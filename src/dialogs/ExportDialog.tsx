@@ -1,30 +1,80 @@
 /**
- * dialogs/ExportDialog.tsx — 导出（引擎迭代中；.jps 源文件已可用）
+ * dialogs/ExportDialog.tsx — 导出（SVG / PNG / JPG / PDF / .jps 源文件）
  */
+import { useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
-import { useUiStore } from '../store/uiStore'
+import { layoutScore, renderScoreToSvg } from '../engine'
+import { exportSvg, exportPng, exportJpg, exportPdf } from '../export/export'
 
 export function ExportDialog() {
   const code = useDocStore((s) => s.code)
   const fileName = useDocStore((s) => s.fileName)
-  const closeModal = useUiStore((s) => s.closeModal)
+  const parseResult = useDocStore((s) => s.parseResult)
+  const pageConfig = useDocStore((s) => s.pageConfig)
 
-  const download = (ext: string, mime: string) => {
-    const blob = new Blob([code], { type: mime })
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const baseName = fileName || '未命名'
+  const hasError = parseResult.errors.some((e) => e.severity === 'error')
+
+  const getPages = (): string[] => {
+    if (hasError) throw new Error('存在语法错误，无法导出。请先修正脚本。')
+    const layout = layoutScore(parseResult, pageConfig)
+    return renderScoreToSvg(layout)
+  }
+
+  const downloadJps = () => {
+    const blob = new Blob([code], { type: 'text/plain;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${fileName || '未命名'}${ext}`
+    a.download = `${baseName}.jps`
     a.click()
     URL.revokeObjectURL(url)
   }
 
+  const run = async (key: 'svg' | 'png' | 'jpg' | 'pdf', fn: () => void | Promise<void>) => {
+    setBusy(key)
+    setError(null)
+    try {
+      await fn()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const items = [
-    { ext: '.jps', label: 'JianpuScript 源文件', mime: 'text/plain;charset=utf-8', ready: true },
-    { ext: '.svg', label: 'SVG 矢量图（渲染引擎开发中）', mime: 'image/svg+xml', ready: false },
-    { ext: '.pdf', label: 'PDF 文档（渲染引擎开发中）', mime: 'application/pdf', ready: false },
-    { ext: '.jpg', label: 'JPG 图片（渲染引擎开发中）', mime: 'image/jpeg', ready: false },
+    {
+      key: 'svg' as const,
+      label: 'SVG 矢量图（逐页）',
+      ext: '.svg',
+      run: () => run('svg', () => {
+        const pages = getPages()
+        pages.forEach((s, i) => exportSvg(s, pages.length > 1 ? `${baseName}-${i + 1}.svg` : `${baseName}.svg`))
+      }),
+    },
+    {
+      key: 'png' as const,
+      label: 'PNG 高清图片（2x，逐页）',
+      ext: '.png',
+      run: () => run('png', async () => exportPng(getPages(), baseName, 2)),
+    },
+    {
+      key: 'jpg' as const,
+      label: 'JPG 图片（白底，逐页）',
+      ext: '.jpg',
+      run: () => run('jpg', async () => exportJpg(getPages(), baseName, 2)),
+    },
+    {
+      key: 'pdf' as const,
+      label: 'PDF 文档（A4 打印）',
+      ext: '.pdf',
+      run: () => run('pdf', () => exportPdf(getPages(), baseName)),
+    },
   ]
 
   return (
@@ -32,22 +82,40 @@ export function ExportDialog() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {items.map((it) => (
           <button
-            key={it.ext}
+            key={it.key}
             className="btn"
-            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', textAlign: 'left' }}
-            onClick={() => {
-              if (it.ready) {
-                download(it.ext, it.mime)
-                closeModal()
-              }
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              width: '100%',
+              textAlign: 'left',
             }}
+            onClick={it.run}
+            disabled={busy !== null}
           >
-            <span>{it.label}</span>
-            <span style={{ fontFamily: 'var(--jp-font-mono)', color: it.ready ? 'var(--jp-accent)' : 'var(--jp-text-muted)' }}>
+            <span>{busy === it.key ? '导出中…' : it.label}</span>
+            <span style={{ fontFamily: 'var(--jp-font-mono)', color: 'var(--jp-accent)' }}>
               {it.ext}
             </span>
           </button>
         ))}
+        <button
+          className="btn"
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', textAlign: 'left' }}
+          onClick={downloadJps}
+        >
+          <span>JianpuScript 源文件</span>
+          <span style={{ fontFamily: 'var(--jp-font-mono)', color: 'var(--jp-accent)' }}>.jps</span>
+        </button>
+        {hasError && (
+          <div style={{ color: 'var(--jp-danger)', fontSize: 12 }}>
+            ⚠ 当前脚本存在语法错误，图片/PDF 导出需先修正。
+          </div>
+        )}
+        {error && (
+          <div style={{ color: 'var(--jp-danger)', fontSize: 12 }}>✗ {error}</div>
+        )}
       </div>
     </Modal>
   )
