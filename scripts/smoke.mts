@@ -529,5 +529,17 @@ check('行 1 6 条小节线', row1Bars.length === 6, `got ${row1Bars.length}`)
 check('行 2 2 条小节线', row2Bars.length === 2, `got ${row2Bars.length}`)
 check('行 2 小节线对齐行 1 网格', Math.abs(row2Bars[0].x - row1Bars[0].x) < 0.5 && Math.abs(row2Bars[1].x - row1Bars[1].x) < 0.5, `row2=${row2Bars[0].x},${row2Bars[1].x} row1=${row1Bars[0].x},${row1Bars[1].x}`)
 
+// ---- 26. 超拍小节容错（adj5） ----
+console.log('[26] over-beat bars (adj5)')
+// 第 2 小节 6 拍 > 4/4：音符不重叠、不溢出（此前会挤在左侧）
+const ov26 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 2- |\n')
+const layOv = layoutScore(ov26, defaultPageConfig)
+const notesOv = [...layOv.pages[0].notes].sort((a, b) => a.x - b.x)
+let minGap = Infinity
+for (let i = 1; i < notesOv.length; i++) minGap = Math.min(minGap, notesOv[i].x - notesOv[i - 1].x)
+check('超拍小节音符不重叠（最小间距 ≥ 11）', minGap >= 11, `minGap=${minGap}`)
+const lastOv = notesOv[notesOv.length - 1]
+check('末音符段终点不溢出', lastOv.x + 6 + lastOv.width / 2 <= 515.28 + 1, `end=${lastOv.x + 6 + lastOv.width / 2}`)
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

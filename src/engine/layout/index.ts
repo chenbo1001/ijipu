@@ -196,13 +196,13 @@ type LayoutRow =
 /** 断行：正常小节按自然宽断行；超长小节（拍数超行上限）拆为碎片行 */
 function breakRows(segs: BarSeg[], beats: number, availW: number): LayoutRow[] {
   const rows: LayoutRow[] = []
-  const maxBeats = Math.max(1, Math.floor((availW - BAR_PAD * 2) / BPW_NATURAL))
   let start = 0
   let w = 0
   for (let i = 0; i < segs.length; i++) {
-    if (segBeats(segs[i]) > maxBeats) {
-      // 超长小节：flush 当前行，再按音符拍数拆碎片行
+    if (segBeats(segs[i]) > Math.floor((availW - BAR_PAD * 2) / segPerBeatMin(segs[i]))) {
+      // 超长小节：flush 当前行，再按音符拍数拆碎片行（拆片上限按密度感知）
       if (i > start) rows.push({ kind: 'bars', start, end: i })
+      const maxBeats = Math.max(1, Math.floor((availW - BAR_PAD * 2) / segPerBeatMin(segs[i])))
       let acc = 0
       let noteStart = 0
       const notes = segs[i].notes
@@ -392,8 +392,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     if (row.kind === 'frag') {
       // 超长小节碎片行：按实际拍数铺满（密度感知防重叠）
       const seg = segs[row.segIdx]
-      const fragBeats = segBeats({ notes: seg.notes.slice(row.noteStart, row.noteEnd), bar: null })
-      const perBeat = Math.max(2, (availW - BAR_PAD * 2) / Math.max(1, fragBeats), segPerBeatMin(seg))
+      const slice = { notes: seg.notes.slice(row.noteStart, row.noteEnd), bar: null }
+      const fragBeats = segBeats(slice)
+      const perBeat = Math.max(2, (availW - BAR_PAD * 2) / Math.max(1, fragBeats), segPerBeatMin(slice))
       let beatAcc = 0
       for (let j = row.noteStart; j < row.noteEnd; j++) {
         const t = seg.notes[j]
@@ -416,7 +417,12 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       const seg = segs[b]
       const isEmptyLead = leadingEmpty === 1 && b === row.start
       const segBarW = rowBarW
-      const perBeat = Math.max(2, (segBarW - BAR_PAD * 2) / beats, segPerBeatMin(seg))
+      // 超拍小节（实际拍数 > 拍号）：按实际拍数算每拍宽，音符铺满小节不溢出
+      const perBeat = Math.max(
+        2,
+        (segBarW - BAR_PAD * 2) / Math.max(beats, segBeats(seg)),
+        segPerBeatMin(seg),
+      )
       let beatAcc = 0
       for (const t of seg.notes) {
         if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
@@ -496,7 +502,19 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
             const lead = r.start < r.end && segs[r.start].notes.length === 0 ? 1 : 0
             return Math.max(1, r.end - r.start - lead)
           }
-          if (barCnt(lastRow) < barCnt(prev)) lastAlignW = availW / barCnt(prev)
+          if (barCnt(lastRow) < barCnt(prev)) {
+            const alignW = availW / barCnt(prev)
+            // 密度保护：行内任一小节自然宽超 alignW 时回退均分（防溢出重叠）
+            let fits = true
+            for (let b = lastRow.start; b < lastRow.end; b++) {
+              if (segs[b].notes.length === 0) continue
+              if (barNaturalW(segs[b], beats) > alignW + 0.5) {
+                fits = false
+                break
+              }
+            }
+            if (fits) lastAlignW = alignW
+          }
         }
       }
     }
@@ -527,9 +545,13 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     }))
     const numBars = Math.max(...parts.map((p) => p.segs.length))
     const barW = availW / numBars // 块内小节均分
-    // 密度感知：perBeat 不小于块内任一小时的每拍最小宽
+    // 密度与超拍感知：perBeat 不小于块内任一小时的每拍最小宽，且按最大实际拍数分摊
     const perBeatMin = Math.max(0, ...parts.flatMap((p) => p.segs.map((s) => segPerBeatMin(s))))
-    const perBeat = Math.max(2, (barW - BAR_PAD * 2) / beats, perBeatMin)
+    const maxSegBeats = Math.max(
+      beats,
+      ...parts.flatMap((p) => p.segs.map((s) => segBeats(s))),
+    )
+    const perBeat = Math.max(2, (barW - BAR_PAD * 2) / Math.max(beats, maxSegBeats), perBeatMin)
 
     const voiceHeights = parts.map((p) => lineHeightOf(config, m, sp, p.lyricRows))
     const blockH = voiceHeights.reduce((a, b) => a + b, 0)
