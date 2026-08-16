@@ -181,12 +181,7 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     }
   }
 
-  // 减时线（数字下方，n 条）
-  for (let i = 0; i < t.diminishCount; i++) {
-    const ly = y + 6 + i * 4
-    parts.push(`<rect x="${x + 1}" y="${ly}" width="${size * 0.58}" height="2" fill="#1b1b1b"/>`)
-  }
-
+  // 减时线由 computeBeams 按拍分组绘制（M3：同一拍内相连）
   // 音符备注（引号注释）—— 小型文本置于音符下方
   if (t.comment) {
     parts.push(
@@ -393,6 +388,81 @@ function renderDynamic(d: PlacedDynamic): string {
 }
 
 // ============================================================
+// 减时线分组（adj3：同一拍内相连）
+// ============================================================
+
+/** 数字近似宽（18px 字号的 0.62 倍） */
+const NOTE_DIGIT_W = 11.16
+
+interface Beam {
+  x1: number
+  x2: number
+  y: number
+}
+
+/**
+ * 计算减时线横线组：
+ * 第 n 条横线连接「同一拍内（floor(beatPos) 相同）连续且减时线数 ≥ n」的音符。
+ * 例：1/2/ → 1 条（整拍连）；1/2/3/4/ → 拍 1 连、拍 2 连（中间断开）；
+ *     1//2//3//4// → 2 条（各整拍连）；1//2//3/ → 第 1 条全连、第 2 条连 1//2//
+ */
+function computeBeams(notes: PlacedToken[]): Beam[] {
+  const beams: Beam[] = []
+  const groups = new Map<string, PlacedToken[]>()
+  for (const n of notes) {
+    const key = `${n.y}|${n.barIndex}`
+    const arr = groups.get(key) ?? []
+    arr.push(n)
+    groups.set(key, arr)
+  }
+  for (const list of groups.values()) {
+    list.sort((a, b) => a.beatPos - b.beatPos)
+    const maxLevel = Math.max(0, ...list.map((n) => n.token.diminishCount))
+    for (let level = 1; level <= maxLevel; level++) {
+      let i = 0
+      while (i < list.length) {
+        if (list[i].token.diminishCount < level) {
+          i++
+          continue
+        }
+        const beat = Math.floor(list[i].beatPos)
+        let j = i
+        while (
+          j + 1 < list.length &&
+          Math.floor(list[j + 1].beatPos) === beat &&
+          list[j + 1].token.diminishCount >= level
+        ) {
+          j++
+        }
+        beams.push({
+          x1: r1n(list[i].x + 1),
+          x2: r1n(list[j].x + NOTE_DIGIT_W - 1),
+          y: r1n(list[i].y + 6 + (level - 1) * 4),
+        })
+        i = j + 1
+      }
+    }
+  }
+  return beams
+}
+
+const r1n = (v: number) => Math.round(v * 10) / 10
+
+/** 供冒烟测试：计算减时线横线组 */
+export function computeBeamsForTest(notes: PlacedToken[]): Beam[] {
+  return computeBeams(notes)
+}
+
+function renderBeams(beams: Beam[]): string {
+  return beams
+    .map(
+      (b) =>
+        `<rect x="${b.x1}" y="${b.y}" width="${Math.max(1, b.x2 - b.x1)}" height="2" fill="#1b1b1b"/>`,
+    )
+    .join('\n')
+}
+
+// ============================================================
 // 页面组装
 // ============================================================
 
@@ -404,6 +474,7 @@ function renderPage(page: ScorePage, config: PageConfig): string {
   body.push(renderVoltas(page.barlines)) // 跳房子线画在最底层
   for (const s of page.slurs) body.push(renderSlur(s))
   for (const d of page.dynamics) body.push(renderDynamic(d))
+  body.push(renderBeams(computeBeams(page.notes)))
   for (const n of page.notes) body.push(renderNote(n, config))
   for (const b of page.barlines) body.push(renderBarline(b))
   for (const l of page.lyrics) body.push(renderLyric(l, config))

@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { parseJps, formatJps, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig } from '../src/engine/index.ts'
 import { buildPlaySequence, inferBpm } from '../src/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '../src/engine/cursorMap.ts'
+import { computeBeamsForTest } from '../src/engine/render/index.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
 import { highlightCode } from '../src/editor/highlight.ts'
 
@@ -439,7 +440,7 @@ const layW2 = layoutScore(rw, defaultPageConfig)
 const notesW2 = layW2.pages[0].notes
 check('时值等宽：1- 宽 = 2 × 1 拍宽', Math.abs(notesW2[0].width - notesW2[1].width * 2) < 0.5, `${notesW2[0].width} vs ${notesW2[1].width}`)
 check('1 拍音符宽一致', Math.abs(notesW2[1].width - notesW2[2].width) < 0.1)
-check('最后一行自然宽（小节宽=4拍×14+边距）', Math.abs(notesW2[4].x - (80 + 70 + 6)) < 1, `x=${notesW2[4].x} expect=${80 + 70 + 6}`)
+check('最后一行自然宽（音符中心对齐拍段中点）', Math.abs(notesW2[4].x + 6 - (150 + 6 + 7.25)) < 0.5, `x=${notesW2[4].x} center=${notesW2[4].x + 6}`)
 // 两端对齐 + 小节均分：8 小节 → 行 1（6 小节）铺满均分，行 2（最后 2 小节）自然宽不撑满
 const rj2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |\n')
 const layJ = layoutScore(rj2, defaultPageConfig)
@@ -448,9 +449,9 @@ check('8 小节断成 2 行', rowsJ.length === 2, `rows=${rowsJ.length}`)
 const row1Notes = layJ.pages[0].notes.filter((n) => n.y === rowsJ[0])
 const maxRight1 = Math.max(...row1Notes.map((n) => n.x + n.width))
 check('行 1 两端对齐（末音符右缘贴近右边界）', maxRight1 > 515.28 - 10, `right=${maxRight1}`)
-// 行 1 小节均分：第 2 小节首音符（行 1 第 5 个音符）x = margin_left + 435/6 + BAR_PAD
+// 行 1 小节均分：第 2 小节首音符（行 1 第 5 个音符）中心 = 段起点 + 半拍宽
 const row1Sorted = row1Notes.sort((a, b) => a.x - b.x)
-check('行 1 小节均分（第 2 小节起点）', Math.abs(row1Sorted[4].x - (80 + 435 / 6 + 6)) < 1, `x=${row1Sorted[4].x} expect=${80 + 435 / 6 + 6}`)
+check('行 1 小节均分（第 2 小节首音符中心）', Math.abs(row1Sorted[4].x + 6 - (80 + 435 / 6 + 6 + 7.5625)) < 0.5, `x=${row1Sorted[4].x} center=${row1Sorted[4].x + 6}`)
 const row2Notes = layJ.pages[0].notes.filter((n) => n.y === rowsJ[1])
 const maxRight2 = Math.max(...row2Notes.map((n) => n.x + n.width))
 check('最后一行不撑满（右缘留空）', maxRight2 < 515.28 - 10, `right=${maxRight2}`)
@@ -468,7 +469,7 @@ check('线 2 在小节 2 右边界', Math.abs(bars23[1].x - (80 + 140)) < 1, `x=
 const rr23 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 3 | 5 6 7 1 |\n')
 const layRr = layoutScore(rr23, defaultPageConfig)
 const noteRr = layRr.pages[0].notes[0]
-check('行首 |: 不占宽（音符 1 贴左边距+BAR_PAD）', Math.abs(noteRr.x - (80 + 6)) < 1, `x=${noteRr.x}`)
+check('行首 |: 不占宽（音符 1 中心贴左边距+BAR_PAD+半拍）', Math.abs(noteRr.x + 6 - (80 + 6 + 7.25)) < 0.5, `center=${noteRr.x + 6}`)
 check('|: 线画在行首', Math.abs(layRr.pages[0].barlines[0].x - 80) < 1, `x=${layRr.pages[0].barlines[0].x}`)
 // 歌词中心对齐音符数字（增时线音符 1- 的歌词在数字下方）
 const rly23 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1- 2 3 4 |\nC: 一 二 三 四\n')
@@ -481,6 +482,35 @@ const svg23 = renderScoreToSvg(layLy)[0]
 const noteY23 = n23.y
 const augRectY = /<rect x="[^"]+" y="([\d.]+)" width="7.56"/.exec(svg23)
 check('增时线在数字中部（y = 基线-8）', augRectY !== null && Math.abs(Number(augRectY[1]) - (noteY23 - 8)) < 0.5, `rectY=${augRectY?.[1]} noteY=${noteY23}`)
+
+// ---- 24. 对齐精细（adj3：音符段内居中 + 减时线按拍分组） ----
+console.log('[24] adj3 alignment')
+// 音符段内居中：1 拍音符中心 = 拍段中点（单行最后一行 barW=70, perBeat=14.5）
+const rc24 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n')
+const layC24 = layoutScore(rc24, defaultPageConfig)
+const n24 = layC24.pages[0].notes[0]
+check('1 拍音符居中于拍段', Math.abs(n24.x + 6 - (86 + 7.25)) < 0.5, `center=${n24.x + 6}`)
+// 1/ 2/ 各居中于半拍段（每拍最小宽 23 = 2 音符 × 11.5，perBeat=23.5）
+const rh24 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1/ 2/ |\n')
+const nH24 = layoutScore(rh24, defaultPageConfig).pages[0].notes
+check('1/ 居中于第 1 半拍段', Math.abs(nH24[0].x + 6 - (86 + 0.25 * 23.5)) < 0.5, `center=${nH24[0].x + 6}`)
+check('2/ 居中于第 2 半拍段', Math.abs(nH24[1].x + 6 - (86 + 0.75 * 23.5)) < 0.5, `center=${nH24[1].x + 6}`)
+check('八分音符不重叠（间隔 ≥ 数字宽）', nH24[1].x - nH24[0].x >= 11.1, `gap=${nH24[1].x - nH24[0].x}`)
+// 减时线按拍分组
+const beamsOf24 = (q: string) => {
+  const r = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`)
+  return computeBeamsForTest(layoutScore(r, defaultPageConfig).pages[0].notes)
+}
+const b1_24 = beamsOf24('1/ 2/ |')
+check('1/2/ 同拍 1 条横线', b1_24.length === 1, `got ${b1_24.length}`)
+const b2_24 = beamsOf24('1/ 2/ 3/ 4/ |')
+check('1/2/3/4/ 两拍 2 条横线', b2_24.length === 2, `got ${b2_24.length}`)
+const b2s_24 = [...b2_24].sort((a, b) => a.x1 - b.x1)
+check('拍间断开（2/ 与 3/ 之间横线断开）', b2s_24[1].x1 > b2s_24[0].x2, `${b2s_24[0].x1}-${b2s_24[0].x2} | ${b2s_24[1].x1}-${b2s_24[1].x2}`)
+const b3_24 = beamsOf24('1// 2// 3// 4// |')
+check('1//2//3//4// 同拍 2 条横线（各整拍连）', b3_24.length === 2, `got ${b3_24.length}`)
+const b4_24 = beamsOf24('1// 2// 3/ |')
+check('1//2//3/ 2 条横线（第1全连、第2连1//2//）', b4_24.length === 2, `got ${b4_24.length}`)
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

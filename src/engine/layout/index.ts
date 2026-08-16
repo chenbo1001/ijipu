@@ -72,6 +72,8 @@ export function pitchToName(
 
 /** 每拍自然宽（px，最后一行/断行预估用） */
 const BPW_NATURAL = 14
+/** 音符数字最小占宽（px，防重叠） */
+const MIN_NOTE_W = 11.5
 /** 小节内左右留白（px） */
 const BAR_PAD = 6
 const DEFAULT_BEATS = 4
@@ -85,6 +87,21 @@ function meterBeatsOf(meter: string | undefined): number {
     if (n > 0 && n <= 32) return n
   }
   return DEFAULT_BEATS
+}
+
+/** 小节所需最小每拍宽：max(自然宽, 拍内最大音符数 × 最小数字宽)，防数字重叠 */
+function segPerBeatMin(seg: BarSeg): number {
+  const counts = new Map<number, number>()
+  let beat = 0
+  for (const t of seg.notes) {
+    if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
+      const b = Math.floor(beat)
+      counts.set(b, (counts.get(b) ?? 0) + 1)
+      beat += tokenDuration(t)
+    }
+  }
+  const maxCount = Math.max(0, ...counts.values())
+  return Math.max(BPW_NATURAL, maxCount * MIN_NOTE_W)
 }
 
 // ============================================================
@@ -166,9 +183,9 @@ function segBeats(seg: BarSeg): number {
   )
 }
 
-/** 小节自然宽（拍数 × 每拍自然宽 + 边距） */
-function barNaturalW(beats: number): number {
-  return beats * BPW_NATURAL + BAR_PAD * 2 + 2
+/** 小节自然宽（每拍最小宽 × 拍数 + 边距） */
+function barNaturalW(seg: BarSeg, beats: number): number {
+  return beats * segPerBeatMin(seg) + BAR_PAD * 2 + 2
 }
 
 /** 排版行：完整小节行（均分撑满）或小节碎片行（超长小节按拍数拆分） */
@@ -204,7 +221,7 @@ function breakRows(segs: BarSeg[], beats: number, availW: number): LayoutRow[] {
       start = i + 1
       w = 0
     } else {
-      const nw = barNaturalW(beats)
+      const nw = barNaturalW(segs[i], beats)
       if (i > start && w + nw > availW) {
         rows.push({ kind: 'bars', start, end: i })
         start = i
@@ -295,11 +312,12 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
 
   /**
    * 放置一个音符并处理歌词对齐。
-   * 返回推进后的拍位置。
+   * segStartX = 该音符时值段起点；音符数字在段内水平居中。
+   * 返回推进后的拍数。
    */
   const placeNoteAt = (
     t: Extract<MusicToken, { kind: 'note' | 'rest' | 'rhythm' }>,
-    nx: number,
+    segStartX: number,
     perBeat: number,
     yTop: number,
     pageIdx: number,
@@ -309,9 +327,13 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     lyricMaps: Map<number, LyricChar>[],
     geciSize: number,
     sp: Spacing,
+    beatPos: number,
+    barIndex: number,
   ) => {
     const dur = tokenDuration(t)
     const w = Math.max(4, dur * perBeat)
+    // 数字左缘：让数字中心落在段中点（数字半宽 ≈ 6px）
+    const nx = segStartX + (dur * perBeat) / 2 - 6
     const id: LayoutId = { page: pageIdx, voice, group: groupIndex, index: noteCounter }
     pages[pageIdx].notes.push({
       id,
@@ -320,6 +342,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       y: r1(yTop + m.noteSize * 1.1),
       width: r1(w),
       duration: dur,
+      beatPos,
+      barIndex,
       audioPitch: toPlayable(t)
         ? pitchToName(t.pitch, t.octaveShift, t.accidental, keySemitone)
         : null,
@@ -328,7 +352,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     lyricMaps.forEach((map, row) => {
       const ch = map.get(slotIndex)
       if (!ch) return
-      // 歌词中心对齐音符数字（数字半宽 ≈ 6px），而非含时值宽的整体
+      // 歌词中心对齐音符数字（数字半宽 ≈ 6px）
       pages[pageIdx].lyrics.push({
         id,
         char: ch,
@@ -366,16 +390,16 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     }
 
     if (row.kind === 'frag') {
-      // 超长小节碎片行：按实际拍数铺满（最后一行自然宽）
+      // 超长小节碎片行：按实际拍数铺满（最后一行自然宽）；密度感知防重叠
       const seg = segs[row.segIdx]
       const fragBeats = segBeats({ notes: seg.notes.slice(row.noteStart, row.noteEnd), bar: null })
       const fragW = isLastRow ? fragBeats * BPW_NATURAL : availW
-      const perBeat = Math.max(2, (fragW - BAR_PAD * 2) / Math.max(1, fragBeats))
+      const perBeat = Math.max(2, (fragW - BAR_PAD * 2) / Math.max(1, fragBeats), segPerBeatMin(seg))
       let beatAcc = 0
       for (let j = row.noteStart; j < row.noteEnd; j++) {
         const t = seg.notes[j]
         if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
-          const dur = placeNoteAt(t, x + BAR_PAD + beatAcc * perBeat, perBeat, yTop, pageIndex, groupIndex, voice, slotIndex, lyricMaps, geciSize, sp)
+          const dur = placeNoteAt(t, x + BAR_PAD + beatAcc * perBeat, perBeat, yTop, pageIndex, groupIndex, voice, slotIndex, lyricMaps, geciSize, sp, beatAcc, 0)
           beatAcc += dur
           slotIndex++
         }
@@ -384,18 +408,19 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       return
     }
 
-    // bars 行：小节均分（行首空小节如 |: 不占宽）
+    // bars 行：小节均分（行首空小节如 |: 不占宽）；最后一行每小节独立自然宽
     const leadingEmpty = row.start < row.end && segs[row.start].notes.length === 0 ? 1 : 0
     const barCount = Math.max(1, row.end - row.start - leadingEmpty)
-    const barW = isLastRow ? barNaturalW(beats) : availW / barCount
-    const perBeat = Math.max(2, (barW - BAR_PAD * 2) / beats)
+    const rowBarW = isLastRow ? 0 : availW / barCount // isLastRow 时逐小节自然宽
     for (let b = row.start; b < row.end; b++) {
       const seg = segs[b]
       const isEmptyLead = leadingEmpty === 1 && b === row.start
+      const segBarW = isLastRow ? barNaturalW(seg, beats) : rowBarW
+      const perBeat = Math.max(2, (segBarW - BAR_PAD * 2) / beats)
       let beatAcc = 0
       for (const t of seg.notes) {
         if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
-          const dur = placeNoteAt(t, x + BAR_PAD + beatAcc * perBeat, perBeat, yTop, pageIndex, groupIndex, voice, slotIndex, lyricMaps, geciSize, sp)
+          const dur = placeNoteAt(t, x + BAR_PAD + beatAcc * perBeat, perBeat, yTop, pageIndex, groupIndex, voice, slotIndex, lyricMaps, geciSize, sp, beatAcc, b)
           beatAcc += dur
           slotIndex++
         } else if (t.kind === 'decoration') {
@@ -411,7 +436,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       if (bar) {
         const isRowStartEmpty = isEmptyLead
         if (!(isRowStartEmpty && bar.type === '|')) {
-          const lineX = isEmptyLead ? x : x + barW
+          const lineX = isEmptyLead ? x : x + segBarW
           const bid: LayoutId = { page: pageIndex, voice, group: groupIndex, index: barCounter }
           page.barlines.push({
             id: bid,
@@ -427,7 +452,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         }
         barCounter++
       }
-      x += isEmptyLead ? 0 : barW
+      x += isEmptyLead ? 0 : segBarW
     }
     finishDyn(x) // 行尾关闭未闭合渐强
   }
@@ -480,7 +505,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     }))
     const numBars = Math.max(...parts.map((p) => p.segs.length))
     const barW = availW / numBars // 块内小节均分
-    const perBeat = Math.max(2, (barW - BAR_PAD * 2) / beats)
+    // 密度感知：perBeat 不小于块内任一小时的每拍最小宽
+    const perBeatMin = Math.max(0, ...parts.flatMap((p) => p.segs.map((s) => segPerBeatMin(s))))
+    const perBeat = Math.max(2, (barW - BAR_PAD * 2) / beats, perBeatMin)
 
     const voiceHeights = parts.map((p) => lineHeightOf(config, m, sp, p.lyricRows))
     const blockH = voiceHeights.reduce((a, b) => a + b, 0)
@@ -505,7 +532,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         let beatAcc = 0
         for (const t of seg.notes) {
           if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
-            const dur = placeNoteAt(t, x + BAR_PAD + beatAcc * perBeat, perBeat, voiceY, pageIndex, vi, p.voice, slotIndex, p.lyricMaps, geciSize, sp)
+            const dur = placeNoteAt(t, x + BAR_PAD + beatAcc * perBeat, perBeat, voiceY, pageIndex, vi, p.voice, slotIndex, p.lyricMaps, geciSize, sp, beatAcc, b)
             beatAcc += dur
             slotIndex++
           }

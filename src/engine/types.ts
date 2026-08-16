@@ -312,6 +312,10 @@ export interface PlacedToken {
   width: number
   /** 时值（拍数，用于播放） */
   duration: number
+  /** 小节内拍位置（累积拍，从 0 起，用于减时线分组） */
+  beatPos: number
+  /** 小节索引（行内唯一，用于减时线分组） */
+  barIndex: number
   /** 试听音高：音级+八度+变音计算出的简谱音名（如 C5） */
   audioPitch: string | null
   /** 是否可点击（休止符/隐藏符不可发声） */
