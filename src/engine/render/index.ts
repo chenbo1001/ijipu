@@ -393,8 +393,9 @@ function renderVoiceBlocks(page: ScorePage, vb: VoiceBlock): string {
 function renderVoltaLine(start: PlacedBarline, end: PlacedBarline | null): string {
   const plus = start.voltaStart?.plus ?? 0
   const y = start.yTop - 16 - plus * 4
-  const x1 = start.x
-  const x2 = end ? end.x : start.x + 60
+  // 起止内缩 1px（adj27）：起点右缩、终点左缩，视觉上收进小节区域
+  const x1 = start.x + 1
+  const x2 = end ? end.x - 1 : start.x + 60
   const openEnd = !end || !!end.voltaEndSlash // 开口结束：无终点折线（adj26）
   const parts: string[] = []
   // 起点竖线（[ 处：从线高向下到行顶上方）
@@ -411,11 +412,11 @@ function renderVoltaLine(start: PlacedBarline, end: PlacedBarline | null): strin
       `<line x1="${x2}" y1="${y}" x2="${x2}" y2="${end.yTop + 4}" stroke="#1b1b1b" stroke-width="1.4"/>`,
     )
   }
-  // 番号（[ 后引号注释优先；小节线引号备注兼容）显示在线起点上方
+  // 番号（[ 后引号注释优先；小节线引号备注兼容）显示在跳房子线下方（adj27）
   const label = start.voltaStart?.comment ?? start.comment
   if (label) {
     parts.push(
-      `<text x="${x1 + 4}" y="${y - 5}" font-size="10" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(label)}</text>`,
+      `<text x="${x1 + 4}" y="${y + 6}" font-size="10" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(label)}</text>`,
     )
   }
   return parts.join('\n')
