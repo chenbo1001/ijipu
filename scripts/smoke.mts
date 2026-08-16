@@ -602,11 +602,11 @@ const getMeta = (key: string) => {
 const tTitle = getMeta('title')
 check('标题居中靠上', tTitle !== null && Math.abs(tTitle.x - 595.28 / 2) < 0.5 && Math.abs(tTitle.y - 106) < 0.5, JSON.stringify(tTitle))
 const tAuthor = getMeta('author_0')
-check('作者右下（右对齐，底部往上）', tAuthor !== null && Math.abs(tAuthor.x - 515.28) < 0.5 && Math.abs(tAuthor.y - 191.6) < 0.5, JSON.stringify(tAuthor))
+check('作者右下（右对齐，描述头区域右下角往上）', tAuthor !== null && Math.abs(tAuthor.x - 515.28) < 0.5 && Math.abs(tAuthor.y - 151.6) < 0.5, JSON.stringify(tAuthor))
 const tKey = getMeta('keyline')
-check('调式+拍号左下', tKey !== null && Math.abs(tKey.x - 80) < 0.5 && Math.abs(tKey.y - 163.6) < 0.5, JSON.stringify(tKey))
+check('调式+拍号左下（描述头区域左下角）', tKey !== null && Math.abs(tKey.x - 80) < 0.5 && Math.abs(tKey.y - 123.6) < 0.5, JSON.stringify(tKey))
 const tTempo = getMeta('tempo')
-check('节拍在 keyline 下', tTempo !== null && Math.abs(tTempo.x - 80) < 0.5 && Math.abs(tTempo.y - 187.6) < 0.5, JSON.stringify(tTempo))
+check('节拍在 keyline 下', tTempo !== null && Math.abs(tTempo.x - 80) < 0.5 && Math.abs(tTempo.y - 147.6) < 0.5, JSON.stringify(tTempo))
 // metaPos 覆盖（相对锚点偏移，adj16）：title 锚=上中点(297.64,80)，绝对 = 297.64+100, 80+50
 const layErM = layoutScore(rEr, { ...defaultPageConfig, metaPos: { title: { x: 100, y: 50 } } })
 const svgErM = renderScoreToSvg(layErM)[0]
@@ -630,13 +630,13 @@ check('词底 = 歌词基线 + 歌词字号', Math.abs((rg0.lyricBottom ?? 0) - 
 const rgsNo = computeRowGuides(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n'), defaultPageConfig), { quci: 13, geci: 18 })
 check('无歌词行 lyricTop=null', rgsNo[0][0].lyricTop === null)
 
-// ---- 32. 描述头位置钳制（adj16 锚点语义） ----
-console.log('[32] meta clamp (adj16)')
-// 区域：宽 = 595.28-160 = 435.28，高 = 207.6-80 = 127.6
+// ---- 32. 描述头位置钳制（adj16/adj31 锚点语义，区域高=descAreaH=87.6） ----
+console.log('[32] meta clamp (adj16/adj31)')
+// 区域：宽 = 595.28-160 = 435.28，高 = descAreaH = 87.6
 const cfgClamp = defaultPageConfig
 // 标题锚定上边中点：偏移范围 x∈[-w/2, w/2]，y∈[0, h]
 const c1 = clampMetaPos('title', 9999, 9999, 595.28, cfgClamp)
-check('标题超右下被钳制', Math.abs(c1.x - 217.64) < 0.5 && Math.abs(c1.y - 127.6) < 0.5, JSON.stringify(c1))
+check('标题超右下被钳制', Math.abs(c1.x - 217.64) < 0.5 && Math.abs(c1.y - 87.6) < 0.5, JSON.stringify(c1))
 const c2 = clampMetaPos('title', -100, -100, 595.28, cfgClamp)
 check('标题左上越界 y 钳到 0、x 在范围内不变', c2.x === -100 && c2.y === 0, JSON.stringify(c2))
 // 调式拍号锚定左下角：偏移 x∈[0, w-40]，y∈[-h, 0]
@@ -648,7 +648,7 @@ check('作者超右上被钳制到右下角', c4.x === 0 && c4.y === 0, JSON.str
 const c5 = clampMetaPos('author_0', -100, -50, 595.28, cfgClamp)
 check('作者区域内偏移不变', c5.x === -100 && c5.y === -50, JSON.stringify(c5))
 const c6 = clampMetaPos('tempo', -100, -200, 595.28, cfgClamp)
-check('节拍超左上被钳制', c6.x === 0 && Math.abs(c6.y + 127.6) < 0.5, JSON.stringify(c6))
+check('节拍超左上被钳制', c6.x === 0 && Math.abs(c6.y + 87.6) < 0.5, JSON.stringify(c6))
 
 // ---- 33. 描述头锚点跟随区域（adj16） ----
 console.log('[33] meta follow anchors (adj16)')
@@ -674,13 +674,15 @@ check('margin_left 改变 → 标题跟随水平中心', pD !== null && Math.abs
 // 左下锚：调式/拍号；右下锚：作者
 const metaRel2 = { keyline: { x: 0, y: -44 }, author_0: { x: 0, y: -16 } }
 const kA = posOf33(defaultPageConfig, metaRel2, 'keyline')
-check('keyline 默认 = 左下角 - 44', kA !== null && Math.abs(kA.x - 80) < 0.5 && Math.abs(kA.y - 163.6) < 0.5, JSON.stringify(kA))
-const kB = posOf33({ ...defaultPageConfig, body_margin_top: 80 }, metaRel2, 'keyline')
-check('区域变高 → keyline 跟随左下角下移', kB !== null && Math.abs(kB.x - 80) < 0.5 && Math.abs(kB.y - 203.6) < 0.5, JSON.stringify(kB))
+check('keyline 默认 = 左下角 - 44（descAreaH 区域）', kA !== null && Math.abs(kA.x - 80) < 0.5 && Math.abs(kA.y - 123.6) < 0.5, JSON.stringify(kA))
+const kB = posOf33({ ...defaultPageConfig, descAreaH: 120 }, metaRel2, 'keyline')
+check('descAreaH 变高 → keyline 跟随左下角下移', kB !== null && Math.abs(kB.x - 80) < 0.5 && Math.abs(kB.y - 156) < 0.5, JSON.stringify(kB))
+const kC = posOf33({ ...defaultPageConfig, body_margin_top: 80 }, metaRel2, 'keyline')
+check('body_margin_top 变 → keyline 不移动（锚定描述头区域）', kC !== null && Math.abs(kC.y - 123.6) < 0.5, JSON.stringify(kC))
 const aA = posOf33(defaultPageConfig, metaRel2, 'author_0')
-check('作者默认 = 右下角 - 16', aA !== null && Math.abs(aA.x - 515.28) < 0.5 && Math.abs(aA.y - 191.6) < 0.5, JSON.stringify(aA))
+check('作者默认 = 右下角 - 16（descAreaH 区域）', aA !== null && Math.abs(aA.x - 515.28) < 0.5 && Math.abs(aA.y - 151.6) < 0.5, JSON.stringify(aA))
 const aB = posOf33({ ...defaultPageConfig, margin_right: 120 }, metaRel2, 'author_0')
-check('右边距改变 → 作者跟随右下角左移', aB !== null && Math.abs(aB.x - 475.28) < 0.5 && Math.abs(aB.y - 191.6) < 0.5, JSON.stringify(aB))
+check('右边距改变 → 作者跟随右下角左移', aB !== null && Math.abs(aB.x - 475.28) < 0.5 && Math.abs(aB.y - 151.6) < 0.5, JSON.stringify(aB))
 
 // ---- 34. 音符渲染细节（adj13） ----
 console.log('[34] note render detail (adj13)')
@@ -836,10 +838,10 @@ check('metaAreaH 默认不变（207.6）', Math.abs(metaAreaH(defaultPageConfig)
 const lay39a = layoutScore(rEr, { ...defaultPageConfig, descAreaH: 140 })
 const firstY39a = Math.min(...lay39a.pages[0].notes.map((n) => n.y))
 check('descAreaH 增大 → 曲部第一行下移', Math.abs(firstY39a - (80 + 140 + 40 + 19.8)) < 0.5, `y=${firstY39a}`)
-// 描述头元素（作者，右下锚）跟随描述头区域
+// 描述头元素（作者，右下锚）跟随描述头区域（descAreaH），不出区域
 const svg39 = renderScoreToSvg(lay39a)[0]
 const m39 = /data-meta="author_0" x="[\d.]+" y="([\d.]+)"/.exec(svg39)
-check('作者跟随描述头区域下移', m39 !== null && Math.abs(Number(m39[1]) - (80 + 140 + 40 - 16)) < 0.5, `y=${m39?.[1]}`)
+check('作者跟随描述头区域下移（在 descAreaH 内）', m39 !== null && Math.abs(Number(m39[1]) - (80 + 140 - 16)) < 0.5, `y=${m39?.[1]}`)
 // body_margin_top 最小 4px（描述头下端线最小间距）
 const exLimits = GUIDE_LIMITS_EX as Record<string, [number, number]>
 check('body_margin_top 最小 4px', exLimits['body_margin_top'][0] === 4)

@@ -1,14 +1,15 @@
 /**
- * engine/layout/metaAnchors.ts — 描述头元素锚点（adj16）
+ * engine/layout/metaAnchors.ts — 描述头元素锚点（adj16/adj31）
  *
- * 描述头元素以「区域锚点 + 相对偏移」定位；区域宽/高变化时元素跟随各自锚点：
- *  - top-center    标题/副标题    —— 描述区上边中点
- *  - bottom-right  词曲作者       —— 描述区右下角
- *  - bottom-left   调式/拍号/速度 —— 描述区左下角
+ * 描述头元素以「描述头区域锚点 + 相对偏移」定位；区域宽/高变化时元素跟随各自锚点：
+ *  - top-center    标题/副标题    —— 描述头区域上边中点
+ *  - bottom-right  词曲作者       —— 描述头区域右下角
+ *  - bottom-left   调式/拍号/速度 —— 描述头区域左下角
  *
+ * 描述头区域 = descAreaH（adj30 拆分的内容区），元素锚定其角且不超出区域（adj31）。
  * metaPos[key] = { x, y } 为相对锚点的偏移（x 向右、y 向下为正，SVG 坐标）。
  */
-import { clamp, metaAreaH } from './guides'
+import { clamp } from './guides'
 
 export type MetaAnchor = 'top-center' | 'bottom-right' | 'bottom-left'
 
@@ -27,14 +28,14 @@ export interface MetaAreaCfg {
   descAreaH: number
 }
 
-/** 锚点绝对坐标（页面 pt） */
+/** 锚点绝对坐标（页面 pt；描述头区域 = descAreaH，adj31） */
 export function metaAnchorPt(
   anchor: MetaAnchor,
   pageW: number,
   cfg: MetaAreaCfg,
 ): { x: number; y: number } {
   const areaW = pageW - cfg.margin_left - cfg.margin_right
-  const areaH = metaAreaH(cfg) - cfg.margin_top
+  const areaH = cfg.descAreaH
   switch (anchor) {
     case 'top-center':
       return { x: cfg.margin_left + areaW / 2, y: cfg.margin_top }
@@ -46,8 +47,8 @@ export function metaAnchorPt(
 }
 
 /**
- * 描述头元素偏移钳制（相对各自锚点，adj16）：元素不超出描述头区域。
- * 区域宽 = 页宽 - 左右边距，区域高 = metaAreaH - margin_top。
+ * 描述头元素偏移钳制（相对各自锚点，adj16/adj31）：元素不超出描述头区域（descAreaH）。
+ * 区域宽 = 页宽 - 左右边距，区域高 = descAreaH。
  * 调式/拍号/节拍（左下锚）向右偏移留 40 防文本越界。
  */
 export function clampMetaPos(
@@ -58,7 +59,7 @@ export function clampMetaPos(
   cfg: MetaAreaCfg,
 ): { x: number; y: number } {
   const areaW = pageW - cfg.margin_left - cfg.margin_right
-  const areaH = metaAreaH(cfg) - cfg.margin_top
+  const areaH = cfg.descAreaH
   switch (metaAnchorOf(key)) {
     case 'top-center':
       return { x: clamp(relX, -areaW / 2, areaW / 2), y: clamp(relY, 0, areaH) }
