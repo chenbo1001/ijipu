@@ -116,31 +116,8 @@ export function metaAreaH(cfg: {
 }
 
 /**
- * 描述头元素位置钳制（相对描述区左上角，adj12）：不超出描述头区域。
- * 输入输出均为相对坐标（0..区域宽/高）；区域宽 = 页宽-左右边距，区域高 = metaAreaH-margin_top。
- * 调式/拍号/节拍（左对齐）右侧留 40 防文本越界。
+ * 描述头元素位置钳制见 metaAnchors.ts（adj16 锚点语义：top-center / bottom-right / bottom-left）。
  */
-export function clampMetaPos(
-  key: string,
-  relX: number,
-  relY: number,
-  pageW: number,
-  cfg: {
-    margin_top: number
-    margin_left: number
-    margin_right: number
-    body_margin_top: number
-    biaoti_size: number
-  },
-): { x: number; y: number } {
-  const areaW = pageW - cfg.margin_left - cfg.margin_right
-  const areaH = metaAreaH(cfg) - cfg.margin_top
-  const xMax = key.startsWith('keyline') || key.startsWith('tempo') ? Math.max(0, areaW - 40) : areaW
-  return {
-    x: clamp(relX, 0, xMax),
-    y: clamp(relY, 0, Math.max(0, areaH)),
-  }
-}
 
 /** 各字段的调整范围 */
 export const GUIDE_LIMITS: Record<GuideDragSpec['key'], [number, number]> = {

@@ -9,7 +9,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { layoutScore, renderScoreToSvg, noteIdToCodePos } from '../engine'
-import { computeRowTops, computeRowGuides, dragDelta, clampMetaPos, clamp, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '../engine/layout/guides'
+import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '../engine/layout/guides'
+import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '../engine/layout/metaAnchors'
 import { brand } from '../brand/tokens'
 
 /** 预览 SVG 显示宽度（与渲染容器一致） */
@@ -100,21 +101,23 @@ export function PreviewPane() {
     if (!layout) return
     const scale = PREVIEW_W / layout.pages[0].width
     const cfg = pageConfigRef.current
+    const pageW = layout.pages[0].width
     const base = cfg.metaPos?.[key]
-    // 无 metaPos 时用元素绝对坐标转相对（adj12）
-    const bx = base ? base.x : Number(el.getAttribute('x')) - cfg.margin_left
-    const by = base ? base.y : Number(el.getAttribute('y')) - cfg.margin_top
+    // 基准 = 相对各自锚点的偏移（adj16）；无 metaPos 时由元素绝对坐标减去锚点得出
+    const anchor = metaAnchorPt(metaAnchorOf(key), pageW, cfg)
+    const bx = base ? base.x : Number(el.getAttribute('x')) - anchor.x
+    const by = base ? base.y : Number(el.getAttribute('y')) - anchor.y
     metaDragRef.current = { key, startX: e.clientX, startY: e.clientY, baseX: bx, baseY: by }
     const onMove = (ev: MouseEvent) => {
       const d = metaDragRef.current
       if (!d) return
       const next = { ...(pageConfigRef.current.metaPos ?? {}) }
-      // 相对描述区左上角保存（adj12），钳制在区域内
+      // 相对锚点保存（adj16），钳制在区域内
       const pos = clampMetaPos(
         d.key,
         d.baseX + (ev.clientX - d.startX) / scale,
         d.baseY + (ev.clientY - d.startY) / scale,
-        layout.pages[0].width,
+        pageW,
         pageConfigRef.current,
       )
       next[d.key] = {

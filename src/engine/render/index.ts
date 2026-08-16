@@ -13,7 +13,7 @@
  * TODO(M7)：跳房子/连音线/装饰符号/多声部
  */
 import type { PageConfig, PlacedBarline, PlacedDynamic, PlacedLyric, PlacedSlur, PlacedToken, ScoreLayout, ScorePage, VoiceBlock } from '../types'
-import { metaAreaH } from '../layout/guides'
+import { metaAnchorOf, metaAnchorPt } from '../layout/metaAnchors'
 
 // ============================================================
 // 工具
@@ -59,73 +59,70 @@ function noteFont(style: import('../types').PageConfig['shuzi_font']): string {
 // ============================================================
 
 /**
- * 描述头默认布局：
- *  - 主标题：居中靠上；副标题紧接其下
- *  - 作者：描述区右下（从底部往上）
- *  - 调式+拍号：左下同排；节拍在其下；其它各一行
+ * 描述头默认布局（adj16 锚点语义）：
+ *  - 主标题：上边中点（top-center）；副标题紧接其下
+ *  - 作者：右下角（bottom-right，从底部往上）
+ *  - 调式+拍号：左下角（bottom-left）；节拍在其下；其它各一行
  *  - metaPos 可覆盖任意元素位置（key: title/subtitle_i/author_i/keyline/tempo）
+ *    值为相对各自锚点的偏移（adj16）：区域宽/高变化时元素跟随锚点。
  */
 function renderMeta(page: ScorePage, config: PageConfig): string {
   const parts: string[] = []
   const { width } = page
-  const mTop = config.margin_top
-  const areaH = metaAreaH(config)
-  const posOf = (key: string, defX: number, defY: number) => {
-    // metaPos 为相对描述区左上角（adj12）：绝对 = 相对 + 边距；缺省用默认位置（默认公式已随区域变化）
+  const posOf = (key: string, defOff: { x: number; y: number }) => {
+    // 绝对 = 锚点 + 偏移；无 metaPos 用默认偏移（等价旧默认公式）
+    const anchor = metaAnchorPt(metaAnchorOf(key), width, config)
     const p = config.metaPos?.[key]
-    return p ? { x: p.x + config.margin_left, y: p.y + config.margin_top } : { x: defX, y: defY }
+    return p ? { x: anchor.x + p.x, y: anchor.y + p.y } : { x: anchor.x + defOff.x, y: anchor.y + defOff.y }
   }
 
-  // ---- 调式 + 拍号（左下，同排） ----
+  // ---- 调式 + 拍号（左下锚，同排） ----
   const keyText = [page.meta.key ? `1=${xmlEsc(page.meta.key)}` : '', page.meta.meter ? xmlEsc(page.meta.meter) : '']
     .filter(Boolean)
     .join('　')
   if (keyText) {
-    const pos = posOf('keyline', config.margin_left, areaH - 44)
+    const pos = posOf('keyline', { x: 0, y: -44 })
     parts.push(
       `<text data-meta="keyline" x="${pos.x}" y="${pos.y}" font-size="13" font-family="${FONT_CN}" fill="#1b1b1b">${keyText}</text>`,
     )
   }
-  // ---- 节拍（左下，keyline 下方；多行合并为一行） ----
+  // ---- 节拍（左下锚，keyline 下方；多行合并为一行） ----
   if (page.meta.tempo) {
     const n = Number(page.meta.tempo)
     const tempoText =
       Number.isFinite(n) && page.meta.tempo.trim() !== ''
         ? `♩=${n}`
         : xmlEsc(page.meta.tempo.replace(/\s*\n\s*/g, '　'))
-    const pos = posOf('tempo', config.margin_left, areaH - 20)
+    const pos = posOf('tempo', { x: 0, y: -20 })
     parts.push(
       `<text data-meta="tempo" x="${pos.x}" y="${pos.y}" font-size="13" font-family="${FONT_CN}" fill="#1b1b1b">${tempoText}</text>`,
     )
   }
 
-  // ---- 主标题（居中靠上） ----
+  // ---- 主标题（上居中锚） ----
   if (page.meta.titles[0]) {
-    const pos = posOf('title', width / 2, mTop + 26)
+    const pos = posOf('title', { x: 0, y: 26 })
     parts.push(
       `<text data-meta="title" x="${pos.x}" y="${pos.y}" text-anchor="middle" font-size="${config.biaoti_size}" font-family="${FONT_CN}" font-weight="bold" fill="#1b1b1b">${xmlEsc(page.meta.titles[0])}</text>`,
     )
   }
-  // ---- 副标题（主标题下） ----
+  // ---- 副标题（上居中锚，主标题下） ----
   let subIdx = 0
-  let subY = mTop + 26 + config.biaoti_size * 1.1
+  let subOffY = 26 + config.biaoti_size * 1.1
   for (const t of page.meta.titles.slice(1)) {
-    const pos = posOf(`subtitle_${subIdx}`, width / 2, subY)
+    const pos = posOf(`subtitle_${subIdx}`, { x: 0, y: subOffY })
     parts.push(
       `<text data-meta="subtitle_${subIdx}" x="${pos.x}" y="${pos.y}" text-anchor="middle" font-size="${config.fubiaoti_size}" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(t)}</text>`,
     )
-    subY += config.fubiaoti_size * 1.3
+    subOffY += config.fubiaoti_size * 1.3
     subIdx++
   }
 
-  // ---- 作者（右下，从底部往上） ----
-  const authorBottom = areaH - 16
+  // ---- 作者（右下锚，从底部往上） ----
   for (let i = 0; i < page.meta.authors.length; i++) {
-    const a = page.meta.authors[i]
-    const defY = authorBottom - (page.meta.authors.length - 1 - i) * 18
-    const pos = posOf(`author_${i}`, width - config.margin_right, defY)
+    const pos = posOf(`author_${i}`, { x: 0, y: -16 - (page.meta.authors.length - 1 - i) * 18 })
     parts.push(
-      `<text data-meta="author_${i}" x="${pos.x}" y="${pos.y}" text-anchor="end" font-size="12" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(a)}</text>`,
+      `<text data-meta="author_${i}" x="${pos.x}" y="${pos.y}" text-anchor="end" font-size="12" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(page.meta.authors[i])}</text>`,
     )
   }
 
