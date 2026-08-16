@@ -9,8 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { layoutScore, renderScoreToSvg, noteIdToCodePos } from '../engine'
-import { computeRowTops, dragDelta, clamp, GUIDE_LIMITS } from '../engine/layout/guides'
-import type { GuideDragSpec } from '../engine/layout/guides'
+import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '../engine/layout/guides'
 import { brand } from '../brand/tokens'
 
 /** 预览 SVG 显示宽度（与渲染容器一致） */
@@ -52,6 +51,10 @@ export function PreviewPane() {
   }, [parseResult, pageConfig])
 
   const rowTops = useMemo(() => (layout ? computeRowTops(layout) : []), [layout])
+  const rowGuides = useMemo(
+    () => (layout ? computeRowGuides(layout, { quci: pageConfig.height_quci, geci: pageConfig.geci_size }) : []),
+    [layout, pageConfig.height_quci, pageConfig.geci_size],
+  )
 
   // 高亮当前音符（M3）
   useEffect(() => {
@@ -119,15 +122,19 @@ export function PreviewPane() {
     window.addEventListener('mouseup', onUp)
   }
 
-  // ---- 辅助虚线拖拽（adj7） ----
+  // ---- 辅助虚线拖拽（adj7/adj10） ----
   const [drag, setDrag] = useState<{
-    spec: GuideDragSpec
+    spec: { key: string; dir: 'v' | 'h'; invert?: boolean }
     startX: number
     startY: number
     startVal: number
   } | null>(null)
 
-  const startDrag = (spec: GuideDragSpec, e: React.MouseEvent, startVal: number) => {
+  const startDrag = (
+    spec: { key: string; dir: 'v' | 'h'; invert?: boolean },
+    e: React.MouseEvent,
+    startVal: number,
+  ) => {
     e.preventDefault()
     e.stopPropagation()
     setDrag({ spec, startX: e.clientX, startY: e.clientY, startVal })
@@ -136,9 +143,13 @@ export function PreviewPane() {
   useEffect(() => {
     if (!drag || !layout) return
     const scale = PREVIEW_W / layout.pages[0].width
+    const limitsOf = (key: string): [number, number] =>
+      (GUIDE_LIMITS as Record<string, [number, number]>)[key] ??
+      (GUIDE_LIMITS_EX as Record<string, [number, number]>)[key] ??
+      [0, 400]
     const onMove = (ev: MouseEvent) => {
       const delta = dragDelta(drag.spec, drag.startX, drag.startY, ev.clientX, ev.clientY, scale)
-      const [min, max] = GUIDE_LIMITS[drag.spec.key]
+      const [min, max] = limitsOf(drag.spec.key)
       const next = { ...pageConfigRef.current, [drag.spec.key]: clamp(drag.startVal + delta, min, max) }
       setPageConfig(next)
     }
@@ -199,6 +210,8 @@ export function PreviewPane() {
           const pct = (v: number) => `${((v / page.width) * 100).toFixed(2)}%`
           const pctY = (v: number) => `${((v / page.height) * 100).toFixed(2)}%`
           const rowTopsOfPage = rowTops[i] ?? []
+          const rowGuidesOfPage = rowGuides[i] ?? []
+          void rowTopsOfPage
           return (
             <div key={i} className="score-page" style={{ maxWidth: '100%', position: 'relative' }}>
               <div style={{ width: PREVIEW_W, position: 'relative' }}>
@@ -233,15 +246,59 @@ export function PreviewPane() {
                       onMouseDown={(e) => startDrag({ key: 'margin_right', dir: 'h', invert: true }, e, pageConfig.margin_right)}
                       title="右边距（拖动调整）"
                     />
-                    {/* 行距线（每行顶部，拖动调整曲上间距） */}
-                    {rowTopsOfPage.map((yt, ri) => (
-                      <div
-                        key={ri}
-                        className="guide-line guide-h guide-row"
-                        style={{ top: pctY(yt), left: pct(pageConfig.margin_left), right: pct(pageConfig.margin_right), cursor: 'ns-resize', pointerEvents: 'auto' }}
-                        onMouseDown={(e) => startDrag({ key: 'height_ciqu', dir: 'v' }, e, pageConfig.height_ciqu)}
-                        title="行距（曲上间距，拖动调整）"
-                      />
+                    {/* 行结构虚线：曲行顶（首行=描述头高度，其余=曲上间距）/ 曲词间距 / 词曲间距 */}
+                    {rowGuidesOfPage.map((rg, ri) => (
+                      <div key={ri} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+                        {/* 曲行顶线 */}
+                        <div
+                          className="guide-line guide-h guide-row"
+                          style={{
+                            top: pctY(rg.yTop),
+                            left: pct(pageConfig.margin_left),
+                            right: pct(pageConfig.margin_right),
+                            cursor: 'ns-resize',
+                            pointerEvents: 'auto',
+                          }}
+                          onMouseDown={(e) =>
+                            startDrag(
+                              { key: ri === 0 ? 'body_margin_top' : 'height_ciqu', dir: 'v' },
+                              e,
+                              ri === 0 ? pageConfig.body_margin_top : pageConfig.height_ciqu,
+                            )
+                          }
+                          title={ri === 0 ? '描述头高度（拖动调整）' : '行距（曲上间距，拖动调整）'}
+                        />
+                        {/* 曲词间距线 */}
+                        {rg.lyricTop !== null && (
+                          <div
+                            className="guide-line guide-h guide-quci"
+                            style={{
+                              top: pctY((rg.yBottom + rg.lyricTop) / 2),
+                              left: pct(pageConfig.margin_left),
+                              right: pct(pageConfig.margin_right),
+                              cursor: 'ns-resize',
+                              pointerEvents: 'auto',
+                            }}
+                            onMouseDown={(e) => startDrag({ key: 'height_quci', dir: 'v' }, e, pageConfig.height_quci)}
+                            title="曲部与词部间距（拖动调整）"
+                          />
+                        )}
+                        {/* 词曲间距线（非最后一行） */}
+                        {rg.lyricBottom !== null && ri < rowGuidesOfPage.length - 1 && (
+                          <div
+                            className="guide-line guide-h guide-cici"
+                            style={{
+                              top: pctY(rg.lyricBottom + pageConfig.height_cici / 2),
+                              left: pct(pageConfig.margin_left),
+                              right: pct(pageConfig.margin_right),
+                              cursor: 'ns-resize',
+                              pointerEvents: 'auto',
+                            }}
+                            onMouseDown={(e) => startDrag({ key: 'height_cici', dir: 'v' }, e, pageConfig.height_cici)}
+                            title="词部与下一行曲部间距（拖动调整）"
+                          />
+                        )}
+                      </div>
                     ))}
                   </div>
                 )}

@@ -318,6 +318,17 @@ body {
   border-color: var(--jp-success);
 }
 
+/* 曲词间距线（橙） / 词曲间距线（紫） */
+.guide-quci {
+  opacity: 0.5;
+  border-color: var(--jp-warning);
+}
+
+.guide-cici {
+  opacity: 0.5;
+  border-color: #c58bff;
+}
+
 .preview-placeholder {
   height: 100%;
   display: flex;

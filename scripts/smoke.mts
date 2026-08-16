@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { parseJps, formatJps, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig } from '../src/engine/index.ts'
 import { buildPlaySequence, inferBpm } from '../src/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '../src/engine/cursorMap.ts'
-import { computeRowTops, dragDelta, clamp } from '../src/engine/layout/guides.ts'
+import { computeRowTops, computeRowGuides, dragDelta, clamp } from '../src/engine/layout/guides.ts'
 import { computeBeamsForTest } from '../src/engine/render/index.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
 import { highlightCode } from '../src/editor/highlight.ts'
@@ -610,6 +610,23 @@ const layErM = layoutScore(rEr, { ...defaultPageConfig, metaPos: { title: { x: 1
 const svgErM = renderScoreToSvg(layErM)[0]
 const m2 = /data-meta="title" x="([\d.]+)" y="([\d.]+)"/.exec(svgErM)
 check('metaPos 覆盖标题位置', m2 !== null && Math.abs(Number(m2[1]) - 100) < 0.5 && Math.abs(Number(m2[2]) - 50) < 0.5, m2?.[0])
+
+// ---- 31. 行结构虚线（adj10） ----
+console.log('[31] row guides (adj10)')
+// 小星星：3 行曲 + 每行歌词 → 每行有 lyricTop/lyricBottom
+const rgs31 = computeRowGuides(layX, { quci: defaultPageConfig.height_quci, geci: defaultPageConfig.geci_size })
+check('3 行结构', rgs31[0].length === 3, `got ${rgs31[0].length}`)
+const rg0 = rgs31[0][0]
+check('行 0 有歌词位置', rg0.lyricTop !== null && rg0.lyricBottom !== null)
+check('曲底 = 行顶 + 30.6', Math.abs(rg0.yBottom - (rg0.yTop + 30.6)) < 0.5)
+// 曲词线位置 = (曲底 + 歌词顶)/2
+const quciLine = (rg0.yBottom + (rg0.lyricTop ?? 0)) / 2
+check('曲词线在曲底与歌词之间', quciLine > rg0.yBottom && quciLine < (rg0.lyricTop ?? 0), `line=${quciLine}`)
+// 词底线 = 歌词 + geci
+check('词底 = 歌词基线 + 歌词字号', Math.abs((rg0.lyricBottom ?? 0) - ((rg0.lyricTop ?? 0) + defaultPageConfig.geci_size)) < 0.5)
+// 无歌词行：lyricTop null（连音线谱第 2 小节无歌词？用纯曲谱验证）
+const rgsNo = computeRowGuides(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n'), defaultPageConfig), { quci: 13, geci: 18 })
+check('无歌词行 lyricTop=null', rgsNo[0][0].lyricTop === null)
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)
