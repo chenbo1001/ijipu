@@ -8,6 +8,7 @@ import ershenbu from '../../samples/ershenbu.jps?raw'
 import fanfuTiaofangzi from '../../samples/fanfu-tiaofangzi.jps?raw'
 import lianyinxianZhuangshi from '../../samples/lianyinxian-zhuangshi.jps?raw'
 import yufaQuangai from '../../samples/yufa-quangai.jps?raw'
+import yinyunZhuangshi from '../../samples/yinyun-zhuangshi.jps?raw'
 
 export interface SampleScore {
   id: string
@@ -58,6 +59,12 @@ export const SAMPLES: SampleScore[] = [
     name: '语法全覆盖',
     description: '高低音点、休止符、附点、减时线、变音、全音符',
     code: yufaQuangai,
+  },
+  {
+    id: 'yinyun-zhuangshi',
+    name: '倚音与虚音符',
+    description: '前倚音 [65]、后倚音 [h56]、虚音符 (1)、后置变音',
+    code: yinyunZhuangshi,
   },
 ]
 

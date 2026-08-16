@@ -169,11 +169,56 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     }
   }
 
-  // 数字主体（含 notepos 契约）
+  // 数字主体（含 notepos 契约；虚音符 (1) 两侧加小括号，adj23）
   const glyph = t.kind === 'rest' ? '0' : t.kind === 'rhythm' ? 'X' : String(t.pitch)
-  parts.push(
-    `<text x="${x}" y="${y}" data-notepos="${nid}" font-size="${size}" font-family="${font}" font-weight="bold" fill="#1b1b1b">${glyph}</text>`,
-  )
+  if (t.kind === 'note' && t.ghost) {
+    parts.push(
+      `<text x="${x - 5}" y="${y}" font-size="13" font-family="${font}" fill="#1b1b1b">(</text>`,
+      `<text x="${x}" y="${y}" data-notepos="${nid}" font-size="${size}" font-family="${font}" font-weight="bold" fill="#1b1b1b">${glyph}</text>`,
+      `<text x="${x + NOTE_DIGIT_W + 1}" y="${y}" font-size="13" font-family="${font}" fill="#1b1b1b">)</text>`,
+    )
+  } else {
+    parts.push(
+      `<text x="${x}" y="${y}" data-notepos="${nid}" font-size="${size}" font-family="${font}" font-weight="bold" fill="#1b1b1b">${glyph}</text>`,
+    )
+  }
+
+  // 倚音（adj23）：前倚音 [65] 画在主音符左侧，后倚音 [h65] 画在右侧（小字号，不占拍）
+  if (t.kind === 'note' && t.gracenotes && t.gracenotes.notes.length > 0) {
+    const gn = t.gracenotes
+    const gSize = 10
+    const gW = 7 // 每个倚音音符占宽
+    for (let gi = 0; gi < gn.notes.length; gi++) {
+      const g = gn.notes[gi]
+      const gx = gn.after
+        ? x + NOTE_DIGIT_W + 3 + gi * gW
+        : x - 3 - (gn.notes.length - gi) * gW
+      // 小高低音点
+      if (g.octaveShift !== 0) {
+        const dir = g.octaveShift > 0 ? -1 : 1
+        const cx = gx + gW / 2
+        for (let d = 0; d < Math.abs(g.octaveShift); d++) {
+          const cy = y + dir * (11 + d * 5)
+          parts.push(`<circle cx="${r1n(cx)}" cy="${cy}" r="1.5" fill="#1b1b1b"/>`)
+        }
+      }
+      // 变音
+      if (g.accidental) {
+        const sym = g.accidental === '#' ? '#' : g.accidental === '$' ? 'b' : '♮'
+        parts.push(
+          `<text x="${gx - 3.5}" y="${y - 6}" font-size="8" font-family="${font}" fill="#1b1b1b">${sym}</text>`,
+        )
+      }
+      // 减时线
+      for (let d = 0; d < g.diminishCount; d++) {
+        parts.push(`<rect x="${gx + 0.5}" y="${y + 2 + d * 3}" width="6" height="1.5" fill="#1b1b1b"/>`)
+      }
+      // 数字
+      parts.push(
+        `<text x="${gx}" y="${y}" font-size="${gSize}" font-family="${font}" font-weight="bold" fill="#1b1b1b">${g.pitch}</text>`,
+      )
+    }
+  }
 
   // 附点（adj13/15：垂直居中于数字；附点占前音符**基础时值**的 1/2，
   // 即 1. 总宽 1.5 拍、1/. 总宽 0.75 拍；位置基于不含附点的基础时值）

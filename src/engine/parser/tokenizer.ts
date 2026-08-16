@@ -2,11 +2,13 @@
  * engine/parser/tokenizer.ts — Q 行（曲行）token 化
  *
  * 将一行音符文本（如 "1 2 3. 4/ |: [ 5 6 ] :|"）解析为 MusicToken[]。
- * 语法依据 .jps V1.0 手册：音符/休止符/节奏符、高低音点、变音、时值线、
- * 附点、装饰符号（& 编码）、渐强渐弱（< > !）、连音线（()）、
- * 小节线与反复记号（| || |: :| :|: |/ |*）、跳房子（[] [/ [+）。
+ * 语法依据 .jps V1.0 手册：音符/休止符/节奏符、高低音点、变音（后置 # $ =）、
+ * 时值线、附点、装饰符号（& 编码）、渐强渐弱（< > !）、连音线（( ... ) 带空格）、
+ * 小节线与反复记号（| || |: :| :|: |/ |*）、跳房子（[] [/ [+）、
+ * 虚音符（(1) 括号紧贴数字，adj23）、倚音（1[65] 前 / 1[h65] 后，adj23）。
+ * 块间空格规则（adj23）：音符块与音符块、音符块与小节线块之间恰好一个空格。
  */
-import type { BarlineType, MusicToken, SourcePos } from '../types'
+import type { BarlineType, GracenoteNote, MusicToken, SourcePos } from '../types'
 import { err } from './errors'
 import type { ParseError } from '../types'
 
@@ -24,6 +26,34 @@ export function tokenizeMusicLine(
   let i = 0
   const n = content.length
   const rawAt = (start: number, end: number) => content.slice(start, end)
+
+  // ---- 块间空格校验（adj23）：音符块与音符块、音符块与小节线块之间恰好一个空格 ----
+  let lastBlockEnd = -1 // 上一个音符块/小节线块的结束字符偏移
+  let lastBlockCounts = false // 上一个块是否参与校验
+  const checkBlockGap = (blockStart: number) => {
+    if (!lastBlockCounts) return
+    const between = content.slice(lastBlockEnd, blockStart)
+    if (between === '') {
+      errors.push(
+        err('音符块与小节线块之间缺少空格（应恰好一个空格）', {
+          line: pos.line,
+          col: pos.col + blockStart,
+        }, 'warning'),
+      )
+    } else if (/^ +$/.test(between) && between.length > 1) {
+      errors.push(
+        err('音符块与小节线块之间应只有一个空格', {
+          line: pos.line,
+          col: pos.col + blockStart,
+        }, 'warning'),
+      )
+    }
+  }
+  const registerBlock = (start: number, end: number) => {
+    checkBlockGap(start)
+    lastBlockEnd = end
+    lastBlockCounts = true
+  }
 
   // 收集一个 token 的公共后缀：变音/减时线/增时线/附点/高低音点/装饰/注释
   const collectSuffix = (
@@ -85,6 +115,37 @@ export function tokenizeMusicLine(
     if (c === ' ' || c === '\t') {
       i++
       continue
+    }
+
+    // 虚音符 (1)：括号紧贴单个音符（块内无空格），是音符块的一部分（adj23）；
+    // 若括号与音符不紧贴（如 ( 1 2 3 )）则回退为连音线
+    if (c === '(' && content[i + 1] >= '1' && content[i + 1] <= '7') {
+      const gStart = i
+      const base = {
+        accidental: null as '#' | '$' | '=' | null,
+        augmentCount: 0,
+        diminishCount: 0,
+        dots: 0,
+        octaveShift: 0,
+        symbols: [] as string[],
+        comment: undefined as string | undefined,
+      }
+      const j = collectSuffix(i + 2, base)
+      if (j < n && content[j] === ')') {
+        const token: NoteToken_ = {
+          kind: 'note',
+          pitch: content[i + 1].charCodeAt(0) - 48 as 1 | 2 | 3 | 4 | 5 | 6 | 7,
+          ...base,
+          ghost: true,
+          pos: i,
+          raw: rawAt(gStart, j + 1),
+        }
+        tokens.push(token)
+        registerBlock(gStart, j + 1)
+        i = j + 1
+        continue
+      }
+      // 不匹配：回退连音线
     }
 
     // 连音线
@@ -176,7 +237,9 @@ export function tokenizeMusicLine(
         pos: i,
         raw: rawAt(i, j),
       }
-      // 跳过小节线后的空格，再处理备注（引号）与跳房子标记
+      // 跳过小节线后的空格，再处理备注（引号）与跳房子标记；
+      // 若无附加内容则回退到空格前（空格留给下一个块做单空格校验，adj23）
+      const barEnd = j
       while (content[j] === ' ' || content[j] === '\t') j++
       // 小节线备注（引号，如跳房子番号 "1."）——先于跳房子标记处理
       if (content[j] === '"') {
@@ -210,10 +273,91 @@ export function tokenizeMusicLine(
         t.voltaEnd = true
         t.raw = rawAt(i, j + 1)
         j++
+      } else if (t.comment === undefined) {
+        j = barEnd // 无备注/跳房子：回退到空格前（空格留给下一个块）
       }
       tokens.push(t)
+      registerBlock(i, j)
       i = j
       continue
+    }
+
+    // 倚音（adj23）：音符后面的 [65] 前倚音 / [h65] 后倚音，是音符块的一部分；
+    // 括号内音符可含高低音点 ' ,、变音 # $ =、减时线 /。
+    // 与跳房子区分（adj23）：小节线后的 [ 是跳房子；音符后的 [ 是倚音
+    if (c === '[') {
+      const last = tokens[tokens.length - 1]
+      if (last && last.kind === 'note') {
+        let k = i + 1
+        let after = false
+        if (content[k] === 'h') {
+          after = true
+          k++
+        }
+        const notes: GracenoteNote[] = []
+        let closed = false
+        while (k < n) {
+          const ch = content[k]
+          if (ch === ']') {
+            closed = true
+            k++
+            break
+          }
+          if (ch === ' ' || ch === '\t') {
+            k++
+            continue
+          }
+          if (ch >= '1' && ch <= '7') {
+            const gn: GracenoteNote = {
+              pitch: ch.charCodeAt(0) - 48 as 1 | 2 | 3 | 4 | 5 | 6 | 7,
+              octaveShift: 0,
+              accidental: null,
+              diminishCount: 0,
+            }
+            k++
+            while (k < n) {
+              const sc = content[k]
+              if (sc === "'") {
+                gn.octaveShift++
+                k++
+              } else if (sc === ',') {
+                gn.octaveShift--
+                k++
+              } else if (sc === '#') {
+                gn.accidental = '#'
+                k++
+              } else if (sc === '$') {
+                gn.accidental = '$'
+                k++
+              } else if (sc === '=') {
+                gn.accidental = '='
+                k++
+              } else if (sc === '/') {
+                gn.diminishCount++
+                k++
+              } else {
+                break
+              }
+            }
+            notes.push(gn)
+          } else {
+            errors.push(
+              err('倚音内不支持的符号', { line: pos.line, col: pos.col + k }, 'warning'),
+            )
+            k++
+          }
+        }
+        if (!closed) {
+          errors.push(
+            err('倚音括号 "]" 未闭合', { line: pos.line, col: pos.col + i }, 'warning'),
+          )
+        }
+        last.gracenotes = { after, notes }
+        last.raw += rawAt(i, k)
+        lastBlockEnd = k // 音符块结束延展到倚音括号后
+        i = k
+        continue
+      }
     }
 
     // 跳房子标记（独立出现，例如行首用 |/ 之后；或小节线引号备注后带空格）
@@ -234,6 +378,7 @@ export function tokenizeMusicLine(
         // 继承前一小节线（含番号备注），合并跳房子起点
         last.voltaStart = { open: true, slash, plus }
         last.raw += rawAt(i, k)
+        lastBlockEnd = k // 小节线块结束延展
       } else {
         tokens.push({
           kind: 'barline',
@@ -242,12 +387,14 @@ export function tokenizeMusicLine(
           pos: i,
           raw: rawAt(i, k),
         })
+        registerBlock(i, k)
       }
       i = k
       continue
     }
     if (c === ']') {
       tokens.push({ kind: 'barline', type: '|', voltaEnd: true, pos: i, raw: ']' })
+      registerBlock(i, i + 1)
       i++
       continue
     }
@@ -272,6 +419,7 @@ export function tokenizeMusicLine(
         raw: rawAt(start, end),
       }
       tokens.push(token)
+      registerBlock(start, end)
       i = end
       continue
     }
@@ -288,6 +436,7 @@ export function tokenizeMusicLine(
         pos: i,
         raw: rawAt(start, end),
       })
+      registerBlock(start, end)
       i = end
       continue
     }
@@ -303,6 +452,7 @@ export function tokenizeMusicLine(
         pos: i,
         raw: rawAt(start, end),
       })
+      registerBlock(start, end)
       i = end
       continue
     }
@@ -314,6 +464,7 @@ export function tokenizeMusicLine(
       if (last && (last.kind === 'note' || last.kind === 'rest' || last.kind === 'rhythm')) {
         last.augmentCount++
         last.raw += '-'
+        lastBlockEnd = i + 1 // 音符块结束延展
         i++
         continue
       }

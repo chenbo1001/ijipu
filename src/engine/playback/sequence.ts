@@ -10,6 +10,7 @@
  */
 import type { BarlineType, ParseResult, PlacedBarline, PlacedToken, ScoreLayout } from '../types'
 import { tokenDuration } from '../duration'
+import { parseKey, pitchToName } from '../layout/index'
 
 export interface PlayEvent {
   placed: PlacedToken
@@ -17,6 +18,8 @@ export interface PlayEvent {
   atMs: number
   /** 时值（ms） */
   durationMs: number
+  /** 音高覆盖（倚音等装饰音，MIDI 音名；缺省用 placed.audioPitch，adj23） */
+  pitch?: string | null
 }
 
 export interface PlaySequence {
@@ -91,12 +94,41 @@ export function buildPlaySequence(result: ParseResult, layout: ScoreLayout, bpm:
   let i = 0
   let guard = 0
   const maxIter = seq.length * 6 // 死循环保护
+  const keySemitone = parseKey(result.header.key)
   while (i < seq.length && guard++ < maxIter) {
     const item = seq[i]
     if (item.kind === 'note' && item.note) {
-      const durationMs = (tokenDuration(item.note.token) * 60000) / bpm
+      const token = item.note.token
+      const durationMs = (tokenDuration(token) * 60000) / bpm
+      // 倚音（adj23）：前倚音提前于主音符、后倚音紧跟主音符，时值 1/8 拍，音高用倚音音符本身
+      const gn = token.kind === 'note' ? token.gracenotes : undefined
+      const graceMs = (0.125 * 60000) / bpm
+      const gracePitches =
+        gn && gn.notes.length > 0
+          ? gn.notes.map((g) => pitchToName(g.pitch, g.octaveShift, g.accidental, keySemitone))
+          : []
+      if (gn && !gn.after && gracePitches.length > 0) {
+        for (let gi = 0; gi < gn.notes.length; gi++) {
+          events.push({
+            placed: item.note,
+            atMs: Math.max(0, at - (gn.notes.length - gi) * graceMs),
+            durationMs: graceMs,
+            pitch: gracePitches[gi],
+          })
+        }
+      }
       events.push({ placed: item.note, atMs: at, durationMs })
       at += durationMs
+      if (gn && gn.after && gracePitches.length > 0) {
+        for (let gi = 0; gi < gn.notes.length; gi++) {
+          events.push({
+            placed: item.note,
+            atMs: at + gi * graceMs,
+            durationMs: graceMs,
+            pitch: gracePitches[gi],
+          })
+        }
+      }
       i++
       continue
     }

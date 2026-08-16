@@ -25,16 +25,18 @@ export function createBackend(kind: BackendKind): AudioBackend {
 
 /** 调度播放：按事件延迟触发；返回取消函数 */
 export function schedulePlay(
-  seq: { events: { placed: PlacedToken; atMs: number; durationMs: number }[] },
+  seq: { events: { placed: PlacedToken; atMs: number; durationMs: number; pitch?: string | null }[] },
   backend: AudioBackend,
   onNote?: (placed: PlacedToken) => void,
 ): { cancel: () => void; totalMs: number } {
   const timers: number[] = []
   for (const ev of seq.events) {
     if (!ev.placed.playable || !ev.placed.audioPitch) continue
+    const pitch = ev.pitch ?? ev.placed.audioPitch
+    if (!pitch) continue
     timers.push(
       window.setTimeout(() => {
-        backend.play(ev.placed.audioPitch, 0, ev.durationMs, 0.5)
+        backend.play(pitch, 0, ev.durationMs, 0.5)
         onNote?.(ev.placed)
       }, ev.atMs),
     )

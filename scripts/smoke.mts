@@ -251,8 +251,8 @@ check('总时长 2000ms', ps0.totalMs === 2000, String(ps0.totalMs))
 const ps1 = mkSeq('|: 1 2 :| 3 4 |')
 check('反复展开 6 事件（1,2,1,2,3,4）', pitchSeq(ps1) === 'C4,D4,C4,D4,E4,F4', pitchSeq(ps1))
 
-// 跳房子（第二遍跳过 [ ] 段）
-const ps2 = mkSeq('|: 1 2 [ 3 4 ] 5 6 :|')
+// 跳房子（第二遍跳过 [ ] 段；adj23：跳房子 [ 须在小节线后，音符后的 [ 是倚音）
+const ps2 = mkSeq('|: 1 2 | [ 3 4 ] 5 6 :|')
 check('跳房子展开 10 事件', pitchSeq(ps2) === 'C4,D4,E4,F4,G4,A4,C4,D4,G4,A4', pitchSeq(ps2))
 
 // 终止线 || 停止
@@ -735,6 +735,48 @@ const lay35d = layoutScore(d35d, defaultPageConfig)
 const n35d = lay35d.pages[0].notes[0]
 const dot35d = /<circle cx="([\d.]+)" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(lay35d)[0])
 check('低八度点距数字底部 4px、x=数字中心（adj22）', dot35d !== null && Math.abs(Number(dot35d[2]) - (n35d.y + 8.4)) < 0.5 && Math.abs(Number(dot35d[1]) - (n35d.x + 5.58)) < 0.5, `cy=${dot35d?.[2]} cx=${dot35d?.[1]}`)
+
+// ---- 36. 音符块语法：后置变音 / 虚音符 / 倚音 / 单空格（adj23） ----
+console.log('[36] note block syntax (adj23)')
+// 变音后置
+const r36a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1# 2$ 3= 4 |\n')
+const tk36a = r36a.groups[0].music.tokens
+check('变音后置 1# 2$ 3=', r36a.errors.length === 0 && tk36a[0].kind === 'note' && tk36a[0].accidental === '#' && tk36a[1].kind === 'note' && tk36a[1].accidental === '$' && tk36a[2].kind === 'note' && tk36a[2].accidental === '=', JSON.stringify(r36a.errors))
+// 虚音符 (3)
+const r36b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 (3) 5 |\n')
+const tk36b = r36b.groups[0].music.tokens
+check('虚音符 (3) ghost=true 且 raw 含括号', r36b.errors.length === 0 && tk36b[1].kind === 'note' && tk36b[1].ghost === true && tk36b[1].raw === '(3)', JSON.stringify(r36b.errors))
+// 倚音 1[65] 前 / 2[h56] 后
+const r36c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1[65] 2[h56] 3 |\n')
+const tk36c = r36c.groups[0].music.tokens
+const gn1 = tk36c[0].kind === 'note' ? tk36c[0].gracenotes : undefined
+const gn2 = tk36c[1].kind === 'note' ? tk36c[1].gracenotes : undefined
+check('前倚音 1[65]', r36c.errors.length === 0 && !!gn1 && gn1.after === false && gn1.notes.length === 2 && gn1.notes[0].pitch === 6 && gn1.notes[1].pitch === 5, JSON.stringify(gn1))
+check('后倚音 2[h56]', !!gn2 && gn2.after === true && gn2.notes.length === 2 && gn2.notes[0].pitch === 5 && gn2.notes[1].pitch === 6, JSON.stringify(gn2))
+// 倚音内高低音/变音/减时
+const r36d = parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1[6'5,2/3#] 4 |\n")
+const gn3 = r36d.groups[0].music.tokens[0].kind === 'note' ? r36d.groups[0].music.tokens[0].gracenotes : undefined
+check('倚音内高低音/变音/减时', !!gn3 && gn3.notes[0].octaveShift === 1 && gn3.notes[1].octaveShift === -1 && gn3.notes[2].diminishCount === 1 && gn3.notes[3].accidental === '#', JSON.stringify(gn3))
+// 单空格校验：双空格警告、紧贴警告、单空格无警告
+const r36e = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1  2 | 3 4 |\n')
+check('双空格 → 警告', r36e.errors.some((e) => e.severity === 'warning' && e.message.includes('一个空格')))
+const r36f = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2| 3 4 |\n')
+check('音符紧贴小节线 → 警告', r36f.errors.some((e) => e.severity === 'warning' && e.message.includes('缺少空格')))
+const r36g = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 | 3 4 |\n')
+check('单空格 → 无警告', r36g.errors.length === 0, JSON.stringify(r36g.errors))
+// 连音线 ( 2 3 ) 与虚音符 (4) 区分（括号内空格与否）
+const r36h = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 ( 2 3 ) (4) 5 |\n')
+check('连音线与虚音符区分', r36h.groups[0].music.tokens.map((t) => t.kind).join(',') === 'note,slur,note,note,slur,note,note,barline', r36h.groups[0].music.tokens.map((t) => t.kind).join(',') + ' | ' + JSON.stringify(r36h.errors))
+// 渲染：虚音符括号 + 倚音小字
+const svg36b = renderScoreToSvg(layoutScore(r36b, defaultPageConfig))[0]
+check('虚音符渲染括号', svg36b.includes('>(</text>') && svg36b.includes(')</text>'))
+const svg36c = renderScoreToSvg(layoutScore(r36c, defaultPageConfig))[0]
+check('倚音渲染小数字（font-size 10）', svg36c.includes('font-size="10"'))
+// 播放：倚音事件（音高覆盖）
+const seq36 = buildPlaySequence(r36c, layoutScore(r36c, defaultPageConfig), 120)
+const gPitches = seq36.events.filter((e) => e.pitch).map((e) => e.pitch)
+check('倚音播放事件 7 个（2+1 前 + 2+1+1 主/后）', seq36.events.length === 7, `got ${seq36.events.length}`)
+check('倚音音高 = 倚音音符本身（A4,G4,G4,A4）', gPitches.join(',') === 'A4,G4,G4,A4', gPitches.join(','))
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

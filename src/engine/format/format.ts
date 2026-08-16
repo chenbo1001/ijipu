@@ -48,6 +48,11 @@ export function formatLine(raw: string): string {
         continue
       }
     }
+    // 普通区空白压缩为单空格（adj23：块间恰好一个空格；引号/跳房子内原样）
+    if (note === ' ') {
+      if (out[out.length - 1] !== ' ') out.push(' ')
+      continue
+    }
     if ('0123456789-'.includes(note) && upNote !== 'Q' && upNote !== 'C' && upNote !== ' ' && upNote !== '(' && upNote !== 'y') {
       out.push(' ' + note)
     } else if (note === '(' && upNote !== '(') {
