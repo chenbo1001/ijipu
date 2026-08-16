@@ -689,7 +689,7 @@ const oct34 = parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1' 2 3 4 |\n")
 const layO34 = layoutScore(oct34, defaultPageConfig)
 const nO34 = layO34.pages[0].notes[0]
 const octDot = /<circle cx="([\d.]+)" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(layO34)[0])
-check('高音点 x = 数字中心', octDot !== null && Math.abs(Number(octDot[1]) - (nO34.x + 5.58)) < 0.5, `cx=${octDot?.[1]} expect=${nO34.x + 5.58}`)
+check('高音点 x = 数字中心左移 2（adj18）', octDot !== null && Math.abs(Number(octDot[1]) - (nO34.x + 3.58)) < 0.5, `cx=${octDot?.[1]} expect=${nO34.x + 3.58}`)
 check('高音点 y = 数字基线上 18（不与数字重叠，adj17）', octDot !== null && Math.abs(Number(octDot[2]) - (nO34.y - 18)) < 0.5, `cy=${octDot?.[2]} expect=${nO34.y - 18}`)
 // 附点：位置 = 时值结束 + 半值中点，垂直居中
 const dot34 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1. 2 3 4 |\n')

@@ -157,7 +157,8 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
   const oct = t.kind === 'note' ? t.octaveShift : 0
   if (oct !== 0) {
     const n = Math.abs(oct)
-    const dotCx = x + NOTE_DIGIT_W / 2 // 数字中心
+    // 数字槽宽中心再左移 2px（"1" 字形窄，视觉中心偏左，adj18）
+    const dotCx = x + NOTE_DIGIT_W / 2 - 2
     const dc = t.diminishCount
     const lowOffset = oct < 0 && dc > 0 ? dc * 4 + 6 : 0 // 避让减时线区域
     for (let i = 0; i < n; i++) {
