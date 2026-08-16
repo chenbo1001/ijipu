@@ -276,10 +276,6 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   let noteCounter = 0
   let barCounter = 0
 
-  /** 行内小节均分宽（扣除小节间距 bar_gap） */
-  const barWidthOf = (count: number) =>
-    (availW - config.bar_gap * Math.max(0, count - 1)) / Math.max(1, count)
-
   const startPage = () => {
     const page: ScorePage = {
       index: pages.length,
@@ -372,7 +368,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     return dur
   }
 
-  /** 排布一个曲行（bars：小节均分 + 时值等宽；frag：超长小节按拍数铺满） */
+  /** 排布一个曲行（bars：每拍宽按行总拍数平均、小节宽=拍数×每拍宽；frag：超长小节按拍数铺满） */
   const placeMusicRow = (
     segs: BarSeg[],
     row: LayoutRow,
@@ -383,7 +379,6 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     geciSize: number,
     sp: Spacing,
     slotStart: number,
-    alignW: number | null,
   ) => {
     const page = pages[pageIndex]
     const yBottom = r1(yTop + m.noteSize * 1.7)
@@ -416,21 +411,22 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       return
     }
 
-    // bars 行：小节均分（行首空小节如 |: 不占宽）；
-    // 最后一行：小节数少于上一行时按上一行网格对齐（alignW），否则与普通行一样均分
+    // bars 行：每拍宽 = 行可用宽 / 行总拍数（每行独立，adj15）；
+    // 小节宽 = 该小节实际拍数 × 每拍宽（取代固定拍号与均分）
     const leadingEmpty = row.start < row.end && segs[row.start].notes.length === 0 ? 1 : 0
     const barCount = Math.max(1, row.end - row.start - leadingEmpty)
-    const rowBarW = alignW !== null ? alignW : barWidthOf(barCount)
+    let rowBeats = 0
+    let maxPbm = 0
+    for (let b = row.start; b < row.end; b++) {
+      if (segs[b].notes.length > 0) rowBeats += segBeats(segs[b])
+      maxPbm = Math.max(maxPbm, segPerBeatMin(segs[b]))
+    }
+    const pads = BAR_PAD * 2 + config.bar_gap * Math.max(0, barCount - 1)
+    const perBeat = Math.max(2, (availW - pads) / Math.max(1, rowBeats), maxPbm)
     for (let b = row.start; b < row.end; b++) {
       const seg = segs[b]
       const isEmptyLead = leadingEmpty === 1 && b === row.start
-      const segBarW = rowBarW
-      // 超拍小节（实际拍数 > 拍号）：按实际拍数算每拍宽，音符铺满小节不溢出
-      const perBeat = Math.max(
-        2,
-        (segBarW - BAR_PAD * 2) / Math.max(beats, segBeats(seg)),
-        segPerBeatMin(seg),
-      )
+      const segBarW = isEmptyLead ? 0 : segBeats(seg) * perBeat
       let beatAcc = 0
       for (const t of seg.notes) {
         if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
@@ -472,7 +468,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   }
 
   /** 处理一个单声部组 */
-  const placeGroup = (groupIndex: number, voice: number, tokens: MusicToken[], lyrics: LyricLine[], isLastGroup: boolean) => {
+  const placeGroup = (groupIndex: number, voice: number, tokens: MusicToken[], lyrics: LyricLine[]) => {
     const segs = splitBars(tokens)
     const rows = breakRows(segs, beats, availW)
     const geciSize = config.geci_size
@@ -493,44 +489,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       }
     }
 
-    // 最后一行对齐规则：小节数少于上一行 → 按上一行均分网格对齐；否则均分
-    let lastAlignW: number | null = null
-    if (isLastGroup && rows.length > 1) {
-      const lastRow = rows[rows.length - 1]
-      if (lastRow.kind === 'bars') {
-        let prev: LayoutRow | null = null
-        for (let i = rows.length - 2; i >= 0; i--) {
-          if (rows[i].kind === 'bars') {
-            prev = rows[i]
-            break
-          }
-        }
-        if (prev && prev.kind === 'bars') {
-          const barCnt = (r: Extract<LayoutRow, { kind: 'bars' }>) => {
-            const lead = r.start < r.end && segs[r.start].notes.length === 0 ? 1 : 0
-            return Math.max(1, r.end - r.start - lead)
-          }
-          if (barCnt(lastRow) < barCnt(prev)) {
-            const alignW = barWidthOf(barCnt(prev))
-            // 密度保护：行内任一小节自然宽超 alignW 时回退均分（防溢出重叠）
-            let fits = true
-            for (let b = lastRow.start; b < lastRow.end; b++) {
-              if (segs[b].notes.length === 0) continue
-              if (barNaturalW(segs[b], beats) > alignW + 0.5) {
-                fits = false
-                break
-              }
-            }
-            if (fits) lastAlignW = alignW
-          }
-        }
-      }
-    }
-
     rows.forEach((row, ri) => {
-      const isLastRow = isLastGroup && ri === rows.length - 1
       const sp = spacingFor(config, pageIndex)
-      placeMusicRow(segs, row, groupIndex, voice, y, lyricMaps, geciSize, sp, rowSlots[ri], isLastRow ? lastAlignW : null)
+      placeMusicRow(segs, row, groupIndex, voice, y, lyricMaps, geciSize, sp, rowSlots[ri])
       y += lineHeightOf(config, m, sp, lyrics.length)
       if (y + m.noteSize * 1.7 > bottomLimit) {
         pageIndex = pages.length
@@ -552,14 +513,21 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       lyricRows: group.lyrics.length,
     }))
     const numBars = Math.max(...parts.map((p) => p.segs.length))
-    const barW = barWidthOf(numBars) // 块内小节均分（含小节间距）
-    // 密度与超拍感知：perBeat 不小于块内任一小时的每拍最小宽，且按最大实际拍数分摊
+    // 块内每拍宽 = 块可用宽 / 块总拍数（每小节取各声部最大拍数，adj15）
+    let blockBeats = 0
+    const barBeats: number[] = []
+    for (let b = 0; b < numBars; b++) {
+      let m = 0
+      for (const p of parts) {
+        const s = p.segs[b]
+        if (s) m = Math.max(m, segBeats(s))
+      }
+      barBeats.push(m)
+      blockBeats += m
+    }
     const perBeatMin = Math.max(0, ...parts.flatMap((p) => p.segs.map((s) => segPerBeatMin(s))))
-    const maxSegBeats = Math.max(
-      beats,
-      ...parts.flatMap((p) => p.segs.map((s) => segBeats(s))),
-    )
-    const perBeat = Math.max(2, (barW - BAR_PAD * 2) / Math.max(beats, maxSegBeats), perBeatMin)
+    const pads = BAR_PAD * 2 + config.bar_gap * Math.max(0, numBars - 1)
+    const perBeat = Math.max(2, (availW - pads) / Math.max(1, blockBeats), perBeatMin)
 
     const voiceHeights = parts.map((p) => lineHeightOf(config, m, sp, p.lyricRows))
     const blockH = voiceHeights.reduce((a, b) => a + b, 0)
@@ -589,7 +557,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
             slotIndex++
           }
         }
-        x += barW + (b < numBars - 1 ? config.bar_gap : 0)
+        x += barBeats[b] * perBeat + (b < numBars - 1 ? config.bar_gap : 0)
       }
       voiceY += voiceHeights[vi]
     }
@@ -615,14 +583,14 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           voltaStart: bar.voltaStart,
           voltaEnd: bar.voltaEnd,
           comment: bar.comment,
-          x: r1(xBar + barW / 2),
+          x: r1(xBar + (barBeats[b] * perBeat) / 2),
           yTop: blockY,
           yBottom: blockY + blockH,
           width: m.barlineWidth,
         })
         barCounter++
       }
-      xBar += barW + (b < numBars - 1 ? config.bar_gap : 0)
+      xBar += barBeats[b] * perBeat + (b < numBars - 1 ? config.bar_gap : 0)
     }
 
     pages[pageIndex].voiceBlocks.push({
@@ -664,8 +632,6 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   flush()
 
   // ---- 按事件序列排版 ----
-  const lastUnitIdx = events.filter((e) => e.kind === 'unit').length - 1
-  let unitSeen = -1
   for (const ev of events) {
     if (ev.kind === 'pagebreak') {
       pageIndex = pages.length
@@ -674,13 +640,11 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       continue
     }
     const { unit } = ev
-    unitSeen++
-    const isLastUnit = unitSeen === lastUnitIdx
     if (unit.multi) {
       placeVoiceBlock(unit)
     } else {
       for (const { groupIndex, group } of unit.groups) {
-        placeGroup(groupIndex, group.music.voice, group.music.tokens, group.lyrics, isLastUnit)
+        placeGroup(groupIndex, group.music.voice, group.music.tokens, group.lyrics)
       }
     }
   }

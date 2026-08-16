@@ -156,14 +156,16 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     )
   }
 
-  // 高低音点（对齐音符数字正上/正下方，adj13）
+  // 高低音点（对齐音符数字正上/正下方；低音点遇减时线时移到横线下方，adj15）
   const oct = t.kind === 'note' ? t.octaveShift : 0
   if (oct !== 0) {
     const dir = oct > 0 ? -1 : 1
     const n = Math.abs(oct)
     const dotCx = x + NOTE_DIGIT_W / 2 // 数字中心
+    const dc = t.diminishCount
+    const lowOffset = oct < 0 && dc > 0 ? dc * 4 + 6 : 0 // 避让减时线区域
     for (let i = 0; i < n; i++) {
-      const cy = y + dir * (8 + i * 7)
+      const cy = y + dir * (8 + lowOffset + i * 7)
       parts.push(`<circle cx="${dotCx}" cy="${cy}" r="2.4" fill="#1b1b1b"/>`)
     }
   }
@@ -174,15 +176,16 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     `<text x="${x}" y="${y}" data-notepos="${nid}" font-size="${size}" font-family="${font}" font-weight="bold" fill="#1b1b1b">${glyph}</text>`,
   )
 
-  // 附点（adj13：圆点垂直居中于数字，水平位于音符时值结束处，占前音符时值 1/2 的区间）
+  // 附点（adj13/15：垂直居中于数字；附点占前音符**基础时值**的 1/2，
+  // 即 1. 总宽 1.5 拍、1/. 总宽 0.75 拍；位置基于不含附点的基础时值）
   if (t.dots > 0) {
-    const dur = note.duration
-    const perBeat = dur > 0 ? note.width / dur : NOTE_DIGIT_W
+    const perBeat = note.duration > 0 ? note.width / note.duration : NOTE_DIGIT_W
+    const baseDur = (1 + t.augmentCount) / Math.pow(2, t.diminishCount)
     // 数字中心 = 第 1 拍段中点 → 时值段起点
-    const segStart = x + 6 - Math.min(dur, 1) * (perBeat / 2)
-    let acc = dur * perBeat // 音符时值结束处
+    const segStart = x + 6 - Math.min(note.duration, 1) * (perBeat / 2)
+    let acc = baseDur * perBeat // 基础时值结束处
     for (let i = 0; i < t.dots; i++) {
-      const half = (dur * perBeat) / Math.pow(2, i + 1)
+      const half = (baseDur * perBeat) / Math.pow(2, i + 1)
       const cx = segStart + acc + half / 2
       parts.push(`<circle cx="${r1n(cx)}" cy="${y - 8}" r="2.4" fill="#1b1b1b"/>`)
       acc += half
