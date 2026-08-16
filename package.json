@@ -1,0 +1,29 @@
+{
+  "name": "jianpuscript",
+  "private": true,
+  "version": "0.1.0",
+  "description": "JianpuScript（码上简谱）—— 下一代代码式简谱制谱引擎。敲码即谱，所见即所得。",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "smoke": "vite build --config vite.smoke.config.ts && node dist-smoke/smoke.cjs",
+    "postinstall": "node scripts/patch-vite.js"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "oxlint": "^1.75.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0"
+  }
+}

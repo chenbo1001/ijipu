@@ -1,0 +1,522 @@
+/* JianpuScript 全局样式 —— 码上简谱 */
+@import './styles/theme.css';
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--jp-font-sans);
+  font-size: 14px;
+  color: var(--jp-text-primary);
+  background: var(--jp-bg-app);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============ 应用外壳 ============ */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--jp-bg-app);
+}
+
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+/* ============ 菜单栏 ============ */
+.menubar {
+  height: var(--jp-menubar-h);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px;
+  background: var(--jp-bg-panel);
+  border-bottom: 1px solid var(--jp-border);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.menubar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 16px;
+  font-weight: 600;
+  color: var(--jp-text-primary);
+}
+
+.menubar-brand .logo-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, var(--jp-deep-space-blue) 0%, #0f2a6e 100%);
+  border: 1px solid var(--jp-accent);
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--jp-accent);
+}
+
+.menubar-brand .brand-zh {
+  font-size: 13px;
+  letter-spacing: 2px;
+}
+
+.menubar-brand .brand-en {
+  font-size: 11px;
+  color: var(--jp-text-secondary);
+  font-weight: 400;
+}
+
+.menu-item {
+  position: relative;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--jp-text-secondary);
+  font-size: 13px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.menu-item:hover,
+.menu-item.open {
+  background: var(--jp-bg-panel-hover);
+  color: var(--jp-text-primary);
+}
+
+.menu-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 210px;
+  background: var(--jp-bg-panel);
+  border: 1px solid var(--jp-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 5px;
+  z-index: 100;
+  animation: menuIn 0.12s ease-out;
+}
+
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.menu-dropdown .menu-entry {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--jp-text-primary);
+  font-size: 13px;
+}
+
+.menu-dropdown .menu-entry:hover {
+  background: var(--jp-bg-panel-hover);
+}
+
+.menu-dropdown .menu-entry .kbd {
+  color: var(--jp-text-muted);
+  font-family: var(--jp-font-mono);
+  font-size: 11px;
+}
+
+.menu-dropdown .menu-sep {
+  height: 1px;
+  background: var(--jp-border);
+  margin: 4px 6px;
+}
+
+.menubar-filename {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--jp-text-muted);
+  font-size: 12px;
+}
+
+.menubar-filename .dirty-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--jp-warning);
+}
+
+/* ============ 工具栏 ============ */
+.toolbar {
+  height: var(--jp-toolbar-h);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  background: var(--jp-bg-panel);
+  border-bottom: 1px solid var(--jp-border);
+  flex-shrink: 0;
+}
+
+.view-switch {
+  display: flex;
+  background: var(--jp-bg-app);
+  border: 1px solid var(--jp-border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.view-switch button {
+  border: none;
+  background: transparent;
+  color: var(--jp-text-secondary);
+  padding: 5px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--jp-font-sans);
+  transition: background 0.15s, color 0.15s;
+}
+
+.view-switch button + button {
+  border-left: 1px solid var(--jp-border);
+}
+
+.view-switch button.active {
+  background: var(--jp-bg-panel-active);
+  color: var(--jp-accent);
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--jp-border);
+  color: var(--jp-text-secondary);
+  border-radius: 7px;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--jp-font-sans);
+  transition: all 0.15s;
+}
+
+.tool-btn:hover {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+}
+
+.tool-btn.primary {
+  background: var(--jp-deep-space-blue);
+  border-color: var(--jp-deep-space-blue);
+  color: var(--jp-text-primary);
+}
+
+.tool-btn.primary:hover {
+  border-color: var(--jp-accent);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
+}
+
+/* ============ 预览区 ============ */
+.preview-pane {
+  flex: 1;
+  overflow: auto;
+  background: var(--jp-bg-app);
+  padding: 24px;
+  min-height: 0;
+}
+
+.preview-pane .pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+
+.score-page {
+  background: var(--jp-paper-bg);
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.score-page svg {
+  display: block;
+}
+
+.preview-placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--jp-text-muted);
+}
+
+.preview-placeholder .ph-icon {
+  font-size: 40px;
+}
+
+/* ============ 编辑器区 ============ */
+.editor-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--jp-editor-bg);
+  border-top: 1px solid var(--jp-border);
+}
+
+.editor-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 10px;
+  background: var(--jp-bg-panel);
+  border-bottom: 1px solid var(--jp-border);
+  font-size: 12px;
+  color: var(--jp-text-secondary);
+}
+
+.editor-head .file-tag {
+  font-family: var(--jp-font-mono);
+  color: var(--jp-accent);
+}
+
+.editor-head .err-count {
+  margin-left: auto;
+}
+
+.editor-head .err-count.has-error {
+  color: var(--jp-danger);
+}
+
+.editor-body {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.editor-body textarea {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--jp-editor-caret);
+  font-family: var(--jp-font-mono);
+  font-size: 14px;
+  line-height: 1.7;
+  padding: 10px 14px;
+  white-space: pre;
+  overflow: auto;
+  tab-size: 4;
+}
+
+.editor-body .highlight-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font-family: var(--jp-font-mono);
+  font-size: 14px;
+  line-height: 1.7;
+  padding: 10px 14px;
+  white-space: pre;
+  overflow: hidden;
+  color: var(--jp-hl-plain);
+}
+
+/* 高亮类 */
+.hl-line-header {
+  color: var(--jp-hl-line-header);
+  font-weight: 600;
+}
+.hl-note {
+  color: var(--jp-hl-note);
+}
+.hl-barline {
+  color: var(--jp-hl-barline);
+  font-weight: 600;
+}
+.hl-lyric {
+  color: var(--jp-hl-lyric);
+}
+.hl-comment {
+  color: var(--jp-hl-comment);
+  font-style: italic;
+}
+.hl-pagebreak {
+  color: var(--jp-hl-pagebreak);
+  font-weight: 600;
+}
+.hl-decoration {
+  color: var(--jp-accent);
+  opacity: 0.85;
+}
+
+/* ============ 状态栏 ============ */
+.statusbar {
+  height: var(--jp-statusbar-h);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 14px;
+  background: var(--jp-bg-panel);
+  border-top: 1px solid var(--jp-border);
+  color: var(--jp-text-muted);
+  font-size: 11px;
+  font-family: var(--jp-font-mono);
+  flex-shrink: 0;
+}
+
+.statusbar .right {
+  margin-left: auto;
+  display: flex;
+  gap: 18px;
+}
+
+.statusbar .accent {
+  color: var(--jp-accent);
+}
+
+.statusbar .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 5px;
+  vertical-align: 1px;
+}
+
+.statusbar .dot.ok {
+  background: var(--jp-success);
+}
+
+.statusbar .dot.err {
+  background: var(--jp-danger);
+}
+
+/* ============ 对话框 ============ */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 10, 22, 0.6);
+  backdrop-filter: blur(2px);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal {
+  min-width: 420px;
+  max-width: 640px;
+  max-height: 80vh;
+  overflow: auto;
+  background: var(--jp-bg-panel);
+  border: 1px solid var(--jp-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  animation: menuIn 0.15s ease-out;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--jp-border);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--jp-text-muted);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.modal-body {
+  padding: 18px;
+}
+
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--jp-border);
+}
+
+/* ============ 通用 ============ */
+.btn {
+  background: var(--jp-bg-app);
+  border: 1px solid var(--jp-border);
+  color: var(--jp-text-primary);
+  border-radius: 7px;
+  padding: 6px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: var(--jp-font-sans);
+}
+
+.btn:hover {
+  border-color: var(--jp-accent);
+}
+
+.btn.primary {
+  background: var(--jp-deep-space-blue);
+  border-color: var(--jp-deep-space-blue);
+}
+
+.btn.primary:hover {
+  border-color: var(--jp-accent);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a3764;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

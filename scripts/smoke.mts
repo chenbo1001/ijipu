@@ -1,0 +1,106 @@
+/**
+ * scripts/smoke.mts — 引擎冒烟测试
+ * 运行：npm run smoke
+ * 验证：解析器（描述头/曲行/词行/分组）、tokenizer（音符/时值/小节线）、
+ * 格式化器（Q 行空格规范）、时值计算。
+ */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { parseJps, formatJps, tokenDuration } from '../src/engine/index.ts'
+
+const root = process.cwd()
+
+let failed = 0
+function check(name: string, cond: boolean, detail?: string) {
+  if (cond) {
+    console.log(`  ✓ ${name}`)
+  } else {
+    failed++
+    console.error(`  ✗ ${name} ${detail ?? ''}`)
+  }
+}
+
+// ---- 1. 解析示例谱（小星星） ----
+console.log('[1] parse samples/xiaoxingxing.jps')
+const code = readFileSync(join(root, 'samples', 'xiaoxingxing.jps'), 'utf8')
+const result = parseJps(code)
+check('无错误', result.errors.length === 0, JSON.stringify(result.errors))
+check('主标题=小星星', result.header.titles[0] === '小星星')
+check('副标题存在', result.header.titles.length === 2)
+check('调式=C', result.header.key === 'C')
+check('拍号=4/4', result.header.meter === '4/4')
+check('节拍=96', result.header.tempo === '96')
+check('3 个曲词分组', result.groups.length === 3, `got ${result.groups.length}`)
+const g0 = result.groups[0]
+const g0Notes = g0.music.tokens.filter((t) => t.kind === 'note').length
+check('第 1 组曲行含 14 个音符（4 小节）', g0Notes === 14, `got ${g0Notes}`)
+const g0Bars = g0.music.tokens.filter((t) => t.kind === 'barline').length
+check('第 1 组曲行含 4 条小节线', g0Bars === 4, `got ${g0Bars}`)
+check('第 1 组有 1 行歌词', g0.lyrics.length === 1)
+const lyricText = g0.lyrics[0].chars.map((c) => c.text).join('')
+check('歌词正确', lyricText === '一闪一闪亮晶晶，满天都是小星星。', lyricText)
+
+// ---- 2. tokenizer 细节（两只老虎：反复记号） ----
+console.log('[2] tokenize liangzhilaohu.jps (repeats)')
+const code2 = readFileSync(join(root, 'samples', 'liangzhilaohu.jps'), 'utf8')
+const r2 = parseJps(code2)
+check('无错误', r2.errors.length === 0, JSON.stringify(r2.errors))
+const t0 = r2.groups[0].music.tokens
+const barTypes = t0.filter((t) => t.kind === 'barline').map((t) => (t.kind === 'barline' ? t.type : ''))
+check('含 |: 反复开始', barTypes.includes('|:'), barTypes.join(','))
+check('含 :| 反复结束', barTypes.includes(':|'), barTypes.join(','))
+check('含单小节线 |', barTypes.includes('|'), barTypes.join(','))
+
+// ---- 3. 复杂音符解析 ----
+console.log('[3] tokenize complex notes')
+const rc = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1\'- 2,,$ 3// 4. 5.. 0 8 9 |\n')
+const tokens = rc.groups[0].music.tokens
+check('9 个音符类 token', tokens.length === 9, `got ${tokens.length}`)
+const n1 = tokens[0]
+if (n1.kind === 'note') {
+  check('1 高音+增时线 (1\'-)', n1.octaveShift === 1 && n1.augmentCount === 1)
+}
+const n2 = tokens[1]
+if (n2.kind === 'note') {
+  check('2 双低音+降 (2,,$)', n2.octaveShift === -2 && n2.accidental === '$')
+}
+const n3 = tokens[2]
+if (n3.kind === 'note') {
+  check('3 双减时线 (3//)', n3.diminishCount === 2)
+}
+const n4 = tokens[3]
+if (n4.kind === 'note') {
+  check('4 单附点 (4.)', n4.dots === 1)
+}
+const n5 = tokens[4]
+if (n5.kind === 'note') {
+  check('5 双附点 (5..)', n5.dots === 2)
+}
+check('0 可见休止符', tokens[5].kind === 'rest' && !(tokens[5].kind === 'rest' && tokens[5].hidden))
+check('8 隐藏休止符', tokens[6].kind === 'rest' && (tokens[6] as { hidden: boolean }).hidden === true)
+check('9 节奏音符', tokens[7].kind === 'rhythm')
+
+// ---- 4. 时值计算 ----
+console.log('[4] durations')
+check('四分音符 = 1 拍', tokenDuration({ augmentCount: 0, diminishCount: 0, dots: 0 }) === 1)
+check('二分音符(1-) = 2 拍', tokenDuration({ augmentCount: 1, diminishCount: 0, dots: 0 }) === 2)
+check('全音符(1---) = 4 拍', tokenDuration({ augmentCount: 3, diminishCount: 0, dots: 0 }) === 4)
+check('八分音符(1/) = 0.5 拍', tokenDuration({ augmentCount: 0, diminishCount: 1, dots: 0 }) === 0.5)
+check('十六分音符(1//) = 0.25 拍', tokenDuration({ augmentCount: 0, diminishCount: 2, dots: 0 }) === 0.25)
+check('附点八分(1/.) = 0.75 拍', Math.abs(tokenDuration({ augmentCount: 0, diminishCount: 1, dots: 1 }) - 0.75) < 1e-9)
+
+// ---- 5. 格式化 ----
+console.log('[5] formatJps')
+const fmt = formatJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ:1 2 3 4|\nC: 词')
+check('Q 行格式化后带空格', fmt.includes('Q: 1 2 3 4 |'), JSON.stringify(fmt.split('\n').find((l) => l.startsWith('Q'))))
+check('描述头行不变', fmt.includes('B: t'))
+
+// ---- 6. 错误处理 ----
+console.log('[6] error handling')
+const re = parseJps('V: 1.0\nB: t\nC: 歌词先行\nQ: 1 2\n')
+check('C 行先于 Q 行报错', re.errors.some((e) => e.message.includes('缺少对应')))
+const ru = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 @@\n')
+check('孤立 @ 报错', ru.errors.some((e) => e.severity === 'warning'))
+
+console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
+process.exit(failed === 0 ? 0 : 1)

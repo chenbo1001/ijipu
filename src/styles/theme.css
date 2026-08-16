@@ -1,0 +1,52 @@
+/**
+ * styles/theme.css — JianpuScript 品牌主题令牌（CSS 变量）
+ * 与 src/brand/tokens.ts 保持同步。
+ * 品牌色：深空蓝 #1E2A5E + 霓虹青 #00F0FF；VS Code 风格深色主题；
+ * 乐谱预览区保持纸张白色。
+ */
+:root {
+  /* 品牌色 */
+  --jp-deep-space-blue: #1e2a5e;
+  --jp-neon-cyan: #00f0ff;
+  --jp-deep-space-blue-dark: #0f1526;
+  --jp-deep-space-blue-panel: #161d3a;
+  --jp-deep-space-blue-border: #24315e;
+
+  /* 界面语义色 */
+  --jp-bg-app: var(--jp-deep-space-blue-dark);
+  --jp-bg-panel: var(--jp-deep-space-blue-panel);
+  --jp-bg-panel-hover: #1e2950;
+  --jp-bg-panel-active: #223063;
+  --jp-border: var(--jp-deep-space-blue-border);
+  --jp-text-primary: #e8ecf8;
+  --jp-text-secondary: #93a0c8;
+  --jp-text-muted: #5a6a99;
+  --jp-accent: var(--jp-neon-cyan);
+  --jp-danger: #ff5d6c;
+  --jp-success: #3ddc97;
+  --jp-warning: #ffc857;
+
+  /* 编辑器高亮 */
+  --jp-hl-line-header: #00f0ff;
+  --jp-hl-note: #ffb86c;
+  --jp-hl-barline: #6272a4;
+  --jp-hl-lyric: #7dd6a8;
+  --jp-hl-comment: #6a7bb8;
+  --jp-hl-pagebreak: #ff79c6;
+  --jp-hl-plain: #e8ecf8;
+  --jp-editor-bg: #0d1220;
+  --jp-editor-caret: #00f0ff;
+
+  /* 乐谱纸张 */
+  --jp-paper-bg: #ffffff;
+  --jp-paper-ink: #1b1b1b;
+
+  /* 字体 */
+  --jp-font-sans: 'Segoe UI', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  --jp-font-mono: 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace;
+
+  /* 尺寸 */
+  --jp-menubar-h: 40px;
+  --jp-toolbar-h: 38px;
+  --jp-statusbar-h: 26px;
+}
