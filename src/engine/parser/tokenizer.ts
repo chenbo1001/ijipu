@@ -176,6 +176,18 @@ export function tokenizeMusicLine(
         pos: i,
         raw: rawAt(i, j),
       }
+      // 小节线备注（引号，如跳房子番号 "1."）——先于跳房子标记处理
+      if (content[j] === '"') {
+        const close = content.indexOf('"', j + 1)
+        if (close === -1) {
+          t.comment = content.slice(j + 1)
+          errors.push(err('引号注释未闭合', { line: pos.line, col: pos.col + j }))
+          j = n
+        } else {
+          t.comment = content.slice(j + 1, close)
+          j = close + 1
+        }
+      }
       // 跳房子标记紧跟小节线
       if (content[j] === '[') {
         let k = j + 1
@@ -197,24 +209,12 @@ export function tokenizeMusicLine(
         t.raw = rawAt(i, j + 1)
         j++
       }
-      // 小节线备注（引号）
-      if (content[j] === '"') {
-        const close = content.indexOf('"', j + 1)
-        if (close === -1) {
-          t.comment = content.slice(j + 1)
-          errors.push(err('引号注释未闭合', { line: pos.line, col: pos.col + j }))
-          j = n
-        } else {
-          t.comment = content.slice(j + 1, close)
-          j = close + 1
-        }
-      }
       tokens.push(t)
       i = j
       continue
     }
 
-    // 跳房子标记（独立出现，例如行首用 |/ 之后）
+    // 跳房子标记（独立出现，例如行首用 |/ 之后；或小节线引号备注后带空格）
     if (c === '[') {
       let k = i + 1
       let slash = false
@@ -227,13 +227,20 @@ export function tokenizeMusicLine(
         plus++
         k++
       }
-      tokens.push({
-        kind: 'barline',
-        type: '|',
-        voltaStart: { open: true, slash, plus },
-        pos: i,
-        raw: rawAt(i, k),
-      })
+      const last = tokens[tokens.length - 1]
+      if (last && last.kind === 'barline' && !last.voltaStart) {
+        // 继承前一小节线（含番号备注），合并跳房子起点
+        last.voltaStart = { open: true, slash, plus }
+        last.raw += rawAt(i, k)
+      } else {
+        tokens.push({
+          kind: 'barline',
+          type: '|',
+          voltaStart: { open: true, slash, plus },
+          pos: i,
+          raw: rawAt(i, k),
+        })
+      }
       i = k
       continue
     }

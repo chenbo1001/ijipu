@@ -325,5 +325,28 @@ const layV3 = layoutScore(vc3, defaultPageConfig)
 check('混合排版 1 个块 + 单声部组', layV3.pages[0].voiceBlocks.length === 1)
 check('混合：总音符 15（末行 1- 为 1 音符+增时线）', layV3.pages[0].notes.length === 15, `got ${layV3.pages[0].notes.length}`)
 
+// ---- 18. 跳房子（M7b） ----
+console.log('[18] volta rendering (M7b)')
+const volta = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |[ 3 4 ] 5 6 |\n')
+const layVo = layoutScore(volta, defaultPageConfig)
+const voBars = layVo.pages[0].barlines
+check('跳房子起终点解析', voBars.some((b) => b.voltaStart?.open) && voBars.some((b) => b.voltaEnd))
+const svgVo = renderScoreToSvg(layVo)[0]
+const voltaLines = (svgVo.match(/stroke-width="1.4"/g) ?? []).length
+check('SVG 含跳房子线（起竖+横+终竖 ≥3）', voltaLines >= 3, `got ${voltaLines}`)
+// 番号（小节线引号备注）与 [ 合并显示
+const volta2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"1." [ 3 4 ] 5 6 |\n')
+const layVo2 = layoutScore(volta2, defaultPageConfig)
+const v2Bars = layVo2.pages[0].barlines.filter((b) => b.voltaStart)
+check('番号与起点合并', v2Bars.length === 1 && v2Bars[0].comment === '1.')
+const svgVo2 = renderScoreToSvg(layVo2)[0]
+check('SVG 番号显示在线上方', svgVo2.includes('>1.<'))
+// 未封闭 [/ 向右延伸
+const volta3 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |[ 3 4 5 6 |\n')
+const layVo3 = layoutScore(volta3, defaultPageConfig)
+const svgVo3 = renderScoreToSvg(layVo3)[0]
+const openLines = (svgVo3.match(/stroke-width="1.4"/g) ?? []).length
+check('未封闭 [/ 只画起点+横线（2 条）', openLines === 2, `got ${openLines}`)
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)
