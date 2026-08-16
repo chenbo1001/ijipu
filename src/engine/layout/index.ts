@@ -381,7 +381,11 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     slotStart: number,
   ) => {
     const page = pages[pageIndex]
-    const yBottom = r1(yTop + m.noteSize * 1.7)
+    // 小节线高度（adj34）：上端高于音符字体上端 4px，下端低于音符字体下端 4px
+    // 音符基线 = yTop + 字号×1.1；数字视觉上端 ≈ 基线-13、下端 ≈ 基线+2
+    const barNoteY = yTop + m.noteSize * 1.1
+    const yTopBar = r1(barNoteY - 17)
+    const yBottomBar = r1(barNoteY + 6)
     let x = config.margin_left
     let slotIndex = slotStart
     let openDyn: { type: 'crescendo' | 'decrescendo'; x: number } | null = null
@@ -465,8 +469,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
             voltaOnly: bar.voltaOnly,
             comment: bar.comment,
             x: r1(lineX),
-            yTop,
-            yBottom,
+            yTop: yTopBar,
+            yBottom: yBottomBar,
             width: m.barlineWidth,
           })
         }

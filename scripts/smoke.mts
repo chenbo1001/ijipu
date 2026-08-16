@@ -523,8 +523,8 @@ check('1//2//3/ 2 条横线（第1全连、第2连1//2//）', b4_24.length === 2
 console.log('[25] per-row perBeat (adj15/adj24)')
 // 8 小节：行 1 = 7 小节（28 拍，perBeat=(435.28-12)/28=15.12），行 2 = 1 小节（4 拍，perBeat=105.82）
 const barsJ25 = layJ.pages[0].barlines
-// barlines.yTop 是行顶，音符 y = 行顶 + 18×1.1
-const rowTop = (noteY: number) => noteY - 18 * 1.1
+// barlines.yTop = 音符基线 - 17（adj34：高于音符字体上端 4px）
+const rowTop = (noteY: number) => noteY - 17
 const row1Bars = barsJ25.filter((b) => Math.abs(b.yTop - rowTop(rowsJ[0])) < 0.5)
 const row2Bars = barsJ25.filter((b) => Math.abs(b.yTop - rowTop(rowsJ[1])) < 0.5)
 check('行 1 7 条小节线', row1Bars.length === 7, `got ${row1Bars.length}`)
@@ -859,6 +859,20 @@ const r40b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 5 6 7 1 | 1 2 3 4 
 const lay40b = layoutScore(r40b, defaultPageConfig)
 const ys40b = [...new Set(lay40b.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
 check('有歌词行高不变（119.6）', ys40b.length >= 2 && Math.abs(ys40b[1] - ys40b[0] - 119.6) < 0.5, `dy=${ys40b[1] - ys40b[0]}`)
+
+// ---- 41. 小节线高度与反复点（adj34） ----
+console.log('[41] barline height & dots (adj34)')
+const r41 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 3 4 :|\n')
+const lay41 = layoutScore(r41, defaultPageConfig)
+const b41 = lay41.pages[0].barlines[0]
+const n41 = lay41.pages[0].notes[0]
+check('小节线上端 = 音符基线-17（高于字体上端 4px）', Math.abs(b41.yTop - (n41.y - 17)) < 0.5, `yTop=${b41.yTop}`)
+check('小节线下端 = 音符基线+6（低于字体下端 4px）', Math.abs(b41.yBottom - (n41.y + 6)) < 0.5, `yBottom=${b41.yBottom}`)
+check('小节线高 23', Math.abs(b41.yBottom - b41.yTop - 23) < 0.5)
+// 反复点贴近线（|: 行首点在线右侧 dx+1）
+const svg41 = renderScoreToSvg(lay41)[0]
+const dot41 = /<circle cx="([\d.]+)" cy="[\d.]+" r="1.8"/.exec(svg41)
+check('反复点紧贴线（cx = 线 x + 1）', dot41 !== null && Math.abs(Number(dot41[1]) - (b41.x + 1)) < 0.5, `cx=${dot41?.[1]} x=${b41.x}`)
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

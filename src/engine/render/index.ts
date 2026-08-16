@@ -294,7 +294,8 @@ function renderBarline(bar: PlacedBarline): string {
     `<rect x="${x + off}" y="${yTop}" width="${w}" height="${yBottom - yTop}" fill="#1b1b1b"/>`
 
   const dots = (side: 'l' | 'r') => {
-    const dx = side === 'l' ? -6 : 6
+    // 小节点内移 5px 贴近线（adj34：原 ±6 → ±1，右移/对称）
+    const dx = side === 'l' ? -1 : 1
     return (
       `<circle cx="${x + dx}" cy="${yTop + 9}" r="1.8" fill="#1b1b1b"/>` +
       `<circle cx="${x + dx}" cy="${yTop + 17}" r="1.8" fill="#1b1b1b"/>`
