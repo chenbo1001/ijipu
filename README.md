@@ -75,5 +75,6 @@ scripts/         工具脚本（patch-vite.js）
 ## 项目文档
 
 - [需求说明书](docs/REQUIREMENTS.md)（含待补充需求清单，供需求方补充）
+- [分期需求分解（迭代路线图）](docs/ROADMAP.md)（M0 已完成，M1 为下一期）
 - [.jps 语法规范 V1.0](docs/JPS-SPEC.md)（逆向自原站官方手册）
 - [品牌手册](docs/BRAND.md)
