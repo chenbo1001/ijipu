@@ -500,7 +500,10 @@ body {
 }
 .hl-barline {
   color: var(--jp-hl-barline);
-  font-weight: 600;
+  font-weight: 700;
+  /* adj25：小节线高亮（淡主题色底 + 圆角），强化小节区域边界 */
+  background: color-mix(in srgb, var(--jp-accent) 16%, transparent);
+  border-radius: 3px;
 }
 .hl-lyric {
   color: var(--jp-hl-lyric);

@@ -589,7 +589,7 @@ const notesGap = layGap.pages[0].notes
 // 小节 2 起点 = 80 + 206.64 + 10 = 296.64；首音符中心 = 296.64+6+25.83
 check('小节间距生效（小节 2 首音符位置）', Math.abs(notesGap[4].x + 6 - (80 + 206.64 + 10 + 6 + 25.83)) < 0.5, `center=${notesGap[4].x + 6}`)
 const barsGap = layGap.pages[0].barlines
-check('小节线在小节右边界（gap 之后）', Math.abs(barsGap[0].x - (80 + 206.64)) < 0.5, `x=${barsGap[0].x}`)
+check('小节线在间距内居中（gap 之后 +gap/2，adj25）', Math.abs(barsGap[0].x - (80 + 206.64 + 5)) < 0.5, `x=${barsGap[0].x}`)
 
 // ---- 30. 描述头布局与拖拽（adj9） ----
 console.log('[30] meta layout (adj9)')
@@ -777,6 +777,23 @@ const seq36 = buildPlaySequence(r36c, layoutScore(r36c, defaultPageConfig), 120)
 const gPitches = seq36.events.filter((e) => e.pitch).map((e) => e.pitch)
 check('倚音播放事件 7 个（2+1 前 + 2+1+1 主/后）', seq36.events.length === 7, `got ${seq36.events.length}`)
 check('倚音音高 = 倚音音符本身（A4,G4,G4,A4）', gPitches.join(',') === 'A4,G4,G4,A4', gPitches.join(','))
+
+// ---- 37. 小节线居中 + 单空格（adj25） ----
+console.log('[37] barline centering (adj25)')
+// 多声部块小节线在小节右边界（此前错误画在小节中央）
+// layV（[17]）：Q1/Q2 各 1 小节 4 拍，blockBeats=4，perBeat=(435.28-12)/4=105.82
+const bars37 = layV.pages[0].barlines
+const perBeat37 = 105.82
+check('多声部小节线在小节右边界（adj25）', bars37.length === 1 && Math.abs(bars37[0].x - (80 + 4 * perBeat37)) < 1, `x=${bars37[0]?.x} expect=${80 + 4 * perBeat37}`)
+// 单声部 gap 居中已在 [29] 断言
+// formatter 单空格：音符块与小节线块之间恰好一个空格
+const fmt37 = formatJps('V: 1.0\nB: t\nQ: 1 2|3 4\n')
+check('formatter 小节线前补单空格', fmt37.includes('2 | 3'), fmt37.replace(/\n/g, '⏎'))
+const fmt37b = formatJps('V: 1.0\nB: t\nQ: 1  2  |  3 4\n')
+check('formatter 多空格压缩为单空格', fmt37b.includes('1 2 | 3 4') && !fmt37b.includes('  '), fmt37b.replace(/\n/g, '⏎'))
+// 编辑区高亮：小节线字符带 hl-barline 类
+const hl37 = highlightCode('V: 1.0\nB: t\nQ: 1 2 | 3 4\n')
+check('编辑器小节线高亮 class', hl37.includes('class="hl-barline"'), '')
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

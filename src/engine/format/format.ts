@@ -53,16 +53,25 @@ export function formatLine(raw: string): string {
       if (out[out.length - 1] !== ' ') out.push(' ')
       continue
     }
+    // 补空格：仅当输出尾部还没有空格时补一个（adj25：避免 | ( : 等补空格造成双空格）
+    const ensureSpace = () => {
+      if (out[out.length - 1] !== ' ') out.push(' ')
+    }
     if ('0123456789-'.includes(note) && upNote !== 'Q' && upNote !== 'C' && upNote !== ' ' && upNote !== '(' && upNote !== 'y') {
-      out.push(' ' + note)
+      ensureSpace()
+      out.push(note)
     } else if (note === '(' && upNote !== '(') {
-      out.push(' ' + note)
+      ensureSpace()
+      out.push(note)
     } else if (note === '|' && upNote !== '|' && upNote !== ':') {
-      out.push(' ' + note)
+      ensureSpace()
+      out.push(note)
     } else if (note === ':' && nextNote === '|') {
-      out.push(' ' + note)
+      ensureSpace()
+      out.push(note)
     } else if (note === '{' || note === '}') {
-      out.push(' ' + note)
+      ensureSpace()
+      out.push(note)
     } else {
       out.push(note)
     }

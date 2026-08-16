@@ -442,12 +442,14 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           }
         }
       }
-      // 小节线：画在小节右边界（行首空 seg 画在其起点，普通 | 省略）
+      // 小节线：画在小节右边界，并在小节间距（bar_gap）内居中（adj25）；
+      // 行首空 seg 画在其起点，普通 | 省略
       const bar = seg.bar
       if (bar) {
         const isRowStartEmpty = isEmptyLead
         if (!(isRowStartEmpty && bar.type === '|')) {
-          const lineX = isEmptyLead ? x : x + segBarW
+          const lineX =
+            isEmptyLead ? x : x + segBarW + (b < row.end - 1 ? config.bar_gap / 2 : 0)
           const bid: LayoutId = { page: pageIndex, voice, group: groupIndex, index: barCounter }
           page.barlines.push({
             id: bid,
@@ -587,7 +589,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           voltaStart: bar.voltaStart,
           voltaEnd: bar.voltaEnd,
           comment: bar.comment,
-          x: r1(xBar + (barBeats[b] * perBeat) / 2),
+          // 小节线在小节右边界，并在小节间距内居中（adj25：修正此前画在小节中央）
+          x: r1(xBar + barBeats[b] * perBeat + (b < numBars - 1 ? config.bar_gap / 2 : 0)),
           yTop: blockY,
           yBottom: blockY + blockH,
           width: m.barlineWidth,
