@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { parseJps, formatJps, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig } from '../src/engine/index.ts'
 import { buildPlaySequence, inferBpm } from '../src/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '../src/engine/cursorMap.ts'
+import { computeRowTops, dragDelta, clamp } from '../src/engine/layout/guides.ts'
 import { computeBeamsForTest } from '../src/engine/render/index.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
 import { highlightCode } from '../src/editor/highlight.ts'
@@ -560,6 +561,21 @@ check('增时线 1 条', rectsAu.length === 1, `got ${rectsAu.length}`)
 const rAu = rectsAu[0]
 check('增时线画在第 2 拍段起点', rAu !== undefined && Math.abs(Number(rAu[1]) - expectLX) < 0.5, `x=${rAu?.[1]} expect=${expectLX}`)
 check('增时线宽 = 一拍 - 2', rAu !== undefined && Math.abs(Number(rAu[2]) - (perBeatAu - 2)) < 0.5, `w=${rAu?.[2]} expect=${perBeatAu - 2}`)
+
+// ---- 28. 排版辅助虚线（adj7） ----
+console.log('[28] layout guides (adj7)')
+// 行顶推导：小星星 3 行 → 3 个行顶
+const rowTops28 = computeRowTops(layX)
+check('小星星 3 行顶', rowTops28[0].length === 3, `got ${rowTops28[0].length}`)
+// 行顶 = 音符 y - 19.8
+check('行顶 = 音符基线 - 19.8', Math.abs(rowTops28[0][0] - (layX.pages[0].notes[0].y - 19.8)) < 0.5)
+// 拖拽增量：50px @ scale 760/595.28 → 39.16pt
+const d28 = dragDelta({ key: 'margin_top', dir: 'v' }, 0, 100, 0, 150, 760 / 595.28)
+check('垂直拖拽 50px → ~39.2pt', Math.abs(d28 - 39.16) < 0.5, `d=${d28}`)
+// 右线反向：向右拖 = 右边距减小
+const d28r = dragDelta({ key: 'margin_right', dir: 'h', invert: true }, 0, 0, 50, 0, 1)
+check('右边距反向拖拽', Math.abs(d28r - -50) < 0.5, `d=${d28r}`)
+check('clamp 钳制', clamp(500, 20, 300) === 300 && clamp(5, 20, 300) === 20)
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

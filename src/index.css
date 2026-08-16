@@ -233,6 +233,11 @@ body {
   color: var(--jp-accent);
 }
 
+.tool-btn.active-guide {
+  border-color: var(--jp-success);
+  color: var(--jp-success);
+}
+
 .tool-btn.primary {
   background: var(--jp-deep-space-blue);
   border-color: var(--jp-deep-space-blue);
@@ -277,6 +282,35 @@ body {
 .score-page [data-notepos].note-active,
 .score-page [data-cipos].note-active {
   fill: var(--jp-danger) !important;
+}
+
+/* 排版辅助虚线（adj7） */
+.guide-line {
+  position: absolute;
+  border: 1px dashed var(--jp-accent);
+  opacity: 0.7;
+  z-index: 5;
+  transition: opacity 0.15s;
+}
+
+.guide-line:hover {
+  opacity: 1;
+  border-color: var(--jp-warning);
+}
+
+.guide-h {
+  height: 0;
+  border-bottom: 1px dashed var(--jp-accent);
+}
+
+.guide-v {
+  width: 0;
+  border-right: 1px dashed var(--jp-accent);
+}
+
+.guide-row {
+  opacity: 0.45;
+  border-color: var(--jp-success);
 }
 
 .preview-placeholder {

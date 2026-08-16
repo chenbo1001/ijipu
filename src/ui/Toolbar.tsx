@@ -1,5 +1,5 @@
 /**
- * ui/Toolbar.tsx — 工具栏（视图切换 + 常用操作）
+ * ui/Toolbar.tsx — 工具栏（视图切换 + 常用操作 + 排版辅助开关）
  */
 import { useDocStore, type ViewType } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
@@ -14,6 +14,8 @@ export function Toolbar() {
   const viewType = useDocStore((s) => s.viewType)
   const setViewType = useDocStore((s) => s.setViewType)
   const openModal = useUiStore((s) => s.openModal)
+  const showGuides = useUiStore((s) => s.showGuides)
+  const setShowGuides = useUiStore((s) => s.setShowGuides)
 
   return (
     <div className="toolbar">
@@ -29,6 +31,13 @@ export function Toolbar() {
         ))}
       </div>
       <div className="toolbar-spacer" />
+      <button
+        className={showGuides ? 'tool-btn active-guide' : 'tool-btn'}
+        onClick={() => setShowGuides(!showGuides)}
+        title="排版辅助虚线：拖动边距/行距虚线直接调整间距"
+      >
+        ┈ 排版辅助
+      </button>
       <button className="tool-btn primary" onClick={() => openModal('playback')}>
         ▶ 试听
       </button>
