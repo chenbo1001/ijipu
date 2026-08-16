@@ -157,8 +157,8 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
   const oct = t.kind === 'note' ? t.octaveShift : 0
   if (oct !== 0) {
     const n = Math.abs(oct)
-    // 数字槽宽中心再左移 1px（adj19；adj18 左移 2 过头，回调 1）
-    const dotCx = x + NOTE_DIGIT_W / 2 - 1
+    // 数字槽宽中心：高音点左移 1px（adj19）；低音点不偏移（adj22：原左移 1 再右移 1）
+    const dotCx = x + NOTE_DIGIT_W / 2 - (oct > 0 ? 1 : 0)
     const dc = t.diminishCount
     // 低音点基座 cy：点顶距最近元素 4px —— 数字底部(基线+2) 或最下方减时横线底(基线+8+(dc-1)*4)
     const lowBase = oct < 0 ? y + (dc > 0 ? 8 + (dc - 1) * 4 : 2) + 4 + 2.4 : 0

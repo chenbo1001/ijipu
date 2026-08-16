@@ -727,14 +727,14 @@ check('1/. 占宽 = 0.75 拍', Math.abs(n35b[0].width - 0.75 * perBeat35b) < 0.5
 const d35c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3/, 2 |\n')
 const lay35c = layoutScore(d35c, defaultPageConfig)
 const n35c = lay35c.pages[0].notes[0]
-const dot35c = /<circle cx="[\d.]+" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(lay35c)[0])
-check('低八度点距减时横线 4px（cy = 基线+14.4）', dot35c !== null && Math.abs(Number(dot35c[1]) - (n35c.y + 14.4)) < 0.5, `cy=${dot35c?.[1]} expect=${n35c.y + 14.4}`)
+const dot35c = /<circle cx="([\d.]+)" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(lay35c)[0])
+check('低八度点距减时横线 4px、x=数字中心（adj22）', dot35c !== null && Math.abs(Number(dot35c[2]) - (n35c.y + 14.4)) < 0.5 && Math.abs(Number(dot35c[1]) - (n35c.x + 5.58)) < 0.5, `cy=${dot35c?.[2]} cx=${dot35c?.[1]}`)
 // 低音点无减时线：3, 点顶 = 数字底(基线+2) + 4 → cy = 基线+8.4
 const d35d = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3, 2 |\n')
 const lay35d = layoutScore(d35d, defaultPageConfig)
 const n35d = lay35d.pages[0].notes[0]
-const dot35d = /<circle cx="[\d.]+" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(lay35d)[0])
-check('低八度点距数字底部 4px（cy = 基线+8.4）', dot35d !== null && Math.abs(Number(dot35d[1]) - (n35d.y + 8.4)) < 0.5, `cy=${dot35d?.[1]} expect=${n35d.y + 8.4}`)
+const dot35d = /<circle cx="([\d.]+)" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(lay35d)[0])
+check('低八度点距数字底部 4px、x=数字中心（adj22）', dot35d !== null && Math.abs(Number(dot35d[2]) - (n35d.y + 8.4)) < 0.5 && Math.abs(Number(dot35d[1]) - (n35d.x + 5.58)) < 0.5, `cy=${dot35d?.[2]} cx=${dot35d?.[1]}`)
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)
