@@ -723,12 +723,18 @@ const lay35b = layoutScore(d35b, defaultPageConfig)
 const n35b = lay35b.pages[0].notes
 const perBeat35b = n35b[1].width / n35b[1].duration
 check('1/. 占宽 = 0.75 拍', Math.abs(n35b[0].width - 0.75 * perBeat35b) < 0.5, `${n35b[0].width} vs ${0.75 * perBeat35b}`)
-// 低音点 + 减时线：3/, 低音点 cy 在减时横线下
+// 低音点 + 减时线：3/, 点顶 = 横线底(基线+8) + 2 → cy = 基线+12.4（adj20）
 const d35c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3/, 2 |\n')
 const lay35c = layoutScore(d35c, defaultPageConfig)
 const n35c = lay35c.pages[0].notes[0]
 const dot35c = /<circle cx="[\d.]+" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(lay35c)[0])
-check('低八度点在减时线下方（cy ≥ 基线+16）', dot35c !== null && Number(dot35c[1]) >= n35c.y + 16, `cy=${dot35c?.[1]} noteY=${n35c.y}`)
+check('低八度点距减时横线 2px（cy = 基线+12.4）', dot35c !== null && Math.abs(Number(dot35c[1]) - (n35c.y + 12.4)) < 0.5, `cy=${dot35c?.[1]} expect=${n35c.y + 12.4}`)
+// 低音点无减时线：3, 点顶 = 数字底(基线+2) + 2 → cy = 基线+6.4
+const d35d = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3, 2 |\n')
+const lay35d = layoutScore(d35d, defaultPageConfig)
+const n35d = lay35d.pages[0].notes[0]
+const dot35d = /<circle cx="[\d.]+" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(lay35d)[0])
+check('低八度点距数字底部 2px（cy = 基线+6.4）', dot35d !== null && Math.abs(Number(dot35d[1]) - (n35d.y + 6.4)) < 0.5, `cy=${dot35d?.[1]} expect=${n35d.y + 6.4}`)
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

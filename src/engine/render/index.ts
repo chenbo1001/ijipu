@@ -153,18 +153,18 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     )
   }
 
-  // 高低音点（对齐音符数字正上/正下方；高音点与数字顶留空隙 adj17；低音点遇减时线时移到横线下方 adj15）
+  // 高低音点（高音点在数字正上方 adj17/19；低音点距最近元素 2px：数字底部或最下方减时横线，adj20）
   const oct = t.kind === 'note' ? t.octaveShift : 0
   if (oct !== 0) {
     const n = Math.abs(oct)
     // 数字槽宽中心再左移 1px（adj19；adj18 左移 2 过头，回调 1）
     const dotCx = x + NOTE_DIGIT_W / 2 - 1
     const dc = t.diminishCount
-    const lowOffset = oct < 0 && dc > 0 ? dc * 4 + 6 : 0 // 避让减时线区域
+    // 低音点基座 cy：点顶距最近元素 2px —— 数字底部(基线+2) 或最下方减时横线底(基线+8+(dc-1)*4)
+    const lowBase = oct < 0 ? y + (dc > 0 ? 8 + (dc - 1) * 4 : 2) + 2 + 2.4 : 0
     for (let i = 0; i < n; i++) {
-      // 高音点在数字正上方（基线上 18：点下沿高于数字顶，不与数字重叠）；
-      // 低音点在数字下方（对称基线下 8）
-      const cy = oct > 0 ? y - (18 + i * 7) : y + (8 + lowOffset + i * 7)
+      // 高音点在数字正上方（基线上 18：点下沿高于数字顶，不与数字重叠）
+      const cy = oct > 0 ? y - (18 + i * 7) : lowBase + i * 7
       parts.push(`<circle cx="${dotCx}" cy="${cy}" r="2.4" fill="#1b1b1b"/>`)
     }
   }
