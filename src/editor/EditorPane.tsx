@@ -80,13 +80,23 @@ export function EditorPane() {
   onSelectRef.current = onSelect
 
   // 行首命令快捷键：光标在行首时按 Q/C/B/Z/D/P/J/V/H 插入命令头
+  // 限制：歌词行（C 行）只允许插入 C；曲行（Q 行）只允许 Q/C；IME 合成事件排除
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const ta = taRef.current
     if (!ta) return
+    if (e.nativeEvent.isComposing) return // 输入法合成中不触发
     const key = e.key
     if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return
     if (key.length !== 1 || !isLineHeaderKey(key.toUpperCase())) return
-    const insert = insertLineHeader(ta.value, ta.selectionStart, key.toUpperCase() as Parameters<typeof insertLineHeader>[2])
+    const keyUp = key.toUpperCase() as Parameters<typeof insertLineHeader>[2]
+    // 当前行类型（光标前内容）
+    const before = ta.value.slice(0, ta.selectionStart)
+    const lineText = before.slice(before.lastIndexOf('\n') + 1)
+    const isMusicLine = /^Q\d*(?:"[^"]*")?\s*:/.test(lineText)
+    const isLyricLine = /^C\d*\s*:/.test(lineText)
+    if (isLyricLine && keyUp !== 'C') return // 编辑歌词时避免误触其他命令
+    if (isMusicLine && keyUp !== 'Q' && keyUp !== 'C') return
+    const insert = insertLineHeader(ta.value, ta.selectionStart, keyUp)
     if (!insert) return
     e.preventDefault()
     setCode(insert.text)

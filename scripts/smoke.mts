@@ -455,5 +455,32 @@ const row2Notes = layJ.pages[0].notes.filter((n) => n.y === rowsJ[1])
 const maxRight2 = Math.max(...row2Notes.map((n) => n.x + n.width))
 check('最后一行不撑满（右缘留空）', maxRight2 < 515.28 - 10, `right=${maxRight2}`)
 
+// ---- 23. 细节修复（adj2） ----
+console.log('[23] adj2 fixes')
+// 小节线位置：单行谱（最后一行自然宽 barW=70），线画在小节右边界
+const rbar = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n')
+const layBar = layoutScore(rbar, defaultPageConfig)
+const bars23 = layBar.pages[0].barlines
+check('小节线 2 条', bars23.length === 2, `got ${bars23.length}`)
+check('线 1 在小节 1 右边界（4 之后）', Math.abs(bars23[0].x - (80 + 70)) < 1, `x=${bars23[0].x}`)
+check('线 2 在小节 2 右边界', Math.abs(bars23[1].x - (80 + 140)) < 1, `x=${bars23[1].x}`)
+// 行首空 seg（|:）不占宽：音符 1 贴左边距，|: 画在行首
+const rr23 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 3 | 5 6 7 1 |\n')
+const layRr = layoutScore(rr23, defaultPageConfig)
+const noteRr = layRr.pages[0].notes[0]
+check('行首 |: 不占宽（音符 1 贴左边距+BAR_PAD）', Math.abs(noteRr.x - (80 + 6)) < 1, `x=${noteRr.x}`)
+check('|: 线画在行首', Math.abs(layRr.pages[0].barlines[0].x - 80) < 1, `x=${layRr.pages[0].barlines[0].x}`)
+// 歌词中心对齐音符数字（增时线音符 1- 的歌词在数字下方）
+const rly23 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1- 2 3 4 |\nC: 一 二 三 四\n')
+const layLy = layoutScore(rly23, defaultPageConfig)
+const n23 = layLy.pages[0].notes[0]
+const l23 = layLy.pages[0].lyrics[0]
+check('歌词中心对齐音符数字', Math.abs(l23.x + defaultPageConfig.geci_size / 2 - (n23.x + 6)) < 1, `lyric=${l23.x} note=${n23.x}`)
+// 增时线渲染为水平横线（y 高于基线，非下划线）
+const svg23 = renderScoreToSvg(layLy)[0]
+const noteY23 = n23.y
+const augRectY = /<rect x="[^"]+" y="([\d.]+)" width="7.56"/.exec(svg23)
+check('增时线在数字中部（y = 基线-8）', augRectY !== null && Math.abs(Number(augRectY[1]) - (noteY23 - 8)) < 0.5, `rectY=${augRectY?.[1]} noteY=${noteY23}`)
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

@@ -154,8 +154,8 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     )
   }
 
-  // 增时线（数字右侧，每条一条短线）
-  const augY = y - 2
+  // 增时线（数字右侧水平延伸，垂直居中于数字）
+  const augY = y - 8
   for (let i = 0; i < t.augmentCount; i++) {
     const lx = x + size * 0.62 + size * 0.5 * i + 2
     parts.push(

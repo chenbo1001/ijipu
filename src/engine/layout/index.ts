@@ -328,10 +328,11 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     lyricMaps.forEach((map, row) => {
       const ch = map.get(slotIndex)
       if (!ch) return
+      // 歌词中心对齐音符数字（数字半宽 ≈ 6px），而非含时值宽的整体
       pages[pageIdx].lyrics.push({
         id,
         char: ch,
-        x: r1(nx + w / 2 - geciSize / 2),
+        x: r1(nx + 6 - geciSize / 2),
         y: r1(yTop + m.noteSize * 1.7 + sp.quci + row * (geciSize + 8 + sp.cici)),
       })
     })
@@ -383,12 +384,14 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       return
     }
 
-    // bars 行：小节均分
-    const barCount = row.end - row.start
+    // bars 行：小节均分（行首空小节如 |: 不占宽）
+    const leadingEmpty = row.start < row.end && segs[row.start].notes.length === 0 ? 1 : 0
+    const barCount = Math.max(1, row.end - row.start - leadingEmpty)
     const barW = isLastRow ? barNaturalW(beats) : availW / barCount
     const perBeat = Math.max(2, (barW - BAR_PAD * 2) / beats)
     for (let b = row.start; b < row.end; b++) {
       const seg = segs[b]
+      const isEmptyLead = leadingEmpty === 1 && b === row.start
       let beatAcc = 0
       for (const t of seg.notes) {
         if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
@@ -403,11 +406,12 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           }
         }
       }
-      // 小节线：行首空小节（如行首 |: 的独立 seg）的普通 | 省略；其余绘制
+      // 小节线：画在小节右边界（行首空 seg 画在其起点，普通 | 省略）
       const bar = seg.bar
       if (bar) {
-        const isRowStartEmpty = b === row.start && seg.notes.length === 0
+        const isRowStartEmpty = isEmptyLead
         if (!(isRowStartEmpty && bar.type === '|')) {
+          const lineX = isEmptyLead ? x : x + barW
           const bid: LayoutId = { page: pageIndex, voice, group: groupIndex, index: barCounter }
           page.barlines.push({
             id: bid,
@@ -415,7 +419,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
             voltaStart: bar.voltaStart,
             voltaEnd: bar.voltaEnd,
             comment: bar.comment,
-            x: r1(x + barW / 2),
+            x: r1(lineX),
             yTop,
             yBottom,
             width: m.barlineWidth,
@@ -423,7 +427,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         }
         barCounter++
       }
-      x += barW
+      x += isEmptyLead ? 0 : barW
     }
     finishDyn(x) // 行尾关闭未闭合渐强
   }
