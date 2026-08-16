@@ -99,15 +99,17 @@ export function PreviewPane() {
     const key = el.getAttribute('data-meta')!
     if (!layout) return
     const scale = PREVIEW_W / layout.pages[0].width
-    const base = pageConfigRef.current.metaPos?.[key]
-    const bx = base ? base.x : Number(el.getAttribute('x'))
-    const by = base ? base.y : Number(el.getAttribute('y'))
+    const cfg = pageConfigRef.current
+    const base = cfg.metaPos?.[key]
+    // 无 metaPos 时用元素绝对坐标转相对（adj12）
+    const bx = base ? base.x : Number(el.getAttribute('x')) - cfg.margin_left
+    const by = base ? base.y : Number(el.getAttribute('y')) - cfg.margin_top
     metaDragRef.current = { key, startX: e.clientX, startY: e.clientY, baseX: bx, baseY: by }
     const onMove = (ev: MouseEvent) => {
       const d = metaDragRef.current
       if (!d) return
       const next = { ...(pageConfigRef.current.metaPos ?? {}) }
-      // 钳制在描述头区域内（adj11）
+      // 相对描述区左上角保存（adj12），钳制在区域内
       const pos = clampMetaPos(
         d.key,
         d.baseX + (ev.clientX - d.startX) / scale,

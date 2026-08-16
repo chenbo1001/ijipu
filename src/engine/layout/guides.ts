@@ -116,13 +116,14 @@ export function metaAreaH(cfg: {
 }
 
 /**
- * 描述头元素位置钳制：不超出描述头区域边线（上 margin_top / 下 metaAreaH / 左 margin_left / 右 页宽-margin_right）。
- * 调式/拍号/节拍（左对齐）起点右侧留 40 防文本越界；标题/副标题为文本中心。
+ * 描述头元素位置钳制（相对描述区左上角，adj12）：不超出描述头区域。
+ * 输入输出均为相对坐标（0..区域宽/高）；区域宽 = 页宽-左右边距，区域高 = metaAreaH-margin_top。
+ * 调式/拍号/节拍（左对齐）右侧留 40 防文本越界。
  */
 export function clampMetaPos(
   key: string,
-  x: number,
-  y: number,
+  relX: number,
+  relY: number,
   pageW: number,
   cfg: {
     margin_top: number
@@ -132,13 +133,12 @@ export function clampMetaPos(
     biaoti_size: number
   },
 ): { x: number; y: number } {
-  const areaBottom = metaAreaH(cfg)
-  const minX = cfg.margin_left
-  const maxX = pageW - cfg.margin_right
-  const xMax = key.startsWith('keyline') || key.startsWith('tempo') ? maxX - 40 : maxX
+  const areaW = pageW - cfg.margin_left - cfg.margin_right
+  const areaH = metaAreaH(cfg) - cfg.margin_top
+  const xMax = key.startsWith('keyline') || key.startsWith('tempo') ? Math.max(0, areaW - 40) : areaW
   return {
-    x: clamp(x, minX, xMax),
-    y: clamp(y, cfg.margin_top, areaBottom),
+    x: clamp(relX, 0, xMax),
+    y: clamp(relY, 0, Math.max(0, areaH)),
   }
 }
 

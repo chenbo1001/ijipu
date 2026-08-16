@@ -605,11 +605,11 @@ const tKey = getMeta('keyline')
 check('调式+拍号左下', tKey !== null && Math.abs(tKey.x - 80) < 0.5 && Math.abs(tKey.y - 163.6) < 0.5, JSON.stringify(tKey))
 const tTempo = getMeta('tempo')
 check('节拍在 keyline 下', tTempo !== null && Math.abs(tTempo.x - 80) < 0.5 && Math.abs(tTempo.y - 187.6) < 0.5, JSON.stringify(tTempo))
-// metaPos 覆盖
+// metaPos 覆盖（相对描述区左上角，adj12）：绝对 = 80+100, 80+50
 const layErM = layoutScore(rEr, { ...defaultPageConfig, metaPos: { title: { x: 100, y: 50 } } })
 const svgErM = renderScoreToSvg(layErM)[0]
 const m2 = /data-meta="title" x="([\d.]+)" y="([\d.]+)"/.exec(svgErM)
-check('metaPos 覆盖标题位置', m2 !== null && Math.abs(Number(m2[1]) - 100) < 0.5 && Math.abs(Number(m2[2]) - 50) < 0.5, m2?.[0])
+check('metaPos 覆盖标题位置（相对+边距）', m2 !== null && Math.abs(Number(m2[1]) - 180) < 0.5 && Math.abs(Number(m2[2]) - 130) < 0.5, m2?.[0])
 
 // ---- 31. 行结构虚线（adj10） ----
 console.log('[31] row guides (adj10)')
@@ -628,21 +628,36 @@ check('词底 = 歌词基线 + 歌词字号', Math.abs((rg0.lyricBottom ?? 0) - 
 const rgsNo = computeRowGuides(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n'), defaultPageConfig), { quci: 13, geci: 18 })
 check('无歌词行 lyricTop=null', rgsNo[0][0].lyricTop === null)
 
-// ---- 32. 描述头位置钳制（adj11） ----
-console.log('[32] meta clamp (adj11)')
-// 描述区：上 80，下 = 80+40+36×1.6+30 = 207.6，左 80，右 595.28-80 = 515.28
+// ---- 32. 描述头位置钳制（adj11/adj12 相对语义） ----
+console.log('[32] meta clamp (adj12)')
+// 区域：宽 = 595.28-160 = 435.28，高 = 207.6-80 = 127.6
 const cfgClamp = defaultPageConfig
-// 越界位置被钳制回区域内
+// 越界位置被钳制回区域内（相对坐标）
 const c1 = clampMetaPos('title', 9999, 9999, 595.28, cfgClamp)
-check('标题超右下被钳制', c1.x === 515.28 && c1.y === 207.6, JSON.stringify(c1))
+check('标题超右下被钳制', Math.abs(c1.x - 435.28) < 0.5 && Math.abs(c1.y - 127.6) < 0.5, JSON.stringify(c1))
 const c2 = clampMetaPos('title', -100, -100, 595.28, cfgClamp)
-check('标题超左上被钳制', c2.x === 80 && c2.y === 80, JSON.stringify(c2))
+check('标题超左上被钳制到原点', c2.x === 0 && c2.y === 0, JSON.stringify(c2))
 // 调式拍号（左对齐）右侧留 40
 const c3 = clampMetaPos('keyline', 9000, 100, 595.28, cfgClamp)
-check('keyline 右侧留 40', c3.x === 515.28 - 40, JSON.stringify(c3))
+check('keyline 右侧留 40', Math.abs(c3.x - (435.28 - 40)) < 0.5, JSON.stringify(c3))
 // 区域内位置不变
-const c4 = clampMetaPos('author_0', 400, 150, 595.28, cfgClamp)
-check('区域内位置不变', c4.x === 400 && c4.y === 150, JSON.stringify(c4))
+const c4 = clampMetaPos('author_0', 100, 100, 595.28, cfgClamp)
+check('区域内位置不变', c4.x === 100 && c4.y === 100, JSON.stringify(c4))
+
+// ---- 33. 描述头相对位置跟随区域（adj12） ----
+console.log('[33] meta follow area (adj12)')
+const metaRel = { title: { x: 10, y: 20 } }
+const posOf33 = (cfg: typeof defaultPageConfig) => {
+  const svg33 = renderScoreToSvg(layoutScore(rEr, { ...cfg, metaPos: metaRel }))[0]
+  const m33 = /data-meta="title" x="([\d.]+)" y="([\d.]+)"/.exec(svg33)
+  return m33 ? { x: Number(m33[1]), y: Number(m33[2]) } : null
+}
+const pA = posOf33(defaultPageConfig)
+check('默认边距下绝对位置 = 80+10, 80+20', pA !== null && Math.abs(pA.x - 90) < 0.5 && Math.abs(pA.y - 100) < 0.5, JSON.stringify(pA))
+const pB = posOf33({ ...defaultPageConfig, margin_top: 120 })
+check('margin_top 改变 → 元素跟随下移', pB !== null && Math.abs(pB.y - (120 + 20)) < 0.5, JSON.stringify(pB))
+const pC = posOf33({ ...defaultPageConfig, body_margin_top: 80 })
+check('body_margin_top 改变 → 元素位置不变（相对不变）', pC !== null && Math.abs(pC.y - 100) < 0.5, JSON.stringify(pC))
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

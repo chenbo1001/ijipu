@@ -71,8 +71,9 @@ function renderMeta(page: ScorePage, config: PageConfig): string {
   const mTop = config.margin_top
   const areaH = metaAreaH(config)
   const posOf = (key: string, defX: number, defY: number) => {
+    // metaPos 为相对描述区左上角（adj12）：绝对 = 相对 + 边距；缺省用默认位置（默认公式已随区域变化）
     const p = config.metaPos?.[key]
-    return p ? { x: p.x, y: p.y } : { x: defX, y: defY }
+    return p ? { x: p.x + config.margin_left, y: p.y + config.margin_top } : { x: defX, y: defY }
   }
 
   // ---- 调式 + 拍号（左下，同排） ----
