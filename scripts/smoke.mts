@@ -7,6 +7,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseJps, formatJps, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig } from '../src/engine/index.ts'
+import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
+import { highlightCode } from '../src/editor/highlight.ts'
 
 const root = process.cwd()
 
@@ -178,6 +180,28 @@ const xiaoxing = parseJps(readFileSync(join(root, 'samples', 'xiaoxingxing.jps')
 const layX = layoutScore(xiaoxing, defaultPageConfig)
 check('小星星共 42 个歌词字', layX.pages[0].lyrics.length === 42, `got ${layX.pages[0].lyrics.length}`)
 check('小星星歌词首字=一', layX.pages[0].lyrics[0].char.text === '一')
+
+// ---- 12. 行首命令快捷键（M2） ----
+console.log('[12] line-header shortcuts (M2)')
+const s1 = insertLineHeader('V: 1.0\n', 0, 'Q')
+check('文首插入 Q:', s1?.text === 'Q: V: 1.0\n' && s1.pos === 3, JSON.stringify(s1))
+const s2 = insertLineHeader('B: t\n', 5, 'C')
+check('行首插入 C:', s2?.text === 'B: t\nC: ' && s2.pos === 8, JSON.stringify(s2))
+const s3 = insertLineHeader('B: t', 2, 'Q')
+check('行中不拦截（返回 null）', s3 === null)
+const s4 = insertLineHeader('Q: 1 2\nC: 词', 7, 'C')
+check('第 2 行行首插入 C（前一字符为换行）', s4?.text === 'Q: 1 2\nC: C: 词' && s4.pos === 10, JSON.stringify(s4))
+check('isLineHeaderKey', isLineHeaderKey('Q') && isLineHeaderKey('H') && !isLineHeaderKey('X'))
+const lc = lineColOf('V: 1.0\nB: t\n', 9)
+check('lineColOf 第2行第2列', lc.line === 2 && lc.col === 2, JSON.stringify(lc))
+
+// ---- 13. 错误行高亮（M2） ----
+console.log('[13] error-line highlight (M2)')
+const errCode = 'V: 1.0\nB: t\nQ: 1 2 @@\n'
+const hl = highlightCode(errCode, new Set([3]))
+check('错误行含 hl-error-line 标记', hl.includes('hl-error-line') && hl.split('hl-error-line').length >= 2)
+const hlClean = highlightCode(errCode)
+check('无错误行时不加标记', !hlClean.includes('hl-error-line'))
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

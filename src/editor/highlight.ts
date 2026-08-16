@@ -81,22 +81,30 @@ function highlightLyricContent(content: string): string {
   return span('hl-lyric', content)
 }
 
-/** 整份代码高亮为 HTML */
-export function highlightCode(code: string): string {
+/** 整份代码高亮为 HTML；errLines 中的行号（1-based）整行红底标记 */
+export function highlightCode(code: string, errLines?: ReadonlySet<number>): string {
   const lines = code.replace(/\r\n/g, '\n').split('\n')
   const parts: string[] = []
-  for (const raw of lines) {
+  for (let ln = 0; ln < lines.length; ln++) {
+    const raw = lines[ln]
+    const lineNo = ln + 1
+    const wrap = (html: string) => {
+      if (errLines && errLines.has(lineNo)) {
+        return `<span class="hl-error-line">${html}</span>`
+      }
+      return html
+    }
     const trimmed = raw.trim()
     if (trimmed === '') {
-      parts.push('')
+      parts.push(wrap(''))
       continue
     }
     if (trimmed.startsWith('#')) {
-      parts.push(span('hl-comment', raw))
+      parts.push(wrap(span('hl-comment', raw)))
       continue
     }
     if (trimmed === '[fenye]') {
-      parts.push(span('hl-pagebreak', raw))
+      parts.push(wrap(span('hl-pagebreak', raw)))
       continue
     }
     // 行头命令：^[A-Z][0-9]*("...")?:
@@ -107,15 +115,15 @@ export function highlightCode(code: string): string {
       const rest = trimmed.slice(headLen)
       const headHtml = span('hl-line-header', head)
       if (m[1] === 'Q') {
-        parts.push(headHtml + highlightMusicContent(rest))
+        parts.push(wrap(headHtml + highlightMusicContent(rest)))
       } else if (m[1] === 'C') {
-        parts.push(headHtml + highlightLyricContent(rest))
+        parts.push(wrap(headHtml + highlightLyricContent(rest)))
       } else {
-        parts.push(headHtml + esc(rest))
+        parts.push(wrap(headHtml + esc(rest)))
       }
       continue
     }
-    parts.push(esc(raw))
+    parts.push(wrap(esc(raw)))
   }
   return parts.join('\n')
 }

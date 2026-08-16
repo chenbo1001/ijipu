@@ -323,11 +323,46 @@ body {
 
 .editor-body {
   flex: 1;
-  position: relative;
+  display: flex;
+  min-height: 0;
   overflow: hidden;
+  --jp-editor-lh: 23.8px; /* 14px * 1.7，与 textarea 行高一致 */
 }
 
-.editor-body textarea {
+.editor-gutter {
+  width: 46px;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--jp-editor-bg);
+  border-right: 1px solid var(--jp-border);
+  padding: 10px 0;
+  user-select: none;
+}
+
+.gutter-line {
+  height: var(--jp-editor-lh);
+  line-height: var(--jp-editor-lh);
+  text-align: right;
+  padding-right: 8px;
+  font-family: var(--jp-font-mono);
+  font-size: 11px;
+  color: var(--jp-text-muted);
+  white-space: pre;
+}
+
+.gutter-line.gutter-err {
+  color: var(--jp-danger);
+  font-weight: 700;
+  background: rgba(255, 93, 108, 0.14);
+}
+
+.editor-main {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+}
+
+.editor-main textarea {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -347,7 +382,7 @@ body {
   tab-size: 4;
 }
 
-.editor-body .highlight-layer {
+.editor-main .highlight-layer {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -386,6 +421,13 @@ body {
 .hl-decoration {
   color: var(--jp-accent);
   opacity: 0.85;
+}
+
+/* 错误行整行红底 */
+.hl-error-line {
+  background: rgba(255, 93, 108, 0.13);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 /* ============ 状态栏 ============ */
