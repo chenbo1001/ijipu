@@ -312,7 +312,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
 
   /**
    * 放置一个音符并处理歌词对齐。
-   * segStartX = 该音符时值段起点；音符数字在段内水平居中。
+   * segStartX = 该音符时值段起点；数字居中于第 1 拍段（增时线占后续每拍）。
    * 返回推进后的拍数。
    */
   const placeNoteAt = (
@@ -332,8 +332,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   ) => {
     const dur = tokenDuration(t)
     const w = Math.max(4, dur * perBeat)
-    // 数字左缘：让数字中心落在段中点（数字半宽 ≈ 6px）
-    const nx = segStartX + (dur * perBeat) / 2 - 6
+    // 数字中心 = 第 1 拍段中点（增时线"-"各占一拍，从第 2 拍起）
+    const nx = segStartX + Math.min(dur, 1) * (perBeat / 2) - 6
     const id: LayoutId = { page: pageIdx, voice, group: groupIndex, index: noteCounter }
     pages[pageIdx].notes.push({
       id,

@@ -139,7 +139,7 @@ const svg2 = renderScoreToSvg(lay2)[0]
 const cnt2 = (svg2.match(/data-notepos=/g) ?? []).length
 check('复杂行 6 个可见音符（8 隐藏休止不画）', cnt2 === 6, `got ${cnt2}`)
 check('隐藏休止符不可播放', lay2.pages[0].notes.find((n) => n.token.kind === 'rest')?.playable === false)
-check('SVG 含增时线 rect', svg2.includes('width="11.16"'))
+check('SVG 含增时线 rect', svg2.includes('height="2.6"'))
 const barRects = (svg2.match(/width="1.5"/g) ?? []).length
 check('小节线竖线 3 条（单线 1 + 双线 2）', barRects === 3, `got ${barRects}`)
 
@@ -483,9 +483,9 @@ const l23 = layLy.pages[0].lyrics[0]
 check('歌词中心对齐音符数字', Math.abs(l23.x + defaultPageConfig.geci_size / 2 - (n23.x + 6)) < 1, `lyric=${l23.x} note=${n23.x}`)
 // 增时线渲染为水平横线（y 高于基线，非下划线）
 const svg23 = renderScoreToSvg(layLy)[0]
-check('增时线宽 = 音符占宽（11.16）', (svg23.match(/width="11.16"/g) ?? []).length >= 1, String((svg23.match(/width="11.16"/g) ?? []).length))
+check('增时线存在（height=2.6）', (svg23.match(/height="2.6"/g) ?? []).length >= 1)
 const noteY23 = n23.y
-const augRectY = /<rect x="[^"]+" y="([\d.]+)" width="11.16"/.exec(svg23)
+const augRectY = /<rect x="[^"]+" y="([\d.]+)" width="[\d.]+" height="2.6"/.exec(svg23)
 check('增时线在数字中部（y = 基线-8）', augRectY !== null && Math.abs(Number(augRectY[1]) - (noteY23 - 8)) < 0.5, `rectY=${augRectY?.[1]} noteY=${noteY23}`)
 
 // ---- 24. 对齐精细（adj3：音符段内居中 + 减时线按拍分组） ----
@@ -539,7 +539,27 @@ let minGap = Infinity
 for (let i = 1; i < notesOv.length; i++) minGap = Math.min(minGap, notesOv[i].x - notesOv[i - 1].x)
 check('超拍小节音符不重叠（最小间距 ≥ 11）', minGap >= 11, `minGap=${minGap}`)
 const lastOv = notesOv[notesOv.length - 1]
-check('末音符段终点不溢出', lastOv.x + 6 + lastOv.width / 2 <= 515.28 + 1, `end=${lastOv.x + 6 + lastOv.width / 2}`)
+// 段终点 = x + 6 - perBeat/2 + dur×perBeat（数字居中于第 1 拍，perBeat = width/dur）
+const perBeatOv = lastOv.width / lastOv.duration
+const segEndOv = lastOv.x + 6 - perBeatOv / 2 + lastOv.duration * perBeatOv
+check('末音符段终点不溢出', segEndOv <= 515.28 + 1, `end=${segEndOv}`)
+
+// ---- 27. 增时线占一拍（adj6） ----
+console.log('[27] augment line = 1 beat (adj6)')
+// 1- 2 3 4 | 单行均分：数字 1 居中于第 1 拍，增时线占第 2 拍
+const au27 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1- 2 3 4 |\n')
+const layAu = layoutScore(au27, defaultPageConfig)
+const nAu = layAu.pages[0].notes[0]
+const perBeatAu = nAu.width / nAu.duration
+check('数字居中于第 1 拍（非整段）', Math.abs(nAu.x + 6 - (86 + perBeatAu / 2)) < 0.5, `center=${nAu.x + 6}`)
+const svgAu = renderScoreToSvg(layAu)[0]
+const segStartAu = nAu.x + 6 - perBeatAu / 2
+const expectLX = segStartAu + perBeatAu + 1
+const rectsAu = [...svgAu.matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="([\d.]+)" height="2.6"/g)]
+check('增时线 1 条', rectsAu.length === 1, `got ${rectsAu.length}`)
+const rAu = rectsAu[0]
+check('增时线画在第 2 拍段起点', rAu !== undefined && Math.abs(Number(rAu[1]) - expectLX) < 0.5, `x=${rAu?.[1]} expect=${expectLX}`)
+check('增时线宽 = 一拍 - 2', rAu !== undefined && Math.abs(Number(rAu[2]) - (perBeatAu - 2)) < 0.5, `w=${rAu?.[2]} expect=${perBeatAu - 2}`)
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

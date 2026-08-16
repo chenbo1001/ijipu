@@ -154,13 +154,20 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     )
   }
 
-  // 增时线（数字右侧水平延伸，垂直居中于数字；每条宽与音符数字占宽一致）
+  // 增时线（"-" 各占一拍：第 i 条画在第 (1+i) 拍段内，宽占满该拍，垂直居中于数字）
   const augY = y - 8
-  for (let i = 0; i < t.augmentCount; i++) {
-    const lx = x + size * 0.62 + i * (NOTE_DIGIT_W + 2) + 1
-    parts.push(
-      `<rect x="${lx}" y="${augY}" width="${NOTE_DIGIT_W}" height="2.6" rx="1.3" fill="#1b1b1b"/>`,
-    )
+  if (t.augmentCount > 0) {
+    const dur = note.duration
+    const perBeat = dur > 0 ? note.width / dur : NOTE_DIGIT_W
+    // 数字中心 = 第 1 拍段中点 → 时值段起点
+    const segStart = x + 6 - Math.min(dur, 1) * (perBeat / 2)
+    for (let i = 0; i < t.augmentCount; i++) {
+      const lx = r1n(segStart + (1 + i) * perBeat + 1)
+      const lw = r1n(Math.max(4, perBeat - 2))
+      parts.push(
+        `<rect x="${lx}" y="${augY}" width="${lw}" height="2.6" rx="1.3" fill="#1b1b1b"/>`,
+      )
+    }
   }
 
   // 装饰符号（& 编码，M7d）：tr 颤音带波浪线，其余画上方小文本
