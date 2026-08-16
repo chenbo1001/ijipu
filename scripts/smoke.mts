@@ -369,5 +369,24 @@ const laySl3 = layoutScore(slur, { ...defaultPageConfig, lianyinxian_type: 2 })
 const svgSl3 = renderScoreToSvg(laySl3)[0]
 check('平顶样式无贝塞尔', !svgSl3.includes('<path d="M'))
 
+// ---- 20. 装饰符号（M7d） ----
+console.log('[20] decorations (M7d)')
+const deco = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1&tr 2&mp 3 < 4 5 ! 6 |\n')
+const dt0 = deco.groups[0].music.tokens[0]
+check('&tr 解析到音符符号', dt0.kind === 'note' && dt0.symbols.includes('tr'))
+const dt1 = deco.groups[0].music.tokens[1]
+check('&mp 解析到音符符号', dt1.kind === 'note' && dt1.symbols.includes('mp'))
+const layDe = layoutScore(deco, defaultPageConfig)
+check('渐强渐弱 1 条', layDe.pages[0].dynamics.length === 1, `got ${layDe.pages[0].dynamics.length}`)
+check('渐强类型 crescendo', layDe.pages[0].dynamics[0]?.type === 'crescendo')
+const svgDe = renderScoreToSvg(layDe)[0]
+check('SVG 含 tr 颤音', svgDe.includes('>tr<'))
+check('SVG 含 mp 力度', svgDe.includes('>mp<'))
+check('SVG 含渐强楔形', svgDe.includes('Z" fill="none"'))
+// 渐弱 + 行尾未闭合
+const deco2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 > 3 4\n')
+const layDe2 = layoutScore(deco2, defaultPageConfig)
+check('行尾未闭合渐弱仍生成', layDe2.pages[0].dynamics.length === 1 && layDe2.pages[0].dynamics[0].type === 'decrescendo')
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

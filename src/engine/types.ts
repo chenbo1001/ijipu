@@ -371,6 +371,15 @@ export interface PlacedSlur {
   style: 'arc' | 'flat'
 }
 
+/** 渐强渐弱记号（< > 起点至 ! 结束） */
+export interface PlacedDynamic {
+  x1: number
+  x2: number
+  /** 记号的 y（行上方） */
+  y: number
+  type: 'crescendo' | 'decrescendo'
+}
+
 /** 单个乐谱页 */
 export interface ScorePage {
   index: number
@@ -381,6 +390,7 @@ export interface ScorePage {
   barlines: PlacedBarline[]
   voiceBlocks: VoiceBlock[]
   slurs: PlacedSlur[]
+  dynamics: PlacedDynamic[]
   /** 页面级元数据（标题/作者/调号拍号等文本元素） */
   meta: ScorePageMeta
 }

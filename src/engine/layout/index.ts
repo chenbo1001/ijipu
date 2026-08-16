@@ -178,6 +178,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       barlines: [],
       voiceBlocks: [],
       slurs: [],
+      dynamics: [],
       meta,
     }
     pages.push(page)
@@ -207,9 +208,25 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     const yBottom = r1(yTop + m.noteSize * 1.7)
     let x = xStart
     let slotIndex = slotStart
+    let openDyn: { type: 'crescendo' | 'decrescendo'; x: number } | null = null
+    const finishDyn = (endX: number) => {
+      if (openDyn) {
+        page.dynamics.push({ x1: r1(openDyn.x), x2: r1(endX), y: r1(yTop - 26), type: openDyn.type })
+        openDyn = null
+      }
+    }
     for (let i = start; i < end; i++) {
       const token = tokens[i]
       const id: LayoutId = { page: pageIdx, voice, group: groupIndex, index: noteCounter }
+      if (token.kind === 'decoration') {
+        // 渐强渐弱：< > 起点、! 结束
+        if (token.dynamics === 'crescendo' || token.dynamics === 'decrescendo') {
+          openDyn = { type: token.dynamics, x }
+        } else if (token.dynamics === 'end') {
+          finishDyn(x)
+        }
+        continue
+      }
       if (token.kind === 'barline') {
         // 单声部行内小节线（多声部块的小节线由块级统一处理）
         page.barlines.push({
@@ -257,8 +274,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         noteCounter++
         x = r1(x + w + m.noteGap)
       }
-      // barline / decoration / slur 由块级或单声部流程处理
+      // slur 等 M1a 不占位（后续迭代）
     }
+    finishDyn(x) // 段尾关闭未闭合的渐强渐弱
   }
 
   /** 构造单声部组的歌词槽位映射 */

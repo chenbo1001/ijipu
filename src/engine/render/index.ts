@@ -12,7 +12,7 @@
  * TODO(M1c)：歌词 <text data-cipos>
  * TODO(M7)：跳房子/连音线/装饰符号/多声部
  */
-import type { PageConfig, PlacedBarline, PlacedLyric, PlacedSlur, PlacedToken, ScoreLayout, ScorePage, VoiceBlock } from '../types'
+import type { PageConfig, PlacedBarline, PlacedDynamic, PlacedLyric, PlacedSlur, PlacedToken, ScoreLayout, ScorePage, VoiceBlock } from '../types'
 
 // ============================================================
 // 工具
@@ -161,6 +161,24 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     parts.push(
       `<rect x="${lx}" y="${augY}" width="${size * 0.42}" height="2.6" rx="1.3" fill="#1b1b1b"/>`,
     )
+  }
+
+  // 装饰符号（& 编码，M7d）：tr 颤音带波浪线，其余画上方小文本
+  if (t.kind === 'note' && t.symbols.length > 0) {
+    let symY = y - 24
+    for (const sym of t.symbols) {
+      if (sym === 'tr') {
+        parts.push(
+          `<text x="${x}" y="${symY}" font-size="10" font-style="italic" font-family="${FONT_CN}" fill="#1b1b1b">tr</text>`,
+        )
+        parts.push(wavePath(x + 16, symY - 6, x + 34))
+      } else {
+        parts.push(
+          `<text x="${x}" y="${symY}" font-size="10" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(sym)}</text>`,
+        )
+      }
+      symY -= 9
+    }
   }
 
   // 减时线（数字下方，n 条）
@@ -351,6 +369,30 @@ function renderSlur(s: PlacedSlur): string {
 }
 
 // ============================================================
+// 渐强渐弱与波浪线（M7d）
+// ============================================================
+
+/** 颤音波浪线（连续小弧） */
+function wavePath(x1: number, y: number, x2: number): string {
+  const seg = 4
+  let d = `M ${x1} ${y}`
+  for (let x = x1; x < x2; x += seg) {
+    d += ` q ${seg / 2} -2.5, ${seg} 0`
+  }
+  return `<path d="${d}" fill="none" stroke="#1b1b1b" stroke-width="1"/>`
+}
+
+function renderDynamic(d: PlacedDynamic): string {
+  const midY = d.y
+  if (d.type === 'crescendo') {
+    // 渐强：左窄右宽楔形
+    return `<path d="M ${d.x1} ${midY - 2} L ${d.x2} ${midY - 8} L ${d.x2} ${midY + 8} L ${d.x1} ${midY + 2} Z" fill="none" stroke="#1b1b1b" stroke-width="1.2"/>`
+  }
+  // 渐弱：右窄左宽楔形
+  return `<path d="M ${d.x2} ${midY - 2} L ${d.x1} ${midY - 8} L ${d.x1} ${midY + 8} L ${d.x2} ${midY + 2} Z" fill="none" stroke="#1b1b1b" stroke-width="1.2"/>`
+}
+
+// ============================================================
 // 页面组装
 // ============================================================
 
@@ -361,6 +403,7 @@ function renderPage(page: ScorePage, config: PageConfig): string {
   body.push(renderMeta(page, config))
   body.push(renderVoltas(page.barlines)) // 跳房子线画在最底层
   for (const s of page.slurs) body.push(renderSlur(s))
+  for (const d of page.dynamics) body.push(renderDynamic(d))
   for (const n of page.notes) body.push(renderNote(n, config))
   for (const b of page.barlines) body.push(renderBarline(b))
   for (const l of page.lyrics) body.push(renderLyric(l, config))
