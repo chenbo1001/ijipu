@@ -6,10 +6,10 @@
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseJps, formatJps, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig } from '../src/engine/index.ts'
+import { parseJps, formatJps, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH } from '../src/engine/index.ts'
 import { buildPlaySequence, inferBpm } from '../src/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '../src/engine/cursorMap.ts'
-import { computeRowTops, computeRowGuides, dragDelta, clamp } from '../src/engine/layout/guides.ts'
+import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '../src/engine/layout/guides.ts'
 import { clampMetaPos } from '../src/engine/layout/metaAnchors.ts'
 import { computeBeamsForTest } from '../src/engine/render/index.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
@@ -827,6 +827,23 @@ check('跳房子番号 "1." "2." 渲染', svg38.includes('>1.<') && svg38.includ
 const r38p = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 |["1." 3 4 |]["2." 5 6 |] 7 1 :|\n')
 const seq38 = buildPlaySequence(r38p, layoutScore(r38p, defaultPageConfig), 120)
 check('跳房子播放 12 事件（pass1 全 8 + pass2 1,2,7,1）', seq38.events.length === 12 && pitchSeq(seq38) === 'C4,D4,E4,F4,G4,A4,B4,C4,C4,D4,B4,C4', `${seq38.events.length}:${pitchSeq(seq38)}`)
+
+// ---- 39. 描述头下端线（adj30） ----
+console.log('[39] desc area guide (adj30)')
+// 描述头区域下沿 = 上边距 + 内容区高 + 曲部上间距（默认 80+87.6+40 = 207.6）
+check('metaAreaH 默认不变（207.6）', Math.abs(metaAreaH(defaultPageConfig) - 207.6) < 0.5, String(metaAreaH(defaultPageConfig)))
+// descAreaH 增大 → 描述头区域变高（曲部第一行下移）
+const lay39a = layoutScore(rEr, { ...defaultPageConfig, descAreaH: 140 })
+const firstY39a = Math.min(...lay39a.pages[0].notes.map((n) => n.y))
+check('descAreaH 增大 → 曲部第一行下移', Math.abs(firstY39a - (80 + 140 + 40 + 19.8)) < 0.5, `y=${firstY39a}`)
+// 描述头元素（作者，右下锚）跟随描述头区域
+const svg39 = renderScoreToSvg(lay39a)[0]
+const m39 = /data-meta="author_0" x="[\d.]+" y="([\d.]+)"/.exec(svg39)
+check('作者跟随描述头区域下移', m39 !== null && Math.abs(Number(m39[1]) - (80 + 140 + 40 - 16)) < 0.5, `y=${m39?.[1]}`)
+// body_margin_top 最小 4px（描述头下端线最小间距）
+const exLimits = GUIDE_LIMITS_EX as Record<string, [number, number]>
+check('body_margin_top 最小 4px', exLimits['body_margin_top'][0] === 4)
+check('descAreaH 范围下限 40', exLimits['descAreaH'][0] === 40)
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

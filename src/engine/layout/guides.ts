@@ -106,13 +106,13 @@ export function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v))
 }
 
-/** 描述头区域高度（下沿；与 layout.metrics.titleAreaH 一致） */
+/** 描述头区域下沿（adj30：= 上边距 + 描述头内容区高 + 曲部上间距；与 layout.metrics.titleAreaH 一致） */
 export function metaAreaH(cfg: {
   margin_top: number
   body_margin_top: number
-  biaoti_size: number
+  descAreaH: number
 }): number {
-  return cfg.margin_top + cfg.body_margin_top + cfg.biaoti_size * 1.6 + 30
+  return cfg.margin_top + cfg.descAreaH + cfg.body_margin_top
 }
 
 /**
@@ -128,14 +128,16 @@ export const GUIDE_LIMITS: Record<GuideDragSpec['key'], [number, number]> = {
   height_ciqu: [0, 300],
 }
 
-/** 扩展的可拖拽项（adj10：描述头高度/曲下/词下） */
+/** 扩展的可拖拽项（adj10：描述头高度/曲下/词下；adj30：描述头内容区高 + 间距下限） */
 export type GuideKeyEx =
+  | 'descAreaH'
   | 'body_margin_top'
   | 'height_quci'
   | 'height_cici'
 
 export const GUIDE_LIMITS_EX: Record<GuideKeyEx, [number, number]> = {
-  body_margin_top: [0, 400],
+  descAreaH: [40, 400],
+  body_margin_top: [4, 400], // 与描述头下端线最小间距 4px（adj30）
   height_quci: [0, 120],
   height_cici: [0, 120],
 }

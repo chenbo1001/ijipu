@@ -457,6 +457,8 @@ export interface PageConfig {
   margin_right: number
   /** 正文上间距（标题与正文之间） */
   body_margin_top: number
+  /** 描述头内容区高度（标题/作者/调式等，adj30：描述头下端虚线调整） */
+  descAreaH: number
   /** 标题字体与字号 */
   biaoti_font: string
   biaoti_size: number
@@ -492,6 +494,7 @@ export const defaultPageConfig: PageConfig = {
   margin_left: 80,
   margin_right: 80,
   body_margin_top: 40,
+  descAreaH: 87.6, // 默认 = biaoti_size(36)×1.6 + 30，保持原描述头区域高度
   biaoti_font: 'Microsoft YaHei',
   biaoti_size: 36,
   fubiaoti_size: 20,

@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { layoutScore, renderScoreToSvg, noteIdToCodePos } from '../engine'
-import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '../engine/layout/guides'
+import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '../engine/layout/guides'
 import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '../engine/layout/metaAnchors'
 import { brand } from '../brand/tokens'
 
@@ -259,7 +259,20 @@ export function PreviewPane() {
                       onMouseDown={(e) => startDrag({ key: 'margin_right', dir: 'h', invert: true }, e, pageConfig.margin_right)}
                       title="右边距（拖动调整）"
                     />
-                    {/* 行结构虚线：曲行顶（首行=描述头高度，其余=曲上间距）/ 曲词间距 / 词曲间距 */}
+                    {/* 描述头区域下端线（adj30：调整描述头内容区高度，与第一行曲部上端线区分） */}
+                    <div
+                      className="guide-line guide-h guide-desc"
+                      style={{
+                        top: pctY(metaAreaH(pageConfig) - pageConfig.body_margin_top),
+                        left: pct(pageConfig.margin_left),
+                        right: pct(pageConfig.margin_right),
+                        cursor: 'ns-resize',
+                        pointerEvents: 'auto',
+                      }}
+                      onMouseDown={(e) => startDrag({ key: 'descAreaH', dir: 'v' }, e, pageConfig.descAreaH)}
+                      title="描述头高度（拖动调整）"
+                    />
+                    {/* 行结构虚线：曲行顶（首行=描述头下沿，其余=曲上间距）/ 曲词间距 / 词曲间距 */}
                     {rowGuidesOfPage.map((rg, ri) => (
                       <div key={ri} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
                         {/* 曲行顶线 */}
@@ -279,7 +292,7 @@ export function PreviewPane() {
                               ri === 0 ? pageConfig.body_margin_top : pageConfig.height_ciqu,
                             )
                           }
-                          title={ri === 0 ? '描述头高度（拖动调整）' : '行距（曲上间距，拖动调整）'}
+                          title={ri === 0 ? '曲部上间距（与描述头间距，拖动调整）' : '行距（曲上间距，拖动调整）'}
                         />
                         {/* 曲词间距线 */}
                         {rg.lyricTop !== null && (

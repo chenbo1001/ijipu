@@ -357,6 +357,12 @@ body {
   border-color: var(--jp-success);
 }
 
+/* 描述头区域下端线（adj30）：青色默认色，与绿色曲行顶线区分 */
+.guide-desc {
+  opacity: 0.6;
+  border-color: var(--jp-accent);
+}
+
 /* 曲词间距线（橙） / 词曲间距线（紫） */
 .guide-quci {
   opacity: 0.5;

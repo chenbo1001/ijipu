@@ -24,7 +24,7 @@ export interface MetaAreaCfg {
   margin_left: number
   margin_right: number
   body_margin_top: number
-  biaoti_size: number
+  descAreaH: number
 }
 
 /** 锚点绝对坐标（页面 pt） */

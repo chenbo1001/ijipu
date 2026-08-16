@@ -115,7 +115,7 @@ function metrics(config: PageConfig): LayoutMetrics {
     noteSize,
     noteGap: noteSize * 0.22,
     barlineWidth: noteSize * 0.32,
-    titleAreaH: config.margin_top + config.body_margin_top + config.biaoti_size * 1.6 + 30,
+    titleAreaH: config.margin_top + config.descAreaH + config.body_margin_top,
   }
 }
 
