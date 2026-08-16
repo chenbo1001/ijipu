@@ -89,19 +89,23 @@ function meterBeatsOf(meter: string | undefined): number {
   return DEFAULT_BEATS
 }
 
-/** 小节所需最小每拍宽：max(自然宽, 拍内最大音符数 × 最小数字宽)，防数字重叠 */
+/** 小节所需最小每拍宽：保证拍内任意相邻音符间距 ≥ 最小字符宽（adj13 按拍内最小时值） */
 function segPerBeatMin(seg: BarSeg): number {
-  const counts = new Map<number, number>()
+  const minDurByBeat = new Map<number, number>()
   let beat = 0
   for (const t of seg.notes) {
     if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
+      const dur = tokenDuration(t)
       const b = Math.floor(beat)
-      counts.set(b, (counts.get(b) ?? 0) + 1)
-      beat += tokenDuration(t)
+      minDurByBeat.set(b, Math.min(minDurByBeat.get(b) ?? Infinity, dur))
+      beat += dur
     }
   }
-  const maxCount = Math.max(0, ...counts.values())
-  return Math.max(BPW_NATURAL, maxCount * MIN_NOTE_W)
+  let minDur = Infinity
+  for (const d of minDurByBeat.values()) minDur = Math.min(minDur, d)
+  if (!Number.isFinite(minDur)) return BPW_NATURAL
+  // 每拍宽 ≥ MIN_NOTE_W / 最小时值：相邻音符间距 = dur×perBeat ≥ MIN_NOTE_W
+  return Math.max(BPW_NATURAL, MIN_NOTE_W / minDur)
 }
 
 // ============================================================

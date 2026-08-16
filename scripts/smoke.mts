@@ -659,5 +659,32 @@ check('margin_top 改变 → 元素跟随下移', pB !== null && Math.abs(pB.y -
 const pC = posOf33({ ...defaultPageConfig, body_margin_top: 80 })
 check('body_margin_top 改变 → 元素位置不变（相对不变）', pC !== null && Math.abs(pC.y - 100) < 0.5, JSON.stringify(pC))
 
+// ---- 34. 音符渲染细节（adj13） ----
+console.log('[34] note render detail (adj13)')
+// 高低音点对齐数字中心
+const oct34 = parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1' 2 3 4 |\n")
+const layO34 = layoutScore(oct34, defaultPageConfig)
+const nO34 = layO34.pages[0].notes[0]
+const octDot = /<circle cx="([\d.]+)" cy="[\d.]+" r="2.4"/.exec(renderScoreToSvg(layO34)[0])
+check('高音点 x = 数字中心', octDot !== null && Math.abs(Number(octDot[1]) - (nO34.x + 5.58)) < 0.5, `cx=${octDot?.[1]} expect=${nO34.x + 5.58}`)
+// 附点：位置 = 时值结束 + 半值中点，垂直居中
+const dot34 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1. 2 3 4 |\n')
+const layD34 = layoutScore(dot34, defaultPageConfig)
+const nD34 = layD34.pages[0].notes[0]
+const perBeatD34 = nD34.width / nD34.duration
+const segStartD34 = nD34.x + 6 - perBeatD34 / 2
+// 附点中心 = 段起点 + dur×perBeat + (dur×perBeat)/4（时值结束 + 半值中点）
+const expectDotX = segStartD34 + 1.25 * perBeatD34 * nD34.duration
+const dotR = /<circle cx="([\d.]+)" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(layD34)[0])
+check('附点水平位置（时值结束+半值中点）', dotR !== null && Math.abs(Number(dotR[1]) - expectDotX) < 0.5, `cx=${dotR?.[1]} expect=${expectDotX}`)
+check('附点垂直居中（y = 基线-8）', dotR !== null && Math.abs(Number(dotR[2]) - (nD34.y - 8)) < 0.5, `cy=${dotR?.[2]}`)
+// 混合时值（八分+十六分）不重叠：2 小节行 perBeat 受限
+const mix34 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1/ 2/ 3// 4// | 1/ 2/ 3// 4// |\n')
+const layM34 = layoutScore(mix34, defaultPageConfig)
+const nM34 = [...layM34.pages[0].notes].sort((a, b) => a.x - b.x)
+let minGap34 = Infinity
+for (let i = 1; i < nM34.length; i++) minGap34 = Math.min(minGap34, nM34[i].x - nM34[i - 1].x)
+check('混合时值（八分+十六分）不重叠', minGap34 >= 11.1, `minGap=${minGap34}`)
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)
