@@ -71,3 +71,9 @@ scripts/         工具脚本（patch-vite.js）
 ## 品牌资料
 
 详见 [docs/BRAND.md](docs/BRAND.md)。
+
+## 项目文档
+
+- [需求说明书](docs/REQUIREMENTS.md)（含待补充需求清单，供需求方补充）
+- [.jps 语法规范 V1.0](docs/JPS-SPEC.md)（逆向自原站官方手册）
+- [品牌手册](docs/BRAND.md)
