@@ -10,6 +10,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "smoke": "vite build --config vite.smoke.config.ts && node dist-smoke/smoke.cjs",
+    "preview:render": "vite build --config vite.smoke.config.ts && node dist-smoke/preview.cjs",
     "postinstall": "node scripts/patch-vite.js"
   },
   "dependencies": {

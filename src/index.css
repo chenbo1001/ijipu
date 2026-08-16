@@ -269,6 +269,8 @@ body {
 
 .score-page svg {
   display: block;
+  width: 100%;
+  height: auto;
 }
 
 .preview-placeholder {

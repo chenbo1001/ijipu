@@ -326,6 +326,25 @@ export interface PlacedLyric {
   y: number
 }
 
+/** 一个定位后的小节线（含反复记号/跳房子信息） */
+export interface PlacedBarline {
+  id: LayoutId
+  type: BarlineType
+  /** 跳房子起点/终点标记 */
+  voltaStart?: { open: boolean; slash?: boolean; plus?: number }
+  voltaEnd?: boolean
+  /** 小节线备注 */
+  comment?: string
+  /** 小节线中心 x */
+  x: number
+  /** 行顶 y */
+  yTop: number
+  /** 行底 y */
+  yBottom: number
+  /** 小节线占宽 */
+  width: number
+}
+
 /** 单个乐谱页 */
 export interface ScorePage {
   index: number
@@ -333,6 +352,7 @@ export interface ScorePage {
   height: number
   notes: PlacedToken[]
   lyrics: PlacedLyric[]
+  barlines: PlacedBarline[]
   /** 页面级元数据（标题/作者/调号拍号等文本元素） */
   meta: ScorePageMeta
 }
@@ -348,7 +368,8 @@ export interface ScorePageMeta {
 /** 排版结果：多页谱面 */
 export interface ScoreLayout {
   pages: ScorePage[]
-  /** 页面配置快照（用于缓存失效判断） */
+  /** 页面配置快照（用于缓存失效判断，render 需要） */
+  config: PageConfig
   configKey: string
 }
 

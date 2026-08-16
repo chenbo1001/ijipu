@@ -6,7 +6,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseJps, formatJps, tokenDuration } from '../src/engine/index.ts'
+import { parseJps, formatJps, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig } from '../src/engine/index.ts'
 
 const root = process.cwd()
 
@@ -101,6 +101,42 @@ const re = parseJps('V: 1.0\nB: t\nC: 歌词先行\nQ: 1 2\n')
 check('C 行先于 Q 行报错', re.errors.some((e) => e.message.includes('缺少对应')))
 const ru = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 @@\n')
 check('孤立 @ 报错', ru.errors.some((e) => e.severity === 'warning'))
+
+// ---- 7. 排版（M1a） ----
+console.log('[7] layout (M1a)')
+const lay = layoutScore(r2, defaultPageConfig)
+check('1 页', lay.pages.length === 1, `got ${lay.pages.length}`)
+const notes = lay.pages[0].notes
+check('两只老虎音符数 = 32', notes.length === 32, `got ${notes.length}`)
+const bars = lay.pages[0].barlines
+check('两只老虎小节线数 = 9', bars.length === 9, `got ${bars.length}`)
+check('小节线含 |: 与 :|', bars.some((b) => b.type === '|:') && bars.some((b) => b.type === ':|'))
+check('note 有 audioPitch', notes[0].audioPitch !== null, String(notes[0].audioPitch))
+check('note 时值>0', notes[0].duration > 0)
+
+// ---- 8. 渲染（M1a） ----
+console.log('[8] render (M1a)')
+const svgs = renderScoreToSvg(lay)
+check('产出 1 个 SVG 页面', svgs.length === 1)
+const svg = svgs[0]
+check('SVG 含标题', svg.includes('两只老虎'))
+check('SVG 含调号', svg.includes('1=C'))
+check('SVG 含拍号', svg.includes('4/4'))
+check('SVG 含节拍', svg.includes('♩=120'))
+check('SVG 含 data-notepos 契约', svg.includes('data-notepos="0_1_0_0"'))
+const noteposCount = (svg.match(/data-notepos=/g) ?? []).length
+check('音符 text 数量正确', noteposCount === 32, `got ${noteposCount}`)
+
+// 复杂音符行渲染
+const rc2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1\'- 2,,$ 3// 4. | 0 8 9 ||\n')
+const lay2 = layoutScore(rc2, defaultPageConfig)
+const svg2 = renderScoreToSvg(lay2)[0]
+const cnt2 = (svg2.match(/data-notepos=/g) ?? []).length
+check('复杂行 6 个可见音符（8 隐藏休止不画）', cnt2 === 6, `got ${cnt2}`)
+check('隐藏休止符不可播放', lay2.pages[0].notes.find((n) => n.token.kind === 'rest')?.playable === false)
+check('SVG 含增时线 rect', svg2.includes('width="7.56"'))
+const barRects = (svg2.match(/width="1.5"/g) ?? []).length
+check('小节线竖线 3 条（单线 1 + 双线 2）', barRects === 3, `got ${barRects}`)
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)
