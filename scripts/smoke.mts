@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { parseJps, formatJps, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig } from '../src/engine/index.ts'
 import { buildPlaySequence, inferBpm } from '../src/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '../src/engine/cursorMap.ts'
-import { computeRowTops, computeRowGuides, dragDelta, clamp } from '../src/engine/layout/guides.ts'
+import { computeRowTops, computeRowGuides, dragDelta, clamp, clampMetaPos } from '../src/engine/layout/guides.ts'
 import { computeBeamsForTest } from '../src/engine/render/index.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
 import { highlightCode } from '../src/editor/highlight.ts'
@@ -627,6 +627,22 @@ check('词底 = 歌词基线 + 歌词字号', Math.abs((rg0.lyricBottom ?? 0) - 
 // 无歌词行：lyricTop null（连音线谱第 2 小节无歌词？用纯曲谱验证）
 const rgsNo = computeRowGuides(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n'), defaultPageConfig), { quci: 13, geci: 18 })
 check('无歌词行 lyricTop=null', rgsNo[0][0].lyricTop === null)
+
+// ---- 32. 描述头位置钳制（adj11） ----
+console.log('[32] meta clamp (adj11)')
+// 描述区：上 80，下 = 80+40+36×1.6+30 = 207.6，左 80，右 595.28-80 = 515.28
+const cfgClamp = defaultPageConfig
+// 越界位置被钳制回区域内
+const c1 = clampMetaPos('title', 9999, 9999, 595.28, cfgClamp)
+check('标题超右下被钳制', c1.x === 515.28 && c1.y === 207.6, JSON.stringify(c1))
+const c2 = clampMetaPos('title', -100, -100, 595.28, cfgClamp)
+check('标题超左上被钳制', c2.x === 80 && c2.y === 80, JSON.stringify(c2))
+// 调式拍号（左对齐）右侧留 40
+const c3 = clampMetaPos('keyline', 9000, 100, 595.28, cfgClamp)
+check('keyline 右侧留 40', c3.x === 515.28 - 40, JSON.stringify(c3))
+// 区域内位置不变
+const c4 = clampMetaPos('author_0', 400, 150, 595.28, cfgClamp)
+check('区域内位置不变', c4.x === 400 && c4.y === 150, JSON.stringify(c4))
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

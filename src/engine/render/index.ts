@@ -13,6 +13,7 @@
  * TODO(M7)：跳房子/连音线/装饰符号/多声部
  */
 import type { PageConfig, PlacedBarline, PlacedDynamic, PlacedLyric, PlacedSlur, PlacedToken, ScoreLayout, ScorePage, VoiceBlock } from '../types'
+import { metaAreaH } from '../layout/guides'
 
 // ============================================================
 // 工具
@@ -56,11 +57,6 @@ function noteFont(style: import('../types').PageConfig['shuzi_font']): string {
 // ============================================================
 // 页面骨架与元数据（描述头）
 // ============================================================
-
-/** 描述头区高度（与 layout.metrics.titleAreaH 一致） */
-function metaAreaH(config: PageConfig): number {
-  return config.margin_top + config.body_margin_top + config.biaoti_size * 1.6 + 30
-}
 
 /**
  * 描述头默认布局：

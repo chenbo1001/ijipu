@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { layoutScore, renderScoreToSvg, noteIdToCodePos } from '../engine'
-import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '../engine/layout/guides'
+import { computeRowTops, computeRowGuides, dragDelta, clampMetaPos, clamp, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '../engine/layout/guides'
 import { brand } from '../brand/tokens'
 
 /** 预览 SVG 显示宽度（与渲染容器一致） */
@@ -107,9 +107,17 @@ export function PreviewPane() {
       const d = metaDragRef.current
       if (!d) return
       const next = { ...(pageConfigRef.current.metaPos ?? {}) }
+      // 钳制在描述头区域内（adj11）
+      const pos = clampMetaPos(
+        d.key,
+        d.baseX + (ev.clientX - d.startX) / scale,
+        d.baseY + (ev.clientY - d.startY) / scale,
+        layout.pages[0].width,
+        pageConfigRef.current,
+      )
       next[d.key] = {
-        x: Math.round((d.baseX + (ev.clientX - d.startX) / scale) * 10) / 10,
-        y: Math.round((d.baseY + (ev.clientY - d.startY) / scale) * 10) / 10,
+        x: Math.round(pos.x * 10) / 10,
+        y: Math.round(pos.y * 10) / 10,
       }
       setPageConfig({ ...pageConfigRef.current, metaPos: next })
     }

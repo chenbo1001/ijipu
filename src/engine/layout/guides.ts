@@ -106,6 +106,42 @@ export function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v))
 }
 
+/** 描述头区域高度（下沿；与 layout.metrics.titleAreaH 一致） */
+export function metaAreaH(cfg: {
+  margin_top: number
+  body_margin_top: number
+  biaoti_size: number
+}): number {
+  return cfg.margin_top + cfg.body_margin_top + cfg.biaoti_size * 1.6 + 30
+}
+
+/**
+ * 描述头元素位置钳制：不超出描述头区域边线（上 margin_top / 下 metaAreaH / 左 margin_left / 右 页宽-margin_right）。
+ * 调式/拍号/节拍（左对齐）起点右侧留 40 防文本越界；标题/副标题为文本中心。
+ */
+export function clampMetaPos(
+  key: string,
+  x: number,
+  y: number,
+  pageW: number,
+  cfg: {
+    margin_top: number
+    margin_left: number
+    margin_right: number
+    body_margin_top: number
+    biaoti_size: number
+  },
+): { x: number; y: number } {
+  const areaBottom = metaAreaH(cfg)
+  const minX = cfg.margin_left
+  const maxX = pageW - cfg.margin_right
+  const xMax = key.startsWith('keyline') || key.startsWith('tempo') ? maxX - 40 : maxX
+  return {
+    x: clamp(x, minX, xMax),
+    y: clamp(y, cfg.margin_top, areaBottom),
+  }
+}
+
 /** 各字段的调整范围 */
 export const GUIDE_LIMITS: Record<GuideDragSpec['key'], [number, number]> = {
   margin_top: [20, 400],
