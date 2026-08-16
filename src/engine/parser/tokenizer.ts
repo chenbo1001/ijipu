@@ -55,6 +55,37 @@ export function tokenizeMusicLine(
     lastBlockCounts = true
   }
 
+  /** 解析 [ 后的跳房子修饰（adj26）：+ 抬高（可多个）、/ 不封闭、引号注释（番号） */
+  const parseVoltaMods = (start: number): { k: number; slash: boolean; plus: number; comment?: string } => {
+    let k = start
+    let slash = false
+    let plus = 0
+    let comment: string | undefined
+    while (k < n) {
+      const ch = content[k]
+      if (ch === '/') {
+        slash = true
+        k++
+      } else if (ch === '+') {
+        plus++
+        k++
+      } else if (ch === '"') {
+        const close = content.indexOf('"', k + 1)
+        if (close === -1) {
+          comment = content.slice(k + 1)
+          errors.push(err('引号注释未闭合', { line: pos.line, col: pos.col + k }))
+          k = n
+        } else {
+          comment = content.slice(k + 1, close)
+          k = close + 1
+        }
+      } else {
+        break
+      }
+    }
+    return { k, slash, plus, comment }
+  }
+
   // 收集一个 token 的公共后缀：变音/减时线/增时线/附点/高低音点/装饰/注释
   const collectSuffix = (
     start: number,
@@ -253,26 +284,22 @@ export function tokenizeMusicLine(
           j = close + 1
         }
       }
-      // 跳房子标记紧跟小节线
+      // 跳房子标记紧跟小节线（adj26：修饰 = + 抬高 / 不封闭 / 引号注释）
       if (content[j] === '[') {
+        const mod = parseVoltaMods(j + 1)
+        t.voltaStart = { open: true, slash: mod.slash, plus: mod.plus, comment: mod.comment }
+        t.raw = rawAt(i, mod.k)
+        j = mod.k
+      } else if (content[j] === ']') {
+        // |] 跳房子结束；|]/ 开口结束（adj26）
+        t.voltaEnd = true
         let k = j + 1
-        let slash = false
-        let plus = 0
         if (content[k] === '/') {
-          slash = true
+          t.voltaEndSlash = true
           k++
         }
-        while (content[k] === '+') {
-          plus++
-          k++
-        }
-        t.voltaStart = { open: true, slash, plus }
         t.raw = rawAt(i, k)
         j = k
-      } else if (content[j] === ']') {
-        t.voltaEnd = true
-        t.raw = rawAt(i, j + 1)
-        j++
       } else if (t.comment === undefined) {
         j = barEnd // 无备注/跳房子：回退到空格前（空格留给下一个块）
       }
@@ -360,42 +387,58 @@ export function tokenizeMusicLine(
       }
     }
 
-    // 跳房子标记（独立出现，例如行首用 |/ 之后；或小节线引号备注后带空格）
+    // 跳房子标记（独立出现，例如行首用 |/ 之后；或小节线引号备注后带空格；或 ] 后连续 [）
     if (c === '[') {
+      const mod = parseVoltaMods(i + 1)
+      const last = tokens[tokens.length - 1]
+      if (last && last.kind === 'barline' && !last.voltaStart && !last.voltaEnd) {
+        // 继承前一小节线（含番号备注），合并跳房子起点
+        last.voltaStart = { open: true, slash: mod.slash, plus: mod.plus, comment: mod.comment }
+        last.raw += rawAt(i, mod.k)
+        lastBlockEnd = mod.k // 小节线块结束延展
+      } else {
+        if (!last || last.kind !== 'barline') {
+          errors.push(
+            err('跳房子 "[" 应写在小节线后（行首请用 |/ 或小节线，adj26）', {
+              line: pos.line,
+              col: pos.col + i,
+            }, 'warning'),
+          )
+        }
+        // ] 后连续 [ 或行首：纯跳房子起点（voltaOnly，不画小节线竖线）；
+        // 属于跳房子延续（] [ 无空格），不参与块间空格校验
+        tokens.push({
+          kind: 'barline',
+          type: '|',
+          voltaStart: { open: true, slash: mod.slash, plus: mod.plus, comment: mod.comment },
+          voltaOnly: true,
+          pos: i,
+          raw: rawAt(i, mod.k),
+        })
+        lastBlockEnd = mod.k
+        lastBlockCounts = true
+      }
+      i = mod.k
+      continue
+    }
+    if (c === ']') {
+      // 跳房子结束；]/ 开口结束（adj26）
       let k = i + 1
       let slash = false
-      let plus = 0
       if (content[k] === '/') {
         slash = true
         k++
       }
-      while (content[k] === '+') {
-        plus++
-        k++
-      }
-      const last = tokens[tokens.length - 1]
-      if (last && last.kind === 'barline' && !last.voltaStart) {
-        // 继承前一小节线（含番号备注），合并跳房子起点
-        last.voltaStart = { open: true, slash, plus }
-        last.raw += rawAt(i, k)
-        lastBlockEnd = k // 小节线块结束延展
-      } else {
-        tokens.push({
-          kind: 'barline',
-          type: '|',
-          voltaStart: { open: true, slash, plus },
-          pos: i,
-          raw: rawAt(i, k),
-        })
-        registerBlock(i, k)
-      }
+      tokens.push({
+        kind: 'barline',
+        type: '|',
+        voltaEnd: true,
+        voltaEndSlash: slash,
+        pos: i,
+        raw: rawAt(i, k),
+      })
+      registerBlock(i, k)
       i = k
-      continue
-    }
-    if (c === ']') {
-      tokens.push({ kind: 'barline', type: '|', voltaEnd: true, pos: i, raw: ']' })
-      registerBlock(i, i + 1)
-      i++
       continue
     }
 

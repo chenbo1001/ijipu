@@ -286,6 +286,8 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
 // ============================================================
 
 function renderBarline(bar: PlacedBarline): string {
+  // 纯跳房子起点（] 后连续 [ 或行首）：只承载跳房子线，不画小节线竖线（adj26）
+  if (bar.voltaOnly) return ''
   const { x, yTop, yBottom } = bar
   const parts: string[] = []
   const draw = (off: number, w: number) =>
@@ -387,12 +389,13 @@ function renderVoiceBlocks(page: ScorePage, vb: VoiceBlock): string {
 // 跳房子渲染（M7b）
 // ============================================================
 
-/** 画一条跳房子线（起点 [ 至终点 ]；未封闭时向右延伸） */
+/** 画一条跳房子线（起点 [ 至终点 ]；未封闭或 |]/ 开口时终点不封闭） */
 function renderVoltaLine(start: PlacedBarline, end: PlacedBarline | null): string {
   const plus = start.voltaStart?.plus ?? 0
   const y = start.yTop - 16 - plus * 4
   const x1 = start.x
   const x2 = end ? end.x : start.x + 60
+  const openEnd = !end || !!end.voltaEndSlash // 开口结束：无终点折线（adj26）
   const parts: string[] = []
   // 起点竖线（[ 处：从线高向下到行顶上方）
   parts.push(
@@ -402,16 +405,17 @@ function renderVoltaLine(start: PlacedBarline, end: PlacedBarline | null): strin
   parts.push(
     `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#1b1b1b" stroke-width="1.4"/>`,
   )
-  // 终点折线（] 处：向下到行顶）
-  if (end) {
+  // 终点折线（] 处：向下到行顶；开口结束不画）
+  if (end && !openEnd) {
     parts.push(
       `<line x1="${x2}" y1="${y}" x2="${x2}" y2="${end.yTop + 4}" stroke="#1b1b1b" stroke-width="1.4"/>`,
     )
   }
-  // 番号（小节线引号备注）显示在线起点上方
-  if (start.comment) {
+  // 番号（[ 后引号注释优先；小节线引号备注兼容）显示在线起点上方
+  const label = start.voltaStart?.comment ?? start.comment
+  if (label) {
     parts.push(
-      `<text x="${x1 + 4}" y="${y - 5}" font-size="10" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(start.comment)}</text>`,
+      `<text x="${x1 + 4}" y="${y - 5}" font-size="10" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(label)}</text>`,
     )
   }
   return parts.join('\n')

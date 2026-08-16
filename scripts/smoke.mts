@@ -795,5 +795,38 @@ check('formatter 多空格压缩为单空格', fmt37b.includes('1 2 | 3 4') && !
 const hl37 = highlightCode('V: 1.0\nB: t\nQ: 1 2 | 3 4\n')
 check('编辑器小节线高亮 class', hl37.includes('class="hl-barline"'), '')
 
+// ---- 38. 跳房子语法（adj26） ----
+console.log('[38] volta syntax (adj26)')
+// 1. 基本：|["1." 4 4 5 |]["2." 5 4 3 |] 两头封闭 + 连续跳房子
+const r38a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |["1." 4 4 5 |]["2." 5 4 3 |] 7 |\n')
+const bars38a = r38a.groups[0].music.tokens.filter((t) => t.kind === 'barline')
+check('跳房子 5 个小节线块（2 起点 + 2 终点 + 行尾）', r38a.errors.length === 0 && bars38a.length === 5, JSON.stringify(r38a.errors))
+const vs1 = bars38a[0].kind === 'barline' ? bars38a[0].voltaStart : undefined
+const ve1 = bars38a[1].kind === 'barline' ? bars38a[1] : undefined
+const vs2 = bars38a[2].kind === 'barline' ? bars38a[2].voltaStart : undefined
+check('跳房子 1 注释 "1."', !!vs1 && vs1.comment === '1.', JSON.stringify(vs1))
+check('跳房子 1 以 |] 结束', !!ve1 && ve1.voltaEnd === true && ve1.voltaEndSlash !== true)
+check('连续跳房子 2 注释 "2."（voltaOnly）', !!vs2 && vs2.comment === '2.' && bars38a[2].kind === 'barline' && bars38a[2].voltaOnly === true, JSON.stringify(vs2))
+// 2. 修饰：+ 抬高、|]/ 开口结束
+const r38b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |[+"1." 4 4 5 |]/ 7 |\n')
+const b38b = r38b.groups[0].music.tokens.filter((t) => t.kind === 'barline')
+check('[+ 抬高 + 注释', b38b.length === 3 && b38b[0].kind === 'barline' && b38b[0].voltaStart?.plus === 1 && b38b[0].voltaStart?.comment === '1.', JSON.stringify(b38b[0]))
+check('|]/ 开口结束', b38b[1].kind === 'barline' && b38b[1].voltaEnd === true && b38b[1].voltaEndSlash === true, JSON.stringify(b38b[1]))
+// 3. 行首跳房子用 |/ [
+const r38c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |/ [ 5 6 ] 1 2 |\n')
+const b38c = r38c.groups[0].music.tokens.filter((t) => t.kind === 'barline')
+check('|/ [ 行首跳房子并入隐藏小节线', r38c.errors.length === 0 && b38c[0].kind === 'barline' && b38c[0].voltaStart?.open === true && b38c[0].type === '|/', JSON.stringify(b38c[0]))
+// 行首直接 [ → 警告
+const r38d = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: [ 5 6 ] 1 2 |\n')
+check('行首 [ 无小节线 → 警告', r38d.errors.some((e) => e.message.includes('小节线后')))
+// 渲染：番号显示在线起点上方
+const lay38 = layoutScore(r38a, defaultPageConfig)
+const svg38 = renderScoreToSvg(lay38)[0]
+check('跳房子番号 "1." "2." 渲染', svg38.includes('>1.<') && svg38.includes('>2.<'))
+// 播放：反复中跳房子段第二遍跳过（注意 8 是隐藏休止符，用 7 1 收尾）
+const r38p = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 |["1." 3 4 |]["2." 5 6 |] 7 1 :|\n')
+const seq38 = buildPlaySequence(r38p, layoutScore(r38p, defaultPageConfig), 120)
+check('跳房子播放 12 事件（pass1 全 8 + pass2 1,2,7,1）', seq38.events.length === 12 && pitchSeq(seq38) === 'C4,D4,E4,F4,G4,A4,B4,C4,C4,D4,B4,C4', `${seq38.events.length}:${pitchSeq(seq38)}`)
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

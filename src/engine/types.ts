@@ -213,7 +213,7 @@ export type BarlineType =
 export interface BarlineToken {
   kind: 'barline'
   type: BarlineType
-  /** 跳房子起点标记 */
+  /** 跳房子起点标记（adj26：[ 后修饰支持 + 抬高 / 不封闭、"注释"） */
   voltaStart?: {
     /** 是否有 "[" 起点 */
     open: boolean
@@ -221,9 +221,15 @@ export interface BarlineToken {
     slash?: boolean
     /** + 号数量，调整跳房子线高度 */
     plus?: number
+    /** [ 后引号注释（跳房子番号，adj26） */
+    comment?: string
   }
   /** 是否为跳房子终点 "]" */
   voltaEnd?: boolean
+  /** |]/ 跳房子开口结束（终点不封闭，adj26） */
+  voltaEndSlash?: boolean
+  /** 纯跳房子起点（无小节线的 [，如 ] 后连续 [ 或行首），渲染不画小节线竖线（adj26） */
+  voltaOnly?: boolean
   /** 小节线备注（引号内容） */
   comment?: string
   pos: number
@@ -354,8 +360,12 @@ export interface PlacedBarline {
   id: LayoutId
   type: BarlineType
   /** 跳房子起点/终点标记 */
-  voltaStart?: { open: boolean; slash?: boolean; plus?: number }
+  voltaStart?: { open: boolean; slash?: boolean; plus?: number; comment?: string }
   voltaEnd?: boolean
+  /** |]/ 跳房子开口结束（adj26） */
+  voltaEndSlash?: boolean
+  /** 纯跳房子起点（无小节线），不画小节线竖线（adj26） */
+  voltaOnly?: boolean
   /** 小节线备注 */
   comment?: string
   /** 小节线中心 x */

@@ -456,6 +456,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
             type: bar.type,
             voltaStart: bar.voltaStart,
             voltaEnd: bar.voltaEnd,
+            voltaEndSlash: bar.voltaEndSlash,
+            voltaOnly: bar.voltaOnly,
             comment: bar.comment,
             x: r1(lineX),
             yTop,
@@ -588,6 +590,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           type: bar.type,
           voltaStart: bar.voltaStart,
           voltaEnd: bar.voltaEnd,
+          voltaEndSlash: bar.voltaEndSlash,
+          voltaOnly: bar.voltaOnly,
           comment: bar.comment,
           // 小节线在小节右边界，并在小节间距内居中（adj25：修正此前画在小节中央）
           x: r1(xBar + barBeats[b] * perBeat + (b < numBars - 1 ? config.bar_gap / 2 : 0)),
