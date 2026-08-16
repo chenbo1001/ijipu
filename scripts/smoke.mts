@@ -296,5 +296,34 @@ const gapOverride = rowsOverride[1] - rowsOverride[0]
 const gapDefault = rowsDefault[1] - rowsDefault[0]
 check('按页覆盖行距生效（第 2 页 ciqu 150 > 40）', gapOverride - gapDefault > 50, `gap=${gapDefault}→${gapOverride}`)
 
+// ---- 17. 多声部（M7a） ----
+console.log('[17] voice blocks (M7a)')
+const vc = parseJps('V: 1.0\nB: 多声部测试\nD: C\nP: 4/4\nQ1: 1 2 3 4 |\nC1: 男 声 歌 词\nQ2: 5 6 5 3 |\nC2: 女 声 歌 词\n')
+const layV = layoutScore(vc, defaultPageConfig)
+check('多声部 1 页', layV.pages.length === 1, `got ${layV.pages.length}`)
+const vb = layV.pages[0].voiceBlocks
+check('1 个声部块', vb.length === 1, `got ${vb.length}`)
+check('块含 2 声部', vb[0]?.voices.length === 2)
+const v1Notes = layV.pages[0].notes.filter((n) => n.id.voice === 1)
+const v2Notes = layV.pages[0].notes.filter((n) => n.id.voice === 2)
+check('两个声部各 4 音符', v1Notes.length === 4 && v2Notes.length === 4, `${v1Notes.length}/${v2Notes.length}`)
+check('声部纵向堆叠（y 不同）', Math.abs(v1Notes[0].y - v2Notes[0].y) > 10, `dy=${Math.abs(v1Notes[0].y - v2Notes[0].y)}`)
+check('块小节线跨声部', layV.pages[0].barlines.length >= 1)
+const svgV = renderScoreToSvg(layV)[0]
+check('SVG 含大括号 path', svgV.includes('fill="none" stroke="#1b1b1b"'))
+check('SVG 含声部标签', svgV.includes('声部1') && svgV.includes('声部2'))
+// 命名声部
+const vc2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1"男声": 1 2 3 4 |\nQ2"女声": 5 6 5 3 |\n')
+const layV2 = layoutScore(vc2, defaultPageConfig)
+const vb2 = layV2.pages[0].voiceBlocks[0]
+check('命名声部解析', vb2?.voices[0]?.name === '男声' && vb2?.voices[1]?.name === '女声')
+const svgV2 = renderScoreToSvg(layV2)[0]
+check('SVG 含声部名称文本', svgV2.includes('男声') && svgV2.includes('女声'))
+// 多声部+单声部混合
+const vc3 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\nQ1: 5 6 5 3 |\nQ2: 3 4 5 1 |\nQ: 5 3 1 - |\n')
+const layV3 = layoutScore(vc3, defaultPageConfig)
+check('混合排版 1 个块 + 单声部组', layV3.pages[0].voiceBlocks.length === 1)
+check('混合：总音符 15（末行 1- 为 1 音符+增时线）', layV3.pages[0].notes.length === 15, `got ${layV3.pages[0].notes.length}`)
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

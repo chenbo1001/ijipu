@@ -12,7 +12,7 @@
  * TODO(M1c)：歌词 <text data-cipos>
  * TODO(M7)：跳房子/连音线/装饰符号/多声部
  */
-import type { PageConfig, PlacedBarline, PlacedLyric, PlacedToken, ScoreLayout, ScorePage } from '../types'
+import type { PageConfig, PlacedBarline, PlacedLyric, PlacedToken, ScoreLayout, ScorePage, VoiceBlock } from '../types'
 
 // ============================================================
 // 工具
@@ -242,6 +242,46 @@ function renderLyric(lyric: PlacedLyric, config: PageConfig): string {
 }
 
 // ============================================================
+// 多声部括弧与名称（M7a）
+// ============================================================
+
+/** 生成垂直大括号 path（两端弧 + 中部凸起） */
+function bracePath(x: number, yTop: number, yBottom: number): string {
+  const mid = (yTop + yBottom) / 2
+  const r = Math.min(10, (yBottom - yTop) / 5)
+  const inner = Math.min(r * 0.9, r)
+  return [
+    `M ${x} ${yTop}`,
+    `Q ${x - r} ${yTop + r} ${x} ${yTop + r * 1.8}`,
+    `L ${x} ${mid - inner}`,
+    `Q ${x - inner * 0.7} ${mid} ${x} ${mid + inner}`,
+    `L ${x} ${yBottom - r * 1.8}`,
+    `Q ${x - r} ${yBottom - r} ${x} ${yBottom}`,
+  ].join(' ')
+}
+
+function renderVoiceBlocks(page: ScorePage, vb: VoiceBlock): string {
+  const parts: string[] = []
+  // 大括号
+  parts.push(
+    `<path d="${bracePath(vb.x, vb.yTop, vb.yBottom)}" fill="none" stroke="#1b1b1b" stroke-width="1.5"/>`,
+  )
+  // 声部名称（括弧左侧，对应各行中部；无名称显示声部号）
+  const h = vb.yBottom - vb.yTop
+  const n = vb.voices.length
+  for (let i = 0; i < n; i++) {
+    const v = vb.voices[i]
+    const cy = vb.yTop + (h * (i + 0.5)) / n
+    const label = v.name ?? `声部${v.voice}`
+    parts.push(
+      `<text x="${vb.x - 10}" y="${cy}" text-anchor="end" dominant-baseline="middle" font-size="12" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(label)}</text>`,
+    )
+  }
+  void page
+  return parts.join('\n')
+}
+
+// ============================================================
 // 页面组装
 // ============================================================
 
@@ -253,6 +293,7 @@ function renderPage(page: ScorePage, config: PageConfig): string {
   for (const n of page.notes) body.push(renderNote(n, config))
   for (const b of page.barlines) body.push(renderBarline(b))
   for (const l of page.lyrics) body.push(renderLyric(l, config))
+  for (const vb of page.voiceBlocks) body.push(renderVoiceBlocks(page, vb))
 
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +

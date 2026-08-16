@@ -2,17 +2,21 @@
  * engine/layout/index.ts — 排版引擎
  *
  * M1a：单行横向排布、音高映射、坐标精度。
- * M1b：行内自动换行（按页面可用宽度断行）、[fenye] 手动分页、多行纵向排布。
+ * M1b：行内自动换行、[fenye] 手动分页、多行纵向排布。
+ * M1c：歌词逐字对齐。
+ * M5：行距配置化（曲上/曲下/词下）、按页覆盖 heights。
+ * M7a：多声部块（Q1/Q2 纵向堆叠、按小节对齐、声部括弧信息）。
  *
- * TODO(M1c)：歌词逐字对齐（PlacedLyric）
- * TODO(M7)：多声部堆叠、装饰符号定位
+ * TODO(M7c)：连音线定位信息
  */
 import { PAPER_SIZE } from '../types'
 import { tokenDuration } from '../duration'
 import type {
+  BarlineType,
   LayoutId,
   LyricChar,
   LyricLine,
+  MusicGroup,
   MusicToken,
   NoteToken,
   PageConfig,
@@ -21,6 +25,7 @@ import type {
   ScoreLayout,
   ScorePage,
   ScorePageMeta,
+  VoiceBlock,
 } from '../types'
 
 // ============================================================
@@ -126,6 +131,20 @@ function toPlayable(t: MusicToken): t is NoteToken {
 const r1 = (v: number) => Math.round(v * 10) / 10
 
 // ============================================================
+// 排版单元：单声部组 / 多声部块
+// ============================================================
+
+interface UnitGroup {
+  groupIndex: number
+  group: MusicGroup
+}
+
+interface Unit {
+  groups: UnitGroup[]
+  multi: boolean
+}
+
+// ============================================================
 // 主排版函数
 // ============================================================
 
@@ -154,8 +173,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       width: paper.width,
       height: paper.height,
       notes: [],
-      lyrics: [], // M1c
+      lyrics: [],
       barlines: [],
+      voiceBlocks: [],
       meta,
     }
     pages.push(page)
@@ -166,7 +186,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   let pageIndex = 0
   let y = m.titleAreaH // 当前行顶 y
 
-  /** 将组内 [start, end) 的 tokens 排布到指定页/行的段 */
+  /** 将 tokens 段排布到指定页/行（x 从 xStart 起；歌词按槽位对齐） */
   const placeSegment = (
     groupIndex: number,
     voice: number,
@@ -179,15 +199,17 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     lyricMaps: Map<number, LyricChar>[],
     geciSize: number,
     sp: Spacing,
+    xStart: number,
   ) => {
     const page = pages[pageIdx]
     const yBottom = r1(yTop + m.noteSize * 1.7)
-    let x = config.margin_left
+    let x = xStart
     let slotIndex = slotStart
     for (let i = start; i < end; i++) {
       const token = tokens[i]
       const id: LayoutId = { page: pageIdx, voice, group: groupIndex, index: noteCounter }
       if (token.kind === 'barline') {
+        // 单声部行内小节线（多声部块的小节线由块级统一处理）
         page.barlines.push({
           id,
           type: token.type,
@@ -233,23 +255,14 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         noteCounter++
         x = r1(x + w + m.noteGap)
       }
-      // decoration / slur 等 M1a 不占位（后续迭代）
+      // barline / decoration / slur 由块级或单声部流程处理
     }
   }
 
-  /** 处理一个曲词组：可能拆成多个视觉行；歌词按槽位对齐 */
-  const placeGroup = (groupIndex: number, voice: number, tokens: MusicToken[], lyrics: LyricLine[]) => {
-    const widths = tokens.map((t) => tokenWidth(t, m) + m.noteGap)
-
-    // 槽位 = note/rest/rhythm 在 tokens 中的序号
-    const slots: number[] = []
-    tokens.forEach((t, i) => {
-      if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') slots.push(i)
-    })
-
-    // 歌词 → 槽位映射（每行词独立）：标点不占槽位（不绘制）；@ 消耗槽位
-    const geciSize = config.geci_size
-    const lyricMaps: Map<number, LyricChar>[] = lyrics.map((line) => {
+  /** 构造单声部组的歌词槽位映射 */
+  const buildLyricMaps = (lyrics: LyricLine[], geciSize: number) => {
+    void geciSize
+    return lyrics.map((line) => {
       const map = new Map<number, LyricChar>()
       let slot = 0
       for (const ch of line.chars) {
@@ -263,16 +276,25 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       }
       return map
     })
+  }
+
+  /** 处理一个单声部组：可能拆成多个视觉行 */
+  const placeGroup = (groupIndex: number, voice: number, tokens: MusicToken[], lyrics: LyricLine[]) => {
+    const widths = tokens.map((t) => tokenWidth(t, m) + m.noteGap)
+    const slots: number[] = []
+    tokens.forEach((t, i) => {
+      if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') slots.push(i)
+    })
+    const geciSize = config.geci_size
+    const lyricMaps = buildLyricMaps(lyrics, geciSize)
 
     let segStart = 0
     let x = config.margin_left
     for (let i = 0; i < widths.length; i++) {
       if (i > segStart && x + widths[i] > rightLimit) {
-        // 段起始全局槽位序号 = 该段开始前已放置的槽位数
         const slotStart = slots.filter((s) => s < segStart).length
         const sp = spacingFor(config, pageIndex)
-        placeSegment(groupIndex, voice, tokens, segStart, i, pageIndex, y, slotStart, lyricMaps, geciSize, sp)
-        // 换行 / 换页
+        placeSegment(groupIndex, voice, tokens, segStart, i, pageIndex, y, slotStart, lyricMaps, geciSize, sp, config.margin_left)
         y += lineHeightOf(config, m, sp, lyrics.length)
         if (y + m.noteSize * 1.7 > bottomLimit) {
           pageIndex = pages.length
@@ -286,7 +308,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     }
     const slotStart = slots.filter((s) => s < segStart).length
     const spEnd = spacingFor(config, pageIndex)
-    placeSegment(groupIndex, voice, tokens, segStart, tokens.length, pageIndex, y, slotStart, lyricMaps, geciSize, spEnd)
+    placeSegment(groupIndex, voice, tokens, segStart, tokens.length, pageIndex, y, slotStart, lyricMaps, geciSize, spEnd, config.margin_left)
     y += lineHeightOf(config, m, spEnd, lyrics.length)
     if (y + m.noteSize * 1.7 > bottomLimit) {
       pageIndex = pages.length
@@ -295,19 +317,184 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     }
   }
 
-  // 按源行顺序遍历：music 行排布，pagebreak 行强制分页
-  for (const line of result.lines) {
-    if (line.kind === 'pagebreak') {
+  /** 多声部块：各声部按小节对齐纵向堆叠 */
+  const placeVoiceBlock = (unit: Unit) => {
+    const geciSize = config.geci_size
+    const sp = spacingFor(config, pageIndex)
+
+    // 各声部按小节切分（barline 由块级统一处理）
+    const splitByBar = (tokens: MusicToken[]) => {
+      const segs: MusicToken[][] = []
+      const bars: (Extract<MusicToken, { kind: 'barline' }> | null)[] = []
+      let cur: MusicToken[] = []
+      for (const t of tokens) {
+        if (t.kind === 'barline') {
+          segs.push(cur)
+          cur = []
+          bars.push(t)
+        } else {
+          cur.push(t)
+        }
+      }
+      if (cur.length) segs.push(cur)
+      bars.push(null)
+      return { segs, bars }
+    }
+
+    const parts = unit.groups.map(({ group }) => {
+      const { segs, bars } = splitByBar(group.music.tokens)
+      return {
+        voice: group.music.voice,
+        name: group.music.voiceName,
+        segs,
+        bars,
+        lyricMaps: buildLyricMaps(group.lyrics, geciSize),
+        lyricRows: group.lyrics.length,
+      }
+    })
+
+    const numBars = Math.max(...parts.map((p) => p.segs.length))
+
+    // 小节宽度 = max(各声部该小节内容宽)
+    const barWidths: number[] = []
+    for (let b = 0; b < numBars; b++) {
+      let w = 0
+      for (const p of parts) {
+        const seg = p.segs[b] ?? []
+        const sw = seg.reduce((a, t) => a + tokenWidth(t, m) + m.noteGap, 0)
+        w = Math.max(w, sw)
+      }
+      barWidths.push(w)
+    }
+    // 块内每声部行高（含歌词）
+    const voiceHeights = parts.map((p) => lineHeightOf(config, m, sp, p.lyricRows))
+    const blockH = voiceHeights.reduce((a, b) => a + b, 0)
+
+    // 块超宽/超高 → 换行/换页
+    if (y + blockH > bottomLimit) {
       pageIndex = pages.length
       startPage()
       y = m.titleAreaH
+    }
+
+    const blockY = y
+    let voiceY = blockY
+    const blockVoices: VoiceBlock['voices'] = []
+
+    for (let vi = 0; vi < parts.length; vi++) {
+      const p = parts[vi]
+      blockVoices.push({ voice: p.voice, name: p.name })
+      let x = config.margin_left
+      let slotCounter = 0
+      for (let b = 0; b < numBars; b++) {
+        const seg = p.segs[b] ?? []
+        placeSegment(
+          vi, // groupIndex：块内声部序号（id.group 语义）
+          p.voice,
+          seg,
+          0,
+          seg.length,
+          pageIndex,
+          voiceY,
+          slotCounter,
+          p.lyricMaps,
+          geciSize,
+          sp,
+          x,
+        )
+        slotCounter += seg.length
+        x += barWidths[b]
+      }
+      voiceY += voiceHeights[vi]
+    }
+
+    // 块级小节线：跨所有声部（取第一个含 barline 的声部类型）
+    const barTypes: (BarlineType | null)[] = []
+    for (let b = 0; b < numBars; b++) {
+      let bt: BarlineType | null = null
+      for (const p of parts) {
+        const bar = p.bars[b]
+        if (bar) {
+          bt = bar.type
+          break
+        }
+      }
+      barTypes.push(bt)
+    }
+    let xBar = config.margin_left
+    for (let b = 0; b < numBars; b++) {
+      const bt = barTypes[b]
+      if (bt) {
+        const id: LayoutId = { page: pageIndex, voice: 0, group: 0, index: barCounter }
+        pages[pageIndex].barlines.push({
+          id,
+          type: bt,
+          x: r1(xBar + m.barlineWidth / 2),
+          yTop: blockY,
+          yBottom: blockY + blockH,
+          width: m.barlineWidth,
+        })
+        barCounter++
+      }
+      xBar += barWidths[b]
+    }
+
+    // 声部括弧信息
+    const vb: VoiceBlock = {
+      x: r1(config.margin_left - 12),
+      yTop: blockY,
+      yBottom: blockY + blockH,
+      voices: blockVoices,
+    }
+    pages[pageIndex].voiceBlocks.push(vb)
+
+    y = blockY + blockH
+  }
+
+  // ---- 构建排版单元序列（含分页标记） ----
+  const events: ({ kind: 'unit'; unit: Unit } | { kind: 'pagebreak' })[] = []
+  let cur: UnitGroup[] = []
+  let curVoices = new Set<number>()
+  const flush = () => {
+    if (cur.length > 0) {
+      events.push({ kind: 'unit', unit: { groups: cur, multi: curVoices.size > 1 } })
+      cur = []
+      curVoices = new Set()
+    }
+  }
+  for (const line of result.lines) {
+    if (line.kind === 'pagebreak') {
+      flush()
+      events.push({ kind: 'pagebreak' })
       continue
     }
     if (line.kind !== 'music') continue
     const groupIndex = result.groups.findIndex((g) => g.music === line)
     if (groupIndex === -1) continue
     const group = result.groups[groupIndex]
-    placeGroup(groupIndex, group.music.voice, group.music.tokens, group.lyrics)
+    const v = group.music.voice
+    if (cur.length > 0 && curVoices.has(v)) flush()
+    cur.push({ groupIndex, group })
+    curVoices.add(v)
+  }
+  flush()
+
+  // ---- 按事件序列排版 ----
+  for (const ev of events) {
+    if (ev.kind === 'pagebreak') {
+      pageIndex = pages.length
+      startPage()
+      y = m.titleAreaH
+      continue
+    }
+    const { unit } = ev
+    if (unit.multi) {
+      placeVoiceBlock(unit)
+    } else {
+      for (const { groupIndex, group } of unit.groups) {
+        placeGroup(groupIndex, group.music.voice, group.music.tokens, group.lyrics)
+      }
+    }
   }
 
   const configKey = JSON.stringify(config)

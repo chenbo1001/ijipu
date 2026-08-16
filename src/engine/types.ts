@@ -345,6 +345,18 @@ export interface PlacedBarline {
   width: number
 }
 
+/** 多声部块（Q1/Q2 纵向堆叠，小节对齐），供渲染声部括弧与名称 */
+export interface VoiceBlock {
+  /** 括弧 x（块左侧） */
+  x: number
+  /** 块顶 y（第一声部行顶） */
+  yTop: number
+  /** 块底 y（最末声部行底） */
+  yBottom: number
+  /** 各声部信息（按堆叠顺序） */
+  voices: { voice: number; name?: string }[]
+}
+
 /** 单个乐谱页 */
 export interface ScorePage {
   index: number
@@ -353,6 +365,7 @@ export interface ScorePage {
   notes: PlacedToken[]
   lyrics: PlacedLyric[]
   barlines: PlacedBarline[]
+  voiceBlocks: VoiceBlock[]
   /** 页面级元数据（标题/作者/调号拍号等文本元素） */
   meta: ScorePageMeta
 }
