@@ -38,7 +38,19 @@ npm install          # 依赖安装（自动执行 scripts/patch-vite.js 沙箱�
 npm run dev          # 本地开发 http://localhost:5173
 npm run build        # 类型检查 + 产物构建
 npm run lint         # oxlint 代码检查
+npm run smoke        # 引擎冒烟测试（147 项）
 ```
+
+## 桌面端（Tauri v2，Windows）
+
+环境已建好（Rust GNU 工具链 + MinGW + Tauri CLI，安装器可产出）：
+
+```bash
+. .\scripts\tauri-env.ps1   # 设置 Rust 环境变量（CARGO_HOME/RUSTUP_HOME 在工作区）
+npx tauri build             # 打包 → src-tauri/target/release/bundle/nsis/*-setup.exe
+```
+
+> **DSH 沙箱注意事项**：cargo/tauri 构建与 GUI 运行需完整权限（沙箱隔离了证书存储与 WebView2 初始化）；详见 docs/ERRORS-LOG.md E-2026-031/032。
 
 > **注意（DSH 环境）**：npm 命令需要显式指定缓存目录，因为沙箱只允许写工作区：
 > `npm install --cache "D:/Coding/JPCoder/.npm-cache"`

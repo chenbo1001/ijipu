@@ -223,6 +223,34 @@
 - **解决**：barline 分支解析后先 `while (content[j]===' '||content[j]==='\t') j++` 再处理引号与 `[ ]`
 - **预防**：语法边界（标记+备注+空格任意组合）统一先跳过空白再判后续 token；新增复杂演示谱必须纳入 smoke（本谱就是靠 M9 示例谱测试揪出的）
 
+### E-2026-029 T1 缺 MSVC 链接器 → 切换 GNU 工具链方案
+- **场景**：Tauri 环境搭建，cargo 编译 hello world
+- **现象**：`error: linker 'link.exe' not found`（msvc targets 需要 Visual Studio Build Tools，本机未装）
+- **根因**：rustup stable-msvc 工具链需要 MSVC 链接器；系统无 VS Build Tools（VS Code 不提供）
+- **解决**：① `rustup toolchain install stable-x86_64-pc-windows-gnu`（rustc 1.97.1 GNU）；② 下载 winlibs MinGW-w64（gcc 16.2.0，GitHub releases 105MB 7z，tar 解压到工作区）；③ `rustup default stable-x86_64-pc-windows-gnu` + PATH 加 `mingw64\bin`；④ 实测编译通过（cargotest.exe 4.7MB）
+- **预防**：Windows 上 Rust 编译先探测链接器（msvc link.exe 或 gnu gcc）；无 VS Build Tools 的机器直接上 GNU 工具链；cargo/rustup 命令必须带 `CARGO_HOME/RUSTUP_HOME`（工作区）+ PATH（rustup 不自改 PATH 时）
+
+### E-2026-030 T1 环境变量不跨 pwsh 进程
+- **场景**：rustup 安装后验证 rustc/cargo
+- **现象**：`could not create home directory: 'C:\Users\snail\.rustup': 拒绝访问`
+- **根因**：每条 pwsh 命令是独立进程，上一条设置的 `CARGO_HOME/RUSTUP_HOME` 不保留；rustup 回退默认用户目录被沙箱拦截
+- **解决**：所有 rust/cargo/tauri 命令在同一命令内设置 `$env:CARGO_HOME = "D:\Coding\JPCoder\.cargo"; $env:RUSTUP_HOME = "D:\Coding\JPCoder\.rustup"; $env:PATH += ".cargo\bin;mingw64\bin"`
+- **预防**：Rust 相关命令统一前置三件套环境变量；可封装为 `scripts/env-rust.ps1` 或统一命令前缀
+
+### E-2026-031 T1 沙箱隔离证书存储 → Rust/git schannel TLS 全失败（SEC_E_NO_CREDENTIALS）
+- **场景**：cargo 拉取 crates.io 依赖索引
+- **现象**：`SSL connect error (schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS)`——cargo（crates.io/rsproxy）、git（schannel 后端）全部 TLS 失败；git openssl 后端可连（TLS 通，镜像 git 索引 404 已停）；node fetch 正常
+- **根因**：DSH 沙箱（workspace-write）隔离了 Windows 证书存储访问 → schannel AcquireCredentialsHandle 拿不到凭据；node 的 fetch 不受影响
+- **解决**：**cargo/tauri 构建命令使用 danger-full-access 权限**（沙箱放宽后证书存储可访问，rsproxy-sparse 镜像下载成功）；`.cargo/config.toml` 配置 rsproxy 镜像 + `git-fetch-with-cli`
+- **预防**：① 本机 Rust 相关网络操作一律 danger-full-access；② 沙箱内 Rust/git https 报 SEC_E_NO_CREDENTIALS 先怀疑证书存储隔离（而非网络）；③ node fetch 用于下载工具链（rustup-init/MinGW/winlibs）不受此限
+
+### E-2026-032 T1 沙箱下 WebView2 初始化失败（exe panic 101）
+- **场景**：tauri exe 试运行
+- **现象**：workspace-write 权限下 exe 启动即退出 code=101（Rust panic）；无 stderr 输出
+- **根因**：DSH 沙箱限制 WebView2/COM 初始化（无完整桌面会话权限）；DLL 检查正常（WebView2Loader.dll 随行、GNU 运行时静态链接）
+- **解决**：danger-full-access 权限下运行，进程正常存活（GUI 启动）
+- **预防**：Tauri GUI 验证/运行一律 danger-full-access；先查 DLL 依赖（objdump -p）再查权限
+
 ## 五、预防清单（Checklist，提交/交付前自检）
 
 - [ ] 所有 npm 命令带 `--cache "D:/Coding/JPCoder/.npm-cache"`
@@ -255,3 +283,6 @@
 | v0.1 | 2026-08-16 | 追加 E-2026-025（M6 未使用变量） |
 | v0.1 | 2026-08-16 | 追加 E-2026-026/027（M7a 断言误算；M7b 番号合并/M7d 变量重名） |
 | v0.1 | 2026-08-16 | 追加 E-2026-028（M9 小节线备注前空格） |
+| v0.1 | 2026-08-16 | 追加 E-2026-029/030（T1 缺 MSVC 链接器→GNU 方案；rust 环境变量不跨进程） |
+| v0.1 | 2026-08-16 | 追加 E-2026-031（T1 沙箱隔离证书存储→schannel TLS 失败） |
+| v0.1 | 2026-08-16 | 追加 E-2026-032（T1 沙箱下 WebView2 初始化失败→完整权限 GUI 正常） |

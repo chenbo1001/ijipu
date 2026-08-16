@@ -125,10 +125,13 @@
 |---|---|---|
 | T1 | Tauri v2 打包（Windows 优先）：本地文件读写、离线安装包 | M |
 
-**T1 前置条件（2026-08-16 环境核查）**：
-- ✅ WebView2 已就绪（151.0.4129.86，Windows 运行时依赖）
-- ❌ Rust 工具链未安装（rustc/cargo/rustup 均缺失）——T1 启动时需先装 rustup（下载工具链），并实测沙箱下 cargo 编译的 spawn 行为与首次编译时长（Tauri 依赖量大，首编可达 10~30 分钟）
-- 前端保持 Web 构建（vite build 产物不变），Tauri 仅作壳；如沙箱限制过强，备选方案为本地 Electron/NW.js 壳或先交付便携式静态服务器包
+**T1 环境搭建（✅ 2026-08-16 完成）**：
+- ✅ Rust 1.97.1（GNU 工具链，`CARGO_HOME`/`RUSTUP_HOME` 置于工作区适配沙箱）
+- ✅ MinGW-w64 gcc 16.2.0（免装 VS Build Tools——本机无 MSVC 链接器，走 GNU 方案）
+- ✅ Tauri CLI 2.11.4（npm 分发）+ `src-tauri` 壳（tauri.conf.json / Cargo.toml / main.rs / capabilities / 品牌图标全套）
+- ✅ `npx tauri build` 编译通过（首编 3m32s，20.9MB exe）+ **NSIS 安装器产出**（`JianpuScript_0.1.0_x64-setup.exe` 3.7MB）+ GUI 运行验证通过
+- ⚠️ 沙箱适配：cargo/tauri 构建与 GUI 运行需 **danger-full-access**（沙箱隔离证书存储 → schannel TLS 失败；WebView2 初始化受限）；`scripts/tauri-env.ps1` 统一环境变量
+- **后续**：本地文件读写（打开/保存 .jps 的 Tauri commands）、自动更新、图标打磨
 
 ## 云端阶段（Python FastAPI —— 最后实施）
 
