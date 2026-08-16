@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { brand } from '../brand/tokens'
+import { THEMES } from '../brand/themes'
 import { formatJps } from '../engine'
 
 export function MenuBar() {
@@ -15,6 +16,8 @@ export function MenuBar() {
   const setViewType = useDocStore((s) => s.setViewType)
   const newDoc = useDocStore((s) => s.newDoc)
   const openModal = useUiStore((s) => s.openModal)
+  const theme = useUiStore((s) => s.theme)
+  const setTheme = useUiStore((s) => s.setTheme)
   const [open, setOpen] = useState<string | null>(null)
 
   const toggle = (key: string) => setOpen(open === key ? null : key)
@@ -85,6 +88,24 @@ export function MenuBar() {
         <div className="menu-entry" onClick={() => { openModal('playback'); setOpen(null) }}>
           试听播放 <span className="kbd">Ctrl+Q</span>
         </div>
+      </MenuItem>
+
+      <MenuItem label="主题(T)" open={open} name="theme" toggle={toggle}>
+        {THEMES.map((t) => (
+          <div
+            key={t.id}
+            className="menu-entry"
+            onClick={() => { setTheme(t.id); setOpen(null) }}
+          >
+            <span>
+              {t.name}
+              <span style={{ color: 'var(--jp-text-muted)', fontSize: 11, marginLeft: 6 }}>
+                {t.desc}
+              </span>
+            </span>
+            {theme === t.id && <span className="kbd">●</span>}
+          </div>
+        ))}
       </MenuItem>
 
       <MenuItem label="帮助(H)" open={open} name="help" toggle={toggle}>

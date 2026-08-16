@@ -20,6 +20,7 @@ import { ShortcutsDialog } from './dialogs/ShortcutsDialog'
 function App() {
   const viewType = useDocStore((s) => s.viewType)
   const modal = useUiStore((s) => s.modal)
+  const theme = useUiStore((s) => s.theme)
 
   // 全局快捷键
   useEffect(() => {
@@ -50,7 +51,7 @@ function App() {
   }, [])
 
   return (
-    <div className="app">
+    <div className="app" data-theme={theme}>
       <MenuBar />
       <Toolbar />
       <div className="app-main">

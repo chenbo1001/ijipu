@@ -50,3 +50,90 @@
   --jp-toolbar-h: 38px;
   --jp-statusbar-h: 26px;
 }
+
+/* ============ 中国色主题（adj14） ============ */
+/* 黛蓝 = 品牌默认（:root 已定义） */
+
+/* 竹青 */
+[data-theme='zhuqing'] {
+  --jp-bg-app: #0e150e;
+  --jp-bg-panel: #152117;
+  --jp-bg-panel-hover: #1b2b1e;
+  --jp-bg-panel-active: #203225;
+  --jp-border: #23352a;
+  --jp-text-primary: #e8f0e4;
+  --jp-text-secondary: #9db89a;
+  --jp-text-muted: #5d7a5c;
+  --jp-accent: #8fbf6f;
+  --jp-editor-bg: #0a0f0b;
+}
+
+/* 朱砂 */
+[data-theme='zhusha'] {
+  --jp-bg-app: #170d0c;
+  --jp-bg-panel: #211312;
+  --jp-bg-panel-hover: #2a1816;
+  --jp-bg-panel-active: #321d1a;
+  --jp-border: #3a211d;
+  --jp-text-primary: #f5e6e0;
+  --jp-text-secondary: #c9a09a;
+  --jp-text-muted: #8a5f58;
+  --jp-accent: #e8573f;
+  --jp-editor-bg: #110a09;
+}
+
+/* 秋香 */
+[data-theme='qiuxiang'] {
+  --jp-bg-app: #181408;
+  --jp-bg-panel: #221d0e;
+  --jp-bg-panel-hover: #2b2512;
+  --jp-bg-panel-active: #332b15;
+  --jp-border: #3a3018;
+  --jp-text-primary: #f2ead2;
+  --jp-text-secondary: #c4b98f;
+  --jp-text-muted: #8a8057;
+  --jp-accent: #c9a227;
+  --jp-editor-bg: #0f0d07;
+}
+
+/* 藕荷 */
+[data-theme='ouhe'] {
+  --jp-bg-app: #161020;
+  --jp-bg-panel: #201830;
+  --jp-bg-panel-hover: #291f3c;
+  --jp-bg-panel-active: #312547;
+  --jp-border: #362a4f;
+  --jp-text-primary: #efe8f7;
+  --jp-text-secondary: #c3b0d8;
+  --jp-text-muted: #83709c;
+  --jp-accent: #b08fd8;
+  --jp-editor-bg: #100b18;
+}
+
+/* 缃色 */
+[data-theme='xiangse'] {
+  --jp-bg-app: #181506;
+  --jp-bg-panel: #221e0a;
+  --jp-bg-panel-hover: #2a2510;
+  --jp-bg-panel-active: #322c14;
+  --jp-border: #393117;
+  --jp-text-primary: #f4eccf;
+  --jp-text-secondary: #cdc190;
+  --jp-text-muted: #94895c;
+  --jp-accent: #e3c13d;
+  --jp-editor-bg: #100e07;
+}
+
+/* 玄墨 */
+[data-theme='xuanmo'] {
+  --jp-bg-app: #101010;
+  --jp-bg-panel: #1a1a1a;
+  --jp-bg-panel-hover: #242424;
+  --jp-bg-panel-active: #2d2d2d;
+  --jp-border: #333333;
+  --jp-text-primary: #ececec;
+  --jp-text-secondary: #b0b0b0;
+  --jp-text-muted: #777777;
+  --jp-accent: #c9c9c9;
+  --jp-editor-bg: #0b0b0b;
+}
