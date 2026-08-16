@@ -398,18 +398,18 @@ function renderVoltaLine(start: PlacedBarline, end: PlacedBarline | null): strin
   const x2 = end ? end.x - 1 : start.x + 60
   const openEnd = !end || !!end.voltaEndSlash // 开口结束：无终点折线（adj26）
   const parts: string[] = []
-  // 起点竖线（[ 处：从线高向下到行顶上方）
+  // 起点竖线（[ 处：从线高向下到小节线上端上方 4px，adj29）
   parts.push(
-    `<line x1="${x1}" y1="${y}" x2="${x1}" y2="${start.yTop + 4}" stroke="#1b1b1b" stroke-width="1.4"/>`,
+    `<line x1="${x1}" y1="${y}" x2="${x1}" y2="${start.yTop - 4}" stroke="#1b1b1b" stroke-width="1.4"/>`,
   )
   // 水平线
   parts.push(
     `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#1b1b1b" stroke-width="1.4"/>`,
   )
-  // 终点折线（] 处：向下到小节线上端上方 6px，adj28；开口结束不画）
+  // 终点折线（] 处：向下到小节线上端上方 4px，adj29；开口结束不画）
   if (end && !openEnd) {
     parts.push(
-      `<line x1="${x2}" y1="${y}" x2="${x2}" y2="${end.yTop - 6}" stroke="#1b1b1b" stroke-width="1.4"/>`,
+      `<line x1="${x2}" y1="${y}" x2="${x2}" y2="${end.yTop - 4}" stroke="#1b1b1b" stroke-width="1.4"/>`,
     )
   }
   // 番号（[ 后引号注释优先；小节线引号备注兼容）显示在跳房子线下方（adj27/28）
