@@ -138,5 +138,28 @@ check('SVG 含增时线 rect', svg2.includes('width="7.56"'))
 const barRects = (svg2.match(/width="1.5"/g) ?? []).length
 check('小节线竖线 3 条（单线 1 + 双线 2）', barRects === 3, `got ${barRects}`)
 
+// ---- 9. 分页（M1b） ----
+console.log('[9] pagination (M1b)')
+const multi = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n[fenye]\nQ: 2 3 4 5 |\n')
+const layM = layoutScore(multi, defaultPageConfig)
+check('分页后 2 页', layM.pages.length === 2, `got ${layM.pages.length}`)
+check('第 1 页 8 音符', layM.pages[0].notes.length === 8, `got ${layM.pages[0].notes.length}`)
+check('第 2 页 4 音符', layM.pages[1].notes.length === 4, `got ${layM.pages[1].notes.length}`)
+check('第 2 页音符 page=1', layM.pages[1].notes[0].id.page === 1)
+const svgM = renderScoreToSvg(layM)
+check('渲染出 2 个 SVG 页面', svgM.length === 2)
+
+// ---- 10. 自动换行（M1b） ----
+console.log('[10] line wrap (M1b)')
+const wide = parseJps(
+  'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 5 6 7 1 2 3 4 5 6 7 1 2 3 4 5 6 7 1 2 3 4 5 6 7 1 2 3 4 5 6 7 1 2 3 4 5 6 7\n',
+)
+const layW = layoutScore(wide, defaultPageConfig)
+const rows = new Set(layW.pages[0].notes.map((n) => n.y))
+check('超宽行自动断成多行', rows.size >= 2, `rows=${rows.size}`)
+const maxX = Math.max(...layW.pages[0].notes.map((n) => n.x + n.width))
+check('音符不超出右边距', maxX <= 595.28 - 80, `maxX=${maxX}`)
+check('同页多行 y 递增', [...rows].sort((a, b) => a - b).every((v, i, arr) => i === 0 || v > arr[i - 1]))
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)
