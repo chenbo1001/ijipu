@@ -69,7 +69,6 @@ export function pitchToName(
 interface LayoutMetrics {
   noteSize: number
   noteGap: number
-  lineHeight: number
   barlineWidth: number
   titleAreaH: number
 }
@@ -79,10 +78,30 @@ function metrics(config: PageConfig): LayoutMetrics {
   return {
     noteSize,
     noteGap: noteSize * 0.22,
-    lineHeight: noteSize * 2.6,
     barlineWidth: noteSize * 0.32,
     titleAreaH: config.margin_top + config.body_margin_top + config.biaoti_size * 1.6 + 30,
   }
+}
+
+/** 行距配置（支持按页覆盖：config.heights['a'+page] = [quci, cici, ciqu, shengbu]） */
+interface Spacing {
+  quci: number // 曲下间距
+  cici: number // 词下间距
+  ciqu: number // 曲上间距
+}
+
+function spacingFor(config: PageConfig, page: number): Spacing {
+  const h = config.heights?.['a' + page]
+  return {
+    quci: h?.[0] ?? config.height_quci,
+    cici: h?.[1] ?? config.height_cici,
+    ciqu: h?.[2] ?? config.height_ciqu,
+  }
+}
+
+/** 计算一行曲（含歌词行数）占用的总高度 */
+function lineHeightOf(config: PageConfig, m: LayoutMetrics, sp: Spacing, lyricRows: number): number {
+  return m.noteSize * 1.7 + sp.quci + lyricRows * (config.geci_size + 8 + sp.cici) + sp.ciqu
 }
 
 /** 音符元素宽度（不含间距） */
@@ -159,6 +178,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     slotStart: number,
     lyricMaps: Map<number, LyricChar>[],
     geciSize: number,
+    sp: Spacing,
   ) => {
     const page = pages[pageIdx]
     const yBottom = r1(yTop + m.noteSize * 1.7)
@@ -197,7 +217,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
             : null,
           playable: toPlayable(token),
         })
-        // 歌词对齐：每行词在槽位 slotIndex 处对齐到该音符
+        // 歌词对齐：行底 + 曲下间距 + 行偏移（词下间距）
         lyricMaps.forEach((map, row) => {
           const ch = map.get(slotIndex)
           if (!ch) return
@@ -205,7 +225,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
             id,
             char: ch,
             x: r1(x + w / 2 - geciSize / 2),
-            y: r1(yTop + m.noteSize * 1.1 + 20 + row * (geciSize + 8)),
+            y: r1(yTop + m.noteSize * 1.7 + sp.quci + row * (geciSize + 8 + sp.cici)),
           }
           page.lyrics.push(lyric)
         })
@@ -250,9 +270,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       if (i > segStart && x + widths[i] > rightLimit) {
         // 段起始全局槽位序号 = 该段开始前已放置的槽位数
         const slotStart = slots.filter((s) => s < segStart).length
-        placeSegment(groupIndex, voice, tokens, segStart, i, pageIndex, y, slotStart, lyricMaps, geciSize)
+        const sp = spacingFor(config, pageIndex)
+        placeSegment(groupIndex, voice, tokens, segStart, i, pageIndex, y, slotStart, lyricMaps, geciSize, sp)
         // 换行 / 换页
-        y += m.lineHeight
+        y += lineHeightOf(config, m, sp, lyrics.length)
         if (y + m.noteSize * 1.7 > bottomLimit) {
           pageIndex = pages.length
           startPage()
@@ -264,8 +285,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       x += widths[i]
     }
     const slotStart = slots.filter((s) => s < segStart).length
-    placeSegment(groupIndex, voice, tokens, segStart, tokens.length, pageIndex, y, slotStart, lyricMaps, geciSize)
-    y += m.lineHeight
+    const spEnd = spacingFor(config, pageIndex)
+    placeSegment(groupIndex, voice, tokens, segStart, tokens.length, pageIndex, y, slotStart, lyricMaps, geciSize, spEnd)
+    y += lineHeightOf(config, m, spEnd, lyrics.length)
     if (y + m.noteSize * 1.7 > bottomLimit) {
       pageIndex = pages.length
       startPage()

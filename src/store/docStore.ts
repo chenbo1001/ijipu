@@ -54,6 +54,7 @@ interface DocState {
 /** 本地草稿（localStorage，自动保存） */
 const DRAFT_KEY = 'jianpuscript.draft'
 const DRAFT_NAME_KEY = 'jianpuscript.draftName'
+const PAGE_CONFIG_KEY = 'jianpuscript.pageConfig'
 
 function loadDraft(): { code: string; name: string } | null {
   try {
@@ -66,6 +67,16 @@ function loadDraft(): { code: string; name: string } | null {
   }
 }
 
+function loadPageConfig(): PageConfig {
+  try {
+    const raw = localStorage.getItem(PAGE_CONFIG_KEY)
+    if (raw) return { ...defaultPageConfig, ...(JSON.parse(raw) as Partial<PageConfig>) }
+  } catch {
+    /* 损坏的配置忽略，用默认 */
+  }
+  return { ...defaultPageConfig }
+}
+
 const draft = loadDraft()
 
 export const useDocStore = create<DocState>()((set) => ({
@@ -74,7 +85,7 @@ export const useDocStore = create<DocState>()((set) => ({
   dirty: false,
   viewType: (localStorage.getItem('jianpuscript.viewType') as ViewType) || 'split',
   autoFormat: true,
-  pageConfig: { ...defaultPageConfig },
+  pageConfig: loadPageConfig(),
   parseResult: parseJps(draft?.code ?? defaultSample().code),
   cursor: { line: 1, col: 0 },
   activeNoteId: null,
@@ -93,7 +104,14 @@ export const useDocStore = create<DocState>()((set) => ({
     set({ viewType: v })
   },
   setAutoFormat: (b) => set({ autoFormat: b }),
-  setPageConfig: (cfg) => set({ pageConfig: cfg }),
+  setPageConfig: (cfg) => {
+    try {
+      localStorage.setItem(PAGE_CONFIG_KEY, JSON.stringify(cfg))
+    } catch {
+      /* 存储不可用时静默 */
+    }
+    set({ pageConfig: cfg })
+  },
   setCursor: (line, col) => set({ cursor: { line, col } }),
   setActiveNoteId: (id) => set({ activeNoteId: id }),
   jumpCursor: (pos) =>

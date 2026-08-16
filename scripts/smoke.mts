@@ -264,5 +264,37 @@ check('J:96 → 96', inferBpm(parseJps('V: 1.0\nB: t\nJ: 96\n')) === 96)
 check('无 J → 90', inferBpm(parseJps('V: 1.0\nB: t\n')) === 90)
 check('J 文字 → 90', inferBpm(parseJps('V: 1.0\nB: t\nJ: 欢快的\n')) === 90)
 
+// ---- 16. 页面设置（M5） ----
+console.log('[16] page config (M5)')
+// 横版纸张
+const cfgH = { ...defaultPageConfig, page: 'A4_horizontal' as const }
+const layH = layoutScore(r2, cfgH)
+check('横版 A4 尺寸 841.89×595.28', layH.pages[0].width === 841.89 && layH.pages[0].height === 595.28, `${layH.pages[0].width}×${layH.pages[0].height}`)
+
+// 行距配置：ciqu 增大 → 第二行更靠下
+const y1 = layoutScore(r2, defaultPageConfig).pages[0].notes[14].y
+const y2 = layoutScore(r2, { ...defaultPageConfig, height_ciqu: 200 }).pages[0].notes[14].y
+check('曲上间距增大 → 第二行更靠下', y2 - y1 > 50, `diff=${y2 - y1}`)
+
+// 字形三套
+const svgA = renderScoreToSvg(layoutScore(r2, { ...defaultPageConfig, shuzi_font: 'a' }))[0]
+const svgB = renderScoreToSvg(layoutScore(r2, { ...defaultPageConfig, shuzi_font: 'b' }))[0]
+const svgC = renderScoreToSvg(layoutScore(r2, { ...defaultPageConfig, shuzi_font: 'c' }))[0]
+check('字形 a = 衬线', svgA.includes('Georgia'))
+check('字形 b = 黑体（默认）', svgB.includes('Microsoft YaHei') && !svgB.includes('Georgia'))
+check('字形 c = 楷体', svgC.includes('KaiTi'))
+
+// 按页覆盖行距 heights['a1'] → 第 2 页 ciqu=150
+const cfgPages = { ...defaultPageConfig, heights: { a1: [13, 10, 150, 0] } }
+const multiP = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 |\n[fenye]\nQ: 5 6 7 1 | 5 6 7 1 |\nQ: 1 2 3 4 | 5 6 7 1 |\n')
+const layP = layoutScore(multiP, cfgPages)
+check('heights 分页 2 页', layP.pages.length === 2)
+const rowsOverride = [...new Set(layP.pages[1].notes.map((n) => n.y))].sort((a, b) => a - b)
+const layPDef = layoutScore(multiP, defaultPageConfig)
+const rowsDefault = [...new Set(layPDef.pages[1].notes.map((n) => n.y))].sort((a, b) => a - b)
+const gapOverride = rowsOverride[1] - rowsOverride[0]
+const gapDefault = rowsDefault[1] - rowsDefault[0]
+check('按页覆盖行距生效（第 2 页 ciqu 150 > 40）', gapOverride - gapDefault > 50, `gap=${gapDefault}→${gapOverride}`)
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

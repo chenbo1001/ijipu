@@ -36,8 +36,22 @@ function noteposId(p: { page: number; voice: number; group: number; index: numbe
 // 字体常量
 // ============================================================
 
-const FONT_NOTE = "Georgia, 'Times New Roman', 'SimSun', serif"
+const FONT_NOTE_SERIF = "Georgia, 'Times New Roman', 'SimSun', serif"
+const FONT_NOTE_SANS = "'Microsoft YaHei', 'SimHei', 'Segoe UI', sans-serif"
+const FONT_NOTE_KAITI = "'KaiTi', '楷体', 'STKaiti', serif"
 const FONT_CN = "'Microsoft YaHei', 'SimHei', sans-serif"
+
+/** 音符字形（a=衬线/宋体，b=黑体（默认），c=楷体） */
+function noteFont(style: import('../types').PageConfig['shuzi_font']): string {
+  switch (style) {
+    case 'a':
+      return FONT_NOTE_SERIF
+    case 'c':
+      return FONT_NOTE_KAITI
+    default:
+      return FONT_NOTE_SANS
+  }
+}
 
 // ============================================================
 // 页面骨架与元数据
@@ -95,7 +109,7 @@ function renderMeta(page: ScorePage, config: PageConfig): string {
 // 音符绘制
 // ============================================================
 
-function renderNote(note: PlacedToken): string {
+function renderNote(note: PlacedToken, config: PageConfig): string {
   const t = note.token
   const size = 18
   const x = note.x
@@ -103,6 +117,7 @@ function renderNote(note: PlacedToken): string {
   const center = x + note.width / 2
   const parts: string[] = []
   const nid = noteposId(note.id)
+  const font = noteFont(config.shuzi_font)
 
   // 隐藏休止符 8：不绘制（占位）
   if (t.kind === 'rest' && t.hidden) return ''
@@ -111,7 +126,7 @@ function renderNote(note: PlacedToken): string {
   if (t.kind === 'note' && t.accidental) {
     const sym = t.accidental === '#' ? '#' : t.accidental === '$' ? 'b' : '♮'
     parts.push(
-      `<text x="${x - 7}" y="${y - 10}" font-size="12" font-family="${FONT_NOTE}" fill="#1b1b1b">${sym}</text>`,
+      `<text x="${x - 7}" y="${y - 10}" font-size="12" font-family="${font}" fill="#1b1b1b">${sym}</text>`,
     )
   }
 
@@ -129,7 +144,7 @@ function renderNote(note: PlacedToken): string {
   // 数字主体（含 notepos 契约）
   const glyph = t.kind === 'rest' ? '0' : t.kind === 'rhythm' ? 'X' : String(t.pitch)
   parts.push(
-    `<text x="${x}" y="${y}" data-notepos="${nid}" font-size="${size}" font-family="${FONT_NOTE}" font-weight="bold" fill="#1b1b1b">${glyph}</text>`,
+    `<text x="${x}" y="${y}" data-notepos="${nid}" font-size="${size}" font-family="${font}" font-weight="bold" fill="#1b1b1b">${glyph}</text>`,
   )
 
   // 附点
@@ -235,7 +250,7 @@ function renderPage(page: ScorePage, config: PageConfig): string {
   const body: string[] = []
 
   body.push(renderMeta(page, config))
-  for (const n of page.notes) body.push(renderNote(n))
+  for (const n of page.notes) body.push(renderNote(n, config))
   for (const b of page.barlines) body.push(renderBarline(b))
   for (const l of page.lyrics) body.push(renderLyric(l, config))
 
