@@ -26,6 +26,9 @@ export interface MetaAreaCfg {
   margin_right: number
   body_margin_top: number
   descAreaH: number
+  /** 标题/副标题字号（用于顶部安全边距，adj32） */
+  biaoti_size?: number
+  fubiaoti_size?: number
 }
 
 /** 锚点绝对坐标（页面 pt；描述头区域 = descAreaH，adj31） */
@@ -61,8 +64,16 @@ export function clampMetaPos(
   const areaW = pageW - cfg.margin_left - cfg.margin_right
   const areaH = cfg.descAreaH
   switch (metaAnchorOf(key)) {
-    case 'top-center':
-      return { x: clamp(relX, -areaW / 2, areaW / 2), y: clamp(relY, 0, areaH) }
+    case 'top-center': {
+      // 标题/副标题文字顶部不越过区域上沿（adj32）：基线最低到 字号×0.85
+      const topPad =
+        key === 'title'
+          ? (cfg.biaoti_size ?? 30) * 0.85
+          : key.startsWith('subtitle')
+            ? (cfg.fubiaoti_size ?? 16) * 0.85
+            : 0
+      return { x: clamp(relX, -areaW / 2, areaW / 2), y: clamp(relY, topPad, areaH) }
+    }
     case 'bottom-right':
       return { x: clamp(relX, -areaW, 0), y: clamp(relY, -areaH, 0) }
     case 'bottom-left': {

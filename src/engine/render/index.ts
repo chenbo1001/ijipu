@@ -99,16 +99,16 @@ function renderMeta(page: ScorePage, config: PageConfig): string {
     )
   }
 
-  // ---- 主标题（上居中锚） ----
+  // ---- 主标题（上居中锚；默认偏移 30.6 = 字号×0.85，文字顶不越过顶部虚线，adj32） ----
   if (page.meta.titles[0]) {
-    const pos = posOf('title', { x: 0, y: 26 })
+    const pos = posOf('title', { x: 0, y: 30.6 })
     parts.push(
       `<text data-meta="title" x="${pos.x}" y="${pos.y}" text-anchor="middle" font-size="${config.biaoti_size}" font-family="${FONT_CN}" font-weight="bold" fill="#1b1b1b">${xmlEsc(page.meta.titles[0])}</text>`,
     )
   }
   // ---- 副标题（上居中锚，主标题下） ----
   let subIdx = 0
-  let subOffY = 26 + config.biaoti_size * 1.1
+  let subOffY = 30.6 + config.biaoti_size * 1.1
   for (const t of page.meta.titles.slice(1)) {
     const pos = posOf(`subtitle_${subIdx}`, { x: 0, y: subOffY })
     parts.push(

@@ -600,7 +600,7 @@ const getMeta = (key: string) => {
   return m ? { x: Number(m[1]), y: Number(m[2]) } : null
 }
 const tTitle = getMeta('title')
-check('标题居中靠上', tTitle !== null && Math.abs(tTitle.x - 595.28 / 2) < 0.5 && Math.abs(tTitle.y - 106) < 0.5, JSON.stringify(tTitle))
+check('标题居中靠上（文字顶不越顶部虚线，adj32）', tTitle !== null && Math.abs(tTitle.x - 595.28 / 2) < 0.5 && Math.abs(tTitle.y - 110.6) < 0.5, JSON.stringify(tTitle))
 const tAuthor = getMeta('author_0')
 check('作者右下（右对齐，描述头区域右下角往上）', tAuthor !== null && Math.abs(tAuthor.x - 515.28) < 0.5 && Math.abs(tAuthor.y - 151.6) < 0.5, JSON.stringify(tAuthor))
 const tKey = getMeta('keyline')
@@ -638,7 +638,7 @@ const cfgClamp = defaultPageConfig
 const c1 = clampMetaPos('title', 9999, 9999, 595.28, cfgClamp)
 check('标题超右下被钳制', Math.abs(c1.x - 217.64) < 0.5 && Math.abs(c1.y - 87.6) < 0.5, JSON.stringify(c1))
 const c2 = clampMetaPos('title', -100, -100, 595.28, cfgClamp)
-check('标题左上越界 y 钳到 0、x 在范围内不变', c2.x === -100 && c2.y === 0, JSON.stringify(c2))
+check('标题左上越界 y 钳到字号安全边距（30.6）、x 在范围内不变', Math.abs(c2.x + 100) < 0.5 && Math.abs(c2.y - 30.6) < 0.5, JSON.stringify(c2))
 // 调式拍号锚定左下角：偏移 x∈[0, w-40]，y∈[-h, 0]
 const c3 = clampMetaPos('keyline', 9000, 100, 595.28, cfgClamp)
 check('keyline 右侧留 40', Math.abs(c3.x - (435.28 - 40)) < 0.5 && c3.y === 0, JSON.stringify(c3))
