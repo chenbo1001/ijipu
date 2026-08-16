@@ -847,5 +847,18 @@ const exLimits = GUIDE_LIMITS_EX as Record<string, [number, number]>
 check('body_margin_top 最小 4px', exLimits['body_margin_top'][0] === 4)
 check('descAreaH 范围下限 40', exLimits['descAreaH'][0] === 40)
 
+// ---- 40. 无歌词行行高（adj33） ----
+console.log('[40] no-lyric row height (adj33)')
+// 无歌词：行高 = 曲高(30.6) + 曲上间距(40) = 70.6（歌词部空间为 0）
+const r40a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 5 6 7 1 | 1 2 3 4 5 6 7 1 | 1 2 3 4 5 6 7 1 | 1 2 3 4 5 6 7 1 |\n')
+const lay40a = layoutScore(r40a, defaultPageConfig)
+const ys40a = [...new Set(lay40a.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
+check('无歌词行高 = 曲高 + 曲上间距（70.6）', ys40a.length >= 2 && Math.abs(ys40a[1] - ys40a[0] - 70.6) < 0.5, `dy=${ys40a[1] - ys40a[0]}`)
+// 有歌词对照：行高 = 30.6 + 13 + (18+8+10) + 40 = 119.6
+const r40b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 5 6 7 1 | 1 2 3 4 5 6 7 1 |\nC: 一 二 三 四 五 六 七 八 九 十 十 一 十 二 十 三 十 四\nQ: 1 2 3 4 5 6 7 1 | 1 2 3 4 5 6 7 1 |\nC: 一 二 三 四 五 六 七 八 九 十 十 一 十 二 十 三 十 四\n')
+const lay40b = layoutScore(r40b, defaultPageConfig)
+const ys40b = [...new Set(lay40b.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
+check('有歌词行高不变（119.6）', ys40b.length >= 2 && Math.abs(ys40b[1] - ys40b[0] - 119.6) < 0.5, `dy=${ys40b[1] - ys40b[0]}`)
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

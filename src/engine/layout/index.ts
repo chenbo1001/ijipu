@@ -135,9 +135,14 @@ function spacingFor(config: PageConfig, page: number): Spacing {
   }
 }
 
-/** 计算一行曲（含歌词行数）占用的总高度 */
+/** 计算一行曲（含歌词行数）占用的总高度；
+ *  无歌词时歌词部空间（曲下间距 quci + 歌词行高）为 0（adj33），减少两曲部间空白 */
 function lineHeightOf(config: PageConfig, m: LayoutMetrics, sp: Spacing, lyricRows: number): number {
-  return m.noteSize * 1.7 + sp.quci + lyricRows * (config.geci_size + 8 + sp.cici) + sp.ciqu
+  return (
+    m.noteSize * 1.7 +
+    sp.ciqu +
+    (lyricRows > 0 ? sp.quci + lyricRows * (config.geci_size + 8 + sp.cici) : 0)
+  )
 }
 
 /** 判断 token 是否产生可播放音符（注：隐藏休止符 8 不可发声） */
