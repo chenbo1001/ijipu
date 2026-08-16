@@ -406,17 +406,17 @@ function renderVoltaLine(start: PlacedBarline, end: PlacedBarline | null): strin
   parts.push(
     `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#1b1b1b" stroke-width="1.4"/>`,
   )
-  // 终点折线（] 处：向下到行顶；开口结束不画）
+  // 终点折线（] 处：向下到小节线上端上方 6px，adj28；开口结束不画）
   if (end && !openEnd) {
     parts.push(
-      `<line x1="${x2}" y1="${y}" x2="${x2}" y2="${end.yTop + 4}" stroke="#1b1b1b" stroke-width="1.4"/>`,
+      `<line x1="${x2}" y1="${y}" x2="${x2}" y2="${end.yTop - 6}" stroke="#1b1b1b" stroke-width="1.4"/>`,
     )
   }
-  // 番号（[ 后引号注释优先；小节线引号备注兼容）显示在跳房子线下方（adj27）
+  // 番号（[ 后引号注释优先；小节线引号备注兼容）显示在跳房子线下方（adj27/28）
   const label = start.voltaStart?.comment ?? start.comment
   if (label) {
     parts.push(
-      `<text x="${x1 + 4}" y="${y + 6}" font-size="10" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(label)}</text>`,
+      `<text x="${x1 + 4}" y="${y + 10}" font-size="10" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(label)}</text>`,
     )
   }
   return parts.join('\n')
