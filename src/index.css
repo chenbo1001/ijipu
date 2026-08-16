@@ -284,6 +284,11 @@ body {
   fill: var(--jp-danger) !important;
 }
 
+/* 描述头元素可拖拽（adj9） */
+.score-page [data-meta] {
+  cursor: move;
+}
+
 /* 排版辅助虚线（adj7） */
 .guide-line {
   position: absolute;

@@ -54,52 +54,82 @@ function noteFont(style: import('../types').PageConfig['shuzi_font']): string {
 }
 
 // ============================================================
-// 页面骨架与元数据
+// 页面骨架与元数据（描述头）
 // ============================================================
 
+/** 描述头区高度（与 layout.metrics.titleAreaH 一致） */
+function metaAreaH(config: PageConfig): number {
+  return config.margin_top + config.body_margin_top + config.biaoti_size * 1.6 + 30
+}
+
+/**
+ * 描述头默认布局：
+ *  - 主标题：居中靠上；副标题紧接其下
+ *  - 作者：描述区右下（从底部往上）
+ *  - 调式+拍号：左下同排；节拍在其下；其它各一行
+ *  - metaPos 可覆盖任意元素位置（key: title/subtitle_i/author_i/keyline/tempo）
+ */
 function renderMeta(page: ScorePage, config: PageConfig): string {
   const parts: string[] = []
   const { width } = page
   const mTop = config.margin_top
+  const areaH = metaAreaH(config)
+  const posOf = (key: string, defX: number, defY: number) => {
+    const p = config.metaPos?.[key]
+    return p ? { x: p.x, y: p.y } : { x: defX, y: defY }
+  }
 
-  // 调号 / 拍号 / 节拍（左上角）
-  const metaLine: string[] = []
-  if (page.meta.key) metaLine.push(`1=${xmlEsc(page.meta.key)}`)
-  if (page.meta.meter) metaLine.push(xmlEsc(page.meta.meter))
+  // ---- 调式 + 拍号（左下，同排） ----
+  const keyText = [page.meta.key ? `1=${xmlEsc(page.meta.key)}` : '', page.meta.meter ? xmlEsc(page.meta.meter) : '']
+    .filter(Boolean)
+    .join('　')
+  if (keyText) {
+    const pos = posOf('keyline', config.margin_left, areaH - 44)
+    parts.push(
+      `<text data-meta="keyline" x="${pos.x}" y="${pos.y}" font-size="13" font-family="${FONT_CN}" fill="#1b1b1b">${keyText}</text>`,
+    )
+  }
+  // ---- 节拍（左下，keyline 下方；多行合并为一行） ----
   if (page.meta.tempo) {
     const n = Number(page.meta.tempo)
-    metaLine.push(
-      Number.isFinite(n) && page.meta.tempo.trim() !== '' ? `♩=${n}` : xmlEsc(page.meta.tempo),
-    )
-  }
-  if (metaLine.length > 0) {
+    const tempoText =
+      Number.isFinite(n) && page.meta.tempo.trim() !== ''
+        ? `♩=${n}`
+        : xmlEsc(page.meta.tempo.replace(/\s*\n\s*/g, '　'))
+    const pos = posOf('tempo', config.margin_left, areaH - 20)
     parts.push(
-      `<text x="${config.margin_left}" y="${mTop + 20}" font-size="13" font-family="${FONT_CN}" fill="#1b1b1b">${metaLine.join('　')}</text>`,
+      `<text data-meta="tempo" x="${pos.x}" y="${pos.y}" font-size="13" font-family="${FONT_CN}" fill="#1b1b1b">${tempoText}</text>`,
     )
   }
 
-  // 主标题（居中）
+  // ---- 主标题（居中靠上） ----
   if (page.meta.titles[0]) {
+    const pos = posOf('title', width / 2, mTop + 26)
     parts.push(
-      `<text x="${width / 2}" y="${mTop + 26}" text-anchor="middle" font-size="${config.biaoti_size}" font-family="${FONT_CN}" font-weight="bold" fill="#1b1b1b">${xmlEsc(page.meta.titles[0])}</text>`,
+      `<text data-meta="title" x="${pos.x}" y="${pos.y}" text-anchor="middle" font-size="${config.biaoti_size}" font-family="${FONT_CN}" font-weight="bold" fill="#1b1b1b">${xmlEsc(page.meta.titles[0])}</text>`,
     )
   }
-  // 副标题
+  // ---- 副标题（主标题下） ----
+  let subIdx = 0
   let subY = mTop + 26 + config.biaoti_size * 1.1
   for (const t of page.meta.titles.slice(1)) {
+    const pos = posOf(`subtitle_${subIdx}`, width / 2, subY)
     parts.push(
-      `<text x="${width / 2}" y="${subY}" text-anchor="middle" font-size="${config.fubiaoti_size}" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(t)}</text>`,
+      `<text data-meta="subtitle_${subIdx}" x="${pos.x}" y="${pos.y}" text-anchor="middle" font-size="${config.fubiaoti_size}" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(t)}</text>`,
     )
     subY += config.fubiaoti_size * 1.3
+    subIdx++
   }
 
-  // 作者（居右，从上到下）
-  let authorY = mTop + 20
-  for (const a of page.meta.authors) {
+  // ---- 作者（右下，从底部往上） ----
+  const authorBottom = areaH - 16
+  for (let i = 0; i < page.meta.authors.length; i++) {
+    const a = page.meta.authors[i]
+    const defY = authorBottom - (page.meta.authors.length - 1 - i) * 18
+    const pos = posOf(`author_${i}`, width - config.margin_right, defY)
     parts.push(
-      `<text x="${width - config.margin_right}" y="${authorY}" text-anchor="end" font-size="12" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(a)}</text>`,
+      `<text data-meta="author_${i}" x="${pos.x}" y="${pos.y}" text-anchor="end" font-size="12" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(a)}</text>`,
     )
-    authorY += 18
   }
 
   return parts.join('\n')

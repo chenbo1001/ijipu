@@ -589,5 +589,27 @@ check('小节间距生效（小节 2 首音符位置）', Math.abs(notesGap[4].x
 const barsGap = layGap.pages[0].barlines
 check('小节线在小节右边界（gap 之后）', Math.abs(barsGap[0].x - (80 + 212.5)) < 0.5, `x=${barsGap[0].x}`)
 
+// ---- 30. 描述头布局与拖拽（adj9） ----
+console.log('[30] meta layout (adj9)')
+// areaH = 80+40+36×1.6+30 = 207.6
+const metaSvg = renderScoreToSvg(layEr)[0]
+const getMeta = (key: string) => {
+  const m = new RegExp(`data-meta="${key}" x="([\\d.]+)" y="([\\d.]+)"`).exec(metaSvg)
+  return m ? { x: Number(m[1]), y: Number(m[2]) } : null
+}
+const tTitle = getMeta('title')
+check('标题居中靠上', tTitle !== null && Math.abs(tTitle.x - 595.28 / 2) < 0.5 && Math.abs(tTitle.y - 106) < 0.5, JSON.stringify(tTitle))
+const tAuthor = getMeta('author_0')
+check('作者右下（右对齐，底部往上）', tAuthor !== null && Math.abs(tAuthor.x - 515.28) < 0.5 && Math.abs(tAuthor.y - 191.6) < 0.5, JSON.stringify(tAuthor))
+const tKey = getMeta('keyline')
+check('调式+拍号左下', tKey !== null && Math.abs(tKey.x - 80) < 0.5 && Math.abs(tKey.y - 163.6) < 0.5, JSON.stringify(tKey))
+const tTempo = getMeta('tempo')
+check('节拍在 keyline 下', tTempo !== null && Math.abs(tTempo.x - 80) < 0.5 && Math.abs(tTempo.y - 187.6) < 0.5, JSON.stringify(tTempo))
+// metaPos 覆盖
+const layErM = layoutScore(rEr, { ...defaultPageConfig, metaPos: { title: { x: 100, y: 50 } } })
+const svgErM = renderScoreToSvg(layErM)[0]
+const m2 = /data-meta="title" x="([\d.]+)" y="([\d.]+)"/.exec(svgErM)
+check('metaPos 覆盖标题位置', m2 !== null && Math.abs(Number(m2[1]) - 100) < 0.5 && Math.abs(Number(m2[2]) - 50) < 0.5, m2?.[0])
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

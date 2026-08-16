@@ -79,6 +79,46 @@ export function PreviewPane() {
     if (pos !== null) jumpCursor(pos)
   }
 
+  // ---- 描述头元素拖拽（adj9） ----
+  const metaDragRef = useRef<{
+    key: string
+    startX: number
+    startY: number
+    baseX: number
+    baseY: number
+  } | null>(null)
+
+  const onMetaMouseDown = (e: React.MouseEvent) => {
+    const el = (e.target as Element).closest('[data-meta]')
+    if (!el) return
+    e.preventDefault()
+    e.stopPropagation()
+    const key = el.getAttribute('data-meta')!
+    if (!layout) return
+    const scale = PREVIEW_W / layout.pages[0].width
+    const base = pageConfigRef.current.metaPos?.[key]
+    const bx = base ? base.x : Number(el.getAttribute('x'))
+    const by = base ? base.y : Number(el.getAttribute('y'))
+    metaDragRef.current = { key, startX: e.clientX, startY: e.clientY, baseX: bx, baseY: by }
+    const onMove = (ev: MouseEvent) => {
+      const d = metaDragRef.current
+      if (!d) return
+      const next = { ...(pageConfigRef.current.metaPos ?? {}) }
+      next[d.key] = {
+        x: Math.round((d.baseX + (ev.clientX - d.startX) / scale) * 10) / 10,
+        y: Math.round((d.baseY + (ev.clientY - d.startY) / scale) * 10) / 10,
+      }
+      setPageConfig({ ...pageConfigRef.current, metaPos: next })
+    }
+    const onUp = () => {
+      metaDragRef.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   // ---- 辅助虚线拖拽（adj7） ----
   const [drag, setDrag] = useState<{
     spec: GuideDragSpec
@@ -153,7 +193,7 @@ export function PreviewPane() {
 
   return (
     <div className="preview-pane">
-      <div className="pages" ref={containerRef} onClick={onClick}>
+      <div className="pages" ref={containerRef} onClick={onClick} onMouseDown={onMetaMouseDown}>
         {pagesHtml.map((svg, i) => {
           const page = layout.pages[i]
           const pct = (v: number) => `${((v / page.width) * 100).toFixed(2)}%`
