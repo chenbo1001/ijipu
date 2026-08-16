@@ -690,7 +690,7 @@ const layO34 = layoutScore(oct34, defaultPageConfig)
 const nO34 = layO34.pages[0].notes[0]
 const octDot = /<circle cx="([\d.]+)" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(layO34)[0])
 check('高音点 x = 数字中心左移 1（adj19）', octDot !== null && Math.abs(Number(octDot[1]) - (nO34.x + 4.58)) < 0.5, `cx=${octDot?.[1]} expect=${nO34.x + 4.58}`)
-check('高音点 y = 数字基线上 18（不与数字重叠，adj17）', octDot !== null && Math.abs(Number(octDot[2]) - (nO34.y - 18)) < 0.5, `cy=${octDot?.[2]} expect=${nO34.y - 18}`)
+check('高音点 y = 数字基线上 20（距音符 4px，adj21）', octDot !== null && Math.abs(Number(octDot[2]) - (nO34.y - 20)) < 0.5, `cy=${octDot?.[2]} expect=${nO34.y - 20}`)
 // 附点：位置 = 时值结束 + 半值中点，垂直居中
 const dot34 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1. 2 3 4 |\n')
 const layD34 = layoutScore(dot34, defaultPageConfig)
@@ -723,18 +723,18 @@ const lay35b = layoutScore(d35b, defaultPageConfig)
 const n35b = lay35b.pages[0].notes
 const perBeat35b = n35b[1].width / n35b[1].duration
 check('1/. 占宽 = 0.75 拍', Math.abs(n35b[0].width - 0.75 * perBeat35b) < 0.5, `${n35b[0].width} vs ${0.75 * perBeat35b}`)
-// 低音点 + 减时线：3/, 点顶 = 横线底(基线+8) + 2 → cy = 基线+12.4（adj20）
+// 低音点 + 减时线：3/, 点顶 = 横线底(基线+8) + 4 → cy = 基线+14.4（adj21）
 const d35c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3/, 2 |\n')
 const lay35c = layoutScore(d35c, defaultPageConfig)
 const n35c = lay35c.pages[0].notes[0]
 const dot35c = /<circle cx="[\d.]+" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(lay35c)[0])
-check('低八度点距减时横线 2px（cy = 基线+12.4）', dot35c !== null && Math.abs(Number(dot35c[1]) - (n35c.y + 12.4)) < 0.5, `cy=${dot35c?.[1]} expect=${n35c.y + 12.4}`)
-// 低音点无减时线：3, 点顶 = 数字底(基线+2) + 2 → cy = 基线+6.4
+check('低八度点距减时横线 4px（cy = 基线+14.4）', dot35c !== null && Math.abs(Number(dot35c[1]) - (n35c.y + 14.4)) < 0.5, `cy=${dot35c?.[1]} expect=${n35c.y + 14.4}`)
+// 低音点无减时线：3, 点顶 = 数字底(基线+2) + 4 → cy = 基线+8.4
 const d35d = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3, 2 |\n')
 const lay35d = layoutScore(d35d, defaultPageConfig)
 const n35d = lay35d.pages[0].notes[0]
 const dot35d = /<circle cx="[\d.]+" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(lay35d)[0])
-check('低八度点距数字底部 2px（cy = 基线+6.4）', dot35d !== null && Math.abs(Number(dot35d[1]) - (n35d.y + 6.4)) < 0.5, `cy=${dot35d?.[1]} expect=${n35d.y + 6.4}`)
+check('低八度点距数字底部 4px（cy = 基线+8.4）', dot35d !== null && Math.abs(Number(dot35d[1]) - (n35d.y + 8.4)) < 0.5, `cy=${dot35d?.[1]} expect=${n35d.y + 8.4}`)
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)
