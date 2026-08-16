@@ -97,15 +97,19 @@ export function MenuBar() {
             className="menu-entry theme-entry"
             onClick={() => { setTheme(t.id); setOpen(null) }}
           >
-            {theme === t.id && <span className="theme-check">✓</span>}
-            <span
-              className="theme-swatch"
-              style={{
-                background: t.bg,
-                borderColor: t.accent,
-              }}
-              title={`${t.name} · ${t.accent}`}
-            />
+            {theme === t.id ? (
+              <span
+                className="theme-swatch"
+                style={{ background: t.accent, borderColor: t.accent }}
+              >
+                ✓
+              </span>
+            ) : (
+              <span
+                className="theme-swatch"
+                style={{ background: t.bg, borderColor: t.accent }}
+              />
+            )}
             <span className="theme-name">{t.name}</span>
             <span className="theme-desc" style={{ color: t.accent }}>
               {t.desc}
