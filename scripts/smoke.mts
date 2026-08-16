@@ -555,12 +555,13 @@ const perBeatAu = nAu.width / nAu.duration
 check('数字居中于第 1 拍（非整段）', Math.abs(nAu.x + 6 - (86 + perBeatAu / 2)) < 0.5, `center=${nAu.x + 6}`)
 const svgAu = renderScoreToSvg(layAu)[0]
 const segStartAu = nAu.x + 6 - perBeatAu / 2
-const expectLX = segStartAu + perBeatAu + 1
+const beatStartAu = segStartAu + perBeatAu
+const expectLX = beatStartAu + (perBeatAu - 11.16) / 2 // 固定宽 11.16 居中于第 2 拍段
 const rectsAu = [...svgAu.matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="([\d.]+)" height="2.6"/g)]
 check('增时线 1 条', rectsAu.length === 1, `got ${rectsAu.length}`)
 const rAu = rectsAu[0]
-check('增时线画在第 2 拍段起点', rAu !== undefined && Math.abs(Number(rAu[1]) - expectLX) < 0.5, `x=${rAu?.[1]} expect=${expectLX}`)
-check('增时线宽 = 一拍 - 2', rAu !== undefined && Math.abs(Number(rAu[2]) - (perBeatAu - 2)) < 0.5, `w=${rAu?.[2]} expect=${perBeatAu - 2}`)
+check('增时线居中于第 2 拍段', rAu !== undefined && Math.abs(Number(rAu[1]) - expectLX) < 0.5, `x=${rAu?.[1]} expect=${expectLX}`)
+check('增时线宽 = 字符占宽（11.16，不拉伸）', rAu !== undefined && Math.abs(Number(rAu[2]) - 11.16) < 0.5, `w=${rAu?.[2]}`)
 
 // ---- 28. 排版辅助虚线（adj7） ----
 console.log('[28] layout guides (adj7)')

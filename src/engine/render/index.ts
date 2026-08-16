@@ -154,7 +154,7 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     )
   }
 
-  // 增时线（"-" 各占一拍：第 i 条画在第 (1+i) 拍段内，宽占满该拍，垂直居中于数字）
+  // 增时线（"-" 各占一拍的位置，但字符本身不拉伸：固定标准宽，居中于所在拍段）
   const augY = y - 8
   if (t.augmentCount > 0) {
     const dur = note.duration
@@ -162,10 +162,10 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     // 数字中心 = 第 1 拍段中点 → 时值段起点
     const segStart = x + 6 - Math.min(dur, 1) * (perBeat / 2)
     for (let i = 0; i < t.augmentCount; i++) {
-      const lx = r1n(segStart + (1 + i) * perBeat + 1)
-      const lw = r1n(Math.max(4, perBeat - 2))
+      const beatStart = segStart + (1 + i) * perBeat
+      const lx = r1n(beatStart + (perBeat - NOTE_DIGIT_W) / 2)
       parts.push(
-        `<rect x="${lx}" y="${augY}" width="${lw}" height="2.6" rx="1.3" fill="#1b1b1b"/>`,
+        `<rect x="${lx}" y="${augY}" width="${NOTE_DIGIT_W}" height="2.6" rx="1.3" fill="#1b1b1b"/>`,
       )
     }
   }
