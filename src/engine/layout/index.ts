@@ -272,6 +272,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   let noteCounter = 0
   let barCounter = 0
 
+  /** 行内小节均分宽（扣除小节间距 bar_gap） */
+  const barWidthOf = (count: number) =>
+    (availW - config.bar_gap * Math.max(0, count - 1)) / Math.max(1, count)
+
   const startPage = () => {
     const page: ScorePage = {
       index: pages.length,
@@ -412,7 +416,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     // 最后一行：小节数少于上一行时按上一行网格对齐（alignW），否则与普通行一样均分
     const leadingEmpty = row.start < row.end && segs[row.start].notes.length === 0 ? 1 : 0
     const barCount = Math.max(1, row.end - row.start - leadingEmpty)
-    const rowBarW = alignW !== null ? alignW : availW / barCount
+    const rowBarW = alignW !== null ? alignW : barWidthOf(barCount)
     for (let b = row.start; b < row.end; b++) {
       const seg = segs[b]
       const isEmptyLead = leadingEmpty === 1 && b === row.start
@@ -458,7 +462,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         }
         barCounter++
       }
-      x += isEmptyLead ? 0 : segBarW
+      x += isEmptyLead ? 0 : segBarW + (b < row.end - 1 ? config.bar_gap : 0)
     }
     finishDyn(x) // 行尾关闭未闭合渐强
   }
@@ -503,7 +507,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
             return Math.max(1, r.end - r.start - lead)
           }
           if (barCnt(lastRow) < barCnt(prev)) {
-            const alignW = availW / barCnt(prev)
+            const alignW = barWidthOf(barCnt(prev))
             // 密度保护：行内任一小节自然宽超 alignW 时回退均分（防溢出重叠）
             let fits = true
             for (let b = lastRow.start; b < lastRow.end; b++) {
@@ -544,7 +548,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       lyricRows: group.lyrics.length,
     }))
     const numBars = Math.max(...parts.map((p) => p.segs.length))
-    const barW = availW / numBars // 块内小节均分
+    const barW = barWidthOf(numBars) // 块内小节均分（含小节间距）
     // 密度与超拍感知：perBeat 不小于块内任一小时的每拍最小宽，且按最大实际拍数分摊
     const perBeatMin = Math.max(0, ...parts.flatMap((p) => p.segs.map((s) => segPerBeatMin(s))))
     const maxSegBeats = Math.max(
@@ -581,7 +585,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
             slotIndex++
           }
         }
-        x += barW
+        x += barW + (b < numBars - 1 ? config.bar_gap : 0)
       }
       voiceY += voiceHeights[vi]
     }
@@ -614,7 +618,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         })
         barCounter++
       }
-      xBar += barW
+      xBar += barW + (b < numBars - 1 ? config.bar_gap : 0)
     }
 
     pages[pageIndex].voiceBlocks.push({

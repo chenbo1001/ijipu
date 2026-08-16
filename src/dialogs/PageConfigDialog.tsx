@@ -11,6 +11,8 @@ import type { PageConfig } from '../engine'
 export function PageConfigDialog() {
   const pageConfig = useDocStore((s) => s.pageConfig)
   const setPageConfig = useDocStore((s) => s.setPageConfig)
+  const showGuides = useUiStore((s) => s.showGuides)
+  const setShowGuides = useUiStore((s) => s.setShowGuides)
   const closeModal = useUiStoreClose()
 
   const [draft, setDraft] = useState<PageConfig>({ ...pageConfig })
@@ -65,8 +67,21 @@ export function PageConfigDialog() {
           <Row label="词下间距">
             <NumInput label="" value={draft.height_cici} onChange={(v) => setDraft({ ...draft, height_cici: v })} />
           </Row>
+          <Row label="行间距">
+            <NumInput label="小节间距" value={draft.bar_gap} onChange={(v) => setDraft({ ...draft, bar_gap: v })} />
+          </Row>
           <Row label="曲上间距">
             <NumInput label="" value={draft.height_ciqu} onChange={(v) => setDraft({ ...draft, height_ciqu: v })} />
+          </Row>
+        </fieldset>
+
+        <fieldset style={{ border: '1px solid var(--jp-border)', borderRadius: 8, padding: 10 }}>
+          <legend style={{ padding: '0 6px', color: 'var(--jp-text-secondary)' }}>显示</legend>
+          <Row label="排版辅助">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={showGuides} onChange={(e) => setShowGuides(e.target.checked)} />
+              <span>预览页显示间距调整虚线（可拖拽边距/行距）</span>
+            </label>
           </Row>
         </fieldset>
 

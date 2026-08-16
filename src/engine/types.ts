@@ -442,6 +442,8 @@ export interface PageConfig {
   height_cici: number
   height_ciqu: number
   height_shengbu: number
+  /** 小节间距（列间距，px；小节线之间的空隙） */
+  bar_gap: number
   /** 连音线样式：0 自动 | 1 圆弧 | 2 平顶 */
   lianyinxian_type: 0 | 1 | 2
   /** 按页覆盖的行距（key: 页码） */
@@ -465,6 +467,7 @@ export const defaultPageConfig: PageConfig = {
   height_cici: 10,
   height_ciqu: 40,
   height_shengbu: 0,
+  bar_gap: 0,
   lianyinxian_type: 0,
 }
 

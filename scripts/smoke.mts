@@ -578,5 +578,16 @@ const d28r = dragDelta({ key: 'margin_right', dir: 'h', invert: true }, 0, 0, 50
 check('右边距反向拖拽', Math.abs(d28r - -50) < 0.5, `d=${d28r}`)
 check('clamp 钳制', clamp(500, 20, 300) === 300 && clamp(5, 20, 300) === 20)
 
+// ---- 29. 小节间距（adj8） ----
+console.log('[29] bar gap (adj8)')
+// bar_gap=10：2 小节单行均分，barW = (435-10)/2 = 212.5
+const gapCfg = { ...defaultPageConfig, bar_gap: 10 }
+const layGap = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n'), gapCfg)
+const notesGap = layGap.pages[0].notes
+// 小节 2 起点 = 80 + 212.5 + 10 = 302.5；首音符中心 = 302.5+6+25.0625（perBeat=(212.5-12)/4=50.125）
+check('小节间距生效（小节 2 首音符位置）', Math.abs(notesGap[4].x + 6 - (302.5 + 6 + 25.0625)) < 0.5, `center=${notesGap[4].x + 6}`)
+const barsGap = layGap.pages[0].barlines
+check('小节线在小节右边界（gap 之后）', Math.abs(barsGap[0].x - (80 + 212.5)) < 0.5, `x=${barsGap[0].x}`)
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)
