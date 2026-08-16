@@ -3,6 +3,7 @@
  */
 import { useDocStore } from '../store/docStore'
 import { brand } from '../brand/tokens'
+import { APP_VERSION } from '../brand/version'
 
 export function StatusBar() {
   const cursor = useDocStore((s) => s.cursor)
@@ -28,7 +29,7 @@ export function StatusBar() {
       <span className="right">
         <span>视图：{viewType}</span>
         <span className="accent">
-          {brand.shortName} · v0.1
+          {brand.shortName} · v{APP_VERSION}
         </span>
         <span>{brand.taglineFooter}</span>
       </span>

@@ -4,6 +4,7 @@
 import { Modal } from '../ui/Modal'
 import { aboutCopy, uiCopy } from '../brand/copy'
 import { palette } from '../brand/tokens'
+import { APP_VERSION_FULL } from '../brand/version'
 
 export function AboutDialog() {
   return (
@@ -40,9 +41,19 @@ export function AboutDialog() {
         ))}
         <p style={{ margin: '8px 0' }}>{aboutCopy.userIdentity}</p>
         <p style={{ margin: '8px 0' }}>{aboutCopy.cli}</p>
-        <p
+        <div
           style={{
             marginTop: 12,
+            textAlign: 'center',
+            color: 'var(--jp-text-muted)',
+            fontSize: 12,
+          }}
+        >
+          {APP_VERSION_FULL}
+        </div>
+        <p
+          style={{
+            marginTop: 10,
             textAlign: 'center',
             color: 'var(--jp-text-muted)',
             fontStyle: 'italic',

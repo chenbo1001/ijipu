@@ -431,5 +431,29 @@ check('全音符 1---', gy[18].kind === 'note' && gy[18].augmentCount === 3)
 const layYf = layoutScore(rYf, defaultPageConfig)
 check('语法谱歌词 16 字对 16 槽位', layYf.pages[0].lyrics.length === 16, `got ${layYf.pages[0].lyrics.length}`)
 
+// ---- 22. 排版细节（adj1：时值等宽/小节均分/两端对齐） ----
+console.log('[22] layout detail (adj1)')
+// 时值等宽：1- 2 3 4 | 5 6 7 1 |（1- 占 2 拍；单行谱 = 最后一行，自然宽）
+const rw = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1- 2 3 4 | 5 6 7 1 |\n')
+const layW2 = layoutScore(rw, defaultPageConfig)
+const notesW2 = layW2.pages[0].notes
+check('时值等宽：1- 宽 = 2 × 1 拍宽', Math.abs(notesW2[0].width - notesW2[1].width * 2) < 0.5, `${notesW2[0].width} vs ${notesW2[1].width}`)
+check('1 拍音符宽一致', Math.abs(notesW2[1].width - notesW2[2].width) < 0.1)
+check('最后一行自然宽（小节宽=4拍×14+边距）', Math.abs(notesW2[4].x - (80 + 70 + 6)) < 1, `x=${notesW2[4].x} expect=${80 + 70 + 6}`)
+// 两端对齐 + 小节均分：8 小节 → 行 1（6 小节）铺满均分，行 2（最后 2 小节）自然宽不撑满
+const rj2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |\n')
+const layJ = layoutScore(rj2, defaultPageConfig)
+const rowsJ = [...new Set(layJ.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
+check('8 小节断成 2 行', rowsJ.length === 2, `rows=${rowsJ.length}`)
+const row1Notes = layJ.pages[0].notes.filter((n) => n.y === rowsJ[0])
+const maxRight1 = Math.max(...row1Notes.map((n) => n.x + n.width))
+check('行 1 两端对齐（末音符右缘贴近右边界）', maxRight1 > 515.28 - 10, `right=${maxRight1}`)
+// 行 1 小节均分：第 2 小节首音符（行 1 第 5 个音符）x = margin_left + 435/6 + BAR_PAD
+const row1Sorted = row1Notes.sort((a, b) => a.x - b.x)
+check('行 1 小节均分（第 2 小节起点）', Math.abs(row1Sorted[4].x - (80 + 435 / 6 + 6)) < 1, `x=${row1Sorted[4].x} expect=${80 + 435 / 6 + 6}`)
+const row2Notes = layJ.pages[0].notes.filter((n) => n.y === rowsJ[1])
+const maxRight2 = Math.max(...row2Notes.map((n) => n.x + n.width))
+check('最后一行不撑满（右缘留空）', maxRight2 < 515.28 - 10, `right=${maxRight2}`)
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

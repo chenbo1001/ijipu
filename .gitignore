@@ -19,6 +19,9 @@ src-tauri/target
 src-tauri/gen
 app-icon.png
 
+# 自动生成
+src/gen/buildInfo.ts
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
