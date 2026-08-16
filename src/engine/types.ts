@@ -357,6 +357,20 @@ export interface VoiceBlock {
   voices: { voice: number; name?: string }[]
 }
 
+/** 连音线（() 匹配的音符对，同行内绘制） */
+export interface PlacedSlur {
+  /** 起点（第一个音符左边缘） */
+  x1: number
+  /** 终点（最后一个音符右边缘） */
+  x2: number
+  /** 线的 y（音符上方） */
+  y: number
+  /** 嵌套深度（错开高度） */
+  depth: number
+  /** 样式：arc 圆弧 / flat 平顶 */
+  style: 'arc' | 'flat'
+}
+
 /** 单个乐谱页 */
 export interface ScorePage {
   index: number
@@ -366,6 +380,7 @@ export interface ScorePage {
   lyrics: PlacedLyric[]
   barlines: PlacedBarline[]
   voiceBlocks: VoiceBlock[]
+  slurs: PlacedSlur[]
   /** 页面级元数据（标题/作者/调号拍号等文本元素） */
   meta: ScorePageMeta
 }

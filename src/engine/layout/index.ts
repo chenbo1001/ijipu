@@ -22,6 +22,7 @@ import type {
   PageConfig,
   ParseResult,
   PlacedLyric,
+  PlacedToken,
   ScoreLayout,
   ScorePage,
   ScorePageMeta,
@@ -176,6 +177,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       lyrics: [],
       barlines: [],
       voiceBlocks: [],
+      slurs: [],
       meta,
     }
     pages.push(page)
@@ -495,6 +497,53 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         placeGroup(groupIndex, group.music.voice, group.music.tokens, group.lyrics)
       }
     }
+  }
+
+  // ---- 连音线后处理（M7c）----
+  const notesByIndex = new Map<number, PlacedToken>()
+  for (const p of pages) for (const n of p.notes) notesByIndex.set(n.id.index, n)
+
+  const slurPairs: { start: number; end: number; depth: number }[] = []
+  const sStack: { start: number; depth: number }[] = []
+  let gNote = 0
+  let lastNote = -1
+  for (const line of result.lines) {
+    if (line.kind !== 'music') continue
+    const group = result.groups.find((g) => g.music === line)
+    if (!group) continue
+    for (const t of group.music.tokens) {
+      if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
+        if (sStack.length > 0 && sStack[sStack.length - 1].start === -1) {
+          sStack[sStack.length - 1].start = gNote
+        }
+        lastNote = gNote
+        gNote++
+      } else if (t.kind === 'slur') {
+        if (t.dir === 'open') {
+          sStack.push({ start: -1, depth: sStack.length })
+        } else {
+          const s = sStack.pop()
+          if (s && s.start !== -1 && lastNote >= s.start) {
+            slurPairs.push({ start: s.start, end: lastNote, depth: s.depth })
+          }
+        }
+      }
+    }
+  }
+
+  const slurStyle = config.lianyinxian_type === 2 ? ('flat' as const) : ('arc' as const)
+  for (const sp of slurPairs) {
+    const a = notesByIndex.get(sp.start)
+    const b = notesByIndex.get(sp.end)
+    if (!a || !b) continue
+    if (a.id.page !== b.id.page || Math.abs(a.y - b.y) > 0.1) continue // 跨行/跨页连音线跳过（第一版）
+    pages[a.id.page].slurs.push({
+      x1: r1(a.x),
+      x2: r1(b.x + b.width),
+      y: r1(a.y - 22 - sp.depth * 7),
+      depth: sp.depth,
+      style: slurStyle,
+    })
   }
 
   const configKey = JSON.stringify(config)

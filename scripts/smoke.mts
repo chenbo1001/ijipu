@@ -348,5 +348,26 @@ const svgVo3 = renderScoreToSvg(layVo3)[0]
 const openLines = (svgVo3.match(/stroke-width="1.4"/g) ?? []).length
 check('未封闭 [/ 只画起点+横线（2 条）', openLines === 2, `got ${openLines}`)
 
+// ---- 19. 连音线（M7c） ----
+console.log('[19] slurs (M7c)')
+const slur = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 ( 2 3 ) 4 |\n')
+const laySl = layoutScore(slur, defaultPageConfig)
+check('1 条连音线', laySl.pages[0].slurs.length === 1, `got ${laySl.pages[0].slurs.length}`)
+const sl0 = laySl.pages[0].slurs[0]
+check('连音线范围覆盖 2、3（x2 > x1）', sl0 !== undefined && sl0.x2 > sl0.x1, `${sl0?.x1}→${sl0?.x2}`)
+const svgSl = renderScoreToSvg(laySl)[0]
+check('SVG 含圆弧贝塞尔', svgSl.includes('<path d="M ') && svgSl.includes(' Q '))
+// 嵌套
+const slur2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 ( 2 ( 3 4 ) 5 ) 6 |\n')
+const laySl2 = layoutScore(slur2, defaultPageConfig)
+check('嵌套 2 条连音线', laySl2.pages[0].slurs.length === 2, `got ${laySl2.pages[0].slurs.length}`)
+const depths = laySl2.pages[0].slurs.map((s) => s.depth).sort((a, b) => a - b)
+check('嵌套深度 0 和 1', depths[0] === 0 && depths[1] === 1, JSON.stringify(depths))
+check('深度 1 的线更高（y 更小）', laySl2.pages[0].slurs[0].y < laySl2.pages[0].slurs[1].y, `${laySl2.pages[0].slurs[0].y} vs ${laySl2.pages[0].slurs[1].y}`)
+// 平顶样式
+const laySl3 = layoutScore(slur, { ...defaultPageConfig, lianyinxian_type: 2 })
+const svgSl3 = renderScoreToSvg(laySl3)[0]
+check('平顶样式无贝塞尔', !svgSl3.includes('<path d="M'))
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

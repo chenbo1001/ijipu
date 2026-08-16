@@ -12,7 +12,7 @@
  * TODO(M1c)：歌词 <text data-cipos>
  * TODO(M7)：跳房子/连音线/装饰符号/多声部
  */
-import type { PageConfig, PlacedBarline, PlacedLyric, PlacedToken, ScoreLayout, ScorePage, VoiceBlock } from '../types'
+import type { PageConfig, PlacedBarline, PlacedLyric, PlacedSlur, PlacedToken, ScoreLayout, ScorePage, VoiceBlock } from '../types'
 
 // ============================================================
 // 工具
@@ -332,6 +332,25 @@ function renderVoltas(barlines: PlacedBarline[]): string {
 }
 
 // ============================================================
+// 连音线绘制（M7c）
+// ============================================================
+
+function renderSlur(s: PlacedSlur): string {
+  if (s.style === 'flat') {
+    // 平顶：横线 + 两端小竖线
+    return (
+      `<line x1="${s.x1}" y1="${s.y}" x2="${s.x2}" y2="${s.y}" stroke="#1b1b1b" stroke-width="1.3"/>` +
+      `<line x1="${s.x1}" y1="${s.y}" x2="${s.x1}" y2="${s.y - 5}" stroke="#1b1b1b" stroke-width="1.3"/>` +
+      `<line x1="${s.x2}" y1="${s.y}" x2="${s.x2}" y2="${s.y - 5}" stroke="#1b1b1b" stroke-width="1.3"/>`
+    )
+  }
+  // 圆弧：二次贝塞尔
+  const midX = (s.x1 + s.x2) / 2
+  const midY = s.y - 9
+  return `<path d="M ${s.x1} ${s.y} Q ${midX} ${midY} ${s.x2} ${s.y}" fill="none" stroke="#1b1b1b" stroke-width="1.3"/>`
+}
+
+// ============================================================
 // 页面组装
 // ============================================================
 
@@ -341,6 +360,7 @@ function renderPage(page: ScorePage, config: PageConfig): string {
 
   body.push(renderMeta(page, config))
   body.push(renderVoltas(page.barlines)) // 跳房子线画在最底层
+  for (const s of page.slurs) body.push(renderSlur(s))
   for (const n of page.notes) body.push(renderNote(n, config))
   for (const b of page.barlines) body.push(renderBarline(b))
   for (const l of page.lyrics) body.push(renderLyric(l, config))
