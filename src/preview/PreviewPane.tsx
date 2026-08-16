@@ -1,17 +1,23 @@
 /**
- * preview/PreviewPane.tsx — 乐谱预览区（真实渲染）
+ * preview/PreviewPane.tsx — 乐谱预览区（真实渲染 + 光标联动）
  *
  * 渲染管线：parseResult → layoutScore → renderScoreToSvg → 多页 SVG。
- * 页面按 A4/A5 比例缩放展示；解析错误时回退为占位摘要。
+ * 联动（M3）：activeNoteId 高亮对应音符并滚动；点击音符/歌词跳转编辑器光标。
  */
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useDocStore } from '../store/docStore'
-import { layoutScore, renderScoreToSvg } from '../engine'
+import { layoutScore, renderScoreToSvg, noteIdToCodePos } from '../engine'
 import { brand } from '../brand/tokens'
 
 export function PreviewPane() {
   const parseResult = useDocStore((s) => s.parseResult)
   const pageConfig = useDocStore((s) => s.pageConfig)
+  const code = useDocStore((s) => s.code)
+  const activeNoteId = useDocStore((s) => s.activeNoteId)
+  const setActiveNoteId = useDocStore((s) => s.setActiveNoteId)
+  const jumpCursor = useDocStore((s) => s.jumpCursor)
+
+  const containerRef = useRef<HTMLDivElement>(null)
 
   const { pagesHtml, errorCount, summary } = useMemo(() => {
     const errors = parseResult.errors.filter((e) => e.severity === 'error')
@@ -33,6 +39,32 @@ export function PreviewPane() {
     const layout = layoutScore(parseResult, pageConfig)
     return { pagesHtml: renderScoreToSvg(layout), errorCount: 0, summary: sum }
   }, [parseResult, pageConfig])
+
+  // 高亮当前音符（M3）：清除旧高亮 → 标记新音符 → 滚动到可视
+  useEffect(() => {
+    const root = containerRef.current
+    if (!root) return
+    root.querySelectorAll('.note-active').forEach((el) => el.classList.remove('note-active'))
+    if (!activeNoteId) return
+    const el = root.querySelector(
+      `[data-notepos="${CSS.escape(activeNoteId)}"], [data-cipos="${CSS.escape(activeNoteId)}"]`,
+    )
+    if (el) {
+      el.classList.add('note-active')
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+  }, [activeNoteId, pagesHtml])
+
+  // 点击谱面音符/歌词 → 高亮 + 编辑器光标跳转（M3）
+  const onClick = (e: React.MouseEvent) => {
+    const target = (e.target as Element).closest('[data-notepos], [data-cipos]')
+    if (!target) return
+    const id = target.getAttribute('data-notepos') ?? target.getAttribute('data-cipos')
+    if (!id) return
+    setActiveNoteId(id)
+    const pos = noteIdToCodePos(code, id)
+    if (pos !== null) jumpCursor(pos)
+  }
 
   if (pagesHtml.length === 0) {
     return (
@@ -76,14 +108,11 @@ export function PreviewPane() {
 
   return (
     <div className="preview-pane">
-      <div className="pages">
+      <div className="pages" ref={containerRef} onClick={onClick}>
         {pagesHtml.map((svg, i) => (
           <div key={i} className="score-page" style={{ maxWidth: '100%' }}>
             {/* 引擎生成的 SVG（文本已 XML 转义），缩放展示 */}
-            <div
-              style={{ width: 760 }}
-              dangerouslySetInnerHTML={{ __html: svg }}
-            />
+            <div style={{ width: 760 }} dangerouslySetInnerHTML={{ __html: svg }} />
             {pagesHtml.length > 1 && (
               <div
                 style={{

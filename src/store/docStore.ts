@@ -34,12 +34,18 @@ interface DocState {
   parseResult: ParseResult
   /** 编辑器光标（行/列，1-based 行，0-based 列） */
   cursor: { line: number; col: number }
+  /** 当前高亮音符 id（notepos 契约），编辑器↔谱面联动 */
+  activeNoteId: string | null
+  /** 编辑器光标跳转请求（点击谱面音符时触发） */
+  cursorJump: { pos: number; nonce: number } | null
 
   setCode: (code: string) => void
   setViewType: (v: ViewType) => void
   setAutoFormat: (b: boolean) => void
   setPageConfig: (cfg: PageConfig) => void
   setCursor: (line: number, col: number) => void
+  setActiveNoteId: (id: string | null) => void
+  jumpCursor: (pos: number) => void
   loadSample: (id: string) => void
   newDoc: () => void
   markSaved: () => void
@@ -71,6 +77,8 @@ export const useDocStore = create<DocState>()((set) => ({
   pageConfig: { ...defaultPageConfig },
   parseResult: parseJps(draft?.code ?? defaultSample().code),
   cursor: { line: 1, col: 0 },
+  activeNoteId: null,
+  cursorJump: null,
 
   setCode: (code) => {
     try {
@@ -87,11 +95,21 @@ export const useDocStore = create<DocState>()((set) => ({
   setAutoFormat: (b) => set({ autoFormat: b }),
   setPageConfig: (cfg) => set({ pageConfig: cfg }),
   setCursor: (line, col) => set({ cursor: { line, col } }),
+  setActiveNoteId: (id) => set({ activeNoteId: id }),
+  jumpCursor: (pos) =>
+    set((s) => ({ cursorJump: { pos, nonce: (s.cursorJump?.nonce ?? 0) + 1 } })),
   loadSample: (id) => {
     const s = SAMPLES.find((x) => x.id === id) ?? defaultSample()
     localStorage.setItem(DRAFT_KEY, s.code)
     localStorage.setItem(DRAFT_NAME_KEY, s.name)
-    set({ code: s.code, fileName: s.name, parseResult: parseJps(s.code), dirty: false })
+    set({
+      code: s.code,
+      fileName: s.name,
+      parseResult: parseJps(s.code),
+      dirty: false,
+      activeNoteId: null,
+      cursorJump: null,
+    })
   },
   newDoc: () => {
     localStorage.setItem(DRAFT_KEY, NEW_FILE_TEMPLATE)
@@ -101,6 +119,8 @@ export const useDocStore = create<DocState>()((set) => ({
       fileName: '未命名',
       parseResult: parseJps(NEW_FILE_TEMPLATE),
       dirty: false,
+      activeNoteId: null,
+      cursorJump: null,
     })
   },
   markSaved: () => set({ dirty: false }),

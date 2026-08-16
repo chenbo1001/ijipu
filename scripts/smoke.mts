@@ -7,6 +7,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseJps, formatJps, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig } from '../src/engine/index.ts'
+import { codePosToNoteId, noteIdToCodePos } from '../src/engine/cursorMap.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
 import { highlightCode } from '../src/editor/highlight.ts'
 
@@ -202,6 +203,26 @@ const hl = highlightCode(errCode, new Set([3]))
 check('错误行含 hl-error-line 标记', hl.includes('hl-error-line') && hl.split('hl-error-line').length >= 2)
 const hlClean = highlightCode(errCode)
 check('无错误行时不加标记', !hlClean.includes('hl-error-line'))
+
+// ---- 14. 光标映射（M3） ----
+console.log('[14] cursor mapping (M3)')
+// 行起点：'V: 1.0\n'=7, 'B: t\n'=5(→12), 'D: C\n'=5(→17), 'P: 4/4\n'=7(→24)，Q 行从 24 开始
+const linkCode = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\nC: 词\n'
+const id1 = codePosToNoteId(linkCode, 29) // '2' 后
+check('光标在数字 2 后 → 0_1_0_1', id1 === '0_1_0_1', String(id1))
+const id2 = codePosToNoteId(linkCode, 26) // 'Q: ' 后
+check('光标在行头后 → 0_1_0_0', id2 === '0_1_0_0', String(id2))
+const pos1 = noteIdToCodePos(linkCode, '0_1_0_2')
+check('id 0_1_0_2 → 位置 31（数字 3）', pos1 === 31, String(pos1))
+const round = codePosToNoteId(linkCode, pos1!)
+check('round-trip 一致', round === '0_1_0_2', String(round))
+check('非 Q 行（歌词行）不联动', codePosToNoteId(linkCode, 44) === null, String(codePosToNoteId(linkCode, 44)))
+// 分页场景：'V: 1.0\n'=7, 'B: t\n'=5(→12), 'Q: 1 2 |\n'=9(→21), '[fenye]\n'=8(→29)，Q2 行从 29 开始
+const linkCode2 = 'V: 1.0\nB: t\nQ: 1 2 |\n[fenye]\nQ: 3 4 |\n'
+const idPage1 = codePosToNoteId(linkCode2, 32) // Q2 行 '3' 后
+check('分页后第 2 页音符 id page=1、index=2（全局计数）', idPage1 === '1_1_1_2', String(idPage1))
+const posPage1 = noteIdToCodePos(linkCode2, '1_1_1_2')
+check('第 2 页音符反向定位在 Q2 行', posPage1 === 32, String(posPage1))
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

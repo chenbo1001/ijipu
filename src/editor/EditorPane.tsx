@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useDocStore } from '../store/docStore'
 import { highlightCode } from './highlight'
-import { formatJps } from '../engine'
+import { formatJps, codePosToNoteId } from '../engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 
 export function EditorPane() {
@@ -24,6 +24,25 @@ export function EditorPane() {
   const hlRef = useRef<HTMLDivElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
   const formatTimer = useRef<number | null>(null)
+
+  // 光标联动（M3）：光标移动 → 计算 notepos id → 预览高亮
+  const setActiveNoteId = useDocStore((s) => s.setActiveNoteId)
+  const cursorJump = useDocStore((s) => s.cursorJump)
+  const onSelectRef = useRef<() => void>(() => {})
+
+  // 消费"点击谱面音符 → 跳转编辑器光标"请求
+  useEffect(() => {
+    if (!cursorJump) return
+    const ta = taRef.current
+    if (!ta) return
+    ta.focus()
+    ta.selectionStart = ta.selectionEnd = cursorJump.pos
+    // 滚动到光标所在行（行高 23.8px = 14px × 1.7，与 CSS --jp-editor-lh 一致）
+    const { line } = lineColOf(ta.value, cursorJump.pos)
+    ta.scrollTop = Math.max(0, (line - 1) * 23.8 - 40)
+    onScroll()
+    onSelectRef.current()
+  }, [cursorJump])
 
   const errorCount = parseResult.errors.filter((e) => e.severity === 'error').length
 
@@ -49,13 +68,16 @@ export function EditorPane() {
     }
   }
 
-  // 光标写入 store
+  // 光标写入 store + 谱面联动（M3）
   const onSelect = () => {
     const ta = taRef.current
     if (!ta) return
     const { line, col } = lineColOf(ta.value, ta.selectionStart)
     setCursor(line, col)
+    const id = codePosToNoteId(ta.value, ta.selectionStart)
+    setActiveNoteId(id)
   }
+  onSelectRef.current = onSelect
 
   // 行首命令快捷键：光标在行首时按 Q/C/B/Z/D/P/J/V/H 插入命令头
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

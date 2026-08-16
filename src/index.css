@@ -273,6 +273,12 @@ body {
   height: auto;
 }
 
+/* 光标联动高亮：当前音符/歌词（M3） */
+.score-page [data-notepos].note-active,
+.score-page [data-cipos].note-active {
+  fill: var(--jp-danger) !important;
+}
+
 .preview-placeholder {
   height: 100%;
   display: flex;
