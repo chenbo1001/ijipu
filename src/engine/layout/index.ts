@@ -11,10 +11,13 @@ import { PAPER_SIZE } from '../types'
 import { tokenDuration } from '../duration'
 import type {
   LayoutId,
+  LyricChar,
+  LyricLine,
   MusicToken,
   NoteToken,
   PageConfig,
   ParseResult,
+  PlacedLyric,
   ScoreLayout,
   ScorePage,
   ScorePageMeta,
@@ -149,10 +152,14 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     end: number,
     pageIdx: number,
     yTop: number,
+    slotStart: number,
+    lyricMaps: Map<number, LyricChar>[],
+    geciSize: number,
   ) => {
     const page = pages[pageIdx]
     const yBottom = r1(yTop + m.noteSize * 1.7)
     let x = config.margin_left
+    let slotIndex = slotStart
     for (let i = start; i < end; i++) {
       const token = tokens[i]
       const id: LayoutId = { page: pageIdx, voice, group: groupIndex, index: noteCounter }
@@ -186,6 +193,19 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
             : null,
           playable: toPlayable(token),
         })
+        // 歌词对齐：每行词在槽位 slotIndex 处对齐到该音符
+        lyricMaps.forEach((map, row) => {
+          const ch = map.get(slotIndex)
+          if (!ch) return
+          const lyric: PlacedLyric = {
+            id,
+            char: ch,
+            x: r1(x + w / 2 - geciSize / 2),
+            y: r1(yTop + m.noteSize * 1.1 + 20 + row * (geciSize + 8)),
+          }
+          page.lyrics.push(lyric)
+        })
+        slotIndex++
         noteCounter++
         x = r1(x + w + m.noteGap)
       }
@@ -193,14 +213,40 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     }
   }
 
-  /** 处理一个曲词组：可能拆成多个视觉行 */
-  const placeGroup = (groupIndex: number, voice: number, tokens: MusicToken[]) => {
+  /** 处理一个曲词组：可能拆成多个视觉行；歌词按槽位对齐 */
+  const placeGroup = (groupIndex: number, voice: number, tokens: MusicToken[], lyrics: LyricLine[]) => {
     const widths = tokens.map((t) => tokenWidth(t, m) + m.noteGap)
+
+    // 槽位 = note/rest/rhythm 在 tokens 中的序号
+    const slots: number[] = []
+    tokens.forEach((t, i) => {
+      if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') slots.push(i)
+    })
+
+    // 歌词 → 槽位映射（每行词独立）：标点不占槽位（不绘制）；@ 消耗槽位
+    const geciSize = config.geci_size
+    const lyricMaps: Map<number, LyricChar>[] = lyrics.map((line) => {
+      const map = new Map<number, LyricChar>()
+      let slot = 0
+      for (const ch of line.chars) {
+        if (ch.punctuation) continue
+        if (ch.skip) {
+          slot++
+          continue
+        }
+        map.set(slot, ch)
+        slot++
+      }
+      return map
+    })
+
     let segStart = 0
     let x = config.margin_left
     for (let i = 0; i < widths.length; i++) {
       if (i > segStart && x + widths[i] > rightLimit) {
-        placeSegment(groupIndex, voice, tokens, segStart, i, pageIndex, y)
+        // 段起始全局槽位序号 = 该段开始前已放置的槽位数
+        const slotStart = slots.filter((s) => s < segStart).length
+        placeSegment(groupIndex, voice, tokens, segStart, i, pageIndex, y, slotStart, lyricMaps, geciSize)
         // 换行 / 换页
         y += m.lineHeight
         if (y + m.noteSize * 1.7 > bottomLimit) {
@@ -213,7 +259,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       }
       x += widths[i]
     }
-    placeSegment(groupIndex, voice, tokens, segStart, tokens.length, pageIndex, y)
+    const slotStart = slots.filter((s) => s < segStart).length
+    placeSegment(groupIndex, voice, tokens, segStart, tokens.length, pageIndex, y, slotStart, lyricMaps, geciSize)
     y += m.lineHeight
     if (y + m.noteSize * 1.7 > bottomLimit) {
       pageIndex = pages.length
@@ -234,7 +281,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     const groupIndex = result.groups.findIndex((g) => g.music === line)
     if (groupIndex === -1) continue
     const group = result.groups[groupIndex]
-    placeGroup(groupIndex, group.music.voice, group.music.tokens)
+    placeGroup(groupIndex, group.music.voice, group.music.tokens, group.lyrics)
   }
 
   const configKey = JSON.stringify(config)

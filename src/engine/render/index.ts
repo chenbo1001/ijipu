@@ -12,7 +12,7 @@
  * TODO(M1c)：歌词 <text data-cipos>
  * TODO(M7)：跳房子/连音线/装饰符号/多声部
  */
-import type { PageConfig, PlacedBarline, PlacedToken, ScoreLayout, ScorePage } from '../types'
+import type { PageConfig, PlacedBarline, PlacedLyric, PlacedToken, ScoreLayout, ScorePage } from '../types'
 
 // ============================================================
 // 工具
@@ -215,6 +215,18 @@ function renderBarline(bar: PlacedBarline): string {
 }
 
 // ============================================================
+// 歌词绘制
+// ============================================================
+
+function renderLyric(lyric: PlacedLyric, config: PageConfig): string {
+  const size = config.geci_size
+  const cid = noteposId(lyric.id)
+  return (
+    `<text x="${lyric.x}" y="${lyric.y}" data-cipos="${cid}" font-size="${size}" font-family="${FONT_CN}" fill="#101010">${xmlEsc(lyric.char.text)}</text>`
+  )
+}
+
+// ============================================================
 // 页面组装
 // ============================================================
 
@@ -225,7 +237,7 @@ function renderPage(page: ScorePage, config: PageConfig): string {
   body.push(renderMeta(page, config))
   for (const n of page.notes) body.push(renderNote(n))
   for (const b of page.barlines) body.push(renderBarline(b))
-  // M1c：歌词
+  for (const l of page.lyrics) body.push(renderLyric(l, config))
 
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +

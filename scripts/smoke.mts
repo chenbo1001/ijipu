@@ -161,5 +161,23 @@ const maxX = Math.max(...layW.pages[0].notes.map((n) => n.x + n.width))
 check('音符不超出右边距', maxX <= 595.28 - 80, `maxX=${maxX}`)
 check('同页多行 y 递增', [...rows].sort((a, b) => a - b).every((v, i, arr) => i === 0 || v > arr[i - 1]))
 
+// ---- 11. 歌词对齐（M1c） ----
+console.log('[11] lyric alignment (M1c)')
+const layL = layoutScore(r2, defaultPageConfig) // 两只老虎
+const lyrics0 = layL.pages[0].lyrics
+check('两只老虎全部歌词字 = 32（两行曲 14+18）', lyrics0.length === 32, `got ${lyrics0.length}`)
+const first = lyrics0[0]
+check('歌词 cipos 与音符 notepos 同 id', first.id.page === 0 && first.id.index === 0)
+check('歌词顺序：首字"两"', lyrics0[0].char.text === '两')
+check('第一行曲歌词末字"快"', lyrics0[13].char.text === '快')
+check('第二行曲歌词首字"一"', lyrics0[14].char.text === '一')
+const svgL = renderScoreToSvg(layL)[0]
+check('SVG 含 data-cipos 契约', svgL.includes('data-cipos="0_1_0_0"'))
+check('SVG 歌词文字正确', svgL.includes('两') && svgL.includes('只') && svgL.includes('老') && svgL.includes('虎'))
+const xiaoxing = parseJps(readFileSync(join(root, 'samples', 'xiaoxingxing.jps'), 'utf8'))
+const layX = layoutScore(xiaoxing, defaultPageConfig)
+check('小星星共 42 个歌词字', layX.pages[0].lyrics.length === 42, `got ${layX.pages[0].lyrics.length}`)
+check('小星星歌词首字=一', layX.pages[0].lyrics[0].char.text === '一')
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)
