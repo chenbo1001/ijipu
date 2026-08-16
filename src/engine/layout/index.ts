@@ -74,20 +74,10 @@ export function pitchToName(
 const BPW_NATURAL = 14
 /** 音符数字最小占宽（px，防重叠） */
 const MIN_NOTE_W = 11.5
+/** 数字槽半宽（与 render 的 NOTE_DIGIT_W/2 一致，歌词/高低音点对齐基准，adj24） */
+const HALF_DIGIT_W = 5.58
 /** 小节内左右留白（px） */
 const BAR_PAD = 6
-const DEFAULT_BEATS = 4
-
-/** 解析拍号 → 每小节拍数（分子），失败默认 4 */
-function meterBeatsOf(meter: string | undefined): number {
-  if (!meter) return DEFAULT_BEATS
-  const m = /^\s*(\d+)\s*\//.exec(meter)
-  if (m) {
-    const n = Number(m[1])
-    if (n > 0 && n <= 32) return n
-  }
-  return DEFAULT_BEATS
-}
 
 /** 小节所需最小每拍宽：保证拍内任意相邻音符间距 ≥ 最小字符宽（adj13 按拍内最小时值） */
 function segPerBeatMin(seg: BarSeg): number {
@@ -187,23 +177,22 @@ function segBeats(seg: BarSeg): number {
   )
 }
 
-/** 小节自然宽（每拍最小宽 × 拍数 + 边距） */
-function barNaturalW(seg: BarSeg, beats: number): number {
-  return beats * segPerBeatMin(seg) + BAR_PAD * 2 + 2
-}
-
 /** 排版行：完整小节行（均分撑满）或小节碎片行（超长小节按拍数拆分） */
 type LayoutRow =
   | { kind: 'bars'; start: number; end: number }
   | { kind: 'frag'; segIdx: number; noteStart: number; noteEnd: number }
 
-/** 断行：正常小节按自然宽断行；超长小节（拍数超行上限）拆为碎片行 */
-function breakRows(segs: BarSeg[], beats: number, availW: number): LayoutRow[] {
+/** 断行：正常小节按自然宽断行；超长小节（拍数超行上限）拆为碎片行。
+ *  行宽按「行内统一每拍宽 ≥ 行内最大密度 min」估算（adj24）：
+ *  断行保证 rowBeats × maxPbm ≤ 行可用宽 → 渲染均分 ≥ maxPbm，既不溢出也不重叠。 */
+function breakRows(segs: BarSeg[], availW: number): LayoutRow[] {
   const rows: LayoutRow[] = []
   let start = 0
-  let w = 0
+  let rowPbm = 0 // 当前行内最大 segPerBeatMin
+  let rowBeats = 0 // 当前行内总拍数
   for (let i = 0; i < segs.length; i++) {
-    if (segBeats(segs[i]) > Math.floor((availW - BAR_PAD * 2) / segPerBeatMin(segs[i]))) {
+    const sb = segBeats(segs[i])
+    if (sb > Math.floor((availW - BAR_PAD * 2) / segPerBeatMin(segs[i]))) {
       // 超长小节：flush 当前行，再按音符拍数拆碎片行（拆片上限按密度感知）
       if (i > start) rows.push({ kind: 'bars', start, end: i })
       const maxBeats = Math.max(1, Math.floor((availW - BAR_PAD * 2) / segPerBeatMin(segs[i])))
@@ -223,15 +212,22 @@ function breakRows(segs: BarSeg[], beats: number, availW: number): LayoutRow[] {
       }
       rows.push({ kind: 'frag', segIdx: i, noteStart, noteEnd: notes.length })
       start = i + 1
-      w = 0
+      rowPbm = 0
+      rowBeats = 0
     } else {
-      const nw = barNaturalW(segs[i], beats)
-      if (i > start && w + nw > availW) {
+      const pbm = segPerBeatMin(segs[i])
+      const newBeats = rowBeats + sb
+      const newPbm = Math.max(rowPbm, pbm)
+      const rowW = newBeats * newPbm + BAR_PAD * 2 + (i - start + 1) * 2
+      if (i > start && rowW > availW) {
         rows.push({ kind: 'bars', start, end: i })
         start = i
-        w = 0
+        rowPbm = pbm
+        rowBeats = sb
+      } else {
+        rowPbm = newPbm
+        rowBeats = newBeats
       }
-      w += nw
     }
   }
   if (start < segs.length) rows.push({ kind: 'bars', start, end: segs.length })
@@ -262,7 +258,6 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   const keySemitone = parseKey(result.header.key)
   const availW = paper.width - config.margin_left - config.margin_right
   const bottomLimit = paper.height - config.margin_bottom
-  const beats = meterBeatsOf(result.header.meter)
 
   const meta: ScorePageMeta = {
     titles: result.header.titles,
@@ -356,11 +351,11 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     lyricMaps.forEach((map, row) => {
       const ch = map.get(slotIndex)
       if (!ch) return
-      // 歌词中心对齐音符数字（数字半宽 ≈ 6px）
+      // 歌词中心对齐音符数字（数字槽宽中心 = nx + NOTE_DIGIT_W/2，adj24）
       pages[pageIdx].lyrics.push({
         id,
         char: ch,
-        x: r1(nx + 6 - geciSize / 2),
+        x: r1(nx + HALF_DIGIT_W - geciSize / 2),
         y: r1(yTop + m.noteSize * 1.7 + sp.quci + row * (geciSize + 8 + sp.cici)),
       })
     })
@@ -397,7 +392,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       const seg = segs[row.segIdx]
       const slice = { notes: seg.notes.slice(row.noteStart, row.noteEnd), bar: null }
       const fragBeats = segBeats(slice)
-      const perBeat = Math.max(2, (availW - BAR_PAD * 2) / Math.max(1, fragBeats), segPerBeatMin(slice))
+      const p0 = Math.max(2, (availW - BAR_PAD * 2) / Math.max(1, fragBeats), segPerBeatMin(slice))
+      // 行宽兜底（adj24）：密度保护拉大时压缩到行均分，保证行在页面区域内
+      const perBeat =
+        fragBeats * p0 + BAR_PAD * 2 > availW ? (availW - BAR_PAD * 2) / Math.max(1, fragBeats) : p0
       let beatAcc = 0
       for (let j = row.noteStart; j < row.noteEnd; j++) {
         const t = seg.notes[j]
@@ -422,7 +420,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       maxPbm = Math.max(maxPbm, segPerBeatMin(segs[b]))
     }
     const pads = BAR_PAD * 2 + config.bar_gap * Math.max(0, barCount - 1)
-    const perBeat = Math.max(2, (availW - pads) / Math.max(1, rowBeats), maxPbm)
+    const p0 = Math.max(2, (availW - pads) / Math.max(1, rowBeats), maxPbm)
+    // 行宽兜底（adj24）：密度保护把每拍宽拉大导致行超宽时，压缩到行均分（保证行在页面区域内）
+    const perBeat =
+      rowBeats * p0 + pads > availW ? (availW - pads) / Math.max(1, rowBeats) : p0
     for (let b = row.start; b < row.end; b++) {
       const seg = segs[b]
       const isEmptyLead = leadingEmpty === 1 && b === row.start
@@ -470,7 +471,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   /** 处理一个单声部组 */
   const placeGroup = (groupIndex: number, voice: number, tokens: MusicToken[], lyrics: LyricLine[]) => {
     const segs = splitBars(tokens)
-    const rows = breakRows(segs, beats, availW)
+    const rows = breakRows(segs, availW)
     const geciSize = config.geci_size
     const lyricMaps = buildLyricMaps(lyrics)
 
@@ -527,7 +528,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     }
     const perBeatMin = Math.max(0, ...parts.flatMap((p) => p.segs.map((s) => segPerBeatMin(s))))
     const pads = BAR_PAD * 2 + config.bar_gap * Math.max(0, numBars - 1)
-    const perBeat = Math.max(2, (availW - pads) / Math.max(1, blockBeats), perBeatMin)
+    const p0 = Math.max(2, (availW - pads) / Math.max(1, blockBeats), perBeatMin)
+    // 行宽兜底（adj24）：保证声部块在页面区域内
+    const perBeat =
+      blockBeats * p0 + pads > availW ? (availW - pads) / Math.max(1, blockBeats) : p0
 
     const voiceHeights = parts.map((p) => lineHeightOf(config, m, sp, p.lyricRows))
     const blockH = voiceHeights.reduce((a, b) => a + b, 0)

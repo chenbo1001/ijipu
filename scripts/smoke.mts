@@ -454,9 +454,9 @@ check('8 小节断成 2 行', rowsJ.length === 2, `rows=${rowsJ.length}`)
 const row1Notes = layJ.pages[0].notes.filter((n) => n.y === rowsJ[0])
 const maxRight1 = Math.max(...row1Notes.map(segEnd))
 check('行 1 两端对齐（末音符段终点贴近右边界）', maxRight1 > 515.28 - 10, `right=${maxRight1}`)
-// 行 1 按拍数：24 拍，perBeat = (435.28-12)/24 = 17.64；小节 1 宽 = 4×17.64
+// 行 1 按拍数：7 小节 28 拍，perBeat = (435.28-12)/28 = 15.12；小节 1 宽 = 4×15.12
 const row1Sorted = row1Notes.sort((a, b) => a.x - b.x)
-check('行 1 小节宽按拍数（第 2 小节首音符中心）', Math.abs(row1Sorted[4].x + 6 - (80 + 4 * 17.64 + 6 + 8.82)) < 0.5, `x=${row1Sorted[4].x} center=${row1Sorted[4].x + 6}`)
+check('行 1 小节宽按拍数（第 2 小节首音符中心）', Math.abs(row1Sorted[4].x + 6 - (80 + 4 * 15.12 + 6 + 0.5 * 15.12)) < 0.5, `x=${row1Sorted[4].x} center=${row1Sorted[4].x + 6}`)
 const row2Notes = layJ.pages[0].notes.filter((n) => n.y === rowsJ[1])
 const maxRight2 = Math.max(...row2Notes.map(segEnd))
 check('最后一行也按行总拍数铺满（贴右边界）', maxRight2 > 515.28 - 10, `right=${maxRight2}`)
@@ -482,7 +482,7 @@ const rly23 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1- 2 3 4 |\nC: 一 二 �
 const layLy = layoutScore(rly23, defaultPageConfig)
 const n23 = layLy.pages[0].notes[0]
 const l23 = layLy.pages[0].lyrics[0]
-check('歌词中心对齐音符数字', Math.abs(l23.x + defaultPageConfig.geci_size / 2 - (n23.x + 6)) < 1, `lyric=${l23.x} note=${n23.x}`)
+check('歌词中心对齐音符数字', Math.abs(l23.x + defaultPageConfig.geci_size / 2 - (n23.x + 5.58)) < 1, `lyric=${l23.x} note=${n23.x}`)
 // 增时线渲染为水平横线（y 高于基线，非下划线）
 const svg23 = renderScoreToSvg(layLy)[0]
 check('增时线存在（height=2.6）', (svg23.match(/height="2.6"/g) ?? []).length >= 1)
@@ -519,18 +519,18 @@ check('1//2//3//4// 同拍 2 条横线（各整拍连）', b3_24.length === 2, `
 const b4_24 = beamsOf24('1// 2// 3/ |')
 check('1//2//3/ 2 条横线（第1全连、第2连1//2//）', b4_24.length === 2, `got ${b4_24.length}`)
 
-// ---- 25. 每行独立每拍宽（adj15） ----
-console.log('[25] per-row perBeat (adj15)')
-// 8 小节：行 1 = 6 小节（24 拍，perBeat=(435.28-12)/24=17.64），行 2 = 2 小节（8 拍，perBeat=52.91）
+// ---- 25. 每行独立每拍宽（adj15/adj24 断行按实际拍数） ----
+console.log('[25] per-row perBeat (adj15/adj24)')
+// 8 小节：行 1 = 7 小节（28 拍，perBeat=(435.28-12)/28=15.12），行 2 = 1 小节（4 拍，perBeat=105.82）
 const barsJ25 = layJ.pages[0].barlines
 // barlines.yTop 是行顶，音符 y = 行顶 + 18×1.1
 const rowTop = (noteY: number) => noteY - 18 * 1.1
 const row1Bars = barsJ25.filter((b) => Math.abs(b.yTop - rowTop(rowsJ[0])) < 0.5)
 const row2Bars = barsJ25.filter((b) => Math.abs(b.yTop - rowTop(rowsJ[1])) < 0.5)
-check('行 1 6 条小节线', row1Bars.length === 6, `got ${row1Bars.length}`)
-check('行 2 2 条小节线', row2Bars.length === 2, `got ${row2Bars.length}`)
-check('行 1 小节宽按拍数（线 1 = 80+4×17.64）', Math.abs(row1Bars[0].x - (80 + 4 * 17.64)) < 0.5, `x=${row1Bars[0].x}`)
-check('行 2 每行独立 perBeat（线 1 = 80+4×52.91）', Math.abs(row2Bars[0].x - (80 + 4 * 52.91)) < 0.5, `x=${row2Bars[0].x} expect=${80 + 4 * 52.91}`)
+check('行 1 7 条小节线', row1Bars.length === 7, `got ${row1Bars.length}`)
+check('行 2 1 条小节线', row2Bars.length === 1, `got ${row2Bars.length}`)
+check('行 1 小节宽按拍数（线 1 = 80+4×15.12）', Math.abs(row1Bars[0].x - (80 + 4 * 15.12)) < 0.5, `x=${row1Bars[0].x}`)
+check('行 2 每行独立 perBeat（线 1 = 80+4×105.82）', Math.abs(row2Bars[0].x - (80 + 4 * 105.82)) < 0.5, `x=${row2Bars[0].x} expect=${80 + 4 * 105.82}`)
 
 // ---- 26. 超拍小节容错（adj5） ----
 console.log('[26] over-beat bars (adj5)')
