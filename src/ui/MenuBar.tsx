@@ -95,13 +95,24 @@ export function MenuBar() {
           <div
             key={t.id}
             className="menu-entry"
+            style={{ alignItems: 'center' }}
             onClick={() => { setTheme(t.id); setOpen(null) }}
           >
-            <span>
-              {t.name}
-              <span style={{ color: 'var(--jp-text-muted)', fontSize: 11, marginLeft: 6 }}>
-                {t.desc}
-              </span>
+            <span
+              style={{
+                display: 'inline-block',
+                width: 14,
+                height: 14,
+                borderRadius: 4,
+                background: t.bg,
+                border: `1px solid ${t.accent}`,
+                flexShrink: 0,
+              }}
+              title={`${t.name} · ${t.accent}`}
+            />
+            <span>{t.name}</span>
+            <span style={{ color: t.accent, fontSize: 11, marginLeft: 2 }}>
+              {t.desc}
             </span>
             {theme === t.id && <span className="kbd">●</span>}
           </div>
