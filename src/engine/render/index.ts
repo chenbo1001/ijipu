@@ -154,12 +154,12 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     )
   }
 
-  // 增时线（数字右侧水平延伸，垂直居中于数字）
+  // 增时线（数字右侧水平延伸，垂直居中于数字；每条宽与音符数字占宽一致）
   const augY = y - 8
   for (let i = 0; i < t.augmentCount; i++) {
-    const lx = x + size * 0.62 + size * 0.5 * i + 2
+    const lx = x + size * 0.62 + i * (NOTE_DIGIT_W + 2) + 1
     parts.push(
-      `<rect x="${lx}" y="${augY}" width="${size * 0.42}" height="2.6" rx="1.3" fill="#1b1b1b"/>`,
+      `<rect x="${lx}" y="${augY}" width="${NOTE_DIGIT_W}" height="2.6" rx="1.3" fill="#1b1b1b"/>`,
     )
   }
 

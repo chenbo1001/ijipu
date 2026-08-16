@@ -483,7 +483,6 @@ body {
   position: fixed;
   inset: 0;
   background: rgba(6, 10, 22, 0.6);
-  backdrop-filter: blur(2px);
   z-index: 200;
   display: flex;
   align-items: center;
@@ -502,6 +501,10 @@ body {
   animation: menuIn 0.15s ease-out;
 }
 
+.modal.dragging {
+  transition: none;
+}
+
 .modal-head {
   display: flex;
   align-items: center;
@@ -510,6 +513,8 @@ body {
   border-bottom: 1px solid var(--jp-border);
   font-weight: 600;
   font-size: 14px;
+  cursor: move;
+  user-select: none;
 }
 
 .modal-close {

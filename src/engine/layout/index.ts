@@ -374,8 +374,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     lyricMaps: Map<number, LyricChar>[],
     geciSize: number,
     sp: Spacing,
-    isLastRow: boolean,
     slotStart: number,
+    alignW: number | null,
   ) => {
     const page = pages[pageIndex]
     const yBottom = r1(yTop + m.noteSize * 1.7)
@@ -390,11 +390,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     }
 
     if (row.kind === 'frag') {
-      // 超长小节碎片行：按实际拍数铺满（最后一行自然宽）；密度感知防重叠
+      // 超长小节碎片行：按实际拍数铺满（密度感知防重叠）
       const seg = segs[row.segIdx]
       const fragBeats = segBeats({ notes: seg.notes.slice(row.noteStart, row.noteEnd), bar: null })
-      const fragW = isLastRow ? fragBeats * BPW_NATURAL : availW
-      const perBeat = Math.max(2, (fragW - BAR_PAD * 2) / Math.max(1, fragBeats), segPerBeatMin(seg))
+      const perBeat = Math.max(2, (availW - BAR_PAD * 2) / Math.max(1, fragBeats), segPerBeatMin(seg))
       let beatAcc = 0
       for (let j = row.noteStart; j < row.noteEnd; j++) {
         const t = seg.notes[j]
@@ -408,15 +407,16 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       return
     }
 
-    // bars 行：小节均分（行首空小节如 |: 不占宽）；最后一行每小节独立自然宽
+    // bars 行：小节均分（行首空小节如 |: 不占宽）；
+    // 最后一行：小节数少于上一行时按上一行网格对齐（alignW），否则与普通行一样均分
     const leadingEmpty = row.start < row.end && segs[row.start].notes.length === 0 ? 1 : 0
     const barCount = Math.max(1, row.end - row.start - leadingEmpty)
-    const rowBarW = isLastRow ? 0 : availW / barCount // isLastRow 时逐小节自然宽
+    const rowBarW = alignW !== null ? alignW : availW / barCount
     for (let b = row.start; b < row.end; b++) {
       const seg = segs[b]
       const isEmptyLead = leadingEmpty === 1 && b === row.start
-      const segBarW = isLastRow ? barNaturalW(seg, beats) : rowBarW
-      const perBeat = Math.max(2, (segBarW - BAR_PAD * 2) / beats)
+      const segBarW = rowBarW
+      const perBeat = Math.max(2, (segBarW - BAR_PAD * 2) / beats, segPerBeatMin(seg))
       let beatAcc = 0
       for (const t of seg.notes) {
         if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
@@ -479,10 +479,32 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       }
     }
 
+    // 最后一行对齐规则：小节数少于上一行 → 按上一行均分网格对齐；否则均分
+    let lastAlignW: number | null = null
+    if (isLastGroup && rows.length > 1) {
+      const lastRow = rows[rows.length - 1]
+      if (lastRow.kind === 'bars') {
+        let prev: LayoutRow | null = null
+        for (let i = rows.length - 2; i >= 0; i--) {
+          if (rows[i].kind === 'bars') {
+            prev = rows[i]
+            break
+          }
+        }
+        if (prev && prev.kind === 'bars') {
+          const barCnt = (r: Extract<LayoutRow, { kind: 'bars' }>) => {
+            const lead = r.start < r.end && segs[r.start].notes.length === 0 ? 1 : 0
+            return Math.max(1, r.end - r.start - lead)
+          }
+          if (barCnt(lastRow) < barCnt(prev)) lastAlignW = availW / barCnt(prev)
+        }
+      }
+    }
+
     rows.forEach((row, ri) => {
       const isLastRow = isLastGroup && ri === rows.length - 1
       const sp = spacingFor(config, pageIndex)
-      placeMusicRow(segs, row, groupIndex, voice, y, lyricMaps, geciSize, sp, isLastRow, rowSlots[ri])
+      placeMusicRow(segs, row, groupIndex, voice, y, lyricMaps, geciSize, sp, rowSlots[ri], isLastRow ? lastAlignW : null)
       y += lineHeightOf(config, m, sp, lyrics.length)
       if (y + m.noteSize * 1.7 > bottomLimit) {
         pageIndex = pages.length
