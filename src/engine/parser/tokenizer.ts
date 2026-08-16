@@ -176,6 +176,8 @@ export function tokenizeMusicLine(
         pos: i,
         raw: rawAt(i, j),
       }
+      // 跳过小节线后的空格，再处理备注（引号）与跳房子标记
+      while (content[j] === ' ' || content[j] === '\t') j++
       // 小节线备注（引号，如跳房子番号 "1."）——先于跳房子标记处理
       if (content[j] === '"') {
         const close = content.indexOf('"', j + 1)
