@@ -1,48 +1,47 @@
 /**
- * engine/playback/index.ts — 播放引擎（契约先行，实现见后续迭代）
+ * engine/playback/index.ts — 播放引擎入口
  *
- * 输入：排版结果；输出：有序播放事件序列（含反复记号展开：
- * |: :| 反复、跳房子 [ ]、以及后续 D.C./Fine 支持）。
- * 音频输出支持两种后端（可切换）：
- *  - synth：Web Audio 合成音色（内置振荡器包络，零依赖）
- *  - sampler：采样音源（钢琴采样，按需加载）
+ * 管线：buildPlaySequence（含反复记号展开）→ AudioBackend 播放。
+ * 两种后端（可切换）：
+ *  - synth：Web Audio 合成音色（零依赖，默认）
+ *  - sampler：钢琴采样（外部 soundfont，需网络，实验性）
  */
-import type { PlacedToken, ScoreLayout } from '../types'
+import type { PlacedToken } from '../types'
+import type { AudioBackend, BackendKind } from './types'
+import { SynthBackend, pitchToFreq } from './synth'
+import { SamplerBackend } from './sampler'
 
-/** 一次播放事件 */
-export interface PlayEvent {
-  /** 音符索引（用于高亮与进度定位） */
-  placed: PlacedToken
-  /** 距开始的延迟（ms） */
-  atMs: number
-  /** 时值（ms） */
-  durationMs: number
+export { buildPlaySequence, inferBpm } from './sequence'
+export type { PlayEvent, PlaySequence } from './sequence'
+export { SynthBackend, pitchToFreq }
+export { SamplerBackend }
+export type { AudioBackend, BackendKind } from './types'
+
+/** 创建音频后端 */
+export function createBackend(kind: BackendKind): AudioBackend {
+  if (kind === 'sampler') return new SamplerBackend()
+  return new SynthBackend()
 }
 
-/** 播放序列构建结果 */
-export interface PlaySequence {
-  events: PlayEvent[]
-  /** 总时长（ms） */
-  totalMs: number
-  /** 拍速（每分钟拍数），从描述头 J 或页面配置推断 */
-  bpm: number
-}
-
-/** 音频后端接口：合成与采样共同实现 */
-export interface AudioBackend {
-  readonly kind: 'synth' | 'sampler'
-  /** 播放一个音（简谱音名如 C5；null 表示休止/不发声） */
-  play(pitch: string | null, atMs: number, durationMs: number, gain: number): void
-  stop(): void
-  /** 释放资源 */
-  dispose(): void
-}
-
-/**
- * 构建播放序列（展开反复记号）。
- * TODO(engine): 实现序列构建与反复逻辑。
- */
-export function buildPlaySequence(layout: ScoreLayout, bpm: number): PlaySequence {
-  void layout
-  return { events: [], totalMs: 0, bpm }
+/** 调度播放：按事件延迟触发；返回取消函数 */
+export function schedulePlay(
+  seq: { events: { placed: PlacedToken; atMs: number; durationMs: number }[] },
+  backend: AudioBackend,
+  onNote?: (placed: PlacedToken) => void,
+): { cancel: () => void; totalMs: number } {
+  const timers: number[] = []
+  for (const ev of seq.events) {
+    if (!ev.placed.playable || !ev.placed.audioPitch) continue
+    timers.push(
+      window.setTimeout(() => {
+        backend.play(ev.placed.audioPitch, 0, ev.durationMs, 0.5)
+        onNote?.(ev.placed)
+      }, ev.atMs),
+    )
+  }
+  const totalMs = seq.events.length > 0 ? seq.events[seq.events.length - 1].atMs + 100 : 0
+  return {
+    cancel: () => timers.forEach((t) => window.clearTimeout(t)),
+    totalMs,
+  }
 }

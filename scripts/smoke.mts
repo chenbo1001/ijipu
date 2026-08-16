@@ -7,6 +7,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseJps, formatJps, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig } from '../src/engine/index.ts'
+import { buildPlaySequence, inferBpm } from '../src/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '../src/engine/cursorMap.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
 import { highlightCode } from '../src/editor/highlight.ts'
@@ -223,6 +224,45 @@ const idPage1 = codePosToNoteId(linkCode2, 32) // Q2 行 '3' 后
 check('分页后第 2 页音符 id page=1、index=2（全局计数）', idPage1 === '1_1_1_2', String(idPage1))
 const posPage1 = noteIdToCodePos(linkCode2, '1_1_1_2')
 check('第 2 页音符反向定位在 Q2 行', posPage1 === 32, String(posPage1))
+
+// ---- 15. 播放序列（M4） ----
+console.log('[15] play sequence (M4)')
+const mkSeq = (q: string, bpm = 120) => {
+  const r = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`)
+  const lay = layoutScore(r, defaultPageConfig)
+  return buildPlaySequence(r, lay, bpm)
+}
+const pitchSeq = (seq: ReturnType<typeof buildPlaySequence>) =>
+  seq.events.map((e) => e.placed.audioPitch).join(',')
+
+// 基础时值：4 音符 @120bpm = 4×500ms
+const ps0 = mkSeq('1 2 3 4 |')
+check('无反复 4 事件', ps0.events.length === 4, `got ${ps0.events.length}`)
+check('事件时值 500ms', ps0.events[0].durationMs === 500, String(ps0.events[0].durationMs))
+check('atMs 递增', ps0.events[3].atMs === 1500, String(ps0.events[3].atMs))
+check('总时长 2000ms', ps0.totalMs === 2000, String(ps0.totalMs))
+
+// 反复 |: :|
+const ps1 = mkSeq('|: 1 2 :| 3 4 |')
+check('反复展开 6 事件（1,2,1,2,3,4）', pitchSeq(ps1) === 'C4,D4,C4,D4,E4,F4', pitchSeq(ps1))
+
+// 跳房子（第二遍跳过 [ ] 段）
+const ps2 = mkSeq('|: 1 2 [ 3 4 ] 5 6 :|')
+check('跳房子展开 10 事件', pitchSeq(ps2) === 'C4,D4,E4,F4,G4,A4,C4,D4,G4,A4', pitchSeq(ps2))
+
+// 终止线 || 停止
+const ps3 = mkSeq('1 2 | 3 4 || 5 6 |')
+check('终止线后停止（4 事件）', ps3.events.length === 4, `got ${ps3.events.length}`)
+
+// 隐藏休止符占时不发声
+const ps4 = mkSeq('1 8 3 |')
+check('隐藏休止符事件仍占位（3 事件）', ps4.events.length === 3, `got ${ps4.events.length}`)
+check('隐藏休止符 audioPitch=null', ps4.events[1].placed.audioPitch === null, String(ps4.events[1].placed.audioPitch))
+
+// bpm 推断
+check('J:96 → 96', inferBpm(parseJps('V: 1.0\nB: t\nJ: 96\n')) === 96)
+check('无 J → 90', inferBpm(parseJps('V: 1.0\nB: t\n')) === 90)
+check('J 文字 → 90', inferBpm(parseJps('V: 1.0\nB: t\nJ: 欢快的\n')) === 90)
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)

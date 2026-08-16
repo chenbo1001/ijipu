@@ -44,6 +44,9 @@ export function parseKey(key: string | undefined): number {
 /** 中音 1 的 MIDI 编号（简谱中音 1 = C4 = MIDI 60） */
 const BASE_MIDI = 60
 
+/** 大调音阶级数 → 半音偏移（1→根音, 2→大二度, ... 7→大七度） */
+const DEGREE_SEMITONES = [0, 2, 4, 5, 7, 9, 11]
+
 /** 音级 + 八度 + 变音 → MIDI → 音名（null = 无音高） */
 export function pitchToName(
   pitch: NoteToken['pitch'],
@@ -52,7 +55,8 @@ export function pitchToName(
   keySemitone: number,
 ): string | null {
   const accSemis = accidental === '#' ? 1 : accidental === '$' ? -1 : 0
-  const midi = BASE_MIDI + keySemitone + (pitch - 1) + octaveShift * 12 + accSemis
+  const degree = DEGREE_SEMITONES[pitch - 1]
+  const midi = BASE_MIDI + keySemitone + degree + octaveShift * 12 + accSemis
   const name = NOTE_NAMES[((midi % 12) + 12) % 12]
   const octave = Math.floor(midi / 12) - 1
   return `${name}${octave}`
