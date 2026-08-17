@@ -221,12 +221,14 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
   }
 
   // 附点（adj13/15：垂直居中于数字；附点占前音符**基础时值**的 1/2，
-  // 即 1. 总宽 1.5 拍、1/. 总宽 0.75 拍；位置基于不含附点的基础时值）
+  // 即 1. 总宽 1.5 拍、1/. 总宽 0.75 拍；位置基于不含附点的基础时值；
+  // adj35：段起点/每拍宽取第 1 拍段）
   if (t.dots > 0) {
-    const perBeat = note.duration > 0 ? note.width / note.duration : NOTE_DIGIT_W
+    const seg0 = note.segments?.[0]
+    const perBeat = seg0 ? seg0.perBeat : note.duration > 0 ? note.width / note.duration : NOTE_DIGIT_W
     const baseDur = (1 + t.augmentCount) / Math.pow(2, t.diminishCount)
     // 数字中心 = 第 1 拍段中点 → 时值段起点
-    const segStart = x + 6 - Math.min(note.duration, 1) * (perBeat / 2)
+    const segStart = seg0 ? seg0.x : x + 6 - Math.min(note.duration, 1) * (perBeat / 2)
     let acc = baseDur * perBeat // 基础时值结束处
     for (let i = 0; i < t.dots; i++) {
       const half = (baseDur * perBeat) / Math.pow(2, i + 1)
@@ -236,16 +238,18 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     }
   }
 
-  // 增时线（"-" 各占一拍的位置，但字符本身不拉伸：固定标准宽，居中于所在拍段）
+  // 增时线（"-" 各占一拍的位置，但字符本身不拉伸：固定标准宽，居中于所在拍段；
+  // adj35：第 i 条增时线在第 i+1 拍段，用该拍段起点与每拍宽）
   const augY = y - 8
   if (t.augmentCount > 0) {
-    const dur = note.duration
-    const perBeat = dur > 0 ? note.width / dur : NOTE_DIGIT_W
-    // 数字中心 = 第 1 拍段中点 → 时值段起点
-    const segStart = x + 6 - Math.min(dur, 1) * (perBeat / 2)
+    const seg0 = note.segments?.[0]
+    const pb0 = seg0 ? seg0.perBeat : note.duration > 0 ? note.width / note.duration : NOTE_DIGIT_W
+    const segStart0 = seg0 ? seg0.x : x + 6 - Math.min(note.duration, 1) * (pb0 / 2)
     for (let i = 0; i < t.augmentCount; i++) {
-      const beatStart = segStart + (1 + i) * perBeat
-      const lx = r1n(beatStart + (perBeat - NOTE_DIGIT_W) / 2)
+      const seg = note.segments?.[i + 1]
+      const beatStart = seg ? seg.x : segStart0 + (1 + i) * pb0
+      const pb = seg ? seg.perBeat : pb0
+      const lx = r1n(beatStart + (pb - NOTE_DIGIT_W) / 2)
       parts.push(
         `<rect x="${lx}" y="${augY}" width="${NOTE_DIGIT_W}" height="2.6" rx="1.3" fill="#1b1b1b"/>`,
       )

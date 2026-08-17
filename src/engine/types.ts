@@ -341,6 +341,11 @@ export interface PlacedToken {
   beatPos: number
   /** 小节索引（行内唯一，用于减时线分组） */
   barIndex: number
+  /**
+   * 拍段序列（adj35 拍级宽度）：每段一拍（跨拍音符拆段），供增时线/附点按拍定位。
+   * x = 段起点，perBeat = 该拍每拍宽，beats = 段内时值（拍）。
+   */
+  segments?: { x: number; perBeat: number; beats: number }[]
   /** 试听音高：音级+八度+变音计算出的简谱音名（如 C5） */
   audioPitch: string | null
   /** 是否可点击（休止符/隐藏符不可发声） */

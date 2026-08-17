@@ -874,5 +874,20 @@ const svg41 = renderScoreToSvg(lay41)[0]
 const dot41 = /<circle cx="([\d.]+)" cy="[\d.]+" r="1.8"/.exec(svg41)
 check('反复点紧贴线（cx = 线 x + 1）', dot41 !== null && Math.abs(Number(dot41[1]) - (b41.x + 1)) < 0.5, `cx=${dot41?.[1]} x=${b41.x}`)
 
+// ---- 42. 拍级挤占（adj35） ----
+console.log('[42] beat-level spacing (adj35)')
+// 16 分音符拍 need=48.64 > 行均分 32.6 → 该拍固定 48.64（挤占），其余拍平均分享 31.2
+const r42 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1// 2// 3// 4// | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |\n')
+const lay42 = layoutScore(r42, defaultPageConfig)
+const n42 = [...lay42.pages[0].notes].sort((a, b) => a.x - b.x)
+check('16 分音符间距 = 12.16（数字 11.16 + 最小间距 1px）', Math.abs(n42[1].x - n42[0].x - 12.16) < 0.5, `gap=${n42[1].x - n42[0].x}`)
+// 拍 1 起点 = 86(BAR 内)+48.64；数字中心 = + 31.2/2
+check('超拍挤占后正常拍平均（第 5 音符中心）', Math.abs(n42[4].x + 6 - (86 + 48.64 + 15.6)) < 0.5, `center=${n42[4].x + 6}`)
+// 行不溢出
+check('拍级行不溢出页面', Math.max(...n42.map((nn) => nn.x + 11.16)) <= 515.28, `right=${Math.max(...n42.map((nn) => nn.x + 11.16))}`)
+// 13 拍整行不拆（断行按逐拍 need，而非统一 maxPbm）
+const ys42 = [...new Set(lay42.pages[0].notes.map((nn) => nn.y))]
+check('密集拍所在行不拆（13 拍一行）', ys42.length === 1, `rows=${ys42.length}`)
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)
