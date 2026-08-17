@@ -940,6 +940,22 @@ const dot1 = dotCxOf(svg45b, 0)
 const dot2 = dotCxOf(svg45b, 1)
 check('双附点：附点1 在 1.25 拍、附点2 在 1.625 拍', Math.abs(dot1 - (86 + 1.25 * pb45b)) < 0.5 && Math.abs(dot2 - (86 + 1.625 * pb45b)) < 0.5, `d1=${dot1} d2=${dot2} pb=${pb45b}`)
 
+// ---- 46. 歌词对齐：@ 占位 / 标点紧跟（adj40） ----
+console.log('[46] lyric @ and punct (adj40)')
+// @ 占位：该处留空，其后歌词后移到下一个音符
+const r46a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\nC: 一 @ 二 三\n')
+const lay46a = layoutScore(r46a, defaultPageConfig)
+const l46a = lay46a.pages[0].lyrics
+check('@ 占位：3 个字渲染（一、二、三）', l46a.length === 3, `got ${l46a.length}`)
+// 行 4 拍：perBeat = (435.28-12)/4 = 105.82；二（对 3）与一（对 1）差 2 拍
+check('@ 后歌词后移（二 对音符 3）', Math.abs(l46a[1].x - l46a[0].x - 2 * 105.82) < 1, `dx=${l46a[1].x - l46a[0].x}`)
+// 标点不占音符位，紧跟前面的字渲染
+const r46b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\nC: 一，二。三\n')
+const l46b = layoutScore(r46b, defaultPageConfig).pages[0].lyrics
+check('标点不占音符位置（3 个歌词字）', l46b.length === 3 && l46b[1].char.text === '二' && l46b[1].char.trailing === '。', `got ${l46b.length}`)
+const svg46b = renderScoreToSvg(layoutScore(r46b, defaultPageConfig))[0]
+check('标点渲染在本字之后（一，/ 二。）', svg46b.includes('一，') && svg46b.includes('二。'), '')
+
 // ---- 44. 独立增时线归入最近音符（adj37） ----
 console.log('[44] dangling augment (adj37)')
 // "1) -" 的 "-" 归入前面音符 1（跳过连音线括号），不跨小节线

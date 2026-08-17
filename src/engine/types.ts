@@ -280,6 +280,8 @@ export interface LyricChar {
   skip: boolean
   /** 是否为标点（自动识别，排版时适当缩小间距） */
   punctuation: boolean
+  /** 紧跟本字的标点串（adj40：标点不占音符位，渲染在本字之后） */
+  trailing?: string
   /** 行内字符偏移 */
   pos: number
   raw: string

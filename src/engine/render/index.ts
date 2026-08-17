@@ -348,8 +348,10 @@ function renderBarline(bar: PlacedBarline): string {
 function renderLyric(lyric: PlacedLyric, config: PageConfig): string {
   const size = config.geci_size
   const cid = noteposId(lyric.id)
+  // 标点紧跟前面的字（adj40：标点不占音符位，渲染在本字之后）
+  const text = lyric.char.text + (lyric.char.trailing ?? '')
   return (
-    `<text x="${lyric.x}" y="${lyric.y}" data-cipos="${cid}" font-size="${size}" font-family="${FONT_CN}" fill="#101010">${xmlEsc(lyric.char.text)}</text>`
+    `<text x="${lyric.x}" y="${lyric.y}" data-cipos="${cid}" font-size="${size}" font-family="${FONT_CN}" fill="#101010">${xmlEsc(text)}</text>`
   )
 }
 

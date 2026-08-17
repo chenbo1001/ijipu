@@ -364,13 +364,22 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     lyrics.map((line) => {
       const map = new Map<number, LyricChar>()
       let slot = 0
+      let lastSlot = -1 // 最近放置的字（标点挂其后，adj40）
       for (const ch of line.chars) {
-        if (ch.punctuation) continue
+        if (ch.punctuation) {
+          // 标点不占音符位，紧跟前面的字（跨 @ 占位也跟前面的字）
+          if (lastSlot >= 0) {
+            const cur = map.get(lastSlot)
+            map.set(lastSlot, cur ? { ...cur, trailing: (cur.trailing ?? '') + ch.text } : { ...ch, skip: false, trailing: ch.text })
+          }
+          continue
+        }
         if (ch.skip) {
           slot++
           continue
         }
-        map.set(slot, ch)
+        map.set(slot, { ...ch, trailing: '' })
+        lastSlot = slot
         slot++
       }
       return map
