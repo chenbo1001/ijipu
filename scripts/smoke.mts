@@ -962,7 +962,7 @@ const r46b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\nC: 一，二。
 const l46b = layoutScore(r46b, defaultPageConfig).pages[0].lyrics
 check('标点不占音符位置（3 个歌词字）', l46b.length === 3 && l46b[1].char.text === '二' && l46b[1].char.trailing === '。', `got ${l46b.length}`)
 const svg46b = renderScoreToSvg(layoutScore(r46b, defaultPageConfig))[0]
-check('标点渲染在本字之后（一，/ 二。）', svg46b.includes('一，') && svg46b.includes('二。'), '')
+check('标点独立渲染在本字之后（一 与 ，相邻，adj40）', svg46b.includes('>一<') && svg46b.includes('>，<') && svg46b.includes('>二<') && svg46b.includes('>。<'), '')
 
 // ---- 44. 独立增时线归入最近音符（adj37） ----
 console.log('[44] dangling augment (adj37)')

@@ -349,11 +349,18 @@ function renderBarline(bar: PlacedBarline): string {
 function renderLyric(lyric: PlacedLyric, config: PageConfig): string {
   const size = config.geci_size
   const cid = noteposId(lyric.id)
-  // 标点紧跟前面的字（adj40：标点不占音符位，渲染在本字之后）
-  const text = lyric.char.text + (lyric.char.trailing ?? '')
-  return (
-    `<text x="${lyric.x}" y="${lyric.y}" data-cipos="${cid}" font-size="${size}" font-family="${FONT_CN}" fill="#101010">${xmlEsc(text)}</text>`
-  )
+  const parts = [
+    // 字以 x 为左边缘，中心 = x + 字号/2（对中音符槽中心，adj40）
+    `<text x="${lyric.x}" y="${lyric.y}" data-cipos="${cid}" font-size="${size}" font-family="${FONT_CN}" fill="#101010">${xmlEsc(lyric.char.text)}</text>`,
+  ]
+  // 中文标点不占音符位，紧跟本字之后独立渲染（adj35/40）——
+  // 分开渲染避免标点并入后整个文本视觉中心偏移、与音符失中
+  if (lyric.char.trailing) {
+    parts.push(
+      `<text x="${r1n(lyric.x + size + 1)}" y="${lyric.y}" font-size="${size}" font-family="${FONT_CN}" fill="#101010">${xmlEsc(lyric.char.trailing)}</text>`,
+    )
+  }
+  return parts.join('\n')
 }
 
 // ============================================================
