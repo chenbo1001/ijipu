@@ -693,7 +693,7 @@ console.log('[34] note render detail (adj13)')
 const oct34 = parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1' 2 3 4 |\n")
 const layO34 = layoutScore(oct34, defaultPageConfig)
 const nO34 = layO34.pages[0].notes[0]
-const octDot = /<circle cx="([\d.]+)" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(layO34)[0])
+const octDot = /<circle cx="([\d.]+)" cy="([\d.]+)" r="2"/.exec(renderScoreToSvg(layO34)[0])
 check('高音点 x = 数字中心左移 1（adj19）', octDot !== null && Math.abs(Number(octDot[1]) - (nO34.x + 4.58)) < 0.5, `cx=${octDot?.[1]} expect=${nO34.x + 4.58}`)
 check('高音点 y = 数字基线上 20（距音符 4px，adj21）', octDot !== null && Math.abs(Number(octDot[2]) - (nO34.y - 20)) < 0.5, `cy=${octDot?.[2]} expect=${nO34.y - 20}`)
 // 附点：位置 = 时值结束 + 半值中点，垂直居中
@@ -704,7 +704,7 @@ const perBeatD34 = nD34.width / nD34.duration
 const segStartD34 = nD34.x + 6 - perBeatD34 / 2
 // 附点基于基础时值（1. 的 baseDur=1）：中心 = 段起点 + 1.25×baseDur×perBeat
 const expectDotX = segStartD34 + 1.25 * perBeatD34
-const dotR = /<circle cx="([\d.]+)" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(layD34)[0])
+const dotR = /<circle cx="([\d.]+)" cy="([\d.]+)" r="2"/.exec(renderScoreToSvg(layD34)[0])
 check('附点水平位置（时值结束+半值中点）', dotR !== null && Math.abs(Number(dotR[1]) - expectDotX) < 0.5, `cx=${dotR?.[1]} expect=${expectDotX}`)
 check('附点垂直居中（y = 基线-8）', dotR !== null && Math.abs(Number(dotR[2]) - (nD34.y - 8)) < 0.5, `cy=${dotR?.[2]}`)
 // 混合时值（八分+十六分）不重叠：2 小节行 perBeat 受限
@@ -732,13 +732,13 @@ check('1/. 占宽 = 0.75 拍', Math.abs(n35b[0].width - 0.75 * perBeat35b) < 0.5
 const d35c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3/, 2 |\n')
 const lay35c = layoutScore(d35c, defaultPageConfig)
 const n35c = lay35c.pages[0].notes[0]
-const dot35c = /<circle cx="([\d.]+)" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(lay35c)[0])
+const dot35c = /<circle cx="([\d.]+)" cy="([\d.]+)" r="2"/.exec(renderScoreToSvg(lay35c)[0])
 check('低八度点距减时横线 4px、x=数字中心（adj22）', dot35c !== null && Math.abs(Number(dot35c[2]) - (n35c.y + 14.4)) < 0.5 && Math.abs(Number(dot35c[1]) - (n35c.x + 5.58)) < 0.5, `cy=${dot35c?.[2]} cx=${dot35c?.[1]}`)
 // 低音点无减时线：3, 点顶 = 数字底(基线+2) + 4 → cy = 基线+8.4
 const d35d = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3, 2 |\n')
 const lay35d = layoutScore(d35d, defaultPageConfig)
 const n35d = lay35d.pages[0].notes[0]
-const dot35d = /<circle cx="([\d.]+)" cy="([\d.]+)" r="2.4"/.exec(renderScoreToSvg(lay35d)[0])
+const dot35d = /<circle cx="([\d.]+)" cy="([\d.]+)" r="2"/.exec(renderScoreToSvg(lay35d)[0])
 check('低八度点距数字底部 4px、x=数字中心（adj22）', dot35d !== null && Math.abs(Number(dot35d[2]) - (n35d.y + 8.4)) < 0.5 && Math.abs(Number(dot35d[1]) - (n35d.x + 5.58)) < 0.5, `cy=${dot35d?.[2]} cx=${dot35d?.[1]}`)
 
 // ---- 36. 音符块语法：后置变音 / 虚音符 / 倚音 / 单空格（adj23） ----
@@ -923,7 +923,7 @@ check('小节线右侧距下小节首音符 ≥ 4px', n43c[4].x - (b43c.x + 0.75
 // ---- 45. 附点显示在占位宽度正中（adj39） ----
 console.log('[45] dot centered in its slot (adj39)')
 const dotCxOf = (svg: string, k: number) => {
-  const m = [...svg.matchAll(/<circle cx="([\d.]+)" cy="[\d.]+" r="2.4"/g)][k]
+  const m = [...svg.matchAll(/<circle cx="([\d.]+)" cy="[\d.]+" r="2"/g)][k]
   return m ? Number(m[1]) : NaN
 }
 // 1.：附点段 = 段 1 [x, x+beats×perBeat]，附点 cx = 段中点

@@ -165,7 +165,7 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     for (let i = 0; i < n; i++) {
       // 高音点在数字正上方（基线上 20：点下沿距数字顶约 4px）
       const cy = oct > 0 ? y - (20 + i * 7) : lowBase + i * 7
-      parts.push(`<circle cx="${dotCx}" cy="${cy}" r="2.4" fill="#1b1b1b"/>`)
+      parts.push(`<circle cx="${dotCx}" cy="${cy}" r="2" fill="#1b1b1b"/>`)
     }
   }
 
@@ -237,7 +237,7 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
       // 附点 i 中心相对附点段起点（拍，i 从 0）：起点 = baseDur×(1-1/2^i)，占位半宽 = baseDur/2^(i+2)
       const rel = baseDur * (1 - 1 / Math.pow(2, i)) + baseDur / Math.pow(2, i + 2)
       const cx = segX + (dotStartRel + rel) * pb
-      parts.push(`<circle cx="${r1n(cx)}" cy="${y - 8}" r="2.4" fill="#1b1b1b"/>`)
+      parts.push(`<circle cx="${r1n(cx)}" cy="${y - 8}" r="2" fill="#1b1b1b"/>`)
     }
   }
 
