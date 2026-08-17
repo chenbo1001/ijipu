@@ -84,10 +84,10 @@ const BAR_PAD = 6
 /** 拍与拍之间间距（px，adj38：音符之间留 8px） */
 const NOTE_GAP = 8
 /**
- * 小节线最小占位空间（px，adj38）：线宽 1.5 + 两侧与音符各 4px = 9.5。
- * 小节线空间 = max(bar_gap, 9.5)，保证小节线与两侧音符至少 4px 间距。
+ * 小节线最小占位空间（px，adj39）：线宽 1.5 + 两侧与音符各 8px = 17.5。
+ * 小节线空间 = max(bar_gap, 17.5)，保证小节线与两侧音符至少 8px 间距。
  */
-const MIN_BARLINE_SPACE = 9.5
+const MIN_BARLINE_SPACE = 17.5
 const barlineSpace = (gap: number) => Math.max(gap, MIN_BARLINE_SPACE)
 
 /** 小节所需最小每拍宽：保证拍内任意相邻音符间距 ≥ 最小字符宽（adj13 按拍内最小时值；adj35 间距 1px） */
@@ -469,11 +469,11 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     slotStart: number,
   ) => {
     const page = pages[pageIndex]
-    // 小节线高度（adj34）：上端高于音符字体上端 4px，下端低于音符字体下端 4px
-    // 音符基线 = yTop + 字号×1.1；数字视觉上端 ≈ 基线-13、下端 ≈ 基线+2
+    // 小节线高度（adj39）：字体高度 18 + 16 = 34px，上端高过字体上端、下端低于字体下端
+    // 音符基线 = yTop + 字号×1.1；上端 = 基线-17、下端 = 基线+17（高 34）
     const barNoteY = yTop + m.noteSize * 1.1
     const yTopBar = r1(barNoteY - 17)
-    const yBottomBar = r1(barNoteY + 6)
+    const yBottomBar = r1(barNoteY + 17)
     let x = config.margin_left
     let slotIndex = slotStart
     let openDyn: { type: 'crescendo' | 'decrescendo'; x: number } | null = null
