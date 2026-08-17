@@ -444,8 +444,8 @@ const layW2 = layoutScore(rw, defaultPageConfig)
 const notesW2 = layW2.pages[0].notes
 check('时值等宽：1- 宽 = 2 × 1 拍宽', Math.abs(notesW2[0].width - notesW2[1].width * 2) < 0.5, `${notesW2[0].width} vs ${notesW2[1].width}`)
 check('1 拍音符宽一致', Math.abs(notesW2[1].width - notesW2[2].width) < 0.1)
-// 行总拍数 = 9（1- 2拍 + 3×1 + 4×1）；perBeat = (435.28-12)/9 = 47.03
-check('每拍宽按行总拍数平均（小节 2 首音符中心）', Math.abs(notesW2[4].x + 6 - (80 + 5 * 47.03 + 6 + 0.5 * 47.03)) < 0.5, `x=${notesW2[4].x} center=${notesW2[4].x + 6}`)
+// 行总拍数 = 9（1- 2拍 + 3×1 + 4×1）；pads=12+9.5，perBeat = (435.28-21.5)/9 = 45.98
+check('每拍宽按行总拍数平均（小节 2 首音符中心）', Math.abs(notesW2[4].x + 6 - (80 + 5 * 45.98 + 9.5 + 6 + 0.5 * 45.98)) < 0.5, `x=${notesW2[4].x} center=${notesW2[4].x + 6}`)
 // 两端对齐 + 小节均分：8 小节 → 行 1（6 小节）铺满均分，行 2（最后 2 小节）自然宽不撑满
 const rj2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |\n')
 const layJ = layoutScore(rj2, defaultPageConfig)
@@ -468,14 +468,14 @@ const rbar = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n')
 const layBar = layoutScore(rbar, defaultPageConfig)
 const bars23 = layBar.pages[0].barlines
 check('小节线 2 条', bars23.length === 2, `got ${bars23.length}`)
-// 单行谱 8 拍：perBeat = 423.28/8 = 52.91；小节 1 宽 211.63（线在内容右端 +6）
-check('线 1 在小节 1 内容右端', Math.abs(bars23[0].x - (80 + 6 + 211.63)) < 1, `x=${bars23[0].x}`)
-check('线 2 在小节 2 内容右端', Math.abs(bars23[1].x - (80 + 6 + 423.26)) < 1, `x=${bars23[1].x}`)
-// 行首空 seg（|:）不占宽：行总拍 7，perBeat = 423.28/7 = 60.47
+// 单行谱 8 拍：pads=12+9.5，perBeat = (435.28-21.5)/8 = 51.72；线在内容右端+空间/2（adj38）
+check('线 1 在小节 1 内容右端+4.75', Math.abs(bars23[0].x - (80 + 6 + 4 * 51.72 + 4.75)) < 1, `x=${bars23[0].x}`)
+check('线 2 在小节 2 内容右端+4.75', Math.abs(bars23[1].x - (80 + 6 + 8 * 51.72 + 9.5 + 4.75)) < 1, `x=${bars23[1].x}`)
+// 行首空 seg（|:）不占宽：行总拍 7，pads=12+9.5（barCount=2），perBeat = 413.78/7 = 59.11
 const rr23 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 3 | 5 6 7 1 |\n')
 const layRr = layoutScore(rr23, defaultPageConfig)
 const noteRr = layRr.pages[0].notes[0]
-check('行首 |: 不占宽（音符 1 中心贴左边距+BAR_PAD+半拍）', Math.abs(noteRr.x + 6 - (86 + 30.23)) < 0.5, `center=${noteRr.x + 6}`)
+check('行首 |: 不占宽（音符 1 中心贴左边距+BAR_PAD+半拍）', Math.abs(noteRr.x + 6 - (86 + 29.55)) < 0.5, `center=${noteRr.x + 6}`)
 check('|: 线画在行首', Math.abs(layRr.pages[0].barlines[0].x - 80) < 1, `x=${layRr.pages[0].barlines[0].x}`)
 // 歌词中心对齐音符数字（增时线音符 1- 的歌词在数字下方）
 const rly23 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1- 2 3 4 |\nC: 一 二 三 四\n')
@@ -529,8 +529,9 @@ const row1Bars = barsJ25.filter((b) => Math.abs(b.yTop - rowTop(rowsJ[0])) < 0.5
 const row2Bars = barsJ25.filter((b) => Math.abs(b.yTop - rowTop(rowsJ[1])) < 0.5)
 check('行 1 7 条小节线', row1Bars.length === 7, `got ${row1Bars.length}`)
 check('行 2 1 条小节线', row2Bars.length === 1, `got ${row2Bars.length}`)
-check('行 1 小节宽按拍数（线 1 = 80+6+4×15.12）', Math.abs(row1Bars[0].x - (80 + 6 + 4 * 15.12)) < 0.5, `x=${row1Bars[0].x}`)
-check('行 2 每行独立 perBeat（线 1 = 80+6+4×105.82）', Math.abs(row2Bars[0].x - (80 + 6 + 4 * 105.82)) < 0.5, `x=${row2Bars[0].x} expect=${80 + 6 + 4 * 105.82}`)
+// pads=12+9.5×6=69：行 1 perBeat = 366.28/28 = 13.08；线 = 内容右端 + 空间/2（adj38）
+check('行 1 小节宽按拍数（线 1 = 80+6+4×13.08+4.75）', Math.abs(row1Bars[0].x - (80 + 6 + 4 * 13.08 + 4.75)) < 0.5, `x=${row1Bars[0].x}`)
+check('行 2 每行独立 perBeat（线 1 = 80+6+4×105.82+4.75）', Math.abs(row2Bars[0].x - (80 + 6 + 4 * 105.82 + 4.75)) < 0.5, `x=${row2Bars[0].x} expect=${80 + 6 + 4 * 105.82 + 4.75}`)
 
 // ---- 26. 超拍小节容错（adj5） ----
 console.log('[26] over-beat bars (adj5)')
@@ -786,7 +787,7 @@ console.log('[37] barline centering (adj25)')
 // layV（[17]）：Q1/Q2 各 1 小节 4 拍，blockBeats=4，perBeat=(435.28-12)/4=105.82
 const bars37 = layV.pages[0].barlines
 const perBeat37 = 105.82
-check('多声部小节线在小节内容右端（adj36）', bars37.length === 1 && Math.abs(bars37[0].x - (80 + 6 + 4 * perBeat37)) < 1, `x=${bars37[0]?.x} expect=${80 + 6 + 4 * perBeat37}`)
+check('多声部小节线在小节内容右端+4.75（adj38）', bars37.length === 1 && Math.abs(bars37[0].x - (80 + 6 + 4 * perBeat37 + 4.75)) < 1, `x=${bars37[0]?.x} expect=${80 + 6 + 4 * perBeat37 + 4.75}`)
 // 单声部 gap 居中已在 [29] 断言
 // formatter 单空格：音符块与小节线块之间恰好一个空格
 const fmt37 = formatJps('V: 1.0\nB: t\nQ: 1 2|3 4\n')
@@ -881,8 +882,8 @@ const r42 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1// 2// 3// 4// | 1 2 3 4 |
 const lay42 = layoutScore(r42, defaultPageConfig)
 const n42 = [...lay42.pages[0].notes].sort((a, b) => a.x - b.x)
 check('16 分音符间距 = 12.16（数字 11.16 + 最小间距 1px）', Math.abs(n42[1].x - n42[0].x - 12.16) < 0.5, `gap=${n42[1].x - n42[0].x}`)
-// 拍 1 起点 = 86(BAR 内)+48.64；数字中心 = + 31.2/2
-check('超拍挤占后正常拍平均（第 5 音符中心）', Math.abs(n42[4].x + 6 - (86 + 48.64 + 15.6)) < 0.5, `center=${n42[4].x + 6}`)
+// 拍 1 起点 = 86(BAR 内)+48.64+空间9.5；数字中心 = + 28.85/2（pads=12+9.5×3）
+check('超拍挤占后正常拍平均（第 5 音符中心）', Math.abs(n42[4].x + 6 - (80 + 48.64 + 9.5 + 6 + 14.42)) < 0.5, `center=${n42[4].x + 6}`)
 // 行不溢出
 check('拍级行不溢出页面', Math.max(...n42.map((nn) => nn.x + 11.16)) <= 515.28, `right=${Math.max(...n42.map((nn) => nn.x + 11.16))}`)
 // 13 拍整行不拆（断行按逐拍 need，而非统一 maxPbm）
@@ -912,8 +913,10 @@ const lay43c = layoutScore(r43c, defaultPageConfig)
 const b43c = lay43c.pages[0].barlines[0]
 const n43c = lay43c.pages[0].notes
 const segEnd43 = (n43c[3].segments?.[0]?.x ?? 0) + (n43c[3].segments?.[0]?.beats ?? 0) * (n43c[3].segments?.[0]?.perBeat ?? 0)
-check('小节线中心 = 小节内容右端', Math.abs(b43c.x - segEnd43) < 0.5, `line=${b43c.x} end=${segEnd43}`)
-check('小节线不与末音符数字重叠', b43c.x - 0.75 >= n43c[3].x + 11.16, `lineL=${b43c.x - 0.75} noteR=${n43c[3].x + 11.16}`)
+check('小节线中心 = 内容右端 + 空间/2（adj38）', Math.abs(b43c.x - (segEnd43 + 4.75)) < 0.5, `line=${b43c.x} end=${segEnd43}`)
+check('小节线与末音符数字至少 4px 间距', b43c.x - 0.75 - (n43c[3].x + 11.16) >= 4, `lineL=${b43c.x - 0.75} noteR=${n43c[3].x + 11.16}`)
+// 右侧：下小节首音符数字左缘 - 线右缘 ≥ 4（adj38）
+check('小节线右侧距下小节首音符 ≥ 4px', n43c[4].x - (b43c.x + 0.75) >= 4, `gap=${(n43c[4].x - (b43c.x + 0.75)).toFixed(1)}`)
 
 // ---- 44. 独立增时线归入最近音符（adj37） ----
 console.log('[44] dangling augment (adj37)')
