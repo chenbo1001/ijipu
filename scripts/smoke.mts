@@ -44,8 +44,10 @@ check('第 1 组曲行含 14 个音符（4 小节）', g0Notes === 14, `got ${g0
 const g0Bars = g0.music.tokens.filter((t) => t.kind === 'barline').length
 check('第 1 组曲行含 4 条小节线', g0Bars === 4, `got ${g0Bars}`)
 check('第 1 组有 1 行歌词', g0.lyrics.length === 1)
-const lyricText = g0.lyrics[0].chars.map((c) => c.text).join('')
-check('歌词正确', lyricText === '一闪一闪亮晶晶，满天都是小星星。', lyricText)
+// adj35：中文标点不占音符位，挂在前面字的 trailing（渲染紧跟其后）
+const lyricText = g0.lyrics[0].chars.map((c) => c.text + (c.trailing ?? '')).join('')
+check('歌词正确（含紧跟的标点）', lyricText === '一闪一闪亮晶晶，满天都是小星星。', lyricText)
+check('标点挂在前字 trailing（不占位）', g0.lyrics[0].chars.some((c) => c.trailing?.includes('，')), JSON.stringify(g0.lyrics[0].chars.map((c) => c.trailing)))
 
 // ---- 2. tokenizer 细节（两只老虎：反复记号） ----
 console.log('[2] tokenize liangzhilaohu.jps (repeats)')

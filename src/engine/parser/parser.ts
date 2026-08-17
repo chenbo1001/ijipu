@@ -21,18 +21,29 @@ import { errAt } from './errors'
 
 const HEADER_KEYS = new Set(['V', 'B', 'Z', 'D', 'P', 'J'])
 
-/** 解析一个 C 行（歌词）：每个汉字/音节对应一个音符；@ 跳过；~ 连字；标点自动跳过 */
+/** 解析一个 C 行（歌词）：每个汉字/音节对应一个音符；@ 占位（占一个字空间）；~ 连字；
+ *  中文标点不占音符位，紧跟前面的字渲染（adj35） */
 function parseLyricContent(content: string, line: number): { chars: LyricChar[]; errors: ParseError[] } {
   const chars: LyricChar[] = []
   const errors: ParseError[] = []
   let i = 0
   const n = content.length
   let pending: LyricChar | null = null // 正在累积的音节
+  let punctBuf = '' // 待挂载的中文标点（adj35）
 
   const flush = () => {
     if (pending) {
       if (pending.text.length > 0) chars.push(pending)
       pending = null
+    }
+  }
+
+  /** 把累积标点挂到最后一个已提交的字后面（标点不占音符位，adj35） */
+  const mountPunct = () => {
+    if (punctBuf !== '') {
+      const last = chars[chars.length - 1]
+      if (last && !last.skip) last.trailing = (last.trailing ?? '') + punctBuf
+      punctBuf = ''
     }
   }
 
@@ -42,23 +53,27 @@ function parseLyricContent(content: string, line: number): { chars: LyricChar[];
     const c = content[i]
     if (c === ' ' || c === '\t') {
       flush()
+      mountPunct()
       i++
       continue
     }
     if (c === '@') {
       flush()
+      mountPunct()
       chars.push({ text: '', skip: true, punctuation: false, pos: i, raw: '@' })
       i++
       continue
     }
     if (c === '~') {
-      // 连字：与下一个非空白字符合并
+      // 连字：与下一个非空白字符合并到当前音节
       let k = i + 1
       while (k < n && (content[k] === ' ' || content[k] === '\t')) k++
       if (k < n) {
         if (pending) {
           pending.text += content[k]
+          pending.raw += content[k]
         } else {
+          mountPunct()
           chars.push({ text: content[k], skip: false, punctuation: false, pos: i, raw: '~' + content[k] })
         }
         i = k + 1
@@ -69,14 +84,15 @@ function parseLyricContent(content: string, line: number): { chars: LyricChar[];
       continue
     }
     if (isPunct(c)) {
+      // 中文标点：结束当前音节，累积挂到前一个字后（adj35）
       flush()
-      // 标点：自动识别，不占音符位（skip）
-      chars.push({ text: c, skip: true, punctuation: true, pos: i, raw: c })
+      punctBuf += c
       i++
       continue
     }
     // 普通字符（汉字/字母/数字）：累积为音节
     if (!pending) {
+      mountPunct() // 新音节前先挂载标点
       pending = { text: '', skip: false, punctuation: false, pos: i, raw: '' }
     }
     pending.text += c
@@ -84,6 +100,7 @@ function parseLyricContent(content: string, line: number): { chars: LyricChar[];
     i++
   }
   flush()
+  mountPunct()
   return { chars, errors }
 }
 

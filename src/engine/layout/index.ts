@@ -378,7 +378,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           slot++
           continue
         }
-        map.set(slot, { ...ch, trailing: '' })
+        map.set(slot, { ...ch }) // 保留解析期挂载的 trailing（adj35：标点紧跟本字渲染）
         lastSlot = slot
         slot++
       }
