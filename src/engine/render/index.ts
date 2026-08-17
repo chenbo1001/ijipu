@@ -160,8 +160,9 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     // 数字槽宽中心：高音点左移 1px（adj19）；低音点不偏移（adj22：原左移 1 再右移 1）
     const dotCx = x + NOTE_DIGIT_W / 2 - (oct > 0 ? 1 : 0)
     const dc = t.diminishCount
-    // 低音点基座 cy：点顶距最近元素 4px —— 数字底部(基线+2) 或最下方减时横线底(基线+8+(dc-1)*4)
-    const lowBase = oct < 0 ? y + (dc > 0 ? 8 + (dc - 1) * 4 : 2) + 4 + 2.4 : 0
+    // 低音点基座 cy：点顶距最近元素 4px —— 数字底部(基线+2) 或最下方减时横线底
+    // （adj37：线间距 3px、线粗 1.5 → 线底 = 基线+7.5+(dc-1)×3）
+    const lowBase = oct < 0 ? y + (dc > 0 ? 13.5 + (dc - 1) * 3 : 8) : 0
     for (let i = 0; i < n; i++) {
       // 高音点在数字正上方（基线上 20：点下沿距数字顶约 4px）
       const cy = oct > 0 ? y - (20 + i * 7) : lowBase + i * 7
@@ -541,7 +542,8 @@ function computeBeams(notes: PlacedToken[]): Beam[] {
         beams.push({
           x1: r1n(list[i].x + 1),
           x2: r1n(list[j].x + NOTE_DIGIT_W - 1),
-          y: r1n(list[i].y + 6 + (level - 1) * 4),
+          // adj37：第一条距音符下沿（基线+2）4px；横线间距 3px（原 4 调小 1px）
+          y: r1n(list[i].y + 6 + (level - 1) * 3),
         })
         i = j + 1
       }
@@ -561,7 +563,7 @@ function renderBeams(beams: Beam[]): string {
   return beams
     .map(
       (b) =>
-        `<rect x="${b.x1}" y="${b.y}" width="${Math.max(1, b.x2 - b.x1)}" height="2" fill="#1b1b1b"/>`,
+        `<rect x="${b.x1}" y="${b.y}" width="${Math.max(1, b.x2 - b.x1)}" height="1.5" fill="#1b1b1b"/>`,
     )
     .join('\n')
 }

@@ -959,12 +959,18 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     const b = notesByIndex.get(sp.end)
     if (!a || !b) continue
     if (a.id.page !== b.id.page || Math.abs(a.y - b.y) > 0.1) continue // 跨行/跨页连音线跳过（第一版）
+    // adj37：连音线下沿距音符上沿（基线-13）4px；开始/结束音符有高八度时，
+    // 距最高高音点顶（基线-22-(hi-1)×7）4px
+    const highOf = (n: PlacedToken) =>
+      n.token.kind === 'note' && n.token.octaveShift > 0 ? n.token.octaveShift : 0
+    const hi = Math.max(highOf(a), highOf(b))
+    const slurY = hi > 0 ? a.y - 26 - (hi - 1) * 7 : a.y - 17
     pages[a.id.page].slurs.push({
-      // adj36：起点=开始音符正上方偏右1px（数字中心+1）、终点=结束音符正上方偏左1px；
-      // 高度在高八度符（点顶 基线-22.4）上方
+      // adj36：起点=开始音符正上方偏右1px（数字中心+1）、终点=结束音符正上方偏左1px
+      // adj37：无高八度 → 线（下沿）距音符上沿（基线-13）4px；有高八度 → 距最高高音点顶 4px
       x1: r1(a.x + 6.58),
       x2: r1(b.x + 4.58),
-      y: r1(a.y - 26 - sp.depth * 7),
+      y: r1(slurY - sp.depth * 7),
       depth: sp.depth,
       style: slurStyle,
     })
