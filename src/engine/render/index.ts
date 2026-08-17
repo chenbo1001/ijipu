@@ -221,20 +221,23 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
   }
 
   // 附点（adj13/15：垂直居中于数字；附点占前音符**基础时值**的 1/2，
-  // 即 1. 总宽 1.5 拍、1/. 总宽 0.75 拍；位置基于不含附点的基础时值；
-  // adj35：段起点/每拍宽取第 1 拍段）
+  // 即 1. 总宽 1.5 拍、1/. 总宽 0.75 拍；adj39：附点圆点显示在其占位宽度正中，
+  // 位置基于拍级附点段（segments 末段），跨拍/超拍也不偏移）
   if (t.dots > 0) {
-    const seg0 = note.segments?.[0]
-    const perBeat = seg0 ? seg0.perBeat : note.duration > 0 ? note.width / note.duration : NOTE_DIGIT_W
     const baseDur = (1 + t.augmentCount) / Math.pow(2, t.diminishCount)
-    // 数字中心 = 第 1 拍段中点 → 时值段起点
-    const segStart = seg0 ? seg0.x : x + 6 - Math.min(note.duration, 1) * (perBeat / 2)
-    let acc = baseDur * perBeat // 基础时值结束处
+    const dur = note.duration
+    const fallbackPb = dur > 0 ? note.width / dur : NOTE_DIGIT_W
+    const segs = note.segments ?? []
+    const last = segs[segs.length - 1]
+    const pb = last ? last.perBeat : fallbackPb
+    const segX = last ? last.x : x + 6 - Math.min(dur, 1) * (fallbackPb / 2)
+    // 附点段起点相对 last 段起点（拍；单段时 = baseDur - 段起点）
+    const dotStartRel = Math.max(0, baseDur - dur + (last ? last.beats : baseDur))
     for (let i = 0; i < t.dots; i++) {
-      const half = (baseDur * perBeat) / Math.pow(2, i + 1)
-      const cx = segStart + acc + half / 2
+      // 附点 i 中心相对附点段起点（拍，i 从 0）：起点 = baseDur×(1-1/2^i)，占位半宽 = baseDur/2^(i+2)
+      const rel = baseDur * (1 - 1 / Math.pow(2, i)) + baseDur / Math.pow(2, i + 2)
+      const cx = segX + (dotStartRel + rel) * pb
       parts.push(`<circle cx="${r1n(cx)}" cy="${y - 8}" r="2.4" fill="#1b1b1b"/>`)
-      acc += half
     }
   }
 

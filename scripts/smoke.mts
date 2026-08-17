@@ -918,6 +918,28 @@ check('小节线与末音符数字至少 4px 间距', b43c.x - 0.75 - (n43c[3].x
 // 右侧：下小节首音符数字左缘 - 线右缘 ≥ 4（adj38）
 check('小节线右侧距下小节首音符 ≥ 4px', n43c[4].x - (b43c.x + 0.75) >= 4, `gap=${(n43c[4].x - (b43c.x + 0.75)).toFixed(1)}`)
 
+// ---- 45. 附点显示在占位宽度正中（adj39） ----
+console.log('[45] dot centered in its slot (adj39)')
+const dotCxOf = (svg: string, k: number) => {
+  const m = [...svg.matchAll(/<circle cx="([\d.]+)" cy="[\d.]+" r="2.4"/g)][k]
+  return m ? Number(m[1]) : NaN
+}
+// 1.：附点段 = 段 1 [x, x+beats×perBeat]，附点 cx = 段中点
+const r45a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1. 2 3 4 |\n')
+const lay45a = layoutScore(r45a, defaultPageConfig)
+const n45a = lay45a.pages[0].notes[0]
+const s45a = n45a.segments ?? []
+const mid45a = s45a[1].x + (s45a[1].beats * s45a[1].perBeat) / 2
+check('1. 附点 = 附点段正中', Math.abs(dotCxOf(renderScoreToSvg(lay45a)[0], 0) - mid45a) < 0.5, `cx=${dotCxOf(renderScoreToSvg(lay45a)[0], 0)} mid=${mid45a}`)
+// 双附点 1..：附点 1 在 [1,1.5] 拍占位正中、附点 2 在 [1.5,1.75] 拍占位正中
+const r45b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1.. 2 3 4 |\n')
+const lay45b = layoutScore(r45b, defaultPageConfig)
+const svg45b = renderScoreToSvg(lay45b)[0]
+const pb45b = (lay45b.pages[0].notes[0].segments?.[0]?.perBeat ?? 0)
+const dot1 = dotCxOf(svg45b, 0)
+const dot2 = dotCxOf(svg45b, 1)
+check('双附点：附点1 在 1.25 拍、附点2 在 1.625 拍', Math.abs(dot1 - (86 + 1.25 * pb45b)) < 0.5 && Math.abs(dot2 - (86 + 1.625 * pb45b)) < 0.5, `d1=${dot1} d2=${dot2} pb=${pb45b}`)
+
 // ---- 44. 独立增时线归入最近音符（adj37） ----
 console.log('[44] dangling augment (adj37)')
 // "1) -" 的 "-" 归入前面音符 1（跳过连音线括号），不跨小节线
