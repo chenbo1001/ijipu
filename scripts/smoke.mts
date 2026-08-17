@@ -468,9 +468,9 @@ const rbar = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n')
 const layBar = layoutScore(rbar, defaultPageConfig)
 const bars23 = layBar.pages[0].barlines
 check('小节线 2 条', bars23.length === 2, `got ${bars23.length}`)
-// 单行谱 8 拍：perBeat = 423.28/8 = 52.91；小节 1 宽 211.63
-check('线 1 在小节 1 右边界', Math.abs(bars23[0].x - (80 + 211.63)) < 1, `x=${bars23[0].x}`)
-check('线 2 在小节 2 右边界', Math.abs(bars23[1].x - (80 + 423.26)) < 1, `x=${bars23[1].x}`)
+// 单行谱 8 拍：perBeat = 423.28/8 = 52.91；小节 1 宽 211.63（线在内容右端 +6）
+check('线 1 在小节 1 内容右端', Math.abs(bars23[0].x - (80 + 6 + 211.63)) < 1, `x=${bars23[0].x}`)
+check('线 2 在小节 2 内容右端', Math.abs(bars23[1].x - (80 + 6 + 423.26)) < 1, `x=${bars23[1].x}`)
 // 行首空 seg（|:）不占宽：行总拍 7，perBeat = 423.28/7 = 60.47
 const rr23 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 3 | 5 6 7 1 |\n')
 const layRr = layoutScore(rr23, defaultPageConfig)
@@ -529,8 +529,8 @@ const row1Bars = barsJ25.filter((b) => Math.abs(b.yTop - rowTop(rowsJ[0])) < 0.5
 const row2Bars = barsJ25.filter((b) => Math.abs(b.yTop - rowTop(rowsJ[1])) < 0.5)
 check('行 1 7 条小节线', row1Bars.length === 7, `got ${row1Bars.length}`)
 check('行 2 1 条小节线', row2Bars.length === 1, `got ${row2Bars.length}`)
-check('行 1 小节宽按拍数（线 1 = 80+4×15.12）', Math.abs(row1Bars[0].x - (80 + 4 * 15.12)) < 0.5, `x=${row1Bars[0].x}`)
-check('行 2 每行独立 perBeat（线 1 = 80+4×105.82）', Math.abs(row2Bars[0].x - (80 + 4 * 105.82)) < 0.5, `x=${row2Bars[0].x} expect=${80 + 4 * 105.82}`)
+check('行 1 小节宽按拍数（线 1 = 80+6+4×15.12）', Math.abs(row1Bars[0].x - (80 + 6 + 4 * 15.12)) < 0.5, `x=${row1Bars[0].x}`)
+check('行 2 每行独立 perBeat（线 1 = 80+6+4×105.82）', Math.abs(row2Bars[0].x - (80 + 6 + 4 * 105.82)) < 0.5, `x=${row2Bars[0].x} expect=${80 + 6 + 4 * 105.82}`)
 
 // ---- 26. 超拍小节容错（adj5） ----
 console.log('[26] over-beat bars (adj5)')
@@ -589,7 +589,7 @@ const notesGap = layGap.pages[0].notes
 // 小节 2 起点 = 80 + 206.64 + 10 = 296.64；首音符中心 = 296.64+6+25.83
 check('小节间距生效（小节 2 首音符位置）', Math.abs(notesGap[4].x + 6 - (80 + 206.64 + 10 + 6 + 25.83)) < 0.5, `center=${notesGap[4].x + 6}`)
 const barsGap = layGap.pages[0].barlines
-check('小节线在间距内居中（gap 之后 +gap/2，adj25）', Math.abs(barsGap[0].x - (80 + 206.64 + 5)) < 0.5, `x=${barsGap[0].x}`)
+check('小节线在内容右端+间距内居中（+6+gap/2，adj36）', Math.abs(barsGap[0].x - (80 + 6 + 206.64 + 5)) < 0.5, `x=${barsGap[0].x}`)
 
 // ---- 30. 描述头布局与拖拽（adj9） ----
 console.log('[30] meta layout (adj9)')
@@ -786,7 +786,7 @@ console.log('[37] barline centering (adj25)')
 // layV（[17]）：Q1/Q2 各 1 小节 4 拍，blockBeats=4，perBeat=(435.28-12)/4=105.82
 const bars37 = layV.pages[0].barlines
 const perBeat37 = 105.82
-check('多声部小节线在小节右边界（adj25）', bars37.length === 1 && Math.abs(bars37[0].x - (80 + 4 * perBeat37)) < 1, `x=${bars37[0]?.x} expect=${80 + 4 * perBeat37}`)
+check('多声部小节线在小节内容右端（adj36）', bars37.length === 1 && Math.abs(bars37[0].x - (80 + 6 + 4 * perBeat37)) < 1, `x=${bars37[0]?.x} expect=${80 + 6 + 4 * perBeat37}`)
 // 单声部 gap 居中已在 [29] 断言
 // formatter 单空格：音符块与小节线块之间恰好一个空格
 const fmt37 = formatJps('V: 1.0\nB: t\nQ: 1 2|3 4\n')
@@ -888,6 +888,32 @@ check('拍级行不溢出页面', Math.max(...n42.map((nn) => nn.x + 11.16)) <= 
 // 13 拍整行不拆（断行按逐拍 need，而非统一 maxPbm）
 const ys42 = [...new Set(lay42.pages[0].notes.map((nn) => nn.y))]
 check('密集拍所在行不拆（13 拍一行）', ys42.length === 1, `rows=${ys42.length}`)
+
+// ---- 43. 附点占位 / 连音线端点 / 小节线不重叠（adj36） ----
+console.log('[43] dot width / slur ends / barline gap (adj36)')
+// ① 附点段不被所在拍（超拍）放大：1. 附点段宽 = 0.5 × 前音符宽
+const r43a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1. 2// 3// 4// 5// 6// 7// 1// | 1 2 3 4 5 6 7 1 | 1 2 3 4 5 6 7 1 |\n')
+const n43a = [...layoutScore(r43a, defaultPageConfig).pages[0].notes].sort((a, b) => a.x - b.x)[0]
+const sg43a = n43a.segments ?? []
+const dotW = (sg43a[1]?.beats ?? 0) * (sg43a[1]?.perBeat ?? 0)
+const baseW = (sg43a[0]?.beats ?? 0) * (sg43a[0]?.perBeat ?? 0)
+check('附点段宽 = 0.5×前音符宽', sg43a.length >= 2 && Math.abs(dotW - 0.5 * baseW) < 0.05, `dot=${dotW} base=${baseW}`)
+// ② 连音线端点 = 音符正上方偏右/左 1px，弧线在高八度点上方
+const r43b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 ( 2 3 4 ) 5 |\n')
+const lay43b = layoutScore(r43b, defaultPageConfig)
+const s43b = lay43b.pages[0].slurs[0]
+const n43b = lay43b.pages[0].notes
+check('slur 起点 = 开始音符中心+1', s43b !== undefined && Math.abs(s43b.x1 - (n43b[1].x + 6.58)) < 0.5, `x1=${s43b?.x1}`)
+check('slur 终点 = 结束音符中心-1', Math.abs(s43b.x2 - (n43b[3].x + 4.58)) < 0.5, `x2=${s43b.x2}`)
+check('slur 高度在高八度点上方', s43b.y < n43b[1].y - 22.4, `y=${s43b.y} dotTop=${n43b[1].y - 22.4}`)
+// ③ 小节线 = 小节内容右端，不与音符重叠
+const r43c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n')
+const lay43c = layoutScore(r43c, defaultPageConfig)
+const b43c = lay43c.pages[0].barlines[0]
+const n43c = lay43c.pages[0].notes
+const segEnd43 = (n43c[3].segments?.[0]?.x ?? 0) + (n43c[3].segments?.[0]?.beats ?? 0) * (n43c[3].segments?.[0]?.perBeat ?? 0)
+check('小节线中心 = 小节内容右端', Math.abs(b43c.x - segEnd43) < 0.5, `line=${b43c.x} end=${segEnd43}`)
+check('小节线不与末音符数字重叠', b43c.x - 0.75 >= n43c[3].x + 11.16, `lineL=${b43c.x - 0.75} noteR=${n43c[3].x + 11.16}`)
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)
