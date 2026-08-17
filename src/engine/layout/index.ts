@@ -81,13 +81,13 @@ const MIN_NOTE_W = 12.16
 const HALF_DIGIT_W = 5.58
 /** 小节内左右留白（px） */
 const BAR_PAD = 6
-/** 拍与拍之间间距（px，adj38：音符之间留 8px） */
-const NOTE_GAP = 8
+/** 拍与拍之间间距（px，adj41：原 8 调为 4） */
+const NOTE_GAP = 4
 /**
- * 小节线最小占位空间（px，adj39）：线宽 1.5 + 两侧与音符各 8px = 17.5。
- * 小节线空间 = max(bar_gap, 17.5)，保证小节线与两侧音符至少 8px 间距。
+ * 小节线最小占位空间（px，adj41）：线宽 1.5 + 两侧与音符各 4px = 9.5。
+ * 小节线空间 = max(bar_gap, 9.5)，保证小节线与两侧音符至少 4px 间距。
  */
-const MIN_BARLINE_SPACE = 17.5
+const MIN_BARLINE_SPACE = 9.5
 const barlineSpace = (gap: number) => Math.max(gap, MIN_BARLINE_SPACE)
 
 /** 小节所需最小每拍宽：保证拍内任意相邻音符间距 ≥ 最小字符宽（adj13 按拍内最小时值；adj35 间距 1px） */
