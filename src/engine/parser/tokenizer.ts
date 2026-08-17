@@ -501,13 +501,22 @@ export function tokenizeMusicLine(
     }
 
     // 独立的增时线 "-"：原站自动格式化会把 "5-" 拆成 "5 -"，
-    // 因此独立出现的 "-" 必须归入前一个音符/休止符/节奏符的增时线
+    // 因此独立出现的 "-" 归入前面最近的音符/休止符/节奏符（adj37：
+    // 可跳过连音线括号等中间符号，如 "1) -" 的 "-" 仍是对 1 的增时；不跨小节线）
     if (c === '-') {
-      const last = tokens[tokens.length - 1]
-      if (last && (last.kind === 'note' || last.kind === 'rest' || last.kind === 'rhythm')) {
-        last.augmentCount++
-        last.raw += '-'
-        lastBlockEnd = i + 1 // 音符块结束延展
+      let found = false
+      for (let k = tokens.length - 1; k >= 0; k--) {
+        const last = tokens[k]
+        if (last.kind === 'note' || last.kind === 'rest' || last.kind === 'rhythm') {
+          last.augmentCount++
+          last.raw += '-'
+          lastBlockEnd = i + 1 // 音符块结束延展
+          found = true
+          break
+        }
+        if (last.kind === 'barline') break // 不跨小节线归入
+      }
+      if (found) {
         i++
         continue
       }

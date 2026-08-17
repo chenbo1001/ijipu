@@ -915,5 +915,18 @@ const segEnd43 = (n43c[3].segments?.[0]?.x ?? 0) + (n43c[3].segments?.[0]?.beats
 check('小节线中心 = 小节内容右端', Math.abs(b43c.x - segEnd43) < 0.5, `line=${b43c.x} end=${segEnd43}`)
 check('小节线不与末音符数字重叠', b43c.x - 0.75 >= n43c[3].x + 11.16, `lineL=${b43c.x - 0.75} noteR=${n43c[3].x + 11.16}`)
 
+// ---- 44. 独立增时线归入最近音符（adj37） ----
+console.log('[44] dangling augment (adj37)')
+// "1) -" 的 "-" 归入前面音符 1（跳过连音线括号），不跨小节线
+const r44a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: | ( 1 - | 1 ) - |\n')
+const tk44a = r44a.groups[0].music.tokens
+const n44a = tk44a.find((t) => t.kind === 'note' && t.pitch === 1 && t.pos > 3)
+check('1) - 的 - 归入音符（augmentCount=1，无错误）', r44a.errors.length === 0 && n44a?.kind === 'note' && n44a.augmentCount === 1, JSON.stringify(r44a.errors) + ' aug=' + (n44a?.kind === 'note' ? n44a.augmentCount : '?'))
+// 两种写法预览一致：跨小节连音线中增时线位置不同但时值相同
+const r44b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: | ( 1 - | 1 - ) |\n')
+const durs44a = r44a.groups[0].music.tokens.filter((t) => t.kind === 'note').map((t) => tokenDuration(t))
+const durs44b = r44b.groups[0].music.tokens.filter((t) => t.kind === 'note').map((t) => tokenDuration(t))
+check('两种写法音符时值一致（1- = 2 拍）', durs44a.join(',') === '2,2' && durs44b.join(',') === '2,2', `${durs44a} vs ${durs44b}`)
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)
