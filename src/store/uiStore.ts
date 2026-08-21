@@ -1,8 +1,8 @@
 /**
- * store/uiStore.ts — UI 状态（模态框、排版辅助、主题）
+ * store/uiStore.ts — UI 状态（模态框、排版辅助、主题、拆分比例、编辑器字号）
  */
 import { create } from 'zustand'
-import { DEFAULT_THEME } from '../brand/themes'
+import { DEFAULT_THEME, DEFAULT_THEME_MODE, type ThemeMode } from '../brand/themes'
 
 export type ModalKind =
   | 'about'
@@ -13,6 +13,10 @@ export type ModalKind =
   | 'shortcuts'
 
 const THEME_KEY = 'jianpuscript.theme'
+const THEME_MODE_KEY = 'jianpuscript.themeMode'
+const SPLIT_KEY = 'jianpuscript.splitPct'
+const EDITOR_FS_KEY = 'jianpuscript.editorFontSize'
+const PREVIEW_ZOOM_KEY = 'jianpuscript.previewZoom'
 
 function loadTheme(): string {
   try {
@@ -22,22 +26,69 @@ function loadTheme(): string {
   }
 }
 
+function loadThemeMode(): ThemeMode {
+  try {
+    const v = localStorage.getItem(THEME_MODE_KEY)
+    return v === 'light' || v === 'dark' || v === 'auto' ? v : DEFAULT_THEME_MODE
+  } catch {
+    return DEFAULT_THEME_MODE
+  }
+}
+
+function loadNum(key: string, fallback: number): number {
+  try {
+    const v = Number(localStorage.getItem(key))
+    return Number.isFinite(v) && v > 0 ? v : fallback
+  } catch {
+    return fallback
+  }
+}
+
+/** 当前系统浅深色偏好（无 matchMedia 时默认深色） */
+function detectSystemLight(): boolean {
+  try {
+    return window.matchMedia('(prefers-color-scheme: light)').matches
+  } catch {
+    return false
+  }
+}
+
 interface UiState {
   modal: ModalKind | null
   /** 预览页排版辅助虚线开关 */
   showGuides: boolean
   /** 中国色主题 id */
   theme: string
+  /** 浅深色模式：auto=跟随系统 prefers-color-scheme（adj48） */
+  themeMode: ThemeMode
+  /** 系统当前是否浅色（auto 模式下决定实际浅深色） */
+  systemLight: boolean
+  /** 拆分视图上（预览）窗格高度占比（%），下（编辑器）窗格占剩余 */
+  splitPct: number
+  /** 脚本编辑器字号（px） */
+  editorFontSize: number
+  /** 预览缩放（%，50~200，adj51） */
+  previewZoom: number
   openModal: (m: ModalKind) => void
   closeModal: () => void
   setShowGuides: (b: boolean) => void
   setTheme: (id: string) => void
+  setThemeMode: (m: ThemeMode) => void
+  setSystemLight: (b: boolean) => void
+  setSplitPct: (pct: number) => void
+  setEditorFontSize: (px: number) => void
+  setPreviewZoom: (z: number) => void
 }
 
 export const useUiStore = create<UiState>()((set) => ({
   modal: null,
   showGuides: true,
   theme: loadTheme(),
+  themeMode: loadThemeMode(),
+  systemLight: detectSystemLight(),
+  splitPct: loadNum(SPLIT_KEY, 50),
+  editorFontSize: loadNum(EDITOR_FS_KEY, 14),
+  previewZoom: loadNum(PREVIEW_ZOOM_KEY, 100),
   openModal: (m) => set({ modal: m }),
   closeModal: () => set({ modal: null }),
   setShowGuides: (b) => set({ showGuides: b }),
@@ -48,5 +99,41 @@ export const useUiStore = create<UiState>()((set) => ({
       /* 忽略 */
     }
     set({ theme: id })
+  },
+  setThemeMode: (m) => {
+    try {
+      localStorage.setItem(THEME_MODE_KEY, m)
+    } catch {
+      /* 忽略 */
+    }
+    set({ themeMode: m })
+  },
+  setSystemLight: (b) => set({ systemLight: b }),
+  setSplitPct: (pct) => {
+    const v = Math.min(85, Math.max(15, pct))
+    try {
+      localStorage.setItem(SPLIT_KEY, String(v))
+    } catch {
+      /* 忽略 */
+    }
+    set({ splitPct: v })
+  },
+  setEditorFontSize: (px) => {
+    const v = Math.min(26, Math.max(10, Math.round(px)))
+    try {
+      localStorage.setItem(EDITOR_FS_KEY, String(v))
+    } catch {
+      /* 忽略 */
+    }
+    set({ editorFontSize: v })
+  },
+  setPreviewZoom: (z) => {
+    const v = Math.min(200, Math.max(50, Math.round(z)))
+    try {
+      localStorage.setItem(PREVIEW_ZOOM_KEY, String(v))
+    } catch {
+      /* 忽略 */
+    }
+    set({ previewZoom: v })
   },
 }))

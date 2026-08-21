@@ -8,12 +8,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
+import { tempoLabel } from '../engine/parser/parser'
 import { layoutScore, renderScoreToSvg, noteIdToCodePos } from '../engine'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '../engine/layout/guides'
 import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '../engine/layout/metaAnchors'
 import { brand } from '../brand/tokens'
 
-/** 预览 SVG 显示宽度（与渲染容器一致） */
+/** 预览 SVG 基准显示宽度（与渲染容器一致）；实际显示宽度 = PREVIEW_W × zoom（adj51） */
 const PREVIEW_W = 760
 
 export function PreviewPane() {
@@ -25,6 +26,7 @@ export function PreviewPane() {
   const setActiveNoteId = useDocStore((s) => s.setActiveNoteId)
   const jumpCursor = useDocStore((s) => s.jumpCursor)
   const showGuides = useUiStore((s) => s.showGuides)
+  const previewZoom = useUiStore((s) => s.previewZoom)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const pageConfigRef = useRef(pageConfig)
@@ -39,7 +41,11 @@ export function PreviewPane() {
       authors: parseResult.header.authors.join('；'),
       key: parseResult.header.key,
       meter: parseResult.header.meter,
-      tempo: parseResult.header.tempo,
+      // 多条 J（数字+文字）时显示合并标签 ♩=80 欢快地（与乐谱一致）
+      tempo:
+        parseResult.header.tempoNum || parseResult.header.tempoText
+          ? tempoLabel(parseResult.header.tempoNum, parseResult.header.tempoText)
+          : parseResult.header.tempo,
       musicLines,
       notes,
       errors: parseResult.errors.length,
@@ -51,10 +57,17 @@ export function PreviewPane() {
     return { layout: lay, pagesHtml: renderScoreToSvg(lay), errorCount: 0, summary: sum }
   }, [parseResult, pageConfig])
 
-  const rowTops = useMemo(() => (layout ? computeRowTops(layout) : []), [layout])
+  const rowTops = useMemo(() => (layout ? computeRowTops(layout, pageConfig.note_size) : []), [layout, pageConfig.note_size])
   const rowGuides = useMemo(
-    () => (layout ? computeRowGuides(layout, { quci: pageConfig.height_quci, geci: pageConfig.geci_size }) : []),
-    [layout, pageConfig.height_quci, pageConfig.geci_size],
+    () =>
+      layout
+        ? computeRowGuides(
+            layout,
+            { quci: pageConfig.height_quci, geci: pageConfig.geci_size },
+            pageConfig.note_size,
+          )
+        : [],
+    [layout, pageConfig.height_quci, pageConfig.geci_size, pageConfig.note_size],
   )
 
   // 高亮当前音符（M3）
@@ -99,14 +112,25 @@ export function PreviewPane() {
     e.stopPropagation()
     const key = el.getAttribute('data-meta')!
     if (!layout) return
-    const scale = PREVIEW_W / layout.pages[0].width
+    // adj51：拖拽换算缩放需含预览 zoom（实际显示宽 = PREVIEW_W × zoom）
+    const scale = (PREVIEW_W / layout.pages[0].width) * (previewZoom / 100)
     const cfg = pageConfigRef.current
     const pageW = layout.pages[0].width
     const base = cfg.metaPos?.[key]
     // 基准 = 相对各自锚点的偏移（adj16）；无 metaPos 时由元素绝对坐标减去锚点得出
-    const anchor = metaAnchorPt(metaAnchorOf(key), pageW, cfg)
-    const bx = base ? base.x : Number(el.getAttribute('x')) - anchor.x
-    const by = base ? base.y : Number(el.getAttribute('y')) - anchor.y
+    // notes（说明文字，谱尾）：基准 = 页面水平居中、下边距线上方 24px（与 render 默认一致）
+    let bx: number
+    let by: number
+    if (key === 'notes') {
+      const baseX = pageW / 2
+      const baseY = layout.pages[0].height - cfg.margin_bottom - 24
+      bx = base ? base.x : Number(el.getAttribute('x')) - baseX
+      by = base ? base.y : Number(el.getAttribute('y')) - baseY
+    } else {
+      const anchor = metaAnchorPt(metaAnchorOf(key), pageW, cfg)
+      bx = base ? base.x : Number(el.getAttribute('x')) - anchor.x
+      by = base ? base.y : Number(el.getAttribute('y')) - anchor.y
+    }
     metaDragRef.current = { key, startX: e.clientX, startY: e.clientY, baseX: bx, baseY: by }
     const onMove = (ev: MouseEvent) => {
       const d = metaDragRef.current
@@ -130,6 +154,10 @@ export function PreviewPane() {
       metaDragRef.current = null
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
+      // adj83：拖拽结束把 metaPos 持久化到源码 # jps-config（每首谱用自己的设置）
+      if (pageConfigRef.current.metaPos) {
+        setPageConfig(pageConfigRef.current, true)
+      }
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -155,7 +183,8 @@ export function PreviewPane() {
 
   useEffect(() => {
     if (!drag || !layout) return
-    const scale = PREVIEW_W / layout.pages[0].width
+    // adj51：拖拽换算缩放需含预览 zoom
+    const scale = (PREVIEW_W / layout.pages[0].width) * (previewZoom / 100)
     const limitsOf = (key: string): [number, number] =>
       (GUIDE_LIMITS as Record<string, [number, number]>)[key] ??
       (GUIDE_LIMITS_EX as Record<string, [number, number]>)[key] ??
@@ -166,14 +195,18 @@ export function PreviewPane() {
       const next = { ...pageConfigRef.current, [drag.spec.key]: clamp(drag.startVal + delta, min, max) }
       setPageConfig(next)
     }
-    const onUp = () => setDrag(null)
+    const onUp = () => {
+      setDrag(null)
+      // adj83：拖拽结束把调整后的设置持久化到源码 # jps-config
+      setPageConfig(pageConfigRef.current, true)
+    }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     return () => {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-  }, [drag, layout, setPageConfig])
+  }, [drag, layout, setPageConfig, previewZoom])
 
   if (!layout || pagesHtml.length === 0) {
     return (
@@ -227,7 +260,14 @@ export function PreviewPane() {
           void rowTopsOfPage
           return (
             <div key={i} className="score-page" style={{ maxWidth: '100%', position: 'relative' }}>
-              <div style={{ width: PREVIEW_W, position: 'relative' }}>
+              <div
+                className="preview-zoom-scale"
+                style={{
+                  width: PREVIEW_W * (previewZoom / 100),
+                  position: 'relative',
+                  zoom: previewZoom / 100,
+                }}
+              >
                 <div dangerouslySetInnerHTML={{ __html: svg }} />
                 {showGuides && (
                   <div
@@ -244,7 +284,7 @@ export function PreviewPane() {
                     <div
                       className="guide-line guide-h"
                       style={{ top: pctY(page.height - pageConfig.margin_bottom), left: 0, right: 0, cursor: 'ns-resize', pointerEvents: 'auto' }}
-                      onMouseDown={(e) => startDrag({ key: 'margin_bottom', dir: 'v' }, e, pageConfig.margin_bottom)}
+                      onMouseDown={(e) => startDrag({ key: 'margin_bottom', dir: 'v', invert: true }, e, pageConfig.margin_bottom)}
                       title="下边距（拖动调整）"
                     />
                     <div
@@ -272,75 +312,84 @@ export function PreviewPane() {
                       onMouseDown={(e) => startDrag({ key: 'descAreaH', dir: 'v' }, e, pageConfig.descAreaH)}
                       title="描述头高度（拖动调整）"
                     />
-                    {/* 行结构虚线：曲行顶（首行=描述头下沿，其余=曲上间距）/ 曲词间距 / 词曲间距 */}
+                    {/* 行结构虚线：曲部行虚线（数字中心）/ 曲词间距 / 词曲间距 / 词部行虚线 */}
                     {rowGuidesOfPage.map((rg, ri) => (
                       <div key={ri} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-                        {/* 曲行顶线 */}
+                        {/* 曲部行虚线（adj72：数字中心为基准；多声部块内第 2+ 声部拖 height_shengbu 独立调声部间距）
+                            adj79：行尾间距拆分——上一行有歌词（底部是词部）→ 曲部与上一行词部间距 height_ciqu_lyric；
+                            上一行无歌词（底部是曲部）→ 曲部与曲部间距 height_ciqu */}
                         <div
                           className="guide-line guide-h guide-row"
                           style={{
-                            top: pctY(rg.yTop),
+                            top: pctY(rg.yCenter),
                             left: pct(pageConfig.margin_left),
                             right: pct(pageConfig.margin_right),
                             cursor: 'ns-resize',
                             pointerEvents: 'auto',
                           }}
-                          onMouseDown={(e) =>
+                          onMouseDown={(e) => {
+                            const prevHasLyric = ri > 0 ? (rowGuidesOfPage[ri - 1]?.lyricRows.length ?? 0) > 0 : false
+                            const key =
+                              ri === 0
+                                ? 'body_margin_top'
+                                : rg.voiceIdx > 0
+                                  ? 'height_shengbu'
+                                  : prevHasLyric
+                                    ? 'height_ciqu_lyric'
+                                    : 'height_ciqu'
                             startDrag(
-                              { key: ri === 0 ? 'body_margin_top' : 'height_ciqu', dir: 'v' },
+                              { key, dir: 'v' },
                               e,
-                              ri === 0 ? pageConfig.body_margin_top : pageConfig.height_ciqu,
+                              ri === 0
+                                ? pageConfig.body_margin_top
+                                : rg.voiceIdx > 0
+                                  ? pageConfig.height_shengbu
+                                  : prevHasLyric
+                                    ? pageConfig.height_ciqu_lyric
+                                    : pageConfig.height_ciqu,
                             )
+                          }}
+                          title={
+                            ri === 0
+                              ? '曲部上间距（与描述头间距，拖动调整）'
+                              : rg.voiceIdx > 0
+                                ? '声部行间距（拖动调整）'
+                                : (rowGuidesOfPage[ri - 1]?.lyricRows.length ?? 0) > 0
+                                  ? '曲部与上一行词部间距（拖动调整）'
+                                  : '曲部与曲部间距（拖动调整）'
                           }
-                          title={ri === 0 ? '曲部上间距（与描述头间距，拖动调整）' : '行距（曲上间距，拖动调整）'}
                         />
-                        {/* 曲词间距线 */}
-                        {rg.lyricTop !== null && (
+                        {/* 词部行虚线（adj72/73：每行歌词一条，歌词行区域中心；第 1 行拖曲词距、后续行拖歌词行距；quci/cici 独立线已移除） */}
+                        {rg.lyricRows.map((lr, k) => (
                           <div
-                            className="guide-line guide-h guide-quci"
+                            key={`lc${k}`}
+                            className="guide-line guide-h guide-lyric-row"
                             style={{
-                              top: pctY((rg.yBottom + rg.lyricTop) / 2),
+                              top: pctY(lr.center),
                               left: pct(pageConfig.margin_left),
                               right: pct(pageConfig.margin_right),
                               cursor: 'ns-resize',
                               pointerEvents: 'auto',
                             }}
-                            onMouseDown={(e) => startDrag({ key: 'height_quci', dir: 'v' }, e, pageConfig.height_quci)}
-                            title="曲部与词部间距（拖动调整）"
+                            onMouseDown={(e) =>
+                              startDrag(
+                                { key: k === 0 ? 'height_quci' : 'height_cici', dir: 'v' },
+                                e,
+                                k === 0 ? pageConfig.height_quci : pageConfig.height_cici,
+                              )
+                            }
+                            title={
+                              k === 0
+                                ? '歌词行 1（与曲部间距，拖动调整）'
+                                : `歌词行 ${k + 1} 间距（与上一行歌词，拖动调整）`
+                            }
                           />
-                        )}
-                        {/* 词曲间距线（非最后一行） */}
-                        {rg.lyricBottom !== null && ri < rowGuidesOfPage.length - 1 && (
-                          <div
-                            className="guide-line guide-h guide-cici"
-                            style={{
-                              top: pctY(rg.lyricBottom + pageConfig.height_cici / 2),
-                              left: pct(pageConfig.margin_left),
-                              right: pct(pageConfig.margin_right),
-                              cursor: 'ns-resize',
-                              pointerEvents: 'auto',
-                            }}
-                            onMouseDown={(e) => startDrag({ key: 'height_cici', dir: 'v' }, e, pageConfig.height_cici)}
-                            title="词部与下一行曲部间距（拖动调整）"
-                          />
-                        )}
+                        ))}
                       </div>
                     ))}
                   </div>
                 )}
               </div>
-              {pagesHtml.length > 1 && (
-                <div
-                  style={{
-                    textAlign: 'center',
-                    fontSize: 12,
-                    color: 'var(--jp-text-muted)',
-                    padding: '6px 0 2px',
-                  }}
-                >
-                  第 {i + 1} / {pagesHtml.length} 页
-                </div>
-              )}
             </div>
           )
         })}

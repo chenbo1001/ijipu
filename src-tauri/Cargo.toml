@@ -7,7 +7,10 @@ edition = "2021"
 
 [lib]
 name = "jianpuscript_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# 注：桌面端仅需 rlib（main.rs 静态链接）；cdylib 在 x86_64-pc-windows-gnu 下
+# 因导出符号超 PE 序号上限（>65535）导致 MinGW ld 报 "export ordinal too large"，
+# 且桌面版不使用该 DLL（见 tauri#10843 / rust#92212），故移除 cdylib。
+crate-type = ["staticlib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

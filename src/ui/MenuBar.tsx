@@ -5,19 +5,26 @@ import { useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { brand } from '../brand/tokens'
-import { THEMES } from '../brand/themes'
+import { THEMES, type ThemeMode } from '../brand/themes'
 import { formatJps } from '../engine'
 
 export function MenuBar() {
-  const fileName = useDocStore((s) => s.fileName)
-  const dirty = useDocStore((s) => s.dirty)
   const code = useDocStore((s) => s.code)
   const setCode = useDocStore((s) => s.setCode)
   const setViewType = useDocStore((s) => s.setViewType)
   const newDoc = useDocStore((s) => s.newDoc)
+  const openFile = useDocStore((s) => s.openFile)
+  const saveFile = useDocStore((s) => s.saveFile)
+  const saveFileAs = useDocStore((s) => s.saveFileAs)
+  const undo = useDocStore((s) => s.undo)
+  const redo = useDocStore((s) => s.redo)
+  const canUndo = useDocStore((s) => s.undoStack.length > 0)
+  const canRedo = useDocStore((s) => s.redoStack.length > 0)
   const openModal = useUiStore((s) => s.openModal)
   const theme = useUiStore((s) => s.theme)
   const setTheme = useUiStore((s) => s.setTheme)
+  const themeMode = useUiStore((s) => s.themeMode)
+  const setThemeMode = useUiStore((s) => s.setThemeMode)
   const [open, setOpen] = useState<string | null>(null)
 
   const toggle = (key: string) => setOpen(open === key ? null : key)
@@ -28,14 +35,16 @@ export function MenuBar() {
     setOpen(null)
   }
 
-  const download = () => {
-    const blob = new Blob([code], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${fileName || '未命名'}.jps`
-    a.click()
-    URL.revokeObjectURL(url)
+  const runOpen = async () => {
+    await openFile()
+    setOpen(null)
+  }
+  const runSave = async () => {
+    await saveFile()
+    setOpen(null)
+  }
+  const runSaveAs = async () => {
+    await saveFileAs()
     setOpen(null)
   }
 
@@ -51,13 +60,20 @@ export function MenuBar() {
 
       <MenuItem label="文件(F)" open={open} name="file" toggle={toggle}>
         <div className="menu-entry" onClick={() => { newDoc(); setOpen(null) }}>
-          新建乐谱 <span className="kbd">Ctrl+N</span>
+          新建 <span className="kbd">Ctrl+N</span>
         </div>
+        <div className="menu-entry" onClick={runOpen}>
+          打开… <span className="kbd">Ctrl+O</span>
+        </div>
+        <div className="menu-entry" onClick={runSave}>
+          保存 <span className="kbd">Ctrl+S</span>
+        </div>
+        <div className="menu-entry" onClick={runSaveAs}>
+          另存为…
+        </div>
+        <div className="menu-sep" />
         <div className="menu-entry" onClick={() => { openModal('samples'); setOpen(null) }}>
-          打开示例谱 <span className="kbd">Ctrl+O</span>
-        </div>
-        <div className="menu-entry" onClick={download}>
-          保存为 .jps <span className="kbd">Ctrl+S</span>
+          打开示例谱
         </div>
         <div className="menu-sep" />
         <div className="menu-entry" onClick={runFormat}>
@@ -69,6 +85,31 @@ export function MenuBar() {
         </div>
         <div className="menu-entry" onClick={() => { openModal('export'); setOpen(null) }}>
           导出…
+        </div>
+      </MenuItem>
+
+      <MenuItem label="编辑(E)" open={open} name="edit" toggle={toggle}>
+        <div
+          className={`menu-entry${canUndo ? '' : ' disabled'}`}
+          onClick={() => {
+            if (canUndo) {
+              undo()
+              setOpen(null)
+            }
+          }}
+        >
+          撤销 <span className="kbd">Ctrl+Z</span>
+        </div>
+        <div
+          className={`menu-entry${canRedo ? '' : ' disabled'}`}
+          onClick={() => {
+            if (canRedo) {
+              redo()
+              setOpen(null)
+            }
+          }}
+        >
+          重做 <span className="kbd">Ctrl+Y</span>
         </div>
       </MenuItem>
 
@@ -91,6 +132,27 @@ export function MenuBar() {
       </MenuItem>
 
       <MenuItem label="主题(T)" open={open} name="theme" toggle={toggle}>
+        {/* adj48：浅深色模式（auto 跟随系统 prefers-color-scheme） */}
+        <div className="theme-mode-row">
+          {(
+            [
+              { key: 'auto', label: '跟随系统' },
+              { key: 'light', label: '浅色' },
+              { key: 'dark', label: '深色' },
+            ] as { key: ThemeMode; label: string }[]
+          ).map((m) => (
+            <button
+              key={m.key}
+              className={`theme-mode-btn${themeMode === m.key ? ' active' : ''}`}
+              onClick={() => { setThemeMode(m.key); setOpen(null) }}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <div className="theme-mode-tip">
+          {themeMode === 'auto' ? '自动跟随系统浅深色设置' : themeMode === 'light' ? '固定使用浅色配色' : '固定使用深色配色'}
+        </div>
         {THEMES.map((t) => (
           <div
             key={t.id}
@@ -100,18 +162,27 @@ export function MenuBar() {
             {theme === t.id ? (
               <span
                 className="theme-swatch"
-                style={{ background: t.accent, borderColor: t.accent }}
+                style={{
+                  background: themeMode === 'light' ? t.accentLight : t.accent,
+                  borderColor: themeMode === 'light' ? t.accentLight : t.accent,
+                }}
               >
                 ✓
               </span>
             ) : (
               <span
                 className="theme-swatch"
-                style={{ background: t.bg, borderColor: t.accent }}
+                style={{
+                  background: themeMode === 'light' ? t.bgLight : t.bg,
+                  borderColor: themeMode === 'light' ? t.accentLight : t.accent,
+                }}
               />
             )}
             <span className="theme-name">{t.name}</span>
-            <span className="theme-desc" style={{ color: t.accent }}>
+            <span
+              className="theme-desc"
+              style={{ color: themeMode === 'light' ? t.accentLight : t.accent }}
+            >
               {t.desc}
             </span>
           </div>
@@ -126,11 +197,6 @@ export function MenuBar() {
           关于 {brand.name}
         </div>
       </MenuItem>
-
-      <div className="menubar-filename">
-        {dirty && <span className="dirty-dot" title="有未保存的修改" />}
-        <span>{fileName}.jps</span>
-      </div>
     </div>
   )
 }

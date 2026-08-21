@@ -38,6 +38,51 @@ body {
   position: relative;
 }
 
+/* ============ 拆分视图（adj46） ============ */
+.split-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.split-divider {
+  flex-shrink: 0;
+  height: 5px;
+  cursor: row-resize;
+  background: var(--jp-bg-panel);
+  border-top: 1px solid var(--jp-border);
+  border-bottom: 1px solid var(--jp-border);
+  position: relative;
+  z-index: 3;
+  transition: background 0.15s;
+}
+
+.split-divider::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--jp-text-muted);
+  opacity: 0.6;
+}
+
+.split-divider:hover,
+.split-divider:active {
+  background: var(--jp-accent);
+}
+
+.split-divider:hover::after,
+.split-divider:active::after {
+  background: #fff;
+  opacity: 1;
+}
+
 /* ============ 菜单栏 ============ */
 .menubar {
   height: var(--jp-menubar-h);
@@ -147,6 +192,15 @@ body {
   font-size: 11px;
 }
 
+.menu-dropdown .menu-entry.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.menu-dropdown .menu-entry.disabled:hover {
+  background: transparent;
+}
+
 .menu-dropdown .menu-sep {
   height: 1px;
   background: var(--jp-border);
@@ -192,6 +246,44 @@ body {
   text-overflow: ellipsis;
 }
 
+/* 浅深色模式选择（adj48） */
+.theme-mode-row {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px 2px;
+}
+
+.theme-mode-btn {
+  flex: 1;
+  padding: 4px 0;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid var(--jp-border);
+  color: var(--jp-text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--jp-font-sans);
+  transition: all 0.15s;
+}
+
+.theme-mode-btn:hover {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+}
+
+.theme-mode-btn.active {
+  background: var(--jp-accent);
+  border-color: var(--jp-accent);
+  color: #101010;
+  font-weight: 600;
+}
+
+.theme-mode-tip {
+  padding: 2px 10px 6px;
+  font-size: 11px;
+  color: var(--jp-text-muted);
+}
+
 .menubar-filename {
   margin-left: auto;
   display: flex;
@@ -201,11 +293,15 @@ body {
   font-size: 12px;
 }
 
-.menubar-filename .dirty-dot {
+/* adj63：未保存标记（编辑器头部 .file-tag 内） */
+.dirty-dot {
+  display: inline-block;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--jp-warning);
+  margin-left: 6px;
+  vertical-align: 1px;
 }
 
 /* ============ 工具栏 ============ */
@@ -243,6 +339,27 @@ body {
   border-left: 1px solid var(--jp-border);
 }
 
+/* 预览缩放（adj52：并入顶部工具条；adj53：移至最右端，间距由工具栏 gap 提供） */
+.toolbar-zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar-zoom .tool-btn.icon-btn {
+  padding: 3px 8px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.toolbar-zoom-val {
+  min-width: 38px;
+  text-align: center;
+  font-family: var(--jp-font-mono);
+  font-size: 11px;
+  color: var(--jp-text-muted);
+}
+
 .view-switch button.active {
   background: var(--jp-bg-panel-active);
   color: var(--jp-accent);
@@ -267,6 +384,12 @@ body {
   transition: all 0.15s;
 }
 
+/* 仅图标按钮（adj46：排版辅助） */
+.tool-btn.icon-btn {
+  padding: 5px 7px;
+  justify-content: center;
+}
+
 .tool-btn:hover {
   border-color: var(--jp-accent);
   color: var(--jp-accent);
@@ -278,14 +401,24 @@ body {
 }
 
 .tool-btn.primary {
-  background: var(--jp-deep-space-blue);
-  border-color: var(--jp-deep-space-blue);
-  color: var(--jp-text-primary);
+  background: var(--jp-accent);
+  border-color: var(--jp-accent);
+  color: #101010;
 }
 
 .tool-btn.primary:hover {
   border-color: var(--jp-accent);
   box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
+}
+
+.tool-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tool-btn:disabled:hover {
+  border-color: var(--jp-border);
+  color: var(--jp-text-secondary);
 }
 
 /* ============ 预览区 ============ */
@@ -422,12 +555,51 @@ body {
   color: var(--jp-danger);
 }
 
+/* 编辑器字号控制（adj46：状态栏 +/- 按钮） */
+.editor-font-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 12px;
+}
+
+.editor-font-control .font-btn {
+  min-width: 24px;
+  height: 20px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--jp-border);
+  color: var(--jp-text-secondary);
+  border-radius: 5px;
+  font-size: 11px;
+  font-family: var(--jp-font-sans);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.editor-font-control .font-btn:hover {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+}
+
+.editor-font-control .font-size-val {
+  min-width: 34px;
+  text-align: center;
+  font-family: var(--jp-font-mono);
+  font-size: 11px;
+  color: var(--jp-text-muted);
+}
+
 .editor-body {
   flex: 1;
   display: flex;
   min-height: 0;
   overflow: hidden;
-  --jp-editor-lh: 23.8px; /* 14px * 1.7，与 textarea 行高一致 */
+  --jp-editor-fs: 14px; /* 默认字号（adj46：可调） */
+  --jp-editor-lh: 23.8px; /* 字号 × 1.7，与 textarea 行高一致 */
 }
 
 .editor-gutter {
@@ -475,7 +647,7 @@ body {
   color: transparent;
   caret-color: var(--jp-editor-caret);
   font-family: var(--jp-font-mono);
-  font-size: 14px;
+  font-size: var(--jp-editor-fs, 14px);
   line-height: 1.7;
   padding: 10px 14px;
   white-space: pre;
@@ -488,7 +660,7 @@ body {
   inset: 0;
   pointer-events: none;
   font-family: var(--jp-font-mono);
-  font-size: 14px;
+  font-size: var(--jp-editor-fs, 14px);
   line-height: 1.7;
   padding: 10px 14px;
   white-space: pre;
@@ -652,8 +824,9 @@ body {
 }
 
 .btn.primary {
-  background: var(--jp-deep-space-blue);
-  border-color: var(--jp-deep-space-blue);
+  background: var(--jp-accent);
+  border-color: var(--jp-accent);
+  color: #101010;
 }
 
 .btn.primary:hover {
@@ -665,7 +838,7 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a3764;
+  background: var(--jp-scrollbar, #2a3764);
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: content-box;

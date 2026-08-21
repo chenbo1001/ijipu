@@ -12,14 +12,48 @@ import type {
   LyricLine,
   MusicGroup,
   MusicLine,
+  MusicToken,
   ParseError,
   ParseResult,
+  SlurToken,
   SourceLine,
 } from '../types'
 import { tokenizeMusicLine } from './tokenizer'
+import { tokenDuration } from '../duration'
 import { errAt } from './errors'
 
-const HEADER_KEYS = new Set(['V', 'B', 'Z', 'D', 'P', 'J'])
+const HEADER_KEYS = new Set(['V', 'B', 'Z', 'D', 'P', 'J', 'Y', 'S'])
+
+/**
+ * 拆解 J 描述头值（节拍）为「数字 + 文字」：
+ *  - 纯数字 "80" → { num: "80" }（渲染 ♩=80）
+ *  - 纯文字 "欢快地" → { text: "欢快地" }
+ *  - "90 欢快地"（数字后跟空格再接文字）→ { num: "90", text: "欢快地" }
+ *  - 其余（如 "120-140"、"96(稍快)" 无空格分隔）整体视为文字，保持原样
+ */
+export function splitTempo(value: string): { num?: string; text?: string } {
+  const v = value.trim()
+  if (v === '') return {}
+  if (/^\d+$/.test(v)) return { num: v }
+  const m = /^(\d+)\s+(.+)$/.exec(v)
+  if (m) {
+    const text = m[2].trim()
+    return { num: m[1], text: text === '' ? undefined : text }
+  }
+  return { text: v }
+}
+
+/**
+ * 组合 J 的「数字 + 文字」为展示标签：
+ *  - 只有数字 → "♩= 96"；只有文字 → "欢快地"；两者 → "♩= 80 欢快地"；都无 → ""
+ *  - = 号后带空格（adj42：与调式行 = 对齐格式一致）
+ */
+export function tempoLabel(num: string | undefined, text: string | undefined): string {
+  const pieces: string[] = []
+  if (num) pieces.push(`♩= ${num}`)
+  if (text) pieces.push(text)
+  return pieces.join(' ')
+}
 
 /** 解析一个 C 行（歌词）：每个汉字/音节对应一个音符；@ 占位（占一个字空间）；~ 连字；
  *  中文标点不占音符位，紧跟前面的字渲染（adj35） */
@@ -30,6 +64,7 @@ function parseLyricContent(content: string, line: number): { chars: LyricChar[];
   const n = content.length
   let pending: LyricChar | null = null // 正在累积的音节
   let punctBuf = '' // 待挂载的中文标点（adj35）
+  let noteBuf: string | null = null // 待挂载的引号注释（adj58："..." 不占歌词位，挂到注释后第一个字）
 
   const flush = () => {
     if (pending) {
@@ -48,6 +83,8 @@ function parseLyricContent(content: string, line: number): { chars: LyricChar[];
   }
 
   const isPunct = (c: string) => '，。、；：？！…—·〈〉《》“”‘’（）【】!,.?;:()[]-—~'.includes(c)
+  /** 汉字：每个字独立占一个音符位（无空格歌词也对齐）；拉丁/数字连续累积为音节 */
+  const isCJK = (c: string) => /\p{Script=Han}/u.test(c)
 
   while (i < n) {
     const c = content[i]
@@ -55,6 +92,22 @@ function parseLyricContent(content: string, line: number): { chars: LyricChar[];
       flush()
       mountPunct()
       i++
+      continue
+    }
+    if (c === '"') {
+      // 引号注释（adj58）：双引号包围的文本为注释，不占歌词对齐位；
+      // 挂到注释后面第一个歌词字上，渲染在该字前面；_ 代替空格（adj59）
+      flush()
+      mountPunct()
+      let k = i + 1
+      let note = ''
+      while (k < n && content[k] !== '"') {
+        note += content[k] === '_' ? ' ' : content[k]
+        k++
+      }
+      if (k >= n) errors.push(errAt('歌词引号注释未闭合', line, i, 'warning'))
+      noteBuf = note
+      i = k + 1
       continue
     }
     if (c === '@') {
@@ -90,10 +143,26 @@ function parseLyricContent(content: string, line: number): { chars: LyricChar[];
       i++
       continue
     }
-    // 普通字符（汉字/字母/数字）：累积为音节
+    // 汉字：每字独立音节（各自占一个音符槽位，避免无空格歌词挤占错位）
+    if (isCJK(c)) {
+      flush()
+      mountPunct()
+      pending = { text: c, skip: false, punctuation: false, pos: i, raw: c }
+      if (noteBuf !== null) {
+        pending.note = noteBuf
+        noteBuf = null
+      }
+      i++
+      continue
+    }
+    // 普通字符（拉丁字母/数字等）：累积为音节
     if (!pending) {
       mountPunct() // 新音节前先挂载标点
       pending = { text: '', skip: false, punctuation: false, pos: i, raw: '' }
+      if (noteBuf !== null) {
+        pending.note = noteBuf
+        noteBuf = null
+      }
     }
     pending.text += c
     pending.raw += c
@@ -110,7 +179,7 @@ export function parseJps(source: string): ParseResult {
   const errors: ParseError[] = []
   const groups: MusicGroup[] = []
 
-  const header: Header = { titles: [], authors: [] }
+  const header: Header = { titles: [], authors: [], instruments: [], notes: [] }
   let lastMusicIndex = -1 // 最近一个 Q 行在 lines 中的索引
 
   const srcLines = source.replace(/\r\n/g, '\n').split('\n')
@@ -162,8 +231,20 @@ export function parseJps(source: string): ParseResult {
         case 'P':
           header.meter = value
           break
-        case 'J':
-          header.tempo = value
+        case 'J': {
+          header.tempo = value // 原始值（最后一条，兼容旧消费方）
+          const t = splitTempo(value)
+          if (t.num !== undefined) header.tempoNum = t.num // 多条数字取最后一条
+          if (t.text !== undefined) {
+            header.tempoText = header.tempoText ? `${header.tempoText} ${t.text}` : t.text
+          }
+          break
+        }
+        case 'Y':
+          header.instruments.push(value)
+          break
+        case 'S':
+          header.notes.push(value)
           break
       }
       continue
@@ -217,5 +298,62 @@ export function parseJps(source: string): ParseResult {
     errors.push(errAt(`无法识别的行 "${trimmed.slice(0, 20)}${trimmed.length > 20 ? '…' : ''}"`, lineNo, 0, 'warning'))
   }
 
+  // ---- 平均连音组 (y...) 时值均分（多连音线）：组内音符时值 = 组总时值 / 组内音符数 ----
+  applyTupletDurations(groups, parseMeterBeats(header.meter))
+
   return { header, lines, groups, errors }
+}
+
+/** 解析拍号名义拍数（"4/4" → 4；"6/8 (2/4)" → 6；无法解析返回 null） */
+function parseMeterBeats(meter: string | undefined): number | null {
+  if (!meter) return null
+  const m = /^(\d+)\s*\//.exec(meter.trim())
+  return m ? Number(m[1]) : null
+}
+
+/**
+ * 平均连音组 "(y ... )"：组内音符时值均分「组总时值」。
+ * 组总时值 = 小节名义拍数 - 组外音符实际时值（不足时回退组内原始时值和）；
+ * 组内音符按均分时值（tupletDur 覆盖，布局与播放共用）。
+ */
+function applyTupletDurations(groups: MusicGroup[], meterBeats: number | null): void {
+  type NoteLike = Extract<MusicToken, { kind: 'note' } | { kind: 'rest' } | { kind: 'rhythm' }>
+  const isNoteLike = (t: MusicToken): t is NoteLike =>
+    t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm'
+  for (const g of groups) {
+    const tokens = g.music.tokens
+    // 按小节切分（| 等小节线分隔；行尾未闭合的收尾小节）
+    let start = 0
+    for (let i = 0; i <= tokens.length; i++) {
+      const atBar = i === tokens.length || tokens[i].kind === 'barline'
+      if (!atBar) continue
+      const measure = tokens.slice(start, i)
+      // FIFO 配对（与布局一致），收集每组音符
+      const open: { slur: SlurToken; members: NoteLike[] }[] = []
+      for (const t of measure) {
+        if (isNoteLike(t)) {
+          for (const o of open) o.members.push(t)
+        } else if (t.kind === 'slur' && t.dir === 'open') {
+          open.push({ slur: t, members: [] })
+        } else if (t.kind === 'slur' && t.dir === 'close') {
+          const o = open.shift()
+          if (o && o.slur.tuplet && o.members.length >= 2) {
+            const n = o.members.length
+            const rawSum = o.members.reduce((a, m) => a + tokenDuration(m), 0)
+            const outer = measure.reduce(
+              (a, m) => a + (isNoteLike(m) && !o.members.includes(m) ? tokenDuration(m) : 0),
+              0,
+            )
+            const groupTotal =
+              meterBeats !== null && meterBeats > 0 && meterBeats - outer > 0
+                ? meterBeats - outer
+                : rawSum
+            const per = groupTotal / n
+            for (const m of o.members) m.tupletDur = per
+          }
+        }
+      }
+      start = i + 1
+    }
+  }
 }

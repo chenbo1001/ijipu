@@ -4,9 +4,11 @@
 import { Modal } from '../ui/Modal'
 
 const SHORTCUTS: [string, string][] = [
-  ['Ctrl+N', '新建乐谱'],
-  ['Ctrl+O', '打开示例谱'],
-  ['Ctrl+S', '保存为 .jps'],
+  ['Ctrl+N', '新建'],
+  ['Ctrl+O', '打开文件'],
+  ['Ctrl+S', '保存'],
+  ['Ctrl+Z', '撤销'],
+  ['Ctrl+Y', '重做'],
   ['Ctrl+Q', '试听播放'],
   ['Tab', '编码 / 预览 切换'],
   ['1 / 2 / 3', '视图：编码 / 拆分 / 预览'],

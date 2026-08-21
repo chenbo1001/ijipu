@@ -38,8 +38,16 @@ export interface Header {
   key?: string
   /** 拍号字符串：如 "4/4"、"6/8"、"4/4 (2/4)" */
   meter?: string
-  /** 节拍：数字或文字（或两者并存，如 "90"、"欢快地"） */
+  /** 节拍：数字或文字（或两者并存，如 "90"、"欢快地"）；多条 J 时最后一条 */
   tempo?: string
+  /** 节拍数字（J 的数字部分，如 "80"；多条 J 取最后一条数字） */
+  tempoNum?: string
+  /** 节拍文字（J 的文字部分，如 "欢快地"；多条 J 的文字用空格连接） */
+  tempoText?: string
+  /** 乐器列表（Y 行，可多行，一行一种乐器；为多声部试听演奏预留，adj83） */
+  instruments: string[]
+  /** 说明文字列表（S 行，可多行；渲染在简谱主体最末尾，adj83） */
+  notes: string[]
 }
 
 // ============================================================
@@ -138,6 +146,8 @@ export interface NoteToken {
   diminishCount: number
   /** 附点数量（. 的个数，1 个 ×1.5，2 个 ×1.75） */
   dots: number
+  /** 平均连音组（(y...)）覆盖时值：组内音符均分括号总时值 */
+  tupletDur?: number
   /** 装饰符号编码列表（& 开头，如 tr、mp；< > 渐强渐弱另见 DecorationToken） */
   symbols: string[]
   /** 虚音符：(1) 括号修饰，弱奏装饰，不占额外拍（adj23） */
@@ -173,6 +183,10 @@ export interface RestToken {
   augmentCount: number
   diminishCount: number
   dots: number
+  /** 平均连音组覆盖时值 */
+  tupletDur?: number
+  /** 装饰符号编码列表（& 开头，如 zkh/ykh 括号等，adj84） */
+  symbols: string[]
   comment?: string
   pos: number
   raw: string
@@ -184,6 +198,10 @@ export interface RhythmToken {
   augmentCount: number
   diminishCount: number
   dots: number
+  /** 平均连音组覆盖时值 */
+  tupletDur?: number
+  /** 装饰符号编码列表（& 开头，如 zkh/ykh 括号等，adj84） */
+  symbols: string[]
   comment?: string
   pos: number
   raw: string
@@ -247,11 +265,13 @@ export interface DecorationToken {
   raw: string
 }
 
-/** 连音线开始/结束：( 与 ) */
+/** 连音线/连音组开始/结束：( 与 )；"(y" 前缀 = 平均连音组（均分时值） */
 export interface SlurToken {
   kind: 'slur'
   /** open=( 开始；close=) 结束 */
   dir: 'open' | 'close'
+  /** "(y" 平均连音组：组内音符时值均分括号总时值 */
+  tuplet?: boolean
   pos: number
   raw: string
 }
@@ -282,6 +302,8 @@ export interface LyricChar {
   punctuation: boolean
   /** 紧跟本字的标点串（adj40：标点不占音符位，渲染在本字之后） */
   trailing?: string
+  /** 本字前的引号注释文本（"..."，adj58：渲染在该字前面，不占歌词对齐位） */
+  note?: string
   /** 行内字符偏移 */
   pos: number
   raw: string
@@ -360,6 +382,10 @@ export interface PlacedLyric {
   char: LyricChar
   x: number
   y: number
+  /** 对应音符的占位宽度（px，adj71：歌词字宽 > 槽宽且相邻歌词密时横向缩窄） */
+  slotW?: number
+  /** 与相邻歌词的最小间距（px，adj71 后处理；判断两侧是否密集会重叠） */
+  gapL?: number
 }
 
 /** 一个定位后的小节线（含反复记号/跳房子信息） */
@@ -409,6 +435,10 @@ export interface PlacedSlur {
   depth: number
   /** 样式：arc 圆弧 / flat 平顶 */
   style: 'arc' | 'flat'
+  /** 跨行半条：l = 上一行左半部（低→高、右侧开口）；r = 下一行右半部（高→低、左侧开口） */
+  half?: 'l' | 'r'
+  /** 平均连音组 (y...) 音符数（仅 (y 组标注数字；普通连音线 (…) 不标注，adj43） */
+  tupletCount?: number
 }
 
 /** 渐强渐弱记号（< > 起点至 ! 结束） */
@@ -441,6 +471,14 @@ export interface ScorePageMeta {
   key: string | null
   meter: string | null
   tempo: string | null
+  /** 节拍数字（渲染 ♩=N 用） */
+  tempoNum: string | null
+  /** 节拍文字（渲染在 ♩=N 之后） */
+  tempoText: string | null
+  /** 乐器列表（Y 行，副标题下，adj83） */
+  instruments: string[]
+  /** 说明文字列表（S 行，谱尾，adj83） */
+  notes: string[]
 }
 
 /** 排版结果：多页谱面 */
@@ -469,16 +507,25 @@ export interface PageConfig {
   /** 标题字体与字号 */
   biaoti_font: string
   biaoti_size: number
+  /** 副标题字体与字号 */
+  fubiaoti_font: string
   fubiaoti_size: number
+  /** 描述头字体与字号（除标题/副标题外的其它内容：调式/拍号/节拍/作者；adj45） */
+  miaoshu_font: string
+  miaoshu_size: number
   /** 歌词字体与字号 */
   geci_font: string
   geci_size: number
-  /** 音符字形样式：a | b | c */
+  /** 音符字号（px）与字形样式：a | b | c */
+  note_size: number
   shuzi_font: 'a' | 'b' | 'c'
   /** 行间距：曲下间距/词下间距/曲上间距/声部间距 */
   height_quci: number
   height_cici: number
+  /** 曲部与曲部间距（行尾间距，本行无歌词时，adj79：原 ciqu 拆分） */
   height_ciqu: number
+  /** 曲部与上一行词部间距（行尾间距，本行有歌词时，adj79） */
+  height_ciqu_lyric: number
   height_shengbu: number
   /** 小节间距（列间距，px；小节线之间的空隙） */
   bar_gap: number
@@ -490,8 +537,8 @@ export interface PageConfig {
   metaPos?: Record<string, { x: number; y: number }>
   /** 连音线样式：0 自动 | 1 圆弧 | 2 平顶 */
   lianyinxian_type: 0 | 1 | 2
-  /** 按页覆盖的行距（key: 页码） */
-  heights?: Record<string, [number, number, number, number]>
+  /** 按页覆盖的行距（key: 页码；[quci, cici, ciqu, shengbu, ciquLyric?]，adj79 末位可选兼容旧存储） */
+  heights?: Record<string, [number, number, number, number, number?]>
 }
 
 export const defaultPageConfig: PageConfig = {
@@ -504,13 +551,18 @@ export const defaultPageConfig: PageConfig = {
   descAreaH: 87.6, // 默认 = biaoti_size(36)×1.6 + 30，保持原描述头区域高度
   biaoti_font: 'Microsoft YaHei',
   biaoti_size: 36,
+  fubiaoti_font: 'Microsoft YaHei',
   fubiaoti_size: 20,
+  miaoshu_font: 'Microsoft YaHei',
+  miaoshu_size: 13,
   geci_font: 'Microsoft YaHei',
   geci_size: 18,
+  note_size: 18,
   shuzi_font: 'b',
   height_quci: 13,
   height_cici: 10,
-  height_ciqu: 40,
+  height_ciqu: 20, // adj78：曲部与曲部间距默认 40→20；adj79 拆分后仅指无歌词行行尾间距
+  height_ciqu_lyric: 20, // adj79：曲部与上一行词部间距（有歌词行行尾间距）
   height_shengbu: 0,
   bar_gap: 0,
   lianyinxian_type: 0,

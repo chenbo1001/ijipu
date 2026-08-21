@@ -12,6 +12,7 @@
 import { PAPER_SIZE } from '../types'
 import { tokenDuration } from '../duration'
 import type {
+  BarlineType,
   LayoutId,
   LyricChar,
   LyricLine,
@@ -20,12 +21,14 @@ import type {
   NoteToken,
   PageConfig,
   ParseResult,
+  PlacedLyric,
   PlacedToken,
   ScoreLayout,
   ScorePage,
   ScorePageMeta,
   VoiceBlock,
 } from '../types'
+import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, BRACKET_PAD, H_GAP, noteScaleOf } from './spacing'
 
 // ============================================================
 // 音高映射：简谱音级 → 音名（如 C4 / F#5）
@@ -72,26 +75,48 @@ export function pitchToName(
 
 /** 每拍自然宽（px，最后一行/断行预估用） */
 const BPW_NATURAL = 14
-/**
- * 音符最小占宽（px，adj35）：数字槽宽 11.16 + 最小间距 1px = 12.16。
- * 保证任意相邻音符数字之间至少 1px 空隙。
- */
-const MIN_NOTE_W = 12.16
-/** 数字槽半宽（与 render 的 NOTE_DIGIT_W/2 一致，歌词/高低音点对齐基准，adj24） */
-const HALF_DIGIT_W = 5.58
+/** 音符最小占宽（随字号缩放）：数字槽宽 0.62×noteSize + 水平元素最小间距 H_GAP（adj64/66：1 → 0.5 → -2） */
+const minNoteW = (noteSize: number) => noteSize * 0.62 + H_GAP
+/** 数字槽半宽（0.31×noteSize，歌词/高低音点对齐基准） */
+const halfDigitW = (noteSize: number) => noteSize * 0.31
 /** 小节内左右留白（px） */
 const BAR_PAD = 6
 /** 拍与拍之间间距（px，adj41：原 8 调为 4） */
 const NOTE_GAP = 4
 /**
- * 小节线最小占位空间（px，adj41）：线宽 1.5 + 两侧与音符各 4px = 9.5。
- * 小节线空间 = max(bar_gap, 9.5)，保证小节线与两侧音符至少 4px 间距。
+ * 小节线最小占位空间（px，adj50）：单线宽 1.1 + 两侧与音符各 4px = 9.1。
+ * 小节线空间 = max(bar_gap, 线组总宽 + 8)，保证线与两侧音符至少 4px 间距；
+ * 各类型线组宽度不同（粗线 1.8、细线 1.1、点 r=1.8），占位随类型变化。
+ * |/ 隐藏小节线1：不显示也不占位（空间 0）。
  */
-const MIN_BARLINE_SPACE = 9.5
-const barlineSpace = (gap: number) => Math.max(gap, MIN_BARLINE_SPACE)
+const MIN_BARLINE_SPACE = 9.1
+/** 小节线类型 → 线组总宽（px；细线 1.1、粗线 1.8、点 r=1.5；adj55 间距：线与线 1、线与点 1.5；adj58 点径 3.0） */
+function barlineTotalW(type: BarlineType): number {
+  switch (type) {
+    case '|':
+      return 1.1
+    case '||':
+      return 3.9 // 细 1.1 + 1 + 粗 1.8
+    case '||/':
+      return 3.2 // 1.1 + 1 + 1.1
+    case '|:':
+    case ':|':
+      return 8.4 // 粗 1.8 + 1 + 细 1.1 + 1.5 + 点 3.0
+    case ':|:':
+      return 15.0 // 点 3.0 + 1.5 + 细 1.1 + 1 + 粗 1.8 + 1 + 细 1.1 + 1.5 + 点 3.0
+    case '||:':
+      return 7.7 // 双细线 + 右点（1.1 + 1 + 1.1 + 1.5 + 点 3.0）
+    case '|*':
+      return 1.1 // 隐藏但占位（同单线）
+    default:
+      return 0 // |/ 不占位
+  }
+}
+const barlineSpace = (gap: number, type: BarlineType = '|') =>
+  type === '|/' ? 0 : Math.max(gap, MIN_BARLINE_SPACE, barlineTotalW(type) + 8)
 
 /** 小节所需最小每拍宽：保证拍内任意相邻音符间距 ≥ 最小字符宽（adj13 按拍内最小时值；adj35 间距 1px） */
-function segPerBeatMin(seg: BarSeg): number {
+function segPerBeatMin(seg: BarSeg, noteSize = 18): number {
   const minDurByBeat = new Map<number, number>()
   let beat = 0
   for (const t of seg.notes) {
@@ -105,12 +130,12 @@ function segPerBeatMin(seg: BarSeg): number {
   let minDur = Infinity
   for (const d of minDurByBeat.values()) minDur = Math.min(minDur, d)
   if (!Number.isFinite(minDur)) return BPW_NATURAL
-  // 每拍宽 ≥ MIN_NOTE_W / 最小时值：相邻音符间距 = dur×perBeat ≥ MIN_NOTE_W
-  return Math.max(BPW_NATURAL, MIN_NOTE_W / minDur)
+  // 每拍宽 ≥ minNoteW / 最小时值：相邻音符间距 = dur×perBeat ≥ minNoteW
+  return Math.max(BPW_NATURAL, minNoteW(noteSize) / minDur)
 }
 
 /** 小节自然宽（adj35）：逐拍累加每拍 need（密集拍多占、正常拍 14），断行与拍级挤占一致 */
-function segNeedW(seg: BarSeg): number {
+function segNeedW(seg: BarSeg, noteSize = 18): number {
   const minDurByBeat = new Map<number, number>()
   let beat = 0
   for (const t of seg.notes) {
@@ -123,7 +148,7 @@ function segNeedW(seg: BarSeg): number {
   }
   let w = 0
   for (const d of minDurByBeat.values()) {
-    w += d > 0 ? Math.max(BPW_NATURAL, MIN_NOTE_W / d) : BPW_NATURAL
+    w += d > 0 ? Math.max(BPW_NATURAL, minNoteW(noteSize) / d) : BPW_NATURAL
   }
   return w
 }
@@ -136,11 +161,15 @@ function segNeedW(seg: BarSeg): number {
  *     其余正常拍平均分享剩余宽度（迭代收敛）。
  * 返回每拍 perBeat；总宽 = Σ 拍时值 × perBeat ≈ avail（极端兜底等比压缩不溢出）。
  */
-function allocatePerBeats(beats: { dur: number; minDur: number }[], avail: number): number[] {
+function allocatePerBeats(
+  beats: { dur: number; minDur: number }[],
+  avail: number,
+  noteSize = 18,
+): number[] {
   const n = beats.length
   if (n === 0) return []
   const need = beats.map((b) =>
-    b.minDur > 0 ? Math.max(BPW_NATURAL, MIN_NOTE_W / b.minDur) : BPW_NATURAL,
+    b.minDur > 0 ? Math.max(BPW_NATURAL, minNoteW(noteSize) / b.minDur) : BPW_NATURAL,
   )
   const fixed = new Array<boolean>(n).fill(false)
   let pb = avail / Math.max(1e-6, beats.reduce((a, b) => a + b.dur, 0))
@@ -167,6 +196,12 @@ function allocatePerBeats(beats: { dur: number; minDur: number }[], avail: numbe
     const scale = avail / total
     return beats.map((_bb, p) => (fixed[p] ? need[p] * scale : pb * scale))
   }
+  // adj85：总宽不足 avail（密集拍 need 大、正常拍均分后仍有富余）时等比放大，
+  // 保证行内容撑满整行（两端对齐），避免行尾留白
+  if (total < avail && total > 0) {
+    const scale = avail / total
+    return beats.map((_bb, p) => (fixed[p] ? need[p] * scale : pb * scale))
+  }
   return beats.map((_bb, p) => (fixed[p] ? need[p] : pb))
 }
 
@@ -178,24 +213,30 @@ interface LayoutMetrics {
   noteSize: number
   noteGap: number
   barlineWidth: number
+  /** 第 1 页正文起始 y（描述头区域 descAreaH + 正文上间距） */
   titleAreaH: number
+  /** 后续页正文起始 y（不占描述头区域，descAreaH 释放给曲部词部） */
+  bodyTopH: number
 }
 
 function metrics(config: PageConfig): LayoutMetrics {
-  const noteSize = 18
+  const noteSize = config.note_size
   return {
     noteSize,
     noteGap: noteSize * 0.22,
     barlineWidth: noteSize * 0.32,
     titleAreaH: config.margin_top + config.descAreaH + config.body_margin_top,
+    bodyTopH: config.margin_top + config.body_margin_top,
   }
 }
 
-/** 行距配置（支持按页覆盖：config.heights['a'+page] = [quci, cici, ciqu, shengbu]） */
+/** 行距配置（支持按页覆盖：config.heights['a'+page] = [quci, cici, ciqu, shengbu, ciquLyric?]） */
 interface Spacing {
-  quci: number // 曲下间距
-  cici: number // 词下间距
-  ciqu: number // 曲上间距
+  quci: number // 曲下间距（曲部与词部）
+  cici: number // 词下间距（词与词）
+  ciqu: number // 曲上间距：曲部与曲部（本行无歌词时的行尾间距，adj79 拆分）
+  ciquLyric: number // 曲部与上一行词部间距（本行有歌词时的行尾间距，adj79）
+  shengbu: number // 声部行间距（adj72）
 }
 
 function spacingFor(config: PageConfig, page: number): Spacing {
@@ -204,16 +245,19 @@ function spacingFor(config: PageConfig, page: number): Spacing {
     quci: h?.[0] ?? config.height_quci,
     cici: h?.[1] ?? config.height_cici,
     ciqu: h?.[2] ?? config.height_ciqu,
+    shengbu: h?.[3] ?? config.height_shengbu,
+    ciquLyric: h?.[4] ?? config.height_ciqu_lyric,
   }
 }
 
 /** 计算一行曲（含歌词行数）占用的总高度；
- *  无歌词时歌词部空间（曲下间距 quci + 歌词行高）为 0（adj33），减少两曲部间空白 */
+ *  无歌词时歌词部空间（曲下间距 quci + 歌词行高）为 0（adj33），减少两曲部间空白；
+ *  行尾间距（adj79）：本行有歌词 → 曲部与上一行词部间距 ciquLyric；无歌词 → 曲部与曲部间距 ciqu */
 function lineHeightOf(config: PageConfig, m: LayoutMetrics, sp: Spacing, lyricRows: number): number {
   return (
     m.noteSize * 1.7 +
-    sp.ciqu +
-    (lyricRows > 0 ? sp.quci + lyricRows * (config.geci_size + 8 + sp.cici) : 0)
+    (lyricRows > 0 ? sp.ciquLyric : sp.ciqu) +
+    (lyricRows > 0 ? sp.quci + lyricRows * (config.geci_size + 4 + sp.cici) : 0)
   )
 }
 
@@ -254,15 +298,7 @@ function segBeats(seg: BarSeg): number {
   )
 }
 
-/** 小节音符数（拍间距 gap 计数用，adj38） */
-function segNoteCount(seg: BarSeg): number {
-  return seg.notes.reduce(
-    (a, t) => a + (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm' ? 1 : 0),
-    0,
-  )
-}
-
-/** 音符间总间距：n 个音符 (n-1) 个 8px 间隙（adj38） */
+/** 音符间总间距：n 个拍 (n-1) 个 NOTE_GAP 间隙（adj38/63：拍间距） */
 function noteGapOf(n: number): number {
   return Math.max(0, n - 1) * NOTE_GAP
 }
@@ -274,16 +310,16 @@ type LayoutRow =
 
 /** 断行：正常小节按逐拍 need 自然宽断行（adj35：密集拍多占、正常拍 14，与拍级挤占一致）；
  *  超长小节（拍数超行上限）拆为碎片行。 */
-function breakRows(segs: BarSeg[], availW: number): LayoutRow[] {
+function breakRows(segs: BarSeg[], availW: number, noteSize = 18): LayoutRow[] {
   const rows: LayoutRow[] = []
   let start = 0
   let w = 0 // 当前行逐拍 need 宽累积
   for (let i = 0; i < segs.length; i++) {
     const sb = segBeats(segs[i])
-    if (sb > Math.floor((availW - BAR_PAD * 2) / segPerBeatMin(segs[i]))) {
+    if (sb > Math.floor((availW - BAR_PAD * 2) / segPerBeatMin(segs[i], noteSize))) {
       // 超长小节：flush 当前行，再按音符拍数拆碎片行（拆片上限按密度感知）
       if (i > start) rows.push({ kind: 'bars', start, end: i })
-      const maxBeats = Math.max(1, Math.floor((availW - BAR_PAD * 2) / segPerBeatMin(segs[i])))
+      const maxBeats = Math.max(1, Math.floor((availW - BAR_PAD * 2) / segPerBeatMin(segs[i], noteSize)))
       let acc = 0
       let noteStart = 0
       const notes = segs[i].notes
@@ -302,8 +338,14 @@ function breakRows(segs: BarSeg[], availW: number): LayoutRow[] {
       start = i + 1
       w = 0
     } else {
-      // adj38：小节宽含音符间 8px 间距（n 个音符 n-1 个间隙）
-      const nw = segNeedW(segs[i]) + noteGapOf(segNoteCount(segs[i]))
+      // adj38/63：小节宽含拍间距（每拍 NOTE_GAP，n 拍 n-1 个间隙）；
+      // 此前误按音符数算间隙（16 分音符小节被高估 48px）→ 断行过保守、单小节行被铺满间距虚大
+      // adj64：另含非时值元素（&zkh/&ykh 括号）占位宽，先扣除再分摊
+      let bp = 0
+      for (const t of segs[i].notes) {
+        if (t.kind === 'note' && (t.symbols.includes('zkh') || t.symbols.includes('ykh'))) bp += BRACKET_PAD
+      }
+      const nw = segNeedW(segs[i], noteSize) + noteGapOf(Math.ceil(sb)) + bp
       if (i > start && w + nw > availW) {
         rows.push({ kind: 'bars', start, end: i })
         start = i
@@ -348,6 +390,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     key: result.header.key ?? null,
     meter: result.header.meter ?? null,
     tempo: result.header.tempo ?? null,
+    tempoNum: result.header.tempoNum ?? null,
+    tempoText: result.header.tempoText ?? null,
+    instruments: result.header.instruments,
+    notes: result.header.notes,
   }
 
   const pages: ScorePage[] = []
@@ -423,8 +469,11 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     const dur = tokenDuration(t)
     const first = segments[0] ?? { x: 0, perBeat: BPW_NATURAL, beats: dur }
     const w = Math.max(4, segments.reduce((a, s) => a + s.beats * s.perBeat, 0))
-    // 数字中心 = 第 1 拍段中点（增时线"-"各占一拍，从第 2 拍起）
-    const nx = first.x + first.beats * (first.perBeat / 2) - 6
+    // 数字中心（adj44）：
+    //  增时线/附点音符锚定第 1 拍段中点（"-" 各占一拍、附点在其后）；
+    //  其余音符（跨拍纯音符/连音组音符）居中于整个时值段（避免跨拍段偏移）
+    const centerOnFirst = t.augmentCount > 0 || t.dots > 0
+    const nx = (centerOnFirst ? first.x + first.beats * (first.perBeat / 2) : first.x + w / 2) - 6
     const id: LayoutId = { page: pageIdx, voice, group: groupIndex, index: noteCounter }
     pages[pageIdx].notes.push({
       id,
@@ -444,12 +493,14 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     lyricMaps.forEach((map, row) => {
       const ch = map.get(slotIndex)
       if (!ch) return
-      // 歌词中心对齐音符数字（数字槽宽中心 = nx + NOTE_DIGIT_W/2，adj24）
+      // 歌词中心对齐音符数字（数字槽宽中心 = nx + NOTE_DIGIT_W/2，adj24）；
+      // adj71：附带音符占位宽（歌词字宽 < 槽宽时横向放大自适应）
       pages[pageIdx].lyrics.push({
         id,
         char: ch,
-        x: r1(nx + HALF_DIGIT_W - geciSize / 2),
-        y: r1(yTop + m.noteSize * 1.7 + sp.quci + row * (geciSize + 8 + sp.cici)),
+        x: r1(nx + halfDigitW(m.noteSize) - geciSize / 2),
+        y: r1(yTop + m.noteSize * 1.7 + sp.quci + row * (geciSize + 4 + sp.cici)),
+        slotW: r1(w),
       })
     })
     noteCounter++
@@ -469,11 +520,12 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     slotStart: number,
   ) => {
     const page = pages[pageIndex]
-    // 小节线高度（adj39）：字体高度 18 + 16 = 34px，上端高过字体上端、下端低于字体下端
-    // 音符基线 = yTop + 字号×1.1；上端 = 基线-17、下端 = 基线+17（高 34）
+    // 小节线高度（adj50/69）：与音符数字等高（墨迹高 ≈0.8em，上沿基线-0.8×字号、下沿基线+0.5×s）
+    // 再向上延伸 4px×s、向下延伸 4px×s → 基线-18.4×s .. 基线+4.5×s（随曲部字号缩放）
     const barNoteY = yTop + m.noteSize * 1.1
-    const yTopBar = r1(barNoteY - 17)
-    const yBottomBar = r1(barNoteY + 17)
+    const bs = noteScaleOf(m.noteSize)
+    const yTopBar = r1(barNoteY - 18.4 * bs)
+    const yBottomBar = r1(barNoteY + 4.5 * bs)
     let x = config.margin_left
     let slotIndex = slotStart
     let openDyn: { type: 'crescendo' | 'decrescendo'; x: number } | null = null
@@ -507,25 +559,29 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           fgBeat += dur
         }
       }
-      const perBeats = allocatePerBeats(beatsInfo, availW - BAR_PAD * 2 - noteGapOf(beatsInfo.length))
+      // adj64：非时值元素（括号）占位先扣除再分摊（超长小节碎片行同规则）
+      let fragBracket = 0
+      for (const t of slice.notes) {
+        if (t.kind === 'note' && (t.symbols.includes('zkh') || t.symbols.includes('ykh'))) fragBracket += BRACKET_PAD
+      }
+      const perBeats = allocatePerBeats(beatsInfo, availW - BAR_PAD * 2 - noteGapOf(beatsInfo.length) - fragBracket, m.noteSize)
       // 段列表（adj36：附点段用基础拍每拍宽）
       const fragSegs: { p: number; piece: number; perBeat: number; note: Extract<MusicToken, { kind: 'note' | 'rest' | 'rhythm' }>; notePos: number }[] = []
       let fgB = 0
       for (const t of slice.notes) {
         if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
           const dur = tokenDuration(t)
-          const baseDur = (1 + t.augmentCount) / Math.pow(2, t.diminishCount)
           const notePos = fgB
           let pos = fgB
           let rem = dur
           while (rem > 1e-9) {
             const p = Math.floor(pos)
             const piece = Math.min(rem, Math.floor(pos) + 1 - pos)
-            const isDot = pos - notePos >= baseDur - 1e-9
             fragSegs.push({
               p,
               piece,
-              perBeat: isDot ? perBeats[Math.max(0, Math.floor(notePos))] : perBeats[p],
+              // adj85：附点段用所在拍 perBeat（原用音符起始拍，段宽与拍宽不一致 → 行尾留白）
+              perBeat: perBeats[p],
               note: t,
               notePos,
             })
@@ -547,8 +603,12 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       let curP = -1
       let offInBeat = 0
       let fIdx = 0
+      // adj64：括号占位累计偏移（碎片行同规则）
+      let fragBracketAcc = 0
       while (fIdx < fragSegs.length) {
         const rs = fragSegs[fIdx]
+        let xOff = fragBracketAcc
+        if (rs.note.kind === 'note' && rs.note.symbols.includes('zkh')) xOff += BRACKET_PAD
         const segments: { x: number; perBeat: number; beats: number }[] = []
         while (fIdx < fragSegs.length && fragSegs[fIdx].notePos === rs.notePos) {
           const s = fragSegs[fIdx]
@@ -556,11 +616,15 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
             curP = s.p
             offInBeat = 0
           }
-          segments.push({ x: x + BAR_PAD + beatStart[s.p] + offInBeat + Math.floor(rs.notePos) * NOTE_GAP, perBeat: s.perBeat, beats: s.piece })
+          // adj75：跨拍段逐段累计拍间距（单音符 6--- 内部也有拍间距，与多音符行一致）
+          segments.push({ x: x + BAR_PAD + beatStart[s.p] + offInBeat + s.p * NOTE_GAP + xOff, perBeat: s.perBeat, beats: s.piece })
           offInBeat += s.piece * s.perBeat
           fIdx++
         }
         placeNoteAt(rs.note, segments, yTop, pageIndex, groupIndex, voice, slotIndex, lyricMaps, geciSize, sp, rs.notePos, 0)
+        if (rs.note.kind === 'note' && (rs.note.symbols.includes('zkh') || rs.note.symbols.includes('ykh'))) {
+          fragBracketAcc += BRACKET_PAD
+        }
         slotIndex++
       }
       finishDyn(x + BAR_PAD + (beatStart[beatsInfo.length - 1] ?? 0) + (beatW[beatsInfo.length - 1] ?? 0))
@@ -572,8 +636,27 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     //  ② 拍内音符最小间距 1px（need = max(14, 12.16/拍内最小时值)）
     //  ③ 超拍挤占其它正常拍空间，正常拍再平均调整
     const leadingEmpty = row.start < row.end && segs[row.start].notes.length === 0 ? 1 : 0
-    const barCount = Math.max(1, row.end - row.start - leadingEmpty)
-    const pads = BAR_PAD * 2 + barlineSpace(config.bar_gap) * Math.max(0, barCount - 1)
+    // adj47：跨行跳房子起点——上一行末的 voltaStart 小节线改画在本行行首
+    // （断行发生在 [ 起点小节线后时，线若留在行尾会溢出右边界且跳房子跨行反向）
+    const leadVoltaBar =
+      row.start > 0 && !leadingEmpty && segs[row.start - 1].bar?.voltaStart
+        ? segs[row.start - 1].bar
+        : null
+    // 行首小节线占位：非普通 |、非 |/ 的行首线（|: || :|: |* 等）预留 线宽 + 右侧 4px 间距
+    const leadBar = leadingEmpty === 1 ? segs[row.start].bar : leadVoltaBar
+    const leadPad =
+      leadBar && leadBar.type !== '|' && leadBar.type !== '|/' ? barlineTotalW(leadBar.type) + 4 : 0
+    // 行预算：每对相邻内容小节之间按该小节线上类型占位（|/ 不占位）
+    let barGaps = 0
+    {
+      let prevBar = -1
+      for (let b = row.start; b < row.end; b++) {
+        if (leadingEmpty === 1 && b === row.start) continue
+        if (prevBar >= 0) barGaps += barlineSpace(config.bar_gap, segs[prevBar].bar?.type)
+        prevBar = b
+      }
+    }
+    const pads = BAR_PAD * 2 + barGaps + leadPad
 
     // 行内拍序列（跨小节连续拍；行首空 seg 不占拍）
     const beatsInfo: { dur: number; minDur: number }[] = []
@@ -602,7 +685,18 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     }
     // 拍间距预算（adj38：拍与拍 8px）
     const noteGap = noteGapOf(beatsInfo.length)
-    const perBeats = allocatePerBeats(beatsInfo, availW - pads - noteGap)
+    // adj64：非时值元素（&zkh/&ykh 括号）占位宽先扣除，剩余宽才按比例分摊给带时值元素
+    let bracketPadTotal = 0
+    for (let b = row.start; b < row.end; b++) {
+      const seg = segs[b]
+      if (leadingEmpty === 1 && b === row.start) continue
+      for (const t of seg.notes) {
+        if (t.kind === 'note' && (t.symbols.includes('zkh') || t.symbols.includes('ykh'))) {
+          bracketPadTotal += BRACKET_PAD
+        }
+      }
+    }
+    const perBeats = allocatePerBeats(beatsInfo, availW - pads - noteGap - bracketPadTotal, m.noteSize)
 
     // 段列表（adj36）：附点段（dots 部分）每拍宽 = 音符基础时值拍的 perBeat，
     // 不被所在拍（超拍）放大 —— 附点只占前音符时值的 0.5
@@ -613,30 +707,43 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       note: Extract<MusicToken, { kind: 'note' | 'rest' | 'rhythm' }>
       notePos: number
       barIdx: number
+      /** 拍间距基准拍（adj44：平均连音组内统一用组起始拍，保证均分） */
+      gapOf: number
     }
     const rowSegs: RowSegInfo[] = []
     let gB = 0
+    // 平均连音组 (y... 起始拍栈（组内拍间距基准 = 组首拍，adj44）
+    const tupletStartStack: number[] = []
     for (let b = row.start; b < row.end; b++) {
       const seg = segs[b]
       if (leadingEmpty === 1 && b === row.start) continue
       for (const t of seg.notes) {
+        if (t.kind === 'slur') {
+          if (t.dir === 'open' && t.tuplet) tupletStartStack.push(Math.floor(gB))
+          else if (t.dir === 'close' && tupletStartStack.length > 0) tupletStartStack.pop()
+          continue
+        }
         if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
           const dur = tokenDuration(t)
-          const baseDur = (1 + t.augmentCount) / Math.pow(2, t.diminishCount)
           const notePos = gB
           let pos = gB
           let rem = dur
           while (rem > 1e-9) {
             const p = Math.floor(pos)
             const piece = Math.min(rem, Math.floor(pos) + 1 - pos)
-            const isDot = pos - notePos >= baseDur - 1e-9
             rowSegs.push({
               p,
               piece,
-              perBeat: isDot ? perBeats[Math.max(0, Math.floor(notePos))] : perBeats[p],
+              // adj85：附点段用所在拍 perBeat（原用音符起始拍，附点跨到密集拍时
+              // 段宽与拍宽不一致 → 行尾留白；改所在拍后拍宽 = perBeats[p]×dur 自洽）
+              perBeat: perBeats[p],
               note: t,
               notePos,
               barIdx: b,
+              // 拍间距基准（adj75）：普通音符按段所在拍 p（跨拍段逐段累计 NOTE_GAP，
+              // 单音符 6--- 内部也有拍间距，末尾增时线不再被小节线甩开）；
+              // 平均连音组内统一用组首拍（组内无拍间距 → 均分）
+              gapOf: tupletStartStack.length > 0 ? tupletStartStack[tupletStartStack.length - 1] : p,
             })
             pos += piece
             rem -= piece
@@ -659,16 +766,44 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     x = config.margin_left
     let segBeat = 0 // 小节起点拍（行内，跳过行首空 seg）
     let segIdx = 0
+    // adj47：跨行跳房子起点——上一行末的 voltaStart 小节线画在本行行首（贴左边距）
+    if (leadVoltaBar) {
+      const halfW = barlineTotalW(leadVoltaBar.type) / 2
+      const lineX = Math.min(
+        Math.max(x + halfW, config.margin_left + halfW),
+        page.width - config.margin_right - halfW,
+      )
+      const bid: LayoutId = { page: pageIndex, voice, group: groupIndex, index: barCounter }
+      page.barlines.push({
+        id: bid,
+        type: leadVoltaBar.type,
+        voltaStart: leadVoltaBar.voltaStart,
+        voltaEnd: leadVoltaBar.voltaEnd,
+        voltaEndSlash: leadVoltaBar.voltaEndSlash,
+        voltaOnly: leadVoltaBar.voltaOnly,
+        comment: leadVoltaBar.comment,
+        x: r1(lineX),
+        yTop: yTopBar,
+        yBottom: yBottomBar,
+        width: m.barlineWidth,
+      })
+      barCounter++
+    }
     for (let b = row.start; b < row.end; b++) {
       const seg = segs[b]
       const isEmptyLead = leadingEmpty === 1 && b === row.start
-      // 小节宽 = Σ 拍宽
+      // 小节宽 = Σ 拍宽；非整拍小节（如 4.5 拍）按实际重叠拍数比例（避免尾拍整宽虚高）
       let segBarW = 0
       if (!isEmptyLead) {
         const sb = segBeats(seg)
         const p0 = Math.max(0, Math.floor(segBeat + 1e-9))
         const p1 = Math.min(beatsInfo.length - 1, Math.floor(segBeat + sb - 1e-9))
-        for (let p = p0; p <= p1; p++) segBarW += beatW[p]
+        for (let p = p0; p <= p1; p++) {
+          const overlap = Math.min(p + 1, segBeat + sb) - Math.max(p, segBeat)
+          if (overlap <= 0) continue
+          const pb = beatsInfo[p]?.dur > 0 ? beatW[p] / beatsInfo[p].dur : 0
+          segBarW += overlap * pb
+        }
       }
       // 小节起点对应的行内相对 x（segBeat 可能非整数：尾拍小节）
       const segBeatFloor = Math.max(0, Math.floor(segBeat + 1e-9))
@@ -680,19 +815,26 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       // 渲染该小节音符（按音符聚合段，段起点逐段累计拍内偏移；音符间 8px，adj38）
       let curP = -1
       let offInBeat = 0
+      // adj64：括号占位累计偏移（行内；zkh 块前再让出 PAD、ykh 块后计入后续）
+      let bracketAcc = 0
       while (segIdx < rowSegs.length && rowSegs[segIdx].barIdx === b) {
         const rs = rowSegs[segIdx]
+        // 本音符 x 偏移：之前的括号占位累计；带 &zkh 再让出块前括号宽
+        let xOff = bracketAcc
+        if (rs.note.kind === 'note' && rs.note.symbols.includes('zkh')) xOff += BRACKET_PAD
         const segments: { x: number; perBeat: number; beats: number }[] = []
         let first = true
         while (segIdx < rowSegs.length && rowSegs[segIdx].barIdx === b && rowSegs[segIdx].notePos === rs.notePos) {
           const s = rowSegs[segIdx]
           if (s.p !== curP) {
             curP = s.p
-            offInBeat = 0
+            // 音符从拍中间开始（notePos 非整）时，首段补拍内偏移；后续段（跨拍）从拍首开始
+            offInBeat = first ? (rs.notePos - Math.floor(rs.notePos)) * s.perBeat : 0
           }
           segments.push({
-            // adj38：拍与拍之间 8px（按行内拍序 floor(notePos)）
-            x: x + BAR_PAD + (beatStart[s.p] - barStartX) + offInBeat + Math.floor(rs.notePos) * NOTE_GAP,
+            // adj38：拍与拍之间 8px（按行内拍序；平均连音组内统一组首拍，adj44）；adj64：+括号占位
+            // adj75：用当前段 s.gapOf（按段所在拍递增，单音符 6--- 内部也有拍间距）
+            x: x + BAR_PAD + (beatStart[s.p] - barStartX) + offInBeat + s.gapOf * NOTE_GAP + xOff,
             perBeat: s.perBeat,
             beats: s.piece,
           })
@@ -704,6 +846,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           segIdx++
         }
         placeNoteAt(rs.note, segments, yTop, pageIndex, groupIndex, voice, slotIndex, lyricMaps, geciSize, sp, rs.notePos - segBeat, b)
+        // 该音符带括号 → 占位计入后续音符偏移
+        if (rs.note.kind === 'note' && (rs.note.symbols.includes('zkh') || rs.note.symbols.includes('ykh'))) {
+          bracketAcc += BRACKET_PAD
+        }
         slotIndex++
         slotIdx++
       }
@@ -720,15 +866,26 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           finishDyn(x + BAR_PAD + (beatStart[pEnd] - barStartX) + (segBeat + atBeat - pEnd) * (beatW[pEnd] / (beatsInfo[pEnd]?.dur || 1)))
         }
       }
-      // 小节线：画在小节内容右端（+BAR_PAD 不重叠音符，adj36），并在小节间距内居中（adj25）
+      // 小节线：画在小节内容右端（+BAR_PAD 不重叠音符，adj36），并在小节间距内居中（adj25）；
+      // 占位空间随线组类型变化（|/ 隐藏线不占位）
       const bar = seg.bar
       if (bar) {
         const isRowStartEmpty = isEmptyLead
-        if (!(isRowStartEmpty && bar.type === '|')) {
-          const lineX =
+        // adj47：断行发生在 [ 起点小节线后时，该线移到下一行行首渲染（leadVoltaBar），
+        // 行尾不再画（避免番号溢出右边界、跳房子跨行反向）
+        const movesToNextRow =
+          bar.voltaStart && b === row.end - 1 && row.end < segs.length
+        if (!movesToNextRow && !(isRowStartEmpty && bar.type === '|')) {
+          // 小节线整体不超出页面内容区（左/右边距内，adj）
+          const lineX0 =
             isEmptyLead
               ? x
-              : x + BAR_PAD + segBarW + barlineSpace(config.bar_gap) / 2 + Math.floor(segBeat + segBeats(seg)) * NOTE_GAP
+              : x + BAR_PAD + segBarW + barlineSpace(config.bar_gap, bar.type) / 2 + Math.floor(segBeat + segBeats(seg)) * NOTE_GAP
+          const halfW = barlineTotalW(bar.type) / 2
+          const lineX = Math.min(
+            Math.max(lineX0, config.margin_left + halfW),
+            page.width - config.margin_right - halfW,
+          )
           const bid: LayoutId = { page: pageIndex, voice, group: groupIndex, index: barCounter }
           page.barlines.push({
             id: bid,
@@ -746,7 +903,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         }
         barCounter++
       }
-      x += isEmptyLead ? 0 : segBarW + (b < row.end - 1 ? barlineSpace(config.bar_gap) : 0)
+      // 行首空 seg：若带需占位的小节线（|: || :|: |* 等），预留 线宽 + 右侧 4px
+      x += isEmptyLead
+        ? leadPad
+        : segBarW + (b < row.end - 1 ? barlineSpace(config.bar_gap, seg.bar?.type) : 0)
       segBeat += isEmptyLead ? 0 : segBeats(seg)
     }
     finishDyn(x) // 行尾关闭未闭合渐强
@@ -755,7 +915,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   /** 处理一个单声部组 */
   const placeGroup = (groupIndex: number, voice: number, tokens: MusicToken[], lyrics: LyricLine[]) => {
     const segs = splitBars(tokens)
-    const rows = breakRows(segs, availW)
+    const rows = breakRows(segs, availW, m.noteSize)
     const geciSize = config.geci_size
     const lyricMaps = buildLyricMaps(lyrics)
 
@@ -776,13 +936,16 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
 
     rows.forEach((row, ri) => {
       const sp = spacingFor(config, pageIndex)
-      placeMusicRow(segs, row, groupIndex, voice, y, lyricMaps, geciSize, sp, rowSlots[ri])
-      y += lineHeightOf(config, m, sp, lyrics.length)
-      if (y + m.noteSize * 1.7 > bottomLimit) {
+      const rowH = lineHeightOf(config, m, sp, lyrics.length)
+      // adj73：分页判定改为「放置前」且用完整行高——行不越界；
+      // 首页/换页后首行 y 必小于 limit 不会误换；放不下时换页到新页放置（不再产生空页）
+      if (y + rowH > bottomLimit) {
         pageIndex = pages.length
         startPage()
-        y = m.titleAreaH
+        y = m.bodyTopH // 后续页不占描述头区域
       }
+      placeMusicRow(segs, row, groupIndex, voice, y, lyricMaps, geciSize, sp, rowSlots[ri])
+      y += rowH
     })
   }
 
@@ -810,8 +973,21 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       barBeats.push(m)
       blockBeats += m
     }
-    const perBeatMin = Math.max(0, ...parts.flatMap((p) => p.segs.map((s) => segPerBeatMin(s))))
-    const pads = BAR_PAD * 2 + barlineSpace(config.bar_gap) * Math.max(0, numBars - 1)
+    const perBeatMin = Math.max(0, ...parts.flatMap((p) => p.segs.map((s) => segPerBeatMin(s, m.noteSize))))
+    // 块级每小节间隔空间：统一所有声部（取该小节线上类型；|/ 不占位），保证纵向对齐
+    const gapSpaces: number[] = []
+    for (let b = 0; b < numBars - 1; b++) {
+      let bt: Extract<MusicToken, { kind: 'barline' }> | null = null
+      for (const p of parts) {
+        const s = p.segs[b]
+        if (s?.bar) {
+          bt = s.bar
+          break
+        }
+      }
+      gapSpaces.push(barlineSpace(config.bar_gap, bt?.type))
+    }
+    const pads = BAR_PAD * 2 + gapSpaces.reduce((a, s) => a + s, 0)
     const p0 = Math.max(2, (availW - pads - noteGapOf(blockBeats)) / Math.max(1, blockBeats), perBeatMin)
     // 行宽兜底（adj24/adj38）：保证声部块在页面区域内
     const perBeat =
@@ -820,12 +996,13 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         : p0
 
     const voiceHeights = parts.map((p) => lineHeightOf(config, m, sp, p.lyricRows))
-    const blockH = voiceHeights.reduce((a, b) => a + b, 0)
+    // adj72：多声部块内声部行之间额外间距 height_shengbu（独立于行距 ciqu，可单独调整）
+    const blockH = voiceHeights.reduce((a, b) => a + b, 0) + Math.max(0, parts.length - 1) * sp.shengbu
 
     if (y + blockH > bottomLimit) {
       pageIndex = pages.length
       startPage()
-      y = m.titleAreaH
+      y = m.bodyTopH // 后续页不占描述头区域
     }
 
     const blockY = y
@@ -843,15 +1020,31 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         for (const t of seg.notes) {
           if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
             const dur = tokenDuration(t)
-            // 多声部块统一每拍宽：单段；拍与拍 8px（adj38）
-            const dur2 = placeNoteAt(t, [{ x: x + BAR_PAD + beatAcc * perBeat + Math.floor(beatAcc) * NOTE_GAP, perBeat, beats: dur }], voiceY, pageIndex, vi, p.voice, slotIndex, p.lyricMaps, geciSize, sp, beatAcc, b)
+            // adj75：多声部块音符按拍拆段（跨拍音符内部也有拍间距 NOTE_GAP，
+            // 增时线逐拍定位、数字锚定第 1 拍段，与单声部 bars 行一致）
+            const segments: { x: number; perBeat: number; beats: number }[] = []
+            {
+              let pos = beatAcc
+              let rem = dur
+              while (rem > 1e-9) {
+                const piece = Math.min(rem, Math.floor(pos) + 1 - pos)
+                segments.push({
+                  x: x + BAR_PAD + pos * perBeat + Math.floor(pos) * NOTE_GAP,
+                  perBeat,
+                  beats: piece,
+                })
+                pos += piece
+                rem -= piece
+              }
+            }
+            const dur2 = placeNoteAt(t, segments, voiceY, pageIndex, vi, p.voice, slotIndex, p.lyricMaps, geciSize, sp, beatAcc, b)
             beatAcc += dur2
             slotIndex++
           }
         }
-        x += barBeats[b] * perBeat + (b < numBars - 1 ? barlineSpace(config.bar_gap) : 0)
+        x += barBeats[b] * perBeat + (b < numBars - 1 ? gapSpaces[b] : 0)
       }
-      voiceY += voiceHeights[vi]
+      voiceY += voiceHeights[vi] + (vi < parts.length - 1 ? sp.shengbu : 0)
     }
 
     // 块级小节线（跨声部；行首空小节普通 | 省略）
@@ -870,6 +1063,11 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       }
       if (bar && !(b === 0 && srcEmpty && bar.type === '|')) {
         const bid: LayoutId = { page: pageIndex, voice: 0, group: 0, index: barCounter }
+        // 小节线在小节内容右端（+BAR_PAD 不重叠音符，adj36）+ 拍间距（adj38），并居中；
+        // 整体不超出页面内容区（右/左边距内）
+        const lineX0 =
+          xBar + BAR_PAD + barBeats[b] * perBeat + barlineSpace(config.bar_gap, bar.type) / 2 + (barEndBeat + barBeats[b]) * NOTE_GAP
+        const halfW = barlineTotalW(bar.type) / 2
         pages[pageIndex].barlines.push({
           id: bid,
           type: bar.type,
@@ -878,15 +1076,19 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           voltaEndSlash: bar.voltaEndSlash,
           voltaOnly: bar.voltaOnly,
           comment: bar.comment,
-          // 小节线在小节内容右端（+BAR_PAD 不重叠音符，adj36）+ 拍间距（adj38），并居中
-          x: r1(xBar + BAR_PAD + barBeats[b] * perBeat + barlineSpace(config.bar_gap) / 2 + (barEndBeat + barBeats[b]) * NOTE_GAP),
+          x: r1(
+            Math.min(
+              Math.max(lineX0, config.margin_left + halfW),
+              pages[pageIndex].width - config.margin_right - halfW,
+            ),
+          ),
           yTop: blockY,
           yBottom: blockY + blockH,
           width: m.barlineWidth,
         })
         barCounter++
       }
-      xBar += barBeats[b] * perBeat + (b < numBars - 1 ? barlineSpace(config.bar_gap) : 0)
+      xBar += barBeats[b] * perBeat + (b < numBars - 1 ? (b < gapSpaces.length ? gapSpaces[b] : 0) : 0)
       barEndBeat += barBeats[b]
     }
 
@@ -933,7 +1135,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     if (ev.kind === 'pagebreak') {
       pageIndex = pages.length
       startPage()
-      y = m.titleAreaH
+      y = m.bodyTopH // 后续页不占描述头区域
       continue
     }
     const { unit } = ev
@@ -950,55 +1152,208 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   const notesByIndex = new Map<number, PlacedToken>()
   for (const p of pages) for (const n of p.notes) notesByIndex.set(n.id.index, n)
 
-  const slurPairs: { start: number; end: number; depth: number }[] = []
-  const sStack: { start: number; depth: number }[] = []
+  const slurPairs: { start: number; end: number; depth: number; tuplet: boolean }[] = []
+  // 配对规则：先进后出（LIFO 栈式，adj55）—— 最近打开的先闭合，标准括号嵌套；
+  // 栈跨行保留：上一行未闭合的括号延续到下一行配对（跨行两半）
+  const sQueue: { start: number; depth: number; tuplet: boolean }[] = []
   let gNote = 0
   let lastNote = -1
+  // adj54：每个音符索引对应的「音符单位数」——基础 1，增时线每根折算 +1、
+  // 附点按 (1+0.5×附点数) 乘算（如 1- =2、1. =1.5、1-. =3），供自动样式判断连音线长度
+  const noteUnits: number[] = []
   for (const line of result.lines) {
     if (line.kind !== 'music') continue
     const group = result.groups.find((g) => g.music === line)
     if (!group) continue
     for (const t of group.music.tokens) {
       if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
-        if (sStack.length > 0 && sStack[sStack.length - 1].start === -1) {
-          sStack[sStack.length - 1].start = gNote
+        // 音符锚定栈中所有尚未设置起点的开括号（adj56：同起点嵌套 ——
+        // 如 ((3 2/) 4)：内层与外层连音线都从 3 开始，不能只锚定队尾，
+        // 否则外层括号 start 保持 -1 被丢弃）
+        for (const s of sQueue) {
+          if (s.start === -1) s.start = gNote
         }
         lastNote = gNote
+        // adj54：记录单位数（休止符/节奏符同样按增时线/附点折算）
+        noteUnits.push((1 + t.augmentCount) * (1 + 0.5 * t.dots))
         gNote++
       } else if (t.kind === 'slur') {
         if (t.dir === 'open') {
-          sStack.push({ start: -1, depth: sStack.length })
+          sQueue.push({ start: -1, depth: sQueue.length, tuplet: t.tuplet === true })
         } else {
-          const s = sStack.pop()
-          if (s && s.start !== -1 && lastNote >= s.start) {
-            slurPairs.push({ start: s.start, end: lastNote, depth: s.depth })
+          // adj55：先进后出 —— pop 最近打开的开括号；栈跨行保留（未闭合延续到后续行）
+          const s = sQueue.pop()
+          // 退化对（起点=终点，如 "(4)" 只修饰单音符）不渲染
+          if (s && s.start !== -1 && lastNote > s.start) {
+            slurPairs.push({ start: s.start, end: lastNote, depth: s.depth, tuplet: s.tuplet })
           }
         }
       }
     }
   }
 
-  const slurStyle = config.lianyinxian_type === 2 ? ('flat' as const) : ('arc' as const)
+  /** 连音线样式：0 自动（2-4 音符单位弧线、>4 平顶，adj54 增时线/附点折算）| 1 圆弧 | 2 平顶 */
+  const slurStyleOf = (unitCount: number): 'arc' | 'flat' => {
+    if (config.lianyinxian_type === 1) return 'arc'
+    if (config.lianyinxian_type === 2) return 'flat'
+    return unitCount <= 4 ? 'arc' : 'flat'
+  }
+
+  // 可视行分组（页内 y 相同 → 同一行；跨页按放置顺序编号），供跨行连音符判定
+  const rows: { page: number; y: number; notes: PlacedToken[] }[] = []
+  const rowOfNote = new Map<number, number>()
+  for (const p of pages) {
+    const byY = new Map<number, PlacedToken[]>()
+    for (const n of p.notes) {
+      const arr = byY.get(n.y)
+      if (arr) arr.push(n)
+      else byY.set(n.y, [n])
+    }
+    const ys = [...byY.keys()].sort((p1, p2) => p1 - p2)
+    for (const y of ys) {
+      const notes = byY.get(y)!.slice().sort((m, n) => m.x - n.x)
+      const rowIdx = rows.length
+      rows.push({ page: p.index, y, notes })
+      for (const n of notes) rowOfNote.set(n.id.index, rowIdx)
+    }
+  }
+
+  // 有效对（含跨行对）；同时统计每行最大嵌套深度 → 外层在上、内层向下错开
+  interface SlurInfo {
+    sp: (typeof slurPairs)[number]
+    a: PlacedToken
+    b: PlacedToken
+    rowA: number
+    rowB: number
+  }
+  const slurInfos: SlurInfo[] = []
   for (const sp of slurPairs) {
     const a = notesByIndex.get(sp.start)
     const b = notesByIndex.get(sp.end)
-    if (!a || !b) continue
-    if (a.id.page !== b.id.page || Math.abs(a.y - b.y) > 0.1) continue // 跨行/跨页连音线跳过（第一版）
-    // adj37：连音线下沿距音符上沿（基线-13）4px；开始/结束音符有高八度时，
-    // 距最高高音点顶（基线-22-(hi-1)×7）4px
-    const highOf = (n: PlacedToken) =>
-      n.token.kind === 'note' && n.token.octaveShift > 0 ? n.token.octaveShift : 0
-    const hi = Math.max(highOf(a), highOf(b))
-    const slurY = hi > 0 ? a.y - 26 - (hi - 1) * 7 : a.y - 17
-    pages[a.id.page].slurs.push({
-      // adj36：起点=开始音符正上方偏右1px（数字中心+1）、终点=结束音符正上方偏左1px
-      // adj37：无高八度 → 线（下沿）距音符上沿（基线-13）4px；有高八度 → 距最高高音点顶 4px
-      x1: r1(a.x + 6.58),
-      x2: r1(b.x + 4.58),
-      y: r1(slurY - sp.depth * 7),
-      depth: sp.depth,
-      style: slurStyle,
-    })
+    const rowA = a ? rowOfNote.get(sp.start) : undefined
+    const rowB = b ? rowOfNote.get(sp.end) : undefined
+    if (!a || !b || rowA === undefined || rowB === undefined) continue
+    slurInfos.push({ sp, a, b, rowA, rowB })
+  }
+  // adj44：每对连音符的嵌套抬升 = 与其音符范围重叠的所有连音符的最大深度差 ×7
+  // （多层嵌套每层抬 7px 避免重叠；独立连音符（无更深的连音符与之重叠）抬升 0，
+  //  避免同排其他嵌套把它抬高——间距保持 4px 不虚大）
+  const nestedRaise: number[] = slurInfos.map((info) => {
+    let maxOverlap = info.sp.depth
+    for (const other of slurInfos) {
+      if (other === info) continue
+      const o = other.sp
+      // 音符范围重叠（含跨行对）且深度更深 → 视为嵌套/包含关系
+      if (o.depth > info.sp.depth && o.start <= info.sp.end && info.sp.start <= o.end) {
+        maxOverlap = Math.max(maxOverlap, o.depth)
+      }
+    }
+    return (maxOverlap - info.sp.depth) * 7
+  })
+
+  const highOf = (n: PlacedToken) =>
+    n.token.kind === 'note' && n.token.octaveShift > 0 ? n.token.octaveShift : 0
+  /**
+   * 连音符覆盖范围内所有音符的最大高音点数（adj44：线需避开其下全部音符的
+   * 高八度点，而不只端点；否则中间音符的高音点会与线交叉）。
+   */
+  const maxHiInRange = (fromIdx: number, toIdx: number): number => {
+    let m = 0
+    for (let i = fromIdx; i <= toIdx; i++) {
+      const n = notesByIndex.get(i)
+      if (n) m = Math.max(m, highOf(n))
+    }
+    return m
+  }
+  /**
+   * 该行连音线基准 y（adj60 层级化）：线底距「数字顶（无高八度）或最高高八度点顶（有）」LAYER_GAP=2；
+   * 线为 stroke（中心 y，宽 SLUR_W）→ 中心 = 元素顶 - LAYER_GAP - SLUR_W/2。
+   * 高八度点层顶 = 基线 - 0.8×noteSize - LAYER_GAP - 2r - (hi-1)×INNER_GAP（octaveTopY）。
+   * 嵌套错开：外层线上移 raise（仅当确实包含内层线时，adj44）。
+   */
+  const slurYFor = (note: PlacedToken, hi: number, raise: number) => {
+    const s = noteScaleOf(m.noteSize)
+    const topY = hi > 0 ? octaveTopY(note.y, hi, m.noteSize) : note.y - m.noteSize * DIGIT_HEIGHT_RATIO
+    const base = topY - LAYER_GAP * s - (SLUR_W * s) / 2
+    return base - raise
+  }
+
+  /** 行末小节线中心 x（跨行连音符左半部延伸到小节线处）；无小节线时返回 null */
+  const rowEndBarX = (rowIdx: number): number | null => {
+    const r = rows[rowIdx]
+    const barY = r.y - 18.4 // 小节线上端 = 音符基线 - 18.4（adj50）
+    let maxX: number | null = null
+    for (const b of pages[r.page].barlines) {
+      if (Math.abs(b.yTop - barY) < 1 && (maxX === null || b.x > maxX)) maxX = b.x
+    }
+    return maxX
+  }
+
+  for (let si = 0; si < slurInfos.length; si++) {
+    const { sp, a, b, rowA, rowB } = slurInfos[si]
+    const raise = nestedRaise[si]
+    const noteCount = sp.end - sp.start + 1 // 覆盖的 token 数（tupletCount 标签用，adj43）
+    // adj54：自动样式按「音符单位数」判断（增时线/附点折算进长度），>4 单位用平顶
+    let unitCount = 0
+    for (let i = sp.start; i <= sp.end; i++) unitCount += noteUnits[i] ?? 1
+    const style = slurStyleOf(unitCount)
+    if (rowA === rowB) {
+      // 同行：整条连音符
+      pages[a.id.page].slurs.push({
+        // adj36：起点=开始音符正上方偏右1px（数字中心+1）、终点=结束音符正上方偏左1px
+        x1: r1(a.x + 6.58),
+        x2: r1(b.x + 4.58),
+        y: r1(slurYFor(a, maxHiInRange(sp.start, sp.end), raise)),
+        depth: sp.depth,
+        style,
+        // 仅平均连音组 (y...) 标数字（普通连音线 (…) 不加，adj43）
+        tupletCount: sp.tuplet ? noteCount : undefined,
+      })
+    } else if (rowB === rowA + 1) {
+      // 相邻行：上一行左半部（开始 → 行末小节线）、下一行右半部（边距 → 结束）；
+      // 行首/行末均为连音符最高点；相隔多行视为误输入，不渲染
+      const rA = rows[rowA]
+      const lastA = rA.notes[rA.notes.length - 1]
+      const xEndA = Math.max(a.x + 6.58 + 2, rowEndBarX(rowA) ?? lastA.x + lastA.width - 2)
+      const xStartB = config.margin_left // 行首从边距处开始
+      pages[rA.page].slurs.push({
+        x1: r1(a.x + 6.58),
+        x2: r1(xEndA),
+        y: r1(slurYFor(a, maxHiInRange(sp.start, lastA.id.index), raise)),
+        depth: sp.depth,
+        style,
+        tupletCount: sp.tuplet ? noteCount : undefined,
+        half: 'l', // 左半部：从最低处到行末最高点，右侧开口
+      })
+      const firstB = rows[rowB].notes[0]
+      pages[rows[rowB].page].slurs.push({
+        x1: r1(xStartB),
+        x2: r1(b.x + 4.58),
+        y: r1(slurYFor(b, maxHiInRange(firstB.id.index, sp.end), raise)),
+        depth: sp.depth,
+        style,
+        tupletCount: sp.tuplet ? noteCount : undefined,
+        half: 'r', // 右半部：从行首最高点到最低处，左侧开口
+      })
+    }
+  }
+
+  // adj71：每行歌词按 x 排序后计算相邻最小间距（gapL），供渲染判断两侧是否密集会重叠
+  for (const p of pages) {
+    const byY = new Map<number, PlacedLyric[]>()
+    for (const l of p.lyrics) {
+      const arr = byY.get(l.y) ?? []
+      arr.push(l)
+      byY.set(l.y, arr)
+    }
+    for (const list of byY.values()) {
+      list.sort((a, b) => a.x - b.x)
+      list.forEach((l, i) => {
+        const dPrev = i > 0 ? l.x - list[i - 1].x : Infinity
+        const dNext = i < list.length - 1 ? list[i + 1].x - l.x : Infinity
+        l.gapL = Math.min(dPrev, dNext)
+      })
+    }
   }
 
   const configKey = JSON.stringify(config)

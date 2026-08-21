@@ -25,6 +25,8 @@
   --jp-danger: #ff5d6c;
   --jp-success: #3ddc97;
   --jp-warning: #ffc857;
+  /* 滚动条滑块（adj48：随浅深色） */
+  --jp-scrollbar: #2a3764;
 
   /* 编辑器高亮 */
   --jp-hl-line-header: #00f0ff;
@@ -53,6 +55,124 @@
 
 /* ============ 中国色主题（adj14） ============ */
 /* 黛蓝 = 品牌默认（:root 已定义） */
+
+/* 浅色模式（adj48：auto 跟随系统 prefers-color-scheme） */
+/* 黛蓝浅色 = 品牌默认浅色 */
+[data-mode='light'] {
+  --jp-bg-app: #f2f5fb;
+  --jp-bg-panel: #ffffff;
+  --jp-bg-panel-hover: #e9eef8;
+  --jp-bg-panel-active: #dfe7f5;
+  --jp-border: #d5dcee;
+  --jp-text-primary: #1c2540;
+  --jp-text-secondary: #46537a;
+  --jp-text-muted: #7a86a8;
+  --jp-accent: #0891a6;
+  --jp-danger: #d64550;
+  --jp-success: #1f9d6a;
+  --jp-warning: #c98a00;
+  /* 滚动条滑块（浅色） */
+  --jp-scrollbar: #c2cbdf;
+
+  /* 编辑器高亮（浅色） */
+  --jp-hl-line-header: #0891a6;
+  --jp-hl-note: #b35900;
+  --jp-hl-barline: #5a6a9e;
+  --jp-hl-lyric: #2f8f5f;
+  --jp-hl-comment: #6a7bb8;
+  --jp-hl-pagebreak: #c73d8f;
+  --jp-hl-plain: #1c2540;
+  --jp-editor-bg: #fbfcff;
+  --jp-editor-caret: #0891a6;
+
+  /* 乐谱纸张保持白纸黑字 */
+  --jp-paper-bg: #ffffff;
+  --jp-paper-ink: #1b1b1b;
+}
+
+/* 竹青浅色 */
+[data-theme='zhuqing'][data-mode='light'] {
+  --jp-bg-app: #eef4ec;
+  --jp-bg-panel: #ffffff;
+  --jp-bg-panel-hover: #e2ece0;
+  --jp-bg-panel-active: #d6e5d3;
+  --jp-border: #cfe0c9;
+  --jp-text-primary: #1d2b1c;
+  --jp-text-secondary: #4a6547;
+  --jp-text-muted: #7c9179;
+  --jp-accent: #3f7a2e;
+  --jp-editor-bg: #f7faf6;
+}
+
+/* 朱砂浅色 */
+[data-theme='zhusha'][data-mode='light'] {
+  --jp-bg-app: #fbf0ee;
+  --jp-bg-panel: #ffffff;
+  --jp-bg-panel-hover: #f7e2de;
+  --jp-bg-panel-active: #f2d5d0;
+  --jp-border: #ecc8c2;
+  --jp-text-primary: #2c1d1a;
+  --jp-text-secondary: #7a4f49;
+  --jp-text-muted: #a8807a;
+  --jp-accent: #c23b28;
+  --jp-editor-bg: #fdf8f7;
+}
+
+/* 秋香浅色 */
+[data-theme='qiuxiang'][data-mode='light'] {
+  --jp-bg-app: #faf6e9;
+  --jp-bg-panel: #fffdf4;
+  --jp-bg-panel-hover: #f3ecd6;
+  --jp-bg-panel-active: #ece2c4;
+  --jp-border: #e0d5b4;
+  --jp-text-primary: #2c2616;
+  --jp-text-secondary: #76693d;
+  --jp-text-muted: #a2956c;
+  --jp-accent: #9c7a16;
+  --jp-editor-bg: #fefcf4;
+}
+
+/* 藕荷浅色 */
+[data-theme='ouhe'][data-mode='light'] {
+  --jp-bg-app: #f7f2fb;
+  --jp-bg-panel: #ffffff;
+  --jp-bg-panel-hover: #efe6f7;
+  --jp-bg-panel-active: #e7daf2;
+  --jp-border: #ddcdec;
+  --jp-text-primary: #281f35;
+  --jp-text-secondary: #6d5687;
+  --jp-text-muted: #9a87b2;
+  --jp-accent: #8a5fb8;
+  --jp-editor-bg: #fbf8fe;
+}
+
+/* 缃色浅色 */
+[data-theme='xiangse'][data-mode='light'] {
+  --jp-bg-app: #faf7e8;
+  --jp-bg-panel: #fffef6;
+  --jp-bg-panel-hover: #f4efd4;
+  --jp-bg-panel-active: #ece6c2;
+  --jp-border: #e2dbb2;
+  --jp-text-primary: #2d2814;
+  --jp-text-secondary: #7d7138;
+  --jp-text-muted: #a89c68;
+  --jp-accent: #a8871e;
+  --jp-editor-bg: #fefdf6;
+}
+
+/* 玄墨浅色 */
+[data-theme='xuanmo'][data-mode='light'] {
+  --jp-bg-app: #f2f2f2;
+  --jp-bg-panel: #ffffff;
+  --jp-bg-panel-hover: #e8e8e8;
+  --jp-bg-panel-active: #dddddd;
+  --jp-border: #cccccc;
+  --jp-text-primary: #222222;
+  --jp-text-secondary: #555555;
+  --jp-text-muted: #888888;
+  --jp-accent: #666666;
+  --jp-editor-bg: #fafafa;
+}
 
 /* 竹青 */
 [data-theme='zhuqing'] {

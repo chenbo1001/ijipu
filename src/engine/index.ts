@@ -15,6 +15,7 @@ export { buildPlaySequence, inferBpm, createBackend, schedulePlay, SynthBackend,
 export { codePosToNoteId, noteIdToCodePos, parseNoteId } from './cursorMap'
 export { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_ITEMS, GUIDE_LIMITS, GUIDE_LIMITS_EX } from './layout/guides'
 export { metaAnchorOf, metaAnchorPt, clampMetaPos } from './layout/metaAnchors'
+export { extractJpsConfig, mergeJpsConfig, writeJpsConfig, JPS_CONFIG_PREFIX } from './settings'
 export type { GuideDragSpec } from './layout/guides'
 export type { NoteIdParts } from './cursorMap'
 export type { AudioBackend, BackendKind, PlayEvent, PlaySequence } from './playback'

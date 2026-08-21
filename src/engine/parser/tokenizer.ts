@@ -26,21 +26,16 @@ export function tokenizeMusicLine(
   let i = 0
   const n = content.length
   const rawAt = (start: number, end: number) => content.slice(start, end)
+  // adj80：独立 "&zkh"（音符前）暂存，遇到下个音符时挂上
+  let pendingZkh = false
 
-  // ---- 块间空格校验（adj23）：音符块与音符块、音符块与小节线块之间恰好一个空格 ----
+  // ---- 块间空格提示（adj23）：空格仅用于格式化，缺空格合法；多空格提示规范为单空格 ----
   let lastBlockEnd = -1 // 上一个音符块/小节线块的结束字符偏移
   let lastBlockCounts = false // 上一个块是否参与校验
   const checkBlockGap = (blockStart: number) => {
     if (!lastBlockCounts) return
     const between = content.slice(lastBlockEnd, blockStart)
-    if (between === '') {
-      errors.push(
-        err('音符块与小节线块之间缺少空格（应恰好一个空格）', {
-          line: pos.line,
-          col: pos.col + blockStart,
-        }, 'warning'),
-      )
-    } else if (/^ +$/.test(between) && between.length > 1) {
+    if (/^ +$/.test(between) && between.length > 1) {
       errors.push(
         err('音符块与小节线块之间应只有一个空格', {
           line: pos.line,
@@ -121,14 +116,14 @@ export function tokenizeMusicLine(
           break // 孤立 &，停止收集
         }
       } else if (c === '"') {
-        // 注释：直到下一个引号
+        // 注释：直到下一个引号；_ 代替空格（adj59：曲部空格仅为分隔，注释内空格用 _ 表示）
         const close = content.indexOf('"', j + 1)
         if (close === -1) {
-          base.comment = content.slice(j + 1)
+          base.comment = content.slice(j + 1).replace(/_/g, ' ')
           errors.push(err('引号注释未闭合', { line: pos.line, col: pos.col + j }))
           j = n
         } else {
-          base.comment = content.slice(j + 1, close)
+          base.comment = content.slice(j + 1, close).replace(/_/g, ' ')
           j = close + 1
         }
         break // 注释后不再收集
@@ -142,47 +137,19 @@ export function tokenizeMusicLine(
   while (i < n) {
     const c = content[i]
 
-    // 空白跳过
+    // 空白跳过（空格仅用于格式化美观，不影响解析——`(` 修饰其后音符，可紧贴）
     if (c === ' ' || c === '\t') {
       i++
       continue
     }
 
-    // 虚音符 (1)：括号紧贴单个音符（块内无空格），是音符块的一部分（adj23）；
-    // 若括号与音符不紧贴（如 ( 1 2 3 )）则回退为连音线
-    if (c === '(' && content[i + 1] >= '1' && content[i + 1] <= '7') {
-      const gStart = i
-      const base = {
-        accidental: null as '#' | '$' | '=' | null,
-        augmentCount: 0,
-        diminishCount: 0,
-        dots: 0,
-        octaveShift: 0,
-        symbols: [] as string[],
-        comment: undefined as string | undefined,
-      }
-      const j = collectSuffix(i + 2, base)
-      if (j < n && content[j] === ')') {
-        const token: NoteToken_ = {
-          kind: 'note',
-          pitch: content[i + 1].charCodeAt(0) - 48 as 1 | 2 | 3 | 4 | 5 | 6 | 7,
-          ...base,
-          ghost: true,
-          pos: i,
-          raw: rawAt(gStart, j + 1),
-        }
-        tokens.push(token)
-        registerBlock(gStart, j + 1)
-        i = j + 1
-        continue
-      }
-      // 不匹配：回退连音线
-    }
-
-    // 连音线
+    // 连音线/连音组：`(` 修饰其后音符（起点），`)` 结束；"(y" 前缀 = 平均连音组（均分时值）
     if (c === '(') {
-      tokens.push({ kind: 'slur', dir: 'open', pos: i, raw: '(' })
-      i++
+      let j = i + 1
+      const tuplet = content[j] === 'y'
+      if (tuplet) j++
+      tokens.push({ kind: 'slur', dir: 'open', pos: i, raw: content.slice(i, j), tuplet })
+      i = j
       continue
     }
     if (c === ')') {
@@ -222,8 +189,30 @@ export function tokenizeMusicLine(
       while (k < n && /[a-zA-Z0-9]/.test(content[k])) k++
       if (k > i + 1) {
         const code = content.slice(i + 1, k)
-        tokens.push({ kind: 'decoration', code, pos: i, raw: content.slice(i, k) })
-        i = k
+        // adj80：独立 zkh/ykh（如 "&zkh 6"、"6 - - -&ykh"）归入相邻音符，
+        // 否则会落成不渲染的 decoration（用户书写习惯允许括号前后带空格）
+        if (code === 'zkh' || code === 'ykh') {
+          // ykh 归入前面最近音符（可跳过连音线括号，不跨小节线）
+          if (code === 'ykh') {
+            for (let kk = tokens.length - 1; kk >= 0; kk--) {
+              const last = tokens[kk]
+              if (last.kind === 'note') {
+                last.symbols.push('ykh')
+                last.raw += '&ykh'
+                break
+              }
+              if (last.kind === 'barline') break
+            }
+          }
+          // zkh 前置归入后续音符（"&zkh 6"）：把标记暂存，遇到下个音符时挂上
+          else {
+            pendingZkh = true
+          }
+          i = k
+        } else {
+          tokens.push({ kind: 'decoration', code, pos: i, raw: content.slice(i, k) })
+          i = k
+        }
       } else {
         errors.push(err(`孤立的 "&" 符号`, { line: pos.line, col: pos.col + i }))
         i++
@@ -454,6 +443,11 @@ export function tokenizeMusicLine(
         symbols: [] as string[],
       }
       const end = collectSuffix(i + 1, base)
+      // adj80：前置 "&zkh"（如 "&zkh 6"）挂到本音符
+      if (pendingZkh) {
+        base.symbols.unshift('zkh')
+        pendingZkh = false
+      }
       const token: NoteToken_ = {
         kind: 'note',
         pitch: c.charCodeAt(0) - 48 as 1 | 2 | 3 | 4 | 5 | 6 | 7,
@@ -470,12 +464,18 @@ export function tokenizeMusicLine(
       const start = i
       const base = { accidental: null, augmentCount: 0, diminishCount: 0, dots: 0, octaveShift: 0, symbols: [] as string[] }
       const end = collectSuffix(i + 1, base)
+      // adj84：前置 "&zkh"（如 "&zkh 0"）挂到休止符
+      if (pendingZkh) {
+        base.symbols.unshift('zkh')
+        pendingZkh = false
+      }
       tokens.push({
         kind: 'rest',
         hidden: c === '8',
         augmentCount: base.augmentCount,
         diminishCount: base.diminishCount,
         dots: base.dots,
+        symbols: base.symbols,
         pos: i,
         raw: rawAt(start, end),
       })
@@ -487,11 +487,17 @@ export function tokenizeMusicLine(
       const start = i
       const base = { accidental: null, augmentCount: 0, diminishCount: 0, dots: 0, octaveShift: 0, symbols: [] as string[] }
       const end = collectSuffix(i + 1, base)
+      // adj84：前置 "&zkh" 挂到节奏符
+      if (pendingZkh) {
+        base.symbols.unshift('zkh')
+        pendingZkh = false
+      }
       tokens.push({
         kind: 'rhythm',
         augmentCount: base.augmentCount,
         diminishCount: base.diminishCount,
         dots: base.dots,
+        symbols: base.symbols,
         pos: i,
         raw: rawAt(start, end),
       })
@@ -510,6 +516,17 @@ export function tokenizeMusicLine(
         if (last.kind === 'note' || last.kind === 'rest' || last.kind === 'rhythm') {
           last.augmentCount++
           last.raw += '-'
+          // adj80：独立 "-" 后紧跟 "&编码"（如 "-&ykh"）应随音符收集，
+          // 否则 "&ykh" 会落成独立 decoration（原 "6 - - -&ykh" 右括号丢失）
+          if (content[i + 1] === '&') {
+            let j = i + 2
+            while (j < n && /[a-zA-Z0-9]/.test(content[j])) j++
+            if (j > i + 2) {
+              if (last.kind === 'note') last.symbols.push(content.slice(i + 2, j))
+              last.raw += content.slice(i + 1, j)
+              i = j - 1 // 循环尾部 i++ 落到编码末
+            }
+          }
           lastBlockEnd = i + 1 // 音符块结束延展
           found = true
           break

@@ -1,5 +1,9 @@
 /**
- * dialogs/PageConfigDialog.tsx — 页面设置（纸张/边距/字体/行距/连音线样式）
+ * dialogs/PageConfigDialog.tsx — 页面设置（纸张/边距/间距/字体/连音线样式）
+ *
+ * 分组顺序（adj45）：页面大小、边距 → 间距 → 字体设置 → 连音线样式。
+ * 字体设置：描述头/标题/副标题/音符/歌词 各一行（先字体下拉框，再字号框）。
+ * 排版辅助开关已移至预览上方工具栏图标按钮，不在此对话框内。
  */
 import { useState } from 'react'
 import { Modal } from '../ui/Modal'
@@ -11,9 +15,7 @@ import type { PageConfig } from '../engine'
 export function PageConfigDialog() {
   const pageConfig = useDocStore((s) => s.pageConfig)
   const setPageConfig = useDocStore((s) => s.setPageConfig)
-  const showGuides = useUiStore((s) => s.showGuides)
-  const setShowGuides = useUiStore((s) => s.setShowGuides)
-  const closeModal = useUiStoreClose()
+  const closeModal = useUiStore((s) => s.closeModal)
 
   const [draft, setDraft] = useState<PageConfig>({ ...pageConfig })
 
@@ -42,46 +44,52 @@ export function PageConfigDialog() {
         </fieldset>
 
         <fieldset style={{ border: '1px solid var(--jp-border)', borderRadius: 8, padding: 10 }}>
-          <legend style={{ padding: '0 6px', color: 'var(--jp-text-secondary)' }}>字体设置</legend>
-          <Row label="标题字号">
-            <NumInput label="主" value={draft.biaoti_size} onChange={(v) => setDraft({ ...draft, biaoti_size: v })} />
-            <NumInput label="副" value={draft.fubiaoti_size} onChange={(v) => setDraft({ ...draft, fubiaoti_size: v })} />
+          <legend style={{ padding: '0 6px', color: 'var(--jp-text-secondary)' }}>间距</legend>
+          <Row label="描述头高">
+            <NumInput label="" value={draft.descAreaH} onChange={(v) => setDraft({ ...draft, descAreaH: v })} />
           </Row>
-          <Row label="歌词字号">
-            <NumInput label="" value={draft.geci_size} onChange={(v) => setDraft({ ...draft, geci_size: v })} />
+          <Row label="首行至描述头间距">
+            <NumInput label="" value={draft.body_margin_top} onChange={(v) => setDraft({ ...draft, body_margin_top: v })} />
           </Row>
-          <Row label="音符字形">
-            <select value={draft.shuzi_font} onChange={(e) => setDraft({ ...draft, shuzi_font: e.target.value as PageConfig['shuzi_font'] })}>
-              <option value="a">样式 1</option>
-              <option value="b">样式 2</option>
-              <option value="c">样式 3</option>
-            </select>
-          </Row>
-        </fieldset>
-
-        <fieldset style={{ border: '1px solid var(--jp-border)', borderRadius: 8, padding: 10 }}>
-          <legend style={{ padding: '0 6px', color: 'var(--jp-text-secondary)' }}>行间距</legend>
-          <Row label="曲下间距">
-            <NumInput label="" value={draft.height_quci} onChange={(v) => setDraft({ ...draft, height_quci: v })} />
-          </Row>
-          <Row label="词下间距">
-            <NumInput label="" value={draft.height_cici} onChange={(v) => setDraft({ ...draft, height_cici: v })} />
-          </Row>
-          <Row label="行间距">
-            <NumInput label="小节间距" value={draft.bar_gap} onChange={(v) => setDraft({ ...draft, bar_gap: v })} />
-          </Row>
-          <Row label="曲上间距">
+          <Row label="曲部与曲部间距">
             <NumInput label="" value={draft.height_ciqu} onChange={(v) => setDraft({ ...draft, height_ciqu: v })} />
           </Row>
+          <Row label="曲部与词部间距">
+            <NumInput label="" value={draft.height_quci} onChange={(v) => setDraft({ ...draft, height_quci: v })} />
+          </Row>
+          <Row label="词与词部间距">
+            <NumInput label="" value={draft.height_cici} onChange={(v) => setDraft({ ...draft, height_cici: v })} />
+          </Row>
+          <Row label="曲部与上一行词部间距">
+            <NumInput label="" value={draft.height_ciqu_lyric} onChange={(v) => setDraft({ ...draft, height_ciqu_lyric: v })} />
+          </Row>
         </fieldset>
 
         <fieldset style={{ border: '1px solid var(--jp-border)', borderRadius: 8, padding: 10 }}>
-          <legend style={{ padding: '0 6px', color: 'var(--jp-text-secondary)' }}>显示</legend>
-          <Row label="排版辅助">
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <input type="checkbox" checked={showGuides} onChange={(e) => setShowGuides(e.target.checked)} />
-              <span>预览页显示间距调整虚线（可拖拽边距/行距）</span>
-            </label>
+          <legend style={{ padding: '0 6px', color: 'var(--jp-text-secondary)' }}>字体设置</legend>
+          <Row label="描述头">
+            <FontSelect value={draft.miaoshu_font} onChange={(v) => setDraft({ ...draft, miaoshu_font: v })} />
+            <NumInput label="字号" value={draft.miaoshu_size} onChange={(v) => setDraft({ ...draft, miaoshu_size: v })} />
+          </Row>
+          <Row label="标题">
+            <FontSelect value={draft.biaoti_font} onChange={(v) => setDraft({ ...draft, biaoti_font: v })} />
+            <NumInput label="字号" value={draft.biaoti_size} onChange={(v) => setDraft({ ...draft, biaoti_size: v })} />
+          </Row>
+          <Row label="副标题">
+            <FontSelect value={draft.fubiaoti_font} onChange={(v) => setDraft({ ...draft, fubiaoti_font: v })} />
+            <NumInput label="字号" value={draft.fubiaoti_size} onChange={(v) => setDraft({ ...draft, fubiaoti_size: v })} />
+          </Row>
+          <Row label="音符">
+            <select value={draft.shuzi_font} onChange={(e) => setDraft({ ...draft, shuzi_font: e.target.value as PageConfig['shuzi_font'] })}>
+              <option value="a">字形 1（衬线）</option>
+              <option value="b">字形 2（黑体）</option>
+              <option value="c">字形 3（楷体）</option>
+            </select>
+            <NumInput label="字号" value={draft.note_size} onChange={(v) => setDraft({ ...draft, note_size: v })} />
+          </Row>
+          <Row label="歌词">
+            <FontSelect value={draft.geci_font} onChange={(v) => setDraft({ ...draft, geci_font: v })} />
+            <NumInput label="字号" value={draft.geci_size} onChange={(v) => setDraft({ ...draft, geci_size: v })} />
           </Row>
         </fieldset>
 
@@ -112,7 +120,8 @@ export function PageConfigDialog() {
         <button
           className="btn primary"
           onClick={() => {
-            setPageConfig(draft)
+            // adj83：保存设置时持久化到源码 # jps-config 注释（每首谱用自己的设置）
+            setPageConfig(draft, true)
             closeModal()
           }}
         >
@@ -123,8 +132,35 @@ export function PageConfigDialog() {
   )
 }
 
-function useUiStoreClose() {
-  return useUiStore((s) => s.closeModal)
+const FONT_OPTIONS = [
+  'Microsoft YaHei',
+  'SimHei',
+  'SimSun',
+  'KaiTi',
+  '楷体',
+  'STKaiti',
+  'Georgia',
+  'Times New Roman',
+  'Segoe UI',
+  'sans-serif',
+  'serif',
+]
+
+function FontSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const opts = value && !FONT_OPTIONS.includes(value) ? [value, ...FONT_OPTIONS] : FONT_OPTIONS
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      style={{ maxWidth: 160 }}
+    >
+      {opts.map((f) => (
+        <option key={f} value={f}>
+          {f}
+        </option>
+      ))}
+    </select>
+  )
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {

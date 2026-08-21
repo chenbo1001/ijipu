@@ -9,6 +9,7 @@
  */
 import { useEffect, useMemo, useRef } from 'react'
 import { useDocStore } from '../store/docStore'
+import { useUiStore } from '../store/uiStore'
 import { highlightCode } from './highlight'
 import { formatJps, codePosToNoteId } from '../engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
@@ -16,9 +17,15 @@ import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 export function EditorPane() {
   const code = useDocStore((s) => s.code)
   const setCode = useDocStore((s) => s.setCode)
+  const fileName = useDocStore((s) => s.fileName)
+  const dirty = useDocStore((s) => s.dirty)
   const setCursor = useDocStore((s) => s.setCursor)
+  const setSelection = useDocStore((s) => s.setSelection)
   const autoFormat = useDocStore((s) => s.autoFormat)
   const parseResult = useDocStore((s) => s.parseResult)
+  // 编辑器字号（adj46：状态栏 +/- 按钮调整）
+  const editorFontSize = useUiStore((s) => s.editorFontSize)
+  const setEditorFontSize = useUiStore((s) => s.setEditorFontSize)
 
   const taRef = useRef<HTMLTextAreaElement>(null)
   const hlRef = useRef<HTMLDivElement>(null)
@@ -30,19 +37,21 @@ export function EditorPane() {
   const cursorJump = useDocStore((s) => s.cursorJump)
   const onSelectRef = useRef<() => void>(() => {})
 
-  // 消费"点击谱面音符 → 跳转编辑器光标"请求
+  // 消费"点击谱面音符 / 撤销重做" → 跳转编辑器光标（含选区）请求
   useEffect(() => {
     if (!cursorJump) return
     const ta = taRef.current
     if (!ta) return
     ta.focus()
-    ta.selectionStart = ta.selectionEnd = cursorJump.pos
-    // 滚动到光标所在行（行高 23.8px = 14px × 1.7，与 CSS --jp-editor-lh 一致）
-    const { line } = lineColOf(ta.value, cursorJump.pos)
-    ta.scrollTop = Math.max(0, (line - 1) * 23.8 - 40)
+    ta.selectionStart = Math.min(cursorJump.start, ta.value.length)
+    ta.selectionEnd = Math.min(cursorJump.end, ta.value.length)
+    // 滚动到光标所在行（行高 = 字号 × 1.7，与 CSS --jp-editor-lh 一致）；adj63 wrap=off 需同步横向
+    const pos = lineColOf(ta.value, cursorJump.start)
+    ta.scrollTop = Math.max(0, (pos.line - 1) * (editorFontSize * 1.7) - 40)
+    ta.scrollLeft = Math.max(0, pos.col * editorFontSize * 0.6 - 40)
     onScroll()
     onSelectRef.current()
-  }, [cursorJump])
+  }, [cursorJump, editorFontSize])
 
   const errorCount = parseResult.errors.filter((e) => e.severity === 'error').length
 
@@ -74,6 +83,7 @@ export function EditorPane() {
     if (!ta) return
     const { line, col } = lineColOf(ta.value, ta.selectionStart)
     setCursor(line, col)
+    setSelection(ta.selectionStart, ta.selectionEnd)
     const id = codePosToNoteId(ta.value, ta.selectionStart)
     setActiveNoteId(id)
   }
@@ -145,16 +155,43 @@ export function EditorPane() {
   const html = highlightCode(code, new Set(errByLine.keys()))
   const gutterLines = Array.from({ length: lineCount }, (_, i) => i + 1)
 
+  // 编辑器字号 → CSS 变量（--jp-editor-fs / --jp-editor-lh），驱动 textarea/高亮层/行号栏
+  const editorStyle = {
+    '--jp-editor-fs': `${editorFontSize}px`,
+    '--jp-editor-lh': `${editorFontSize * 1.7}px`,
+  } as React.CSSProperties
+
   return (
     <div className="editor-pane">
       <div className="editor-head">
-        <span className="file-tag">.jps</span>
+        {/* adj63：文件名从菜单栏右侧移至此（.jps 标签处） */}
+        <span className="file-tag">
+          {(fileName || '未命名') + '.jps'}
+          {dirty && <span className="dirty-dot" title="有未保存的修改" />}
+        </span>
         <span>脚本编辑器</span>
         <span className={errorCount > 0 ? 'err-count has-error' : 'err-count'}>
           {errorCount > 0 ? `${errorCount} 个语法错误` : '语法正确'}
         </span>
+        <span className="editor-font-control">
+          <button
+            className="font-btn"
+            title="减小字号"
+            onClick={() => setEditorFontSize(editorFontSize - 1)}
+          >
+            A−
+          </button>
+          <span className="font-size-val">{editorFontSize}px</span>
+          <button
+            className="font-btn"
+            title="增大字号"
+            onClick={() => setEditorFontSize(editorFontSize + 1)}
+          >
+            A+
+          </button>
+        </span>
       </div>
-      <div className="editor-body">
+      <div className="editor-body" style={editorStyle}>
         <div className="editor-gutter" ref={gutterRef} aria-hidden="true">
           {gutterLines.map((n) => {
             const errs = errByLine.get(n)
@@ -174,6 +211,7 @@ export function EditorPane() {
             ref={taRef}
             value={code}
             spellCheck={false}
+            wrap="off"
             autoCapitalize="off"
             autoCorrect="off"
             onChange={onChange}

@@ -13,8 +13,9 @@ export interface DurationParts {
   dots: number
 }
 
-/** 计算拍数 */
-export function tokenDuration(t: DurationParts): number {
+/** 计算拍数（平均连音组 (y...) 用 tupletDur 覆盖） */
+export function tokenDuration(t: DurationParts & { tupletDur?: number }): number {
+  if (t.tupletDur !== undefined) return t.tupletDur
   let d = (1 + t.augmentCount) / Math.pow(2, t.diminishCount)
   let extra = d
   for (let i = 0; i < t.dots; i++) {

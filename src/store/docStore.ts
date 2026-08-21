@@ -3,9 +3,17 @@
  * 数据流：code → parse（同步）→ parseResult；layout/render 由渲染管线消费。
  */
 import { create } from 'zustand'
-import { parseJps, defaultPageConfig } from '../engine'
+import { parseJps, defaultPageConfig, mergeJpsConfig, writeJpsConfig } from '../engine'
 import type { PageConfig, ParseResult } from '../engine'
 import { SAMPLES, defaultSample } from '../samples'
+import {
+  recordEdit,
+  undoHistory,
+  redoHistory,
+  DEFAULT_HISTORY_LIMIT,
+  type HistoryEntry,
+  type HistoryState,
+} from '../editor/history'
 
 export type ViewType = 'code' | 'split' | 'preview'
 
@@ -16,6 +24,8 @@ const NEW_FILE_TEMPLATE = [
   'Z: 佚名 词曲',
   'D: C',
   'P: 4/4',
+  'Y: 笛子',
+  'S: 说明文字（渲染在谱尾，可拖拽调整位置）',
   '#============================以下开始简谱主体==========================',
   'Q: 1 2 3 4 |',
   'C: 这是歌词',
@@ -34,21 +44,46 @@ interface DocState {
   parseResult: ParseResult
   /** 编辑器光标（行/列，1-based 行，0-based 列） */
   cursor: { line: number; col: number }
+  /** 编辑器选区（0-based，历史记录与恢复用） */
+  sel: { start: number; end: number }
   /** 当前高亮音符 id（notepos 契约），编辑器↔谱面联动 */
   activeNoteId: string | null
-  /** 编辑器光标跳转请求（点击谱面音符时触发） */
-  cursorJump: { pos: number; nonce: number } | null
+  /** 编辑器光标跳转请求（点击谱面音符 / 撤销重做恢复选区时触发） */
+  cursorJump: { start: number; end: number; nonce: number } | null
+
+  /** 撤销历史（栈顶 = 最近一步） */
+  undoStack: HistoryEntry[]
+  /** 重做历史 */
+  redoStack: HistoryEntry[]
+  /** 历史合并时间戳（内部） */
+  lastEditAt: number
+  /** 历史步数上限（默认 50） */
+  historyLimit: number
 
   setCode: (code: string) => void
   setViewType: (v: ViewType) => void
   setAutoFormat: (b: boolean) => void
-  setPageConfig: (cfg: PageConfig) => void
+  /** 更新页面设置；persist=true 时同时写回源码 # jps-config（谱面级持久化，adj83） */
+  setPageConfig: (cfg: PageConfig, persist?: boolean) => void
   setCursor: (line: number, col: number) => void
+  setSelection: (start: number, end: number) => void
   setActiveNoteId: (id: string | null) => void
-  jumpCursor: (pos: number) => void
+  jumpCursor: (pos: number, end?: number) => void
+  undo: () => void
+  redo: () => void
   loadSample: (id: string) => void
   newDoc: () => void
   markSaved: () => void
+
+  // ---- 文件读写（adj70：Web File System Access API 打开/保存对话框） ----
+  /** 当前已打开文件的句柄（null = 未关联磁盘文件） */
+  fileHandle: FileSystemFileHandle | null
+  /** 打开文件对话框：读取 .jps 载入；用户取消返回 false */
+  openFile: () => Promise<boolean>
+  /** 保存：已有句柄直接写入；否则走另存为对话框 */
+  saveFile: () => Promise<boolean>
+  /** 另存为对话框：选择保存位置与文件名后写入 */
+  saveFileAs: () => Promise<boolean>
 }
 
 /** 本地草稿（localStorage，自动保存） */
@@ -76,46 +111,129 @@ function loadPageConfig(): PageConfig {
   }
   return { ...defaultPageConfig }
 }
-
 const draft = loadDraft()
 
-export const useDocStore = create<DocState>()((set) => ({
+/** 撤销/重做：将历史快照恢复到文档（code/解析/脏标记/选区/光标跳转） */
+function restoreEntry(
+  entry: HistoryEntry,
+  historyNext: HistoryState,
+  set: (partial: Partial<DocState>) => void,
+  s: DocState,
+) {
+  const code = entry.code
+  const selStart = Math.max(0, Math.min(entry.selStart, code.length))
+  const selEnd = Math.max(0, Math.min(entry.selEnd, code.length))
+  try {
+    localStorage.setItem(DRAFT_KEY, code)
+  } catch {
+    /* 存储不可用时静默 */
+  }
+  set({
+    code,
+    parseResult: parseJps(code),
+    pageConfig: mergeJpsConfig(code, loadPageConfig()),
+    dirty: true,
+    sel: { start: selStart, end: selEnd },
+    ...historyNext,
+    cursorJump: { start: selStart, end: selEnd, nonce: (s.cursorJump?.nonce ?? 0) + 1 },
+  })
+}
+
+export const useDocStore = create<DocState>()((set, get) => ({
   code: draft?.code ?? defaultSample().code,
   fileName: draft?.name ?? defaultSample().name,
   dirty: false,
   viewType: (localStorage.getItem('jianpuscript.viewType') as ViewType) || 'split',
   autoFormat: true,
-  pageConfig: loadPageConfig(),
+  // adj83：谱面级设置优先（源码 # jps-config 注释），无则回退公共设置
+  pageConfig: mergeJpsConfig(draft?.code ?? defaultSample().code, loadPageConfig()),
   parseResult: parseJps(draft?.code ?? defaultSample().code),
   cursor: { line: 1, col: 0 },
+  sel: { start: 0, end: 0 },
   activeNoteId: null,
   cursorJump: null,
+  undoStack: [],
+  redoStack: [],
+  lastEditAt: 0,
+  historyLimit: DEFAULT_HISTORY_LIMIT,
 
   setCode: (code) => {
+    const s = get()
+    if (code === s.code) return // 无变化不产生历史
+    const current: HistoryEntry = { code: s.code, selStart: s.sel.start, selEnd: s.sel.end }
+    const { next } = recordEdit(
+      { undoStack: s.undoStack, redoStack: s.redoStack, lastEditAt: s.lastEditAt },
+      current,
+      Date.now(),
+      s.historyLimit,
+    )
     try {
       localStorage.setItem(DRAFT_KEY, code)
     } catch {
       /* 存储不可用时静默 */
     }
-    set({ code, parseResult: parseJps(code), dirty: true })
+    // adj83：源码 # 设置变化时同步 pageConfig（谱面级设置优先，无则回退公共）
+    set({
+      code,
+      parseResult: parseJps(code),
+      pageConfig: mergeJpsConfig(code, loadPageConfig()),
+      dirty: true,
+      ...next,
+    })
   },
   setViewType: (v) => {
     localStorage.setItem('jianpuscript.viewType', v)
     set({ viewType: v })
   },
   setAutoFormat: (b) => set({ autoFormat: b }),
-  setPageConfig: (cfg) => {
+  setPageConfig: (cfg, persist) => {
     try {
       localStorage.setItem(PAGE_CONFIG_KEY, JSON.stringify(cfg))
     } catch {
       /* 存储不可用时静默 */
     }
+    // adj83：persist（对话框「保存设置」）时把设置写回源码 # jps-config 注释
+    // （每首谱用自己的设置）；拖拽实时预览不写源码，避免频繁重解析
+    if (persist) {
+      const code = get().code
+      const newCode = writeJpsConfig(code, cfg)
+      if (newCode !== code) {
+        try {
+          localStorage.setItem(DRAFT_KEY, newCode)
+        } catch {
+          /* 存储不可用时静默 */
+        }
+        set({ code: newCode, pageConfig: cfg, parseResult: parseJps(newCode), dirty: true })
+        return
+      }
+    }
     set({ pageConfig: cfg })
   },
   setCursor: (line, col) => set({ cursor: { line, col } }),
+  setSelection: (start, end) => set({ sel: { start, end } }),
   setActiveNoteId: (id) => set({ activeNoteId: id }),
-  jumpCursor: (pos) =>
-    set((s) => ({ cursorJump: { pos, nonce: (s.cursorJump?.nonce ?? 0) + 1 } })),
+  jumpCursor: (pos, end) =>
+    set((s) => ({
+      cursorJump: { start: pos, end: end ?? pos, nonce: (s.cursorJump?.nonce ?? 0) + 1 },
+    })),
+  undo: () => {
+    const s = get()
+    const current: HistoryEntry = { code: s.code, selStart: s.sel.start, selEnd: s.sel.end }
+    const { next, restored } = undoHistory(
+      { undoStack: s.undoStack, redoStack: s.redoStack, lastEditAt: s.lastEditAt },
+      current,
+    )
+    if (restored) restoreEntry(restored, next, set, s)
+  },
+  redo: () => {
+    const s = get()
+    const current: HistoryEntry = { code: s.code, selStart: s.sel.start, selEnd: s.sel.end }
+    const { next, restored } = redoHistory(
+      { undoStack: s.undoStack, redoStack: s.redoStack, lastEditAt: s.lastEditAt },
+      current,
+    )
+    if (restored) restoreEntry(restored, next, set, s)
+  },
   loadSample: (id) => {
     const s = SAMPLES.find((x) => x.id === id) ?? defaultSample()
     localStorage.setItem(DRAFT_KEY, s.code)
@@ -124,9 +242,14 @@ export const useDocStore = create<DocState>()((set) => ({
       code: s.code,
       fileName: s.name,
       parseResult: parseJps(s.code),
+      pageConfig: mergeJpsConfig(s.code, loadPageConfig()),
       dirty: false,
       activeNoteId: null,
       cursorJump: null,
+      undoStack: [],
+      redoStack: [],
+      lastEditAt: 0,
+      sel: { start: 0, end: 0 },
     })
   },
   newDoc: () => {
@@ -136,10 +259,85 @@ export const useDocStore = create<DocState>()((set) => ({
       code: NEW_FILE_TEMPLATE,
       fileName: '未命名',
       parseResult: parseJps(NEW_FILE_TEMPLATE),
+      pageConfig: mergeJpsConfig(NEW_FILE_TEMPLATE, loadPageConfig()),
       dirty: false,
       activeNoteId: null,
       cursorJump: null,
+      undoStack: [],
+      redoStack: [],
+      lastEditAt: 0,
+      sel: { start: 0, end: 0 },
     })
   },
   markSaved: () => set({ dirty: false }),
+
+  // ---- 文件读写（adj70） ----
+  fileHandle: null,
+  openFile: async () => {
+    const picker = (window as any).showOpenFilePicker
+    if (typeof picker !== 'function') return false
+    try {
+      const [handle] = await picker({
+        types: [{ description: 'JianpuScript 乐谱', accept: { 'text/plain': ['.jps'] } }],
+        multiple: false,
+      })
+      const file = await handle.getFile()
+      const code = await file.text()
+      const name = (file.name || '未命名').replace(/\.jps$/i, '')
+      try {
+        localStorage.setItem(DRAFT_KEY, code)
+        localStorage.setItem(DRAFT_NAME_KEY, name)
+      } catch {
+        /* 存储不可用时静默 */
+      }
+      set({
+        code,
+        fileName: name,
+        parseResult: parseJps(code),
+        dirty: false,
+        fileHandle: handle,
+        activeNoteId: null,
+        cursorJump: null,
+        undoStack: [],
+        redoStack: [],
+        lastEditAt: 0,
+        sel: { start: 0, end: 0 },
+      })
+      return true
+    } catch {
+      return false // 用户取消
+    }
+  },
+  saveFile: async () => {
+    const s = get()
+    if (s.fileHandle) {
+      try {
+        const w = await s.fileHandle.createWritable()
+        await w.write(s.code)
+        await w.close()
+        set({ dirty: false })
+        return true
+      } catch {
+        /* 写入失败 → 走另存为 */
+      }
+    }
+    return s.saveFileAs()
+  },
+  saveFileAs: async () => {
+    const picker = (window as any).showSaveFilePicker
+    if (typeof picker !== 'function') return false
+    try {
+      const handle = await picker({
+        suggestedName: `${get().fileName || '未命名'}.jps`,
+        types: [{ description: 'JianpuScript 乐谱', accept: { 'text/plain': ['.jps'] } }],
+      })
+      const w = await handle.createWritable()
+      await w.write(get().code)
+      await w.close()
+      set({ dirty: false, fileHandle: handle })
+      return true
+    } catch {
+      return false // 用户取消
+    }
+  },
 }))

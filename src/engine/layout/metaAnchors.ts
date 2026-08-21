@@ -11,12 +11,13 @@
  */
 import { clamp } from './guides'
 
-export type MetaAnchor = 'top-center' | 'bottom-right' | 'bottom-left'
+export type MetaAnchor = 'top-center' | 'bottom-right' | 'bottom-left' | 'notes'
 
-/** key → 锚点类型（title/subtitle_i → 上居中，author_i → 右下，keyline/tempo → 左下） */
+/** key → 锚点类型（title/subtitle_i → 上居中，author_i → 右下，keyline/tempo → 左下；instrument_i 上居中，notes 谱尾居中） */
 export function metaAnchorOf(key: string): MetaAnchor {
-  if (key === 'title' || key.startsWith('subtitle')) return 'top-center'
+  if (key === 'title' || key.startsWith('subtitle') || key.startsWith('instrument')) return 'top-center'
   if (key.startsWith('author')) return 'bottom-right'
+  if (key === 'notes') return 'notes'
   return 'bottom-left'
 }
 
@@ -46,6 +47,9 @@ export function metaAnchorPt(
       return { x: pageW - cfg.margin_right, y: cfg.margin_top + areaH }
     case 'bottom-left':
       return { x: cfg.margin_left, y: cfg.margin_top + areaH }
+    case 'notes':
+      // 谱尾说明文字：基准 = 页面水平居中（y 由调用方用页面高计算，此处仅占位）
+      return { x: pageW / 2, y: 0 }
   }
 }
 
@@ -63,6 +67,10 @@ export function clampMetaPos(
 ): { x: number; y: number } {
   const areaW = pageW - cfg.margin_left - cfg.margin_right
   const areaH = cfg.descAreaH
+  // 说明文字（谱尾）：偏移相对页面底部默认位置，宽松钳制（页面区域内）
+  if (key === 'notes') {
+    return { x: clamp(relX, -areaW, areaW), y: clamp(relY, -600, 200) }
+  }
   switch (metaAnchorOf(key)) {
     case 'top-center': {
       // 标题/副标题文字顶部不越过区域上沿（adj32）：基线最低到 字号×0.85
@@ -81,5 +89,8 @@ export function clampMetaPos(
         key.startsWith('keyline') || key.startsWith('tempo') ? Math.max(0, areaW - 40) : areaW
       return { x: clamp(relX, 0, xMax), y: clamp(relY, -areaH, 0) }
     }
+    case 'notes':
+      // 已在函数开头处理，此处仅为类型穷尽
+      return { x: relX, y: relY }
   }
 }

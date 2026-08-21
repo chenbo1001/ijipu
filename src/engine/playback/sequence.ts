@@ -28,9 +28,9 @@ export interface PlaySequence {
   bpm: number
 }
 
-/** 从描述头 J 推断拍速（30~240），无效或缺失默认 90 */
+/** 从描述头 J 推断拍速（30~240），无效或缺失默认 90；数字部分优先（多条 J 时） */
 export function inferBpm(result: ParseResult): number {
-  const t = result.header.tempo
+  const t = result.header.tempoNum ?? result.header.tempo
   if (t) {
     const n = Number(t)
     if (Number.isFinite(n) && n > 0) {
