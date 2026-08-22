@@ -752,12 +752,10 @@ function renderBarline(bar: PlacedBarline, noteSize = 18): string {
         `<text x="${mx.toFixed(1)}" y="${(yBottom + 11 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="${FONT_CN}" font-weight="bold"${italic} fill="#1b1b1b">${label}</text>`,
       )
     } else if (bar.mark === 'ty') {
-      // 小节线正上方 ⊕（圆 + 十字）
-      const cy = yTop - 12 * s
+      // 大跳跃记号（adj130）：官方 Unicode U+1D10C（𝄌），音乐符号字体渲染
+      const fs = Math.max(12, Math.round(14 * s))
       parts.push(
-        `<circle cx="${mx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r1n(4 * s)}" fill="none" stroke="#1b1b1b" stroke-width="1.2"/>` +
-          `<line x1="${(mx - 4.5 * s).toFixed(1)}" y1="${cy.toFixed(1)}" x2="${(mx + 4.5 * s).toFixed(1)}" y2="${cy.toFixed(1)}" stroke="#1b1b1b" stroke-width="1.2"/>` +
-          `<line x1="${mx.toFixed(1)}" y1="${(cy - 4.5 * s).toFixed(1)}" x2="${mx.toFixed(1)}" y2="${(cy + 4.5 * s).toFixed(1)}" stroke="#1b1b1b" stroke-width="1.2"/>`,
+        `<text x="${mx.toFixed(1)}" y="${(yTop - 5 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄌</text>`,
       )
     } else if (bar.mark === 'hs') {
       // 花 S 记号（adj129）：官方 Unicode U+1D10B（𝄋），用音乐符号字体渲染

@@ -508,7 +508,7 @@ const placed126 = lay126.pages[0].barlines
 check('adj126 布局透传修饰符', placed126.length >= 6 && placed126.some((b) => b.mark === 'fine') && placed126.some((b) => b.mark === 'ty') && placed126.some((b) => b.mark === 'hs'), JSON.stringify(placed126.map((b) => b.mark)))
 const svg126 = renderScoreToSvg(lay126)[0]
 check('adj126 渲染 Fine/D.C./D.S. 文本', svg126.includes('>Fine<') && svg126.includes('>D.C.<') && svg126.includes('>D.S.<'), '')
-check('adj126 渲染 ⊕（圆 + 十字）', svg126.includes('<circle ') && (svg126.match(/stroke-width="1.2"/g) ?? []).length >= 3, '')
+check('adj130 渲染大跳跃记号（Unicode U+1D10C 𝄌）', svg126.includes('𝄌'), '')
 check('adj129 渲染花 S 记号（Unicode U+1D10B 𝄋）', svg126.includes('𝄋'), '')
 // 播放跳转：fine 截断 / ds 跳 hs / ty 跳下一 ty / dc 从头反复
 const mk126 = (q: string) => buildPlaySequence(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), layoutScore(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), defaultPageConfig), 120)
