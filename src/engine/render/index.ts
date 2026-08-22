@@ -486,20 +486,85 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
           `<text x="${r1n(blockRight + s)}" y="${r1n(y - size * 0.4)}" dominant-baseline="central" font-weight="bold" font-size="${size}" font-family="${font}" fill="#1b1b1b">)</text>`,
         )
       } else {
-        // 上方符号：文字底 = aboveTop - LAYER_GAP×s；基线 = 底 - descender
+        // 上方符号（adj109 扩展 & 编码修饰符）：文字底 = aboveTop - LAYER_GAP×s；基线 = 底 - descender
         const symY = aboveTop - LAYER_GAP * s - SYM_FS * DESC_RATIO
-        if (sym === 'tr') {
+        const cx = x + digitW / 2 // 数字槽中心
+        if (sym === 'tr' || sym === 'cy+') {
+          // 颤音：tr + 波浪线（cy+ 加长颤音同此；&tr 既有行为）
           parts.push(
             `<text x="${x}" y="${r1n(symY)}" font-size="${SYM_FS}" font-style="italic" font-family="${FONT_CN}" fill="#1b1b1b">tr</text>`,
           )
           parts.push(wavePath(x + 16 * s, symY - 6 * s, x + 34 * s))
+        } else if (sym === 'cy') {
+          // 颤音：仅 tr 文本（adj109：&cy 不带波浪线，&cy+ 才带）
+          parts.push(
+            `<text x="${x}" y="${r1n(symY)}" font-size="${SYM_FS}" font-style="italic" font-family="${FONT_CN}" fill="#1b1b1b">tr</text>`,
+          )
+        } else if (sym === 'bc') {
+          // 保持音：上方短横线
+          parts.push(
+            `<line x1="${r1n(cx - 4.5 * s)}" y1="${r1n(symY - 2 * s)}" x2="${r1n(cx + 4.5 * s)}" y2="${r1n(symY - 2 * s)}" stroke="#1b1b1b" stroke-width="${r1n(2 * s)}"/>`,
+          )
+        } else if (sym === 'zy') {
+          // 重音：上方实心三角 >（尖朝右）
+          parts.push(
+            `<path d="M ${r1n(cx - 5 * s)} ${r1n(symY - 5 * s)} L ${r1n(cx + 3 * s)} ${r1n(symY)} L ${r1n(cx - 5 * s)} ${r1n(symY + 5 * s)} Z" fill="#1b1b1b"/>`,
+          )
+        } else if (sym === 'dy') {
+          // 顿音：上方实心倒三角（尖朝下）
+          parts.push(
+            `<path d="M ${r1n(cx - 4 * s)} ${r1n(symY - 3.5 * s)} L ${r1n(cx + 4 * s)} ${r1n(symY - 3.5 * s)} L ${r1n(cx)} ${r1n(symY + 4 * s)} Z" fill="#1b1b1b"/>`,
+          )
+        } else if (sym === 'yc') {
+          // 延长记号：点 + 半圆弧（弧顶在上、开口朝下）
+          const cy0 = symY - 4 * s // 点中心
+          parts.push(`<circle cx="${r1n(cx)}" cy="${r1n(cy0)}" r="${r1n(1.8 * s)}" fill="#1b1b1b"/>`)
+          parts.push(
+            `<path d="M ${r1n(cx - 6 * s)} ${r1n(cy0 + 2 * s)} Q ${r1n(cx)} ${r1n(cy0 - 9 * s)} ${r1n(cx + 6 * s)} ${r1n(cy0 + 2 * s)}" fill="none" stroke="#1b1b1b" stroke-width="${r1n(1.2 * s)}"/>`,
+          )
+        } else if (sym === 'sby' || sym === 'xby' || sym === 'sby+' || sym === 'xby+') {
+          // 波音：粗波浪线（sby+ 加长；xby 波线中间加 \ 斜线）
+          const half = sym.endsWith('+') ? 9 * s : 5 * s
+          const wy = symY - 4 * s
+          parts.push(wavePath(cx - half, wy, cx + half, 1.5))
+          if (sym.startsWith('x')) {
+            parts.push(
+              `<line x1="${r1n(cx - 3 * s)}" y1="${r1n(wy - 4 * s)}" x2="${r1n(cx + 3 * s)}" y2="${r1n(wy + 4 * s)}" stroke="#1b1b1b" stroke-width="1.5"/>`,
+            )
+          }
+        } else if (sym === 'shy' || sym === 'xhy') {
+          // 滑音：音符中右/左起，向右/左上弧线 + 末端箭头
+          const right = sym === 'shy'
+          const x1 = right ? x + digitW + 1 * s : x - 1 * s
+          const y1 = y - size * 0.4 // 音符中部
+          const x2 = right ? x1 + 14 * s : x1 - 14 * s
+          const y2 = y1 - 12 * s
+          const mx = (x1 + x2) / 2
+          parts.push(
+            `<path d="M ${r1n(x1)} ${r1n(y1)} Q ${r1n(mx)} ${r1n(y1)} ${r1n(x2)} ${r1n(y2)}" fill="none" stroke="#1b1b1b" stroke-width="1"/>`,
+          )
+          // 末端箭头（指向末端方向）
+          const ax = right ? x2 + 2 * s : x2 - 2 * s
+          const ay = y2 - 2 * s
+          parts.push(
+            `<path d="M ${r1n(x2)} ${r1n(y2)} L ${r1n(ax)} ${r1n(ay + 2 * s)} L ${r1n(ax)} ${r1n(ay - 2 * s)} Z" fill="#1b1b1b"/>`,
+          )
+        } else if (sym === 'hx') {
+          // 呼吸记号：音符右侧上方，顺时针 90° 的 >（∨ 形，尖朝下）
+          const hx = x + digitW + 7 * s
+          const hy = y - size * 0.8 - 4 * s
+          parts.push(
+            `<path d="M ${r1n(hx - 3.5 * s)} ${r1n(hy - 3 * s)} L ${r1n(hx)} ${r1n(hy + 3 * s)} L ${r1n(hx + 3.5 * s)} ${r1n(hy - 3 * s)}" fill="none" stroke="#1b1b1b" stroke-width="1.5"/>`,
+          )
+          continue // hx 在右侧，不占上方层顶
         } else {
+          // 其余编码：上方小文本（既有行为）
           parts.push(
             `<text x="${x}" y="${r1n(symY)}" font-size="${SYM_FS}" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(sym)}</text>`,
           )
         }
-        // 更新层顶：文字顶 = 基线 - ascent（0.8×字号）
-        aboveTop = symY - SYM_FS * DIGIT_HEIGHT_RATIO
+        // 更新层顶：文字顶 = 基线 - ascent（0.8×字号）；延长记号弧顶更高单独处理
+        aboveTop = sym === 'yc' ? symY - 13 * s : symY - SYM_FS * DIGIT_HEIGHT_RATIO
       }
     }
   }
@@ -893,14 +958,14 @@ function renderSlur(s: PlacedSlur, noteSize = 18): string {
 // 渐强渐弱与波浪线（M7d）
 // ============================================================
 
-/** 颤音波浪线（连续小弧） */
-function wavePath(x1: number, y: number, x2: number): string {
+/** 颤音/波音波浪线（连续小弧；w 线宽，adj109 波音用粗线） */
+function wavePath(x1: number, y: number, x2: number, w = 1): string {
   const seg = 4
   let d = `M ${x1} ${y}`
   for (let x = x1; x < x2; x += seg) {
     d += ` q ${seg / 2} -2.5, ${seg} 0`
   }
-  return `<path d="${d}" fill="none" stroke="#1b1b1b" stroke-width="1"/>`
+  return `<path d="${d}" fill="none" stroke="#1b1b1b" stroke-width="${w}"/>`
 }
 
 function renderDynamic(d: PlacedDynamic): string {

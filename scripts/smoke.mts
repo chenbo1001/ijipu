@@ -481,6 +481,17 @@ check('&ykh 渲染右括号 )', svgZkh.includes('>)<'), '')
 const zkhSpace = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: &zkh 6 - - -&ykh |\n')
 const zkhSpaceNote = zkhSpace.groups[0].music.tokens.find((t) => t.kind === 'note')
 check('独立 &zkh 前置 + 独立 &ykh 后置（带空格）归入音符', zkhSpace.errors.length === 0 && !!zkhSpaceNote && zkhSpaceNote.symbols.includes('zkh') && zkhSpaceNote.symbols.includes('ykh'), JSON.stringify(zkhSpaceNote?.symbols))
+// adj109：& 修饰符扩展（yc/bc/zy/dy/hx/shy/xhy/sby/xby/sby+/xby+/cy/cy+）解析 + 渲染
+const r109 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1&yc 2&bc 3&zy 4&dy 5&hx 6&shy 7&xhy 1&sby 2&xby 3&sby+ 4&xby+ 5&cy 6&cy+ | 1 2 3 4 |\n')
+const n109 = r109.groups[0].music.tokens.filter((t) => t.kind === 'note')
+check('adj109 修饰符解析（yc bc zy dy hx shy xhy）', r109.errors.length === 0 && JSON.stringify(n109.slice(0, 7).map((t) => t.symbols[0])) === JSON.stringify(['yc', 'bc', 'zy', 'dy', 'hx', 'shy', 'xhy']), JSON.stringify(n109.slice(0, 7).map((t) => t.symbols)))
+check('adj109 修饰符解析（sby xby sby+ xby+ cy cy+，含 + 后缀）', JSON.stringify(n109.slice(7, 13).map((t) => t.symbols[0])) === JSON.stringify(['sby', 'xby', 'sby+', 'xby+', 'cy', 'cy+']), JSON.stringify(n109.slice(7, 13).map((t) => t.symbols)))
+const svg109 = renderScoreToSvg(layoutScore(r109, defaultPageConfig))[0]
+check('adj109 yc 渲染点 + 半圆弧（circle + Q）', svg109.includes('<circle ') && / Q /.test(svg109), '')
+check('adj109 zy/dy 渲染实心三角（fill）', (svg109.match(/Z" fill="#1b1b1b"/g) ?? []).length >= 4, '')
+check('adj109 波音渲染粗波浪线（q 弧 ≥ 4）+ xby 斜线', (svg109.match(/<path d="M [\d.]+ [\d.]+ q/g) ?? []).length >= 5, '')
+check('adj109 滑音渲染弧线（Q）+ 箭头（fill 三角）', svg109.includes(' Q '), '')
+check('adj109 cy/cy+ 渲染 tr 文本', svg109.includes('>tr<'), '')
 // adj81：括号加粗 + 垂直居中于数字中心（dominant-baseline=central @ 基线-0.4×字号）
 // adj82：括号字号与音符一致（font-size=note_size，同字体）
 const svgZkhSp = renderScoreToSvg(layoutScore(zkhSpace, defaultPageConfig))[0]

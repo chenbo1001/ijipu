@@ -106,9 +106,10 @@ export function tokenizeMusicLine(
       } else if (c === ',') {
         base.octaveShift--; j++
       } else if (c === '&') {
-        // & 装饰编码：连续字母数字
+        // & 装饰编码：连续字母数字（adj109：允许尾部 +，如 &sby+ / &cy+）
         let k = j + 1
         while (k < n && /[a-zA-Z0-9]/.test(content[k])) k++
+        if (content[k] === '+') k++
         if (k > j + 1) {
           base.symbols.push(content.slice(j + 1, k))
           j = k
@@ -187,6 +188,7 @@ export function tokenizeMusicLine(
     if (c === '&') {
       let k = i + 1
       while (k < n && /[a-zA-Z0-9]/.test(content[k])) k++
+      if (content[k] === '+') k++ // adj109：允许尾部 +（&sby+ 等）
       if (k > i + 1) {
         const code = content.slice(i + 1, k)
         // adj80：独立 zkh/ykh（如 "&zkh 6"、"6 - - -&ykh"）归入相邻音符，
