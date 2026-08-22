@@ -492,8 +492,8 @@ check('adj109 修饰符解析（yc bc zy dy hx shy xhy）', r109.errors.length =
 check('adj109 修饰符解析（sby xby sby+ xby+ cy cy+，含 + 后缀）', JSON.stringify(n109.slice(7, 13).map((t) => t.symbols[0])) === JSON.stringify(['sby', 'xby', 'sby+', 'xby+', 'cy', 'cy+']), JSON.stringify(n109.slice(7, 13).map((t) => t.symbols)))
 const svg109 = renderScoreToSvg(layoutScore(r109, defaultPageConfig))[0]
 check('adj109 yc 渲染点 + 半圆弧（circle + Q）', svg109.includes('<circle ') && / Q /.test(svg109), '')
-// adj112：zy 为线形 >（非实心）、dy 仍实心倒三角 → 实心三角 = dy 1 + 滑音箭头 2 = 3
-check('adj112 zy 线形 >、dy 实心（实心三角共 3）', (svg109.match(/Z" fill="#1b1b1b"/g) ?? []).length === 3, '')
+// adj112：zy 线形 >、dy 仍实心倒三角；adj119：滑音箭头改线形 >（实心三角仅 dy 1 个）
+check('adj119 实心三角仅 dy（1 个）', (svg109.match(/Z" fill="#1b1b1b"/g) ?? []).length === 1, '')
 // adj114/115：波音锯齿 = 斜上细线(stroke 1) + 斜下粗线(stroke 1.8)，共 4 个波音
 // sby/xby 各 2 条下降段、sby+/xby+ 各 3 条 → stroke 1.8 共 10 条；xby 竖线细线
 check('adj115 波音锯齿斜下粗线（stroke 1.8 ≥ 10 条）', (svg109.match(/stroke-width="1.8"/g) ?? []).length >= 10, '')

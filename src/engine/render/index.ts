@@ -561,15 +561,27 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
           }
         } else if (sym === 'shy' || sym === 'xhy') {
           // 滑音：细线弧线 + 末端线形 > 箭头（adj119：箭头方向 = 弧线末端切线延伸方向）
-          // 上滑音：从音符中部右侧，弧线向右再弧线向上；下滑音水平镜像
+          // 上滑音：音符中部右侧起，弧线向右再弧线向上（adj119）
+          // 下滑音：音符上部右侧起，弧线向右再弧线向下到音符中部高度（adj120）
           const right = sym === 'shy'
           const cx0 = x + digitW / 2 // 音符中部
-          const x1 = right ? cx0 + 2 * s : cx0 - 2 * s // 中部右侧/左侧起笔
-          const y1 = y - size * 0.4 // 音符中部
           const sz = size * 0.25 // 滑音大小 = 音符的 1/4
-          const x2 = right ? x1 + sz : x1 - sz
-          const y2 = y1 - sz
-          const mx = (x1 + x2) / 2 // 控制点水平（先向右/左弯再向上）
+          let x1: number
+          let y1: number
+          let x2: number
+          let y2: number
+          if (right) {
+            x1 = cx0 + 2 * s // 中部右侧起笔
+            y1 = y - size * 0.4 // 音符中部
+            x2 = x1 + sz
+            y2 = y1 - sz // 终点在上方（向右上）
+          } else {
+            x1 = x + digitW * 0.8 // 上部右侧起笔
+            y1 = y - size * 0.75 // 音符上部
+            x2 = x1 + sz
+            y2 = y - size * 0.4 // 终点在音符中部高度（向右下）
+          }
+          const mx = (x1 + x2) / 2 // 控制点水平（先向右弯再向上/下）
           parts.push(
             `<path d="M ${r1n(x1)} ${r1n(y1)} Q ${r1n(mx)} ${r1n(y1)} ${r1n(x2)} ${r1n(y2)}" fill="none" stroke="#1b1b1b" stroke-width="1"/>`,
           )
