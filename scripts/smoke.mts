@@ -497,7 +497,8 @@ check('adj112 zy 线形 >、dy 实心（实心三角共 3）', (svg109.match(/Z"
 // adj114/115：波音锯齿 = 斜上细线(stroke 1) + 斜下粗线(stroke 1.8)，共 4 个波音
 // sby/xby 各 2 条下降段、sby+/xby+ 各 3 条 → stroke 1.8 共 10 条；xby 竖线细线
 check('adj115 波音锯齿斜下粗线（stroke 1.8 ≥ 10 条）', (svg109.match(/stroke-width="1.8"/g) ?? []).length >= 10, '')
-check('adj115 下波音竖线为细线（stroke 1）', (svg109.match(/stroke-width="1"/g) ?? []).length >= 8, '')
+// adj116：下波音竖线为细线 stroke 0.8（xby/xby+ 各 1 条）
+check('adj116 下波音竖线为细线（stroke 0.8 ≥ 2 条）', (svg109.match(/stroke-width="0.8"/g) ?? []).length >= 2, '')
 check('adj109 滑音渲染弧线（Q）+ 箭头（fill 三角）', svg109.includes(' Q '), '')
 check('adj112 tr 文本加粗', /font-weight="bold"[^>]*>tr</.test(svg109), '')
 // adj81：括号加粗 + 垂直居中于数字中心（dominant-baseline=central @ 基线-0.4×字号）
