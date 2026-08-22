@@ -1,9 +1,8 @@
-/**
- * vite.smoke.config.ts — 引擎测试/预览打包配置
- * 将 scripts/*.mts 打包为 Node 可直接运行的 CJS（用于沙箱环境跑引擎测试）。
- * 用法：vite build --config vite.smoke.config.ts
- *   node dist-smoke/smoke.cjs    → 冒烟测试
- *   node dist-smoke/preview.cjs  → 生成示例谱渲染 SVG
+﻿/**
+ * vite.smoke.config.ts 鈥?寮曟搸娴嬭瘯/棰勮鎵撳寘閰嶇疆
+ * 灏?scripts/*.mts 鎵撳寘涓?Node 鍙洿鎺ヨ繍琛岀殑 CJS锛堢敤浜庢矙绠辩幆澧冭窇寮曟搸娴嬭瘯锛夈€? * 鐢ㄦ硶锛歷ite build --config vite.smoke.config.ts
+ *   node dist-smoke/smoke.cjs    鈫?鍐掔儫娴嬭瘯
+ *   node dist-smoke/preview.cjs  鈫?鐢熸垚绀轰緥璋辨覆鏌?SVG
  */
 import { defineConfig } from 'vite'
 
@@ -26,3 +25,5 @@ export default defineConfig({
     },
   },
 })
+
+

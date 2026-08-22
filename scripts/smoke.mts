@@ -1021,6 +1021,12 @@ const yMain36d = Number(svg36d.match(/<text x="[^"]+" y="([^"]+)" data-notepos="
 const lowCy36d = Math.max(...[...svg36d.matchAll(/<circle cx="[^"]+" cy="([^"]+)" r="[^"]+" fill="#1b1b1b"/g)].map((m) => Number(m[1])))
 // 5, 无减时（dc=1 → 线 1 条）：圆心 = mainTop + 半线高0.3 + (2+1.7)×(7.2/18=0.4)；mainTop = 主音符基线 - 14.4
 check('adj101 低八度点在最后一条减时线下方（线底+LAYER_GAP×s）', !Number.isNaN(yMain36d) && Math.abs(lowCy36d - (yMain36d - 14.4 + 0.3 + (2 + 1.7) * 0.4)) < 0.6, `lowCy=${lowCy36d} expect=${(yMain36d - 14.4 + 1.78).toFixed(2)}`)
+// adj102：弧线起点——无低八度点 → 最后一条减时线底（直接连接）；有低八度点 → 最低点底 + LAYER_GAP×s
+const yMain36c = Number(svg36c.match(/<text x="[^"]+" y="([^"]+)" data-notepos="[^"]+" font-size="18"[^>]*font-weight="bold"[^>]*>1<\/text>/)?.[1] ?? 'NaN')
+const arcStarts36c = [...svg36c.matchAll(/<path d="M [-\d.]+ ([-\d.]+) Q/g)].map((m) => Number(m[1]))
+check('adj102 无低八度点：弧线起点 = 最后一条减时线底（与线连接）', arcStarts36c.length === 2 && arcStarts36c.every((sy) => Math.abs(sy - (yMain36c - 14.4 + 0.3)) < 0.5), `sy=${arcStarts36c.join(',')} lineBottom=${(yMain36c - 14.4 + 0.3).toFixed(1)}`)
+const arcSy36d = Number(svg36d.match(/<path d="M [-\d.]+ ([-\d.]+) Q/)?.[1] ?? 'NaN')
+check('adj102 有低八度点：弧线起点 = 低八度点底 + LAYER_GAP×s', !Number.isNaN(arcSy36d) && Math.abs(arcSy36d - (lowCy36d + (1.7 + 2) * 0.4)) < 0.6, `arcSy=${arcSy36d} expect=${(lowCy36d + 1.48).toFixed(2)}`)
 // adj98：倚音占位计入音符宽度——带倚音的音符 perBeat ≥ 无倚音音符
 const lay98 = layoutScore(r98g, defaultPageConfig)
 const n98 = [...lay98.pages[0].notes].sort((a, b) => a.x - b.x)

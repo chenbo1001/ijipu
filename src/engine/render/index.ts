@@ -311,8 +311,8 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     )
   }
 
-  // 倚音（adj23/65/97/98/99/100/101）：前倚音 [65] 排于主音符左上角、后倚音 [h65] 排于右上角
-  // 规范（用户 2026-08-22 + adj100/101 调整）：
+  // 倚音（adj23/65/97/98/99/100/101/102）：前倚音 [65] 排于主音符左上角、后倚音 [h65] 排于右上角
+  // 规范（用户 2026-08-22 + adj100/101/102 调整）：
   //  ① 倚音字号 = 主音符 × 0.4（adj101 由 0.3 调大），**不加粗**（与主音符粗体区分）；
   //  ② 倚音减时线 = 实际时值 +1 条（2[3] → 1 条、2[3/] → 2 条），线**更细**（0.6）、
   //     间距固定 1.2px（adj100 由 1.8px 减小）；
@@ -320,9 +320,10 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
   //     adj101 数字整体下移 1.5px（数字底距线 0.5px）；
   //  ④ 低八度点紧贴该音符最后一条减时线下方，间距规则同主音符
   //     （线底 + LAYER_GAP×s + DOT_R×s = 圆心，层内点距 INNER_GAP×s，adj101）；
-  //  ⑤ 无论几个倚音，只有**一条弧线**：起点 = 组中心正下方（减时线下方），
-  //     控制点 = 起点正下方 → 前倚音**先向下再弯向右**、后倚音**先向下再弯向左**
-  //     （二次贝塞尔抛物线，adj101 由 1/4 圆弧改——圆弧无法从正下先竖直向下弯向侧边）
+  //  ⑤ 无论几个倚音，只有**一条弧线**：起点 = 组中心正下方，控制点 = 起点正下方
+  //     → 前倚音**先向下再弯向右**、后倚音**先向下再弯向左**（二次贝塞尔，adj101）；
+  //     adj102：无低八度点 → 弧线起点 = 最后一条减时线底（直接连接）；
+  //             有低八度点 → 弧线起点 = 最低低八度点底 + LAYER_GAP×s（间距 = 点到减时线的距离）
   if (t.kind === 'note' && t.gracenotes && t.gracenotes.notes.length > 0) {
     const gn = t.gracenotes
     const gSize = Math.max(6, size * 0.4) // ①倚音字号 = 主音符 × 0.4（下限 6px 防过小）
@@ -379,10 +380,21 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
         `<line x1="${r1n(gx1)}" y1="${r1n(ly)}" x2="${r1n(gx2)}" y2="${r1n(ly)}" stroke="#1b1b1b" stroke-width="0.6"/>`,
       )
     }
-    // ⑤ 一条弧线（二次贝塞尔 = 抛物线）：起点 = 组中心正下方（最后一条减时线下方 2px），
-    //    控制点 = 起点正下方（起点切线竖直向下）→ 先向下再弯向主音符；终点比起点低 arcDrop
+    // ⑤ 一条弧线（二次贝塞尔 = 抛物线）：起点 = 组中心正下方；控制点 = 起点正下方（先向下再弯向主音符）
+    //    adj102：无低八度点 → 起点 = 最后一条减时线底（弧线与线**直接连接**）；
+    //            有低八度点 → 起点 = 最低低八度点底 + LAYER_GAP×s（与点留间距 = 点到减时线的距离）
     const gcx = (gx1 + gx2) / 2 // 倚音组中心 x
-    const arcStartY = beamTop + (maxDim - 1) * beamGap + 2 // 弧线起点（减时线下方）
+    let lowDotBottom = -Infinity // 组内最低低八度点底 y
+    for (const g of gn.notes) {
+      if (g.octaveShift < 0) {
+        const nLow = Math.abs(g.octaveShift)
+        const lastBeamBottom = beamTop + g.diminishCount * beamGap + 0.3 // 该音符最后一条线底（线中心+半线高）
+        const cy = lastBeamBottom + (LAYER_GAP + DOT_R) * gs + (nLow - 1) * (DOT_R * 2 + INNER_GAP) * gs
+        lowDotBottom = Math.max(lowDotBottom, cy + DOT_R * gs)
+      }
+    }
+    const arcStartY =
+      lowDotBottom > -Infinity ? lowDotBottom + LAYER_GAP * gs : beamTop + (maxDim - 1) * beamGap + 0.3
     const arcDrop = 3 * s // 终点比起点低（垂度）
     const arcW = 0.6 // 弧线宽 = 减时线宽
     if (gn.after) {
