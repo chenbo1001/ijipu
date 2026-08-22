@@ -1538,14 +1538,15 @@ const rowEnd53 = lay53.pages[0].barlines
 check('连音符左半：第一行 2 → 行末小节线', Math.abs(s53[0].x1 - (n53[1].x + 6.58)) < 0.5 && Math.abs(s53[0].x2 - (rowEnd53[rowEnd53.length - 1]?.x ?? 0)) < 1, `x1=${s53[0].x1} x2=${s53[0].x2} bar=${rowEnd53[rowEnd53.length - 1]?.x}`)
 check('连音符右半：行首边距处 → 第二行 1', Math.abs(s53[1].x1 - 80) < 0.5 && Math.abs(s53[1].x2 - (n53[4].x + 4.58)) < 0.5, `x1=${s53[1].x1} x2=${s53[1].x2}`)
 check('左右两半跨行（y 不同）', Math.abs(s53[0].y - s53[1].y) > 1, `${s53[0].y} vs ${s53[1].y}`)
-// adj89：跨行连音线固定平顶（弧线跨行两端高度差大、不连贯）
-check('跨行连音符强制平顶（adj89）', s53[0].style === 'flat' && s53[1].style === 'flat', `${s53[0].style}/${s53[1].style}`)
+// adj108：跨行连音线优先弧线（默认样式；原 adj89 强制平顶）
+check('跨行连音符弧线（adj108）', s53[0].style === 'arc' && s53[1].style === 'arc', `${s53[0].style}/${s53[1].style}`)
 const svg53 = renderScoreToSvg(lay53)[0]
 const hlY = s53[0].y
 const hrY = s53[1].y
-check('平顶左半：两端弧线过渡到平顶线（右侧开口）', svg53.includes(`M ${s53[0].x1} ${hlY}`) && svg53.includes(`L ${s53[0].x2} ${(hlY - 7).toFixed(1)}"`), '')
-check('平顶右半：平顶线 + 右端弧线（左侧开口）', svg53.includes(`M ${s53[1].x1} ${(hrY - 7).toFixed(1)}`) && svg53.includes(` C `) && svg53.includes(`${s53[1].x2} ${hrY}"`), '')
-// 平顶跨行：左半右侧开口、右半左侧开口
+// 弧线半部：左半从音符竖直上弯到行末最高点（右侧开口）；右半行首最高点弯到音符（左侧开口）
+check('弧线左半：起点竖直上弯到行末最高点（右侧开口）', svg53.includes(`M ${s53[0].x1} ${hlY} C ${s53[0].x1} ${(hlY - 9).toFixed(1)} ${s53[0].x2} ${(hlY - 4.5).toFixed(1)}`), '')
+check('弧线右半：行首最高点弯到终点（左侧开口）', svg53.includes(`M ${s53[1].x1} ${(hrY - 4.5).toFixed(1)} C ${s53[1].x1} ${(hrY - 4.5).toFixed(1)} ${s53[1].x2} ${(hrY - 9).toFixed(1)} ${s53[1].x2} ${hrY}`), '')
+// 用户强制平顶（lianyinxian_type=2）：跨行仍平顶（adj108 尊重设置）
 const lay53f = layoutScore(r53, { ...defaultPageConfig, lianyinxian_type: 2 })
 const svg53f = renderScoreToSvg(lay53f)[0]
 const s53fL = lay53f.pages[0].slurs.find((s) => s.half === 'l')

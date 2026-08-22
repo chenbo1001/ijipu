@@ -1374,14 +1374,19 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     // adj106：嵌套时外层连音线一律平顶（nestedRaise>0 = 被更深线包含/包裹），
     // 平顶线层次清晰不与内层圆弧交叉，保证美观
     const style = nestedRaise[si] > 0 ? 'flat' : baseStyle
-    // adj89：跨行连音线固定平顶（弧线跨行两端在行首/行尾高度差大，视觉不连贯）
-    const crossRowStyle: 'arc' | 'flat' = rowB === rowA + 1 ? 'flat' : style
+    // adj108：跨行连音线优先用弧线（先保证弧线，再考虑横线）；仅用户强制平顶
+    // （lianyinxian_type=2）或嵌套外层（层次规则优先）时用平顶
+    const crossRowStyle: 'arc' | 'flat' =
+      config.lianyinxian_type === 2 || nestedRaise[si] > 0 ? 'flat' : 'arc'
+    // adj108：连音线端点 = 数字槽中心 ± 1px×s（原固定 6.58/4.58，字号变化时端点错位）
+    const sSlur = noteScaleOf(m.noteSize)
+    const halfDig = halfDigitW(m.noteSize)
     if (rowA === rowB) {
       // 同行：整条连音符
       pages[a.id.page].slurs.push({
-        // adj36：起点=开始音符正上方偏右1px（数字中心+1）、终点=结束音符正上方偏左1px
-        x1: r1(a.x + 6.58),
-        x2: r1(b.x + 4.58),
+        // 起点=开始音符数字槽中心右 1px×s、终点=结束音符数字槽中心左 1px×s
+        x1: r1(a.x + halfDig + sSlur),
+        x2: r1(b.x + halfDig - sSlur),
         y: r1(slurYFor(a, maxHiInRange(sp.start, sp.end), raise)),
         depth: sp.depth,
         style,
@@ -1393,11 +1398,11 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       // 行首/行末均为连音符最高点；相隔多行视为误输入，不渲染
       const rA = rows[rowA]
       const lastA = rA.notes[rA.notes.length - 1]
-      const xEndA = Math.max(a.x + 6.58 + 2, rowEndBarX(rowA) ?? lastA.x + lastA.width - 2)
+      const xEndA = Math.max(a.x + halfDig + sSlur + 2, rowEndBarX(rowA) ?? lastA.x + lastA.width - 2)
       // adj106：下一行始端 = 行首小节线（有则从其开始）否则从左边距开始
       const xStartB = rowStartBarX(rowB) ?? config.margin_left
       pages[rA.page].slurs.push({
-        x1: r1(a.x + 6.58),
+        x1: r1(a.x + halfDig + sSlur),
         x2: r1(xEndA),
         y: r1(slurYFor(a, maxHiInRange(sp.start, lastA.id.index), raise)),
         depth: sp.depth,
@@ -1408,7 +1413,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       const firstB = rows[rowB].notes[0]
       pages[rows[rowB].page].slurs.push({
         x1: r1(xStartB),
-        x2: r1(b.x + 4.58),
+        x2: r1(b.x + halfDig - sSlur),
         y: r1(slurYFor(b, maxHiInRange(firstB.id.index, sp.end), raise)),
         depth: sp.depth,
         style: crossRowStyle,
