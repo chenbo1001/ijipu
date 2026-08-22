@@ -566,7 +566,7 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
         } else if (sym === 'shy' || sym === 'xhy') {
           // 滑音：细线弧线 + 末端线形 > 箭头（adj119：箭头方向 = 弧线末端切线延伸方向）
           // 上滑音：音符中部右侧起，弧线向右再弧线向上（adj119）
-          // 下滑音：音符上部起，弧线向右下，终点 = 音符中部右侧（与上滑音起始位置对应，adj125）
+          // 下滑音：音符右上角起笔，弧线向右转斜向下（adj127；终点在音符中部高度）
           // adj121：弧线起点与音符间距加大；> 箭头从弧线末端直接张开（连接无间隙）
           const right = sym === 'shy'
           const cx0 = x + digitW / 2 // 音符中部
@@ -581,10 +581,10 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
             x2 = x1 + sz
             y2 = y1 - sz // 终点在上方（向右上）
           } else {
-            x1 = cx0 // 上部（数字中心上方）
-            y1 = y - size * 0.75 // 音符上部
-            x2 = cx0 + 4 * s // 终点 x = 上滑音起点 x
-            y2 = y - size * 0.4 // 终点 y = 音符中线 = 上滑音起点 y
+            x1 = x + digitW // 音符右上角（数字右缘）
+            y1 = y - size * 0.8 // 数字顶部
+            x2 = x1 + sz // 向右伸出
+            y2 = y - size * 0.4 // 斜向下到音符中部高度
           }
           const mx = (x1 + x2) / 2 // 控制点水平（先向右弯再向上/下）
           parts.push(
