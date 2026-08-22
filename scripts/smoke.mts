@@ -429,6 +429,8 @@ check('嵌套深度 0 和 1', depths[0] === 0 && depths[1] === 1, JSON.stringify
 check('深度 1 的线更低（内层小连音符包在外层大连音符下面）', laySl2.pages[0].slurs[0].y > laySl2.pages[0].slurs[1].y, `${laySl2.pages[0].slurs[0].y} vs ${laySl2.pages[0].slurs[1].y}`)
 // adj44/95：嵌套抬升 2px（外层线比内层线高 2px）
 check('嵌套抬升 2px（外层 y = 内层 y - 2，adj95）', Math.abs(laySl2.pages[0].slurs[0].y - laySl2.pages[0].slurs[1].y - 2) < 0.5, `${laySl2.pages[0].slurs[0].y} vs ${laySl2.pages[0].slurs[1].y}`)
+// adj106：嵌套时外层连音线一律平顶（内层 2 单位仍圆弧）
+check('adj106 嵌套外层连音线平顶、内层圆弧', laySl2.pages[0].slurs[0].style === 'arc' && laySl2.pages[0].slurs[1].style === 'flat', `${laySl2.pages[0].slurs[0].style}/${laySl2.pages[0].slurs[1].style}`)
 // 平顶样式（adj89：两端大弧度弧线过渡到平顶线）
 const laySl3 = layoutScore(slur, { ...defaultPageConfig, lianyinxian_type: 2 })
 const svgSl3 = renderScoreToSvg(laySl3)[0]
@@ -451,6 +453,8 @@ check('同起点嵌套：2 条连音线（内层 3→2、外层 3→4）', sl56.
 check('同起点：两条线 x1 相同（都从 3 开始）', sl56.length === 2 && Math.abs(sl56[0].x1 - sl56[1].x1) < 0.5, `${sl56[0]?.x1} vs ${sl56[1]?.x1}`)
 check('同起点：内层（depth1）更低、外层（depth0）更高', sl56.length === 2 && sl56[0].depth === 1 && sl56[1].depth === 0 && sl56[0].y > sl56[1].y, JSON.stringify(sl56.map((s) => ({ d: s.depth, y: s.y }))))
 check('同起点：内层 x2 < 外层 x2（3→2 短、3→4 长）', sl56.length === 2 && sl56[0].x2 < sl56[1].x2, `${sl56[0]?.x2} vs ${sl56[1]?.x2}`)
+// adj106：同起点嵌套外层同样平顶（不按单位数回退圆弧）
+check('adj106 同起点嵌套外层平顶', sl56.length === 2 && sl56[1].style === 'flat', JSON.stringify(sl56.map((s) => s.style)))
 
 // ---- 20. 装饰符号（M7d） ----
 console.log('[20] decorations (M7d)')
@@ -1030,6 +1034,9 @@ check('adj102 有低八度点：弧线起点 = 低八度点底 + LAYER_GAP×s', 
 // adj103：多音符（≥2）倚音数字间距缩小为 0.5×字号（0.5×9 = 4.5@18）；1[65] 与 2[h56] 两组
 const gx36c = [...svg36c.matchAll(/<text x="([^"]+)" y="[^"]+" font-size="9"/g)].map((m) => Number(m[1])).sort((a, b) => a - b)
 check('adj103 多音符倚音数字间距 = 0.5×字号（4.5）', gx36c.length === 4 && Math.abs(gx36c[1] - gx36c[0] - 4.5) < 0.15 && Math.abs(gx36c[3] - gx36c[2] - 4.5) < 0.15, `xs=${gx36c.join(',')}`)
+// adj106：倚音组右端与主音符固定留 1px×s（多音符组尾不侵入主音符区）——前倚音 1[65] 最右数字 5 右缘 = 主音符 1 左缘 - 1
+const yMainX1 = Number(svg36c.match(/<text x="([^"]+)" y="[^"]+" data-notepos="[^"]+" font-size="18"[^>]*font-weight="bold"[^>]*>1<\/text>/)?.[1] ?? 'NaN')
+check('adj106 前倚音组右端与主音符留 1px（不重叠）', !Number.isNaN(yMainX1) && Math.abs(gx36c[1] + 9 * 0.62 - (yMainX1 - 1)) < 0.3, `gRight=${(gx36c[1] + 5.58).toFixed(1)} main=${yMainX1}`)
 // adj98：倚音占位计入音符宽度——带倚音的音符 perBeat ≥ 无倚音音符
 const lay98 = layoutScore(r98g, defaultPageConfig)
 const n98 = [...lay98.pages[0].notes].sort((a, b) => a.x - b.x)

@@ -146,46 +146,41 @@ const barlineSpace = (gap: number, type: BarlineType = '|', comment?: string, no
   return base
 }
 
-/** 小节所需最小每拍宽：保证拍内任意相邻音符间距 ≥ 最小字符宽（adj13 按拍内最小时值；adj35 间距 1px） */
-function segPerBeatMin(seg: BarSeg, noteSize = 18): number {
-  const minDurByBeat = new Map<number, number>()
+/** 小节内每拍信息（adj106：倚音占位按拍记录，不再整小节最大 extra 应用到所有拍——会高估行宽导致早断行） */
+function segBeatMap(seg: BarSeg, noteSize = 18): Map<number, { minDur: number; extra: number }> {
+  const byBeat = new Map<number, { minDur: number; extra: number }>()
   let beat = 0
-  // adj98：倚音占位额外宽（小节内音符的最大倚音宽）
-  let extra = 0
   for (const t of seg.notes) {
     if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
       const dur = tokenDuration(t)
       const b = Math.floor(beat)
-      minDurByBeat.set(b, Math.min(minDurByBeat.get(b) ?? Infinity, dur))
+      const e = byBeat.get(b) ?? { minDur: Infinity, extra: 0 }
+      e.minDur = Math.min(e.minDur, dur)
+      if (t.kind === 'note') e.extra = Math.max(e.extra, graceExtraW(t, noteSize))
+      byBeat.set(b, e)
       beat += dur
-      if (t.kind === 'note') extra = Math.max(extra, graceExtraW(t, noteSize))
     }
   }
-  let minDur = Infinity
-  for (const d of minDurByBeat.values()) minDur = Math.min(minDur, d)
-  if (!Number.isFinite(minDur)) return BPW_NATURAL
-  // 每拍宽 ≥ minNoteW / 最小时值：相邻音符间距 = dur×perBeat ≥ minNoteW
-  return Math.max(BPW_NATURAL, minNoteW(noteSize, extra) / minDur)
+  return byBeat
 }
 
-/** 小节自然宽（adj35）：逐拍累加每拍 need（密集拍多占、正常拍 14），断行与拍级挤占一致 */
-function segNeedW(seg: BarSeg, noteSize = 18): number {
-  const minDurByBeat = new Map<number, number>()
-  let beat = 0
-  // adj98：倚音占位额外宽
-  let extra = 0
-  for (const t of seg.notes) {
-    if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
-      const dur = tokenDuration(t)
-      const b = Math.floor(beat)
-      minDurByBeat.set(b, Math.min(minDurByBeat.get(b) ?? Infinity, dur))
-      beat += dur
-      if (t.kind === 'note') extra = Math.max(extra, graceExtraW(t, noteSize))
-    }
+/** 小节所需最小每拍宽：保证拍内任意相邻音符间距 ≥ 最小字符宽（adj13 按拍内最小时值；adj35 间距 1px；adj106 拍级倚音占位） */
+function segPerBeatMin(seg: BarSeg, noteSize = 18): number {
+  const byBeat = segBeatMap(seg, noteSize)
+  if (byBeat.size === 0) return BPW_NATURAL
+  let m = 0
+  for (const e of byBeat.values()) {
+    m = Math.max(m, Math.max(BPW_NATURAL, minNoteW(noteSize, e.extra) / e.minDur))
   }
+  return m
+}
+
+/** 小节自然宽（adj35）：逐拍累加每拍 need（密集拍多占、正常拍 14），断行与拍级挤占一致；adj106 拍级倚音占位 */
+function segNeedW(seg: BarSeg, noteSize = 18): number {
+  const byBeat = segBeatMap(seg, noteSize)
   let w = 0
-  for (const d of minDurByBeat.values()) {
-    w += d > 0 ? Math.max(BPW_NATURAL, minNoteW(noteSize, extra) / d) : BPW_NATURAL
+  for (const e of byBeat.values()) {
+    w += e.minDur > 0 ? Math.max(BPW_NATURAL, minNoteW(noteSize, e.extra) / e.minDur) : BPW_NATURAL
   }
   return w
 }
@@ -199,14 +194,14 @@ function segNeedW(seg: BarSeg, noteSize = 18): number {
  * 返回每拍 perBeat；总宽 = Σ 拍时值 × perBeat ≈ avail（极端兜底等比压缩不溢出）。
  */
 function allocatePerBeats(
-  beats: { dur: number; minDur: number }[],
+  beats: { dur: number; minDur: number; extra?: number }[],
   avail: number,
   noteSize = 18,
 ): number[] {
   const n = beats.length
   if (n === 0) return []
   const need = beats.map((b) =>
-    b.minDur > 0 ? Math.max(BPW_NATURAL, minNoteW(noteSize) / b.minDur) : BPW_NATURAL,
+    b.minDur > 0 ? Math.max(BPW_NATURAL, minNoteW(noteSize, b.extra ?? 0) / b.minDur) : BPW_NATURAL,
   )
   const fixed = new Array<boolean>(n).fill(false)
   let pb = avail / Math.max(1e-6, beats.reduce((a, b) => a + b.dur, 0))
@@ -353,23 +348,36 @@ function breakRows(segs: BarSeg[], availW: number, noteSize = 18): LayoutRow[] {
   let w = 0 // 当前行逐拍 need 宽累积
   for (let i = 0; i < segs.length; i++) {
     const sb = segBeats(segs[i])
-    if (sb > Math.floor((availW - BAR_PAD * 2) / segPerBeatMin(segs[i], noteSize))) {
-      // 超长小节：flush 当前行，再按音符拍数拆碎片行（拆片上限按密度感知）
+    // adj106：小节整体超宽判定改用「拍级 need 总和」（原来按最密拍 need 高估，拆得过碎）
+    const segW = segNeedW(segs[i], noteSize) + noteGapOf(Math.ceil(sb))
+    if (segW > availW - BAR_PAD * 2) {
+      // 超长小节：flush 当前行，再按音符拍数拆碎片行（按拍级 need 累计，adj106）
       if (i > start) rows.push({ kind: 'bars', start, end: i })
-      const maxBeats = Math.max(1, Math.floor((availW - BAR_PAD * 2) / segPerBeatMin(segs[i], noteSize)))
-      let acc = 0
+      const byBeat = segBeatMap(segs[i], noteSize)
+      const needOf = new Map<number, number>()
+      for (const [p, e] of byBeat) needOf.set(p, Math.max(BPW_NATURAL, minNoteW(noteSize, e.extra) / e.minDur))
+      let accNeed = 0
+      let accBeats = 0
       let noteStart = 0
+      let lastP = -1
       const notes = segs[i].notes
       for (let j = 0; j < notes.length; j++) {
         const t = notes[j]
         const dur =
           t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm' ? tokenDuration(t) : 0
-        if (acc + dur > maxBeats && j > noteStart) {
-          rows.push({ kind: 'frag', segIdx: i, noteStart, noteEnd: j })
-          noteStart = j
-          acc = 0
+        const p = Math.floor(accBeats)
+        if (p !== lastP) {
+          // 进入新拍：计入该拍 need + 与前拍的间隙（行首拍无间隙）
+          const add = (needOf.get(p) ?? BPW_NATURAL) + (lastP >= 0 ? NOTE_GAP : 0)
+          if (accNeed + add > availW - BAR_PAD * 2 && j > noteStart) {
+            rows.push({ kind: 'frag', segIdx: i, noteStart, noteEnd: j })
+            noteStart = j
+            accNeed = 0
+          }
+          accNeed += add
+          lastP = p
         }
-        acc += dur
+        accBeats += dur
       }
       rows.push({ kind: 'frag', segIdx: i, noteStart, noteEnd: notes.length })
       start = i + 1
@@ -382,7 +390,7 @@ function breakRows(segs: BarSeg[], availW: number, noteSize = 18): LayoutRow[] {
       for (const t of segs[i].notes) {
         if (t.kind === 'note' && (t.symbols.includes('zkh') || t.symbols.includes('ykh'))) bp += BRACKET_PAD
       }
-      const nw = segNeedW(segs[i], noteSize) + noteGapOf(Math.ceil(sb)) + bp
+      const nw = segW + bp
       if (i > start && w + nw > availW) {
         rows.push({ kind: 'bars', start, end: i })
         start = i
@@ -577,7 +585,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       // 超长小节碎片行：拍级每拍宽（adj35）
       const seg = segs[row.segIdx]
       const slice = { notes: seg.notes.slice(row.noteStart, row.noteEnd), bar: null }
-      const beatsInfo: { dur: number; minDur: number }[] = []
+      const beatsInfo: { dur: number; minDur: number; extra: number }[] = []
       let fgBeat = 0
       for (const t of slice.notes) {
         if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
@@ -586,12 +594,17 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           let rem = dur
           while (rem > 1e-9) {
             const p = Math.floor(pos)
-            while (beatsInfo.length <= p) beatsInfo.push({ dur: 0, minDur: Infinity })
+            while (beatsInfo.length <= p) beatsInfo.push({ dur: 0, minDur: Infinity, extra: 0 })
             const piece = Math.min(rem, Math.floor(pos) + 1 - pos)
             beatsInfo[p].dur += piece
             beatsInfo[p].minDur = Math.min(beatsInfo[p].minDur, piece)
             pos += piece
             rem -= piece
+          }
+          // adj106：倚音占位记到音符起始拍（该拍分配更宽，避免倚音与相邻音符重叠）
+          if (t.kind === 'note') {
+            const p0 = Math.floor(fgBeat)
+            if (beatsInfo[p0]) beatsInfo[p0].extra = Math.max(beatsInfo[p0].extra, graceExtraW(t, m.noteSize))
           }
           fgBeat += dur
         }
@@ -699,7 +712,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     const pads = BAR_PAD * 2 + barGaps + leadPad
 
     // 行内拍序列（跨小节连续拍；行首空 seg 不占拍）
-    const beatsInfo: { dur: number; minDur: number }[] = []
+    const beatsInfo: { dur: number; minDur: number; extra: number }[] = []
     let gBeat = 0
     for (let b = row.start; b < row.end; b++) {
       const seg = segs[b]
@@ -712,12 +725,17 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           let rem = dur
           while (rem > 1e-9) {
             const p = Math.floor(pos)
-            while (beatsInfo.length <= p) beatsInfo.push({ dur: 0, minDur: Infinity })
+            while (beatsInfo.length <= p) beatsInfo.push({ dur: 0, minDur: Infinity, extra: 0 })
             const piece = Math.min(rem, Math.floor(pos) + 1 - pos)
             beatsInfo[p].dur += piece
             beatsInfo[p].minDur = Math.min(beatsInfo[p].minDur, piece)
             pos += piece
             rem -= piece
+          }
+          // adj106：倚音占位记到音符起始拍（该拍分配更宽，避免倚音与相邻音符重叠）
+          if (t.kind === 'note') {
+            const p0 = Math.floor(gBeat)
+            if (beatsInfo[p0]) beatsInfo[p0].extra = Math.max(beatsInfo[p0].extra, graceExtraW(t, m.noteSize))
           }
           gBeat += dur
         }
@@ -1330,6 +1348,19 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     return maxX
   }
 
+  /** 行首小节线中心 x（跨行连音符右半部从行首小节线处开始，adj106）；
+   *  仅取「位于行首音符左侧」的小节线（行首真有节线才从其开始），否则 null 用边距 */
+  const rowStartBarX = (rowIdx: number): number | null => {
+    const r = rows[rowIdx]
+    const barY = r.y - 18.4
+    const firstNoteX = r.notes[0]?.x ?? Infinity
+    let minX: number | null = null
+    for (const b of pages[r.page].barlines) {
+      if (Math.abs(b.yTop - barY) < 1 && b.x < firstNoteX && (minX === null || b.x < minX)) minX = b.x
+    }
+    return minX
+  }
+
   for (let si = 0; si < slurInfos.length; si++) {
     const { sp, a, b, rowA, rowB } = slurInfos[si]
     const raise = nestedRaise[si]
@@ -1337,7 +1368,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     // adj54：自动样式按「音符单位数」判断（增时线/附点折算进长度），>4 单位用平顶
     let unitCount = 0
     for (let i = sp.start; i <= sp.end; i++) unitCount += noteUnits[i] ?? 1
-    const style = slurStyleOf(unitCount)
+    const baseStyle = slurStyleOf(unitCount)
+    // adj106：嵌套时外层连音线一律平顶（nestedRaise>0 = 被更深线包含/包裹），
+    // 平顶线层次清晰不与内层圆弧交叉，保证美观
+    const style = nestedRaise[si] > 0 ? 'flat' : baseStyle
     // adj89：跨行连音线固定平顶（弧线跨行两端在行首/行尾高度差大，视觉不连贯）
     const crossRowStyle: 'arc' | 'flat' = rowB === rowA + 1 ? 'flat' : style
     if (rowA === rowB) {
@@ -1358,7 +1392,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       const rA = rows[rowA]
       const lastA = rA.notes[rA.notes.length - 1]
       const xEndA = Math.max(a.x + 6.58 + 2, rowEndBarX(rowA) ?? lastA.x + lastA.width - 2)
-      const xStartB = config.margin_left // 行首从边距处开始
+      // adj106：下一行始端 = 行首小节线（有则从其开始）否则从左边距开始
+      const xStartB = rowStartBarX(rowB) ?? config.margin_left
       pages[rA.page].slurs.push({
         x1: r1(a.x + 6.58),
         x2: r1(xEndA),

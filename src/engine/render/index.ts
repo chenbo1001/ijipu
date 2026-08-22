@@ -339,9 +339,15 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     //    基线 = mainTop - 0.5×s - 字号/9（字号/9 = 2×gs，即数字底到基线的 descender）
     const gBaseY = mainTop - 0.5 * s - gSize / 9
     // 数字水平排列：前倚音从主音符左上角向左依次排；后倚音从主音符右上角向右依次排
+    // adj106：组右端（前倚音）固定与主音符留 1px×s——多音符时组内间距 gapW < 槽宽 gW，
+    // 原公式按 gapW 排组尾会右移侵入主音符区造成重叠；后倚音原公式组左端已固定
     const gxs: number[] = []
     for (let gi = 0; gi < gn.notes.length; gi++) {
-      gxs.push(gn.after ? x + digitW + 1 * s + gi * gapW : x - 1 * s - (gn.notes.length - gi) * gapW)
+      gxs.push(
+        gn.after
+          ? x + digitW + 1 * s + gi * gapW
+          : x - 1 * s - gW - (gn.notes.length - 1 - gi) * gapW,
+      )
     }
     const gy = gBaseY // 同基线（水平排列）
     // 组范围（数字区）：组首 x、组尾 x
