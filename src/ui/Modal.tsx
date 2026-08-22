@@ -1,11 +1,25 @@
 /**
- * ui/Modal.tsx — 通用模态框（按住标题栏可拖动；背景无模糊）
+ * ui/Modal.tsx — 通用模态框（按住标题栏可拖动）
+ * props：maskDim 背景遮罩透明度（0~1，默认 0.6；试听对话框用 0 保持看谱）；
+ *        closeOnMaskClick 点击遮罩是否关闭（默认 true；试听对话框 false）。
  */
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useUiStore } from '../store/uiStore'
 
-export function Modal({ title, children }: { title: string; children: ReactNode }) {
+export function Modal({
+  title,
+  children,
+  maskDim = 0.6,
+  closeOnMaskClick = true,
+}: {
+  title: string
+  children: ReactNode
+  /** 背景遮罩透明度（0 = 不遮罩，试听时保持看谱） */
+  maskDim?: number
+  /** 点击遮罩区域是否关闭（false = 仅 ✕ 或 Esc 关闭） */
+  closeOnMaskClick?: boolean
+}) {
   const closeModal = useUiStore((s) => s.closeModal)
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -47,7 +61,11 @@ export function Modal({ title, children }: { title: string; children: ReactNode 
     : undefined
 
   return (
-    <div className="modal-mask" onClick={closeModal}>
+    <div
+      className="modal-mask"
+      style={{ background: `rgba(6, 10, 22, ${maskDim})` }}
+      onClick={closeOnMaskClick ? closeModal : undefined}
+    >
       <div
         ref={modalRef}
         className={dragging ? 'modal dragging' : 'modal'}

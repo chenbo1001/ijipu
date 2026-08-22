@@ -427,14 +427,14 @@ check('嵌套深度 0 和 1', depths[0] === 0 && depths[1] === 1, JSON.stringify
 // adj55：先进后出（LIFO 栈式）配对：最近打开的先闭合（标准括号嵌套）；
 // slurs[0] = 内层（depth1，更低）、slurs[1] = 外层（depth0，更高）
 check('深度 1 的线更低（内层小连音符包在外层大连音符下面）', laySl2.pages[0].slurs[0].y > laySl2.pages[0].slurs[1].y, `${laySl2.pages[0].slurs[0].y} vs ${laySl2.pages[0].slurs[1].y}`)
-// adj44：嵌套抬升 7px（外层线比内层线高 7px，避免重叠）
-check('嵌套抬升 7px（外层 y = 内层 y - 7，adj44）', Math.abs(laySl2.pages[0].slurs[0].y - laySl2.pages[0].slurs[1].y - 7) < 0.5, `${laySl2.pages[0].slurs[0].y} vs ${laySl2.pages[0].slurs[1].y}`)
-// 平顶样式
+// adj44/95：嵌套抬升 2px（外层线比内层线高 2px）
+check('嵌套抬升 2px（外层 y = 内层 y - 2，adj95）', Math.abs(laySl2.pages[0].slurs[0].y - laySl2.pages[0].slurs[1].y - 2) < 0.5, `${laySl2.pages[0].slurs[0].y} vs ${laySl2.pages[0].slurs[1].y}`)
+// 平顶样式（adj89：两端大弧度弧线过渡到平顶线）
 const laySl3 = layoutScore(slur, { ...defaultPageConfig, lianyinxian_type: 2 })
 const svgSl3 = renderScoreToSvg(laySl3)[0]
-check('平顶样式：圆角路径（直线段 + 弧线拐角）', svgSl3.includes('<path d="M') && svgSl3.includes(' Q ') && svgSl3.includes(' L '), '')
+check('平顶样式：贝塞尔路径（C 弧线 + 平顶横线）', svgSl3.includes('<path d="M') && svgSl3.includes(' C ') && svgSl3.includes(' L '), '')
 const s3Flat = laySl3.pages[0].slurs[0]
-check('平顶样式：横线在上 y-7、竖线朝下到 y、拐角弧线 r=4', svgSl3.includes(`M ${s3Flat.x1} ${s3Flat.y}`) && svgSl3.includes(`L ${s3Flat.x2} ${s3Flat.y}"`) && svgSl3.includes(`Q ${s3Flat.x1} ${s3Flat.y - 7}`) && svgSl3.includes(`L ${(s3Flat.x2 - 4).toFixed(1)} ${s3Flat.y - 7}`), svgSl3.slice(0, 250))
+check('平顶样式：两端弧线过渡到平顶线 y-7', svgSl3.includes(`M ${s3Flat.x1} ${s3Flat.y} C`) && svgSl3.includes(` ${(s3Flat.y - 7).toFixed(1)} C `) && svgSl3.includes(' C ') && svgSl3.includes(`"`), svgSl3.slice(0, 250))
 // adj54：自动样式按「音符单位数」判断（增时线/附点折算进长度，>4 单位平顶）
 const slAuto = (q: string) => layoutScore(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), defaultPageConfig).pages[0].slurs[0]?.style
 check('自动样式：4 个普通音符 = 4 单位 → 圆弧（边界不回归）', slAuto('( 1 2 3 4 ) 5 |') === 'arc', `got ${slAuto('( 1 2 3 4 ) 5 |')}`)
@@ -516,6 +516,38 @@ check('|"P:2/4" 解析为小节线备注', r67.errors.length === 0 && b67?.comme
 const svg67 = renderScoreToSvg(layoutScore(r67, defaultPageConfig))[0]
 check('临时节拍渲染分数（分子 2 / 分母 4，font-size 10 居中）', /<text x="[\d.]+" y="[\d.]+" text-anchor="middle" font-size="10"[^>]*>2<\/text>/.test(svg67) && /<text x="[\d.]+" y="[\d.]+" text-anchor="middle" font-size="10"[^>]*>4<\/text>/.test(svg67), '')
 check('临时节拍分数横线在分子/分母之间', /<line x1="[\d.]+" y1="([\d.]+)" x2="[\d.]+" y2="\1" stroke="#1b1b1b" stroke-width="1"\/>/.test(svg67), '')
+// adj86：大小写不敏感 —— 临时节拍 p:/P:、后倚音 h/H、平均连音组 y/Y
+const r86p = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"p:3/8" 3 4 |\n')
+const b86p = layoutScore(r86p, defaultPageConfig).pages[0].barlines.find((b) => b.comment?.toLowerCase().startsWith('p:'))
+check('|"p:3/8" 与 |"P:3/8" 等效（小写也渲染分数）', b86p !== undefined && renderScoreToSvg(layoutScore(r86p, defaultPageConfig))[0].includes('>3<') && renderScoreToSvg(layoutScore(r86p, defaultPageConfig))[0].includes('>8<'), '')
+const r86h = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1[H3] 2[h3] 3 |\n')
+const g86h = r86h.groups[0].music.tokens.filter((t) => t.kind === 'note' && t.gracenotes)
+check('后倚音 1[H3] 与 1[h3] 等效（均 after）', g86h.length === 2 && g86h.every((t) => t.gracenotes?.after === true), JSON.stringify(g86h.map((t) => t.gracenotes)))
+const r86y = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (Y1 2 3) 4 | (y5 6 7) 1 |\n')
+const g86y = r86y.groups[0].music.tokens.filter((t) => t.kind === 'note')
+// (Y1 2 3)：小节 4 拍 - 组外 4 的 1 拍 = 组 3 拍均分 3 音 = 每音 1 拍（tupletDur 覆盖原始时值）
+check('平均连音组 (Y…) 与 (y…) 等效（tupletDur 均分覆盖）', r86y.errors.length === 0 && g86y[0].tupletDur !== undefined && g86y[0].tupletDur === g86y[4].tupletDur && Math.abs((g86y[0].tupletDur ?? 0) - 1) < 1e-6, JSON.stringify(g86y.map((t) => t.tupletDur)))
+// adj86：临时节拍占位——分数右侧留 ≥2px，不压下一小节音符（小节间距含分数宽）
+const lay86p = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"P:2/4" 3 4 |\n'), defaultPageConfig)
+const b86x = lay86p.pages[0].barlines.find((b) => b.comment?.startsWith('P:'))
+const n86n = lay86p.pages[0].notes.find((n) => n.x > (b86x?.x ?? 0))
+check('临时节拍占位：分数后音符间距 ≥2px（音符 x ≥ 线右缘 + 分数半宽 + 2）', b86x !== undefined && n86n !== undefined && n86n.x >= b86x.x + 0.55 + 2 + 2, `noteX=${n86n?.x} barX=${b86x?.x}`)
+// adj88：连音线内相同音高连续音符连奏合并时值
+const r88a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (2 - | 2/) 3 |\n')
+const ev88a = buildPlaySequence(r88a, layoutScore(r88a, defaultPageConfig), 60).events
+const d88 = ev88a.filter((e) => e.placed.audioPitch === 'D4')
+check('(2 - | 2/) 连奏：2 一次共 2.5 拍', ev88a.length === 2 && d88.length === 1 && Math.abs(d88[0].durationMs - 2500) < 50, ev88a.map((e) => `${e.placed.audioPitch}:${e.durationMs}`).join(' '))
+const r88b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (2 3 | 2) 5 |\n')
+const ev88b = buildPlaySequence(r88b, layoutScore(r88b, defaultPageConfig), 60).events
+const d88b = ev88b.filter((e) => e.placed.audioPitch === 'D4')
+check('(2 3 | 2) 中间隔 3 不合并：3 个 D4 各 1 拍', d88b.length === 2 && d88b.every((e) => Math.abs(e.durationMs - 1000) < 50), ev88b.map((e) => `${e.placed.audioPitch}:${e.durationMs}`).join(' '))
+// adj88：从指定音符开始播放（双击音符定位试听起点）
+const r88s = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n')
+const lay88s = layoutScore(r88s, defaultPageConfig)
+const n88s = lay88s.pages[0].notes[3]
+const id88s = `${n88s.id.page}_${n88s.id.voice}_${n88s.id.group}_${n88s.id.index}`
+const seq88s = buildPlaySequence(r88s, lay88s, 60, id88s)
+check('从指定音符开始播放（起点 atMs=0，丢弃之前音符）', seq88s.events.length === 5 && seq88s.events[0].atMs === 0 && seq88s.events[0].placed.id.index === 3, seq88s.events.map((e) => `${e.placed.id.index}:${Math.round(e.atMs)}`).join(' '))
 // adj59：音符引号注释显示在音符正上方（有高八度点在圆点上方）；_ 代替空格
 const nc59 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1"渐强" 2\'"渐强_稍快" 3 |\n')
 const nc59n = nc59.groups[0].music.tokens.filter((t) => t.kind === 'note')
@@ -942,9 +974,55 @@ check('单空格 → 无警告', r36g.errors.length === 0, JSON.stringify(r36g.e
 // 括号一律连音线（空格与否均可）：( 2 3 ) 与 (4) 都是连音线
 const r36h = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 ( 2 3 ) (4) 5 |\n')
 check('( 2 3 ) 与 (4) 均解析为连音线', r36h.groups[0].music.tokens.map((t) => t.kind).join(',') === 'note,slur,note,note,slur,slur,note,slur,note,barline', r36h.groups[0].music.tokens.map((t) => t.kind).join(',') + ' | ' + JSON.stringify(r36h.errors))
-// 渲染：倚音小字
+// 渲染：倚音小字（adj98：字号 = 主音符 × 0.3 = 5.4 → 下限 6）
 const svg36c = renderScoreToSvg(layoutScore(r36c, defaultPageConfig))[0]
-check('倚音渲染小数字（font-size 10）', svg36c.includes('font-size="10"'))
+check('倚音渲染小数字（font-size = 0.3×18 = 6）', svg36c.includes('font-size="6"'), '')
+// adj97：倚音减时线为跨组平行横线（line 元素）而非斜线（path M...L...斜向）
+check('倚音减时线为横线（line 元素）', svg36c.includes('<line ') && svg36c.includes('stroke="#1b1b1b"'), '')
+// adj99：倚音与主音符之间是一条 1/4 圆弧（SVG A 命令），粗细同减时线 0.6
+check('倚音连接弧线为 1/4 圆弧（A 命令）', svg36c.includes(' A ') && svg36c.includes('stroke-width="0.6"'), '')
+// adj99：倚音数字不加粗（与主音符粗体区分）
+check('倚音数字不加粗', !svg36c.includes('font-size="6" font-weight="bold"'), '')
+// adj98：倚音减时线 = 实际时值 +1 条——主音符 1[65]（倚音无 /）→ 倚音有 1 条横线；
+// 2[3/]（倚音 /）→ 2 条（减时线数 = diminishCount + 1）
+const r98g = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 2[3] 3[4/] 4 |\n')
+const svg98g = renderScoreToSvg(layoutScore(r98g, defaultPageConfig))[0]
+// 减时线横线数量（倚音区）：2[3] → 1 条、3[4/] → 2 条，共 3 条小横线（y 在倚音基线下方）
+const gLines98 = [...svg98g.matchAll(/<line /g)].length
+check('倚音减时线 +1（2[3]→1 条、3[4/]→2 条，共 3 条横线）', gLines98 >= 3, `lines=${gLines98}`)
+// adj100：首条减时线 y = 主音符文本上端（主音符基线 y - 18×0.8 = y - 14.4）；同组线间距固定 1.2px
+const lay100 = layoutScore(r98g, defaultPageConfig)
+const n100 = [...lay100.pages[0].notes].sort((a, b) => a.x - b.x)
+// 按 x1 分组（2[3] 与 3[4/] 是两组音符，各自首条线都在自己的 mainTop，不能混算间距）
+const gLineGroups100 = new Map<number, number[]>()
+for (const m of svg98g.matchAll(/<line x1="([^"]+)" y1="([^"]+)" x2="([^"]+)" y2="[^"]+" stroke="#1b1b1b" stroke-width="0.6"/g)) {
+  const x1 = Number(m[1])
+  const arr = gLineGroups100.get(x1) ?? []
+  arr.push(Number(m[2]))
+  gLineGroups100.set(x1, arr)
+}
+const gLineYs100 = [...gLineGroups100.values()].map((g) => g.sort((a, b) => a - b))
+const firstLineY100 = Math.min(...gLineYs100.flat())
+const maxGroup100 = gLineYs100.reduce((a, b) => (b.length > a.length ? b : a), [])
+check('adj100 首条减时线 y = 主音符文本上端（基线 - 14.4）', gLineYs100.length >= 2 && Math.abs(firstLineY100 - (n100[0].y - 14.4)) < 0.5, `first=${firstLineY100} mainTop=${(n100[0].y - 14.4).toFixed(1)}`)
+check('adj100 减时线间距 1.2px', maxGroup100.length >= 2 && Math.abs(maxGroup100[1] - maxGroup100[0] - 1.2) < 0.05, `ys=${maxGroup100.join(',')}`)
+// adj100：倚音数字上移，基线在首条减时线上方（不压线）
+const gTextY100 = Number(svg98g.match(/<text x="[^"]+" y="([^"]+)" font-size="6"/)?.[1] ?? 'NaN')
+check('adj100 倚音数字上移（基线 < 首条减时线 - 1）', !Number.isNaN(gTextY100) && gTextY100 < gLineYs100[0] - 1, `gy=${gTextY100} line0=${gLineYs100[0]}`)
+// adj100：弧线前倚音自正下斜向右下（终点 x>起点 x、y>起点 y）、后倚音自正下斜向左下（终点 x<起点 x、y>起点 y）
+const arcs100 = [...svg36c.matchAll(/<path d="M ([-\d.]+) ([-\d.]+) A [\d.]+ [\d.]+ 0 0 ([01]) ([-\d.]+) ([-\d.]+)" fill="none" stroke="#1b1b1b" stroke-width="0.6"/g)].map((m) => ({ sx: Number(m[1]), sy: Number(m[2]), sweep: Number(m[3]), ex: Number(m[4]), ey: Number(m[5]) }))
+const arcFront = arcs100.find((a) => a.sweep === 1)
+const arcBack = arcs100.find((a) => a.sweep === 0)
+check('adj100 前倚音弧线斜向右下（终点 x>起点 x 且 y>起点 y）', !!arcFront && arcFront.ex > arcFront.sx && arcFront.ey > arcFront.sy, JSON.stringify(arcFront))
+check('adj100 后倚音弧线斜向左下（终点 x<起点 x 且 y>起点 y）', !!arcBack && arcBack.ex < arcBack.sx && arcBack.ey > arcBack.sy, JSON.stringify(arcBack))
+// adj98：倚音占位计入音符宽度——带倚音的音符 perBeat ≥ 无倚音音符
+const lay98 = layoutScore(r98g, defaultPageConfig)
+const n98 = [...lay98.pages[0].notes].sort((a, b) => a.x - b.x)
+const w98g = (n: { segments?: { x: number; beats: number; perBeat: number }[] }) => {
+  const segs = n.segments ?? []
+  return segs.reduce((a, s) => a + s.beats * s.perBeat, 0)
+}
+check('倚音占位计入音符宽度（带倚音音符更宽）', w98g(n98[0]) >= w98g(n98[2]), `g=${w98g(n98[0]).toFixed(1)} plain=${w98g(n98[2]).toFixed(1)}`)
 // 播放：倚音事件（音高覆盖）
 const seq36 = buildPlaySequence(r36c, layoutScore(r36c, defaultPageConfig), 120)
 const gPitches = seq36.events.filter((e) => e.pitch).map((e) => e.pitch)
@@ -1024,11 +1102,11 @@ const r40a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 5 6 7 1 | 1 2 3 4 
 const lay40a = layoutScore(r40a, defaultPageConfig)
 const ys40a = [...new Set(lay40a.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
 check('无歌词行高 = 曲高 + 曲上间距（50.6）', ys40a.length >= 2 && Math.abs(ys40a[1] - ys40a[0] - 50.6) < 0.5, `dy=${ys40a[1] - ys40a[0]}`)
-// 有歌词对照：行高 = 30.6 + 13 + (18+4+10) + 20 = 95.6（adj73 词曲最小间距 8→4；adj78 曲上间距 40→20）
+// 有歌词对照：行高 = 30.6 + 13 + (18+4+10) + 12 = 87.6（adj73 词曲最小间距 8→4；adj92 曲上间距 20→12）
 const r40b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 5 6 7 1 | 1 2 3 4 5 6 7 1 |\nC: 一 二 三 四 五 六 七 八 九 十 十 一 十 二 十 三 十 四\nQ: 1 2 3 4 5 6 7 1 | 1 2 3 4 5 6 7 1 |\nC: 一 二 三 四 五 六 七 八 九 十 十 一 十 二 十 三 十 四\n')
 const lay40b = layoutScore(r40b, defaultPageConfig)
 const ys40b = [...new Set(lay40b.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
-check('有歌词行高 = 95.6（曲上间距 20）', ys40b.length >= 2 && Math.abs(ys40b[1] - ys40b[0] - 95.6) < 0.5, `dy=${ys40b[1] - ys40b[0]}`)
+check('有歌词行高 = 87.6（曲上间距 12）', ys40b.length >= 2 && Math.abs(ys40b[1] - ys40b[0] - 87.6) < 0.5, `dy=${ys40b[1] - ys40b[0]}`)
 
 // ---- 41. 小节线高度与反复点（adj34） ----
 console.log('[41] barline height & dots (adj34)')
@@ -1438,19 +1516,20 @@ const rowEnd53 = lay53.pages[0].barlines
 check('连音符左半：第一行 2 → 行末小节线', Math.abs(s53[0].x1 - (n53[1].x + 6.58)) < 0.5 && Math.abs(s53[0].x2 - (rowEnd53[rowEnd53.length - 1]?.x ?? 0)) < 1, `x1=${s53[0].x1} x2=${s53[0].x2} bar=${rowEnd53[rowEnd53.length - 1]?.x}`)
 check('连音符右半：行首边距处 → 第二行 1', Math.abs(s53[1].x1 - 80) < 0.5 && Math.abs(s53[1].x2 - (n53[4].x + 4.58)) < 0.5, `x1=${s53[1].x1} x2=${s53[1].x2}`)
 check('左右两半跨行（y 不同）', Math.abs(s53[0].y - s53[1].y) > 1, `${s53[0].y} vs ${s53[1].y}`)
-// 半条形状：左半 = 低→高、右侧开口（三次贝塞尔 C）；右半 = 高→低、左侧开口
+// adj89：跨行连音线固定平顶（弧线跨行两端高度差大、不连贯）
+check('跨行连音符强制平顶（adj89）', s53[0].style === 'flat' && s53[1].style === 'flat', `${s53[0].style}/${s53[1].style}`)
 const svg53 = renderScoreToSvg(lay53)[0]
 const hlY = s53[0].y
 const hrY = s53[1].y
-check('弧线左半：最低处 → 行末最高点（右侧开口）', svg53.includes(`C ${s53[0].x1} ${(hlY - 9).toFixed(1)} ${s53[0].x2} ${(hlY - 4.5).toFixed(1)} ${s53[0].x2} ${(hlY - 4.5).toFixed(1)}`), '')
-check('弧线右半：行首最高点 → 最低处（左侧开口）', svg53.includes(`C ${s53[1].x1} ${(hrY - 4.5).toFixed(1)} ${s53[1].x2} ${(hrY - 9).toFixed(1)} ${s53[1].x2} ${hrY}`), '')
+check('平顶左半：两端弧线过渡到平顶线（右侧开口）', svg53.includes(`M ${s53[0].x1} ${hlY}`) && svg53.includes(`L ${s53[0].x2} ${(hlY - 7).toFixed(1)}"`), '')
+check('平顶右半：平顶线 + 右端弧线（左侧开口）', svg53.includes(`M ${s53[1].x1} ${(hrY - 7).toFixed(1)}`) && svg53.includes(` C `) && svg53.includes(`${s53[1].x2} ${hrY}"`), '')
 // 平顶跨行：左半右侧开口、右半左侧开口
 const lay53f = layoutScore(r53, { ...defaultPageConfig, lianyinxian_type: 2 })
 const svg53f = renderScoreToSvg(lay53f)[0]
 const s53fL = lay53f.pages[0].slurs.find((s) => s.half === 'l')
 const s53fR = lay53f.pages[0].slurs.find((s) => s.half === 'r')
-check('平顶左半：横线 + 左竖线，右侧开口', s53fL !== undefined && svg53f.includes(`L ${s53fL.x2} ${s53fL.y - 7}"`), '')
-check('平顶右半：横线 + 右竖线，左侧开口', s53fR !== undefined && svg53f.includes(`M ${s53fR.x1} ${s53fR.y - 7}`), '')
+check('平顶左半：横线 + 弧线，右侧开口', s53fL !== undefined && svg53f.includes(`L ${s53fL.x2} ${(s53fL.y - 7).toFixed(1)}"`), '')
+check('平顶右半：横线 + 弧线，左侧开口', s53fR !== undefined && svg53f.includes(`M ${s53fR.x1} ${(s53fR.y - 7).toFixed(1)}`), '')
 
 // ---- 54. 非整拍小节/密集行不溢出边距 ----
 console.log('[54] fractional-bar & dense-row no overflow')
@@ -1494,16 +1573,17 @@ const lay55 = layoutScore(r55b, defaultPageConfig)
 const svg55 = renderScoreToSvg(lay55)[0]
 const s55 = lay55.pages[0].slurs.find((s) => s.tupletCount === 4)
 check('平均组 tupletCount=4', s55 !== undefined)
-const label55 = svg55.includes(`>4</text>`) && svg55.includes('height="10" rx="2"')
+const label55 = svg55.includes(`>4</text>`) && svg55.includes('rx="2"')
 check('渲染：数字 4 + 不透明背景 rect', label55)
 // adj43：普通连音线 (…) 不标注数字——(1 2 3) 无 tupletCount、SVG 无数字标签
 const lay55c = layoutScore(r55c, defaultPageConfig)
 const s55c = lay55c.pages[0].slurs
 check('普通连音线 (…) 无 tupletCount', s55c.length === 1 && s55c[0].tupletCount === undefined, JSON.stringify(s55c.map((s) => s.tupletCount)))
-check('普通连音线 (…) SVG 不渲染数字', !renderScoreToSvg(lay55c)[0].includes('height="10" rx="2"'))
-// adj43：数字下移 2px 位于线正中——文字基线 = 弧线顶点 topY + 2（topY = slur.y - 4.5）
-const labelEl55 = /height="10" rx="2"[^>]*\/><text x="([\d.]+)" y="([\d.]+)"[^>]*>4<\/text>/.exec(svg55)
+check('普通连音线 (…) SVG 不渲染数字', !renderScoreToSvg(lay55c)[0].includes('rx="2"'))
+// adj89：数字字号 = 音符字号 × TUPLET_NUM_RATIO（0.2×18=3.6 → 下限 7）；基线 = 弧线顶点 + 2
+const labelEl55 = /rx="2"[^>]*\/><text x="([\d.]+)" y="([\d.]+)"[^>]*>4<\/text>/.exec(svg55)
 const labelY55 = labelEl55 ? Number(labelEl55[2]) : NaN
+check('数字字号随音符（0.2×18 → 7）', svg55.includes('font-size="7"'), '')
 check('数字下移 2px（基线 = 线顶点 + 2）', Number.isFinite(labelY55) && Math.abs(labelY55 - (s55!.y - 4.5 + 2)) < 0.5, `labelY=${labelY55} slur.y=${s55?.y}`)
 // 平均组占宽：4 个 0.75 拍音符 vs 3 个 1 拍音符——同一小节宽一致
 const lay55a = layoutScore(r55, defaultPageConfig)

@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
+import { useUiStore } from '../store/uiStore'
 import {
   layoutScore,
   buildPlaySequence,
@@ -22,6 +23,8 @@ export function PlaybackDialog() {
   const parseResult = useDocStore((s) => s.parseResult)
   const pageConfig = useDocStore((s) => s.pageConfig)
   const setActiveNoteId = useDocStore((s) => s.setActiveNoteId)
+  const playbackStartId = useUiStore((s) => s.playbackStartId)
+  const setPlaybackStart = useUiStore((s) => s.setPlaybackStart)
 
   const defaultBpm = useMemo(() => inferBpm(parseResult), [parseResult])
   const [bpm, setBpm] = useState(defaultBpm)
@@ -73,19 +76,22 @@ export function PlaybackDialog() {
         setKind('synth')
       }
     }
-    // 构建序列（含反复展开）
+    // 构建序列（含反复展开；adj88：双击谱面音符定位试听起点）
     const layout = layoutScore(parseResult, pageConfig)
-    const seq = buildPlaySequence(parseResult, layout, bpm)
+    const seq = buildPlaySequence(parseResult, layout, bpm, playbackStartId)
     setTotalMs(seq.totalMs)
     const job = schedulePlay(seq, backend, (placed) => {
       setActiveNoteId(placed.id.page + '_' + placed.id.voice + '_' + placed.id.group + '_' + placed.id.index)
     })
     cancelRef.current = job.cancel
     setPlaying(true)
+    // 起点播放后清除标记，下次播放从头开始
+    if (playbackStartId) setPlaybackStart(null)
   }
 
   return (
-    <Modal title="试听播放">
+    // adj87：试听时保持看谱——背景不遮罩（maskDim=0）、点击遮罩不关闭（仅 ✕ / Esc）
+    <Modal title="试听播放" maskDim={0} closeOnMaskClick={false}>
       <div style={{ fontSize: 13, lineHeight: 1.9 }}>
         <div style={{ fontWeight: 700, fontSize: 15 }}>{header.titles[0] ?? '未命名'}</div>
         {header.authors.length > 0 && (

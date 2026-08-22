@@ -27,6 +27,8 @@ export function PreviewPane() {
   const jumpCursor = useDocStore((s) => s.jumpCursor)
   const showGuides = useUiStore((s) => s.showGuides)
   const previewZoom = useUiStore((s) => s.previewZoom)
+  const openModal = useUiStore((s) => s.openModal)
+  const setPlaybackStart = useUiStore((s) => s.setPlaybackStart)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const pageConfigRef = useRef(pageConfig)
@@ -94,6 +96,17 @@ export function PreviewPane() {
     setActiveNoteId(id)
     const pos = noteIdToCodePos(code, id)
     if (pos !== null) jumpCursor(pos)
+  }
+
+  // adj88：双击谱面音符 → 定位试听起点并打开试听对话框（从该音符开始播放）
+  const onDoubleClick = (e: React.MouseEvent) => {
+    const target = (e.target as Element).closest('[data-notepos]')
+    if (!target) return
+    const id = target.getAttribute('data-notepos')
+    if (!id) return
+    setActiveNoteId(id)
+    setPlaybackStart(id)
+    openModal('playback')
   }
 
   // ---- 描述头元素拖拽（adj9） ----
@@ -250,7 +263,7 @@ export function PreviewPane() {
 
   return (
     <div className="preview-pane">
-      <div className="pages" ref={containerRef} onClick={onClick} onMouseDown={onMetaMouseDown}>
+      <div className="pages" ref={containerRef} onClick={onClick} onDoubleClick={onDoubleClick} onMouseDown={onMetaMouseDown}>
         {pagesHtml.map((svg, i) => {
           const page = layout.pages[i]
           const pct = (v: number) => `${((v / page.width) * 100).toFixed(2)}%`

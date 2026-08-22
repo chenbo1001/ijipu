@@ -490,10 +490,10 @@ body {
   border-color: var(--jp-success);
 }
 
-/* 描述头区域下端线（adj30）：青色默认色，与绿色曲行顶线区分 */
+/* 描述头区域下端线（adj30）：橙黄色，与边距青色/曲行绿色区分 */
 .guide-desc {
   opacity: 0.6;
-  border-color: var(--jp-accent);
+  border-color: var(--jp-warning);
 }
 
 /* 曲词间距线（橙） / 词曲间距线（紫） */
@@ -503,6 +503,12 @@ body {
 }
 
 .guide-cici {
+  opacity: 0.5;
+  border-color: #c58bff;
+}
+
+/* 词部行虚线（adj92）：紫色，与边距（青）/描述头（橙）/曲部行（绿）区分 */
+.guide-lyric-row {
   opacity: 0.5;
   border-color: #c58bff;
 }

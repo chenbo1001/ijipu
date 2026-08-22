@@ -143,10 +143,10 @@ export function tokenizeMusicLine(
       continue
     }
 
-    // 连音线/连音组：`(` 修饰其后音符（起点），`)` 结束；"(y" 前缀 = 平均连音组（均分时值）
+    // 连音线/连音组：`(` 修饰其后音符（起点），`)` 结束；"(y"/"(Y" 前缀 = 平均连音组（均分时值，adj86 大小写不敏感）
     if (c === '(') {
       let j = i + 1
-      const tuplet = content[j] === 'y'
+      const tuplet = content[j] !== undefined && content[j].toLowerCase() === 'y'
       if (tuplet) j++
       tokens.push({ kind: 'slur', dir: 'open', pos: i, raw: content.slice(i, j), tuplet })
       i = j
@@ -306,7 +306,8 @@ export function tokenizeMusicLine(
       if (last && last.kind === 'note') {
         let k = i + 1
         let after = false
-        if (content[k] === 'h') {
+        // adj86：[h 与 [H 等效（后倚音，大小写不敏感）
+        if (content[k] !== undefined && content[k].toLowerCase() === 'h') {
           after = true
           k++
         }

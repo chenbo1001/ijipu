@@ -55,6 +55,8 @@ function detectSystemLight(): boolean {
 
 interface UiState {
   modal: ModalKind | null
+  /** 试听起始音符 id（双击谱面音符定位试听起点，adj88；null = 从头播放） */
+  playbackStartId: string | null
   /** 预览页排版辅助虚线开关 */
   showGuides: boolean
   /** 中国色主题 id */
@@ -71,6 +73,7 @@ interface UiState {
   previewZoom: number
   openModal: (m: ModalKind) => void
   closeModal: () => void
+  setPlaybackStart: (id: string | null) => void
   setShowGuides: (b: boolean) => void
   setTheme: (id: string) => void
   setThemeMode: (m: ThemeMode) => void
@@ -82,6 +85,7 @@ interface UiState {
 
 export const useUiStore = create<UiState>()((set) => ({
   modal: null,
+  playbackStartId: null,
   showGuides: true,
   theme: loadTheme(),
   themeMode: loadThemeMode(),
@@ -90,7 +94,8 @@ export const useUiStore = create<UiState>()((set) => ({
   editorFontSize: loadNum(EDITOR_FS_KEY, 14),
   previewZoom: loadNum(PREVIEW_ZOOM_KEY, 100),
   openModal: (m) => set({ modal: m }),
-  closeModal: () => set({ modal: null }),
+  closeModal: () => set({ modal: null, playbackStartId: null }),
+  setPlaybackStart: (id) => set({ playbackStartId: id }),
   setShowGuides: (b) => set({ showGuides: b }),
   setTheme: (id) => {
     try {

@@ -562,7 +562,7 @@ export const defaultPageConfig: PageConfig = {
   height_quci: 13,
   height_cici: 10,
   height_ciqu: 20, // adj78：曲部与曲部间距默认 40→20；adj79 拆分后仅指无歌词行行尾间距
-  height_ciqu_lyric: 20, // adj79：曲部与上一行词部间距（有歌词行行尾间距）
+  height_ciqu_lyric: 12, // adj92：曲部与上一行词部间距 20→12（用户反馈仍偏大，收窄与 quci 相近）
   height_shengbu: 0,
   bar_gap: 0,
   lianyinxian_type: 0,

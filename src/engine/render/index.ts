@@ -25,6 +25,7 @@ import {
   VOLTA_BAR_GAP,
   VOLTA_RAISE,
   VOLTA_COMMENT_FONT_RATIO,
+  TUPLET_NUM_RATIO,
   noteScaleOf,
   beamY,
   lowDotY,
@@ -309,32 +310,41 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     )
   }
 
-  // 倚音（adj23/65）：前倚音 [65] 斜排于主音符左上方、后倚音 [h65] 斜排于右上方（小字号，不占拍）；
-  // 倚音减时线用斜线（简谱倚音特征，区别于主音符横线）；多个倚音沿上斜线依次排开；尺寸随字号（adj69）
+  // 倚音（adj23/65/97/98/99/100）：前倚音 [65] 排于主音符左上角、后倚音 [h65] 排于右上角
+  // 规范（用户 2026-08-22 + adj100 调整）：
+  //  ① 倚音字号 = 主音符 × 0.3，**不加粗**（与主音符粗体区分）；
+  //  ② 倚音减时线 = 实际时值 +1 条（2[3] → 1 条、2[3/] → 2 条），线**更细**（0.6）、
+  //     间距固定 1.2px（adj100 由 1.8px 减小；不以 0.3 字号等比缩放，避免小字号下线连成一片）；
+  //  ③ adj100：第一条减时线与主音符文本上端对齐（= mainTop）；倚音数字整体上移，
+  //     数字底与第一条减时线留 2px 间距（原与主音符上沿对齐会压线）；
+  //  ④ 无论几个倚音，只有**一条弧线**：起点在倚音组中心正下方（减时线下方），
+  //     前倚音自正下**斜向右下**弯向主音符左侧、后倚音自正下**斜向左下**弯向主音符右侧（adj100）
   if (t.kind === 'note' && t.gracenotes && t.gracenotes.notes.length > 0) {
     const gn = t.gracenotes
-    const gSize = Math.round(10 * s) // 倚音字号（约主音符一半，随字号）
-    const gW = 7 * s // 每个倚音音符占宽
-    const rise = 3 * s // 斜排步进：每增一个倚音向上抬
-    const gBaseY = y - 2 * s // 倚音基线略高于主音符基线
+    const gSize = Math.max(6, size * 0.3) // ①倚音字号 = 主音符 × 0.3（下限 6px 防过小）
+    const gW = gSize * 0.62 // 每个倚音数字占宽（同数字槽宽比例）
+    const mainTop = y - size * DIGIT_HEIGHT_RATIO // 主音符文本上端（adj100 = 第一条减时线位置）
+    // ③ 倚音数字上移：数字底 ≈ 基线 + 字号/9，取 = 第一条减时线上方 2px → 基线 = mainTop - 2 - gSize/9
+    const gBaseY = mainTop - 2 - gSize / 9
+    // 数字水平排列：前倚音从主音符左上角向左依次排；后倚音从主音符右上角向右依次排
+    const gxs: number[] = []
+    for (let gi = 0; gi < gn.notes.length; gi++) {
+      gxs.push(gn.after ? x + digitW + 1 * s + gi * gW : x - 1 * s - (gn.notes.length - gi) * gW)
+    }
+    const gy = gBaseY // 同基线（水平排列）
+    // 组范围（数字区）：组首 x、组尾 x
+    const gx1 = Math.min(...gxs)
+    const gx2 = Math.max(...gxs) + gW
     for (let gi = 0; gi < gn.notes.length; gi++) {
       const g = gn.notes[gi]
-      // 前倚音：最后一个贴主音符左缘，前面的依次向左上斜排；
-      // 后倚音：第一个贴主音符右缘，后面的依次向右上斜排
-      const gx = gn.after
-        ? x + digitW + 3 * s + gi * gW
-        : x - 3 * s - (gn.notes.length - gi) * gW
-      const gy =
-        gn.after
-          ? gBaseY - gi * rise
-          : gBaseY - (gn.notes.length - 1 - gi) * rise
-      // 小高低音点
+      const gx = gxs[gi]
+      // 小高低音点（规则同主音符，以倚音字号为参照）
       if (g.octaveShift !== 0) {
-        const dir = g.octaveShift > 0 ? -1 : 1
         const cx = gx + gW / 2
-        for (let d = 0; d < Math.abs(g.octaveShift); d++) {
-          const cy = gy + dir * (11 + d * 5) * s
-          parts.push(`<circle cx="${r1n(cx)}" cy="${r1n(cy)}" r="${r1n(1.5 * s)}" fill="#1b1b1b"/>`)
+        const n = Math.abs(g.octaveShift)
+        for (let d = 0; d < n; d++) {
+          const cy = g.octaveShift > 0 ? octaveDotY(gy, d, gSize) : lowDotY(gy, d, g.diminishCount + 1, gSize)
+          parts.push(`<circle cx="${r1n(cx)}" cy="${r1n(cy)}" r="${r1n(DOT_R * (gSize / 18))}" fill="#1b1b1b"/>`)
         }
       }
       // 变音
@@ -344,18 +354,42 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
           `<text x="${gx - 3.5 * s}" y="${gy - 6 * s}" font-size="${r1n(8 * s)}" font-family="${font}" fill="#1b1b1b">${sym}</text>`,
         )
       }
-      // 减时线（adj65：倚音用斜线——从数字右上向左下斜，d 根平行偏移 2px×s）
-      for (let d = 0; d < g.diminishCount; d++) {
-        const sx = gx + gW - 2 * s + d * 2 * s
-        const sy = gy - 5 * s - d * 2 * s
-        const len = 5 * s
-        parts.push(
-          `<path d="M ${r1n(sx)} ${r1n(sy)} L ${r1n(sx - len)} ${r1n(sy + len)}" stroke="#1b1b1b" stroke-width="1"/>`,
-        )
-      }
-      // 数字
+      // ①数字：不加粗（与主音符粗体区分）
       parts.push(
-        `<text x="${gx}" y="${gy}" font-size="${gSize}" font-family="${font}" font-weight="bold" fill="#1b1b1b">${g.pitch}</text>`,
+        `<text x="${gx}" y="${gy}" font-size="${gSize}" font-family="${font}" fill="#1b1b1b">${g.pitch}</text>`,
+      )
+    }
+    // ②减时线（跨组平行横线）：实际时值 +1 条；线更细 0.6、间距固定 1.2px
+    //   （adj100：首条线 = mainTop 与主音符文本上端对齐；间距 1.8 → 1.2px）
+    const maxDim = Math.max(0, ...gn.notes.map((g) => g.diminishCount + 1))
+    const beamGap = 1.2
+    const beamTop = mainTop
+    for (let d = 0; d < maxDim; d++) {
+      const ly = beamTop + d * beamGap
+      parts.push(
+        `<line x1="${r1n(gx1)}" y1="${r1n(ly)}" x2="${r1n(gx2)}" y2="${r1n(ly)}" stroke="#1b1b1b" stroke-width="0.6"/>`,
+      )
+    }
+    // ④ 一条弧线：起点 = 倚音组中心正下方（最后一条减时线下方 2px），
+    //    终点 = 主音符侧边、比起点低 3px（斜向下）；半径取组中心到主音符的间距，
+    //    前 sweep=1 凸向右下、后 sweep=0 凸向左下；线宽同减时线 0.6
+    const gcx = (gx1 + gx2) / 2 // 倚音组中心 x
+    const arcStartY = beamTop + (maxDim - 1) * beamGap + 2 // 弧线起点（减时线下方）
+    const arcW = 0.6 // 弧线宽 = 减时线宽
+    const arcDrop = 3 * s // 终点比起点低（斜向下垂）
+    if (gn.after) {
+      // 后倚音（组在右）：起点 = 组中心正下方，终点 = 主音符右缘下方 → 斜向左下（sweep=0）
+      const dx = gcx - (x + digitW)
+      const r = Math.max(3 * s, Math.min(10 * s, dx))
+      parts.push(
+        `<path d="M ${r1n(gcx)} ${r1n(arcStartY)} A ${r1n(r)} ${r1n(r)} 0 0 0 ${r1n(x + digitW)} ${r1n(arcStartY + arcDrop)}" fill="none" stroke="#1b1b1b" stroke-width="${arcW}"/>`,
+      )
+    } else {
+      // 前倚音（组在左）：起点 = 组中心正下方，终点 = 主音符数字左缘（= x）下方 → 斜向右下（sweep=1）
+      const dx = x - gcx
+      const r = Math.max(3 * s, Math.min(10 * s, dx))
+      parts.push(
+        `<path d="M ${r1n(gcx)} ${r1n(arcStartY)} A ${r1n(r)} ${r1n(r)} 0 0 1 ${r1n(x)} ${r1n(arcStartY + arcDrop)}" fill="none" stroke="#1b1b1b" stroke-width="${arcW}"/>`,
       )
     }
   }
@@ -521,8 +555,9 @@ function renderBarline(bar: PlacedBarline, noteSize = 18): string {
   }
 
   // 小节线备注；adj67：|"P:2/4" 临时节拍 → 小节线右侧画分数（上下数字+横线，整体高度与小节线等高，随字号 adj69）
+  // adj86：|"p:2/4" 与 |"P:2/4" 等效（大小写不敏感）
   if (bar.comment) {
-    const pm = /^P:\s*(\d+)\s*\/\s*(\d+)$/.exec(bar.comment)
+    const pm = /^p:\s*(\d+)\s*\/\s*(\d+)$/i.exec(bar.comment)
     if (pm) {
       const size = Math.round(10 * s) // 分数字号：总高 ≈ 小节线高，随字号
       const halfW = Math.max(pm[1].length, pm[2].length) * size * 0.32 + 1.5 * s
@@ -689,13 +724,14 @@ function renderVoltas(barlines: PlacedBarline[], noteSize = 18): string {
 // 连音线绘制（M7c）
 // ============================================================
 
-function renderSlur(s: PlacedSlur): string {
+function renderSlur(s: PlacedSlur, noteSize = 18): string {
   const { x1, x2, y } = s
   // 平均连音组标注（adj43）：仅 (y...) 组在弧线/横线正中画数字（不透明背景）；
   // 普通连音线 (…) 不标注。数字向下偏移 2px 使其居于线正中。
+  // adj89：数字字号 = 音符字号 × TUPLET_NUM_RATIO（默认 0.2，可调常量）
   const label = (cx: number, cy: number): string => {
     if (!s.tupletCount || s.tupletCount < 2) return ''
-    const size = 10
+    const size = Math.max(7, Math.round(noteSize * TUPLET_NUM_RATIO))
     const text = String(s.tupletCount)
     const w = Math.max(14, text.length * 7 + 3)
     const dy = 2 // 数字下移 2px → 位于线正中
@@ -705,45 +741,50 @@ function renderSlur(s: PlacedSlur): string {
     )
   }
   if (s.style === 'flat') {
-    // 平顶：横线在上（y-7）、竖线朝下（至 y）、拐角圆弧（r=4）
-    const r = 4
-    const leg = 7
+    // 平顶（adj89）：横线在上（y-leg），两端从音符处**圆弧过渡**到平顶线
+    // （adj94：两端是明显的弧线而非直坡面——从音符竖直上弯，用三次贝塞尔
+    //   控制点让曲线外凸（弧线感），到横线处水平切入；非此前近直线的缓坡）
+    // adj96：嵌套内层（depth>0）连音线高度少 1px（横线更贴音符，层次更分明）
+    const leg = 7 - (s.depth > 0 ? 1 : 0)
     const barY = y - leg
+    // 弧线水平跨度：取音符间距的一半内合理值，短连音线自动收窄
+    const halfL = Math.min(16, Math.abs(x2 - x1) / 2 - 1)
+    // 弧线控制点：c1 竖直偏右（从音符向上弯的起点）、c2 横线左侧（水平进入）
+    // 竖直分量 leg×0.9、水平分量 halfL×0.45 → 曲线外凸明显，呈圆弧而非坡面
+    const c1x = x1 + halfL * 0.45
+    const c1y = y - leg * 0.9
+    const c2x = x1 + halfL - 3
     if (s.half === 'l') {
-      // 左半部：横线 + 左竖线，右侧开口
+      // 左半部：从音符（x1,y）弧线升到平顶线，横线右伸（右侧开口）
       return (
         `<path d="M ${x1} ${y} ` +
-        `L ${x1} ${(barY + r).toFixed(1)} ` +
-        `Q ${x1} ${barY} ${(x1 + r).toFixed(1)} ${barY} ` +
+        `C ${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${barY} ${(x1 + halfL).toFixed(1)} ${barY} ` +
         `L ${x2} ${barY}" ` +
         `fill="none" stroke="#1b1b1b" stroke-width="1"/>`
       )
     }
     if (s.half === 'r') {
-      // 右半部：横线 + 右竖线，左侧开口
+      // 右半部：横线从左伸来，右端弧线降到音符（左侧开口）
       return (
         `<path d="M ${x1} ${barY} ` +
-        `L ${(x2 - r).toFixed(1)} ${barY} ` +
-        `Q ${x2} ${barY} ${x2} ${(barY + r).toFixed(1)} ` +
-        `L ${x2} ${y}" ` +
+        `L ${(x2 - halfL).toFixed(1)} ${barY} ` +
+        `C ${(x2 - halfL + 3).toFixed(1)} ${barY} ${(x2 - halfL * 0.45).toFixed(1)} ${c1y.toFixed(1)} ${x2} ${y}" ` +
         `fill="none" stroke="#1b1b1b" stroke-width="1"/>`
       )
     }
-    // 完整：横线 + 两端竖线（拐角圆弧）；正中标连音组数字
+    // 完整：两端弧线升到平顶线 + 中间横线；正中标连音组数字
     const midX = (x1 + x2) / 2
     return (
       `<path d="M ${x1} ${y} ` +
-      `L ${x1} ${(barY + r).toFixed(1)} ` +
-      `Q ${x1} ${barY} ${(x1 + r).toFixed(1)} ${barY} ` +
-      `L ${(x2 - r).toFixed(1)} ${barY} ` +
-      `Q ${x2} ${barY} ${x2} ${(barY + r).toFixed(1)} ` +
-      `L ${x2} ${y}" ` +
+      `C ${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${barY} ${(x1 + halfL).toFixed(1)} ${barY} ` +
+      `L ${(x2 - halfL).toFixed(1)} ${barY} ` +
+      `C ${(x2 - halfL + 3).toFixed(1)} ${barY} ${(x2 - halfL * 0.45).toFixed(1)} ${c1y.toFixed(1)} ${x2} ${y}" ` +
       `fill="none" stroke="#1b1b1b" stroke-width="1"/>` +
       label(midX, barY)
     )
   }
-  // 圆弧
-  const topY = y - 4.5 // 弧线最高点（与完整弧线顶点同高）
+  // 圆弧（adj96：嵌套内层 depth>0 高度少 1px，弧线更贴音符）
+  const topY = y - (s.depth > 0 ? 3.5 : 4.5) // 弧线最高点（与完整弧线顶点同高）
   if (s.half === 'l') {
     // 左半部：从最低处（x1,y）竖直向上出发，行末为最高点（x2, topY），右侧开口
     return (
@@ -894,7 +935,7 @@ function renderPage(page: ScorePage, config: PageConfig, pageCount: number): str
   // 描述头（标题/作者/调号/拍号/节拍）仅第一页显示，后续页面不重复
   if (page.index === 0) body.push(renderMeta(page, config))
   body.push(renderVoltas(page.barlines, config.note_size)) // 跳房子线画在最底层
-  for (const s of page.slurs) body.push(renderSlur(s))
+  for (const s of page.slurs) body.push(renderSlur(s, config.note_size))
   for (const d of page.dynamics) body.push(renderDynamic(d))
   body.push(renderBeams(computeBeams(page.notes, config.note_size)))
   for (const n of page.notes) body.push(renderNote(n, config))

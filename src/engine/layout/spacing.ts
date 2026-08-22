@@ -57,6 +57,8 @@ export const DESC_RATIO = 0.2
 export const SLUR_W = 1
 /** 连音线嵌套抬升（每层，px） */
 export const SLUR_NEST_RAISE = 5
+/** 平均连音组数字字号与音符字号的比值（adj89：默认 0.2×noteSize，可调整） */
+export const TUPLET_NUM_RATIO = 0.2
 
 // ---- 水平元素占位 ----
 /** 左右括号（&zkh/&ykh）占位宽度（px，adj64：非时值元素，先扣除再分摊时值宽） */
