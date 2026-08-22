@@ -560,24 +560,35 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
             )
           }
         } else if (sym === 'shy' || sym === 'xhy') {
-          // 滑音：音符中右/左起，向右/左上弧线 + 末端箭头
-          // adj114：滑音大小 = 音符的 1/4（跨度/高度 ≈ size×0.25），箭头实心清晰可见
+          // 滑音：细线弧线 + 末端线形 > 箭头（adj119：箭头方向 = 弧线末端切线延伸方向）
+          // 上滑音：从音符中部右侧，弧线向右再弧线向上；下滑音水平镜像
           const right = sym === 'shy'
-          const x1 = right ? x + digitW + 1 * s : x - 1 * s
+          const cx0 = x + digitW / 2 // 音符中部
+          const x1 = right ? cx0 + 2 * s : cx0 - 2 * s // 中部右侧/左侧起笔
           const y1 = y - size * 0.4 // 音符中部
-          const sz = size * 0.25
+          const sz = size * 0.25 // 滑音大小 = 音符的 1/4
           const x2 = right ? x1 + sz : x1 - sz
           const y2 = y1 - sz
-          const mx = (x1 + x2) / 2
+          const mx = (x1 + x2) / 2 // 控制点水平（先向右/左弯再向上）
           parts.push(
             `<path d="M ${r1n(x1)} ${r1n(y1)} Q ${r1n(mx)} ${r1n(y1)} ${r1n(x2)} ${r1n(y2)}" fill="none" stroke="#1b1b1b" stroke-width="1"/>`,
           )
-          // 末端箭头：尖在末端、两翼向弧线后方张开（指向右/左上）
-          const dir = right ? -1 : 1
-          const bx = x2 + dir * 2.2 * s
-          const by = y2 + 2.2 * s
+          // > 箭头：尖在弧线末端沿切线延伸方向，两翼向后张开（线形两笔）
+          const tx = x2 - mx
+          const ty = y2 - y1
+          const tLen = Math.hypot(tx, ty) || 1
+          const ux = tx / tLen // 切线单位方向（末端延伸方向）
+          const uy = ty / tLen
+          const al = 3 * s // 箭头长度（尖到翼根）
+          const aw = 2 * s // 开度（两翼到中线距离）
+          const ax = x2 + ux * al
+          const ay = y2 + uy * al
+          const bx = x2 + ux * (al - aw)
+          const by = y2 + uy * (al - aw)
+          const ox = -uy * aw
+          const oy = ux * aw
           parts.push(
-            `<path d="M ${r1n(x2)} ${r1n(y2)} L ${r1n(bx)} ${r1n(y2 - 2.2 * s)} L ${r1n(bx)} ${r1n(by)} Z" fill="#1b1b1b"/>`,
+            `<path d="M ${r1n(bx + ox)} ${r1n(by + oy)} L ${r1n(ax)} ${r1n(ay)} L ${r1n(bx - ox)} ${r1n(by - oy)}" fill="none" stroke="#1b1b1b" stroke-width="1"/>`,
           )
         } else if (sym === 'hx') {
           // 呼吸记号：音符右侧上方，单线 V（尖朝下，adj112）
