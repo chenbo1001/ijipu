@@ -739,6 +739,35 @@ function renderBarline(bar: PlacedBarline, noteSize = 18): string {
     }
   }
 
+  // adj126：小节线修饰符（&fine 曲终 / &dc 从头反复 / &ds 大反复 → 正下方文本；
+  // &ty 大跳跃 → 正上方 ⊕；&hs 花S → 正上方花 S 记号）
+  if (bar.mark) {
+    const mx = x + ({ '|': 0.55, '||': 1.95, '||/': 1.6, '|:': 4.2, ':|': 4.2, ':|:': 8.1, '||:': 3.85, '|*': 0.55, '|/': 0.55 }[bar.type] ?? 0.55) / 2
+    const label = bar.mark === 'fine' ? 'Fine' : bar.mark === 'dc' ? 'D.C.' : bar.mark === 'ds' ? 'D.S.' : null
+    if (label) {
+      // 小节线正下方文本
+      const fs = Math.max(8, Math.round(9 * s))
+      parts.push(
+        `<text x="${mx.toFixed(1)}" y="${(yBottom + 11 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="${FONT_CN}" fill="#1b1b1b">${label}</text>`,
+      )
+    } else if (bar.mark === 'ty') {
+      // 小节线正上方 ⊕（圆 + 十字）
+      const cy = yTop - 12 * s
+      parts.push(
+        `<circle cx="${mx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r1n(4 * s)}" fill="none" stroke="#1b1b1b" stroke-width="1.2"/>` +
+          `<line x1="${(mx - 4.5 * s).toFixed(1)}" y1="${cy.toFixed(1)}" x2="${(mx + 4.5 * s).toFixed(1)}" y2="${cy.toFixed(1)}" stroke="#1b1b1b" stroke-width="1.2"/>` +
+          `<line x1="${mx.toFixed(1)}" y1="${(cy - 4.5 * s).toFixed(1)}" x2="${mx.toFixed(1)}" y2="${(cy + 4.5 * s).toFixed(1)}" stroke="#1b1b1b" stroke-width="1.2"/>`,
+      )
+    } else if (bar.mark === 'hs') {
+      // 小节线正上方花 S 记号（dal segno：S 形曲线 + 两条斜线）
+      const cy = yTop - 10 * s
+      parts.push(
+        `<path d="M ${(mx - 3 * s).toFixed(1)} ${(cy - 3 * s).toFixed(1)} Q ${(mx + 3 * s).toFixed(1)} ${(cy - 0.5 * s).toFixed(1)} ${mx.toFixed(1)} ${(cy - 0.5 * s).toFixed(1)} Q ${(mx - 3 * s).toFixed(1)} ${(cy + 0.5 * s).toFixed(1)} ${(mx + 3 * s).toFixed(1)} ${(cy + 3 * s).toFixed(1)}" fill="none" stroke="#1b1b1b" stroke-width="1.2"/>` +
+          `<line x1="${(mx - 2.5 * s).toFixed(1)}" y1="${(cy - 4.5 * s).toFixed(1)}" x2="${(mx + 1 * s).toFixed(1)}" y2="${(cy + 4.5 * s).toFixed(1)}" stroke="#1b1b1b" stroke-width="1"/>`,
+      )
+    }
+  }
+
   return parts.join('\n')
 }
 

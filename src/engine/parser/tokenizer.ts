@@ -291,6 +291,18 @@ export function tokenizeMusicLine(
         }
         t.raw = rawAt(i, k)
         j = k
+      } else if (content[j] === '&') {
+        // adj126：小节线修饰符（&fine 曲终 / &dc 从头反复 / &ds 大反复 / &ty 大跳跃 / &hs 花S）
+        let k = j + 1
+        while (k < n && /[a-z]/i.test(content[k])) k++
+        const code = content.slice(j + 1, k)
+        if (code === 'fine' || code === 'dc' || code === 'ds' || code === 'ty' || code === 'hs') {
+          t.mark = code as Extract<MusicToken, { kind: 'barline' }>['mark']
+          t.raw = rawAt(i, k)
+          j = k
+        } else {
+          j = barEnd // 非小节线修饰符：回退（& 留给独立装饰处理）
+        }
       } else if (t.comment === undefined) {
         j = barEnd // 无备注/跳房子：回退到空格前（空格留给下一个块）
       }

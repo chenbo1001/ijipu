@@ -55,7 +55,7 @@ interface SeqItem {
   note?: PlacedToken
   /** 音符全局索引（slur 区间用；bar 项无） */
   noteIdx?: number
-  bar?: { type: BarlineType; voltaStart?: PlacedBarline['voltaStart']; voltaEnd?: boolean }
+  bar?: { type: BarlineType; mark?: PlacedBarline['mark']; voltaStart?: PlacedBarline['voltaStart']; voltaEnd?: boolean }
 }
 
 export function buildPlaySequence(
@@ -96,7 +96,7 @@ export function buildPlaySequence(
       if (token.kind === 'barline') {
         seq.push({
           kind: 'bar',
-          bar: { type: token.type, voltaStart: token.voltaStart, voltaEnd: token.voltaEnd },
+          bar: { type: token.type, mark: token.mark, voltaStart: token.voltaStart, voltaEnd: token.voltaEnd },
         })
       } else if (token.kind === 'note' || token.kind === 'rest' || token.kind === 'rhythm') {
         const placed = byIndex.get(noteIdx)
@@ -206,6 +206,29 @@ export function buildPlaySequence(
       continue
     }
     const bar = item.bar!
+    // adj126：小节线修饰符跳转（&fine 曲终结束 / &dc 从头反复 / &ds 跳到花S / &ty 跳到下一大跳跃）
+    if (bar.mark) {
+      if (bar.mark === 'fine') {
+        i = seq.length // 曲终：播放到此结束
+        continue
+      }
+      if (bar.mark === 'dc') {
+        i = 0 // 从头反复
+        continue
+      }
+      if (bar.mark === 'ds') {
+        // 跳到 &hs 花 S 标记位置开始
+        const hs = seq.findIndex((it, k) => k > i && it.kind === 'bar' && it.bar?.mark === 'hs')
+        i = hs >= 0 ? hs + 1 : i + 1
+        continue
+      }
+      if (bar.mark === 'ty') {
+        // 跳到下一个 &ty 大跳跃记号（两 ty 中间不演奏）
+        const nextTy = seq.findIndex((it, k) => k > i && it.kind === 'bar' && it.bar?.mark === 'ty')
+        i = nextTy >= 0 ? nextTy + 1 : i + 1
+        continue
+      }
+    }
     // 跳房子：第二遍跳过 [ 段
     if (bar.voltaStart && pass === 2) {
       i = voltaAfter.get(i) ?? i + 1

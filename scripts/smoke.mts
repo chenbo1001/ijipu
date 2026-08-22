@@ -499,6 +499,24 @@ check('adj119 实心三角仅 dy（1 个）', (svg109.match(/Z" fill="#1b1b1b"/g
 check('adj115 波音锯齿斜下粗线（stroke 1.8 ≥ 10 条）', (svg109.match(/stroke-width="1.8"/g) ?? []).length >= 10, '')
 // adj116：下波音竖线为细线 stroke 0.8（xby/xby+ 各 1 条）
 check('adj116 下波音竖线为细线（stroke 0.8 ≥ 2 条）', (svg109.match(/stroke-width="0.8"/g) ?? []).length >= 2, '')
+// adj126：小节线修饰符（&fine/&dc/&ds/&ty/&hs）解析 + 渲染 + 播放跳转
+const r126 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |&fine 5 6 7 1 |&dc 2 3 4 5 |&ds 6 7 1 2 |&hs 3 4 5 6 |&ty 7 1 2 3 |&ty 4 5 6 7 |\n')
+const bars126 = r126.groups[0].music.tokens.filter((t) => t.kind === 'barline')
+check('adj126 小节线修饰符解析（fine/dc/ds/hs/ty/ty + 行尾无）', r126.errors.length === 0 && JSON.stringify(bars126.map((b) => b.kind === 'barline' ? b.mark : undefined)) === JSON.stringify(['fine', 'dc', 'ds', 'hs', 'ty', 'ty', null]), JSON.stringify(bars126.map((b) => b.kind === 'barline' ? b.mark : undefined)))
+const lay126 = layoutScore(r126, defaultPageConfig)
+const placed126 = lay126.pages[0].barlines
+check('adj126 布局透传修饰符', placed126.length >= 6 && placed126.some((b) => b.mark === 'fine') && placed126.some((b) => b.mark === 'ty') && placed126.some((b) => b.mark === 'hs'), JSON.stringify(placed126.map((b) => b.mark)))
+const svg126 = renderScoreToSvg(lay126)[0]
+check('adj126 渲染 Fine/D.C./D.S. 文本', svg126.includes('>Fine<') && svg126.includes('>D.C.<') && svg126.includes('>D.S.<'), '')
+check('adj126 渲染 ⊕（圆 + 十字）', svg126.includes('<circle ') && (svg126.match(/stroke-width="1.2"/g) ?? []).length >= 3, '')
+check('adj126 渲染花 S 记号（Q 曲线）', svg126.includes(' Q '), '')
+// 播放跳转：fine 截断 / ds 跳 hs / ty 跳下一 ty / dc 从头反复
+const mk126 = (q: string) => buildPlaySequence(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), layoutScore(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), defaultPageConfig), 120)
+const pits126 = (seq: ReturnType<typeof mk126>) => seq.events.filter((e) => e.placed.audioPitch).map((e) => e.placed.audioPitch)
+check('adj126 播放：&fine 曲终截断（只播前 4 音）', pits126(mk126('1 2 3 4 |&fine 5 6 7 1 |')).join(',') === 'C4,D4,E4,F4', pits126(mk126('1 2 3 4 |&fine 5 6 7 1 |')).join(','))
+check('adj126 播放：&ds 跳到 &hs 位置（5 6 7 1 跳过）', pits126(mk126('1 2 3 4 |&ds 5 6 7 1 |&hs 2 3 4 5 |')).join(',') === 'C4,D4,E4,F4,D4,E4,F4,G4', pits126(mk126('1 2 3 4 |&ds 5 6 7 1 |&hs 2 3 4 5 |')).join(','))
+check('adj126 播放：&ty 跳到下一 &ty（中间跳过）', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |')).join(',') === 'C4,D4,E4,F4,D4,E4,F4,G4', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |')).join(','))
+check('adj126 播放：&dc 从头反复（首 4 音重复出现）', (() => { const p = pits126(mk126('1 2 3 4 |&dc 5 6 7 1 |')); return p.length > 4 && p[0] === p[4] && p[1] === p[5] && p[2] === p[6] && p[3] === p[7] })(), pits126(mk126('1 2 3 4 |&dc 5 6 7 1 |')).join(','))
 check('adj109 滑音渲染弧线（Q）+ 箭头（fill 三角）', svg109.includes(' Q '), '')
 check('adj112 tr 文本加粗', /font-weight="bold"[^>]*>tr</.test(svg109), '')
 // adj81：括号加粗 + 垂直居中于数字中心（dominant-baseline=central @ 基线-0.4×字号）

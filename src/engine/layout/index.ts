@@ -835,6 +835,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       page.barlines.push({
         id: bid,
         type: leadVoltaBar.type,
+        mark: leadVoltaBar.mark, // adj126
         voltaStart: leadVoltaBar.voltaStart,
         voltaEnd: leadVoltaBar.voltaEnd,
         voltaEndSlash: leadVoltaBar.voltaEndSlash,
@@ -948,6 +949,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           page.barlines.push({
             id: bid,
             type: bar.type,
+            mark: bar.mark, // adj126：小节线修饰符透传
             voltaStart: bar.voltaStart,
             voltaEnd: bar.voltaEnd,
             voltaEndSlash: bar.voltaEndSlash,
@@ -1129,6 +1131,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         pages[pageIndex].barlines.push({
           id: bid,
           type: bar.type,
+          mark: bar.mark, // adj126
           voltaStart: bar.voltaStart,
           voltaEnd: bar.voltaEnd,
           voltaEndSlash: bar.voltaEndSlash,
