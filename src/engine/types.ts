@@ -267,13 +267,16 @@ export interface DecorationToken {
   raw: string
 }
 
-/** 连音线/连音组开始/结束：( 与 )；"(y" 前缀 = 平均连音组（均分时值） */
+/** 连音线/连音组开始/结束：( 与 )；"(y" 前缀 = 平均连音组（均分时值）；
+ *  "(+"/"(y+" 前缀：+ 数量调整连音线抬升（adj135，与跳房子 + 类似） */
 export interface SlurToken {
   kind: 'slur'
   /** open=( 开始；close=) 结束 */
   dir: 'open' | 'close'
   /** "(y" 平均连音组：组内音符时值均分括号总时值 */
   tuplet?: boolean
+  /** (+ 抬升数量（每级 2px，adj135） */
+  plus?: number
   pos: number
   raw: string
 }

@@ -1213,10 +1213,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   const notesByIndex = new Map<number, PlacedToken>()
   for (const p of pages) for (const n of p.notes) notesByIndex.set(n.id.index, n)
 
-  const slurPairs: { start: number; end: number; depth: number; tuplet: boolean }[] = []
+  const slurPairs: { start: number; end: number; depth: number; tuplet: boolean; plus: number }[] = []
   // 配对规则：先进后出（LIFO 栈式，adj55）—— 最近打开的先闭合，标准括号嵌套；
   // 栈跨行保留：上一行未闭合的括号延续到下一行配对（跨行两半）
-  const sQueue: { start: number; depth: number; tuplet: boolean }[] = []
+  const sQueue: { start: number; depth: number; tuplet: boolean; plus: number }[] = []
   let gNote = 0
   let lastNote = -1
   // adj54：每个音符索引对应的「音符单位数」——基础 1，增时线每根折算 +1、
@@ -1240,14 +1240,14 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         gNote++
       } else if (t.kind === 'slur') {
         if (t.dir === 'open') {
-          sQueue.push({ start: -1, depth: sQueue.length, tuplet: t.tuplet === true })
+          sQueue.push({ start: -1, depth: sQueue.length, tuplet: t.tuplet === true, plus: t.plus ?? 0 })
         } else {
           // adj55：先进后出 —— pop 最近打开的开括号；栈跨行保留（未闭合延续到后续行）
           const s = sQueue.pop()
           // 退化对（起点=终点，如 "(4)" 只修饰单音符）不渲染；
           // adj91：连音线嵌套最多两层（depth 0/1），第三层（如 (1 (2 (3 5))) 的 (3 5)）不渲染
           if (s && s.start !== -1 && lastNote > s.start && s.depth < 2) {
-            slurPairs.push({ start: s.start, end: lastNote, depth: s.depth, tuplet: s.tuplet })
+            slurPairs.push({ start: s.start, end: lastNote, depth: s.depth, tuplet: s.tuplet, plus: s.plus })
           }
         }
       }
@@ -1343,28 +1343,19 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     return m
   }
   /**
-   * 连音符覆盖范围内是否有倚音（adj134：倚音画在主音符上方，连音线需再抬高避让）。
-   */
-  const maxGraceInRange = (fromIdx: number, toIdx: number): number => {
-    for (let i = fromIdx; i <= toIdx; i++) {
-      const n = notesByIndex.get(i)
-      if (n && n.token.kind === 'note' && n.token.gracenotes && n.token.gracenotes.notes.length > 0) return 1
-    }
-    return 0
-  }
-  /**
    * 该行连音线基准 y（adj60 层级化）：线底距「数字顶（无高八度）或最高高八度点顶（有）」LAYER_GAP=2；
    * 线为 stroke（中心 y，宽 SLUR_W）→ 中心 = 元素顶 - LAYER_GAP - SLUR_W/2。
    * 高八度点层顶 = 基线 - 0.8×noteSize - LAYER_GAP - 2r - (hi-1)×INNER_GAP（octaveTopY）。
-   * adj132：再上移 修饰符层数 ×（符号高 + 层距）；adj134：有倚音再上移一层。
+   * adj132：再上移 修饰符层数 ×（符号高 + 层距）；adj135：取消倚音自动避让
+   * （影响所有连音线），改用 (+ 手动抬升。
    * 嵌套错开：外层线上移 raise（仅当确实包含内层线时，adj44）。
    */
-  const slurYFor = (note: PlacedToken, hi: number, symCount: number, graceCount: number, raise: number) => {
+  const slurYFor = (note: PlacedToken, hi: number, symCount: number, raise: number) => {
     const s = noteScaleOf(m.noteSize)
     const topY = hi > 0 ? octaveTopY(note.y, hi, m.noteSize) : note.y - m.noteSize * DIGIT_HEIGHT_RATIO
     let base = topY - LAYER_GAP * s - (SLUR_W * s) / 2
-    // 每层（修饰符/倚音）：符号字号 10×s + 层距 LAYER_GAP×s（与 render 上方符号堆叠一致）
-    base -= (symCount + graceCount) * (10 * s + LAYER_GAP * s)
+    // 每层修饰符：符号字号 10×s + 层距 LAYER_GAP×s（与 render 上方符号堆叠一致）
+    base -= symCount * (10 * s + LAYER_GAP * s)
     return base - raise
   }
   /** 行内跳房子线最低 y + 2s（adj134：连音线不得高于跳房子线，避免与其重叠） */
@@ -1409,7 +1400,6 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
 
   for (let si = 0; si < slurInfos.length; si++) {
     const { sp, a, b, rowA, rowB } = slurInfos[si]
-    const raise = nestedRaise[si]
     const noteCount = sp.end - sp.start + 1 // 覆盖的 token 数（tupletCount 标签用，adj43）
     // adj54：自动样式按「音符单位数」判断（增时线/附点折算进长度），>4 单位用平顶
     let unitCount = 0
@@ -1425,15 +1415,16 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     // adj108：连音线端点 = 数字槽中心 ± 1px×s（原固定 6.58/4.58，字号变化时端点错位）
     const sSlur = noteScaleOf(m.noteSize)
     const halfDig = halfDigitW(m.noteSize)
+    // adj44 嵌套抬升 + adj135：(+ 手动抬升（每 + 2px，与跳房子类似）
+    const raise = nestedRaise[si] + (sp.plus ?? 0) * VOLTA_RAISE
     if (rowA === rowB) {
-      // 同行：整条连音符（adj134：不高于行内跳房子线）
       pages[a.id.page].slurs.push({
         // 起点=开始音符数字槽中心右 1px×s、终点=结束音符数字槽中心左 1px×s
         x1: r1(a.x + halfDig + sSlur),
         x2: r1(b.x + halfDig - sSlur),
         y: r1(
           Math.max(
-            slurYFor(a, maxHiInRange(sp.start, sp.end), maxSymInRange(sp.start, sp.end), maxGraceInRange(sp.start, sp.end), raise),
+            slurYFor(a, maxHiInRange(sp.start, sp.end), maxSymInRange(sp.start, sp.end), raise),
             voltaFloorY(rowA) ?? -Infinity,
           ),
         ),
@@ -1455,7 +1446,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         x2: r1(xEndA),
         y: r1(
           Math.max(
-            slurYFor(a, maxHiInRange(sp.start, lastA.id.index), maxSymInRange(sp.start, lastA.id.index), maxGraceInRange(sp.start, lastA.id.index), raise),
+            slurYFor(a, maxHiInRange(sp.start, lastA.id.index), maxSymInRange(sp.start, lastA.id.index), raise),
             voltaFloorY(rowA) ?? -Infinity,
           ),
         ),
@@ -1470,7 +1461,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         x2: r1(b.x + halfDig - sSlur),
         y: r1(
           Math.max(
-            slurYFor(b, maxHiInRange(firstB.id.index, sp.end), maxSymInRange(firstB.id.index, sp.end), maxGraceInRange(firstB.id.index, sp.end), raise),
+            slurYFor(b, maxHiInRange(firstB.id.index, sp.end), maxSymInRange(firstB.id.index, sp.end), raise),
             voltaFloorY(rowB) ?? -Infinity,
           ),
         ),

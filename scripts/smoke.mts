@@ -521,9 +521,12 @@ check('adj126 播放：&dc 从头反复（首 4 音重复出现）', (() => { co
 const slSym132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1&sby 2&cy) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
 const slPlain132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1 2) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
 check('adj132 连音线在修饰符之上（y 上移 ≥10）', slSym132 < slPlain132 - 10, `sym=${slSym132} plain=${slPlain132}`)
-// adj134：连音线避让倚音（y 上移一层）且不高于行内跳房子线
+// adj135：取消倚音自动避让（连音线不再因倚音抬高）；改用 (+ 手动抬升（每 + 2px）
 const slGrace134 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1[3] 2) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
-check('adj134 连音线避让倚音（y 上移 ≥10）', slGrace134 < slPlain132 - 10, `grace=${slGrace134} plain=${slPlain132}`)
+check('adj135 倚音不抬高连音线（与无倚音相同）', Math.abs(slGrace134 - slPlain132) < 0.5, `grace=${slGrace134} plain=${slPlain132}`)
+const slPlus135 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (+ 1 2) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
+const slPlus135b = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (++ 1 2) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
+check('adj135 (+ 抬升 2px、(++ 抬升 4px', Math.abs(slPlus135 - (slPlain132 - 2)) < 0.5 && Math.abs(slPlus135b - (slPlain132 - 4)) < 0.5, `p1=${slPlus135} p2=${slPlus135b} plain=${slPlain132}`)
 const r134v = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 | [3 (4 5) 6 | 7 1 2 3] 4 |\n')
 const lay134v = layoutScore(r134v, defaultPageConfig)
 const s134v = lay134v.pages[0].slurs[0]
