@@ -1656,6 +1656,28 @@ check('跳房子起点线在行首（x < 100）', vStart56 !== undefined && vSta
 check('跳房子起点与终点在同一行（y 相同）', vStart56 !== undefined && vEnd56 !== undefined && Math.abs(vStart56.yTop - vEnd56.yTop) < 1, `${vStart56?.yTop} vs ${vEnd56?.yTop}`)
 check('跳房子番号在起点线右侧（不溢出右边距）', vStart56 !== undefined && vStart56.x + 8 < 515.28, `x=${vStart56?.x}`)
 check('跳房子线正向（终点 x > 起点 x，不再反向跨行）', vStart56 !== undefined && vEnd56 !== undefined && vEnd56.x > vStart56.x, `${vStart56?.x} → ${vEnd56?.x}`)
+// adj107：跳房子允许跨行——[ 在行内、] 在下一行时拆两半（左半到行末小节线、右半从行首小节线）
+const r107 = parseJps(
+  'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (3/ 2// 3//) 5 (3/ 2// 3//) 1 | (2./ 3//) (2/ 1/) 6, - |[+"1." (2/ 0// 3//) (5,/ 6,/) 1[6,/] - | 2/ 3/ 4/ 5/ 6/ 7/ 1/ 2/ | 3/ 4/ 5/ 6/ 7/ 1/ |] 2/ 3/ 4/ | 1/ 2/ 3/ 4/ |\n',
+)
+const lay107 = layoutScore(r107, defaultPageConfig)
+const vStart107 = lay107.pages[0].barlines.find((b) => b.voltaStart)
+const vEnd107 = lay107.pages[0].barlines.find((b) => b.voltaEnd)
+check('adj107 跨行跳房子：起点与终点在不同行', vStart107 !== undefined && vEnd107 !== undefined && Math.abs(vStart107.yTop - vEnd107.yTop) > 1, `${vStart107?.yTop} vs ${vEnd107?.yTop}`)
+const svg107 = renderScoreToSvg(lay107)[0]
+const voltaLines107 = [...svg107.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)" stroke="#1b1b1b" stroke-width="1"/g)]
+  .map((m) => ({ x1: Number(m[1]), y1: Number(m[2]), x2: Number(m[3]) }))
+  .filter((l) => l.x2 - l.x1 > 20)
+check('adj107 跨行跳房子拆两半（2 条线、y 不同）', voltaLines107.length === 2 && Math.abs(voltaLines107[0].y1 - voltaLines107[1].y1) > 1, JSON.stringify(voltaLines107))
+const sortedVolta107 = [...voltaLines107].sort((a, b) => a.y1 - b.y1)
+const leftHalf107 = sortedVolta107[0]
+const rightHalf107 = sortedVolta107[1]
+const row1Bars107 = lay107.pages[0].barlines.filter((b) => Math.abs(b.yTop - vStart107.yTop) < 1)
+const row2Bars107 = lay107.pages[0].barlines.filter((b) => Math.abs(b.yTop - vEnd107.yTop) < 1)
+const row1LastX107 = Math.max(...row1Bars107.map((b) => b.x))
+const row2FirstX107 = Math.min(...row2Bars107.map((b) => b.x))
+check('adj107 左半：起点线+2 → 行末小节线-2', leftHalf107 !== undefined && Math.abs(leftHalf107.x1 - (vStart107.x + 2)) < 0.5 && Math.abs(leftHalf107.x2 - (row1LastX107 - 2)) < 0.5, JSON.stringify(leftHalf107))
+check('adj107 右半：行首小节线+2 → 终点线-2', rightHalf107 !== undefined && Math.abs(rightHalf107.x1 - (row2FirstX107 + 2)) < 0.5 && Math.abs(rightHalf107.x2 - (vEnd107.x - 2)) < 0.5, JSON.stringify(rightHalf107))
 
 // ---- 57. 排版虚线行结构（adj72）：曲部行数字中心 / 多声部声部序号 / 词部行虚线 ----
 console.log('[57] row guides (adj72)')

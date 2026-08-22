@@ -1337,12 +1337,14 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     return base - raise
   }
 
-  /** 行末小节线中心 x（跨行连音符左半部延伸到小节线处）；无小节线时返回 null */
+  /** 行末小节线中心 x（跨行连音符左半部延伸到小节线处）；无可见小节线时返回 null */
   const rowEndBarX = (rowIdx: number): number | null => {
     const r = rows[rowIdx]
     const barY = r.y - 18.4 // 小节线上端 = 音符基线 - 18.4（adj50）
     let maxX: number | null = null
     for (const b of pages[r.page].barlines) {
+      // adj107：排除隐藏线 |/（不渲染，不应作为跨行连音线的端点）
+      if (b.type === '|/') continue
       if (Math.abs(b.yTop - barY) < 1 && (maxX === null || b.x > maxX)) maxX = b.x
     }
     return maxX
