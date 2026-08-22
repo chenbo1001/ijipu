@@ -521,6 +521,14 @@ check('adj126 播放：&dc 从头反复（首 4 音重复出现）', (() => { co
 const slSym132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1&sby 2&cy) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
 const slPlain132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1 2) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
 check('adj132 连音线在修饰符之上（y 上移 ≥10）', slSym132 < slPlain132 - 10, `sym=${slSym132} plain=${slPlain132}`)
+// adj134：连音线避让倚音（y 上移一层）且不高于行内跳房子线
+const slGrace134 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1[3] 2) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
+check('adj134 连音线避让倚音（y 上移 ≥10）', slGrace134 < slPlain132 - 10, `grace=${slGrace134} plain=${slPlain132}`)
+const r134v = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 [3 (4 5) 6 | 7 1 2 3] 4 |\n')
+const lay134v = layoutScore(r134v, defaultPageConfig)
+const s134v = lay134v.pages[0].slurs[0]
+const v134v = lay134v.pages[0].barlines.find((b) => b.voltaStart)
+check('adj134 连音线在跳房子线下方', s134v !== undefined && v134v !== undefined && s134v.y >= v134v.yTop - 8 + 2 - 0.5, `slur=${s134v?.y} volta=${v134v ? v134v.yTop - 8 : '?'}`)
 check('adj109 滑音渲染弧线（Q）+ 箭头（fill 三角）', svg109.includes(' Q '), '')
 check('adj112 tr 文本加粗', /font-weight="bold"[^>]*>tr</.test(svg109), '')
 // adj81：括号加粗 + 垂直居中于数字中心（dominant-baseline=central @ 基线-0.4×字号）

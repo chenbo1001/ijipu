@@ -28,7 +28,7 @@ import type {
   ScorePageMeta,
   VoiceBlock,
 } from '../types'
-import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, BRACKET_PAD, H_GAP, noteScaleOf, GRACE_SIZE_RATIO, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from './spacing'
+import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, BRACKET_PAD, H_GAP, noteScaleOf, GRACE_SIZE_RATIO, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, VOLTA_BAR_GAP, VOLTA_RAISE } from './spacing'
 
 // ============================================================
 // 音高映射：简谱音级 → 音名（如 C4 / F#5）
@@ -1343,19 +1343,42 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     return m
   }
   /**
+   * 连音符覆盖范围内是否有倚音（adj134：倚音画在主音符上方，连音线需再抬高避让）。
+   */
+  const maxGraceInRange = (fromIdx: number, toIdx: number): number => {
+    for (let i = fromIdx; i <= toIdx; i++) {
+      const n = notesByIndex.get(i)
+      if (n && n.token.kind === 'note' && n.token.gracenotes && n.token.gracenotes.notes.length > 0) return 1
+    }
+    return 0
+  }
+  /**
    * 该行连音线基准 y（adj60 层级化）：线底距「数字顶（无高八度）或最高高八度点顶（有）」LAYER_GAP=2；
    * 线为 stroke（中心 y，宽 SLUR_W）→ 中心 = 元素顶 - LAYER_GAP - SLUR_W/2。
    * 高八度点层顶 = 基线 - 0.8×noteSize - LAYER_GAP - 2r - (hi-1)×INNER_GAP（octaveTopY）。
-   * adj132：再上移 修饰符层数 ×（符号高 + 层距），使连音线位于波音/颤音/顿音等修饰符之上。
+   * adj132：再上移 修饰符层数 ×（符号高 + 层距）；adj134：有倚音再上移一层。
    * 嵌套错开：外层线上移 raise（仅当确实包含内层线时，adj44）。
    */
-  const slurYFor = (note: PlacedToken, hi: number, symCount: number, raise: number) => {
+  const slurYFor = (note: PlacedToken, hi: number, symCount: number, graceCount: number, raise: number) => {
     const s = noteScaleOf(m.noteSize)
     const topY = hi > 0 ? octaveTopY(note.y, hi, m.noteSize) : note.y - m.noteSize * DIGIT_HEIGHT_RATIO
     let base = topY - LAYER_GAP * s - (SLUR_W * s) / 2
-    // 每层修饰符：符号字号 10×s + 层距 LAYER_GAP×s（与 render 上方符号堆叠一致）
-    base -= symCount * (10 * s + LAYER_GAP * s)
+    // 每层（修饰符/倚音）：符号字号 10×s + 层距 LAYER_GAP×s（与 render 上方符号堆叠一致）
+    base -= (symCount + graceCount) * (10 * s + LAYER_GAP * s)
     return base - raise
+  }
+  /** 行内跳房子线最低 y + 2s（adj134：连音线不得高于跳房子线，避免与其重叠） */
+  const voltaFloorY = (rowIdx: number): number | null => {
+    const r = rows[rowIdx]
+    const barY = r.y - 18.4 // 小节线上端 = 音符基线 - 18.4（adj50）
+    let floor: number | null = null
+    for (const b of pages[r.page].barlines) {
+      if (Math.abs(b.yTop - barY) < 1 && b.voltaStart) {
+        const vy = b.yTop - VOLTA_BAR_GAP - (b.voltaStart.plus ?? 0) * VOLTA_RAISE
+        if (floor === null || vy < floor) floor = vy
+      }
+    }
+    return floor === null ? null : floor + 2 * noteScaleOf(m.noteSize)
   }
 
   /** 行末小节线中心 x（跨行连音符左半部延伸到小节线处）；无可见小节线时返回 null */
@@ -1403,12 +1426,17 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     const sSlur = noteScaleOf(m.noteSize)
     const halfDig = halfDigitW(m.noteSize)
     if (rowA === rowB) {
-      // 同行：整条连音符
+      // 同行：整条连音符（adj134：不高于行内跳房子线）
       pages[a.id.page].slurs.push({
         // 起点=开始音符数字槽中心右 1px×s、终点=结束音符数字槽中心左 1px×s
         x1: r1(a.x + halfDig + sSlur),
         x2: r1(b.x + halfDig - sSlur),
-        y: r1(slurYFor(a, maxHiInRange(sp.start, sp.end), maxSymInRange(sp.start, sp.end), raise)),
+        y: r1(
+          Math.max(
+            slurYFor(a, maxHiInRange(sp.start, sp.end), maxSymInRange(sp.start, sp.end), maxGraceInRange(sp.start, sp.end), raise),
+            voltaFloorY(rowA) ?? -Infinity,
+          ),
+        ),
         depth: sp.depth,
         style,
         // 仅平均连音组 (y...) 标数字（普通连音线 (…) 不加，adj43）
@@ -1425,7 +1453,12 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       pages[rA.page].slurs.push({
         x1: r1(a.x + halfDig + sSlur),
         x2: r1(xEndA),
-        y: r1(slurYFor(a, maxHiInRange(sp.start, lastA.id.index), maxSymInRange(sp.start, lastA.id.index), raise)),
+        y: r1(
+          Math.max(
+            slurYFor(a, maxHiInRange(sp.start, lastA.id.index), maxSymInRange(sp.start, lastA.id.index), maxGraceInRange(sp.start, lastA.id.index), raise),
+            voltaFloorY(rowA) ?? -Infinity,
+          ),
+        ),
         depth: sp.depth,
         style: crossRowStyle,
         tupletCount: sp.tuplet ? noteCount : undefined,
@@ -1435,7 +1468,12 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       pages[rows[rowB].page].slurs.push({
         x1: r1(xStartB),
         x2: r1(b.x + halfDig - sSlur),
-        y: r1(slurYFor(b, maxHiInRange(firstB.id.index, sp.end), maxSymInRange(firstB.id.index, sp.end), raise)),
+        y: r1(
+          Math.max(
+            slurYFor(b, maxHiInRange(firstB.id.index, sp.end), maxSymInRange(firstB.id.index, sp.end), maxGraceInRange(firstB.id.index, sp.end), raise),
+            voltaFloorY(rowB) ?? -Infinity,
+          ),
+        ),
         depth: sp.depth,
         style: crossRowStyle,
         tupletCount: sp.tuplet ? noteCount : undefined,
