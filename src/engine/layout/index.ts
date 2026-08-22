@@ -81,13 +81,13 @@ const minNoteW = (noteSize: number, extra = 0) => noteSize * 0.62 + H_GAP + extr
 const halfDigitW = (noteSize: number) => noteSize * 0.31
 /**
  * 倚音占位额外宽（adj98：倚音计入音符占位宽度——前倚音向左、后倚音向右扩展）。
- * 倚音字号 = 主音符 × 0.3，每音占宽 0.62×0.3×noteSize + 左侧 2px 间距；
+ * 倚音字号 = 主音符 × 0.4（adj101 由 0.3 调大），每音占宽 0.62×0.4×noteSize + 左侧 2px 间距；
  * 组内 n 个倚音线性叠加。
  */
 function graceExtraW(t: Extract<MusicToken, { kind: 'note' }> | undefined, noteSize: number): number {
   if (!t || t.kind !== 'note' || !t.gracenotes || t.gracenotes.notes.length === 0) return 0
   const n = t.gracenotes.notes.length
-  const gW = noteSize * 0.3 * 0.62
+  const gW = noteSize * 0.4 * 0.62
   return n * gW + 4 // 每组 4px 间距（左右各 2px）
 }
 /** 小节内左右留白（px） */

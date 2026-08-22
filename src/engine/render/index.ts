@@ -19,6 +19,7 @@ import {
   DOT_R_DOT,
   DIGIT_HEIGHT_RATIO,
   LAYER_GAP,
+  INNER_GAP,
   COMMENT_FONT_RATIO,
   NOTE_COMMENT_FONT_RATIO,
   DESC_RATIO,
@@ -310,22 +311,26 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     )
   }
 
-  // 倚音（adj23/65/97/98/99/100）：前倚音 [65] 排于主音符左上角、后倚音 [h65] 排于右上角
-  // 规范（用户 2026-08-22 + adj100 调整）：
-  //  ① 倚音字号 = 主音符 × 0.3，**不加粗**（与主音符粗体区分）；
+  // 倚音（adj23/65/97/98/99/100/101）：前倚音 [65] 排于主音符左上角、后倚音 [h65] 排于右上角
+  // 规范（用户 2026-08-22 + adj100/101 调整）：
+  //  ① 倚音字号 = 主音符 × 0.4（adj101 由 0.3 调大），**不加粗**（与主音符粗体区分）；
   //  ② 倚音减时线 = 实际时值 +1 条（2[3] → 1 条、2[3/] → 2 条），线**更细**（0.6）、
-  //     间距固定 1.2px（adj100 由 1.8px 减小；不以 0.3 字号等比缩放，避免小字号下线连成一片）；
-  //  ③ adj100：第一条减时线与主音符文本上端对齐（= mainTop）；倚音数字整体上移，
-  //     数字底与第一条减时线留 2px 间距（原与主音符上沿对齐会压线）；
-  //  ④ 无论几个倚音，只有**一条弧线**：起点在倚音组中心正下方（减时线下方），
-  //     前倚音自正下**斜向右下**弯向主音符左侧、后倚音自正下**斜向左下**弯向主音符右侧（adj100）
+  //     间距固定 1.2px（adj100 由 1.8px 减小）；
+  //  ③ 第一条减时线与主音符文本上端对齐（= mainTop，adj100）；数字底距首条线 2px，
+  //     adj101 数字整体下移 1.5px（数字底距线 0.5px）；
+  //  ④ 低八度点紧贴该音符最后一条减时线下方，间距规则同主音符
+  //     （线底 + LAYER_GAP×s + DOT_R×s = 圆心，层内点距 INNER_GAP×s，adj101）；
+  //  ⑤ 无论几个倚音，只有**一条弧线**：起点 = 组中心正下方（减时线下方），
+  //     控制点 = 起点正下方 → 前倚音**先向下再弯向右**、后倚音**先向下再弯向左**
+  //     （二次贝塞尔抛物线，adj101 由 1/4 圆弧改——圆弧无法从正下先竖直向下弯向侧边）
   if (t.kind === 'note' && t.gracenotes && t.gracenotes.notes.length > 0) {
     const gn = t.gracenotes
-    const gSize = Math.max(6, size * 0.3) // ①倚音字号 = 主音符 × 0.3（下限 6px 防过小）
+    const gSize = Math.max(6, size * 0.4) // ①倚音字号 = 主音符 × 0.4（下限 6px 防过小）
     const gW = gSize * 0.62 // 每个倚音数字占宽（同数字槽宽比例）
+    const gs = gSize / 18 // 倚音缩放因子（高低音点/间距随倚音字号缩放）
     const mainTop = y - size * DIGIT_HEIGHT_RATIO // 主音符文本上端（adj100 = 第一条减时线位置）
-    // ③ 倚音数字上移：数字底 ≈ 基线 + 字号/9，取 = 第一条减时线上方 2px → 基线 = mainTop - 2 - gSize/9
-    const gBaseY = mainTop - 2 - gSize / 9
+    // ③ 数字底 = 首条减时线上方 2px → 基线 = mainTop - 2 - 字号/9；adj101 下移 1.5px
+    const gBaseY = mainTop - 0.5 - gSize / 9
     // 数字水平排列：前倚音从主音符左上角向左依次排；后倚音从主音符右上角向右依次排
     const gxs: number[] = []
     for (let gi = 0; gi < gn.notes.length; gi++) {
@@ -335,6 +340,10 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     // 组范围（数字区）：组首 x、组尾 x
     const gx1 = Math.min(...gxs)
     const gx2 = Math.max(...gxs) + gW
+    // ② 减时线参数：首条 = mainTop（与主音符文本上端对齐），间距固定 1.2px
+    const maxDim = Math.max(0, ...gn.notes.map((g) => g.diminishCount + 1))
+    const beamGap = 1.2
+    const beamTop = mainTop
     for (let gi = 0; gi < gn.notes.length; gi++) {
       const g = gn.notes[gi]
       const gx = gxs[gi]
@@ -343,8 +352,12 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
         const cx = gx + gW / 2
         const n = Math.abs(g.octaveShift)
         for (let d = 0; d < n; d++) {
-          const cy = g.octaveShift > 0 ? octaveDotY(gy, d, gSize) : lowDotY(gy, d, g.diminishCount + 1, gSize)
-          parts.push(`<circle cx="${r1n(cx)}" cy="${r1n(cy)}" r="${r1n(DOT_R * (gSize / 18))}" fill="#1b1b1b"/>`)
+          const cy =
+            g.octaveShift > 0
+              ? octaveDotY(gy, d, gSize)
+              : // ④ 低八度点：该音符最后一条减时线底（线中心 + 半线高 0.3）+ LAYER_GAP×s + DOT_R×s
+                beamTop + g.diminishCount * beamGap + 0.3 + (LAYER_GAP + DOT_R) * gs + d * (DOT_R * 2 + INNER_GAP) * gs
+          parts.push(`<circle cx="${r1n(cx)}" cy="${r1n(cy)}" r="${r1n(DOT_R * gs)}" fill="#1b1b1b"/>`)
         }
       }
       // 变音
@@ -360,36 +373,27 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
       )
     }
     // ②减时线（跨组平行横线）：实际时值 +1 条；线更细 0.6、间距固定 1.2px
-    //   （adj100：首条线 = mainTop 与主音符文本上端对齐；间距 1.8 → 1.2px）
-    const maxDim = Math.max(0, ...gn.notes.map((g) => g.diminishCount + 1))
-    const beamGap = 1.2
-    const beamTop = mainTop
     for (let d = 0; d < maxDim; d++) {
       const ly = beamTop + d * beamGap
       parts.push(
         `<line x1="${r1n(gx1)}" y1="${r1n(ly)}" x2="${r1n(gx2)}" y2="${r1n(ly)}" stroke="#1b1b1b" stroke-width="0.6"/>`,
       )
     }
-    // ④ 一条弧线：起点 = 倚音组中心正下方（最后一条减时线下方 2px），
-    //    终点 = 主音符侧边、比起点低 3px（斜向下）；半径取组中心到主音符的间距，
-    //    前 sweep=1 凸向右下、后 sweep=0 凸向左下；线宽同减时线 0.6
+    // ⑤ 一条弧线（二次贝塞尔 = 抛物线）：起点 = 组中心正下方（最后一条减时线下方 2px），
+    //    控制点 = 起点正下方（起点切线竖直向下）→ 先向下再弯向主音符；终点比起点低 arcDrop
     const gcx = (gx1 + gx2) / 2 // 倚音组中心 x
     const arcStartY = beamTop + (maxDim - 1) * beamGap + 2 // 弧线起点（减时线下方）
+    const arcDrop = 3 * s // 终点比起点低（垂度）
     const arcW = 0.6 // 弧线宽 = 减时线宽
-    const arcDrop = 3 * s // 终点比起点低（斜向下垂）
     if (gn.after) {
-      // 后倚音（组在右）：起点 = 组中心正下方，终点 = 主音符右缘下方 → 斜向左下（sweep=0）
-      const dx = gcx - (x + digitW)
-      const r = Math.max(3 * s, Math.min(10 * s, dx))
+      // 后倚音（组在右）：终点 = 主音符右缘下方 → 先向下再弯向左
       parts.push(
-        `<path d="M ${r1n(gcx)} ${r1n(arcStartY)} A ${r1n(r)} ${r1n(r)} 0 0 0 ${r1n(x + digitW)} ${r1n(arcStartY + arcDrop)}" fill="none" stroke="#1b1b1b" stroke-width="${arcW}"/>`,
+        `<path d="M ${r1n(gcx)} ${r1n(arcStartY)} Q ${r1n(gcx)} ${r1n(arcStartY + arcDrop)} ${r1n(x + digitW)} ${r1n(arcStartY + arcDrop)}" fill="none" stroke="#1b1b1b" stroke-width="${arcW}"/>`,
       )
     } else {
-      // 前倚音（组在左）：起点 = 组中心正下方，终点 = 主音符数字左缘（= x）下方 → 斜向右下（sweep=1）
-      const dx = x - gcx
-      const r = Math.max(3 * s, Math.min(10 * s, dx))
+      // 前倚音（组在左）：终点 = 主音符数字左缘（= x）下方 → 先向下再弯向右
       parts.push(
-        `<path d="M ${r1n(gcx)} ${r1n(arcStartY)} A ${r1n(r)} ${r1n(r)} 0 0 1 ${r1n(x)} ${r1n(arcStartY + arcDrop)}" fill="none" stroke="#1b1b1b" stroke-width="${arcW}"/>`,
+        `<path d="M ${r1n(gcx)} ${r1n(arcStartY)} Q ${r1n(gcx)} ${r1n(arcStartY + arcDrop)} ${r1n(x)} ${r1n(arcStartY + arcDrop)}" fill="none" stroke="#1b1b1b" stroke-width="${arcW}"/>`,
       )
     }
   }

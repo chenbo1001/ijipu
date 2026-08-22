@@ -974,15 +974,15 @@ check('单空格 → 无警告', r36g.errors.length === 0, JSON.stringify(r36g.e
 // 括号一律连音线（空格与否均可）：( 2 3 ) 与 (4) 都是连音线
 const r36h = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 ( 2 3 ) (4) 5 |\n')
 check('( 2 3 ) 与 (4) 均解析为连音线', r36h.groups[0].music.tokens.map((t) => t.kind).join(',') === 'note,slur,note,note,slur,slur,note,slur,note,barline', r36h.groups[0].music.tokens.map((t) => t.kind).join(',') + ' | ' + JSON.stringify(r36h.errors))
-// 渲染：倚音小字（adj98：字号 = 主音符 × 0.3 = 5.4 → 下限 6）
+// 渲染：倚音小字（adj101：字号 = 主音符 × 0.4 = 7.2，由 0.3 调大）
 const svg36c = renderScoreToSvg(layoutScore(r36c, defaultPageConfig))[0]
-check('倚音渲染小数字（font-size = 0.3×18 = 6）', svg36c.includes('font-size="6"'), '')
+check('倚音渲染小数字（font-size = 0.4×18 = 7.2）', svg36c.includes('font-size="7.2"'), '')
 // adj97：倚音减时线为跨组平行横线（line 元素）而非斜线（path M...L...斜向）
 check('倚音减时线为横线（line 元素）', svg36c.includes('<line ') && svg36c.includes('stroke="#1b1b1b"'), '')
-// adj99：倚音与主音符之间是一条 1/4 圆弧（SVG A 命令），粗细同减时线 0.6
-check('倚音连接弧线为 1/4 圆弧（A 命令）', svg36c.includes(' A ') && svg36c.includes('stroke-width="0.6"'), '')
+// adj101：倚音与主音符之间是一条抛物线弧线（SVG Q 二次贝塞尔，控制点在起点正下），粗细同减时线 0.6
+check('倚音连接弧线为抛物线（Q 命令）', svg36c.includes(' Q ') && svg36c.includes('stroke-width="0.6"'), '')
 // adj99：倚音数字不加粗（与主音符粗体区分）
-check('倚音数字不加粗', !svg36c.includes('font-size="6" font-weight="bold"'), '')
+check('倚音数字不加粗', !svg36c.includes('font-size="7.2" font-weight="bold"'), '')
 // adj98：倚音减时线 = 实际时值 +1 条——主音符 1[65]（倚音无 /）→ 倚音有 1 条横线；
 // 2[3/]（倚音 /）→ 2 条（减时线数 = diminishCount + 1）
 const r98g = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 2[3] 3[4/] 4 |\n')
@@ -1007,14 +1007,20 @@ const maxGroup100 = gLineYs100.reduce((a, b) => (b.length > a.length ? b : a), [
 check('adj100 首条减时线 y = 主音符文本上端（基线 - 14.4）', gLineYs100.length >= 2 && Math.abs(firstLineY100 - (n100[0].y - 14.4)) < 0.5, `first=${firstLineY100} mainTop=${(n100[0].y - 14.4).toFixed(1)}`)
 check('adj100 减时线间距 1.2px', maxGroup100.length >= 2 && Math.abs(maxGroup100[1] - maxGroup100[0] - 1.2) < 0.05, `ys=${maxGroup100.join(',')}`)
 // adj100：倚音数字上移，基线在首条减时线上方（不压线）
-const gTextY100 = Number(svg98g.match(/<text x="[^"]+" y="([^"]+)" font-size="6"/)?.[1] ?? 'NaN')
+const gTextY100 = Number(svg98g.match(/<text x="[^"]+" y="([^"]+)" font-size="7.2"/)?.[1] ?? 'NaN')
 check('adj100 倚音数字上移（基线 < 首条减时线 - 1）', !Number.isNaN(gTextY100) && gTextY100 < gLineYs100[0] - 1, `gy=${gTextY100} line0=${gLineYs100[0]}`)
-// adj100：弧线前倚音自正下斜向右下（终点 x>起点 x、y>起点 y）、后倚音自正下斜向左下（终点 x<起点 x、y>起点 y）
-const arcs100 = [...svg36c.matchAll(/<path d="M ([-\d.]+) ([-\d.]+) A [\d.]+ [\d.]+ 0 0 ([01]) ([-\d.]+) ([-\d.]+)" fill="none" stroke="#1b1b1b" stroke-width="0.6"/g)].map((m) => ({ sx: Number(m[1]), sy: Number(m[2]), sweep: Number(m[3]), ex: Number(m[4]), ey: Number(m[5]) }))
-const arcFront = arcs100.find((a) => a.sweep === 1)
-const arcBack = arcs100.find((a) => a.sweep === 0)
-check('adj100 前倚音弧线斜向右下（终点 x>起点 x 且 y>起点 y）', !!arcFront && arcFront.ex > arcFront.sx && arcFront.ey > arcFront.sy, JSON.stringify(arcFront))
-check('adj100 后倚音弧线斜向左下（终点 x<起点 x 且 y>起点 y）', !!arcBack && arcBack.ex < arcBack.sx && arcBack.ey > arcBack.sy, JSON.stringify(arcBack))
+// adj101：弧线为二次贝塞尔 Q——控制点在起点正下方（先向下），前倚音终点向右、后倚音终点向左，终点比起点低
+const arcs100 = [...svg36c.matchAll(/<path d="M ([-\d.]+) ([-\d.]+) Q ([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+)" fill="none" stroke="#1b1b1b" stroke-width="0.6"/g)].map((m) => ({ sx: Number(m[1]), sy: Number(m[2]), cx: Number(m[3]), cy: Number(m[4]), ex: Number(m[5]), ey: Number(m[6]) }))
+const arcFront = arcs100.find((a) => a.ex > a.sx)
+const arcBack = arcs100.find((a) => a.ex < a.sx)
+check('adj101 前倚音弧线先向下再弯向右（控制点 x=起点 x、终点 x>起点 x 且 y>起点 y）', !!arcFront && Math.abs(arcFront.cx - arcFront.sx) < 0.05 && arcFront.ex > arcFront.sx && arcFront.ey > arcFront.sy, JSON.stringify(arcFront))
+check('adj101 后倚音弧线先向下再弯向左（控制点 x=起点 x、终点 x<起点 x 且 y>起点 y）', !!arcBack && Math.abs(arcBack.cx - arcBack.sx) < 0.05 && arcBack.ex < arcBack.sx && arcBack.ey > arcBack.sy, JSON.stringify(arcBack))
+// adj101：倚音低八度点紧贴该音符最后一条减时线下方（线底 + (LAYER_GAP+DOT_R)×倚音缩放因子 = 圆心）
+const svg36d = renderScoreToSvg(layoutScore(r36d, defaultPageConfig))[0]
+const yMain36d = Number(svg36d.match(/<text x="[^"]+" y="([^"]+)" data-notepos="[^"]+" font-size="18"[^>]*font-weight="bold"[^>]*>1<\/text>/)?.[1] ?? 'NaN')
+const lowCy36d = Math.max(...[...svg36d.matchAll(/<circle cx="[^"]+" cy="([^"]+)" r="[^"]+" fill="#1b1b1b"/g)].map((m) => Number(m[1])))
+// 5, 无减时（dc=1 → 线 1 条）：圆心 = mainTop + 半线高0.3 + (2+1.7)×(7.2/18=0.4)；mainTop = 主音符基线 - 14.4
+check('adj101 低八度点在最后一条减时线下方（线底+LAYER_GAP×s）', !Number.isNaN(yMain36d) && Math.abs(lowCy36d - (yMain36d - 14.4 + 0.3 + (2 + 1.7) * 0.4)) < 0.6, `lowCy=${lowCy36d} expect=${(yMain36d - 14.4 + 1.78).toFixed(2)}`)
 // adj98：倚音占位计入音符宽度——带倚音的音符 perBeat ≥ 无倚音音符
 const lay98 = layoutScore(r98g, defaultPageConfig)
 const n98 = [...lay98.pages[0].notes].sort((a, b) => a.x - b.x)
