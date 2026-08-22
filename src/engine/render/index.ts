@@ -529,10 +529,10 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
           // 波音：锯齿状波浪线（adj113 两齿半/三齿半；adj114：斜上细线、斜下粗线）
           // adj115：锯齿中心与下波音竖线垂直居中；adj117：横向压缩 75%
           // adj118：斜上细线端点与斜下粗线端点精确贴紧（峰/谷同点相接，无交叠）
-          // adj121：宽度 85%（原 75%）、高度 120%（峰谷 ±1.5s → ±1.8s）
-          // adj122：波音整体下移 1s（wy symY-4s → symY-3s）
+          // adj121：高度 120%（峰谷 ±1.5s → ±1.8s）；adj122：整体下移 1s
+          // adj123：宽度——上下波音 90%、加长上下波音 75%；均以数字槽中心水平居中（cx±half）
           const teeth = sym.endsWith('+') ? 3.5 : 2.5
-          const half = (sym.endsWith('+') ? 9 * s : 5 * s) * 0.85
+          const half = (sym.endsWith('+') ? 9 * s : 5 * s) * (sym.endsWith('+') ? 0.75 : 0.9)
           const wy = symY - 3 * s
           const tw = (2 * half) / teeth // 齿宽
           const ampV = 1.8 * s // 峰/谷相对中线高度（1.5s × 1.2）
