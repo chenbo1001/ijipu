@@ -67,9 +67,6 @@ function noteposId(p: { page: number; voice: number; group: number; index: numbe
 // 字体常量
 // ============================================================
 
-const FONT_NOTE_SERIF = "Georgia, 'Times New Roman', 'SimSun', serif"
-const FONT_NOTE_SANS = "'Microsoft YaHei', 'SimHei', 'Segoe UI', sans-serif"
-const FONT_NOTE_KAITI = "'KaiTi', '楷体', 'STKaiti', serif"
 const FONT_CN = "'Microsoft YaHei', 'SimHei', sans-serif"
 
 /**
@@ -95,16 +92,9 @@ function metaTextW(s: string): number {
   return w
 }
 
-/** 音符字形（a=衬线/宋体，b=黑体（默认），c=楷体） */
-function noteFont(style: import('../types').PageConfig['shuzi_font']): string {
-  switch (style) {
-    case 'a':
-      return FONT_NOTE_SERIF
-    case 'c':
-      return FONT_NOTE_KAITI
-    default:
-      return FONT_NOTE_SANS
-  }
+/** 音符字体：直接使用页面设置中的字体名（adj105：原 a/b/c 字形改为字体名） */
+function noteFont(style: string): string {
+  return style || "'Microsoft YaHei', 'SimHei', 'Segoe UI', sans-serif"
 }
 
 // ============================================================
@@ -323,7 +313,7 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
 
   // 倚音（adj23/65/97/98/99/100/101/102/103）：前倚音 [65] 排于主音符左上角、后倚音 [h65] 排于右上角
   // 规范（用户 2026-08-22 + adj100~103 调整）：
-  //  ① 倚音字号 = 主音符 × 0.4（adj101 由 0.3 调大），**不加粗**（与主音符粗体区分）；
+  //  ① 倚音字号 = 主音符 × 0.5（adj105 由 0.4 调大），**加粗**（adj105，与主音符粗体一致）；
   //  ② 倚音减时线 = 实际时值 +1 条（2[3] → 1 条、2[3/] → 2 条），线**更细**（0.6）、
   //     间距固定 1.2px（adj100 由 1.8px 减小）；
   //  ③ 第一条减时线与主音符文本上端对齐（= mainTop，adj100）；数字底距首条线 2px，
@@ -385,9 +375,9 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
           `<text x="${gx - 3.5 * s}" y="${gy - 6 * s}" font-size="${r1n(8 * s)}" font-family="${font}" fill="#1b1b1b">${sym}</text>`,
         )
       }
-      // ①数字：不加粗（与主音符粗体区分）
+      // ①数字：adj105 加粗（与主音符粗体一致）
       parts.push(
-        `<text x="${gx}" y="${gy}" font-size="${gSize}" font-family="${font}" fill="#1b1b1b">${g.pitch}</text>`,
+        `<text x="${gx}" y="${gy}" font-size="${gSize}" font-family="${font}" font-weight="bold" fill="#1b1b1b">${g.pitch}</text>`,
       )
     }
     // ②减时线（跨组平行横线）：实际时值 +1 条；线宽 GRACE_LINE_W×s、间距 GRACE_BEAM_GAP×s

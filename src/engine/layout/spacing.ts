@@ -77,8 +77,8 @@ export const BRACKET_PAD = 5
 export const H_GAP = 2
 
 // ---- 倚音（adj103：以下设计值均为 18 号字基准，实际使用一律 ×主音符缩放因子 s） ----
-/** 倚音字号与主音符字号比值（adj101：0.4） */
-export const GRACE_SIZE_RATIO = 0.4
+/** 倚音字号与主音符字号比值（adj105：0.4 → 0.5） */
+export const GRACE_SIZE_RATIO = 0.5
 /** 倚音数字槽宽与字号比值（同数字槽宽比例） */
 export const GRACE_SLOT_RATIO = 0.62
 /** 倚音多音符（≥2 个）时数字间占宽与字号比值（adj103：缩小多音符间距，0.62 → 0.5） */

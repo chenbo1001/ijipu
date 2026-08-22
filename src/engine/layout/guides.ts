@@ -198,5 +198,5 @@ export const GUIDE_LIMITS_EX: Record<GuideKeyEx, [number, number]> = {
   height_quci: [0, 120],
   height_cici: [0, 120],
   height_shengbu: [0, 300], // 声部行间距（adj72）
-  height_ciqu_lyric: [0, 120], // 曲部与上一行词部间距（adj79）
+  height_ciqu_lyric: [-80, 120], // 曲部与上一行词部间距（adj79；adj105 允许负值，用户需进一步压缩行距）
 }

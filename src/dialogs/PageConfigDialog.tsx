@@ -45,24 +45,27 @@ export function PageConfigDialog() {
 
         <fieldset style={{ border: '1px solid var(--jp-border)', borderRadius: 8, padding: 10 }}>
           <legend style={{ padding: '0 6px', color: 'var(--jp-text-secondary)' }}>间距</legend>
-          <Row label="描述头高">
-            <NumInput label="" value={draft.descAreaH} onChange={(v) => setDraft({ ...draft, descAreaH: v })} />
-          </Row>
-          <Row label="首行至描述头间距">
-            <NumInput label="" value={draft.body_margin_top} onChange={(v) => setDraft({ ...draft, body_margin_top: v })} />
-          </Row>
-          <Row label="曲部与曲部间距">
-            <NumInput label="" value={draft.height_ciqu} onChange={(v) => setDraft({ ...draft, height_ciqu: v })} />
-          </Row>
-          <Row label="曲部与词部间距">
-            <NumInput label="" value={draft.height_quci} onChange={(v) => setDraft({ ...draft, height_quci: v })} />
-          </Row>
-          <Row label="词与词部间距">
-            <NumInput label="" value={draft.height_cici} onChange={(v) => setDraft({ ...draft, height_cici: v })} />
-          </Row>
-          <Row label="曲部与上一行词部间距">
-            <NumInput label="" value={draft.height_ciqu_lyric} onChange={(v) => setDraft({ ...draft, height_ciqu_lyric: v })} />
-          </Row>
+          {/* adj105：间距项两列排列，节省纵向空间 */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 18px' }}>
+            <Row label="描述头高">
+              <NumInput label="" value={draft.descAreaH} onChange={(v) => setDraft({ ...draft, descAreaH: v })} />
+            </Row>
+            <Row label="首行至描述头间距">
+              <NumInput label="" value={draft.body_margin_top} onChange={(v) => setDraft({ ...draft, body_margin_top: v })} />
+            </Row>
+            <Row label="曲部与曲部间距">
+              <NumInput label="" value={draft.height_ciqu} onChange={(v) => setDraft({ ...draft, height_ciqu: v })} />
+            </Row>
+            <Row label="曲部与词部间距">
+              <NumInput label="" value={draft.height_quci} onChange={(v) => setDraft({ ...draft, height_quci: v })} />
+            </Row>
+            <Row label="词部与词部间距">
+              <NumInput label="" value={draft.height_cici} onChange={(v) => setDraft({ ...draft, height_cici: v })} />
+            </Row>
+            <Row label="曲部与上词部间距">
+              <NumInput label="" value={draft.height_ciqu_lyric} onChange={(v) => setDraft({ ...draft, height_ciqu_lyric: v })} />
+            </Row>
+          </div>
         </fieldset>
 
         <fieldset style={{ border: '1px solid var(--jp-border)', borderRadius: 8, padding: 10 }}>
@@ -80,11 +83,7 @@ export function PageConfigDialog() {
             <NumInput label="字号" value={draft.fubiaoti_size} onChange={(v) => setDraft({ ...draft, fubiaoti_size: v })} />
           </Row>
           <Row label="音符">
-            <select value={draft.shuzi_font} onChange={(e) => setDraft({ ...draft, shuzi_font: e.target.value as PageConfig['shuzi_font'] })}>
-              <option value="a">字形 1（衬线）</option>
-              <option value="b">字形 2（黑体）</option>
-              <option value="c">字形 3（楷体）</option>
-            </select>
+            <FontSelect value={draft.shuzi_font} onChange={(v) => setDraft({ ...draft, shuzi_font: v })} />
             <NumInput label="字号" value={draft.note_size} onChange={(v) => setDraft({ ...draft, note_size: v })} />
           </Row>
           <Row label="歌词">
@@ -132,31 +131,31 @@ export function PageConfigDialog() {
   )
 }
 
-const FONT_OPTIONS = [
-  'Microsoft YaHei',
-  'SimHei',
-  'SimSun',
-  'KaiTi',
-  '楷体',
-  'STKaiti',
-  'Georgia',
-  'Times New Roman',
-  'Segoe UI',
-  'sans-serif',
-  'serif',
+/** 字体选项（adj105：名称显示中文，value 存字体名供 SVG/渲染使用） */
+const FONT_OPTIONS: { label: string; value: string }[] = [
+  { label: '微软雅黑', value: 'Microsoft YaHei' },
+  { label: '黑体', value: 'SimHei' },
+  { label: '宋体', value: 'SimSun' },
+  { label: '楷体', value: 'KaiTi' },
+  { label: '华文楷体', value: 'STKaiti' },
+  { label: 'Georgia', value: 'Georgia' },
+  { label: 'Times New Roman', value: 'Times New Roman' },
+  { label: 'Segoe UI', value: 'Segoe UI' },
+  { label: '无衬线', value: 'sans-serif' },
+  { label: '衬线', value: 'serif' },
 ]
 
 function FontSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const opts = value && !FONT_OPTIONS.includes(value) ? [value, ...FONT_OPTIONS] : FONT_OPTIONS
+  const opts = value && !FONT_OPTIONS.some((o) => o.value === value) ? [{ label: value, value }, ...FONT_OPTIONS] : FONT_OPTIONS
   return (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
       style={{ maxWidth: 160 }}
     >
-      {opts.map((f) => (
-        <option key={f} value={f}>
-          {f}
+      {opts.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
         </option>
       ))}
     </select>
@@ -166,7 +165,7 @@ function FontSelect({ value, onChange }: { value: string; onChange: (v: string) 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-      <span style={{ width: 76, color: 'var(--jp-text-secondary)' }}>{label}</span>
+      <span style={{ width: 88, color: 'var(--jp-text-secondary)', fontSize: 12 }}>{label}</span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>{children}</div>
     </div>
   )

@@ -302,13 +302,13 @@ const yN1 = rowY(layoutScore(noLyric, defaultPageConfig))[1]
 const yN2 = rowY(layoutScore(noLyric, { ...defaultPageConfig, height_ciqu: 200 }))[1]
 check('曲部与曲部间距增大 → 第二行更靠下（无歌词）', yN2 - yN1 > 50, `diff=${yN2 - yN1}`)
 
-// 字形三套
-const svgA = renderScoreToSvg(layoutScore(r2, { ...defaultPageConfig, shuzi_font: 'a' }))[0]
-const svgB = renderScoreToSvg(layoutScore(r2, { ...defaultPageConfig, shuzi_font: 'b' }))[0]
-const svgC = renderScoreToSvg(layoutScore(r2, { ...defaultPageConfig, shuzi_font: 'c' }))[0]
-check('字形 a = 衬线', svgA.includes('Georgia'))
-check('字形 b = 黑体（默认）', svgB.includes('Microsoft YaHei') && !svgB.includes('Georgia'))
-check('字形 c = 楷体', svgC.includes('KaiTi'))
+// 音符字体（adj105：由字形 a/b/c 改为字体名，直接用于 SVG font-family）
+const svgA = renderScoreToSvg(layoutScore(r2, { ...defaultPageConfig, shuzi_font: 'Georgia' }))[0]
+const svgB = renderScoreToSvg(layoutScore(r2, { ...defaultPageConfig, shuzi_font: 'Microsoft YaHei' }))[0]
+const svgC = renderScoreToSvg(layoutScore(r2, { ...defaultPageConfig, shuzi_font: 'KaiTi' }))[0]
+check('音符字体 = 设置的字体名（Georgia）', svgA.includes('font-family="Georgia"'))
+check('音符字体 = 设置的字体名（微软雅黑，默认）', svgB.includes('Microsoft YaHei') && !svgB.includes('Georgia'))
+check('音符字体 = 设置的字体名（KaiTi）', svgC.includes('KaiTi'))
 
 // 按页覆盖行距 heights['a1'] → 第 2 页 ciqu=150
 const cfgPages = { ...defaultPageConfig, heights: { a1: [13, 10, 150, 0] } }
@@ -974,15 +974,15 @@ check('单空格 → 无警告', r36g.errors.length === 0, JSON.stringify(r36g.e
 // 括号一律连音线（空格与否均可）：( 2 3 ) 与 (4) 都是连音线
 const r36h = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 ( 2 3 ) (4) 5 |\n')
 check('( 2 3 ) 与 (4) 均解析为连音线', r36h.groups[0].music.tokens.map((t) => t.kind).join(',') === 'note,slur,note,note,slur,slur,note,slur,note,barline', r36h.groups[0].music.tokens.map((t) => t.kind).join(',') + ' | ' + JSON.stringify(r36h.errors))
-// 渲染：倚音小字（adj101：字号 = 主音符 × 0.4 = 7.2，由 0.3 调大）
+// 渲染：倚音小字（adj105：字号 = 主音符 × 0.5 = 9，由 0.4 调大；加粗与主音符一致）
 const svg36c = renderScoreToSvg(layoutScore(r36c, defaultPageConfig))[0]
-check('倚音渲染小数字（font-size = 0.4×18 = 7.2）', svg36c.includes('font-size="7.2"'), '')
+check('倚音渲染小数字（font-size = 0.5×18 = 9）', svg36c.includes('font-size="9"'), '')
 // adj97：倚音减时线为跨组平行横线（line 元素）而非斜线（path M...L...斜向）
 check('倚音减时线为横线（line 元素）', svg36c.includes('<line ') && svg36c.includes('stroke="#1b1b1b"'), '')
 // adj101：倚音与主音符之间是一条抛物线弧线（SVG Q 二次贝塞尔，控制点在起点正下），粗细同减时线 0.6
 check('倚音连接弧线为抛物线（Q 命令）', svg36c.includes(' Q ') && svg36c.includes('stroke-width="0.6"'), '')
-// adj99：倚音数字不加粗（与主音符粗体区分）
-check('倚音数字不加粗', !svg36c.includes('font-size="7.2" font-weight="bold"'), '')
+// adj105：倚音数字加粗（与主音符粗体一致）
+check('倚音数字加粗', /<text x="[^"]+" y="[^"]+" font-size="9"[^>]*font-weight="bold"/.test(svg36c), '')
 // adj98：倚音减时线 = 实际时值 +1 条——主音符 1[65]（倚音无 /）→ 倚音有 1 条横线；
 // 2[3/]（倚音 /）→ 2 条（减时线数 = diminishCount + 1）
 const r98g = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 2[3] 3[4/] 4 |\n')
@@ -1007,7 +1007,7 @@ const maxGroup100 = gLineYs100.reduce((a, b) => (b.length > a.length ? b : a), [
 check('adj100 首条减时线 y = 主音符文本上端（基线 - 14.4）', gLineYs100.length >= 2 && Math.abs(firstLineY100 - (n100[0].y - 14.4)) < 0.5, `first=${firstLineY100} mainTop=${(n100[0].y - 14.4).toFixed(1)}`)
 check('adj100 减时线间距 1.2px', maxGroup100.length >= 2 && Math.abs(maxGroup100[1] - maxGroup100[0] - 1.2) < 0.05, `ys=${maxGroup100.join(',')}`)
 // adj100：倚音数字上移，基线在首条减时线上方（不压线）
-const gTextY100 = Number(svg98g.match(/<text x="[^"]+" y="([^"]+)" font-size="7.2"/)?.[1] ?? 'NaN')
+const gTextY100 = Number(svg98g.match(/<text x="[^"]+" y="([^"]+)" font-size="9"/)?.[1] ?? 'NaN')
 check('adj100 倚音数字上移（基线 < 首条减时线 - 1）', !Number.isNaN(gTextY100) && gTextY100 < gLineYs100[0] - 1, `gy=${gTextY100} line0=${gLineYs100[0]}`)
 // adj101：弧线为二次贝塞尔 Q——控制点在起点正下方（先向下），前倚音终点向右、后倚音终点向左，终点比起点低
 const arcs100 = [...svg36c.matchAll(/<path d="M ([-\d.]+) ([-\d.]+) Q ([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+)" fill="none" stroke="#1b1b1b" stroke-width="0.6"/g)].map((m) => ({ sx: Number(m[1]), sy: Number(m[2]), cx: Number(m[3]), cy: Number(m[4]), ex: Number(m[5]), ey: Number(m[6]) }))
@@ -1019,17 +1019,17 @@ check('adj101 后倚音弧线先向下再弯向左（控制点 x=起点 x、终�
 const svg36d = renderScoreToSvg(layoutScore(r36d, defaultPageConfig))[0]
 const yMain36d = Number(svg36d.match(/<text x="[^"]+" y="([^"]+)" data-notepos="[^"]+" font-size="18"[^>]*font-weight="bold"[^>]*>1<\/text>/)?.[1] ?? 'NaN')
 const lowCy36d = Math.max(...[...svg36d.matchAll(/<circle cx="[^"]+" cy="([^"]+)" r="[^"]+" fill="#1b1b1b"/g)].map((m) => Number(m[1])))
-// 5, 无减时（dc=1 → 线 1 条）：圆心 = mainTop + 半线高0.3 + (2+1.7)×(7.2/18=0.4)；mainTop = 主音符基线 - 14.4
-check('adj101 低八度点在最后一条减时线下方（线底+LAYER_GAP×s）', !Number.isNaN(yMain36d) && Math.abs(lowCy36d - (yMain36d - 14.4 + 0.3 + (2 + 1.7) * 0.4)) < 0.6, `lowCy=${lowCy36d} expect=${(yMain36d - 14.4 + 1.78).toFixed(2)}`)
+// 5, 无减时（dc=1 → 线 1 条）：圆心 = mainTop + 半线高0.3 + (2+1.5)×(9/18=0.5)；mainTop = 主音符基线 - 14.4
+check('adj101 低八度点在最后一条减时线下方（线底+LAYER_GAP×s）', !Number.isNaN(yMain36d) && Math.abs(lowCy36d - (yMain36d - 14.4 + 0.3 + (2 + 1.5) * 0.5)) < 0.6, `lowCy=${lowCy36d} expect=${(yMain36d - 14.4 + 2.05).toFixed(2)}`)
 // adj102：弧线起点——无低八度点 → 最后一条减时线底（直接连接）；有低八度点 → 最低点底 + LAYER_GAP×s
 const yMain36c = Number(svg36c.match(/<text x="[^"]+" y="([^"]+)" data-notepos="[^"]+" font-size="18"[^>]*font-weight="bold"[^>]*>1<\/text>/)?.[1] ?? 'NaN')
 const arcStarts36c = [...svg36c.matchAll(/<path d="M [-\d.]+ ([-\d.]+) Q/g)].map((m) => Number(m[1]))
 check('adj102 无低八度点：弧线起点 = 最后一条减时线底（与线连接）', arcStarts36c.length === 2 && arcStarts36c.every((sy) => Math.abs(sy - (yMain36c - 14.4 + 0.3)) < 0.5), `sy=${arcStarts36c.join(',')} lineBottom=${(yMain36c - 14.4 + 0.3).toFixed(1)}`)
 const arcSy36d = Number(svg36d.match(/<path d="M [-\d.]+ ([-\d.]+) Q/)?.[1] ?? 'NaN')
-check('adj102 有低八度点：弧线起点 = 低八度点底 + LAYER_GAP×s', !Number.isNaN(arcSy36d) && Math.abs(arcSy36d - (lowCy36d + (1.7 + 2) * 0.4)) < 0.6, `arcSy=${arcSy36d} expect=${(lowCy36d + 1.48).toFixed(2)}`)
-// adj103：多音符（≥2）倚音数字间距缩小为 0.5×字号（0.5×7.2 = 3.6@18）；1[65] 与 2[h56] 两组
-const gx36c = [...svg36c.matchAll(/<text x="([^"]+)" y="[^"]+" font-size="7.2"/g)].map((m) => Number(m[1])).sort((a, b) => a - b)
-check('adj103 多音符倚音数字间距 = 0.5×字号（3.6）', gx36c.length === 4 && Math.abs(gx36c[1] - gx36c[0] - 3.6) < 0.15 && Math.abs(gx36c[3] - gx36c[2] - 3.6) < 0.15, `xs=${gx36c.join(',')}`)
+check('adj102 有低八度点：弧线起点 = 低八度点底 + LAYER_GAP×s', !Number.isNaN(arcSy36d) && Math.abs(arcSy36d - (lowCy36d + (1.5 + 2) * 0.5)) < 0.6, `arcSy=${arcSy36d} expect=${(lowCy36d + 1.75).toFixed(2)}`)
+// adj103：多音符（≥2）倚音数字间距缩小为 0.5×字号（0.5×9 = 4.5@18）；1[65] 与 2[h56] 两组
+const gx36c = [...svg36c.matchAll(/<text x="([^"]+)" y="[^"]+" font-size="9"/g)].map((m) => Number(m[1])).sort((a, b) => a - b)
+check('adj103 多音符倚音数字间距 = 0.5×字号（4.5）', gx36c.length === 4 && Math.abs(gx36c[1] - gx36c[0] - 4.5) < 0.15 && Math.abs(gx36c[3] - gx36c[2] - 4.5) < 0.15, `xs=${gx36c.join(',')}`)
 // adj98：倚音占位计入音符宽度——带倚音的音符 perBeat ≥ 无倚音音符
 const lay98 = layoutScore(r98g, defaultPageConfig)
 const n98 = [...lay98.pages[0].notes].sort((a, b) => a.x - b.x)

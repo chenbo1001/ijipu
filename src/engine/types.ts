@@ -516,9 +516,9 @@ export interface PageConfig {
   /** 歌词字体与字号 */
   geci_font: string
   geci_size: number
-  /** 音符字号（px）与字形样式：a | b | c */
+  /** 音符字号（px）与字体（adj105：由字形 a|b|c 改为字体名，默认微软雅黑） */
   note_size: number
-  shuzi_font: 'a' | 'b' | 'c'
+  shuzi_font: string
   /** 行间距：曲下间距/词下间距/曲上间距/声部间距 */
   height_quci: number
   height_cici: number
@@ -558,7 +558,7 @@ export const defaultPageConfig: PageConfig = {
   geci_font: 'Microsoft YaHei',
   geci_size: 18,
   note_size: 18,
-  shuzi_font: 'b',
+  shuzi_font: 'Microsoft YaHei', // adj105：默认音符字体 = 微软雅黑（原字形 b 黑体系）
   height_quci: 13,
   height_cici: 10,
   height_ciqu: 20, // adj78：曲部与曲部间距默认 40→20；adj79 拆分后仅指无歌词行行尾间距
