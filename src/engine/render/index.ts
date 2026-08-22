@@ -490,11 +490,12 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
         const symY = aboveTop - LAYER_GAP * s - SYM_FS * DESC_RATIO
         const cx = x + digitW / 2 // 数字槽中心
         if (sym === 'tr' || sym === 'cy+') {
-          // 颤音：tr（粗体，adj112）+ 波浪线（cy+ 加长颤音同此；&tr 既有行为）
+          // 颤音：tr（粗体，adj112）+ 正弦波（adj115：周期数随音符点位/时值——每拍约 2 周期）
           parts.push(
             `<text x="${x}" y="${r1n(symY)}" font-size="${SYM_FS}" font-weight="bold" font-style="italic" font-family="${FONT_CN}" fill="#1b1b1b">tr</text>`,
           )
-          parts.push(wavePath(x + 16 * s, symY - 6 * s, x + 34 * s))
+          const cycles = Math.max(2, Math.round((note.duration || 1) * 2))
+          parts.push(wavePath(x + 16 * s, symY - 6 * s, x + 34 * s, 1, cycles))
         } else if (sym === 'cy') {
           // 颤音：仅 tr 文本（粗体，adj112；&cy 不带波浪线，&cy+ 才带）
           parts.push(
@@ -523,44 +524,55 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
             `<path d="M ${r1n(cx - 6 * s)} ${r1n(cy0 + 2 * s)} Q ${r1n(cx)} ${r1n(cy0 - 9 * s)} ${r1n(cx + 6 * s)} ${r1n(cy0 + 2 * s)}" fill="none" stroke="#1b1b1b" stroke-width="${r1n(1.2 * s)}"/>`,
           )
         } else if (sym === 'sby' || sym === 'xby' || sym === 'sby+' || sym === 'xby+') {
-          // 波音：锯齿状波浪线（adj112 锯齿；adj113：sby/xby 两齿半、sby+/xby+ 三齿半）
+          // 波音：锯齿状波浪线（adj113 两齿半/三齿半；adj114：斜上细线、斜下粗线）
+          // adj115：锯齿中心（谷 wy+1.5s、峰 wy-1.5s）与下波音竖线垂直居中对齐
           const teeth = sym.endsWith('+') ? 3.5 : 2.5
           const half = sym.endsWith('+') ? 9 * s : 5 * s
           const wy = symY - 4 * s
-          // 锯齿 path：谷-峰-谷-…，齿宽 tw = 总宽/齿数；整数齿结束在谷，半齿结束在峰
-          let d = `M ${r1n(cx - half)} ${r1n(wy)}`
-          const tw = (2 * half) / teeth
+          const tw = (2 * half) / teeth // 齿宽
+          const upLines: string[] = [] // 斜上（谷→峰）：细线
+          const downLines: string[] = [] // 斜下（峰→谷）：粗线
           for (let t = 0; t < Math.floor(teeth); t++) {
             const x0 = cx - half + t * tw
-            d += ` L ${r1n(x0 + tw / 2)} ${r1n(wy - 3 * s)} L ${r1n(x0 + tw)} ${r1n(wy)}`
+            upLines.push(
+              `<line x1="${r1n(x0)}" y1="${r1n(wy + 1.5 * s)}" x2="${r1n(x0 + tw / 2)}" y2="${r1n(wy - 1.5 * s)}" stroke="#1b1b1b" stroke-width="1"/>`,
+            )
+            downLines.push(
+              `<line x1="${r1n(x0 + tw / 2)}" y1="${r1n(wy - 1.5 * s)}" x2="${r1n(x0 + tw)}" y2="${r1n(wy + 1.5 * s)}" stroke="#1b1b1b" stroke-width="1.8"/>`,
+            )
           }
           if (teeth % 1 !== 0) {
             const x0 = cx - half + Math.floor(teeth) * tw
-            d += ` L ${r1n(x0 + tw / 2)} ${r1n(wy - 3 * s)}`
+            upLines.push(
+              `<line x1="${r1n(x0)}" y1="${r1n(wy + 1.5 * s)}" x2="${r1n(x0 + tw / 2)}" y2="${r1n(wy - 1.5 * s)}" stroke="#1b1b1b" stroke-width="1"/>`,
+            )
           }
-          parts.push(`<path d="${d}" fill="none" stroke="#1b1b1b" stroke-width="1.5"/>`)
+          parts.push(...upLines, ...downLines)
           if (sym.startsWith('x')) {
-            // 下波音：中间细竖线 |（adj113：原 \ 斜线改竖线、细线）
+            // 下波音：中间细竖线 |（中心 wy 与锯齿垂直居中对齐，adj115）
             parts.push(
               `<line x1="${r1n(cx)}" y1="${r1n(wy - 4 * s)}" x2="${r1n(cx)}" y2="${r1n(wy + 4 * s)}" stroke="#1b1b1b" stroke-width="1"/>`,
             )
           }
         } else if (sym === 'shy' || sym === 'xhy') {
           // 滑音：音符中右/左起，向右/左上弧线 + 末端箭头
+          // adj114：滑音大小 = 音符的 1/4（跨度/高度 ≈ size×0.25），箭头实心清晰可见
           const right = sym === 'shy'
           const x1 = right ? x + digitW + 1 * s : x - 1 * s
           const y1 = y - size * 0.4 // 音符中部
-          const x2 = right ? x1 + 14 * s : x1 - 14 * s
-          const y2 = y1 - 12 * s
+          const sz = size * 0.25
+          const x2 = right ? x1 + sz : x1 - sz
+          const y2 = y1 - sz
           const mx = (x1 + x2) / 2
           parts.push(
             `<path d="M ${r1n(x1)} ${r1n(y1)} Q ${r1n(mx)} ${r1n(y1)} ${r1n(x2)} ${r1n(y2)}" fill="none" stroke="#1b1b1b" stroke-width="1"/>`,
           )
-          // 末端箭头（指向末端方向）
-          const ax = right ? x2 + 2 * s : x2 - 2 * s
-          const ay = y2 - 2 * s
+          // 末端箭头：尖在末端、两翼向弧线后方张开（指向右/左上）
+          const dir = right ? -1 : 1
+          const bx = x2 + dir * 2.2 * s
+          const by = y2 + 2.2 * s
           parts.push(
-            `<path d="M ${r1n(x2)} ${r1n(y2)} L ${r1n(ax)} ${r1n(ay + 2 * s)} L ${r1n(ax)} ${r1n(ay - 2 * s)} Z" fill="#1b1b1b"/>`,
+            `<path d="M ${r1n(x2)} ${r1n(y2)} L ${r1n(bx)} ${r1n(y2 - 2.2 * s)} L ${r1n(bx)} ${r1n(by)} Z" fill="#1b1b1b"/>`,
           )
         } else if (sym === 'hx') {
           // 呼吸记号：音符右侧上方，单线 V（尖朝下，adj112）
@@ -971,12 +983,12 @@ function renderSlur(s: PlacedSlur, noteSize = 18): string {
 // 渐强渐弱与波浪线（M7d）
 // ============================================================
 
-/** 颤音尾部正弦波（adj113：&tr+/&cy+ 的波浪线改为正弦波，L 采样拟合） */
-function wavePath(x1: number, y: number, x2: number, w = 1): string {
-  const amp = 2.5 // 振幅（px）
-  const wl = 6 // 波长（px）
+/** 颤音尾部正弦波（adj113 正弦；adj115：幅度 = 原 1/3、周期数由调用方按音符点位传入） */
+function wavePath(x1: number, y: number, x2: number, w = 1, cycles = 3): string {
+  const amp = 2.5 / 3 // 幅度（adj115：原 2.5 的 1/3）
+  const wl = (x2 - x1) / Math.max(1, cycles) // 波长 = 总长/周期数
   let d = `M ${x1} ${y}`
-  const n = Math.max(8, Math.round((x2 - x1)))
+  const n = Math.max(8, Math.round(x2 - x1))
   for (let i = 1; i <= n; i++) {
     const x = x1 + ((x2 - x1) * i) / n
     const yy = y - amp * Math.sin(((x - x1) / wl) * 2 * Math.PI)
