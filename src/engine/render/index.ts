@@ -760,11 +760,10 @@ function renderBarline(bar: PlacedBarline, noteSize = 18): string {
           `<line x1="${mx.toFixed(1)}" y1="${(cy - 4.5 * s).toFixed(1)}" x2="${mx.toFixed(1)}" y2="${(cy + 4.5 * s).toFixed(1)}" stroke="#1b1b1b" stroke-width="1.2"/>`,
       )
     } else if (bar.mark === 'hs') {
-      // 小节线正上方花 S 记号（dal segno：S 形曲线 + 两条斜线）
-      const cy = yTop - 10 * s
+      // 花 S 记号（adj129）：官方 Unicode U+1D10B（𝄋），用音乐符号字体渲染
+      const fs = Math.max(12, Math.round(14 * s))
       parts.push(
-        `<path d="M ${(mx - 3 * s).toFixed(1)} ${(cy - 3 * s).toFixed(1)} Q ${(mx + 3 * s).toFixed(1)} ${(cy - 0.5 * s).toFixed(1)} ${mx.toFixed(1)} ${(cy - 0.5 * s).toFixed(1)} Q ${(mx - 3 * s).toFixed(1)} ${(cy + 0.5 * s).toFixed(1)} ${(mx + 3 * s).toFixed(1)} ${(cy + 3 * s).toFixed(1)}" fill="none" stroke="#1b1b1b" stroke-width="1.2"/>` +
-          `<line x1="${(mx - 2.5 * s).toFixed(1)}" y1="${(cy - 4.5 * s).toFixed(1)}" x2="${(mx + 1 * s).toFixed(1)}" y2="${(cy + 4.5 * s).toFixed(1)}" stroke="#1b1b1b" stroke-width="1"/>`,
+        `<text x="${mx.toFixed(1)}" y="${(yTop - 5 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄋</text>`,
       )
     }
   }
