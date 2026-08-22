@@ -524,7 +524,7 @@ check('adj132 连音线在修饰符之上（y 上移 ≥10）', slSym132 < slPla
 // adj134：连音线避让倚音（y 上移一层）且不高于行内跳房子线
 const slGrace134 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1[3] 2) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
 check('adj134 连音线避让倚音（y 上移 ≥10）', slGrace134 < slPlain132 - 10, `grace=${slGrace134} plain=${slPlain132}`)
-const r134v = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 [3 (4 5) 6 | 7 1 2 3] 4 |\n')
+const r134v = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 | [3 (4 5) 6 | 7 1 2 3] 4 |\n')
 const lay134v = layoutScore(r134v, defaultPageConfig)
 const s134v = lay134v.pages[0].slurs[0]
 const v134v = lay134v.pages[0].barlines.find((b) => b.voltaStart)
