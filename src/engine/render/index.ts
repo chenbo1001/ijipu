@@ -504,26 +504,26 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
             `<text x="${x}" y="${r1n(symY)}" font-size="${SYM_FS}" font-weight="bold" font-style="italic" font-family="${FONT_CN}" fill="#1b1b1b">tr</text>`,
           )
         } else if (sym === 'bc') {
-          // 保持音：上方短横线
+          // 保持音：上方短横线（adj124：尺寸 ×0.8）
           parts.push(
-            `<line x1="${r1n(cx - 4.5 * s)}" y1="${r1n(symY - 2 * s)}" x2="${r1n(cx + 4.5 * s)}" y2="${r1n(symY - 2 * s)}" stroke="#1b1b1b" stroke-width="${r1n(2 * s)}"/>`,
+            `<line x1="${r1n(cx - 3.6 * s)}" y1="${r1n(symY - 2 * s)}" x2="${r1n(cx + 3.6 * s)}" y2="${r1n(symY - 2 * s)}" stroke="#1b1b1b" stroke-width="${r1n(2 * s)}"/>`,
           )
         } else if (sym === 'zy') {
-          // 重音：上方线形 > 符号（adj112 非实心；adj113 调小 + 上移）
+          // 重音：上方线形 > 符号（adj112 非实心；adj113 调小 + 上移；adj124 尺寸 ×0.8）
           parts.push(
-            `<path d="M ${r1n(cx - 4 * s)} ${r1n(symY - 6 * s)} L ${r1n(cx + 2.5 * s)} ${r1n(symY - 2 * s)} L ${r1n(cx - 4 * s)} ${r1n(symY + 2 * s)}" fill="none" stroke="#1b1b1b" stroke-width="1.5"/>`,
+            `<path d="M ${r1n(cx - 3.2 * s)} ${r1n(symY - 5 * s)} L ${r1n(cx + 2 * s)} ${r1n(symY - 2 * s)} L ${r1n(cx - 3.2 * s)} ${r1n(symY + 1 * s)}" fill="none" stroke="#1b1b1b" stroke-width="1.5"/>`,
           )
         } else if (sym === 'dy') {
-          // 顿音：上方实心倒三角（尖朝下；adj113 上移）
+          // 顿音：上方实心倒三角（尖朝下；adj113 上移；adj124 尺寸 ×0.8）
           parts.push(
-            `<path d="M ${r1n(cx - 4 * s)} ${r1n(symY - 5.5 * s)} L ${r1n(cx + 4 * s)} ${r1n(symY - 5.5 * s)} L ${r1n(cx)} ${r1n(symY + 2 * s)} Z" fill="#1b1b1b"/>`,
+            `<path d="M ${r1n(cx - 3.2 * s)} ${r1n(symY - 4.4 * s)} L ${r1n(cx + 3.2 * s)} ${r1n(symY - 4.4 * s)} L ${r1n(cx)} ${r1n(symY + 1.6 * s)} Z" fill="#1b1b1b"/>`,
           )
         } else if (sym === 'yc') {
-          // 延长记号：点 + 半圆弧（弧顶在上、开口朝下；adj113 下移贴近数字）
+          // 延长记号：点 + 半圆弧（弧顶在上、开口朝下；adj113 下移；adj124 尺寸 ×0.8）
           const cy0 = symY - 1.5 * s // 点中心
-          parts.push(`<circle cx="${r1n(cx)}" cy="${r1n(cy0)}" r="${r1n(1.8 * s)}" fill="#1b1b1b"/>`)
+          parts.push(`<circle cx="${r1n(cx)}" cy="${r1n(cy0)}" r="${r1n(1.44 * s)}" fill="#1b1b1b"/>`)
           parts.push(
-            `<path d="M ${r1n(cx - 6 * s)} ${r1n(cy0 + 2 * s)} Q ${r1n(cx)} ${r1n(cy0 - 9 * s)} ${r1n(cx + 6 * s)} ${r1n(cy0 + 2 * s)}" fill="none" stroke="#1b1b1b" stroke-width="${r1n(1.2 * s)}"/>`,
+            `<path d="M ${r1n(cx - 4.8 * s)} ${r1n(cy0 + 1.6 * s)} Q ${r1n(cx)} ${r1n(cy0 - 7.2 * s)} ${r1n(cx + 4.8 * s)} ${r1n(cy0 + 1.6 * s)}" fill="none" stroke="#1b1b1b" stroke-width="${r1n(1.2 * s)}"/>`,
           )
         } else if (sym === 'sby' || sym === 'xby' || sym === 'sby+' || sym === 'xby+') {
           // 波音：锯齿状波浪线（adj113 两齿半/三齿半；adj114：斜上细线、斜下粗线）
@@ -618,8 +618,8 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
             `<text x="${x}" y="${r1n(symY)}" font-size="${SYM_FS}" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(sym)}</text>`,
           )
         }
-        // 更新层顶：文字顶 = 基线 - ascent（0.8×字号）；延长记号弧顶更高单独处理
-        aboveTop = sym === 'yc' ? symY - 10.5 * s : symY - SYM_FS * DIGIT_HEIGHT_RATIO
+        // 更新层顶：文字顶 = 基线 - ascent（0.8×字号）；延长记号弧顶更高单独处理（adj124 缩 80%）
+        aboveTop = sym === 'yc' ? symY - 8.7 * s : symY - SYM_FS * DIGIT_HEIGHT_RATIO
       }
     }
   }
