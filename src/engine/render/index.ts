@@ -529,27 +529,30 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
           // 波音：锯齿状波浪线（adj113 两齿半/三齿半；adj114：斜上细线、斜下粗线）
           // adj115：锯齿中心与下波音竖线垂直居中；adj117：横向压缩 75%
           // adj118：斜上细线端点与斜下粗线端点精确贴紧（峰/谷同点相接，无交叠）
+          // adj121：宽度 85%（原 75%）、高度 120%（峰谷 ±1.5s → ±1.8s）
+          // adj122：波音整体下移 1s（wy symY-4s → symY-3s）
           const teeth = sym.endsWith('+') ? 3.5 : 2.5
-          const half = (sym.endsWith('+') ? 9 * s : 5 * s) * 0.75
-          const wy = symY - 4 * s
+          const half = (sym.endsWith('+') ? 9 * s : 5 * s) * 0.85
+          const wy = symY - 3 * s
           const tw = (2 * half) / teeth // 齿宽
+          const ampV = 1.8 * s // 峰/谷相对中线高度（1.5s × 1.2）
           const upLines: string[] = [] // 斜上（谷→峰）：细线
           const downLines: string[] = [] // 斜下（峰→谷）：粗线
           for (let t = 0; t < Math.floor(teeth); t++) {
             const x0 = cx - half + t * tw
             const peak = x0 + tw / 2
             upLines.push(
-              `<line x1="${r1n(x0)}" y1="${r1n(wy + 1.5 * s)}" x2="${r1n(peak)}" y2="${r1n(wy - 1.5 * s)}" stroke="#1b1b1b" stroke-width="0.7"/>`,
+              `<line x1="${r1n(x0)}" y1="${r1n(wy + ampV)}" x2="${r1n(peak)}" y2="${r1n(wy - ampV)}" stroke="#1b1b1b" stroke-width="0.7"/>`,
             )
             downLines.push(
-              `<line x1="${r1n(peak)}" y1="${r1n(wy - 1.5 * s)}" x2="${r1n(x0 + tw)}" y2="${r1n(wy + 1.5 * s)}" stroke="#1b1b1b" stroke-width="1.8"/>`,
+              `<line x1="${r1n(peak)}" y1="${r1n(wy - ampV)}" x2="${r1n(x0 + tw)}" y2="${r1n(wy + ampV)}" stroke="#1b1b1b" stroke-width="1.8"/>`,
             )
           }
           if (teeth % 1 !== 0) {
             const x0 = cx - half + Math.floor(teeth) * tw
             const peak = x0 + tw / 2
             upLines.push(
-              `<line x1="${r1n(x0)}" y1="${r1n(wy + 1.5 * s)}" x2="${r1n(peak)}" y2="${r1n(wy - 1.5 * s)}" stroke="#1b1b1b" stroke-width="0.7"/>`,
+              `<line x1="${r1n(x0)}" y1="${r1n(wy + ampV)}" x2="${r1n(peak)}" y2="${r1n(wy - ampV)}" stroke="#1b1b1b" stroke-width="0.7"/>`,
             )
           }
           parts.push(...upLines, ...downLines)
@@ -563,6 +566,7 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
           // 滑音：细线弧线 + 末端线形 > 箭头（adj119：箭头方向 = 弧线末端切线延伸方向）
           // 上滑音：音符中部右侧起，弧线向右再弧线向上（adj119）
           // 下滑音：音符上部右侧起，弧线向右再弧线向下到音符中部高度（adj120）
+          // adj121：弧线起点与音符间距加大；> 箭头从弧线末端直接张开（连接无间隙）
           const right = sym === 'shy'
           const cx0 = x + digitW / 2 // 音符中部
           const sz = size * 0.25 // 滑音大小 = 音符的 1/4
@@ -571,12 +575,12 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
           let x2: number
           let y2: number
           if (right) {
-            x1 = cx0 + 2 * s // 中部右侧起笔
+            x1 = cx0 + 4 * s // 中部右侧起笔（间距加大）
             y1 = y - size * 0.4 // 音符中部
             x2 = x1 + sz
             y2 = y1 - sz // 终点在上方（向右上）
           } else {
-            x1 = x + digitW * 0.8 // 上部右侧起笔
+            x1 = x + digitW * 0.9 // 上部右侧起笔（间距加大）
             y1 = y - size * 0.75 // 音符上部
             x2 = x1 + sz
             y2 = y - size * 0.4 // 终点在音符中部高度（向右下）
@@ -585,22 +589,20 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
           parts.push(
             `<path d="M ${r1n(x1)} ${r1n(y1)} Q ${r1n(mx)} ${r1n(y1)} ${r1n(x2)} ${r1n(y2)}" fill="none" stroke="#1b1b1b" stroke-width="1"/>`,
           )
-          // > 箭头：尖在弧线末端沿切线延伸方向，两翼向后张开（线形两笔）
+          // > 箭头：两翼从弧线末端张开到尖（尖沿切线延伸方向，与弧线连接）
           const tx = x2 - mx
           const ty = y2 - y1
           const tLen = Math.hypot(tx, ty) || 1
           const ux = tx / tLen // 切线单位方向（末端延伸方向）
           const uy = ty / tLen
-          const al = 3 * s // 箭头长度（尖到翼根）
+          const al = 3 * s // 箭头长度（弧线末端到尖）
           const aw = 2 * s // 开度（两翼到中线距离）
           const ax = x2 + ux * al
           const ay = y2 + uy * al
-          const bx = x2 + ux * (al - aw)
-          const by = y2 + uy * (al - aw)
           const ox = -uy * aw
           const oy = ux * aw
           parts.push(
-            `<path d="M ${r1n(bx + ox)} ${r1n(by + oy)} L ${r1n(ax)} ${r1n(ay)} L ${r1n(bx - ox)} ${r1n(by - oy)}" fill="none" stroke="#1b1b1b" stroke-width="1"/>`,
+            `<path d="M ${r1n(x2 + ox)} ${r1n(y2 + oy)} L ${r1n(ax)} ${r1n(ay)} L ${r1n(x2 - ox)} ${r1n(y2 - oy)}" fill="none" stroke="#1b1b1b" stroke-width="1"/>`,
           )
         } else if (sym === 'hx') {
           // 呼吸记号：音符右侧上方，单线 V（尖朝下，adj112）
