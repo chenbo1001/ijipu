@@ -531,9 +531,10 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
           // adj118：斜上细线端点与斜下粗线端点精确贴紧（峰/谷同点相接，无交叠）
           // adj121：高度 120%（峰谷 ±1.5s → ±1.8s）；adj122：整体下移 1s
           // adj123：宽度——上下波音 90%、加长上下波音 75%；均以数字槽中心水平居中（cx±half）
+          // adj125：波音位置再下移 1s（wy symY-3s → symY-2s）
           const teeth = sym.endsWith('+') ? 3.5 : 2.5
           const half = (sym.endsWith('+') ? 9 * s : 5 * s) * (sym.endsWith('+') ? 0.75 : 0.9)
-          const wy = symY - 3 * s
+          const wy = symY - 2 * s
           const tw = (2 * half) / teeth // 齿宽
           const ampV = 1.8 * s // 峰/谷相对中线高度（1.5s × 1.2）
           const upLines: string[] = [] // 斜上（谷→峰）：细线
@@ -565,7 +566,7 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
         } else if (sym === 'shy' || sym === 'xhy') {
           // 滑音：细线弧线 + 末端线形 > 箭头（adj119：箭头方向 = 弧线末端切线延伸方向）
           // 上滑音：音符中部右侧起，弧线向右再弧线向上（adj119）
-          // 下滑音：音符上部右侧起，弧线向右再弧线向下到音符中部高度（adj120）
+          // 下滑音：音符上部起，弧线向右下，终点 = 音符中部右侧（与上滑音起始位置对应，adj125）
           // adj121：弧线起点与音符间距加大；> 箭头从弧线末端直接张开（连接无间隙）
           const right = sym === 'shy'
           const cx0 = x + digitW / 2 // 音符中部
@@ -580,10 +581,10 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
             x2 = x1 + sz
             y2 = y1 - sz // 终点在上方（向右上）
           } else {
-            x1 = x + digitW * 0.9 // 上部右侧起笔（间距加大）
+            x1 = cx0 // 上部（数字中心上方）
             y1 = y - size * 0.75 // 音符上部
-            x2 = x1 + sz
-            y2 = y - size * 0.4 // 终点在音符中部高度（向右下）
+            x2 = cx0 + 4 * s // 终点 x = 上滑音起点 x
+            y2 = y - size * 0.4 // 终点 y = 音符中线 = 上滑音起点 y
           }
           const mx = (x1 + x2) / 2 // 控制点水平（先向右弯再向上/下）
           parts.push(
