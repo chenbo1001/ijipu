@@ -37,6 +37,8 @@ export function EditorPane() {
   // 光标联动（M3）：光标移动 → 计算 notepos id → 预览高亮
   const setActiveNoteId = useDocStore((s) => s.setActiveNoteId)
   const cursorJump = useDocStore((s) => s.cursorJump)
+  const undo = useDocStore((s) => s.undo)
+  const redo = useDocStore((s) => s.redo)
   const onSelectRef = useRef<() => void>(() => {})
 
   // 消费"点击谱面音符 / 撤销重做" → 跳转编辑器光标（含选区）请求
@@ -97,8 +99,22 @@ export function EditorPane() {
     const ta = taRef.current
     if (!ta) return
     if (e.nativeEvent.isComposing) return // 输入法合成中不触发
-    const key = e.key
+    // adj111：撤销/重做在编辑器内直接处理（受控 textarea 浏览器原生撤销无效；
+    // stopPropagation 防止与 App 全局快捷键双重触发）
+    if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault()
+      e.stopPropagation()
+      undo()
+      return
+    }
+    if (e.ctrlKey && e.key.toLowerCase() === 'y') {
+      e.preventDefault()
+      e.stopPropagation()
+      redo()
+      return
+    }
     if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return
+    const key = e.key
     if (key.length !== 1 || !isLineHeaderKey(key.toUpperCase())) return
     const keyUp = key.toUpperCase() as Parameters<typeof insertLineHeader>[2]
     // 当前行类型（光标前内容）
@@ -129,7 +145,8 @@ export function EditorPane() {
       // adj110：光标离开上一行时才格式化该行（仅 Q 行，formatLine 逐行处理），
       // 输入中不格式化 → 不抢光标；格式化行在光标上方，偏移量同步光标
       if (editingLineRef.current >= 0 && editingLineRef.current !== line) {
-        const li = editingLineRef.current
+        // adj111：lineColOf 行号 1-based，数组索引转 0-based（此前错位一行改到下一行）
+        const li = editingLineRef.current - 1
         const lines = next.split('\n')
         const oldText = lines[li] ?? ''
         const formatted = formatLine(oldText)
