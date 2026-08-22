@@ -745,23 +745,24 @@ function renderBarline(bar: PlacedBarline, noteSize = 18): string {
     const mx = x + ({ '|': 0.55, '||': 1.95, '||/': 1.6, '|:': 4.2, ':|': 4.2, ':|:': 8.1, '||:': 3.85, '|*': 0.55, '|/': 0.55 }[bar.type] ?? 0.55) / 2
     const label = bar.mark === 'fine' ? 'Fine' : bar.mark === 'dc' ? 'D.C.' : bar.mark === 'ds' ? 'D.S.' : null
     if (label) {
-      // 小节线正下方文本（adj128：&dc/&ds 斜体粗体、&fine 粗体；均 80% 宽度字号）
+      // 小节线正下方文本（adj128：&dc/&ds 斜体粗体、&fine 粗体；均 80% 宽度字号；
+      // adj131：上移更靠近小节线下端）
       const fs = Math.max(8, Math.round(9 * s * 0.8))
       const italic = bar.mark === 'dc' || bar.mark === 'ds' ? ' font-style="italic"' : ''
       parts.push(
-        `<text x="${mx.toFixed(1)}" y="${(yBottom + 11 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="${FONT_CN}" font-weight="bold"${italic} fill="#1b1b1b">${label}</text>`,
+        `<text x="${mx.toFixed(1)}" y="${(yBottom + 8 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="${FONT_CN}" font-weight="bold"${italic} fill="#1b1b1b">${label}</text>`,
       )
     } else if (bar.mark === 'ty') {
-      // 大跳跃记号（adj130）：官方 Unicode U+1D10C（𝄌），音乐符号字体渲染
-      const fs = Math.max(12, Math.round(14 * s))
+      // 大跳跃记号（adj130）：官方 Unicode U+1D10C（𝄌）；adj131：调大 + 下移靠近小节线
+      const fs = Math.max(14, Math.round(16 * s))
       parts.push(
-        `<text x="${mx.toFixed(1)}" y="${(yTop - 5 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄌</text>`,
+        `<text x="${mx.toFixed(1)}" y="${(yTop - 3 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄌</text>`,
       )
     } else if (bar.mark === 'hs') {
-      // 花 S 记号（adj129）：官方 Unicode U+1D10B（𝄋），用音乐符号字体渲染
-      const fs = Math.max(12, Math.round(14 * s))
+      // 花 S 记号（adj129）：官方 Unicode U+1D10B（𝄋）；adj131：调小与大跳跃匹配 + 下移靠近小节线
+      const fs = Math.max(10, Math.round(12 * s))
       parts.push(
-        `<text x="${mx.toFixed(1)}" y="${(yTop - 5 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄋</text>`,
+        `<text x="${mx.toFixed(1)}" y="${(yTop - 3 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄋</text>`,
       )
     }
   }
