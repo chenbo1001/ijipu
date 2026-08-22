@@ -20,6 +20,11 @@ import {
   DIGIT_HEIGHT_RATIO,
   LAYER_GAP,
   INNER_GAP,
+  BEAM_H,
+  BARLINE_DOT_R,
+  BARLINE_DOT_GAP,
+  BARLINE_W_THIN,
+  BARLINE_W_THICK,
   COMMENT_FONT_RATIO,
   NOTE_COMMENT_FONT_RATIO,
   DESC_RATIO,
@@ -539,42 +544,52 @@ function renderBarline(bar: PlacedBarline, noteSize = 18): string {
     `<rect x="${x + off}" y="${yTop}" width="${w}" height="${h}" fill="#1b1b1b"/>`
   // adj69：小节线高度/反复点随曲部字号缩放（线宽与占位保持，避免布局占位连锁变化）
   const s = noteScaleOf(noteSize)
-  // 反复点（r=1.5×s，adj58 调小），off 为相对中心 x 的偏移；垂直对称于小节线中心 ±4×s
+  // 反复点（r=BARLINE_DOT_R×s，adj58/104 调小），off 为相对中心 x 的偏移；
+  // 垂直对称于小节线中心 ±4×s；点与最近细线水平空白 BARLINE_DOT_GAP（adj104 由 1.5 调小）
+  const dotR = BARLINE_DOT_R * s
   const dots = (off: number) => {
     const midY = (yTop + yBottom) / 2
     return (
-      `<circle cx="${x + off}" cy="${(midY - 4 * s).toFixed(1)}" r="${r1n(1.5 * s)}" fill="#1b1b1b"/>` +
-      `<circle cx="${x + off}" cy="${(midY + 4 * s).toFixed(1)}" r="${r1n(1.5 * s)}" fill="#1b1b1b"/>`
+      `<circle cx="${x + off}" cy="${(midY - 4 * s).toFixed(1)}" r="${r1n(dotR)}" fill="#1b1b1b"/>` +
+      `<circle cx="${x + off}" cy="${(midY + 4 * s).toFixed(1)}" r="${r1n(dotR)}" fill="#1b1b1b"/>`
     )
   }
-
+  // 线宽（adj104 调小：细 0.9、粗 1.4；线左缘位置保持，右缘相应内收）
+  const wThin = BARLINE_W_THIN
+  const wThick = BARLINE_W_THICK
   switch (bar.type) {
     case '|':
-      parts.push(draw(-0.55, 1.1))
+      parts.push(draw(-0.55, wThin))
       break
     case '||':
-      // 双小节线：左细线右粗线（细 1.1、粗 1.8），间距 1px（adj55）
-      parts.push(draw(-1.95, 1.1), draw(0.15, 1.8))
+      // 双小节线：左细线右粗线（细 wThin、粗 wThick），间距 1px（adj55）
+      parts.push(draw(-1.95, wThin), draw(0.15, wThick))
       break
     case '||/':
       // 双小节线（双细线）：间距 1px（adj55）
-      parts.push(draw(-1.6, 1.1), draw(0.5, 1.1))
+      parts.push(draw(-1.6, wThin), draw(0.5, wThin))
       break
     case '||:':
-      // 双细线 + 右 :（线距 1px、线点距 1.5px，adj55/58）
-      parts.push(draw(-1.6, 1.1), draw(0.5, 1.1), dots(4.6))
+      // 双细线 + 右 :（线距 1px；点距右细线右缘 BARLINE_DOT_GAP，adj55/58/104）
+      parts.push(draw(-1.6, wThin), draw(0.5, wThin), dots(0.5 + wThin + BARLINE_DOT_GAP + dotR))
       break
     case '|:':
-      // 左反复线：左粗线、中细线、右 :，线距 1px、线点距 1.5px（adj55/58）
-      parts.push(draw(-4.5, 1.8), draw(-1.7, 1.1), dots(2.4))
+      // 左反复线：左粗线、中细线、右 :，线距 1px、点线距 BARLINE_DOT_GAP（adj55/58/104）
+      parts.push(draw(-4.5, wThick), draw(-1.7, wThin), dots(-1.7 + wThin + BARLINE_DOT_GAP + dotR))
       break
     case ':|':
-      // 右反复线：左 :、中细线、右粗线，点线距 1.5px、线距 1px（adj55/58）
-      parts.push(dots(-2.4), draw(0.6, 1.1), draw(2.7, 1.8))
+      // 右反复线：左 :、中细线、右粗线，点线距 BARLINE_DOT_GAP、线距 1px（adj55/58/104）
+      parts.push(dots(0.6 - BARLINE_DOT_GAP - dotR), draw(0.6, wThin), draw(2.7, wThick))
       break
     case ':|:':
-      // 两边反复线：: 细线 粗线 细线 :，线距 1px、线点距 1.5px（adj55/58）
-      parts.push(dots(-4.5), draw(-1.5, 1.1), draw(0.6, 1.8), draw(2.4, 1.1), dots(7.5))
+      // 两边反复线：: 细线 粗线 细线 :，线距 1px、点线距 BARLINE_DOT_GAP（adj55/58/104）
+      parts.push(
+        dots(-1.5 - BARLINE_DOT_GAP - dotR),
+        draw(-1.5, wThin),
+        draw(0.6, wThick),
+        draw(2.4, wThin),
+        dots(2.4 + wThin + BARLINE_DOT_GAP + dotR),
+      )
       break
     case '|/':
     case '|*':
@@ -929,7 +944,7 @@ function renderBeams(beams: Beam[]): string {
   return beams
     .map(
       (b) =>
-        `<rect x="${b.x1}" y="${b.y}" width="${Math.max(1, b.x2 - b.x1)}" height="1.1" fill="#1b1b1b"/>`,
+        `<rect x="${b.x1}" y="${b.y}" width="${Math.max(1, b.x2 - b.x1)}" height="${BEAM_H}" fill="#1b1b1b"/>`,
     )
     .join('\n')
 }

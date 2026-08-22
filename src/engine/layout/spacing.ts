@@ -27,16 +27,26 @@ export const LAYER_GAP = 2
 export const INNER_GAP = 1.5
 
 // ---- 元素尺寸 ----
-/** 八度点 / 小节线反复点半径（px） */
-export const DOT_R = 1.7
+/** 八度点半径（px，adj104 由 1.7 调小） */
+export const DOT_R = 1.5
 /** 附点圆点半径（px，adj71：独立常量，默认 2，随音符字号缩放） */
 export const DOT_R_DOT = 2
-/** 减时线横线高（px） */
-export const BEAM_H = 1
+/** 减时线横线高（px，adj104 由 1 调小） */
+export const BEAM_H = 0.8
+/** 高八度点层内垂直间距（px，adj104：原 INNER_GAP 1.5 调小，仅高八度点之间） */
+export const OCTAVE_DOT_GAP = 1.2
 
 // ---- 小节线 ----
 /** 反复点相对小节线中心垂直偏移（上下各 ±，px） */
 export const BARLINE_DOT_OFF = 4
+/** 小节线反复点半径设计值（px，adj58 曾调小至 1.5、adj104 再调小至 1.2；实际 ×s） */
+export const BARLINE_DOT_R = 1.2
+/** 小节线反复点与最近细线的水平空白设计值（px，adj104 由 1.5 调小；实际 ×s） */
+export const BARLINE_DOT_GAP = 1.2
+/** 小节线细线宽设计值（px，adj104 由 1.1 调小；线宽不随字号，避免占位连锁） */
+export const BARLINE_W_THIN = 0.9
+/** 小节线粗线宽设计值（px，adj104 由 1.8 调小；线宽不随字号） */
+export const BARLINE_W_THICK = 1.4
 /** 跳房子线距小节线上端间距（px；adj73：比线下方元素最高点（小节线上端）高 8px） */
 export const VOLTA_BAR_GAP = 8
 /** 跳房子 + 修饰（抬高）每级间距（px） */
@@ -96,16 +106,16 @@ export const digitTopY = (y: number, noteSize: number) => y - noteSize * DIGIT_H
 export const digitBottomY = (y: number, noteSize: number) =>
   y + DIGIT_BOTTOM * noteScaleOf(noteSize)
 
-/** 高八度点：第 i 个点 cy（点底距数字顶 LAYER_GAP×scale，层内点空白 INNER_GAP×scale） */
+/** 高八度点：第 i 个点 cy（点底距数字顶 LAYER_GAP×scale，层内点空白 OCTAVE_DOT_GAP×scale，adj104） */
 export const octaveDotY = (y: number, i: number, noteSize: number) => {
   const s = noteScaleOf(noteSize)
-  return y - noteSize * DIGIT_HEIGHT_RATIO - (LAYER_GAP + DOT_R) * s - i * (DOT_R * 2 + INNER_GAP) * s
+  return y - noteSize * DIGIT_HEIGHT_RATIO - (LAYER_GAP + DOT_R) * s - i * (DOT_R * 2 + OCTAVE_DOT_GAP) * s
 }
 
 /** 高八度点层顶 y（n 个点时的最高点顶，供上层装饰/连音线定位） */
 export const octaveTopY = (y: number, n: number, noteSize: number) => {
   const s = noteScaleOf(noteSize)
-  return y - noteSize * DIGIT_HEIGHT_RATIO - (LAYER_GAP + DOT_R * 2) * s - (n - 1) * (DOT_R * 2 + INNER_GAP) * s
+  return y - noteSize * DIGIT_HEIGHT_RATIO - (LAYER_GAP + DOT_R * 2) * s - (n - 1) * (DOT_R * 2 + OCTAVE_DOT_GAP) * s
 }
 
 /** 减时线：第 level 条横线顶 y（第一条距数字底 LAYER_GAP×scale，层内线空白 INNER_GAP×scale） */

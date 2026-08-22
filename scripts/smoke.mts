@@ -155,7 +155,7 @@ const cnt2 = (svg2.match(/data-notepos=/g) ?? []).length
 check('复杂行 6 个可见音符（8 隐藏休止不画）', cnt2 === 6, `got ${cnt2}`)
 check('隐藏休止符不可播放', lay2.pages[0].notes.find((n) => n.token.kind === 'rest')?.playable === false)
 check('SVG 含增时线 "-" 字符', svg2.includes('>-<'))
-const barRects = (svg2.match(/width="(?:1\.1|1\.8)" height="22\.9"/g) ?? []).length
+const barRects = (svg2.match(/width="(?:0\.9|1\.4)" height="22\.9"/g) ?? []).length
 check('小节线竖线 3 条（单线 1 + 双线 2：细+粗）', barRects === 3, `got ${barRects}`)
 
 // ---- 9. 分页（M1b） ----
@@ -572,7 +572,7 @@ const dots60a = [...svg60a.matchAll(new RegExp(`<circle cx="[\\d.]+" cy="([\\d.]
 check('双低八度点层内空白 INNER_GAP（中心距 2r+INNER_GAP，动态）', dots60a.length === 2 && Math.abs(dots60a[1] - dots60a[0] - (DOT_R * 2 + INNER_GAP)) < 0.3, JSON.stringify(dots60a))
 const lr60b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3// 4 |\n')
 const svg60b = renderScoreToSvg(layoutScore(lr60b, defaultPageConfig))[0]
-const beams60b = [...svg60b.matchAll(/<rect x="[\d.]+" y="([\d.]+)" width="[\d.]+" height="1.1"/g)].map((m) => +m[1]).sort((a, b) => a - b)
+const beams60b = [...svg60b.matchAll(/<rect x="[\d.]+" y="([\d.]+)" width="[\d.]+" height="0.8"/g)].map((m) => +m[1]).sort((a, b) => a - b)
 check('双减时线层内空白 INNER_GAP（中心距 BEAM_H+INNER_GAP，动态）', beams60b.length === 2 && Math.abs(beams60b[1] - beams60b[0] - (BEAM_H + INNER_GAP)) < 0.3, JSON.stringify(beams60b))
 const lr60c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3//, 2 |\n')
 const n60c = layoutScore(lr60c, defaultPageConfig).pages[0].notes[0]
@@ -583,8 +583,8 @@ check('双减时线+低音点：低八度点在减时线层下方（点顶距层
 const s69 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1\' 2. 3// 4 |\n')
 const lay69 = layoutScore(s69, { ...defaultPageConfig, note_size: 36 })
 const svg69 = renderScoreToSvg(lay69)[0]
-check('note_size=36：八度点 r = DOT_R×2', new RegExp(`<circle cx="[\\d.]+" cy="[\\d.]+" r="${(DOT_R * 2).toFixed(1)}"`).test(svg69), '')
-check('note_size=36：附点 r = 1.7×2', new RegExp(`<circle cx="[\\d.]+" cy="[\\d.]+" r="3.4"`).test(svg69), '')
+check('note_size=36：八度点 r = DOT_R×2（1.5×2 = 3，r1n 去尾零）', new RegExp(`<circle cx="[\\d.]+" cy="[\\d.]+" r="${DOT_R * 2}"`).test(svg69), '')
+check('note_size=36：附点 r = DOT_R_DOT×2 = 4', new RegExp(`<circle cx="[\\d.]+" cy="[\\d.]+" r="${DOT_R_DOT * 2}"`).test(svg69), '')
 const bar69 = lay69.pages[0].barlines[0]
 const n69 = lay69.pages[0].notes[0]
 check('note_size=36：小节线高度随字号（上端偏移 36.8、高 45.8）', Math.abs(n69.y - bar69.yTop - 36.8) < 0.5 && Math.abs(bar69.yBottom - bar69.yTop - 45.8) < 0.5, `off=${(n69.y - bar69.yTop).toFixed(1)} h=${(bar69.yBottom - bar69.yTop).toFixed(1)}`)
@@ -1132,10 +1132,10 @@ const n41 = lay41.pages[0].notes[0]
 check('小节线上端 = 音符基线-18.4（数字上沿-14.4 再上延 4px）', Math.abs(b41.yTop - (n41.y - 18.4)) < 0.5, `yTop=${b41.yTop}`)
 check('小节线下端 = 音符基线+4.5（数字下沿+0.5 再下延 4px）', Math.abs(b41.yBottom - (n41.y + 4.5)) < 0.5, `yBottom=${b41.yBottom}`)
 check('小节线高 22.9（数字 14.9 + 上下各延伸 4px）', Math.abs(b41.yBottom - b41.yTop - 22.9) < 0.5)
-// 反复点：|: 为左粗线、中细线、右 :（点中心 = 线 x + 2.4，线点距 1.5px，adj58 点径 3.0）
+// 反复点：|: 为左粗线、中细线、右 :（点中心 = 线 x + 1.6，点线距 1.2px，adj104 点径 2.4、r=1.2）
 const svg41 = renderScoreToSvg(lay41)[0]
-const dot41 = /<circle cx="([\d.]+)" cy="[\d.]+" r="1.5"/.exec(svg41)
-check('反复点（|: 右侧 :，cx = 线 x + 2.4）', dot41 !== null && Math.abs(Number(dot41[1]) - (b41.x + 2.4)) < 0.5, `cx=${dot41?.[1]} x=${b41.x}`)
+const dot41 = /<circle cx="([\d.]+)" cy="[\d.]+" r="1.2"/.exec(svg41)
+check('反复点（|: 右侧 :，cx = 线 x + 1.6）', dot41 !== null && Math.abs(Number(dot41[1]) - (b41.x + 1.6)) < 0.5, `cx=${dot41?.[1]} x=${b41.x}`)
 
 // ---- 42. 拍级挤占（adj35） ----
 console.log('[42] beat-level spacing (adj35)')
@@ -1462,52 +1462,52 @@ const mk52 = (q: string) =>
   layoutScore(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), defaultPageConfig)
 const svg52 = (lay: ReturnType<typeof mk52>) => renderScoreToSvg(lay)[0]
 const barlineRects = (svg: string, cx: number, r: number) =>
-  [...svg.matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="(1\.1|1\.8)" height="22\.9"/g)]
+  [...svg.matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="(0\.9|1\.4)" height="22\.9"/g)]
     .map((m) => ({ x: +m[1], w: m[2] }))
     .filter((o) => Math.abs(o.x - cx) < r)
 const barlineDots = (svg: string, cx: number, r: number) =>
-  [...svg.matchAll(/<circle cx="([\d.]+)" cy="[\d.]+" r="1.5"/g)]
+  [...svg.matchAll(/<circle cx="([\d.]+)" cy="[\d.]+" r="1.2"/g)]
     .map((m) => +m[1])
     .filter((c) => Math.abs(c - cx) < r)
-// ① || 双小节线：左细线右粗线（细 1.1、粗 1.8），间距 1px（adj55）
+// ① || 双小节线：左细线右粗线（细 0.9、粗 1.4，adj104），间距 1.2px（线左缘不动、宽缩）
 const lay52a = mk52('1 2 3 4 || 5 6 7 1 |')
 const b52a = lay52a.pages[0].barlines.find((b) => b.type === '||')
 const rr52a = b52a ? barlineRects(svg52(lay52a), b52a.x, 6) : []
-check('|| 左细右粗（细 1.1、粗 1.8）', rr52a.length === 2 && rr52a[0].w === '1.1' && rr52a[1].w === '1.8', JSON.stringify(rr52a))
-check('|| 线间距 1px（adj55）', rr52a.length === 2 && Math.abs(rr52a[1].x - (rr52a[0].x + 1.1) - 1) < 0.5, JSON.stringify(rr52a))
-// ② ||/ 双细线，间距 1px（adj55）
+check('|| 左细右粗（细 0.9、粗 1.4）', rr52a.length === 2 && rr52a[0].w === '0.9' && rr52a[1].w === '1.4', JSON.stringify(rr52a))
+check('|| 线间距 1.2px（adj104）', rr52a.length === 2 && Math.abs(rr52a[1].x - (rr52a[0].x + 0.9) - 1.2) < 0.5, JSON.stringify(rr52a))
+// ② ||/ 双细线，间距 1.2px（adj55/104）
 const lay52b = mk52('1 2 3 4 ||/ 5 6 7 1 |')
 const b52b = lay52b.pages[0].barlines.find((b) => b.type === '||/')
 const rr52b = b52b ? barlineRects(svg52(lay52b), b52b.x, 5) : []
-check('||/ 双细线（2 条 1.1）', rr52b.length === 2 && rr52b[0].w === '1.1' && rr52b[1].w === '1.1', JSON.stringify(rr52b))
-check('||/ 线间距 1px（adj55）', rr52b.length === 2 && Math.abs(rr52b[1].x - (rr52b[0].x + 1.1) - 1) < 0.5, JSON.stringify(rr52b))
-// ③ |: 左粗线、中细线、右 :，线距 1px、线点距 1.5px（adj55）
+check('||/ 双细线（2 条 0.9）', rr52b.length === 2 && rr52b[0].w === '0.9' && rr52b[1].w === '0.9', JSON.stringify(rr52b))
+check('||/ 线间距 1.2px（adj104）', rr52b.length === 2 && Math.abs(rr52b[1].x - (rr52b[0].x + 0.9) - 1.2) < 0.5, JSON.stringify(rr52b))
+// ③ |: 左粗线、中细线、右 :，线距 1.4px、点线距 1.2px（adj55/104）
 const lay52c = mk52('1 2 3 4 |: 5 6 7 1 |')
 const b52c = lay52c.pages[0].barlines.find((b) => b.type === '|:')
 const rr52c = b52c ? barlineRects(svg52(lay52c), b52c.x, 8) : []
 const dd52c = b52c ? barlineDots(svg52(lay52c), b52c.x, 8) : []
-check('|: 粗线在左、细线在右', rr52c.length === 2 && rr52c[0].w === '1.8' && rr52c[1].w === '1.1', JSON.stringify(rr52c))
-const dotGap52c = Math.min(...dd52c) - 1.8 - (rr52c[1].x + 1.1) // 点左缘 - 细线右缘
-check('|: 点在细线右侧（间距 1.5px，adj55）', dd52c.length === 2 && Math.abs(dotGap52c - 1.5) < 0.5, `gap=${dotGap52c} dots=${dd52c} thin=${rr52c[1]?.x}`)
+check('|: 粗线在左、细线在右', rr52c.length === 2 && rr52c[0].w === '1.4' && rr52c[1].w === '0.9', JSON.stringify(rr52c))
+const dotGap52c = Math.min(...dd52c) - 1.2 - (rr52c[1].x + 0.9) // 点左缘 - 细线右缘
+check('|: 点在细线右侧（间距 1.2px，adj104）', dd52c.length === 2 && Math.abs(dotGap52c - 1.2) < 0.5, `gap=${dotGap52c} dots=${dd52c} thin=${rr52c[1]?.x}`)
 // ④ :| 左 :、中细线、右粗线，间距 2px
 const lay52d = mk52('1 2 3 4 :| 5 6 7 1 |')
 const b52d = lay52d.pages[0].barlines.find((b) => b.type === ':|')
 const rr52d = b52d ? barlineRects(svg52(lay52d), b52d.x, 8) : []
 const dd52d = b52d ? barlineDots(svg52(lay52d), b52d.x, 8) : []
-check(':| 细线在左、粗线在右', rr52d.length === 2 && rr52d[0].w === '1.1' && rr52d[1].w === '1.8', JSON.stringify(rr52d))
+check(':| 细线在左、粗线在右', rr52d.length === 2 && rr52d[0].w === '0.9' && rr52d[1].w === '1.4', JSON.stringify(rr52d))
 check(':| 点在细线左侧', dd52d.length === 2 && Math.max(...dd52d) < rr52d[0].x, `dots=${dd52d}`)
 // ⑤ :|: 两边反复：: 细线 粗线 细线 :
 const lay52e = mk52('1 2 3 4 :|: 5 6 7 1 |')
 const b52e = lay52e.pages[0].barlines.find((b) => b.type === ':|:')
 const rr52e = b52e ? barlineRects(svg52(lay52e), b52e.x, 10) : []
 const dd52e = b52e ? barlineDots(svg52(lay52e), b52e.x, 10) : []
-check(':|: 细-粗-细 3 线', rr52e.length === 3 && rr52e[0].w === '1.1' && rr52e[1].w === '1.8' && rr52e[2].w === '1.1', JSON.stringify(rr52e))
-check(':|: 左右各 2 点', dd52e.length === 4 && Math.min(...dd52e) < rr52e[0].x && Math.max(...dd52e) > rr52e[2].x + 1.1, `dots=${dd52e}`)
+check(':|: 细-粗-细 3 线', rr52e.length === 3 && rr52e[0].w === '0.9' && rr52e[1].w === '1.4' && rr52e[2].w === '0.9', JSON.stringify(rr52e))
+check(':|: 左右各 2 点', dd52e.length === 4 && Math.min(...dd52e) < rr52e[0].x && Math.max(...dd52e) > rr52e[2].x + 0.9, `dots=${dd52e}`)
 // ⑥ |/ 不显示、不占位；|* 不显示、占位
 const lay52f = mk52('1 2 3 4 |/ 5 6 7 1 |')
 const lay52g = mk52('1 2 3 4 |* 5 6 7 1 |')
 const lay52h = mk52('1 2 3 4 | 5 6 7 1 |')
-const rectCount52 = (s: string) => (s.match(/width="(?:1\.1|1\.8)" height="22\.9"/g) ?? []).length
+const rectCount52 = (s: string) => (s.match(/width="(?:0\.9|1\.4)" height="22\.9"/g) ?? []).length
 check('|/ 不渲染线（rect 数比 | 版本少 1）', rectCount52(svg52(lay52f)) === rectCount52(svg52(lay52h)) - 1, `${rectCount52(svg52(lay52f))} vs ${rectCount52(svg52(lay52h))}`)
 const gap52f = lay52f.pages[0].notes[4].x - (lay52f.pages[0].notes[3].x + 11.16)
 const gap52h = lay52h.pages[0].notes[4].x - (lay52h.pages[0].notes[3].x + 11.16)
