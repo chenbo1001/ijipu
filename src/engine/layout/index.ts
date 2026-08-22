@@ -1213,10 +1213,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   const notesByIndex = new Map<number, PlacedToken>()
   for (const p of pages) for (const n of p.notes) notesByIndex.set(n.id.index, n)
 
-  const slurPairs: { start: number; end: number; depth: number; tuplet: boolean; plus: number }[] = []
+  const slurPairs: { start: number; end: number; depth: number; tuplet: boolean; plus: number; minus: number }[] = []
   // 配对规则：先进后出（LIFO 栈式，adj55）—— 最近打开的先闭合，标准括号嵌套；
   // 栈跨行保留：上一行未闭合的括号延续到下一行配对（跨行两半）
-  const sQueue: { start: number; depth: number; tuplet: boolean; plus: number }[] = []
+  const sQueue: { start: number; depth: number; tuplet: boolean; plus: number; minus: number }[] = []
   let gNote = 0
   let lastNote = -1
   // adj54：每个音符索引对应的「音符单位数」——基础 1，增时线每根折算 +1、
@@ -1240,14 +1240,14 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         gNote++
       } else if (t.kind === 'slur') {
         if (t.dir === 'open') {
-          sQueue.push({ start: -1, depth: sQueue.length, tuplet: t.tuplet === true, plus: t.plus ?? 0 })
+          sQueue.push({ start: -1, depth: sQueue.length, tuplet: t.tuplet === true, plus: t.plus ?? 0, minus: t.minus ?? 0 })
         } else {
           // adj55：先进后出 —— pop 最近打开的开括号；栈跨行保留（未闭合延续到后续行）
           const s = sQueue.pop()
           // 退化对（起点=终点，如 "(4)" 只修饰单音符）不渲染；
           // adj91：连音线嵌套最多两层（depth 0/1），第三层（如 (1 (2 (3 5))) 的 (3 5)）不渲染
           if (s && s.start !== -1 && lastNote > s.start && s.depth < 2) {
-            slurPairs.push({ start: s.start, end: lastNote, depth: s.depth, tuplet: s.tuplet, plus: s.plus })
+            slurPairs.push({ start: s.start, end: lastNote, depth: s.depth, tuplet: s.tuplet, plus: s.plus, minus: s.minus })
           }
         }
       }
@@ -1415,8 +1415,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     // adj108：连音线端点 = 数字槽中心 ± 1px×s（原固定 6.58/4.58，字号变化时端点错位）
     const sSlur = noteScaleOf(m.noteSize)
     const halfDig = halfDigitW(m.noteSize)
-    // adj44 嵌套抬升 + adj135：(+ 手动抬升（每 + 2px，与跳房子类似）
-    const raise = nestedRaise[si] + (sp.plus ?? 0) * VOLTA_RAISE
+    // adj44 嵌套抬升 + adj135：(+ 抬升 / adj136：(- 下降（每级 2px，与跳房子类似）
+    const raise = nestedRaise[si] + (sp.plus ?? 0) * VOLTA_RAISE - (sp.minus ?? 0) * VOLTA_RAISE
     if (rowA === rowB) {
       pages[a.id.page].slurs.push({
         // 起点=开始音符数字槽中心右 1px×s、终点=结束音符数字槽中心左 1px×s

@@ -268,7 +268,7 @@ export interface DecorationToken {
 }
 
 /** 连音线/连音组开始/结束：( 与 )；"(y" 前缀 = 平均连音组（均分时值）；
- *  "(+"/"(y+" 前缀：+ 数量调整连音线抬升（adj135，与跳房子 + 类似） */
+ *  "(+"/"(y+" 前缀：+ 数量调整连音线抬升；"(-"/"(y-" 前缀：- 数量调整下降（adj136） */
 export interface SlurToken {
   kind: 'slur'
   /** open=( 开始；close=) 结束 */
@@ -277,6 +277,8 @@ export interface SlurToken {
   tuplet?: boolean
   /** (+ 抬升数量（每级 2px，adj135） */
   plus?: number
+  /** (- 下降数量（每级 2px，adj136） */
+  minus?: number
   pos: number
   raw: string
 }

@@ -145,14 +145,18 @@ export function tokenizeMusicLine(
     }
 
     // 连音线/连音组：`(` 修饰其后音符（起点），`)` 结束；"(y"/"(Y" 前缀 = 平均连音组（均分时值，adj86 大小写不敏感）；
-    // adj135："(+"/"(y+" 的 + 数量调整连音线抬升（与跳房子 + 类似）
+    // adj135："(+"/"(y+" 的 + 数量抬升连音线；adj136："(-"/"(y-" 的 - 数量下降连音线
     if (c === '(') {
       let j = i + 1
       let plus = 0
+      let minus = 0
       let tuplet = false
       while (j < n) {
         if (content[j] === '+') {
           plus++
+          j++
+        } else if (content[j] === '-') {
+          minus++
           j++
         } else if (!tuplet && content[j].toLowerCase() === 'y') {
           tuplet = true
@@ -161,7 +165,15 @@ export function tokenizeMusicLine(
           break
         }
       }
-      tokens.push({ kind: 'slur', dir: 'open', pos: i, raw: content.slice(i, j), tuplet, plus: plus > 0 ? plus : undefined })
+      tokens.push({
+        kind: 'slur',
+        dir: 'open',
+        pos: i,
+        raw: content.slice(i, j),
+        tuplet,
+        plus: plus > 0 ? plus : undefined,
+        minus: minus > 0 ? minus : undefined,
+      })
       i = j
       continue
     }

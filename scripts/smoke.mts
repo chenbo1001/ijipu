@@ -527,6 +527,10 @@ check('adj135 倚音不抬高连音线（与无倚音相同）', Math.abs(slGrac
 const slPlus135 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (+ 1 2) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
 const slPlus135b = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (++ 1 2) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
 check('adj135 (+ 抬升 2px、(++ 抬升 4px', Math.abs(slPlus135 - (slPlain132 - 2)) < 0.5 && Math.abs(slPlus135b - (slPlain132 - 4)) < 0.5, `p1=${slPlus135} p2=${slPlus135b} plain=${slPlain132}`)
+// adj136：(- 下降连音线（每 - 2px）、(-- 下降 4px
+const slMinus136 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (- 1 2) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
+const slMinus136b = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (-- 1 2) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
+check('adj136 (- 下降 2px、(-- 下降 4px', Math.abs(slMinus136 - (slPlain132 + 2)) < 0.5 && Math.abs(slMinus136b - (slPlain132 + 4)) < 0.5, `m1=${slMinus136} m2=${slMinus136b} plain=${slPlain132}`)
 const r134v = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 | [3 (4 5) 6 | 7 1 2 3] 4 |\n')
 const lay134v = layoutScore(r134v, defaultPageConfig)
 const s134v = lay134v.pages[0].slurs[0]
