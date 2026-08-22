@@ -490,15 +490,15 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
         const symY = aboveTop - LAYER_GAP * s - SYM_FS * DESC_RATIO
         const cx = x + digitW / 2 // 数字槽中心
         if (sym === 'tr' || sym === 'cy+') {
-          // 颤音：tr + 波浪线（cy+ 加长颤音同此；&tr 既有行为）
+          // 颤音：tr（粗体，adj112）+ 波浪线（cy+ 加长颤音同此；&tr 既有行为）
           parts.push(
-            `<text x="${x}" y="${r1n(symY)}" font-size="${SYM_FS}" font-style="italic" font-family="${FONT_CN}" fill="#1b1b1b">tr</text>`,
+            `<text x="${x}" y="${r1n(symY)}" font-size="${SYM_FS}" font-weight="bold" font-style="italic" font-family="${FONT_CN}" fill="#1b1b1b">tr</text>`,
           )
           parts.push(wavePath(x + 16 * s, symY - 6 * s, x + 34 * s))
         } else if (sym === 'cy') {
-          // 颤音：仅 tr 文本（adj109：&cy 不带波浪线，&cy+ 才带）
+          // 颤音：仅 tr 文本（粗体，adj112；&cy 不带波浪线，&cy+ 才带）
           parts.push(
-            `<text x="${x}" y="${r1n(symY)}" font-size="${SYM_FS}" font-style="italic" font-family="${FONT_CN}" fill="#1b1b1b">tr</text>`,
+            `<text x="${x}" y="${r1n(symY)}" font-size="${SYM_FS}" font-weight="bold" font-style="italic" font-family="${FONT_CN}" fill="#1b1b1b">tr</text>`,
           )
         } else if (sym === 'bc') {
           // 保持音：上方短横线
@@ -506,9 +506,9 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
             `<line x1="${r1n(cx - 4.5 * s)}" y1="${r1n(symY - 2 * s)}" x2="${r1n(cx + 4.5 * s)}" y2="${r1n(symY - 2 * s)}" stroke="#1b1b1b" stroke-width="${r1n(2 * s)}"/>`,
           )
         } else if (sym === 'zy') {
-          // 重音：上方实心三角 >（尖朝右）
+          // 重音：上方线形 > 符号（adj112：非实心三角）
           parts.push(
-            `<path d="M ${r1n(cx - 5 * s)} ${r1n(symY - 5 * s)} L ${r1n(cx + 3 * s)} ${r1n(symY)} L ${r1n(cx - 5 * s)} ${r1n(symY + 5 * s)} Z" fill="#1b1b1b"/>`,
+            `<path d="M ${r1n(cx - 5 * s)} ${r1n(symY - 5 * s)} L ${r1n(cx + 3 * s)} ${r1n(symY)} L ${r1n(cx - 5 * s)} ${r1n(symY + 5 * s)}" fill="none" stroke="#1b1b1b" stroke-width="1.5"/>`,
           )
         } else if (sym === 'dy') {
           // 顿音：上方实心倒三角（尖朝下）
@@ -523,10 +523,18 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
             `<path d="M ${r1n(cx - 6 * s)} ${r1n(cy0 + 2 * s)} Q ${r1n(cx)} ${r1n(cy0 - 9 * s)} ${r1n(cx + 6 * s)} ${r1n(cy0 + 2 * s)}" fill="none" stroke="#1b1b1b" stroke-width="${r1n(1.2 * s)}"/>`,
           )
         } else if (sym === 'sby' || sym === 'xby' || sym === 'sby+' || sym === 'xby+') {
-          // 波音：粗波浪线（sby+ 加长；xby 波线中间加 \ 斜线）
+          // 波音：锯齿状波浪线（adj112：sby/xby 两齿、sby+/xby+ 三齿；xby 中间加 \ 斜线）
+          const teeth = sym.endsWith('+') ? 3 : 2
           const half = sym.endsWith('+') ? 9 * s : 5 * s
           const wy = symY - 4 * s
-          parts.push(wavePath(cx - half, wy, cx + half, 1.5))
+          // 锯齿 path：_/\_/\_ 形态，峰高 3s、齿宽 2×half/齿数
+          let d = `M ${r1n(cx - half)} ${r1n(wy)}`
+          const tw = (2 * half) / teeth // 每齿水平跨度
+          for (let t = 0; t < teeth; t++) {
+            const x0 = cx - half + t * tw
+            d += ` L ${r1n(x0 + tw / 2)} ${r1n(wy - 3 * s)} L ${r1n(x0 + tw)} ${r1n(wy)}`
+          }
+          parts.push(`<path d="${d}" fill="none" stroke="#1b1b1b" stroke-width="1.5"/>`)
           if (sym.startsWith('x')) {
             parts.push(
               `<line x1="${r1n(cx - 3 * s)}" y1="${r1n(wy - 4 * s)}" x2="${r1n(cx + 3 * s)}" y2="${r1n(wy + 4 * s)}" stroke="#1b1b1b" stroke-width="1.5"/>`,
@@ -550,11 +558,11 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
             `<path d="M ${r1n(x2)} ${r1n(y2)} L ${r1n(ax)} ${r1n(ay + 2 * s)} L ${r1n(ax)} ${r1n(ay - 2 * s)} Z" fill="#1b1b1b"/>`,
           )
         } else if (sym === 'hx') {
-          // 呼吸记号：音符右侧上方，顺时针 90° 的 >（∨ 形，尖朝下）
+          // 呼吸记号：音符右侧上方，单线 V（尖朝下，adj112）
           const hx = x + digitW + 7 * s
           const hy = y - size * 0.8 - 4 * s
           parts.push(
-            `<path d="M ${r1n(hx - 3.5 * s)} ${r1n(hy - 3 * s)} L ${r1n(hx)} ${r1n(hy + 3 * s)} L ${r1n(hx + 3.5 * s)} ${r1n(hy - 3 * s)}" fill="none" stroke="#1b1b1b" stroke-width="1.5"/>`,
+            `<path d="M ${r1n(hx - 3.5 * s)} ${r1n(hy - 3 * s)} L ${r1n(hx)} ${r1n(hy + 3 * s)} L ${r1n(hx + 3.5 * s)} ${r1n(hy - 3 * s)}" fill="none" stroke="#1b1b1b" stroke-width="1"/>`,
           )
           continue // hx 在右侧，不占上方层顶
         } else {
