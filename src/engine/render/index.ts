@@ -506,38 +506,43 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
             `<line x1="${r1n(cx - 4.5 * s)}" y1="${r1n(symY - 2 * s)}" x2="${r1n(cx + 4.5 * s)}" y2="${r1n(symY - 2 * s)}" stroke="#1b1b1b" stroke-width="${r1n(2 * s)}"/>`,
           )
         } else if (sym === 'zy') {
-          // 重音：上方线形 > 符号（adj112：非实心三角）
+          // 重音：上方线形 > 符号（adj112 非实心；adj113 调小 + 上移）
           parts.push(
-            `<path d="M ${r1n(cx - 5 * s)} ${r1n(symY - 5 * s)} L ${r1n(cx + 3 * s)} ${r1n(symY)} L ${r1n(cx - 5 * s)} ${r1n(symY + 5 * s)}" fill="none" stroke="#1b1b1b" stroke-width="1.5"/>`,
+            `<path d="M ${r1n(cx - 4 * s)} ${r1n(symY - 6 * s)} L ${r1n(cx + 2.5 * s)} ${r1n(symY - 2 * s)} L ${r1n(cx - 4 * s)} ${r1n(symY + 2 * s)}" fill="none" stroke="#1b1b1b" stroke-width="1.5"/>`,
           )
         } else if (sym === 'dy') {
-          // 顿音：上方实心倒三角（尖朝下）
+          // 顿音：上方实心倒三角（尖朝下；adj113 上移）
           parts.push(
-            `<path d="M ${r1n(cx - 4 * s)} ${r1n(symY - 3.5 * s)} L ${r1n(cx + 4 * s)} ${r1n(symY - 3.5 * s)} L ${r1n(cx)} ${r1n(symY + 4 * s)} Z" fill="#1b1b1b"/>`,
+            `<path d="M ${r1n(cx - 4 * s)} ${r1n(symY - 5.5 * s)} L ${r1n(cx + 4 * s)} ${r1n(symY - 5.5 * s)} L ${r1n(cx)} ${r1n(symY + 2 * s)} Z" fill="#1b1b1b"/>`,
           )
         } else if (sym === 'yc') {
-          // 延长记号：点 + 半圆弧（弧顶在上、开口朝下）
-          const cy0 = symY - 4 * s // 点中心
+          // 延长记号：点 + 半圆弧（弧顶在上、开口朝下；adj113 下移贴近数字）
+          const cy0 = symY - 1.5 * s // 点中心
           parts.push(`<circle cx="${r1n(cx)}" cy="${r1n(cy0)}" r="${r1n(1.8 * s)}" fill="#1b1b1b"/>`)
           parts.push(
             `<path d="M ${r1n(cx - 6 * s)} ${r1n(cy0 + 2 * s)} Q ${r1n(cx)} ${r1n(cy0 - 9 * s)} ${r1n(cx + 6 * s)} ${r1n(cy0 + 2 * s)}" fill="none" stroke="#1b1b1b" stroke-width="${r1n(1.2 * s)}"/>`,
           )
         } else if (sym === 'sby' || sym === 'xby' || sym === 'sby+' || sym === 'xby+') {
-          // 波音：锯齿状波浪线（adj112：sby/xby 两齿、sby+/xby+ 三齿；xby 中间加 \ 斜线）
-          const teeth = sym.endsWith('+') ? 3 : 2
+          // 波音：锯齿状波浪线（adj112 锯齿；adj113：sby/xby 两齿半、sby+/xby+ 三齿半）
+          const teeth = sym.endsWith('+') ? 3.5 : 2.5
           const half = sym.endsWith('+') ? 9 * s : 5 * s
           const wy = symY - 4 * s
-          // 锯齿 path：_/\_/\_ 形态，峰高 3s、齿宽 2×half/齿数
+          // 锯齿 path：谷-峰-谷-…，齿宽 tw = 总宽/齿数；整数齿结束在谷，半齿结束在峰
           let d = `M ${r1n(cx - half)} ${r1n(wy)}`
-          const tw = (2 * half) / teeth // 每齿水平跨度
-          for (let t = 0; t < teeth; t++) {
+          const tw = (2 * half) / teeth
+          for (let t = 0; t < Math.floor(teeth); t++) {
             const x0 = cx - half + t * tw
             d += ` L ${r1n(x0 + tw / 2)} ${r1n(wy - 3 * s)} L ${r1n(x0 + tw)} ${r1n(wy)}`
           }
+          if (teeth % 1 !== 0) {
+            const x0 = cx - half + Math.floor(teeth) * tw
+            d += ` L ${r1n(x0 + tw / 2)} ${r1n(wy - 3 * s)}`
+          }
           parts.push(`<path d="${d}" fill="none" stroke="#1b1b1b" stroke-width="1.5"/>`)
           if (sym.startsWith('x')) {
+            // 下波音：中间细竖线 |（adj113：原 \ 斜线改竖线、细线）
             parts.push(
-              `<line x1="${r1n(cx - 3 * s)}" y1="${r1n(wy - 4 * s)}" x2="${r1n(cx + 3 * s)}" y2="${r1n(wy + 4 * s)}" stroke="#1b1b1b" stroke-width="1.5"/>`,
+              `<line x1="${r1n(cx)}" y1="${r1n(wy - 4 * s)}" x2="${r1n(cx)}" y2="${r1n(wy + 4 * s)}" stroke="#1b1b1b" stroke-width="1"/>`,
             )
           }
         } else if (sym === 'shy' || sym === 'xhy') {
@@ -572,7 +577,7 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
           )
         }
         // 更新层顶：文字顶 = 基线 - ascent（0.8×字号）；延长记号弧顶更高单独处理
-        aboveTop = sym === 'yc' ? symY - 13 * s : symY - SYM_FS * DIGIT_HEIGHT_RATIO
+        aboveTop = sym === 'yc' ? symY - 10.5 * s : symY - SYM_FS * DIGIT_HEIGHT_RATIO
       }
     }
   }
@@ -966,12 +971,16 @@ function renderSlur(s: PlacedSlur, noteSize = 18): string {
 // 渐强渐弱与波浪线（M7d）
 // ============================================================
 
-/** 颤音/波音波浪线（连续小弧；w 线宽，adj109 波音用粗线） */
+/** 颤音尾部正弦波（adj113：&tr+/&cy+ 的波浪线改为正弦波，L 采样拟合） */
 function wavePath(x1: number, y: number, x2: number, w = 1): string {
-  const seg = 4
+  const amp = 2.5 // 振幅（px）
+  const wl = 6 // 波长（px）
   let d = `M ${x1} ${y}`
-  for (let x = x1; x < x2; x += seg) {
-    d += ` q ${seg / 2} -2.5, ${seg} 0`
+  const n = Math.max(8, Math.round((x2 - x1)))
+  for (let i = 1; i <= n; i++) {
+    const x = x1 + ((x2 - x1) * i) / n
+    const yy = y - amp * Math.sin(((x - x1) / wl) * 2 * Math.PI)
+    d += ` L ${x.toFixed(1)} ${yy.toFixed(1)}`
   }
   return `<path d="${d}" fill="none" stroke="#1b1b1b" stroke-width="${w}"/>`
 }
