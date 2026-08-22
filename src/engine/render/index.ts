@@ -745,10 +745,11 @@ function renderBarline(bar: PlacedBarline, noteSize = 18): string {
     const mx = x + ({ '|': 0.55, '||': 1.95, '||/': 1.6, '|:': 4.2, ':|': 4.2, ':|:': 8.1, '||:': 3.85, '|*': 0.55, '|/': 0.55 }[bar.type] ?? 0.55) / 2
     const label = bar.mark === 'fine' ? 'Fine' : bar.mark === 'dc' ? 'D.C.' : bar.mark === 'ds' ? 'D.S.' : null
     if (label) {
-      // 小节线正下方文本
-      const fs = Math.max(8, Math.round(9 * s))
+      // 小节线正下方文本（adj128：&dc/&ds 斜体粗体、&fine 粗体；均 80% 宽度字号）
+      const fs = Math.max(8, Math.round(9 * s * 0.8))
+      const italic = bar.mark === 'dc' || bar.mark === 'ds' ? ' font-style="italic"' : ''
       parts.push(
-        `<text x="${mx.toFixed(1)}" y="${(yBottom + 11 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="${FONT_CN}" fill="#1b1b1b">${label}</text>`,
+        `<text x="${mx.toFixed(1)}" y="${(yBottom + 11 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="${FONT_CN}" font-weight="bold"${italic} fill="#1b1b1b">${label}</text>`,
       )
     } else if (bar.mark === 'ty') {
       // 小节线正上方 ⊕（圆 + 十字）
