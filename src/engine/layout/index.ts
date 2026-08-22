@@ -28,7 +28,7 @@ import type {
   ScorePageMeta,
   VoiceBlock,
 } from '../types'
-import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, BRACKET_PAD, H_GAP, noteScaleOf } from './spacing'
+import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, BRACKET_PAD, H_GAP, noteScaleOf, GRACE_SIZE_RATIO, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from './spacing'
 
 // ============================================================
 // 音高映射：简谱音级 → 音名（如 C4 / F#5）
@@ -81,14 +81,16 @@ const minNoteW = (noteSize: number, extra = 0) => noteSize * 0.62 + H_GAP + extr
 const halfDigitW = (noteSize: number) => noteSize * 0.31
 /**
  * 倚音占位额外宽（adj98：倚音计入音符占位宽度——前倚音向左、后倚音向右扩展）。
- * 倚音字号 = 主音符 × 0.4（adj101 由 0.3 调大），每音占宽 0.62×0.4×noteSize + 左侧 2px 间距；
- * 组内 n 个倚音线性叠加。
+ * 倚音字号 = 主音符 × 0.4（adj101 由 0.3 调大），每音占宽 0.62×0.4×noteSize；
+ * 多音符（≥2）数字间距缩小为 0.5×0.4×noteSize（adj103，与渲染一致）；
+ * 组内 n 个倚音线性叠加 + 左侧 2px 间距。
  */
 function graceExtraW(t: Extract<MusicToken, { kind: 'note' }> | undefined, noteSize: number): number {
   if (!t || t.kind !== 'note' || !t.gracenotes || t.gracenotes.notes.length === 0) return 0
   const n = t.gracenotes.notes.length
-  const gW = noteSize * 0.4 * 0.62
-  return n * gW + 4 // 每组 4px 间距（左右各 2px）
+  const gW = noteSize * GRACE_SIZE_RATIO * GRACE_SLOT_RATIO // 单音槽宽
+  const gapW = n >= 2 ? noteSize * GRACE_SIZE_RATIO * GRACE_SLOT_RATIO_MULTI : gW // 多音符间距缩小
+  return (n - 1) * gapW + gW + 4 // 组总宽 + 4px 间距（左右各 2px）
 }
 /** 小节内左右留白（px） */
 const BAR_PAD = 6

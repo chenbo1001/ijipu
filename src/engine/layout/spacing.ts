@@ -66,6 +66,18 @@ export const BRACKET_PAD = 5
 /** 水平元素（音符块/增时线/附点/括号/小节线等）之间最小间距 */
 export const H_GAP = 2
 
+// ---- 倚音（adj103：以下设计值均为 18 号字基准，实际使用一律 ×主音符缩放因子 s） ----
+/** 倚音字号与主音符字号比值（adj101：0.4） */
+export const GRACE_SIZE_RATIO = 0.4
+/** 倚音数字槽宽与字号比值（同数字槽宽比例） */
+export const GRACE_SLOT_RATIO = 0.62
+/** 倚音多音符（≥2 个）时数字间占宽与字号比值（adj103：缩小多音符间距，0.62 → 0.5） */
+export const GRACE_SLOT_RATIO_MULTI = 0.5
+/** 倚音减时线间距设计值（px，adj100 由 1.8 减小；实际 ×s） */
+export const GRACE_BEAM_GAP = 1.2
+/** 倚音减时线/连接弧线线宽设计值（px，adj97；实际 ×s） */
+export const GRACE_LINE_W = 0.6
+
 // ============================================================
 // 位置计算（纯函数，供 render / layout 共用）
 // ============================================================

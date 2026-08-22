@@ -1027,6 +1027,9 @@ const arcStarts36c = [...svg36c.matchAll(/<path d="M [-\d.]+ ([-\d.]+) Q/g)].map
 check('adj102 无低八度点：弧线起点 = 最后一条减时线底（与线连接）', arcStarts36c.length === 2 && arcStarts36c.every((sy) => Math.abs(sy - (yMain36c - 14.4 + 0.3)) < 0.5), `sy=${arcStarts36c.join(',')} lineBottom=${(yMain36c - 14.4 + 0.3).toFixed(1)}`)
 const arcSy36d = Number(svg36d.match(/<path d="M [-\d.]+ ([-\d.]+) Q/)?.[1] ?? 'NaN')
 check('adj102 有低八度点：弧线起点 = 低八度点底 + LAYER_GAP×s', !Number.isNaN(arcSy36d) && Math.abs(arcSy36d - (lowCy36d + (1.7 + 2) * 0.4)) < 0.6, `arcSy=${arcSy36d} expect=${(lowCy36d + 1.48).toFixed(2)}`)
+// adj103：多音符（≥2）倚音数字间距缩小为 0.5×字号（0.5×7.2 = 3.6@18）；1[65] 与 2[h56] 两组
+const gx36c = [...svg36c.matchAll(/<text x="([^"]+)" y="[^"]+" font-size="7.2"/g)].map((m) => Number(m[1])).sort((a, b) => a - b)
+check('adj103 多音符倚音数字间距 = 0.5×字号（3.6）', gx36c.length === 4 && Math.abs(gx36c[1] - gx36c[0] - 3.6) < 0.15 && Math.abs(gx36c[3] - gx36c[2] - 3.6) < 0.15, `xs=${gx36c.join(',')}`)
 // adj98：倚音占位计入音符宽度——带倚音的音符 perBeat ≥ 无倚音音符
 const lay98 = layoutScore(r98g, defaultPageConfig)
 const n98 = [...lay98.pages[0].notes].sort((a, b) => a.x - b.x)
