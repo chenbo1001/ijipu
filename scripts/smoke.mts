@@ -517,6 +517,10 @@ check('adj126 播放：&fine 曲终截断（只播前 4 音）', pits126(mk126('
 check('adj126 播放：&ds 跳到 &hs 位置（5 6 7 1 跳过）', pits126(mk126('1 2 3 4 |&ds 5 6 7 1 |&hs 2 3 4 5 |')).join(',') === 'C4,D4,E4,F4,D4,E4,F4,G4', pits126(mk126('1 2 3 4 |&ds 5 6 7 1 |&hs 2 3 4 5 |')).join(','))
 check('adj126 播放：&ty 跳到下一 &ty（中间跳过）', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |')).join(',') === 'C4,D4,E4,F4,D4,E4,F4,G4', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |')).join(','))
 check('adj126 播放：&dc 从头反复（首 4 音重复出现）', (() => { const p = pits126(mk126('1 2 3 4 |&dc 5 6 7 1 |')); return p.length > 4 && p[0] === p[4] && p[1] === p[5] && p[2] === p[6] && p[3] === p[7] })(), pits126(mk126('1 2 3 4 |&dc 5 6 7 1 |')).join(','))
+// adj132：连音线位于音符上方修饰符（波音/颤音等）之上——带修饰符时 slur y 上移约一层（12s）
+const slSym132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1&sby 2&cy) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
+const slPlain132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1 2) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
+check('adj132 连音线在修饰符之上（y 上移 ≥10）', slSym132 < slPlain132 - 10, `sym=${slSym132} plain=${slPlain132}`)
 check('adj109 滑音渲染弧线（Q）+ 箭头（fill 三角）', svg109.includes(' Q '), '')
 check('adj112 tr 文本加粗', /font-weight="bold"[^>]*>tr</.test(svg109), '')
 // adj81：括号加粗 + 垂直居中于数字中心（dominant-baseline=central @ 基线-0.4×字号）

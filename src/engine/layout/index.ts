@@ -1328,15 +1328,33 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     return m
   }
   /**
+   * 连音符覆盖范围内所有音符的最大上方修饰符层数（adj132：波音/颤音/顿音等
+   * & 修饰符画在数字上方，连音线需在其上；括号 zkh/ykh 与右侧的 hx 不占上方层）。
+   */
+  const maxSymInRange = (fromIdx: number, toIdx: number): number => {
+    let m = 0
+    for (let i = fromIdx; i <= toIdx; i++) {
+      const n = notesByIndex.get(i)
+      if (n && n.token.kind === 'note') {
+        const cnt = n.token.symbols.filter((s) => s !== 'zkh' && s !== 'ykh' && s !== 'hx').length
+        m = Math.max(m, cnt)
+      }
+    }
+    return m
+  }
+  /**
    * 该行连音线基准 y（adj60 层级化）：线底距「数字顶（无高八度）或最高高八度点顶（有）」LAYER_GAP=2；
    * 线为 stroke（中心 y，宽 SLUR_W）→ 中心 = 元素顶 - LAYER_GAP - SLUR_W/2。
    * 高八度点层顶 = 基线 - 0.8×noteSize - LAYER_GAP - 2r - (hi-1)×INNER_GAP（octaveTopY）。
+   * adj132：再上移 修饰符层数 ×（符号高 + 层距），使连音线位于波音/颤音/顿音等修饰符之上。
    * 嵌套错开：外层线上移 raise（仅当确实包含内层线时，adj44）。
    */
-  const slurYFor = (note: PlacedToken, hi: number, raise: number) => {
+  const slurYFor = (note: PlacedToken, hi: number, symCount: number, raise: number) => {
     const s = noteScaleOf(m.noteSize)
     const topY = hi > 0 ? octaveTopY(note.y, hi, m.noteSize) : note.y - m.noteSize * DIGIT_HEIGHT_RATIO
-    const base = topY - LAYER_GAP * s - (SLUR_W * s) / 2
+    let base = topY - LAYER_GAP * s - (SLUR_W * s) / 2
+    // 每层修饰符：符号字号 10×s + 层距 LAYER_GAP×s（与 render 上方符号堆叠一致）
+    base -= symCount * (10 * s + LAYER_GAP * s)
     return base - raise
   }
 
@@ -1390,7 +1408,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         // 起点=开始音符数字槽中心右 1px×s、终点=结束音符数字槽中心左 1px×s
         x1: r1(a.x + halfDig + sSlur),
         x2: r1(b.x + halfDig - sSlur),
-        y: r1(slurYFor(a, maxHiInRange(sp.start, sp.end), raise)),
+        y: r1(slurYFor(a, maxHiInRange(sp.start, sp.end), maxSymInRange(sp.start, sp.end), raise)),
         depth: sp.depth,
         style,
         // 仅平均连音组 (y...) 标数字（普通连音线 (…) 不加，adj43）
@@ -1407,7 +1425,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       pages[rA.page].slurs.push({
         x1: r1(a.x + halfDig + sSlur),
         x2: r1(xEndA),
-        y: r1(slurYFor(a, maxHiInRange(sp.start, lastA.id.index), raise)),
+        y: r1(slurYFor(a, maxHiInRange(sp.start, lastA.id.index), maxSymInRange(sp.start, lastA.id.index), raise)),
         depth: sp.depth,
         style: crossRowStyle,
         tupletCount: sp.tuplet ? noteCount : undefined,
@@ -1417,7 +1435,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       pages[rows[rowB].page].slurs.push({
         x1: r1(xStartB),
         x2: r1(b.x + halfDig - sSlur),
-        y: r1(slurYFor(b, maxHiInRange(firstB.id.index, sp.end), raise)),
+        y: r1(slurYFor(b, maxHiInRange(firstB.id.index, sp.end), maxSymInRange(firstB.id.index, sp.end), raise)),
         depth: sp.depth,
         style: crossRowStyle,
         tupletCount: sp.tuplet ? noteCount : undefined,
