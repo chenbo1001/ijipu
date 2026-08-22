@@ -654,7 +654,9 @@ body {
   caret-color: var(--jp-editor-caret);
   font-family: var(--jp-font-mono);
   font-size: var(--jp-editor-fs, 14px);
-  line-height: 1.7;
+  /* adj110：行高用与行号栏相同的计算值（--jp-editor-lh），
+     相对值 1.7 与 fs×1.7 的舍入差异会在多行后累积成滚动错位 */
+  line-height: var(--jp-editor-lh, 23.8px);
   padding: 10px 14px;
   white-space: pre;
   overflow: auto;
@@ -667,7 +669,7 @@ body {
   pointer-events: none;
   font-family: var(--jp-font-mono);
   font-size: var(--jp-editor-fs, 14px);
-  line-height: 1.7;
+  line-height: var(--jp-editor-lh, 23.8px);
   padding: 10px 14px;
   white-space: pre;
   overflow: hidden;

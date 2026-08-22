@@ -7,7 +7,7 @@
  */
 export * from './types'
 export { parseJps } from './parser'
-export { formatJps } from './format/format'
+export { formatJps, formatLine } from './format/format'
 export { tokenDuration, durationMs } from './duration'
 export { layoutScore } from './layout'
 export { renderScoreToSvg } from './render'

@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { highlightCode } from './highlight'
-import { formatJps, codePosToNoteId } from '../engine'
+import { formatLine, codePosToNoteId } from '../engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 
 export function EditorPane() {
@@ -31,6 +31,8 @@ export function EditorPane() {
   const hlRef = useRef<HTMLDivElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
   const formatTimer = useRef<number | null>(null)
+  // adj110：最近编辑行（光标所在行）；光标离开该行时格式化它，避免输入时抢光标
+  const editingLineRef = useRef<number>(-1)
 
   // 光标联动（M3）：光标移动 → 计算 notepos id → 预览高亮
   const setActiveNoteId = useDocStore((s) => s.setActiveNoteId)
@@ -122,28 +124,35 @@ export function EditorPane() {
     const ta = taRef.current
     if (!ta) return
     const next = ta.value
-    setCode(next)
+    const { line } = lineColOf(next, ta.selectionStart)
     if (autoFormat) {
-      // 防抖格式化，尽量保持光标位置（公共前缀匹配）
-      if (formatTimer.current) window.clearTimeout(formatTimer.current)
-      const startPos = ta.selectionStart
-      formatTimer.current = window.setTimeout(() => {
-        const current = taRef.current?.value ?? next
-        const formatted = formatJps(current)
-        if (formatted !== current && taRef.current) {
-          const common = commonPrefixLen(current, formatted)
-          const target = Math.max(0, Math.min(startPos, common))
-          setCode(formatted)
+      // adj110：光标离开上一行时才格式化该行（仅 Q 行，formatLine 逐行处理），
+      // 输入中不格式化 → 不抢光标；格式化行在光标上方，偏移量同步光标
+      if (editingLineRef.current >= 0 && editingLineRef.current !== line) {
+        const li = editingLineRef.current
+        const lines = next.split('\n')
+        const oldText = lines[li] ?? ''
+        const formatted = formatLine(oldText)
+        if (formatted !== oldText) {
+          const delta = formatted.length - oldText.length
+          lines[li] = formatted
+          const replaced = lines.join('\n')
+          const off = Math.max(0, Math.min(ta.selectionStart + delta, replaced.length))
+          setCode(replaced)
           requestAnimationFrame(() => {
             if (taRef.current) {
-              taRef.current.selectionStart = taRef.current.selectionEnd = target
+              taRef.current.selectionStart = taRef.current.selectionEnd = off
               onScroll()
               onSelect()
             }
           })
+          editingLineRef.current = line
+          return
         }
-      }, 900)
+      }
     }
+    editingLineRef.current = line
+    setCode(next)
   }
 
   useEffect(() => {
@@ -231,11 +240,4 @@ export function EditorPane() {
       </div>
     </div>
   )
-}
-
-function commonPrefixLen(a: string, b: string): number {
-  let i = 0
-  const n = Math.min(a.length, b.length)
-  while (i < n && a[i] === b[i]) i++
-  return i
 }

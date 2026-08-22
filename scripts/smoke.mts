@@ -6,7 +6,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseJps, formatJps, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig } from '../src/engine/index.ts'
+import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig } from '../src/engine/index.ts'
 import { splitTempo } from '../src/engine/parser/parser.ts'
 import { buildPlaySequence, inferBpm } from '../src/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '../src/engine/cursorMap.ts'
@@ -114,6 +114,10 @@ console.log('[5] formatJps')
 const fmt = formatJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ:1 2 3 4|\nC: 词')
 check('Q 行格式化后带空格', fmt.includes('Q: 1 2 3 4 |'), JSON.stringify(fmt.split('\n').find((l) => l.startsWith('Q'))))
 check('描述头行不变', fmt.includes('B: t'))
+// adj110：formatLine 单行格式化（编辑器光标离开行时按行格式化，其余行原样）
+check('formatLine 格式化单行 Q 行', formatLine('Q: 1 2 3|4') === 'Q: 1 2 3 | 4', formatLine('Q: 1 2 3|4'))
+check('formatLine 不改非 Q 行（歌词原样）', formatLine('C: 一 二 三') === 'C: 一 二 三', '')
+check('formatLine 保留行首命令头格式', formatLine('Q2: 1 2|3') === 'Q2: 1 2 | 3', formatLine('Q2: 1 2|3'))
 
 // ---- 6. 错误处理 ----
 console.log('[6] error handling')
