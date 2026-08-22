@@ -494,9 +494,10 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
           parts.push(
             `<text x="${x}" y="${r1n(symY)}" font-size="${SYM_FS}" font-weight="bold" font-style="italic" font-family="${FONT_CN}" fill="#1b1b1b">tr</text>`,
           )
-          // adj116：正弦波更细密（每拍约 4 周期，显示更多波形）
+          // adj116：正弦波更细密（每拍约 4 周期）；adj117：正弦波与 tr 文本垂直居中对齐
+          // （tr 文本视觉中心 ≈ 基线 - 4×s，正弦波中心线取同高）
           const cycles = Math.max(4, Math.round((note.duration || 1) * 4))
-          parts.push(wavePath(x + 16 * s, symY - 6 * s, x + 34 * s, 1, cycles))
+          parts.push(wavePath(x + 16 * s, symY - 4 * s, x + 34 * s, 1, cycles))
         } else if (sym === 'cy') {
           // 颤音：仅 tr 文本（粗体，adj112；&cy 不带波浪线，&cy+ 才带）
           parts.push(
@@ -526,15 +527,15 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
           )
         } else if (sym === 'sby' || sym === 'xby' || sym === 'sby+' || sym === 'xby+') {
           // 波音：锯齿状波浪线（adj113 两齿半/三齿半；adj114：斜上细线、斜下粗线）
-          // adj115：锯齿中心（谷 wy+1.5s、峰 wy-1.5s）与下波音竖线垂直居中对齐
-          // adj116：斜上线更细（0.7）；上下线在峰点交叠（各延伸 overlap）→ 视觉连续锯齿感
+          // adj115：锯齿中心与下波音竖线垂直居中
+          // adj117：横向压缩 75%（更尖）；峰点与谷点均由粗下线覆盖细上线端点 → 视觉连续锯齿
           const teeth = sym.endsWith('+') ? 3.5 : 2.5
-          const half = sym.endsWith('+') ? 9 * s : 5 * s
+          const half = (sym.endsWith('+') ? 9 * s : 5 * s) * 0.75
           const wy = symY - 4 * s
           const tw = (2 * half) / teeth // 齿宽
-          const overlap = 0.8 // 峰点交叠量（px，防线段拼接感）
+          const overlap = 0.9 // 线端点交叠量（px）
           const upLines: string[] = [] // 斜上（谷→峰）：细线
-          const downLines: string[] = [] // 斜下（峰→谷）：粗线
+          const downLines: string[] = [] // 斜下（峰→谷）：粗线（两端各延伸覆盖细线端点）
           for (let t = 0; t < Math.floor(teeth); t++) {
             const x0 = cx - half + t * tw
             const peak = x0 + tw / 2
@@ -542,7 +543,7 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
               `<line x1="${r1n(x0)}" y1="${r1n(wy + 1.5 * s)}" x2="${r1n(peak + overlap)}" y2="${r1n(wy - 1.5 * s)}" stroke="#1b1b1b" stroke-width="0.7"/>`,
             )
             downLines.push(
-              `<line x1="${r1n(peak - overlap)}" y1="${r1n(wy - 1.5 * s)}" x2="${r1n(x0 + tw)}" y2="${r1n(wy + 1.5 * s)}" stroke="#1b1b1b" stroke-width="1.8"/>`,
+              `<line x1="${r1n(peak - overlap)}" y1="${r1n(wy - 1.5 * s)}" x2="${r1n(x0 + tw + overlap)}" y2="${r1n(wy + 1.5 * s)}" stroke="#1b1b1b" stroke-width="1.8"/>`,
             )
           }
           if (teeth % 1 !== 0) {
