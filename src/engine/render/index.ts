@@ -824,10 +824,10 @@ function renderBarline(bar: PlacedBarline, noteSize = 18): string {
     const downMarks = bar.marks.filter((m) => m === 'fine' || m === 'dc' || m === 'ds')
     downMarks.forEach((m, idx) => {
       const label = m === 'fine' ? 'Fine' : m === 'dc' ? 'D.C.' : 'D.S.'
-      // 小节线正下方文本（adj128：&dc/&ds 斜体、&fine 粗体；均 80% 宽度字号；
-      // adj131：上移更靠近小节线下端）
-      // adj207：&dc/&ds 不再粗体（此前粗体显宽）；宽度保持 80% 字号
-      const fs = Math.max(8, Math.round(9 * s * 0.8))
+      // 小节线正下方文本（adj128：&dc/&ds 斜体、&fine 粗体；
+      // adj207：&dc/&ds 不再粗体（此前粗体显宽）；
+      // adj210：字号为主音符的 0.5（9×s = noteSize×0.5，此前 80% 字号偏大）
+      const fs = Math.max(8, Math.round(9 * s))
       const bold = m === 'fine' ? ' font-weight="bold"' : ''
       const italic = m === 'dc' || m === 'ds' ? ' font-style="italic"' : ''
       const dx = mx + (idx - (downMarks.length - 1) / 2) * 10 * s

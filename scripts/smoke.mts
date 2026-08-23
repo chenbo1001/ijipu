@@ -647,7 +647,8 @@ const svg207 = renderScoreToSvg(layoutScore(r206, defaultPageConfig))[0]
 check('adj207 叠加渲染：&ty&ds 同时显示 ⊕ 与 D.S.，&fine&hs 同时显示 Fine 与 花S', (svg207.match(/𝄌/g) ?? []).length >= 1 && svg207.includes('>D.S.<') && svg207.includes('>Fine<') && svg207.includes('𝄋'), '')
 check('adj207 D.S. 不加粗（font-weight 不在 D.S. text 内）', !/font-weight="bold"[^>]*>D\.S\.</.test(svg207) && !/font-weight="bold"[^>]*>D\.C\.</.test(svg207), '')
 check('adj207 Fine 仍加粗', /font-weight="bold"[^>]*>Fine</.test(svg207), '')
-check('adj207 D.S. 字号 80%（fs = 9×s×0.8）', /<text x="[^"]+" y="[^"]+" text-anchor="middle" font-size="8"[^>]*>D\.S\.<\/text>/.test(svg207), '')
+check('adj210 D.S. 字号 = 主音符 0.5（fs = 9×s = 9）', /<text x="[^"]+" y="[^"]+" text-anchor="middle" font-size="9"[^>]*>D\.S\.<\/text>/.test(svg207), '')
+check('adj210 Fine 字号 = 主音符 0.5（fs = 9）', /<text x="[^"]+" y="[^"]+" text-anchor="middle" font-size="9"[^>]*>Fine<\/text>/.test(svg207), '')
 // adj182：大跳跃记号高度 120%（fs = 19.2×s）；两记号下端与小节线上端（yTop）齐平
 const ty182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="([\d.]+)"[^>]*>𝄌<\/text>/.exec(svg126)
 const hs182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="([\d.]+)"[^>]*>𝄋<\/text>/.exec(svg126)
