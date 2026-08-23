@@ -519,7 +519,7 @@ export function tokenizeMusicLine(
     }
     if (c === '0' || c === '8') {
       const start = i
-      const base = { accidental: null, augmentCount: 0, diminishCount: 0, dots: 0, octaveShift: 0, symbols: [] as string[] }
+      const base: { accidental: null; augmentCount: number; diminishCount: number; dots: number; octaveShift: number; symbols: string[]; comment?: string } = { accidental: null, augmentCount: 0, diminishCount: 0, dots: 0, octaveShift: 0, symbols: [] as string[] }
       const end = collectSuffix(i + 1, base)
       // adj84：前置 "&zkh"（如 "&zkh 0"）挂到休止符
       if (pendingZkh) {
@@ -533,6 +533,8 @@ export function tokenizeMusicLine(
         diminishCount: base.diminishCount,
         dots: base.dots,
         symbols: base.symbols,
+        // adj209：休止符注释（0"转调"）此前漏传——collectSuffix 已解析但未挂到 token
+        comment: base.comment,
         pos: i,
         raw: rawAt(start, end),
       })
@@ -542,7 +544,7 @@ export function tokenizeMusicLine(
     }
     if (c === '9') {
       const start = i
-      const base = { accidental: null, augmentCount: 0, diminishCount: 0, dots: 0, octaveShift: 0, symbols: [] as string[] }
+      const base: { accidental: null; augmentCount: number; diminishCount: number; dots: number; octaveShift: number; symbols: string[]; comment?: string } = { accidental: null, augmentCount: 0, diminishCount: 0, dots: 0, octaveShift: 0, symbols: [] as string[] }
       const end = collectSuffix(i + 1, base)
       // adj84：前置 "&zkh" 挂到节奏符
       if (pendingZkh) {
@@ -555,6 +557,8 @@ export function tokenizeMusicLine(
         diminishCount: base.diminishCount,
         dots: base.dots,
         symbols: base.symbols,
+        // adj209：节奏符注释（9"…"）同休止符，此前漏传
+        comment: base.comment,
         pos: i,
         raw: rawAt(start, end),
       })

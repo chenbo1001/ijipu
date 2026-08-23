@@ -809,6 +809,17 @@ const mNc0 = new RegExp(`<text x="[\\d.]+" y="([\\d.]+)" text-anchor="middle" fo
 const mNc1 = new RegExp(`<text x="[\\d.]+" y="([\\d.]+)" text-anchor="middle" font-size="${ncfs}"[^>]*>渐强 稍快<`).exec(svgNc59)
 check('无高八度注释在数字顶上方（y < 基线-16.4）', mNc0 !== null && Number(mNc0[1]) < nNc0.y - 16.4, `y=${mNc0?.[1]}`)
 check('有高八度注释在圆点上方（y < 点顶-基线 19.9）', mNc1 !== null && Number(mNc1[1]) < nNc1.y - 19.9, `y=${mNc1?.[1]}`)
+// adj209：休止符/节奏符注释（0"转调"、9"…"）此前 collectSuffix 解析但未挂到 token → 不显示
+const rc209 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 0"转1=bE调" 1 2 3 |\n')
+const rc209t = rc209.groups[0].music.tokens.filter((t) => t.kind === 'rest')
+check('adj209 休止符注释解析（0"转1=bE调" → comment）', rc209.errors.length === 0 && rc209t[0].comment === '转1=bE调', JSON.stringify(rc209t.map((t) => t.comment)))
+const svgRc209 = renderScoreToSvg(layoutScore(rc209, defaultPageConfig))[0]
+check('adj209 休止符注释渲染在 0 上方', svgRc209.includes('>转1=bE调<'), '')
+const rc209b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 9"节奏" 1 2 3 |\n')
+const rc209r = rc209b.groups[0].music.tokens.filter((t) => t.kind === 'rhythm')
+check('adj209 节奏符注释解析（9"节奏" → comment）', rc209b.errors.length === 0 && rc209r[0].comment === '节奏', JSON.stringify(rc209r.map((t) => t.comment)))
+const svgRc209b = renderScoreToSvg(layoutScore(rc209b, defaultPageConfig))[0]
+check('adj209 节奏符注释渲染在 X 上方', svgRc209b.includes('>节奏<'), '')
 // 歌词注释 _ 替换空格（adj59）
 const lr59 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\nC: 一 二"副歌_部分"三 四\n')
 const lr59c = lr59.groups[0].lyrics[0].chars
