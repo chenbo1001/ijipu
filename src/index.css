@@ -684,9 +684,17 @@ body {
      adj165：行高取整为整数，textarea 原生行盒与高亮层 CSS 行盒完全一致 */
   line-height: var(--jp-editor-lh, 24px);
   padding: 10px 14px;
-  white-space: pre;
+  /* adj193（测试）：软折行——与 wrap=soft 一致 */
+  white-space: pre-wrap;
   overflow: auto;
+  /* adj194：隐藏滚动条（不占宽度）——否则滚动条占宽使 textarea 内容区比高亮层窄，
+     折行点不同导致显示层与实际层错位；滚动仍可用滚轮/键盘 */
+  scrollbar-width: none;
   tab-size: 4;
+}
+
+.editor-main textarea::-webkit-scrollbar {
+  display: none;
 }
 
 .editor-main .highlight-layer {
@@ -696,12 +704,14 @@ body {
   pointer-events: none;
 }
 
-/* adj167：高亮层内部滚动容器（transform 平移跟随 textarea，随滚动整体平移） */
+/* adj167：高亮层内部滚动容器（transform 平移跟随 textarea，随滚动整体平移）；
+   adj193（测试）：宽度固定为容器（left/right 双定）——否则 pre-wrap 无折行点，
+   长内容会把 shrink-to-fit 的 absolute 容器撑宽导致显示层不折行、与实际层不一致 */
 .editor-main .highlight-inner {
   position: absolute;
   top: 0;
   left: 0;
-  min-width: 100%;
+  right: 0;
 }
 
 /* adj171：当前行整行背景铺满层（在内容层之下，宽度铺满编辑区） */
@@ -724,7 +734,8 @@ body {
   font-size: var(--jp-editor-fs, 14px);
   line-height: var(--jp-editor-lh, 24px);
   padding: 10px 14px;
-  white-space: pre;
+  /* adj193（测试）：与 textarea 软折行一致——保留空白并允许自动折行 */
+  white-space: pre-wrap;
   color: var(--jp-hl-plain);
 }
 

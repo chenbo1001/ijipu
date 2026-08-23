@@ -172,6 +172,22 @@ export function EditorPane() {
   }
   onSelectRef.current = onSelect
 
+  // adj194：窗口/容器宽度变化（软折行重排）后强制同步 transform——
+  // 否则动态 resize 过程中显示层与实际层折行位置短暂错位
+  const onScrollRef = useRef(onScroll)
+  onScrollRef.current = onScroll
+  useEffect(() => {
+    const onResize = () => onScrollRef.current()
+    window.addEventListener('resize', onResize)
+    // 拆分窗格拖动也会改变编辑器宽度（ResizeObserver 兜底）
+    const ro = new ResizeObserver(onResize)
+    if (taRef.current?.parentElement) ro.observe(taRef.current.parentElement)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      ro.disconnect()
+    }
+  }, [])
+
   // adj165：分析光标前文本，触发自动提示（& 修饰符 / [ 跳房子 / 描述头行首 Tab）
   const updateCompletion = () => {
     const ta = taRef.current
@@ -474,7 +490,7 @@ export function EditorPane() {
             ref={taRef}
             value={code}
             spellCheck={false}
-            wrap="off"
+            wrap="soft"
             autoCapitalize="off"
             autoCorrect="off"
             onChange={onChange}
