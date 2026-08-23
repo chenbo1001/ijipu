@@ -1816,7 +1816,40 @@ const rightHalf107 = sortedVolta107[1]
 // adj162：跨行跳房子左半延伸到页面右边距（与跨行连音线一致），而非行末小节线
 const rightEdge107 = lay107.pages[0].width - defaultPageConfig.margin_right
 check('adj162 左半：起点线+2 → 页面右边距', leftHalf107 !== undefined && Math.abs(leftHalf107.x1 - (vStart107.x + 2)) < 0.5 && Math.abs(leftHalf107.x2 - rightEdge107) < 0.5, JSON.stringify(leftHalf107))
-check('adj137 右半：从行首（边距+2）连到终点线-2', rightHalf107 !== undefined && Math.abs(rightHalf107.x1 - 82) < 0.5 && Math.abs(rightHalf107.x2 - (vEnd107.x - 2)) < 0.5, JSON.stringify(rightHalf107))
+// adj164：右半从下一行「行首小节线」（位于该行首音符左侧）开始；行首无小节线则从边距+2
+const endRowFirstNoteX107 = Math.min(
+  ...lay107.pages[0].notes
+    .filter((n) => Math.abs(n.y - (vEnd107.yTop + 18.4)) < 1)
+    .map((n) => n.x),
+)
+const endRowLeadBar107 = lay107.pages[0].barlines
+  .filter((b) => Math.abs(b.yTop - vEnd107.yTop) < 1 && b.x < endRowFirstNoteX107)
+  .sort((a, b) => a.x - b.x)[0]
+const expectStartB107 = endRowLeadBar107 ? endRowLeadBar107.x : 82
+check('adj164 右半：从下一行行首小节线/边距连到终点线-2', rightHalf107 !== undefined && Math.abs(rightHalf107.x1 - expectStartB107) < 0.5 && Math.abs(rightHalf107.x2 - (vEnd107.x - 2)) < 0.5, JSON.stringify(rightHalf107))
+// adj164：下一行行首有小节线时，右半从其开始（与连音线 rowStartBarX 一致）；
+// 该场景终点行行首音符 x=86 而小节线最小 154（行首无小节线）→ 右半应从边距+2 开始
+const r164b = parseJps(
+  'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 | 3 4 5 6 | 7 1 2 3 | 4 5 6 7 | 1 2 3 4 | 5 6 7 1 | 2 3 4 5 |[ 6 7 1 2 | 3 4 5 6 | 7 1 2 3 | 4 5 6 7 | 1 2 3 4 | 5 6 7 1 | 2 3 4 5 |] 6 7 1 2 |\n',
+)
+const lay164b = layoutScore(r164b, defaultPageConfig)
+const vStart164b = lay164b.pages[0].barlines.find((b) => b.voltaStart)
+const vEnd164b = lay164b.pages[0].barlines.find((b) => b.voltaEnd)
+const svg164b = renderScoreToSvg(lay164b)[0]
+const lines164b = [...svg164b.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)" stroke="#1b1b1b" stroke-width="0.8"/g)]
+  .map((m) => ({ x1: Number(m[1]), y1: Number(m[2]), x2: Number(m[3]) }))
+  .filter((l) => l.x2 - l.x1 > 20)
+  .sort((a, b) => a.y1 - b.y1)
+const rightHalf164b = lines164b[1]
+check(
+  'adj164 右半行首无小节线时从边距+2 开始（行首音符前无 |）',
+  rightHalf164b !== undefined &&
+    vStart164b !== undefined &&
+    vEnd164b !== undefined &&
+    Math.abs(rightHalf164b.x1 - 82) < 0.5 &&
+    Math.abs(rightHalf164b.x2 - (vEnd164b.x - 2)) < 0.5,
+  JSON.stringify({ right: rightHalf164b, ve: vEnd164b?.x }),
+)
 
 // ---- 57. 排版虚线行结构（adj72）：曲部行数字中心 / 多声部声部序号 / 词部行虚线 ----
 console.log('[57] row guides (adj72)')
