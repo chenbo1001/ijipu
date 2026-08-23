@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig } from '../src/engine/index.ts'
 import { splitTempo } from '../src/engine/parser/parser.ts'
+import { parseKey } from '../src/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm } from '../src/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '../src/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '../src/engine/layout/guides.ts'
@@ -1483,6 +1484,25 @@ const meterG = /<g data-meta="meter" data-meter="([^"]*)">([\s\S]*?)<\/g>/.exec(
 check('拍号分数组存在（data-meter 保留原文）', meterG !== null && meterG[1] === '4/4', meterG?.[0])
 check('拍号分数：分子在上、分母在下、中间横线', meterG !== null && />4<[\s\S]*?<line[\s\S]*?>4</.test(meterG[2]), meterG?.[2])
 check('调号文本独立为 1 = C（keyline 元素）', svgM48.includes('data-meta="keyline"') && svgM48.includes('1 = C'))
+// adj174：调号升降号——前置（#F/$B）与后置（F#/B$）两种写法等价，预览时 ♯/♭ 作角标画在字母左上角
+const rK174a = parseJps('V: 1.0\nB: t\nD: #F\nP: 4/4\nQ: 1 2 3 4 |\n')
+const rK174b = parseJps('V: 1.0\nB: t\nD: F#\nP: 4/4\nQ: 1 2 3 4 |\n')
+check('adj174 升降号前置/后置半音偏移一致（#F = F#）', parseKey(rK174a.header.key) === parseKey(rK174b.header.key) && parseKey(rK174b.header.key) === 6, `${parseKey(rK174a.header.key)} vs ${parseKey(rK174b.header.key)}`)
+const svgK174a = renderScoreToSvg(layoutScore(rK174a, defaultPageConfig))[0]
+const svgK174b = renderScoreToSvg(layoutScore(rK174b, defaultPageConfig))[0]
+check('adj174 前置 #F 渲染为 1 = F + ♯ 角标', svgK174a.includes('1 = F') && svgK174a.includes('♯'), '')
+check('adj174 后置 F# 渲染为 1 = F + ♯ 角标（等价）', svgK174b.includes('1 = F') && svgK174b.includes('♯'), '')
+const rK174c = parseJps('V: 1.0\nB: t\nD: B$\nP: 4/4\nQ: 1 2 3 4 |\n')
+const svgK174c = renderScoreToSvg(layoutScore(rK174c, defaultPageConfig))[0]
+check('adj174 降号 $ 渲染 ♭ 角标且字母为 B', svgK174c.includes('1 = B') && svgK174c.includes('♭') && !svgK174c.includes('$B'), '')
+// 角标位置在字母左上方（x 在字母区间内偏左、y < 字母基线、字更小）
+const k174Acc = /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>♯<\/text>/.exec(svgK174a)
+const k174Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK174a)
+// 13px 基准 "1 = " 估算宽：1=7.62 空格=3.85 =9.64
+const k174PrefixW = (7.62 + 3.85 + 9.64) * (defaultPageConfig.miaoshu_size / 13)
+const k174LetterLeft = Number(k174Letter?.[1] ?? NaN) + k174PrefixW // 字母 F 左缘
+const k174LetterRight = k174LetterLeft + 6.91 // F 宽（13px 基准 6.91）
+check('adj174 ♯ 角标在字母左上方（x 在字母区间、y 更高、字更小）', k174Acc !== null && k174Letter !== null && Number(k174Acc[1]) >= k174LetterLeft - 3 && Number(k174Acc[1]) <= k174LetterRight && Number(k174Acc[2]) < Number(k174Letter[2]) && Number(k174Acc[3]) < 13, JSON.stringify([k174Acc?.[1], k174Acc?.[2], k174Acc?.[3], k174LetterLeft, k174LetterRight]))
 // 辅助拍号（括号内小一号）
 const rM2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4 (2/4)\nJ: 96\nQ: 1 2 3 4 |\n')
 const svgM48b = renderScoreToSvg(layoutScore(rM2, defaultPageConfig))[0]

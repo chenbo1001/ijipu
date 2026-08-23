@@ -142,18 +142,34 @@ function renderMeta(page: ScorePage, config: PageConfig): string {
 
   // ---- 调式 + 拍号（左下锚，同排）：调号文本 + 拍号分数（数字上下正对，中间横线） ----
   // adj42：调式行 = 号两侧加空格（如 "1 = C"），与下方节拍行的 = 号垂直对齐
+  // adj174：调号支持升降号在前（#F/$B）或在后（F#/B$），预览时 ♯/♭ 作角标画在字母左上角
   const mFont = config.miaoshu_font
   const mSize = config.miaoshu_size
-  const keyLabel = page.meta.key ? `1 = ${xmlEsc(page.meta.key)}` : ''
+  const keyRaw = (page.meta.key ?? '').trim()
+  const keyM = /^([#$]?)([A-G])([#$]?)$/.exec(keyRaw)
+  const keyLetter = keyM ? keyM[2] : keyRaw // 调号字母（无效时原样）
+  const keyAcc = keyM ? (keyM[1] || keyM[3]) : '' // 升降号（# 或 $）
+  const keyLabel = keyLetter ? `1 = ${keyLetter}` : ''
   if (keyLabel) {
     const pos = posOf('keyline', { x: 0, y: -44 })
     parts.push(
       `<text data-meta="keyline" x="${pos.x}" y="${pos.y}" font-size="${mSize}" font-family="${mFont}" fill="#1b1b1b">${keyLabel}</text>`,
     )
+    // adj174：升降号角标画在调号字母左上角（♯/♭ 小字，略高于字母顶部）
+    if (keyAcc) {
+      const sym = keyAcc === '#' ? '♯' : '♭'
+      // "1 = " 宽 + 字母前缘偏移，使符号落在字母左上方
+      const symX = pos.x + metaTextW('1 = ') * (mSize / 13) - 2 * (mSize / 13)
+      const symSize = mSize * 0.7
+      parts.push(
+        `<text x="${r1n(symX)}" y="${r1n(pos.y - mSize * 0.9)}" font-size="${r1n(symSize)}" font-family="${mFont}" fill="#1b1b1b">${sym}</text>`,
+      )
+    }
   }
   if (page.meta.meter) {
     const pos = posOf('keyline', { x: 0, y: -44 })
-    // 估算 "1 = C" 文本宽（13px 字体 ASCII ≈7px/字符，随字号缩放）后留 10px 间距
+    // 估算 "1 = C" 文本宽（13px 字体 ASCII ≈7px/字符，随字号缩放）后留 10px 间距；
+    // adj174：升降号作角标不再占文本宽度，拍号按字母文本宽排
     const meterX = pos.x + (keyLabel ? keyLabel.length * 7 * (mSize / 13) + 10 : 0)
     parts.push(renderMeterMeta(page.meta.meter, meterX, pos.y, mFont, mSize))
   }
