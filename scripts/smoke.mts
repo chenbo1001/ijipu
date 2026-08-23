@@ -233,8 +233,9 @@ check('错误行含 hl-error-line 标记', hl.includes('hl-error-line') && hl.sp
 const hlClean = highlightCode(errCode)
 check('无错误行时不加标记', !hlClean.includes('hl-error-line'))
 // adj165：当前行背景 + 当前音符区块背景（光标行/列；Q: 为 3 字符，rest 从 col=3 起）
+// adj171：当前行整行背景由 EditorPane 铺满层渲染，highlightCode 不再输出 hl-current-line
 const hlCur = highlightCode('V: 1.0\nB: t\nQ: 1 2 3 4 |\n', undefined, { line: 3, col: 3 })
-check('adj165 当前行整行带 hl-current-line', hlCur.includes('hl-current-line'), '')
+check('adj171 highlightCode 不再含 hl-current-line（整行背景移入组件铺满层）', !hlCur.includes('hl-current-line'), '')
 check('adj165 光标所在音符区块带 hl-current-block', hlCur.includes('hl-current-block'), '')
 check('adj165 当前行无错误时不叠加 hl-error-line', !hlCur.includes('hl-error-line'), '')
 const hlCur2 = highlightCode('V: 1.0\nB: t\nQ: 1 2 3 4 |\n', undefined, { line: 3, col: 11 })

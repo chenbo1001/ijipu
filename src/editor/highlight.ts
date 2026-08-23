@@ -82,8 +82,8 @@ function highlightLyricContent(content: string): string {
 }
 
 /** 整份代码高亮为 HTML；errLines 中的行号（1-based）整行红底标记；
- *  cursor（1-based 行、0-based 列，adj165）：当前行整行背景 + 光标所在空格段
- *  （音符块/小节线块）叠加区块背景，与行背景区分 */
+ *  cursor（1-based 行、0-based 列，adj165）：光标所在空格段（音符块/小节线块）
+ *  叠加区块背景（当前行整行背景由 EditorPane 独立铺满层渲染，adj171） */
 export function highlightCode(
   code: string,
   errLines?: ReadonlySet<number>,
@@ -95,11 +95,8 @@ export function highlightCode(
     const raw = lines[ln]
     const lineNo = ln + 1
     const wrap = (html: string) => {
-      let h = html
-      if (errLines && errLines.has(lineNo)) h = `<span class="hl-error-line">${h}</span>`
-      // adj165：当前行背景最外层（错误红底在内层，当前行背景再包一层）
-      if (cursor && cursor.line === lineNo) h = `<span class="hl-current-line">${h}</span>`
-      return h
+      if (errLines && errLines.has(lineNo)) return `<span class="hl-error-line">${html}</span>`
+      return html
     }
     const trimmed = raw.trim()
     if (trimmed === '') {

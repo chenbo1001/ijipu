@@ -464,11 +464,19 @@ export function EditorPane() {
             onMouseUp={onSelect}
           />
           <div ref={hlRef} className="highlight-layer" aria-hidden="true">
-            <div
-              className="highlight-inner"
-              ref={hlInnerRef}
-              dangerouslySetInnerHTML={{ __html: html }}
-            />
+            <div className="highlight-inner" ref={hlInnerRef}>
+              {/* adj171：当前行整行背景铺满层（随 inner transform 一起平移；宽度铺满编辑区） */}
+              {cursor && (
+                <div
+                  className="editor-current-line-bg"
+                  style={{ top: (cursor.line - 1) * editorLineH }}
+                />
+              )}
+              <div
+                className="highlight-content"
+                dangerouslySetInnerHTML={{ __html: html }}
+              />
+            </div>
           </div>
           {/* adj165：自动提示浮层（& 修饰符 / 跳房子输入提示） */}
           {completion && (

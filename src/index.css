@@ -694,13 +694,29 @@ body {
   pointer-events: none;
 }
 
-/* adj167：高亮层内部滚动容器（transform 平移跟随 textarea，字号/行高/padding 在此）；
-   adj169：禁用编程字体连字（与 textarea 一致，防止 |:、|| 等被渲染成连字字形导致列错位） */
+/* adj167：高亮层内部滚动容器（transform 平移跟随 textarea，随滚动整体平移） */
 .editor-main .highlight-inner {
   position: absolute;
   top: 0;
   left: 0;
   min-width: 100%;
+}
+
+/* adj171：当前行整行背景铺满层（在内容层之下，宽度铺满编辑区） */
+.editor-main .editor-current-line-bg {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--jp-editor-lh);
+  background: color-mix(in srgb, var(--jp-accent) 8%, transparent);
+  pointer-events: none;
+}
+
+/* 高亮内容层：字号/行高/padding 在此；
+   adj169：禁用编程字体连字（与 textarea 一致，防止 |:、|| 等被渲染成连字字形导致列错位） */
+.editor-main .highlight-content {
+  position: relative;
+  min-height: 100%;
   font-family: var(--jp-editor-font, var(--jp-font-mono));
   font-variant-ligatures: none;
   font-size: var(--jp-editor-fs, 14px);
@@ -756,13 +772,6 @@ body {
 .hl-line-header {
   color: var(--jp-hl-line-header);
   font-weight: 600;
-}
-/* adj165：当前行背景（光标所在行，与其它行区分） */
-.hl-current-line {
-  background: color-mix(in srgb, var(--jp-accent) 8%, transparent);
-  border-radius: 3px;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
 }
 /* adj165：当前音符区块/小节线区块背景（叠加在当前行背景之上，二者可区分） */
 .hl-current-block {
