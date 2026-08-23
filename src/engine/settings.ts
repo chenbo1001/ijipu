@@ -30,10 +30,14 @@ export function extractJpsConfig(code: string): Partial<PageConfig> | null {
     const obj = JSON.parse(raw) as Record<string, unknown>
     if (typeof obj !== 'object' || obj === null) return null
     // 仅回填已知字段，防止任意键污染
+    // adj221：editorFont/editorFontSize 是 PageConfig 可选字段（不在 defaultPageConfig
+    // 对象上），必须显式加白名单——否则写回 # jps-config 后读回会被过滤丢失
     const known = new Set([
       ...Object.keys(defaultPageConfig),
       'heights',
       'metaPos',
+      'editorFont',
+      'editorFontSize',
     ])
     const out: Record<string, unknown> = {}
     for (const k of Object.keys(obj)) {

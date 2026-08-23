@@ -544,6 +544,10 @@ export interface PageConfig {
   height_shengbu: number
   /** 小节间距（列间距，px；小节线之间的空隙） */
   bar_gap: number
+  /** 编辑器字体（谱面级，adj221：随 # jps-config 保存；缺省回退全局/默认） */
+  editorFont?: string
+  /** 编辑器字号（px，谱面级，adj221；缺省回退全局/默认） */
+  editorFontSize?: number
   /**
    * 描述头自定义位置：相对各自锚点的偏移（adj16）。
    * title/subtitle_i → 描述区上边中点；author_i → 右下角；keyline/tempo → 左下角。

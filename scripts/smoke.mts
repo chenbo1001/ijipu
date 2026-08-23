@@ -502,6 +502,17 @@ check('mergeJpsConfig 谱面设置优先（margin_top=123）', mgCfg.margin_top 
 check('无 # 设置时回退默认（margin_top=默认）', mergeJpsConfig(ysSrc, null).margin_top === defaultPageConfig.margin_top, `mt=${mergeJpsConfig(ysSrc, null).margin_top}`)
 const codeW2 = writeJpsConfig(codeW, { ...defaultPageConfig, margin_top: 200 })
 check('writeJpsConfig 原位更新已有行（margin_top=200，不重复追加）', codeW2.split('\n').filter((l) => l.startsWith('# jps-config:')).length === 1 && extractJpsConfig(codeW2)?.margin_top === 200, '')
+// adj221：编辑器字体/字号随谱保存——PageConfig 可选字段不在 defaultPageConfig 对象上，
+// 白名单必须显式涵盖，否则写回后读回被过滤丢失
+{
+  const codeW3 = writeJpsConfig(ysSrc, { ...defaultPageConfig, editorFont: 'Courier New', editorFontSize: 18 })
+  const ex3 = extractJpsConfig(codeW3)
+  check('adj221 extractJpsConfig 回读 editorFont', ex3 !== null && ex3.editorFont === 'Courier New', JSON.stringify(ex3))
+  check('adj221 extractJpsConfig 回读 editorFontSize', ex3 !== null && ex3.editorFontSize === 18, JSON.stringify(ex3))
+  const mg3 = mergeJpsConfig(codeW3, null)
+  check('adj221 mergeJpsConfig 谱面 editorFont/Size 优先', mg3.editorFont === 'Courier New' && mg3.editorFontSize === 18, `font=${mg3.editorFont} fs=${mg3.editorFontSize}`)
+  check('adj221 无谱面设置时缺省（editorFont 未定义）', mergeJpsConfig(ysSrc, null).editorFont === undefined, `font=${mergeJpsConfig(ysSrc, null).editorFont}`)
+}
 // 损坏 JSON 忽略（回退默认）
 const badCfg = mergeJpsConfig('V: 1.0\n# jps-config:{bad json\nQ: 1 2 3 4 |\n', null)
 check('损坏 # jps-config 静默回退默认', badCfg.margin_top === defaultPageConfig.margin_top, `mt=${badCfg.margin_top}`)

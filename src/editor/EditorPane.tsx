@@ -75,9 +75,15 @@ export function EditorPane() {
   // adj160：编辑器字体下拉框（与字号按钮同排）
   const editorFont = useUiStore((s) => s.editorFont)
   const setEditorFont = useUiStore((s) => s.setEditorFont)
+  // adj221：编辑器字体/字号随谱保存（# jps-config）——谱面有值时优先（打开带设置的
+  // 谱直接生效），无则回退 uiStore 全局默认；调整时写谱面 + 同步全局默认
+  const pageConfig = useDocStore((s) => s.pageConfig)
+  const setPageConfig = useDocStore((s) => s.setPageConfig)
+  const effectiveFontSize = pageConfig.editorFontSize ?? editorFontSize
+  const effectiveFont = pageConfig.editorFont ?? editorFont
 
   // adj165：行高取整为整数（textarea 原生行盒与高亮层 CSS 行盒完全一致）
-  const editorLineH = Math.round(editorFontSize * 1.7)
+  const editorLineH = Math.round(effectiveFontSize * 1.7)
 
   const taRef = useRef<HTMLTextAreaElement>(null)
   const hlRef = useRef<HTMLDivElement>(null)
@@ -114,11 +120,11 @@ export function EditorPane() {
     ta.selectionEnd = Math.min(cursorJump.end, ta.value.length)
     // 滚动到光标所在行（行高 = 整数 --jp-editor-lh，adj165：与 CSS 取整一致）；adj63 wrap=off 需同步横向
     const pos = lineColOf(ta.value, cursorJump.start)
-    ta.scrollTop = Math.max(0, (pos.line - 1) * Math.round(editorFontSize * 1.7) - 40)
-    ta.scrollLeft = Math.max(0, pos.col * editorFontSize * 0.6 - 40)
+    ta.scrollTop = Math.max(0, (pos.line - 1) * Math.round(effectiveFontSize * 1.7) - 40)
+    ta.scrollLeft = Math.max(0, pos.col * effectiveFontSize * 0.6 - 40)
     onScroll()
     onSelectRef.current()
-  }, [cursorJump, editorFontSize])
+  }, [cursorJump, effectiveFontSize])
 
   const errorCount = parseResult.errors.filter((e) => e.severity === 'error').length
 
@@ -182,9 +188,9 @@ export function EditorPane() {
     const lines = code.split('\n')
     if (contentW <= 0) return lines.map(() => 1)
     // 估算字符宽（等宽 0.6×fs）：若行内容宽必然超内容区才需要精确折行数
-    const charW = editorFontSize * 0.6
+    const charW = effectiveFontSize * 0.6
     const probe = document.createElement('div')
-    probe.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;white-space:pre-wrap;width:${contentW}px;font-size:${editorFontSize}px;line-height:${editorLineH}px;font-family:${editorFont},monospace;padding:0`
+    probe.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;white-space:pre-wrap;width:${contentW}px;font-size:${effectiveFontSize}px;line-height:${editorLineH}px;font-family:${effectiveFont},monospace;padding:0`
     document.body.appendChild(probe)
     const res = lines.map((l) => {
       if (l.length * charW <= contentW) return 1 // 必不折行
@@ -193,7 +199,7 @@ export function EditorPane() {
     })
     document.body.removeChild(probe)
     return res
-  }, [code, contentW, editorFontSize, editorLineH, editorFont])
+  }, [code, contentW, effectiveFontSize, editorLineH, effectiveFont])
 
   // adj201：视觉行起点偏移（每源码行前的累计视觉行数 × 行高）——折行后当前行
   // 背景/提示定位等按视觉行计算，不再按源码行（此前折行时光标行背景错位）
@@ -250,7 +256,7 @@ export function EditorPane() {
     const lineBefore = before.slice(before.lastIndexOf('\n') + 1)
     // adj201：浮层 y 按视觉行（折行后光标行下有折行占位）
     const compPos = (line: number, col: number) => ({
-      x: col * editorFontSize * 0.6,
+      x: col * effectiveFontSize * 0.6,
       y: (visualTopOfLine[line - 1] ?? 0) + editorLineH,
     })
     // adj186：描述头区域行首 Tab → 列出所有描述头（行首 = 光标前仅空白）；
@@ -482,9 +488,9 @@ export function EditorPane() {
   // adj165：行高取整为整数——非整数行高（如 14×1.7=23.8px）在 textarea 原生行盒与
   // 高亮层 CSS 行盒中按各自方式取整，多行后累积错位（选中行高亮到另一行）
   const editorStyle = {
-    '--jp-editor-fs': `${editorFontSize}px`,
+    '--jp-editor-fs': `${effectiveFontSize}px`,
     '--jp-editor-lh': `${editorLineH}px`,
-    '--jp-editor-font': `${editorFont}, monospace`,
+    '--jp-editor-font': `${effectiveFont}, monospace`,
   } as React.CSSProperties
 
   return (
@@ -498,13 +504,17 @@ export function EditorPane() {
         <span className={errorCount > 0 ? 'err-count has-error' : 'err-count'}>
           {errorCount > 0 ? `${errorCount} 个语法错误` : '语法正确'}
         </span>
-        {/* adj160：编辑器字体下拉框（字号按钮左侧） */}
+        {/* adj160：编辑器字体下拉框（字号按钮左侧）；adj221：随谱保存（# jps-config） */}
         <span className="editor-font-select">
           <select
-            value={editorFont}
-            onChange={(e) => setEditorFont(e.target.value)}
+            value={effectiveFont}
+            onChange={(e) => {
+              const f = e.target.value
+              setEditorFont(f)
+              setPageConfig({ ...pageConfig, editorFont: f }, true)
+            }}
             title="编辑器字体"
-            style={{ fontFamily: `'${editorFont}', monospace` }}
+            style={{ fontFamily: `'${effectiveFont}', monospace` }}
           >
             {EDITOR_FONT_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
@@ -517,15 +527,23 @@ export function EditorPane() {
           <button
             className="font-btn"
             title="减小字号"
-            onClick={() => setEditorFontSize(editorFontSize - 1)}
+            onClick={() => {
+              const v = Math.max(10, effectiveFontSize - 1)
+              setEditorFontSize(v)
+              setPageConfig({ ...pageConfig, editorFontSize: v }, true)
+            }}
           >
             A−
           </button>
-          <span className="font-size-val">{editorFontSize}px</span>
+          <span className="font-size-val">{effectiveFontSize}px</span>
           <button
             className="font-btn"
             title="增大字号"
-            onClick={() => setEditorFontSize(editorFontSize + 1)}
+            onClick={() => {
+              const v = Math.min(26, effectiveFontSize + 1)
+              setEditorFontSize(v)
+              setPageConfig({ ...pageConfig, editorFontSize: v }, true)
+            }}
           >
             A+
           </button>
