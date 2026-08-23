@@ -175,7 +175,8 @@ export function PlaybackDialog() {
               </span>
             )}
             <span style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>
-              <button className="btn primary" onClick={() => void play()} disabled={playing} style={{ padding: '3px 12px', fontSize: 12 }}>
+              {/* adj170：播放按钮与停止按钮风格一致（去掉 primary 强调样式） */}
+              <button className="btn" onClick={() => void play()} disabled={playing} style={{ padding: '3px 12px', fontSize: 12 }}>
                 {playing ? '播放中…' : '▶ 播放'}
               </button>
               <button className="btn" onClick={stop} disabled={!playing} style={{ padding: '3px 12px', fontSize: 12, marginLeft: 6 }}>

@@ -58,7 +58,8 @@ export function Toolbar() {
           <path d="M 14.5 12.5 V 11.5" strokeDasharray="1.4 1.4" />
         </svg>
       </button>
-      <button className="tool-btn primary" onClick={() => openModal('playback')}>
+      {/* adj170：试听按钮与页面设置等工具按钮风格一致（去掉 primary 强调样式） */}
+      <button className="tool-btn" onClick={() => openModal('playback')}>
         ▶ 试听
       </button>
       <button className="tool-btn" onClick={() => openModal('pageConfig')}>
