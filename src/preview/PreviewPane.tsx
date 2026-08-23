@@ -136,10 +136,18 @@ export function PreviewPane() {
     let by: number
     if (key.startsWith('notes')) {
       const lineIdx = Number(el.getAttribute('data-notes-line') ?? '0')
-      const baseX = cfg.margin_left
       const baseY = layout.pages[0].height - cfg.margin_bottom - 24 + lineIdx * cfg.miaoshu_size * 1.4
-      bx = base ? base.x : Number(el.getAttribute('x')) - baseX
-      by = base ? base.y : Number(el.getAttribute('y')) - baseY
+      if (key === 'notes') {
+        // 旧 metaPos["notes"]（adj83 语义）：基准 = 页面居中（兼容旧配置拖拽）
+        const baseX = pageW / 2
+        bx = base ? base.x : Number(el.getAttribute('x')) - baseX
+        by = base ? base.y : Number(el.getAttribute('y')) - baseY
+      } else {
+        // 新 metaPos["notes_i"]（adj151）：基准 = 左边距（左对齐）
+        const baseX = cfg.margin_left
+        bx = base ? base.x : Number(el.getAttribute('x')) - baseX
+        by = base ? base.y : Number(el.getAttribute('y')) - baseY
+      }
     } else {
       const anchor = metaAnchorPt(metaAnchorOf(key), pageW, cfg)
       bx = base ? base.x : Number(el.getAttribute('x')) - anchor.x

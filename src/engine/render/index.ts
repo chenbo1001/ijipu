@@ -1185,10 +1185,15 @@ function renderPage(page: ScorePage, config: PageConfig, pageCount: number): str
     const baseY = height - config.margin_bottom - 24
     for (let i = 0; i < page.meta.notes.length; i++) {
       const line = page.meta.notes[i]
-      const p = config.metaPos?.[`notes_${i}`] ?? config.metaPos?.['notes'] // 兼容整体偏移
+      // adj151：新 metaPos["notes_i"] 相对左边距基准；兼容旧 metaPos["notes"]
+      // （adj83 语义：相对页面居中）——旧偏移按居中基准解释，避免位置出页面
+      const p = config.metaPos?.[`notes_${i}`]
+      const pOld = config.metaPos?.['notes']
       const pos = p
         ? { x: baseX + p.x, y: baseY + i * nSize * 1.4 + p.y }
-        : { x: baseX, y: baseY + i * nSize * 1.4 }
+        : pOld
+          ? { x: width / 2 + pOld.x, y: baseY + i * nSize * 1.4 + pOld.y }
+          : { x: baseX, y: baseY + i * nSize * 1.4 }
       body.push(
         `<text data-meta="notes_${i}" data-notes-line="${i}" x="${r1n(pos.x)}" y="${r1n(pos.y)}" text-anchor="start" font-size="${nSize}" font-family="${nFont}" fill="#1b1b1b">${xmlEsc(line)}</text>`,
       )

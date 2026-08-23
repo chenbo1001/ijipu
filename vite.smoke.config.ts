@@ -16,6 +16,7 @@ export default defineConfig({
       entry: {
         smoke: 'scripts/smoke.mts',
         preview: 'scripts/render-preview.mts',
+        tmpN: 'scripts/_tmp_n.mts',
       },
       formats: ['cjs'],
       fileName: (_format, entryName) => `${entryName}.cjs`,
@@ -25,6 +26,7 @@ export default defineConfig({
     },
   },
 })
+
 
 
 
