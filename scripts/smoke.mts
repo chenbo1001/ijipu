@@ -2059,6 +2059,20 @@ check('独立连音符不因同排嵌套抬高（y = 数字上沿-LAYER_GAP×s�
   const wTup218 = pn218[6].width
   check('adj218 第 2 小节：7./ 宽 = 3×三音宽、7- 在 6// 右侧', Math.abs(pn218[9].width - wTup218 * 3) < 1 && pn218[11].x > pn218[10].x, `${pn218[9].width.toFixed(1)} vs ${(wTup218 * 3).toFixed(1)}`)
 }
+// adj219：减时线按拍分组——beatPos 浮点尾（0.9999…）近整数归整，
+// tuplet 组三音一条、7./+6// 一条、4×16 分音符一条（不跨拍粘连）
+{
+  const lay219 = layoutScore(parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (y6/ 1'/ 1'/) 7./ 6// 7 - | 6// 6// 5// 6// 5/ 6/ 3 - |\n"), defaultPageConfig)
+  const pn219 = lay219.pages[0].notes
+  // bar 0：tuplet 三音 beatPos 0/0.333/0.667 同拍、7./ 1.0 与 6// 1.75 同拍（浮点归整后 1）
+  const b0 = pn219.filter((n) => n.barIndex === 0)
+  const beatP0 = b0.map((n) => n.beatPos)
+  check('adj219 bar0 beatPos：三音同拍 0、7./ 归整到拍 1 与 6// 同拍', Math.abs(beatP0[0] - 0) < 1e-3 && Math.abs(beatP0[2] - 2 / 3) < 1e-3 && Math.abs(beatP0[3] - 1) < 1e-3 && Math.abs(beatP0[4] - 1.75) < 1e-3, beatP0.map((v) => v.toFixed(3)).join(','))
+  const beams219 = computeBeamsForTest(pn219, defaultPageConfig.note_size)
+  // bar0 level1：2 条（三音一条 + 7./6// 一条）；bar1 level1：2 条（4×16 分一条 + 5/6/ 一条）
+  const lvl1 = beams219.filter((b) => Math.abs(b.y - (157.2)) < 1).sort((a, b) => a.x1 - b.x1)
+  check('adj219 减时线分组：bar0 2 条、bar1 2 条（不跨拍粘连）', lvl1.length === 4 && Math.abs(lvl1[1].x1 - lvl1[0].x2) > 5 && Math.abs(lvl1[3].x1 - lvl1[2].x2) > 5, lvl1.map((b) => `${b.x1}-${b.x2}`).join(' | '))
+}
 
 // ---- 56. 跨行跳房子起点（adj47）：断行在 [ 起点小节线后 → 起点线移到下一行行首 ----
 console.log('[56] cross-row volta start')

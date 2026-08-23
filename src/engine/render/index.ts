@@ -1191,11 +1191,15 @@ function computeBeams(notes: PlacedToken[], noteSize = 18): Beam[] {
           i++
           continue
         }
-        const beat = Math.floor(list[i].beatPos)
+        const beatRaw = list[i].beatPos
+        // adj219：近整数归整——浮点拍位（0.9999…）误判拍边界（同布局 adj217/218）
+        const beat = Math.abs(beatRaw - Math.round(beatRaw)) < 1e-3 ? Math.round(beatRaw) : Math.floor(beatRaw)
         let j = i
         while (
           j + 1 < list.length &&
-          Math.floor(list[j + 1].beatPos) === beat &&
+          (Math.abs(list[j + 1].beatPos - Math.round(list[j + 1].beatPos)) < 1e-3
+            ? Math.round(list[j + 1].beatPos)
+            : Math.floor(list[j + 1].beatPos)) === beat &&
           list[j + 1].token.diminishCount >= level
         ) {
           j++

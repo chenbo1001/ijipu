@@ -944,7 +944,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           }
           segIdx++
         }
-        placeNoteAt(rs.note, segments, yTop, pageIndex, groupIndex, voice, slotIndex, lyricMaps, geciSize, sp, rs.notePos - segBeat, b)
+        // adj219：beatPos 近整数归整（浮点尾 0.9999… → 1），供减时线按拍分组正确
+        const bpRaw = rs.notePos - segBeat
+        const bp = Math.abs(bpRaw - Math.round(bpRaw)) < 1e-3 ? Math.round(bpRaw) : bpRaw
+        placeNoteAt(rs.note, segments, yTop, pageIndex, groupIndex, voice, slotIndex, lyricMaps, geciSize, sp, bp, b)
         // 该音符带括号 → 占位计入后续音符偏移
         if (rs.note.kind === 'note' && (rs.note.symbols.includes('zkh') || rs.note.symbols.includes('ykh'))) {
           bracketAcc += BRACKET_PAD
