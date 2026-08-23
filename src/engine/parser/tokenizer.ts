@@ -240,7 +240,9 @@ export function tokenizeMusicLine(
           i = k
         }
       } else {
-        errors.push(err(`孤立的 "&" 符号`, { line: pos.line, col: pos.col + i }))
+        // adj178：孤立 &（输入中未完成）降为 warning——避免预览在 error 时整页阻断、
+        // 输入过程中在正确预览与错误提示间闪动（error 仅用于真正破坏结构的错误）
+        errors.push(err(`孤立的 "&" 符号（输入中未完成？）`, { line: pos.line, col: pos.col + i }, 'warning'))
         i++
       }
       continue

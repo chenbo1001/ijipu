@@ -1509,6 +1509,11 @@ const k175Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK175)
 const k175PrefixW = (7.62 + 3.85 + 9.64) * (defaultPageConfig.miaoshu_size / 13)
 const k175LetterLeft = Number(k175Letter?.[1] ?? NaN) + k175PrefixW
 check('adj175 ♭ 角标在字母左侧、更高、字号为调号一半（6.5）', k175Acc !== null && k175Letter !== null && Number(k175Acc[1]) < k175LetterLeft && Number(k175Acc[2]) < Number(k175Letter[2]) && Math.abs(Number(k175Acc[3]) - 6.5) < 0.1, JSON.stringify([k175Acc?.[1], k175Acc?.[2], k175Acc?.[3], k175LetterLeft]))
+// adj179：角标下移一个升降符高度——y = 字母基线 - 0.4×字号（原 0.9×字号）
+check('adj179 角标 y = 基线 - 0.4×字号（下移一个升降符高度）', k175Acc !== null && k175Letter !== null && Math.abs(Number(k175Acc[2]) - (Number(k175Letter[2]) - 0.4 * defaultPageConfig.miaoshu_size)) < 0.5, JSON.stringify([k175Acc?.[2], k175Letter?.[2]]))
+// adj178：孤立 &（输入中未完成）为 warning 而非 error——预览不阻断
+const r178 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 &\n')
+check('adj178 孤立 & 降为 warning（不阻断预览）', r178.errors.some((e) => e.message.includes('&') && e.severity === 'warning') && !r178.errors.some((e) => e.severity === 'error'), JSON.stringify(r178.errors))
 // 角标位置在字母左上方（adj175：x 在字母左侧、y < 字母基线、字号为调号一半）
 const k174Acc = /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>♯<\/text>/.exec(svgK174a)
 const k174Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK174a)

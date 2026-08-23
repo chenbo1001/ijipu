@@ -192,12 +192,13 @@ export function EditorPane() {
         return
       }
       const { line, col } = lineColOf(ta.value, pos)
+      // adj177：浮层定位在光标字符下方——x = 列 × 等宽字符宽（0.6×fs），y = 行顶 + 行高
       setCompletion({
         kind: 'modifier',
         items,
         index: 0,
-        x: col * 7.5,
-        y: (line - 1) * Math.round(editorFontSize * 1.7),
+        x: col * editorFontSize * 0.6,
+        y: (line - 1) * Math.round(editorFontSize * 1.7) + Math.round(editorFontSize * 1.7),
       })
       return
     }
@@ -209,12 +210,13 @@ export function EditorPane() {
         return
       }
       const { line, col } = lineColOf(ta.value, pos)
+      // adj177：与修饰符提示一致，定位在光标字符下方
       setCompletion({
         kind: 'volta',
         items,
         index: 0,
-        x: col * 7.5,
-        y: (line - 1) * Math.round(editorFontSize * 1.7),
+        x: col * editorFontSize * 0.6,
+        y: (line - 1) * Math.round(editorFontSize * 1.7) + Math.round(editorFontSize * 1.7),
       })
       return
     }
@@ -233,10 +235,11 @@ export function EditorPane() {
     let insert = item.code
     let replaceLen = 0
     if (c.kind === 'modifier') {
-      // 替换已输入的 & 前缀（保留 &）
+      // adj177：用户已输入 &（lineBefore 以 & 结尾），只补全其后的字母——
+      // 不再拼接第二个 &（此前 replaceLen 仅替换字母、insert 又含 &，会变成 &&tr）
       const m = /&([a-zA-Z0-9]*)$/.exec(lineBefore)
       if (m) replaceLen = m[1].length
-      insert = '&' + item.code + ' '
+      insert = item.code + ' '
     } else {
       // 替换 [ 后已输入内容；插入 [ 本身 + 候选 + ]（无 ] 的候选不加）
       const b = lineBefore.lastIndexOf('[')
@@ -478,11 +481,11 @@ export function EditorPane() {
               />
             </div>
           </div>
-          {/* adj165：自动提示浮层（& 修饰符 / 跳房子输入提示） */}
+          {/* adj165：自动提示浮层（& 修饰符 / 跳房子输入提示）；adj177：定位含内容层 padding（上 10 左 14） */}
           {completion && (
             <div
               className="editor-completion"
-              style={{ left: completion.x + 14, top: completion.y + 14 }}
+              style={{ left: completion.x + 14, top: completion.y + 10 }}
             >
               {completion.items.map((it, i) => (
                 <div
