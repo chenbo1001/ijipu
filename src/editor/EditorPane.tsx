@@ -13,7 +13,7 @@ import { useUiStore } from '../store/uiStore'
 import { highlightCode } from './highlight'
 import { formatLine, codePosToNoteId } from '../engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
-import { NOTE_MODIFIER_HINTS, VOLTA_HINTS, HEADER_HINTS, filterHeaderHints } from './completions'
+import { VOLTA_HINTS, filterHeaderHints, isBarlineModifierContext, filterModifierHints } from './completions'
 
 /** adj160：编辑器字体选项；adj163：仅等宽字体——textarea 与高亮层需逐字符对齐，
  *  非等宽字体下加粗 span（小节线/行头等）宽度变化会从该字符开始逐字累积错位；
@@ -274,7 +274,9 @@ export function EditorPane() {
     }
     const mod = modifierPrefix(lineBefore)
     if (mod !== null) {
-      const items = NOTE_MODIFIER_HINTS.filter((h) => h.code.startsWith(mod) || mod === '')
+      // adj203：小节线后（| &、:| &）提示小节线修饰符（&fine/&dc/&ds/&ty/&hs），
+      // 音符后提示音符修饰符——按光标上下文切换候选池
+      const items = filterModifierHints(mod, isBarlineModifierContext(lineBefore))
       if (items.length === 0) {
         setCompletion(null)
         return

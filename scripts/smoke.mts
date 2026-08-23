@@ -17,7 +17,7 @@ import { clampMetaPos } from '../src/engine/layout/metaAnchors.ts'
 import { computeBeamsForTest } from '../src/engine/render/index.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
 import { highlightCode } from '../src/editor/highlight.ts'
-import { HEADER_HINTS, filterHeaderHints } from '../src/editor/completions.ts'
+import { HEADER_HINTS, filterHeaderHints, BARLINE_MODIFIER_HINTS, isBarlineModifierContext, filterModifierHints } from '../src/editor/completions.ts'
 import {
   createHistoryState,
   recordEdit,
@@ -254,6 +254,19 @@ check('adj192 带声部名模板含 cursorAt（光标停引号内）', HEADER_HI
   check('adj202 q1 → Q1:/Q1"声部名":（2 项）', fq1.length === 2 && fq1.some((h) => h.code === 'Q1"声部名":'), fq1.map((h) => h.code).join(','))
   check('adj202 无匹配前缀 → 空数组', filterHeaderHints('xyz').length === 0)
   check('adj202 空前缀 → 全部', filterHeaderHints('').length === HEADER_HINTS.length)
+}
+// adj203：& 修饰符提示按上下文区分——小节线后提示小节线修饰符（含 &hs/&ty）
+{
+  check('adj203 小节线后 & 前缀非空 → 小节线修饰符池', isBarlineModifierContext('Q: 1 2 3 4 | &h') && isBarlineModifierContext('Q: 1 2 3 4 :| &'), '')
+  check('adj203 音符后 & → 音符修饰符池', !isBarlineModifierContext('Q: 1 2 3 4 5 &') && !isBarlineModifierContext('Q: 1 2 3 4 5 &t'), '')
+  const fh = filterModifierHints('h', true)
+  check('adj203 | &h → hs（花 S，1 项）', fh.length === 1 && fh[0].code === 'hs', fh.map((h) => h.code).join(','))
+  const ft = filterModifierHints('t', true)
+  check('adj203 | &t → ty（大跳跃，1 项）', ft.length === 1 && ft[0].code === 'ty', ft.map((h) => h.code).join(','))
+  const fAll = filterModifierHints('', true)
+  check('adj203 小节线后空前缀 → 全部小节线修饰符（fine/dc/ds/ty/hs）', fAll.length === BARLINE_MODIFIER_HINTS.length && fAll.some((h) => h.code === 'hs') && fAll.some((h) => h.code === 'ty') && fAll.some((h) => h.code === 'fine'), fAll.map((h) => h.code).join(','))
+  const fn = filterModifierHints('', false)
+  check('adj203 音符后空前缀 → 音符修饰符池（含 tr/cy，不含 hs）', fn.some((h) => h.code === 'tr') && !fn.some((h) => h.code === 'hs'), '')
 }
 // adj165：当前行背景 + 当前音符区块背景（光标行/列；Q: 为 3 字符，rest 从 col=3 起）
 // adj171：当前行整行背景由 EditorPane 铺满层渲染，highlightCode 不再输出 hl-current-line

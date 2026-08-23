@@ -80,3 +80,28 @@ export function filterHeaderHints(prefix: string): { code: string; label: string
   if (p === '') return HEADER_HINTS
   return HEADER_HINTS.filter((h) => h.code.toLowerCase().startsWith(p))
 }
+
+/**
+ * adj203：判断光标前 & 编码是否位于小节线后（如 `| &`、`:| &`）——
+ * 是则提示小节线修饰符（&fine/&dc/&ds/&ty/&hs），否则提示音符修饰符（&tr/&cy 等）。
+ * 依据：tokenizer 中小节线后的 & 才解析为 mark，音符后的 & 是音符修饰符。
+ */
+export function isBarlineModifierContext(lineBefore: string): boolean {
+  const m = /&([a-zA-Z0-9]*)$/.exec(lineBefore)
+  if (!m) return false
+  const prev = lineBefore.slice(0, m.index).trimEnd()
+  return prev !== '' && /[|:]/.test(prev[prev.length - 1])
+}
+
+/**
+ * adj203：按上下文过滤 & 修饰符提示——小节线后显示 BARLINE_MODIFIER_HINTS，
+ * 音符后显示 NOTE_MODIFIER_HINTS；前缀为空返回对应全量；无匹配返回空数组。
+ */
+export function filterModifierHints(
+  prefix: string,
+  onBarline: boolean,
+): { code: string; label: string }[] {
+  const pool = onBarline ? BARLINE_MODIFIER_HINTS : NOTE_MODIFIER_HINTS
+  if (prefix === '') return pool
+  return pool.filter((h) => h.code.startsWith(prefix))
+}
