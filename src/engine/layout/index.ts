@@ -1445,10 +1445,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     // adj106：嵌套时外层连音线一律平顶（nestedRaise>0 = 被更深线包含/包裹），
     // 平顶线层次清晰不与内层圆弧交叉，保证美观
     const style = nestedRaise[si] > 0 ? 'flat' : baseStyle
-    // adj108：跨行连音线优先用弧线（先保证弧线，再考虑横线）；仅用户强制平顶
-    // （lianyinxian_type=2）或嵌套外层（层次规则优先）时用平顶
-    const crossRowStyle: 'arc' | 'flat' =
-      config.lianyinxian_type === 2 || nestedRaise[si] > 0 ? 'flat' : 'arc'
+    // adj140：跨行连音线统一平顶（用户要求跨行显示平顶线，非弧线——
+    // 弧线跨行两端行高差大、且不易延伸到行末小节线；嵌套外层同平顶）
+    const crossRowStyle: 'arc' | 'flat' = 'flat'
     // adj108：连音线端点 = 数字槽中心 ± 1px×s（原固定 6.58/4.58，字号变化时端点错位）
     const sSlur = noteScaleOf(m.noteSize)
     const halfDig = halfDigitW(m.noteSize)

@@ -1610,14 +1610,14 @@ const rowEnd53 = lay53.pages[0].barlines
 check('连音符左半：第一行 2 → 行末小节线', Math.abs(s53[0].x1 - (n53[1].x + 6.58)) < 0.5 && Math.abs(s53[0].x2 - (rowEnd53[rowEnd53.length - 1]?.x ?? 0)) < 1, `x1=${s53[0].x1} x2=${s53[0].x2} bar=${rowEnd53[rowEnd53.length - 1]?.x}`)
 check('连音符右半：行首边距处 → 第二行 1', Math.abs(s53[1].x1 - 80) < 0.5 && Math.abs(s53[1].x2 - (n53[4].x + 4.58)) < 0.5, `x1=${s53[1].x1} x2=${s53[1].x2}`)
 check('左右两半跨行（y 不同）', Math.abs(s53[0].y - s53[1].y) > 1, `${s53[0].y} vs ${s53[1].y}`)
-// adj108：跨行连音线优先弧线（默认样式；原 adj89 强制平顶）
-check('跨行连音符弧线（adj108）', s53[0].style === 'arc' && s53[1].style === 'arc', `${s53[0].style}/${s53[1].style}`)
+// adj140：跨行连音线统一平顶（用户要求跨行显示平顶线，非弧线）
+check('adj140 跨行连音符平顶', s53[0].style === 'flat' && s53[1].style === 'flat', `${s53[0].style}/${s53[1].style}`)
 const svg53 = renderScoreToSvg(lay53)[0]
 const hlY = s53[0].y
 const hrY = s53[1].y
-// 弧线半部：左半从音符竖直上弯到行末最高点（右侧开口）；右半行首最高点弯到音符（左侧开口）
-check('弧线左半：起点竖直上弯到行末最高点（右侧开口）', svg53.includes(`M ${s53[0].x1} ${hlY} C ${s53[0].x1} ${(hlY - 9).toFixed(1)} ${s53[0].x2} ${(hlY - 4.5).toFixed(1)}`), '')
-check('弧线右半：行首最高点弯到终点（左侧开口）', svg53.includes(`M ${s53[1].x1} ${(hrY - 4.5).toFixed(1)} C ${s53[1].x1} ${(hrY - 4.5).toFixed(1)} ${s53[1].x2} ${(hrY - 9).toFixed(1)} ${s53[1].x2} ${hrY}`), '')
+// 平顶半部：左半从音符弧线升到平顶线、横线延伸到行末小节线；右半从行首横线到音符
+check('平顶左半：弧线升到平顶线 + 横线到行末（右侧开口）', svg53.includes(`M ${s53[0].x1} ${hlY} C`) && svg53.includes(`L ${s53[0].x2} ${(hlY - 7).toFixed(1)}"`), '')
+check('平顶右半：横线 + 右端弧线（左侧开口）', svg53.includes(`M ${s53[1].x1} ${(hrY - 7).toFixed(1)}`) && svg53.includes(` C `) && svg53.includes(`${s53[1].x2} ${hrY}"`), '')
 // 用户强制平顶（lianyinxian_type=2）：跨行仍平顶（adj108 尊重设置）
 const lay53f = layoutScore(r53, { ...defaultPageConfig, lianyinxian_type: 2 })
 const svg53f = renderScoreToSvg(lay53f)[0]
