@@ -988,20 +988,19 @@ function renderSlur(s: PlacedSlur, noteSize = 18): string {
     const c1y = y - leg * 0.9
     const c2x = x1 + halfL - 3
     if (s.half === 'l') {
-      // 左半部（adj141）：音符端弧线 + 横线 + 小节线端弧线（两端弧线弯角，右侧开口）
+      // 左半部（adj142）：音符端弧线升到平顶线 + 横线平直延伸到行末小节线；
+      // **右侧开口**（跨行连接处不画弧线闭合，弧线优先 halfL 上限 24）
       return (
         `<path d="M ${x1} ${y} ` +
         `C ${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${barY} ${(x1 + halfL).toFixed(1)} ${barY} ` +
-        `L ${(x2 - halfL).toFixed(1)} ${barY} ` +
-        `C ${(x2 - halfL + 3).toFixed(1)} ${barY} ${(x2 - halfL * 0.45).toFixed(1)} ${c1y.toFixed(1)} ${x2} ${y}" ` +
+        `L ${x2} ${barY}" ` +
         `fill="none" stroke="#1b1b1b" stroke-width="1"/>`
       )
     }
     if (s.half === 'r') {
-      // 右半部（adj141）：行首端弧线 + 横线 + 音符端弧线（两端弧线弯角，左侧开口）
+      // 右半部（adj142）：横线从行首平直伸来（**左侧开口**）+ 音符端弧线降到音符
       return (
-        `<path d="M ${x1} ${y} ` +
-        `C ${(x1 + halfL * 0.45).toFixed(1)} ${c1y.toFixed(1)} ${(x1 + halfL - 3).toFixed(1)} ${barY} ${(x1 + halfL).toFixed(1)} ${barY} ` +
+        `<path d="M ${x1} ${barY} ` +
         `L ${(x2 - halfL).toFixed(1)} ${barY} ` +
         `C ${(x2 - halfL + 3).toFixed(1)} ${barY} ${(x2 - halfL * 0.45).toFixed(1)} ${c1y.toFixed(1)} ${x2} ${y}" ` +
         `fill="none" stroke="#1b1b1b" stroke-width="1"/>`

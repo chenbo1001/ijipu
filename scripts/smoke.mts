@@ -1616,16 +1616,16 @@ const svg53 = renderScoreToSvg(lay53)[0]
 const hlY = s53[0].y
 const hrY = s53[1].y
 // 平顶半部：左半从音符弧线升到平顶线、横线延伸到行末小节线；右半从行首横线到音符
-// adj141：跨行半部两端弧线 + 中间横线（弧线优先，剩余画横线）
-check('平顶左半：音符端弧线 + 横线 + 小节线端弧线', svg53.includes(`M ${s53[0].x1} ${hlY} C`) && svg53.includes(` L `) && svg53.includes(`${s53[0].x2} ${hlY}"`), '')
-check('平顶右半：行首端弧线 + 横线 + 音符端弧线', svg53.includes(`M ${s53[1].x1} ${hrY} C`) && svg53.includes(` L `) && svg53.includes(`${s53[1].x2} ${hrY}"`), '')
+// adj142：跨行平顶——左半右侧开口（横线到行末小节线）、右半左侧开口（横线从行首伸出）
+check('平顶左半：音符端弧线 + 横线平直到行末（右侧开口）', svg53.includes(`M ${s53[0].x1} ${hlY} C`) && svg53.includes(`L ${s53[0].x2} ${(hlY - 7).toFixed(1)}"`), '')
+check('平顶右半：横线从行首平直伸出（左侧开口）+ 音符端弧线', svg53.includes(`M ${s53[1].x1} ${(hrY - 7).toFixed(1)}`) && svg53.includes(` C `) && svg53.includes(`${s53[1].x2} ${hrY}"`), '')
 // 用户强制平顶（lianyinxian_type=2）：跨行仍平顶（adj108 尊重设置）
 const lay53f = layoutScore(r53, { ...defaultPageConfig, lianyinxian_type: 2 })
 const svg53f = renderScoreToSvg(lay53f)[0]
 const s53fL = lay53f.pages[0].slurs.find((s) => s.half === 'l')
 const s53fR = lay53f.pages[0].slurs.find((s) => s.half === 'r')
-check('平顶左半：两端弧线 + 横线，右侧开口', s53fL !== undefined && svg53f.includes(`M ${s53fL.x1} ${s53fL.y} C`) && svg53f.includes(` L `) && svg53f.includes(`${s53fL.x2} ${s53fL.y}"`), '')
-check('平顶右半：两端弧线 + 横线，左侧开口', s53fR !== undefined && svg53f.includes(`M ${s53fR.x1} ${s53fR.y} C`) && svg53f.includes(` L `) && svg53f.includes(`${s53fR.x2} ${s53fR.y}"`), '')
+check('平顶左半：横线平直到行末（右侧开口）', s53fL !== undefined && svg53f.includes(`L ${s53fL.x2} ${(s53fL.y - 7).toFixed(1)}"`), '')
+check('平顶右半：横线从行首伸出（左侧开口）', s53fR !== undefined && svg53f.includes(`M ${s53fR.x1} ${(s53fR.y - 7).toFixed(1)}`), '')
 
 // ---- 54. 非整拍小节/密集行不溢出边距 ----
 console.log('[54] fractional-bar & dense-row no overflow')
