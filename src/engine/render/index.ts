@@ -148,15 +148,16 @@ function renderMeta(page: ScorePage, config: PageConfig): string {
   const mSize = config.miaoshu_size
   // adj176：调号/拍号/节拍整体右移一点，为字母左侧的升降号角标（♯/♭）留出空间；
   // adj181：有升降号时再整体右移一个升降号宽（0.5×mSize），容纳角标显示；
-  // adj187：调号再往右移动 1/5 调号字号宽度（0.2×mSize）
+  // adj187：调号再往右移动 1/5 调号字号宽度（0.2×mSize）；adj190：再右移 1×scale
   const KEY_SHIFT = 6
   const keyRaw = (page.meta.key ?? '').trim()
   const keyM = /^([#$b]?)([A-G])([#$b]?)$/.exec(keyRaw)
   const keyLetter = keyM ? keyM[2] : keyRaw // 调号字母（无效时原样）
   const keyAcc = keyM ? (keyM[1] || keyM[3]) : '' // 升降号（# 或 $/b）
   const keyLabel = keyLetter ? `1 = ${keyLetter}` : ''
-  // adj181：有升降号时文本整体右移升降号宽（0.5×mSize）；adj187：再右移 1/5 调号字号（0.2×mSize）
-  const accShift = keyAcc ? mSize * (0.5 + 0.2) : 0
+  // adj181：有升降号时文本整体右移升降号宽（0.5×mSize）；adj187：再右移 1/5 调号字号（0.2×mSize）；
+  // adj190：再右移 1×scale（scale = mSize/13）
+  const accShift = keyAcc ? mSize * (0.5 + 0.2) + mSize / 13 : 0
   if (keyLabel) {
     const pos = posOf('keyline', { x: KEY_SHIFT + accShift, y: -44 })
     parts.push(
