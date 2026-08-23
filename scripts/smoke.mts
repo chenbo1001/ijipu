@@ -1150,7 +1150,7 @@ const ve1 = bars38a[1].kind === 'barline' ? bars38a[1] : undefined
 const vs2 = bars38a[2].kind === 'barline' ? bars38a[2].voltaStart : undefined
 check('跳房子 1 注释 "1."', !!vs1 && vs1.comment === '1.', JSON.stringify(vs1))
 check('跳房子 1 以 |] 结束', !!ve1 && ve1.voltaEnd === true && ve1.voltaEndSlash !== true)
-check('连续跳房子 2 注释 "2."（voltaOnly）', !!vs2 && vs2.comment === '2.' && bars38a[2].kind === 'barline' && bars38a[2].voltaOnly === true, JSON.stringify(vs2))
+check('连续跳房子 2 注释 "2."（adj138：] 后 [ 带小节线竖线）', !!vs2 && vs2.comment === '2.' && bars38a[2].kind === 'barline' && bars38a[2].voltaOnly !== true, JSON.stringify(vs2))
 // 2. 修饰：+ 抬高、|]/ 开口结束
 const r38b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |[+"1." 4 4 5 |]/ 7 |\n')
 const b38b = r38b.groups[0].music.tokens.filter((t) => t.kind === 'barline')

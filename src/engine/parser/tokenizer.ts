@@ -425,6 +425,7 @@ export function tokenizeMusicLine(
         last.raw += rawAt(i, mod.k)
         lastBlockEnd = mod.k // 小节线块结束延展
       } else {
+        const lastIsVoltaEnd = last && last.kind === 'barline' && last.voltaEnd
         if (!last || last.kind !== 'barline') {
           errors.push(
             err('跳房子 "[" 应写在小节线后（行首请用 |/ 或小节线，adj26）', {
@@ -433,13 +434,13 @@ export function tokenizeMusicLine(
             }, 'warning'),
           )
         }
-        // ] 后连续 [ 或行首：纯跳房子起点（voltaOnly，不画小节线竖线）；
-        // 属于跳房子延续（] [ 无空格），不参与块间空格校验
+        // ] 后连续 [（如 |]["2"）：新段起点带小节线竖线（adj138，第二段从小节线开始）；
+        // 行首 [：纯跳房子起点（voltaOnly，无小节线可依，不画竖线）
         tokens.push({
           kind: 'barline',
           type: '|',
           voltaStart: { open: true, slash: mod.slash, plus: mod.plus, comment: mod.comment },
-          voltaOnly: true,
+          voltaOnly: !lastIsVoltaEnd,
           pos: i,
           raw: rawAt(i, mod.k),
         })
