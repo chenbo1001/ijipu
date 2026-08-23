@@ -396,14 +396,16 @@ body {
   color: var(--jp-success);
 }
 
+/* adj168：试听按钮（工具栏）与其它工具按钮协调——透明底 + 青色描边/文字（原实心青色反差大） */
 .tool-btn.primary {
-  background: var(--jp-accent);
+  background: transparent;
   border-color: var(--jp-accent);
-  color: #101010;
+  color: var(--jp-accent);
 }
 
 .tool-btn.primary:hover {
   border-color: var(--jp-accent);
+  background: color-mix(in srgb, var(--jp-accent) 14%, transparent);
   box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
 }
 
@@ -941,14 +943,16 @@ body {
   border-color: var(--jp-accent);
 }
 
+/* adj168：试听对话框播放按钮与其它对话框按钮协调——透明底 + 青色描边/文字（原实心青色反差大） */
 .btn.primary {
-  background: var(--jp-accent);
+  background: transparent;
   border-color: var(--jp-accent);
-  color: #101010;
+  color: var(--jp-accent);
 }
 
 .btn.primary:hover {
   border-color: var(--jp-accent);
+  background: color-mix(in srgb, var(--jp-accent) 14%, transparent);
 }
 
 ::-webkit-scrollbar {
