@@ -1510,7 +1510,7 @@ check('adj175 bE 渲染为 1 = E + ♭ 角标', svgK175.includes('1 = E') && svg
 // 角标位置：在字母左侧（x < 字母左缘）、y 更高、字号 = 调号一半（13/2 = 6.5）
 const k175Acc = /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>♭<\/text>/.exec(svgK175)
 const k175Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK175)
-const k175PrefixW = (7.62 + 3.85 + 9.64) * (defaultPageConfig.miaoshu_size / 13)
+const k175PrefixW = (7.62 + 3.85 + 9.64 + 3.85) * (defaultPageConfig.miaoshu_size / 13)
 const k175LetterLeft = Number(k175Letter?.[1] ?? NaN) + k175PrefixW
 check('adj175 ♭ 角标在字母左侧、更高、字号为调号一半（6.5）', k175Acc !== null && k175Letter !== null && Number(k175Acc[1]) < k175LetterLeft && Number(k175Acc[2]) < Number(k175Letter[2]) && Math.abs(Number(k175Acc[3]) - 6.5) < 0.1, JSON.stringify([k175Acc?.[1], k175Acc?.[2], k175Acc?.[3], k175LetterLeft]))
 // adj179：角标下移一个升降符高度——y = 字母基线 - 0.4×字号（原 0.9×字号）
@@ -1518,11 +1518,21 @@ check('adj179 角标 y = 基线 - 0.4×字号（下移一个升降符高度）',
 // adj178：孤立 &（输入中未完成）为 warning 而非 error——预览不阻断
 const r178 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 &\n')
 check('adj178 孤立 & 降为 warning（不阻断预览）', r178.errors.some((e) => e.message.includes('&') && e.severity === 'warning') && !r178.errors.some((e) => e.severity === 'error'), JSON.stringify(r178.errors))
+// adj181：有升降号时调号文本额外右移一个升降号宽（0.5×13 = 6.5），升降号与字母间距 7×scale
+const k181Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK175) // bE 谱
+const k181Acc = /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>♭<\/text>/.exec(svgK175)
+const k181Plain = /data-meta="keyline" x="([\d.]+)"/.exec(svgM48) // 无升降号 D: C
+check('adj181 有升降号时 keyline 右移 6.5px（相对无升降号）', k181Letter !== null && k181Plain !== null && Math.abs(Number(k181Letter[1]) - (Number(k181Plain[1]) + 6.5)) < 0.5, `acc=${k181Letter?.[1]} plain=${k181Plain?.[1]}`)
+const k181Scale = defaultPageConfig.miaoshu_size / 13
+// "1 = " 含尾随空格：1=7.62 空格=3.85 =9.64 空格=3.85 → 24.96
+const k181PrefixW = (7.62 + 3.85 + 9.64 + 3.85) * k181Scale
+const k181LetterLeft = Number(k181Letter?.[1] ?? NaN) + k181PrefixW
+check('adj181 升降号与字母间距 = 7×scale（不贴字）', k181Acc !== null && Math.abs(Number(k181Acc[1]) - (k181LetterLeft - 7 * k181Scale)) < 0.5, JSON.stringify([k181Acc?.[1], k181LetterLeft - 7 * k181Scale]))
 // 角标位置在字母左上方（adj175：x 在字母左侧、y < 字母基线、字号为调号一半）
 const k174Acc = /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>♯<\/text>/.exec(svgK174a)
 const k174Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK174a)
-// 13px 基准 "1 = " 估算宽：1=7.62 空格=3.85 =9.64
-const k174PrefixW = (7.62 + 3.85 + 9.64) * (defaultPageConfig.miaoshu_size / 13)
+// 13px 基准 "1 = " 估算宽：1=7.62 空格=3.85 =9.64 尾随空格=3.85 → 24.96
+const k174PrefixW = (7.62 + 3.85 + 9.64 + 3.85) * (defaultPageConfig.miaoshu_size / 13)
 const k174LetterLeft = Number(k174Letter?.[1] ?? NaN) + k174PrefixW // 字母 F 左缘
 check('adj174 ♯ 角标在字母左侧、更高、字号为调号一半（6.5）', k174Acc !== null && k174Letter !== null && Number(k174Acc[1]) < k174LetterLeft && Number(k174Acc[2]) < Number(k174Letter[2]) && Math.abs(Number(k174Acc[3]) - 6.5) < 0.1, JSON.stringify([k174Acc?.[1], k174Acc?.[2], k174Acc?.[3], k174LetterLeft]))
 // 辅助拍号（括号内小一号）
