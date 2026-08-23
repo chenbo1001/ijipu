@@ -1529,7 +1529,7 @@ const k175Acc = /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>♭<\
 const k175Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK175)
 const k175PrefixW = (7.62 + 3.85 + 9.64 + 3.85) * (defaultPageConfig.miaoshu_size / 13)
 const k175LetterLeft = Number(k175Letter?.[1] ?? NaN) + k175PrefixW
-check('adj175 ♭ 角标在字母左侧、更高、字号为调号一半（6.5）', k175Acc !== null && k175Letter !== null && Number(k175Acc[1]) < k175LetterLeft && Number(k175Acc[2]) < Number(k175Letter[2]) && Math.abs(Number(k175Acc[3]) - 6.5) < 0.1, JSON.stringify([k175Acc?.[1], k175Acc?.[2], k175Acc?.[3], k175LetterLeft]))
+check('adj189 ♭ 角标在字母左侧、更高、字号 = 0.6×13 = 7.8', k175Acc !== null && k175Letter !== null && Number(k175Acc[1]) < k175LetterLeft && Number(k175Acc[2]) < Number(k175Letter[2]) && Math.abs(Number(k175Acc[3]) - 7.8) < 0.1, JSON.stringify([k175Acc?.[1], k175Acc?.[2], k175Acc?.[3], k175LetterLeft]))
 // adj179：角标下移一个升降符高度——y = 字母基线 - 0.4×字号（原 0.9×字号）
 check('adj179 角标 y = 基线 - 0.4×字号（下移一个升降符高度）', k175Acc !== null && k175Letter !== null && Math.abs(Number(k175Acc[2]) - (Number(k175Letter[2]) - 0.4 * defaultPageConfig.miaoshu_size)) < 0.5, JSON.stringify([k175Acc?.[2], k175Letter?.[2]]))
 // adj178：孤立 &（输入中未完成）为 warning 而非 error——预览不阻断
@@ -1551,7 +1551,7 @@ const k174Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK174a
 // 13px 基准 "1 = " 估算宽：1=7.62 空格=3.85 =9.64 尾随空格=3.85 → 24.96
 const k174PrefixW = (7.62 + 3.85 + 9.64 + 3.85) * (defaultPageConfig.miaoshu_size / 13)
 const k174LetterLeft = Number(k174Letter?.[1] ?? NaN) + k174PrefixW // 字母 F 左缘
-check('adj174 ♯ 角标在字母左侧、更高、字号为调号一半（6.5）', k174Acc !== null && k174Letter !== null && Number(k174Acc[1]) < k174LetterLeft && Number(k174Acc[2]) < Number(k174Letter[2]) && Math.abs(Number(k174Acc[3]) - 6.5) < 0.1, JSON.stringify([k174Acc?.[1], k174Acc?.[2], k174Acc?.[3], k174LetterLeft]))
+check('adj189 ♯ 角标在字母左侧、更高、字号 = 0.6×13 = 7.8', k174Acc !== null && k174Letter !== null && Number(k174Acc[1]) < k174LetterLeft && Number(k174Acc[2]) < Number(k174Letter[2]) && Math.abs(Number(k174Acc[3]) - 7.8) < 0.1, JSON.stringify([k174Acc?.[1], k174Acc?.[2], k174Acc?.[3], k174LetterLeft]))
 // 辅助拍号（括号内小一号）
 const rM2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4 (2/4)\nJ: 96\nQ: 1 2 3 4 |\n')
 const svgM48b = renderScoreToSvg(layoutScore(rM2, defaultPageConfig))[0]

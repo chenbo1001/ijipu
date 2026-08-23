@@ -162,16 +162,17 @@ function renderMeta(page: ScorePage, config: PageConfig): string {
     parts.push(
       `<text data-meta="keyline" x="${pos.x}" y="${pos.y}" font-size="${mSize}" font-family="${mFont}" fill="#1b1b1b">${keyLabel}</text>`,
     )
-    // adj175：升降号角标画在调号字母左侧、中线以上，字号 = 调号的一半；
+    // adj175：升降号角标画在调号字母左侧、中线以上；
     // adj179：整体下移一个升降符高度（y 抬高 0.9×字号 → 0.4×字号）；
-    // adj188：升降号与字母水平间距 4×scale（随字号缩放）
+    // adj188：升降号与字母水平间距 4×scale（随字号缩放）；
+    // adj189：升降号字号再加一号（0.5×mSize → 0.6×mSize）
     if (keyAcc) {
       const sym = keyAcc === '#' ? '♯' : '♭'
       const scale = mSize / 13
       // "1 = " 宽 + 字母前缘向左偏移（符号在字母左侧）
       const letterLeft = pos.x + metaTextW('1 = ') * scale
       const symX = letterLeft - 4 * scale
-      const symSize = mSize * 0.5
+      const symSize = mSize * 0.6
       parts.push(
         `<text x="${r1n(symX)}" y="${r1n(pos.y - mSize * 0.4)}" font-size="${r1n(symSize)}" font-family="${mFont}" fill="#1b1b1b">${sym}</text>`,
       )
