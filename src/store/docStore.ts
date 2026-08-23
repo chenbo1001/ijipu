@@ -297,10 +297,13 @@ export const useDocStore = create<DocState>()((set, get) => ({
       }
       // adj161：打开的文件成为操作主体，句柄持久化（下次保存直接写回）
       void saveFileHandle(handle)
+      // adj212：打开文件时同步 pageConfig——此前漏了 mergeJpsConfig，
+      // 其它浏览器打开带 # jps-config 的谱时页面设置仍是打开前的旧值
       set({
         code,
         fileName: name,
         parseResult: parseJps(code),
+        pageConfig: mergeJpsConfig(code, loadPageConfig()),
         dirty: false,
         fileHandle: handle,
         activeNoteId: null,
