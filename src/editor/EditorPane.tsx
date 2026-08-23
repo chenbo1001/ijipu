@@ -80,6 +80,10 @@ export function EditorPane() {
   const taRef = useRef<HTMLTextAreaElement>(null)
   const hlRef = useRef<HTMLDivElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
+  // adj167：显示层（高亮层/行号栏）内部滚动容器——用 transform 平移跟随 textarea 滚动位置，
+  // 避免 scrollTop 同步被各自 scrollHeight 钳制（滚动到底时显示层停住、textarea 继续滚）
+  const hlInnerRef = useRef<HTMLDivElement>(null)
+  const gutterInnerRef = useRef<HTMLDivElement>(null)
   const formatTimer = useRef<number | null>(null)
   // adj110：最近编辑行（光标所在行）；光标离开该行时格式化它，避免输入时抢光标
   const editingLineRef = useRef<number>(-1)
@@ -145,13 +149,15 @@ export function EditorPane() {
     jumpCursor(offset + first.col)
   }
 
-  // 滚动同步（高亮层 + 行号栏）
+  // 滚动同步（adj167：显示层内部容器用 transform 平移跟随 textarea 的滚动位置，
+  // 不受显示层自身 scrollHeight 限制——滚动到底也不会停住/错层）
   const onScroll = () => {
-    if (hlRef.current && taRef.current && gutterRef.current) {
-      hlRef.current.scrollTop = taRef.current.scrollTop
-      hlRef.current.scrollLeft = taRef.current.scrollLeft
-      gutterRef.current.scrollTop = taRef.current.scrollTop
-    }
+    const ta = taRef.current
+    if (!ta) return
+    const hlInner = hlInnerRef.current
+    const gutterInner = gutterInnerRef.current
+    if (hlInner) hlInner.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`
+    if (gutterInner) gutterInner.style.transform = `translateY(${-ta.scrollTop}px)`
     setCompletion(null) // adj165：滚动时关闭提示（位置不再准确）
   }
 
@@ -426,19 +432,21 @@ export function EditorPane() {
       </div>
       <div className="editor-body" style={editorStyle}>
         <div className="editor-gutter" ref={gutterRef} aria-hidden="true">
-          {gutterLines.map((n) => {
-            const errs = errByLine.get(n)
-            return (
-              <div
-                key={n}
-                className={errs ? 'gutter-line gutter-err' : 'gutter-line'}
-                title={errs?.map((e) => e.msg).join('\n')}
-                onDoubleClick={() => onGutterDoubleClick(n)}
-              >
-                {n}
-              </div>
-            )
-          })}
+          <div className="editor-gutter-inner" ref={gutterInnerRef}>
+            {gutterLines.map((n) => {
+              const errs = errByLine.get(n)
+              return (
+                <div
+                  key={n}
+                  className={errs ? 'gutter-line gutter-err' : 'gutter-line'}
+                  title={errs?.map((e) => e.msg).join('\n')}
+                  onDoubleClick={() => onGutterDoubleClick(n)}
+                >
+                  {n}
+                </div>
+              )
+            })}
+          </div>
         </div>
         <div className="editor-main">
           <textarea
@@ -455,12 +463,13 @@ export function EditorPane() {
             onKeyUp={onSelect}
             onMouseUp={onSelect}
           />
-          <div
-            ref={hlRef}
-            className="highlight-layer"
-            dangerouslySetInnerHTML={{ __html: html }}
-            aria-hidden="true"
-          />
+          <div ref={hlRef} className="highlight-layer" aria-hidden="true">
+            <div
+              className="highlight-inner"
+              ref={hlInnerRef}
+              dangerouslySetInnerHTML={{ __html: html }}
+            />
+          </div>
           {/* adj165：自动提示浮层（& 修饰符 / 跳房子输入提示） */}
           {completion && (
             <div

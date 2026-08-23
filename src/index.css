@@ -631,11 +631,21 @@ body {
 .editor-gutter {
   width: 46px;
   flex-shrink: 0;
+  position: relative;
   overflow: hidden;
   background: var(--jp-editor-bg);
   border-right: 1px solid var(--jp-border);
-  padding: 10px 0;
   user-select: none;
+}
+
+/* adj167：行号栏内部滚动容器（transform 平移跟随 textarea，padding 在此） */
+.editor-gutter-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 10px 0;
+  will-change: transform;
 }
 
 .gutter-line {
@@ -687,14 +697,23 @@ body {
 .editor-main .highlight-layer {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   pointer-events: none;
+}
+
+/* adj167：高亮层内部滚动容器（transform 平移跟随 textarea，字号/行高/padding 在此） */
+.editor-main .highlight-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-width: 100%;
   font-family: var(--jp-editor-font, var(--jp-font-mono));
   font-size: var(--jp-editor-fs, 14px);
   line-height: var(--jp-editor-lh, 24px);
   padding: 10px 14px;
   white-space: pre;
-  overflow: hidden;
   color: var(--jp-hl-plain);
+  will-change: transform;
 }
 
 /* adj165：自动提示浮层（& 修饰符 / 跳房子输入提示） */
