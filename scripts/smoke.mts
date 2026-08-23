@@ -547,7 +547,7 @@ const b137b = lay137b.pages[0].barlines
 const sStart1 = b137b.find((b) => b.voltaStart && b.voltaStart.comment === '1')
 const sEnd1 = b137b.find((b) => b.voltaEnd)
 const sStart2 = b137b.filter((b) => b.voltaStart).find((b) => b.voltaStart?.comment === '2')
-check('adj137 两段跳房子：4 根小节线（2 起 2 止）', b137b.filter((b) => b.voltaStart || b.voltaEnd).length === 4 && !!sStart1 && !!sEnd1 && !!sStart2, JSON.stringify(b137b.map((b) => ({ t: b.type, s: !!b.voltaStart, e: !!b.voltaEnd, c: b.voltaStart?.comment }))))
+check('adj139 两段跳房子共用小节线：线2 同时 voltaEnd+voltaStart', b137b.filter((b) => b.voltaStart || b.voltaEnd).length === 3 && !!sStart1 && !!sStart2 && !!b137b.find((b) => b.voltaEnd && b.voltaStart), JSON.stringify(b137b.map((b) => ({ t: b.type, s: !!b.voltaStart, e: !!b.voltaEnd, c: b.voltaStart?.comment }))))
 const svg137b = renderScoreToSvg(lay137b)[0]
 const voltas137b = [...svg137b.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)" stroke="#1b1b1b" stroke-width="1"/g)].filter((m) => Number(m[3]) - Number(m[1]) > 20).map((m) => `${m[1]}→${m[3]}`)
 check('adj137 两段跳房子渲染 2 条线', voltas137b.length === 2, voltas137b.join(' '))
@@ -1144,13 +1144,13 @@ console.log('[38] volta syntax (adj26)')
 // 1. 基本：|["1." 4 4 5 |]["2." 5 4 3 |] 两头封闭 + 连续跳房子
 const r38a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |["1." 4 4 5 |]["2." 5 4 3 |] 7 |\n')
 const bars38a = r38a.groups[0].music.tokens.filter((t) => t.kind === 'barline')
-check('跳房子 5 个小节线块（2 起点 + 2 终点 + 行尾）', r38a.errors.length === 0 && bars38a.length === 5, JSON.stringify(r38a.errors))
+check('跳房子 4 个小节线块（adj139：] 后 [ 与 ] 共用一根线）', r38a.errors.length === 0 && bars38a.length === 4, JSON.stringify(r38a.errors))
 const vs1 = bars38a[0].kind === 'barline' ? bars38a[0].voltaStart : undefined
 const ve1 = bars38a[1].kind === 'barline' ? bars38a[1] : undefined
-const vs2 = bars38a[2].kind === 'barline' ? bars38a[2].voltaStart : undefined
+const vs2 = bars38a[1].kind === 'barline' ? bars38a[1].voltaStart : undefined
 check('跳房子 1 注释 "1."', !!vs1 && vs1.comment === '1.', JSON.stringify(vs1))
 check('跳房子 1 以 |] 结束', !!ve1 && ve1.voltaEnd === true && ve1.voltaEndSlash !== true)
-check('连续跳房子 2 注释 "2."（adj138：] 后 [ 带小节线竖线）', !!vs2 && vs2.comment === '2.' && bars38a[2].kind === 'barline' && bars38a[2].voltaOnly !== true, JSON.stringify(vs2))
+check('adj139 连续跳房子 2 与 ] 共用线（voltaEnd+voltaStart）', !!vs2 && vs2.comment === '2.' && bars38a[1].kind === 'barline' && bars38a[1].voltaEnd === true && bars38a[1].voltaStart !== undefined, JSON.stringify(vs2))
 // 2. 修饰：+ 抬高、|]/ 开口结束
 const r38b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |[+"1." 4 4 5 |]/ 7 |\n')
 const b38b = r38b.groups[0].music.tokens.filter((t) => t.kind === 'barline')

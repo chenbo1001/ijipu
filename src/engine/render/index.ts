@@ -937,11 +937,15 @@ function renderVoltas(barlines: PlacedBarline[], noteSize = 18, marginLeft = 40)
   }
   let open: PlacedBarline | null = null
   for (const bar of barlines) {
-    if (bar.voltaStart && !open) {
-      open = bar
-    } else if (bar.voltaEnd && open) {
+    // adj139：一根小节线可同时 voltaEnd（闭合上一段）与 voltaStart（开启下一段）
+    // —— 连续跳房子共用同一小节线（|["1" …|]["2" …|]）
+    if (bar.voltaEnd && open) {
       parts.push(renderVoltaLine(open, bar, lastOfRow, noteSize, marginLeft))
       open = null
+    }
+    if (bar.voltaStart) {
+      if (open) parts.push(renderVoltaLine(open, null, lastOfRow, noteSize, marginLeft)) // 未闭合上一段
+      open = bar
     }
   }
   if (open) parts.push(renderVoltaLine(open, null, lastOfRow, noteSize, marginLeft))

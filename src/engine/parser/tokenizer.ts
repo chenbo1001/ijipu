@@ -424,8 +424,13 @@ export function tokenizeMusicLine(
         last.voltaStart = { open: true, slash: mod.slash, plus: mod.plus, comment: mod.comment }
         last.raw += rawAt(i, mod.k)
         lastBlockEnd = mod.k // 小节线块结束延展
+      } else if (last && last.kind === 'barline' && last.voltaEnd && !last.voltaStart) {
+        // ] 后连续 [（如 |]["2"）：第二段起点与第一段结束**共用同一小节线**
+        // （adj139：voltaEnd + voltaStart 共存于一根小节线，不另画竖线）
+        last.voltaStart = { open: true, slash: mod.slash, plus: mod.plus, comment: mod.comment }
+        last.raw += rawAt(i, mod.k)
+        lastBlockEnd = mod.k
       } else {
-        const lastIsVoltaEnd = last && last.kind === 'barline' && last.voltaEnd
         if (!last || last.kind !== 'barline') {
           errors.push(
             err('跳房子 "[" 应写在小节线后（行首请用 |/ 或小节线，adj26）', {
@@ -434,13 +439,12 @@ export function tokenizeMusicLine(
             }, 'warning'),
           )
         }
-        // ] 后连续 [（如 |]["2"）：新段起点带小节线竖线（adj138，第二段从小节线开始）；
-        // 行首 [：纯跳房子起点（voltaOnly，无小节线可依，不画竖线）
+        // 其余（行首 [ 等无小节线可依）：纯跳房子起点（voltaOnly，不画小节线竖线）
         tokens.push({
           kind: 'barline',
           type: '|',
           voltaStart: { open: true, slash: mod.slash, plus: mod.plus, comment: mod.comment },
-          voltaOnly: !lastIsVoltaEnd,
+          voltaOnly: true,
           pos: i,
           raw: rawAt(i, mod.k),
         })
