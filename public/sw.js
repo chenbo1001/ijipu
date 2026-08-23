@@ -5,8 +5,8 @@
  *  - manifest / 图标 / favicon：cache-first
  * 版本号变化时 activate 清理旧缓存。
  */
-const CACHE = 'jps-shell-v1'
-const PRECACHE = ['/', '/index.html', '/manifest.webmanifest', '/favicon.svg', '/pwa-192.png', '/pwa-512.png']
+const CACHE = 'jps-shell-v2'
+const PRECACHE = ['/', '/index.html', '/manifest.webmanifest', '/Jianpu.ico', '/Jianpu.png', '/pwa-192.png', '/pwa-512.png']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
