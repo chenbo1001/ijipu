@@ -983,38 +983,35 @@ function renderSlur(s: PlacedSlur, noteSize = 18): string {
     // 弧线水平跨度：以**音符宽度为直径**（adj144：0.62×noteSize）调整弧度，
     // 短连音线自动收窄（跨度/2 - 1）
     const halfL = Math.min(noteSize * 0.62, Math.abs(x2 - x1) / 2 - 1)
-    // 弧线控制点（adj145）：c1 压低（先水平弯再上升，避免折线感）、c2 内收水平进入
-    // 原 c1y = y - leg×0.9 接近平顶线高度 → 弧线前半近乎竖直，视觉像直线段
-    const c1x = x1 + halfL * 0.4
-    const c1y = y - leg * 0.45
-    const c2x = x1 + halfL * 0.8
-    const c2y = barY - leg * 0.12 // 略低于平顶线，末端圆润切入
+    // adj146：两侧整体是一段弧线（抛物线 Q）——从音符直接弯到平顶线端点，
+    // 控制点显著高于平顶线使弧凸明显（不再"直线+折弯处小弧线"）
+    const qx = x1 + halfL / 2
+    const qy = y - leg * 1.3
     if (s.half === 'l') {
-      // 左半部（adj142）：音符端弧线升到平顶线 + 横线平直延伸到行末小节线/右边距；
-      // **右侧开口**（跨行连接处不画弧线闭合）
+      // 左半部：音符端一段弧线弯到平顶线，横线平直延伸到行末（右侧开口）
       return (
         `<path d="M ${x1} ${y} ` +
-        `C ${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${(x1 + halfL).toFixed(1)} ${barY} ` +
+        `Q ${qx.toFixed(1)} ${qy.toFixed(1)} ${(x1 + halfL).toFixed(1)} ${barY} ` +
         `L ${x2} ${barY}" ` +
         `fill="none" stroke="#1b1b1b" stroke-width="1"/>`
       )
     }
     if (s.half === 'r') {
-      // 右半部（adj142）：横线从行首平直伸来（**左侧开口**）+ 音符端弧线降到音符
+      // 右半部：横线从行首平直伸来（左侧开口）+ 音符端一段弧线弯下
       return (
         `<path d="M ${x1} ${barY} ` +
         `L ${(x2 - halfL).toFixed(1)} ${barY} ` +
-        `C ${(x2 - halfL * 0.8).toFixed(1)} ${c2y.toFixed(1)} ${(x2 - halfL * 0.4).toFixed(1)} ${c1y.toFixed(1)} ${x2} ${y}" ` +
+        `Q ${(x2 - halfL / 2).toFixed(1)} ${qy.toFixed(1)} ${x2} ${y}" ` +
         `fill="none" stroke="#1b1b1b" stroke-width="1"/>`
       )
     }
-    // 完整：两端弧线升到平顶线 + 中间横线；正中标连音组数字
+    // 完整：两端各一段弧线弯到平顶线 + 中间横线；正中标连音组数字
     const midX = (x1 + x2) / 2
     return (
       `<path d="M ${x1} ${y} ` +
-      `C ${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${(x1 + halfL).toFixed(1)} ${barY} ` +
+      `Q ${qx.toFixed(1)} ${qy.toFixed(1)} ${(x1 + halfL).toFixed(1)} ${barY} ` +
       `L ${(x2 - halfL).toFixed(1)} ${barY} ` +
-      `C ${(x2 - halfL * 0.8).toFixed(1)} ${c2y.toFixed(1)} ${(x2 - halfL * 0.4).toFixed(1)} ${c1y.toFixed(1)} ${x2} ${y}" ` +
+      `Q ${(x2 - halfL / 2).toFixed(1)} ${qy.toFixed(1)} ${x2} ${y}" ` +
       `fill="none" stroke="#1b1b1b" stroke-width="1"/>` +
       label(midX, barY)
     )

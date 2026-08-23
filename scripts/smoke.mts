@@ -438,9 +438,9 @@ check('adj106 嵌套外层连音线平顶、内层圆弧', laySl2.pages[0].slurs
 // 平顶样式（adj89：两端大弧度弧线过渡到平顶线）
 const laySl3 = layoutScore(slur, { ...defaultPageConfig, lianyinxian_type: 2 })
 const svgSl3 = renderScoreToSvg(laySl3)[0]
-check('平顶样式：贝塞尔路径（C 弧线 + 平顶横线）', svgSl3.includes('<path d="M') && svgSl3.includes(' C ') && svgSl3.includes(' L '), '')
+check('平顶样式：抛物线弧线（Q）+ 平顶横线', svgSl3.includes('<path d="M') && svgSl3.includes(' Q ') && svgSl3.includes(' L '), '')
 const s3Flat = laySl3.pages[0].slurs[0]
-check('平顶样式：两端弧线过渡到平顶线 y-7', svgSl3.includes(`M ${s3Flat.x1} ${s3Flat.y} C`) && svgSl3.includes(` ${(s3Flat.y - 7).toFixed(1)} C `) && svgSl3.includes(' C ') && svgSl3.includes(`"`), svgSl3.slice(0, 250))
+check('平顶样式：两端弧线过渡到平顶线 y-7', svgSl3.includes(`M ${s3Flat.x1} ${s3Flat.y} Q`) && svgSl3.includes(` L `) && svgSl3.includes(` ${(s3Flat.y - 7).toFixed(1)}`), svgSl3.slice(0, 250))
 // adj54：自动样式按「音符单位数」判断（增时线/附点折算进长度，>4 单位平顶）
 const slAuto = (q: string) => layoutScore(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), defaultPageConfig).pages[0].slurs[0]?.style
 check('自动样式：4 个普通音符 = 4 单位 → 圆弧（边界不回归）', slAuto('( 1 2 3 4 ) 5 |') === 'arc', `got ${slAuto('( 1 2 3 4 ) 5 |')}`)
@@ -1616,9 +1616,9 @@ const svg53 = renderScoreToSvg(lay53)[0]
 const hlY = s53[0].y
 const hrY = s53[1].y
 // 平顶半部：左半从音符弧线升到平顶线、横线延伸到行末小节线；右半从行首横线到音符
-// adj142：跨行平顶——左半右侧开口（横线到行末小节线）、右半左侧开口（横线从行首伸出）
-check('平顶左半：音符端弧线 + 横线平直到行末（右侧开口）', svg53.includes(`M ${s53[0].x1} ${hlY} C`) && svg53.includes(`L ${s53[0].x2} ${(hlY - 7).toFixed(1)}"`), '')
-check('平顶右半：横线从行首平直伸出（左侧开口）+ 音符端弧线', svg53.includes(`M ${s53[1].x1} ${(hrY - 7).toFixed(1)}`) && svg53.includes(` C `) && svg53.includes(`${s53[1].x2} ${hrY}"`), '')
+// adj146：跨行平顶——两侧各一段抛物线弧线，左半右侧开口、右半左侧开口
+check('平顶左半：音符端抛物线弧线 + 横线平直到行末（右侧开口）', svg53.includes(`M ${s53[0].x1} ${hlY} Q`) && svg53.includes(`L ${s53[0].x2} ${(hlY - 7).toFixed(1)}"`), '')
+check('平顶右半：横线从行首平直伸出（左侧开口）+ 音符端抛物线弧线', svg53.includes(`M ${s53[1].x1} ${(hrY - 7).toFixed(1)}`) && svg53.includes(` Q `) && svg53.includes(`${s53[1].x2} ${hrY}"`), '')
 // 用户强制平顶（lianyinxian_type=2）：跨行仍平顶（adj108 尊重设置）
 const lay53f = layoutScore(r53, { ...defaultPageConfig, lianyinxian_type: 2 })
 const svg53f = renderScoreToSvg(lay53f)[0]
