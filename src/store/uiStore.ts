@@ -102,22 +102,16 @@ export const useUiStore = create<UiState>()((set) => ({
   editorFontSize: loadNum(EDITOR_FS_KEY, 14),
   editorFont: (() => {
     // adj163：仅接受等宽字体（textarea 与高亮层需逐字符对齐）；
-    // 旧配置若存了非等宽字体（adj160 曾允许），回退默认
-    const MONO = new Set([
-      'Cascadia Code',
-      'JetBrains Mono',
-      'Consolas',
-      'Fira Code',
-      'Courier New',
-      'monospace',
-    ])
+    // adj173：排除带编程连字的字体（Cascadia Code/JetBrains Mono/Fira Code 等），
+    // 防止 |:、|| 等连字字形导致显示层与实际层列错位；旧配置存了连字字体回退默认
+    const MONO = new Set(['Consolas', 'Courier New', 'monospace'])
     try {
       const v = localStorage.getItem(EDITOR_FONT_KEY)
       if (v && MONO.has(v)) return v
     } catch {
       /* 忽略 */
     }
-    return 'Cascadia Code'
+    return 'Consolas'
   })(),
   previewZoom: loadNum(PREVIEW_ZOOM_KEY, 100),
   openModal: (m) => set({ modal: m }),

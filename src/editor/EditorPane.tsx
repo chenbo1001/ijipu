@@ -16,12 +16,11 @@ import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 import { NOTE_MODIFIER_HINTS, VOLTA_HINTS } from './completions'
 
 /** adj160：编辑器字体选项；adj163：仅等宽字体——textarea 与高亮层需逐字符对齐，
- *  非等宽字体下加粗 span（小节线/行头等）宽度变化会从该字符开始逐字累积错位 */
+ *  非等宽字体下加粗 span（小节线/行头等）宽度变化会从该字符开始逐字累积错位；
+ *  adj173：取消带编程连字（ligatures）的字体（Cascadia Code/JetBrains Mono/Fira Code），
+ *  防止 |:、|| 等被渲染成连字字形导致显示层与实际层列错位 */
 const EDITOR_FONT_OPTIONS: { label: string; value: string }[] = [
-  { label: 'Cascadia Code', value: 'Cascadia Code' },
-  { label: 'JetBrains Mono', value: 'JetBrains Mono' },
   { label: 'Consolas', value: 'Consolas' },
-  { label: 'Fira Code', value: 'Fira Code' },
   { label: 'Courier New', value: 'Courier New' },
   { label: '等宽（系统默认）', value: 'monospace' },
 ]

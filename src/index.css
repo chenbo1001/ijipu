@@ -614,7 +614,9 @@ body {
   overflow: hidden;
   --jp-editor-fs: 14px; /* 默认字号（adj46：可调） */
   --jp-editor-lh: 24px; /* 字号 × 1.7 取整（adj165：整数行高避免 textarea 与高亮层累积错位） */
-  --jp-editor-font: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace; /* adj160：编辑器字体（可调） */
+  /* adj160：编辑器字体（可调）；adj173：排除带编程连字的字体（Cascadia Code 等），
+     防止 |:、|| 等连字字形导致显示层与实际层列错位 */
+  --jp-editor-font: Consolas, 'Courier New', monospace;
 }
 
 .editor-gutter {
