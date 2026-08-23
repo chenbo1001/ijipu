@@ -640,14 +640,15 @@ body {
   user-select: none;
 }
 
-/* adj167：行号栏内部滚动容器（transform 平移跟随 textarea，padding 在此） */
+/* adj167：行号栏内部滚动容器（transform 平移跟随 textarea，padding 在此）；
+   adj169：禁用连字与编辑区一致 */
 .editor-gutter-inner {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   padding: 10px 0;
-  will-change: transform;
+  font-variant-ligatures: none;
 }
 
 .gutter-line {
@@ -685,6 +686,9 @@ body {
   color: transparent;
   caret-color: var(--jp-editor-caret);
   font-family: var(--jp-editor-font, var(--jp-font-mono));
+  /* adj169：禁用编程字体连字——textarea UA 默认无连字，若高亮层启用连字
+     （Cascadia Code/Fira Code 的 |:、|| 等会被渲染成单个字形）则列逐段错位 */
+  font-variant-ligatures: none;
   font-size: var(--jp-editor-fs, 14px);
   /* adj110：行高用与行号栏相同的计算值（--jp-editor-lh），
      相对值 1.7 与 fs×1.7 的舍入差异会在多行后累积成滚动错位；
@@ -703,19 +707,20 @@ body {
   pointer-events: none;
 }
 
-/* adj167：高亮层内部滚动容器（transform 平移跟随 textarea，字号/行高/padding 在此） */
+/* adj167：高亮层内部滚动容器（transform 平移跟随 textarea，字号/行高/padding 在此）；
+   adj169：禁用编程字体连字（与 textarea 一致，防止 |:、|| 等被渲染成连字字形导致列错位） */
 .editor-main .highlight-inner {
   position: absolute;
   top: 0;
   left: 0;
   min-width: 100%;
   font-family: var(--jp-editor-font, var(--jp-font-mono));
+  font-variant-ligatures: none;
   font-size: var(--jp-editor-fs, 14px);
   line-height: var(--jp-editor-lh, 24px);
   padding: 10px 14px;
   white-space: pre;
   color: var(--jp-hl-plain);
-  will-change: transform;
 }
 
 /* adj165：自动提示浮层（& 修饰符 / 跳房子输入提示） */
