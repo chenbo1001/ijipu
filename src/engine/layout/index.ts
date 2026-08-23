@@ -155,8 +155,9 @@ function segBeatMap(seg: BarSeg, noteSize = 18): Map<number, { minDur: number; e
   for (const t of seg.notes) {
     if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
       const dur = tokenDuration(t)
-      // adj217：+1e-9 容差（浮点累加归并拍边界，1/3×3=0.9999…）
-      const b = Math.floor(beat + 1e-9)
+      // adj217/218：近整数归整（浮点累加 4.9999… 归并拍边界）
+      const nearInt = Math.abs(beat - Math.round(beat)) < 1e-3
+      const b = nearInt ? Math.round(beat) : Math.floor(beat + 1e-9)
       const e = byBeat.get(b) ?? { minDur: Infinity, extra: 0 }
       e.minDur = Math.min(e.minDur, dur)
       if (t.kind === 'note') e.extra = Math.max(e.extra, graceExtraW(t, noteSize))
@@ -605,9 +606,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           let pos = fgBeat
           let rem = dur
           while (rem > 1e-9) {
-            const p = Math.floor(pos + 1e-9)
+            const nearInt = Math.abs(pos - Math.round(pos)) < 1e-3
+            const p = nearInt ? Math.round(pos) : Math.floor(pos + 1e-9)
             while (beatsInfo.length <= p) beatsInfo.push({ dur: 0, minDur: Infinity, extra: 0 })
-            const piece = Math.min(rem, Math.floor(pos + 1e-9) + 1 - pos)
+            const piece = Math.min(rem, (nearInt ? Math.round(pos) : Math.floor(pos + 1e-9)) + 1 - pos)
             beatsInfo[p].dur += piece
             beatsInfo[p].minDur = Math.min(beatsInfo[p].minDur, piece)
             pos += piece
@@ -637,8 +639,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           let pos = fgB
           let rem = dur
           while (rem > 1e-9) {
-            const p = Math.floor(pos + 1e-9)
-            const piece = Math.min(rem, Math.floor(pos + 1e-9) + 1 - pos)
+            const nearInt = Math.abs(pos - Math.round(pos)) < 1e-3
+            const p = nearInt ? Math.round(pos) : Math.floor(pos + 1e-9)
+            const piece = Math.min(rem, (nearInt ? Math.round(pos) : Math.floor(pos + 1e-9)) + 1 - pos)
             fragSegs.push({
               p,
               piece,
@@ -736,10 +739,11 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           let pos = gBeat
           let rem = dur
           while (rem > 1e-9) {
-            // adj217：+1e-9 容差——浮点累加（如 1/3×3=0.9999…）误判拍边界时归并到当前拍
-            const p = Math.floor(pos + 1e-9)
+            // adj217/218：近整数归整——tupletDur 浮点累加（4.9999…）误判拍边界时归并
+            const nearInt = Math.abs(pos - Math.round(pos)) < 1e-3
+            const p = nearInt ? Math.round(pos) : Math.floor(pos + 1e-9)
             while (beatsInfo.length <= p) beatsInfo.push({ dur: 0, minDur: Infinity, extra: 0 })
-            const piece = Math.min(rem, Math.floor(pos + 1e-9) + 1 - pos)
+            const piece = Math.min(rem, (nearInt ? Math.round(pos) : Math.floor(pos + 1e-9)) + 1 - pos)
             beatsInfo[p].dur += piece
             beatsInfo[p].minDur = Math.min(beatsInfo[p].minDur, piece)
             pos += piece
@@ -814,9 +818,11 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           let pos = gB
           let rem = dur
           while (rem > 1e-9) {
-            // adj217：+1e-9 容差（同 beatsInfo，浮点累加归并拍边界）
-            const p = Math.floor(pos + 1e-9)
-            const piece = Math.min(rem, Math.floor(pos + 1e-9) + 1 - pos)
+            // adj217/218：近整数归整——tupletDur 浮点累加（4.9999…）误判拍边界时归并；
+            // 距整数 <1e-3 视为整数拍边界
+            const nearInt = Math.abs(pos - Math.round(pos)) < 1e-3
+            const p = nearInt ? Math.round(pos) : Math.floor(pos + 1e-9)
+            const piece = Math.min(rem, (nearInt ? Math.round(pos) : Math.floor(pos + 1e-9)) + 1 - pos)
             rowSegs.push({
               p,
               piece,
@@ -916,7 +922,13 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           if (s.p !== curP) {
             curP = s.p
             // 音符从拍中间开始（notePos 非整）时，首段补拍内偏移；后续段（跨拍）从拍首开始
-            offInBeat = first ? (rs.notePos - Math.floor(rs.notePos)) * s.perBeat : 0
+            // adj218：notePos 浮点尾（tupletDur 累加 4.9999…）→ 拍内偏移近整数归 0
+            if (first) {
+              const frac = rs.notePos - Math.floor(rs.notePos)
+              offInBeat = frac < 1e-3 || 1 - frac < 1e-3 ? 0 : frac * s.perBeat
+            } else {
+              offInBeat = 0
+            }
           }
           segments.push({
             // adj38：拍与拍之间 8px（按行内拍序；平均连音组内统一组首拍，adj44）；adj64：+括号占位

@@ -2039,6 +2039,26 @@ check('独立连音符不因同排嵌套抬高（y = 数字上沿-LAYER_GAP×s�
   const bars217 = lay217.pages[0].barlines
   check('adj217 四小节小节线均匀分布（不塌缩）', bars217.length === 4 && Math.abs(bars217[1].x - bars217[0].x - (bars217[3].x - bars217[2].x)) < 15, bars217.map((b) => b.x.toFixed(1)).join(','))
 }
+// adj218：&zkh 在 tuplet 组内首音符后——浮点拍边界（4.9999…）近整数归整，
+// 组外音符不再倒序/重叠（此前 7- 落在 6// 左侧）
+{
+  const r218 = parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (y6/&zkh 1'/ 1'/) 1'/. 6// 1' - | (y6/ 1'/ 1'/) 7./ 6// 7 - | 6// 6// 5// 6// 5/ 6/ 3 - | 5// 5// 3// 5// 5/ 3/ 2 - |\n")
+  const lay218 = layoutScore(r218, defaultPageConfig)
+  const pn218 = lay218.pages[0].notes
+  check('adj218 解析：&zkh 挂 tuplet 组内首音符、tupletDur=1/3', r218.errors.length === 0 && (pn218[0].token as { symbols?: string[] }).symbols?.includes('zkh') && Math.abs((pn218[0].token as { tupletDur?: number }).tupletDur! - 1 / 3) < 1e-6, '')
+  // 各音符 x 严格递增（不重叠不倒序）
+  let ascOk218 = true
+  for (let i = 1; i < pn218.length; i++) {
+    if (pn218[i].x < pn218[i - 1].x - 0.5) {
+      ascOk218 = false
+      break
+    }
+  }
+  check('adj218 占位：全部音符 x 递增（不重叠不倒序）', ascOk218, pn218.map((n) => n.x.toFixed(0)).join(','))
+  // 第 2 小节：7./ 0.75 拍宽 = 3×tuplet 音宽、7- 2 拍在 6// 右侧
+  const wTup218 = pn218[6].width
+  check('adj218 第 2 小节：7./ 宽 = 3×三音宽、7- 在 6// 右侧', Math.abs(pn218[9].width - wTup218 * 3) < 1 && pn218[11].x > pn218[10].x, `${pn218[9].width.toFixed(1)} vs ${(wTup218 * 3).toFixed(1)}`)
+}
 
 // ---- 56. 跨行跳房子起点（adj47）：断行在 [ 起点小节线后 → 起点线移到下一行行首 ----
 console.log('[56] cross-row volta start')
