@@ -641,7 +641,7 @@ body {
 }
 
 .gutter-line {
-  height: var(--jp-editor-lh);
+  /* 高度由内联控制 = 视觉行数 × 行高（adj195：折行不产生新行号） */
   line-height: var(--jp-editor-lh);
   text-align: right;
   padding-right: 8px;
@@ -649,6 +649,27 @@ body {
   font-size: 11px;
   color: var(--jp-text-muted);
   white-space: pre;
+}
+
+/* 行号占首行 */
+.gutter-num {
+  display: block;
+  height: var(--jp-editor-lh);
+  line-height: var(--jp-editor-lh);
+}
+
+/* adj195：折行延续标记——每折一行显示一个「↳」小箭头，区分新行与折行 */
+.gutter-wrap-mark {
+  display: block;
+  height: var(--jp-editor-lh);
+  line-height: var(--jp-editor-lh);
+  font-size: 10px;
+  color: var(--jp-text-muted);
+  opacity: 0.45;
+}
+
+.gutter-wrap-mark::before {
+  content: '↳';
 }
 
 .gutter-line.gutter-err {

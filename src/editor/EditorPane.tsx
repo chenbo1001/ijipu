@@ -76,6 +76,9 @@ export function EditorPane() {
   const editorFont = useUiStore((s) => s.editorFont)
   const setEditorFont = useUiStore((s) => s.setEditorFont)
 
+  // adj165：行高取整为整数（textarea 原生行盒与高亮层 CSS 行盒完全一致）
+  const editorLineH = Math.round(editorFontSize * 1.7)
+
   const taRef = useRef<HTMLTextAreaElement>(null)
   const hlRef = useRef<HTMLDivElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
@@ -159,6 +162,38 @@ export function EditorPane() {
     if (gutterInner) gutterInner.style.transform = `translateY(${-ta.scrollTop}px)`
     setCompletion(null) // adj165：滚动时关闭提示（位置不再准确）
   }
+
+  // adj195：每源码行的视觉行数（软折行下可能 >1）——行号栏按视觉行高渲染，
+  // 折行不产生新行号、并用延续标记区分新行与折行
+  const [contentW, setContentW] = useState(0)
+  useEffect(() => {
+    const parent = taRef.current?.parentElement ?? null
+    if (!parent) return
+    const update = () => {
+      const ta = taRef.current
+      if (ta) setContentW(ta.clientWidth - 28) // 内容区宽（去左右 padding 14×2）
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(parent)
+    return () => ro.disconnect()
+  }, [])
+  const visualLines = useMemo(() => {
+    const lines = code.split('\n')
+    if (contentW <= 0) return lines.map(() => 1)
+    // 估算字符宽（等宽 0.6×fs）：若行内容宽必然超内容区才需要精确折行数
+    const charW = editorFontSize * 0.6
+    const probe = document.createElement('div')
+    probe.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;white-space:pre-wrap;width:${contentW}px;font-size:${editorFontSize}px;line-height:${editorLineH}px;font-family:${editorFont},monospace;padding:0`
+    document.body.appendChild(probe)
+    const res = lines.map((l) => {
+      if (l.length * charW <= contentW) return 1 // 必不折行
+      probe.textContent = l
+      return Math.max(1, Math.round(probe.clientHeight / editorLineH))
+    })
+    document.body.removeChild(probe)
+    return res
+  }, [code, contentW, editorFontSize, editorLineH, editorFont])
 
   // 光标写入 store + 谱面联动（M3）
   const onSelect = () => {
@@ -416,7 +451,6 @@ export function EditorPane() {
   // 高亮层加粗 span 与 textarea 逐字符错位
   // adj165：行高取整为整数——非整数行高（如 14×1.7=23.8px）在 textarea 原生行盒与
   // 高亮层 CSS 行盒中按各自方式取整，多行后累积错位（选中行高亮到另一行）
-  const editorLineH = Math.round(editorFontSize * 1.7)
   const editorStyle = {
     '--jp-editor-fs': `${editorFontSize}px`,
     '--jp-editor-lh': `${editorLineH}px`,
@@ -472,14 +506,21 @@ export function EditorPane() {
           <div className="editor-gutter-inner" ref={gutterInnerRef}>
             {gutterLines.map((n) => {
               const errs = errByLine.get(n)
+              const vis = visualLines[n - 1] ?? 1
               return (
                 <div
                   key={n}
                   className={errs ? 'gutter-line gutter-err' : 'gutter-line'}
+                  style={{ height: vis * editorLineH }}
                   title={errs?.map((e) => e.msg).join('\n')}
                   onDoubleClick={() => onGutterDoubleClick(n)}
                 >
-                  {n}
+                  <span className="gutter-num">{n}</span>
+                  {/* adj195：折行延续标记（不占新行号，区分新行与折行） */}
+                  {vis > 1 &&
+                    Array.from({ length: vis - 1 }, (_, k) => (
+                      <span key={k} className="gutter-wrap-mark" />
+                    ))}
                 </div>
               )
             })}
