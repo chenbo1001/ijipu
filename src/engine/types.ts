@@ -558,28 +558,37 @@ export interface PageConfig {
 
 export const defaultPageConfig: PageConfig = {
   page: 'A4',
-  margin_top: 80,
-  margin_bottom: 80,
-  margin_left: 80,
-  margin_right: 80,
-  body_margin_top: 40,
-  descAreaH: 87.6, // 默认 = biaoti_size(36)×1.6 + 30，保持原描述头区域高度
+  // adj213：默认边距 80 → 40（页面留白收窄）
+  margin_top: 40,
+  margin_bottom: 40,
+  margin_left: 40,
+  margin_right: 40,
+  // adj213：首行至描述头间距 40 → 20
+  body_margin_top: 20,
+  // adj213：描述头内容区高 87.6 → 80（与默认标题字号 20 更协调）
+  descAreaH: 80,
   biaoti_font: 'Microsoft YaHei',
-  biaoti_size: 36,
+  // adj213：标题字号 36 → 20
+  biaoti_size: 20,
   fubiaoti_font: 'Microsoft YaHei',
-  fubiaoti_size: 20,
+  // adj213：副标题字号 20 → 15
+  fubiaoti_size: 15,
   miaoshu_font: 'Microsoft YaHei',
   miaoshu_size: 13,
-  notes_font: 'Microsoft YaHei', // adj154：说明文字默认沿用描述头字体
+  // adj213：说明文字字体微软雅黑 → 宋体（与正文说明区分）
+  notes_font: 'SimSun',
   notes_size: 13,
   geci_font: 'Microsoft YaHei',
   geci_size: 18,
   note_size: 18,
-  shuzi_font: 'Microsoft YaHei', // adj105：默认音符字体 = 微软雅黑（原字形 b 黑体系）
-  height_quci: 13,
+  // adj213：音符字体微软雅黑 → 黑体（简谱数字用黑体更醒目）
+  shuzi_font: 'SimHei',
+  // adj213：曲部与词部间距 13 → 15
+  height_quci: 15,
   height_cici: 10,
   height_ciqu: 20, // adj78：曲部与曲部间距默认 40→20；adj79 拆分后仅指无歌词行行尾间距
-  height_ciqu_lyric: 12, // adj92：曲部与上一行词部间距 20→12（用户反馈仍偏大，收窄与 quci 相近）
+  // adj213：曲部与上一行词部间距 12 → 10
+  height_ciqu_lyric: 10,
   height_shengbu: 0,
   bar_gap: 0,
   lianyinxian_type: 0,
