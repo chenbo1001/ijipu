@@ -14,6 +14,7 @@ import {
   type HistoryEntry,
   type HistoryState,
 } from '../editor/history'
+import { saveFileHandle, loadFileHandle } from './fileHandleDb'
 
 export type ViewType = 'code' | 'split' | 'preview'
 
@@ -238,12 +239,15 @@ export const useDocStore = create<DocState>()((set, get) => ({
     const s = SAMPLES.find((x) => x.id === id) ?? defaultSample()
     localStorage.setItem(DRAFT_KEY, s.code)
     localStorage.setItem(DRAFT_NAME_KEY, s.name)
+    // adj161：载入示例不是磁盘文件——清除文件句柄，避免误写回旧文件
+    void saveFileHandle(null)
     set({
       code: s.code,
       fileName: s.name,
       parseResult: parseJps(s.code),
       pageConfig: mergeJpsConfig(s.code, loadPageConfig()),
       dirty: false,
+      fileHandle: null,
       activeNoteId: null,
       cursorJump: null,
       undoStack: [],
@@ -255,12 +259,15 @@ export const useDocStore = create<DocState>()((set, get) => ({
   newDoc: () => {
     localStorage.setItem(DRAFT_KEY, NEW_FILE_TEMPLATE)
     localStorage.setItem(DRAFT_NAME_KEY, '未命名')
+    // adj161：新建文档不关联磁盘文件——清除句柄
+    void saveFileHandle(null)
     set({
       code: NEW_FILE_TEMPLATE,
       fileName: '未命名',
       parseResult: parseJps(NEW_FILE_TEMPLATE),
       pageConfig: mergeJpsConfig(NEW_FILE_TEMPLATE, loadPageConfig()),
       dirty: false,
+      fileHandle: null,
       activeNoteId: null,
       cursorJump: null,
       undoStack: [],
@@ -290,6 +297,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
       } catch {
         /* 存储不可用时静默 */
       }
+      // adj161：打开的文件成为操作主体，句柄持久化（下次保存直接写回）
+      void saveFileHandle(handle)
       set({
         code,
         fileName: name,
@@ -315,10 +324,17 @@ export const useDocStore = create<DocState>()((set, get) => ({
         const w = await s.fileHandle.createWritable()
         await w.write(s.code)
         await w.close()
-        set({ dirty: false })
+        // adj161：保存后以该文件为操作主体（同步文件名，防止句柄与显示名不一致）
+        const name = (s.fileHandle.name || '未命名').replace(/\.jps$/i, '')
+        try {
+          localStorage.setItem(DRAFT_NAME_KEY, name)
+        } catch {
+          /* 忽略 */
+        }
+        set({ dirty: false, fileName: name })
         return true
       } catch {
-        /* 写入失败 → 走另存为 */
+        /* 写入失败（权限失效等）→ 走另存为重新授权 */
       }
     }
     return s.saveFileAs()
@@ -334,10 +350,28 @@ export const useDocStore = create<DocState>()((set, get) => ({
       const w = await handle.createWritable()
       await w.write(get().code)
       await w.close()
-      set({ dirty: false, fileHandle: handle })
+      // adj161：另存为后新文件成为操作主体——同步文件名 + 持久化句柄，
+      // 下次直接按保存即写回该文件
+      const name = (handle.name || '未命名').replace(/\.jps$/i, '')
+      try {
+        localStorage.setItem(DRAFT_NAME_KEY, name)
+      } catch {
+        /* 忽略 */
+      }
+      void saveFileHandle(handle)
+      set({ dirty: false, fileHandle: handle, fileName: name })
       return true
     } catch {
       return false // 用户取消
     }
   },
 }))
+
+// adj161：启动时恢复上次保存/打开的文件句柄（IndexedDB 持久化），
+// 之后直接按保存即写回该文件（无需重新选文件）；恢复失败静默（走另存为）
+void loadFileHandle().then((h) => {
+  if (h) {
+    const name = (h.name || '未命名').replace(/\.jps$/i, '')
+    useDocStore.setState({ fileHandle: h, fileName: name })
+  }
+})
