@@ -2024,6 +2024,21 @@ const lay55f = layoutScore(r55f, defaultPageConfig)
 const s55f = lay55f.pages[0].slurs
 const n55fFirst = lay55f.pages[0].notes[0]
 check('独立连音符不因同排嵌套抬高（y = 数字上沿-LAYER_GAP×s，adj60）', s55f.length >= 2 && Math.abs(s55f[0].y - (n55fFirst.y - defaultPageConfig.note_size * 0.8 - LAYER_GAP * NS_S)) < 0.5, `y=${s55f[0]?.y} expect=${n55fFirst.y - defaultPageConfig.note_size * 0.8 - LAYER_GAP * NS_S}`)
+// adj217：平均连音组占位宽度按时值比例（两 tuplet 组 + 0.25 密集拍）——
+// 此前 tupletDur 浮点累加（1/3×3=0.9999…）导致拍切分误判、组被压缩/拉伸
+{
+  const r217 = parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (y6/ 1'/ 1'/) 1'/. 6// 1' - | (y6/ 1'/ 1'/) 7./ 6// 7 - | 6// 6// 5// 6// 5/ 6/ 3 - | 5// 5// 3// 5// 5/ 3/ 2 - |\n")
+  const lay217 = layoutScore(r217, defaultPageConfig)
+  const pn217 = lay217.pages[0].notes
+  check('adj217 解析：两组 tupletDur 均分 1 拍（0.333）', r217.errors.length === 0 && Math.abs((pn217[0].token as { tupletDur?: number }).tupletDur! - 1 / 3) < 1e-6 && Math.abs((pn217[6].token as { tupletDur?: number }).tupletDur! - 1 / 3) < 1e-6, '')
+  // 第 1 小节：三音均分 1 拍等宽、组外 0.75/0.25 按时值比例
+  const g217 = pn217.slice(0, 6)
+  const wTup = g217[0].width
+  check('adj217 占位：tuplet 三音等宽（各 1/3 拍）', Math.abs(g217[1].width - wTup) < 0.5 && Math.abs(g217[2].width - wTup) < 0.5, `${g217.map((n) => n.width.toFixed(1)).join(',')}`)
+  check('adj217 占位：组外附点 0.75 拍宽 = 3×三音宽、0.25 拍宽 = 1×三音宽', Math.abs(g217[3].width - wTup * 3) < 1 && Math.abs(g217[4].width - wTup) < 1, `${g217[3].width.toFixed(1)} vs ${(wTup * 3).toFixed(1)}`)
+  const bars217 = lay217.pages[0].barlines
+  check('adj217 四小节小节线均匀分布（不塌缩）', bars217.length === 4 && Math.abs(bars217[1].x - bars217[0].x - (bars217[3].x - bars217[2].x)) < 15, bars217.map((b) => b.x.toFixed(1)).join(','))
+}
 
 // ---- 56. 跨行跳房子起点（adj47）：断行在 [ 起点小节线后 → 起点线移到下一行行首 ----
 console.log('[56] cross-row volta start')

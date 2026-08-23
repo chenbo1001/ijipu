@@ -155,7 +155,8 @@ function segBeatMap(seg: BarSeg, noteSize = 18): Map<number, { minDur: number; e
   for (const t of seg.notes) {
     if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
       const dur = tokenDuration(t)
-      const b = Math.floor(beat)
+      // adj217：+1e-9 容差（浮点累加归并拍边界，1/3×3=0.9999…）
+      const b = Math.floor(beat + 1e-9)
       const e = byBeat.get(b) ?? { minDur: Infinity, extra: 0 }
       e.minDur = Math.min(e.minDur, dur)
       if (t.kind === 'note') e.extra = Math.max(e.extra, graceExtraW(t, noteSize))
@@ -604,9 +605,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           let pos = fgBeat
           let rem = dur
           while (rem > 1e-9) {
-            const p = Math.floor(pos)
+            const p = Math.floor(pos + 1e-9)
             while (beatsInfo.length <= p) beatsInfo.push({ dur: 0, minDur: Infinity, extra: 0 })
-            const piece = Math.min(rem, Math.floor(pos) + 1 - pos)
+            const piece = Math.min(rem, Math.floor(pos + 1e-9) + 1 - pos)
             beatsInfo[p].dur += piece
             beatsInfo[p].minDur = Math.min(beatsInfo[p].minDur, piece)
             pos += piece
@@ -614,7 +615,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           }
           // adj106：倚音占位记到音符起始拍（该拍分配更宽，避免倚音与相邻音符重叠）
           if (t.kind === 'note') {
-            const p0 = Math.floor(fgBeat)
+            const p0 = Math.floor(fgBeat + 1e-9)
             if (beatsInfo[p0]) beatsInfo[p0].extra = Math.max(beatsInfo[p0].extra, graceExtraW(t, m.noteSize))
           }
           fgBeat += dur
@@ -636,8 +637,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           let pos = fgB
           let rem = dur
           while (rem > 1e-9) {
-            const p = Math.floor(pos)
-            const piece = Math.min(rem, Math.floor(pos) + 1 - pos)
+            const p = Math.floor(pos + 1e-9)
+            const piece = Math.min(rem, Math.floor(pos + 1e-9) + 1 - pos)
             fragSegs.push({
               p,
               piece,
@@ -735,9 +736,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           let pos = gBeat
           let rem = dur
           while (rem > 1e-9) {
-            const p = Math.floor(pos)
+            // adj217：+1e-9 容差——浮点累加（如 1/3×3=0.9999…）误判拍边界时归并到当前拍
+            const p = Math.floor(pos + 1e-9)
             while (beatsInfo.length <= p) beatsInfo.push({ dur: 0, minDur: Infinity, extra: 0 })
-            const piece = Math.min(rem, Math.floor(pos) + 1 - pos)
+            const piece = Math.min(rem, Math.floor(pos + 1e-9) + 1 - pos)
             beatsInfo[p].dur += piece
             beatsInfo[p].minDur = Math.min(beatsInfo[p].minDur, piece)
             pos += piece
@@ -745,7 +747,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           }
           // adj106：倚音占位记到音符起始拍（该拍分配更宽，避免倚音与相邻音符重叠）
           if (t.kind === 'note') {
-            const p0 = Math.floor(gBeat)
+            const p0 = Math.floor(gBeat + 1e-9)
             if (beatsInfo[p0]) beatsInfo[p0].extra = Math.max(beatsInfo[p0].extra, graceExtraW(t, m.noteSize))
           }
           gBeat += dur
@@ -812,8 +814,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           let pos = gB
           let rem = dur
           while (rem > 1e-9) {
-            const p = Math.floor(pos)
-            const piece = Math.min(rem, Math.floor(pos) + 1 - pos)
+            // adj217：+1e-9 容差（同 beatsInfo，浮点累加归并拍边界）
+            const p = Math.floor(pos + 1e-9)
+            const piece = Math.min(rem, Math.floor(pos + 1e-9) + 1 - pos)
             rowSegs.push({
               p,
               piece,
@@ -1124,9 +1127,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
               let pos = beatAcc
               let rem = dur
               while (rem > 1e-9) {
-                const piece = Math.min(rem, Math.floor(pos) + 1 - pos)
+                const piece = Math.min(rem, Math.floor(pos + 1e-9) + 1 - pos)
                 segments.push({
-                  x: x + BAR_PAD + pos * perBeat + Math.floor(pos) * NOTE_GAP,
+                  x: x + BAR_PAD + pos * perBeat + Math.floor(pos + 1e-9) * NOTE_GAP,
                   perBeat,
                   beats: piece,
                 })

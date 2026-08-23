@@ -350,7 +350,12 @@ function applyTupletDurations(groups: MusicGroup[], meterBeats: number | null): 
                 ? meterBeats - outer
                 : rawSum
             const per = groupTotal / n
-            for (const m of o.members) m.tupletDur = per
+            // adj217：末音符 tupletDur 用剩余值（groupTotal - per×(n-1)），消除浮点累加误差
+            // ——1/3×3 累加得 0.9999…，布局按拍切分时误落到下一拍（minDur≈8.88e-16）
+            for (let mi = 0; mi < n; mi++) {
+              const m = o.members[mi]
+              m.tupletDur = mi === n - 1 ? groupTotal - per * (n - 1) : per
+            }
           }
         }
       }
