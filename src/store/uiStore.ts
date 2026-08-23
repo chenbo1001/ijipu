@@ -16,6 +16,7 @@ const THEME_KEY = 'jianpuscript.theme'
 const THEME_MODE_KEY = 'jianpuscript.themeMode'
 const SPLIT_KEY = 'jianpuscript.splitPct'
 const EDITOR_FS_KEY = 'jianpuscript.editorFontSize'
+const EDITOR_FONT_KEY = 'jianpuscript.editorFont'
 const PREVIEW_ZOOM_KEY = 'jianpuscript.previewZoom'
 
 function loadTheme(): string {
@@ -71,6 +72,8 @@ interface UiState {
   splitPct: number
   /** 脚本编辑器字号（px） */
   editorFontSize: number
+  /** 脚本编辑器字体（adj160：与字号按钮同排，默认等宽代码字体） */
+  editorFont: string
   /** 预览缩放（%，50~200，adj51） */
   previewZoom: number
   openModal: (m: ModalKind) => void
@@ -83,6 +86,7 @@ interface UiState {
   setSystemLight: (b: boolean) => void
   setSplitPct: (pct: number) => void
   setEditorFontSize: (px: number) => void
+  setEditorFont: (f: string) => void
   setPreviewZoom: (z: number) => void
 }
 
@@ -96,6 +100,15 @@ export const useUiStore = create<UiState>()((set) => ({
   systemLight: detectSystemLight(),
   splitPct: loadNum(SPLIT_KEY, 50),
   editorFontSize: loadNum(EDITOR_FS_KEY, 14),
+  editorFont: (() => {
+    try {
+      const v = localStorage.getItem(EDITOR_FONT_KEY)
+      if (v && v.trim()) return v
+    } catch {
+      /* 忽略 */
+    }
+    return 'Cascadia Code'
+  })(),
   previewZoom: loadNum(PREVIEW_ZOOM_KEY, 100),
   openModal: (m) => set({ modal: m }),
   closeModal: () => set({ modal: null, playbackStartId: null }),
@@ -136,6 +149,14 @@ export const useUiStore = create<UiState>()((set) => ({
       /* 忽略 */
     }
     set({ editorFontSize: v })
+  },
+  setEditorFont: (f) => {
+    try {
+      localStorage.setItem(EDITOR_FONT_KEY, f)
+    } catch {
+      /* 忽略 */
+    }
+    set({ editorFont: f })
   },
   setPreviewZoom: (z) => {
     const v = Math.min(200, Math.max(50, Math.round(z)))

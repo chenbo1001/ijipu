@@ -14,6 +14,23 @@ import { highlightCode } from './highlight'
 import { formatLine, codePosToNoteId } from '../engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 
+/** adj160：编辑器字体选项（等宽优先，适合简谱脚本代码） */
+const EDITOR_FONT_OPTIONS: { label: string; value: string }[] = [
+  { label: 'Cascadia Code', value: 'Cascadia Code' },
+  { label: 'JetBrains Mono', value: 'JetBrains Mono' },
+  { label: 'Consolas', value: 'Consolas' },
+  { label: 'Fira Code', value: 'Fira Code' },
+  { label: 'Courier New', value: 'Courier New' },
+  { label: '微软雅黑', value: 'Microsoft YaHei' },
+  { label: '黑体', value: 'SimHei' },
+  { label: '宋体', value: 'SimSun' },
+  { label: '楷体', value: 'KaiTi' },
+  { label: 'Georgia', value: 'Georgia' },
+  { label: 'Times New Roman', value: 'Times New Roman' },
+  { label: '无衬线', value: 'sans-serif' },
+  { label: '衬线', value: 'serif' },
+]
+
 export function EditorPane() {
   const code = useDocStore((s) => s.code)
   const setCode = useDocStore((s) => s.setCode)
@@ -26,6 +43,9 @@ export function EditorPane() {
   // 编辑器字号（adj46：状态栏 +/- 按钮调整）
   const editorFontSize = useUiStore((s) => s.editorFontSize)
   const setEditorFontSize = useUiStore((s) => s.setEditorFontSize)
+  // adj160：编辑器字体下拉框（与字号按钮同排）
+  const editorFont = useUiStore((s) => s.editorFont)
+  const setEditorFont = useUiStore((s) => s.setEditorFont)
 
   const taRef = useRef<HTMLTextAreaElement>(null)
   const hlRef = useRef<HTMLDivElement>(null)
@@ -185,6 +205,7 @@ export function EditorPane() {
   const editorStyle = {
     '--jp-editor-fs': `${editorFontSize}px`,
     '--jp-editor-lh': `${editorFontSize * 1.7}px`,
+    '--jp-editor-font': editorFont,
   } as React.CSSProperties
 
   return (
@@ -198,6 +219,21 @@ export function EditorPane() {
         <span>脚本编辑器</span>
         <span className={errorCount > 0 ? 'err-count has-error' : 'err-count'}>
           {errorCount > 0 ? `${errorCount} 个语法错误` : '语法正确'}
+        </span>
+        {/* adj160：编辑器字体下拉框（字号按钮左侧） */}
+        <span className="editor-font-select">
+          <select
+            value={editorFont}
+            onChange={(e) => setEditorFont(e.target.value)}
+            title="编辑器字体"
+            style={{ fontFamily: `'${editorFont}', monospace` }}
+          >
+            {EDITOR_FONT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         </span>
         <span className="editor-font-control">
           <button

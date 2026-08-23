@@ -565,6 +565,29 @@ body {
   margin-left: 12px;
 }
 
+/* adj160：编辑器字体下拉框（字号按钮左侧） */
+.editor-font-select {
+  display: flex;
+  align-items: center;
+}
+
+.editor-font-select select {
+  max-width: 150px;
+  height: 22px;
+  padding: 0 6px;
+  background: var(--jp-bg-app);
+  border: 1px solid var(--jp-border);
+  color: var(--jp-text-primary);
+  border-radius: 5px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.editor-font-select select:hover {
+  border-color: var(--jp-accent);
+}
+
 .editor-font-control .font-btn {
   min-width: 24px;
   height: 20px;
@@ -602,6 +625,7 @@ body {
   overflow: hidden;
   --jp-editor-fs: 14px; /* 默认字号（adj46：可调） */
   --jp-editor-lh: 23.8px; /* 字号 × 1.7，与 textarea 行高一致 */
+  --jp-editor-font: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace; /* adj160：编辑器字体（可调） */
 }
 
 .editor-gutter {
@@ -619,7 +643,7 @@ body {
   line-height: var(--jp-editor-lh);
   text-align: right;
   padding-right: 8px;
-  font-family: var(--jp-font-mono);
+  font-family: var(--jp-editor-font, var(--jp-font-mono));
   font-size: 11px;
   color: var(--jp-text-muted);
   white-space: pre;
@@ -648,7 +672,7 @@ body {
   background: transparent;
   color: transparent;
   caret-color: var(--jp-editor-caret);
-  font-family: var(--jp-font-mono);
+  font-family: var(--jp-editor-font, var(--jp-font-mono));
   font-size: var(--jp-editor-fs, 14px);
   /* adj110：行高用与行号栏相同的计算值（--jp-editor-lh），
      相对值 1.7 与 fs×1.7 的舍入差异会在多行后累积成滚动错位 */
@@ -663,7 +687,7 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  font-family: var(--jp-font-mono);
+  font-family: var(--jp-editor-font, var(--jp-font-mono));
   font-size: var(--jp-editor-fs, 14px);
   line-height: var(--jp-editor-lh, 23.8px);
   padding: 10px 14px;
