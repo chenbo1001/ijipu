@@ -45,6 +45,18 @@ export const VOLTA_HINTS: { code: string; label: string }[] = [
   { code: '"+其他"', label: '自定义注释（引号内任意）' },
 ]
 
+/** adj186：描述头（行首 Tab 提示）——code + 中文说明（与 parser HEADER_KEYS 一致） */
+export const HEADER_HINTS: { code: string; label: string }[] = [
+  { code: 'V:', label: '版本号（必须，如 V: 1.0）' },
+  { code: 'B:', label: '标题（首个为主标题，其后为副标题）' },
+  { code: 'Z:', label: '作者（居右显示）' },
+  { code: 'D:', label: '调式（如 D: C / D: F# / D: bE）' },
+  { code: 'P:', label: '拍号（如 P: 4/4，可多个）' },
+  { code: 'J:', label: '节拍（数字=拍/分，或文字）' },
+  { code: 'Y:', label: '乐器（可多次，显示在副标题下）' },
+  { code: 'S:', label: '说明文字（谱尾，支持 \\n 换行）' },
+]
+
 /** 判断某字符是否可组成 & 编码（字母数字） */
 export function isModifierChar(ch: string): boolean {
   return /[a-zA-Z0-9]/.test(ch)

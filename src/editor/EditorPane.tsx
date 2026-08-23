@@ -13,7 +13,7 @@ import { useUiStore } from '../store/uiStore'
 import { highlightCode } from './highlight'
 import { formatLine, codePosToNoteId } from '../engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
-import { NOTE_MODIFIER_HINTS, VOLTA_HINTS } from './completions'
+import { NOTE_MODIFIER_HINTS, VOLTA_HINTS, HEADER_HINTS } from './completions'
 
 /** adj160：编辑器字体选项；adj163：仅等宽字体——textarea 与高亮层需逐字符对齐，
  *  非等宽字体下加粗 span（小节线/行头等）宽度变化会从该字符开始逐字累积错位；
@@ -27,8 +27,8 @@ const EDITOR_FONT_OPTIONS: { label: string; value: string }[] = [
 
 /** adj165：自动提示浮层状态（null = 不显示） */
 interface Completion {
-  /** 提示类型：修饰符（& 编码）或跳房子（[ 后） */
-  kind: 'modifier' | 'volta'
+  /** 提示类型：修饰符（& 编码）、跳房子（[ 后）、描述头（行首 Tab） */
+  kind: 'modifier' | 'volta' | 'header'
   /** 候选列表 */
   items: { code: string; label: string }[]
   /** 当前高亮索引 */
@@ -172,13 +172,25 @@ export function EditorPane() {
   }
   onSelectRef.current = onSelect
 
-  // adj165：分析光标前文本，触发自动提示（& 修饰符 / [ 跳房子）
+  // adj165：分析光标前文本，触发自动提示（& 修饰符 / [ 跳房子 / 描述头行首 Tab）
   const updateCompletion = () => {
     const ta = taRef.current
     if (!ta) return
     const pos = ta.selectionStart
     const before = ta.value.slice(0, pos)
     const lineBefore = before.slice(before.lastIndexOf('\n') + 1)
+    // adj186：描述头区域行首 Tab → 列出所有描述头（行首 = 光标前仅空白）
+    if (/^\s*$/.test(lineBefore)) {
+      const { line, col } = lineColOf(ta.value, pos)
+      setCompletion({
+        kind: 'header',
+        items: HEADER_HINTS,
+        index: 0,
+        x: col * editorFontSize * 0.6,
+        y: (line - 1) * Math.round(editorFontSize * 1.7) + Math.round(editorFontSize * 1.7),
+      })
+      return
+    }
     // 仅 Q 行（曲行）内提示
     if (!/^Q(\d*(?:"[^"]*")?\s*:)/.test(lineBefore) && !/^\s*Q/.test(lineBefore)) {
       setCompletion(null)
@@ -234,7 +246,10 @@ export function EditorPane() {
     const lineBefore = before.slice(before.lastIndexOf('\n') + 1)
     let insert = item.code
     let replaceLen = 0
-    if (c.kind === 'modifier') {
+    if (c.kind === 'header') {
+      // adj186：描述头行首补全——插入 "V: " 并带一个空格等待输入内容
+      insert = item.code + ' '
+    } else if (c.kind === 'modifier') {
       // adj177：用户已输入 &（lineBefore 以 & 结尾），只补全其后的字母——
       // 不再拼接第二个 &（此前 replaceLen 仅替换字母、insert 又含 &，会变成 &&tr）
       const m = /&([a-zA-Z0-9]*)$/.exec(lineBefore)

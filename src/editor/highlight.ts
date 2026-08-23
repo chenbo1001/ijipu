@@ -2,13 +2,14 @@
  * editor/highlight.ts — .jps 语法高亮（输出 HTML span 字符串）
  *
  * 着色语义：
- *  - 行头命令（Q/C/B/Z/D/P/J 及声部编号）→ line-header（霓虹青）
+ *  - 行头命令（Q/C/B/Z/D/P/J/V/Y/S 及声部编号）→ line-header（霓虹青）
  *  - 音符数字/增时线 → note（橙）；小节线/反复记号 → barline（灰蓝）
  *  - 歌词 → lyric（绿）；注释 → comment（暗蓝斜体）；[fenye] → pagebreak（粉）
  *  - & 装饰编码 → decoration（青淡）
  */
 
-const HEADER_KEYS = 'QCBZD PJV'.replace(/\s/g, '')
+// adj186：Y/S 描述头与其它行头同色（与 parser HEADER_KEYS 一致：V/B/Z/D/P/J/Y/S）
+const HEADER_KEYS = 'QCBZD PJVYS'.replace(/\s/g, '')
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
