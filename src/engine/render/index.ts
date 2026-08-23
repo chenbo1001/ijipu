@@ -977,28 +977,31 @@ function renderSlur(s: PlacedSlur, noteSize = 18): string {
     // （adj94：两端是明显的弧线而非直坡面——从音符竖直上弯，用三次贝塞尔
     //   控制点让曲线外凸（弧线感），到横线处水平切入；非此前近直线的缓坡）
     // adj96：嵌套内层（depth>0）连音线高度少 1px（横线更贴音符，层次更分明）
+    // adj141：跨行半部两端都保留弧线弯角（优先弧线，剩余空间画横线），弧线上限 16→24
     const leg = 7 - (s.depth > 0 ? 1 : 0)
     const barY = y - leg
     // 弧线水平跨度：取音符间距的一半内合理值，短连音线自动收窄
-    const halfL = Math.min(16, Math.abs(x2 - x1) / 2 - 1)
+    const halfL = Math.min(24, Math.abs(x2 - x1) / 2 - 1)
     // 弧线控制点：c1 竖直偏右（从音符向上弯的起点）、c2 横线左侧（水平进入）
     // 竖直分量 leg×0.9、水平分量 halfL×0.45 → 曲线外凸明显，呈圆弧而非坡面
     const c1x = x1 + halfL * 0.45
     const c1y = y - leg * 0.9
     const c2x = x1 + halfL - 3
     if (s.half === 'l') {
-      // 左半部：从音符（x1,y）弧线升到平顶线，横线右伸（右侧开口）
+      // 左半部（adj141）：音符端弧线 + 横线 + 小节线端弧线（两端弧线弯角，右侧开口）
       return (
         `<path d="M ${x1} ${y} ` +
         `C ${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${barY} ${(x1 + halfL).toFixed(1)} ${barY} ` +
-        `L ${x2} ${barY}" ` +
+        `L ${(x2 - halfL).toFixed(1)} ${barY} ` +
+        `C ${(x2 - halfL + 3).toFixed(1)} ${barY} ${(x2 - halfL * 0.45).toFixed(1)} ${c1y.toFixed(1)} ${x2} ${y}" ` +
         `fill="none" stroke="#1b1b1b" stroke-width="1"/>`
       )
     }
     if (s.half === 'r') {
-      // 右半部：横线从左伸来，右端弧线降到音符（左侧开口）
+      // 右半部（adj141）：行首端弧线 + 横线 + 音符端弧线（两端弧线弯角，左侧开口）
       return (
-        `<path d="M ${x1} ${barY} ` +
+        `<path d="M ${x1} ${y} ` +
+        `C ${(x1 + halfL * 0.45).toFixed(1)} ${c1y.toFixed(1)} ${(x1 + halfL - 3).toFixed(1)} ${barY} ${(x1 + halfL).toFixed(1)} ${barY} ` +
         `L ${(x2 - halfL).toFixed(1)} ${barY} ` +
         `C ${(x2 - halfL + 3).toFixed(1)} ${barY} ${(x2 - halfL * 0.45).toFixed(1)} ${c1y.toFixed(1)} ${x2} ${y}" ` +
         `fill="none" stroke="#1b1b1b" stroke-width="1"/>`
