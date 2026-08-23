@@ -388,7 +388,6 @@ export function EditorPane() {
           {(fileName || '未命名') + '.jps'}
           {dirty && <span className="dirty-dot" title="有未保存的修改" />}
         </span>
-        <span>脚本编辑器</span>
         <span className={errorCount > 0 ? 'err-count has-error' : 'err-count'}>
           {errorCount > 0 ? `${errorCount} 个语法错误` : '语法正确'}
         </span>

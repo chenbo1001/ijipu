@@ -27,7 +27,7 @@ export function PreviewPane() {
   const jumpCursor = useDocStore((s) => s.jumpCursor)
   const showGuides = useUiStore((s) => s.showGuides)
   const previewZoom = useUiStore((s) => s.previewZoom)
-  const openModal = useUiStore((s) => s.openModal)
+  const modal = useUiStore((s) => s.modal)
   const setPlaybackStart = useUiStore((s) => s.setPlaybackStart)
   const bumpPlaybackTick = useUiStore((s) => s.bumpPlaybackTick)
 
@@ -101,15 +101,17 @@ export function PreviewPane() {
 
   // adj88：双击谱面音符 → 定位试听起点并打开试听对话框（从该音符开始播放）
   // adj158：播放中双击 → 递增 playbackTick 让对话框从该音符重新播放（快速跳跃）
+  // adj166：仅在试听对话框**已打开**时，双击音符才跳到该处开始播放；
+  // 未打开试听时双击不弹窗（避免误触，改用菜单/快捷键打开试听）
   const onDoubleClick = (e: React.MouseEvent) => {
     const target = (e.target as Element).closest('[data-notepos]')
     if (!target) return
     const id = target.getAttribute('data-notepos')
     if (!id) return
     setActiveNoteId(id)
+    if (modal !== 'playback') return // 试听未打开：仅高亮/联动光标，不弹窗不播放
     setPlaybackStart(id)
     bumpPlaybackTick()
-    openModal('playback')
   }
 
   // ---- 描述头元素拖拽（adj9） ----
