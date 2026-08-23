@@ -803,16 +803,19 @@ function renderBarline(bar: PlacedBarline, noteSize = 18): string {
         `<text x="${mx.toFixed(1)}" y="${(yBottom + 8 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="${FONT_CN}" font-weight="bold"${italic} fill="#1b1b1b">${label}</text>`,
       )
     } else if (bar.mark === 'ty') {
-      // 大跳跃记号（adj130）：官方 Unicode U+1D10C（𝄌）；adj131：调大 + 下移靠近小节线
-      const fs = Math.max(14, Math.round(16 * s))
+      // 大跳跃记号（adj130）：官方 Unicode U+1D10C（𝄌）；adj131：调大 + 下移靠近小节线；
+      // adj182：高度 120%（16s→19.2s）、记号下端与小节线上端（yTop）齐平
+      // （text y 为基线，记号下端 ≈ y + 0.15×fs）
+      const fs = Math.max(14, Math.round(16 * s * 1.2))
       parts.push(
-        `<text x="${mx.toFixed(1)}" y="${(yTop - 3 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄌</text>`,
+        `<text x="${mx.toFixed(1)}" y="${(yTop - 0.15 * fs).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄌</text>`,
       )
     } else if (bar.mark === 'hs') {
-      // 花 S 记号（adj129）：官方 Unicode U+1D10B（𝄋）；adj131：调小与大跳跃匹配 + 下移靠近小节线
+      // 花 S 记号（adj129）：官方 Unicode U+1D10B（𝄋）；adj131：调小与大跳跃匹配 + 下移靠近小节线；
+      // adj182：记号下端与小节线上端（yTop）齐平
       const fs = Math.max(10, Math.round(12 * s))
       parts.push(
-        `<text x="${mx.toFixed(1)}" y="${(yTop - 3 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄋</text>`,
+        `<text x="${mx.toFixed(1)}" y="${(yTop - 0.15 * fs).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄋</text>`,
       )
     }
   }

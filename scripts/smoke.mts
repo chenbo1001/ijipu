@@ -571,6 +571,15 @@ const svg126 = renderScoreToSvg(lay126)[0]
 check('adj126 渲染 Fine/D.C./D.S. 文本', svg126.includes('>Fine<') && svg126.includes('>D.C.<') && svg126.includes('>D.S.<'), '')
 check('adj130 渲染大跳跃记号（Unicode U+1D10C 𝄌）', svg126.includes('𝄌'), '')
 check('adj129 渲染花 S 记号（Unicode U+1D10B 𝄋）', svg126.includes('𝄋'), '')
+// adj182：大跳跃记号高度 120%（fs = 19.2×s）；两记号下端与小节线上端（yTop）齐平
+const ty182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="([\d.]+)"[^>]*>𝄌<\/text>/.exec(svg126)
+const hs182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="([\d.]+)"[^>]*>𝄋<\/text>/.exec(svg126)
+check('adj182 大跳跃字号 = 19.2×s（120%）', ty182 !== null && Number(ty182[3]) === Math.max(14, Math.round(16 * 1.2)), `fs=${ty182?.[3]}`)
+// y = yTop - 0.15×fs → 记号下端（y + 0.15×fs）≈ yTop
+const tyBar182 = placed126.find((b) => b.mark === 'ty')
+const hsBar182 = placed126.find((b) => b.mark === 'hs')
+check('adj182 大跳跃记号下端与 yTop 齐平（y = yTop - 0.15×fs）', ty182 !== null && tyBar182 !== undefined && Math.abs(Number(ty182[2]) + 0.15 * Number(ty182[3]) - tyBar182.yTop) < 1, `y=${ty182?.[2]} fs=${ty182?.[3]} yTop=${tyBar182?.yTop}`)
+check('adj182 花S 记号下端与 yTop 齐平（y = yTop - 0.15×fs）', hs182 !== null && hsBar182 !== undefined && Math.abs(Number(hs182[2]) + 0.15 * Number(hs182[3]) - hsBar182.yTop) < 1, `y=${hs182?.[2]} fs=${hs182?.[3]} yTop=${hsBar182?.yTop}`)
 // 播放跳转：fine 截断 / ds 跳 hs / ty 跳下一 ty / dc 从头反复
 const mk126 = (q: string) => buildPlaySequence(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), layoutScore(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), defaultPageConfig), 120)
 const pits126 = (seq: ReturnType<typeof mk126>) => seq.events.filter((e) => e.placed.audioPitch).map((e) => e.placed.audioPitch)
