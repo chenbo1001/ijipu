@@ -655,6 +655,31 @@ const r88a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (2 - | 2/) 3 |\n')
 const ev88a = buildPlaySequence(r88a, layoutScore(r88a, defaultPageConfig), 60).events
 const d88 = ev88a.filter((e) => e.placed.audioPitch === 'D4')
 check('(2 - | 2/) 连奏：2 一次共 2.5 拍', ev88a.length === 2 && d88.length === 1 && Math.abs(d88[0].durationMs - 2500) < 50, ev88a.map((e) => `${e.placed.audioPitch}:${e.durationMs}`).join(' '))
+// adj157：连音合并时全局时钟 at 同步推进——后续音符从连音结束时开始，不与连音重叠
+const ev88aNext = ev88a[1]
+check(
+  'adj157 连音合并后 at 推进（后续音符从连音结束 2500ms 开始，不重叠）',
+  ev88a.length === 2 &&
+    ev88aNext.placed.audioPitch === 'E4' &&
+    Math.abs(ev88aNext.atMs - 2500) < 1 &&
+    ev88aNext.atMs >= ev88a[0].atMs + ev88a[0].durationMs - 0.5,
+  ev88a.map((e) => `${e.placed.audioPitch}:at=${Math.round(e.atMs)} dur=${Math.round(e.durationMs)}`).join(' '),
+)
+// adj157：连续两处连音合并 + 中间不同音高——时值累计且不重叠（1 两处连奏 2.5 拍、2 独立、3 独立）
+const r88d = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1 - | 1/ 2 3) 4 |\n')
+const ev88d = buildPlaySequence(r88d, layoutScore(r88d, defaultPageConfig), 60).events
+const d88d = ev88d.filter((e) => e.placed.audioPitch === 'C4')
+const noOverlap88d = ev88d.every(
+  (e, k) => k === 0 || e.atMs >= ev88d[k - 1].atMs + ev88d[k - 1].durationMs - 0.5,
+)
+check(
+  'adj157 多音符连音组时值累计且事件不重叠（C4 共 2.5 拍）',
+  d88d.length === 1 &&
+    Math.abs(d88d[0].durationMs - 2500) < 50 &&
+    noOverlap88d &&
+    Math.abs(ev88d[ev88d.length - 1].atMs + ev88d[ev88d.length - 1].durationMs - 5500) < 50,
+  ev88d.map((e) => `${e.placed.audioPitch}:at=${Math.round(e.atMs)} dur=${Math.round(e.durationMs)}`).join(' '),
+)
 const r88b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (2 3 | 2) 5 |\n')
 const ev88b = buildPlaySequence(r88b, layoutScore(r88b, defaultPageConfig), 60).events
 const d88b = ev88b.filter((e) => e.placed.audioPitch === 'D4')

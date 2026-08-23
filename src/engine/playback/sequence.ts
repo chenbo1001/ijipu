@@ -167,6 +167,9 @@ export function buildPlaySequence(
       ) {
         const prev = events[events.length - 1]
         prev.durationMs += durationMs
+        // adj157：合并时值的同时全局时钟也要同步推进——否则后续音符
+        // 从连音开始时刻起播，与连音事件重叠（应等连音时值结束后再播）
+        at += durationMs
         lastEventNoteIdx = curNoteIdx
         i++
         continue
