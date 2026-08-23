@@ -980,8 +980,9 @@ function renderSlur(s: PlacedSlur, noteSize = 18): string {
     // adj141：跨行半部两端都保留弧线弯角（优先弧线，剩余空间画横线），弧线上限 16→24
     const leg = 7 - (s.depth > 0 ? 1 : 0)
     const barY = y - leg
-    // 弧线水平跨度：取音符间距的一半内合理值，短连音线自动收窄
-    const halfL = Math.min(24, Math.abs(x2 - x1) / 2 - 1)
+    // 弧线水平跨度：以**音符宽度为直径**（adj144：0.62×noteSize）调整弧度，
+    // 短连音线自动收窄（跨度/2 - 1）
+    const halfL = Math.min(noteSize * 0.62, Math.abs(x2 - x1) / 2 - 1)
     // 弧线控制点：c1 竖直偏右（从音符向上弯的起点）、c2 横线左侧（水平进入）
     // 竖直分量 leg×0.9、水平分量 halfL×0.45 → 曲线外凸明显，呈圆弧而非坡面
     const c1x = x1 + halfL * 0.45
