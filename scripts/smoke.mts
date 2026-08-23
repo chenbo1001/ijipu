@@ -362,6 +362,27 @@ const svgLn2 = renderScoreToSvg(layoutScore(rLn, { ...defaultPageConfig, metaPos
 const ln2 = /data-meta="notes_0" data-notes-line="0" data-notes-sub="0" x="([\d.]+)"/.exec(svgLn2)
 check('adj153 大偏移下 x 钳制（右缘不超右边距）', ln2 !== null && Number(ln2[1]) <= rightEdge, `x=${ln2?.[1]} rightEdge=${rightEdge}`)
 
+// ---- 16d. S 说明 \n 换行 + 独立字体字号（adj154） ----
+console.log('[16d] notes \\n wrap & independent font (adj154)')
+const nlSrc = 'V: 1.0\nB: 测试\nD: C\nP: 4/4\nS: 第一段\\n第二段\nQ: 1 |\n'
+const rNl = parseJps(nlSrc)
+check('adj154 S 行 \\n 拆成 2 行说明', rNl.header.notes.length === 2 && rNl.header.notes[0] === '第一段' && rNl.header.notes[1] === '第二段', JSON.stringify(rNl.header.notes))
+const svgNl = renderScoreToSvg(layoutScore(rNl, defaultPageConfig))[0]
+check('adj154 \\n 拆行渲染为两个 text（notes_0/notes_1）', svgNl.includes('data-meta="notes_0"') && svgNl.includes('data-meta="notes_1"') && svgNl.includes('第一段') && svgNl.includes('第二段'), '')
+const svgNl2 = renderScoreToSvg(layoutScore(rNl, { ...defaultPageConfig, notes_font: 'KaiTi', notes_size: 16 }))[0]
+const nl2 = /data-meta="notes_0" data-notes-line="0" data-notes-sub="0" x="([\d.]+)" y="([\d.]+)"[^>]*>第一段/.exec(svgNl2)
+check('adj154 S 独立字体字号生效（KaiTi/16）', nl2 !== null && svgNl2.includes('font-family="KaiTi"') && svgNl2.includes('font-size="16"'), '')
+const nl2b = /data-meta="notes_1" data-notes-line="1" data-notes-sub="0" x="([\d.]+)" y="([\d.]+)"/.exec(svgNl2)
+check('adj154 \\n 第二行按独立字号下移（y 差 = 16×1.4）', nl2 !== null && nl2b !== null && Math.abs(Number(nl2b[2]) - Number(nl2[2]) - 16 * 1.4) < 0.2, `y0=${nl2?.[2]} y1=${nl2b?.[2]}`)
+// 独立字号下不超右边距（16px 中文 16/字符）
+const nl3 = [...svgNl2.matchAll(/data-meta="notes_\d+" data-notes-line="\d+" data-notes-sub="0" x="([\d.]+)"[^>]*>([^<]*)</g)]
+const nlWithin = nl3.every((m) => {
+  const x = Number(m[1])
+  const w = [...m[2]].reduce((s, ch) => s + (ch.charCodeAt(0) > 127 ? 13 : 7.62), 0) * (16 / 13)
+  return x >= defaultPageConfig.margin_left - 0.01 && x + w <= rightEdge + 0.01
+})
+check('adj154 独立字号下说明仍不超边距', nlWithin, nl3.map((m) => m[1]).join('|'))
+
 // ---- 16c. 谱面级设置 # jps-config（adj83） ----
 console.log('[16c] per-score settings # jps-config (adj83)')
 const codeW = writeJpsConfig(ysSrc, { ...defaultPageConfig, margin_top: 123, metaPos: { notes: { x: 10, y: -30 } } })

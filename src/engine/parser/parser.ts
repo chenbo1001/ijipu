@@ -244,7 +244,8 @@ export function parseJps(source: string): ParseResult {
           header.instruments.push(value)
           break
         case 'S':
-          header.notes.push(value)
+          // adj154：支持字面 \n 换行——拆成多行说明（每行一个 text，渲染时纵向堆叠）
+          header.notes.push(...value.split('\\n'))
           break
       }
       continue

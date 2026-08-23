@@ -522,6 +522,9 @@ export interface PageConfig {
   /** 描述头字体与字号（除标题/副标题外的其它内容：调式/拍号/节拍/作者；adj45） */
   miaoshu_font: string
   miaoshu_size: number
+  /** 说明文字（S 行）字体与字号（adj154：独立于描述头设置） */
+  notes_font: string
+  notes_size: number
   /** 歌词字体与字号 */
   geci_font: string
   geci_size: number
@@ -564,6 +567,8 @@ export const defaultPageConfig: PageConfig = {
   fubiaoti_size: 20,
   miaoshu_font: 'Microsoft YaHei',
   miaoshu_size: 13,
+  notes_font: 'Microsoft YaHei', // adj154：说明文字默认沿用描述头字体
+  notes_size: 13,
   geci_font: 'Microsoft YaHei',
   geci_size: 18,
   note_size: 18,

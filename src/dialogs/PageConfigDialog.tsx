@@ -90,6 +90,11 @@ export function PageConfigDialog() {
             <FontSelect value={draft.geci_font} onChange={(v) => setDraft({ ...draft, geci_font: v })} />
             <NumInput label="字号" value={draft.geci_size} onChange={(v) => setDraft({ ...draft, geci_size: v })} />
           </Row>
+          {/* adj154：说明（S 行）字体独立于描述头 */}
+          <Row label="说明">
+            <FontSelect value={draft.notes_font ?? draft.miaoshu_font} onChange={(v) => setDraft({ ...draft, notes_font: v })} />
+            <NumInput label="字号" value={draft.notes_size ?? draft.miaoshu_size} onChange={(v) => setDraft({ ...draft, notes_size: v })} />
+          </Row>
         </fieldset>
 
         <fieldset style={{ border: '1px solid var(--jp-border)', borderRadius: 8, padding: 10 }}>

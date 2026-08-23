@@ -1196,12 +1196,13 @@ function renderPage(page: ScorePage, config: PageConfig, pageCount: number): str
   body.push(renderPageNum(page, config, pageCount))
 
   // 说明文字（adj83：S 行，多行；渲染在简谱主体最末尾——最后一页正文下方、下边距线上方，
-  // 用描述头字体字号；adj151：左对齐（text-anchor=start、x=左边距）、颜色与 P:/J: 一致，
+  // adj154：用独立的说明字体字号 notes_font/notes_size（默认沿用描述头）；
+  // adj151：左对齐（text-anchor=start、x=左边距）、颜色与 P:/J: 一致，
   // 每段 data-meta="notes_i" 可独立拖拽调整位置，metaPos["notes_i"] 为相对默认的偏移；
   // adj153：内容不超边距——超宽自动换行成子行（data-notes-sub）、x 钳制在左右边距内）
   if (page.index === pageCount - 1 && page.meta.notes.length > 0) {
-    const nFont = config.miaoshu_font
-    const nSize = config.miaoshu_size
+    const nFont = config.notes_font ?? config.miaoshu_font
+    const nSize = config.notes_size ?? config.miaoshu_size
     const baseX = config.margin_left
     const baseY = height - config.margin_bottom - 24
     // 可用宽 = 左右边距之间（adj153：文本不超此范围）
