@@ -1526,7 +1526,7 @@ const s51 = lay51.pages[0].slurs
 const rowEnd51 = lay51.pages[0].barlines
   .filter((b) => Math.abs(b.yTop - (n51[0].y - 18.4)) < 1)
   .sort((a, b) => a.x - b.x)
-check('连音符左半：第一行 2 → 行末小节线', Math.abs(s51[0].x1 - (n51[1].x + 6.58)) < 0.5 && Math.abs(s51[0].x2 - (rowEnd51[rowEnd51.length - 1]?.x ?? 0)) < 1, `x1=${s51[0].x1} x2=${s51[0].x2} bar=${rowEnd51[rowEnd51.length - 1]?.x}`)
+check('adj143 连音符左半：延伸到页面右边距', Math.abs(s51[0].x1 - (n51[1].x + 6.58)) < 0.5 && Math.abs(s51[0].x2 - (lay51.pages[0].width - defaultPageConfig.margin_right)) < 0.5, `x1=${s51[0].x1} x2=${s51[0].x2} right=${lay51.pages[0].width - defaultPageConfig.margin_right}`)
 check('连音符右半：行首边距处 → 第二行 1', Math.abs(s51[1].x1 - 80) < 0.5 && Math.abs(s51[1].x2 - (n51[4].x + 4.58)) < 0.5, `x1=${s51[1].x1} x2=${s51[1].x2}`)
 check('左右两半 y 不同（跨行）', Math.abs(s51[0].y - s51[1].y) > 1, `${s51[0].y} vs ${s51[1].y}`)
 check('LIFO 深度均为 0（内层 (4) 退化丢弃）', s51[0].depth === 0 && s51[1].depth === 0, JSON.stringify(s51.map((s) => s.depth)))
@@ -1607,7 +1607,7 @@ check('LIFO：1 条跨行连音符 → 左半 + 右半', s53.length === 2, `got 
 const rowEnd53 = lay53.pages[0].barlines
   .filter((b) => Math.abs(b.yTop - (n53[0].y - 18.4)) < 1)
   .sort((a, b) => a.x - b.x)
-check('连音符左半：第一行 2 → 行末小节线', Math.abs(s53[0].x1 - (n53[1].x + 6.58)) < 0.5 && Math.abs(s53[0].x2 - (rowEnd53[rowEnd53.length - 1]?.x ?? 0)) < 1, `x1=${s53[0].x1} x2=${s53[0].x2} bar=${rowEnd53[rowEnd53.length - 1]?.x}`)
+check('adj143 连音符左半：延伸到页面右边距', Math.abs(s53[0].x1 - (n53[1].x + 6.58)) < 0.5 && Math.abs(s53[0].x2 - (lay53.pages[0].width - defaultPageConfig.margin_right)) < 0.5, `x1=${s53[0].x1} x2=${s53[0].x2} right=${lay53.pages[0].width - defaultPageConfig.margin_right}`)
 check('连音符右半：行首边距处 → 第二行 1', Math.abs(s53[1].x1 - 80) < 0.5 && Math.abs(s53[1].x2 - (n53[4].x + 4.58)) < 0.5, `x1=${s53[1].x1} x2=${s53[1].x2}`)
 check('左右两半跨行（y 不同）', Math.abs(s53[0].y - s53[1].y) > 1, `${s53[0].y} vs ${s53[1].y}`)
 // adj140：跨行连音线统一平顶（用户要求跨行显示平顶线，非弧线）

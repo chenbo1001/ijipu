@@ -1409,19 +1409,6 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     return floor === null ? null : floor + 2 * noteScaleOf(m.noteSize)
   }
 
-  /** 行末小节线中心 x（跨行连音符左半部延伸到小节线处）；无可见小节线时返回 null */
-  const rowEndBarX = (rowIdx: number): number | null => {
-    const r = rows[rowIdx]
-    const barY = r.y - 18.4 // 小节线上端 = 音符基线 - 18.4（adj50）
-    let maxX: number | null = null
-    for (const b of pages[r.page].barlines) {
-      // adj107：排除隐藏线 |/（不渲染，不应作为跨行连音线的端点）
-      if (b.type === '|/') continue
-      if (Math.abs(b.yTop - barY) < 1 && (maxX === null || b.x > maxX)) maxX = b.x
-    }
-    return maxX
-  }
-
   /** 行首小节线中心 x（跨行连音符右半部从行首小节线处开始，adj106）；
    *  仅取「位于行首音符左侧」的小节线（行首真有节线才从其开始），否则 null 用边距 */
   const rowStartBarX = (rowIdx: number): number | null => {
@@ -1474,7 +1461,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       // 行首/行末均为连音符最高点；相隔多行视为误输入，不渲染
       const rA = rows[rowA]
       const lastA = rA.notes[rA.notes.length - 1]
-      const xEndA = Math.max(a.x + halfDig + sSlur + 2, rowEndBarX(rowA) ?? lastA.x + lastA.width - 2)
+      // adj143：上一行左半横线延伸到**页面右边距**（原连到行末小节线，效果不理想）
+      const xEndA = pages[rA.page].width - config.margin_right
       // adj106：下一行始端 = 行首小节线（有则从其开始）否则从左边距开始
       const xStartB = rowStartBarX(rowB) ?? config.margin_left
       pages[rA.page].slurs.push({
