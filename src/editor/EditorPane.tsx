@@ -465,11 +465,12 @@ export function EditorPane() {
           />
           <div ref={hlRef} className="highlight-layer" aria-hidden="true">
             <div className="highlight-inner" ref={hlInnerRef}>
-              {/* adj171：当前行整行背景铺满层（随 inner transform 一起平移；宽度铺满编辑区） */}
+              {/* adj171：当前行整行背景铺满层（随 inner transform 一起平移；宽度铺满编辑区）
+                  adj172：top 含内容层 padding-top 10px（否则背景整体偏上 10px） */}
               {cursor && (
                 <div
                   className="editor-current-line-bg"
-                  style={{ top: (cursor.line - 1) * editorLineH }}
+                  style={{ top: 10 + (cursor.line - 1) * editorLineH }}
                 />
               )}
               <div
