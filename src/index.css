@@ -728,12 +728,14 @@ body {
   color: var(--jp-hl-plain);
 }
 
-/* adj165：自动提示浮层（& 修饰符 / 跳房子输入提示） */
+/* adj165：自动提示浮层（& 修饰符 / 跳房子 / 描述头）；adj192：max-height+滚动防溢出 */
 .editor-completion {
   position: absolute;
   z-index: 20;
   min-width: 220px;
   max-width: 320px;
+  max-height: 300px;
+  overflow-y: auto;
   background: var(--jp-bg-panel);
   border: 1px solid var(--jp-border);
   border-radius: 8px;

@@ -45,8 +45,9 @@ export const VOLTA_HINTS: { code: string; label: string }[] = [
   { code: '"+其他"', label: '自定义注释（引号内任意）' },
 ]
 
-/** adj186：描述头（行首 Tab 提示）——code + 中文说明（与 parser HEADER_KEYS 一致） */
-export const HEADER_HINTS: { code: string; label: string }[] = [
+/** adj186：描述头（行首 Tab 提示）——code + 中文说明；cursorAt 可选（插入后光标停靠位置，
+ *  用于带声部名模板让光标落在引号内待输入）；adj192：加入 Q:/C: 及多声部/带声部名变体 */
+export const HEADER_HINTS: { code: string; label: string; cursorAt?: number }[] = [
   { code: 'V:', label: '版本号（必须，如 V: 1.0）' },
   { code: 'B:', label: '标题（首个为主标题，其后为副标题）' },
   { code: 'Z:', label: '作者（居右显示）' },
@@ -55,6 +56,14 @@ export const HEADER_HINTS: { code: string; label: string }[] = [
   { code: 'J:', label: '节拍（数字=拍/分，或文字）' },
   { code: 'Y:', label: '乐器（可多次，显示在副标题下）' },
   { code: 'S:', label: '说明文字（谱尾，支持 \\n 换行）' },
+  { code: 'Q:', label: '曲行（声部 1，可省略编号）' },
+  { code: 'C:', label: '歌词行（依附上一曲行）' },
+  { code: 'Q1:', label: '曲行·声部 1' },
+  { code: 'Q2:', label: '曲行·声部 2' },
+  { code: 'C1:', label: '歌词行·声部 1' },
+  { code: 'C2:', label: '歌词行·声部 2' },
+  { code: 'Q1"声部名":', label: '曲行·声部 1 带名称', cursorAt: 4 },
+  { code: 'Q2"声部名":', label: '曲行·声部 2 带名称', cursorAt: 4 },
 ]
 
 /** 判断某字符是否可组成 & 编码（字母数字） */

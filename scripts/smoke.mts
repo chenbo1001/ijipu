@@ -239,8 +239,9 @@ const hlYS = highlightCode('V: 1.0\nB: t\nY: 笛子\nS: 说明\nQ: 1 2 3 4 |\n')
 check('adj186 Y: 行头高亮为 hl-line-header（青色）', hlYS.includes('<span class="hl-line-header">Y:') || hlYS.includes('hl-line-header">Y:'), '')
 check('adj186 S: 行头高亮为 hl-line-header（青色）', hlYS.includes('<span class="hl-line-header">S:') || hlYS.includes('hl-line-header">S:'), '')
 check('adj186 V:/B: 行头同样高亮', hlYS.includes('hl-line-header">V:') && hlYS.includes('hl-line-header">B:'), '')
-// adj186：描述头提示列表覆盖全部描述头（V/B/Z/D/P/J/Y/S）
-check('adj186 描述头提示含 8 项（V/B/Z/D/P/J/Y/S）', HEADER_HINTS.length === 8 && ['V:', 'B:', 'Z:', 'D:', 'P:', 'J:', 'Y:', 'S:'].every((k) => HEADER_HINTS.some((h) => h.code === k)), JSON.stringify(HEADER_HINTS.map((h) => h.code)))
+// adj186：描述头提示列表覆盖全部描述头；adj192：加入 Q:/C: 及多声部/带声部名变体
+check('adj192 描述头提示含 V/B/Z/D/P/J/Y/S/Q/C 及声部变体', HEADER_HINTS.length >= 16 && ['V:', 'B:', 'Z:', 'D:', 'P:', 'J:', 'Y:', 'S:', 'Q:', 'C:', 'Q1:', 'Q2:', 'C1:', 'C2:'].every((k) => HEADER_HINTS.some((h) => h.code === k)), JSON.stringify(HEADER_HINTS.map((h) => h.code)))
+check('adj192 带声部名模板含 cursorAt（光标停引号内）', HEADER_HINTS.some((h) => h.code === 'Q1"声部名":' && h.cursorAt === 4) && HEADER_HINTS.some((h) => h.code === 'Q2"声部名":' && h.cursorAt === 4), JSON.stringify(HEADER_HINTS.filter((h) => h.cursorAt !== undefined)))
 // adj165：当前行背景 + 当前音符区块背景（光标行/列；Q: 为 3 字符，rest 从 col=3 起）
 // adj171：当前行整行背景由 EditorPane 铺满层渲染，highlightCode 不再输出 hl-current-line
 const hlCur = highlightCode('V: 1.0\nB: t\nQ: 1 2 3 4 |\n', undefined, { line: 3, col: 3 })

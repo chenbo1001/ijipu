@@ -29,8 +29,8 @@ const EDITOR_FONT_OPTIONS: { label: string; value: string }[] = [
 interface Completion {
   /** 提示类型：修饰符（& 编码）、跳房子（[ 后）、描述头（行首 Tab） */
   kind: 'modifier' | 'volta' | 'header'
-  /** 候选列表 */
-  items: { code: string; label: string }[]
+  /** 候选列表（cursorAt = 插入后光标停靠位置，用于带声部名模板） */
+  items: { code: string; label: string; cursorAt?: number }[]
   /** 当前高亮索引 */
   index: number
   /** 光标触发位置（相对 textarea 内容区，浮层定位用） */
@@ -246,15 +246,18 @@ export function EditorPane() {
     const lineBefore = before.slice(before.lastIndexOf('\n') + 1)
     let insert = item.code
     let replaceLen = 0
+    let cursorAt: number | null = null
     if (c.kind === 'header') {
-      // adj186：描述头行首补全——插入 "V: " 并带一个空格等待输入内容
+      // adj186：描述头行首补全；adj192：带声部名模板（cursorAt）光标停在引号内待输入
       insert = item.code + ' '
+      cursorAt = item.cursorAt ?? insert.length
     } else if (c.kind === 'modifier') {
       // adj177：用户已输入 &（lineBefore 以 & 结尾），只补全其后的字母——
       // 不再拼接第二个 &（此前 replaceLen 仅替换字母、insert 又含 &，会变成 &&tr）
       const m = /&([a-zA-Z0-9]*)$/.exec(lineBefore)
       if (m) replaceLen = m[1].length
       insert = item.code + ' '
+      cursorAt = insert.length
     } else {
       // 替换 [ 后已输入内容；插入 [ 本身 + 候选 + ]（无 ] 的候选不加）
       const b = lineBefore.lastIndexOf('[')
@@ -263,10 +266,11 @@ export function EditorPane() {
       insert = item.code
       if (!insert.includes(']')) insert += ' '
       if (insert.startsWith('"') && !insert.endsWith('"')) insert += ' '
+      cursorAt = insert.length
     }
     const next = ta.value.slice(0, pos - replaceLen) + insert + ta.value.slice(pos)
     setCode(next)
-    const newPos = pos - replaceLen + insert.length
+    const newPos = pos - replaceLen + (cursorAt ?? insert.length)
     requestAnimationFrame(() => {
       if (taRef.current) {
         taRef.current.selectionStart = taRef.current.selectionEnd = newPos
@@ -496,30 +500,57 @@ export function EditorPane() {
               />
             </div>
           </div>
-          {/* adj165：自动提示浮层（& 修饰符 / 跳房子输入提示）；adj177：定位含内容层 padding（上 10 左 14） */}
+          {/* adj165：自动提示浮层（& 修饰符 / 跳房子 / 描述头）；adj177：定位含内容层 padding（上 10 左 14）；
+              adj192：靠下输入时浮层改为在光标上方弹出（否则列表超出窗口底部无法选择） */}
           {completion && (
-            <div
-              className="editor-completion"
-              style={{ left: completion.x + 14, top: completion.y + 10 }}
-            >
-              {completion.items.map((it, i) => (
-                <div
-                  key={it.code}
-                  className={`completion-item${i === completion.index ? ' active' : ''}`}
-                  onMouseDown={(e) => {
-                    e.preventDefault() // 防止 textarea 失焦
-                    const c = { ...completion, index: i }
-                    applyCompletion(c)
-                  }}
-                >
-                  <span className="completion-code">{it.code}</span>
-                  <span className="completion-label">{it.label}</span>
-                </div>
-              ))}
-            </div>
+            <CompletionPopover
+              completion={completion}
+              containerRef={taRef.current?.parentElement ?? null}
+              lineH={editorLineH}
+              onPick={(c) => applyCompletion(c)}
+            />
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/** adj192：自动提示浮层——靠下时翻转到光标上方显示，避免列表超出窗口底部 */
+function CompletionPopover({
+  completion,
+  containerRef,
+  lineH,
+  onPick,
+}: {
+  completion: Completion
+  containerRef: HTMLElement | null
+  lineH: number
+  onPick: (c: Completion) => void
+}) {
+  const { x, y, items } = completion
+  // 估算浮层高：每项约 24px + 上下 padding
+  const estH = items.length * 24 + 8
+  const containerH = containerRef?.clientHeight ?? 600
+  // 默认显示在光标下方（y 已含行高）；若超出容器底部则翻转到光标上方
+  const below = y + 10
+  const flip = below + estH > containerH
+  const top = flip ? Math.max(4, y - lineH - estH + 10) : below
+  return (
+    <div className="editor-completion" style={{ left: x + 14, top }}>
+      {items.map((it, i) => (
+        <div
+          key={it.code}
+          className={`completion-item${i === completion.index ? ' active' : ''}`}
+          onMouseDown={(e) => {
+            e.preventDefault() // 防止 textarea 失焦
+            onPick({ ...completion, index: i })
+          }}
+        >
+          <span className="completion-code">{it.code}</span>
+          <span className="completion-label">{it.label}</span>
+        </div>
+      ))}
     </div>
   )
 }
