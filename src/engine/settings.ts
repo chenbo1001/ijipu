@@ -81,10 +81,14 @@ export function writeJpsConfig(code: string, cfg: PageConfig): string {
   if (idx >= 0) {
     lines[idx] = line
   } else {
-    // 追加：末尾空行则直接接，否则补空行
+    // adj200：追加前默认补 3 个空行（原有 1 个）——把 # jps-config 与用户正文隔开，
+    // 避免用户误改/误删设置行
     const tail = lines[lines.length - 1]
-    if (tail === undefined || tail === '') lines.push(line)
-    else lines.push('', line)
+    if (tail === undefined || tail === '') {
+      lines.push('', '', line)
+    } else {
+      lines.push('', '', '', line)
+    }
   }
   return lines.join('\n')
 }

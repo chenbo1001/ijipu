@@ -193,12 +193,14 @@ function segNeedW(seg: BarSeg, noteSize = 18): number {
  *  ② 最小间距 1px：每拍 need = max(自然宽 14, 12.16 / 拍内最小时值)；
  *  ③ 超拍挤占：拍宽不足以按最小间距容纳时，该拍固定为 need（宽 = 拍时值 × need），
  *     其余正常拍平均分享剩余宽度（迭代收敛）。
- * 返回每拍 perBeat；总宽 = Σ 拍时值 × perBeat ≈ avail（极端兜底等比压缩不溢出）。
+ * 返回每拍 perBeat；stretch=true 时总宽 ≈ avail（两端对齐撑满，极端兜底等比压缩不溢出）；
+ * stretch=false 时按自然宽排布（行尾留白，adj198：≤3 小节的行不分散对齐）。
  */
 function allocatePerBeats(
   beats: { dur: number; minDur: number; extra?: number }[],
   avail: number,
   noteSize = 18,
+  stretch = true,
 ): number[] {
   const n = beats.length
   if (n === 0) return []
@@ -229,6 +231,10 @@ function allocatePerBeats(
   if (total > avail && total > 0) {
     const scale = avail / total
     return beats.map((_bb, p) => (fixed[p] ? need[p] * scale : pb * scale))
+  }
+  // adj198：不撑满模式——按自然宽排布（每拍 = need，行尾留白）
+  if (!stretch) {
+    return beats.map((_bb, p) => need[p])
   }
   // adj85：总宽不足 avail（密集拍 need 大、正常拍均分后仍有富余）时等比放大，
   // 保证行内容撑满整行（两端对齐），避免行尾留白
@@ -554,7 +560,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     return dur
   }
 
-  /** 排布一个曲行（bars：每拍宽按行总拍数平均、小节宽=拍数×每拍宽；frag：超长小节按拍数铺满） */
+  /** 排布一个曲行（bars：每拍宽按行总拍数平均、小节宽=拍数×每拍宽；frag：超长小节按拍数铺满）
+   *  refPerBeat：前面曲部行的平均每拍宽（adj199：未撑满行前面有曲部时按小节线对齐，
+   *  每小节宽与前面行一致，而非自然宽）；返回该行平均每拍宽（供后续行对齐）。 */
   const placeMusicRow = (
     segs: BarSeg[],
     row: LayoutRow,
@@ -565,7 +573,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     geciSize: number,
     sp: Spacing,
     slotStart: number,
-  ) => {
+    isLastRow = false,
+    refPerBeat?: number,
+  ): number | undefined => {
     const page = pages[pageIndex]
     // 小节线高度（adj50/69）：与音符数字等高（墨迹高 ≈0.8em，上沿基线-0.8×字号、下沿基线+0.5×s）
     // 再向上延伸 4px×s、向下延伸 4px×s → 基线-18.4×s .. 基线+4.5×s（随曲部字号缩放）
@@ -680,7 +690,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         slotIndex++
       }
       finishDyn(x + BAR_PAD + (beatStart[beatsInfo.length - 1] ?? 0) + (beatW[beatsInfo.length - 1] ?? 0))
-      return
+      return undefined // frag 行不参与小节线对齐参考
     }
 
     // bars 行（adj35 拍级每拍宽）：
@@ -756,7 +766,17 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         }
       }
     }
-    const perBeats = allocatePerBeats(beatsInfo, availW - pads - noteGap - bracketPadTotal, m.noteSize)
+    // adj198：≤3 小节的行不分散对齐（自然宽、行尾留白）——含最后一行；
+    // 仅「小节数 > 3 且非最后一行」才撑满两端对齐。
+    // adj199：未撑满行前面有曲部（refPerBeat 提供）时，按小节线对齐——
+    // 每拍宽直接取参考行平均每拍宽（不加 BPW_NATURAL 下限：撑满行每拍宽可小于自然宽，
+    // 抬升会破坏小节线对齐），使各小节宽与前面行一致（纵向小节线对齐）
+    const barCount = row.end - row.start - leadingEmpty
+    const stretch = barCount > 3 && !isLastRow
+    const perBeats =
+      !stretch && refPerBeat !== undefined
+        ? beatsInfo.map(() => refPerBeat)
+        : allocatePerBeats(beatsInfo, availW - pads - noteGap - bracketPadTotal, m.noteSize, stretch)
 
     // 段列表（adj36）：附点段（dots 部分）每拍宽 = 音符基础时值拍的 perBeat，
     // 不被所在拍（超拍）放大 —— 附点只占前音符时值的 0.5
@@ -976,6 +996,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       segBeat += isEmptyLead ? 0 : segBeats(seg)
     }
     finishDyn(x) // 行尾关闭未闭合渐强
+    // adj199：返回该行平均每拍宽（撑满行 → 实际均分宽；未撑满行 → 参考宽/自然宽），
+    // 供后续行按小节线对齐
+    const totalBeats = beatsInfo.reduce((a, b) => a + b.dur, 0)
+    return totalBeats > 0 ? beatsInfo.reduce((a, b, p) => a + b.dur * perBeats[p], 0) / totalBeats : undefined
   }
 
   /** 处理一个单声部组 */
@@ -1000,6 +1024,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       }
     }
 
+    // adj199：参考每拍宽（前面曲部行的平均每拍宽，供未撑满行按小节线对齐）
+    let refPerBeat: number | undefined
     rows.forEach((row, ri) => {
       const sp = spacingFor(config, pageIndex)
       const rowH = lineHeightOf(config, m, sp, lyrics.length)
@@ -1010,7 +1036,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         startPage()
         y = m.bodyTopH // 后续页不占描述头区域
       }
-      placeMusicRow(segs, row, groupIndex, voice, y, lyricMaps, geciSize, sp, rowSlots[ri])
+      // adj198：最后一行标记（≤3 小节的行不分散对齐）；adj199：传参考每拍宽
+      const pb = placeMusicRow(segs, row, groupIndex, voice, y, lyricMaps, geciSize, sp, rowSlots[ri], ri === rows.length - 1, refPerBeat)
+      if (row.kind === 'bars' && pb !== undefined) refPerBeat = pb
       y += rowH
     })
   }
@@ -1424,6 +1452,17 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     return minX
   }
 
+  /** 行末小节线 x（该行 x 最大的小节线；无则 null；adj199 自然宽行连音线左半终点） */
+  const rowEndBarX = (rowIdx: number): number | null => {
+    const r = rows[rowIdx]
+    const barY = r.y - 18.4
+    let maxX: number | null = null
+    for (const b of pages[r.page].barlines) {
+      if (Math.abs(b.yTop - barY) < 1 && (maxX === null || b.x > maxX)) maxX = b.x
+    }
+    return maxX
+  }
+
   for (let si = 0; si < slurInfos.length; si++) {
     const { sp, a, b, rowA, rowB } = slurInfos[si]
     const noteCount = sp.end - sp.start + 1 // 覆盖的 token 数（tupletCount 标签用，adj43）
@@ -1463,8 +1502,13 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       // 行首/行末均为连音符最高点；相隔多行视为误输入，不渲染
       const rA = rows[rowA]
       const lastA = rA.notes[rA.notes.length - 1]
-      // adj143：上一行左半横线延伸到**页面右边距**（原连到行末小节线，效果不理想）
-      const xEndA = pages[rA.page].width - config.margin_right
+      // adj143：撑满行左半横线延伸到**页面右边距**（原连到行末小节线，效果不理想）；
+      // adj199：自然宽行（未撑满，≤3 小节/最后一行）左半到行末小节线即可，不延伸到右边距
+      const rowAEndBar = rowEndBarX(rowA)
+      const xEndA =
+        rowAEndBar !== null && rowAEndBar < pages[rA.page].width - config.margin_right - 10
+          ? rowAEndBar
+          : pages[rA.page].width - config.margin_right
       // adj106：下一行始端 = 行首小节线（有则从其开始）否则从左边距开始
       const xStartB = rowStartBarX(rowB) ?? config.margin_left
       pages[rA.page].slurs.push({

@@ -195,6 +195,20 @@ export function EditorPane() {
     return res
   }, [code, contentW, editorFontSize, editorLineH, editorFont])
 
+  // adj201：视觉行起点偏移（每源码行前的累计视觉行数 × 行高）——折行后当前行
+  // 背景/提示定位等按视觉行计算，不再按源码行（此前折行时光标行背景错位）
+  const visualTopOfLine = useMemo(() => {
+    const tops: number[] = []
+    let acc = 0
+    for (const v of visualLines) {
+      tops.push(acc)
+      acc += v
+    }
+    return tops
+  }, [visualLines])
+  const cursorVisualTop = cursor ? visualTopOfLine[cursor.line - 1] ?? 0 : 0
+  const cursorVisualH = cursor ? (visualLines[cursor.line - 1] ?? 1) * editorLineH : editorLineH
+
   // 光标写入 store + 谱面联动（M3）
   const onSelect = () => {
     const ta = taRef.current
@@ -234,16 +248,15 @@ export function EditorPane() {
     const pos = ta.selectionStart
     const before = ta.value.slice(0, pos)
     const lineBefore = before.slice(before.lastIndexOf('\n') + 1)
+    // adj201：浮层 y 按视觉行（折行后光标行下有折行占位）
+    const compPos = (line: number, col: number) => ({
+      x: col * editorFontSize * 0.6,
+      y: (visualTopOfLine[line - 1] ?? 0) + editorLineH,
+    })
     // adj186：描述头区域行首 Tab → 列出所有描述头（行首 = 光标前仅空白）
     if (/^\s*$/.test(lineBefore)) {
       const { line, col } = lineColOf(ta.value, pos)
-      setCompletion({
-        kind: 'header',
-        items: HEADER_HINTS,
-        index: 0,
-        x: col * editorFontSize * 0.6,
-        y: (line - 1) * Math.round(editorFontSize * 1.7) + Math.round(editorFontSize * 1.7),
-      })
+      setCompletion({ kind: 'header', items: HEADER_HINTS, index: 0, ...compPos(line, col) })
       return
     }
     // 仅 Q 行（曲行）内提示
@@ -259,14 +272,8 @@ export function EditorPane() {
         return
       }
       const { line, col } = lineColOf(ta.value, pos)
-      // adj177：浮层定位在光标字符下方——x = 列 × 等宽字符宽（0.6×fs），y = 行顶 + 行高
-      setCompletion({
-        kind: 'modifier',
-        items,
-        index: 0,
-        x: col * editorFontSize * 0.6,
-        y: (line - 1) * Math.round(editorFontSize * 1.7) + Math.round(editorFontSize * 1.7),
-      })
+      // adj177：浮层定位在光标字符下方
+      setCompletion({ kind: 'modifier', items, index: 0, ...compPos(line, col) })
       return
     }
     const volta = voltaPrefix(lineBefore)
@@ -278,13 +285,7 @@ export function EditorPane() {
       }
       const { line, col } = lineColOf(ta.value, pos)
       // adj177：与修饰符提示一致，定位在光标字符下方
-      setCompletion({
-        kind: 'volta',
-        items,
-        index: 0,
-        x: col * editorFontSize * 0.6,
-        y: (line - 1) * Math.round(editorFontSize * 1.7) + Math.round(editorFontSize * 1.7),
-      })
+      setCompletion({ kind: 'volta', items, index: 0, ...compPos(line, col) })
       return
     }
     setCompletion(null)
@@ -561,7 +562,7 @@ export function EditorPane() {
               {cursor && (
                 <div
                   className="editor-current-line-bg"
-                  style={{ top: 10 + (cursor.line - 1) * editorLineH }}
+                  style={{ top: 10 + cursorVisualTop, height: cursorVisualH }}
                 />
               )}
               <div
