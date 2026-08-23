@@ -939,6 +939,25 @@ const rj3 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 | 1 2 3 4
 const lay3 = layoutScore(rj3, defaultPageConfig)
 const maxRight3 = Math.max(...lay3.pages[0].notes.map(segEnd))
 check('adj205 单行 3 小节（≤3）仍自然宽不撑满', maxRight3 < 515.28 - 100, `right=${maxRight3}`)
+// adj211：曲部最后一行以 ||（终止线）结束且 ≤3 小节时按自然宽排布
+// ——终止线行音乐已结束，不参与前面行的小节线对齐（refPerBeat）
+{
+  // 8 小节 + ||：断成 2 行，最后一行 3 小节 + ||（≤3）→ 自然宽（316.2），
+  // 而非按前面行对齐（对照同谱 | 结尾为 291.1）
+  const r211 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 5 6 7 1 ||\n')
+  const lay211 = layoutScore(r211, defaultPageConfig)
+  const rows211 = [...new Set(lay211.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
+  const lastRow211 = lay211.pages[0].notes.filter((n) => n.y === rows211[rows211.length - 1])
+  const lastRight211 = Math.max(...lastRow211.map(segEnd))
+  check('adj211 最后一行 || 终止（3 小节）→ 自然宽 316.2', Math.abs(lastRight211 - 316.2) < 1, `right=${lastRight211}`)
+  // 对照：同谱 | 结尾，最后一行 3 小节仍按前面行对齐（291.1）
+  const r211b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 5 6 7 1 |\n')
+  const lay211b = layoutScore(r211b, defaultPageConfig)
+  const rows211b = [...new Set(lay211b.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
+  const lastRow211b = lay211b.pages[0].notes.filter((n) => n.y === rows211b[rows211b.length - 1])
+  const lastRight211b = Math.max(...lastRow211b.map(segEnd))
+  check('adj211 对照：| 结尾最后一行仍按前面行对齐（291.1）', Math.abs(lastRight211b - 291.1) < 1, `right=${lastRight211b}`)
+}
 
 // ---- 23. 细节修复（adj2） ----
 console.log('[23] adj2 fixes')

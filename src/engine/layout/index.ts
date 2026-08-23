@@ -773,8 +773,11 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     // 抬升会破坏小节线对齐），使各小节宽与前面行一致（纵向小节线对齐）
     const barCount = row.end - row.start - leadingEmpty
     const stretch = barCount > 3
+    // adj211：行末以 ||（终止线）结束且 ≤3 小节时，不参与前面行的小节线对齐
+    // （refPerBeat）——终止线行音乐已结束，无需与其他行纵向对齐小节线，按自然宽排布
+    const endsByTerminal = segs[row.end - 1]?.bar?.type === '||'
     const perBeats =
-      !stretch && refPerBeat !== undefined
+      !stretch && refPerBeat !== undefined && !endsByTerminal
         ? beatsInfo.map(() => refPerBeat)
         : allocatePerBeats(beatsInfo, availW - pads - noteGap - bracketPadTotal, m.noteSize, stretch)
 
