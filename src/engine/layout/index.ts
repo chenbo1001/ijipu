@@ -934,7 +934,11 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         // 行尾不再画（避免番号溢出右边界、跳房子跨行反向）
         const movesToNextRow =
           bar.voltaStart && b === row.end - 1 && row.end < segs.length
-        if (!movesToNextRow && !(isRowStartEmpty && bar.type === '|')) {
+        // adj137：行首空 seg 的普通单线 | 跳过（行从边距开始）；
+        // 带跳房子（voltaStart/voltaEnd）或小节线修饰符的行首线**不跳过**——否则起点/标记丢失
+        const skipRowStart =
+          isRowStartEmpty && bar.type === '|' && !bar.voltaStart && !bar.voltaEnd && !bar.mark
+        if (!movesToNextRow && !skipRowStart) {
           // 小节线整体不超出页面内容区（左/右边距内，adj）
           const lineX0 =
             isEmptyLead
@@ -1244,9 +1248,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         } else {
           // adj55：先进后出 —— pop 最近打开的开括号；栈跨行保留（未闭合延续到后续行）
           const s = sQueue.pop()
-          // 退化对（起点=终点，如 "(4)" 只修饰单音符）不渲染；
+          // 退化对（起点=终点，如 "(2)"）也记录（adj137：供外层连音线分割），但不渲染自身；
           // adj91：连音线嵌套最多两层（depth 0/1），第三层（如 (1 (2 (3 5))) 的 (3 5)）不渲染
-          if (s && s.start !== -1 && lastNote > s.start && s.depth < 2) {
+          if (s && s.start !== -1 && lastNote >= s.start && s.depth < 2) {
             slurPairs.push({ start: s.start, end: lastNote, depth: s.depth, tuplet: s.tuplet, plus: s.plus, minus: s.minus })
           }
         }
@@ -1287,26 +1291,59 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     b: PlacedToken
     rowA: number
     rowB: number
+    /** 渲染段（adj137：外层连音线被内层括号对分割，如 (1 (2) 3) → [1,2] 与 [2,3]） */
+    segs: [number, number][]
+  }
+  /** 计算连音线渲染段：被范围内退化内层对（单音符，如 (1 (2) 3) 的 (2)）分割 */
+  const segsOf = (sp: (typeof slurPairs)[number]): [number, number][] => {
+    if (sp.start === sp.end) return [] // 退化对自身不渲染
+    // adj137：仅退化内层对（p.start === p.end，范围在外部内部）打断外层；
+    // 普通嵌套（内层多音符）保持整条（既有行为）
+    const inner = slurPairs
+      .filter((p) => p.depth > sp.depth && p.start === p.end && p.start > sp.start && p.end < sp.end)
+      .sort((a, b) => a.start - b.start)
+    if (inner.length === 0) return [[sp.start, sp.end]]
+    const segs: [number, number][] = []
+    let cur = sp.start
+    for (const p of inner) {
+      if (p.start < cur) continue
+      if (p.start > cur) segs.push([cur, p.start])
+      cur = Math.max(cur, p.end)
+      if (cur >= sp.end) break
+    }
+    if (cur < sp.end) segs.push([cur, sp.end])
+    return segs.length > 0 ? segs : [[sp.start, sp.end]]
   }
   const slurInfos: SlurInfo[] = []
   for (const sp of slurPairs) {
-    const a = notesByIndex.get(sp.start)
-    const b = notesByIndex.get(sp.end)
-    const rowA = a ? rowOfNote.get(sp.start) : undefined
-    const rowB = b ? rowOfNote.get(sp.end) : undefined
-    if (!a || !b || rowA === undefined || rowB === undefined) continue
-    slurInfos.push({ sp, a, b, rowA, rowB })
+    // adj137：同行外层才被退化内层打断；跨行外层保持整段（LIFO 跨行两半行为不变）
+    const aAll = notesByIndex.get(sp.start)
+    const bAll = notesByIndex.get(sp.end)
+    const rowAllA = aAll ? rowOfNote.get(sp.start) : undefined
+    const rowAllB = bAll ? rowOfNote.get(sp.end) : undefined
+    const segs =
+      rowAllA !== undefined && rowAllA === rowAllB && sp.start !== sp.end ? segsOf(sp) : sp.start === sp.end ? [] : [[sp.start, sp.end]]
+    if (segs.length === 0) continue // 退化对不渲染
+    for (const [s0, s1] of segs) {
+      const a = notesByIndex.get(s0)
+      const b = notesByIndex.get(s1)
+      const rowA = a ? rowOfNote.get(s0) : undefined
+      const rowB = b ? rowOfNote.get(s1) : undefined
+      if (!a || !b || rowA === undefined || rowB === undefined) continue
+      slurInfos.push({ sp, a, b, rowA, rowB, segs: [[s0, s1]] })
+    }
   }
   // adj44：每对连音符的嵌套抬升 = 与其音符范围重叠的所有连音符的最大深度差 ×2
   // （多层嵌套每层抬 2px（adj95，原 7px 过疏）；独立连音符（无更深的连音符与之重叠）抬升 0，
   //  避免同排其他嵌套把它抬高——间距保持紧凑不虚大）
+  // adj137：重叠判定用严格包含（相邻段如 [1,2] 与 [2,3] 端点相接不算重叠，保持等高）
   const nestedRaise: number[] = slurInfos.map((info) => {
     let maxOverlap = info.sp.depth
     for (const other of slurInfos) {
       if (other === info) continue
       const o = other.sp
       // 音符范围重叠（含跨行对）且深度更深 → 视为嵌套/包含关系
-      if (o.depth > info.sp.depth && o.start <= info.sp.end && info.sp.start <= o.end) {
+      if (o.depth > info.sp.depth && o.start < info.sp.end && info.sp.start < o.end) {
         maxOverlap = Math.max(maxOverlap, o.depth)
       }
     }

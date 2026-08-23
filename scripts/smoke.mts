@@ -536,6 +536,21 @@ const lay134v = layoutScore(r134v, defaultPageConfig)
 const s134v = lay134v.pages[0].slurs[0]
 const v134v = lay134v.pages[0].barlines.find((b) => b.voltaStart)
 check('adj134 连音线在跳房子线下方', s134v !== undefined && v134v !== undefined && s134v.y >= v134v.yTop - 8 + 2 - 0.5, `slur=${s134v?.y} volta=${v134v ? v134v.yTop - 8 : '?'}`)
+// adj137：连音线 (1 (2) 3) 被退化内层 (2) 打断为两段（1→2、2→3）
+const r137a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1 (2) 3) 4 |\n')
+const s137a = layoutScore(r137a, defaultPageConfig).pages[0].slurs
+check('adj137 (1 (2) 3) 拆两段连音线（1→2、2→3）', s137a.length === 2 && s137a[0].x2 < s137a[1].x1 + 0.5, `slurs=${s137a.map((s) => `${s.x1}→${s.x2}`).join(' | ')}`)
+// adj137：两段跳房子 |["1" ... |]["2" ... |] 各渲染一段（从小节线到小节线）
+const r137b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |["1" 1 2 3 4 |]["2" 5 6 7 1 |] 2 3 4 5 |\n')
+const lay137b = layoutScore(r137b, defaultPageConfig)
+const b137b = lay137b.pages[0].barlines
+const sStart1 = b137b.find((b) => b.voltaStart && b.voltaStart.comment === '1')
+const sEnd1 = b137b.find((b) => b.voltaEnd)
+const sStart2 = b137b.filter((b) => b.voltaStart).find((b) => b.voltaStart?.comment === '2')
+check('adj137 两段跳房子：4 根小节线（2 起 2 止）', b137b.filter((b) => b.voltaStart || b.voltaEnd).length === 4 && !!sStart1 && !!sEnd1 && !!sStart2, JSON.stringify(b137b.map((b) => ({ t: b.type, s: !!b.voltaStart, e: !!b.voltaEnd, c: b.voltaStart?.comment }))))
+const svg137b = renderScoreToSvg(lay137b)[0]
+const voltas137b = [...svg137b.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)" stroke="#1b1b1b" stroke-width="1"/g)].filter((m) => Number(m[3]) - Number(m[1]) > 20).map((m) => `${m[1]}→${m[3]}`)
+check('adj137 两段跳房子渲染 2 条线', voltas137b.length === 2, voltas137b.join(' '))
 check('adj109 滑音渲染弧线（Q）+ 箭头（fill 三角）', svg109.includes(' Q '), '')
 check('adj112 tr 文本加粗', /font-weight="bold"[^>]*>tr</.test(svg109), '')
 // adj81：括号加粗 + 垂直居中于数字中心（dominant-baseline=central @ 基线-0.4×字号）
@@ -1731,11 +1746,9 @@ const sortedVolta107 = [...voltaLines107].sort((a, b) => a.y1 - b.y1)
 const leftHalf107 = sortedVolta107[0]
 const rightHalf107 = sortedVolta107[1]
 const row1Bars107 = lay107.pages[0].barlines.filter((b) => Math.abs(b.yTop - vStart107.yTop) < 1)
-const row2Bars107 = lay107.pages[0].barlines.filter((b) => Math.abs(b.yTop - vEnd107.yTop) < 1)
 const row1LastX107 = Math.max(...row1Bars107.map((b) => b.x))
-const row2FirstX107 = Math.min(...row2Bars107.map((b) => b.x))
 check('adj107 左半：起点线+2 → 行末小节线-2', leftHalf107 !== undefined && Math.abs(leftHalf107.x1 - (vStart107.x + 2)) < 0.5 && Math.abs(leftHalf107.x2 - (row1LastX107 - 2)) < 0.5, JSON.stringify(leftHalf107))
-check('adj107 右半：行首小节线+2 → 终点线-2', rightHalf107 !== undefined && Math.abs(rightHalf107.x1 - (row2FirstX107 + 2)) < 0.5 && Math.abs(rightHalf107.x2 - (vEnd107.x - 2)) < 0.5, JSON.stringify(rightHalf107))
+check('adj137 右半：从行首（边距+2）连到终点线-2', rightHalf107 !== undefined && Math.abs(rightHalf107.x1 - 82) < 0.5 && Math.abs(rightHalf107.x2 - (vEnd107.x - 2)) < 0.5, JSON.stringify(rightHalf107))
 
 // ---- 57. 排版虚线行结构（adj72）：曲部行数字中心 / 多声部声部序号 / 词部行虚线 ----
 console.log('[57] row guides (adj72)')

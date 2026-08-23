@@ -860,7 +860,6 @@ function renderVoiceBlocks(page: ScorePage, vb: VoiceBlock): string {
 function renderVoltaLine(
   start: PlacedBarline,
   end: PlacedBarline | null,
-  firstOfRow: Map<number, PlacedBarline>,
   lastOfRow: Map<number, PlacedBarline>,
   noteSize = 18,
   marginLeft = 40,
@@ -884,7 +883,7 @@ function renderVoltaLine(
     ? `<text x="${x1 + 2}" y="${y + 8}" font-size="${Math.max(8, Math.round(noteSize * VOLTA_COMMENT_FONT_RATIO))}" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(label)}</text>`
     : ''
   if (end && end.yTop !== start.yTop) {
-    // 跨行：左半（起点行）到该行末小节线、右半（终点行）从行首小节线/边距到终点
+    // 跨行：左半（起点行）到该行末小节线、右半从行首（边距）连到终点小节线（adj137）
     const lastA = lastOfRow.get(start.yTop)
     const xEndA = lastA ? lastA.x - 2 : start.x + 60
     parts.push(
@@ -892,8 +891,7 @@ function renderVoltaLine(
     )
     parts.push(labelSvg)
     const yB = end.yTop - VOLTA_BAR_GAP - plus * VOLTA_RAISE
-    const firstB = firstOfRow.get(end.yTop)
-    const xStartB = firstB ? firstB.x + 2 : marginLeft + 2
+    const xStartB = marginLeft + 2 // 右半从行首（边距）开始连接
     const x2B = end.x - 2
     parts.push(
       `<line x1="${xStartB}" y1="${yB}" x2="${x2B}" y2="${yB}" stroke="#1b1b1b" stroke-width="1"/>`,
@@ -942,11 +940,11 @@ function renderVoltas(barlines: PlacedBarline[], noteSize = 18, marginLeft = 40)
     if (bar.voltaStart && !open) {
       open = bar
     } else if (bar.voltaEnd && open) {
-      parts.push(renderVoltaLine(open, bar, firstOfRow, lastOfRow, noteSize, marginLeft))
+      parts.push(renderVoltaLine(open, bar, lastOfRow, noteSize, marginLeft))
       open = null
     }
   }
-  if (open) parts.push(renderVoltaLine(open, null, firstOfRow, lastOfRow, noteSize, marginLeft))
+  if (open) parts.push(renderVoltaLine(open, null, lastOfRow, noteSize, marginLeft))
   return parts.join('\n')
 }
 
