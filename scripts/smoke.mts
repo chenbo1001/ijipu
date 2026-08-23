@@ -393,9 +393,9 @@ const layVo = layoutScore(volta, defaultPageConfig)
 const voBars = layVo.pages[0].barlines
 check('跳房子起终点解析', voBars.some((b) => b.voltaStart?.open) && voBars.some((b) => b.voltaEnd))
 const svgVo = renderScoreToSvg(layVo)[0]
-// 跳房子线在 y = yTop-16 高度（adj50；adj59 线宽 1）
+// 跳房子线在 y = yTop-16 高度（adj50；adj150 线宽 0.8）
 const voY = voBars.find((b) => b.voltaStart)!.yTop - VOLTA_BAR_GAP
-const voltaLines = (svgVo.match(new RegExp(`y1="${voY}"[^>]*stroke-width="1"`, 'g')) ?? []).length
+const voltaLines = (svgVo.match(new RegExp(`y1="${voY}"[^>]*stroke-width="0.8"`, 'g')) ?? []).length
 check('SVG 含跳房子线（起竖+横+终竖 ≥3）', voltaLines >= 3, `got ${voltaLines}`)
 // 番号（小节线引号备注）与 [ 合并显示
 const volta2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"1." [ 3 4 ] 5 6 |\n')
@@ -410,7 +410,7 @@ const layVo3 = layoutScore(volta3, defaultPageConfig)
 const svgVo3 = renderScoreToSvg(layVo3)[0]
 const vo3Start = layVo3.pages[0].barlines.find((b) => b.voltaStart)
 const vo3Y = vo3Start ? vo3Start.yTop - VOLTA_BAR_GAP : NaN
-const openLines = (svgVo3.match(new RegExp(`y1="${vo3Y}"[^>]*stroke-width="1"`, 'g')) ?? []).length
+const openLines = (svgVo3.match(new RegExp(`y1="${vo3Y}"[^>]*stroke-width="0.8"`, 'g')) ?? []).length
 check('未封闭 [/ 只画起点+横线（2 条）', openLines === 2, `got ${openLines}`)
 
 // ---- 19. 连音线（M7c） ----
@@ -549,7 +549,7 @@ const sEnd1 = b137b.find((b) => b.voltaEnd)
 const sStart2 = b137b.filter((b) => b.voltaStart).find((b) => b.voltaStart?.comment === '2')
 check('adj139 两段跳房子共用小节线：线2 同时 voltaEnd+voltaStart', b137b.filter((b) => b.voltaStart || b.voltaEnd).length === 3 && !!sStart1 && !!sStart2 && !!b137b.find((b) => b.voltaEnd && b.voltaStart), JSON.stringify(b137b.map((b) => ({ t: b.type, s: !!b.voltaStart, e: !!b.voltaEnd, c: b.voltaStart?.comment }))))
 const svg137b = renderScoreToSvg(lay137b)[0]
-const voltas137b = [...svg137b.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)" stroke="#1b1b1b" stroke-width="1"/g)].filter((m) => Number(m[3]) - Number(m[1]) > 20).map((m) => `${m[1]}→${m[3]}`)
+const voltas137b = [...svg137b.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)" stroke="#1b1b1b" stroke-width="0.8"/g)].filter((m) => Number(m[3]) - Number(m[1]) > 20).map((m) => `${m[1]}→${m[3]}`)
 check('adj137 两段跳房子渲染 2 条线', voltas137b.length === 2, voltas137b.join(' '))
 check('adj109 滑音渲染弧线（Q）+ 箭头（fill 三角）', svg109.includes(' Q '), '')
 check('adj112 tr 文本加粗', /font-weight="bold"[^>]*>tr</.test(svg109), '')
@@ -582,9 +582,9 @@ const lr58c = lr58.groups[0].lyrics[0].chars
 check('引号注释挂到注释后第一个歌词字', lr58.errors.length === 0 && lr58c.find((c) => c.text === '三')?.note === '副歌', JSON.stringify(lr58c.map((c) => ({ t: c.text, note: c.note }))))
 const svgLr58 = renderScoreToSvg(layoutScore(lr58, defaultPageConfig))[0]
 check('歌词注释渲染在字前（灰色小字）', svgLr58.includes('>副歌<'), '')
-// adj58：连音线线宽 1
+// adj150：连音线线宽 0.8
 const svgSl58 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 ( 2 3 ) 4 |\n'), defaultPageConfig))[0]
-check('连音线线宽 1（adj58）', svgSl58.includes('stroke-width="1"') && !svgSl58.includes('fill="none" stroke="#1b1b1b" stroke-width="1.1"'), '')
+check('连音线线宽 0.8（adj150）', svgSl58.includes('stroke-width="0.8"') && !svgSl58.includes('fill="none" stroke="#1b1b1b" stroke-width="1.1"'), '')
 // adj67：|"P:2/4" 临时节拍 → 小节线右侧画分数（分子/横线/分母，与小节线等高）
 const r67 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"P:2/4" 3 4 |\n')
 const b67 = layoutScore(r67, defaultPageConfig).pages[0].barlines.find((b) => b.comment?.startsWith('P:'))
@@ -1739,7 +1739,7 @@ const vStart107 = lay107.pages[0].barlines.find((b) => b.voltaStart)
 const vEnd107 = lay107.pages[0].barlines.find((b) => b.voltaEnd)
 check('adj107 跨行跳房子：起点与终点在不同行', vStart107 !== undefined && vEnd107 !== undefined && Math.abs(vStart107.yTop - vEnd107.yTop) > 1, `${vStart107?.yTop} vs ${vEnd107?.yTop}`)
 const svg107 = renderScoreToSvg(lay107)[0]
-const voltaLines107 = [...svg107.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)" stroke="#1b1b1b" stroke-width="1"/g)]
+const voltaLines107 = [...svg107.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)" stroke="#1b1b1b" stroke-width="0.8"/g)]
   .map((m) => ({ x1: Number(m[1]), y1: Number(m[2]), x2: Number(m[3]) }))
   .filter((l) => l.x2 - l.x1 > 20)
 check('adj107 跨行跳房子拆两半（2 条线、y 不同）', voltaLines107.length === 2 && Math.abs(voltaLines107[0].y1 - voltaLines107[1].y1) > 1, JSON.stringify(voltaLines107))

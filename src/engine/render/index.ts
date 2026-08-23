@@ -30,6 +30,7 @@ import {
   DESC_RATIO,
   VOLTA_BAR_GAP,
   VOLTA_RAISE,
+  SLUR_W,
   VOLTA_COMMENT_FONT_RATIO,
   TUPLET_NUM_RATIO,
   GRACE_SIZE_RATIO,
@@ -871,9 +872,9 @@ function renderVoltaLine(
   const x1 = start.x + 2
   const openEnd = !end || !!end.voltaEndSlash // 开口结束：无终点折线（adj26）
   const parts: string[] = []
-  // 起点竖线（[ 处：从线高向下到小节线上端上方 2px，adj29；adj59 线宽 1；adj76：下沿下延 2px）
+  // 起点竖线（[ 处：从线高向下到小节线上端上方 2px，adj29；adj150 线宽 0.8；adj76：下沿下延 2px）
   parts.push(
-    `<line x1="${x1}" y1="${y}" x2="${x1}" y2="${start.yTop - 2}" stroke="#1b1b1b" stroke-width="1"/>`,
+    `<line x1="${x1}" y1="${y}" x2="${x1}" y2="${start.yTop - 2}" stroke="#1b1b1b" stroke-width="0.8"/>`,
   )
   // 番号（[ 后引号注释优先；小节线引号备注兼容）显示在跳房子线下方（adj27/28）；
   // adj71：字号 = 音符高度的 0.5（VOLTA_COMMENT_FONT_RATIO），随音符字号
@@ -887,31 +888,31 @@ function renderVoltaLine(
     const lastA = lastOfRow.get(start.yTop)
     const xEndA = lastA ? lastA.x - 2 : start.x + 60
     parts.push(
-      `<line x1="${x1}" y1="${y}" x2="${xEndA}" y2="${y}" stroke="#1b1b1b" stroke-width="1"/>`,
+      `<line x1="${x1}" y1="${y}" x2="${xEndA}" y2="${y}" stroke="#1b1b1b" stroke-width="0.8"/>`,
     )
     parts.push(labelSvg)
     const yB = end.yTop - VOLTA_BAR_GAP - plus * VOLTA_RAISE
     const xStartB = marginLeft + 2 // 右半从行首（边距）开始连接
     const x2B = end.x - 2
     parts.push(
-      `<line x1="${xStartB}" y1="${yB}" x2="${x2B}" y2="${yB}" stroke="#1b1b1b" stroke-width="1"/>`,
+      `<line x1="${xStartB}" y1="${yB}" x2="${x2B}" y2="${yB}" stroke="#1b1b1b" stroke-width="0.8"/>`,
     )
     if (!openEnd) {
       parts.push(
-        `<line x1="${x2B}" y1="${yB}" x2="${x2B}" y2="${end.yTop - 2}" stroke="#1b1b1b" stroke-width="1"/>`,
+        `<line x1="${x2B}" y1="${yB}" x2="${x2B}" y2="${end.yTop - 2}" stroke="#1b1b1b" stroke-width="0.8"/>`,
       )
     }
     return parts.join('\n')
   }
   const x2 = end ? end.x - 2 : start.x + 60
-  // 水平线（adj59 线宽 1）
+  // 水平线（adj150 线宽 0.8）
   parts.push(
-    `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#1b1b1b" stroke-width="1"/>`,
+    `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#1b1b1b" stroke-width="0.8"/>`,
   )
-  // 终点折线（] 处：向下到小节线上端上方 2px，adj29；开口结束不画；adj59 线宽 1；adj76：下沿下延 2px）
+  // 终点折线（] 处：向下到小节线上端上方 2px，adj29；开口结束不画；adj150 线宽 0.8；adj76：下沿下延 2px）
   if (end && !openEnd) {
     parts.push(
-      `<line x1="${x2}" y1="${y}" x2="${x2}" y2="${end.yTop - 2}" stroke="#1b1b1b" stroke-width="1"/>`,
+      `<line x1="${x2}" y1="${y}" x2="${x2}" y2="${end.yTop - 2}" stroke="#1b1b1b" stroke-width="0.8"/>`,
     )
   }
   parts.push(labelSvg)
@@ -986,7 +987,7 @@ function renderSlur(s: PlacedSlur, noteSize = 18): string {
         `<path d="M ${x1} ${y} ` +
         `A ${R.toFixed(1)} ${R.toFixed(1)} 0 0 1 ${(x1 + R).toFixed(1)} ${barY} ` +
         `L ${x2} ${barY}" ` +
-        `fill="none" stroke="#1b1b1b" stroke-width="1"/>`
+        `fill="none" stroke="#1b1b1b" stroke-width="${SLUR_W}"/>`
       )
     }
     if (s.half === 'r') {
@@ -995,7 +996,7 @@ function renderSlur(s: PlacedSlur, noteSize = 18): string {
         `<path d="M ${x1} ${barY} ` +
         `L ${(x2 - R).toFixed(1)} ${barY} ` +
         `A ${R.toFixed(1)} ${R.toFixed(1)} 0 0 1 ${x2} ${y}" ` +
-        `fill="none" stroke="#1b1b1b" stroke-width="1"/>`
+        `fill="none" stroke="#1b1b1b" stroke-width="${SLUR_W}"/>`
       )
     }
     // 完整：两端 1/4 圆弧弯到平顶线 + 中间横线；正中标连音组数字
@@ -1005,7 +1006,7 @@ function renderSlur(s: PlacedSlur, noteSize = 18): string {
       `A ${R.toFixed(1)} ${R.toFixed(1)} 0 0 1 ${(x1 + R).toFixed(1)} ${barY} ` +
       `L ${(x2 - R).toFixed(1)} ${barY} ` +
       `A ${R.toFixed(1)} ${R.toFixed(1)} 0 0 1 ${x2} ${y}" ` +
-      `fill="none" stroke="#1b1b1b" stroke-width="1"/>` +
+      `fill="none" stroke="#1b1b1b" stroke-width="${SLUR_W}"/>` +
       label(midX, barY)
     )
   }
@@ -1015,21 +1016,21 @@ function renderSlur(s: PlacedSlur, noteSize = 18): string {
     // 左半部：从最低处（x1,y）竖直向上出发，行末为最高点（x2, topY），右侧开口
     return (
       `<path d="M ${x1} ${y} C ${x1} ${(y - 9).toFixed(1)} ${x2} ${topY.toFixed(1)} ${x2} ${topY.toFixed(1)}" ` +
-      `fill="none" stroke="#1b1b1b" stroke-width="1"/>`
+      `fill="none" stroke="#1b1b1b" stroke-width="${SLUR_W}"/>`
     )
   }
   if (s.half === 'r') {
     // 右半部：行首为最高点（x1, topY）水平出发，到最低处（x2,y）竖直向下，左侧开口
     return (
       `<path d="M ${x1} ${topY.toFixed(1)} C ${x1} ${topY.toFixed(1)} ${x2} ${(y - 9).toFixed(1)} ${x2} ${y}" ` +
-      `fill="none" stroke="#1b1b1b" stroke-width="1"/>`
+      `fill="none" stroke="#1b1b1b" stroke-width="${SLUR_W}"/>`
     )
   }
   // 完整：二次贝塞尔（两端低、中间高）；正中（顶点）标连音组数字
   const midX = (x1 + x2) / 2
   const midY = y - 9
   return (
-    `<path d="M ${x1} ${y} Q ${midX} ${midY} ${x2} ${y}" fill="none" stroke="#1b1b1b" stroke-width="1"/>` +
+    `<path d="M ${x1} ${y} Q ${midX} ${midY} ${x2} ${y}" fill="none" stroke="#1b1b1b" stroke-width="${SLUR_W}"/>` +
     label(midX, topY)
   )
 }

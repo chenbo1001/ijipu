@@ -63,8 +63,8 @@ export const NOTE_COMMENT_FONT_RATIO = 0.3
 export const DESC_RATIO = 0.2
 
 // ---- 连音线 ----
-/** 连音线线宽（px） */
-export const SLUR_W = 1
+/** 连音线线宽（px，adj150：由 1 减小到 0.8） */
+export const SLUR_W = 0.8
 /** 连音线嵌套抬升（每层，px） */
 export const SLUR_NEST_RAISE = 5
 /** 平均连音组数字字号与音符字号的比值（adj89：默认 0.2×noteSize，可调整） */
