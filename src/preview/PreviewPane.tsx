@@ -35,8 +35,7 @@ export function PreviewPane() {
   const pageConfigRef = useRef(pageConfig)
   pageConfigRef.current = pageConfig
 
-  const { layout, pagesHtml, errorCount, summary } = useMemo(() => {
-    const errors = parseResult.errors.filter((e) => e.severity === 'error')
+  const { layout, pagesHtml, summary } = useMemo(() => {
     const musicLines = parseResult.groups.length
     const notes = parseResult.groups.reduce((n, g) => n + g.music.tokens.length, 0)
     const sum = {
@@ -53,11 +52,11 @@ export function PreviewPane() {
       notes,
       errors: parseResult.errors.length,
     }
-    if (errors.length > 0) {
-      return { layout: null, pagesHtml: [] as string[], errorCount: errors.length, summary: sum }
-    }
+    // adj208：不因语法错误清空预览——layout/render 对错误输入安全（错误行已在
+    // 解析阶段跳过：引号未闭合吞剩余内容、歌词缺曲行不挂载、未知符号降级为装饰），
+    // 始终渲染可解析部分，避免预览在正常显示与错误提示之间闪动
     const lay = layoutScore(parseResult, pageConfig)
-    return { layout: lay, pagesHtml: renderScoreToSvg(lay), errorCount: 0, summary: sum }
+    return { layout: lay, pagesHtml: renderScoreToSvg(lay), summary: sum }
   }, [parseResult, pageConfig])
 
   const rowTops = useMemo(() => (layout ? computeRowTops(layout, pageConfig.note_size) : []), [layout, pageConfig.note_size])
@@ -263,11 +262,9 @@ export function PreviewPane() {
               lineHeight: 1.9,
             }}
           >
-            {errorCount > 0 ? (
-              <>⚠ 存在 {errorCount} 个语法错误，请先修正脚本</>
-            ) : (
-              <>解析完成：{summary.musicLines} 个曲行 · {summary.notes} 个乐符 · {summary.errors} 个问题</>
-            )}
+            {/* adj208：预览不再提示语法错误（避免正常预览与错误提示闪动）——
+                错误行已在解析阶段跳过，预览始终渲染可解析部分 */}
+            <>解析完成：{summary.musicLines} 个曲行 · {summary.notes} 个乐符 · {summary.errors} 个问题</>
           </div>
           <div style={{ color: 'var(--jp-text-muted)', fontSize: 12, marginTop: 10 }}>
             {brand.taglineMain}

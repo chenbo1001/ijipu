@@ -284,6 +284,24 @@ const hlCur4 = highlightCode('V: 1.0\nB: t\nQ: 1 2 3 4 |\n', undefined, { line: 
 check('adj204 光标在行尾紧邻 → 高亮最后一块（|）', hlCur4.includes('hl-current-block') && hlCur4.includes('hl-barline">|<'), '')
 const hlCur5 = highlightCode('V: 1.0\nB: t\nQ: 1 2 3  4 |\n', undefined, { line: 3, col: 9 })
 check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !hlCur5.includes('hl-current-block'), '')
+// adj208：有语法错误时仍渲染可解析部分（预览不闪动）——
+// layout/render 对错误输入安全，错误行在解析阶段已跳过
+{
+  const src208 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\nQ: 1 "2 3 4 | 5 6 7 1 |\nQ: 2 3 4 5 | 6 7 1 2 |\n'
+  const r208 = parseJps(src208)
+  const errLv208 = r208.errors.filter((e) => e.severity === 'error')
+  const lay208 = layoutScore(r208, defaultPageConfig)
+  const svg208 = renderScoreToSvg(lay208)[0] ?? ''
+  check('adj208 引号未闭合行（error 级）不阻断渲染（其余行正常出谱）', lay208.pages.length >= 1 && svg208.length > 500 && lay208.pages[0].notes.length >= 16, `pages=${lay208.pages.length} svgLen=${svg208.length} notes=${lay208.pages[0]?.notes.length ?? 0} errLv=${errLv208.length}`)
+  const r208b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nC: 词\n')
+  const lay208b = layoutScore(r208b, defaultPageConfig)
+  const svg208b = renderScoreToSvg(lay208b)[0] ?? ''
+  check('adj208 歌词缺曲行（error 级）仍渲染（描述头页）', lay208b.pages.length >= 1 && svg208b.length > 100, `pages=${lay208b.pages.length} svgLen=${svg208b.length}`)
+  const r208c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |"abc 5 6 7 1 |\n')
+  const lay208c = layoutScore(r208c, defaultPageConfig)
+  const svg208c = renderScoreToSvg(lay208c)[0] ?? ''
+  check('adj208 小节线后引号未闭合（error 级）仍渲染（吞掉引号后内容）', lay208c.pages.length >= 1 && svg208c.length > 100 && lay208c.pages[0].notes.length === 4, `svgLen=${svg208c.length} notes=${lay208c.pages[0]?.notes.length ?? 0}`)
+}
 
 // ---- 14. 光标映射（M3） ----
 console.log('[14] cursor mapping (M3)')
