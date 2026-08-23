@@ -1535,16 +1535,16 @@ check('adj179 角标 y = 基线 - 0.4×字号（下移一个升降符高度）',
 // adj178：孤立 &（输入中未完成）为 warning 而非 error——预览不阻断
 const r178 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 &\n')
 check('adj178 孤立 & 降为 warning（不阻断预览）', r178.errors.some((e) => e.message.includes('&') && e.severity === 'warning') && !r178.errors.some((e) => e.severity === 'error'), JSON.stringify(r178.errors))
-// adj181：有升降号时调号文本额外右移一个升降号宽（0.5×13 = 6.5），升降号与字母间距 7×scale
+// adj181：有升降号时调号文本额外右移（adj187：0.5+0.2 = 0.7×13 = 9.1px），升降号与字母间距 2px
 const k181Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK175) // bE 谱
 const k181Acc = /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>♭<\/text>/.exec(svgK175)
 const k181Plain = /data-meta="keyline" x="([\d.]+)"/.exec(svgM48) // 无升降号 D: C
-check('adj181 有升降号时 keyline 右移 6.5px（相对无升降号）', k181Letter !== null && k181Plain !== null && Math.abs(Number(k181Letter[1]) - (Number(k181Plain[1]) + 6.5)) < 0.5, `acc=${k181Letter?.[1]} plain=${k181Plain?.[1]}`)
+check('adj187 有升降号时 keyline 右移 9.1px（相对无升降号）', k181Letter !== null && k181Plain !== null && Math.abs(Number(k181Letter[1]) - (Number(k181Plain[1]) + 0.7 * defaultPageConfig.miaoshu_size)) < 0.5, `acc=${k181Letter?.[1]} plain=${k181Plain?.[1]}`)
 const k181Scale = defaultPageConfig.miaoshu_size / 13
 // "1 = " 含尾随空格：1=7.62 空格=3.85 =9.64 空格=3.85 → 24.96
 const k181PrefixW = (7.62 + 3.85 + 9.64 + 3.85) * k181Scale
 const k181LetterLeft = Number(k181Letter?.[1] ?? NaN) + k181PrefixW
-check('adj181 升降号与字母间距 = 7×scale（不贴字）', k181Acc !== null && Math.abs(Number(k181Acc[1]) - (k181LetterLeft - 7 * k181Scale)) < 0.5, JSON.stringify([k181Acc?.[1], k181LetterLeft - 7 * k181Scale]))
+check('adj187 升降号与字母间距 = 2px', k181Acc !== null && Math.abs(Number(k181Acc[1]) - (k181LetterLeft - 2)) < 0.5, JSON.stringify([k181Acc?.[1], k181LetterLeft - 2]))
 // 角标位置在字母左上方（adj175：x 在字母左侧、y < 字母基线、字号为调号一半）
 const k174Acc = /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>♯<\/text>/.exec(svgK174a)
 const k174Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK174a)

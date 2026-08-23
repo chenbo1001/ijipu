@@ -147,15 +147,16 @@ function renderMeta(page: ScorePage, config: PageConfig): string {
   const mFont = config.miaoshu_font
   const mSize = config.miaoshu_size
   // adj176：调号/拍号/节拍整体右移一点，为字母左侧的升降号角标（♯/♭）留出空间；
-  // adj181：有升降号时再整体右移一个升降号宽（0.5×mSize），容纳角标显示
+  // adj181：有升降号时再整体右移一个升降号宽（0.5×mSize），容纳角标显示；
+  // adj187：调号再往右移动 1/5 调号字号宽度（0.2×mSize）
   const KEY_SHIFT = 6
   const keyRaw = (page.meta.key ?? '').trim()
   const keyM = /^([#$b]?)([A-G])([#$b]?)$/.exec(keyRaw)
   const keyLetter = keyM ? keyM[2] : keyRaw // 调号字母（无效时原样）
   const keyAcc = keyM ? (keyM[1] || keyM[3]) : '' // 升降号（# 或 $/b）
   const keyLabel = keyLetter ? `1 = ${keyLetter}` : ''
-  // adj181：有升降号时文本整体右移升降号宽（0.5×mSize）
-  const accShift = keyAcc ? mSize * 0.5 : 0
+  // adj181：有升降号时文本整体右移升降号宽（0.5×mSize）；adj187：再右移 1/5 调号字号（0.2×mSize）
+  const accShift = keyAcc ? mSize * (0.5 + 0.2) : 0
   if (keyLabel) {
     const pos = posOf('keyline', { x: KEY_SHIFT + accShift, y: -44 })
     parts.push(
@@ -163,13 +164,13 @@ function renderMeta(page: ScorePage, config: PageConfig): string {
     )
     // adj175：升降号角标画在调号字母左侧、中线以上，字号 = 调号的一半；
     // adj179：整体下移一个升降符高度（y 抬高 0.9×字号 → 0.4×字号）；
-    // adj181：升降号与字母间距调大（4×scale → 7×scale，避免贴在一起）
+    // adj187：升降号与字母水平间距固定 2px
     if (keyAcc) {
       const sym = keyAcc === '#' ? '♯' : '♭'
       const scale = mSize / 13
       // "1 = " 宽 + 字母前缘向左偏移（符号在字母左侧）
       const letterLeft = pos.x + metaTextW('1 = ') * scale
-      const symX = letterLeft - 7 * scale
+      const symX = letterLeft - 2
       const symSize = mSize * 0.5
       parts.push(
         `<text x="${r1n(symX)}" y="${r1n(pos.y - mSize * 0.4)}" font-size="${r1n(symSize)}" font-family="${mFont}" fill="#1b1b1b">${sym}</text>`,
