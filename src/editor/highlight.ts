@@ -147,10 +147,30 @@ export function highlightCode(
   return parts.join('\n')
 }
 
-/** 找列 col（0-based）所在空格分隔段 [start, end)（col 越界/在空白处返回 null） */
+/** 找列 col（0-based）所在空格分隔段 [start, end)（col 越界/在空白处返回 null）
+ *  adj204：光标在块后**紧邻**空白处（紧贴块末，如 `4 |` 中 `4` 与 `|` 之间的空格）
+ *  或行尾时，也返回左侧块——继续输入的 & 修饰符针对该块，应保持高亮。
+ *  格式化后块间以单个空格分隔，故「col-1 非空白」即紧邻前块末。 */
 function segmentAt(text: string, col: number): [number, number] | null {
-  if (col < 0 || col >= text.length) return null
-  if (text[col] === ' ' || text[col] === '\t') return null
+  if (col < 0) return null
+  if (col >= text.length) {
+    // 行尾：紧邻左侧块末则返回该块
+    if (col > 0 && text[col - 1] !== ' ' && text[col - 1] !== '\t') {
+      let s = col - 1
+      while (s > 0 && text[s - 1] !== ' ' && text[s - 1] !== '\t') s--
+      return [s, col]
+    }
+    return null
+  }
+  if (text[col] === ' ' || text[col] === '\t') {
+    // 空白处：仅当紧贴左侧块末（col-1 非空白）时返回左侧块，否则不高亮
+    if (col > 0 && text[col - 1] !== ' ' && text[col - 1] !== '\t') {
+      let s = col - 1
+      while (s > 0 && text[s - 1] !== ' ' && text[s - 1] !== '\t') s--
+      return [s, col]
+    }
+    return null
+  }
   let s = col
   let e = col
   while (s > 0 && text[s - 1] !== ' ' && text[s - 1] !== '\t') s--

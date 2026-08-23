@@ -276,6 +276,14 @@ check('adj165 光标所在音符区块带 hl-current-block', hlCur.includes('hl-
 check('adj165 当前行无错误时不叠加 hl-error-line', !hlCur.includes('hl-error-line'), '')
 const hlCur2 = highlightCode('V: 1.0\nB: t\nQ: 1 2 3 4 |\n', undefined, { line: 3, col: 11 })
 check('adj165 光标在小节线区块高亮（| 段）', hlCur2.includes('hl-current-block'), '')
+// adj204：光标在块后紧邻（空白处紧贴块末 / 行尾）也应高亮该块——
+// 继续输入的 & 修饰符针对该块（格式化后块间以单空格分隔，可区分块间隔）
+const hlCur3 = highlightCode('V: 1.0\nB: t\nQ: 1 2 3 4 |\n', undefined, { line: 3, col: 10 })
+check('adj204 光标在块后紧邻空格 → 高亮前一块（4）', hlCur3.includes('hl-current-block') && hlCur3.includes('hl-note">4<'), '')
+const hlCur4 = highlightCode('V: 1.0\nB: t\nQ: 1 2 3 4 |\n', undefined, { line: 3, col: 12 })
+check('adj204 光标在行尾紧邻 → 高亮最后一块（|）', hlCur4.includes('hl-current-block') && hlCur4.includes('hl-barline">|<'), '')
+const hlCur5 = highlightCode('V: 1.0\nB: t\nQ: 1 2 3  4 |\n', undefined, { line: 3, col: 9 })
+check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !hlCur5.includes('hl-current-block'), '')
 
 // ---- 14. 光标映射（M3） ----
 console.log('[14] cursor mapping (M3)')
