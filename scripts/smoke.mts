@@ -338,8 +338,29 @@ const svgYs = renderScoreToSvg(layYs)[0]
 check('乐器渲染在副标题下（data-meta=instrument_i）', svgYs.includes('data-meta="instrument_0"') && svgYs.includes('data-meta="instrument_1"'), '')
 check('adj151 说明渲染在谱尾左对齐（data-meta=notes_i）', svgYs.includes('data-meta="notes_0"') && svgYs.includes('data-meta="notes_1"') && svgYs.includes('这是一段说明') && svgYs.includes('第二行说明'), '')
 // 说明文字位置：最后一页下边距线上方、左边距（左对齐，adj151）
-const ysNotesEl = /data-meta="notes_0" data-notes-line="0" x="([\d.]+)" y="([\d.]+)"/.exec(svgYs)
+const ysNotesEl = /data-meta="notes_0" data-notes-line="0" data-notes-sub="0" x="([\d.]+)" y="([\d.]+)"/.exec(svgYs)
 check('adj151 说明默认在下边距线上方且左对齐（x=左边距）', ysNotesEl !== null && Number(ysNotesEl[2]) < layoutScore(rYs, defaultPageConfig).pages[0].height - defaultPageConfig.margin_bottom && Math.abs(Number(ysNotesEl[1]) - defaultPageConfig.margin_left) < 0.5, `x=${ysNotesEl?.[1]} y=${ysNotesEl?.[2]}`)
+// adj153：说明内容不超边距——超宽自动换行、x 钳制在左右边距内（右缘不超右边距）
+const longNotesSrc = 'V: 1.0\nB: 测试\nD: C\nP: 4/4\nS: ' + '超长说明文字'.repeat(12) + '\nQ: 1 |\n'
+const rLn = parseJps(longNotesSrc)
+const layLn = layoutScore(rLn, defaultPageConfig)
+const svgLn = renderScoreToSvg(layLn)[0]
+const lnSubs = [...svgLn.matchAll(/data-meta="notes_0" data-notes-line="0" data-notes-sub="(\d+)" x="([\d.]+)"[^>]*>([^<]*)</g)]
+check('adj153 超宽 S 行自动换行为多个子行', lnSubs.length > 1, `子行数=${lnSubs.length}`)
+const pageW0 = layLn.pages[0].width
+const rightEdge = pageW0 - defaultPageConfig.margin_right
+const within = lnSubs.every((m) => {
+  const x = Number(m[2])
+  const text = m[3]
+  // 估算宽（13px 基准，中文 13/字符）
+  const w = [...text].reduce((s, ch) => s + (ch.charCodeAt(0) > 127 ? 13 : 7.62), 0)
+  return x >= defaultPageConfig.margin_left - 0.01 && x + w <= rightEdge + 0.01
+})
+check('adj153 每个子行左缘不超左边距、右缘不超右边距', within, lnSubs.map((m) => `${m[2]}+${m[3].length}字`).join('|'))
+// 拖拽偏移很大时 x 仍被钳制（不超右边距）
+const svgLn2 = renderScoreToSvg(layoutScore(rLn, { ...defaultPageConfig, metaPos: { notes_0: { x: 900, y: 0 } } }))[0]
+const ln2 = /data-meta="notes_0" data-notes-line="0" data-notes-sub="0" x="([\d.]+)"/.exec(svgLn2)
+check('adj153 大偏移下 x 钳制（右缘不超右边距）', ln2 !== null && Number(ln2[1]) <= rightEdge, `x=${ln2?.[1]} rightEdge=${rightEdge}`)
 
 // ---- 16c. 谱面级设置 # jps-config（adj83） ----
 console.log('[16c] per-score settings # jps-config (adj83)')

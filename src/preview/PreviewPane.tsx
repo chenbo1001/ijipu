@@ -136,7 +136,9 @@ export function PreviewPane() {
     let by: number
     if (key.startsWith('notes')) {
       const lineIdx = Number(el.getAttribute('data-notes-line') ?? '0')
-      const baseY = layout.pages[0].height - cfg.margin_bottom - 24 + lineIdx * cfg.miaoshu_size * 1.4
+      // adj153：换行后的子行（data-notes-sub）基准 y 也要计入，避免把子行偏移混进 metaPos
+      const subIdx = Number(el.getAttribute('data-notes-sub') ?? '0')
+      const baseY = layout.pages[0].height - cfg.margin_bottom - 24 + (lineIdx + subIdx) * cfg.miaoshu_size * 1.4
       if (key === 'notes') {
         // 旧 metaPos["notes"]（adj83 语义）：基准 = 页面居中（兼容旧配置拖拽）
         const baseX = pageW / 2

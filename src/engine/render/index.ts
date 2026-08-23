@@ -93,6 +93,26 @@ function metaTextW(s: string): number {
   return w
 }
 
+/** 按可用宽将一行说明拆成多子行（字符级估算宽、随字号缩放；adj153 内容不超边距） */
+function wrapNotesLine(line: string, availW: number, size: number): string[] {
+  const scale = size / 13
+  const subs: string[] = []
+  let cur = ''
+  let curW = 0
+  for (const ch of line) {
+    const w = (META_GLYPH_W[ch] ?? (ch.charCodeAt(0) > 127 ? 13 : 7.62)) * scale
+    if (cur && curW + w > availW) {
+      subs.push(cur)
+      cur = ''
+      curW = 0
+    }
+    cur += ch
+    curW += w
+  }
+  if (cur) subs.push(cur)
+  return subs.length ? subs : ['']
+}
+
 /** 音符字体：直接使用页面设置中的字体名（adj105：原 a/b/c 字形改为字体名） */
 function noteFont(style: string): string {
   return style || "'Microsoft YaHei', 'SimHei', 'Segoe UI', sans-serif"
@@ -1177,12 +1197,15 @@ function renderPage(page: ScorePage, config: PageConfig, pageCount: number): str
 
   // 说明文字（adj83：S 行，多行；渲染在简谱主体最末尾——最后一页正文下方、下边距线上方，
   // 用描述头字体字号；adj151：左对齐（text-anchor=start、x=左边距）、颜色与 P:/J: 一致，
-  // 每段 data-meta="notes_i" 可独立拖拽调整位置，metaPos["notes_i"] 为相对默认的偏移）
+  // 每段 data-meta="notes_i" 可独立拖拽调整位置，metaPos["notes_i"] 为相对默认的偏移；
+  // adj153：内容不超边距——超宽自动换行成子行（data-notes-sub）、x 钳制在左右边距内）
   if (page.index === pageCount - 1 && page.meta.notes.length > 0) {
     const nFont = config.miaoshu_font
     const nSize = config.miaoshu_size
     const baseX = config.margin_left
     const baseY = height - config.margin_bottom - 24
+    // 可用宽 = 左右边距之间（adj153：文本不超此范围）
+    const availW = Math.max(width - config.margin_left - config.margin_right, 10)
     for (let i = 0; i < page.meta.notes.length; i++) {
       const line = page.meta.notes[i]
       // adj151：新 metaPos["notes_i"] 相对左边距基准；兼容旧 metaPos["notes"]
@@ -1194,9 +1217,18 @@ function renderPage(page: ScorePage, config: PageConfig, pageCount: number): str
         : pOld
           ? { x: width / 2 + pOld.x, y: baseY + i * nSize * 1.4 + pOld.y }
           : { x: baseX, y: baseY + i * nSize * 1.4 }
-      body.push(
-        `<text data-meta="notes_${i}" data-notes-line="${i}" x="${r1n(pos.x)}" y="${r1n(pos.y)}" text-anchor="start" font-size="${nSize}" font-family="${nFont}" fill="#1b1b1b">${xmlEsc(line)}</text>`,
-      )
+      // adj153：超宽自动换行（字符级估算宽、随字号缩放），每子行一个 text
+      const subs = wrapNotesLine(line, availW, nSize)
+      for (let k = 0; k < subs.length; k++) {
+        const sub = subs[k]
+        const subW = metaTextW(sub) * (nSize / 13)
+        // 钳制：文字整体在 [左边距, 右边距 - 文本宽] 内，右缘不超右边距
+        const maxX = width - config.margin_right - subW
+        const x = Math.min(Math.max(pos.x, baseX), maxX)
+        body.push(
+          `<text data-meta="notes_${i}" data-notes-line="${i}" data-notes-sub="${k}" x="${r1n(x)}" y="${r1n(pos.y + k * nSize * 1.4)}" text-anchor="start" font-size="${nSize}" font-family="${nFont}" fill="#1b1b1b">${xmlEsc(sub)}</text>`,
+        )
+      }
     }
   }
 
