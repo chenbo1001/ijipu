@@ -1,12 +1,24 @@
 /**
  * ui/MenuBar.tsx — 顶部菜单栏（品牌 + 下拉菜单）
+ * adj185：支持 Alt+字母 打开对应菜单（Alt+F 文件 / Alt+E 编辑 / Alt+V 视图 /
+ * Alt+P 播放 / Alt+T 主题 / Alt+H 帮助），Esc 关闭菜单。
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { brand } from '../brand/tokens'
 import { THEMES, type ThemeMode } from '../brand/themes'
 import { formatJps } from '../engine'
+
+/** Alt+字母 → 菜单名（adj185） */
+const ALT_MENU_KEYS: Record<string, string> = {
+  f: 'file',
+  e: 'edit',
+  v: 'view',
+  p: 'play',
+  t: 'theme',
+  h: 'help',
+}
 
 export function MenuBar() {
   const code = useDocStore((s) => s.code)
@@ -28,6 +40,28 @@ export function MenuBar() {
   const [open, setOpen] = useState<string | null>(null)
 
   const toggle = (key: string) => setOpen(open === key ? null : key)
+
+  // adj185：Alt+字母 打开对应菜单；Esc 关闭菜单
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        const name = ALT_MENU_KEYS[e.key.toLowerCase()]
+        if (name) {
+          e.preventDefault()
+          e.stopPropagation()
+          setOpen((cur) => (cur === name ? null : name))
+          return
+        }
+      }
+      if (e.key === 'Escape' && open) {
+        e.preventDefault()
+        e.stopPropagation()
+        setOpen(null)
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [open])
 
   const runFormat = () => {
     const formatted = formatJps(code)

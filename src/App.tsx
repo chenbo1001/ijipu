@@ -43,7 +43,8 @@ function App() {
   // 实际浅深色：auto 模式下跟随系统偏好
   const effectiveMode = themeMode === 'auto' ? (systemLight ? 'light' : 'dark') : themeMode
 
-  // 全局快捷键
+  // 全局快捷键（adj185：capture 阶段监听——bubble 阶段可能被子元素 stopPropagation 拦截，
+  // 导致 Ctrl+S/Ctrl+N 等在编辑器聚焦时失效；capture 最优先且处理即阻断，保证始终响应）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const st = useDocStore.getState()
@@ -51,31 +52,39 @@ function App() {
       if (e.ctrlKey && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         // adj70：撤销 Ctrl+Z（重做统一为 Ctrl+Y）
         e.preventDefault()
+        e.stopPropagation()
         st.undo()
       } else if (e.ctrlKey && e.key.toLowerCase() === 'y') {
         e.preventDefault()
+        e.stopPropagation()
         st.redo()
       } else if (e.ctrlKey && e.key.toLowerCase() === 's') {
         e.preventDefault()
+        e.stopPropagation()
         void st.saveFile()
       } else if (e.ctrlKey && e.key.toLowerCase() === 'n') {
         e.preventDefault()
+        e.stopPropagation()
         st.newDoc()
       } else if (e.ctrlKey && e.key.toLowerCase() === 'o') {
         e.preventDefault()
+        e.stopPropagation()
         void st.openFile()
       } else if (e.ctrlKey && e.key.toLowerCase() === 'q') {
         e.preventDefault()
+        e.stopPropagation()
         ui.openModal('playback')
-      } else if (e.key === 'Tab' && !ui.modal) {
+      } else if (e.key === 'Tab' && !ui.modal && !(e.target as HTMLElement | null)?.closest?.('.editor-main')) {
+        // 编辑器内 Tab 留给自动补全/默认行为（completion 时补全），其余区域切换视图
         e.preventDefault()
+        e.stopPropagation()
         st.setViewType(st.viewType === 'preview' ? 'split' : 'preview')
       } else if (e.key === 'Escape' && ui.modal) {
         ui.closeModal()
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [])
 
   // 拆分视图：拖动分隔条调整上下两个窗格高度（adj46）
