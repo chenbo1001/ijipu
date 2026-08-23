@@ -990,11 +990,11 @@ function renderSlur(s: PlacedSlur, noteSize = 18): string {
       )
     }
     if (s.half === 'r') {
-      // 右半部：横线从行首平直伸来（左侧开口）+ 1/4 圆弧弯下到音符
+      // 右半部：横线从行首平直伸来（左侧开口）+ 1/4 圆弧弯到音符（凸右上，sweep=1 与左半镜像）
       return (
         `<path d="M ${x1} ${barY} ` +
         `L ${(x2 - R).toFixed(1)} ${barY} ` +
-        `A ${R.toFixed(1)} ${R.toFixed(1)} 0 0 0 ${x2} ${y}" ` +
+        `A ${R.toFixed(1)} ${R.toFixed(1)} 0 0 1 ${x2} ${y}" ` +
         `fill="none" stroke="#1b1b1b" stroke-width="1"/>`
       )
     }
@@ -1004,7 +1004,7 @@ function renderSlur(s: PlacedSlur, noteSize = 18): string {
       `<path d="M ${x1} ${y} ` +
       `A ${R.toFixed(1)} ${R.toFixed(1)} 0 0 1 ${(x1 + R).toFixed(1)} ${barY} ` +
       `L ${(x2 - R).toFixed(1)} ${barY} ` +
-      `A ${R.toFixed(1)} ${R.toFixed(1)} 0 0 0 ${x2} ${y}" ` +
+      `A ${R.toFixed(1)} ${R.toFixed(1)} 0 0 1 ${x2} ${y}" ` +
       `fill="none" stroke="#1b1b1b" stroke-width="1"/>` +
       label(midX, barY)
     )
