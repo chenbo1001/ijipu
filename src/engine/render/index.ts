@@ -142,32 +142,37 @@ function renderMeta(page: ScorePage, config: PageConfig): string {
 
   // ---- 调式 + 拍号（左下锚，同排）：调号文本 + 拍号分数（数字上下正对，中间横线） ----
   // adj42：调式行 = 号两侧加空格（如 "1 = C"），与下方节拍行的 = 号垂直对齐
-  // adj174：调号支持升降号在前（#F/$B）或在后（F#/B$），预览时 ♯/♭ 作角标画在字母左上角
+  // adj174/175：调号支持升降号在前（#F/$B/bE）或在后（F#/B$/Eb），降号 $ 与 b 等价；
+  // 预览时 ♯/♭ 作角标画在调号字母左侧、中线以上，字号为调号的一半
   const mFont = config.miaoshu_font
   const mSize = config.miaoshu_size
+  // adj176：调号/拍号/节拍整体右移一点，为字母左侧的升降号角标（♯/♭）留出空间
+  const KEY_SHIFT = 6
   const keyRaw = (page.meta.key ?? '').trim()
-  const keyM = /^([#$]?)([A-G])([#$]?)$/.exec(keyRaw)
+  const keyM = /^([#$b]?)([A-G])([#$b]?)$/.exec(keyRaw)
   const keyLetter = keyM ? keyM[2] : keyRaw // 调号字母（无效时原样）
-  const keyAcc = keyM ? (keyM[1] || keyM[3]) : '' // 升降号（# 或 $）
+  const keyAcc = keyM ? (keyM[1] || keyM[3]) : '' // 升降号（# 或 $/b）
   const keyLabel = keyLetter ? `1 = ${keyLetter}` : ''
   if (keyLabel) {
-    const pos = posOf('keyline', { x: 0, y: -44 })
+    const pos = posOf('keyline', { x: KEY_SHIFT, y: -44 })
     parts.push(
       `<text data-meta="keyline" x="${pos.x}" y="${pos.y}" font-size="${mSize}" font-family="${mFont}" fill="#1b1b1b">${keyLabel}</text>`,
     )
-    // adj174：升降号角标画在调号字母左上角（♯/♭ 小字，略高于字母顶部）
+    // adj175：升降号角标画在调号字母左侧、中线以上，字号 = 调号的一半
     if (keyAcc) {
       const sym = keyAcc === '#' ? '♯' : '♭'
-      // "1 = " 宽 + 字母前缘偏移，使符号落在字母左上方
-      const symX = pos.x + metaTextW('1 = ') * (mSize / 13) - 2 * (mSize / 13)
-      const symSize = mSize * 0.7
+      const scale = mSize / 13
+      // "1 = " 宽 + 字母前缘向左偏移（符号在字母左侧）
+      const letterLeft = pos.x + metaTextW('1 = ') * scale
+      const symX = letterLeft - 4 * scale
+      const symSize = mSize * 0.5
       parts.push(
         `<text x="${r1n(symX)}" y="${r1n(pos.y - mSize * 0.9)}" font-size="${r1n(symSize)}" font-family="${mFont}" fill="#1b1b1b">${sym}</text>`,
       )
     }
   }
   if (page.meta.meter) {
-    const pos = posOf('keyline', { x: 0, y: -44 })
+    const pos = posOf('keyline', { x: KEY_SHIFT, y: -44 })
     // 估算 "1 = C" 文本宽（13px 字体 ASCII ≈7px/字符，随字号缩放）后留 10px 间距；
     // adj174：升降号作角标不再占文本宽度，拍号按字母文本宽排
     const meterX = pos.x + (keyLabel ? keyLabel.length * 7 * (mSize / 13) + 10 : 0)
@@ -183,8 +188,9 @@ function renderMeta(page: ScorePage, config: PageConfig): string {
   const hasTempoEq = Boolean(tempoNum) || (legacyTempo !== null && Number.isFinite(Number(legacyTempo)) && legacyTempo.trim() !== '')
   const tempoEqShift = keyLabel && hasTempoEq ? (metaTextW('1 ') - metaTextW('♩')) * (mSize / 13) : 0
   if (tempoNum || tempoText) {
-    // adj：与调式行间距加大（偏移 -20 → -12），防止拍号分母与节拍行重叠
-    const pos = posOf('tempo', { x: tempoEqShift, y: -12 })
+    // adj：与调式行间距加大（偏移 -20 → -12），防止拍号分母与节拍行重叠；
+    // adj176：与调号同步右移 KEY_SHIFT
+    const pos = posOf('tempo', { x: tempoEqShift + KEY_SHIFT, y: -12 })
     parts.push(
       `<text data-meta="tempo" x="${pos.x}" y="${pos.y}" font-size="${mSize}" font-family="${mFont}" fill="#1b1b1b">${xmlEsc(tempoLabel(tempoNum ?? undefined, tempoText ?? undefined))}</text>`,
     )
@@ -195,7 +201,7 @@ function renderMeta(page: ScorePage, config: PageConfig): string {
       Number.isFinite(n) && page.meta.tempo.trim() !== ''
         ? `♩= ${n}`
         : xmlEsc(page.meta.tempo.replace(/\s*\n\s*/g, '　'))
-    const pos = posOf('tempo', { x: tempoEqShift, y: -12 })
+    const pos = posOf('tempo', { x: tempoEqShift + KEY_SHIFT, y: -12 })
     parts.push(
       `<text data-meta="tempo" x="${pos.x}" y="${pos.y}" font-size="${mSize}" font-family="${mFont}" fill="#1b1b1b">${tempoText}</text>`,
     )

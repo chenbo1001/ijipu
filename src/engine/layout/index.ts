@@ -39,14 +39,15 @@ const KEY_SEMITONE: Record<string, number> = {
 }
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
-/** 解析调式字符串（如 "C"、"#F"、"$B"；adj174 也支持升降号在后的 "F#"、"B$"）→ 根音半音偏移（C=0） */
+/** 解析调式字符串（如 "C"、"#F"、"F#"、"$B"、"B$"、"bE"、"Eb"；adj174/175 升降号
+ *  可在字母前或后，降号支持 $ 与 b 两种写法）→ 根音半音偏移（C=0） */
 export function parseKey(key: string | undefined): number {
   if (!key) return 0
-  const m = /^([#$]?)([A-G])([#$]?)$/.exec(key.trim())
+  const m = /^([#$b]?)([A-G])([#$b]?)$/.exec(key.trim())
   if (!m) return 0
   const semis = KEY_SEMITONE[m[2]]
   const acc = m[1] || m[3]
-  return semis + (acc === '#' ? 1 : acc === '$' ? -1 : 0)
+  return semis + (acc === '#' ? 1 : acc === '$' || acc === 'b' ? -1 : 0)
 }
 
 /** 中音 1 的 MIDI 编号（简谱中音 1 = C4 = MIDI 60） */

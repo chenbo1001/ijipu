@@ -968,10 +968,11 @@ check('标题居中靠上（文字顶不越顶部虚线，adj32）', tTitle !== 
 const tAuthor = getMeta('author_0')
 check('作者右下（右对齐，描述头区域右下角往上）', tAuthor !== null && Math.abs(tAuthor.x - 515.28) < 0.5 && Math.abs(tAuthor.y - 151.6) < 0.5, JSON.stringify(tAuthor))
 const tKey = getMeta('keyline')
-check('调式+拍号左下（描述头区域左下角）', tKey !== null && Math.abs(tKey.x - 80) < 0.5 && Math.abs(tKey.y - 123.6) < 0.5, JSON.stringify(tKey))
+// adj176：调号/拍号/节拍整体右移 6px（为字母左侧升降号角标留空间）
+check('调式+拍号左下（描述头区域左下角，右移 6px）', tKey !== null && Math.abs(tKey.x - 86) < 0.5 && Math.abs(tKey.y - 123.6) < 0.5, JSON.stringify(tKey))
 const tTempo = getMeta('tempo')
-// adj42：节拍行 = 号与调式行对齐 → x = 80 + (w("1 ") - w("♩")) = 80 + 11.47 - 7.0 = 84.47
-check('节拍在 keyline 下（D↔J 间距加大，-20→-12；= 号与调式行对齐）', tTempo !== null && Math.abs(tTempo.x - 84.47) < 0.5 && Math.abs(tTempo.y - 155.6) < 0.5, JSON.stringify(tTempo))
+// adj42：节拍行 = 号与调式行对齐 → x = 80 + (w("1 ") - w("♩")) = 80 + 11.47 - 7.0 = 84.47；adj176 +6 → 90.47
+check('节拍在 keyline 下（D↔J 间距加大，-20→-12；= 号与调式行对齐；右移 6px）', tTempo !== null && Math.abs(tTempo.x - 90.47) < 0.5 && Math.abs(tTempo.y - 155.6) < 0.5, JSON.stringify(tTempo))
 // metaPos 覆盖（相对锚点偏移，adj16）：title 锚=上中点(297.64,80)，绝对 = 297.64+100, 80+50
 const layErM = layoutScore(rEr, { ...defaultPageConfig, metaPos: { title: { x: 100, y: 50 } } })
 const svgErM = renderScoreToSvg(layErM)[0]
@@ -1495,14 +1496,26 @@ check('adj174 后置 F# 渲染为 1 = F + ♯ 角标（等价）', svgK174b.incl
 const rK174c = parseJps('V: 1.0\nB: t\nD: B$\nP: 4/4\nQ: 1 2 3 4 |\n')
 const svgK174c = renderScoreToSvg(layoutScore(rK174c, defaultPageConfig))[0]
 check('adj174 降号 $ 渲染 ♭ 角标且字母为 B', svgK174c.includes('1 = B') && svgK174c.includes('♭') && !svgK174c.includes('$B'), '')
-// 角标位置在字母左上方（x 在字母区间内偏左、y < 字母基线、字更小）
+// adj175：b 作为降号与 $ 等价；bE 与 Eb 等价；升降号在字母左侧、中线以上、字号为调号一半
+const rK175a = parseJps('V: 1.0\nB: t\nD: bE\nP: 4/4\nQ: 1 2 3 4 |\n')
+const rK175b = parseJps('V: 1.0\nB: t\nD: Eb\nP: 4/4\nQ: 1 2 3 4 |\n')
+const rK175c = parseJps('V: 1.0\nB: t\nD: $E\nP: 4/4\nQ: 1 2 3 4 |\n')
+check('adj175 bE / Eb / $E 半音偏移一致（降 E）', parseKey(rK175a.header.key) === parseKey(rK175b.header.key) && parseKey(rK175b.header.key) === parseKey(rK175c.header.key) && parseKey(rK175b.header.key) === 3, `${parseKey(rK175a.header.key)},${parseKey(rK175b.header.key)},${parseKey(rK175c.header.key)}`)
+const svgK175 = renderScoreToSvg(layoutScore(rK175a, defaultPageConfig))[0]
+check('adj175 bE 渲染为 1 = E + ♭ 角标', svgK175.includes('1 = E') && svgK175.includes('♭'), '')
+// 角标位置：在字母左侧（x < 字母左缘）、y 更高、字号 = 调号一半（13/2 = 6.5）
+const k175Acc = /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>♭<\/text>/.exec(svgK175)
+const k175Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK175)
+const k175PrefixW = (7.62 + 3.85 + 9.64) * (defaultPageConfig.miaoshu_size / 13)
+const k175LetterLeft = Number(k175Letter?.[1] ?? NaN) + k175PrefixW
+check('adj175 ♭ 角标在字母左侧、更高、字号为调号一半（6.5）', k175Acc !== null && k175Letter !== null && Number(k175Acc[1]) < k175LetterLeft && Number(k175Acc[2]) < Number(k175Letter[2]) && Math.abs(Number(k175Acc[3]) - 6.5) < 0.1, JSON.stringify([k175Acc?.[1], k175Acc?.[2], k175Acc?.[3], k175LetterLeft]))
+// 角标位置在字母左上方（adj175：x 在字母左侧、y < 字母基线、字号为调号一半）
 const k174Acc = /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>♯<\/text>/.exec(svgK174a)
 const k174Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK174a)
 // 13px 基准 "1 = " 估算宽：1=7.62 空格=3.85 =9.64
 const k174PrefixW = (7.62 + 3.85 + 9.64) * (defaultPageConfig.miaoshu_size / 13)
 const k174LetterLeft = Number(k174Letter?.[1] ?? NaN) + k174PrefixW // 字母 F 左缘
-const k174LetterRight = k174LetterLeft + 6.91 // F 宽（13px 基准 6.91）
-check('adj174 ♯ 角标在字母左上方（x 在字母区间、y 更高、字更小）', k174Acc !== null && k174Letter !== null && Number(k174Acc[1]) >= k174LetterLeft - 3 && Number(k174Acc[1]) <= k174LetterRight && Number(k174Acc[2]) < Number(k174Letter[2]) && Number(k174Acc[3]) < 13, JSON.stringify([k174Acc?.[1], k174Acc?.[2], k174Acc?.[3], k174LetterLeft, k174LetterRight]))
+check('adj174 ♯ 角标在字母左侧、更高、字号为调号一半（6.5）', k174Acc !== null && k174Letter !== null && Number(k174Acc[1]) < k174LetterLeft && Number(k174Acc[2]) < Number(k174Letter[2]) && Math.abs(Number(k174Acc[3]) - 6.5) < 0.1, JSON.stringify([k174Acc?.[1], k174Acc?.[2], k174Acc?.[3], k174LetterLeft]))
 // 辅助拍号（括号内小一号）
 const rM2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4 (2/4)\nJ: 96\nQ: 1 2 3 4 |\n')
 const svgM48b = renderScoreToSvg(layoutScore(rM2, defaultPageConfig))[0]
