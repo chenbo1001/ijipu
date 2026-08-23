@@ -793,35 +793,48 @@ function renderBarline(bar: PlacedBarline, noteSize = 18): string {
 
   // adj126：小节线修饰符（&fine 曲终 / &dc 从头反复 / &ds 大反复 → 正下方文本；
   // &ty 大跳跃 → 正上方 ⊕；&hs 花S → 正上方花 S 记号）
-  if (bar.mark) {
+  // adj206：同一条小节线可叠加多个修饰符（如 |&ty&ds）——全部渲染；
+  // 正上方记号（ty/hs）横向依次排开，正下方文本（fine/dc/ds）也横向排开
+  if (bar.marks?.length) {
     const mx = x + ({ '|': 0.55, '||': 1.95, '||/': 1.6, '|:': 4.2, ':|': 4.2, ':|:': 8.1, '||:': 3.85, '|*': 0.55, '|/': 0.55 }[bar.type] ?? 0.55) / 2
-    const label = bar.mark === 'fine' ? 'Fine' : bar.mark === 'dc' ? 'D.C.' : bar.mark === 'ds' ? 'D.S.' : null
-    if (label) {
-      // 小节线正下方文本（adj128：&dc/&ds 斜体粗体、&fine 粗体；均 80% 宽度字号；
+    // 上方记号组（ty/hs）
+    const upMarks = bar.marks.filter((m) => m === 'ty' || m === 'hs')
+    upMarks.forEach((m, idx) => {
+      const ux = mx + (idx - (upMarks.length - 1) / 2) * 9 * s
+      if (m === 'ty') {
+        // 大跳跃记号（adj130）：官方 Unicode U+1D10C（𝄌）；adj131：调大 + 下移靠近小节线；
+        // adj182：高度 120%（16s→19.2s）、记号下端与小节线上端（yTop）齐平
+        // （text y 为基线，记号下端 ≈ y + 0.15×fs）；
+        // adj183：再向下移动 60% 自身高度（y → yTop + 0.45×fs）；
+        // adj184：再上移 10% 自身高度（y → yTop + 0.35×fs）
+        const fs = Math.max(14, Math.round(16 * s * 1.2))
+        parts.push(
+          `<text x="${ux.toFixed(1)}" y="${(yTop + 0.35 * fs).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄌</text>`,
+        )
+      } else {
+        // 花 S 记号（adj129）：官方 Unicode U+1D10B（𝄋）；adj131：调小与大跳跃匹配 + 下移靠近小节线；
+        // adj182：记号下端与小节线上端（yTop）齐平
+        const fs = Math.max(10, Math.round(12 * s))
+        parts.push(
+          `<text x="${ux.toFixed(1)}" y="${(yTop - 0.15 * fs).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄋</text>`,
+        )
+      }
+    })
+    // 下方文本组（fine/dc/ds）
+    const downMarks = bar.marks.filter((m) => m === 'fine' || m === 'dc' || m === 'ds')
+    downMarks.forEach((m, idx) => {
+      const label = m === 'fine' ? 'Fine' : m === 'dc' ? 'D.C.' : 'D.S.'
+      // 小节线正下方文本（adj128：&dc/&ds 斜体、&fine 粗体；均 80% 宽度字号；
       // adj131：上移更靠近小节线下端）
+      // adj207：&dc/&ds 不再粗体（此前粗体显宽）；宽度保持 80% 字号
       const fs = Math.max(8, Math.round(9 * s * 0.8))
-      const italic = bar.mark === 'dc' || bar.mark === 'ds' ? ' font-style="italic"' : ''
+      const bold = m === 'fine' ? ' font-weight="bold"' : ''
+      const italic = m === 'dc' || m === 'ds' ? ' font-style="italic"' : ''
+      const dx = mx + (idx - (downMarks.length - 1) / 2) * 10 * s
       parts.push(
-        `<text x="${mx.toFixed(1)}" y="${(yBottom + 8 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="${FONT_CN}" font-weight="bold"${italic} fill="#1b1b1b">${label}</text>`,
+        `<text x="${dx.toFixed(1)}" y="${(yBottom + 8 * s).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="${FONT_CN}"${bold}${italic} fill="#1b1b1b">${label}</text>`,
       )
-    } else if (bar.mark === 'ty') {
-      // 大跳跃记号（adj130）：官方 Unicode U+1D10C（𝄌）；adj131：调大 + 下移靠近小节线；
-      // adj182：高度 120%（16s→19.2s）、记号下端与小节线上端（yTop）齐平
-      // （text y 为基线，记号下端 ≈ y + 0.15×fs）；
-      // adj183：再向下移动 60% 自身高度（y → yTop + 0.45×fs）；
-      // adj184：再上移 10% 自身高度（y → yTop + 0.35×fs）
-      const fs = Math.max(14, Math.round(16 * s * 1.2))
-      parts.push(
-        `<text x="${mx.toFixed(1)}" y="${(yTop + 0.35 * fs).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄌</text>`,
-      )
-    } else if (bar.mark === 'hs') {
-      // 花 S 记号（adj129）：官方 Unicode U+1D10B（𝄋）；adj131：调小与大跳跃匹配 + 下移靠近小节线；
-      // adj182：记号下端与小节线上端（yTop）齐平
-      const fs = Math.max(10, Math.round(12 * s))
-      parts.push(
-        `<text x="${mx.toFixed(1)}" y="${(yTop - 0.15 * fs).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄋</text>`,
-      )
-    }
+    })
   }
 
   return parts.join('\n')

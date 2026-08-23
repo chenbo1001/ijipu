@@ -228,11 +228,14 @@ export type BarlineType =
   | '||/'
   | '||:'
 
+/** 小节线修饰符（adj126：&fine 曲终 / &dc 从头反复 / &ds 大反复 / &ty 大跳跃 / &hs 花S） */
+export type BarlineMark = 'fine' | 'dc' | 'ds' | 'ty' | 'hs'
+
 export interface BarlineToken {
   kind: 'barline'
   type: BarlineType
-  /** 小节线修饰符（adj126：&fine 曲终 / &dc 从头反复 / &ds 大反复 / &ty 大跳跃 / &hs 花S） */
-  mark?: 'fine' | 'dc' | 'ds' | 'ty' | 'hs'
+  /** 小节线修饰符列表（adj206：同一条小节线可叠加多个，如 |&ty&ds） */
+  marks?: BarlineMark[]
   /** 跳房子起点标记（adj26：[ 后修饰支持 + 抬高 / 不封闭、"注释"） */
   voltaStart?: {
     /** 是否有 "[" 起点 */
@@ -399,8 +402,8 @@ export interface PlacedLyric {
 export interface PlacedBarline {
   id: LayoutId
   type: BarlineType
-  /** 小节线修饰符（adj126：Fine/D.C./D.S./⊕/花S） */
-  mark?: 'fine' | 'dc' | 'ds' | 'ty' | 'hs'
+  /** 小节线修饰符列表（adj206：可叠加多个，如 |&ty&ds 同时渲染 ⊕ 与 D.S.） */
+  marks?: BarlineMark[]
   /** 跳房子起点/终点标记 */
   voltaStart?: { open: boolean; slash?: boolean; plus?: number; comment?: string }
   voltaEnd?: boolean

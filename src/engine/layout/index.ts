@@ -857,7 +857,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       page.barlines.push({
         id: bid,
         type: leadVoltaBar.type,
-        mark: leadVoltaBar.mark, // adj126
+        marks: leadVoltaBar.marks, // adj206
         voltaStart: leadVoltaBar.voltaStart,
         voltaEnd: leadVoltaBar.voltaEnd,
         voltaEndSlash: leadVoltaBar.voltaEndSlash,
@@ -959,7 +959,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         // adj137：行首空 seg 的普通单线 | 跳过（行从边距开始）；
         // 带跳房子（voltaStart/voltaEnd）或小节线修饰符的行首线**不跳过**——否则起点/标记丢失
         const skipRowStart =
-          isRowStartEmpty && bar.type === '|' && !bar.voltaStart && !bar.voltaEnd && !bar.mark
+          isRowStartEmpty && bar.type === '|' && !bar.voltaStart && !bar.voltaEnd && !bar.marks?.length
         if (!movesToNextRow && !skipRowStart) {
           // 小节线整体不超出页面内容区（左/右边距内，adj）
           const lineX0 =
@@ -975,7 +975,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           page.barlines.push({
             id: bid,
             type: bar.type,
-            mark: bar.mark, // adj126：小节线修饰符透传
+            marks: bar.marks, // adj206：小节线修饰符透传
             voltaStart: bar.voltaStart,
             voltaEnd: bar.voltaEnd,
             voltaEndSlash: bar.voltaEndSlash,
@@ -1165,7 +1165,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         pages[pageIndex].barlines.push({
           id: bid,
           type: bar.type,
-          mark: bar.mark, // adj126
+          marks: bar.marks, // adj206
           voltaStart: bar.voltaStart,
           voltaEnd: bar.voltaEnd,
           voltaEndSlash: bar.voltaEndSlash,

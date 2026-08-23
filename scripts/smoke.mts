@@ -612,21 +612,31 @@ check('adj180 hx 半宽 = 2.8×s（80% 宽度）', hxPath180 !== null && Math.ab
 // adj126：小节线修饰符（&fine/&dc/&ds/&ty/&hs）解析 + 渲染 + 播放跳转
 const r126 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |&fine 5 6 7 1 |&dc 2 3 4 5 |&ds 6 7 1 2 |&hs 3 4 5 6 |&ty 7 1 2 3 |&ty 4 5 6 7 |\n')
 const bars126 = r126.groups[0].music.tokens.filter((t) => t.kind === 'barline')
-check('adj126 小节线修饰符解析（fine/dc/ds/hs/ty/ty + 行尾无）', r126.errors.length === 0 && JSON.stringify(bars126.map((b) => b.kind === 'barline' ? b.mark : undefined)) === JSON.stringify(['fine', 'dc', 'ds', 'hs', 'ty', 'ty', null]), JSON.stringify(bars126.map((b) => b.kind === 'barline' ? b.mark : undefined)))
+check('adj126 小节线修饰符解析（fine/dc/ds/hs/ty/ty + 行尾无）', r126.errors.length === 0 && JSON.stringify(bars126.map((b) => b.kind === 'barline' ? b.marks : undefined)) === JSON.stringify([['fine'], ['dc'], ['ds'], ['hs'], ['ty'], ['ty'], undefined]), JSON.stringify(bars126.map((b) => b.kind === 'barline' ? b.marks : undefined)))
+// adj206：同一小节线叠加多个修饰符（如 |&ty&ds）全部解析
+const r206 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |&ty&ds 5 6 7 1 |&fine&hs 2 3 4 5 |\n')
+const bars206 = r206.groups[0].music.tokens.filter((t) => t.kind === 'barline')
+check('adj206 小节线叠加修饰符解析（|&ty&ds → [ty,ds]、|&fine&hs → [fine,hs]）', r206.errors.length === 0 && JSON.stringify(bars206.slice(0, 2).map((b) => b.kind === 'barline' ? b.marks : undefined)) === JSON.stringify([['ty', 'ds'], ['fine', 'hs']]), JSON.stringify(bars206.map((b) => b.kind === 'barline' ? b.marks : undefined)))
 const lay126 = layoutScore(r126, defaultPageConfig)
 const placed126 = lay126.pages[0].barlines
-check('adj126 布局透传修饰符', placed126.length >= 6 && placed126.some((b) => b.mark === 'fine') && placed126.some((b) => b.mark === 'ty') && placed126.some((b) => b.mark === 'hs'), JSON.stringify(placed126.map((b) => b.mark)))
+check('adj126 布局透传修饰符', placed126.length >= 6 && placed126.some((b) => b.marks?.includes('fine')) && placed126.some((b) => b.marks?.includes('ty')) && placed126.some((b) => b.marks?.includes('hs')), JSON.stringify(placed126.map((b) => b.marks)))
 const svg126 = renderScoreToSvg(lay126)[0]
 check('adj126 渲染 Fine/D.C./D.S. 文本', svg126.includes('>Fine<') && svg126.includes('>D.C.<') && svg126.includes('>D.S.<'), '')
 check('adj130 渲染大跳跃记号（Unicode U+1D10C 𝄌）', svg126.includes('𝄌'), '')
 check('adj129 渲染花 S 记号（Unicode U+1D10B 𝄋）', svg126.includes('𝄋'), '')
+// adj207：&dc/&ds 不加粗（此前粗体显宽）；&fine 保持粗体
+const svg207 = renderScoreToSvg(layoutScore(r206, defaultPageConfig))[0]
+check('adj207 叠加渲染：&ty&ds 同时显示 ⊕ 与 D.S.，&fine&hs 同时显示 Fine 与 花S', (svg207.match(/𝄌/g) ?? []).length >= 1 && svg207.includes('>D.S.<') && svg207.includes('>Fine<') && svg207.includes('𝄋'), '')
+check('adj207 D.S. 不加粗（font-weight 不在 D.S. text 内）', !/font-weight="bold"[^>]*>D\.S\.</.test(svg207) && !/font-weight="bold"[^>]*>D\.C\.</.test(svg207), '')
+check('adj207 Fine 仍加粗', /font-weight="bold"[^>]*>Fine</.test(svg207), '')
+check('adj207 D.S. 字号 80%（fs = 9×s×0.8）', /<text x="[^"]+" y="[^"]+" text-anchor="middle" font-size="8"[^>]*>D\.S\.<\/text>/.test(svg207), '')
 // adj182：大跳跃记号高度 120%（fs = 19.2×s）；两记号下端与小节线上端（yTop）齐平
 const ty182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="([\d.]+)"[^>]*>𝄌<\/text>/.exec(svg126)
 const hs182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="([\d.]+)"[^>]*>𝄋<\/text>/.exec(svg126)
 check('adj182 大跳跃字号 = 19.2×s（120%）', ty182 !== null && Number(ty182[3]) === Math.max(14, Math.round(16 * 1.2)), `fs=${ty182?.[3]}`)
 // y = yTop - 0.15×fs → 记号下端（y + 0.15×fs）≈ yTop；adj183 再下移 60%、adj184 再上移 10% → y = yTop + 0.35×fs
-const tyBar182 = placed126.find((b) => b.mark === 'ty')
-const hsBar182 = placed126.find((b) => b.mark === 'hs')
+const tyBar182 = placed126.find((b) => b.marks?.includes('ty'))
+const hsBar182 = placed126.find((b) => b.marks?.includes('hs'))
 check('adj184 大跳跃记号 y = yTop + 0.35×fs（下移60%再上移10%）', ty182 !== null && tyBar182 !== undefined && Math.abs(Number(ty182[2]) - (tyBar182.yTop + 0.35 * Number(ty182[3]))) < 1, `y=${ty182?.[2]} fs=${ty182?.[3]} yTop=${tyBar182?.yTop}`)
 check('adj182 花S 记号下端与 yTop 齐平（y = yTop - 0.15×fs）', hs182 !== null && hsBar182 !== undefined && Math.abs(Number(hs182[2]) + 0.15 * Number(hs182[3]) - hsBar182.yTop) < 1, `y=${hs182?.[2]} fs=${hs182?.[3]} yTop=${hsBar182?.yTop}`)
 // 播放跳转：fine 截断 / ds 跳 hs / ty 跳下一 ty / dc 从头反复

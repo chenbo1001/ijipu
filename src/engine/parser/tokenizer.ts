@@ -8,7 +8,7 @@
  * 虚音符（(1) 括号紧贴数字，adj23）、倚音（1[65] 前 / 1[h65] 后，adj23）。
  * 块间空格规则（adj23）：音符块与音符块、音符块与小节线块之间恰好一个空格。
  */
-import type { BarlineType, GracenoteNote, MusicToken, SourcePos } from '../types'
+import type { BarlineMark, BarlineType, GracenoteNote, MusicToken, SourcePos } from '../types'
 import { err } from './errors'
 import type { ParseError } from '../types'
 
@@ -319,11 +319,22 @@ export function tokenizeMusicLine(
         j = k
       } else if (content[j] === '&') {
         // adj126：小节线修饰符（&fine 曲终 / &dc 从头反复 / &ds 大反复 / &ty 大跳跃 / &hs 花S）
-        let k = j + 1
-        while (k < n && /[a-z]/i.test(content[k])) k++
-        const code = content.slice(j + 1, k)
-        if (code === 'fine' || code === 'dc' || code === 'ds' || code === 'ty' || code === 'hs') {
-          t.mark = code as Extract<MusicToken, { kind: 'barline' }>['mark']
+        // adj206：同一小节线可叠加多个修饰符（如 |&ty&ds）——循环收集
+        const marks: Extract<MusicToken, { kind: 'barline' }>['marks'] = []
+        let k = j
+        while (k < n && content[k] === '&') {
+          let m = k + 1
+          while (m < n && /[a-z]/i.test(content[m])) m++
+          const code = content.slice(k + 1, m)
+          if (code === 'fine' || code === 'dc' || code === 'ds' || code === 'ty' || code === 'hs') {
+            marks.push(code as BarlineMark)
+            k = m
+          } else {
+            break // 非小节线修饰符：停止收集（& 留给独立装饰处理）
+          }
+        }
+        if (marks.length > 0) {
+          t.marks = marks
           t.raw = rawAt(i, k)
           j = k
         } else {

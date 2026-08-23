@@ -8,7 +8,7 @@
  *  - `[ ]` 跳房子：第一遍经过 [ 段，第二遍跳过
  *  - `||` / `||/`：终止线，播放到此结束
  */
-import type { BarlineType, ParseResult, PlacedBarline, PlacedToken, ScoreLayout } from '../types'
+import type { BarlineMark, BarlineType, ParseResult, PlacedBarline, PlacedToken, ScoreLayout } from '../types'
 import { tokenDuration } from '../duration'
 import { parseKey, pitchToName } from '../layout/index'
 
@@ -55,7 +55,7 @@ interface SeqItem {
   note?: PlacedToken
   /** 音符全局索引（slur 区间用；bar 项无） */
   noteIdx?: number
-  bar?: { type: BarlineType; mark?: PlacedBarline['mark']; voltaStart?: PlacedBarline['voltaStart']; voltaEnd?: boolean }
+  bar?: { type: BarlineType; marks?: BarlineMark[]; voltaStart?: PlacedBarline['voltaStart']; voltaEnd?: boolean }
 }
 
 export function buildPlaySequence(
@@ -96,7 +96,7 @@ export function buildPlaySequence(
       if (token.kind === 'barline') {
         seq.push({
           kind: 'bar',
-          bar: { type: token.type, mark: token.mark, voltaStart: token.voltaStart, voltaEnd: token.voltaEnd },
+          bar: { type: token.type, marks: token.marks, voltaStart: token.voltaStart, voltaEnd: token.voltaEnd },
         })
       } else if (token.kind === 'note' || token.kind === 'rest' || token.kind === 'rhythm') {
         const placed = byIndex.get(noteIdx)
@@ -210,24 +210,24 @@ export function buildPlaySequence(
     }
     const bar = item.bar!
     // adj126：小节线修饰符跳转（&fine 曲终结束 / &dc 从头反复 / &ds 跳到花S / &ty 跳到下一大跳跃）
-    if (bar.mark) {
-      if (bar.mark === 'fine') {
+    if (bar.marks?.length) {
+      if (bar.marks.includes('fine')) {
         i = seq.length // 曲终：播放到此结束
         continue
       }
-      if (bar.mark === 'dc') {
+      if (bar.marks.includes('dc')) {
         i = 0 // 从头反复
         continue
       }
-      if (bar.mark === 'ds') {
+      if (bar.marks.includes('ds')) {
         // 跳到 &hs 花 S 标记位置开始
-        const hs = seq.findIndex((it, k) => k > i && it.kind === 'bar' && it.bar?.mark === 'hs')
+        const hs = seq.findIndex((it, k) => k > i && it.kind === 'bar' && it.bar?.marks?.includes('hs'))
         i = hs >= 0 ? hs + 1 : i + 1
         continue
       }
-      if (bar.mark === 'ty') {
+      if (bar.marks.includes('ty')) {
         // 跳到下一个 &ty 大跳跃记号（两 ty 中间不演奏）
-        const nextTy = seq.findIndex((it, k) => k > i && it.kind === 'bar' && it.bar?.mark === 'ty')
+        const nextTy = seq.findIndex((it, k) => k > i && it.kind === 'bar' && it.bar?.marks?.includes('ty'))
         i = nextTy >= 0 ? nextTy + 1 : i + 1
         continue
       }
