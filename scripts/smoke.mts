@@ -1544,7 +1544,7 @@ const k181Scale = defaultPageConfig.miaoshu_size / 13
 // "1 = " 含尾随空格：1=7.62 空格=3.85 =9.64 空格=3.85 → 24.96
 const k181PrefixW = (7.62 + 3.85 + 9.64 + 3.85) * k181Scale
 const k181LetterLeft = Number(k181Letter?.[1] ?? NaN) + k181PrefixW
-check('adj188 升降号与字母间距 = 4×scale（随字号缩放）', k181Acc !== null && Math.abs(Number(k181Acc[1]) - (k181LetterLeft - 4 * k181Scale)) < 0.5, JSON.stringify([k181Acc?.[1], k181LetterLeft - 4 * k181Scale]))
+check('adj191 升降号与字母间距 = 5×scale（随字号缩放）', k181Acc !== null && Math.abs(Number(k181Acc[1]) - (k181LetterLeft - 5 * k181Scale)) < 0.5, JSON.stringify([k181Acc?.[1], k181LetterLeft - 5 * k181Scale]))
 // 角标位置在字母左上方（adj175：x 在字母左侧、y < 字母基线、字号为调号一半）
 const k174Acc = /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>♯<\/text>/.exec(svgK174a)
 const k174Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK174a)
