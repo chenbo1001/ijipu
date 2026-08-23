@@ -101,9 +101,19 @@ export const useUiStore = create<UiState>()((set) => ({
   splitPct: loadNum(SPLIT_KEY, 50),
   editorFontSize: loadNum(EDITOR_FS_KEY, 14),
   editorFont: (() => {
+    // adj163：仅接受等宽字体（textarea 与高亮层需逐字符对齐）；
+    // 旧配置若存了非等宽字体（adj160 曾允许），回退默认
+    const MONO = new Set([
+      'Cascadia Code',
+      'JetBrains Mono',
+      'Consolas',
+      'Fira Code',
+      'Courier New',
+      'monospace',
+    ])
     try {
       const v = localStorage.getItem(EDITOR_FONT_KEY)
-      if (v && v.trim()) return v
+      if (v && MONO.has(v)) return v
     } catch {
       /* 忽略 */
     }

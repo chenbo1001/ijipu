@@ -1813,9 +1813,9 @@ check('adj107 跨行跳房子拆两半（2 条线、y 不同）', voltaLines107.
 const sortedVolta107 = [...voltaLines107].sort((a, b) => a.y1 - b.y1)
 const leftHalf107 = sortedVolta107[0]
 const rightHalf107 = sortedVolta107[1]
-const row1Bars107 = lay107.pages[0].barlines.filter((b) => Math.abs(b.yTop - vStart107.yTop) < 1)
-const row1LastX107 = Math.max(...row1Bars107.map((b) => b.x))
-check('adj107 左半：起点线+2 → 行末小节线-2', leftHalf107 !== undefined && Math.abs(leftHalf107.x1 - (vStart107.x + 2)) < 0.5 && Math.abs(leftHalf107.x2 - (row1LastX107 - 2)) < 0.5, JSON.stringify(leftHalf107))
+// adj162：跨行跳房子左半延伸到页面右边距（与跨行连音线一致），而非行末小节线
+const rightEdge107 = lay107.pages[0].width - defaultPageConfig.margin_right
+check('adj162 左半：起点线+2 → 页面右边距', leftHalf107 !== undefined && Math.abs(leftHalf107.x1 - (vStart107.x + 2)) < 0.5 && Math.abs(leftHalf107.x2 - rightEdge107) < 0.5, JSON.stringify(leftHalf107))
 check('adj137 右半：从行首（边距+2）连到终点线-2', rightHalf107 !== undefined && Math.abs(rightHalf107.x1 - 82) < 0.5 && Math.abs(rightHalf107.x2 - (vEnd107.x - 2)) < 0.5, JSON.stringify(rightHalf107))
 
 // ---- 57. 排版虚线行结构（adj72）：曲部行数字中心 / 多声部声部序号 / 词部行虚线 ----

@@ -14,21 +14,15 @@ import { highlightCode } from './highlight'
 import { formatLine, codePosToNoteId } from '../engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 
-/** adj160：编辑器字体选项（等宽优先，适合简谱脚本代码） */
+/** adj160：编辑器字体选项；adj163：仅等宽字体——textarea 与高亮层需逐字符对齐，
+ *  非等宽字体下加粗 span（小节线/行头等）宽度变化会从该字符开始逐字累积错位 */
 const EDITOR_FONT_OPTIONS: { label: string; value: string }[] = [
   { label: 'Cascadia Code', value: 'Cascadia Code' },
   { label: 'JetBrains Mono', value: 'JetBrains Mono' },
   { label: 'Consolas', value: 'Consolas' },
   { label: 'Fira Code', value: 'Fira Code' },
   { label: 'Courier New', value: 'Courier New' },
-  { label: '微软雅黑', value: 'Microsoft YaHei' },
-  { label: '黑体', value: 'SimHei' },
-  { label: '宋体', value: 'SimSun' },
-  { label: '楷体', value: 'KaiTi' },
-  { label: 'Georgia', value: 'Georgia' },
-  { label: 'Times New Roman', value: 'Times New Roman' },
-  { label: '无衬线', value: 'sans-serif' },
-  { label: '衬线', value: 'serif' },
+  { label: '等宽（系统默认）', value: 'monospace' },
 ]
 
 export function EditorPane() {
@@ -202,10 +196,12 @@ export function EditorPane() {
   const gutterLines = Array.from({ length: lineCount }, (_, i) => i + 1)
 
   // 编辑器字号 → CSS 变量（--jp-editor-fs / --jp-editor-lh），驱动 textarea/高亮层/行号栏
+  // adj163：字体值保留 monospace 回退——避免所选字体缺失时退化为非等宽默认字体导致
+  // 高亮层加粗 span 与 textarea 逐字符错位
   const editorStyle = {
     '--jp-editor-fs': `${editorFontSize}px`,
     '--jp-editor-lh': `${editorFontSize * 1.7}px`,
-    '--jp-editor-font': editorFont,
+    '--jp-editor-font': `${editorFont}, monospace`,
   } as React.CSSProperties
 
   return (

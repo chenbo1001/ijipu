@@ -877,13 +877,14 @@ function renderVoiceBlocks(page: ScorePage, vb: VoiceBlock): string {
 // ============================================================
 
 /** 画一条跳房子线（起点 [ 至终点 ]；未封闭或 |]/ 开口时终点不封闭；
- *  adj107：跨行（起点与终点在不同行）时拆两半——左半到行末小节线、右半从行首小节线/边距到终点 */
+ *  adj107：跨行（起点与终点在不同行）时拆两半——左半到页面右边距、右半从行首小节线/边距到终点 */
 function renderVoltaLine(
   start: PlacedBarline,
   end: PlacedBarline | null,
-  lastOfRow: Map<number, PlacedBarline>,
   noteSize = 18,
   marginLeft = 40,
+  pageWidth = 595.28,
+  marginRight = 80,
 ): string {
   const plus = start.voltaStart?.plus ?? 0
   // adj60：跳房子线基于小节线定位（距小节线上端 VOLTA_BAR_GAP，+ 修饰每级 VOLTA_RAISE）
@@ -904,9 +905,9 @@ function renderVoltaLine(
     ? `<text x="${x1 + 2}" y="${y + 8}" font-size="${Math.max(8, Math.round(noteSize * VOLTA_COMMENT_FONT_RATIO))}" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(label)}</text>`
     : ''
   if (end && end.yTop !== start.yTop) {
-    // 跨行：左半（起点行）到该行末小节线、右半从行首（边距）连到终点小节线（adj137）
-    const lastA = lastOfRow.get(start.yTop)
-    const xEndA = lastA ? lastA.x - 2 : start.x + 60
+    // 跨行：左半（起点行）延伸到页面右边距（adj162：与跨行连音线一致——
+    // 上一行横线贯穿到右侧边距，右半从行首（边距）连到终点小节线）
+    const xEndA = pageWidth - marginRight
     parts.push(
       `<line x1="${x1}" y1="${y}" x2="${xEndA}" y2="${y}" stroke="#1b1b1b" stroke-width="0.8"/>`,
     )
@@ -940,36 +941,28 @@ function renderVoltaLine(
 }
 
 /** 渲染页内全部跳房子线（配对 [ ]；未闭合 [ 向右延伸） */
-function renderVoltas(barlines: PlacedBarline[], noteSize = 18, marginLeft = 40): string {
+function renderVoltas(
+  barlines: PlacedBarline[],
+  noteSize = 18,
+  marginLeft = 40,
+  pageWidth = 595.28,
+  marginRight = 80,
+): string {
   const parts: string[] = []
-  // adj107：按行（yTop）分组，找每行首/末小节线，供跨行跳房子拆两半定位
-  const rows = new Map<number, PlacedBarline[]>()
-  for (const bar of barlines) {
-    const arr = rows.get(bar.yTop) ?? []
-    arr.push(bar)
-    rows.set(bar.yTop, arr)
-  }
-  const firstOfRow = new Map<number, PlacedBarline>()
-  const lastOfRow = new Map<number, PlacedBarline>()
-  for (const [y, arr] of rows) {
-    arr.sort((a, b) => a.x - b.x)
-    firstOfRow.set(y, arr[0])
-    lastOfRow.set(y, arr[arr.length - 1])
-  }
   let open: PlacedBarline | null = null
   for (const bar of barlines) {
     // adj139：一根小节线可同时 voltaEnd（闭合上一段）与 voltaStart（开启下一段）
     // —— 连续跳房子共用同一小节线（|["1" …|]["2" …|]）
     if (bar.voltaEnd && open) {
-      parts.push(renderVoltaLine(open, bar, lastOfRow, noteSize, marginLeft))
+      parts.push(renderVoltaLine(open, bar, noteSize, marginLeft, pageWidth, marginRight))
       open = null
     }
     if (bar.voltaStart) {
-      if (open) parts.push(renderVoltaLine(open, null, lastOfRow, noteSize, marginLeft)) // 未闭合上一段
+      if (open) parts.push(renderVoltaLine(open, null, noteSize, marginLeft, pageWidth, marginRight)) // 未闭合上一段
       open = bar
     }
   }
-  if (open) parts.push(renderVoltaLine(open, null, lastOfRow, noteSize, marginLeft))
+  if (open) parts.push(renderVoltaLine(open, null, noteSize, marginLeft, pageWidth, marginRight))
   return parts.join('\n')
 }
 
@@ -1185,7 +1178,7 @@ function renderPage(page: ScorePage, config: PageConfig, pageCount: number): str
 
   // 描述头（标题/作者/调号/拍号/节拍）仅第一页显示，后续页面不重复
   if (page.index === 0) body.push(renderMeta(page, config))
-  body.push(renderVoltas(page.barlines, config.note_size, config.margin_left)) // 跳房子线画在最底层
+  body.push(renderVoltas(page.barlines, config.note_size, config.margin_left, width, config.margin_right)) // 跳房子线画在最底层
   for (const s of page.slurs) body.push(renderSlur(s, config.note_size))
   for (const d of page.dynamics) body.push(renderDynamic(d))
   body.push(renderBeams(computeBeams(page.notes, config.note_size)))
