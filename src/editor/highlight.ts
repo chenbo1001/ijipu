@@ -81,18 +81,25 @@ function highlightLyricContent(content: string): string {
   return span('hl-lyric', content)
 }
 
-/** 整份代码高亮为 HTML；errLines 中的行号（1-based）整行红底标记 */
-export function highlightCode(code: string, errLines?: ReadonlySet<number>): string {
+/** 整份代码高亮为 HTML；errLines 中的行号（1-based）整行红底标记；
+ *  cursor（1-based 行、0-based 列，adj165）：当前行整行背景 + 光标所在空格段
+ *  （音符块/小节线块）叠加区块背景，与行背景区分 */
+export function highlightCode(
+  code: string,
+  errLines?: ReadonlySet<number>,
+  cursor?: { line: number; col: number } | null,
+): string {
   const lines = code.replace(/\r\n/g, '\n').split('\n')
   const parts: string[] = []
   for (let ln = 0; ln < lines.length; ln++) {
     const raw = lines[ln]
     const lineNo = ln + 1
     const wrap = (html: string) => {
-      if (errLines && errLines.has(lineNo)) {
-        return `<span class="hl-error-line">${html}</span>`
-      }
-      return html
+      let h = html
+      if (errLines && errLines.has(lineNo)) h = `<span class="hl-error-line">${h}</span>`
+      // adj165：当前行背景最外层（错误红底在内层，当前行背景再包一层）
+      if (cursor && cursor.line === lineNo) h = `<span class="hl-current-line">${h}</span>`
+      return h
     }
     const trimmed = raw.trim()
     if (trimmed === '') {
@@ -115,6 +122,20 @@ export function highlightCode(code: string, errLines?: ReadonlySet<number>): str
       const rest = trimmed.slice(headLen)
       const headHtml = span('hl-line-header', head)
       if (m[1] === 'Q') {
+        // adj165：当前行光标段（空格分隔的音符块/小节线块）叠加区块背景
+        if (cursor && cursor.line === lineNo) {
+          const lead = raw.length - trimmed.length // raw 前导空格
+          const restCol = cursor.col - lead - headLen // 光标在 rest 内的列
+          const seg = segmentAt(rest, restCol)
+          if (seg) {
+            const [s, e] = seg
+            const before = highlightMusicContent(rest.slice(0, s))
+            const curSeg = highlightMusicContent(rest.slice(s, e))
+            const after = highlightMusicContent(rest.slice(e))
+            parts.push(wrap(headHtml + before + `<span class="hl-current-block">${curSeg}</span>` + after))
+            continue
+          }
+        }
         parts.push(wrap(headHtml + highlightMusicContent(rest)))
       } else if (m[1] === 'C') {
         parts.push(wrap(headHtml + highlightLyricContent(rest)))
@@ -126,4 +147,15 @@ export function highlightCode(code: string, errLines?: ReadonlySet<number>): str
     parts.push(wrap(esc(raw)))
   }
   return parts.join('\n')
+}
+
+/** 找列 col（0-based）所在空格分隔段 [start, end)（col 越界/在空白处返回 null） */
+function segmentAt(text: string, col: number): [number, number] | null {
+  if (col < 0 || col >= text.length) return null
+  if (text[col] === ' ' || text[col] === '\t') return null
+  let s = col
+  let e = col
+  while (s > 0 && text[s - 1] !== ' ' && text[s - 1] !== '\t') s--
+  while (e < text.length && text[e] !== ' ' && text[e] !== '\t') e++
+  return [s, e]
 }

@@ -57,7 +57,12 @@ export function formatLine(raw: string): string {
     const ensureSpace = () => {
       if (out[out.length - 1] !== ' ') out.push(' ')
     }
-    if ('0123456789-'.includes(note) && upNote !== 'Q' && upNote !== 'C' && upNote !== ' ' && upNote !== '(' && upNote !== 'y') {
+    // adj165：数字前补空格——排除 Q/C 行头、空格、(、以及 (y 连音组（仅 upNote='y' 且其前为 '('）
+    // 注：&sby/&cy 等修饰符也以 y 结尾，但修饰符后紧跟的音符必须分隔（1&sby2 → 1&sby 2）
+    const isTupletY = upNote === 'y' && trimmed[x - 2] === '('
+    const noSpaceBefore =
+      upNote === 'Q' || upNote === 'C' || upNote === ' ' || upNote === '(' || isTupletY
+    if ('0123456789-'.includes(note) && !noSpaceBefore) {
       ensureSpace()
       out.push(note)
     } else if (note === '(' && upNote !== '(') {

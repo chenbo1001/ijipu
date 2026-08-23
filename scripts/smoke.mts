@@ -118,6 +118,12 @@ check('描述头行不变', fmt.includes('B: t'))
 check('formatLine 格式化单行 Q 行', formatLine('Q: 1 2 3|4') === 'Q: 1 2 3 | 4', formatLine('Q: 1 2 3|4'))
 check('formatLine 不改非 Q 行（歌词原样）', formatLine('C: 一 二 三') === 'C: 一 二 三', '')
 check('formatLine 保留行首命令头格式', formatLine('Q2: 1 2|3') === 'Q2: 1 2 | 3', formatLine('Q2: 1 2|3'))
+// adj165：& 修饰符自动分隔（修饰符与后续音符之间补空格；(y 连音组不受影响）
+check('adj165 &修饰符后音符补空格（1&yc2）', formatLine('Q: 1&yc2') === 'Q: 1&yc 2', formatLine('Q: 1&yc2'))
+check('adj165 &修饰符以 y 结尾也分隔（1&sby2）', formatLine('Q: 1&sby2') === 'Q: 1&sby 2', formatLine('Q: 1&sby2'))
+check('adj165 &修饰符后跟括号补空格（1&tr(2)）', formatLine('Q: 1&tr(2)') === 'Q: 1&tr (2)', formatLine('Q: 1&tr(2)'))
+check('adj165 (y 连音组不误分隔（(y1 2）', formatLine('Q: (y1 2 3)') === 'Q: (y1 2 3)', formatLine('Q: (y1 2 3)'))
+check('adj165 独立 &zkh 后音符补空格（&zkh6）', formatLine('Q: &zkh6') === 'Q: &zkh 6', formatLine('Q: &zkh6'))
 
 // ---- 6. 错误处理 ----
 console.log('[6] error handling')
@@ -226,6 +232,13 @@ const hl = highlightCode(errCode, new Set([3]))
 check('错误行含 hl-error-line 标记', hl.includes('hl-error-line') && hl.split('hl-error-line').length >= 2)
 const hlClean = highlightCode(errCode)
 check('无错误行时不加标记', !hlClean.includes('hl-error-line'))
+// adj165：当前行背景 + 当前音符区块背景（光标行/列；Q: 为 3 字符，rest 从 col=3 起）
+const hlCur = highlightCode('V: 1.0\nB: t\nQ: 1 2 3 4 |\n', undefined, { line: 3, col: 3 })
+check('adj165 当前行整行带 hl-current-line', hlCur.includes('hl-current-line'), '')
+check('adj165 光标所在音符区块带 hl-current-block', hlCur.includes('hl-current-block'), '')
+check('adj165 当前行无错误时不叠加 hl-error-line', !hlCur.includes('hl-error-line'), '')
+const hlCur2 = highlightCode('V: 1.0\nB: t\nQ: 1 2 3 4 |\n', undefined, { line: 3, col: 11 })
+check('adj165 光标在小节线区块高亮（| 段）', hlCur2.includes('hl-current-block'), '')
 
 // ---- 14. 光标映射（M3） ----
 console.log('[14] cursor mapping (M3)')

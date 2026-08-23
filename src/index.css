@@ -624,7 +624,7 @@ body {
   min-height: 0;
   overflow: hidden;
   --jp-editor-fs: 14px; /* 默认字号（adj46：可调） */
-  --jp-editor-lh: 23.8px; /* 字号 × 1.7，与 textarea 行高一致 */
+  --jp-editor-lh: 24px; /* 字号 × 1.7 取整（adj165：整数行高避免 textarea 与高亮层累积错位） */
   --jp-editor-font: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace; /* adj160：编辑器字体（可调） */
 }
 
@@ -675,8 +675,9 @@ body {
   font-family: var(--jp-editor-font, var(--jp-font-mono));
   font-size: var(--jp-editor-fs, 14px);
   /* adj110：行高用与行号栏相同的计算值（--jp-editor-lh），
-     相对值 1.7 与 fs×1.7 的舍入差异会在多行后累积成滚动错位 */
-  line-height: var(--jp-editor-lh, 23.8px);
+     相对值 1.7 与 fs×1.7 的舍入差异会在多行后累积成滚动错位；
+     adj165：行高取整为整数，textarea 原生行盒与高亮层 CSS 行盒完全一致 */
+  line-height: var(--jp-editor-lh, 24px);
   padding: 10px 14px;
   white-space: pre;
   overflow: auto;
@@ -689,17 +690,73 @@ body {
   pointer-events: none;
   font-family: var(--jp-editor-font, var(--jp-font-mono));
   font-size: var(--jp-editor-fs, 14px);
-  line-height: var(--jp-editor-lh, 23.8px);
+  line-height: var(--jp-editor-lh, 24px);
   padding: 10px 14px;
   white-space: pre;
   overflow: hidden;
   color: var(--jp-hl-plain);
 }
 
+/* adj165：自动提示浮层（& 修饰符 / 跳房子输入提示） */
+.editor-completion {
+  position: absolute;
+  z-index: 20;
+  min-width: 220px;
+  max-width: 320px;
+  background: var(--jp-bg-panel);
+  border: 1px solid var(--jp-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 4px;
+  font-size: 12px;
+}
+
+.editor-completion .completion-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--jp-text-primary);
+}
+
+.editor-completion .completion-item.active {
+  background: color-mix(in srgb, var(--jp-accent) 24%, transparent);
+}
+
+.editor-completion .completion-code {
+  font-family: var(--jp-editor-font, var(--jp-font-mono));
+  color: var(--jp-accent);
+  white-space: nowrap;
+}
+
+.editor-completion .completion-label {
+  color: var(--jp-text-secondary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 高亮类 */
 .hl-line-header {
   color: var(--jp-hl-line-header);
   font-weight: 600;
+}
+/* adj165：当前行背景（光标所在行，与其它行区分） */
+.hl-current-line {
+  background: color-mix(in srgb, var(--jp-accent) 8%, transparent);
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+/* adj165：当前音符区块/小节线区块背景（叠加在当前行背景之上，二者可区分） */
+.hl-current-block {
+  background: color-mix(in srgb, var(--jp-accent) 22%, transparent);
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 .hl-note {
   color: var(--jp-hl-note);
