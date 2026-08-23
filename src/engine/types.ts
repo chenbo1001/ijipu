@@ -577,10 +577,13 @@ export const defaultPageConfig: PageConfig = {
   miaoshu_size: 13,
   // adj213：说明文字字体微软雅黑 → 宋体（与正文说明区分）
   notes_font: 'SimSun',
-  notes_size: 13,
+  // adj215：说明文字字号 13 → 12
+  notes_size: 12,
   geci_font: 'Microsoft YaHei',
-  geci_size: 18,
-  note_size: 18,
+  // adj215：歌词字号 18 → 11
+  geci_size: 11,
+  // adj215：音符字号 18 → 13
+  note_size: 13,
   // adj213：音符字体微软雅黑 → 黑体（简谱数字用黑体更醒目）
   shuzi_font: 'SimHei',
   // adj213：曲部与词部间距 13 → 15

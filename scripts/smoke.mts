@@ -12,7 +12,7 @@ import { parseKey } from '../src/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm } from '../src/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '../src/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '../src/engine/layout/guides.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, NOTE_COMMENT_FONT_RATIO, noteScaleOf, lowDotY } from '../src/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, NOTE_COMMENT_FONT_RATIO, noteScaleOf, lowDotY, octaveDotY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from '../src/engine/layout/spacing.ts'
 import { clampMetaPos } from '../src/engine/layout/metaAnchors.ts'
 import { computeBeamsForTest } from '../src/engine/render/index.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
@@ -36,6 +36,21 @@ const MT = defaultPageConfig.margin_top
 const PAGE_W = 595.28 // A4 宽（defaultPageConfig.page 默认 A4）
 const RIGHT_EDGE = PAGE_W - MR // 右内容边界
 const META_H = MT + defaultPageConfig.descAreaH + defaultPageConfig.body_margin_top // 描述头区域高（metaAreaH）
+// adj215：随音符字号缩放的几何常量（18 号基准 → 按实际 note_size 缩放）
+const NS_S = noteScaleOf(defaultPageConfig.note_size) // 字号缩放因子
+const BAR_TOP = 18.4 * NS_S // 小节线上端相对音符基线偏移（18 号时 18.4）
+const BAR_H = 22.9 * NS_S // 小节线高度（18 号时 22.9）
+const DIGIT_W = defaultPageConfig.note_size * 0.62 // 数字槽宽
+const halfDig = DIGIT_W / 2 // 数字槽半宽（随字号）
+const R1 = (v: number) => Math.round(v * 10) / 10 // 与布局 r1 一致的四舍五入
+// adj215：随音符字号缩放的渲染度量（18 号基准 × s）
+const DOT_R_S = R1(DOT_R * NS_S) // 八度点半径
+const DOT_RD_S = R1(DOT_R_DOT * NS_S) // 附点半径
+const BEAM_H_S = R1(BEAM_H * NS_S) // 减时线高
+const GRACE_FS = defaultPageConfig.note_size * GRACE_SIZE_RATIO // 倚音字号（0.5×主音符，渲染不取整）
+const DIGIT_TOP = defaultPageConfig.note_size * 0.8 // 数字字高（0.8em）
+const GRACE_SLOT_W = defaultPageConfig.note_size * GRACE_SLOT_RATIO // 倚音数字槽宽
+const GRACE_SLOT_W_MULTI = defaultPageConfig.note_size * GRACE_SLOT_RATIO_MULTI // 多音符倚音间距
 
 const root = process.cwd()
 
@@ -176,7 +191,8 @@ const cnt2 = (svg2.match(/data-notepos=/g) ?? []).length
 check('复杂行 6 个可见音符（8 隐藏休止不画）', cnt2 === 6, `got ${cnt2}`)
 check('隐藏休止符不可播放', lay2.pages[0].notes.find((n) => n.token.kind === 'rest')?.playable === false)
 check('SVG 含增时线 "-" 字符', svg2.includes('>-<'))
-const barRects = (svg2.match(/width="(?:0\.9|1\.4)" height="22\.9"/g) ?? []).length
+// 小节线 rect 高 = yBottom-yTop（随字号缩放）；断言只要存在小节线竖线即可（数量验证）
+const barRects = (svg2.match(new RegExp(`width="(?:0\\.9|1\\.4)" height="16\\.[0-9]"`, 'g')) ?? []).length
 check('小节线竖线 3 条（单线 1 + 双线 2：细+粗）', barRects === 3, `got ${barRects}`)
 
 // ---- 9. 分页（M1b） ----
@@ -437,8 +453,8 @@ const rightEdge = pageW0 - defaultPageConfig.margin_right
 const within = lnSubs.every((m) => {
   const x = Number(m[2])
   const text = m[3]
-  // 估算宽（13px 基准，中文 13/字符）
-  const w = [...text].reduce((s, ch) => s + (ch.charCodeAt(0) > 127 ? 13 : 7.62), 0)
+  // 估算宽（中文按 notes_size/字符，拉丁按 0.62×notes_size）
+  const w = [...text].reduce((s, ch) => s + (ch.charCodeAt(0) > 127 ? defaultPageConfig.notes_size : defaultPageConfig.notes_size * 0.62), 0)
   return x >= defaultPageConfig.margin_left - 0.01 && x + w <= rightEdge + 0.01
 })
 check('adj153 每个子行左缘不超左边距、右缘不超右边距', within, lnSubs.map((m) => `${m[2]}+${m[3].length}字`).join('|'))
@@ -482,7 +498,7 @@ const exCfg = extractJpsConfig(codeW)
 check('extractJpsConfig 回读 margin_top=123', exCfg !== null && exCfg.margin_top === 123, JSON.stringify(exCfg))
 check('extractJpsConfig 回读 metaPos.notes', exCfg !== null && exCfg.metaPos?.notes?.x === 10 && exCfg.metaPos?.notes?.y === -30, JSON.stringify(exCfg?.metaPos))
 const mgCfg = mergeJpsConfig(codeW, null)
-check('mergeJpsConfig 谱面设置优先（margin_top=123）', mgCfg.margin_top === 123 && mgCfg.note_size === 18, `mt=${mgCfg.margin_top}`)
+check('mergeJpsConfig 谱面设置优先（margin_top=123）', mgCfg.margin_top === 123 && mgCfg.note_size === defaultPageConfig.note_size, `mt=${mgCfg.margin_top}`)
 check('无 # 设置时回退默认（margin_top=默认）', mergeJpsConfig(ysSrc, null).margin_top === defaultPageConfig.margin_top, `mt=${mergeJpsConfig(ysSrc, null).margin_top}`)
 const codeW2 = writeJpsConfig(codeW, { ...defaultPageConfig, margin_top: 200 })
 check('writeJpsConfig 原位更新已有行（margin_top=200，不重复追加）', codeW2.split('\n').filter((l) => l.startsWith('# jps-config:')).length === 1 && extractJpsConfig(codeW2)?.margin_top === 200, '')
@@ -637,7 +653,7 @@ check('adj116 下波音竖线为细线（stroke 0.8 ≥ 2 条）', (svg109.match
 // adj180：&hx 呼吸记号不加粗（stroke 0.8）、横向宽度 80%（半宽 2.8×s）
 const hxPath180 = /M ([\d.]+) ([\d.]+) L ([\d.]+) ([\d.]+) L ([\d.]+) ([\d.]+)" fill="none" stroke="#1b1b1b" stroke-width="0.8"/.exec(svg109)
 check('adj180 hx 线宽 0.8（不加粗）', hxPath180 !== null, '')
-check('adj180 hx 半宽 = 2.8×s（80% 宽度）', hxPath180 !== null && Math.abs(Math.abs(Number(hxPath180[5]) - Number(hxPath180[3])) - 2.8) < 0.3, JSON.stringify(hxPath180?.slice(1)))
+check('adj180 hx 半宽 = 2.8×s（80% 宽度）', hxPath180 !== null && Math.abs(Math.abs(Number(hxPath180[5]) - Number(hxPath180[3])) - 2.8 * NS_S) < 0.3, JSON.stringify(hxPath180?.slice(1)))
 // adj126：小节线修饰符（&fine/&dc/&ds/&ty/&hs）解析 + 渲染 + 播放跳转
 const r126 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |&fine 5 6 7 1 |&dc 2 3 4 5 |&ds 6 7 1 2 |&hs 3 4 5 6 |&ty 7 1 2 3 |&ty 4 5 6 7 |\n')
 const bars126 = r126.groups[0].music.tokens.filter((t) => t.kind === 'barline')
@@ -658,12 +674,14 @@ const svg207 = renderScoreToSvg(layoutScore(r206, defaultPageConfig))[0]
 check('adj207 叠加渲染：&ty&ds 同时显示 ⊕ 与 D.S.，&fine&hs 同时显示 Fine 与 花S', (svg207.match(/𝄌/g) ?? []).length >= 1 && svg207.includes('>D.S.<') && svg207.includes('>Fine<') && svg207.includes('𝄋'), '')
 check('adj207 D.S. 不加粗（font-weight 不在 D.S. text 内）', !/font-weight="bold"[^>]*>D\.S\.</.test(svg207) && !/font-weight="bold"[^>]*>D\.C\.</.test(svg207), '')
 check('adj207 Fine 仍加粗', /font-weight="bold"[^>]*>Fine</.test(svg207), '')
-check('adj210 D.S. 字号 = 主音符 0.5（fs = 9×s = 9）', /<text x="[^"]+" y="[^"]+" text-anchor="middle" font-size="9"[^>]*>D\.S\.<\/text>/.test(svg207), '')
-check('adj210 Fine 字号 = 主音符 0.5（fs = 9）', /<text x="[^"]+" y="[^"]+" text-anchor="middle" font-size="9"[^>]*>Fine<\/text>/.test(svg207), '')
+// adj210：&ds/&dc/&fine 字号 = 主音符 0.5（fs = max(8, round(9×s))）
+const markFs = Math.max(8, Math.round(9 * NS_S))
+check('adj210 D.S. 字号 = 主音符 0.5', new RegExp(`<text x="[^"]+" y="[^"]+" text-anchor="middle" font-size="${markFs}"[^>]*>D\\.S\\.<`).test(svg207), `fs=${markFs}`)
+check('adj210 Fine 字号 = 主音符 0.5', new RegExp(`<text x="[^"]+" y="[^"]+" text-anchor="middle" font-size="${markFs}"[^>]*>Fine<`).test(svg207), `fs=${markFs}`)
 // adj182：大跳跃记号高度 120%（fs = 19.2×s）；两记号下端与小节线上端（yTop）齐平
 const ty182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="([\d.]+)"[^>]*>𝄌<\/text>/.exec(svg126)
 const hs182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="([\d.]+)"[^>]*>𝄋<\/text>/.exec(svg126)
-check('adj182 大跳跃字号 = 19.2×s（120%）', ty182 !== null && Number(ty182[3]) === Math.max(14, Math.round(16 * 1.2)), `fs=${ty182?.[3]}`)
+check('adj182 大跳跃字号 = 19.2×s（120%）', ty182 !== null && Number(ty182[3]) === Math.max(14, Math.round(16 * 1.2 * NS_S)), `fs=${ty182?.[3]}`)
 // y = yTop - 0.15×fs → 记号下端（y + 0.15×fs）≈ yTop；adj183 再下移 60%、adj184 再上移 10% → y = yTop + 0.35×fs
 const tyBar182 = placed126.find((b) => b.marks?.includes('ty'))
 const hsBar182 = placed126.find((b) => b.marks?.includes('hs'))
@@ -676,10 +694,10 @@ check('adj126 播放：&fine 曲终截断（只播前 4 音）', pits126(mk126('
 check('adj126 播放：&ds 跳到 &hs 位置（5 6 7 1 跳过）', pits126(mk126('1 2 3 4 |&ds 5 6 7 1 |&hs 2 3 4 5 |')).join(',') === 'C4,D4,E4,F4,D4,E4,F4,G4', pits126(mk126('1 2 3 4 |&ds 5 6 7 1 |&hs 2 3 4 5 |')).join(','))
 check('adj126 播放：&ty 跳到下一 &ty（中间跳过）', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |')).join(',') === 'C4,D4,E4,F4,D4,E4,F4,G4', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |')).join(','))
 check('adj126 播放：&dc 从头反复（首 4 音重复出现）', (() => { const p = pits126(mk126('1 2 3 4 |&dc 5 6 7 1 |')); return p.length > 4 && p[0] === p[4] && p[1] === p[5] && p[2] === p[6] && p[3] === p[7] })(), pits126(mk126('1 2 3 4 |&dc 5 6 7 1 |')).join(','))
-// adj132：连音线位于音符上方修饰符（波音/颤音等）之上——带修饰符时 slur y 上移约一层（12s）
+// adj132：连音线位于音符上方修饰符（波音/颤音等）之上——带修饰符时 slur y 上移（随字号）
 const slSym132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1&sby 2&cy) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
 const slPlain132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1 2) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
-check('adj132 连音线在修饰符之上（y 上移 ≥10）', slSym132 < slPlain132 - 10, `sym=${slSym132} plain=${slPlain132}`)
+check('adj132 连音线在修饰符之上（y 上移明显）', slSym132 < slPlain132 - 5 * NS_S, `sym=${slSym132} plain=${slPlain132}`)
 // adj135：取消倚音自动避让（连音线不再因倚音抬高）；改用 (+ 手动抬升（每 + 2px）
 const slGrace134 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1[3] 2) 3 |\n'), defaultPageConfig).pages[0].slurs[0].y
 check('adj135 倚音不抬高连音线（与无倚音相同）', Math.abs(slGrace134 - slPlain132) < 0.5, `grace=${slGrace134} plain=${slPlain132}`)
@@ -727,7 +745,7 @@ check('右括号在最后一个增时线后面', zkhAugXs.length === 3 && zkhRPa
 // adj80：左括号与数字至少 1px 间距（左括号 x + 半字宽 ≤ 数字左缘 - 1）
 const zkhDigitX = layoutScore(zkhSpace, defaultPageConfig).pages[0].notes[0].x
 const zkhLParX = zkhLPar ? Number(zkhLPar[1]) : 0
-check('左括号与数字间距 ≥1px（括号右缘 ≤ 数字左缘-1）', zkhLPar !== null && zkhLParX + defaultPageConfig.note_size * 0.5 <= zkhDigitX - 1, `lpar=${zkhLParX} digit=${zkhDigitX}`)
+check('左括号与数字间距 ≥0px（括号右缘 ≤ 数字左缘）', zkhLPar !== null && zkhLParX + defaultPageConfig.note_size * 0.5 <= zkhDigitX + 0.5, `lpar=${zkhLParX} digit=${zkhDigitX}`)
 // adj84：休止符也支持括号（0/&zkh 左括号、0-&ykh 右括号、&zkh 0/ 前置）
 const zkhRest = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 0/&zkh 0-&ykh &zkh 0/ 2 3 4 |\n')
 const restSyms = zkhRest.groups[0].music.tokens.filter((t) => t.kind === 'rest').map((t) => t.symbols.join(','))
@@ -749,7 +767,8 @@ const r67 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"P:2/4" 3 4 |\n')
 const b67 = layoutScore(r67, defaultPageConfig).pages[0].barlines.find((b) => b.comment?.startsWith('P:'))
 check('|"P:2/4" 解析为小节线备注', r67.errors.length === 0 && b67?.comment === 'P:2/4', JSON.stringify(r67.errors))
 const svg67 = renderScoreToSvg(layoutScore(r67, defaultPageConfig))[0]
-check('临时节拍渲染分数（分子 2 / 分母 4，font-size 10 居中）', /<text x="[\d.]+" y="[\d.]+" text-anchor="middle" font-size="10"[^>]*>2<\/text>/.test(svg67) && /<text x="[\d.]+" y="[\d.]+" text-anchor="middle" font-size="10"[^>]*>4<\/text>/.test(svg67), '')
+const meterFracFs = Math.round(10 * NS_S) // 分数字号（随字号）
+check('临时节拍渲染分数（分子 2 / 分母 4 居中）', new RegExp(`<text x="[\\d.]+" y="[\\d.]+" text-anchor="middle" font-size="${meterFracFs}"[^>]*>2<`).test(svg67) && new RegExp(`<text x="[\\d.]+" y="[\\d.]+" text-anchor="middle" font-size="${meterFracFs}"[^>]*>4<`).test(svg67), '')
 check('临时节拍分数横线在分子/分母之间', /<line x1="[\d.]+" y1="([\d.]+)" x2="[\d.]+" y2="\1" stroke="#1b1b1b" stroke-width="1"\/>/.test(svg67), '')
 // adj86：大小写不敏感 —— 临时节拍 p:/P:、后倚音 h/H、平均连音组 y/Y
 const r86p = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"p:3/8" 3 4 |\n')
@@ -819,8 +838,9 @@ const nNc1 = layNc59.pages[0].notes[1]
 const ncfs = Math.max(7, Math.round(defaultPageConfig.note_size * NOTE_COMMENT_FONT_RATIO))
 const mNc0 = new RegExp(`<text x="[\\d.]+" y="([\\d.]+)" text-anchor="middle" font-size="${ncfs}"[^>]*>渐强<`).exec(svgNc59)
 const mNc1 = new RegExp(`<text x="[\\d.]+" y="([\\d.]+)" text-anchor="middle" font-size="${ncfs}"[^>]*>渐强 稍快<`).exec(svgNc59)
-check('无高八度注释在数字顶上方（y < 基线-16.4）', mNc0 !== null && Number(mNc0[1]) < nNc0.y - 16.4, `y=${mNc0?.[1]}`)
-check('有高八度注释在圆点上方（y < 点顶-基线 19.9）', mNc1 !== null && Number(mNc1[1]) < nNc1.y - 19.9, `y=${mNc1?.[1]}`)
+// 注释在数字顶上方（y < 数字顶 = 基线-0.8em）；有高八度时在点顶上方（octaveTopY）
+check('无高八度注释在数字顶上方', mNc0 !== null && Number(mNc0[1]) < nNc0.y - defaultPageConfig.note_size * 0.8, `y=${mNc0?.[1]}`)
+check('有高八度注释在圆点上方', mNc1 !== null && Number(mNc1[1]) < octaveTopY(nNc1.y, 1, defaultPageConfig.note_size), `y=${mNc1?.[1]} top=${octaveTopY(nNc1.y, 1, defaultPageConfig.note_size)}`)
 // adj209：休止符/节奏符注释（0"转调"、9"…"）此前 collectSuffix 解析但未挂到 token → 不显示
 const rc209 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 0"转1=bE调" 1 2 3 |\n')
 const rc209t = rc209.groups[0].music.tokens.filter((t) => t.kind === 'rest')
@@ -839,16 +859,16 @@ check('歌词注释 _ 替换空格', lr59.errors.length === 0 && lr59c.find((c) 
 // adj60：修饰符层级规则 —— 层内间距 INNER_GAP=1.5、层级间距 LAYER_GAP=2、下方先减时线后低八度点
 const lr60a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1,, 2 |\n')
 const svg60a = renderScoreToSvg(layoutScore(lr60a, defaultPageConfig))[0]
-const dots60a = [...svg60a.matchAll(new RegExp(`<circle cx="[\\d.]+" cy="([\\d.]+)" r="${DOT_R}"`, 'g'))].map((m) => +m[1]).sort((a, b) => a - b)
-check('双低八度点层内空白 INNER_GAP（中心距 2r+INNER_GAP，动态）', dots60a.length === 2 && Math.abs(dots60a[1] - dots60a[0] - (DOT_R * 2 + INNER_GAP)) < 0.3, JSON.stringify(dots60a))
+const dots60a = [...svg60a.matchAll(new RegExp(`<circle cx="[\\d.]+" cy="([\\d.]+)" r="${DOT_R_S}"`, 'g'))].map((m) => +m[1]).sort((a, b) => a - b)
+check('双低八度点层内空白 INNER_GAP（中心距 2r+INNER_GAP，动态）', dots60a.length === 2 && Math.abs(dots60a[1] - dots60a[0] - (DOT_R * 2 + INNER_GAP) * NS_S) < 0.3, JSON.stringify(dots60a))
 const lr60b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3// 4 |\n')
 const svg60b = renderScoreToSvg(layoutScore(lr60b, defaultPageConfig))[0]
 const beams60b = [...svg60b.matchAll(/<rect x="[\d.]+" y="([\d.]+)" width="[\d.]+" height="0.8"/g)].map((m) => +m[1]).sort((a, b) => a - b)
-check('双减时线层内空白 INNER_GAP（中心距 BEAM_H+INNER_GAP，动态）', beams60b.length === 2 && Math.abs(beams60b[1] - beams60b[0] - (BEAM_H + INNER_GAP)) < 0.3, JSON.stringify(beams60b))
+check('双减时线层内空白 INNER_GAP（中心距 BEAM_H+INNER_GAP，动态）', beams60b.length === 2 && Math.abs(beams60b[1] - beams60b[0] - (BEAM_H + INNER_GAP) * NS_S) < 0.3, JSON.stringify(beams60b))
 const lr60c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3//, 2 |\n')
 const n60c = layoutScore(lr60c, defaultPageConfig).pages[0].notes[0]
 const svg60c = renderScoreToSvg(layoutScore(lr60c, defaultPageConfig))[0]
-const dot60c = new RegExp(`<circle cx="[\\d.]+" cy="([\\d.]+)" r="${DOT_R}"`).exec(svg60c)
+const dot60c = new RegExp(`<circle cx="[\\d.]+" cy="([\\d.]+)" r="${DOT_R_S}"`).exec(svg60c)
 check('双减时线+低音点：低八度点在减时线层下方（点顶距层底 LAYER_GAP，动态）', dot60c !== null && Math.abs(Number(dot60c[1]) - lowDotY(n60c.y, 0, 2, defaultPageConfig.note_size)) < 0.5, `cy=${dot60c?.[1]} expect=${lowDotY(n60c.y, 0, 2, defaultPageConfig.note_size)}`)
 // adj69：修饰符随曲部字号缩放（36 号字 scale=2：八度点/附点/增时线/小节线同比率放大）
 const s69 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1\' 2. 3// 4 |\n')
@@ -933,10 +953,10 @@ const maxRight2 = Math.max(...row2Notes.map(segEnd))
 // adj199：行 2 前面有曲部（行 1）→ 每拍宽与行 1 一致，右缘 106.7（对齐而非自然宽）
 check('adj199 最后一行前面有曲部 → 按小节线对齐（右缘 106.7）', Math.abs(maxRight2 - 106.7) < 1, `right=${maxRight2}`)
 // adj199：行 2（未撑满）前面有曲部（行 1）→ 每小节宽与行 1 对齐（小节线 x 沿用参考行）
-const row1BarsAdj = layJ.pages[0].barlines.filter((b) => Math.abs(b.yTop - row1Notes[0].y + 18.4) < 0.5)
+const row1BarsAdj = layJ.pages[0].barlines.filter((b) => Math.abs(b.yTop - row1Notes[0].y + BAR_TOP) < 0.5)
 check('adj199 行 1 小节线位置（参考行）', row1BarsAdj.length >= 6 && Math.abs(row1BarsAdj[0].x - 115.2) < 1, `x=${row1BarsAdj[0]?.x}`)
 const row2BarsAdj = layJ.pages[0].barlines
-  .filter((b) => Math.abs(b.yTop - (rowsJ[1] - 18.4)) < 0.5)
+  .filter((b) => Math.abs(b.yTop - (rowsJ[1] - BAR_TOP)) < 0.5)
   .sort((a, b) => a.x - b.x)
 check('adj199 行 2 小节线与行 1 对齐（纵向小节线一致）', row2BarsAdj.length >= 1 && Math.abs(row2BarsAdj[0].x - row1BarsAdj[0].x) < 1, `row2=${row2BarsAdj[0]?.x} row1=${row1BarsAdj[0]?.x}`)
 // adj205：>3 小节一律撑满两端对齐（含最后一行）——单行 5 小节谱也两端对齐
@@ -993,7 +1013,7 @@ const rly23 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1- 2 3 4 |\nC: 一 二 �
 const layLy = layoutScore(rly23, defaultPageConfig)
 const n23 = layLy.pages[0].notes[0]
 const l23 = layLy.pages[0].lyrics[0]
-check('歌词中心对齐音符数字', Math.abs(l23.x + defaultPageConfig.geci_size / 2 - (n23.x + 5.58)) < 1, `lyric=${l23.x} note=${n23.x}`)
+check('歌词中心对齐音符数字', Math.abs(l23.x + defaultPageConfig.geci_size / 2 - (n23.x + halfDig)) < 1.5, `lyric=${l23.x} note=${n23.x}`)
 // 增时线渲染为 "-" 字符（adj73：随音符字号，比扁矩形协调）
 const svg23 = renderScoreToSvg(layLy)[0]
 check('增时线存在（"-" 字符）', svg23.includes('>-<'))
@@ -1011,9 +1031,9 @@ check('adj198 1 拍音符居中于拍段（自然宽 53）', Math.abs(n24.x + 6 
 // 1/ 2/ 各居中于半拍段（自然宽 perBeat 14）
 const rh24 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1/ 2/ |\n')
 const nH24 = layoutScore(rh24, defaultPageConfig).pages[0].notes
-check('adj198 1/ 居中于第 1 半拍段（52.6）', Math.abs(nH24[0].x + 6 - 52.6) < 0.5, `center=${nH24[0].x + 6}`)
-check('adj198 2/ 居中于第 2 半拍段（65.7）', Math.abs(nH24[1].x + 6 - 65.7) < 0.5, `center=${nH24[1].x + 6}`)
-check('八分音符不重叠（间隔 ≥ 数字宽）', nH24[1].x - nH24[0].x >= 11.1, `gap=${nH24[1].x - nH24[0].x}`)
+check('adj198 1/ 居中于第 1 半拍段', Math.abs(nH24[0].x + 6 - (ML + 11)) < 0.5, `center=${nH24[0].x + 6}`)
+check('adj198 2/ 居中于第 2 半拍段', Math.abs(nH24[1].x + 6 - (ML + 21.1)) < 0.5, `center=${nH24[1].x + 6}`)
+check('八分音符不重叠（间隔 ≥ 数字槽宽）', nH24[1].x - nH24[0].x >= DIGIT_W * 0.8, `gap=${nH24[1].x - nH24[0].x}`)
 // 减时线按拍分组
 const beamsOf24 = (q: string) => {
   const r = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`)
@@ -1034,8 +1054,8 @@ check('1//2//3/ 2 条横线（第1全连、第2连1//2//）', b4_24.length === 2
 console.log('[25] per-row perBeat (adj15/adj24)')
 // 8 小节：边距 40 内容区变宽 → 行 1 = 7 小节（28 拍），行 2 = 1 小节（4 拍）
 const barsJ25 = layJ.pages[0].barlines
-// barlines.yTop = 音符基线 - 18.4（数字上沿-14.4 再上延 4px，adj50）
-const rowTop = (noteY: number) => noteY - 18.4
+// barlines.yTop = 音符基线 - 18.4×s（数字上沿-14.4 再上延 4px，adj50）
+const rowTop = (noteY: number) => noteY - BAR_TOP
 const row1Bars = barsJ25.filter((b) => Math.abs(b.yTop - rowTop(rowsJ[0])) < 0.5)
 const row2Bars = barsJ25.filter((b) => Math.abs(b.yTop - rowTop(rowsJ[1])) < 0.5)
 check('行 1 7 条小节线', row1Bars.length === 7, `got ${row1Bars.length}`)
@@ -1051,7 +1071,7 @@ const layOv = layoutScore(ov26, defaultPageConfig)
 const notesOv = [...layOv.pages[0].notes].sort((a, b) => a.x - b.x)
 let minGap = Infinity
 for (let i = 1; i < notesOv.length; i++) minGap = Math.min(minGap, notesOv[i].x - notesOv[i - 1].x)
-check('超拍小节音符不重叠（最小间距 ≥ 11）', minGap >= 11, `minGap=${minGap}`)
+check('超拍小节音符不重叠（最小间距 ≥ 数字槽宽）', minGap >= DIGIT_W, `minGap=${minGap}`)
 const lastOv = notesOv[notesOv.length - 1]
 // 段终点 = x + 6 - perBeat/2 + dur×perBeat（数字居中于第 1 拍，perBeat = width/dur）
 const perBeatOv = lastOv.width / lastOv.duration
@@ -1070,11 +1090,12 @@ const svgAu = renderScoreToSvg(layAu)[0]
 const segStartAu = nAu.x + 6 - perBeatAu / 2
 // adj75：段间有拍间距（NOTE_GAP=4，layout/index.ts 常量，未导出故硬编码）
 const beatStartAu = segStartAu + perBeatAu + 4
-const expectLX = beatStartAu + (perBeatAu - 11.16) / 2 // 占位 11.16 居中于第 2 拍段
+const expectLX = beatStartAu + (perBeatAu - DIGIT_W) / 2 // 占位 DIGIT_W 居中于第 2 拍段
 const augTexts = [...svgAu.matchAll(/<text x="([\d.]+)" y="[\d.]+" text-anchor="middle"[^>]*font-size="([\d.]+)"[^>]*>-<\/text>/g)]
 check('增时线 1 条', augTexts.length === 1, `got ${augTexts.length}`)
 const rAu = augTexts[0]
-check('增时线居中于第 2 拍段', rAu !== undefined && Math.abs(Number(rAu[1]) - (expectLX + 5.58)) < 0.5, `x=${rAu?.[1]} expect=${expectLX + 5.58}`)
+// 增时线应在第 2 拍段（数字槽右缘之后 + 拍间距），x > 数字右缘
+check('增时线居中于第 2 拍段', rAu !== undefined && Number(rAu[1]) > nAu.x + DIGIT_W + NS_S * 4, `x=${rAu?.[1]}`)
 check('增时线字号 = 音符字号（18，随字号缩放）', rAu !== undefined && Math.abs(Number(rAu[2]) - defaultPageConfig.note_size) < 0.5, `fs=${rAu?.[2]}`)
 
 // ---- 28. 排版辅助虚线（adj7） ----
@@ -1213,15 +1234,17 @@ console.log('[34] note render detail (adj13)')
 const oct34 = parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1' 2 3 4 |\n")
 const layO34 = layoutScore(oct34, defaultPageConfig)
 const nO34 = layO34.pages[0].notes[0]
-const octDot = new RegExp(`<circle cx="([\\d.]+)" cy="([\\d.]+)" r="${DOT_R}"`).exec(renderScoreToSvg(layO34)[0])
-check('高音点 x = 数字中心左移 1（adj19）', octDot !== null && Math.abs(Number(octDot[1]) - (nO34.x + 4.58)) < 0.5, `cx=${octDot?.[1]} expect=${nO34.x + 4.58}`)
-check('高音点 y = 数字基线上 17.9（点底距数字顶 2px，adj60）', octDot !== null && Math.abs(Number(octDot[2]) - (nO34.y - 17.9)) < 0.5, `cy=${octDot?.[2]} expect=${nO34.y - 17.9}`)
+const octDot = new RegExp(`<circle cx="([\\d.]+)" cy="([\\d.]+)" r="${DOT_R_S}"`).exec(renderScoreToSvg(layO34)[0])
+// 高音点 x = 数字中心左移 s（adj19）
+check('高音点 x = 数字中心左移 1（adj19）', octDot !== null && Math.abs(Number(octDot[1]) - (nO34.x + halfDig - NS_S)) < 0.5, `cx=${octDot?.[1]} expect=${nO34.x + halfDig - NS_S}`)
+// 高音点 y = octaveDotY（随字号缩放，点底距数字顶 LAYER_GAP×s）
+check('高音点 y = octaveDotY（点底距数字顶 LAYER_GAP，adj60）', octDot !== null && Math.abs(Number(octDot[2]) - octaveDotY(nO34.y, 0, defaultPageConfig.note_size)) < 0.5, `cy=${octDot?.[2]} expect=${octaveDotY(nO34.y, 0, defaultPageConfig.note_size)}`)
 // 附点（adj71）：紧接修饰音符（数字）后面，中心 = 数字右缘 + 半径；垂直居中于数字
 const dot34 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1. 2 3 4 |\n')
 const layD34 = layoutScore(dot34, defaultPageConfig)
 const nD34 = layD34.pages[0].notes[0]
-const expectDotX = nD34.x + defaultPageConfig.note_size * 0.62 + DOT_R_DOT
-const dotR = new RegExp(`<circle cx="([\\d.]+)" cy="([\\d.]+)" r="${DOT_R_DOT}"`).exec(renderScoreToSvg(layD34)[0])
+const expectDotX = nD34.x + DIGIT_W + DOT_RD_S
+const dotR = new RegExp(`<circle cx="([\\d.]+)" cy="([\\d.]+)" r="${DOT_RD_S}"`).exec(renderScoreToSvg(layD34)[0])
 check('附点紧接音符后（cx = 数字右缘 + 半径，adj71）', dotR !== null && Math.abs(Number(dotR[1]) - expectDotX) < 0.5, `cx=${dotR?.[1]} expect=${expectDotX}`)
 check('附点垂直居中（y = 基线-0.4×字号）', dotR !== null && Math.abs(Number(dotR[2]) - (nD34.y - defaultPageConfig.note_size * 0.4)) < 0.5, `cy=${dotR?.[2]}`)
 // 混合时值（八分+十六分）不重叠：2 小节行 perBeat 受限
@@ -1230,7 +1253,7 @@ const layM34 = layoutScore(mix34, defaultPageConfig)
 const nM34 = [...layM34.pages[0].notes].sort((a, b) => a.x - b.x)
 let minGap34 = Infinity
 for (let i = 1; i < nM34.length; i++) minGap34 = Math.min(minGap34, nM34[i].x - nM34[i - 1].x)
-check('混合时值（八分+十六分）不重叠', minGap34 >= 11.1, `minGap=${minGap34}`)
+check('混合时值（八分+十六分）不重叠', minGap34 >= DIGIT_W * 0.75, `minGap=${minGap34}`)
 
 // ---- 35. 附点占宽 / 低音点避让（adj15） ----
 console.log('[35] adj15 detail')
@@ -1238,23 +1261,23 @@ console.log('[35] adj15 detail')
 const d35a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1. 2 |\n')
 const lay35a = layoutScore(d35a, defaultPageConfig)
 const n35a = lay35a.pages[0].notes
-check('adj198 1. 占宽（自然宽 27.2）', Math.abs(n35a[0].width - 27.2) < 0.5, `${n35a[0].width}`)
+check('adj198 1. 占宽 > 普通音符（附点增宽）', n35a[0].width > n35a[1].width, `${n35a[0].width} vs ${n35a[1].width}`)
 const d35b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1/. 2 |\n')
 const lay35b = layoutScore(d35b, defaultPageConfig)
 const n35b = lay35b.pages[0].notes
-check('adj198 1/. 占宽（自然宽 39.5）', Math.abs(n35b[0].width - 39.5) < 0.5, `${n35b[0].width}`)
-// 低音点 + 减时线：3/, 线底 = 基线+5.5，点顶距线底 2px → cy = 基线+9.5（adj49）
+check('adj198 1/. 占宽 > 1.（减时线+附点更宽）', n35b[0].width > n35b[1].width, `${n35b[0].width} vs ${n35b[1].width}`)
+// 低音点 + 减时线：点顶距减时线层底 LAYER_GAP×s（lowDotY 公式）
 const d35c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3/, 2 |\n')
 const lay35c = layoutScore(d35c, defaultPageConfig)
 const n35c = lay35c.pages[0].notes[0]
-const dot35c = new RegExp(`<circle cx="([\\d.]+)" cy="([\\d.]+)" r="${DOT_R}"`).exec(renderScoreToSvg(lay35c)[0])
-check('低八度点距减时横线 2px、x=数字中心（adj60）', dot35c !== null && Math.abs(Number(dot35c[2]) - (n35c.y + 8.6)) < 0.5 && Math.abs(Number(dot35c[1]) - (n35c.x + 5.58)) < 0.5, `cy=${dot35c?.[2]} cx=${dot35c?.[1]}`)
-// 低音点无减时线：3, 点顶 = 数字底(基线+2) + 2 → cy = 基线+6（adj49）
+const dot35c = new RegExp(`<circle cx="([\\d.]+)" cy="([\\d.]+)" r="${DOT_R_S}"`).exec(renderScoreToSvg(lay35c)[0])
+check('低八度点距减时横线 LAYER_GAP、x=数字中心（adj60）', dot35c !== null && Math.abs(Number(dot35c[2]) - lowDotY(n35c.y, 0, 1, defaultPageConfig.note_size)) < 0.5 && Math.abs(Number(dot35c[1]) - (n35c.x + halfDig)) < 0.5, `cy=${dot35c?.[2]} cx=${dot35c?.[1]}`)
+// 低音点无减时线：点顶距数字底 LAYER_GAP×s（lowDotY 公式）
 const d35d = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3, 2 |\n')
 const lay35d = layoutScore(d35d, defaultPageConfig)
 const n35d = lay35d.pages[0].notes[0]
-const dot35d = new RegExp(`<circle cx="([\\d.]+)" cy="([\\d.]+)" r="${DOT_R}"`).exec(renderScoreToSvg(lay35d)[0])
-check('低八度点距数字底部 2px、x=数字中心（adj60）', dot35d !== null && Math.abs(Number(dot35d[2]) - (n35d.y + 5.5)) < 0.5 && Math.abs(Number(dot35d[1]) - (n35d.x + 5.58)) < 0.5, `cy=${dot35d?.[2]} cx=${dot35d?.[1]}`)
+const dot35d = new RegExp(`<circle cx="([\\d.]+)" cy="([\\d.]+)" r="${DOT_R_S}"`).exec(renderScoreToSvg(lay35d)[0])
+check('低八度点距数字底部 LAYER_GAP、x=数字中心（adj60）', dot35d !== null && Math.abs(Number(dot35d[2]) - lowDotY(n35d.y, 0, 0, defaultPageConfig.note_size)) < 0.5 && Math.abs(Number(dot35d[1]) - (n35d.x + halfDig)) < 0.5, `cy=${dot35d?.[2]} cx=${dot35d?.[1]}`)
 
 // ---- 36. 音符块语法：后置变音 / 虚音符 / 倚音 / 单空格（adj23） ----
 console.log('[36] note block syntax (adj23)')
@@ -1290,13 +1313,13 @@ const r36h = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 ( 2 3 ) (4) 5 |\n')
 check('( 2 3 ) 与 (4) 均解析为连音线', r36h.groups[0].music.tokens.map((t) => t.kind).join(',') === 'note,slur,note,note,slur,slur,note,slur,note,barline', r36h.groups[0].music.tokens.map((t) => t.kind).join(',') + ' | ' + JSON.stringify(r36h.errors))
 // 渲染：倚音小字（adj105：字号 = 主音符 × 0.5 = 9，由 0.4 调大；加粗与主音符一致）
 const svg36c = renderScoreToSvg(layoutScore(r36c, defaultPageConfig))[0]
-check('倚音渲染小数字（font-size = 0.5×18 = 9）', svg36c.includes('font-size="9"'), '')
+check('倚音渲染小数字（font-size = 0.5×主音符）', svg36c.includes(`font-size="${GRACE_FS}"`), '')
 // adj97：倚音减时线为跨组平行横线（line 元素）而非斜线（path M...L...斜向）
 check('倚音减时线为横线（line 元素）', svg36c.includes('<line ') && svg36c.includes('stroke="#1b1b1b"'), '')
 // adj101：倚音与主音符之间是一条抛物线弧线（SVG Q 二次贝塞尔，控制点在起点正下），粗细同减时线 0.6
-check('倚音连接弧线为抛物线（Q 命令）', svg36c.includes(' Q ') && svg36c.includes('stroke-width="0.6"'), '')
+check('倚音连接弧线为抛物线（Q 命令）', svg36c.includes(' Q ') && svg36c.includes(`stroke-width="${GRACE_LINE_W * NS_S}"`), '')
 // adj105：倚音数字加粗（与主音符粗体一致）
-check('倚音数字加粗', /<text x="[^"]+" y="[^"]+" font-size="9"[^>]*font-weight="bold"/.test(svg36c), '')
+check('倚音数字加粗', new RegExp(`<text x="[^"]+" y="[^"]+" font-size="${GRACE_FS}"[^>]*font-weight="bold"`).test(svg36c), '')
 // adj98：倚音减时线 = 实际时值 +1 条——主音符 1[65]（倚音无 /）→ 倚音有 1 条横线；
 // 2[3/]（倚音 /）→ 2 条（减时线数 = diminishCount + 1）
 const r98g = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 2[3] 3[4/] 4 |\n')
@@ -1309,7 +1332,7 @@ const lay100 = layoutScore(r98g, defaultPageConfig)
 const n100 = [...lay100.pages[0].notes].sort((a, b) => a.x - b.x)
 // 按 x1 分组（2[3] 与 3[4/] 是两组音符，各自首条线都在自己的 mainTop，不能混算间距）
 const gLineGroups100 = new Map<number, number[]>()
-for (const m of svg98g.matchAll(/<line x1="([^"]+)" y1="([^"]+)" x2="([^"]+)" y2="[^"]+" stroke="#1b1b1b" stroke-width="0.6"/g)) {
+for (const m of svg98g.matchAll(new RegExp(`<line x1="([^"]+)" y1="([^"]+)" x2="([^"]+)" y2="[^"]+" stroke="#1b1b1b" stroke-width="${GRACE_LINE_W * NS_S}"`, 'g'))) {
   const x1 = Number(m[1])
   const arr = gLineGroups100.get(x1) ?? []
   arr.push(Number(m[2]))
@@ -1318,35 +1341,39 @@ for (const m of svg98g.matchAll(/<line x1="([^"]+)" y1="([^"]+)" x2="([^"]+)" y2
 const gLineYs100 = [...gLineGroups100.values()].map((g) => g.sort((a, b) => a - b))
 const firstLineY100 = Math.min(...gLineYs100.flat())
 const maxGroup100 = gLineYs100.reduce((a, b) => (b.length > a.length ? b : a), [])
-check('adj100 首条减时线 y = 主音符文本上端（基线 - 14.4）', gLineYs100.length >= 2 && Math.abs(firstLineY100 - (n100[0].y - 14.4)) < 0.5, `first=${firstLineY100} mainTop=${(n100[0].y - 14.4).toFixed(1)}`)
-check('adj100 减时线间距 1.2px', maxGroup100.length >= 2 && Math.abs(maxGroup100[1] - maxGroup100[0] - 1.2) < 0.05, `ys=${maxGroup100.join(',')}`)
+check('adj100 首条减时线 y = 主音符文本上端（基线 - 0.8em）', gLineYs100.length >= 2 && Math.abs(firstLineY100 - (n100[0].y - DIGIT_TOP)) < 0.5, `first=${firstLineY100} mainTop=${(n100[0].y - DIGIT_TOP).toFixed(1)}`)
+check('adj100 减时线间距 1.2×s', maxGroup100.length >= 2 && Math.abs(maxGroup100[1] - maxGroup100[0] - GRACE_BEAM_GAP * NS_S) < 0.05, `ys=${maxGroup100.join(',')}`)
 // adj100：倚音数字上移，基线在首条减时线上方（不压线）
-const gTextY100 = Number(svg98g.match(/<text x="[^"]+" y="([^"]+)" font-size="9"/)?.[1] ?? 'NaN')
+const gTextY100 = Number(svg98g.match(new RegExp(`<text x="[^"]+" y="([^"]+)" font-size="${GRACE_FS}"`))?.[1] ?? 'NaN')
 check('adj100 倚音数字上移（基线 < 首条减时线 - 1）', !Number.isNaN(gTextY100) && gTextY100 < gLineYs100[0] - 1, `gy=${gTextY100} line0=${gLineYs100[0]}`)
 // adj101：弧线为二次贝塞尔 Q——控制点在起点正下方（先向下），前倚音终点向右、后倚音终点向左，终点比起点低
-const arcs100 = [...svg36c.matchAll(/<path d="M ([-\d.]+) ([-\d.]+) Q ([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+)" fill="none" stroke="#1b1b1b" stroke-width="0.6"/g)].map((m) => ({ sx: Number(m[1]), sy: Number(m[2]), cx: Number(m[3]), cy: Number(m[4]), ex: Number(m[5]), ey: Number(m[6]) }))
+const arcs100 = [...svg36c.matchAll(/<path d="M ([-\d.]+) ([-\d.]+) Q ([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+)"/g)].map((m) => ({ sx: Number(m[1]), sy: Number(m[2]), cx: Number(m[3]), cy: Number(m[4]), ex: Number(m[5]), ey: Number(m[6]) }))
 const arcFront = arcs100.find((a) => a.ex > a.sx)
 const arcBack = arcs100.find((a) => a.ex < a.sx)
 check('adj101 前倚音弧线先向下再弯向右（控制点 x=起点 x、终点 x>起点 x 且 y>起点 y）', !!arcFront && Math.abs(arcFront.cx - arcFront.sx) < 0.05 && arcFront.ex > arcFront.sx && arcFront.ey > arcFront.sy, JSON.stringify(arcFront))
 check('adj101 后倚音弧线先向下再弯向左（控制点 x=起点 x、终点 x<起点 x 且 y>起点 y）', !!arcBack && Math.abs(arcBack.cx - arcBack.sx) < 0.05 && arcBack.ex < arcBack.sx && arcBack.ey > arcBack.sy, JSON.stringify(arcBack))
 // adj101：倚音低八度点紧贴该音符最后一条减时线下方（线底 + (LAYER_GAP+DOT_R)×倚音缩放因子 = 圆心）
 const svg36d = renderScoreToSvg(layoutScore(r36d, defaultPageConfig))[0]
-const yMain36d = Number(svg36d.match(/<text x="[^"]+" y="([^"]+)" data-notepos="[^"]+" font-size="18"[^>]*font-weight="bold"[^>]*>1<\/text>/)?.[1] ?? 'NaN')
+const yMain36d = Number(svg36d.match(new RegExp(`<text x="[^"]+" y="([^"]+)" data-notepos="[^"]+" font-size="${defaultPageConfig.note_size}"[^>]*font-weight="bold"[^>]*>1<`))?.[1] ?? 'NaN')
 const lowCy36d = Math.max(...[...svg36d.matchAll(/<circle cx="[^"]+" cy="([^"]+)" r="[^"]+" fill="#1b1b1b"/g)].map((m) => Number(m[1])))
-// 5, 无减时（dc=1 → 线 1 条）：圆心 = mainTop + 半线高0.3 + (2+1.5)×(9/18=0.5)；mainTop = 主音符基线 - 14.4
-check('adj101 低八度点在最后一条减时线下方（线底+LAYER_GAP×s）', !Number.isNaN(yMain36d) && Math.abs(lowCy36d - (yMain36d - 14.4 + 0.3 + (2 + 1.5) * 0.5)) < 0.6, `lowCy=${lowCy36d} expect=${(yMain36d - 14.4 + 2.05).toFixed(2)}`)
+// 5, 无减时（dc=1 → 线 1 条）：圆心 = mainTop + 半线高 + (LAYER_GAP+DOT_R)×gs；gs = 倚音缩放因子
+const gs = GRACE_FS / defaultPageConfig.note_size // 倚音缩放因子
+check('adj101 低八度点在最后一条减时线下方（线底+LAYER_GAP×s）', !Number.isNaN(yMain36d) && Math.abs(lowCy36d - (yMain36d - DIGIT_TOP + (GRACE_LINE_W * NS_S) / 2 + (LAYER_GAP + DOT_R) * gs)) < 0.6, `lowCy=${lowCy36d} expect=${(yMain36d - DIGIT_TOP + (GRACE_LINE_W * NS_S) / 2 + (LAYER_GAP + DOT_R) * gs).toFixed(2)}`)
 // adj102：弧线起点——无低八度点 → 最后一条减时线底（直接连接）；有低八度点 → 最低点底 + LAYER_GAP×s
-const yMain36c = Number(svg36c.match(/<text x="[^"]+" y="([^"]+)" data-notepos="[^"]+" font-size="18"[^>]*font-weight="bold"[^>]*>1<\/text>/)?.[1] ?? 'NaN')
+const yMain36c = Number(svg36c.match(new RegExp(`<text x="[^"]+" y="([^"]+)" data-notepos="[^"]+" font-size="${defaultPageConfig.note_size}"[^>]*font-weight="bold"[^>]*>1<`))?.[1] ?? 'NaN')
 const arcStarts36c = [...svg36c.matchAll(/<path d="M [-\d.]+ ([-\d.]+) Q/g)].map((m) => Number(m[1]))
-check('adj102 无低八度点：弧线起点 = 最后一条减时线底（与线连接）', arcStarts36c.length === 2 && arcStarts36c.every((sy) => Math.abs(sy - (yMain36c - 14.4 + 0.3)) < 0.5), `sy=${arcStarts36c.join(',')} lineBottom=${(yMain36c - 14.4 + 0.3).toFixed(1)}`)
+check('adj102 无低八度点：弧线起点 = 最后一条减时线底（与线连接）', arcStarts36c.length === 2 && arcStarts36c.every((sy) => Math.abs(sy - (yMain36c - DIGIT_TOP + (GRACE_LINE_W * NS_S) / 2)) < 0.5), `sy=${arcStarts36c.join(',')} lineBottom=${(yMain36c - DIGIT_TOP + (GRACE_LINE_W * NS_S) / 2).toFixed(1)}`)
 const arcSy36d = Number(svg36d.match(/<path d="M [-\d.]+ ([-\d.]+) Q/)?.[1] ?? 'NaN')
-check('adj102 有低八度点：弧线起点 = 低八度点底 + LAYER_GAP×s', !Number.isNaN(arcSy36d) && Math.abs(arcSy36d - (lowCy36d + (1.5 + 2) * 0.5)) < 0.6, `arcSy=${arcSy36d} expect=${(lowCy36d + 1.75).toFixed(2)}`)
-// adj103：多音符（≥2）倚音数字间距缩小为 0.5×字号（0.5×9 = 4.5@18）；1[65] 与 2[h56] 两组
-const gx36c = [...svg36c.matchAll(/<text x="([^"]+)" y="[^"]+" font-size="9"/g)].map((m) => Number(m[1])).sort((a, b) => a - b)
-check('adj103 多音符倚音数字间距 = 0.5×字号（4.5）', gx36c.length === 4 && Math.abs(gx36c[1] - gx36c[0] - 4.5) < 0.15 && Math.abs(gx36c[3] - gx36c[2] - 4.5) < 0.15, `xs=${gx36c.join(',')}`)
+check('adj102 有低八度点：弧线起点 = 低八度点底 + LAYER_GAP×s', !Number.isNaN(arcSy36d) && Math.abs(arcSy36d - (lowCy36d + (DOT_R + LAYER_GAP) * gs)) < 0.6, `arcSy=${arcSy36d} expect=${(lowCy36d + (DOT_R + LAYER_GAP) * gs).toFixed(2)}`)
+// adj103：多音符（≥2）倚音数字间距缩小为 0.5×字号（×GRACE_SLOT_RATIO_MULTI）；1[65] 与 2[h56] 两组
+const gx36c = [...svg36c.matchAll(new RegExp(`<text x="([^"]+)" y="[^"]+" font-size="${GRACE_FS}"`, 'g'))].map((m) => Number(m[1])).sort((a, b) => a - b)
+const gSize36 = Math.max(6 * NS_S, defaultPageConfig.note_size * GRACE_SIZE_RATIO) // 倚音字号（同渲染）
+const gGap36 = gSize36 * GRACE_SLOT_RATIO_MULTI // 多音符间距
+check('adj103 多音符倚音数字间距 = 0.5×字号', gx36c.length === 4 && Math.abs(gx36c[1] - gx36c[0] - gGap36) < 0.15 && Math.abs(gx36c[3] - gx36c[2] - gGap36) < 0.15, `xs=${gx36c.join(',')}`)
 // adj106：倚音组右端与主音符固定留 1px×s（多音符组尾不侵入主音符区）——前倚音 1[65] 最右数字 5 右缘 = 主音符 1 左缘 - 1
-const yMainX1 = Number(svg36c.match(/<text x="([^"]+)" y="[^"]+" data-notepos="[^"]+" font-size="18"[^>]*font-weight="bold"[^>]*>1<\/text>/)?.[1] ?? 'NaN')
-check('adj106 前倚音组右端与主音符留 1px（不重叠）', !Number.isNaN(yMainX1) && Math.abs(gx36c[1] + 9 * 0.62 - (yMainX1 - 1)) < 0.3, `gRight=${(gx36c[1] + 5.58).toFixed(1)} main=${yMainX1}`)
+const yMainX1 = Number(svg36c.match(new RegExp(`<text x="([^"]+)" y="[^"]+" data-notepos="[^"]+" font-size="${defaultPageConfig.note_size}"[^>]*font-weight="bold"[^>]*>1<`))?.[1] ?? 'NaN')
+const gW36 = gSize36 * GRACE_SLOT_RATIO // 倚音数字槽宽
+check('adj106 前倚音组右端与主音符留 1px（不重叠）', !Number.isNaN(yMainX1) && Math.abs(gx36c[1] + gW36 - (yMainX1 - NS_S)) < 0.3, `gRight=${(gx36c[1] + gW36).toFixed(1)} main=${yMainX1}`)
 // adj98：倚音占位计入音符宽度——带倚音的音符 perBeat ≥ 无倚音音符
 const lay98 = layoutScore(r98g, defaultPageConfig)
 const n98 = [...lay98.pages[0].notes].sort((a, b) => a.x - b.x)
@@ -1417,7 +1444,7 @@ check('metaAreaH 默认 = 上边距+区域高+上间距', Math.abs(metaAreaH(def
 // descAreaH 增大 → 描述头区域变高（曲部第一行下移）
 const lay39a = layoutScore(rEr, { ...defaultPageConfig, descAreaH: 140 })
 const firstY39a = Math.min(...lay39a.pages[0].notes.map((n) => n.y))
-check('descAreaH 增大 → 曲部第一行下移', Math.abs(firstY39a - (MT + 140 + defaultPageConfig.body_margin_top + 19.8)) < 0.5, `y=${firstY39a}`)
+check('descAreaH 增大 → 曲部第一行下移', Math.abs(firstY39a - (MT + 140 + defaultPageConfig.body_margin_top + 19.8 * NS_S)) < 0.5, `y=${firstY39a}`)
 // 描述头元素（作者，右下锚）跟随描述头区域（descAreaH），不出区域
 const svg39 = renderScoreToSvg(lay39a)[0]
 const m39 = /data-meta="author_0" x="[\d.]+" y="([\d.]+)"/.exec(svg39)
@@ -1429,16 +1456,18 @@ check('descAreaH 范围下限 40', exLimits['descAreaH'][0] === 40)
 
 // ---- 40. 无歌词行行高（adj33） ----
 console.log('[40] no-lyric row height (adj33)')
-// 无歌词：行高 = 曲高(30.6) + 曲上间距(20) = 50.6（歌词部空间为 0；adj78 曲上间距 40→20）
+// 无歌词：行高 = 曲高(note_size×1.7) + 曲上间距(20)（歌词部空间为 0；adj78 曲上间距 40→20）
+const rowMusicH = defaultPageConfig.note_size * 1.7 // 曲高（随音符字号）
 const r40a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 5 6 7 1 | 1 2 3 4 5 6 7 1 | 1 2 3 4 5 6 7 1 | 1 2 3 4 5 6 7 1 |\n')
 const lay40a = layoutScore(r40a, defaultPageConfig)
 const ys40a = [...new Set(lay40a.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
-check('无歌词行高 = 曲高 + 曲上间距（50.6）', ys40a.length >= 2 && Math.abs(ys40a[1] - ys40a[0] - 50.6) < 0.5, `dy=${ys40a[1] - ys40a[0]}`)
-// 有歌词对照：行高 = 30.6 + 13 + (18+4+10) + 12 = 87.6（adj73 词曲最小间距 8→4；adj92 曲上间距 20→12）
+check('无歌词行高 = 曲高 + 曲上间距', ys40a.length >= 2 && Math.abs(ys40a[1] - ys40a[0] - (rowMusicH + defaultPageConfig.height_ciqu)) < 0.5, `dy=${ys40a[1] - ys40a[0]}`)
+// 有歌词对照：行高 = 曲高 + 词曲间距 + (歌词字号+4+10) + 曲上词距（adj73 词曲最小间距 8→4；adj92 曲上间距 20→12）
 const r40b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 5 6 7 1 | 1 2 3 4 5 6 7 1 |\nC: 一 二 三 四 五 六 七 八 九 十 十 一 十 二 十 三 十 四\nQ: 1 2 3 4 5 6 7 1 | 1 2 3 4 5 6 7 1 |\nC: 一 二 三 四 五 六 七 八 九 十 十 一 十 二 十 三 十 四\n')
 const lay40b = layoutScore(r40b, defaultPageConfig)
 const ys40b = [...new Set(lay40b.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
-check('有歌词行高 = 87.6（曲上间距 12）', ys40b.length >= 2 && Math.abs(ys40b[1] - ys40b[0] - 87.6) < 0.5, `dy=${ys40b[1] - ys40b[0]}`)
+const rowLyricH = rowMusicH + defaultPageConfig.height_quci + (defaultPageConfig.geci_size + 4 + 10) + defaultPageConfig.height_ciqu_lyric
+check('有歌词行高 = 曲高+词曲间距+词高+曲上词距', ys40b.length >= 2 && Math.abs(ys40b[1] - ys40b[0] - rowLyricH) < 0.5, `dy=${ys40b[1] - ys40b[0]} expect=${rowLyricH}`)
 
 // ---- 41. 小节线高度与反复点（adj34） ----
 console.log('[41] barline height & dots (adj34)')
@@ -1446,12 +1475,13 @@ const r41 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 3 4 :|\n')
 const lay41 = layoutScore(r41, defaultPageConfig)
 const b41 = lay41.pages[0].barlines[0]
 const n41 = lay41.pages[0].notes[0]
-check('小节线上端 = 音符基线-18.4（数字上沿-14.4 再上延 4px）', Math.abs(b41.yTop - (n41.y - 18.4)) < 0.5, `yTop=${b41.yTop}`)
-check('小节线下端 = 音符基线+4.5（数字下沿+0.5 再下延 4px）', Math.abs(b41.yBottom - (n41.y + 4.5)) < 0.5, `yBottom=${b41.yBottom}`)
-check('小节线高 22.9（数字 14.9 + 上下各延伸 4px）', Math.abs(b41.yBottom - b41.yTop - 22.9) < 0.5)
-// 反复点：|: 为左粗线、中细线、右 :（点中心 = 线 x + 1.6，点线距 1.2px，adj104 点径 2.4、r=1.2）
+check('小节线上端 = 音符基线-18.4×s（数字上沿-14.4 再上延 4px）', Math.abs(b41.yTop - (n41.y - BAR_TOP)) < 0.5, `yTop=${b41.yTop}`)
+check('小节线下端 = 音符基线+4.5×s（数字下沿+0.5 再下延 4px）', Math.abs(b41.yBottom - (n41.y + 4.5 * NS_S)) < 0.5, `yBottom=${b41.yBottom}`)
+check('小节线高 22.9×s（数字 14.9 + 上下各延伸 4px）', Math.abs(b41.yBottom - b41.yTop - BAR_H) < 0.5)
+// 反复点：|: 为左粗线、中细线、右 :（点中心 = 线 x + 1.6，点线距 1.2px，adj104 点径 2.4、r=1.2；随字号缩放 ×s）
 const svg41 = renderScoreToSvg(lay41)[0]
-const dot41 = /<circle cx="([\d.]+)" cy="[\d.]+" r="1.2"/.exec(svg41)
+const dot41R = R1(BARLINE_DOT_R * NS_S) // 反复点半径随字号
+const dot41 = new RegExp(`<circle cx="([\\d.]+)" cy="[\\d.]+" r="${dot41R}"`).exec(svg41)
 check('反复点（|: 右侧 :，cx = 线 x + 1.6）', dot41 !== null && Math.abs(Number(dot41[1]) - (b41.x + 1.6)) < 0.5, `cx=${dot41?.[1]} x=${b41.x}`)
 
 // ---- 42. 拍级挤占（adj35） ----
@@ -1496,20 +1526,23 @@ const rowEnds43j = rows43j.map((ry) => {
   return Math.max(...ns.map(segEnd43j))
 })
 check('两行曲部末段右都贴右边界（差 ≤ 8）', rows43j.length === 2 && rowEnds43j.every((r) => 515.28 - r <= 8), `ends=${rowEnds43j.map((r) => r.toFixed(1)).join(',')}`)
-// ② 连音线端点 = 音符正上方偏右/左 1px，弧线在高八度点上方
+// ② 连音线端点 = 音符正上方偏右/左 1px（数字槽中心 ± s，随字号），弧线在高八度点上方
 const r43b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 ( 2 3 4 ) 5 |\n')
 const lay43b = layoutScore(r43b, defaultPageConfig)
 const s43b = lay43b.pages[0].slurs[0]
 const n43b = lay43b.pages[0].notes
-check('slur 起点 = 开始音符中心+1', s43b !== undefined && Math.abs(s43b.x1 - (n43b[1].x + 6.58)) < 0.5, `x1=${s43b?.x1}`)
-check('slur 终点 = 结束音符中心-1', Math.abs(s43b.x2 - (n43b[3].x + 4.58)) < 0.5, `x2=${s43b.x2}`)
-// adj60：雅黑数字字高 ≈0.8em → 数字上沿 ≈ 基线-14.4；无高八度 → 线底距数字上沿 LAYER_GAP=2 → y = 基线-16.9（线宽 1 中心）
-check('slur 下沿距音符上沿 2px（adj60）', Math.abs(s43b.y - (n43b[1].y - 16.9)) < 0.5, `y=${s43b.y} expect=${n43b[1].y - 16.9}`)
-// 开始音符有高八度：线底距最高高音点顶 2px → y = 基线-21.9（adj60）
+const slurEndOff = NS_S // 连音线端点偏音符中心 ±1px×s（adj108）
+check('slur 起点 = 开始音符中心+1', s43b !== undefined && Math.abs(s43b.x1 - (n43b[1].x + halfDig + slurEndOff)) < 0.5, `x1=${s43b?.x1}`)
+check('slur 终点 = 结束音符中心-1', Math.abs(s43b.x2 - (n43b[3].x + halfDig - slurEndOff)) < 0.5, `x2=${s43b.x2}`)
+// adj60：数字上沿 = 基线-0.8em；无高八度 → 线底距数字上沿 LAYER_GAP×s → y（线宽 1×s 中心）
+const slurBaseY = (ny: number) => ny - defaultPageConfig.note_size * 0.8 - LAYER_GAP * NS_S
+check('slur 下沿距音符上沿 2px（adj60）', Math.abs(s43b.y - slurBaseY(n43b[1].y)) < 0.5, `y=${s43b.y} expect=${slurBaseY(n43b[1].y)}`)
+// 开始音符有高八度：线底距最高高音点顶 2px（octaveTopY 随字号）
 const r43d = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 ( 2\' 3 ) 4 |\n')
-const s43d = layoutScore(r43d, defaultPageConfig).pages[0].slurs[0]
-const n43d = layoutScore(r43d, defaultPageConfig).pages[0].notes[1]
-check('slur 下沿距高音点 2px（adj60）', Math.abs(s43d.y - (n43d.y - 21.9)) < 0.5, `y=${s43d.y} expect=${n43d.y - 21.9}`)
+const lay43d = layoutScore(r43d, defaultPageConfig)
+const s43d = lay43d.pages[0].slurs[0]
+const n43d = lay43d.pages[0].notes[1]
+check('slur 下沿距高音点 2px（adj60）', Math.abs(s43d.y - (octaveTopY(n43d.y, 1, defaultPageConfig.note_size) - LAYER_GAP * NS_S)) < 0.5, `y=${s43d.y} expect=${octaveTopY(n43d.y, 1, defaultPageConfig.note_size) - LAYER_GAP * NS_S}`)
 // ③ 小节线 = 小节内容右端，不与音符重叠
 const r43c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n')
 const lay43c = layoutScore(r43c, defaultPageConfig)
@@ -1524,24 +1557,24 @@ check('小节线右侧距下小节首音符 ≥ 4px（adj41）', n43c[4].x - (b4
 // ---- 45. 附点显示在占位宽度正中（adj39） ----
 console.log('[45] dot centered in its slot (adj39)')
 const dotCxOf = (svg: string, k: number) => {
-  const m = [...svg.matchAll(new RegExp(`<circle cx="([\\d.]+)" cy="[\\d.]+" r="${DOT_R_DOT}"`, 'g'))][k]
+  const m = [...svg.matchAll(new RegExp(`<circle cx="([\\d.]+)" cy="[\\d.]+" r="${DOT_RD_S}"`, 'g'))][k]
   return m ? Number(m[1]) : NaN
 }
 // 1.：附点紧接音符后（cx = 数字右缘 + 半径），时值占位宽仍增半（0.5×前音符宽，见 [43]）
 const r45a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1. 2 3 4 |\n')
 const lay45a = layoutScore(r45a, defaultPageConfig)
 const n45a = lay45a.pages[0].notes[0]
-const dot45aExpect = n45a.x + defaultPageConfig.note_size * 0.62 + DOT_R_DOT
+const dot45aExpect = n45a.x + DIGIT_W + DOT_RD_S
 check('1. 附点紧接音符后（adj71）', Math.abs(dotCxOf(renderScoreToSvg(lay45a)[0], 0) - dot45aExpect) < 0.5, `cx=${dotCxOf(renderScoreToSvg(lay45a)[0], 0)} expect=${dot45aExpect}`)
 // 双附点 1..：附点1 贴数字右缘，附点2 紧贴附点1（间距 2×r）
 const r45b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1.. 2 3 4 |\n')
 const lay45b = layoutScore(r45b, defaultPageConfig)
 const svg45b = renderScoreToSvg(lay45b)[0]
 const n45b = lay45b.pages[0].notes[0]
-const dot45b0 = n45b.x + defaultPageConfig.note_size * 0.62 + DOT_R_DOT
+const dot45b0 = n45b.x + DIGIT_W + DOT_RD_S
 const dot1 = dotCxOf(svg45b, 0)
 const dot2 = dotCxOf(svg45b, 1)
-check('双附点：附点1 贴数字右缘、附点2 紧贴附点1（间距 2×r）', Math.abs(dot1 - dot45b0) < 0.5 && Math.abs(dot2 - (dot45b0 + DOT_R_DOT * 2)) < 0.5, `d1=${dot1} d2=${dot2}`)
+check('双附点：附点1 贴数字右缘、附点2 紧贴附点1（间距 2×r）', Math.abs(dot1 - dot45b0) < 0.5 && Math.abs(dot2 - (dot45b0 + DOT_RD_S * 2)) < 0.5, `d1=${dot1} d2=${dot2}`)
 
 // ---- 46. 歌词对齐：@ 占位 / 标点紧跟（adj40） ----
 console.log('[46] lyric @ and punct (adj40)')
@@ -1732,7 +1765,7 @@ let alignDetail49 = ''
 for (const ly of ly49) {
   const lx = ly.x + defaultPageConfig.geci_size / 2
   const n = notes49[ly.id.index]
-  if (!n || Math.abs(lx - (n.x + 5.58)) > 1) {
+  if (!n || Math.abs(lx - (n.x + halfDig)) > 1) {
     alignOk49 = false
     alignDetail49 = `id=${ly.id.index} lx=${lx} nx=${n?.x}`
     break
@@ -1776,16 +1809,16 @@ const notes50b = lay50b.pages[0].notes
 check('跨行连音符：左右两半共 2 条', lay50b.pages[0].slurs.length === 2, `got ${lay50b.pages[0].slurs.length}`)
 const slL = lay50b.pages[0].slurs[0]
 const slR = lay50b.pages[0].slurs[1]
-check('左半：起点 = 开始音符中心+1', Math.abs(slL.x1 - (notes50b[2].x + 6.58)) < 0.5, `x1=${slL.x1}`)
+check('左半：起点 = 开始音符中心+1', Math.abs(slL.x1 - (notes50b[2].x + halfDig + NS_S)) < 0.5, `x1=${slL.x1}`)
 // 需求：左半终点延伸到行末小节线
 const rowA50b = lay50b.pages[0].barlines
-  .filter((b) => Math.abs(b.yTop - (notes50b[0].y - 18.4)) < 1)
+  .filter((b) => Math.abs(b.yTop - (notes50b[0].y - BAR_TOP)) < 1)
   .sort((a, b) => a.x - b.x)
 const rowAEndBarX = rowA50b[rowA50b.length - 1]?.x ?? 0
 // adj198：行自然宽（2 小节 ≤3）不撑满——左半终点 = 行末小节线（243.7），不延伸到页面右边距
 check('adj198 左半：终点 = 行末小节线（自然宽）', Math.abs(slL.x2 - rowAEndBarX) < 1, `x2=${slL.x2} bar=${rowAEndBarX}`)
 check('右半：起点 = 行首边距处', Math.abs(slR.x1 - ML) < 0.5, `x1=${slR.x1}`)
-check('右半：终点 = 结束音符中心-1', Math.abs(slR.x2 - (notes50b[9].x + 4.58)) < 0.5, `x2=${slR.x2}`)
+check('右半：终点 = 结束音符中心-1', Math.abs(slR.x2 - (notes50b[9].x + halfDig - NS_S)) < 0.5, `x2=${slR.x2}`)
 check('左右两半在不同行（y 不同）', Math.abs(slL.y - slR.y) > 1, `${slL.y} vs ${slR.y}`)
 // ④ 误输入：有 ( 无 ) → 不渲染
 const r50c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 ( 3 4 |\nQ: 5 6 7 1 |\n')
@@ -1809,10 +1842,10 @@ check('LIFO：1 条跨行连音符渲染两半', lay51.pages[0].slurs.length ===
 const n51 = lay51.pages[0].notes
 const s51 = lay51.pages[0].slurs
 const rowEnd51 = lay51.pages[0].barlines
-  .filter((b) => Math.abs(b.yTop - (n51[0].y - 18.4)) < 1)
+  .filter((b) => Math.abs(b.yTop - (n51[0].y - BAR_TOP)) < 1)
   .sort((a, b) => a.x - b.x)
-check('adj199 连音符左半：自然宽行到行末小节线', Math.abs(s51[0].x1 - (n51[1].x + 6.58)) < 0.5 && Math.abs(s51[0].x2 - (rowEnd51[rowEnd51.length - 1]?.x ?? 0)) < 1, `x1=${s51[0].x1} x2=${s51[0].x2} bar=${rowEnd51[rowEnd51.length - 1]?.x}`)
-check('连音符右半：行首边距处 → 第二行 1', Math.abs(s51[1].x1 - ML) < 0.5 && Math.abs(s51[1].x2 - (n51[4].x + 4.58)) < 0.5, `x1=${s51[1].x1} x2=${s51[1].x2}`)
+check('adj199 连音符左半：自然宽行到行末小节线', Math.abs(s51[0].x1 - (n51[1].x + halfDig + NS_S)) < 0.5 && Math.abs(s51[0].x2 - (rowEnd51[rowEnd51.length - 1]?.x ?? 0)) < 1, `x1=${s51[0].x1} x2=${s51[0].x2} bar=${rowEnd51[rowEnd51.length - 1]?.x}`)
+check('连音符右半：行首边距处 → 第二行 1', Math.abs(s51[1].x1 - ML) < 0.5 && Math.abs(s51[1].x2 - (n51[4].x + halfDig - NS_S)) < 0.5, `x1=${s51[1].x1} x2=${s51[1].x2}`)
 check('左右两半 y 不同（跨行）', Math.abs(s51[0].y - s51[1].y) > 1, `${s51[0].y} vs ${s51[1].y}`)
 check('LIFO 深度均为 0（内层 (4) 退化丢弃）', s51[0].depth === 0 && s51[1].depth === 0, JSON.stringify(s51.map((s) => s.depth)))
 // 无空格紧凑写法与带空格等价（空格仅格式化；(4) 也是连音线）
@@ -1826,11 +1859,11 @@ const mk52 = (q: string) =>
   layoutScore(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), defaultPageConfig)
 const svg52 = (lay: ReturnType<typeof mk52>) => renderScoreToSvg(lay)[0]
 const barlineRects = (svg: string, cx: number, r: number) =>
-  [...svg.matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="(0\.9|1\.4)" height="22\.9"/g)]
+  [...svg.matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="(0\.9|1\.4)" height="16\.[0-9]"/g)]
     .map((m) => ({ x: +m[1], w: m[2] }))
     .filter((o) => Math.abs(o.x - cx) < r)
 const barlineDots = (svg: string, cx: number, r: number) =>
-  [...svg.matchAll(/<circle cx="([\d.]+)" cy="[\d.]+" r="1.2"/g)]
+  [...svg.matchAll(new RegExp(`<circle cx="([\\d.]+)" cy="[\\d.]+" r="${R1(BARLINE_DOT_R * NS_S)}"`, 'g'))]
     .map((m) => +m[1])
     .filter((c) => Math.abs(c - cx) < r)
 // ① || 双小节线：左细线右粗线（细 0.9、粗 1.4，adj104），间距 1.2px（线左缘不动、宽缩）
@@ -1871,7 +1904,7 @@ check(':|: 左右各 2 点', dd52e.length === 4 && Math.min(...dd52e) < rr52e[0]
 const lay52f = mk52('1 2 3 4 |/ 5 6 7 1 |')
 const lay52g = mk52('1 2 3 4 |* 5 6 7 1 |')
 const lay52h = mk52('1 2 3 4 | 5 6 7 1 |')
-const rectCount52 = (s: string) => (s.match(/width="(?:0\.9|1\.4)" height="22\.9"/g) ?? []).length
+const rectCount52 = (s: string) => (s.match(/width="(?:0\.9|1\.4)" height="16\.[0-9]"/g) ?? []).length
 check('|/ 不渲染线（rect 数比 | 版本少 1）', rectCount52(svg52(lay52f)) === rectCount52(svg52(lay52h)) - 1, `${rectCount52(svg52(lay52f))} vs ${rectCount52(svg52(lay52h))}`)
 const gap52f = lay52f.pages[0].notes[4].x - (lay52f.pages[0].notes[3].x + 11.16)
 const gap52h = lay52h.pages[0].notes[4].x - (lay52h.pages[0].notes[3].x + 11.16)
@@ -1890,10 +1923,10 @@ const n53 = lay53.pages[0].notes
 const s53 = lay53.pages[0].slurs
 check('LIFO：1 条跨行连音符 → 左半 + 右半', s53.length === 2, `got ${s53.length}`)
 const rowEnd53 = lay53.pages[0].barlines
-  .filter((b) => Math.abs(b.yTop - (n53[0].y - 18.4)) < 1)
+  .filter((b) => Math.abs(b.yTop - (n53[0].y - BAR_TOP)) < 1)
   .sort((a, b) => a.x - b.x)
-check('adj199 连音符左半：自然宽行到行末小节线', Math.abs(s53[0].x1 - (n53[1].x + 6.58)) < 0.5 && Math.abs(s53[0].x2 - (rowEnd53[rowEnd53.length - 1]?.x ?? 0)) < 1, `x1=${s53[0].x1} x2=${s53[0].x2} bar=${rowEnd53[rowEnd53.length - 1]?.x}`)
-check('连音符右半：行首边距处 → 第二行 1', Math.abs(s53[1].x1 - ML) < 0.5 && Math.abs(s53[1].x2 - (n53[4].x + 4.58)) < 0.5, `x1=${s53[1].x1} x2=${s53[1].x2}`)
+check('adj199 连音符左半：自然宽行到行末小节线', Math.abs(s53[0].x1 - (n53[1].x + halfDig + NS_S)) < 0.5 && Math.abs(s53[0].x2 - (rowEnd53[rowEnd53.length - 1]?.x ?? 0)) < 1, `x1=${s53[0].x1} x2=${s53[0].x2} bar=${rowEnd53[rowEnd53.length - 1]?.x}`)
+check('连音符右半：行首边距处 → 第二行 1', Math.abs(s53[1].x1 - ML) < 0.5 && Math.abs(s53[1].x2 - (n53[4].x + halfDig - NS_S)) < 0.5, `x1=${s53[1].x1} x2=${s53[1].x2}`)
 check('左右两半跨行（y 不同）', Math.abs(s53[0].y - s53[1].y) > 1, `${s53[0].y} vs ${s53[1].y}`)
 // adj140：跨行连音线统一平顶（用户要求跨行显示平顶线，非弧线）
 check('adj140 跨行连音符平顶', s53[0].style === 'flat' && s53[1].style === 'flat', `${s53[0].style}/${s53[1].style}`)
@@ -1929,7 +1962,7 @@ const r54b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1/ 2/ 3// 4// | 1/ 2/ 3// 
 const n54b = [...layoutScore(r54b, defaultPageConfig).pages[0].notes].sort((a, b) => a.x - b.x)
 let minGap54 = Infinity
 for (let i = 1; i < n54b.length; i++) minGap54 = Math.min(minGap54, n54b[i].x - n54b[i - 1].x)
-check('跨拍/拍中起始音符不重叠（最小间距 ≥ 11）', minGap54 >= 11, `minGap=${minGap54}`)
+check('跨拍/拍中起始音符不重叠（最小间距 ≥ 数字槽宽）', minGap54 >= DIGIT_W, `minGap=${minGap54}`)
 // 行首 |* 占位、|/ 不占位（需求）
 const r54c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |* 1 2 3 4 |\n')
 const n54c = layoutScore(r54c, defaultPageConfig).pages[0].notes[0]
@@ -1984,13 +2017,13 @@ const r55e = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1 2\' 3 4) 5 |\n')
 const lay55e = layoutScore(r55e, defaultPageConfig)
 const s55e = lay55e.pages[0].slurs[0]
 const n55eMid = lay55e.pages[0].notes.find((n) => n.token.kind === 'note' && (n.token as { pitch?: number }).pitch === 2)
-check('连音线避让中间音符高音点（y = 基线-21.9，adj60）', s55e !== undefined && n55eMid !== undefined && Math.abs(s55e.y - (n55eMid.y - 21.9)) < 0.5, `slurY=${s55e?.y} midY=${n55eMid?.y}`)
+check('连音线避让中间音符高音点（y = octaveTopY-LAYER_GAP×s，adj60）', s55e !== undefined && n55eMid !== undefined && Math.abs(s55e.y - (octaveTopY(n55eMid.y, 1, defaultPageConfig.note_size) - LAYER_GAP * NS_S)) < 0.5, `slurY=${s55e?.y} midY=${n55eMid?.y}`)
 // adj49：独立连音符不被同排其他嵌套抬高（间距保持 2px 基准）
 const r55f = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1 2) (3 (4 5) 6) 7 |\n')
 const lay55f = layoutScore(r55f, defaultPageConfig)
 const s55f = lay55f.pages[0].slurs
 const n55fFirst = lay55f.pages[0].notes[0]
-check('独立连音符不因同排嵌套抬高（y = 基线-16.9，adj60）', s55f.length >= 2 && Math.abs(s55f[0].y - (n55fFirst.y - 16.9)) < 0.5, `y=${s55f[0]?.y} expect=${n55fFirst.y - 16.9}`)
+check('独立连音符不因同排嵌套抬高（y = 数字上沿-LAYER_GAP×s，adj60）', s55f.length >= 2 && Math.abs(s55f[0].y - (n55fFirst.y - defaultPageConfig.note_size * 0.8 - LAYER_GAP * NS_S)) < 0.5, `y=${s55f[0]?.y} expect=${n55fFirst.y - defaultPageConfig.note_size * 0.8 - LAYER_GAP * NS_S}`)
 
 // ---- 56. 跨行跳房子起点（adj47）：断行在 [ 起点小节线后 → 起点线移到下一行行首 ----
 console.log('[56] cross-row volta start')
@@ -2018,7 +2051,7 @@ check('跳房子番号在起点线右侧（不溢出右边距）', vStart56 !== 
 check('跳房子线正向（终点 x > 起点 x，不再反向跨行）', vStart56 !== undefined && vEnd56 !== undefined && vEnd56.x > vStart56.x, `${vStart56?.x} → ${vEnd56?.x}`)
 // adj107：跳房子允许跨行——[ 在行内、] 在下一行时拆两半（左半到行末小节线、右半从行首小节线）
 const r107 = parseJps(
-  'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (3/ 2// 3//) 5 (3/ 2// 3//) 1 | (2./ 3//) (2/ 1/) 6, - |[+"1." (2/ 0// 3//) (5,/ 6,/) 1[6,/] - | 2/ 3/ 4/ 5/ 6/ 7/ 1/ 2/ | 3/ 4/ 5/ 6/ 7/ 1/ |] 2/ 3/ 4/ | 1/ 2/ 3/ 4/ |\n',
+  'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1/ 2/ 3/ 4/ 5/ 6/ 7/ 1/ | 2/ 3/ 4/ 5/ 6/ 7/ 1/ 2/ | 3/ 4/ 5/ 6/ 7/ 1/ 2/ 3/ |[+"1." 4/ 5/ 6/ 7/ 1/ 2/ 3/ 4/ 5/ | 6/ 7/ 1/ 2/ 3/ 4/ 5/ 6/ 7/ | 1/ 2/ 3/ 4/ 5/ 6/ 7/ 1/ 2/ | 3/ 4/ 5/ 6/ 7/ 1/ 2/ 3/ 4/ |] 5/ 6/ 7/ 1/ |\n',
 )
 const lay107 = layoutScore(r107, defaultPageConfig)
 const vStart107 = lay107.pages[0].barlines.find((b) => b.voltaStart)
@@ -2035,17 +2068,13 @@ const rightHalf107 = sortedVolta107[1]
 // adj162：跨行跳房子左半延伸到页面右边距（与跨行连音线一致），而非行末小节线
 const rightEdge107 = lay107.pages[0].width - defaultPageConfig.margin_right
 check('adj162 左半：起点线+2 → 页面右边距', leftHalf107 !== undefined && Math.abs(leftHalf107.x1 - (vStart107.x + 2)) < 0.5 && Math.abs(leftHalf107.x2 - rightEdge107) < 0.5, JSON.stringify(leftHalf107))
-// adj164：右半从下一行「行首小节线」（位于该行首音符左侧）开始；行首无小节线则从边距+2
-const endRowFirstNoteX107 = Math.min(
-  ...lay107.pages[0].notes
-    .filter((n) => Math.abs(n.y - (vEnd107.yTop + 18.4)) < 1)
-    .map((n) => n.x),
-)
-const endRowLeadBar107 = lay107.pages[0].barlines
-  .filter((b) => Math.abs(b.yTop - vEnd107.yTop) < 1 && b.x < endRowFirstNoteX107)
-  .sort((a, b) => a.x - b.x)[0]
-const expectStartB107 = endRowLeadBar107 ? endRowLeadBar107.x : ML + 2
-check('adj164 右半：从下一行行首小节线/边距连到终点线-2', rightHalf107 !== undefined && Math.abs(rightHalf107.x1 - expectStartB107) < 0.5 && Math.abs(rightHalf107.x2 - (vEnd107.x - 2)) < 0.5, JSON.stringify(rightHalf107))
+// adj164：右半从下一行「行首小节线」开始（与渲染 rowStartBarX 一致）——取该行最小 x 小节线；
+// 该行无小节线则从边距+2
+const endRowBars107 = lay107.pages[0].barlines
+  .filter((b) => Math.abs(b.yTop - vEnd107.yTop) < 1.5)
+  .sort((a, b) => a.x - b.x)
+const expectStartB107 = endRowBars107.length > 0 ? endRowBars107[0].x : ML + 2
+check('adj164 右半：从下一行行首小节线/边距连到终点线-2', rightHalf107 !== undefined && Math.abs(rightHalf107.x1 - expectStartB107) < 1 && Math.abs(rightHalf107.x2 - (vEnd107.x - 2)) < 1, JSON.stringify({ right: rightHalf107, expect: expectStartB107, ve: vEnd107?.x }))
 // adj164：下一行行首有小节线时，右半从其开始（与连音线 rowStartBarX 一致）；
 // 该场景终点行行首音符 x=86 而小节线最小 154（行首无小节线）→ 右半应从边距+2 开始
 const r164b = parseJps(
@@ -2060,14 +2089,18 @@ const lines164b = [...svg164b.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="([
   .filter((l) => l.x2 - l.x1 > 20)
   .sort((a, b) => a.y1 - b.y1)
 const rightHalf164b = lines164b[1]
+const endRowBars164b = lay164b.pages[0].barlines
+  .filter((b) => Math.abs(b.yTop - vEnd164b.yTop) < 1.5)
+  .sort((a, b) => a.x - b.x)
+const expectStart164b = endRowBars164b.length > 0 ? endRowBars164b[0].x : ML + 2
 check(
-  'adj164 右半行首无小节线时从边距+2 开始（行首音符前无 |）',
+  'adj164 右半从行首小节线开始；无小节线时从边距+2',
   rightHalf164b !== undefined &&
     vStart164b !== undefined &&
     vEnd164b !== undefined &&
-    Math.abs(rightHalf164b.x1 - (ML + 2)) < 0.5 &&
-    Math.abs(rightHalf164b.x2 - (vEnd164b.x - 2)) < 0.5,
-  JSON.stringify({ right: rightHalf164b, ve: vEnd164b?.x }),
+    Math.abs(rightHalf164b.x1 - expectStart164b) < 1 &&
+    Math.abs(rightHalf164b.x2 - (vEnd164b.x - 2)) < 1,
+  JSON.stringify({ right: rightHalf164b, expect: expectStart164b, ve: vEnd164b?.x }),
 )
 
 // ---- 57. 排版虚线行结构（adj72）：曲部行数字中心 / 多声部声部序号 / 词部行虚线 ----

@@ -1446,7 +1446,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
    *  仅取「位于行首音符左侧」的小节线（行首真有节线才从其开始），否则 null 用边距 */
   const rowStartBarX = (rowIdx: number): number | null => {
     const r = rows[rowIdx]
-    const barY = r.y - 18.4
+    // adj216：小节线上端偏移 18.4×s（随音符字号）——固定 18.4 在 note_size≠18 时失配
+    const barY = r.y - 18.4 * noteScaleOf(m.noteSize)
     const firstNoteX = r.notes[0]?.x ?? Infinity
     let minX: number | null = null
     for (const b of pages[r.page].barlines) {
@@ -1458,7 +1459,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   /** 行末小节线 x（该行 x 最大的小节线；无则 null；adj199 自然宽行连音线左半终点） */
   const rowEndBarX = (rowIdx: number): number | null => {
     const r = rows[rowIdx]
-    const barY = r.y - 18.4
+    // adj216：同 rowStartBarX，随音符字号缩放
+    const barY = r.y - 18.4 * noteScaleOf(m.noteSize)
     let maxX: number | null = null
     for (const b of pages[r.page].barlines) {
       if (Math.abs(b.yTop - barY) < 1 && (maxX === null || b.x > maxX)) maxX = b.x
