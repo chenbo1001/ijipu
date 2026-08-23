@@ -70,3 +70,13 @@ export const HEADER_HINTS: { code: string; label: string; cursorAt?: number }[] 
 export function isModifierChar(ch: string): boolean {
   return /[a-zA-Z0-9]/.test(ch)
 }
+
+/**
+ * adj202：按行首已输入的描述头前缀过滤提示列表（不区分大小写）——
+ * 输入 q → Q:/Q1:/Q2: 等；前缀为空返回全部；无匹配返回空数组。
+ */
+export function filterHeaderHints(prefix: string): { code: string; label: string; cursorAt?: number }[] {
+  const p = prefix.toLowerCase()
+  if (p === '') return HEADER_HINTS
+  return HEADER_HINTS.filter((h) => h.code.toLowerCase().startsWith(p))
+}

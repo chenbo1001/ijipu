@@ -13,7 +13,7 @@ import { useUiStore } from '../store/uiStore'
 import { highlightCode } from './highlight'
 import { formatLine, codePosToNoteId } from '../engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
-import { NOTE_MODIFIER_HINTS, VOLTA_HINTS, HEADER_HINTS } from './completions'
+import { NOTE_MODIFIER_HINTS, VOLTA_HINTS, HEADER_HINTS, filterHeaderHints } from './completions'
 
 /** adj160：编辑器字体选项；adj163：仅等宽字体——textarea 与高亮层需逐字符对齐，
  *  非等宽字体下加粗 span（小节线/行头等）宽度变化会从该字符开始逐字累积错位；
@@ -253,10 +253,18 @@ export function EditorPane() {
       x: col * editorFontSize * 0.6,
       y: (visualTopOfLine[line - 1] ?? 0) + editorLineH,
     })
-    // adj186：描述头区域行首 Tab → 列出所有描述头（行首 = 光标前仅空白）
-    if (/^\s*$/.test(lineBefore)) {
+    // adj186：描述头区域行首 Tab → 列出所有描述头（行首 = 光标前仅空白）；
+    // adj202：行首已输入描述头前缀（如 q/Q/qv）时按前缀过滤列表（Q:/Q1:/Q2: 等，
+    // 不区分大小写），继续输入字母/数字实时收窄；无匹配项则关闭列表
+    const headerMatch = /^\s*([a-zA-Z0-9]*)$/.exec(lineBefore)
+    if (headerMatch) {
+      const items = filterHeaderHints(headerMatch[1])
+      if (items.length === 0) {
+        setCompletion(null)
+        return
+      }
       const { line, col } = lineColOf(ta.value, pos)
-      setCompletion({ kind: 'header', items: HEADER_HINTS, index: 0, ...compPos(line, col) })
+      setCompletion({ kind: 'header', items, index: 0, ...compPos(line, col) })
       return
     }
     // 仅 Q 行（曲行）内提示
@@ -304,7 +312,10 @@ export function EditorPane() {
     let replaceLen = 0
     let cursorAt: number | null = null
     if (c.kind === 'header') {
-      // adj186：描述头行首补全；adj192：带声部名模板（cursorAt）光标停在引号内待输入
+      // adj186：描述头行首补全；adj192：带声部名模板（cursorAt）光标停在引号内待输入；
+      // adj202：过滤后补全——替换已输入的描述头前缀（如 q → Q:），避免 qQ: 叠加
+      const hm = /^\s*([a-zA-Z0-9]*)$/.exec(lineBefore)
+      if (hm) replaceLen = hm[1].length
       insert = item.code + ' '
       cursorAt = item.cursorAt ?? insert.length
     } else if (c.kind === 'modifier') {
@@ -383,6 +394,9 @@ export function EditorPane() {
     }
     if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return
     const key = e.key
+    // adj202：描述头列表弹出时，行首命令快捷键让位——让字母直接输入用于过滤列表
+    // （否则按 q 会被插入 Q: 拦截，无法收窄候选）；列表关闭后恢复快捷键
+    if (comp?.kind === 'header') return
     if (key.length !== 1 || !isLineHeaderKey(key.toUpperCase())) return
     const keyUp = key.toUpperCase() as Parameters<typeof insertLineHeader>[2]
     // 当前行类型（光标前内容）

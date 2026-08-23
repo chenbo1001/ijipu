@@ -17,7 +17,7 @@ import { clampMetaPos } from '../src/engine/layout/metaAnchors.ts'
 import { computeBeamsForTest } from '../src/engine/render/index.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
 import { highlightCode } from '../src/editor/highlight.ts'
-import { HEADER_HINTS } from '../src/editor/completions.ts'
+import { HEADER_HINTS, filterHeaderHints } from '../src/editor/completions.ts'
 import {
   createHistoryState,
   recordEdit,
@@ -242,6 +242,19 @@ check('adj186 V:/B: 行头同样高亮', hlYS.includes('hl-line-header">V:') && 
 // adj186：描述头提示列表覆盖全部描述头；adj192：加入 Q:/C: 及多声部/带声部名变体
 check('adj192 描述头提示含 V/B/Z/D/P/J/Y/S/Q/C 及声部变体', HEADER_HINTS.length >= 16 && ['V:', 'B:', 'Z:', 'D:', 'P:', 'J:', 'Y:', 'S:', 'Q:', 'C:', 'Q1:', 'Q2:', 'C1:', 'C2:'].every((k) => HEADER_HINTS.some((h) => h.code === k)), JSON.stringify(HEADER_HINTS.map((h) => h.code)))
 check('adj192 带声部名模板含 cursorAt（光标停引号内）', HEADER_HINTS.some((h) => h.code === 'Q1"声部名":' && h.cursorAt === 4) && HEADER_HINTS.some((h) => h.code === 'Q2"声部名":' && h.cursorAt === 4), JSON.stringify(HEADER_HINTS.filter((h) => h.cursorAt !== undefined)))
+// adj202：行首输入描述头前缀实时过滤（不区分大小写；空前缀 = 全部）
+{
+  const fq = filterHeaderHints('q')
+  check('adj202 q → Q:/Q1:/Q2: 等 5 项', fq.length === 5 && ['Q:', 'Q1:', 'Q2:'].every((k) => fq.some((h) => h.code === k)), fq.map((h) => h.code).join(','))
+  const fQ = filterHeaderHints('Q')
+  check('adj202 大写 Q 与 q 过滤一致', fQ.map((h) => h.code).join() === fq.map((h) => h.code).join(), '')
+  const fv = filterHeaderHints('v')
+  check('adj202 v → V:（1 项）', fv.length === 1 && fv[0].code === 'V:', fv.map((h) => h.code).join(','))
+  const fq1 = filterHeaderHints('q1')
+  check('adj202 q1 → Q1:/Q1"声部名":（2 项）', fq1.length === 2 && fq1.some((h) => h.code === 'Q1"声部名":'), fq1.map((h) => h.code).join(','))
+  check('adj202 无匹配前缀 → 空数组', filterHeaderHints('xyz').length === 0)
+  check('adj202 空前缀 → 全部', filterHeaderHints('').length === HEADER_HINTS.length)
+}
 // adj165：当前行背景 + 当前音符区块背景（光标行/列；Q: 为 3 字符，rest 从 col=3 起）
 // adj171：当前行整行背景由 EditorPane 铺满层渲染，highlightCode 不再输出 hl-current-line
 const hlCur = highlightCode('V: 1.0\nB: t\nQ: 1 2 3 4 |\n', undefined, { line: 3, col: 3 })
