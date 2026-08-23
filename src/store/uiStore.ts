@@ -57,6 +57,8 @@ interface UiState {
   modal: ModalKind | null
   /** 试听起始音符 id（双击谱面音符定位试听起点，adj88；null = 从头播放） */
   playbackStartId: string | null
+  /** 双击谱面音符请求重新播放的计数（adj158：播放中双击快速跳到该处，每次 +1） */
+  playbackTick: number
   /** 预览页排版辅助虚线开关 */
   showGuides: boolean
   /** 中国色主题 id */
@@ -74,6 +76,7 @@ interface UiState {
   openModal: (m: ModalKind) => void
   closeModal: () => void
   setPlaybackStart: (id: string | null) => void
+  bumpPlaybackTick: () => void
   setShowGuides: (b: boolean) => void
   setTheme: (id: string) => void
   setThemeMode: (m: ThemeMode) => void
@@ -86,6 +89,7 @@ interface UiState {
 export const useUiStore = create<UiState>()((set) => ({
   modal: null,
   playbackStartId: null,
+  playbackTick: 0,
   showGuides: true,
   theme: loadTheme(),
   themeMode: loadThemeMode(),
@@ -96,6 +100,7 @@ export const useUiStore = create<UiState>()((set) => ({
   openModal: (m) => set({ modal: m }),
   closeModal: () => set({ modal: null, playbackStartId: null }),
   setPlaybackStart: (id) => set({ playbackStartId: id }),
+  bumpPlaybackTick: () => set((s) => ({ playbackTick: s.playbackTick + 1 })),
   setShowGuides: (b) => set({ showGuides: b }),
   setTheme: (id) => {
     try {

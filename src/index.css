@@ -783,6 +783,20 @@ body {
   transition: none;
 }
 
+/* adj158：紧凑模式（试听对话框）——缩小最小宽与边距 */
+.modal.compact {
+  min-width: 320px;
+}
+
+.modal.compact .modal-head {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.modal.compact .modal-body {
+  padding: 10px 12px;
+}
+
 .modal-head {
   display: flex;
   align-items: center;

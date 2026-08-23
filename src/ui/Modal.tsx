@@ -1,7 +1,9 @@
 /**
  * ui/Modal.tsx — 通用模态框（按住标题栏可拖动）
  * props：maskDim 背景遮罩透明度（0~1，默认 0.6；试听对话框用 0 保持看谱）；
- *        closeOnMaskClick 点击遮罩是否关闭（默认 true；试听对话框 false）。
+ *        closeOnMaskClick 点击遮罩是否关闭（默认 true；试听对话框 false）；
+ *        dock 初始停靠位置（'bottom-right' = 窗口右下角，adj158：播放时让开预览区；
+ *        用户拖动后以拖动位置为准）。
  */
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -12,6 +14,8 @@ export function Modal({
   children,
   maskDim = 0.6,
   closeOnMaskClick = true,
+  dock,
+  compact,
 }: {
   title: string
   children: ReactNode
@@ -19,6 +23,10 @@ export function Modal({
   maskDim?: number
   /** 点击遮罩区域是否关闭（false = 仅 ✕ 或 Esc 关闭） */
   closeOnMaskClick?: boolean
+  /** 初始停靠位置（adj158：'bottom-right' = 窗口右下角；拖动后以用户位置为准） */
+  dock?: 'bottom-right'
+  /** 紧凑模式（缩小边距与最小宽，adj158：试听对话框用） */
+  compact?: boolean
 }) {
   const closeModal = useUiStore((s) => s.closeModal)
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
@@ -56,9 +64,14 @@ export function Modal({
     window.addEventListener('mouseup', onUp)
   }
 
+  // adj158：dock 停靠样式（未拖动时生效）；拖动后回退到用户位置
+  const dockStyle =
+    pos === null && dock === 'bottom-right'
+      ? { position: 'fixed' as const, right: 16, bottom: 16, margin: 0 }
+      : undefined
   const modalStyle = pos
     ? { position: 'fixed' as const, left: pos.x, top: pos.y, margin: 0 }
-    : undefined
+    : dockStyle
 
   return (
     <div
@@ -68,7 +81,7 @@ export function Modal({
     >
       <div
         ref={modalRef}
-        className={dragging ? 'modal dragging' : 'modal'}
+        className={`modal${dragging ? ' dragging' : ''}${compact ? ' compact' : ''}`}
         style={modalStyle}
         onClick={(e) => e.stopPropagation()}
       >

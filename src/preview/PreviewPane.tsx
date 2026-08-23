@@ -29,6 +29,7 @@ export function PreviewPane() {
   const previewZoom = useUiStore((s) => s.previewZoom)
   const openModal = useUiStore((s) => s.openModal)
   const setPlaybackStart = useUiStore((s) => s.setPlaybackStart)
+  const bumpPlaybackTick = useUiStore((s) => s.bumpPlaybackTick)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const pageConfigRef = useRef(pageConfig)
@@ -99,6 +100,7 @@ export function PreviewPane() {
   }
 
   // adj88：双击谱面音符 → 定位试听起点并打开试听对话框（从该音符开始播放）
+  // adj158：播放中双击 → 递增 playbackTick 让对话框从该音符重新播放（快速跳跃）
   const onDoubleClick = (e: React.MouseEvent) => {
     const target = (e.target as Element).closest('[data-notepos]')
     if (!target) return
@@ -106,6 +108,7 @@ export function PreviewPane() {
     if (!id) return
     setActiveNoteId(id)
     setPlaybackStart(id)
+    bumpPlaybackTick()
     openModal('playback')
   }
 
