@@ -106,9 +106,11 @@ export function tokenizeMusicLine(
       } else if (c === ',') {
         base.octaveShift--; j++
       } else if (c === '&') {
-        // & 装饰编码：连续字母数字（adj109：允许尾部 +，如 &sby+ / &cy+）
+        // & 装饰编码：连续字母（adj109：允许尾部 +，如 &sby+ / &cy+）
+        // adj220：不再收数字——&dy5/ 中 5 是下一音符起点（此前被吞进 dy5，
+        // 3&dy5/&dy5/… 粘连成一个音符）；编码均为字母（tr/cy/dy/zkh/fine 等）
         let k = j + 1
-        while (k < n && /[a-zA-Z0-9]/.test(content[k])) k++
+        while (k < n && /[a-zA-Z]/.test(content[k])) k++
         if (content[k] === '+') k++
         if (k > j + 1) {
           base.symbols.push(content.slice(j + 1, k))
@@ -211,7 +213,8 @@ export function tokenizeMusicLine(
     // & 装饰编码（行内独立出现）
     if (c === '&') {
       let k = i + 1
-      while (k < n && /[a-zA-Z0-9]/.test(content[k])) k++
+      // adj220：只收字母（+ 可选尾部 +）——&dy5/ 中 5 是下一音符起点，不进编码
+      while (k < n && /[a-zA-Z]/.test(content[k])) k++
       if (content[k] === '+') k++ // adj109：允许尾部 +（&sby+ 等）
       if (k > i + 1) {
         const code = content.slice(i + 1, k)

@@ -1308,6 +1308,17 @@ const r36f = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2| 3 4 |\n')
 check('音符紧贴小节线 → 合法（空格可选，无警告）', r36f.errors.length === 0, JSON.stringify(r36f.errors))
 const r36g = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 | 3 4 |\n')
 check('单空格 → 无警告', r36g.errors.length === 0, JSON.stringify(r36g.errors))
+// adj220：& 编码只收字母（+ 可选 +）——&dy5/ 中 5 是下一音符起点，
+// 3&dy5/&dy5/&dy5/&dy3/&dy6&dy 应拆为 6 个音符各带 &dy
+const r220 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3&dy5/&dy5/&dy5/&dy3/&dy6&dy |\n')
+const tk220 = r220.groups[0].music.tokens
+const notes220 = tk220.filter((t) => t.kind === 'note')
+check('adj220 & 紧贴分块：6 个音符各带 &dy（不粘连）', r220.errors.length === 0 && notes220.length === 6 && notes220.every((n) => n.kind === 'note' && n.symbols.join(',') === 'dy'), notes220.map((n) => (n.kind === 'note' ? `音${n.pitch}${n.diminishCount ? '/'.repeat(n.diminishCount) : ''}[${n.symbols.join(',')}]` : '')).join(' '))
+check('adj220 时值正确（3 与 6 整拍、5/ 3/ 半拍）', tokenDuration(notes220[0] as { tupletDur?: number }) === 1 && tokenDuration(notes220[1] as { tupletDur?: number }) === 0.5 && tokenDuration(notes220[5] as { tupletDur?: number }) === 1, notes220.map((n) => String(tokenDuration(n))).join(','))
+// 独立 & 装饰同理：&dy5/ 独立出现也拆块（&dy 成为 decoration，5/ 是独立音符）
+const r220b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 &dy5/ 6 |\n')
+const notes220b = r220b.groups[0].music.tokens.filter((t) => t.kind === 'note')
+check('adj220 独立 & 编码不吞数字（&dy5/ → 音符 5/ 独立）', r220b.errors.length === 0 && notes220b.length === 3 && notes220b[1].kind === 'note' && notes220b[1].pitch === 5 && notes220b[1].diminishCount === 1, notes220b.map((n) => (n.kind === 'note' ? `音${n.pitch}${n.diminishCount ? '/'.repeat(n.diminishCount) : ''}` : '')).join(' '))
 // 括号一律连音线（空格与否均可）：( 2 3 ) 与 (4) 都是连音线
 const r36h = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 ( 2 3 ) (4) 5 |\n')
 check('( 2 3 ) 与 (4) 均解析为连音线', r36h.groups[0].music.tokens.map((t) => t.kind).join(',') === 'note,slur,note,note,slur,slur,note,slur,note,barline', r36h.groups[0].music.tokens.map((t) => t.kind).join(',') + ' | ' + JSON.stringify(r36h.errors))

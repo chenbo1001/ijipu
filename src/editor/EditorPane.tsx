@@ -38,9 +38,9 @@ interface Completion {
   y: number
 }
 
-/** 判断光标前是否在输入 & 编码（返回已输入的前缀） */
+/** 判断光标前是否在输入 & 编码（返回已输入的前缀；只收字母 + 可选 +，adj220 与 tokenizer 一致） */
 function modifierPrefix(lineBefore: string): string | null {
-  const m = /&([a-zA-Z0-9]*)$/.exec(lineBefore)
+  const m = /&([a-zA-Z+]*)$/.exec(lineBefore)
   return m ? m[1] : null
 }
 
@@ -323,7 +323,7 @@ export function EditorPane() {
     } else if (c.kind === 'modifier') {
       // adj177：用户已输入 &（lineBefore 以 & 结尾），只补全其后的字母——
       // 不再拼接第二个 &（此前 replaceLen 仅替换字母、insert 又含 &，会变成 &&tr）
-      const m = /&([a-zA-Z0-9]*)$/.exec(lineBefore)
+      const m = /&([a-zA-Z+]*)$/.exec(lineBefore)
       if (m) replaceLen = m[1].length
       insert = item.code + ' '
       cursorAt = insert.length

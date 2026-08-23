@@ -87,7 +87,8 @@ export function filterHeaderHints(prefix: string): { code: string; label: string
  * 依据：tokenizer 中小节线后的 & 才解析为 mark，音符后的 & 是音符修饰符。
  */
 export function isBarlineModifierContext(lineBefore: string): boolean {
-  const m = /&([a-zA-Z0-9]*)$/.exec(lineBefore)
+  // adj220：只收字母 + 可选 +（与 tokenizer 一致，&dy5 中 5 是音符起点）
+  const m = /&([a-zA-Z+]*)$/.exec(lineBefore)
   if (!m) return false
   const prev = lineBefore.slice(0, m.index).trimEnd()
   return prev !== '' && /[|:]/.test(prev[prev.length - 1])
