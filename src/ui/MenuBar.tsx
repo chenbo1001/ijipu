@@ -51,7 +51,8 @@ export function MenuBar() {
   return (
     <div className="menubar">
       <div className="menubar-brand">
-        <span className="logo-mark">谱</span>
+        {/* adj159：品牌图标改用 Jianpu.png（与 favicon/PWA 图标同源） */}
+        <img className="logo-mark" src="/Jianpu.png" alt="JianpuScript" draggable={false} />
         <span>
           <span className="brand-zh">码上简谱</span>{' '}
           <span className="brand-en">JianpuScript</span>
