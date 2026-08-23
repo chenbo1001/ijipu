@@ -259,11 +259,14 @@ export const useDocStore = create<DocState>()((set, get) => ({
     localStorage.setItem(DRAFT_NAME_KEY, '未命名')
     // adj161：新建文档不关联磁盘文件——清除句柄
     void saveFileHandle(null)
+    // adj214：新建文档强制使用 defaultPageConfig——不再被 localStorage 公共设置
+    // 旧值覆盖（此前 loadPageConfig() 会把用户历史设置带进新谱，默认值调整后
+    // 新建仍显示旧值）；模板无 # jps-config，merge(null) 即纯默认
     set({
       code: NEW_FILE_TEMPLATE,
       fileName: '未命名',
       parseResult: parseJps(NEW_FILE_TEMPLATE),
-      pageConfig: mergeJpsConfig(NEW_FILE_TEMPLATE, loadPageConfig()),
+      pageConfig: mergeJpsConfig(NEW_FILE_TEMPLATE, null),
       dirty: false,
       fileHandle: null,
       activeNoteId: null,
