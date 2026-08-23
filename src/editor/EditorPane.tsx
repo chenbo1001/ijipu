@@ -200,6 +200,10 @@ export function EditorPane() {
     const ta = taRef.current
     if (!ta) return
     const { line, col } = lineColOf(ta.value, ta.selectionStart)
+    // adj196：光标移动离开上一行（鼠标点击/方向键/谱面跳转）→ 格式化该行。
+    // 注意：此函数内部 setCode 会触发 onChange，但 onChange 中 editingLineRef 已更新
+    // 为当前行，不会重复格式化。
+    formatLeftLine(ta.value, line)
     setCursor(line, col)
     setSelection(ta.selectionStart, ta.selectionEnd)
     const id = codePosToNoteId(ta.value, ta.selectionStart)
@@ -399,38 +403,47 @@ export function EditorPane() {
     })
   }
 
+  // adj196：光标离开上一行时格式化该行（仅 Q 行）。输入（onChange）与光标移动
+  // （onSelect：鼠标点击/方向键/谱面跳转）都触发——此前只有 onChange 处理，
+  // 鼠标点击离开行不会格式化。
+  // 返回是否已执行格式化（调用方据此跳过后续处理）。
+  const formatLeftLine = (text: string, newLine: number): boolean => {
+    if (!autoFormat) return false
+    const prev = editingLineRef.current
+    if (prev < 0 || prev === newLine) return false
+    const li = prev - 1 // adj111：1-based 行 → 0-based 索引
+    const lines = text.split('\n')
+    const oldText = lines[li] ?? ''
+    const formatted = formatLine(oldText)
+    if (formatted === oldText) {
+      editingLineRef.current = newLine
+      return false
+    }
+    const delta = formatted.length - oldText.length
+    lines[li] = formatted
+    const replaced = lines.join('\n')
+    const ta = taRef.current
+    const off = ta ? Math.max(0, Math.min(ta.selectionStart + delta, replaced.length)) : 0
+    setCode(replaced)
+    requestAnimationFrame(() => {
+      if (taRef.current) {
+        taRef.current.selectionStart = taRef.current.selectionEnd = off
+        onScroll()
+        onSelect()
+      }
+    })
+    editingLineRef.current = newLine
+    return true
+  }
+
   const onChange = () => {
     const ta = taRef.current
     if (!ta) return
     const next = ta.value
     const { line } = lineColOf(next, ta.selectionStart)
-    if (autoFormat) {
-      // adj110：光标离开上一行时才格式化该行（仅 Q 行，formatLine 逐行处理），
-      // 输入中不格式化 → 不抢光标；格式化行在光标上方，偏移量同步光标
-      if (editingLineRef.current >= 0 && editingLineRef.current !== line) {
-        // adj111：lineColOf 行号 1-based，数组索引转 0-based（此前错位一行改到下一行）
-        const li = editingLineRef.current - 1
-        const lines = next.split('\n')
-        const oldText = lines[li] ?? ''
-        const formatted = formatLine(oldText)
-        if (formatted !== oldText) {
-          const delta = formatted.length - oldText.length
-          lines[li] = formatted
-          const replaced = lines.join('\n')
-          const off = Math.max(0, Math.min(ta.selectionStart + delta, replaced.length))
-          setCode(replaced)
-          requestAnimationFrame(() => {
-            if (taRef.current) {
-              taRef.current.selectionStart = taRef.current.selectionEnd = off
-              onScroll()
-              onSelect()
-            }
-          })
-          editingLineRef.current = line
-          return
-        }
-      }
-    }
+    // adj110：光标离开上一行时才格式化该行（仅 Q 行，formatLine 逐行处理），
+    // 输入中不格式化 → 不抢光标；格式化行在光标上方，偏移量同步光标
+    if (formatLeftLine(next, line)) return
     editingLineRef.current = line
     setCode(next)
     // adj165：输入后更新自动提示
