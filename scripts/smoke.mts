@@ -336,10 +336,10 @@ check('S 多行说明解析', rYs.header.notes.length === 2 && rYs.header.notes[
 const layYs = layoutScore(rYs, defaultPageConfig)
 const svgYs = renderScoreToSvg(layYs)[0]
 check('乐器渲染在副标题下（data-meta=instrument_i）', svgYs.includes('data-meta="instrument_0"') && svgYs.includes('data-meta="instrument_1"'), '')
-check('说明渲染在谱尾（data-meta=notes）', svgYs.includes('data-meta="notes"') && svgYs.includes('这是一段说明') && svgYs.includes('第二行说明'), '')
-// 说明文字位置：最后一页下边距线上方（y < height - margin_bottom）
-const ysNotesEl = /data-meta="notes" data-notes-line="0" x="([\d.]+)" y="([\d.]+)"/.exec(svgYs)
-check('说明默认在下边距线上方', ysNotesEl !== null && Number(ysNotesEl[2]) < layoutScore(rYs, defaultPageConfig).pages[0].height - defaultPageConfig.margin_bottom, `y=${ysNotesEl?.[2]}`)
+check('adj151 说明渲染在谱尾左对齐（data-meta=notes_i）', svgYs.includes('data-meta="notes_0"') && svgYs.includes('data-meta="notes_1"') && svgYs.includes('这是一段说明') && svgYs.includes('第二行说明'), '')
+// 说明文字位置：最后一页下边距线上方、左边距（左对齐，adj151）
+const ysNotesEl = /data-meta="notes_0" data-notes-line="0" x="([\d.]+)" y="([\d.]+)"/.exec(svgYs)
+check('adj151 说明默认在下边距线上方且左对齐（x=左边距）', ysNotesEl !== null && Number(ysNotesEl[2]) < layoutScore(rYs, defaultPageConfig).pages[0].height - defaultPageConfig.margin_bottom && Math.abs(Number(ysNotesEl[1]) - defaultPageConfig.margin_left) < 0.5, `x=${ysNotesEl?.[1]} y=${ysNotesEl?.[2]}`)
 
 // ---- 16c. 谱面级设置 # jps-config（adj83） ----
 console.log('[16c] per-score settings # jps-config (adj83)')

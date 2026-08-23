@@ -13,11 +13,11 @@ import { clamp } from './guides'
 
 export type MetaAnchor = 'top-center' | 'bottom-right' | 'bottom-left' | 'notes'
 
-/** key → 锚点类型（title/subtitle_i → 上居中，author_i → 右下，keyline/tempo → 左下；instrument_i 上居中，notes 谱尾居中） */
+/** key → 锚点类型（title/subtitle_i → 上居中，author_i → 右下，keyline/tempo → 左下；instrument_i 上居中，notes_i 谱尾） */
 export function metaAnchorOf(key: string): MetaAnchor {
   if (key === 'title' || key.startsWith('subtitle') || key.startsWith('instrument')) return 'top-center'
   if (key.startsWith('author')) return 'bottom-right'
-  if (key === 'notes') return 'notes'
+  if (key.startsWith('notes')) return 'notes'
   return 'bottom-left'
 }
 
@@ -68,7 +68,7 @@ export function clampMetaPos(
   const areaW = pageW - cfg.margin_left - cfg.margin_right
   const areaH = cfg.descAreaH
   // 说明文字（谱尾）：偏移相对页面底部默认位置，宽松钳制（页面区域内）
-  if (key === 'notes') {
+  if (key.startsWith('notes')) {
     return { x: clamp(relX, -areaW, areaW), y: clamp(relY, -600, 200) }
   }
   switch (metaAnchorOf(key)) {

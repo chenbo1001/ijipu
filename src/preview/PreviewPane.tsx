@@ -131,12 +131,13 @@ export function PreviewPane() {
     const pageW = layout.pages[0].width
     const base = cfg.metaPos?.[key]
     // 基准 = 相对各自锚点的偏移（adj16）；无 metaPos 时由元素绝对坐标减去锚点得出
-    // notes（说明文字，谱尾）：基准 = 页面水平居中、下边距线上方 24px（与 render 默认一致）
+    // notes_i（说明文字，谱尾，adj151 左对齐）：基准 = 左边距 + 默认 y（下边距线上方 24px 起逐行）
     let bx: number
     let by: number
-    if (key === 'notes') {
-      const baseX = pageW / 2
-      const baseY = layout.pages[0].height - cfg.margin_bottom - 24
+    if (key.startsWith('notes')) {
+      const lineIdx = Number(el.getAttribute('data-notes-line') ?? '0')
+      const baseX = cfg.margin_left
+      const baseY = layout.pages[0].height - cfg.margin_bottom - 24 + lineIdx * cfg.miaoshu_size * 1.4
       bx = base ? base.x : Number(el.getAttribute('x')) - baseX
       by = base ? base.y : Number(el.getAttribute('y')) - baseY
     } else {

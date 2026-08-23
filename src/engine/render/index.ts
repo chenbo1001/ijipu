@@ -185,12 +185,12 @@ function renderMeta(page: ScorePage, config: PageConfig): string {
   }
 
   // ---- 乐器（adj83：Y 行，多行，一行一种乐器；显示在副标题下面，上居中锚） ----
-  // 默认偏移：主标题(30.6) + 主标题高 + 各副标题高之后；字体用描述头字号（随 miaoshu）
+  // adj151：颜色与 P:/J: 等描述头一致（#555 → #1b1b1b）
   let instOffY = subOffY
   for (let i = 0; i < page.meta.instruments.length; i++) {
     const pos = posOf(`instrument_${i}`, { x: 0, y: instOffY })
     parts.push(
-      `<text data-meta="instrument_${i}" x="${pos.x}" y="${pos.y}" text-anchor="middle" font-size="${mSize}" font-family="${mFont}" fill="#555">${xmlEsc(page.meta.instruments[i])}</text>`,
+      `<text data-meta="instrument_${i}" x="${pos.x}" y="${pos.y}" text-anchor="middle" font-size="${mSize}" font-family="${mFont}" fill="#1b1b1b">${xmlEsc(page.meta.instruments[i])}</text>`,
     )
     instOffY += mSize * 1.4
   }
@@ -1176,22 +1176,22 @@ function renderPage(page: ScorePage, config: PageConfig, pageCount: number): str
   body.push(renderPageNum(page, config, pageCount))
 
   // 说明文字（adj83：S 行，多行；渲染在简谱主体最末尾——最后一页正文下方、下边距线上方，
-  // 用描述头字体字号；可拖拽调整位置 metaPos["notes"]，多行从上到下排）
+  // 用描述头字体字号；adj151：左对齐（text-anchor=start、x=左边距）、颜色与 P:/J: 一致，
+  // 每段 data-meta="notes_i" 可独立拖拽调整位置，metaPos["notes_i"] 为相对默认的偏移）
   if (page.index === pageCount - 1 && page.meta.notes.length > 0) {
     const nFont = config.miaoshu_font
     const nSize = config.miaoshu_size
-    const p = config.metaPos?.['notes']
-    // 默认位置：页面水平居中、下边距线上方 24px 起；metaPos 为相对默认的偏移
-    const baseX = width / 2
+    const baseX = config.margin_left
     const baseY = height - config.margin_bottom - 24
-    let ny = p ? baseY + p.y : baseY
     for (let i = 0; i < page.meta.notes.length; i++) {
       const line = page.meta.notes[i]
-      const pos = p ? { x: baseX + p.x, y: ny } : { x: baseX, y: ny }
+      const p = config.metaPos?.[`notes_${i}`] ?? config.metaPos?.['notes'] // 兼容整体偏移
+      const pos = p
+        ? { x: baseX + p.x, y: baseY + i * nSize * 1.4 + p.y }
+        : { x: baseX, y: baseY + i * nSize * 1.4 }
       body.push(
-        `<text data-meta="notes" data-notes-line="${i}" x="${r1n(pos.x)}" y="${r1n(pos.y)}" text-anchor="middle" font-size="${nSize}" font-family="${nFont}" fill="#555">${xmlEsc(line)}</text>`,
+        `<text data-meta="notes_${i}" data-notes-line="${i}" x="${r1n(pos.x)}" y="${r1n(pos.y)}" text-anchor="start" font-size="${nSize}" font-family="${nFont}" fill="#1b1b1b">${xmlEsc(line)}</text>`,
       )
-      ny += nSize * 1.4
     }
   }
 
