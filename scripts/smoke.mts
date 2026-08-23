@@ -888,6 +888,17 @@ const row2BarsAdj = layJ.pages[0].barlines
   .filter((b) => Math.abs(b.yTop - (rowsJ[1] - 18.4)) < 0.5)
   .sort((a, b) => a.x - b.x)
 check('adj199 行 2 小节线与行 1 对齐（纵向小节线一致）', row2BarsAdj.length >= 1 && Math.abs(row2BarsAdj[0].x - row1BarsAdj[0].x) < 1, `row2=${row2BarsAdj[0]?.x} row1=${row1BarsAdj[0]?.x}`)
+// adj205：>3 小节一律撑满两端对齐（含最后一行）——单行 5 小节谱也两端对齐
+const rj5 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |\n')
+const lay5 = layoutScore(rj5, defaultPageConfig)
+const row5Notes = lay5.pages[0].notes
+const maxRight5 = Math.max(...row5Notes.map(segEnd))
+check('adj205 单行 5 小节两端对齐（末音符段终点贴近右边界）', maxRight5 > 515.28 - 10, `right=${maxRight5}`)
+// 对比：单行 3 小节（≤3）仍自然宽不撑满
+const rj3 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |\n')
+const lay3 = layoutScore(rj3, defaultPageConfig)
+const maxRight3 = Math.max(...lay3.pages[0].notes.map(segEnd))
+check('adj205 单行 3 小节（≤3）仍自然宽不撑满', maxRight3 < 515.28 - 100, `right=${maxRight3}`)
 
 // ---- 23. 细节修复（adj2） ----
 console.log('[23] adj2 fixes')

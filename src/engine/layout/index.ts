@@ -573,7 +573,6 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     geciSize: number,
     sp: Spacing,
     slotStart: number,
-    isLastRow = false,
     refPerBeat?: number,
   ): number | undefined => {
     const page = pages[pageIndex]
@@ -766,13 +765,14 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         }
       }
     }
-    // adj198：≤3 小节的行不分散对齐（自然宽、行尾留白）——含最后一行；
-    // 仅「小节数 > 3 且非最后一行」才撑满两端对齐。
+    // adj198：≤3 小节的行不分散对齐（自然宽、行尾留白）；
+    // adj205：>3 小节一律撑满两端对齐（**含最后一行**——此前最后一行即使
+    // 5 小节也不撑满，违反「≤3 才自然宽」规则）
     // adj199：未撑满行前面有曲部（refPerBeat 提供）时，按小节线对齐——
     // 每拍宽直接取参考行平均每拍宽（不加 BPW_NATURAL 下限：撑满行每拍宽可小于自然宽，
     // 抬升会破坏小节线对齐），使各小节宽与前面行一致（纵向小节线对齐）
     const barCount = row.end - row.start - leadingEmpty
-    const stretch = barCount > 3 && !isLastRow
+    const stretch = barCount > 3
     const perBeats =
       !stretch && refPerBeat !== undefined
         ? beatsInfo.map(() => refPerBeat)
@@ -1036,8 +1036,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         startPage()
         y = m.bodyTopH // 后续页不占描述头区域
       }
-      // adj198：最后一行标记（≤3 小节的行不分散对齐）；adj199：传参考每拍宽
-      const pb = placeMusicRow(segs, row, groupIndex, voice, y, lyricMaps, geciSize, sp, rowSlots[ri], ri === rows.length - 1, refPerBeat)
+      // adj205：>3 小节一律撑满（含最后一行），≤3 小节自然宽；adj199：传参考每拍宽
+      const pb = placeMusicRow(segs, row, groupIndex, voice, y, lyricMaps, geciSize, sp, rowSlots[ri], refPerBeat)
       if (row.kind === 'bars' && pb !== undefined) refPerBeat = pb
       y += rowH
     })
