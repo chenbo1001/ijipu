@@ -650,11 +650,13 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
             `<path d="M ${r1n(x2 + ox)} ${r1n(y2 + oy)} L ${r1n(ax)} ${r1n(ay)} L ${r1n(x2 - ox)} ${r1n(y2 - oy)}" fill="none" stroke="#1b1b1b" stroke-width="1"/>`,
           )
         } else if (sym === 'hx') {
-          // 呼吸记号：音符右侧上方，单线 V（尖朝下，adj112）
+          // 呼吸记号：音符右侧上方，单线 V（尖朝下，adj112）；
+          // adj180：线宽 1 → 0.8（不加粗）、横向尺寸缩为 80%（3.5s → 2.8s）
           const hx = x + digitW + 7 * s
           const hy = y - size * 0.8 - 4 * s
+          const hw = 3.5 * s * 0.8
           parts.push(
-            `<path d="M ${r1n(hx - 3.5 * s)} ${r1n(hy - 3 * s)} L ${r1n(hx)} ${r1n(hy + 3 * s)} L ${r1n(hx + 3.5 * s)} ${r1n(hy - 3 * s)}" fill="none" stroke="#1b1b1b" stroke-width="1"/>`,
+            `<path d="M ${r1n(hx - hw)} ${r1n(hy - 3 * s)} L ${r1n(hx)} ${r1n(hy + 3 * s)} L ${r1n(hx + hw)} ${r1n(hy - 3 * s)}" fill="none" stroke="#1b1b1b" stroke-width="0.8"/>`,
           )
           continue // hx 在右侧，不占上方层顶
         } else {
