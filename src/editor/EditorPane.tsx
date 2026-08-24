@@ -12,6 +12,7 @@ import { flushSync } from 'react-dom'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { highlightCodeWrapped } from './highlight'
+import type { BlockMarks } from './highlight'
 import { formatLine, codePosToNoteId } from '../engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 import { VOLTA_HINTS, filterHeaderHints, isBarlineModifierContext, filterModifierHints } from './completions'
@@ -547,8 +548,23 @@ export function EditorPane() {
     }
   }, [])
 
+  // adj243：行内错误/告警块标记（col 相对该行内容）——命中块加红/橙单线外框
+  const blockMarks = useMemo(() => {
+    const m = new Map<number, BlockMarks>()
+    for (const [line, arr] of errByLine) {
+      const err: number[] = []
+      const warn: number[] = []
+      for (const e of arr) {
+        if (e.severity === 'error') err.push(e.col)
+        else if (e.severity === 'warning') warn.push(e.col)
+      }
+      if (err.length || warn.length) m.set(line, { err, warn })
+    }
+    return m
+  }, [errByLine])
+
   // adj227：按实际层折行点分视觉行高亮（每视觉行一个 .hl-line，white-space: pre）
-  const html = highlightCodeWrapped(code, new Set(errByLine.keys()), cursor, wrapPoints)
+  const html = highlightCodeWrapped(code, new Set(errByLine.keys()), cursor, wrapPoints, blockMarks)
   const gutterLines = Array.from({ length: lineCount }, (_, i) => i + 1)
   // adj242：行号字号跟随脚本字号后，按行号位数自适应栏宽（避免大字号/多位数被裁切）
   const gutterNumW = Math.max(46, String(lineCount).length * effectiveFontSize * 0.62 + 16)

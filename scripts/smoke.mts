@@ -17,6 +17,7 @@ import { clampMetaPos } from '../src/engine/layout/metaAnchors.ts'
 import { computeBeamsForTest } from '../src/engine/render/index.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
 import { highlightCode } from '../src/editor/highlight.ts'
+import { highlightCodeWrapped } from '../src/editor/highlight.ts'
 import { HEADER_HINTS, filterHeaderHints, BARLINE_MODIFIER_HINTS, isBarlineModifierContext, filterModifierHints } from '../src/editor/completions.ts'
 import {
   createHistoryState,
@@ -309,6 +310,20 @@ const hlCur4 = highlightCode('V: 1.0\nB: t\nQ: 1 2 3 4 |\n', undefined, { line: 
 check('adj204 光标在行尾紧邻 → 高亮最后一块（|）', hlCur4.includes('hl-current-block') && hlCur4.includes('hl-barline">|<'), '')
 const hlCur5 = highlightCode('V: 1.0\nB: t\nQ: 1 2 3  4 |\n', undefined, { line: 3, col: 9 })
 check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !hlCur5.includes('hl-current-block'), '')
+// adj243：高亮层按折行点分行，错误/告警块以单线外框包裹（col 相对该行内容）
+{
+  const src243 = 'V: 1.0\nB: t\nQ: 1 2 3 4 |\n'
+  // content = "1 2 3 4 |"，col 8 = '|'（小节线块）；col 2 = '2'（音符块）
+  const hlErr243 = highlightCodeWrapped(src243, undefined, null, [], new Map([[3, { err: [8], warn: [] }]]))
+  check('adj243 错误块（小节线）包 hl-err-block', hlErr243.includes('hl-err-block') && hlErr243.includes('hl-barline'), '')
+  const hlWarn243 = highlightCodeWrapped(src243, undefined, null, [], new Map([[3, { err: [], warn: [2] }]]))
+  check('adj243 告警块（音符）包 hl-warn-block', hlWarn243.includes('hl-warn-block') && hlWarn243.includes('hl-note'), '')
+  const hlNone243 = highlightCodeWrapped(src243, undefined, null, [])
+  check('adj243 无错误/告警时不加外框', !hlNone243.includes('hl-err-block') && !hlNone243.includes('hl-warn-block'), '')
+  // col 8 同时为错误块时优先红框（不叠加橙框）
+  const hlBoth243 = highlightCodeWrapped(src243, undefined, null, [], new Map([[3, { err: [8], warn: [8] }]]))
+  check('adj243 同块错误优先红框', hlBoth243.includes('hl-err-block') && !hlBoth243.includes('hl-warn-block'), '')
+}
 // adj208：有语法错误时仍渲染可解析部分（预览不闪动）——
 // layout/render 对错误输入安全，错误行在解析阶段已跳过
 {

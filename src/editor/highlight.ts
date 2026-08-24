@@ -148,6 +148,12 @@ export function highlightCode(
 }
 
 /**
+ * adj243：行内错误/告警块标记——col 相对该行内容（tokenizer 的 content，去掉行头），
+ * 由 parser 直接给出；渲染时按空格块定位，命中块加红/橙单线外框。
+ */
+export type BlockMarks = { err: number[]; warn: number[] }
+
+/**
  * adj227：按「实际层（textarea）折行点」分视觉行的高亮版本。
  *
  * 背景：高亮层用 pre-wrap 自动折行时，span（inline 盒）边界会产生额外的
@@ -161,12 +167,15 @@ export function highlightCode(
  * 显示层与 textarea 逐行逐字符对齐。
  *
  * @param wrapPoints 每源码行的折行点字符偏移数组（相对该行；无折行 = 空数组）
+ * @param markByLine adj243：行号 → { err, warn } 的 col 数组（col 相对该行内容），
+ *  命中块以 hl-err-block/hl-warn-block 单线外框包裹
  */
 export function highlightCodeWrapped(
   code: string,
   errLines: ReadonlySet<number> | undefined,
   cursor: { line: number; col: number } | null,
   wrapPoints: number[][],
+  markByLine?: ReadonlyMap<number, BlockMarks>,
 ): string {
   const lines = code.replace(/\r\n/g, '\n').split('\n')
   const parts: string[] = []
@@ -225,20 +234,34 @@ export function highlightCodeWrapped(
         if (re <= rs) return ''
         let inner: string
         if (m[1] === 'Q') {
-          if (curSeg) {
-            const is = Math.max(rs, curSeg[0])
-            const ie = Math.min(re, curSeg[1])
-            if (is < ie) {
-              inner =
-                highlightMusicContent(rest.slice(rs, is)) +
-                `<span class="hl-current-block">${highlightMusicContent(rest.slice(is, ie))}</span>` +
-                highlightMusicContent(rest.slice(ie, re))
-            } else {
-              inner = highlightMusicContent(rest.slice(rs, re))
+          // adj243：错误/告警块的 rest 坐标（col 相对该行内容，需补前导空白偏移 restLead）
+          const marks = markByLine?.get(lineNo)
+          const restLead = rest.length - rest.trimStart().length
+          const errCols = marks ? marks.err.map((c) => c + restLead) : []
+          const warnCols = marks ? marks.warn.map((c) => c + restLead) : []
+          // 逐块渲染（保留块间空格，textContent 与 textarea 逐字符对齐）
+          let out = ''
+          let i = rs
+          while (i < re) {
+            const ch = rest[i]
+            if (ch === ' ' || ch === '\t') {
+              let j = i
+              while (j < re && (rest[j] === ' ' || rest[j] === '\t')) j++
+              out += esc(rest.slice(i, j))
+              i = j
+              continue
             }
-          } else {
-            inner = highlightMusicContent(rest.slice(rs, re))
+            const bs = i
+            while (i < re && rest[i] !== ' ' && rest[i] !== '\t') i++
+            const be = i
+            let blk = highlightMusicContent(rest.slice(bs, be))
+            // 错误块优先于告警块（红 > 橙）
+            if (errCols.some((c) => c >= bs && c < be)) blk = `<span class="hl-err-block">${blk}</span>`
+            else if (warnCols.some((c) => c >= bs && c < be)) blk = `<span class="hl-warn-block">${blk}</span>`
+            if (curSeg && bs === curSeg[0]) blk = `<span class="hl-current-block">${blk}</span>`
+            out += blk
           }
+          inner = out
         } else if (m[1] === 'C') {
           inner = span('hl-lyric', rest.slice(rs, re))
         } else {

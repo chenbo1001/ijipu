@@ -907,6 +907,22 @@ body {
   -webkit-box-decoration-break: clone;
 }
 
+/* adj243：错误/告警块单线外框——outline 不占布局宽，不影响与 textarea 逐字符对齐；
+   box-decoration-break: clone 让折行时每段各自闭合（块不跨折行点，实际单段） */
+.hl-err-block {
+  outline: 1px solid var(--jp-danger);
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.hl-warn-block {
+  outline: 1px solid var(--jp-warning);
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
 /* ============ 状态栏 ============ */
 .statusbar {
   height: var(--jp-statusbar-h);
