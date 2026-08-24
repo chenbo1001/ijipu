@@ -127,9 +127,13 @@ export function EditorPane() {
     // 滚动到光标所在行（行高 = 整数 --jp-editor-lh，adj165：与 CSS 取整一致）；adj63 wrap=off 需同步横向
     // adj223：折行后按视觉行滚动（visualTopRef 读取最新视觉行前缀和，不加入依赖——
     // 否则每次输入重跑 effect、光标被拉回跳转位置）
+    // adj236：居中滚动——目标音符块尽量处于编辑器视口水平/垂直中心，
+    // 避免跳到边角不好查找；超界由浏览器自动钳制到最大滚动
     const pos = lineColOf(ta.value, cursorJump.start)
-    ta.scrollTop = Math.max(0, (visualTopRef.current[pos.line - 1] ?? 0) * editorLineH - 40)
-    ta.scrollLeft = Math.max(0, pos.col * effectiveFontSize * 0.6 - 40)
+    const targetTop = (visualTopRef.current[pos.line - 1] ?? 0) * editorLineH
+    ta.scrollTop = Math.max(0, targetTop - (ta.clientHeight - editorLineH) / 2)
+    const targetLeft = pos.col * effectiveFontSize * 0.6
+    ta.scrollLeft = Math.max(0, targetLeft - ta.clientWidth / 2 + effectiveFontSize * 0.3)
     onScroll()
     onSelectRef.current()
   }, [cursorJump, effectiveFontSize])
