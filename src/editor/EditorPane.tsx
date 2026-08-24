@@ -177,12 +177,18 @@ export function EditorPane() {
   // adj224：textarea 内容区宽（含 padding，clientWidth 已扣除滚动条宽）——
   // 同步给高亮层（--jp-editor-content-w），恢复竖向滚动条后两侧折行点一致
   const [taClientW, setTaClientW] = useState(0)
+  // adj225：高亮层宽度由 ResizeObserver 直接写 DOM（inline width）——拖动窗体时
+  // textarea 与高亮层**同帧**重排；若只走 React state（CSS 变量）会滞后一帧，
+  // 拖动过程中高亮层仍是旧宽度、折行点不同，折行后的行文本错位
+  const innerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const parent = taRef.current?.parentElement ?? null
     if (!parent) return
     const update = () => {
       const ta = taRef.current
       if (ta) {
+        // 直接写 DOM：与浏览器 reflow 同帧生效（React state 只用于视觉行探测等非对齐计算）
+        if (innerRef.current) innerRef.current.style.width = `${ta.clientWidth}px`
         setTaClientW(ta.clientWidth) // 含 padding，不含滚动条
         setContentW(ta.clientWidth - 28) // 内容区宽（去左右 padding 14×2）
       }
@@ -608,7 +614,11 @@ export function EditorPane() {
             onMouseUp={onSelect}
           />
           <div ref={hlRef} className="highlight-layer" aria-hidden="true">
-            <div className="highlight-inner" ref={hlInnerRef}>
+            {/* adj225：innerRef 供 ResizeObserver 同帧同步宽度（拖动窗体不滞后） */}
+            <div className="highlight-inner" ref={(el) => {
+              innerRef.current = el
+              hlInnerRef.current = el
+            }}>
               {/* adj171：当前行整行背景铺满层（随 inner transform 一起平移；宽度铺满编辑区）
                   adj172：top 含内容层 padding-top 10px（否则背景整体偏上 10px） */}
               {cursor && (
