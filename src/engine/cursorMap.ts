@@ -73,7 +73,9 @@ export function codePosToNoteId(code: string, pos: number): string | null {
         if (t.pos + headLen >= col) break
         if (isNoteToken(t)) local++
       }
-      if (local >= noteTokens.length) return null
+      // adj228：光标在行尾/最后音符之后时取最后一个音符——此前返回 null，
+      // 行尾移动光标时预览无高亮（「时准时不准」的主因）
+      if (local >= noteTokens.length) local = noteTokens.length - 1
       const voice = m[1] === '' ? 1 : Number(m[1])
       target = `${page}_${voice}_${group}_${noteCounter + local}`
       break

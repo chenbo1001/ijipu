@@ -340,6 +340,8 @@ const pos1 = noteIdToCodePos(linkCode, '0_1_0_2')
 check('id 0_1_0_2 → 位置 31（数字 3）', pos1 === 31, String(pos1))
 const round = codePosToNoteId(linkCode, pos1!)
 check('round-trip 一致', round === '0_1_0_2', String(round))
+// adj228：光标在行尾/最后音符之后 → 取最后一个音符（此前返回 null，预览无高亮）
+check('adj228 行尾光标 → 最后音符', codePosToNoteId(linkCode, 35) === '0_1_0_3', String(codePosToNoteId(linkCode, 35)))
 check('非 Q 行（歌词行）不联动', codePosToNoteId(linkCode, 44) === null, String(codePosToNoteId(linkCode, 44)))
 // 分页场景：'V: 1.0\n'=7, 'B: t\n'=5(→12), 'Q: 1 2 |\n'=9(→21), '[fenye]\n'=8(→29)，Q2 行从 29 开始
 const linkCode2 = 'V: 1.0\nB: t\nQ: 1 2 |\n[fenye]\nQ: 3 4 |\n'

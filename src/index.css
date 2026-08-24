@@ -844,9 +844,12 @@ body {
   color: var(--jp-hl-line-header);
   text-shadow: 0.4px 0 0 currentColor, -0.4px 0 0 currentColor;
 }
-/* adj165：当前音符区块/小节线区块背景（叠加在当前行背景之上，二者可区分） */
+/* adj165：当前音符区块/小节线区块背景（叠加在当前行背景之上，二者可区分）；
+   adj228：加醒目外边框（outline 不占宽，不影响逐字符对齐）——点击预览音符
+   跳转编辑器后，光标所在块一目了然 */
 .hl-current-block {
-  background: color-mix(in srgb, var(--jp-accent) 22%, transparent);
+  background: color-mix(in srgb, var(--jp-accent) 18%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--jp-accent) 80%, transparent);
   border-radius: 3px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
