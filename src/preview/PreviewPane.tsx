@@ -339,8 +339,11 @@ export function PreviewPane() {
                 {/* adj226：SVG 层提到虚线层之上且默认不拦截命中——音符/歌词/描述头
                     （data-notepos/cipos/meta）各自 pointer-events: all 可点，
                     虚线的拖拽在音符外区域仍可用；此前 SVG 在虚线之下，
-                    音符数字中心与行虚线重叠处点击被虚线拦截（拖拽而非联动） */}
+                    音符数字中心与行虚线重叠处点击被虚线拦截（拖拽而非联动）
+                    adj244：SVG 自带页面白底 rect 会盖住虚线层，预览层将其透明化，
+                    白底由 .score-page 提供——音符仍可点，虚线透过透明 SVG 可见 */}
                 <div
+                  className="preview-svg"
                   dangerouslySetInnerHTML={{ __html: svg }}
                   style={{ position: 'relative', zIndex: 1, pointerEvents: 'none' }}
                 />

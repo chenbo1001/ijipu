@@ -455,6 +455,11 @@ body {
 }
 
 /* 排版辅助虚线（adj7） */
+/* adj244：预览层把 SVG 自带的页面白底 rect 透明化（白底由 .score-page 提供），
+   否则 SVG 层（z-index:1）的白底会盖住虚线层——虚线不可见但仍可命中 */
+.preview-svg rect:first-child {
+  fill: transparent;
+}
 .guide-line {
   position: absolute;
   border: 1px dashed var(--jp-accent);
