@@ -1068,7 +1068,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   const placeVoiceBlock = (unit: Unit) => {
     const geciSize = config.geci_size
     const sp = spacingFor(config, pageIndex)
-    const parts = unit.groups.map(({ group }) => ({
+    const parts = unit.groups.map(({ groupIndex, group }) => ({
+      groupIndex,
       voice: group.music.voice,
       name: group.music.voiceName,
       segs: splitBars(group.music.tokens),
@@ -1152,7 +1153,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
                 rem -= piece
               }
             }
-            const dur2 = placeNoteAt(t, segments, voiceY, pageIndex, vi, p.voice, slotIndex, p.lyricMaps, geciSize, sp, beatAcc, b)
+            // adj226：id.group 用真实组索引（此前误传块内声部序号 vi——
+            // 前面还有单声部行时组序号错位，预览↔编辑器光标联动全偏）
+            const dur2 = placeNoteAt(t, segments, voiceY, pageIndex, p.groupIndex, p.voice, slotIndex, p.lyricMaps, geciSize, sp, beatAcc, b)
             beatAcc += dur2
             slotIndex++
           }

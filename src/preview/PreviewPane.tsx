@@ -294,11 +294,25 @@ export function PreviewPane() {
                   zoom: previewZoom / 100,
                 }}
               >
-                <div dangerouslySetInnerHTML={{ __html: svg }} />
+                {/* adj226：SVG 层提到虚线层之上且默认不拦截命中——音符/歌词/描述头
+                    （data-notepos/cipos/meta）各自 pointer-events: all 可点，
+                    虚线的拖拽在音符外区域仍可用；此前 SVG 在虚线之下，
+                    音符数字中心与行虚线重叠处点击被虚线拦截（拖拽而非联动） */}
+                <div
+                  dangerouslySetInnerHTML={{ __html: svg }}
+                  style={{ position: 'relative', zIndex: 1, pointerEvents: 'none' }}
+                />
                 {showGuides && (
                   <div
                     className="guide-layer"
-                    style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      pointerEvents: 'none',
+                      // adj226：isolation 封住内部 guide-line 的 z-index（否则 z-index:5
+                      // 的虚线会越过 z-index:1 的 SVG 层拦截音符点击）
+                      isolation: 'isolate',
+                    }}
                   >
                     {/* 四边距 */}
                     <div

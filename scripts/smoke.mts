@@ -347,6 +347,22 @@ const idPage1 = codePosToNoteId(linkCode2, 32) // Q2 行 '3' 后
 check('分页后第 2 页音符 id page=1、index=2（全局计数）', idPage1 === '1_1_1_2', String(idPage1))
 const posPage1 = noteIdToCodePos(linkCode2, '1_1_1_2')
 check('第 2 页音符反向定位在 Q2 行', posPage1 === 32, String(posPage1))
+// adj226：多声部块 id.group 用真实组索引（此前误用块内声部序号 vi——
+// 前面有单声部行时组序号错位，预览↔编辑器光标联动全偏）
+{
+  const linkCode3 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\nQ1: 2 3 4 5 |\nQ2: 6 7 1 2 |\n'
+  const r226 = parseJps(linkCode3)
+  const lay226 = layoutScore(r226, defaultPageConfig)
+  const ids226 = lay226.pages[0].notes.map((n) => `${n.id.voice}_${n.id.group}_${n.id.index}`)
+  check(
+    'adj226 多声部块 group 用真实组索引',
+    ids226.join(',') ===
+      '1_0_0,1_0_1,1_0_2,1_0_3,1_0_4,1_0_5,1_0_6,1_0_7,1_1_8,1_1_9,1_1_10,1_1_11,2_2_12,2_2_13,2_2_14,2_2_15',
+    ids226.join(','),
+  )
+  check('adj226 codePosToNoteId 多声部 Q1 行 → 0_1_1_9', codePosToNoteId(linkCode3, 53) === '0_1_1_9', String(codePosToNoteId(linkCode3, 53)))
+  check('adj226 noteIdToCodePos 多声部 Q2 行定位', noteIdToCodePos(linkCode3, '0_2_2_13') === 67, String(noteIdToCodePos(linkCode3, '0_2_2_13')))
+}
 
 // ---- 15. 播放序列（M4） ----
 console.log('[15] play sequence (M4)')

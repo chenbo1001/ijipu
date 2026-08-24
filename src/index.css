@@ -446,6 +446,14 @@ body {
   cursor: move;
 }
 
+/* adj226：SVG 容器 pointer-events none（避免整层拦截虚线的拖拽），
+   音符/歌词/描述头自身恢复可命中——点击音符不再被行虚线拦截 */
+.score-page [data-notepos],
+.score-page [data-cipos],
+.score-page [data-meta] {
+  pointer-events: all;
+}
+
 /* 排版辅助虚线（adj7） */
 .guide-line {
   position: absolute;
