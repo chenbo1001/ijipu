@@ -231,7 +231,9 @@ export function highlightCodeWrapped(
         // 段内 rest 范围
         const rs = Math.max(0, s.start - headLen)
         const re = Math.max(0, s.end - headLen)
-        if (re <= rs) return ''
+        // adj246：段仅含行头（rest 为空，如只剩 "Q:" / "C:" 的行）也要输出行头，
+        // 否则显示层变成空行
+        if (re <= rs) return s.start < headLen ? span('hl-line-header', head) : ''
         let inner: string
         if (m[1] === 'Q') {
           // adj243：错误/告警块的 rest 坐标（col 相对该行内容，需补前导空白偏移 restLead）

@@ -324,6 +324,13 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
   const hlBoth243 = highlightCodeWrapped(src243, undefined, null, [], new Map([[3, { err: [8], warn: [8] }]]))
   check('adj243 同块错误优先红框', hlBoth243.includes('hl-err-block') && !hlBoth243.includes('hl-warn-block'), '')
 }
+// adj246：空 rest 的 Q:/C: 行也要渲染行头（否则显示层成空行）
+{
+  const h246 = highlightCodeWrapped('V: 1.0\nQ:\nC:\n', undefined, null, [])
+  check('adj246 空 Q: 行渲染行头', h246.includes('hl-line-header">Q:</span'), '')
+  check('adj246 空 C: 行渲染行头', h246.includes('hl-line-header">C:</span'), '')
+  check('adj246 空行不误加行头', !h246.includes('hl-line-header">1<'), '')
+}
 // adj208：有语法错误时仍渲染可解析部分（预览不闪动）——
 // layout/render 对错误输入安全，错误行在解析阶段已跳过
 {
