@@ -806,9 +806,12 @@ body {
 }
 
 /* adj227：高亮层按实际层折行点手动分行（每视觉行一个 .hl-line）——
-   不自动折行（textarea 的折行位置为准），避免 span 断行差异导致的折行行错位 */
+   不自动折行（textarea 的折行位置为准），避免 span 断行差异导致的折行行错位；
+   adj239：min-height 保底一行高——空行的 .hl-line 无内容时高度为 0，
+   textarea 空行占一行高，显示层不占位导致后续行（# jps-config 等）垂直错位 */
 .editor-main .highlight-content .hl-line {
   white-space: pre;
+  min-height: var(--jp-editor-lh, 24px);
 }
 
 /* adj165：自动提示浮层（& 修饰符 / 跳房子 / 描述头）；adj192：max-height+滚动防溢出 */
