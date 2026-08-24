@@ -628,15 +628,18 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
           let x2: number
           let y2: number
           if (right) {
+            // adj231：上滑音右上角更高（终点 sz×1.4 向上，原 ×1.0）
             x1 = cx0 + 4 * s // 中部右侧起笔（间距加大）
             y1 = y - size * 0.4 // 音符中部
             x2 = x1 + sz
-            y2 = y1 - sz // 终点在上方（向右上）
+            y2 = y1 - sz * 1.4 // 终点更高
           } else {
+            // adj231：下滑音更靠近主音符（弧线缩短 0.8×）+ 整体上移（起点 0.95、
+            // 终点 0.55，原 0.8/0.4）
             x1 = x + digitW // 音符右上角（数字右缘）
-            y1 = y - size * 0.8 // 数字顶部
-            x2 = x1 + sz // 向右伸出
-            y2 = y - size * 0.4 // 斜向下到音符中部高度
+            y1 = y - size * 0.95 // 数字顶部上方（上移）
+            x2 = x1 + sz * 0.8 // 更短，更贴主音符
+            y2 = y - size * 0.55 // 终点上移
           }
           const mx = (x1 + x2) / 2 // 控制点水平（先向右弯再向上/下）
           parts.push(
