@@ -331,9 +331,15 @@ export function EditorPane() {
     // adj186：描述头区域行首 Tab → 列出所有描述头（行首 = 光标前仅空白）；
     // adj202：行首已输入描述头前缀（如 q/Q/qv）时按前缀过滤列表（Q:/Q1:/Q2: 等，
     // 不区分大小写），继续输入字母/数字实时收窄；无匹配项则关闭列表
-    const headerMatch = /^\s*([a-zA-Z0-9]*)$/.exec(lineBefore)
+    // adj245：触发时机调整——回车换到新行（lineBefore 为空）先不弹；行首输入空格
+    // 弹完整描述头列表、输入前缀字母/数字弹按前缀过滤的列表；空行回车正常换行
+    const headerMatch = /^(\s*)([a-zA-Z0-9]*)$/.exec(lineBefore)
     if (headerMatch) {
-      const items = filterHeaderHints(headerMatch[1])
+      if (lineBefore === '') {
+        setCompletion(null)
+        return
+      }
+      const items = filterHeaderHints(headerMatch[2])
       if (items.length === 0) {
         setCompletion(null)
         return
