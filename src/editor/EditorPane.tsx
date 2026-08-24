@@ -119,8 +119,10 @@ export function EditorPane() {
     ta.selectionStart = Math.min(cursorJump.start, ta.value.length)
     ta.selectionEnd = Math.min(cursorJump.end, ta.value.length)
     // 滚动到光标所在行（行高 = 整数 --jp-editor-lh，adj165：与 CSS 取整一致）；adj63 wrap=off 需同步横向
+    // adj223：折行后按视觉行滚动（visualTopRef 读取最新视觉行前缀和，不加入依赖——
+    // 否则每次输入重跑 effect、光标被拉回跳转位置）
     const pos = lineColOf(ta.value, cursorJump.start)
-    ta.scrollTop = Math.max(0, (pos.line - 1) * Math.round(effectiveFontSize * 1.7) - 40)
+    ta.scrollTop = Math.max(0, (visualTopRef.current[pos.line - 1] ?? 0) * editorLineH - 40)
     ta.scrollLeft = Math.max(0, pos.col * effectiveFontSize * 0.6 - 40)
     onScroll()
     onSelectRef.current()
@@ -212,8 +214,14 @@ export function EditorPane() {
     }
     return tops
   }, [visualLines])
-  const cursorVisualTop = cursor ? visualTopOfLine[cursor.line - 1] ?? 0 : 0
+  // adj223：cursorVisualTop 必须 × 行高——visualTopOfLine 是「累计视觉行数」而非像素，
+  // 此前直接当 px 用（top: 10 + 行数）导致背景永远停在前几行，光标移到下方行时
+  // 背景不动（看起来像「行高亮一直停在第 1 行」）
+  const cursorVisualTop = cursor ? (visualTopOfLine[cursor.line - 1] ?? 0) * editorLineH : 0
   const cursorVisualH = cursor ? (visualLines[cursor.line - 1] ?? 1) * editorLineH : editorLineH
+  // adj223：视觉行前缀和经 ref 供光标跳转滚动读取（避免加入 effect 依赖）
+  const visualTopRef = useRef(visualTopOfLine)
+  visualTopRef.current = visualTopOfLine
 
   // 光标写入 store + 谱面联动（M3）
   const onSelect = () => {
@@ -254,10 +262,10 @@ export function EditorPane() {
     const pos = ta.selectionStart
     const before = ta.value.slice(0, pos)
     const lineBefore = before.slice(before.lastIndexOf('\n') + 1)
-    // adj201：浮层 y 按视觉行（折行后光标行下有折行占位）
+    // adj201：浮层 y 按视觉行（折行后光标行下有折行占位）；adj223：行数 × 行高转像素
     const compPos = (line: number, col: number) => ({
       x: col * effectiveFontSize * 0.6,
-      y: (visualTopOfLine[line - 1] ?? 0) + editorLineH,
+      y: ((visualTopOfLine[line - 1] ?? 0) + 1) * editorLineH,
     })
     // adj186：描述头区域行首 Tab → 列出所有描述头（行首 = 光标前仅空白）；
     // adj202：行首已输入描述头前缀（如 q/Q/qv）时按前缀过滤列表（Q:/Q1:/Q2: 等，
