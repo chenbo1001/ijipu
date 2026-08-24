@@ -33,6 +33,8 @@ import {
   SLUR_W,
   VOLTA_COMMENT_FONT_RATIO,
   TUPLET_NUM_RATIO,
+  TUPLET_NUM_W_RATIO,
+  TUPLET_LABEL_PAD,
   GRACE_SIZE_RATIO,
   GRACE_SLOT_RATIO,
   GRACE_SLOT_RATIO_MULTI,
@@ -1058,7 +1060,9 @@ function renderSlur(s: PlacedSlur, noteSize = 18): string {
     if (!s.tupletCount || s.tupletCount < 2) return ''
     const size = Math.max(7, Math.round(noteSize * TUPLET_NUM_RATIO))
     const text = String(s.tupletCount)
-    const w = Math.max(14, text.length * 7 + 3)
+    // adj222：不透明背景只包裹文字字形——数字宽 ≈ 0.62em/字 + 两侧各 1px 空隙；
+    // 原 max(14, n×7+3) 白底远大于字形（单数字 14px vs 字形约 4px），大片白块遮线
+    const w = text.length * size * TUPLET_NUM_W_RATIO + TUPLET_LABEL_PAD * 2
     const dy = 2 // 数字下移 2px → 位于线正中
     return (
       `<rect x="${(cx - w / 2).toFixed(1)}" y="${(cy - size + 1 + dy).toFixed(1)}" width="${w.toFixed(1)}" height="${size}" rx="2" fill="#ffffff"/>` +

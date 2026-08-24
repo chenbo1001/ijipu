@@ -2021,6 +2021,10 @@ const labelEl55 = /rx="2"[^>]*\/><text x="([\d.]+)" y="([\d.]+)"[^>]*>4<\/text>/
 const labelY55 = labelEl55 ? Number(labelEl55[2]) : NaN
 check('数字字号随音符（0.2×18 → 7）', svg55.includes('font-size="7"'), '')
 check('数字下移 2px（基线 = 线顶点 + 2）', Number.isFinite(labelY55) && Math.abs(labelY55 - (s55!.y - 4.5 + 2)) < 0.5, `labelY=${labelY55} slur.y=${s55?.y}`)
+// adj222：不透明背景只包裹文字字形——单数字 4 宽 = 1×7×0.62+2 ≈ 6.34px
+// （原 max(14, n×7+3) 固定 14px 白底，远大于字形约 4px，大片白块遮线）
+const rectW55 = /<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="7" rx="2"/.exec(svg55)
+check('adj222 数字背景仅包裹字形（宽≈6.3，非固定 14）', rectW55 !== null && Math.abs(Number(rectW55[3]) - 6.34) < 0.2, rectW55 ? `w=${rectW55[3]}` : 'no rect')
 // 平均组占宽：4 个 0.75 拍音符 vs 3 个 1 拍音符——同一小节宽一致
 const lay55a = layoutScore(r55, defaultPageConfig)
 const n55a = [...lay55a.pages[0].notes].sort((a, b) => a.x - b.x)

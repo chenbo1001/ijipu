@@ -69,6 +69,10 @@ export const SLUR_W = 0.8
 export const SLUR_NEST_RAISE = 5
 /** 平均连音组数字字号与音符字号的比值（adj89：默认 0.2×noteSize，可调整） */
 export const TUPLET_NUM_RATIO = 0.2
+/** 平均连音组数字字形宽与字号比值（adj222：与音符数字槽同比例 0.62em） */
+export const TUPLET_NUM_W_RATIO = 0.62
+/** 平均连音组数字背景矩形四周空隙（px，adj222：紧贴文字即可，连线与字不重叠） */
+export const TUPLET_LABEL_PAD = 1
 
 // ---- 水平元素占位 ----
 /** 左右括号（&zkh/&ykh）占位宽度（px，adj64：非时值元素，先扣除再分摊时值宽） */
