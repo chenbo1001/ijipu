@@ -83,28 +83,46 @@ export function PreviewPane() {
     )
     if (el) {
       el.classList.add('note-active')
-      // adj237：居中滚动但以页面区域为界——scrollIntoView 会把音符滚到视口中心，
-      // 页面较矮时视口中心落在页面外的预览空白上；改为手动滚动：
+      // adj237/238：居中滚动但以页面区域为界——scrollIntoView 会把音符滚到视口中心，
+      // 页面较小时视口中心落在页面外的预览空白上；改为手动滚动（垂直+水平）：
       //  - 页面 ≥ 视口：音符居中，滚动范围钳在页面内（页面始终铺满视口，不露空白）
-      //  - 页面 < 视口：不为了居中而滚出页面——页面顶部对齐视口顶部（阅读自然）
+      //  - 页面 < 视口：不为了居中而滚出页面——垂直页面顶对齐视口顶、
+      //    水平页面居中排布不滚动（align-items:center）
       const scroller = root.parentElement // 滚动容器（.preview-pane）
       if (scroller) {
         const scRect = scroller.getBoundingClientRect()
+        // 垂直
         const viewH = scroller.clientHeight
         const noteY = el.getBoundingClientRect().top - scRect.top + scroller.scrollTop
-        let target = noteY - viewH / 2
+        let targetY = noteY - viewH / 2
+        // 水平（adj238：预览放大后页面宽于视口，点击两侧音符需水平滚动居中）
+        const viewW = scroller.clientWidth
+        const noteX = el.getBoundingClientRect().left - scRect.left + scroller.scrollLeft
+        let targetX = noteX - viewW / 2
         const pageEl = el.closest('.score-page')
         if (pageEl) {
+          // 水平边界用 preview-zoom-scale（实际放大内容区）——score-page 的
+          // maxWidth:100% 会被视口裁剪，音符实际 x 位于 zoom-scale 内
+          const boundsEl = pageEl.querySelector('.preview-zoom-scale') ?? pageEl
           const pageTop = pageEl.getBoundingClientRect().top - scRect.top + scroller.scrollTop
           const pageH = pageEl.getBoundingClientRect().height
+          const bLeft = boundsEl.getBoundingClientRect().left - scRect.left + scroller.scrollLeft
+          const bW = boundsEl.getBoundingClientRect().width
           if (pageH >= viewH) {
-            target = Math.max(pageTop, Math.min(target, pageTop + pageH - viewH))
+            targetY = Math.max(pageTop, Math.min(targetY, pageTop + pageH - viewH))
           } else {
-            target = pageTop
+            targetY = pageTop
+          }
+          if (bW >= viewW) {
+            targetX = Math.max(bLeft, Math.min(targetX, bLeft + bW - viewW))
+          } else {
+            targetX = 0 // 内容窄于视口（居中排布），无需横向滚动
           }
         }
-        const maxScroll = scroller.scrollHeight - viewH
-        scroller.scrollTop = Math.max(0, Math.min(target, maxScroll))
+        const maxScrollY = scroller.scrollHeight - viewH
+        scroller.scrollTop = Math.max(0, Math.min(targetY, maxScrollY))
+        const maxScrollX = scroller.scrollWidth - viewW
+        scroller.scrollLeft = Math.max(0, Math.min(targetX, maxScrollX))
       } else {
         el.scrollIntoView({ block: 'center', behavior: 'smooth' })
       }
