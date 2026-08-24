@@ -1105,22 +1105,16 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
         acc += barBeats[b]
       }
     }
-    const blockBeatsInfo: { dur: number; minDur: number; extra: number }[] = []
+    // 块内总拍 = Σ 每小节整数拍（barBeats 已向上取整）
+    const totalBeats = blockBeats
+    // adj251：多声部按切分法则计算每拍实际宽：
+    // ① 每拍横向最小宽 = max(BPW_NATURAL, minNoteW/minPiece)（该拍每音符的最小宽）
+    // ② 纵向取每组各声部该拍最小宽的**最大**为该拍基础宽（同拍纵向堆叠、同一 x，取最宽的）
+    // ③ Σ基础宽 < 页面有效宽 → 剩余宽度给各拍均分 → 得各拍实际宽
+    const availBeats = availW - pads - noteGapOf(totalBeats)
+    const beatBaseW: number[] = []
     {
-      // 各声部音符按**小节内**整数拍位置合并（块内拍 = 小节起始拍 + 小节内拍）。
-      // 每拍聚合各声部时值：dur 取该拍**最大**声部时值（同拍纵向堆叠在同一 x，取最宽的），
-      // minDur 取最小、extra 取最大 —— 不能叠加（否则 dur 膨胀 → 每拍过窄 → 块宽不足、
-      // 两端对齐失效）
-      const beatAgg: { maxP: number; minP: number; extra: number }[] = []
-      const addBeat = (bb: number, piece: number, extra: number) => {
-        while (beatAgg.length <= bb) beatAgg.push({ maxP: -1, minP: Infinity, extra: 0 })
-        const a = beatAgg[bb]
-        if (piece > a.maxP) a.maxP = piece
-        if (piece < a.minP) a.minP = piece
-        if (extra > a.extra) a.extra = extra
-      }
       for (let b = 0; b < numBars; b++) {
-        const barStart = barStartBeat[b]
         for (const p of parts) {
           const seg = p.segs[b] ?? { notes: [], bar: null }
           let barBeatAcc = 0
@@ -1134,7 +1128,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
                 const nearInt = Math.abs(pos - Math.round(pos)) < 1e-3
                 const pp = nearInt ? Math.round(pos) : Math.floor(pos + 1e-9)
                 const piece = Math.min(rem, (nearInt ? Math.round(pos) : Math.floor(pos + 1e-9)) + 1 - pos)
-                addBeat(barStart + pp, piece, extra)
+                const bb = barStartBeat[b] + pp
+                const need = Math.max(BPW_NATURAL, minNoteW(m.noteSize, extra) / piece)
+                beatBaseW[bb] = Math.max(beatBaseW[bb] ?? 0, need)
                 pos += piece
                 rem -= piece
               }
@@ -1143,14 +1139,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           }
         }
       }
-      for (const a of beatAgg) blockBeatsInfo.push({ dur: a.maxP, minDur: a.minP, extra: a.extra })
+      while (beatBaseW.length < totalBeats) beatBaseW.push(BPW_NATURAL)
     }
-    // 块内总拍 = Σ 每小节整数拍（barBeats 已向上取整）；blockBeatsInfo 补全空白拍，
-    // 保证 beatStartX/barStartBeat 索引不越界（小节线 x 不再乱序）
-    const totalBeats = blockBeats
-    while (blockBeatsInfo.length < totalBeats) blockBeatsInfo.push({ dur: 0, minDur: Infinity, extra: 0 })
-    const blockStretch = numBars > 3
-    const perBeats = allocatePerBeats(blockBeatsInfo, availW - pads - noteGapOf(totalBeats), m.noteSize, blockStretch)
+    const sumBase = beatBaseW.reduce((a, b) => a + b, 0)
+    const perBeats = beatBaseW.map((bw) => (sumBase < availBeats ? bw + (availBeats - sumBase) / totalBeats : bw))
     // 块内每拍段起点（相对内容左端 margin_left + BAR_PAD；每拍宽 + 拍间距累计）。
     // 循环到 totalBeats（含）——beatStartX[totalBeats] 为末小节右端，供小节线取整
     const beatStartX: number[] = []
@@ -1220,7 +1212,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
           }
         }
         // 小节右端（下一小节起点）：本小节拍宽累计（去尾拍间距）+ 小节间距
-        x += ((beatStartX[barStartB + barBeats[b]] ?? 0) - (beatStartX[barStartB] ?? 0) - NOTE_GAP) + (b < numBars - 1 ? gapSpaces[b] : 0)
+        x += ((beatStartX[barStartB + barBeats[b]] ?? 0) - (beatStartX[barStartB] ?? 0)) + (b < numBars - 1 ? gapSpaces[b] : 0)
       }
       voiceY += voiceHeights[vi] + (vi < parts.length - 1 ? sp.shengbu : 0)
     }
@@ -1243,9 +1235,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       const halfW = barlineTotalW(bt?.type ?? '|') / 2
       // 小节线按拍子累计位置：小节内容右端 = 小节起点 + BAR_PAD + 小节拍宽累计（去尾拍间距）
       // + 前面拍间距累计 + 空间/2（与单声部 bars 行一致）
-      const barWb = (beatStartX[barStartBeat[b] + barBeats[b]] ?? 0) - (beatStartX[barStartBeat[b]] ?? 0) - NOTE_GAP
+      // 小节宽度 = 拍宽累计（含拍间距）；小节线在小节内容右端 + 空间/2（与音符段 x 一致）
+      const barWb = (beatStartX[barStartBeat[b] + barBeats[b]] ?? 0) - (beatStartX[barStartBeat[b]] ?? 0)
       const lineX0 =
-        xBar + BAR_PAD + barWb + (bt ? barlineSpace(config.bar_gap, bt.type, bt.comment, m.noteSize) : 0) / 2 + barStartBeat[b] * NOTE_GAP
+        xBar + BAR_PAD + barWb + (bt ? barlineSpace(config.bar_gap, bt.type, bt.comment, m.noteSize) : 0) / 2
       barX[b] = r1(
         Math.min(
           Math.max(lineX0, config.margin_left + halfW),
