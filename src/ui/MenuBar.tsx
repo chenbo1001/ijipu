@@ -22,14 +22,16 @@ const ALT_MENU_KEYS: Record<string, string> = {
   h: 'help',
 }
 
-/** adj240：渲染热键标签——「文件(&F)」→ 「文件(<u>F</u>)」（& 后字母下划线，& 不显示） */
+/** adj240：渲染热键标签——「文件(&F)」→ 「文件(<u>F</u>)」（& 后字母下划线，& 不显示）
+ *  adj241：整体包 <span>（单个 flex item）——菜单项是 flex 布局（space-between），
+ *  不包裹时「新建(」「N」「)」会被当成独立 flex item 拉开间距 */
 function Hotkey({ text }: { text: string }) {
   const m = /\(&([A-Za-z0-9])\)/.exec(text)
-  if (!m) return <>{text}</>
+  if (!m) return <span>{text}</span>
   return (
-    <>
+    <span>
       {text.slice(0, m.index)}(<u>{m[1]}</u>){text.slice(m.index + m[0].length)}
-    </>
+    </span>
   )
 }
 
@@ -73,8 +75,11 @@ export function MenuBar() {
         setOpen(null)
         return
       }
-      // 菜单打开时：按字母执行对应热键菜单项（不叠加 Alt/Ctrl 等修饰键）
-      if (open && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && /^[a-z0-9]$/i.test(e.key)) {
+      // 菜单打开时：按字母执行对应热键菜单项
+      // adj241：Alt 按住时也执行（用户「Alt+F 再按 O」的 Alt 不松开场景——
+      // 原 !e.altKey 条件导致 Alt 按住时按 O 落入 textarea 输入）；
+      // Alt+菜单切换字母（ALT_MENU_KEYS）已由上方分支处理并 return
+      if (open && !e.ctrlKey && !e.metaKey && !e.shiftKey && /^[a-z0-9]$/i.test(e.key)) {
         const dropdown = document.querySelector('.menu-item.open .menu-dropdown')
         const target = dropdown?.querySelector<HTMLElement>(`[data-hotkey="${e.key.toLowerCase()}"]`)
         if (target) {
