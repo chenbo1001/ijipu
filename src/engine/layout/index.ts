@@ -1196,7 +1196,9 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
                 const perBeat = perBeats[blockBeat] ?? perBeats[totalBeats - 1]
                 const piece = Math.min(rem, (nearInt ? Math.round(pos) : Math.floor(pos + 1e-9)) + 1 - pos)
                 segments.push({
-                  x: x + BAR_PAD + (beatStartX[blockBeat] ?? 0) - (beatStartX[barStartB] ?? 0),
+                  // 段 x = 拍起点累计 + 拍内浮点偏移（(pos-pp)*perBeat）——
+                  // 否则同拍内的减时线音符（2/ 3/ 等）都被映射到拍起点、重叠
+                  x: x + BAR_PAD + ((beatStartX[blockBeat] ?? 0) - (beatStartX[barStartB] ?? 0)) + (pos - pp) * perBeat,
                   perBeat,
                   beats: piece,
                 })
