@@ -1124,14 +1124,18 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     const blockY = y
     let voiceY = blockY
     const blockVoices: VoiceBlock['voices'] = []
+    const voiceYTop: number[] = []
 
     for (let vi = 0; vi < parts.length; vi++) {
       const p = parts[vi]
       blockVoices.push({ voice: p.voice, name: p.name })
+      voiceYTop.push(voiceY)
       let x = config.margin_left
       let slotIndex = 0
-      let beatAcc = 0
       for (let b = 0; b < numBars; b++) {
+        // adj248：beatAcc 必须是**小节内**拍位置（0 起），每小节重置——
+        // 此前跨小节累计使 segments.x 漂移、音符 x 逐小节超出页面（多声部音符未全显示）
+        let beatAcc = 0
         const seg = p.segs[b] ?? { notes: [], bar: null }
         for (const t of seg.notes) {
           if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
@@ -1165,50 +1169,61 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       voiceY += voiceHeights[vi] + (vi < parts.length - 1 ? sp.shengbu : 0)
     }
 
-    // 块级小节线（跨声部；行首空小节普通 | 省略）
+    // adj249：小节线改为**每个声部单独绘制**（参考单声部：高度 = 该声部音符行高），
+    // 不再上下贯穿整个多声部块与词部；且只在该声部实际有小节线的位置画线（不多出）。
+    // 各声部 x 统一（块级小节对齐），y 取该声部行高（复用单声部小节线高度公式）。
+    const bs = noteScaleOf(m.noteSize)
+    const barX: number[] = []
     let xBar = config.margin_left
     let barEndBeat = 0
     for (let b = 0; b < numBars; b++) {
-      let bar: Extract<MusicToken, { kind: 'barline' }> | null = null
-      let srcEmpty = false
+      let bt: Extract<MusicToken, { kind: 'barline' }> | null = null
       for (const p of parts) {
-        const seg = p.segs[b]
-        if (seg?.bar) {
-          bar = seg.bar
-          srcEmpty = seg.notes.length === 0
+        const s = p.segs[b]
+        if (s?.bar) {
+          bt = s.bar
           break
         }
       }
-      if (bar && !(b === 0 && srcEmpty && bar.type === '|')) {
-        const bid: LayoutId = { page: pageIndex, voice: 0, group: 0, index: barCounter }
-        // 小节线在小节内容右端（+BAR_PAD 不重叠音符，adj36）+ 拍间距（adj38），并居中；
-        // 整体不超出页面内容区（右/左边距内）
-        const lineX0 =
-          xBar + BAR_PAD + barBeats[b] * perBeat + barlineSpace(config.bar_gap, bar.type, bar.comment, m.noteSize) / 2 + (barEndBeat + barBeats[b]) * NOTE_GAP
-        const halfW = barlineTotalW(bar.type) / 2
+      const halfW = barlineTotalW(bt?.type ?? '|') / 2
+      const lineX0 =
+        xBar + BAR_PAD + barBeats[b] * perBeat + (bt ? barlineSpace(config.bar_gap, bt.type, bt.comment, m.noteSize) : 0) / 2 + (barEndBeat + barBeats[b]) * NOTE_GAP
+      barX[b] = r1(
+        Math.min(
+          Math.max(lineX0, config.margin_left + halfW),
+          pages[pageIndex].width - config.margin_right - halfW,
+        ),
+      )
+      xBar += barBeats[b] * perBeat + (b < numBars - 1 ? (b < gapSpaces.length ? gapSpaces[b] : 0) : 0)
+      barEndBeat += barBeats[b]
+    }
+    for (let vi = 0; vi < parts.length; vi++) {
+      const p = parts[vi]
+      const vTop = voiceYTop[vi]
+      const barNoteY = vTop + m.noteSize * 1.1
+      const yTopBar = r1(barNoteY - 18.4 * bs)
+      const yBottomBar = r1(barNoteY + 4.5 * bs)
+      for (let b = 0; b < numBars; b++) {
+        const seg = p.segs[b]
+        if (!seg?.bar) continue
+        if (b === 0 && seg.notes.length === 0 && seg.bar.type === '|') continue
+        const bid: LayoutId = { page: pageIndex, voice: p.voice, group: p.groupIndex, index: barCounter }
         pages[pageIndex].barlines.push({
           id: bid,
-          type: bar.type,
-          marks: bar.marks, // adj206
-          voltaStart: bar.voltaStart,
-          voltaEnd: bar.voltaEnd,
-          voltaEndSlash: bar.voltaEndSlash,
-          voltaOnly: bar.voltaOnly,
-          comment: bar.comment,
-          x: r1(
-            Math.min(
-              Math.max(lineX0, config.margin_left + halfW),
-              pages[pageIndex].width - config.margin_right - halfW,
-            ),
-          ),
-          yTop: blockY,
-          yBottom: blockY + blockH,
+          type: seg.bar.type,
+          marks: seg.bar.marks, // adj206
+          voltaStart: seg.bar.voltaStart,
+          voltaEnd: seg.bar.voltaEnd,
+          voltaEndSlash: seg.bar.voltaEndSlash,
+          voltaOnly: seg.bar.voltaOnly,
+          comment: seg.bar.comment,
+          x: barX[b],
+          yTop: yTopBar,
+          yBottom: yBottomBar,
           width: m.barlineWidth,
         })
         barCounter++
       }
-      xBar += barBeats[b] * perBeat + (b < numBars - 1 ? (b < gapSpaces.length ? gapSpaces[b] : 0) : 0)
-      barEndBeat += barBeats[b]
     }
 
     pages[pageIndex].voiceBlocks.push({
