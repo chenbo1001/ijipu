@@ -83,7 +83,31 @@ export function PreviewPane() {
     )
     if (el) {
       el.classList.add('note-active')
-      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      // adj237：居中滚动但以页面区域为界——scrollIntoView 会把音符滚到视口中心，
+      // 页面较矮时视口中心落在页面外的预览空白上；改为手动滚动：
+      //  - 页面 ≥ 视口：音符居中，滚动范围钳在页面内（页面始终铺满视口，不露空白）
+      //  - 页面 < 视口：不为了居中而滚出页面——页面顶部对齐视口顶部（阅读自然）
+      const scroller = root.parentElement // 滚动容器（.preview-pane）
+      if (scroller) {
+        const scRect = scroller.getBoundingClientRect()
+        const viewH = scroller.clientHeight
+        const noteY = el.getBoundingClientRect().top - scRect.top + scroller.scrollTop
+        let target = noteY - viewH / 2
+        const pageEl = el.closest('.score-page')
+        if (pageEl) {
+          const pageTop = pageEl.getBoundingClientRect().top - scRect.top + scroller.scrollTop
+          const pageH = pageEl.getBoundingClientRect().height
+          if (pageH >= viewH) {
+            target = Math.max(pageTop, Math.min(target, pageTop + pageH - viewH))
+          } else {
+            target = pageTop
+          }
+        }
+        const maxScroll = scroller.scrollHeight - viewH
+        scroller.scrollTop = Math.max(0, Math.min(target, maxScroll))
+      } else {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      }
     }
   }, [activeNoteId, pagesHtml])
 
