@@ -214,7 +214,7 @@ export function EditorPane() {
     if (contentW <= 0 || taClientW <= 0) return lines.map(() => [])
     // 克隆 textarea（同 textarea 样式）测每行折行点；短行（估算必不折）跳过
     const probe = document.createElement('textarea')
-    probe.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;height:24px;resize:none;overflow:hidden;white-space:pre-wrap;wrap:soft;font-family:${effectiveFont},monospace;font-size:${effectiveFontSize}px;line-height:${editorLineH}px;padding:10px 14px;box-sizing:border-box;width:${taClientW}px;font-variant-ligatures:none;tab-size:4`
+    probe.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;height:24px;resize:none;overflow:hidden;border:none;white-space:pre-wrap;wrap:soft;font-family:${effectiveFont},monospace;font-size:${effectiveFontSize}px;line-height:${editorLineH}px;padding:10px 14px;box-sizing:border-box;width:${taClientW}px;font-variant-ligatures:none;tab-size:4`
     document.body.appendChild(probe)
     const lh = editorLineH
     const rowsOf = (text: string) => {
