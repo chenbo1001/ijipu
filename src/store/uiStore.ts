@@ -87,8 +87,8 @@ interface UiState {
   editorFont: string
   /** 预览缩放（%，50~200，adj51） */
   previewZoom: number
-  /** 编辑器自动折行（adj233：默认关闭——textarea 逐字符折行与高亮层切分难以
-   *  完全对位；关闭时 wrap=off 长行横向滚动，未折行逐字符对位正确） */
+  /** 编辑器自动折行（adj233 默认关闭；adj234：overflow-wrap:normal 统一
+   *  textarea 与高亮层为「空格后折行」，折行对位正确，改回默认开启） */
   autoWrap: boolean
   openModal: (m: ModalKind) => void
   closeModal: () => void
@@ -129,7 +129,7 @@ export const useUiStore = create<UiState>()((set) => ({
     return 'Consolas'
   })(),
   previewZoom: loadNum(PREVIEW_ZOOM_KEY, 100),
-  autoWrap: loadBool(AUTO_WRAP_KEY, false),
+  autoWrap: loadBool(AUTO_WRAP_KEY, true),
   openModal: (m) => set({ modal: m }),
   closeModal: () => set({ modal: null, playbackStartId: null }),
   setPlaybackStart: (id) => set({ playbackStartId: id }),

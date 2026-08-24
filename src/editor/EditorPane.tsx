@@ -76,7 +76,8 @@ export function EditorPane() {
   // adj160：编辑器字体下拉框（与字号按钮同排）
   const editorFont = useUiStore((s) => s.editorFont)
   const setEditorFont = useUiStore((s) => s.setEditorFont)
-  // adj233：自动折行开关（默认关闭——关闭时 wrap=off 长行横向滚动，未折行对位正确）
+  // adj233/adj234：自动折行开关——overflow-wrap:normal 后 textarea 与高亮层
+  // 同为「空格后折行」、折行点一致，默认开启；关闭时 wrap=off 横向滚动
   const autoWrap = useUiStore((s) => s.autoWrap)
   const setAutoWrap = useUiStore((s) => s.setAutoWrap)
   // adj221：编辑器字体/字号随谱保存（# jps-config）——谱面有值时优先（打开带设置的
@@ -219,7 +220,7 @@ export function EditorPane() {
     if (contentW <= 0 || taClientW <= 0) return lines.map(() => [])
     // 克隆 textarea（同 textarea 样式）测每行折行点；短行（估算必不折）跳过
     const probe = document.createElement('textarea')
-    probe.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;height:24px;resize:none;overflow:hidden;border:none;white-space:pre-wrap;wrap:soft;font-family:${effectiveFont},monospace;font-size:${effectiveFontSize}px;line-height:${editorLineH}px;padding:10px 14px;box-sizing:border-box;width:${taClientW}px;font-variant-ligatures:none;tab-size:4`
+    probe.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;height:24px;resize:none;overflow:hidden;border:none;white-space:pre-wrap;overflow-wrap:normal;wrap:soft;font-family:${effectiveFont},monospace;font-size:${effectiveFontSize}px;line-height:${editorLineH}px;padding:10px 14px;box-sizing:border-box;width:${taClientW}px;font-variant-ligatures:none;tab-size:4`
     document.body.appendChild(probe)
     const lh = editorLineH
     const rowsOf = (text: string) => {
