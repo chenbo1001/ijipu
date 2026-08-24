@@ -76,6 +76,9 @@ export function EditorPane() {
   // adj160：编辑器字体下拉框（与字号按钮同排）
   const editorFont = useUiStore((s) => s.editorFont)
   const setEditorFont = useUiStore((s) => s.setEditorFont)
+  // adj233：自动折行开关（默认关闭——关闭时 wrap=off 长行横向滚动，未折行对位正确）
+  const autoWrap = useUiStore((s) => s.autoWrap)
+  const setAutoWrap = useUiStore((s) => s.setAutoWrap)
   // adj221：编辑器字体/字号随谱保存（# jps-config）——谱面有值时优先（打开带设置的
   // 谱直接生效），无则回退 uiStore 全局默认；调整时写谱面 + 同步全局默认
   const pageConfig = useDocStore((s) => s.pageConfig)
@@ -211,6 +214,8 @@ export function EditorPane() {
   // visualLines（行号栏/背景高度）同样用测量结果（更准，替代此前的 pre-wrap probe）
   const wrapPoints = useMemo(() => {
     const lines = code.split('\n')
+    // adj233：关闭自动折行时不测量（wrap=off 无折行，长行横向滚动对位正确）
+    if (!autoWrap) return lines.map(() => [])
     if (contentW <= 0 || taClientW <= 0) return lines.map(() => [])
     // 克隆 textarea（同 textarea 样式）测每行折行点；短行（估算必不折）跳过
     const probe = document.createElement('textarea')
@@ -247,7 +252,7 @@ export function EditorPane() {
     })
     document.body.removeChild(probe)
     return res
-  }, [code, contentW, taClientW, effectiveFontSize, editorLineH, effectiveFont])
+  }, [code, contentW, taClientW, effectiveFontSize, editorLineH, effectiveFont, autoWrap])
 
   const visualLines = useMemo(
     () => wrapPoints.map((pts) => pts.length + 1),
@@ -566,6 +571,13 @@ export function EditorPane() {
         <span className={errorCount > 0 ? 'err-count has-error' : 'err-count'}>
           {errorCount > 0 ? `${errorCount} 个语法错误` : '语法正确'}
         </span>
+        {/* adj233：自动折行开关——关闭（默认）时 wrap=off 长行横向滚动，未折行
+            逐字符对位正确；开启时软折行（textarea 逐字符折行与高亮层切分对位
+            尚不能完全保证，遇错位可关闭） */}
+        <label className="editor-autowrap" title="自动折行（关闭时长行横向滚动，对位更可靠）">
+          <input type="checkbox" checked={autoWrap} onChange={(e) => setAutoWrap(e.target.checked)} />
+          <span>自动折行</span>
+        </label>
         {/* adj160：编辑器字体下拉框（字号按钮左侧）；adj221：随谱保存（# jps-config） */}
         <span className="editor-font-select">
           <select
@@ -641,7 +653,10 @@ export function EditorPane() {
             ref={taRef}
             value={code}
             spellCheck={false}
-            wrap="soft"
+            wrap={autoWrap ? 'soft' : 'off'}
+            // adj233：关闭自动折行时 white-space 改 pre——wrap=off 仅属性不足，
+            // CSS pre-wrap 仍会软折行；pre 保证长行横向滚动、不折行对位正确
+            style={{ whiteSpace: autoWrap ? 'pre-wrap' : 'pre' }}
             autoCapitalize="off"
             autoCorrect="off"
             onChange={onChange}

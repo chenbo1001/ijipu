@@ -18,6 +18,17 @@ const SPLIT_KEY = 'jianpuscript.splitPct'
 const EDITOR_FS_KEY = 'jianpuscript.editorFontSize'
 const EDITOR_FONT_KEY = 'jianpuscript.editorFont'
 const PREVIEW_ZOOM_KEY = 'jianpuscript.previewZoom'
+const AUTO_WRAP_KEY = 'jianpuscript.autoWrap'
+
+function loadBool(key: string, def: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key)
+    if (v === null) return def
+    return v === '1' || v === 'true'
+  } catch {
+    return def
+  }
+}
 
 function loadTheme(): string {
   try {
@@ -76,6 +87,9 @@ interface UiState {
   editorFont: string
   /** 预览缩放（%，50~200，adj51） */
   previewZoom: number
+  /** 编辑器自动折行（adj233：默认关闭——textarea 逐字符折行与高亮层切分难以
+   *  完全对位；关闭时 wrap=off 长行横向滚动，未折行逐字符对位正确） */
+  autoWrap: boolean
   openModal: (m: ModalKind) => void
   closeModal: () => void
   setPlaybackStart: (id: string | null) => void
@@ -88,6 +102,7 @@ interface UiState {
   setEditorFontSize: (px: number) => void
   setEditorFont: (f: string) => void
   setPreviewZoom: (z: number) => void
+  setAutoWrap: (b: boolean) => void
 }
 
 export const useUiStore = create<UiState>()((set) => ({
@@ -114,6 +129,7 @@ export const useUiStore = create<UiState>()((set) => ({
     return 'Consolas'
   })(),
   previewZoom: loadNum(PREVIEW_ZOOM_KEY, 100),
+  autoWrap: loadBool(AUTO_WRAP_KEY, false),
   openModal: (m) => set({ modal: m }),
   closeModal: () => set({ modal: null, playbackStartId: null }),
   setPlaybackStart: (id) => set({ playbackStartId: id }),
@@ -170,5 +186,13 @@ export const useUiStore = create<UiState>()((set) => ({
       /* 忽略 */
     }
     set({ previewZoom: v })
+  },
+  setAutoWrap: (b) => {
+    try {
+      localStorage.setItem(AUTO_WRAP_KEY, b ? '1' : '0')
+    } catch {
+      /* 忽略 */
+    }
+    set({ autoWrap: b })
   },
 }))

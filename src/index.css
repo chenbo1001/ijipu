@@ -554,6 +554,21 @@ body {
   color: var(--jp-danger);
 }
 
+/* adj233：自动折行开关（语法检查与字体下拉框之间） */
+.editor-autowrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--jp-text-secondary);
+  user-select: none;
+}
+
+.editor-autowrap input {
+  accent-color: var(--jp-accent);
+  cursor: pointer;
+}
+
 /* 编辑器字号控制（adj46：状态栏 +/- 按钮） */
 .editor-font-control {
   display: flex;
