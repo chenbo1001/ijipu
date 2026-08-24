@@ -147,6 +147,121 @@ export function highlightCode(
   return parts.join('\n')
 }
 
+/**
+ * adj227：按「实际层（textarea）折行点」分视觉行的高亮版本。
+ *
+ * 背景：高亮层用 pre-wrap 自动折行时，span（inline 盒）边界会产生额外的
+ * 软换行机会（CSS Text 3），折行点与 textarea 不同（实测 1175px 宽下
+ * 高亮层 139 字符 vs textarea 142 字符），折行行文本错位；word-break/
+ * display:contents 等 CSS 均无法消除。
+ *
+ * 方案：折行位置以实际层为准——EditorPane 用克隆 textarea 测量每个源码行的
+ * 真实折行点（wrapPoints），本函数按折行点把每行切成「视觉行」，
+ * 每视觉行输出独立 <div class="hl-line">（CSS white-space: pre，不自动折行），
+ * 显示层与 textarea 逐行逐字符对齐。
+ *
+ * @param wrapPoints 每源码行的折行点字符偏移数组（相对该行；无折行 = 空数组）
+ */
+export function highlightCodeWrapped(
+  code: string,
+  errLines: ReadonlySet<number> | undefined,
+  cursor: { line: number; col: number } | null,
+  wrapPoints: number[][],
+): string {
+  const lines = code.replace(/\r\n/g, '\n').split('\n')
+  const parts: string[] = []
+
+  /** 按折行点把 [0, len) 切成视觉行段 */
+  const segsOf = (len: number, pts: number[]) => {
+    const segs: { start: number; end: number }[] = []
+    let prev = 0
+    for (const p of pts) {
+      segs.push({ start: prev, end: Math.min(p, len) })
+      prev = Math.min(p, len)
+    }
+    segs.push({ start: prev, end: len })
+    return segs
+  }
+
+  for (let ln = 0; ln < lines.length; ln++) {
+    const raw = lines[ln]
+    const lineNo = ln + 1
+    const pts = wrapPoints[ln] ?? []
+    const wrap = (html: string) => {
+      if (errLines && errLines.has(lineNo)) return `<span class="hl-error-line">${html}</span>`
+      return html
+    }
+    const trimmed = raw.trim()
+    if (trimmed === '') {
+      parts.push(wrap('<div class="hl-line"></div>'))
+      continue
+    }
+    if (trimmed.startsWith('#')) {
+      parts.push(wrap(`<div class="hl-line">${span('hl-comment', raw)}</div>`))
+      continue
+    }
+    if (trimmed === '[fenye]') {
+      parts.push(wrap(`<div class="hl-line">${span('hl-pagebreak', raw)}</div>`))
+      continue
+    }
+    const m = /^([A-Z])(\d*)(?:"[^"]*")?\s*:/.exec(trimmed)
+    if (m && HEADER_KEYS.includes(m[1])) {
+      const headLen = m[0].length
+      const head = trimmed.slice(0, headLen)
+      const rest = trimmed.slice(headLen)
+      const segs = segsOf(raw.length, pts)
+      // 光标所在空格段（相对 rest；adj165/204）
+      let curSeg: [number, number] | null = null
+      if (cursor && cursor.line === lineNo) {
+        const lead = raw.length - trimmed.length
+        const restCol = cursor.col - lead - headLen
+        curSeg = segmentAt(rest, restCol)
+      }
+      // 每段输出独立 .hl-line div（textContent 与 textarea 对应视觉行一致）
+      const renderSeg = (s: { start: number; end: number }): string => {
+        // 段内 rest 范围
+        const rs = Math.max(0, s.start - headLen)
+        const re = Math.max(0, s.end - headLen)
+        if (re <= rs) return ''
+        let inner: string
+        if (m[1] === 'Q') {
+          if (curSeg) {
+            const is = Math.max(rs, curSeg[0])
+            const ie = Math.min(re, curSeg[1])
+            if (is < ie) {
+              inner =
+                highlightMusicContent(rest.slice(rs, is)) +
+                `<span class="hl-current-block">${highlightMusicContent(rest.slice(is, ie))}</span>` +
+                highlightMusicContent(rest.slice(ie, re))
+            } else {
+              inner = highlightMusicContent(rest.slice(rs, re))
+            }
+          } else {
+            inner = highlightMusicContent(rest.slice(rs, re))
+          }
+        } else if (m[1] === 'C') {
+          inner = span('hl-lyric', rest.slice(rs, re))
+        } else {
+          inner = esc(rest.slice(rs, re))
+        }
+        return s.start < headLen ? span('hl-line-header', head) + inner : inner
+      }
+      const segHtml = segs
+        .map((s) => `<div class="hl-line">${renderSeg(s)}</div>`)
+        .join('')
+      parts.push(wrap(segHtml))
+      continue
+    }
+    // 普通行（含长歌词/注释外文本）：按折行点切段，每段一个 .hl-line
+    const segs = segsOf(raw.length, pts)
+    const segHtml = segs.map((s) => `<div class="hl-line">${esc(raw.slice(s.start, s.end))}</div>`).join('')
+    parts.push(wrap(segHtml))
+  }
+  // adj227：div 块级已自动分行，不能 join('\n')——父级 white-space: pre-wrap
+  // 会把 div 之间的 \n 文本节点渲染成 24px 空行（行距翻倍）
+  return parts.join('')
+}
+
 /** 找列 col（0-based）所在空格分隔段 [start, end)（col 越界/在空白处返回 null）
  *  adj204：光标在块后**紧邻**空白处（紧贴块末，如 `4 |` 中 `4` 与 `|` 之间的空格）
  *  或行尾时，也返回左侧块——继续输入的 & 修饰符针对该块，应保持高亮。

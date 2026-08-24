@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
-import { highlightCode } from './highlight'
+import { highlightCodeWrapped } from './highlight'
 import { formatLine, codePosToNoteId } from '../engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 import { VOLTA_HINTS, filterHeaderHints, isBarlineModifierContext, filterModifierHints } from './completions'
@@ -200,22 +200,53 @@ export function EditorPane() {
     if (taRef.current) ro.observe(taRef.current)
     return () => ro.disconnect()
   }, [])
-  const visualLines = useMemo(() => {
+  // adj227：以实际层（textarea）的真实折行点为准——克隆同款 textarea 逐行测量
+  // 折行点（wrapPoints），显示层按此手动分行，彻底消除 span 断行差异导致的错位；
+  // visualLines（行号栏/背景高度）同样用测量结果（更准，替代此前的 pre-wrap probe）
+  const wrapPoints = useMemo(() => {
     const lines = code.split('\n')
-    if (contentW <= 0) return lines.map(() => 1)
-    // 估算字符宽（等宽 0.6×fs）：若行内容宽必然超内容区才需要精确折行数
-    const charW = effectiveFontSize * 0.6
-    const probe = document.createElement('div')
-    probe.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;white-space:pre-wrap;width:${contentW}px;font-size:${effectiveFontSize}px;line-height:${editorLineH}px;font-family:${effectiveFont},monospace;padding:0`
+    if (contentW <= 0 || taClientW <= 0) return lines.map(() => [])
+    // 克隆 textarea（同 textarea 样式）测每行折行点；短行（估算必不折）跳过
+    const probe = document.createElement('textarea')
+    probe.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;height:24px;resize:none;overflow:hidden;white-space:pre-wrap;wrap:soft;font-family:${effectiveFont},monospace;font-size:${effectiveFontSize}px;line-height:${editorLineH}px;padding:10px 14px;box-sizing:border-box;width:${taClientW}px;font-variant-ligatures:none;tab-size:4`
     document.body.appendChild(probe)
-    const res = lines.map((l) => {
-      if (l.length * charW <= contentW) return 1 // 必不折行
-      probe.textContent = l
-      return Math.max(1, Math.round(probe.clientHeight / editorLineH))
+    const lh = editorLineH
+    const rowsOf = (text: string) => {
+      probe.value = text
+      void probe.offsetHeight // 强制 reflow
+      return Math.max(1, Math.round((probe.scrollHeight - 20) / lh))
+    }
+    const charW = effectiveFontSize * 0.6
+    const res = lines.map((line) => {
+      if (line.length * charW <= contentW) return [] // 必不折行
+      const pts: number[] = []
+      let offset = 0
+      while (offset < line.length) {
+        const rest = line.slice(offset)
+        if (rowsOf(rest) <= 1) break
+        // 二分：第一行容纳字符数
+        let lo = 1
+        let hi = rest.length
+        while (lo < hi) {
+          const mid = Math.floor((lo + hi) / 2)
+          if (rowsOf(rest.slice(0, mid)) >= 2) hi = mid
+          else lo = mid + 1
+        }
+        const first = Math.max(1, lo - 1) // 第一行 first 字符
+        offset += first
+        pts.push(offset)
+        if (first >= rest.length) break
+      }
+      return pts
     })
     document.body.removeChild(probe)
     return res
-  }, [code, contentW, effectiveFontSize, editorLineH, effectiveFont])
+  }, [code, contentW, taClientW, effectiveFontSize, editorLineH, effectiveFont])
+
+  const visualLines = useMemo(
+    () => wrapPoints.map((pts) => pts.length + 1),
+    [wrapPoints],
+  )
 
   // adj201：视觉行起点偏移（每源码行前的累计视觉行数 × 行高）——折行后当前行
   // 背景/提示定位等按视觉行计算，不再按源码行（此前折行时光标行背景错位）
@@ -501,7 +532,8 @@ export function EditorPane() {
     }
   }, [])
 
-  const html = highlightCode(code, new Set(errByLine.keys()), cursor)
+  // adj227：按实际层折行点分视觉行高亮（每视觉行一个 .hl-line，white-space: pre）
+  const html = highlightCodeWrapped(code, new Set(errByLine.keys()), cursor, wrapPoints)
   const gutterLines = Array.from({ length: lineCount }, (_, i) => i + 1)
 
   // 编辑器字号 → CSS 变量（--jp-editor-fs / --jp-editor-lh），驱动 textarea/高亮层/行号栏

@@ -785,6 +785,12 @@ body {
   color: var(--jp-hl-plain);
 }
 
+/* adj227：高亮层按实际层折行点手动分行（每视觉行一个 .hl-line）——
+   不自动折行（textarea 的折行位置为准），避免 span 断行差异导致的折行行错位 */
+.editor-main .highlight-content .hl-line {
+  white-space: pre;
+}
+
 /* adj165：自动提示浮层（& 修饰符 / 跳房子 / 描述头）；adj192：max-height+滚动防溢出 */
 .editor-completion {
   position: absolute;
@@ -830,9 +836,13 @@ body {
 }
 
 /* 高亮类 */
+/* adj227：行头/小节线/分页符的加粗改为 text-shadow 模拟（不用 font-weight）——
+   font-weight 加粗在等宽字体下字符变宽，高亮层与 textarea 实际层的折行点不同，
+   折行后的行文本错位（如 1175px 宽时折行点 140 vs 144）；阴影不变宽，
+   与 adj169（禁连字）同为「显示层逐字符对齐实际层」的约束 */
 .hl-line-header {
   color: var(--jp-hl-line-header);
-  font-weight: 600;
+  text-shadow: 0.4px 0 0 currentColor, -0.4px 0 0 currentColor;
 }
 /* adj165：当前音符区块/小节线区块背景（叠加在当前行背景之上，二者可区分） */
 .hl-current-block {
@@ -846,7 +856,7 @@ body {
 }
 .hl-barline {
   color: var(--jp-hl-barline);
-  font-weight: 700;
+  text-shadow: 0.4px 0 0 currentColor, -0.4px 0 0 currentColor;
   /* adj25：小节线高亮（淡主题色底 + 圆角），强化小节区域边界 */
   background: color-mix(in srgb, var(--jp-accent) 16%, transparent);
   border-radius: 3px;
@@ -860,7 +870,7 @@ body {
 }
 .hl-pagebreak {
   color: var(--jp-hl-pagebreak);
-  font-weight: 600;
+  text-shadow: 0.4px 0 0 currentColor, -0.4px 0 0 currentColor;
 }
 .hl-decoration {
   color: var(--jp-accent);
