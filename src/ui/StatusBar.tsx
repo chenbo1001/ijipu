@@ -14,6 +14,8 @@ export function StatusBar() {
   const errors = parseResult.errors.filter((e) => e.severity === 'error').length
   const warnings = parseResult.errors.filter((e) => e.severity === 'warning').length
   const lines = code.split('\n').length
+  // adj242：小圆点按严重程度着色——有错误红、仅警告橙、正常绿（以最严重为准）
+  const dotClass = errors > 0 ? 'err' : warnings > 0 ? 'warn' : 'ok'
 
   return (
     <div className="statusbar">
@@ -22,7 +24,7 @@ export function StatusBar() {
       </span>
       <span>共 {lines} 行</span>
       <span className={errors > 0 ? 'accent' : ''}>
-        <span className={`dot ${errors > 0 ? 'err' : 'ok'}`} />
+        <span className={`dot ${dotClass}`} />
         {errors} 错误
       </span>
       {warnings > 0 && <span>{warnings} 警告</span>}

@@ -546,19 +546,15 @@ body {
   color: var(--jp-accent);
 }
 
-.editor-head .err-count {
-  margin-left: auto;
-}
+/* adj242：语法检查文本已移除（集中到行号颜色提示 + 状态栏圆点） */
 
-.editor-head .err-count.has-error {
-  color: var(--jp-danger);
-}
-
-/* adj233：自动折行开关（语法检查与字体下拉框之间） */
+/* adj233：自动折行开关（语法检查与字体下拉框之间）；
+   adj242：语法检查文本移至状态栏后，行首控件靠右（margin-left:auto） */
 .editor-autowrap {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  margin-left: auto;
   cursor: pointer;
   color: var(--jp-text-secondary);
   user-select: none;
@@ -669,7 +665,8 @@ body {
   text-align: right;
   padding-right: 8px;
   font-family: var(--jp-editor-font, var(--jp-font-mono));
-  font-size: 11px;
+  /* adj242：行号字号与脚本字号一致 */
+  font-size: var(--jp-editor-fs);
   color: var(--jp-text-muted);
   white-space: pre;
 }
@@ -950,6 +947,11 @@ body {
 
 .statusbar .dot.err {
   background: var(--jp-danger);
+}
+
+/* adj242：警告（橙）——无错误但存在警告时小圆点呈橙色 */
+.statusbar .dot.warn {
+  background: var(--jp-warning);
 }
 
 /* ============ 对话框 ============ */

@@ -138,8 +138,6 @@ export function EditorPane() {
     onSelectRef.current()
   }, [cursorJump, effectiveFontSize])
 
-  const errorCount = parseResult.errors.filter((e) => e.severity === 'error').length
-
   // 行号 + 错误行信息
   const lineCount = useMemo(() => code.split('\n').length, [code])
   const errByLine = useMemo(() => {
@@ -552,6 +550,8 @@ export function EditorPane() {
   // adj227：按实际层折行点分视觉行高亮（每视觉行一个 .hl-line，white-space: pre）
   const html = highlightCodeWrapped(code, new Set(errByLine.keys()), cursor, wrapPoints)
   const gutterLines = Array.from({ length: lineCount }, (_, i) => i + 1)
+  // adj242：行号字号跟随脚本字号后，按行号位数自适应栏宽（避免大字号/多位数被裁切）
+  const gutterNumW = Math.max(46, String(lineCount).length * effectiveFontSize * 0.62 + 16)
 
   // 编辑器字号 → CSS 变量（--jp-editor-fs / --jp-editor-lh），驱动 textarea/高亮层/行号栏
   // adj163：字体值保留 monospace 回退——避免所选字体缺失时退化为非等宽默认字体导致
@@ -573,9 +573,6 @@ export function EditorPane() {
         <span className="file-tag">
           {(fileName || '未命名') + '.jps'}
           {dirty && <span className="dirty-dot" title="有未保存的修改" />}
-        </span>
-        <span className={errorCount > 0 ? 'err-count has-error' : 'err-count'}>
-          {errorCount > 0 ? `${errorCount} 个语法错误` : '语法正确'}
         </span>
         {/* adj233：自动折行开关——关闭（默认）时 wrap=off 长行横向滚动，未折行
             逐字符对位正确；开启时软折行（textarea 逐字符折行与高亮层切分对位
@@ -630,7 +627,7 @@ export function EditorPane() {
         </span>
       </div>
       <div className="editor-body" style={editorStyle}>
-        <div className="editor-gutter" ref={gutterRef} aria-hidden="true">
+        <div className="editor-gutter" ref={gutterRef} aria-hidden="true" style={{ width: gutterNumW }}>
           <div className="editor-gutter-inner" ref={gutterInnerRef}>
             {gutterLines.map((n) => {
               const errs = errByLine.get(n)
