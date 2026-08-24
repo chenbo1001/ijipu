@@ -2,6 +2,8 @@
  * ui/MenuBar.tsx — 顶部菜单栏（品牌 + 下拉菜单）
  * adj185：支持 Alt+字母 打开对应菜单（Alt+F 文件 / Alt+E 编辑 / Alt+V 视图 /
  * Alt+P 播放 / Alt+T 主题 / Alt+H 帮助），Esc 关闭菜单。
+ * adj240：菜单标题/项使用「(&X)」热键符（Windows 风格）——& 后字母渲染下划线，
+ * 菜单打开后按对应字母直接执行菜单项。
  */
 import { useEffect, useState } from 'react'
 import { useDocStore } from '../store/docStore'
@@ -18,6 +20,17 @@ const ALT_MENU_KEYS: Record<string, string> = {
   p: 'play',
   t: 'theme',
   h: 'help',
+}
+
+/** adj240：渲染热键标签——「文件(&F)」→ 「文件(<u>F</u>)」（& 后字母下划线，& 不显示） */
+function Hotkey({ text }: { text: string }) {
+  const m = /\(&([A-Za-z0-9])\)/.exec(text)
+  if (!m) return <>{text}</>
+  return (
+    <>
+      {text.slice(0, m.index)}(<u>{m[1]}</u>){text.slice(m.index + m[0].length)}
+    </>
+  )
 }
 
 export function MenuBar() {
@@ -42,6 +55,7 @@ export function MenuBar() {
   const toggle = (key: string) => setOpen(open === key ? null : key)
 
   // adj185：Alt+字母 打开对应菜单；Esc 关闭菜单
+  // adj240：菜单打开时按字母执行对应菜单项（data-hotkey）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
@@ -57,6 +71,17 @@ export function MenuBar() {
         e.preventDefault()
         e.stopPropagation()
         setOpen(null)
+        return
+      }
+      // 菜单打开时：按字母执行对应热键菜单项（不叠加 Alt/Ctrl 等修饰键）
+      if (open && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && /^[a-z0-9]$/i.test(e.key)) {
+        const dropdown = document.querySelector('.menu-item.open .menu-dropdown')
+        const target = dropdown?.querySelector<HTMLElement>(`[data-hotkey="${e.key.toLowerCase()}"]`)
+        if (target) {
+          e.preventDefault()
+          e.stopPropagation()
+          target.click()
+        }
       }
     }
     window.addEventListener('keydown', onKey, true)
@@ -93,39 +118,40 @@ export function MenuBar() {
         </span>
       </div>
 
-      <MenuItem label="文件(F)" open={open} name="file" toggle={toggle}>
-        <div className="menu-entry" onClick={() => { newDoc(); setOpen(null) }}>
-          新建 <span className="kbd">Ctrl+N</span>
+      <MenuItem label="文件(&F)" open={open} name="file" toggle={toggle}>
+        <div className="menu-entry" data-hotkey="n" onClick={() => { newDoc(); setOpen(null) }}>
+          <Hotkey text="新建(&N)" /> <span className="kbd">Ctrl+N</span>
         </div>
-        <div className="menu-entry" onClick={runOpen}>
-          打开… <span className="kbd">Ctrl+O</span>
+        <div className="menu-entry" data-hotkey="o" onClick={runOpen}>
+          <Hotkey text="打开(&O)…" /> <span className="kbd">Ctrl+O</span>
         </div>
-        <div className="menu-entry" onClick={runSave}>
-          保存 <span className="kbd">Ctrl+S</span>
+        <div className="menu-entry" data-hotkey="s" onClick={runSave}>
+          <Hotkey text="保存(&S)" /> <span className="kbd">Ctrl+S</span>
         </div>
-        <div className="menu-entry" onClick={runSaveAs}>
-          另存为…
-        </div>
-        <div className="menu-sep" />
-        <div className="menu-entry" onClick={() => { openModal('samples'); setOpen(null) }}>
-          打开示例谱
+        <div className="menu-entry" data-hotkey="a" onClick={runSaveAs}>
+          <Hotkey text="另存为(&A)…" />
         </div>
         <div className="menu-sep" />
-        <div className="menu-entry" onClick={runFormat}>
-          格式化脚本
+        <div className="menu-entry" data-hotkey="e" onClick={() => { openModal('samples'); setOpen(null) }}>
+          <Hotkey text="打开示例谱(&E)" />
         </div>
         <div className="menu-sep" />
-        <div className="menu-entry" onClick={() => { openModal('pageConfig'); setOpen(null) }}>
-          页面设置
+        <div className="menu-entry" data-hotkey="f" onClick={runFormat}>
+          <Hotkey text="格式化脚本(&F)" />
         </div>
-        <div className="menu-entry" onClick={() => { openModal('export'); setOpen(null) }}>
-          导出…
+        <div className="menu-sep" />
+        <div className="menu-entry" data-hotkey="g" onClick={() => { openModal('pageConfig'); setOpen(null) }}>
+          <Hotkey text="页面设置(&G)" />
+        </div>
+        <div className="menu-entry" data-hotkey="x" onClick={() => { openModal('export'); setOpen(null) }}>
+          <Hotkey text="导出(&X)…" />
         </div>
       </MenuItem>
 
-      <MenuItem label="编辑(E)" open={open} name="edit" toggle={toggle}>
+      <MenuItem label="编辑(&E)" open={open} name="edit" toggle={toggle}>
         <div
           className={`menu-entry${canUndo ? '' : ' disabled'}`}
+          data-hotkey="u"
           onClick={() => {
             if (canUndo) {
               undo()
@@ -133,10 +159,11 @@ export function MenuBar() {
             }
           }}
         >
-          撤销 <span className="kbd">Ctrl+Z</span>
+          <Hotkey text="撤销(&U)" /> <span className="kbd">Ctrl+Z</span>
         </div>
         <div
           className={`menu-entry${canRedo ? '' : ' disabled'}`}
+          data-hotkey="r"
           onClick={() => {
             if (canRedo) {
               redo()
@@ -144,44 +171,45 @@ export function MenuBar() {
             }
           }}
         >
-          重做 <span className="kbd">Ctrl+Y</span>
+          <Hotkey text="重做(&R)" /> <span className="kbd">Ctrl+Y</span>
         </div>
       </MenuItem>
 
-      <MenuItem label="视图(V)" open={open} name="view" toggle={toggle}>
-        <div className="menu-entry" onClick={() => { setViewType('code'); setOpen(null) }}>
-          编码 <span className="kbd">1</span>
+      <MenuItem label="视图(&V)" open={open} name="view" toggle={toggle}>
+        <div className="menu-entry" data-hotkey="c" onClick={() => { setViewType('code'); setOpen(null) }}>
+          <Hotkey text="编码(&C)" /> <span className="kbd">1</span>
         </div>
-        <div className="menu-entry" onClick={() => { setViewType('split'); setOpen(null) }}>
-          拆分 <span className="kbd">2</span>
+        <div className="menu-entry" data-hotkey="s" onClick={() => { setViewType('split'); setOpen(null) }}>
+          <Hotkey text="拆分(&S)" /> <span className="kbd">2</span>
         </div>
-        <div className="menu-entry" onClick={() => { setViewType('preview'); setOpen(null) }}>
-          预览 <span className="kbd">Tab</span>
-        </div>
-      </MenuItem>
-
-      <MenuItem label="播放(P)" open={open} name="play" toggle={toggle}>
-        <div className="menu-entry" onClick={() => { openModal('playback'); setOpen(null) }}>
-          试听播放 <span className="kbd">Ctrl+Q</span>
+        <div className="menu-entry" data-hotkey="p" onClick={() => { setViewType('preview'); setOpen(null) }}>
+          <Hotkey text="预览(&P)" /> <span className="kbd">Tab</span>
         </div>
       </MenuItem>
 
-      <MenuItem label="主题(T)" open={open} name="theme" toggle={toggle}>
+      <MenuItem label="播放(&P)" open={open} name="play" toggle={toggle}>
+        <div className="menu-entry" data-hotkey="p" onClick={() => { openModal('playback'); setOpen(null) }}>
+          <Hotkey text="试听播放(&P)" /> <span className="kbd">Ctrl+Q</span>
+        </div>
+      </MenuItem>
+
+      <MenuItem label="主题(&T)" open={open} name="theme" toggle={toggle}>
         {/* adj48：浅深色模式（auto 跟随系统 prefers-color-scheme） */}
         <div className="theme-mode-row">
           {(
             [
-              { key: 'auto', label: '跟随系统' },
-              { key: 'light', label: '浅色' },
-              { key: 'dark', label: '深色' },
-            ] as { key: ThemeMode; label: string }[]
+              { key: 'auto', label: '跟随系统(&A)', hk: 'a' },
+              { key: 'light', label: '浅色(&L)', hk: 'l' },
+              { key: 'dark', label: '深色(&D)', hk: 'd' },
+            ] as { key: ThemeMode; label: string; hk: string }[]
           ).map((m) => (
             <button
               key={m.key}
+              data-hotkey={m.hk}
               className={`theme-mode-btn${themeMode === m.key ? ' active' : ''}`}
               onClick={() => { setThemeMode(m.key); setOpen(null) }}
             >
-              {m.label}
+              <Hotkey text={m.label} />
             </button>
           ))}
         </div>
@@ -224,12 +252,12 @@ export function MenuBar() {
         ))}
       </MenuItem>
 
-      <MenuItem label="帮助(H)" open={open} name="help" toggle={toggle}>
-        <div className="menu-entry" onClick={() => { openModal('shortcuts'); setOpen(null) }}>
-          快捷键速查 <span className="kbd">Ctrl+~</span>
+      <MenuItem label="帮助(&H)" open={open} name="help" toggle={toggle}>
+        <div className="menu-entry" data-hotkey="k" onClick={() => { openModal('shortcuts'); setOpen(null) }}>
+          <Hotkey text="快捷键速查(&K)" /> <span className="kbd">Ctrl+~</span>
         </div>
-        <div className="menu-entry" onClick={() => { openModal('about'); setOpen(null) }}>
-          关于 {brand.name}
+        <div className="menu-entry" data-hotkey="a" onClick={() => { openModal('about'); setOpen(null) }}>
+          <Hotkey text="关于(&A)" /> {brand.name}
         </div>
       </MenuItem>
     </div>
@@ -246,7 +274,7 @@ function MenuItem(props: {
   const isOpen = props.open === props.name
   return (
     <div className={`menu-item${isOpen ? ' open' : ''}`} onClick={() => props.toggle(props.name)}>
-      {props.label}
+      <Hotkey text={props.label} />
       {isOpen && <div className="menu-dropdown" onClick={(e) => e.stopPropagation()}>{props.children}</div>}
     </div>
   )
