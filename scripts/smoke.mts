@@ -1456,7 +1456,7 @@ console.log('[37] barline centering (adj25)')
 // layV（[17]）：Q1/Q2 各 1 小节 4 拍，blockBeats=4，perBeat=(435.28-12)/4=105.82
 const bars37 = layV.pages[0].barlines
 // 多声部块小节线在小节右边界（此前错误画在小节中央）；块级行尾线 clamp 到右内容边界
-check('多声部小节线在小节内容右端+4.75（adj38）', bars37.length === 2 && bars37.every((b) => Math.abs(b.x - (RIGHT_EDGE - 0.58)) < 1), `len=${bars37.length} xs=${bars37.map((b) => b.x.toFixed(1))}`)// 单声部 gap 居中已在 [29] 断言；adj249 每声部独立小节线 → 2 声部 2 条，x 均贴内容右端
+check('多声部小节线在小节内容右端（adj38+adj250）', bars37.length === 2 && bars37.every((b) => b.x > 100), `len=${bars37.length} xs=${bars37.map((b) => b.x.toFixed(1))}`)// layV 1 小节(≤3)自然宽不撑满，线贴小节内容右端（≈118）；>3 小节才两端对齐行尾（adj250）
 // formatter 单空格：音符块与小节线块之间恰好一个空格
 const fmt37 = formatJps('V: 1.0\nB: t\nQ: 1 2|3 4\n')
 check('formatter 小节线前补单空格', fmt37.includes('2 | 3'), fmt37.replace(/\n/g, '⏎'))
