@@ -793,7 +793,9 @@ body {
 }
 
 /* 高亮内容层：字号/行高/padding 在此；
-   adj169：禁用编程字体连字（与 textarea 一致，防止 |:、|| 等被渲染成连字字形导致列错位） */
+   adj169：禁用编程字体连字（与 textarea 一致，防止 |:、|| 等被渲染成连字字形导致列错位）；
+   adj247：tab-size/overflow-wrap 与 textarea 完全一致 + 粗体用 text-shadow 不改变字宽——
+   保证显示层与 textarea 除颜色外逐字逐位对应 */
 .editor-main .highlight-content {
   position: relative;
   min-height: 100%;
@@ -802,6 +804,9 @@ body {
   font-size: var(--jp-editor-fs, 14px);
   line-height: var(--jp-editor-lh, 24px);
   padding: 10px 14px;
+  /* 与 textarea 一致：tab 宽度 4；空格处折行（无空格长串横向溢出不折行） */
+  tab-size: 4;
+  overflow-wrap: normal;
   /* adj193（测试）：与 textarea 软折行一致——保留空白并允许自动折行 */
   white-space: pre-wrap;
   color: var(--jp-hl-plain);
