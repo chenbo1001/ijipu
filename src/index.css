@@ -730,9 +730,10 @@ body {
   padding: 10px 14px;
   /* adj193（测试）：软折行——与 wrap=soft 一致 */
   white-space: pre-wrap;
-  /* adj234：overflow-wrap: normal——textarea 默认对无空格长串「逐字符折行」，
-     与高亮层（空格处折行）折行点不一致；normal 让 textarea 也只在空格处折行
-     （无空格长串横向溢出），两者折行规则统一 */
+  /* adj234/235：overflow-wrap: normal——textarea 默认对无空格长串
+     「逐字符折行」，与高亮层（空格处折行）折行点不一致；normal 让 textarea
+     只在空格处折行（无空格长串横向溢出），克隆测量同规则后两层折行点一致
+     （实测 111=111）；溢出部分由 EditorPane 按自动折行开关决定 overflow-x */
   overflow-wrap: normal;
   overflow: auto;
   /* adj224：恢复竖向滚动条。adj194 曾隐藏滚动条（滚动条占宽使 textarea 内容区

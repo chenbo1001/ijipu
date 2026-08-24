@@ -76,8 +76,9 @@ export function EditorPane() {
   // adj160：编辑器字体下拉框（与字号按钮同排）
   const editorFont = useUiStore((s) => s.editorFont)
   const setEditorFont = useUiStore((s) => s.setEditorFont)
-  // adj233/adj234：自动折行开关——overflow-wrap:normal 后 textarea 与高亮层
-  // 同为「空格后折行」、折行点一致，默认开启；关闭时 wrap=off 横向滚动
+  // adj233/adj235：自动折行开关——默认关闭（wrap=off 横向滚动对位正确）；
+  // 开启时 textarea 与高亮层同用 break-word（空格后折行 + 长串边界断行），
+  // 两层折行点一致且无横向滚动条
   const autoWrap = useUiStore((s) => s.autoWrap)
   const setAutoWrap = useUiStore((s) => s.setAutoWrap)
   // adj221：编辑器字体/字号随谱保存（# jps-config）——谱面有值时优先（打开带设置的
@@ -656,8 +657,13 @@ export function EditorPane() {
             spellCheck={false}
             wrap={autoWrap ? 'soft' : 'off'}
             // adj233：关闭自动折行时 white-space 改 pre——wrap=off 仅属性不足，
-            // CSS pre-wrap 仍会软折行；pre 保证长行横向滚动、不折行对位正确
-            style={{ whiteSpace: autoWrap ? 'pre-wrap' : 'pre' }}
+            // CSS pre-wrap 仍会软折行；pre 保证长行横向滚动、不折行对位正确；
+            // adj235：选中自动折行时 overflow-x hidden——normal 下无空格长串溢出，
+            // 取消横向滚动条（长串与高亮层同被裁剪，对位一致）
+            style={{
+              whiteSpace: autoWrap ? 'pre-wrap' : 'pre',
+              overflowX: autoWrap ? 'hidden' : 'auto',
+            }}
             autoCapitalize="off"
             autoCorrect="off"
             onChange={onChange}
