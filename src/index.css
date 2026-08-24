@@ -708,14 +708,29 @@ body {
   /* adj193（测试）：软折行——与 wrap=soft 一致 */
   white-space: pre-wrap;
   overflow: auto;
-  /* adj194：隐藏滚动条（不占宽度）——否则滚动条占宽使 textarea 内容区比高亮层窄，
-     折行点不同导致显示层与实际层错位；滚动仍可用滚轮/键盘 */
-  scrollbar-width: none;
+  /* adj224：恢复竖向滚动条。adj194 曾隐藏滚动条（滚动条占宽使 textarea 内容区
+     比高亮层窄、折行点错位）——现高亮层宽度已同步 textarea 内容区
+     （--jp-editor-content-w），滚动条不再造成折行差异；用细滚动条减少视觉占宽 */
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--jp-text-muted) 45%, transparent) transparent;
   tab-size: 4;
 }
 
 .editor-main textarea::-webkit-scrollbar {
-  display: none;
+  width: 8px;
+}
+
+.editor-main textarea::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--jp-text-muted) 45%, transparent);
+  border-radius: 4px;
+}
+
+.editor-main textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.editor-main textarea::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .editor-main .highlight-layer {
@@ -726,13 +741,15 @@ body {
 }
 
 /* adj167：高亮层内部滚动容器（transform 平移跟随 textarea，随滚动整体平移）；
-   adj193（测试）：宽度固定为容器（left/right 双定）——否则 pre-wrap 无折行点，
-   长内容会把 shrink-to-fit 的 absolute 容器撑宽导致显示层不折行、与实际层不一致 */
+   adj193（测试）：宽度固定为容器——否则 pre-wrap 无折行点，
+   长内容会把 shrink-to-fit 的 absolute 容器撑宽导致显示层不折行、与实际层不一致；
+   adj224：宽度改跟随 textarea 内容区（--jp-editor-content-w）——恢复滚动条后
+   textarea 内容宽 = 父宽 - 滚动条宽，高亮层若不跟随则折行点不同、显示层错位 */
 .editor-main .highlight-inner {
   position: absolute;
   top: 0;
   left: 0;
-  right: 0;
+  width: var(--jp-editor-content-w, 100%);
 }
 
 /* adj171：当前行整行背景铺满层（在内容层之下，宽度铺满编辑区） */

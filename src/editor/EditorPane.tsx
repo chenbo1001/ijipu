@@ -174,16 +174,24 @@ export function EditorPane() {
   // adj195：每源码行的视觉行数（软折行下可能 >1）——行号栏按视觉行高渲染，
   // 折行不产生新行号、并用延续标记区分新行与折行
   const [contentW, setContentW] = useState(0)
+  // adj224：textarea 内容区宽（含 padding，clientWidth 已扣除滚动条宽）——
+  // 同步给高亮层（--jp-editor-content-w），恢复竖向滚动条后两侧折行点一致
+  const [taClientW, setTaClientW] = useState(0)
   useEffect(() => {
     const parent = taRef.current?.parentElement ?? null
     if (!parent) return
     const update = () => {
       const ta = taRef.current
-      if (ta) setContentW(ta.clientWidth - 28) // 内容区宽（去左右 padding 14×2）
+      if (ta) {
+        setTaClientW(ta.clientWidth) // 含 padding，不含滚动条
+        setContentW(ta.clientWidth - 28) // 内容区宽（去左右 padding 14×2）
+      }
     }
     update()
     const ro = new ResizeObserver(update)
     ro.observe(parent)
+    // adj224：滚动条出现/消失会改变 textarea 内容宽（父宽不变）——需直接观察 textarea
+    if (taRef.current) ro.observe(taRef.current)
     return () => ro.disconnect()
   }, [])
   const visualLines = useMemo(() => {
@@ -499,6 +507,8 @@ export function EditorPane() {
     '--jp-editor-fs': `${effectiveFontSize}px`,
     '--jp-editor-lh': `${editorLineH}px`,
     '--jp-editor-font': `${effectiveFont}, monospace`,
+    // adj224：高亮层宽度跟随 textarea 内容区（滚动条占宽后两侧折行一致）
+    '--jp-editor-content-w': taClientW > 0 ? `${taClientW}px` : '100%',
   } as React.CSSProperties
 
   return (
