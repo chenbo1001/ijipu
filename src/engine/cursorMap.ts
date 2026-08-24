@@ -65,19 +65,25 @@ export function codePosToNoteId(code: string, pos: number): string | null {
     const noteTokens = tokens.filter(isNoteToken)
 
     if (i === lineIdx) {
-      // 光标所在 Q 行：统计光标前的音符
+      // 光标所在 Q 行：定位「光标处/光标前最近音符」（块级，adj230）
+      // 原逻辑用 >= break → 光标落在音符块末尾空隙时取到右侧下一个音符
+      // （「点第一个高亮第二个」的 ±1 错位）；改为取光标处或紧邻左侧的音符，
+      // 点击块内任意位置（含块末空隙/行尾）都对应本块
       const col = pos - lineStart - leading // 相对 trimmed 行的列
       const headLen = trimmed.length - content.length
       let local = 0
+      let last = 0
       for (const t of tokens) {
-        if (t.pos + headLen >= col) break
-        if (isNoteToken(t)) local++
+        if (t.pos + headLen > col) break
+        if (isNoteToken(t)) {
+          last = local
+          local++
+        }
       }
-      // adj228：光标在行尾/最后音符之后时取最后一个音符——此前返回 null，
-      // 行尾移动光标时预览无高亮（「时准时不准」的主因）
-      if (local >= noteTokens.length) local = noteTokens.length - 1
+      if (noteTokens.length === 0) return null
+      const idx = Math.min(last, noteTokens.length - 1)
       const voice = m[1] === '' ? 1 : Number(m[1])
-      target = `${page}_${voice}_${group}_${noteCounter + local}`
+      target = `${page}_${voice}_${group}_${noteCounter + idx}`
       break
     }
     noteCounter += noteTokens.length
