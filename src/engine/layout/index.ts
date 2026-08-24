@@ -236,6 +236,39 @@ function allocatePerBeats(
   return beats.map((_bb, p) => (fixed[p] ? need[p] : pb))
 }
 
+/**
+ * adj253：单声部每拍宽规则（用户法则）：
+ *   ① 每拍最小宽 baseW[i] = max(BPW_NATURAL, minNoteW/minDur)（该拍最小时值单元决定）；
+ *   ② 撑满（stretch）：Σ baseW < avail → 多出部分给各拍均摊；≥ avail → 等比压缩到 avail；
+ *   ③ 自然对齐（≤3 小节、stretch=false）：avgW = max(baseW)/2，小于 avgW 的拍以 avgW 显示。
+ *   （各拍在自己宽度内按拍内浮点位置平均分布各音符，见 placeMusicRow 段定位。）
+ */
+function singleRulePerBeats(
+  beats: { dur: number; minDur: number; extra?: number }[],
+  avail: number,
+  noteSize = 18,
+  stretch = true,
+): number[] {
+  const n = beats.length
+  if (n === 0) return []
+  const baseW = beats.map((b) =>
+    b.minDur > 0 ? Math.max(BPW_NATURAL, minNoteW(noteSize, b.extra ?? 0) / b.minDur) : BPW_NATURAL,
+  )
+  const sum = baseW.reduce((a, b) => a + b, 0)
+  if (stretch) {
+    if (sum < avail) {
+      const extra = (avail - sum) / n
+      return baseW.map((bw) => bw + extra)
+    }
+    // Σ≥avail：复用 allocatePerBeats（固定高 need 拍、压缩其余）——
+    // 避免所有拍等比压缩使密集拍（如 16 分音符）被压薄而重叠
+    return allocatePerBeats(beats, avail, noteSize, true)
+  }
+  // 自然对齐：avgW = max/2；小于 avgW 的拍以 avgW 显示
+  const avgW = Math.max(...baseW) / 2
+  return baseW.map((bw) => (bw < avgW ? avgW : bw))
+}
+
 // ============================================================
 // 布局参数（由页面配置派生）
 // ============================================================
@@ -774,7 +807,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     const perBeats =
       !stretch && refPerBeat !== undefined && !endsByTerminal
         ? beatsInfo.map(() => refPerBeat)
-        : allocatePerBeats(beatsInfo, availW - pads - noteGap - bracketPadTotal, m.noteSize, stretch)
+        : singleRulePerBeats(beatsInfo, availW - pads - noteGap - bracketPadTotal, m.noteSize, stretch)
 
     // 段列表（adj36）：附点段（dots 部分）每拍宽 = 音符基础时值拍的 perBeat，
     // 不被所在拍（超拍）放大 —— 附点只占前音符时值的 0.5

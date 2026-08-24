@@ -986,8 +986,8 @@ const layW2 = layoutScore(rw, defaultPageConfig)
 const notesW2 = layW2.pages[0].notes
 check('时值等宽：1- 宽 = 2 × 1 拍宽', Math.abs(notesW2[0].width - notesW2[1].width * 2) < 0.5, `${notesW2[0].width} vs ${notesW2[1].width}`)
 check('1 拍音符宽一致', Math.abs(notesW2[1].width - notesW2[2].width) < 0.1)
-// adj198：单行 2 小节（≤3）自然宽不撑满——每拍 14，小节 2 首音符中心 = 实测 357.5
-check('adj198 自然宽（小节 2 首音符中心）', Math.abs(notesW2[4].x + 6 - 357.5) < 0.5, `x=${notesW2[4].x} center=${notesW2[4].x + 6}`)
+// adj253：单行 2 小节（≤3）自然宽——avgW=max/2、小于 avgW 的拍以 avgW 显示（实测中心 152.1）
+check('adj198 自然宽（小节 2 首音符中心）', Math.abs(notesW2[4].x + 6 - 152.1) < 0.5, `x=${notesW2[4].x} center=${notesW2[4].x + 6}`)
 // 两端对齐 + 小节均分：8 小节 → 行 1（7 小节）铺满均分，行 2（最后 1 小节 ≤3）自然宽不撑满
 const rj2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |\n')
 const layJ = layoutScore(rj2, defaultPageConfig)
@@ -1553,7 +1553,7 @@ const r42 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1// 2// 3// 4// | 1 2 3 4 |
 const lay42 = layoutScore(r42, defaultPageConfig)
 const n42 = [...lay42.pages[0].notes].sort((a, b) => a.x - b.x)
 const minNoteW42 = defaultPageConfig.note_size * 0.62 + H_GAP
-check('16 分音符间距 = minNoteW（数字槽 + H_GAP）', Math.abs(n42[1].x - n42[0].x - minNoteW42) < 0.5, `gap=${n42[1].x - n42[0].x}`)
+check('16 分音符间距 ≥ minNoteW（数字槽 + H_GAP，adj253 用户规则下更宽不重叠）', n42[1].x - n42[0].x >= minNoteW42, `gap=${n42[1].x - n42[0].x}`)
 // 拍 1 起点 = 左边距(BAR 内)+need+空间9.5；第 5 音符在密集拍段之后、正常拍间距 ≥ minNoteW
 check('超拍挤占后第 5 音符在密集拍段右侧', n42[4].x + 6 > ML + minNoteW42 / 0.25 + 9.5 + 6, `center=${n42[4].x + 6}`)
 check('超拍挤占后正常拍间距 ≥ minNoteW（不重叠）', n42[5].x - n42[4].x >= minNoteW42, `gap=${(n42[5].x - n42[4].x).toFixed(1)}`)
