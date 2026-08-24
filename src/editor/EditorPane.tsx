@@ -8,6 +8,7 @@
  *  - 语法高亮（含错误行红底）
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { highlightCodeWrapped } from './highlight'
@@ -189,8 +190,13 @@ export function EditorPane() {
       if (ta) {
         // 直接写 DOM：与浏览器 reflow 同帧生效（React state 只用于视觉行探测等非对齐计算）
         if (innerRef.current) innerRef.current.style.width = `${ta.clientWidth}px`
-        setTaClientW(ta.clientWidth) // 含 padding，不含滚动条
-        setContentW(ta.clientWidth - 28) // 内容区宽（去左右 padding 14×2）
+        // adj228：flushSync 同步渲染——快速拖动窗体时 React 并发调度可能跨帧提交，
+        // wrapPoints（高亮层手动折行点）与 textarea 实际折行错位；同步渲染保证
+        // 拖动过程中的每一帧内高亮层切分都与 textarea 一致
+        flushSync(() => {
+          setTaClientW(ta.clientWidth) // 含 padding，不含滚动条
+          setContentW(ta.clientWidth - 28) // 内容区宽（去左右 padding 14×2）
+        })
       }
     }
     update()
