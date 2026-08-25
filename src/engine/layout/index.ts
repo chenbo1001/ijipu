@@ -1188,11 +1188,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     }
 
     const voiceHeights = parts.map((p) => lineHeightOf(config, m, sp, p.lyricRows))
-    // adj255：纯曲部行高（不含 lyricRows）——大括号/声部名称只覆盖曲部，避免跨词部被歌词/虚线遮挡而断截
-    const voicePureH = parts.map((p) => m.noteSize * 1.7 + (p.lyricRows > 0 ? sp.ciquLyric : sp.ciqu))
     // adj72：多声部块内声部行之间额外间距 height_shengbu（独立于行距 ciqu，可单独调整）
     const blockH = voiceHeights.reduce((a, b) => a + b, 0) + Math.max(0, parts.length - 1) * sp.shengbu
-    const pureH = voicePureH.reduce((a, b) => a + b, 0) + Math.max(0, parts.length - 1) * sp.shengbu
 
     if (y + blockH > bottomLimit) {
       pageIndex = pages.length
@@ -1317,8 +1314,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     pages[pageIndex].voiceBlocks.push({
       x: r1(config.margin_left - 12),
       yTop: blockY,
-      // adj255：大括号仅覆盖曲部（不含词部），避免被歌词遮挡而断截
-      yBottom: blockY + pureH,
+      // adj271：yBottom = 最后声部曲部底。声部循环用 voiceHeights（含词行高）推进，
+      // 第 2+ 声部位于词部下方；用纯曲 pureH 会偏上、括号没延伸到最后一曲部，
+      // 故用 voiceYTop[last]（含词推进到的最后声部曲顶）+ 曲部高 noteSize*1.7
+      yBottom: voiceYTop[parts.length - 1] + m.noteSize * 1.7,
       voices: blockVoices,
     })
 
