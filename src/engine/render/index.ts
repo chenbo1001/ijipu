@@ -895,10 +895,10 @@ function renderLyric(lyric: PlacedLyric, config: PageConfig): string {
 function bracePath(x: number, yTop: number, yBottom: number, noteSize: number): { arc: string; lineL: string; lineR: string } {
   const R = Math.min(noteSize / 2, (yBottom - yTop) * 0.15)
   const dx = 2 // 粗/细线之间空白间距
-  // 上弧：以竖线(粗线 x)为轴水平翻转 → 从粗线上端 (x, yTop+R) 向右上延伸到 (x+R, yTop)（弧凸向下）
-  const arcTop = `M ${x} ${yTop + R} A ${R} ${R} 0 0 1 ${x + R} ${yTop}`
-  // 下弧：以粗线下端点 (x, yBottom-R) 为圆心逆时针转 90° → 从 (x, yBottom-R) 向右下延伸到 (x+R, yBottom)（弧凸向上）
-  const arcBottom = `M ${x} ${yBottom - R} A ${R} ${R} 0 0 0 ${x + R} ${yBottom}`
+  // 上弧：以两端点为轴翻转一次（sweep 1→0），凸向翻到另一侧
+  const arcTop = `M ${x} ${yTop + R} A ${R} ${R} 0 0 0 ${x + R} ${yTop}`
+  // 下弧：以两端点为轴翻转一次（sweep 0→1），凸向翻到另一侧
+  const arcBottom = `M ${x} ${yBottom - R} A ${R} ${R} 0 0 1 ${x + R} ${yBottom}`
   const lineL = `M ${x} ${yTop + R} L ${x} ${yBottom - R}`
   const lineR = `M ${x + dx} ${yTop + R} L ${x + dx} ${yBottom - R}`
   return { arc: `${arcTop} ${arcBottom}`, lineL, lineR }
