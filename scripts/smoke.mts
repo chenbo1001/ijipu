@@ -572,7 +572,7 @@ check('声部纵向堆叠（y 不同）', Math.abs(v1Notes[0].y - v2Notes[0].y) 
 check('块小节线跨声部', layV.pages[0].barlines.length >= 1)
 const svgV = renderScoreToSvg(layV)[0]
 check('SVG 含大括号 path', svgV.includes('fill="none" stroke="#1b1b1b"'))
-check('SVG 含声部标签', svgV.includes('声部1') && svgV.includes('声部2'))
+check('adj273 无名称不显示声部标签', !svgV.includes('声部1') && !svgV.includes('声部2'))
 // 命名声部
 const vc2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1"男声": 1 2 3 4 |\nQ2"女声": 5 6 5 3 |\n')
 const layV2 = layoutScore(vc2, defaultPageConfig)
