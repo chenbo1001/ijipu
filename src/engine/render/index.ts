@@ -894,13 +894,12 @@ function renderLyric(lyric: PlacedLyric, config: PageConfig): string {
  *  弧朝向粗线端不变、另一端弧线水平长度减少 1/3（rx=2R/3、垂直不变）。 */
 function bracePath(x: number, yTop: number, yBottom: number, noteSize: number): { arc: string; lineL: string; lineR: string } {
   const R = Math.min(noteSize / 2, (yBottom - yTop) * 0.15)
-  const rx = (R * 2) / 3 // 弧线水平长度保持（另一侧减 1/3）
-  const ry = R / 2 // 弧线高度调整为当前 50%
-  const dx = 3 // 粗/细线间距
+  const rx = (R * 2) / 3 // 弧线水平长度减少 1/3（另一端缩短），粗线端竖直高度不变
+  const dx = 3 // 粗/细线间距加大 1/2（2 → 3）
   // 上弧：粗线端 (x, yTop+R) 不变 → 尖端 (x+rx, yTop)，凸向翻转
-  const arcTop = `M ${x} ${yTop + R} A ${rx} ${ry} 0 0 0 ${x + rx} ${yTop}`
+  const arcTop = `M ${x} ${yTop + R} A ${rx} ${R} 0 0 0 ${x + rx} ${yTop}`
   // 下弧：粗线端 (x, yBottom-R) 不变 → 尖端 (x+rx, yBottom)，凸向翻转
-  const arcBottom = `M ${x} ${yBottom - R} A ${rx} ${ry} 0 0 1 ${x + rx} ${yBottom}`
+  const arcBottom = `M ${x} ${yBottom - R} A ${rx} ${R} 0 0 1 ${x + rx} ${yBottom}`
   const lineL = `M ${x} ${yTop + R} L ${x} ${yBottom - R}`
   const lineR = `M ${x + dx} ${yTop + R} L ${x + dx} ${yBottom - R}`
   return { arc: `${arcTop} ${arcBottom}`, lineL, lineR }
@@ -908,11 +907,11 @@ function bracePath(x: number, yTop: number, yBottom: number, noteSize: number): 
 
 function renderVoiceBlocks(page: ScorePage, vb: VoiceBlock, noteSize: number): string {
   const parts: string[] = []
-  // 大括号：弧线/右细线 0.9（×2/3）、左粗线 2.1（保持）
+  // 大括号：弧/右细线 1.35、左粗线 2.1（粗细与间距各加大 1/2）？改为参考小节线加粗
   const { arc, lineL, lineR } = bracePath(vb.x, vb.yTop, vb.yBottom, noteSize)
-  parts.push(`<path d="${arc}" fill="none" stroke="#1b1b1b" stroke-width="0.9"/>`)
+  parts.push(`<path d="${arc}" fill="none" stroke="#1b1b1b" stroke-width="1.35"/>`)
   parts.push(`<path d="${lineL}" fill="none" stroke="#1b1b1b" stroke-width="2.1"/>`)
-  parts.push(`<path d="${lineR}" fill="none" stroke="#1b1b1b" stroke-width="0.9"/>`)
+  parts.push(`<path d="${lineR}" fill="none" stroke="#1b1b1b" stroke-width="1.35"/>`)
   // 声部名称（括弧左侧，对应各行中部；无名称显示声部号）
   const h = vb.yBottom - vb.yTop
   const n = vb.voices.length
