@@ -128,8 +128,38 @@ export function buildPlaySequence(
   })
 
   // 4. 展开反复（支持两层：反复内嵌跳房子）
+  // adj256：按拍时钟生成 events——同 group 同 (barIndex, beatPos) 各声部 atMs 相同，多声部同步播放
+  const beatMs = 60000 / bpm
+  // 预计算每 group 拍时钟起点与组内每小节起始 ms（按 lines music 顺序）
+  const groupStartMs: number[] = []
+  const barStartMsInGroup: number[][] = []
+  let totalMs = 0
+  {
+    let ms = 0
+    for (const line of result.lines) {
+      if (line.kind !== 'music') continue
+      const grp = result.groups.find((g) => g.music === line)
+      if (!grp) continue
+      const barBeats: number[] = []
+      let beats = 0
+      for (const tok of grp.music.tokens) {
+        if (tok.kind === 'barline') barBeats.push(beats)
+        else if (tok.kind === 'note' || tok.kind === 'rest' || tok.kind === 'rhythm') beats += tokenDuration(tok)
+      }
+      barBeats.push(beats)
+      const bsMs: number[] = []
+      let bMs = 0
+      for (const b of barBeats) {
+        bsMs.push(bMs)
+        bMs += b * beatMs
+      }
+      barStartMsInGroup.push(bsMs)
+      groupStartMs.push(ms)
+      ms += beats * beatMs
+    }
+    totalMs = ms
+  }
   const events: PlayEvent[] = []
-  let at = 0
   let pass = 1
   let repeatStart = -1
   let i = 0
@@ -143,10 +173,17 @@ export function buildPlaySequence(
   while (i < seq.length && guard++ < maxIter) {
     const item = seq[i]
     if (item.kind === 'note' && item.note) {
-      const token = item.note.token
+      const placed = item.note
+      const token = placed.token
       const durationMs = (tokenDuration(token) * 60000) / bpm
-      const pitch = item.note.audioPitch
+      const pitch = placed.audioPitch
       const curNoteIdx = item.noteIdx ?? -1
+      // adj256：每个 event 的 atMs 由所属 group 的拍时钟决定（不受源码顺序累加），
+      // 保证同组同 (barIndex, beatPos) 的各声部事件 atMs 相同 → 同步播放
+      const g = placed.id.group
+      const bi = placed.barIndex
+      const bp = placed.beatPos
+      const atMs = groupStartMs[g] + (barStartMsInGroup[g][bi] ?? 0) + bp * beatMs
       // adj89：合并判定——与前一已发事件音高相同、索引相邻（中间无音符）、
       // 且**两者同属同一条连音线**（严格 slur 内连奏）：
       // (2 - | 2/) 的 2 连 2.5 拍；(2 3/ 2/ | 2) 第 3、4 个 2 连奏；
@@ -167,9 +204,7 @@ export function buildPlaySequence(
       ) {
         const prev = events[events.length - 1]
         prev.durationMs += durationMs
-        // adj157：合并时值的同时全局时钟也要同步推进——否则后续音符
-        // 从连音开始时刻起播，与连音事件重叠（应等连音时值结束后再播）
-        at += durationMs
+        // adj157：合并时值；atMs 来自拍时钟（每个 event 独立），不需全局 at 累加
         lastEventNoteIdx = curNoteIdx
         i++
         continue
@@ -185,19 +220,18 @@ export function buildPlaySequence(
         for (let gi = 0; gi < gn.notes.length; gi++) {
           events.push({
             placed: item.note,
-            atMs: Math.max(0, at - (gn.notes.length - gi) * graceMs),
+            atMs: Math.max(0, atMs - (gn.notes.length - gi) * graceMs),
             durationMs: graceMs,
             pitch: gracePitches[gi],
           })
         }
       }
-      events.push({ placed: item.note, atMs: at, durationMs })
-      at += durationMs
+      events.push({ placed: item.note, atMs, durationMs })
       if (gn && gn.after && gracePitches.length > 0) {
         for (let gi = 0; gi < gn.notes.length; gi++) {
           events.push({
             placed: item.note,
-            atMs: at + gi * graceMs,
+            atMs: atMs + durationMs + gi * graceMs,
             durationMs: graceMs,
             pitch: gracePitches[gi],
           })
@@ -268,12 +302,12 @@ export function buildPlaySequence(
     if (from > 0) {
       const base = events[from].atMs
       const sliced = events.slice(from).map((e) => ({ ...e, atMs: Math.max(0, e.atMs - base) }))
-      return { events: sliced, totalMs: at - base, bpm }
+      return { events: sliced, totalMs: totalMs - base, bpm }
     }
-    if (from === 0) return { events, totalMs: at, bpm }
+    if (from === 0) return { events, totalMs, bpm }
     // 起点音符不在事件中（隐藏休止符等）→ 从第一个可播放事件开始
-    return { events, totalMs: at, bpm }
+    return { events, totalMs, bpm }
   }
 
-  return { events, totalMs: at, bpm }
+  return { events, totalMs, bpm }
 }
