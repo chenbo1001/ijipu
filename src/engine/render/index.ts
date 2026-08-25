@@ -890,11 +890,11 @@ function renderLyric(lyric: PlacedLyric, config: PageConfig): string {
 // 多声部括弧与名称（M7a）
 // ============================================================
 
-/** adj264：多声部括号——上下端为细弧线（1/6 圆弧，直径 = 音符高，尖端朝左）+ 中部左粗右细竖线。
- *  返回 SVG path（弧细；竖线两条：左粗 x 处、右细 x+dx 处，参考小节线 || 左粗右细）。 */
+/** adj265：多声部括号——中部左粗右细双竖线贯穿 + 上下端较小的弧（尖端朝左、紧凑，如参考图）。
+ *  返回 SVG path（弧细；竖线两条：左粗 x 处、右细 x+dx 处）。 */
 function bracePath(x: number, yTop: number, yBottom: number, noteSize: number): { arc: string; lineL: string; lineR: string } {
-  const R = Math.min(noteSize / 2, (yBottom - yTop) / 3)
-  const dx = 1.4 // 左右双线间距（参考小节线线间距）
+  const R = Math.min(noteSize * 0.4, (yBottom - yTop) * 0.1) // 弧半径较小 → 端部紧凑转角
+  const dx = 1.4 // 左右双线间距（参考小节线 || 左粗右细）
   // 上弧：左尖端 (x-R, yTop) → 竖线顶 (x, yTop+R)；下弧：竖线底 (x, yBottom-R) → 左尖端 (x-R, yBottom)
   const arc = `M ${x - R} ${yTop} A ${R} ${R} 0 0 1 ${x} ${yTop + R} M ${x} ${yBottom - R} A ${R} ${R} 0 0 0 ${x - R} ${yBottom}`
   // 左粗竖线（x）与右细竖线（x+dx）
