@@ -890,16 +890,13 @@ function renderLyric(lyric: PlacedLyric, config: PageConfig): string {
 // 多声部括弧与名称（M7a）
 // ============================================================
 
-/** adj266：多声部括号——左粗(1.4)右细(0.9)双竖线（间距 1px，参考小节线 ||）+ 上下端弧向右延伸。
- *  上弧圆心在左上（下端接粗线上端、弧向右上方延伸）；下弧圆心在左下（上端接粗线下端、弧向右下方延伸）。 */
+/** adj267：多声部括号——左粗(1.4)右细(0.9)双竖线（中间空白间距 2px）+ 两端弧（上下+左右翻转，向左延伸）。 */
 function bracePath(x: number, yTop: number, yBottom: number, noteSize: number): { arc: string; lineL: string; lineR: string } {
-  const R = Math.min(noteSize / 2, (yBottom - yTop) * 0.15) // 弧半径 = 音符高/2（直径 = 音符高）
-  const dx = 1 // 左粗右细间距（参考小节线线间距 1px）
-  // 上弧：下端 (x, yTop+R) → 上端 (x+R, yTop)，圆心 (x, yTop)（左上），向右上凸
-  const arcTop = `M ${x} ${yTop + R} A ${R} ${R} 0 0 1 ${x + R} ${yTop}`
-  // 下弧：上端接粗线下端 (x, yBottom-R) → 下端 (x+R, yBottom)，圆心 (x, yBottom)（左下），向右下凸
-  const arcBottom = `M ${x} ${yBottom - R} A ${R} ${R} 0 0 0 ${x + R} ${yBottom}`
-  // 左粗竖线（x，细线在右 x+dx）；弧向右伸出 → 括号开口朝右包住曲部
+  const R = Math.min(noteSize / 2, (yBottom - yTop) * 0.15)
+  const dx = 2 // 粗/细线之间空白间距
+  // 弧：上下+左右翻转 → 上弧左上延伸、下弧左下延伸（弧尖朝左）
+  const arcTop = `M ${x - R} ${yTop} A ${R} ${R} 0 0 0 ${x} ${yTop + R}`
+  const arcBottom = `M ${x} ${yBottom - R} A ${R} ${R} 0 0 1 ${x - R} ${yBottom}`
   const lineL = `M ${x} ${yTop + R} L ${x} ${yBottom - R}`
   const lineR = `M ${x + dx} ${yTop + R} L ${x + dx} ${yBottom - R}`
   return { arc: `${arcTop} ${arcBottom}`, lineL, lineR }
