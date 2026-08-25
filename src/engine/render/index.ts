@@ -890,18 +890,17 @@ function renderLyric(lyric: PlacedLyric, config: PageConfig): string {
 // 多声部括弧与名称（M7a）
 // ============================================================
 
-/** adj273：多声部括号——左粗(2.1)右细(0.9)双竖线（间距 2px）；上下弧长 = 1/6 圆（60°），
- *  上弧以粗线上端点为圆心顺时针转 30°、下弧逆时针转 30°；与粗线连接端位置不变。 */
+/** adj276：多声部括号——左粗(2.1)右细(1.125)双竖线（间距 3px）；上下弧各自以弧两端点为轴翻转（sweep 交换）、
+ *  上弧顺转 30°、下弧逆转 30°，弧 = 1/6 圆。 */
 function bracePath(x: number, yTop: number, yBottom: number, noteSize: number): { arc: string; lineL: string; lineR: string } {
   const R = Math.min(noteSize / 2, (yBottom - yTop) * 0.15)
-  const dx = 2 // 粗细线间距 ×2/3（3 → 2）
-  // 弧 = 半径为 R 的 60°（1/6 圆）弧段：上弧以粗线上端点 (x, yTop+R) 为圆心、顺转 30° 扫 60°（向右上）；
-  // 下弧以粗线下端点 (x, yBottom-R) 为圆心、逆转 30° 扫 60°（向右下）。终点 = 圆心沿 30°+60° 方向偏移 R。
-  const endX = x + R * 0.866 // sin60° ≈ 0.866（弧沿 30° 方向偏移：x 增量 R*cos30°）
-  const endTopY = yTop + R * 0.5 // 上弧终点 y（圆心 y + R*sin30°=R*0.5）
+  const dx = 3 // 粗/细线间距 ×1.5（2 → 3）
+  // 弧 = 1/6 圆（60°）；上下弧各以两端点为轴翻转一次（sweep 1↔0），凸向翻到另一侧
+  const endX = x + R * 0.866
+  const endTopY = yTop + R * 0.5
   const endBotY = yBottom - R * 0.5
-  const aTop = `M ${x} ${yTop + R} A ${R} ${R} 0 0 1 ${endX.toFixed(2)} ${endTopY.toFixed(2)}`
-  const aBot = `M ${x} ${yBottom - R} A ${R} ${R} 0 0 0 ${endX.toFixed(2)} ${endBotY.toFixed(2)}`
+  const aTop = `M ${x} ${yTop + R} A ${R} ${R} 0 0 0 ${endX.toFixed(2)} ${endTopY.toFixed(2)}`
+  const aBot = `M ${x} ${yBottom - R} A ${R} ${R} 0 0 1 ${endX.toFixed(2)} ${endBotY.toFixed(2)}`
   const lineL = `M ${x} ${yTop + R} L ${x} ${yBottom - R}`
   const lineR = `M ${x + dx} ${yTop + R} L ${x + dx} ${yBottom - R}`
   return { arc: `${aTop} ${aBot}`, lineL, lineR }
@@ -909,12 +908,12 @@ function bracePath(x: number, yTop: number, yBottom: number, noteSize: number): 
 
 function renderVoiceBlocks(page: ScorePage, vb: VoiceBlock, noteSize: number): string {
   const parts: string[] = []
-  // 大括号：弧线/右细线 0.9（×2/3）、左粗线 2.1
-  const { arc, lineL, lineR } = bracePath(vb.x, vb.yTop, vb.yBottom, noteSize)
-  parts.push(`<path d="${arc}" fill="none" stroke="#1b1b1b" stroke-width="0.9"/>`)
+  // 大括号：弧线/右细线 1.125（0.9×1.25）、左粗线 2.1；括号整体上移 0.2×音符高（adj，注释不动）
+  const { arc, lineL, lineR } = bracePath(vb.x, vb.yTop - noteSize * 0.2, vb.yBottom - noteSize * 0.2, noteSize)
+  parts.push(`<path d="${arc}" fill="none" stroke="#1b1b1b" stroke-width="1.125"/>`)
   parts.push(`<path d="${lineL}" fill="none" stroke="#1b1b1b" stroke-width="2.1"/>`)
-  parts.push(`<path d="${lineR}" fill="none" stroke="#1b1b1b" stroke-width="0.9"/>`)
-  // 声部名称（括弧左侧，对应各行中部；仅当有声部名注释时显示，无注释不显示）
+  parts.push(`<path d="${lineR}" fill="none" stroke="#1b1b1b" stroke-width="1.125"/>`)
+  // 声部名称（括弧左侧，与该声部曲部垂直居中；仅当有声部名注释时显示，无注释不显示）
   const h = vb.yBottom - vb.yTop
   const n = vb.voices.length
   for (let i = 0; i < n; i++) {
@@ -922,7 +921,7 @@ function renderVoiceBlocks(page: ScorePage, vb: VoiceBlock, noteSize: number): s
     if (!v.name) continue
     const cy = vb.yTop + (h * (i + 0.5)) / n
     parts.push(
-      `<text x="${vb.x - 10}" y="${cy}" text-anchor="end" dominant-baseline="middle" font-size="12" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(v.name)}</text>`,
+      `<text x="${vb.x - 10}" y="${cy}" text-anchor="end" dominant-baseline="middle" font-size="${noteSize}" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(v.name)}</text>`,
     )
   }
   void page

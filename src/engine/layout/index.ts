@@ -1090,10 +1090,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   const placeVoiceBlock = (unit: Unit) => {
     const geciSize = config.geci_size
     const sp = spacingFor(config, pageIndex)
-    // adj275：多声部括号占位——括号/声部注释在页面有效范围（margin_left 右侧），音符内容区右移预留
-    const BRACE_PAD = 48
-    const blockStartX = config.margin_left + BRACE_PAD
-    const blockAvailW = availW - BRACE_PAD
+    // adj275：多声部括号占位（括号/注释在页面有效范围、音符内容区右移）；每组占位在 parts 后按注释长度独立计算
     const parts = unit.groups.map(({ groupIndex, group }) => ({
       groupIndex,
       voice: group.music.voice,
@@ -1102,6 +1099,12 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       lyricMaps: buildLyricMaps(group.lyrics),
       lyricRows: group.lyrics.length,
     }))
+    // adj276：每组占位独立计算（按本组最长注释宽；无注释小、有注释大），括号与其曲/词部紧凑、不与上一组对齐
+    const maxNameLen = parts.reduce((mx, p) => Math.max(mx, p.name ? p.name.length : 0), 0)
+    const labelPad = maxNameLen * m.noteSize * 0.72
+    const blockPad = labelPad + 14
+    const blockStartX = config.margin_left + blockPad
+    const blockAvailW = availW - blockPad
     const numBars = Math.max(...parts.map((p) => p.segs.length))
     // 块内每拍宽 = 块可用宽 / 块总拍数（每小节取各声部最大拍数，adj15）
     let blockBeats = 0
