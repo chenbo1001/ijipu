@@ -1188,8 +1188,11 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     }
 
     const voiceHeights = parts.map((p) => lineHeightOf(config, m, sp, p.lyricRows))
+    // adj255：纯曲部行高（不含 lyricRows）——大括号/声部名称只覆盖曲部，避免跨词部被歌词/虚线遮挡而断截
+    const voicePureH = parts.map((p) => m.noteSize * 1.7 + (p.lyricRows > 0 ? sp.ciquLyric : sp.ciqu))
     // adj72：多声部块内声部行之间额外间距 height_shengbu（独立于行距 ciqu，可单独调整）
     const blockH = voiceHeights.reduce((a, b) => a + b, 0) + Math.max(0, parts.length - 1) * sp.shengbu
+    const pureH = voicePureH.reduce((a, b) => a + b, 0) + Math.max(0, parts.length - 1) * sp.shengbu
 
     if (y + blockH > bottomLimit) {
       pageIndex = pages.length
@@ -1314,7 +1317,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     pages[pageIndex].voiceBlocks.push({
       x: r1(config.margin_left - 12),
       yTop: blockY,
-      yBottom: blockY + blockH,
+      // adj255：大括号仅覆盖曲部（不含词部），避免被歌词遮挡而断截
+      yBottom: blockY + pureH,
       voices: blockVoices,
     })
 
