@@ -30,6 +30,8 @@ export interface PlayEvent {
   durationMs: number
   /** 音高覆盖（倚音等装饰音，MIDI 音名；缺省用 placed.audioPitch，adj23） */
   pitch?: string | null
+  /** adj257：乐器名（多声部按各自乐器同时演奏；缺省 = 通用音色） */
+  instrument?: string
 }
 
 export interface PlaySequence {
@@ -71,6 +73,13 @@ export function buildPlaySequence(
   const byIndex = new Map<number, PlacedToken>()
   for (const page of layout.pages) {
     for (const n of page.notes) byIndex.set(n.id.index, n)
+  }
+  // adj257：多声部乐器名映射（voice → name）——从 voiceBlocks 收集，PlayEvent.instrument 用于后端按乐器路由
+  const voiceNameMap = new Map<number, string>()
+  for (const page of layout.pages) {
+    for (const vb of page.voiceBlocks) {
+      for (const v of vb.voices) voiceNameMap.set(v.voice, v.name ?? '')
+    }
   }
 
   // 2. 重建交错序列（音符 + 小节线），保持源码顺序
@@ -209,6 +218,7 @@ export function buildPlaySequence(
         i++
         continue
       }
+      const instrument = voiceNameMap.get(placed.id.voice) || undefined
       // 倚音（adj23）：前倚音提前于主音符、后倚音紧跟主音符，时值 1/8 拍，音高用倚音音符本身
       const gn = token.kind === 'note' ? token.gracenotes : undefined
       const graceMs = (0.125 * 60000) / bpm
@@ -220,17 +230,19 @@ export function buildPlaySequence(
         for (let gi = 0; gi < gn.notes.length; gi++) {
           events.push({
             placed: item.note,
+            instrument,
             atMs: Math.max(0, atMs - (gn.notes.length - gi) * graceMs),
             durationMs: graceMs,
             pitch: gracePitches[gi],
           })
         }
       }
-      events.push({ placed: item.note, atMs, durationMs })
+      events.push({ placed: item.note, instrument, atMs, durationMs })
       if (gn && gn.after && gracePitches.length > 0) {
         for (let gi = 0; gi < gn.notes.length; gi++) {
           events.push({
             placed: item.note,
+            instrument,
             atMs: atMs + durationMs + gi * graceMs,
             durationMs: graceMs,
             pitch: gracePitches[gi],
