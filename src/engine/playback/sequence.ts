@@ -137,34 +137,74 @@ export function buildPlaySequence(
   })
 
   // 4. 展开反复（支持两层：反复内嵌跳房子）
-  // adj256：按拍时钟生成 events——同 group 同 (barIndex, beatPos) 各声部 atMs 相同，多声部同步播放
+  // adj258：按 voiceBlocks 分块——多声部块内 group 共享 blockStartMs（同一组 Q1/Q2/Q3 同时播放），
+  // 跨块顺序累加。单声部 group 不在任何 voiceBlock 内，自成块（blockStartMs = 累加）。
   const beatMs = 60000 / bpm
-  // 预计算每 group 拍时钟起点与组内每小节起始 ms（按 lines music 顺序）
-  const groupStartMs: number[] = []
-  const barStartMsInGroup: number[][] = []
+  const groupStartMs: number[] = new Array(result.groups.length).fill(0)
+  const barStartMsInGroup: number[][] = result.groups.map(() => [])
   let totalMs = 0
   {
     let ms = 0
-    for (const line of result.lines) {
-      if (line.kind !== 'music') continue
-      const grp = result.groups.find((g) => g.music === line)
-      if (!grp) continue
-      const barBeats: number[] = []
-      let beats = 0
-      for (const tok of grp.music.tokens) {
-        if (tok.kind === 'barline') barBeats.push(beats)
-        else if (tok.kind === 'note' || tok.kind === 'rest' || tok.kind === 'rhythm') beats += tokenDuration(tok)
+    // group.voice → groupIndex 映射（多声部 Q1 voice=1 / Q2 voice=2 → 对应不同 group）
+    const voiceToGroupIdx = new Map<number, number>()
+    result.groups.forEach((g, gi) => {
+      if (!voiceToGroupIdx.has(g.music.voice)) voiceToGroupIdx.set(g.music.voice, gi)
+    })
+    // 已纳入 voiceBlock 的 groupIndex
+    const covered = new Set<number>()
+    // 块拍数（块内 max groupBeats）
+    const blockBeatsOf = (gis: number[]) => {
+      let bb = 0
+      for (const gi of gis) {
+        let b = 0
+        for (const tk of result.groups[gi].music.tokens) {
+          if (tk.kind === 'note' || tk.kind === 'rest' || tk.kind === 'rhythm') b += tokenDuration(tk)
+        }
+        if (b > bb) bb = b
       }
-      barBeats.push(beats)
+      return bb
+    }
+    // 该 group 的 bsMs（按 token 拍累计；同块各 group 小节对齐 → bsMs 一致）
+    const bsMsOf = (gi: number) => {
       const bsMs: number[] = []
-      let bMs = 0
-      for (const b of barBeats) {
-        bsMs.push(bMs)
-        bMs += b * beatMs
+      let beats = 0
+      bsMs.push(0)
+      for (const tk of result.groups[gi].music.tokens) {
+        if (tk.kind === 'barline') bsMs.push(beats * beatMs)
+        else if (tk.kind === 'note' || tk.kind === 'rest' || tk.kind === 'rhythm') beats += tokenDuration(tk)
       }
-      barStartMsInGroup.push(bsMs)
-      groupStartMs.push(ms)
-      ms += beats * beatMs
+      bsMs.push(beats * beatMs)
+      return bsMs
+    }
+    // 1. 多声部块（voiceBlock）
+    for (const page of layout.pages) {
+      for (const vb of page.voiceBlocks) {
+        const gis: number[] = []
+        for (const v of vb.voices) {
+          const gi = voiceToGroupIdx.get(v.voice)
+          if (gi !== undefined && !gis.includes(gi)) gis.push(gi)
+        }
+        if (gis.length === 0) continue
+        gis.sort((a, b) => a - b)
+        const bb = blockBeatsOf(gis)
+        for (const gi of gis) {
+          groupStartMs[gi] = ms
+          barStartMsInGroup[gi] = bsMsOf(gi)
+          covered.add(gi)
+        }
+        ms += bb * beatMs
+      }
+    }
+    // 2. 单声部 group（不在任何 voiceBlock 内）按 lines music 顺序自成块累加
+    for (let gi = 0; gi < result.groups.length; gi++) {
+      if (covered.has(gi)) continue
+      groupStartMs[gi] = ms
+      barStartMsInGroup[gi] = bsMsOf(gi)
+      let bb = 0
+      for (const tk of result.groups[gi].music.tokens) {
+        if (tk.kind === 'note' || tk.kind === 'rest' || tk.kind === 'rhythm') bb += tokenDuration(tk)
+      }
+      ms += bb * beatMs
     }
     totalMs = ms
   }
