@@ -1319,14 +1319,16 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     }
 
     pages[pageIndex].voiceBlocks.push({
-      // adj275：括号在有效范围（margin_left 右侧）；有声部注释时括号顺延内推（在注释右侧）
-      x: r1(config.margin_left + (parts.some((p) => p.name) ? 30 : 0) + 2),
+      // adj275：括号在有效范围（margin_left 右侧）、顺延内推；adj276：按本组注释宽（labelPad）独立计算
+      x: r1(config.margin_left + labelPad + 2),
       yTop: blockY,
       // adj271：yBottom = 最后声部曲部底。声部循环用 voiceHeights（含词行高）推进，
       // 第 2+ 声部位于词部下方；用纯曲 pureH 会偏上、括号没延伸到最后一曲部，
       // 故用 voiceYTop[last]（含词推进到的最后声部曲顶）+ 曲部高 noteSize*1.7
       yBottom: voiceYTop[parts.length - 1] + m.noteSize * 1.7,
       voices: blockVoices,
+      // adj280：每声部曲部中心（音符数字垂直中心 = 曲顶 + 0.85×noteSize），注释与曲部垂直居中
+      voiceCenters: voiceYTop.map((yt) => r1(yt + m.noteSize * 0.85)),
     })
 
     y = blockY + blockH

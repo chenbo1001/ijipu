@@ -914,12 +914,11 @@ function renderVoiceBlocks(page: ScorePage, vb: VoiceBlock, noteSize: number): s
   parts.push(`<path d="${lineL}" fill="none" stroke="#1b1b1b" stroke-width="2.1"/>`)
   parts.push(`<path d="${lineR}" fill="none" stroke="#1b1b1b" stroke-width="1.125"/>`)
   // 声部名称（括弧左侧，与该声部曲部垂直居中；仅当有声部名注释时显示，无注释不显示）
-  const h = vb.yBottom - vb.yTop
   const n = vb.voices.length
   for (let i = 0; i < n; i++) {
     const v = vb.voices[i]
     if (!v.name) continue
-    const cy = vb.yTop + (h * (i + 0.5)) / n
+    const cy = vb.voiceCenters?.[i] ?? vb.yTop + ((vb.yBottom - vb.yTop) * (i + 0.5)) / n
     parts.push(
       `<text x="${vb.x - 10}" y="${cy}" text-anchor="end" dominant-baseline="middle" font-size="${noteSize}" font-family="${FONT_CN}" fill="#1b1b1b">${xmlEsc(v.name)}</text>`,
     )

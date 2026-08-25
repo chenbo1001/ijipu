@@ -433,6 +433,8 @@ export interface VoiceBlock {
   yBottom: number
   /** 各声部信息（按堆叠顺序） */
   voices: { voice: number; name?: string }[]
+  /** adj280：每声部曲部中心 y（音符数字垂直中心），供声部注释与曲部垂直居中 */
+  voiceCenters?: number[]
 }
 
 /** 连音线（() 匹配的音符对，同行内绘制） */
