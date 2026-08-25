@@ -890,17 +890,17 @@ function renderLyric(lyric: PlacedLyric, config: PageConfig): string {
 // 多声部括弧与名称（M7a）
 // ============================================================
 
-/** 生成垂直大括号 path（两端弧 + 中部凸起） */
+/** adj262：生成垂直大括号 path（两端弧 + 中部凸起，更接近花括号形状） */
 function bracePath(x: number, yTop: number, yBottom: number): string {
   const mid = (yTop + yBottom) / 2
-  const r = Math.min(10, (yBottom - yTop) / 5)
+  const r = Math.min(14, (yBottom - yTop) / 3)
   const inner = Math.min(r * 0.9, r)
   return [
     `M ${x} ${yTop}`,
-    `Q ${x - r} ${yTop + r} ${x} ${yTop + r * 1.8}`,
+    `Q ${x - r} ${yTop + r} ${x} ${yTop + r * 1.6}`,
     `L ${x} ${mid - inner}`,
-    `Q ${x - inner * 0.7} ${mid} ${x} ${mid + inner}`,
-    `L ${x} ${yBottom - r * 1.8}`,
+    `Q ${x - inner * 0.8} ${mid} ${x} ${mid + inner}`,
+    `L ${x} ${yBottom - r * 1.6}`,
     `Q ${x - r} ${yBottom - r} ${x} ${yBottom}`,
   ].join(' ')
 }
