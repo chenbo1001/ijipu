@@ -51,6 +51,8 @@ interface DocState {
   activeNoteId: string | null
   /** adj258：播放高亮——同一组多声部同时演奏的音符 id 列表，预览区同时高亮 */
   activeNoteIds: string[]
+  /** adj263：播放当前 ms（PlaybackDialog RAF 驱动），PreviewPane 用其渲染平滑移动的整列竖向色框 */
+  currentMs: number
   /** adj262：多声部 voiceBlocks（纯曲部 yTop/yBottom/x）——播放时渲染竖向色框覆盖整列 */
   voiceBlocks: { x: number; yTop: number; yBottom: number; pageIndex: number; voices: number[] }[]
   /** 编辑器光标跳转请求（点击谱面音符 / 撤销重做恢复选区时触发） */
@@ -77,6 +79,8 @@ interface DocState {
   setActiveNoteIds: (ids: string[]) => void
   /** adj262：设置多声部 voiceBlocks（layout 后由 PlaybackDialog 写入） */
   setVoiceBlocks: (vbs: { x: number; yTop: number; yBottom: number; pageIndex: number; voices: number[] }[]) => void
+  /** adj263：设置播放当前 ms（RAF 驱动，PreviewPane 渲染平滑色框） */
+  setCurrentMs: (ms: number) => void
   jumpCursor: (pos: number, end?: number) => void
   undo: () => void
   redo: () => void
@@ -161,6 +165,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   sel: { start: 0, end: 0 },
   activeNoteId: null,
   activeNoteIds: [],
+  currentMs: 0,
   voiceBlocks: [],
   cursorJump: null,
   undoStack: [],
@@ -225,6 +230,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   setActiveNoteId: (id) => set({ activeNoteId: id }),
   setActiveNoteIds: (ids) => set({ activeNoteIds: ids }),
   setVoiceBlocks: (vbs) => set({ voiceBlocks: vbs }),
+  setCurrentMs: (ms) => set({ currentMs: ms }),
   jumpCursor: (pos, end) =>
     set((s) => ({
       cursorJump: { start: pos, end: end ?? pos, nonce: (s.cursorJump?.nonce ?? 0) + 1 },

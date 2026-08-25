@@ -890,27 +890,26 @@ function renderLyric(lyric: PlacedLyric, config: PageConfig): string {
 // 多声部括弧与名称（M7a）
 // ============================================================
 
-/** adj262：生成垂直大括号 path（两端弧 + 中部凸起，更接近花括号形状） */
-function bracePath(x: number, yTop: number, yBottom: number): string {
-  const mid = (yTop + yBottom) / 2
-  const r = Math.min(14, (yBottom - yTop) / 3)
-  const inner = Math.min(r * 0.9, r)
-  return [
-    `M ${x} ${yTop}`,
-    `Q ${x - r} ${yTop + r} ${x} ${yTop + r * 1.6}`,
-    `L ${x} ${mid - inner}`,
-    `Q ${x - inner * 0.8} ${mid} ${x} ${mid + inner}`,
-    `L ${x} ${yBottom - r * 1.6}`,
-    `Q ${x - r} ${yBottom - r} ${x} ${yBottom}`,
-  ].join(' ')
+/** adj264：多声部括号——上下端为细弧线（1/6 圆弧，直径 = 音符高，尖端朝左）+ 中部左粗右细竖线。
+ *  返回 SVG path（弧细；竖线两条：左粗 x 处、右细 x+dx 处，参考小节线 || 左粗右细）。 */
+function bracePath(x: number, yTop: number, yBottom: number, noteSize: number): { arc: string; lineL: string; lineR: string } {
+  const R = Math.min(noteSize / 2, (yBottom - yTop) / 3)
+  const dx = 1.4 // 左右双线间距（参考小节线线间距）
+  // 上弧：左尖端 (x-R, yTop) → 竖线顶 (x, yTop+R)；下弧：竖线底 (x, yBottom-R) → 左尖端 (x-R, yBottom)
+  const arc = `M ${x - R} ${yTop} A ${R} ${R} 0 0 1 ${x} ${yTop + R} M ${x} ${yBottom - R} A ${R} ${R} 0 0 0 ${x - R} ${yBottom}`
+  // 左粗竖线（x）与右细竖线（x+dx）
+  const lineL = `M ${x} ${yTop + R} L ${x} ${yBottom - R}`
+  const lineR = `M ${x + dx} ${yTop + R} L ${x + dx} ${yBottom - R}`
+  return { arc, lineL, lineR }
 }
 
-function renderVoiceBlocks(page: ScorePage, vb: VoiceBlock): string {
+function renderVoiceBlocks(page: ScorePage, vb: VoiceBlock, noteSize: number): string {
   const parts: string[] = []
-  // 大括号
-  parts.push(
-    `<path d="${bracePath(vb.x, vb.yTop, vb.yBottom)}" fill="none" stroke="#1b1b1b" stroke-width="2.5"/>`,
-  )
+  // 大括号：上下弧细 1.1、左竖线粗 2.2、右竖线细 1.1（左粗右细，参考小节线 ||）
+  const { arc, lineL, lineR } = bracePath(vb.x, vb.yTop, vb.yBottom, noteSize)
+  parts.push(`<path d="${arc}" fill="none" stroke="#1b1b1b" stroke-width="1.1"/>`)
+  parts.push(`<path d="${lineL}" fill="none" stroke="#1b1b1b" stroke-width="2.2"/>`)
+  parts.push(`<path d="${lineR}" fill="none" stroke="#1b1b1b" stroke-width="1.1"/>`)
   // 声部名称（括弧左侧，对应各行中部；无名称显示声部号）
   const h = vb.yBottom - vb.yTop
   const n = vb.voices.length
@@ -1275,7 +1274,7 @@ function renderPage(page: ScorePage, config: PageConfig, pageCount: number): str
   for (const n of page.notes) body.push(renderNote(n, config))
   for (const b of page.barlines) body.push(renderBarline(b, config.note_size))
   for (const l of page.lyrics) body.push(renderLyric(l, config))
-  for (const vb of page.voiceBlocks) body.push(renderVoiceBlocks(page, vb))
+  for (const vb of page.voiceBlocks) body.push(renderVoiceBlocks(page, vb, config.note_size))
   body.push(renderPageNum(page, config, pageCount))
 
   // 说明文字（adj83：S 行，多行；渲染在简谱主体最末尾——最后一页正文下方、下边距线上方，
