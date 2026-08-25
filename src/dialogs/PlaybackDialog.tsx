@@ -25,6 +25,8 @@ export function PlaybackDialog() {
   const parseResult = useDocStore((s) => s.parseResult)
   const pageConfig = useDocStore((s) => s.pageConfig)
   const setActiveNoteId = useDocStore((s) => s.setActiveNoteId)
+  // adj258：批量高亮播放中同时演奏的音符
+  const setActiveNoteIds = useDocStore((s) => s.setActiveNoteIds)
   const playbackStartId = useUiStore((s) => s.playbackStartId)
   const setPlaybackStart = useUiStore((s) => s.setPlaybackStart)
   const playbackTick = useUiStore((s) => s.playbackTick)
@@ -40,6 +42,10 @@ export function PlaybackDialog() {
   const cancelRef = useRef<(() => void) | null>(null)
   // adj158：播完自动复位（playing=false → 对话框回中央）
   const doneTimerRef = useRef<number | null>(null)
+  // adj258：播放序列 + 启动时间（本地计时），高亮定时器按当前 atMs 设 activeNoteIds
+  const seqRef = useRef<ReturnType<typeof buildPlaySequence> | null>(null)
+  const startTimeRef = useRef<number>(0)
+  const highlightTimerRef = useRef<number | null>(null)
 
   const header = parseResult.header
 
@@ -48,10 +54,12 @@ export function PlaybackDialog() {
     return () => {
       cancelRef.current?.()
       if (doneTimerRef.current !== null) window.clearTimeout(doneTimerRef.current)
+      if (highlightTimerRef.current !== null) window.clearInterval(highlightTimerRef.current)
       backendRef.current?.dispose()
       setActiveNoteId(null)
+      setActiveNoteIds([])
     }
-  }, [setActiveNoteId])
+  }, [setActiveNoteId, setActiveNoteIds])
 
   const stop = () => {
     cancelRef.current?.()
@@ -59,9 +67,14 @@ export function PlaybackDialog() {
       window.clearTimeout(doneTimerRef.current)
       doneTimerRef.current = null
     }
+    if (highlightTimerRef.current !== null) {
+      window.clearInterval(highlightTimerRef.current)
+      highlightTimerRef.current = null
+    }
     backendRef.current?.stop()
     setPlaying(false)
     setActiveNoteId(null)
+    setActiveNoteIds([])
   }
 
   const play = async () => {
@@ -90,6 +103,23 @@ export function PlaybackDialog() {
     const layout = layoutScore(parseResult, pageConfig)
     const seq = buildPlaySequence(parseResult, layout, bpm, playbackStartId)
     setTotalMs(seq.totalMs)
+    // adj258：保存序列 + 本地启动时间，启动高亮定时器按当前 atMs 设 activeNoteIds
+    seqRef.current = seq
+    startTimeRef.current = performance.now()
+    if (highlightTimerRef.current !== null) window.clearInterval(highlightTimerRef.current)
+    const computeActive = () => {
+      const cur = performance.now() - startTimeRef.current
+      const ids: string[] = []
+      const es = seqRef.current?.events ?? []
+      for (const e of es) {
+        if (e.atMs <= cur && cur < e.atMs + e.durationMs) {
+          ids.push(e.placed.id.page + '_' + e.placed.id.voice + '_' + e.placed.id.group + '_' + e.placed.id.index)
+        }
+      }
+      setActiveNoteIds(ids)
+    }
+    computeActive()
+    highlightTimerRef.current = window.setInterval(computeActive, 50)
     const job = schedulePlay(seq, backend, (placed) => {
       setActiveNoteId(placed.id.page + '_' + placed.id.voice + '_' + placed.id.group + '_' + placed.id.index)
     })
@@ -101,6 +131,11 @@ export function PlaybackDialog() {
       doneTimerRef.current = null
       setPlaying(false)
       setActiveNoteId(null)
+      setActiveNoteIds([])
+      if (highlightTimerRef.current !== null) {
+        window.clearInterval(highlightTimerRef.current)
+        highlightTimerRef.current = null
+      }
     }, seq.totalMs + 300)
     // 起点播放后清除标记，下次播放从头开始
     if (playbackStartId) setPlaybackStart(null)

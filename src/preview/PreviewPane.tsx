@@ -24,6 +24,8 @@ export function PreviewPane() {
   const code = useDocStore((s) => s.code)
   const activeNoteId = useDocStore((s) => s.activeNoteId)
   const setActiveNoteId = useDocStore((s) => s.setActiveNoteId)
+  // adj258：批量高亮播放中同时演奏的音符（多声部同步）
+  const activeNoteIds = useDocStore((s) => s.activeNoteIds)
   const jumpCursor = useDocStore((s) => s.jumpCursor)
   const showGuides = useUiStore((s) => s.showGuides)
   const previewZoom = useUiStore((s) => s.previewZoom)
@@ -71,6 +73,20 @@ export function PreviewPane() {
         : [],
     [layout, pageConfig.height_quci, pageConfig.geci_size, pageConfig.note_size],
   )
+
+  // adj258：批量高亮播放中同时演奏的音符（多声部同步演奏——同一组多声部同 atMs 音符同时高亮）
+  useEffect(() => {
+    const root = containerRef.current
+    if (!root) return
+    root.querySelectorAll('.note-active').forEach((el) => el.classList.remove('note-active'))
+    if (!activeNoteIds || activeNoteIds.length === 0) return
+    for (const id of activeNoteIds) {
+      const el = root.querySelector(
+        `[data-notepos="${CSS.escape(id)}"], [data-cipos="${CSS.escape(id)}"]`,
+      )
+      if (el) el.classList.add('note-active')
+    }
+  }, [activeNoteIds, pagesHtml])
 
   // 高亮当前音符（M3）
   useEffect(() => {

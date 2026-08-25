@@ -49,6 +49,8 @@ interface DocState {
   sel: { start: number; end: number }
   /** 当前高亮音符 id（notepos 契约），编辑器↔谱面联动 */
   activeNoteId: string | null
+  /** adj258：播放高亮——同一组多声部同时演奏的音符 id 列表，预览区同时高亮 */
+  activeNoteIds: string[]
   /** 编辑器光标跳转请求（点击谱面音符 / 撤销重做恢复选区时触发） */
   cursorJump: { start: number; end: number; nonce: number } | null
 
@@ -69,6 +71,8 @@ interface DocState {
   setCursor: (line: number, col: number) => void
   setSelection: (start: number, end: number) => void
   setActiveNoteId: (id: string | null) => void
+  /** adj258：设置预览区同时高亮的音符 id 列表（多声部同步演奏） */
+  setActiveNoteIds: (ids: string[]) => void
   jumpCursor: (pos: number, end?: number) => void
   undo: () => void
   redo: () => void
@@ -152,6 +156,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   cursor: { line: 1, col: 0 },
   sel: { start: 0, end: 0 },
   activeNoteId: null,
+  activeNoteIds: [],
   cursorJump: null,
   undoStack: [],
   redoStack: [],
@@ -213,6 +218,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   setCursor: (line, col) => set({ cursor: { line, col } }),
   setSelection: (start, end) => set({ sel: { start, end } }),
   setActiveNoteId: (id) => set({ activeNoteId: id }),
+  setActiveNoteIds: (ids) => set({ activeNoteIds: ids }),
   jumpCursor: (pos, end) =>
     set((s) => ({
       cursorJump: { start: pos, end: end ?? pos, nonce: (s.cursorJump?.nonce ?? 0) + 1 },
@@ -249,6 +255,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       dirty: false,
       fileHandle: null,
       activeNoteId: null,
+      activeNoteIds: [],
       cursorJump: null,
       undoStack: [],
       redoStack: [],
@@ -272,6 +279,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       dirty: false,
       fileHandle: null,
       activeNoteId: null,
+      activeNoteIds: [],
       cursorJump: null,
       undoStack: [],
       redoStack: [],
@@ -312,6 +320,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
         dirty: false,
         fileHandle: handle,
         activeNoteId: null,
+        activeNoteIds: [],
         cursorJump: null,
         undoStack: [],
         redoStack: [],
