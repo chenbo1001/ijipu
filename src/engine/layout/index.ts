@@ -1090,6 +1090,10 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
   const placeVoiceBlock = (unit: Unit) => {
     const geciSize = config.geci_size
     const sp = spacingFor(config, pageIndex)
+    // adj275：多声部括号占位——括号/声部注释在页面有效范围（margin_left 右侧），音符内容区右移预留
+    const BRACE_PAD = 48
+    const blockStartX = config.margin_left + BRACE_PAD
+    const blockAvailW = availW - BRACE_PAD
     const parts = unit.groups.map(({ groupIndex, group }) => ({
       groupIndex,
       voice: group.music.voice,
@@ -1144,7 +1148,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     // ① 每拍横向最小宽 = max(BPW_NATURAL, minNoteW/minPiece)（该拍每音符的最小宽）
     // ② 纵向取每组各声部该拍最小宽的**最大**为该拍基础宽（同拍纵向堆叠、同一 x，取最宽的）
     // ③ Σ基础宽 < 页面有效宽 → 剩余宽度给各拍均分 → 得各拍实际宽
-    const availBeats = availW - pads - noteGapOf(totalBeats)
+    const availBeats = blockAvailW - pads - noteGapOf(totalBeats)
     const beatBaseW: number[] = []
     {
       for (let b = 0; b < numBars; b++) {
@@ -1206,7 +1210,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
       const p = parts[vi]
       blockVoices.push({ voice: p.voice, name: p.name })
       voiceYTop.push(voiceY)
-      let x = config.margin_left
+      let x = blockStartX
       let slotIndex = 0
       for (let b = 0; b < numBars; b++) {
         // adj248：beatAcc 必须是**小节内**拍位置（0 起），每小节重置——
@@ -1257,7 +1261,7 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     // 各声部 x 统一（块级小节对齐），y 取该声部行高（复用单声部小节线高度公式）。
     const bs = noteScaleOf(m.noteSize)
     const barX: number[] = []
-    let xBar = config.margin_left
+    let xBar = blockStartX
     for (let b = 0; b < numBars; b++) {
       let bt: Extract<MusicToken, { kind: 'barline' }> | null = null
       for (const p of parts) {
@@ -1312,7 +1316,8 @@ export function layoutScore(result: ParseResult, config: PageConfig): ScoreLayou
     }
 
     pages[pageIndex].voiceBlocks.push({
-      x: r1(config.margin_left - 12),
+      // adj275：括号在有效范围（margin_left 右侧）；有声部注释时括号顺延内推（在注释右侧）
+      x: r1(config.margin_left + (parts.some((p) => p.name) ? 30 : 0) + 2),
       yTop: blockY,
       // adj271：yBottom = 最后声部曲部底。声部循环用 voiceHeights（含词行高）推进，
       // 第 2+ 声部位于词部下方；用纯曲 pureH 会偏上、括号没延伸到最后一曲部，
