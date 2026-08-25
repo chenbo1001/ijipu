@@ -27,6 +27,7 @@ export function PlaybackDialog() {
   const setActiveNoteId = useDocStore((s) => s.setActiveNoteId)
   // adj258：批量高亮播放中同时演奏的音符
   const setActiveNoteIds = useDocStore((s) => s.setActiveNoteIds)
+  const setVoiceBlocks = useDocStore((s) => s.setVoiceBlocks)
   const playbackStartId = useUiStore((s) => s.playbackStartId)
   const setPlaybackStart = useUiStore((s) => s.setPlaybackStart)
   const playbackTick = useUiStore((s) => s.playbackTick)
@@ -58,8 +59,9 @@ export function PlaybackDialog() {
       backendRef.current?.dispose()
       setActiveNoteId(null)
       setActiveNoteIds([])
+      setVoiceBlocks([])
     }
-  }, [setActiveNoteId, setActiveNoteIds])
+  }, [setActiveNoteId, setActiveNoteIds, setVoiceBlocks])
 
   const stop = () => {
     cancelRef.current?.()
@@ -75,6 +77,7 @@ export function PlaybackDialog() {
     setPlaying(false)
     setActiveNoteId(null)
     setActiveNoteIds([])
+    setVoiceBlocks([])
   }
 
   const play = async () => {
@@ -103,6 +106,18 @@ export function PlaybackDialog() {
     const layout = layoutScore(parseResult, pageConfig)
     const seq = buildPlaySequence(parseResult, layout, bpm, playbackStartId)
     setTotalMs(seq.totalMs)
+    // adj262：layout 后写入 voiceBlocks（纯曲部 yTop/yBottom）供预览色框覆盖整列
+    setVoiceBlocks(
+      layout.pages.flatMap((p) =>
+        p.voiceBlocks.map((vb) => ({
+          x: vb.x,
+          yTop: vb.yTop,
+          yBottom: vb.yBottom,
+          pageIndex: p.index,
+          voices: vb.voices.map((v) => v.voice),
+        })),
+      ),
+    )
     // adj258：保存序列 + 本地启动时间，启动高亮定时器按当前 atMs 设 activeNoteIds
     seqRef.current = seq
     startTimeRef.current = performance.now()
@@ -132,6 +147,7 @@ export function PlaybackDialog() {
       setPlaying(false)
       setActiveNoteId(null)
       setActiveNoteIds([])
+      setVoiceBlocks([])
       if (highlightTimerRef.current !== null) {
         window.clearInterval(highlightTimerRef.current)
         highlightTimerRef.current = null

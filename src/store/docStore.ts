@@ -51,6 +51,8 @@ interface DocState {
   activeNoteId: string | null
   /** adj258：播放高亮——同一组多声部同时演奏的音符 id 列表，预览区同时高亮 */
   activeNoteIds: string[]
+  /** adj262：多声部 voiceBlocks（纯曲部 yTop/yBottom/x）——播放时渲染竖向色框覆盖整列 */
+  voiceBlocks: { x: number; yTop: number; yBottom: number; pageIndex: number; voices: number[] }[]
   /** 编辑器光标跳转请求（点击谱面音符 / 撤销重做恢复选区时触发） */
   cursorJump: { start: number; end: number; nonce: number } | null
 
@@ -73,6 +75,8 @@ interface DocState {
   setActiveNoteId: (id: string | null) => void
   /** adj258：设置预览区同时高亮的音符 id 列表（多声部同步演奏） */
   setActiveNoteIds: (ids: string[]) => void
+  /** adj262：设置多声部 voiceBlocks（layout 后由 PlaybackDialog 写入） */
+  setVoiceBlocks: (vbs: { x: number; yTop: number; yBottom: number; pageIndex: number; voices: number[] }[]) => void
   jumpCursor: (pos: number, end?: number) => void
   undo: () => void
   redo: () => void
@@ -157,6 +161,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   sel: { start: 0, end: 0 },
   activeNoteId: null,
   activeNoteIds: [],
+  voiceBlocks: [],
   cursorJump: null,
   undoStack: [],
   redoStack: [],
@@ -219,6 +224,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   setSelection: (start, end) => set({ sel: { start, end } }),
   setActiveNoteId: (id) => set({ activeNoteId: id }),
   setActiveNoteIds: (ids) => set({ activeNoteIds: ids }),
+  setVoiceBlocks: (vbs) => set({ voiceBlocks: vbs }),
   jumpCursor: (pos, end) =>
     set((s) => ({
       cursorJump: { start: pos, end: end ?? pos, nonce: (s.cursorJump?.nonce ?? 0) + 1 },
@@ -256,6 +262,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       fileHandle: null,
       activeNoteId: null,
       activeNoteIds: [],
+      voiceBlocks: [],
       cursorJump: null,
       undoStack: [],
       redoStack: [],
@@ -280,6 +287,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       fileHandle: null,
       activeNoteId: null,
       activeNoteIds: [],
+      voiceBlocks: [],
       cursorJump: null,
       undoStack: [],
       redoStack: [],
@@ -321,6 +329,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
         fileHandle: handle,
         activeNoteId: null,
         activeNoteIds: [],
+        voiceBlocks: [],
         cursorJump: null,
         undoStack: [],
         redoStack: [],
