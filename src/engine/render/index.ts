@@ -909,7 +909,7 @@ function renderVoiceBlocks(page: ScorePage, vb: VoiceBlock): string {
   const parts: string[] = []
   // 大括号
   parts.push(
-    `<path d="${bracePath(vb.x, vb.yTop, vb.yBottom)}" fill="none" stroke="#1b1b1b" stroke-width="1.5"/>`,
+    `<path d="${bracePath(vb.x, vb.yTop, vb.yBottom)}" fill="none" stroke="#1b1b1b" stroke-width="2.5"/>`,
   )
   // 声部名称（括弧左侧，对应各行中部；无名称显示声部号）
   const h = vb.yBottom - vb.yTop

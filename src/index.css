@@ -435,10 +435,14 @@ body {
   height: auto;
 }
 
-/* 光标联动高亮：当前音符/歌词（M3） */
+/* adj258：播放同步高亮——多声部同时演奏的音符用半透明蓝+描边模拟色框指示当前时点
+   （fill 半透明蓝 + paint-order stroke 描边加宽；纯 SVG 文本无法用 CSS box-shadow 做竖条，此为近似） */
 .score-page [data-notepos].note-active,
 .score-page [data-cipos].note-active {
-  fill: var(--jp-danger) !important;
+  fill: rgba(87, 170, 255, 0.45) !important;
+  paint-order: stroke fill;
+  stroke: rgba(87, 170, 255, 0.55);
+  stroke-width: 3px;
 }
 
 /* 描述头元素可拖拽（adj9） */
