@@ -908,8 +908,8 @@ function bracePath(x: number, yTop: number, yBottom: number, noteSize: number): 
 
 function renderVoiceBlocks(page: ScorePage, vb: VoiceBlock, noteSize: number): string {
   const parts: string[] = []
-  // 大括号：弧线/右细线 1.125（0.9×1.25）、左粗线 2.1；括号整体下移 0.1×音符高（注释保持曲部垂直居中不动）
-  const { arc, lineL, lineR } = bracePath(vb.x, vb.yTop + noteSize * 0.1, vb.yBottom + noteSize * 0.1, noteSize)
+  // 大括号：弧线/右细线 1.125（0.9×1.25）、左粗线 2.1；括号整体上移 0.2×音符高（注释保持曲部垂直居中不动）
+  const { arc, lineL, lineR } = bracePath(vb.x, vb.yTop - noteSize * 0.2, vb.yBottom - noteSize * 0.2, noteSize)
   parts.push(`<path d="${arc}" fill="none" stroke="#1b1b1b" stroke-width="1.125"/>`)
   parts.push(`<path d="${lineL}" fill="none" stroke="#1b1b1b" stroke-width="2.1"/>`)
   parts.push(`<path d="${lineR}" fill="none" stroke="#1b1b1b" stroke-width="1.125"/>`)
