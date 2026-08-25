@@ -23,27 +23,23 @@ export function createBackend(kind: BackendKind): AudioBackend {
   return new SynthBackend()
 }
 
-/** 调度播放：按事件延迟触发；返回取消函数 */
+/** 调度播放：按事件 atMs 调度音频（由后端用 AudioContext.currentTime 调度，同 atMs 事件同时响） */
 export function schedulePlay(
   seq: { events: { placed: PlacedToken; atMs: number; durationMs: number; pitch?: string | null }[] },
   backend: AudioBackend,
   onNote?: (placed: PlacedToken) => void,
 ): { cancel: () => void; totalMs: number } {
-  const timers: number[] = []
   for (const ev of seq.events) {
     if (!ev.placed.playable || !ev.placed.audioPitch) continue
     const pitch = ev.pitch ?? ev.placed.audioPitch
     if (!pitch) continue
-    timers.push(
-      window.setTimeout(() => {
-        backend.play(pitch, 0, ev.durationMs, 0.5)
-        onNote?.(ev.placed)
-      }, ev.atMs),
-    )
+    // adj261：直接用 ev.atMs 调度（此前 bug 传 0，导致音频延迟/不响）；后端 AudioContext 按 atMs 调度，同 atMs 事件同时响
+    backend.play(pitch, ev.atMs, ev.durationMs, 0.5)
+    onNote?.(ev.placed)
   }
   const totalMs = seq.events.length > 0 ? seq.events[seq.events.length - 1].atMs + 100 : 0
   return {
-    cancel: () => timers.forEach((t) => window.clearTimeout(t)),
+    cancel: () => backend.stop(),
     totalMs,
   }
 }
