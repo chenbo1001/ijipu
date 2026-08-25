@@ -890,15 +890,16 @@ function renderLyric(lyric: PlacedLyric, config: PageConfig): string {
 // 多声部括弧与名称（M7a）
 // ============================================================
 
-/** adj268：多声部括号——上弧以粗线轴水平翻转（向右上延伸）、下弧以粗线下端点逆时针转 90°（向右下延伸）。
- *  左粗(1.4)右细(0.9)双竖线，中间空白间距 2px。 */
+/** adj270：多声部括号——左粗(2.1)右细(1.35)双竖线（间距加大 1/2 → 3px）；上下弧以两端点翻转，
+ *  弧朝向粗线端不变、另一端弧线水平长度减少 1/3（rx=2R/3、垂直不变）。 */
 function bracePath(x: number, yTop: number, yBottom: number, noteSize: number): { arc: string; lineL: string; lineR: string } {
   const R = Math.min(noteSize / 2, (yBottom - yTop) * 0.15)
-  const dx = 2 // 粗/细线之间空白间距
-  // 上弧：以两端点为轴翻转一次（sweep 1→0），凸向翻到另一侧
-  const arcTop = `M ${x} ${yTop + R} A ${R} ${R} 0 0 0 ${x + R} ${yTop}`
-  // 下弧：以两端点为轴翻转一次（sweep 0→1），凸向翻到另一侧
-  const arcBottom = `M ${x} ${yBottom - R} A ${R} ${R} 0 0 1 ${x + R} ${yBottom}`
+  const rx = (R * 2) / 3 // 弧线水平长度减少 1/3（另一端缩短），粗线端竖直高度不变
+  const dx = 3 // 粗/细线间距加大 1/2（2 → 3）
+  // 上弧：粗线端 (x, yTop+R) 不变 → 尖端 (x+rx, yTop)，凸向翻转
+  const arcTop = `M ${x} ${yTop + R} A ${rx} ${R} 0 0 0 ${x + rx} ${yTop}`
+  // 下弧：粗线端 (x, yBottom-R) 不变 → 尖端 (x+rx, yBottom)，凸向翻转
+  const arcBottom = `M ${x} ${yBottom - R} A ${rx} ${R} 0 0 1 ${x + rx} ${yBottom}`
   const lineL = `M ${x} ${yTop + R} L ${x} ${yBottom - R}`
   const lineR = `M ${x + dx} ${yTop + R} L ${x + dx} ${yBottom - R}`
   return { arc: `${arcTop} ${arcBottom}`, lineL, lineR }
@@ -906,11 +907,11 @@ function bracePath(x: number, yTop: number, yBottom: number, noteSize: number): 
 
 function renderVoiceBlocks(page: ScorePage, vb: VoiceBlock, noteSize: number): string {
   const parts: string[] = []
-  // 大括号：弧细 0.9、左竖线粗 1.4、右竖线细 0.9（参考小节线 ||）
+  // 大括号：弧/右细线 1.35、左粗线 2.1（粗细与间距各加大 1/2）？改为参考小节线加粗
   const { arc, lineL, lineR } = bracePath(vb.x, vb.yTop, vb.yBottom, noteSize)
-  parts.push(`<path d="${arc}" fill="none" stroke="#1b1b1b" stroke-width="0.9"/>`)
-  parts.push(`<path d="${lineL}" fill="none" stroke="#1b1b1b" stroke-width="1.4"/>`)
-  parts.push(`<path d="${lineR}" fill="none" stroke="#1b1b1b" stroke-width="0.9"/>`)
+  parts.push(`<path d="${arc}" fill="none" stroke="#1b1b1b" stroke-width="1.35"/>`)
+  parts.push(`<path d="${lineL}" fill="none" stroke="#1b1b1b" stroke-width="2.1"/>`)
+  parts.push(`<path d="${lineR}" fill="none" stroke="#1b1b1b" stroke-width="1.35"/>`)
   // 声部名称（括弧左侧，对应各行中部；无名称显示声部号）
   const h = vb.yBottom - vb.yTop
   const n = vb.voices.length
