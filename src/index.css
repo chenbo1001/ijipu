@@ -1248,6 +1248,8 @@ body {
   border: 1px solid var(--jp-border);
   border-radius: 12px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  /* adj：显式 color: var(--jp-text-primary)——避免依赖 body 继承；浅色主题白底配深字、对比足够 */
+  color: var(--jp-text-primary);
   animation: menuIn 0.15s ease-out;
 }
 
