@@ -240,6 +240,30 @@ body {
   border-radius: 7px;
   padding: 2px;
 }
+/* 设置组内按钮：去独立 border，融入组框；与功能组同款
+   ——组内选中(active-guide)时 border-color:accent 无视觉(无 border)，
+   高亮只有背景+文字色变化(排版按钮同款风格，边框不高亮) */
+.topbar-settings .topbar-btn {
+  border: none;
+  padding: 4px 9px;
+  font-size: 12px;
+  border-radius: 5px;
+}
+.topbar-settings .topbar-btn.icon-btn {
+  padding: 3px 7px;
+}
+.topbar-settings .topbar-zoom {
+  gap: 2px;
+}
+.topbar-settings .topbar-zoom .topbar-btn.icon-btn {
+  border: none;
+  padding: 3px 8px;
+}
+.topbar-settings .editor-font-split-btn {
+  border: none;
+  padding: 4px 9px;
+  border-radius: 5px;
+}
 /* 功能组内按钮：去 border、缩小 padding、与视图按钮风格统一 */
 .topbar-buttons .topbar-btn {
   border: none;
