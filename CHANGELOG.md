@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+### 调整
+
+- **关于对话框文案以中文为主**(续上次更名 iJipu/爱记谱/i记谱 之后):
+  - 「关于 iJipu」→「关于 爱记谱」(`src/brand/copy.ts` `uiCopy.about` 改为 `关于 ${brand.nameZh}`)
+  - 标题 `iJipu(爱记谱)`→「爱记谱(iJipu)」(`aboutCopy.title` 用 `${nameZh}(${name})`)
+  - 副标题 slogan `敲码即谱,所见即所得`→`敲码即简谱,所见即所得`(`tokens.ts` `taglineMain`;`index.html` `<title>` 与 `<meta description>` 同步改)
+  - 介绍首段 `iJipu(中文名:爱记谱)—— 下一代代码式简谱制谱引擎。`→「爱记谱(英文名:iJipu)—— 优秀高效的代码式简谱制谱引擎。`(`aboutCopy.body[0]`)
+  - 用户身份段 `用 iJipu 写简谱的人`→「用爱记谱写简谱的人」(`aboutCopy.userIdentity`)
+  - 关于对话框 Logo 圆形渐变里的字「谱」→「记」(`AboutDialog.tsx`),呼应「爱**记**谱」
+
 ### 变更
 
 - **应用更名为 iJipu / 爱记谱 / i记谱**：仅改"用户可见"的名字（5 个文件、零内部包名改动，零数据迁移风险）：

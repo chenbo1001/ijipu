@@ -21,7 +21,7 @@ export const brand = {
   /** 后缀全称 */
   extensionFull: 'iJipu Script',
   /** 首页大标题 Slogan */
-  taglineMain: '敲码即谱，所见即所得',
+  taglineMain: '敲码即简谱，所见即所得',
   /** 底部情怀 Slogan */
   taglineFooter: '用代码的严谨，谱写指尖的浪漫',
   /** 命令行概念（后续 CLI 工具：jps run / jps compile） */

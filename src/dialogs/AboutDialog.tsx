@@ -26,7 +26,7 @@ export function AboutDialog() {
             color: palette.neonCyan,
           }}
         >
-          谱
+          记
         </div>
         <div style={{ fontSize: 18, fontWeight: 700 }}>{aboutCopy.title}</div>
         <div style={{ color: 'var(--jp-accent)', fontSize: 13, marginTop: 4 }}>
