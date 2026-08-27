@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "码上简谱 JianpuScript",
+        "title": "爱记谱 iJipu",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
