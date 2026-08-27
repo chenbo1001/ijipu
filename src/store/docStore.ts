@@ -20,21 +20,6 @@ import { uiCopy } from '../brand/copy'
 
 export type ViewType = 'code' | 'split' | 'preview'
 
-const NEW_FILE_TEMPLATE = [
-  '#============================以下为描述头定义==========================',
-  'V: 1.0',
-  'B: 未命名',
-  'Z: 佚名 词曲',
-  'D: C',
-  'P: 4/4',
-  // adj254：本乐谱使用「码上简谱」编制——谱尾署名/广告说明
-  'S: 本乐谱使用「码上简谱」编制',
-  '#============================以下开始简谱主体==========================',
-  'Q: 1 2 3 4 |',
-  'C: 这是歌词',
-  '',
-].join('\n')
-
 interface DocState {
   code: string
   fileName: string
@@ -288,7 +273,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
     })
   },
   newDoc: () => {
-    localStorage.setItem(DRAFT_KEY, NEW_FILE_TEMPLATE)
+    const template = defaultSample().code
+    localStorage.setItem(DRAFT_KEY, template)
     localStorage.setItem(DRAFT_NAME_KEY, '未命名')
     // adj161：新建文档不关联磁盘文件——清除句柄
     void saveFileHandle(null)
@@ -296,10 +282,10 @@ export const useDocStore = create<DocState>()((set, get) => ({
     // 旧值覆盖（此前 loadPageConfig() 会把用户历史设置带进新谱，默认值调整后
     // 新建仍显示旧值）；模板无 # jps-config，merge(null) 即纯默认
     set({
-      code: NEW_FILE_TEMPLATE,
+      code: template,
       fileName: '未命名',
-      parseResult: parseJps(NEW_FILE_TEMPLATE),
-      pageConfig: mergeJpsConfig(NEW_FILE_TEMPLATE, null),
+      parseResult: parseJps(template),
+      pageConfig: mergeJpsConfig(template, null),
       dirty: false,
       fileHandle: null,
       activeNoteId: null,

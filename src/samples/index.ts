@@ -1,14 +1,10 @@
 /**
- * src/samples/index.ts — 内置示例谱（?raw 导入，保持 .jps 原文）
+ * src/samples/index.ts — 内置示例谱
+ *
+ * adj：示例/模板谱当前清空——老板娘对这些示例不满意，暂不内置。
+ * 保留 SampleScore 接口 + 空 SAMPLES（为将来引入高质量示例预留结构），
+ * defaultSample() 改为返回内置「新建」模板，作为编辑器初始默认谱。
  */
-import paipaizuo from '../../samples/paipaizuo.jps?raw'
-import xiaoxingxing from '../../samples/xiaoxingxing.jps?raw'
-import liangzhilaohu from '../../samples/liangzhilaohu.jps?raw'
-import ershenbu from '../../samples/ershenbu.jps?raw'
-import fanfuTiaofangzi from '../../samples/fanfu-tiaofangzi.jps?raw'
-import lianyinxianZhuangshi from '../../samples/lianyinxian-zhuangshi.jps?raw'
-import yufaQuangai from '../../samples/yufa-quangai.jps?raw'
-import yinyunZhuangshi from '../../samples/yinyun-zhuangshi.jps?raw'
 
 export interface SampleScore {
   id: string
@@ -17,58 +13,26 @@ export interface SampleScore {
   code: string
 }
 
-export const SAMPLES: SampleScore[] = [
-  {
-    id: 'paipaizuo',
-    name: '排排坐（极简示例）',
-    description: '复刻原站极简示例，引擎冒烟测试',
-    code: paipaizuo,
-  },
-  {
-    id: 'xiaoxingxing',
-    name: '小星星',
-    description: '歌词对齐、增时线、标点自动跳过',
-    code: xiaoxingxing,
-  },
-  {
-    id: 'liangzhilaohu',
-    name: '两只老虎',
-    description: '反复记号 |: :|、弹性小节',
-    code: liangzhilaohu,
-  },
-  {
-    id: 'ershenbu',
-    name: '二声部练习',
-    description: '多声部渲染：声部括弧与名称、各声部歌词',
-    code: ershenbu,
-  },
-  {
-    id: 'fanfu-tiaofangzi',
-    name: '反复与跳房子',
-    description: '|: :| 两遍反复、跳房子第一遍/第二遍',
-    code: fanfuTiaofangzi,
-  },
-  {
-    id: 'lianyinxian-zhuangshi',
-    name: '连音线与装饰',
-    description: '连音线、&tr 颤音、&mp 力度、渐强渐弱',
-    code: lianyinxianZhuangshi,
-  },
-  {
-    id: 'yufa-quangai',
-    name: '语法全覆盖',
-    description: '高低音点、休止符、附点、减时线、变音、全音符',
-    code: yufaQuangai,
-  },
-  {
-    id: 'yinyun-zhuangshi',
-    name: '倚音与虚音符',
-    description: '前倚音 [65]、后倚音 [h56]、虚音符 (1)、后置变音',
-    code: yinyunZhuangshi,
-  },
-]
+/** 「新建」模板（adj：作为编辑器初始默认谱，替代原示例谱） */
+const NEW_FILE_TEMPLATE = [
+  '#============================以下为描述头定义==========================',
+  'V: 1.0',
+  'B: 未命名',
+  'Z: 佚名 词曲',
+  'D: C',
+  'P: 4/4',
+  // adj254：本乐谱使用「码上简谱」编制——谱尾署名/广告说明
+  'S: 本乐谱使用「码上简谱」编制',
+  '#============================以下开始简谱主体==========================',
+  'Q: 1 2 3 4 |',
+  'C: 这是歌词',
+  '',
+].join('\n')
 
-/** 默认打开第一首示例 */
+/** 示例谱列表 —— 当前清空（老板娘暂不满意，不入内置示例） */
+export const SAMPLES: SampleScore[] = []
+
+/** 默认（新建）谱 —— 返回内置新建模板，不依赖 SAMPLES[0] */
 export function defaultSample(): SampleScore {
-  return SAMPLES[0]
+  return { id: 'new', name: '未命名', description: '', code: NEW_FILE_TEMPLATE }
 }

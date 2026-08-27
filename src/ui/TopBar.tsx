@@ -600,8 +600,6 @@ export function TopBar() {
     { label: '保存(&S)', kbd: 'Ctrl+S', hotkey: 's', onPick: runSave },
     { label: '另存为(&A)…', hotkey: 'a', onPick: runSaveAs },
     'sep',
-    { label: '打开示例谱(&E)', hotkey: 'e', onPick: () => openModal('samples') },
-    'sep',
     { label: '格式化脚本(&F)', hotkey: 'f', onPick: runFormat },
     'sep',
     { label: '页面设置(&G)', hotkey: 'g', onPick: () => openModal('pageConfig') },
