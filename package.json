@@ -1,7 +1,7 @@
 {
   "name": "jianpuscript",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "JianpuScript（码上简谱）—— 下一代代码式简谱制谱引擎。敲码即谱，所见即所得。",
   "type": "module",
   "scripts": {

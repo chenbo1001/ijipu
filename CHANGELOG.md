@@ -5,17 +5,18 @@
 
 ---
 
-## [Unreleased]
+## [0.5.1] — 2026-08-27
+
+### 新增
+
+- **打开示例谱菜单隐藏 + 示例谱清空**（`5d6e621`）：老板娘对现有内置示例（排排坐/小星星/两只老虎/二声部/反复跳房子/连音装饰/语法全覆盖/倚音虚音符）不满意，暂不提供示例谱入口——删除「文件」菜单的「打开示例谱(&E)」项；`src/samples/index.ts` 的 `SAMPLES` 清空为 `[]`（remove 全部 `?raw` 导入），`defaultSample()` 改为返回内置「新建」模板（含 adj254 S 行），作为编辑器初始默认谱。
+  - 草稿自动保存保留——**有草稿恢复上次编辑**，**无草稿（首次打开）→ 新建模板**（不再排排坐）
+  - 保留 `SampleScore` 接口 + 空 `SAMPLES`（为将来高质量示例预留）；`samples/*.jps` 原文保留（`npm run smoke` 仍可用）
+  - `src/store/docStore.ts` 移除本地 `NEW_FILE_TEMPLATE`，`newDoc()` 用 `defaultSample().code`（单一来源）
 
 ### 调整
 
 - **关于对话框文案以中文为主**(续上次更名 iJipu/爱记谱/i记谱 之后):
-  - 「关于 iJipu」→「关于 爱记谱」(`src/brand/copy.ts` `uiCopy.about` 改为 `关于 ${brand.nameZh}`)
-  - 标题 `iJipu(爱记谱)`→「爱记谱(iJipu)」(`aboutCopy.title` 用 `${nameZh}(${name})`)
-  - 副标题 slogan `敲码即谱,所见即所得`→`敲码即简谱,所见即所得`(`tokens.ts` `taglineMain`;`index.html` `<title>` 与 `<meta description>` 同步改)
-  - 介绍首段 `iJipu(中文名:爱记谱)—— 下一代代码式简谱制谱引擎。`→「爱记谱(英文名:iJipu)—— 优秀高效的代码式简谱制谱引擎。`(`aboutCopy.body[0]`)
-  - 用户身份段 `用 iJipu 写简谱的人`→「用爱记谱写简谱的人」(`aboutCopy.userIdentity`)
-  - 关于对话框 Logo 圆形渐变里的字「谱」→「记」(`AboutDialog.tsx`),呼应「爱**记**谱」
 
 ### 变更
 
@@ -28,6 +29,15 @@
   - `src/brand/copy.ts` + `src/dialogs/AboutDialog.tsx`「关于」对话框加**致谢「番茄简谱」原作者与社区** + **本脚本规则高度兼容「番茄简谱」脚本**（致敬块高亮卡片样式）
   - **未改**（保持兼容/低风险）：`package.json` name/Cargo.toml name/`tauri.conf.json` identifier/localStorage 键 `jianpuscript.*`/`.jps` 后缀/文件夹名（改这些需数据迁移或破坏兼容性，本次仅做"用户可见改名"）
   - **更新方法**：`npm run build` → 重新上传 `dist/` 到 Cloudflare（手动拖或 Git 集成），PWA / Tauri 桌面同步看到新名
+- **关于对话框以中文为主 + slogan "敲码即简谱"**（`d040129`）：
+  - 「关于 iJipu」→「关于 爱记谱」；标题「爱记谱(iJipu)」；副标题 slogan「敲码即简谱,所见即所得」（`tokens.ts` taglineMain + `index.html` title/description 同步）
+  - 介绍首段「爱记谱(英文名:iJipu)—— 优秀高效的代码式简谱制谱引擎。」；用户身份「用爱记谱写简谱的人」；Logo 圆形「谱」→「记」
+- **关于对话框 Logo 用网站 Logo**（`2b439a8`）：占位渐变圆形+「记」字 → `<img src="/Jianpu.png">`（即顶栏也在用的品牌 Logo）
+
+### 修复
+
+- **编辑器选中仅文字高亮（参考排版按钮选中风格）**（`7b3e0be`）：去掉 `.hl-current-block` 的 `outline: 2px solid` 外边框（只剩 `background: accent 18%` 文字级高亮）；删除 `.editor-current-line-bg` 整行铺满层（折行时跨多视觉行过重）及其 JSX/`cursorVisualTop/H` 计算。选中视觉与顶栏"排版"按钮激活风格统一
+- **对话框标题浅色主题下颜色偏浅**（`95a40c6`）：`.modal` 未设 `color` 继承 body → 浅色主题白底配浅字看不清（关于/页面设置/试听/导出等所有对话框一致）。`.modal` 显式 `color: var(--jp-text-primary)`，浅色主题 text-primary 为深色，白底深字对比足够
 
 ### 文档
 
