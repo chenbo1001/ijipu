@@ -630,10 +630,10 @@ export function TopBar() {
     <div className="topbar" ref={topbarRef}>
       {/* Logo */}
       <div className="topbar-brand">
-        <img className="logo-mark" src="/Jianpu.png" alt="JianpuScript" draggable={false} />
+        <img className="logo-mark" src="/Jianpu.png" alt="爱记谱 iJipu" draggable={false} />
         <span className="topbar-brand-text">
-          <span className="brand-zh">码上简谱</span>
-          <span className="brand-en">JianpuScript</span>
+          <span className="brand-zh">爱记谱</span>
+          <span className="brand-en">iJipu</span>
         </span>
       </div>
 

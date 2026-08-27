@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **应用更名为 iJipu / 爱记谱 / i记谱**：仅改"用户可见"的名字（5 个文件、零内部包名改动，零数据迁移风险）：
+  - 中文名：码上简谱 → **爱记谱**；英文名：JianpuScript → **iJipu**；中文简称：码谱 → **i记谱**
+  - `src/brand/tokens.ts` 改 `brand.name/nameZh/shortName/extensionFull`（`userTitle/extension/.jps` 保留：用户身份"谱师"/文件后缀 `.jps` 不变以保持谱面兼容）
+  - `public/manifest.webmanifest` 改 `name`/`short_name`/`description`（PWA 安装名/手机主屏图标名生效）
+  - `index.html` 改 `<title>`/`<meta description>`/`<meta apple-mobile-web-app-title>`（浏览器标签页/iOS Safari 添加到主屏名）
+  - `src/ui/TopBar.tsx` 改 Logo 区 `<span className="brand-zh">` 与 `brand-en`（顶栏 Logo 文字 + img alt 同步更新）
+  - `src/brand/copy.ts` + `src/dialogs/AboutDialog.tsx`「关于」对话框加**致谢「番茄简谱」原作者与社区** + **本脚本规则高度兼容「番茄简谱」脚本**（致敬块高亮卡片样式）
+  - **未改**（保持兼容/低风险）：`package.json` name/Cargo.toml name/`tauri.conf.json` identifier/localStorage 键 `jianpuscript.*`/`.jps` 后缀/文件夹名（改这些需数据迁移或破坏兼容性，本次仅做"用户可见改名"）
+  - **更新方法**：`npm run build` → 重新上传 `dist/` 到 Cloudflare（手动拖或 Git 集成），PWA / Tauri 桌面同步看到新名
+
 ### 文档
 
 - **PWA 部署与手机端安装指南**（`docs/DEPLOY-PWA.md`）：JianpuScript 已具备完整 PWA 能力（adj155 — `public/sw.js` + `public/manifest.webmanifest` + `src/main.tsx` SW 注册 + `index.html` viewport/manifest/apple-touch-icon），仅需将 `dist/` 部署到任意 HTTPS 静态托管（推荐 Cloudflare Pages / Netlify），手机 Chrome 即可"添加到主屏幕"作为独立 App 运行。文档覆盖：构建产物说明、HTTPS 平台推荐（Cloudflare Pages / Netlify / Vercel / GH Pages / 自建 nginx / 国内 CDN）、部署后验证清单、Android 与 iOS 安装步骤、调试常见问题（HTTP 无 install、SW 未注册、manifest 解析、iOS 7 天缓存失效等）、PWABuilder/Bubblewrap/Capacitor 打包上架路径、回归测试清单

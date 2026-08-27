@@ -11,6 +11,8 @@ export const aboutCopy = {
   body: [
     `${brand.name}（中文名：${brand.nameZh}）—— 下一代代码式简谱制谱引擎。`,
     '我们致力于将编程语言的严谨逻辑，注入中国传统简谱的创作之中。通过一套极简的 .jps 标记语言，让音乐人像写代码一样编排音符，让程序员像调参一样调整音高。敲码即谱，让简谱创作从此进入“脚本时代”。',
+    '本脚本规则高度兼容「番茄简谱」脚本——复刻自原 doc.lezhi99.com/zhipu 在线编辑器的脚本规范，原网站导出的谱子可直接复制进来使用，`.jps` 后缀与原版一致。',
+    '特别致谢「番茄简谱」原作者与社区——本项目在脚本语法、谱面解析、UI 交互等方面大量参考了原站实现，谨以此向原项目致敬。',
   ].join('\n'),
   /** 用户身份 */
   userIdentity: `用${brand.name}写简谱的人，我们称为「${brand.userTitle}」（${brand.userTitleEn}）。`,
@@ -18,6 +20,8 @@ export const aboutCopy = {
   cli: `命令行工作流：${brand.cli.compile} 编译乐谱，${brand.cli.run} 试听播放。`,
   /** 底部情怀 */
   footer: brand.taglineFooter,
+  /** 致敬说明（较短一句，显示在 footer 下方） */
+  acknowledgement: '本项目以 MIT 协议开源，向「番茄简谱」社区致敬。',
 } as const
 
 /** 界面内文案 */

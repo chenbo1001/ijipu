@@ -1,25 +1,25 @@
 /**
  * 品牌设计令牌（Design Tokens）
- * JianpuScript — 码上简谱
+ * iJipu — 爱记谱
  *
  * 品牌主色调：深空蓝 #1E2A5E（音乐的深邃与严谨）+ 霓虹青 #00F0FF（代码与科技感）
  * 界面采用 VS Code 风格的深色主题，乐谱预览区保持纸张白色。
  */
 export const brand = {
   /** 英文名 */
-  name: 'JianpuScript',
+  name: 'iJipu',
   /** 中文名 */
-  nameZh: '码上简谱',
+  nameZh: '爱记谱',
   /** 中文简称（口语化传播） */
-  shortName: '码谱',
+  shortName: 'i记谱',
   /** 用户昵称（社群称呼） */
   userTitle: '谱师',
   /** 用户昵称英文 */
   userTitleEn: 'Score Smith',
-  /** 文件后缀（Jianpu Pro Script） */
+  /** 文件后缀（iJipu Script） */
   extension: '.jps',
   /** 后缀全称 */
-  extensionFull: 'Jianpu Pro Script',
+  extensionFull: 'iJipu Script',
   /** 首页大标题 Slogan */
   taglineMain: '敲码即谱，所见即所得',
   /** 底部情怀 Slogan */
