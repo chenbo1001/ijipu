@@ -415,7 +415,10 @@ function openFileViaInput(): Promise<boolean> {
   return new Promise((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = '.jps'
+    // adj：手机端(iOS/Android 文件管理器)不识别自定义 .jps 扩展——若 accept 只填 ".jps"
+    // 会被文件管理器过滤掉导致搜不到；放宽为纯文本/octet-stream 让任意类型可见，
+    // 用户自行挑选 .jps 即可（PC 端走 showOpenFilePicker 不受影响）
+    input.accept = '.jps,text/plain,.txt,application/octet-stream'
     input.style.display = 'none'
     document.body.appendChild(input)
     let settled = false
