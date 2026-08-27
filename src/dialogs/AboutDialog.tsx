@@ -10,24 +10,20 @@ export function AboutDialog() {
   return (
     <Modal title={uiCopy.about}>
       <div style={{ textAlign: 'center', padding: '8px 0 16px' }}>
-        <div
+        <img
+          src="/Jianpu.png"
+          alt="爱记谱 iJipu Logo"
+          width={64}
+          height={64}
           style={{
-            width: 56,
-            height: 56,
+            display: 'block',
             margin: '0 auto 12px',
             borderRadius: 14,
-            background: `linear-gradient(135deg, ${palette.deepSpaceBlue} 0%, #0f2a6e 100%)`,
-            border: `1px solid ${palette.neonCyan}`,
-            boxShadow: `0 0 16px rgba(0,240,255,0.4)`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 24,
-            color: palette.neonCyan,
+            border: `1px solid ${palette.deepSpaceBlueBorder}`,
+            boxShadow: `0 0 16px rgba(0,240,255,0.35)`,
+            background: 'var(--jp-bg-panel)',
           }}
-        >
-          记
-        </div>
+        />
         <div style={{ fontSize: 18, fontWeight: 700 }}>{aboutCopy.title}</div>
         <div style={{ color: 'var(--jp-accent)', fontSize: 13, marginTop: 4 }}>
           {aboutCopy.tagline}
