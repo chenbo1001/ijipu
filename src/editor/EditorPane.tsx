@@ -13,24 +13,14 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { highlightCodeWrapped } from './highlight'
 import type { BlockMarks } from './highlight'
-import { formatLine, codePosToNoteId } from '../engine'
+import { formatLine, codePosToNoteId, INSTRUMENT_LIB_NAMES } from '../engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 import { VOLTA_HINTS, filterHeaderHints, isBarlineModifierContext, filterModifierHints } from './completions'
 
-/** adj160：编辑器字体选项；adj163：仅等宽字体——textarea 与高亮层需逐字符对齐，
- *  非等宽字体下加粗 span（小节线/行头等）宽度变化会从该字符开始逐字累积错位；
- *  adj173：取消带编程连字（ligatures）的字体（Cascadia Code/JetBrains Mono/Fira Code），
- *  防止 |:、|| 等被渲染成连字字形导致显示层与实际层列错位 */
-const EDITOR_FONT_OPTIONS: { label: string; value: string }[] = [
-  { label: 'Consolas', value: 'Consolas' },
-  { label: 'Courier New', value: 'Courier New' },
-  { label: '等宽（系统默认）', value: 'monospace' },
-]
-
 /** adj165：自动提示浮层状态（null = 不显示） */
 interface Completion {
-  /** 提示类型：修饰符（& 编码）、跳房子（[ 后）、描述头（行首 Tab） */
-  kind: 'modifier' | 'volta' | 'header'
+  /** 提示类型：修饰符（& 编码）、跳房子（[ 后）、描述头（行首 Tab）、Y 行乐器（@ 后，adj302） */
+  kind: 'modifier' | 'volta' | 'header' | 'instrument'
   /** 候选列表（cursorAt = 插入后光标停靠位置，用于带声部名模板） */
   items: { code: string; label: string; cursorAt?: number }[]
   /** 当前高亮索引 */
@@ -65,27 +55,19 @@ function voltaPrefix(lineBefore: string): string | null {
 export function EditorPane() {
   const code = useDocStore((s) => s.code)
   const setCode = useDocStore((s) => s.setCode)
-  const fileName = useDocStore((s) => s.fileName)
-  const dirty = useDocStore((s) => s.dirty)
   const setCursor = useDocStore((s) => s.setCursor)
   const setSelection = useDocStore((s) => s.setSelection)
   const autoFormat = useDocStore((s) => s.autoFormat)
   const parseResult = useDocStore((s) => s.parseResult)
-  // 编辑器字号（adj46：状态栏 +/- 按钮调整）
+  // adj281：editor-head 顶栏已迁出到 EditorFootBar；编辑器主体仍需字号/字体 CSS 变量
   const editorFontSize = useUiStore((s) => s.editorFontSize)
-  const setEditorFontSize = useUiStore((s) => s.setEditorFontSize)
-  // adj160：编辑器字体下拉框（与字号按钮同排）
+  // adj160：编辑器字体
   const editorFont = useUiStore((s) => s.editorFont)
-  const setEditorFont = useUiStore((s) => s.setEditorFont)
-  // adj233/adj235：自动折行开关——默认关闭（wrap=off 横向滚动对位正确）；
-  // 开启时 textarea 与高亮层同用 break-word（空格后折行 + 长串边界断行），
-  // 两层折行点一致且无横向滚动条
+  // adj233/adj235/adj311：自动折行开关（折叠点计算与 textarea wrap=soft/off 联动）
   const autoWrap = useUiStore((s) => s.autoWrap)
-  const setAutoWrap = useUiStore((s) => s.setAutoWrap)
-  // adj221：编辑器字体/字号随谱保存（# jps-config）——谱面有值时优先（打开带设置的
-  // 谱直接生效），无则回退 uiStore 全局默认；调整时写谱面 + 同步全局默认
+  // adj221：编辑器字体/字号随谱保存（# jps-config）——谱面有值时优先，
+  // 无则回退 uiStore 全局默认；写入在 EditorFootBar 处理
   const pageConfig = useDocStore((s) => s.pageConfig)
-  const setPageConfig = useDocStore((s) => s.setPageConfig)
   const effectiveFontSize = pageConfig.editorFontSize ?? editorFontSize
   const effectiveFont = pageConfig.editorFont ?? editorFont
 
@@ -106,6 +88,9 @@ export function EditorPane() {
   const [completion, setCompletion] = useState<Completion | null>(null)
   const completionRef = useRef<Completion | null>(null)
   completionRef.current = completion
+  // adj296b：回车换行标记——onChange 后横向滚动回新行行首光标
+  //（长行末回车时视口停在右侧，不滚回行首会看不到新行输入）
+  const enterKeyRef = useRef(false)
 
   // 光标联动（M3）：光标移动 → 计算 notepos id → 预览高亮
   const setActiveNoteId = useDocStore((s) => s.setActiveNoteId)
@@ -180,6 +165,19 @@ export function EditorPane() {
     setCompletion(null) // adj165：滚动时关闭提示（位置不再准确）
   }
 
+  // adj296b：回车换行后把横向滚动回滚到行首——textarea 原生不处理此场景：
+  // 关闭自动折行（wrap=off）时在长行末尾回车，新行行首在左侧但视口仍停在右侧，
+  // 用户看不到输入位置；其余场景（方向键/输入）由浏览器原生保证光标可见，
+  // 不做额外滚动（避免逐键检查造成多余操作）
+  const scrollToLineStartAfterEnter = () => {
+    const ta = taRef.current
+    if (!ta) return
+    if (enterKeyRef.current) {
+      enterKeyRef.current = false
+      ta.scrollLeft = 0 // 新行行首 col=0 → 滚回最左
+    }
+  }
+
   // adj195：每源码行的视觉行数（软折行下可能 >1）——行号栏按视觉行高渲染，
   // 折行不产生新行号、并用延续标记区分新行与折行
   const [contentW, setContentW] = useState(0)
@@ -216,46 +214,59 @@ export function EditorPane() {
   }, [])
   // adj227：以实际层（textarea）的真实折行点为准——克隆同款 textarea 逐行测量
   // 折行点（wrapPoints），显示层按此手动分行，彻底消除 span 断行差异导致的错位；
-  // visualLines（行号栏/背景高度）同样用测量结果（更准，替代此前的 pre-wrap probe）
+  // adj309：用 mirror div + Range API 测字符 X 坐标替代 scrollHeight + Math.round——
+  // scrollHeight 取整在 sub-pixel 边界处 ±1 字符误差，Range 直接给像素位置无误差；
+  // mirror div 用 word-break:keep-all 与 textarea 折行行为一致（仅空格处折行）。
   const wrapPoints = useMemo(() => {
     const lines = code.split('\n')
     // adj233：关闭自动折行时不测量（wrap=off 无折行，长行横向滚动对位正确）
     if (!autoWrap) return lines.map(() => [])
-    if (contentW <= 0 || taClientW <= 0) return lines.map(() => [])
-    // 克隆 textarea（同 textarea 样式）测每行折行点；短行（估算必不折）跳过
-    const probe = document.createElement('textarea')
-    probe.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;height:24px;resize:none;overflow:hidden;border:none;white-space:pre-wrap;overflow-wrap:normal;wrap:soft;font-family:${effectiveFont},monospace;font-size:${effectiveFontSize}px;line-height:${editorLineH}px;padding:10px 14px;box-sizing:border-box;width:${taClientW}px;font-variant-ligatures:none;tab-size:4`
-    document.body.appendChild(probe)
-    const lh = editorLineH
-    const rowsOf = (text: string) => {
-      probe.value = text
-      void probe.offsetHeight // 强制 reflow
-      return Math.max(1, Math.round((probe.scrollHeight - 20) / lh))
-    }
-    const charW = effectiveFontSize * 0.6
+    // adj225 延伸：用 taRef.current.clientWidth（实时，与 textarea reflow 同帧）——
+    // 不读 taClientW state（state 滞后一帧，拖动/缩放窗体时镜像用旧宽 → 折行点错位）。
+    // taClientW 仅作 deps 触发 useMemo 重算；测量时一律用 ref 的实时宽。
+    const ta = taRef.current
+    const w = ta ? ta.clientWidth : 0
+    if (w <= 0) return lines.map(() => [])
+    // mirror div：与 textarea 同款样式，width 直接用实时 clientWidth（与 textarea 一致）。
+    // box-sizing: border-box 让内容 = w - 28（去 padding 14×2），与 textarea（box-sizing:border-box）完全一致。
+    const mirror = document.createElement('div')
+    mirror.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;width:${w}px;padding:10px 14px;box-sizing:border-box;font-family:${effectiveFont},monospace;font-size:${effectiveFontSize}px;line-height:${editorLineH}px;white-space:pre-wrap;overflow-wrap:normal;tab-size:4;font-variant-ligatures:none;direction:ltr`
+    document.body.appendChild(mirror)
+    // adj：去掉「短行跳过」优化（line.length*charW <= cw return []）——
+    // charW = fontSize*0.6 是估算（`=` advance ~8.4 但 0.6×14=8.4 是近似，sub-pixel 临界时会
+    // 让 mirror 误判「装得下不折」、而 textarea 实际整数像素 layout 装不下折了 → 一层折一层没折 → 错位。
+    // 所有行都用 Range 测真实字符 X 坐标，精确无误差；短行 Range 也只测几十字符，性能可接受）
     const res = lines.map((line) => {
-      if (line.length * charW <= contentW) return [] // 必不折行
-      const pts: number[] = []
-      let offset = 0
-      while (offset < line.length) {
-        const rest = line.slice(offset)
-        if (rowsOf(rest) <= 1) break
-        // 二分：第一行容纳字符数
-        let lo = 1
-        let hi = rest.length
-        while (lo < hi) {
-          const mid = Math.floor((lo + hi) / 2)
-          if (rowsOf(rest.slice(0, mid)) >= 2) hi = mid
-          else lo = mid + 1
+      mirror.textContent = line
+      void mirror.offsetHeight // 强制 reflow
+      const node = mirror.firstChild
+      if (!node || node.nodeType !== 3) return []
+      // 测每字符 X 坐标：top 突然变大 = 新行起点 → 折行点
+      const rects: { left: number; right: number; top: number }[] = []
+      for (let i = 0; i < line.length; i++) {
+        const range = document.createRange()
+        try {
+          range.setStart(node, i)
+          range.setEnd(node, i + 1)
+        } catch {
+          break
         }
-        const first = Math.max(1, lo - 1) // 第一行 first 字符
-        offset += first
-        pts.push(offset)
-        if (first >= rest.length) break
+        const r = range.getBoundingClientRect()
+        rects.push({ left: r.left, right: r.right, top: r.top })
+        range.detach?.()
+      }
+      const pts: number[] = []
+      for (let i = 1; i < rects.length; i++) {
+        const cur = rects[i]
+        const prev = rects[i - 1]
+        // 新行起点：top 显著大于 prev 且 left 显著小于 prev
+        if (cur.top > prev.top + 0.5 && cur.left < prev.left - 1) {
+          pts.push(i)
+        }
       }
       return pts
     })
-    document.body.removeChild(probe)
+    document.body.removeChild(mirror)
     return res
   }, [code, contentW, taClientW, effectiveFontSize, editorLineH, effectiveFont, autoWrap])
 
@@ -348,9 +359,38 @@ export function EditorPane() {
       setCompletion({ kind: 'header', items, index: 0, ...compPos(line, col) })
       return
     }
+    // adj302：Y 行乐器补全——光标在 Y: 行、已按空格或输入 @（进入填乐器阶段）时弹音色库列表
+    if (/^Y\s*:/.test(lineBefore) && /\s/.test(lineBefore.slice(lineBefore.indexOf(':')))) {
+      const after = lineBefore.replace(/^Y\s*:\s*@?/, '') // 已输入前缀（含可选 @ 剥离）
+      const items = Object.values(INSTRUMENT_LIB_NAMES)
+        .filter((n) => n.startsWith(after))
+        .map((n) => ({ code: n, label: '乐器' }))
+      if (items.length > 0) {
+        const { line, col } = lineColOf(ta.value, pos)
+        setCompletion({ kind: 'instrument', items, index: 0, ...compPos(line, col) })
+      } else {
+        setCompletion(null)
+      }
+      return
+    }
     // 仅 Q 行（曲行）内提示
     if (!/^Q(\d*(?:"[^"]*")?\s*:)/.test(lineBefore) && !/^\s*Q/.test(lineBefore)) {
       setCompletion(null)
+      return
+    }
+    // adj302b：曲行内 @ 乐器补全——输入 @（或 @ + 前缀）时弹音色库乐器列表
+    const instM = /@([^@\s]*)$/.exec(lineBefore)
+    if (instM) {
+      const after = instM[1] // @ 后已输入前缀（剥离 @）
+      const items = Object.values(INSTRUMENT_LIB_NAMES)
+        .filter((n) => n.startsWith(after))
+        .map((n) => ({ code: '@' + n, label: '乐器' }))
+      if (items.length > 0) {
+        const { line, col } = lineColOf(ta.value, pos)
+        setCompletion({ kind: 'instrument', items, index: 0, ...compPos(line, col) })
+      } else {
+        setCompletion(null)
+      }
       return
     }
     const mod = modifierPrefix(lineBefore)
@@ -407,6 +447,17 @@ export function EditorPane() {
       const m = /&([a-zA-Z+]*)$/.exec(lineBefore)
       if (m) replaceLen = m[1].length
       insert = item.code + ' '
+      cursorAt = insert.length
+    } else if (c.kind === 'instrument') {
+      // adj302/302b：Y 行乐器补全（替换 Y: 后内容）或曲行 @ 乐器补全（替换 @ + 前缀）
+      if (/^Q/.test(lineBefore)) {
+        const m = /@([^@\s]*)$/.exec(lineBefore)
+        if (m) replaceLen = 1 + m[1].length // @ + 已输入前缀
+      } else {
+        const m = /^(Y\s*:\s*)(@?)(.*)$/.exec(lineBefore)
+        if (m) replaceLen = m[2].length + m[3].length // @ + 已输入前缀
+      }
+      insert = item.code
       cursorAt = insert.length
     } else {
       // 替换 [ 后已输入内容；插入 [ 本身 + 候选 + ]（无 ] 的候选不加）
@@ -476,6 +527,12 @@ export function EditorPane() {
       return
     }
     if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return
+    // adj296b：回车换行（无补全时）→ 标记，onChange 后横向滚回新行行首光标；
+    // 其余场景横向滚动仍由用户手动控制
+    if (e.key === 'Enter') {
+      enterKeyRef.current = true
+      return
+    }
     const key = e.key
     // adj202：描述头列表弹出时，行首命令快捷键让位——让字母直接输入用于过滤列表
     // （否则按 q 会被插入 Q: 拦截，无法收窄候选）；列表关闭后恢复快捷键
@@ -544,8 +601,12 @@ export function EditorPane() {
     if (formatLeftLine(next, line)) return
     editingLineRef.current = line
     setCode(next)
-    // adj165：输入后更新自动提示
-    requestAnimationFrame(updateCompletion)
+    // adj165：输入后更新自动提示；adj296b：回车换行后横向滚回行首（仅此场景干预，
+    // 其余光标可见性由浏览器原生保证）
+    requestAnimationFrame(() => {
+      updateCompletion()
+      scrollToLineStartAfterEnter()
+    })
   }
 
   useEffect(() => {
@@ -590,64 +651,7 @@ export function EditorPane() {
 
   return (
     <div className="editor-pane">
-      <div className="editor-head">
-        {/* adj63：文件名从菜单栏右侧移至此（.jps 标签处） */}
-        <span className="file-tag">
-          {(fileName || '未命名') + '.jps'}
-          {dirty && <span className="dirty-dot" title="有未保存的修改" />}
-        </span>
-        {/* adj233：自动折行开关——关闭（默认）时 wrap=off 长行横向滚动，未折行
-            逐字符对位正确；开启时软折行（textarea 逐字符折行与高亮层切分对位
-            尚不能完全保证，遇错位可关闭） */}
-        <label className="editor-autowrap" title="自动折行（关闭时长行横向滚动，对位更可靠）">
-          <input type="checkbox" checked={autoWrap} onChange={(e) => setAutoWrap(e.target.checked)} />
-          <span>自动折行</span>
-        </label>
-        {/* adj160：编辑器字体下拉框（字号按钮左侧）；adj221：随谱保存（# jps-config） */}
-        <span className="editor-font-select">
-          <select
-            value={effectiveFont}
-            onChange={(e) => {
-              const f = e.target.value
-              setEditorFont(f)
-              setPageConfig({ ...pageConfig, editorFont: f }, true)
-            }}
-            title="编辑器字体"
-            style={{ fontFamily: `'${effectiveFont}', monospace` }}
-          >
-            {EDITOR_FONT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </span>
-        <span className="editor-font-control">
-          <button
-            className="font-btn"
-            title="减小字号"
-            onClick={() => {
-              const v = Math.max(10, effectiveFontSize - 1)
-              setEditorFontSize(v)
-              setPageConfig({ ...pageConfig, editorFontSize: v }, true)
-            }}
-          >
-            A−
-          </button>
-          <span className="font-size-val">{effectiveFontSize}px</span>
-          <button
-            className="font-btn"
-            title="增大字号"
-            onClick={() => {
-              const v = Math.min(26, effectiveFontSize + 1)
-              setEditorFontSize(v)
-              setPageConfig({ ...pageConfig, editorFontSize: v }, true)
-            }}
-          >
-            A+
-          </button>
-        </span>
-      </div>
+      {/* adj281：editor-head 已迁出到 EditorFootBar；编辑器主体直接铺满 */}
       <div className="editor-body" style={editorStyle}>
         <div className="editor-gutter" ref={gutterRef} aria-hidden="true" style={{ width: gutterNumW }}>
           <div className="editor-gutter-inner" ref={gutterInnerRef}>
@@ -745,15 +749,23 @@ function CompletionPopover({
   onPick: (c: Completion) => void
 }) {
   const { x, y, items } = completion
-  // 估算浮层高：每项约 24px + 上下 padding
+  // 估算浮层尺寸：每项约 24px + 上下 padding + 估算宽
   const estH = items.length * 24 + 8
+  const estW = 240
+  const containerW = containerRef?.clientWidth ?? 800
   const containerH = containerRef?.clientHeight ?? 600
-  // 默认显示在光标下方（y 已含行高）；若超出容器底部则翻转到光标上方
+  // 内容区 left padding=14；浮层左缘默认在光标右侧；超出右边界翻转到左侧
+  const baseLeft = x + 14
+  const flipH = baseLeft + estW > containerW
+  const left = flipH ? Math.max(4, baseLeft - estW) : baseLeft
+  // 默认在光标下方；超出底部翻转到上方，并钳制不超容器下沿
   const below = y + 10
-  const flip = below + estH > containerH
-  const top = flip ? Math.max(4, y - lineH - estH + 10) : below
+  const flipV = below + estH > containerH
+  const top = flipV
+    ? Math.max(4, y - lineH - estH + 10)
+    : Math.min(below, containerH - estH - 4)
   return (
-    <div className="editor-completion" style={{ left: x + 14, top }}>
+    <div className="editor-completion" style={{ left, top }}>
       {items.map((it, i) => (
         <div
           key={it.code}

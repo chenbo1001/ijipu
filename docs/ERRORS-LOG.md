@@ -510,6 +510,62 @@
 - **解决**（adj84/85）：① types 加 `symbols`，tokenizer rest/rhythm 保留并支持前置 `&zkh`，render 括号条件放宽为 `t.symbols.length > 0`；② bars/frag 两处附点段 perBeat 改为所在拍 `perBeats[p]`，拍宽 = perBeat×dur 自洽（smoke [43] 旧断言「附点段 = 0.5×前音符宽」同步更新为新语义）
 - **预防**：新增符号能力（括号等）时检查所有 token 种类（note/rest/rhythm）而非只实现音符；附点/跨拍段的 perBeat 必须与所在拍一致，否则行尾留白——断言用「末段右贴右边界」兜底
 
+### E-2026-083 反复记号播放：第二遍 atMs 与第一遍重叠（音频重叠/高亮错乱）
+- **场景**：adj282 实现预览播放进度跟随色块时发现——`|: 1 2 :| 3 4 |` 试听，第二遍 1 2 与第一遍 1 2 **同时响**（音频重叠），高亮在第二遍全灭
+- **现象**：`buildPlaySequence` 反复展开后同一音符 push 两次，但 `atMs` 只由布局时钟 `groupStartMs + barStart + beatPos` 决定，与遍数无关 → 展开事件 atMs 重复；`schedulePlay` 按 atMs 用 AudioContext 调度 → 同 atMs 两遍事件同时触发；`computeActive`（`atMs <= cur < atMs+durationMs`）在第二遍时 cur 已超所有 atMs → 高亮丢失；`doneTimer` 用布局总时长 → 反复谱播放中途被截断
+- **根因**：布局时钟不感知反复遍数；反复只影响事件遍历顺序，未推进时间轴
+- **解决**（adj282，`src/engine/playback/sequence.ts`）：新增「播放遍时钟」——`passMs`（当前遍偏移）+ `passEndMs`（本遍已播块末，= passMs + 块时长，块时长与音符时值/连音合并无关）；事件 `atMs = passMs + 布局时钟`（同块各声部共享 → 多声部同步保持）；仅在**回跳**（`:|`/`:|:` 第一遍结束、`&dc` 从头反复）时 `passMs = passEndMs` 推进新遍；单向前跳（`&ds`/`&ty`/跳房子第二遍跳过）不推进（跳过段不占时间，语义与原布局时钟一致）；`totalMs = passEndMs`（含反复的展开总时长）。smoke [15]/[17] 新增：反复/跳房子展开 atMs 单调不重叠 + 总时长 = 展开遍数、多声部同拍 atMs 相等 + 各声部内单调
+- **预防**：播放序列的任何时间计算必须以「播放顺序」为基准（反复展开后的实际播放），布局时钟只能用于块内相对位置；多声部同步断言必须同时覆盖「同拍相等」与「遍间不重叠」两个维度
+
+### E-2026-084 单声部试听调试两问题：开始播放滚到底 + 第二曲行中途色块/高亮消失
+- **场景**：adj285 单声部试听调试（色块改红/高亮恢复红色后实测）
+- **现象**：① 点击「播放」瞬间预览窗格直接滚到谱面最后；② 播放到第二曲行（第二个 Q 行）约一半时，色块与音符高亮同时消失
+- **根因**：① `schedulePlay` 的 `onNote` 回调在同步循环内对**每个事件**调用 `setActiveNoteId`，React 批处理后只保留最后一次 → activeNoteId = 最后一个事件的音符 → PreviewPane 的 activeNoteId 联动滚动直接滚到底；② adj282 引入的 `passEndMs` 公式漏加 `groupStartMs`（写成 `passMs + blockDurOfGroup`），多块（多曲行）谱时只累计到第一块结束 → `totalMs` 偏小 → `doneTimer`（totalMs+300）在第二行中途触发 → stop() 清空色块/高亮/轨道
+- **解决**（adj285）：① 移除 onNote 的同步 setActiveNoteId，高亮与滚动跟随统一由 `computeActive`（interval 50ms 按当前时间计算）负责——设置当前活动音符 id（首个），音符 id 不变不触发滚动，播放开始不再滚到底、播放中色块区域保持在视口内；② `passEndMs = max(passEndMs, passMs + groupStartMs[g] + blockDurOfGroup[g])`；smoke [15] 新增多曲行断言（第二行 atMs=2000、totalMs=4000、8 事件）
+- **预防**：① 播放序列的 totalMs 必须覆盖全部块（多曲行/多页），断言用「第二行 atMs + 总时长」兜底；② 异步音频调度（同步循环批量 schedule）内不要用回调同步设置「单值」状态（批处理后语义失真）——播放跟随/高亮一律由定时器按当前播放时钟现算
+
+### E-2026-085 力度修饰符斜体加粗 + 渐强渐弱 hairpin（起点/终点定位 + "+" 提升）
+- **场景**：新增力度修饰符（`&pp` `&p` `&mp` `&mf` `&f` `&ff` `&fff` `&sf` `&fp` `&sfp` `&rit`，音符上方**斜体加粗**）与渐强渐弱（`<`/`>` 起、`!` 终，`<+`/`>++` 逐级抬升；形状为**开口尖括号 hairpin**，高度与对音符间距对齐连音线）
+- **现象**：① 力度编码此前走渲染 fallback 呈普通上方小文本（非斜体、不加粗）；② 渐强渐弱此前渲染为**闭合梯形楔形**，且起点/终点取值用 `prevBeatAcc`（恒为小节末音符拍）→ `<` 起点错位到小节最后一个音符；`<+`/`>++` 抬升级数虽被 tokenizer 收进 code 但布局/渲染未用；记号 y 用固定 `yTop-26`（离音符过远，异于连音线间距）
+- **根因**：① `renderNote` 的 `symbols` 循环对未知 `&` 编码统一 fallback 渲染（无力度/速度斜体分支）；② layout 渐强渐弱定位按「小节内音符累积拍」近似取 `prevBeatAcc`，该变量在音符放置循环里被每个音符覆盖、结束时=小节末音符 → 装饰 token 处理取其拍位即错位；抬升级数未透传到 `PlacedDynamic`/`renderDynamic`
+- **解决**（adj）：① `render/index.ts` 增 `DYN_MARKS`（力度/速度编码集），`renderNote` 单独命中时以 `font-style=italic` + `font-weight=bold` 居中于数字槽渲染，其余 fallback 不变；② `renderDynamic` 改为开口尖括号 hairpin（尖点 + 上下两线，张开半高 `DYN_HALF_H×s` 如连音线弧高），并按 `plus×VOLTA_RAISE` 上移；`layout/index.ts` bars 行按小节音符顺序记录 `noteCenters`（每音符数字槽中心），装饰循环用游标 `nk` 对齐 `<`/`>`/`!` 所跟音符（起点/终点=其槽中心），y 改按「行音符数字顶 − (LAYER_GAP+DYN_HALF_H+SLUR_W/2)×s」计算（贴近音符、间距对齐连音线）；③ `types.ts` `PlacedDynamic` 增 `plus`；`spacing.ts` 增 `DYN_HALF_H`；`completions` 补力度编码提示；`smoke [20]` 新增斜体加粗、hairpin、起止点、plus 断言
+- **预防**：装饰 token（渐强渐弱/连音线/滑音等）定位必须取「其所跟音符」的槽中心，不能用全局/小节末音符近似；`+`/`-` 等抬升级数（类似跳房子）应从 code 解析并在 layout→render 全程透传，底层类型（`Placed*`）同步增字段；记号 y 与间距应复用上方元素基准（LAYER_GAP/连音线）而非固定偏移，并随音符字号缩放；`.jps` 语法改动同步 `JPS-SPEC.md`/`SYNTAX.md` 且以 smoke 断言回归
+
+### E-2026-086 Ctrl+S 保存静默失败无反馈（“有时按 Ctrl+S 不保存”）
+- **场景**：编辑区按 Ctrl+S 保存，用户反馈“有时不会保存”（已打开/另存过的文件、无弹窗、未保存红点仍亮）
+- **现象**：保存失败时无任何提示，用户误以为已保存；`dirty` 保持 true、红点仍亮、内容未写入文件
+- **根因**：`docStore.saveFile` 有 fileHandle 时 `createWritable()` 若抛错（句柄权限失效 NotAllowedError / 文件被占用等），catch 后转 `saveFileAs`；若 `saveFileAs` 也失败（`showSaveFilePicker` 不可用或抛错被吞）则返回 `false`，全过程静默无反馈
+- **解决**（adj）：① 新增轻量浮动提示 `ui/Toast.tsx`（右下角、按 kind 着色，ok 1.8s / warn·error 4s 自动隐藏）；② `uiStore` 增 `notice`/`showNotice`/`clearNotice`；③ `docStore.saveFile`/`saveFileAs` 成功 → `showNotice(saveOk)`；`saveFileAs` 失败（picker 不可用 → `saveUnsupported`；真实异常 → `saveAsFailed`）；用户取消另存为（AbortError）静默不提示；④ 文案集中 `brand/copy.ts`；样式 `index.css` 复用主题变量
+- **预防**：任何异步写（保存/导出等）失败必须有可见反馈，不能静默；写失败后应引导用户走「另存为」重新授权；区分「用户主动取消」（静默）与「真实失败」（提示）避免误报
+
+### E-2026-087 小节线「附加内容顺序敏感」：修饰符/引号注释/跳房子任意顺序解析
+- **场景**：用户反馈 `|"p:2/4"&hs` 可解析，但 `|&hs"p:2/4"` 不行（花S修饰符 + 临时节拍丢失）
+- **现象**：小节线后的引号备注（临时节拍/备注）只在「最开头」处理一次；当 `&` 修饰符在引号前（`|&hs"p:2/4"`）时引号被跳过 → 临时节拍不解析；音符块注释（`1"注释"&tr`）同样因注释后 `break` 而丢失后续修饰符
+- **根因**：① tokenizer 小节线处理：引号备注在循环外只处理一次，未与 `[`/`]`/`&` 一同按任意顺序循环（adj295 只覆盖跳房子+修饰符，漏了引号）；② `collectSuffix` 音符注释用 `break` 结束收集，注释后仍合法的 `&` 等修饰符不再收集
+- **解决**（adj）：① 小节线：删除循环外的「引号只处理一次」，把引号备注分支并入 `[`/`]`/`&` 的任意顺序循环（`|"p:2/4"&hs` 与 `|&hs"p:2/4"` 均解析出 marks=[hs] + comment="p:2/4"，渲染花S + 临时节拍分数）；② 音符块：`collectSuffix` 注释后不再 `break`，继续收集后续修饰符（`1"注释"&tr` 与 `1&tr"注释"` 等价）；smoke 新增「小节线任意顺序」「音符注释任意顺序」断言
+- **预防**：凡「同一块内多个独立元素（修饰符/注释/跳房子）」应做成**顺序无关**（循环消费 + 各自分支），不能先处理其中一种；语法改动同步 `JPS-SPEC.md` 且以 smoke 断言回归
+
+### E-2026-088 试听色块残留：上一行色块冻结驻留在行末/旧行
+- **场景**：用户反馈试听时「色块已走到新行，上一行色块还残留在行末」
+- **现象**：播放到反复/跳房子段落时，旧行的跟随色块停在原位置不动（冻结），没有随下一段音乐出现/消失；多行谱上表现为旧行行末处残留一个色块
+- **根因**：`preview/PreviewPane.tsx` 的 `playheadPosOf` 隐藏条件只写了「**本曲行最后一段**结束时才隐藏」（`i === segs.length - 1 && currentMs >= a.atMs + a.durationMs`）。反复/跳房子（`|:`/`:|`/`[ ]`/`&dc`/`&ds` 等）在展开后会留下**段间空隙**——当前拍段已结束、下一拍段还未开始（`currentMs` 落在空隙里），此时 `i` 并非最后一段 → 旧行色块按 `a.x` 停在「已结束的上一段」位置冻结，直到下一段开始才跳走；视觉即旧行驻留/行末残留
+- **解决**（adj313，`src/preview/PreviewPane.tsx`）：隐藏条件由「仅最后一段结束」放宽为「**当前段已结束即隐藏**」（`currentMs >= a.atMs + a.durationMs` 即返回 null）——色块只在该拍段「正在发声」期间显示，旧行按各自发声时间出现/消失，不再冻结残留；段间空隙（该处无声）无色块，与音频一致
+- **预防**：跟随/高亮类元素（试听色块、音符高亮）的显隐必须以「当前是否正在发声」为判据，不能在拍段序列末尾才判定；凡播放序列展开（反复/跳房子）会产生的**时间空隙/跳变**，渲染侧必须显式处理，不能依赖「到序列末尾」推断单个元素何时消失
+
+### E-2026-089 发布为 http:// 网站后「文件/打开」无反应（非安全上下文无 File System Access API）
+- **场景**：`npm run dev`（localhost）「文件 → 打开」正常；`npm run build` 后把 `dist/` 发布为 `http://` 网站，点「文件/打开」毫无反应
+- **现象**：点击「文件/打开」静默失败、无任何提示、无弹窗；同一功能在 `localhost` 下正常。可排除「页面白屏/资源 404」（菜单能点开，说明 JS 已加载）
+- **根因**：`docStore.openFile` 依赖 Web File System Access API 的 `window.showOpenFilePicker`；该 API 仅在**安全上下文**（`https://` 或 `localhost`）且 Chromium 内核（Chrome/Edge）下存在。发布到 `http://`（非 localhost）即非安全上下文 → `showOpenFilePicker` 为 `undefined` → `openFile` 走 `typeof picker !== 'function'` 分支**静默 `return false`**，无任何反馈；`showSaveFilePicker`（另存为）同理
+- **解决**（adj281）：`openFile` 检测到 `showOpenFilePicker` 不存在时，降级用标准 `<input type="file" accept=".jps">` 读取文本载入谱面（打开本质只读文本，不依赖文件系统 API）。新增模块级 `store/docStore.ts#openFileViaInput()`：读文件文本 → 载入 code/parseResult/pageConfig，降级环境无写回权限故 `fileHandle` 置 null、`useUiStore.showNotice(uiCopy.openFallbackNotice, 'warn')` 提示改用「导出」；加载逻辑复用正常打开的全部 set 字段。文案 `brand/copy.ts` 新增 `openFallbackNotice`
+- **预防**：凡依赖浏览器专属/非标准 API（File System Access、clipboard、Fullscreen、蓝牙等）的功能，入口处**必须做能力检测**并给**非安全上下文 / 非 Chromium** 用户一条可用降级路径（如标准 `<input type=file>`、`<canvas.toBlob>` 下载），不能静默失败；发布前用 `http://`（非 localhost）或 `file://` 打开构建产物跑一遍「文件/打开/另存为」验证
+
+### E-2026-090 编辑器长行折行后 textarea 与高亮层文字错位（`#===...=== 描述/主体` 装饰行在临界窗口宽度）
+- **场景**：将「码上简谱」模板（含两行 `#============================...===...===` 装饰行）粘贴进编辑器，调整窗口宽度到一定大小时（约 340~350px 视口宽）
+- **现象**：两行 `#===...===以下为描述头定义/以下开始简谱主体...===` 中，textarea 实际折行（行高增加为 2 行），但高亮层（显示层）仍按单行排版（`pts=[]`），导致**行错位**——textarea 已折而显示层未折，或反之
+- **根因**：① `wrapPoints` useMemo 中用 `charW = fontSize * 0.6 = 8.4` 做**短行跳过**（`if (line.length * charW <= cw) return []`）→ `=` 实际 advance ≈ **8.40625**（sub-pixel），`=` 28 + `#` + 中文 9 字符总宽 319.44px，在临界 taClientW=347（内容 319）时：`charW=8.4` 估算 319.2 ≤ 319 → 判「装得下不折」`pts=[]`；而 textarea 实际整数像素 layout 总宽 319.44 > 319 → **装不下折了** → 一层折一层没折。② 此前还尝试过 `box-sizing` 修复（adj232 思路：textarea 改 `box-sizing:border-box`）但 `charW` 估算误差才是 sub-pixel 临界错位的根因
+- **解决**（adj282，`src/editor/EditorPane.tsx` `wrapPoints` useMemo）：**去掉「短行跳过」优化**——所有行都用 Range API `getBoundingClientRect` 测真实字符 X 坐标（精确反映 textarea layout），不再依赖 `charW` 估算 → 临界窗口宽度下 mirror 测出的折行点 == textarea 实际折行点。同时利用 `adj225` 思路直接读 `taRef.current.clientWidth`（实时，与 textarea reflow 同帧），不回 state（避免一帧滞后）
+- **预防**：① **任何折行测量都不要用字符宽估算**做短行跳过/条件判断（`fontSize*0.6` 等都是近似，sub-pixel 边界必翻车），全部用 Range API 测真实几何；② 测量镜像（mirror/clone）的 `box-sizing` / `padding` / `font-size` / `line-height` / `font-variant-ligatures` / `tab-size` / `word-break` / `overflow-wrap` / `white-space` 必须与 textarea **逐项一致**（adj232 补 border:none、adj234 overflow-wrap:normal、adj247 tab-size:4、adj282 box-sizing:border-box 一致）；③ `wrapPoints` deps 用 `taClientW` 仅触发重算，**测量时直接读 `taRef.current.clientWidth`**避免 state 滞后
+
 ## 五、预防清单（Checklist，提交/交付前自检）
 
 - [ ] 所有 npm 命令带 `--cache "D:/Coding/JPCoder/.npm-cache"`
@@ -598,4 +654,5 @@
 | v0.1 | 2026-08-18 | 追加 E-2026-078（线宽统一 1.1/1.8 + 小节线增高 ±4px + 跳房子起止 ±2px） |
 | v0.1 | 2026-08-18 | 追加 E-2026-079（预览缩放 −/+ 工具条 + 浅色模式主按钮黑字修复） |
 | v0.1 | 2026-08-18 | 追加 E-2026-080（预览缩放并入顶部工具条 + 移除工具栏撤销/重做按钮） |
+| v0.1 | 2026-08-18 | 追加 E-2026-088（试听色块残留：反复/跳房子空隙导致旧行色块冻结在行末，adj313 改为「段结束即隐藏」） |
 

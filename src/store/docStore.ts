@@ -15,6 +15,8 @@ import {
   type HistoryState,
 } from '../editor/history'
 import { saveFileHandle, loadFileHandle } from './fileHandleDb'
+import { useUiStore } from './uiStore'
+import { uiCopy } from '../brand/copy'
 
 export type ViewType = 'code' | 'split' | 'preview'
 
@@ -53,6 +55,10 @@ interface DocState {
   activeNoteIds: string[]
   /** adj263：播放当前 ms（PlaybackDialog RAF 驱动），PreviewPane 用其渲染平滑移动的整列竖向色框 */
   currentMs: number
+  /** adj282：播放轨道（事件 atMs 单调，含反复展开），PreviewPane 跟随色块定位用。
+   *  adj299：group 唯一标识曲行（多声部 Q1 与单声部行可共用 voice 号，必须用 group 定位）；
+   *  voice 用于色块配色 */
+  playheadTrack: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number }[]
   /** adj262：多声部 voiceBlocks（纯曲部 yTop/yBottom/x）——播放时渲染竖向色框覆盖整列 */
   voiceBlocks: { x: number; yTop: number; yBottom: number; pageIndex: number; voices: number[] }[]
   /** 编辑器光标跳转请求（点击谱面音符 / 撤销重做恢复选区时触发） */
@@ -79,6 +85,8 @@ interface DocState {
   setActiveNoteIds: (ids: string[]) => void
   /** adj262：设置多声部 voiceBlocks（layout 后由 PlaybackDialog 写入） */
   setVoiceBlocks: (vbs: { x: number; yTop: number; yBottom: number; pageIndex: number; voices: number[] }[]) => void
+  /** adj282：设置播放轨道（PlaybackDialog 播放时写入、停止时清空） */
+  setPlayheadTrack: (t: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number }[]) => void
   /** adj263：设置播放当前 ms（RAF 驱动，PreviewPane 渲染平滑色框） */
   setCurrentMs: (ms: number) => void
   jumpCursor: (pos: number, end?: number) => void
@@ -166,6 +174,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   activeNoteId: null,
   activeNoteIds: [],
   currentMs: 0,
+  playheadTrack: [],
   voiceBlocks: [],
   cursorJump: null,
   undoStack: [],
@@ -230,6 +239,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   setActiveNoteId: (id) => set({ activeNoteId: id }),
   setActiveNoteIds: (ids) => set({ activeNoteIds: ids }),
   setVoiceBlocks: (vbs) => set({ voiceBlocks: vbs }),
+  setPlayheadTrack: (t) => set({ playheadTrack: t }),
   setCurrentMs: (ms) => set({ currentMs: ms }),
   jumpCursor: (pos, end) =>
     set((s) => ({
@@ -268,6 +278,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       fileHandle: null,
       activeNoteId: null,
       activeNoteIds: [],
+      playheadTrack: [],
       voiceBlocks: [],
       cursorJump: null,
       undoStack: [],
@@ -293,6 +304,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       fileHandle: null,
       activeNoteId: null,
       activeNoteIds: [],
+      playheadTrack: [],
       voiceBlocks: [],
       cursorJump: null,
       undoStack: [],
@@ -307,7 +319,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
   fileHandle: null,
   openFile: async () => {
     const picker = (window as any).showOpenFilePicker
-    if (typeof picker !== 'function') return false
+    // adj281：非安全上下文（http:// 或 file://）或非 Chromium 内核下无 showOpenFilePicker，
+    // 降级用 <input type=file> 读取 .jps 文本——打开本质只读文本，不依赖文件系统 API
+    if (typeof picker !== 'function') return openFileViaInput()
     try {
       const [handle] = await picker({
         types: [{ description: 'JianpuScript 乐谱', accept: { 'text/plain': ['.jps'] } }],
@@ -362,16 +376,22 @@ export const useDocStore = create<DocState>()((set, get) => ({
           /* 忽略 */
         }
         set({ dirty: false, fileName: name })
+        useUiStore.getState().showNotice(uiCopy.saveOk, 'ok')
         return true
       } catch {
-        /* 写入失败（权限失效等）→ 走另存为重新授权 */
+        /* 写入失败（权限失效、文件被占用等）→ 走另存为重新授权，由 saveFileAs 给出提示 */
       }
     }
     return s.saveFileAs()
   },
   saveFileAs: async () => {
+    const ui = useUiStore.getState()
     const picker = (window as any).showSaveFilePicker
-    if (typeof picker !== 'function') return false
+    if (typeof picker !== 'function') {
+      // 当前 WebView/浏览器不支持 File System Access API → 无法保存到磁盘
+      ui.showNotice(uiCopy.saveUnsupported, 'error')
+      return false
+    }
     try {
       const handle = await picker({
         suggestedName: `${get().fileName || '未命名'}.jps`,
@@ -390,12 +410,88 @@ export const useDocStore = create<DocState>()((set, get) => ({
       }
       void saveFileHandle(handle)
       set({ dirty: false, fileHandle: handle, fileName: name })
+      ui.showNotice(uiCopy.saveOk, 'ok')
       return true
-    } catch {
-      return false // 用户取消
+    } catch (e) {
+      // 用户取消（AbortError/NotAllowedError 的取消交互）静默；真实失败提示
+      const name = (e as { name?: string } | undefined)?.name
+      if (name !== 'AbortError' && name !== 'NotAllowedError') ui.showNotice(uiCopy.saveAsFailed, 'error')
+      return false
     }
   },
 }))
+
+// ---- adj281：降级打开（无 Web File System Access API 时） ----
+// 非安全上下文（http://、file://）或非 Chromium 内核下没有 showOpenFilePicker；
+// 打开本身只需读取 .jps 文本，改用标准 <input type="file"> 任何环境都可用。
+// 该环境无法写回磁盘，故 fileHandle 置 null，并提示改走「导出」保存成果。
+function openFileViaInput(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.jps'
+    input.style.display = 'none'
+    document.body.appendChild(input)
+    let settled = false
+    let gotFile = false
+    const finish = (ok: boolean) => {
+      if (settled) return
+      settled = true
+      window.removeEventListener('focus', onFocus)
+      input.remove()
+      resolve(ok)
+    }
+    // 用户取消（现代 Chrome/Edge/Firefox 触发 cancel 事件）
+    input.addEventListener('cancel', () => finish(false))
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0]
+      if (!file) {
+        finish(false)
+        return
+      }
+      gotFile = true
+      try {
+        const code = await file.text()
+        const name = (file.name || '未命名').replace(/\.jps$/i, '')
+        try {
+          localStorage.setItem(DRAFT_KEY, code)
+          localStorage.setItem(DRAFT_NAME_KEY, name)
+        } catch {
+          /* 存储不可用时静默 */
+        }
+        useDocStore.setState({
+          code,
+          fileName: name,
+          parseResult: parseJps(code),
+          pageConfig: mergeJpsConfig(code, loadPageConfig()),
+          dirty: false,
+          // adj281：降级环境无写回权限，不关联磁盘句柄（保存走 saveFileAs → 会提示 saveUnsupported）
+          fileHandle: null,
+          activeNoteId: null,
+          activeNoteIds: [],
+          voiceBlocks: [],
+          cursorJump: null,
+          undoStack: [],
+          redoStack: [],
+          lastEditAt: 0,
+          sel: { start: 0, end: 0 },
+        })
+        useUiStore.getState().showNotice(uiCopy.openFallbackNotice, 'warn')
+        finish(true)
+      } catch {
+        finish(false)
+      }
+    })
+    // 兜底：老内核无 cancel 事件时，窗口从文件选择框重新获焦且未选文件 → 视为取消
+    const onFocus = () => {
+      setTimeout(() => {
+        if (!gotFile) finish(false)
+      }, 300)
+    }
+    window.addEventListener('focus', onFocus)
+    input.click()
+  })
+}
 
 // adj161：启动时恢复上次保存/打开的文件句柄（IndexedDB 持久化），
 // 之后直接按保存即写回该文件（无需重新选文件）；恢复失败静默（走另存为）

@@ -28,6 +28,10 @@ body {
   flex-direction: column;
   height: 100vh;
   background: var(--jp-bg-app);
+  /* adj：不能设 overflow:hidden——它会裁剪绝对定位下拉（汉堡/更多/字体下拉），
+     导致窄屏点击菜单下拉显示不全。整页防页面滚动由 body{overflow:hidden} 兜底，
+     各滚动区（预览/编辑器/下拉）各自处理 */
+  overflow: visible;
 }
 
 .app-main {
@@ -83,29 +87,32 @@ body {
   opacity: 1;
 }
 
-/* ============ 菜单栏 ============ */
-.menubar {
-  height: var(--jp-menubar-h);
+/* ============ 顶栏（adj281：合并原 MenuBar + Toolbar）============ */
+.topbar {
+  height: var(--jp-topbar-h);
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 12px;
+  gap: 6px;
+  padding: 0 10px;
   background: var(--jp-bg-panel);
   border-bottom: 1px solid var(--jp-border);
   user-select: none;
   flex-shrink: 0;
+  /* adj：给顶栏建立定位上下文 + 提升层级，使汉堡/更多下拉浮在内容区之上
+     （不能依赖 overflow 裁剪——会把绝对定位下拉裁掉导致列表显示不全） */
+  position: relative;
+  z-index: 50;
 }
 
-.menubar-brand {
+.topbar-brand {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-right: 16px;
   font-weight: 600;
   color: var(--jp-text-primary);
 }
 
-.menubar-brand .logo-mark {
+.topbar-brand .logo-mark {
   width: 22px;
   height: 22px;
   border-radius: 5px;
@@ -115,33 +122,268 @@ body {
   box-shadow: 0 0 8px rgba(0, 240, 255, 0.35);
 }
 
-.menubar-brand .brand-zh {
+.topbar-brand-text {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  /* 窗口宽度变化时 Logo 标题不折行（单行显示） */
+  white-space: nowrap;
+}
+
+.topbar-brand .brand-zh {
   font-size: 13px;
   letter-spacing: 2px;
 }
 
-.menubar-brand .brand-en {
+.topbar-brand .brand-en {
   font-size: 11px;
   color: var(--jp-text-secondary);
   font-weight: 400;
 }
 
-.menu-item {
-  position: relative;
-  padding: 6px 10px;
+/* 汉堡菜单按钮 */
+.topbar-hamburger {
+  /* adj：不做定位上下文——让下拉 <div> 的 absolute 定位上溯到 .topbar(position:relative)，
+     这样下拉 left:0 相对整个顶栏左缘 = Logo 左缘，从 Logo 处向左对齐展开 */
+  position: static;
+}
+.topbar-hamburger-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
   border-radius: 6px;
   cursor: pointer;
   color: var(--jp-text-secondary);
-  font-size: 13px;
-  transition: background 0.15s, color 0.15s;
+  background: transparent;
+  border: 1px solid transparent;
+  font-family: var(--jp-font-sans);
+  font-size: 18px;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-
-.menu-item:hover,
-.menu-item.open {
+.topbar-hamburger-btn:hover,
+.topbar-hamburger.open .topbar-hamburger-btn {
   background: var(--jp-bg-panel-hover);
   color: var(--jp-text-primary);
+  border-color: var(--jp-border);
 }
 
+/* 视图切换 */
+.topbar-views {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--jp-bg-app);
+  border: 1px solid var(--jp-border);
+  border-radius: 7px;
+  padding: 2px;
+}
+.topbar-view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  font-size: 12px;
+  background: transparent;
+  border: none;
+  color: var(--jp-text-secondary);
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: var(--jp-font-sans);
+  transition: background 0.15s, color 0.15s;
+  /* 窗口宽度变化时视图按钮标题（编码/拆分/预览）不折行（单行显示） */
+  white-space: nowrap;
+}
+.topbar-view-btn.active {
+  background: var(--jp-bg-panel-active);
+  color: var(--jp-accent);
+}
+
+.topbar-spacer {
+  flex: 1;
+}
+
+/* 功能按钮组容器（排版/试听/设置/导出 + 缩放）——溢出模式：
+   只渲染测量后能放下的前 visCount 个按钮；不收缩、不换行（保证测量准确）。
+   样式套框模仿 .topbar-views（背景 + 边框 + 圆角 + 内 padding），使功能组在视觉上呈
+   「一组」。组内按钮去 border/调整 padding 与视图按钮一致。 */
+.topbar-buttons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  background: var(--jp-bg-app);
+  border: 1px solid var(--jp-border);
+  border-radius: 7px;
+  padding: 2px;
+}
+
+/* 顶栏工具条：容纳功能组 + 设置组两个组框，组框间 gap 4 */
+.topbar-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+}
+/* 设置组框（从状态栏移来）：与功能组同款（背景+边框+圆角+内 padding） */
+.topbar-settings {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  background: var(--jp-bg-app);
+  border: 1px solid var(--jp-border);
+  border-radius: 7px;
+  padding: 2px;
+}
+/* 功能组内按钮：去 border、缩小 padding、与视图按钮风格统一 */
+.topbar-buttons .topbar-btn {
+  border: none;
+  padding: 4px 9px;
+  font-size: 12px;
+  border-radius: 5px;
+}
+.topbar-buttons .topbar-btn.icon-btn {
+  padding: 3px 7px;
+}
+/* 功能组内缩放组：去掉组外独立 border，融入功能组；与基类缩放按钮一致 */
+.topbar-buttons .topbar-zoom {
+  gap: 2px;
+}
+.topbar-buttons .topbar-zoom .topbar-btn.icon-btn {
+  padding: 3px 8px;
+}
+
+/* adj：「更多」按钮容器——独立于工具条最右（按需出现，JSX 用 visCount<total 控制显隐）；
+   下拉右对齐（right:0）相对更多按钮，避免超出屏幕右缘 */
+.topbar-overflow {
+  position: relative;
+}
+/* 更多按钮样式与功能组按钮一致（去 border、圆角 5px、透明背景）；与视图按钮风格统一 */
+.topbar-overflow-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 7px;
+  border-radius: 5px;
+  background: transparent;
+  border: none;
+  color: var(--jp-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.topbar-overflow-btn:hover,
+.topbar-overflow.open .topbar-overflow-btn {
+  background: var(--jp-bg-panel-hover);
+  color: var(--jp-accent);
+}
+
+/* adj281：更多下拉的【右缘】与「⋮」按钮【右缘】对齐——三点图标位于顶栏最右端，
+   right:0 使下拉右缘紧贴按钮右缘并**向左**展开，避免超出屏幕右缘造成页面横向扩展。
+   选择器用结构父类提高特异性（2 class > 基类 .menu-dropdown 的 1 class），
+   确保 `left:auto` 能覆盖基类 `left:0`，让 right:0 真正生效 */
+.topbar-overflow > .topbar-overflow-dropdown {
+  right: 0; /* 下拉右缘 = 三点按钮容器右缘，向下靠左展开 */
+  left: auto;
+  min-width: 180px;
+  max-width: calc(100vw - 12px);
+  /* max-height 严格限制为「视口高 - 下拉顶 y - 安全距」与 720px 的较小值——
+     保证下拉底部始终落在视口内（不被裁），同时高窗口下不会因 max-height 过大
+     而不触发滚动；overscroll-behavior:contain 防止下拉内滚到底时滚动页面 */
+  max-height: min(calc(100dvh - 56px), 720px);
+  max-height: min(calc(100vh - 56px), 720px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  /* 始终显示细滚动条 */
+  scrollbar-width: thin;
+}
+
+/* 「更多」下拉里的 ± 按钮（缩放） */
+.menu-entry-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 24px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid var(--jp-border);
+  border-radius: 5px;
+  color: var(--jp-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.menu-entry-btn:hover {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+}
+
+/* 通用按钮（功能按钮组：排版/试听/设置/导出） */
+.topbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--jp-border);
+  color: var(--jp-text-secondary);
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--jp-font-sans);
+  transition: all 0.15s;
+  /* 窗口宽度变化时功能按钮标题不折行（单行显示） */
+  white-space: nowrap;
+}
+.topbar-btn.icon-btn {
+  padding: 5px 7px;
+  justify-content: center;
+}
+.topbar-btn:hover {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+}
+/* adj：选中样式与 .topbar-view-btn.active 一致——背景 panel-active + 文字 accent */
+.topbar-btn.active-guide {
+  background: var(--jp-bg-panel-active);
+  color: var(--jp-accent);
+  border-color: var(--jp-accent);
+}
+.topbar-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.topbar-btn:disabled:hover {
+  border-color: var(--jp-border);
+  color: var(--jp-text-secondary);
+}
+
+/* 缩放比率组：- / % / + */
+.topbar-zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.topbar-zoom .topbar-btn.icon-btn {
+  padding: 3px 8px;
+  font-size: 14px;
+  line-height: 1;
+}
+.topbar-zoom-val {
+  min-width: 38px;
+  text-align: center;
+  font-family: var(--jp-font-mono);
+  font-size: 11px;
+  color: var(--jp-text-muted);
+}
+
+/* ============ 汉堡下拉（共享 menu-* 样式）============ */
 .menu-dropdown {
   position: absolute;
   top: calc(100% + 6px);
@@ -152,7 +394,8 @@ body {
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   padding: 5px;
-  z-index: 100;
+  /* adj：提升到 1200，确保汉堡/更多/字体下拉始终浮在内容区与其它元素之上 */
+  z-index: 1200;
   animation: menuIn 0.12s ease-out;
 }
 
@@ -165,6 +408,24 @@ body {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+.topbar-hamburger-dropdown {
+  right: auto;
+  /* adj：左缘对齐 Logo 左缘——因为 .topbar-hamburger 已 static，下拉相对 .topbar 定位，
+     left 需等于 .topbar 的左 padding（宽屏 10px），才能顶到 Logo 左缘 */
+  left: 10px;
+  max-width: calc(100vw - 12px);
+  /* max-height 严格限制为「视口高 - 下拉顶 y - 安全距」与 720px 的较小值——
+     保证下拉底部始终落在视口内（不会被裁），同时高窗口下不会因 max-height 过大
+     而不触发滚动。100dvh 兼容移动浏览器动态视口；-webkit-overflow-scrolling 兼容 iOS 触摸滚动 */
+  max-height: min(calc(100dvh - 56px), 720px);
+  max-height: min(calc(100vh - 56px), 720px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  /* 始终显示细滚动条，避免桌面浏览器默认仅 hover 时显示滚动条导致用户不知道能滚 */
+  scrollbar-width: thin;
 }
 
 .menu-dropdown .menu-entry {
@@ -209,12 +470,6 @@ body {
   white-space: nowrap;
   gap: 7px;
   align-items: center;
-}
-
-.theme-check {
-  color: var(--jp-success);
-  font-weight: 700;
-  flex-shrink: 0;
 }
 
 /* 主题色块：未选中=主题面板色预览；选中=强调色底 + 内勾（复选框样式） */
@@ -280,16 +535,15 @@ body {
   color: var(--jp-text-muted);
 }
 
-.menubar-filename {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* 汉堡下拉分组标题（窄屏时仍可能用） */
+.menu-group-title {
+  padding: 6px 10px 3px;
+  font-size: 11px;
   color: var(--jp-text-muted);
-  font-size: 12px;
+  letter-spacing: 1px;
 }
 
-/* adj63：未保存标记（编辑器头部 .file-tag 内） */
+/* adj63：未保存标记（footer 内 .footer-file 内） */
 .dirty-dot {
   display: inline-block;
   width: 7px;
@@ -298,112 +552,6 @@ body {
   background: var(--jp-warning);
   margin-left: 6px;
   vertical-align: 1px;
-}
-
-/* ============ 工具栏 ============ */
-.toolbar {
-  height: var(--jp-toolbar-h);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 12px;
-  background: var(--jp-bg-panel);
-  border-bottom: 1px solid var(--jp-border);
-  flex-shrink: 0;
-}
-
-.view-switch {
-  display: flex;
-  background: var(--jp-bg-app);
-  border: 1px solid var(--jp-border);
-  border-radius: 7px;
-  overflow: hidden;
-}
-
-.view-switch button {
-  border: none;
-  background: transparent;
-  color: var(--jp-text-secondary);
-  padding: 5px 14px;
-  font-size: 12px;
-  cursor: pointer;
-  font-family: var(--jp-font-sans);
-  transition: background 0.15s, color 0.15s;
-}
-
-.view-switch button + button {
-  border-left: 1px solid var(--jp-border);
-}
-
-/* 预览缩放（adj52：并入顶部工具条；adj53：移至最右端，间距由工具栏 gap 提供） */
-.toolbar-zoom {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.toolbar-zoom .tool-btn.icon-btn {
-  padding: 3px 8px;
-  font-size: 14px;
-  line-height: 1;
-}
-
-.toolbar-zoom-val {
-  min-width: 38px;
-  text-align: center;
-  font-family: var(--jp-font-mono);
-  font-size: 11px;
-  color: var(--jp-text-muted);
-}
-
-.view-switch button.active {
-  background: var(--jp-bg-panel-active);
-  color: var(--jp-accent);
-}
-
-.toolbar-spacer {
-  flex: 1;
-}
-
-.tool-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: 1px solid var(--jp-border);
-  color: var(--jp-text-secondary);
-  border-radius: 7px;
-  padding: 5px 12px;
-  font-size: 12px;
-  cursor: pointer;
-  font-family: var(--jp-font-sans);
-  transition: all 0.15s;
-}
-
-/* 仅图标按钮（adj46：排版辅助） */
-.tool-btn.icon-btn {
-  padding: 5px 7px;
-  justify-content: center;
-}
-
-.tool-btn:hover {
-  border-color: var(--jp-accent);
-  color: var(--jp-accent);
-}
-
-.tool-btn.active-guide {
-  border-color: var(--jp-success);
-  color: var(--jp-success);
-}
-
-.tool-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.tool-btn:disabled:hover {
-  border-color: var(--jp-border);
-  color: var(--jp-text-secondary);
 }
 
 /* ============ 预览区 ============ */
@@ -427,6 +575,10 @@ body {
   box-shadow: 0 2px 16px rgba(0, 0, 0, 0.5);
   border-radius: 2px;
   flex-shrink: 0;
+  /* adj287：auto margin——页面窄于视口时居中（自由空间为正），宽于视口时归零 →
+     左对齐（flex 居中溢出会让放大后的页面左右各溢出视口一半，左侧内容无法滚动查看） */
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .score-page svg {
@@ -435,14 +587,20 @@ body {
   height: auto;
 }
 
-/* adj258：播放同步高亮——多声部同时演奏的音符用半透明蓝+描边模拟色框指示当前时点
-   （fill 半透明蓝 + paint-order stroke 描边加宽；纯 SVG 文本无法用 CSS box-shadow 做竖条，此为近似） */
+/* adj258：播放同步高亮——多声部同时演奏的音符用主题红高亮
+   （adj285：恢复 adj260 之前的红色无边框样式；蓝底+描边改为红底） */
 .score-page [data-notepos].note-active,
 .score-page [data-cipos].note-active {
-  fill: rgba(87, 170, 255, 0.45) !important;
-  paint-order: stroke fill;
-  stroke: rgba(87, 170, 255, 0.55);
-  stroke-width: 3px;
+  fill: var(--jp-danger) !important;
+}
+
+/* adj282：播放进度跟随色块——接近透明的竖向色框（高 = 该声部行，宽 = 每段≤1 拍）
+   adj299：颜色由组件按声部内联设置（多声部各声部不同色，voice1 红）；transition 使段间平滑滑动 */
+.playhead-marker {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  transition: left 0.15s linear;
 }
 
 /* 描述头元素可拖拽（adj9） */
@@ -485,6 +643,16 @@ body {
 .guide-v {
   width: 0;
   border-right: 1px dashed var(--jp-accent);
+}
+
+/* adj304：描述头区域水平中线——浅灰竖向虚线，纯标注（不可拖拽、不响应交互） */
+.guide-desc-mid {
+  border-right-color: rgba(128, 128, 128, 0.55);
+  opacity: 0.55;
+  pointer-events: none;
+}
+.guide-desc-mid:hover {
+  border-color: rgba(128, 128, 128, 0.55);
 }
 
 .guide-row {
@@ -539,100 +707,228 @@ body {
   border-top: 1px solid var(--jp-border);
 }
 
-.editor-head {
+/* ============ 底部栏（adj281：合并原 editor-head + StatusBar）============ */
+.footer {
+  height: var(--jp-statusbar-h);
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 4px 10px;
+  gap: 10px;
+  padding: 0 12px;
   background: var(--jp-bg-panel);
-  border-bottom: 1px solid var(--jp-border);
-  font-size: 12px;
+  border-top: 1px solid var(--jp-border);
   color: var(--jp-text-secondary);
+  font-size: 12px;
+  font-family: var(--jp-font-sans);
+  flex-shrink: 0;
+  user-select: none;
+  /* adj：建立定位上下文 + 提升层级，使字体下拉浮在内容区之上（不可用 overflow 裁剪） */
+  position: relative;
+  z-index: 50;
 }
 
-.editor-head .file-tag {
+.footer-file {
   font-family: var(--jp-font-mono);
   color: var(--jp-accent);
 }
 
-/* adj242：语法检查文本已移除（集中到行号颜色提示 + 状态栏圆点） */
-
-/* adj233：自动折行开关（语法检查与字体下拉框之间）；
-   adj242：语法检查文本移至状态栏后，行首控件靠右（margin-left:auto） */
-.editor-autowrap {
+.footer-cursor {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  cursor: pointer;
-  color: var(--jp-text-secondary);
-  user-select: none;
+  gap: 6px;
+  font-family: var(--jp-font-mono);
+  font-size: 11px;
+  color: var(--jp-text-muted);
 }
 
-.editor-autowrap input {
-  accent-color: var(--jp-accent);
-  cursor: pointer;
+/* adj242：小圆点按严重程度着色——有错误红、仅警告橙、正常绿 */
+.footer-cursor .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.footer-cursor .dot.ok {
+  background: var(--jp-success);
+}
+.footer-cursor .dot.err {
+  background: var(--jp-danger);
+}
+.footer-cursor .dot.warn {
+  background: var(--jp-warning);
 }
 
-/* 编辑器字号控制（adj46：状态栏 +/- 按钮） */
-.editor-font-control {
-  display: flex;
+.footer-spacer {
+  flex: 1;
+}
+
+/* adj：状态栏「设置组框」——类似顶栏功能组，把折行 / 字体 / 字号收进一个组框 */
+.footer-settings {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-left: 12px;
-}
-
-/* adj160：编辑器字体下拉框（字号按钮左侧） */
-.editor-font-select {
-  display: flex;
-  align-items: center;
-}
-
-.editor-font-select select {
-  max-width: 150px;
-  height: 22px;
-  padding: 0 6px;
+  gap: 2px;
   background: var(--jp-bg-app);
   border: 1px solid var(--jp-border);
-  color: var(--jp-text-primary);
-  border-radius: 5px;
+  border-radius: 7px;
+  padding: 2px;
+}
+/* 设置组框内按钮：去独立 border、圆角 5px、与视图/功能组按钮风格统一 */
+.footer-settings .footer-btn {
+  border: none;
+  padding: 3px 8px;
   font-size: 11px;
-  cursor: pointer;
-  transition: border-color 0.15s;
+  border-radius: 5px;
+}
+.footer-settings .footer-btn.icon-btn {
+  padding: 2px 7px;
+}
+.footer-settings .editor-font-split {
+  display: inline-flex;
+  position: relative;
+}
+.footer-settings .editor-font-split .arrow {
+  font-size: 9px;
+  opacity: 0.7;
 }
 
-.editor-font-select select:hover {
-  border-color: var(--jp-accent);
-}
-
-.editor-font-control .font-btn {
-  min-width: 24px;
-  height: 20px;
-  padding: 0 5px;
+/* 底部按钮（折行 / 字体 / 字号）共享样式——与顶栏按钮风格一致 */
+.footer-btn {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 5px;
   background: transparent;
   border: 1px solid var(--jp-border);
   color: var(--jp-text-secondary);
-  border-radius: 5px;
+  border-radius: 7px;
+  padding: 3px 9px;
   font-size: 11px;
-  font-family: var(--jp-font-sans);
   cursor: pointer;
+  font-family: var(--jp-font-sans);
   transition: all 0.15s;
 }
-
-.editor-font-control .font-btn:hover {
+.footer-btn.icon-btn {
+  padding: 3px 7px;
+  justify-content: center;
+  font-size: 12px;
+}
+.footer-btn:hover {
   border-color: var(--jp-accent);
   color: var(--jp-accent);
 }
+/* adj：选中样式与 .topbar-view-btn.active 一致——背景 panel-active + 文字 accent */
+.footer-btn.active-guide {
+  background: var(--jp-bg-panel-active);
+  color: var(--jp-accent);
+  border-color: var(--jp-accent);
+}
+.footer-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.footer-btn:disabled:hover {
+  border-color: var(--jp-border);
+  color: var(--jp-text-secondary);
+}
 
-.editor-font-control .font-size-val {
+/* 折行 toggle 按钮（选中样式同上：背景 panel-active + 文字 accent） */
+.footer-toggle.active-guide {
+  background: var(--jp-bg-panel-active);
+  color: var(--jp-accent);
+  border-color: var(--jp-accent);
+}
+
+/* 缩放字号组：A- / px / A+——已套在外层 .footer-settings 组框内，自身不设边框（避免嵌套组框） */
+.footer-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+.footer-zoom .footer-btn.icon-btn {
+  border: none;
+  padding: 2px 7px;
+  font-size: 11px;
+  border-radius: 5px;
+}
+.footer-zoom-val {
   min-width: 34px;
   text-align: center;
   font-family: var(--jp-font-mono);
   font-size: 11px;
   color: var(--jp-text-muted);
+  /* 让 px 数值居中与按钮高度对齐 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 字体 split-button（窄屏替代 select；这里 EditorFootBar 统一使用 split） */
+.editor-font-split {
+  display: inline-flex;
+  position: relative;
+}
+.editor-font-split-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: transparent;
+  border: 1px solid var(--jp-border);
+  color: var(--jp-text-secondary);
+  border-radius: 7px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-family: var(--jp-font-sans);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.editor-font-split-btn:hover {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+}
+.editor-font-split-btn .arrow {
+  font-size: 9px;
+  opacity: 0.7;
+}
+.editor-font-split-dropdown {
+  position: absolute;
+  /* adj：字体按钮在顶栏工具条内，下拉向下弹出（top 相对），
+     底部用 max-height 限制 + overflow-y 滚动 + 始终显示细滚动条 */
+  top: calc(100% + 6px);
+  bottom: auto;
+  right: 0;
+  min-width: 160px;
+  max-height: min(calc(100dvh - 56px), 560px);
+  max-height: min(calc(100vh - 56px), 560px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  background: var(--jp-bg-panel);
+  border: 1px solid var(--jp-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+  z-index: 1200;
+}
+.editor-font-split-dropdown .opt {
+  padding: 6px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--jp-text-primary);
+}
+.editor-font-split-dropdown .opt:hover {
+  background: var(--jp-bg-panel-hover);
+}
+.editor-font-split-dropdown .opt.active {
+  color: var(--jp-accent);
+}
+.editor-font-split-dropdown .opt-label {
+  font-family: var(--jp-font-mono);
+  margin-right: 8px;
+  color: var(--jp-text-secondary);
+  font-size: 11px;
 }
 
 .editor-body {
@@ -725,6 +1021,10 @@ body {
   color: transparent;
   caret-color: var(--jp-editor-caret);
   font-family: var(--jp-editor-font, var(--jp-font-mono));
+  /* adj232 延伸：textarea box-sizing:border-box——与 mirror div 一致，
+     确保 textarea 内容宽 = clientWidth - padding(28) = mirror 内容宽，
+     长行折行后两侧折行点完全一致（否则 mirror 内容比 textarea 少 28px → 折行错位） */
+  box-sizing: border-box;
   /* adj169：禁用编程字体连字——textarea UA 默认无连字，若高亮层启用连字
      （Cascadia Code/Fira Code 的 |:、|| 等会被渲染成单个字形）则列逐段错位 */
   font-variant-ligatures: none;
@@ -903,7 +1203,7 @@ body {
 }
 .hl-comment {
   color: var(--jp-hl-comment);
-  font-style: italic;
+  /* adj282：编辑器注释去除斜体，保持正体显示 */
 }
 .hl-pagebreak {
   color: var(--jp-hl-pagebreak);
@@ -937,53 +1237,6 @@ body {
   -webkit-box-decoration-break: clone;
 }
 
-/* ============ 状态栏 ============ */
-.statusbar {
-  height: var(--jp-statusbar-h);
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 0 14px;
-  background: var(--jp-bg-panel);
-  border-top: 1px solid var(--jp-border);
-  color: var(--jp-text-muted);
-  font-size: 11px;
-  font-family: var(--jp-font-mono);
-  flex-shrink: 0;
-}
-
-.statusbar .right {
-  margin-left: auto;
-  display: flex;
-  gap: 18px;
-}
-
-.statusbar .accent {
-  color: var(--jp-accent);
-}
-
-.statusbar .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  display: inline-block;
-  margin-right: 5px;
-  vertical-align: 1px;
-}
-
-.statusbar .dot.ok {
-  background: var(--jp-success);
-}
-
-.statusbar .dot.err {
-  background: var(--jp-danger);
-}
-
-/* adj242：警告（橙）——无错误但存在警告时小圆点呈橙色 */
-.statusbar .dot.warn {
-  background: var(--jp-warning);
-}
-
 /* ============ 对话框 ============ */
 .modal-mask {
   position: fixed;
@@ -997,7 +1250,8 @@ body {
 
 .modal {
   min-width: 420px;
-  max-width: 640px;
+  /* adj：对话框宽度不超过 700px（用户要求）——宽屏上限，窄屏由 @media 覆盖为 100% */
+  max-width: 700px;
   max-height: 80vh;
   overflow: auto;
   background: var(--jp-bg-panel);
@@ -1024,6 +1278,31 @@ body {
 .modal.compact .modal-body {
   padding: 10px 12px;
 }
+
+/* adj305：帮助文档内容（操作手册/脚本语法）——滚动展示 */
+.doc-content {
+  max-height: 70vh;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--jp-text-primary);
+  padding-right: 6px;
+}
+.doc-content h1 { font-size: 18px; margin: 2px 0 10px; }
+.doc-content h2 { font-size: 15px; margin: 12px 0 6px; }
+.doc-content h3 { font-size: 14px; margin: 10px 0 4px; }
+.doc-content p { margin: 4px 0; }
+.doc-content ul { margin: 4px 0; padding-left: 18px; }
+.doc-content li { margin: 2px 0; }
+.doc-content pre {
+  background: var(--jp-bg-app);
+  border: 1px solid var(--jp-border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+.doc-content .doc-table { font-family: var(--jp-font-mono); font-size: 11.5px; white-space: pre; }
 
 .modal-head {
   display: flex;
@@ -1055,6 +1334,33 @@ body {
   gap: 10px;
   padding: 12px 18px;
   border-top: 1px solid var(--jp-border);
+}
+
+/* adj282：标签页（页面设置等对话框按分组切换）——节省纵向空间，便于容纳更多设置 */
+.jp-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--jp-border);
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.jp-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--jp-text-secondary);
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: var(--jp-font-sans);
+}
+.jp-tab:hover {
+  color: var(--jp-text-primary);
+}
+.jp-tab.active {
+  color: var(--jp-accent);
+  border-bottom-color: var(--jp-accent);
+  font-weight: 600;
 }
 
 /* ============ 通用 ============ */
@@ -1097,4 +1403,160 @@ body {
 }
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* ============ 轻量浮动提示（toast）============ */
+.toast {
+  position: fixed;
+  right: 20px;
+  bottom: 40px;
+  z-index: 1000;
+  max-width: 340px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--jp-border);
+  background: var(--jp-bg-panel);
+  color: var(--jp-text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  animation: toast-in 0.18s ease;
+}
+.toast-ok {
+  border-left: 3px solid var(--jp-success);
+}
+.toast-warn {
+  border-left: 3px solid var(--jp-warning);
+}
+.toast-error {
+  border-left: 3px solid var(--jp-danger);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============ 窄屏适配（adj281：≤640px 手机等）============
+ *  顶栏全部只图标、缩放组取消 % 数值；状态栏全部只图标；
+ *  对话框靠下方弹出 + 内容上下滚动 */
+
+/* 窄屏（≤640px） */
+@media (max-width: 640px) {
+  /* —— 顶栏：紧凑 + 全部只图标，缩放组 % 数值隐藏 —— */
+  .topbar {
+    padding: 0 6px;
+    gap: 4px;
+  }
+  .topbar-brand .brand-zh,
+  .topbar-brand .brand-en {
+    display: none;
+  }
+  .topbar-brand {
+    margin-right: 0;
+  }
+  /* 所有按钮（除缩放组）隐藏文字标签 */
+  .topbar-btn > .tool-label,
+  .topbar-view-btn > .tool-label {
+    display: none;
+  }
+  /* 缩放组：% 数值隐藏，只剩 ± */
+  .topbar-zoom-val {
+    display: none;
+  }
+  .topbar-zoom {
+    gap: 2px;
+  }
+  /* 视图切换紧凑 */
+  .topbar-views {
+    padding: 1px;
+  }
+  .topbar-view-btn {
+    padding: 4px 7px;
+  }
+
+  /* —— 底部栏：全部只图标 —— */
+  .footer {
+    gap: 6px;
+    padding: 0 8px;
+  }
+  /* 所有按钮隐藏文字标签 */
+  .footer-btn > .tool-label,
+  .footer-btn > .arrow {
+    display: none;
+  }
+  /* 缩放字号组中间 px 数值隐藏（只剩 A- / A+） */
+  .footer-zoom-val {
+    display: none;
+  }
+
+  /* —— 顶栏：溢出模式下窄屏同样只显示能放下的按钮，多余收进「更多」——由 JSX 测量决定，
+     无需在此隐藏全部（.topbar-buttons / .topbar-overflow 均按 visCount 渲染） */
+
+  /* —— 预览/编辑器区：最小触摸高度 + 预览区边距收紧 —— */
+  .editor-pane,
+  .preview-pane {
+    min-height: 0;
+  }
+  .preview-pane {
+    padding: 10px;
+  }
+  .preview-pane .pages {
+    gap: 12px;
+  }
+  /* 顶栏/状态栏：注意不能用 overflow-x:hidden——它会强制 overflow-y:auto，
+     把字体下拉/汉堡下拉等 position:absolute 的下拉裁剪掉（弹出列表显示不全）。
+     改为设置 z-index 使下拉浮在内容区之上；整页防溢出由 .app{overflow:hidden} 兜底 */
+  .topbar,
+  .footer {
+    position: relative;
+    z-index: 50;
+  }
+
+  /* —— 拆分视图分隔条加粗，便于手指拖动 —— */
+  .split-divider {
+    height: 8px;
+  }
+
+  /* —— 对话框：宽度自适应窄屏，靠下方弹出（bottom sheet），内容上下滚动 —— */
+  .modal-mask {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .modal {
+    width: 100%;
+    min-width: 0; /* 取消宽屏 min-width:420，让窄屏不被强制撑大 */
+    max-width: 100%;
+    max-height: 90vh;
+    border-radius: 16px 16px 0 0;
+    /* 让 .modal-body 内部独立滚动，head/foot 保持固定 */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  /* 取消桌面端的拖动（手机无鼠标）*/
+  .modal-head {
+    cursor: default;
+    padding: 10px 14px;
+    font-size: 13px;
+  }
+  .modal-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px 14px;
+  }
+  .modal-foot {
+    padding: 10px 14px;
+  }
+  /* 紧凑对话框在窄屏恢复标准间距 */
+  .modal.compact {
+    min-width: 0;
+  }
 }

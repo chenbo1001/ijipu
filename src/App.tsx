@@ -1,11 +1,13 @@
 /**
  * App.tsx — JianpuScript（码上简谱）应用外壳
- * 布局：菜单栏 / 工具栏 / 主区域（按视图：编码·拆分·预览）/ 状态栏 + 模态框
+ * 布局（adj281）：
+ *   TopBar（合并原菜单栏 + 工具栏）/ 主区域（编码·拆分·预览）/
+ *   EditorFootBar（合并原脚本编辑器顶栏 + 状态栏）+ 模态框
  */
 import { useEffect, useRef } from 'react'
-import { MenuBar } from './ui/MenuBar'
-import { Toolbar } from './ui/Toolbar'
-import { StatusBar } from './ui/StatusBar'
+import { TopBar } from './ui/TopBar'
+import { EditorFootBar } from './ui/EditorFootBar'
+import { Toast } from './ui/Toast'
 import { EditorPane } from './editor/EditorPane'
 import { PreviewPane } from './preview/PreviewPane'
 import { useDocStore } from './store/docStore'
@@ -16,6 +18,7 @@ import { PageConfigDialog } from './dialogs/PageConfigDialog'
 import { PlaybackDialog } from './dialogs/PlaybackDialog'
 import { ExportDialog } from './dialogs/ExportDialog'
 import { ShortcutsDialog } from './dialogs/ShortcutsDialog'
+import { DocDialog } from './dialogs/DocDialog'
 
 function App() {
   const viewType = useDocStore((s) => s.viewType)
@@ -109,8 +112,7 @@ function App() {
 
   return (
     <div className="app" data-theme={theme} data-mode={effectiveMode}>
-      <MenuBar />
-      <Toolbar />
+      <TopBar />
       <div className="app-main" ref={mainRef}>
         {viewType === 'code' && <EditorPane />}
         {viewType === 'preview' && <PreviewPane />}
@@ -126,7 +128,8 @@ function App() {
           </>
         )}
       </div>
-      <StatusBar />
+      <EditorFootBar />
+      <Toast />
 
       {modal === 'about' && <AboutDialog />}
       {modal === 'samples' && <SamplesDialog />}
@@ -134,6 +137,8 @@ function App() {
       {modal === 'playback' && <PlaybackDialog />}
       {modal === 'export' && <ExportDialog />}
       {modal === 'shortcuts' && <ShortcutsDialog />}
+      {modal === 'manual' && <DocDialog kind="manual" />}
+      {modal === 'syntax' && <DocDialog kind="syntax" />}
     </div>
   )
 }

@@ -69,14 +69,21 @@ export function Modal({
     pos === null && dock === 'bottom-right'
       ? { position: 'fixed' as const, right: 16, bottom: 16, margin: 0 }
       : undefined
-  const modalStyle = pos
-    ? { position: 'fixed' as const, left: pos.x, top: pos.y, margin: 0 }
-    : dockStyle
+  const modalStyle = {
+    // adj284：遮罩透明（maskDim=0）时遮罩 pointer-events:none 事件穿透，
+    // .modal 需显式 auto 覆盖继承——试听时预览窗格可滚动/点击，对话框本体仍可交互
+    pointerEvents: 'auto' as const,
+    ...(pos ? { position: 'fixed' as const, left: pos.x, top: pos.y, margin: 0 } : dockStyle),
+  }
 
   return (
     <div
       className="modal-mask"
-      style={{ background: `rgba(6, 10, 22, ${maskDim})` }}
+      style={{
+        background: `rgba(6, 10, 22, ${maskDim})`,
+        // adj284：试听对话框（maskDim=0）遮罩事件穿透——预览窗格滚动/点击音符/拖拽不受阻
+        pointerEvents: maskDim > 0 ? 'auto' : 'none',
+      }}
       onClick={closeOnMaskClick ? closeModal : undefined}
     >
       <div

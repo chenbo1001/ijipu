@@ -10,6 +10,7 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { tempoLabel } from '../engine/parser/parser'
 import { layoutScore, renderScoreToSvg, noteIdToCodePos } from '../engine'
+import type { ScorePage } from '../engine'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '../engine/layout/guides'
 import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '../engine/layout/metaAnchors'
 import { brand } from '../brand/tokens'
@@ -146,6 +147,7 @@ export function PreviewPane() {
   }, [activeNoteId, pagesHtml])
 
   // 点击谱面音符/歌词 → 编辑器光标跳转（M3）
+  // adj284：试听对话框打开时（遮罩已穿透），单击音符 → 从该音符开始/重播（跳转到该处演奏）
   const onClick = (e: React.MouseEvent) => {
     const target = (e.target as Element).closest('[data-notepos], [data-cipos]')
     if (!target) return
@@ -154,21 +156,24 @@ export function PreviewPane() {
     setActiveNoteId(id)
     const pos = noteIdToCodePos(code, id)
     if (pos !== null) jumpCursor(pos)
+    if (modal === 'playback') {
+      setPlaybackStart(id)
+      bumpPlaybackTick()
+    }
   }
 
   // adj88：双击谱面音符 → 定位试听起点并打开试听对话框（从该音符开始播放）
   // adj158：播放中双击 → 递增 playbackTick 让对话框从该音符重新播放（快速跳跃）
   // adj166：仅在试听对话框**已打开**时，双击音符才跳到该处开始播放；
   // 未打开试听时双击不弹窗（避免误触，改用菜单/快捷键打开试听）
+  // adj284：试听对话框打开时单击已触发跳转播放，双击不再重复触发
   const onDoubleClick = (e: React.MouseEvent) => {
     const target = (e.target as Element).closest('[data-notepos]')
     if (!target) return
     const id = target.getAttribute('data-notepos')
     if (!id) return
     setActiveNoteId(id)
-    if (modal !== 'playback') return // 试听未打开：仅高亮/联动光标，不弹窗不播放
-    setPlaybackStart(id)
-    bumpPlaybackTick()
+    if (modal !== 'playback') return
   }
 
   // ---- 描述头元素拖拽（adj9） ----
@@ -343,7 +348,9 @@ export function PreviewPane() {
           const rowGuidesOfPage = rowGuides[i] ?? []
           void rowTopsOfPage
           return (
-            <div key={i} className="score-page" style={{ maxWidth: '100%', position: 'relative' }}>
+            // adj286：去掉 maxWidth:100%——放大后该限制把 score-page 白底裁到视口宽，
+            // 页面右侧区域露出容器深色背景（变黑）；宽度跟随 preview-zoom-scale 内容
+            <div key={i} className="score-page" style={{ position: 'relative' }}>
               <div
                 className="preview-zoom-scale"
                 style={{
@@ -363,6 +370,8 @@ export function PreviewPane() {
                   dangerouslySetInnerHTML={{ __html: svg }}
                   style={{ position: 'relative', zIndex: 1, pointerEvents: 'none' }}
                 />
+                {/* adj282：播放进度跟随色块（接近透明，随播放时钟滑动；未播放时自身不渲染） */}
+                <PlayheadLayer page={page} noteSize={pageConfig.note_size} />
                 {showGuides && (
                   <div
                     className="guide-layer"
@@ -412,6 +421,16 @@ export function PreviewPane() {
                       }}
                       onMouseDown={(e) => startDrag({ key: 'descAreaH', dir: 'v' }, e, pageConfig.descAreaH)}
                       title="描述头高度（拖动调整）"
+                    />
+                    {/* adj304：描述头区域水平中线——浅灰竖向虚线（纯标注，居中参考，不可拖拽） */}
+                    <div
+                      className="guide-line guide-v guide-desc-mid"
+                      style={{
+                        left: pct((pageConfig.margin_left + (page.width - pageConfig.margin_right)) / 2),
+                        top: pctY(pageConfig.margin_top),
+                        bottom: pctY(page.height - (metaAreaH(pageConfig) - pageConfig.body_margin_top)),
+                      }}
+                      title="描述头区域中线（标注）"
                     />
                     {/* 行结构虚线：曲部行虚线（数字中心）/ 曲词间距 / 词曲间距 / 词部行虚线 */}
                     {rowGuidesOfPage.map((rg, ri) => (
@@ -496,5 +515,99 @@ export function PreviewPane() {
         })}
       </div>
     </div>
+  )
+}
+
+/**
+ * adj282：计算播放进度跟随色块位置——同页内按曲行（group）定位，每 group 独立色块。
+ * adj299：按「拍段」定位（每段 ≤1 拍）；用 group（而非 voice）定位——多声部 Q1 与单声部行
+ * 可共用 voice 号（如 Q1 与 Q 均 voice=1），必须用 group 区分；色块高度 = 该曲行
+ * （音符基线推：行顶 基线-1.1×音符高、行底 基线+0.6×音符高，各加延伸 0.5×音符高）。
+ * 返回 null = 未播放/不在本页/已播完。
+ */
+function playheadPosOf(
+  track: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number }[],
+  currentMs: number,
+  page: ScorePage,
+  noteSize: number,
+  group: number,
+): { x: number; yTop: number; yBottom: number; width: number; voice: number } | null {
+  if (track.length === 0 || currentMs <= 0) return null
+  // 该曲行的段（atMs 单调）
+  const segs = track.filter((t) => t.group === group)
+  if (segs.length === 0) return null
+  // 二分：最后一个 atMs <= currentMs 的段
+  let lo = 0
+  let hi = segs.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (segs[mid].atMs <= currentMs) lo = mid + 1
+    else hi = mid
+  }
+  const i = lo - 1
+  if (i < 0 || i >= segs.length) return null
+  const a = segs[i]
+  // adj313：色块只在该拍段「正在发声」期间显示。旧逻辑仅在「本曲行最后一段」
+  // 结束时才隐藏（i === 最后段），遇到反复/跳房子跳跃产生的段间空隙（当前段已结束、
+  // 下一段还未开始）时，会把旧行色块冻结驻留在原处——用户观感即「色块已走到新行，
+  // 上一行色块还残留在行末」。改为：只要当前段已结束（该处已无声）就隐藏，
+  // 各曲行按各自发声时间出现/消失，旧行不再残留。
+  if (currentMs >= a.atMs + a.durationMs) return null
+  if (a.pageIndex !== page.index) return null
+  // 停驻当前段 x（段间由 CSS transition 平滑过渡）
+  const x = a.x
+  // 高度 = 该曲行（音符基线推，天然区分各声部行/单声部行，不依赖 voiceBlock）
+  const ext = noteSize * 0.5
+  const yTop = a.y - noteSize * 1.1 - ext
+  const yBottom = a.y - noteSize * 1.1 + noteSize * 1.7 + ext
+  return { x, yTop, yBottom, width: a.width, voice: a.voice }
+}
+
+/** adj299：多声部各声部色块颜色（半透明；voice 1 保持红色——延续 adj285 单声部红块） */
+const PLAYHEAD_COLORS = [
+  'rgba(255, 93, 108,', // 红（声部 1）
+  'rgba(87, 170, 255,', // 蓝（声部 2）
+  'rgba(63, 122, 46,', // 绿（声部 3）
+  'rgba(255, 200, 87,', // 橙（声部 4）
+  'rgba(138, 95, 184,', // 紫（声部 5）
+]
+
+/**
+ * adj282：跟随色块渲染层——仅订阅 currentMs/playheadTrack，避免 PreviewPane 主组件
+ * 随播放逐帧重渲染（SVG 层不重建，仅本轻量色块刷新）。
+ * adj299：每曲行（group）独立一个色块（按各自拍段滑动、按 voice 配色、各自行高）。
+ */
+function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }) {
+  const currentMs = useDocStore((s) => s.currentMs)
+  const track = useDocStore((s) => s.playheadTrack)
+  if (track.length === 0 || currentMs <= 0) return null
+  // 该页涉及的曲行（group 去重排序）
+  const groups = [
+    ...new Set(track.filter((t) => t.pageIndex === page.index).map((t) => t.group)),
+  ].sort((a, b) => a - b)
+  const pct = (v: number) => `${((v / page.width) * 100).toFixed(3)}%`
+  const pctY = (v: number) => `${((v / page.height) * 100).toFixed(3)}%`
+  return (
+    <>
+      {groups.map((group) => {
+        const pos = playheadPosOf(track, currentMs, page, noteSize, group)
+        if (!pos) return null
+        const base = PLAYHEAD_COLORS[(pos.voice - 1) % PLAYHEAD_COLORS.length]
+        return (
+          <div
+            key={group}
+            className="playhead-marker"
+            style={{
+              left: pct(pos.x),
+              top: pctY(pos.yTop),
+              width: pct(pos.width),
+              height: pctY(pos.yBottom - pos.yTop),
+              background: `${base} 0.32)`,
+              boxShadow: `inset 0 0 0 1px ${base} 0.5)`,
+            }}
+          />
+        )
+      })}
+    </>
   )
 }

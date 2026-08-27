@@ -42,4 +42,12 @@ export const uiCopy = {
   viewSplit: '拆分',
   viewPreview: '预览',
   statusReady: '就绪',
+  // ---- 保存反馈（toast）----
+  saveOk: '已保存',
+  saveFailed: '保存失败：文件句柄可能失效或文件被占用，请用「文件 → 另存为」重新保存',
+  saveAsFailed: '另存为失败，请检查文件位置是否可写',
+  saveUnsupported: '当前环境不支持保存到磁盘，请使用「文件 → 另存为」或导出',
+  // adj281：非安全上下文（http:// 或 file://）或非 Chromium 内核下无 Web File System Access API，
+  // 降级用 <input type=file> 载入 .jps 文本——已载入但无法写回磁盘，提示改用「导出」保存
+  openFallbackNotice: '已载入文件；此环境无法写回磁盘，请用「文件 → 导出」保存成果',
 } as const
