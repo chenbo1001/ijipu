@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### 文档
+
+- **PWA 部署与手机端安装指南**（`docs/DEPLOY-PWA.md`）：JianpuScript 已具备完整 PWA 能力（adj155 — `public/sw.js` + `public/manifest.webmanifest` + `src/main.tsx` SW 注册 + `index.html` viewport/manifest/apple-touch-icon），仅需将 `dist/` 部署到任意 HTTPS 静态托管（推荐 Cloudflare Pages / Netlify），手机 Chrome 即可"添加到主屏幕"作为独立 App 运行。文档覆盖：构建产物说明、HTTPS 平台推荐（Cloudflare Pages / Netlify / Vercel / GH Pages / 自建 nginx / 国内 CDN）、部署后验证清单、Android 与 iOS 安装步骤、调试常见问题（HTTP 无 install、SW 未注册、manifest 解析、iOS 7 天缓存失效等）、PWABuilder/Bubblewrap/Capacitor 打包上架路径、回归测试清单
+
 ## [0.5.0] — 2026-08-27
 
 ### 新增
