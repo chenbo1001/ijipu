@@ -1086,15 +1086,7 @@ body {
   width: var(--jp-editor-content-w, 100%);
 }
 
-/* adj171：当前行整行背景铺满层（在内容层之下，宽度铺满编辑区） */
-.editor-main .editor-current-line-bg {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: var(--jp-editor-lh);
-  background: color-mix(in srgb, var(--jp-accent) 8%, transparent);
-  pointer-events: none;
-}
+/* adj171：当前行整行背景铺满层——去掉，仅保留 .hl-current-block 文字级高亮（参考排版按钮选中风格） */
 
 /* 高亮内容层：字号/行高/padding 在此；
    adj169：禁用编程字体连字（与 textarea 一致，防止 |:、|| 等被渲染成连字字形导致列错位）；
@@ -1178,12 +1170,10 @@ body {
   color: var(--jp-hl-line-header);
   text-shadow: 0.4px 0 0 currentColor, -0.4px 0 0 currentColor;
 }
-/* adj165：当前音符区块/小节线区块背景（叠加在当前行背景之上，二者可区分）；
-   adj228：加醒目外边框（outline 不占宽，不影响逐字符对齐）——点击预览音符
-   跳转编辑器后，光标所在块一目了然 */
+/* adj165：当前音符区块/小节线区块背景（accent 18% 半透明高亮选中文本）。
+   adj：去掉 outline 外边框——参考排版按钮选中风格（只有背景+文字色变化，无外边框）。 */
 .hl-current-block {
   background: color-mix(in srgb, var(--jp-accent) 18%, transparent);
-  outline: 2px solid color-mix(in srgb, var(--jp-accent) 80%, transparent);
   border-radius: 3px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;

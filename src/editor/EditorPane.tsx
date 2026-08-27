@@ -286,11 +286,6 @@ export function EditorPane() {
     }
     return tops
   }, [visualLines])
-  // adj223：cursorVisualTop 必须 × 行高——visualTopOfLine 是「累计视觉行数」而非像素，
-  // 此前直接当 px 用（top: 10 + 行数）导致背景永远停在前几行，光标移到下方行时
-  // 背景不动（看起来像「行高亮一直停在第 1 行」）
-  const cursorVisualTop = cursor ? (visualTopOfLine[cursor.line - 1] ?? 0) * editorLineH : 0
-  const cursorVisualH = cursor ? (visualLines[cursor.line - 1] ?? 1) * editorLineH : editorLineH
   // adj223：视觉行前缀和经 ref 供光标跳转滚动读取（避免加入 effect 依赖）
   const visualTopRef = useRef(visualTopOfLine)
   visualTopRef.current = visualTopOfLine
@@ -706,14 +701,8 @@ export function EditorPane() {
               innerRef.current = el
               hlInnerRef.current = el
             }}>
-              {/* adj171：当前行整行背景铺满层（随 inner transform 一起平移；宽度铺满编辑区）
-                  adj172：top 含内容层 padding-top 10px（否则背景整体偏上 10px） */}
-              {cursor && (
-                <div
-                  className="editor-current-line-bg"
-                  style={{ top: 10 + cursorVisualTop, height: cursorVisualH }}
-                />
-              )}
+              {/* adj：去掉整行铺满背景 — 折行时整行 accent 8% 底色跨多视觉行过重；
+                  当前块/选中由 .hl-current-block 背景（accent 18%）文字级高亮承担，参考排版按钮选中风格 */}
               <div
                 className="highlight-content"
                 dangerouslySetInnerHTML={{ __html: html }}
