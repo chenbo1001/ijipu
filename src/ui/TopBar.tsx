@@ -229,8 +229,8 @@ export function TopBar() {
         return (
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
             <rect x="2.2" y="2.2" width="9.6" height="9.6" />
-            <path d="M 7 1.6 V 12.4" />
-            <path d="M 1.6 7 H 12.4" />
+            <path d="M 7 3.6 V 10.4" />
+            <path d="M 3.6 7 H 10.4" />
           </svg>
         )
       case 'playback':
