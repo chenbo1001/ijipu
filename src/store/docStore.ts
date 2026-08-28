@@ -16,6 +16,11 @@ import {
 } from '../editor/history'
 import { saveFileHandle, loadFileHandle } from './fileHandleDb'
 import { useUiStore } from './uiStore'
+
+/** adj200：用户是否已主导过文件状态（新建/打开/保存/另存为）。「启动恢复」异步读 IndexedDB，
+ *  必须只在用户还未进行任何文件操作时应用，避免它在用户新建/另存为之后才完成，从而把
+ *  fileHandle / fileName 覆盖回旧文件（旧值 A）。 */
+let fileStateTouched = false
 import { uiCopy } from '../brand/copy'
 
 export type ViewType = 'code' | 'split' | 'preview'
@@ -273,6 +278,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
     })
   },
   newDoc: () => {
+    fileStateTouched = true
     const template = defaultSample().code
     localStorage.setItem(DRAFT_KEY, template)
     localStorage.setItem(DRAFT_NAME_KEY, '未命名')
@@ -304,6 +310,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   // ---- 文件读写（adj70） ----
   fileHandle: null,
   openFile: async () => {
+    fileStateTouched = true
     const picker = (window as any).showOpenFilePicker
     // adj281：非安全上下文（http:// 或 file://）或非 Chromium 内核下无 showOpenFilePicker，
     // 降级用 <input type=file> 读取 .jps 文本——打开本质只读文本，不依赖文件系统 API
@@ -348,6 +355,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
     }
   },
   saveFile: async () => {
+    fileStateTouched = true
     const s = get()
     if (s.fileHandle) {
       try {
@@ -371,6 +379,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
     return s.saveFileAs()
   },
   saveFileAs: async () => {
+    fileStateTouched = true
     const ui = useUiStore.getState()
     const picker = (window as any).showSaveFilePicker
     if (typeof picker !== 'function') {
@@ -485,7 +494,7 @@ function openFileViaInput(): Promise<boolean> {
 // adj161：启动时恢复上次保存/打开的文件句柄（IndexedDB 持久化），
 // 之后直接按保存即写回该文件（无需重新选文件）；恢复失败静默（走另存为）
 void loadFileHandle().then((h) => {
-  if (h) {
+  if (h && !fileStateTouched) {
     const name = (h.name || '未命名').replace(/\.jps$/i, '')
     useDocStore.setState({ fileHandle: h, fileName: name })
   }
