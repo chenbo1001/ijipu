@@ -248,11 +248,16 @@ export function TopBar() {
       case 'pageConfig':
         return (
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
-            <path d="M 2 1.5 H 9 L 12 4.5 V 12.5 H 2 Z" />
-            <path d="M 9 1.5 V 4.5 H 12" />
-            <path d="M 4.5 7.5 H 9.5" />
-            <path d="M 4.5 10 H 9.5" />
-            <path d="M 4.5 8.5 L 9.5 9" strokeDasharray="1 1" />
+            <circle cx="7" cy="7" r="3.1" />
+            <path d="M 7 1.5 V 3.2" />
+            <path d="M 7 10.8 V 12.5" />
+            <path d="M 1.5 7 H 3.2" />
+            <path d="M 10.8 7 H 12.5" />
+            <path d="M 3.1 3.1 L 4.3 4.3" />
+            <path d="M 9.7 9.7 L 10.9 10.9" />
+            <path d="M 10.9 3.1 L 9.7 4.3" />
+            <path d="M 4.3 9.7 L 3.1 10.9" />
+            <circle cx="7" cy="7" r="1.3" />
           </svg>
         )
       case 'export':
