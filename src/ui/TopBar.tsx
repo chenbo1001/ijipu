@@ -227,16 +227,10 @@ export function TopBar() {
     switch (key) {
       case 'guides':
         return (
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-            <path d="M 3.2 0.8 V 5.6" />
-            <path d="M 0.8 3.2 H 5.6" />
-            <path d="M 12.8 0.8 V 5.6" />
-            <path d="M 10.4 3.2 H 15.2" />
-            <path d="M 5 8 H 11" />
-            <path d="M 3.2 10.4 V 15.2" />
-            <path d="M 0.8 12.8 H 5.6" />
-            <path d="M 12.8 10.4 V 15.2" />
-            <path d="M 10.4 12.8 H 15.2" />
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+            <rect x="2.2" y="2.2" width="9.6" height="9.6" />
+            <path d="M 7 2.2 V 11.8" />
+            <path d="M 2.2 7 H 11.8" />
           </svg>
         )
       case 'playback':
