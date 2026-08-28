@@ -69,7 +69,7 @@ export class SamplerBackend implements AudioBackend {
     return this.ctx
   }
 
-  play(pitch: string | null, atMs: number, durationMs: number, gain: number): void {
+  play(pitch: string | null, atMs: number, durationMs: number, gain: number, _instrument?: string): void {
     if (!pitch || this.state !== 'ready') return
     const ctx = this.ctx
     if (!ctx) return
@@ -81,7 +81,8 @@ export class SamplerBackend implements AudioBackend {
     src.buffer = buf
     const g = ctx.createGain()
     g.gain.setValueAtTime(0, t0)
-    g.gain.linearRampToValueAtTime(gain, t0 + 0.008)
+    // adj311：起音渐强至少 60ms（原 8ms 太陡 → 爆音；延迟播放 + 由小渐强压制）
+    g.gain.linearRampToValueAtTime(gain, t0 + Math.max(0.008, 0.06))
     g.gain.exponentialRampToValueAtTime(0.001, t0 + Math.max(0.1, durationMs / 1000))
     src.connect(g)
     g.connect(ctx.destination)

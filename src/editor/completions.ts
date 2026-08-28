@@ -23,7 +23,17 @@ export const NOTE_MODIFIER_HINTS: { code: string; label: string }[] = [
   { code: 'hx', label: '滑音箭头（右侧）' },
   { code: 'zkh', label: '左括号（音符前）' },
   { code: 'ykh', label: '右括号（音符块后）' },
-  { code: 'mp', label: '力度（如 mf）' },
+  { code: 'pp', label: '力度：很弱（pp）' },
+  { code: 'p', label: '力度：弱（p）' },
+  { code: 'mp', label: '力度：稍弱（mp）' },
+  { code: 'mf', label: '力度：稍强（mf）' },
+  { code: 'f', label: '力度：强（f）' },
+  { code: 'ff', label: '力度：很强（ff）' },
+  { code: 'fff', label: '力度：最强（fff）' },
+  { code: 'sf', label: '力度：突强（sf）' },
+  { code: 'fp', label: '力度：强后立即弱（fp）' },
+  { code: 'sfp', label: '力度：突强后突弱（sfp）' },
+  { code: 'rit', label: '渐慢（rit）' },
 ]
 
 /** 小节线修饰符（& 编码，adj126）提示 */
@@ -46,16 +56,9 @@ export const VOLTA_HINTS: { code: string; label: string }[] = [
 ]
 
 /** adj186：描述头（行首 Tab 提示）——code + 中文说明；cursorAt 可选（插入后光标停靠位置，
- *  用于带声部名模板让光标落在引号内待输入）；adj192：加入 Q:/C: 及多声部/带声部名变体 */
+ *  用于带声部名模板让光标落在引号内待输入）；adj192：加入 Q:/C: 及多声部/带声部名变体；
+ *  adj281：Q:/C: 系列最常用，将 Q:/C: 相关描述头提前到最前面，其它保持原顺序排列 */
 export const HEADER_HINTS: { code: string; label: string; cursorAt?: number }[] = [
-  { code: 'V:', label: '版本号（必须，如 V: 1.0）' },
-  { code: 'B:', label: '标题（首个为主标题，其后为副标题）' },
-  { code: 'Z:', label: '作者（居右显示）' },
-  { code: 'D:', label: '调式（如 D: C / D: F# / D: bE）' },
-  { code: 'P:', label: '拍号（如 P: 4/4，可多个）' },
-  { code: 'J:', label: '节拍（数字=拍/分，或文字）' },
-  { code: 'Y:', label: '乐器（可多次，显示在副标题下）' },
-  { code: 'S:', label: '说明文字（谱尾，支持 \\n 换行）' },
   { code: 'Q:', label: '曲行（声部 1，可省略编号）' },
   { code: 'C:', label: '歌词行（依附上一曲行）' },
   { code: 'Q1:', label: '曲行·声部 1' },
@@ -64,6 +67,14 @@ export const HEADER_HINTS: { code: string; label: string; cursorAt?: number }[] 
   { code: 'C2:', label: '歌词行·声部 2' },
   { code: 'Q1"声部名":', label: '曲行·声部 1 带名称', cursorAt: 4 },
   { code: 'Q2"声部名":', label: '曲行·声部 2 带名称', cursorAt: 4 },
+  { code: 'V:', label: '版本号（必须，如 V: 1.0）' },
+  { code: 'B:', label: '标题（首个为主标题，其后为副标题）' },
+  { code: 'Z:', label: '作者（居右显示）' },
+  { code: 'D:', label: '调式（如 D: C / D: F# / D: bE）' },
+  { code: 'P:', label: '拍号（如 P: 4/4，可多个）' },
+  { code: 'J:', label: '节拍（数字=拍/分，或文字）' },
+  { code: 'Y:', label: '乐器（可多次，显示在副标题下）' },
+  { code: 'S:', label: '说明文字（谱尾，支持 \\n 换行）' },
 ]
 
 /** 判断某字符是否可组成 & 编码（字母数字） */

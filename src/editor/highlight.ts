@@ -4,7 +4,7 @@
  * 着色语义：
  *  - 行头命令（Q/C/B/Z/D/P/J/V/Y/S 及声部编号）→ line-header（霓虹青）
  *  - 音符数字/增时线 → note（橙）；小节线/反复记号 → barline（灰蓝）
- *  - 歌词 → lyric（绿）；注释 → comment（暗蓝斜体）；[fenye] → pagebreak（粉）
+ *  - 歌词 → lyric（绿）；注释 → comment（暗蓝）；[fenye] → pagebreak（粉）
  *  - & 装饰编码 → decoration（青淡）
  */
 
@@ -206,7 +206,14 @@ export function highlightCodeWrapped(
       continue
     }
     if (trimmed.startsWith('#')) {
-      parts.push(wrap(`<div class="hl-line">${span('hl-comment', raw)}</div>`))
+      // adj310：注释行同样按 wrapPoints 切分——原独立分支整行放一个 .hl-line，
+      // white-space:pre 不折行；textarea 却 pre-wrap 自动折行，长注释两层不同步。
+      // 与 Q 行一致，按实际折行点切成多个 .hl-line 每段用 hl-comment 着色。
+      const segs = segsOf(raw.length, pts)
+      const segHtml = segs
+        .map((s) => `<div class="hl-line">${span('hl-comment', raw.slice(s.start, s.end))}</div>`)
+        .join('')
+      parts.push(wrap(segHtml))
       continue
     }
     if (trimmed === '[fenye]') {

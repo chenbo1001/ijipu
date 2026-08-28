@@ -11,6 +11,16 @@ export type ModalKind =
   | 'playback'
   | 'export'
   | 'shortcuts'
+  | 'manual'
+  | 'syntax'
+
+/** 轻量浮动提示（toast）：kind 决定配色；nonce 用于同文案重复触发时重置隐藏计时 */
+export type NoticeKind = 'ok' | 'warn' | 'error'
+export interface Notice {
+  text: string
+  kind: NoticeKind
+  nonce: number
+}
 
 const THEME_KEY = 'jianpuscript.theme'
 const THEME_MODE_KEY = 'jianpuscript.themeMode'
@@ -90,6 +100,8 @@ interface UiState {
   /** 编辑器自动折行（adj233 默认关闭；adj234 曾默认开启——用户确认保持默认关闭，
    *  关闭时 wrap=off 横向滚动对位正确；开启时 break-word 空格后折行） */
   autoWrap: boolean
+  /** 轻量浮动提示（null = 无提示） */
+  notice: Notice | null
   openModal: (m: ModalKind) => void
   closeModal: () => void
   setPlaybackStart: (id: string | null) => void
@@ -103,6 +115,8 @@ interface UiState {
   setEditorFont: (f: string) => void
   setPreviewZoom: (z: number) => void
   setAutoWrap: (b: boolean) => void
+  showNotice: (text: string, kind?: NoticeKind) => void
+  clearNotice: () => void
 }
 
 export const useUiStore = create<UiState>()((set) => ({
@@ -129,7 +143,9 @@ export const useUiStore = create<UiState>()((set) => ({
     return 'Consolas'
   })(),
   previewZoom: loadNum(PREVIEW_ZOOM_KEY, 100),
-  autoWrap: loadBool(AUTO_WRAP_KEY, false),
+  // adj311：自动折行改为默认开启——Textarea 与显示层折行同步已修复
+  //（mirror div 与 textarea 折行点一致），开启后长行软折行对位正确无横向滚动
+  autoWrap: loadBool(AUTO_WRAP_KEY, true),
   openModal: (m) => set({ modal: m }),
   closeModal: () => set({ modal: null, playbackStartId: null }),
   setPlaybackStart: (id) => set({ playbackStartId: id }),
@@ -195,4 +211,8 @@ export const useUiStore = create<UiState>()((set) => ({
     }
     set({ autoWrap: b })
   },
+  notice: null,
+  showNotice: (text, kind = 'ok') =>
+    set((s) => ({ notice: { text, kind, nonce: (s.notice?.nonce ?? 0) + 1 } })),
+  clearNotice: () => set({ notice: null }),
 }))

@@ -51,6 +51,8 @@ interface DocState {
   playheadTrack: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number }[]
   /** adj262：多声部 voiceBlocks（纯曲部 yTop/yBottom/x）——播放时渲染竖向色框覆盖整列 */
   voiceBlocks: { x: number; yTop: number; yBottom: number; pageIndex: number; voices: number[] }[]
+  /** adj291：布局后的「全局音符 index → 物理页 page」映射（自动分页一致）——光标联动定位音符 id.page */
+  noteIndexToPage: Map<number, number> | null
   /** 编辑器光标跳转请求（点击谱面音符 / 撤销重做恢复选区时触发） */
   cursorJump: { start: number; end: number; nonce: number } | null
 
@@ -75,6 +77,8 @@ interface DocState {
   setActiveNoteIds: (ids: string[]) => void
   /** adj262：设置多声部 voiceBlocks（layout 后由 PlaybackDialog 写入） */
   setVoiceBlocks: (vbs: { x: number; yTop: number; yBottom: number; pageIndex: number; voices: number[] }[]) => void
+  /** adj291：设置布局后的音符 index→页映射（PreviewPane 布局后回填，EditorPane 光标联动用） */
+  setNoteIndexToPage: (m: Map<number, number> | null) => void
   /** adj282：设置播放轨道（PlaybackDialog 播放时写入、停止时清空） */
   setPlayheadTrack: (t: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number }[]) => void
   /** adj263：设置播放当前 ms（RAF 驱动，PreviewPane 渲染平滑色框） */
@@ -166,6 +170,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   currentMs: 0,
   playheadTrack: [],
   voiceBlocks: [],
+  noteIndexToPage: null,
   cursorJump: null,
   undoStack: [],
   redoStack: [],
@@ -229,6 +234,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   setActiveNoteId: (id) => set({ activeNoteId: id }),
   setActiveNoteIds: (ids) => set({ activeNoteIds: ids }),
   setVoiceBlocks: (vbs) => set({ voiceBlocks: vbs }),
+  setNoteIndexToPage: (m) => set({ noteIndexToPage: m }),
   setPlayheadTrack: (t) => set({ playheadTrack: t }),
   setCurrentMs: (ms) => set({ currentMs: ms }),
   jumpCursor: (pos, end) =>

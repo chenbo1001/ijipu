@@ -380,6 +380,8 @@ export interface PlacedToken {
   y: number
   /** 占宽 */
   width: number
+  /** adj290：音符实际占位右端（含分配+留空，不含相邻休止符）——播放色块/定位用，防止延伸到后面的休止符 */
+  rightX?: number
   /** 时值（拍数，用于播放） */
   duration: number
   /** 小节内拍位置（累积拍，从 0 起，用于减时线分组） */
@@ -389,8 +391,10 @@ export interface PlacedToken {
   /**
    * 拍段序列（adj35 拍级宽度）：每段一拍（跨拍音符拆段），供增时线/附点按拍定位。
    * x = 段起点，perBeat = 该拍每拍宽，beats = 段内时值（拍）。
+   * adj284：空间优先布局给每段加 el 标记（note=音符块 / aug=增时线 / dot=附点），
+   * 供渲染端读取显式段位置；时值优先路径不设置该标记，不影响既有行为。
    */
-  segments?: { x: number; perBeat: number; beats: number }[]
+  segments?: { x: number; perBeat: number; beats: number; el?: 'note' | 'aug' | 'dot' }[]
   /** 试听音高：音级+八度+变音计算出的简谱音名（如 C5） */
   audioPitch: string | null
   /** 是否可点击（休止符/隐藏符不可发声） */
@@ -637,8 +641,8 @@ export const defaultPageConfig: PageConfig = {
   height_shengbu: 0,
   bar_gap: 0,
   align_min_bars: 4,
-  // adj281：默认时值优先（当前音符排列模式）
-  noteSpaceLayout: 'duration',
+  // adj289：默认空间优先（指定为默认布局方式）
+  noteSpaceLayout: 'space',
   lianyinxian_type: 0,
 }
 

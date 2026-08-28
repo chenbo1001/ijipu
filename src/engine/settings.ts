@@ -38,6 +38,8 @@ export function extractJpsConfig(code: string): Partial<PageConfig> | null {
       'metaPos',
       'editorFont',
       'editorFontSize',
+      // adj292：歌词压缩开关（可选字段，不在 defaultPageConfig 上，显式白名单）
+      'lyricShrink',
     ])
     const out: Record<string, unknown> = {}
     for (const k of Object.keys(obj)) {

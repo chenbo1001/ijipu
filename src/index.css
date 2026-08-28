@@ -1194,13 +1194,14 @@ body {
   color: var(--jp-hl-line-header);
   text-shadow: 0.4px 0 0 currentColor, -0.4px 0 0 currentColor;
 }
-/* adj165：当前音符区块/小节线区块背景（accent 18% 半透明高亮选中文本）。
-   adj：去掉 outline 外边框——参考排版按钮选中风格（只有背景+文字色变化，无外边框）。 */
+/* adj165：当前音符区块/小节线区块背景（accent 半透明高亮选中文本）。
+   adj292：提高背景浓度（18%→32%）并加底部强调线，让当前音符块/小节线块更醒目、易定位。 */
 .hl-current-block {
-  background: color-mix(in srgb, var(--jp-accent) 18%, transparent);
+  background: color-mix(in srgb, var(--jp-accent) 32%, transparent);
   border-radius: 3px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+  box-shadow: inset 0 -2px 0 var(--jp-accent);
 }
 .hl-note {
   color: var(--jp-hl-note);

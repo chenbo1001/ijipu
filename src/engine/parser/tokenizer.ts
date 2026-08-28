@@ -129,7 +129,8 @@ export function tokenizeMusicLine(
           base.comment = content.slice(j + 1, close).replace(/_/g, ' ')
           j = close + 1
         }
-        break // 注释后不再收集
+        // 注释不固定为块末：注释后的 & 等修饰符仍继续收集（对「修饰符在注释后」的写法健壮）；
+        // 遇非法字符（数字等）由下方 else break 停止
       } else {
         break
       }
@@ -251,6 +252,27 @@ export function tokenizeMusicLine(
       continue
     }
 
+    // adj301：@乐器名 / @@ 乐器切换指令（Q 行内；不占时值、不渲染，仅播放切换乐器）
+    if (c === '@') {
+      if (content[i + 1] === '@') {
+        // @@ → 切回默认乐器
+        tokens.push({ kind: 'instrument', name: null, pos: i, raw: '@@' })
+        i += 2
+        continue
+      }
+      let k = i + 1
+      // 收集乐器名：到空白/小节线/行尾为止（中文名如 钢琴、英文如 piano）
+      while (k < n && content[k] !== ' ' && content[k] !== '\t' && content[k] !== '|' && content[k] !== ':' && content[k] !== '\n') k++
+      if (k > i + 1) {
+        tokens.push({ kind: 'instrument', name: content.slice(i + 1, k), pos: i, raw: content.slice(i, k) })
+        i = k
+        continue
+      }
+      // 孤立 @：略过（作为指令边界）
+      i++
+      continue
+    }
+
     // 小节线（含反复记号与隐藏线）
     if (c === '|' || (c === ':' && content[i + 1] === '|')) {
       let j = i
@@ -292,59 +314,71 @@ export function tokenizeMusicLine(
       // 若无附加内容则回退到空格前（空格留给下一个块做单空格校验，adj23）
       const barEnd = j
       while (content[j] === ' ' || content[j] === '\t') j++
-      // 小节线备注（引号，如跳房子番号 "1."）——先于跳房子标记处理
-      if (content[j] === '"') {
-        const close = content.indexOf('"', j + 1)
-        if (close === -1) {
-          t.comment = content.slice(j + 1)
-          errors.push(err('引号注释未闭合', { line: pos.line, col: pos.col + j }))
-          j = n
-        } else {
-          t.comment = content.slice(j + 1, close)
-          j = close + 1
-        }
-      }
-      // 跳房子标记紧跟小节线（adj26：修饰 = + 抬高 / 不封闭 / 引号注释）
-      if (content[j] === '[') {
-        const mod = parseVoltaMods(j + 1)
-        t.voltaStart = { open: true, slash: mod.slash, plus: mod.plus, comment: mod.comment }
-        t.raw = rawAt(i, mod.k)
-        j = mod.k
-      } else if (content[j] === ']') {
-        // |] 跳房子结束；|]/ 开口结束（adj26）
-        t.voltaEnd = true
-        let k = j + 1
-        if (content[k] === '/') {
-          t.voltaEndSlash = true
-          k++
-        }
-        t.raw = rawAt(i, k)
-        j = k
-      } else if (content[j] === '&') {
-        // adj126：小节线修饰符（&fine 曲终 / &dc 从头反复 / &ds 大反复 / &ty 大跳跃 / &hs 花S）
-        // adj206：同一小节线可叠加多个修饰符（如 |&ty&ds）——循环收集
-        const marks: Extract<MusicToken, { kind: 'barline' }>['marks'] = []
-        let k = j
-        while (k < n && content[k] === '&') {
-          let m = k + 1
-          while (m < n && /[a-z]/i.test(content[m])) m++
-          const code = content.slice(k + 1, m)
-          if (code === 'fine' || code === 'dc' || code === 'ds' || code === 'ty' || code === 'hs') {
-            marks.push(code as BarlineMark)
-            k = m
+      // adj295：跳房子标记（[ ]）、小节线修饰符（&fine/&dc/&ds/&ty/&hs）、
+      // 小节线引号备注（"p:2/4" 临时节拍 / 备注）可**任意顺序共存**——循环处理而非固定顺序；
+      // 此前引号只在开头处理一次，& 在引号前时（|&hs"p:2/4"）引号被吞、临时节拍丢失
+      {
+        let guard = 0
+        while (guard++ < 6) {
+          if (content[j] === '[') {
+            // 跳房子开始（adj26：修饰 = + 抬高 / 不封闭 / 引号注释）
+            const mod = parseVoltaMods(j + 1)
+            t.voltaStart = { open: true, slash: mod.slash, plus: mod.plus, comment: mod.comment }
+            t.raw = rawAt(i, mod.k)
+            j = mod.k
+          } else if (content[j] === ']') {
+            // |] 跳房子结束；|]/ 开口结束（adj26）
+            t.voltaEnd = true
+            let k = j + 1
+            if (content[k] === '/') {
+              t.voltaEndSlash = true
+              k++
+            }
+            t.raw = rawAt(i, k)
+            j = k
+          } else if (content[j] === '&') {
+            // adj126：小节线修饰符（&fine 曲终 / &dc 从头反复 / &ds 大反复 / &ty 大跳跃 / &hs 花S）
+            // adj206：同一小节线可叠加多个修饰符（如 |&ty&ds）——循环收集
+            const marks: Extract<MusicToken, { kind: 'barline' }>['marks'] = []
+            let k = j
+            while (k < n && content[k] === '&') {
+              let m = k + 1
+              while (m < n && /[a-z]/i.test(content[m])) m++
+              const code = content.slice(k + 1, m)
+              if (code === 'fine' || code === 'dc' || code === 'ds' || code === 'ty' || code === 'hs') {
+                marks.push(code as BarlineMark)
+                k = m
+              } else {
+                break // 非小节线修饰符：停止收集（& 留给独立装饰处理）
+              }
+            }
+            if (marks.length > 0) {
+              t.marks = marks
+              t.raw = rawAt(i, k)
+              j = k
+            } else {
+              break // 非小节线修饰符：& 留给独立装饰处理
+            }
+          } else if (content[j] === '"') {
+            // 小节线备注（引号，如 "p:2/4" 临时节拍 / 备注）——任意顺序下都能解析
+            const close = content.indexOf('"', j + 1)
+            if (close === -1) {
+              t.comment = content.slice(j + 1)
+              errors.push(err('引号注释未闭合', { line: pos.line, col: pos.col + j }))
+              j = n
+            } else {
+              t.comment = content.slice(j + 1, close)
+              t.raw = rawAt(i, close + 1)
+              j = close + 1
+            }
           } else {
-            break // 非小节线修饰符：停止收集（& 留给独立装饰处理）
+            break
           }
         }
-        if (marks.length > 0) {
-          t.marks = marks
-          t.raw = rawAt(i, k)
-          j = k
-        } else {
-          j = barEnd // 非小节线修饰符：回退（& 留给独立装饰处理）
+        // 无任何附加（备注/跳房子/修饰符）：回退到空格前（空格留给下一个块，adj23）
+        if (t.comment === undefined && t.voltaStart === undefined && t.voltaEnd === undefined && t.marks === undefined) {
+          j = barEnd
         }
-      } else if (t.comment === undefined) {
-        j = barEnd // 无备注/跳房子：回退到空格前（空格留给下一个块）
       }
       tokens.push(t)
       registerBlock(i, j)

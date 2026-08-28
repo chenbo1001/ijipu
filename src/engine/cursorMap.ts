@@ -8,6 +8,7 @@
  *  - noteIdToCodePos：音符 id → 编辑器字符位置（点击谱面跳转）
  */
 import { tokenizeMusicLine } from './parser/tokenizer'
+import type { ScoreLayout } from './types'
 
 const Q_RE = /^Q(\d*)(?:"[^"]*")?\s*:(.*)$/
 const ID_RE = /^(\d+)_(\d+)_(\d+)_(\d+)$/
@@ -28,8 +29,9 @@ export function parseNoteId(id: string): NoteIdParts | null {
 const isNoteToken = (t: { kind: string }) =>
   t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm'
 
-/** 编辑器光标位置（0-based）→ notepos id；非 Q 行或超出范围返回 null */
-export function codePosToNoteId(code: string, pos: number): string | null {
+/** 编辑器光标位置（0-based）→ notepos id；非 Q 行或超出范围返回 null
+ *  @param indexToPage 布局时生成的「全局音符 index → 物理页 page」（自动分页一致）；缺省回退 [fenye] 计 */
+export function codePosToNoteId(code: string, pos: number, indexToPage?: Map<number, number>): string | null {
   const lines = code.replace(/\r\n/g, '\n').split('\n')
 
   // 定位光标所在行
@@ -83,7 +85,10 @@ export function codePosToNoteId(code: string, pos: number): string | null {
       if (noteTokens.length === 0) return null
       const idx = Math.min(last, noteTokens.length - 1)
       const voice = m[1] === '' ? 1 : Number(m[1])
-      target = `${page}_${voice}_${group}_${noteCounter + idx}`
+      const gIdx = noteCounter + idx
+      // adj291：page 用实际布局的物理页（自动分页也一致），与音符 id 的 page 对齐；无映射回退 [fenye] 计
+      const pg = indexToPage?.get(gIdx) ?? page
+      target = `${pg}_${voice}_${group}_${gIdx}`
       break
     }
     noteCounter += noteTokens.length
@@ -119,7 +124,7 @@ export function noteIdToCodePos(code: string, id: string): number | null {
     const { tokens } = tokenizeMusicLine(content, { line: i + 1, col: 0 })
     const noteTokens = tokens.filter(isNoteToken)
 
-    if (page === parts.page && noteCounter <= parts.index && parts.index < noteCounter + noteTokens.length) {
+    if (noteCounter <= parts.index && parts.index < noteCounter + noteTokens.length) {
       // 目标音符在本行
       const local = parts.index - noteCounter
       const t = noteTokens[local]
@@ -130,4 +135,11 @@ export function noteIdToCodePos(code: string, id: string): number | null {
     lineStart += raw.length + 1
   }
   return null
+}
+
+/** 布局后的「全局音符 index → 物理页 page」映射（自动分页也一致）——供光标联动对齐音符 id 的 page */
+export function buildIndexToPage(layout: ScoreLayout): Map<number, number> {
+  const m = new Map<number, number>()
+  for (const pg of layout.pages) for (const n of pg.notes) m.set(n.id.index, pg.index)
+  return m
 }

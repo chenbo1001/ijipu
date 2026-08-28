@@ -94,7 +94,10 @@ export function EditorPane() {
 
   // 光标联动（M3）：光标移动 → 计算 notepos id → 预览高亮
   const setActiveNoteId = useDocStore((s) => s.setActiveNoteId)
+  const noteIndexToPage = useDocStore((s) => s.noteIndexToPage)
   const cursorJump = useDocStore((s) => s.cursorJump)
+  // adj292：折行点 ref——光标跳转滚动时精确到「光标所在视觉行」（源码行顶 + 折行偏移）
+  const wrapPointsRef = useRef<number[][]>([])
   const undo = useDocStore((s) => s.undo)
   const redo = useDocStore((s) => s.redo)
   // adj165：当前光标行/列（1-based 行、0-based 列），供高亮当前行与当前区块
@@ -116,10 +119,16 @@ export function EditorPane() {
     // adj236：居中滚动——目标音符块尽量处于编辑器视口水平/垂直中心，
     // 避免跳到边角不好查找；超界由浏览器自动钳制到最大滚动
     const pos = lineColOf(ta.value, cursorJump.start)
-    const targetTop = (visualTopRef.current[pos.line - 1] ?? 0) * editorLineH
+    // adj292：折行内精确到光标所在视觉行——源码行顶 + 折行偏移×行高，保证音符块居中
+    const wp = wrapPointsRef.current[pos.line - 1] ?? []
+    const vIdx = wp.filter((p) => p < pos.col).length
+    // visualTopRef 存「视觉行数」，需 ×行高转 px；（源码行前视觉行数 + 行内折行偏移）× 行高
+    const targetTop = ((visualTopRef.current[pos.line - 1] ?? 0) + vIdx) * editorLineH
     ta.scrollTop = Math.max(0, targetTop - (ta.clientHeight - editorLineH) / 2)
     const targetLeft = pos.col * effectiveFontSize * 0.6
-    ta.scrollLeft = Math.max(0, targetLeft - ta.clientWidth / 2 + effectiveFontSize * 0.3)
+    // 折行（autoWrap）时内容宽度=视口，无横向滚动条——scrollLeft 置 0，
+    // 避免残留的横向偏移让高亮层/内容错位、左侧看不到；wrap=off（长行横向滚动）再定位到目标列居中
+    ta.scrollLeft = autoWrap ? 0 : Math.max(0, targetLeft - ta.clientWidth / 2 + effectiveFontSize * 0.3)
     onScroll()
     onSelectRef.current()
   }, [cursorJump, effectiveFontSize])
@@ -274,6 +283,8 @@ export function EditorPane() {
     () => wrapPoints.map((pts) => pts.length + 1),
     [wrapPoints],
   )
+  // adj292：折行点经 ref 供光标跳转滚动读取（不加入 effect 依赖，避免输入重跑）
+  wrapPointsRef.current = wrapPoints
 
   // adj201：视觉行起点偏移（每源码行前的累计视觉行数 × 行高）——折行后当前行
   // 背景/提示定位等按视觉行计算，不再按源码行（此前折行时光标行背景错位）
@@ -301,7 +312,8 @@ export function EditorPane() {
     formatLeftLine(ta.value, line)
     setCursor(line, col)
     setSelection(ta.selectionStart, ta.selectionEnd)
-    const id = codePosToNoteId(ta.value, ta.selectionStart)
+    // adj291：传布局后的 index→页映射，使音符 id.page 与预览物理页一致（自动分页）
+    const id = codePosToNoteId(ta.value, ta.selectionStart, noteIndexToPage ?? undefined)
     setActiveNoteId(id)
   }
   onSelectRef.current = onSelect

@@ -9,11 +9,23 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { tempoLabel } from '../engine/parser/parser'
-import { layoutScore, renderScoreToSvg, noteIdToCodePos } from '../engine'
+import { layoutScore, renderScoreToSvg, noteIdToCodePos, buildIndexToPage } from '../engine'
 import type { ScorePage } from '../engine'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '../engine/layout/guides'
 import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '../engine/layout/metaAnchors'
 import { brand } from '../brand/tokens'
+
+/** adj199：用 canvas.measureText 实测指定字体/字号下文本宽度（按字体实际宽度摆放角标，消除中英文宽度差异） */
+function measureFont(text: string, fontSize: number, fontFamily: string): number | undefined {
+  try {
+    const ctx = document.createElement('canvas').getContext('2d')
+    if (!ctx) return undefined
+    ctx.font = `${fontSize}px ${fontFamily}`
+    return ctx.measureText(text).width
+  } catch {
+    return undefined
+  }
+}
 
 /** 预览 SVG 基准显示宽度（与渲染容器一致）；实际显示宽度 = PREVIEW_W × zoom（adj51） */
 const PREVIEW_W = 760
@@ -25,6 +37,7 @@ export function PreviewPane() {
   const code = useDocStore((s) => s.code)
   const activeNoteId = useDocStore((s) => s.activeNoteId)
   const setActiveNoteId = useDocStore((s) => s.setActiveNoteId)
+  const setNoteIndexToPage = useDocStore((s) => s.setNoteIndexToPage)
   // adj258：批量高亮播放中同时演奏的音符（多声部同步）
   const activeNoteIds = useDocStore((s) => s.activeNoteIds)
   const jumpCursor = useDocStore((s) => s.jumpCursor)
@@ -59,8 +72,17 @@ export function PreviewPane() {
     // 解析阶段跳过：引号未闭合吞剩余内容、歌词缺曲行不挂载、未知符号降级为装饰），
     // 始终渲染可解析部分，避免预览在正常显示与错误提示之间闪动
     const lay = layoutScore(parseResult, pageConfig)
-    return { layout: lay, pagesHtml: renderScoreToSvg(lay), summary: sum }
+    // adj199：按字体实际宽度摆放角标——实测 "1 = " 与 ♯ 宽传入渲染，消除中英文字体 ♯ 宽度差异
+    const cfg = lay.config
+    const w1eq = measureFont('1 = ', cfg.miaoshu_size, cfg.miaoshu_font)
+    const wAcc = measureFont('♯', cfg.miaoshu_size * (3 / 4), cfg.miaoshu_font)
+    return { layout: lay, pagesHtml: renderScoreToSvg(lay, { w1eq, wAcc }), summary: sum }
   }, [parseResult, pageConfig])
+
+  // adj291：布局后把「音符 index → 物理页」映射回填 store，供编辑器光标联动对齐音符 id.page（自动分页一致）
+  useEffect(() => {
+    if (layout) setNoteIndexToPage(buildIndexToPage(layout))
+  }, [layout, setNoteIndexToPage])
 
   const rowTops = useMemo(() => (layout ? computeRowTops(layout, pageConfig.note_size) : []), [layout, pageConfig.note_size])
   const rowGuides = useMemo(

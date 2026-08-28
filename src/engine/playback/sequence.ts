@@ -11,6 +11,8 @@
 import type { BarlineMark, BarlineType, ParseResult, PlacedBarline, PlacedToken, ScoreLayout } from '../types'
 import { tokenDuration } from '../duration'
 import { parseKey, pitchToName } from '../layout/index'
+import { resolveInstrument } from './instruments'
+import type { InstrumentId } from './instruments'
 
 /**
  * 解析音符 id（"page_voice_group_index"）为全局音符序号定位起点。
@@ -20,6 +22,20 @@ function parseStartNoteIdx(id: string): { index: number } | null {
   const parts = id.split('_')
   const index = Number(parts[parts.length - 1])
   return Number.isFinite(index) ? { index } : null
+}
+
+/** adj300：播放拍段（每段 ≤1 拍）——色块按拍段滑动；连音合并时后续音符拍段并入事件 */
+export interface PlayheadSeg {
+  /** 段起点拍偏移（相对事件起点） */
+  beat: number
+  /** 段拍数（≤1） */
+  beats: number
+  pageIndex: number
+  x: number
+  y: number
+  width: number
+  voice: number
+  group: number
 }
 
 export interface PlayEvent {
@@ -32,6 +48,8 @@ export interface PlayEvent {
   pitch?: string | null
   /** adj257：乐器名（多声部按各自乐器同时演奏；缺省 = 通用音色） */
   instrument?: string
+  /** adj300：播放拍段轨道（连音合并时含被合并音符的拍段，覆盖完整时值；普通事件 = 音符拍段） */
+  playheadSegs?: PlayheadSeg[]
 }
 
 export interface PlaySequence {
@@ -49,15 +67,56 @@ export function inferBpm(result: ParseResult): number {
       return Math.min(240, Math.max(30, Math.round(n)))
     }
   }
-  return 90
+  // adj308：默认试听速度 60 拍/分（描述头无 J 时）
+  return 60
 }
 
 interface SeqItem {
-  kind: 'note' | 'bar'
+  kind: 'note' | 'bar' | 'instrument'
   note?: PlacedToken
   /** 音符全局索引（slur 区间用；bar 项无） */
   noteIdx?: number
+  /** adj301：乐器切换指令（@乐器名 / @@） */
+  instr?: { name: string | null }
   bar?: { type: BarlineType; marks?: BarlineMark[]; voltaStart?: PlacedBarline['voltaStart']; voltaEnd?: boolean }
+}
+
+/** adj300：构建一个音符的播放拍段（placed.segments 每段 ≤1 拍；无 segments 兜底单段）。
+ *  beat = 段起点拍偏移（相对事件起点）；连音合并时以累计拍数作后续音符起始拍。 */
+function buildPlayheadSegs(plc: PlacedToken, startBeat: number): PlayheadSeg[] {
+  const base = {
+    pageIndex: plc.id.page,
+    y: plc.y,
+    voice: plc.id.voice,
+    group: plc.id.group,
+  }
+  const segs = plc.segments ?? []
+  if (segs.length === 0) {
+    return [{ beat: startBeat, beats: plc.duration, x: plc.x, width: plc.width, ...base }]
+  }
+  // adj290：空间优先（段带 el 标记）——附点/增时线按独立时值逐个滑动；
+  // 色块宽 = 该段到下一段的物理区间（含分配+留空），连续覆盖无重叠。
+  if (segs.some((s) => s.el !== undefined)) {
+    const endX = plc.rightX ?? (plc.x + plc.width)
+    const out: PlayheadSeg[] = []
+    let acc = startBeat
+    for (let i = 0; i < segs.length; i++) {
+      const s = segs[i]
+      const x0 = s.x
+      const x1 = i < segs.length - 1 ? segs[i + 1].x : endX
+      out.push({ beat: acc, beats: s.beats, x: x0, width: Math.max(0, x1 - x0), ...base })
+      acc += s.beats
+    }
+    return out
+  }
+  // 时值优先：按段宽（本体）滑动
+  const out: PlayheadSeg[] = []
+  let acc = startBeat
+  for (const s of segs) {
+    out.push({ beat: acc, beats: s.beats, x: s.x, width: s.perBeat * s.beats, ...base })
+    acc += s.beats
+  }
+  return out
 }
 
 export function buildPlaySequence(
@@ -74,12 +133,14 @@ export function buildPlaySequence(
   for (const page of layout.pages) {
     for (const n of page.notes) byIndex.set(n.id.index, n)
   }
-  // adj257：多声部乐器名映射（voice → name）——从 voiceBlocks 收集，PlayEvent.instrument 用于后端按乐器路由
-  const voiceNameMap = new Map<number, string>()
-  for (const page of layout.pages) {
-    for (const vb of page.voiceBlocks) {
-      for (const v of vb.voices) voiceNameMap.set(v.voice, v.name ?? '')
-    }
+  // adj301/302：全局默认乐器 = 描述头第一个 Y 乐器（name 与试听音色库一致，无则音色库第一个钢琴）。
+  // 多声部按声部序号对应 Y 行顺序（Q1→Y[0]、Q2→Y[1]…）；声部比 Y 行多时用全局默认。
+  // @乐器名 覆盖声部默认（全局持续直到 @@），@@ 清除覆盖（回声部默认）
+  const yInstruments = result.header.instruments
+  const defaultInstrument = resolveInstrument(yInstruments?.[0])
+  const voiceDefaultOf = (voice: number): InstrumentId => {
+    const y = yInstruments?.[voice - 1]
+    return y !== undefined ? resolveInstrument(y) : defaultInstrument
   }
 
   // 2. 重建交错序列（音符 + 小节线），保持源码顺序
@@ -107,6 +168,9 @@ export function buildPlaySequence(
           kind: 'bar',
           bar: { type: token.type, marks: token.marks, voltaStart: token.voltaStart, voltaEnd: token.voltaEnd },
         })
+      } else if (token.kind === 'instrument') {
+        // adj301：乐器切换指令纳入播放序列（不产生音符事件，仅切换当前乐器）
+        seq.push({ kind: 'instrument', instr: { name: token.name } })
       } else if (token.kind === 'note' || token.kind === 'rest' || token.kind === 'rhythm') {
         const placed = byIndex.get(noteIdx)
         if (placed) seq.push({ kind: 'note', note: placed, noteIdx })
@@ -137,19 +201,21 @@ export function buildPlaySequence(
   })
 
   // 4. 展开反复（支持两层：反复内嵌跳房子）
-  // adj258：按 voiceBlocks 分块——多声部块内 group 共享 blockStartMs（同一组 Q1/Q2/Q3 同时播放），
+  // adj258：按 voiceBlocks 分块——多声部块内 group 共享 blockStartMs（同一组 Q1/Q2 同时播放），
   // 跨块顺序累加。单声部 group 不在任何 voiceBlock 内，自成块（blockStartMs = 累加）。
+  // adj307：多组多声部（同一 voice 在不同 voiceBlock 多次出现）— 不再用全局 voice→首 group
+  // 索引共享（会导致第二组覆盖第一组 ms）；改为按 voiceBlocks 顺序，每个 voice
+  // 在该 vb 内取"下一个未处理"的 group 索引，使每组 ms 独立累加、同步正确。
   const beatMs = 60000 / bpm
   const groupStartMs: number[] = new Array(result.groups.length).fill(0)
   const barStartMsInGroup: number[][] = result.groups.map(() => [])
+  // adj282：group → 所在块时长 ms（同块各声部共享；反复回跳推进遍时钟用）
+  const blockDurOfGroup: number[] = new Array(result.groups.length).fill(0)
   let totalMs = 0
   {
     let ms = 0
-    // group.voice → groupIndex 映射（多声部 Q1 voice=1 / Q2 voice=2 → 对应不同 group）
-    const voiceToGroupIdx = new Map<number, number>()
-    result.groups.forEach((g, gi) => {
-      if (!voiceToGroupIdx.has(g.music.voice)) voiceToGroupIdx.set(g.music.voice, gi)
-    })
+    // 每个 voice 在 result.groups 中按顺序的下一个待处理 group 索引（多组多声部各自独立 ms）
+    const voiceNextGroupIdx = new Map<number, number>()
     // 已纳入 voiceBlock 的 groupIndex
     const covered = new Set<number>()
     // 块拍数（块内 max groupBeats）
@@ -176,13 +242,23 @@ export function buildPlaySequence(
       bsMs.push(beats * beatMs)
       return bsMs
     }
-    // 1. 多声部块（voiceBlock）
+    // 1. 多声部块（voiceBlock）— 每个 voice 在该 vb 取下一个未处理的 group（adj307）
     for (const page of layout.pages) {
       for (const vb of page.voiceBlocks) {
         const gis: number[] = []
         for (const v of vb.voices) {
-          const gi = voiceToGroupIdx.get(v.voice)
-          if (gi !== undefined && !gis.includes(gi)) gis.push(gi)
+          // 找该 voice 下一个属于本 vb 的 group（按 result.groups 顺序遍历，跳过已覆盖）
+          let cur = voiceNextGroupIdx.get(v.voice) ?? 0
+          while (
+            cur < result.groups.length &&
+            (covered.has(cur) || result.groups[cur].music.voice !== v.voice)
+          ) {
+            cur++
+          }
+          if (cur < result.groups.length && result.groups[cur].music.voice === v.voice) {
+            gis.push(cur)
+            voiceNextGroupIdx.set(v.voice, cur + 1)
+          }
         }
         if (gis.length === 0) continue
         gis.sort((a, b) => a - b)
@@ -190,12 +266,13 @@ export function buildPlaySequence(
         for (const gi of gis) {
           groupStartMs[gi] = ms
           barStartMsInGroup[gi] = bsMsOf(gi)
+          blockDurOfGroup[gi] = bb * beatMs
           covered.add(gi)
         }
         ms += bb * beatMs
       }
     }
-    // 2. 单声部 group（不在任何 voiceBlock 内）按 lines music 顺序自成块累加
+    // 2. 单声部 group（不在任何 voiceBlock 内）按 groups 顺序自成块累加
     for (let gi = 0; gi < result.groups.length; gi++) {
       if (covered.has(gi)) continue
       groupStartMs[gi] = ms
@@ -204,16 +281,25 @@ export function buildPlaySequence(
       for (const tk of result.groups[gi].music.tokens) {
         if (tk.kind === 'note' || tk.kind === 'rest' || tk.kind === 'rhythm') bb += tokenDuration(tk)
       }
+      blockDurOfGroup[gi] = bb * beatMs
       ms += bb * beatMs
     }
     totalMs = ms
   }
+
   const events: PlayEvent[] = []
   let pass = 1
   let repeatStart = -1
   let i = 0
   let guard = 0
   const maxIter = seq.length * 6 // 死循环保护
+  // adj282：播放遍时钟——反复回跳（:|/&dc）时把 passMs 推进到本遍已播块末，
+  // 展开后同一音符第二遍 atMs 不再重叠（此前布局时钟不变 → 音频重叠/高亮错乱）；
+  // 单向前跳（&ds/&ty/跳房子第二遍跳过）不推进（时间连续，跳过段不占时）
+  let passMs = 0
+  let passEndMs = 0
+  // adj301：@乐器名 覆盖当前乐器（全局持续）；@@（null）清覆盖（回声部默认）。初始无覆盖 → 各声部用自己 Y 乐器
+  let overridden: InstrumentId | null = null
   const keySemitone = parseKey(result.header.key)
   // adj88：连音线内相同音高连续音符连奏合并——上一个已发事件的音符索引与音高；
   // 当前音符若与上一个音高相同、同属某连音线且中间无音符（索引相邻），则时值并入前一事件
@@ -221,6 +307,12 @@ export function buildPlaySequence(
   let lastEventPitch: string | null | undefined = undefined
   while (i < seq.length && guard++ < maxIter) {
     const item = seq[i]
+    if (item.kind === 'instrument') {
+      // adj301：@乐器名 切换（覆盖声部默认）；@@（name=null）清除覆盖（回声部默认）
+      overridden = item.instr?.name != null ? resolveInstrument(item.instr.name) : null
+      i++
+      continue
+    }
     if (item.kind === 'note' && item.note) {
       const placed = item.note
       const token = placed.token
@@ -232,7 +324,12 @@ export function buildPlaySequence(
       const g = placed.id.group
       const bi = placed.barIndex
       const bp = placed.beatPos
-      const atMs = groupStartMs[g] + (barStartMsInGroup[g][bi] ?? 0) + bp * beatMs
+      // adj282：加播放遍偏移 passMs——同块各声部共享（同步保持），反复回跳后整体平移（不重叠）
+      const atMs = passMs + groupStartMs[g] + (barStartMsInGroup[g][bi] ?? 0) + bp * beatMs
+      // adj282：本遍已播块末（块时长固定，与音符时值/连音合并无关）——回跳时作为新遍起点
+      // adj285：块结束 = 遍偏移 + 块布局起点 + 块时长（此前漏加 groupStartMs →
+      // 多曲行谱 totalMs 只算到第一块，播放到后续行中途被 doneTimer 截断）
+      passEndMs = Math.max(passEndMs, passMs + groupStartMs[g] + blockDurOfGroup[g])
       // adj89：合并判定——与前一已发事件音高相同、索引相邻（中间无音符）、
       // 且**两者同属同一条连音线**（严格 slur 内连奏）：
       // (2 - | 2/) 的 2 连 2.5 拍；(2 3/ 2/ | 2) 第 3、4 个 2 连奏；
@@ -253,12 +350,16 @@ export function buildPlaySequence(
       ) {
         const prev = events[events.length - 1]
         prev.durationMs += durationMs
+        // adj300：连音合并——把被合并音符的拍段并入 prev 的播放拍段（色块可覆盖全时值，
+        // 如 (1 - - - | 1) - 0 0 中 1 合并 6 拍，色块依次滑过 1 - - - 1 -）
+        const prevBeat = (prev.playheadSegs ?? []).reduce((a, s) => a + s.beats, 0)
+        prev.playheadSegs = (prev.playheadSegs ?? []).concat(buildPlayheadSegs(item.note, prevBeat))
         // adj157：合并时值；atMs 来自拍时钟（每个 event 独立），不需全局 at 累加
         lastEventNoteIdx = curNoteIdx
         i++
         continue
       }
-      const instrument = voiceNameMap.get(placed.id.voice) || undefined
+      const instrument = overridden ?? voiceDefaultOf(placed.id.voice)
       // 倚音（adj23）：前倚音提前于主音符、后倚音紧跟主音符，时值 1/8 拍，音高用倚音音符本身
       const gn = token.kind === 'note' ? token.gracenotes : undefined
       const graceMs = (0.125 * 60000) / bpm
@@ -277,7 +378,7 @@ export function buildPlaySequence(
           })
         }
       }
-      events.push({ placed: item.note, instrument, atMs, durationMs })
+      events.push({ placed: item.note, instrument, atMs, durationMs, playheadSegs: buildPlayheadSegs(item.note, 0) })
       if (gn && gn.after && gracePitches.length > 0) {
         for (let gi = 0; gi < gn.notes.length; gi++) {
           events.push({
@@ -303,6 +404,8 @@ export function buildPlaySequence(
       }
       if (bar.marks.includes('dc')) {
         i = 0 // 从头反复
+        // adj282：从头反复 → 新遍，遍时钟推进（与 |: 跳回一致，避免 atMs 重叠）
+        passMs = passEndMs
         continue
       }
       if (bar.marks.includes('ds')) {
@@ -334,6 +437,8 @@ export function buildPlaySequence(
         if (pass === 1 && repeatStart >= 0) {
           i = repeatStart
           pass = 2
+          // adj282：反复回跳 → 新遍，遍时钟推进到本遍已播块末（展开事件 atMs 不重叠）
+          passMs = passEndMs
         } else {
           if (bar.type === ':|:') repeatStart = i + 1 // 新段落起点
           i++
@@ -347,6 +452,9 @@ export function buildPlaySequence(
         i++
     }
   }
+
+  // adj282：总时长 = 展开后的实际播放时长（含反复遍；原布局总时长在反复时会中途截断播放）
+  totalMs = passEndMs
 
   // adj88：从指定音符开始——丢弃起点之前的音符事件，其后 atMs 统一减去起点 atMs
   if (startIdxByPage !== null) {

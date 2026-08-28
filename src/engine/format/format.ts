@@ -5,7 +5,8 @@
  *  - 仅格式化 Q 行（曲行）；其余行原样保留；
  *  - 引号内（歌词引用/注释）与跳房子 [] 内不做空格处理；
  *  - 数字前补空格（除非前一位已是 Q/C/空格/(/y）；
- *  - "(" 前补空格；"|" 前补空格；":" 在 "|" 前补空格；"{" "}" 前补空格。
+ *  - "(" 前补空格；"|" 前补空格；":" 在 "|" 前补空格；"{" "}" 前补空格；
+ *  - adj293：描述头属性与内容之间保留且只保留一个空格（如 Y:  钢琴 / Y:钢琴 → Y: 钢琴）。
  */
 export function formatJps(source: string): string {
   const lines = source.replace(/\r\n/g, '\n').split('\n')
@@ -15,7 +16,10 @@ export function formatJps(source: string): string {
 export function formatLine(raw: string): string {
   const trimmed = raw.trim()
   if (trimmed === '') return raw
-  if (!/^Q(\d*)(?:"[^"]*")?\s*:/.test(trimmed)) return raw
+  // adj293：描述头属性与内容之间保留且只保留一个空格（Y:钢琴 / Y:  钢琴 → Y: 钢琴）
+  const headerM = /^((?:V|B|Z|D|P|J|Y|S)\s*:)\s*(.*)$/.exec(trimmed)
+  if (headerM) return `${headerM[1]} ${headerM[2]}`
+  if (!/^Q(\d*(?:"[^"]*")?\s*:)/.test(trimmed)) return raw
 
   const out: string[] = []
   let inQuote = false

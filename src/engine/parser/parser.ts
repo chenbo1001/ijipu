@@ -241,7 +241,8 @@ export function parseJps(source: string): ParseResult {
           break
         }
         case 'Y':
-          header.instruments.push(value)
+          // adj302：一个 Y 行只保留一种乐器（取第一个词；多乐器写多行，每行一种）
+          header.instruments.push(value.trim().split(/\s+/)[0] ?? '')
           break
         case 'S':
           // adj154：支持字面 \n 换行——拆成多行说明（每行一个 text，渲染时纵向堆叠）

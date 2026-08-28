@@ -51,6 +51,8 @@ export const BARLINE_W_THICK = 1.4
 export const VOLTA_BAR_GAP = 8
 /** 跳房子 + 修饰（抬高）每级间距（px） */
 export const VOLTA_RAISE = 2
+/** 渐强渐弱 hairpin（尖括号）上下张开半高（px，与连音线弧高近似；实际 ×s 随音符字号） */
+export const DYN_HALF_H = 4
 /** 跳房子注释（番号）字号与音符字号的比值（adj71：音符高度的 0.4） */
 export const VOLTA_COMMENT_FONT_RATIO = 0.4
 

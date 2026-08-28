@@ -63,8 +63,9 @@ export function PageConfigDialog() {
               value={draft.noteSpaceLayout}
               onChange={(e) => setDraft({ ...draft, noteSpaceLayout: e.target.value as PageConfig['noteSpaceLayout'] })}
             >
+              {/* adj289：空间优先设为默认并置于首位；时值优先保留可选 */}
+              <option value="space">空间优先</option>
               <option value="duration">时值优先</option>
-              {/* adj281：'space' 空间优先型布局预留，后续实现后再开放选项 */}
             </select>
           </Row>
         )
