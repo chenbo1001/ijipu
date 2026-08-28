@@ -6,20 +6,22 @@
  */
 
 /* adj：Noto Sans Mono CJK SC 等宽字体（PC/Tauri/Android/iOS 跨端一致）——
-   src-tauri/fonts/ 源文件由 Tauri bundle.resources 自动复制到产物目录，
-   webview 加载相对路径 ./fonts/*.otf。失败时回退到 --jp-font-mono 链 */
+   字体文件在 public/fonts/ → 构建后由 Vite 复制到 dist/fonts/（站点根），
+   CSS 必须用绝对路径 /fonts/*.otf 引用；相对路径 ./fonts/ 会相对 dist/assets/ 解析
+   到不存在的 dist/assets/fonts/ → 404 → 字体加载失败回退系统字体（adj192 根因）。
+   失败时回退到 --jp-font-mono 链 */
 @font-face {
   font-family: 'Noto Sans Mono CJK SC';
   font-style: normal;
   font-weight: 400;
-  src: url('./fonts/NotoSansMonoCJKsc-Regular.otf') format('opentype');
+  src: url('/fonts/NotoSansMonoCJKsc-Regular.otf') format('opentype');
   font-display: swap;
 }
 @font-face {
   font-family: 'Noto Sans Mono CJK SC';
   font-style: normal;
   font-weight: 700;
-  src: url('./fonts/NotoSansMonoCJKsc-Bold.otf') format('opentype');
+  src: url('/fonts/NotoSansMonoCJKsc-Bold.otf') format('opentype');
   font-display: swap;
 }
 

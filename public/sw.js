@@ -2,10 +2,12 @@
  * 策略：
  *  - 导航请求（HTML）：network-first，离线回退缓存首页（保证拿到最新构建）
  *  - 静态资源（/assets/* 带 hash）：cache-first，后台刷新缓存
+ *  - 大体积字体（/fonts/*.otf，累计 ~33MB）：cache-first，命中缓存直接返回，
+ *    避免每次浏览都重新下载字体（adj192：字体按需加载后常驻缓存）
  *  - manifest / 图标 / favicon：cache-first
- * 版本号变化时 activate 清理旧缓存。
+ * 版本号变化时 activate 清理旧缓存（adj192：升 v3，强制清掉旧 CSS/字体缓存）。
  */
-const CACHE = 'jps-shell-v2'
+const CACHE = 'jps-shell-v3'
 const PRECACHE = ['/', '/index.html', '/manifest.webmanifest', '/Jianpu.ico', '/Jianpu.png', '/pwa-192.png', '/pwa-512.png']
 
 self.addEventListener('install', (event) => {
@@ -42,6 +44,25 @@ self.addEventListener('fetch', (event) => {
           return res
         })
         .catch(() => caches.match('/index.html')),
+    )
+    return
+  }
+
+  // 大体积字体（/fonts/*.otf）：cache-first，命中即回——字体按需只下载一次，节省流量
+  if (url.pathname.startsWith('/fonts/')) {
+    event.respondWith(
+      caches.match(req).then((hit) => {
+        if (hit) return hit
+        return fetch(req)
+          .then((res) => {
+            if (res && res.ok) {
+              const copy = res.clone()
+              caches.open(CACHE).then((c) => c.put(req, copy))
+            }
+            return res
+          })
+          .catch(() => hit)
+      }),
     )
     return
   }

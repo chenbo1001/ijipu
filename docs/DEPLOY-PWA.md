@@ -53,7 +53,7 @@ PWA 安装提示仅在 **HTTPS 域名** 下出现（`localhost` 除外）。
   - **Status: activated**（已激活，绿色）
   - Source: `/sw.js`
 - [ ] DevTools → Application → Cache Storage：
-  - `jps-shell-v2` 缓存存在（sw.js install 时预缓存）
+  - `jps-shell-v3` 缓存存在（sw.js install 时预缓存）
 - [ ] DevTools → Lighthouse → PWA 类别：
   - "Installable" 通过
   - "PWA Optimized" 通过
@@ -157,7 +157,7 @@ PWA 上架 Google Play 需用工具打包成 APK / AAB：
 ## 8. 相关代码位置
 
 - `src/main.tsx:12-21` — Service Worker 注册（adj155）
-- `public/sw.js` — Service Worker 策略（adj155，network-first 导航 / cache-first 静态）
+- `public/sw.js` — Service Worker 策略（adj155，network-first 导航 / cache-first 静态；adj192 `/fonts/*.otf` 大体积字体 cache-first 命中即回，缓存版本升到 `jps-shell-v3` 以便 activate 清掉旧缓存）
 - `public/manifest.webmanifest` — PWA 清单（standalone + theme + 图标）
 - `index.html:7-13` — viewport / manifest / theme-color / apple-touch-icon
 - `src-tauri/tauri.conf.json` — Tauri 桌面配置（与 PWA 独立；PWA 部署仅需 `dist/`）
