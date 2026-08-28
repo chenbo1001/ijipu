@@ -5,25 +5,9 @@
  * 乐谱预览区保持纸张白色。
  */
 
-/* adj：Noto Sans Mono CJK SC 等宽字体（PC/Tauri/Android/iOS 跨端一致）——
-   字体文件在 public/fonts/ → 构建后由 Vite 复制到 dist/fonts/（站点根），
-   CSS 必须用绝对路径 /fonts/*.otf 引用；相对路径 ./fonts/ 会相对 dist/assets/ 解析
-   到不存在的 dist/assets/fonts/ → 404 → 字体加载失败回退系统字体（adj192 根因）。
-   失败时回退到 --jp-font-mono 链 */
-@font-face {
-  font-family: 'Noto Sans Mono CJK SC';
-  font-style: normal;
-  font-weight: 400;
-  src: url('/fonts/NotoSansMonoCJKsc-Regular.otf') format('opentype');
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Noto Sans Mono CJK SC';
-  font-style: normal;
-  font-weight: 700;
-  src: url('/fonts/NotoSansMonoCJKsc-Bold.otf') format('opentype');
-  font-display: swap;
-}
+/* adj：不再附带大字体文件——谱面字体统一用系统字体栈（见 defaultPageConfig），
+   搜索引擎/系统字体（微软雅黑/PingFang/Noto CJK）随系统提供，减小站点体积（移除 ~33MB .otf）。
+   Web 预览直接消费系统字体 / 回退 --jp-font-mono 链。 */
 
 :root {
   /* 品牌色 */
@@ -66,8 +50,8 @@
 
   /* 字体 */
   --jp-font-sans: 'Segoe UI', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
-  /* Noto Sans Mono CJK SC 跨端等宽（@font-face 注入，缺字回退到 Source Han Mono SC / Microsoft YaHei / monospace） */
-  --jp-font-mono: 'Noto Sans Mono CJK SC', 'Source Han Mono SC', 'Microsoft YaHei', monospace;
+  /* --jp-font-mono：编辑器/界面等宽字体（系统 Consolas/Courier，缺字符回退 Microsoft YaHei / monospace，adj194） */
+  --jp-font-mono: 'Consolas', 'Courier New', 'Microsoft YaHei', monospace;
 
   /* 尺寸 */
   --jp-menubar-h: 40px; /* 旧菜单栏高度（已合并到 TopBar，保留 token 兼容） */

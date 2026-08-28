@@ -592,6 +592,9 @@ export interface PageConfig {
   heights?: Record<string, [number, number, number, number, number?]>
 }
 
+/** adj194：谱面默认系统字体栈（不附带字体文件，减小体积；与 META_GLYPH_W 比例宽度估算匹配） */
+const SYS_FONT = "'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif"
+
 export const defaultPageConfig: PageConfig = {
   page: 'A4',
   // adj213：默认边距 80 → 40（页面留白收窄）
@@ -603,28 +606,28 @@ export const defaultPageConfig: PageConfig = {
   body_margin_top: 20,
   // adj213：描述头内容区高 87.6 → 80（与默认标题字号 20 更协调）
   descAreaH: 80,
-  // adj：默认字体统一为跨平台等宽 CJK(Noto Sans Mono CJK SC, 优先 PC+Tauri+Android+iOS 一致)，
-  // 字体文件 src-tauri/fonts/NotoSansMonoCJKsc-*.otf 随 tauri build 复制到产物;
-  // 字体未到位时回退到 Source Han Mono SC → Microsoft YaHei → monospace,跨平台回退链稳定
-  biaoti_font: 'Noto Sans Mono CJK SC',
+  // adj：默认字体统一用系统字体栈（微软雅黑/PingFang/系统 Noto CJK），不附带大字体文件；
+  //   META_GLYPH_W 文本宽度估算按比例字体测量与系统字体匹配（等宽 Noto Mono 反而不匹配），
+  //   跨端一致且显著减小站点体积（移除 ~33MB .otf，adj194）。
+  biaoti_font: SYS_FONT,
   // adj213：标题字号 36 → 20
   biaoti_size: 20,
-  fubiaoti_font: 'Noto Sans Mono CJK SC',
+  fubiaoti_font: SYS_FONT,
   // adj213：副标题字号 20 → 15
   fubiaoti_size: 15,
-  miaoshu_font: 'Noto Sans Mono CJK SC',
+  miaoshu_font: SYS_FONT,
   miaoshu_size: 13,
   // adj213：说明文字字体微软雅黑 → 宋体（与正文说明区分）
-  notes_font: 'Noto Sans Mono CJK SC',
+  notes_font: SYS_FONT,
   // adj215：说明文字字号 13 → 12
   notes_size: 12,
-  geci_font: 'Noto Sans Mono CJK SC',
+  geci_font: SYS_FONT,
   // adj215：歌词字号 18 → 11
   geci_size: 11,
   // adj215：音符字号 18 → 13
   note_size: 13,
   // adj213：音符字体微软雅黑 → 黑体（简谱数字用黑体更醒目）
-  shuzi_font: 'Noto Sans Mono CJK SC',
+  shuzi_font: SYS_FONT,
   // adj213：曲部与词部间距 13 → 15
   height_quci: 15,
   height_cici: 10,
