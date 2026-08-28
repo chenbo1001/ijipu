@@ -286,6 +286,16 @@ export interface SlurToken {
   raw: string
 }
 
+/** 乐器切换指令（adj301）：Q 行内 @乐器名 / @@（@@=切回默认乐器）
+ *  不占时值、不渲染，仅播放时切换当前乐器状态 */
+export interface InstrumentToken {
+  kind: 'instrument'
+  /** 乐器名（@乐器名 的内容）；null = @@（切回默认乐器） */
+  name: string | null
+  pos: number
+  raw: string
+}
+
 /** 音乐 token 联合 */
 export type MusicToken =
   | NoteToken
@@ -294,6 +304,7 @@ export type MusicToken =
   | BarlineToken
   | DecorationToken
   | SlurToken
+  | InstrumentToken
 
 // ============================================================
 // 歌词（LyricChar）
@@ -384,6 +395,8 @@ export interface PlacedToken {
   audioPitch: string | null
   /** 是否可点击（休止符/隐藏符不可发声） */
   playable: boolean
+  /** adj303：乐器名注释（@乐器名 / @@ 切换后的下一个音符上方显示；仅 config.showInstrument 时渲染） */
+  instrumentLabel?: string
 }
 
 /** 一个定位后的歌词字符 */
@@ -462,6 +475,8 @@ export interface PlacedDynamic {
   /** 记号的 y（行上方） */
   y: number
   type: 'crescendo' | 'decrescendo'
+  /** 渐强渐弱 "+" 提升级数（<+ / >++，每级抬升，类似跳房子；无则 0 缺省） */
+  plus?: number
 }
 
 /** 单个乐谱页 */
@@ -507,6 +522,13 @@ export interface ScoreLayout {
 // 页面配置（PageConfig，与 localStorage/服务端持久化一致）
 // ============================================================
 
+/**
+ * 音符空间布局模式（adj281）：
+ *  - 'duration' 时值优先：音符水平宽度与拍数成正比（当前默认/历史行为）；
+ *  - 'space' 空间优先：预留，后续实现（按横向空间需求排布）。
+ */
+export type NoteSpaceLayout = 'duration' | 'space'
+
 export interface PageConfig {
   /** 纸张：A4 | A5 | A4_horizontal | A5_horizontal */
   page: 'A4' | 'A5' | 'A4_horizontal' | 'A5_horizontal'
@@ -533,6 +555,8 @@ export interface PageConfig {
   /** 歌词字体与字号 */
   geci_font: string
   geci_size: number
+  /** adj292：歌词宽度不足时是否压缩字宽（true = 横向缩窄防重叠；false/缺省 = 允许重叠） */
+  lyricShrink?: boolean
   /** 音符字号（px）与字体（adj105：由字形 a|b|c 改为字体名，默认微软雅黑） */
   note_size: number
   shuzi_font: string
@@ -546,6 +570,12 @@ export interface PageConfig {
   height_shengbu: number
   /** 小节间距（列间距，px；小节线之间的空隙） */
   bar_gap: number
+  /** adj297：两端对齐最小小节数——行小节数 < 该值做自然对齐（行尾留白），≥ 该值撑满两端对齐；默认 4 */
+  align_min_bars: number
+  /** adj281：音符空间布局模式——时值优先（音符宽度与拍数成正比）/ 空间优先（预留） */
+  noteSpaceLayout: NoteSpaceLayout
+  /** adj303：是否显示乐器名注释（@乐器名 / @@ 切换后的下一个音符上方；缺省 false 不显示） */
+  showInstrument?: boolean
   /** 编辑器字体（谱面级，adj221：随 # jps-config 保存；缺省回退全局/默认） */
   editorFont?: string
   /** 编辑器字号（px，谱面级，adj221；缺省回退全局/默认） */
@@ -573,25 +603,28 @@ export const defaultPageConfig: PageConfig = {
   body_margin_top: 20,
   // adj213：描述头内容区高 87.6 → 80（与默认标题字号 20 更协调）
   descAreaH: 80,
-  biaoti_font: 'Microsoft YaHei',
+  // adj：默认字体统一为跨平台等宽 CJK(Noto Sans Mono CJK SC, 优先 PC+Tauri+Android+iOS 一致)，
+  // 字体文件 src-tauri/fonts/NotoSansMonoCJKsc-*.otf 随 tauri build 复制到产物;
+  // 字体未到位时回退到 Source Han Mono SC → Microsoft YaHei → monospace,跨平台回退链稳定
+  biaoti_font: 'Noto Sans Mono CJK SC',
   // adj213：标题字号 36 → 20
   biaoti_size: 20,
-  fubiaoti_font: 'Microsoft YaHei',
+  fubiaoti_font: 'Noto Sans Mono CJK SC',
   // adj213：副标题字号 20 → 15
   fubiaoti_size: 15,
-  miaoshu_font: 'Microsoft YaHei',
+  miaoshu_font: 'Noto Sans Mono CJK SC',
   miaoshu_size: 13,
   // adj213：说明文字字体微软雅黑 → 宋体（与正文说明区分）
-  notes_font: 'SimSun',
+  notes_font: 'Noto Sans Mono CJK SC',
   // adj215：说明文字字号 13 → 12
   notes_size: 12,
-  geci_font: 'Microsoft YaHei',
+  geci_font: 'Noto Sans Mono CJK SC',
   // adj215：歌词字号 18 → 11
   geci_size: 11,
   // adj215：音符字号 18 → 13
   note_size: 13,
   // adj213：音符字体微软雅黑 → 黑体（简谱数字用黑体更醒目）
-  shuzi_font: 'SimHei',
+  shuzi_font: 'Noto Sans Mono CJK SC',
   // adj213：曲部与词部间距 13 → 15
   height_quci: 15,
   height_cici: 10,
@@ -600,6 +633,9 @@ export const defaultPageConfig: PageConfig = {
   height_ciqu_lyric: 10,
   height_shengbu: 0,
   bar_gap: 0,
+  align_min_bars: 4,
+  // adj281：默认时值优先（当前音符排列模式）
+  noteSpaceLayout: 'duration',
   lianyinxian_type: 0,
 }
 
