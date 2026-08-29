@@ -56,6 +56,15 @@ npx tauri build             # 打包 → src-tauri/target/release/bundle/nsis/*-
 > `npm install --cache "D:/Coding/JPCoder/.npm-cache"`
 > 项目 `.npmrc` 已配置 cache 路径，但 DSH 注入的 `npm_config_cache` 环境变量优先级更高，会覆盖它，因此命令行参数 `--cache` 是最终生效手段。
 
+## 开源协议
+
+本项目采用 **[GNU Affero General Public License v3.0（AGPL-3.0）](LICENSE)** 开源。
+
+- **允许**：自由使用、学习、修改、再分发；任何人部署为在线服务/网站时，必须向用户公开其修改后的完整源码（AGPL 网络条款）。
+- **遵循方式**：修改本项目衍生作品时，须同样以 AGPL-3.0 发布，并保留版权声明。
+
+> 本项目在 `.jps` 语法上高度兼容「番茄简谱」（闭源免费软件），但所有引擎代码均为独立实现（clean-room 重写），不含原站代码/素材/商标。向「番茄简谱」原作者与社区致敬。
+
 ## 目录结构
 
 ```

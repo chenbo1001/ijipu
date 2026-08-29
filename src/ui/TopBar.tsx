@@ -176,6 +176,7 @@ export function TopBar() {
     // —— 功能组（原顶栏功能按钮组） ——
     { key: 'guides', label: '排版', group: 'topbar' as const, kind: 'btn' as const, active: showGuides, onPick: () => setShowGuides(!showGuides) },
     { key: 'playback', label: '试听', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('playback') },
+    { key: 'donate', label: '支持', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('donate') },
     { key: 'pageConfig', label: '设置', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('pageConfig') },
     { key: 'export', label: '导出', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('export') },
     { key: 'zoom', label: '缩放', group: 'topbar' as const, kind: 'zoom' as const, show: showZoom },
@@ -237,6 +238,12 @@ export function TopBar() {
         return (
           <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
             <path d="M 3 2 L 12 7 L 3 12 Z" />
+          </svg>
+        )
+      case 'donate':
+        return (
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+            <path d="M 7 12.6 L 2.4 8 A 2.85 2.85 0 1 1 6.3 4.04 L 7 4.75 L 7.7 4.04 A 2.85 2.85 0 1 1 11.6 8 Z" />
           </svg>
         )
       case 'pageConfig':

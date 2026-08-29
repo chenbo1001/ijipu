@@ -19,6 +19,7 @@ import { PlaybackDialog } from './dialogs/PlaybackDialog'
 import { ExportDialog } from './dialogs/ExportDialog'
 import { ShortcutsDialog } from './dialogs/ShortcutsDialog'
 import { DocDialog } from './dialogs/DocDialog'
+import { DonateDialog } from './dialogs/DonateDialog'
 
 function App() {
   const viewType = useDocStore((s) => s.viewType)
@@ -139,6 +140,7 @@ function App() {
       {modal === 'shortcuts' && <ShortcutsDialog />}
       {modal === 'manual' && <DocDialog kind="manual" />}
       {modal === 'syntax' && <DocDialog kind="syntax" />}
+      {modal === 'donate' && <DonateDialog />}
     </div>
   )
 }

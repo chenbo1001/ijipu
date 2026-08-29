@@ -13,6 +13,7 @@ export type ModalKind =
   | 'shortcuts'
   | 'manual'
   | 'syntax'
+  | 'donate'
 
 /** 轻量浮动提示（toast）：kind 决定配色；nonce 用于同文案重复触发时重置隐藏计时 */
 export type NoticeKind = 'ok' | 'warn' | 'error'

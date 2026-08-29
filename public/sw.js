@@ -8,7 +8,7 @@
  * 版本号变化时 activate 清理旧缓存（adj192：升 v3，强制清掉旧 CSS/字体缓存）。
  */
 const CACHE = 'jps-shell-v3'
-const PRECACHE = ['/', '/index.html', '/manifest.webmanifest', '/Jianpu.ico', '/Jianpu.png', '/pwa-192.png', '/pwa-512.png']
+const PRECACHE = ['/', '/index.html', '/manifest.webmanifest', '/Jianpu.ico', '/Jianpu.png', '/pwa-192.png', '/pwa-512.png', '/good.png']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

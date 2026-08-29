@@ -21,7 +21,20 @@ export const aboutCopy = {
   /** 底部情怀 */
   footer: brand.taglineFooter,
   /** 致敬说明（较短一句，显示在 footer 下方） */
-  acknowledgement: '本项目以 MIT 协议开源，向「番茄简谱」社区致敬。',
+  acknowledgement: '本项目以 AGPL-3.0 协议开源，向「番茄简谱」社区致敬。',
+  /** 开源协议说明 */
+  license: '本项目基于 GNU Affero General Public License v3.0（AGPL-3.0）发布，欢迎学习、修改与再分发。',
+} as const
+
+/** 捐赠/支持作者（Q-10）。donateImage 为微信赞赏码图片路径（public/ 下）；为空则不显示捐赠入口。
+ *  按钮文案见 donate.label；「关于」对话框点击后打开模态框展示赞赏码。 */
+export const donate = {
+  /** 微信赞赏码图片路径（public 下，如 '/good.png'）——留空 = 不显示捐赠入口 */
+  image: '/good.png',
+  /** 捐赠按钮文案 */
+  label: '支持作者 ❤',
+  /** 显示在赞赏码下方的说明 */
+  tip: '如果爱记谱帮到了你，欢迎扫码支持一下作者～（自愿捐赠，无任何商业回报）',
 } as const
 
 /** 界面内文案 */

@@ -2,11 +2,14 @@
  * dialogs/AboutDialog.tsx — 关于本软件（品牌介绍）
  */
 import { Modal } from '../ui/Modal'
-import { aboutCopy, uiCopy } from '../brand/copy'
+import { aboutCopy, uiCopy, donate } from '../brand/copy'
 import { palette } from '../brand/tokens'
 import { APP_VERSION_FULL } from '../brand/version'
+import { useUiStore } from '../store/uiStore'
 
 export function AboutDialog() {
+  const openModal = useUiStore((s) => s.openModal)
+
   return (
     <Modal title={uiCopy.about}>
       <div style={{ textAlign: 'center', padding: '8px 0 16px' }}>
@@ -57,6 +60,33 @@ export function AboutDialog() {
         >
           {aboutCopy.footer}
         </p>
+        <p style={{ marginTop: 6, textAlign: 'center', color: 'var(--jp-text-muted)', fontSize: 12 }}>
+          {aboutCopy.acknowledgement}
+        </p>
+        <div style={{ marginTop: 10, textAlign: 'center' }}>
+          {donate.image ? (
+            <button
+              type="button"
+              onClick={() => openModal('donate')}
+              style={{
+                display: 'inline-block',
+                padding: '8px 20px',
+                borderRadius: 8,
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: 13,
+                border: 'none',
+                cursor: 'pointer',
+                background: `linear-gradient(135deg, ${palette.deepSpaceBlue}, ${palette.neonCyan})`,
+                boxShadow: `0 0 10px rgba(0,240,255,0.3)`,
+              }}
+            >
+              {donate.label}
+            </button>
+          ) : (
+            <span style={{ color: 'var(--jp-text-muted)', fontSize: 12 }}>{aboutCopy.license}</span>
+          )}
+        </div>
       </div>
     </Modal>
   )
