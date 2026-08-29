@@ -296,6 +296,19 @@ export interface InstrumentToken {
   raw: string
 }
 
+/**
+ * 括号标记（&zkh / &ykh，adj294）：**独立无时值元素**——不再依附音符。
+ * 放在源码哪个位置，就在那插入一个括号符号并占宽；对音符的时值/位置不施加影响，
+ * 仅是标记符。open=( 左括号；close=) 右括号。
+ */
+export interface BracketToken {
+  kind: 'bracket'
+  /** open=( 左括号；close=) 右括号 */
+  dir: 'open' | 'close'
+  pos: number
+  raw: string
+}
+
 /** 音乐 token 联合 */
 export type MusicToken =
   | NoteToken
@@ -305,6 +318,7 @@ export type MusicToken =
   | DecorationToken
   | SlurToken
   | InstrumentToken
+  | BracketToken
 
 // ============================================================
 // 歌词（LyricChar）
@@ -483,6 +497,20 @@ export interface PlacedDynamic {
   plus?: number
 }
 
+/** 括号标记（&zkh/&ykh，adj294）：独立无时值元素，插位占宽 */
+export interface PlacedBracket {
+  /** open=( 左括号；close=) 右括号 */
+  dir: 'open' | 'close'
+  /** 括号字符绘制中心 x */
+  x: number
+  /** 所在行顶 y（括号垂直居中于数字） */
+  yTop: number
+  /** 占位宽 */
+  width: number
+  voice: number
+  group: number
+}
+
 /** 单个乐谱页 */
 export interface ScorePage {
   index: number
@@ -494,6 +522,8 @@ export interface ScorePage {
   voiceBlocks: VoiceBlock[]
   slurs: PlacedSlur[]
   dynamics: PlacedDynamic[]
+  /** adj294：独立括号标记（&zkh/&ykh）——按源码位置插位、占宽，不影响音符 */
+  brackets: PlacedBracket[]
   /** 页面级元数据（标题/作者/调号拍号等文本元素） */
   meta: ScorePageMeta
 }

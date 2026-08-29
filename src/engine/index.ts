@@ -15,7 +15,7 @@ export { buildPlaySequence, inferBpm, createBackend, schedulePlay, SynthBackend,
 export { codePosToNoteId, noteIdToCodePos, parseNoteId, buildIndexToPage } from './cursorMap'
 export { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_ITEMS, GUIDE_LIMITS, GUIDE_LIMITS_EX } from './layout/guides'
 export { metaAnchorOf, metaAnchorPt, clampMetaPos } from './layout/metaAnchors'
-export { splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW } from './layout/spaceLayout'
+export { splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, hxBodyW } from './layout/spaceLayout'
 export type { NoteDurSplit } from './layout/spaceLayout'
 export { extractJpsConfig, mergeJpsConfig, writeJpsConfig, JPS_CONFIG_PREFIX } from './settings'
 export type { GuideDragSpec } from './layout/guides'

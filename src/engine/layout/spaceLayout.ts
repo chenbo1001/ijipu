@@ -86,3 +86,10 @@ export const nonDurGap = (noteSize: number) => noteSize * 0.5
  * 否则空间优先下角标会向左越界与前一个音符重叠。
  */
 export const accidentalBodyW = (noteSize: number) => 7.62 * (noteSize / 13)
+
+/**
+ * &hx（滑音箭头，右侧）无时值元素本体宽：依附其前面的带时值元素之后。
+ * 与渲染一致——hx 中心偏移 7×s（noteScaleOf）、V 形两翼半宽 3.5×s×0.8，
+ * 故占位 = 7s + 2.8s = 9.8×s（保证箭头不压到下一个音符）。
+ */
+export const hxBodyW = (noteSize: number) => 9.8 * noteScaleOf(noteSize)

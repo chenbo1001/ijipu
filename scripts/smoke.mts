@@ -871,17 +871,22 @@ check('力度记号花体渲染（斜体加粗 + Segoe Script + mp）', /<text[^
   }
   check('渲染：<+ hairpin 上移 2px（VOLTA_RAISE）', Math.abs(hairpinY('1 < 2 3 !') - hairpinY('1 <+ 2 3 !') - 2) < 0.6, `${hairpinY('1 < 2 3 !')} vs ${hairpinY('1 <+ 2 3 !')}`)
 }
-// adj58：&zkh 音符前加 (、&ykh 音符块（含增时线/附点）后加 )
+// adj294：&zkh/&ykh 独立为 bracket token，不再依附音符（解析/占位/渲染独立）
 const zkh = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1&zkh 2-&ykh 3.&ykh 4 |\n')
-const zkhNotes = zkh.groups[0].music.tokens.filter((t) => t.kind === 'note')
-check('&zkh/&ykh 解析到音符符号', zkh.errors.length === 0 && zkhNotes[0].symbols.includes('zkh') && zkhNotes[1].symbols.includes('ykh') && zkhNotes[2].symbols.includes('ykh'), JSON.stringify(zkhNotes.map((t) => t.symbols)))
+const zkhTok = zkh.groups[0].music.tokens
+const zkhBk = zkhTok.filter((t) => t.kind === 'bracket')
+check('adj294 &zkh/&ykh 解析为独立 bracket token（open/close/close）', zkh.errors.length === 0 && zkhBk.length === 3 && zkhBk[0].kind === 'bracket' && (zkhBk[0] as any).dir === 'open' && (zkhBk[1] as any).dir === 'close' && (zkhBk[2] as any).dir === 'close', JSON.stringify(zkhBk))
+// 独立 bracket 不再写入音符 symbols（音符 symbols 只含真实修饰符）
+const zkhNote0 = zkhTok.find((t) => t.kind === 'note' && t.pitch === 1)
+check('adj294 bracket 不入音符 symbols', !!zkhNote0 && !(zkhNote0.symbols as string[]).includes('zkh') && !(zkhNote0.symbols as string[]).includes('ykh'), JSON.stringify((zkhNote0 as any)?.symbols))
+// 渲染：独立括号文本 ( / ) 出现在 SVG（font-size=note_size，垂直居中于数字）
 const svgZkh = renderScoreToSvg(layoutScore(zkh, DUR_CFG))[0]
-check('&zkh 渲染左括号 (', svgZkh.includes('>(<'), svgZkh.slice(0, 200))
-check('&ykh 渲染右括号 )', svgZkh.includes('>)<'), '')
-// adj80：独立 zkh/ykh 写法（括号前后带空格）也归入音符：&zkh 6 - - -&ykh
+check('adj294 &zkh 渲染左括号 (', svgZkh.includes('>(<'), svgZkh.slice(0, 200))
+check('adj294 &ykh 渲染右括号 )', svgZkh.includes('>)<'), '')
+// adj294：独立 &zkh/&ykh 写法（括号前后带空格）也是独立 bracket token，符号形状 = 括号窄槽（不挂在音符上）
 const zkhSpace = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: &zkh 6 - - -&ykh |\n')
-const zkhSpaceNote = zkhSpace.groups[0].music.tokens.find((t) => t.kind === 'note')
-check('独立 &zkh 前置 + 独立 &ykh 后置（带空格）归入音符', zkhSpace.errors.length === 0 && !!zkhSpaceNote && zkhSpaceNote.symbols.includes('zkh') && zkhSpaceNote.symbols.includes('ykh'), JSON.stringify(zkhSpaceNote?.symbols))
+const zkhSpaceBk = zkhSpace.groups[0].music.tokens.filter((t) => t.kind === 'bracket')
+check('adj294 独立 &zkh 前置 + 独立 &ykh 后置（带空格）为 bracket token', zkhSpace.errors.length === 0 && zkhSpaceBk.length === 2 && (zkhSpaceBk[0] as any).dir === 'open' && (zkhSpaceBk[1] as any).dir === 'close', JSON.stringify(zkhSpaceBk))
 // adj109：& 修饰符扩展（yc/bc/zy/dy/hx/shy/xhy/sby/xby/sby+/xby+/cy/cy+）解析 + 渲染
 const r109 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1&yc 2&bc 3&zy 4&dy 5&hx 6&shy 7&xhy 1&sby 2&xby 3&sby+ 4&xby+ 5&cy 6&cy+ | 1 2 3 4 |\n')
 const n109 = r109.groups[0].music.tokens.filter((t) => t.kind === 'note')
@@ -997,29 +1002,28 @@ const voltas137b = [...svg137b.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="(
 check('adj137 两段跳房子渲染 2 条线', voltas137b.length === 2, voltas137b.join(' '))
 check('adj109 滑音渲染弧线（Q）+ 箭头（fill 三角）', svg109.includes(' Q '), '')
 check('adj112 tr 文本加粗', /font-weight="bold"[^>]*>tr</.test(svg109), '')
-// adj81：括号加粗 + 垂直居中于数字中心（dominant-baseline=central @ 基线-0.4×字号）
-// adj82：括号字号与音符一致（font-size=note_size，同字体）
+// adj294：括号独立渲染——加粗 + 垂直居中于数字中心（dominant-baseline=central @ 基线-0.4×字号）、字号=note_size
 const svgZkhSp = renderScoreToSvg(layoutScore(zkhSpace, DUR_CFG))[0]
-const zkhLPar = /<text x="([\d.]+)" y="([\d.]+)" dominant-baseline="central" font-weight="bold" font-size="([\d.]+)"[^>]*>\(<\/text>/.exec(svgZkhSp)
-const zkhRPar = /<text x="([\d.]+)" y="([\d.]+)" dominant-baseline="central" font-weight="bold" font-size="([\d.]+)"[^>]*>\)<\/text>/.exec(svgZkhSp)
+const zkhLPar = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" dominant-baseline="central" font-weight="bold" font-size="([\d.]+)"[^>]*>\(<\/text>/.exec(svgZkhSp)
+const zkhRPar = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" dominant-baseline="central" font-weight="bold" font-size="([\d.]+)"[^>]*>\)<\/text>/.exec(svgZkhSp)
 const zkhNoteY = layoutScore(zkhSpace, DUR_CFG).pages[0].notes[0].y
-check('括号加粗 + 垂直居中于数字（y = 基线-0.4×字号）', zkhLPar !== null && zkhRPar !== null && Math.abs(Number(zkhLPar[2]) - (zkhNoteY - defaultPageConfig.note_size * 0.4)) < 0.5 && Math.abs(Number(zkhRPar[2]) - (zkhNoteY - defaultPageConfig.note_size * 0.4)) < 0.5, `l=${zkhLPar?.[2]} r=${zkhRPar?.[2]} noteY=${zkhNoteY}`)
-check('括号字号与音符一致（18）', zkhLPar !== null && zkhRPar !== null && Math.abs(Number(zkhLPar[3]) - defaultPageConfig.note_size) < 0.5 && Math.abs(Number(zkhRPar[3]) - defaultPageConfig.note_size) < 0.5, `lfs=${zkhLPar?.[3]} rfs=${zkhRPar?.[3]}`)
-// adj80：右括号在最后一个增时线后面（增时线 x < 右括号 x）
-const zkhAugXs = [...svgZkhSp.matchAll(/<text x="([\d.]+)"[^>]*>-<\/text>/g)].map((m) => Number(m[1]))
-const zkhRParX = zkhRPar ? Number(zkhRPar[1]) : 0
-check('右括号在最后一个增时线后面', zkhAugXs.length === 3 && zkhRParX > Math.max(...zkhAugXs), `rpar=${zkhRParX} aug=${zkhAugXs.join(',')}`)
-// adj80：左括号与数字至少 1px 间距（左括号 x + 半字宽 ≤ 数字左缘 - 1）
-const zkhDigitX = layoutScore(zkhSpace, DUR_CFG).pages[0].notes[0].x
-const zkhLParX = zkhLPar ? Number(zkhLPar[1]) : 0
-check('左括号与数字间距 ≥0px（括号右缘 ≤ 数字左缘）', zkhLPar !== null && zkhLParX + defaultPageConfig.note_size * 0.5 <= zkhDigitX + 0.5, `lpar=${zkhLParX} digit=${zkhDigitX}`)
-// adj84：休止符也支持括号（0/&zkh 左括号、0-&ykh 右括号、&zkh 0/ 前置）
+check('adj294 括号加粗 + 垂直居中于数字（y = 基线-0.4×字号）', zkhLPar !== null && zkhRPar !== null && Math.abs(Number(zkhLPar[2]) - (zkhNoteY - defaultPageConfig.note_size * 0.4)) < 0.5 && Math.abs(Number(zkhRPar[2]) - (zkhNoteY - defaultPageConfig.note_size * 0.4)) < 0.5, `l=${zkhLPar?.[2]} r=${zkhRPar?.[2]} noteY=${zkhNoteY}`)
+check('adj294 括号字号与音符一致（note_size）', zkhLPar !== null && zkhRPar !== null && Math.abs(Number(zkhLPar[3]) - defaultPageConfig.note_size) < 0.5 && Math.abs(Number(zkhRPar[3]) - defaultPageConfig.note_size) < 0.5, `lfs=${zkhLPar?.[3]} rfs=${zkhRPar?.[3]}`)
+// adj294：&zkh 在音符左侧（open x < 音符数字左缘）、&ykh 在音符块（含增时线）之后（close x > 首音符右端）
+check('adj294 左括号在音符左侧（open x < 数字 x）', zkhLPar !== null && Number(zkhLPar[1]) < layoutScore(zkhSpace, DUR_CFG).pages[0].notes[0].x, `lpar=${zkhLPar?.[1]} digit=${layoutScore(zkhSpace, DUR_CFG).pages[0].notes[0].x}`)
+{
+  const bkCfg = layoutScore(zkhSpace, DUR_CFG).pages[0]
+  const firstNote = bkCfg.notes[0]
+  const closeBk = bkCfg.brackets.find((b) => b.dir === 'close')
+  check('adj294 右括号在音符块（含增时线）之后', !!closeBk && closeBk.x > (firstNote.rightX ?? firstNote.x + firstNote.width), `rpar=${closeBk?.x} firstRight=${firstNote.rightX ?? firstNote.x + firstNote.width}`)
+}
+// adj84：休止符也支持括号（0/&zkh 左括号、0-&ykh 右括号、&zkh 0/ 前置）——均为独立 bracket token
 const zkhRest = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 0/&zkh 0-&ykh &zkh 0/ 2 3 4 |\n')
-const restSyms = zkhRest.groups[0].music.tokens.filter((t) => t.kind === 'rest').map((t) => t.symbols.join(','))
-check('休止符 &zkh/&ykh 解析到 symbols', zkhRest.errors.length === 0 && restSyms[0] === 'zkh' && restSyms[1] === 'ykh' && restSyms[2] === 'zkh', JSON.stringify(restSyms))
+const restBk = zkhRest.groups[0].music.tokens.filter((t) => t.kind === 'bracket')
+check('adj294 休止符括号为独立 bracket token', zkhRest.errors.length === 0 && restBk.length === 3 && (restBk[0] as any).dir === 'open' && (restBk[1] as any).dir === 'close' && (restBk[2] as any).dir === 'open', JSON.stringify(restBk))
 const svgRestPar = renderScoreToSvg(layoutScore(zkhRest, DUR_CFG))[0]
-check('休止符左括号渲染', (svgRestPar.match(/\(<\/text>/g) ?? []).length >= 2, '')
-check('休止符右括号渲染', (svgRestPar.match(/\)<\/text>/g) ?? []).length >= 1, '')
+check('adj294 休止符左括号渲染', (svgRestPar.match(/\(<\/text>/g) ?? []).length >= 2, '')
+check('adj294 休止符右括号渲染', (svgRestPar.match(/\)<\/text>/g) ?? []).length >= 1, '')
 // 歌词引号注释（adj58）：双引号文本为注释，不占歌词位，渲染在注释后歌词前面
 const lr58 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\nC: 一 二"副歌"三 四\n')
 const lr58c = lr58.groups[0].lyrics[0].chars
@@ -2394,7 +2398,9 @@ check('独立连音符不因同排嵌套抬高（y = 数字上沿-LAYER_GAP×s�
   const r218 = parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (y6/&zkh 1'/ 1'/) 1'/. 6// 1' - | (y6/ 1'/ 1'/) 7./ 6// 7 - | 6// 6// 5// 6// 5/ 6/ 3 - | 5// 5// 3// 5// 5/ 3/ 2 - |\n")
   const lay218 = layoutScore(r218, DUR_CFG)
   const pn218 = lay218.pages[0].notes
-  check('adj218 解析：&zkh 挂 tuplet 组内首音符、tupletDur=1/3', r218.errors.length === 0 && (pn218[0].token as { symbols?: string[] }).symbols?.includes('zkh') && Math.abs((pn218[0].token as { tupletDur?: number }).tupletDur! - 1 / 3) < 1e-6, '')
+  const tok218 = r218.groups[0].music.tokens
+  const bk218 = tok218.filter((t) => t.kind === 'bracket')
+  check('adj218 解析：&zkh 为独立 bracket token、tupletDur=1/3', r218.errors.length === 0 && bk218.length === 1 && (bk218[0] as any).dir === 'open' && Math.abs((pn218[0].token as { tupletDur?: number }).tupletDur! - 1 / 3) < 1e-6, '')
   // 各音符 x 严格递增（不重叠不倒序）
   let ascOk218 = true
   for (let i = 1; i < pn218.length; i++) {
@@ -2583,10 +2589,14 @@ check('space 附点音符数字左缘=音符块段左缘', Math.abs((spDotNote?.
 console.log('[60] space-first brackets & grace (adj286)')
 const brCfg = { ...DUR_CFG, noteSpaceLayout: 'space' as const }
 const brSrc = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3&zkh 2 1 | 4[5/] 3 2&ykh 1 |\n'
-const brNotes = layoutScore(parseJps(brSrc), brCfg).pages[0].notes
+const brRes = parseJps(brSrc)
+const brLay = layoutScore(brRes, brCfg)
+const brNotes = brLay.pages[0].notes
 check('space 含括号/倚音行不回退（segment 带 el=note）', brNotes[0]?.segments?.[0]?.el === 'note', JSON.stringify(brNotes[0]?.segments))
-const brZkh = brNotes.find((n) => n.token.kind === 'note' && n.token.symbols.includes('zkh'))
-check('space 含 &zkh 音符仍有 el 段', brZkh?.segments?.[0]?.el === 'note', JSON.stringify(brZkh?.segments))
+// adj294：&zkh/&ykh 独立为 bracket token——不再占音符 el 段，但空间优先音符块（el=note）仍放置
+const brBks = brRes.groups[0].music.tokens.filter((t) => t.kind === 'bracket')
+const brPlacedBks = brLay.pages[0].brackets
+check('adj294 space &zkh/&ykh 独立 bracket token + 音符仍有 el 段', brBks.length === 2 && brPlacedBks.length === 2 && brNotes.some((n) => n.segments?.[0]?.el === 'note'), JSON.stringify({ bks: brBks, placed: brPlacedBks, seg: brNotes[0]?.segments }))
 const brGn = brNotes.find((n) => n.token.kind === 'note' && ((n.token as any).gracenotes?.notes?.length ?? 0) > 0)
 check('space 前倚音数字左缘>段左缘（右移 leftExt）', !!brGn && (brGn.x > (brGn.segments?.[0]?.x ?? 0)), JSON.stringify({ nx: brGn?.x, segX: brGn?.segments?.[0]?.x }))
 const brXs = brNotes.map((n) => n.segments?.[0]?.x).filter((x): x is number => typeof x === 'number')

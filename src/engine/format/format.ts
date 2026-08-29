@@ -66,7 +66,17 @@ export function formatLine(raw: string): string {
     const isTupletY = upNote === 'y' && trimmed[x - 2] === '('
     const noSpaceBefore =
       upNote === 'Q' || upNote === 'C' || upNote === ' ' || upNote === '(' || isTupletY
-    if ('0123456789-'.includes(note) && !noSpaceBefore) {
+    // adj295：独立括号 &zkh/&ykh 与前一元素分隔（@风琴&zkh → @风琴 &zkh）；其余 & 修饰符仍贴音符
+    if (note === '&') {
+      let kk = x + 1
+      while (kk < trimmed.length && /[a-zA-Z]/.test(trimmed[kk])) kk++
+      const code = trimmed.slice(x + 1, kk)
+      if (code === 'zkh' || code === 'ykh') ensureSpace()
+      out.push(note)
+      continue
+    }
+    // adj294：增时线 "-" 依附前面的音符/修饰符（连接），不纳入"需补空格"——否则 1&hx-2 被隔成 1&hx - 2
+    if ('0123456789'.includes(note) && !noSpaceBefore) {
       ensureSpace()
       out.push(note)
     } else if (note === '(' && upNote !== '(') {

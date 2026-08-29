@@ -495,7 +495,6 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
   // tokenDuration 已按 ×1.5/×1.75 计算，占位宽度随之增半）；
   // adj288：主音符与附点在 1.5 倍时值宽内平均分布（三等分）——附点圆心 = 主段（第 1 拍段）右端
   // = 总宽 2/3 处，数字中心在主段中点 = 1/3 处；原附点紧贴数字右缘（视觉挤在左侧）
-  let dotRight = 0 // 附点右端（adj58：供 &ykh 右括号定位）
   if (t.dots > 0) {
     const rDot = DOT_R_DOT * s
     // adj291：附点圆心 = 主时值部分结束处 = 段起点 + 主时值×每拍宽
@@ -513,14 +512,12 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
       const cx = dotX0 + i * rDot * 2
       // 垂直居中于数字（数字视觉中心 ≈ 基线-0.4×字号）
       parts.push(`<circle cx="${r1n(cx)}" cy="${r1n(y - size * 0.4)}" r="${r1n(rDot)}" fill="#1b1b1b"/>`)
-      dotRight = Math.max(dotRight, cx + rDot)
     }
   }
 
   // 增时线（"-" 各占一拍的位置，每根在所在拍段占位宽度内居中；
   // adj35：第 i 条增时线在第 i+1 拍段；adj73：垂直居中于音符数字（数字中心 = 基线-0.4×字号））
   const augY = y - size * 0.4
-  let augRight = 0 // 增时线右端（adj58：供 &ykh 右括号定位）
   if (t.augmentCount > 0) {
     const seg0 = note.segments?.[0]
     const pb0 = seg0 ? seg0.perBeat : note.duration > 0 ? note.width / note.duration : digitW
@@ -535,39 +532,20 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
       parts.push(
         `<text x="${r1n(lx + digitW / 2)}" y="${augY}" text-anchor="middle" dominant-baseline="central" font-weight="bold" font-size="${size}" font-family="${font}" fill="#1b1b1b">-</text>`,
       )
-      augRight = Math.max(augRight, lx + digitW)
     }
   }
 
   // 装饰符号（& 编码，M7d）：tr 颤音带波浪线，其余画上方小文本；
-  // adj58：&zkh 在音符前画 (、&ykh 在音符块（数字/增时线/附点）之后画 )
   // adj60：上方装饰层从「高八度点层顶（无高八度则数字顶）」往上，按书写顺序逐层排（层间距 LAYER_GAP×s）
-  // adj84：休止符/节奏符也支持括号（0&zkh 左括号、0-&ykh 右括号）
+  // adj294：&zkh/&ykh 为独立 bracket token，不再作为音符 symbols——由 renderBracket 单独渲染
   if (t.symbols.length > 0) {
-    // 音符块右端（含增时线/附点右端，供 &ykh 定位）
-    const blockRight = Math.max(x + digitW, dotRight, augRight)
     // 当前已占用的上方层顶（高八度点层顶优先；无高八度点则为数字顶）
     let aboveTop = oct > 0 ? octaveTopY(y, Math.abs(oct), size) : y - size * DIGIT_HEIGHT_RATIO
     const SYM_FS = Math.round(10 * s) // 装饰符号字号（随字号）
     for (const sym of t.symbols) {
-      if (sym === 'zkh') {
-        // 左括号：音符数字左侧；
-        // adj80：括号字符宽约 0.5em（同字号下），左移 半字宽+1px 保证与数字间距 ≥1px
-        // adj81：加粗 + 垂直居中于数字（dominant-baseline=central @ 数字中心 基线-0.4×字号）；
-        // adj82：字体字号与音符一致（size、font、加粗同数字）
-        parts.push(
-          `<text x="${r1n(x - 10 * s)}" y="${r1n(y - size * 0.4)}" dominant-baseline="central" font-weight="bold" font-size="${size}" font-family="${font}" fill="#1b1b1b">(</text>`,
-        )
-      } else if (sym === 'ykh') {
-        // 右括号：音符块之后（数字/增时线/附点右端 + 1px×s）
-        // adj81：加粗 + 垂直居中于数字；adj82：字体字号与音符一致
-        parts.push(
-          `<text x="${r1n(blockRight + s)}" y="${r1n(y - size * 0.4)}" dominant-baseline="central" font-weight="bold" font-size="${size}" font-family="${font}" fill="#1b1b1b">)</text>`,
-        )
-      } else {
-        // 上方符号（adj109 扩展 & 编码修饰符）：文字底 = aboveTop - LAYER_GAP×s；基线 = 底 - descender
-        const symY = aboveTop - LAYER_GAP * s - SYM_FS * DESC_RATIO
-        const cx = x + digitW / 2 // 数字槽中心
+      // 上方符号（adj109 扩展 & 编码修饰符）：文字底 = aboveTop - LAYER_GAP×s；基线 = 底 - descender
+      const symY = aboveTop - LAYER_GAP * s - SYM_FS * DESC_RATIO
+      const cx = x + digitW / 2 // 数字槽中心
         if (sym === 'tr' || sym === 'cy+') {
           // 颤音：tr（粗体，adj112）+ 正弦波（adj115：周期数随音符点位/时值——每拍约 2 周期）
           parts.push(
@@ -690,7 +668,9 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
         } else if (sym === 'hx') {
           // 呼吸记号：音符右侧上方，单线 V（尖朝下，adj112）；
           // adj180：线宽 1 → 0.8（不加粗）、横向尺寸缩为 80%（3.5s → 2.8s）
-          const hx = x + digitW + 7 * s
+          // adj293：位置用「音符实际占位右端」(rightX，含附点/增时线等有时值元素) 之后，
+          // 而非固定数字右缘——否则增时线/附点会与 hx 重叠，不符「显示在有时值元素后面」。
+          const hx = (note.rightX ?? (x + digitW)) + 7 * s
           const hy = y - size * 0.8 - 4 * s
           const hw = 3.5 * s * 0.8
           parts.push(
@@ -713,7 +693,6 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
         aboveTop = sym === 'yc' ? symY - 8.7 * s : symY - SYM_FS * DIGIT_HEIGHT_RATIO
       }
     }
-  }
 
   // 减时线由 computeBeams 按拍分组绘制（M3：同一拍内相连）
   // 音符备注（引号注释，adj62）—— 字号 = 音符字体高度的一半（0.5×note_size）；
@@ -725,7 +704,7 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     if (oct > 0) aboveTop = octaveTopY(y, Math.abs(oct), size)
     if (t.symbols.length > 0) {
       const SYM_FS = Math.round(10 * s)
-      const nTop = t.symbols.filter((s) => s !== 'zkh' && s !== 'ykh').length
+      const nTop = t.symbols.length
       aboveTop -= nTop * (SYM_FS * (DIGIT_HEIGHT_RATIO + DESC_RATIO) + LAYER_GAP * s)
     }
     const base = aboveTop - LAYER_GAP * s - cfs * DESC_RATIO // 注释文字底距上层元素顶 LAYER_GAP×s
@@ -742,7 +721,7 @@ function renderNote(note: PlacedToken, config: PageConfig): string {
     if (oct > 0) iTop = octaveTopY(y, Math.abs(oct), size)
     if (t.symbols.length > 0) {
       const SYM_FS = Math.round(10 * s)
-      const nTop = t.symbols.filter((ss) => ss !== 'zkh' && ss !== 'ykh').length
+      const nTop = t.symbols.length
       iTop -= nTop * (SYM_FS * (DIGIT_HEIGHT_RATIO + DESC_RATIO) + LAYER_GAP * s)
     }
     if (t.comment) {
@@ -1321,6 +1300,13 @@ function renderPageNum(page: ScorePage, config: PageConfig, pageCount: number): 
   )
 }
 
+/** adj294：渲染独立括号标记（&zkh/&ykh）——放在插位、垂直居中于数字（dominant-baseline=central 使字符中心对齐数字中心） */
+function renderBracket(b: { dir: 'open' | 'close'; x: number; yTop: number; width: number }, config: PageConfig): string {
+  const size = config.note_size
+  const glyph = b.dir === 'open' ? '(' : ')'
+  return `<text x="${r1n(b.x)}" y="${r1n(b.yTop)}" text-anchor="middle" dominant-baseline="central" font-weight="bold" font-size="${size}" font-family="${noteFont(config.shuzi_font)}" fill="#1b1b1b">${glyph}</text>`
+}
+
 function renderPage(page: ScorePage, config: PageConfig, pageCount: number, opts?: RenderFontMeta): string {
   const { width, height } = page
   const body: string[] = []
@@ -1332,6 +1318,8 @@ function renderPage(page: ScorePage, config: PageConfig, pageCount: number, opts
   for (const d of page.dynamics) body.push(renderDynamic(d, config.note_size))
   body.push(renderBeams(computeBeams(page.notes, config.note_size)))
   for (const n of page.notes) body.push(renderNote(n, config))
+  // adj294：&zkh/&ykh 独立括号标记——按插位画括号
+  for (const b of page.brackets) body.push(renderBracket(b, config))
   for (const b of page.barlines) body.push(renderBarline(b, config.note_size))
   for (const l of page.lyrics) body.push(renderLyric(l, config))
   for (const vb of page.voiceBlocks) body.push(renderVoiceBlocks(page, vb, config.note_size))
