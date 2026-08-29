@@ -369,6 +369,17 @@ body {
   padding: 5px 7px;
   justify-content: center;
 }
+/* 支持作者（捐赠入口）：独立于工具条最右侧，不参与功能组/设置组折叠。
+   ——与相邻功能组留出间距，hover 用暖色（非 accent 青）以区分普通功能按钮 */
+.topbar-donate {
+  margin-left: 6px;
+  color: var(--jp-text-muted);
+  border-radius: 7px;
+}
+.topbar-donate:hover {
+  border-color: var(--jp-warning);
+  color: var(--jp-warning);
+}
 .topbar-btn:hover {
   border-color: var(--jp-accent);
   color: var(--jp-accent);

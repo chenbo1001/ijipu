@@ -176,7 +176,6 @@ export function TopBar() {
     // —— 功能组（原顶栏功能按钮组） ——
     { key: 'guides', label: '排版', group: 'topbar' as const, kind: 'btn' as const, active: showGuides, onPick: () => setShowGuides(!showGuides) },
     { key: 'playback', label: '试听', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('playback') },
-    { key: 'donate', label: '支持', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('donate') },
     { key: 'pageConfig', label: '设置', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('pageConfig') },
     { key: 'export', label: '导出', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('export') },
     { key: 'zoom', label: '缩放', group: 'topbar' as const, kind: 'zoom' as const, show: showZoom },
@@ -726,6 +725,17 @@ export function TopBar() {
             </span>
           ))}
         </div>
+        {/* 支持作者：独立于工具条最右侧（不参与功能组/设置组折叠，始终可见） */}
+        <button
+          type="button"
+          className="topbar-btn topbar-donate"
+          onClick={() => openModal('donate')}
+          title="支持作者"
+          aria-label="支持作者"
+        >
+          {iconOf('donate')}
+          <span className="tool-label">支持</span>
+        </button>
       </div>
 
       {/* 「更多」按钮：公共更多按钮，独立于工具条最右，按需出现（空间不足时显示） */}
