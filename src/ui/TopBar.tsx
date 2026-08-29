@@ -204,6 +204,7 @@ export function TopBar() {
   const measureRef = useRef<HTMLDivElement>(null) // 隐藏测量容器（渲染全部按钮量宽）
   const overflowBtnRef = useRef<HTMLDivElement>(null) // 「更多」按钮容器
   const overflowDropdownRef = useRef<HTMLDivElement>(null) // 「更多」下拉容器
+  const donateRef = useRef<HTMLButtonElement>(null) // 「支持作者」独立按钮（宽度计入测量预算）
   // adj：视口很窄时下拉可能向左溢出视口，用 translateX 把它拉回视口内
   const [overflowShiftX, setOverflowShiftX] = useState(0)
   useLayoutEffect(() => {
@@ -486,6 +487,9 @@ export function TopBar() {
       // 「更多」按钮宽度（未渲染时用估值 36，避免首帧把全部挤出去）
       const ovW = overflowBtnRef.current?.getBoundingClientRect().width ?? 36
       const fix = (sel: string) => topbar.querySelector(sel)?.getBoundingClientRect().width ?? 0
+      // adj：独立「支持作者」按钮不参与折叠、始终常驻最右——须把它的宽度（含 margin-left 6px）
+      // 计入可用空间预算，否则窄屏（如 PAD 竖屏）下其余工具按钮会把它挤出视口导致横向滚动
+      const donateW = donateRef.current?.getBoundingClientRect().width ?? 0
       const avail =
         topbar.clientWidth -
         pad -
@@ -493,7 +497,8 @@ export function TopBar() {
         ovW -
         fix('.topbar-brand') -
         fix('.topbar-hamburger') -
-        fix('.topbar-views')
+        fix('.topbar-views') -
+        (donateW > 0 ? donateW + 6 : 0)
       // 测量每个按钮宽（测量容器按组分段渲染，与实际工具条布局一致）
       const btnEls = Array.from(mes.querySelectorAll<HTMLElement>('[data-tool-key]'))
       const widths = btnEls.map((el) => el.getBoundingClientRect().width)
@@ -727,6 +732,7 @@ export function TopBar() {
         </div>
         {/* 支持作者：独立于工具条最右侧（不参与功能组/设置组折叠，始终可见） */}
         <button
+          ref={donateRef}
           type="button"
           className="topbar-btn topbar-donate"
           onClick={() => openModal('donate')}

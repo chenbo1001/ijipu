@@ -227,6 +227,12 @@ body {
   gap: 4px;
   flex-shrink: 0;
   flex-wrap: nowrap;
+  /* adj：允许被压缩 + 隐藏自身溢出——即使 visCount 测量有偏差，
+     toolbtns/donate 总宽超容器时也不会撑破 .app 造成横向滚动。
+     注意：overflow:hidden 不影响下拉——下拉是 .topbar 的 absolute 子元素，
+     挂在 .topbar-hamburger/.topbar-overflow 下，不在本容器内 */
+  min-width: 0;
+  overflow: hidden;
 }
 /* 设置组框（从状态栏移来）：与功能组同款（背景+边框+圆角+内 padding） */
 .topbar-settings {
