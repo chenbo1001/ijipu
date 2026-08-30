@@ -1,7 +1,7 @@
 {
   "name": "爱记谱 iJipu",
   "short_name": "i记谱",
-  "description": "敲码即谱，所见即所得。代码式简谱制谱引擎，脚本规则高度兼容「番茄简谱」。",
+  "description": "码即成，谱自现。代码式简谱制谱引擎，脚本规则高度兼容「番茄简谱」。",
   "lang": "zh-CN",
   "start_url": "/",
   "scope": "/",

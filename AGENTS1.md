@@ -4,7 +4,7 @@
 
 ## 一、项目基础信息
 1. 品牌信息：iJipu（中文「爱记谱」，简称「i记谱」）
-   - Slogan：敲码即谱，所见即所得
+   - Slogan：码即成，谱自现
    - 应用窗口标题：`爱记谱 iJipu`
    - 文件后缀：`.jps`（iJipu Script），兼容原「番茄简谱」在线编辑器语法
    - 品牌 token（色板/字体/口号）集中定义在 `src/brand/tokens.ts`，面向用户文案集中定义在 `src/brand/copy.ts`，主题在 `src/brand/themes.ts`（adj48 浅深色模式）

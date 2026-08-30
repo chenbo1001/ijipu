@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.8.0",
   "license": "AGPL-3.0",
-  "description": "iJipu（爱记谱）—— 下一代代码式简谱制谱引擎。敲码即谱，所见即所得。",
+  "description": "iJipu（爱记谱）—— 下一代代码式简谱制谱引擎。码即成，谱自现。",
   "type": "module",
   "scripts": {
     "gen:info": "node scripts/gen-build-info.mjs",
