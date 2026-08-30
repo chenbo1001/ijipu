@@ -4,8 +4,15 @@
  *   node dist-smoke/preview.cjs  閳?閻㈢喐鍨氱粈杞扮伐鐠嬭鲸瑕嗛弻?SVG
  */
 import { defineConfig } from 'vite'
+import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
+  resolve: {
+    alias: [
+      { find: /^@ijipu\/engine$/, replacement: fileURLToPath(new URL('./packages/ijipu-engine/src/engine/index.ts', import.meta.url)) },
+      { find: /^@ijipu\/engine\//, replacement: fileURLToPath(new URL('./packages/ijipu-engine/src/engine/', import.meta.url)) },
+    ],
+  },
   build: {
     outDir: 'dist-smoke',
     target: 'node22',

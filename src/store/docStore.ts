@@ -4,8 +4,8 @@
  */
 import './localStorageMigration'
 import { create } from 'zustand'
-import { parseJps, defaultPageConfig, mergeJpsConfig, writeJpsConfig } from '../engine'
-import type { PageConfig, ParseResult } from '../engine'
+import { parseJps, defaultPageConfig, mergeJpsConfig, writeJpsConfig } from '@ijipu/engine'
+import type { PageConfig, ParseResult } from '@ijipu/engine'
 import { SAMPLES, defaultSample } from '../samples'
 import {
   recordEdit,

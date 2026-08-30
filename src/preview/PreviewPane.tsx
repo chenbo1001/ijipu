@@ -8,11 +8,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
-import { tempoLabel } from '../engine/parser/parser'
-import { layoutScore, renderScoreToSvg, noteIdToCodePos, buildIndexToPage } from '../engine'
-import type { ScorePage } from '../engine'
-import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '../engine/layout/guides'
-import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '../engine/layout/metaAnchors'
+import { tempoLabel } from '@ijipu/engine/parser/parser'
+import { layoutScore, renderScoreToSvg, noteIdToCodePos, buildIndexToPage } from '@ijipu/engine'
+import type { ScorePage } from '@ijipu/engine'
+import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides'
+import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '@ijipu/engine/layout/metaAnchors'
 import { brand } from '../brand/tokens'
 
 /** adj199：用 canvas.measureText 实测指定字体/字号下文本宽度（按字体实际宽度摆放角标，消除中英文宽度差异） */

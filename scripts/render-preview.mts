@@ -4,7 +4,7 @@
  */
 import { readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseJps, layoutScore, renderScoreToSvg, defaultPageConfig } from '../src/engine/index.ts'
+import { parseJps, layoutScore, renderScoreToSvg, defaultPageConfig } from '@ijipu/engine/index.ts'
 
 const root = process.cwd()
 const outDir = join(root, 'dist-preview')

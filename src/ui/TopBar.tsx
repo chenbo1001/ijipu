@@ -13,7 +13,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useDocStore, type ViewType } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { THEMES, type ThemeMode } from '../brand/themes'
-import { formatJps } from '../engine'
+import { formatJps } from '@ijipu/engine'
 
 /** adj281：编辑器字体下拉选项（从 EditorFootBar 移来，固定三个等宽字体） */
 const EDITOR_FONT_OPTIONS: { label: string; value: string }[] = [

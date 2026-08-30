@@ -10,8 +10,8 @@ import { useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
-import { defaultPageConfig } from '../engine'
-import type { PageConfig } from '../engine'
+import { defaultPageConfig } from '@ijipu/engine'
+import type { PageConfig } from '@ijipu/engine'
 
 type TabId = 'page' | 'noteLayout' | 'spacing' | 'font' | 'slur'
 

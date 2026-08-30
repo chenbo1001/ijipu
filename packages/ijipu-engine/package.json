@@ -1,0 +1,21 @@
+{
+  "name": "@ijipu/engine",
+  "version": "0.8.0",
+  "description": "iJipu 简谱引擎：纯 TypeScript，零 React/DOM 依赖 —— .jps 解析 → 排版 → SVG 渲染 → 播放序列 / MIDI / WAV",
+  "type": "module",
+  "license": "AGPL-3.0",
+  "main": "./src/engine/index.ts",
+  "types": "./src/engine/index.ts",
+  "exports": {
+    ".": "./src/engine/index.ts",
+    "./*": "./src/engine/*"
+  },
+  "files": ["src", "dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2"
+  }
+}

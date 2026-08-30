@@ -13,7 +13,7 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { highlightCodeWrapped } from './highlight'
 import type { BlockMarks } from './highlight'
-import { formatLine, codePosToNoteId, INSTRUMENT_LIB_NAMES } from '../engine'
+import { formatLine, codePosToNoteId, INSTRUMENT_LIB_NAMES } from '@ijipu/engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 import { VOLTA_HINTS, filterHeaderHints, isBarlineModifierContext, filterModifierHints } from './completions'
 

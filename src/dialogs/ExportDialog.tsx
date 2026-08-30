@@ -4,7 +4,7 @@
 import { useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
-import { layoutScore, renderScoreToSvg, buildPlaySequence, inferBpm, eventsToMidi } from '../engine'
+import { layoutScore, renderScoreToSvg, buildPlaySequence, inferBpm, eventsToMidi } from '@ijipu/engine'
 import { renderToAudioBuffer, audioBufferToWav, audioBufferToMp3 } from '../export/audio'
 import { exportSvg, exportPng, exportJpg, exportPdf } from '../export/export'
 

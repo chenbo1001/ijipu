@@ -4,9 +4,9 @@
  * 复用试听合成音色（renderSynthNote，多乐器按声部名路由），播放事件序列 →
  * AudioBuffer → WAV（零依赖）/ MP3（lamejs 纯 JS 编码，浏览器/桌面均离线可用）。
  */
-import { renderSynthNote, pcmToWav } from '../engine'
+import { renderSynthNote, pcmToWav } from '@ijipu/engine'
 import { Mp3Encoder } from '@breezystack/lamejs'
-import type { PlayEvent } from '../engine'
+import type { PlayEvent } from '@ijipu/engine'
 
 /** 渲染采样率 */
 export const RENDER_SAMPLE_RATE = 44100

@@ -5,6 +5,10 @@
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
     "types": ["vite/client"],
+    "paths": {
+      "@ijipu/engine": ["./packages/ijipu-engine/src/engine/index.ts"],
+      "@ijipu/engine/*": ["./packages/ijipu-engine/src/engine/*"]
+    },
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
 

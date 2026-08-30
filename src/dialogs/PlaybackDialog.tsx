@@ -17,7 +17,7 @@ import {
   createBackend,
   schedulePlay,
   INSTRUMENT_OPTIONS,
-} from '../engine'
+} from '@ijipu/engine'
 
 const BPM_OPTIONS = [40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 160, 180, 200]
 
@@ -126,7 +126,7 @@ export function PlaybackDialog() {
       if (wantSampler) {
         setSamplerState('loading')
         try {
-          await (backend as import('../engine').SamplerBackend).load()
+          await (backend as import('@ijipu/engine').SamplerBackend).load()
           setSamplerState('ready')
         } catch {
           setSamplerState('failed')
