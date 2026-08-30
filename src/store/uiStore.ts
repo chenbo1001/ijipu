@@ -31,6 +31,7 @@ const EDITOR_FS_KEY = 'ijipu.editorFontSize'
 const EDITOR_FONT_KEY = 'ijipu.editorFont'
 const PREVIEW_ZOOM_KEY = 'ijipu.previewZoom'
 const AUTO_WRAP_KEY = 'ijipu.autoWrap'
+const SHOW_SCRIPT_PAD_KEY = 'ijipu.showScriptPad'
 
 function loadBool(key: string, def: boolean): boolean {
   try {
@@ -77,6 +78,21 @@ function detectSystemLight(): boolean {
   }
 }
 
+/** adj314：是否移动端/PAD（触屏或窄屏≤1024px）——决定脚本工具条默认开关。PC 大屏默认关 */
+function detectTouch(): boolean {
+  try {
+    if (window.matchMedia('(pointer: coarse)').matches) return true
+  } catch {
+    /* 忽略 */
+  }
+  try {
+    if (window.innerWidth <= 1024) return true
+  } catch {
+    /* 忽略 */
+  }
+  return false
+}
+
 interface UiState {
   modal: ModalKind | null
   /** 试听起始音符 id（双击谱面音符定位试听起点，adj88；null = 从头播放） */
@@ -102,6 +118,8 @@ interface UiState {
   /** 编辑器自动折行（adj233 默认关闭；adj234 曾默认开启——用户确认保持默认关闭，
    *  关闭时 wrap=off 横向滚动对位正确；开启时 break-word 空格后折行） */
   autoWrap: boolean
+  /** adj314：嵌入式简谱输入工具条显示开关（移动端/PAD 默认开、PC 默认关） */
+  showScriptPad: boolean
   /** 轻量浮动提示（null = 无提示） */
   notice: Notice | null
   openModal: (m: ModalKind) => void
@@ -117,6 +135,7 @@ interface UiState {
   setEditorFont: (f: string) => void
   setPreviewZoom: (z: number) => void
   setAutoWrap: (b: boolean) => void
+  setShowScriptPad: (b: boolean) => void
   showNotice: (text: string, kind?: NoticeKind) => void
   clearNotice: () => void
 }
@@ -148,6 +167,8 @@ export const useUiStore = create<UiState>()((set) => ({
   // adj311：自动折行改为默认开启——Textarea 与显示层折行同步已修复
   //（mirror div 与 textarea 折行点一致），开启后长行软折行对位正确无横向滚动
   autoWrap: loadBool(AUTO_WRAP_KEY, true),
+  // adj314：脚本工具条默认按设备——移动端/PAD（触屏或≤1024px）默认开、PC 默认关
+  showScriptPad: loadBool(SHOW_SCRIPT_PAD_KEY, detectTouch()),
   openModal: (m) => set({ modal: m }),
   closeModal: () => set({ modal: null, playbackStartId: null }),
   setPlaybackStart: (id) => set({ playbackStartId: id }),
@@ -212,6 +233,14 @@ export const useUiStore = create<UiState>()((set) => ({
       /* 忽略 */
     }
     set({ autoWrap: b })
+  },
+  setShowScriptPad: (b) => {
+    try {
+      localStorage.setItem(SHOW_SCRIPT_PAD_KEY, b ? '1' : '0')
+    } catch {
+      /* 忽略 */
+    }
+    set({ showScriptPad: b })
   },
   notice: null,
   showNotice: (text, kind = 'ok') =>

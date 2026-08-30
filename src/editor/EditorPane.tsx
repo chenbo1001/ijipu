@@ -15,12 +15,15 @@ import { highlightCodeWrapped } from './highlight'
 import type { BlockMarks } from './highlight'
 import { formatLine, codePosToNoteId, INSTRUMENT_LIB_NAMES } from '@ijipu/engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
-import { VOLTA_HINTS, filterHeaderHints, isBarlineModifierContext, filterModifierHints } from './completions'
+import { isBarlineModifierContext, filterModifierHints } from './completions'
+import { ScriptToolbar } from './ScriptToolbar'
 
-/** adj165：自动提示浮层状态（null = 不显示） */
+/** adj165：自动提示浮层状态（null = 不显示）
+ *  adj314：保留 & 修饰符（modifier）与 Y/@ 乐器（instrument）两类——
+ *  描述头（header）、跳房子（volta）已由嵌入式输入工具条整段覆盖，弹列表取消 */
 interface Completion {
-  /** 提示类型：修饰符（& 编码）、跳房子（[ 后）、描述头（行首 Tab）、Y 行乐器（@ 后，adj302） */
-  kind: 'modifier' | 'volta' | 'header' | 'instrument'
+  /** 提示类型：修饰符（& 编码）、Y 行乐器（@ 后，adj302） */
+  kind: 'modifier' | 'instrument'
   /** 候选列表（cursorAt = 插入后光标停靠位置，用于带声部名模板） */
   items: { code: string; label: string; cursorAt?: number }[]
   /** 当前高亮索引 */
@@ -36,22 +39,6 @@ function modifierPrefix(lineBefore: string): string | null {
   return m ? m[1] : null
 }
 
-/** 判断光标前是否在小节线块内输入 [（返回已输入内容；仅小节线后触发跳房子提示） */
-function voltaPrefix(lineBefore: string): string | null {
-  // 最近的 [ 之前必须是小节线（| 或 :| 等），且 [ 之后可跟部分修饰
-  const b = lineBefore.lastIndexOf('[')
-  if (b < 0) return null
-  const after = lineBefore.slice(b + 1)
-  // 若 [ 后已输入 ] 或音符等 → 不提示
-  if (/[\]0-9|]/.test(after)) return null
-  const before = lineBefore.slice(0, b)
-  if (!/[|:]/.test(before)) return null
-  // 前面最近非空白字符需是小节线
-  const prev = before.trimEnd()
-  if (prev === '' || !/[|:]/.test(prev[prev.length - 1])) return null
-  return after
-}
-
 export function EditorPane() {
   const code = useDocStore((s) => s.code)
   const setCode = useDocStore((s) => s.setCode)
@@ -65,6 +52,8 @@ export function EditorPane() {
   const editorFont = useUiStore((s) => s.editorFont)
   // adj233/adj235/adj311：自动折行开关（折叠点计算与 textarea wrap=soft/off 联动）
   const autoWrap = useUiStore((s) => s.autoWrap)
+  // adj314：嵌入式简谱输入工具条显示开关
+  const showScriptPad = useUiStore((s) => s.showScriptPad)
   // adj221：编辑器字体/字号随谱保存（# jps-config）——谱面有值时优先，
   // 无则回退 uiStore 全局默认；写入在 EditorFootBar 处理
   const pageConfig = useDocStore((s) => s.pageConfig)
@@ -91,6 +80,8 @@ export function EditorPane() {
   // adj296b：回车换行标记——onChange 后横向滚动回新行行首光标
   //（长行末回车时视口停在右侧，不滚回行首会看不到新行输入）
   const enterKeyRef = useRef(false)
+  // adj314：系统软键盘当前是否显示——「⌨」按钮高亮态由 focus/blur 事件驱动
+  const [kbActive, setKbActive] = useState(false)
 
   // 光标联动（M3）：光标移动 → 计算 notepos id → 预览高亮
   const setActiveNoteId = useDocStore((s) => s.setActiveNoteId)
@@ -334,6 +325,52 @@ export function EditorPane() {
     }
   }, [])
 
+  // adj314：系统软键盘显示态 —— 跟随 textarea focus/blur，给「⌨」按钮高亮
+  useEffect(() => {
+    const ta = taRef.current
+    if (!ta) return
+    const onF = () => setKbActive(true)
+    const onB = () => setKbActive(false)
+    ta.addEventListener('focus', onF)
+    ta.addEventListener('blur', onB)
+    return () => {
+      ta.removeEventListener('focus', onF)
+      ta.removeEventListener('blur', onB)
+    }
+  }, [])
+
+  // adj314：工具条插入 —— 与 applyCompletion 同范式：读 textarea → 拼接 → setCode → 光标定位。
+  // cursorOffset 相对 insert 起点（默认末尾），用于带模板插入（如带声部名的描述头光标停在引号内）。
+  // 注意：受控 textarea 无法 execCommand，必须 setCode 后 RAF 回位光标并联动 onSelect/updateCompletion。
+  const insertAtCursor = (text: string, cursorOffset?: number) => {
+    const ta = taRef.current
+    if (!ta) return
+    const pos = ta.selectionStart
+    const next = ta.value.slice(0, pos) + text + ta.value.slice(ta.selectionEnd)
+    setCode(next)
+    const newPos = pos + (cursorOffset ?? text.length)
+    requestAnimationFrame(() => {
+      if (taRef.current) {
+        taRef.current.selectionStart = taRef.current.selectionEnd = newPos
+        onScroll()
+        onSelect()
+        updateCompletion()
+      }
+    })
+  }
+
+  // adj314：「⌨」软键盘开关 —— blur 收起（可靠）；focus 在用户手势下通常能唤起 iOS/Android 软键盘，
+  // 个别平台 focus 失效时用户仍可点编辑区唤回，不影响其它输入。
+  const toggleSystemKb = () => {
+    const ta = taRef.current
+    if (!ta) return
+    if (ta.matches(':focus')) {
+      ta.blur()
+    } else {
+      ta.focus()
+    }
+  }
+
   // adj165：分析光标前文本，触发自动提示（& 修饰符 / [ 跳房子 / 描述头行首 Tab）
   const updateCompletion = () => {
     const ta = taRef.current
@@ -346,26 +383,8 @@ export function EditorPane() {
       x: col * effectiveFontSize * 0.6,
       y: ((visualTopOfLine[line - 1] ?? 0) + 1) * editorLineH,
     })
-    // adj186：描述头区域行首 Tab → 列出所有描述头（行首 = 光标前仅空白）；
-    // adj202：行首已输入描述头前缀（如 q/Q/qv）时按前缀过滤列表（Q:/Q1:/Q2: 等，
-    // 不区分大小写），继续输入字母/数字实时收窄；无匹配项则关闭列表
-    // adj245：触发时机调整——回车换到新行（lineBefore 为空）先不弹；行首输入空格
-    // 弹完整描述头列表、输入前缀字母/数字弹按前缀过滤的列表；空行回车正常换行
-    const headerMatch = /^(\s*)([a-zA-Z0-9]*)$/.exec(lineBefore)
-    if (headerMatch) {
-      if (lineBefore === '') {
-        setCompletion(null)
-        return
-      }
-      const items = filterHeaderHints(headerMatch[2])
-      if (items.length === 0) {
-        setCompletion(null)
-        return
-      }
-      const { line, col } = lineColOf(ta.value, pos)
-      setCompletion({ kind: 'header', items, index: 0, ...compPos(line, col) })
-      return
-    }
+    // adj314：描述头（行首 Tab 补全）已由嵌入式输入工具条「描述头」组整段覆盖，取消弹列表；
+    // 行首命令快捷键（Q/C/B/...）等行为保留在 onKeyDown。
     // adj302：Y 行乐器补全——光标在 Y: 行、已按空格或输入 @（进入填乐器阶段）时弹音色库列表
     if (/^Y\s*:/.test(lineBefore) && /\s/.test(lineBefore.slice(lineBefore.indexOf(':')))) {
       const after = lineBefore.replace(/^Y\s*:\s*@?/, '') // 已输入前缀（含可选 @ 剥离）
@@ -414,18 +433,6 @@ export function EditorPane() {
       setCompletion({ kind: 'modifier', items, index: 0, ...compPos(line, col) })
       return
     }
-    const volta = voltaPrefix(lineBefore)
-    if (volta !== null) {
-      const items = VOLTA_HINTS.filter((h) => h.code.startsWith(volta))
-      if (items.length === 0) {
-        setCompletion(null)
-        return
-      }
-      const { line, col } = lineColOf(ta.value, pos)
-      // adj177：与修饰符提示一致，定位在光标字符下方
-      setCompletion({ kind: 'volta', items, index: 0, ...compPos(line, col) })
-      return
-    }
     setCompletion(null)
   }
 
@@ -441,14 +448,7 @@ export function EditorPane() {
     let insert = item.code
     let replaceLen = 0
     let cursorAt: number | null = null
-    if (c.kind === 'header') {
-      // adj186：描述头行首补全；adj192：带声部名模板（cursorAt）光标停在引号内待输入；
-      // adj202：过滤后补全——替换已输入的描述头前缀（如 q → Q:），避免 qQ: 叠加
-      const hm = /^\s*([a-zA-Z0-9]*)$/.exec(lineBefore)
-      if (hm) replaceLen = hm[1].length
-      insert = item.code + ' '
-      cursorAt = item.cursorAt ?? insert.length
-    } else if (c.kind === 'modifier') {
+    if (c.kind === 'modifier') {
       // adj177：用户已输入 &（lineBefore 以 & 结尾），只补全其后的字母——
       // 不再拼接第二个 &（此前 replaceLen 仅替换字母、insert 又含 &，会变成 &&tr）
       const m = /&([a-zA-Z+]*)$/.exec(lineBefore)
@@ -465,15 +465,6 @@ export function EditorPane() {
         if (m) replaceLen = m[2].length + m[3].length // @ + 已输入前缀
       }
       insert = item.code
-      cursorAt = insert.length
-    } else {
-      // 替换 [ 后已输入内容；插入 [ 本身 + 候选 + ]（无 ] 的候选不加）
-      const b = lineBefore.lastIndexOf('[')
-      const after = lineBefore.slice(b + 1)
-      replaceLen = after.length
-      insert = item.code
-      if (!insert.includes(']')) insert += ' '
-      if (insert.startsWith('"') && !insert.endsWith('"')) insert += ' '
       cursorAt = insert.length
     }
     const next = ta.value.slice(0, pos - replaceLen) + insert + ta.value.slice(pos)
@@ -541,9 +532,6 @@ export function EditorPane() {
       return
     }
     const key = e.key
-    // adj202：描述头列表弹出时，行首命令快捷键让位——让字母直接输入用于过滤列表
-    // （否则按 q 会被插入 Q: 拦截，无法收窄候选）；列表关闭后恢复快捷键
-    if (comp?.kind === 'header') return
     if (key.length !== 1 || !isLineHeaderKey(key.toUpperCase())) return
     const keyUp = key.toUpperCase() as Parameters<typeof insertLineHeader>[2]
     // 当前行类型（光标前内容）
@@ -721,7 +709,7 @@ export function EditorPane() {
               />
             </div>
           </div>
-          {/* adj165：自动提示浮层（& 修饰符 / 跳房子 / 描述头）；adj177：定位含内容层 padding（上 10 左 14）；
+          {/* adj165：自动提示浮层（& 修饰符 / Y/@ 乐器）；adj177：定位含内容层 padding（上 10 左 14）；
               adj192：靠下输入时浮层改为在光标上方弹出（否则列表超出窗口底部无法选择） */}
           {completion && (
             <CompletionPopover
@@ -733,6 +721,11 @@ export function EditorPane() {
           )}
         </div>
       </div>
+      {/* adj314：嵌入式简谱输入工具条——编辑器底部常驻（编辑区与预览/分页之间），
+          单行横向滑动，主键/二级键共用一条工具条 */}
+      {showScriptPad && (
+        <ScriptToolbar onInsert={insertAtCursor} onToggleKb={toggleSystemKb} kbActive={kbActive} />
+      )}
     </div>
   )
 }

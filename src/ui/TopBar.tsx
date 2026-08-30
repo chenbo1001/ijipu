@@ -146,6 +146,9 @@ export function TopBar() {
   // adj281：折行 / 字体 / 字号（从状态栏设置组移到顶栏工具条）
   const autoWrap = useUiStore((s) => s.autoWrap)
   const setAutoWrap = useUiStore((s) => s.setAutoWrap)
+  // adj314：脚本输入工具条开关（移动端/PAD 默认开、PC 默认关）
+  const showScriptPad = useUiStore((s) => s.showScriptPad)
+  const setShowScriptPad = useUiStore((s) => s.setShowScriptPad)
   const editorFontSize = useUiStore((s) => s.editorFontSize)
   const setEditorFontSize = useUiStore((s) => s.setEditorFontSize)
   const editorFont = useUiStore((s) => s.editorFont)
@@ -158,14 +161,19 @@ export function TopBar() {
   // ---- 下拉开关 ----
   const [menuOpen, setMenuOpen] = useState(false)
   const [overflowOpen, setOverflowOpen] = useState(false)
-  // 顶栏根 ref：用于 click-outside 检测（汉堡 / 更多下拉都收在 topbar 内，点击外部关闭）
+  // adj314：视图切换改为下拉按钮（减少宽度占用）
+  const [viewOpen, setViewOpen] = useState(false)
+  const viewRef = useRef<HTMLDivElement>(null)
+  // 顶栏根 ref：用于 click-outside 检测（汉堡 / 更多 / 视图下拉都收在 topbar 内，点击外部关闭）
   const topbarRef = useRef<HTMLDivElement>(null)
 
   const closeMenu = () => setMenuOpen(false)
   const closeOverflow = () => setOverflowOpen(false)
+  const closeView = () => setViewOpen(false)
   const closeAll = () => {
     setMenuOpen(false)
     setOverflowOpen(false)
+    setViewOpen(false)
   }
 
   // ---- adj：功能按钮溢出（顶栏尽量显示，放不下的进「更多」下拉） ----
@@ -181,6 +189,7 @@ export function TopBar() {
     { key: 'zoom', label: '缩放', group: 'topbar' as const, kind: 'zoom' as const, show: showZoom },
     // —— 设置组（从状态栏移来） ——
     { key: 'autoWrap', label: '折行', group: 'footer' as const, kind: 'btn' as const, active: autoWrap, onPick: () => setAutoWrap(!autoWrap) },
+    { key: 'scriptPad', label: '输入条', group: 'footer' as const, kind: 'btn' as const, active: showScriptPad, onPick: () => setShowScriptPad(!showScriptPad) },
     { key: 'font', label: '字体', group: 'footer' as const, kind: 'font' as const },
     { key: 'fontSize', label: '字号', group: 'footer' as const, kind: 'fontSize' as const, show: true },
   ].filter((t) => (t.kind === 'zoom' ? t.show : true))
@@ -283,6 +292,17 @@ export function TopBar() {
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
             <text x="2" y="11.5" fontSize="11" fontWeight="700" fill="currentColor">A</text>
             <text x="9" y="11.5" fontSize="7.5" fontWeight="700" fill="currentColor">a</text>
+          </svg>
+        )
+      case 'scriptPad':
+        return (
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+            <rect x="1.5" y="2.5" width="7" height="5.5" rx="1" />
+            <path d="M 4.5 9 V 11.5" />
+            <path d="M 8.5 9 V 11.5" />
+            <path d="M 2 11.5 H 11" />
+            <path d="M 9.8 4.2 V 6.6" />
+            <path d="M 8.6 5.4 H 11" />
           </svg>
         )
       default:
@@ -538,9 +558,9 @@ export function TopBar() {
     }
   }, [showZoom])
 
-  // adj281：点击外部关闭任意打开的下拉（汉堡 / 更多）；同时支持 Esc 关闭
+  // adj281：点击外部关闭任意打开的下拉（汉堡 / 更多 / 视图）；同时支持 Esc 关闭
   useEffect(() => {
-    if (!menuOpen && !overflowOpen) return
+    if (!menuOpen && !overflowOpen && !viewOpen) return
     const onDown = (e: MouseEvent) => {
       const root = topbarRef.current
       if (!root) return
@@ -549,7 +569,7 @@ export function TopBar() {
       }
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && (menuOpen || overflowOpen)) {
+      if (e.key === 'Escape' && (menuOpen || overflowOpen || viewOpen)) {
         e.preventDefault()
         e.stopPropagation()
         closeAll()
@@ -561,7 +581,7 @@ export function TopBar() {
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey, true)
     }
-  }, [menuOpen, overflowOpen])
+  }, [menuOpen, overflowOpen, viewOpen])
 
   // adj185：Alt+字母 打开菜单组；菜单打开时按字母执行 data-hotkey
   useEffect(() => {
@@ -653,6 +673,7 @@ export function TopBar() {
           className="topbar-hamburger-btn"
           onClick={() => {
             setOverflowOpen(false)
+            setViewOpen(false)
             setMenuOpen((v) => !v)
           }}
           title="菜单"
@@ -696,20 +717,45 @@ export function TopBar() {
         )}
       </div>
 
-      {/* 视图切换 */}
-      <div className="topbar-views">
-        {VIEWS.map((v) => (
-          <button
-            key={v.key}
-            className={`topbar-btn topbar-view-btn${viewType === v.key ? ' active' : ''}`}
-            onClick={() => setViewType(v.key)}
-            title={v.label}
-            aria-label={v.label}
+      {/* 视图切换（adj314：改为下拉按钮，减少宽度占用） */}
+      <div className="topbar-views" ref={viewRef}>
+        <button
+          type="button"
+          className={`topbar-btn topbar-view-btn${viewOpen ? ' active' : ''}`}
+          onClick={() => {
+            setMenuOpen(false)
+            setOverflowOpen(false)
+            setViewOpen((v) => !v)
+          }}
+          title="切换视图"
+          aria-label="切换视图"
+          aria-expanded={viewOpen}
+        >
+          {VIEWS.find((v) => v.key === viewType)?.icon}
+          <span className="tool-label">{VIEWS.find((v) => v.key === viewType)?.label}</span>
+          <span className="arrow">▾</span>
+        </button>
+        {viewOpen && (
+          <div
+            className="menu-dropdown topbar-view-dropdown"
+            onClick={(e) => e.stopPropagation()}
           >
-            {v.icon}
-            <span className="tool-label">{v.label}</span>
-          </button>
-        ))}
+            {VIEWS.map((v) => (
+              <div
+                key={v.key}
+                className={`menu-entry${viewType === v.key ? ' active' : ''}`}
+                onClick={() => {
+                  setViewType(v.key)
+                  closeView()
+                }}
+              >
+                {v.icon}
+                <span>{v.label}</span>
+                {viewType === v.key && <span style={{ marginLeft: 'auto', color: 'var(--jp-accent)' }}>✓</span>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="topbar-spacer" />
@@ -753,6 +799,7 @@ export function TopBar() {
             className="topbar-overflow-btn"
             onClick={() => {
               setMenuOpen(false)
+              setViewOpen(false)
               setOverflowOpen((v) => !v)
             }}
             title="更多工具"
