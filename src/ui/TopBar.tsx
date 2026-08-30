@@ -666,11 +666,11 @@ export function TopBar() {
         </span>
       </div>
 
-      {/* 汉堡菜单（宽窄屏都用） */}
+      {/* 汉堡菜单（宽屏显示「菜单」标题，窄屏仅 ☰——同排版按钮的 tool-label 约定） */}
       <div className={`topbar-hamburger${menuOpen ? ' open' : ''}`}>
         <button
           type="button"
-          className="topbar-hamburger-btn"
+          className="topbar-btn topbar-hamburger-btn"
           onClick={() => {
             setOverflowOpen(false)
             setViewOpen(false)
@@ -684,6 +684,7 @@ export function TopBar() {
             <path d="M 2 9 H 16" />
             <path d="M 2 14 H 16" />
           </svg>
+          <span className="tool-label">菜单</span>
         </button>
         {menuOpen && (
           <div

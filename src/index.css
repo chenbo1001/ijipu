@@ -147,21 +147,9 @@ body {
      这样下拉 left:0 相对整个顶栏左缘 = Logo 左缘，从 Logo 处向左对齐展开 */
   position: static;
 }
-.topbar-hamburger-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  color: var(--jp-text-secondary);
-  background: transparent;
-  border: 1px solid transparent;
-  font-family: var(--jp-font-sans);
-  font-size: 18px;
-  line-height: 1;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
+/* adj314：宽屏显示「菜单」标题同排版按钮——基础样式（display/padding/border/gap/font-size
+   等）由类组合复用 .topbar-btn；这里只保留汉堡特有的 hover/open 状态（菜单激活态用
+   panel-hover 背景+文字主色，与工具按钮 hover 的 accent 高亮区分） */
 .topbar-hamburger-btn:hover,
 .topbar-hamburger.open .topbar-hamburger-btn {
   background: var(--jp-bg-panel-hover);
