@@ -1,5 +1,13 @@
 # iJipu 更新日志（Changelog）
 
+## [Unreleased]
+
+### 清理
+
+- **合规清理**：删除仓库根 `_site_probe/` 目录（含抓取的第三方网站文档/JS 抓取产物），从未进入 git 索引，仅作为开发参考材料，本地清理后不再保留。删除 `samples/paipaizuo.jps`（注释明确标注复刻自原「番茄简谱」极简示例格式）。`docs/JPS-SPEC.md` / `public/doc/jps-spec.html` / `docs/ERRORS-LOG.md` 中第三方网站原始抓取路径已脱敏；`packages/ijipu-engine/src/engine/format/format.ts` 注释中「规则翻译自原 ... formatJP 逻辑」改为「规则实现自 JPS 脚本规范」；`packages/ijipu-engine/src/engine/index.ts` 入口加 clean-room 总体声明。引擎代码本身已是独立实现（README 既有声明），本清理为加固合规姿态、消除代码注释与文档中"原站"字样的模糊表述。
+
+---
+
 ## [0.9.0] — 2026-08-30
 
 ### 新增
