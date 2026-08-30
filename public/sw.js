@@ -1,4 +1,4 @@
-/* JianpuScript PWA Service Worker（adj155：可安装为浏览器应用）
+/* iJipu PWA Service Worker（adj155：可安装为浏览器应用）
  * 策略：
  *  - 导航请求（HTML）：network-first，离线回退缓存首页（保证拿到最新构建）
  *  - 静态资源（/assets/* 带 hash）：cache-first，后台刷新缓存

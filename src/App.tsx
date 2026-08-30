@@ -1,5 +1,5 @@
 /**
- * App.tsx — JianpuScript（码上简谱）应用外壳
+ * App.tsx — iJipu（爱记谱）应用外壳
  * 布局（adj281）：
  *   TopBar（合并原菜单栏 + 工具栏）/ 主区域（编码·拆分·预览）/
  *   EditorFootBar（合并原脚本编辑器顶栏 + 状态栏）+ 模态框

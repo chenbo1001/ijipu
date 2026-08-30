@@ -1,5 +1,5 @@
 /**
- * engine/types.ts — JianpuScript 简谱引擎核心类型
+ * engine/types.ts — iJipu 简谱引擎核心类型
  *
  * 语法依据：原「番茄简谱」脚本说明手册（doc.lezhi99.com/zhipu）完整逆向，
  * 兼容 .jps 标记语言 V1.0。

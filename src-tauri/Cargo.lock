@@ -1534,7 +1534,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "jianpuscript"
+name = "ijipu"
 version = "0.1.0"
 dependencies = [
  "serde",

@@ -3,9 +3,9 @@
 > 本文件由 DeepSeek Harness（DSH）作为工作区指令**自动加载**；子目录级规范见 `src/AGENTS.md`（src 分层职责）。参考 `D:\Coding\ShiJi_dev` 项目规范体系整理，框架沿用、内容按本项目（Tauri + React + TS 简谱引擎）适配。
 
 ## 一、项目基础信息
-1. 品牌信息：JianpuScript（中文「码上简谱」，简称「码谱」）
+1. 品牌信息：iJipu（中文「码上简谱」，简称「码谱」）
    - Slogan：敲码即谱，所见即所得
-   - 应用窗口标题：`码上简谱 JianpuScript`
+   - 应用窗口标题：`码上简谱 iJipu`
    - 文件后缀：`.jps`（Jianpu Pro Script），兼容原「番茄简谱」在线编辑器语法
    - 品牌 token（色板/字体/口号）集中定义在 `src/brand/tokens.ts`，面向用户文案集中定义在 `src/brand/copy.ts`，主题在 `src/brand/themes.ts`（adj48 浅深色模式）
 2. 技术栈：Tauri v2（Windows 桌面壳）+ Vite 8 + React 19 + TypeScript 6（strict）+ Zustand 5
@@ -98,7 +98,7 @@ npx tauri build             # 打包 → src-tauri/target/release/bundle/nsis/*-
 3. 光标联动契约：音符/歌词元素带 `data-notepos` / `data-cipos` 属性，编辑器↔谱面双向跳转（`engine/cursorMap.ts` 负责 id ↔ 代码位置换算），改动联动逻辑必须同步两端
 4. 布局数值规则（间距/字号/行距）集中定义在 `engine/types.ts` 的 `defaultPageConfig` 与 `engine/layout/index.ts`；调整记录用 `adjNN` 编号，commit message 带编号
 5. 排版辅助虚线（guides）：位置计算收敛在 `engine/layout/guides.ts` 纯函数（`computeRowTops` / `computeRowGuides` / `quciGuideY` / `dragDelta`），预览层（PreviewPane）只消费不重算；**quci 虚线钳制在「曲部内容下沿」与「歌词文字上沿」之间，cici 虚线不越过歌词下沿（adj53 约定）**
-6. 配置持久化：浏览器 localStorage，键统一 `jianpuscript.` 前缀（草稿/页面配置/主题/缩放等），**存储键集中定义在 store 文件顶部常量，禁止散落硬编码**
+6. 配置持久化：浏览器 localStorage，键统一 `ijipu.` 前缀（草稿/页面配置/主题/缩放等），**存储键集中定义在 store 文件顶部常量，禁止散落硬编码**
 7. 试听播放：`engine/playback`（Web Audio 合成 + 采样音源），UI 在 PlaybackDialog；改动播放序列逻辑同步 smoke 断言
 
 ## 七、禁用行为（AI禁止执行）
@@ -109,9 +109,9 @@ npx tauri build             # 打包 → src-tauri/target/release/bundle/nsis/*-
 5. 不输出英文注释、英文说明，全部沟通、注释使用简体中文
 
 ## 八、配置与数据保护规则
-1. **损坏回退**：`jianpuscript.pageConfig` JSON 解析失败或字段类型非法时，必须回退 `defaultPageConfig` 并静默忽略，禁止崩溃、禁止向用户抛错
-2. **草稿容错**：`jianpuscript.draft` 读取失败（损坏/无权限）时静默忽略，回退默认新谱，不影响启动
-3. **存储键集中**：所有 localStorage 读写键统一 `jianpuscript.` 前缀，常量集中在 `src/store/uiStore.ts` / `src/store/docStore.ts` 顶部；禁止在组件中散落硬编码键名
+1. **损坏回退**：`ijipu.pageConfig` JSON 解析失败或字段类型非法时，必须回退 `defaultPageConfig` 并静默忽略，禁止崩溃、禁止向用户抛错
+2. **草稿容错**：`ijipu.draft` 读取失败（损坏/无权限）时静默忽略，回退默认新谱，不影响启动
+3. **存储键集中**：所有 localStorage 读写键统一 `ijipu.` 前缀，常量集中在 `src/store/uiStore.ts` / `src/store/docStore.ts` 顶部；禁止在组件中散落硬编码键名
 4. **无隐含写**：应用纯前端无后端、不写用户文件；导出（PDF/JPG/SVG/PNG）仅在用户主动触发时生成到浏览器下载，验证脚本不得污染 samples/docs/ 真实文件
 5. **写入校验**：写入 localStorage 前做范围钳制（如预览缩放 50~200、编辑器字号 10~26、拆分比例 15~85），参考 uiStore 既有实现
 

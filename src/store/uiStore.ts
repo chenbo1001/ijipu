@@ -1,6 +1,7 @@
 /**
  * store/uiStore.ts — UI 状态（模态框、排版辅助、主题、拆分比例、编辑器字号）
  */
+import './localStorageMigration'
 import { create } from 'zustand'
 import { DEFAULT_THEME, DEFAULT_THEME_MODE, type ThemeMode } from '../brand/themes'
 
@@ -23,13 +24,13 @@ export interface Notice {
   nonce: number
 }
 
-const THEME_KEY = 'jianpuscript.theme'
-const THEME_MODE_KEY = 'jianpuscript.themeMode'
-const SPLIT_KEY = 'jianpuscript.splitPct'
-const EDITOR_FS_KEY = 'jianpuscript.editorFontSize'
-const EDITOR_FONT_KEY = 'jianpuscript.editorFont'
-const PREVIEW_ZOOM_KEY = 'jianpuscript.previewZoom'
-const AUTO_WRAP_KEY = 'jianpuscript.autoWrap'
+const THEME_KEY = 'ijipu.theme'
+const THEME_MODE_KEY = 'ijipu.themeMode'
+const SPLIT_KEY = 'ijipu.splitPct'
+const EDITOR_FS_KEY = 'ijipu.editorFontSize'
+const EDITOR_FONT_KEY = 'ijipu.editorFont'
+const PREVIEW_ZOOM_KEY = 'ijipu.previewZoom'
+const AUTO_WRAP_KEY = 'ijipu.autoWrap'
 
 function loadBool(key: string, def: boolean): boolean {
   try {

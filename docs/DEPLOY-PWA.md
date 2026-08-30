@@ -1,6 +1,6 @@
 # PWA 部署与手机端安装指南
 
-JianpuScript 已支持 PWA（Progressive Web App，adj155）。
+iJipu 已支持 PWA（Progressive Web App，adj155）。
 构建产物 `dist/` 包含 `sw.js`（Service Worker）、`manifest.webmanifest`、图标与 `index.html`，
 部署到 **HTTPS** 站点后，手机/桌面浏览器可"添加到主屏幕"作为独立应用运行。
 
@@ -31,14 +31,14 @@ PWA 安装提示仅在 **HTTPS 域名** 下出现（`localhost` 除外）。
 
 | 平台 | 操作 | 备注 |
 |---|---|---|
-| **Cloudflare Pages** | 1. 登录 dash.cloudflare.com → Workers & Pages → Create → Pages<br>2. 关联 GitHub 仓库 JianpuScript → 选根目录（jianpuscript/）<br>3. Build command: `npm run build`　Output: `dist` | 免费、自动 HTTPS、自带 CDN。**推荐首选** |
+| **Cloudflare Pages** | 1. 登录 dash.cloudflare.com → Workers & Pages → Create → Pages<br>2. 关联 GitHub 仓库 iJipu → 选根目录（ijipu/）<br>3. Build command: `npm run build`　Output: `dist` | 免费、自动 HTTPS、自带 CDN。**推荐首选** |
 | **Netlify** | 1. app.netlify.com → Add new site → Import from Git<br>2. Build: `npm run build`　Publish: `dist` | 免费、自动 HTTPS、CDN |
-| **Vercel** | 1. vercel.com → Add New Project → JianpuScript<br>2. Framework: Vite　Output: `dist` | 免费、自动 HTTPS、CDN。**注意**：Vercel 部署 Vite 项目时默认 root 设为仓库根，但 JianpuScript 应用在 `jianpuscript/` 子目录，需手动设 **Root Directory: `jianpuscript`** |
-| **GitHub Pages** | 1. 仓库 Settings → Pages → Build from branch → gh-pages<br>2. 用 `gh-pages` action 自动 build + 部署 `dist/` | 免费、自动 HTTPS。**注意**：JianpuScript 在子目录，需设 **Pages → Build from branch → Branch: `gh-pages` / `/(root)`**；或用 `subpath` action；或 monorepo 配置 base path |
+| **Vercel** | 1. vercel.com → Add New Project → iJipu<br>2. Framework: Vite　Output: `dist` | 免费、自动 HTTPS、CDN。**注意**：Vercel 部署 Vite 项目时默认 root 设为仓库根，但 iJipu 应用在 `ijipu/` 子目录，需手动设 **Root Directory: `ijipu`** |
+| **GitHub Pages** | 1. 仓库 Settings → Pages → Build from branch → gh-pages<br>2. 用 `gh-pages` action 自动 build + 部署 `dist/` | 免费、自动 HTTPS。**注意**：iJipu 在子目录，需设 **Pages → Build from branch → Branch: `gh-pages` / `/(root)`**；或用 `subpath` action；或 monorepo 配置 base path |
 | **自建 nginx + Let's Encrypt** | 1. `apt install nginx certbot python3-certbot-nginx`<br>2. `certbot --nginx -d your.domain.com`<br>3. nginx server block: `root /var/www/jps/dist;` + HTTPS config | 需自有域名 + 公网 IP。沙箱外可走，DSH 工作区内不支持长监听 |
 | **国内备案 + CDN** | 阿里云 / 腾讯云 / 华为云 OSS + CDN + ICP 备案 | 国内访问快，但需域名 ICP 备案（个人/企业均可，约 7-20 天） |
 
-> **Vercel / GH Pages 部署子目录注意**：JianpuScript 在 `jianpuscript/` 子目录，部署时必须设 **Root Directory: `jianpuscript`**，否则部署的是仓库根目录（无 `dist/`）。
+> **Vercel / GH Pages 部署子目录注意**：iJipu 在 `ijipu/` 子目录，部署时必须设 **Root Directory: `ijipu`**，否则部署的是仓库根目录（无 `dist/`）。
 
 ---
 
@@ -86,7 +86,7 @@ PWA 安装提示仅在 **HTTPS 域名** 下出现（`localhost` 除外）。
 5. 主屏出现「码谱」图标，启动后**全屏 + 无 Safari UI**
 6. **iOS 限制**（PWA 已知）：
    - 7 天无访问 Safari 会清缓存（sw.js 缓存可能失效）
-   - 推送通知 / 后台同步 / Web Bluetooth 等部分 API 不支持（**JianpuScript 不依赖这些，OK**）
+   - 推送通知 / 后台同步 / Web Bluetooth 等部分 API 不支持（**iJipu 不依赖这些，OK**）
    - Web Audio 需用户首次手势触发（`AudioContext.resume()`，项目内已用 `try { await (backend as {ready?: ()=>Promise<void>}).ready?.() }` 等价处理）
 
 ---

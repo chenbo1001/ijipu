@@ -2,6 +2,7 @@
  * store/docStore.ts — 文档状态（zustand）
  * 数据流：code → parse（同步）→ parseResult；layout/render 由渲染管线消费。
  */
+import './localStorageMigration'
 import { create } from 'zustand'
 import { parseJps, defaultPageConfig, mergeJpsConfig, writeJpsConfig } from '../engine'
 import type { PageConfig, ParseResult } from '../engine'
@@ -102,9 +103,9 @@ interface DocState {
 }
 
 /** 本地草稿（localStorage，自动保存） */
-const DRAFT_KEY = 'jianpuscript.draft'
-const DRAFT_NAME_KEY = 'jianpuscript.draftName'
-const PAGE_CONFIG_KEY = 'jianpuscript.pageConfig'
+const DRAFT_KEY = 'ijipu.draft'
+const DRAFT_NAME_KEY = 'ijipu.draftName'
+const PAGE_CONFIG_KEY = 'ijipu.pageConfig'
 
 function loadDraft(): { code: string; name: string } | null {
   try {
@@ -158,7 +159,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   code: draft?.code ?? defaultSample().code,
   fileName: draft?.name ?? defaultSample().name,
   dirty: false,
-  viewType: (localStorage.getItem('jianpuscript.viewType') as ViewType) || 'split',
+  viewType: (localStorage.getItem('ijipu.viewType') as ViewType) || 'split',
   autoFormat: true,
   // adj83：谱面级设置优先（源码 # jps-config 注释），无则回退公共设置
   pageConfig: mergeJpsConfig(draft?.code ?? defaultSample().code, loadPageConfig()),
@@ -202,7 +203,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
     })
   },
   setViewType: (v) => {
-    localStorage.setItem('jianpuscript.viewType', v)
+    localStorage.setItem('ijipu.viewType', v)
     set({ viewType: v })
   },
   setAutoFormat: (b) => set({ autoFormat: b }),
@@ -323,7 +324,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
     if (typeof picker !== 'function') return openFileViaInput()
     try {
       const [handle] = await picker({
-        types: [{ description: 'JianpuScript 乐谱', accept: { 'text/plain': ['.jps'] } }],
+        types: [{ description: 'iJipu 乐谱', accept: { 'text/plain': ['.jps'] } }],
         multiple: false,
       })
       const file = await handle.getFile()
@@ -396,7 +397,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
     try {
       const handle = await picker({
         suggestedName: `${get().fileName || '未命名'}.jps`,
-        types: [{ description: 'JianpuScript 乐谱', accept: { 'text/plain': ['.jps'] } }],
+        types: [{ description: 'iJipu 乐谱', accept: { 'text/plain': ['.jps'] } }],
       })
       const w = await handle.createWritable()
       await w.write(get().code)

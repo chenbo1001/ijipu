@@ -3,7 +3,7 @@
 > DSH 自动加载；src 分层职责见 `src/AGENTS.md`。完整版备份见 `AGENTS1.md`。
 
 ## 一、项目事实速查
-- JianpuScript（码上简谱）：Tauri v2 + Vite 8 + React 19 + TS 6(strict) + Zustand；`.jps` 语法兼容原「番茄简谱」
+- iJipu（码上简谱）：Tauri v2 + Vite 8 + React 19 + TS 6(strict) + Zustand；`.jps` 语法兼容原「番茄简谱」
 - `src/engine` 纯 TS，零 React/DOM 依赖；数据流单向 `source→parse→layout→render/playback`，禁反向依赖
 - 版本 SemVer：唯一手动维护 `src/brand/version.ts` 的 `APP_VERSION`；发布时与 `package.json`、`src-tauri/tauri.conf.json` **三处一致**
 - 允许依赖：react / react-dom / zustand；**新增依赖必须先询问**
@@ -33,7 +33,7 @@
 2. 光标联动：元素带 `data-notepos`/`data-cipos`，改动同步两端（`engine/cursorMap.ts`）
 3. 排版虚线收敛在 `engine/layout/guides.ts` 纯函数；**quci 虚线钳制曲部下沿~歌词上沿、cici 不越歌词下沿**（adj53）；预览层只消费不重算
 4. **修饰符间距常量统一在 `engine/layout/spacing.ts`**（adj60：层级间距 LAYER_GAP=2、层内 INNER_GAP=1；**adj64：水平元素最小间距 0.5px，非时值元素（&zkh/&ykh 括号等）占位 BRACKET_PAD 先扣除、剩余宽按比例分摊给带时值元素**）；改间距只改该文件
-5. localStorage 键统一 `jianpuscript.` 前缀、集中定义在 store 顶部；损坏回退默认值；写入范围钳制
+5. localStorage 键统一 `ijipu.` 前缀、集中定义在 store 顶部；损坏回退默认值；写入范围钳制
 6. 每次功能/修复后：排错必记 `docs/ERRORS-LOG.md`（`E-年份-序号`，现象/根因/解决/预防）
 7. 版本发布顺序：**改码 → 同步文档 → 递增版本号（三处）→ git 提交（Conventional + adjNN）→ 打包**
 

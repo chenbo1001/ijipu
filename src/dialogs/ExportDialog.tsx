@@ -171,7 +171,7 @@ export function ExportDialog() {
           style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', textAlign: 'left' }}
           onClick={downloadJps}
         >
-          <span>JianpuScript 源文件</span>
+          <span>iJipu 源文件</span>
           <span style={{ fontFamily: 'var(--jp-font-mono)', color: 'var(--jp-accent)' }}>.jps</span>
         </button>
         {hasError && (

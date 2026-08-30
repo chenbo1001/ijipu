@@ -1,13 +1,16 @@
 /**
  * store/fileHandleDb.ts — 文件句柄 IndexedDB 持久化（adj161）
  *
+ * 库名 iJipu（原 jianpuscript）。旧库句柄由 localStorageMigration.ts
+ * 在启动时搬运到新库（改名零数据丢失）。
+ *
  * File System Access API 的 FileSystemFileHandle 是内存对象，无法存入
  * localStorage；保存/另存后把句柄存入 IndexedDB，应用重启后恢复，
  * 实现「下次按保存直接写入上次保存的文件」，无需重新选文件。
  * 权限状态：恢复的句柄在保存时若权限失效（SecurityError），调用方会
  * 回退到另存为对话框重新授权（浏览器会弹出权限询问）。
  */
-const DB_NAME = 'jianpuscript'
+const DB_NAME = 'ijipu'
 const STORE = 'fileHandle'
 
 function openDb(): Promise<IDBDatabase> {

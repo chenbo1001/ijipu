@@ -11,7 +11,7 @@
 | `engine/` | 简谱引擎：解析（parser/tokenizer）、格式化（format）、排版（layout）、渲染（render）、播放（playback）、光标映射（cursorMap）、时值（duration）、类型（types） | **纯 TS，零 React/DOM/浏览器 API 依赖**，可在 Node 中单测；数据流单向 `source → parse → layout → render/playback`，禁止反向依赖；入口统一 `engine/index.ts` |
 | `editor/` | 代码编辑器：EditorPane（textarea+高亮层）、highlight、history（撤销/重做）、shortcuts（行首命令快捷键） | 只做编辑交互；解析/格式化调用 engine，不复制引擎逻辑 |
 | `preview/` | 乐谱预览：PreviewPane（SVG 渲染消费 + 光标联动 + 排版辅助虚线拖拽） | 渲染消费 engine 输出，虚线位置计算调用 `engine/layout/guides.ts` 纯函数，不重算几何 |
-| `store/` | Zustand 状态：docStore（代码/解析结果/页面配置/历史）、uiStore（模态框/主题/缩放/字号） | 唯一状态源；localStorage 键集中定义在文件顶部常量（`jianpuscript.` 前缀），禁止组件内散落硬编码键名 |
+| `store/` | Zustand 状态：docStore（代码/解析结果/页面配置/历史）、uiStore（模态框/主题/缩放/字号） | 唯一状态源；localStorage 键集中定义在文件顶部常量（`ijipu.` 前缀），禁止组件内散落硬编码键名 |
 | `ui/` | 通用组件：MenuBar、Toolbar、Modal、StatusBar | 无业务状态，只消费 store；图标/按钮样式走 CSS 变量 |
 | `dialogs/` | 功能对话框：PageConfig、Playback、Export、Samples、Shortcuts、About | 每个对话框一个文件，统一用 `ui/Modal`；打开/关闭走 uiStore.modal |
 | `export/` | 导出模块：PDF/JPG/SVG/PNG（export.ts） | 纯函数 + 浏览器下载，仅在用户主动触发时执行 |
@@ -33,10 +33,10 @@
 
 ## 三、store 状态管理
 
-1. `docStore`（文档态）：code、parseResult、pageConfig、cursor/sel、撤销/重做历史（history.ts，上限 50 步、输入合并窗口）、草稿自动保存（jianpuscript.draft）
+1. `docStore`（文档态）：code、parseResult、pageConfig、cursor/sel、撤销/重做历史（history.ts，上限 50 步、输入合并窗口）、草稿自动保存（ijipu.draft）
 2. `uiStore`（界面态）：modal、showGuides、theme/themeMode、splitPct、editorFontSize、previewZoom；写入 localStorage 前范围钳制（缩放 50~200、字号 10~26、拆分 15~85）
 3. **数据流**：组件通过 `useDocStore((s) => s.xxx)` 按字段订阅，禁止解构整个 store 造成全量重渲染；修改一律走 store action，禁止组件直接改 store 内部状态
-4. **持久化键**：`jianpuscript.` 前缀常量集中在 store 文件顶部（DRAFT_KEY/PAGE_CONFIG_KEY/PREVIEW_ZOOM_KEY 等），读取必须 try/catch 回退默认值
+4. **持久化键**：`ijipu.` 前缀常量集中在 store 文件顶部（DRAFT_KEY/PAGE_CONFIG_KEY/PREVIEW_ZOOM_KEY 等），读取必须 try/catch 回退默认值
 
 ## 四、品牌与文案集中管理（强制）
 

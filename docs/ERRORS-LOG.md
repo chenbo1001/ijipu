@@ -1,4 +1,4 @@
-# JianpuScript 错误日志与经验教训（Error Log & Lessons）
+# iJipu 错误日志与经验教训（Error Log & Lessons）
 
 | 项 | 内容 |
 |---|---|

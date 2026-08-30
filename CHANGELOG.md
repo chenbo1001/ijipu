@@ -1,4 +1,7 @@
-# JianpuScript 更新日志（Changelog）
+# iJipu 更新日志（Changelog）
+
+## Unreleased
+- **项目重命名 JianpuScript → iJipu / ijipu**：统一工程标识符（`package.json` / Cargo.toml name+lib / tauri identifier / Cargo.lock）、品牌展示名、文档与示例谱；localStorage 前缀与 IndexedDB 库名改为 `ijipu.*`/`ijipu`，并新增 `src/store/localStorageMigration.ts` 做旧→新一条性迁移（零数据丢失）；`.jps` 后缀与 `.git` 历史保持不变。
 
 版本机制见 `docs/VERSIONING.md`：`MAJOR.MINOR.PATCH`（SemVer），三处版本号
 （`src/brand/version.ts` / `package.json` / `src-tauri/tauri.conf.json`）保持一致。

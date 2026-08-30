@@ -1,13 +1,13 @@
-# JianpuScript（码上简谱）
+# iJipu（码上简谱）
 
 > **敲码即谱，所见即所得** —— 下一代代码式简谱制谱引擎。
 
 我们致力于将编程语言的严谨逻辑，注入中国传统简谱的创作之中。通过一套极简的 `.jps` 标记语言，让音乐人像写代码一样编排音符，让程序员像调参一样调整音高。敲码即谱，让简谱创作从此进入"脚本时代"。
 
 - **中文简称**：码谱（Mǎ Pǔ）——"我用码谱写了个曲子。"
-- **文件后缀**：`.jps`（**J**ianpu **P**ro **S**cript）
+- **文件后缀**：`.jps`（**iJipu Script** 的后缀，兼容原「番茄简谱」）
 - **命令行**：`jps run` / `jps compile` —— 像编译代码一样编译乐谱
-- **用户身份**：谱师（Score Smith）—— 写代码的叫程序员，用 JianpuScript 写简谱的叫谱师
+- **用户身份**：谱师（Score Smith）—— 写代码的叫程序员，用 iJipu 写简谱的叫谱师
 - **品牌色**：深空蓝 `#1E2A5E`（音乐的深邃与严谨）+ 霓虹青 `#00F0FF`（代码与科技感）
 
 ## 这是什么
@@ -53,7 +53,7 @@ npx tauri build             # 打包 → src-tauri/target/release/bundle/nsis/*-
 > **DSH 沙箱注意事项**：cargo/tauri 构建与 GUI 运行需完整权限（沙箱隔离了证书存储与 WebView2 初始化）；详见 docs/ERRORS-LOG.md E-2026-031/032。
 
 > **注意（DSH 环境）**：npm 命令需要显式指定缓存目录，因为沙箱只允许写工作区：
-> `npm install --cache "D:/Coding/JPCoder/.npm-cache"`
+> `npm install --cache "D:/Coding/JianpuScript/.npm-cache"`
 > 项目 `.npmrc` 已配置 cache 路径，但 DSH 注入的 `npm_config_cache` 环境变量优先级更高，会覆盖它，因此命令行参数 `--cache` 是最终生效手段。
 
 ## 开源协议

@@ -1,4 +1,4 @@
-# JianpuScript 版本机制（Versioning）
+# iJipu 版本机制（Versioning）
 
 ## 版本格式
 
