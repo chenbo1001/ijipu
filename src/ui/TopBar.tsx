@@ -631,6 +631,7 @@ export function TopBar() {
     { label: '快捷键速查(&K)', kbd: 'Ctrl+~', hotkey: 'k', onPick: () => openModal('shortcuts') },
     { label: '操作手册(&M)', hotkey: 'm', onPick: () => openModal('manual') },
     { label: '脚本语法(&S)', hotkey: 's', onPick: () => openModal('syntax') },
+    { label: '脚本规则说明(&J)', onPick: () => window.open('/doc/jps-spec.html', '_blank') },
     { label: '关于(&A)', hotkey: 'a', onPick: () => openModal('about') },
   ]
 
