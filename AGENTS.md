@@ -3,7 +3,7 @@
 > DSH 自动加载；src 分层职责见 `src/AGENTS.md`。完整版备份见 `AGENTS1.md`。
 
 ## 一、项目事实速查
-- iJipu（码上简谱）：Tauri v2 + Vite 8 + React 19 + TS 6(strict) + Zustand；`.jps` 语法兼容原「番茄简谱」
+- iJipu（爱记谱）：Tauri v2 + Vite 8 + React 19 + TS 6(strict) + Zustand；`.jps` 语法兼容原「番茄简谱」
 - `src/engine` 纯 TS，零 React/DOM 依赖；数据流单向 `source→parse→layout→render/playback`，禁反向依赖
 - 版本 SemVer：唯一手动维护 `src/brand/version.ts` 的 `APP_VERSION`；发布时与 `package.json`、`src-tauri/tauri.conf.json` **三处一致**
 - 允许依赖：react / react-dom / zustand；**新增依赖必须先询问**

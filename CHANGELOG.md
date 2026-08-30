@@ -1,7 +1,10 @@
 # iJipu 更新日志（Changelog）
 
-## Unreleased
-- **项目重命名 JianpuScript → iJipu / ijipu**：统一工程标识符（`package.json` / Cargo.toml name+lib / tauri identifier / Cargo.lock）、品牌展示名、文档与示例谱；localStorage 前缀与 IndexedDB 库名改为 `ijipu.*`/`ijipu`，并新增 `src/store/localStorageMigration.ts` 做旧→新一条性迁移（零数据丢失）；`.jps` 后缀与 `.git` 历史保持不变。
+## [0.8.0] — 2026-08-30
+
+- **版本号升至 0.8.0**：`package.json` / `src-tauri/tauri.conf.json` / `src/brand/version.ts` 三处同步。
+- **中英文名统一**：中文名「码上简谱」→「爱记谱」、中文简称「码谱」→「i记谱」，英文名统一为 iJipu（含示例谱尾署名、文档、PWA 图标名、`.jps` 全称）。
+- **项目重命名 JianpuScript → iJipu / ijipu**：统一工程标识符（`package.json` / Cargo.toml name+lib / tauri identifier / Cargo.lock）、品牌展示名、文档与示例谱；localStorage 前缀与 IndexedDB 库名改为 `ijipu.*`/`ijipu`，并新增 `src/store/localStorageMigration.ts` 做旧→新一次性迁移（零数据丢失）；`.jps` 后缀与 `.git` 历史保持不变。
 
 版本机制见 `docs/VERSIONING.md`：`MAJOR.MINOR.PATCH`（SemVer），三处版本号
 （`src/brand/version.ts` / `package.json` / `src-tauri/tauri.conf.json`）保持一致。

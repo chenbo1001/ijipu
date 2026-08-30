@@ -3,10 +3,10 @@
 > 本文件由 DeepSeek Harness（DSH）作为工作区指令**自动加载**；子目录级规范见 `src/AGENTS.md`（src 分层职责）。参考 `D:\Coding\ShiJi_dev` 项目规范体系整理，框架沿用、内容按本项目（Tauri + React + TS 简谱引擎）适配。
 
 ## 一、项目基础信息
-1. 品牌信息：iJipu（中文「码上简谱」，简称「码谱」）
+1. 品牌信息：iJipu（中文「爱记谱」，简称「i记谱」）
    - Slogan：敲码即谱，所见即所得
-   - 应用窗口标题：`码上简谱 iJipu`
-   - 文件后缀：`.jps`（Jianpu Pro Script），兼容原「番茄简谱」在线编辑器语法
+   - 应用窗口标题：`爱记谱 iJipu`
+   - 文件后缀：`.jps`（iJipu Script），兼容原「番茄简谱」在线编辑器语法
    - 品牌 token（色板/字体/口号）集中定义在 `src/brand/tokens.ts`，面向用户文案集中定义在 `src/brand/copy.ts`，主题在 `src/brand/themes.ts`（adj48 浅深色模式）
 2. 技术栈：Tauri v2（Windows 桌面壳）+ Vite 8 + React 19 + TypeScript 6（strict）+ Zustand 5
 3. 项目定位：代码式简谱制谱引擎——纯前端单页应用，`src/engine` 为纯 TS 引擎（零 React/DOM 依赖，可 Node 单测）

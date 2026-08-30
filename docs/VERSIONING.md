@@ -25,7 +25,7 @@
 
 ## 展示位置
 
-- 状态栏右侧：`码谱 · v{APP_VERSION}`
+- 状态栏右侧：`i记谱 · v{APP_VERSION}`
 - 关于对话框：`v{APP_VERSION} (BUILD_DATE @GIT_COMMIT)`
 
 ## 构建链
