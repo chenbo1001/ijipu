@@ -6,29 +6,34 @@
 
 - **中文简称**：i记谱（i Jì Pǔ）——"我用 i记谱写了个曲子。"
 - **文件后缀**：`.jps`（**iJipu Script** 的后缀，兼容原「番茄简谱」）
-- **命令行**：`jps run` / `jps compile` —— 像编译代码一样编译乐谱
+- **命令行（规划中）**：`jps run` / `jps compile` —— 像编译代码一样编译乐谱（后续 CLI 工具，当前为品牌概念）
 - **用户身份**：谱师（Score Smith）—— 写代码的叫程序员，用 iJipu 写简谱的叫谱师
 - **品牌色**：深空蓝 `#1E2A5E`（音乐的深邃与严谨）+ 霓虹青 `#00F0FF`（代码与科技感）
 
 ## 这是什么
 
-复刻「番茄简谱」在线简谱编辑器（zhipu.lezhi99.com）的现代重设计版本。第一版为**纯前端单页应用**，兼容原站 `.jps` 脚本语法——原网站的谱子可直接复制进来使用。
+复刻「番茄简谱」在线简谱编辑器（zhipu.lezhi99.com）的现代重设计版本。核心为**纯前端单页应用**（Web + PWA 可安装），并有 **Tauri v2 桌面端**（Windows 安装器）；兼容原站 `.jps` 脚本语法——原网站的谱子可直接复制进来使用。
 
-## 第一版功能
+## 功能现状
 
 - [x] 项目骨架与品牌体系
-- [ ] 脚本编辑器（语法高亮 / 自动格式化 / 行首命令快捷键）
-- [ ] 实时渲染预览（编码 / 拆分 / 预览 三视图）
-- [ ] 光标双向联动（编辑器 ↔ 乐谱）
-- [ ] 页面设置（纸张 / 边距 / 字体 / 行距）
-- [ ] 试听播放（Web Audio 合成 + 采样音源可切换）
-- [ ] 导出（PDF / JPG / SVG / PNG）
+- [x] 脚本编辑器：语法高亮（按词法分色）/ 自动格式化 / 行首命令快捷键 / 自动补全（`&` 修饰符、`@` 乐器）/ 撤销重做（输入合并）
+- [x] **嵌入式简谱输入工具条**（adj314）：单行可横向滑动，主键/二级键共用；移动端/PAD 默认开启、PC 默认关；「输入条」开关控制，手机端免字母/符号键盘切换
+- [x] 实时渲染预览（编码 / 拆分 / 预览 三视图）
+- [x] 光标双向联动（编辑器 ↔ 乐谱）
+- [x] 页面设置（纸张 / 边距 / 字体 / 行距 / 音符布局模式 时值优先 vs 空间优先）
+- [x] 试听播放（Web Audio 合成 + 采样音源可切换，MIDI/WAV/MP3 导出）
+- [x] 导出（PDF / JPG / SVG / PNG / MIDI / WAV / MP3）
+- [x] 多声部支持（Q1/Q2 纵向堆叠、声部括弧、命名声部）
+- [x] PWA（可安装为独立应用，离线可用）；Tauri 桌面端（Windows 安装器）
 - [ ] 后端阶段（预留）：Python FastAPI 账号 / 云谱库 / 服务端 PDF
+
+> **音符布局模式**：支持「空间优先」（默认）与「时值优先」两种宽度分配。空间优先按元素本体宽 + 可分配空白比例分配，多声部以小节为对齐单元、每拍不等宽；时值优先按拍级每拍宽。
 
 ## 技术栈
 
 - **前端**：Vite 8 + React 19 + TypeScript 6 + Zustand
-- **引擎**：纯 TypeScript 实现 `.jps` 解析 → 排版 → SVG 渲染 → 播放序列（无 React 依赖，可独立单测）
+- **引擎**：纯 TypeScript 实现 `.jps` 解析 → 排版 → SVG 渲染 → 播放序列（零 React/DOM 依赖，可独立单测）；作为本地包 `@ijipu/engine`（`packages/ijipu-engine`）被应用消费，也可独立引入
 - **存储**：浏览器本地（localStorage / IndexedDB），架构上预留后端接口
 
 ## 快速开始
@@ -38,7 +43,7 @@ npm install          # 依赖安装（自动执行 scripts/patch-vite.js 沙箱�
 npm run dev          # 本地开发 http://localhost:5173
 npm run build        # 类型检查 + 产物构建
 npm run lint         # oxlint 代码检查
-npm run smoke        # 引擎冒烟测试（147 项）
+npm run smoke        # 引擎冒烟测试（748 项断言，覆盖解析/时值/布局/渲染/播放/多声部空间优先）
 ```
 
 ## 桌面端（Tauri v2，Windows）
@@ -68,26 +73,26 @@ npx tauri build             # 打包 → src-tauri/target/release/bundle/nsis/*-
 ## 目录结构
 
 ```
-src/
-├── brand/       品牌身份（tokens / copy）
-├── engine/      简谱引擎（纯 TS，无 React 依赖）
-│   ├── types.ts         核心类型（AST / 谱面模型）
-│   ├── parser/          .jps 解析器
-│   ├── format/          自动格式化
-│   ├── layout/          排版引擎（小节 / 分页 / 几何）
-│   ├── render/          SVG 渲染与字形
-│   └── playback/        播放序列与音频
-├── editor/      代码编辑器（textarea + 高亮层）
-├── preview/     SVG 乐谱预览与光标
-├── store/       Zustand 状态（文档 / UI）
-├── ui/          通用组件（菜单栏 / 状态栏 / 对话框）
-├── dialogs/     功能对话框（页面设置 / 试听 / 关于）
-├── export/      导出模块
-└── styles/      主题样式（品牌 token CSS 变量）
-samples/         内置 .jps 示例谱
-docs/            文档（品牌手册等）
-scripts/         工具脚本（patch-vite.js）
+ijipu/
+├── src/                 应用源码（React）—— 按职责分层，数据流单向
+│   ├── brand/           品牌身份（tokens / copy / themes / version）
+│   ├── editor/          代码编辑器（textarea + 高亮层 + 行号栏 + 输入工具条）
+│   ├── preview/         SVG 乐谱预览与光标联动
+│   ├── store/           Zustand 状态（docStore / uiStore）
+│   ├── ui/              通用组件（TopBar / Modal / Toast / 状态栏）
+│   ├── dialogs/         功能对话框（页面设置 / 试听 / 导出 / 关于 / 示例）
+│   ├── export/          导出模块（PDF/JPG/SVG/PNG/MIDI/WAV/MP3）
+│   ├── styles/          主题样式（品牌 token CSS 变量）
+│   └── samples/         示例谱登记（当前 SAMPLES 已清空，defaultSample 返回新建模板）
+├── packages/ijipu-engine/  简谱引擎（纯 TS，零 React/DOM 依赖，可单测）
+│   └── src/engine/      types / parser / format / layout / render / playback / cursorMap
+├── src-tauri/          Tauri 桌面端配置
+├── samples/            .jps 示例谱（供引擎冒烟测试引用；应用内示例登记 SAMPLES 已清空）
+├── docs/               文档（语法规范 / 操作手册 / 需求 / 路线图 / 错误日志）
+└── scripts/            工具脚本（patch-vite.js / gen-build-info.mjs / smoke.mts）
 ```
+
+> 引擎数据流单向：`source(.jps) → parse → layout → render / playback`，可从 `@ijipu/engine` 独立引入。
 
 ## 品牌资料
 
