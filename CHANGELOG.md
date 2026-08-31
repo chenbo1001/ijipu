@@ -1,6 +1,6 @@
 # iJipu 更新日志（Changelog）
 
-## [Unreleased]
+## [0.10.0] — 2026-08-31
 
 ### 功能
 
