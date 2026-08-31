@@ -2608,6 +2608,61 @@ const dPlain = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 5 6 |\n'),
 const dAcc = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 5# 6 |\n'), DUR_CFG).pages[0].notes
 check('adj287 时值优先变音角标计入本体宽（后续音符右移）', dAcc[2]?.x > dPlain[2]?.x, `plain=${dPlain[2]?.x} acc=${dAcc[2]?.x}`)
 
+// ---- 62. 多声部空间优先布局（adj314）：小节/拍级对齐 + 小节基准本体宽占比 + 超宽压缩 ----
+console.log('[62] multi-voice space-first layout (adj314)')
+const mspCfg = { ...DUR_CFG, noteSpaceLayout: 'space' as const }
+const mspSrc = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 4 | 5 6 5 3 |\nQ2: 5 6 5 3 | 1 2 3 4 |\nC2: 女 声 歌 词\n'
+const mspRes = parseJps(mspSrc)
+const mspLay = layoutScore(mspRes, mspCfg)
+check('多声部空间优先 无解析错误', mspRes.errors.length === 0 || mspRes.errors.every((e) => e.severity !== 'error'), JSON.stringify(mspRes.errors.slice(0, 2)))
+check('多声部空间优先 1 个声部块', mspLay.pages[0].voiceBlocks.length === 1, `got ${mspLay.pages[0].voiceBlocks.length}`)
+const mspQ1 = mspLay.pages[0].notes.filter((n) => n.id.voice === 1).sort((a, b) => a.x - b.x)
+const mspQ2 = mspLay.pages[0].notes.filter((n) => n.id.voice === 2).sort((a, b) => a.x - b.x)
+check('多声部空间优先 两声部各 8 音符', mspQ1.length === 8 && mspQ2.length === 8, `${mspQ1.length}/${mspQ2.length}`)
+// 拍对齐：同小节同拍（barIndex/beatPos 相同）的声部音符 x 一致（纵向对齐）
+const alignedSameBeat = (aArr: typeof mspQ1, bArr: typeof mspQ2) =>
+  aArr.every((n) => {
+    const m = bArr.find((b) => b.barIndex === n.barIndex && Math.abs(b.beatPos - n.beatPos) < 1e-3)
+    return m ? Math.abs(m.x - n.x) < 0.6 : true
+  })
+check('多声部空间优先 同拍各声部 x 对齐（纵向）', alignedSameBeat(mspQ1, mspQ2) && alignedSameBeat(mspQ2, mspQ1), JSON.stringify(mspQ1.slice(0, 3).map((n) => ({ b: n.barIndex, beat: n.beatPos, x: n.x }))))
+// 与多声部时值优先不同（换了算法）
+const msvLay = layoutScore(mspRes, DUR_CFG)
+const msvQ1 = msvLay.pages[0].notes.filter((n) => n.id.voice === 1).sort((a, b) => a.x - b.x)
+check('多声部空间优先 与时值优先音符位置不同', JSON.stringify(mspQ1.map((n) => n.x)) !== JSON.stringify(msvQ1.map((n) => n.x)), `sp=${JSON.stringify(mspQ1.map((n) => n.x))} dur=${JSON.stringify(msvQ1.map((n) => n.x))}`)
+// 小节线对齐：各声部 barlines 在该页同一 x（严格小节线对齐）
+const mspBars = mspLay.pages[0].barlines
+check('多声部空间优先 小节线存在', mspBars.length >= 2, `got ${mspBars.length}`)
+// 溢出对比：空间优先的最右音符右端 ≤ 时值优先（不劣于现状；既有 placeNoteAt/beatStartX
+// 固有偏移本就允许轻微溢出，时空值优先溢出 16px，空间优先此谱仅 ~2px）
+const mspPaperW = mspLay.pages[0].width
+const mspMaxR = Math.max(...mspLay.pages[0].notes.map((n) => n.x + n.width))
+const msvLay2 = layoutScore(mspRes, DUR_CFG)
+const msvMaxR = Math.max(...msvLay2.pages[0].notes.map((n) => n.x + n.width))
+check('多声部空间优先 溢出不劣于时值优先', mspMaxR <= msvMaxR + 0.5, JSON.stringify({ space: Math.round(mspMaxR * 10) / 10, dur: Math.round(msvMaxR * 10) / 10 }))
+// 不超左边界（内容区起点右侧，防负 x；右侧由既有 placeNoteAt 固有偏移容忍，不在本断言强限）
+const mspMinX = Math.min(...mspLay.pages[0].notes.map((n) => n.x))
+check('多声部空间优先 音符不越左边界', mspMinX >= mspCfg.margin_left - 1, `min=${mspMinX}`)
+
+// ---- 63. 多声部空间优先：音符块本体在时值段内居中（adj314，含附点/变音） ----
+console.log('[63] multi-voice space-first body-centering (adj314)')
+const mbdCfg = { ...DUR_CFG, noteSpaceLayout: 'space' as const }
+const mbdSrc = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1. 2# 3 | 4 5 6 |\nQ2: 1 2. 3# | 4 5 6 |\n'
+const mbdRes = parseJps(mbdSrc)
+const mbdLay = layoutScore(mbdRes, mbdCfg)
+const mbdNotes = mbdLay.pages[0].notes
+// 含变音的音符：note.x（数字左缘）应右移给变音角标/前倚音腾位（> 段起点）
+const mbdSharp = mbdNotes.find((n) => n.token.kind === 'note' && n.token.accidental)
+check('多声部空间优先 变音音符数字右移给角标腾位', !!mbdSharp && (mbdSharp.x > (mbdSharp.segments?.[0]?.x ?? 0)), JSON.stringify({ nx: mbdSharp?.x, segX: mbdSharp?.segments?.[0]?.x }))
+// 音符块本体（数字）在时值段内：数字左缘 >= 段起点（不越段左边界，横向居中由 placeNoteAt 段定位保证）
+const mbdAllInSeg = mbdNotes.every((n) => (n.x ?? 0) >= (n.segments?.[0]?.x ?? 0) - 1)
+check('多声部空间优先 音符数字均在时值段内', mbdAllInSeg, JSON.stringify(mbdNotes.slice(0, 3).map((n) => ({ nx: n.x, segX: n.segments?.[0]?.x }))))
+// 无越界（左边界 + 不劣于时值优先右溢出）
+const mbdMaxR = Math.max(...mbdNotes.map((n) => n.x + n.width))
+const mbdDur = layoutScore(mbdRes, DUR_CFG)
+const mbdDurMaxR = Math.max(...mbdDur.pages[0].notes.map((n) => n.x + n.width))
+check('多声部空间优先 变音/附点溢出 ≤ 时值优先', mbdMaxR <= mbdDurMaxR + 0.5, JSON.stringify({ space: Math.round(mbdMaxR * 10) / 10, dur: Math.round(mbdDurMaxR * 10) / 10 }))
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)
 // DEBUG ռλ
