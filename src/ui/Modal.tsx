@@ -16,6 +16,7 @@ export function Modal({
   closeOnMaskClick = true,
   dock,
   compact,
+  onClose,
 }: {
   title: string
   children: ReactNode
@@ -27,6 +28,8 @@ export function Modal({
   dock?: 'bottom-right'
   /** 紧凑模式（缩小边距与最小宽，adj158：试听对话框用） */
   compact?: boolean
+  /** adj315：关闭（Esc/✕/遮罩）前回调——用于"取消不保存"时恢复设置快照 */
+  onClose?: () => void
 }) {
   const closeModal = useUiStore((s) => s.closeModal)
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
@@ -34,13 +37,19 @@ export function Modal({
   const modalRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ dx: number; dy: number } | null>(null)
 
+  // adj315：统一关闭动作——先 onClose（取消时恢复快照），再关闭
+  const doClose = () => {
+    onClose?.()
+    closeModal()
+  }
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeModal()
+      if (e.key === 'Escape') doClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [closeModal])
+  }, [closeModal, onClose])
 
   // 按住标题栏拖动
   const onHeadMouseDown = (e: React.MouseEvent) => {
@@ -84,7 +93,7 @@ export function Modal({
         // adj284：试听对话框（maskDim=0）遮罩事件穿透——预览窗格滚动/点击音符/拖拽不受阻
         pointerEvents: maskDim > 0 ? 'auto' : 'none',
       }}
-      onClick={closeOnMaskClick ? closeModal : undefined}
+      onClick={closeOnMaskClick ? doClose : undefined}
     >
       <div
         ref={modalRef}
@@ -94,7 +103,7 @@ export function Modal({
       >
         <div className="modal-head" onMouseDown={onHeadMouseDown}>
           <span>{title}</span>
-          <button className="modal-close" onClick={closeModal}>
+          <button className="modal-close" onClick={doClose}>
             ✕
           </button>
         </div>

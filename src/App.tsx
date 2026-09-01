@@ -30,6 +30,8 @@ function App() {
   const setSystemLight = useUiStore((s) => s.setSystemLight)
   const splitPct = useUiStore((s) => s.splitPct)
   const setSplitPct = useUiStore((s) => s.setSplitPct)
+  // adj315：左右拆分排列方向（全局设置——预览/编辑在 splitH 时的左右方位）
+  const splitHDir = useUiStore((s) => s.splitHDir)
   const mainRef = useRef<HTMLDivElement>(null)
 
   // adj48：跟随系统浅深色——监听 prefers-color-scheme 变化
@@ -91,17 +93,21 @@ function App() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [])
 
-  // 拆分视图：拖动分隔条调整上下两个窗格高度（adj46）
-  const startSplitDrag = (e: React.MouseEvent) => {
+  // 拆分视图：拖动分隔条调整窗格占比（adj46 上下；adj315 左右）。
+  // dir='v' 上下（分隔条在上/下窗格间，按高度占比）；dir='h' 左右（按宽度占比）。
+  // 上下/左右共用同一 splitPct（"第一个窗格"占比）。
+  const startSplitDrag = (dir: 'v' | 'h') => (e: React.MouseEvent) => {
     e.preventDefault()
     const main = mainRef.current
     if (!main) return
-    const startY = e.clientY
-    const startPct = splitPct
     const rect = main.getBoundingClientRect()
+    const start = dir === 'v' ? e.clientY : e.clientX
+    const startPct = splitPct
+    const size = dir === 'v' ? rect.height : rect.width
+    if (size <= 0) return
     const onMove = (ev: MouseEvent) => {
-      const dy = ev.clientY - startY
-      setSplitPct(startPct + (dy / rect.height) * 100)
+      const d = (dir === 'v' ? ev.clientY : ev.clientX) - start
+      setSplitPct(startPct + (d / size) * 100)
     }
     const onUp = () => {
       window.removeEventListener('mousemove', onMove)
@@ -111,10 +117,27 @@ function App() {
     window.addEventListener('mouseup', onUp)
   }
 
+  // 左右拆分布局（adj315）：方位由全局设置 splitHDir 决定
+  // （previewLeft=左预览右编辑 / editorLeft=左编辑右预览）。
+  // 改 splitHDir 后立即生效（renderSplitH 响应式读 uiStore）。
+  const isSplitHView = viewType === 'splitH' || viewType === 'splitHE'
+  const previewOnLeft = splitHDir !== 'editorLeft'
+  const renderSplitH = () => (
+    <>
+      <div className="split-pane split-pane-h" style={{ flex: `0 0 ${splitPct}%` }}>
+        {previewOnLeft ? <PreviewPane /> : <EditorPane />}
+      </div>
+      <div className="split-divider split-divider-h" onMouseDown={startSplitDrag('h')} title="拖动调整左右窗格宽度" />
+      <div className="split-pane split-pane-h">
+        {previewOnLeft ? <EditorPane /> : <PreviewPane />}
+      </div>
+    </>
+  )
+
   return (
     <div className="app" data-theme={theme} data-mode={effectiveMode}>
       <TopBar />
-      <div className="app-main" ref={mainRef}>
+      <div className={`app-main${isSplitHView ? ' app-main-h' : ''}`} ref={mainRef}>
         {viewType === 'code' && <EditorPane />}
         {viewType === 'preview' && <PreviewPane />}
         {viewType === 'split' && (
@@ -122,12 +145,13 @@ function App() {
             <div className="split-pane" style={{ flex: `0 0 ${splitPct}%` }}>
               <PreviewPane />
             </div>
-            <div className="split-divider" onMouseDown={startSplitDrag} title="拖动调整上下窗格高度" />
+            <div className="split-divider" onMouseDown={startSplitDrag('v')} title="拖动调整上下窗格高度" />
             <div className="split-pane">
               <EditorPane />
             </div>
           </>
         )}
+        {(viewType === 'splitH' || viewType === 'splitHE') && renderSplitH()}
       </div>
       <EditorFootBar />
       <Toast />

@@ -42,6 +42,11 @@ body {
   position: relative;
 }
 
+/* adj315：左右拆分时 .app-main 切为横向（编辑/预览左右并排） */
+.app-main.app-main-h {
+  flex-direction: row;
+}
+
 /* ============ 拆分视图（adj46） ============ */
 .split-pane {
   flex: 1;
@@ -85,6 +90,34 @@ body {
 .split-divider:active::after {
   background: #fff;
   opacity: 1;
+}
+
+/* adj315：左右拆分——左/右窗格横向排列，分隔条为纵向可拖拽 */
+.split-pane-h {
+  flex-direction: row;
+  min-width: 0;
+}
+.split-pane-h > .editor-pane,
+.split-pane-h > .preview-pane {
+  flex: 1;
+  min-width: 0;
+}
+.split-divider-h {
+  width: 5px;
+  height: auto;
+  cursor: col-resize;
+  border-top: none;
+  border-bottom: none;
+  border-left: 1px solid var(--jp-border);
+  border-right: 1px solid var(--jp-border);
+}
+.split-divider-h::after {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 40px;
+  border-radius: 2px;
 }
 
 /* ============ 顶栏（adj281：合并原 MenuBar + Toolbar）============ */

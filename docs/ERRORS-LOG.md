@@ -580,6 +580,72 @@
 - **解决**（adj282，`src/editor/EditorPane.tsx` `wrapPoints` useMemo）：**去掉「短行跳过」优化**——所有行都用 Range API `getBoundingClientRect` 测真实字符 X 坐标（精确反映 textarea layout），不再依赖 `charW` 估算 → 临界窗口宽度下 mirror 测出的折行点 == textarea 实际折行点。同时利用 `adj225` 思路直接读 `taRef.current.clientWidth`（实时，与 textarea reflow 同帧），不回 state（避免一帧滞后）
 - **预防**：① **任何折行测量都不要用字符宽估算**做短行跳过/条件判断（`fontSize*0.6` 等都是近似，sub-pixel 边界必翻车），全部用 Range API 测真实几何；② 测量镜像（mirror/clone）的 `box-sizing` / `padding` / `font-size` / `line-height` / `font-variant-ligatures` / `tab-size` / `word-break` / `overflow-wrap` / `white-space` 必须与 textarea **逐项一致**（adj232 补 border:none、adj234 overflow-wrap:normal、adj247 tab-size:4、adj282 box-sizing:border-box 一致）；③ `wrapPoints` deps 用 `taClientW` 仅触发重算，**测量时直接读 `taRef.current.clientWidth`**避免 state 滞后
 
+### E-2026-093 多声部空间优先忽略 `align_min_bars`：设置两端对齐最小小节数对多声部无效
+- **场景**：用户反馈在「页面设置 → 间距 → 两端对齐最小小节数」调整 `align_min_bars` 对多声部**完全无效**——多声部始终撑满两端对齐、不论设置几；单声部行按预期「小节数 ≥ 阈值撑满、< 阈值自然宽」
+- **现象**：默认 `align_min_bars=4`，用户设 6 / 10 期望多声部行小节数不足时不撑满、行尾留白；但实际多声部行（不论小节数多少）始终末线贴右、行内音符均匀分散到边界
+- **根因**：`align_min_bars` 在 `types.ts:607` 字段定义 + 单声部 `placeMusicRow`（`layout/index.ts:937` `stretch = barCount >= config.align_min_bars`）读取生效；多声部 `placeVoiceBlock` 的 space 路径 (`adj317c`) **完全没读这个字段**——末线钳制 `targetEndBarX` 总是触发，`avStretch = targetBarSum - baseBarSum` 总为正，`s` 始终撑满
+- **解决**（`adj318`，`packages/ijipu-engine/src/engine/layout/index.ts:1696-1704`）：在多声部 space 分支加 `stretchBars = numBars >= config.align_min_bars`，`stretchBars=false` 时 `targetBarSum=0`、`avStretch=0`、`s=0` → `ΣbarBar=baseBarSum`（自然宽）、末线自然值 `< rightLimit - halfW`（行尾留白，与单声部 `<` 阈值自然宽语义对齐）；`stretchBars=true` 时维持现有 adj317c 末线钳制行为。smoke `[67]` 改用 `align_min_bars=2` 验证 `≥` 撑满钳制；smoke `[68]` 用默认 4 验证 `<` 自然宽不撑满
+- **预防**：任何「撑满/自然宽」类阈值开关必须**全布局路径同步检查**（单声部行 + 多声部块 + 时值/空间两路径）；新增配置项后跑一段各路径覆盖——「设了不生效」通常因为另一条路径忘读；任何「`numBars / barCount / segCount` 类行级数量阈值」都该 grep `config.*` 全布局函数确认读到了
+
+### E-2026-094 空间优先布局计算规则梳理与归档（adj283~adj318）
+- **场景**：用户要求「梳理空间优先布局的计算」便于后阅；同时排查 `align_min_bars` 设置在多声部失效（详见 E-2026-093）
+- **现象**：多声部 space 路径经多轮调整（`adj250/283/314/315/316/317a-c/318`），`placeVoiceBlock` 内嵌 ⑥ 的拍宽分配、拉伸均分、首尾节头、末线钳制逻辑与单声部 `placeMusicRowSpace` 差异散落各处，缺乏一份「单声部 vs 多声部」对照备忘
+- **根因**：规则随调整累积，没在每一轮后归档；后续若再改某一步，需重新推导全局不变量（`ΣbarRelW`/`lineX0_末`/`beatBodyW` 与 `mspBarRelW`/`mspSegX` 的耦合）；同时 `placeVoiceBlock` 新增 `stretchBars` 后，已具备「自然宽 ↔ 撑满」切换能力，备忘正好把这个分叉记录下来
+- **解决**：① 新增 `docs/SPACE-LAYOUT.md`：单声部 / 多声部 space 计算规则对照备忘（常量、口分配、口约束、差异表、已知问题、变更历史 adj283~adj318）；② 排查过程中发现 E-2026-093（多声部漏读 `align_min_bars`）→ 见 `adj318` 修复条目
+- **预防**：布局规则每累计 ≥3 个 adj 调整后写一份「单/多声部对照备忘」；新增配置字段后跑全布局路径回归（不仅新代码所在路径），避免「设了不生效」类问题反复出现
+
+### E-2026-095 多声部块不自动断行——超宽由谱师编排平衡（决策变更）
+- **场景**：用户梳理 `docs/SPACE-LAYOUT.md` 时提出"超宽小节换行"修复建议（初判为 bug），但用户后续明确**否决**该规则
+- **现象**：多声部 `placeVoiceBlock` 无 `breakVoiceBlock`，整块单行渲染。`ΣbaseBarSum > blockAvailW − nonDurPad` 时末音符挤右 margin
+- **根因**：① 多声部行是「多声部同步编排」语义（同一拍多声部对齐）；② **换行会让第二声部看上去像「新一组二声部块」，破坏多声部视觉与语义**；③ 超宽属谱师编排平衡范畴（删内容/缩字号/改行/调时值），引擎不强行处理
+- **解决**：**不实施断行**——撤销 E-2026-095 初版「建议修复 `breakVoiceBlock`」。`docs/SPACE-LAYOUT.md` 5.3/5.4 标 `[撤销/不实施]`，说明决策原因与用户原话（"这个规则不要，超就超，这是需要谱师需要对谱的编排进行平衡考虑的事"）
+- **预防**：**多声部块的断行决策**——视觉语义上是「多声部同步」，不能简单复用单声部「超宽换行」逻辑；任何对多声部「超宽自动换行」的设想都需先与用户确认是否会破坏多声部视觉，否则宁可留给谱师；引擎层面的「不自动断行」应在 SPACE-LAYOUT.md 等布局备忘中明确标记，避免后续维护者再被当作 bug 提出
+
+### E-2026-096 多声部试听色块：(5. 5) 附点消失 + 宽度用本体而非显示占宽（adj319）
+- **场景**：用户给 3 声部谱 `Q3: 0 0 0 5/ 6/ | 5// 6// (5. 5) - | 6 - - - | 5 - 3 - | 0 1 5 - |`，播放到 `(5. 5)` 附点时色块消失；其他色块显示宽度用本体宽而非显示占宽
+- **现象**：① (5. 5) 附点段 width=0 → 附点色块不显示；② `6 - - -` 等增时线音符色块宽 ≈ `noteBodyW`（本体宽），不覆盖增时线本体（`augBodyW`）；③ 含附点的音符色块右端提前停止，未到附点右
+- **根因**（双根因）：
+  1. **多声部 `placeNoteAt` space 分支 `noteRightX = first.x + space.noteBodyW`**（line620），**只含本体宽不含附点 + 增时线 + hx 显示占宽**。单声部 `placeMusicRowSpace` 有 `xCursor += augElW; if (n.hasHx) xCursor += hxBodyW; actualW = xCursor − curX; rightX = xCursor`（line1437-1450），多声部遗漏同等累加
+  2. **`buildPlayheadSegs`（`sequence.ts:99`）按"下一段 x − 本段 x"算 width**（adj290 注释"色块宽 = 该段到下一段的物理区间，连续覆盖无重叠"），但**多声部 note/dot 段混排在 plc.segments 数组**且 note段无 `el`（与单声部 line1435 `el: 'note'` 不同）。多声部 note段 push 时（line1813）**未设 el**，导致 `segs.some(el !== undefined)` 走"按 el 分段"分支但段类型错乱。dot段 x = `first.x + noteBodyW + dotGap + dotBodyW/2`（圆心）> 下一 note 段 x 时 width = max(0, 负) = 0 → 附点消失；多声部 `plc.rightX` 只含本体宽 → 末段 width = 本体宽
+- **解决**（`adj319`，`packages/ijipu-engine/src/engine/layout/index.ts:617-643` + `playback/sequence.ts:97-108`）：
+  - **多声部 `space` 增 `augW` + `hxW` 字段**（line603/1835）；调用处传 `augW = t.kind==='note' ? splitNoteDur(t).augCount * augBodyW(m.noteSize) : 0`、`hxW = ... hx ? hxBodyW(m.noteSize) : 0`
+  - **多声部 `noteRightX = first.x + noteBodyW + (hasDot?dotBodyW:0) + augW + hxW`**（与单声部 actualW/rightX 对齐）
+  - **`buildPlayheadSegs`**：首段 `width = plc.rightX − s.x`（含附点+增时线显示占宽），其余段 `width = 0`（避免重叠；色块由首段覆盖整音符）
+  - **smoke [69]**：附点音符 `rightX − x ≥ 本体 + dotBodyW` ✓、增时线音符 `rightX − x ≥ 本体 + augBodyW` ✓
+- **预防**：
+  ① **多声部 vs 单声部必须**「同一个（显示/几何）属性」**同步实现**（accW/augW/hxW/dotBodyW 等累加）——新增 `space` 字段时同时更新所有调用处 + 默认构造
+  ② **playhead / 渲染 / 布局** 三个消费方对 `note.width` vs `note.rightX − note.x` 的语义需明确：前者=本体宽（无附点/增时线/hx），后者=**显示占宽**（含所有修饰符空间）。色块类「覆盖」逻辑统一用 `rightX − x`
+  ③ `placeVoiceBlock` 段循环 push segments 时**漏 `el` 字段**——单声部 `placeMusicRowSpace` 已设 `el: 'note'/'dot'/'aug'`，多声部遗漏导致 `buildPlayheadSegs` 按 el 分支错位。两边对称修复后按 el 分段才正确
+  ④ 任何 **空间优先路径**（`useSpace`）几何常量都与 `placeMusicRowSpace`（`placeNoteSpace` 闭包）双轨实现，每轨独立维护——容易漂移；建议**后续重构**把 `space` 几何抽到公共 helper（`placeNoteSpace` 多声部版）
+
+### E-2026-097 试听色块分段规则：一个时值元素 = 一个色块（覆盖显示占宽，到下一元素/小节线前）（adj320）
+- **场景**：用户反馈此前"按拍段分段"的色块在附点（权点段 x=圆心 > rightX → width=0）消失；用户提出更简单规则：**色块主要针对有时值元素，把「当前时值元素到下一个时值元素前（或小节线前）」作为当前元素的色块宽度**，这样色块之间连续
+- **现象**：① 按「拍段」（adj290，每段≤1拍）分段，附点段 width=max(0, 负)=0 消失；② 用户观察"附点都没色块，只是 (5.5) 时值大所以看起来显示"；③ 用户明确：空+音符块+空 为音符色块一块，附点+空 为附点色块一块，连续覆盖
+- **根因**：`buildPlayheadSegs`（sequence.ts）按 `placed.segments` 的拍段算 width（`x1−x0`），但①多声部 note段 push 无 `el`（与单声部 line1435 不同，段类型混排）②附点段 x 是圆心（> rightX）→ width=0 ③多声部 rightX 只含本体宽（不含附点/增时线/hx）→ 末段 width 用本体宽
+- **解决**（adj320，`sequence.ts:87-99`）：`buildPlayheadSegs` 改为**一个时值元素 = 一个色块**——返回单段 `{ beat: startBeat, beats: plc.duration, x: plc.x, width: plc.rightX − plc.x }`（`width` = 显示占宽，含附点/增时线/hx；`x` = 元素左缘）。相邻元素色块天然连续（各音符显示占宽相接），附点/增时线都在色块内不再消失。同时 `adj319` 修 `placeNoteAt` 多声部 `noteRightX` 累加附点圆右（圆心 + DOT_R）、增时线、hx（此前只含本体宽）
+- **预防**：
+  ① 色块「覆盖」的**粒度**决策：用户规则 = **一个时值元素一个色块**（不是每个拍段）。任何"按拍段/按段 el 分段"的色块方案都要考虑段 x 是否单调、附点圆心 > rightX 是否导致负宽——**宁可整元素一块**，简单且稳定
+  ② `buildPlayheadSegs` 用 `plc.rightX − plc.x`（显示占宽）而非 `note.width`（本体宽）作色块宽；`rightX` 由 layout 提供且必须含附点/增时线/hx（否则色块右偏、附点不覆盖）
+  ③ 色块 x 始终 = `plc.x`（元素起点，非段圆心/段左缘）——避免圆心 > rightX 的负宽回归
+
+### E-2026-098 跨项目同步：@ijipu/engine 镜像 + obsidian-ijipu 插件版本号（v0.10.1）
+- **场景**：发布 v0.10.1 后 `@ijipu/engine` 和 `obsidian-ijipu` 也需要"按需更新"
+- **现象**：
+  - `packages/ijipu-engine/package.json` 版本 `0.9.0`（落后主项目 `0.10.1`）
+  - `obsidian-ijipu/package.json` + `manifest.json` 版本 `0.2.0`
+  - `obsidian-ijipu/vendor/engine/` 内 3 个文件落后主项目引擎（`layout/index.ts` / `layout/spacing.ts` / `playback/sequence.ts`）——`vendor` 是插件"仓库自包含"的引擎源码副本（esbuild `alias '@ijipu/engine' → ./vendor/engine/index.ts`），与主项目 `@ijipu/engine` 容易漂移
+- **根因**：跨项目版本号没有联动机制；vendor 镜像需手动复制引擎 src 更新
+- **解决**：
+  - 同步 vendor/engine 3 文件（adj314→adj318 多声部空间优先几何重写 + adj317 `DOT_AFTER_DIGIT_GAP` 常量 + adj319→adj320 色块按"时值元素"分块）
+  - `@ijipu/engine` 版本号 `0.9.0` → `0.10.1`
+  - `obsidian-ijipu` 版本号 `0.2.0` → `0.10.1`（package.json + manifest.json 双处）
+  - `obsidian-ijipu/docs/RELEASE-NOTES.md` 追加 v0.10.1 条目
+  - 插件 ts 类型检查通过（vite build 因沙箱 spawn EPERM 无法跑，但 vendor 同步无类型问题）
+- **预防**：
+  ① **vendor 镜像漂移**：每次主项目引擎改动（任何 adj），检查 `obsidian-ijipu/vendor/engine/` 与主项目的 diff（`Compare-Object` 或 git diff），按需同步；建议**后续**把 vendor 改为 git submodule / symlink 指向主项目引擎，或在 CI 里加自动同步脚本
+  ② **跨项目版本号同步**：任何版本发布（patch/minor/major）必须同时更新**所有相关 package**（主项目 + 引擎 + 插件 + 文档）；建议**后续**用 `scripts/sync-version.mjs` 自动同步三处
+  ③ **vendor 仓库自包含** vs **submodule** 的取舍：自包含利于离线/CI（无外部依赖），但漂移风险高；建议**发布前**对比并明确同步责任（README/CONTRIBUTING 写明）
+
 ## 五、预防清单（Checklist，提交/交付前自检）
 
 - [ ] 所有 npm 命令带 `--cache "D:/Coding/JPCoder/.npm-cache"`
@@ -673,4 +739,6 @@
 | v0.5.0 | 2026-08-27 | 补 PWA 部署文档 `docs/DEPLOY-PWA.md`（adj155 sw.js/manifest/main.tsx 注册已就绪，dist 构建产物已含 sw.js + manifest；部署 HTTPS 静态托管 → 手机 Chrome/Edge "添加到主屏幕"即可作为独立 App 运行；文档覆盖 HTTPS 平台推荐、部署验证清单、Android/iOS 安装步骤、调试问题、PWABuilder 打包上架路径） |
 | v0.5.0 | 2026-08-27 | 应用更名为「iJipu / 爱记谱 / i记谱」（仅用户可见改名，零内部包名改动）：改 5 个文件（`src/brand/tokens.ts` brand.name/nameZh/shortName/extensionFull；`public/manifest.webmanifest` name/short_name/description；`index.html` title/description/apple-mobile-web-app-title；`src/ui/TopBar.tsx` 顶栏 Logo zh/en + img alt；`src/brand/copy.ts` + `src/dialogs/AboutDialog.tsx` 加致谢「番茄简谱」原作者与社区 + 本脚本高度兼容说明卡片）。**未改** `package.json` name/Cargo.toml name/`tauri.conf.json` identifier/localStorage 键 `jianpuscript.*`/`.jps` 后缀（保持兼容与零数据迁移）。`npm run build` 验证 dist 含新名 → 重新上传 Cloudflare 即生效 |
 | v0.5.1 | 2026-08-27 | 发布 v0.5.1（更名/文案及若干修复调整）：更名「iJipu/爱记谱/i记谱」（仅用户可见）、关于对话框中文为主+slogan「敲码即简谱」、关于对话框 Logo 用网站 Jianpu.png、**编辑器选中仅文字高亮**（去 .hl-current-block outline + 删 .editor-current-line-bg 整行铺满层，参考排版按钮选中风格）、**对话框标题浅色主题偏浅**（.modal 显式 color:var(--jp-text-primary)）、**隐藏「打开示例谱」菜单并清空 SAMPLES**（defaultSample 返回新建模板；无草稿首开=新建，有草稿恢复草稿；sampless 入口隐藏）、PWA 部署文档。版本号三处（version.ts/package.json/tauri.conf.json）+ package-lock 同步 0.5.0 → 0.5.1 |
+| v0.5.1 | 2026-08-27 | 追加 E-2026-093（多声部空间优先忽略 `align_min_bars`：设置两端对齐最小小节数对多声部无效 → adj318 `stretchBars = numBars >= config.align_min_bars`，自然宽 vs 撑满分叉与单声部同步；smoke [67] 改用 `align_min_bars=2` 验证撑满钳制，[ [68] 用默认 4 验证自然宽不撑满）+ E-2026-094（空间优先布局规则梳理与归档——新增 `docs/SPACE-LAYOUT.md` 单/多声部对照备忘，含 adj283~adj318 变更历史与已知问题清单） |
+| v0.10.1 | 2026-08-27 | 发布 v0.10.1（多声部空间优先布局修复 + 试听色块按"时值元素"分块规则）：① **adj314~adj318 多声部空间优先几何重写**——`placeVoiceBlock` 重构 `mspSegX`/`mspBarRelW`/`mspS` 几何：小节头空、拉伸空白均分「(tb+numBars-1) 槽」、末节线钳制 rightLimit − halfW（`barlineTotalW('|')/2`，adj317c）、多声部读 `config.align_min_bars`（自然宽 vs 撑满分叉，adj318）、`DOT_AFTER_DIGIT_GAP` 入 `spacing.ts` 规范化常量；② **adj319/adj320 试听色块按"时值元素"分块**——一个时值元素一个色块（音符块 / 附点 / 增时线 / 双附点各自一块或附点并入主音符），色块右边界 = 下一时值元素左缘或小节线左缘（连续覆盖），附点段 `dotGap` 间隙防 `dotX0` 落在数字内，多声部 `plc.rightX` 累加附点圆右 + 增时线 + hx 显示占宽，多声部段循环 `dur` 用主时值（去附点）防止双重计入；③ **修复多声部块无断行用户决策**——撤 `breakVoiceBlock` 提案（多声部换行破坏"多声部同步编排"语义，超宽归谱师编排平衡，E-2026-095 撤销条目）；smoke 新增 [65][66][67][68][69][70]：行首贴左 + 附点有间隙 + 不溢出 + 末线贴右 + 双附点 + 5---分4块 + 5.附点并入主音符（1块）；tsc -b 通过；版本号三处（version.ts/package.json/tauri.conf.json）+ package-lock 同步 0.5.1 → 0.10.1。**未发布**：deploy PWA（需 HTTPS 静态托管更新 + Android/iOS "添加到主屏幕"刷缓存）。详见 `docs/SPACE-LAYOUT.md` 单/多声部布局备忘、E-2026-093~098 错误日志条目。 |
 

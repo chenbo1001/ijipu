@@ -98,12 +98,23 @@ const VIEWS: { key: ViewType; label: string; icon: React.ReactNode }[] = [
   },
   {
     key: 'split',
-    label: '拆分',
+    label: '拆分(上下)',
     icon: (
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
         <rect x="1.5" y="1.5" width="11" height="4.5" rx="0.5" />
         <rect x="1.5" y="8" width="11" height="4.5" rx="0.5" />
         <path d="M 2 6.8 H 12" strokeDasharray="1.2 1.2" />
+      </svg>
+    ),
+  },
+  {
+    key: 'splitH',
+    label: '左右拆分',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="4.5" height="11" rx="0.5" />
+        <rect x="8" y="1.5" width="4.5" height="11" rx="0.5" />
+        <path d="M 6.8 2 V 12" strokeDasharray="1.2 1.2" />
       </svg>
     ),
   },
@@ -119,12 +130,20 @@ const VIEWS: { key: ViewType; label: string; icon: React.ReactNode }[] = [
   },
 ]
 
+/** adj315：归一化视图 key——splitHE 视为「左右拆分」(splitH) 条目 */
+const normViewKey = (k: ViewType): string => (k === 'splitHE' ? 'splitH' : k)
+
+/** 查当前视图在 VIEWS 中的条目（splitHE 归入 splitH 条目，保证顶栏图标/标签正确显示） */
+const viewItem = (k: ViewType) => VIEWS.find((v) => v.key === normViewKey(k))
+
 export function TopBar() {
   // ---- 文档 store ----
   const code = useDocStore((s) => s.code)
   const setCode = useDocStore((s) => s.setCode)
   const viewType = useDocStore((s) => s.viewType)
   const setViewType = useDocStore((s) => s.setViewType)
+  // adj315：左右拆分排列方向（点「左右拆分」时据此设为 splitH/splitHE）
+  const splitHDir = useUiStore((s) => s.splitHDir)
   const newDoc = useDocStore((s) => s.newDoc)
   const openFile = useDocStore((s) => s.openFile)
   const saveFile = useDocStore((s) => s.saveFile)
@@ -732,8 +751,8 @@ export function TopBar() {
           aria-label="切换视图"
           aria-expanded={viewOpen}
         >
-          {VIEWS.find((v) => v.key === viewType)?.icon}
-          <span className="tool-label">{VIEWS.find((v) => v.key === viewType)?.label}</span>
+          {viewItem(viewType)?.icon}
+          <span className="tool-label">{viewItem(viewType)?.label}</span>
           <span className="arrow">▾</span>
         </button>
         {viewOpen && (
@@ -741,20 +760,25 @@ export function TopBar() {
             className="menu-dropdown topbar-view-dropdown"
             onClick={(e) => e.stopPropagation()}
           >
-            {VIEWS.map((v) => (
-              <div
-                key={v.key}
-                className={`menu-entry${viewType === v.key ? ' active' : ''}`}
-                onClick={() => {
-                  setViewType(v.key)
-                  closeView()
-                }}
-              >
-                {v.icon}
-                <span>{v.label}</span>
-                {viewType === v.key && <span style={{ marginLeft: 'auto', color: 'var(--jp-accent)' }}>✓</span>}
-              </div>
-            ))}
+            {VIEWS.map((v) => {
+              // adj315：splitH/splitHE 归入同一「左右拆分」条目；active 用归一化 key 判断
+              const isActive = normViewKey(viewType) === v.key
+              return (
+                <div
+                  key={v.key}
+                  className={`menu-entry${isActive ? ' active' : ''}`}
+                  onClick={() => {
+                    // 点「左右拆分」按当前 splitHDir 决定方向（previewLeft→splitH / editorLeft→splitHE）
+                    setViewType(v.key === 'splitH' ? (splitHDir === 'editorLeft' ? 'splitHE' : 'splitH') : v.key)
+                    closeView()
+                  }}
+                >
+                  {v.icon}
+                  <span>{v.label}</span>
+                  {isActive && <span style={{ marginLeft: 'auto', color: 'var(--jp-accent)' }}>✓</span>}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>

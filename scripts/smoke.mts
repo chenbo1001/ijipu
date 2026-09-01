@@ -2663,6 +2663,138 @@ const mbdDur = layoutScore(mbdRes, DUR_CFG)
 const mbdDurMaxR = Math.max(...mbdDur.pages[0].notes.map((n) => n.x + n.width))
 check('多声部空间优先 变音/附点溢出 ≤ 时值优先', mbdMaxR <= mbdDurMaxR + 0.5, JSON.stringify({ space: Math.round(mbdMaxR * 10) / 10, dur: Math.round(mbdDurMaxR * 10) / 10 }))
 
+// ---- 64. 多声部空间优先：中间小节线两侧空白对称（adj316，拉伸空白均分到小节头/各拍后） ----
+console.log('[64] multi-voice space barline symmetry (adj316)')
+{
+  const mspUq = [...new Set(mspLay.pages[0].barlines.map((b) => b.x))].sort((a, b) => a - b)
+  const v1n = mspLay.pages[0].notes.filter((n) => n.id.voice === 1)
+  const symOk = mspUq.every((bx, bi) => {
+    if (bi === 0 || bi === mspUq.length - 1) return true // 行首/行末单侧不判
+    const l = v1n.filter((n) => n.barIndex === bi)
+    const r = v1n.filter((n) => n.barIndex === bi + 1).sort((a, b) => a.x - b.x)[0]
+    if (!l.length || !r) return true
+    const lr = Math.max(...l.map((n) => n.x + n.width))
+    return Math.abs((bx - lr) - (r.x - bx)) < 2
+  })
+  check('adj316 多声部中间小节线两侧空白对称（≤2px）', symOk, mspUq.map((x, i) => `${i}:${x.toFixed(1)}`).join(','))
+}
+
+// ---- 65. 多声部空间优先：行首贴左 + 多声部附点不贴数字（adj317） ----
+console.log('[65] multi-voice space block left-align + dot gap (adj317)')
+{
+  const adj317Cfg = { ...DUR_CFG, noteSpaceLayout: 'space' as const }
+  const adj317Src =
+    'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 6. 1\'// (3// 3) - | 0/ 1// 2// 3/ 2/ 3/ 7/ 7/. 1\'// | 1\' - 0 5/ 4/ | (3/ 2.) 0 0 | 0 0 3 5 |\nQ2: 4. 5/ 3 - | 0/ 1// 2// 3/ 2/ 3/ 2/ 2/. 3// | 4 - 0 4/ 4/ | (3/ 2.) 0 0 | 0 0 3 2 |\nQ3: 4 - 3 - | 0 3 5 7 | 1\' - 0 5/ 4/ | 3/ 2. 0 0 | 0 0 0 0 |\n'
+  const adj317Lay = layoutScore(parseJps(adj317Src), adj317Cfg)
+  // 行首音符贴内容左界（blockStartX + BAR_PAD）
+  const blockPad = 14 // labelPad=0 + 14
+  const blockStartX = adj317Cfg.margin_left + blockPad
+  const firstX = Math.min(...adj317Lay.pages[0].notes.map((n) => n.x))
+  const expectedLeft = blockStartX + 6 // BAR_PAD
+  check('adj317 多声部行首贴内容左界', Math.abs(firstX - expectedLeft) < 0.1, `firstX=${firstX.toFixed(2)} expected=${expectedLeft}`)
+  // 附点圆心在数字右缘之后（gap>0），不再紧贴
+  const dotNote = adj317Lay.pages[0].notes.find((n) => n.token.kind === 'note' && n.token.dots > 0)
+  const dotSeg = dotNote?.segments?.find((s) => s.el === 'dot')
+  // adj319：note.width 已是显示占宽（含附点），附点圆心在数字本体右（> 本体宽 → 不紧贴数字），
+  // 且落在显示占宽内。原 `dotSeg.x > note.x+note.width` 语义已变（width 含附点），改为测：
+  // 附点圆心距音符起点 > 本体宽（约 8.06，有 gap），且 < 显示占宽（在音符内）。
+  const dotGap = dotSeg && dotNote ? dotSeg.x - dotNote.x : -1
+  const inNote = dotSeg && dotNote ? dotSeg.x < dotNote.x + dotNote.width : false
+  check('adj317 多声部附点圆心有间隙（>本体宽）且落在显示占宽内', !!dotSeg && dotGap > 8 && inNote, `dotOff=${dotGap.toFixed(2)} dotX=${dotSeg?.x?.toFixed(2)} note.x=${dotNote?.x?.toFixed(2)} note.width=${dotNote?.width.toFixed(2)}`)
+}
+
+// ---- 66. 多声部空间优先：内容不溢出页右界（adj317b，avStretch 基于 baseBarSum 防溢出） ----
+console.log('[66] multi-voice space no overflow (adj317b)')
+{
+  const adj317bCfg = { ...DUR_CFG, noteSpaceLayout: 'space' as const }
+  const adj317bSrc =
+    'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 2\'/ 1\'// (1\'// 1\'/) 5/ 3 0/. 3// | 2\'/ 1\'// (1\'// 1\'/) 7/ 1\' 0/ 1\'// 5// | 3\'/ 3\'/ 3\'/ 1\'// (5// 5) 0/. 3// | 4/ 5// (6// 6/) 1/ 2 - |\nQ2: 3/ 3// (3// 3/) 1// 2// 1 0/. 3// | 5/ 5// (5// 5/) 3/ 5 0/ 5// 3// | 4/ 4/ 4/ 4/ 3 0/. 1// | 2/ 3// (4// 4/) 1/ 2 - |\nQ3: 0 0 2\'/ 1\'// (1\'// 1\'/) 6/ | 3 0/. 3// 2\'/ 1\'// (1\'// 1\'/) 7/ | 1\' 3\' 3\' 1\' | 4 0 7/ 1\'/ 2\' |\n'
+  const adj317bLay = layoutScore(parseJps(adj317bSrc), adj317bCfg)
+  const overflowNotes = adj317bLay.pages.flatMap((page) =>
+    page.notes.filter((n) => n.x + n.width > page.width - adj317bCfg.margin_right + 0.5),
+  )
+  check('adj317b 多声部内容不越页右界', overflowNotes.length === 0, overflowNotes.slice(0, 3).map((n) => `v${n.id.voice} right=${(n.x + n.width).toFixed(1)}`).join(','))
+}
+
+// ---- 67. 多声部空间优先末节线贴右钳制（adj317c，与单声部 atEnd 一致） ----
+console.log('[67] multi-voice space end-bar to right clamp (adj317c)')
+{
+  const cfg317c = { ...DUR_CFG, noteSpaceLayout: 'space' as const, align_min_bars: 2 }
+  const src317c =
+    'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 3/ 5/ 5 3 | 1 - - - |\nQ2: 5/ 6/ 1 3 1 | 5 - - - |\nQ: 1 2 3 4 | 5 6 5 - |\n'
+  const lay317c = layoutScore(parseJps(src317c), cfg317c)
+  const page = lay317c.pages[0]
+  const rightEdge = page.width - cfg317c.margin_right - 0.55
+  // align_min_bars=2 → numBars=2 ≥ 2 → 多声部 + 单声部末线都撑满贴右
+  const edgeBars = page.barlines.filter((b) => Math.abs(b.x - rightEdge) < 0.6)
+  check('adj317c align_min_bars=2 多声部/单声部末节线均贴右钳制（≤0.6px 容差）', edgeBars.length >= 2, `edgeBars=${edgeBars.length} (${edgeBars.map((b) => `v${b.id.voice}x=${b.x.toFixed(2)}`).join(',')})`)
+}
+
+// ---- 68. 多声部自然宽（行小节数 < align_min_bars，adj318） ----
+console.log('[68] multi-voice space natural width when bars < align_min_bars (adj318)')
+{
+  const cfg318 = { ...DUR_CFG, noteSpaceLayout: 'space' as const } // 默认 align_min_bars=4
+  const src318 =
+    'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 3/ 5/ 5 3 | 1 - - - |\nQ2: 5/ 6/ 1 3 1 | 5 - - - |\n'
+  const lay318 = layoutScore(parseJps(src318), cfg318)
+  const page = lay318.pages[0]
+  const rightEdge = page.width - cfg318.margin_right - 0.55
+  const lastVbBarX = Math.max(...page.voiceBlocks.flatMap((vb) => [] /* lines not on vb */))
+  // 取多声部最右节线（voice 2 最后一条）
+  const v2LastBar = page.barlines.filter((b) => b.id.voice === 2).reduce((mx, b) => Math.max(mx, b.x), 0)
+  // 多声部末线应 < rightEdge（自然宽留白，不撑满）；单声部行无（仅 Q1/Q2）
+  const naturalOk = v2LastBar < rightEdge - 1 // 至少留 1px 行尾留白
+  check('adj318 多声部行小节数<align_min_bars 时末线不撑满（自然宽）', naturalOk, `v2LastBar=${v2LastBar.toFixed(2)} rightEdge=${rightEdge.toFixed(2)} gap=${(rightEdge - v2LastBar).toFixed(2)}`)
+}
+
+// ---- 69. 多声部 rightX 含附点+增时线（adj319，色块按段不消失 + 显示占宽） ----
+console.log('[69] multi-voice note.rightX includes dot/aug display width (adj319)')
+{
+  const lay319 = layoutScore(
+    parseJps('V: 1.0\nB: t\nD: C\nJ: 90\nP: 4/4\nQ3: 0 0 0 5/ 6/ | 5// 6// (5. 5) - | 6 - - - |\n'),
+    { ...DUR_CFG, noteSpaceLayout: 'space' as const },
+  )
+  const notes = lay319.pages[0].notes.filter((n) => n.id.voice === 3)
+  // (5. 5) 附点音符：rightX - x 应 >= 本体宽 + dotBodyW（约 8.06 + 2.89 = 10.95）
+  const dotNote = notes.find((n) => n.token.kind === 'note' && n.token.dots > 0)
+  const dotDisplay = dotNote ? (dotNote.rightX ?? 0) - dotNote.x : -1
+  check('adj319 附点音符 rightX - x 含 dotBodyW（≥ 本体+dotBodyW）', !!dotNote && dotDisplay >= 10.5, `dotNote x=${dotNote?.x.toFixed(2)} rightX=${dotNote?.rightX?.toFixed(2)} display=${dotDisplay.toFixed(2)}`)
+  // 增时线音符 `6 - - -`：第一根 - 后 rightX - x 应含 1×augBodyW
+  const augNote = notes.find((n) => n.token.kind === 'note' && n.token.augmentCount > 0)
+  const augDisplay = augNote ? (augNote.rightX ?? 0) - augNote.x : -1
+  check('adj319 增时线音符 rightX - x 含 augBodyW（≥ 本体+augBodyW）', !!augNote && augDisplay >= 14, `augNote x=${augNote?.x.toFixed(2)} rightX=${augNote?.rightX?.toFixed(2)} display=${augDisplay.toFixed(2)} augCount=${augNote?.token.augmentCount}`)
+  // （第 2 修复）附点音符 = 单段色块，width = 显示占宽（rightX − x，覆盖附点）→ 色块不消失
+  const seq319 = buildPlaySequence(
+    parseJps('V: 1.0\nB: t\nD: C\nJ: 90\nP: 4/4\nQ1: 5/. 3 |\nQ3: 0 0 0 5/ 6/ | 5// 6// (5. 5) - | 6 - - - |\n'),
+    lay319,
+    90,
+  )
+  const allSegs319 = seq319.events.flatMap((e) => e.playheadSegs ?? [])
+  // 附点音符：单段，width = 显示占宽（≥ 本体+dotBodyW）
+  const dotNote319 = seq319.events.find((e) => e.placed.token?.kind === 'note' && e.placed.token.dots > 0)
+  const dotSeg319w = dotNote319?.playheadSegs?.[0]?.width ?? -1
+  check('adj319 附点音符色块宽 = 显示占宽（覆盖附点）', dotSeg319w >= 10.5, `dotW=${dotSeg319w.toFixed(2)} (should ≈ rightX−x)`)
+  // （第 3）双附点是一个时值元素：色块宽含两个附点圆
+  const ddotLay = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nJ: 90\nP: 4/4\nQ1: 5.. 3 |\n'), { ...DUR_CFG, noteSpaceLayout: 'space' as const })
+  const ddot = ddotLay.pages[0].notes.find((n) => n.token.kind === 'note' && (n.token as any).dots === 2)
+  const ddotW = ddot ? (ddot.rightX ?? ddot.x) - ddot.x : -1
+  check('adj320 双附点作为一个时值元素（色块宽含双附点）', !!ddot && ddotW > 12, `ddotW=${ddotW.toFixed(2)}`)
+}
+// ---- 70. 按时值元素分块：5--- 按拍分块、5. 音符+附点分块（adj320 恢复拍段分块） ----
+console.log('[70] playhead seg blocks by time-value element (adj320)')
+{
+  const lay70 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nJ: 90\nP: 4/4\nQ1: 5--- 5. 3 |\n'), { ...DUR_CFG, noteSpaceLayout: 'space' as const })
+  const seq70 = buildPlaySequence(parseJps('V: 1.0\nB: t\nD: C\nJ: 90\nP: 4/4\nQ1: 5--- 5. 3 |\n'), lay70, 90)
+  // 5---（4 拍）→ 4 块
+  const augEv = seq70.events.find((e) => e.placed.token?.kind === 'note' && (e.placed.token as any).augmentCount > 0)
+  const augBlocks = augEv?.playheadSegs?.length ?? 0
+  check('adj320 增时线音符 5--- 按时值分块（4 块）', augBlocks === 4, `blocks=${augBlocks}`)
+  // 5.（附点）→ 1 块（附点并入主音符）
+  const dotEv = seq70.events.find((e) => e.placed.token?.kind === 'note' && (e.placed.token as any).dots === 1)
+  const dotBlocks = dotEv?.playheadSegs?.length ?? 0
+  check('adj320 附点音符 5. 附点并入主音符（1 块）', dotBlocks === 1, `blocks=${dotBlocks}`)
+}
+
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
 process.exit(failed === 0 ? 0 : 1)
-// DEBUG ռλ
+

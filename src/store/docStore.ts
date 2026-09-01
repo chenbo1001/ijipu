@@ -24,7 +24,7 @@ import { useUiStore } from './uiStore'
 let fileStateTouched = false
 import { uiCopy } from '../brand/copy'
 
-export type ViewType = 'code' | 'split' | 'preview'
+export type ViewType = 'code' | 'split' | 'splitH' | 'splitHE' | 'preview'
 
 interface DocState {
   code: string
@@ -159,6 +159,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   code: draft?.code ?? defaultSample().code,
   fileName: draft?.name ?? defaultSample().name,
   dirty: false,
+  // adj315：视图记住顶栏上次设置——持久化 localStorage，下次打开恢复上一次的视图
   viewType: (localStorage.getItem('ijipu.viewType') as ViewType) || 'split',
   autoFormat: true,
   // adj83：谱面级设置优先（源码 # jps-config 注释），无则回退公共设置
@@ -203,6 +204,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
     })
   },
   setViewType: (v) => {
+    // adj315：视图持久化——记住顶栏上次设置，重启恢复
     localStorage.setItem('ijipu.viewType', v)
     set({ viewType: v })
   },

@@ -32,6 +32,8 @@ const EDITOR_FONT_KEY = 'ijipu.editorFont'
 const PREVIEW_ZOOM_KEY = 'ijipu.previewZoom'
 const AUTO_WRAP_KEY = 'ijipu.autoWrap'
 const SHOW_SCRIPT_PAD_KEY = 'ijipu.showScriptPad'
+// adj315：应用级视图偏好——左右拆分排列方向（默认视图已取消，改为记住顶栏上次设置）
+const SPLITH_DIR_KEY = 'ijipu.splitHDir'
 
 function loadBool(key: string, def: boolean): boolean {
   try {
@@ -120,6 +122,8 @@ interface UiState {
   autoWrap: boolean
   /** adj314：嵌入式简谱输入工具条显示开关（移动端/PAD 默认开、PC 默认关） */
   showScriptPad: boolean
+  /** adj315：左右拆分的排列方向（previewLeft=左预览右编辑 / editorLeft=左编辑右预览） */
+  splitHDir: 'previewLeft' | 'editorLeft'
   /** 轻量浮动提示（null = 无提示） */
   notice: Notice | null
   openModal: (m: ModalKind) => void
@@ -136,6 +140,7 @@ interface UiState {
   setPreviewZoom: (z: number) => void
   setAutoWrap: (b: boolean) => void
   setShowScriptPad: (b: boolean) => void
+  setSplitHDir: (d: 'previewLeft' | 'editorLeft') => void
   showNotice: (text: string, kind?: NoticeKind) => void
   clearNotice: () => void
 }
@@ -169,6 +174,15 @@ export const useUiStore = create<UiState>()((set) => ({
   autoWrap: loadBool(AUTO_WRAP_KEY, true),
   // adj314：脚本工具条默认按设备——移动端/PAD（触屏或≤1024px）默认开、PC 默认关
   showScriptPad: loadBool(SHOW_SCRIPT_PAD_KEY, detectTouch()),
+  // adj315：左右拆分排列方向（previewLeft=左预览右编辑，默认）
+  splitHDir: (() => {
+    try {
+      const v = localStorage.getItem(SPLITH_DIR_KEY)
+      return v === 'editorLeft' ? 'editorLeft' : 'previewLeft'
+    } catch {
+      return 'previewLeft'
+    }
+  })(),
   openModal: (m) => set({ modal: m }),
   closeModal: () => set({ modal: null, playbackStartId: null }),
   setPlaybackStart: (id) => set({ playbackStartId: id }),
@@ -241,6 +255,14 @@ export const useUiStore = create<UiState>()((set) => ({
       /* 忽略 */
     }
     set({ showScriptPad: b })
+  },
+  setSplitHDir: (d) => {
+    try {
+      localStorage.setItem(SPLITH_DIR_KEY, d)
+    } catch {
+      /* 忽略 */
+    }
+    set({ splitHDir: d })
   },
   notice: null,
   showNotice: (text, kind = 'ok') =>
