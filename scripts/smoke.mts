@@ -2181,26 +2181,30 @@ const lay50e = layoutScore(r50e, DUR_CFG)
 const rows50e = new Set(lay50e.pages.flatMap((p) => p.notes.map((n) => n.y))).size
 check('断行跨行：按相邻行渲染两半', lay50e.pages.flatMap((p) => p.slurs).length === 2, `got ${lay50e.pages.flatMap((p) => p.slurs).length} rows=${rows50e}`)
 
-// ---- 51. 连音符先进后出（LIFO）跨行配对 ----
-console.log('[51] slur LIFO pairing (adj55)')
+// ---- 51. 连音符 LIFO + 连接点跨行配对（adj55/adj321） ----
+console.log('[51] slur LIFO + junction pairing (adj55/adj321)')
 // 用户示例（带空格）：1 ( 2 3 ( 4 ) | / 1 ) 2 3 4
-// LIFO：内层 (4) 先闭合 → 起点=终点退化不渲染；外层 ( 跨行到第二行 ) → 一条跨行两半
+// adj321 连接点规则：内层 (4) 为单音符连接点 → 终止外层 open1(2→4) + 从 4 起新连音(4→行2 1 跨行两半)
+// → 共 3 条：idx1→idx3（行1 2→4）+ idx3→行2 idx4（4→1，跨行两半）
 const r51 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 ( 2 3 ( 4 ) |\nQ: 1 ) 2 3 4\n')
 const lay51 = layoutScore(r51, DUR_CFG)
-check('LIFO：1 条跨行连音符渲染两半', lay51.pages[0].slurs.length === 2, `got ${lay51.pages[0].slurs.length}`)
+check('LIFO+连接点：2→4 一条 + 4→行2（跨行两半）共 3 条', lay51.pages[0].slurs.length === 3, `got ${lay51.pages[0].slurs.length}`)
 const n51 = lay51.pages[0].notes
 const s51 = lay51.pages[0].slurs
 const rowEnd51 = lay51.pages[0].barlines
   .filter((b) => Math.abs(b.yTop - (n51[0].y - BAR_TOP)) < 1)
   .sort((a, b) => a.x - b.x)
-check('adj199 连音符左半：自然宽行到行末小节线', Math.abs(s51[0].x1 - (n51[1].x + halfDig + NS_S)) < 0.5 && Math.abs(s51[0].x2 - (rowEnd51[rowEnd51.length - 1]?.x ?? 0)) < 1, `x1=${s51[0].x1} x2=${s51[0].x2} bar=${rowEnd51[rowEnd51.length - 1]?.x}`)
-check('连音符右半：行首边距处 → 第二行 1', Math.abs(s51[1].x1 - ML) < 0.5 && Math.abs(s51[1].x2 - (n51[4].x + halfDig - NS_S)) < 0.5, `x1=${s51[1].x1} x2=${s51[1].x2}`)
-check('左右两半 y 不同（跨行）', Math.abs(s51[0].y - s51[1].y) > 1, `${s51[0].y} vs ${s51[1].y}`)
-check('LIFO 深度均为 0（内层 (4) 退化丢弃）', s51[0].depth === 0 && s51[1].depth === 0, JSON.stringify(s51.map((s) => s.depth)))
-// 无空格紧凑写法与带空格等价（空格仅格式化；(4) 也是连音线）
+// slur0 = 外层 open1 被连接点(4)终止：2(→ 4 (idx1→idx3)
+check('adj321 连接点终止外层于 4（idx1→idx3）', Math.abs(s51[0].x1 - (n51[1].x + halfDig + NS_S)) < 0.5 && Math.abs(s51[0].x2 - (n51[3].x + halfDig - NS_S)) < 0.5, `x1=${s51[0].x1} x2=${s51[0].x2}`)
+// slur1+slur2 = 从 4 起新连音跨行两半：行1 半到行末小节线 + 行2 半从边距到行2 1
+check('adj321 新连音行1 半（4→行末小节线）', Math.abs(s51[1].x1 - (n51[3].x + halfDig + NS_S)) < 0.5 && Math.abs(s51[1].x2 - (rowEnd51[rowEnd51.length - 1]?.x ?? 0)) < 1, `x1=${s51[1].x1} x2=${s51[1].x2} bar=${rowEnd51[rowEnd51.length - 1]?.x}`)
+check('adj321 新连音行2 半（边距 → 行2 1）', Math.abs(s51[2].x1 - ML) < 0.5 && Math.abs(s51[2].x2 - (n51[4].x + halfDig - NS_S)) < 0.5, `x1=${s51[2].x1} x2=${s51[2].x2}`)
+check('连接点终止外层与新连音分隔（y 不同跨行）', Math.abs(s51[0].y - s51[2].y) > 1, `${s51[0].y} vs ${s51[2].y}`)
+check('连接点深度均 0（外层终止 + 新连音顶层）', s51.every((s) => s.depth === 0), JSON.stringify(s51.map((s) => s.depth)))
+// 无空格紧凑写法与带空格等价
 const r51b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1(23(4)|\nQ: 1)234\n')
 const lay51b = layoutScore(r51b, DUR_CFG)
-check('无空格紧凑写法：与带空格同（跨行两半）', r51b.errors.length === 0 && lay51b.pages[0].slurs.length === 2, `errors=${r51b.errors.length} slurs=${lay51b.pages[0].slurs.length}`)
+check('无空格紧凑写法：与带空格同（3 条）', r51b.errors.length === 0 && lay51b.pages[0].slurs.length === 3, `errors=${r51b.errors.length} slurs=${lay51b.pages[0].slurs.length}`)
 
 // ---- 52. 小节线类型渲染 ----
 console.log('[52] barline styles')
@@ -2261,31 +2265,34 @@ check('|/ 不占位（小节间音符间隙比 | 小约 9.5px）', Math.abs(gap5
 check('|* 占位（与 | 布局一致）', Math.abs(lay52g.pages[0].notes[4].x - lay52h.pages[0].notes[4].x) < 0.5, `${lay52g.pages[0].notes[4].x} vs ${lay52h.pages[0].notes[4].x}`)
 check('|* 不渲染线（rect 数比 | 版本少 1）', rectCount52(svg52(lay52g)) === rectCount52(svg52(lay52h)) - 1, `${rectCount52(svg52(lay52g))} vs ${rectCount52(svg52(lay52h))}`)
 
-// ---- 53. 连音符：紧贴括号 + 跨行（用户示例，LIFO adj55） ----
-console.log('[53] slur tight parens & cross-row (LIFO)')
+// ---- 53. 连音符：紧贴括号 + 跨行 + 连接点（adj321） ----
+console.log('[53] slur tight parens & cross-row & junction (adj321)')
 // Q: 1 (2 3 (4) |  /  Q: 1) 2 3 4 |
-// LIFO：内层 (4) 退化丢弃；外层 ( 跨行 → 一条跨行连音符（左半 2→行末、右半 行首→1）
+// adj321 连接点：内层 (4) 为单音符连接点 → 外层 open1 终止于 4（2→4）+ 从 4 起新连音（4→行2 1 跨行两半）
 const r53 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 (2 3 (4) |\nQ: 1) 2 3 4 |\n')
 const lay53 = layoutScore(r53, DUR_CFG)
 check('无解析错误（空格可选、紧贴括号合法）', r53.errors.length === 0, JSON.stringify(r53.errors))
 const n53 = lay53.pages[0].notes
 const s53 = lay53.pages[0].slurs
-check('LIFO：1 条跨行连音符 → 左半 + 右半', s53.length === 2, `got ${s53.length}`)
+check('连接点：2→4（一条）+ 4→行2（跨行两半）共 3 条', s53.length === 3, `got ${s53.length}`)
 const rowEnd53 = lay53.pages[0].barlines
   .filter((b) => Math.abs(b.yTop - (n53[0].y - BAR_TOP)) < 1)
   .sort((a, b) => a.x - b.x)
-check('adj199 连音符左半：自然宽行到行末小节线', Math.abs(s53[0].x1 - (n53[1].x + halfDig + NS_S)) < 0.5 && Math.abs(s53[0].x2 - (rowEnd53[rowEnd53.length - 1]?.x ?? 0)) < 1, `x1=${s53[0].x1} x2=${s53[0].x2} bar=${rowEnd53[rowEnd53.length - 1]?.x}`)
-check('连音符右半：行首边距处 → 第二行 1', Math.abs(s53[1].x1 - ML) < 0.5 && Math.abs(s53[1].x2 - (n53[4].x + halfDig - NS_S)) < 0.5, `x1=${s53[1].x1} x2=${s53[1].x2}`)
-check('左右两半跨行（y 不同）', Math.abs(s53[0].y - s53[1].y) > 1, `${s53[0].y} vs ${s53[1].y}`)
-// adj140：跨行连音线统一平顶（用户要求跨行显示平顶线，非弧线）
-check('adj140 跨行连音符平顶', s53[0].style === 'flat' && s53[1].style === 'flat', `${s53[0].style}/${s53[1].style}`)
+// 跨行两半（4→行2 1）：左半 4→行末小节线、右半 行首→行2 1
+const s53l = s53.find((s) => s.half === 'l')
+const s53r = s53.find((s) => s.half === 'r')
+check('adj199 跨行左半（4→行末小节线）', s53l !== undefined && Math.abs(s53l.x1 - (n53[3].x + halfDig + NS_S)) < 0.5 && Math.abs(s53l.x2 - (rowEnd53[rowEnd53.length - 1]?.x ?? 0)) < 1, `x1=${s53l?.x1} x2=${s53l?.x2} bar=${rowEnd53[rowEnd53.length - 1]?.x}`)
+check('adj321 跨行右半（边距 → 行2 1）', s53r !== undefined && Math.abs(s53r.x1 - ML) < 0.5 && Math.abs(s53r.x2 - (n53[4].x + halfDig - NS_S)) < 0.5, `x1=${s53r?.x1} x2=${s53r?.x2}`)
+check('跨行两半 y 不同（跨行）', s53l !== undefined && s53r !== undefined && Math.abs(s53l.y - s53r.y) > 1, `${s53l?.y} vs ${s53r?.y}`)
+// adj140：跨行连音线统一平顶
+check('adj140 跨行连音符平顶', s53l?.style === 'flat' && s53r?.style === 'flat', `${s53l?.style}/${s53r?.style}`)
 const svg53 = renderScoreToSvg(lay53)[0]
-const hlY = s53[0].y
-const hrY = s53[1].y
+const hlY = s53l!.y
+const hrY = s53r!.y
 // 平顶半部：左半从音符弧线升到平顶线、横线延伸到行末小节线；右半从行首横线到音符
 // adj147/148：跨行平顶——两侧各 1/4 圆弧，左半右侧开口、右半左侧开口，线高 5
-check('平顶左半：1/4 圆弧 + 横线平直到行末（右侧开口）', svg53.includes(`M ${s53[0].x1} ${hlY} A`) && new RegExp(`L ${s53[0].x2} ${(hlY - 5).toFixed(1).replace('.0', '')}(?:\.0)?"`).test(svg53), '')
-check('平顶右半：横线从行首平直伸出（左侧开口）+ 1/4 圆弧', svg53.includes(`M ${s53[1].x1} ${(hrY - 5).toFixed(1)}`) && svg53.includes(` A `) && svg53.includes(`${s53[1].x2} ${hrY}"`), '')
+check('平顶左半：1/4 圆弧 + 横线平直到行末（右侧开口）', svg53.includes(`M ${s53l!.x1} ${hlY} A`) && new RegExp(`L ${s53l!.x2} ${(hlY - 5).toFixed(1).replace('.0', '')}(?:\.0)?"`).test(svg53), '')
+check('平顶右半：横线从行首平直伸出（左侧开口）+ 1/4 圆弧', svg53.includes(`M ${s53r!.x1} ${(hrY - 5).toFixed(1)}`) && svg53.includes(` A `) && svg53.includes(`${s53r!.x2} ${hrY}"`), '')
 // 用户强制平顶（lianyinxian_type=2）：跨行仍平顶（adj108 尊重设置）
 const lay53f = layoutScore(r53, { ...DUR_CFG, lianyinxian_type: 2 })
 const svg53f = renderScoreToSvg(lay53f)[0]
@@ -2793,6 +2800,58 @@ console.log('[70] playhead seg blocks by time-value element (adj320)')
   const dotEv = seq70.events.find((e) => e.placed.token?.kind === 'note' && (e.placed.token as any).dots === 1)
   const dotBlocks = dotEv?.playheadSegs?.length ?? 0
   check('adj320 附点音符 5. 附点并入主音符（1 块）', dotBlocks === 1, `blocks=${dotBlocks}`)
+}
+
+// ---- 71. 连音线连接点规则（adj321）：(X) 单音符终止前一连音 + 起新连音 ----
+console.log('[71] slur junction rule (adj321)')
+{
+  // (1 (2) 3) → 1→2 + 2→3（两条连续）；(1(2 3)) → 1→3外层 + 2→3内层；(1 (2 3) 4) → 1→4 + 2→3
+  const j1 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ( 1 ( 2 ) 3 ) |\n'), DUR_CFG)
+  check('adj321 (1 (2) 3) 连接点：1→2 + 2→3（2 条连续）', j1.pages[0].slurs.length === 2, `got ${j1.pages[0].slurs.length}`)
+  const j2 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ( 1 ( 2 3 ) ) |\n'), DUR_CFG)
+  check('adj321 (1(2 3)) 真嵌套：1→3外层 + 2→3内层（2 条）', j2.pages[0].slurs.length === 2, `got ${j2.pages[0].slurs.length}`)
+  const j3 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ( 1 ( 2 3 ) 4 ) |\n'), DUR_CFG)
+  check('adj321 (1 (2 3) 4) 真嵌套：1→4外层 + 2→3内层（2 条）', j3.pages[0].slurs.length === 2, `got ${j3.pages[0].slurs.length}`)
+}
+// ---- 72. 用户谱跨行连接点：上一行 6, → 下一行第一个 6,（连接点）+ 连接点 → 下一行第二个 6, ----
+console.log('[72] user cross-line slur junction (adj321)')
+{
+  const lay72 = layoutScore(
+    parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 2/ 1/ (7,/ 6,// 5,//) (6,- |\nQ: (6,)--- | 6)- 0 (3/ 6// 7//) |\n'),
+    { ...DUR_CFG, noteSpaceLayout: 'space' as const },
+  )
+  const notes72 = lay72.pages[0].notes
+  // 行1 idx5(6, aug1) ：x 在 362 附近；行2 idx6(6, aug3) 是连接点：x=66；行2 idx7(6 aug1)
+  const idx5 = notes72.find((n) => n.id.index === 5)
+  const idx6 = notes72.find((n) => n.id.index === 6)
+  const idx7 = notes72.find((n) => n.id.index === 7)
+  // 连接点产生的两条：idx5→idx6（跨行，终止于连接点） + idx6→idx7（连接点起新连音）
+  // 用 slurs.x1 与对应音符 x 比对（跨行 idx5→idx6 两半 + idx6→idx7）
+  const slurs72 = lay72.pages[0].slurs
+  // idx6→idx7 同行连音：x1≈idx6.x+halfDig、x2≈idx7.x+halfDig
+  const j67 = slurs72.find((s) => Math.abs(s.x1 - (idx6.x + halfDig + NS_S)) < 1 && Math.abs(s.x2 - (idx7.x + halfDig - NS_S)) < 1)
+  check('adj321 用户谱：连接点 → 下一行第二个 6,（idx6→idx7）', !!j67, `x1=${j67?.x1?.toFixed(1)} x2=${j67?.x2?.toFixed(1)} (idx6.x=${idx6?.x?.toFixed(1)} idx7.x=${idx7?.x?.toFixed(1)})`)
+}
+
+// ---- 73. 深嵌套连接点（adj321b）：depth≥2 时不阻断连接点 ----
+console.log('[73] deep-nested junction (adj321b)')
+{
+  // 大段谱：(4#// 3// | 2/ 1/ (7,/ 6,// 5,//) (6,- | 1 2 (6,)- | 6,)- ...，连接点 (6,) 在深嵌套内
+  const lay73 = layoutScore(
+    parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 - - 0/ (6,// 7,//) | (1/ 3/ 2/ 1/) (3. 1/) | 2 - - 0/ (4#// 3// | 2/ 1/ (7,/ 6,// 5,//) (6,- |\nQ: 1 2 (6,)- | 6,)- 0 (3/ 6// 7//) |\n'),
+    { ...DUR_CFG, noteSpaceLayout: 'space' as const },
+  )
+  const notes73 = lay73.pages[0].notes
+  // 行1 idx19(6, aug1) = (6,- 的 6,；行2 idx22(6, aug1) = (6,)- 的连接点；idx23(6, aug1) = 第二个 6,
+  const n19 = notes73.find((n) => n.id.index === 19)
+  const n22 = notes73.find((n) => n.id.index === 22)
+  const n23 = notes73.find((n) => n.id.index === 23)
+  const slurs73 = lay73.pages[0].slurs
+  // 连接点两条：跨行 idx19→idx22（行2 右半到 idx22）+ 同行 idx22→idx23
+  const j2223 = slurs73.find((s) => Math.abs(s.x1 - (n22.x + halfDig + NS_S)) < 1 && Math.abs(s.x2 - (n23.x + halfDig - NS_S)) < 1)
+  const j1922r = slurs73.find((s) => s.half === 'r' && Math.abs(s.x2 - (n22.x + halfDig)) < 1.5)
+  check('adj321b 深嵌套连接点：idx22→idx23（连接点起新连音）', !!j2223, `x1=${j2223?.x1?.toFixed(1)} x2=${j2223?.x2?.toFixed(1)} (n22=${n22?.x?.toFixed(1)} n23=${n23?.x?.toFixed(1)})`)
+  check('adj321b 深嵌套连接点：跨行右半终止于 idx22（连接点）', !!j1922r, `x2=${j1922r?.x2?.toFixed(1)} (n22=${n22?.x?.toFixed(1)})`)
 }
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
