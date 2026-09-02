@@ -144,6 +144,8 @@ export function TopBar() {
   const setViewType = useDocStore((s) => s.setViewType)
   // adj315：左右拆分排列方向（点「左右拆分」时据此设为 splitH/splitHE）
   const splitHDir = useUiStore((s) => s.splitHDir)
+  // adj322：宽/窄屏——按视口选 split(上下) 还是 splitH/splitHE(左右)
+  const isNarrow = useUiStore((s) => s.isNarrow)
   const newDoc = useDocStore((s) => s.newDoc)
   const openFile = useDocStore((s) => s.openFile)
   const saveFile = useDocStore((s) => s.saveFile)
@@ -660,7 +662,8 @@ export function TopBar() {
   ]
   const viewEntries: (MenuEntry | 'sep')[] = [
     { label: '编码(&C)', kbd: '1', hotkey: 'c', onPick: () => setViewType('code') },
-    { label: '拆分(&S)', kbd: '2', hotkey: 's', onPick: () => setViewType('split') },
+    // adj322：按宽窄屏选上下(split) 还是左右(splitH/splitHE)
+    { label: '拆分(&S)', kbd: '2', hotkey: 's', onPick: () => setViewType(isNarrow ? 'split' : (splitHDir === 'editorLeft' ? 'splitHE' : 'splitH')) },
     { label: '预览(&P)', kbd: 'Tab', hotkey: 'p', onPick: () => setViewType('preview') },
   ]
   const playEntries: (MenuEntry | 'sep')[] = [

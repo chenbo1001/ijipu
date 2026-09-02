@@ -30,6 +30,9 @@ function App() {
   const setSystemLight = useUiStore((s) => s.setSystemLight)
   const splitPct = useUiStore((s) => s.splitPct)
   const setSplitPct = useUiStore((s) => s.setSplitPct)
+  // adj322：宽/窄屏实时同步
+  const isNarrow = useUiStore((s) => s.isNarrow)
+  const setIsNarrow = useUiStore((s) => s.setIsNarrow)
   // adj315：左右拆分排列方向（全局设置——预览/编辑在 splitH 时的左右方位）
   const splitHDir = useUiStore((s) => s.splitHDir)
   const mainRef = useRef<HTMLDivElement>(null)
@@ -45,6 +48,40 @@ function App() {
       return
     }
   }, [setSystemLight])
+
+  // adj322：宽/窄屏实时同步——matchMedia 'change' 回调驱动 uiStore.isNarrow
+  useEffect(() => {
+    try {
+      const mq = window.matchMedia('(max-width: 1024px)')
+      // 初始值可能与已加载的 draft 视图不同 → 用 mq 当前值纠正一次
+      setIsNarrow(mq.matches)
+      const onChange = (e: MediaQueryListEvent) => setIsNarrow(e.matches)
+      mq.addEventListener('change', onChange)
+      return () => mq.removeEventListener('change', onChange)
+    } catch {
+      /* matchMedia 不支持时,detectNarrow 已用 innerWidth 兜底 */
+    }
+  }, [setIsNarrow])
+
+  // adj322：宽窄屏 → 拆分模式自动切换。
+  // 设计：仅依赖 isNarrow（视口跨阈值时触发）。
+  // 每次跑通过 store.getState() 取最新值,避免把 viewType/splitHDir 放进 deps
+  // —— 这样用户主动改 viewType 时本 effect 不会重入拉回。
+  // 首次加载兼容：组件挂载时 effect 首跑,按当前视口纠正持久化的 viewType。
+  // 校正规则：
+  //   - 仅作用于拆分类视图（split / splitH / splitHE）;
+  //   - 窄屏 → 上下 'split'；宽屏 → 左右（按 splitHDir 选 splitH/splitHE）;
+  //   - splitH ↔ splitHE 之间不自动切换（保留用户设置的左右方位）。
+  useEffect(() => {
+    const v = useDocStore.getState().viewType
+    if (v !== 'split' && v !== 'splitH' && v !== 'splitHE') return
+    const dir = useUiStore.getState().splitHDir
+    if (isNarrow && v !== 'split') {
+      useDocStore.getState().setViewType('split')
+    } else if (!isNarrow && v === 'split') {
+      useDocStore.getState().setViewType(dir === 'editorLeft' ? 'splitHE' : 'splitH')
+    }
+  }, [isNarrow])
 
   // 实际浅深色：auto 模式下跟随系统偏好
   const effectiveMode = themeMode === 'auto' ? (systemLight ? 'light' : 'dark') : themeMode

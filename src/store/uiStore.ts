@@ -95,6 +95,22 @@ function detectTouch(): boolean {
   return false
 }
 
+/** adj322：宽/窄屏分界（≤1024px = 窄屏）。matchMedia 支持时用 mq，否则读 innerWidth。
+ * 阈值与 detectTouch 一致——统一「≤1024px = 窄屏」语义（触屏设备通常也窄） */
+const NARROW_MQ = '(max-width: 1024px)'
+function detectNarrow(): boolean {
+  try {
+    if (window.matchMedia(NARROW_MQ).matches) return true
+  } catch {
+    /* 忽略 */
+  }
+  try {
+    return window.innerWidth <= 1024
+  } catch {
+    return false
+  }
+}
+
 interface UiState {
   modal: ModalKind | null
   /** 试听起始音符 id（双击谱面音符定位试听起点，adj88；null = 从头播放） */
@@ -122,6 +138,9 @@ interface UiState {
   autoWrap: boolean
   /** adj314：嵌入式简谱输入工具条显示开关（移动端/PAD 默认开、PC 默认关） */
   showScriptPad: boolean
+  /** adj322：当前是否窄屏（视口宽度 ≤1024px）。由 matchMedia 同步更新,
+   *  用于：① 进入拆分视图时按视口选上下/左右；② 拆分类视图下视口跨阈值实时切换。 */
+  isNarrow: boolean
   /** adj315：左右拆分的排列方向（previewLeft=左预览右编辑 / editorLeft=左编辑右预览） */
   splitHDir: 'previewLeft' | 'editorLeft'
   /** 轻量浮动提示（null = 无提示） */
@@ -140,6 +159,8 @@ interface UiState {
   setPreviewZoom: (z: number) => void
   setAutoWrap: (b: boolean) => void
   setShowScriptPad: (b: boolean) => void
+  /** adj322：宽窄屏变化同步（matchMedia 'change' 回调） */
+  setIsNarrow: (b: boolean) => void
   setSplitHDir: (d: 'previewLeft' | 'editorLeft') => void
   showNotice: (text: string, kind?: NoticeKind) => void
   clearNotice: () => void
@@ -174,6 +195,8 @@ export const useUiStore = create<UiState>()((set) => ({
   autoWrap: loadBool(AUTO_WRAP_KEY, true),
   // adj314：脚本工具条默认按设备——移动端/PAD（触屏或≤1024px）默认开、PC 默认关
   showScriptPad: loadBool(SHOW_SCRIPT_PAD_KEY, detectTouch()),
+  // adj322：宽/窄屏（≤1024px 视为窄屏）—— matchMedia 实时同步
+  isNarrow: detectNarrow(),
   // adj315：左右拆分排列方向（previewLeft=左预览右编辑，默认）
   splitHDir: (() => {
     try {
@@ -256,6 +279,8 @@ export const useUiStore = create<UiState>()((set) => ({
     }
     set({ showScriptPad: b })
   },
+  // adj322：宽窄屏实时同步（不持久化——视口宽度本身是运行时状态）
+  setIsNarrow: (b) => set({ isNarrow: b }),
   setSplitHDir: (d) => {
     try {
       localStorage.setItem(SPLITH_DIR_KEY, d)
