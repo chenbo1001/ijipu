@@ -1,14 +1,17 @@
 /**
- * editor/padLayout.ts — 嵌入式简谱输入工具条的数据表（adj314）
+ * editor/padLayout.ts — 嵌入式简谱输入工具条的数据表（adj314，adj323 一级设计）
  *
  * 纯 TS、零 React/DOM 依赖，可与引擎语法（engine/parser/tokenizer.ts）对照校验。
  *
- * 结构（用户方案 v2）：
- *  - 主键组（PAD_GROUPS）与二级键共用同一工具条，一行、宽度自适应、横向滑动；
- *    点主键切到该组二级键（最左固定「← 返回」），点二级键插入后自动回主键。
+ * 结构（用户方案，adj323）：
+ *  - PAD_GROUPS 为**一级主键组**：工具条只显示主键（icon + 中文标签），一行、宽度自适应、横向滑动；
+ *    点某主键 → 由编辑器在其按钮位置弹出该组二级键浮层（见 EditorPane 的 PadMenuPopover）。
+ *  - keepOpen 组（音符/时值）浮层保持展开（连续插多个），其余组点一项后自动关闭。
  *  - 组内按键按使用频度降序排列；不常用的符号合并进低频组，减少主键数量。
  *  - insert 为插入到光标的原文；cursorOffset 可选（默认 insert.length，即光标停在末尾），
  *    用于带模板的插入（如带声部名的描述头让光标落在引号内）。
+ *  - **装饰组（DECOR_KEYS）与自动补全的 & 修饰候选（completions.ts 的 NOTE/BARLINE_MODIFIER_HINTS）
+ *    同源于 MODIFIER_SYMBOLS**（adj322），避免两处各维护一份符号/文案导致漂移。
  *
  * 约定：
  *  - 音符/时值/变音等后缀紧跟光标插入（**不带自动空格**）——JPS 中升/降号、高音点、
@@ -16,6 +19,9 @@
  *    块间空格由用户用物理键盘空格或输入法给出（空格在手机默认键盘上，无需工具条解决）。
  *  - 描述头（Q:/C: 等）插入带尾随空格（`Q: `），光标停在空格后即可直接输入内容。
  */
+
+import { MODIFIER_SYMBOLS } from './completions'
+import { INSTRUMENT_LIB_NAMES } from '@ijipu/engine'
 
 /** 一个可插入的二级键 */
 export interface PadKey {
@@ -42,20 +48,6 @@ export interface PadGroup {
   /** adj314：点二级键后是否**保持**二级态（连续输入不返回主键）——音符/时值组为 true */
   keepOpen?: boolean
 }
-
-/** 音高/休止/节奏（最高频入口） */
-const NOTE_KEYS: PadKey[] = [
-  { label: '1', insert: '1', hint: 'do' },
-  { label: '2', insert: '2', hint: 're' },
-  { label: '3', insert: '3', hint: 'mi' },
-  { label: '4', insert: '4', hint: 'fa' },
-  { label: '5', insert: '5', hint: 'sol' },
-  { label: '6', insert: '6', hint: 'la' },
-  { label: '7', insert: '7', hint: 'si' },
-  { label: '0', insert: '0', hint: '休止符' },
-  { label: '8', insert: '8', hint: '隐藏休止符' },
-  { label: '9', insert: '9', hint: '节奏符' },
-]
 
 /** 时值后缀（紧跟音符，不带空格） */
 const DURATION_KEYS: PadKey[] = [
@@ -89,36 +81,14 @@ const BRACE_KEYS: PadKey[] = [
   { label: '[h]', insert: '1[h65]', hint: '后倚音' },
 ]
 
-/** & 装饰编码（颤音/跳音/波音/滑音/括号标记/力度/渐慢/小节修饰）——含中文语义说明 */
-const DECOR_KEYS: PadKey[] = [
-  { label: '&tr', insert: '&tr', hint: '颤音（带波浪线）' },
-  { label: '&cy', insert: '&cy', hint: '颤音（仅 tr 文本）' },
-  { label: '&dy', insert: '&dy', hint: '实心三角（顿音）' },
-  { label: '&yc', insert: '&yc', hint: '圆点+圆弧（跳音）' },
-  { label: '&sby', insert: '&sby', hint: '上波音' },
-  { label: '&xby', insert: '&xby', hint: '下波音' },
-  { label: '&shy', insert: '&shy', hint: '上滑音' },
-  { label: '&xhy', insert: '&xhy', hint: '下滑音' },
-  { label: '&hx', insert: '&hx', hint: '滑音箭头' },
-  { label: '&zkh', insert: '&zkh', hint: '左括号（音符前）' },
-  { label: '&ykh', insert: '&ykh', hint: '右括号（音符块后）' },
-  { label: '&rit', insert: '&rit', hint: '渐慢' },
-  { label: '&pp', insert: '&pp', hint: '力度：很弱' },
-  { label: '&p', insert: '&p', hint: '力度：弱' },
-  { label: '&mp', insert: '&mp', hint: '力度：稍弱' },
-  { label: '&mf', insert: '&mf', hint: '力度：稍强' },
-  { label: '&f', insert: '&f', hint: '力度：强' },
-  { label: '&ff', insert: '&ff', hint: '力度：很强' },
-  { label: '&fff', insert: '&fff', hint: '力度：最强' },
-  { label: '&sf', insert: '&sf', hint: '力度：突强' },
-  { label: '&fp', insert: '&fp', hint: '力度：强后弱' },
-  { label: '&sfp', insert: '&sfp', hint: '力度：突强后弱' },
-  { label: '&fine', insert: '&fine', hint: '曲终' },
-  { label: '&dc', insert: '&dc', hint: '从头反复（D.C.）' },
-  { label: '&ds', insert: '&ds', hint: '跳到花 S（D.S.）' },
-  { label: '&ty', insert: '&ty', hint: '大跳跃' },
-  { label: '&hs', insert: '&hs', hint: '花 S 记号' },
-]
+/** & 装饰编码（颤音/跳音/波音/滑音/括号标记/力度/渐慢/小节修饰）——含中文语义说明。
+ *  adj322：与 completions.ts 的 NOTE_MODIFIER_HINTS/BARLINE_MODIFIER_HINTS **两处同源**，
+ *  统一由 MODIFIER_SYMBOLS 派生，避免符号/文案双份维护导致漂移。 */
+const DECOR_KEYS: PadKey[] = MODIFIER_SYMBOLS.map(({ symbol, label }) => ({
+  label: `&${symbol}`,
+  insert: `&${symbol}`,
+  hint: label,
+}))
 
 /** 跳房子 / 行内引号备注 */
 const VOLTA_KEYS: PadKey[] = [
@@ -163,16 +133,21 @@ const HEADER_KEYS: PadKey[] = [
   { label: 'C2:', insert: 'C2: ', hint: '歌词行·声部 2' },
 ]
 
-/** 乐器指令 */
+/** 乐器指令（adj326：直接把乐器名作为菜单项，点击一步插入 `@乐器名`，不再先插 @ 再靠自动补全选）
+ *  @乐器名：切换乐器（与 Y 默认乐器同源，INSTRUMENT_LIB_NAMES）；@@：切回默认 */
 const INSTRUMENT_KEYS: PadKey[] = [
-  { label: '@', insert: '@', hint: '切换乐器' },
+  ...Object.values(INSTRUMENT_LIB_NAMES).map((name) => ({
+    label: name,
+    insert: `@${name}`,
+    hint: `切换乐器：${name}`,
+  })),
   { label: '@@', insert: '@@', hint: '切回默认乐器' },
 ]
 
-/** 主键组（adj314：描述头排首位——按操作习惯，写完描述头再录入音符曲词） */
+/** 主键组（adj314：描述头排首位——按操作习惯，写完描述头再录入音符曲词；
+ *  adj324：移除「音符」组——数字 1-7/休止 0 用物理键盘输入更快，工具条只保留键盘难以产出的符号） */
 export const PAD_GROUPS: PadGroup[] = [
   { id: 'header', icon: 'Q', label: '描述', keys: HEADER_KEYS },
-  { id: 'note', icon: '♪', label: '音符', keys: NOTE_KEYS, keepOpen: true },
   { id: 'dur', icon: '—', label: '时值', keys: DURATION_KEYS, keepOpen: true },
   { id: 'bar', icon: '|', label: '小节', keys: BARLINE_KEYS },
   { id: 'brace', icon: '([', label: '括倚', keys: BRACE_KEYS, keepOpen: true },

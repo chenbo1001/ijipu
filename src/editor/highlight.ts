@@ -200,9 +200,13 @@ export function highlightCodeWrapped(
       if (errLines && errLines.has(lineNo)) return `<span class="hl-error-line">${html}</span>`
       return html
     }
+    // adj322：当前行整行背景——属于光标源码行的视觉行叠加 .hl-current-line
+    //   （每视觉行一个 .hl-line；当前行所有视觉行都高亮，补齐 v0.5.1 移除的整行背景）
+    const hlLine = (inner: string) =>
+      `<div class="${cursor && cursor.line === lineNo ? 'hl-line hl-current-line' : 'hl-line'}">${inner}</div>`
     const trimmed = raw.trim()
     if (trimmed === '') {
-      parts.push(wrap('<div class="hl-line"></div>'))
+      parts.push(wrap(hlLine('')))
       continue
     }
     if (trimmed.startsWith('#')) {
@@ -211,13 +215,13 @@ export function highlightCodeWrapped(
       // 与 Q 行一致，按实际折行点切成多个 .hl-line 每段用 hl-comment 着色。
       const segs = segsOf(raw.length, pts)
       const segHtml = segs
-        .map((s) => `<div class="hl-line">${span('hl-comment', raw.slice(s.start, s.end))}</div>`)
+        .map((s) => hlLine(span('hl-comment', raw.slice(s.start, s.end))))
         .join('')
       parts.push(wrap(segHtml))
       continue
     }
     if (trimmed === '[fenye]') {
-      parts.push(wrap(`<div class="hl-line">${span('hl-pagebreak', raw)}</div>`))
+      parts.push(wrap(hlLine(span('hl-pagebreak', raw))))
       continue
     }
     const m = /^([A-Z])(\d*)(?:"[^"]*")?\s*:/.exec(trimmed)
@@ -279,14 +283,14 @@ export function highlightCodeWrapped(
         return s.start < headLen ? span('hl-line-header', head) + inner : inner
       }
       const segHtml = segs
-        .map((s) => `<div class="hl-line">${renderSeg(s)}</div>`)
+        .map((s) => hlLine(renderSeg(s)))
         .join('')
       parts.push(wrap(segHtml))
       continue
     }
     // 普通行（含长歌词/注释外文本）：按折行点切段，每段一个 .hl-line
     const segs = segsOf(raw.length, pts)
-    const segHtml = segs.map((s) => `<div class="hl-line">${esc(raw.slice(s.start, s.end))}</div>`).join('')
+    const segHtml = segs.map((s) => hlLine(esc(raw.slice(s.start, s.end)))).join('')
     parts.push(wrap(segHtml))
   }
   // adj227：div 块级已自动分行，不能 join('\n')——父级 white-space: pre-wrap

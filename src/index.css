@@ -13,6 +13,14 @@ body,
   padding: 0;
 }
 
+/* adj329：锁死 document 滚动——页面整体固定（不左右/上下滚），只让内部各滚动区
+   （编辑器 textarea / 预览 preview-pane / 下拉列表 / 工具条 pad-scroll）各自滚。
+   仅 body{overflow:hidden} 在 iOS/部分安卓对横向 document 滚动不总是生效，
+   补 html{overflow:hidden} 一并锁住 document 两个方向。 */
+html {
+  overflow: hidden;
+}
+
 body {
   font-family: var(--jp-font-sans);
   font-size: 14px;
@@ -26,10 +34,13 @@ body {
 .app {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 100vw; /* adj329：防某子元素撑宽 .app 造成横向滚动 */
   height: 100vh;
+  height: 100dvh; /* adj329：动态视口高——移动端地址栏收起/展开时 100vh 会大于可见视口导致纵向可滚，dvh 跟随实际视口 */
   background: var(--jp-bg-app);
   /* adj：不能设 overflow:hidden——它会裁剪绝对定位下拉（汉堡/更多/字体下拉），
-     导致窄屏点击菜单下拉显示不全。整页防页面滚动由 body{overflow:hidden} 兜底，
+     导致窄屏点击菜单下拉显示不全。整页防页面滚动由 html/body{overflow:hidden} 兜底，
      各滚动区（预览/编辑器/下拉）各自处理 */
   overflow: visible;
 }
@@ -1089,6 +1100,13 @@ body {
   background: rgba(255, 93, 108, 0.14);
 }
 
+/* adj322：当前源码行（光标所在行）的行号高亮——与整行背景 .hl-current-line 统一（淡强调色） */
+.gutter-line.gutter-current {
+  color: var(--jp-accent);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--jp-accent) 14%, transparent);
+}
+
 .editor-main {
   flex: 1;
   position: relative;
@@ -1201,6 +1219,17 @@ body {
 .editor-main .highlight-content .hl-line {
   white-space: pre;
   min-height: var(--jp-editor-lh, 24px);
+}
+
+/* adj322：当前行整行背景（光标所在源码行的所有视觉行）——淡强调色铺底，补齐 v0.5.1 移除的整行高亮。
+   adj322b：负 margin 抵消 .highlight-content 的水平 padding（14px），让背景延伸到编辑区左右边界
+   （否则背景只到内容 box 右缘，右 14px padding 区仍为原背景色）；padding 补回保证文本起点不变 */
+.editor-main .highlight-content .hl-line.hl-current-line {
+  margin-left: -14px;
+  margin-right: -14px;
+  padding-left: 14px;
+  padding-right: 14px;
+  background: color-mix(in srgb, var(--jp-accent) 14%, transparent);
 }
 
 /* adj165：自动提示浮层（& 修饰符 / 跳房子 / 描述头）；adj192：max-height+滚动防溢出 */
@@ -1363,6 +1392,61 @@ body {
   background: var(--jp-border);
   flex-shrink: 0;
   margin: 0 3px;
+}
+
+/* ============ 一级工具条主键组浮层（adj323）============ */
+/* 点一级主键在按钮位置弹出该组二级键，每项显示「插入内容 + 中文说明」，点击插入；
+   keepOpen 组（时值/括倚/跳房子/变音）保持展开、移到浮层外点击关闭；其余组点一项后自动关闭。
+   复用自动提示浮层的面板风格（.editor-completion 同族）。
+   adj325：固定一个最大高度，避免高分组（装饰/变音）菜单过高；
+   overflow-y: auto 让超出部分滚动。
+   adj327：最大高度收紧为 7 个菜单项。
+   adj328：进一步收紧为 6 个菜单项。 */
+.pad-menu {
+  position: fixed;
+  z-index: 40; /* 高于编辑内容区（高亮层/自动提示），浮层独立于滚动 */
+  --pad-menu-item-h: 28px; /* 每个菜单项估算高度（5px 上下 padding + 行高） */
+  min-width: 220px;
+  max-width: 340px;
+  max-height: 176px; /* ≈ 6 个菜单项（28×6 + 8px padding）；与 EditorPane 内联 maxHeight 上限一致 */
+  overflow-y: auto;
+  background: var(--jp-bg-panel);
+  border: 1px solid var(--jp-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 4px;
+  font-size: 12px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.pad-menu .pad-menu-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--jp-text-primary);
+}
+
+.pad-menu .pad-menu-item.active {
+  background: color-mix(in srgb, var(--jp-accent) 24%, transparent);
+}
+
+.pad-menu .pad-menu-insert {
+  font-family: var(--jp-editor-font, var(--jp-font-mono));
+  color: var(--jp-accent);
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.pad-menu .pad-menu-label {
+  color: var(--jp-text-secondary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 高亮类 */

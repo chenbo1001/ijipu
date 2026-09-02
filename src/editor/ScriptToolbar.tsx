@@ -1,108 +1,72 @@
 /**
- * editor/ScriptToolbar.tsx — 嵌入式简谱输入工具条（adj314）
+ * editor/ScriptToolbar.tsx — 嵌入式简谱输入工具条（adj314，adj323 改一级设计）
  *
- * 用户方案 v2（评审通过）：
- *  - 主键/二级键共用同一工具条，只一行、宽度自适应、横向滑动（.pad-scroll）。
- *  - 默认显示主键组；点主键切到该组二级键（最左固定「← 返回」），
- *    点二级键插入后自动回主键（setActiveGroup(null)）。
- *  - 组内按键按频度排序；不常用符号合并进低频组。
- *  - 常驻主键「⌨」用于显示/隐藏系统软键盘：普通符号键通过 mousedown.preventDdefault
- *    保住 textarea 焦点，只有「⌨」主动 blur/focus。
+ * 用户方案（adj323，评审通过）：
+ *  - **一级工具栏**：一行、宽度自适应、横向滑动（.pad-scroll），只显示各主键组 + ⌨。
+ *  - 点某**主键组 → 从其上方弹出下拉浮层**（padMenu，adj323b：统一底部对齐工具条顶边、
+ *    水平居中于工具条，不再跟随按钮左右飘），浮层内列出该组全部二级键，
+ *    每项显示「插入内容 + 中文说明」，点项即插入。
+ *  - 音符/时值等 keepOpen 组：浮层**保持展开**（连续插入多个符号），移到浮层外点击时关闭；
+ *    其余组：点一个二级键插入后浮层**自动关闭**。
+ *  - 键盘导航（↑↓ 选择 / Enter 插入 / Esc 关闭）复用 autocomplete 同一套（在 EditorPane.onKeyDown 处理）。
+ *  - 常驻主键「⌨」显示/隐藏系统软键盘：普通符号键通过 mousedown.preventDefault 保住 textarea 焦点。
  *
- * 本组件纯 UI：插入逻辑经 props 的 onInsert 交由 EditorPane 统一处理
- * （读 textarea → 拼接 → setCode → 光标定位），与既有 applyCompletion 一致。
+ * 本组件纯 UI：插入逻辑经 props 的 onInsert 交由 EditorPane 统一处理。
  */
-import { useRef, useState } from 'react'
-import { PAD_GROUPS, PAD_KB_KEY } from './padLayout'
+import { useRef, type RefObject } from 'react'
+import { PAD_GROUPS, PAD_KB_KEY, type PadGroup } from './padLayout'
 
 export function ScriptToolbar({
-  onInsert,
+  padAreaRef,
+  onGroupMenuOpen,
   onToggleKb,
   kbActive,
 }: {
-  /** 插入文本到光标处（cursorOffset 可选：带模板插入时光标停靠位置） */
-  onInsert: (text: string, cursorOffset?: number) => void
+  /** 工具条容器 ref——父级用它读取工具条 rect（adj323b 底部统一对齐） */
+  padAreaRef: RefObject<HTMLDivElement | null>
+  /** 点主键组：上报该组 + 按钮位置（视口 rect）——父级用它水平跟随按钮，adj323c */
+  onGroupMenuOpen: (group: PadGroup, rect: DOMRect) => void
   /** 点击「⌨」：显示/隐藏系统软键盘（EditorPane 负责 focus/blur） */
   onToggleKb: () => void
   /** 系统软键盘当前是否显示（用于「⌨」高亮） */
   kbActive: boolean
 }) {
-  // null = 主键态；非 null = 当前展开的主键组 id
-  const [activeGroup, setActiveGroup] = useState<string | null>(null)
-  const active = activeGroup
-  const scrollRef = useRef<HTMLDivElement>(null)
-
-  // 点二级键：插入后按组决定是否回主键。音符/时值（keepOpen）保持二级态以连续输入，
-  // 其余组返回主键态（insert 后回到主键组视图）
-  const pick = (text: string, cursorOffset?: number) => {
-    onInsert(text, cursorOffset)
-    const g = PAD_GROUPS.find((x) => x.id === active)
-    if (!g?.keepOpen) setActiveGroup(null)
-  }
+  const btnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
 
   return (
-    <div className="script-pad" role="toolbar" aria-label="简谱输入工具条">
-      {/* 二级态最左固定返回键 */}
-      {active !== null && (
+    <div className="script-pad" role="toolbar" aria-label="简谱输入工具条" ref={padAreaRef}>
+      <div className="pad-scroll">
+        {PAD_GROUPS.map((g) => (
+          <button
+            key={g.id}
+            type="button"
+            ref={(el) => {
+              btnRefs.current[g.id] = el
+            }}
+            className="pad-key pad-master"
+            title={g.label}
+            aria-label={g.label}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              const el = btnRefs.current[g.id]
+              if (el) onGroupMenuOpen(g, el.getBoundingClientRect())
+            }}
+          >
+            <span className="pad-key-icon">{g.icon}</span>
+            <span className="pad-key-sub">{g.label}</span>
+          </button>
+        ))}
+        <div className="pad-sep" aria-hidden="true" />
         <button
           type="button"
-          className="pad-key pad-back"
-          title="返回"
-          aria-label="返回主键盘"
+          className={`pad-key pad-master${kbActive ? ' active' : ''}`}
+          title={PAD_KB_KEY.hint}
+          aria-label={PAD_KB_KEY.hint}
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => setActiveGroup(null)}
+          onClick={onToggleKb}
         >
-          ←
+          <span className="pad-key-icon">{PAD_KB_KEY.label}</span>
         </button>
-      )}
-      <div className="pad-scroll" ref={scrollRef}>
-        {active === null ? (
-          /* —— 主键态：所有主键组 + 软键盘开关 —— */
-          <>
-            {PAD_GROUPS.map((g) => (
-              <button
-                key={g.id}
-                type="button"
-                className="pad-key pad-master"
-                title={g.label}
-                aria-label={g.label}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setActiveGroup(g.id)}
-              >
-                <span className="pad-key-icon">{g.icon}</span>
-                <span className="pad-key-sub">{g.label}</span>
-              </button>
-            ))}
-            <div className="pad-sep" aria-hidden="true" />
-            <button
-              type="button"
-              className={`pad-key pad-master${kbActive ? ' active' : ''}`}
-              title={PAD_KB_KEY.hint}
-              aria-label={PAD_KB_KEY.hint}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={onToggleKb}
-            >
-              <span className="pad-key-icon">{PAD_KB_KEY.label}</span>
-            </button>
-          </>
-        ) : (
-          /* —— 二级态：当前主键组的二级键 —— */
-          <div className="pad-group-keys">
-            {(PAD_GROUPS.find((g) => g.id === active)?.keys ?? []).map((k) => (
-              <button
-                key={k.insert + k.label}
-                type="button"
-                className="pad-key pad-item"
-                title={k.hint ?? k.label}
-                aria-label={k.hint ?? k.label}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => pick(k.insert, k.cursorOffset)}
-              >
-                {k.label}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   )

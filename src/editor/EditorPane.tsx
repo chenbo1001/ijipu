@@ -17,6 +17,7 @@ import { formatLine, codePosToNoteId, INSTRUMENT_LIB_NAMES } from '@ijipu/engine
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 import { isBarlineModifierContext, filterModifierHints } from './completions'
 import { ScriptToolbar } from './ScriptToolbar'
+import type { PadGroup, PadKey } from './padLayout'
 
 /** adj165：自动提示浮层状态（null = 不显示）
  *  adj314：保留 & 修饰符（modifier）与 Y/@ 乐器（instrument）两类——
@@ -31,6 +32,24 @@ interface Completion {
   /** 光标触发位置（相对 textarea 内容区，浮层定位用） */
   x: number
   y: number
+}
+
+/** adj323：一級工具条主键组浮层状态（null = 不显示）
+ *  点主键在工具条上方弹出该组二级键（insert + 中文说明），点击插入；
+ *  keepOpen 组（音符/时值）保持展开（连续插多个），移到浮层外点击时关闭；其余组点一项后自动关闭。 */
+interface PadMenu {
+  /** 所属主键组 id */
+  groupId: string
+  /** 该组二级键列表 */
+  keys: PadKey[]
+  /** 当前高亮索引 */
+  index: number
+  /** 工具条容器视口 rect（adj323b：浮层底部统一对齐工具条顶边） */
+  area: { x: number; y: number; w: number; h: number }
+  /** 被点按钮视口 rect（adj323c：水平尽量跟随按钮位置） */
+  btn: { x: number; y: number; w: number; h: number }
+  /** 点二级键后是否保持展开（keepOpen 组：音符/时值，连续输入） */
+  keepOpen: boolean
 }
 
 /** 判断光标前是否在输入 & 编码（返回已输入的前缀；只收字母 + 可选 +，adj220 与 tokenizer 一致） */
@@ -63,6 +82,17 @@ export function EditorPane() {
   // adj165：行高取整为整数（textarea 原生行盒与高亮层 CSS 行盒完全一致）
   const editorLineH = Math.round(effectiveFontSize * 1.7)
 
+  // adj331：实测 textarea 单行渲染行高（两行 offsetHeight 差）——理论 editorLineH
+  // （round(fs*1.7)）在手机端某些字体/浏览器下可能与 textarea 实际行盒不一致，
+  // 导致行号栏/高亮层按 editorLineH 排布与内容行**累积漂移**（越往下越错）。
+  // 实际测量逻辑在下方 taRef 声明的 ResizeObserver effect 里执行（须在 taRef 之后，
+  // 否则 TS 报 TDZ：taRef 使用先于声明）。
+  const [measuredLineH, setMeasuredLineH] = useState<number>(editorLineH)
+
+  // adj331：渲染统一用实测行高 lineH（= measuredLineH），而非理论 editorLineH——
+  // 保证行号栏/高亮层/滚动目标与 textarea 实际行盒一致，消除累积漂移。
+  const lineH = measuredLineH
+
   const taRef = useRef<HTMLTextAreaElement>(null)
   const hlRef = useRef<HTMLDivElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
@@ -77,6 +107,12 @@ export function EditorPane() {
   const [completion, setCompletion] = useState<Completion | null>(null)
   const completionRef = useRef<Completion | null>(null)
   completionRef.current = completion
+  // adj323：一级工具条 → 主键组浮层（点主键统一在工具条上方弹出该组二级键列表）
+  const [padMenu, setPadMenu] = useState<PadMenu | null>(null)
+  const padMenuRef = useRef<PadMenu | null>(null)
+  padMenuRef.current = padMenu
+  // adj323b：工具条容器 ref——浮层底部统一对齐工具条顶边（不随按钮水平位置飘）
+  const padAreaRef = useRef<HTMLDivElement | null>(null)
   // adj296b：回车换行标记——onChange 后横向滚动回新行行首光标
   //（长行末回车时视口停在右侧，不滚回行首会看不到新行输入）
   const enterKeyRef = useRef(false)
@@ -114,8 +150,8 @@ export function EditorPane() {
     const wp = wrapPointsRef.current[pos.line - 1] ?? []
     const vIdx = wp.filter((p) => p < pos.col).length
     // visualTopRef 存「视觉行数」，需 ×行高转 px；（源码行前视觉行数 + 行内折行偏移）× 行高
-    const targetTop = ((visualTopRef.current[pos.line - 1] ?? 0) + vIdx) * editorLineH
-    ta.scrollTop = Math.max(0, targetTop - (ta.clientHeight - editorLineH) / 2)
+    const targetTop = ((visualTopRef.current[pos.line - 1] ?? 0) + vIdx) * lineH
+    ta.scrollTop = Math.max(0, targetTop - (ta.clientHeight - lineH) / 2)
     const targetLeft = pos.col * effectiveFontSize * 0.6
     // 折行（autoWrap）时内容宽度=视口，无横向滚动条——scrollLeft 置 0，
     // 避免残留的横向偏移让高亮层/内容错位、左侧看不到；wrap=off（长行横向滚动）再定位到目标列居中
@@ -123,6 +159,20 @@ export function EditorPane() {
     onScroll()
     onSelectRef.current()
   }, [cursorJump, effectiveFontSize])
+
+  // adj323：点浮层/主键外任意位置 → 关闭主键组浮层。
+  // 注意浮层与主键本身 mousedown 都 preventDefault 保留 textarea 焦点，这里用 capture 阶段
+  // 判断点击目标是否在浮层（.pad-menu）内；keepOpen 组（音符/时值）只在移到浮层外时关闭。
+  useEffect(() => {
+    if (!padMenu) return
+    const onDocDown = (e: MouseEvent) => {
+      const t = e.target as Node | null
+      if (t && (t as HTMLElement).closest?.('.pad-menu, .script-pad')) return
+      setPadMenu(null)
+    }
+    document.addEventListener('mousedown', onDocDown, true)
+    return () => document.removeEventListener('mousedown', onDocDown, true)
+  }, [padMenu])
 
   // 行号 + 错误行信息
   const lineCount = useMemo(() => code.split('\n').length, [code])
@@ -141,16 +191,27 @@ export function EditorPane() {
     return map
   }, [parseResult])
 
-  // adj165：双击错误行号 → 跳到该行第一个错误位置
-  const onGutterDoubleClick = (line: number) => {
-    const errs = errByLine.get(line)
-    if (!errs || errs.length === 0) return
-    const first = [...errs].sort((a, b) => a.col - b.col)[0]
-    // 行首偏移 + 列偏移（0-based 列 → 直接加）
+  // adj322：单击行号（含折行标记区域）→ 光标跳转：
+  //   若点击的**不是当前行** → 跳转该源码行行首；
+  //   若点击的**是当前行** → 跳到该行错误位置（若有错误；无错误则落行首）。
+  //   不再用双击（双击会造成当前行连续跳动）。
+  const onGutterClick = (line: number) => {
     const lines = code.split('\n')
     let offset = 0
     for (let i = 0; i < line - 1 && i < lines.length; i++) offset += lines[i].length + 1
-    jumpCursor(offset + first.col)
+    const isCur = cursor && cursor.line === line
+    if (!isCur) {
+      jumpCursor(offset)
+      return
+    }
+    // 点击当前行 → 跳到错误位置（若该行有错误）
+    const errs = errByLine.get(line)
+    if (errs && errs.length > 0) {
+      const first = [...errs].sort((a, b) => a.col - b.col)[0]
+      jumpCursor(offset + first.col)
+    } else {
+      jumpCursor(offset)
+    }
   }
 
   // 滚动同步（adj167：显示层内部容器用 transform 平移跟随 textarea 的滚动位置，
@@ -203,6 +264,27 @@ export function EditorPane() {
           setTaClientW(ta.clientWidth) // 含 padding，不含滚动条
           setContentW(ta.clientWidth - 28) // 内容区宽（去左右 padding 14×2）
         })
+        // adj331：实测 textarea 单行**布局行盒**（getBoundingClientRect().height 差）——
+        // textarea 是原生控件，其行盒可能被字体撑得高于 line-height（部分 WebKit/移动
+        // WebView 对 textarea 遵循字体 line-box 而非 CSS line-height）。用克隆 textarea
+        // 测两行布局高差，得到 textarea 真实每行高度；不用理论 editorLineH（round(fs*1.7)），
+        // 且不用 scrollHeight（它按 line-height 算、不含字体撑高，测不到偏差）。
+        const cs = getComputedStyle(ta)
+        const clone = document.createElement('textarea')
+        // adj333：用 opacity:0 而非 visibility:hidden——visibility:hidden 的隐藏 textarea
+        // 在部分浏览器 getBoundingClientRect 高度为 0（测不到行盒）；opacity:0 保留布局
+        // 与行盒，能测出字体撑高后的真实每行高度（移动端字体 ascent/descent 较大时，
+        // textarea 实际行盒 > CSS line-height，这正是 PC 正常、手机错位的根源）。
+        clone.style.cssText = `position:absolute;left:-9999px;top:0;opacity:0;width:${ta.clientWidth}px;box-sizing:border-box;font-family:${cs.fontFamily};font-size:${cs.fontSize};line-height:${cs.lineHeight};letter-spacing:${cs.letterSpacing};white-space:${cs.whiteSpace};overflow-wrap:${cs.overflowWrap};tab-size:4;font-variant-ligatures:none;direction:ltr;resize:none;border:none;outline:none;padding:0;margin:0`
+        document.body.appendChild(clone)
+        clone.value = '0'
+        const oneH = clone.getBoundingClientRect().height
+        clone.value = '0\n0'
+        const twoH = clone.getBoundingClientRect().height
+        document.body.removeChild(clone)
+        // rect 差（布局行盒）随字体撑高；value 无空格含 `\n` 强制两行，不含 padding（=0）
+        const lh = Math.round(twoH - oneH)
+        if (lh > 0) setMeasuredLineH(lh)
       }
     }
     update()
@@ -229,8 +311,23 @@ export function EditorPane() {
     if (w <= 0) return lines.map(() => [])
     // mirror div：与 textarea 同款样式，width 直接用实时 clientWidth（与 textarea 一致）。
     // box-sizing: border-box 让内容 = w - 28（去 padding 14×2），与 textarea（box-sizing:border-box）完全一致。
+    // adj330：字体/度量直接从 textarea 的 computed style 取（getComputedStyle），
+    // 不再用 `${effectiveFont},monospace` 拼接——effectiveFont 为空或含特殊字族时
+    // mirror 与 textarea 字体分裂 → 折行点不同 → 行号/高亮层错位（手机端尤其明显）。
+    // 现 mirror 的 font-family/font-size/line-height/letter-spacing 与 textarea 逐字一致，
+    // 保证折行测量与实际渲染完全同源。
     const mirror = document.createElement('div')
-    mirror.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;width:${w}px;padding:10px 14px;box-sizing:border-box;font-family:${effectiveFont},monospace;font-size:${effectiveFontSize}px;line-height:${editorLineH}px;white-space:pre-wrap;overflow-wrap:normal;tab-size:4;font-variant-ligatures:none;direction:ltr`
+    const taCS = ta ? getComputedStyle(ta) : null
+    const fontFamily = taCS?.fontFamily ?? `${effectiveFont}, monospace`
+    const fontSize = taCS?.fontSize ?? `${effectiveFontSize}px`
+    const lineHeight = taCS?.lineHeight ?? `${editorLineH}px`
+    const letterSpacing = taCS?.letterSpacing ?? 'normal'
+    // adj332：折行判定阈值按行高缩放——原用 `cur.top > prev.top + 0.5`（0.5px 太小），
+    // 手机/亚像素渲染时相邻字符 top 可能抖动 >0.5px → 误判为折行 → visualLines 高估 →
+    // 行号栏每行过高、往下与内容行越离越开（累积漂移）。改为按 0.6 行高作 top 阈值：
+    // 真实换行 top 增加≈一整行（必过），亚像素抖动（远小于行高）不会误判。
+    const lh = parseFloat(lineHeight) || 24
+    mirror.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;width:${w}px;padding:10px 14px;box-sizing:border-box;font-family:${fontFamily};font-size:${fontSize};line-height:${lineHeight};letter-spacing:${letterSpacing};white-space:pre-wrap;overflow-wrap:normal;tab-size:4;font-variant-ligatures:none;direction:ltr`
     document.body.appendChild(mirror)
     // adj：去掉「短行跳过」优化（line.length*charW <= cw return []）——
     // charW = fontSize*0.6 是估算（`=` advance ~8.4 但 0.6×14=8.4 是近似，sub-pixel 临界时会
@@ -259,8 +356,8 @@ export function EditorPane() {
       for (let i = 1; i < rects.length; i++) {
         const cur = rects[i]
         const prev = rects[i - 1]
-        // 新行起点：top 显著大于 prev 且 left 显著小于 prev
-        if (cur.top > prev.top + 0.5 && cur.left < prev.left - 1) {
+        // 新行起点：top 增加近一整行高（≥0.6 行）且 left 显著回退到行首（adj332）
+        if (cur.top > prev.top + lh * 0.6 && cur.left < prev.left - 1) {
           pts.push(i)
         }
       }
@@ -359,6 +456,30 @@ export function EditorPane() {
     })
   }
 
+  // ———— adj323：一级工具条主键组浮层 ————
+  // 点主键：读取工具条容器 rect（底边对齐），记录按钮 rect（水平跟随），弹出该组浮层并关闭自动提示
+  const openPadGroup = (group: PadGroup, rect: DOMRect) => {
+    setCompletion(null)
+    const area = padAreaRef.current?.getBoundingClientRect()
+    setPadMenu({
+      groupId: group.id,
+      keys: group.keys,
+      index: 0,
+      area: area
+        ? { x: area.left, y: area.top, w: area.width, h: area.height }
+        : { x: 0, y: 0, w: 0, h: 0 },
+      btn: { x: rect.left, y: rect.top, w: rect.width, h: rect.height },
+      keepOpen: !!group.keepOpen,
+    })
+  }
+  // 点浮层项：插入；非 keepOpen 组插入后自动关闭
+  const pickPadKey = (k: PadKey) => {
+    insertAtCursor(k.insert, k.cursorOffset)
+    if (!padMenuRef.current?.keepOpen) setPadMenu(null)
+  }
+  // 关闭浮层（点击浮层外 / Esc）
+  const closePadMenu = () => setPadMenu(null)
+
   // adj314：「⌨」软键盘开关 —— blur 收起（可靠）；focus 在用户手势下通常能唤起 iOS/Android 软键盘，
   // 个别平台 focus 失效时用户仍可点编辑区唤回，不影响其它输入。
   const toggleSystemKb = () => {
@@ -381,7 +502,7 @@ export function EditorPane() {
     // adj201：浮层 y 按视觉行（折行后光标行下有折行占位）；adj223：行数 × 行高转像素
     const compPos = (line: number, col: number) => ({
       x: col * effectiveFontSize * 0.6,
-      y: ((visualTopOfLine[line - 1] ?? 0) + 1) * editorLineH,
+      y: ((visualTopOfLine[line - 1] ?? 0) + 1) * lineH,
     })
     // adj314：描述头（行首 Tab 补全）已由嵌入式输入工具条「描述头」组整段覆盖，取消弹列表；
     // 行首命令快捷键（Q/C/B/...）等行为保留在 onKeyDown。
@@ -486,6 +607,31 @@ export function EditorPane() {
     const ta = taRef.current
     if (!ta) return
     if (e.nativeEvent.isComposing) return // 输入法合成中不触发
+    // adj323：主键组浮层键盘导航（↑↓ 选择 / Enter Tab 插入 / Esc 关闭）——复用同一套导航习惯
+    const menu = padMenuRef.current
+    if (menu) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setPadMenu({ ...menu, index: (menu.index + 1) % menu.keys.length })
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setPadMenu({ ...menu, index: (menu.index - 1 + menu.keys.length) % menu.keys.length })
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        const k = menu.keys[menu.index]
+        if (k) pickPadKey(k)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        closePadMenu()
+        return
+      }
+    }
     // adj165：自动提示导航（↑↓ 选择 / Enter Tab 补全 / Esc 关闭）
     const comp = completionRef.current
     if (comp) {
@@ -638,7 +784,7 @@ export function EditorPane() {
   // 高亮层 CSS 行盒中按各自方式取整，多行后累积错位（选中行高亮到另一行）
   const editorStyle = {
     '--jp-editor-fs': `${effectiveFontSize}px`,
-    '--jp-editor-lh': `${editorLineH}px`,
+    '--jp-editor-lh': `${lineH}px`,
     '--jp-editor-font': `${effectiveFont}, monospace`,
     // adj224：高亮层宽度跟随 textarea 内容区（滚动条占宽后两侧折行一致）
     '--jp-editor-content-w': taClientW > 0 ? `${taClientW}px` : '100%',
@@ -653,13 +799,15 @@ export function EditorPane() {
             {gutterLines.map((n) => {
               const errs = errByLine.get(n)
               const vis = visualLines[n - 1] ?? 1
+              // adj322：当前源码行（光标所在行）的行号也高亮，与整行背景统一（gutter-current）
+              const cur = cursor && cursor.line === n
               return (
                 <div
                   key={n}
-                  className={errs ? 'gutter-line gutter-err' : 'gutter-line'}
-                  style={{ height: vis * editorLineH }}
+                  className={`gutter-line${errs ? ' gutter-err' : ''}${cur ? ' gutter-current' : ''}`}
+                  style={{ height: vis * lineH }}
                   title={errs?.map((e) => e.msg).join('\n')}
-                  onDoubleClick={() => onGutterDoubleClick(n)}
+                  onClick={() => onGutterClick(n)}
                 >
                   <span className="gutter-num">{n}</span>
                   {/* adj195：折行延续标记（不占新行号，区分新行与折行） */}
@@ -715,17 +863,72 @@ export function EditorPane() {
             <CompletionPopover
               completion={completion}
               containerRef={taRef.current?.parentElement ?? null}
-              lineH={editorLineH}
+              lineH={lineH}
               onPick={(c) => applyCompletion(c)}
             />
           )}
         </div>
       </div>
       {/* adj314：嵌入式简谱输入工具条——编辑器底部常驻（编辑区与预览/分页之间），
-          单行横向滑动，主键/二级键共用一条工具条 */}
+          单行横向滑动，一级主键/软键盘开关（adj323：二级键改为浮层弹出） */}
       {showScriptPad && (
-        <ScriptToolbar onInsert={insertAtCursor} onToggleKb={toggleSystemKb} kbActive={kbActive} />
+        <ScriptToolbar padAreaRef={padAreaRef} onGroupMenuOpen={openPadGroup} onToggleKb={toggleSystemKb} kbActive={kbActive} />
       )}
+      {/* adj323：一级主键组浮层——点主键在按钮位置弹出该组二级键（insert + 中文说明） */}
+      {padMenu && (
+        <PadMenuPopover
+          menu={padMenu}
+          onPick={pickPadKey}
+        />
+      )}
+    </div>
+  )
+}
+
+/** adj323c：一级工具条主键组浮层——底部统一对齐工具条顶边（所有菜单底部在同一水平线，
+ *  向上弹出），水平尽量跟随被点按钮居中，越界钳制在视口内。每项显示「插入内容 + 中文说明」，点击即插入。 */
+function PadMenuPopover({
+  menu,
+  onPick,
+}: {
+  menu: PadMenu
+  onPick: (k: PadKey) => void
+}) {
+  const { area, btn, keys, index } = menu
+  // 估算浮层宽度（高度不用估算：用 CSS bottom 定位让底边精确对齐，键数变化不影响底边）
+  const estW = 290
+  const viewW = window.innerWidth
+  const viewH = window.innerHeight
+  // 用 CSS bottom 定位（元素底边到视口底边的距离）：把底边精确放在工具条顶边上方 6px——
+  // 所有菜单的**底边**都在同一水平线、紧贴工具条上方；键数多少、CSS max-height 钳制都不影响底边。
+  const bottomInset = Math.max(0, viewH - (area.y - 6))
+  // 顶边钳制：固定定位下底边位置已定，若内容过高顶边会越过视口顶——
+  // 用 maxHeight 限制菜单高：上限 176px（≈6 个菜单项，adj328），且不超底边到视口顶的高度。
+  const maxH = Math.min(176, Math.max(56, viewH - bottomInset - 6))
+  // 水平：以按钮中心为基准居中跟随；越出视口则钳制到窗口内
+  const btnCenter = btn.x + btn.w / 2
+  let left = btnCenter - estW / 2
+  left = Math.min(Math.max(6, left), viewW - estW - 6)
+  return (
+    <div
+      className="pad-menu"
+      style={{ position: 'fixed', left, bottom: bottomInset, maxHeight: maxH }}
+      role="menu"
+    >
+      {keys.map((k, i) => (
+        <div
+          key={k.insert + k.label}
+          role="menuitem"
+          className={`pad-menu-item${i === index ? ' active' : ''}`}
+          onMouseDown={(e) => {
+            e.preventDefault() // 防止 textarea 失焦
+            onPick(k)
+          }}
+        >
+          <span className="pad-menu-insert">{k.insert}</span>
+          <span className="pad-menu-label">{k.hint ?? k.label}</span>
+        </div>
+      ))}
     </div>
   )
 }
