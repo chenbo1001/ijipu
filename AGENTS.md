@@ -35,7 +35,7 @@
 4. **修饰符间距常量统一在 `engine/layout/spacing.ts`**（adj60：层级间距 LAYER_GAP=2、层内 INNER_GAP=1；**adj64：水平元素最小间距 0.5px，非时值元素（&zkh/&ykh 括号等）占位 BRACKET_PAD 先扣除、剩余宽按比例分摊给带时值元素**）；改间距只改该文件
 5. localStorage 键统一 `ijipu.` 前缀、集中定义在 store 顶部；损坏回退默认值；写入范围钳制
 6. 每次功能/修复后：排错必记 `docs/ERRORS-LOG.md`（`E-年份-序号`，现象/根因/解决/预防）
-7. 版本发布顺序：**改码 → 同步文档 → 递增版本号（三处）→ git 提交（Conventional + adjNN）→ 打包**
+7. 版本发布顺序：**改码 → 同步文档 → 判定版本递增（按内容大小）→ 递增版本号（多处同步）→ git 提交（Conventional + adjNN）→ 打 git tag → 打包**。完整规则见 `docs/VERSIONING.md`「发布操作流程」；引擎更新需同步 `obsidian-ijipu/vendor/engine` 并单独提交 + 打 tag。（触发词：用户说「**更新要提交**」/「**提交更新**」即按此整串执行——ijipu 判版本幅增、双库各自升版本、记录、git 提交 + 打 tag。）
 
 ## 六、临时验证脚本
 - 命名 `scripts/_tmp_*.mts`，用后**必删**、禁提交 git；引擎验证优先并入 smoke
