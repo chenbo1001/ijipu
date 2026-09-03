@@ -64,13 +64,14 @@ npm run tauri:build  # 复用 npm run build（前端 dist），版本随 package
 ---
 ## 双仓库联动（ijipu 引擎 ↔ obsidian-ijipu）
 
-- **当 ijipu 更新涉及引擎代码**（`packages/ijipu-engine/src/engine/`）时，`obsidian-ijipu` 也需要发布：
+- **版本号策略：两库各自独立，不强制对齐**。`ijipu`（网页应用）与 `obsidian-ijipu`（Obsidian 插件）只有**引擎（`vendor/engine`）是共用引用**，插件代码与网页代码分开，各自按自己的发布节奏与代码更新量递增版本号。引擎同步只是 obsidian-ijipu 版本递增的一类原因，不代表其版本号必须等于 ijipu。
+- **当 ijipu 更新涉及引擎代码**（`packages/ijipu-engine/src/engine/`）时，`obsidian-ijipu` 需要同步发布：
   1. 把 ijipu 引擎改动的文件同步到 `obsidian-ijipu/vendor/engine/`（vite 将 `@ijipu/engine` 别名到 `vendor/engine/index.ts`，是自包含镜像）。
      - 用文件 hash 对比确认哪些引擎文件有差异（DIFF），复制覆盖；同步后用 hash 校验一致。
-  2. **判断 obsidian-ijipu 版本递增**：若有**引擎更新**（vendored 引擎变化）或**自身插件代码更新**（`src/`、manifest、设置等），则递增 `obsidian-ijipu` 版本号（`package.json` + `manifest.json`）；仅文档/素材变化可不升。
-  3. 记录更新（`obsidian-ijipu` 若有 CHANGELOG 则同步）。
+  2. **判断 obsidian-ijipu 版本递增**（按其自身代码更新量，非照抄 ijipu 版本号）：若有**引擎更新**（vendored 引擎变化）或**自身插件代码更新**（`src/`、manifest、设置等），则递增 `obsidian-ijipu` 版本号（`package.json` + `manifest.json`）；仅文档/素材变化可不升。
+  3. 记录更新（`obsidian-ijipu/docs/RELEASE-NOTES.md` 顶部加对应版本条目）。
   4. 验证：`tsc -noEmit -skipLibCheck` 通过（vite `npm run build` 在 DSH 沙箱可能因 spawn 限制失败，属环境限制、非代码问题；`main.js` 为构建产物且已 gitignore）。
-  5. **git 提交 + 打 tag**：`git tag <版本号>`（对齐 ijipu，无 `v` 前缀）。
+  5. **git 提交 + 打 tag**：`git tag <obsidian-ijipu 自身版本号>`（无 `v` 前缀）。
 
-> 简化准则：**`ijipu` 有代码更新 → 判版本、记录、两库各自升版本、git 提交 + 打 tag；其中引擎更新需同步到 `obsidian-ijipu` 并单独提交 + 打 tag。**
+> 简化准则：**`ijipu` 有代码更新 → 按内容判版本、记录、提交 + 打 tag；若涉及引擎更新，同步 `obsidian-ijipu/vendor/engine` 并按 obsidian-ijipu 自身更新量判其版本、补 RELEASE-NOTES、提交 + 打 tag。两库版本号各自独立，不因引用同一个引擎而强行对齐。**
 
