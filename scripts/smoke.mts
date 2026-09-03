@@ -310,6 +310,8 @@ check('adj192 带声部名模板含 cursorAt（光标停引号内）', HEADER_HI
   check('曲部输入 & 空前缀 → 弹列表含力度 pp/mp/rit', fn.some((h) => h.code === 'pp') && fn.some((h) => h.code === 'mp') && fn.some((h) => h.code === 'rit'), '')
   const ffilt = filterModifierHints('f', false)
   check('输入 &f 前缀 → 过滤出 f/ff/fff（力度）', ['f', 'ff', 'fff'].every((c) => ffilt.some((h) => h.code === c)), ffilt.map((h) => h.code).join(','))
+  // adj334：吐音/打音/叠音修饰符在音符修饰符池
+  check('adj334 音符修饰符池含 tu/ku/da/die', ['tu', 'ku', 'da', 'die'].every((c) => NOTE_MODIFIER_HINTS.some((h) => h.code === c)), NOTE_MODIFIER_HINTS.map((h) => h.code).join(','))
 }
 // adj165：当前行背景 + 当前音符区块背景（光标行/列；Q: 为 3 字符，rest 从 col=3 起）
 // adj171：当前行整行背景由 EditorPane 铺满层渲染，highlightCode 不再输出 hl-current-line
@@ -846,6 +848,20 @@ check('力度记号花体渲染（斜体加粗 + Segoe Script + mp）', /<text[^
   const rRit = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1&rit 2 |\n')
   const svgRit = renderScoreToSvg(layoutScore(rRit, DUR_CFG))[0]
   check('rit 用花体文字（font-family 含 Segoe Script）', /<text[^>]*font-family="[^"]*Segoe Script[^"]*"[^>]*>rit<\/text>/.test(svgRit), '')
+}
+// adj334：音符上方单字修饰符——吐音/打音/叠音在音符正上方居中显示一个粗体字形
+{
+  const rAb = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1&tu 2&ku 3&da 4&die |\n')
+  const svgAb = renderScoreToSvg(layoutScore(rAb, DUR_CFG))[0]
+  check('吐音 &tu → 音符上方粗体 T（居中）', /<text[^>]*text-anchor="middle"[^>]*font-weight="bold"[^>]*>T<\/text>/.test(svgAb), '')
+  check('吐音 &ku → 音符上方粗体 K（居中）', /<text[^>]*text-anchor="middle"[^>]*font-weight="bold"[^>]*>K<\/text>/.test(svgAb), '')
+  check('打音 &da → 音符上方粗体 扌（居中）', /<text[^>]*text-anchor="middle"[^>]*font-weight="bold"[^>]*>扌<\/text>/.test(svgAb), '')
+  check('叠音 &die → 音符上方粗体 又（居中，横向缩 0.75）', /<text[^>]*transform="[^"]*scale\(0\.75,1\)"[^>]*font-weight="bold"[^>]*>又<\/text>/.test(svgAb), '')
+  // 归属验证：&tu 应居中于**它前面**的数字 1 上方（T 的 x 落在数字 1 的槽内偏右中部），
+  // 证明修饰符修饰的是前方音符，而非独立/错位。
+  const n1X = Number(svgAb.match(/<text x="([\d.]+)" y="[^"]+" data-notepos="[^"]+"[^>]*>1<\/text>/)?.[1] ?? 'NaN')
+  const tX = Number(svgAb.match(/<text x="([\d.]+)" y="[^"]+" text-anchor="middle"[^>]*font-weight="bold"[^>]*>T<\/text>/)?.[1] ?? 'NaN')
+  check('&tu 归属前方音符（T 居中于数字 1 上方）', !Number.isNaN(n1X) && !Number.isNaN(tX) && tX > n1X && tX - n1X < 12, `n1X=${n1X} tX=${tX}`)
 }
 // adj：渐强渐弱起点/终点取「< > ! 所跟音符」的数字槽中心（不再是小节末音符）
 {
