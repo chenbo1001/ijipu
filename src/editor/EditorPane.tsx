@@ -13,7 +13,7 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { highlightCodeWrapped } from './highlight'
 import type { BlockMarks } from './highlight'
-import { formatLine, codePosToNoteId, INSTRUMENT_LIB_NAMES } from '@ijipu/engine'
+import { formatLine, codePosToNoteId } from '@ijipu/engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 import { isBarlineModifierContext, filterModifierHints } from './completions'
 import { ScriptToolbar } from './ScriptToolbar'
@@ -199,12 +199,7 @@ export function EditorPane() {
     const lines = code.split('\n')
     let offset = 0
     for (let i = 0; i < line - 1 && i < lines.length; i++) offset += lines[i].length + 1
-    const isCur = cursor && cursor.line === line
-    if (!isCur) {
-      jumpCursor(offset)
-      return
-    }
-    // 点击当前行 → 跳到错误位置（若该行有错误）
+    // adj338：点击行号 → 跳到该行第一个告警/错误的问题列（无则行首），不受是否当前行限制
     const errs = errByLine.get(line)
     if (errs && errs.length > 0) {
       const first = [...errs].sort((a, b) => a.col - b.col)[0]
@@ -506,38 +501,16 @@ export function EditorPane() {
     })
     // adj314：描述头（行首 Tab 补全）已由嵌入式输入工具条「描述头」组整段覆盖，取消弹列表；
     // 行首命令快捷键（Q/C/B/...）等行为保留在 onKeyDown。
-    // adj302：Y 行乐器补全——光标在 Y: 行、已按空格或输入 @（进入填乐器阶段）时弹音色库列表
-    if (/^Y\s*:/.test(lineBefore) && /\s/.test(lineBefore.slice(lineBefore.indexOf(':')))) {
-      const after = lineBefore.replace(/^Y\s*:\s*@?/, '') // 已输入前缀（含可选 @ 剥离）
-      const items = Object.values(INSTRUMENT_LIB_NAMES)
-        .filter((n) => n.startsWith(after))
-        .map((n) => ({ code: n, label: '乐器' }))
-      if (items.length > 0) {
-        const { line, col } = lineColOf(ta.value, pos)
-        setCompletion({ kind: 'instrument', items, index: 0, ...compPos(line, col) })
-      } else {
-        setCompletion(null)
-      }
-      return
-    }
-    // 仅 Q 行（曲行）内提示
+    // adj335：取消 Y 行乐器补全（与 @ 补全一致）——乐器由输入工具条一步插入，或手动输入
+    // `Y: @库id:乐器"显示名"` / `@乐器名`；避免补全列表过长。
     if (!/^Q(\d*(?:"[^"]*")?\s*:)/.test(lineBefore) && !/^\s*Q/.test(lineBefore)) {
       setCompletion(null)
       return
     }
-    // adj302b：曲行内 @ 乐器补全——输入 @（或 @ + 前缀）时弹音色库乐器列表
-    const instM = /@([^@\s]*)$/.exec(lineBefore)
-    if (instM) {
-      const after = instM[1] // @ 后已输入前缀（剥离 @）
-      const items = Object.values(INSTRUMENT_LIB_NAMES)
-        .filter((n) => n.startsWith(after))
-        .map((n) => ({ code: '@' + n, label: '乐器' }))
-      if (items.length > 0) {
-        const { line, col } = lineColOf(ta.value, pos)
-        setCompletion({ kind: 'instrument', items, index: 0, ...compPos(line, col) })
-      } else {
-        setCompletion(null)
-      }
+    // adj335：取消曲行内 @ 乐器自动补全——动态乐器多时列表过长不便选择；
+    // @乐器名 由用户手动输入（解析器仍识别），且输入工具条「乐器」组已可一步插入。
+    if (modifierPrefix(lineBefore) === null) {
+      setCompletion(null)
       return
     }
     const mod = modifierPrefix(lineBefore)
@@ -801,10 +774,14 @@ export function EditorPane() {
               const vis = visualLines[n - 1] ?? 1
               // adj322：当前源码行（光标所在行）的行号也高亮，与整行背景统一（gutter-current）
               const cur = cursor && cursor.line === n
+              // adj338：区分告警/错误，且告警/错误背景优先于当前行高亮——有 err 就不用 gutter-current
+              const hasErr = errs?.some((e) => e.severity === 'error')
+              const hasWarn = errs?.some((e) => e.severity !== 'error')
+              const gutterCls = `gutter-line${hasErr ? ' gutter-err' : hasWarn ? ' gutter-warn' : ''}${cur && !errs ? ' gutter-current' : ''}`
               return (
                 <div
                   key={n}
-                  className={`gutter-line${errs ? ' gutter-err' : ''}${cur ? ' gutter-current' : ''}`}
+                  className={gutterCls}
                   style={{ height: vis * lineH }}
                   title={errs?.map((e) => e.msg).join('\n')}
                   onClick={() => onGutterClick(n)}

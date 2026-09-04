@@ -24,8 +24,9 @@ export function Modal({
   maskDim?: number
   /** 点击遮罩区域是否关闭（false = 仅 ✕ 或 Esc 关闭） */
   closeOnMaskClick?: boolean
-  /** 初始停靠位置（adj158：'bottom-right' = 窗口右下角；拖动后以用户位置为准） */
-  dock?: 'bottom-right'
+  /** 初始停靠位置（adj158：'bottom-right' = 窗口右下角；'bottom-left' = 左下角；
+   *  adj326：试听对话框按编辑区方位选角，打开即停靠；拖动后以用户位置为准） */
+  dock?: 'bottom-left' | 'bottom-right'
   /** 紧凑模式（缩小边距与最小宽，adj158：试听对话框用） */
   compact?: boolean
   /** adj315：关闭（Esc/✕/遮罩）前回调——用于"取消不保存"时恢复设置快照 */
@@ -75,8 +76,8 @@ export function Modal({
 
   // adj158：dock 停靠样式（未拖动时生效）；拖动后回退到用户位置
   const dockStyle =
-    pos === null && dock === 'bottom-right'
-      ? { position: 'fixed' as const, right: 16, bottom: 16, margin: 0 }
+    pos === null && (dock === 'bottom-left' || dock === 'bottom-right')
+      ? { position: 'fixed' as const, bottom: 16, margin: 0, ...(dock === 'bottom-left' ? { left: 16 } : { right: 16 }) }
       : undefined
   const modalStyle = {
     // adj284：遮罩透明（maskDim=0）时遮罩 pointer-events:none 事件穿透，

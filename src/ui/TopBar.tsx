@@ -204,6 +204,7 @@ export function TopBar() {
   const toolBtns = [
     // —— 功能组（原顶栏功能按钮组） ——
     { key: 'guides', label: '排版', group: 'topbar' as const, kind: 'btn' as const, active: showGuides, onPick: () => setShowGuides(!showGuides) },
+    { key: 'soundbanks', label: '音色库', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('soundbanks') },
     { key: 'playback', label: '试听', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('playback') },
     { key: 'pageConfig', label: '设置', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('pageConfig') },
     { key: 'export', label: '导出', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('export') },
@@ -668,6 +669,7 @@ export function TopBar() {
   ]
   const playEntries: (MenuEntry | 'sep')[] = [
     { label: '试听播放(&P)', kbd: 'Ctrl+Q', hotkey: 'p', onPick: () => openModal('playback') },
+    { label: '音色库管理(&B)', hotkey: 'b', onPick: () => openModal('soundbanks') },
   ]
   const helpEntries: (MenuEntry | 'sep')[] = [
     { label: '快捷键速查(&K)', kbd: 'Ctrl+~', hotkey: 'k', onPick: () => openModal('shortcuts') },

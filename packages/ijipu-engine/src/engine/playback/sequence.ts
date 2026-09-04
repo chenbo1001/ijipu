@@ -11,8 +11,7 @@
 import type { BarlineMark, BarlineType, ParseResult, PlacedBarline, PlacedToken, ScoreLayout } from '../types'
 import { tokenDuration } from '../duration'
 import { parseKey, pitchToName } from '../layout/index'
-import { resolveInstrument } from './instruments'
-import type { InstrumentId } from './instruments'
+import { parseInstrumentRef } from './instruments'
 
 /**
  * 解析音符 id（"page_voice_group_index"）为全局音符序号定位起点。
@@ -157,11 +156,13 @@ export function buildPlaySequence(
   // adj301/302：全局默认乐器 = 描述头第一个 Y 乐器（name 与试听音色库一致，无则音色库第一个钢琴）。
   // 多声部按声部序号对应 Y 行顺序（Q1→Y[0]、Q2→Y[1]…）；声部比 Y 行多时用全局默认。
   // @乐器名 覆盖声部默认（全局持续直到 @@），@@ 清除覆盖（回声部默认）
+  // adj339：Y 行默认乐器支持 `@库id:乐器名["显示名"]`（parseInstrumentRef 剥库前缀/显示名/可选 @），
+  // 缺省仍是旧写法（如 `钢琴` / `@小提琴`），路由交给播放端。
   const yInstruments = result.header.instruments
-  const defaultInstrument = resolveInstrument(yInstruments?.[0])
-  const voiceDefaultOf = (voice: number): InstrumentId => {
+  const defaultInstrument = parseInstrumentRef(yInstruments?.[0] ?? '').ref
+  const voiceDefaultOf = (voice: number): string => {
     const y = yInstruments?.[voice - 1]
-    return y !== undefined ? resolveInstrument(y) : defaultInstrument
+    return y !== undefined ? parseInstrumentRef(y).ref : defaultInstrument
   }
 
   // 2. 重建交错序列（音符 + 小节线），保持源码顺序
@@ -320,7 +321,10 @@ export function buildPlaySequence(
   let passMs = 0
   let passEndMs = 0
   // adj301：@乐器名 覆盖当前乐器（全局持续）；@@（null）清覆盖（回声部默认）。初始无覆盖 → 各声部用自己 Y 乐器
-  let overridden: InstrumentId | null = null
+  // adj301：@乐器名 覆盖当前乐器（全局持续）；@@（null）清覆盖（回声部默认）。
+  // adj334：保留原始名（可为 `音色名` 或 `库id:音色名`），由 instrumentToProgram 在播放端路由，
+  // 不再压缩成固定 6 种——否则动态采样音色名会丢失。
+  let overridden: string | null = null
   const keySemitone = parseKey(result.header.key)
   // adj88：连音线内相同音高连续音符连奏合并——上一个已发事件的音符索引与音高；
   // 当前音符若与上一个音高相同、同属某连音线且中间无音符（索引相邻），则时值并入前一事件
@@ -330,7 +334,7 @@ export function buildPlaySequence(
     const item = seq[i]
     if (item.kind === 'instrument') {
       // adj301：@乐器名 切换（覆盖声部默认）；@@（name=null）清除覆盖（回声部默认）
-      overridden = item.instr?.name != null ? resolveInstrument(item.instr.name) : null
+      overridden = item.instr?.name ?? null
       i++
       continue
     }
@@ -380,7 +384,7 @@ export function buildPlaySequence(
         i++
         continue
       }
-      const instrument = overridden ?? voiceDefaultOf(placed.id.voice)
+      const instrument = overridden != null ? parseInstrumentRef(overridden).ref : voiceDefaultOf(placed.id.voice)
       // 倚音（adj23）：前倚音提前于主音符、后倚音紧跟主音符，时值 1/8 拍，音高用倚音音符本身
       const gn = token.kind === 'note' ? token.gracenotes : undefined
       const graceMs = (0.125 * 60000) / bpm

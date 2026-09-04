@@ -138,7 +138,7 @@ const HEADER_KEYS: PadKey[] = [
 const INSTRUMENT_KEYS: PadKey[] = [
   ...Object.values(INSTRUMENT_LIB_NAMES).map((name) => ({
     label: name,
-    insert: `@${name}`,
+    insert: `@${name}@`,
     hint: `切换乐器：${name}`,
   })),
   { label: '@@', insert: '@@', hint: '切回默认乐器' },

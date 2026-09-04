@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW } from '@ijipu/engine/index.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
-import { buildPlaySequence, inferBpm, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, pcmToWav } from '@ijipu/engine/playback/index.ts'
+import { buildPlaySequence, inferBpm, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork } from '@ijipu/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, NOTE_COMMENT_FONT_RATIO, noteScaleOf, lowDotY, octaveDotY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from '@ijipu/engine/layout/spacing.ts'
@@ -2868,6 +2868,32 @@ console.log('[73] deep-nested junction (adj321b)')
   const j1922r = slurs73.find((s) => s.half === 'r' && Math.abs(s.x2 - (n22.x + halfDig)) < 1.5)
   check('adj321b 深嵌套连接点：idx22→idx23（连接点起新连音）', !!j2223, `x1=${j2223?.x1?.toFixed(1)} x2=${j2223?.x2?.toFixed(1)} (n22=${n22?.x?.toFixed(1)} n23=${n23?.x?.toFixed(1)})`)
   check('adj321b 深嵌套连接点：跨行右半终止于 idx22（连接点）', !!j1922r, `x2=${j1922r?.x2?.toFixed(1)} (n22=${n22?.x?.toFixed(1)})`)
+}
+
+// ---- 74. 采样色库元数据 + 联网分类（adj323） ----
+console.log('[74] sampler library metadata & network classify (adj323)')
+{
+  check('adj323 getSamplerLibrary 命中 id', getSamplerLibrary('violin').id === 'violin')
+  check('adj323 getSamplerLibrary 未知 id 回退默认库', getSamplerLibrary('__nope__').id === SAMPLER_LIBRARIES[0].id)
+  check('adj323 SAMPLER_LIBRARIES 首个为默认', SAMPLER_LIBRARIES[0].id === getSamplerLibrary().id)
+  check('adj323 离线分类', classifyNetwork({ online: false }) === 'offline')
+  check('adj323 WiFi 分类', classifyNetwork({ online: true, type: 'wifi' }) === 'wifi')
+  check('adj323 以太网分类', classifyNetwork({ online: true, type: 'ethernet' }) === 'ethernet')
+  check('adj323 慢网分类（3g）', classifyNetwork({ online: true, effectiveType: '3g' }) === 'slow')
+  check('adj323 未知在线分类', classifyNetwork({ online: true }) === 'unknown')
+}
+
+// ---- 75. @...@ 乐器语法 + 旧写法告警（adj337/338） ----
+console.log('[75] @...@ instrument syntax & legacy warning (adj337/338)')
+{
+  const f1 = formatLine('Q: @电吉他(清音)@ 1 |')
+  check('adj337 @...@ 格式化原样（不拆括号）', f1.includes('@电吉他(清音)@') && !f1.includes('@电吉他 (清音)'), f1)
+  const f2 = formatLine('Q: 1 @小提琴@ 2 |')
+  check('adj337 @...@ 格式化原样（单乐器）', f2.includes('@小提琴@'), f2)
+  const r1 = parseJps('V: 1.0\nB: t\nD: C\nQ: @小提琴 |') // 旧写法（无尾 @）
+  check('adj338 旧写法 @小提琴 触发告警', r1.errors.some((e) => (e as { severity?: string }).severity === 'warning'), `errors=${r1.errors.length}`)
+  const r2 = parseJps('V: 1.0\nB: t\nD: C\nQ: @小提琴@ |') // 新语法
+  check('adj338 新语法 @小提琴@ 无告警', !r2.errors.some((e) => (e as { severity?: string }).severity === 'warning'), `errors=${r2.errors.length}`)
 }
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)

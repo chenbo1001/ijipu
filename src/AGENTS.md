@@ -15,6 +15,7 @@
 | `ui/` | 通用组件：MenuBar、Toolbar、Modal、StatusBar | 无业务状态，只消费 store；图标/按钮样式走 CSS 变量 |
 | `dialogs/` | 功能对话框：PageConfig、Playback、Export、Samples、Shortcuts、About | 每个对话框一个文件，统一用 `ui/Modal`；打开/关闭走 uiStore.modal |
 | `export/` | 导出模块：PDF/JPG/SVG/PNG（export.ts） | 纯函数 + 浏览器下载，仅在用户主动触发时执行 |
+| `playback/` | 播放辅助：采样音色库离线缓存（浏览器 IndexedDB / Tauri 文件系统，samplerCache.ts，adj323） | 实现 engine 的 `SamplerCache` 接口；只做缓存读写与预缓存编排，音频播放仍走 engine |
 | `brand/` | 品牌层：tokens（色板/字体/口号）、copy（面向用户文案）、themes（中国色主题）、version（版本号） | 所有品牌字面量集中于此，禁止在其它代码硬编码文案/色值/版本号 |
 | `styles/` | 主题样式：theme.css（品牌 token CSS 变量） | 样式统一用 `var(--jp-*)` 变量，禁止散落魔法色值 |
 | `gen/` | 自动生成：buildInfo.ts（BUILD_DATE/GIT_COMMIT） | 由 scripts/gen-build-info.mjs 生成，**禁止手改**（已在 .gitignore） |

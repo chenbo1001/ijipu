@@ -68,3 +68,28 @@ export const uiCopy = {
   // 降级用 <input type=file> 载入 .jps 文本——已载入但无法写回磁盘，提示改用「导出」保存
   openFallbackNotice: '已载入文件；此环境无法写回磁盘，请用「文件 → 导出」保存成果',
 } as const
+
+/** 试听播放文案（adj323：模式/采样色库/缓存状态/网络提示） */
+export const playbackCopy = {
+  /** 试听模式选项 */
+  modeSynth: '合成（快速）',
+  modeSampler: '采样（高质量）',
+  modeSamplerHq: '采样-高保真(SpessaSynth)',
+  /** 合成乐器下拉 label */
+  synthLabel: '音色',
+  /** 采样色库下拉 label */
+  samplerLabel: '音色库',
+  /** 采样加载状态 */
+  loading: '加载中…',
+  loaded: '已加载',
+  failedFallback: '已回退合成',
+  /** 缓存状态（P1 进度/离线接入） */
+  cacheMiss: '未缓存',
+  cacheCached: '已缓存',
+  /** 缓存动作按钮 */
+  cacheButton: '缓存',
+  cacheAllButton: '缓存全部',
+  caching: '缓存中…',
+  /** 离线提示 */
+  offline: '离线：仅能播放已缓存音色库',
+} as const

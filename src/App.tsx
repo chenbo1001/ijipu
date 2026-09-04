@@ -16,6 +16,7 @@ import { AboutDialog } from './dialogs/AboutDialog'
 import { SamplesDialog } from './dialogs/SamplesDialog'
 import { PageConfigDialog } from './dialogs/PageConfigDialog'
 import { PlaybackDialog } from './dialogs/PlaybackDialog'
+import { SoundBankDialog } from './dialogs/SoundBankDialog'
 import { ExportDialog } from './dialogs/ExportDialog'
 import { ShortcutsDialog } from './dialogs/ShortcutsDialog'
 import { DocDialog } from './dialogs/DocDialog'
@@ -197,6 +198,7 @@ function App() {
       {modal === 'samples' && <SamplesDialog />}
       {modal === 'pageConfig' && <PageConfigDialog />}
       {modal === 'playback' && <PlaybackDialog />}
+      {modal === 'soundbanks' && <SoundBankDialog />}
       {modal === 'export' && <ExportDialog />}
       {modal === 'shortcuts' && <ShortcutsDialog />}
       {modal === 'manual' && <DocDialog kind="manual" />}

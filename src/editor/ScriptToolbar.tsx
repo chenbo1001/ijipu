@@ -14,7 +14,9 @@
  * 本组件纯 UI：插入逻辑经 props 的 onInsert 交由 EditorPane 统一处理。
  */
 import { useRef, type RefObject } from 'react'
+import { useUiStore } from '../store/uiStore'
 import { PAD_GROUPS, PAD_KB_KEY, type PadGroup } from './padLayout'
+import { GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
 
 export function ScriptToolbar({
   padAreaRef,
@@ -32,6 +34,22 @@ export function ScriptToolbar({
   kbActive: boolean
 }) {
   const btnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  // adj333：动态「乐器」——把收藏的采样音色（GM 音色）加入乐器组，插入 @名
+  const hqEnabled = useUiStore((s) => s.playbackHqEnabled)
+  const hqVoiceKeys = hqEnabled
+    .map((program) => GM_VOICE_OPTIONS.find((v) => v.program === program))
+    .filter((v): v is NonNullable<typeof v> => !!v)
+    .map((v) => {
+      const name = v.label.replace(/^\d+\s*/, '') // 去编号前缀，只用音色名
+      // adj339：用 @...@ 包裹（安全，防止 () 等被格式化拆分；缺省显示名=乐器名）
+      return { label: name, insert: `@${name}@`, hint: `切换采样乐器：${name}` }
+    })
+
+  const openGroup = (g: PadGroup, rect: DOMRect) => {
+    // inst 组动态附加收藏采样音色（纯名 @乐器）
+    const ext = g.id === 'inst' && hqVoiceKeys.length > 0 ? { ...g, keys: [...g.keys, ...hqVoiceKeys] } : g
+    onGroupMenuOpen(ext, rect)
+  }
 
   return (
     <div className="script-pad" role="toolbar" aria-label="简谱输入工具条" ref={padAreaRef}>
@@ -49,7 +67,7 @@ export function ScriptToolbar({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
               const el = btnRefs.current[g.id]
-              if (el) onGroupMenuOpen(g, el.getBoundingClientRect())
+              if (el) openGroup(g, el.getBoundingClientRect())
             }}
           >
             <span className="pad-key-icon">{g.icon}</span>

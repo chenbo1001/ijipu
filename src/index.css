@@ -1107,6 +1107,13 @@ body {
   background: color-mix(in srgb, var(--jp-accent) 14%, transparent);
 }
 
+/* adj338：告警行（警告级，如旧 @乐器名 建议改 @...@）——黄色背景，优先级高于当前行高亮 */
+.gutter-line.gutter-warn {
+  color: var(--jp-warning);
+  font-weight: 700;
+  background: rgba(255, 200, 87, 0.18);
+}
+
 .editor-main {
   flex: 1;
   position: relative;
