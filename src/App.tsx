@@ -4,7 +4,7 @@
  *   TopBar（合并原菜单栏 + 工具栏）/ 主区域（编码·拆分·预览）/
  *   EditorFootBar（合并原脚本编辑器顶栏 + 状态栏）+ 模态框
  */
-import { useEffect, useRef } from 'react'
+import { Suspense, lazy, useEffect, useRef } from 'react'
 import { TopBar } from './ui/TopBar'
 import { EditorFootBar } from './ui/EditorFootBar'
 import { Toast } from './ui/Toast'
@@ -12,15 +12,16 @@ import { EditorPane } from './editor/EditorPane'
 import { PreviewPane } from './preview/PreviewPane'
 import { useDocStore } from './store/docStore'
 import { useUiStore } from './store/uiStore'
-import { AboutDialog } from './dialogs/AboutDialog'
-import { SamplesDialog } from './dialogs/SamplesDialog'
-import { PageConfigDialog } from './dialogs/PageConfigDialog'
-import { PlaybackDialog } from './dialogs/PlaybackDialog'
-import { SoundBankDialog } from './dialogs/SoundBankDialog'
-import { ExportDialog } from './dialogs/ExportDialog'
-import { ShortcutsDialog } from './dialogs/ShortcutsDialog'
-import { DocDialog } from './dialogs/DocDialog'
-import { DonateDialog } from './dialogs/DonateDialog'
+// adj350：对话框懒加载（React.lazy）——首屏不加载它们，显著减小主包、加快首屏显示
+const AboutDialog = lazy(() => import('./dialogs/AboutDialog').then((m) => ({ default: m.AboutDialog })))
+const SamplesDialog = lazy(() => import('./dialogs/SamplesDialog').then((m) => ({ default: m.SamplesDialog })))
+const PageConfigDialog = lazy(() => import('./dialogs/PageConfigDialog').then((m) => ({ default: m.PageConfigDialog })))
+const PlaybackDialog = lazy(() => import('./dialogs/PlaybackDialog').then((m) => ({ default: m.PlaybackDialog })))
+const SoundBankDialog = lazy(() => import('./dialogs/SoundBankDialog').then((m) => ({ default: m.SoundBankDialog })))
+const ExportDialog = lazy(() => import('./dialogs/ExportDialog').then((m) => ({ default: m.ExportDialog })))
+const ShortcutsDialog = lazy(() => import('./dialogs/ShortcutsDialog').then((m) => ({ default: m.ShortcutsDialog })))
+const DocDialog = lazy(() => import('./dialogs/DocDialog').then((m) => ({ default: m.DocDialog })))
+const DonateDialog = lazy(() => import('./dialogs/DonateDialog').then((m) => ({ default: m.DonateDialog })))
 
 function App() {
   const viewType = useDocStore((s) => s.viewType)
@@ -194,16 +195,16 @@ function App() {
       <EditorFootBar />
       <Toast />
 
-      {modal === 'about' && <AboutDialog />}
-      {modal === 'samples' && <SamplesDialog />}
-      {modal === 'pageConfig' && <PageConfigDialog />}
-      {modal === 'playback' && <PlaybackDialog />}
-      {modal === 'soundbanks' && <SoundBankDialog />}
-      {modal === 'export' && <ExportDialog />}
-      {modal === 'shortcuts' && <ShortcutsDialog />}
-      {modal === 'manual' && <DocDialog kind="manual" />}
-      {modal === 'syntax' && <DocDialog kind="syntax" />}
-      {modal === 'donate' && <DonateDialog />}
+      {modal === 'about' && <Suspense fallback={null}><AboutDialog /></Suspense>}
+      {modal === 'samples' && <Suspense fallback={null}><SamplesDialog /></Suspense>}
+      {modal === 'pageConfig' && <Suspense fallback={null}><PageConfigDialog /></Suspense>}
+      {modal === 'playback' && <Suspense fallback={null}><PlaybackDialog /></Suspense>}
+      {modal === 'soundbanks' && <Suspense fallback={null}><SoundBankDialog /></Suspense>}
+      {modal === 'export' && <Suspense fallback={null}><ExportDialog /></Suspense>}
+      {modal === 'shortcuts' && <Suspense fallback={null}><ShortcutsDialog /></Suspense>}
+      {modal === 'manual' && <Suspense fallback={null}><DocDialog kind="manual" /></Suspense>}
+      {modal === 'syntax' && <Suspense fallback={null}><DocDialog kind="syntax" /></Suspense>}
+      {modal === 'donate' && <Suspense fallback={null}><DonateDialog /></Suspense>}
     </div>
   )
 }
