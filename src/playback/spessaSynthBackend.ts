@@ -28,15 +28,17 @@ export interface HqSampleLibrary {
   sizeBytes: number
   format: 'sf2' | 'sf3' | 'dls'
 }
-/** adj330/341：可切换的高质量音源库列表。默认库已内置本地（public/soundfonts/，离线可用）。
+/** adj330/341/346：可切换的高质量音源库列表。默认库已内置（桌面打包资源 / Web 远端加载）。
  *  加库只需追加一条元数据。 */
 export const HQ_LIBRARIES: HqSampleLibrary[] = [
   {
     id: 'generaluser_gs',
     name: '通用音源（GeneralUser GS）',
-    // adj341：本地内置优先（随应用/网站提供，离线可用）；缺失回退联网 raw
-    source: `${import.meta.env.BASE_URL}soundfonts/generaluser_gs.sf2`,
-    fallbackSource: 'https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/GeneralUser-GS.sf2',
+    // adj346：SF2 不打包进 Web 产物（规避 Cloudflare Pages 单文件 25MB 限制），改为远端加载：
+    //   Web 源用 GitHub raw；有 Cloudflare R2 公开桶时把 `source` 换成 R2 公开 URL（更快更稳）。
+    //   桌面（Tauri）离线由 loadHqBank 读内置打包资源，不走此 source。
+    source: 'https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/GeneralUser-GS.sf2',
+    fallbackSource: '',
     sizeBytes: 32_319_396,
     format: 'sf2',
   },
@@ -102,13 +104,41 @@ export const GM_VOICE_OPTIONS: { program: number; label: string }[] = [
   { program: 124, label: '124 电话铃' }, { program: 125, label: '125 直升机' }, { program: 126, label: '126 拍手声' }, { program: 127, label: '127 枪声' },
 ]
 
-/** 下载音源库（SF2/SF3/DLS）为 ArrayBuffer：优先本地内置（离线），失败回退 fallbackSource */
+/** 是否运行在 Tauri 桌面环境（window.__TAURI__ 由 withGlobalTauri 注入） */
+function detectTauri(): boolean {
+  try {
+    return typeof (window as unknown as { __TAURI__?: { core?: { invoke?: unknown } } }).__TAURI__?.core?.invoke === 'function'
+  } catch {
+    return false
+  }
+}
+
+/** 通过 Rust command 读内置音源资源（打包进桌面的 SF2，离线可用）为 ArrayBuffer */
+async function invokeResource(libId: string): Promise<ArrayBuffer> {
+  const inv = (window as unknown as { __TAURI__?: { core?: { invoke?: (c: string, a?: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__?.core?.invoke
+  if (typeof inv !== 'function') throw new Error('Tauri invoke 不可用')
+  const buf = (await inv('sf_soundfont_resource_read', { libId })) as ArrayBuffer | Uint8Array | number[]
+  if (buf instanceof ArrayBuffer) return buf
+  if (buf instanceof Uint8Array) return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
+  return new Uint8Array(buf).buffer
+}
+
+/** 下载音源库（SF2/SF3/DLS）为 ArrayBuffer（adj346）：桌面（Tauri）读内置打包资源（离线）；
+ *  Web 从远端 source 下载；失败回退 fallbackSource。 */
 export async function loadHqBank(lib: HqSampleLibrary): Promise<ArrayBuffer> {
+  // 桌面（Tauri）离线优先：读 bundle.resources 打包的 SF2；异常（未打包/dev）回退联网
+  if (detectTauri()) {
+    try {
+      return await invokeResource(lib.id)
+    } catch {
+      /* 资源缺失/非打包环境 → 走远端下载 */
+    }
+  }
   try {
     const res = await fetch(lib.source)
     if (res.ok) return await res.arrayBuffer()
   } catch {
-    /* 本地读取失败 → 走 fallback */
+    /* 下载失败 → 走 fallback */
   }
   if (lib.fallbackSource) {
     const res = await fetch(lib.fallbackSource)

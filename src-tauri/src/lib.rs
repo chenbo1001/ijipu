@@ -48,10 +48,31 @@ fn sf_cache_remove(app: tauri::AppHandle, lib_id: String) -> Result<(), String> 
     Ok(())
 }
 
+/// 读内置高质量音源资源（打包进桌面的 SF2/SF3，来自 bundle.resources，adj346）。
+/// 返回原始字节 Vec<u8>（前端 ArrayBuffer）；资源缺失时返回 Err（前端回退到联网下载）。
+#[tauri::command]
+fn sf_soundfont_resource_read(app: tauri::AppHandle, lib_id: String) -> Result<Vec<u8>, String> {
+    let dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| e.to_string())?
+        .join("soundfonts");
+    let path = dir.join(format!("{}.sf2", lib_id));
+    if !path.exists() {
+        return Err(format!("内置音源资源缺失: {}", path.display()));
+    }
+    std::fs::read(&path).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![sf_cache_read, sf_cache_write, sf_cache_remove])
+        .invoke_handler(tauri::generate_handler![
+            sf_cache_read,
+            sf_cache_write,
+            sf_cache_remove,
+            sf_soundfont_resource_read
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

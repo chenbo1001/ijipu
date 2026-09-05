@@ -1,5 +1,18 @@
 # iJipu 更新日志（Changelog）
 
+## [0.12.1] — 2026-09-05
+
+### 修复
+
+- **音色库改为独立附件 / Web 远端加载**（`adj346`）：32MB 的 generaluser_gs.sf2 不再打进 Web 产物（规避 Cloudflare Pages 单文件 25MB 上限），也不再嵌进 Tauri 单文件 exe/NSIS 安装包——Web 运行时从远端（GitHub raw）下载一次并缓存 IndexedDB，之后直接用；桌面端作为独立附件（`resources/soundfonts/`），打包后由 `scripts/prepare-tauri-soundfont.mjs` 复制到应用发布目录（exe 旁），运行时经 Rust `sf_soundfont_resource_read` 读取，未放置时回退远端。
+- `dist` 由 32.4MB 降至 1.6MB；tsc -b + npm run build + cargo check 通过。
+
+### 文档 / 版本
+
+- 发布流程：`npx tauri build` 后运行 `node scripts/prepare-tauri-soundfont.mjs` 把音色库作为独立附件复制到发布目录；版本号三处 + `package-lock` 同步 0.12.0 → 0.12.1。
+
+---
+
 ## [0.12.0] — 2026-09-05
 
 ### 功能

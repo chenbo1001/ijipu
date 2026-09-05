@@ -137,7 +137,7 @@ export function SoundBankDialog() {
           <input ref={fileSf2Ref} type="file" accept=".sf2,.sf3" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importDataFile(f); e.target.value = '' }} />
         </div>
         <div style={{ color: HIGHLIGHT, fontSize: 11 }}>
-          SpessaSynth 高保真为默认音源（SF2 内置本地、离线可用）；音色已随应用提供，无需联网下载。
+          SpessaSynth 高保真为默认音源：桌面端内置随应用提供（离线可用）；Web 端首次联网下载并缓存到本地，之后直接用。
         </div>
         <div>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>SpessaSynth 高保真（SF2/SF3，多力度层，GM 全集）</div>
