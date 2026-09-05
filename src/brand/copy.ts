@@ -69,27 +69,12 @@ export const uiCopy = {
   openFallbackNotice: '已载入文件；此环境无法写回磁盘，请用「文件 → 导出」保存成果',
 } as const
 
-/** 试听播放文案（adj323：模式/采样色库/缓存状态/网络提示） */
+/** 试听播放文案（adj344：固定 SpessaSynth 高保真——仅保留「音色」下拉相关文案） */
 export const playbackCopy = {
-  /** 试听模式选项 */
-  modeSynth: '合成（快速）',
-  modeSampler: '采样（高质量）',
-  modeSamplerHq: '采样-高保真(SpessaSynth)',
-  /** 合成乐器下拉 label */
+  /** 音色下拉 label（固定高保真，只列启用收藏音色） */
   synthLabel: '音色',
-  /** 采样色库下拉 label */
-  samplerLabel: '音色库',
-  /** 采样加载状态 */
+  /** 音源加载状态 */
   loading: '加载中…',
   loaded: '已加载',
-  failedFallback: '已回退合成',
-  /** 缓存状态（P1 进度/离线接入） */
-  cacheMiss: '未缓存',
-  cacheCached: '已缓存',
-  /** 缓存动作按钮 */
-  cacheButton: '缓存',
-  cacheAllButton: '缓存全部',
-  caching: '缓存中…',
-  /** 离线提示 */
-  offline: '离线：仅能播放已缓存音色库',
+  failedFallback: '加载失败',
 } as const

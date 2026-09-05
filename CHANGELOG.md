@@ -1,5 +1,19 @@
 # iJipu 更新日志（Changelog）
 
+## [0.12.0] — 2026-09-05
+
+### 功能
+
+- **试听固定 SpessaSynth 高保真**（`adj344`）：PlaybackDialog 去掉「模式/音色库」下拉，固定 SpessaSynth 高保真音源；「音色」下拉只列用户启用的收藏音色（GM program，在「音色库管理」勾选）；play() 收敛为高保真。音源仅首次使用时下载并缓存到 IndexedDB，后续直接读缓存，不再重复下载。
+- **移除合成/midi-js 试听**（`adj344`）：PlaybackDialog 移除 SynthBackend/sampler 分支与无关 import；engine 合成/采样后端保留为兼容代码（标注废弃，避免大动引擎）。
+- **音频导出改 SpessaSynth 高保真**（`adj345`）：export/audio.ts 用 OfflineAudioContext + SpessaSynth 离线渲染（eventsToMidi → BasicMIDI → WorkletSynthesizer.startOfflineRender → startRendering），WAV/MP3 导出与试听同为高保真。
+
+### 文档 / 版本
+
+- `docs/JPS-SPEC.md`、`docs/SOUNDBANKS-SPEC.md` 同步（试听固定高保真、可用乐器列表与播放路由更新）；版本号三处 + `package-lock` 同步 0.11.1 → 0.12.0；tsc -b + npm run build 验证通过（smoke 维持既有预存失败基线 17 项，与本次改动无关）。
+
+---
+
 ## [0.10.5] — 2026-09-02
 
 ### 功能

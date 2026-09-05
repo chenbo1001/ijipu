@@ -4,7 +4,6 @@
 import './localStorageMigration'
 import { create } from 'zustand'
 import { DEFAULT_THEME, DEFAULT_THEME_MODE, type ThemeMode } from '../brand/themes'
-import { getSamplerLibrary } from '@ijipu/engine'
 
 export type ModalKind =
   | 'about'
@@ -37,10 +36,6 @@ const SHOW_SCRIPT_PAD_KEY = 'ijipu.showScriptPad'
 const SHOW_GUIDES_KEY = 'ijipu.showGuides'
 // adj315：应用级视图偏好——左右拆分排列方向（默认视图已取消，改为记住顶栏上次设置）
 const SPLITH_DIR_KEY = 'ijipu.splitHDir'
-// adj323：试听偏好——模式（合成/采样）、合成乐器、采样库（记住用户上次选择）
-const PLAYBACK_MODE_KEY = 'ijipu.playbackMode'
-const PLAYBACK_SYNTH_KEY = 'ijipu.playbackSynthInstrument'
-const PLAYBACK_SAMPLER_KEY = 'ijipu.playbackSamplerLibrary'
 // adj330：SpessaSynth 高质量采样——音源库 + 全局音色（GM program）
 const PLAYBACK_HQ_LIBRARY_KEY = 'ijipu.playbackHqLibrary'
 const PLAYBACK_HQ_VOICE_KEY = 'ijipu.playbackHqVoice'
@@ -80,41 +75,6 @@ function loadNum(key: string, fallback: number): number {
   } catch {
     return fallback
   }
-}
-
-/** adj323/341：试听模式（合成/采样/高保真）；默认高保真（用户以 SpessaSynth 为默认音色） */
-function loadPlaybackMode(): 'synth' | 'sampler' | 'samplerHq' {
-  try {
-    const v = localStorage.getItem(PLAYBACK_MODE_KEY)
-    if (v === 'sampler') return 'sampler'
-    if (v === 'samplerHq') return 'samplerHq'
-    if (v === 'synth') return 'synth'
-  } catch {
-    /* 忽略 */
-  }
-  return 'samplerHq'
-}
-
-/** adj323：合成乐器（'auto' 或 InstrumentId），回退 auto */
-function loadPlaybackSynth(): string {
-  try {
-    const v = localStorage.getItem(PLAYBACK_SYNTH_KEY)
-    if (v) return v
-  } catch {
-    /* 忽略 */
-  }
-  return 'auto'
-}
-
-/** adj323：采样库 id，回退默认库 */
-function loadPlaybackSampler(): string {
-  try {
-    const v = localStorage.getItem(PLAYBACK_SAMPLER_KEY)
-    if (v) return v
-  } catch {
-    /* 忽略 */
-  }
-  return getSamplerLibrary().id
 }
 
 /** 当前系统浅深色偏好（无 matchMedia 时默认深色） */
@@ -189,12 +149,6 @@ interface UiState {
   isNarrow: boolean
   /** adj315：左右拆分的排列方向（previewLeft=左预览右编辑 / editorLeft=左编辑右预览） */
   splitHDir: 'previewLeft' | 'editorLeft'
-/** adj323：试听模式——synth=合成（快速试听） / sampler=采样（midi-js 中试听，adj328 前） / samplerHq=SpessaSynth 高质量采样 */
-  playbackMode: 'synth' | 'sampler' | 'samplerHq'
-  /** adj323：合成乐器（'auto'=按声部名自动路由，余同 INSTRUMENT_OPTIONS 合成项） */
-  playbackSynthInstrument: string
-  /** adj323：采样音色库 id（SAMPLER_LIBRARIES，空=默认库） */
-  playbackSamplerLibrary: string
   /** adj330：SpessaSynth 音源库 id（HQ_LIBRARIES，空=默认库） */
   playbackHqLibrary: string
   /** adj330：SpessaSynth 全局音色（GM program；null=按声部名自动路由） */
@@ -220,10 +174,6 @@ interface UiState {
   /** adj322：宽窄屏变化同步（matchMedia 'change' 回调） */
   setIsNarrow: (b: boolean) => void
   setSplitHDir: (d: 'previewLeft' | 'editorLeft') => void
-  /** adj323：试听偏好 setter */
-  setPlaybackMode: (m: 'synth' | 'sampler' | 'samplerHq') => void
-  setPlaybackSynthInstrument: (i: string) => void
-  setPlaybackSamplerLibrary: (id: string) => void
   /** adj330：SpessaSynth 试听偏好 setter */
   setPlaybackHqLibrary: (id: string) => void
   setPlaybackHqVoice: (program: number | null) => void
@@ -300,10 +250,6 @@ export const useUiStore = create<UiState>()((set) => ({
       return []
     }
   })(),
-  // adj323：试听偏好（记住上次选择；无则默认合成 + 自动 + 默认库）
-  playbackMode: loadPlaybackMode(),
-  playbackSynthInstrument: loadPlaybackSynth(),
-  playbackSamplerLibrary: loadPlaybackSampler(),
   openModal: (m) => set({ modal: m }),
   closeModal: () => set({ modal: null, playbackStartId: null }),
   setPlaybackStart: (id) => set({ playbackStartId: id }),
@@ -393,31 +339,6 @@ export const useUiStore = create<UiState>()((set) => ({
       /* 忽略 */
     }
     set({ splitHDir: d })
-  },
-  // adj323：试听偏好 setter（persist，范围钳制在合法两种值）
-  setPlaybackMode: (m) => {
-    try {
-      localStorage.setItem(PLAYBACK_MODE_KEY, m)
-    } catch {
-      /* 忽略 */
-    }
-    set({ playbackMode: m })
-  },
-  setPlaybackSynthInstrument: (i) => {
-    try {
-      localStorage.setItem(PLAYBACK_SYNTH_KEY, i)
-    } catch {
-      /* 忽略 */
-    }
-    set({ playbackSynthInstrument: i })
-  },
-  setPlaybackSamplerLibrary: (id) => {
-    try {
-      localStorage.setItem(PLAYBACK_SAMPLER_KEY, id)
-    } catch {
-      /* 忽略 */
-    }
-    set({ playbackSamplerLibrary: id })
   },
   // adj330：SpessaSynth 音源库 / 全局音色持久化
   setPlaybackHqLibrary: (id) => {

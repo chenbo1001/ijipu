@@ -1,36 +1,53 @@
 /**
- * export/audio.ts — 音频导出：离线渲染（OfflineAudioContext）+ WAV/MP3 编码（adj290）
+ * export/audio.ts — 音频导出：OfflineAudioContext + SpessaSynth 高保真离线渲染（adj345）
  *
- * 复用试听合成音色（renderSynthNote，多乐器按声部名路由），播放事件序列 →
- * AudioBuffer → WAV（零依赖）/ MP3（lamejs 纯 JS 编码，浏览器/桌面均离线可用）。
+ * 与试听同一 SpessaSynth 高保真音源（SF2 内置本地）：播放事件序列 → 标准 MIDI 字节
+ * （engine.eventsToMidi 复用）→ BasicMIDI → WorkletSynthesizer 在 OfflineAudioContext
+ * 上离线渲染 → AudioBuffer → WAV（零依赖）/ MP3（lamejs 纯 JS 编码，浏览器/桌面均离线可用）。
+ * adj345：导出由「合成渲染」改为 SpessaSynth 高保真离线渲染（导出也高保真，与试听一致）；
+ * 音源由调用方负责「仅首次使用时下载并缓存」（见 ExportDialog）。
  */
-import { renderSynthNote, pcmToWav } from '@ijipu/engine'
+import { eventsToMidi, pcmToWav, type PlayEvent } from '@ijipu/engine'
+import { BasicMIDI } from 'spessasynth_core'
+import { WorkletSynthesizer } from 'spessasynth_lib'
 import { Mp3Encoder } from '@breezystack/lamejs'
-import type { PlayEvent } from '@ijipu/engine'
 
 /** 渲染采样率 */
 export const RENDER_SAMPLE_RATE = 44100
 
+/** SpessaSynth worklet 处理器（已拷贝到 public/spessasynth/，经 BASE_URL 定位，与试听后端一致） */
+const WORKLET_URL = `${import.meta.env.BASE_URL}spessasynth/spessasynth_processor.min.js`
+
 /**
- * 播放事件序列 → AudioBuffer（OfflineAudioContext 离线渲染，与试听音色一致）。
- * 时长由事件 atMs/durationMs 决定（已含拍速换算），无需 bpm。
- * globalInstrument 非空 = 全局指定乐器（覆盖所有事件），否则按事件声部名自动路由。
+ * 播放事件序列 → AudioBuffer（OfflineAudioContext + SpessaSynth 高保真离线渲染）。
+ * 时长由事件 atMs/durationMs 决定（已含拍速换算）。bpm 用于构造 MIDI 速度元数据；
+ * soundBank 为 SF2/SF3 ArrayBuffer（由调用方保证已缓存，仅首次使用时下载）。
  */
 export async function renderToAudioBuffer(
   events: PlayEvent[],
-  globalInstrument?: string,
+  soundBank: ArrayBuffer,
+  opts: { bpm: number; title?: string },
 ): Promise<AudioBuffer> {
-  // 总时长 = 最后事件结束 + 尾部余量 0.5s
+  // 1. 播放序列 → 标准 MIDI 字节（含反复展开/多声部分轨；复用引擎，保证与试听一致）
+  const midiBytes = eventsToMidi(events, { bpm: opts.bpm, title: opts.title })
+  const midiBuf = midiBytes.buffer.slice(midiBytes.byteOffset, midiBytes.byteOffset + midiBytes.byteLength) as ArrayBuffer
+  const midi = BasicMIDI.fromArrayBuffer(midiBuf)
+
+  // 2. OfflineAudioContext 离线渲染（SpessaSynth 高保真）
   let endMs = 500
   for (const e of events) endMs = Math.max(endMs, e.atMs + e.durationMs)
   const len = Math.max(1, Math.ceil((endMs / 1000) * RENDER_SAMPLE_RATE))
   const ctx = new OfflineAudioContext(2, len, RENDER_SAMPLE_RATE)
-  for (const e of events) {
-    if (!e.placed.playable || !e.placed.audioPitch) continue
-    const pitch = e.pitch ?? e.placed.audioPitch
-    if (!pitch) continue
-    renderSynthNote(ctx, pitch, e.atMs / 1000, e.durationMs / 1000, 0.5, globalInstrument ?? e.instrument)
-  }
+  await ctx.audioWorklet.addModule(WORKLET_URL)
+  const synth = new WorkletSynthesizer(ctx)
+  synth.connect(ctx.destination)
+  // 音源仅首次使用时由调用方下载并缓存；此处直接使用传入 ArrayBuffer
+  await synth.startOfflineRender({
+    midiSequence: midi,
+    soundBankList: [{ bankOffset: 0, soundBankBuffer: soundBank }],
+    loopCount: 0,
+  })
+  // startRendering() 渲染整图（含 worklet 输出 downmix 到 2ch），返回播放序列对应的 AudioBuffer
   return ctx.startRendering()
 }
 

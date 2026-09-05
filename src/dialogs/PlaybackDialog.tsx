@@ -1,11 +1,12 @@
 /**
- * dialogs/PlaybackDialog.tsx — 试听播放
+ * dialogs/PlaybackDialog.tsx — 试听播放（adj344：固定 SpessaSynth 高保真，移除合成/midi-js 试听）
  *
- * 能力：速度 30~240 拍/分（默认取 J 描述头）；「模式」下拉（合成快速 / 采样高质量）
- * 与「音色库」下拉（采样时选具体库，adj323 拆分，两域不再混用）；播放/停止；
- * 播放中音符高亮 + 自动滚屏（复用 M3 联动）；反复记号展开。
- * adj323：① 合成乐器（快速试听）与采样色库（高质量试听）拆成独立下拉；
- * ② 选择持久化到 uiStore（记住用户上次偏好）；③ 离线时仅可播放已缓存库。
+ * 能力：速度 30~240 拍/分（默认取 J 描述头）；固定 SpessaSynth 高保真音源（SF2 内置本地、
+ * 仅首次使用时下载并缓存到 IndexedDB，后续直接读缓存）；「音色」下拉仅列用户启用的收藏音色
+ * （GM program，由「音色库管理」勾选）；播放/停止；播放中音符高亮 + 自动滚屏（复用 M3 联动）；
+ * 反复记号展开。
+ * adj344：试听简化：①去掉「模式/音色库」下拉（不再提供合成/采样切换），固定 SpessaSynth
+ * 高保真；②play() 收敛为高保真，移除合成/midi-js 采样分支；③「音色」只列启用收藏音色。
  * adj158：① 内容压缩缩小对话框；② 播放时停靠窗口右下角让开预览区；
  * ③ 播放中双击谱面音符 → 快速跳到该处重新播放（PreviewPane 通过 playbackTick 触发）。
  */
@@ -14,38 +15,11 @@ import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { playbackCopy } from '../brand/copy'
-import { createSamplerCache, prefetchLibrary, libraryCached } from '../playback/samplerCache'
-import { SpessaSynthBackend, HQ_LIBRARIES, getHqLibrary, loadHqBank, GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
 import { createHqCache } from '../playback/spessaCache'
-import {
-  layoutScore,
-  buildPlaySequence,
-  inferBpm,
-  createBackend,
-  schedulePlay,
-  INSTRUMENT_OPTIONS,
-  SAMPLER_LIBRARIES,
-  getSamplerLibrary,
-  classifyNetwork,
-} from '@ijipu/engine'
-import type { SamplerBackend, SamplerCache, NetworkClass } from '@ijipu/engine'
+import { SpessaSynthBackend, getHqLibrary, loadHqBank, GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
+import { layoutScore, buildPlaySequence, inferBpm, schedulePlay } from '@ijipu/engine'
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
-
-/** 当前联网分类（在线事件实时刷新；P1 用其控制「预缓存大库」开关） */
-function currentNetworkClass(): NetworkClass {
-  try {
-    const nav = navigator as Navigator & { connection?: { type?: string; effectiveType?: string; downlink?: number } }
-    return classifyNetwork({
-      online: navigator.onLine,
-      type: nav.connection?.type,
-      effectiveType: nav.connection?.effectiveType,
-      downlink: nav.connection?.downlink,
-    })
-  } catch {
-    return classifyNetwork({ online: true })
-  }
-}
 
 export function PlaybackDialog() {
   const parseResult = useDocStore((s) => s.parseResult)
@@ -62,25 +36,15 @@ export function PlaybackDialog() {
   const playbackStartId = useUiStore((s) => s.playbackStartId)
   const setPlaybackStart = useUiStore((s) => s.setPlaybackStart)
   const playbackTick = useUiStore((s) => s.playbackTick)
-  // adj323：试听偏好（持久化——记住用户上次选择）
-  const playbackMode = useUiStore((s) => s.playbackMode)
-  const setPlaybackMode = useUiStore((s) => s.setPlaybackMode)
-  const playbackSynthInstrument = useUiStore((s) => s.playbackSynthInstrument)
-  const setPlaybackSynthInstrument = useUiStore((s) => s.setPlaybackSynthInstrument)
-  const playbackSamplerLibrary = useUiStore((s) => s.playbackSamplerLibrary)
-  const setPlaybackSamplerLibrary = useUiStore((s) => s.setPlaybackSamplerLibrary)
-  // adj330：SpessaSynth 音源库 + 全局音色（GM program）
-  const playbackHqLibrary = useUiStore((s) => s.playbackHqLibrary)
-  const setPlaybackHqLibrary = useUiStore((s) => s.setPlaybackHqLibrary)
-  const playbackHqVoice = useUiStore((s) => s.playbackHqVoice)
   // adj332：已启用音色集合——试听音色下拉只列这些（避免 128 项全列）
   const playbackHqEnabled = useUiStore((s) => s.playbackHqEnabled)
+  const playbackHqVoice = useUiStore((s) => s.playbackHqVoice)
   const setPlaybackHqVoice = useUiStore((s) => s.setPlaybackHqVoice)
   // adj326：左右拆分方位（previewLeft=左预览右编辑 / editorLeft=左编辑右预览）
   const splitHDir = useUiStore((s) => s.splitHDir)
   // adj323：宽/窄屏（≤1024px 视为窄屏模式，adj322）——角落停靠仅宽屏生效，窄屏保持原样
   const isNarrowMode = useUiStore((s) => s.isNarrow)
-  // adj327：采样加载失败时用 toast 明确告知原因（不再仅复位后静默）
+  // adj327：加载失败时用 toast 明确告知原因（不再仅复位后静默）
   const showNotice = useUiStore((s) => s.showNotice)
 
   const defaultBpm = useMemo(() => inferBpm(parseResult), [parseResult])
@@ -88,11 +52,6 @@ export function PlaybackDialog() {
   const [playing, setPlaying] = useState(false)
   const [samplerState, setSamplerState] = useState<string>('idle')
   const [totalMs, setTotalMs] = useState(0)
-  // adj323：采样库缓存状态（cached/notcached），按库 id 记录
-  const [cacheState, setCacheState] = useState<Record<string, 'cached' | 'notcached'>>({})
-  // adj323：正在预缓存的库 id（null=当前无预缓存动作）
-  const [caching, setCaching] = useState<string | null>(null)
-  const [networkClass, setNetworkClass] = useState<NetworkClass>(currentNetworkClass)
   // adj293：播放异常提示（async play 若中途抛错此前被静默吞掉 → 无声无色块无法定位）
   const [playError, setPlayError] = useState<string | null>(null)
   // adj：窄屏（≤640px）下对话框已是 bottom-sheet 靠底，播放时不再 dock 到 bottom-right
@@ -107,24 +66,8 @@ export function PlaybackDialog() {
     return () => mq.removeEventListener('change', onChange)
   }, [])
 
-  // adj323：联网状态实时刷新（online/offline 事件）
-  useEffect(() => {
-    const update = () => setNetworkClass(currentNetworkClass())
-    window.addEventListener('online', update)
-    window.addEventListener('offline', update)
-    const conn = (navigator as Navigator & { connection?: EventTarget }).connection
-    conn?.addEventListener?.('change', update)
-    return () => {
-      window.removeEventListener('online', update)
-      window.removeEventListener('offline', update)
-      conn?.removeEventListener?.('change', update)
-    }
-  }, [])
-
-  const backendRef = useRef<ReturnType<typeof createBackend> | null>(null)
-  // adj323：采样库离线缓存（惰性创建——Tauri 桌面→文件系统；否则→IndexedDB）
-  const cacheRef = useRef<SamplerCache | null>(null)
-  // adj331：SpessaSynth 音源缓存 ref（惰性）
+  const backendRef = useRef<SpessaSynthBackend | null>(null)
+  // adj331：SpessaSynth 音源缓存（IndexedDB，音源仅首次使用时下载并缓存，后续直接读缓存）
   const hqCacheRef = useRef<ReturnType<typeof createHqCache> | null>(null)
   const cancelRef = useRef<(() => void) | null>(null)
   // adj158：播完自动复位（playing=false → 对话框回中央）
@@ -137,7 +80,6 @@ export function PlaybackDialog() {
   const rafRef = useRef<number | null>(null)
 
   const header = parseResult.header
-  const samplerLib = getSamplerLibrary(playbackSamplerLibrary)
   // adj326：打开试听对话框即按编辑区方位停靠——编辑区在左（左右拆分 editorLeft）→ 左下角；
   // 编辑区在右/下/全屏（含上下拆分、纯 preview/code）→ 右下角。仅在宽屏模式生效。
   const editorCorner: 'bottom-left' | 'bottom-right' =
@@ -149,42 +91,8 @@ export function PlaybackDialog() {
   const dockPos = isNarrowMode
     ? (playing && !isNarrow ? 'bottom-right' : undefined)
     : editorCorner
-  // adj323：采样库离线缓存（惰性创建，首次使用时定位环境）
-  const cache = (cacheRef.current ??= createSamplerCache())
-  // adj331：SpessaSynth 音源缓存（IndexedDB，供「音色库管理」下载的 SF2 复用）
+  // adj331：SpessaSynth 音源缓存（IndexedDB，供试听/导出复用；音源首次使用时下载并缓存）
   const hqCache = (hqCacheRef.current ??= createHqCache())
-
-  // adj323：刷新某库缓存状态（写入 cacheState）
-  const refreshCacheState = async (libId: string) => {
-    const hit = await libraryCached(getSamplerLibrary(libId), cache).catch(() => false)
-    setCacheState((prev) => ({ ...prev, [libId]: hit ? 'cached' : 'notcached' }))
-  }
-  // 选中库变化 → 刷新其缓存状态
-  useEffect(() => {
-    void refreshCacheState(samplerLib.id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [samplerLib.id])
-  // adj323：预缓存当前选中库
-  const cacheCurrent = async () => {
-    setCaching(samplerLib.id)
-    try {
-      await prefetchLibrary(samplerLib, cache)
-    } catch {
-      /* 下载失败——离线/网络异常，交由播放回退处理 */
-    }
-    setCaching(null)
-    void refreshCacheState(samplerLib.id)
-  }
-  // adj323：预缓存全部库（WIFI 下批量下载）
-  const cacheAll = async () => {
-    setCaching('*')
-    try {
-      for (const l of SAMPLER_LIBRARIES) await prefetchLibrary(l, cache)
-    } finally {
-      setCaching(null)
-      for (const l of SAMPLER_LIBRARIES) void refreshCacheState(l.id)
-    }
-  }
 
   // 关闭时停止播放
   useEffect(() => {
@@ -229,76 +137,33 @@ export function PlaybackDialog() {
     stop()
     // adj293：整个播放流程包 try/catch——异常不再静默（此前 async 抛错 → 无声无色块）
     try {
-      const wantHq = playbackMode === 'samplerHq'
-      const wantSamplerNow = playbackMode === 'sampler'
-      const libNow = getSamplerLibrary(playbackSamplerLibrary)
+      // adj344：固定 SpessaSynth 高保真后端（不再提供合成/midi-js 切换）
       let backend = backendRef.current
-      if (wantHq) {
-        // adj328：SpessaSynth 高质量采样（SF2/SF3/DLS，worklet 合成器）
-        if (!backend || !(backend as SpessaSynthBackend).hq) {
-          backendRef.current?.dispose()
-          backend = new SpessaSynthBackend()
-          backendRef.current = backend
-          await (backend as unknown as { ready?: () => Promise<void> }).ready?.()
-          await new Promise((r) => setTimeout(r, 200))
+      if (!backend || !backend.hq) {
+        backendRef.current?.dispose()
+        backend = new SpessaSynthBackend()
+        backendRef.current = backend
+        await (backend as unknown as { ready?: () => Promise<void> }).ready?.()
+        await new Promise((r) => setTimeout(r, 200))
+      }
+      setSamplerState('loading')
+      try {
+        const hqLib = getHqLibrary()
+        // adj331/adj344：音源仅首次使用时下载并缓存，后续直接读缓存（不再重复下载）
+        let bank = await hqCache.load(hqLib.id)
+        if (!bank) {
+          bank = await loadHqBank(hqLib)
+          await hqCache.save(hqLib.id, bank)
         }
-        setSamplerState('loading')
-        try {
-          const hqLib = getHqLibrary(playbackHqLibrary)
-          // adj331：优先用「音色库管理」下载的缓存，未缓存则联网下载并写回缓存
-          let bank = await hqCache.load(hqLib.id)
-          if (!bank) {
-            bank = await loadHqBank(hqLib)
-            await hqCache.save(hqLib.id, bank)
-          }
-          await (backend as SpessaSynthBackend).load(bank)
-          ;(backend as SpessaSynthBackend).setVoice(playbackHqVoice)
-          setSamplerState('ready')
-        } catch (e) {
-          setSamplerState('failed')
-          backendRef.current?.dispose()
-          backend = createBackend('synth')
-          backendRef.current = backend
-          setPlaybackMode('synth')
-          showNotice(`音源下载失败，已回退合成：${e instanceof Error ? e.message : String(e)}`, 'error')
-        }
-      } else {
-        // adj323：后端 kind 不匹配或采样库切换（库 id 变化）→ 重建后端
-        const needBuild =
-          wantSamplerNow
-            ? !backend ||
-              backend.kind !== 'sampler' ||
-              (backend as SamplerBackend).library.id !== libNow.id
-            : !backend || backend.kind !== 'synth'
-        if (needBuild) {
-          backendRef.current?.dispose()
-          backend = createBackend(
-            wantSamplerNow ? 'sampler' : 'synth',
-            wantSamplerNow ? libNow : undefined,
-            wantSamplerNow ? cache : undefined,
-          )
-          backendRef.current = backend
-          // adj308：等待 AudioContext 创建/resume 完成（避免首拍漏播 + 旧 ctx 叠加杂音）
-          await (backend as unknown as { ready?: () => Promise<void> }).ready?.()
-          // adj309：给听者/演奏准备时间——按下播放后延迟 200ms 才出第一声
-          await new Promise((r) => setTimeout(r, 200))
-        }
-        if (wantSamplerNow) {
-          setSamplerState('loading')
-          try {
-            await (backend as SamplerBackend).load()
-            setSamplerState('ready')
-          } catch (e) {
-            setSamplerState('failed')
-            // 回退到合成音色（自动路由）
-            backendRef.current?.dispose()
-            backend = createBackend('synth')
-            backendRef.current = backend
-            setPlaybackMode('synth')
-            // adj327：明确告知加载失败原因（网络/CORS/解码），便于定位
-            showNotice(`采样音色加载失败，已回退合成：${e instanceof Error ? e.message : String(e)}`, 'error')
-          }
-        }
+        await backend.load(bank)
+        backend.setVoice(playbackHqVoice)
+        setSamplerState('ready')
+      } catch (e) {
+        setSamplerState('failed')
+        backendRef.current?.dispose()
+        // adj344：固定高保真后不再回退合成（合成试听已移除），直接明确报错
+        showNotice(`音源加载失败，无法试听：${e instanceof Error ? e.message : String(e)}`, 'error')
+        return
       }
       // 构建序列（含反复展开；adj88：双击谱面音符定位试听起点）
       // adj310：声音/色块统一的准备延迟（毫秒）——按下播放后延迟才出第一声，色块同步
@@ -362,11 +227,10 @@ export function PlaybackDialog() {
       }
       computeActive()
       highlightTimerRef.current = window.setInterval(computeActive, 50)
-      // adj323：全局乐器覆盖（仅合成模式；auto = 按声部名自动路由；采样后端忽略）
-      const globalInst = !wantSamplerNow && playbackSynthInstrument !== 'auto' ? playbackSynthInstrument : undefined
+      // adj344：高保真音色由 setVoice(GM program) 决定，无需全局乐器覆盖参数（globalInstrument）
       // adj285：不再用 onNote 同步设置 activeNoteId（循环内逐事件 set → 批处理后为最后一事件）
       // adj309：按下播放后延迟 200ms 才出第一声——给听者准备时间 + 让 ctx resume 完成
-      const job = schedulePlay(seq, backend!, undefined, globalInst, PLAY_FIRST_DELAY_MS)
+      const job = schedulePlay(seq, backend, undefined, undefined, PLAY_FIRST_DELAY_MS)
       cancelRef.current = job.cancel
       setPlaying(true)
       setPlayError(null)
@@ -424,7 +288,7 @@ export function PlaybackDialog() {
           </span>
         </div>
 
-        {/* 主体：左「设置框(速度/模式/音色/说明)」 + 右「播放/停止(上下排列)」 */}
+        {/* 主体：左「设置框(速度/音色/说明)」 + 右「播放/停止(上下排列)」 */}
         <div style={{ marginTop: 8, display: 'flex', alignItems: 'stretch', gap: 8 }}>
           {/* 左：设置框 */}
           <div
@@ -438,7 +302,7 @@ export function PlaybackDialog() {
               borderRadius: 8,
             }}
           >
-            {/* 速度 + 模式上下两行 */}
+            {/* 速度 */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ color: 'var(--jp-text-secondary)', flexShrink: 0 }}>速度</span>
               <select
@@ -455,127 +319,32 @@ export function PlaybackDialog() {
                 ))}
               </select>
             </div>
-            {/* 模式：合成（快速）/ 采样（高质量）——决定后端 */}
+            {/* 音色：固定 SpessaSynth 高保真——只列用户启用的收藏音色（adj332/344） */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: 'var(--jp-text-secondary)', flexShrink: 0 }}>模式</span>
+              <span style={{ color: 'var(--jp-text-muted)', flexShrink: 0 }}>{playbackCopy.synthLabel}</span>
               <select
-                value={playbackMode}
-                onChange={(e) => setPlaybackMode(e.target.value as 'synth' | 'sampler' | 'samplerHq')}
+                value={playbackHqVoice ?? ''}
+                onChange={(e) => setPlaybackHqVoice(e.target.value === '' ? null : Number(e.target.value))}
                 disabled={playing}
                 style={{ background: 'var(--jp-bg-app)', border: '1px solid var(--jp-border)', color: 'var(--jp-text-primary)', borderRadius: 6, padding: '2px 6px', fontSize: 12, flex: 1, minWidth: 0 }}
               >
-                <option value="synth">{playbackCopy.modeSynth}</option>
-                <option value="sampler">{playbackCopy.modeSampler}</option>
-                <option value="samplerHq">{playbackCopy.modeSamplerHq}</option>
+                <option value="">自动（按声部名）</option>
+                {GM_VOICE_OPTIONS.filter((v) => playbackHqEnabled.includes(v.program)).map((v) => (
+                  <option key={v.program} value={v.program}>{v.label}</option>
+                ))}
               </select>
+              <span style={{ color: samplerState === 'failed' ? 'var(--jp-danger)' : 'var(--jp-text-muted)', flexShrink: 0, fontSize: 11 }}>
+                {samplerState === 'loading' ? playbackCopy.loading : samplerState === 'failed' ? playbackCopy.failedFallback : ''}
+              </span>
             </div>
-            {/* 音色 / 音色库（按模式动态显示） */}
-            {playbackMode === 'samplerHq' ? (
-              // adj330：SpessaSynth 高保真采样——音源库下拉 + GM 音色下拉
-              <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ color: 'var(--jp-text-muted)', flexShrink: 0 }}>{playbackCopy.samplerLabel}</span>
-                  <select
-                    value={getHqLibrary(playbackHqLibrary).id}
-                    onChange={(e) => setPlaybackHqLibrary(e.target.value)}
-                    disabled={playing}
-                    style={{ background: 'var(--jp-bg-app)', border: '1px solid var(--jp-border)', color: 'var(--jp-text-primary)', borderRadius: 6, padding: '2px 6px', fontSize: 12, flex: 1, minWidth: 0 }}
-                  >
-                    {HQ_LIBRARIES.map((l) => (
-                      <option key={l.id} value={l.id}>{l.name}</option>
-                    ))}
-                  </select>
-                  <span style={{ color: samplerState === 'failed' ? 'var(--jp-danger)' : 'var(--jp-text-muted)', flexShrink: 0, fontSize: 11 }}>
-                    {samplerState === 'loading' ? playbackCopy.loading : samplerState === 'failed' ? playbackCopy.failedFallback : ''}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ color: 'var(--jp-text-muted)', flexShrink: 0 }}>{playbackCopy.synthLabel}</span>
-                  <select
-                    value={playbackHqVoice ?? ''}
-                    onChange={(e) => setPlaybackHqVoice(e.target.value === '' ? null : Number(e.target.value))}
-                    disabled={playing}
-                    style={{ background: 'var(--jp-bg-app)', border: '1px solid var(--jp-border)', color: 'var(--jp-text-primary)', borderRadius: 6, padding: '2px 6px', fontSize: 12, flex: 1, minWidth: 0 }}
-                  >
-                    <option value="">自动（按声部名）</option>
-                    {GM_VOICE_OPTIONS.filter((v) => playbackHqEnabled.includes(v.program)).map((v) => (
-                      <option key={v.program} value={v.program}>{v.label}</option>
-                    ))}
-                  </select>
-                </div>
-                {playbackHqEnabled.length === 0 && (
-                  <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>尚未启用音色——请到「音色库管理」勾选要试听的音色</div>
-                )}
-              </>
-            ) : playbackMode === 'sampler' ? (
-              <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ color: 'var(--jp-text-muted)', flexShrink: 0 }}>{playbackCopy.samplerLabel}</span>
-                  <select
-                    value={samplerLib.id}
-                    onChange={(e) => setPlaybackSamplerLibrary(e.target.value)}
-                    disabled={playing}
-                    style={{ background: 'var(--jp-bg-app)', border: '1px solid var(--jp-border)', color: 'var(--jp-text-primary)', borderRadius: 6, padding: '2px 6px', fontSize: 12, flex: 1, minWidth: 0 }}
-                  >
-                    {SAMPLER_LIBRARIES.map((l) => (
-                      <option key={l.id} value={l.id}>
-                        {l.name}
-                      </option>
-                    ))}
-                  </select>
-                  <span style={{ color: samplerState === 'failed' ? 'var(--jp-danger)' : 'var(--jp-text-muted)', flexShrink: 0, fontSize: 11 }}>
-                    {samplerState === 'loading' ? playbackCopy.loading : samplerState === 'failed' ? playbackCopy.failedFallback : ''}
-                  </span>
-                </div>
-                {/* adj323：缓存状态 + 预缓存（WIFI 下可先下载，离线也能试听） */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <span style={{ color: 'var(--jp-text-muted)', flexShrink: 0, fontSize: 11 }}>
-                    {cacheState[samplerLib.id] === 'cached' ? `✓ ${playbackCopy.cacheCached}` : playbackCopy.cacheMiss} · {(samplerLib.sizeBytes / 1_000_000).toFixed(1)}MB
-                  </span>
-                  <button
-                    className="btn"
-                    onClick={() => void cacheCurrent()}
-                    disabled={playing || caching !== null || networkClass === 'offline'}
-                    style={{ padding: '2px 8px', fontSize: 11, whiteSpace: 'nowrap' }}
-                  >
-                    {caching === samplerLib.id ? playbackCopy.caching : playbackCopy.cacheButton}
-                  </button>
-                  <button
-                    className="btn"
-                    onClick={() => void cacheAll()}
-                    disabled={playing || caching !== null || networkClass === 'offline'}
-                    style={{ padding: '2px 8px', fontSize: 11, whiteSpace: 'nowrap' }}
-                  >
-                    {caching === '*' ? playbackCopy.caching : playbackCopy.cacheAllButton}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ color: 'var(--jp-text-muted)', flexShrink: 0 }}>{playbackCopy.synthLabel}</span>
-                <select
-                  value={playbackSynthInstrument}
-                  onChange={(e) => setPlaybackSynthInstrument(e.target.value)}
-                  disabled={playing}
-                  style={{ background: 'var(--jp-bg-app)', border: '1px solid var(--jp-border)', color: 'var(--jp-text-primary)', borderRadius: 6, padding: '2px 6px', fontSize: 12, flex: 1, minWidth: 0 }}
-                >
-                  {INSTRUMENT_OPTIONS.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {playbackHqEnabled.length === 0 && (
+              <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>尚未启用音色——请到「音色库管理」勾选要试听的音色</div>
             )}
 
             <div style={{ color: 'var(--jp-text-muted)', fontSize: 11, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
               <span>反复/跳房子自动展开 · 多声部按声部名路由音色 · 播放中音符高亮</span>
               {totalMs > 0 && !playing && <span>总时长 {(totalMs / 1000).toFixed(1)}s</span>}
             </div>
-            {/* adj323：离线提示——仅能播放已缓存库 */}
-            {networkClass === 'offline' && (
-              <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>⚠ {playbackCopy.offline}</div>
-            )}
             {/* adj293：播放异常提示（不再静默失败） */}
             {playError && (
               <div style={{ color: 'var(--jp-danger)', fontSize: 11, marginTop: 2 }}>✗ 播放失败：{playError}</div>

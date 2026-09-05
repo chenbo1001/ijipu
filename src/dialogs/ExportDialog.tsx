@@ -1,12 +1,14 @@
 /**
  * dialogs/ExportDialog.tsx — 导出（SVG / PNG / JPG / PDF / .jps 源文件）
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
 import { layoutScore, renderScoreToSvg, buildPlaySequence, inferBpm, eventsToMidi } from '@ijipu/engine'
 import { renderToAudioBuffer, audioBufferToWav, audioBufferToMp3 } from '../export/audio'
 import { exportSvg, exportPng, exportJpg, exportPdf } from '../export/export'
+import { createHqCache } from '../playback/spessaCache'
+import { getHqLibrary, loadHqBank } from '../playback/spessaSynthBackend'
 
 /** 下载字节（Blob + 临时 <a>） */
 function downloadBytes(bytes: Uint8Array, name: string, type: string) {
@@ -29,9 +31,22 @@ export function ExportDialog() {
   const [error, setError] = useState<string | null>(null)
   // adj294：图片清晰度（PNG/JPG 共用倍率，2x 标准 / 4x 高清 / 6x 超清）
   const [imgScale, setImgScale] = useState<number>(2)
+  // adj345：导出用 SpessaSynth 高保真音源（IndexedDB 缓存，仅首次使用时下载并缓存）
+  const hqCacheRef = useRef(createHqCache())
 
   const baseName = fileName || '未命名'
   const hasError = parseResult.errors.some((e) => e.severity === 'error')
+
+  /** 取高保真音源 ArrayBuffer（缓存优先；未缓存则下载并写回缓存，后续直接读缓存） */
+  const ensureHqBank = async (): Promise<ArrayBuffer> => {
+    const lib = getHqLibrary()
+    let bank = await hqCacheRef.current.load(lib.id)
+    if (!bank) {
+      bank = await loadHqBank(lib)
+      await hqCacheRef.current.save(lib.id, bank)
+    }
+    return bank
+  }
 
   const getPages = (): string[] => {
     if (hasError) throw new Error('存在语法错误，无法导出。请先修正脚本。')
@@ -103,27 +118,29 @@ export function ExportDialog() {
       }),
     },
     {
-      // adj290：WAV/MP3 音频导出——离线渲染（与试听音色一致），任何播放器免音色库直接播放
+      // adj345：WAV/MP3 音频导出——SpessaSynth 高保真离线渲染（与试听一致），任何播放器免音色库直接播放
       key: 'wav' as const,
-      label: 'WAV 音频（合成渲染，免音色库）',
+      label: 'WAV 音频（高保真渲染，免音色库）',
       ext: '.wav',
       run: () => run('wav', async () => {
         const layout = layoutScore(parseResult, pageConfig)
         const bpm = inferBpm(parseResult)
         const seq = buildPlaySequence(parseResult, layout, bpm)
-        const buf = await renderToAudioBuffer(seq.events)
+        const bank = await ensureHqBank()
+        const buf = await renderToAudioBuffer(seq.events, bank, { bpm, title: parseResult.header.titles[0] ?? baseName })
         downloadBytes(audioBufferToWav(buf), `${baseName}.wav`, 'audio/wav')
       }),
     },
     {
       key: 'mp3' as const,
-      label: 'MP3 音频（合成渲染，体积小）',
+      label: 'MP3 音频（高保真渲染，体积小）',
       ext: '.mp3',
       run: () => run('mp3', async () => {
         const layout = layoutScore(parseResult, pageConfig)
         const bpm = inferBpm(parseResult)
         const seq = buildPlaySequence(parseResult, layout, bpm)
-        const buf = await renderToAudioBuffer(seq.events)
+        const bank = await ensureHqBank()
+        const buf = await renderToAudioBuffer(seq.events, bank, { bpm, title: parseResult.header.titles[0] ?? baseName })
         downloadBytes(audioBufferToMp3(buf), `${baseName}.mp3`, 'audio/mpeg')
       }),
     },

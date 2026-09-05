@@ -5,6 +5,9 @@
  *  - 桌面 Tauri（window.__TAURI__ 存在）→ 读写应用数据目录（soundfonts/<id>.js，跨重启保留）
  *  - 浏览器 → IndexedDB（WebView 内持久化，Web 与桌面均生效）
  * 提供 prefetch 预缓存（WIFI 下批量下载）与缓存状态查询。
+ *
+ * adj344（试听简化）：试听已固定 SpessaSynth 高保真，midi-js 采样（SamplerBackend）不再作为
+ * 试听用途，本模块不再被 PlaybackDialog 引用（保留兼容，供未来需恢复 midi-js 采样试听时复用）。
  */
 import type { SamplerCache, SamplerLibrary } from '@ijipu/engine'
 

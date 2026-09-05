@@ -1,7 +1,7 @@
 {
   "name": "ijipu",
   "private": true,
-  "version": "0.11.1",
+  "version": "0.12.0",
   "license": "AGPL-3.0",
   "description": "iJipu（爱记谱）—— 下一代代码式简谱制谱引擎。码即成，谱自现。",
   "type": "module",
