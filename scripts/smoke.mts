@@ -483,6 +483,17 @@ const vY3 = seqYv3.events.filter((e) => e.placed.id.voice === 3)[0]
 check('多声部 Q3（无对应 Y）用默认钢琴', vY3?.instrument === 'piano', String(vY3?.instrument))
 const rYone = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 钢琴 弦乐\nQ: 1 2 3 4 |\n')
 check('Y 行多乐器只取第一个（一个 Y 行一种）', rYone.header.instruments.length === 1 && rYone.header.instruments[0] === '钢琴', JSON.stringify(rYone.header.instruments))
+// adj351：多声部声部乐器独立延续——第一组各声部 @ 乐器，第二组同声部延续（不再回归为最后一个声部音色）
+const rMv = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: @大钢琴@ 1/ 2/ 2/ 3// (5// 5) - |\nQ2: @打击风琴@ 1/ 2/ 2/ 3// (5// 5) - |\nQ3: @大提琴@ 0 0 0 5/ 6/ | 5// 6// (5. 5) - |\nQ1: 6. 1'// (3// 3) - |\nQ2: 4. 5/ 3 - |\nQ3: 4 - 3 - |\n`)
+const seqMv = buildPlaySequence(rMv, layoutScore(rMv, DUR_CFG), 120)
+const q1Mv = seqMv.events.filter((e) => e.placed.id.voice === 1)
+const q2Mv = seqMv.events.filter((e) => e.placed.id.voice === 2)
+const q3Mv = seqMv.events.filter((e) => e.placed.id.voice === 3)
+const gMv1 = q1Mv[0]?.placed.id.group
+const mvFirst = { q1: q1Mv[0]?.instrument, q2: q2Mv[0]?.instrument, q3: q3Mv[0]?.instrument }
+const mvNext = { q1: q1Mv.find((e) => e.placed.id.group !== gMv1)?.instrument, q2: q2Mv.find((e) => e.placed.id.group !== gMv1)?.instrument, q3: q3Mv.find((e) => e.placed.id.group !== gMv1)?.instrument }
+check('adj351 多声部第一组音色：Q1=大钢琴 Q2=打击风琴 Q3=大提琴', mvFirst.q1 === '大钢琴' && mvFirst.q2 === '打击风琴' && mvFirst.q3 === '大提琴', `${mvFirst.q1},${mvFirst.q2},${mvFirst.q3}`)
+check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q3=大提琴', mvNext.q1 === '大钢琴' && mvNext.q2 === '打击风琴' && mvNext.q3 === '大提琴', `${mvNext.q1},${mvNext.q2},${mvNext.q3}`)
 // adj303：显示乐器名——@乐器名 / @@ 后第一个音符正上方标注
 const rIns = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 弦乐\nQ: 1 2 @钢琴 3 4 @@ 5 6 |\n')
 const layIns = layoutScore(rIns, { ...DUR_CFG, showInstrument: true })
