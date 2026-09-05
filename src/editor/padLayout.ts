@@ -21,7 +21,6 @@
  */
 
 import { MODIFIER_SYMBOLS } from './completions'
-import { INSTRUMENT_LIB_NAMES } from '@ijipu/engine'
 
 /** 一个可插入的二级键 */
 export interface PadKey {
@@ -133,14 +132,9 @@ const HEADER_KEYS: PadKey[] = [
   { label: 'C2:', insert: 'C2: ', hint: '歌词行·声部 2' },
 ]
 
-/** 乐器指令（adj326：直接把乐器名作为菜单项，点击一步插入 `@乐器名`，不再先插 @ 再靠自动补全选）
- *  @乐器名：切换乐器（与 Y 默认乐器同源，INSTRUMENT_LIB_NAMES）；@@：切回默认 */
+/** 乐器指令（adj348：删除旧合成 6 种菜单项——试听已固定 SpessaSynth 高保真；
+ *  保留 @@ 切回默认；收藏的 GM 音色由 ScriptToolbar 动态附加到本组） */
 const INSTRUMENT_KEYS: PadKey[] = [
-  ...Object.values(INSTRUMENT_LIB_NAMES).map((name) => ({
-    label: name,
-    insert: `@${name}@`,
-    hint: `切换乐器：${name}`,
-  })),
   { label: '@@', insert: '@@', hint: '切回默认乐器' },
 ]
 

@@ -8,8 +8,6 @@
  * 音源由调用方负责「仅首次使用时下载并缓存」（见 ExportDialog）。
  */
 import { eventsToMidi, pcmToWav, type PlayEvent } from '@ijipu/engine'
-import { BasicMIDI } from 'spessasynth_core'
-import { WorkletSynthesizer } from 'spessasynth_lib'
 import { Mp3Encoder } from '@breezystack/lamejs'
 
 /** 渲染采样率 */
@@ -28,6 +26,10 @@ export async function renderToAudioBuffer(
   soundBank: ArrayBuffer,
   opts: { bpm: number; title?: string },
 ): Promise<AudioBuffer> {
+  // adj349：动态加载 spessasynth_core/spessasynth_lib（大库）——导出时才按需加载，减首包
+  const { BasicMIDI } = await import('spessasynth_core')
+  const { WorkletSynthesizer } = await import('spessasynth_lib')
+
   // 1. 播放序列 → 标准 MIDI 字节（含反复展开/多声部分轨；复用引擎，保证与试听一致）
   const midiBytes = eventsToMidi(events, { bpm: opts.bpm, title: opts.title })
   const midiBuf = midiBytes.buffer.slice(midiBytes.byteOffset, midiBytes.byteOffset + midiBytes.byteLength) as ArrayBuffer

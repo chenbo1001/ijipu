@@ -38,7 +38,13 @@ export class HqCache {
     return this.get(id)
   }
   async has(id: string): Promise<boolean> {
-    return (await this.get(id)) != null
+    // 极快：只查键是否存在（getKey，不读全量 32MB）
+    const db = await this.open()
+    return new Promise<boolean>((resolve) => {
+      const r = db.transaction('banks', 'readonly').objectStore('banks').getKey(id)
+      r.onsuccess = () => resolve(r.result !== undefined)
+      r.onerror = () => resolve(false)
+    })
   }
   async save(id: string, ab: ArrayBuffer): Promise<void> {
     const db = await this.open()
@@ -78,19 +84,18 @@ export function createHqCache(): HqCache {
   return new HqCache()
 }
 
-/** 预下载音源库为 ArrayBuffer 并写缓存（adj347/348）：
- *  已缓存直接返回；桌面（Tauri）优先读内置资源（本地找到音色库→直接用）；本地未找到
- *  或 Web 环境则用 fetch 后台下载（浏览器内部线程完成，主线程不逐块处理，尽量不影响 UI），
- *  完成后写入 IndexedDB 缓存，后续可直接用（不再重复下载）。onProgress 仅在结束时回调（0~1）。 */
+/** 预下载音源库并写缓存（adj347/348/349）：已缓存用 getKey 极快判断；桌面（Tauri）优先读内置资源；
+ *  本地未找到或 Web 环境则用 fetch 后台下载（浏览器内部线程完成，主线程不逐块处理，不影响 UI）。
+ *  完成后写入 IndexedDB 缓存，后续可直接用（不再重复下载）。onProgress 仅结束时回调（0~1）。 */
 export async function prefetchHqLibraryProgress(
   lib: HqSampleLibrary,
   cache: HqCache,
   onProgress?: (p: number) => void,
-): Promise<ArrayBuffer> {
-  const hit = await cache.load(lib.id)
-  if (hit) {
+): Promise<void> {
+  // 极快：只查键是否存在（getKey，不读 32MB 全量）
+  if (await cache.has(lib.id)) {
     onProgress?.(1)
-    return hit
+    return
   }
   // 桌面：读内置资源（若应用目录已放置独立音色库）→ 缺失则走下方远端下载
   try {
@@ -98,10 +103,10 @@ export async function prefetchHqLibraryProgress(
       const bank = await loadHqBank(lib)
       await cache.save(lib.id, bank)
       onProgress?.(1)
-      return bank
+      return
     }
   } catch {
-    /* 本地未找到音源 → 走 Web 流式下载并缓存 */
+    /* 本地未找到音源 → 走 Web 后台下载并缓存 */
   }
   // Web：后台下载——await res.arrayBuffer() 由浏览器内部线程完成，主线程不做逐块拼接，尽量不影响 UI
   const res = await fetch(lib.source)
@@ -109,5 +114,4 @@ export async function prefetchHqLibraryProgress(
   const bank = await res.arrayBuffer()
   await cache.save(lib.id, bank)
   onProgress?.(1)
-  return bank
 }

@@ -32,18 +32,21 @@ export function SoundBankDialog() {
   const fileSf2Ref = useRef<HTMLInputElement>(null)
   const currentHqLib = HQ_LIBRARIES[0]
 
-  // adj347：打开音色库管理自动下载音源（未缓存时），提示进度
+  // adj347/349：打开音色库管理自动下载音源——延迟到 UI 渲染后再触发，不干扰打开/交互
   useEffect(() => {
-    void (async () => {
-      try {
-        const lib = getHqLibrary()
-        setHqDl('loading')
-        await prefetchHqLibraryProgress(lib, hqCache.current)
-        setHqDl('done')
-      } catch {
-        setHqDl('error')
-      }
-    })()
+    const t = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const lib = getHqLibrary()
+          setHqDl('loading')
+          await prefetchHqLibraryProgress(lib, hqCache.current)
+          setHqDl('done')
+        } catch {
+          setHqDl('error')
+        }
+      })()
+    }, 60)
+    return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

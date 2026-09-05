@@ -13,7 +13,7 @@
  */
 import type { AudioBackend } from '@ijipu/engine'
 import { pitchToMidiNote, instrumentToProgram, matchInstrument } from '@ijipu/engine'
-import { WorkletSynthesizer } from 'spessasynth_lib'
+import type { WorkletSynthesizer } from 'spessasynth_lib'
 
 /** worklet processor 文件（已拷贝到 public/spessasynth/，经 BASE_URL 定位） */
 const WORKLET_URL = `${import.meta.env.BASE_URL}spessasynth/spessasynth_processor.min.js`
@@ -202,6 +202,8 @@ export class SpessaSynthBackend implements AudioBackend {
       const ctx = await this.ensureCtx()
       if (!ctx) throw new Error('AudioContext 不可用')
       if (!this.synth) {
+        // adj349：动态加载 spessasynth_lib（体积较大）——首屏不打包，试听时才按需加载，加快启动
+        const { WorkletSynthesizer } = await import('spessasynth_lib')
         await ctx.audioWorklet.addModule(workletUrl)
         const synth = new WorkletSynthesizer(ctx)
         if (bank) {

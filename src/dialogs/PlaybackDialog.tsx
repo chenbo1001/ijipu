@@ -123,11 +123,14 @@ export function PlaybackDialog() {
     return bankPromiseRef.current
   }
 
-  // adj347：打开试听即自动下载音源（初次体验——无需用户先手动点下载，点播放即可用）
+  // adj347/349：打开试听即后台自动下载音源——延迟到 UI 渲染后再触发，保证打开/交互秒响应
   useEffect(() => {
-    void ensureBank().catch((e) => {
-      showNotice(`音色库下载失败：${e instanceof Error ? e.message : String(e)}`, 'error')
-    })
+    const t = window.setTimeout(() => {
+      void ensureBank().catch((e) => {
+        showNotice(`音色库下载失败：${e instanceof Error ? e.message : String(e)}`, 'error')
+      })
+    }, 60)
+    return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
