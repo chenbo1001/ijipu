@@ -331,7 +331,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       })
       const file = await handle.getFile()
       const code = await file.text()
-      const name = (file.name || '未命名').replace(/\.jps$/i, '')
+      const name = (file.name || '未命名').replace(/\.(jps|md|txt)$/i, '')
       try {
         localStorage.setItem(DRAFT_KEY, code)
         localStorage.setItem(DRAFT_NAME_KEY, name)
@@ -372,7 +372,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
         await w.write(s.code)
         await w.close()
         // adj161：保存后以该文件为操作主体（同步文件名，防止句柄与显示名不一致）
-        const name = (s.fileHandle.name || '未命名').replace(/\.jps$/i, '')
+        const name = (s.fileHandle.name || '未命名').replace(/\.(jps|md|txt)$/i, '')
         try {
           localStorage.setItem(DRAFT_NAME_KEY, name)
         } catch {
@@ -406,7 +406,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       await w.close()
       // adj161：另存为后新文件成为操作主体——同步文件名 + 持久化句柄，
       // 下次直接按保存即写回该文件
-      const name = (handle.name || '未命名').replace(/\.jps$/i, '')
+      const name = (handle.name || '未命名').replace(/\.(jps|md|txt)$/i, '')
       try {
         localStorage.setItem(DRAFT_NAME_KEY, name)
       } catch {
@@ -459,7 +459,7 @@ function openFileViaInput(): Promise<boolean> {
       gotFile = true
       try {
         const code = await file.text()
-        const name = (file.name || '未命名').replace(/\.jps$/i, '')
+        const name = (file.name || '未命名').replace(/\.(jps|md|txt)$/i, '')
         try {
           localStorage.setItem(DRAFT_KEY, code)
           localStorage.setItem(DRAFT_NAME_KEY, name)
@@ -504,7 +504,7 @@ function openFileViaInput(): Promise<boolean> {
 // 之后直接按保存即写回该文件（无需重新选文件）；恢复失败静默（走另存为）
 void loadFileHandle().then((h) => {
   if (h && !fileStateTouched) {
-    const name = (h.name || '未命名').replace(/\.jps$/i, '')
+    const name = (h.name || '未命名').replace(/\.(jps|md|txt)$/i, '')
     useDocStore.setState({ fileHandle: h, fileName: name })
   }
 })

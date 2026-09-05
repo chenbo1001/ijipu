@@ -34,7 +34,8 @@ export function ExportDialog() {
   // adj345：导出用 SpessaSynth 高保真音源（IndexedDB 缓存，仅首次使用时下载并缓存）
   const hqCacheRef = useRef(createHqCache())
 
-  const baseName = fileName || '未命名'
+  // adj352：导出基名剥掉残留的 .jps/.md/.txt（手机端系统常把 .jps 识别为 .md/.txt，导致 xxx.md.jpg）
+  const baseName = (fileName || '未命名').replace(/\.(jps|md|txt)$/i, '')
   const hasError = parseResult.errors.some((e) => e.severity === 'error')
 
   /** 取高保真音源 ArrayBuffer（缓存优先；未缓存则下载并写回缓存，后续直接读缓存） */

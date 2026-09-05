@@ -1,5 +1,17 @@
 # iJipu 更新日志（Changelog）
 
+## [0.12.7] — 2026-09-05
+
+### 修复
+
+- **手机端导出文件名不再带 `.md`**（`adj352`）：手机系统（iOS/Android）不识别 `.jps`（`accept` 已放宽到 text/plain/.txt），文件名会被系统当成 `.md`/`.txt`，导致导出变成 `xxx.md.jpg`/`xxx.md.mp3`/`xxx.md.jps`。现于 `docStore` 各 `fileName` 清洗处剥掉 `.jps/.md/.txt` 后缀，并在导出基名再兜底去除一次。
+
+### 文档 / 版本
+
+- 版本号三处 + `package-lock` 同步 0.12.6 → 0.12.7；tsc -b + npm run build 通过。
+
+---
+
 ## [0.12.6] — 2026-09-05
 
 ### 修复
