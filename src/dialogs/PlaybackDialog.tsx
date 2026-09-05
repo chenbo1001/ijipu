@@ -54,9 +54,8 @@ export function PlaybackDialog() {
   const [playing, setPlaying] = useState(false)
   const [samplerState, setSamplerState] = useState<string>('idle')
   const [totalMs, setTotalMs] = useState(0)
-  // adj347：音源下载进度（首次打开自动下载；进度 0~1）
+  // adj347/348：音源下载中（首次打开自动后台下载；前台仅文字提示，不阻塞其它交互）
   const [downloading, setDownloading] = useState(false)
-  const [downloadPct, setDownloadPct] = useState(0)
   // adj293：播放异常提示（async play 若中途抛错此前被静默吞掉 → 无声无色块无法定位）
   const [playError, setPlayError] = useState<string | null>(null)
   // adj：窄屏（≤640px）下对话框已是 bottom-sheet 靠底，播放时不再 dock 到 bottom-right
@@ -107,10 +106,9 @@ export function PlaybackDialog() {
     if (!bankPromiseRef.current) {
       setDownloading(true)
       setSamplerState('loading')
-      setDownloadPct(0)
       bankPromiseRef.current = (async () => {
         const hqLib = getHqLibrary()
-        await prefetchHqLibraryProgress(hqLib, hqCache, (p) => setDownloadPct(p))
+        await prefetchHqLibraryProgress(hqLib, hqCache)
         setSamplerState('ready')
       })()
         .catch((e) => {
@@ -376,10 +374,10 @@ export function PlaybackDialog() {
             {playbackHqEnabled.length === 0 && (
               <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>尚未启用音色——请到「音色库管理」勾选要试听的音色</div>
             )}
-            {/* adj347：首次自动下载音源进度提示 */}
+            {/* adj347/348：首次自动下载音源——后台进行，仅文字提示，不阻塞其它操作 */}
             {downloading && (
               <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>
-                ⏳ 正在下载音色库{downloadPct > 0 ? ` ${Math.round(downloadPct * 100)}%` : ''}（约 30MB，仅首次）…
+                ⏳ 正在后台下载音色库（约30MB，仅首次）…下载期间可正常操作。
               </div>
             )}
 

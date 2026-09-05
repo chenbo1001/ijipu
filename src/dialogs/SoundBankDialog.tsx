@@ -19,9 +19,8 @@ export function SoundBankDialog() {
   const hqCache = useRef(createHqCache())
   const [notice, setNotice] = useState<string | null>(null)
   const [open, setOpen] = useState<Record<string, boolean>>(() => ({ [HQ_LIBRARIES[0]?.id ?? 'generaluser_gs']: true }))
-  // adj347：打开音色库管理即自动下载音源（初次体验）；显示进度
+  // adj347/348：打开音色库管理即自动后台下载音源（初次体验）；仅文字提示，不阻塞其它交互
   const [hqDl, setHqDl] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
-  const [hqPct, setHqPct] = useState(0)
   const enabled = useUiStore((s) => s.playbackHqEnabled)
   const toggle = useUiStore((s) => s.togglePlaybackHqVoice)
   const hqLibrary = useUiStore((s) => s.playbackHqLibrary)
@@ -39,7 +38,7 @@ export function SoundBankDialog() {
       try {
         const lib = getHqLibrary()
         setHqDl('loading')
-        await prefetchHqLibraryProgress(lib, hqCache.current, (p) => setHqPct(p))
+        await prefetchHqLibraryProgress(lib, hqCache.current)
         setHqDl('done')
       } catch {
         setHqDl('error')
@@ -157,10 +156,10 @@ export function SoundBankDialog() {
         <div style={{ color: HIGHLIGHT, fontSize: 11 }}>
           SpessaSynth 高保真为默认音源：桌面端内置随应用提供（离线可用）；Web 端首次联网下载并缓存到本地，之后直接用。
         </div>
-        {/* adj347：自动下载进度 / 失败提示 */}
+        {/* adj347/348：自动下载——后台进行，仅提示，不阻塞其它操作 */}
         {hqDl === 'loading' && (
           <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>
-            ⏳ 正在下载音色库{hqPct > 0 ? ` ${Math.round(hqPct * 100)}%` : ''}（约 30MB，仅首次）…
+            ⏳ 正在后台下载音色库（约30MB，仅首次）…下载期间可正常操作。
           </div>
         )}
         {hqDl === 'error' && (

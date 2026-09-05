@@ -78,10 +78,10 @@ export function createHqCache(): HqCache {
   return new HqCache()
 }
 
-/** 预下载音源库为 ArrayBuffer 并写缓存（adj347，带进度回调）：
+/** 预下载音源库为 ArrayBuffer 并写缓存（adj347/348）：
  *  已缓存直接返回；桌面（Tauri）优先读内置资源（本地找到音色库→直接用）；本地未找到
- *  或 Web 环境则用 fetch 流式下载并回调进度（0~1）。下载完成后写入 IndexedDB 缓存，
- *  后续可直接用（不再重复下载）。 */
+ *  或 Web 环境则用 fetch 后台下载（浏览器内部线程完成，主线程不逐块处理，尽量不影响 UI），
+ *  完成后写入 IndexedDB 缓存，后续可直接用（不再重复下载）。onProgress 仅在结束时回调（0~1）。 */
 export async function prefetchHqLibraryProgress(
   lib: HqSampleLibrary,
   cache: HqCache,
@@ -103,33 +103,10 @@ export async function prefetchHqLibraryProgress(
   } catch {
     /* 本地未找到音源 → 走 Web 流式下载并缓存 */
   }
+  // Web：后台下载——await res.arrayBuffer() 由浏览器内部线程完成，主线程不做逐块拼接，尽量不影响 UI
   const res = await fetch(lib.source)
   if (!res.ok) throw new Error(`音源「${lib.name}」下载失败: HTTP ${res.status}`)
-  const total = Number(res.headers.get('content-length') || 0)
-  const reader = res.body?.getReader()
-  let bank: ArrayBuffer
-  if (reader) {
-    const chunks: Uint8Array[] = []
-    let received = 0
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (value) {
-        chunks.push(value)
-        received += value.length
-        if (total > 0) onProgress?.(Math.min(1, received / total))
-      }
-    }
-    const merged = new Uint8Array(received)
-    let off = 0
-    for (const c of chunks) {
-      merged.set(c, off)
-      off += c.length
-    }
-    bank = merged.buffer.slice(merged.byteOffset, merged.byteOffset + merged.byteLength) as ArrayBuffer
-  } else {
-    bank = await res.arrayBuffer()
-  }
+  const bank = await res.arrayBuffer()
   await cache.save(lib.id, bank)
   onProgress?.(1)
   return bank
