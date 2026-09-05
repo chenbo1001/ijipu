@@ -1,16 +1,16 @@
 /**
  * dialogs/SoundBankDialog.tsx — 音色库管理（adj331/332/342）
  *
- * SpessaSynth 高保真为默认音源（SF2 内置本地，随应用提供，离线可用）：
+ * SpessaSynth 高保真为默认音源（SF2 内置本地；首次打开自动下载并缓存，离线可用）：
  *  - 库行：展开查看库内全部 GM 音色（128 种）+「全选/全消」+「内置」标识（无需下载/删除）
  *  - 音色勾选进入试听列表（playbackHqEnabled）
  *  - 「导入/导出音色文件」（SF2/SF3 本体，供不便联网用户导入/分享）+「导入/导出收藏配置」（JSON）
  */
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useUiStore } from '../store/uiStore'
-import { HQ_LIBRARIES, GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
-import { createHqCache } from '../playback/spessaCache'
+import { HQ_LIBRARIES, GM_VOICE_OPTIONS, getHqLibrary } from '../playback/spessaSynthBackend'
+import { createHqCache, prefetchHqLibraryProgress } from '../playback/spessaCache'
 
 const HIGHLIGHT = 'var(--jp-text-muted)'
 const BTN = { padding: '2px 8px', fontSize: 11, whiteSpace: 'nowrap' as const, background: 'var(--jp-bg-app)', border: '1px solid var(--jp-border)', color: 'var(--jp-text-primary)', borderRadius: '6px' }
@@ -19,6 +19,9 @@ export function SoundBankDialog() {
   const hqCache = useRef(createHqCache())
   const [notice, setNotice] = useState<string | null>(null)
   const [open, setOpen] = useState<Record<string, boolean>>(() => ({ [HQ_LIBRARIES[0]?.id ?? 'generaluser_gs']: true }))
+  // adj347：打开音色库管理即自动下载音源（初次体验）；显示进度
+  const [hqDl, setHqDl] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  const [hqPct, setHqPct] = useState(0)
   const enabled = useUiStore((s) => s.playbackHqEnabled)
   const toggle = useUiStore((s) => s.togglePlaybackHqVoice)
   const hqLibrary = useUiStore((s) => s.playbackHqLibrary)
@@ -29,6 +32,21 @@ export function SoundBankDialog() {
   const fileRef = useRef<HTMLInputElement>(null)
   const fileSf2Ref = useRef<HTMLInputElement>(null)
   const currentHqLib = HQ_LIBRARIES[0]
+
+  // adj347：打开音色库管理自动下载音源（未缓存时），提示进度
+  useEffect(() => {
+    void (async () => {
+      try {
+        const lib = getHqLibrary()
+        setHqDl('loading')
+        await prefetchHqLibraryProgress(lib, hqCache.current, (p) => setHqPct(p))
+        setHqDl('done')
+      } catch {
+        setHqDl('error')
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // adj342：全选/全消（SpessaSynth GM 全集）
   const selectAll = () => setPlaybackHqEnabled(GM_VOICE_OPTIONS.map((v) => v.program))
@@ -139,6 +157,17 @@ export function SoundBankDialog() {
         <div style={{ color: HIGHLIGHT, fontSize: 11 }}>
           SpessaSynth 高保真为默认音源：桌面端内置随应用提供（离线可用）；Web 端首次联网下载并缓存到本地，之后直接用。
         </div>
+        {/* adj347：自动下载进度 / 失败提示 */}
+        {hqDl === 'loading' && (
+          <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>
+            ⏳ 正在下载音色库{hqPct > 0 ? ` ${Math.round(hqPct * 100)}%` : ''}（约 30MB，仅首次）…
+          </div>
+        )}
+        {hqDl === 'error' && (
+          <div style={{ color: 'var(--jp-danger)', fontSize: 11 }}>
+            ✗ 音色库下载失败——请检查网络，或点击「导入音色文件」手动导入 SF2。
+          </div>
+        )}
         <div>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>SpessaSynth 高保真（SF2/SF3，多力度层，GM 全集）</div>
           {HQ_LIBRARIES.map((l) => bankRow(l.id, l.name, l.sizeBytes, '高保真'))}

@@ -2,9 +2,11 @@
  * dialogs/PlaybackDialog.tsx — 试听播放（adj344：固定 SpessaSynth 高保真，移除合成/midi-js 试听）
  *
  * 能力：速度 30~240 拍/分（默认取 J 描述头）；固定 SpessaSynth 高保真音源（SF2 内置本地、
- * 仅首次使用时下载并缓存到 IndexedDB，后续直接读缓存）；「音色」下拉仅列用户启用的收藏音色
- * （GM program，由「音色库管理」勾选）；播放/停止；播放中音符高亮 + 自动滚屏（复用 M3 联动）；
- * 反复记号展开。
+ * 首次打开即自动下载并缓存到 IndexedDB，后续直接读缓存；下载中显示进度提示）；「音色」下拉
+ * 仅列用户启用的收藏音色（GM program，默认含常用音色，由「音色库管理」勾选）；播放/停止；
+ * 播放中音符高亮 + 自动滚屏（复用 M3 联动）；反复记号展开。
+ * adj347：① 打开试听即自动下载音源（不再要求用户先手动点下载，点播放即可用）；
+ * ② 音色默认启用一组常用音色（首次即可选）。
  * adj344：试听简化：①去掉「模式/音色库」下拉（不再提供合成/采样切换），固定 SpessaSynth
  * 高保真；②play() 收敛为高保真，移除合成/midi-js 采样分支；③「音色」只列启用收藏音色。
  * adj158：① 内容压缩缩小对话框；② 播放时停靠窗口右下角让开预览区；
@@ -15,8 +17,8 @@ import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { playbackCopy } from '../brand/copy'
-import { createHqCache } from '../playback/spessaCache'
-import { SpessaSynthBackend, getHqLibrary, loadHqBank, GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
+import { createHqCache, prefetchHqLibraryProgress } from '../playback/spessaCache'
+import { SpessaSynthBackend, getHqLibrary, GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
 import { layoutScore, buildPlaySequence, inferBpm, schedulePlay } from '@ijipu/engine'
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
@@ -52,6 +54,9 @@ export function PlaybackDialog() {
   const [playing, setPlaying] = useState(false)
   const [samplerState, setSamplerState] = useState<string>('idle')
   const [totalMs, setTotalMs] = useState(0)
+  // adj347：音源下载进度（首次打开自动下载；进度 0~1）
+  const [downloading, setDownloading] = useState(false)
+  const [downloadPct, setDownloadPct] = useState(0)
   // adj293：播放异常提示（async play 若中途抛错此前被静默吞掉 → 无声无色块无法定位）
   const [playError, setPlayError] = useState<string | null>(null)
   // adj：窄屏（≤640px）下对话框已是 bottom-sheet 靠底，播放时不再 dock 到 bottom-right
@@ -69,6 +74,8 @@ export function PlaybackDialog() {
   const backendRef = useRef<SpessaSynthBackend | null>(null)
   // adj331：SpessaSynth 音源缓存（IndexedDB，音源仅首次使用时下载并缓存，后续直接读缓存）
   const hqCacheRef = useRef<ReturnType<typeof createHqCache> | null>(null)
+  // adj347：音源就绪 Promise（初次自动下载/缓存；播放与下载共享，避免重复下载）
+  const bankPromiseRef = useRef<Promise<void> | null>(null)
   const cancelRef = useRef<(() => void) | null>(null)
   // adj158：播完自动复位（playing=false → 对话框回中央）
   const doneTimerRef = useRef<number | null>(null)
@@ -93,6 +100,38 @@ export function PlaybackDialog() {
     : editorCorner
   // adj331：SpessaSynth 音源缓存（IndexedDB，供试听/导出复用；音源首次使用时下载并缓存）
   const hqCache = (hqCacheRef.current ??= createHqCache())
+
+  // adj347：确保音源就绪（优先读缓存；未缓存则自动下载并缓存，带进度提示）。
+  // 用共享 Promise：打开试听即自动下载，点播放时复用同一下载，避免重复下载。
+  const ensureBank = (): Promise<void> => {
+    if (!bankPromiseRef.current) {
+      setDownloading(true)
+      setSamplerState('loading')
+      setDownloadPct(0)
+      bankPromiseRef.current = (async () => {
+        const hqLib = getHqLibrary()
+        await prefetchHqLibraryProgress(hqLib, hqCache, (p) => setDownloadPct(p))
+        setSamplerState('ready')
+      })()
+        .catch((e) => {
+          setSamplerState('failed')
+          throw e
+        })
+        .finally(() => {
+          setDownloading(false)
+          bankPromiseRef.current = null
+        })
+    }
+    return bankPromiseRef.current
+  }
+
+  // adj347：打开试听即自动下载音源（初次体验——无需用户先手动点下载，点播放即可用）
+  useEffect(() => {
+    void ensureBank().catch((e) => {
+      showNotice(`音色库下载失败：${e instanceof Error ? e.message : String(e)}`, 'error')
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // 关闭时停止播放
   useEffect(() => {
@@ -146,15 +185,12 @@ export function PlaybackDialog() {
         await (backend as unknown as { ready?: () => Promise<void> }).ready?.()
         await new Promise((r) => setTimeout(r, 200))
       }
-      setSamplerState('loading')
       try {
         const hqLib = getHqLibrary()
-        // adj331/adj344：音源仅首次使用时下载并缓存，后续直接读缓存（不再重复下载）
-        let bank = await hqCache.load(hqLib.id)
-        if (!bank) {
-          bank = await loadHqBank(hqLib)
-          await hqCache.save(hqLib.id, bank)
-        }
+        // adj347：先确保音源就绪（初次自动下载/缓存；已缓存直接读）；点播放不再重复下载
+        await ensureBank()
+        const bank = await hqCache.load(hqLib.id)
+        if (!bank) throw new Error('音源缓存缺失')
         await backend.load(bank)
         backend.setVoice(playbackHqVoice)
         setSamplerState('ready')
@@ -339,6 +375,12 @@ export function PlaybackDialog() {
             </div>
             {playbackHqEnabled.length === 0 && (
               <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>尚未启用音色——请到「音色库管理」勾选要试听的音色</div>
+            )}
+            {/* adj347：首次自动下载音源进度提示 */}
+            {downloading && (
+              <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>
+                ⏳ 正在下载音色库{downloadPct > 0 ? ` ${Math.round(downloadPct * 100)}%` : ''}（约 30MB，仅首次）…
+              </div>
             )}
 
             <div style={{ color: 'var(--jp-text-muted)', fontSize: 11, display: 'flex', justifyContent: 'space-between', gap: 8 }}>

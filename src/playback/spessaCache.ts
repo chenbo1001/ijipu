@@ -4,6 +4,7 @@
  * 音源较大（32MB+），用 IndexedDB 存 ArrayBuffer 实现离线可用（Web / Tauri WebView 均持久化）。
  * 提供下载（prefetchHqLibrary）、查询（hqLibraryCached）、删除。
  */
+import { loadHqBank, detectTauri } from './spessaSynthBackend'
 import type { HqSampleLibrary } from './spessaSynthBackend'
 
 /** SF2/SF3 ArrayBuffer 缓存（IndexedDB，键=库 id） */
@@ -75,4 +76,61 @@ export async function hqLibraryCached(lib: HqSampleLibrary, cache: HqCache): Pro
 /** 创建 SpessaSynth 音源缓存实例（惰性，IndexedDB） */
 export function createHqCache(): HqCache {
   return new HqCache()
+}
+
+/** 预下载音源库为 ArrayBuffer 并写缓存（adj347，带进度回调）：
+ *  已缓存直接返回；桌面（Tauri）优先读内置资源（本地找到音色库→直接用）；本地未找到
+ *  或 Web 环境则用 fetch 流式下载并回调进度（0~1）。下载完成后写入 IndexedDB 缓存，
+ *  后续可直接用（不再重复下载）。 */
+export async function prefetchHqLibraryProgress(
+  lib: HqSampleLibrary,
+  cache: HqCache,
+  onProgress?: (p: number) => void,
+): Promise<ArrayBuffer> {
+  const hit = await cache.load(lib.id)
+  if (hit) {
+    onProgress?.(1)
+    return hit
+  }
+  // 桌面：读内置资源（若应用目录已放置独立音色库）→ 缺失则走下方远端下载
+  try {
+    if (detectTauri()) {
+      const bank = await loadHqBank(lib)
+      await cache.save(lib.id, bank)
+      onProgress?.(1)
+      return bank
+    }
+  } catch {
+    /* 本地未找到音源 → 走 Web 流式下载并缓存 */
+  }
+  const res = await fetch(lib.source)
+  if (!res.ok) throw new Error(`音源「${lib.name}」下载失败: HTTP ${res.status}`)
+  const total = Number(res.headers.get('content-length') || 0)
+  const reader = res.body?.getReader()
+  let bank: ArrayBuffer
+  if (reader) {
+    const chunks: Uint8Array[] = []
+    let received = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value) {
+        chunks.push(value)
+        received += value.length
+        if (total > 0) onProgress?.(Math.min(1, received / total))
+      }
+    }
+    const merged = new Uint8Array(received)
+    let off = 0
+    for (const c of chunks) {
+      merged.set(c, off)
+      off += c.length
+    }
+    bank = merged.buffer.slice(merged.byteOffset, merged.byteOffset + merged.byteLength) as ArrayBuffer
+  } else {
+    bank = await res.arrayBuffer()
+  }
+  await cache.save(lib.id, bank)
+  onProgress?.(1)
+  return bank
 }

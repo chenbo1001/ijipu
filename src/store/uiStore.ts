@@ -40,6 +40,8 @@ const SPLITH_DIR_KEY = 'ijipu.splitHDir'
 const PLAYBACK_HQ_LIBRARY_KEY = 'ijipu.playbackHqLibrary'
 const PLAYBACK_HQ_VOICE_KEY = 'ijipu.playbackHqVoice'
 const PLAYBACK_HQ_ENABLED_KEY = 'ijipu.playbackHqEnabled'
+// adj347：默认启用的常用音色（初次用户打开试听即可选）——大钢琴/八音盒/小提琴/弦乐/小号/单簧管/长笛
+const DEFAULT_HQ_ENABLED: number[] = [0, 10, 40, 48, 56, 71, 73]
 
 function loadBool(key: string, def: boolean): boolean {
   try {
@@ -241,13 +243,15 @@ export const useUiStore = create<UiState>()((set) => ({
       return null
     }
   })(),
-  // adj332：已启用音色集合（试听只列这些）；损坏回退空
+  // adj332/347：已启用音色集合（试听只列这些）；首次/损坏回退默认常用音色
   playbackHqEnabled: (() => {
     try {
-      const v = JSON.parse(localStorage.getItem(PLAYBACK_HQ_ENABLED_KEY) ?? '[]')
-      return Array.isArray(v) ? v.filter((n) => Number.isInteger(n) && n >= 0 && n < 128) : []
+      const raw = localStorage.getItem(PLAYBACK_HQ_ENABLED_KEY)
+      if (raw === null) return DEFAULT_HQ_ENABLED // 首次：默认常用音色
+      const v = JSON.parse(raw)
+      return Array.isArray(v) ? v.filter((n) => Number.isInteger(n) && n >= 0 && n < 128) : DEFAULT_HQ_ENABLED
     } catch {
-      return []
+      return DEFAULT_HQ_ENABLED
     }
   })(),
   openModal: (m) => set({ modal: m }),

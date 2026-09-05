@@ -105,7 +105,7 @@ export const GM_VOICE_OPTIONS: { program: number; label: string }[] = [
 ]
 
 /** 是否运行在 Tauri 桌面环境（window.__TAURI__ 由 withGlobalTauri 注入） */
-function detectTauri(): boolean {
+export function detectTauri(): boolean {
   try {
     return typeof (window as unknown as { __TAURI__?: { core?: { invoke?: unknown } } }).__TAURI__?.core?.invoke === 'function'
   } catch {
