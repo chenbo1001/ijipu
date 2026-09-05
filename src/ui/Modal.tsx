@@ -16,6 +16,7 @@ export function Modal({
   closeOnMaskClick = true,
   dock,
   compact,
+  width,
   onClose,
 }: {
   title: string
@@ -29,6 +30,8 @@ export function Modal({
   dock?: 'bottom-left' | 'bottom-right'
   /** 紧凑模式（缩小边距与最小宽，adj158：试听对话框用） */
   compact?: boolean
+  /** 自定义宽度（number=px / string=CSS；覆盖默认宽度） */
+  width?: number | string
   /** adj315：关闭（Esc/✕/遮罩）前回调——用于"取消不保存"时恢复设置快照 */
   onClose?: () => void
 }) {
@@ -83,6 +86,7 @@ export function Modal({
     // adj284：遮罩透明（maskDim=0）时遮罩 pointer-events:none 事件穿透，
     // .modal 需显式 auto 覆盖继承——试听时预览窗格可滚动/点击，对话框本体仍可交互
     pointerEvents: 'auto' as const,
+    ...(width ? { width: typeof width === 'number' ? `${width}px` : width } : {}),
     ...(pos ? { position: 'fixed' as const, left: pos.x, top: pos.y, margin: 0 } : dockStyle),
   }
 

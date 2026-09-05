@@ -82,16 +82,17 @@ function loadNum(key: string, fallback: number): number {
   }
 }
 
-/** adj323：试听模式（合成/采样/高质量采样），回退合成 */
+/** adj323/341：试听模式（合成/采样/高保真）；默认高保真（用户以 SpessaSynth 为默认音色） */
 function loadPlaybackMode(): 'synth' | 'sampler' | 'samplerHq' {
   try {
     const v = localStorage.getItem(PLAYBACK_MODE_KEY)
     if (v === 'sampler') return 'sampler'
     if (v === 'samplerHq') return 'samplerHq'
-    return 'synth'
+    if (v === 'synth') return 'synth'
   } catch {
-    return 'synth'
+    /* 忽略 */
   }
+  return 'samplerHq'
 }
 
 /** adj323：合成乐器（'auto' 或 InstrumentId），回退 auto */
@@ -228,6 +229,8 @@ interface UiState {
   setPlaybackHqVoice: (program: number | null) => void
   /** adj332：切换某音色是否启用（收藏），试听只列启用的 */
   togglePlaybackHqVoice: (program: number) => void
+  /** adj340：批量设置已启用音色集合（导入音色配置用） */
+  setPlaybackHqEnabled: (programs: number[]) => void
   showNotice: (text: string, kind?: NoticeKind) => void
   clearNotice: () => void
 }
@@ -445,6 +448,16 @@ export const useUiStore = create<UiState>()((set) => ({
       }
       return { playbackHqEnabled: next }
     }),
+  // adj340：批量设置已启用音色（导入），持久化
+  setPlaybackHqEnabled: (programs) => {
+    const next = programs.filter((n) => Number.isInteger(n) && n >= 0 && n < 128)
+    try {
+      localStorage.setItem(PLAYBACK_HQ_ENABLED_KEY, JSON.stringify(next))
+    } catch {
+      /* 忽略 */
+    }
+    set({ playbackHqEnabled: next })
+  },
   notice: null,
   showNotice: (text, kind = 'ok') =>
     set((s) => ({ notice: { text, kind, nonce: (s.notice?.nonce ?? 0) + 1 } })),

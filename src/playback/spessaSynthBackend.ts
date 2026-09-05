@@ -23,16 +23,20 @@ export interface HqSampleLibrary {
   id: string
   name: string
   source: string
+  /** fallbackSource：本地内置缺失时回退的联网直链（可选） */
+  fallbackSource?: string
   sizeBytes: number
   format: 'sf2' | 'sf3' | 'dls'
 }
-/** adj330：可切换的高质量音源库列表（当前含 GeneralUser GS；加库只需追加一条元数据）
- *  注意：大文件 SF2/SF3 受 jsDelivr 20MB 限制，取 raw.githubusercontent（带 CORS）。 */
+/** adj330/341：可切换的高质量音源库列表。默认库已内置本地（public/soundfonts/，离线可用）。
+ *  加库只需追加一条元数据。 */
 export const HQ_LIBRARIES: HqSampleLibrary[] = [
   {
     id: 'generaluser_gs',
     name: '通用音源（GeneralUser GS）',
-    source: 'https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/GeneralUser-GS.sf2',
+    // adj341：本地内置优先（随应用/网站提供，离线可用）；缺失回退联网 raw
+    source: `${import.meta.env.BASE_URL}soundfonts/generaluser_gs.sf2`,
+    fallbackSource: 'https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/GeneralUser-GS.sf2',
     sizeBytes: 32_319_396,
     format: 'sf2',
   },
@@ -98,11 +102,19 @@ export const GM_VOICE_OPTIONS: { program: number; label: string }[] = [
   { program: 124, label: '124 电话铃' }, { program: 125, label: '125 直升机' }, { program: 126, label: '126 拍手声' }, { program: 127, label: '127 枪声' },
 ]
 
-/** 下载音源库（SF2/SF3/DLS）为 ArrayBuffer，供 addSoundBank 使用 */
+/** 下载音源库（SF2/SF3/DLS）为 ArrayBuffer：优先本地内置（离线），失败回退 fallbackSource */
 export async function loadHqBank(lib: HqSampleLibrary): Promise<ArrayBuffer> {
-  const res = await fetch(lib.source)
-  if (!res.ok) throw new Error(`音源「${lib.name}」下载失败: HTTP ${res.status}`)
-  return res.arrayBuffer()
+  try {
+    const res = await fetch(lib.source)
+    if (res.ok) return await res.arrayBuffer()
+  } catch {
+    /* 本地读取失败 → 走 fallback */
+  }
+  if (lib.fallbackSource) {
+    const res = await fetch(lib.fallbackSource)
+    if (res.ok) return await res.arrayBuffer()
+  }
+  throw new Error(`音源「${lib.name}」加载失败`)
 }
 
 /** 乐器 id → MIDI channel（0-15）：多声部同时演奏时避免 program 冲突 */

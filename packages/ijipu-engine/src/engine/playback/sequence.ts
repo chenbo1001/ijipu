@@ -66,8 +66,8 @@ export function inferBpm(result: ParseResult): number {
       return Math.min(240, Math.max(30, Math.round(n)))
     }
   }
-  // adj308：默认试听速度 60 拍/分（描述头无 J 时）
-  return 60
+  // adj343：无 J 时默认 70 拍/分（有指定以乐谱为准）
+  return 70
 }
 
 interface SeqItem {

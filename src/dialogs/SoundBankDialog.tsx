@@ -1,93 +1,115 @@
 /**
- * dialogs/SoundBankDialog.tsx — 音色库管理（adj331/adj332）
+ * dialogs/SoundBankDialog.tsx — 音色库管理（adj331/332/342）
  *
- * 用层级列表统一管理试听用到的所有音色库：
- *  - SpessaSynth 高保真（HQ_LIBRARIES，SF2/SF3 ArrayBuffer 缓存）——可展开查看库内全部 GM 音色（128 种）
- *  - midi-js 标准采样（SAMPLER_LIBRARIES，文本缓存）——单乐器库
- * 每个库支持联网下载（写入缓存）、删除缓存，展示缓存状态。
+ * SpessaSynth 高保真为默认音源（SF2 内置本地，随应用提供，离线可用）：
+ *  - 库行：展开查看库内全部 GM 音色（128 种）+「全选/全消」+「内置」标识（无需下载/删除）
+ *  - 音色勾选进入试听列表（playbackHqEnabled）
+ *  - 「导入/导出音色文件」（SF2/SF3 本体，供不便联网用户导入/分享）+「导入/导出收藏配置」（JSON）
  */
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useUiStore } from '../store/uiStore'
-import { SAMPLER_LIBRARIES, getSamplerLibrary } from '@ijipu/engine'
-import { HQ_LIBRARIES, getHqLibrary, GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
-import { createSamplerCache, prefetchLibrary, libraryCached } from '../playback/samplerCache'
-import { createHqCache, prefetchHqLibrary, hqLibraryCached } from '../playback/spessaCache'
+import { HQ_LIBRARIES, GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
+import { createHqCache } from '../playback/spessaCache'
 
 const HIGHLIGHT = 'var(--jp-text-muted)'
 const BTN = { padding: '2px 8px', fontSize: 11, whiteSpace: 'nowrap' as const, background: 'var(--jp-bg-app)', border: '1px solid var(--jp-border)', color: 'var(--jp-text-primary)', borderRadius: '6px' }
 
 export function SoundBankDialog() {
-  const samplerCache = useRef(createSamplerCache())
   const hqCache = useRef(createHqCache())
-  const [states, setStates] = useState<Record<string, 'cached' | 'notcached'>>({})
-  const [busy, setBusy] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [open, setOpen] = useState<Record<string, boolean>>({})
-  // adj332：已启用音色集合（试听只列这些）与切换
+  const [open, setOpen] = useState<Record<string, boolean>>(() => ({ [HQ_LIBRARIES[0]?.id ?? 'generaluser_gs']: true }))
   const enabled = useUiStore((s) => s.playbackHqEnabled)
   const toggle = useUiStore((s) => s.togglePlaybackHqVoice)
+  const hqLibrary = useUiStore((s) => s.playbackHqLibrary)
+  const hqVoice = useUiStore((s) => s.playbackHqVoice)
+  const setPlaybackHqLibrary = useUiStore((s) => s.setPlaybackHqLibrary)
+  const setPlaybackHqVoice = useUiStore((s) => s.setPlaybackHqVoice)
+  const setPlaybackHqEnabled = useUiStore((s) => s.setPlaybackHqEnabled)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const fileSf2Ref = useRef<HTMLInputElement>(null)
+  const currentHqLib = HQ_LIBRARIES[0]
 
-  const refresh = async () => {
-    const s: Record<string, 'cached' | 'notcached'> = {}
-    for (const l of SAMPLER_LIBRARIES) s[l.id] = (await libraryCached(l, samplerCache.current)) ? 'cached' : 'notcached'
-    for (const l of HQ_LIBRARIES) s[l.id] = (await hqLibraryCached(l, hqCache.current)) ? 'cached' : 'notcached'
-    setStates(s)
+  // adj342：全选/全消（SpessaSynth GM 全集）
+  const selectAll = () => setPlaybackHqEnabled(GM_VOICE_OPTIONS.map((v) => v.program))
+  const clearAll = () => setPlaybackHqEnabled([])
+
+  // 导入/导出「音色收藏配置」（JSON）
+  const exportConfig = () => {
+    const data = { version: 1, hqEnabled: enabled, hqLibrary, hqVoice }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'ijipu-soundbanks.json'
+    a.click()
+    URL.revokeObjectURL(url)
+    setNotice('✓ 已导出音色配置')
   }
-  useEffect(() => {
-    void refresh()
-  }, [])
-
-  const download = async (kind: 'midi' | 'hq', id: string) => {
-    setBusy(id)
-    setNotice(null)
-    try {
-      if (kind === 'midi') await prefetchLibrary(getSamplerLibrary(id), samplerCache.current)
-      else await prefetchHqLibrary(getHqLibrary(id), hqCache.current)
-    } catch (e) {
-      setNotice(e instanceof Error ? e.message : String(e))
+  const importConfig = (file: File) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const j = JSON.parse(String(reader.result))
+        if (Array.isArray(j.hqEnabled)) setPlaybackHqEnabled(j.hqEnabled)
+        if (typeof j.hqLibrary === 'string') setPlaybackHqLibrary(j.hqLibrary)
+        if (j.hqVoice === null || typeof j.hqVoice === 'number') setPlaybackHqVoice(j.hqVoice ?? null)
+        setNotice('✓ 已导入音色配置')
+      } catch {
+        setNotice('导入文件格式无效')
+      }
     }
-    setBusy(null)
-    void refresh()
+    reader.readAsText(file)
   }
-  const remove = async (kind: 'midi' | 'hq', id: string) => {
-    setBusy(id)
+  // 导入/导出「音色数据文件」（SF2/SF3 本体）——给不便联网用户导入/分享
+  const importDataFile = (file: File) => {
+    const reader = new FileReader()
+    reader.onload = async () => {
+      try {
+        await hqCache.current.save(currentHqLib.id, reader.result as ArrayBuffer)
+        setNotice(`✓ 已导入音色数据 → ${currentHqLib.name}`)
+      } catch {
+        setNotice('音色数据文件读取失败')
+      }
+    }
+    reader.readAsArrayBuffer(file)
+  }
+  const exportDataFile = async () => {
     try {
-      if (kind === 'midi') await samplerCache.current.remove(id)
-      else await hqCache.current.remove(id)
+      const ab = await hqCache.current.load(currentHqLib.id)
+      if (!ab) {
+        setNotice('该音色库未缓存，无法导出')
+        return
+      }
+      const blob = new Blob([ab], { type: 'application/octet-stream' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${currentHqLib.id}.sf2`
+      a.click()
+      URL.revokeObjectURL(url)
+      setNotice(`✓ 已导出音色数据：${currentHqLib.name}`)
     } catch {
-      /* 忽略 */
+      setNotice('音色数据导出失败')
     }
-    setBusy(null)
-    void refresh()
   }
 
-  /** 库行（右侧缓存状态 + 下载/删除/展开） */
-  const bankRow = (kind: 'midi' | 'hq', id: string, name: string, size: number, typeLabel: string, expandable: boolean) => {
-    const st = states[id] ?? 'notcached'
-    const isBusy = busy === id
+  /** 库行：展开 + 名称 + 类型 + 体积 + 内置 + 全选/全消 + 展开音色列表 */
+  const bankRow = (id: string, name: string, size: number, typeLabel: string) => {
+    const isOpen = !!open[id]
     return (
-      <div key={kind + id}>
+      <div key={id}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', borderBottom: '1px solid var(--jp-border)' }}>
-          {expandable && (
-            <button className="btn" style={{ ...BTN, padding: '2px 4px' }} onClick={() => setOpen((o) => ({ ...o, [id]: !o[id] }))}>
-              {open[id] ? '▾' : '▸'}
-            </button>
-          )}
+          <button className="btn" style={{ ...BTN, padding: '2px 4px' }} onClick={() => setOpen((o) => ({ ...o, [id]: !o[id] }))}>
+            {isOpen ? '▾' : '▸'}
+          </button>
           <span style={{ flex: 1, minWidth: 0 }}>{name}</span>
           <span style={{ color: HIGHLIGHT, fontSize: 11, flexShrink: 0 }}>{typeLabel}</span>
-          <span style={{ color: HIGHLIGHT, fontSize: 11, width: 52, textAlign: 'right', flexShrink: 0 }}>{(size / 1_000_000).toFixed(1)}MB</span>
-          <span style={{ color: st === 'cached' ? 'var(--jp-text-primary)' : HIGHLIGHT, fontSize: 11, width: 52, flexShrink: 0 }}>
-            {st === 'cached' ? '✓ 已缓存' : '未缓存'}
-          </span>
-          <button className="btn" style={BTN} disabled={isBusy} onClick={() => void download(kind, id)}>
-            {isBusy ? '…' : st === 'cached' ? '重下' : '下载'}
-          </button>
-          <button className="btn" style={{ ...BTN, color: 'var(--jp-danger)' }} disabled={isBusy || st !== 'cached'} onClick={() => void remove(kind, id)}>
-            删除
-          </button>
+          <span style={{ color: HIGHLIGHT, fontSize: 11, flexShrink: 0 }}>{(size / 1_000_000).toFixed(1)}MB · 内置</span>
+          <button className="btn" style={BTN} onClick={selectAll}>全选</button>
+          <button className="btn" style={BTN} onClick={clearAll}>全消</button>
         </div>
-        {expandable && open[id] && (
+        {isOpen && (
           <div style={{ marginLeft: 20, maxHeight: 300, overflow: 'auto', borderLeft: '1px solid var(--jp-border)', paddingLeft: 8, marginBottom: 6 }}>
             <div style={{ color: HIGHLIGHT, fontSize: 11, marginBottom: 2 }}>库内音色（{GM_VOICE_OPTIONS.length} 种）· 勾选进入试听列表（已选 {enabled.length}）</div>
             {GM_VOICE_OPTIONS.map((v) => (
@@ -103,20 +125,25 @@ export function SoundBankDialog() {
   }
 
   return (
-    <Modal title="音色库管理" maskDim={0.35} closeOnMaskClick>
+    <Modal title="音色库管理" maskDim={0.35} closeOnMaskClick compact>
       <div style={{ fontSize: 12, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn" style={BTN} onClick={exportConfig}>导出收藏</button>
+          <button className="btn" style={BTN} onClick={() => fileRef.current?.click()}>导入收藏</button>
+          <button className="btn" style={{ ...BTN, color: 'var(--jp-accent)' }} onClick={() => fileSf2Ref.current?.click()}>导入音色文件</button>
+          <button className="btn" style={{ ...BTN, color: 'var(--jp-accent)' }} onClick={() => void exportDataFile()}>导出音色文件</button>
+          <span style={{ color: HIGHLIGHT, fontSize: 11 }}>收藏=启用音色+音源/音色配置；音色文件=SF2/SF3 本体（供不便联网用户导入/分享）。</span>
+          <input ref={fileRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importConfig(f); e.target.value = '' }} />
+          <input ref={fileSf2Ref} type="file" accept=".sf2,.sf3" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importDataFile(f); e.target.value = '' }} />
+        </div>
         <div style={{ color: HIGHLIGHT, fontSize: 11 }}>
-          联网下载（缓存）后离线可用，可删除释放空间；高保真库可展开查看库内含有的全部音色。
+          SpessaSynth 高保真为默认音源（SF2 内置本地、离线可用）；音色已随应用提供，无需联网下载。
         </div>
         <div>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>SpessaSynth 高保真（SF2/SF3，多力度层，GM 全集）</div>
-          {HQ_LIBRARIES.map((l) => bankRow('hq', l.id, l.name, l.sizeBytes, '高保真', true))}
+          {HQ_LIBRARIES.map((l) => bankRow(l.id, l.name, l.sizeBytes, '高保真'))}
         </div>
-        <div>
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>标准采样（midi-js，单层，单乐器）</div>
-          {SAMPLER_LIBRARIES.map((l) => bankRow('midi', l.id, l.name, l.sizeBytes, '标准', false))}
-        </div>
-        {notice && <div style={{ color: 'var(--jp-danger)', fontSize: 11 }}>✗ {notice}</div>}
+        {notice && <div style={{ color: notice.startsWith('✓') ? 'var(--jp-text-primary)' : 'var(--jp-danger)', fontSize: 11 }}>{notice}</div>}
       </div>
     </Modal>
   )

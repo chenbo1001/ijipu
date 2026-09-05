@@ -271,6 +271,14 @@ export function TopBar() {
             <path d="M 3 2 L 12 7 L 3 12 Z" />
           </svg>
         )
+      case 'soundbanks':
+        return (
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+            <path d="M 5 11 V 4 L 10.4 2.8 V 10" />
+            <circle cx="3.4" cy="11" r="1.4" fill="currentColor" stroke="none" />
+            <circle cx="8.8" cy="10" r="1.4" fill="currentColor" stroke="none" />
+          </svg>
+        )
       case 'donate':
         return (
           <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">

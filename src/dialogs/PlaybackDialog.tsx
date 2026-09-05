@@ -30,7 +30,7 @@ import {
 } from '@ijipu/engine'
 import type { SamplerBackend, SamplerCache, NetworkClass } from '@ijipu/engine'
 
-const BPM_OPTIONS = [40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 160, 180, 200]
+const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
 
 /** 当前联网分类（在线事件实时刷新；P1 用其控制「预缓存大库」开关） */
 function currentNetworkClass(): NetworkClass {
@@ -447,6 +447,7 @@ export function PlaybackDialog() {
                 disabled={playing}
                 style={{ background: 'var(--jp-bg-app)', border: '1px solid var(--jp-border)', color: 'var(--jp-text-primary)', borderRadius: 6, padding: '2px 6px', fontSize: 12, flex: 1, minWidth: 0 }}
               >
+                {!BPM_OPTIONS.includes(bpm) && <option value={bpm}>{bpm} 拍/分（按乐谱）</option>}
                 {BPM_OPTIONS.map((v) => (
                   <option key={v} value={v}>
                     {v} 拍/分
@@ -503,7 +504,7 @@ export function PlaybackDialog() {
                   </select>
                 </div>
                 {playbackHqEnabled.length === 0 && (
-                  <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>尚未启用音色——请到「音色库」管理勾选要试听的音色</div>
+                  <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>尚未启用音色——请到「音色库管理」勾选要试听的音色</div>
                 )}
               </>
             ) : playbackMode === 'sampler' ? (
