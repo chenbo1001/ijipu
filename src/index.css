@@ -1580,8 +1580,21 @@ body {
 .doc-content h2 { font-size: 15px; margin: 12px 0 6px; }
 .doc-content h3 { font-size: 14px; margin: 10px 0 4px; }
 .doc-content p { margin: 4px 0; }
-.doc-content ul { margin: 4px 0; padding-left: 18px; }
+.doc-content ul,
+.doc-content ol { margin: 4px 0; padding-left: 18px; }
 .doc-content li { margin: 2px 0; }
+/* adj353：行内 Markdown 元素（code/粗体/斜体/链接）样式 */
+.doc-content code {
+  font-family: var(--jp-font-mono);
+  font-size: 12px;
+  background: rgba(127, 127, 127, 0.14);
+  border-radius: 3px;
+  padding: 0 4px;
+  word-break: break-all;
+}
+.doc-content strong { font-weight: 700; }
+.doc-content em { font-style: italic; }
+.doc-content a { color: var(--jp-accent); text-decoration: underline; }
 .doc-content pre {
   background: var(--jp-bg-app);
   border: 1px solid var(--jp-border);
