@@ -711,6 +711,13 @@
 - **解决**（adj356）：`parseVoltaMods` 增 `minus` 计数（与 `+` 对称）；`voltaStart`（token 类型 + `PlacedBarline`）增 `minus?: number`；`layout/index.ts` 跳房子 floor 高度用 `yTop - VOLTA_BAR_GAP - plus×VOLTA_RAISE + minus×VOLTA_RAISE`（降低=向下）；`render/index.ts` 起止 y 同样 `+ minus×VOLTA_RAISE`。smoke [38] 新增：`[-` 解析 `minus=1` + 渲染 `[-` 更低/`[--` 更低/`[+` 更高（方向与 `+` 相反）。JPS-SPEC/SYNTAX 文档同步
 - **预防**：凡「方向性修饰」（+抬升/-降低、上移/下移）应**成对实现并全程透传**（tokenizer → token 类型 → layout → render 类型），漏一边就会只支持一个方向；语法改动同步 JPS-SPEC/SYNTAX 并以 smoke 断言回归
 
+### E-2026-104 临时节拍 `"p:2/4"` 预览显示与占位（adj357）
+- **场景**：① 用户反馈临时节拍预览区字体应与音符字体一致、字号一样、高度缩为 2/3、加粗；② 它是有占宽元素，但空间优先路径未预留其宽度，分数压到下一小节音符
+- **现象**：临时节拍分数字体用固定 `FONT_CN`（非音符字体）、字号 10×s（非音符字号）、非加粗、分数较高；空间优先（`noteSpaceLayout:'space'`）下小节线右侧 `barGapSide`（=barlinePad=noteSize/4）不含分数宽度 → 分数与下一音符重叠
+- **根因**：`renderBarline` 用 `FONT_CN` + `size=10*s` + 非粗体渲染分数（无音符字体透传）；`placeMusicRowSpace` 小节线间距仅用固定 `barGapSide`（不读备注/分数宽），而时值优先路径用 `barlineSpace`（含 `meterCommentHalfW`）→ 空间路径漏算占宽；`render` 与 `layout` 的分数半宽各自维护（`10*s`），改动需同步
+- **解决**（adj357）：`renderBarline` 增 `noteFontFamily` 参数（调用处传 `noteFont(config.shuzi_font)`），分数用 `font-size=noteSize`、`font-weight=bold`、`font-family=noteFontFamily`，并用 `scale(1, 2/3)`（围绕小节线中点）把分数高度压到 2/3；`meterCommentHalfW` 改 `size=noteSize`（与 render 一致）；`placeMusicRowSpace` 小节线右侧 `gapR` 补 `2×s + 2×halfW + 2`（分数半宽×2 + 起始 + 末距），空间路径不再压音符；smoke 新增 `adj357 空间优先路径预留临时节拍宽度` + 分数字号/加粗断言
+- **预防**：**无时值有占宽元素**（临时节拍/括号/滑音箭头等）的**占宽必须在所有布局路径（单/多声部、时值/空间）同步预留**，且渲染端尺寸与布局端占宽要**共享同一计算**（避免改一边另一边脱节）；方向性/比例性修饰（高度、字号、加粗）注意与音符一致并加粗
+
 ## 五、预防清单（Checklist，提交/交付前自检）
 
 - [ ] 所有 npm 命令带 `--cache "D:/Coding/JPCoder/.npm-cache"`

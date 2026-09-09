@@ -397,8 +397,13 @@ export const useDocStore = create<DocState>()((set, get) => ({
       return false
     }
     try {
+      // adj357：未命名文件保存/另存时，默认用描述头第一个 B: 标题作为文件名（省得输入）
+      const nm = get().fileName
+      const isNamed = !!nm && nm !== '未命名'
+      const bTitle = get().parseResult.header.titles[0]
+      const defaultName = isNamed ? nm : bTitle && bTitle !== '未命名' ? bTitle : '未命名'
       const handle = await picker({
-        suggestedName: `${get().fileName || '未命名'}.jps`,
+        suggestedName: `${defaultName}.jps`,
         types: [{ description: 'iJipu 乐谱', accept: { 'text/plain': ['.jps'] } }],
       })
       const w = await handle.createWritable()

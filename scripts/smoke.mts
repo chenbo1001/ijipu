@@ -1077,8 +1077,8 @@ const r67 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"P:2/4" 3 4 |\n')
 const b67 = layoutScore(r67, DUR_CFG).pages[0].barlines.find((b) => b.comment?.startsWith('P:'))
 check('|"P:2/4" 解析为小节线备注', r67.errors.length === 0 && b67?.comment === 'P:2/4', JSON.stringify(r67.errors))
 const svg67 = renderScoreToSvg(layoutScore(r67, DUR_CFG))[0]
-const meterFracFs = Math.round(10 * NS_S) // 分数字号（随字号）
-check('临时节拍渲染分数（分子 2 / 分母 4 居中）', new RegExp(`<text x="[\\d.]+" y="[\\d.]+" text-anchor="middle" font-size="${meterFracFs}"[^>]*>2<`).test(svg67) && new RegExp(`<text x="[\\d.]+" y="[\\d.]+" text-anchor="middle" font-size="${meterFracFs}"[^>]*>4<`).test(svg67), '')
+const meterFracFs = defaultPageConfig.note_size // adj357：字号与音符一致
+check('临时节拍渲染分数（分子 2 / 分母 4 居中）', new RegExp(`<text x="[\\d.]+" y="[\\d.]+" text-anchor="middle" font-weight="bold" font-size="${meterFracFs}"[^>]*>2<`).test(svg67) && new RegExp(`<text x="[\\d.]+" y="[\\d.]+" text-anchor="middle" font-weight="bold" font-size="${meterFracFs}"[^>]*>4<`).test(svg67), '')
 check('临时节拍分数横线在分子/分母之间', /<line x1="[\d.]+" y1="([\d.]+)" x2="[\d.]+" y2="\1" stroke="#1b1b1b" stroke-width="1"\/>/.test(svg67), '')
 // adj86：大小写不敏感 —— 临时节拍 p:/P:、后倚音 h/H、平均连音组 y/Y
 const r86p = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"p:3/8" 3 4 |\n')
@@ -1096,6 +1096,14 @@ const lay86p = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"P:2/4"
 const b86x = lay86p.pages[0].barlines.find((b) => b.comment?.startsWith('P:'))
 const n86n = lay86p.pages[0].notes.find((n) => n.x > (b86x?.x ?? 0))
 check('临时节拍占位：分数后音符间距 ≥2px（音符 x ≥ 线右缘 + 分数半宽 + 2）', b86x !== undefined && n86n !== undefined && n86n.x >= b86x.x + 0.55 + 2 + 2, `noteX=${n86n?.x} barX=${b86x?.x}`)
+// adj357：空间优先路径也应预留临时节拍宽度（原未算上，分数会压到下一小节音符）
+{
+  const lay86s = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"P:2/4" 3 4 |\n'), { ...DUR_CFG, noteSpaceLayout: 'space' as const })
+  const b86s = lay86s.pages[0].barlines.find((b) => b.comment?.startsWith('P:'))
+  const n86s = lay86s.pages[0].notes.find((n) => n.x > (b86s?.x ?? 0))
+  // 分数半宽 ≈ 1 位数字 × noteSize×0.32 + 1.5×s（noteSize=18 → 7.26）；音符应在分数右缘之后
+  check('adj357 空间优先路径预留临时节拍宽度（分数不压下一音符）', b86s !== undefined && n86s !== undefined && n86s.x >= b86s.x + 0.55 + 2 + 2 * (defaultPageConfig.note_size * 0.32 + 1.5 * NS_S) + 1, `noteX=${n86s?.x} barX=${b86s?.x}`)
+}
 // adj88：连音线内相同音高连续音符连奏合并时值
 const r88a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (2 - | 2/) 3 |\n')
 const ev88a = buildPlaySequence(r88a, layoutScore(r88a, DUR_CFG), 60).events
