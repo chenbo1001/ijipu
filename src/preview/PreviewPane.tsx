@@ -13,6 +13,7 @@ import { layoutScore, renderScoreToSvg, noteIdToCodePos, buildIndexToPage } from
 import type { ScorePage } from '@ijipu/engine'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides'
 import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '@ijipu/engine/layout/metaAnchors'
+import { firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
 import { brand } from '../brand/tokens'
 
 /** adj199：用 canvas.measureText 实测指定字体/字号下文本宽度（按字体实际宽度摆放角标，消除中英文宽度差异） */
@@ -46,6 +47,9 @@ export function PreviewPane() {
   const modal = useUiStore((s) => s.modal)
   const setPlaybackStart = useUiStore((s) => s.setPlaybackStart)
   const bumpPlaybackTick = useUiStore((s) => s.bumpPlaybackTick)
+  // adj354：@@ 显示默认音色名——无 Y 时用试听音色列表第一个启用音色（与播放端一致）
+  const playbackHqEnabled = useUiStore((s) => s.playbackHqEnabled)
+  const defaultInstrumentRef = useMemo(() => firstEnabledInstrumentRef(playbackHqEnabled), [playbackHqEnabled])
 
   const containerRef = useRef<HTMLDivElement>(null)
   const pageConfigRef = useRef(pageConfig)
@@ -71,13 +75,13 @@ export function PreviewPane() {
     // adj208：不因语法错误清空预览——layout/render 对错误输入安全（错误行已在
     // 解析阶段跳过：引号未闭合吞剩余内容、歌词缺曲行不挂载、未知符号降级为装饰），
     // 始终渲染可解析部分，避免预览在正常显示与错误提示之间闪动
-    const lay = layoutScore(parseResult, pageConfig)
+    const lay = layoutScore(parseResult, pageConfig, defaultInstrumentRef)
     // adj199：按字体实际宽度摆放角标——实测 "1 = " 与 ♯ 宽传入渲染，消除中英文字体 ♯ 宽度差异
     const cfg = lay.config
     const w1eq = measureFont('1 = ', cfg.miaoshu_size, cfg.miaoshu_font)
     const wAcc = measureFont('♯', cfg.miaoshu_size * (3 / 4), cfg.miaoshu_font)
     return { layout: lay, pagesHtml: renderScoreToSvg(lay, { w1eq, wAcc }), summary: sum }
-  }, [parseResult, pageConfig])
+  }, [parseResult, pageConfig, defaultInstrumentRef])
 
   // adj291：布局后把「音符 index → 物理页」映射回填 store，供编辑器光标联动对齐音符 id.page（自动分页一致）
   useEffect(() => {

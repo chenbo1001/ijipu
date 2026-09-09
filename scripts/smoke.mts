@@ -505,6 +505,18 @@ const svgIns = renderScoreToSvg(layIns)[0]
 check('adj303 showInstrument 开启渲染乐器名文本', svgIns.includes('>钢琴<') && svgIns.includes('>弦乐<'), '')
 const svgInsOff = renderScoreToSvg(layoutScore(rIns, DUR_CFG))[0]
 check('adj303 默认不显示乐器名', !svgInsOff.includes('>钢琴<'), '')
+// adj354：@@ 无 Y 时显示默认音色名（用调用方传入 defaultInstrumentRef = 第一启用音色），不固定为钢琴
+const rInsNoY = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 @钢琴 3 4 @@ 5 6 |\n')
+const layInsNoY = layoutScore(rInsNoY, { ...DUR_CFG, showInstrument: true }, '八音盒')
+{
+  const n5 = layInsNoY.pages[0].notes.find((n) => n.audioPitch === 'G4')
+  check('adj354 @@ 无 Y 时标注第一启用音色（八音盒）', n5?.instrumentLabel === '八音盒', String(n5?.instrumentLabel))
+}
+const layInsNoYNoRef = layoutScore(rInsNoY, { ...DUR_CFG, showInstrument: true })
+{
+  const n5 = layInsNoYNoRef.pages[0].notes.find((n) => n.audioPitch === 'G4')
+  check('adj354 @@ 无 Y 且无传入默认时回退第一音色库第一音色（钢琴）', n5?.instrumentLabel === '钢琴', String(n5?.instrumentLabel))
+}
 
 // bpm 推断
 check('J:96 → 96', inferBpm(parseJps('V: 1.0\nB: t\nJ: 96\n')) === 96)

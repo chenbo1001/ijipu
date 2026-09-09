@@ -18,7 +18,7 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { playbackCopy } from '../brand/copy'
 import { createHqCache, prefetchHqLibraryProgress } from '../playback/spessaCache'
-import { SpessaSynthBackend, getHqLibrary, GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
+import { SpessaSynthBackend, getHqLibrary, GM_VOICE_OPTIONS, firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
 import { layoutScore, buildPlaySequence, inferBpm, schedulePlay } from '@ijipu/engine'
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
@@ -42,13 +42,8 @@ export function PlaybackDialog() {
   const playbackHqEnabled = useUiStore((s) => s.playbackHqEnabled)
   const playbackHqVoice = useUiStore((s) => s.playbackHqVoice)
   const setPlaybackHqVoice = useUiStore((s) => s.setPlaybackHqVoice)
-  // adjNN：@@ 恢复默认音色=第一音色——无描述头 Y 时取试听音色列表第一个启用音色（GM program 名）
-  const firstEnabledInstrumentRef = useMemo(() => {
-    if (playbackHqEnabled.length === 0) return undefined
-    const prog = Math.min(...playbackHqEnabled)
-    const v = GM_VOICE_OPTIONS.find((o) => o.program === prog)
-    return v ? v.label.replace(/^\d+\s+/, '') : undefined
-  }, [playbackHqEnabled])
+  // adj354：@@ 恢复默认音色=第一音色——无描述头 Y 时取试听音色列表第一个启用音色（GM program 名）
+  const defaultInstrumentRef = useMemo(() => firstEnabledInstrumentRef(playbackHqEnabled), [playbackHqEnabled])
   // adj326：左右拆分方位（previewLeft=左预览右编辑 / editorLeft=左编辑右预览）
   const splitHDir = useUiStore((s) => s.splitHDir)
   // adj323：宽/窄屏（≤1024px 视为窄屏模式，adj322）——角落停靠仅宽屏生效，窄屏保持原样
@@ -212,8 +207,8 @@ export function PlaybackDialog() {
       // 构建序列（含反复展开；adj88：双击谱面音符定位试听起点）
       // adj310：声音/色块统一的准备延迟（毫秒）——按下播放后延迟才出第一声，色块同步
       const PLAY_FIRST_DELAY_MS = 200
-      const layout = layoutScore(parseResult, pageConfig)
-      const seq = buildPlaySequence(parseResult, layout, bpm, playbackStartId, firstEnabledInstrumentRef)
+      const layout = layoutScore(parseResult, pageConfig, defaultInstrumentRef)
+      const seq = buildPlaySequence(parseResult, layout, bpm, playbackStartId, defaultInstrumentRef)
       setTotalMs(seq.totalMs)
       // adj262：layout 后写入 voiceBlocks（纯曲部 yTop/yBottom）供预览色框覆盖整列
       setVoiceBlocks(

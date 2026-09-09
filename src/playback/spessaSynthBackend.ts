@@ -147,6 +147,19 @@ export async function loadHqBank(lib: HqSampleLibrary): Promise<ArrayBuffer> {
   throw new Error(`音源「${lib.name}」加载失败`)
 }
 
+/**
+ * adj354：@@ 恢复默认音色的「第一音色」——试听/导出音色列表第一个启用音色的 GM 音色名。
+ * 由启用集合（playbackHqEnabled，program 列表，按 program 序）取最小 program 对应 GM_VOICE_OPTIONS 的 label
+ * （剥掉前导「N 」编号），作为 buildPlaySequence / layoutScore 的 defaultInstrumentRef；
+ * 启用集合为空返回 undefined（引擎回退第一音色库第一音色）。
+ */
+export function firstEnabledInstrumentRef(enabled: number[]): string | undefined {
+  if (enabled.length === 0) return undefined
+  const prog = Math.min(...enabled)
+  const v = GM_VOICE_OPTIONS.find((o) => o.program === prog)
+  return v ? v.label.replace(/^\d+\s+/, '') : undefined
+}
+
 /** 乐器 id → MIDI channel（0-15）：多声部同时演奏时避免 program 冲突 */
 const CHANNEL_OF: Record<string, number> = {
   piano: 0, organ: 1, strings: 2, flute: 3, brass: 4, musicbox: 5,
