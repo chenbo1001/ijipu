@@ -687,6 +687,21 @@
   ② `docs/JPS-SPEC.md` 与 `public/doc/jps-spec.html` 为**手工同步**（VERSIONING 约定），任一改动都要同步另一端并人工核对表格/代码块渲染，不能只看源文件。
   ③ 改渲染器/文档后，用一次性对照脚本（`scripts/_tmp_*.mjs`，用后即删）或直接检查生成 HTML 里是否残留 `` `\``、`` `` ` `` `` 等转义痕迹。
 
+### E-2026-102 `@@` 恢复默认音色未按"第一音色"链路 + 单声部空间优先忽略 `align_min_bars`（adj354）
+- **场景**：① 用户在脚本里用 `@@` 想切回默认音色，但无描述头 `Y:` 时默认落回钢琴，未用「试听音色列表」第一个启用音色；② 用户在「页面设置 → 音符空间布局」选"空间优先"后，`align_min_bars`（两端对齐最小小节数）对单声部无效——行小节数小于阈值仍撑满两端对齐
+- **现象**：① `@@` 恢复默认音色——有 `Y:` 时正确；无 `Y:` 时 `sequence.ts` 里 `defaultInstrument = parseInstrumentRef(yInstruments?.[0] ?? '').ref` = `''`（空串），即便用户在「音色库管理」启用了收藏音色（如只留八音盒、关掉大钢琴），`@@` 也落回钢琴（`instrumentToProgram('')→0`），未用首个启用音色；② 单声部 `placeMusicRowSpace`（`layout/index.ts`）忽略 `align_min_bars`——`W = availW − durBodySum − nonDurPad` 恒为"全部剩余宽"，行小节数 < 阈值时仍把音符撑满到右边缘（行尾不自然留白），与多声部 `placeVoiceBlock` 已有 `stretchBars` 行为（adj318）不一致
+- **根因**：
+  - `@@` → `voiceDefaultOf(voice)` → 全局 `defaultInstrument`：无 `Y:` 时解析出空串，引擎层无法感知 UI 的"试听音色列表首个启用音色"（`uiStore.playbackHqEnabled`，React 状态），二者是纯 TS 引擎与 UI 的边界，缺一个从 UI 注入默认乐器的入口（`buildPlaySequence` 无此参数）
+  - 单声部空间优先 `placeMusicRowSpace` 只实现"始终撑满"一条路径，没读 `config.align_min_bars`；这是 E-2026-093（多声部"设了不生效"）的单声部版——当时只修了多声部，单声部空间路径漏了
+- **解决**（adj354）：
+  - **`@@` 第一音色链路**：`buildPlaySequence` 增加可选 `defaultInstrumentRef?: string`；`sequence.ts` 的 `defaultInstrument` 改为「先取第一个 `Y:`（`yRef`），无 `Y:` 时用调用方传入的 `defaultInstrumentRef`（UI 传入 `playbackHqEnabled` 第一个启用音色的 GM 名），仍空则回退 `''`（播放端路由→第一音色库第一音色钢琴）」。`PlaybackDialog`/`ExportDialog` 传入 `firstEnabledInstrumentRef = GM_VOICE_OPTIONS[Math.min(...playbackHqEnabled)].label.replace(/^\d+\s+/,'')`（无启用则 undefined）。保证 `@@` 一定有可用音色：有 `Y:`→首个 `Y:`；无 `Y:`→首个启用收藏音色；收藏为空→第一音色库第一音色
+  - **单声部空间优先自然宽**：`placeMusicRowSpace` 加 `barCount = row.end − row.start − leadingEmpty`、`stretch = barCount >= config.align_min_bars`；`W = stretch ? 剩余宽 : 0`（不撑满、行尾留白、末小节线 `atEnd` 仅在 stretch 时贴右钳制）。与多声部 `avStretch=0` 一致
+  - **顺带修**：多附点音符 `dotBodyW` 未乘 `t.dots`（双附点只按一个附点占宽，自然宽路径下色块偏窄）——`placeMusicRowSpace` 与 `placeVoiceBlock` 的 `dotBodyW` 均改为 `dotBodyW(m.noteSize) * t.dots`。smoke 新增 `[68b]`（单声部空间优先自然宽 + align_min_bars=2 撑满）、`[68c]`（@@ 第一音色链路三种情形）
+- **预防**：
+  ① **"某设置不生效"先 grep 全布局路径确认**：`align_min_bars` 类行级阈值在单/多声部 + 时值/空间四路径都要读到（E-2026-093 已提，本次单声部空间再次印证）
+  ② **引擎与 UI 状态边界**：UI 态（收藏音色）不能直接进纯 TS 引擎——需显式 `buildPlaySequence(...)` 参数传入默认值，否则 `@@` 类"回默认"行为只能落到硬编码默认（钢琴）
+  ③ **多附点占宽**：`dotBodyW` 按附点数（`t.dots`）相乘；自然宽/撑满两条路径都要一致，否则双附点色块/占宽偏窄
+
 ## 五、预防清单（Checklist，提交/交付前自检）
 
 - [ ] 所有 npm 命令带 `--cache "D:/Coding/JPCoder/.npm-cache"`

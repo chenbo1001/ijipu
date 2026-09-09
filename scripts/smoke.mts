@@ -2781,6 +2781,40 @@ console.log('[68] multi-voice space natural width when bars < align_min_bars (ad
   check('adj318 多声部行小节数<align_min_bars 时末线不撑满（自然宽）', naturalOk, `v2LastBar=${v2LastBar.toFixed(2)} rightEdge=${rightEdge.toFixed(2)} gap=${(rightEdge - v2LastBar).toFixed(2)}`)
 }
 
+// ---- 68b. 单声部空间优先自然宽（行小节数 < align_min_bars，adj354） ----
+console.log('[68b] single-voice space natural width when bars < align_min_bars (adj354)')
+{
+  const cfgSpaceNat = { ...DUR_CFG, noteSpaceLayout: 'space' as const } // 默认 align_min_bars=4
+  const srcSpaceNat = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 5 - |\n' // 2 小节 < 4
+  const laySpaceNat = layoutScore(parseJps(srcSpaceNat), cfgSpaceNat)
+  const pageSpace = laySpaceNat.pages[0]
+  const rightEdgeSpace = pageSpace.width - cfgSpaceNat.margin_right - 0.55
+  const lastBarSpace = Math.max(...pageSpace.barlines.map((b) => b.x))
+  // 单声部末节线应 < rightEdge（自然宽留白，不撑满）——修复前恒撑满贴右
+  check('adj354 单声部空间优先 行小节数<align_min_bars 时末线不撑满（自然宽）', lastBarSpace < rightEdgeSpace - 1, `lastBar=${lastBarSpace.toFixed(2)} rightEdge=${rightEdgeSpace.toFixed(2)} gap=${(rightEdgeSpace - lastBarSpace).toFixed(2)}`)
+  // 对照：align_min_bars=2 → 2 小节 ≥ 2 → 撑满贴右
+  const cfgSpaceStretch = { ...DUR_CFG, noteSpaceLayout: 'space' as const, align_min_bars: 2 }
+  const laySpaceStretch = layoutScore(parseJps(srcSpaceNat), cfgSpaceStretch)
+  const lastBarStretch = Math.max(...laySpaceStretch.pages[0].barlines.map((b) => b.x))
+  check('adj354 单声部空间优先 align_min_bars=2 时 2 小节撑满贴右', Math.abs(lastBarStretch - rightEdgeSpace) < 0.6, `lastBar=${lastBarStretch.toFixed(2)} rightEdge=${rightEdgeSpace.toFixed(2)}`)
+}
+
+// ---- 68c. @@ 恢复默认音色 = 第一音色（adj354） ----
+console.log('[68c] @@ restore default instrument = first instrument (adj354)')
+{
+  // 有 Y：默认用第一个 Y（优先于传入默认）
+  const rY = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 长笛\nQ: 1 2 @大钢琴 3 4 @@ 5 6 |\n')
+  const seqY = buildPlaySequence(rY, layoutScore(rY, DUR_CFG), 120, undefined, '八音盒')
+  check('adj354 有 Y 时 @@ 用第一个 Y（长笛）而非传入（八音盒）', seqY.events[4]?.instrument === '长笛' && seqY.events[5]?.instrument === '长笛', `${seqY.events[4]?.instrument},${seqY.events[5]?.instrument}`)
+  // 无 Y：@@ 用调用方传入的第一音色（defaultInstrumentRef）
+  const rNoY = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 @大钢琴 3 4 @@ 5 6 |\n')
+  const seqNoY = buildPlaySequence(rNoY, layoutScore(rNoY, DUR_CFG), 120, undefined, '八音盒')
+  check('adj354 无 Y 时 @@ 用传入第一音色（八音盒）', seqNoY.events[4]?.instrument === '八音盒' && seqNoY.events[5]?.instrument === '八音盒', `${seqNoY.events[4]?.instrument},${seqNoY.events[5]?.instrument}`)
+  // 无 Y 且无传入默认：@@ 回退空串（播放端路由→第一音色库第一音色钢琴）
+  const seqNoYNoRef = buildPlaySequence(rNoY, layoutScore(rNoY, DUR_CFG), 120)
+  check('adj354 无 Y 且无传入默认时 @@ 回退空串', seqNoYNoRef.events[4]?.instrument === '', `${seqNoYNoRef.events[4]?.instrument}`)
+}
+
 // ---- 69. 多声部 rightX 含附点+增时线（adj319，色块按段不消失 + 显示占宽） ----
 console.log('[69] multi-voice note.rightX includes dot/aug display width (adj319)')
 {

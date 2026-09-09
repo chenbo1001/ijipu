@@ -1,14 +1,15 @@
 /**
  * dialogs/ExportDialog.tsx — 导出（SVG / PNG / JPG / PDF / .jps 源文件）
  */
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
+import { useUiStore } from '../store/uiStore'
 import { layoutScore, renderScoreToSvg, buildPlaySequence, inferBpm, eventsToMidi } from '@ijipu/engine'
 import { renderToAudioBuffer, audioBufferToWav, audioBufferToMp3 } from '../export/audio'
 import { exportSvg, exportPng, exportJpg, exportPdf } from '../export/export'
 import { createHqCache } from '../playback/spessaCache'
-import { getHqLibrary, loadHqBank } from '../playback/spessaSynthBackend'
+import { getHqLibrary, loadHqBank, GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
 
 /** 下载字节（Blob + 临时 <a>） */
 function downloadBytes(bytes: Uint8Array, name: string, type: string) {
@@ -26,6 +27,14 @@ export function ExportDialog() {
   const fileName = useDocStore((s) => s.fileName)
   const parseResult = useDocStore((s) => s.parseResult)
   const pageConfig = useDocStore((s) => s.pageConfig)
+  // adjNN：@@ 恢复默认音色——无 Y 时用试听音色列表第一个启用音色（MIDI/音频导出与试听一致）
+  const playbackHqEnabled = useUiStore((s) => s.playbackHqEnabled)
+  const firstEnabledInstrumentRef = useMemo(() => {
+    if (playbackHqEnabled.length === 0) return undefined
+    const prog = Math.min(...playbackHqEnabled)
+    const v = GM_VOICE_OPTIONS.find((o) => o.program === prog)
+    return v ? v.label.replace(/^\d+\s+/, '') : undefined
+  }, [playbackHqEnabled])
 
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -113,7 +122,7 @@ export function ExportDialog() {
       run: () => run('midi', () => {
         const layout = layoutScore(parseResult, pageConfig)
         const bpm = inferBpm(parseResult)
-        const seq = buildPlaySequence(parseResult, layout, bpm)
+        const seq = buildPlaySequence(parseResult, layout, bpm, undefined, firstEnabledInstrumentRef)
         const midi = eventsToMidi(seq.events, { bpm, title: parseResult.header.titles[0] ?? baseName })
         downloadBytes(midi, `${baseName}.mid`, 'audio/midi')
       }),
@@ -126,7 +135,7 @@ export function ExportDialog() {
       run: () => run('wav', async () => {
         const layout = layoutScore(parseResult, pageConfig)
         const bpm = inferBpm(parseResult)
-        const seq = buildPlaySequence(parseResult, layout, bpm)
+        const seq = buildPlaySequence(parseResult, layout, bpm, undefined, firstEnabledInstrumentRef)
         const bank = await ensureHqBank()
         const buf = await renderToAudioBuffer(seq.events, bank, { bpm, title: parseResult.header.titles[0] ?? baseName })
         downloadBytes(audioBufferToWav(buf), `${baseName}.wav`, 'audio/wav')
@@ -139,7 +148,7 @@ export function ExportDialog() {
       run: () => run('mp3', async () => {
         const layout = layoutScore(parseResult, pageConfig)
         const bpm = inferBpm(parseResult)
-        const seq = buildPlaySequence(parseResult, layout, bpm)
+        const seq = buildPlaySequence(parseResult, layout, bpm, undefined, firstEnabledInstrumentRef)
         const bank = await ensureHqBank()
         const buf = await renderToAudioBuffer(seq.events, bank, { bpm, title: parseResult.header.titles[0] ?? baseName })
         downloadBytes(audioBufferToMp3(buf), `${baseName}.mp3`, 'audio/mpeg')

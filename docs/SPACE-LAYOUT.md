@@ -194,9 +194,9 @@ xBar += mspBarRelW[b] + (b<numBars−1 ? gapSpaces[b] : 0)
 | 拉伸分配 | `noteElDur/totalDur × W`（按总时值） | `avStretch = (targetBarSum − baseBarSum)`（按末线钳制反推，stretchBars 才生效） |
 | 数字 x | `blockX + accW + leftExt`（**右移腾位**） | `first.x`（**锚段起点**，accW 在 noteW 内） |
 | 附点段 | `dotCX = curX + g + noteBodyW + g + dotBodyW/2`（动态 g） | `first.x + noteBodyW + dotGap + dotBodyW/2`（adj317 修复） |
-| 行末线 | `atEnd` 直接钳制 `pageW − margin_right − halfW` | lineX0 自然值（依赖 mspBarRelW）；stretchBars=true 时末线贴右 |
+| 行末线 | `atEnd && stretch` 钳制 `pageW − margin_right − halfW`；否则自然（adj354，stretch=false 行尾留白） | lineX0 自然值（依赖 mspBarRelW）；stretchBars=true 时末线贴右 |
 | 段间隙 | 拍后 `(noteElDur/totalDur)·W`（按 W 自然均分） | 拍后 `NOTE_GAP + s`（固定 + 均匀拉伸） |
-| 行内撑满阈值 | `barCount >= config.align_min_bars`（adj297 默认 4） | `numBars >= config.align_min_bars`（adj318 新增） |
+| 行内撑满阈值 | `barCount >= config.align_min_bars`（adj297 时值优先 / adj354 空间优先，默认 4；`W = stretch ? 剩余宽 : 0`） | `numBars >= config.align_min_bars`（adj318，`avStretch` 分叉） |
 
 ---
 
