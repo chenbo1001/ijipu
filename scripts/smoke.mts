@@ -2848,6 +2848,33 @@ console.log('[68d] single-voice space natural row measure width >= previous row 
   check('adj355 natural 行小节宽 >= 上一行对应小节（扩宽）', bar2Notes.length > 0 && spanBar2 >= spanBar1 - 1 && spanBar2 > 180, `spanBar1=${spanBar1.toFixed(2)} spanBar2=${spanBar2.toFixed(2)} bar1n=${bar1Notes.length} bar2n=${bar2Notes.length}`)
 }
 
+// ---- 68e. 跨组：第 2 行自然宽对齐第 1 行对应小节（adj355） ----
+console.log('[68e] two-line: row2 natural measures align to row1 (adj355)')
+{
+  const cfg68e = { ...DUR_CFG, noteSpaceLayout: 'space' as const, align_min_bars: 4 }
+  const src68e = `V: 1.0
+B: t
+D: C
+P: 4/4
+Q: 6. 3'/ 2'&shy 3' | 2'. 1'/ 1' @大钢琴@ &zkh 1// 2// 3// 5// | 1'/. 1'// 1'/ (2'// 3'//) 3' 2'/ 1'/ | 7/. 7// 7/ 6/ 5 0// 3// 5// 6// |
+Q: 1 2/ 3/ 5 6, | 1- 0 0 &ykh ||`
+  const lay68e = layoutScore(parseJps(src68e), cfg68e)
+  const notes68e = lay68e.pages[0].notes
+  const spanOf68e = (gid: number, b: number) => {
+    const ns = notes68e.filter((n) => n.id.group === gid && n.barIndex === b)
+    if (ns.length < 2) return 0
+    const xs = ns.map((n) => n.x)
+    const xe = ns.map((n) => n.rightX ?? n.x + (n.width ?? 0))
+    return Math.max(...xe) - Math.min(...xs)
+  }
+  const q1b0 = spanOf68e(0, 0)
+  const q1b1 = spanOf68e(0, 1)
+  const q2b0 = spanOf68e(1, 0)
+  const q2b1 = spanOf68e(1, 1)
+  check('adj355 跨组：Q2 第1小节宽接近 Q1 第1小节（不窄）', q2b0 >= q1b0 * 0.9, `q1b0=${q1b0.toFixed(1)} q2b0=${q2b0.toFixed(1)}`)
+  check('adj355 跨组：Q2 第2小节宽接近 Q1 第2小节（不窄）', q2b1 >= q1b1 * 0.9, `q1b1=${q1b1.toFixed(1)} q2b1=${q2b1.toFixed(1)}`)
+}
+
 // ---- 69. 多声部 rightX 含附点+增时线（adj319，色块按段不消失 + 显示占宽） ----
 console.log('[69] multi-voice note.rightX includes dot/aug display width (adj319)')
 {
