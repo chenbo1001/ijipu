@@ -704,6 +704,13 @@
   ② **引擎与 UI 状态边界**：UI 态（收藏音色）不能直接进纯 TS 引擎——需显式 `buildPlaySequence(...)` 参数传入默认值，否则 `@@` 类"回默认"行为只能落到硬编码默认（钢琴）
   ③ **多附点占宽**：`dotBodyW` 按附点数（`t.dots`）相乘；自然宽/撑满两条路径都要一致，否则双附点色块/占宽偏窄
 
+### E-2026-103 跳房子 `[` 修饰不支持 `-` 降低（adj356）
+- **场景**：用户要求「连音线 `(` / 跳房子 `[` 后用 `+` 抬升，现已加 `-` 降低，方向相反」。连音线 `(+`/`(-`（adj135/136）早已支持，但跳房子 `[` 只支持 `+`、不支持 `-`
+- **现象**：`|[-` 把 `-` 当普通字符/音符前缀处理，无法降低跳房子线；`[` 后只有 `+` 抬升一种方向
+- **根因**：`tokenizer.ts` 的 `parseVoltaMods` 只识别 `/`、`+`、`"`，未识别 `-`；`voltaStart`/`PlacedBarline.voltaStart` 类型缺 `minus`；layout/render 的跳房子线 y 只减 `plus×VOLTA_RAISE`，不增 `minus×VOLTA_RAISE`。连音线（adj136）已有 `minus` 通路，跳房子漏了
+- **解决**（adj356）：`parseVoltaMods` 增 `minus` 计数（与 `+` 对称）；`voltaStart`（token 类型 + `PlacedBarline`）增 `minus?: number`；`layout/index.ts` 跳房子 floor 高度用 `yTop - VOLTA_BAR_GAP - plus×VOLTA_RAISE + minus×VOLTA_RAISE`（降低=向下）；`render/index.ts` 起止 y 同样 `+ minus×VOLTA_RAISE`。smoke [38] 新增：`[-` 解析 `minus=1` + 渲染 `[-` 更低/`[--` 更低/`[+` 更高（方向与 `+` 相反）。JPS-SPEC/SYNTAX 文档同步
+- **预防**：凡「方向性修饰」（+抬升/-降低、上移/下移）应**成对实现并全程透传**（tokenizer → token 类型 → layout → render 类型），漏一边就会只支持一个方向；语法改动同步 JPS-SPEC/SYNTAX 并以 smoke 断言回归
+
 ## 五、预防清单（Checklist，提交/交付前自检）
 
 - [ ] 所有 npm 命令带 `--cache "D:/Coding/JPCoder/.npm-cache"`

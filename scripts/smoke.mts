@@ -12,7 +12,7 @@ import { parseKey } from '@ijipu/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork } from '@ijipu/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, NOTE_COMMENT_FONT_RATIO, noteScaleOf, lowDotY, octaveDotY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, noteScaleOf, lowDotY, octaveDotY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos } from '@ijipu/engine/layout/metaAnchors.ts'
 import { computeBeamsForTest } from '@ijipu/engine/render/index.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
@@ -1768,6 +1768,23 @@ const r38b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |[+"1." 4 4 5 |]/ 7 |\n'
 const b38b = r38b.groups[0].music.tokens.filter((t) => t.kind === 'barline')
 check('[+ 抬高 + 注释', b38b.length === 3 && b38b[0].kind === 'barline' && b38b[0].voltaStart?.plus === 1 && b38b[0].voltaStart?.comment === '1.', JSON.stringify(b38b[0]))
 check('|]/ 开口结束', b38b[1].kind === 'barline' && b38b[1].voltaEnd === true && b38b[1].voltaEndSlash === true, JSON.stringify(b38b[1]))
+// adj356：[- 修饰降低跳房子线（与 + 相反）
+const r38e = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |[- 3 4 ] 5 6 |\n')
+const b38e = r38e.groups[0].music.tokens.filter((t) => t.kind === 'barline')
+check('[- 降低修饰解析（minus=1）', b38e.length >= 2 && b38e[0].kind === 'barline' && b38e[0].voltaStart?.minus === 1 && b38e[0].voltaStart?.plus === 0, JSON.stringify(b38e[0]))
+// 渲染：[- 线更低（y 更大）、[- 两个更低、[+ 更高
+{
+  const vyOf = (src: string) => {
+    const lay = layoutScore(parseJps(src), DUR_CFG)
+    const b = lay.pages[0].barlines.find((bb) => bb.voltaStart)
+    return b ? b.yTop - VOLTA_BAR_GAP - (b.voltaStart?.plus ?? 0) * VOLTA_RAISE + (b.voltaStart?.minus ?? 0) * VOLTA_RAISE : NaN
+  }
+  const vDef = vyOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |[ 3 4 ] 5 |\n')
+  const vMinus = vyOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |[- 3 4 ] 5 |\n')
+  const vMinus2 = vyOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |[-- 3 4 ] 5 |\n')
+  const vPlus = vyOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |[+ 3 4 ] 5 |\n')
+  check('[- 降低跳房子线（y 更大，方向与 + 相反）', vMinus > vDef + 1 && vMinus2 > vDef + 2 && vPlus < vDef - 1, `def=${vDef.toFixed(2)} minus=${vMinus.toFixed(2)} minus2=${vMinus2.toFixed(2)} plus=${vPlus.toFixed(2)}`)
+}
 // 3. 行首跳房子用 |/ [
 const r38c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |/ [ 5 6 ] 1 2 |\n')
 const b38c = r38c.groups[0].music.tokens.filter((t) => t.kind === 'barline')
