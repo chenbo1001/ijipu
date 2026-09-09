@@ -698,6 +698,7 @@
   - **单声部空间优先自然宽**：`placeMusicRowSpace` 加 `barCount = row.end − row.start − leadingEmpty`、`stretch = barCount >= config.align_min_bars`；`W = stretch ? 剩余宽 : 0`（不撑满、行尾留白、末小节线 `atEnd` 仅在 stretch 时贴右钳制）。与多声部 `avStretch=0` 一致
   - **顺带修**：多附点音符 `dotBodyW` 未乘 `t.dots`（双附点只按一个附点占宽，自然宽路径下色块偏窄）——`placeMusicRowSpace` 与 `placeVoiceBlock` 的 `dotBodyW` 均改为 `dotBodyW(m.noteSize) * t.dots`。smoke 新增 `[68b]`（单声部空间优先自然宽 + align_min_bars=2 撑满）、`[68c]`（@@ 第一音色链路三种情形）
   - **@@ 显示标注音色名（adj303 显示乐器名开启时）**：`layoutScore` 的 `@@` 标注原用 `INSTRUMENT_LIB_NAMES[resolveInstrument(...)]`，只映射固定 6 种合成音色，无 `Y:` 时固定显示"钢琴"。现 `layoutScore` 也接受 `defaultInstrumentRef`，`@@` 标注与播放端一致（有 `Y:`→该声部 `Y:` 乐器名；无 `Y:`→第一启用音色；再空第一音色库第一音色），用 `parseInstrumentRef(...).instrument` 取纯乐器名（GM 音色名不再显示为钢琴）。`PreviewPane`/`PlaybackDialog`/`ExportDialog` 均传入；抽 `firstEnabledInstrumentRef(enabled)` helper（`playback/spessaSynthBackend.ts`）三处共用
+  - **自然宽行小节宽对齐上一行（adj355）**：单声部空间优先自然宽行（`stretch=false`）此前各小节恒为自然本体宽，末行窄小节被压缩、与上一行小节线纵向错位。现 `placeMusicRowSpace` 读 `refRelMeasureW`（上一行各小节内容宽，按行内相对下标），本小节自然内容宽 < 上一行对应小节宽时扩到上一行宽度，多余宽按小节内时值摊开（空间布局）；并把本行各小节内容宽回传，供下一行对齐。`measureContentW` 累计时值分隔表（含增时线）宽度。smoke `[68d]` 验证自然行小节宽 ≥ 上一行对应小节
 - **预防**：
   ① **"某设置不生效"先 grep 全布局路径确认**：`align_min_bars` 类行级阈值在单/多声部 + 时值/空间四路径都要读到（E-2026-093 已提，本次单声部空间再次印证）
   ② **引擎与 UI 状态边界**：UI 态（收藏音色）不能直接进纯 TS 引擎——需显式 `buildPlaySequence(...)` 参数传入默认值，否则 `@@` 类"回默认"行为只能落到硬编码默认（钢琴）

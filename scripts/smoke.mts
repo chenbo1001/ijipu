@@ -2827,6 +2827,27 @@ console.log('[68c] @@ restore default instrument = first instrument (adj354)')
   check('adj354 无 Y 且无传入默认时 @@ 回退空串', seqNoYNoRef.events[4]?.instrument === '', `${seqNoYNoRef.events[4]?.instrument}`)
 }
 
+// ---- 68d. 单声部空间优先自然宽——小节宽不小于上一行对应小节（adj355） ----
+console.log('[68d] single-voice space natural row measure width >= previous row (adj355)')
+{
+  // 每小节 16 个十六分音符（自然本体宽 ~178px），3 小节：行1=2小节(≥align_min_bars=2，撑满)、行2=1小节(自然)
+  const cfg68d = { ...DUR_CFG, noteSpaceLayout: 'space' as const, align_min_bars: 2 }
+  const src68d =
+    'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1//2//3//4//5//6//7//8//9//10//11//12//13//14//15//16// | 1//2//3//4//5//6//7//8//9//10//11//12//13//14//15//16// | 1//2//3//4//5//6//7//8//9//10//11//12//13//14//15//16// |\n'
+  const lay68d = layoutScore(parseJps(src68d), cfg68d)
+  const page68d = lay68d.pages[0]
+  const notes68d = page68d.notes
+  // 上一行（小节 1）内容宽 vs 自然行（小节 3）内容宽——自然行应被扩宽到不小于上一行对应小节
+  const bar1Notes = notes68d.filter((n) => n.barIndex === 0)
+  const bar2Notes = notes68d.filter((n) => n.barIndex === 2)
+  const spanOf = (arr: { x: number; rightX?: number; width?: number }[]) =>
+    arr.length > 1 ? Math.max(...arr.map((n) => (n.rightX ?? n.x + (n.width ?? 0)) )) - Math.min(...arr.map((n) => n.x)) : 0
+  const spanBar1 = spanOf(bar1Notes)
+  const spanBar2 = spanOf(bar2Notes)
+  // 自然行小节内容宽应 ≥ 上一行对应小节内容宽（不窄于它）；且确实被扩宽（> 纯自然 16 分宽 ~178）
+  check('adj355 natural 行小节宽 >= 上一行对应小节（扩宽）', bar2Notes.length > 0 && spanBar2 >= spanBar1 - 1 && spanBar2 > 180, `spanBar1=${spanBar1.toFixed(2)} spanBar2=${spanBar2.toFixed(2)} bar1n=${bar1Notes.length} bar2n=${bar2Notes.length}`)
+}
+
 // ---- 69. 多声部 rightX 含附点+增时线（adj319，色块按段不消失 + 显示占宽） ----
 console.log('[69] multi-voice note.rightX includes dot/aug display width (adj319)')
 {
