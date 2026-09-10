@@ -77,6 +77,9 @@ export const uiCopy = {
   // adj281：非安全上下文（http:// 或 file://）或非 Chromium 内核下无 Web File System Access API，
   // 降级用 <input type=file> 载入 .jps 文本——已载入但无法写回磁盘，提示改用「导出」保存
   openFallbackNotice: '已载入文件；此环境无法写回磁盘，请用「文件 → 导出」保存成果',
+  // adj370：打开文件必须给出反馈（此前失败静默 return false，用户无法判断是否打开成功）
+  openOkPrefix: '已打开：',
+  openFailedPrefix: '打开失败：',
 } as const
 
 /** adj369：保存阶段中文名（保存慢时的提示与控制台明细用） */

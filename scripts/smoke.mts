@@ -3485,11 +3485,129 @@ console.log('[80] save phase timing log (adj369)')
   }
 }
 
+// ---- 81. 文件身份一致性（adj370）：打开/保存/另存为后，文件名与句柄必须是同一份新文件 ----
+// 用户反馈「打开一个文件后当前文件名还是之前的」——用桩化 localStorage/indexedDB/window 在 Node 里
+// 跑真实 store 流程（含「启动恢复慢返回」的竞态）把这条不变量固定下来。
+async function runStoreFileIdentityTests() {
+  console.log('[81] store file identity: open / save / save-as (adj370)')
+  const kv: Record<string, string> = {
+    'ijipu.draftName': 'A',
+    'ijipu.draft': 'V: 1.0\nB: 甲\nD: C\nP: 4/4\nQ: 1 |\n',
+  }
+  const g = globalThis as unknown as Record<string, unknown>
+  g.localStorage = {
+    getItem: (k: string) => (k in kv ? kv[k] : null),
+    setItem: (k: string, v: string) => {
+      kv[k] = v
+    },
+    removeItem: (k: string) => {
+      delete kv[k]
+    },
+    get length() {
+      return Object.keys(kv).length
+    },
+    key: (i: number) => Object.keys(kv)[i] ?? null,
+  }
+  const writes: string[] = []
+  const mkHandle = (name: string) => ({
+    name,
+    getFile: async () => ({ name, text: async () => kv['ijipu.draft'] }),
+    createWritable: async () => ({
+      write: async () => {
+        writes.push(name)
+      },
+      close: async () => undefined,
+      abort: async () => undefined,
+    }),
+    queryPermission: async () => 'granted',
+    requestPermission: async () => 'granted',
+  })
+  const handleA = mkHandle('A.jps')
+  const handleB = mkHandle('B.jps')
+  const handleC = mkHandle('C.jps')
+  // IndexedDB 桩：恢复句柄「慢返回」200ms（模拟真实延迟，专门制造启动恢复 vs 用户打开 的竞态）
+  g.indexedDB = {
+    open: () => {
+      const req: { result: unknown; onupgradeneeded?: () => void; onsuccess?: () => void; onerror?: () => void } = {
+        result: {
+          objectStoreNames: { contains: () => true },
+          createObjectStore: () => undefined,
+          transaction: () => {
+            const getReq: { result: unknown; onsuccess?: () => void; onerror?: () => void } = { result: handleA }
+            setTimeout(() => getReq.onsuccess?.(), 200)
+            return { objectStore: () => ({ put: () => undefined, get: () => getReq }), oncomplete: null, onerror: null }
+          },
+          close: () => undefined,
+        },
+      }
+      setTimeout(() => {
+        req.onupgradeneeded?.()
+        req.onsuccess?.()
+      }, 0)
+      return req
+    },
+  }
+  let openPicker: () => Promise<unknown[]> = async () => [handleB]
+  let savePicker: () => Promise<unknown> = async () => handleC
+  g.window = {
+    showOpenFilePicker: () => openPicker(),
+    showSaveFilePicker: () => savePicker(),
+    setTimeout,
+    clearTimeout,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  }
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const { useDocStore } = (await import('../src/store/docStore.ts')) as any
+  const { useUiStore } = (await import('../src/store/uiStore.ts')) as any
+  const st = () => useDocStore.getState()
+  const hName = () => (st().fileHandle as { name?: string } | null)?.name ?? null
+
+  check('adj370 启动：fileName 取草稿名（A）', st().fileName === 'A', st().fileName)
+  await st().openFile()
+  check('adj370 打开 B.jps → fileName=B', st().fileName === 'B', st().fileName)
+  check('adj370 打开 B.jps → 句柄=B.jps', hName() === 'B.jps', String(hName()))
+  await new Promise((r) => setTimeout(r, 400))
+  check('adj370 启动恢复慢返回不覆盖已打开文件', st().fileName === 'B' && hName() === 'B.jps', `${st().fileName}/${hName()}`)
+  await st().saveFile()
+  check('adj370 保存写回的是 B 句柄', writes.length === 1 && writes[0] === 'B.jps', JSON.stringify(writes))
+  await st().saveFileAs()
+  check('adj370 另存为 C.jps → fileName=C', st().fileName === 'C', st().fileName)
+  check('adj370 另存为 C.jps → 句柄=C.jps', hName() === 'C.jps', String(hName()))
+  check('adj370 另存为 C.jps → 草稿名=C（下次启动才对得上）', kv['ijipu.draftName'] === 'C', kv['ijipu.draftName'])
+  check('adj370 另存为写入的是 C 句柄', writes.length === 2 && writes[1] === 'C.jps', JSON.stringify(writes))
+  // 打开失败必须可见（此前 catch 静默 return false）
+  openPicker = async () => {
+    throw new Error('boom')
+  }
+  const ok = await st().openFile()
+  const notice = useUiStore.getState().notice as { text: string; kind: string } | null
+  check(
+    'adj370 打开失败：返回 false 且给出错误提示',
+    ok === false && !!notice && notice.kind === 'error' && notice.text.includes('打开失败'),
+    JSON.stringify(notice),
+  )
+  // 用户取消（AbortError）仍静默、不报错
+  useUiStore.getState().clearNotice()
+  openPicker = async () => {
+    const e = new Error('cancel')
+    e.name = 'AbortError'
+    throw e
+  }
+  const ok2 = await st().openFile()
+  check('adj370 用户取消打开：静默无提示', ok2 === false && useUiStore.getState().notice === null, String(useUiStore.getState().notice))
+}
+
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
 runAdj363SaveTests()
   .catch((e) => {
     failed++
     console.error('  ✗ adj363 保存可靠性用例抛异常', e)
+  })
+  .then(() => runStoreFileIdentityTests())
+  .catch((e) => {
+    failed++
+    console.error('  ✗ adj370 文件身份用例抛异常', e)
   })
   .then(() => {
     console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)

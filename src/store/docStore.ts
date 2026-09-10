@@ -20,6 +20,7 @@ import {
   classifySaveError,
   createSavePhaseLog,
   fileBaseName,
+  isUserCancel,
   saveTextToHandle,
   type SavePhaseLog,
 } from './saveSupport'
@@ -365,9 +366,19 @@ export const useDocStore = create<DocState>()((set, get) => ({
         lastEditAt: 0,
         sel: { start: 0, end: 0 },
       })
+      // adj370：打开成功给出明确反馈（含实际文件名与句柄名），避免"打开了没打开"无从判断
+      const ui = useUiStore.getState()
+      console.info(`[iJipu] 打开文件：name=${name} handle=${handle.name}`)
+      ui.showNotice(`${uiCopy.openOkPrefix}${name}.jps`, 'ok')
       return true
-    } catch {
-      return false // 用户取消
+    } catch (e) {
+      // adj370：打开失败不再静默——此前 catch 直接 return false，用户只看到"没反应"；
+      // 用户主动取消（AbortError）仍静默
+      if (isUserCancel(e)) return false
+      const reason = e instanceof Error ? `${e.name}${e.message ? `: ${e.message}` : ''}` : String(e)
+      console.warn('[iJipu] 打开文件失败', e)
+      useUiStore.getState().showNotice(`${uiCopy.openFailedPrefix}${reason}`, 'error')
+      return false
     }
   },
   saveFile: async () => {
@@ -435,7 +446,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       const tUi = performance.now()
       set({ fileHandle: handle, fileName: name, dirty: get().code !== code })
       phaseLog.tail('ui', performance.now() - tUi)
-      reportSaved(t0, phaseLog)
+      reportSaved(t0, phaseLog, name)
       return true
     } catch (e) {
       const kind = classifySaveError(e)
@@ -493,22 +504,26 @@ function collectSavePhases(): SavePhaseLog {
  *  - adj369：「提交文件」是瓶颈且 ≥2s 时附一句可操作提示——这一步是**浏览器把临时文件原子替换成目标文件**，
  *    应用代码不参与，常见原因是目标文件被云同步客户端 / 杀毒软件 / 其它程序占用（替换被反复重试）。
  */
-function reportSaved(t0: number, log?: SavePhaseLog): void {
+function reportSaved(t0: number, log?: SavePhaseLog, savedName?: string): void {
   const ms = Math.round(performance.now() - t0)
+  // adj370：提示带上实际写入的文件名，一眼确认"保存到了哪个文件"
+  const who = savedName ? `：${savedName}.jps` : ''
   if (ms < SAVE_SLOW_MS) {
-    useUiStore.getState().showNotice(uiCopy.saveOk, 'ok')
+    useUiStore.getState().showNotice(`${uiCopy.saveOk}${who}`, 'ok')
     return
   }
   const detail = log?.text() ?? ''
   const worst = log?.worst() ?? null
   const worstSex = worst ? `（${worst.label} ${Math.round(worst.ms)}ms）` : ''
   const commitStuck = worst?.phase === 'commit' && worst.ms >= SAVE_SLOW_COMMIT_MS
-  console.info(`[iJipu] 保存耗时 ${ms}ms（${detail || '无阶段明细'} · 收尾 ${Math.max(0, ms - (log?.total() ?? 0))}ms）`)
+  console.info(
+    `[iJipu] 保存耗时 ${ms}ms → ${savedName ?? '?'}.jps（${detail || '无阶段明细'} · 收尾 ${Math.max(0, ms - (log?.total() ?? 0))}ms）`,
+  )
   // 带排查建议时用 warn（toast 停留 4s，够读完），否则 ok（1.8s）
   useUiStore
     .getState()
     .showNotice(
-      `${uiCopy.saveOk} · ${(ms / 1000).toFixed(1)}s${worstSex}${commitStuck ? ` · ${uiCopy.saveSlowCommitHint}` : ''}`,
+      `${uiCopy.saveOk}${who} · ${(ms / 1000).toFixed(1)}s${worstSex}${commitStuck ? ` · ${uiCopy.saveSlowCommitHint}` : ''}`,
       commitStuck ? 'warn' : 'ok',
     )
 }
@@ -540,7 +555,7 @@ async function doSaveFile(): Promise<boolean> {
     const tUi = performance.now()
     useDocStore.setState({ fileName: name, dirty: useDocStore.getState().code !== code })
     phaseLog.tail('ui', performance.now() - tUi)
-    reportSaved(t0, phaseLog)
+    reportSaved(t0, phaseLog, name)
     return true
   } catch (e) {
     const kind = classifySaveError(e)
