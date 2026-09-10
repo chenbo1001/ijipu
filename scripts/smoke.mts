@@ -429,14 +429,37 @@ const ps1 = mkSeq('|: 1 2 :| 3 4 |')
 check('反复展开 6 事件（1,2,1,2,3,4）', pitchSeq(ps1) === 'C4,D4,C4,D4,E4,F4', pitchSeq(ps1))
 // adj282：反复回跳后 atMs 单调平移（此前第二遍 atMs 与第一遍重叠 → 音频重叠/高亮错乱）
 check('反复展开 atMs 单调不重叠', ps1.events.every((e, k) => k === 0 || e.atMs >= ps1.events[k - 1].atMs + ps1.events[k - 1].durationMs - 0.5), ps1.events.map((e) => Math.round(e.atMs)).join(','))
-check('反复播放总时长 = 展开 2 遍', ps1.totalMs === 4000, String(ps1.totalMs))
+// adj361：无缝跳跃——回跳后第二遍紧接第一遍（无空档），总时长 = 实际播放时刻
+check('adj361 反复播放总时长 = 3 拍组×2 遍 + 尾（3000ms，无空档）', ps1.totalMs === 3000, String(ps1.totalMs))
+check(
+  'adj361 反复回跳无缝（第二遍首音紧接第一遍末音，无空档）',
+  ps1.events[2]?.atMs === ps1.events[1].atMs + ps1.events[1].durationMs,
+  `${ps1.events[1]?.atMs}+${ps1.events[1]?.durationMs} → ${ps1.events[2]?.atMs}`,
+)
 
 // 跳房子（第二遍跳过 [ ] 段；adj23：跳房子 [ 须在小节线后，音符后的 [ 是倚音）
 const ps2 = mkSeq('|: 1 2 | [ 3 4 ] 5 6 :|')
 check('跳房子展开 10 事件', pitchSeq(ps2) === 'C4,D4,E4,F4,G4,A4,C4,D4,G4,A4', pitchSeq(ps2))
 // adj282：跳房子跳过段后同一块第二遍 atMs 继续单调推进
 check('跳房子展开 atMs 单调不重叠', ps2.events.every((e, k) => k === 0 || e.atMs >= ps2.events[k - 1].atMs + ps2.events[k - 1].durationMs - 0.5), ps2.events.map((e) => Math.round(e.atMs)).join(','))
-check('跳房子播放总时长 = 2 遍', ps2.totalMs === 6000, String(ps2.totalMs))
+check('adj361 跳房子播放总时长 = 2 遍（5000ms，跳过段不占时）', ps2.totalMs === 5000, String(ps2.totalMs))
+
+// adj361：多行谱「后一行」的反复跳跃也必须无缝——原 bug 下 passMs 会跳到
+// 「本行布局起点 + 整行时长」，回跳后整体多等十几~几十秒（用户报告的问题）
+{
+  const srcJ2 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\nQ: |: 5 6 :| 7 8 |\n'
+  const rJ2 = parseJps(srcJ2)
+  const seqJ2 = buildPlaySequence(rJ2, layoutScore(rJ2, DUR_CFG), 120)
+  const evJ2 = seqJ2.events.filter((e) => e.placed.audioPitch)
+  // 音序：C4,D4,E4,F4（行1） G4,A4（行2 第1遍） G4,A4（第2遍） B4,C4
+  const j = 6 // 第 2 遍首音（G4 第二次）
+  check(
+    'adj361 多行谱后行反复回跳无缝（第二遍首音紧接第一遍末音）',
+    evJ2[j]?.atMs === evJ2[j - 1].atMs + evJ2[j - 1].durationMs,
+    `${evJ2[j - 1]?.atMs}+${evJ2[j - 1]?.durationMs} → ${evJ2[j]?.atMs}（音序 ${evJ2.map((e) => e.placed.audioPitch).join(',')}）`,
+  )
+  check('adj361 多行谱后行反复总时长 = 5000ms（无空档）', seqJ2.totalMs === 5000, String(seqJ2.totalMs))
+}
 
 // 终止线 || 停止
 const ps3 = mkSeq('1 2 | 3 4 || 5 6 |')
