@@ -1,5 +1,17 @@
 # iJipu 更新日志（Changelog）
 
+## [0.12.13] — 2026-09-09
+
+### 修复
+
+- **导出 MIDI / WAV / MP3 按音色设置导出**（`adj358`）：此前导出只使用**每声部第一个音符**的音色、且每轨只在开头发一次 Program Change，导致曲内 `@乐器名` 切换、`@@` 回默认（含 `Y:` 默认）**全部丢失**（单声部、多声部、单/多声部混合一致；试听本就逐事件 `programChange`，不受影响）。现 `eventsToMidi` 按**每个音符记录其 program**，在乐器变化处插入 Program Change；同 tick 顺序为 Program Change → Note Off → Note On。
+
+### 文档 / 版本
+
+- 版本号三处 + `package-lock` 同步 0.12.12 → 0.12.13；`docs/ERRORS-LOG.md` 登记 E-2026-105（adj358）；smoke 新增单声部（长笛→大钢琴→长笛）与多声部（Q1 0→73、Q2 48→73）Program Change 断言通过，维持预存基线 17 项。
+
+---
+
 ## [0.12.12] — 2026-09-09
 
 ### 新增 / 调整
