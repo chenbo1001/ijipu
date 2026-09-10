@@ -20,6 +20,8 @@ import {
   classifySaveError,
   fileBaseName,
   saveTextToHandle,
+  type SavePhase,
+  type SaveTrace,
 } from './saveSupport'
 import { useUiStore } from './uiStore'
 
@@ -409,8 +411,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
       // adj365：选完文件后才武装「保存中…」提示（选文件期间提示会误导）
       const t0 = performance.now()
       const cancelHint = armSavingHint()
+      const phaseLog = collectSavePhases()
       try {
-        await saveTextToHandle(handle, code)
+        await saveTextToHandle(handle, code, { trace: phaseLog.trace })
       } finally {
         cancelHint()
       }
@@ -425,7 +428,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       void saveFileHandle(handle)
       // adj363：写入期间用户可能继续输入，内容已变则保留未保存标记
       set({ fileHandle: handle, fileName: name, dirty: get().code !== code })
-      reportSaved(t0)
+      reportSaved(t0, phaseLog)
       return true
     } catch (e) {
       const kind = classifySaveError(e)
@@ -461,6 +464,13 @@ const SAVE_HINT_DELAY_MS = 150
 /** adj365：超过该毫秒数视为慢保存——控制台记录耗时，提示里带上实际耗时（便于定位是写盘慢还是反馈慢） */
 const SAVE_SLOW_MS = 400
 
+/** adj367：保存阶段中文名（定位"保存要好几秒"到底卡在哪一步） */
+const SAVE_PHASE_LABEL: Record<SavePhase, string> = {
+  open: '打开写入流',
+  write: '写入数据',
+  commit: '提交文件',
+}
+
 /** adj365：武装「保存中…」提示，返回清理函数（保存结束即撤销未触发的计时器） */
 function armSavingHint(): () => void {
   const ui = useUiStore.getState()
@@ -468,15 +478,42 @@ function armSavingHint(): () => void {
   return () => window.clearTimeout(timer)
 }
 
-/** adj365：保存成功提示（慢保存带耗时，便于用户/开发者反馈真实数字） */
-function reportSaved(t0: number): void {
+/** adj367：收集文件写入各阶段耗时（open/write/commit），慢保存时与总耗时一起给出 */
+interface SavePhaseLog {
+  trace: SaveTrace
+  /** 阶段明细文案（如「打开写入流 12ms · 写入数据 3ms · 提交文件 7180ms」） */
+  text: () => string
+  /** 已计时阶段的毫秒合计（用于推「收尾」= 总耗时 − 各阶段） */
+  total: () => number
+}
+
+function collectSavePhases(): SavePhaseLog {
+  const parts: { label: string; ms: number }[] = []
+  return {
+    trace: (phase, ms) => parts.push({ label: SAVE_PHASE_LABEL[phase], ms }),
+    text: () => parts.map((p) => `${p.label} ${Math.round(p.ms)}ms`).join(' · '),
+    total: () => parts.reduce((sum, p) => sum + p.ms, 0),
+  }
+}
+
+/**
+ * adj365/adj367：保存成功提示。
+ *  - <400ms：仅「已保存」；
+ *  - ≥400ms：带上总耗时与各阶段耗时（如「已保存 · 7.2s（打开写入流 12ms · 写入数据 3ms · 提交文件 7180ms · 收尾 5ms）」），
+ *    并 `console.info` 一行，便于判断延迟出在文件系统哪一步（打开/写入/提交）还是主线程（收尾）。
+ */
+function reportSaved(t0: number, log?: SavePhaseLog): void {
   const ms = Math.round(performance.now() - t0)
-  if (ms >= SAVE_SLOW_MS) {
-    console.info(`[iJipu] 保存耗时 ${ms}ms`)
-    useUiStore.getState().showNotice(`${uiCopy.saveOk} · ${(ms / 1000).toFixed(1)}s`, 'ok')
+  if (ms < SAVE_SLOW_MS) {
+    useUiStore.getState().showNotice(uiCopy.saveOk, 'ok')
     return
   }
-  useUiStore.getState().showNotice(uiCopy.saveOk, 'ok')
+  const detail = log?.text() ?? ''
+  const meta = detail
+    ? `${(ms / 1000).toFixed(1)}s（${detail} · 收尾 ${Math.max(0, ms - (log?.total() ?? 0))}ms）`
+    : `${(ms / 1000).toFixed(1)}s`
+  console.info(`[iJipu] 保存耗时 ${ms}ms（${detail || '无阶段明细'}）`)
+  useUiStore.getState().showNotice(`${uiCopy.saveOk} · ${meta}`, 'ok')
 }
 
 /** 「保存」主流程：有可用句柄直接写回；否则走另存为 */
@@ -486,10 +523,11 @@ async function doSaveFile(): Promise<boolean> {
   const ui = useUiStore.getState()
   const t0 = performance.now()
   const cancelHint = armSavingHint()
+  const phaseLog = collectSavePhases()
   try {
     const code = useDocStore.getState().code
     // adj364：最快路径——直接写；权限失效时才申请权限并重试（不再每次前置查权限/回读）
-    await saveTextToHandle(handle, code)
+    await saveTextToHandle(handle, code, { trace: phaseLog.trace })
     const name = fileBaseName(handle.name)
     try {
       localStorage.setItem(DRAFT_NAME_KEY, name)
@@ -498,7 +536,7 @@ async function doSaveFile(): Promise<boolean> {
     }
     // 句柄与显示名保持一致（句柄持久化已在获取/打开该文件时完成，保存热路径不再重复写库）
     useDocStore.setState({ fileName: name, dirty: useDocStore.getState().code !== code })
-    reportSaved(t0)
+    reportSaved(t0, phaseLog)
     return true
   } catch (e) {
     const kind = classifySaveError(e)

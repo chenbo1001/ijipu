@@ -125,24 +125,38 @@ async function readBack(handle: FileSystemFileHandle): Promise<string | null> {
   }
 }
 
+/** 保存阶段标识（adj367：用于定位"保存耗时好几秒"卡在哪一步） */
+export type SavePhase = 'open' | 'write' | 'commit'
+
+/** 阶段耗时回调（毫秒） */
+export type SaveTrace = (phase: SavePhase, ms: number) => void
+
 /**
- * 写入文本；可选回读校验。
+ * 写入文本；可选回读校验 + 阶段计时。
  * 失败时抛原始异常（由 classifySaveError 归类）；`verify` 且内容不一致时抛 name='SaveVerifyError'。
  * 写入中途失败会 abort 写入流——createWritable() 默认在临时文件上写、close() 才替换原文件，
  * abort() 丢弃临时文件，避免原文件被截断成空。
  *
  * verify 默认 **关闭**（adj364）：回读要额外 getFile()+text()，每次保存多一到两次文件系统往返，
  * 用户可感知到保存变慢；写入失败本身会抛异常，因此默认走最快路径，仅诊断时开启。
+ * trace 默认不传（adj367：仅排查"保存秒级延迟"时由调用方收集阶段耗时）。
  */
 export async function writeTextToHandle(
   handle: FileSystemFileHandle,
   text: string,
-  opts?: { verify?: boolean },
+  opts?: { verify?: boolean; trace?: SaveTrace },
 ): Promise<void> {
+  const now = () => performance.now()
+  const t0 = now()
   const w = await handle.createWritable()
+  opts?.trace?.('open', now() - t0)
   try {
+    const t1 = now()
     await w.write(text)
+    opts?.trace?.('write', now() - t1)
+    const t2 = now()
     await w.close()
+    opts?.trace?.('commit', now() - t2)
   } catch (e) {
     try {
       await w.abort()
@@ -169,7 +183,7 @@ export async function writeTextToHandle(
 export async function saveTextToHandle(
   handle: FileSystemFileHandle,
   text: string,
-  opts?: { verify?: boolean },
+  opts?: { verify?: boolean; trace?: SaveTrace },
 ): Promise<void> {
   try {
     await writeTextToHandle(handle, text, opts)
