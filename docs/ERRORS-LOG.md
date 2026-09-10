@@ -718,6 +718,13 @@
 - **解决**（adj357）：`renderBarline` 增 `noteFontFamily` 参数（调用处传 `noteFont(config.shuzi_font)`），分数用 `font-size=noteSize`、`font-weight=bold`、`font-family=noteFontFamily`，并用 `scale(1, 2/3)`（围绕小节线中点）把分数高度压到 2/3；`meterCommentHalfW` 改 `size=noteSize`（与 render 一致）；`placeMusicRowSpace` 小节线右侧 `gapR` 补 `2×s + 2×halfW + 2`（分数半宽×2 + 起始 + 末距），空间路径不再压音符；smoke 新增 `adj357 空间优先路径预留临时节拍宽度` + 分数字号/加粗断言
 - **预防**：**无时值有占宽元素**（临时节拍/括号/滑音箭头等）的**占宽必须在所有布局路径（单/多声部、时值/空间）同步预留**，且渲染端尺寸与布局端占宽要**共享同一计算**（避免改一边另一边脱节）；方向性/比例性修饰（高度、字号、加粗）注意与音符一致并加粗
 
+### E-2026-105 MIDI/WAV/MP3 导出只用每声部第一个音色（曲内 `@`/`@@` 不生效）（adj358）
+- **场景**：用户反馈单声部曲子导出 mp3/wav 时「只使用曲部设置的第一个音色，且遇到 `@@` 也不切回默认（Y:）音色」；要求检查 MIDI 导出、多声部、单/多声部混合是否同样，并按音色设置导出
+- **现象**：导出音频（WAV/MP3）与 MIDI 全曲只用每声部**第一个音符**的音色；曲内 `@乐器名` 切换、`@@` 回默认均无效；单声部/多声部/混合一致
+- **根因**：`eventsToMidi`（`playback/midi.ts`）按声部收集音符时用 `if (!notesByVoice.has(v)) programByVoice.set(v, instrumentToProgram(e.instrument))` —— **每声部只取第一个可发声音乐的乐器**，且每轨只在开头发一次 Program Change（`bytes.push(vlq(0), 0xc0|chan, program)`），曲内乐器变化全部丢失。音频导出（`export/audio.ts`）与 MIDI 导出都走 `eventsToMidi`，故三者同病；而**试听**走 `SpessaSynthBackend`（逐事件 `programChange`，program 变化时才发）→ 试听正常、导出异常
+- **解决**（adj358）：`eventsToMidi` 改为**每个音符记录其 program**，音符按 tick 排序后**在乐器变化处插入 Program Change**（首音色、曲内 `@` 切换、`@@` 回默认都覆盖）；同 tick 排序 `Program Change 最先 → Note Off → Note On`（先切音色再发声、同音重复先断后起）。smoke 新增：单声部 `Y 长笛(73)→@大钢琴(0)→@@ 长笛(73)`、多声部 `Q1 0→73 / Q2 48→73`（各自声部独立）
+- **预防**：**导出与试听的乐器路由必须同源**——试听逐事件 `programChange`，则导出（`eventsToMidi`）也必须**逐音符/逐变化**发 Program Change，不能"每轨一次"（否则曲内乐器切换静默丢失）；新增「逐事件属性」（乐器/力度/声部）时，检查**所有消费方**（试听后端、MIDI 导出、音频渲染）是否都按事件读取；导出类功能至少断言"曲内切换生效"，不能只断言"首音色正确"
+
 ## 五、预防清单（Checklist，提交/交付前自检）
 
 - [ ] 所有 npm 命令带 `--cache "D:/Coding/JPCoder/.npm-cache"`

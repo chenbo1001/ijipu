@@ -584,6 +584,34 @@ check('MIDI 首音 C4 → 60', noteOn1[0]?.data[0] === 60, String(noteOn1[0]?.da
 check('MIDI 音符轨首事件 Program Change 钢琴(0)', (ev1[0]?.status ?? -1) === 0xc0 && ev1[0]?.data[0] === 0, JSON.stringify(ev1[0]))
 check('MIDI 元数据轨含速度事件（120bpm）', ev0.some((e) => e.status === 0xff && e.data.length === 3 && ((e.data[0] << 16) | (e.data[1] << 8) | e.data[2]) === Math.round(60000000 / 120)), '')
 
+// adj357：MIDI 导出按「每个音符的乐器」发 Program Change（曲内 @ 切换 / @@ 回默认）——
+// 旧实现每声部只取第一个音符的乐器发一次，导致整轨（单/多声部、混合）只用一个音色、@@ 不生效
+{
+  const mkTrack = (bytes: Uint8Array, idx: number): number[] => {
+    let p = 14
+    let ti = 0
+    while (p + 8 <= bytes.length) {
+      const len = (bytes[p + 4] << 24) | (bytes[p + 5] << 16) | (bytes[p + 6] << 8) | bytes[p + 7]
+      if (len === 0 || p + 8 + len > bytes.length) break
+      if (ti === idx) return [...bytes.slice(p + 8, p + 8 + len)]
+      p += 8 + len
+      ti++
+    }
+    return []
+  }
+  const progsOf = (bytes: Uint8Array, idx: number) => evList(mkTrack(bytes, idx)).filter((e) => (e.status & 0xf0) === 0xc0).map((e) => e.data[0])
+  // 单声部：Y 长笛(73) → @大钢琴(0) → @@ 回长笛(73)
+  const rS = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 长笛\nQ: 1 2 @大钢琴@ 3 4 @@ 5 6 |\n')
+  const pS = progsOf(eventsToMidi(buildPlaySequence(rS, layoutScore(rS, DUR_CFG), 120).events, { bpm: 120 }), 1)
+  check('adj357 单声部 MIDI 按音符切音色（长笛→大钢琴→长笛）', pS.length >= 3 && pS[0] === 73 && pS.includes(0) && pS[pS.length - 1] === 73, `progs=${pS.join(',')}`)
+  // 多声部：Q1 大钢琴(0)→长笛(73)；Q2 弦乐(48)→长笛(73)
+  const rM = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 长笛\nQ1: @大钢琴@ 1 2 @@ 3 4 |\nQ2: @弦乐@ 5 6 @@ 7 8 |\n')
+  const mM = eventsToMidi(buildPlaySequence(rM, layoutScore(rM, DUR_CFG), 120).events, { bpm: 120 })
+  const pQ1 = progsOf(mM, 1)
+  const pQ2 = progsOf(mM, 2)
+  check('adj357 多声部 MIDI 各声部独立切音色（Q1 0→73、Q2 48→73）', pQ1.length >= 2 && pQ1[0] === 0 && pQ1[pQ1.length - 1] === 73 && pQ2.length >= 2 && pQ2[0] === 48 && pQ2[pQ2.length - 1] === 73, `Q1=${pQ1.join(',')} Q2=${pQ2.join(',')}`)
+}
+
 // adj290：WAV（PCM16）编码——音频导出（离线渲染 → WAV/MP3）共用
 const wavB = pcmToWav(
   [new Float32Array([0, 0.5, -0.5]), new Float32Array([0, -0.5, 0.5])],
