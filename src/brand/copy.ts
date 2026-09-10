@@ -70,10 +70,23 @@ export const uiCopy = {
   saveBusy: '保存失败：文件正被其它程序占用或只读，请关闭占用程序后重试，或用「文件 → 另存为」',
   saveVerifyFailed: '保存未生效：写入后校验内容不一致，请用「文件 → 另存为」另选位置重试',
   saveAsNoGesture: '另存为失败：未获得用户操作授权，请直接再点一次「另存为」或按 Ctrl+S',
+  // adj369：保存慢在「提交文件」（浏览器把临时文件替换成目标文件）时的可操作提示——
+  // 该步由浏览器 + 操作系统完成，应用代码不参与，常见原因是目标文件被云同步/杀软/其它程序占用
+  saveSlowCommitHint: '保存慢在文件替换（浏览器行为），常见原因是文件被云同步/杀毒软件/其它程序占用，可试试另存到本地文件夹',
   saveUnsupported: '当前环境不支持保存到磁盘（File System Access API 仅 Chromium 安全上下文支持，手机端通常没有）；请用「文件 → 导出」下载 .jps 保存',
   // adj281：非安全上下文（http:// 或 file://）或非 Chromium 内核下无 Web File System Access API，
   // 降级用 <input type=file> 载入 .jps 文本——已载入但无法写回磁盘，提示改用「导出」保存
   openFallbackNotice: '已载入文件；此环境无法写回磁盘，请用「文件 → 导出」保存成果',
+} as const
+
+/** adj369：保存阶段中文名（保存慢时的提示与控制台明细用） */
+export const savePhaseCopy = {
+  open: '打开写入流',
+  write: '写入数据',
+  commit: '提交文件',
+  perm: '权限申请',
+  store: '写入草稿名',
+  ui: '更新界面状态',
 } as const
 
 /** 试听播放文案（adj344：固定 SpessaSynth 高保真——仅保留「音色」下拉相关文案） */

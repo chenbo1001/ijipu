@@ -125,11 +125,40 @@ async function readBack(handle: FileSystemFileHandle): Promise<string | null> {
   }
 }
 
-/** 保存阶段标识（adj367：用于定位"保存耗时好几秒"卡在哪一步） */
-export type SavePhase = 'open' | 'write' | 'commit' | 'perm'
+/** 保存阶段标识（adj367：用于定位"保存耗时好几秒"卡在哪一步）
+ *  - `open`/`write`/`commit`：浏览器文件写入的三步（打开写入流 / 写入数据 / 提交替换文件）
+ *  - `perm`：写入被拒后申请权限
+ *  - `store`/`ui`：调用方补充的尾部（写草稿名 / 更新界面状态） */
+export type SavePhase = 'open' | 'write' | 'commit' | 'perm' | 'store' | 'ui'
 
 /** 阶段耗时回调（毫秒） */
 export type SaveTrace = (phase: SavePhase, ms: number) => void
+
+/** 阶段耗时收集器（adj369：明细给控制台、瓶颈给提示） */
+export interface SavePhaseLog {
+  trace: SaveTrace
+  /** 尾部阶段计时（与 trace 同一收集器，语义上属于调用方补充的收尾动作） */
+  tail: SaveTrace
+  /** 阶段明细文案（如「打开写入流 12ms · 写入数据 3ms · 提交文件 7180ms」） */
+  text: () => string
+  /** 已计时阶段的毫秒合计（用于推「收尾」= 总耗时 − 各阶段） */
+  total: () => number
+  /** 最耗时的那一段（提示里只点瓶颈，避免长文案）；无记录返回 null */
+  worst: () => { phase: SavePhase; label: string; ms: number } | null
+}
+
+/** 创建阶段耗时收集器；label 由调用方提供（文案集中在 brand/copy.ts） */
+export function createSavePhaseLog(label: (phase: SavePhase) => string): SavePhaseLog {
+  const parts: { phase: SavePhase; label: string; ms: number }[] = []
+  const push: SaveTrace = (phase, ms) => parts.push({ phase, label: label(phase), ms })
+  return {
+    trace: push,
+    tail: push,
+    text: () => parts.map((p) => `${p.label} ${Math.round(p.ms)}ms`).join(' · '),
+    total: () => parts.reduce((sum, p) => sum + p.ms, 0),
+    worst: () => parts.reduce<(typeof parts)[number] | null>((w, p) => (!w || p.ms > w.ms ? p : w), null),
+  }
+}
 
 /**
  * 写入文本；可选回读校验 + 阶段计时。

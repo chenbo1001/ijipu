@@ -18,10 +18,10 @@ import {
 import { saveFileHandle, loadFileHandle } from './fileHandleDb'
 import {
   classifySaveError,
+  createSavePhaseLog,
   fileBaseName,
   saveTextToHandle,
-  type SavePhase,
-  type SaveTrace,
+  type SavePhaseLog,
 } from './saveSupport'
 import { useUiStore } from './uiStore'
 
@@ -29,7 +29,7 @@ import { useUiStore } from './uiStore'
  *  必须只在用户还未进行任何文件操作时应用，避免它在用户新建/另存为之后才完成，从而把
  *  fileHandle / fileName 覆盖回旧文件（旧值 A）。 */
 let fileStateTouched = false
-import { uiCopy } from '../brand/copy'
+import { uiCopy, savePhaseCopy } from '../brand/copy'
 
 export type ViewType = 'code' | 'split' | 'splitH' | 'splitHE' | 'preview'
 
@@ -470,19 +470,8 @@ let saveInFlight: Promise<boolean> | null = null
 const SAVE_HINT_DELAY_MS = 150
 /** adj365：超过该毫秒数视为慢保存——控制台记录耗时，提示里带上实际耗时（便于定位是写盘慢还是反馈慢） */
 const SAVE_SLOW_MS = 400
-
-/** adj367：保存阶段中文名（定位"保存要好几秒"到底卡在哪一步） */
-const SAVE_PHASE_LABEL: Record<SavePhase | 'store' | 'ui', string> = {
-  open: '打开写入流',
-  write: '写入数据',
-  commit: '提交文件',
-  perm: '权限申请',
-  store: '写入草稿名',
-  ui: '更新界面状态',
-}
-
-/** adj367：阶段计时器（tail 段：localStorage 写文件名、store 状态更新） */
-type SaveTailPhase = 'store' | 'ui'
+/** adj369：提交（原子替换文件）超过该毫秒数 = 异常——附上「文件被占用」的可操作提示 */
+const SAVE_SLOW_COMMIT_MS = 2000
 
 /** adj365：武装「保存中…」提示，返回清理函数（保存结束即撤销未触发的计时器） */
 function armSavingHint(): () => void {
@@ -491,33 +480,18 @@ function armSavingHint(): () => void {
   return () => window.clearTimeout(timer)
 }
 
-/** adj367：收集文件写入各阶段耗时（open/write/commit），慢保存时与总耗时一起给出 */
-interface SavePhaseLog {
-  trace: SaveTrace
-  /** adj367：尾部阶段计时（localStorage 写文件名 / store 状态更新） */
-  tail: (phase: SaveTailPhase, ms: number) => void
-  /** 阶段明细文案（如「打开写入流 12ms · 写入数据 3ms · 提交文件 7180ms」） */
-  text: () => string
-  /** 已计时阶段的毫秒合计（用于推「收尾」= 总耗时 − 各阶段） */
-  total: () => number
-}
-
+/** adj367：阶段耗时收集器（阶段名文案集中在 brand/copy.ts 的 savePhaseCopy） */
 function collectSavePhases(): SavePhaseLog {
-  const parts: { label: string; ms: number }[] = []
-  const push = (label: string, ms: number) => parts.push({ label, ms })
-  return {
-    trace: (phase, ms) => push(SAVE_PHASE_LABEL[phase], ms),
-    tail: (phase, ms) => push(SAVE_PHASE_LABEL[phase], ms),
-    text: () => parts.map((p) => `${p.label} ${Math.round(p.ms)}ms`).join(' · '),
-    total: () => parts.reduce((sum, p) => sum + p.ms, 0),
-  }
+  return createSavePhaseLog((phase) => savePhaseCopy[phase])
 }
 
 /**
- * adj365/adj367：保存成功提示。
+ * adj365/adj367/adj369：保存成功提示。
  *  - <400ms：仅「已保存」；
- *  - ≥400ms：带上总耗时与各阶段耗时（如「已保存 · 7.2s（打开写入流 12ms · 写入数据 3ms · 提交文件 7180ms · 收尾 5ms）」），
- *    并 `console.info` 一行，便于判断延迟出在文件系统哪一步（打开/写入/提交）还是主线程（收尾）。
+ *  - ≥400ms：给出总耗时 + **最耗时那一段**（如「已保存 · 7.1s（提交文件 7140ms）」），完整阶段明细
+ *    进 `console.info`（便于判断延迟出在文件系统哪一步还是主线程）；
+ *  - adj369：「提交文件」是瓶颈且 ≥2s 时附一句可操作提示——这一步是**浏览器把临时文件原子替换成目标文件**，
+ *    应用代码不参与，常见原因是目标文件被云同步客户端 / 杀毒软件 / 其它程序占用（替换被反复重试）。
  */
 function reportSaved(t0: number, log?: SavePhaseLog): void {
   const ms = Math.round(performance.now() - t0)
@@ -526,11 +500,17 @@ function reportSaved(t0: number, log?: SavePhaseLog): void {
     return
   }
   const detail = log?.text() ?? ''
-  const meta = detail
-    ? `${(ms / 1000).toFixed(1)}s（${detail} · 收尾 ${Math.max(0, ms - (log?.total() ?? 0))}ms）`
-    : `${(ms / 1000).toFixed(1)}s`
-  console.info(`[iJipu] 保存耗时 ${ms}ms（${detail || '无阶段明细'}）`)
-  useUiStore.getState().showNotice(`${uiCopy.saveOk} · ${meta}`, 'ok')
+  const worst = log?.worst() ?? null
+  const worstSex = worst ? `（${worst.label} ${Math.round(worst.ms)}ms）` : ''
+  const commitStuck = worst?.phase === 'commit' && worst.ms >= SAVE_SLOW_COMMIT_MS
+  console.info(`[iJipu] 保存耗时 ${ms}ms（${detail || '无阶段明细'} · 收尾 ${Math.max(0, ms - (log?.total() ?? 0))}ms）`)
+  // 带排查建议时用 warn（toast 停留 4s，够读完），否则 ok（1.8s）
+  useUiStore
+    .getState()
+    .showNotice(
+      `${uiCopy.saveOk} · ${(ms / 1000).toFixed(1)}s${worstSex}${commitStuck ? ` · ${uiCopy.saveSlowCommitHint}` : ''}`,
+      commitStuck ? 'warn' : 'ok',
+    )
 }
 
 /** 「保存」主流程：有可用句柄直接写回；否则走另存为 */

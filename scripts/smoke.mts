@@ -31,6 +31,7 @@ import {
 // adj363：保存到磁盘可靠性（失败分类 / 权限申请 / 回读校验）——纯逻辑，可用假句柄断言
 import {
   classifySaveError,
+  createSavePhaseLog,
   ensureWritePermission,
   fileBaseName,
   isUserCancel,
@@ -3456,6 +3457,32 @@ console.log('[79] last volta label = 结束句 (adj368)')
   }
   // ⑦ 番号房子行为不变（回归）
   check('adj368 番号房子不受影响 <1> |["1." <1> :|] <2> ||', ord('1 |["1." 2 :|] 3 ||') === 'C4,D4,C4,E4', ord('1 |["1." 2 :|] 3 ||]'))
+}
+
+// ---- 80. 保存阶段耗时收集（adj369）----
+console.log('[80] save phase timing log (adj369)')
+{
+  const lb = (p: string) => `P:${p}`
+  const log = createSavePhaseLog(lb as never)
+  log.trace('open', 2)
+  log.trace('write', 1)
+  log.trace('commit', 7140)
+  log.tail('store', 0)
+  log.tail('ui', 0.6)
+  check(
+    'adj369 明细文案按顺序拼接（各段取整）',
+    log.text() === 'P:open 2ms · P:write 1ms · P:commit 7140ms · P:store 0ms · P:ui 1ms',
+    log.text(),
+  )
+  check('adj369 合计 = 各段原始毫秒之和', Math.abs(log.total() - 7143.6) < 1e-6, String(log.total()))
+  {
+    const w = log.worst()
+    check('adj369 瓶颈 = 最耗时那段（提交文件）', w?.phase === 'commit' && w.ms === 7140, JSON.stringify(w))
+  }
+  {
+    const empty = createSavePhaseLog(lb as never)
+    check('adj369 空记录：无明细、无瓶颈', empty.text() === '' && empty.worst() === null && empty.total() === 0)
+  }
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
