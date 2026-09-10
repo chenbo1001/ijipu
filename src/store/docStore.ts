@@ -419,27 +419,25 @@ export const useDocStore = create<DocState>()((set, get) => ({
       })
       // adj364：最快路径写入（刚选定的句柄权限本就授予；仅权限失败时才申请并重试）
       const code = get().code
+      // adj371：文件名乐观更新——选完文件名字就定了，先切到新名（写盘可能要几秒），
+      // 未保存标记与句柄仍等写盘成功后才落定；失败回滚。
+      const prevName = get().fileName
+      const name = fileBaseName(handle.name)
+      const optimistic = prevName !== name
+      if (optimistic) applyOptimisticName(name)
       // adj365：选完文件后才武装「保存中…」提示（选文件期间提示会误导）
       const t0 = performance.now()
       const cancelHint = armSavingHint()
       const phaseLog = collectSavePhases()
       try {
         await saveTextToHandle(handle, code, { trace: phaseLog.trace })
+      } catch (e) {
+        if (optimistic) rollbackOptimisticName(prevName)
+        throw e
       } finally {
         cancelHint()
       }
-      // adj161：另存为后新文件成为操作主体——同步文件名 + 持久化句柄，
-      // 下次直接按保存即写回该文件
-      const name = fileBaseName(handle.name)
       const tStore = performance.now()
-      // adj367：文件名没变就不写 localStorage（另存为通常变了，正常会写）
-      if (get().fileName !== name) {
-        try {
-          localStorage.setItem(DRAFT_NAME_KEY, name)
-        } catch {
-          /* 忽略 */
-        }
-      }
       phaseLog.tail('store', performance.now() - tStore)
       void saveFileHandle(handle)
       // adj363：写入期间用户可能继续输入，内容已变则保留未保存标记
@@ -536,28 +534,26 @@ async function doSaveFile(): Promise<boolean> {
   const t0 = performance.now()
   const cancelHint = armSavingHint()
   const phaseLog = collectSavePhases()
+  // adj371：文件名「乐观更新」——写盘（尤其 close() 的原子替换）可能要好几秒，
+  // 名称在按下保存时就已知，先切过去，未保存标记仍保留到写盘成功；失败则回滚。
+  const prevName = useDocStore.getState().fileName
+  const name = fileBaseName(handle.name)
+  const optimistic = prevName !== name
+  if (optimistic) applyOptimisticName(name)
   try {
     const code = useDocStore.getState().code
     // adj364：最快路径——直接写；权限失效时才申请权限并重试（不再每次前置查权限/回读）
     await saveTextToHandle(handle, code, { trace: phaseLog.trace })
-    const name = fileBaseName(handle.name)
     const tStore = performance.now()
-    // adj367：文件名没变就不写 localStorage（同步存储写可能被 StorageService 争用拖住，热路径能省则省）
-    if (useDocStore.getState().fileName !== name) {
-      try {
-        localStorage.setItem(DRAFT_NAME_KEY, name)
-      } catch {
-        /* 忽略 */
-      }
-    }
     phaseLog.tail('store', performance.now() - tStore)
     // 句柄与显示名保持一致（句柄持久化已在获取/打开该文件时完成，保存热路径不再重复写库）
     const tUi = performance.now()
-    useDocStore.setState({ fileName: name, dirty: useDocStore.getState().code !== code })
+    useDocStore.setState({ dirty: useDocStore.getState().code !== code })
     phaseLog.tail('ui', performance.now() - tUi)
     reportSaved(t0, phaseLog, name)
     return true
   } catch (e) {
+    if (optimistic) rollbackOptimisticName(prevName)
     const kind = classifySaveError(e)
     if (kind === 'cancel') return false
     if (kind === 'permission' || kind === 'gone') {
@@ -574,6 +570,26 @@ async function doSaveFile(): Promise<boolean> {
   } finally {
     cancelHint()
   }
+}
+
+/** adj371：乐观切名（同步写草稿名，保证下次启动「句柄名 ↔ 草稿名」仍对得上） */
+function applyOptimisticName(name: string): void {
+  try {
+    localStorage.setItem(DRAFT_NAME_KEY, name)
+  } catch {
+    /* 忽略 */
+  }
+  useDocStore.setState({ fileName: name })
+}
+
+/** adj371：写盘失败时回滚乐观切名 */
+function rollbackOptimisticName(prevName: string): void {
+  try {
+    localStorage.setItem(DRAFT_NAME_KEY, prevName)
+  } catch {
+    /* 忽略 */
+  }
+  useDocStore.setState({ fileName: prevName })
 }
 
 /** 断开与磁盘文件的关联（句柄失效时：下次保存 = 另存为） */

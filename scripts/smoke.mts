@@ -3596,6 +3596,51 @@ async function runStoreFileIdentityTests() {
   }
   const ok2 = await st().openFile()
   check('adj370 用户取消打开：静默无提示', ok2 === false && useUiStore.getState().notice === null, String(useUiStore.getState().notice))
+
+  // adj371：文件名乐观更新——写盘（close 原子替换可能好几秒）未完成时，状态栏文件名已经切好
+  {
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    const mkD = {
+      name: 'D.jps',
+      getFile: async () => ({ name: 'D.jps', text: async () => kv['ijipu.draft'] }),
+      createWritable: async () => ({ write: async () => undefined, close: () => gate, abort: async () => undefined }),
+      queryPermission: async () => 'granted',
+      requestPermission: async () => 'granted',
+    }
+    useDocStore.setState({ fileHandle: mkD, fileName: 'C', dirty: true })
+    const pending = st().saveFile() as Promise<boolean>
+    await new Promise((r) => setTimeout(r, 20))
+    check('adj371 写盘未完成：文件名已乐观切到 D', st().fileName === 'D', st().fileName)
+    check('adj371 写盘未完成：仍标记未保存', st().dirty === true, String(st().dirty))
+    release()
+    const done = await pending
+    check('adj371 写盘完成：文件名=D 且已保存', done === true && st().fileName === 'D' && st().dirty === false, `${done}/${st().fileName}/${st().dirty}`)
+
+    // 写盘失败要回滚乐观切名
+    const mkE = {
+      name: 'E.jps',
+      getFile: async () => ({ name: 'E.jps', text: async () => kv['ijipu.draft'] }),
+      createWritable: async () => ({
+        write: async () => {
+          const e = new Error('quota')
+          e.name = 'QuotaExceededError'
+          throw e
+        },
+        close: async () => undefined,
+        abort: async () => undefined,
+      }),
+      queryPermission: async () => 'granted',
+      requestPermission: async () => 'granted',
+    }
+    useDocStore.setState({ fileHandle: mkE, dirty: true })
+    const okFail = await st().saveFile()
+    check('adj371 写盘失败：文件名回滚为 D', okFail === false && st().fileName === 'D', `${okFail}/${st().fileName}`)
+    check('adj371 写盘失败：仍标记未保存', st().dirty === true, String(st().dirty))
+    check('adj371 写盘失败：草稿名不被改坏', kv['ijipu.draftName'] === 'D', kv['ijipu.draftName'])
+  }
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
