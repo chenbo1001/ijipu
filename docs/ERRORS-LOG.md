@@ -782,6 +782,17 @@
   - smoke 新增 `[77]`（27 项：分类矩阵、取消语义、权限申请顺序/拒绝/无 API/查询抛错、写入成功与磁盘内容、createWritable 失败归类、写入中途失败 abort、回读不一致 → verify、无法回读不误报）
 - **预防**：① **用户取消只认 `AbortError`**——`NotAllowedError` 是权限/手势问题，绝不能当取消静默；② 依赖**用户手势**的 API（选择器/全屏/剪贴板写）**不可在 `await` 之后调用**，需要恢复权限时应在手势内先 `requestPermission`；③ 任何"写入成功"的结论都应有**回读校验**支撑，`close()` 成功不等于磁盘已更新；④ 句柄/令牌类**异步持久化**的对象恢复时必须与当前文档**同源核对**（草稿名 vs 句柄名），否则会写错文件；⑤ 失败必须有可见且**可操作**的提示，并把失败分类（取消/权限/丢失/占用/校验）逐一映射到文案
 
+### E-2026-110 「保存」变慢：把权限检查与回读校验放进了每次保存的必经路径（adj364）
+- **场景**：E-2026-109 修复（adj363：写入前主动查/申请权限 + 写入后回读校验）之后，用户续报「Ctrl+S 响应很慢，菜单保存响应也很慢」
+- **现象**：保存本身能成功，但每次按保存到「已保存」提示之间有明显延迟（菜单保存同样慢，说明不是快捷键链路问题）
+- **根因**：adj363 的可靠性措施被放在了**热路径**上——每次保存都要 `queryPermission()`（权限为 `prompt` 时还要 `requestPermission()`，该调用可能等待用户对权限提示作答）+ 写入后 `getFile().text()` 回读比对。相比旧版「createWritable → write → close」，每次多出 2~3 次文件系统往返（其中权限申请还可能是**等待人工操作**），于是保存明显变慢。此外每次保存都 `void saveFileHandle(handle)` 重复写了一次 IndexedDB 句柄（句柄本就在打开/另存为时已持久化）
+- **解决**（adj364）：
+  - `saveSupport.saveTextToHandle()`：**先直接写**（一次往返，等同旧版速度）；**仅当因权限失败**（`NotAllowedError`/`SecurityError`）才 `queryPermission → requestPermission` 并重试一次（此时通常仍在用户手势窗口内，既不静默失败也不为常态保存付代价）；非权限失败原样抛出（不申请权限）
+  - `writeTextToHandle(handle, text, { verify })`：回读校验改为**默认关闭**（可按需开启，仅供诊断），校验与比对逻辑（`sameContent`）保留
+  - `docStore.doSaveFile`：去掉热路径里重复的 `saveFileHandle(handle)`；另存为同样走 `saveTextToHandle`
+  - smoke 新增 adj364 断言：默认不读回（无 `getFile`）、`verify:true` 才读回、热路径调用序列恰为 `create,write,close`（无 query/request/getFile）、权限失效时序列为 `createFail,query,request,create,write,close`、非权限失败不申请权限
+- **预防**：① **可靠性措施与热路径解耦**——「权限确认、回读校验、重复持久化」这类**防御性**动作应放在**失败分支或诊断开关**里，不能塞进每次操作的必经路径（否则用户为极少数异常场景长期付性能代价）；② 评估新增 await 的**往返次数**，凡是"每次操作都多调 1~2 次系统 API"的改动要按效果判断是否值得；③ 可能**等待人工交互**的 API（权限提示、选择器）绝不能出现在热路径上；④ 性能类反馈要看**调用序列**（smoke 断言调用序列，而不只看最终结果），把"热路径上到底调了什么"固化为断言
+
 ## 五、预防清单（Checklist，提交/交付前自检）
 
 - [ ] 所有 npm 命令带 `--cache "D:/Coding/JPCoder/.npm-cache"`

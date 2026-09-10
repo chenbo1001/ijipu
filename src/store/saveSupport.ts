@@ -126,12 +126,19 @@ async function readBack(handle: FileSystemFileHandle): Promise<string | null> {
 }
 
 /**
- * 写入文本并回读校验。
- * 失败时抛原始异常（由 classifySaveError 归类）；内容不一致抛 name='SaveVerifyError'。
+ * 写入文本；可选回读校验。
+ * 失败时抛原始异常（由 classifySaveError 归类）；`verify` 且内容不一致时抛 name='SaveVerifyError'。
  * 写入中途失败会 abort 写入流——createWritable() 默认在临时文件上写、close() 才替换原文件，
  * abort() 丢弃临时文件，避免原文件被截断成空。
+ *
+ * verify 默认 **关闭**（adj364）：回读要额外 getFile()+text()，每次保存多一到两次文件系统往返，
+ * 用户可感知到保存变慢；写入失败本身会抛异常，因此默认走最快路径，仅诊断时开启。
  */
-export async function writeTextToHandle(handle: FileSystemFileHandle, text: string): Promise<void> {
+export async function writeTextToHandle(
+  handle: FileSystemFileHandle,
+  text: string,
+  opts?: { verify?: boolean },
+): Promise<void> {
   const w = await handle.createWritable()
   try {
     await w.write(text)
@@ -144,8 +151,32 @@ export async function writeTextToHandle(handle: FileSystemFileHandle, text: stri
     }
     throw e
   }
+  if (!opts?.verify) return
   const back = await readBack(handle)
   if (back !== null && !sameContent(back, text)) {
     throw namedError(VERIFY_ERROR_NAME, '写入后回读内容与预期不一致')
+  }
+}
+
+/**
+ * 保存文本到已有句柄（adj364：最快路径优先）。
+ *  1. 直接写——与浏览器原生保存等价的一次往返，不做任何前置权限查询；
+ *  2. 仅当**因权限失败**（NotAllowedError/SecurityError：句柄重启后权限失效）时，
+ *     才申请一次权限并重试一次（此时通常仍在用户手势窗口内，不会静默失败）；
+ *  3. 其余失败原样抛出，由调用方按类型提示。
+ * 这样「权限正常」（绝大多数情况）的保存速度与旧版一致，不再为权限检查/回读付代价。
+ */
+export async function saveTextToHandle(
+  handle: FileSystemFileHandle,
+  text: string,
+  opts?: { verify?: boolean },
+): Promise<void> {
+  try {
+    await writeTextToHandle(handle, text, opts)
+  } catch (e) {
+    if (classifySaveError(e) !== 'permission') throw e
+    const perm = await ensureWritePermission(handle)
+    if (perm !== 'granted') throw e
+    await writeTextToHandle(handle, text, opts)
   }
 }

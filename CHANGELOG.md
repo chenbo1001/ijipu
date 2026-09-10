@@ -10,11 +10,15 @@
   - 权限失效或文件已不在时**断开失效句柄**并立即转「另存为」（下次按保存直接弹对话框 = 全新手势），不会再卡在静默失败的路径上；
   - 连按两次 Ctrl+S 的并发保存合并（此前会对同一句柄并发 `createWritable()`）；写入期间内容又变则保留未保存标记；
   - 启动恢复句柄时**核对草稿名与句柄名一致**才恢复（防止"旧句柄 + 新草稿"把新谱写进旧文件）。
-- 新增 `src/store/saveSupport.ts`（纯逻辑，无 DOM/store 依赖）：`classifySaveError` / `isUserCancel` / `ensureWritePermission` / `writeTextToHandle` / `fileBaseName`，保存流程的判定与写入收敛在此，可用假句柄直接断言。
+- 新增 `src/store/saveSupport.ts`（纯逻辑，无 DOM/store 依赖）：`classifySaveError` / `isUserCancel` / `ensureWritePermission` / `saveTextToHandle` / `writeTextToHandle` / `fileBaseName`，保存流程的判定与写入收敛在此，可用假句柄直接断言。
+
+### 性能
+
+- **保存恢复最快路径**（`adj364`）：上一版把「主动查权限 + 写入后回读校验」放进了每次保存的必经路径，每次多出 2~3 次文件系统往返（权限为 `prompt` 时 `requestPermission` 还要等权限提示），导致 Ctrl+S / 菜单保存明显变慢。现改为**失败才申请权限**：先直接写（一次往返，与旧版一致），只有因权限失败（句柄重启后权限失效）才 `requestPermission` 并重试一次；回读校验默认关闭（`writeTextToHandle(handle, text, { verify: true })` 可按需开启，仅诊断用）；保存热路径不再重复写 IndexedDB 句柄。
 
 ### 文档 / 版本
 
-- `docs/ERRORS-LOG.md` 登记 E-2026-109（adj363）；smoke 新增 `[77]`（27 项：失败分类矩阵、取消语义、权限申请顺序/拒绝/无 API/查询抛错、写入成功与磁盘内容一致、`createWritable` 失败归类、写入中途失败 abort、回读不一致 → verify、无法回读不误报），维持预存基线 17 项。版本号不变（递增由用户决定）。
+- `docs/ERRORS-LOG.md` 登记 E-2026-109（adj363）、E-2026-110（adj364）；smoke 新增 `[77]`（32 项：失败分类矩阵、取消语义、权限申请顺序/拒绝/无 API/查询抛错、写入成功与磁盘内容一致、保存热路径无 query/request/getFile、权限失效重试一次、非权限失败不申请权限、`createWritable` 失败归类、写入中途失败 abort、回读不一致 → verify、无法回读不误报），维持预存基线 17 项。版本号不变（递增由用户决定）。
 
 ---
 

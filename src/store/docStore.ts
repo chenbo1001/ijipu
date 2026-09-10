@@ -18,10 +18,8 @@ import {
 import { saveFileHandle, loadFileHandle } from './fileHandleDb'
 import {
   classifySaveError,
-  ensureWritePermission,
   fileBaseName,
-  namedError,
-  writeTextToHandle,
+  saveTextToHandle,
 } from './saveSupport'
 import { useUiStore } from './uiStore'
 
@@ -406,9 +404,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
         suggestedName: `${defaultName}.jps`,
         types: [{ description: 'iJipu 乐谱', accept: { 'text/plain': ['.jps'] } }],
       })
-      // adj363：写入 + 回读校验（close() 成功不代表磁盘内容已更新）
+      // adj364：最快路径写入（刚选定的句柄权限本就授予；仅权限失败时才申请并重试）
       const code = get().code
-      await writeTextToHandle(handle, code)
+      await saveTextToHandle(handle, code)
       // adj161：另存为后新文件成为操作主体——同步文件名 + 持久化句柄，
       // 下次直接按保存即写回该文件
       const name = fileBaseName(handle.name)
@@ -433,14 +431,20 @@ export const useDocStore = create<DocState>()((set, get) => ({
   },
 }))
 
-// ---- adj363：保存到磁盘的可靠性补强 ----
+// ---- adj363/adj364：保存到磁盘的可靠性补强 ----
 // 用户反馈「按保存有时没生效，必须另存为才有效」。根因链条：
 //   ① 恢复自 IndexedDB 的句柄重启后写权限失效 → createWritable() 抛 NotAllowedError；
 //   ② 旧代码静默回退 saveFileAs()，但 showSaveFilePicker() 必须在**用户手势**内调用，
 //      前面的 await 已消耗手势 → 选择器再抛 NotAllowedError；
 //   ③ 旧代码把 NotAllowedError 当「用户取消」静默吞掉 → 按保存毫无反应、文件未变。
-// 现在：写入前查询/申请权限（手势内），写入后回读校验，只有 AbortError 才算取消，
-// 其余失败一律给出可操作提示；权限/文件已失效时断开句柄，下次「保存」直接走另存为。
+// 现在：只有 AbortError 算取消，其余失败一律给出可操作提示；权限/文件失效时断开句柄，
+// 下次「保存」直接走另存为。
+//
+// adj364（用户续报「Ctrl+S / 菜单保存响应很慢」）：上一版把「主动查权限 + 写入后回读」放进
+// 了每次保存的必经路径，每次都多出 2~3 次文件系统往返（权限为 prompt 时 requestPermission
+// 还要等权限提示）→ 保存明显变慢。现改为 **失败才申请权限**：先直接写（一次往返），
+// 只有因权限失败才申请权限并重试一次（saveTextToHandle 内部处理），回读校验默认关闭。
+// 于是权限正常的保存与旧版一样快，同时保留「不会静默不生效」。
 
 /** 进行中的保存（并发合并用） */
 let saveInFlight: Promise<boolean> | null = null
@@ -451,19 +455,16 @@ async function doSaveFile(): Promise<boolean> {
   if (!handle) return useDocStore.getState().saveFileAs()
   const ui = useUiStore.getState()
   try {
-    // 必须在用户手势（Ctrl+S / 菜单点击）尚未被消耗时申请权限
-    const perm = await ensureWritePermission(handle)
-    if (perm === 'denied') throw namedError('NotAllowedError', '文件写入权限未授予')
     const code = useDocStore.getState().code
-    await writeTextToHandle(handle, code)
+    // adj364：最快路径——直接写；权限失效时才申请权限并重试（不再每次前置查权限/回读）
+    await saveTextToHandle(handle, code)
     const name = fileBaseName(handle.name)
     try {
       localStorage.setItem(DRAFT_NAME_KEY, name)
     } catch {
       /* 忽略 */
     }
-    // 句柄与显示名保持一致，并刷新持久化（下次启动恢复即是该文件）
-    void saveFileHandle(handle)
+    // 句柄与显示名保持一致（句柄持久化已在获取/打开该文件时完成，保存热路径不再重复写库）
     useDocStore.setState({ fileName: name, dirty: useDocStore.getState().code !== code })
     ui.showNotice(uiCopy.saveOk, 'ok')
     return true

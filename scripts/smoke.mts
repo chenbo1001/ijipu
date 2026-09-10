@@ -35,6 +35,7 @@ import {
   fileBaseName,
   isUserCancel,
   sameContent,
+  saveTextToHandle,
   writeTextToHandle,
 } from '../src/store/saveSupport.ts'
 
@@ -3220,7 +3221,7 @@ function fakeHandle(o: {
 }
 
 async function runAdj363SaveTests() {
-  // ④ 正常写入：权限已授予 → 直接写 + 回读校验通过
+  // ④ 正常写入：权限已授予 → 直接写（默认不读回，最快路径）+ 回读校验（显式开启）
   {
     const f = fakeHandle({ permission: 'granted' })
     const perm = await ensureWritePermission(f.h)
@@ -3231,9 +3232,94 @@ async function runAdj363SaveTests() {
     } catch (e) {
       err = (e as Error).name
     }
-    check('adj363 写入成功且回读一致（无异常）', err === '', err)
+    check('adj363 写入成功且无异常', err === '', err)
     check('adj363 磁盘内容已更新', f.disk() === '新内容', f.disk())
     check('adj363 成功路径不调用 abort', !f.calls.includes('abort'), f.calls.join(','))
+    // adj364：默认不读回——保存热路径少一次 getFile().text() 往返（用户反馈「保存响应慢」）
+    check('adj364 默认不读回（无 getFile）', !f.calls.includes('getFile'), f.calls.join(','))
+  }
+  // ④b adj364：显式开启 verify 时才读回；内容一致即通过
+  {
+    const f = fakeHandle({ permission: 'granted' })
+    let err = ''
+    try {
+      await writeTextToHandle(f.h, '新内容', { verify: true })
+    } catch (e) {
+      err = (e as Error).name
+    }
+    check('adj364 verify=true 时读回校验', err === '' && f.calls.includes('getFile'), `${err} ${f.calls.join(',')}`)
+  }
+  // ④c adj364：saveTextToHandle 最快路径——权限正常时**不调用任何权限 API**（一次写入往返）
+  {
+    const f = fakeHandle({ permission: 'granted' })
+    let err = ''
+    try {
+      await saveTextToHandle(f.h, '新内容')
+    } catch (e) {
+      err = (e as Error).name
+    }
+    check(
+      'adj364 保存热路径：直接写、无 query/request/getFile',
+      err === '' && f.calls.join(',') === 'create,write,close' && f.disk() === '新内容',
+      `${err} ${f.calls.join(',')}`,
+    )
+  }
+  // ④d adj364：权限失效 → 申请权限后重试一次成功（calls: create 失败 → query → request → create → write → close）
+  {
+    let first = true
+    const calls: string[] = []
+    const h = {
+      name: 'A.jps',
+      async queryPermission() {
+        calls.push('query')
+        return 'prompt'
+      },
+      async requestPermission() {
+        calls.push('request')
+        return 'granted'
+      },
+      async createWritable() {
+        if (first) {
+          first = false
+          calls.push('createFail')
+          throw Object.assign(new Error('c'), { name: 'NotAllowedError' })
+        }
+        calls.push('create')
+        return {
+          async write() {
+            calls.push('write')
+          },
+          async close() {
+            calls.push('close')
+          },
+          async abort() {
+            calls.push('abort')
+          },
+        }
+      },
+    }
+    let err = ''
+    try {
+      await saveTextToHandle(h as never, '新内容')
+    } catch (e) {
+      err = (e as Error).name
+    }
+    check(
+      'adj364 权限失效 → 申请权限后重试一次成功',
+      err === '' && calls.join(',') === 'createFail,query,request,create,write,close',
+      `${err} ${calls.join(',')}`,
+    )
+  }
+  // ④e adj364：非权限失败不申请权限（避免无谓的权限提示/往返）
+  {
+    const f = fakeHandle({ permission: 'granted', createFail: 'QuotaExceededError' })
+    let kind = ''
+    try {
+      await saveTextToHandle(f.h, 'x')
+    } catch (e) {
+      kind = classifySaveError(e)
+    }
+    check('adj364 非权限失败不申请权限', kind === 'unknown' && !f.calls.includes('query'), `${kind} ${f.calls.join(',')}`)
   }
   // ⑤ 恢复的句柄权限为 prompt：用户手势内申请后放行（顺序 query → request）
   {
@@ -3280,12 +3366,12 @@ async function runAdj363SaveTests() {
     check('adj363 写入失败抛原异常', name === 'QuotaExceededError', name)
     check('adj363 写入失败调用 abort', f.calls.includes('abort'), f.calls.join(','))
   }
-  // ⑪ close() 成功但磁盘内容不是刚写的内容 → 抛 SaveVerifyError（归类 verify）
+  // ⑪ close() 成功但磁盘内容不是刚写的内容 → 抛 SaveVerifyError（归类 verify；verify 显式开启）
   {
     const f = fakeHandle({ permission: 'granted', readBack: 'stale' })
     let kind = ''
     try {
-      await writeTextToHandle(f.h, '新内容')
+      await writeTextToHandle(f.h, '新内容', { verify: true })
     } catch (e) {
       kind = classifySaveError(e)
     }
@@ -3296,7 +3382,7 @@ async function runAdj363SaveTests() {
     const f = fakeHandle({ permission: 'granted', readBack: 'error' })
     let err = ''
     try {
-      await writeTextToHandle(f.h, '新内容')
+      await writeTextToHandle(f.h, '新内容', { verify: true })
     } catch (e) {
       err = (e as Error).name
     }
