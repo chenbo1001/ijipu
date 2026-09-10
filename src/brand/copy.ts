@@ -63,6 +63,11 @@ export const uiCopy = {
   saveOk: '已保存',
   saveFailed: '保存失败：文件句柄可能失效或文件被占用，请用「文件 → 另存为」重新保存',
   saveAsFailed: '另存为失败，请检查文件位置是否可写',
+  // adj363：保存失败按原因给出可操作提示（此前统一静默或笼统提示，用户以为已保存）
+  saveGone: '保存失败：原文件已被移动或删除，请用「文件 → 另存为」另选位置',
+  saveBusy: '保存失败：文件正被其它程序占用或只读，请关闭占用程序后重试，或用「文件 → 另存为」',
+  saveVerifyFailed: '保存未生效：写入后校验内容不一致，请用「文件 → 另存为」另选位置重试',
+  saveAsNoGesture: '另存为失败：未获得用户操作授权，请直接再点一次「另存为」或按 Ctrl+S',
   saveUnsupported: '当前环境不支持保存到磁盘（File System Access API 仅 Chromium 安全上下文支持，手机端通常没有）；请用「文件 → 导出」下载 .jps 保存',
   // adj281：非安全上下文（http:// 或 file://）或非 Chromium 内核下无 Web File System Access API，
   // 降级用 <input type=file> 载入 .jps 文本——已载入但无法写回磁盘，提示改用「导出」保存

@@ -28,6 +28,15 @@ import {
   HISTORY_MERGE_MS,
   type HistoryState,
 } from '../src/editor/history.ts'
+// adj363：保存到磁盘可靠性（失败分类 / 权限申请 / 回读校验）——纯逻辑，可用假句柄断言
+import {
+  classifySaveError,
+  ensureWritePermission,
+  fileBaseName,
+  isUserCancel,
+  sameContent,
+  writeTextToHandle,
+} from '../src/store/saveSupport.ts'
 
 // adj213：布局断言常量——从 defaultPageConfig 派生，避免硬编码边距/右边界/
 // 描述头区域高等魔数（默认值调整时断言自动适配）
@@ -3130,6 +3139,179 @@ console.log('[76] playback jump order: volta / repeat / D.C. / D.S. / ty (adj359
   }
 }
 
-console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
-process.exit(failed === 0 ? 0 : 1)
+// ---- 77. 保存到磁盘可靠性（adj363）：失败分类 / 权限申请 / 回读校验 ----
+console.log('[77] save reliability: error classify / permission / write-back verify (adj363)')
+{
+  const mkErr = (name: string) => Object.assign(new Error(name), { name })
+  // ① 只有 AbortError 是「用户取消」——NotAllowedError 是权限/手势问题，必须可见
+  check('adj363 AbortError = 用户取消', isUserCancel(mkErr('AbortError')))
+  check('adj363 NotAllowedError 不算取消', !isUserCancel(mkErr('NotAllowedError')))
+  check('adj363 无 name 的异常不算取消', !isUserCancel(new Error('x')))
+  // ② 失败分类（决定提示文案与句柄是否断开）
+  check('adj363 NotAllowedError → permission', classifySaveError(mkErr('NotAllowedError')) === 'permission')
+  check('adj363 SecurityError → permission', classifySaveError(mkErr('SecurityError')) === 'permission')
+  check('adj363 NotFoundError → gone', classifySaveError(mkErr('NotFoundError')) === 'gone')
+  check('adj363 NoModificationAllowedError → busy', classifySaveError(mkErr('NoModificationAllowedError')) === 'busy')
+  check('adj363 InvalidStateError → busy', classifySaveError(mkErr('InvalidStateError')) === 'busy')
+  check('adj363 未知异常 → unknown', classifySaveError(mkErr('QuotaExceededError')) === 'unknown')
+  // ③ 文件名归一化 / 内容比对（容忍 BOM）
+  check('adj363 文件名去 .jps 后缀', fileBaseName('小星星.jps') === '小星星', fileBaseName('小星星.jps'))
+  check('adj363 文件名去 .md/.txt 后缀', fileBaseName('a.md') === 'a' && fileBaseName('a.txt') === 'a')
+  check('adj363 无文件名回退「未命名」', fileBaseName(undefined) === '未命名' && fileBaseName('') === '未命名')
+  check('adj363 内容比对容忍 BOM', sameContent('\uFEFFabc', 'abc') && !sameContent('abc', 'abd'))
+}
+
+/** 假句柄（结构化模拟 FileSystemFileHandle；node 环境无浏览器 API，用于断言保存流程） */
+function fakeHandle(o: {
+  /** 权限状态；'none' = 环境不提供权限 API */
+  permission?: 'granted' | 'prompt' | 'denied' | 'none'
+  /** requestPermission 是否授予 */
+  grant?: boolean
+  /** createWritable 抛该名异常 */
+  createFail?: string
+  /** write 抛该名异常 */
+  writeFail?: string
+  /** getFile().text() 行为：disk=回读真实写入内容 / stale=内容陈旧 / error=读不到 */
+  readBack?: 'disk' | 'stale' | 'error'
+  /** queryPermission 抛该名异常 */
+  queryFail?: string
+}) {
+  let disk = '旧内容'
+  const calls: string[] = []
+  const h: Record<string, unknown> = {
+    name: 'A.jps',
+    async queryPermission() {
+      calls.push('query')
+      if (o.queryFail) throw Object.assign(new Error('q'), { name: o.queryFail })
+      return o.permission === 'none' ? 'granted' : (o.permission ?? 'granted')
+    },
+    async requestPermission() {
+      calls.push('request')
+      return o.grant ? 'granted' : 'denied'
+    },
+    async createWritable() {
+      if (o.createFail) throw Object.assign(new Error('c'), { name: o.createFail })
+      calls.push('create')
+      return {
+        async write(t: string) {
+          calls.push('write')
+          if (o.writeFail) throw Object.assign(new Error('w'), { name: o.writeFail })
+          disk = t
+        },
+        async close() {
+          calls.push('close')
+        },
+        async abort() {
+          calls.push('abort')
+        },
+      }
+    },
+    async getFile() {
+      calls.push('getFile')
+      if (o.readBack === 'error') throw Object.assign(new Error('g'), { name: 'NotFoundError' })
+      return { text: async () => (o.readBack === 'stale' ? '别的旧内容' : disk) }
+    },
+  }
+  if (o.permission === 'none') {
+    delete h.queryPermission
+    delete h.requestPermission
+  }
+  return { h: h as never, calls, disk: () => disk }
+}
+
+async function runAdj363SaveTests() {
+  // ④ 正常写入：权限已授予 → 直接写 + 回读校验通过
+  {
+    const f = fakeHandle({ permission: 'granted' })
+    const perm = await ensureWritePermission(f.h)
+    check('adj363 权限已授予 → granted', perm === 'granted', perm)
+    let err = ''
+    try {
+      await writeTextToHandle(f.h, '新内容')
+    } catch (e) {
+      err = (e as Error).name
+    }
+    check('adj363 写入成功且回读一致（无异常）', err === '', err)
+    check('adj363 磁盘内容已更新', f.disk() === '新内容', f.disk())
+    check('adj363 成功路径不调用 abort', !f.calls.includes('abort'), f.calls.join(','))
+  }
+  // ⑤ 恢复的句柄权限为 prompt：用户手势内申请后放行（顺序 query → request）
+  {
+    const f = fakeHandle({ permission: 'prompt', grant: true })
+    const perm = await ensureWritePermission(f.h)
+    check('adj363 prompt + 同意 → granted', perm === 'granted', perm)
+    check('adj363 申请顺序 query→request', f.calls.join(',') === 'query,request', f.calls.join(','))
+  }
+  // ⑥ 用户拒绝授权 → denied（调用方转另存为/提示）
+  {
+    const f = fakeHandle({ permission: 'prompt', grant: false })
+    check('adj363 prompt + 拒绝 → denied', (await ensureWritePermission(f.h)) === 'denied')
+  }
+  // ⑦ 环境无权限 API → unknown（交写入本身判定，不能误判为拒绝）
+  {
+    const f = fakeHandle({ permission: 'none' })
+    check('adj363 无权限 API → unknown', (await ensureWritePermission(f.h)) === 'unknown')
+  }
+  // ⑧ 权限查询抛错（句柄失效等）→ unknown，不阻断保存尝试
+  {
+    const f = fakeHandle({ queryFail: 'SecurityError' })
+    check('adj363 权限查询抛错 → unknown', (await ensureWritePermission(f.h)) === 'unknown')
+  }
+  // ⑨ createWritable 抛 NotAllowedError（句子失效的典型表现）→ 归类 permission
+  {
+    const f = fakeHandle({ permission: 'granted', createFail: 'NotAllowedError' })
+    let kind = ''
+    try {
+      await writeTextToHandle(f.h, 'x')
+    } catch (e) {
+      kind = classifySaveError(e)
+    }
+    check('adj363 createWritable 失败 → permission', kind === 'permission', kind)
+  }
+  // ⑩ 写入中途失败 → abort 丢弃临时文件（不把原文件截断成空）并抛原异常
+  {
+    const f = fakeHandle({ permission: 'granted', writeFail: 'QuotaExceededError' })
+    let name = ''
+    try {
+      await writeTextToHandle(f.h, 'x')
+    } catch (e) {
+      name = (e as Error).name
+    }
+    check('adj363 写入失败抛原异常', name === 'QuotaExceededError', name)
+    check('adj363 写入失败调用 abort', f.calls.includes('abort'), f.calls.join(','))
+  }
+  // ⑪ close() 成功但磁盘内容不是刚写的内容 → 抛 SaveVerifyError（归类 verify）
+  {
+    const f = fakeHandle({ permission: 'granted', readBack: 'stale' })
+    let kind = ''
+    try {
+      await writeTextToHandle(f.h, '新内容')
+    } catch (e) {
+      kind = classifySaveError(e)
+    }
+    check('adj363 回读不一致 → verify', kind === 'verify', kind)
+  }
+  // ⑫ 读不回（无读权限等）→ 不误报失败（无法校验不等于没保存）
+  {
+    const f = fakeHandle({ permission: 'granted', readBack: 'error' })
+    let err = ''
+    try {
+      await writeTextToHandle(f.h, '新内容')
+    } catch (e) {
+      err = (e as Error).name
+    }
+    check('adj363 无法回读不误报', err === '' && f.disk() === '新内容', err)
+  }
+}
+
+// 收尾：合并同步 + 异步用例结果后统一输出/退出码
+runAdj363SaveTests()
+  .catch((e) => {
+    failed++
+    console.error('  ✗ adj363 保存可靠性用例抛异常', e)
+  })
+  .then(() => {
+    console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
+    process.exit(failed === 0 ? 0 : 1)
+  })
 

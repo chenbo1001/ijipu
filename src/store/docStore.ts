@@ -16,6 +16,13 @@ import {
   type HistoryState,
 } from '../editor/history'
 import { saveFileHandle, loadFileHandle } from './fileHandleDb'
+import {
+  classifySaveError,
+  ensureWritePermission,
+  fileBaseName,
+  namedError,
+  writeTextToHandle,
+} from './saveSupport'
 import { useUiStore } from './uiStore'
 
 /** adj200：用户是否已主导过文件状态（新建/打开/保存/另存为）。「启动恢复」异步读 IndexedDB，
@@ -331,7 +338,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       })
       const file = await handle.getFile()
       const code = await file.text()
-      const name = (file.name || '未命名').replace(/\.(jps|md|txt)$/i, '')
+      const name = fileBaseName(file.name)
       try {
         localStorage.setItem(DRAFT_KEY, code)
         localStorage.setItem(DRAFT_NAME_KEY, name)
@@ -365,27 +372,20 @@ export const useDocStore = create<DocState>()((set, get) => ({
   },
   saveFile: async () => {
     fileStateTouched = true
-    const s = get()
-    if (s.fileHandle) {
-      try {
-        const w = await s.fileHandle.createWritable()
-        await w.write(s.code)
-        await w.close()
-        // adj161：保存后以该文件为操作主体（同步文件名，防止句柄与显示名不一致）
-        const name = (s.fileHandle.name || '未命名').replace(/\.(jps|md|txt)$/i, '')
-        try {
-          localStorage.setItem(DRAFT_NAME_KEY, name)
-        } catch {
-          /* 忽略 */
-        }
-        set({ dirty: false, fileName: name })
-        useUiStore.getState().showNotice(uiCopy.saveOk, 'ok')
-        return true
-      } catch {
-        /* 写入失败（权限失效、文件被占用等）→ 走另存为重新授权，由 saveFileAs 给出提示 */
-      }
+    // adj363：并发合并——连按两次 Ctrl+S 会同时对同一句柄 createWritable()，
+    // 后一次可能 InvalidStateError 失败（间歇性「保存没生效」），此处复用进行中的保存
+    if (saveInFlight) return saveInFlight
+    const task = doSaveFile()
+    saveInFlight = task
+    try {
+      return await task
+    } catch {
+      // doSaveFile 内部已归类提示；此处兜底避免未处理 rejection
+      useUiStore.getState().showNotice(uiCopy.saveFailed, 'error')
+      return false
+    } finally {
+      saveInFlight = null
     }
-    return s.saveFileAs()
   },
   saveFileAs: async () => {
     fileStateTouched = true
@@ -406,29 +406,89 @@ export const useDocStore = create<DocState>()((set, get) => ({
         suggestedName: `${defaultName}.jps`,
         types: [{ description: 'iJipu 乐谱', accept: { 'text/plain': ['.jps'] } }],
       })
-      const w = await handle.createWritable()
-      await w.write(get().code)
-      await w.close()
+      // adj363：写入 + 回读校验（close() 成功不代表磁盘内容已更新）
+      const code = get().code
+      await writeTextToHandle(handle, code)
       // adj161：另存为后新文件成为操作主体——同步文件名 + 持久化句柄，
       // 下次直接按保存即写回该文件
-      const name = (handle.name || '未命名').replace(/\.(jps|md|txt)$/i, '')
+      const name = fileBaseName(handle.name)
       try {
         localStorage.setItem(DRAFT_NAME_KEY, name)
       } catch {
         /* 忽略 */
       }
       void saveFileHandle(handle)
-      set({ dirty: false, fileHandle: handle, fileName: name })
+      // adj363：写入期间用户可能继续输入，内容已变则保留未保存标记
+      set({ fileHandle: handle, fileName: name, dirty: get().code !== code })
       ui.showNotice(uiCopy.saveOk, 'ok')
       return true
     } catch (e) {
-      // 用户取消（AbortError/NotAllowedError 的取消交互）静默；真实失败提示
-      const name = (e as { name?: string } | undefined)?.name
-      if (name !== 'AbortError' && name !== 'NotAllowedError') ui.showNotice(uiCopy.saveAsFailed, 'error')
+      const kind = classifySaveError(e)
+      // adj363：只有 AbortError 是「用户取消」（静默）；NotAllowedError 是缺少用户手势/权限，
+      // 此前被当成取消静默吞掉 → 按保存毫无反应、文件未变（用户反馈的「保存没生效」）
+      if (kind === 'cancel') return false
+      ui.showNotice(kind === 'permission' ? uiCopy.saveAsNoGesture : uiCopy.saveAsFailed, 'error')
       return false
     }
   },
 }))
+
+// ---- adj363：保存到磁盘的可靠性补强 ----
+// 用户反馈「按保存有时没生效，必须另存为才有效」。根因链条：
+//   ① 恢复自 IndexedDB 的句柄重启后写权限失效 → createWritable() 抛 NotAllowedError；
+//   ② 旧代码静默回退 saveFileAs()，但 showSaveFilePicker() 必须在**用户手势**内调用，
+//      前面的 await 已消耗手势 → 选择器再抛 NotAllowedError；
+//   ③ 旧代码把 NotAllowedError 当「用户取消」静默吞掉 → 按保存毫无反应、文件未变。
+// 现在：写入前查询/申请权限（手势内），写入后回读校验，只有 AbortError 才算取消，
+// 其余失败一律给出可操作提示；权限/文件已失效时断开句柄，下次「保存」直接走另存为。
+
+/** 进行中的保存（并发合并用） */
+let saveInFlight: Promise<boolean> | null = null
+
+/** 「保存」主流程：有可用句柄直接写回；否则走另存为 */
+async function doSaveFile(): Promise<boolean> {
+  const handle = useDocStore.getState().fileHandle
+  if (!handle) return useDocStore.getState().saveFileAs()
+  const ui = useUiStore.getState()
+  try {
+    // 必须在用户手势（Ctrl+S / 菜单点击）尚未被消耗时申请权限
+    const perm = await ensureWritePermission(handle)
+    if (perm === 'denied') throw namedError('NotAllowedError', '文件写入权限未授予')
+    const code = useDocStore.getState().code
+    await writeTextToHandle(handle, code)
+    const name = fileBaseName(handle.name)
+    try {
+      localStorage.setItem(DRAFT_NAME_KEY, name)
+    } catch {
+      /* 忽略 */
+    }
+    // 句柄与显示名保持一致，并刷新持久化（下次启动恢复即是该文件）
+    void saveFileHandle(handle)
+    useDocStore.setState({ fileName: name, dirty: useDocStore.getState().code !== code })
+    ui.showNotice(uiCopy.saveOk, 'ok')
+    return true
+  } catch (e) {
+    const kind = classifySaveError(e)
+    if (kind === 'cancel') return false
+    if (kind === 'permission' || kind === 'gone') {
+      // 句柄已失效：断开它——下次「保存」直接弹另存为（全新用户手势，选择器不会被拒），
+      // 不会再卡在同一条静默失败的路径上；本次先尝试直接转另存为
+      disconnectFileHandle()
+      return useDocStore.getState().saveFileAs()
+    }
+    ui.showNotice(
+      kind === 'busy' ? uiCopy.saveBusy : kind === 'verify' ? uiCopy.saveVerifyFailed : uiCopy.saveFailed,
+      'error',
+    )
+    return false
+  }
+}
+
+/** 断开与磁盘文件的关联（句柄失效时：下次保存 = 另存为） */
+function disconnectFileHandle(): void {
+  useDocStore.setState({ fileHandle: null })
+  void saveFileHandle(null)
+}
 
 // ---- adj281：降级打开（无 Web File System Access API 时） ----
 // 非安全上下文（http://、file://）或非 Chromium 内核下没有 showOpenFilePicker；
@@ -464,7 +524,7 @@ function openFileViaInput(): Promise<boolean> {
       gotFile = true
       try {
         const code = await file.text()
-        const name = (file.name || '未命名').replace(/\.(jps|md|txt)$/i, '')
+        const name = fileBaseName(file.name)
         try {
           localStorage.setItem(DRAFT_KEY, code)
           localStorage.setItem(DRAFT_NAME_KEY, name)
@@ -508,8 +568,13 @@ function openFileViaInput(): Promise<boolean> {
 // adj161：启动时恢复上次保存/打开的文件句柄（IndexedDB 持久化），
 // 之后直接按保存即写回该文件（无需重新选文件）；恢复失败静默（走另存为）
 void loadFileHandle().then((h) => {
-  if (h && !fileStateTouched) {
-    const name = (h.name || '未命名').replace(/\.(jps|md|txt)$/i, '')
-    useDocStore.setState({ fileHandle: h, fileName: name })
-  }
+  if (!h || fileStateTouched) return
+  const name = fileBaseName(h.name)
+  // adj363：句柄与草稿必须属于同一文件才恢复。句柄持久化是异步 fire-and-forget，
+  // 若「新建/载入示例」后立刻退出应用，清空句柄的写入可能没落盘，下次启动会恢复出旧句柄，
+  // 此时草稿已是另一份谱 → 按保存会把新谱写进旧文件。草稿名（DRAFT_NAME_KEY）始终标识
+  // 草稿所属文件，与句柄名不一致即视为不同文件，不恢复句柄（下次保存走另存为）。
+  const draftName = useDocStore.getState().fileName
+  if (draftName && draftName !== name) return
+  useDocStore.setState({ fileHandle: h, fileName: name })
 })

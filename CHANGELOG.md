@@ -1,5 +1,23 @@
 # iJipu 更新日志（Changelog）
 
+## [未发布]
+
+### 修复
+
+- **「保存」有时毫无反应、文件没变（必须用「另存为」才有效）**（`adj363`）：三条静默失败叠加——① 从 IndexedDB 恢复的文件句柄在应用重启后**写入权限失效**，`createWritable()` 抛 `NotAllowedError`，旧代码 `catch {}` 静默转「另存为」；② `showSaveFilePicker()` **必须在用户手势内**调用，前一步的 `await` 已消耗手势 → 选择器再抛 `NotAllowedError`、**对话框根本不弹**；③ 旧代码把 `NotAllowedError` 与 `AbortError` 一起当"用户取消"静默忽略 → 按保存彻底无反应。现改为：
+  - 写入前先 `queryPermission`，未授权则在**手势内** `requestPermission`；写入后**回读比对**确认磁盘内容真的更新（`close()` 成功不代表已落盘），中途失败 `abort()` 丢弃临时文件避免原文件被截断；
+  - **只有 `AbortError` 才算用户取消**；其余失败按类型给出可操作提示（权限已失效 / 文件被移动删除 / 被占用只读 / 校验不一致）；
+  - 权限失效或文件已不在时**断开失效句柄**并立即转「另存为」（下次按保存直接弹对话框 = 全新手势），不会再卡在静默失败的路径上；
+  - 连按两次 Ctrl+S 的并发保存合并（此前会对同一句柄并发 `createWritable()`）；写入期间内容又变则保留未保存标记；
+  - 启动恢复句柄时**核对草稿名与句柄名一致**才恢复（防止"旧句柄 + 新草稿"把新谱写进旧文件）。
+- 新增 `src/store/saveSupport.ts`（纯逻辑，无 DOM/store 依赖）：`classifySaveError` / `isUserCancel` / `ensureWritePermission` / `writeTextToHandle` / `fileBaseName`，保存流程的判定与写入收敛在此，可用假句柄直接断言。
+
+### 文档 / 版本
+
+- `docs/ERRORS-LOG.md` 登记 E-2026-109（adj363）；smoke 新增 `[77]`（27 项：失败分类矩阵、取消语义、权限申请顺序/拒绝/无 API/查询抛错、写入成功与磁盘内容一致、`createWritable` 失败归类、写入中途失败 abort、回读不一致 → verify、无法回读不误报），维持预存基线 17 项。版本号不变（递增由用户决定）。
+
+---
+
 ## [0.12.15] — 2026-09-09
 
 ### 修复

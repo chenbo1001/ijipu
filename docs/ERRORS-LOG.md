@@ -766,6 +766,22 @@
 - **解决**（adj362，`playback/sequence.ts`）：`&ds` 分支改为 `pass++`（不重置为 1）、删除 `repeatStart = 0`（保持不变）。于是 `&ds` 后 `pass: 2→3` → 房子1（1≠3）/房子2（2≠3）被跳过、房子3（3==3）演奏；因 `pass(3) ≥ count(2)`，即便再遇 `:|` 也不回跳。smoke 新增：简化三房子用例 + **用户真实谱 56 音符全序列回归**（第1遍 段A+B+C+房子1；第2遍 B+C+房子2；第3遍 C+房子3）
 - **预防**：① **"遍次/遍数"是跨大反复延续的状态**——大反复不是"回到第 1 遍"，而是"进入下一遍"；凡是按遍次选择的分支（volta 番号、`:|` 回跳判定）都要保证 `pass` 不被大反复重置；② 重置类操作（`pass=1`、`repeatStart=0`）在跳跃分支里要**逐条论证**：`&dc`（真·从头）与 `&ds`（跳到段中间）语义不同，不能共用一套重置；③ 用**用户真实谱**做全序列回归（56 音符）比只测缩短版更能暴露"多遍 + 多房子 + 花S + D.S."的组合问题
 
+### E-2026-109 「保存」有时毫无反应、文件没变（必须「另存为」才有效）（adj363）
+- **场景**：已打开/另存过的文件，编辑后按 Ctrl+S 或「文件 → 保存」——**有时**什么都没发生（无对话框、无提示），磁盘文件未更新、未保存红点仍在；改用「文件 → 另存为」就正常
+- **现象**：保存请求被**完全静默地**吞掉，用户无从判断是没保存还是保存了
+- **根因**（静默链条，三层叠加）：
+  1. `saveFile` 有句柄时的写入 `createWritable()` 若抛 `NotAllowedError`（句柄来自 IndexedDB 恢复，重启后写权限失效——权限需重新申请），旧代码 `catch {}` 静默转 `saveFileAs()`；
+  2. `saveFileAs` 调 `showSaveFilePicker()` **必须在用户手势内**（[Chrome 策略](https://gpedit.tplant.com.au/en-us/policy/Google.Policies.Chrome/FileOrDirectoryPickerWithoutGestureAllowedForOrigins/)），而前一步的 `await` 已消耗手势 → 选择器抛 `NotAllowedError`，**对话框根本不弹**；
+  3. `saveFileAs` 的 catch 把 `NotAllowedError` 与 `AbortError` 一起当"用户取消"静默忽略 → 按保存彻底无反应
+  另有两个同源隐患：① 写入没有回读校验，`close()` 成功即报"已保存"，而写入流被中断/目标被换走时磁盘其实没变；② 连按两次 Ctrl+S 会同时对同一句柄 `createWritable()`（后一次可能 `InvalidStateError`），且句柄持久化是异步 fire-and-forget——「新建」后立即退出应用可能留下旧句柄，下次启动草稿与句柄不是同一文件，按保存会把新谱写进旧文件
+- **解决**（adj363）：
+  - 新增纯逻辑模块 `src/store/saveSupport.ts`（无 DOM/store 依赖，可在 smoke 用假句柄断言）：`classifySaveError`（cancel/permission/gone/busy/verify/unknown）、`isUserCancel`（**只有 `AbortError` 算取消**）、`ensureWritePermission`（写入前 `queryPermission` → 必要时**在用户手势内** `requestPermission`）、`writeTextToHandle`（写入 → `close()` → **回读比对**，中途失败 `abort()` 丢弃临时文件避免原文件被截断）、`fileBaseName`
+  - `docStore.saveFile` 拆为 `doSaveFile()`：有句柄则**先申请权限再写 + 回读校验**；失败按类型提示（`gone`/`busy`/`verify` 各有可操作文案，集中 `brand/copy.ts`）；`permission`/`gone` 时**断开失效句柄**并立即转「另存为」（下次按保存直接弹对话框 = 全新手势）；并发保存用 `saveInFlight` 合并；写入期间内容又变则保留未保存标记
+  - `saveFileAs`：`NotAllowedError` 不再当取消，提示「未获得用户操作授权，请再点一次」；同样回读校验
+  - 启动恢复句柄时**核对草稿名与句柄名一致**才恢复（防止旧句柄配新草稿）
+  - smoke 新增 `[77]`（27 项：分类矩阵、取消语义、权限申请顺序/拒绝/无 API/查询抛错、写入成功与磁盘内容、createWritable 失败归类、写入中途失败 abort、回读不一致 → verify、无法回读不误报）
+- **预防**：① **用户取消只认 `AbortError`**——`NotAllowedError` 是权限/手势问题，绝不能当取消静默；② 依赖**用户手势**的 API（选择器/全屏/剪贴板写）**不可在 `await` 之后调用**，需要恢复权限时应在手势内先 `requestPermission`；③ 任何"写入成功"的结论都应有**回读校验**支撑，`close()` 成功不等于磁盘已更新；④ 句柄/令牌类**异步持久化**的对象恢复时必须与当前文档**同源核对**（草稿名 vs 句柄名），否则会写错文件；⑤ 失败必须有可见且**可操作**的提示，并把失败分类（取消/权限/丢失/占用/校验）逐一映射到文案
+
 ## 五、预防清单（Checklist，提交/交付前自检）
 
 - [ ] 所有 npm 命令带 `--cache "D:/Coding/JPCoder/.npm-cache"`
