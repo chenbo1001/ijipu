@@ -406,7 +406,14 @@ export const useDocStore = create<DocState>()((set, get) => ({
       })
       // adj364：最快路径写入（刚选定的句柄权限本就授予；仅权限失败时才申请并重试）
       const code = get().code
-      await saveTextToHandle(handle, code)
+      // adj365：选完文件后才武装「保存中…」提示（选文件期间提示会误导）
+      const t0 = performance.now()
+      const cancelHint = armSavingHint()
+      try {
+        await saveTextToHandle(handle, code)
+      } finally {
+        cancelHint()
+      }
       // adj161：另存为后新文件成为操作主体——同步文件名 + 持久化句柄，
       // 下次直接按保存即写回该文件
       const name = fileBaseName(handle.name)
@@ -418,7 +425,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       void saveFileHandle(handle)
       // adj363：写入期间用户可能继续输入，内容已变则保留未保存标记
       set({ fileHandle: handle, fileName: name, dirty: get().code !== code })
-      ui.showNotice(uiCopy.saveOk, 'ok')
+      reportSaved(t0)
       return true
     } catch (e) {
       const kind = classifySaveError(e)
@@ -449,11 +456,36 @@ export const useDocStore = create<DocState>()((set, get) => ({
 /** 进行中的保存（并发合并用） */
 let saveInFlight: Promise<boolean> | null = null
 
+/** adj365：慢保存的即时反馈阈值——超过该毫秒数仍未写完才提示「保存中…」（快保存不闪烁） */
+const SAVE_HINT_DELAY_MS = 150
+/** adj365：超过该毫秒数视为慢保存——控制台记录耗时，提示里带上实际耗时（便于定位是写盘慢还是反馈慢） */
+const SAVE_SLOW_MS = 400
+
+/** adj365：武装「保存中…」提示，返回清理函数（保存结束即撤销未触发的计时器） */
+function armSavingHint(): () => void {
+  const ui = useUiStore.getState()
+  const timer = window.setTimeout(() => ui.showNotice(uiCopy.saving, 'warn'), SAVE_HINT_DELAY_MS)
+  return () => window.clearTimeout(timer)
+}
+
+/** adj365：保存成功提示（慢保存带耗时，便于用户/开发者反馈真实数字） */
+function reportSaved(t0: number): void {
+  const ms = Math.round(performance.now() - t0)
+  if (ms >= SAVE_SLOW_MS) {
+    console.info(`[iJipu] 保存耗时 ${ms}ms`)
+    useUiStore.getState().showNotice(`${uiCopy.saveOk} · ${(ms / 1000).toFixed(1)}s`, 'ok')
+    return
+  }
+  useUiStore.getState().showNotice(uiCopy.saveOk, 'ok')
+}
+
 /** 「保存」主流程：有可用句柄直接写回；否则走另存为 */
 async function doSaveFile(): Promise<boolean> {
   const handle = useDocStore.getState().fileHandle
   if (!handle) return useDocStore.getState().saveFileAs()
   const ui = useUiStore.getState()
+  const t0 = performance.now()
+  const cancelHint = armSavingHint()
   try {
     const code = useDocStore.getState().code
     // adj364：最快路径——直接写；权限失效时才申请权限并重试（不再每次前置查权限/回读）
@@ -466,7 +498,7 @@ async function doSaveFile(): Promise<boolean> {
     }
     // 句柄与显示名保持一致（句柄持久化已在获取/打开该文件时完成，保存热路径不再重复写库）
     useDocStore.setState({ fileName: name, dirty: useDocStore.getState().code !== code })
-    ui.showNotice(uiCopy.saveOk, 'ok')
+    reportSaved(t0)
     return true
   } catch (e) {
     const kind = classifySaveError(e)
@@ -482,6 +514,8 @@ async function doSaveFile(): Promise<boolean> {
       'error',
     )
     return false
+  } finally {
+    cancelHint()
   }
 }
 
