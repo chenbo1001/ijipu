@@ -3104,6 +3104,30 @@ console.log('[76] playback jump order: volta / repeat / D.C. / D.S. / ty (adj359
   check('adj359 <1,2> |&ty <1> |&ty <1,2> |&dc <2> ||', ord('1 |&ty 2 |&ty 3 |&dc 4 ||') === 'C4,D4,E4,C4,E4,F4', ord('1 |&ty 2 |&ty 3 |&dc 4 ||'))
   // ⑥ 未封闭房子 |]/ 延续到其后第一个 :|（房子内后段也属该房子，第二遍一并跳过）
   check('adj360 <1> |: <1,2> |["1." <1> |]/ <1> :| <2> ||', ord('1 |: 2 |["1." 3 |]/ 4 :| 5 ||') === 'C4,D4,E4,F4,D4,G4', ord('1 |: 2 |["1." 3 |]/ 4 :| 5 ||'))
+  // ⑦ 三房子 + 花S + D.S.：第1遍 A,B,C,房子1（:|回跳）、第2遍 B,C,房子2（&ds跳花S）、
+  //    D.S.后为第3遍 → 从 &hs 起、跳过房子1/2、走房子3 到结束（不再回跳）
+  check(
+    'adj362 三房子+D.S.：D.S. 后进入下一遍走房子3（跳过房子1/2，不回跳）',
+    ord('1 |: 2 |&hs 3 |["1." 4 :|]["2." 5 |&ds]["3." 6 ||]') === 'C4,D4,E4,F4,D4,E4,G4,E4,A4',
+    ord('1 |: 2 |&hs 3 |["1." 4 :|]["2." 5 |&ds]["3." 6 ||]'),
+  )
+  // ⑦b 用户真实谱（折行拼成一个 Q 行）回归：确认解析 + 三遍结构（第3遍从 &hs 起跳房子1/2、走房子3）
+  {
+    const uSrc =
+      'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 6,-- @@ &ykh 3,/ 5,/ |: 6,/ 5,/ 6,/ (2// 3//) 2/&sby 1/ 6,/&sby 5,/ | |/&hs 6,/ 5/ 5/ 1/ (2 3) | |/"p:4/4"[+"1." (2// 1// 6,.) 0 @手风琴@ &zkh 3/ 5/ | 6,-- @@ &ykh 3,/ 5,/ :|] |/["2." (2// 1// 6,.) 0 0 ||&ds]["3." (2// 1// 6,.) 0 @手风琴@ &zkh 2/ 3/ | 6,--- &ykh ||]\n'
+    const uRes = parseJps(uSrc)
+    const uP = buildPlaySequence(uRes, layoutScore(uRes, DUR_CFG), 120)
+      .events.filter((e) => e.placed.audioPitch)
+      .map((e) => e.placed.audioPitch)
+      .join(' ')
+    // 段A(A3 E3 G3) 段B(A3 G3 A3 D4 E4 D4 C4 A3 G3) 段C(A3 G4 G4 C4 D4 E4) 房子1(D4 C4 A3 E4 G4 A3 E3 G3)
+    // 第2遍 段B 段C 房子2(D4 C4 A3) / 第3遍 段C 房子3(D4 C4 A3 D4 E4 A3)
+    const uExpect =
+      'A3 E3 G3 A3 G3 A3 D4 E4 D4 C4 A3 G3 A3 G4 G4 C4 D4 E4 D4 C4 A3 E4 G4 A3 E3 G3 ' +
+      'A3 G3 A3 D4 E4 D4 C4 A3 G3 A3 G4 G4 C4 D4 E4 D4 C4 A3 ' +
+      'A3 G4 G4 C4 D4 E4 D4 C4 A3 D4 E4 A3'
+    check('adj362 用户真实谱：三遍跳跃结构（D.S. 后从 &hs 起走房子3）', uRes.errors.length === 0 && uP === uExpect, `err=${uRes.errors.length} n=${uP.split(' ').length}\n  ${uP}`)
+  }
 }
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
