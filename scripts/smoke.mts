@@ -3414,6 +3414,50 @@ console.log('[78] playback voice default = auto (adj366)')
   check('adj366 自动路由：无乐器 → 钢琴 0', instrumentToProgram(undefined) === 0, String(instrumentToProgram(undefined)))
 }
 
+// ---- 79. 最后一个跳房子用「结束句」做标签（adj368）----
+console.log('[79] last volta label = 结束句 (adj368)')
+{
+  const ord = (q: string) => {
+    const r = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`)
+    return buildPlaySequence(r, layoutScore(r, DUR_CFG), 120)
+      .events.map((e) => e.placed.audioPitch)
+      .join(',')
+  }
+  const src1 = '1 |: 2 |["1." 3 :|]["结束句" 4 ||]'
+  const res1 = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${src1}\n`)
+  const bt1 = res1.groups[0].music.tokens.filter((t) => t.kind === 'barline')
+  const volta1 = bt1.find((b) => b.kind === 'barline' && b.voltaStart?.comment === '结束句')
+  // ① 解析/格式化：文字标签原样保留（不再只认数字番号）
+  check('adj368 解析：["结束句" 作为跳房子标签（无错误）', res1.errors.length === 0 && volta1 !== undefined, JSON.stringify(res1.errors))
+  check(
+    'adj368 格式化：文字标签原样保留',
+    formatJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${src1}\n`).includes('["结束句"'),
+  )
+  // ② 渲染：标签文字画进跳房子线下方
+  {
+    const svg = renderScoreToSvg(layoutScore(res1, DUR_CFG))[0] ?? ''
+    check('adj368 渲染：跳房子标签显示「结束句」', svg.includes('结束句'), '')
+  }
+  // ③ 演奏：两房子（"1." + "结束句"）——第 1 遍奏房子1、第 2 遍奏结束句（旧实现把结束句当第 1 遍 → 末遍整段丢失）
+  check('adj368 <1> |: <1,2> |["1." <1> :|]["结束句" <2> ||]', ord(src1) === 'C4,D4,E4,D4,F4', ord(src1))
+  // ④ 无 |: 时（只奏 1 遍）文字标签房子照常奏响，不丢音
+  check('adj368 无反复 <1> |["结束句" <2> ||]', ord('1 |["结束句" 2 ||]') === 'C4,D4', ord('1 |["结束句" 2 ||]'))
+  // ⑤ 只有段落反复、无番号房子：末遍奏结束句
+  check('adj368 <1> |: <1,2> :|["结束句" <1> ||]', ord('1 |: 2 :|["结束句" 3 ||]') === 'C4,D4,D4,E4', ord('1 |: 2 :|["结束句" 3 ||]'))
+  // ⑥ 三房子 + 花S + D.S.（与 adj362 番号版等价）：结束句房子在第 3 遍奏响
+  {
+    const withNum = ord('1 |: 2 |&hs 3 |["1." 4 :|]["2." 5 |&ds]["3." 6 ||]')
+    const withText = ord('1 |: 2 |&hs 3 |["1." 4 :|]["2." 5 |&ds]["结束句" 6 ||]')
+    check(
+      'adj368 三房子+D.S.：结束句版 == 数字番号版（第 3 遍奏结束句）',
+      withText === withNum && withText === 'C4,D4,E4,F4,D4,E4,G4,E4,A4',
+      `text=${withText} num=${withNum}`,
+    )
+  }
+  // ⑦ 番号房子行为不变（回归）
+  check('adj368 番号房子不受影响 <1> |["1." <1> :|] <2> ||', ord('1 |["1." 2 :|] 3 ||') === 'C4,D4,C4,E4', ord('1 |["1." 2 :|] 3 ||]'))
+}
+
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
 runAdj363SaveTests()
   .catch((e) => {

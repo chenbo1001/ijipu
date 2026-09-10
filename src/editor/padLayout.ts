@@ -96,6 +96,8 @@ const VOLTA_KEYS: PadKey[] = [
   { label: ']', insert: ']', hint: '跳房子结束' },
   { label: '"1."', insert: '"1."', hint: '番号：第一遍' },
   { label: '"2."', insert: '"2."', hint: '番号：第二遍' },
+  // adj368：最后一个跳房子可用文字标签——「结束句」= 该段最后一遍才奏（不必强写番号）
+  { label: '"结束句"', insert: '"结束句"', hint: '标签：末遍房子（结束句）' },
   { label: '/', insert: '/', hint: '右侧不封闭' },
   { label: '"', insert: '"', hint: '行内引号备注' },
   { label: '""', insert: '""', hint: '空引号对' },
