@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW } from '@ijipu/engine/index.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
-import { buildPlaySequence, inferBpm, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork } from '@ijipu/engine/playback/index.ts'
+import { buildPlaySequence, inferBpm, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork } from '@ijipu/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, noteScaleOf, lowDotY, octaveDotY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from '@ijipu/engine/layout/spacing.ts'
@@ -38,6 +38,8 @@ import {
   saveTextToHandle,
   writeTextToHandle,
 } from '../src/store/saveSupport.ts'
+// adj366：试听「音色」选择值解析（未设置/空串 = 自动）——纯函数，可直接断言
+import { formatStoredVoice, parseStoredVoice } from '../src/store/playbackVoice.ts'
 
 // adj213：布局断言常量——从 defaultPageConfig 派生，避免硬编码边距/右边界/
 // 描述头区域高等魔数（默认值调整时断言自动适配）
@@ -3388,6 +3390,28 @@ async function runAdj363SaveTests() {
     }
     check('adj363 无法回读不误报', err === '' && f.disk() === '新内容', err)
   }
+}
+
+// ---- 78. 试听音色默认「自动」（adj366）----
+console.log('[78] playback voice default = auto (adj366)')
+{
+  // ① 持久化值解析：未设置/空串/空白/非法 → null（自动）；合法 program 保留
+  check('adj366 未设置（null）→ 自动', parseStoredVoice(null) === null, String(parseStoredVoice(null)))
+  check('adj366 空串（保存「自动」后的值）→ 自动', parseStoredVoice('') === null, String(parseStoredVoice('')))
+  check('adj366 空白 → 自动', parseStoredVoice('  ') === null, String(parseStoredVoice('  ')))
+  check('adj366 非法值 → 自动', parseStoredVoice('abc') === null && parseStoredVoice('128') === null && parseStoredVoice('-1') === null)
+  check('adj366 程序号 0（大钢琴）保留为 0，不被当成自动', parseStoredVoice('0') === 0, String(parseStoredVoice('0')))
+  check('adj366 程序号 73（长笛）保留', parseStoredVoice('73') === 73, String(parseStoredVoice('73')))
+  // ② 反向格式化：自动 = 空串（既有存储格式，回读仍是自动）
+  check('adj366 自动 → 空串', formatStoredVoice(null) === '', JSON.stringify(formatStoredVoice(null)))
+  check('adj366 音色 → 数字串', formatStoredVoice(10) === '10', formatStoredVoice(10))
+  check('adj366 存↔读往返一致', parseStoredVoice(formatStoredVoice(null)) === null && parseStoredVoice(formatStoredVoice(21)) === 21)
+  // ③ 「自动」的落点：按谱面乐器/声部名路由 GM 音色（不是固定钢琴）
+  check('adj366 自动路由：@手风琴 → GM 21', instrumentToProgram('手风琴') === 21, String(instrumentToProgram('手风琴')))
+  check('adj366 自动路由：@长笛 → GM 73', instrumentToProgram('长笛') === 73, String(instrumentToProgram('长笛')))
+  check('adj366 自动路由：带库前缀「库:小提琴」→ GM 40', instrumentToProgram('库:小提琴') === 40, String(instrumentToProgram('库:小提琴')))
+  check('adj366 自动路由：声部名 小号 → GM 56', instrumentToProgram('小号') === 56, String(instrumentToProgram('小号')))
+  check('adj366 自动路由：无乐器 → 钢琴 0', instrumentToProgram(undefined) === 0, String(instrumentToProgram(undefined)))
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码

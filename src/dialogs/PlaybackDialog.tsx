@@ -367,7 +367,8 @@ export function PlaybackDialog() {
                 disabled={playing}
                 style={{ background: 'var(--jp-bg-app)', border: '1px solid var(--jp-border)', color: 'var(--jp-text-primary)', borderRadius: 6, padding: '2px 6px', fontSize: 12, flex: 1, minWidth: 0 }}
               >
-                <option value="">自动（按声部名）</option>
+                {/* adj366：默认项 = 自动（跟随谱面声部/乐器）——也是未选择时的默认值 */}
+                <option value="">{playbackCopy.voiceAuto}</option>
                 {GM_VOICE_OPTIONS.filter((v) => playbackHqEnabled.includes(v.program)).map((v) => (
                   <option key={v.program} value={v.program}>{v.label}</option>
                 ))}
@@ -387,7 +388,7 @@ export function PlaybackDialog() {
             )}
 
             <div style={{ color: 'var(--jp-text-muted)', fontSize: 11, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-              <span>反复/跳房子自动展开 · 多声部按声部名路由音色 · 播放中音符高亮</span>
+              <span>反复/跳房子自动展开 · 音色「自动」时按谱面声部/乐器路由 · 播放中音符高亮</span>
               {totalMs > 0 && !playing && <span>总时长 {(totalMs / 1000).toFixed(1)}s</span>}
             </div>
             {/* adj293：播放异常提示（不再静默失败） */}

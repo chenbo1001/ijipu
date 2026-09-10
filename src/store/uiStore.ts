@@ -4,6 +4,8 @@
 import './localStorageMigration'
 import { create } from 'zustand'
 import { DEFAULT_THEME, DEFAULT_THEME_MODE, type ThemeMode } from '../brand/themes'
+// adj366：试听音色选择值的解析/格式化（未设置或空串 = 自动）
+import { formatStoredVoice, parseStoredVoice } from './playbackVoice'
 
 export type ModalKind =
   | 'about'
@@ -237,8 +239,8 @@ export const useUiStore = create<UiState>()((set) => ({
   })(),
   playbackHqVoice: (() => {
     try {
-      const v = Number(localStorage.getItem(PLAYBACK_HQ_VOICE_KEY))
-      return Number.isInteger(v) && v >= 0 && v < 128 ? v : null
+      // adj366：未设置/空串/非法值 → null（自动）；直接 Number(null)/Number('') 会得到 0（大钢琴）
+      return parseStoredVoice(localStorage.getItem(PLAYBACK_HQ_VOICE_KEY))
     } catch {
       return null
     }
@@ -355,7 +357,8 @@ export const useUiStore = create<UiState>()((set) => ({
   },
   setPlaybackHqVoice: (program) => {
     try {
-      localStorage.setItem(PLAYBACK_HQ_VOICE_KEY, program === null ? '' : String(program))
+      // adj366：自动 = 空串（parseStoredVoice 回读为 null）
+      localStorage.setItem(PLAYBACK_HQ_VOICE_KEY, formatStoredVoice(program))
     } catch {
       /* 忽略 */
     }

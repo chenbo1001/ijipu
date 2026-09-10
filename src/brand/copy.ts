@@ -80,6 +80,8 @@ export const uiCopy = {
 export const playbackCopy = {
   /** 音色下拉 label（固定高保真，只列启用收藏音色） */
   synthLabel: '音色',
+  /** adj366：音色下拉的「自动」项——跟随谱面（@乐器 / 声部名）路由，非固定音色 */
+  voiceAuto: '自动（跟随谱面声部/乐器）',
   /** 音源加载状态 */
   loading: '加载中…',
   loaded: '已加载',
