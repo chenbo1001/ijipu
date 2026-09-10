@@ -126,7 +126,7 @@ async function readBack(handle: FileSystemFileHandle): Promise<string | null> {
 }
 
 /** 保存阶段标识（adj367：用于定位"保存耗时好几秒"卡在哪一步） */
-export type SavePhase = 'open' | 'write' | 'commit'
+export type SavePhase = 'open' | 'write' | 'commit' | 'perm'
 
 /** 阶段耗时回调（毫秒） */
 export type SaveTrace = (phase: SavePhase, ms: number) => void
@@ -148,7 +148,14 @@ export async function writeTextToHandle(
 ): Promise<void> {
   const now = () => performance.now()
   const t0 = now()
-  const w = await handle.createWritable()
+  let w: FileSystemWritableFileStream
+  try {
+    w = await handle.createWritable()
+  } catch (e) {
+    // adj367：打开失败同样要报耗时——否则这段会被算进笼统的"收尾"，看不出是谁慢
+    opts?.trace?.('open', now() - t0)
+    throw e
+  }
   opts?.trace?.('open', now() - t0)
   try {
     const t1 = now()
@@ -189,7 +196,10 @@ export async function saveTextToHandle(
     await writeTextToHandle(handle, text, opts)
   } catch (e) {
     if (classifySaveError(e) !== 'permission') throw e
+    // adj367：权限申请（可能等权限提示）也单独计时，避免与"写盘慢"混淆
+    const tp = performance.now()
     const perm = await ensureWritePermission(handle)
+    opts?.trace?.('perm', performance.now() - tp)
     if (perm !== 'granted') throw e
     await writeTextToHandle(handle, text, opts)
   }

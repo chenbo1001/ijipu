@@ -420,14 +420,21 @@ export const useDocStore = create<DocState>()((set, get) => ({
       // adj161：另存为后新文件成为操作主体——同步文件名 + 持久化句柄，
       // 下次直接按保存即写回该文件
       const name = fileBaseName(handle.name)
-      try {
-        localStorage.setItem(DRAFT_NAME_KEY, name)
-      } catch {
-        /* 忽略 */
+      const tStore = performance.now()
+      // adj367：文件名没变就不写 localStorage（另存为通常变了，正常会写）
+      if (get().fileName !== name) {
+        try {
+          localStorage.setItem(DRAFT_NAME_KEY, name)
+        } catch {
+          /* 忽略 */
+        }
       }
+      phaseLog.tail('store', performance.now() - tStore)
       void saveFileHandle(handle)
       // adj363：写入期间用户可能继续输入，内容已变则保留未保存标记
+      const tUi = performance.now()
       set({ fileHandle: handle, fileName: name, dirty: get().code !== code })
+      phaseLog.tail('ui', performance.now() - tUi)
       reportSaved(t0, phaseLog)
       return true
     } catch (e) {
@@ -465,11 +472,17 @@ const SAVE_HINT_DELAY_MS = 150
 const SAVE_SLOW_MS = 400
 
 /** adj367：保存阶段中文名（定位"保存要好几秒"到底卡在哪一步） */
-const SAVE_PHASE_LABEL: Record<SavePhase, string> = {
+const SAVE_PHASE_LABEL: Record<SavePhase | 'store' | 'ui', string> = {
   open: '打开写入流',
   write: '写入数据',
   commit: '提交文件',
+  perm: '权限申请',
+  store: '写入草稿名',
+  ui: '更新界面状态',
 }
+
+/** adj367：阶段计时器（tail 段：localStorage 写文件名、store 状态更新） */
+type SaveTailPhase = 'store' | 'ui'
 
 /** adj365：武装「保存中…」提示，返回清理函数（保存结束即撤销未触发的计时器） */
 function armSavingHint(): () => void {
@@ -481,6 +494,8 @@ function armSavingHint(): () => void {
 /** adj367：收集文件写入各阶段耗时（open/write/commit），慢保存时与总耗时一起给出 */
 interface SavePhaseLog {
   trace: SaveTrace
+  /** adj367：尾部阶段计时（localStorage 写文件名 / store 状态更新） */
+  tail: (phase: SaveTailPhase, ms: number) => void
   /** 阶段明细文案（如「打开写入流 12ms · 写入数据 3ms · 提交文件 7180ms」） */
   text: () => string
   /** 已计时阶段的毫秒合计（用于推「收尾」= 总耗时 − 各阶段） */
@@ -489,8 +504,10 @@ interface SavePhaseLog {
 
 function collectSavePhases(): SavePhaseLog {
   const parts: { label: string; ms: number }[] = []
+  const push = (label: string, ms: number) => parts.push({ label, ms })
   return {
-    trace: (phase, ms) => parts.push({ label: SAVE_PHASE_LABEL[phase], ms }),
+    trace: (phase, ms) => push(SAVE_PHASE_LABEL[phase], ms),
+    tail: (phase, ms) => push(SAVE_PHASE_LABEL[phase], ms),
     text: () => parts.map((p) => `${p.label} ${Math.round(p.ms)}ms`).join(' · '),
     total: () => parts.reduce((sum, p) => sum + p.ms, 0),
   }
@@ -529,13 +546,20 @@ async function doSaveFile(): Promise<boolean> {
     // adj364：最快路径——直接写；权限失效时才申请权限并重试（不再每次前置查权限/回读）
     await saveTextToHandle(handle, code, { trace: phaseLog.trace })
     const name = fileBaseName(handle.name)
-    try {
-      localStorage.setItem(DRAFT_NAME_KEY, name)
-    } catch {
-      /* 忽略 */
+    const tStore = performance.now()
+    // adj367：文件名没变就不写 localStorage（同步存储写可能被 StorageService 争用拖住，热路径能省则省）
+    if (useDocStore.getState().fileName !== name) {
+      try {
+        localStorage.setItem(DRAFT_NAME_KEY, name)
+      } catch {
+        /* 忽略 */
+      }
     }
+    phaseLog.tail('store', performance.now() - tStore)
     // 句柄与显示名保持一致（句柄持久化已在获取/打开该文件时完成，保存热路径不再重复写库）
+    const tUi = performance.now()
     useDocStore.setState({ fileName: name, dirty: useDocStore.getState().code !== code })
+    phaseLog.tail('ui', performance.now() - tUi)
     reportSaved(t0, phaseLog)
     return true
   } catch (e) {
