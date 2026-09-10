@@ -1031,7 +1031,9 @@ const mk126 = (q: string) => buildPlaySequence(parseJps(`V: 1.0\nB: t\nD: C\nP: 
 const pits126 = (seq: ReturnType<typeof mk126>) => seq.events.filter((e) => e.placed.audioPitch).map((e) => e.placed.audioPitch)
 check('adj126 播放：&fine 曲终截断（只播前 4 音）', pits126(mk126('1 2 3 4 |&fine 5 6 7 1 |')).join(',') === 'C4,D4,E4,F4', pits126(mk126('1 2 3 4 |&fine 5 6 7 1 |')).join(','))
 check('adj126 播放：&ds 跳到 &hs 位置（5 6 7 1 跳过）', pits126(mk126('1 2 3 4 |&ds 5 6 7 1 |&hs 2 3 4 5 |')).join(',') === 'C4,D4,E4,F4,D4,E4,F4,G4', pits126(mk126('1 2 3 4 |&ds 5 6 7 1 |&hs 2 3 4 5 |')).join(','))
-check('adj126 播放：&ty 跳到下一 &ty（中间跳过）', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |')).join(',') === 'C4,D4,E4,F4,D4,E4,F4,G4', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |')).join(','))
+// adj359：&ty 第一次遇到忽略（无大反复则不跳越，全部演奏）；有大反复时第二次跳越两 ty 之间
+check('adj359 播放：&ty 无大反复时忽略（不跳越）', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |')).join(',') === 'C4,D4,E4,F4,G4,A4,B4,C4,D4,E4,F4,G4', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |')).join(','))
+check('adj359 播放：&dc 后 &ty 跳越两 ty 之间', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |&dc |')).join(',') === 'C4,D4,E4,F4,G4,A4,B4,C4,D4,E4,F4,G4,C4,D4,E4,F4,D4,E4,F4,G4', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |&dc |')).join(','))
 check('adj126 播放：&dc 从头反复（首 4 音重复出现）', (() => { const p = pits126(mk126('1 2 3 4 |&dc 5 6 7 1 |')); return p.length > 4 && p[0] === p[4] && p[1] === p[5] && p[2] === p[6] && p[3] === p[7] })(), pits126(mk126('1 2 3 4 |&dc 5 6 7 1 |')).join(','))
 // adj132：连音线位于音符上方修饰符（波音/颤音等）之上——带修饰符时 slur y 上移（随字号）
 const slSym132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1&sby 2&cy) 3 |\n'), DUR_CFG).pages[0].slurs[0].y
@@ -1835,7 +1837,7 @@ check('跳房子番号 "1." "2." 渲染', svg38.includes('>1.<') && svg38.includ
 // 播放：反复中跳房子段第二遍跳过（注意 8 是隐藏休止符，用 7 1 收尾）
 const r38p = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 |["1." 3 4 |]["2." 5 6 |] 7 1 :|\n')
 const seq38 = buildPlaySequence(r38p, layoutScore(r38p, DUR_CFG), 120)
-check('跳房子播放 12 事件（pass1 全 8 + pass2 1,2,7,1）', seq38.events.length === 12 && pitchSeq(seq38) === 'C4,D4,E4,F4,G4,A4,B4,C4,C4,D4,B4,C4', `${seq38.events.length}:${pitchSeq(seq38)}`)
+check('adj359 跳房子播放 12 事件（pass1 1,2,3,4,7,1 + pass2 1,2,5,6,7,1）', seq38.events.length === 12 && pitchSeq(seq38) === 'C4,D4,E4,F4,B4,C4,C4,D4,G4,A4,B4,C4', `${seq38.events.length}:${pitchSeq(seq38)}`)
 // adj295：跳房子与反复修饰符共存（|]/&hs、|&hs]/ 顺序解析而非互斥——
 // 此前 else-if 二选一：前者吞 &hs、后者把残留 ] 解析成第二条独立小节线）
 const r95a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |["1." 3 4 |]/&hs 5 6 |&ds]/ 7 1 |\n')
@@ -3052,6 +3054,33 @@ console.log('[75] @...@ instrument syntax & legacy warning (adj337/338)')
   check('adj338 旧写法 @小提琴 触发告警', r1.errors.some((e) => (e as { severity?: string }).severity === 'warning'), `errors=${r1.errors.length}`)
   const r2 = parseJps('V: 1.0\nB: t\nD: C\nQ: @小提琴@ |') // 新语法
   check('adj338 新语法 @小提琴@ 无告警', !r2.errors.some((e) => (e as { severity?: string }).severity === 'warning'), `errors=${r2.errors.length}`)
+}
+
+// ---- 76. 小节跳跃演奏顺序（adj359/adj360）：跳房子 / 段落反复 / D.C. / D.S. / 跳越 ----
+console.log('[76] playback jump order: volta / repeat / D.C. / D.S. / ty (adj359)')
+{
+  const ord = (q: string) => {
+    const r = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`)
+    return buildPlaySequence(r, layoutScore(r, DUR_CFG), 120)
+      .events.map((e) => e.placed.audioPitch)
+      .join(',')
+  }
+  // ① 1 号房子 + 无 |: 时从头反复（`:|` 无对应 `|:` → 回到乐曲开头）
+  check('adj359 <1,2> |["1." <1> :|] <2> ||', ord('1 |["1." 2 :|] 3 ||') === 'C4,D4,C4,E4', ord('1 |["1." 2 :|] 3 ||'))
+  // ② |: 段落反复 + 1 号房子（第二遍跳过房子）
+  check('adj359 <1> |: <1,2> |["1." <1> :|] <2> ||', ord('1 |: 2 |["1." 3 :|] 4 ||') === 'C4,D4,E4,D4,F4', ord('1 |: 2 |["1." 3 :|] 4 ||'))
+  // ③ 两房子、各自 :| → 3 遍（第 3 遍两房子皆跳过）
+  check(
+    'adj359 <1> |: <1,2,3> |["1." <1> :|]["2." <2> :|] <3> ||',
+    ord('1 |: 2 |["1." 3 :|]["2." 4 :|] 5 ||') === 'C4,D4,E4,D4,F4,D4,G4',
+    ord('1 |: 2 |["1." 3 :|]["2." 4 :|] 5 ||'),
+  )
+  // ④ D.S. 跳花 S（&hs 写在 &ds 之前）+ 只跳一次（第二次遇到 &ds 续播）
+  check('adj359 <1> |&hs <1,2> |&ds <2> ||', ord('1 |&hs 2 |&ds 3 ||') === 'C4,D4,D4,E4', ord('1 |&hs 2 |&ds 3 ||'))
+  // ⑤ &ty 第一次忽略；D.C. 后跳越两 ty 之间；D.C. 只跳一次
+  check('adj359 <1,2> |&ty <1> |&ty <1,2> |&dc <2> ||', ord('1 |&ty 2 |&ty 3 |&dc 4 ||') === 'C4,D4,E4,C4,E4,F4', ord('1 |&ty 2 |&ty 3 |&dc 4 ||'))
+  // ⑥ 未封闭房子 |]/ 延续到其后第一个 :|（房子内后段也属该房子，第二遍一并跳过）
+  check('adj360 <1> |: <1,2> |["1." <1> |]/ <1> :| <2> ||', ord('1 |: 2 |["1." 3 |]/ 4 :| 5 ||') === 'C4,D4,E4,F4,D4,G4', ord('1 |: 2 |["1." 3 |]/ 4 :| 5 ||'))
 }
 
 console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
