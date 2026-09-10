@@ -71,8 +71,9 @@ export const uiCopy = {
   saveVerifyFailed: '保存未生效：写入后校验内容不一致，请用「文件 → 另存为」另选位置重试',
   saveAsNoGesture: '另存为失败：未获得用户操作授权，请直接再点一次「另存为」或按 Ctrl+S',
   // adj369：保存慢在「提交文件」（浏览器把临时文件替换成目标文件）时的可操作提示——
-  // 该步由浏览器 + 操作系统完成，应用代码不参与，常见原因是目标文件被云同步/杀软/其它程序占用
-  saveSlowCommitHint: '保存慢在文件替换（浏览器行为），常见原因是文件被云同步/杀毒软件/其它程序占用，可试试另存到本地文件夹',
+  // 该步由浏览器 + 操作系统完成，应用代码不参与；adj372 按实测补充"换浏览器"这条（Edge 正常、
+  // Chrome/PWA 窗口慢，属浏览器环境差异）
+  saveSlowCommitHint: '保存慢在文件替换（浏览器/系统行为）：可试试换用其它浏览器或非 PWA 窗口，或把文件移出云同步/杀软监控目录',
   saveUnsupported: '当前环境不支持保存到磁盘（File System Access API 仅 Chromium 安全上下文支持，手机端通常没有）；请用「文件 → 导出」下载 .jps 保存',
   // adj281：非安全上下文（http:// 或 file://）或非 Chromium 内核下无 Web File System Access API，
   // 降级用 <input type=file> 载入 .jps 文本——已载入但无法写回磁盘，提示改用「导出」保存
