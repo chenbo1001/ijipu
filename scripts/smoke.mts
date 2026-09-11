@@ -3715,6 +3715,26 @@ console.log('[83] playhead highlight & blocks cover augmentation (adj374)')
       `segs=${segs.length}/${noteSegs.length} 末块右=${(lastBlock ? lastBlock.x + lastBlock.width : 0).toFixed(1)} 末格右=${(lastCell ? lastCell.x + lastCell.perBeat * lastCell.beats : 0).toFixed(1)}`,
     )
   }
+  // 用户实测的两条对照谱（adj374）：更强的不变量——**每条增时线的实际笔画中心必须落在某个色块内**
+  for (const [name, q] of [
+    ['用户 A：| 6,) 1-- ||', 'Q: | 6,) 1-- ||'],
+    ['用户 B：| 1- 0 0 &ykh ||', 'Q: | 1- 0 0 &ykh ||'],
+    ['用户 A 变体：末小节不写收尾线', 'Q: | 6,) 1--'],
+  ] as [string, string][]) {
+    const rv = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\n${q}\n`)
+    const layv = layoutScore(rv, DUR_CFG)
+    const seqv = buildPlaySequence(rv, layv, 120)
+    const svg = renderScoreToSvg(layv)[0] ?? ''
+    // 增时线 "-" 的实际笔画中心 x（text-anchor=middle → 该 x 即中心）
+    const dashX = [...svg.matchAll(/<text x="([\d.]+)"[^>]*>-<\/text>/g)].map((m) => Number(m[1]))
+    const blocks = seqv.events.flatMap((e) => (e.playheadSegs ?? []).map((s) => ({ x: s.x, r: s.x + s.width })))
+    const allCovered = dashX.length > 0 && dashX.every((dx) => blocks.some((b) => dx >= b.x - 0.5 && dx <= b.r + 0.5))
+    check(
+      `adj374 每条增时线笔画中心都落在色块内：${name}`,
+      rv.errors.length === 0 && allCovered,
+      `dash=${JSON.stringify(dashX)} blocks=${JSON.stringify(blocks.map((b) => `${b.x.toFixed(1)}~${b.r.toFixed(1)}`))}`,
+    )
+  }
 }
 
 // ---- 84. &hx 独立化 + 呼吸静音（adj375）----
