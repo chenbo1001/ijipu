@@ -14,7 +14,30 @@ import type { ScorePage } from '@ijipu/engine'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides'
 import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '@ijipu/engine/layout/metaAnchors'
 import { firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
-import { brand } from '../brand/tokens'
+import { brand, ui as uiColors } from '../brand/tokens'
+
+/**
+ * adj380：播放高亮元素「加/去」高亮——**除 class 外直接写 fill 属性**。
+ * 只靠 CSS 类（`.note-active { fill: var(--jp-danger) !important }`）在部署版里有失效风险
+ * （样式表/主题变量未就绪、PWA 缓存与 bundle 版本不一致时，类加了也不变色——表现就是
+ * "数字变红而增时线不变红"这类局部不变色）。直接写属性后，高亮与 CSS 层叠解耦；
+ * 原始 fill 值暂存在 data-hl-fill，去掉高亮时精确还原（歌词等元素的 fill 与音符不同）。
+ * 颜色取自品牌 tokens 的 ui.danger（与 CSS 的 --jp-danger 同值）。
+ */
+function applyNoteHighlight(el: Element, on: boolean): void {
+  if (on) {
+    if (!el.hasAttribute('data-hl-fill')) el.setAttribute('data-hl-fill', el.getAttribute('fill') ?? '')
+    el.classList.add('note-active')
+    el.setAttribute('fill', uiColors.danger)
+    return
+  }
+  el.classList.remove('note-active')
+  const orig = el.getAttribute('data-hl-fill')
+  if (orig === null) return
+  if (orig === '') el.removeAttribute('fill')
+  else el.setAttribute('fill', orig)
+  el.removeAttribute('data-hl-fill')
+}
 
 /** adj199：用 canvas.measureText 实测指定字体/字号下文本宽度（按字体实际宽度摆放角标，消除中英文宽度差异） */
 function measureFont(text: string, fontSize: number, fontFamily: string): number | undefined {
@@ -105,14 +128,14 @@ export function PreviewPane() {
   useEffect(() => {
     const root = containerRef.current
     if (!root) return
-    root.querySelectorAll('.note-active').forEach((el) => el.classList.remove('note-active'))
+    root.querySelectorAll('.note-active').forEach((el) => applyNoteHighlight(el, false))
     if (!activeNoteIds || activeNoteIds.length === 0) return
     for (const id of activeNoteIds) {
       // adj374：一个音符可能有多个视觉元素共用同一 data-notepos（数字 + 各条增时线），需全部高亮
       const els = root.querySelectorAll(
         `[data-notepos="${CSS.escape(id)}"], [data-cipos="${CSS.escape(id)}"]`,
       )
-      els.forEach((el) => el.classList.add('note-active'))
+      els.forEach((el) => applyNoteHighlight(el, true))
     }
   }, [activeNoteIds, pagesHtml])
 
@@ -120,12 +143,12 @@ export function PreviewPane() {
   useEffect(() => {
     const root = containerRef.current
     if (!root) return
-    root.querySelectorAll('.note-active').forEach((el) => el.classList.remove('note-active'))
+    root.querySelectorAll('.note-active').forEach((el) => applyNoteHighlight(el, false))
     if (!activeNoteId) return
     const els = root.querySelectorAll(
       `[data-notepos="${CSS.escape(activeNoteId)}"], [data-cipos="${CSS.escape(activeNoteId)}"]`,
     )
-    els.forEach((el) => el.classList.add('note-active'))
+    els.forEach((el) => applyNoteHighlight(el, true))
     const el = els[0]
     if (el) {
       // adj237/238：居中滚动但以页面区域为界——scrollIntoView 会把音符滚到视口中心，
