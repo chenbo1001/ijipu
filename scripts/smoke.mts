@@ -3807,6 +3807,43 @@ console.log('[84] &hx standalone breath mark (adj375)')
   check('adj375 演奏：槽位不变——总时长与无 &hx 版一致', total('| 6 &hx 5 ||') === total('| 6 5 ||') && total('| 1-- &hx 2 ||') === total('| 1-- 2 ||'), `${total('| 6 &hx 5 ||')}/${total('| 6 5 ||')}`)
 }
 
+// ---- 85. 用户谱行宽核对（adj377 排查）----
+console.log('[85] user line width check')
+{
+  // 用户实测谱（A4 / 边距 40 / 13 号黑体 / 空间优先）：行内 3 个 &hx + 5 小节，
+  // 断行曾把独立标记占宽按「每个音符重复计一次」高估 → 过早断成 2 行（adj377 修复）
+  const line =
+    'Q: &hx 6,/ 6,/ 1/ 6,/ 2/ 5/ 3 | 1/ 1/ 6,/. 6,// 7,/ 3,/ 3, | &hx 6,/ 6,/ 1/ 6,/ 2/ 5/ 3 | 6/ 6/ 6/ 5/ (3/ (2/ 2/.)) &hx 3// | 3/ 5 1/. 3// (2 2/.) 2// |'
+  const src = `V: 1.0\nB: t\nD: C\nP: 4/4\n${line}\n`
+  const r = parseJps(src)
+  const rowCount = (lay: ReturnType<typeof layoutScore>) =>
+    new Set(lay.pages.flatMap((p) => p.barlines.map((b) => Math.round(b.yTop)))).size
+  const real = layoutScore(r, defaultPageConfig)
+  check('adj377 用户谱行：A4/边距40/13号 一行放得下（1 行）', r.errors.length === 0 && rowCount(real) === 1, `rows=${rowCount(real)}`)
+  check(
+    'adj377 用户谱行：行内容撑满到右边界（两端对齐）',
+    Math.abs(
+      Math.max(...real.pages.flatMap((p) => p.barlines.map((b) => b.x))) -
+        (595.28 - defaultPageConfig.margin_right),
+    ) < 2,
+    String(Math.max(...real.pages.flatMap((p) => p.barlines.map((b) => b.x)))),
+  )
+  // 独立标记不得被"每音符重复计宽"：同一行加/不加标记，行数应一致（标记只占自身基本宽）
+  {
+    const manyNotes = '1/ 2/ 3/ 4/ 5/ 6/ 7/ 1/ 2/ 3/ 4/ 5/ 6/ 7/ 1/ 2/ 3/ 4/ 5/ 6/ 7/ 1/ 2/ 3/ 4/'
+    const noMark = layoutScore(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: | ${manyNotes} |\n`), defaultPageConfig)
+    const withMarks = layoutScore(
+      parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: | &zkh ${manyNotes} &ykh &hx |\n`),
+      defaultPageConfig,
+    )
+    check(
+      'adj377 独立标记占宽不随音符数放大（加 3 个标记不改行数）',
+      rowCount(noMark) === rowCount(withMarks),
+      `无标记=${rowCount(noMark)} 有标记=${rowCount(withMarks)}`,
+    )
+  }
+}
+
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
 runAdj363SaveTests()
   .catch((e) => {
