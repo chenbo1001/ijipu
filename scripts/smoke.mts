@@ -3715,24 +3715,45 @@ console.log('[83] playhead highlight & blocks cover augmentation (adj374)')
       `segs=${segs.length}/${noteSegs.length} 末块右=${(lastBlock ? lastBlock.x + lastBlock.width : 0).toFixed(1)} 末格右=${(lastCell ? lastCell.x + lastCell.perBeat * lastCell.beats : 0).toFixed(1)}`,
     )
   }
-  // 用户实测的两条对照谱（adj374）：更强的不变量——**每条增时线的实际笔画中心必须落在某个色块内**
+  // 用户实测的两条对照谱（adj374）：更强的不变量——**每条增时线的实际笔画中心必须落在某个色块内**。
+  // adj378：**同时覆盖用户实际字号（13 号）与几种常见字号**——此前只在默认字号下断言过。
   for (const [name, q] of [
     ['用户 A：| 6,) 1-- ||', 'Q: | 6,) 1-- ||'],
     ['用户 B：| 1- 0 0 &ykh ||', 'Q: | 1- 0 0 &ykh ||'],
     ['用户 A 变体：末小节不写收尾线', 'Q: | 6,) 1--'],
   ] as [string, string][]) {
-    const rv = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\n${q}\n`)
-    const layv = layoutScore(rv, DUR_CFG)
-    const seqv = buildPlaySequence(rv, layv, 120)
-    const svg = renderScoreToSvg(layv)[0] ?? ''
-    // 增时线 "-" 的实际笔画中心 x（text-anchor=middle → 该 x 即中心）
-    const dashX = [...svg.matchAll(/<text x="([\d.]+)"[^>]*>-<\/text>/g)].map((m) => Number(m[1]))
-    const blocks = seqv.events.flatMap((e) => (e.playheadSegs ?? []).map((s) => ({ x: s.x, r: s.x + s.width })))
-    const allCovered = dashX.length > 0 && dashX.every((dx) => blocks.some((b) => dx >= b.x - 0.5 && dx <= b.r + 0.5))
+    for (const noteSize of [13, 15, 18, 22]) {
+      const cfg = { ...DUR_CFG, note_size: noteSize }
+      const rv = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\n${q}\n`)
+      const layv = layoutScore(rv, cfg)
+      const seqv = buildPlaySequence(rv, layv, 120)
+      const svg = renderScoreToSvg(layv)[0] ?? ''
+      // 增时线 "-" 的实际笔画中心 x（text-anchor=middle → 该 x 即中心）
+      const dashX = [...svg.matchAll(/<text x="([\d.]+)"[^>]*>-<\/text>/g)].map((m) => Number(m[1]))
+      const blocks = seqv.events.flatMap((e) => (e.playheadSegs ?? []).map((s) => ({ x: s.x, r: s.x + s.width })))
+      const allCovered = dashX.length > 0 && dashX.every((dx) => blocks.some((b) => dx >= b.x - 0.5 && dx <= b.r + 0.5))
+      check(
+        `adj374 每条增时线笔画中心都落在色块内：${name}（${noteSize} 号）`,
+        rv.errors.length === 0 && allCovered,
+        `dash=${JSON.stringify(dashX)} blocks=${JSON.stringify(blocks.map((b) => `${b.x.toFixed(1)}~${b.r.toFixed(1)}`))}`,
+      )
+    }
+  }
+  // adj378：多声部（Q1/Q2）同款核对——多声部还有整列 voiceBlocks 色框，另需看其 x 覆盖
+  {
+    const srcMV = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: | 6,) 1-- ||\nQ2: | 5 5 5 5 ||\n'
+    const rMV = parseJps(srcMV)
+    const layMV = layoutScore(rMV, { ...DUR_CFG, note_size: 13 })
+    const seqMV = buildPlaySequence(rMV, layMV, 120)
+    const svgMV = renderScoreToSvg(layMV)[0] ?? ''
+    const dashXMV = [...svgMV.matchAll(/<text x="([\d.]+)"[^>]*>-<\/text>/g)].map((m) => Number(m[1]))
+    const blocksMV = seqMV.events.flatMap((e) => (e.playheadSegs ?? []).map((s) => ({ x: s.x, r: s.x + s.width })))
+    const vb = layMV.pages.flatMap((p) => p.voiceBlocks.map((v) => `x=${v.x.toFixed(1)}`))
+    const coveredMV = dashXMV.length > 0 && dashXMV.every((dx) => blocksMV.some((b) => dx >= b.x - 0.5 && dx <= b.r + 0.5))
     check(
-      `adj374 每条增时线笔画中心都落在色块内：${name}`,
-      rv.errors.length === 0 && allCovered,
-      `dash=${JSON.stringify(dashX)} blocks=${JSON.stringify(blocks.map((b) => `${b.x.toFixed(1)}~${b.r.toFixed(1)}`))}`,
+      'adj378 多声部：增时线笔画中心也落在色块内',
+      rMV.errors.length === 0 && coveredMV,
+      `dash=${JSON.stringify(dashXMV)} blocks=${JSON.stringify(blocksMV.map((b) => `${b.x.toFixed(1)}~${b.r.toFixed(1)}`))} voiceBlocks=${JSON.stringify(vb)}`,
     )
   }
 }
