@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW } from '@ijipu/engine/index.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
-import { buildPlaySequence, inferBpm, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork } from '@ijipu/engine/playback/index.ts'
+import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork } from '@ijipu/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, noteScaleOf, lowDotY, octaveDotY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from '@ijipu/engine/layout/spacing.ts'
@@ -3723,22 +3723,25 @@ console.log('[83] playhead highlight & blocks cover augmentation (adj374)')
     ['用户 A：| 6,) 1-- ||', 'Q: | 6,) 1-- ||'],
     ['用户 B：| 1- 0 0 &ykh ||', 'Q: | 1- 0 0 &ykh ||'],
     ['用户 A 变体：末小节不写收尾线', 'Q: | 6,) 1--'],
+    ['用户 A 多小节（5 小节行末）', 'Q: | 5 5 5 5 | 5 5 5 5 | 5 5 5 5 | 6,) 1-- ||'],
   ] as [string, string][]) {
-    for (const noteSize of [13, 15, 18, 22]) {
-      const cfg = { ...DUR_CFG, note_size: noteSize }
-      const rv = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\n${q}\n`)
-      const layv = layoutScore(rv, cfg)
-      const seqv = buildPlaySequence(rv, layv, 120)
-      const svg = renderScoreToSvg(layv)[0] ?? ''
-      // 增时线 "-" 的实际笔画中心 x（text-anchor=middle → 该 x 即中心）
-      const dashX = [...svg.matchAll(/<text x="([\d.]+)"[^>]*>-<\/text>/g)].map((m) => Number(m[1]))
-      const blocks = seqv.events.flatMap((e) => (e.playheadSegs ?? []).map((s) => ({ x: s.x, r: s.x + s.width })))
-      const allCovered = dashX.length > 0 && dashX.every((dx) => blocks.some((b) => dx >= b.x - 0.5 && dx <= b.r + 0.5))
-      check(
-        `adj374 每条增时线笔画中心都落在色块内：${name}（${noteSize} 号）`,
-        rv.errors.length === 0 && allCovered,
-        `dash=${JSON.stringify(dashX)} blocks=${JSON.stringify(blocks.map((b) => `${b.x.toFixed(1)}~${b.r.toFixed(1)}`))}`,
-      )
+    // adj380：**两种布局模式都要核对**——应用默认是「空间优先」(space)，此前断言多跑在时值优先(duration)
+    for (const mode of ['duration', 'space'] as const) {
+      for (const noteSize of [13, 18]) {
+        const cfg = { ...DUR_CFG, note_size: noteSize, noteSpaceLayout: mode }
+        const rv = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\n${q}\n`)
+        const layv = layoutScore(rv, cfg)
+        const seqv = buildPlaySequence(rv, layv, 120)
+        const svg = renderScoreToSvg(layv)[0] ?? ''
+        const dashX = [...svg.matchAll(/<text x="([\d.]+)"[^>]*>-<\/text>/g)].map((m) => Number(m[1]))
+        const blocks = seqv.events.flatMap((e) => (e.playheadSegs ?? []).map((s) => ({ x: s.x, r: s.x + s.width })))
+        const allCovered = dashX.length > 0 && dashX.every((dx) => blocks.some((b) => dx >= b.x - 0.5 && dx <= b.r + 0.5))
+        check(
+          `adj374 增时线笔画中心落在色块内：${name}（${mode}/${noteSize}号）`,
+          rv.errors.length === 0 && allCovered,
+          `dash=${JSON.stringify(dashX)} blocks=${JSON.stringify(blocks.map((b) => `${b.x.toFixed(1)}~${b.r.toFixed(1)}`))}`,
+        )
+      }
     }
   }
   // adj378：多声部（Q1/Q2）同款核对——多声部还有整列 voiceBlocks 色框，另需看其 x 覆盖
@@ -3873,6 +3876,86 @@ console.log('[86] pwa update prompt (adj379)')
   check('adj379 首次注册（页面此前无控制者）不提示更新', shouldPromptUpdate(false) === false)
   check('adj379 已有控制者被新 SW 接管 → 提示更新', shouldPromptUpdate(true) === true)
   check('adj379 自动检查间隔 = 30 分钟', UPDATE_CHECK_INTERVAL_MS === 30 * 60 * 1000, String(UPDATE_CHECK_INTERVAL_MS))
+}
+
+// ---- 87. 增时线 data-notepos 覆盖：各种写法核对（adj380 排查）----
+console.log('[87] augmentation data-notepos coverage (adj380)')
+{
+  // [名称, Q 行, 末音符 id, id 期望出现次数（数字 1 + 增时线 N）]
+  const cases: [string, string, string, number][] = [
+    ['连写 1--', 'Q: | 6,) 1-- ||', '0_1_0_1', 3],
+    ['拆开写 1 - -', 'Q: | 6,) 1 - - ||', '0_1_0_1', 3],
+    ['单条 1-', 'Q: | 6,) 1- ||', '0_1_0_1', 2],
+    ['三条 1---', 'Q: | 6,) 1--- ||', '0_1_0_1', 4],
+    ['附点+增时线 1-.', 'Q: | 6,) 1-. ||', '0_1_0_1', 2],
+    ['用户谱 6,--- &ykh', 'Q: | 6,--- &ykh ||', '0_1_0_0', 4],
+    ['用户谱 6,--- &ykh（带前面小节）', 'Q: | 5 5 5 5 | 6,--- &ykh ||', '0_1_0_4', 4],
+  ]
+  for (const [name, q, id, expect] of cases) {
+    const rv = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\n${q}\n`)
+    const layv = layoutScore(rv, DUR_CFG)
+    const svg = renderScoreToSvg(layv)[0] ?? ''
+    const n = svg.split(`data-notepos="${id}"`).length - 1
+    const dashes = [...svg.matchAll(/<text [^>]*>-<\/text>/g)].length
+    console.log(`[PROBE-87] ${name}: err=${rv.errors.length} id(${id})出现=${n} 增时线笔画=${dashes}`)
+    // 用户谱：打印增时线笔画中心 vs 色块区间（两种布局模式 + 13 号）
+    if (name.startsWith('用户谱')) {
+      for (const mode of ['duration', 'space'] as const) {
+        const lm = layoutScore(rv, { ...DUR_CFG, noteSpaceLayout: mode, note_size: 13 })
+        const sm = renderScoreToSvg(lm)[0] ?? ''
+        const dx = [...sm.matchAll(/<text x="([\d.]+)"[^>]*>-<\/text>/g)].map((m) => Number(m[1]))
+        const bl = buildPlaySequence(rv, lm, 120).events.flatMap((e) =>
+          (e.playheadSegs ?? []).map((s) => `${s.x.toFixed(1)}~${(s.x + s.width).toFixed(1)}`),
+        )
+        const ok = dx.length > 0 && dx.every((x) => bl.some((b) => { const [a, z] = b.split('~').map(Number); return x >= a - 0.5 && x <= z + 0.5 }))
+        console.log(`[PROBE-87]   ${mode}/13号 覆盖=${ok}: dash=${JSON.stringify(dx)} blocks=${JSON.stringify(bl)}`)
+      }
+    }
+    check(`adj380 ${name}：该音符 id 覆盖数字+各增时线（应为 ${expect} 处）`, rv.errors.length === 0 && n === expect, `id出现=${n} 期望=${expect}`)
+  }
+}
+
+// ---- 88. 试听总时长取「事件尾端」：末音符后段（增时线）不被提前清空（adj381）----
+console.log('[88] play totalMs covers last-note tail (adj381)')
+{
+  // 用户两条对照谱：末音符带增时线（时值跨多拍），旧算法只算末事件「起声时刻」+100ms，
+  // 收尾定时器在末音符刚起声时清空色块轨道 → 末音符后面的增时线永远没有色块。
+  const tailCases: [string, string][] = [
+    ['用户本次对照 6,--- &ykh', 'Q: | 1 2 3 4 | 6,--- &ykh ||'],
+    ['用户最初报告 1--', 'Q: | 1 2 | 6,) 1-- ||'],
+    ['单小节末尾长音符 6,---', 'Q: | 6,--- ||'],
+  ]
+  const stubBackend = { play: async () => {}, stop: () => {} } as unknown as Parameters<typeof schedulePlay>[1]
+  const FIRST_DELAY = 200 // PlaybackDialog 的 PLAY_FIRST_DELAY_MS
+  for (const [name, q] of tailCases) {
+    const rv = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\n${q}\n`)
+    const layv = layoutScore(rv, defaultPageConfig)
+    const seq = buildPlaySequence(rv, layv, 60)
+    const job = schedulePlay(seq, stubBackend, undefined, undefined, FIRST_DELAY)
+    const beatMs = 60000 / seq.bpm
+    const lastEv = seq.events[seq.events.length - 1]
+    const evEndMs = Math.max(...seq.events.map((e) => e.atMs + e.durationMs))
+    // 色块（拍段）时间窗的最大结束时刻——每个色块都必须落在 totalMs 内，否则会被提前清空
+    const segEndMs = Math.max(
+      ...seq.events.flatMap((e) => (e.playheadSegs ?? []).map((s) => e.atMs + (s.beat + s.beats) * beatMs)),
+    )
+    const oldTotalMs = lastEv.atMs + 100 + FIRST_DELAY // 旧算法（只算末事件起声）
+    check(
+      `adj381 ${name}：总时长覆盖末音符尾端色块（不提前收尾）`,
+      rv.errors.length === 0 && segEndMs <= job.totalMs + 1e-6 && job.totalMs > oldTotalMs + 1,
+      `末色块结束=${segEndMs.toFixed(0)}ms totalMs=${job.totalMs}ms 旧算法=${oldTotalMs}ms`,
+    )
+    check(
+      `adj381 ${name}：总时长 = 事件尾端 + 100ms 余量 + 准备延迟`,
+      Math.abs(job.totalMs - (evEndMs + 100 + FIRST_DELAY)) < 1e-6,
+      `totalMs=${job.totalMs} 期望=${evEndMs + 100 + FIRST_DELAY}`,
+    )
+    check(
+      `adj381 ${name}：末音符至少 N 条增时线各有独立色块`,
+      (lastEv.playheadSegs ?? []).length >= 2,
+      `末事件色块数=${(lastEv.playheadSegs ?? []).length}`,
+    )
+  }
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
