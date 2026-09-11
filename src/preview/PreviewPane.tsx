@@ -108,10 +108,11 @@ export function PreviewPane() {
     root.querySelectorAll('.note-active').forEach((el) => el.classList.remove('note-active'))
     if (!activeNoteIds || activeNoteIds.length === 0) return
     for (const id of activeNoteIds) {
-      const el = root.querySelector(
+      // adj374：一个音符可能有多个视觉元素共用同一 data-notepos（数字 + 各条增时线），需全部高亮
+      const els = root.querySelectorAll(
         `[data-notepos="${CSS.escape(id)}"], [data-cipos="${CSS.escape(id)}"]`,
       )
-      if (el) el.classList.add('note-active')
+      els.forEach((el) => el.classList.add('note-active'))
     }
   }, [activeNoteIds, pagesHtml])
 
@@ -121,11 +122,12 @@ export function PreviewPane() {
     if (!root) return
     root.querySelectorAll('.note-active').forEach((el) => el.classList.remove('note-active'))
     if (!activeNoteId) return
-    const el = root.querySelector(
+    const els = root.querySelectorAll(
       `[data-notepos="${CSS.escape(activeNoteId)}"], [data-cipos="${CSS.escape(activeNoteId)}"]`,
     )
+    els.forEach((el) => el.classList.add('note-active'))
+    const el = els[0]
     if (el) {
-      el.classList.add('note-active')
       // adj237/238：居中滚动但以页面区域为界——scrollIntoView 会把音符滚到视口中心，
       // 页面较小时视口中心落在页面外的预览空白上；改为手动滚动（垂直+水平）：
       //  - 页面 ≥ 视口：音符居中，滚动范围钳在页面内（页面始终铺满视口，不露空白）

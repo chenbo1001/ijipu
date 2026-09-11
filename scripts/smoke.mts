@@ -208,14 +208,16 @@ check('SVG 含调号', svg.includes('1 = C'))
 check('SVG 含拍号', svg.includes('4/4'))
 check('SVG 含节拍', svg.includes('♩= 120'))
 check('SVG 含 data-notepos 契约', svg.includes('data-notepos="0_1_0_0"'))
-const noteposCount = (svg.match(/data-notepos=/g) ?? []).length
+// adj374：一个音符的「数字 + 各条增时线」共用同一 data-notepos → 数音符要按**唯一 id** 数
+const uniqIds = (s: string) => new Set([...s.matchAll(/data-notepos="([^"]+)"/g)].map((m) => m[1])).size
+const noteposCount = uniqIds(svg)
 check('音符 text 数量正确', noteposCount === 32, `got ${noteposCount}`)
 
 // 复杂音符行渲染
 const rc2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1\'- 2,,$ 3// 4. | 0 8 9 ||\n')
 const lay2 = layoutScore(rc2, DUR_CFG)
 const svg2 = renderScoreToSvg(lay2)[0]
-const cnt2 = (svg2.match(/data-notepos=/g) ?? []).length
+const cnt2 = uniqIds(svg2)
 check('复杂行 6 个可见音符（8 隐藏休止不画）', cnt2 === 6, `got ${cnt2}`)
 check('隐藏休止符不可播放', lay2.pages[0].notes.find((n) => n.token.kind === 'rest')?.playable === false)
 check('SVG 含增时线 "-" 字符', svg2.includes('>-<'))
@@ -3663,6 +3665,53 @@ console.log('[82] author credit (adj373)')
     brand.authorEmail === '' || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(brand.authorEmail),
     brand.authorEmail,
   )
+}
+
+// ---- 83. 试听高亮/色块覆盖增时线（adj374）----
+console.log('[83] playhead highlight & blocks cover augmentation (adj374)')
+{
+  // ① 渲染契约：一个音符的「数字 + 各条增时线」共用同一 data-notepos（消费方 querySelectorAll 才能全高亮）
+  const countId = (svg: string, id: string) => svg.split(`data-notepos="${id}"`).length - 1
+  {
+    const r1 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: | 6,) 1-- ||\n')
+    const svg1 = renderScoreToSvg(layoutScore(r1, DUR_CFG))[0] ?? ''
+    check('adj374 增时线音符：data-notepos 出现 3 次（数字 + 2 条增时线）', countId(svg1, '0_1_0_1') === 3, String(countId(svg1, '0_1_0_1')))
+    const r2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: | 1 2 ||\n')
+    const svg2 = renderScoreToSvg(layoutScore(r2, DUR_CFG))[0] ?? ''
+    check('adj374 无增时线音符：data-notepos 仍只出现 1 次', countId(svg2, '0_1_0_1') === 1, String(countId(svg2, '0_1_0_1')))
+  }
+  // ② 色块右边界不变量：每条增时线的色块必须盖住它自己那一格（含"末元素无后续小节线"的常见写法）
+  const variants: [string, string][] = [
+    ['v1 单行 结尾 ||', 'Q: | 6,) 1-- ||'],
+    ['v2 三增时线', 'Q: | 6,) 1--- ||'],
+    ['v3 无收尾小节线', 'Q: | 6,) 1--'],
+    ['v4 行末（前面 3 小节撑满一行）', 'Q: | 5 5 5 5 | 5 5 5 5 | 5 5 5 5 | 6,) 1-- ||'],
+    ['v5 跳房子收尾 |]', 'Q: | 6,) 1-- |]'],
+    ['v6 终止线后带 &fine', 'Q: | 6,) 1-- ||&fine'],
+    ['v7 多行末行', 'Q: | 5 5 5 5 | 5 5 5 5 | 5 5 5 5 | 5 5 5 5 |\nQ: | 6,) 1-- ||'],
+    ['v8 增时线拆开写（1 - -）', 'Q: | 6,) 1 - - ||'],
+  ]
+  for (const [name, q] of variants) {
+    const rv = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\n${q}\n`)
+    const layv = layoutScore(rv, DUR_CFG)
+    const seqv = buildPlaySequence(rv, layv, 120)
+    const notes = layv.pages.flatMap((p) => p.notes)
+    const lastNote = notes[notes.length - 1]
+    const segs = (seqv.events[seqv.events.length - 1]?.playheadSegs ?? []).slice().sort((a, b) => a.beat - b.beat)
+    const noteSegs = (lastNote?.segments ?? []).slice()
+    const lastBlock = segs[segs.length - 1]
+    const lastCell = noteSegs[noteSegs.length - 1]
+    const covered =
+      !!lastBlock &&
+      !!lastCell &&
+      segs.length === noteSegs.length &&
+      lastBlock.x + lastBlock.width >= lastCell.x + lastCell.perBeat * lastCell.beats - 0.5
+    check(
+      `adj374 色块盖住末格增时线：${name}`,
+      rv.errors.length === 0 && covered,
+      `segs=${segs.length}/${noteSegs.length} 末块右=${(lastBlock ? lastBlock.x + lastBlock.width : 0).toFixed(1)} 末格右=${(lastCell ? lastCell.x + lastCell.perBeat * lastCell.beats : 0).toFixed(1)}`,
+    )
+  }
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
