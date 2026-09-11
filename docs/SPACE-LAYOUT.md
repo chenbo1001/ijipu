@@ -16,7 +16,8 @@
 totalDur   = Σ (noteElDur + augCount×augDur)           # 总时值拍数
 durBodySum = Σ (noteBodyW + hasDot×dotBodyW + augCount×augBodyW)   # 本体宽（不含独立标记）
 nonDurPad  = Σ_barline (barlineTotalW + bp×2)  +  Σ_标记 markBodyW(code)
-           # adj375：独立标记 = &zkh/&ykh 括号（bracketBodyW=BRACKET_PAD）+ &hx 呼吸记号（hxBodyW）
+           # adj375/adj376：独立标记 = &zkh/&ykh 括号 + &hx 呼吸记号，统一用基本占宽 bracketBodyW(=BRACKET_PAD)
+           # （&hx 的"占时值"是演奏概念，不影响排版宽度）
            # 旧写法「&hx 依附音符」(hasHx/hxW) 已废弃（tokenizer 不再产生该 symbols）
            # bp = barlinePad(noteSize) = noteSize/4  ←  单声部线两侧净间距
 W          = max(0, availW − durBodySum − nonDurPad)    # 可拉伸空白

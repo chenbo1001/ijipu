@@ -3776,6 +3776,15 @@ console.log('[84] &hx standalone breath mark (adj375)')
     const xWithout = without.lay.pages[0].notes[1].x
     check('adj375 排版：&hx 作为独立标记占宽', b.length === 1 && b[0].code === 'hx' && b[0].width > 0, JSON.stringify(b))
     check('adj375 排版：后续音符因 &hx 占宽而右移', xWith > xWithout + 1, `with=${xWith.toFixed(1)} without=${xWithout.toFixed(1)}`)
+    // adj376：&hx 与括号**同基本占宽**（时值占用是演奏概念，不体现在排版宽度）
+    {
+      const bk = brsOf(build('| 6 &zkh 5 6 &ykh ||').lay)
+      check(
+        'adj376 &hx 占宽 = 括号占宽（基本占宽）',
+        bk.length === 2 && b[0].width === bk[0].width && bk[0].width === bk[1].width,
+        `hx=${b[0]?.width} zkh=${bk[0]?.width} ykh=${bk[1]?.width}`,
+      )
+    }
   }
   // ④ 渲染：画出 V 形呼吸记号（三折线 path、线宽 0.8）
   {
