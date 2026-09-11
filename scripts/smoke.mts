@@ -995,11 +995,12 @@ check('adj294 &ykh 渲染右括号 )', svgZkh.includes('>)<'), '')
 const zkhSpace = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: &zkh 6 - - -&ykh |\n')
 const zkhSpaceBk = zkhSpace.groups[0].music.tokens.filter((t) => t.kind === 'bracket')
 check('adj294 独立 &zkh 前置 + 独立 &ykh 后置（带空格）为 bracket token', zkhSpace.errors.length === 0 && zkhSpaceBk.length === 2 && (zkhSpaceBk[0] as any).dir === 'open' && (zkhSpaceBk[1] as any).dir === 'close', JSON.stringify(zkhSpaceBk))
-// adj109：& 修饰符扩展（yc/bc/zy/dy/hx/shy/xhy/sby/xby/sby+/xby+/cy/cy+）解析 + 渲染
-const r109 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1&yc 2&bc 3&zy 4&dy 5&hx 6&shy 7&xhy 1&sby 2&xby 3&sby+ 4&xby+ 5&cy 6&cy+ | 1 2 3 4 |\n')
+// adj109：& 修饰符扩展（yc/bc/zy/dy/shy/xhy/sby/xby/sby+/xby+/cy/cy+）解析 + 渲染
+// adj375：&hx 已改为独立标记（不再进音符 symbols），故此用例不再含 hx
+const r109 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1&yc 2&bc 3&zy 4&dy 5&shy 6&xhy 1&sby 2&xby 3&sby+ 4&xby+ 5&cy 6&cy+ | 1 2 3 4 |\n')
 const n109 = r109.groups[0].music.tokens.filter((t) => t.kind === 'note')
-check('adj109 修饰符解析（yc bc zy dy hx shy xhy）', r109.errors.length === 0 && JSON.stringify(n109.slice(0, 7).map((t) => t.symbols[0])) === JSON.stringify(['yc', 'bc', 'zy', 'dy', 'hx', 'shy', 'xhy']), JSON.stringify(n109.slice(0, 7).map((t) => t.symbols)))
-check('adj109 修饰符解析（sby xby sby+ xby+ cy cy+，含 + 后缀）', JSON.stringify(n109.slice(7, 13).map((t) => t.symbols[0])) === JSON.stringify(['sby', 'xby', 'sby+', 'xby+', 'cy', 'cy+']), JSON.stringify(n109.slice(7, 13).map((t) => t.symbols)))
+check('adj109 修饰符解析（yc bc zy dy shy xhy）', r109.errors.length === 0 && JSON.stringify(n109.slice(0, 6).map((t) => t.symbols[0])) === JSON.stringify(['yc', 'bc', 'zy', 'dy', 'shy', 'xhy']), JSON.stringify(n109.slice(0, 6).map((t) => t.symbols)))
+check('adj109 修饰符解析（sby xby sby+ xby+ cy cy+，含 + 后缀）', JSON.stringify(n109.slice(6, 12).map((t) => t.symbols[0])) === JSON.stringify(['sby', 'xby', 'sby+', 'xby+', 'cy', 'cy+']), JSON.stringify(n109.slice(6, 12).map((t) => t.symbols)))
 const svg109 = renderScoreToSvg(layoutScore(r109, DUR_CFG))[0]
 check('adj109 yc 渲染点 + 半圆弧（circle + Q）', svg109.includes('<circle ') && / Q /.test(svg109), '')
 // adj112：zy 线形 >、dy 仍实心倒三角；adj119：滑音箭头改线形 >（实心三角仅 dy 1 个）
@@ -1010,7 +1011,9 @@ check('adj115 波音锯齿斜下粗线（stroke 1.8 ≥ 10 条）', (svg109.matc
 // adj116：下波音竖线为细线 stroke 0.8（xby/xby+ 各 1 条）
 check('adj116 下波音竖线为细线（stroke 0.8 ≥ 2 条）', (svg109.match(/stroke-width="0.8"/g) ?? []).length >= 2, '')
 // adj180：&hx 呼吸记号不加粗（stroke 0.8）、横向宽度 80%（半宽 2.8×s）
-const hxPath180 = /M ([\d.]+) ([\d.]+) L ([\d.]+) ([\d.]+) L ([\d.]+) ([\d.]+)" fill="none" stroke="#1b1b1b" stroke-width="0.8"/.exec(svg109)
+// adj375：&hx 已独立化——用独立写法取样（原 r109 里 5&hx 已不再产生记号）
+const svgHx180 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 5 &hx 6 |\n'), DUR_CFG))[0]
+const hxPath180 = /M ([\d.]+) ([\d.]+) L ([\d.]+) ([\d.]+) L ([\d.]+) ([\d.]+)" fill="none" stroke="#1b1b1b" stroke-width="0.8"/.exec(svgHx180)
 check('adj180 hx 线宽 0.8（不加粗）', hxPath180 !== null, '')
 check('adj180 hx 半宽 = 2.8×s（80% 宽度）', hxPath180 !== null && Math.abs(Math.abs(Number(hxPath180[5]) - Number(hxPath180[3])) - 2.8 * NS_S) < 0.3, JSON.stringify(hxPath180?.slice(1)))
 // adj126：小节线修饰符（&fine/&dc/&ds/&ty/&hs）解析 + 渲染 + 播放跳转
@@ -3712,6 +3715,67 @@ console.log('[83] playhead highlight & blocks cover augmentation (adj374)')
       `segs=${segs.length}/${noteSegs.length} 末块右=${(lastBlock ? lastBlock.x + lastBlock.width : 0).toFixed(1)} 末格右=${(lastCell ? lastCell.x + lastCell.perBeat * lastCell.beats : 0).toFixed(1)}`,
     )
   }
+}
+
+// ---- 84. &hx 独立化 + 呼吸静音（adj375）----
+console.log('[84] &hx standalone breath mark (adj375)')
+{
+  const q = (body: string) => `V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${body}\n`
+  const fmtQ = (body: string) => formatJps(q(body)).split('\n')[4]
+  const build = (body: string) => {
+    const r = parseJps(q(body))
+    const lay = layoutScore(r, DUR_CFG)
+    return { r, lay, seq: buildPlaySequence(r, lay, 120) }
+  }
+  const brsOf = (lay: ReturnType<typeof layoutScore>) => lay.pages.flatMap((p) => p.brackets)
+
+  // ① 解析：&hx 不再进音符 symbols，而是独立标记 token
+  {
+    const { r } = build('| 6&hx 5 ||')
+    const toks = r.groups[0].music.tokens
+    const hxTok = toks.filter((t) => t.kind === 'bracket' && t.code === 'hx')
+    const syms = toks.filter((t) => t.kind === 'note').map((t) => (t.kind === 'note' ? t.symbols : []))
+    check('adj375 解析：&hx 成独立标记 token（不再依附音符）', r.errors.length === 0 && hxTok.length === 1, JSON.stringify(hxTok))
+    check('adj375 解析：音符 symbols 里不再有 hx', syms.every((s) => !s.includes('hx')), JSON.stringify(syms))
+  }
+  // ② 格式化：三种写法统一为「独立块 + 两侧空格」，且幂等
+  check('adj375 格式化 6&hx 5 → 6 &hx 5', fmtQ('| 6&hx 5 ||') === 'Q: | 6 &hx 5 ||', fmtQ('| 6&hx 5 ||'))
+  check('adj375 格式化 6 &hx 5 保持', fmtQ('| 6 &hx 5 ||') === 'Q: | 6 &hx 5 ||', fmtQ('| 6 &hx 5 ||'))
+  check('adj375 格式化 &hx6 5 → &hx 6 5', fmtQ('| &hx6 5 ||') === 'Q: | &hx 6 5 ||', fmtQ('| &hx6 5 ||'))
+  check('adj375 格式化 &hx 6 5 保持（幂等）', fmtQ('| &hx 6 5 ||') === 'Q: | &hx 6 5 ||', fmtQ('| &hx 6 5 ||'))
+  check(
+    'adj375 格式化幂等：二次格式化不再变化',
+    fmtQ('| 6&hx 5 ||') === formatJps(`V: 1.0\nB: t\nD: C\nP: 4/4\n${fmtQ('| 6&hx 5 ||')}\n`).split('\n')[4],
+  )
+  // ③ 排版：独立标记占宽，后面的音符因此右移（与 &zkh/&ykh 同机制）
+  {
+    const withHx = build('| 6 &hx 5 ||')
+    const without = build('| 6 5 ||')
+    const b = brsOf(withHx.lay)
+    const xWith = withHx.lay.pages[0].notes[1].x
+    const xWithout = without.lay.pages[0].notes[1].x
+    check('adj375 排版：&hx 作为独立标记占宽', b.length === 1 && b[0].code === 'hx' && b[0].width > 0, JSON.stringify(b))
+    check('adj375 排版：后续音符因 &hx 占宽而右移', xWith > xWithout + 1, `with=${xWith.toFixed(1)} without=${xWithout.toFixed(1)}`)
+  }
+  // ④ 渲染：画出 V 形呼吸记号（三折线 path、线宽 0.8）
+  {
+    const svgWith = renderScoreToSvg(build('| 6 &hx 5 ||').lay)[0] ?? ''
+    const svgWithout = renderScoreToSvg(build('| 6 5 ||').lay)[0] ?? ''
+    const vRe = /<path d="M [\d.-]+ [\d.-]+ L [\d.-]+ [\d.-]+ L [\d.-]+ [\d.-]+" fill="none" stroke="#1b1b1b" stroke-width="0.8"\/>/g
+    const nWith = (svgWith.match(vRe) ?? []).length
+    const nWithout = (svgWithout.match(vRe) ?? []).length
+    check('adj375 渲染：有 &hx 时画出 1 个 V 形记号', nWith === 1, `n=${nWith}`)
+    check('adj375 渲染：无 &hx 时不画 V 形记号', nWithout === 0, `n=${nWithout}`)
+  }
+  // ⑤ 演奏：呼吸静音 = min(前音符总时值/4, 1/2 拍)；槽位/总时长不变（连音合并按总时值算）
+  const durs = (body: string) => build(body).seq.events.map((e) => Math.round(e.durationMs))
+  const total = (body: string) => Math.round(build(body).seq.totalMs)
+  check('adj375 演奏：6 &hx 5 → 6 发声 1−1/4=0.75 拍（375ms）', JSON.stringify(durs('| 6 &hx 5 ||')) === '[375,500]', JSON.stringify(durs('| 6 &hx 5 ||')))
+  check('adj375 演奏：1-- &hx 2 → 换气封顶 1/2 拍（1500−250=1250ms）', JSON.stringify(durs('| 1-- &hx 2 ||')) === '[1250,500]', JSON.stringify(durs('| 1-- &hx 2 ||')))
+  check('adj375 演奏：1--- &hx 2 → 仍封顶 1/2 拍（2000−250=1750ms）', JSON.stringify(durs('| 1--- &hx 2 ||')) === '[1750,500]', JSON.stringify(durs('| 1--- &hx 2 ||')))
+  check('adj375 演奏：&hx 写在本行最前 → 作用于右侧音符', JSON.stringify(durs('| &hx 6 5 ||')) === '[375,500]', JSON.stringify(durs('| &hx 6 5 ||')))
+  check('adj375 演奏：连音合并按总时值算（(6 - &hx 6) → 1500−250=1250ms）', JSON.stringify(durs('| (6 - &hx 6) ||')) === '[1250]', JSON.stringify(durs('| (6 - &hx 6) ||')))
+  check('adj375 演奏：槽位不变——总时长与无 &hx 版一致', total('| 6 &hx 5 ||') === total('| 6 5 ||') && total('| 1-- &hx 2 ||') === total('| 1-- 2 ||'), `${total('| 6 &hx 5 ||')}/${total('| 6 5 ||')}`)
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码

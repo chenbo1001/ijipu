@@ -26,7 +26,9 @@ export const MODIFIER_SYMBOLS: { symbol: string; label: string; barline?: boolea
   { symbol: 'xby+', label: '下波音（3.5 齿）' },
   { symbol: 'shy', label: '上滑音（弧线）' },
   { symbol: 'xhy', label: '下滑音（弧线）' },
-  { symbol: 'hx', label: '滑音箭头（右侧）' },
+  // adj375：&hx 已独立为标记块（不再依附音符）——可写在音符前或后，占宽；播放时占用
+  // 前一个音符总时值（含同音连音/增时线/附点）的 1/4 作呼吸换气（最多 1/2 拍，静音）
+  { symbol: 'hx', label: '呼吸记号（独立块，换气静音）' },
   { symbol: 'zkh', label: '左括号（音符前）' },
   { symbol: 'ykh', label: '右括号（音符块后）' },
   { symbol: 'pp', label: '力度：很弱（pp）' },

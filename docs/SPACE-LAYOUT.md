@@ -14,8 +14,10 @@
 
 ```
 totalDur   = Σ (noteElDur + augCount×augDur)           # 总时值拍数
-durBodySum = Σ (noteBodyW + hasDot×dotBodyW + augCount×augBodyW)   # 本体宽（不含括号/hx）
-nonDurPad  = Σ_barline (barlineTotalW + bp×2)  +  brackets×bracketBodyW  + Σ_&hx hxBodyW
+durBodySum = Σ (noteBodyW + hasDot×dotBodyW + augCount×augBodyW)   # 本体宽（不含独立标记）
+nonDurPad  = Σ_barline (barlineTotalW + bp×2)  +  Σ_标记 markBodyW(code)
+           # adj375：独立标记 = &zkh/&ykh 括号（bracketBodyW=BRACKET_PAD）+ &hx 呼吸记号（hxBodyW）
+           # 旧写法「&hx 依附音符」(hasHx/hxW) 已废弃（tokenizer 不再产生该 symbols）
            # bp = barlinePad(noteSize) = noteSize/4  ←  单声部线两侧净间距
 W          = max(0, availW − durBodySum − nonDurPad)    # 可拉伸空白
 
@@ -47,7 +49,7 @@ else {
 # 增时线（el: 'aug'）逐根推 xCursor += augElW
 
 # 数字 x = blockX + accW + leftExt                     # adj314：数字右移给角标/前倚音腾位
-curX = xCursor + (hasHx ? hxBodyW : 0)
+curX = xCursor + (独立标记按源码插位各自加宽，adj375: &hx/&zkh/&ykh 同通道)
 ```
 
 小节线：
@@ -84,7 +86,7 @@ bodyW[声部][b] = Σ 声部 b 小节 bodyW0
 
 #### ② `baseW[b]`：小节基准本体宽 = max(各声部 `bodyW[声部][b]`)
 
-#### ③ `nonDurPad` = pads + 括号 + &hx
+#### ③ `nonDurPad` = pads + 独立标记（&zkh/&ykh 括号 + &hx 呼吸记号，adj375）
 
 #### ③b `beatBodyW[b][k]`：每小节每拍最大本体占宽（跨声部取 max）
 
