@@ -46,6 +46,11 @@ PWA 安装提示仅在 **HTTPS 域名** 下出现（`localhost` 除外）。
 
 部署到 HTTPS 后，**依次检查**：
 
+> **adj379：更新提示**——部署新构建后，新 SW 会立刻接管页面，但**当前页面仍在跑旧 bundle**。
+> 应用会在接管时于右下角提示「**发现新版本，点击刷新**」（首次注册不提示），点击即刷新拿到新代码；
+> SPA/PWA 长期不重载时每 30 分钟 + 每次窗口获焦也会主动检查新版。
+> 因此部署完新版后若还能看到旧界面：**点一下该提示**（或 Ctrl+Shift+R 强刷；已安装的 PWA 窗口需关掉重开）。
+
 - [ ] 浏览器 DevTools → Application → Manifest：
   - Name、short_name、start_url、scope、display=standalone、icons 均正确
   - **Status** 显示 "Manifest fetched, no errors"
@@ -156,7 +161,9 @@ PWA 上架 Google Play 需用工具打包成 APK / AAB：
 
 ## 8. 相关代码位置
 
-- `src/main.tsx:12-21` — Service Worker 注册（adj155）
+- `src/main.tsx` — Service Worker 注册（adj155）+ 新版本接管提示（adj379：`controllerchange` → `updateReady`；30 分钟/窗口获焦 `reg.update()`）
+- `src/pwa/swUpdate.ts` — 「新版本就绪」判定纯逻辑（adj379：`shouldPromptUpdate` 区分首次注册与真更新）
+- `src/ui/UpdatePrompt.tsx` — 右下角「发现新版本，点击刷新」按钮（adj379）
 - `public/sw.js` — Service Worker 策略（adj155，network-first 导航 / cache-first 静态；adj192 `/fonts/*.otf` 大体积字体 cache-first 命中即回，缓存版本升到 `jps-shell-v3` 以便 activate 清掉旧缓存）
 - `public/manifest.webmanifest` — PWA 清单（standalone + theme + 图标）
 - `index.html:7-13` — viewport / manifest / theme-color / apple-touch-icon

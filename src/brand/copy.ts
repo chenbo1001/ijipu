@@ -79,6 +79,8 @@ export const uiCopy = {
   // Chrome/PWA 窗口慢，属浏览器环境差异）
   saveSlowCommitHint: '保存慢在文件替换（浏览器/系统行为）：可试试换用其它浏览器或非 PWA 窗口，或把文件移出云同步/杀软监控目录',
   saveUnsupported: '当前环境不支持保存到磁盘（File System Access API 仅 Chromium 安全上下文支持，手机端通常没有）；请用「文件 → 导出」下载 .jps 保存',
+  // adj379：PWA 部署新版后的更新提示（新 SW 已接管、页面仍跑旧 bundle，点击刷新即换新代码）
+  updateReady: '发现新版本，点击刷新',
   // adj281：非安全上下文（http:// 或 file://）或非 Chromium 内核下无 Web File System Access API，
   // 降级用 <input type=file> 载入 .jps 文本——已载入但无法写回磁盘，提示改用「导出」保存
   openFallbackNotice: '已载入文件；此环境无法写回磁盘，请用「文件 → 导出」保存成果',

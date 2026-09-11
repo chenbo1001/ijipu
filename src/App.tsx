@@ -8,6 +8,7 @@ import { Suspense, lazy, useEffect, useRef } from 'react'
 import { TopBar } from './ui/TopBar'
 import { EditorFootBar } from './ui/EditorFootBar'
 import { Toast } from './ui/Toast'
+import { UpdatePrompt } from './ui/UpdatePrompt'
 import { EditorPane } from './editor/EditorPane'
 import { PreviewPane } from './preview/PreviewPane'
 import { useDocStore } from './store/docStore'
@@ -194,6 +195,8 @@ function App() {
       </div>
       <EditorFootBar />
       <Toast />
+      {/* adj379：检测到 SW 新版本时的「点击刷新」提示 */}
+      <UpdatePrompt />
 
       {modal === 'about' && <Suspense fallback={null}><AboutDialog /></Suspense>}
       {modal === 'samples' && <Suspense fallback={null}><SamplesDialog /></Suspense>}

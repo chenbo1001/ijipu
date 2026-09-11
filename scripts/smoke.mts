@@ -44,6 +44,8 @@ import { formatStoredVoice, parseStoredVoice } from '../src/store/playbackVoice.
 // adj373：作者署名（品牌 tokens + 关于对话框文案）
 import { brand } from '../src/brand/tokens.ts'
 import { aboutCopy } from '../src/brand/copy.ts'
+// adj379：PWA「新版本就绪」判定（纯逻辑）
+import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from '../src/pwa/swUpdate.ts'
 
 // adj213：布局断言常量——从 defaultPageConfig 派生，避免硬编码边距/右边界/
 // 描述头区域高等魔数（默认值调整时断言自动适配）
@@ -3863,6 +3865,14 @@ console.log('[85] user line width check')
       `无标记=${rowCount(noMark)} 有标记=${rowCount(withMarks)}`,
     )
   }
+}
+
+// ---- 86. PWA 新版本提示判定（adj379）----
+console.log('[86] pwa update prompt (adj379)')
+{
+  check('adj379 首次注册（页面此前无控制者）不提示更新', shouldPromptUpdate(false) === false)
+  check('adj379 已有控制者被新 SW 接管 → 提示更新', shouldPromptUpdate(true) === true)
+  check('adj379 自动检查间隔 = 30 分钟', UPDATE_CHECK_INTERVAL_MS === 30 * 60 * 1000, String(UPDATE_CHECK_INTERVAL_MS))
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码

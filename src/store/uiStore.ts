@@ -161,6 +161,8 @@ interface UiState {
   playbackHqEnabled: number[]
   /** 轻量浮动提示（null = 无提示） */
   notice: Notice | null
+  /** adj379：检测到 SW 新版本（页面仍在跑旧 bundle）——右下角提示「点击刷新」 */
+  updateReady: boolean
   openModal: (m: ModalKind) => void
   closeModal: () => void
   setPlaybackStart: (id: string | null) => void
@@ -185,6 +187,8 @@ interface UiState {
   togglePlaybackHqVoice: (program: number) => void
   /** adj340：批量设置已启用音色集合（导入音色配置用） */
   setPlaybackHqEnabled: (programs: number[]) => void
+  /** adj379：设置「检测到新版本」状态（PWA 更新提示） */
+  setUpdateReady: (b: boolean) => void
   showNotice: (text: string, kind?: NoticeKind) => void
   clearNotice: () => void
 }
@@ -390,4 +394,7 @@ export const useUiStore = create<UiState>()((set) => ({
   showNotice: (text, kind = 'ok') =>
     set((s) => ({ notice: { text, kind, nonce: (s.notice?.nonce ?? 0) + 1 } })),
   clearNotice: () => set({ notice: null }),
+  // adj379：SW 新版本提示状态（部署新版后页面仍跑旧 bundle 时置 true）
+  updateReady: false,
+  setUpdateReady: (b) => set({ updateReady: b }),
 }))
