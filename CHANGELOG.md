@@ -1,5 +1,13 @@
 # iJipu 更新日志（Changelog）
 
+## [未发布]
+
+### 新增
+
+- **应用内作者署名**（`adj373`）：此前应用里没有任何作者信息。现在「帮助 → 关于」显示 **作者：蜗牛🐌**（取自品牌 tokens 的 `brand.author`；联系方式为可选行 `brand.authorEmail`，留空则不显示）。同时补齐包与产物元数据：`package.json` 的 `author`、`index.html` 的 `<meta name="author">`、桌面安装包的 `bundle.publisher` / `copyright`（NSIS 安装器会显示发布者与版权）、`README.md` 的作者行。smoke 新增 `[82]`（3 项）守住署名不被误删。
+
+---
+
 ## [0.12.16] — 2026-09-11
 
 ### 新增

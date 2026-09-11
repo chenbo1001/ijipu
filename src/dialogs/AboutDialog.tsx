@@ -40,6 +40,11 @@ export function AboutDialog() {
         ))}
         <p style={{ margin: '8px 0' }}>{aboutCopy.userIdentity}</p>
         <p style={{ margin: '8px 0' }}>{aboutCopy.cli}</p>
+        {/* adj373：作者署名（+ 可选联系方式，邮箱留空则不显示） */}
+        <p style={{ margin: '8px 0' }}>
+          <strong>{aboutCopy.author}</strong>
+          {aboutCopy.contact && <span style={{ marginLeft: 10 }}>{aboutCopy.contact}</span>}
+        </p>
         <div
           style={{
             marginTop: 12,

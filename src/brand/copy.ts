@@ -16,6 +16,10 @@ export const aboutCopy = {
   ].join('\n'),
   /** 用户身份 */
   userIdentity: `用${brand.nameZh}写简谱的人，我们称为「${brand.userTitle}」（${brand.userTitleEn}）。`,
+  /** 作者署名（adj373） */
+  author: `作者：${brand.author}`,
+  /** 作者联系方式（邮箱留空时为空串 → 关于对话框不渲染该行） */
+  contact: brand.authorEmail ? `联系：${brand.authorEmail}` : '',
   /** 命令行概念 */
   cli: `命令行工作流：${brand.cli.compile} 编译乐谱，${brand.cli.run} 试听播放。`,
   /** 底部情怀 */

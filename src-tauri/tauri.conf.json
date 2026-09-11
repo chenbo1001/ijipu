@@ -28,6 +28,9 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "publisher": "蜗牛🐌",
+    "copyright": "© 蜗牛🐌 · iJipu（爱记谱）· AGPL-3.0",
+    "shortDescription": "代码式简谱制谱引擎",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

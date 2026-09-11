@@ -41,6 +41,9 @@ import {
 } from '../src/store/saveSupport.ts'
 // adj366：试听「音色」选择值解析（未设置/空串 = 自动）——纯函数，可直接断言
 import { formatStoredVoice, parseStoredVoice } from '../src/store/playbackVoice.ts'
+// adj373：作者署名（品牌 tokens + 关于对话框文案）
+import { brand } from '../src/brand/tokens.ts'
+import { aboutCopy } from '../src/brand/copy.ts'
 
 // adj213：布局断言常量——从 defaultPageConfig 派生，避免硬编码边距/右边界/
 // 描述头区域高等魔数（默认值调整时断言自动适配）
@@ -3641,6 +3644,18 @@ async function runStoreFileIdentityTests() {
     check('adj371 写盘失败：仍标记未保存', st().dirty === true, String(st().dirty))
     check('adj371 写盘失败：草稿名不被改坏', kv['ijipu.draftName'] === 'D', kv['ijipu.draftName'])
   }
+}
+
+// ---- 82. 作者署名（adj373）----
+console.log('[82] author credit (adj373)')
+{
+  check('adj373 品牌 tokens 有作者署名', brand.author.trim().length > 0, brand.author)
+  check('adj373 关于对话框作者行 = 「作者：<署名>」', aboutCopy.author === `作者：${brand.author}`, aboutCopy.author)
+  check(
+    'adj373 联系方式：未设邮箱为空，设了以「联系：」开头',
+    aboutCopy.contact === '' || aboutCopy.contact.startsWith('联系：'),
+    JSON.stringify(aboutCopy.contact),
+  )
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
