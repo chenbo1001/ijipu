@@ -3652,9 +3652,16 @@ console.log('[82] author credit (adj373)')
   check('adj373 品牌 tokens 有作者署名', brand.author.trim().length > 0, brand.author)
   check('adj373 关于对话框作者行 = 「作者：<署名>」', aboutCopy.author === `作者：${brand.author}`, aboutCopy.author)
   check(
-    'adj373 联系方式：未设邮箱为空，设了以「联系：」开头',
-    aboutCopy.contact === '' || aboutCopy.contact.startsWith('联系：'),
+    'adj373 联系方式：未设邮箱为空，设了则含该邮箱并以「联系：」开头',
+    brand.authorEmail === ''
+      ? aboutCopy.contact === ''
+      : aboutCopy.contact.startsWith('联系：') && aboutCopy.contact.includes(brand.authorEmail),
     JSON.stringify(aboutCopy.contact),
+  )
+  check(
+    'adj373 邮箱格式合法（公开地址）',
+    brand.authorEmail === '' || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(brand.authorEmail),
+    brand.authorEmail,
   )
 }
 

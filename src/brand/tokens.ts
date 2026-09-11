@@ -18,8 +18,8 @@ export const brand = {
   userTitleEn: 'Score Smith',
   /** 作者署名（关于对话框 / 安装包 publisher 展示） */
   author: '蜗牛🐌',
-  /** 作者联系邮箱——留空 = 关于对话框不显示「联系」行（避免邮箱被爬虫抓取时可留空） */
-  authorEmail: '',
+  /** 作者联系邮箱——留空 = 关于对话框不显示「联系」行（公开地址，需接受被爬虫抓取） */
+  authorEmail: 'snail.zh@qq.com',
   /** 文件后缀（iJipu Script） */
   extension: '.jps',
   /** 后缀全称 */
