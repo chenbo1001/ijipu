@@ -220,6 +220,24 @@ export function TopBar() {
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [fontOpen])
+
+  /**
+   * adj386：字体下拉改 `position: fixed` + 按按钮实测位置定位。
+   * 原因：字体按钮在 `.topbar-toolbar` 内，而该容器 `overflow: hidden`（用于裁掉横向溢出的按钮），
+   * 向下弹出的下拉被它裁掉——DOM 与几何都正常，但**根本没画出来**（命中测试落到下方编辑器 textarea），
+   * 表现就是"顶栏字体下拉打不开"。fixed 定位脱离祖先裁切，视觉效果仍是贴按钮右缘向下弹出。
+   */
+  const [fontDdPos, setFontDdPos] = useState<{ top: number; right: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!fontOpen) {
+      setFontDdPos(null)
+      return
+    }
+    const btn = fontRef.current?.querySelector('button')
+    if (!btn) return
+    const r = btn.getBoundingClientRect()
+    setFontDdPos({ top: Math.round(r.bottom + 6), right: Math.max(6, Math.round(window.innerWidth - r.right)) })
+  }, [fontOpen])
   const [visCount, setVisCount] = useState(toolBtns.length)
   const btnsRef = useRef<HTMLDivElement>(null) // .topbar-buttons（功能组可见区）
   const settingsRef = useRef<HTMLDivElement>(null) // .topbar-settings（设置组可见区）
@@ -358,7 +376,7 @@ export function TopBar() {
   }
 
   // 顶栏按钮渲染（用于可见区 / 隐藏测量容器）
-  const renderBtn = (t: (typeof toolBtns)[number]) => {
+  const renderBtn = (t: (typeof toolBtns)[number], measuring = false) => {
     if (t.kind === 'zoom') {
       return (
         <div className="topbar-zoom" key={t.key}>
@@ -402,8 +420,10 @@ export function TopBar() {
     }
     if (t.kind === 'font') {
       // 字体 split-button（从状态栏移来，下拉从顶栏向下展开）
+      // adj386：`measuring`（隐藏测量容器里的那份）不挂 ref、也不渲染下拉——否则同一个 ref 会被
+      // 后渲染的测量实例覆盖，导致下拉按"测量容器里那个按钮"的坐标定位（跑偏到 x≈447）。
       return (
-        <span className="editor-font-split" ref={fontRef} key={t.key}>
+        <span className="editor-font-split" ref={measuring ? undefined : fontRef} key={t.key}>
           <button
             className="topbar-btn"
             onClick={() => {
@@ -417,8 +437,17 @@ export function TopBar() {
             <span className="tool-label">{t.label}</span>
             <span className="arrow">▼</span>
           </button>
-          {fontOpen && (
-            <div className="editor-font-split-dropdown" role="listbox" ref={fontDdRef}>
+          {!measuring && fontOpen && (
+            <div
+              className="editor-font-split-dropdown"
+              role="listbox"
+              ref={fontDdRef}
+              style={
+                fontDdPos
+                  ? { position: 'fixed', top: fontDdPos.top, right: fontDdPos.right, left: 'auto', bottom: 'auto' }
+                  : undefined
+              }
+            >
               {EDITOR_FONT_OPTIONS.map((o) => (
                 <div
                   key={o.value}
@@ -880,7 +909,7 @@ export function TopBar() {
       >
         {toolBtns.map((t) => (
           <span data-tool-key={t.key} key={t.key} style={{ display: 'inline-block' }}>
-            {renderBtn(t)}
+            {renderBtn(t, true)}
           </span>
         ))}
       </div>

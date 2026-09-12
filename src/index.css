@@ -1070,6 +1070,9 @@ body {
 }
 .editor-font-split-dropdown {
   position: absolute;
+  /* adj386：实际定位由 TopBar 内联为 `position: fixed`（按按钮实测位置）——字体按钮位于
+     `.topbar-toolbar { overflow: hidden }` 内，absolute 下拉会被该容器裁掉（见 TopBar 注释）。
+     下面的 top/right 仅作无 JS 时的兜底。 */
   /* adj：字体按钮在顶栏工具条内，下拉向下弹出（top 相对），
      底部用 max-height 限制 + overflow-y 滚动 + 始终显示细滚动条 */
   top: calc(100% + 6px);
