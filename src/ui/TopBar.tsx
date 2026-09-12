@@ -226,18 +226,27 @@ export function TopBar() {
    * 原因：字体按钮在 `.topbar-toolbar` 内，而该容器 `overflow: hidden`（用于裁掉横向溢出的按钮），
    * 向下弹出的下拉被它裁掉——DOM 与几何都正常，但**根本没画出来**（命中测试落到下方编辑器 textarea），
    * 表现就是"顶栏字体下拉打不开"。fixed 定位脱离祖先裁切，视觉效果仍是贴按钮右缘向下弹出。
+   *
+   * adj388：锚点改为**点击事件里的那个按钮**（`e.currentTarget`）而不是靠 ref 反查——避免顶栏重排
+   * （visCount 变化/旋转/缩放）后 ref 指向的按钮与用户点的不是同一个导致跑偏；并做**视口双向钳制**
+   * （横向夹在 [8, clientWidth - 宽 - 8]，纵向不越过视口底），在 resize/滚动时实时重算。
    */
-  const [fontDdPos, setFontDdPos] = useState<{ top: number; right: number } | null>(null)
-  useLayoutEffect(() => {
-    if (!fontOpen) {
-      setFontDdPos(null)
-      return
-    }
-    const btn = fontRef.current?.querySelector('button')
-    if (!btn) return
+  const [fontDdPos, setFontDdPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const fontBtnRef = useRef<HTMLElement | null>(null)
+
+  const placeFontDropdown = useCallback((btn: HTMLElement | null): void => {
+    if (!btn || !btn.isConnected) return
     const r = btn.getBoundingClientRect()
-    setFontDdPos({ top: Math.round(r.bottom + 6), right: Math.max(6, Math.round(window.innerWidth - r.right)) })
-  }, [fontOpen])
+    // clientWidth/Height 不含滚动条（用 innerWidth 会在有滚动条时把下拉往左推约 15px）
+    const cw = document.documentElement.clientWidth
+    const ch = document.documentElement.clientHeight
+    const margin = 8
+    const width = Math.max(120, Math.min(160, cw - margin * 2))
+    // 贴按钮右缘，但夹在视口内
+    const left = Math.min(Math.max(margin, r.right - width), Math.max(margin, cw - width - margin))
+    const top = Math.min(r.bottom + 6, Math.max(margin, ch - 60))
+    setFontDdPos({ top: Math.round(top), left: Math.round(left), width: Math.round(width) })
+  }, [])
   const [visCount, setVisCount] = useState(toolBtns.length)
   const btnsRef = useRef<HTMLDivElement>(null) // .topbar-buttons（功能组可见区）
   const settingsRef = useRef<HTMLDivElement>(null) // .topbar-settings（设置组可见区）
@@ -296,6 +305,25 @@ export function TopBar() {
       window.removeEventListener('orientationchange', onResize)
     }
   }, [clampDropdowns, menuOpen, viewOpen, overflowOpen, fontOpen])
+
+  // adj388：下拉打开期间随窗口尺寸/滚动重算位置（顶栏重排、旋转、缩放后仍贴着用户点的那个按钮）
+  useLayoutEffect(() => {
+    if (!fontOpen) return
+    placeFontDropdown(fontBtnRef.current)
+  }, [fontOpen, placeFontDropdown, visCount, isNarrow, previewZoom])
+
+  useEffect(() => {
+    if (!fontOpen) return
+    const onMove = (): void => placeFontDropdown(fontBtnRef.current)
+    window.addEventListener('resize', onMove)
+    window.addEventListener('orientationchange', onMove)
+    window.addEventListener('scroll', onMove, true)
+    return () => {
+      window.removeEventListener('resize', onMove)
+      window.removeEventListener('orientationchange', onMove)
+      window.removeEventListener('scroll', onMove, true)
+    }
+  }, [fontOpen, placeFontDropdown])
 
   // 图标：(key) => JSX，与 renderBtn 共用
   const iconOf = (key: string): React.ReactNode => {
@@ -426,8 +454,12 @@ export function TopBar() {
         <span className="editor-font-split" ref={measuring ? undefined : fontRef} key={t.key}>
           <button
             className="topbar-btn"
-            onClick={() => {
-              setFontOpen((v) => !v)
+            onClick={(e) => {
+              // adj388：以**点击的这个按钮**为锚点（避免 ref 反查到别的实例导致弹出位置不对）
+              fontBtnRef.current = e.currentTarget
+              const next = !fontOpen
+              setFontOpen(next)
+              if (next) placeFontDropdown(e.currentTarget)
             }}
             title="编辑器字体"
             aria-label="编辑器字体"
@@ -444,7 +476,14 @@ export function TopBar() {
               ref={fontDdRef}
               style={
                 fontDdPos
-                  ? { position: 'fixed', top: fontDdPos.top, right: fontDdPos.right, left: 'auto', bottom: 'auto' }
+                  ? {
+                      position: 'fixed',
+                      top: fontDdPos.top,
+                      left: fontDdPos.left,
+                      width: fontDdPos.width,
+                      right: 'auto',
+                      bottom: 'auto',
+                    }
                   : undefined
               }
             >
