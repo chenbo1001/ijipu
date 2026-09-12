@@ -146,7 +146,8 @@ export function SoundBankPanel() {
   }
 
   return (
-    <div style={{ fontSize: 12, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 10 }}>
+    /* adj387：面板宽度收到 2/3（.soundbank-panel）——与其它标签（Row 表单）的视觉宽度对齐 */
+    <div className="soundbank-panel" style={{ fontSize: 12, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn" style={BTN} onClick={exportConfig}>导出收藏</button>
           <button className="btn" style={BTN} onClick={() => fileRef.current?.click()}>导入收藏</button>

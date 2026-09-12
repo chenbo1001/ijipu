@@ -713,6 +713,13 @@ body {
   margin: 4px 0 10px;
 }
 
+/* adj387：音色库面板（设置 → 音色库标签）——宽度收到 2/3，与其它标签的 Row 表单宽度对齐；
+   min-width 兜底：窄对话框下不至于被挤到不可用 */
+.soundbank-panel {
+  width: calc(100% * 2 / 3);
+  min-width: 300px;
+}
+
 /* 汉堡下拉分组标题（窄屏时仍可能用） */
 .menu-group-title {
   padding: 6px 10px 3px;
