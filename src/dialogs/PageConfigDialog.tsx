@@ -14,14 +14,17 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { clampEditorFontSize, defaultPageConfig, EDITOR_FONT_OPTIONS, SCORE_FONT_OPTIONS } from '@ijipu/engine'
 import { THEMES, type ThemeMode } from '../brand/themes'
+import { SoundBankPanel } from './SoundBankPanel'
 import type { PageConfig } from '@ijipu/engine'
 
-type TabId = 'global' | 'theme' | 'page' | 'noteLayout' | 'spacing' | 'font' | 'slur'
+type TabId = 'global' | 'theme' | 'soundbank' | 'page' | 'noteLayout' | 'spacing' | 'font' | 'slur'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'global', label: '全局' },
   // adj383：主题组从顶栏菜单移入设置，紧跟在「全局」之后
   { id: 'theme', label: '主题' },
+  // adj384：音色库从顶栏按钮移入设置，紧跟「主题」之后
+  { id: 'soundbank', label: '音色库' },
   { id: 'page', label: '页面' },
   { id: 'noteLayout', label: '音符布局' },
   { id: 'spacing', label: '间距' },
@@ -202,6 +205,16 @@ export function PageConfigDialog() {
             </div>
             <div className="ijipu-form-hint" style={{ marginTop: 8 }}>
               主题属本机界面偏好，不随谱保存。
+            </div>
+          </>
+        )
+      case 'soundbank':
+        // adj384：音色库管理（原顶栏「音色库」按钮 + 独立对话框）——本机偏好，不随谱保存
+        return (
+          <>
+            <SoundBankPanel />
+            <div className="ijipu-form-hint">
+              音源库/试听音色属本机偏好（L1），不随谱保存；试听对话框只列这里勾选的音色。
             </div>
           </>
         )

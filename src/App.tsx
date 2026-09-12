@@ -18,7 +18,7 @@ const AboutDialog = lazy(() => import('./dialogs/AboutDialog').then((m) => ({ de
 const SamplesDialog = lazy(() => import('./dialogs/SamplesDialog').then((m) => ({ default: m.SamplesDialog })))
 const PageConfigDialog = lazy(() => import('./dialogs/PageConfigDialog').then((m) => ({ default: m.PageConfigDialog })))
 const PlaybackDialog = lazy(() => import('./dialogs/PlaybackDialog').then((m) => ({ default: m.PlaybackDialog })))
-const SoundBankDialog = lazy(() => import('./dialogs/SoundBankDialog').then((m) => ({ default: m.SoundBankDialog })))
+// adj384：音色库不再是独立对话框（移入「设置 → 音色库」标签）
 const ExportDialog = lazy(() => import('./dialogs/ExportDialog').then((m) => ({ default: m.ExportDialog })))
 const ShortcutsDialog = lazy(() => import('./dialogs/ShortcutsDialog').then((m) => ({ default: m.ShortcutsDialog })))
 const DocDialog = lazy(() => import('./dialogs/DocDialog').then((m) => ({ default: m.DocDialog })))
@@ -202,7 +202,6 @@ function App() {
       {modal === 'samples' && <Suspense fallback={null}><SamplesDialog /></Suspense>}
       {modal === 'pageConfig' && <Suspense fallback={null}><PageConfigDialog /></Suspense>}
       {modal === 'playback' && <Suspense fallback={null}><PlaybackDialog /></Suspense>}
-      {modal === 'soundbanks' && <Suspense fallback={null}><SoundBankDialog /></Suspense>}
       {modal === 'export' && <Suspense fallback={null}><ExportDialog /></Suspense>}
       {modal === 'shortcuts' && <Suspense fallback={null}><ShortcutsDialog /></Suspense>}
       {modal === 'manual' && <Suspense fallback={null}><DocDialog kind="manual" /></Suspense>}

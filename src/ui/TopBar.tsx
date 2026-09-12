@@ -192,7 +192,7 @@ export function TopBar() {
   const toolBtns = [
     // —— 功能组（原顶栏功能按钮组） ——
     { key: 'guides', label: '排版', group: 'topbar' as const, kind: 'btn' as const, active: showGuides, onPick: () => setShowGuides(!showGuides) },
-    { key: 'soundbanks', label: '音色库', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('soundbanks') },
+    // adj384：音色库按钮已移除（移入「设置 → 音色库」标签）
     { key: 'playback', label: '试听', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('playback') },
     { key: 'pageConfig', label: '设置', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('pageConfig') },
     { key: 'export', label: '导出', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('export') },
@@ -257,14 +257,6 @@ export function TopBar() {
         return (
           <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
             <path d="M 3 2 L 12 7 L 3 12 Z" />
-          </svg>
-        )
-      case 'soundbanks':
-        return (
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
-            <path d="M 5 11 V 4 L 10.4 2.8 V 10" />
-            <circle cx="3.4" cy="11" r="1.4" fill="currentColor" stroke="none" />
-            <circle cx="8.8" cy="10" r="1.4" fill="currentColor" stroke="none" />
           </svg>
         )
       case 'donate':
@@ -660,7 +652,7 @@ export function TopBar() {
   ]
   const playEntries: (MenuEntry | 'sep')[] = [
     { label: '试听播放(&P)', kbd: 'Ctrl+Q', hotkey: 'p', onPick: () => openModal('playback') },
-    { label: '音色库管理(&B)', hotkey: 'b', onPick: () => openModal('soundbanks') },
+    // adj384：音色库管理入口已移除（移入「设置 → 音色库」标签，与主题组同样不再出现在菜单/顶栏）
   ]
   const helpEntries: (MenuEntry | 'sep')[] = [
     { label: '快捷键速查(&K)', kbd: 'Ctrl+~', hotkey: 'k', onPick: () => openModal('shortcuts') },

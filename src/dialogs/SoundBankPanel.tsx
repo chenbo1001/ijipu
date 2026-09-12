@@ -1,13 +1,14 @@
 /**
- * dialogs/SoundBankDialog.tsx — 音色库管理（adj331/332/342）
+ * dialogs/SoundBankPanel.tsx — 音色库管理面板（adj331/332/342；adj384 从独立对话框移入「设置」标签）
  *
  * SpessaSynth 高保真为默认音源（SF2 内置本地；首次打开自动下载并缓存，离线可用）：
  *  - 库行：展开查看库内全部 GM 音色（128 种）+「全选/全消」+「内置」标识（无需下载/删除）
  *  - 音色勾选进入试听列表（playbackHqEnabled）
  *  - 「导入/导出音色文件」（SF2/SF3 本体，供不便联网用户导入/分享）+「导入/导出收藏配置」（JSON）
+ *
+ * 属**本机用户偏好（L1）**：不随谱保存（分层见 docs/SETTINGS-AUDIT.md）。
  */
 import { useEffect, useRef, useState } from 'react'
-import { Modal } from '../ui/Modal'
 import { useUiStore } from '../store/uiStore'
 import { HQ_LIBRARIES, GM_VOICE_OPTIONS, getHqLibrary } from '../playback/spessaSynthBackend'
 import { createHqCache, prefetchHqLibraryProgress } from '../playback/spessaCache'
@@ -15,7 +16,7 @@ import { createHqCache, prefetchHqLibraryProgress } from '../playback/spessaCach
 const HIGHLIGHT = 'var(--jp-text-muted)'
 const BTN = { padding: '2px 8px', fontSize: 11, whiteSpace: 'nowrap' as const, background: 'var(--jp-bg-app)', border: '1px solid var(--jp-border)', color: 'var(--jp-text-primary)', borderRadius: '6px' }
 
-export function SoundBankDialog() {
+export function SoundBankPanel() {
   const hqCache = useRef(createHqCache())
   const [notice, setNotice] = useState<string | null>(null)
   const [open, setOpen] = useState<Record<string, boolean>>(() => ({ [HQ_LIBRARIES[0]?.id ?? 'generaluser_gs']: true }))
@@ -145,8 +146,7 @@ export function SoundBankDialog() {
   }
 
   return (
-    <Modal title="音色库管理" maskDim={0.35} closeOnMaskClick compact>
-      <div style={{ fontSize: 12, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ fontSize: 12, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn" style={BTN} onClick={exportConfig}>导出收藏</button>
           <button className="btn" style={BTN} onClick={() => fileRef.current?.click()}>导入收藏</button>
@@ -175,7 +175,7 @@ export function SoundBankDialog() {
           {HQ_LIBRARIES.map((l) => bankRow(l.id, l.name, l.sizeBytes, '高保真'))}
         </div>
         {notice && <div style={{ color: notice.startsWith('✓') ? 'var(--jp-text-primary)' : 'var(--jp-danger)', fontSize: 11 }}>{notice}</div>}
-      </div>
-    </Modal>
+        <div style={{ color: HIGHLIGHT, fontSize: 11 }}>音色库与试听音色属本机偏好，不随谱保存。</div>
+    </div>
   )
 }
