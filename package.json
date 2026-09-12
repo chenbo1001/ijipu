@@ -13,6 +13,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "smoke": "vite build --config vite.smoke.config.ts && node dist-smoke/smoke.cjs",
+    "release:body": "node scripts/release-body.mjs",
     "preview:render": "vite build --config vite.smoke.config.ts && node dist-smoke/preview.cjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

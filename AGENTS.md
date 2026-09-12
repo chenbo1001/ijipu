@@ -36,6 +36,7 @@
 5. localStorage 键统一 `ijipu.` 前缀、集中定义在 store 顶部；损坏回退默认值；写入范围钳制
 6. 每次功能/修复后：排错必记 `docs/ERRORS-LOG.md`（`E-年份-序号`，现象/根因/解决/预防）
 7. 版本发布顺序：**改码 → 同步文档 → 判定版本递增（按内容大小）→ 递增版本号（多处同步）→ git 提交（Conventional + adjNN）→ 打 git tag → 打包**。完整规则见 `docs/VERSIONING.md`「发布操作流程」。**版本号策略**：`ijipu` 与 `obsidian-ijipu` 只有引擎（`vendor/engine`）共用，两库版本号**各自独立、不强制对齐**，各按自身代码更新量递增；涉及引擎更新时同步 `obsidian-ijipu/vendor/engine` 并按其自身更新量升版本、补 RELEASE-NOTES、单独提交 + 打 tag。（触发词：用户说「**更新提交**」即按此整串执行。）
+8. **Release 正文只含当版**：`npm run release:body` 生成 `release-body.md`（从 `CHANGELOG.md` 截取**当前版本**那一节）；**禁把整份累积 CHANGELOG 贴进 GitHub Release**（插件仓库已由工作流自动截取）。
 
 ## 六、临时验证脚本
 - 命名 `scripts/_tmp_*.mts`，用后**必删**、禁提交 git；引擎验证优先并入 smoke

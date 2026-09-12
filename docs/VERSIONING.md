@@ -59,7 +59,12 @@ npm run tauri:build  # 复用 npm run build（前端 dist），版本随 package
 4. **验证**：`tsc -b` + `npm run build` 通过；`npm run smoke` 无新增失败（既有预存失败基线除外）。
 5. **git 提交 + 打 tag**：
    - 提交（Conventional + adjNN，如 `release: 版本升至 x.y.z（...）`、`feat(engine): ...`）
-   - `git tag <版本号>`（无 `v` 前缀，如 `0.10.5`），指向该提交。
+   - `git tag v<x.y.z>`（与既有 tag 一致，如 `v0.12.17`、`v0.13.0`），指向该提交。
+6. **GitHub Release 正文只含当版**：用 `npm run release:body`（= `scripts/release-body.mjs`）按
+   `package.json` 的版本从 `CHANGELOG.md` 截取**当前版本那一节**，写入 `release-body.md`（已 gitignore），
+   建 Release 时用它当正文。
+   > `CHANGELOG.md` 是累积文件（保留历史便于查阅），**直接把整份贴进 Release 会把之前所有版本一起发出去**。
+   > 插件仓库同理：其工作流已改为先跑 `scripts/release-body.mjs` 再 `body_path: release-body.md`。
 
 ---
 ## 双仓库联动（ijipu 引擎 ↔ obsidian-ijipu）
