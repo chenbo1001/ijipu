@@ -6,7 +6,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, JPS_CONFIG_PREFIX, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW } from '@ijipu/engine/index.ts'
+import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW } from '@ijipu/engine/index.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork } from '@ijipu/engine/playback/index.ts'
@@ -781,16 +781,22 @@ check('mergeJpsConfig 谱面设置优先（margin_top=123）', mgCfg.margin_top 
 check('无 # 设置时回退默认（margin_top=默认）', mergeJpsConfig(ysSrc, null).margin_top === defaultPageConfig.margin_top, `mt=${mergeJpsConfig(ysSrc, null).margin_top}`)
 const codeW2 = writeJpsConfig(codeW, { ...DUR_CFG, margin_top: 200 })
 check('writeJpsConfig 原位更新已有行（margin_top=200，不重复追加）', codeW2.split('\n').filter((l) => l.startsWith('# jps-config:')).length === 1 && extractJpsConfig(codeW2)?.margin_top === 200, '')
-// adj221：编辑器字体/字号随谱保存——PageConfig 可选字段不在 defaultPageConfig 对象上，
-// 白名单必须显式涵盖，否则写回后读回被过滤丢失
+// adj-font 分层：编辑器偏好属「用户个性」，**不进谱面**（旧断言按新语义重写）
 {
-  const codeW3 = writeJpsConfig(ysSrc, { ...DUR_CFG, editorFont: 'Courier New', editorFontSize: 18 })
+  // 写回：即使传入的对象里带了 editorFont（历史数据），也不会写进 # jps-config 行
+  const codeW3 = writeJpsConfig(ysSrc, {
+    ...DUR_CFG,
+    editorFont: 'Courier New',
+    editorFontSize: 18,
+  } as unknown as typeof defaultPageConfig)
+  check('adj-font 谱面写入不含 editorFont（用户个性不进谱面）', !codeW3.includes('editorFont'), codeW3.split('\n').slice(-3).join(' | '))
   const ex3 = extractJpsConfig(codeW3)
-  check('adj221 extractJpsConfig 回读 editorFont', ex3 !== null && ex3.editorFont === 'Courier New', JSON.stringify(ex3))
-  check('adj221 extractJpsConfig 回读 editorFontSize', ex3 !== null && ex3.editorFontSize === 18, JSON.stringify(ex3))
-  const mg3 = mergeJpsConfig(codeW3, null)
-  check('adj221 mergeJpsConfig 谱面 editorFont/Size 优先', mg3.editorFont === 'Courier New' && mg3.editorFontSize === 18, `font=${mg3.editorFont} fs=${mg3.editorFontSize}`)
-  check('adj221 无谱面设置时缺省（editorFont 未定义）', mergeJpsConfig(ysSrc, null).editorFont === undefined, `font=${mergeJpsConfig(ysSrc, null).editorFont}`)
+  check('adj-font 谱面读取也拿不到 editorFont/Size', ex3 !== null && !('editorFont' in ex3) && !('editorFontSize' in ex3), JSON.stringify(ex3))
+  // 旧谱面里已存在的 editorFont：读配置时忽略，但可用 extractLegacyEditorPrefs 迁移到本机偏好
+  const legacySrc = `${ysSrc}\n# jps-config:{"margin_top":41,"editorFont":"Courier New","editorFontSize":18}\n`
+  check('adj-font 旧谱面 editorFont 读取时被忽略', extractJpsConfig(legacySrc)?.margin_top === 41 && !('editorFont' in (extractJpsConfig(legacySrc) ?? {})))
+  check('adj-font 旧谱面 editorFont 可迁移读出', extractLegacyEditorPrefs(legacySrc)?.font === 'Courier New' && extractLegacyEditorPrefs(legacySrc)?.fontSize === 18)
+  check('adj-font 无旧字段时迁移返回 null', extractLegacyEditorPrefs(ysSrc) === null)
 }
 // 损坏 JSON 忽略（回退默认）
 const badCfg = mergeJpsConfig('V: 1.0\n# jps-config:{bad json\nQ: 1 2 3 4 |\n', null)
@@ -3970,7 +3976,6 @@ console.log('[89] per-score config round trip (# jps-config, adj382)')
     lianyinxian_type: 2 as const,
     showInstrument: true,
     lyricShrink: true,
-    editorFontSize: 18,
   }
   const written = writeJpsConfig(src, cfg)
   const line = written.split('\n').find((l) => l.startsWith(JPS_CONFIG_PREFIX))
@@ -3982,13 +3987,13 @@ console.log('[89] per-score config round trip (# jps-config, adj382)')
   check('adj382 往返保真：写入的每个字段都能读回（不丢字段）', missed.length === 0, `丢失=${missed.join(',')}`)
   check('adj382 可选字段 showInstrument 往返保真（旧版会丢：勾选「显示乐器名」重开即失效）', back.showInstrument === true, String(back.showInstrument))
   check('adj382 可选字段 lyricShrink 往返保真', back.lyricShrink === true, String(back.lyricShrink))
-  check('adj382 可选字段 editorFontSize 往返保真', back.editorFontSize === 18, String(back.editorFontSize))
-  // 可选字段逐个核对（与 engine/settings.ts 的 OPTIONAL_CONFIG_FIELDS 对齐）
+  // adj-font：editorFont/editorFontSize 已不属谱面级（改为 L1 用户个性），不再做往返断言——
+  // 相关新语义断言见本节之后的 [90]（差量写入 + 编辑器偏好不进谱面 + 字体 fallback）
+  // 可选字段逐个核对（与 engine/settings.ts 的 OPTIONAL_CONFIG_FIELDS 对齐；
+  // 编辑器偏好已移出谱面级，不在此列——见 adj-font 断言）
   const optionalSamples: [string, unknown][] = [
     ['heights', { quci: [1, 2, 3, 4] }],
     ['metaPos', { notes: { x: 10, y: -30 } }],
-    ['editorFont', 'Courier New'],
-    ['editorFontSize', 18],
     ['lyricShrink', true],
     ['showInstrument', true],
   ]
@@ -4001,6 +4006,67 @@ console.log('[89] per-score config round trip (# jps-config, adj382)')
   check('adj382 优先级：源内谱面设置 > 兜底设置', merged.note_size === 15, String(merged.note_size))
   check('adj382 源内未写的键回退兜底', mergeJpsConfig(src, { ...defaultPageConfig, margin_right: 12 }).margin_right === 12)
   check('adj382 重复写回仍只有一行 # jps-config', writeJpsConfig(written, cfg).split(JPS_CONFIG_PREFIX).length - 1 === 1)
+}
+
+// ---- 90. 设置分层：差量写入 / 编辑器偏好不进谱面 / 字体 fallback（adj-font）----
+console.log('[90] settings layering: diff write, editor prefs out of score, font fallbacks (adj-font)')
+{
+  const src = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n'
+
+  // ① 差量写入：全默认 → 不写设置行；改一项 → 只写该项
+  const allDefault = writeJpsConfig(src, { ...defaultPageConfig })
+  check('adj-font 全默认时不写 # jps-config 行', !allDefault.includes(JPS_CONFIG_PREFIX), JSON.stringify(allDefault.slice(-40)))
+  const oneChange = writeJpsConfig(src, { ...defaultPageConfig, margin_left: 32, note_size: 15 })
+  const line1 = oneChange.split('\n').find((l) => l.startsWith(JPS_CONFIG_PREFIX)) ?? ''
+  const obj1 = JSON.parse(line1.slice(JPS_CONFIG_PREFIX.length)) as Record<string, unknown>
+  check('adj-font 差量写入只含被改字段', Object.keys(obj1).sort().join(',') === 'margin_left,note_size', Object.keys(obj1).join(','))
+  check('adj-font 差量写入可正确读回', extractJpsConfig(oneChange)?.margin_left === 32 && extractJpsConfig(oneChange)?.note_size === 15)
+  check('adj-font 差量写入不含默认字段（margin_top 不落盘）', !('margin_top' in obj1))
+
+  // ② 全部回到默认 → 删除设置行（并收敛空行）
+  const back = writeJpsConfig(oneChange, { ...defaultPageConfig })
+  check('adj-font 回到默认时删除设置行', !back.includes(JPS_CONFIG_PREFIX), JSON.stringify(back))
+  check('adj-font 删除后不留多余空行', !back.includes('\n\n\n'), JSON.stringify(back))
+
+  // ③ 全量模式（固化）：与默认相同的项也写入
+  const full = writeJpsConfig(oneChange, { ...defaultPageConfig, margin_left: 32 }, { mode: 'full' })
+  const lineF = full.split('\n').find((l) => l.startsWith(JPS_CONFIG_PREFIX)) ?? ''
+  const objF = JSON.parse(lineF.slice(JPS_CONFIG_PREFIX.length)) as Record<string, unknown>
+  check('adj-font 全量模式写入全部可写字段（≥28 项）', Object.keys(objF).length >= 28, String(Object.keys(objF).length))
+  check('adj-font 全量模式含默认字段（margin_top=40）', objF.margin_top === 40)
+
+  // ④ 编辑器偏好永不进谱面（类型上已从 PageConfig 移除；源码里写了也会被白名单过滤）
+  const legacy = `V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n\n# jps-config:{"note_size":15,"editorFont":"SimHei","editorFontSize":22}\n`
+  const exLegacy = extractJpsConfig(legacy)
+  check('adj-font 读取时忽略谱面里的 editorFont/editorFontSize', exLegacy?.note_size === 15 && !('editorFont' in (exLegacy ?? {})) && !('editorFontSize' in (exLegacy ?? {})), JSON.stringify(exLegacy))
+  const migrated = extractLegacyEditorPrefs(legacy)
+  check('adj-font 旧编辑器偏好可一次性迁移读出', migrated?.font === 'SimHei' && migrated?.fontSize === 22, JSON.stringify(migrated))
+  const rewritten = writeJpsConfig(legacy, mergeJpsConfig(legacy, null))
+  check('adj-font 再次保存后谱面里的 editorFont 被清除', !rewritten.includes('editorFont'), rewritten.split('\n').slice(-3).join(' | '))
+  check('adj-font 再次保存保留仍非默认的项（note_size=15）', extractJpsConfig(rewritten)?.note_size === 15)
+
+  // ⑤ 字体 fallback：裸名补通用族；已有通用族不重复补
+  check('adj-font 裸字体名补 sans-serif', normalizeFontStack('Microsoft YaHei') === "'Microsoft YaHei', sans-serif", normalizeFontStack('Microsoft YaHei'))
+  check('adj-font 宋体类补 serif', normalizeFontStack('SimSun') === 'SimSun, serif', normalizeFontStack('SimSun'))
+  check('adj-font 等宽类补 monospace', normalizeFontStack('Consolas') === 'Consolas, monospace', normalizeFontStack('Consolas'))
+  check('adj-font 已有通用族的栈保持不变', normalizeFontStack("'SimHei', sans-serif") === "'SimHei', sans-serif")
+  check('adj-font 空值回落默认系统栈', normalizeFontStack('') === SYS_FONT)
+  check('adj-font 旧谱面里的裸字体名读取时自动补 fallback', extractJpsConfig(`V: 1.0\nQ: 1 |\n# jps-config:{"geci_font":"KaiTi"}\n`)?.geci_font === 'KaiTi, serif', String(extractJpsConfig(`V: 1.0\nQ: 1 |\n# jps-config:{"geci_font":"KaiTi"}\n`)?.geci_font))
+
+  // ⑥ 字体候选：每个都是含通用族的完整栈（三原则之"保证有字体可用"）
+  const allFonts = [...SCORE_FONT_OPTIONS, ...EDITOR_FONT_OPTIONS]
+  const noGeneric = allFonts.filter((o) => !/sans-serif|serif|monospace|system-ui/.test(o.value))
+  check(`adj-font 字体候选（${allFonts.length} 项）都以通用族兜底`, noGeneric.length === 0, noGeneric.map((o) => o.label).join(','))
+  check('adj-font 编辑器字体候选均为等宽（monospace 兜底）', EDITOR_FONT_OPTIONS.every((o) => o.value.includes('monospace')))
+  check('adj-font 编辑器字体候选不含编程连字字体', EDITOR_FONT_OPTIONS.every((o) => !/Fira Code|JetBrains Mono|Cascadia Code/i.test(o.value)))
+
+  // ⑦ 字体覆盖（L1）：开启后六项字体统一替换；关闭原样返回
+  const ovCfg = applyFontOverride({ ...defaultPageConfig, biaoti_font: 'X, serif' }, { enabled: true, font: 'SimHei' })
+  check('adj-font 字体覆盖开启：六项字体统一', ['biaoti_font', 'fubiaoti_font', 'miaoshu_font', 'notes_font', 'geci_font', 'shuzi_font'].every((f) => (ovCfg as unknown as Record<string, unknown>)[f] === 'SimHei, sans-serif'))
+  check('adj-font 字体覆盖不改字号与其它排版参数', ovCfg.note_size === defaultPageConfig.note_size && ovCfg.margin_left === defaultPageConfig.margin_left)
+  const off = { ...defaultPageConfig, biaoti_font: 'X, serif' }
+  check('adj-font 字体覆盖关闭时原样返回（同一对象）', applyFontOverride(off, { enabled: false, font: 'SimHei' }) === off)
+  check('adj-font 编辑器字号夹取范围 10~26', clampEditorFontSize(99) === 26 && clampEditorFontSize(1) === 10)
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码

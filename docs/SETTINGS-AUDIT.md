@@ -173,6 +173,38 @@ draft 草稿、文件句柄库、PWA/SW 与更新提示、Tauri 音源分支、`
 
 ---
 
+## 八、决策定稿（2026-09-12，按建议执行）
+
+| # | 决策 | **定稿** |
+|---|---|---|
+| **D1** | `# jps-config` 写入策略 | **差量写入（默认）**：`writeJpsConfig(code, cfg)` 只写与 `defaultPageConfig` 不同的字段，无差量则**删除该行**；需要"到哪都一样"时用 `{ mode: 'full' }`，界面入口 = 页面设置对话框的「**固化全部到谱面**」 |
+| **D2** | 字体是否允许用户层覆盖谱面 | **允许，默认关**：L1 新增 `FontOverride{ enabled, font }`（键 `ijipu.fontOverride`），开启后标题/副标题/描述头/说明/歌词/数字六项**字体族**统一为所选栈（不动字号与其它排版参数），谱面文件不改写；界面在页面设置「全局」标签 |
+| **D3** | Obsidian frontmatter 是否保留 | **保留为可选 L1.5**：优先级低于源内 `# jps-config`，文档写明；已降级键（`ijipu_editorFont*`）给专门提示而非"未识别" |
+| **D4** | 音源缓存按库隔离？ | **共享**（跨库复用省流量）；插件设置页提供缓存状态与清除入口（后续随嵌入方案落地） |
+| **D5** | 嵌入后主题与布局类偏好 | **跟随 Obsidian 主题 + 隐藏布局类偏好**（splitPct/splitHDir/viewType/previewZoom 由宿主/窗格决定）；保留编辑器字号/字体/折行/输入条（L1） |
+
+## 八之二、字体策略（三原则，已落地）
+
+| 原则 | 做法 |
+|---|---|
+| ① 跨机尽量有 | 候选只选 Windows/macOS/iOS/Android/Linux 至少一到两个平台内置的字体：微软雅黑 / PingFang SC / Hiragino Sans GB / Noto Sans CJK SC / 思源黑体 / 文泉驿；宋体侧用 Songti SC / SimSun / Noto Serif CJK SC |
+| ② 适合简谱 | 音符数字默认无衬线（醒目）；黑体、宋体、楷体作为风格选项；另提供西文衬线（Georgia）与等宽（数字等距） |
+| ③ 保证有可用字体 | 每个候选都是**完整 font-family 栈**且**末尾必须落到通用族**（`sans-serif`/`serif`/`monospace`）；旧文件里的裸字体名（`SimHei`、`KaiTi`…）在读取时经 `normalizeFontStack()` **自动补 fallback**，无需用户改谱 |
+
+集中定义在 `engine/fonts.ts`（`SYS_FONT`、`SCORE_FONT_OPTIONS`、`EDITOR_FONT_OPTIONS`、`normalizeFontStack`），应用与插件共用同一份，不再各写一套（此前应用 10 项裸名、插件 5 项，两处还不一致）。
+
+## 八之三、本次已实施清单
+
+| 项 | 位置 |
+|---|---|
+| `PageConfig` 移除 `editorFont/editorFontSize`；L1 偏好集中到 `EditorPrefs`/`defaultEditorPrefs` | `engine/types.ts`、`engine/fonts.ts` |
+| 差量写入 + 空差量删除行 + 全量模式 + 白名单过滤 + 字体 fallback 归一 | `engine/settings.ts`（`writeJpsConfig` / `extractJpsConfig` / `extractLegacyEditorPrefs`） |
+| L1 读写唯一入口（编辑器字体/字号、字体覆盖）+ 旧谱面值一次性迁移 | `src/store/editorPrefs.ts`（新） |
+| 顶栏 A−/A+/字体下拉不再写谱面；读取只认 L1 | `src/ui/TopBar.tsx`、`src/editor/EditorPane.tsx` |
+| 生效配置解析收敛为 `resolveConfig()`（含 L1 字体覆盖）；新增 `persistFullConfig()` | `src/store/docStore.ts` |
+| 页面设置：字体候选取自引擎、编辑器项标注为 L1、字体覆盖开关、「固化全部到谱面」 | `src/dialogs/PageConfigDialog.tsx` |
+| 40 项断言（差量/删除行/全量/编辑器键不进谱面/迁移/字体归一/候选兜底/覆盖开关/字号钳制） | `scripts/smoke.mts` 的 `[90]` |
+
 ## 九、变更清单（按文档执行时要动的文件）
 
 | 文件 | 动作 |

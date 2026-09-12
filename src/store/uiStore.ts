@@ -3,9 +3,13 @@
  */
 import './localStorageMigration'
 import { create } from 'zustand'
+import { clampEditorFontSize, normalizeFontStack } from '@ijipu/engine'
 import { DEFAULT_THEME, DEFAULT_THEME_MODE, type ThemeMode } from '../brand/themes'
 // adj366：试听音色选择值的解析/格式化（未设置或空串 = 自动）
 import { formatStoredVoice, parseStoredVoice } from './playbackVoice'
+// L1「用户个性」：编辑器偏好 + 字体覆盖（不进谱面；详见 docs/SETTINGS-AUDIT.md 分层）
+import { loadEditorFont, loadEditorFontSize, loadFontOverride, saveEditorFont, saveEditorFontSize, saveFontOverride } from './editorPrefs'
+import type { FontOverride } from '@ijipu/engine'
 
 export type ModalKind =
   | 'about'
@@ -30,8 +34,6 @@ export interface Notice {
 const THEME_KEY = 'ijipu.theme'
 const THEME_MODE_KEY = 'ijipu.themeMode'
 const SPLIT_KEY = 'ijipu.splitPct'
-const EDITOR_FS_KEY = 'ijipu.editorFontSize'
-const EDITOR_FONT_KEY = 'ijipu.editorFont'
 const PREVIEW_ZOOM_KEY = 'ijipu.previewZoom'
 const AUTO_WRAP_KEY = 'ijipu.autoWrap'
 const SHOW_SCRIPT_PAD_KEY = 'ijipu.showScriptPad'
@@ -137,10 +139,12 @@ interface UiState {
   systemLight: boolean
   /** 拆分视图上（预览）窗格高度占比（%），下（编辑器）窗格占剩余 */
   splitPct: number
-  /** 脚本编辑器字号（px） */
+  /** 脚本编辑器字号（px，L1 用户个性；不写入谱面） */
   editorFontSize: number
-  /** 脚本编辑器字体（adj160：与字号按钮同排，默认等宽代码字体） */
+  /** 脚本编辑器字体（L1 用户个性；等宽栈，含 fallback；不写入谱面） */
   editorFont: string
+  /** L1：用我的字体覆盖谱面字体（标题/副标题/描述头/说明/歌词/数字六项；默认关） */
+  fontOverride: FontOverride
   /** 预览缩放（%，50~200，adj51） */
   previewZoom: number
   /** 编辑器自动折行（adj233 默认关闭；adj234 曾默认开启——用户确认保持默认关闭，
@@ -174,6 +178,7 @@ interface UiState {
   setSplitPct: (pct: number) => void
   setEditorFontSize: (px: number) => void
   setEditorFont: (f: string) => void
+  setFontOverride: (o: FontOverride) => void
   setPreviewZoom: (z: number) => void
   setAutoWrap: (b: boolean) => void
   setShowScriptPad: (b: boolean) => void
@@ -202,20 +207,9 @@ export const useUiStore = create<UiState>()((set) => ({
   themeMode: loadThemeMode(),
   systemLight: detectSystemLight(),
   splitPct: loadNum(SPLIT_KEY, 50),
-  editorFontSize: loadNum(EDITOR_FS_KEY, 14),
-  editorFont: (() => {
-    // adj163：仅接受等宽字体（textarea 与高亮层需逐字符对齐）；
-    // adj173：排除带编程连字的字体（Cascadia Code/JetBrains Mono/Fira Code 等），
-    // 防止 |:、|| 等连字字形导致显示层与实际层列错位；旧配置存了连字字体回退默认
-    const MONO = new Set(['Consolas', 'Courier New', 'monospace'])
-    try {
-      const v = localStorage.getItem(EDITOR_FONT_KEY)
-      if (v && MONO.has(v)) return v
-    } catch {
-      /* 忽略 */
-    }
-    return 'Consolas'
-  })(),
+  editorFontSize: loadEditorFontSize(),
+  editorFont: loadEditorFont(),
+  fontOverride: loadFontOverride(),
   previewZoom: loadNum(PREVIEW_ZOOM_KEY, 100),
   // adj311：自动折行改为默认开启——Textarea 与显示层折行同步已修复
   //（mirror div 与 textarea 折行点一致），开启后长行软折行对位正确无横向滚动
@@ -299,21 +293,20 @@ export const useUiStore = create<UiState>()((set) => ({
     set({ splitPct: v })
   },
   setEditorFontSize: (px) => {
-    const v = Math.min(26, Math.max(10, Math.round(px)))
-    try {
-      localStorage.setItem(EDITOR_FS_KEY, String(v))
-    } catch {
-      /* 忽略 */
-    }
+    // L1 用户个性：只写本机偏好（**不再写谱面**；早期版本会 setPageConfig(cfg,true) 写进 # jps-config）
+    const v = clampEditorFontSize(px)
+    saveEditorFontSize(v)
     set({ editorFontSize: v })
   },
   setEditorFont: (f) => {
-    try {
-      localStorage.setItem(EDITOR_FONT_KEY, f)
-    } catch {
-      /* 忽略 */
-    }
-    set({ editorFont: f })
+    const v = normalizeFontStack(f)
+    saveEditorFont(v)
+    set({ editorFont: v })
+  },
+  setFontOverride: (o) => {
+    const next: FontOverride = { enabled: o.enabled === true, font: normalizeFontStack(o.font) }
+    saveFontOverride(next)
+    set({ fontOverride: next })
   },
   setPreviewZoom: (z) => {
     const v = Math.min(200, Math.max(50, Math.round(z)))

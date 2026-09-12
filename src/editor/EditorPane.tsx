@@ -73,11 +73,11 @@ export function EditorPane() {
   const autoWrap = useUiStore((s) => s.autoWrap)
   // adj314：嵌入式简谱输入工具条显示开关
   const showScriptPad = useUiStore((s) => s.showScriptPad)
-  // adj221：编辑器字体/字号随谱保存（# jps-config）——谱面有值时优先，
-  // 无则回退 uiStore 全局默认；写入在 EditorFootBar 处理
-  const pageConfig = useDocStore((s) => s.pageConfig)
-  const effectiveFontSize = pageConfig.editorFontSize ?? editorFontSize
-  const effectiveFont = pageConfig.editorFont ?? editorFont
+  // 编辑器字体/字号属 L1「用户个性」（本机偏好，**不随谱保存**；分层见 docs/SETTINGS-AUDIT.md）——
+  // adj-font：此前这里读 `pageConfig.editorFontSize ?? editorFontSize`（谱面里有值就优先），
+  // 而谱面里的这两个键是早期版本误写进去的；现已从 PageConfig 移除，只认本机偏好。
+  const effectiveFontSize = editorFontSize
+  const effectiveFont = editorFont
 
   // adj165：行高取整为整数（textarea 原生行盒与高亮层 CSS 行盒完全一致）
   const editorLineH = Math.round(effectiveFontSize * 1.7)

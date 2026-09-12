@@ -4,7 +4,7 @@
  */
 import './localStorageMigration'
 import { create } from 'zustand'
-import { parseJps, defaultPageConfig, mergeJpsConfig, writeJpsConfig } from '@ijipu/engine'
+import { parseJps, defaultPageConfig, applyFontOverride, mergeJpsConfig, writeJpsConfig } from '@ijipu/engine'
 import type { PageConfig, ParseResult } from '@ijipu/engine'
 import { SAMPLES, defaultSample } from '../samples'
 import {
@@ -25,6 +25,7 @@ import {
   type SavePhaseLog,
 } from './saveSupport'
 import { useUiStore } from './uiStore'
+import { loadFontOverride, migrateLegacyEditorPrefs } from './editorPrefs'
 
 /** adj200：用户是否已主导过文件状态（新建/打开/保存/另存为）。「启动恢复」异步读 IndexedDB，
  *  必须只在用户还未进行任何文件操作时应用，避免它在用户新建/另存为之后才完成，从而把
@@ -77,8 +78,13 @@ interface DocState {
   setCode: (code: string) => void
   setViewType: (v: ViewType) => void
   setAutoFormat: (b: boolean) => void
-  /** 更新页面设置；persist=true 时同时写回源码 # jps-config（谱面级持久化，adj83） */
+  /** 更新页面设置；persist=true 时同时写回源码 # jps-config（谱面级持久化，adj83；默认差量写入） */
   setPageConfig: (cfg: PageConfig, persist?: boolean) => void
+  /**
+   * 把**当前生效的全部设置**固化进谱面 `# jps-config`（全量写入）。
+   * 差量写入下，与默认值相同的项不落盘；需要"这份谱在任何机器/任何人手里都长一样"时用它。
+   */
+  persistFullConfig: () => void
   setCursor: (line: number, col: number) => void
   setSelection: (start: number, end: number) => void
   setActiveNoteId: (id: string | null) => void
@@ -135,6 +141,25 @@ function loadPageConfig(): PageConfig {
   }
   return { ...defaultPageConfig }
 }
+
+/**
+ * 解析**生效配置**（分层见 docs/SETTINGS-AUDIT.md）：
+ *   L0 引擎默认 < L1 公共设置(localStorage pageConfig) < L2 谱面源码 # jps-config
+ * 之后再叠加 L1 的「用我的字体覆盖谱面字体」（默认关，跨机缺字体时用）。
+ *
+ * 顺带做一次性迁移：早期版本把编辑器偏好写进了谱面（`# jps-config` 里的 editorFont/editorFontSize），
+ * 首次解析时搬到本机 L1 偏好（仅当本机从未设置过）；此后任何保存都会以差量写入自动清除它们。
+ */
+function resolveConfig(code: string): PageConfig {
+  if (code) {
+    migrateLegacyEditorPrefs(code, (p) => {
+      const ui = useUiStore.getState()
+      if (p.font) ui.setEditorFont(p.font)
+      if (typeof p.fontSize === 'number') ui.setEditorFontSize(p.fontSize)
+    })
+  }
+  return applyFontOverride(mergeJpsConfig(code, loadPageConfig()), loadFontOverride())
+}
 const draft = loadDraft()
 
 /** 撤销/重做：将历史快照恢复到文档（code/解析/脏标记/选区/光标跳转） */
@@ -171,7 +196,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   viewType: (localStorage.getItem('ijipu.viewType') as ViewType) || 'split',
   autoFormat: true,
   // adj83：谱面级设置优先（源码 # jps-config 注释），无则回退公共设置
-  pageConfig: mergeJpsConfig(draft?.code ?? defaultSample().code, loadPageConfig()),
+  pageConfig: resolveConfig(draft?.code ?? defaultSample().code),
   parseResult: parseJps(draft?.code ?? defaultSample().code),
   cursor: { line: 1, col: 0 },
   sel: { start: 0, end: 0 },
@@ -206,7 +231,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
     set({
       code,
       parseResult: parseJps(code),
-      pageConfig: mergeJpsConfig(code, loadPageConfig()),
+      pageConfig: resolveConfig(code),
       dirty: true,
       ...next,
     })
@@ -223,8 +248,10 @@ export const useDocStore = create<DocState>()((set, get) => ({
     } catch {
       /* 存储不可用时静默 */
     }
-    // adj83：persist（对话框「保存设置」）时把设置写回源码 # jps-config 注释
-    // （每首谱用自己的设置）；拖拽实时预览不写源码，避免频繁重解析
+    // adj83：persist（对话框「保存设置」/ 拖拽虚线松手）时把设置写回源码 # jps-config 注释
+    // （每首谱用自己的设置）；拖拽实时预览不写源码，避免频繁重解析。
+    // adj-font：改为**差量写入**（只写与默认不同的字段；无差量则删除设置行），
+    // 避免把旧默认永久钉在文件里；编辑器偏好已不在 PageConfig 中，不会再被写入。
     if (persist) {
       const code = get().code
       const newCode = writeJpsConfig(code, cfg)
@@ -239,6 +266,19 @@ export const useDocStore = create<DocState>()((set, get) => ({
       }
     }
     set({ pageConfig: cfg })
+  },
+  persistFullConfig: () => {
+    const code = get().code
+    const cfg = get().pageConfig
+    const newCode = writeJpsConfig(code, cfg, { mode: 'full' })
+    if (newCode === code) return
+    try {
+      localStorage.setItem(DRAFT_KEY, newCode)
+    } catch {
+      /* 存储不可用时静默 */
+    }
+    set({ code: newCode, parseResult: parseJps(newCode), dirty: true })
+    useUiStore.getState().showNotice('已把当前全部设置固化到谱面（# jps-config）')
   },
   setCursor: (line, col) => set({ cursor: { line, col } }),
   setSelection: (start, end) => set({ sel: { start, end } }),
@@ -280,7 +320,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       code: s.code,
       fileName: s.name,
       parseResult: parseJps(s.code),
-      pageConfig: mergeJpsConfig(s.code, loadPageConfig()),
+      pageConfig: resolveConfig(s.code),
       dirty: false,
       fileHandle: null,
       activeNoteId: null,
@@ -308,7 +348,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
       code: template,
       fileName: '未命名',
       parseResult: parseJps(template),
-      pageConfig: mergeJpsConfig(template, null),
+      // adj214：新建文档强制使用 defaultPageConfig（不吃公共设置），仅叠加 L1 字体覆盖
+      pageConfig: applyFontOverride(mergeJpsConfig(template, null), loadFontOverride()),
       dirty: false,
       fileHandle: null,
       activeNoteId: null,
@@ -354,7 +395,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
         code,
         fileName: name,
         parseResult: parseJps(code),
-        pageConfig: mergeJpsConfig(code, loadPageConfig()),
+        pageConfig: resolveConfig(code),
         dirty: false,
         fileHandle: handle,
         activeNoteId: null,
@@ -643,7 +684,7 @@ function openFileViaInput(): Promise<boolean> {
           code,
           fileName: name,
           parseResult: parseJps(code),
-          pageConfig: mergeJpsConfig(code, loadPageConfig()),
+          pageConfig: resolveConfig(code),
           dirty: false,
           // adj281：降级环境无写回权限，不关联磁盘句柄（保存走 saveFileAs → 会提示 saveUnsupported）
           fileHandle: null,

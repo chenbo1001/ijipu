@@ -2,6 +2,18 @@
 
 ## [未发布]
 
+### 变更
+
+- **设置分层落地：编辑器偏好不再随谱保存 + `# jps-config` 改为差量写入**（`adj-font`，见 `docs/SETTINGS-AUDIT.md` 与 `AGENTS.md` 七）：
+  - **`PageConfig` 移除 `editorFont`/`editorFontSize`**（它们属「用户个性」L1）：顶栏 A−/A+ 与字体下拉此前会 `setPageConfig(cfg, true)` 把编辑器字体**写进 `# jps-config`**，并与 `uiStore` 里的同名偏好并存（读取是 `pageConfig.editorFontSize ?? editorFontSize`，两处存储、两个入口）→ **把 .jps 发给别人会让对方的编辑器字体被改**。现 L1 偏好收敛到 `src/store/editorPrefs.ts` 唯一入口，顶栏/编辑器只读写 L1；旧谱里已写入的值会被一次性迁移到本机偏好（`extractLegacyEditorPrefs`），此后任何保存自动清除。
+  - **`writeJpsConfig` 默认差量写入**（新增 `mode:'diff'|'full'`）：只写与 `defaultPageConfig` 不同的字段，**全部为默认时删除该行**（并收敛 adj200 补充的空行）。这样默认值将来改得更合理时，未显式设置过的谱会跟着变好，而不是被旧默认永久钉住；需要"到哪都一样"时用页面设置里的新按钮「**固化全部到谱面**」（全量写入）。读取侧白名单同时过滤掉编辑器偏好键。
+  - **字体策略（跨机尽量有 / 适合简谱 / 保证有可用字体）** 集中到新模块 `engine/fonts.ts`：`SYS_FONT`（默认栈补上 Hiragino/思源/文泉驿）、`SCORE_FONT_OPTIONS`（6 项，**每项都是含通用族的完整栈**）、`EDITOR_FONT_OPTIONS`（4 项等宽、排除编程连字字体）、`normalizeFontStack`（**旧谱里的裸字体名读取时自动补 `sans-serif`/`serif`/`monospace`**）。此前应用字体下拉存的是裸名（`Microsoft YaHei`/`SimHei`/`KaiTi`…），macOS/Linux/手机缺字体时会静默掉到浏览器默认字体、简谱数字对位崩坏。
+  - 新增 L1「**用我的字体覆盖谱面字体**」开关（`FontOverride`，默认关）：勾选后标题/副标题/描述头/说明/歌词/数字六项字体族统一为所选栈（不动字号与其它排版），谱面文件不改写——跨机缺字体时的兜底手段。
+  - 文档：`docs/SETTINGS-AUDIT.md`（新增：四层模型/逐项归属/决策定稿/字体策略/已实施清单）、`AGENTS.md` 新增「七、设置分层原则」（**新增或调整设置项必须先定层**）、`docs/SYNTAX.md`、`docs/USER-GUIDE.md` 同步。
+  - smoke 新增 `[90]`（25 项：差量/删除行/全量/白名单过滤/旧键迁移/字体归一/候选兜底/覆盖开关/字号钳制）；既有 6 项"编辑器偏好随谱保存"的旧断言按新语义重写。失败数仍为既有基线 17、无回归。
+
+## [未发布]
+
 ### 修复
 
 - **谱面级设置 `# jps-config` 往返丢字段：`showInstrument` 写进去读不回来**（`adj382`）：`extractJpsConfig` 的字段白名单 = `Object.keys(defaultPageConfig)` + 手工补的几项，而 `showInstrument`（「显示乐器名」开关）既是**可选字段**（不在 `defaultPageConfig` 对象上）又没有显式补进白名单 → 实测 `writeJpsConfig` 写入 **30** 个字段、`extractJpsConfig` 只读回 **29** 个：**在 App 里勾选「显示乐器名」→ 保存设置（写进谱面）→ 重新打开就丢**。现把可选字段抽成 `OPTIONAL_CONFIG_FIELDS` 常量并**补上 `showInstrument`**，同时加**编译期完整性断言**（`PageConfig` 新增可选字段而常量未同步时 `tsc` 直接报错），从机制上杜绝"白名单靠人工补"的漏项。smoke 新增 `[89]`（14 项：强不变量「写入的每个字段都必须能读回」+ 6 个可选字段逐个往返 + 优先级/回退/单行更新）。**这是 obsidian-ijipu 直接复用 iJipu 谱面设置（把 .jps 复制进 Obsidian 即渲染一致）的前置修复。**

@@ -13,14 +13,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useDocStore, type ViewType } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { THEMES, type ThemeMode } from '../brand/themes'
-import { formatJps } from '@ijipu/engine'
-
-/** adj281：编辑器字体下拉选项（从 EditorFootBar 移来，固定三个等宽字体） */
-const EDITOR_FONT_OPTIONS: { label: string; value: string }[] = [
-  { label: 'Consolas', value: 'Consolas' },
-  { label: 'Courier New', value: 'Courier New' },
-  { label: '等宽（系统默认）', value: 'monospace' },
-]
+import { formatJps, EDITOR_FONT_OPTIONS } from '@ijipu/engine'
 
 /** Alt+字母 → 菜单分组（adj185） */
 const ALT_MENU_KEYS: Record<string, string> = {
@@ -174,11 +167,10 @@ export function TopBar() {
   const setEditorFontSize = useUiStore((s) => s.setEditorFontSize)
   const editorFont = useUiStore((s) => s.editorFont)
   const setEditorFont = useUiStore((s) => s.setEditorFont)
-  // adj221：字体/字号随谱保存（# jps-config）——调整时写谱面 + 同步全局默认
-  const pageConfig = useDocStore((s) => s.pageConfig)
-  const setPageConfig = useDocStore((s) => s.setPageConfig)
-  const effectiveFontSize = pageConfig.editorFontSize ?? editorFontSize
-  const effectiveFont = pageConfig.editorFont ?? editorFont
+  // 编辑器字体/字号属 L1「用户个性」（本机偏好，**不随谱保存**）——adj-font：此前这里把改动
+  // 同时写进 pageConfig（→ # jps-config），导致"把 .jps 发给别人、别人的编辑器字体被改"，现已移除。
+  const effectiveFontSize = editorFontSize
+  const effectiveFont = editorFont
   // ---- 下拉开关 ----
   const [menuOpen, setMenuOpen] = useState(false)
   const [overflowOpen, setOverflowOpen] = useState(false)
@@ -365,7 +357,6 @@ export function TopBar() {
             onClick={() => {
               const v = Math.max(10, effectiveFontSize - 1)
               setEditorFontSize(v)
-              setPageConfig({ ...pageConfig, editorFontSize: v }, true)
             }}
           >
             A−
@@ -377,7 +368,6 @@ export function TopBar() {
             onClick={() => {
               const v = Math.min(26, effectiveFontSize + 1)
               setEditorFontSize(v)
-              setPageConfig({ ...pageConfig, editorFontSize: v }, true)
             }}
           >
             A+
@@ -413,11 +403,10 @@ export function TopBar() {
                   onMouseDown={(e) => {
                     e.preventDefault()
                     setEditorFont(o.value)
-                    setPageConfig({ ...pageConfig, editorFont: o.value }, true)
                     setFontOpen(false)
                   }}
                 >
-                  <span className="opt-label" style={{ fontFamily: `'${o.value}', monospace` }}>Aa</span>
+                  <span className="opt-label" style={{ fontFamily: o.value }}>Aa</span>
                   {o.label}
                 </div>
               ))}
@@ -466,7 +455,6 @@ export function TopBar() {
               onClick={() => {
                 const v = Math.max(10, effectiveFontSize - 1)
                 setEditorFontSize(v)
-                setPageConfig({ ...pageConfig, editorFontSize: v }, true)
                 closeOverflow()
               }}
               title="减小字号"
@@ -480,7 +468,6 @@ export function TopBar() {
               onClick={() => {
                 const v = Math.min(26, effectiveFontSize + 1)
                 setEditorFontSize(v)
-                setPageConfig({ ...pageConfig, editorFontSize: v }, true)
                 closeOverflow()
               }}
               title="增大字号"

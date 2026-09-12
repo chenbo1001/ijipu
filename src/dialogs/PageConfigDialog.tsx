@@ -12,7 +12,7 @@ import { useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
-import { defaultPageConfig } from '@ijipu/engine'
+import { clampEditorFontSize, defaultPageConfig, EDITOR_FONT_OPTIONS, SCORE_FONT_OPTIONS } from '@ijipu/engine'
 import type { PageConfig } from '@ijipu/engine'
 
 type TabId = 'global' | 'page' | 'noteLayout' | 'spacing' | 'font' | 'slur'
@@ -43,6 +43,11 @@ export function PageConfigDialog() {
   const setEditorFontSize = useUiStore((s) => s.setEditorFontSize)
   const editorFont = useUiStore((s) => s.editorFont)
   const setEditorFont = useUiStore((s) => s.setEditorFont)
+  // adj-font：字体覆盖（L1 用户个性；跨机缺字体时用我的字体，不改谱面文件）
+  const fontOverride = useUiStore((s) => s.fontOverride)
+  const setFontOverride = useUiStore((s) => s.setFontOverride)
+  // adj-font：把当前生效设置**全量**固化进谱面（差量写入下与默认相同的项不落盘）
+  const persistFullConfig = useDocStore((s) => s.persistFullConfig)
 
   const [draft, setDraft] = useState<PageConfig>({ ...pageConfig })
   const [tab, setTab] = useState<TabId>('global')
@@ -97,7 +102,7 @@ export function PageConfigDialog() {
               </label>
             </Row>
             <Row label="编辑器字号">
-              <NumInput label="" value={editorFontSize} onChange={(v) => setEditorFontSize(Math.min(26, Math.max(10, Number.isFinite(v) ? v : 14)))} />
+              <NumInput label="" value={editorFontSize} onChange={(v) => setEditorFontSize(clampEditorFontSize(Number.isFinite(v) ? v : 14))} />
             </Row>
             <Row label="编辑器字体">
               <select value={editorFont} onChange={(e) => setEditorFont(e.target.value)}>
@@ -106,8 +111,24 @@ export function PageConfigDialog() {
                 ))}
               </select>
             </Row>
+            {/* adj-font：L1 用户个性——跨机缺字体时的兜底：用我的字体覆盖谱面六项字体（默认关，不改写谱面） */}
+            <Row label="字体覆盖">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={fontOverride.enabled}
+                  onChange={(e) => setFontOverride({ ...fontOverride, enabled: e.target.checked })}
+                />
+                <span style={{ fontSize: 12 }}>用我的字体覆盖谱面字体（跨机缺字体时勾选）</span>
+              </label>
+            </Row>
+            {fontOverride.enabled && (
+              <Row label="覆盖为">
+                <FontSelect value={fontOverride.font} onChange={(v) => setFontOverride({ ...fontOverride, font: v })} />
+              </Row>
+            )}
             <div style={{ color: 'var(--jp-text-muted)', fontSize: 12, marginTop: 2 }}>
-              全局设置不随谱保存；默认视图由顶栏视图组记住，重启恢复最后一次。
+              以上为**本机偏好**（L1），不随谱保存；谱面字体在「字体」标签里设置（随谱走）。
             </div>
           </>
         )
@@ -269,9 +290,23 @@ export function PageConfigDialog() {
           恢复默认
         </button>
         <button
+          className="btn"
+          title="把当前生效的全部设置写成全量 # jps-config（与默认相同的项也会写入）——要把这份谱发给别人、保证任何机器上都长一样时用"
+          onClick={() => {
+            // adj-font（D1）：差量写入是默认；这里显式"固化全部"（全量写入），供分享/存档
+            committedRef.current = true
+            setPageConfig(snapRef.current, false) // 丢弃预览改动，按当前生效配置固化
+            persistFullConfig()
+            closeModal()
+          }}
+        >
+          固化全部到谱面
+        </button>
+        <button
           className="btn primary"
           onClick={() => {
             // adj83：保存设置时持久化到源码 # jps-config 注释（每首谱用自己的设置）
+            // adj-font（D1）：默认**差量写入**（只写与默认不同的字段；全部为默认时删除设置行）
             committedRef.current = true
             setPageConfig(draft, true)
             closeModal()
@@ -284,26 +319,11 @@ export function PageConfigDialog() {
   )
 }
 
-/** 字体选项（adj105：名称显示中文，value 存字体名供 SVG/渲染使用） */
-const FONT_OPTIONS: { label: string; value: string }[] = [
-  { label: '微软雅黑', value: 'Microsoft YaHei' },
-  { label: '黑体', value: 'SimHei' },
-  { label: '宋体', value: 'SimSun' },
-  { label: '楷体', value: 'KaiTi' },
-  { label: '华文楷体', value: 'STKaiti' },
-  { label: 'Georgia', value: 'Georgia' },
-  { label: 'Times New Roman', value: 'Times New Roman' },
-  { label: 'Segoe UI', value: 'Segoe UI' },
-  { label: '无衬线', value: 'sans-serif' },
-  { label: '衬线', value: 'serif' },
-]
-
-/** adj315：编辑器字体选项（全局设置——编辑器 textarea 等宽字体） */
-const EDITOR_FONT_OPTIONS: { label: string; value: string }[] = [
-  { label: 'Consolas', value: 'Consolas' },
-  { label: 'Courier New', value: 'Courier New' },
-  { label: '等宽（系统默认）', value: 'monospace' },
-]
+/**
+ * 谱面字体候选（adj-font：改由引擎 `SCORE_FONT_OPTIONS` 统一提供——每项都是**含通用族的完整栈**，
+ * 避免旧版"裸字体名"换机器掉到浏览器默认字体；跨机可用/适合简谱/保证有 fallback 三原则）。
+ */
+const FONT_OPTIONS: { label: string; value: string }[] = SCORE_FONT_OPTIONS
 
 function FontSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const opts = value && !FONT_OPTIONS.some((o) => o.value === value) ? [{ label: value, value }, ...FONT_OPTIONS] : FONT_OPTIONS

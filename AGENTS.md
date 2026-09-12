@@ -40,3 +40,30 @@
 ## 六、临时验证脚本
 - 命名 `scripts/_tmp_*.mts`，用后**必删**、禁提交 git；引擎验证优先并入 smoke
 - 只读 samples/、docs/ 真实文件；产物只写 `dist-smoke/`、`dist-preview/`，验证后清理
+
+## 七、设置分层原则（新增/调整任何设置项必须先定层）
+
+> 完整清单与逐项归属见 `docs/SETTINGS-AUDIT.md`。**新增属性或调整属性时，先按下表定层、再写代码**；
+> 跨层放错是本项目多次踩坑的根源（编辑器偏好被写进谱面、全量写入把旧默认钉死等）。
+
+| 层 | 含义 | 存储位置 | 判定要点 |
+|---|---|---|---|
+| **L0 代码默认** | `defaultPageConfig`、引擎/品牌常量 | 源码 | 只作兜底，用户不可改 |
+| **L1 用户个性** | 与"这个人怎么用"有关，与具体谱无关 | 本机缓存（`ijipu.*`）/ 插件设置 / IndexedDB 缓存 | 换机器可以不一样；丢失会让用户烦 |
+| **L1.5 笔记级** | 仅 Obsidian：一个笔记内多份谱的统一覆盖 | 笔记 frontmatter `ijipu_*` | 可选层，优先级低于源内 |
+| **L2 谱面级** | 决定这份谱长什么样，必须跟着 .jps 走 | 源码 `# jps-config` | 换机器/换人打开应当一样 |
+| **L3 会话级** | 打开期间的临时状态 | 内存 | 重开即重建；**必须每实例独立** |
+
+优先级：**L0 < L1 < L1.5 < L2**（L3 不参与合并）。
+
+判定三问：
+1. 改它会不会改变**谱面外观/排版结果**？会 → L2。
+2. 换台机器/换个人打开同一份 .jps，**期望看到一样吗**？一样 → L2；可以不一样 → L1。
+3. 丢掉它用户**会不会烦**（要重设）？会 → L1（需持久化）；不会 → L3。
+
+硬性约束：
+1. **编辑器/界面偏好永属 L1**，绝不写入 `# jps-config`（`PageConfig` 里不得再出现 `editorFont/editorFontSize` 之类字段）。
+2. **L2 写入用差量**（`writeJpsConfig` 默认 `mode:'diff'`：只写与 `defaultPageConfig` 不同的字段，无差量则删除该行）；需要"到哪都一样"时用 `mode:'full'`（界面上是「固化全部到谱面」）。
+3. **可选字段**（不在 `defaultPageConfig` 上）若属 L2，必须同时登记到 `engine/settings.ts` 的 `OPTIONAL_CONFIG_FIELDS`（有编译期断言兜底）。
+4. **字体一律用完整栈**（末尾必须落到 `sans-serif/serif/monospace`）：候选集中在 `engine/fonts.ts`，读取旧值经 `normalizeFontStack` 自动补 fallback。
+5. L1 的新键：集中定义在 `src/store/editorPrefs.ts` 或 store 顶部常量，`ijipu.` 前缀、损坏回退默认、越界钳制。
