@@ -256,6 +256,45 @@ body {
   font-weight: 600;
 }
 
+/* adj385：矮视口（PAD 横屏 768 高、手机横屏 390~560 高）下菜单总高会超过视口高——先收紧行高与间距，
+   让整份菜单装得下；再配合 TopBar 的 clampDropdowns（按实测位置动态限高 + 内滚）与下面的双列规则。
+   阈值取 820px：1366×768 这类 PAD/笔记本横屏与所有手机横屏都进入紧凑排布，桌面高窗口不受影响。 */
+@media (max-height: 820px) {
+  .menu-dropdown .menu-entry {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+  .menu-dropdown .menu-group-title {
+    padding: 3px 8px 1px;
+    font-size: 11px;
+  }
+  .menu-dropdown .menu-sep {
+    margin: 2px 4px;
+  }
+  .menu-dropdown {
+    padding: 3px;
+  }
+}
+
+/* adj385：极矮且够宽（手机横屏）——汉堡菜单改双列排布，从根上避免"菜单比视口还高"；
+   双列下不设 max-height（多列布局本应按列数容纳，限高会把内容挤到看不见的下一列），
+   TopBar.clampDropdowns 检测到多列时会跳过限高。 */
+@media (max-height: 560px) and (min-width: 620px) {
+  .topbar-hamburger-dropdown {
+    column-count: 2;
+    column-gap: 8px;
+    column-rule: 1px solid var(--jp-border);
+    min-width: 440px;
+    max-height: none;
+  }
+  .topbar-hamburger-dropdown .menu-sep {
+    display: none;
+  }
+  .topbar-hamburger-dropdown .menu-group-title {
+    break-after: avoid;
+  }
+}
+
 .topbar-spacer {
   flex: 1;
 }

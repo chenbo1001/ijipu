@@ -9,7 +9,7 @@
  * - 窄屏下：功能按钮组 + 缩放组隐藏到右侧「⋮ 更多」下拉中，避免按钮溢出顶栏
  *   导致整页左右滚动；汉堡下拉与「更多」下拉均支持上下滚动 + 点击外部关闭
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useDocStore, type ViewType } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { formatJps, EDITOR_FONT_OPTIONS } from '@ijipu/engine'
@@ -206,6 +206,10 @@ export function TopBar() {
   // 字体 split-button 状态（从状态栏移来，下拉从顶栏向下展开）
   const [fontOpen, setFontOpen] = useState(false)
   const fontRef = useRef<HTMLSpanElement>(null)
+  // adj385：各下拉的 ref——用于"按实测位置动态限高"，保证下拉底部始终落在视口内
+  const hamburgerDdRef = useRef<HTMLDivElement>(null)
+  const viewDdRef = useRef<HTMLDivElement>(null)
+  const fontDdRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!fontOpen) return
     const onDown = (e: MouseEvent) => {
@@ -241,6 +245,39 @@ export function TopBar() {
       setOverflowShiftX(0)
     }
   }, [overflowOpen])
+
+  // adj385：下拉动态限高——此前 CSS 用硬编码「视口高 - 56px」估算下拉顶位置，PAD/手机横屏等矮视口
+  // （再叠加浏览器工具栏吃高度）下菜单底部会超出视口：末几项被裁、触屏又没有可见滚动条 → "菜单项选不了"。
+  // 现在按**实测 top** 现算 max-height（= 视口高 - top - 12 安全距），并在旋转/缩放时重算；
+  // 多列布局（矮视口双列）靠列数容纳内容，跳过限高以免内容被挤到看不见的下一列。
+  const clampDropdowns = useCallback(() => {
+    for (const el of [hamburgerDdRef.current, viewDdRef.current, overflowDropdownRef.current, fontDdRef.current]) {
+      if (!el) continue
+      el.style.maxHeight = ''
+      const cols = Number.parseInt(getComputedStyle(el).columnCount, 10)
+      if (!Number.isFinite(cols) || cols <= 1) {
+        const top = el.getBoundingClientRect().top
+        const avail = Math.floor(window.innerHeight - top - 12)
+        el.style.maxHeight = `${Math.max(160, avail)}px`
+      }
+      el.style.overflowY = 'auto'
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    clampDropdowns()
+  }, [clampDropdowns, menuOpen, viewOpen, overflowOpen, fontOpen, isNarrow])
+
+  useEffect(() => {
+    if (!menuOpen && !viewOpen && !overflowOpen && !fontOpen) return
+    const onResize = (): void => clampDropdowns()
+    window.addEventListener('resize', onResize)
+    window.addEventListener('orientationchange', onResize)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      window.removeEventListener('orientationchange', onResize)
+    }
+  }, [clampDropdowns, menuOpen, viewOpen, overflowOpen, fontOpen])
 
   // 图标：(key) => JSX，与 renderBtn 共用
   const iconOf = (key: string): React.ReactNode => {
@@ -381,7 +418,7 @@ export function TopBar() {
             <span className="arrow">▼</span>
           </button>
           {fontOpen && (
-            <div className="editor-font-split-dropdown" role="listbox">
+            <div className="editor-font-split-dropdown" role="listbox" ref={fontDdRef}>
               {EDITOR_FONT_OPTIONS.map((o) => (
                 <div
                   key={o.value}
@@ -696,6 +733,7 @@ export function TopBar() {
         {menuOpen && (
           <div
             className="menu-dropdown topbar-hamburger-dropdown"
+            ref={hamburgerDdRef}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="menu-group-title">文件</div>
@@ -737,9 +775,11 @@ export function TopBar() {
         {viewOpen && (
           <div
             className="menu-dropdown topbar-view-dropdown"
+            ref={viewDdRef}
             onClick={(e) => e.stopPropagation()}
           >
-            {VIEWS.map((v) => {
+            {/* adj385：窄屏下拆分固定为上下，不再列出「左右拆分」（对窄屏没有意义） */}
+            {VIEWS.filter((v) => !(isNarrow && v.key === 'splitH')).map((v) => {
               // adj315：splitH/splitHE 归入同一「左右拆分」条目；active 用归一化 key 判断
               const isActive = normViewKey(viewType) === v.key
               return (
