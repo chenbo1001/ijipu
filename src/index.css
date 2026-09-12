@@ -632,6 +632,48 @@ body {
   color: var(--jp-text-muted);
 }
 
+/* adj383：主题组移入「页面设置」对话框——列表与表单标签样式
+   （原 .menu-dropdown .theme-entry 的作用域只在菜单里，对话框内需要等价布局） */
+.theme-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 2px;
+  border: 1px solid var(--jp-border);
+  border-radius: 6px;
+}
+
+.theme-list .theme-entry {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  white-space: nowrap;
+  padding: 5px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.theme-list .theme-entry:hover {
+  background: var(--jp-bg-panel);
+}
+
+.ijipu-form-label {
+  font-size: 12px;
+  color: var(--jp-text-secondary);
+  margin: 2px 0 5px;
+}
+
+.ijipu-form-hint {
+  font-size: 11px;
+  color: var(--jp-text-muted);
+  margin: 4px 0 10px;
+}
+
 /* 汉堡下拉分组标题（窄屏时仍可能用） */
 .menu-group-title {
   padding: 6px 10px 3px;

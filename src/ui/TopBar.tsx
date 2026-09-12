@@ -12,16 +12,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useDocStore, type ViewType } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
-import { THEMES, type ThemeMode } from '../brand/themes'
 import { formatJps, EDITOR_FONT_OPTIONS } from '@ijipu/engine'
 
-/** Alt+字母 → 菜单分组（adj185） */
+/** Alt+字母 → 菜单分组（adj185）
+ *  adj383：主题组已移入「页面设置」对话框的「主题」标签，Alt+T 菜单分组随之取消 */
 const ALT_MENU_KEYS: Record<string, string> = {
   f: 'file',
   e: 'edit',
   v: 'view',
   p: 'play',
-  t: 'theme',
   h: 'help',
 }
 
@@ -153,10 +152,7 @@ export function TopBar() {
   const setShowGuides = useUiStore((s) => s.setShowGuides)
   const previewZoom = useUiStore((s) => s.previewZoom)
   const setPreviewZoom = useUiStore((s) => s.setPreviewZoom)
-  const theme = useUiStore((s) => s.theme)
-  const setTheme = useUiStore((s) => s.setTheme)
-  const themeMode = useUiStore((s) => s.themeMode)
-  const setThemeMode = useUiStore((s) => s.setThemeMode)
+  // adj383：主题（中国色主题 + 浅深模式）已移入「页面设置」对话框的「主题」标签，顶栏不再持有
   // adj281：折行 / 字体 / 字号（从状态栏设置组移到顶栏工具条）
   const autoWrap = useUiStore((s) => s.autoWrap)
   const setAutoWrap = useUiStore((s) => s.setAutoWrap)
@@ -722,15 +718,6 @@ export function TopBar() {
             <div className="menu-group-title">播放</div>
             <MenuPanel entries={playEntries} onClose={closeMenu} />
             <div className="menu-sep" />
-            <div className="menu-group-title">主题</div>
-            <ThemeMenuContent
-              themeMode={themeMode}
-              setThemeMode={(m) => setThemeMode(m)}
-              theme={theme}
-              setTheme={(t) => setTheme(t)}
-              onClose={closeMenu}
-            />
-            <div className="menu-sep" />
             <div className="menu-group-title">帮助</div>
             <MenuPanel entries={helpEntries} onClose={closeMenu} />
           </div>
@@ -866,84 +853,5 @@ export function TopBar() {
         ))}
       </div>
     </div>
-  )
-}
-
-/** adj281：主题菜单内容（模式按钮 + 主题色块） */
-function ThemeMenuContent(props: {
-  themeMode: ThemeMode
-  setThemeMode: (m: ThemeMode) => void
-  theme: string
-  setTheme: (t: string) => void
-  onClose: () => void
-}) {
-  return (
-    <>
-      <div className="theme-mode-row">
-        {(
-          [
-            { key: 'auto', label: '跟随系统(&A)', hk: 'a' },
-            { key: 'light', label: '浅色(&L)', hk: 'l' },
-            { key: 'dark', label: '深色(&D)', hk: 'd' },
-          ] as { key: ThemeMode; label: string; hk: string }[]
-        ).map((m) => (
-          <button
-            key={m.key}
-            data-hotkey={m.hk}
-            className={`theme-mode-btn${props.themeMode === m.key ? ' active' : ''}`}
-            onClick={() => {
-              props.setThemeMode(m.key)
-              props.onClose()
-            }}
-          >
-            <Hotkey text={m.label} />
-          </button>
-        ))}
-      </div>
-      <div className="theme-mode-tip">
-        {props.themeMode === 'auto'
-          ? '自动跟随系统浅深色设置'
-          : props.themeMode === 'light'
-          ? '固定使用浅色配色'
-          : '固定使用深色配色'}
-      </div>
-      {THEMES.map((t) => (
-        <div
-          key={t.id}
-          className="menu-entry theme-entry"
-          onClick={() => {
-            props.setTheme(t.id)
-            props.onClose()
-          }}
-        >
-          {props.theme === t.id ? (
-            <span
-              className="theme-swatch"
-              style={{
-                background: props.themeMode === 'light' ? t.accentLight : t.accent,
-                borderColor: props.themeMode === 'light' ? t.accentLight : t.accent,
-              }}
-            >
-              ✓
-            </span>
-          ) : (
-            <span
-              className="theme-swatch"
-              style={{
-                background: props.themeMode === 'light' ? t.bgLight : t.bg,
-                borderColor: props.themeMode === 'light' ? t.accentLight : t.accent,
-              }}
-            />
-          )}
-          <span className="theme-name">{t.name}</span>
-          <span
-            className="theme-desc"
-            style={{ color: props.themeMode === 'light' ? t.accentLight : props.theme === t.id ? props.theme && t.accent : t.accent }}
-          >
-            {t.desc}
-          </span>
-        </div>
-      ))}
-    </>
   )
 }

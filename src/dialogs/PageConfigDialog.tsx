@@ -13,12 +13,15 @@ import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { clampEditorFontSize, defaultPageConfig, EDITOR_FONT_OPTIONS, SCORE_FONT_OPTIONS } from '@ijipu/engine'
+import { THEMES, type ThemeMode } from '../brand/themes'
 import type { PageConfig } from '@ijipu/engine'
 
-type TabId = 'global' | 'page' | 'noteLayout' | 'spacing' | 'font' | 'slur'
+type TabId = 'global' | 'theme' | 'page' | 'noteLayout' | 'spacing' | 'font' | 'slur'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'global', label: '全局' },
+  // adj383：主题组从顶栏菜单移入设置，紧跟在「全局」之后
+  { id: 'theme', label: '主题' },
   { id: 'page', label: '页面' },
   { id: 'noteLayout', label: '音符布局' },
   { id: 'spacing', label: '间距' },
@@ -43,6 +46,11 @@ export function PageConfigDialog() {
   const setEditorFontSize = useUiStore((s) => s.setEditorFontSize)
   const editorFont = useUiStore((s) => s.editorFont)
   const setEditorFont = useUiStore((s) => s.setEditorFont)
+  // adj383：主题（中国色主题 + 浅深模式）——从顶栏菜单移入设置「主题」标签（本机界面偏好，不随谱保存）
+  const theme = useUiStore((s) => s.theme)
+  const setTheme = useUiStore((s) => s.setTheme)
+  const themeMode = useUiStore((s) => s.themeMode)
+  const setThemeMode = useUiStore((s) => s.setThemeMode)
   // adj-font：字体覆盖（L1 用户个性；跨机缺字体时用我的字体，不改谱面文件）
   const fontOverride = useUiStore((s) => s.fontOverride)
   const setFontOverride = useUiStore((s) => s.setFontOverride)
@@ -129,6 +137,71 @@ export function PageConfigDialog() {
             )}
             <div style={{ color: 'var(--jp-text-muted)', fontSize: 12, marginTop: 2 }}>
               以上为**本机偏好**（L1），不随谱保存；谱面字体在「字体」标签里设置（随谱走）。
+            </div>
+          </>
+        )
+      case 'theme':
+        // adj383：主题组（原顶栏菜单「主题」）——浅深模式 + 中国色主题；本机界面偏好，即时生效、不随谱保存
+        return (
+          <>
+            <div className="ijipu-form-label">浅深模式</div>
+            <div className="theme-mode-row" style={{ padding: 0 }}>
+              {(
+                [
+                  { key: 'auto', label: '跟随系统' },
+                  { key: 'light', label: '浅色' },
+                  { key: 'dark', label: '深色' },
+                ] as { key: ThemeMode; label: string }[]
+              ).map((m) => (
+                <button
+                  key={m.key}
+                  className={`theme-mode-btn${themeMode === m.key ? ' active' : ''}`}
+                  onClick={() => setThemeMode(m.key)}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <div className="ijipu-form-hint">
+              {themeMode === 'auto'
+                ? '自动跟随系统浅深色设置'
+                : themeMode === 'light'
+                  ? '固定使用浅色配色'
+                  : '固定使用深色配色'}
+            </div>
+
+            <div className="ijipu-form-label">主题配色</div>
+            <div className="theme-list">
+              {THEMES.map((t) => (
+                <div key={t.id} className="theme-entry" onClick={() => setTheme(t.id)} title={t.desc}>
+                  {theme === t.id ? (
+                    <span
+                      className="theme-swatch"
+                      style={{
+                        background: themeMode === 'light' ? t.accentLight : t.accent,
+                        borderColor: themeMode === 'light' ? t.accentLight : t.accent,
+                      }}
+                    >
+                      ✓
+                    </span>
+                  ) : (
+                    <span
+                      className="theme-swatch"
+                      style={{
+                        background: themeMode === 'light' ? t.bgLight : t.bg,
+                        borderColor: themeMode === 'light' ? t.accentLight : t.accent,
+                      }}
+                    />
+                  )}
+                  <span className="theme-name">{t.name}</span>
+                  <span className="theme-desc" style={{ color: themeMode === 'light' ? t.accentLight : t.accent }}>
+                    {t.desc}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="ijipu-form-hint" style={{ marginTop: 8 }}>
+              主题属本机界面偏好，不随谱保存。
             </div>
           </>
         )

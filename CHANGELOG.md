@@ -4,6 +4,8 @@
 
 ### 变更
 
+- **主题组从顶栏菜单移入「页面设置」——新增「主题」标签，紧跟「全局」之后**（`adj383`）：浅深模式（跟随系统/浅色/深色）与中国色主题色块（7 款，带色块预览与当前选中勾）现在都在设置里；点击即时生效且**不随谱保存**（本机界面偏好，L1）。顶栏菜单分组变为 文件/编辑/视图/播放/帮助（原「主题」分组与 `Alt+T` 分组热键随之取消；菜单作用域的 `Alt+A/L/D` 不再需要）。新增 `.theme-list` 等对话框内样式（原 `.menu-dropdown .theme-entry` 作用域仅限菜单），列表支持滚动。已用无头 Chrome 打开构建产物核对：菜单分组无「主题」、设置标签为 全局/**主题**/页面/…。
+
 - **设置分层落地：编辑器偏好不再随谱保存 + `# jps-config` 改为差量写入**（`adj-font`，见 `docs/SETTINGS-AUDIT.md` 与 `AGENTS.md` 七）：
   - **`PageConfig` 移除 `editorFont`/`editorFontSize`**（它们属「用户个性」L1）：顶栏 A−/A+ 与字体下拉此前会 `setPageConfig(cfg, true)` 把编辑器字体**写进 `# jps-config`**，并与 `uiStore` 里的同名偏好并存（读取是 `pageConfig.editorFontSize ?? editorFontSize`，两处存储、两个入口）→ **把 .jps 发给别人会让对方的编辑器字体被改**。现 L1 偏好收敛到 `src/store/editorPrefs.ts` 唯一入口，顶栏/编辑器只读写 L1；旧谱里已写入的值会被一次性迁移到本机偏好（`extractLegacyEditorPrefs`），此后任何保存自动清除。
   - **`writeJpsConfig` 默认差量写入**（新增 `mode:'diff'|'full'`）：只写与 `defaultPageConfig` 不同的字段，**全部为默认时删除该行**（并收敛 adj200 补充的空行）。这样默认值将来改得更合理时，未显式设置过的谱会跟着变好，而不是被旧默认永久钉住；需要"到哪都一样"时用页面设置里的新按钮「**固化全部到谱面**」（全量写入）。读取侧白名单同时过滤掉编辑器偏好键。
