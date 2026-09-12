@@ -1,6 +1,12 @@
 # iJipu 更新日志（Changelog）
 
-## [未发布]
+## [0.13.0] — 2026-09-12
+
+> 主题：**设置分层落地 + 设置体系重构**。本版把设置按「L0 代码默认 / L1 用户个性 / L1.5 笔记级 /
+> L2 谱面级 / L3 会话级」分层固化（见 `docs/SETTINGS-AUDIT.md` 与 `AGENTS.md` 七）：编辑器偏好移出
+> 谱面、`# jps-config` 改为差量写入、字体策略（跨机可用 / 适合简谱 / 必有 fallback）集中治理；
+> 设置界面把主题与音色库收进「设置」标签；另修若干窄屏与顶栏交互问题。注意 `PageConfig` 移除
+> `editorFont/editorFontSize` 属行为变更，`obsidian-ijipu` 的 `vendor/engine` 已同步。
 
 ### 修复
 
@@ -31,9 +37,7 @@
   - 文档：`docs/SETTINGS-AUDIT.md`（新增：四层模型/逐项归属/决策定稿/字体策略/已实施清单）、`AGENTS.md` 新增「七、设置分层原则」（**新增或调整设置项必须先定层**）、`docs/SYNTAX.md`、`docs/USER-GUIDE.md` 同步。
   - smoke 新增 `[90]`（25 项：差量/删除行/全量/白名单过滤/旧键迁移/字体归一/候选兜底/覆盖开关/字号钳制）；既有 6 项"编辑器偏好随谱保存"的旧断言按新语义重写。失败数仍为既有基线 17、无回归。
 
-## [未发布]
-
-### 修复
+### 修复（引擎：`# jps-config` 往返丢字段）
 
 - **谱面级设置 `# jps-config` 往返丢字段：`showInstrument` 写进去读不回来**（`adj382`）：`extractJpsConfig` 的字段白名单 = `Object.keys(defaultPageConfig)` + 手工补的几项，而 `showInstrument`（「显示乐器名」开关）既是**可选字段**（不在 `defaultPageConfig` 对象上）又没有显式补进白名单 → 实测 `writeJpsConfig` 写入 **30** 个字段、`extractJpsConfig` 只读回 **29** 个：**在 App 里勾选「显示乐器名」→ 保存设置（写进谱面）→ 重新打开就丢**。现把可选字段抽成 `OPTIONAL_CONFIG_FIELDS` 常量并**补上 `showInstrument`**，同时加**编译期完整性断言**（`PageConfig` 新增可选字段而常量未同步时 `tsc` 直接报错），从机制上杜绝"白名单靠人工补"的漏项。smoke 新增 `[89]`（14 项：强不变量「写入的每个字段都必须能读回」+ 6 个可选字段逐个往返 + 优先级/回退/单行更新）。**这是 obsidian-ijipu 直接复用 iJipu 谱面设置（把 .jps 复制进 Obsidian 即渲染一致）的前置修复。**
 
