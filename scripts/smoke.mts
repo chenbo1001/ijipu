@@ -6,7 +6,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW } from '@ijipu/engine/index.ts'
+import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, JPS_CONFIG_PREFIX, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW } from '@ijipu/engine/index.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork } from '@ijipu/engine/playback/index.ts'
@@ -3956,6 +3956,51 @@ console.log('[88] play totalMs covers last-note tail (adj381)')
       `末事件色块数=${(lastEv.playheadSegs ?? []).length}`,
     )
   }
+}
+
+// ---- 89. 谱面级设置 # jps-config 往返保真（adj382）----
+console.log('[89] per-score config round trip (# jps-config, adj382)')
+{
+  const src = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n'
+  const cfg: typeof defaultPageConfig = {
+    ...defaultPageConfig,
+    note_size: 15,
+    margin_left: 32,
+    noteSpaceLayout: 'duration' as const,
+    lianyinxian_type: 2 as const,
+    showInstrument: true,
+    lyricShrink: true,
+    editorFontSize: 18,
+  }
+  const written = writeJpsConfig(src, cfg)
+  const line = written.split('\n').find((l) => l.startsWith(JPS_CONFIG_PREFIX))
+  check('adj382 写回：源码出现 # jps-config 行', line !== undefined)
+  const raw = JSON.parse((line ?? '').slice(JPS_CONFIG_PREFIX.length)) as Record<string, unknown>
+  const back = extractJpsConfig(written) ?? {}
+  // 强不变量：**写进去的每个字段都必须能读回来**（旧版白名单漏 showInstrument 时此处会列出它）
+  const missed = Object.keys(raw).filter((k) => !(k in back))
+  check('adj382 往返保真：写入的每个字段都能读回（不丢字段）', missed.length === 0, `丢失=${missed.join(',')}`)
+  check('adj382 可选字段 showInstrument 往返保真（旧版会丢：勾选「显示乐器名」重开即失效）', back.showInstrument === true, String(back.showInstrument))
+  check('adj382 可选字段 lyricShrink 往返保真', back.lyricShrink === true, String(back.lyricShrink))
+  check('adj382 可选字段 editorFontSize 往返保真', back.editorFontSize === 18, String(back.editorFontSize))
+  // 可选字段逐个核对（与 engine/settings.ts 的 OPTIONAL_CONFIG_FIELDS 对齐）
+  const optionalSamples: [string, unknown][] = [
+    ['heights', { quci: [1, 2, 3, 4] }],
+    ['metaPos', { notes: { x: 10, y: -30 } }],
+    ['editorFont', 'Courier New'],
+    ['editorFontSize', 18],
+    ['lyricShrink', true],
+    ['showInstrument', true],
+  ]
+  for (const [field, value] of optionalSamples) {
+    const w = writeJpsConfig(src, { ...defaultPageConfig, [field]: value } as typeof defaultPageConfig)
+    const e = extractJpsConfig(w) as Record<string, unknown> | null
+    check(`adj382 可选字段 ${field} 写入后可读回`, e !== null && JSON.stringify(e[field]) === JSON.stringify(value), JSON.stringify(e?.[field]))
+  }
+  const merged = mergeJpsConfig(written, { ...defaultPageConfig, note_size: 99 })
+  check('adj382 优先级：源内谱面设置 > 兜底设置', merged.note_size === 15, String(merged.note_size))
+  check('adj382 源内未写的键回退兜底', mergeJpsConfig(src, { ...defaultPageConfig, margin_right: 12 }).margin_right === 12)
+  check('adj382 重复写回仍只有一行 # jps-config', writeJpsConfig(written, cfg).split(JPS_CONFIG_PREFIX).length - 1 === 1)
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码

@@ -1,5 +1,11 @@
 # iJipu 更新日志（Changelog）
 
+## [未发布]
+
+### 修复
+
+- **谱面级设置 `# jps-config` 往返丢字段：`showInstrument` 写进去读不回来**（`adj382`）：`extractJpsConfig` 的字段白名单 = `Object.keys(defaultPageConfig)` + 手工补的几项，而 `showInstrument`（「显示乐器名」开关）既是**可选字段**（不在 `defaultPageConfig` 对象上）又没有显式补进白名单 → 实测 `writeJpsConfig` 写入 **30** 个字段、`extractJpsConfig` 只读回 **29** 个：**在 App 里勾选「显示乐器名」→ 保存设置（写进谱面）→ 重新打开就丢**。现把可选字段抽成 `OPTIONAL_CONFIG_FIELDS` 常量并**补上 `showInstrument`**，同时加**编译期完整性断言**（`PageConfig` 新增可选字段而常量未同步时 `tsc` 直接报错），从机制上杜绝"白名单靠人工补"的漏项。smoke 新增 `[89]`（14 项：强不变量「写入的每个字段都必须能读回」+ 6 个可选字段逐个往返 + 优先级/回退/单行更新）。**这是 obsidian-ijipu 直接复用 iJipu 谱面设置（把 .jps 复制进 Obsidian 即渲染一致）的前置修复。**
+
 ## [0.12.18] — 2026-09-12
 
 ### 新增
