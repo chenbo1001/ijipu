@@ -12,7 +12,8 @@ import { parseKey } from '@ijipu/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork } from '@ijipu/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, noteScaleOf, lowDotY, octaveDotY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from '@ijipu/engine/layout/spacing.ts'
+import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos } from '@ijipu/engine/layout/metaAnchors.ts'
 import type { BarlineType } from '@ijipu/engine/types.ts'
 import { computeBeamsForTest } from '@ijipu/engine/render/index.ts'
@@ -47,6 +48,11 @@ import { brand } from '../src/brand/tokens.ts'
 import { aboutCopy } from '../src/brand/copy.ts'
 // adj379：PWA「新版本就绪」判定（纯逻辑）
 import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from '../src/pwa/swUpdate.ts'
+// adj394：编辑区问题提示条的汇总/跳转换算（纯逻辑）
+import { summarizeProblems, offsetOf } from '../src/ui/problems.ts'
+import { problemCopy } from '../src/brand/copy.ts'
+// adj394：输入条「强弱」组的提示文案（渐强/渐弱只有 + 抬升、没有 - 降低）
+import { PAD_GROUPS } from '../src/editor/padLayout.ts'
 
 // adj213：布局断言常量——从 defaultPageConfig 派生，避免硬编码边距/右边界/
 // 描述头区域高等魔数（默认值调整时断言自动适配）
@@ -989,6 +995,197 @@ check('力度记号花体渲染（斜体加粗 + Segoe Script + mp）', /<text[^
   }
   check('渲染：<+ hairpin 上移 2px（VOLTA_RAISE）', Math.abs(hairpinY('1 < 2 3 !') - hairpinY('1 <+ 2 3 !') - 2) < 0.6, `${hairpinY('1 < 2 3 !')} vs ${hairpinY('1 <+ 2 3 !')}`)
 }
+// adj393：渐强/渐弱必须在**两种布局模式**下都渲染（此前只实现了拍级 duration，
+// 而默认配置是空间优先 space → 默认设置下记号静默不显示；本组断言两种模式逐一对照，防止再漏）
+{
+  const SPACE_CFG = { ...defaultPageConfig, noteSpaceLayout: 'space' as const }
+  const DYN_SRC = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 <+ 4 5 6 ! 7 |\n'
+  const dynOf = (cfg: typeof DUR_CFG) => layoutScore(parseJps(DYN_SRC), cfg).pages[0]
+  const spacePage = dynOf(SPACE_CFG)
+  const durPage = dynOf(DUR_CFG)
+  check('adj393 空间优先（默认）布局：渐强/渐弱渲染 1 条', spacePage.dynamics.length === 1, `got ${spacePage.dynamics.length}`)
+  check('adj393 拍级布局：渐强/渐弱渲染 1 条（回归）', durPage.dynamics.length === 1, `got ${durPage.dynamics.length}`)
+  const spaceDyn = spacePage.dynamics[0]
+  const durDyn = durPage.dynamics[0]
+  check('adj393 两种布局类型一致（crescendo）', spaceDyn?.type === 'crescendo' && durDyn?.type === 'crescendo', `${spaceDyn?.type} / ${durDyn?.type}`)
+  check('adj393 两种布局抬升级数一致（<+ → plus=1）', spaceDyn?.plus === 1 && durDyn?.plus === 1, `${spaceDyn?.plus} / ${durDyn?.plus}`)
+  // 起止锚定「所跟音符槽中心」：两种布局都必须落在对应音符中心（模式内自洽校验）
+  // 源码 `1 2 3 <+ 4 5 6 ! 7`：`<+` 紧跟在音符 3（notes[2]）后、`!` 紧跟音符 6（notes[5]）后
+  const anchorOk = (page: typeof spacePage, noteIdx: number, x: number): boolean => {
+    const n = page.notes[noteIdx]
+    return n !== undefined && Math.abs(x - (n.x + halfDig)) < 1
+  }
+  check(
+    'adj393 空间优先：起点 = <+ 所跟音符（notes[2]）、终点 = ! 所跟音符（notes[5]）',
+    spaceDyn !== undefined && anchorOk(spacePage, 2, spaceDyn.x1) && anchorOk(spacePage, 5, spaceDyn.x2),
+    `x1=${spaceDyn?.x1} x2=${spaceDyn?.x2} n3=${spacePage.notes[2]?.x} n6=${spacePage.notes[5]?.x}`,
+  )
+  check(
+    'adj393 拍级：起点 = <+ 所跟音符（notes[2]）、终点 = ! 所跟音符（notes[5]）',
+    durDyn !== undefined && anchorOk(durPage, 2, durDyn.x1) && anchorOk(durPage, 5, durDyn.x2),
+    `x1=${durDyn?.x1} x2=${durDyn?.x2} n3=${durPage.notes[2]?.x} n6=${durPage.notes[5]?.x}`,
+  )
+  // 两种布局的 y 基准一致（行数字顶再上移 (LAYER_GAP+DYN_HALF_H+SLUR_W/2)×s）
+  check('adj393 两种布局 hairpin 中心 y 一致', spaceDyn !== undefined && durDyn !== undefined && Math.abs(spaceDyn.y - durDyn.y) < 0.6, `${spaceDyn?.y} / ${durDyn?.y}`)
+  // 未写 ! 时在行尾收尾（两种布局都要有且 x2 > x1）
+  const OPEN_SRC = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 < 4 5 6 7 |\n'
+  for (const [label, cfg] of [['空间优先', SPACE_CFG], ['拍级', DUR_CFG]] as const) {
+    const d = layoutScore(parseJps(OPEN_SRC), cfg).pages[0].dynamics[0]
+    check(`adj393 ${label}：未写 ! 的渐强在行尾收尾`, d !== undefined && d.x2 > d.x1, JSON.stringify(d))
+  }
+  // 两种布局都能在 SVG 里看到开口尖括号 hairpin
+  for (const [label, cfg] of [['空间优先', SPACE_CFG], ['拍级', DUR_CFG]] as const) {
+    const svg = renderScoreToSvg(layoutScore(parseJps(DYN_SRC), cfg))[0]
+    check(`adj393 ${label}：SVG 含 hairpin path`, /<path d="M [\d.-]+ [\d.-]+ L [\d.-]+ [\d.-]+ M [\d.-]+ [\d.-]+ L [\d.-]+ [\d.-]+" fill="none" stroke="#1b1b1b" stroke-width="0.8"/.test(svg), '')
+  }
+  // adj393：多声部块（Q1/Q2 纵向堆叠）此前完全不处理装饰 token → 一并补上（按声部行定位）
+  const MV_SRC = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 <+ 4 5 6 ! 7 |\nQ2: 1 2 3 4 5 6 7 1 |\n'
+  for (const [label, cfg] of [['空间优先', SPACE_CFG], ['拍级', DUR_CFG]] as const) {
+    const page = layoutScore(parseJps(MV_SRC), cfg).pages[0]
+    const d = page.dynamics[0]
+    const n3 = page.notes[2] // 声部 1 的第 3 个音符（<+ 所跟）
+    const n6 = page.notes[5] // 声部 1 的第 6 个音符（! 所跟）
+    check(
+      `adj393 多声部（${label}）：渐强渲染且起止锚定该声部所跟音符`,
+      page.dynamics.length === 1 &&
+        d?.type === 'crescendo' &&
+        d.plus === 1 &&
+        n3 !== undefined &&
+        n6 !== undefined &&
+        Math.abs(d.x1 - (n3.x + halfDig)) < 1 &&
+        Math.abs(d.x2 - (n6.x + halfDig)) < 1,
+      JSON.stringify({ dyn: d, n3: n3?.x, n6: n6?.x }),
+    )
+  }
+  // adj393：**退化写法不画竖线**——`<` 紧跟 `!`（起止落在同一音符）宁可不出记号，并给出 warning
+  for (const [label, cfg] of [['空间优先', SPACE_CFG], ['拍级', DUR_CFG]] as const) {
+    const rDeg = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 < ! 4 5 6 |\n')
+    const pDeg = layoutScore(rDeg, cfg).pages[0]
+    check(`adj393 ${label}：< 紧跟 ! 的退化写法不产出记号（不画竖线）`, pDeg.dynamics.length === 0, `got ${pDeg.dynamics.length}`)
+    check(
+      `adj393 ${label}：退化写法给出 warning 说明原因`,
+      rDeg.errors.some((e) => e.severity === 'warning' && e.message.includes('起止之间没有音符')),
+      JSON.stringify(rDeg.errors),
+    )
+  }
+  // 任何非退化写法都不得产出「宽度 < MIN_HAIRPIN_W」的记号（竖线现象的回归护栏）
+  const allDyns = [SPACE_CFG, DUR_CFG].flatMap((cfg) =>
+    layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 <+ 4 5 6 ! 7 | 1 2 3 > 4 5 6 ! 7 | 1 2 3 < 4 5 6 7 |\n'), cfg).pages.flatMap((p) => p.dynamics),
+  )
+  check(
+    'adj393 所有记号开口宽度 ≥ MIN_HAIRPIN_W（无退化竖线）',
+    allDyns.length === 6 && allDyns.every((d) => d.x2 - d.x1 >= MIN_HAIRPIN_W),
+    allDyns.map((d) => `${d.type}:${(d.x2 - d.x1).toFixed(1)}`).join(' '),
+  )
+  // `!` 没有同一行内的起点（含起点在上一行）→ warning
+  {
+    const rLone = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 < 4 |\nQ: 5 6 7 ! |\n')
+    check(
+      'adj393 跨行的「< … 换行 … !」给出 warning（渐强/渐弱不能跨行）',
+      rLone.errors.some((e) => e.severity === 'warning' && e.message.includes('不能跨行')),
+      JSON.stringify(rLone.errors),
+    )
+  }
+  // 行内已有未闭合记号又写新的 → warning（后写的替换前一个）
+  {
+    const rTwo = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 < 3 4 > 5 6 |\n')
+    check(
+      'adj393 未用 ! 结束又出现新记号 → warning（提示前一个被替换）',
+      rTwo.errors.some((e) => e.severity === 'warning' && e.message.includes('尚未用 "!" 结束')),
+      JSON.stringify(rTwo.errors),
+    )
+  }
+  // ---- adj394：`!` 可结束于任意「有时值的元素」之后（音符 / 增时线 `-` / 附点 `.`）----
+  {
+    const mk = (q: string) => {
+      const res = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`)
+      return { res, page: layoutScore(res, SPACE_CFG).pages[0], pageDur: layoutScore(res, DUR_CFG).pages[0] }
+    }
+    const tokEnd = (q: string): string | undefined => {
+      const t = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`).groups[0].music.tokens.find((x) => x.kind === 'decoration' && x.dynamics === 'end')
+      return t && t.kind === 'decoration' ? t.dynamicsEndOn : undefined
+    }
+    check('adj394 解析：`!` 紧跟音符 → endOn=note', tokEnd('1 2 3 < 4 ! 5 6') === 'note', String(tokEnd('1 2 3 < 4 ! 5 6')))
+    check('adj394 解析：`!` 紧跟增时线（4- !）→ endOn=aug', tokEnd('1 2 3 < 4- ! 5 6') === 'aug', String(tokEnd('1 2 3 < 4- ! 5 6')))
+    check('adj394 解析：`!` 紧跟附点（4. !）→ endOn=dot', tokEnd('1 2 3 < 4. ! 5 6') === 'dot', String(tokEnd('1 2 3 < 4. ! 5 6')))
+    check('adj394 解析：增时线分写（4 - !）同样识别 → endOn=aug', tokEnd('1 2 3 < 4 - ! 5 6') === 'aug', String(tokEnd('1 2 3 < 4 - ! 5 6')))
+    // adj394：`3<---!` 是**合法**写法（起点=音符 3、终点=其末增时线右缘），不得告警
+    {
+      const r = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3<---! |\n')
+      check(
+        'adj394 `3<---!`（紧贴写法）不报任何语法问题',
+        r.errors.length === 0,
+        JSON.stringify(r.errors),
+      )
+      for (const [label, cfg] of [['空间优先', SPACE_CFG], ['拍级', DUR_CFG]] as const) {
+        const pg = layoutScore(r, cfg).pages[0]
+        const n0 = pg.notes[0]
+        check(
+          `adj394 ${label}：` + '`3<---!` 渲染出渐强（起点 = 音符 3 中心、终点 = 该音符右缘）',
+          pg.dynamics.length === 1 && n0 !== undefined && Math.abs(pg.dynamics[0].x1 - (n0.x + halfDig)) < 1 && Math.abs(pg.dynamics[0].x2 - (n0.rightX ?? NaN)) < 1,
+          JSON.stringify({ dyn: pg.dynamics[0], center: n0 ? n0.x + halfDig : null, right: n0?.rightX }),
+        )
+      }
+      // adj394（语法约定）：`<`/`>` **只有 `+` 抬升，没有 `-` 降低**——`-` 始终是增时线。
+      // 二者在源码上无法区分"想降低"还是"想增时"，故**不发告警**（否则误伤 `3<---!` 这类合法写法），
+      // 只在语法文档/编辑器提示里写明；这里用断言把实际语义固定下来。
+      {
+        const rMinus = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3<- 4 5 |\n')
+        const n3 = rMinus.groups[0].music.tokens.find((t) => t.kind === 'note')
+        check(
+          'adj394 `3<- 4`：`-` 是**增时线**（计入音符 3）、且不产生任何"降低"告警',
+          n3?.kind === 'note' && n3.augmentCount === 1 && !rMinus.errors.some((e) => e.message.includes('降低')),
+          JSON.stringify({ aug: n3?.kind === 'note' ? n3.augmentCount : null, errs: rMinus.errors.map((e) => e.message) }),
+        )
+        const rPlus = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3<+ 4 5 |\n')
+        check(
+          'adj394 `3<+ 4`：`+` 是抬升级数（不产生告警、不改变时值）',
+          rPlus.errors.length === 0 &&
+            rPlus.groups[0].music.tokens.find((t) => t.kind === 'note')?.kind === 'note' &&
+            (rPlus.groups[0].music.tokens.find((t) => t.kind === 'note') as { augmentCount?: number }).augmentCount === 0,
+          JSON.stringify(rPlus.errors.map((e) => e.message)),
+        )
+      }
+      // 同一行的 `<` 后紧跟 `!`（无 `-`/`.`）仍是退化写法 → 告警且不渲染
+      const rDeg = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3<! |\n')
+      check(
+        'adj394 `3<!`（无任何时值元素）仍判为退化并给出告警',
+        rDeg.errors.some((e) => e.severity === 'warning' && e.message.includes('起止之间没有音符')) &&
+          layoutScore(rDeg, SPACE_CFG).pages[0].dynamics.length === 0,
+        JSON.stringify(rDeg.errors),
+      )
+    }
+    for (const [label, cfg] of [['空间优先', SPACE_CFG], ['拍级', DUR_CFG]] as const) {
+      const plain = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 < 4 ! 5 6 |\n'), cfg).pages[0]
+      const aug = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 < 4- ! 5 6 |\n'), cfg).pages[0]
+      const aug2 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 < 4-- ! 5 6 |\n'), cfg).pages[0]
+      const dot = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 < 4. ! 5 6 |\n'), cfg).pages[0]
+      const n4plain = plain.notes[3]
+      const n4aug = aug.notes[3]
+      const n4dot = dot.notes[3]
+      check(
+        `adj394 ${label}：` + '`!` 跟音符 → 终点 = 数字槽中心（原行为不变）',
+        plain.dynamics[0] !== undefined && n4plain !== undefined && Math.abs(plain.dynamics[0].x2 - (n4plain.x + halfDig)) < 1,
+        `x2=${plain.dynamics[0]?.x2} center=${n4plain ? n4plain.x + halfDig : NaN}`,
+      )
+      check(
+        `adj394 ${label}：` + '`!` 跟增时线 → 终点 = 该音符右缘（越过数字槽中心）',
+        aug.dynamics[0] !== undefined && n4aug !== undefined && Math.abs(aug.dynamics[0].x2 - (n4aug.rightX ?? NaN)) < 1 && aug.dynamics[0].x2 > n4aug.x + halfDig + 2,
+        `x2=${aug.dynamics[0]?.x2} rightX=${n4aug?.rightX} center=${n4aug ? n4aug.x + halfDig : NaN}`,
+      )
+      check(
+        `adj394 ${label}：` + '`4-- !` 比 `4- !` 更靠右（按增时线数量延伸）',
+        aug2.dynamics[0] !== undefined && aug.dynamics[0] !== undefined && aug2.dynamics[0].x2 > aug.dynamics[0].x2 + 2,
+        `${aug.dynamics[0]?.x2} → ${aug2.dynamics[0]?.x2}`,
+      )
+      check(
+        `adj394 ${label}：` + '`!` 跟附点 → 终点 = 附点右缘（越过数字槽中心）',
+        dot.dynamics[0] !== undefined && n4dot !== undefined && Math.abs(dot.dynamics[0].x2 - (n4dot.rightX ?? NaN)) < 1 && dot.dynamics[0].x2 > n4dot.x + halfDig + 1,
+        `x2=${dot.dynamics[0]?.x2} rightX=${n4dot?.rightX} center=${n4dot ? n4dot.x + halfDig : NaN}`,
+      )
+    }
+  }
+}
 // adj294：&zkh/&ykh 独立为 bracket token，不再依附音符（解析/占位/渲染独立）
 const zkh = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1&zkh 2-&ykh 3.&ykh 4 |\n')
 const zkhTok = zkh.groups[0].music.tokens
@@ -1261,6 +1458,46 @@ const rc209r = rc209b.groups[0].music.tokens.filter((t) => t.kind === 'rhythm')
 check('adj209 节奏符注释解析（9"节奏" → comment）', rc209b.errors.length === 0 && rc209r[0].comment === '节奏', JSON.stringify(rc209r.map((t) => t.comment)))
 const svgRc209b = renderScoreToSvg(layoutScore(rc209b, DUR_CFG))[0]
 check('adj209 节奏符注释渲染在 X 上方', svgRc209b.includes('>节奏<'), '')
+// ---- adj392：紧接注释引号后的 + / - 抬升 / 降低注释文本（每级 NOTE_COMMENT_RAISE = 2px） ----
+const r392 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1"甲" 2"乙"+ 3"丙"- 4"丁"++ |\n')
+const t392 = r392.groups[0].music.tokens.filter((t) => t.kind === 'note')
+check(
+  'adj392 解析：+ / - 挂在注释上（甲=0、乙=+1、丙=-1、丁=+2），且都不再是增时线',
+  r392.errors.length === 0 &&
+    t392.every((t) => t.kind === 'note' && t.augmentCount === 0) &&
+    t392[0].kind === 'note' && t392[0].commentPlus === undefined && t392[0].commentMinus === undefined &&
+    t392[1].kind === 'note' && t392[1].commentPlus === 1 && t392[1].commentMinus === undefined &&
+    t392[2].kind === 'note' && t392[2].commentMinus === 1 && t392[2].commentPlus === undefined &&
+    t392[3].kind === 'note' && t392[3].commentPlus === 2,
+  JSON.stringify(t392.map((t) => (t.kind === 'note' ? { c: t.comment, p: t.commentPlus, m: t.commentMinus, aug: t.augmentCount } : {}))),
+)
+const svg392 = renderScoreToSvg(layoutScore(r392, DUR_CFG))[0]
+const commentY392 = (text: string): number => {
+  const m = new RegExp(`<text x="[\\d.]+" y="([\\d.]+)" text-anchor="middle" font-size="[\\d.]+"[^>]*>${text}<`).exec(svg392)
+  return m ? Number(m[1]) : NaN
+}
+const y392 = { 甲: commentY392('甲'), 乙: commentY392('乙'), 丙: commentY392('丙'), 丁: commentY392('丁') }
+check('adj392 渲染：+ 抬升 1 级（y 减少 NOTE_COMMENT_RAISE）', Math.abs(y392.甲 - y392.乙 - NOTE_COMMENT_RAISE) < 0.05, JSON.stringify(y392))
+check('adj392 渲染：- 降低 1 级（y 增加 NOTE_COMMENT_RAISE）', Math.abs(y392.丙 - y392.甲 - NOTE_COMMENT_RAISE) < 0.05, JSON.stringify(y392))
+check('adj392 渲染：++ 抬升 2 级（y 减少 2×NOTE_COMMENT_RAISE）', Math.abs(y392.甲 - y392.丁 - 2 * NOTE_COMMENT_RAISE) < 0.05, JSON.stringify(y392))
+// 注释块内注释与 + 之间不留空格也成立；增时线写在注释之前仍是增时线（注释后紧贴的 - 归注释）
+const r392b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1"甲"+2"乙" 3-"丙" 4"丁"--- |\n')
+const t392b = r392b.groups[0].music.tokens.filter((t) => t.kind === 'note')
+check(
+  'adj392 紧贴下一音符 / 空格写法都支持：1"甲"+2 与 1"甲"+ 2 等效',
+  r392b.errors.length === 0 && t392b.length === 4 && t392b[0].kind === 'note' && t392b[0].commentPlus === 1 && t392b[1].kind === 'note' && t392b[1].commentPlus === undefined,
+  JSON.stringify(t392b.map((t) => (t.kind === 'note' ? { c: t.comment, p: t.commentPlus } : {}))),
+)
+check('adj392 增时线写在注释前（3-"丙"）仍是增时线，注释不带 +/-', t392b[2].kind === 'note' && t392b[2].augmentCount === 1 && t392b[2].commentMinus === undefined && t392b[2].commentPlus === undefined, JSON.stringify(t392b[2]))
+check('adj392 注释后紧贴的 --- 归注释降低（4"丁"--- → -3 级，augmentCount=0）', t392b[3].kind === 'note' && t392b[3].commentMinus === 3 && t392b[3].augmentCount === 0, JSON.stringify(t392b[3]))
+// 休止符 / 节奏符注释同样支持
+const r392c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 0"转调"+ 9"节奏"-- |\n')
+const t392c = r392c.groups[0].music.tokens.filter((t) => t.kind === 'rest' || t.kind === 'rhythm')
+check(
+  'adj392 休止符/节奏符注释也支持 +/-（0"转调"+ → +1、9"节奏"-- → -2）',
+  r392c.errors.length === 0 && t392c[0]?.kind === 'rest' && t392c[0].commentPlus === 1 && t392c[1]?.kind === 'rhythm' && t392c[1].commentMinus === 2,
+  JSON.stringify(t392c.map((t) => ({ k: t.kind, p: (t as { commentPlus?: number }).commentPlus, m: (t as { commentMinus?: number }).commentMinus }))),
+)
 // 歌词注释 _ 替换空格（adj59）
 const lr59 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\nC: 一 二"副歌_部分"三 四\n')
 const lr59c = lr59.groups[0].lyrics[0].chars
@@ -3941,6 +4178,124 @@ console.log('[86] pwa update prompt (adj379)')
   check('adj379 首次注册（页面此前无控制者）不提示更新', shouldPromptUpdate(false) === false)
   check('adj379 已有控制者被新 SW 接管 → 提示更新', shouldPromptUpdate(true) === true)
   check('adj379 自动检查间隔 = 30 分钟', UPDATE_CHECK_INTERVAL_MS === 30 * 60 * 1000, String(UPDATE_CHECK_INTERVAL_MS))
+}
+
+// ---- 86b. 编辑区问题提示条（adj394）----
+console.log('[86b] problems bar summary / jump offset (adj394)')
+{
+  const errs = [
+    { line: 5, col: 8, message: '渐强/渐弱起止之间没有音符（起止落在同一音符），不会渲染', severity: 'warning' as const },
+    { line: 3, col: 4, message: '引号注释未闭合', severity: 'error' as const },
+    { line: 9, col: 0, message: '音符块与小节线块之间应只有一个空格', severity: 'warning' as const },
+  ]
+  const s = summarizeProblems(errs)
+  check('adj394 汇总计数（1 错误 / 2 告警 / 共 3）', s.errorCount === 1 && s.warnCount === 2 && s.total === 3, JSON.stringify(s))
+  check('adj394 最严重级别 = error（有错误时）', s.worst === 'error', String(s.worst))
+  check('adj394 排序：错误在前、同类按行升序', s.rows.map((r) => `${r.severity}${r.line}`).join(',') === 'error3,warning5,warning9', s.rows.map((r) => `${r.severity}${r.line}`).join(','))
+  check('adj394 展示文本含分级/行列/消息', s.rows[0].text === '错误[第3行 第5列] 引号注释未闭合', s.rows[0].text)
+  check('adj394 列号展示为 1-based（源码 0-based +1）', s.rows[2].col === 1 && s.rows[0].col === 5, JSON.stringify(s.rows.map((r) => r.col)))
+  const sWarn = summarizeProblems([errs[0]])
+  check('adj394 仅告警时最严重级别 = warning', sWarn.worst === 'warning' && sWarn.errorCount === 0, JSON.stringify(sWarn))
+  check('adj394 无问题时 total=0、worst=null（组件据此不渲染提示条）', summarizeProblems([]).total === 0 && summarizeProblems([]).worst === null)
+  check('adj394 max 限制只影响展示行数、计数仍为全量', (() => { const c = summarizeProblems(errs, 2); return c.rows.length === 2 && c.total === 3 && c.errorCount === 1 })())
+  check('adj394 文案：标题含分级计数', problemCopy.title(3, 1, 2) === '3 个问题（1 个错误 / 2 个告警）', problemCopy.title(3, 1, 2))
+  // adj394：问题行带「正确语法规则」（引擎 hint）→ 提示条在消息下方显示「正确写法」
+  {
+    const withHint = summarizeProblems([
+      { line: 5, col: 8, message: '渐强/渐弱起止之间没有音符（起止落在同一音符），不会渲染', severity: 'warning', hint: '起止之间至少要有音符：`1 2 3 < 4 ! 5`' },
+      { line: 3, col: 4, message: '引号注释未闭合', severity: 'error', hint: '引号要成对闭合，如 `1"渐强" 2`' },
+    ])
+    check('adj394 问题行携带 hint（正确写法）', withHint.rows.every((r) => !!r.hint && r.hint.includes('`')), JSON.stringify(withHint.rows.map((r) => r.hint)))
+    check('adj394 「正确写法」前缀文案存在', problemCopy.correctPrefix === '正确写法：', problemCopy.correctPrefix)
+    check('adj394 语法速查入口文案存在', problemCopy.syntaxHelp === '语法速查', problemCopy.syntaxHelp)
+    // 无 hint 的问题也不应报错（hint 可能缺省）
+    const noHint = summarizeProblems([{ line: 1, col: 0, message: 'x', severity: 'warning' }])
+    check('adj394 缺省 hint 时正常（不报错、hint 为 undefined）', noHint.rows.length === 1 && noHint.rows[0].hint === undefined)
+  // adj394：输入条「强弱」组提示必须写明「只有 + 抬升、`-` 不支持」（语法约定的用户可见入口）
+  {
+    const dyn = PAD_GROUPS.find((g) => g.keys.some((k) => k.label === '<' && k.label !== '+'))
+    const keys = dyn?.keys ?? []
+    const lt = keys.find((k) => k.insert === '<')
+    const gt = keys.find((k) => k.insert === '>')
+    const plus = keys.find((k) => k.insert === '+')
+    check('adj394 输入条 `+` 键提示写明「只有抬升、没有 - 降低」', !!plus?.hint && plus.hint.includes('没有 - 降低'), plus?.hint)
+    check('adj394 输入条 `<` / `>` 键提示写明「不支持 - 降低（- 是增时线）」', !!lt?.hint && !!gt?.hint && lt.hint.includes('不支持 - 降低') && gt.hint.includes('不支持 - 降低'), `${lt?.hint} | ${gt?.hint}`)
+  }
+  }
+  // adj394：**所有报错点都必须带正确写法**（逐个场景扫一遍，防止以后新增报错时漏挂 hint）
+  {
+    const badSources: [string, string][] = [
+      ['多空格', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1  2 |\n'],
+      ['孤立 &', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 & 2 |\n'],
+      ['无法识别的符号', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 % 2 |\n'],
+      ['引号未闭合', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1"未闭合 2 |\n'],
+      ['渐强起止同音符', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 < ! 4 |\n'],
+      ['渐强跨行', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 < 3 |\nQ: 4 5 ! |\n'],
+      ['渐强未结束又新起', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 < 3 4 > 5 |\n'],
+      ['跳房子写错位置', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: [ "1." 1 2 3 |\n'],
+      ['C 行缺曲行', 'V: 1.0\nB: t\nD: C\nP: 4/4\nC: 孤零零的歌词\n'],
+      ['未识别行', 'V: 1.0\nB: t\nD: C\nP: 4/4\nX: 这是啥\nQ: 1 2 3 4 |\n'],
+    ]
+    const missing: string[] = []
+    for (const [name, src] of badSources) {
+      const rows = summarizeProblems(parseJps(src).errors).rows
+      if (rows.length === 0) missing.push(`${name}(未产生任何问题)`)
+      else if (rows.some((r) => !r.hint)) missing.push(`${name}(${rows.filter((r) => !r.hint).map((r) => r.message).join('/')})`)
+    }
+    check('adj394 十类语法问题全部带正确写法（引擎 hint 无漏挂）', missing.length === 0, missing.join('；'))
+  }
+  // adj394（`-` 与增时线的全面排查）：连音线 `(-` 的 `-` 属于连音线；紧贴音符且带 +/- 时给出提示
+  {
+    const attached = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1(- 2 3) 4 |\n')
+    const sAtt = attached.groups[0].music.tokens.find((t) => t.kind === 'slur')
+    const n1 = attached.groups[0].music.tokens.find((t) => t.kind === 'note')
+    check(
+      'adj394 `1(- 2 3)`：`-` 归连音线（降低 1 级）、音符 1 不增时，并给出告警',
+      sAtt?.kind === 'slur' &&
+        sAtt.minus === 1 &&
+        n1?.kind === 'note' &&
+        n1.augmentCount === 0 &&
+        attached.errors.some((e) => e.message.includes('紧贴在音符后')),
+      JSON.stringify({ slur: sAtt?.kind === 'slur' ? { plus: sAtt.plus, minus: sAtt.minus } : null, aug: n1?.kind === 'note' ? n1.augmentCount : null, errs: attached.errors.map((e) => e.message) }),
+    )
+    check(
+      'adj394 `1(-` 告警带正确写法（说明增时要写在音符旁 1- (- 2 3）',
+      attached.errors.some((e) => e.message.includes('紧贴在音符后') && (e.hint ?? '').includes('1- (- 2 3')),
+      JSON.stringify(attached.errors.map((e) => e.hint)),
+    )
+    const spaced = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1- (- 2 3) 4 |\n')
+    const sSp = spaced.groups[0].music.tokens.find((t) => t.kind === 'slur')
+    const n1s = spaced.groups[0].music.tokens.find((t) => t.kind === 'note')
+    check(
+      'adj394 `1- (- 2 3)`（规范写法）：音符 1 增时 1、连音线降低 1，且无告警',
+      spaced.errors.length === 0 && sSp?.kind === 'slur' && sSp.minus === 1 && n1s?.kind === 'note' && n1s.augmentCount === 1,
+      JSON.stringify({ errs: spaced.errors.map((e) => e.message), aug: n1s?.kind === 'note' ? n1s.augmentCount : null }),
+    )
+    const volta = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1- | [-"1." 2 3 4 |]\n')
+    const barV = volta.groups[0].music.tokens.find((t) => t.kind === 'barline' && t.voltaStart)
+    const nv = volta.groups[0].music.tokens.find((t) => t.kind === 'note')
+    check(
+      'adj394 跳房子 `|[-"1."`：`-` 是跳房子降低级数；音符增时写在 `|` 之前（1-）照旧生效',
+      volta.errors.length === 0 && barV?.kind === 'barline' && barV.voltaStart?.minus === 1 && nv?.kind === 'note' && nv.augmentCount === 1,
+      JSON.stringify({ volta: barV?.kind === 'barline' ? barV.voltaStart : null, errs: volta.errors.map((e) => e.message) }),
+    )
+    const ampPlus = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1&sby+ 2 |\n')
+    const ampMinus = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1&sby- 2 |\n')
+    const symPlus = ampPlus.groups[0].music.tokens.find((t) => t.kind === 'note')
+    const symMinus = ampMinus.groups[0].music.tokens.find((t) => t.kind === 'note')
+    check(
+      'adj394 `&sby+`（加长版编码）与 `&sby-`（`-` 是增时线、编码仍为 sby）解析正确',
+      symPlus?.kind === 'note' && symPlus.symbols.includes('sby+') && symMinus?.kind === 'note' && symMinus.symbols.includes('sby') && symMinus.augmentCount === 1,
+      JSON.stringify({ plus: symPlus?.kind === 'note' ? symPlus.symbols : null, minus: symMinus?.kind === 'note' ? { sym: symMinus.symbols, aug: symMinus.augmentCount } : null }),
+    )
+  }
+  // offsetOf：行/列为 1-based，越界钳制（供 jumpCursor 定位）
+  const code = 'V: 1.0\nB: t\nQ: 1 2 < ! 3 |\n'
+  check('adj394 偏移：第1行第1列 = 0', offsetOf(code, 1, 1) === 0, String(offsetOf(code, 1, 1)))
+  check('adj394 偏移：第3行第1列 = 前两行长度+2', offsetOf(code, 3, 1) === 'V: 1.0\nB: t\n'.length, `${offsetOf(code, 3, 1)} vs ${'V: 1.0\nB: t\n'.length}`)
+  check('adj394 偏移：第3行第8列（`<` 所在）指向该字符', code[offsetOf(code, 3, 8)] === '<', `char=${code[offsetOf(code, 3, 8)]}`)
+  check('adj394 偏移：行号/列号超界钳制（不越界、不抛错）', offsetOf(code, 999, 999) === code.length, `${offsetOf(code, 999, 999)} vs ${code.length}`)
+  check('adj394 偏移：非法行号（0）钳制到第 1 行', offsetOf(code, 0, 1) === 0, String(offsetOf(code, 0, 1)))
 }
 
 // ---- 87. 增时线 data-notepos 覆盖：各种写法核对（adj380 排查）----

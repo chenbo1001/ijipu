@@ -2,11 +2,13 @@
  * App.tsx — iJipu（爱记谱）应用外壳
  * 布局（adj281）：
  *   TopBar（合并原菜单栏 + 工具栏）/ 主区域（编码·拆分·预览）/
+ *   ProblemsBar（adj394：语法问题提示条，仅在有问题时出现）/
  *   EditorFootBar（合并原脚本编辑器顶栏 + 状态栏）+ 模态框
  */
 import { Suspense, lazy, useEffect, useRef } from 'react'
 import { TopBar } from './ui/TopBar'
 import { EditorFootBar } from './ui/EditorFootBar'
+import { ProblemsBar } from './ui/ProblemsBar'
 import { Toast } from './ui/Toast'
 import { UpdatePrompt } from './ui/UpdatePrompt'
 import { EditorPane } from './editor/EditorPane'
@@ -193,6 +195,8 @@ function App() {
         )}
         {(viewType === 'splitH' || viewType === 'splitHE') && renderSplitH()}
       </div>
+      {/* adj394：脚本不符合语法时，编辑区底部给出可读的告警提示条（无问题时整条不渲染） */}
+      <ProblemsBar />
       <EditorFootBar />
       <Toast />
       {/* adj379：检测到 SW 新版本时的「点击刷新」提示 */}

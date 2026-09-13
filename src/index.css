@@ -892,6 +892,177 @@ body {
   border-top: 1px solid var(--jp-border);
 }
 
+/* ============ 编辑区问题提示条（adj394：脚本不符合语法时给出可读告警）============ */
+.problems-bar {
+  flex-shrink: 0;
+  border-top: 1px solid var(--jp-border);
+  background: var(--jp-bg-panel);
+  font-family: var(--jp-font-sans);
+  font-size: 12px;
+  max-height: 40%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 严重级别着色：错误红、告警橙（与行号栏 gutter-err/gutter-warn 同一套色） */
+.problems-bar.is-error {
+  border-top-color: var(--jp-danger);
+  box-shadow: inset 3px 0 0 var(--jp-danger);
+}
+.problems-bar.is-warn {
+  border-top-color: var(--jp-warning);
+  box-shadow: inset 3px 0 0 var(--jp-warning);
+}
+
+.problems-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 12px;
+  color: var(--jp-text-primary);
+  font-size: 12px;
+}
+
+.problems-head-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font-size: 12px;
+}
+
+.problems-head-main:hover {
+  color: var(--jp-accent);
+}
+
+/* adj394：「语法速查」入口 + 折叠开关（靠右） */
+.problems-syntax,
+.problems-toggle {
+  background: transparent;
+  border: 0;
+  padding: 0 4px;
+  cursor: pointer;
+  color: var(--jp-text-muted);
+  font-size: 11px;
+  font-family: var(--jp-font-sans);
+}
+
+.problems-syntax {
+  margin-left: auto;
+  text-decoration: underline dotted;
+}
+
+.problems-syntax:hover,
+.problems-toggle:hover {
+  color: var(--jp-accent);
+}
+
+.problems-icon {
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.problems-bar.is-error .problems-icon,
+.problems-bar.is-error .problems-title {
+  color: var(--jp-danger);
+}
+
+.problems-bar.is-warn .problems-icon,
+.problems-bar.is-warn .problems-title {
+  color: var(--jp-warning);
+}
+
+.problems-title {
+  font-weight: 600;
+}
+
+.problems-toggle {
+  margin-left: 0;
+  color: var(--jp-text-muted);
+  font-size: 11px;
+}
+
+.problems-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.problem-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 12px 2px 24px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  color: var(--jp-text-secondary);
+  font-size: 12px;
+}
+
+.problem-row:hover {
+  background: var(--jp-bg-hover, rgba(127, 127, 127, 0.08));
+  color: var(--jp-text-primary);
+}
+
+.problem-tag {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+.problem-row.is-error .problem-tag {
+  color: var(--jp-danger);
+}
+.problem-row.is-warning .problem-tag {
+  color: var(--jp-warning);
+}
+
+.problem-pos {
+  flex: 0 0 auto;
+  font-family: var(--jp-font-mono);
+  font-size: 11px;
+  color: var(--jp-text-muted);
+}
+
+.problem-msg {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* adj394：每条问题下方给出「正确写法」（引擎 hint，含最小示例）——可换行、不截断 */
+.problem-hint {
+  padding: 1px 12px 4px 24px;
+  color: var(--jp-text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.problem-hint-label {
+  font-weight: 600;
+  color: var(--jp-text-secondary);
+}
+
+/* 状态栏语法状态（adj394：小圆点 + 文字，明细见上方问题条） */
+.footer-problems {
+  cursor: default;
+  max-width: 40%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* ============ 底部栏（adj281：合并原 editor-head + StatusBar）============ */
 .footer {
   height: var(--jp-statusbar-h);

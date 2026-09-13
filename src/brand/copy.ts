@@ -89,6 +89,37 @@ export const uiCopy = {
   openFailedPrefix: '打开失败：',
 } as const
 
+/**
+ * adj394：编辑区「问题提示条」文案（脚本不符合语法时在编辑区内显式可见，
+ * 此前只有行号栏着色 + 悬停 tooltip，用户看不出哪里不对）
+ */
+export const problemCopy = {
+  /** 无问题时的状态文字（状态栏小圆点 tooltip） */
+  clean: '语法检查通过',
+  /** 有错误时的状态文字 */
+  hasErrors: '有语法错误',
+  /** 仅有警告时的状态文字 */
+  hasWarnings: '有语法告警',
+  /** 分级标签（与 summarizeProblems 的 label 一致） */
+  error: '错误',
+  warning: '警告',
+  /** 提示条标题：N 个问题（X 错误 / Y 警告） */
+  title: (total: number, errors: number, warnings: number): string => {
+    const parts: string[] = []
+    if (errors > 0) parts.push(`${errors} 个错误`)
+    if (warnings > 0) parts.push(`${warnings} 个告警`)
+    return `${total} 个问题（${parts.join(' / ')}）`
+  },
+  /** 行尾提示：点击跳到该位置 */
+  jumpHint: '点击跳转到该位置',
+  expand: '展开',
+  collapse: '收起',
+  /** adj394：问题条里「正确写法」的前缀（hint 由引擎给出） */
+  correctPrefix: '正确写法：',
+  /** 打开内置「语法速查」对话框 */
+  syntaxHelp: '语法速查',
+} as const
+
 /** adj369：保存阶段中文名（保存慢时的提示与控制台明细用） */
 export const savePhaseCopy = {
   open: '打开写入流',
