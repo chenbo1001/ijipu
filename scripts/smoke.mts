@@ -12,8 +12,9 @@ import { parseKey } from '@ijipu/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork } from '@ijipu/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, noteScaleOf, lowDotY, octaveDotY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, noteScaleOf, lowDotY, octaveDotY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos } from '@ijipu/engine/layout/metaAnchors.ts'
+import type { BarlineType } from '@ijipu/engine/types.ts'
 import { computeBeamsForTest } from '@ijipu/engine/render/index.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
 import { highlightCode } from '../src/editor/highlight.ts'
@@ -224,7 +225,8 @@ check('复杂行 6 个可见音符（8 隐藏休止不画）', cnt2 === 6, `got 
 check('隐藏休止符不可播放', lay2.pages[0].notes.find((n) => n.token.kind === 'rest')?.playable === false)
 check('SVG 含增时线 "-" 字符', svg2.includes('>-<'))
 // 小节线 rect 高 = yBottom-yTop（随字号缩放）；断言只要存在小节线竖线即可（数量验证）
-const barRects = (svg2.match(new RegExp(`width="(?:0\\.9|1\\.4)" height="16\\.[0-9]"`, 'g')) ?? []).length
+// adj391：线宽改为 细 1 / 粗 2
+const barRects = (svg2.match(new RegExp(`width="(?:1|2)" height="16\\.[0-9]"`, 'g')) ?? []).length
 check('小节线竖线 3 条（单线 1 + 双线 2：细+粗）', barRects === 3, `got ${barRects}`)
 
 // ---- 9. 分页（M1b） ----
@@ -1427,9 +1429,10 @@ check('adj198 线 2 在自然宽行尾（203.7，不铺满）', Math.abs(bars23[
 const rr23 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 3 | 5 6 7 1 |\n')
 const layRr = layoutScore(rr23, DUR_CFG)
 const noteRr = layRr.pages[0].notes[0]
-// adj198：行首 |: 自然宽（首音符 x+6 = 实测 65.4；首线 44.2 贴左边距）
-check('adj198 行首 |: 占位（首音符中心 = 实测 65.4）', Math.abs(noteRr.x + 6 - 65.4) < 0.6, `center=${noteRr.x + 6}`)
-check('|: 行首：粗线左缘贴左边距（x = 40+4.2）', Math.abs(layRr.pages[0].barlines[0].x - (ML + 4.2)) < 1, `x=${layRr.pages[0].barlines[0].x}`)
+// adj198：行首 |: 自然宽（首音符 x+6 = 实测 64.6；adj391 线组 8.4→7.6 后整体左移 0.8）
+check('adj198 行首 |: 占位（首音符中心 = 实测 64.6）', Math.abs(noteRr.x + 6 - 64.6) < 0.6, `center=${noteRr.x + 6}`)
+check('|: 行首：粗线左缘贴左边距（x = 40 + 线组半宽）', Math.abs(layRr.pages[0].barlines[0].x - (ML + barlineTotalW('|:') / 2)) < 1, `x=${layRr.pages[0].barlines[0].x} expect=${ML + barlineTotalW('|:') / 2}`)
+
 // 歌词中心对齐音符数字（增时线音符 1- 的歌词在数字下方）
 const rly23 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1- 2 3 4 |\nC: 一 二 三 四\n')
 const layLy = layoutScore(rly23, DUR_CFG)
@@ -1657,8 +1660,8 @@ const oct34 = parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1' 2 3 4 |\n")
 const layO34 = layoutScore(oct34, DUR_CFG)
 const nO34 = layO34.pages[0].notes[0]
 const octDot = new RegExp(`<circle cx="([\\d.]+)" cy="([\\d.]+)" r="${DOT_R_S}"`).exec(renderScoreToSvg(layO34)[0])
-// 高音点 x = 数字中心左移 s（adj19）
-check('高音点 x = 数字中心左移 1（adj19）', octDot !== null && Math.abs(Number(octDot[1]) - (nO34.x + halfDig - NS_S)) < 0.5, `cx=${octDot?.[1]} expect=${nO34.x + halfDig - NS_S}`)
+// 高音点 x = 数字槽中心（adj391：取消 adj19 的左移 1px，与音符水平居中）
+check('adj391 高音点 x = 数字槽中心（与音符水平居中）', octDot !== null && Math.abs(Number(octDot[1]) - (nO34.x + halfDig)) < 0.5, `cx=${octDot?.[1]} expect=${nO34.x + halfDig}`)
 // 高音点 y = octaveDotY（随字号缩放，点底距数字顶 LAYER_GAP×s）
 check('高音点 y = octaveDotY（点底距数字顶 LAYER_GAP，adj60）', octDot !== null && Math.abs(Number(octDot[2]) - octaveDotY(nO34.y, 0, defaultPageConfig.note_size)) < 0.5, `cy=${octDot?.[2]} expect=${octaveDotY(nO34.y, 0, defaultPageConfig.note_size)}`)
 // 附点（adj288）：主音符与附点在 1.5 倍时值宽内平均分布（三等分）——圆心 = 主段右端；
@@ -1948,11 +1951,13 @@ const n41 = lay41.pages[0].notes[0]
 check('小节线上端 = 音符基线-18.4×s（数字上沿-14.4 再上延 4px）', Math.abs(b41.yTop - (n41.y - BAR_TOP)) < 0.5, `yTop=${b41.yTop}`)
 check('小节线下端 = 音符基线+4.5×s（数字下沿+0.5 再下延 4px）', Math.abs(b41.yBottom - (n41.y + 4.5 * NS_S)) < 0.5, `yBottom=${b41.yBottom}`)
 check('小节线高 22.9×s（数字 14.9 + 上下各延伸 4px）', Math.abs(b41.yBottom - b41.yTop - BAR_H) < 0.5)
-// 反复点：|: 为左粗线、中细线、右 :（点中心 = 线 x + 1.6，点线距 1.2px，adj104 点径 2.4、r=1.2；随字号缩放 ×s）
+// 反复点：|: 为左粗线、中细线、右 :（点中心由 barlineGeometry 给出，adj391 = 线 x + 2.6；
+// 点线距 1.2px，adj104 点径 2.4、r=1.2；随字号缩放 ×s）
 const svg41 = renderScoreToSvg(lay41)[0]
 const dot41R = R1(BARLINE_DOT_R * NS_S) // 反复点半径随字号
 const dot41 = new RegExp(`<circle cx="([\\d.]+)" cy="[\\d.]+" r="${dot41R}"`).exec(svg41)
-check('反复点（|: 右侧 :，cx = 线 x + 1.6）', dot41 !== null && Math.abs(Number(dot41[1]) - (b41.x + 1.6)) < 0.5, `cx=${dot41?.[1]} x=${b41.x}`)
+const dot41Exp = b41.x + (barlineGeometry(b41.type).dots[0] ?? 0)
+check('反复点（|: 右侧 :，cx = 线 x + 几何点偏移）', dot41 !== null && Math.abs(Number(dot41[1]) - dot41Exp) < 0.5, `cx=${dot41?.[1]} expect=${dot41Exp}`)
 
 // ---- 42. 拍级挤占（adj35） ----
 console.log('[42] beat-level spacing (adj35)')
@@ -2358,52 +2363,100 @@ const mk52 = (q: string) =>
   layoutScore(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), DUR_CFG)
 const svg52 = (lay: ReturnType<typeof mk52>) => renderScoreToSvg(lay)[0]
 const barlineRects = (svg: string, cx: number, r: number) =>
-  [...svg.matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="(0\.9|1\.4)" height="16\.[0-9]"/g)]
+  [...svg.matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="(1|2)" height="16\.[0-9]"/g)]
     .map((m) => ({ x: +m[1], w: m[2] }))
     .filter((o) => Math.abs(o.x - cx) < r)
 const barlineDots = (svg: string, cx: number, r: number) =>
   [...svg.matchAll(new RegExp(`<circle cx="([\\d.]+)" cy="[\\d.]+" r="${R1(BARLINE_DOT_R * NS_S)}"`, 'g'))]
     .map((m) => +m[1])
     .filter((c) => Math.abs(c - cx) < r)
-// ① || 双小节线：左细线右粗线（细 0.9、粗 1.4，adj104），间距 1.2px（线左缘不动、宽缩）
+// adj391：线宽 细 1 / 粗 2（用户规则）；线组以小节线中心对称（渲染与布局占位共用 barlineGeometry）
+check('adj391 线宽常量：细 1、粗 2', BARLINE_W_THIN === 1 && BARLINE_W_THICK === 2, `thin=${BARLINE_W_THIN} thick=${BARLINE_W_THICK}`)
+// ① || 双小节线：左细线右粗线（细 1、粗 2），间距 1px（adj55 原意，adj391 恢复）
 const lay52a = mk52('1 2 3 4 || 5 6 7 1 |')
 const b52a = lay52a.pages[0].barlines.find((b) => b.type === '||')
 const rr52a = b52a ? barlineRects(svg52(lay52a), b52a.x, 6) : []
-check('|| 左细右粗（细 0.9、粗 1.4）', rr52a.length === 2 && rr52a[0].w === '0.9' && rr52a[1].w === '1.4', JSON.stringify(rr52a))
-check('|| 线间距 1.2px（adj104）', rr52a.length === 2 && Math.abs(rr52a[1].x - (rr52a[0].x + 0.9) - 1.2) < 0.5, JSON.stringify(rr52a))
-// ② ||/ 双细线，间距 1.2px（adj55/104）
+check('|| 左细右粗（细 1、粗 2）', rr52a.length === 2 && rr52a[0].w === '1' && rr52a[1].w === '2', JSON.stringify(rr52a))
+check('|| 线间距 1px（adj391）', rr52a.length === 2 && Math.abs(rr52a[1].x - (rr52a[0].x + 1) - BARLINE_LINE_GAP) < 0.5, JSON.stringify(rr52a))
+check('adj391 线组以小节线中心对称（左缘 = x−2、右缘 = x+2）', rr52a.length === 2 && b52a !== undefined && Math.abs(rr52a[0].x - (b52a.x - barlineTotalW('||') / 2)) < 0.5 && Math.abs(rr52a[1].x + 2 - (b52a.x + barlineTotalW('||') / 2)) < 0.5, `rects=${JSON.stringify(rr52a)} x=${b52a?.x}`)
+// ② ||/ 双细线，间距 1px（adj55/391）
 const lay52b = mk52('1 2 3 4 ||/ 5 6 7 1 |')
 const b52b = lay52b.pages[0].barlines.find((b) => b.type === '||/')
 const rr52b = b52b ? barlineRects(svg52(lay52b), b52b.x, 5) : []
-check('||/ 双细线（2 条 0.9）', rr52b.length === 2 && rr52b[0].w === '0.9' && rr52b[1].w === '0.9', JSON.stringify(rr52b))
-check('||/ 线间距 1.2px（adj104）', rr52b.length === 2 && Math.abs(rr52b[1].x - (rr52b[0].x + 0.9) - 1.2) < 0.5, JSON.stringify(rr52b))
-// ③ |: 左粗线、中细线、右 :，线距 1.4px、点线距 1.2px（adj55/104）
+check('||/ 双细线（2 条 1）', rr52b.length === 2 && rr52b[0].w === '1' && rr52b[1].w === '1', JSON.stringify(rr52b))
+check('||/ 线间距 1px（adj391）', rr52b.length === 2 && Math.abs(rr52b[1].x - (rr52b[0].x + 1) - BARLINE_LINE_GAP) < 0.5, JSON.stringify(rr52b))
+// ③ |: 左粗线、中细线、右 :，线距 1px、点线距 1.2px（adj55/104/391）
 const lay52c = mk52('1 2 3 4 |: 5 6 7 1 |')
 const b52c = lay52c.pages[0].barlines.find((b) => b.type === '|:')
 const rr52c = b52c ? barlineRects(svg52(lay52c), b52c.x, 8) : []
 const dd52c = b52c ? barlineDots(svg52(lay52c), b52c.x, 8) : []
-check('|: 粗线在左、细线在右', rr52c.length === 2 && rr52c[0].w === '1.4' && rr52c[1].w === '0.9', JSON.stringify(rr52c))
-const dotGap52c = Math.min(...dd52c) - 1.2 - (rr52c[1].x + 0.9) // 点左缘 - 细线右缘
-check('|: 点在细线右侧（间距 1.2px，adj104）', dd52c.length === 2 && Math.abs(dotGap52c - 1.2) < 0.5, `gap=${dotGap52c} dots=${dd52c} thin=${rr52c[1]?.x}`)
-// ④ :| 左 :、中细线、右粗线，间距 2px
+check('|: 粗线在左、细线在右', rr52c.length === 2 && rr52c[0].w === '2' && rr52c[1].w === '1', JSON.stringify(rr52c))
+const dotGap52c = Math.min(...dd52c) - BARLINE_DOT_R * NS_S - (rr52c[1].x + 1) // 点左缘 - 细线右缘
+check('|: 点在细线右侧（间距 1.2px，adj104）', dd52c.length === 2 && Math.abs(dotGap52c - BARLINE_DOT_GAP) < 0.5, `gap=${dotGap52c} dots=${dd52c} thin=${rr52c[1]?.x}`)
+// ④ :| 左 :、中细线、右粗线
 const lay52d = mk52('1 2 3 4 :| 5 6 7 1 |')
 const b52d = lay52d.pages[0].barlines.find((b) => b.type === ':|')
 const rr52d = b52d ? barlineRects(svg52(lay52d), b52d.x, 8) : []
 const dd52d = b52d ? barlineDots(svg52(lay52d), b52d.x, 8) : []
-check(':| 细线在左、粗线在右', rr52d.length === 2 && rr52d[0].w === '0.9' && rr52d[1].w === '1.4', JSON.stringify(rr52d))
+check(':| 细线在左、粗线在右', rr52d.length === 2 && rr52d[0].w === '1' && rr52d[1].w === '2', JSON.stringify(rr52d))
 check(':| 点在细线左侧', dd52d.length === 2 && Math.max(...dd52d) < rr52d[0].x, `dots=${dd52d}`)
 // ⑤ :|: 两边反复：: 细线 粗线 细线 :
 const lay52e = mk52('1 2 3 4 :|: 5 6 7 1 |')
 const b52e = lay52e.pages[0].barlines.find((b) => b.type === ':|:')
 const rr52e = b52e ? barlineRects(svg52(lay52e), b52e.x, 10) : []
 const dd52e = b52e ? barlineDots(svg52(lay52e), b52e.x, 10) : []
-check(':|: 细-粗-细 3 线', rr52e.length === 3 && rr52e[0].w === '0.9' && rr52e[1].w === '1.4' && rr52e[2].w === '0.9', JSON.stringify(rr52e))
-check(':|: 左右各 2 点', dd52e.length === 4 && Math.min(...dd52e) < rr52e[0].x && Math.max(...dd52e) > rr52e[2].x + 0.9, `dots=${dd52e}`)
+check(':|: 细-粗-细 3 线', rr52e.length === 3 && rr52e[0].w === '1' && rr52e[1].w === '2' && rr52e[2].w === '1', JSON.stringify(rr52e))
+check(':|: 左右各 2 点', dd52e.length === 4 && Math.min(...dd52e) < rr52e[0].x && Math.max(...dd52e) > rr52e[2].x + 1, `dots=${dd52e}`)
+// adj391：渲染与布局占位同源——线 rect 的 x/宽、点圆心都必须等于 barlineGeometry 给出的几何
+// （线宽不随字号缩放，故 rect 可直接与设计值逐项比对；点的半径随字号缩放，故只比圆心）
+const spans391: [string, ReturnType<typeof mk52>, BarlineType][] = [
+  ['|', mk52('1 2 3 4 | 5 6 7 1 |'), '|'],
+  ['||', lay52a, '||'],
+  ['||/', lay52b, '||/'],
+  ['|:', lay52c, '|:'],
+  [':|', lay52d, ':|'],
+  [':|:', lay52e, ':|:'],
+]
+for (const [name, lay, type] of spans391) {
+  const bb = lay.pages[0].barlines.find((x) => x.type === type)
+  if (!bb) {
+    check(`adj391 ${name} 小节线存在`, false, `type=${type}`)
+    continue
+  }
+  const geom = barlineGeometry(type)
+  const rs = barlineRects(svg52(lay), bb.x, 12)
+    .map((o) => ({ off: R1(o.x - bb.x), w: Number(o.w) }))
+    .sort((a, b) => a.off - b.off)
+  const ds = [...new Set(barlineDots(svg52(lay), bb.x, 12).map((c) => R1(c - bb.x)))].sort((a, b) => a - b)
+  const linesOk = rs.length === geom.lines.length && rs.every((o, i) => Math.abs(o.off - geom.lines[i].off) < 0.05 && o.w === geom.lines[i].w)
+  // 每个反复点渲染两枚圆（上下各一），故按 x 去重后再比
+  const dotsOk = ds.length === geom.dots.length && ds.every((c, i) => Math.abs(c - R1(geom.dots[i])) < 0.05)
+  check(`adj391 ${name} 渲染几何 == barlineGeometry（线偏移/宽 + 点圆心）`, linesOk && dotsOk, JSON.stringify({ rs, geom: geom.lines, ds, gdots: geom.dots }))
+}
+// 占位表本身（几何单一来源）
+const ALL_BAR_TYPES: BarlineType[] = ['|', '||', '||/', '||:', '|:', ':|', ':|:', '|*', '|/']
+const w391: Record<string, number> = { '|': 1, '||': 4, '||/': 3, '||:': 6.6, '|:': 7.6, ':|': 7.6, ':|:': 13.2, '|*': 1, '|/': 0 }
+check(
+  'adj391 占位总宽（| 1、|| 4、||/ 3、||: 6.6、|: 7.6、:| 7.6、:|: 13.2、|* 1、|/ 0）',
+  ALL_BAR_TYPES.every((t) => Math.abs(barlineTotalW(t) - w391[t]) < 1e-9),
+  ALL_BAR_TYPES.map((t) => `${t}=${barlineTotalW(t)}`).join(','),
+)
+check(
+  'adj391 几何对称（各类型首元素左缘 = −total/2、末元素右缘 = +total/2）',
+  ALL_BAR_TYPES.every((t) => {
+    const g = barlineGeometry(t)
+    if (g.total === 0) return g.lines.length === 0 && g.dots.length === 0
+    const lefts = [...g.lines.map((l) => l.off), ...g.dots.map((c) => c - BARLINE_DOT_R)]
+    const rights = [...g.lines.map((l) => l.off + l.w), ...g.dots.map((c) => c + BARLINE_DOT_R)]
+    return Math.abs(Math.min(...lefts) + g.total / 2) < 1e-9 && Math.abs(Math.max(...rights) - g.total / 2) < 1e-9
+  }),
+  ALL_BAR_TYPES.map((t) => `${t}:${JSON.stringify(barlineGeometry(t))}`).join(' '),
+)
 // ⑥ |/ 不显示、不占位；|* 不显示、占位
 const lay52f = mk52('1 2 3 4 |/ 5 6 7 1 |')
 const lay52g = mk52('1 2 3 4 |* 5 6 7 1 |')
 const lay52h = mk52('1 2 3 4 | 5 6 7 1 |')
-const rectCount52 = (s: string) => (s.match(/width="(?:0\.9|1\.4)" height="16\.[0-9]"/g) ?? []).length
+const rectCount52 = (s: string) => (s.match(/width="(?:1|2)" height="16\.[0-9]"/g) ?? []).length
 check('|/ 不渲染线（rect 数比 | 版本少 1）', rectCount52(svg52(lay52f)) === rectCount52(svg52(lay52h)) - 1, `${rectCount52(svg52(lay52f))} vs ${rectCount52(svg52(lay52h))}`)
 const gap52f = lay52f.pages[0].notes[4].x - (lay52f.pages[0].notes[3].x + 11.16)
 const gap52h = lay52h.pages[0].notes[4].x - (lay52h.pages[0].notes[3].x + 11.16)
@@ -2457,8 +2510,14 @@ check('密集行无 error 级解析错误', r54.errors.filter((e) => e.severity 
 const n54 = lay54.pages[0].notes
 const maxNoteR54 = Math.max(...n54.map((n) => n.x + n.width))
 check('非整拍小节行：音符不溢出右边距', maxNoteR54 <= RIGHT_EDGE, `right=${maxNoteR54}`)
-const maxBarR54 = Math.max(...lay54.pages[0].barlines.map((b) => b.x + ({ '|': 0.55, '||': 1.95, '||/': 1.6, '|:': 4.2, ':|': 4.2, ':|:': 8.1, '||:': 3.85, '|*': 0.55 }[b.type] ?? 0.55)))
-check('小节线不溢出右边距（右缘 = 中心+半宽 ≤ 右内容边界）', maxBarR54 <= RIGHT_EDGE, `right=${maxBarR54}`)
+const maxBarR54 = Math.max(...lay54.pages[0].barlines.map((b) => b.x + barlineTotalW(b.type) / 2))
+// adj391：小节线中心 x 由布局以 r1（0.1px）取整，贴右边距行的"右缘 = 中心 + 半宽"最多外溢 0.05px
+// ——这是取整误差，不是布局溢出（该行右缘本就应落在内容边界上），故断言放 0.05 容差
+check(
+  '小节线不溢出右边距（右缘 = 中心+半宽 ≤ 右内容边界 + 0.05 取整容差）',
+  maxBarR54 <= RIGHT_EDGE + 0.05,
+  `right=${maxBarR54} edge=${RIGHT_EDGE} worst=${JSON.stringify(lay54.pages[0].barlines.map((b) => ({ t: b.type, x: b.x.toFixed(4), r: (b.x + barlineTotalW(b.type) / 2).toFixed(4) })).sort((a, b) => Number(b.r) - Number(a.r)).slice(0, 3))}`,
+)
 // 混合时值（16 分音符）不重叠
 const r54b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1/ 2/ 3// 4// | 1/ 2/ 3// 4// |\n')
 const n54b = [...layoutScore(r54b, DUR_CFG).pages[0].notes].sort((a, b) => a.x - b.x)
@@ -2468,7 +2527,7 @@ check('跨拍/拍中起始音符不重叠（最小间距 ≥ 数字槽宽）', m
 // 行首 |* 占位、|/ 不占位（需求）
 const r54c = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |* 1 2 3 4 |\n')
 const n54c = layoutScore(r54c, DUR_CFG).pages[0].notes[0]
-check('行首 |* 占位（音符右移）', n54c.x > ML + 12, `x=${n54c.x}`)
+check('行首 |* 占位（音符右移；adj391 线组宽 1 后实测 52）', n54c.x >= ML + 11.5, `x=${n54c.x}`)
 
 // ---- 55. 多连音线（(1 2 3) 三连音 / (y...) 平均连音组） ----
 console.log('[55] tuplets')
