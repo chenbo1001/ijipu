@@ -1034,7 +1034,7 @@
 - **根因（两层）**：
   1. **工具链决定链接方式**：`webview2-com-sys` 的 `src/lib.rs` 里 `link_webview2!` 宏按 `target_env` 分派——`msvc` 静态链接 `WebView2LoaderStatic.lib`（**不需要 DLL**），其它（本项目用的 **GNU**，`x86_64-pc-windows-gnu`，见 E-2026-029）链接 `WebView2Loader.dll`（**运行期必须有该 DLL 与 exe 同目录**）；
   2. **打包没带上它**：`tauri.conf.json` 的 `bundle.resources` 是空数组，生成的 `installer.nsi` 只有 `File "${MAINBINARYSRCPATH}"`（即 exe）——**0.12.16 起的每个安装包都缺这个 DLL**。之所以长期没暴露：从 `target/release/ijipu.exe` 直接跑时 DLL 就在旁边，只有**装到干净目录**才炸。
-- **解决**：`bundle.resources` 加映射 `{ "target/release/WebView2Loader.dll": "WebView2Loader.dll" }`（源路径相对 `src-tauri/`，目标 = 安装根目录），生成的 `installer.nsi` 随之多出 `File /a "/oname=WebView2Loader.dll" …`；安装包 4321KB → **4387KB**。并新增 `scripts/check-installer.mjs`（`npm run check:installer`）：读 `installer.nsi` 断言「主程序 + 必需 DLL」都在安装清单里，且列出 `bundle/nsis` 下的产物大小，供发布前一眼核对。
+- **解决**：`bundle.resources` 加映射 `{ "target/release/WebView2Loader.dll": "WebView2Loader.dll" }`（源路径相对 `src-tauri/`，目标 = 安装根目录），生成的 `installer.nsi` 随之多出 `File /a "/oname=WebView2Loader.dll" …`；安装包体积约 +70KB（压缩后的 DLL）。并新增 `scripts/check-installer.mjs`（`npm run check:installer`）：读 `installer.nsi` 断言「主程序 + 必需 DLL」都在安装清单里，且列出 `bundle/nsis` 下的产物大小，供发布前一眼核对。
 - **预防**：① **换工具链（MSVC↔GNU）会改变运行期依赖**——GNU 下 `WebView2Loader.dll` 必须随包，别只看本机能不能跑；② 发布前**必须跑一次 `npm run check:installer`**（已写进 `docs/VERSIONING.md` 打包步骤与 `AGENTS.md` 命令速查）；③ 验证"装出来能用"要在**干净目录**里装（`/S /D=<临时目录>`）或至少核对安装清单，不能只在本机开发目录里跑 exe；④ 这类"清单类"问题适合脚本化断言（读打包脚本比人工比对文件列表可靠）。
 
 ### E-2026-133 渐强/渐弱退化判定误报：`3<---!`（合法）被报「起止之间没有音符」（adj394）

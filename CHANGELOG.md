@@ -16,7 +16,7 @@
 
 ### 修复
 
-- **安装包漏带 `WebView2Loader.dll`，装完启动即报错**（打包修复）：本项目用 **GNU 工具链**（`x86_64-pc-windows-gnu`），而 `webview2-com-sys` 只在 `target_env = "msvc"` 时静态链接 `WebView2LoaderStatic.lib`；GNU 下改走**动态** `WebView2Loader.dll`（必须与 `ijipu.exe` 同目录）。生成的 `installer.nsi` 此前只 `File` 了 exe（`bundle.resources` 为空）→ **0.12.16 起所有安装包都缺这个 DLL**（直接从 `target/release/` 跑则正常，因为 DLL 就在旁边，所以一直没暴露）。现把 `target/release/WebView2Loader.dll` 加入 `bundle.resources`（映射到安装根目录），安装包 4321KB → 4387KB；并新增 `npm run check:installer`（读 `installer.nsi` 断言必需文件都在清单里）作为发布前自检。
+- **安装包漏带 `WebView2Loader.dll`，装完启动即报错**（打包修复）：本项目用 **GNU 工具链**（`x86_64-pc-windows-gnu`），而 `webview2-com-sys` 只在 `target_env = "msvc"` 时静态链接 `WebView2LoaderStatic.lib`；GNU 下改走**动态** `WebView2Loader.dll`（必须与 `ijipu.exe` 同目录）。生成的 `installer.nsi` 此前只 `File` 了 exe（`bundle.resources` 为空）→ **0.12.16 起所有安装包都缺这个 DLL**（直接从 `target/release/` 跑则正常，因为 DLL 就在旁边，所以一直没暴露）。现把 `target/release/WebView2Loader.dll` 加入 `bundle.resources`（映射到安装根目录），安装包体积约 +70KB（压缩后的 DLL）；并新增 `npm run check:installer`（读 `installer.nsi` 断言必需文件都在清单里）作为发布前自检。
 - **渐强/渐弱在默认布局下完全不显示**（`adj393`）：`<`/`>`/`!` 是装饰 token，而处理它的代码此前**只存在于拍级（duration）布局路径**——默认配置 `noteSpaceLayout: 'space'`（空间优先）与多声部块都不处理，记号被静默丢弃。现新增引擎纯模块 `layout/hairpins.ts`（事件流 + 起止解析），**三条布局路径（拍级 / 空间优先 / 多声部）共用**；`smoke` 断言改为**两种布局逐一对照**（此前只用非默认的 `DUR_CFG` 测过，等于没测）。
 - **`!` 可结束于任意「有时值的元素」之后**（`adj394`）：起点 `<`/`>` 仍取所跟音符的数字槽中心，而 `!` 除写在音符后外，还可写在该音符的**增时线 `-`** 或**附点 `.`** 之后 → 终点取该元素右缘（如 `1 2 3 < 4- ! 5`；`4--` 则更靠右）。渐强/渐弱**不跨行**（未写 `!` 时收尾于本行行末）。
 - **退化写法不再画成一根竖线；告警说明原因**（`adj393/394`）：起止落在同一处时两条线重合（用户实测"只显示一根竖线"）→ 加最小开口宽度保护（`MIN_HAIRPIN_W`，不画竖线），并给出「起止之间没有音符」告警 + 正确写法；未闭合者的行尾收尾改为 `max(行尾, 末音符右缘)`，避免反向。
