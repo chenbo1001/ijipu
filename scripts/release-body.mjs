@@ -4,17 +4,19 @@
  * 背景：`CHANGELOG.md` 是**累积**文件（每发一版在最上面加一节，保留历史便于查阅）。
  * 手动建 Release 时若直接粘贴整份 CHANGELOG，正文就会带上之前所有版本的内容。
  *
- * 本脚本按 `package.json` 的 version 从 CHANGELOG 中截取**该版本那一节**
+ * 本脚本按版本号从 CHANGELOG 中截取**该版本那一节**
  * （`## [<版本>] — 日期` 到下一个 `## [` 之前），写入 `release-body.md`（已 gitignore），
  * 建 Release 时用它作为正文即可。
  *
- * 用法：node scripts/release-body.mjs   （或 npm run release:body）
+ * 用法：
+ *   node scripts/release-body.mjs          # 取 package.json 的当前版本（或 npm run release:body）
+ *   node scripts/release-body.mjs 0.13.0   # 取指定版本（补历史 Release 正文用）
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 
-const version = String(JSON.parse(readFileSync('package.json', 'utf8')).version ?? '').trim()
+const version = String(process.argv[2] ?? JSON.parse(readFileSync('package.json', 'utf8')).version ?? '').trim()
 if (!version) {
-  console.error('[release-body] package.json 缺少 version')
+  console.error('[release-body] package.json 缺少 version，且未在命令行给出版本号')
   process.exit(1)
 }
 
@@ -29,7 +31,11 @@ if (start < 0) {
   process.exit(1)
 }
 const next = lines.findIndex((l, i) => i > start && isVersionHeading(l))
-const body = lines.slice(start, next < 0 ? lines.length : next).join('\n').trim()
+const body = lines
+  .slice(start, next < 0 ? lines.length : next)
+  .join('\n')
+  .trim()
+  .replace(/\n---\s*$/, '') // 各节之间用 --- 分隔，正文不需要
 
 writeFileSync(OUT, `${body}\n`, 'utf8')
 console.log(`[release-body] 命中：${lines[start]}`)
