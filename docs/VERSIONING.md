@@ -60,11 +60,21 @@ npm run tauri:build  # 复用 npm run build（前端 dist），版本随 package
 5. **git 提交 + 打 tag**：
    - 提交（Conventional + adjNN，如 `release: 版本升至 x.y.z（...）`、`feat(engine): ...`）
    - `git tag v<x.y.z>`（与既有 tag 一致，如 `v0.12.17`、`v0.13.0`），指向该提交。
-6. **GitHub Release 正文只含当版**：用 `npm run release:body`（= `scripts/release-body.mjs`）按
+6. **桌面打包 + 安装包自检**（打包放在提交之后，让应用内构建信息带上发布提交号）：
+   - `. .\scripts\tauri-env.ps1` → `npx tauri build` → `src-tauri/target/release/bundle/nsis/iJipu_<x.y.z>_x64-setup.exe`
+   - **必须跑 `npm run check:installer`**：读生成的 `installer.nsi` 断言「主程序 + 必需 DLL」都在安装清单里。
+     本项目用 **GNU 工具链**，`WebView2Loader.dll` 是**运行期动态依赖**，必须随包分发（漏了会装完启动报错，见 `E-2026-134`）；
+     换工具链（MSVC）或改 `bundle.resources` 后尤其要跑。
+   - 「装出来能用」要在干净目录验证（`iJipu_<x.y.z>_x64-setup.exe /S /D=<临时目录>`）或至少核对安装清单，
+     不能只在开发目录里跑 `target/release/ijipu.exe`（那里 DLL 就在旁边）。
+7. **GitHub Release 正文只含当版**：用 `npm run release:body`（= `scripts/release-body.mjs`）按
    `package.json` 的版本从 `CHANGELOG.md` 截取**当前版本那一节**，写入 `release-body.md`（已 gitignore），
    建 Release 时用它当正文。
    > `CHANGELOG.md` 是累积文件（保留历史便于查阅），**直接把整份贴进 Release 会把之前所有版本一起发出去**。
    > 插件仓库同理：其工作流已改为先跑 `scripts/release-body.mjs` 再 `body_path: release-body.md`。
+8. **上传安装包附件**：`gh release create/edit v<x.y.z> --notes-file release-body-<x.y.z>.md <安装包>`；
+   重新打包后替换附件用 `gh release upload v<x.y.z> <安装包> --clobber`。
+   > 核对 Release 状态一律用**带鉴权的 `gh api`/`gh release view`**（匿名 `curl api.github.com` 有 CDN 缓存，会读到旧内容 → `E-2026-130`）。
 
 ---
 ## 双仓库联动（ijipu 引擎 ↔ obsidian-ijipu）

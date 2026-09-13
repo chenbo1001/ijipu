@@ -16,6 +16,7 @@
 | 引擎测试 | `npm run smoke`（断言在 scripts/smoke.mts，先写断言再实现） |
 | 渲染检查 | `npm run preview:render` → `dist-preview/` |
 | 桌面打包 | `. .\scripts\tauri-env.ps1` 后 `npx tauri build` → `src-tauri/target/release/bundle/nsis/*-setup.exe` |
+| 安装包自检 | `npm run check:installer`（核对安装清单含 `WebView2Loader.dll`——GNU 工具链下是运行期动态依赖，漏了装完启动报错，见 E-2026-134；**打包后必跑**） |
 | 沙箱注意 | npm/npx 必须带 `--cache "D:/Coding/JianpuScript/.npm-cache"`；**禁用 tsx/esbuild**（spawn 受限，临时脚本用 vite lib 打包 CJS 后 node 跑）；cargo/tauri 需完整权限 |
 
 ## 三、代码规范（强制）
