@@ -1,6 +1,6 @@
 # iJipu 更新日志（Changelog）
 
-## [未发布] — 2026-09-14（测试中：待用户真机确认「键盘不再吃编辑区 / PWA 里打开可用」后再定版本号）
+## [0.16.2] — 2026-09-14（真机验证后定版；应用侧均为 PATCH 级修复与一个兜底入口）
 
 > 主题：**键盘不再吃掉编辑区 + PWA 里「打开」能用了**。0.16.1 的 `interactive-widget=resizes-content`（`adj403`）在用户真机上无效——
 > 已安装的 PWA / 国产浏览器外壳在键盘弹出时只缩"视觉视口"、**不缩布局视口**，于是 `100dvh` 不变、键盘直接盖住编辑区；
@@ -48,7 +48,7 @@
 
 ### 验证
 
-- `npm run smoke` 新增 5 条断言（`adj400` 3 条：build 串联 stamp-sw、脚本存在、注册带 `updateViaCache:'none'`；`adj401` 1 条：指引覆盖三条出路；`adj403` 1 条：viewport 带 `interactive-widget=resizes-content`）全绿；**失败项 17 == 基线**。
+- `npm run smoke` 新增 11 条断言（`adj403` 1 + `adj404` 3 + `adj405` 2 + `adj406` 6）全绿；**失败项 17 == 基线**。
 - 构建后 `dist/sw.js` 末尾出现 `// ijipu-build: v0.16.1 …` 指纹，重复执行只保留一行（不会越打越长）。
 - 线上 `sw.js` 的缓存头实测为 `public, max-age=0, must-revalidate`（Cloudflare Pages 默认），浏览器每次都会校验 → 指纹一改就能被检出。
 - `tsc -b` 通过；`npm run lint` 0 error。
