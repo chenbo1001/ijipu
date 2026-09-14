@@ -4,7 +4,7 @@
  * 验证：解析器（描述头/曲行/词行/分组）、tokenizer（音符/时值/小节线）、
  * 格式化器（Q 行空格规范）、时值计算。
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW } from '@ijipu/engine/index.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
@@ -47,6 +47,7 @@ import { formatStoredVoice, parseStoredVoice } from '../src/store/playbackVoice.
 // adj373：作者署名（品牌 tokens + 关于对话框文案）
 import { brand } from '../src/brand/tokens.ts'
 import { aboutCopy } from '../src/brand/copy.ts'
+import { uiCopy } from '../src/brand/copy.ts'
 // adj379：PWA「新版本就绪」判定（纯逻辑）
 import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from '../src/pwa/swUpdate.ts'
 // adj394：编辑区问题提示条的汇总/跳转换算（纯逻辑）
@@ -4726,6 +4727,21 @@ console.log('[94] temp-meter fraction budgeting (adj398)')
   const limit398 = 595.28 - cfg398.margin_right
   const endBar398 = pEnd398.barlines.find((b) => b.comment === 'p:2/4')
   check('adj398 行末小节线带拍号：分数右缘不越右边距（行末线让出分数占位）', endBar398 !== undefined && worstRight398(pEnd398) <= limit398 + 0.05, `分数线中心=${endBar398?.x} 右缘=${worstRight398(pEnd398).toFixed(1)} 右界=${limit398.toFixed(1)}`)
+}
+
+// ---- 95. PWA 更新机制与手机端打开指引（adj400 / adj401） ----
+// adj400：更新提示只在 sw.js **内容变化**时触发 → 构建时给它打指纹（scripts/stamp-sw.mjs），
+//         并让 SW 注册绕开 HTTP 缓存（updateViaCache:'none'）。这三条防的是「机制被无意改回去」：
+//         任一处丢掉，手机上的 PWA 就又会静默停在旧 bundle。
+// adj401：手机端放弃选择文件时给出可操作指引（找不到 .jps 的三条出路）。
+console.log('[95] PWA update mechanism & mobile open hint (adj400/adj401)')
+{
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { scripts?: Record<string, string> }
+  check('adj400 build 脚本串联 stamp-sw（sw.js 每构建都变 → 触发更新提示）', (pkg.scripts?.build ?? '').includes('stamp-sw.mjs'), pkg.scripts?.build)
+  check('adj400 scripts/stamp-sw.mjs 存在', existsSync(join(root, 'scripts', 'stamp-sw.mjs')))
+  check('adj400 SW 注册带 updateViaCache:none（绕开 HTTP 缓存，update() 真能拿到新版）', readFileSync(join(root, 'src', 'main.tsx'), 'utf8').includes("updateViaCache: 'none'"))
+  check('adj401 手机端打开指引覆盖「保存到手机 / 下载目录 / 改扩展名」', uiCopy.openPickHint.includes('保存到手机') && uiCopy.openPickHint.includes('下载') && uiCopy.openPickHint.includes('.md'), uiCopy.openPickHint.slice(0, 24) + '…')
+  check('adj403 viewport 带 interactive-widget=resizes-content（PWA 键盘弹出收缩内容区）', readFileSync(join(root, 'index.html'), 'utf8').includes('interactive-widget=resizes-content'))
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码

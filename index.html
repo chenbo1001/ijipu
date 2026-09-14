@@ -4,7 +4,10 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/x-icon" href="/Jianpu.ico" />
     <link rel="icon" type="image/png" href="/Jianpu.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- adj403：interactive-widget=resizes-content —— 让**已安装的 PWA** 在软键盘弹出时
+         与浏览器一样收缩内容区（Chrome 108+）。默认 PWA 只缩"视觉视口"、布局视口不变，
+         于是键盘会盖住编辑区底部（用户反馈"用 PWA 时窗口不随输入法缩小，只能用浏览器"）。 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
     <meta name="description" content="爱记谱 iJipu —— 码即成，谱自现。代码式简谱制谱引擎，脚本规则高度兼容「番茄简谱」。" />
     <!-- adj373：作者署名（页面元数据） -->
     <meta name="author" content="蜗牛🐌" />

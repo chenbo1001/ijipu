@@ -667,16 +667,29 @@ function isCoarsePointer(): boolean {
 
 function openFileViaInput(): Promise<boolean> {
   return new Promise((resolve) => {
+    const mobile = isCoarsePointer()
     const input = document.createElement('input')
     input.type = 'file'
     // adj281：桌面降级路径保留过滤（未知扩展在桌面浏览器上按文件名后缀匹配，能正常筛出 .jps）；
     // adj399：移动端（粗指针）不设 accept——见 fileInputAccept 注释（MIME 过滤会把 .jps 藏起来）
-    const accept = fileInputAccept(isCoarsePointer())
+    const accept = fileInputAccept(mobile)
     if (accept !== null) input.accept = accept
     input.style.display = 'none'
     document.body.appendChild(input)
     let settled = false
     let gotFile = false
+    let hinted = false
+    /**
+     * adj401：手机端**放弃选择**（关掉对话框没选文件）时给出可操作指引——
+     * 用户实测「列表里能看到 .md 却看不到 .jps」：文件还在网盘/微信里（没落到本机）、
+     * 或所选目录/网盘 SAF 按类型隐藏了未知扩展。这三条指引覆盖全部情况。
+     * 只在移动端、且用户确实没选到文件时提示一次，不打扰正常流程。
+     */
+    const hintMobile = () => {
+      if (!mobile || hinted) return
+      hinted = true
+      useUiStore.getState().showNotice(uiCopy.openPickHint, 'warn')
+    }
     const finish = (ok: boolean) => {
       if (settled) return
       settled = true
@@ -685,7 +698,10 @@ function openFileViaInput(): Promise<boolean> {
       resolve(ok)
     }
     // 用户取消（现代 Chrome/Edge/Firefox 触发 cancel 事件）
-    input.addEventListener('cancel', () => finish(false))
+    input.addEventListener('cancel', () => {
+      hintMobile()
+      finish(false)
+    })
     input.addEventListener('change', async () => {
       const file = input.files?.[0]
       if (!file) {
@@ -728,7 +744,10 @@ function openFileViaInput(): Promise<boolean> {
     // 兜底：老内核无 cancel 事件时，窗口从文件选择框重新获焦且未选文件 → 视为取消
     const onFocus = () => {
       setTimeout(() => {
-        if (!gotFile) finish(false)
+        if (!gotFile) {
+          hintMobile() // adj401：老内核走这条兜底，同样给「找不到 .jps」的指引
+          finish(false)
+        }
       }, 300)
     }
     window.addEventListener('focus', onFocus)

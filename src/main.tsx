@@ -22,7 +22,9 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
     // 快照：注册前页面是否已有 SW 控制者（决定这次接管是不是"更新"）
     const hadController = !!navigator.serviceWorker.controller
     navigator.serviceWorker
-      .register('/sw.js')
+      // adj400：updateViaCache:'none' —— SW 脚本本身也绕开 HTTP 缓存，保证 reg.update() 每次
+      // 都真的拿到线上最新 sw.js（配合 scripts/stamp-sw.mjs 给每个构建打指纹 → 一定能检出更新）
+      .register('/sw.js', { updateViaCache: 'none' })
       .then((reg) => {
         navigator.serviceWorker.addEventListener('controllerchange', () => {
           if (shouldPromptUpdate(hadController)) useUiStore.getState().setUpdateReady(true)
