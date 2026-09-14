@@ -25,6 +25,8 @@ const ExportDialog = lazy(() => import('./dialogs/ExportDialog').then((m) => ({ 
 const ShortcutsDialog = lazy(() => import('./dialogs/ShortcutsDialog').then((m) => ({ default: m.ShortcutsDialog })))
 const DocDialog = lazy(() => import('./dialogs/DocDialog').then((m) => ({ default: m.DocDialog })))
 const DonateDialog = lazy(() => import('./dialogs/DonateDialog').then((m) => ({ default: m.DonateDialog })))
+// adj406：粘贴源码导入
+const PasteImportDialog = lazy(() => import('./dialogs/PasteImportDialog').then((m) => ({ default: m.PasteImportDialog })))
 
 function App() {
   const viewType = useDocStore((s) => s.viewType)
@@ -211,6 +213,8 @@ function App() {
       {modal === 'manual' && <Suspense fallback={null}><DocDialog kind="manual" /></Suspense>}
       {modal === 'syntax' && <Suspense fallback={null}><DocDialog kind="syntax" /></Suspense>}
       {modal === 'donate' && <Suspense fallback={null}><DonateDialog /></Suspense>}
+      {/* adj406：粘贴源码导入（不依赖系统文件选择器的兜底入口） */}
+      {modal === 'pasteImport' && <Suspense fallback={null}><PasteImportDialog /></Suspense>}
     </div>
   )
 }

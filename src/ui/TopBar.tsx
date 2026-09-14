@@ -13,6 +13,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useDocStore, type ViewType } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { formatJps, EDITOR_FONT_OPTIONS } from '@ijipu/engine'
+import { pasteImportCopy } from '../brand/copy'
 
 /** Alt+字母 → 菜单分组（adj185）
  *  adj383：主题组已移入「页面设置」对话框的「主题」标签，Alt+T 菜单分组随之取消 */
@@ -737,6 +738,8 @@ export function TopBar() {
   const fileEntries: (MenuEntry | 'sep')[] = [
     { label: '新建(&N)', kbd: 'Ctrl+N', hotkey: 'n', onPick: newDoc },
     { label: '打开(&O)…', kbd: 'Ctrl+O', hotkey: 'o', onPick: runOpen },
+    // adj406：粘贴源码导入——手机端系统文件选择器看不到 .jps 时的兜底入口
+    { label: pasteImportCopy.menuLabel, hotkey: 'v', onPick: () => openModal('pasteImport') },
     { label: '保存(&S)', kbd: 'Ctrl+S', hotkey: 's', onPick: runSave },
     { label: '另存为(&A)…', hotkey: 'a', onPick: runSaveAs },
     'sep',

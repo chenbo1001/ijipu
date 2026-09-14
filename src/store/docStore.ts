@@ -28,12 +28,13 @@ import {
 } from './saveSupport'
 import { useUiStore } from './uiStore'
 import { loadFontOverride, migrateLegacyEditorPrefs } from './editorPrefs'
+import { normalizePastedSource } from './importSource'
 
 /** adj200：用户是否已主导过文件状态（新建/打开/保存/另存为）。「启动恢复」异步读 IndexedDB，
  *  必须只在用户还未进行任何文件操作时应用，避免它在用户新建/另存为之后才完成，从而把
  *  fileHandle / fileName 覆盖回旧文件（旧值 A）。 */
 let fileStateTouched = false
-import { uiCopy, savePhaseCopy } from '../brand/copy'
+import { uiCopy, savePhaseCopy, pasteImportCopy } from '../brand/copy'
 
 export type ViewType = 'code' | 'split' | 'splitH' | 'splitHE' | 'preview'
 
@@ -106,6 +107,8 @@ interface DocState {
   loadSample: (id: string) => void
   newDoc: () => void
   markSaved: () => void
+  /** adj406：粘贴源码导入（返回 false = 内容为空、未替换） */
+  importSource: (raw: string) => boolean
 
   // ---- 文件读写（adj70：Web File System Access API 打开/保存对话框） ----
   /** 当前已打开文件的句柄（null = 未关联磁盘文件） */
@@ -366,6 +369,43 @@ export const useDocStore = create<DocState>()((set, get) => ({
     })
   },
   markSaved: () => set({ dirty: false }),
+
+  /**
+   * adj406：粘贴源码导入——不依赖系统文件选择器的兜底入口
+   * （手机端网盘/微信里的 .jps 常看不到：选择器只列本机文件，未知扩展还可能被按类型隐藏）。
+   * 与「打开文件」的区别：不关联磁盘句柄（保存仍走「导出」），内容按文本清洗后替换当前文档。
+   */
+  importSource: (raw) => {
+    const code = normalizePastedSource(raw)
+    if (!code) return false
+    fileStateTouched = true
+    try {
+      localStorage.setItem(DRAFT_KEY, code)
+      localStorage.setItem(DRAFT_NAME_KEY, pasteImportCopy.name)
+    } catch {
+      /* 存储不可用时静默 */
+    }
+    // adj161：粘贴导入不是磁盘文件——清除句柄，避免误写回旧文件
+    void saveFileHandle(null)
+    set({
+      code,
+      fileName: pasteImportCopy.name,
+      parseResult: parseJps(code),
+      pageConfig: resolveConfig(code),
+      dirty: true, // 内容尚未落到任何文件，提醒用户用「导出」保存
+      fileHandle: null,
+      activeNoteId: null,
+      activeNoteIds: [],
+      playheadTrack: [],
+      voiceBlocks: [],
+      cursorJump: null,
+      undoStack: [],
+      redoStack: [],
+      lastEditAt: 0,
+      sel: { start: 0, end: 0 },
+    })
+    return true
+  },
 
   // ---- 文件读写（adj70） ----
   fileHandle: null,

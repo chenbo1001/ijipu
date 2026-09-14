@@ -13,6 +13,10 @@
 - **键盘弹出时应用不收缩、编辑区被盖住**（`adj404`，`E-2026-141` 后续）：新增 `src/pwa/appHeight.ts`——`visualViewport` 实测可视高写入 CSS 变量 `--app-h`（缩放≠1 或 API 不可用时回退窗口内高），`.app { height: var(--app-h, 100dvh) }`；`main.tsx` 启动即安装，监听 `visualViewport` 的 `resize`/`scroll` 与窗口 `resize`/`orientationchange`。**真机复测后改为取 `min(visualViewport.height, innerHeight)`**：布局视口跟键盘缩（浏览器/adjustResize 外壳）与只缩视觉视口（Chrome WebAPK）两种机制都覆盖——用户机上属于后者，只取 `visualViewport` 时量不到键盘。`interactive-widget=resizes-content`（`adj403`）保留。
 - **已安装的 PWA 里菜单「打开」点了没反应**（`adj405`，`E-2026-142`）：移动端**一律走 `<input type="file">` 路径**，不再尝试 `showOpenFilePicker`（真机上 PWA 里该 API 会静默失败，浏览器里却正常；Android 也拿不到可写回句柄）。降级路径另加"选择器没弹出来"兜底提示（4 秒内无任何动静且页面始终有焦点 → 给可操作提示，不再让用户干等）。判定收敛为纯函数 `shouldUseFileInputPicker(coarsePointer, hasFsApi)`。
 
+### 新增
+
+- **「粘贴源码导入」入口**（`adj406`）：菜单「文件 → 粘贴源码导入」——把谱面源码粘进对话框（支持微信/网盘里复制的文本、笔记里的 ```jps 代码块）即可替换当前文档，**完全不经过系统文件选择器**；带「从剪贴板粘贴」按钮与空内容保护；清洗规则（去 BOM／CRLF 归一／剥代码围栏／去首尾空行）收敛为纯函数 `normalizePastedSource`。这是手机端 `.jps` 打不开的终极兜底（选择器只列本机文件、未知扩展还可能被按类型隐藏）。「打开」的两个提示里也都加上了这条出路。
+
 ### 验证
 
 - `npm run smoke` 新增 5 条断言（`adj404` 3 条：`appHeightPx` 两种情形 + CSS/安装点；`adj405` 2 条：移动端走 input、桌面端仍用系统选择器）全绿；**失败项 17 == 基线**。

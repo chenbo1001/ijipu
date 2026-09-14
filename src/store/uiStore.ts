@@ -21,6 +21,8 @@ export type ModalKind =
   | 'manual'
   | 'syntax'
   | 'donate'
+  /** adj406：粘贴源码导入（不依赖系统文件选择器的兜底入口） */
+  | 'pasteImport'
 
 /** 轻量浮动提示（toast）：kind 决定配色；nonce 用于同文案重复触发时重置隐藏计时 */
 export type NoticeKind = 'ok' | 'warn' | 'error'

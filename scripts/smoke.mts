@@ -50,6 +50,7 @@ import { brand } from '../src/brand/tokens.ts'
 import { aboutCopy } from '../src/brand/copy.ts'
 import { uiCopy } from '../src/brand/copy.ts'
 import { appHeightPx } from '../src/pwa/appHeight.ts'
+import { normalizePastedSource } from '../src/store/importSource.ts'
 // adj379：PWA「新版本就绪」判定（纯逻辑）
 import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from '../src/pwa/swUpdate.ts'
 // adj394：编辑区问题提示条的汇总/跳转换算（纯逻辑）
@@ -4752,6 +4753,13 @@ console.log('[95] PWA update mechanism & mobile open hint (adj400/adj401)')
   check('adj404 appHeightPx：视口未缩（vv 高于窗口内高）时取窗口内高', appHeightPx({ height: 900, scale: 1 }, 800) === 800)
   check('adj404 appHeightPx：双指放大（scale≠1）或不可用时回退窗口内高', appHeightPx({ height: 420, scale: 2 }, 800) === 800 && appHeightPx(null, 800) === 800)
   check('adj404 .app 高度用 --app-h（回退 100dvh）+ main.tsx 安装', readFileSync(join(root, 'src', 'index.css'), 'utf8').includes('var(--app-h, 100dvh)') && readFileSync(join(root, 'src', 'main.tsx'), 'utf8').includes('installAppHeight()'))
+  // adj406：粘贴源码导入——不依赖系统文件选择器的兜底入口（手机端网盘里的 .jps 看不到时用）
+  check('adj406 清洗：去 BOM / CRLF 归一 / 去首尾空行', normalizePastedSource('\uFEFFV: 1.0\r\nQ: 1 2 3\r\n') === 'V: 1.0\nQ: 1 2 3')
+  check('adj406 清洗：剥掉 ```jps 代码围栏（从笔记复制代码块）', normalizePastedSource('```jps\nV: 1.0\nQ: 1 2 3\n```') === 'V: 1.0\nQ: 1 2 3')
+  check('adj406 清洗：无关围栏语言不误伤', normalizePastedSource('```bash\necho hi\n```').includes('```bash'))
+  check('adj406 清洗：纯文本原样（仅去行尾空白）', normalizePastedSource('V: 1.0\nQ: 1 2 3  ') === 'V: 1.0\nQ: 1 2 3')
+  check('adj406 空内容清洗后为空 → importSource 直接返回 false（不替换文档）', normalizePastedSource('   \n  ') === '')
+  check('adj406 菜单与对话框已接线', readFileSync(join(root, 'src', 'ui', 'TopBar.tsx'), 'utf8').includes('pasteImportCopy.menuLabel') && readFileSync(join(root, 'src', 'App.tsx'), 'utf8').includes("modal === 'pasteImport'"))
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
