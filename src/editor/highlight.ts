@@ -66,7 +66,15 @@ function highlightMusicContent(content: string): string {
       continue
     } else if (c === '<' || c === '>' || c === '!') {
       push('hl-decoration', c)
-    } else if (c === '(' || c === ')' || c === '{' || c === '}') {
+    } else if (c === '(') {
+      // adj395：`(` 连同其后的修饰前缀（+/- 抬降级数、y 平均连音组标志）一起高亮，
+      // 否则 `(y` 的 y 会落成普通字符色，看不出它是连音组
+      let j = i + 1
+      while (j < content.length && (content[j] === '+' || content[j] === '-' || content[j] === 'y' || content[j] === 'Y')) j++
+      push('hl-barline', content.slice(i, j))
+      i = j
+      continue
+    } else if (c === ')' || c === '{' || c === '}') {
       push('hl-barline', c)
     } else {
       push(null, c)

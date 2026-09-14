@@ -4483,6 +4483,162 @@ console.log('[90] settings layering: diff write, editor prefs out of score, font
   check('adj-font 编辑器字号夹取范围 10~26', clampEditorFontSize(99) === 26 && clampEditorFontSize(1) === 10)
 }
 
+// ---- 91. 等时值连音组 (y…) 的时值 / 占宽 / 减时线规则（adj395） ----
+// 用户定案（2/4 的 `3./ 6,// (y3/ 2/ 1/) |`）：
+//   ① 组占「小节剩余时值」——2 拍小节扣掉组外已占的 1 拍 → 组总 1 拍，
+//      组内 3 个音符平分 → 各 1/3 拍（演奏时值也是 1/3 拍/音）；
+//   ② 组内各音符的**占宽**同样按 1/3 拍分摊（不是按各自书写的 1/2 拍）；
+//   ③ 组内减时线**连成一条**——等时值连音是一组，不随拍边界断开。
+console.log('[91] equal-duration tuplet (y...) rule (adj395)')
+{
+  const code395 = 'V: 1.0\nB: t\nD: C\nP: 2/4\nQ: 3./ 6,// (y3/ 2/ 1/) |\n'
+  const r395 = parseJps(code395)
+  type N395 = { tupletDur?: number; tupletGroup?: number; diminishCount: number }
+  const tk395 = r395.groups[0].music.tokens.filter((t) => t.kind === 'note') as unknown as N395[]
+  check('adj395 解析：组内三音各 1/3 拍（= (2 − 1) ÷ 3）', r395.errors.length === 0 && tk395.length === 5 && [2, 3, 4].every((i) => Math.abs((tk395[i].tupletDur ?? 0) - 1 / 3) < 1e-6), JSON.stringify(tk395.map((t) => t.tupletDur)))
+  const tupSum395 = [2, 3, 4].reduce((a, i) => a + (tk395[i].tupletDur ?? 0), 0)
+  check('adj395 解析：组内时值合计 = 小节剩余 1 拍', Math.abs(tupSum395 - 1) < 1e-9, String(tupSum395))
+  const gid395 = tk395[2].tupletGroup
+  check('adj395 解析：组内三音同组号、组外音符无组号', gid395 !== undefined && tk395[3].tupletGroup === gid395 && tk395[4].tupletGroup === gid395 && tk395[0].tupletGroup === undefined && tk395[1].tupletGroup === undefined, JSON.stringify(tk395.map((t) => t.tupletGroup)))
+
+  // 两条布局路径都要「按剩余 1 拍」定位：拍位 = 1、4/3、5/3（同处小节第 2 拍）
+  const beatOk395 = (cfg: typeof defaultPageConfig): boolean => {
+    const ns = [...layoutScore(r395, cfg).pages[0].notes].filter((n) => n.barIndex === 0).sort((a, b) => a.beatPos - b.beatPos)
+    return [1, 4 / 3, 5 / 3].every((v, i) => Math.abs(ns[2 + i].beatPos - v) < 1e-3)
+  }
+  check('adj395 时值优先：组内三音拍位 1 / 4⁄3 / 5⁄3（落在小节第 2 拍）', beatOk395(DUR_CFG))
+  check('adj395 空间优先（默认）：组内三音拍位 1 / 4⁄3 / 5⁄3（落在小节第 2 拍）', beatOk395(defaultPageConfig))
+
+  // 减时线：组内三音连成一条（两种布局），且 6,// 的第 2 条线仍是独立短横
+  const beamOk395 = (cfg: typeof defaultPageConfig): boolean => {
+    const ns = [...layoutScore(r395, cfg).pages[0].notes].filter((n) => n.barIndex === 0).sort((a, b) => a.beatPos - b.beatPos)
+    const beams = computeBeamsForTest(ns, cfg.note_size)
+    const digitW = cfg.note_size * 0.62
+    const tup = beams.find((b) => Math.abs(b.x1 - (ns[2].x + 1)) < 0.15)
+    return tup !== undefined && Math.abs(tup.x2 - (ns[4].x + digitW - 1)) < 0.15
+  }
+  check('adj395 时值优先：组内减时线连成一条（覆盖 3/ 2/ 1/ 三音）', beamOk395(DUR_CFG))
+  check('adj395 空间优先（默认）：组内减时线连成一条（覆盖 3/ 2/ 1/ 三音）', beamOk395(defaultPageConfig))
+
+  // 占宽按剩余 1 拍分摊：撑满行里「组（1 拍）可支配宽 = 一个 1 拍音符的可支配宽」
+  // （可支配宽 = 音符占宽 − 数字槽本体宽；本体宽随音符个数，不参与时值分摊）
+  const rStretch395 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3./ 6,// (y3/ 2/ 1/) 1 2 | 3 4 5 6 | 7 1 2 3 | 4 5 6 7 |\n')
+  const nsStretch395 = [...layoutScore(rStretch395, defaultPageConfig).pages[0].notes].filter((n) => n.barIndex === 0).sort((a, b) => a.beatPos - b.beatPos)
+  const body395 = defaultPageConfig.note_size * 0.62
+  const tupExtra395 = [2, 3, 4].reduce((a, i) => a + (nsStretch395[i].width - body395), 0)
+  const oneBeatExtra395 = nsStretch395[5].width - body395
+  check('adj395 占宽按时值分摊：组（1 拍）可支配宽 = 整拍音符的可支配宽', Math.abs(tupExtra395 - oneBeatExtra395) < 0.1, `${tupExtra395.toFixed(2)} vs ${oneBeatExtra395.toFixed(2)}`)
+
+  // 连音组自成减时线组：与「同一拍内但不在组里」的音符不相连（三连音是一组）
+  const rMix395 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1/ (y3/ 2/ 1/) 2 - |\n')
+  for (const [tag395, cfg395] of [['时值优先', DUR_CFG], ['空间优先', defaultPageConfig]] as const) {
+    const ns = [...layoutScore(rMix395, cfg395).pages[0].notes].filter((n) => n.barIndex === 0).sort((a, b) => a.beatPos - b.beatPos)
+    const beams = computeBeamsForTest(ns, cfg395.note_size)
+    check(`adj395 ${tag395}：连音组自成一条减时线（不与同拍组外音符相连）`, beams.length === 2 && Math.abs(beams[0].x1 - (ns[0].x + 1)) < 0.15 && Math.abs(beams[1].x1 - (ns[1].x + 1)) < 0.15, beams.map((b) => `${b.x1}~${b.x2}`).join(' | '))
+  }
+
+  // 跨拍连音组（组总 2 拍、每音 2/3 拍）：减时线仍连成一条（不因跨拍断开）
+  const rAcross395 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (y3/ 2/ 1/) 1 2 |\n')
+  for (const [tag395, cfg395] of [['时值优先', DUR_CFG], ['空间优先', defaultPageConfig]] as const) {
+    const ns = [...layoutScore(rAcross395, cfg395).pages[0].notes].filter((n) => n.barIndex === 0).sort((a, b) => a.beatPos - b.beatPos)
+    const beams = computeBeamsForTest(ns, cfg395.note_size)
+    const digitW = cfg395.note_size * 0.62
+    check(`adj395 ${tag395}：跨拍组（每音 2⁄3 拍）减时线仍连成一条`, Math.abs(ns[0].beatPos) < 1e-3 && Math.abs(ns[2].beatPos - 4 / 3) < 1e-3 && beams.length === 1 && Math.abs(beams[0].x2 - (ns[2].x + digitW - 1)) < 0.15, `${beams.length} beams, beats=${ns.map((n) => n.beatPos.toFixed(3)).join(',')}`)
+  }
+
+  // 多声部空间优先：同一套规则（组内拍位 + 段时值 + 减时线相连）
+  const rMv395 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 3./ 6,// (y3/ 2/ 1/) 1 2 | 3 4 5 6 |\nQ2: 1 2 3 4 | 5 6 7 1 |\n')
+  const mv395 = [...layoutScore(rMv395, defaultPageConfig).pages[0].notes].filter((n) => n.id.voice === 1 && n.barIndex === 0).sort((a, b) => a.beatPos - b.beatPos)
+  const digitW395 = defaultPageConfig.note_size * 0.62
+  const mvBeams395 = computeBeamsForTest(mv395, defaultPageConfig.note_size)
+  const mvTupBeam395 = mvBeams395.find((b) => Math.abs(b.x1 - (mv395[2].x + 1)) < 0.15)
+  check('adj395 多声部：组内三音拍位 1 / 4⁄3 / 5⁄3、段时值 1⁄3 拍', [1, 4 / 3, 5 / 3].every((v, i) => Math.abs(mv395[2 + i].beatPos - v) < 1e-3) && mv395.slice(2, 5).every((n) => Math.abs((n.segments?.[0]?.beats ?? 0) - 1 / 3) < 1e-3), mv395.map((n) => n.beatPos.toFixed(3)).join(','))
+  check('adj395 多声部：组内减时线连成一条', mvTupBeam395 !== undefined && Math.abs(mvTupBeam395.x2 - (mv395[4].x + digitW395 - 1)) < 0.15, mvBeams395.map((b) => `${b.x1}~${b.x2}`).join(' | '))
+}
+
+// ---- 92. 倚音时值与位置规则（adj396） ----
+// 用户规范：
+//   ① 倚音**占用主音符的时值**——单个倚音实际时值 = 1/2^(括号内减时线条数 + 1) 拍
+//      （`3[2/]`：主音符 3 为 1 拍、倚音 2 为 1/4 拍 → 先奏 1/4 拍倚音再奏 3/4 拍主音符，合计 1 拍）；
+//   ② 后倚音同理但排在**末尾**（先主音符 3/4 拍，最后 1/4 拍奏倚音）；
+//   ③ 多倚音各占各自时值依次排列（`3[3/2/]` = 1/4 + 1/4 倚音，主音符余 1/2 拍）；
+//   ④ **增时线/附点后可写后倚音**（`3 -[h5/]` / `3.[h5/]`）：总时值 = 主音符总时值（2 拍 / 1.5 拍），
+//      主音符先奏满增时线/附点（到末尾前），最后 1/4 拍才奏后倚音；谱面上倚音画在增时线/附点**之后**（紧靠）。
+console.log('[92] grace note timing & position (adj396)')
+{
+  const BEAT_MS = 1000 // 60 BPM → 1 拍 = 1000ms
+  /** 倚音实际时值（拍）：1/2^(减时线条数+1) */
+  const gBeats = (dc: number) => 1 / Math.pow(2, dc + 1)
+  /** 取某行第 idx 个音符的 token（note 类型断言） */
+  type N92 = { kind: string; pitch?: number; augmentCount: number; dots: number; diminishCount: number; gracenotes?: { after: boolean; notes: { pitch: number; diminishCount: number }[] } }
+  const toks92 = (code: string): N92[] => parseJps(code).groups[0].music.tokens as unknown as N92[]
+
+  // ---- ① 解析 ----
+  const gA92 = toks92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[2/] 3[h2/] |\n')
+  check('adj396 解析：`3[2/]` 前倚音（after=false、倚音减时线 1 条）', gA92[0].gracenotes?.after === false && gA92[0].gracenotes?.notes[0].diminishCount === 1, JSON.stringify(gA92[0].gracenotes))
+  check('adj396 解析：`3[h2/]` 后倚音（after=true）', gA92[1].gracenotes?.after === true, JSON.stringify(gA92[1].gracenotes))
+  const gB92 = toks92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 -[h5/] |\n')
+  check('adj396 解析：`3 -[h5/]` 增时线后写后倚音（音符增时 1 拍 + 后倚音）', gB92[0].augmentCount === 1 && gB92[0].gracenotes?.after === true && gB92[0].gracenotes?.notes[0].pitch === 5, JSON.stringify(gB92[0]))
+  const gC92 = toks92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3.[h5/] 3 .[h5/] |\n')
+  check('adj396 解析：独立附点归前音符（`3 .[h5/]` 等价 `3.[h5/]`）', gC92[0].dots === 1 && gC92[1].dots === 1 && gC92[1].gracenotes?.after === true, `dots=${gC92.map((t) => t.dots).join(',')}`)
+  // 倚音总时值超过主音符 → 告警（主音符会被钳制为 0 拍、不发声）
+  const rOver92 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3,//[2] 1 |\n')
+  const over92 = rOver92.errors.find((e) => e.message.includes('倚音总时值'))
+  check('adj396 告警：倚音总时值超过主音符时值（带正确写法）', over92 !== undefined && over92.severity === 'warning' && (over92.hint ?? '').includes('减时线条数'), JSON.stringify(rOver92.errors.map((e) => e.message)))
+
+  // ---- ② 演奏时值（60 BPM：1 拍 = 1000ms；倚音不再向相邻音符借时间） ----
+  /** 按发生时刻排序的事件 [{at, dur, pitch}] */
+  const evs92 = (code: string) => {
+    const r = parseJps(code)
+    const seq = buildPlaySequence(r, layoutScore(r, defaultPageConfig), 60)
+    return { ev: [...seq.events].sort((a, b) => a.atMs - b.atMs), totalMs: seq.totalMs }
+  }
+  const q1 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[2/] 1 2 3 |\n')
+  const g250 = gBeats(1) * BEAT_MS // 1/4 拍 = 250ms（`2/` 的倚音实际时值）
+  check('adj396 前倚音：先 1/4 拍倚音再 3/4 拍主音符（合计 1 拍）', Math.abs(q1.ev[0].atMs - 0) < 1 && Math.abs(q1.ev[0].durationMs - g250) < 1 && Math.abs(q1.ev[1].atMs - g250) < 1 && Math.abs(q1.ev[1].durationMs - (BEAT_MS - g250)) < 1, q1.ev.slice(0, 3).map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
+  check('adj396 前倚音：后续音符仍在整拍位置（不因倚音整体后移）', Math.abs(q1.ev[2].atMs - 1000) < 1 && Math.abs(q1.ev[4].atMs - 3000) < 1 && Math.abs(q1.totalMs - 4000) < 1, q1.ev.map((e) => e.atMs).join(','))
+  const q2 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[h2/] 1 2 3 |\n')
+  check('adj396 后倚音：先 3/4 拍主音符，最后 1/4 拍奏倚音', Math.abs(q2.ev[0].atMs - 0) < 1 && Math.abs(q2.ev[0].durationMs - (BEAT_MS - g250)) < 1 && Math.abs(q2.ev[1].atMs - (BEAT_MS - g250)) < 1 && Math.abs(q2.ev[1].durationMs - g250) < 1, q2.ev.slice(0, 3).map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
+  const q3 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[3/2/] 1 2 3 |\n')
+  check('adj396 多倚音：1/4 + 1/4 倚音后主音符余 1/2 拍', Math.abs(q3.ev[0].durationMs - g250) < 1 && Math.abs(q3.ev[1].atMs - g250) < 1 && Math.abs(q3.ev[1].durationMs - g250) < 1 && Math.abs(q3.ev[2].atMs - 2 * g250) < 1 && Math.abs(q3.ev[2].durationMs - (BEAT_MS - 2 * g250)) < 1, q3.ev.slice(0, 3).map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
+  // ④ 增时线/附点后倚音：主音符先奏满（到末尾前），最后一段才是倚音
+  const q4 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 -[h5/] 1 |\n')
+  check('adj396 `3 -[h5/]`：主音符奏 1.75 拍、最后 1/4 拍奏倚音（总 2 拍）', Math.abs(q4.ev[0].atMs - 0) < 1 && Math.abs(q4.ev[0].durationMs - (2 * BEAT_MS - g250)) < 1 && Math.abs(q4.ev[1].atMs - (2 * BEAT_MS - g250)) < 1 && Math.abs(q4.ev[1].durationMs - g250) < 1 && Math.abs(q4.ev[2].atMs - 2000) < 1, q4.ev.map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
+  check('adj396 `3 -[h5/]`：总时长仍为 3 拍（倚音不额外占时）', Math.abs(q4.totalMs - 3000) < 1, String(q4.totalMs))
+  const q5 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3.[h5/] 1 2 |\n')
+  check('adj396 `3.[h5/]`：主音符奏 1.25 拍、末 1/4 拍奏倚音（总 1.5 拍）', Math.abs(q5.ev[0].durationMs - (1.5 * BEAT_MS - g250)) < 1 && Math.abs(q5.ev[1].atMs - (1.5 * BEAT_MS - g250)) < 1 && Math.abs(q5.ev[1].durationMs - g250) < 1, q5.ev.map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
+  check('adj396 倚音不越界到相邻音符（前倚音不早于本音符起点、后倚音不晚于本音符终点）', q1.ev[0].atMs >= 0 && Math.abs(q2.ev[1].atMs + q2.ev[1].durationMs - 1000) < 1, `${q2.ev[1].atMs}+${q2.ev[1].durationMs}`)
+
+  // ---- ③ 谱面位置：倚音紧靠「数字 / 增时线 / 附点」（三种情形，两种布局） ----
+  const graceXs92 = (svg: string) => [...svg.matchAll(new RegExp(`<text x="([\\d.]+)" y="[\\d.]+" font-size="${GRACE_FS}"`, 'g'))].map((m) => Number(m[1]))
+  const digitX92 = (svg: string, glyph: string) => Number(svg.match(new RegExp(`<text x="([\\d.]+)" y="[^"]+" data-notepos="[^"]+" font-size="${defaultPageConfig.note_size}"[^>]*>${glyph}<`))?.[1] ?? 'NaN')
+  const augCx92 = (svg: string, nth = 0) => {
+    const all = [...svg.matchAll(new RegExp(`<text x="([\\d.]+)" y="[^"]+" text-anchor="middle"[^>]*font-size="${defaultPageConfig.note_size}"[^>]*>-<`, 'g'))].map((m) => Number(m[1]))
+    return all[nth] ?? NaN
+  }
+  const dotCx92 = (svg: string) => Number(svg.match(/<circle cx="([\d.]+)" cy="[^"]+" r="[^"]+" fill="#1b1b1b"\/>/)?.[1] ?? 'NaN')
+  const DOT_R_S92 = DOT_R_DOT * NS_S
+  for (const [tag92, cfg92] of [['空间优先', defaultPageConfig], ['时值优先', DUR_CFG]] as const) {
+    const svgPlain = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[h5/] 1 2 3 |\n'), cfg92))[0]
+    const gxPlain = graceXs92(svgPlain)[0]
+    check(`adj396 ${tag92}：无增时线/附点 → 后倚音紧靠数字右缘（+1px×s）`, Math.abs(gxPlain - (digitX92(svgPlain, '3') + DIGIT_W + NS_S)) < 0.3, `grace=${gxPlain} digit=${digitX92(svgPlain, '3')}`)
+    const svgAug = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 -[h5/] 1 |\n'), cfg92))[0]
+    const gxAug = graceXs92(svgAug)[0]
+    const augCx = augCx92(svgAug)
+    check(`adj396 ${tag92}：有增时线 → 后倚音排在增时线之后（紧靠）`, gxAug > augCx + DIGIT_W / 2 && gxAug < augCx + DIGIT_W / 2 + 1.5 * NS_S + 6, `grace=${gxAug} augCx=${augCx}`)
+    const svgDot = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3.[h5/] 1 2 |\n'), cfg92))[0]
+    const gxDot = graceXs92(svgDot)[0]
+    const dotCx = dotCx92(svgDot)
+    check(`adj396 ${tag92}：有附点 → 后倚音排在附点之后（紧靠）`, gxDot > dotCx + DOT_R_S92 && gxDot < dotCx + DOT_R_S92 + 1.5 * NS_S + 2, `grace=${gxDot} dotCx=${dotCx}`)
+  }
+  // 占位：尾部倚音不挤压后续音符——带倚音音符的 rightX ≤ 下一音符 x（两种布局）
+  for (const [tag92, cfg92] of [['空间优先', defaultPageConfig], ['时值优先', DUR_CFG]] as const) {
+    const lay92 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 -[h5/] 1 |\n'), cfg92)
+    const ns92 = [...lay92.pages[0].notes].sort((a, b) => a.x - b.x)
+    check(`adj396 ${tag92}：尾部倚音占位计入音符宽（不压到下一音符）`, (ns92[0].rightX ?? ns92[0].x + ns92[0].width) <= ns92[1].x + 0.15, `rightX=${ns92[0].rightX} next=${ns92[1].x}`)
+  }
+}
+
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
 runAdj363SaveTests()
   .catch((e) => {
