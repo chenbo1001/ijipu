@@ -89,6 +89,18 @@ export function fileBaseName(name: string | undefined | null): string {
 }
 
 /**
+ * adj399：`<input type="file">` 的 accept 过滤串；返回 null 表示**不设过滤**（全部文件可见）。
+ *
+ * 为什么移动端不设：`.jps` 是自定义扩展，系统没有对应 MIME 记录——Android SAF / iOS 文件 App
+ * 一律**按 MIME 过滤**，accept 里无论写扩展名（`.jps`）还是 `application/octet-stream`，
+ * 自家的 .jps 文件都会被隐藏或置灰（用户反馈「手机端打开对话框里看不到 .jps 文件」）。
+ * 桌面浏览器按**文件名后缀**匹配（Firefox/Safari 还会额外给「所有文件」入口），过滤安全可用。
+ */
+export function fileInputAccept(coarsePointer: boolean): string | null {
+  return coarsePointer ? null : '.jps,text/plain,.txt,application/octet-stream'
+}
+
+/**
  * 确认句柄可写：先 queryPermission，未授权时在**用户手势内** requestPermission。
  * 返回最终状态；环境不支持权限 API 时返回 'unknown'（交给真正的写入判定）。
  * 注意：requestPermission 必须在用户手势（Ctrl+S / 菜单点击）尚未被消耗时调用。

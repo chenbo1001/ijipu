@@ -20,6 +20,7 @@ import {
   classifySaveError,
   createSavePhaseLog,
   fileBaseName,
+  fileInputAccept,
   isUserCancel,
   saveTextToHandle,
   type SavePhaseLog,
@@ -643,14 +644,35 @@ function disconnectFileHandle(): void {
 // 非安全上下文（http://、file://）或非 Chromium 内核下没有 showOpenFilePicker；
 // 打开本身只需读取 .jps 文本，改用标准 <input type="file"> 任何环境都可用。
 // 该环境无法写回磁盘，故 fileHandle 置 null，并提示改走「导出」保存成果。
+
+/**
+ * adj399：是否触屏/移动端（粗指针 = 手机/PAD，判据与 uiStore 的工具条默认开关一致，另加 UA 兜底）。
+ * 移动端文件管理器**按 MIME 过滤**：`.jps` 是自定义扩展，系统没有对应 MIME 记录
+ * （Android SAF / iOS 文件 App 会当作未知类型隐藏或置灰），
+ * 因此无论 accept 里写扩展名还是 `application/octet-stream`，用户都**看不到自己的 .jps 文件**
+ * （用户反馈：手机端打开对话框里 .jps 不出现）。故移动端一律不设 accept，全部文件可见。
+ */
+function isCoarsePointer(): boolean {
+  try {
+    if (window.matchMedia('(pointer: coarse)').matches) return true
+  } catch {
+    /* 媒体特性不可用时走 UA 兜底 */
+  }
+  try {
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '')
+  } catch {
+    return false
+  }
+}
+
 function openFileViaInput(): Promise<boolean> {
   return new Promise((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'
-    // adj：手机端(iOS/Android 文件管理器)不识别自定义 .jps 扩展——若 accept 只填 ".jps"
-    // 会被文件管理器过滤掉导致搜不到；放宽为纯文本/octet-stream 让任意类型可见，
-    // 用户自行挑选 .jps 即可（PC 端走 showOpenFilePicker 不受影响）
-    input.accept = '.jps,text/plain,.txt,application/octet-stream'
+    // adj281：桌面降级路径保留过滤（未知扩展在桌面浏览器上按文件名后缀匹配，能正常筛出 .jps）；
+    // adj399：移动端（粗指针）不设 accept——见 fileInputAccept 注释（MIME 过滤会把 .jps 藏起来）
+    const accept = fileInputAccept(isCoarsePointer())
+    if (accept !== null) input.accept = accept
     input.style.display = 'none'
     document.body.appendChild(input)
     let settled = false

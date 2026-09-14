@@ -13,7 +13,7 @@ import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInst
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos } from '@ijipu/engine/layout/metaAnchors.ts'
 import type { BarlineType } from '@ijipu/engine/types.ts'
 import { computeBeamsForTest } from '@ijipu/engine/render/index.ts'
@@ -36,6 +36,7 @@ import {
   createSavePhaseLog,
   ensureWritePermission,
   fileBaseName,
+  fileInputAccept,
   isUserCancel,
   sameContent,
   saveTextToHandle,
@@ -3475,6 +3476,9 @@ console.log('[77] save reliability: error classify / permission / write-back ver
   check('adj363 文件名去 .md/.txt 后缀', fileBaseName('a.md') === 'a' && fileBaseName('a.txt') === 'a')
   check('adj363 无文件名回退「未命名」', fileBaseName(undefined) === '未命名' && fileBaseName('') === '未命名')
   check('adj363 内容比对容忍 BOM', sameContent('\uFEFFabc', 'abc') && !sameContent('abc', 'abd'))
+  // adj399：手机端打开对话框看不到 .jps —— 移动端（粗指针）不设 accept 过滤，桌面降级路径保留
+  check('adj399 移动端不设 accept（.jps 不被 MIME 过滤藏起来）', fileInputAccept(true) === null, String(fileInputAccept(true)))
+  check('adj399 桌面降级路径 accept 含 .jps', (fileInputAccept(false) ?? '').includes('.jps'), String(fileInputAccept(false)))
 }
 
 /** 假句柄（结构化模拟 FileSystemFileHandle；node 环境无浏览器 API，用于断言保存流程） */
@@ -4488,7 +4492,8 @@ console.log('[90] settings layering: diff write, editor prefs out of score, font
 //   ① 组占「小节剩余时值」——2 拍小节扣掉组外已占的 1 拍 → 组总 1 拍，
 //      组内 3 个音符平分 → 各 1/3 拍（演奏时值也是 1/3 拍/音）；
 //   ② 组内各音符的**占宽**同样按 1/3 拍分摊（不是按各自书写的 1/2 拍）；
-//   ③ 组内减时线**连成一条**——等时值连音是一组，不随拍边界断开。
+//   ③ 组内减时线**连成一条**——等时值连音是一组，不随拍边界断开
+//      （与「同一拍内、组外」音符的相连规则见 adj397，第 93 节）。
 console.log('[91] equal-duration tuplet (y...) rule (adj395)')
 {
   const code395 = 'V: 1.0\nB: t\nD: C\nP: 2/4\nQ: 3./ 6,// (y3/ 2/ 1/) |\n'
@@ -4529,12 +4534,15 @@ console.log('[91] equal-duration tuplet (y...) rule (adj395)')
   const oneBeatExtra395 = nsStretch395[5].width - body395
   check('adj395 占宽按时值分摊：组（1 拍）可支配宽 = 整拍音符的可支配宽', Math.abs(tupExtra395 - oneBeatExtra395) < 0.1, `${tupExtra395.toFixed(2)} vs ${oneBeatExtra395.toFixed(2)}`)
 
-  // 连音组自成减时线组：与「同一拍内但不在组里」的音符不相连（三连音是一组）
+  // adj397：减时线与「同一拍内的连音组成员」相连——
+  // 旧实现按「组号优先」分桶，`1/ (y3/ 2/ 1/)` 里 1/（拍 1 起点）与组首音（拍 1 内）各画一条、
+  // 减时线在谱面上断开；现按「同组 **或** 同拍」逐对判定 → 1/ 与组内三音共用第 1 条减时线。
   const rMix395 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1/ (y3/ 2/ 1/) 2 - |\n')
   for (const [tag395, cfg395] of [['时值优先', DUR_CFG], ['空间优先', defaultPageConfig]] as const) {
     const ns = [...layoutScore(rMix395, cfg395).pages[0].notes].filter((n) => n.barIndex === 0).sort((a, b) => a.beatPos - b.beatPos)
     const beams = computeBeamsForTest(ns, cfg395.note_size)
-    check(`adj395 ${tag395}：连音组自成一条减时线（不与同拍组外音符相连）`, beams.length === 2 && Math.abs(beams[0].x1 - (ns[0].x + 1)) < 0.15 && Math.abs(beams[1].x1 - (ns[1].x + 1)) < 0.15, beams.map((b) => `${b.x1}~${b.x2}`).join(' | '))
+    const mixDigitW = cfg395.note_size * 0.62
+    check(`adj397 ${tag395}：1/ 与同拍连音组共用一条减时线（1/ + 组内三音，中间不断开）`, beams.length === 1 && Math.abs(beams[0].x1 - (ns[0].x + 1)) < 0.15 && Math.abs(beams[0].x2 - (ns[3].x + mixDigitW - 1)) < 0.15, beams.map((b) => `${b.x1}~${b.x2}`).join(' | '))
   }
 
   // 跨拍连音组（组总 2 拍、每音 2/3 拍）：减时线仍连成一条（不因跨拍断开）
@@ -4637,6 +4645,87 @@ console.log('[92] grace note timing & position (adj396)')
     const ns92 = [...lay92.pages[0].notes].sort((a, b) => a.x - b.x)
     check(`adj396 ${tag92}：尾部倚音占位计入音符宽（不压到下一音符）`, (ns92[0].rightX ?? ns92[0].x + ns92[0].width) <= ns92[1].x + 0.15, `rightX=${ns92[0].rightX} next=${ns92[1].x}`)
   }
+}
+
+// ---- 93. 减时线与同一拍内的连音组相连（adj397） ----
+// 用户定案（4/4 的 `2/. 3// 5/ (y5// 6// 5//) 3[2/] 0// 2// 3// 5// |`）：
+//   5/（拍 1.0 起）与 (y5// 6// 5//)（组占小节剩余 0.5 拍 → 拍 1.5/1.667/1.833）
+//   **同处第 2 拍** → 5/ 的减时线应与组内三音**连在一起**（旧实现按组号分桶、各画一条）。
+//   规则（computeBeams 的 linked，逐对判定）：同组 → 相连；否则同拍 → 相连。
+console.log('[93] beams join same-beat tuplet (adj397)')
+{
+  const r397 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 2/. 3// 5/ (y5// 6// 5//) 3[2/] 0// 2// 3// 5// |\n')
+  check('adj397 解析：用户小节无错误', r397.errors.length === 0, JSON.stringify(r397.errors.map((e) => e.message)))
+  for (const [tag397, cfg397] of [['空间优先', defaultPageConfig], ['时值优先', DUR_CFG]] as const) {
+    const ns = [...layoutScore(r397, cfg397).pages[0].notes].filter((n) => n.barIndex === 0).sort((a, b) => a.beatPos - b.beatPos)
+    const dw = cfg397.note_size * 0.62
+    const beams = computeBeamsForTest(ns, cfg397.note_size)
+    const lvl1 = beams.filter((b) => Math.abs(b.y - beamY(ns[0].y, 1, cfg397.note_size)) < 0.5).sort((a, b) => a.x1 - b.x1)
+    const lvl2 = beams.filter((b) => Math.abs(b.y - beamY(ns[0].y, 2, cfg397.note_size)) < 0.5).sort((a, b) => a.x1 - b.x1)
+    const at = (list: typeof beams, x: number) => list.find((b) => Math.abs(b.x1 - x) < 0.15)
+    // 前提：5/ 与组内三音的拍号一致（floor(beatPos) = 1），这正是相连的依据
+    check(`adj397 ${tag397}：5/ 与组内三音同处第 2 拍`, Math.floor(ns[2].beatPos) === 1 && ns.slice(3, 6).every((n) => Math.floor(n.beatPos) === 1), ns.slice(2, 6).map((n) => n.beatPos.toFixed(3)).join(','))
+    const join397 = at(lvl1, ns[2].x + 1)
+    check(`adj397 ${tag397}：第 1 条减时线从 5/ 连到组末（5/ 与组内三音一条线）`, join397 !== undefined && Math.abs(join397.x2 - (ns[5].x + dw - 1)) < 0.15, lvl1.map((b) => `${b.x1}~${b.x2}`).join(' | '))
+    check(`adj397 ${tag397}：组首音不再是独立线头（不再与 5/ 断开）`, at(lvl1, ns[3].x + 1) === undefined, lvl1.map((b) => `${b.x1}~${b.x2}`).join(' | '))
+    // 5/ 只有 1 条减时线：第 2 条不得从 5/ 起（第 2 条仍只覆盖组内三音）
+    const join2 = at(lvl2, ns[3].x + 1)
+    check(`adj397 ${tag397}：第 2 条减时线只覆盖组内三音（5/ 不参与）`, at(lvl2, ns[2].x + 1) === undefined && join2 !== undefined && Math.abs(join2.x2 - (ns[5].x + dw - 1)) < 0.15, lvl2.map((b) => `${b.x1}~${b.x2}`).join(' | '))
+  }
+  // 反例：跨拍连音组仍整组相连，但**不与下一拍**的音符相连（adj395 的跨拍规则保留）
+  const rAcross397 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (y3/ 2/ 1/) 1 2 |\n')
+  for (const [tag397, cfg397] of [['空间优先', defaultPageConfig], ['时值优先', DUR_CFG]] as const) {
+    const ns = [...layoutScore(rAcross397, cfg397).pages[0].notes].filter((n) => n.barIndex === 0).sort((a, b) => a.beatPos - b.beatPos)
+    const beams = computeBeamsForTest(ns, cfg397.note_size)
+    check(`adj397 ${tag397}：跨拍组仍连成一条、不与下一拍音符相连`, beams.length === 1 && Math.abs(beams[0].x1 - (ns[0].x + 1)) < 0.15 && Math.abs(beams[0].x2 - (ns[2].x + cfg397.note_size * 0.62 - 1)) < 0.15, `${beams.length}: ${beams.map((b) => `${b.x1}~${b.x2}`).join(' | ')}`)
+  }
+}
+
+// ---- 94. 临时拍号分数的占位预算（adj398，E-2026-138） ----
+// 用户定案（4/4 的 `5'/. 6'// 5'/ 2'/ 3' 0/ 6// 5// | 6/ 5'// (3'// 3'/) 3'/ 2' 7&yc |"p:2/4" 0 5 |"p:4/4" 6-- &zkh 6/ 5/&sby |`，
+// 边距 40、字号 13）：整行内容**越出右边距 19.2px**。根因——临时节拍分数画在小节线右缘之后，
+// 而空间优先路径的行宽预算 `nonDurPad` 只按 barlinePad×2 计小节线，未含分数占位，
+// 放置处 gapR 却按分数宽撑开 → 差出的部分无人买单、行内容整体右溢（每个分数约 10.7px）。
+// 修复：预算与放置共用 `meterGapRight`；行末小节线带分数时右钳制让出分数占位。
+console.log('[94] temp-meter fraction budgeting (adj398)')
+{
+  const noteSize398 = 13
+  const cfg398 = { ...defaultPageConfig, margin_left: 40, margin_right: 40, note_size: noteSize398 }
+  const s398 = noteSize398 / 18
+  /** 行内可见右缘：音符 rightX（内容右端，非槽宽）+ 小节线（带分数取分数右缘）+ 括号 */
+  const worstRight398 = (page: { notes: { x: number; width: number; rightX?: number }[]; barlines: { x: number; type: BarlineType; comment?: string }[]; brackets: { x: number; width: number }[] }): number => {
+    const fracRight = (comment: string, center: number): number => {
+      const pm = /^p:\s*(\d+)\s*\/\s*(\d+)$/i.exec(comment)
+      if (!pm) return center + barlineTotalW('|') / 2
+      const halfW = Math.max(pm[1].length, pm[2].length) * noteSize398 * 0.32 + 1.5 * s398
+      return center + barlineTotalW('|') / 2 + 2 * s398 + 2 * halfW
+    }
+    return Math.max(
+      ...page.notes.map((n) => n.rightX ?? n.x + n.width),
+      ...page.barlines.map((b) => (b.comment ? fracRight(b.comment, b.x) : b.x + barlineTotalW(b.type) / 2)),
+      ...page.brackets.map((b) => b.x + b.width / 2),
+    )
+  }
+  const M1 = "5'/. 6'// 5'/ 2'/ 3' 0/ 6// 5//"
+  const M2 = "6/ 5'// (3'// 3'/) 3'/ 2' 7&yc"
+  const M4 = '"p:4/4" 6-- &zkh 6/ 5/&sby'
+  const codeWith = `V: 1.0\nB: t\nZ: z\nD: C\nP: 4/4\nQ: ${M1} | ${M2} | "p:2/4" 0 5 | ${M4} |\n`
+  const codeWithout = `V: 1.0\nB: t\nZ: z\nD: C\nP: 4/4\nQ: ${M1} | ${M2} | 0 5 | ${M4.replace('"p:4/4" ', '')} |\n`
+  for (const [tag398, cfg] of [['空间优先（默认）', cfg398], ['时值优先', { ...cfg398, noteSpaceLayout: 'duration' as const }]] as const) {
+    const limit = 595.28 - cfg.margin_right
+    const pWith = layoutScore(parseJps(codeWith), cfg).pages[0]
+    const pWithout = layoutScore(parseJps(codeWithout), cfg).pages[0]
+    const wWith = worstRight398(pWith)
+    const wWithout = worstRight398(pWithout)
+    check(`adj398 ${tag398}：两个临时拍号的行不越右边距（含分数右缘）`, wWith <= limit + 0.05, `右缘=${wWith.toFixed(1)} 右界=${limit.toFixed(1)}`)
+    check(`adj398 ${tag398}：同谱去掉临时拍号后同样不越界（对照）`, wWithout <= limit + 0.05, `右缘=${wWithout.toFixed(1)}`)
+  }
+  // 行末小节线带临时拍号：分数画在线右缘之后 → 右钳制须让出分数占位（越 12px 的老问题）
+  const rEnd398 = parseJps('V: 1.0\nB: t\nZ: z\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 | 1 2 3 4 | 5 6 7 1 |"p:2/4"\n')
+  const pEnd398 = layoutScore(rEnd398, cfg398).pages[0]
+  const limit398 = 595.28 - cfg398.margin_right
+  const endBar398 = pEnd398.barlines.find((b) => b.comment === 'p:2/4')
+  check('adj398 行末小节线带拍号：分数右缘不越右边距（行末线让出分数占位）', endBar398 !== undefined && worstRight398(pEnd398) <= limit398 + 0.05, `分数线中心=${endBar398?.x} 右缘=${worstRight398(pEnd398).toFixed(1)} 右界=${limit398.toFixed(1)}`)
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
