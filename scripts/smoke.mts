@@ -4749,6 +4749,7 @@ console.log('[95] PWA update mechanism & mobile open hint (adj400/adj401)')
   check('adj403 viewport 带 interactive-widget=resizes-content（PWA 键盘弹出收缩内容区）', readFileSync(join(root, 'index.html'), 'utf8').includes('interactive-widget=resizes-content'))
   // adj404：键盘弹出时应用高度跟随**可视视口**（不依赖宿主是否缩布局视口 / 是否会重复扣减）
   check('adj404 appHeightPx：缩放为 1 时取可视视口高', appHeightPx({ height: 420, scale: 1 }, 800) === 420)
+  check('adj404 appHeightPx：视口未缩（vv 高于窗口内高）时取窗口内高', appHeightPx({ height: 900, scale: 1 }, 800) === 800)
   check('adj404 appHeightPx：双指放大（scale≠1）或不可用时回退窗口内高', appHeightPx({ height: 420, scale: 2 }, 800) === 800 && appHeightPx(null, 800) === 800)
   check('adj404 .app 高度用 --app-h（回退 100dvh）+ main.tsx 安装', readFileSync(join(root, 'src', 'index.css'), 'utf8').includes('var(--app-h, 100dvh)') && readFileSync(join(root, 'src', 'main.tsx'), 'utf8').includes('installAppHeight()'))
 }

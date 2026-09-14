@@ -19,7 +19,10 @@
 /** 计算应用高度（px）。纯函数，便于单测：仅当缩放为 1（未被双指放大）时采用可视视口 */
 export function appHeightPx(vv: { height: number; scale: number } | null, winHeight: number): number {
   if (!vv || vv.scale !== 1) return Math.round(winHeight)
-  return Math.round(vv.height)
+  // 取**较小**者：布局视口跟着键盘缩了（浏览器 / adjustResize 外壳）→ 用 winHeight；
+  // 只有视觉视口缩了（Chrome WebAPK 的 resizes-visual、只上报视觉视口的外壳）→ 用 vv.height。
+  // 真机上两种都遇到过，只取 vv 会在"视口不缩"的机器上量不到键盘（用户复测反馈）。
+  return Math.round(Math.min(vv.height, winHeight))
 }
 
 /** 把可视高度写进 `documentElement` 的 CSS 变量 `--app-h`，并跟随键盘/地址栏变化 */

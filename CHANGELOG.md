@@ -10,7 +10,7 @@
 
 ### 修复
 
-- **键盘弹出时应用不收缩、编辑区被盖住**（`adj404`，`E-2026-141` 后续）：新增 `src/pwa/appHeight.ts`——`visualViewport` 实测可视高写入 CSS 变量 `--app-h`（缩放≠1 或 API 不可用时回退窗口内高），`.app { height: var(--app-h, 100dvh) }`；`main.tsx` 启动即安装，监听 `visualViewport` 的 `resize`/`scroll` 与窗口 `resize`/`orientationchange`。浏览器里该值本就等于视口高（无副作用），PWA/外壳里则补上了缺失的收缩。`interactive-widget=resizes-content`（`adj403`）保留——它在支持的内核上仍然更优。
+- **键盘弹出时应用不收缩、编辑区被盖住**（`adj404`，`E-2026-141` 后续）：新增 `src/pwa/appHeight.ts`——`visualViewport` 实测可视高写入 CSS 变量 `--app-h`（缩放≠1 或 API 不可用时回退窗口内高），`.app { height: var(--app-h, 100dvh) }`；`main.tsx` 启动即安装，监听 `visualViewport` 的 `resize`/`scroll` 与窗口 `resize`/`orientationchange`。**真机复测后改为取 `min(visualViewport.height, innerHeight)`**：布局视口跟键盘缩（浏览器/adjustResize 外壳）与只缩视觉视口（Chrome WebAPK）两种机制都覆盖——用户机上属于后者，只取 `visualViewport` 时量不到键盘。`interactive-widget=resizes-content`（`adj403`）保留。
 - **已安装的 PWA 里菜单「打开」点了没反应**（`adj405`，`E-2026-142`）：移动端**一律走 `<input type="file">` 路径**，不再尝试 `showOpenFilePicker`（真机上 PWA 里该 API 会静默失败，浏览器里却正常；Android 也拿不到可写回句柄）。降级路径另加"选择器没弹出来"兜底提示（4 秒内无任何动静且页面始终有焦点 → 给可操作提示，不再让用户干等）。判定收敛为纯函数 `shouldUseFileInputPicker(coarsePointer, hasFsApi)`。
 
 ### 验证
