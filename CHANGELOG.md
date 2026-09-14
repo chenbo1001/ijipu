@@ -1,5 +1,25 @@
 # iJipu 更新日志（Changelog）
 
+## [未发布] — 2026-09-14（测试中：待用户真机确认「键盘不再吃编辑区 / PWA 里打开可用」后再定版本号）
+
+> 主题：**键盘不再吃掉编辑区 + PWA 里「打开」能用了**。0.16.1 的 `interactive-widget=resizes-content`（`adj403`）在用户真机上无效——
+> 已安装的 PWA / 国产浏览器外壳在键盘弹出时只缩"视觉视口"、**不缩布局视口**，于是 `100dvh` 不变、键盘直接盖住编辑区；
+> 还有的宿主会**再扣一次**键盘高度（Obsidian 移动端即此，插件侧同批修掉）。
+> 现在不猜宿主策略：**直接量 `visualViewport`**（它在所有情况下都等于"真正看得见的区域"），把应用高度钉到可视高。
+> 另外已安装的 PWA 里菜单「打开」**点了没反应**（`showOpenFilePicker` 静默挂起），改为移动端一律走 `<input type="file">`。
+
+### 修复
+
+- **键盘弹出时应用不收缩、编辑区被盖住**（`adj404`，`E-2026-141` 后续）：新增 `src/pwa/appHeight.ts`——`visualViewport` 实测可视高写入 CSS 变量 `--app-h`（缩放≠1 或 API 不可用时回退窗口内高），`.app { height: var(--app-h, 100dvh) }`；`main.tsx` 启动即安装，监听 `visualViewport` 的 `resize`/`scroll` 与窗口 `resize`/`orientationchange`。浏览器里该值本就等于视口高（无副作用），PWA/外壳里则补上了缺失的收缩。`interactive-widget=resizes-content`（`adj403`）保留——它在支持的内核上仍然更优。
+- **已安装的 PWA 里菜单「打开」点了没反应**（`adj405`，`E-2026-142`）：移动端**一律走 `<input type="file">` 路径**，不再尝试 `showOpenFilePicker`（真机上 PWA 里该 API 会静默失败，浏览器里却正常；Android 也拿不到可写回句柄）。降级路径另加"选择器没弹出来"兜底提示（4 秒内无任何动静且页面始终有焦点 → 给可操作提示，不再让用户干等）。判定收敛为纯函数 `shouldUseFileInputPicker(coarsePointer, hasFsApi)`。
+
+### 验证
+
+- `npm run smoke` 新增 5 条断言（`adj404` 3 条：`appHeightPx` 两种情形 + CSS/安装点；`adj405` 2 条：移动端走 input、桌面端仍用系统选择器）全绿；**失败项 17 == 基线**。
+- `tsc -b` + `npm run build` + `npm run lint`（0 error）通过。
+
+---
+
 ## [0.16.1] — 2026-09-14
 
 > 主题：**让更新真正到达手机端**。0.16.0 部署后用户反馈「手机上的 PWA 还是旧界面，打开对话框里依旧看不到 .jps」——

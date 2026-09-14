@@ -23,6 +23,7 @@ import {
   fileInputAccept,
   isUserCancel,
   saveTextToHandle,
+  shouldUseFileInputPicker,
   type SavePhaseLog,
 } from './saveSupport'
 import { useUiStore } from './uiStore'
@@ -373,7 +374,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
     const picker = (window as any).showOpenFilePicker
     // adj281：非安全上下文（http:// 或 file://）或非 Chromium 内核下无 showOpenFilePicker，
     // 降级用 <input type=file> 读取 .jps 文本——打开本质只读文本，不依赖文件系统 API
-    if (typeof picker !== 'function') return openFileViaInput()
+    // adj405：**移动端一律走 input 路径**——真机上已安装的 PWA 里 showOpenFilePicker 可能
+    // "点了没反应"（浏览器同一地址却正常），且 Android 拿不到可写回句柄（移动端保存走「导出」）。
+    if (shouldUseFileInputPicker(isCoarsePointer(), typeof picker === 'function')) return openFileViaInput()
     try {
       const [handle] = await picker({
         types: [{ description: 'iJipu 乐谱', accept: { 'text/plain': ['.jps'] } }],
@@ -752,6 +755,14 @@ function openFileViaInput(): Promise<boolean> {
     }
     window.addEventListener('focus', onFocus)
     input.click()
+    // adj405：兜底——个别移动外壳/PWA 里 `input.click()` 静默失败（既不弹选择器、也不触发
+    // change/cancel，用户看到的就是"点了没反应"）。若 4 秒后仍无任何动静且页面始终有焦点
+    // （说明我们从未被选择器抢走焦点），给一条可操作提示，别让用户干等。
+    window.setTimeout(() => {
+      if (settled || gotFile) return
+      if (typeof document.hasFocus === 'function' && !document.hasFocus()) return
+      useUiStore.getState().showNotice(uiCopy.openPickerSilent, 'warn')
+    }, 4000)
   })
 }
 

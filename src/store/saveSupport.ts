@@ -101,6 +101,18 @@ export function fileInputAccept(coarsePointer: boolean): string | null {
 }
 
 /**
+ * adj405：是否走 `<input type="file">` 降级路径（而不是 `showOpenFilePicker`）。
+ *
+ * 移动端**一律走 input**，两个真机理由（用户反馈）：
+ *  ① 已安装的 PWA 里 `showOpenFilePicker` 可能"点了没反应"（菜单「打开」无响应），而同一个地址在浏览器里正常；
+ *  ② Android 上即便该 API 存在，打开的文件也拿不到可写回的句柄，移动端本来就走「导出」保存。
+ * input 路径在所有移动环境都可靠（浏览器/PWA/自建外壳一致），桌面端仍优先用 File System Access API。
+ */
+export function shouldUseFileInputPicker(coarsePointer: boolean, hasFileSystemAccess: boolean): boolean {
+  return coarsePointer || !hasFileSystemAccess
+}
+
+/**
  * 确认句柄可写：先 queryPermission，未授权时在**用户手势内** requestPermission。
  * 返回最终状态；环境不支持权限 API 时返回 'unknown'（交给真正的写入判定）。
  * 注意：requestPermission 必须在用户手势（Ctrl+S / 菜单点击）尚未被消耗时调用。

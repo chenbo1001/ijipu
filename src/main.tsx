@@ -3,7 +3,12 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from './pwa/swUpdate'
+import { installAppHeight } from './pwa/appHeight'
 import { useUiStore } from './store/uiStore'
+
+// adj404：应用高度跟随可视视口——软键盘弹出时（浏览器/PWA/自建外壳）编辑区自动让位，
+// 不再被键盘盖住（`.app { height: var(--app-h, 100dvh) }`，见 index.css）
+installAppHeight()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

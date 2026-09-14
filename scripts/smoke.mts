@@ -37,6 +37,7 @@ import {
   ensureWritePermission,
   fileBaseName,
   fileInputAccept,
+  shouldUseFileInputPicker,
   isUserCancel,
   sameContent,
   saveTextToHandle,
@@ -48,6 +49,7 @@ import { formatStoredVoice, parseStoredVoice } from '../src/store/playbackVoice.
 import { brand } from '../src/brand/tokens.ts'
 import { aboutCopy } from '../src/brand/copy.ts'
 import { uiCopy } from '../src/brand/copy.ts'
+import { appHeightPx } from '../src/pwa/appHeight.ts'
 // adj379：PWA「新版本就绪」判定（纯逻辑）
 import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from '../src/pwa/swUpdate.ts'
 // adj394：编辑区问题提示条的汇总/跳转换算（纯逻辑）
@@ -3480,6 +3482,9 @@ console.log('[77] save reliability: error classify / permission / write-back ver
   // adj399：手机端打开对话框看不到 .jps —— 移动端（粗指针）不设 accept 过滤，桌面降级路径保留
   check('adj399 移动端不设 accept（.jps 不被 MIME 过滤藏起来）', fileInputAccept(true) === null, String(fileInputAccept(true)))
   check('adj399 桌面降级路径 accept 含 .jps', (fileInputAccept(false) ?? '').includes('.jps'), String(fileInputAccept(false)))
+  // adj405：移动端一律走 input 路径（PWA 里 showOpenFilePicker 可能"点了没反应"）
+  check('adj405 移动端走 input 路径（不看是否支持 FS Access API）', shouldUseFileInputPicker(true, true) && shouldUseFileInputPicker(true, false))
+  check('adj405 桌面端支持 FS Access API 时仍用系统选择器', !shouldUseFileInputPicker(false, true) && shouldUseFileInputPicker(false, false))
 }
 
 /** 假句柄（结构化模拟 FileSystemFileHandle；node 环境无浏览器 API，用于断言保存流程） */
@@ -4742,6 +4747,10 @@ console.log('[95] PWA update mechanism & mobile open hint (adj400/adj401)')
   check('adj400 SW 注册带 updateViaCache:none（绕开 HTTP 缓存，update() 真能拿到新版）', readFileSync(join(root, 'src', 'main.tsx'), 'utf8').includes("updateViaCache: 'none'"))
   check('adj401 手机端打开指引覆盖「保存到手机 / 下载目录 / 改扩展名」', uiCopy.openPickHint.includes('保存到手机') && uiCopy.openPickHint.includes('下载') && uiCopy.openPickHint.includes('.md'), uiCopy.openPickHint.slice(0, 24) + '…')
   check('adj403 viewport 带 interactive-widget=resizes-content（PWA 键盘弹出收缩内容区）', readFileSync(join(root, 'index.html'), 'utf8').includes('interactive-widget=resizes-content'))
+  // adj404：键盘弹出时应用高度跟随**可视视口**（不依赖宿主是否缩布局视口 / 是否会重复扣减）
+  check('adj404 appHeightPx：缩放为 1 时取可视视口高', appHeightPx({ height: 420, scale: 1 }, 800) === 420)
+  check('adj404 appHeightPx：双指放大（scale≠1）或不可用时回退窗口内高', appHeightPx({ height: 420, scale: 2 }, 800) === 800 && appHeightPx(null, 800) === 800)
+  check('adj404 .app 高度用 --app-h（回退 100dvh）+ main.tsx 安装', readFileSync(join(root, 'src', 'index.css'), 'utf8').includes('var(--app-h, 100dvh)') && readFileSync(join(root, 'src', 'main.tsx'), 'utf8').includes('installAppHeight()'))
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码

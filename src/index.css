@@ -38,6 +38,11 @@ body {
   max-width: 100vw; /* adj329：防某子元素撑宽 .app 造成横向滚动 */
   height: 100vh;
   height: 100dvh; /* adj329：动态视口高——移动端地址栏收起/展开时 100vh 会大于可见视口导致纵向可滚，dvh 跟随实际视口 */
+  /* adj404：优先用**实测可视视口**（main.tsx 的 installAppHeight 写 --app-h）——
+     已安装的 PWA / 部分国产浏览器外壳在键盘弹出时只缩"视觉视口"、不缩布局视口，
+     此时 100dvh 不变 → 键盘盖住编辑区；--app-h 取 visualViewport.height，键盘一弹就变小。
+     拿不到 --app-h（脚本未跑/老内核）时回退 100dvh。 */
+  height: var(--app-h, 100dvh);
   background: var(--jp-bg-app);
   /* adj：不能设 overflow:hidden——它会裁剪绝对定位下拉（汉堡/更多/字体下拉），
      导致窄屏点击菜单下拉显示不全。整页防页面滚动由 html/body{overflow:hidden} 兜底，
