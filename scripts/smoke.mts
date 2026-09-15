@@ -5189,6 +5189,41 @@ console.log('[104] runnable examples in docs parse clean (adj419)')
   })
 }
 
+// ---- 105. 输入条「括倚」组：倚音键插骨架、光标停在 ] 前；不再有虚音符键（adj420） ----
+// 用户反馈：菜单里显示 `1[65]` / `1[h65]`（那是 insert 预览），点下去整串插进正文会被当成真音符。
+// 现在只插 `[]` / `[h]`，并用 cursorOffset 把光标停在 `]` 之前，接着输倚音数字即可。
+console.log('[105] pad 括倚 keys: insert skeleton + caret inside (adj420)')
+{
+  const brace = PAD_GROUPS.find((g) => g.id === 'brace')
+  check('adj420 存在「括倚」主键组', !!brace, PAD_GROUPS.map((g) => g.id).join(','))
+  const keys = brace?.keys ?? []
+  const pre = keys.find((k) => k.insert === '[]')
+  const post = keys.find((k) => k.insert === '[h]')
+  check('adj420 前倚音键插入骨架 []', !!pre, keys.map((k) => k.insert).join(' '))
+  check('adj420 前倚音键光标停在 ] 之前（cursorOffset=1）', pre?.cursorOffset === 1, `${pre?.cursorOffset}`)
+  check('adj420 后倚音键插入骨架 [h]', !!post, keys.map((k) => k.insert).join(' '))
+  check('adj420 后倚音键光标停在 ] 之前（cursorOffset=2）', post?.cursorOffset === 2, `${post?.cursorOffset}`)
+  // 提示里仍给出用法示例（用户可以照着写，但插进去的是骨架）
+  check('adj420 前倚音提示含用法示例 1[65]', !!pre?.hint && pre.hint.includes('1[65]'), pre?.hint)
+  check('adj420 后倚音提示含用法示例 1[h65]', !!post?.hint && post.hint.includes('1[h65]'), post?.hint)
+  // 不再提供 `(1)` 虚音符键（低频写法，需要时在源码里手写）
+  check('adj420 括倚组已移除 (1) 虚音符键', !keys.some((k) => k.insert.includes('(1)')), keys.map((k) => k.insert).join(' '))
+  // 模拟 EditorPane 的插入语义（text + cursorOffset）：插完光标应落在 [ 与 ] 之间
+  const apply = (text: string, pos: number, ins: string, off?: number) => ({
+    text: text.slice(0, pos) + ins + text.slice(pos),
+    pos: pos + (off ?? ins.length),
+  })
+  const r1 = apply('1 2 ', 4, '[]', 1)
+  check('adj420 插入 [] 后光标在括号内（可继续输倚音数字）', r1.text === '1 2 []' && r1.pos === 5 && r1.text[r1.pos] === ']', `${r1.text}@${r1.pos}`)
+  const r2 = apply('1 2 ', 4, '[h]', 2)
+  check('adj420 插入 [h] 后光标在 h 与 ] 之间', r2.text === '1 2 [h]' && r2.pos === 6 && r2.text[r2.pos] === ']' && r2.text[r2.pos - 1] === 'h', `${r2.text}@${r2.pos}`)
+  // 插完接着输倚音数字，得到合法语法（1[65] / 1[h65]）
+  const typed = r1.text.slice(0, r1.pos) + '65' + r1.text.slice(r1.pos)
+  check('adj420 继续输 65 即得完整前倚音 1[65]', typed === '1 2 [65]', typed)
+  const typed2 = r2.text.slice(0, r2.pos) + '65' + r2.text.slice(r2.pos)
+  check('adj420 继续输 65 即得完整后倚音 1[h65]', typed2 === '1 2 [h65]', typed2)
+}
+
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
 runAdj363SaveTests()
   .catch((e) => {
