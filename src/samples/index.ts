@@ -1,9 +1,16 @@
 /**
  * src/samples/index.ts — 内置示例谱
  *
- * adj：示例/模板谱当前清空——老板娘对这些示例不满意，暂不内置。
- * 保留 SampleScore 接口 + 空 SAMPLES（为将来引入高质量示例预留结构），
- * defaultSample() 改为返回内置「新建」模板，作为编辑器初始默认谱。
+ * adj423（用户要求）：示例谱改为**目录驱动**——`public/samples/*.jps` 下的每个 `.jps` 文件
+ * 都是一份示例谱，用 Vite 的 `import.meta.glob` 在**构建期**自动发现并读入（`?raw`）。
+ * 于是：**往 `public/samples/` 里加/改 .jps 文件即可，不需要改代码**（重跑构建即生效）。
+ *
+ * 每份示例的元信息也来自文件本身，避免"再维护一份清单"：
+ *  - 名称：首个 `B:` 标题（没有就用文件名）
+ *  - 说明：首个 `S:` 说明行（没有就留空）
+ *  - id：文件名（去扩展名）
+ *
+ * `defaultSample()` 仍返回内置「新建」模板（编辑器初始默认谱，与示例谱无关）。
  */
 import { JPS_CONFIG_PREFIX } from '@ijipu/engine'
 
@@ -51,8 +58,42 @@ const NEW_FILE_TEMPLATE = [
   '',
 ].join('\n')
 
-/** 示例谱列表 —— 当前清空（老板娘暂不满意，不入内置示例） */
-export const SAMPLES: SampleScore[] = []
+/** 从示例源码里取首个 `B:` 标题（没有则空串） */
+function firstTitleOf(code: string): string {
+  for (const line of code.split(/\r?\n/)) {
+    const m = /^\s*B\s*:\s*(.+?)\s*$/.exec(line)
+    if (m) return m[1]
+  }
+  return ''
+}
+
+/** 从示例源码里取首个 `S:` 说明（没有则空串；`\n` 占位换行换成空格便于列表展示） */
+function firstNoteOf(code: string): string {
+  for (const line of code.split(/\r?\n/)) {
+    const m = /^\s*S\s*:\s*(.+?)\s*$/.exec(line)
+    if (m) return m[1].replace(/\\n/g, ' ')
+  }
+  return ''
+}
+
+/**
+ * 示例谱列表——由 `public/samples/*.jps` **构建期自动发现**（按文件名排序，中文按拼音/码位稳定排序）。
+ * 加/改示例只需动那个目录里的文件，不用回来改这里。
+ */
+export const SAMPLES: SampleScore[] = Object.entries(
+  import.meta.glob('/public/samples/*.jps', { query: '?raw', import: 'default', eager: true }) as Record<string, string>,
+)
+  .map(([path, code]) => {
+    const file = path.split('/').pop() ?? path
+    const id = file.replace(/\.jps$/i, '')
+    return {
+      id,
+      name: firstTitleOf(code) || id,
+      description: firstNoteOf(code),
+      code,
+    }
+  })
+  .sort((a, b) => a.id.localeCompare(b.id, 'zh-Hans-CN'))
 
 /** 默认（新建）谱 —— 返回内置新建模板，不依赖 SAMPLES[0] */
 export function defaultSample(): SampleScore {

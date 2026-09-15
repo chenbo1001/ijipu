@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useDocStore, type ViewType } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
-import { formatJps, EDITOR_FONT_OPTIONS } from '@ijipu/engine'
+import { EDITOR_FONT_OPTIONS } from '@ijipu/engine'
 import { pasteImportCopy } from '../brand/copy'
 import { ToolIcon } from './ToolIcon'
 
@@ -95,8 +95,8 @@ const viewItem = (k: ViewType) => VIEWS.find((v) => v.key === normViewKey(k))
 
 export function TopBar() {
   // ---- 文档 store ----
-  const code = useDocStore((s) => s.code)
-  const setCode = useDocStore((s) => s.setCode)
+  // adj423：不再订阅 code/setCode——原来它们只服务于已取消的「格式化脚本」菜单项
+  // （格式化现在是自动的：光标离开 Q 行时由 EditorPane 调 formatLine）
   const viewType = useDocStore((s) => s.viewType)
   const setViewType = useDocStore((s) => s.setViewType)
   // adj315：左右拆分排列方向（点「左右拆分」时据此设为 splitH/splitHE）
@@ -666,10 +666,8 @@ export function TopBar() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [menuOpen])
 
-  const runFormat = () => {
-    const formatted = formatJps(code)
-    if (formatted !== code) setCode(formatted)
-  }
+  // adj423：「格式化脚本」菜单项已取消（用户要求）——脚本格式化现在是**自动**的：
+  // 光标离开某条 Q 行时 EditorPane 会调 formatLine 整理该行，不需要手动触发。
   const runOpen = async () => {
     await openFile()
   }
@@ -688,7 +686,9 @@ export function TopBar() {
     { label: '保存(&S)', kbd: 'Ctrl+S', hotkey: 's', onPick: runSave },
     { label: '另存为(&A)…', hotkey: 'a', onPick: runSaveAs },
     'sep',
-    { label: '格式化脚本(&F)', hotkey: 'f', onPick: runFormat },
+    // adj423：新增「打开示例」——列出 public/samples 下的示例谱（该目录靠构建期 glob 自动发现，
+    // 往里加 .jps 文件即出现在列表里，无需改代码）
+    { label: '打开示例(&E)…', hotkey: 'e', onPick: () => openModal('samples') },
     'sep',
     // adj422：菜单项由「页面设置」改为「设置」（与对话框标题、顶栏按钮一致）
     { label: '设置(&G)…', hotkey: 'g', onPick: () => openModal('pageConfig') },

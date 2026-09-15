@@ -59,13 +59,17 @@ function mdToHtml(md: string): string {
   const table: { rows: string[][]; headRows: number } = { rows: [], headRows: 0 }
   const isTableRow = (s: string) => /^\s*\|.*\|\s*$/.test(s)
   const isTableSep = (s: string) => /^\s*\|[\s:|-]+\|\s*$/.test(s)
+  /**
+   * adj423：单元格切分——**只在未转义的 `|` 处切**（`\|` 是转义后的竖线，用于语法表里写 `|`、`||`、`:|:`）。
+   * 此前用 `split('|')` 直接切，导致「小节线与反复」这类表格被切碎（E-2026-153）。
+   */
   const cellsOf = (s: string) =>
     s
       .trim()
       .replace(/^\|/, '')
       .replace(/\|$/, '')
-      .split('|')
-      .map((c) => c.trim())
+      .split(/(?<!\\)\|/)
+      .map((c) => c.trim().replace(/\\\|/g, '|'))
 
   const closeAllLists = () => {
     while (listStack.length) {

@@ -5191,6 +5191,36 @@ console.log('[104] runnable examples in docs parse clean (adj419/adj422)')
     })
   }
   check('adj422 语法说明里的可运行示例 ≥10 段（入门递进 + 组合示例集）', total >= 10, `${total}`)
+  // adj423：文档表格**列数一致性**——表格里的竖线要写成 `\|` 转义，写漏了会把整张表切碎
+  // （「小节线与反复」表就踩过：`| \| | 单小节线 |` 被切成了三列，表格错位，见 E-2026-153）
+  {
+    const cells = (s: string): string[] =>
+      s
+        .trim()
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split(/(?<!\\)\|/)
+        .map((c) => c.trim().replace(/\\\|/g, '|'))
+    const isRow = (s: string) => /^\s*\|.*\|\s*$/.test(s)
+    const isSep = (s: string) => /^\s*\|[\s:|-]+\|\s*$/.test(s)
+    for (const f of ['docs/SYNTAX.md', 'docs/USER-GUIDE.md']) {
+      const lines = readFileSync(join(root, f), 'utf8').split('\n')
+      const bad: string[] = []
+      let tables = 0
+      let i = 0
+      while (i < lines.length) {
+        if (isRow(lines[i])) {
+          const rows: string[] = []
+          while (i < lines.length && isRow(lines[i])) rows.push(lines[i++])
+          tables++
+          const head = cells(rows[0]).length
+          const off = rows.slice(1).filter((r) => !isSep(r) && cells(r).length !== head)
+          if (off.length) bad.push(`第 ${tables} 张表（表头 ${head} 列）：${off[0].trim().slice(0, 70)}`)
+        } else i++
+      }
+      check(`adj423 ${f} 的 Markdown 表格列数一致（共 ${tables} 张表）`, bad.length === 0, bad.join(' | '))
+    }
+  }
   // adj422：合并后不应再有第二份语法文档（用户要求只留一份，避免三处漂移）
   check('adj422 不再存在独立的 HTML 规格页（已合并）', !existsSync(join(root, 'public', 'doc', 'jps-spec.html')))
   const spec = readFileSync(join(root, 'docs', 'JPS-SPEC.md'), 'utf8')
