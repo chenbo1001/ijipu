@@ -14,11 +14,14 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
+import { ToolIcon } from '../ui/ToolIcon'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { playbackCopy } from '../brand/copy'
 import { createHqCache, prefetchHqLibraryProgress } from '../playback/spessaCache'
 import { SpessaSynthBackend, getHqLibrary, GM_VOICE_OPTIONS, firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
+// adj409：暂停/续播的剩余事件平移（纯函数）
+import { shiftEventsFrom } from '../playback/playbackTimeline'
 import { layoutScore, buildPlaySequence, inferBpm, schedulePlay } from '@ijipu/engine'
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
@@ -54,6 +57,11 @@ export function PlaybackDialog() {
   const defaultBpm = useMemo(() => inferBpm(parseResult), [parseResult])
   const [bpm, setBpm] = useState(defaultBpm)
   const [playing, setPlaying] = useState(false)
+  // adj409：暂停态——`playing` 表示"会话仍在进行（含暂停）"，`paused` 表示音频已停住但可续播。
+  // 二者分开：播放中按钮显示「暂停」，暂停后显示「继续」，会话未结束时「停止」始终可用、对话框保持停靠。
+  const [paused, setPaused] = useState(false)
+  // adj409：按播放后的准备期（音源加载/序列构建）——此间按钮置灰，避免连点重入
+  const [starting, setStarting] = useState(false)
   const [samplerState, setSamplerState] = useState<string>('idle')
   const [totalMs, setTotalMs] = useState(0)
   // adj347/348：音源下载中（首次打开自动后台下载；前台仅文字提示，不阻塞其它交互）
@@ -83,9 +91,21 @@ export function PlaybackDialog() {
   // adj258：播放序列 + 启动时间（本地计时），高亮定时器按当前 atMs 设 activeNoteIds
   const seqRef = useRef<ReturnType<typeof buildPlaySequence> | null>(null)
   const startTimeRef = useRef<number>(0)
+  /**
+   * adj409：把「时间轴」与「音频调度」拆成两个时钟，暂停/续播才不用改高亮与色块轨道：
+   *  · `startTimeRef` = 本次音频调度起点的 `performance.now()`
+   *  · `timeBaseRef`  = 该起点对应的**原时间轴**毫秒（首次播放 0；续播 = 暂停时的位置）
+   *  于是 `curMs() = timeBase + (now - startTime)` 恒为**原时间轴**位置——
+   *  高亮比对与 `playheadTrack`（都在原时间轴）无需任何偏移；音频侧则把剩余事件整体平移到 0 重排。
+   */
+  const timeBaseRef = useRef<number>(0)
+  /** adj409：暂停时已播到的位置（原时间轴毫秒）= 续播起点 */
+  const pausedAtRef = useRef<number>(0)
   const highlightTimerRef = useRef<number | null>(null)
   // adj282：RAF 驱动 currentMs（色块平滑滑动）
   const rafRef = useRef<number | null>(null)
+  // adj409：播放/暂停按钮——点击后把焦点留在这里，空格即可暂停/继续
+  const playBtnRef = useRef<HTMLButtonElement>(null)
 
   const header = parseResult.header
   // adj326：打开试听对话框即按编辑区方位停靠——编辑区在左（左右拆分 editorLeft）→ 左下角；
@@ -152,8 +172,13 @@ export function PlaybackDialog() {
     }
   }, [setActiveNoteId, setActiveNoteIds, setVoiceBlocks, setPlayheadTrack, setCurrentMs])
 
-  const stop = () => {
-    cancelRef.current?.()
+  // ---- adj409：播放驱动（RAF 色块 + 50ms 高亮 + 收尾复位）统一在这里启停，暂停/续播复用同一套 ----
+
+  /** 当前（**原时间轴**）播放位置，毫秒 */
+  const curMs = () => timeBaseRef.current + (performance.now() - startTimeRef.current)
+
+  /** 清掉三个驱动定时器（收尾 / 高亮 / RAF） */
+  const clearTimers = () => {
     if (doneTimerRef.current !== null) {
       window.clearTimeout(doneTimerRef.current)
       doneTimerRef.current = null
@@ -166,8 +191,10 @@ export function PlaybackDialog() {
       cancelAnimationFrame(rafRef.current)
       rafRef.current = null
     }
-    backendRef.current?.stop()
-    setPlaying(false)
+  }
+
+  /** 清空播放期的界面态（高亮 / 声部色框 / 色块轨道 / 播放位置） */
+  const clearPlaybackUi = () => {
     setActiveNoteId(null)
     setActiveNoteIds([])
     setVoiceBlocks([])
@@ -175,8 +202,110 @@ export function PlaybackDialog() {
     setCurrentMs(0)
   }
 
+  /**
+   * 启动驱动：RAF 每帧刷新 `currentMs`（色块滑动）、50ms 比对高亮、到点（job.totalMs + 100）自动复位。
+   * 暂停后重排的序列是"相对现在"的，故收尾时间直接用 job.totalMs —— 与首次播放同一套语义。
+   */
+  const startTimers = (job: { totalMs: number }) => {
+    clearTimers()
+    const rafLoop = () => {
+      setCurrentMs(curMs())
+      rafRef.current = requestAnimationFrame(rafLoop)
+    }
+    rafRef.current = requestAnimationFrame(rafLoop)
+    const computeActive = () => {
+      const cur = curMs()
+      const ids: string[] = []
+      for (const e of seqRef.current?.events ?? []) {
+        if (e.atMs <= cur && cur < e.atMs + e.durationMs) {
+          ids.push(e.placed.id.page + '_' + e.placed.id.voice + '_' + e.placed.id.group + '_' + e.placed.id.index)
+        }
+      }
+      setActiveNoteIds(ids)
+      // adj285：播放跟随滚动——设当前活动音符 id（首个），使色块/高亮区域保持在视口内
+      if (ids.length > 0) setActiveNoteId(ids[0])
+    }
+    computeActive()
+    highlightTimerRef.current = window.setInterval(computeActive, 50)
+    // adj158：播放结束后自动复位（playing=false，对话框从右下角回中央）
+    doneTimerRef.current = window.setTimeout(() => {
+      doneTimerRef.current = null
+      clearTimers()
+      setPlaying(false)
+      setPaused(false)
+      pausedAtRef.current = 0
+      timeBaseRef.current = 0
+      clearPlaybackUi()
+    }, job.totalMs + 100)
+  }
+
+  const stop = () => {
+    cancelRef.current?.()
+    cancelRef.current = null
+    clearTimers()
+    backendRef.current?.stop()
+    setPlaying(false)
+    setPaused(false)
+    pausedAtRef.current = 0
+    timeBaseRef.current = 0
+    clearPlaybackUi()
+  }
+
+  /**
+   * adj409：暂停——记住已播位置、撤掉音频调度（后端用 `setTimeout` 排程，只能"撤掉重排"）、
+   * 停住三个驱动定时器；**保持 `playing = true`**（会话未结束：「停止」仍可用、对话框保持停靠）。
+   * 界面保留暂停瞬间的高亮与色块（不清空），位置定格在暂停点。
+   */
+  const pause = () => {
+    if (!playing || paused) return
+    pausedAtRef.current = Math.max(0, curMs())
+    cancelRef.current?.()
+    cancelRef.current = null
+    clearTimers()
+    setCurrentMs(pausedAtRef.current)
+    setPaused(true)
+  }
+
+  /**
+   * adj409：续播——把**剩余事件**整体平移到 0 重新调度：
+   *  · 已播完的事件丢弃；
+   *  · 暂停瞬间正在发声的音符从 0 起重排（时长取它在原时间轴上的**剩余部分**）——
+   *    后端没有"从中间起声"的能力，故该音会从头再响一次，这是暂停/续播的已知取舍。
+   */
+  const resume = () => {
+    const seq = seqRef.current
+    const backend = backendRef.current
+    if (!seq || !backend || !paused) return
+    const from = pausedAtRef.current
+    // adj409：剩余事件的平移/裁剪收敛在纯函数里（`playbackTimeline.ts`，带 smoke 断言）
+    const events = shiftEventsFrom(seq.events, from)
+    if (events.length === 0) {
+      stop()
+      return
+    }
+    const job = schedulePlay({ events }, backend, undefined, undefined, 0)
+    cancelRef.current = job.cancel
+    timeBaseRef.current = from
+    startTimeRef.current = performance.now()
+    setPaused(false)
+    startTimers(job)
+  }
+
+  /** 播放键（开关语义）：未播放 → 播放；播放中 → 暂停；暂停中 → 继续 */
+  const onPlayToggle = () => {
+    if (starting) return
+    if (!playing) {
+      void play()
+      return
+    }
+    if (paused) resume()
+    else pause()
+  }
+
   const play = async () => {
     stop()
+    // adj409：准备期置位——按钮暂时置灰，避免连点重入（音源加载 + 序列构建要几百毫秒）
+    setStarting(true)
     // adj293：整个播放流程包 try/catch——异常不再静默（此前 async 抛错 → 无声无色块）
     try {
       // adj344：固定 SpessaSynth 高保真后端（不再提供合成/midi-js 切换）
@@ -240,63 +369,28 @@ export function PlaybackDialog() {
         ),
       )
       // adj258：保存序列 + 本地启动时间，启动高亮定时器按当前 atMs 设 activeNoteIds
+      // adj409：首次播放的时间轴基点 = 0（续播时由 resume() 设为暂停位置）
       seqRef.current = seq
+      timeBaseRef.current = 0
+      pausedAtRef.current = 0
       startTimeRef.current = performance.now() + PLAY_FIRST_DELAY_MS
-      // adj282：RAF 驱动 currentMs（每帧更新 → PreviewPane 色块平滑滑动）
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
-      setCurrentMs(0)
-      const rafLoop = () => {
-        setCurrentMs(performance.now() - startTimeRef.current)
-        rafRef.current = requestAnimationFrame(rafLoop)
-      }
-      rafRef.current = requestAnimationFrame(rafLoop)
-      if (highlightTimerRef.current !== null) window.clearInterval(highlightTimerRef.current)
-      const computeActive = () => {
-        const cur = performance.now() - startTimeRef.current
-        const ids: string[] = []
-        const es = seqRef.current?.events ?? []
-        for (const e of es) {
-          if (e.atMs <= cur && cur < e.atMs + e.durationMs) {
-            ids.push(e.placed.id.page + '_' + e.placed.id.voice + '_' + e.placed.id.group + '_' + e.placed.id.index)
-          }
-        }
-        setActiveNoteIds(ids)
-        // adj285：播放跟随滚动——设当前活动音符 id（首个），使色块/高亮区域保持在视口内
-        if (ids.length > 0) setActiveNoteId(ids[0])
-      }
-      computeActive()
-      highlightTimerRef.current = window.setInterval(computeActive, 50)
       // adj344：高保真音色由 setVoice(GM program) 决定，无需全局乐器覆盖参数（globalInstrument）
       // adj285：不再用 onNote 同步设置 activeNoteId（循环内逐事件 set → 批处理后为最后一事件）
       // adj309：按下播放后延迟 200ms 才出第一声——给听者准备时间 + 让 ctx resume 完成
       const job = schedulePlay(seq, backend, undefined, undefined, PLAY_FIRST_DELAY_MS)
       cancelRef.current = job.cancel
       setPlaying(true)
+      setPaused(false)
       setPlayError(null)
-      // adj158：播放结束后自动复位（playing=false，对话框从右下角回中央）
-      if (doneTimerRef.current !== null) window.clearTimeout(doneTimerRef.current)
-      doneTimerRef.current = window.setTimeout(() => {
-        doneTimerRef.current = null
-        setPlaying(false)
-        setActiveNoteId(null)
-        setActiveNoteIds([])
-        setVoiceBlocks([])
-        setPlayheadTrack([])
-        setCurrentMs(0)
-        if (highlightTimerRef.current !== null) {
-          window.clearInterval(highlightTimerRef.current)
-          highlightTimerRef.current = null
-        }
-        if (rafRef.current !== null) {
-          cancelAnimationFrame(rafRef.current)
-          rafRef.current = null
-        }
-      }, job.totalMs + 100)
+      // adj282/adj409：驱动定时器（RAF 色块 + 高亮 + 收尾复位）统一由 startTimers 启停
+      startTimers(job)
       // 起点播放后清除标记，下次播放从头开始
       if (playbackStartId) setPlaybackStart(null)
     } catch (e) {
       // adj293：异常显示在对话框（不再静默失败）
       setPlayError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setStarting(false)
     }
   }
 
@@ -310,6 +404,13 @@ export function PlaybackDialog() {
     if (playbackTick > 0) void play()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playbackTick])
+
+  // adj409：播放/暂停后把焦点留在播放按钮上——按钮获得焦点后，**空格/回车**即等于再点一次，
+  // 于是「按一下空格」就能暂停或恢复，不必去点按钮（用户要求）。仅在会话进行中出现状态变化时聚焦，
+  // 打开对话框时不抢焦点（避免影响谱面/编辑器操作）。
+  useEffect(() => {
+    if (playing || starting) playBtnRef.current?.focus()
+  }, [playing, paused, starting])
 
   return (
     // adj87：试听时保持看谱——背景不遮罩（maskDim=0）、点击遮罩不关闭（仅 ✕ / Esc）
@@ -397,14 +498,54 @@ export function PlaybackDialog() {
             )}
           </div>
 
-          {/* 右：播放 / 停止（上下排列，垂直居中） */}
+          {/* 右：播放 / 暂停 / 停止（上下排列，垂直居中） */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, justifyContent: 'center' }}>
-            {/* adj170：播放按钮与停止按钮风格一致（去掉 primary 强调样式） */}
-            <button className="btn" onClick={() => void play()} disabled={playing} style={{ padding: '4px 14px', fontSize: 12, whiteSpace: 'nowrap' }}>
-              {playing ? '播放中…' : '▶ 播放'}
+            {/* adj170：播放按钮与停止按钮风格一致（去掉 primary 强调样式）
+                adj408：按钮图标改用 public/*.png（播放/暂停/停止），与顶栏同一套上色（mask + currentColor）
+                adj409：播放键改**开关**——播放中显示「暂停」（暂停.png），按一下暂停；暂停后显示「继续」（播放.png）
+                       再按恢复；点击后焦点留在本按钮，空格即可暂停/继续 */}
+            <button
+              ref={playBtnRef}
+              className="btn"
+              onClick={onPlayToggle}
+              /* adj409：准备期**不用 `disabled`**——被禁用的按钮会立刻失去焦点，
+                 而"点播放后焦点留在本按钮、空格即可暂停/继续"正是本需求；
+                 改为 `aria-busy` + 降透明度提示忙碌，连点由 onPlayToggle 里的 starting 守卫拦掉 */
+              aria-busy={starting}
+              aria-label={playing && !paused ? '暂停' : playing && paused ? '继续播放' : '播放'}
+              title={
+                starting
+                  ? '正在准备音源…'
+                  : playing && !paused
+                    ? '暂停（或按空格）'
+                    : playing && paused
+                      ? '继续播放（或按空格）'
+                      : '开始试听（或按空格）'
+              }
+              style={{
+                padding: '4px 14px',
+                fontSize: 12,
+                whiteSpace: 'nowrap',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+                opacity: starting ? 0.7 : 1,
+                cursor: starting ? 'default' : 'pointer',
+              }}
+            >
+              <ToolIcon name={playing && !paused ? 'pause' : 'play'} size={14} />
+              {starting ? '准备中…' : playing && !paused ? '暂停' : playing && paused ? '继续' : '播放'}
             </button>
-            <button className="btn" onClick={stop} disabled={!playing} style={{ padding: '4px 14px', fontSize: 12, whiteSpace: 'nowrap' }}>
-              ■ 停止
+            <button
+              className="btn"
+              onClick={stop}
+              disabled={!playing}
+              title="停止并回到开头"
+              style={{ padding: '4px 14px', fontSize: 12, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}
+            >
+              <ToolIcon name="stop" size={14} />
+              停止
             </button>
           </div>
         </div>

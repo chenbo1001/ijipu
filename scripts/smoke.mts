@@ -53,6 +53,8 @@ import { appHeightPx } from '../src/pwa/appHeight.ts'
 import { normalizePastedSource } from '../src/store/importSource.ts'
 // adj379：PWA「新版本就绪」判定（纯逻辑）
 import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from '../src/pwa/swUpdate.ts'
+// adj409：试听暂停/续播的剩余事件平移（纯逻辑）
+import { shiftEventsFrom } from '../src/playback/playbackTimeline.ts'
 // adj394：编辑区问题提示条的汇总/跳转换算（纯逻辑）
 import { summarizeProblems, offsetOf } from '../src/ui/problems.ts'
 import { problemCopy } from '../src/brand/copy.ts'
@@ -4760,6 +4762,34 @@ console.log('[95] PWA update mechanism & mobile open hint (adj400/adj401)')
   check('adj406 清洗：纯文本原样（仅去行尾空白）', normalizePastedSource('V: 1.0\nQ: 1 2 3  ') === 'V: 1.0\nQ: 1 2 3')
   check('adj406 空内容清洗后为空 → importSource 直接返回 false（不替换文档）', normalizePastedSource('   \n  ') === '')
   check('adj406 菜单与对话框已接线', readFileSync(join(root, 'src', 'ui', 'TopBar.tsx'), 'utf8').includes('pasteImportCopy.menuLabel') && readFileSync(join(root, 'src', 'App.tsx'), 'utf8').includes("modal === 'pasteImport'"))
+}
+
+// ---- 96. 试听暂停/续播：剩余事件平移（adj409） ----
+// 后端（SpessaSynthBackend）用 setTimeout 逐个排程音符，没有 ctx 级暂停可借 →
+// 暂停 = 撤掉全部待触发排程、续播 = 把剩余事件整体平移到 0 重排（见 src/playback/playbackTimeline.ts）。
+// 这里断言平移/裁剪的边界：已播完丢弃、未开始保持时长、正在发声取剩余部分、越界返回空、不修改入参。
+console.log('[96] playback pause/resume event shift (adj409)')
+{
+  const mk = () => [
+    { atMs: 0, durationMs: 1000, tag: 'a' },
+    { atMs: 1000, durationMs: 500, tag: 'b' }, // 1000~1500
+    { atMs: 1500, durationMs: 500, tag: 'c' }, // 1500~2000
+    { atMs: 2000, durationMs: 1000, tag: 'd' }, // 2000~3000
+  ]
+  const src = mk()
+  const at0 = shiftEventsFrom(src, 0)
+  check('adj409 从头播（from=0）：时间轴与时长原样保留', at0.length === 4 && at0[0].atMs === 0 && at0[3].atMs === 2000 && at0[3].durationMs === 1000, JSON.stringify(at0.map((e) => [e.atMs, e.durationMs])))
+  const at1200 = shiftEventsFrom(src, 1200)
+  check('adj409 播到 1200ms 暂停：已播完的 a 丢弃、未开始的 c/d 平移且时长不变', at1200.length === 3 && at1200[0].tag === 'b' && at1200[0].atMs === 0 && at1200[0].durationMs === 300 && at1200[1].atMs === 300 && at1200[1].durationMs === 500 && at1200[2].atMs === 800 && at1200[2].durationMs === 1000, JSON.stringify(at1200.map((e) => [e.tag, e.atMs, e.durationMs])))
+  check('adj409 正在发声的音符从 0 起重排、时长取剩余部分（b：1500−1200=300）', at1200[0].tag === 'b' && at1200[0].atMs === 0 && at1200[0].durationMs === 300, JSON.stringify(at1200[0]))
+  const atExact = shiftEventsFrom(src, 1500)
+  check('adj409 恰好落在事件边界：该事件（终点=边界）丢弃，下一个从 0 起', atExact.length === 2 && atExact[0].tag === 'c' && atExact[0].atMs === 0 && atExact[1].tag === 'd' && atExact[1].atMs === 500, JSON.stringify(atExact.map((e) => [e.tag, e.atMs])))
+  const atEnd = shiftEventsFrom(src, 3000)
+  check('adj409 已播到结尾：返回空数组（调用方据此停止而不是排空序列）', atEnd.length === 0, JSON.stringify(atEnd))
+  check('adj409 越界（from > 总时长）同样返回空数组', shiftEventsFrom(src, 9999).length === 0)
+  check('adj409 负数 from 视为 0（不把事件推到负时间）', shiftEventsFrom(src, -500)[0].atMs === 0)
+  check('adj409 纯函数：不修改入参', JSON.stringify(src) === JSON.stringify(mk()), JSON.stringify(src))
+  check('adj409 平移后的起点恒 ≥ 0', shiftEventsFrom(src, 1700).every((e) => e.atMs >= 0))
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
