@@ -105,9 +105,11 @@ export function ExportDialog() {
     },
     {
       key: 'pdf' as const,
-      label: 'PDF 文档（A4 打印）',
+      // adj411：直接生成 .pdf 并下载（不再开新窗口 → 无「浏览器拦截新窗口」问题）
+      // adj412：清晰度跟随上方「图片清晰度」选择（每页按该倍率栅格化后内嵌 JPEG），与 PNG/JPG 同一档位
+      label: 'PDF 文档（A4）',
       ext: '.pdf',
-      run: () => run('pdf', () => exportPdf(getPages(), baseName)),
+      run: () => run('pdf', () => exportPdf(getPages(), baseName, imgScale)),
     },
     {
       // adj289：MIDI 导出——复用播放序列（含反复展开），多声部每声部一条音轨
@@ -154,7 +156,7 @@ export function ExportDialog() {
   return (
     <Modal title="导出">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {/* adj294：图片清晰度（PNG/JPG 导出倍率） */}
+        {/* adj294：图片清晰度（PNG/JPG 导出倍率）；adj412：PDF 每页也按该倍率栅格化 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
           <span style={{ color: 'var(--jp-text-secondary)' }}>图片清晰度</span>
           <select
@@ -166,7 +168,7 @@ export function ExportDialog() {
             <option value={4}>4x 高清</option>
             <option value={6}>6x 超清</option>
           </select>
-          <span style={{ color: 'var(--jp-text-muted)' }}>适用于 PNG / JPG</span>
+          <span style={{ color: 'var(--jp-text-muted)' }}>适用于 PNG / JPG / PDF</span>
         </div>
         {items.map((it) => (
           <button

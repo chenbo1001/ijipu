@@ -3,8 +3,9 @@
  *
  *  - SVG：多页分别下载
  *  - PNG / JPG：SVG → canvas（白底、可选分辨率）→ 下载
- *  - PDF：浏览器打印（A4 页面化新窗口，打印对话框另存为 PDF）
+ *  - PDF：SVG → canvas（JPEG）→ 自建 PDF 字节流 → 直接下载（adj411，零依赖，见 export/pdf.ts）
  */
+import { buildPdf, type PdfImagePage } from './pdf'
 
 /** 触发浏览器下载 */
 function downloadDataUrl(dataUrl: string, fileName: string) {
@@ -12,6 +13,16 @@ function downloadDataUrl(dataUrl: string, fileName: string) {
   a.href = dataUrl
   a.download = fileName
   a.click()
+}
+
+/** 触发浏览器下载（Blob 版） */
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 /** 下载 SVG 文本 */
@@ -75,39 +86,26 @@ export async function exportJpg(pages: string[], baseName: string, scale = 2): P
 }
 
 /**
- * 导出 PDF：在新窗口按 A4 排版全部页面并触发浏览器打印（可另存为 PDF）。
- * 依赖浏览器打印能力，零第三方库。
+ * 导出 PDF：**直接生成 .pdf 并下载**（adj411）。
+ *
+ * 做法：每页 SVG → canvas（`pdfScale` 倍分辨率）→ JPEG 字节 → 自建 PDF 字节流
+ * （`export/pdf.ts`，JPEG 以 `/DCTDecode` 原样内嵌）→ Blob 下载。
+ * **不再开新窗口**，因此不存在"浏览器拦截了新窗口"的弹窗拦截问题。
+ *
+ * 清晰度（adj412）：由调用方（导出对话框的「图片清晰度」）传入，与 PNG/JPG 同档位——
+ *  2x ≈ 144 DPI、4x ≈ 288 DPI、6x ≈ 432 DPI（A4）。默认 2 与对话框默认档一致。
+ * 取舍：PDF 内是**位图**（文字不可选中）；矢量方案需引入 jspdf + svg2pdf 并另解中文字体嵌入，见回报说明。
  */
-export function exportPdf(pages: string[], title: string) {
-  const w = window.open('', '_blank')
-  if (!w) {
-    throw new Error('浏览器拦截了新窗口，请允许弹窗后重试')
+export async function exportPdf(pages: string[], title: string, pdfScale = 2): Promise<void> {
+  if (pages.length === 0) throw new Error('没有可导出的页面')
+  const imgs: PdfImagePage[] = []
+  for (const svg of pages) {
+    const canvas = await svgToCanvas(svg, pdfScale)
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92))
+    if (!blob) throw new Error('页面栅格化失败（canvas 无法编码 JPEG）')
+    imgs.push({ jpeg: new Uint8Array(await blob.arrayBuffer()), width: canvas.width, height: canvas.height })
   }
-  const esc = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-  const html = `<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<title>${esc(title)}</title>
-<style>
-  @page { size: A4; margin: 0; }
-  html, body { margin: 0; padding: 0; }
-  .page {
-    width: 210mm; height: 297mm;
-    display: flex; align-items: center; justify-content: center;
-    page-break-after: always;
-  }
-  .page:last-child { page-break-after: auto; }
-  .page svg { width: 100%; height: 100%; }
-</style>
-</head>
-<body>
-${pages.map((s) => `<div class="page">${s}</div>`).join('\n')}
-<script>window.onload = function () { setTimeout(function () { window.print(); }, 400); };</script>
-</body>
-</html>`
-  w.document.open()
-  w.document.write(html)
-  w.document.close()
+  const bytes = buildPdf(imgs)
+  // 用 Uint8Array 直接建 Blob（不经过 base64，避免大文件多一次膨胀拷贝）
+  downloadBlob(new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' }), `${title}.pdf`)
 }
