@@ -55,6 +55,8 @@ import { normalizePastedSource } from '../src/store/importSource.ts'
 import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from '../src/pwa/swUpdate.ts'
 // adj409：试听暂停/续播的剩余事件平移（纯逻辑）
 import { shiftEventsFrom } from '../src/playback/playbackTimeline.ts'
+// adj411：直接生成 PDF（不再开新窗口）——PDF 字节结构（纯逻辑）
+import { buildPdf, A4_W_PT, A4_H_PT } from '../src/export/pdf.ts'
 // adj394：编辑区问题提示条的汇总/跳转换算（纯逻辑）
 import { summarizeProblems, offsetOf } from '../src/ui/problems.ts'
 import { problemCopy } from '../src/brand/copy.ts'
@@ -4790,6 +4792,82 @@ console.log('[96] playback pause/resume event shift (adj409)')
   check('adj409 负数 from 视为 0（不把事件推到负时间）', shiftEventsFrom(src, -500)[0].atMs === 0)
   check('adj409 纯函数：不修改入参', JSON.stringify(src) === JSON.stringify(mk()), JSON.stringify(src))
   check('adj409 平移后的起点恒 ≥ 0', shiftEventsFrom(src, 1700).every((e) => e.atMs >= 0))
+}
+
+// ---- 97. 导出 PDF：自建 PDF 字节结构（adj411） ----
+// 以前走「开新窗口 + window.print()」会被弹窗拦截；现在把每页 SVG 栅格化成 JPEG、
+// 内嵌为 PDF 图像 XObject（/DCTDecode）后直接下载。这里断言生成的字节结构合法。
+console.log('[97] export PDF byte structure (adj411)')
+{
+  const dec = (b: Uint8Array) => new TextDecoder('latin1').decode(b)
+  /** 造一页假 JPEG（内容无关，只校验 /Length 与数组长度一致） */
+  const fakeJpeg = (n: number) => {
+    const a = new Uint8Array(16 + n)
+    a.set([0xff, 0xd8, 0xff, 0xe0], 0) // JPEG SOI + APP0
+    a.set([0xff, 0xd9], a.length - 2) // EOI
+    return a
+  }
+  const pages = [
+    { jpeg: fakeJpeg(100), width: 1785, height: 2525 },
+    { jpeg: fakeJpeg(250), width: 1785, height: 2525 },
+  ]
+  const pdf = buildPdf(pages)
+  const s = dec(pdf)
+  check('adj411 PDF 以 %PDF- 魔数开头', s.startsWith('%PDF-1.4'))
+  check('adj411 PDF 含二进制标记注释行', s.includes('%\u00e2\u00e3\u00cf\u00d3'))
+  check('adj411 PDF 以 %%EOF 结尾', s.trimEnd().endsWith('%%EOF'))
+  check('adj411 页数正确（/Count 与 /Type /Page 个数一致）', s.includes('/Count 2') && (s.match(/\/Type \/Page[^s]/g) ?? []).length === 2, `pages=${(s.match(/\/Type \/Page[^s]/g) ?? []).length}`)
+  check('adj411 每个 JPEG 的 /Length 与实际字节数一致', s.includes(`/Filter /DCTDecode /Length ${pages[0].jpeg.length}`) && s.includes(`/Filter /DCTDecode /Length ${pages[1].jpeg.length}`))
+  check('adj411 图像尺寸写入 /Width /Height', s.includes('/Width 1785 /Height 2525'))
+  check('adj411 页面尺寸为 A4 纵向', s.includes(`/MediaBox [0 0 ${A4_W_PT} ${A4_H_PT}]`), `A4=${A4_W_PT}x${A4_H_PT}`)
+  check('adj411 内容流把图像铺满整页（cm + Do）', s.includes(`q ${A4_W_PT} 0 0 ${A4_H_PT} 0 0 cm /Im0 Do Q`))
+  // xref 偏移必须真的指向各对象（错一个字节阅读器就打不开）
+  const xrefAt = Number(/startxref\s+(\d+)/.exec(s)?.[1] ?? '-1')
+  check('adj411 startxref 指向 xref 表', xrefAt > 0 && s.slice(xrefAt, xrefAt + 4) === 'xref')
+  const entries = [...s.slice(xrefAt).matchAll(/^(\d{10}) 00000 n $/gm)].map((m) => Number(m[1]))
+  const total = 3 + pages.length * 3 // 3 个固定对象 + 每页 3 个
+  check('adj411 xref 条目数 = 对象总数', entries.length === total - 1, `entries=${entries.length} total=${total}`)
+  const offsetsOk = entries.every((off, i) => new RegExp(`^${i + 1} 0 obj`).test(s.slice(off, off + 12)))
+  check('adj411 每个 xref 偏移都精确指向 "N 0 obj"', offsetsOk, entries.map((o, i) => `${i + 1}@${o}`).join(' '))
+  check('adj411 无页时也能生成合法空文档（/Count 0）', dec(buildPdf([])).includes('/Count 0'))
+  // ★ 流字节的**精确位置**：`/Length` 声明的字节必须紧接 `stream\n`，且首尾为 JPEG 的 SOI/EOI。
+  // 这条断言是补出来的——原先只查"文件里含 FFD8"，而实际流数据前多了一个换行、
+  // 长度声明少 1 字节（JPEG 末位 EOI 被截断），文件结构检查全绿但图会坏（E-2026-145）。
+  const imgAt = s.indexOf('/Filter /DCTDecode')
+  const streamMark = s.indexOf('stream\n', imgAt)
+  const dataAt = streamMark + 'stream\n'.length
+  const declared = Number(/\/Filter \/DCTDecode \/Length (\d+)/.exec(s)?.[1] ?? '-1')
+  check('adj411 图像流数据紧接 stream\\n（前面无多余字节）', pdf[dataAt] === 0xff && pdf[dataAt + 1] === 0xd8, `首字节=0x${pdf[dataAt]?.toString(16)} 0x${pdf[dataAt + 1]?.toString(16)}`)
+  check('adj411 流声明的 /Length 覆盖完整 JPEG（末两字节 = EOI FFD9）', declared === pages[0].jpeg.length && pdf[dataAt + declared - 2] === 0xff && pdf[dataAt + declared - 1] === 0xd9, `declared=${declared} 末两字节=0x${pdf[dataAt + declared - 2]?.toString(16)} 0x${pdf[dataAt + declared - 1]?.toString(16)}`)
+  check('adj411 流内字节与传入的 JPEG 逐字节一致', (() => { for (let k = 0; k < declared; k++) if (pdf[dataAt + k] !== pages[0].jpeg[k]) return false; return true })())
+}
+
+// ---- 98. 减时线延伸到附点下面（adj411） ----
+// `1//2/.`：2 带附点，附点画在数字右侧（一拍的后半），其减时线应延伸到附点右缘之下，
+// 而不是在数字右缘提前断掉。两种布局各验一遍。
+console.log('[98] beam extends under trailing dot (adj411)')
+{
+  const code = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1//2/. 3 4 |\n'
+  const r = parseJps(code)
+  for (const [tag, cfg] of [['空间优先', defaultPageConfig], ['时值优先', DUR_CFG]] as const) {
+    const lay = layoutScore(r, cfg)
+    const ns = [...lay.pages[0].notes].filter((n) => n.barIndex === 0).sort((a, b) => a.beatPos - b.beatPos)
+    const beams = computeBeamsForTest(ns, cfg.note_size)
+    // 第 1 条（level 1）连接 1// 与 2/. ：右端应越过 2 的数字右缘，落到附点右缘
+    const lvl1 = beams.find((b) => Math.abs(b.x1 - (ns[0].x + 1)) < 0.15)
+    const digitRight = ns[1].x + cfg.note_size * 0.62
+    check(`adj411 ${tag}：带附点的音符减时线延伸到附点之下（越过数字右缘）`, lvl1 !== undefined && lvl1.x2 > digitRight + 0.5, `x2=${lvl1?.x2} digitRight=${digitRight.toFixed(1)}`)
+    // 与渲染出的附点圆心对齐：附点右缘 = 数字右缘 + 间隙 + 半径（圆心由 dot 段给出）
+    const dotSeg = ns[1].segments?.find((sg) => sg.el === 'dot')
+    if (dotSeg) {
+      const rDot = DOT_R_DOT * noteScaleOf(cfg.note_size)
+      check(`adj411 ${tag}：减时线右端 = 末附点右缘（圆心+半径）`, lvl1 !== undefined && Math.abs(lvl1.x2 - (dotSeg.x + rDot)) < 0.25, `x2=${lvl1?.x2} dotRight=${(dotSeg.x + rDot).toFixed(2)}`)
+    }
+    // 反例：不带附点的普通音符，减时线仍止于数字右缘（不被误伸）
+    const ns2 = [...layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1//2/ 3 4 |\n'), cfg).pages[0].notes].filter((n) => n.barIndex === 0).sort((a, b) => a.beatPos - b.beatPos)
+    const b2 = computeBeamsForTest(ns2, cfg.note_size).find((b) => Math.abs(b.x1 - (ns2[0].x + 1)) < 0.15)
+    check(`adj411 ${tag}：无附点音符的减时线仍止于数字右缘（不误伸）`, b2 !== undefined && Math.abs(b2.x2 - (ns2[1].x + cfg.note_size * 0.62 - 1)) < 0.15, `x2=${b2?.x2}`)
+  }
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
