@@ -1,5 +1,8 @@
 /**
  * dialogs/AboutDialog.tsx — 关于本软件（品牌介绍）
+ *
+ * adj419：脚本兼容说明 / 致谢 / 谱师 / 命令行工作流四段移到「操作手册」（docs/USER-GUIDE.md §九），
+ * 关于对话框只留品牌介绍、署名、版本与协议。
  */
 import { Modal } from '../ui/Modal'
 import { aboutCopy, uiCopy, donate } from '../brand/copy'
@@ -38,9 +41,7 @@ export function AboutDialog() {
             {p}
           </p>
         ))}
-        <p style={{ margin: '8px 0' }}>{aboutCopy.userIdentity}</p>
-        <p style={{ margin: '8px 0' }}>{aboutCopy.cli}</p>
-        {/* adj373：作者署名（+ 可选联系方式，邮箱留空则不显示） */}
+        {/* adj419：作者署名（+ 可选联系方式，邮箱留空则不显示） */}
         <p style={{ margin: '8px 0' }}>
           <strong>{aboutCopy.author}</strong>
           {aboutCopy.contact && <span style={{ marginLeft: 10 }}>{aboutCopy.contact}</span>}

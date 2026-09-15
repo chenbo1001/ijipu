@@ -313,7 +313,11 @@ const s3 = insertLineHeader('B: t', 2, 'Q')
 check('行中不拦截（返回 null）', s3 === null)
 const s4 = insertLineHeader('Q: 1 2\nC: 词', 7, 'C')
 check('第 2 行行首插入 C（前一字符为换行）', s4?.text === 'Q: 1 2\nC: C: 词' && s4.pos === 10, JSON.stringify(s4))
-check('isLineHeaderKey', isLineHeaderKey('Q') && isLineHeaderKey('H') && !isLineHeaderKey('X'))
+// adj419：行首命令集合与解析器 HEADER_KEYS + 曲/词行对齐——补 Y/S、去掉解析器不认的 H
+check('isLineHeaderKey 覆盖 Q/C/B/Z/D/P/J/V/Y/S', ['Q', 'C', 'B', 'Z', 'D', 'P', 'J', 'V', 'Y', 'S'].every((k) => isLineHeaderKey(k)) && !isLineHeaderKey('H') && !isLineHeaderKey('X'))
+const s5 = insertLineHeader('', 0, 'Y')
+const s6 = insertLineHeader('', 0, 'S')
+check('adj419 行首可插 Y:（默认乐器）与 S:（说明）', s5?.text === 'Y: ' && s6?.text === 'S: ', `${s5?.text}|${s6?.text}`)
 const lc = lineColOf('V: 1.0\nB: t\n', 9)
 check('lineColOf 第2行第2列', lc.line === 2 && lc.col === 2, JSON.stringify(lc))
 
@@ -5132,6 +5136,57 @@ console.log('[103] icons live in public/icons and only the used ones (adj417)')
     .filter((f) => /\.tsx?$/.test(f))
     .filter((f) => new RegExp(`["'\`]/(Jianpu|pwa-\\d+|good)\\.(png|ico)`).test(readFileSync(join(root, 'src', f), 'utf8')))
   check('adj417 源码里没有遗留的根目录图片路径（Logo/赞赏码/PWA 图标）', rootRefs.length === 0, rootRefs.join(','))
+}
+
+// ---- 104. 文档里的组合示例必须真能解析（adj419） ----
+// 语法文档（docs/SYNTAX.md 的「组合示例」、docs/JPS-SPEC.md 的附录）里的 ```jps 代码块
+// 是给用户**直接粘贴运行**的，必须解析零错误——文档里的示例最容易过时（改了语法忘了改示例）。
+// 这里把文档里的 ```jps 块**整段抠出来**逐个解析：既保证示例可用，也逼着文档跟实现同步。
+console.log('[104] runnable examples in docs parse clean (adj419)')
+{
+  // ParseError 是 { line, col, message, severity, hint? }（**没有 pos**）——格式化时按真实字段取
+  const fmtIssue = (e: { line?: number; col?: number; severity?: string; message?: string }): string =>
+    `L${e.line ?? '?'}:C${e.col ?? '?'}${e.severity === 'warning' ? '(告警)' : ''}:${e.message ?? '?'}`
+  const files = ['docs/SYNTAX.md', 'docs/JPS-SPEC.md']
+  let total = 0
+  for (const f of files) {
+    const md = readFileSync(join(root, f), 'utf8')
+    const blocks = [...md.matchAll(/```jps\n([\s\S]*?)```/g)].map((m) => m[1])
+    check(`adj419 ${f} 含可运行示例（≥3 段）`, blocks.length >= 3, `${blocks.length}`)
+    blocks.forEach((code, i) => {
+      total++
+      const r = parseJps(code)
+      const errs = r.errors.filter((e) => e.severity === 'error')
+      const warns = r.errors.filter((e) => e.severity === 'warning')
+      check(
+        `adj419 ${f} 示例 ${i + 1} 解析零错误`,
+        errs.length === 0,
+        errs.map(fmtIssue).join(' / ').slice(0, 200),
+      )
+      // 文档示例还应当**干净**（连告警都没有）——用户会直接粘贴运行，冒出告警会像"示例写错了"
+      check(
+        `adj419 ${f} 示例 ${i + 1} 无告警（可直接粘贴）`,
+        warns.length === 0,
+        warns.map(fmtIssue).join(' / ').slice(0, 200),
+      )
+    })
+  }
+  check('adj419 两份文档合计示例 ≥6 段', total >= 6, `${total}`)
+  // 独立 HTML 规格页（帮助 → 脚本规则说明）里的示例同样要能跑——它是 JPS-SPEC 的手工孪生页，
+  // 最容易忘了跟着改；这里抠出 <pre><code> 里以 `V: ` 开头的块（并按 HTML 实体还原）逐个解析。
+  const html = readFileSync(join(root, 'public', 'doc', 'jps-spec.html'), 'utf8')
+  const htmlBlocks = [...html.matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)]
+    .map((m) => m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&'))
+    .filter((c) => /^V: /m.test(c))
+  check('adj419 jps-spec.html 含可运行示例（≥5 段）', htmlBlocks.length >= 5, `${htmlBlocks.length}`)
+  htmlBlocks.forEach((code, i) => {
+    const bad = parseJps(code).errors
+    check(
+      `adj419 jps-spec.html 示例 ${i + 1} 解析零错误零告警`,
+      bad.length === 0,
+      bad.map(fmtIssue).join(' / ').slice(0, 200),
+    )
+  })
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码

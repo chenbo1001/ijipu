@@ -1,5 +1,9 @@
 /**
  * dialogs/ShortcutsDialog.tsx — 快捷键速查
+ *
+ * adj419：① 行首命令按**小写**书写（编辑器实际按小写字母触发，大小写都认；
+ *          原速查写成大写容易让人以为要按 Shift）；② 补上描述头 `y`（默认乐器）、
+ *          `s`（说明文字）与 `v`（版本）；③ 去掉解析器并不认识的 `h`。
  */
 import { Modal } from '../ui/Modal'
 
@@ -12,8 +16,11 @@ const SHORTCUTS: [string, string][] = [
   ['Ctrl+Q', '试听播放'],
   ['Tab', '编码 / 预览 切换'],
   ['1 / 2 / 3', '视图：编码 / 拆分 / 预览'],
-  ['Q / C', '行首插入曲行 / 词行'],
-  ['B / Z / D / P / J', '行首插入描述头（标题/作者/调式/拍号/节拍）'],
+  ['q / c', '行首插入曲行 Q: / 词行 C:'],
+  ['b / z', '行首插入标题 B: / 作者 Z:'],
+  ['d / p / j', '行首插入调式 D: / 拍号 P: / 节拍 J:'],
+  ['y / s', '行首插入默认乐器 Y: / 说明文字 S:'],
+  ['v', '行首插入版本 V:'],
   ['Ctrl+~', '本快捷键速查'],
 ]
 
@@ -38,6 +45,11 @@ export function ShortcutsDialog() {
             <span style={{ color: 'var(--jp-text-secondary)' }}>{desc}</span>
           </div>
         ))}
+        {/* adj419：说明行首命令的触发条件与大小写（避免"按了没反应"的困惑） */}
+        <div style={{ color: 'var(--jp-text-muted)', fontSize: 12, marginTop: 4 }}>
+          行首命令：光标在**行首**（行首或换行后）按上述字母即插入命令头，字母大小写均可；
+          插入的永远是标准大写命令头（如按 q 得到 `Q: `）。
+        </div>
       </div>
     </Modal>
   )

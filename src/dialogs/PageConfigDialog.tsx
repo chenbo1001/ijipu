@@ -243,28 +243,6 @@ export function PageConfigDialog() {
               <NumInput label="右" value={draft.margin_right} onChange={(v) => updateDraft({ margin_right: v })} />
             </Row>
 
-            <div className="pcfg-group-title">音符布局</div>
-            <Row label="布局模式">
-              <select
-                value={draft.noteSpaceLayout}
-                onChange={(e) => updateDraft({ noteSpaceLayout: e.target.value as PageConfig['noteSpaceLayout'] })}
-              >
-                {/* adj289：空间优先设为默认并置于首位；时值优先保留可选 */}
-                <option value="space">空间优先</option>
-                <option value="duration">时值优先</option>
-              </select>
-            </Row>
-            <Row label="连音线样式">
-              <select
-                value={draft.lianyinxian_type}
-                onChange={(e) => updateDraft({ lianyinxian_type: Number(e.target.value) as 0 | 1 | 2 })}
-              >
-                <option value={0}>自动</option>
-                <option value={1}>圆弧</option>
-                <option value={2}>平顶</option>
-              </select>
-            </Row>
-
             <div className="pcfg-group-title">间距(px)</div>
             {/* adj105：间距项两列排列，节省纵向空间；adj418：铺满页签宽度（不再右侧留白） */}
             <div className="pcfg-grid2">
@@ -291,6 +269,29 @@ export function PageConfigDialog() {
                 <NumInput label="" value={draft.align_min_bars} onChange={(v) => updateDraft({ align_min_bars: v })} />
               </Row>
             </div>
+
+            {/* adj419：音符布局组挪到「间距」下面（用户要求：先看纸张/边距，再调间距，最后是排布方式） */}
+            <div className="pcfg-group-title">音符布局</div>
+            <Row label="布局模式">
+              <select
+                value={draft.noteSpaceLayout}
+                onChange={(e) => updateDraft({ noteSpaceLayout: e.target.value as PageConfig['noteSpaceLayout'] })}
+              >
+                {/* adj289：空间优先设为默认并置于首位；时值优先保留可选 */}
+                <option value="space">空间优先</option>
+                <option value="duration">时值优先</option>
+              </select>
+            </Row>
+            <Row label="连音线样式">
+              <select
+                value={draft.lianyinxian_type}
+                onChange={(e) => updateDraft({ lianyinxian_type: Number(e.target.value) as 0 | 1 | 2 })}
+              >
+                <option value={0}>自动</option>
+                <option value={1}>圆弧</option>
+                <option value={2}>平顶</option>
+              </select>
+            </Row>
           </>
         )
       case 'font':

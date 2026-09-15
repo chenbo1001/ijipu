@@ -65,4 +65,76 @@ C: 两只老虎 两只老虎 跑得快 跑得快</code></pre>
 <p>要点速览：</p>
 <ul><li><strong>描述头</strong>（每行一个，<code>字母:</code> 开头，必须）：<code>V</code> 版本、<code>B</code> 标题、<code>Z</code> 作者、<code>D</code> 调式、<code>P</code> 拍号、<code>J</code> 节拍；可选 <code>Y</code> 乐器、<code>S</code> 说明。</li><li><strong>主体行</strong>：<code>Q:</code> 曲（音符序列）、<code>C:</code> 词（歌词，自动对齐上一 Q 行音符；汉字一字一音）。</li><li><strong>音符</strong>：<code>1</code>-<code>7</code> 数字音符、<code>0</code> 休止符、<code>8</code> 隐藏休止、<code>9</code> 节奏音符；<code>'</code> 高音点、<code>,</code> 低音点、<code>-</code> 增时线、<code>/</code> 减时线、<code>.</code> 附点、<code>#</code>/<code>$</code>/<code>=</code> 升/降/还原（写在数字后）。</li><li><strong>倚音</strong>：<code>1[65]</code> 前倚音、<code>1[h65]</code> 后倚音；倚音<strong>占用主音符的时值</strong>——实际时值 = 书写减时线条数再减一半（<code>3[2/]</code> = 1/4 拍倚音 + 3/4 拍主音符，合计 1 拍），前倚音先奏、后倚音末奏；后倚音可写在<strong>增时线/附点之后</strong>（<code>3 -[h5/]</code>：主音符先奏满 2 拍中的 1.75 拍，最后 1/4 拍才奏倚音，谱面上倚音画在 <code>-</code> 之后）。</li><li><strong>小节线与反复</strong>：<code>|</code> 单线、<code>||</code> 终止、<code>|:</code> <code>:|</code> <code>:|:</code> 反复、<code>[</code> <code>]</code> 跳房子、<code>"注释"</code> 小节线备注。</li><li><strong>连音线与装饰</strong>：<code>( ... )</code> 连音线（与音符间有空格）；<code>(y ... )</code> 等时值连音组（组内音符平分「小节剩下的那截时值」，占宽与减时线同样按此规则，减时线连成一条并标数字）；<code>&amp;tr</code> 颤音、<code>&amp;mp</code> 力度等装饰写在音符后；<code>&lt;</code> <code>&gt;</code> 渐强/渐弱。</li><li><strong><code>+</code> 抬升 / <code>-</code> 降低 与增时线的边界</strong>（重要）：<code>-</code> <strong>在音符处永远是增时线</strong>，只有写在<strong>记号自己的区域里</strong>才是「降低」——连音线 <code>(- 2 3)</code>、跳房子 <code>|[-"1."</code>、音符注释 <code>1"注"-</code> 三处的 <code>-</code> 属于各自记号；而渐强/渐弱<strong>没有 <code>-</code></strong>（<code>3&lt;- 4</code> 的 <code>-</code> 是音符 3 的增时线），<code>&amp;编码</code> 也<strong>没有 <code>-</code></strong>（<code>&amp;sby+</code> 是加长版，<code>&amp;sby-</code> 的 <code>-</code> 是增时线）。</li><li><strong>多声部</strong>：<code>Q1:</code> <code>Q2:</code> 加声部编号，<code>Q1"女声":</code> 加声部名。</li><li><strong>渐强/渐弱</strong>：<code>1 2 3 &lt;+ 4 5 6 ! 7</code>（<code>&lt;</code>/<code>&gt;</code> 从所跟音符正中开始，<code>!</code> 结束；不写 <code>!</code> 则收到行末）；<code>!</code> 也可写在增时线/附点之后（<code>&lt; 4- !</code>），终点取该元素右缘；<strong>不能跨行</strong>。</li></ul>
 <ul><li><strong>音符注释</strong>：<code>1"文字"</code> 显示在音符正上方（灰色小字，空格用 <code>_</code>）；<code>1"文字"+</code> / <code>1"文字"-</code> 逐级抬升/降低注释文本（每级 2px，可多个），与跳房子 <code>[+</code>、连音线 <code>(+</code> 同一套记法</li></ul>
+<h2>附：组合示例集（可直接粘贴运行）</h2>
+<p>每段都是一份<strong>完整可用的 .jps</strong>（描述头 + 主体），可整段粘进 iJipu 编辑器或 Obsidian 的 <code>```jps</code> 代码块。示例按主题拆分，每段都同时演示好几种语法；<code>npm run smoke</code> 会把文档里的示例逐个解析，保证它们始终能跑。</p>
+<h3>示例一：基础音符与时值</h3>
+<p>描述头、数字音符、减时线 <code>/</code>、高音点 <code>'</code>、低音点 <code>,</code>、变音 <code># $ =</code>、休止符 <code>0</code>、歌词逐字对齐。</p>
+<pre><code>V: 1.0
+B: 示例一：基础音符与时值
+Z: 佚名 词曲
+D: C
+P: 4/4
+J: 88
+Q: 1 2 3 4 | 5/ 6/ 7 1' | 1 2# 3$ 4= | 5, 6, 7, 0 |
+C: 一 二 三 四 五 六 七 八 九 十 百 千 低 音 休 止</code></pre>
+<h3>示例二：时值细节</h3>
+<p>附点 <code>.</code>、增时线 <code>-</code>、连音线 <code>( … )</code>、虚音符 <code>(1)</code>、前倚音 <code>1[65]</code>、后倚音 <code>1[h65]</code>。</p>
+<pre><code>V: 1.0
+B: 示例二：附点·增时线·连音线·虚音符·倚音
+Z: 佚名 词曲
+D: C
+P: 4/4
+J: 88
+Q: 1. 2/ 3/ 4. | 5 - - - | (6) 7 1' 2' | 3[2/] 4 5[h6/] 7 |</code></pre>
+<h3>示例三：反复、跳房子与小节线修饰</h3>
+<p>反复 <code>|:</code> <code>:|</code>、跳房子 <code>["1."</code> / <code>|]</code>、末遍房子 <code>["结束句"</code>、小节线修饰 <code>&amp;fine</code>。</p>
+<pre><code>V: 1.0
+B: 示例三：反复与跳房子
+D: C
+P: 4/4
+J: 100
+Q: |: 1 2 3 4 | 5 6 7 1' |["1." 1 2 3 4 :|["2." 5 4 3 2 |] |: 6 7 1' 2' :|["结束句" 3 - - - |] ||&amp;fine</code></pre>
+<h3>示例四：歌词的三种对齐写法</h3>
+<p><code>@</code> 跳过一个音符、<code>~</code> 两字对一音、中文标点自动跟字不占位、一行曲对多行词。</p>
+<pre><code>V: 1.0
+B: 示例四：歌词对齐
+D: C
+P: 4/4
+Q: 1 2 3 4 | 5 6 7 1' |
+C: 一 @ 三，四 五~六 七 八 九
+C: 二 二 三 四 五 六 七 八</code></pre>
+<h3>示例五：多声部与乐器切换</h3>
+<p><code>Q1"声部名":</code> / <code>C1:</code>、隐藏休止 <code>8</code>、隐藏小节线 <code>|*</code>、多行 <code>Y:</code> 按声部顺序对应、<code>@乐器名</code> 与 <code>@@</code> 切换。</p>
+<pre><code>V: 1.0
+B: 示例五：多声部与乐器切换
+D: C
+P: 4/4
+J: 96
+Y: 钢琴
+Y: 弦乐
+Q1"主旋律": 1 2 3 4 | 5 6 7 1' | @弦乐@ 1' 7 6 5 | 4 - - - ||
+C1: 一 二 三 四 五 六 七 八 九 十 百 千 万 里 江 山
+Q2"伴奏": 8 8 8 8 |* 8 8 8 8 |* 8 8 8 8 |* 8 - - - |*</code></pre>
+<h3>示例六：装饰、力度与呼吸</h3>
+<p>音符注释 <code>1"文字"</code>、<code>&amp;tr</code> 颤音、<code>&amp;tu</code> 吐音、<code>&amp;die</code> 叠音、<code>&amp;mp</code> / <code>&amp;f</code> 力度、呼吸 <code>&amp;hx</code>、独立括号 <code>&amp;zkh</code> / <code>&amp;ykh</code>、等时值连音组 <code>(y …)</code>、渐强 <code>3 &lt;+</code> 与结束 <code>!</code>。</p>
+<pre><code>V: 1.0
+B: 示例六：装饰与力度
+D: C
+P: 4/4
+J: 84
+Q: 1"渐强" 2&amp;tr 3&amp;tu 4&amp;die | 6 &amp;hx 5 &amp;mp 4 &amp;f 3 | (y3/ 2/ 1/) 6 7 1' | 2 3 &lt;+ 4 - ! |
+Q: &amp;zkh 5 6 7&amp;ykh 1' | 2 - - - | 0 &amp;hx 3 4 | 5 6 7 1' ||</code></pre>
+<h3>示例七：分页、说明与注释</h3>
+<p><code>[fenye]</code> 强制分页、<code>S:</code> 谱尾说明与 <code>\n</code> 换行、<code>#</code> 注释行、临时拍号 <code>"p:2/4"</code>、页面设置行。</p>
+<pre><code>V: 1.0
+B: 示例七：分页与说明
+D: C
+P: 4/4
+J: 90
+# 下面这行是注释，不会渲染
+Q: 1 2 3 4 | 5 6 7 1' |"p:2/4" 1 2 | 3 - |
+[fenye]
+Q: 5 6 7 1' | 2' - - - ||
+S: 本谱为语法示例\n可自由修改
+# jps-config:{"margin_left":50,"margin_right":50}</code></pre>
 </div></body></html>
