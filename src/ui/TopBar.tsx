@@ -78,7 +78,7 @@ function MenuPanel({
   )
 }
 
-/** adj408：视图图标改用 `public/*.png`（`ToolIcon` 统一上色）——
+/** adj408：视图图标改用 `public/icons/*.png`（`ToolIcon` 统一上色）——
  *  编码=文件、左右拆分=收起、上下拆分=收起旋转 90°、预览=查看 */
 const VIEWS: { key: ViewType; label: string; icon: React.ReactNode }[] = [
   { key: 'code', label: '编码', icon: <ToolIcon name="file" /> },
@@ -159,8 +159,10 @@ export function TopBar() {
     { key: 'guides', label: '排版', group: 'topbar' as const, kind: 'btn' as const, active: showGuides, onPick: () => setShowGuides(!showGuides) },
     // adj384：音色库按钮已移除（移入「设置 → 音色库」标签）
     { key: 'playback', label: '试听', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('playback') },
-    { key: 'pageConfig', label: '设置', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('pageConfig') },
+    // adj415：功能组内「导出」与「设置」位置对调（导出在前、设置在后）。
+    // 本数组顺序即顶栏显示顺序，同时决定「更多」下拉里的排列与折叠测量的顺序——改这一处即可。
     { key: 'export', label: '导出', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('export') },
+    { key: 'pageConfig', label: '设置', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('pageConfig') },
     { key: 'zoom', label: '缩放', group: 'topbar' as const, kind: 'zoom' as const, show: showZoom },
     // —— 设置组（从状态栏移来） ——
     { key: 'autoWrap', label: '折行', group: 'footer' as const, kind: 'btn' as const, active: autoWrap, onPick: () => setAutoWrap(!autoWrap) },
@@ -301,7 +303,7 @@ export function TopBar() {
   }, [fontOpen, placeFontDropdown])
 
   // 图标：(key) => JSX，与 renderBtn 共用
-  // adj408：顶栏按钮图标全部改用 `public/*.png`（`ToolIcon` 走 CSS mask 统一上色，颜色随主题/激活态）
+  // adj408：顶栏按钮图标全部改用 `public/icons/*.png`（`ToolIcon` 走 CSS mask 统一上色，颜色随主题/激活态）
   const iconOf = (key: string): React.ReactNode => {
     switch (key) {
       case 'guides':
@@ -389,7 +391,7 @@ export function TopBar() {
           >
             {iconOf('font')}
             <span className="tool-label">{t.label}</span>
-            {/* adj408：下拉指示箭头改用 public/下.png（与其余按钮图标同一套上色） */}
+            {/* adj408：下拉指示箭头改用 public/icons/下.png（与其余按钮图标同一套上色） */}
             <span className="arrow">
               <ToolIcon name="down" size={9} />
             </span>
@@ -557,7 +559,28 @@ export function TopBar() {
       // 测量每个按钮宽（测量容器按组分段渲染，与实际工具条布局一致）
       const btnEls = Array.from(mes.querySelectorAll<HTMLElement>('[data-tool-key]'))
       const widths = btnEls.map((el) => el.getBoundingClientRect().width)
-      // 贪心：按 toolBtns 顺序累计，按 group 分两组；总宽公式见下
+      /**
+       * adj414：两个组的「盒子开销」（左右 padding + 左右 border）与**组内按钮间距**
+       * 改为**从实际容器上读**，不再写死 `4 + … * 2`。
+       * 起因：本次取消了功能组/设置组的组框（background/border/radius/padding 全去掉），
+       * 若仍按写死的「padding 4 + gap 2」计算，宽度预算会比实际多算 → 本可显示的按钮被提前
+       * 挤进「更多」（正是 E-2026-143 同一类"CSS 改了、宽度预算没跟上"的坑）。
+       * 读活值后 CSS 怎么调都自动同步。
+       */
+      const boxOf = (sel: string): { overhead: number; gap: number } => {
+        const el = topbar.querySelector<HTMLElement>(sel)
+        if (!el) return { overhead: 0, gap: 2 }
+        const b = getComputedStyle(el)
+        const overhead =
+          (parseFloat(b.paddingLeft) || 0) +
+          (parseFloat(b.paddingRight) || 0) +
+          (parseFloat(b.borderLeftWidth) || 0) +
+          (parseFloat(b.borderRightWidth) || 0)
+        return { overhead, gap: parseFloat(b.gap) || 0 }
+      }
+      const box1 = boxOf('.topbar-buttons')
+      const box2 = boxOf('.topbar-settings')
+      // 贪心：按 toolBtns 顺序累计，按 group 分两组
       let n1 = 0
       let n2 = 0
       let w1 = 0
@@ -568,10 +591,10 @@ export function TopBar() {
         const newN2 = n2 + (isT ? 0 : 1)
         const newW1 = w1 + (isT ? widths[i] : 0)
         const newW2 = w2 + (isT ? 0 : widths[i])
-        // 组框 i 宽 = padding 2 + 按钮宽和 + 按钮间 gap×2 + padding 2 = 4 + sum + (n-1)*2
-        const group1 = newN1 > 0 ? 4 + newW1 + (newN1 - 1) * 2 : 0
-        const group2 = newN2 > 0 ? 4 + newW2 + (newN2 - 1) * 2 : 0
-        // 总宽：两组合框 + 工具条内组框间 gap 4
+        // 组宽 = 盒子开销（padding+border）+ 按钮宽和 + 按钮间 gap×(n−1)（adj414：均为实测值）
+        const group1 = newN1 > 0 ? box1.overhead + newW1 + (newN1 - 1) * box1.gap : 0
+        const group2 = newN2 > 0 ? box2.overhead + newW2 + (newN2 - 1) * box2.gap : 0
+        // 总宽：两组合框 + 工具条内两组间 gap 4
         const total = group1 + (newN1 > 0 && newN2 > 0 ? 4 : 0) + group2
         if (total <= avail) {
           n1 = newN1
@@ -698,7 +721,7 @@ export function TopBar() {
     <div className="topbar" ref={topbarRef}>
       {/* Logo */}
       <div className="topbar-brand">
-        <img className="logo-mark" src="/Jianpu.png" alt="爱记谱 iJipu" draggable={false} />
+        <img className="logo-mark" src="/icons/Jianpu.png" alt="爱记谱 iJipu" draggable={false} />
         <span className="topbar-brand-text">
           <span className="brand-zh">爱记谱</span>
           <span className="brand-en">iJipu</span>
@@ -761,7 +784,7 @@ export function TopBar() {
         >
           {viewItem(viewType)?.icon}
           <span className="tool-label">{viewItem(viewType)?.label}</span>
-          {/* adj408：下拉指示箭头改用 public/下.png（与其余按钮图标同一套上色） */}
+          {/* adj408：下拉指示箭头改用 public/icons/下.png（与其余按钮图标同一套上色） */}
           <span className="arrow">
             <ToolIcon name="down" size={9} />
           </span>
@@ -844,7 +867,7 @@ export function TopBar() {
             aria-label="更多工具"
             aria-expanded={overflowOpen}
           >
-            {/* adj408：三点「更多」图标改用 public/更多.png（与其余按钮图标同一套上色） */}
+            {/* adj408：三点「更多」图标改用 public/icons/更多.png（与其余按钮图标同一套上色） */}
             <ToolIcon name="more" />
           </button>
           {overflowOpen && (

@@ -449,8 +449,14 @@ function NumInput(props: {
       )}
       <input
         type="number"
+        // adj413：设置与间距里的 px 一律整数——输入即四舍五入（step=1 + 取整双保险）
+        step={1}
         value={props.value}
-        onChange={(e) => props.onChange(Number(e.target.value))}
+        onChange={(e) => {
+          const n = Number(e.target.value)
+          // 输入中途（空串 / 单独一个负号）会得到 NaN：此时不动配置，避免把 NaN 写进设置
+          if (Number.isFinite(n)) props.onChange(Math.round(n))
+        }}
         style={{
           width: 52,
           padding: '3px 6px',

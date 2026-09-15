@@ -327,15 +327,17 @@ body {
 
 /* 功能按钮组容器（排版/试听/设置/导出 + 缩放）——溢出模式：
    只渲染测量后能放下的前 visCount 个按钮；不收缩、不换行（保证测量准确）。
-   样式套框模仿 .topbar-views（背景 + 边框 + 圆角 + 内 padding），使功能组在视觉上呈
-   「一组」。组内按钮去 border/调整 padding 与视图按钮一致。 */
+   adj414：**去掉组背景**（原 `background: var(--jp-bg-app)`），**外框保留**——
+   即保留 `border + 圆角 + 内 padding` 这一圈框线，只是框内不再填色；
+   按钮的可点性靠**鼠标移到按钮上时该按钮背景高亮**（见下方 :hover），与「左右拆分」按钮同一手感。
+   注意：本容器的 padding/border/gap 会被 TopBar 的折叠测量**在运行时读出来**，
+   所以改这里不必同步改 JS 常量（修掉"CSS 改了、宽度预算没跟上"的老毛病）。 */
 .topbar-buttons {
   display: flex;
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
   flex-wrap: nowrap;
-  background: var(--jp-bg-app);
   border: 1px solid var(--jp-border);
   border-radius: 7px;
   padding: 2px;
@@ -355,19 +357,18 @@ body {
   min-width: 0;
   overflow: hidden;
 }
-/* 设置组框（从状态栏移来）：与功能组同款（背景+边框+圆角+内 padding） */
+/* 设置组（从状态栏移来）：与功能组同款——**去掉组背景、保留外框**（adj414） */
 .topbar-settings {
   display: flex;
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
   flex-wrap: nowrap;
-  background: var(--jp-bg-app);
   border: 1px solid var(--jp-border);
   border-radius: 7px;
   padding: 2px;
 }
-/* 设置组内按钮：去独立 border，融入组框；与功能组同款
+/* 设置组内按钮：去独立 border，融入工具条；与功能组同款
    ——组内选中(active-guide)时 border-color:accent 无视觉(无 border)，
    高亮只有背景+文字色变化(排版按钮同款风格，边框不高亮) */
 .topbar-settings .topbar-btn {
@@ -509,10 +510,17 @@ body {
 .topbar-donate:hover {
   border-color: var(--jp-warning);
   color: var(--jp-warning);
+  /* adj414：与其余按钮一致——hover 时给背景高亮 */
+  background: var(--jp-bg-panel-hover);
 }
-.topbar-btn:hover {
+/* adj414：按钮 hover 一律**背景高亮**（组框取消后，靠它标识"可点/当前指到哪个按钮"）。
+   视图下拉按钮与「更多」按钮也一并纳入，使整条工具条手感一致（此前二者只变文字色）。 */
+.topbar-btn:hover,
+.topbar-view-btn:hover,
+.topbar-overflow-btn:hover {
   border-color: var(--jp-accent);
   color: var(--jp-accent);
+  background: var(--jp-bg-panel-hover);
 }
 /* adj：选中样式与 .topbar-view-btn.active 一致——背景 panel-active + 文字 accent */
 .topbar-btn.active-guide {

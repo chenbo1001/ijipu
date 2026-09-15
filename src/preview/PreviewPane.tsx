@@ -287,8 +287,9 @@ export function PreviewPane() {
         pageConfigRef.current,
       )
       next[d.key] = {
-        x: Math.round(pos.x * 10) / 10,
-        y: Math.round(pos.y * 10) / 10,
+        // adj413：描述头位置同样按整数 px 存（原为 0.1px 精度，与"px 一律整数"不符）
+        x: Math.round(pos.x),
+        y: Math.round(pos.y),
       }
       setPageConfig({ ...pageConfigRef.current, metaPos: next })
     }
@@ -334,7 +335,8 @@ export function PreviewPane() {
     const onMove = (ev: MouseEvent) => {
       const delta = dragDelta(drag.spec, drag.startX, drag.startY, ev.clientX, ev.clientY, scale)
       const [min, max] = limitsOf(drag.spec.key)
-      const next = { ...pageConfigRef.current, [drag.spec.key]: clamp(drag.startVal + delta, min, max) }
+      // adj413：位移是浮点（鼠标位移 ÷ 预览缩放），取整后再写入——px 一律整数（与设置界面一致）
+      const next = { ...pageConfigRef.current, [drag.spec.key]: Math.round(clamp(drag.startVal + delta, min, max)) }
       setPageConfig(next)
     }
     const onUp = () => {
