@@ -27,7 +27,28 @@ noteElW    = noteBodyW + (hasDot ? dotBodyW : 0) + (noteElDur/totalDur) · W
 perPerBeatW = noteElDur>0 ? noteElW/noteElDur : 0      # 拍宽（供小节线间距自适应收紧）
 ```
 
-`gapL / gapR`：小节线两侧净间距（adj315）—— 行首 / 行末背对音面那侧 = 0，中间 = `barlinePad`。
+`gapL / gapR`：小节线两侧净间距（adj315）—— 行首 / 行末背对音面那一侧 = 0，中间 = `barlinePad`。
+
+### 1.1b 单行曲部：按 `align_min_bars` 个小节槽预分占宽（adj421，用户规则）
+
+> 场景：曲部**只有一行**（新建文件、示例谱那种一行就写完的曲子）。此前这类行按「自然宽」排布，
+> 内容挤在左侧、行尾一大片空白（1 小节的 `Q: 1 2 3 4 |` 只占约 1/4 行宽里的一小段）。
+> 用户规则：**小节数 < `align_min_bars`（默认 4）时，把整行占宽按 `align_min_bars` 个小节预分**。
+
+```
+slotOuter = availW / align_min_bars                     # 一个小节槽宽（默认 = 行内容宽 / 4）
+每小节 b： natOuter[b] = segNatW[b] + barOuter[b]        # 本体宽 + 该小节小节线占位（lineW + bp + max(bp, meterGap)）
+          extraWByBar[b] = max(0, slotOuter − natOuter[b])   # 槽内富余 → 按该小节各时值元素**时值比例**摊开
+                                                            # 本体宽 + 小节线占位 > 槽宽 → extra = 0（保持自然宽、允许越出槽）
+```
+
+- **适用条件**：本曲部只有这一行（`rows.length === 1`）且 `barCount < align_min_bars`；行首空小节
+  （多声部填充）不参与。**多行曲部不适用**——末行仍按 adj199/adj355「对齐前面行」的规则。
+- **效果**：N(<4) 小节的单行曲部，每小节占 `1/align_min_bars` 行宽、行尾留 `(align_min_bars − N)` 个槽的空白；
+  单行 1 小节的每小节几何与「4 小节铺满行」里的一个小节**完全一致**（槽宽相同）。
+- **时值优先路径**（`placeMusicRow`）同规则：按小节把该小节的 `perBeats` 整体等比放大到槽内容宽
+  （`scale = (slotInner − 拍间距) / 本体宽`），本体超槽时不缩放。
+- 断言：`scripts/smoke.mts` `[106]`（两种布局各 8 条）+ `[22]/[23]/[29]/[46]/[92]` 中相关几何断言已按此重算。
 
 ### 1.2 放置（`curX = margin_left` 起）
 

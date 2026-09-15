@@ -86,6 +86,10 @@ const RIGHT_EDGE = PAGE_W - MR // 右内容边界
 // 取决于可用宽（= 右边界 − 左边距），可用宽变窄 → 每拍宽变窄，它的偏移**不等于** ML_SHIFT，
 // 这类值按调整后的实测重新钉住并在注释里说明。默认边距再改时只需动 ML_SHIFT。
 const ML_SHIFT = ML - 40 // 左边距相对「40 基准」的增量
+// adj421（用户规则）：**单行曲部**（曲部只有一行）且小节数 < align_min_bars 时，
+// 整行占宽按 align_min_bars 个「小节槽」预分——槽宽 = 行内容宽 / align_min_bars（默认 4）。
+// 注意：该规则只对**单行曲部**生效；多行曲部里最后一行仍按 adj199/adj355 的「对齐前面行」规则。
+const SLOT_W = (PAGE_W - ML - MR) / defaultPageConfig.align_min_bars // 单行曲部的小节槽宽（默认 4 槽）
 const META_H = MT + defaultPageConfig.descAreaH + defaultPageConfig.body_margin_top // 描述头区域高（metaAreaH）
 // adj289：引擎默认现为空间优先；既有布局/坐标断言按「时值优先」基准，故用 DUR_CFG 显式化
 const DUR_CFG = { ...defaultPageConfig, noteSpaceLayout: 'duration' as const }
@@ -1610,8 +1614,8 @@ const layW2 = layoutScore(rw, DUR_CFG)
 const notesW2 = layW2.pages[0].notes
 check('时值等宽：1- 宽 = 2 × 1 拍宽', Math.abs(notesW2[0].width - notesW2[1].width * 2) < 0.5, `${notesW2[0].width} vs ${notesW2[1].width}`)
 check('1 拍音符宽一致', Math.abs(notesW2[1].width - notesW2[2].width) < 0.1)
-// adj253：单行 2 小节（≤3）自然宽——avgW=max/2、小于 avgW 的拍以 avgW 显示（实测中心 152.1）
-check('adj198 自然宽（小节 2 首音符中心）', Math.abs(notesW2[4].x + 6 - (152.1 + ML_SHIFT)) < 0.5, `x=${notesW2[4].x} center=${notesW2[4].x + 6}`)
+// adj421：单行 2 小节 → 每小节一个槽；第 2 小节首音符落在第 2 槽内（实测中心 191）
+check('adj421 单行 2 小节：小节 2 首音符在第 2 槽内（ML + 槽宽 ~ +2 槽）', notesW2[4].x + 6 > ML + SLOT_W && notesW2[4].x + 6 < ML + 2 * SLOT_W, `center=${notesW2[4].x + 6}`)
 // 两端对齐 + 小节均分：8 小节 → 行 1（7 小节）铺满均分，行 2（最后 1 小节 ≤3）自然宽不撑满
 const rj2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |\n')
 const layJ = layoutScore(rj2, DUR_CFG)
@@ -1692,10 +1696,11 @@ const rbar = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n')
 const layBar = layoutScore(rbar, DUR_CFG)
 const bars23 = layBar.pages[0].barlines
 check('小节线 2 条', bars23.length === 2, `got ${bars23.length}`)
-// adj198：单行 2 小节自然宽——线 1 在小节 1 右端（实测 122.6）
-check('adj198 线 1 在小节 1 内容右端（自然宽）', Math.abs(bars23[0].x - (122.6 + ML_SHIFT)) < 1, `x=${bars23[0].x}`)
-// 行尾小节线：自然宽下不到右边界（实测 203.7，不铺满）
-check('adj198 线 2 在自然宽行尾（不铺满）', Math.abs(bars23[1].x - (203.7 + ML_SHIFT)) < 1, `x=${bars23[1].x}`)
+// adj421：单行 2 小节 → 每小节占一个「槽」（整行占宽按 4 槽预分），线 1 落在第 1 槽末尾
+check('adj421 单行 2 小节：线 1 落在第 1 槽末尾（ML + 槽宽）', Math.abs(bars23[0].x - (ML + SLOT_W)) < 2, `x=${bars23[0].x} slot=${ML + SLOT_W}`)
+// 行尾小节线：两槽用完后留白（含末尾线自身间距，实测 304.1）
+check('adj421 单行 2 小节：线 2 ≈ 第 2 槽末尾（行尾留 2 槽空白）', Math.abs(bars23[1].x - (ML + 2 * SLOT_W)) < 8, `x=${bars23[1].x} slot2=${ML + 2 * SLOT_W}`)
+check('adj421 单行 2 小节：行内容明显短于整行（未铺满）', bars23[1].x < ML + 3 * SLOT_W, `x=${bars23[1].x}`)
 // 行首空 seg（|:）不占宽
 const rr23 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 3 | 5 6 7 1 |\n')
 const layRr = layoutScore(rr23, DUR_CFG)
@@ -1723,12 +1728,17 @@ console.log('[24] adj3 alignment')
 const rc24 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n')
 const layC24 = layoutScore(rc24, DUR_CFG)
 const n24 = layC24.pages[0].notes[0]
-check('adj198 1 拍音符居中于拍段（自然宽）', Math.abs(n24.x + 6 - (53 + ML_SHIFT)) < 0.5, `center=${n24.x + 6}`)
+// adj421：单行 1 小节 → 内容在第 1 槽内摊开（4 拍均分槽宽，实测首音中心 68.5）
+const n24All = layC24.pages[0].notes
+const n24Centers = n24All.map((n) => n.x + 6)
+check('adj421 单行 1 小节：4 拍音符在第 1 槽内摊开（首音中心 < 槽末）', n24.x + 6 > ML && n24.x + 6 < ML + SLOT_W, `center=${n24.x + 6}`)
+check('adj421 单行 1 小节：4 拍均分槽宽（相邻间距一致）', n24Centers.length === 4 && Math.max(...n24Centers.slice(1).map((c, i) => Math.abs(c - n24Centers[i] - (n24Centers[1] - n24Centers[0])))) < 0.5, n24Centers.map((c) => c.toFixed(1)).join(','))
 // 1/ 2/ 各居中于半拍段（自然宽 perBeat 14）
 const rh24 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1/ 2/ |\n')
 const nH24 = layoutScore(rh24, DUR_CFG).pages[0].notes
-check('adj198 1/ 居中于第 1 半拍段', Math.abs(nH24[0].x + 6 - (ML + 11)) < 0.5, `center=${nH24[0].x + 6}`)
-check('adj198 2/ 居中于第 2 半拍段', Math.abs(nH24[1].x + 6 - (ML + 21.1)) < 0.5, `center=${nH24[1].x + 6}`)
+// 1/ 2/ 各居中于半拍段（adj421：半拍段宽随槽宽摊开——两音关于槽中心对称）
+check('adj421 单行 1 小节：1/ 2/ 关于槽中心对称摊开', Math.abs((nH24[0].x + nH24[1].x) / 2 + 6 - (ML + SLOT_W / 2)) < 2, `mid=${(nH24[0].x + nH24[1].x) / 2 + 6} slotMid=${ML + SLOT_W / 2}`)
+check('adj421 单行 1 小节：1/ 2/ 间距随槽宽拉开（不再挤在左边）', nH24[1].x - nH24[0].x > DIGIT_W * 3, `gap=${nH24[1].x - nH24[0].x}`)
 check('八分音符不重叠（间隔 ≥ 数字槽宽）', nH24[1].x - nH24[0].x >= DIGIT_W * 0.8, `gap=${nH24[1].x - nH24[0].x}`)
 // 减时线按拍分组
 const beamsOf24 = (q: string) => {
@@ -1816,9 +1826,10 @@ const gapCfg = { ...DUR_CFG, bar_gap: 10 }
 const layGap = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n'), gapCfg)
 const notesGap = layGap.pages[0].notes
 // adj198：自然宽（gap 体现在小节线后空间）——小节 2 首音符中心 = 实测 135
-check('adj198 小节间距生效（小节 2 首音符）', Math.abs(notesGap[4].x + 6 - (135 + ML_SHIFT)) < 0.5, `center=${notesGap[4].x + 6}`)
+// adj421：单行 2 小节 → 每小节一个槽（bar_gap 10 只影响槽内的小节线间距，不再决定小节宽）
+check('adj421 小节间距配置下：小节 2 仍落在第 2 槽内', notesGap[4].x + 6 > ML + SLOT_W && notesGap[4].x + 6 < ML + 2 * SLOT_W, `center=${notesGap[4].x + 6}`)
 const barsGap = layGap.pages[0].barlines
-check('adj198 小节线在内容右端（自然宽）', Math.abs(barsGap[0].x - (123 + ML_SHIFT)) < 0.5, `x=${barsGap[0].x}`)
+check('adj421 小节间距配置下：线 1 仍在第 1 槽末尾', Math.abs(barsGap[0].x - (ML + SLOT_W)) < 2, `x=${barsGap[0].x} slot=${ML + SLOT_W}`)
 
 // ---- 30. 描述头布局与拖拽（adj9） ----
 console.log('[30] meta layout (adj9)')
@@ -2346,8 +2357,8 @@ const r46a = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\nC: 一 @ 二 �
 const lay46a = layoutScore(r46a, DUR_CFG)
 const l46a = lay46a.pages[0].lyrics
 check('@ 占位：3 个字渲染（一、二、三）', l46a.length === 3, `got ${l46a.length}`)
-// adj198：自然宽每拍 14 + 拍间距——二（对 3）与一（对 1）差 2 拍（2×14 + 拍间距×2 = 36）
-check('adj198 @ 后歌词后移（二 对音符 3，dx=36）', Math.abs(l46a[1].x - l46a[0].x - 36) < 1, `dx=${l46a[1].x - l46a[0].x}`)
+// adj421：单行 1 小节 → 4 拍均分槽宽，「二」（对音符 3）与「一」（对音符 1）相差 2 拍段（实测 57.9）
+check('adj421 @ 后歌词后移（二 对音符 3，随槽宽均分）', Math.abs(l46a[1].x - l46a[0].x - 57.9) < 1, `dx=${l46a[1].x - l46a[0].x}`)
 // 标点不占音符位，紧跟前面的字渲染
 const r46b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\nC: 一，二。三\n')
 const l46b = layoutScore(r46b, DUR_CFG).pages[0].lyrics
@@ -4669,7 +4680,14 @@ console.log('[92] grace note timing & position (adj396)')
     const svgAug = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 -[h5/] 1 |\n'), cfg92))[0]
     const gxAug = graceXs92(svgAug)[0]
     const augCx = augCx92(svgAug)
-    check(`adj396 ${tag92}：有增时线 → 后倚音排在增时线之后（紧靠）`, gxAug > augCx + DIGIT_W / 2 && gxAug < augCx + DIGIT_W / 2 + 1.5 * NS_S + 6, `grace=${gxAug} augCx=${augCx}`)
+    // adj421：单行曲部按槽预分占宽后，音符的时值元素（数字/增时线/附点）在槽内摊开——
+    // 「紧靠」的语义随之变为「排在增时线之后、仍在本音符跨度内」，不再要求 1.5×s+6 的贴身距离
+    // （实测槽内摊开后距增时线中心 ≈ 4 + 11~15px；对照上面「无增时线」用例仍严格贴身）
+    check(
+      `adj396 ${tag92}：有增时线 → 后倚音排在增时线之后（同音符跨度内，槽内摊开）`,
+      gxAug > augCx + DIGIT_W / 2 && gxAug < augCx + DIGIT_W / 2 + 2.5 * NS_S + 14,
+      `grace=${gxAug} augCx=${augCx}`,
+    )
     const svgDot = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3.[h5/] 1 2 |\n'), cfg92))[0]
     const gxDot = graceXs92(svgDot)[0]
     const dotCx = dotCx92(svgDot)
@@ -5222,6 +5240,54 @@ console.log('[105] pad 括倚 keys: insert skeleton + caret inside (adj420)')
   check('adj420 继续输 65 即得完整前倚音 1[65]', typed === '1 2 [65]', typed)
   const typed2 = r2.text.slice(0, r2.pos) + '65' + r2.text.slice(r2.pos)
   check('adj420 继续输 65 即得完整后倚音 1[h65]', typed2 === '1 2 [h65]', typed2)
+}
+
+// ---- 106. 单行曲部按 align_min_bars 个小节槽预分占宽（adj421，用户规则） ----
+// 规则：曲部**只有一行**（新建文件/示例谱那种）且小节数 < align_min_bars（默认 4）时，
+// 整行占宽按 4 个小节预分（槽宽 = 行内容宽 / 4），每小节领一个槽、槽内按空间优先摊开音符；
+// 若某小节「本体宽 + 小节线占位」超过槽宽，则该小节保持自然宽（不压缩、越出槽）。
+// 多行曲部**不适用**（最后一行仍按 adj199/adj355 对齐前面行）。
+console.log('[106] single-row section: bar slots = align_min_bars (adj421)')
+{
+  const slotOf = (cfg: PageConfig) => (PAGE_W - cfg.margin_left - cfg.margin_right) / cfg.align_min_bars
+  const oneLine = (q: string, cfg: PageConfig) => {
+    const r = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`)
+    const lay = layoutScore(r, cfg)
+    const notes = [...lay.pages[0].notes].sort((a, b) => a.x - b.x)
+    const bars = [...lay.pages[0].barlines].sort((a, b) => a.x - b.x)
+    return { notes, bars, rows: new Set(lay.pages[0].notes.map((n) => n.y)).size }
+  }
+  for (const [tag, cfg] of [['空间优先', defaultPageConfig], ['时值优先', DUR_CFG]] as const) {
+    const SLOT = slotOf(cfg)
+    // ① 单行 1 小节 → 小节线落在第 1 槽末尾附近（线自身在小节内的偏移 ≈ 3~4px，故给 8px 容差）
+    const a = oneLine('1 2 3 4 |', cfg)
+    check(`adj421 ${tag}：单行 1 小节 → 小节线在第 1 槽末尾`, a.rows === 1 && a.bars.length === 1 && a.bars[0].x > cfg.margin_left + SLOT - 8 && a.bars[0].x <= cfg.margin_left + SLOT + 4, `x=${a.bars[0]?.x} slot=${cfg.margin_left + SLOT}`)
+    // ② 单行 2 小节 → 两小节各领一个槽：相邻小节线间距 ≈ 槽宽（末线含自身间距，给 10px 容差）
+    const b = oneLine('1 2 3 4 | 5 6 7 1 |', cfg)
+    check(`adj421 ${tag}：单行 2 小节 → 相邻小节线间距 ≈ 1 槽宽`, b.bars.length === 2 && Math.abs(b.bars[1].x - b.bars[0].x - SLOT) < 10, `gap=${(b.bars[1]?.x - b.bars[0]?.x).toFixed(2)} slot=${SLOT.toFixed(2)}`)
+    check(`adj421 ${tag}：单行 2 小节 → 行内容只占 2 槽（未铺满整行）`, b.bars[1].x < cfg.margin_left + 2 * SLOT + 8 && b.bars[1].x > cfg.margin_left + 2 * SLOT - 12, `x=${b.bars[1].x}`)
+    // ③ 单行 3 小节 → 三槽用完（行尾只剩 1 槽）
+    const c = oneLine('1 2 3 4 | 5 6 7 1 | 2 3 4 5 |', cfg)
+    check(`adj421 ${tag}：单行 3 小节 → 线 3 在第 3 槽末尾`, c.bars.length === 3 && Math.abs(c.bars[2].x - (cfg.margin_left + 3 * SLOT)) < 12, c.bars.map((x) => x.x.toFixed(1)).join(','))
+    check(`adj421 ${tag}：单行 3 小节仍明显短于整行（未铺满）`, c.bars[2].x < cfg.margin_left + 3.6 * SLOT, `x=${c.bars[2].x}`)
+    // ④ 每小节内部摊开：1 小节 4 拍 → 4 个音符均分槽宽（相邻间距一致且远大于数字槽宽）
+    const pitchGap = a.notes.length === 4 ? a.notes[1].x - a.notes[0].x : 0
+    check(`adj421 ${tag}：槽内音符按空间优先摊开（相邻间距一致、> 数字槽宽）`, pitchGap > DIGIT_W && Math.abs(a.notes[3].x - a.notes[0].x - 3 * pitchGap) < 1, `gap=${pitchGap.toFixed(2)}`)
+
+    // ⑤ 本体超槽 → 该小节自然宽（越出槽，不压缩挤压）
+    //   16 个十六分音符：自然本体宽 ≈ 16×数字槽宽 > 槽宽，理应越出第 1 槽
+    const dense = oneLine('1// 2// 3// 4// 5// 6// 7// 1\'// 2// 3// 4// 5// 6// 7// 1\'// 2// |', cfg)
+    check(`adj421 ${tag}：本体宽 > 槽宽 → 该小节保持自然宽（越出槽）`, dense.bars.length === 1 && dense.bars[0].x > cfg.margin_left + SLOT, `x=${dense.bars[0]?.x} slotEnd=${cfg.margin_left + SLOT}`)
+    // ⑥ 多行曲部不适用槽规则：15 小节断成 ≥2 行 → 末行小节间距明显偏离槽宽（单小节末行记 0）
+    const multi = oneLine(
+      '1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |',
+      cfg,
+    )
+    const lastRowY = Math.max(...[...new Set(multi.notes.map((n) => n.y))])
+    const lastRowBars = multi.bars.filter((x) => Math.abs(x.yTop - (lastRowY - BAR_TOP)) < 0.5)
+    const lastGap = lastRowBars.length >= 2 ? lastRowBars[1].x - lastRowBars[0].x : 0
+    check(`adj421 ${tag}：多行曲部（15 小节断行）末行不按槽预分`, multi.rows >= 2 && Math.abs(lastGap - SLOT) > 5, `rows=${multi.rows} lastGap=${lastGap.toFixed(1)} slot=${SLOT.toFixed(1)}`)
+  }
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
