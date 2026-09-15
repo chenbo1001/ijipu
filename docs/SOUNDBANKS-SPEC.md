@@ -65,3 +65,24 @@
 ② 预览区标题下显示名
 ③ 输入工具条插入引用 + 显示名
 ④ `docs/JPS-SPEC.md` 同步 + smoke 断言
+
+## 10. 音源文件的来源与分发（adj346 / adj416）
+
+> 这一节讲"音源本体从哪来"，与上面的语法无关；改打包方式或音源来源时同步本节与 `scripts/check-installer.mjs`。
+
+**来源优先级（`src/playback/spessaCache.ts` 的 `resolveHqBank`，试听/导出共用）**：
+1. **IndexedDB 缓存**（`ijipu-soundfonts-hq`，键 = 库 id）——用户导入的音色文件、或 Web 端已下载的音源；
+2. **桌面内置音源**——**安装目录**下的 `generaluser_gs.sf2`（见下）；
+3. **远端下载**——`HQ_LIBRARIES[].source`（GitHub raw），失败再试 `fallbackSource`；**只有这一条的结果会写回缓存**。
+
+**桌面（Tauri）内置音源**：
+- 发布程序把 `resources/soundfonts/generaluser_gs.sf2` **随安装包**装到**安装目录根**：`<安装目录>\generaluser_gs.sf2`
+  （`src-tauri/tauri.conf.json` 的 `bundle.resources` 映射 `../resources/soundfonts/generaluser_gs.sf2 → generaluser_gs.sf2`）。
+- Rust 侧查找顺序（`builtin_soundfont_candidates`）：**安装目录根 `<库id>.sf2` 优先**，其次 `soundfonts/<库id>.sf2`（兼容旧便携版布局）。
+- 前端**先用 `sf_soundfont_builtin_path` 探测存在性**（不读 30MB）：
+  - 命中 → 试听/音色库面板显示「✓ 使用随应用内置音源…无需下载」并**跳过下载提示**，播放时再 `sf_soundfont_resource_read` 读字节（raw body → ArrayBuffer）；
+  - 未命中（如 Web、或用户把文件删了）→ 显示原有的「正在后台下载音色库」提示并联网。
+- 便携/调试目录不含随包资源，由 `scripts/prepare-tauri-soundfont.mjs` 把音源放到 exe 旁（`target/release`、`target/debug`），布局与安装目录一致。
+- 校验：`npm run check:installer`（安装清单必须含 `generaluser_gs.sf2`）+ smoke `[101]`（映射/源文件为真 SF2/查找顺序/raw body）。
+
+**Web（PWA）**：音源不打包进 Web 产物（规避单文件体积上限），一律远端下载一次后缓存到 IndexedDB，之后直接用（离线可用）。
