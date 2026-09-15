@@ -4,7 +4,7 @@
  * 验证：解析器（描述头/曲行/词行/分组）、tokenizer（音符/时值/小节线）、
  * 格式化器（Q 行空格规范）、时值计算。
  */
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW } from '@ijipu/engine/index.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
@@ -57,11 +57,22 @@ import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from '../src/pwa/swUpdat
 import { shiftEventsFrom } from '../src/playback/playbackTimeline.ts'
 // adj411：直接生成 PDF（不再开新窗口）——PDF 字节结构（纯逻辑）
 import { buildPdf, A4_W_PT, A4_H_PT } from '../src/export/pdf.ts'
+// adj413：新建模板（分隔注释 30 字符 + 尾部页面设置区块）+ px 一律整数
+import { defaultSample } from '../src/samples/index.ts'
+import { roundPxIntegers } from '@ijipu/engine/index.ts'
+import type { PageConfig } from '@ijipu/engine/types.ts'
 // adj394：编辑区问题提示条的汇总/跳转换算（纯逻辑）
 import { summarizeProblems, offsetOf } from '../src/ui/problems.ts'
 import { problemCopy } from '../src/brand/copy.ts'
 // adj394：输入条「强弱」组的提示文案（渐强/渐弱只有 + 抬升、没有 - 降低）
 import { PAD_GROUPS } from '../src/editor/padLayout.ts'
+// adj416：音源来源解析（安装目录内置 SF2 / 缓存 / 远端）——用假 Tauri + 假缓存断言，不碰真 IndexedDB
+import { resolveHqBank, prefetchHqLibraryProgress } from '../src/playback/spessaCache.ts'
+import type { HqCache } from '../src/playback/spessaCache.ts'
+import { hasBuiltinBank } from '../src/playback/spessaSynthBackend.ts'
+import type { HqSampleLibrary } from '../src/playback/spessaSynthBackend.ts'
+// adj417：按钮图标清单（public/icons/ 下的文件名）——断言文件存在、sw.js 预热清单未漂移
+import { ICON_DIR, ICON_FILE_NAMES } from '../src/ui/toolIcons.ts'
 
 // adj213：布局断言常量——从 defaultPageConfig 派生，避免硬编码边距/右边界/
 // 描述头区域高等魔数（默认值调整时断言自动适配）
@@ -4870,6 +4881,249 @@ console.log('[98] beam extends under trailing dot (adj411)')
   }
 }
 
+// ---- 99. 新建模板：三段分隔注释 + 页面设置区块（adj413） ----
+// ① 分隔注释规范为 30 个字符；② 主体后 5 个空行 → 「页面设置」分隔注释 → 真正的 `# jps-config:` 设置行；
+// ③ 设置行 `{}` 语义 = 全部默认（不覆盖任何设置）；改动后程序**原地**写入，改回默认则删行但保留分隔注释。
+console.log('[99] new-file template dividers & settings block (adj413)')
+{
+  const tpl = defaultSample().code
+  const lines = tpl.replace(/\r\n/g, '\n').split('\n')
+  const dividers = lines.filter((l) => l.startsWith('#='))
+  check('adj413 模板有三条分隔注释（描述头 / 简谱主体 / 页面设置）', dividers.length === 3, JSON.stringify(dividers))
+  check('adj413 前两条分隔注释恰好 30 个字符', dividers[0].length === 30 && dividers[1].length === 30, dividers.slice(0, 2).map((l) => `${l.length}`).join(','))
+  check('adj413 第二条分隔注释为「以下为简谱主体」', dividers[1].includes('简谱主体'), dividers[1])
+  check('adj413 第三条分隔注释为「#====== 以下为页面设置，请勿手动修改 =======」', dividers[2] === '#====== 以下为页面设置，请勿手动修改 =======', dividers[2])
+  // 主体最后一行 → 页面设置分隔注释之间的空行数
+  const divIdx = lines.indexOf(dividers[2])
+  let blanks = 0
+  for (let i = divIdx - 1; i >= 0 && lines[i].trim() === ''; i--) blanks++
+  check('adj413 页面设置区块与主体间隔 ≥5 个空行', blanks >= 5, `空行数=${blanks}`)
+  // 分隔注释紧跟设置行
+  check('adj413 分隔注释的下一行就是设置行', (lines[divIdx + 1] ?? '').startsWith(JPS_CONFIG_PREFIX), lines[divIdx + 1])
+  check('adj413 模板设置行内容为 {}（表示全部默认）', lines[divIdx + 1] === `${JPS_CONFIG_PREFIX}{}`, lines[divIdx + 1])
+  check('adj413 空设置行不覆盖任何设置（读回无字段）', Object.keys(extractJpsConfig(tpl) ?? {}).length === 0, JSON.stringify(extractJpsConfig(tpl)))
+  check('adj413 空设置行不影响兜底配置合并', mergeJpsConfig(tpl, { ...defaultPageConfig, note_size: 17 }).note_size === 17)
+  // 写入差量设置：原地写进那条设置行（紧跟分隔注释），分隔注释保持不动
+  const withCfg = writeJpsConfig(tpl, { ...defaultPageConfig, note_size: 15 })
+  const lines2 = withCfg.split('\n')
+  const divIdx2 = lines2.findIndex((l) => l.includes('以下为页面设置'))
+  check('adj413 写入设置后分隔注释位置不变、设置行原地更新', divIdx2 === divIdx && (lines2[divIdx2 + 1] ?? '').startsWith(JPS_CONFIG_PREFIX) && lines2[divIdx2 + 1].includes('"note_size":15'), lines2[divIdx2 + 1])
+  check('adj413 写入的设置行可读回', extractJpsConfig(withCfg)?.note_size === 15, JSON.stringify(extractJpsConfig(withCfg)))
+  check('adj413 模板仍只有一条设置行（未重复追加）', lines2.filter((l) => l.startsWith(JPS_CONFIG_PREFIX)).length === 1)
+  // 改回默认（差量清空）：删设置行但保留分隔注释
+  const back = writeJpsConfig(withCfg, { ...defaultPageConfig })
+  check('adj413 清空设置后删行但保留「页面设置」分隔注释', !back.split('\n').some((l) => l.startsWith(JPS_CONFIG_PREFIX)) && back.includes('以下为页面设置'), '')
+}
+
+// ---- 100. px 值一律整数：roundPxIntegers + 读写两端（adj413） ----
+// 虚线拖拽的位移是浮点（鼠标位移 ÷ 预览缩放），过去会把 12.4 这类值写进 # jps-config
+// （metaPos 更是刻意保留 0.1px）。现在读取/写入两端都取整，旧文件里的小数值读出来即整数。
+console.log('[100] px values are always integers (adj413)')
+{
+  const frac: PageConfig = {
+    ...defaultPageConfig,
+    margin_top: 40.4,
+    height_quci: 15.5,
+    height_cici: 9.6,
+    note_size: 13.49,
+    bar_gap: 3.5,
+    heights: { a0: [12.4, 8.5, 20.4999, 0.5, 11.5] },
+    metaPos: { title: { x: 10.5, y: -4.49 }, author_0: { x: -2.5, y: 3.2 } },
+  }
+  const r = roundPxIntegers(frac)
+  check('adj413 顶层 px 小数四舍五入为整数', r.margin_top === 40 && r.height_quci === 16 && r.height_cici === 10 && r.note_size === 13 && r.bar_gap === 4, `${r.margin_top},${r.height_quci},${r.height_cici},${r.note_size},${r.bar_gap}`)
+  check('adj413 按页行距 heights 逐项取整', JSON.stringify(r.heights?.a0) === JSON.stringify([12, 9, 20, 1, 12]), JSON.stringify(r.heights?.a0))
+  // 注：Math.round 的 .5 一律向 +∞ 取整（-2.5 → -2），断言按 JS 语义写
+  check('adj413 描述头 metaPos 的 x/y 取整（原为 0.1px 精度）', r.metaPos?.title.x === 11 && r.metaPos?.title.y === -4 && r.metaPos?.author_0.x === -2 && r.metaPos?.author_0.y === 3, JSON.stringify(r.metaPos))
+  check('adj413 非数值字段原样保留（字体栈/枚举不被动）', r.biaoti_font === defaultPageConfig.biaoti_font && r.page === defaultPageConfig.page && r.noteSpaceLayout === defaultPageConfig.noteSpaceLayout)
+  check('adj413 取整是幂等的', JSON.stringify(roundPxIntegers(r)) === JSON.stringify(r))
+  // 读取端：源码里的小数值读出来即整数
+  const src = `V: 1.0\nQ: 1 |\n# jps-config:{"margin_top":40.4,"height_quci":15.5,"heights":{"a0":[12.4,8.5,20.5,0.5]},"metaPos":{"title":{"x":10.5,"y":-4.4}}}\n`
+  const merged = mergeJpsConfig(src, null)
+  check('adj413 读取端：源码里的小数 px 合并后即为整数', merged.margin_top === 40 && merged.height_quci === 16 && merged.heights?.a0?.[0] === 12 && merged.metaPos?.title.x === 11, `${merged.margin_top},${merged.height_quci},${merged.heights?.a0?.[0]},${merged.metaPos?.title.x}`)
+  // 写入端：即便直接传浮点，落盘也必须是整数
+  const written = writeJpsConfig('V: 1.0\nQ: 1 |\n', frac)
+  const obj = JSON.parse((written.split('\n').find((l) => l.startsWith(JPS_CONFIG_PREFIX)) ?? '').slice(JPS_CONFIG_PREFIX.length)) as Record<string, unknown>
+  const nums: number[] = []
+  const walk = (v: unknown): void => {
+    if (typeof v === 'number') nums.push(v)
+    else if (Array.isArray(v)) v.forEach(walk)
+    else if (v && typeof v === 'object') Object.values(v as Record<string, unknown>).forEach(walk)
+  }
+  walk(obj)
+  check('adj413 写入端：落盘的所有数值均为整数', nums.length > 0 && nums.every((n) => Number.isInteger(n)), nums.join(','))
+  check('adj413 默认配置本身全为整数（无浮点默认值）', Object.entries(defaultPageConfig).every(([, v]) => typeof v !== 'number' || Number.isInteger(v)))
+}
+
+// ---- 101. 桌面内置音源（随安装包分发）打包不变量（adj416） ----
+// PC 发布程序必须把 resources/soundfonts/generaluser_gs.sf2 映射到**安装目录根**的
+// generaluser_gs.sf2：装完 `<安装目录>\generaluser_gs.sf2` 即存在，运行时 Rust 直接读该文件
+// （sf_soundfont_builtin_path 探测 → 前端跳过下载提示），不再依赖国内不可达的 GitHub raw。
+// 打包配置/源文件在这里兜底——漏了安装包会「静默」退回联网下载（用户以为没反应）。
+console.log('[101] desktop bundled soundfont packaging (adj416)')
+{
+  const conf = JSON.parse(readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf8')) as {
+    bundle?: { resources?: Record<string, string> }
+  }
+  const resources = conf.bundle?.resources ?? {}
+  const entry = Object.entries(resources).find(([, dest]) => dest === 'generaluser_gs.sf2')
+  check('adj416 bundle.resources 含映射到安装目录根的 generaluser_gs.sf2', entry !== undefined, JSON.stringify(resources))
+  check('adj416 映射源为 resources/soundfonts/generaluser_gs.sf2（config 相对 src-tauri）', (entry?.[0] ?? '').replace(/\\/g, '/') === '../resources/soundfonts/generaluser_gs.sf2', entry?.[0] ?? '')
+  // 源文件：真实完整 SF2（RIFF 容器 + sfbk 类型标识），不是占位符
+  const sf2 = join(root, 'resources', 'soundfonts', 'generaluser_gs.sf2')
+  check('adj416 音源源文件存在', existsSync(sf2), sf2)
+  const size = existsSync(sf2) ? statSync(sf2).size : 0
+  check('adj416 音源体积 ≥30MB（真音源而非占位文件）', size >= 30_000_000, `${size}`)
+  let magic = ''
+  if (existsSync(sf2)) {
+    const fd = openSync(sf2, 'r')
+    const head = Buffer.alloc(12)
+    readSync(fd, head, 0, 12, 0)
+    closeSync(fd)
+    magic = head.toString('latin1')
+  }
+  check('adj416 音源是 SoundFont2（RIFF…sfbk）', magic.startsWith('RIFF') && magic.slice(8, 12) === 'sfbk', JSON.stringify(magic))
+  // Rust 侧：候选顺序（安装目录根 → 兼容旧 soundfonts/ 子目录）+ raw body（30MB 不走 JSON 数组，E-2026-146）
+  const libRs = readFileSync(join(root, 'src-tauri', 'src', 'lib.rs'), 'utf8')
+  check('adj416 Rust 探测命令已注册', libRs.includes('sf_soundfont_builtin_path'))
+  check('adj416 Rust 候选含安装目录根 <id>.sf2 优先、并兼容 soundfonts/ 子目录',
+    libRs.includes('dir.join(&file)') && libRs.includes('dir.join("soundfonts").join(&file)'))
+  check('adj416 Rust 以 raw body 返回音源字节（tauri::ipc::Response）', libRs.includes('tauri::ipc::Response::new(bytes)'))
+  // 检查脚本：安装包清单必需项 + 打包源体积兜底
+  const chk = readFileSync(join(root, 'scripts', 'check-installer.mjs'), 'utf8')
+  check('adj416 check:installer 把 generaluser_gs.sf2 列为安装包必需文件', chk.includes('oname=generaluser_gs\\.sf2'))
+  check('adj416 check:installer 校验打包源体积（≥20MB）', chk.includes('resources/soundfonts/generaluser_gs.sf2'))
+  // 便携/调试目录：prepare 脚本把音源放到 exe 旁（与安装目录同布局），dev 也能走内置
+  const prep = readFileSync(join(root, 'scripts', 'prepare-tauri-soundfont.mjs'), 'utf8')
+  check('adj416 prepare 脚本把音源放到 target/release 与 target/debug（exe 旁）',
+    prep.includes("target/release") && prep.includes("target/debug"))
+}
+
+// ---- 102. 音源来源解析：安装目录内置优先、且不重复占缓存（adj416） ----
+// 桌面端「装完就有音源」的关键在来源判定：先探测安装目录内置 SF2（只探测存在性，不读 30MB），
+// 命中就直接读文件、**不写 IndexedDB**（内置文件已在安装目录，再存一份纯属浪费）；
+// 只有远端下载的结果才写缓存。这里用假 Tauri / 假 fetch / 假缓存断言，不碰真 IndexedDB 与网络。
+console.log('[102] soundfont source resolution: builtin first (adj416)')
+async function runAdj416BankSourceTests() {
+  const lib: HqSampleLibrary = {
+    id: 'generaluser_gs',
+    name: '测试音源',
+    source: 'https://example.invalid/generaluser_gs.sf2',
+    sizeBytes: 3,
+    format: 'sf2',
+  }
+  const builtinBank = new Uint8Array([1, 2, 3]).buffer
+  const remoteBank = new Uint8Array([9, 9, 9, 9]).buffer
+  const calls: string[] = []
+  const cacheOf = (existing: ArrayBuffer | null, saved: ArrayBuffer[]): HqCache =>
+    ({
+      load: async () => existing,
+      has: async () => existing !== null,
+      save: async (_id: string, ab: ArrayBuffer) => {
+        saved.push(ab)
+      },
+    }) as unknown as HqCache
+  const g = globalThis as unknown as { window?: unknown; fetch?: unknown }
+  const savedWindow = g.window
+  const savedFetch = g.fetch
+  // 假 Tauri：探测命令返回安装目录路径，读取命令返回「音源字节」
+  const mockTauri = (path: string | null) => {
+    g.window = {
+      __TAURI__: {
+        core: {
+          invoke: async (cmd: string) => {
+            calls.push(cmd)
+            if (cmd === 'sf_soundfont_builtin_path') return path
+            if (cmd === 'sf_soundfont_resource_read') return builtinBank
+            return null
+          },
+        },
+      },
+    }
+  }
+  try {
+    // ① 桌面 + 安装目录有 SF2：探测命中 → builtin，且预取阶段不读 30MB、不写缓存
+    calls.length = 0
+    mockTauri('C:\\Program Files\\iJipu\\generaluser_gs.sf2')
+    check('adj416 安装目录有 SF2 → hasBuiltinBank 为真', (await hasBuiltinBank(lib)) === true)
+    const saved1: ArrayBuffer[] = []
+    const src1 = await prefetchHqLibraryProgress(lib, cacheOf(null, saved1))
+    check('adj416 预取来源 = builtin（不联网）', src1 === 'builtin', src1)
+    check('adj416 预取只探测存在性、不读 30MB', !calls.includes('sf_soundfont_resource_read'), calls.join(','))
+    check('adj416 内置音源不写 IndexedDB（不重复占 30MB）', saved1.length === 0, `${saved1.length}`)
+    const r1 = await resolveHqBank(lib, cacheOf(null, saved1))
+    check('adj416 解析来源 = builtin 且字节取自内置读取命令', r1.source === 'builtin' && r1.bank.byteLength === 3 && calls.includes('sf_soundfont_resource_read'), `${r1.source}/${r1.bank.byteLength}`)
+    check('adj416 走内置仍不写缓存', saved1.length === 0, `${saved1.length}`)
+    // ② 已有缓存（含用户导入的音色）优先于内置，且不再探测
+    calls.length = 0
+    const saved2: ArrayBuffer[] = []
+    const src2 = await prefetchHqLibraryProgress(lib, cacheOf(remoteBank, saved2))
+    check('adj416 已有缓存 → 来源 = cache（用户导入的音色不被内置覆盖）', src2 === 'cache', src2)
+    check('adj416 命中缓存时不发探测命令', !calls.includes('sf_soundfont_builtin_path'), calls.join(','))
+    // ③ 无内置（Web 或用户删了文件）：探测返回 null → 走远端下载并写缓存
+    calls.length = 0
+    g.window = { __TAURI__: { core: { invoke: async (cmd: string) => { calls.push(cmd); return cmd === 'sf_soundfont_builtin_path' ? null : builtinBank } } } }
+    g.fetch = async () => ({ ok: true, arrayBuffer: async () => remoteBank }) as unknown as Response
+    check('adj416 未内置 → hasBuiltinBank 为假', (await hasBuiltinBank(lib)) === false)
+    const saved3: ArrayBuffer[] = []
+    const src3 = await prefetchHqLibraryProgress(lib, cacheOf(null, saved3))
+    check('adj416 未内置 → 来源 = remote（联网下载）', src3 === 'remote', src3)
+    check('adj416 只有远端下载结果才写缓存', saved3.length === 1 && saved3[0] === remoteBank, `${saved3.length}`)
+    check('adj416 远端结果不读内置读取命令', !calls.includes('sf_soundfont_resource_read'), calls.join(','))
+    // ④ 纯 Web（无 Tauri）：探测直接判否，不报错
+    calls.length = 0
+    delete g.window
+    check('adj416 非桌面环境 hasBuiltinBank 为假且不调用 invoke', (await hasBuiltinBank(lib)) === false && calls.length === 0, calls.join(','))
+    // ⑤ 来源全不可用 → 明确报错（供 UI 提示），不静默返回空音源
+    g.fetch = async () => ({ ok: false, status: 404 }) as unknown as Response
+    let err = ''
+    try {
+      await resolveHqBank(lib, cacheOf(null, []))
+    } catch (e) {
+      err = e instanceof Error ? e.message : String(e)
+    }
+    check('adj416 缓存/内置/远端都没有 → 抛出明确错误', err.includes('加载失败'), err)
+  } finally {
+    g.window = savedWindow
+    g.fetch = savedFetch
+  }
+}
+
+// ---- 103. 图标集中到 public/icons/ 且只放用得到的（adj417） ----
+// 过去图标全平铺在 public/ 根目录 → dist 根目录几十个 png，看不出哪些是构建产物、哪些是资源；
+// 现在统一放 public/icons/，并**只保留用得到的**（没用的不放，需要时再加）。这里守住四件事：
+// ①清单里的图标文件都真的存在；②public 根目录不再有 png/ico；③sw.js 的预热清单与清单一致
+// （此前就漂移过：漏了「暂停」「下载」）；④manifest / index.html 引用的图标都存在。
+console.log('[103] icons live in public/icons and only the used ones (adj417)')
+{
+  const iconDir = join(root, 'public', ICON_DIR)
+  const missing = ICON_FILE_NAMES.filter((n) => !existsSync(join(iconDir, `${n}.png`)))
+  check('adj417 清单里的 16 个按钮图标都存在于 public/icons/', missing.length === 0, missing.join(','))
+  check('adj417 图标清单无重复文件名', new Set(ICON_FILE_NAMES).size === ICON_FILE_NAMES.length)
+  const rootImages = readdirSync(join(root, 'public')).filter((f) => /\.(png|ico)$/i.test(f))
+  check('adj417 public 根目录不再有散落的 png/ico', rootImages.length === 0, rootImages.join(','))
+  const swJs = readFileSync(join(root, 'public', 'sw.js'), 'utf8')
+  const swIcons = (/const ICON_FILES = \[([^\]]*)\]/.exec(swJs)?.[1] ?? '')
+    .split(',')
+    .map((s) => s.trim().replace(/^'|'$/g, ''))
+    .filter(Boolean)
+  check('adj417 sw.js 预热清单与 ui/toolIcons.ts 完全一致（防清单漂移）', swIcons.join(',') === ICON_FILE_NAMES.join(','), `sw=[${swIcons.join(',')}] ts=[${ICON_FILE_NAMES.join(',')}]`)
+  check('adj417 sw.js 图标 URL 前缀为 /icons/', swJs.includes('`/icons/${n}.png`'))
+  const swPrecacheIcons = [...swJs.matchAll(/'(\/icons\/[^']+)'/g)].map((m) => m[1])
+  check('adj417 sw.js 预缓存的 /icons/ 文件都存在', swPrecacheIcons.length > 0 && swPrecacheIcons.every((p) => existsSync(join(root, 'public', p.replace('/icons/', 'icons/')))), swPrecacheIcons.join(','))
+  const manifest = JSON.parse(readFileSync(join(root, 'public', 'manifest.webmanifest'), 'utf8')) as { icons: { src: string }[] }
+  const manIcons = manifest.icons.map((i) => i.src)
+  check('adj417 manifest 图标指向 /icons/ 且文件存在', manIcons.every((s) => s.startsWith('/icons/') && existsSync(join(root, 'public', s.slice(1)))), manIcons.join(','))
+  const html = readFileSync(join(root, 'index.html'), 'utf8')
+  const htmlIcons = [...html.matchAll(/href="(\/icons\/[^"]+)"/g)].map((m) => m[1])
+  check('adj417 index.html 的 favicon / apple-touch-icon 指向 /icons/ 且文件存在', htmlIcons.length >= 3 && htmlIcons.every((p) => existsSync(join(root, 'public', p.slice(1)))), htmlIcons.join(','))
+  // 赞赏码与 Logo 路径同样走 /icons/（brand/copy.ts 与组件里不得再出现根目录路径）
+  const rootRefs = [...readdirSync(join(root, 'src'), { recursive: true }) as string[]]
+    .filter((f) => /\.tsx?$/.test(f))
+    .filter((f) => new RegExp(`["'\`]/(Jianpu|pwa-\\d+|good)\\.(png|ico)`).test(readFileSync(join(root, 'src', f), 'utf8')))
+  check('adj417 源码里没有遗留的根目录图片路径（Logo/赞赏码/PWA 图标）', rootRefs.length === 0, rootRefs.join(','))
+}
+
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
 runAdj363SaveTests()
   .catch((e) => {
@@ -4880,6 +5134,11 @@ runAdj363SaveTests()
   .catch((e) => {
     failed++
     console.error('  ✗ adj370 文件身份用例抛异常', e)
+  })
+  .then(() => runAdj416BankSourceTests())
+  .catch((e) => {
+    failed++
+    console.error('  ✗ adj416 音源来源用例抛异常', e)
   })
   .then(() => {
     console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
