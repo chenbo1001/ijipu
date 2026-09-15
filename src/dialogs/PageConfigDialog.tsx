@@ -353,7 +353,8 @@ export function PageConfigDialog() {
     // adj418：fill —— 对话框内容撑满高度（页签与面板放中间滚动区，底部按钮固定可见）；
     // width 用 min(700px, 100%) 固定成"桌面满宽上限 / 窄屏铺满"——此前没给宽度，
     // 弹窗宽度由内容撑开，切页签时**弹窗宽度会跟着跳**（各页签内容宽度不同），页签与面板也就对不齐。
-    <Modal title="页面设置" fill width="min(700px, 100%)" onClose={onCancelReset}>
+    // adj422：标题与菜单统一为「设置」（里面包含 全局/主题/音色库/谱面/字体 五个标签）
+    <Modal title="设置" fill width="min(700px, 100%)" onClose={onCancelReset}>
       <div className="pcfg-root">
         {/* 中间滚动区：页签 + 面板（只有这里滚动，底部按钮永远可见） */}
         <div className="pcfg-scroll">

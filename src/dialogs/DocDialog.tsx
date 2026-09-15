@@ -1,10 +1,12 @@
 /**
- * dialogs/DocDialog.tsx — 帮助文档（操作手册 / 脚本语法）
+ * dialogs/DocDialog.tsx — 帮助文档（操作手册 / 脚本语法说明）
  *
- * 从 docs/*.md 以 ?raw 导入，经简易 Markdown 渲染为 HTML 展示（标题/列表/代码块/段落）。
+ * 从 docs/*.md 以 ?raw 导入，经简易 Markdown 渲染为 HTML 展示（标题/列表/代码块/表格/引用/段落）。
  * 零第三方依赖；长文档在对话框内滚动查看。
  * adj353：补全行内 Markdown（`code`、**粗体**、*斜体*、[链接](url)）与多级列表（缩进子项），
  *          修复原文把 `` ` ``、`**`、缩进 `-` 等 MD 标记直接透出的问题。
+ * adj422：支持 **Markdown 表格**（`| a | b |` + 分隔行 → 真正的 `<table>`）与**引用块**（`> `）——
+ *          语法说明要以表格当参考书查（此前表格被降级成等宽文本，读起来吃力）。
  */
 import { Modal } from '../ui/Modal'
 import manualMd from '../../docs/USER-GUIDE.md?raw'
@@ -12,7 +14,8 @@ import syntaxMd from '../../docs/SYNTAX.md?raw'
 
 const docs: Record<'manual' | 'syntax', { title: string; md: string }> = {
   manual: { title: '操作手册', md: manualMd },
-  syntax: { title: '脚本语法', md: syntaxMd },
+  // adj422：与「脚本规则说明」合并后统一叫「脚本语法说明」
+  syntax: { title: '脚本语法说明', md: syntaxMd },
 }
 
 const esc = (s: string) =>
@@ -45,13 +48,24 @@ const inlineMd = (raw: string): string => {
   return out
 }
 
-/** 极简 Markdown→HTML：标题 #、多级列表 -/数字、代码块 围栏、表格 等宽段落、普通段落 */
+/** 极简 Markdown→HTML：标题 #、多级列表 -/数字、代码块 围栏、**表格**、**引用块**、普通段落 */
 function mdToHtml(md: string): string {
   const out: string[] = []
   let inCode = false
   const fence = String.fromCharCode(96).repeat(3) // ``` 代码块围栏（避免字面反引号）
   // 列表栈：每层 {tag 容器标签, liOpen 当前 <li> 是否未闭合（可容纳子列表）}
   const listStack: { tag: 'ul' | 'ol'; liOpen: boolean }[] = []
+  // adj422：表格状态（连续的 | 行合成为一个 <table>；紧随表头的 |---| 分隔行标记为 thead）
+  const table: { rows: string[][]; headRows: number } = { rows: [], headRows: 0 }
+  const isTableRow = (s: string) => /^\s*\|.*\|\s*$/.test(s)
+  const isTableSep = (s: string) => /^\s*\|[\s:|-]+\|\s*$/.test(s)
+  const cellsOf = (s: string) =>
+    s
+      .trim()
+      .replace(/^\|/, '')
+      .replace(/\|$/, '')
+      .split('|')
+      .map((c) => c.trim())
 
   const closeAllLists = () => {
     while (listStack.length) {
@@ -61,9 +75,41 @@ function mdToHtml(md: string): string {
     }
   }
 
+  /** adj422：把缓存的表格行输出成真正的 HTML 表格（前 headRows 行进 <thead>） */
+  const flushTable = () => {
+    if (table.rows.length === 0) return
+    const head = table.rows.slice(0, table.headRows)
+    const body = table.rows.slice(table.headRows)
+    out.push('<table class="doc-md-table">')
+    if (head.length) {
+      out.push('<thead>')
+      for (const r of head) out.push(`<tr>${r.map((c) => `<th>${inlineMd(c)}</th>`).join('')}</tr>`)
+      out.push('</thead>')
+    }
+    if (body.length) {
+      out.push('<tbody>')
+      for (const r of body) out.push(`<tr>${r.map((c) => `<td>${inlineMd(c)}</td>`).join('')}</tr>`)
+      out.push('</tbody>')
+    }
+    out.push('</table>')
+    table.rows = []
+    table.headRows = 0
+  }
+
+  // adj422：引用块——连续的 `> ` 行合成一个 <blockquote>（每行一个 <p>）
+  let inQuote = false
+  const closeQuote = () => {
+    if (inQuote) {
+      out.push('</blockquote>')
+      inQuote = false
+    }
+  }
+
   for (const rawLine of md.split('\n')) {
     const line = rawLine.trimEnd()
     if (line.trimStart().startsWith(fence)) {
+      flushTable()
+      closeQuote()
       if (inCode) {
         out.push('</pre>')
         inCode = false
@@ -79,6 +125,29 @@ function mdToHtml(md: string): string {
       continue
     }
     const t = line.trimEnd()
+    // adj422：引用块（`> 文字`）——帮助文档开头常用来写"怎么读这份文档"
+    if (/^>\s?/.test(t)) {
+      closeAllLists()
+      flushTable()
+      if (!inQuote) {
+        out.push('<blockquote>')
+        inQuote = true
+      }
+      out.push(`<p>${inlineMd(t.replace(/^>\s?/, ''))}</p>`)
+      continue
+    }
+    closeQuote()
+    // adj422：表格——| 行连续排布，第二行是 |---| 分隔行时视为表头
+    if (isTableRow(t)) {
+      closeAllLists()
+      if (isTableSep(t)) {
+        table.headRows = table.rows.length
+      } else {
+        table.rows.push(cellsOf(t))
+      }
+      continue
+    }
+    flushTable()
     if (/^#{1,6} /.test(t)) {
       closeAllLists()
       const level = Math.min(6, (t.match(/^#+/)![0]).length)
@@ -124,16 +193,14 @@ function mdToHtml(md: string): string {
     } else if (t === '') {
       closeAllLists()
       out.push('')
-    } else if (/^\|/.test(t)) {
-      // 表格行：保留为等宽文本（不解析为 HTML 表格）
-      closeAllLists()
-      out.push(`<p class="doc-table">${esc(t)}</p>`)
     } else {
       closeAllLists()
       out.push(`<p>${inlineMd(t)}</p>`)
     }
   }
   closeAllLists()
+  flushTable()
+  closeQuote()
   if (inCode) out.push('</pre>')
   return out.join('\n')
 }

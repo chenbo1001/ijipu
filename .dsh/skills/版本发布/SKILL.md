@@ -1,6 +1,6 @@
 ---
 name: 版本发布
-description: JianpuScript 版本发布全流程：按 SemVer 递增 src/brand/version.ts 的 APP_VERSION 并同步 package.json 与 src-tauri/tauri.conf.json 三处版本号、同步项目文档（docs/ERRORS-LOG.md 错误日志、语法变更同步 JPS-SPEC.md、功能状态更新 ROADMAP/REQUIREMENTS）、Conventional Commits 提交 git（feat/fix/refactor/chore + 中文描述，布局调整带 adjNN 编号）、需要交付时走「编译应用」技能打包。当用户说"发布版本""递增版本号""准备发布""打新版本"或功能/修复开发完成需要落地时使用。
+description: JianpuScript 版本发布全流程：按 SemVer 递增 src/brand/version.ts 的 APP_VERSION 并同步 package.json 与 src-tauri/tauri.conf.json 三处版本号、同步项目文档（docs/ERRORS-LOG.md 错误日志、语法变更同步 docs/SYNTAX.md、功能状态更新 ROADMAP/REQUIREMENTS）、Conventional Commits 提交 git（feat/fix/refactor/chore + 中文描述，布局调整带 adjNN 编号）、需要交付时走「编译应用」技能打包。当用户说"发布版本""递增版本号""准备发布""打新版本"或功能/修复开发完成需要落地时使用。
 whenToUse: 仅当功能/修复/重构开发完成需要走完整发布流程（文档同步 → 版本号三处递增 → git 提交 → 打包交付）时使用；仅打包走「编译应用」技能，仅运行/测试走「环境运行与测试」技能，语法文档同步走「语法规范同步」技能。
 ---
 
@@ -18,7 +18,7 @@ whenToUse: 仅当功能/修复/重构开发完成需要走完整发布流程（�
 | `package.json` | 安装包版本来源之一 | `version` 字段（与上同步） |
 | `src-tauri/tauri.conf.json` | 安装包版本来源之二 | `version` 字段（与上同步） |
 | `docs/ERRORS-LOG.md` | 错误日志 | 本次排错记录（E-年份-序号） |
-| `docs/JPS-SPEC.md` | .jps 语法规范 | 仅语法行为变更时（走「语法规范同步」技能） |
+| `docs/SYNTAX.md` | .jps 语法说明（唯一对外口径） | 仅语法行为变更时（走「语法规范同步」技能） |
 | `docs/ROADMAP.md` / `docs/REQUIREMENTS.md` | 路线图 / 需求清单 | 功能完成勾选、状态更新 |
 | `src/gen/buildInfo.ts` | 构建信息（自动生成） | 无（gen:info 自动注入 BUILD_DATE/GIT_COMMIT） |
 
@@ -27,7 +27,7 @@ whenToUse: 仅当功能/修复/重构开发完成需要走完整发布流程（�
 ### 第 1 步：同步项目文档
 
 - 本次排错/踩坑 → `docs/ERRORS-LOG.md` 追加一条：编号 `E-年份-序号`（取现有最大序号 +1），格式 = 现象/根因/解决/预防，中文简洁
-- 语法/解析行为变更 → 同步 `docs/JPS-SPEC.md`（走「语法规范同步」技能）
+- 语法/解析行为变更 → 同步 `docs/SYNTAX.md`（走「语法规范同步」技能）
 - 功能完成/路线图变化 → 更新 `docs/ROADMAP.md` / `docs/REQUIREMENTS.md` 勾选与状态
 - 布局/UI 调整 → 注释与 commit 标注 `adjNN` 编号（取 git log 最新编号下一个）
 
@@ -67,7 +67,7 @@ SemVer 规则（docs/VERSIONING.md）：
 ## 检查清单
 
 - [ ] docs/ERRORS-LOG.md 本次排错已记录（E-年份-序号）
-- [ ] 语法行为变更时 JPS-SPEC.md 已同步；功能状态在 ROADMAP/REQUIREMENTS 已更新
+- [ ] 语法行为变更时 docs/SYNTAX.md 已同步；功能状态在 ROADMAP/REQUIREMENTS 已更新
 - [ ] 三处版本号一致（version.ts / package.json / tauri.conf.json），递增符合 SemVer
 - [ ] 布局/UI 调整带 adjNN 编号
 - [ ] git 提交完整：各改动提交 + `chore: 版本号递增至 …` 提交
@@ -83,7 +83,7 @@ SemVer 规则（docs/VERSIONING.md）：
 |---|---|---|
 | 安装包版本号与 APP_VERSION 不一致 | 三处只改了一处 | 三处同步（version.ts/package.json/tauri.conf.json） |
 | 漏记错误日志 | 发布时未走第 1 步 | 补齐 ERRORS-LOG.md 记录再发布 |
-| 语法文档与实现不一致 | 语法变更未同步 JPS-SPEC.md | 走「语法规范同步」技能补齐 |
+| 语法文档与实现不一致 | 语法变更未同步 docs/SYNTAX.md | 走「语法规范同步」技能补齐 |
 | 状态栏版本号显示 dev | 构建信息未注入 | 重跑 `npm run gen:info` 或 dev/build |
 
 ## 约束（AGENTS 十一）

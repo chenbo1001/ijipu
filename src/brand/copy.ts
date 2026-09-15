@@ -20,9 +20,8 @@ export const aboutCopy = {
   contact: brand.authorEmail ? `联系：${brand.authorEmail}` : '',
   /** 底部情怀 */
   footer: brand.taglineFooter,
-  /** 致敬说明（较短一句，显示在 footer 下方） */
-  acknowledgement: '本项目以 AGPL-3.0 协议开源，向「番茄简谱」社区致敬。',
-  /** 开源协议说明 */
+  /** 开源协议说明（捐赠入口未配置时显示在关于对话框底部；
+   *  adj422：原来的「致敬」短句已移到操作手册 §九，关于对话框不再重复） */
   license: '本项目基于 GNU Affero General Public License v3.0（AGPL-3.0）发布，欢迎学习、修改与再分发。',
 } as const
 
@@ -49,7 +48,9 @@ export const uiCopy = {
   exportJpg: '导出 JPG 图片',
   exportSvg: '导出 SVG 图片',
   exportPng: '导出 PNG 图片',
-  pageConfig: '页面设置',
+  // adj422：菜单与对话框统一叫「设置」（原「页面设置」——里面早就不只是页面了：
+  // 全局/主题/音色库/谱面/字体五个标签）
+  pageConfig: '设置',
   play: '试听播放',
   about: `关于 ${brand.name}`,
   currentFile: '当前乐谱',

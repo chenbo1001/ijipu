@@ -1905,6 +1905,42 @@ body {
   overflow-x: auto;
   font-size: 12px;
 }
+/* adj422：引用块（帮助文档开头的"怎么读这份文档"之类说明） */
+.doc-content blockquote {
+  margin: 8px 0 12px;
+  padding: 6px 12px;
+  border-left: 3px solid var(--jp-accent);
+  background: var(--jp-bg-app);
+  border-radius: 0 6px 6px 0;
+  color: var(--jp-text-secondary);
+}
+.doc-content blockquote p {
+  margin: 2px 0;
+}
+/* adj422：Markdown 表格（DocDialog 现在把 `| a | b |` 渲染成真正的表格）——语法说明当参考书查用 */
+.doc-content table.doc-md-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0 12px;
+  font-size: 12px;
+}
+.doc-content table.doc-md-table th,
+.doc-content table.doc-md-table td {
+  border: 1px solid var(--jp-border);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.doc-content table.doc-md-table th {
+  background: var(--jp-bg-app);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.doc-content table.doc-md-table td:first-child {
+  white-space: nowrap;
+  font-family: var(--jp-font-mono);
+}
+/* adj353：旧的「表格降级为等宽段落」样式保留（万一有旧文档仍用非表格写法） */
 .doc-content .doc-table { font-family: var(--jp-font-mono); font-size: 11.5px; white-space: pre; }
 
 .modal-head {

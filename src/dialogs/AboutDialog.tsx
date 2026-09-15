@@ -66,9 +66,9 @@ export function AboutDialog() {
         >
           {aboutCopy.footer}
         </p>
-        <p style={{ marginTop: 6, textAlign: 'center', color: 'var(--jp-text-muted)', fontSize: 12 }}>
-          {aboutCopy.acknowledgement}
-        </p>
+        {/* adj419：脚本兼容说明 / 致谢 / 谱师 / 命令行工作流四段移到「操作手册」（docs/USER-GUIDE.md §九），
+            adj422：连「本项目以 AGPL-3.0 协议开源…」这句也一并移过去——关于对话框只留品牌介绍、署名、版本
+            与底部的支持入口；协议说明在操作手册与仓库 LICENSE 里 */}
         <div style={{ marginTop: 10, textAlign: 'center' }}>
           {donate.image ? (
             <button

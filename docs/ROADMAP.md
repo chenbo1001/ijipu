@@ -4,7 +4,7 @@
 |---|---|
 | 文档版本 | v0.1 |
 | 状态 | 基线（待需求方调整优先级） |
-| 关联 | 需求基线见 docs/REQUIREMENTS.md；语法规范见 docs/JPS-SPEC.md |
+| 关联 | 需求基线见 docs/REQUIREMENTS.md；语法规范见 docs/SYNTAX.md（《脚本语法说明》） |
 | 原则 | 每期 = 可运行 + 可验收 + 可演示的增量；每期结束以 git 里程碑收尾 |
 
 ## 分期总览

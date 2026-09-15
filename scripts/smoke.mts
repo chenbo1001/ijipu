@@ -5156,55 +5156,45 @@ console.log('[103] icons live in public/icons and only the used ones (adj417)')
   check('adj417 源码里没有遗留的根目录图片路径（Logo/赞赏码/PWA 图标）', rootRefs.length === 0, rootRefs.join(','))
 }
 
-// ---- 104. 文档里的组合示例必须真能解析（adj419） ----
-// 语法文档（docs/SYNTAX.md 的「组合示例」、docs/JPS-SPEC.md 的附录）里的 ```jps 代码块
-// 是给用户**直接粘贴运行**的，必须解析零错误——文档里的示例最容易过时（改了语法忘了改示例）。
-// 这里把文档里的 ```jps 块**整段抠出来**逐个解析：既保证示例可用，也逼着文档跟实现同步。
-console.log('[104] runnable examples in docs parse clean (adj419)')
+// ---- 104. 文档里的示例必须真能解析（adj419 / adj422） ----
+// 语法说明（docs/SYNTAX.md —— 帮助菜单里的「脚本语法说明」，也是 .jps 语法的唯一对外口径）里的
+// ```jps 代码块是给用户**直接粘贴运行**的，必须解析零错误零告警——文档示例最容易过时。
+// adj422：「脚本语法」与「脚本规则说明」（public/doc/jps-spec.html）已合并为这一份文档，
+// 因此不再检查 HTML 孪生页（已删除），JPS-SPEC.md 也只留指向性占位。
+console.log('[104] runnable examples in docs parse clean (adj419/adj422)')
 {
   // ParseError 是 { line, col, message, severity, hint? }（**没有 pos**）——格式化时按真实字段取
   const fmtIssue = (e: { line?: number; col?: number; severity?: string; message?: string }): string =>
     `L${e.line ?? '?'}:C${e.col ?? '?'}${e.severity === 'warning' ? '(告警)' : ''}:${e.message ?? '?'}`
-  const files = ['docs/SYNTAX.md', 'docs/JPS-SPEC.md']
+  const files = ['docs/SYNTAX.md']
   let total = 0
   for (const f of files) {
     const md = readFileSync(join(root, f), 'utf8')
     const blocks = [...md.matchAll(/```jps\n([\s\S]*?)```/g)].map((m) => m[1])
-    check(`adj419 ${f} 含可运行示例（≥3 段）`, blocks.length >= 3, `${blocks.length}`)
+    check(`adj422 ${f} 含可运行示例（≥6 段）`, blocks.length >= 6, `${blocks.length}`)
     blocks.forEach((code, i) => {
       total++
       const r = parseJps(code)
       const errs = r.errors.filter((e) => e.severity === 'error')
       const warns = r.errors.filter((e) => e.severity === 'warning')
       check(
-        `adj419 ${f} 示例 ${i + 1} 解析零错误`,
+        `adj422 ${f} 示例 ${i + 1} 解析零错误`,
         errs.length === 0,
         errs.map(fmtIssue).join(' / ').slice(0, 200),
       )
       // 文档示例还应当**干净**（连告警都没有）——用户会直接粘贴运行，冒出告警会像"示例写错了"
       check(
-        `adj419 ${f} 示例 ${i + 1} 无告警（可直接粘贴）`,
+        `adj422 ${f} 示例 ${i + 1} 无告警（可直接粘贴）`,
         warns.length === 0,
         warns.map(fmtIssue).join(' / ').slice(0, 200),
       )
     })
   }
-  check('adj419 两份文档合计示例 ≥6 段', total >= 6, `${total}`)
-  // 独立 HTML 规格页（帮助 → 脚本规则说明）里的示例同样要能跑——它是 JPS-SPEC 的手工孪生页，
-  // 最容易忘了跟着改；这里抠出 <pre><code> 里以 `V: ` 开头的块（并按 HTML 实体还原）逐个解析。
-  const html = readFileSync(join(root, 'public', 'doc', 'jps-spec.html'), 'utf8')
-  const htmlBlocks = [...html.matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)]
-    .map((m) => m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&'))
-    .filter((c) => /^V: /m.test(c))
-  check('adj419 jps-spec.html 含可运行示例（≥5 段）', htmlBlocks.length >= 5, `${htmlBlocks.length}`)
-  htmlBlocks.forEach((code, i) => {
-    const bad = parseJps(code).errors
-    check(
-      `adj419 jps-spec.html 示例 ${i + 1} 解析零错误零告警`,
-      bad.length === 0,
-      bad.map(fmtIssue).join(' / ').slice(0, 200),
-    )
-  })
+  check('adj422 语法说明里的可运行示例 ≥10 段（入门递进 + 组合示例集）', total >= 10, `${total}`)
+  // adj422：合并后不应再有第二份语法文档（用户要求只留一份，避免三处漂移）
+  check('adj422 不再存在独立的 HTML 规格页（已合并）', !existsSync(join(root, 'public', 'doc', 'jps-spec.html')))
+  const spec = readFileSync(join(root, 'docs', 'JPS-SPEC.md'), 'utf8')
+  check('adj422 JPS-SPEC.md 已改为指向 SYNTAX.md 的占位说明', spec.includes('SYNTAX.md') && spec.length < 2000, `${spec.length}`)
 }
 
 // ---- 105. 输入条「括倚」组：倚音键插骨架、光标停在 ] 前；不再有虚音符键（adj420） ----

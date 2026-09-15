@@ -136,9 +136,9 @@ export function SoundBankPanel() {
           <button className="btn" style={BTN} onClick={clearAll}>全消</button>
         </div>
         {isOpen && (
-          // adj418：列表高度收到「约 10 条音色」（约 10×19px 行高 + 表头）——整个面板不撑高，
+          // adj422：列表高度收到「约 7 条音色」（用户要求；行高约 19.4px + 表头）——整个面板不撑高，
           // 设置对话框不用滚动就能看到底部按钮；更多音色在列表内滚动查看。
-          <div className="soundbank-voices" style={{ marginLeft: 20, maxHeight: 212, overflow: 'auto', borderLeft: '1px solid var(--jp-border)', paddingLeft: 8, marginBottom: 6 }}>
+          <div className="soundbank-voices" style={{ marginLeft: 20, maxHeight: 154, overflow: 'auto', borderLeft: '1px solid var(--jp-border)', paddingLeft: 8, marginBottom: 6 }}>
             <div style={{ color: HIGHLIGHT, fontSize: 11, marginBottom: 2 }}>库内音色（{GM_VOICE_OPTIONS.length} 种）· 勾选进入试听列表（已选 {enabled.length}）</div>
             {GM_VOICE_OPTIONS.map((v) => (
               <label key={v.program} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, lineHeight: 1.7, color: 'var(--jp-text-primary)', cursor: 'pointer' }}>

@@ -107,10 +107,8 @@ export function TopBar() {
   const openFile = useDocStore((s) => s.openFile)
   const saveFile = useDocStore((s) => s.saveFile)
   const saveFileAs = useDocStore((s) => s.saveFileAs)
-  const undo = useDocStore((s) => s.undo)
-  const redo = useDocStore((s) => s.redo)
-  const canUndo = useDocStore((s) => s.undoStack.length > 0)
-  const canRedo = useDocStore((s) => s.redoStack.length > 0)
+  // adj422：撤销/重做不再挂在菜单上（菜单「编辑」子菜单已移除），因此这里不再订阅 undo/redo —
+  // 两个功能仍由编辑器里的 Ctrl+Z / Ctrl+Y 触发（EditorPane 直接调 store），行为未变。
   // ---- UI store ----
   const openModal = useUiStore((s) => s.openModal)
   const showGuides = useUiStore((s) => s.showGuides)
@@ -692,13 +690,12 @@ export function TopBar() {
     'sep',
     { label: '格式化脚本(&F)', hotkey: 'f', onPick: runFormat },
     'sep',
-    { label: '页面设置(&G)', hotkey: 'g', onPick: () => openModal('pageConfig') },
+    // adj422：菜单项由「页面设置」改为「设置」（与对话框标题、顶栏按钮一致）
+    { label: '设置(&G)…', hotkey: 'g', onPick: () => openModal('pageConfig') },
     { label: '导出(&X)…', hotkey: 'x', onPick: () => openModal('export') },
   ]
-  const editEntries: (MenuEntry | 'sep')[] = [
-    { label: '撤销(&U)', kbd: 'Ctrl+Z', hotkey: 'u', onPick: undo, disabled: !canUndo },
-    { label: '重做(&R)', kbd: 'Ctrl+Y', hotkey: 'r', onPick: redo, disabled: !canRedo },
-  ]
+  // adj422：原「编辑」子菜单（撤销/重做）已从菜单移除——用户要求菜单精简；
+  // **功能保留**：撤销/重做仍走 Ctrl+Z / Ctrl+Y（见下方全局快捷键），store 与历史栈未改。
   const viewEntries: (MenuEntry | 'sep')[] = [
     { label: '编码(&C)', kbd: '1', hotkey: 'c', onPick: () => setViewType('code') },
     // adj322：按宽窄屏选上下(split) 还是左右(splitH/splitHE)
@@ -712,8 +709,9 @@ export function TopBar() {
   const helpEntries: (MenuEntry | 'sep')[] = [
     { label: '快捷键速查(&K)', kbd: 'Ctrl+~', hotkey: 'k', onPick: () => openModal('shortcuts') },
     { label: '操作手册(&M)', hotkey: 'm', onPick: () => openModal('manual') },
-    { label: '脚本语法(&S)', hotkey: 's', onPick: () => openModal('syntax') },
-    { label: '脚本规则说明(&J)', onPick: () => window.open('/doc/jps-spec.html', '_blank') },
+    // adj422：原「脚本语法」与「脚本规则说明」（独立 HTML 页）合并为一份「脚本语法说明」——
+    // 两个入口内容重叠、容易互相漂移；现在统一读 docs/SYNTAX.md（列表页已删除）
+    { label: '脚本语法说明(&S)', hotkey: 's', onPick: () => openModal('syntax') },
     { label: '关于(&A)', hotkey: 'a', onPick: () => openModal('about') },
   ]
 
@@ -752,9 +750,8 @@ export function TopBar() {
           >
             <div className="menu-group-title">文件</div>
             <MenuPanel entries={fileEntries} onClose={closeMenu} />
-            <div className="menu-sep" />
-            <div className="menu-group-title">编辑</div>
-            <MenuPanel entries={editEntries} onClose={closeMenu} />
+            {/* adj422：取消「编辑」子菜单及其下的撤销/重做菜单项（用户要求）——
+                两个**功能**保留：Ctrl+Z / Ctrl+Y 快捷键照旧，历史栈与 store 不动 */}
             <div className="menu-sep" />
             <div className="menu-group-title">视图</div>
             <MenuPanel entries={viewEntries} onClose={closeMenu} />

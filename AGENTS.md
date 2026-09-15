@@ -30,7 +30,7 @@
 - 技能统一放 `.dsh/skills/<技能名>/SKILL.md`（frontmatter 必须含 `name`+`description`）
 
 ## 五、业务关键约定
-1. `.jps` 语法以 `docs/JPS-SPEC.md` 为准：**parser/tokenizer 语法改动必须同步该文档**（走「语法规范同步」技能）
+1. `.jps` 语法以 `docs/SYNTAX.md`（应用内「脚本语法说明」，**唯一对外口径**）为准：**parser/tokenizer 语法改动必须同步该文档**（走「语法规范同步」技能）。`docs/JPS-SPEC.md` 与 `public/doc/jps-spec.html` 已在 adj422 合并进该文档，不要再往那里写规则
 2. 光标联动：元素带 `data-notepos`/`data-cipos`，改动同步两端（`engine/cursorMap.ts`）
 3. 排版虚线收敛在 `engine/layout/guides.ts` 纯函数；**quci 虚线钳制曲部下沿~歌词上沿、cici 不越歌词下沿**（adj53）；预览层只消费不重算
 4. **修饰符间距常量统一在 `engine/layout/spacing.ts`**（adj60：层级间距 LAYER_GAP=2、层内 INNER_GAP=1；**adj64：水平元素最小间距 0.5px，非时值元素（&zkh/&ykh 括号等）占位 BRACKET_PAD 先扣除、剩余宽按比例分摊给带时值元素**）；改间距只改该文件

@@ -51,7 +51,7 @@ npm run tauri:build  # 复用 npm run build（前端 dist），版本随 package
 2. **记录更新**：
    - `CHANGELOG.md` 顶部新增 `[x.y.z]` 条目（功能/修复/文档版本）
    - `docs/ERRORS-LOG.md`：排错条目（`E-年份-序号`）+ 末尾 CHANGELOG 表新增 `vx.y.z` 行
-   - 涉及语法改动同步 `docs/JPS-SPEC.md` / `docs/SYNTAX.md` / `public/doc/jps-spec.html`
+   - 涉及语法改动同步 `docs/SYNTAX.md`（《脚本语法说明》，**唯一对外口径**；`JPS-SPEC.md` / `jps-spec.html` 已在 adj422 合并进它）
 3. **递增版本号（同步多份）**：
    - `src/brand/version.ts`（`APP_VERSION`）、`package.json`、`src-tauri/tauri.conf.json`
    - `package-lock.json`（顶层 + packages[""] 两处）
