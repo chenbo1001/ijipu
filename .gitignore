@@ -44,3 +44,9 @@ build.bat
 # Python 字节码缓存（scripts/ 下的临时 Python 脚本产物，不应入库）
 __pycache__/
 *.pyc
+
+# 宣传视频的本地草稿（文案 + 生成脚本）：属工作区临时产物，不入库
+# （要发布它们时用 `git add -f <file>` 显式强制加入）
+docs/APP-PROMO-VIDEO.md
+scripts/gen-promo-video.py
+dist-video/
