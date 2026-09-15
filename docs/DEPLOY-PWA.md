@@ -13,7 +13,7 @@ npm run build
 # 产出 dist/:
 #   index.html, manifest.webmanifest, sw.js
 #   assets/index-*.js, assets/index-*.css (带 hash)
-#   pwa-192.png, pwa-512.png, Jianpu.ico, Jianpu.png
+#   icons/（图标、Logo、PWA 图标、赞赏码——adj417 起统一放这里，根目录不再散落 png）
 ```
 
 - **Service Worker 注册**：`src/main.tsx` 已写 `navigator.serviceWorker.register('/sw.js')`，

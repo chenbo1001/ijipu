@@ -14,7 +14,7 @@ export function AboutDialog() {
     <Modal title={uiCopy.about}>
       <div style={{ textAlign: 'center', padding: '8px 0 16px' }}>
         <img
-          src="/Jianpu.png"
+          src="/icons/Jianpu.png"
           alt="爱记谱 iJipu Logo"
           width={64}
           height={64}

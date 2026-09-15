@@ -1,6 +1,6 @@
 /**
  * dialogs/DonateDialog.tsx — 支持作者（微信赞赏码）
- * 点击「支持作者」后打开，展示 public/good.png 微信赞赏码供用户扫码。
+ * 点击「支持作者」后打开，展示 public/icons/good.png 微信赞赏码供用户扫码（图片路径见 brand/copy.ts）。
  */
 import { Modal } from '../ui/Modal'
 import { donate } from '../brand/copy'

@@ -1,7 +1,8 @@
 /**
- * ui/ToolIcon.tsx — 按钮图标（adj408）
+ * ui/ToolIcon.tsx — 按钮图标（adj408，adj417 起图标集中于 `public/icons/`）
  *
- * 图标资源统一放 `public/*.png`（中文文件名，200×200 线稿，形状编码在 **alpha 通道**）。
+ * 图标资源统一放 **`public/icons/*.png`**（中文文件名，线稿，形状编码在 **alpha 通道**）；
+ * 名称映射见 `ui/toolIcons.ts`（同时被 `public/sw.js` 预热清单与 smoke 断言使用）。
  *
  * ## 上色方式：CSS mask + `background-color: currentColor`
  * 只取 PNG 的 **alpha 通道**当形状，颜色完全交给 CSS —— 这样解决两件事：
@@ -15,54 +16,18 @@
  * 用法：`<ToolIcon name="layout" />`、`<ToolIcon name="collapse" rotate={90} />`。
  */
 import type { CSSProperties } from 'react'
-
-/** 图标名 → `public/` 下的文件名（不含扩展名；中文文件名按用户给定的图标集） */
-const ICON_FILES = {
-  /** 菜单（汉堡菜单按钮） */
-  menu: '菜单',
-  /** 编码视图（文件） */
-  file: '文件',
-  /** 收起/拆分（左右拆分直接用；上下拆分旋转 90°） */
-  collapse: '收起',
-  /** 预览（眼睛） */
-  view: '查看',
-  /** 排版（行距调整） */
-  layout: '排版',
-  /** 试听（播放三角） */
-  play: '播放',
-  /** 停止（方块） */
-  stop: '停止',
-  /** 暂停（试听时按一下播放键 → 暂停/继续） */
-  pause: '暂停',
-  /** 设置（齿轮） */
-  settings: '设置',
-  /** 导出（用 下载 图标——上传/下载通用语义） */
-  export: '下载',
-  /** 折行（自动换行） */
-  wrap: '折行',
-  /** 字体（Aa） */
-  font: '字体',
-  /** 支持作者（爱心） */
-  heart: '爱心',
-  /** 下拉按钮右侧的下拉指示箭头（视图下拉、字体下拉） */
-  down: '下',
-  /** 「更多」按钮（窄屏收起的工具按钮入口） */
-  more: '更多',
-  /** 输入条（简谱输入键盘） */
-  keyboard: '键盘',
-} as const
-
-export type ToolIconName = keyof typeof ICON_FILES
+import { ICON_DIR, ICON_FILES } from './toolIcons'
+import type { ToolIconName } from './toolIcons'
 
 /**
  * 按钮图标：以 CSS mask 绘制，颜色 = 当前 `color`（因此随主题/激活态走）。
- * @param name 图标名（见 ICON_FILES）
+ * @param name 图标名（见 ui/toolIcons.ts 的 ICON_FILES）
  * @param size 边长（px）；顶栏按钮 16、对话框按钮 14
  * @param rotate 旋转角度（度）——上下拆分用「收起」图标转 90°
  */
 export function ToolIcon({ name, size = 16, rotate = 0 }: { name: ToolIconName; size?: number; rotate?: number }) {
   // encodeURI：文件名是中文，转成 %XX 后对各类 URL 解析都安全（mask url() 同样吃百分号编码）
-  const url = encodeURI(`${import.meta.env.BASE_URL}${ICON_FILES[name]}.png`)
+  const url = encodeURI(`${import.meta.env.BASE_URL}${ICON_DIR}/${ICON_FILES[name]}.png`)
   const style: CSSProperties & Record<string, string | number> = {
     width: size,
     height: size,
