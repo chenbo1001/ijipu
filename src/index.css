@@ -752,11 +752,11 @@ body {
   margin: 4px 0 10px;
 }
 
-/* adj387：音色库面板（设置 → 音色库标签）——宽度收到 2/3，与其它标签的 Row 表单宽度对齐；
-   min-width 兜底：窄对话框下不至于被挤到不可用 */
+/* adj387：音色库面板（设置 → 音色库标签）——宽度与其它标签的 Row 表单对齐；
+   adj418：改为**铺满页签宽度**（不再固定 2/3，避免右侧一大段空白） */
 .soundbank-panel {
-  width: calc(100% * 2 / 3);
-  min-width: 300px;
+  width: 100%;
+  min-width: 0;
 }
 
 /* 汉堡下拉分组标题（窄屏时仍可能用） */
@@ -1939,23 +1939,30 @@ body {
   border-top: 1px solid var(--jp-border);
 }
 
-/* adj282：标签页（页面设置等对话框按分组切换）——节省纵向空间，便于容纳更多设置 */
+/* adj282：标签页（页面设置等对话框按分组切换）——节省纵向空间，便于容纳更多设置
+   adj418：页签**等分对话框宽度**（flex:1 + 居中），既不横向溢出、也不在右侧留一段空白；
+   文字过长时省略号兜底（窄屏 5 个页签也不会把整行撑破）。 */
 .jp-tabs {
   display: flex;
   gap: 4px;
   border-bottom: 1px solid var(--jp-border);
   margin-bottom: 14px;
-  flex-wrap: wrap;
 }
 .jp-tab {
+  flex: 1 1 0;
+  min-width: 0;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--jp-text-secondary);
-  padding: 6px 12px;
+  padding: 6px 8px;
   font-size: 13px;
   cursor: pointer;
   font-family: var(--jp-font-sans);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
 }
 .jp-tab:hover {
   color: var(--jp-text-primary);
@@ -1964,6 +1971,59 @@ body {
   color: var(--jp-accent);
   border-bottom-color: var(--jp-accent);
   font-weight: 600;
+}
+
+/* adj418：内容撑满对话框（head/页签内容滚动、底部按钮固定）——页面设置对话框用 */
+.modal.fill {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal.fill .modal-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* 页面设置：页签 + 面板放进 .pcfg-scroll 滚动，底部按钮在其外（永远可见、不用滚动去找） */
+.pcfg-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+.pcfg-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* 滚动条不压住内容（Windows 下滚动条占宽，避免贴边控件被盖住） */
+  padding-right: 4px;
+}
+.pcfg-foot {
+  flex: 0 0 auto;
+  padding: 10px 0 0;
+  margin-top: 0;
+}
+/* 合并页签（谱面）里的小节标题：区分「纸张与边距 / 音符布局 / 间距 / 连音线」四组 */
+.pcfg-group-title {
+  color: var(--jp-accent);
+  font-size: 12px;
+  font-weight: 600;
+  margin: 10px 0 6px;
+  padding-bottom: 3px;
+  border-bottom: 1px dashed var(--jp-border);
+}
+.pcfg-group-title:first-child {
+  margin-top: 0;
+}
+/* 间距类设置两列铺满页签宽度（adj418：不再固定两列窄宽后在右侧留白；
+   窄屏（手机）也保持两列——每列约 170px 仍放得下「标签 + 数值框」，省纵向空间） */
+.pcfg-grid2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2px 18px;
 }
 
 /* ============ 通用 ============ */
@@ -2178,5 +2238,14 @@ body {
   /* 紧凑对话框在窄屏恢复标准间距 */
   .modal.compact {
     min-width: 0;
+  }
+  /* adj418：手机上间距类设置也保持两列（每列约 170px，够放「标签 + 数值框」），省纵向空间；
+     底部按钮已固定在滚动区之外，占的这点高度不影响按钮可见 */
+  .pcfg-grid2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px 10px;
+  }
+  .pcfg-foot {
+    padding: 8px 0 0;
   }
 }

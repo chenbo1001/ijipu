@@ -16,6 +16,7 @@ export function Modal({
   closeOnMaskClick = true,
   dock,
   compact,
+  fill,
   width,
   onClose,
 }: {
@@ -30,6 +31,12 @@ export function Modal({
   dock?: 'bottom-left' | 'bottom-right'
   /** 紧凑模式（缩小边距与最小宽，adj158：试听对话框用） */
   compact?: boolean
+  /**
+   * adj418：内容撑满对话框高度（`.modal` 变纵向 flex、`.modal-body` 内部滚动）——
+   * 供"内容长 + 底部有按钮"的对话框（页面设置）用：把页签与面板放进自己的滚动区、
+   * 底部按钮留在滚动区之外，于是**永远不用滚动去找按钮**（窄屏/手机上尤其重要）。
+   */
+  fill?: boolean
   /** 自定义宽度（number=px / string=CSS；覆盖默认宽度） */
   width?: number | string
   /** adj315：关闭（Esc/✕/遮罩）前回调——用于"取消不保存"时恢复设置快照 */
@@ -102,7 +109,7 @@ export function Modal({
     >
       <div
         ref={modalRef}
-        className={`modal${dragging ? ' dragging' : ''}${compact ? ' compact' : ''}`}
+        className={`modal${dragging ? ' dragging' : ''}${compact ? ' compact' : ''}${fill ? ' fill' : ''}`}
         style={modalStyle}
         onClick={(e) => e.stopPropagation()}
       >

@@ -1,12 +1,15 @@
 /**
- * dialogs/PageConfigDialog.tsx — 页面设置（纸张/边距/音符布局/间距/字体/连音线 + 全局设置）
+ * dialogs/PageConfigDialog.tsx — 页面设置（谱面：纸张/边距/布局/间距/连音线 + 字体 + 全局）
  *
  * adj282：各分组改为标签页（tab）形式切换，节省纵向空间、便于放入更多设置。
  * adj315：新增「全局」标签页（应用级 uiStore；不写入谱面 # jps-config）。
  *         页面级设置改为「即刻预览 + 保存持久化 + X 恢复」：调整时临时应用到 store
  *         （setPageConfig(next,false) 预览非持久化），保存才写入 .jps，关闭未保存则恢复快照。
+ * adj418：①「页面 / 音符布局 / 间距 / 连音线」四个标签页**合并为「谱面」**一个（分小节标题）；
+ *         ②标签页**等分对话框宽度**、面板内容铺满页签宽度（不留右侧空白、不横向溢出）；
+ *         ③底部三个按钮**固定在对话框底部**（只有中间的页签内容区滚动），永远不用滚动去找。
  *
- * 标签页顺序：全局 → 页面 → 音符布局 → 间距 → 字体 → 连音线。
+ * 标签页顺序：全局 → 主题 → 音色库 → 谱面 → 字体。
  */
 import { useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
@@ -17,7 +20,7 @@ import { THEMES, type ThemeMode } from '../brand/themes'
 import { SoundBankPanel } from './SoundBankPanel'
 import type { PageConfig } from '@ijipu/engine'
 
-type TabId = 'global' | 'theme' | 'soundbank' | 'page' | 'noteLayout' | 'spacing' | 'font' | 'slur'
+type TabId = 'global' | 'theme' | 'soundbank' | 'score' | 'font'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'global', label: '全局' },
@@ -25,11 +28,9 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'theme', label: '主题' },
   // adj384：音色库从顶栏按钮移入设置，紧跟「主题」之后
   { id: 'soundbank', label: '音色库' },
-  { id: 'page', label: '页面' },
-  { id: 'noteLayout', label: '音符布局' },
-  { id: 'spacing', label: '间距' },
+  // adj418：原「页面 / 音符布局 / 间距 / 连音线」四个标签合并为「谱面」（都是"这份谱长什么样"）
+  { id: 'score', label: '谱面' },
   { id: 'font', label: '字体' },
-  { id: 'slur', label: '连音线' },
 ]
 
 export function PageConfigDialog() {
@@ -218,9 +219,12 @@ export function PageConfigDialog() {
             </div>
           </>
         )
-      case 'page':
+      case 'score':
+        // adj418：合并原「页面 / 音符布局 / 间距 / 连音线」四个标签——都是"这份谱长什么样"，
+        // 分组用小节标题体现；间距类设置两列排布（省纵向空间，且铺满页签宽度）。
         return (
           <>
+            <div className="pcfg-group-title">纸张与边距</div>
             <Row label="纸张">
               <select
                 value={draft.page}
@@ -238,48 +242,56 @@ export function PageConfigDialog() {
               <NumInput label="左" value={draft.margin_left} onChange={(v) => updateDraft({ margin_left: v })} />
               <NumInput label="右" value={draft.margin_right} onChange={(v) => updateDraft({ margin_right: v })} />
             </Row>
+
+            <div className="pcfg-group-title">音符布局</div>
+            <Row label="布局模式">
+              <select
+                value={draft.noteSpaceLayout}
+                onChange={(e) => updateDraft({ noteSpaceLayout: e.target.value as PageConfig['noteSpaceLayout'] })}
+              >
+                {/* adj289：空间优先设为默认并置于首位；时值优先保留可选 */}
+                <option value="space">空间优先</option>
+                <option value="duration">时值优先</option>
+              </select>
+            </Row>
+            <Row label="连音线样式">
+              <select
+                value={draft.lianyinxian_type}
+                onChange={(e) => updateDraft({ lianyinxian_type: Number(e.target.value) as 0 | 1 | 2 })}
+              >
+                <option value={0}>自动</option>
+                <option value={1}>圆弧</option>
+                <option value={2}>平顶</option>
+              </select>
+            </Row>
+
+            <div className="pcfg-group-title">间距(px)</div>
+            {/* adj105：间距项两列排列，节省纵向空间；adj418：铺满页签宽度（不再右侧留白） */}
+            <div className="pcfg-grid2">
+              <Row label="描述头高">
+                <NumInput label="" value={draft.descAreaH} onChange={(v) => updateDraft({ descAreaH: v })} />
+              </Row>
+              <Row label="首行至描述头间距">
+                <NumInput label="" value={draft.body_margin_top} onChange={(v) => updateDraft({ body_margin_top: v })} />
+              </Row>
+              <Row label="曲部与曲部间距">
+                <NumInput label="" value={draft.height_ciqu} onChange={(v) => updateDraft({ height_ciqu: v })} />
+              </Row>
+              <Row label="曲部与词部间距">
+                <NumInput label="" value={draft.height_quci} onChange={(v) => updateDraft({ height_quci: v })} />
+              </Row>
+              <Row label="词部与词部间距">
+                <NumInput label="" value={draft.height_cici} onChange={(v) => updateDraft({ height_cici: v })} />
+              </Row>
+              <Row label="曲部与上词部间距">
+                <NumInput label="" value={draft.height_ciqu_lyric} onChange={(v) => updateDraft({ height_ciqu_lyric: v })} />
+              </Row>
+              {/* adj297：两端对齐最小小节数——行小节数小于该值自然对齐（行尾留白），≥ 该值撑满两端对齐 */}
+              <Row label="两端对齐最小小节数">
+                <NumInput label="" value={draft.align_min_bars} onChange={(v) => updateDraft({ align_min_bars: v })} />
+              </Row>
+            </div>
           </>
-        )
-      case 'noteLayout':
-        return (
-          <Row label="布局模式">
-            <select
-              value={draft.noteSpaceLayout}
-              onChange={(e) => updateDraft({ noteSpaceLayout: e.target.value as PageConfig['noteSpaceLayout'] })}
-            >
-              {/* adj289：空间优先设为默认并置于首位；时值优先保留可选 */}
-              <option value="space">空间优先</option>
-              <option value="duration">时值优先</option>
-            </select>
-          </Row>
-        )
-      case 'spacing':
-        return (
-          // adj105：间距项两列排列，节省纵向空间
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 18px' }}>
-            <Row label="描述头高">
-              <NumInput label="" value={draft.descAreaH} onChange={(v) => updateDraft({ descAreaH: v })} />
-            </Row>
-            <Row label="首行至描述头间距">
-              <NumInput label="" value={draft.body_margin_top} onChange={(v) => updateDraft({ body_margin_top: v })} />
-            </Row>
-            <Row label="曲部与曲部间距">
-              <NumInput label="" value={draft.height_ciqu} onChange={(v) => updateDraft({ height_ciqu: v })} />
-            </Row>
-            <Row label="曲部与词部间距">
-              <NumInput label="" value={draft.height_quci} onChange={(v) => updateDraft({ height_quci: v })} />
-            </Row>
-            <Row label="词部与词部间距">
-              <NumInput label="" value={draft.height_cici} onChange={(v) => updateDraft({ height_cici: v })} />
-            </Row>
-            <Row label="曲部与上词部间距">
-              <NumInput label="" value={draft.height_ciqu_lyric} onChange={(v) => updateDraft({ height_ciqu_lyric: v })} />
-            </Row>
-            {/* adj297：两端对齐最小小节数——行小节数小于该值自然对齐（行尾留白），≥ 该值撑满两端对齐 */}
-            <Row label="两端对齐最小小节数">
-              <NumInput label="" value={draft.align_min_bars} onChange={(v) => updateDraft({ align_min_bars: v })} />
-            </Row>
-          </div>
         )
       case 'font':
         return (
@@ -333,73 +345,66 @@ export function PageConfigDialog() {
             </Row>
           </>
         )
-      case 'slur':
-        return (
-          <Row label="样式">
-            <select
-              value={draft.lianyinxian_type}
-              onChange={(e) => updateDraft({ lianyinxian_type: Number(e.target.value) as 0 | 1 | 2 })}
-            >
-              <option value={0}>自动</option>
-              <option value={1}>圆弧</option>
-              <option value={2}>平顶</option>
-            </select>
-          </Row>
-        )
     }
   }
 
   return (
-    <Modal title="页面设置" onClose={onCancelReset}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, fontSize: 13 }}>
-        <div className="jp-tabs">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              className={`jp-tab${tab === t.id ? ' active' : ''}`}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
+    // adj418：fill —— 对话框内容撑满高度（页签与面板放中间滚动区，底部按钮固定可见）；
+    // width 用 min(700px, 100%) 固定成"桌面满宽上限 / 窄屏铺满"——此前没给宽度，
+    // 弹窗宽度由内容撑开，切页签时**弹窗宽度会跟着跳**（各页签内容宽度不同），页签与面板也就对不齐。
+    <Modal title="页面设置" fill width="min(700px, 100%)" onClose={onCancelReset}>
+      <div className="pcfg-root">
+        {/* 中间滚动区：页签 + 面板（只有这里滚动，底部按钮永远可见） */}
+        <div className="pcfg-scroll">
+          <div className="jp-tabs">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                className={`jp-tab${tab === t.id ? ' active' : ''}`}
+                onClick={() => setTab(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {renderPanel()}
         </div>
-        {renderPanel()}
-      </div>
 
-      <div className="modal-foot" style={{ padding: '12px 0 0', marginTop: 4 }}>
-        <button
-          className="btn"
-          onClick={() => {
-            updateDraft({ ...defaultPageConfig })
-          }}
-        >
-          恢复默认
-        </button>
-        <button
-          className="btn"
-          title="把当前生效的全部设置写成全量 # jps-config（与默认相同的项也会写入）——要把这份谱发给别人、保证任何机器上都长一样时用"
-          onClick={() => {
-            // adj-font（D1）：差量写入是默认；这里显式"固化全部"（全量写入），供分享/存档
-            committedRef.current = true
-            setPageConfig(snapRef.current, false) // 丢弃预览改动，按当前生效配置固化
-            persistFullConfig()
-            closeModal()
-          }}
-        >
-          固化全部到谱面
-        </button>
-        <button
-          className="btn primary"
-          onClick={() => {
-            // adj83：保存设置时持久化到源码 # jps-config 注释（每首谱用自己的设置）
-            // adj-font（D1）：默认**差量写入**（只写与默认不同的字段；全部为默认时删除设置行）
-            committedRef.current = true
-            setPageConfig(draft, true)
-            closeModal()
-          }}
-        >
-          保存设置
-        </button>
+        <div className="modal-foot pcfg-foot">
+          <button
+            className="btn"
+            onClick={() => {
+              updateDraft({ ...defaultPageConfig })
+            }}
+          >
+            恢复默认
+          </button>
+          <button
+            className="btn"
+            title="把当前生效的全部设置写成全量 # jps-config（与默认相同的项也会写入）——要把这份谱发给别人、保证任何机器上都长一样时用"
+            onClick={() => {
+              // adj-font（D1）：差量写入是默认；这里显式"固化全部"（全量写入），供分享/存档
+              committedRef.current = true
+              setPageConfig(snapRef.current, false) // 丢弃预览改动，按当前生效配置固化
+              persistFullConfig()
+              closeModal()
+            }}
+          >
+            固化全部到谱面
+          </button>
+          <button
+            className="btn primary"
+            onClick={() => {
+              // adj83：保存设置时持久化到源码 # jps-config 注释（每首谱用自己的设置）
+              // adj-font（D1）：默认**差量写入**（只写与默认不同的字段；全部为默认时删除设置行）
+              committedRef.current = true
+              setPageConfig(draft, true)
+              closeModal()
+            }}
+          >
+            保存设置
+          </button>
+        </div>
       </div>
     </Modal>
   )
@@ -430,9 +435,11 @@ function FontSelect({ value, onChange }: { value: string; onChange: (v: string) 
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
+    // adj418：标签列给足宽度且不换行（「两端对齐最小小节数」这类长标签不再折成两行），
+    // 右侧控件按 flexWrap 自动换行，窄屏也不会横向溢出。
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-      <span style={{ width: 88, color: 'var(--jp-text-secondary)', fontSize: 12 }}>{label}</span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>{children}</div>
+      <span style={{ minWidth: 96, color: 'var(--jp-text-secondary)', fontSize: 12, whiteSpace: 'nowrap' }}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>{children}</div>
     </div>
   )
 }

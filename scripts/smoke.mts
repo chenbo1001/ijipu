@@ -81,6 +81,11 @@ const MR = defaultPageConfig.margin_right
 const MT = defaultPageConfig.margin_top
 const PAGE_W = 595.28 // A4 宽（defaultPageConfig.page 默认 A4）
 const RIGHT_EDGE = PAGE_W - MR // 右内容边界
+// adj418：左右边距默认 40 → 50（用户要求）。下面若干「自然宽」断言的绝对 x 是按 **40 基准**
+// 实测钉住的回归值——自然宽本身与边距无关，所以只需加上左移增量；而"按前面曲部行对齐"的行宽
+// 取决于可用宽（= 右边界 − 左边距），可用宽变窄 → 每拍宽变窄，它的偏移**不等于** ML_SHIFT，
+// 这类值按调整后的实测重新钉住并在注释里说明。默认边距再改时只需动 ML_SHIFT。
+const ML_SHIFT = ML - 40 // 左边距相对「40 基准」的增量
 const META_H = MT + defaultPageConfig.descAreaH + defaultPageConfig.body_margin_top // 描述头区域高（metaAreaH）
 // adj289：引擎默认现为空间优先；既有布局/坐标断言按「时值优先」基准，故用 DUR_CFG 显式化
 const DUR_CFG = { ...defaultPageConfig, noteSpaceLayout: 'duration' as const }
@@ -1602,7 +1607,7 @@ const notesW2 = layW2.pages[0].notes
 check('时值等宽：1- 宽 = 2 × 1 拍宽', Math.abs(notesW2[0].width - notesW2[1].width * 2) < 0.5, `${notesW2[0].width} vs ${notesW2[1].width}`)
 check('1 拍音符宽一致', Math.abs(notesW2[1].width - notesW2[2].width) < 0.1)
 // adj253：单行 2 小节（≤3）自然宽——avgW=max/2、小于 avgW 的拍以 avgW 显示（实测中心 152.1）
-check('adj198 自然宽（小节 2 首音符中心）', Math.abs(notesW2[4].x + 6 - 152.1) < 0.5, `x=${notesW2[4].x} center=${notesW2[4].x + 6}`)
+check('adj198 自然宽（小节 2 首音符中心）', Math.abs(notesW2[4].x + 6 - (152.1 + ML_SHIFT)) < 0.5, `x=${notesW2[4].x} center=${notesW2[4].x + 6}`)
 // 两端对齐 + 小节均分：8 小节 → 行 1（7 小节）铺满均分，行 2（最后 1 小节 ≤3）自然宽不撑满
 const rj2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |\n')
 const layJ = layoutScore(rj2, DUR_CFG)
@@ -1616,11 +1621,13 @@ const row1Sorted = row1Notes.sort((a, b) => a.x - b.x)
 check('行 1 小节宽按拍数（第 2 小节首音符 > 行 1 首音符 + 4 拍宽）', row1Sorted[4].x + 6 > row1Sorted[0].x + 6 + 4 * 11.824, `x=${row1Sorted[4].x} center=${row1Sorted[4].x + 6}`)
 const row2Notes = layJ.pages[0].notes.filter((n) => n.y === rowsJ[1])
 const maxRight2 = Math.max(...row2Notes.map(segEnd))
-// adj199：行 2 前面有曲部（行 1）→ 每拍宽与行 1 一致，右缘 106.7（对齐而非自然宽）
-check('adj199 最后一行前面有曲部 → 按小节线对齐（右缘 106.7）', Math.abs(maxRight2 - 106.7) < 1, `right=${maxRight2}`)
+// adj199：行 2 前面有曲部（行 1）→ 每拍宽与行 1 一致（对齐而非自然宽）
+// adj418：该行宽 = 参考行每拍宽 × 4，随可用宽变化（边距 40→50 后为 113.95，非简单 +10）
+check('adj199 最后一行前面有曲部 → 按小节线对齐', Math.abs(maxRight2 - 113.95) < 1, `right=${maxRight2}`)
 // adj199：行 2（未撑满）前面有曲部（行 1）→ 每小节宽与行 1 对齐（小节线 x 沿用参考行）
 const row1BarsAdj = layJ.pages[0].barlines.filter((b) => Math.abs(b.yTop - row1Notes[0].y + BAR_TOP) < 0.5)
-check('adj199 行 1 小节线位置（参考行）', row1BarsAdj.length >= 6 && Math.abs(row1BarsAdj[0].x - 115.2) < 1, `x=${row1BarsAdj[0]?.x}`)
+// adj418：行 1（7 小节）撑满，小节线 x 由可用宽决定（边距 40→50 后 115.2 → 122.4）
+check('adj199 行 1 小节线位置（参考行）', row1BarsAdj.length >= 6 && Math.abs(row1BarsAdj[0].x - 122.4) < 1, `x=${row1BarsAdj[0]?.x}`)
 const row2BarsAdj = layJ.pages[0].barlines
   .filter((b) => Math.abs(b.yTop - (rowsJ[1] - BAR_TOP)) < 0.5)
   .sort((a, b) => a.x - b.x)
@@ -1644,7 +1651,9 @@ check('adj297 默认 4 小节两端对齐（≥4）', maxRight4 > RIGHT_EDGE - 1
 const maxRight5n = Math.max(
   ...layoutScore(rj5, { ...DUR_CFG, align_min_bars: 6 }).pages[0].notes.map(segEnd),
 )
-check('adj297 配置 6：5 小节自然宽不撑满', maxRight5n < RIGHT_EDGE - 100, `right=${maxRight5n}`)
+// adj297：配置 6（自然宽）与默认 4（撑满）对比——自然宽应明显短于撑满，而不是卡"离右边界还差 100px"
+// （adj418：改成相对比较，边距/纸张变化都不会让它误报）
+check('adj297 配置 6：5 小节自然宽不撑满', maxRight5n < maxRight5 - 50, `natural=${maxRight5n} stretched=${maxRight5}`)
 // align_min_bars=2：2 小节（≥2）也两端对齐
 const rj2b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 |\n')
 const maxRight2s = Math.max(
@@ -1661,14 +1670,15 @@ check('adj297 配置 2：2 小节两端对齐（≥2）', maxRight2s > RIGHT_EDG
   const rows211 = [...new Set(lay211.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
   const lastRow211 = lay211.pages[0].notes.filter((n) => n.y === rows211[rows211.length - 1])
   const lastRight211 = Math.max(...lastRow211.map(segEnd))
-  check('adj211 最后一行 || 终止（3 小节）→ 自然宽 195.1', Math.abs(lastRight211 - 195.1) < 1, `right=${lastRight211}`)
+  check('adj211 最后一行 || 终止（3 小节）→ 自然宽', Math.abs(lastRight211 - (195.1 + ML_SHIFT)) < 1, `right=${lastRight211}`)
   // 对照：同谱 | 结尾，最后一行 3 小节仍按前面行对齐（180.4）
   const r211b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 5 6 7 1 |\n')
   const lay211b = layoutScore(r211b, DUR_CFG)
   const rows211b = [...new Set(lay211b.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
   const lastRow211b = lay211b.pages[0].notes.filter((n) => n.y === rows211b[rows211b.length - 1])
   const lastRight211b = Math.max(...lastRow211b.map(segEnd))
-  check('adj211 对照：| 结尾最后一行仍按前面行对齐（180.4）', Math.abs(lastRight211b - 180.4) < 1, `right=${lastRight211b}`)
+  // adj418：这一行是"按前面行对齐"（每拍宽来自参考行），随可用宽变化 → 重钉为实测 184.85
+  check('adj211 对照：| 结尾最后一行仍按前面行对齐', Math.abs(lastRight211b - 184.85) < 1, `right=${lastRight211b}`)
 }
 
 // ---- 23. 细节修复（adj2） ----
@@ -1679,15 +1689,15 @@ const layBar = layoutScore(rbar, DUR_CFG)
 const bars23 = layBar.pages[0].barlines
 check('小节线 2 条', bars23.length === 2, `got ${bars23.length}`)
 // adj198：单行 2 小节自然宽——线 1 在小节 1 右端（实测 122.6）
-check('adj198 线 1 在小节 1 内容右端（自然宽）', Math.abs(bars23[0].x - 122.6) < 1, `x=${bars23[0].x}`)
+check('adj198 线 1 在小节 1 内容右端（自然宽）', Math.abs(bars23[0].x - (122.6 + ML_SHIFT)) < 1, `x=${bars23[0].x}`)
 // 行尾小节线：自然宽下不到右边界（实测 203.7，不铺满）
-check('adj198 线 2 在自然宽行尾（203.7，不铺满）', Math.abs(bars23[1].x - 203.7) < 1, `x=${bars23[1].x}`)
+check('adj198 线 2 在自然宽行尾（不铺满）', Math.abs(bars23[1].x - (203.7 + ML_SHIFT)) < 1, `x=${bars23[1].x}`)
 // 行首空 seg（|:）不占宽
 const rr23 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 3 | 5 6 7 1 |\n')
 const layRr = layoutScore(rr23, DUR_CFG)
 const noteRr = layRr.pages[0].notes[0]
 // adj198：行首 |: 自然宽（首音符 x+6 = 实测 64.6；adj391 线组 8.4→7.6 后整体左移 0.8）
-check('adj198 行首 |: 占位（首音符中心 = 实测 64.6）', Math.abs(noteRr.x + 6 - 64.6) < 0.6, `center=${noteRr.x + 6}`)
+check('adj198 行首 |: 占位（首音符中心）', Math.abs(noteRr.x + 6 - (64.6 + ML_SHIFT)) < 0.6, `center=${noteRr.x + 6}`)
 check('|: 行首：粗线左缘贴左边距（x = 40 + 线组半宽）', Math.abs(layRr.pages[0].barlines[0].x - (ML + barlineTotalW('|:') / 2)) < 1, `x=${layRr.pages[0].barlines[0].x} expect=${ML + barlineTotalW('|:') / 2}`)
 
 // 歌词中心对齐音符数字（增时线音符 1- 的歌词在数字下方）
@@ -1709,7 +1719,7 @@ console.log('[24] adj3 alignment')
 const rc24 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n')
 const layC24 = layoutScore(rc24, DUR_CFG)
 const n24 = layC24.pages[0].notes[0]
-check('adj198 1 拍音符居中于拍段（自然宽 53）', Math.abs(n24.x + 6 - 53) < 0.5, `center=${n24.x + 6}`)
+check('adj198 1 拍音符居中于拍段（自然宽）', Math.abs(n24.x + 6 - (53 + ML_SHIFT)) < 0.5, `center=${n24.x + 6}`)
 // 1/ 2/ 各居中于半拍段（自然宽 perBeat 14）
 const rh24 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1/ 2/ |\n')
 const nH24 = layoutScore(rh24, DUR_CFG).pages[0].notes
@@ -1743,7 +1753,7 @@ const row2Bars = barsJ25.filter((b) => Math.abs(b.yTop - rowTop(rowsJ[1])) < 0.5
 check('行 1 7 条小节线', row1Bars.length === 7, `got ${row1Bars.length}`)
 check('行 2 1 条小节线', row2Bars.length === 1, `got ${row2Bars.length}`)
 // adj199：行 2（1 小节 ≤3）前面有曲部（行 1）→ 按小节线对齐，线 1 = 行 1 线 1 = 115.2
-check('adj199 行 2 按前面曲部行对齐（线 1 = 115.2）', Math.abs(row2Bars[0].x - 115.2) < 0.5, `x=${row2Bars[0].x}`)
+check('adj199 行 2 按前面曲部行对齐（线 1）', Math.abs(row2Bars[0].x - 122.4) < 0.5, `x=${row2Bars[0].x}`)
 
 // ---- 26. 超拍小节容错（adj5） ----
 console.log('[26] over-beat bars (adj5)')
@@ -1802,9 +1812,9 @@ const gapCfg = { ...DUR_CFG, bar_gap: 10 }
 const layGap = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n'), gapCfg)
 const notesGap = layGap.pages[0].notes
 // adj198：自然宽（gap 体现在小节线后空间）——小节 2 首音符中心 = 实测 135
-check('adj198 小节间距生效（小节 2 首音符 = 135）', Math.abs(notesGap[4].x + 6 - 135) < 0.5, `center=${notesGap[4].x + 6}`)
+check('adj198 小节间距生效（小节 2 首音符）', Math.abs(notesGap[4].x + 6 - (135 + ML_SHIFT)) < 0.5, `center=${notesGap[4].x + 6}`)
 const barsGap = layGap.pages[0].barlines
-check('adj198 小节线在内容右端（自然宽 123）', Math.abs(barsGap[0].x - 123) < 0.5, `x=${barsGap[0].x}`)
+check('adj198 小节线在内容右端（自然宽）', Math.abs(barsGap[0].x - (123 + ML_SHIFT)) < 0.5, `x=${barsGap[0].x}`)
 
 // ---- 30. 描述头布局与拖拽（adj9） ----
 console.log('[30] meta layout (adj9)')
