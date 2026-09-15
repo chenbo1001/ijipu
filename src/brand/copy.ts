@@ -33,8 +33,8 @@ export const aboutCopy = {
 /** 捐赠/支持作者（Q-10）。donateImage 为微信赞赏码图片路径（public/ 下）；为空则不显示捐赠入口。
  *  按钮文案见 donate.label；「关于」对话框点击后打开模态框展示赞赏码。 */
 export const donate = {
-  /** 微信赞赏码图片路径（public 下，如 '/good.png'）——留空 = 不显示捐赠入口 */
-  image: '/good.png',
+  /** 微信赞赏码图片路径（adj417 起图片统一放 public/icons/ 下，如 '/icons/good.png'）——留空 = 不显示捐赠入口 */
+  image: '/icons/good.png',
   /** 捐赠按钮文案 */
   label: '支持作者 ❤',
   /** 显示在赞赏码下方的说明 */
@@ -166,4 +166,6 @@ export const playbackCopy = {
   loading: '加载中…',
   loaded: '已加载',
   failedFallback: '加载失败',
+  /** adj416：桌面端随安装包内置音源（安装目录 generaluser_gs.sf2）→ 直接读取，无需下载 */
+  builtinBankHint: '✓ 使用随应用内置音源（安装目录 generaluser_gs.sf2），无需下载、离线可用。',
 } as const

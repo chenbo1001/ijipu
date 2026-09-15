@@ -1,14 +1,17 @@
 /**
  * dialogs/PlaybackDialog.tsx — 试听播放（adj344：固定 SpessaSynth 高保真，移除合成/midi-js 试听）
  *
- * 能力：速度 30~240 拍/分（默认取 J 描述头）；固定 SpessaSynth 高保真音源（SF2 内置本地、
- * 首次打开即自动下载并缓存到 IndexedDB，后续直接读缓存；下载中显示进度提示）；「音色」下拉
+ * 能力：速度 30~240 拍/分（默认取 J 描述头）；固定 SpessaSynth 高保真音源（桌面为随安装包
+ * 内置在安装目录的 SF2，直接读取；Web 首次打开即自动下载并缓存到 IndexedDB，后续直接读缓存；
+ * 需要下载时显示进度提示）；「音色」下拉
  * 仅列用户启用的收藏音色（GM program，默认含常用音色，由「设置 → 音色库」勾选）；播放/停止；
  * 播放中音符高亮 + 自动滚屏（复用 M3 联动）；反复记号展开。
  * adj347：① 打开试听即自动下载音源（不再要求用户先手动点下载，点播放即可用）；
  * ② 音色默认启用一组常用音色（首次即可选）。
  * adj344：试听简化：①去掉「模式/音色库」下拉（不再提供合成/采样切换），固定 SpessaSynth
  * 高保真；②play() 收敛为高保真，移除合成/midi-js 采样分支；③「音色」只列启用收藏音色。
+ * adj416：桌面端音源随安装包内置在**安装目录**（`generaluser_gs.sf2`）——直接读文件、不提示下载；
+ * 音源来源统一走 resolveHqBank（缓存 → 内置 → 联网）。
  * adj158：① 内容压缩缩小对话框；② 播放时停靠窗口右下角让开预览区；
  * ③ 播放中双击谱面音符 → 快速跳到该处重新播放（PreviewPane 通过 playbackTick 触发）。
  */
@@ -18,8 +21,8 @@ import { ToolIcon } from '../ui/ToolIcon'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { playbackCopy } from '../brand/copy'
-import { createHqCache, prefetchHqLibraryProgress } from '../playback/spessaCache'
-import { SpessaSynthBackend, getHqLibrary, GM_VOICE_OPTIONS, firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
+import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../playback/spessaCache'
+import { SpessaSynthBackend, getHqLibrary, hasBuiltinBank, GM_VOICE_OPTIONS, firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
 // adj409：暂停/续播的剩余事件平移（纯函数）
 import { shiftEventsFrom } from '../playback/playbackTimeline'
 import { layoutScore, buildPlaySequence, inferBpm, schedulePlay } from '@ijipu/engine'
@@ -66,6 +69,8 @@ export function PlaybackDialog() {
   const [totalMs, setTotalMs] = useState(0)
   // adj347/348：音源下载中（首次打开自动后台下载；前台仅文字提示，不阻塞其它交互）
   const [downloading, setDownloading] = useState(false)
+  // adj416：音源随安装包内置（安装目录 generaluser_gs.sf2）→ 直接读文件，不显示下载提示
+  const [builtinBank, setBuiltinBank] = useState(false)
   // adj293：播放异常提示（async play 若中途抛错此前被静默吞掉 → 无声无色块无法定位）
   const [playError, setPlayError] = useState<string | null>(null)
   // adj：窄屏（≤640px）下对话框已是 bottom-sheet 靠底，播放时不再 dock 到 bottom-right
@@ -124,21 +129,31 @@ export function PlaybackDialog() {
 
   // adj347：确保音源就绪（优先读缓存；未缓存则自动下载并缓存，带进度提示）。
   // 用共享 Promise：打开试听即自动下载，点播放时复用同一下载，避免重复下载。
+  // adj416：桌面端音源随安装包内置在安装目录——先探测（极快），有就直接用、不显示下载提示。
   const ensureBank = (): Promise<void> => {
     if (!bankPromiseRef.current) {
-      setDownloading(true)
+      const hqLib = getHqLibrary()
       setSamplerState('loading')
       bankPromiseRef.current = (async () => {
-        const hqLib = getHqLibrary()
-        await prefetchHqLibraryProgress(hqLib, hqCache)
-        setSamplerState('ready')
+        // adj416：桌面随安装包内置音源（安装目录 SF2）→ 直接读文件即可，不必再走缓存/下载流程
+        if (await hasBuiltinBank(hqLib)) {
+          setBuiltinBank(true)
+          setSamplerState('ready')
+          return
+        }
+        setDownloading(true)
+        try {
+          await prefetchHqLibraryProgress(hqLib, hqCache)
+          setSamplerState('ready')
+        } finally {
+          setDownloading(false)
+        }
       })()
         .catch((e) => {
           setSamplerState('failed')
           throw e
         })
         .finally(() => {
-          setDownloading(false)
           bankPromiseRef.current = null
         })
     }
@@ -321,8 +336,8 @@ export function PlaybackDialog() {
         const hqLib = getHqLibrary()
         // adj347：先确保音源就绪（初次自动下载/缓存；已缓存直接读）；点播放不再重复下载
         await ensureBank()
-        const bank = await hqCache.load(hqLib.id)
-        if (!bank) throw new Error('音源缓存缺失')
+        // adj416：取音源字节——缓存优先，其次**安装目录内置 SF2**（桌面直接读文件），最后才是联网下载
+        const { bank } = await resolveHqBank(hqLib, hqCache)
         await backend.load(bank)
         backend.setVoice(playbackHqVoice)
         setSamplerState('ready')
@@ -487,6 +502,10 @@ export function PlaybackDialog() {
                 ⏳ 正在后台下载音色库（约30MB，仅首次）…下载期间可正常操作。
               </div>
             )}
+            {/* adj416：桌面端随安装包内置音源（安装目录 generaluser_gs.sf2）→ 直接使用，不提示下载 */}
+            {builtinBank && !downloading && (
+              <div style={{ color: 'var(--jp-text-muted)', fontSize: 11 }}>{playbackCopy.builtinBankHint}</div>
+            )}
 
             <div style={{ color: 'var(--jp-text-muted)', fontSize: 11, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
               <span>反复/跳房子自动展开 · 音色「自动」时按谱面声部/乐器路由 · 播放中音符高亮</span>
@@ -501,7 +520,7 @@ export function PlaybackDialog() {
           {/* 右：播放 / 暂停 / 停止（上下排列，垂直居中） */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, justifyContent: 'center' }}>
             {/* adj170：播放按钮与停止按钮风格一致（去掉 primary 强调样式）
-                adj408：按钮图标改用 public/*.png（播放/暂停/停止），与顶栏同一套上色（mask + currentColor）
+                adj408：按钮图标改用 public/icons/*.png（播放/暂停/停止），与顶栏同一套上色（mask + currentColor）
                 adj409：播放键改**开关**——播放中显示「暂停」（暂停.png），按一下暂停；暂停后显示「继续」（播放.png）
                        再按恢复；点击后焦点留在本按钮，空格即可暂停/继续 */}
             <button

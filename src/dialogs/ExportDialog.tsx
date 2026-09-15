@@ -8,8 +8,8 @@ import { useUiStore } from '../store/uiStore'
 import { layoutScore, renderScoreToSvg, buildPlaySequence, inferBpm, eventsToMidi } from '@ijipu/engine'
 import { renderToAudioBuffer, audioBufferToWav, audioBufferToMp3 } from '../export/audio'
 import { exportSvg, exportPng, exportJpg, exportPdf } from '../export/export'
-import { createHqCache } from '../playback/spessaCache'
-import { getHqLibrary, loadHqBank, firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
+import { createHqCache, resolveHqBank } from '../playback/spessaCache'
+import { getHqLibrary, firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
 
 /** 下载字节（Blob + 临时 <a>） */
 function downloadBytes(bytes: Uint8Array, name: string, type: string) {
@@ -35,21 +35,17 @@ export function ExportDialog() {
   const [error, setError] = useState<string | null>(null)
   // adj294：图片清晰度（PNG/JPG 共用倍率，2x 标准 / 4x 高清 / 6x 超清）
   const [imgScale, setImgScale] = useState<number>(2)
-  // adj345：导出用 SpessaSynth 高保真音源（IndexedDB 缓存，仅首次使用时下载并缓存）
+  // adj345/adj416：导出用 SpessaSynth 高保真音源（缓存 → 桌面安装目录内置 SF2 → 联网下载并缓存）
   const hqCacheRef = useRef(createHqCache())
 
   // adj352：导出基名剥掉残留的 .jps/.md/.txt（手机端系统常把 .jps 识别为 .md/.txt，导致 xxx.md.jpg）
   const baseName = (fileName || '未命名').replace(/\.(jps|md|txt)$/i, '')
   const hasError = parseResult.errors.some((e) => e.severity === 'error')
 
-  /** 取高保真音源 ArrayBuffer（缓存优先；未缓存则下载并写回缓存，后续直接读缓存） */
+  /** 取高保真音源 ArrayBuffer（adj416：缓存 → 桌面安装目录内置 SF2 → 联网下载并写回缓存） */
   const ensureHqBank = async (): Promise<ArrayBuffer> => {
     const lib = getHqLibrary()
-    let bank = await hqCacheRef.current.load(lib.id)
-    if (!bank) {
-      bank = await loadHqBank(lib)
-      await hqCacheRef.current.save(lib.id, bank)
-    }
+    const { bank } = await resolveHqBank(lib, hqCacheRef.current)
     return bank
   }
 

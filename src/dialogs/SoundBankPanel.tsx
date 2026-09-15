@@ -1,17 +1,19 @@
 /**
  * dialogs/SoundBankPanel.tsx — 音色库管理面板（adj331/332/342；adj384 从独立对话框移入「设置」标签）
  *
- * SpessaSynth 高保真为默认音源（SF2 内置本地；首次打开自动下载并缓存，离线可用）：
+ * SpessaSynth 高保真为默认音源（桌面随安装包内置在安装目录，直接读取；Web 首次打开自动下载并缓存，离线可用）：
  *  - 库行：展开查看库内全部 GM 音色（128 种）+「全选/全消」+「内置」标识（无需下载/删除）
  *  - 音色勾选进入试听列表（playbackHqEnabled）
  *  - 「导入/导出音色文件」（SF2/SF3 本体，供不便联网用户导入/分享）+「导入/导出收藏配置」（JSON）
+ *  - adj416：桌面端音源随安装包内置在**安装目录**（`generaluser_gs.sf2`）——直接读文件，不显示下载提示
  *
  * 属**本机用户偏好（L1）**：不随谱保存（分层见 docs/SETTINGS-AUDIT.md）。
  */
 import { useEffect, useRef, useState } from 'react'
 import { useUiStore } from '../store/uiStore'
-import { HQ_LIBRARIES, GM_VOICE_OPTIONS, getHqLibrary } from '../playback/spessaSynthBackend'
-import { createHqCache, prefetchHqLibraryProgress } from '../playback/spessaCache'
+import { playbackCopy } from '../brand/copy'
+import { HQ_LIBRARIES, GM_VOICE_OPTIONS, getHqLibrary, hasBuiltinBank } from '../playback/spessaSynthBackend'
+import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../playback/spessaCache'
 
 const HIGHLIGHT = 'var(--jp-text-muted)'
 const BTN = { padding: '2px 8px', fontSize: 11, whiteSpace: 'nowrap' as const, background: 'var(--jp-bg-app)', border: '1px solid var(--jp-border)', color: 'var(--jp-text-primary)', borderRadius: '6px' }
@@ -21,7 +23,8 @@ export function SoundBankPanel() {
   const [notice, setNotice] = useState<string | null>(null)
   const [open, setOpen] = useState<Record<string, boolean>>(() => ({ [HQ_LIBRARIES[0]?.id ?? 'generaluser_gs']: true }))
   // adj347/348：打开音色库管理即自动后台下载音源（初次体验）；仅文字提示，不阻塞其它交互
-  const [hqDl, setHqDl] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  // adj416：桌面端随安装包内置（安装目录 generaluser_gs.sf2）→ 直接可用，显示「已内置」而非下载提示
+  const [hqDl, setHqDl] = useState<'idle' | 'loading' | 'done' | 'builtin' | 'error'>('idle')
   const enabled = useUiStore((s) => s.playbackHqEnabled)
   const toggle = useUiStore((s) => s.togglePlaybackHqVoice)
   const hqLibrary = useUiStore((s) => s.playbackHqLibrary)
@@ -34,11 +37,16 @@ export function SoundBankPanel() {
   const currentHqLib = HQ_LIBRARIES[0]
 
   // adj347/349：打开音色库管理自动下载音源——延迟到 UI 渲染后再触发，不干扰打开/交互
+  // adj416：先探测桌面安装目录内置音源（极快）——有就直接用，不显示「正在下载」提示
   useEffect(() => {
     const t = window.setTimeout(() => {
       void (async () => {
         try {
           const lib = getHqLibrary()
+          if (await hasBuiltinBank(lib)) {
+            setHqDl('builtin')
+            return
+          }
           setHqDl('loading')
           await prefetchHqLibraryProgress(lib, hqCache.current)
           setHqDl('done')
@@ -97,11 +105,8 @@ export function SoundBankPanel() {
   }
   const exportDataFile = async () => {
     try {
-      const ab = await hqCache.current.load(currentHqLib.id)
-      if (!ab) {
-        setNotice('该音色库未缓存，无法导出')
-        return
-      }
+      // adj416：缓存 → 安装目录内置 SF2 → 联网（内置音源也能直接导出，不再报「未缓存」）
+      const { bank: ab } = await resolveHqBank(currentHqLib, hqCache.current)
       const blob = new Blob([ab], { type: 'application/octet-stream' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -158,13 +163,17 @@ export function SoundBankPanel() {
           <input ref={fileSf2Ref} type="file" accept=".sf2,.sf3" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importDataFile(f); e.target.value = '' }} />
         </div>
         <div style={{ color: HIGHLIGHT, fontSize: 11 }}>
-          SpessaSynth 高保真为默认音源：桌面端内置随应用提供（离线可用）；Web 端首次联网下载并缓存到本地，之后直接用。
+          SpessaSynth 高保真为默认音源：桌面端随安装包内置（安装目录 generaluser_gs.sf2，离线直接读取）；Web 端首次联网下载并缓存到本地，之后直接用。
         </div>
         {/* adj347/348：自动下载——后台进行，仅提示，不阻塞其它操作 */}
         {hqDl === 'loading' && (
           <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>
             ⏳ 正在后台下载音色库（约30MB，仅首次）…下载期间可正常操作。
           </div>
+        )}
+        {/* adj416：桌面端随安装包内置音源（安装目录 generaluser_gs.sf2）→ 直接读取，无需下载 */}
+        {hqDl === 'builtin' && (
+          <div style={{ color: 'var(--jp-accent)', fontSize: 11 }}>{playbackCopy.builtinBankHint}</div>
         )}
         {hqDl === 'error' && (
           <div style={{ color: 'var(--jp-danger)', fontSize: 11 }}>

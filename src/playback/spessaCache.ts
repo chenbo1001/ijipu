@@ -2,10 +2,15 @@
  * src/playback/spessaCache.ts — SpessaSynth 高质量音源（SF2/SF3 ArrayBuffer）离线缓存（adj331）
  *
  * 音源较大（32MB+），用 IndexedDB 存 ArrayBuffer 实现离线可用（Web / Tauri WebView 均持久化）。
- * 提供下载（prefetchHqLibrary）、查询（hqLibraryCached）、删除。
+ * 提供解析（resolveHqBank）、预取（prefetchHqLibraryProgress）、删除。
+ * adj416：桌面端音源随安装包内置在**安装目录**（`generaluser_gs.sf2`）——直接读文件、
+ * 不写 IndexedDB（不重复占 30MB），也不显示「正在下载」提示；Web 端仍走远端下载 + 缓存。
  */
-import { loadHqBank, detectTauri } from './spessaSynthBackend'
+import { loadHqBank, loadBuiltinBank, hasBuiltinBank } from './spessaSynthBackend'
 import type { HqSampleLibrary } from './spessaSynthBackend'
+
+/** 音源来源（adj416）：builtin=安装目录随包内置（桌面直读）；cache=IndexedDB 缓存；remote=联网下载 */
+export type HqBankSource = 'builtin' | 'cache' | 'remote'
 
 /** SF2/SF3 ArrayBuffer 缓存（IndexedDB，键=库 id） */
 export class HqCache {
@@ -66,17 +71,19 @@ export class HqCache {
   }
 }
 
-/** 下载音源库并写入缓存（未缓存则联网下载 ArrayBuffer 存 IndexedDB） */
-export async function prefetchHqLibrary(lib: HqSampleLibrary, cache: HqCache): Promise<void> {
-  if (await cache.has(lib.id)) return
-  const res = await fetch(lib.source)
-  if (!res.ok) throw new Error(`音源「${lib.name}」下载失败: HTTP ${res.status}`)
-  await cache.save(lib.id, await res.arrayBuffer())
-}
-
-/** 查询音源库是否已缓存 */
-export async function hqLibraryCached(lib: HqSampleLibrary, cache: HqCache): Promise<boolean> {
-  return cache.has(lib.id)
+/** 取音源字节 + 来源（adj416）：IndexedDB 缓存 → 桌面安装目录内置 → 联网下载。
+ *  只有**下载**的结果才写缓存（内置文件已在安装目录，再存一份 30MB 纯属浪费；缓存优先则保留用户导入的音色）。 */
+export async function resolveHqBank(
+  lib: HqSampleLibrary,
+  cache: HqCache,
+): Promise<{ bank: ArrayBuffer; source: HqBankSource }> {
+  const cached = await cache.load(lib.id)
+  if (cached) return { bank: cached, source: 'cache' }
+  const builtin = await loadBuiltinBank(lib)
+  if (builtin) return { bank: builtin, source: 'builtin' }
+  const bank = await loadHqBank(lib)
+  await cache.save(lib.id, bank)
+  return { bank, source: 'remote' }
 }
 
 /** 创建 SpessaSynth 音源缓存实例（惰性，IndexedDB） */
@@ -84,34 +91,28 @@ export function createHqCache(): HqCache {
   return new HqCache()
 }
 
-/** 预下载音源库并写缓存（adj347/348/349）：已缓存用 getKey 极快判断；桌面（Tauri）优先读内置资源；
- *  本地未找到或 Web 环境则用 fetch 后台下载（浏览器内部线程完成，主线程不逐块处理，不影响 UI）。
- *  完成后写入 IndexedDB 缓存，后续可直接用（不再重复下载）。onProgress 仅结束时回调（0~1）。 */
+/** 预取音源并返回其来源（adj347/348/349/416）：已缓存用 getKey 极快判断；桌面**只探测**
+ *  安装目录内置音源的存在性（不读 30MB、不写缓存）；都没有才联网下载并写缓存。
+ *  onProgress 仅结束时回调（0~1）。返回来源供 UI 决定是否显示「正在下载」提示。 */
 export async function prefetchHqLibraryProgress(
   lib: HqSampleLibrary,
   cache: HqCache,
   onProgress?: (p: number) => void,
-): Promise<void> {
+): Promise<HqBankSource> {
   // 极快：只查键是否存在（getKey，不读 32MB 全量）
   if (await cache.has(lib.id)) {
     onProgress?.(1)
-    return
+    return 'cache'
   }
-  // 桌面：读内置资源（若应用目录已放置独立音色库）→ 缺失则走下方远端下载
-  try {
-    if (detectTauri()) {
-      const bank = await loadHqBank(lib)
-      await cache.save(lib.id, bank)
-      onProgress?.(1)
-      return
-    }
-  } catch {
-    /* 本地未找到音源 → 走 Web 后台下载并缓存 */
+  // 桌面：随包内置（安装目录 generaluser_gs.sf2）→ 直接可用，无需下载
+  if (await hasBuiltinBank(lib)) {
+    onProgress?.(1)
+    return 'builtin'
   }
-  // Web：后台下载——await res.arrayBuffer() 由浏览器内部线程完成，主线程不做逐块拼接，尽量不影响 UI
-  const res = await fetch(lib.source)
-  if (!res.ok) throw new Error(`音源「${lib.name}」下载失败: HTTP ${res.status}`)
-  const bank = await res.arrayBuffer()
+  // Web（或桌面未随包提供）：后台下载——await res.arrayBuffer() 由浏览器内部线程完成，
+  // 主线程不做逐块拼接，尽量不影响 UI
+  const bank = await loadHqBank(lib)
   await cache.save(lib.id, bank)
   onProgress?.(1)
+  return 'remote'
 }

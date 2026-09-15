@@ -104,36 +104,73 @@ export const GM_VOICE_OPTIONS: { program: number; label: string }[] = [
   { program: 124, label: '124 电话铃' }, { program: 125, label: '125 直升机' }, { program: 126, label: '126 拍手声' }, { program: 127, label: '127 枪声' },
 ]
 
-/** 是否运行在 Tauri 桌面环境（window.__TAURI__ 由 withGlobalTauri 注入） */
-export function detectTauri(): boolean {
+/** Tauri invoke 函数签名（window.__TAURI__.core.invoke） */
+type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
+
+/** 取 Tauri invoke（非桌面环境返回 undefined） */
+function tauriInvoke(): TauriInvoke | undefined {
   try {
-    return typeof (window as unknown as { __TAURI__?: { core?: { invoke?: unknown } } }).__TAURI__?.core?.invoke === 'function'
+    const inv = (window as unknown as { __TAURI__?: { core?: { invoke?: TauriInvoke } } }).__TAURI__?.core?.invoke
+    return typeof inv === 'function' ? inv : undefined
   } catch {
-    return false
+    return undefined
   }
 }
 
-/** 通过 Rust command 读内置音源资源（打包进桌面的 SF2，离线可用）为 ArrayBuffer */
+/** 是否运行在 Tauri 桌面环境（window.__TAURI__ 由 withGlobalTauri 注入） */
+export function detectTauri(): boolean {
+  return tauriInvoke() !== undefined
+}
+
+/**
+ * adj416：内置音源文件路径——发布程序把 `generaluser_gs.sf2` 放在**安装目录**（Rust 侧查找
+ * 「安装目录根 → soundfonts/ 子目录」），返回命中的绝对路径；非桌面环境或未随包提供返回 null。
+ * 前端据此在下载**之前**判定「已随包内置」→ 直接读文件，不显示下载提示。
+ */
+export async function builtinBankPath(libId: string): Promise<string | null> {
+  const inv = tauriInvoke()
+  if (!inv) return null
+  try {
+    const p = await inv('sf_soundfont_builtin_path', { libId })
+    return typeof p === 'string' && p.length > 0 ? p : null
+  } catch {
+    return null
+  }
+}
+
+/** adj416：是否随安装包内置音源（安装目录存在该 SF2）→ 直接使用，无需下载 */
+export async function hasBuiltinBank(lib: HqSampleLibrary): Promise<boolean> {
+  return (await builtinBankPath(lib.id)) !== null
+}
+
+/** 通过 Rust command 读内置音源资源（打包进桌面的 SF2，离线可用）为 ArrayBuffer。
+ *  adj416：Rust 侧返回 raw body → 前端直接拿到 ArrayBuffer（30MB 不走 JSON 数组）。 */
 async function invokeResource(libId: string): Promise<ArrayBuffer> {
-  const inv = (window as unknown as { __TAURI__?: { core?: { invoke?: (c: string, a?: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__?.core?.invoke
-  if (typeof inv !== 'function') throw new Error('Tauri invoke 不可用')
+  const inv = tauriInvoke()
+  if (!inv) throw new Error('Tauri invoke 不可用')
   const buf = (await inv('sf_soundfont_resource_read', { libId })) as ArrayBuffer | Uint8Array | number[]
   if (buf instanceof ArrayBuffer) return buf
   if (buf instanceof Uint8Array) return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
   return new Uint8Array(buf).buffer
 }
 
-/** 下载音源库（SF2/SF3/DLS）为 ArrayBuffer（adj346）：桌面（Tauri）读内置打包资源（离线）；
- *  Web 从远端 source 下载；失败回退 fallbackSource。 */
-export async function loadHqBank(lib: HqSampleLibrary): Promise<ArrayBuffer> {
-  // 桌面（Tauri）离线优先：读 bundle.resources 打包的 SF2；异常（未打包/dev）回退联网
-  if (detectTauri()) {
-    try {
-      return await invokeResource(lib.id)
-    } catch {
-      /* 资源缺失/非打包环境 → 走远端下载 */
-    }
+/** adj416：读桌面内置音源字节（安装目录随包提供的 SF2）；未随包提供/读失败返回 null。
+ *  仅供「内置优先」的解析用——远端下载走 loadHqBank。 */
+export async function loadBuiltinBank(lib: HqSampleLibrary): Promise<ArrayBuffer | null> {
+  if (!(await hasBuiltinBank(lib))) return null
+  try {
+    return await invokeResource(lib.id)
+  } catch {
+    // 文件在但读失败（权限/损坏）→ 同样回退远端，不阻断试听
+    return null
   }
+}
+
+/** 加载音源库（SF2/SF3/DLS）为 ArrayBuffer（adj346/adj416）：桌面优先读**安装目录内置资源**
+ *  （离线、直接使用）；否则 Web/Tauri 均从远端 source 下载，失败回退 fallbackSource。 */
+export async function loadHqBank(lib: HqSampleLibrary): Promise<ArrayBuffer> {
+  const builtin = await loadBuiltinBank(lib)
+  if (builtin) return builtin
   try {
     const res = await fetch(lib.source)
     if (res.ok) return await res.arrayBuffer()
