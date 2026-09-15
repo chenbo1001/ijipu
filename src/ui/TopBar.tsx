@@ -14,6 +14,7 @@ import { useDocStore, type ViewType } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { formatJps, EDITOR_FONT_OPTIONS } from '@ijipu/engine'
 import { pasteImportCopy } from '../brand/copy'
+import { ToolIcon } from './ToolIcon'
 
 /** Alt+字母 → 菜单分组（adj185）
  *  adj383：主题组已移入「页面设置」对话框的「主题」标签，Alt+T 菜单分组随之取消 */
@@ -77,50 +78,13 @@ function MenuPanel({
   )
 }
 
+/** adj408：视图图标改用 `public/*.png`（`ToolIcon` 统一上色）——
+ *  编码=文件、左右拆分=收起、上下拆分=收起旋转 90°、预览=查看 */
 const VIEWS: { key: ViewType; label: string; icon: React.ReactNode }[] = [
-  {
-    key: 'code',
-    label: '编码',
-    icon: (
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M 4.5 2.5 L 1.5 7 L 4.5 11.5" />
-        <path d="M 9.5 2.5 L 12.5 7 L 9.5 11.5" />
-        <path d="M 8 3 L 6 11" />
-      </svg>
-    ),
-  },
-  {
-    key: 'split',
-    label: '拆分(上下)',
-    icon: (
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
-        <rect x="1.5" y="1.5" width="11" height="4.5" rx="0.5" />
-        <rect x="1.5" y="8" width="11" height="4.5" rx="0.5" />
-        <path d="M 2 6.8 H 12" strokeDasharray="1.2 1.2" />
-      </svg>
-    ),
-  },
-  {
-    key: 'splitH',
-    label: '左右拆分',
-    icon: (
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
-        <rect x="1.5" y="1.5" width="4.5" height="11" rx="0.5" />
-        <rect x="8" y="1.5" width="4.5" height="11" rx="0.5" />
-        <path d="M 6.8 2 V 12" strokeDasharray="1.2 1.2" />
-      </svg>
-    ),
-  },
-  {
-    key: 'preview',
-    label: '预览',
-    icon: (
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
-        <path d="M 1.5 7 C 3.5 3.5, 10.5 3.5, 12.5 7 C 10.5 10.5, 3.5 10.5, 1.5 7 Z" />
-        <circle cx="7" cy="7" r="2" />
-      </svg>
-    ),
-  },
+  { key: 'code', label: '编码', icon: <ToolIcon name="file" /> },
+  { key: 'split', label: '拆分(上下)', icon: <ToolIcon name="collapse" rotate={90} /> },
+  { key: 'splitH', label: '左右拆分', icon: <ToolIcon name="collapse" /> },
+  { key: 'preview', label: '预览', icon: <ToolIcon name="view" /> },
 ]
 
 /** adj315：归一化视图 key——splitHE 视为「左右拆分」(splitH) 条目 */
@@ -337,78 +301,25 @@ export function TopBar() {
   }, [fontOpen, placeFontDropdown])
 
   // 图标：(key) => JSX，与 renderBtn 共用
+  // adj408：顶栏按钮图标全部改用 `public/*.png`（`ToolIcon` 走 CSS mask 统一上色，颜色随主题/激活态）
   const iconOf = (key: string): React.ReactNode => {
     switch (key) {
       case 'guides':
-        return (
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
-            <rect x="2.2" y="2.2" width="9.6" height="9.6" />
-            <path d="M 7 3.6 V 10.4" />
-            <path d="M 3.6 7 H 10.4" />
-          </svg>
-        )
+        return <ToolIcon name="layout" />
       case 'playback':
-        return (
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-            <path d="M 3 2 L 12 7 L 3 12 Z" />
-          </svg>
-        )
+        return <ToolIcon name="play" />
       case 'donate':
-        return (
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-            <path d="M 7 12.6 L 2.4 8 A 2.85 2.85 0 1 1 6.3 4.04 L 7 4.75 L 7.7 4.04 A 2.85 2.85 0 1 1 11.6 8 Z" />
-          </svg>
-        )
+        return <ToolIcon name="heart" />
       case 'pageConfig':
-        return (
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
-            <circle cx="7" cy="7" r="3.1" />
-            <path d="M 7 1.5 V 3.2" />
-            <path d="M 7 10.8 V 12.5" />
-            <path d="M 1.5 7 H 3.2" />
-            <path d="M 10.8 7 H 12.5" />
-            <path d="M 3.1 3.1 L 4.3 4.3" />
-            <path d="M 9.7 9.7 L 10.9 10.9" />
-            <path d="M 10.9 3.1 L 9.7 4.3" />
-            <path d="M 4.3 9.7 L 3.1 10.9" />
-            <circle cx="7" cy="7" r="1.3" />
-          </svg>
-        )
+        return <ToolIcon name="settings" />
       case 'export':
-        return (
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
-            <path d="M 7 1.5 V 9.5" />
-            <path d="M 3.5 6 L 7 9.5 L 10.5 6" />
-            <path d="M 2.5 11.5 H 11.5" />
-          </svg>
-        )
+        return <ToolIcon name="export" />
       case 'autoWrap':
-        return (
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
-            <path d="M 2 3 H 12" />
-            <path d="M 2 7 H 9" />
-            <path d="M 2 11 H 12" />
-            <path d="M 7.5 5.5 L 9 7 L 7.5 8.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )
+        return <ToolIcon name="wrap" />
       case 'font':
-        return (
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-            <text x="2" y="11.5" fontSize="11" fontWeight="700" fill="currentColor">A</text>
-            <text x="9" y="11.5" fontSize="7.5" fontWeight="700" fill="currentColor">a</text>
-          </svg>
-        )
+        return <ToolIcon name="font" />
       case 'scriptPad':
-        return (
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
-            <rect x="1.5" y="2.5" width="7" height="5.5" rx="1" />
-            <path d="M 4.5 9 V 11.5" />
-            <path d="M 8.5 9 V 11.5" />
-            <path d="M 2 11.5 H 11" />
-            <path d="M 9.8 4.2 V 6.6" />
-            <path d="M 8.6 5.4 H 11" />
-          </svg>
-        )
+        return <ToolIcon name="keyboard" />
       default:
         return null
     }
@@ -478,7 +389,10 @@ export function TopBar() {
           >
             {iconOf('font')}
             <span className="tool-label">{t.label}</span>
-            <span className="arrow">▼</span>
+            {/* adj408：下拉指示箭头改用 public/下.png（与其余按钮图标同一套上色） */}
+            <span className="arrow">
+              <ToolIcon name="down" size={9} />
+            </span>
           </button>
           {!measuring && fontOpen && (
             <div
@@ -804,11 +718,7 @@ export function TopBar() {
           title="菜单"
           aria-label="菜单"
         >
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-            <path d="M 2 4 H 16" />
-            <path d="M 2 9 H 16" />
-            <path d="M 2 14 H 16" />
-          </svg>
+          <ToolIcon name="menu" />
           <span className="tool-label">菜单</span>
         </button>
         {menuOpen && (
@@ -851,7 +761,10 @@ export function TopBar() {
         >
           {viewItem(viewType)?.icon}
           <span className="tool-label">{viewItem(viewType)?.label}</span>
-          <span className="arrow">▾</span>
+          {/* adj408：下拉指示箭头改用 public/下.png（与其余按钮图标同一套上色） */}
+          <span className="arrow">
+            <ToolIcon name="down" size={9} />
+          </span>
         </button>
         {viewOpen && (
           <div
@@ -931,12 +844,8 @@ export function TopBar() {
             aria-label="更多工具"
             aria-expanded={overflowOpen}
           >
-            {/* 三点垂直图标（更多） */}
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-              <circle cx="7" cy="3" r="1.4" />
-              <circle cx="7" cy="7" r="1.4" />
-              <circle cx="7" cy="11" r="1.4" />
-            </svg>
+            {/* adj408：三点「更多」图标改用 public/更多.png（与其余按钮图标同一套上色） */}
+            <ToolIcon name="more" />
           </button>
           {overflowOpen && (
             <div

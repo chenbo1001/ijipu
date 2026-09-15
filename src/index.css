@@ -218,7 +218,8 @@ body {
   align-items: center;
   gap: 5px;
   font-size: 12px;
-  color: var(--jp-text-secondary);
+  /* adj408：与顶栏其余按钮一致——文字与图标同用正文主色（高对比） */
+  color: var(--jp-text-primary);
   border-radius: 7px;
   cursor: pointer;
   font-family: var(--jp-font-sans);
@@ -240,9 +241,29 @@ body {
   height: 16px;
 }
 
-/* 视图下拉按钮的箭头 */
+/* adj408：PNG 按钮图标（`ui/ToolIcon`）——用 CSS mask 上色：
+   只取 PNG 的 **alpha 通道**当形状，颜色恒等于按钮自身的 `color`（`currentColor`）。
+   这样做的两层目的：
+   ① **统一颜色/灰度**（用户要求）：这批图标的原始颜色并不一致（近乎纯黑 / 偏灰 / 实心填充），
+      直接用 `<img>` 会把这种杂乱照搬到界面上；走 mask 后所有图标只剩一个颜色，
+      且与**同一按钮的文字标签同色**——不再出现"图标亮、文字灰"的错位；也避免了原始黑线稿
+      在深色主题上"隐形"；
+   ② 图标随按钮文字色走，于是悬停 / 激活 / 禁用等状态**天然同步**，无需为图标单独写一套状态规则。
+   配套改动：顶栏各按钮的文字色统一提到**正文主色** `--jp-text-primary`
+   （每个主题里对比度最高的前景色：深色 #e8ecf8、浅色 #1c2540），
+   比原来的次级灰 `--jp-text-secondary`(#93a0c8) 更显眼（用户要求"对比度更大"）。 */
+.tool-icon {
+  display: inline-block;
+  flex: 0 0 auto;
+  background-color: currentColor;
+  -webkit-mask: var(--tool-icon) center / contain no-repeat;
+  mask: var(--tool-icon) center / contain no-repeat;
+}
+
+/* 视图下拉按钮的箭头（adj408：改为 `下.png` 图标，此处只负责尺寸与不透明度） */
 .topbar-view-btn .arrow {
-  font-size: 9px;
+  display: inline-flex;
+  align-items: center;
   opacity: 0.7;
   margin-left: -1px;
 }
@@ -402,7 +423,8 @@ body {
   border-radius: 5px;
   background: transparent;
   border: none;
-  color: var(--jp-text-secondary);
+  /* adj408：与顶栏其余按钮一致——图标与文字同用正文主色 */
+  color: var(--jp-text-primary);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
@@ -461,7 +483,8 @@ body {
   gap: 5px;
   background: transparent;
   border: 1px solid var(--jp-border);
-  color: var(--jp-text-secondary);
+  /* adj408：文字与图标统一用**正文主色**（高对比），比原来的次级灰更显眼 */
+  color: var(--jp-text-primary);
   border-radius: 7px;
   padding: 5px 10px;
   font-size: 12px;
@@ -479,7 +502,8 @@ body {
    ——与相邻功能组留出间距，hover 用暖色（非 accent 青）以区分普通功能按钮 */
 .topbar-donate {
   margin-left: 6px;
-  color: var(--jp-text-muted);
+  /* adj408：与顶栏其余按钮、及其爱心图标统一同色（原为更暗的 text-muted） */
+  color: var(--jp-text-primary);
   border-radius: 7px;
 }
 .topbar-donate:hover {
@@ -502,7 +526,8 @@ body {
 }
 .topbar-btn:disabled:hover {
   border-color: var(--jp-border);
-  color: var(--jp-text-secondary);
+  /* adj408：禁用态 hover 回到按钮基色（此前写死次级灰，与新的基色不一致） */
+  color: var(--jp-text-primary);
 }
 
 /* 缩放比率组：- / % / + */
@@ -521,7 +546,8 @@ body {
   text-align: center;
   font-family: var(--jp-font-mono);
   font-size: 11px;
-  color: var(--jp-text-muted);
+  /* adj408：与同组的 − / + 按钮同色（原为更暗的 text-muted，夹在两个亮按钮中间显得断层） */
+  color: var(--jp-text-primary);
 }
 
 /* ============ 汉堡下拉（共享 menu-* 样式）============ */
@@ -1248,7 +1274,8 @@ body {
   color: var(--jp-accent);
 }
 .editor-font-split-btn .arrow {
-  font-size: 9px;
+  display: inline-flex;
+  align-items: center;
   opacity: 0.7;
 }
 .editor-font-split-dropdown {

@@ -9,12 +9,18 @@
  */
 const CACHE = 'jps-shell-v3'
 const PRECACHE = ['/', '/index.html', '/manifest.webmanifest', '/Jianpu.ico', '/Jianpu.png', '/pwa-192.png', '/pwa-512.png', '/good.png']
+/* adj408：按钮 PNG 图标（`public/*.png`，约 60KB）——首屏渲染就会用到，离线时必须命中缓存。
+   单独**逐个**预热而**不并进 PRECACHE**：`addAll` 是"任一失败则整体失败"，图标文件名是中文，
+   万一编码/改名对不上就会让整个 install 失败 → 更新提示再也弹不出来（E-2026-140），
+   故这里用非致命写法（单个失败忽略）。 */
+const ICON_FILES = ['菜单', '文件', '收起', '查看', '排版', '播放', '停止', '设置', '导出', '折行', '字体', '爱心', '下', '更多', '键盘']
+const ICONS = ICON_FILES.map((n) => `/${n}.png`)
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(CACHE)
-      .then((c) => c.addAll(PRECACHE))
+      .then((c) => c.addAll(PRECACHE).then(() => Promise.all(ICONS.map((u) => c.add(u).catch(() => undefined)))))
       .then(() => self.skipWaiting()),
   )
 })
