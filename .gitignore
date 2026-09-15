@@ -40,3 +40,7 @@ release-body-*.md
 # Tauri portable build
 dist-release/
 build.bat
+
+# Python 字节码缓存（scripts/ 下的临时 Python 脚本产物，不应入库）
+__pycache__/
+*.pyc
