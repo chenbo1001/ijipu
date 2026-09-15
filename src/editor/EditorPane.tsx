@@ -453,8 +453,13 @@ export function EditorPane() {
 
   // ———— adj323：一级工具条主键组浮层 ————
   // 点主键：读取工具条容器 rect（底边对齐），记录按钮 rect（水平跟随），弹出该组浮层并关闭自动提示
+  // adj407：主键按钮按**开关**语义——同一组菜单已展开时再点即收起；点别的组直接换成那个组的菜单
   const openPadGroup = (group: PadGroup, rect: DOMRect) => {
     setCompletion(null)
+    if (padMenuRef.current?.groupId === group.id) {
+      setPadMenu(null)
+      return
+    }
     const area = padAreaRef.current?.getBoundingClientRect()
     setPadMenu({
       groupId: group.id,
@@ -849,7 +854,13 @@ export function EditorPane() {
       {/* adj314：嵌入式简谱输入工具条——编辑器底部常驻（编辑区与预览/分页之间），
           单行横向滑动，一级主键/软键盘开关（adj323：二级键改为浮层弹出） */}
       {showScriptPad && (
-        <ScriptToolbar padAreaRef={padAreaRef} onGroupMenuOpen={openPadGroup} onToggleKb={toggleSystemKb} kbActive={kbActive} />
+        <ScriptToolbar
+          padAreaRef={padAreaRef}
+          onGroupMenuOpen={openPadGroup}
+          onToggleKb={toggleSystemKb}
+          kbActive={kbActive}
+          activeGroupId={padMenu?.groupId ?? null}
+        />
       )}
       {/* adj323：一级主键组浮层——点主键在按钮位置弹出该组二级键（insert + 中文说明） */}
       {padMenu && (

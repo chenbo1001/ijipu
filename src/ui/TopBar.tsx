@@ -201,9 +201,13 @@ export function TopBar() {
     // —— 设置组（从状态栏移来） ——
     { key: 'autoWrap', label: '折行', group: 'footer' as const, kind: 'btn' as const, active: autoWrap, onPick: () => setAutoWrap(!autoWrap) },
     { key: 'scriptPad', label: '输入条', group: 'footer' as const, kind: 'btn' as const, active: showScriptPad, onPick: () => setShowScriptPad(!showScriptPad) },
-    { key: 'font', label: '字体', group: 'footer' as const, kind: 'font' as const },
+    // adj407：编辑器字体选择框在窄屏模式下不显示（顶栏与「更多」里都不出现；
+    // 设置项本身仍在「页面设置 → 全局 → 编辑器字体」，不会被弄丢）
+    { key: 'font', label: '字体', group: 'footer' as const, kind: 'font' as const, show: !isNarrow },
     { key: 'fontSize', label: '字号', group: 'footer' as const, kind: 'fontSize' as const, show: true },
-  ].filter((t) => (t.kind === 'zoom' ? t.show : true))
+    // adj407：统一按 show 过滤（此前只对 kind==='zoom' 生效）——俯仰视图/窄屏的隐藏项
+    // 必须在**测量容器**里也一并去掉，否则隐藏项仍占宽度预算、把本可显示的按钮挤进「更多」
+  ].filter((t) => !('show' in t) || t.show)
   // 字体 split-button 状态（从状态栏移来，下拉从顶栏向下展开）
   const [fontOpen, setFontOpen] = useState(false)
   const fontRef = useRef<HTMLSpanElement>(null)
@@ -221,6 +225,12 @@ export function TopBar() {
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [fontOpen])
+
+  // adj407：字体选择框在窄屏模式下不显示——已在窄屏时被隐藏的话，把打开中的下拉一并收起，
+  // 否则会出现"按钮没了、下拉还浮在顶栏下方"的孤儿浮层
+  useEffect(() => {
+    if (isNarrow) setFontOpen(false)
+  }, [isNarrow])
 
   /**
    * adj386：字体下拉改 `position: fixed` + 按按钮实测位置定位。

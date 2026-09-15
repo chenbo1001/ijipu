@@ -23,6 +23,7 @@ export function ScriptToolbar({
   onGroupMenuOpen,
   onToggleKb,
   kbActive,
+  activeGroupId,
 }: {
   /** 工具条容器 ref——父级用它读取工具条 rect（adj323b 底部统一对齐） */
   padAreaRef: RefObject<HTMLDivElement | null>
@@ -32,6 +33,8 @@ export function ScriptToolbar({
   onToggleKb: () => void
   /** 系统软键盘当前是否显示（用于「⌨」高亮） */
   kbActive: boolean
+  /** adj407：当前已展开菜单的组 id——主键按钮按"开关"语义，展开时高亮（再点即收起） */
+  activeGroupId: string | null
 }) {
   const btnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   // adj333：动态「乐器」——把收藏的采样音色（GM 音色）加入乐器组，插入 @名
@@ -61,9 +64,10 @@ export function ScriptToolbar({
             ref={(el) => {
               btnRefs.current[g.id] = el
             }}
-            className="pad-key pad-master"
-            title={g.label}
+            className={`pad-key pad-master${activeGroupId === g.id ? ' active' : ''}`}
+            title={activeGroupId === g.id ? `${g.label}（再点收起）` : g.label}
             aria-label={g.label}
+            aria-expanded={activeGroupId === g.id}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
               const el = btnRefs.current[g.id]
