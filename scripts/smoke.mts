@@ -5310,6 +5310,43 @@ console.log('[106] single-row section: bar slots = align_min_bars (adj421)')
   }
 }
 
+// ---- adj427 Step 3：layout/render 不崩溃（段 token 暂时静默跳过） ----
+console.log('[adj427] layout/render survive {bz/dsb segments')
+{
+  const src = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 | {bz 5 6 7 1} 3 4 | 5 6 |\n'
+  const r = parseJps(src)
+  const lay = layoutScore(r, DUR_CFG)
+  check('含 bz 段的 JPS layoutScore 不崩', lay !== undefined && lay.pages.length > 0, JSON.stringify(r.errors))
+  const svg = renderScoreToSvg(lay)[0]
+  check('含 bz 段的 JPS renderScoreToSvg 不崩', svg.length > 100, `len=${svg.length}`)
+}
+{
+  const src = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 | {dsb 5 6 7 1} 3 4 | 5 6 |\n'
+  const r = parseJps(src)
+  const lay = layoutScore(r, DUR_CFG)
+  check('含 dsb 段的 JPS layoutScore 不崩', lay !== undefined && lay.pages.length > 0, JSON.stringify(r.errors))
+  const svg = renderScoreToSvg(lay)[0]
+  check('含 dsb 段的 JPS renderScoreToSvg 不崩', svg.length > 100, `len=${svg.length}`)
+}
+{
+  // 图 1 真实场景：3 4 |{bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const r = parseJps(src)
+  const lay = layoutScore(r, DUR_CFG)
+  check('图 1 bz 场景 layoutScore 不崩', lay !== undefined && lay.pages.length > 0, JSON.stringify(r.errors))
+  const svg = renderScoreToSvg(lay)[0]
+  check('图 1 bz 场景 renderScoreToSvg 不崩', svg.length > 100, `len=${svg.length}`)
+}
+{
+  // 图 2 真实场景：dsb + 主旋律共存
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const r = parseJps(src)
+  const lay = layoutScore(r, DUR_CFG)
+  check('图 2 dsb 场景 layoutScore 不崩', lay !== undefined && lay.pages.length > 0, JSON.stringify(r.errors))
+  const svg = renderScoreToSvg(lay)[0]
+  check('图 2 dsb 场景 renderScoreToSvg 不崩', svg.length > 100, `len=${svg.length}`)
+}
+
 // ---- adj427：临时段 {bz / {dsb / } token 识别（Step 3/9，骨架） ----
 console.log('[adj427] tokenize {bz / {dsb segments')
 // 1. 简单 bz 段：{bz 1 2 3} 产出 open(2段内音/children) + close 一对 token
