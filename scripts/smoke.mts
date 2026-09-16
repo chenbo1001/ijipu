@@ -6033,7 +6033,7 @@ console.log('[adj435] overlap beats sized by the denser layer (multi-voice style
       `seg0.x=${segN[0].x.toFixed(2)} mel.x=${coveredBeatNote.x.toFixed(2)}`)
     // AJ5：段层各音 bx0 单调递增（无倒序/重叠）
     check(`AJ5[${nm}] 段层各音 bx0 单调递增`, segN.every((n, i) => i === 0 || n.x >= segN[i - 1].x - 1e-6), `x=${segN.map((n) => n.x.toFixed(1)).join(',')}`)
-    if (nm !== '时值优先') continue
+    // adj441：两种布局都跑下面的宽度断言（空间优先此前未生效，见 E-2026-175）
     const minGlyph = cfg.note_size * 0.5 // 数字约半个字号的净宽（小于它必然视觉重叠）
     check(`AJ1[${nm}] 段层同拍的 3 个子拍音宽均 ≥ 数字净宽（不重叠）`,
       head3.length === 3 && head3.every((n) => n.width >= minGlyph),
@@ -6042,11 +6042,17 @@ console.log('[adj435] overlap beats sized by the denser layer (multi-voice style
     check(`AJ2[${nm}] 段层子拍宽比 ≈ 2:1:1（时值比例正确、无跳变）`,
       head3.length === 3 && Math.abs(head3[0].width / head3[1].width - 2) < 0.15 && Math.abs(head3[1].width / head3[2].width - 1) < 0.15,
       `比值=${(head3[0].width / head3[1].width).toFixed(3)} / ${(head3[1].width / head3[2].width).toFixed(3)}`)
-    // AJ3：被段层覆盖的主旋律拍比未被覆盖的普通拍更宽（多声部式取更密需求）
-    const plainBeatNote = melN[0] // `3`（无段层覆盖）
-    check(`AJ3[${nm}] 被覆盖拍的占宽 > 未覆盖普通拍（重叠区按更密层加宽）`,
-      coveredBeatNote.width > plainBeatNote.width * 1.3,
-      `covered=${coveredBeatNote.width.toFixed(2)} plain=${plainBeatNote.width.toFixed(2)} 比值=${(coveredBeatNote.width / plainBeatNote.width).toFixed(2)}`)
+    // AJ3（adj441，用户要求「多声部同一拍的总占宽要一致」）：段层子拍宽**之和**
+    // = 主旋律同拍的**字距跨度**（本音数字 → 下一个音数字），即两层在该拍的总占宽一致。
+    {
+      const head3Sum = head3.reduce((a, n) => a + n.width, 0)
+      const plainBeatNote = melN[0]
+      const nextNote = melN[3] // `6`（被覆盖拍的下一个音）
+      const beatSpan = nextNote.x - coveredBeatNote.x
+      check(`AJ3[${nm}] 段层子拍宽之和 = 主旋律同拍字距跨度（同一拍总占宽一致）`,
+        Math.abs(head3Sum - beatSpan) < 0.6,
+        `segSum=${head3Sum.toFixed(2)} melBeatSpan=${beatSpan.toFixed(2)} plainW=${plainBeatNote.width.toFixed(2)}`)
+    }
   }
 }
 
@@ -6073,16 +6079,19 @@ console.log('[adj433] segment beats align with melody beats (within-note interpo
   const mel6 = melEnv
   // Y3：段层总宽 = 主旋律 `6,-` 的占位宽（**不被压缩、也不溢出**）——这是"拍子对齐"的量化判据
   const segTotalW = (segNs[2].rightX ?? 0) - segNs[0].x
-  const melW = (mel6?.rightX ?? 0) - (mel6?.x ?? 0)
-  check('Y3 段层占宽 ≈ 主旋律包络音占宽（比例 1.0，未被压缩）',
-    melW > 0 && Math.abs(segTotalW / melW - 1) < 0.06,
-    `segW=${segTotalW.toFixed(2)} melW=${melW.toFixed(2)} 比值=${(segTotalW / melW).toFixed(3)}`)
+  // adj441：包络终点 = 主旋律包络音**之后的小节线**（`6,-` 的槽与包络都到小节线为止）——
+  // 段内容应铺满整段包络（含末音到小节线之间的那部分），故不再用"主旋律音的 rightX"作期望。
+  const barAfterMel = page.barlines.filter((b) => !b.segment).map((b) => b.x).find((x) => x > (mel6?.rightX ?? 0)) ?? (mel6?.rightX ?? 0)
+  const envSpan = barAfterMel - (mel6?.x ?? 0)
+  check('Y3 段层占宽 ≈ 包络跨度（主旋律包络音 → 其后小节线，未被压缩）',
+    envSpan > 0 && Math.abs(segTotalW - envSpan) < 1.5,
+    `segW=${segTotalW.toFixed(2)} envSpan=${envSpan.toFixed(2)}`)
   // Y4：段层每个音的 x 必须落在主旋律 `6,-` 的 x 范围内（不跨到后面的小节）
   const melL = mel6?.x ?? 0
   const melR = mel6?.rightX ?? 0
-  check('Y4 段层各音 x 均在主旋律包络音范围内（不跨小节）',
-    segNs.every((n) => n.x >= melL - 0.51 && (n.rightX ?? 0) <= melR + 0.51),
-    `mel=[${melL.toFixed(2)},${melR.toFixed(2)}] segs=${segNs.map((n) => `${n.x.toFixed(1)}~${(n.rightX ?? 0).toFixed(1)}`).join(' ')}`)
+  check('Y4 段层各音 x 均在包络范围内（包络音 → 其后小节线，不跨线）',
+    segNs.every((n) => n.x >= melL - 0.51 && (n.rightX ?? 0) <= barAfterMel + 0.51),
+    `env=[${melL.toFixed(2)},${barAfterMel.toFixed(2)}] segs=${segNs.map((n) => `${n.x.toFixed(1)}~${(n.rightX ?? 0).toFixed(1)}`).join(' ')}`)
 
   // ---- adj434：段内 `@乐器@` 与段后 `@乐器@` 的切换（用户报「主声部没切换为手风琴」）----
   {
