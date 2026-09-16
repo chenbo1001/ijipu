@@ -891,11 +891,11 @@ body {
 }
 
 /* adj432：临时叠加段（{bz}/{dsb}）的段层虚线——**紫色**，与曲行绿/描述头橙/边距青区分；
-   拖它调的是「段层与主旋律的间距」（PageConfig.segmentRowGap），不是谱面行距。 */
+   拖它调的是「段层与主旋律的间距」（PageConfig.segmentRowGap），不是谱面行距。
+   只覆盖 border-color（`.guide-h` 已把可见线设为 border-bottom，不要再加 border-top 以免画成双线）。 */
 .guide-seg {
   opacity: 0.75;
   border-color: #a855f7;
-  border-top-style: dashed;
 }
 .guide-seg:hover {
   opacity: 1;

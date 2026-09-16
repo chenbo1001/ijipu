@@ -4961,6 +4961,8 @@ console.log('[100] px values are always integers (adj413)')
     bar_gap: 3.5,
     heights: { a0: [12.4, 8.5, 20.4999, 0.5, 11.5] },
     metaPos: { title: { x: 10.5, y: -4.49 }, author_0: { x: -2.5, y: 3.2 } },
+    // adj432（E-2026-172）：adj428 新增的嵌套数值对象——此前 roundPxIntegers 漏了它
+    segmentRowGap: { bz: 22.5, dsb: 30.4 },
   }
   const r = roundPxIntegers(frac)
   check('adj413 顶层 px 小数四舍五入为整数', r.margin_top === 40 && r.height_quci === 16 && r.height_cici === 10 && r.note_size === 13 && r.bar_gap === 4, `${r.margin_top},${r.height_quci},${r.height_cici},${r.note_size},${r.bar_gap}`)
@@ -4968,11 +4970,23 @@ console.log('[100] px values are always integers (adj413)')
   // 注：Math.round 的 .5 一律向 +∞ 取整（-2.5 → -2），断言按 JS 语义写
   check('adj413 描述头 metaPos 的 x/y 取整（原为 0.1px 精度）', r.metaPos?.title.x === 11 && r.metaPos?.title.y === -4 && r.metaPos?.author_0.x === -2 && r.metaPos?.author_0.y === 3, JSON.stringify(r.metaPos))
   check('adj413 非数值字段原样保留（字体栈/枚举不被动）', r.biaoti_font === defaultPageConfig.biaoti_font && r.page === defaultPageConfig.page && r.noteSpaceLayout === defaultPageConfig.noteSpaceLayout)
+  // adj432（E-2026-172）：嵌套段层间距也要取整（adj428 新增字段，此前漏在 roundPxIntegers 外）
+  check('adj413b segmentRowGap 的 bz/dsb 逐项取整（adj428 新增嵌套字段）',
+    r.segmentRowGap?.bz === 23 && r.segmentRowGap?.dsb === 30,
+    JSON.stringify(r.segmentRowGap))
+  check('adj413b segmentRowGap 缺失/非数值不造出假字段', (() => {
+    const noGap = roundPxIntegers({ ...defaultPageConfig })
+    const halfGap = roundPxIntegers({ ...defaultPageConfig, segmentRowGap: { bz: 22.6 } })
+    return noGap.segmentRowGap === undefined && halfGap.segmentRowGap?.bz === 23 && halfGap.segmentRowGap?.dsb === undefined
+  })(), JSON.stringify(roundPxIntegers({ ...defaultPageConfig, segmentRowGap: { bz: 22.6 } }).segmentRowGap))
   check('adj413 取整是幂等的', JSON.stringify(roundPxIntegers(r)) === JSON.stringify(r))
   // 读取端：源码里的小数值读出来即整数
-  const src = `V: 1.0\nQ: 1 |\n# jps-config:{"margin_top":40.4,"height_quci":15.5,"heights":{"a0":[12.4,8.5,20.5,0.5]},"metaPos":{"title":{"x":10.5,"y":-4.4}}}\n`
+  const src = `V: 1.0\nQ: 1 |\n# jps-config:{"margin_top":40.4,"height_quci":15.5,"heights":{"a0":[12.4,8.5,20.5,0.5]},"metaPos":{"title":{"x":10.5,"y":-4.4}},"segmentRowGap":{"bz":22.5,"dsb":30.6}}\n`
   const merged = mergeJpsConfig(src, null)
   check('adj413 读取端：源码里的小数 px 合并后即为整数', merged.margin_top === 40 && merged.height_quci === 16 && merged.heights?.a0?.[0] === 12 && merged.metaPos?.title.x === 11, `${merged.margin_top},${merged.height_quci},${merged.heights?.a0?.[0]},${merged.metaPos?.title.x}`)
+  check('adj413b 读取端：源码里的小数 segmentRowGap 合并后即为整数',
+    merged.segmentRowGap?.bz === 23 && merged.segmentRowGap?.dsb === 31,
+    JSON.stringify(merged.segmentRowGap))
   // 写入端：即便直接传浮点，落盘也必须是整数
   const written = writeJpsConfig('V: 1.0\nQ: 1 |\n', frac)
   const obj = JSON.parse((written.split('\n').find((l) => l.startsWith(JPS_CONFIG_PREFIX)) ?? '').slice(JPS_CONFIG_PREFIX.length)) as Record<string, unknown>
@@ -5901,6 +5915,32 @@ console.log('[adj432] segment color-block voice colors + segment row guides')
     const y1 = (lay1.pages[0].notes.find((n) => n.segment)?.y ?? 0)
     const y2 = (lay2.pages[0].notes.find((n) => n.segment)?.y ?? 0)
     check('X5 bz 段层间距 22→50 → 段层 y 上移 28（拖动方向一致）', Math.abs((y1 - y2) - 28) < 0.2, `y1=${y1.toFixed(2)} y2=${y2.toFixed(2)} 差=${(y1 - y2).toFixed(2)}`)
+  }
+  // X7（回归，E-2026-171）：**上下层音色相同时**，分组键必须含 playVoice——否则两块合并成一块。
+  // 场景：谱面只写 `Y: 手风琴` ⇒ 主旋律 = Y[0] = 手风琴；bz 伴奏回退也用 手风琴 ⇒
+  // 旧分组键 `(page,group,voice,instrument)` 完全相同 ⇒ PreviewPane 只画一个色块。
+  {
+    const sameInst = "V: 1.0\nB: t\nD: C\nP: 4/4\nY: 手风琴\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+    const pr = parseJps(sameInst)
+    const seq = buildPlaySequence(pr, layoutScore(pr, DUR_CFG), 120, undefined, '手风琴')
+    const segs = seq.events.flatMap((e) => e.playheadSegs ?? [])
+    const accomp = segs.filter((s) => s.playVoice === 'accomp')
+    const main = segs.filter((s) => s.playVoice === undefined)
+    check('X7 前提：Y 只有一条时上下层 instrument 相同（手风琴）',
+      accomp.length > 0 && main.length > 0 && accomp.every((s) => s.instrument === '手风琴') && main.every((s) => s.instrument === '手风琴'),
+      `accompInst=${accomp[0]?.instrument} mainInst=${main[0]?.instrument}`)
+    const keyOld = (s: { pageIndex: number; group: number; voice: number; instrument?: string }) =>
+      `${s.pageIndex}|${s.group}|${s.voice}|${s.instrument ?? ''}`
+    const keyNew = (s: { pageIndex: number; group: number; voice: number; instrument?: string; playVoice?: string }) =>
+      `${s.pageIndex}|${s.group}|${s.voice}|${s.instrument ?? ''}|${s.playVoice ?? ''}`
+    const oldKeys = new Set(segs.map(keyOld))
+    const newKeys = new Set(segs.map(keyNew))
+    check('X7b 旧键（不含 playVoice）把上下层合并为同一组（复现 bug）',
+      oldKeys.size < newKeys.size,
+      `old=${oldKeys.size} new=${newKeys.size}`)
+    check('X7c 新键（含 playVoice）上下层各自一组（修复后两色块）',
+      newKeys.size >= oldKeys.size + 1 && [...newKeys].some((k) => k.endsWith('|accomp')) && [...newKeys].some((k) => k.endsWith('|')),
+      `newKeys=${[...newKeys].join(' / ')}`)
   }
   void ns432
 }

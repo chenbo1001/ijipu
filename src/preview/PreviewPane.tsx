@@ -630,7 +630,10 @@ function trackKeysOf(track: PlayheadTrackItem[]): Map<string, PlayheadTrackItem[
   if (pathKeyCache === track) return pathGroupCache
   const m = new Map<string, PlayheadTrackItem[]>()
   for (const t of track) {
-    const k = `${t.pageIndex}|${t.group}|${t.voice}|${t.instrument ?? ''}`
+    // adj432（E-2026-171）：键**必须含 playVoice**——上下两层音色相同时
+    // （如谱面只写 `Y: 手风琴` ⇒ 主旋律 = Y[0] = 手风琴、bz 伴奏回退也 = 手风琴）
+    // 旧键 `(page,group,voice,instrument)` 完全相同 ⇒ 两层被并成一组 ⇒ **只画一个色块**。
+    const k = `${t.pageIndex}|${t.group}|${t.voice}|${t.instrument ?? ''}|${t.playVoice ?? ''}`
     const arr = m.get(k)
     if (arr) arr.push(t)
     else m.set(k, [t])
