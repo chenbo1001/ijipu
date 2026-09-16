@@ -1390,9 +1390,13 @@ function renderBracket(
  *
  * - 位置由**布局层**给出：`x1` / `x2` 是大括号所占槽位的**左缘**（布局已把它们当作
  *   「无时值占宽元素」排在小节线**内侧**——左大括号在小节线右侧、右大括号在小节线左侧）。
- *   本函数只在给定槽位内画形状，**不做任何外扩**（此前按 `x ± bulge` 外扩，正好把括号
- *   画到了小节线外面）。
- * - 线形：**加粗**（`stroke-width ≈ 0.16×字号`，≥1.8），与细线条的小节线形成层次。
+ *   本函数只在给定槽位内画形状，**不做任何外扩**。
+ * - 形状：**用字体里的 `{` / `}` 字形**（`text-anchor=middle` + `lengthAdjust=spacingAndGlyphs`
+ *   横向压到槽宽，再用 `scale(1, sy)` **纵向拉伸**到两层高度）。
+ *   为什么用字形而不是手绘路径：字体的括号自带**粗细变化**（笔画中段粗、拐角与尖端细），
+ *   这正是排版惯例想要的效果；手绘等宽线条无论加粗与否都是"均匀的一根"，观感不对
+ *   （用户明确要求「细条带有粗细变化的大括号，不用粗线」）。
+ *   粗细对比度**跟随「音符字体」**（`shuzi_font`）——衬线字体对比更强，可在设置里换。
  * - 圆括号 `( … )` 不在这里画——段层圆括号由布局层发成 `page.brackets`（`zkh`/`ykh`
  *   文本字形），与全项目其它括号同一套渲染与纵向基准（字形中心 = 数字中心）。
  */
@@ -1402,23 +1406,18 @@ function renderSegmentBracket(b: PlacedSegmentBracket, config: PageConfig): stri
   const ns = config.note_size
   /** 大括号横向占宽——与布局层 `braceW` 同源（`max(3, 0.32×字号)`） */
   const w = Math.max(3, ns * 0.32)
-  const cw = w / 2
-  const sw = Math.max(1.8, ns * 0.16) // 加粗线条
-  const yTop = b.yTop
-  const my = (yTop + lo) / 2
-  const spine = (x: number, dir: 1 | -1): string =>
-    `M ${r1n(x)} ${r1n(yTop)} ` +
-    `Q ${r1n(x + dir * w)} ${r1n(yTop)} ${r1n(x + dir * cw)} ${r1n(yTop + cw * 1.2)} ` +
-    `L ${r1n(x + dir * cw)} ${r1n(my - cw)} ` +
-    `Q ${r1n(x + dir * cw)} ${r1n(my)} ${r1n(x + dir * w)} ${r1n(my)} ` +
-    `Q ${r1n(x + dir * cw)} ${r1n(my)} ${r1n(x + dir * cw)} ${r1n(my + cw)} ` +
-    `L ${r1n(x + dir * cw)} ${r1n(lo - cw * 1.2)} ` +
-    `Q ${r1n(x + dir * cw)} ${r1n(lo)} ${r1n(x)} ${r1n(lo)}`
-  // 左 `{`：两端锚点取槽位右缘、cusp 朝左 → 形状正好占满 [x1, x1+w]
-  // 右 `}`：镜像（两端锚点取槽位左缘、cusp 朝右）→ 占满 [x2, x2+w]
-  const left = `<path d="${spine(b.x1 + w, -1)}" fill="none" stroke="#1b1b1b" stroke-width="${r1n(sw)}" stroke-linecap="round" data-segment-brace="dsb"/>`
-  const right = `<path d="${spine(b.x2, 1)}" fill="none" stroke="#1b1b1b" stroke-width="${r1n(sw)}" stroke-linecap="round" data-segment-brace="dsb"/>`
-  return left + right
+  const h = lo - b.yTop
+  /** 基准字号：决定字形细节与笔画粗细（与槽宽联动，取 1.6×音符字号） */
+  const fs = ns * 1.6
+  /** 纵向拉伸系数（按「字形自然高度 ≈ 1.2×字号」估算，只拉伸纵向、不放大笔画） */
+  const sy = h / (fs * 1.2)
+  const my = (b.yTop + lo) / 2
+  const fam = noteFont(config.shuzi_font)
+  const glyph = (ch: string, slotX: number): string =>
+    `<text x="0" y="0" text-anchor="middle" dominant-baseline="central" font-size="${r1n(fs)}" ` +
+    `font-family="${fam}" fill="#1b1b1b" textLength="${r1n(w)}" lengthAdjust="spacingAndGlyphs" ` +
+    `transform="translate(${r1n(slotX + w / 2)},${r1n(my)}) scale(1,${r1n(sy)})" data-segment-brace="${b.type}">${ch}</text>`
+  return glyph('{', b.x1) + glyph('}', b.x2)
 }
 
 function renderPage(page: ScorePage, config: PageConfig, pageCount: number, opts?: RenderFontMeta): string {

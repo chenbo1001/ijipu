@@ -5707,10 +5707,14 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
     check('X4 右大括号在右圆括号**右侧**（不重叠）', ykhX !== undefined && braceR >= ykhX.x + ykhX.width / 2 - 0.11, `braceL=${braceR} parenR=${ykhX ? (ykhX.x + ykhX.width / 2).toFixed(1) : 'n/a'}`)
     check('X5 大括号与内容不重叠（左括号槽右缘 ≤ 段首音）', segN.length > 0 && braceL + braceW <= segN[0].x + 0.11, `braceR=${(braceL + braceW).toFixed(1)} firstNote=${segN[0]?.x}`)
     // X6：线条加粗——渲染出的 `stroke-width` ≥ 1.8
+    // X6：大括号用**字体字形**（自带粗细变化）+ 纵向拉伸，**不是**手绘等宽粗线
     const svgDsb = renderScoreToSvg(layoutScore(parseJps(src), DUR_CFG))[0]
-    const m = /<path[^>]*data-segment-brace="dsb"[^>]*>/.exec(svgDsb)
-    const sw = m ? Number(/stroke-width="([\d.]+)"/.exec(m[0])?.[1] ?? 0) : 0
-    check('X6 大括号用加粗线条绘制（stroke-width ≥ 1.8）', sw >= 1.8, `stroke-width=${sw}`)
+    const m = /<text[^>]*data-segment-brace="dsb"[^>]*>[{}]<\/text>/.exec(svgDsb)
+    check('X6 大括号用字体字形绘制（含 { 与 } 字形）', m !== null, m ? m[0].slice(0, 80) : 'not found')
+    const mAll = svgDsb.match(/<text[^>]*data-segment-brace="dsb"[^>]*>[{}]<\/text>/g) ?? []
+    check('X6b 左右大括号各一个字形', mAll.length === 2, `got ${mAll.length}`)
+    check('X6c 大括号不再用等宽描边线条（无 stroke-width 粗线）', !/<path[^>]*data-segment-brace/.test(svgDsb), '')
+    check('X6d 大括号做纵向拉伸（transform 含 scale(1,…)）且横向压到槽宽', /scale\(1,[\d.]+\)/.test(m?.[0] ?? '') && /lengthAdjust="spacingAndGlyphs"/.test(m?.[0] ?? ''), m?.[0] ?? '')
     check('X7 大括号横向占宽 ≈ max(3, 0.32×字号)', Math.abs(braceW - Math.max(3, nsx * 0.32)) < 0.01, `w=${braceW}`)
     // X8：dsb 内部三个元素（左大括号 / 左圆括号 / 内容）**依次不重叠**，且都在小节线内侧
     const braceLEdge = braceL + braceW
