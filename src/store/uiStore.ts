@@ -5,8 +5,6 @@ import './localStorageMigration'
 import { create } from 'zustand'
 import { clampEditorFontSize, normalizeFontStack } from '@ijipu/engine'
 import { DEFAULT_THEME, DEFAULT_THEME_MODE, type ThemeMode } from '../brand/themes'
-// adj366：试听音色选择值的解析/格式化（未设置或空串 = 自动）
-import { formatStoredVoice, parseStoredVoice } from './playbackVoice'
 // L1「用户个性」：编辑器偏好 + 字体覆盖（不进谱面；详见 docs/SETTINGS-AUDIT.md 分层）
 import { loadEditorFont, loadEditorFontSize, loadFontOverride, saveEditorFont, saveEditorFontSize, saveFontOverride } from './editorPrefs'
 import type { FontOverride } from '@ijipu/engine'
@@ -43,6 +41,13 @@ const SHOW_GUIDES_KEY = 'ijipu.showGuides'
 const SPLITH_DIR_KEY = 'ijipu.splitHDir'
 // adj330：SpessaSynth 高质量采样——音源库 + 全局音色（GM program）
 const PLAYBACK_HQ_LIBRARY_KEY = 'ijipu.playbackHqLibrary'
+/**
+ * adj448：试听「音色」**不再持久化**（会话级）：每次打开试听都从「自动」开始。
+ *
+ * 原因：选定具体音色会**覆盖谱面里的 `Y:` 乐器**（按设计），而它又会被记住 ⇒
+ * 用户下次打开带多声部 `Y:` 的谱子时，音色仍是上次选的那个，看起来像「谱面 Y: 不生效」
+ * （用户实测反馈）。此键仅用于**清理旧版本残留**。
+ */
 const PLAYBACK_HQ_VOICE_KEY = 'ijipu.playbackHqVoice'
 const PLAYBACK_HQ_ENABLED_KEY = 'ijipu.playbackHqEnabled'
 // adj347：默认启用的常用音色（初次用户打开试听即可选）——大钢琴/八音盒/小提琴/弦乐/小号/单簧管/长笛
@@ -236,14 +241,18 @@ export const useUiStore = create<UiState>()((set) => ({
       return ''
     }
   })(),
+  /**
+   * adj448：试听音色 = **会话级**（默认「自动」，每次打开试听重置，见 PlaybackDialog）。
+   * 旧版本曾把它记在 `ijipu.playbackHqVoice`——这里顺手清掉残留，避免"明明没选却仍按旧音色演奏"。
+   */
   playbackHqVoice: (() => {
     try {
-      // adj366：未设置/空串/非法值 → null（自动）；直接 Number(null)/Number('') 会得到 0（大钢琴）
-      return parseStoredVoice(localStorage.getItem(PLAYBACK_HQ_VOICE_KEY))
+      localStorage.removeItem(PLAYBACK_HQ_VOICE_KEY)
     } catch {
-      return null
+      /* 缓存不可用：忽略 */
     }
-  })(),
+    return null
+  })() as number | null,
   // adj332/347：已启用音色集合（试听只列这些）；首次/损坏回退默认常用音色
   playbackHqEnabled: (() => {
     try {
@@ -353,15 +362,8 @@ export const useUiStore = create<UiState>()((set) => ({
     }
     set({ playbackHqLibrary: id })
   },
-  setPlaybackHqVoice: (program) => {
-    try {
-      // adj366：自动 = 空串（parseStoredVoice 回读为 null）
-      localStorage.setItem(PLAYBACK_HQ_VOICE_KEY, formatStoredVoice(program))
-    } catch {
-      /* 忽略 */
-    }
-    set({ playbackHqVoice: program })
-  },
+  /** adj448：会话级（不落盘）——每次打开试听都从「自动」开始，见 PlaybackDialog 的挂载重置 */
+  setPlaybackHqVoice: (program) => set({ playbackHqVoice: program }),
   // adj332：切换音色启用（收藏），持久化数组
   togglePlaybackHqVoice: (program) =>
     set((s) => {

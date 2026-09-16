@@ -103,7 +103,7 @@
 | `ijipu.viewType` | split | 视图偏好（拆分/编辑/预览） | 同上 | 同上（由宿主决定布局） |
 | `ijipu.showGuides` | true | 排版辅助虚线开关 | UI 状态（可持久化可不） | 建议插件级开关或会话状态 |
 | `ijipu.playbackHqLibrary` | ''(默认库) | 音源库 id | 用户个性 | → 插件设置（已实现） |
-| `ijipu.playbackHqVoice` | null=自动 | 默认音色（GM program） | 用户个性 | → 插件设置（已实现） |
+| `ijipu.playbackHqVoice` | ~~null=自动~~ | ~~默认音色（GM program）~~ | **adj448：改为会话级（L3），不再落盘** | 选定音色会**覆盖谱面 `Y:` 乐器**，被记住会让用户误判「谱面 Y: 不生效」⇒ 每次打开试听重置为「自动」；旧键仅用于清理残留 |
 | `ijipu.playbackHqEnabled` | 常用 7 种 | 收藏音色集合 | 用户个性 | → 插件设置（已实现） |
 | `ijipu.draft` | — | **未保存草稿正文** | 独立应用专用 | **嵌入时必须禁用**（vault 才是唯一真源） |
 | `ijipu.draftName` | — | 草稿文件名 | 独立应用专用 | 同上 |

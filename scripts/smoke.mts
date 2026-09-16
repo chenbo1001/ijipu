@@ -43,8 +43,6 @@ import {
   saveTextToHandle,
   writeTextToHandle,
 } from '../src/store/saveSupport.ts'
-// adj366：试听「音色」选择值解析（未设置/空串 = 自动）——纯函数，可直接断言
-import { formatStoredVoice, parseStoredVoice } from '../src/store/playbackVoice.ts'
 // adj373：作者署名（品牌 tokens + 关于对话框文案）
 import { brand } from '../src/brand/tokens.ts'
 import { aboutCopy } from '../src/brand/copy.ts'
@@ -3756,26 +3754,34 @@ async function runAdj363SaveTests() {
   }
 }
 
-// ---- 78. 试听音色默认「自动」（adj366）----
-console.log('[78] playback voice default = auto (adj366)')
+// ---- 78. 试听音色默认「自动」（adj366 → adj448 改为会话级、每次打开重置）----
+console.log('[78] playback voice default = auto (adj366/adj448)')
 {
-  // ① 持久化值解析：未设置/空串/空白/非法 → null（自动）；合法 program 保留
-  check('adj366 未设置（null）→ 自动', parseStoredVoice(null) === null, String(parseStoredVoice(null)))
-  check('adj366 空串（保存「自动」后的值）→ 自动', parseStoredVoice('') === null, String(parseStoredVoice('')))
-  check('adj366 空白 → 自动', parseStoredVoice('  ') === null, String(parseStoredVoice('  ')))
-  check('adj366 非法值 → 自动', parseStoredVoice('abc') === null && parseStoredVoice('128') === null && parseStoredVoice('-1') === null)
-  check('adj366 程序号 0（大钢琴）保留为 0，不被当成自动', parseStoredVoice('0') === 0, String(parseStoredVoice('0')))
-  check('adj366 程序号 73（长笛）保留', parseStoredVoice('73') === 73, String(parseStoredVoice('73')))
-  // ② 反向格式化：自动 = 空串（既有存储格式，回读仍是自动）
-  check('adj366 自动 → 空串', formatStoredVoice(null) === '', JSON.stringify(formatStoredVoice(null)))
-  check('adj366 音色 → 数字串', formatStoredVoice(10) === '10', formatStoredVoice(10))
-  check('adj366 存↔读往返一致', parseStoredVoice(formatStoredVoice(null)) === null && parseStoredVoice(formatStoredVoice(21)) === 21)
-  // ③ 「自动」的落点：按谱面乐器/声部名路由 GM 音色（不是固定钢琴）
+  // ① 「自动」的落点：按谱面乐器/声部名路由 GM 音色（不是固定钢琴）
   check('adj366 自动路由：@手风琴 → GM 21', instrumentToProgram('手风琴') === 21, String(instrumentToProgram('手风琴')))
   check('adj366 自动路由：@长笛 → GM 73', instrumentToProgram('长笛') === 73, String(instrumentToProgram('长笛')))
   check('adj366 自动路由：带库前缀「库:小提琴」→ GM 40', instrumentToProgram('库:小提琴') === 40, String(instrumentToProgram('库:小提琴')))
   check('adj366 自动路由：声部名 小号 → GM 56', instrumentToProgram('小号') === 56, String(instrumentToProgram('小号')))
   check('adj366 自动路由：无乐器 → 钢琴 0', instrumentToProgram(undefined) === 0, String(instrumentToProgram(undefined)))
+  // ② adj448：试听音色改为**会话级**且每次打开试听重置为「自动」——
+  //    选定具体音色会覆盖谱面 `Y:`，若被记住，用户会误判「谱面 Y: 不生效」（用户实测反馈）
+  {
+    const storeSrc = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+    const dlgSrc = String(readFileSync('src/dialogs/PlaybackDialog.tsx', 'utf8'))
+    check('adj448 音色选择不再落盘（setter 不写 localStorage）',
+      /setPlaybackHqVoice: \(program\) => set\(\{ playbackHqVoice: program \}\)/.test(storeSrc))
+    check('adj448 旧存储键只用于清理残留（removeItem，不再读取）',
+      storeSrc.includes('localStorage.removeItem(PLAYBACK_HQ_VOICE_KEY)') &&
+      !storeSrc.includes('localStorage.getItem(PLAYBACK_HQ_VOICE_KEY)'))
+    check('adj448 默认值 = null（自动）',
+      /playbackHqVoice: \(\(\) => \{[\s\S]{0,240}return null/.test(storeSrc))
+    check('adj448 打开试听即重置为「自动」',
+      /useEffect\(\(\) => \{\s*setPlaybackHqVoice\(null\)\s*\}, \[setPlaybackHqVoice\]\)/.test(dlgSrc))
+    check('adj448 选定具体音色时给出「会覆盖谱面 Y:」提示',
+      dlgSrc.includes('voiceOverrideHint') && dlgSrc.includes('playbackHqVoice !== null'))
+    check('adj448 旧的音色持久化模块已删除（不再有 second source）',
+      !existsSync('src/store/playbackVoice.ts'))
+  }
 }
 
 // ---- 79. 最后一个跳房子用「结束句」做标签（adj368）----

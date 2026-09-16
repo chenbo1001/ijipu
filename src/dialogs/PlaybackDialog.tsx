@@ -171,6 +171,13 @@ export function PlaybackDialog() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // adj448：**每次打开试听，「音色」都从「自动」开始**——选定具体音色会覆盖谱面 `Y:` 乐器，
+  // 若把它记住，用户下次打开带多声部 `Y:` 的谱子时音色仍是上次那个，看起来像「谱面 Y: 不生效」
+  // （用户实测反馈）。试听音色因此改为**会话级**，不落盘（见 store 的 playbackHqVoice）。
+  useEffect(() => {
+    setPlaybackHqVoice(null)
+  }, [setPlaybackHqVoice])
+
   // 关闭时停止播放
   useEffect(() => {
     return () => {
@@ -500,6 +507,12 @@ export function PlaybackDialog() {
                 {samplerState === 'loading' ? playbackCopy.loading : samplerState === 'failed' ? playbackCopy.failedFallback : ''}
               </span>
             </div>
+            {playbackHqVoice !== null && (
+              // adj448：选定具体音色时说明它会覆盖谱面 `Y:`（用户曾据此误判「多声部 Y: 不生效」）
+              <div style={{ color: 'var(--jp-text-muted)', fontSize: 11, lineHeight: 1.4 }}>
+                {playbackCopy.voiceOverrideHint}
+              </div>
+            )}
             {playbackHqEnabled.length === 0 && (
               <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>尚未启用音色——请到「设置 → 音色库」勾选要试听的音色</div>
             )}
