@@ -6438,6 +6438,19 @@ console.log('[adj428] segmentRowGap (bz/dsb) configurable')
   }
 }
 
+// ---- adj443（E-2026-184）：桌面端（Tauri）不得注册 Service Worker ----
+// 用户报「PC 版重新安装后打开还是旧界面，要按 Ctrl+R 才更新」——根因：Tauri v2 在 Windows 用
+// `http(s)://tauri.localhost`（**安全上下文，SW 能正常注册**，原注释以为会静默失败），
+// SW 从 Cache Storage 返回旧资源 ⇒ 磁盘上是新 bundle、界面仍是旧的。
+console.log('[adj443] desktop must not register a service worker')
+{
+  const mainSrc = String(require('node:fs').readFileSync('src/main.tsx', 'utf8'))
+  check('AJ8 main.tsx 存在桌面端判定（isTauriDesktop）', mainSrc.includes('isTauriDesktop'))
+  check('AJ8b 桌面端分支：注销旧 SW + 清 CacheStorage（老用户一次性摘掉污染缓存）',
+    mainSrc.includes('getRegistrations') && mainSrc.includes('caches.delete'))
+  check('AJ8c 注册 SW 的代码在 else 分支里（仅非桌面端注册）',
+    /else\s*\{[\s\S]*serviceWorker[\s\S]*register\(/.test(mainSrc))
+}
 
 runAdj363SaveTests()
   .catch((e) => {
