@@ -30,10 +30,6 @@ export function tokenizeMusicLine(
   const n = content.length
   const rawAt = (start: number, end: number) => content.slice(start, end)
 
-  // adj427：临时段栈——`{bz` / `{dsb` 入栈，`}` 出栈；close 段时按栈顶类型生成 close token。
-  // 段内**不嵌套** `{bz/dsb`（在 open 段内遇到 `{bz/dsb` 报 error）；段内允许任意 MusicToken。
-  const segmentStack: ('bz' | 'dsb')[] = []
-
   // adj393：渐强/渐弱配对的辅助查询（`<`/`>` 后到 `!` 之前为区间；`!` 必须有同一行内的起点）
   /** 行内最后一条渐强/渐弱起点 token 的下标；没有返回 -1 */
   const lastHairpinStart = (): number => {
@@ -66,6 +62,11 @@ export function tokenizeMusicLine(
   const HINT_GRACE = '倚音用 `[` `]` 紧贴音符成对书写，括号内只允许高低音点 `\'` `,`、变音 `#` `$` `=`、减时线 `/`：前倚音 `1[65]`、后倚音 `1[h6/5]`'
   const HINT_SLUR_ATTACHED =
     '连音线 `(` 与音符之间**应有空格**（与虚音符 `(1)` 区分）；`(` 后的 `+`/`-` 是**连音线的高度级数**（`(+` 抬升、`(-` 降低，每级 2px），**不是**前一个音符的增时线——要给音符增时请写在音符旁，如 `1- (- 2 3)`'
+  // adj427：临时段提示文案
+  const HINT_SEGMENT_HEAD = '临时段必须以 `{bz`（临时伴奏）或 `{dsb`（临时多声部）开头，且 `bz`/`dsb` 后要留一个空格，如 `{bz 1 2 3}`'
+  const HINT_SEGMENT_CLOSE = '临时段要成对闭合：`{bz … }` / `{dsb … }`，如 `3 4 | {bz 1 2 3 4} 5 6 |`'
+  const HINT_SEGMENT_NEST = '临时段**不支持嵌套**；请先 `}` 关闭外层段，再开新段'
+  const HINT_SEGMENT_STRAY = '`}` 只能用于关闭 `{bz` 或 `{dsb` 临时段，不能单独出现'
   const HINT_VOLTA = '跳房子 `[` 要紧跟在小节线之后；行首跳房子请先用隐藏小节线 `|/`，如 `|/ ["1." 1 2 3 |]`'
   const HINT_SYMBOL =
     '音符用 `1`-`7`、休止 `0`（隐藏休止 `8`）、节奏 `9`；时值 `-` `/` `.`；高低音点 `\'` `,`；变音 `#` `$` `=`；装饰 `&编码`（如 `&tr`）；注释 `"文字"`；小节线与反复 `|` `||` `|:` `:|`；跳房子 `[` `]`；渐强渐弱 `<` `>` `!`（详见「语法速查」）'
@@ -215,76 +216,71 @@ export function tokenizeMusicLine(
       continue
     }
 
-    // adj427：临时段 `{bz ... }` / `{dsb ... }` —— `}` 是段结束（线性扫描到第一个 `}`）；
-    // 段内 token 递归 tokenize 后挂在 open token 的 children 上。
-    // 段内**不嵌套** `{bz/dsb` —— 段内再遇到 `{bz/dsb` 报"嵌套"错。
+    // adj427：临时段 `{bz … }`（临时伴奏）/ `{dsb … }`（临时多声部）。
+    // 段内 token 递归 tokenize 后挂在 open token 的 children 上；`}` 生成配对的 close token。
+    // 段头边界校验见 matchSegmentHead（`bz`/`dsb` 后必须是空白或 `}`）；段结束扫描见
+    // findSegmentEnd（跳过引号内的 `}`）；段内**不嵌套**（段内再遇 `{bz/dsb` 报"嵌套"错）。
     if (c === '{') {
-      const after = content.slice(i + 1, i + 5) // 看 4 字符足以区分 bz/dsb
-      let segType: 'bz' | 'dsb' | null = null
-      if (after.startsWith('bz')) segType = 'bz'
-      else if (after.startsWith('dsb')) segType = 'dsb'
+      const segType = matchSegmentHead(content, i)
       if (segType) {
         // 嵌套限制：段内不能再开新段（递归调用时 opts.inSegment 已设置）
-        if (segmentStack.length > 0 || opts.inSegment) {
+        if (opts.inSegment) {
           errors.push(
             err(
-              '临时段 "{' + segType + '}" 不能嵌套在已有段内（已有 ' + (opts.inSegment ?? ('{' + segmentStack[segmentStack.length - 1])) + '）',
+              '临时段 "{' + segType + '}" 不能嵌套在已有段内（已有 {' + opts.inSegment + '}）',
               { line: pos.line, col: pos.col + i },
               'error',
-              '临时段 {bz} / {dsb} 不支持嵌套；请先 } 关闭外层段，再开新段',
+              HINT_SEGMENT_NEST,
             ),
           )
           i++ // 跳过 `{`，继续解析（不阻塞后续 token）
           continue
         }
-        // 找 `}`：跳过 `bz`/`dsb` 后的可选空白，然后线性扫描第一个 `}`
+        // 段内容起点：跳过 `{bz`/`{dsb` 后的空白
         let j = i + 1 + segType.length
         while (j < n && (content[j] === ' ' || content[j] === '\t')) j++
         const segStart = j
-        let segEnd = -1
-        while (j < n) {
-          if (content[j] === '}') {
-            segEnd = j
-            break
-          }
-          j++
-        }
+        const segEnd = findSegmentEnd(content, segStart)
+        // 段头文本（`{bz` / `{dsb`）——作为 open token 的 raw，与 close 的 `}` 对称
+        const headRaw = content.slice(i, i + 1 + segType.length)
+
         if (segEnd === -1) {
+          // 未闭合：报错 + 兜底把段内剩余内容照常 tokenize（让其它错误一并暴露）
           errors.push(
             err(
               '临时段 "{' + segType + '}" 未找到结束 "}"',
               { line: pos.line, col: pos.col + i },
               'error',
-              '请用 "{' + segType + '} ... }" 包裹段内容',
+              HINT_SEGMENT_CLOSE,
             ),
           )
-          // 兜底：把段内剩余内容全部交给普通 tokenize（让其它错误暴露）
-          const innerRaw = content.slice(segStart)
-          const innerRes = tokenizeMusicLine(innerRaw, pos)
+          // 段内递归：位置基准带上 segStart（列号绝对化），token 位置再右移 segStart
+          const innerRes = tokenizeMusicLine(content.slice(segStart), { line: pos.line, col: pos.col + segStart })
           errors.push(...innerRes.errors)
           tokens.push({
             kind: 'segment',
             type: segType,
             dir: 'open',
             pos: i,
-            raw: content.slice(i, segStart),
-            children: innerRes.tokens,
+            raw: headRaw,
+            children: shiftTokenPos(innerRes.tokens, segStart),
           })
           i = n
           continue
         }
-        // 递归 tokenize 段内内容：传入 inSegment 标志，让段内再遇 `{bz/dsb` 时报嵌套错
-        const innerRaw = content.slice(segStart, segEnd)
-        const innerRes = tokenizeMusicLine(innerRaw, pos, { inSegment: segType })
+
+        // 递归 tokenize 段内内容：inSegment 让段内再遇 `{bz/dsb` 时报嵌套错；
+        // 位置基准 col 加 segStart 使段内错误列号**绝对化**（相对整行内容）
+        const innerRes = tokenizeMusicLine(content.slice(segStart, segEnd), { line: pos.line, col: pos.col + segStart }, { inSegment: segType })
         errors.push(...innerRes.errors)
-        // open 段 token（含 children）
+        // open 段 token（含 children；children 的 pos 已右移 segStart）
         tokens.push({
           kind: 'segment',
           type: segType,
           dir: 'open',
           pos: i,
-          raw: content.slice(i, segEnd + 1),
-          children: innerRes.tokens,
+          raw: headRaw,
+          children: shiftTokenPos(innerRes.tokens, segStart),
         })
         // close 段 token（`}`）
         tokens.push({
@@ -297,18 +293,18 @@ export function tokenizeMusicLine(
         i = segEnd + 1
         continue
       }
-      // `{` 后不是 `bz`/`dsb`：当成无效字符警告并跳过
+      // `{` 后不是合法段头：报"无法识别"（`{bzzy` 这类会被 matchSegmentHead 正确挡下）
       errors.push(
-        err(`无法识别的符号 "${c}"（临时段必须以 "{bz" 或 "{dsb" 开头）`, { line: pos.line, col: pos.col + i }, 'warning', HINT_SYMBOL),
+        err(`无法识别的符号 "${c}"`, { line: pos.line, col: pos.col + i }, 'warning', HINT_SEGMENT_HEAD),
       )
       i++
       continue
     }
 
-    // adj427：段外的 `}` —— 不应出现（段内的 `}` 由 `{bz/dsb` 处理时线性扫描吃掉了）
+    // adj427：段外的 `}` —— 段内的 `}` 已被 findSegmentEnd 吃掉，独立出现的 `}` 是书写错误
     if (c === '}') {
       errors.push(
-        err(`多余的 "}"（没有对应的 "{bz" 或 "{dsb"）`, { line: pos.line, col: pos.col + i }, 'warning', '`}` 只能用于关闭 `{bz` 或 `{dsb` 临时段'),
+        err('多余的 "}"（没有对应的 "{bz" 或 "{dsb"）', { line: pos.line, col: pos.col + i }, 'warning', HINT_SEGMENT_STRAY),
       )
       i++
       continue
@@ -880,3 +876,66 @@ export function tokenizeMusicLine(
 
 // 局部类型别名（避免在分支中手写冗长 Extract）
 type NoteToken_ = Extract<MusicToken, { kind: 'note' }>
+
+// ============================================================
+// adj427：临时段（{bz … } / {dsb … }）辅助纯函数
+// ============================================================
+
+/** 临时段类型 */
+export type SegmentKind = 'bz' | 'dsb'
+
+/**
+ * 判断 `content[at]` 处是否为临时段开头（`{bz` / `{dsb`），是则返回段类型。
+ *
+ * **必须做边界校验**：`bz`/`dsb` 之后只能是空白或段结束 `}`——
+ * 否则 `{bzzy 1 2}` 会被误当成 bz 段（`bzzy` 不是合法段头，应报"无法识别"）。
+ */
+export function matchSegmentHead(content: string, at: number): SegmentKind | null {
+  if (content[at] !== '{') return null
+  // dsb 放在 bz 之前无影响（互不为前缀），但顺序固定便于阅读
+  for (const t of ['dsb', 'bz'] as const) {
+    if (!content.startsWith(t, at + 1)) continue
+    const boundary = content[at + 1 + t.length]
+    // 段头后必须是空白或直接结束 `}`（`{bz}` 空段）
+    if (boundary === undefined || boundary === ' ' || boundary === '\t' || boundary === '}') return t
+  }
+  return null
+}
+
+/**
+ * 从 `from` 起找段结束 `}` 的下标；找不到返回 -1。
+ *
+ * **跳过引号内内容**：`"…"` 注释里的 `}` 不算段结束
+ * （如 `{bz 1"渐强}注" 2}` 的 `}` 在引号内）——与 tokenizer 其它部分对引号的处理保持一致。
+ */
+export function findSegmentEnd(content: string, from: number): number {
+  let inQuote = false
+  for (let k = from; k < content.length; k++) {
+    const ch = content[k]
+    if (ch === '"') {
+      inQuote = !inQuote
+      continue
+    }
+    if (inQuote) continue
+    if (ch === '}') return k
+  }
+  return -1
+}
+
+/**
+ * 把段内 token 的 `pos` 整体右移 `offset`。
+ *
+ * 段内内容是**切片后递归 tokenize** 的，其 `pos` 是相对切片起点的偏移；
+ * 而全行 token 的 `pos` 必须相对整行内容——不偏移会导致
+ * ①错误列号偏小；②`cursorMap`（光标↔谱面联动）把光标映射到错误的位置。
+ */
+export function shiftTokenPos(tokens: MusicToken[], offset: number): MusicToken[] {
+  return tokens.map((t) => {
+    const shifted = { ...t, pos: t.pos + offset } as MusicToken
+    // 段内不允许嵌套，理论上不会有 children；仍递归处理以防未来放开嵌套
+    if (t.kind === 'segment' && t.children) {
+      ;(shifted as Extract<MusicToken, { kind: 'segment' }>).children = shiftTokenPos(t.children, offset)
+    }
+    return shifted
+  })
+}

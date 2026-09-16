@@ -5389,6 +5389,57 @@ console.log('[adj427] tokenize {bz / {dsb segments')
   const errs = r.errors.filter((e) => e.message.includes('多余的'))
   check('多余 } 报错', errs.length > 0, JSON.stringify(r.errors))
 }
+// ---- adj427 回顾加固（Step 2 修复）：段头边界 / 位置偏移 / 引号内 } / raw 语义 / 格式化 ----
+{
+  // A. 段头边界校验：{bzzy 不是 bz 段（bz 后必须是空白或 }）
+  const r = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {bzzy 1 2}\n')
+  const segs = r.groups[0].music.tokens.filter((t) => t.kind === 'segment')
+  check('A1 {bzzy 不产生 segment token（段头边界校验）', segs.length === 0, `got ${segs.length}`)
+  check('A2 {bzzy 报"无法识别"', r.errors.some((e) => e.message.includes('无法识别')), JSON.stringify(r.errors))
+}
+{
+  // B. 段内 token 位置偏移：{bz 1 2 3} → `{bz ` 之后起点为 4
+  const r = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {bz 1 2 3}\n')
+  const seg = r.groups[0].music.tokens.find((t) => t.kind === 'segment' && t.dir === 'open') as
+    | { children?: { pos: number }[] }
+    | undefined
+  check('B1 段内首 token pos 已右移 segStart（=4）', seg?.children?.[0]?.pos === 4, `got ${seg?.children?.[0]?.pos}`)
+  check('B2 段内第二个 token pos = 6', seg?.children?.[1]?.pos === 6, `got ${seg?.children?.[1]?.pos}`)
+}
+{
+  // C. 引号内的 } 不结束段：{bz 1"a}b" 2} → 段内仍 2 个音符
+  const r = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {bz 1"a}b" 2}\n')
+  const seg = r.groups[0].music.tokens.find((t) => t.kind === 'segment' && t.dir === 'open') as
+    | { children?: unknown[] }
+    | undefined
+  const notes = (seg?.children ?? []).filter((c) => (c as { kind: string }).kind === 'note')
+  check('C1 引号内 } 不结束段（段内仍有 2 个音符）', notes.length === 2, `got ${notes.length}`)
+  check('C2 引号内 } 场景无"未找到结束"错', !r.errors.some((e) => e.message.includes('未找到结束')), JSON.stringify(r.errors))
+}
+{
+  // D. 空段 {bz} → open + close，children 空
+  const r = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {bz}\n')
+  const segs = r.groups[0].music.tokens.filter((t) => t.kind === 'segment') as Array<{ dir: string; children?: unknown[] }>
+  check('D1 {bz} 空段产出 open + close', segs.length === 2, `got ${segs.length}`)
+  check('D2 空段 children 长度为 0', segs[0]?.children?.length === 0, `got ${segs[0]?.children?.length}`)
+}
+{
+  // E. raw 语义：open.raw = 段头（`{dsb`），close.raw = `}`
+  const r = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {dsb 1 2}\n')
+  const segs = r.groups[0].music.tokens.filter((t) => t.kind === 'segment') as Array<{ dir: string; raw: string }>
+  check('E1 open.raw = "{dsb"（段头）', segs[0]?.raw === '{dsb', `got ${JSON.stringify(segs[0]?.raw)}`)
+  check('E2 close.raw = "}"', segs[1]?.raw === '}', `got ${JSON.stringify(segs[1]?.raw)}`)
+}
+{
+  // F. 格式化不破坏 {bz … }（EditorPane 光标离开 Q 行时会自动格式化）
+  const src = "Q: 3 4 |{bz 1 2 3 4 | 5 6 7 1'} 5 6 |"
+  const once = formatLine(src)
+  const twice = formatLine(once)
+  check('F1 格式化保留 {bz 与 }', once.includes('{bz') && once.includes('}'), once)
+  check('F2 格式化幂等（两次结果一致）', once === twice, `once=${once} twice=${twice}`)
+  const r = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\n${once}\n`)
+  check('F3 格式化后仍能解析出 segment token', r.groups[0].music.tokens.some((t) => t.kind === 'segment'), JSON.stringify(r.errors))
+}
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
 runAdj363SaveTests()
