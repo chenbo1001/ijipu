@@ -171,12 +171,10 @@ export function PlaybackDialog() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // adj448：**每次打开试听，「音色」都从「自动」开始**——选定具体音色会覆盖谱面 `Y:` 乐器，
-  // 若把它记住，用户下次打开带多声部 `Y:` 的谱子时音色仍是上次那个，看起来像「谱面 Y: 不生效」
-  // （用户实测反馈）。试听音色因此改为**会话级**，不落盘（见 store 的 playbackHqVoice）。
-  useEffect(() => {
-    setPlaybackHqVoice(null)
-  }, [setPlaybackHqVoice])
+  // adj448：试听「音色」是**会话级**（store 初值恒为「自动」，不落盘）——选定具体音色会覆盖
+  // 谱面 `Y:` 乐器，若被持久化，用户下次打开带多声部 `Y:` 的谱子时音色仍是上次那个，
+  // 看起来像「谱面 Y: 不生效」（用户实测反馈）。adj450（用户要求）：**本次运行内记住**选择，
+  // 不再每次打开对话框都重置——只有重启应用才回到「自动」。
 
   // 关闭时停止播放
   useEffect(() => {

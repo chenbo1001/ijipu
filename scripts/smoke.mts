@@ -3763,8 +3763,8 @@ console.log('[78] playback voice default = auto (adj366/adj448)')
   check('adj366 自动路由：带库前缀「库:小提琴」→ GM 40', instrumentToProgram('库:小提琴') === 40, String(instrumentToProgram('库:小提琴')))
   check('adj366 自动路由：声部名 小号 → GM 56', instrumentToProgram('小号') === 56, String(instrumentToProgram('小号')))
   check('adj366 自动路由：无乐器 → 钢琴 0', instrumentToProgram(undefined) === 0, String(instrumentToProgram(undefined)))
-  // ② adj448：试听音色改为**会话级**且每次打开试听重置为「自动」——
-  //    选定具体音色会覆盖谱面 `Y:`，若被记住，用户会误判「谱面 Y: 不生效」（用户实测反馈）
+  // ② adj448/adj450：试听音色 = **会话级**（本次运行内记住，重启回到「自动」）——
+  //    选定具体音色会覆盖谱面 `Y:`，若被持久化/每次重置都不合用户预期（用户实测反馈）
   {
     const storeSrc = String(readFileSync('src/store/uiStore.ts', 'utf8'))
     const dlgSrc = String(readFileSync('src/dialogs/PlaybackDialog.tsx', 'utf8'))
@@ -3775,8 +3775,9 @@ console.log('[78] playback voice default = auto (adj366/adj448)')
       !storeSrc.includes('localStorage.getItem(PLAYBACK_HQ_VOICE_KEY)'))
     check('adj448 默认值 = null（自动）',
       /playbackHqVoice: \(\(\) => \{[\s\S]{0,240}return null/.test(storeSrc))
-    check('adj448 打开试听即重置为「自动」',
-      /useEffect\(\(\) => \{\s*setPlaybackHqVoice\(null\)\s*\}, \[setPlaybackHqVoice\]\)/.test(dlgSrc))
+    check('adj450 本次运行内记住选择：打开试听**不**重置（仅重启回到自动）',
+      !/useEffect\(\(\) => \{\s*setPlaybackHqVoice\(null\)/.test(dlgSrc) &&
+      /onChange=\{\(e\) => setPlaybackHqVoice\(/.test(dlgSrc))
     check('adj448 选定具体音色时给出「会覆盖谱面 Y:」提示',
       dlgSrc.includes('voiceOverrideHint') && dlgSrc.includes('playbackHqVoice !== null'))
     check('adj448 旧的音色持久化模块已删除（不再有 second source）',
@@ -6751,6 +6752,99 @@ console.log('[adj447] instrument names must resolve to their own GM program')
     const appSrc = String(readFileSync('src/playback/spessaSynthBackend.ts', 'utf8'))
     check('AN7 app 的 GM_VOICE_OPTIONS 直接取 engine 的 GM_VOICES（不再各存一份表）',
       appSrc.includes('GM_VOICE_OPTIONS: GmVoice[] = GM_VOICES'))
+  }
+}
+
+// ---- adj449：多组多声部时，色块必须按「行归属」定界（用户报「第二组色块跑到第一组位置」）----
+// 根因：`buildPlaySequence` 建 `voiceBlockByNoteIdx` 时只按「本页第一个包含该声部号的块」匹配——
+// 一页里多组多声部块（声部号重复出现）时，第 2 组及之后的所有音符（**以及中间穿插的单声部行**）
+// 全被判成第 1 组的块，`computeColorBounds` 便拿第 1 组的 `voiceCenters` 定界 ⇒ 色块整块跑到第 1 组那一行。
+console.log('[adj449] color bounds must follow the note own voice block')
+{
+  const code =
+    'V: 1.0\nB: t\nD: C\nP: 4/4\n' +
+    "Q1: 1 2 3 4 | 5 6 7 1' |\nQ2: 5 6 7 1' | 1' 7 6 5 |\n" +
+    "Q: 1 2 3 4 | 5 6 7 1' |\n" +
+    "Q1: 1' 7 6 5 | 5 5 5 - |\nQ2: 5 6 7 1' | 1' 1' 1' - |\n" +
+    "Q: 1' 2' 3' 4' | 5' - - - |\n"
+  const cfgList = [
+    ['时值优先', DUR_CFG],
+    ['空间优先', { ...DUR_CFG, noteSpaceLayout: 'space' as const }],
+  ] as const
+  for (const [ln, cfg] of cfgList) {
+    const pr = parseJps(code)
+    const layout = layoutScore(pr, cfg)
+    const page = layout.pages[0]
+    check(`AP[A1/${ln}] 本谱含 2 组多声部块`, page.voiceBlocks.length === 2,
+      `got ${page.voiceBlocks.length}`)
+    const seq = buildPlaySequence(pr, layout, 100)
+    /** 该音符所属的多声部块下标（块纵向范围包含本音符 + 声部号命中）；单声部行返回 -1 */
+    const blockIdxOf = (n: { id: { voice: number }; y: number }) =>
+      page.voiceBlocks.findIndex(
+        (vb) =>
+          vb.voices.some((v) => v.voice === n.id.voice) &&
+          n.y >= vb.yTop - 0.01 &&
+          n.y <= vb.yBottom + 0.01,
+      )
+    let containOwn = true // 色块纵向范围必须**包含本音符自己**
+    let withinBlock = true // 且必须落在**本块**的纵向范围（含自然外扩）内
+    let singleNull = true // 单声部行不得被套上多声部块的定界
+    let xAligned = true // 横向仍取本音符的**时值段**（色块覆盖整段、数字居中于段内）
+    const block2Bounds = new Set<string>()
+    const block1Bounds = new Set<string>()
+    const topExt = layout.config.note_size * 1.1
+    const botExt = layout.config.note_size * 0.6
+    let wrong = ''
+    for (const e of seq.events) {
+      const n = e.placed
+      if (n.segment) continue
+      const seg0 = e.playheadSegs?.[0]
+      if (!seg0) continue
+      const has = seg0.yTopMin !== undefined && seg0.yBottomMax !== undefined
+      const bi = blockIdxOf(n)
+      const key = has ? `${seg0.yTopMin!.toFixed(1)}~${seg0.yBottomMax!.toFixed(1)}` : 'null'
+      if (bi < 0) {
+        if (has) {
+          singleNull = false
+          wrong = `单声部 g${n.id.group}v${n.id.voice} 却套上了多声部定界 ${key}`
+        }
+        continue
+      }
+      if (bi === 0) block1Bounds.add(key)
+      else block2Bounds.add(key)
+      if (!has) {
+        containOwn = false
+        wrong = `多声部 g${n.id.group}v${n.id.voice} 缺少动态定界`
+        continue
+      }
+      if (!(seg0.yTopMin! <= n.y + 0.01 && n.y <= seg0.yBottomMax! + 0.01)) {
+        containOwn = false
+        wrong = `g${n.id.group}v${n.id.voice} y=${n.y} 不在定界 ${key} 内`
+      }
+      // 定界须落在**本块**范围内（允许自然的上下外扩 TOP_EXT=1.1×字号 / BOT_EXT=0.6×字号）
+      const vb = page.voiceBlocks[bi]
+      if (seg0.yTopMin! < vb.yTop - topExt - 0.01 || seg0.yBottomMax! > vb.yBottom + botExt + 0.01) {
+        withinBlock = false
+        wrong = `g${n.id.group}v${n.id.voice} 定界 ${key} 越出本块 [${(vb.yTop - topExt).toFixed(1)},${(vb.yBottom + botExt).toFixed(1)}]`
+      }
+      // 横向：色块左缘 = 本音符**时值段**左缘（adj320：色块覆盖整段，数字居中于段内 ⇒ 不必等于音符 x）
+      const slotX = n.segments?.[0]?.x
+      if (slotX !== undefined && Math.abs(seg0.x - slotX) > 0.6) {
+        xAligned = false
+        wrong = `g${n.id.group}v${n.id.voice} 色块 x=${seg0.x} ≠ 时值段左缘 x=${slotX}`
+      }
+      if (seg0.x > n.x + 0.61) {
+        xAligned = false
+        wrong = `g${n.id.group}v${n.id.voice} 色块 x=${seg0.x} 在音符 x=${n.x} 右侧`
+      }
+    }
+    check(`AP[A2/${ln}] 每个多声部音的色块定界都包含本音符`, containOwn, wrong)
+    check(`AP[A3/${ln}] 每组色块定界落在**自己那一组**的纵向范围内`, withinBlock, wrong)
+    check(`AP[A4/${ln}] 中间穿插的单声部行不被套上多声部定界`, singleNull, wrong)
+    check(`AP[A5/${ln}] 色块横向取本音符的时值段左缘`, xAligned, wrong)
+    check(`AP[A6/${ln}] 第 2 组与第 1 组的定界集合不相交（不再共用第 1 组范围）`,
+      [...block2Bounds].every((k) => !block1Bounds.has(k)) && block2Bounds.size > 0,
+      `组1=${[...block1Bounds].join(',')} 组2=${[...block2Bounds].join(',')}`)
   }
 }
 
