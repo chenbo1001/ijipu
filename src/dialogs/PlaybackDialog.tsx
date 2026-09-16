@@ -25,7 +25,7 @@ import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../play
 import { SpessaSynthBackend, getHqLibrary, hasBuiltinBank, GM_VOICE_OPTIONS, firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
 // adj409：暂停/续播的剩余事件平移（纯函数）
 import { shiftEventsFrom } from '../playback/playbackTimeline'
-import { layoutScore, buildPlaySequence, inferBpm, schedulePlay } from '@ijipu/engine'
+import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, gmVoiceRef, countScoreInstrumentSwitches } from '@ijipu/engine'
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
 
@@ -50,6 +50,14 @@ export function PlaybackDialog() {
   const setPlaybackHqVoice = useUiStore((s) => s.setPlaybackHqVoice)
   // adj354：@@ 恢复默认音色=第一音色——无描述头 Y 时取试听音色列表第一个启用音色（GM program 名）
   const defaultInstrumentRef = useMemo(() => firstEnabledInstrumentRef(playbackHqEnabled), [playbackHqEnabled])
+  /**
+   * adj455：选定具体音色时传给 `buildPlaySequence` 的**全篇乐器覆盖**（音色名 ref）——
+   * 「自动」（null）时为 undefined，引擎完全不介入、按谱面路由。
+   * 与 `backend.setVoice(playbackHqVoice)` 同源（同一张 GM 表：program ↔ 音色名 ref 互逆，smoke 有断言）。
+   */
+  const voiceOverrideRef = useMemo(() => gmVoiceRef(playbackHqVoice), [playbackHqVoice])
+  /** adj455：谱面里 `@乐器名@` 显式切换的处数——>0 且选了具体音色时提示"已被统一覆盖" */
+  const voiceSwitchCount = useMemo(() => countScoreInstrumentSwitches(parseResult), [parseResult])
   // adj326：左右拆分方位（previewLeft=左预览右编辑 / editorLeft=左编辑右预览）
   const splitHDir = useUiStore((s) => s.splitHDir)
   // adj323：宽/窄屏（≤1024px 视为窄屏模式，adj322）——角落停靠仅宽屏生效，窄屏保持原样
@@ -357,7 +365,9 @@ export function PlaybackDialog() {
       // adj310：声音/色块统一的准备延迟（毫秒）——按下播放后延迟才出第一声，色块同步
       const PLAY_FIRST_DELAY_MS = 200
       const layout = layoutScore(parseResult, pageConfig, defaultInstrumentRef)
-      const seq = buildPlaySequence(parseResult, layout, bpm, playbackStartId, defaultInstrumentRef)
+      // adj455：选定具体音色 → **全篇统一音色**（含伴奏/第二声部与曲内 `@乐器名@`）；
+      // 「自动」时传 undefined，完全按谱面路由。音色名 ref 由 GM 表逆映射得到（与 setVoice 的 program 同源）
+      const seq = buildPlaySequence(parseResult, layout, bpm, playbackStartId, defaultInstrumentRef, voiceOverrideRef)
       setTotalMs(seq.totalMs)
       // adj262：layout 后写入 voiceBlocks（纯曲部 yTop/yBottom）供预览色框覆盖整列
       setVoiceBlocks(
@@ -509,8 +519,13 @@ export function PlaybackDialog() {
             </div>
             {playbackHqVoice !== null && (
               // adj448：选定具体音色时说明它会覆盖谱面 `Y:`（用户曾据此误判「多声部 Y: 不生效」）
+              // adj455：语义改为**全篇统一音色**；若谱面里确有 `@乐器名@` 切换，再补一句"已被覆盖"
+              //   （否则用户会以为"写了 @ 却不生效"= bug，见 E-2026-174）
               <div style={{ color: 'var(--jp-text-muted)', fontSize: 11, lineHeight: 1.4 }}>
                 {playbackCopy.voiceOverrideHint}
+                {voiceSwitchCount > 0 && (
+                  <span style={{ color: 'var(--jp-warning)' }}> {playbackCopy.voiceOverrideAtHint(voiceSwitchCount)}</span>
+                )}
               </div>
             )}
             {playbackHqEnabled.length === 0 && (

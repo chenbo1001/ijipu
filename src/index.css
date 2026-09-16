@@ -348,14 +348,34 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex-shrink: 0;
+  /* adj453：由 `flex-shrink:0` 改为 `1`——**安全阀**。宽度预算万一算小了（新按钮、字体
+     度量差异、亚像素取整），旧行为是整条工具条不压缩、把后面的「浅深 / 支持 / 更多」
+     直接顶出视口右缘（被视口裁掉 → 用户看到"三点只露一半 / 完全没有"）。
+     现在工具条自己让步：超出部分由自身 `overflow:hidden` 裁掉，右侧三个常驻按钮
+     始终留在视口内（正常路径下 visCount 测量会先一步把多余按钮收进「更多」）。 */
+  flex-shrink: 1;
   flex-wrap: nowrap;
-  /* adj：允许被压缩 + 隐藏自身溢出——即使 visCount 测量有偏差，
-     toolbtns/donate 总宽超容器时也不会撑破 .app 造成横向滚动。
-     注意：overflow:hidden 不影响下拉——下拉是 .topbar 的 absolute 子元素，
-     挂在 .topbar-hamburger/.topbar-overflow 下，不在本容器内 */
   min-width: 0;
   overflow: hidden;
+}
+
+/* adj453：顶栏左侧固定项 + 右侧三个常驻按钮一律**不收缩**——空间不足时只让
+   `.topbar-toolbar` 让步，保证 Logo / 汉堡 / 视图 / 浅深三状态 / 支持 / 更多 完整可见 */
+.topbar-brand,
+.topbar-hamburger,
+.topbar-views,
+.topbar-theme-mode,
+.topbar-donate,
+.topbar-overflow {
+  flex-shrink: 0;
+}
+/* adj453：两个组框在**没有任何可见按钮**时不占位（极窄屏 visCount 很小时，
+   空组框会白占 6px 宽并露出一个空边框）。用 `:empty` 而非条件渲染——容器仍在 DOM 里，
+   TopBar 的宽度测量才能继续从它身上读到真实的 padding/border/gap（display:none 元素的
+   计算样式依然可读），不会重演「CSS 改了、宽度预算没跟上」的老问题。 */
+.topbar-buttons:empty,
+.topbar-settings:empty {
+  display: none;
 }
 /* 设置组（从状态栏移来）：与功能组同款——**去掉组背景、保留外框**（adj414） */
 .topbar-settings {
@@ -386,11 +406,6 @@ body {
 .topbar-settings .topbar-zoom .topbar-btn.icon-btn {
   border: none;
   padding: 3px 8px;
-}
-.topbar-settings .editor-font-split-btn {
-  border: none;
-  padding: 4px 9px;
-  border-radius: 5px;
 }
 /* 功能组内按钮：去 border、缩小 padding、与视图按钮风格统一 */
 .topbar-buttons .topbar-btn {
@@ -1168,135 +1183,17 @@ body {
   flex: 1;
 }
 
-/* adj：状态栏「设置组框」——类似顶栏功能组，把折行 / 字体 / 字号收进一个组框 */
-.footer-settings {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  background: var(--jp-bg-app);
-  border: 1px solid var(--jp-border);
-  border-radius: 7px;
-  padding: 2px;
-}
-/* 设置组框内按钮：去独立 border、圆角 5px、与视图/功能组按钮风格统一 */
-.footer-settings .footer-btn {
-  border: none;
-  padding: 3px 8px;
-  font-size: 11px;
-  border-radius: 5px;
-}
-.footer-settings .footer-btn.icon-btn {
-  padding: 2px 7px;
-}
-.footer-settings .editor-font-split {
-  display: inline-flex;
-  position: relative;
-}
-.footer-settings .editor-font-split .arrow {
-  font-size: 9px;
-  opacity: 0.7;
-}
+/* adj456：删除一批**失效的底部栏旧样式**——adj281 把原「状态栏工具条」（折行/字体/字号按钮组）
+   并入顶栏后，`EditorFootBar` 只剩「文件名 / 光标 / 问题指示 / 弹性间距」四个元素
+   （全仓 tsx 已无 `footer-settings`、`footer-btn`、`footer-toggle`、`footer-zoom`、`editor-font-split-btn`
+   的任何引用）。留着不仅无用，还会误导后来人以为底部还有工具条（窄屏媒体查询里也在为不存在的按钮
+   隐藏标签）。`.editor-font-split` / `.editor-font-split-dropdown` **仍在用**（顶栏字体 split-button），
+   故只删 `.editor-font-split-btn`（JSX 走的是 `.topbar-btn` 基类）。 */
 
-/* 底部按钮（折行 / 字体 / 字号）共享样式——与顶栏按钮风格一致 */
-.footer-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  background: transparent;
-  border: 1px solid var(--jp-border);
-  color: var(--jp-text-secondary);
-  border-radius: 7px;
-  padding: 3px 9px;
-  font-size: 11px;
-  cursor: pointer;
-  font-family: var(--jp-font-sans);
-  transition: all 0.15s;
-}
-.footer-btn.icon-btn {
-  padding: 3px 7px;
-  justify-content: center;
-  font-size: 12px;
-}
-.footer-btn:hover {
-  border-color: var(--jp-accent);
-  color: var(--jp-accent);
-}
-/* adj：选中样式与 .topbar-view-btn.active 一致——背景 panel-active + 文字 accent */
-.footer-btn.active-guide {
-  background: var(--jp-bg-panel-active);
-  color: var(--jp-accent);
-  border-color: var(--jp-accent);
-}
-.footer-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-.footer-btn:disabled:hover {
-  border-color: var(--jp-border);
-  color: var(--jp-text-secondary);
-}
-
-/* 折行 toggle 按钮（选中样式同上：背景 panel-active + 文字 accent） */
-.footer-toggle.active-guide {
-  background: var(--jp-bg-panel-active);
-  color: var(--jp-accent);
-  border-color: var(--jp-accent);
-}
-
-/* 缩放字号组：A- / px / A+——已套在外层 .footer-settings 组框内，自身不设边框（避免嵌套组框） */
-.footer-zoom {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  background: transparent;
-  border: none;
-  padding: 0;
-}
-.footer-zoom .footer-btn.icon-btn {
-  border: none;
-  padding: 2px 7px;
-  font-size: 11px;
-  border-radius: 5px;
-}
-.footer-zoom-val {
-  min-width: 34px;
-  text-align: center;
-  font-family: var(--jp-font-mono);
-  font-size: 11px;
-  color: var(--jp-text-muted);
-  /* 让 px 数值居中与按钮高度对齐 */
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* 字体 split-button（窄屏替代 select；这里 EditorFootBar 统一使用 split） */
+/* 字体 split-button（顶栏「字体」按钮：`.editor-font-split` 容器 + 内部 `.topbar-btn`） */
 .editor-font-split {
   display: inline-flex;
   position: relative;
-}
-.editor-font-split-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  background: transparent;
-  border: 1px solid var(--jp-border);
-  color: var(--jp-text-secondary);
-  border-radius: 7px;
-  padding: 3px 9px;
-  font-size: 11px;
-  font-family: var(--jp-font-sans);
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-.editor-font-split-btn:hover {
-  border-color: var(--jp-accent);
-  color: var(--jp-accent);
-}
-.editor-font-split-btn .arrow {
-  display: inline-flex;
-  align-items: center;
-  opacity: 0.7;
 }
 .editor-font-split-dropdown {
   position: absolute;
@@ -2209,19 +2106,12 @@ body {
   }
   /* 视图切换：单下拉按钮，窄屏已隐藏文字标签只留图标，无需额外紧凑处理 */
 
-  /* —— 底部栏：全部只图标 —— */
+  /* —— 底部栏：只剩「文件名 / 光标 / 问题指示」，紧凑间距即可 ——
+     adj456：原来这里还有「隐藏按钮文字标签 / 隐藏缩放 px 数值」两条规则，但底部工具条在 adj281
+     就已并入顶栏、这些按钮不存在了（死规则），一并删除。 */
   .footer {
     gap: 6px;
     padding: 0 8px;
-  }
-  /* 所有按钮隐藏文字标签 */
-  .footer-btn > .tool-label,
-  .footer-btn > .arrow {
-    display: none;
-  }
-  /* 缩放字号组中间 px 数值隐藏（只剩 A- / A+） */
-  .footer-zoom-val {
-    display: none;
   }
 
   /* —— 顶栏：溢出模式下窄屏同样只显示能放下的按钮，多余收进「更多」——由 JSX 测量决定，

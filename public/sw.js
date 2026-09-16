@@ -15,15 +15,36 @@ const PRECACHE = ['/', '/index.html', '/manifest.webmanifest', '/icons/Jianpu.ic
    万一编码/改名对不上就会让整个 install 失败 → 更新提示再也弹不出来（E-2026-140），
    故这里用非致命写法（单个失败忽略）。
    adj417：清单必须与 `src/ui/toolIcons.ts` 的 ICON_FILES 完全一致（smoke 有断言兜底——
-   此前这里漏了「暂停」「下载」，属于清单漂移）。 */
-const ICON_FILES = ['菜单', '文件', '收起', '查看', '排版', '播放', '停止', '暂停', '设置', '下载', '折行', '字体', '爱心', '下', '更多', '键盘']
+   此前这里漏了「暂停」「下载」，属于清单漂移）。
+   adj456：**再次漂移**——adj426 新增的「自动主题」「浅色主题」「深色主题」三个图标没进这份清单，
+   表现为 PWA 离线/首次安装后顶栏「浅深模式」按钮**空白**（图标是 CSS mask 的 URL，缺文件即无形状）。
+   本次补齐并把该断言从"基线里的一条已知失败"变成"零容忍"（smoke 现在 0 失败）。 */
+const ICON_FILES = ['菜单', '文件', '收起', '查看', '排版', '播放', '停止', '暂停', '设置', '下载', '折行', '字体', '爱心', '下', '更多', '键盘', '自动主题', '浅色主题', '深色主题']
 const ICONS = ICON_FILES.map((n) => `/icons/${n}.png`)
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(CACHE)
-      .then((c) => c.addAll(PRECACHE).then(() => Promise.all(ICONS.map((u) => c.add(u).catch(() => undefined)))))
+      .then((c) =>
+        c.addAll(PRECACHE).then(() =>
+          Promise.all(
+            ICONS.map((u) =>
+              /**
+               * adj457：图标**强制走网络校验**（`cache: 'reload'`）再写缓存。
+               * 起因：图标文件名固定不带 hash，`cache.add()` 的 fetch 可能命中**浏览器 HTTP 缓存**
+               * （部署侧通常 `max-age=600`）→ 新构建把图标换了图，SW 却把**旧图**写进缓存并一直用下去
+               * （要等下一次构建触发 SW 更新才可能换掉），用户会以为"换了图没生效"。
+               * 仍然**逐个非致命**（单个失败忽略）——中文文件名 + `addAll` 的"任一失败全失败"
+               * 曾让整个 install 挂掉、更新提示再也弹不出来（E-2026-140）。
+               */
+              fetch(new Request(u, { cache: 'reload' }))
+                .then((res) => (res.ok ? c.put(u, res) : undefined))
+                .catch(() => undefined),
+            ),
+          ),
+        ),
+      )
       .then(() => self.skipWaiting()),
   )
 })

@@ -6,10 +6,10 @@
  */
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage } from '@ijipu/engine/index.ts'
+import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage } from '@ijipu/engine/index.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
-import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES } from '@ijipu/engine/playback/index.ts'
+import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES, gmVoiceRef, gmVoiceProgram, countScoreInstrumentSwitches } from '@ijipu/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
@@ -550,19 +550,29 @@ const rInst = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 长笛\nQ: 1 2 @弦乐 3 
 const instToks = rInst.groups[0].music.tokens.filter((t) => t.kind === 'instrument')
 check('乐器切换 token 解析（@弦乐 / @@）', instToks.length === 2 && instToks[0].kind === 'instrument' && instToks[0].name === '弦乐' && instToks[1]?.name === null, JSON.stringify(instToks))
 const seqInst = buildPlaySequence(rInst, layoutScore(rInst, DUR_CFG), 120)
-check('Y 默认乐器 = 长笛（1 2 = flute）', seqInst.events[0]?.instrument === 'flute' && seqInst.events[1]?.instrument === 'flute', `${seqInst.events[0]?.instrument},${seqInst.events[1]?.instrument}`)
-check('@弦乐 切换到弦乐（3 4 = strings）', seqInst.events[2]?.instrument === 'strings' && seqInst.events[3]?.instrument === 'strings', `${seqInst.events[2]?.instrument},${seqInst.events[3]?.instrument}`)
-check('@@ 切回默认长笛（5 6 = flute）', seqInst.events[4]?.instrument === 'flute' && seqInst.events[5]?.instrument === 'flute', `${seqInst.events[4]?.instrument},${seqInst.events[5]?.instrument}`)
+/**
+ * adj456：这三条断言此前长期失败（属"18 条基线"之一），根因是**断言口径过时**而非行为退化——
+ * 旧断言期望序列里带的是**合成后端时代**的预设 id（`flute`/`strings`/`piano`，见 `resolveInstrument`），
+ * 但 adj354 起试听只走高保真后端（adj344），序列里带的是**乐器名/音色名 ref**（`长笛`/`弦乐`…），
+ * 音色→program 的解析由播放端（`gmVoiceProgram`）与 `eventsToMidi` 各自完成。
+ * 现按当前口径断言（行为本身没变：Y: 决定声部默认、`@` 切换、`@@` 回默认）。
+ */
+check('Y 默认乐器 = 长笛（1 2 = 长笛 ref）', seqInst.events[0]?.instrument === '长笛' && seqInst.events[1]?.instrument === '长笛', `${seqInst.events[0]?.instrument},${seqInst.events[1]?.instrument}`)
+check('@弦乐 切换到弦乐（3 4 = 弦乐 ref）', seqInst.events[2]?.instrument === '弦乐' && seqInst.events[3]?.instrument === '弦乐', `${seqInst.events[2]?.instrument},${seqInst.events[3]?.instrument}`)
+check('@@ 切回默认长笛（5 6 = 长笛 ref）', seqInst.events[4]?.instrument === '长笛' && seqInst.events[5]?.instrument === '长笛', `${seqInst.events[4]?.instrument},${seqInst.events[5]?.instrument}`)
+// 序列里的 ref 必须能被**播放/导出实际使用的解析器**解回 GM program（长笛=73；旧简称「弦乐」走别名表=48）
+check('adj456 序列乐器名可解回 GM program（长笛=73、弦乐=48）', instrumentToProgram('长笛') === 73 && instrumentToProgram('弦乐') === 48, `${instrumentToProgram('长笛')}/${instrumentToProgram('弦乐')}`)
 // adj302：多声部按 Y 行顺序对应乐器；声部比 Y 多时用默认
 const rYv = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 钢琴\nY: 弦乐\nQ1: 1 2 3 4 |\nQ2: 5 6 5 3 |\n')
 const seqYv = buildPlaySequence(rYv, layoutScore(rYv, DUR_CFG), 120)
 const vY1 = seqYv.events.filter((e) => e.placed.id.voice === 1)[0]
 const vY2 = seqYv.events.filter((e) => e.placed.id.voice === 2)[0]
-check('多声部 Q1→Y[0] 钢琴、Q2→Y[1] 弦乐', vY1?.instrument === 'piano' && vY2?.instrument === 'strings', `${vY1?.instrument},${vY2?.instrument}`)
+// adj456：口径同上一组——序列带**乐器名 ref**（非合成预设 id）；多声部按 Y 行顺序对应
+check('多声部 Q1→Y[0] 钢琴、Q2→Y[1] 弦乐', vY1?.instrument === '钢琴' && vY2?.instrument === '弦乐', `${vY1?.instrument},${vY2?.instrument}`)
 const rYv3 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 钢琴\nY: 弦乐\nQ1: 1 2 3 4 |\nQ2: 5 6 5 3 |\nQ3: 1 3 5 1 |\n')
 const seqYv3 = buildPlaySequence(rYv3, layoutScore(rYv3, DUR_CFG), 120)
 const vY3 = seqYv3.events.filter((e) => e.placed.id.voice === 3)[0]
-check('多声部 Q3（无对应 Y）用默认钢琴', vY3?.instrument === 'piano', String(vY3?.instrument))
+check('多声部 Q3（无对应 Y）用默认乐器（= Y[0] 钢琴）', vY3?.instrument === '钢琴', String(vY3?.instrument))
 const rYone = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 钢琴 弦乐\nQ: 1 2 3 4 |\n')
 check('Y 行多乐器只取第一个（一个 Y 行一种）', rYone.header.instruments.length === 1 && rYone.header.instruments[0] === '钢琴', JSON.stringify(rYone.header.instruments))
 // adj351：多声部声部乐器独立延续——第一组各声部 @ 乐器，第二组同声部延续（不再回归为最后一个声部音色）
@@ -600,10 +610,10 @@ const layInsNoYNoRef = layoutScore(rInsNoY, { ...DUR_CFG, showInstrument: true }
   check('adj354 @@ 无 Y 且无传入默认时回退第一音色库第一音色（钢琴）', n5?.instrumentLabel === '钢琴', String(n5?.instrumentLabel))
 }
 
-// bpm 推断
+// bpm 推断（adj456：默认口径为 **70**——adj343 把无 J 的默认从 60 提到 70，两条断言与函数头注释当时漏改）
 check('J:96 → 96', inferBpm(parseJps('V: 1.0\nB: t\nJ: 96\n')) === 96)
-check('无 J → 60（adj308 默认试听速度）', inferBpm(parseJps('V: 1.0\nB: t\n')) === 60)
-check('J 文字 → 60（adj308 默认试听速度）', inferBpm(parseJps('V: 1.0\nB: t\nJ: 欢快的\n')) === 60)
+check('无 J → 70（adj343 默认试听速度）', inferBpm(parseJps('V: 1.0\nB: t\n')) === 70)
+check('J 文字 → 70（adj343 默认试听速度）', inferBpm(parseJps('V: 1.0\nB: t\nJ: 欢快的\n')) === 70)
 
 // adj283：乐器/声部名 → 合成预设路由
 check('乐器匹配：缺省/未知声部名 → 钢琴', matchInstrument(undefined) === 'piano' && matchInstrument('男声') === 'piano')
@@ -2459,46 +2469,86 @@ const rK174b = parseJps('V: 1.0\nB: t\nD: F#\nP: 4/4\nQ: 1 2 3 4 |\n')
 check('adj174 升降号前置/后置半音偏移一致（#F = F#）', parseKey(rK174a.header.key) === parseKey(rK174b.header.key) && parseKey(rK174b.header.key) === 6, `${parseKey(rK174a.header.key)} vs ${parseKey(rK174b.header.key)}`)
 const svgK174a = renderScoreToSvg(layoutScore(rK174a, DUR_CFG))[0]
 const svgK174b = renderScoreToSvg(layoutScore(rK174b, DUR_CFG))[0]
-check('adj174 前置 #F 渲染为 1 = F + ♯ 角标', svgK174a.includes('1 = F') && svgK174a.includes('♯'), '')
-check('adj174 后置 F# 渲染为 1 = F + ♯ 角标（等价）', svgK174b.includes('1 = F') && svgK174b.includes('♯'), '')
+/**
+ * adj456：调号角标这一组（adj174/175/179/189/190/191）此前长期失败，排查结论是**断言口径整体过时**，
+ * 不是渲染退化——现行设计（render/index.ts 调号分支）已改成：
+ *   ① 角标字号 = 调号 3/4（`mSize * 3/4`，13 → 9.8），不再是 0.6×字号；
+ *   ② 角标 y = 调号基线 − **0.35×字号**（下沿贴字母中线），不再是 0.4×字号；
+ *   ③ 字母让位改用 **`<tspan dx="0.9×角标宽">`**（8.8），**不再是整体右移 keyline 的 x**；
+ *   ④ 角标 x = "1 = " 宽之后的**原字母左缘**（即它占的正是让位让出来的空档）。
+ * 旧的硬编码字形 advance（7.62+3.85+9.64+3.85）仍可用于算 "1 = " 宽，但必须**再加上 tspan dx**
+ * 才等于字母真实左缘——旧断言漏了这一步，于是把"角标在字母左侧"判成了失败（实测只差 0.04px）。
+ * 现按现行设计逐项断言，并补一条真正用户可见的不变量：**调号与拍号不重叠**。
+ */
+const kAccOf = (svg: string): RegExpExecArray | null => /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>([♯♭])<\/text>/.exec(svg)
+const kKeyOf = (svg: string): RegExpExecArray | null => /<text data-meta="keyline" x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>1 = (?:<tspan dx="([\d.]+)">([A-G])<\/tspan>|([A-G]))<\/text>/.exec(svg)
+const kMeterOf = (svg: string): RegExpExecArray | null => /<g data-meta="meter"[^>]*><text x="([\d.]+)"/.exec(svg)
+/** "1 = " 在 13px 基准下的估算宽（与 render 的 metaTextW 口径一致：1=7.62 空格=3.85 ==9.64 空格=3.85） */
+const kPrefixW = (7.62 + 3.85 + 9.64 + 3.85) * (defaultPageConfig.miaoshu_size / 13)
+/** 字母真实左缘 = keyline.x + "1 = " 宽 + tspan dx（有升降号时字母被 dx 右移让位） */
+const kLetterLeftOf = (svg: string): number => {
+  const k = kKeyOf(svg)
+  if (!k) return NaN
+  return Number(k[1]) + kPrefixW + Number(k[4] ?? 0)
+}
+const kLetterOf = (svg: string): string | undefined => kKeyOf(svg)?.[5] ?? kKeyOf(svg)?.[6]
+check('adj174 前置 #F：调号文本 = 1 = ♯F（字母用 tspan 让位）', kLetterOf(svgK174a) === 'F' && kAccOf(svgK174a)?.[4] === '♯' && kKeyOf(svgK174a)?.[4] !== undefined, `key=${kKeyOf(svgK174a)?.[0]}`)
+check('adj174 后置 F# 与前置完全等价（同字母、同角标、同几何）',
+  kLetterOf(svgK174b) === 'F' && kAccOf(svgK174b)?.[4] === '♯' && kLetterLeftOf(svgK174b) === kLetterLeftOf(svgK174a) && Number(kAccOf(svgK174b)?.[1]) === Number(kAccOf(svgK174a)?.[1]),
+  `${kLetterLeftOf(svgK174b)} vs ${kLetterLeftOf(svgK174a)}`)
 const rK174c = parseJps('V: 1.0\nB: t\nD: B$\nP: 4/4\nQ: 1 2 3 4 |\n')
 const svgK174c = renderScoreToSvg(layoutScore(rK174c, DUR_CFG))[0]
-check('adj174 降号 $ 渲染 ♭ 角标且字母为 B', svgK174c.includes('1 = B') && svgK174c.includes('♭') && !svgK174c.includes('$B'), '')
+check('adj174 降号 $ 渲染 ♭ 角标且字母为 B（不出现 $B 原文）', kLetterOf(svgK174c) === 'B' && kAccOf(svgK174c)?.[4] === '♭' && !svgK174c.includes('$B'), '')
 // adj175：b 作为降号与 $ 等价；bE 与 Eb 等价；升降号在字母左侧、中线以上、字号为调号一半
 const rK175a = parseJps('V: 1.0\nB: t\nD: bE\nP: 4/4\nQ: 1 2 3 4 |\n')
 const rK175b = parseJps('V: 1.0\nB: t\nD: Eb\nP: 4/4\nQ: 1 2 3 4 |\n')
 const rK175c = parseJps('V: 1.0\nB: t\nD: $E\nP: 4/4\nQ: 1 2 3 4 |\n')
 check('adj175 bE / Eb / $E 半音偏移一致（降 E）', parseKey(rK175a.header.key) === parseKey(rK175b.header.key) && parseKey(rK175b.header.key) === parseKey(rK175c.header.key) && parseKey(rK175b.header.key) === 3, `${parseKey(rK175a.header.key)},${parseKey(rK175b.header.key)},${parseKey(rK175c.header.key)}`)
 const svgK175 = renderScoreToSvg(layoutScore(rK175a, DUR_CFG))[0]
-check('adj175 bE 渲染为 1 = E + ♭ 角标', svgK175.includes('1 = E') && svgK175.includes('♭'), '')
-// 角标位置：在字母左侧（x < 字母左缘）、y 更高、字号 = 调号一半（13/2 = 6.5）
-const k175Acc = /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>♭<\/text>/.exec(svgK175)
-const k175Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK175)
-const k175PrefixW = (7.62 + 3.85 + 9.64 + 3.85) * (defaultPageConfig.miaoshu_size / 13)
-const k175LetterLeft = Number(k175Letter?.[1] ?? NaN) + k175PrefixW
-check('adj189 ♭ 角标在字母左侧、更高、字号 = 0.6×13 = 7.8', k175Acc !== null && k175Letter !== null && Number(k175Acc[1]) < k175LetterLeft && Number(k175Acc[2]) < Number(k175Letter[2]) && Math.abs(Number(k175Acc[3]) - 7.8) < 0.1, JSON.stringify([k175Acc?.[1], k175Acc?.[2], k175Acc?.[3], k175LetterLeft]))
-// adj179：角标下移一个升降符高度——y = 字母基线 - 0.4×字号（原 0.9×字号）
-check('adj179 角标 y = 基线 - 0.4×字号（下移一个升降符高度）', k175Acc !== null && k175Letter !== null && Math.abs(Number(k175Acc[2]) - (Number(k175Letter[2]) - 0.4 * defaultPageConfig.miaoshu_size)) < 0.5, JSON.stringify([k175Acc?.[2], k175Letter?.[2]]))
+check('adj175 bE 渲染为 1 = ♭E 角标', kLetterOf(svgK175) === 'E' && kAccOf(svgK175)?.[4] === '♭', `key=${kKeyOf(svgK175)?.[0]}`)
+const k175Acc = kAccOf(svgK175)
+const k175Key = kKeyOf(svgK175)
+// adj189：角标在**字母真实左缘**之左（含 tspan 让位量）、y 更高、字号 = 调号 3/4
+check('adj189 ♭ 角标在字母左侧、更高、字号 = 3/4×调号（9.8）',
+  k175Acc !== null && k175Key !== null &&
+    Number(k175Acc[1]) < kLetterLeftOf(svgK175) &&
+    Number(k175Acc[2]) < Number(k175Key[2]) &&
+    Math.abs(Number(k175Acc[3]) - defaultPageConfig.miaoshu_size * 0.75) < 0.1,
+  JSON.stringify([k175Acc?.[1], k175Acc?.[2], k175Acc?.[3], kLetterLeftOf(svgK175)]))
+// adj191（并入角标不压字母的不变量）：角标右缘不得越过字母真实左缘（允许设计上的 0.1×角标宽叠入）
+check('adj191 角标占用的是让位空档，不压到字母（右缘 ≤ 字母左缘 + 0.1×角标宽）',
+  k175Acc !== null && Number(k175Acc[1]) + Number(k175Acc[3]) <= kLetterLeftOf(svgK175) + 0.1 * Number(k175Acc[3]) + 0.5,
+  `accRight=${k175Acc ? Number(k175Acc[1]) + Number(k175Acc[3]) : NaN} letterLeft=${kLetterLeftOf(svgK175)}`)
+// adj179：角标 y = 调号基线 − 0.35×字号（下沿贴字母中线）
+check('adj179 角标 y = 基线 - 0.35×字号（下沿贴字母中线）',
+  k175Acc !== null && k175Key !== null && Math.abs(Number(k175Acc[2]) - (Number(k175Key[2]) - 0.35 * defaultPageConfig.miaoshu_size)) < 0.15,
+  JSON.stringify([k175Acc?.[2], k175Key?.[2]]))
 // adj178：孤立 &（输入中未完成）为 warning 而非 error——预览不阻断
 const r178 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 &\n')
 check('adj178 孤立 & 降为 warning（不阻断预览）', r178.errors.some((e) => e.message.includes('&') && e.severity === 'warning') && !r178.errors.some((e) => e.severity === 'error'), JSON.stringify(r178.errors))
-// adj190：有升降号时调号文本额外右移（0.7×13 + 1×scale = 10.1px），升降号与字母间距 4×scale
-const k181Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK175) // bE 谱
-const k181Acc = /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>♭<\/text>/.exec(svgK175)
-const k181Plain = /data-meta="keyline" x="([\d.]+)"/.exec(svgM48) // 无升降号 D: C
-check('adj190 有升降号时 keyline 右移 10.1px（相对无升降号）', k181Letter !== null && k181Plain !== null && Math.abs(Number(k181Letter[1]) - (Number(k181Plain[1]) + 0.7 * defaultPageConfig.miaoshu_size + 1)) < 0.5, `acc=${k181Letter?.[1]} plain=${k181Plain?.[1]}`)
-const k181Scale = defaultPageConfig.miaoshu_size / 13
-// "1 = " 含尾随空格：1=7.62 空格=3.85 =9.64 空格=3.85 → 24.96
-const k181PrefixW = (7.62 + 3.85 + 9.64 + 3.85) * k181Scale
-const k181LetterLeft = Number(k181Letter?.[1] ?? NaN) + k181PrefixW
-check('adj191 升降号与字母间距 = 5×scale（随字号缩放）', k181Acc !== null && Math.abs(Number(k181Acc[1]) - (k181LetterLeft - 5 * k181Scale)) < 0.5, JSON.stringify([k181Acc?.[1], k181LetterLeft - 5 * k181Scale]))
-// 角标位置在字母左上方（adj175：x 在字母左侧、y < 字母基线、字号为调号一半）
-const k174Acc = /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>♯<\/text>/.exec(svgK174a)
-const k174Letter = /data-meta="keyline" x="([\d.]+)" y="([\d.]+)"/.exec(svgK174a)
-// 13px 基准 "1 = " 估算宽：1=7.62 空格=3.85 =9.64 尾随空格=3.85 → 24.96
-const k174PrefixW = (7.62 + 3.85 + 9.64 + 3.85) * (defaultPageConfig.miaoshu_size / 13)
-const k174LetterLeft = Number(k174Letter?.[1] ?? NaN) + k174PrefixW // 字母 F 左缘
-check('adj189 ♯ 角标在字母左侧、更高、字号 = 0.6×13 = 7.8', k174Acc !== null && k174Letter !== null && Number(k174Acc[1]) < k174LetterLeft && Number(k174Acc[2]) < Number(k174Letter[2]) && Math.abs(Number(k174Acc[3]) - 7.8) < 0.1, JSON.stringify([k174Acc?.[1], k174Acc?.[2], k174Acc?.[3], k174LetterLeft]))
+// adj190：字母让位——**机制已从"整体右移 keyline.x"改为"字母 tspan dx 右移"**（旧断言因此长期失败）
+// 现断言可观测结果：① 有升降号时字母真实左缘 = 无升降号时字母左缘 + tspan dx（>0）；② 无升降号时没有 tspan
+const k181PlainKey = kKeyOf(svgM48) // 无升降号 D: C
+check('adj190 有升降号时字母用 tspan dx 右移让位（无升降号时无 tspan）',
+  kKeyOf(svgK175)?.[4] !== undefined && Number(kKeyOf(svgK175)?.[4]) > 0 &&
+    k181PlainKey !== null && k181PlainKey[4] === undefined &&
+    kLetterLeftOf(svgK175) - (Number(k181PlainKey[1]) + kPrefixW) > 0.5,
+  `dx=${kKeyOf(svgK175)?.[4]} letterLeft=${kLetterLeftOf(svgK175)} plainLetterLeft=${Number(k181PlainKey?.[1]) + kPrefixW}`)
+// 角标 x = "1 = " 宽之后的**原字母左缘**（即角标占的正是让位让出来的空档）
+check('adj190b 角标 x = keyline.x + "1 = " 宽（让位空档起点）',
+  k175Acc !== null && k175Key !== null && Math.abs(Number(k175Acc[1]) - (Number(k175Key[1]) + kPrefixW)) < 0.15,
+  JSON.stringify([k175Acc?.[1], Number(k175Key?.[1] ?? NaN) + kPrefixW]))
+// 用户可见不变量：调号与拍号不打架——拍号左缘必须在字母（含让位与字宽）之后
+check('adj190c 调号与拍号不重叠（拍号左缘 ≥ 字母左缘 + 0.6×字号）',
+  kLetterLeftOf(svgK175) < Number(kMeterOf(svgK175)?.[1] ?? NaN) - 0.6 * defaultPageConfig.miaoshu_size,
+  `letterLeft=${kLetterLeftOf(svgK175)} meterX=${kMeterOf(svgK175)?.[1]}`)
+// ♯ 角标同样满足上述不变量（与 ♭ 同一套几何，此处只把 ♯ 走一遍）
+check('adj189b ♯ 角标同样在字母真实左缘之左、更高、字号 = 3/4×调号',
+  kAccOf(svgK174a) !== null && kKeyOf(svgK174a) !== null &&
+    Number(kAccOf(svgK174a)![1]) < kLetterLeftOf(svgK174a) &&
+    Number(kAccOf(svgK174a)![2]) < Number(kKeyOf(svgK174a)![2]) &&
+    Math.abs(Number(kAccOf(svgK174a)![3]) - defaultPageConfig.miaoshu_size * 0.75) < 0.1,
+  JSON.stringify([kAccOf(svgK174a)?.[1], kAccOf(svgK174a)?.[2], kAccOf(svgK174a)?.[3], kLetterLeftOf(svgK174a)]))
 // 辅助拍号（括号内小一号）
 const rM2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4 (2/4)\nJ: 96\nQ: 1 2 3 4 |\n')
 const svgM48b = renderScoreToSvg(layoutScore(rM2, DUR_CFG))[0]
@@ -3142,10 +3192,36 @@ const mbdCfg = { ...DUR_CFG, noteSpaceLayout: 'space' as const }
 const mbdSrc = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1. 2# 3 | 4 5 6 |\nQ2: 1 2. 3# | 4 5 6 |\n'
 const mbdRes = parseJps(mbdSrc)
 const mbdLay = layoutScore(mbdRes, mbdCfg)
+// 含变音的音符：见下面 adj456 断言（腾位体现在本体宽，不是"数字 x > 段起点"）
 const mbdNotes = mbdLay.pages[0].notes
-// 含变音的音符：note.x（数字左缘）应右移给变音角标/前倚音腾位（> 段起点）
-const mbdSharp = mbdNotes.find((n) => n.token.kind === 'note' && n.token.accidental)
-check('多声部空间优先 变音音符数字右移给角标腾位', !!mbdSharp && (mbdSharp.x > (mbdSharp.segments?.[0]?.x ?? 0)), JSON.stringify({ nx: mbdSharp?.x, segX: mbdSharp?.segments?.[0]?.x }))
+/**
+ * adj456：「变音音符数字右移给角标腾位」这条断言此前长期失败（实测 nx == segX，只差 0.017px），
+ * 排查结论同样是**断言口径过时**：空间优先下 `note.x` 就是**本体框左缘**（数字画在框内、
+ * 角标画在数字左侧），而"腾位"体现在**本体宽**上——`noteBodyW(...) + accidentalBodyW(...)`
+ * （accW = 7.62×字号），于是变音音之后的音符整体右移一个 accW。
+ * 旧断言拿 `x > 段起点` 去判"右移"，但段起点本来就等于本体左缘 ⇒ 永远近似相等。
+ * 现按**可观测后果**断言：与"去掉变音"的对照谱逐音比较，变音音之后的音右移 ≈ accW。
+ */
+const mbdPlainCfg = { ...DUR_CFG, noteSpaceLayout: 'space' as const }
+const mbdPlainLay = layoutScore(parseJps(mbdSrc.replace(/#/g, '')), mbdPlainCfg)
+const mbdPlainNotes = mbdPlainLay.pages[0].notes
+const accW = accidentalBodyW(defaultPageConfig.note_size)
+const shifted = mbdNotes.filter((n, i) => n.token.kind === 'note' && !n.token.accidental && mbdPlainNotes[i] && n.x > mbdPlainNotes[i].x + accW - 0.6)
+check('多声部空间优先 变音音符本体宽含角标预留（其后音符整体右移 ≈ 一个角标宽）',
+  mbdNotes.some((n) => n.token.kind === 'note' && n.token.accidental) && shifted.length >= 1,
+  `accW=${accW} 右移项=${shifted.map((n) => Math.round((n.x - mbdPlainNotes[mbdNotes.indexOf(n)].x) * 10) / 10).join(',')}`)
+// 角标画在数字左侧、且在自己的**本体预留**之内（renderNote：x − 7×s，s = noteSize/18）
+// 与上一个音符：不出它的本体框（容差 0.6px——本体宽按字形 advance 计，实际墨迹略窄）
+{
+  const sharpIdx = mbdNotes.findIndex((n) => n.token.kind === 'note' && n.token.accidental)
+  const sharpNote = mbdNotes[sharpIdx]
+  const prevNote = mbdNotes[sharpIdx - 1]
+  const s18 = defaultPageConfig.note_size / 18 // 渲染端缩放基准（noteScaleOf）
+  const accX = sharpNote ? sharpNote.x - 7 * s18 : NaN
+  check('多声部空间优先 变音角标画在数字左侧且在本体预留内、不出前一个音符的本体框',
+    !!sharpNote && !!prevNote && accX < sharpNote.x && accX >= sharpNote.x - accW - 0.5 && accX >= prevNote.x + prevNote.width - 0.6,
+    `accX=${accX} noteX=${sharpNote?.x} reserve=${sharpNote ? sharpNote.x - accW : NaN} prevRight=${prevNote ? prevNote.x + prevNote.width : NaN}`)
+}
 // 音符块本体（数字）在时值段内：数字左缘 >= 段起点（不越段左边界，横向居中由 placeNoteAt 段定位保证）
 const mbdAllInSeg = mbdNotes.every((n) => (n.x ?? 0) >= (n.segments?.[0]?.x ?? 0) - 1)
 check('多声部空间优先 音符数字均在时值段内', mbdAllInSeg, JSON.stringify(mbdNotes.slice(0, 3).map((n) => ({ nx: n.x, segX: n.segments?.[0]?.x }))))
@@ -5151,7 +5227,7 @@ console.log('[103] icons live in public/icons and only the used ones (adj417)')
 {
   const iconDir = join(root, 'public', ICON_DIR)
   const missing = ICON_FILE_NAMES.filter((n) => !existsSync(join(iconDir, `${n}.png`)))
-  check('adj417 清单里的 16 个按钮图标都存在于 public/icons/', missing.length === 0, missing.join(','))
+  check(`adj417 清单里的 ${ICON_FILE_NAMES.length} 个按钮图标都存在于 public/icons/`, missing.length === 0, missing.join(','))
   check('adj417 图标清单无重复文件名', new Set(ICON_FILE_NAMES).size === ICON_FILE_NAMES.length)
   const rootImages = readdirSync(join(root, 'public')).filter((f) => /\.(png|ico)$/i.test(f))
   check('adj417 public 根目录不再有散落的 png/ico', rootImages.length === 0, rootImages.join(','))
@@ -6162,6 +6238,52 @@ console.log('[adj433] segment beats align with melody beats (within-note interpo
     check('AX9c 倚音事件带 playVoice（与主音符同角色，段内倚音不丢伴奏音色）',
       graceEv.every((e) => e.playVoice === undefined || e.playVoice === 'main' || e.playVoice === 'accomp' || e.playVoice === 'second'),
       `roles=${[...new Set(graceEv.map((e) => e.playVoice ?? '-'))].join('/')}`)
+
+    // ---- adj455：选定「试听音色」= **全篇统一音色**（含伴奏/第二声部与曲内 `@乐器名@`）----
+    // 用户规格：「音色选自动时按 曲内 @ > 描述头 Y: > 启用音色第一 > 音色库第一 路由；
+    // 选定具体音色时**全篇**都用它」——修复前 adj427/adj434 给伴奏与 `@` 开了两个例外，
+    // 表现为「只有主旋律（第一个音色）变成我选的音色，伴奏还是手风琴」。
+    const seq455 = buildPlaySequence(pr434, layoutScore(pr434, DUR_CFG), 120, undefined, '大钢琴', '小提琴')
+    const allInsts = [...new Set(seq455.events.map((e) => e.instrument))]
+    check('AY1 全篇覆盖：所有事件（主声部/伴奏/段后 @）音色 = 小提琴', allInsts.length === 1 && allInsts[0] === '小提琴', `集合=${allInsts.join('/')}`)
+    check('AY2 全篇覆盖：曲内 `@手风琴@` 也被覆盖（不再保留显式音色）',
+      seq455.events.filter((e) => e.explicitInstrument === true).length === 0,
+      `explicit=${seq455.events.filter((e) => e.explicitInstrument === true).length}`)
+    const trk455 = [...new Set(seq455.events.flatMap((e) => (e.playheadSegs ?? []).map((s) => s.instrument ?? '')))]
+    check('AY3 全篇覆盖：色块轨道音色同样统一（音频与配色不能各说各话）', trk455.length === 1 && trk455[0] === '小提琴', `集合=${trk455.join('/')}`)
+    check('AY4 全篇覆盖：力度角色不变（伴奏仍 0.75，只是换了音色）',
+      seq455.events.filter((e) => e.playVoice === 'accomp').every((e) => e.gain === 0.75) &&
+        seq455.events.filter((e) => e.playVoice === 'accomp').length > 0,
+      `gains=${[...new Set(seq455.events.filter((e) => e.playVoice === 'accomp').map((e) => e.gain))].join('/')}`)
+    check('AY5 覆盖为空串/undefined 时完全不介入（= 自动模式，路由与 AX 一致）',
+      JSON.stringify(buildPlaySequence(pr434, layoutScore(pr434, DUR_CFG), 120, undefined, '大钢琴', '').events.map((e) => e.instrument)) === JSON.stringify(seq434.events.map((e) => e.instrument)) &&
+        JSON.stringify(buildPlaySequence(pr434, layoutScore(pr434, DUR_CFG), 120, undefined, '大钢琴').events.map((e) => e.instrument)) === JSON.stringify(seq434.events.map((e) => e.instrument)),
+      '')
+    // `@乐器名@` 处数（供界面提示"已被试听音色覆盖"，避免误判"写了 @ 却不生效"）
+    check('AY6 countScoreInstrumentSwitches 数出曲内 @ 切换处数（本行 2 处，@@ 不计）',
+      countScoreInstrumentSwitches(pr434) === 2 && countScoreInstrumentSwitches(parseJps('V: 1.0\nQ: 1 2 3 4 |\n')) === 0 &&
+        countScoreInstrumentSwitches(parseJps('V: 1.0\nQ: @@ 1 2 3 4 |\n')) === 0,
+      `n=${countScoreInstrumentSwitches(pr434)}`)
+    // program ↔ 音色名 ref 互逆（全篇覆盖传的是 ref，后端 setVoice 传的是 program，两者必须同源）
+    const rtBad = GM_VOICES.filter((v) => gmVoiceProgram(gmVoiceRef(v.program)) !== v.program)
+    check('AY7 gmVoiceRef ↔ gmVoiceProgram 对 128 个音色逐项互逆', rtBad.length === 0, `不一致=${rtBad.map((v) => v.label).join('/')}`)
+    check('AY8 gmVoiceRef 边界：null/越界 program → undefined',
+      gmVoiceRef(null) === undefined && gmVoiceRef(undefined) === undefined && gmVoiceRef(999) === undefined && gmVoiceRef(NaN) === undefined,
+      '')
+    const dlg455 = String(readFileSync('src/dialogs/PlaybackDialog.tsx', 'utf8'))
+    check('AY9 应用侧把「音色」选择作为全篇覆盖传入 buildPlaySequence',
+      /buildPlaySequence\(parseResult, layout, bpm, playbackStartId, defaultInstrumentRef, voiceOverrideRef\)/.test(dlg455) &&
+        dlg455.includes('gmVoiceRef(playbackHqVoice)'),
+      '')
+    /**
+     * adj457（用户决策）：**导出始终按谱面音色**——MIDI/WAV/MP3 三条导出路径都不得传乐器覆盖，
+     * 否则"选了试听音色再导出"会静默改变导出结果（用户明确要求导出跟随谱面 `Y:` / `@…@`）。
+     */
+    const expSrc = String(readFileSync('src/dialogs/ExportDialog.tsx', 'utf8'))
+    const expCalls = [...expSrc.matchAll(/buildPlaySequence\(([^)]*)\)/g)].map((m) => m[1].trim())
+    check('adj457 导出（MIDI/WAV/MP3）一律不传乐器覆盖（按谱面音色导出）',
+      expCalls.length === 3 && expCalls.every((args) => args === 'parseResult, layout, bpm, undefined, defaultInstrumentRef'),
+      expCalls.join(' | '))
   }
 }
 
@@ -6914,6 +7036,71 @@ console.log('[adj451] per-event 力度 (gain) must flow into the playhead track'
     check('AQ3 app 的 playheadTrack 条目类型含 gain', /playheadTrack: \{[\s\S]{0,700}gain\?: number/.test(storeSrc))
     check('AQ4 PlaybackDialog 把拍段 gain 透传进播放轨道', dlgSrc.includes('{ gain: s.gain }'))
   }
+}
+
+// ---- 107. 设置分层：源码 > 缓存 > 默认 + 写回只固化用户改动 + 设置行类型校验（adj454）----
+console.log('[107] settings layering: source > cache > default, write-back = user edits only (adj454)')
+{
+  const srcCfg = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n\n# jps-config:{"margin_left":55}\n'
+  // 缓存（L1 公共设置）：三项本机值，其中只有 margin_left 与源码冲突
+  const cache: PageConfig = { ...defaultPageConfig, margin_left: 99, margin_right: 77, height_quci: 50 }
+
+  // ① 读取优先级：源码 > 缓存 > 默认（三层同时给值时的定位）
+  const merged = mergeJpsConfig(srcCfg, cache)
+  check('adj454 优先级① 源码压过缓存（margin_left=55 而非 99）', merged.margin_left === 55, `left=${merged.margin_left}`)
+  check('adj454 优先级② 源码没有的项由缓存兜底（margin_right=77）', merged.margin_right === 77, `right=${merged.margin_right}`)
+  check('adj454 优先级③ 两层都没有的项用默认', merged.note_size === defaultPageConfig.note_size, `note_size=${merged.note_size}`)
+  check('adj454 优先级④ 缓存传缺省值时源码仍赢', mergeJpsConfig(srcCfg, { ...defaultPageConfig, margin_left: 1 }).margin_left === 55)
+
+  // ② 写回：只固化「用户本次改动」，缓存来源的值不进谱面（此前点一次保存就把本机设置写进别人的谱）
+  const base: PageConfig = { ...merged } // 编辑前生效值
+  const next: PageConfig = { ...merged, note_size: 15 } // 用户只改了音符字号
+  const edits = mergeConfigEdits(srcCfg, base, next)
+  check('adj454 写回只含用户改动（note_size=15）+ 源码原字段（margin_left=55）', edits.note_size === 15 && edits.margin_left === 55 && Object.keys(edits).length === 2, JSON.stringify(edits))
+  check('adj454 写回**不含**缓存来源字段', !('margin_right' in edits) && !('height_quci' in edits), JSON.stringify(edits))
+  const written = writeJpsConfig(srcCfg, edits)
+  check('adj454 落盘后谱面无缓存值', !written.includes('margin_right') && !written.includes('height_quci'), written.split('\n').filter((l) => l.startsWith(JPS_CONFIG_PREFIX)).join('|'))
+  check('adj454 落盘后源码值保留 + 新改动写入', extractJpsConfig(written)?.margin_left === 55 && extractJpsConfig(written)?.note_size === 15, JSON.stringify(extractJpsConfig(written)))
+  check('adj454 未写盘的缓存项在生效值里仍然生效', mergeJpsConfig(written, cache).margin_right === 77 && mergeJpsConfig(written, cache).height_quci === 50)
+  const noChange = writeJpsConfig(srcCfg, mergeConfigEdits(srcCfg, base, base))
+  check('adj454 无改动时不新增字段', extractJpsConfig(noChange)?.note_size === undefined && extractJpsConfig(noChange)?.margin_left === 55, JSON.stringify(extractJpsConfig(noChange)))
+  const reset = writeJpsConfig(srcCfg, mergeConfigEdits(srcCfg, { ...merged, margin_left: 60 }, { ...merged, margin_left: defaultPageConfig.margin_left }))
+  check('adj454 用户把某项改回默认 → 设置行里该项被移除（差量语义）', !reset.includes(JPS_CONFIG_PREFIX), JSON.stringify(reset.slice(-40)))
+
+  // ③ 设置行类型校验：坏 JSON / 坏值 / 拼错的键都要**可见告警**（此前一律静默）
+  const badJson = 'V: 1.0\nQ: 1 2 3 4 |\n\n# jps-config:{"margin_left":55\n'
+  const badIssues = inspectJpsConfig(badJson)
+  check('adj454 坏 JSON → 1 条 warning 且带行号', badIssues.length === 1 && badIssues[0].severity === 'warning' && badIssues[0].line === 4 && badIssues[0].message.includes('无法解析'), JSON.stringify(badIssues))
+  const badParsed = parseJps(badJson)
+  check('adj454 坏 JSON → 并进解析结果（问题条/状态栏可见）', badParsed.errors.some((e) => e.message.includes('设置行 JSON 无法解析') && e.line === 4), JSON.stringify(badParsed.errors.map((e) => `${e.line}:${e.message}`)))
+  check('adj454 坏 JSON → 值仍静默回退缓存（不炸排版）', mergeJpsConfig(badJson, cache).margin_left === 99)
+
+  const wrongType = 'V: 1.0\nQ: 1 2 3 4 |\n\n# jps-config:{"margin_left":"abc","margin_right":70}\n'
+  const wtIssues = inspectJpsConfig(wrongType)
+  check('adj454 坏值（"abc"）→ 告警且点名该字段', wtIssues.length === 1 && wtIssues[0].message.includes('margin_left'), JSON.stringify(wtIssues))
+  const wt = mergeJpsConfig(wrongType, cache)
+  check('adj454 坏值被忽略 → 该项回退缓存（99）', wt.margin_left === 99, `left=${wt.margin_left}`)
+  check('adj454 同一行里的合法项照常生效（margin_right=70）', wt.margin_right === 70, `right=${wt.margin_right}`)
+
+  const typo = 'V: 1.0\nQ: 1 2 3 4 |\n\n# jps-config:{"margin_laft":30}\n'
+  check('adj454 拼错的键 → 告警（此前静默丢弃）', inspectJpsConfig(typo).some((i) => i.message.includes('margin_laft')), JSON.stringify(inspectJpsConfig(typo)))
+  check('adj454 拼错的键不影响其它项', mergeJpsConfig(typo, cache).margin_right === 77)
+
+  // 枚举 / 嵌套对象也要校验（坏纸张名会让 PAPER_SIZE 取不到尺寸）
+  const badPage = 'V: 1.0\nQ: 1 |\n# jps-config:{"page":"A3"}\n'
+  check('adj454 非法纸张名 → 告警并回退', inspectJpsConfig(badPage).some((i) => i.message.includes('page')) && mergeJpsConfig(badPage, null).page === defaultPageConfig.page)
+  const badLayout = 'V: 1.0\nQ: 1 |\n# jps-config:{"noteSpaceLayout":"xxx"}\n'
+  check('adj454 非法布局模式 → 告警并回退（枚举值为 space/duration）', inspectJpsConfig(badLayout).some((i) => i.message.includes('noteSpaceLayout')) && mergeJpsConfig(badLayout, null).noteSpaceLayout === defaultPageConfig.noteSpaceLayout)
+  check('adj454 合法枚举值不误报（space/duration）', inspectJpsConfig('V: 1.0\nQ: 1 |\n# jps-config:{"noteSpaceLayout":"duration","lianyinxian_type":2,"page":"A5_horizontal"}\n').length === 0)
+  const badGap = 'V: 1.0\nQ: 1 |\n# jps-config:{"segmentRowGap":{"bz":"x"}}\n'
+  check('adj454 段层间距值非数 → 告警并回退', inspectJpsConfig(badGap).some((i) => i.message.includes('segmentRowGap')) && mergeJpsConfig(badGap, null).segmentRowGap?.bz === undefined)
+  check('adj454 metaPos 缺 y / heights 元素非数 → 告警', inspectJpsConfig('V: 1.0\nQ: 1 |\n# jps-config:{"metaPos":{"title":{"x":1}}}\n').length === 1 && inspectJpsConfig('V: 1.0\nQ: 1 |\n# jps-config:{"heights":{"a0":[1,2,"x",4]}}\n').length === 1)
+
+  // ④ 缩进的设置行：整行不生效（settings 只认顶格），必须给出告警而不是静默
+  const indented = 'V: 1.0\nQ: 1 2 3 4 |\n\n  # jps-config:{"margin_left":55}\n'
+  check('adj454 缩进的设置行 → 告警「必须顶格」', parseJps(indented).errors.some((e) => e.message.includes('顶格')), JSON.stringify(parseJps(indented).errors.map((e) => e.message)))
+  check('adj454 缩进的设置行确实不生效', mergeJpsConfig(indented, null).margin_left === defaultPageConfig.margin_left)
+  check('adj454 合法的顶格设置行**不产生**任何告警', parseJps(srcCfg).errors.length === 0 && inspectJpsConfig(srcCfg).length === 0)
 }
 
 runAdj363SaveTests()

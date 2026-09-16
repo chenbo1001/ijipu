@@ -12,7 +12,7 @@
  * 说明：本模块属浏览器层（AudioWorklet/WebAudio），不放入零 DOM 的 engine。
  */
 import type { AudioBackend } from '@ijipu/engine'
-import { pitchToMidiNote, instrumentToProgram, GmChannelAllocator, GM_VOICES } from '@ijipu/engine'
+import { pitchToMidiNote, instrumentToProgram, GmChannelAllocator, GM_VOICES, gmVoiceRef } from '@ijipu/engine'
 import type { GmVoice } from '@ijipu/engine'
 import type { WorkletSynthesizer } from 'spessasynth_lib'
 
@@ -145,15 +145,14 @@ export async function loadHqBank(lib: HqSampleLibrary): Promise<ArrayBuffer> {
 
 /**
  * adj354：@@ 恢复默认音色的「第一音色」——试听/导出音色列表第一个启用音色的 GM 音色名。
- * 由启用集合（playbackHqEnabled，program 列表，按 program 序）取最小 program 对应 GM_VOICE_OPTIONS 的 label
- * （剥掉前导「N 」编号），作为 buildPlaySequence / layoutScore 的 defaultInstrumentRef；
+ * 由启用集合（playbackHqEnabled，program 列表）取最小 program，经引擎 `gmVoiceRef` 还原成音色名 ref
+ * （剥掉显示编号），作为 buildPlaySequence / layoutScore 的 defaultInstrumentRef；
  * 启用集合为空返回 undefined（引擎回退第一音色库第一音色）。
  */
 export function firstEnabledInstrumentRef(enabled: number[]): string | undefined {
   if (enabled.length === 0) return undefined
-  const prog = Math.min(...enabled)
-  const v = GM_VOICE_OPTIONS.find((o) => o.program === prog)
-  return v ? v.label.replace(/^\d+\s+/, '') : undefined
+  // adj455：program → 音色名 ref 的逆映射收敛在引擎（gmVoiceRef），此处不再自己拼 label
+  return gmVoiceRef(Math.min(...enabled))
 }
 
 /**

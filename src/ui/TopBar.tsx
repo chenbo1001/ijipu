@@ -230,9 +230,11 @@ export function TopBar() {
   const settingsRef = useRef<HTMLDivElement>(null) // .topbar-settings（设置组可见区）
   const toolbarRef = useRef<HTMLDivElement>(null) // .topbar-toolbar（工具条）
   const measureRef = useRef<HTMLDivElement>(null) // 隐藏测量容器（渲染全部按钮量宽）
+  const moreMeasureRef = useRef<HTMLButtonElement>(null) // 「更多」按钮的隐形副本（实测槽位宽）
   const overflowBtnRef = useRef<HTMLDivElement>(null) // 「更多」按钮容器
   const overflowDropdownRef = useRef<HTMLDivElement>(null) // 「更多」下拉容器
   const donateRef = useRef<HTMLButtonElement>(null) // 「支持作者」独立按钮（宽度计入测量预算）
+  const themeModeRef = useRef<HTMLButtonElement>(null) // 浅深三状态按钮（宽度计入测量预算，adj453）
   // adj：视口很窄时下拉可能向左溢出视口，用 translateX 把它拉回视口内
   const [overflowShiftX, setOverflowShiftX] = useState(0)
   useLayoutEffect(() => {
@@ -549,24 +551,47 @@ export function TopBar() {
       const cs = getComputedStyle(topbar)
       const pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0)
       const gap = parseFloat(cs.gap) || 4
-      // 「更多」按钮宽度（未渲染时用估值 36，避免首帧把全部挤出去）
-      const ovW = overflowBtnRef.current?.getBoundingClientRect().width ?? 36
-      const fix = (sel: string) => topbar.querySelector(sel)?.getBoundingClientRect().width ?? 0
-      // adj：独立「支持作者」按钮不参与折叠、始终常驻最右——须把它的宽度（含 margin-left 6px）
-      // 计入可用空间预算，否则窄屏（如 PAD 竖屏）下其余工具按钮会把它挤出视口导致横向滚动
-      const donateW = donateRef.current?.getBoundingClientRect().width ?? 0
-      const avail =
-        topbar.clientWidth -
-        pad -
-        gap -
-        ovW -
-        fix('.topbar-brand') -
-        fix('.topbar-hamburger') -
-        fix('.topbar-views') -
-        (donateW > 0 ? donateW + 6 : 0)
-      // 测量每个按钮宽（测量容器按组分段渲染，与实际工具条布局一致）
-      const btnEls = Array.from(mes.querySelectorAll<HTMLElement>('[data-tool-key]'))
-      const widths = btnEls.map((el) => el.getBoundingClientRect().width)
+      /**
+       * adj453：**右侧常驻项全部先扣预算**——浅深三状态 / 支持作者 / 更多 三个按钮必须完整落在
+       * 顶栏右侧。用户报障「手机上三点只露一半、部分机型完全看不到」的根因有二：
+       *   ① 老代码只扣了「支持作者」的宽度，**漏了浅深三状态按钮**（约 36px）；
+       *   ② 顶栏 flex 间距只扣了 1 个 `gap`，实际有 6~7 个（每个 4~6px）。
+       * 两者叠加使预算比真实可用宽度多出 ~40px → 工具条按虚高预算多留按钮 → 顶栏总额超出视口，
+       * 而工具条 `flex-shrink:0` 会把最后一个子项「更多」直接顶出视口右缘（被裁一半或整颗不见）。
+       * 现在：常驻项宽度**含外边距**实测 + 间距按**实际在流子项数**算 + 2px 安全余量。
+       */
+      const outerW = (el: Element | null): number => {
+        if (!el) return 0
+        const s = getComputedStyle(el)
+        return (
+          el.getBoundingClientRect().width + (parseFloat(s.marginLeft) || 0) + (parseFloat(s.marginRight) || 0)
+        )
+      }
+      const fix = (sel: string) => outerW(topbar.querySelector(sel))
+      /**
+       * 「更多」按钮槽位**恒定预留**，且取**实测宽**（测量容器里放了它的隐形副本，见 JSX）——
+       * 与可见的「更多」当前是否存在无关，因此 visCount 不会随它有无而变，杜绝
+       * "按钮消失→预算变大→按钮又出现"的抖动；也不用估值，窄屏不会白扣几个像素。
+       */
+      const ovReserve = moreMeasureRef.current ? outerW(moreMeasureRef.current) : 30
+      const fixedW =
+        fix('.topbar-brand') + fix('.topbar-hamburger') + fix('.topbar-views') +
+        outerW(themeModeRef.current) + outerW(donateRef.current)
+      // 顶栏在流内的子项：Logo / 汉堡 / 视图 / 弹性间距 / 工具条 / 浅深 / 支持 [/ 更多]
+      // 间距数 = 子项数 − 1，按**含「更多」的最坏情况**算（「更多」未渲染时补 +1）
+      const flowKids = Array.from(topbar.children).filter((el) => getComputedStyle(el).position !== 'absolute')
+      const gapCount = Math.max(0, flowKids.length - 1 + (overflowBtnRef.current ? 0 : 1))
+      const SAFE = 2 // 安全余量：抵消亚像素取整（getBoundingClientRect 小数累加）带来的溢出
+      const avail = topbar.clientWidth - pad - gap * gapCount - fixedW - ovReserve - SAFE
+      // 测量每个按钮宽——**按 key 取**（不依赖测量容器里的 DOM 顺序，与 toolBtns 一一对应）。
+      // 注意量的是包裹 span 的**第一个元素子节点**：包裹层是 `display:contents`（为了与实际
+      // 工具条布局一致）本身不产生盒子，getBoundingClientRect 恒为 0，直接量它会得到全 0 宽度。
+      const widthByKey = new Map<string, number>()
+      mes.querySelectorAll<HTMLElement>('[data-tool-key]').forEach((el) => {
+        const box = el.firstElementChild instanceof HTMLElement ? el.firstElementChild : el
+        widthByKey.set(el.dataset.toolKey ?? '', box.getBoundingClientRect().width)
+      })
+      const widths = toolBtns.map((t) => widthByKey.get(t.key) ?? 0)
       /**
        * adj414：两个组的「盒子开销」（左右 padding + 左右 border）与**组内按钮间距**
        * 改为**从实际容器上读**，不再写死 `4 + … * 2`。
@@ -835,8 +860,9 @@ export function TopBar() {
 
       <div className="topbar-spacer" />
 
-      {/* 工具条：功能组（顶栏）+ 设置组（从状态栏移来），按工具条长度可容纳数量动态布局；
-         放不下的按钮收进「更多」下拉。「⋮ 更多」独立于工具条最右，按需出现。 */}
+      {/* 工具条：**只**容纳可折叠的功能组 + 设置组（放不下的按钮收进右侧「更多」下拉）。
+          adj453：常驻的浅深三状态 /「支持作者」已移出本容器——本容器带 `overflow:hidden`
+          （用于裁掉超出 visCount 的按钮），常驻按钮放在里面会被裁掉或被挤出视口。 */}
       <div className="topbar-toolbar" ref={toolbarRef}>
         <div className="topbar-buttons" ref={btnsRef}>
           {toolBtns.slice(0, visCount).filter((t) => t.group === 'topbar').map((t) => (
@@ -852,63 +878,62 @@ export function TopBar() {
             </span>
           ))}
         </div>
-        {/* adj426：浅深模式三状态按钮（位于「支持」之前，独立于工具条常驻）——
-             点一次循环到下一档：auto → light → dark → auto；图标与文字随当前档位切换。
-             与「设置 → 主题 → 浅深模式」三个按钮共用 store（uiStore.setThemeMode），状态实时同步。 */}
-        <button
-          type="button"
-          className="topbar-btn topbar-theme-mode"
-          onClick={() => {
-            const next: Record<typeof themeMode, typeof themeMode> = {
-              auto: 'light',
-              light: 'dark',
-              dark: 'auto',
-            }
-            setThemeMode(next[themeMode])
-          }}
-          title={
-            themeMode === 'auto'
-              ? '浅深模式：随系统（点击切到浅色）'
-              : themeMode === 'light'
-                ? '浅深模式：浅色（点击切到深色）'
-                : '浅深模式：深色（点击切到随系统）'
-          }
-          aria-label={
-            themeMode === 'auto'
-              ? '浅深模式 当前为随系统，点击切到浅色'
-              : themeMode === 'light'
-                ? '浅深模式 当前为浅色，点击切到深色'
-                : '浅深模式 当前为深色，点击切到随系统'
-          }
-        >
-          {iconOf(
-            themeMode === 'auto'
-              ? 'themeAuto'
-              : themeMode === 'light'
-                ? 'themeLight'
-                : 'themeDark'
-          )}
-          <span className="tool-label">
-            {themeMode === 'auto' ? '自动' : themeMode === 'light' ? '浅色' : '深色'}
-          </span>
-        </button>
-        {/* 支持作者：独立于工具条最右侧（不参与功能组/设置组折叠，始终可见） */}
-        <button
-          ref={donateRef}
-          type="button"
-          className="topbar-btn topbar-donate"
-          onClick={() => openModal('donate')}
-          title="支持作者"
-          aria-label="支持作者"
-        >
-          {iconOf('donate')}
-          <span className="tool-label">支持</span>
-        </button>
       </div>
 
-      {/* 「更多」按钮：公共更多按钮，独立于工具条最右，按需出现（空间不足时显示） */}
+      {/* adj453：顶栏右侧三个**常驻**按钮（浅深三状态 → 支持作者 → 更多）——
+          直接挂在 `.topbar` 下（不再放进带 `overflow:hidden` 的 `.topbar-toolbar`），
+          并统一 `flex-shrink:0`：无论工具条怎么压缩、屏幕多窄，它们都完整固定在顶栏右侧。 */}
+      {/* adj426：浅深模式三状态按钮（位于「支持」之前，独立于工具条常驻）——
+             点一次循环到下一档：auto → light → dark → auto；图标与文字随当前档位切换。
+             与「设置 → 主题 → 浅深模式」三个按钮共用 store（uiStore.setThemeMode），状态实时同步。 */}
+      <button
+        ref={themeModeRef}
+        type="button"
+        className="topbar-btn topbar-theme-mode"
+        onClick={() => {
+          const next: Record<typeof themeMode, typeof themeMode> = {
+            auto: 'light',
+            light: 'dark',
+            dark: 'auto',
+          }
+          setThemeMode(next[themeMode])
+        }}
+        title={
+          themeMode === 'auto'
+            ? '浅深模式：随系统（点击切到浅色）'
+            : themeMode === 'light'
+              ? '浅深模式：浅色（点击切到深色）'
+              : '浅深模式：深色（点击切到随系统）'
+        }
+        aria-label={
+          themeMode === 'auto'
+            ? '浅深模式 当前为随系统，点击切到浅色'
+            : themeMode === 'light'
+              ? '浅深模式 当前为浅色，点击切到深色'
+              : '浅深模式 当前为深色，点击切到随系统'
+        }
+      >
+        {iconOf(themeMode === 'auto' ? 'themeAuto' : themeMode === 'light' ? 'themeLight' : 'themeDark')}
+        <span className="tool-label">
+          {themeMode === 'auto' ? '自动' : themeMode === 'light' ? '浅色' : '深色'}
+        </span>
+      </button>
+      {/* 支持作者：常驻顶栏右侧（不参与功能组/设置组折叠，始终可见） */}
+      <button
+        ref={donateRef}
+        type="button"
+        className="topbar-btn topbar-donate"
+        onClick={() => openModal('donate')}
+        title="支持作者"
+        aria-label="支持作者"
+      >
+        {iconOf('donate')}
+        <span className="tool-label">支持</span>
+      </button>
+
+      {/* 「更多」按钮：公共更多按钮，常驻顶栏最右、按需出现（有按钮被折叠时显示） */}
       {visCount < toolBtns.length && (
-        <div className={`topbar-overflow${overflowOpen ? ' open' : ''}`} ref={overflowBtnRef} style={{ marginLeft: 'auto' }}>
+        <div className={`topbar-overflow${overflowOpen ? ' open' : ''}`} ref={overflowBtnRef}>
           <button
             type="button"
             className="topbar-overflow-btn"
@@ -938,18 +963,34 @@ export function TopBar() {
         </div>
       )}
 
-      {/* 隐藏测量容器：渲染全部按钮（按组分两段），仅用于测量宽度（不参与布局/交互） */}
+      {/* 隐藏测量容器：**按与真实工具条相同的组结构**渲染全部按钮，仅用于测量宽度
+          （不参与布局/交互）。adj453：此前是平铺一行裸 span，量出来的宽度用的是
+          「基类」`.topbar-btn`（padding 5/10 + 有边框），比组内真实按钮（padding 4/9 + 无边框）
+          每个宽 4px——窄屏上会白白少显示一个本可放下的按钮；改成组结构后量到即所见。 */}
       <div
         className="topbar-measure"
         ref={measureRef}
         aria-hidden="true"
         style={{ position: 'absolute', visibility: 'hidden', pointerEvents: 'none', whiteSpace: 'nowrap', zIndex: -1 }}
       >
-        {toolBtns.map((t) => (
-          <span data-tool-key={t.key} key={t.key} style={{ display: 'inline-block' }}>
-            {renderBtn(t, true)}
-          </span>
-        ))}
+        <div className="topbar-buttons">
+          {toolBtns.filter((t) => t.group === 'topbar').map((t) => (
+            <span data-tool-key={t.key} key={t.key} style={{ display: 'contents' }}>
+              {renderBtn(t, true)}
+            </span>
+          ))}
+        </div>
+        <div className="topbar-settings">
+          {toolBtns.filter((t) => t.group === 'footer').map((t) => (
+            <span data-tool-key={t.key} key={t.key} style={{ display: 'contents' }}>
+              {renderBtn(t, true)}
+            </span>
+          ))}
+        </div>
+        {/* 「更多」按钮的隐形副本——见 ovReserve 注释（恒定按实测宽预留它的槽位） */}
+        <button type="button" className="topbar-overflow-btn" ref={moreMeasureRef} tabIndex={-1} aria-hidden="true">
+          <ToolIcon name="more" />
+        </button>
       </div>
     </div>
   )

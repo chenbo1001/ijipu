@@ -430,8 +430,10 @@ export function PageConfigDialog() {
             onClick={() => {
               // adj83：保存设置时持久化到源码 # jps-config 注释（每首谱用自己的设置）
               // adj-font（D1）：默认**差量写入**（只写与默认不同的字段；全部为默认时删除设置行）
+              // adj454：传入打开时的快照 snapRef 作为基线——只固化**用户本次真正改动**的字段，
+              // 本机公共设置（localStorage 缓存）里带来的值不会被写进这首谱
               committedRef.current = true
-              setPageConfig(draft, true)
+              setPageConfig(draft, true, snapRef.current)
               closeModal()
             }}
           >

@@ -10,7 +10,7 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { tempoLabel } from '@ijipu/engine/parser/parser'
 import { layoutScore, renderScoreToSvg, noteIdToCodePos, buildIndexToPage, SEGMENT_ROW_GAP_DEFAULT } from '@ijipu/engine'
-import type { ScorePage } from '@ijipu/engine'
+import type { ScorePage, PageConfig } from '@ijipu/engine'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides'
 import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '@ijipu/engine/layout/metaAnchors'
 import { firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
@@ -235,6 +235,8 @@ export function PreviewPane() {
     startY: number
     baseX: number
     baseY: number
+    /** adj454：按下时的生效配置快照——松手写回谱面时以它为基线，只固化本次拖拽的改动 */
+    baseCfg: PageConfig
   } | null>(null)
 
   const onMetaMouseDown = (e: React.MouseEvent) => {
@@ -274,7 +276,7 @@ export function PreviewPane() {
       bx = base ? base.x : Number(el.getAttribute('x')) - anchor.x
       by = base ? base.y : Number(el.getAttribute('y')) - anchor.y
     }
-    metaDragRef.current = { key, startX: e.clientX, startY: e.clientY, baseX: bx, baseY: by }
+    metaDragRef.current = { key, startX: e.clientX, startY: e.clientY, baseX: bx, baseY: by, baseCfg: { ...cfg } }
     const onMove = (ev: MouseEvent) => {
       const d = metaDragRef.current
       if (!d) return
@@ -295,12 +297,14 @@ export function PreviewPane() {
       setPageConfig({ ...pageConfigRef.current, metaPos: next })
     }
     const onUp = () => {
+      // adj454：先取出按下时的基线快照（下面会清空 ref），写回时只固化本次拖拽改动的字段
+      const baseCfg = metaDragRef.current?.baseCfg
       metaDragRef.current = null
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
       // adj83：拖拽结束把 metaPos 持久化到源码 # jps-config（每首谱用自己的设置）
       if (pageConfigRef.current.metaPos) {
-        setPageConfig(pageConfigRef.current, true)
+        setPageConfig(pageConfigRef.current, true, baseCfg)
       }
     }
     window.addEventListener('mousemove', onMove)
@@ -313,6 +317,8 @@ export function PreviewPane() {
     startX: number
     startY: number
     startVal: number
+    /** adj454：按下时的生效配置快照——松手写回谱面时以它为基线，只固化本次拖拽的改动 */
+    baseCfg: PageConfig
   } | null>(null)
 
   const startDrag = (
@@ -322,7 +328,7 @@ export function PreviewPane() {
   ) => {
     e.preventDefault()
     e.stopPropagation()
-    setDrag({ spec, startX: e.clientX, startY: e.clientY, startVal })
+    setDrag({ spec, startX: e.clientX, startY: e.clientY, startVal, baseCfg: { ...pageConfigRef.current } })
   }
 
   useEffect(() => {
@@ -351,7 +357,8 @@ export function PreviewPane() {
     const onUp = () => {
       setDrag(null)
       // adj83：拖拽结束把调整后的设置持久化到源码 # jps-config
-      setPageConfig(pageConfigRef.current, true)
+      // adj454：以按下时的快照为基线（drag.baseCfg）——只固化本次拖拽改动的字段
+      setPageConfig(pageConfigRef.current, true, drag.baseCfg)
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)

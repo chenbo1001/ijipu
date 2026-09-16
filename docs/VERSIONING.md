@@ -56,7 +56,7 @@ npm run tauri:build  # 复用 npm run build（前端 dist），版本随 package
    - `src/brand/version.ts`（`APP_VERSION`）、`package.json`、`src-tauri/tauri.conf.json`
    - `package-lock.json`（顶层 + packages[""] 两处）
    - 引擎改动涉及包版本时同步 `packages/ijipu-engine/package.json`、`packages/ijipu-engine/src/engine/...` 相关
-4. **验证**：`tsc -b` + `npm run build` 通过；`npm run smoke` 无新增失败（既有预存失败基线除外）。
+4. **验证**：`tsc -b` + `npm run build` 通过；`npm run smoke` **必须 0 失败**（adj456 起旧的"18 条预存失败基线"已逐条清理归零——不再接受"== 基线"的说法；若确有无法立刻修的失败，必须在断言里写明原因与跟踪项，并在提交信息里点名，而不是只写个数）。
 5. **git 提交 + 打 tag**：
    - 提交（Conventional + adjNN，如 `release: 版本升至 x.y.z（...）`、`feat(engine): ...`）
    - `git tag v<x.y.z>`（与既有 tag 一致，如 `v0.12.17`、`v0.13.0`），指向该提交。

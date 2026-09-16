@@ -4,7 +4,7 @@
  */
 import './localStorageMigration'
 import { create } from 'zustand'
-import { parseJps, defaultPageConfig, applyFontOverride, mergeJpsConfig, writeJpsConfig } from '@ijipu/engine'
+import { parseJps, defaultPageConfig, applyFontOverride, mergeJpsConfig, mergeConfigEdits, writeJpsConfig } from '@ijipu/engine'
 import type { PageConfig, ParseResult } from '@ijipu/engine'
 import { SAMPLES, defaultSample } from '../samples'
 import {
@@ -87,8 +87,13 @@ interface DocState {
   setCode: (code: string) => void
   setViewType: (v: ViewType) => void
   setAutoFormat: (b: boolean) => void
-  /** 更新页面设置；persist=true 时同时写回源码 # jps-config（谱面级持久化，adj83；默认差量写入） */
-  setPageConfig: (cfg: PageConfig, persist?: boolean) => void
+  /**
+   * 更新页面设置；persist=true 时同时写回源码 # jps-config（谱面级持久化，adj83；默认差量写入）。
+   * adj454：`base` = 本次编辑**开始前**的生效配置快照（对话框打开时 / 虚线按下时）——
+   * 传了它就只把「用户本次真正改动」的字段写进谱面（本机缓存来源的值不再被固化）；
+   * 不传则退回旧行为（写回整份生效配置的差量）。
+   */
+  setPageConfig: (cfg: PageConfig, persist?: boolean, base?: PageConfig) => void
   /**
    * 把**当前生效的全部设置**固化进谱面 `# jps-config`（全量写入）。
    * 差量写入下，与默认值相同的项不落盘；需要"这份谱在任何机器/任何人手里都长一样"时用它。
@@ -191,7 +196,9 @@ function restoreEntry(
   set({
     code,
     parseResult: parseJps(code),
-    pageConfig: mergeJpsConfig(code, loadPageConfig()),
+    // adj454：撤销/重做也必须走 resolveConfig——此前直接用 mergeJpsConfig 少了 L1「字体覆盖」
+    // 这一层，开了该开关时撤销一步会让覆盖短暂失效（其它入口都走 resolveConfig）
+    pageConfig: resolveConfig(code),
     dirty: true,
     sel: { start: selStart, end: selEnd },
     ...historyNext,
@@ -253,7 +260,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
     set({ viewType: v })
   },
   setAutoFormat: (b) => set({ autoFormat: b }),
-  setPageConfig: (cfg, persist) => {
+  setPageConfig: (cfg, persist, base) => {
     try {
       localStorage.setItem(PAGE_CONFIG_KEY, JSON.stringify(cfg))
     } catch {
@@ -263,9 +270,13 @@ export const useDocStore = create<DocState>()((set, get) => ({
     // （每首谱用自己的设置）；拖拽实时预览不写源码，避免频繁重解析。
     // adj-font：改为**差量写入**（只写与默认不同的字段；无差量则删除设置行），
     // 避免把旧默认永久钉在文件里；编辑器偏好已不在 PageConfig 中，不会再被写入。
+    // adj454：传了 base（本次编辑开始前的生效配置）时，只把**用户本次改动**并入源码层
+    // （mergeConfigEdits）——此前直接写整份生效配置，会把本机公共设置（缓存）固化进别人的谱。
     if (persist) {
       const code = get().code
-      const newCode = writeJpsConfig(code, cfg)
+      const newCode = base
+        ? writeJpsConfig(code, mergeConfigEdits(code, base, cfg))
+        : writeJpsConfig(code, cfg)
       if (newCode !== code) {
         try {
           localStorage.setItem(DRAFT_KEY, newCode)

@@ -7,7 +7,7 @@
  *  - 自动格式化（防抖 + 光标公共前缀保持）
  *  - 语法高亮（含错误行红底）
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
@@ -244,10 +244,19 @@ export function EditorPane() {
   // textarea 与高亮层**同帧**重排；若只走 React state（CSS 变量）会滞后一帧，
   // 拖动过程中高亮层仍是旧宽度、折行点不同，折行后的行文本错位
   const innerRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
+  /**
+   * adj456：本测量 effect 由 `useEffect` 改为 `useLayoutEffect`，并把「是否同步渲染」参数化——
+   * 修掉控制台那条 React 报错 `flushSync was called from inside a lifecycle method`（dev 下 StrictMode
+   * 双跑 effect，故干净加载即出现 **2 条**）：
+   *  - **初次测量在生命周期内执行** → 不能用 flushSync；而 layout effect 里的 setState 本来就会在
+   *    本帧绘制**前**同步提交（与 flushSync 等效，还少一次多余渲染），语义不降级；
+   *  - **ResizeObserver 回调**（拖动窗体途中、帧间触发，不在 React 生命周期内）→ 继续用 flushSync，
+   *    保住 adj228 的本意：高亮层折行点与 textarea 同帧一致、不跨帧错位。
+   */
+  useLayoutEffect(() => {
     const parent = taRef.current?.parentElement ?? null
     if (!parent) return
-    const update = () => {
+    const update = (sync: boolean) => {
       const ta = taRef.current
       if (ta) {
         // 直接写 DOM：与浏览器 reflow 同帧生效（React state 只用于视觉行探测等非对齐计算）
@@ -255,10 +264,12 @@ export function EditorPane() {
         // adj228：flushSync 同步渲染——快速拖动窗体时 React 并发调度可能跨帧提交，
         // wrapPoints（高亮层手动折行点）与 textarea 实际折行错位；同步渲染保证
         // 拖动过程中的每一帧内高亮层切分都与 textarea 一致
-        flushSync(() => {
+        const applyWidths = () => {
           setTaClientW(ta.clientWidth) // 含 padding，不含滚动条
           setContentW(ta.clientWidth - 28) // 内容区宽（去左右 padding 14×2）
-        })
+        }
+        if (sync) flushSync(applyWidths)
+        else applyWidths()
         // adj331：实测 textarea 单行**布局行盒**（getBoundingClientRect().height 差）——
         // textarea 是原生控件，其行盒可能被字体撑得高于 line-height（部分 WebKit/移动
         // WebView 对 textarea 遵循字体 line-box 而非 CSS line-height）。用克隆 textarea
@@ -282,8 +293,8 @@ export function EditorPane() {
         if (lh > 0) setMeasuredLineH(lh)
       }
     }
-    update()
-    const ro = new ResizeObserver(update)
+    update(false) // adj456：初次测量走普通 setState（layout effect 内本帧绘制前提交）
+    const ro = new ResizeObserver(() => update(true))
     ro.observe(parent)
     // adj224：滚动条出现/消失会改变 textarea 内容宽（父宽不变）——需直接观察 textarea
     if (taRef.current) ro.observe(taRef.current)

@@ -31,6 +31,17 @@
 
 优先级（现状，保持）：**L0 < L1 < L1.5 < L2**。
 
+> **adj454（2026-09-16）用户确认与落地**：读取优先级就是「**源码设置 > 缓存设置 > 默认设置**」——
+> `engine/settings.ts` 的 `mergeJpsConfig` 展开顺序 `{...defaultPageConfig, ...(缓存), ...(源码)}`
+> 即优先级本身（源码最后展开、覆盖前两层），现已由 smoke `[107]` 用例逐条锁定；
+> 应用侧所有入口统一走 `docStore.resolveConfig()`（= 合并 + L1「字体覆盖」），
+> **包括撤销/重做**（此前 `restoreEntry` 漏了字体覆盖这一层）。
+> 同轮还补了两处与"分层"直接相关的行为：
+> ① **写方向只固化用户改动**（`mergeConfigEdits`）——点「保存设置」/拖拽虚线松手时，只把本次真正改动的
+>    字段写进 `# jps-config`；缓存来源的值不再被固化（此前会把本机公共设置写进别人的谱）；
+> ② **读取端类型校验**（`inspectJpsConfig`）——坏 JSON / 值类型不对 / 键拼错 / 设置行被缩进，
+>    一律给出带行号的告警（并进 `ParseResult.errors` → 问题条 + 状态栏橙点），不再静默"设置丢失"。
+
 ---
 
 ## 三、L2 谱面级：`PageConfig` 34 字段逐一归属
@@ -178,7 +189,7 @@ draft 草稿、文件句柄库、PWA/SW 与更新提示、Tauri 音源分支、`
 
 | # | 决策 | **定稿** |
 |---|---|---|
-| **D1** | `# jps-config` 写入策略 | **差量写入（默认）**：`writeJpsConfig(code, cfg)` 只写与 `defaultPageConfig` 不同的字段，无差量则**删除该行**；需要"到哪都一样"时用 `{ mode: 'full' }`，界面入口 = 页面设置对话框的「**固化全部到谱面**」 |
+| **D1** | `# jps-config` 写入策略 | **差量写入（默认）**：`writeJpsConfig(code, cfg)` 只写与 `defaultPageConfig` 不同的字段，无差量则**删除该行**；需要"到哪都一样"时用 `{ mode: 'full' }`，界面入口 = 页面设置对话框的「**固化全部到谱面**」。<br>**adj454 补充**：默认入口的 `cfg` 必须是 `mergeConfigEdits(code, base, next)` 的结果（只含"本次用户改动"），**不得**直接传合并后的生效配置——否则本机缓存设置会被固化进谱面 |
 | **D2** | 字体是否允许用户层覆盖谱面 | **允许，默认关**：L1 新增 `FontOverride{ enabled, font }`（键 `ijipu.fontOverride`），开启后标题/副标题/描述头/说明/歌词/数字六项**字体族**统一为所选栈（不动字号与其它排版参数），谱面文件不改写；界面在页面设置「全局」标签 |
 | **D3** | Obsidian frontmatter 是否保留 | **保留为可选 L1.5**：优先级低于源内 `# jps-config`，文档写明；已降级键（`ijipu_editorFont*`）给专门提示而非"未识别" |
 | **D4** | 音源缓存按库隔离？ | **共享**（跨库复用省流量）；插件设置页提供缓存状态与清除入口（后续随嵌入方案落地） |
@@ -205,6 +216,17 @@ draft 草稿、文件句柄库、PWA/SW 与更新提示、Tauri 音源分支、`
 | 生效配置解析收敛为 `resolveConfig()`（含 L1 字体覆盖）；新增 `persistFullConfig()` | `src/store/docStore.ts` |
 | 页面设置：字体候选取自引擎、编辑器项标注为 L1、字体覆盖开关、「固化全部到谱面」 | `src/dialogs/PageConfigDialog.tsx` |
 | 40 项断言（差量/删除行/全量/编辑器键不进谱面/迁移/字体归一/候选兜底/覆盖开关/字号钳制） | `scripts/smoke.mts` 的 `[90]` |
+
+### 八之四、adj454 已实施清单（分层口径加固）
+
+| 项 | 位置 |
+|---|---|
+| 写回只固化「用户本次改动」：`mergeConfigEdits(code, base, next)`；`setPageConfig(cfg, persist, base?)` | `engine/settings.ts`、`src/store/docStore.ts` |
+| 生效配置解析统一：撤销/重做也走 `resolveConfig()`（补上 L1 字体覆盖层） | `src/store/docStore.ts`（`restoreEntry`） |
+| 设置行类型校验：坏 JSON / 值类型错 / 键拼错 / 缩进 → 带行号告警；坏项忽略并回退下一层 | `engine/settings.ts`（`inspectJpsConfig` / `readConfigLine` / `expectDescOf`） |
+| 告警接入既有问题通道（问题条 + 状态栏橙点 + 行号定位） | `engine/parser/parser.ts`（`#` 注释行分支） |
+| 编辑交互传入"编辑前快照"作为写回基线（对话框打开时 / 虚线按下时） | `src/dialogs/PageConfigDialog.tsx`、`src/preview/PreviewPane.tsx` |
+| 27 项断言（优先级三层 / 写回不含缓存值 / 改回默认即删除 / 坏 JSON 与坏值的告警与回退 / 缩进告警） | `scripts/smoke.mts` 的 `[107]` |
 
 ## 九、变更清单（按文档执行时要动的文件）
 
