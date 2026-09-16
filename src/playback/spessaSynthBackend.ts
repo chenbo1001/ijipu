@@ -12,7 +12,7 @@
  * 说明：本模块属浏览器层（AudioWorklet/WebAudio），不放入零 DOM 的 engine。
  */
 import type { AudioBackend } from '@ijipu/engine'
-import { pitchToMidiNote, instrumentToProgram, matchInstrument } from '@ijipu/engine'
+import { pitchToMidiNote, instrumentToProgram, GmChannelAllocator } from '@ijipu/engine'
 import type { WorkletSynthesizer } from 'spessasynth_lib'
 
 /** worklet processor 文件（已拷贝到 public/spessasynth/，经 BASE_URL 定位） */
@@ -197,12 +197,14 @@ export function firstEnabledInstrumentRef(enabled: number[]): string | undefined
   return v ? v.label.replace(/^\d+\s+/, '') : undefined
 }
 
-/** 乐器 id → MIDI channel（0-15）：多声部同时演奏时避免 program 冲突 */
-const CHANNEL_OF: Record<string, number> = {
-  piano: 0, organ: 1, strings: 2, flute: 3, brass: 4, musicbox: 5,
-}
-const channelOf = (instrument?: string) => CHANNEL_OF[matchInstrument(instrument)] ?? 0
-
+/**
+ * adj446：**一个音色独占一个 MIDI 通道**（原按「乐器族」映射——钢琴族/弦乐族/长笛族…）。
+ *
+ * 旧实现在同族两个音色（钢琴+电钢琴、小提琴+大提琴、长笛+竖笛…）时会把它们挤到同一通道：
+ * MIDI 通道同时只能有一个 program，后设的音色把先前声部一起改掉，且 `programSet` 又让先设过的
+ * program 不再补发 ⇒ 多声部实际只响**一种**音色（用户报「多个 Y: 音色只用了第一个」）。
+ * 分配逻辑收敛在 engine 的 `GmChannelAllocator`（纯函数、有 smoke 断言）。
+ */
 export class SpessaSynthBackend implements AudioBackend {
   readonly kind = 'sampler' as const
   /** adj328：特征标记——UI 用其区分于 midi-js 采样后端（kind 相同，需额外标志） */
@@ -212,8 +214,10 @@ export class SpessaSynthBackend implements AudioBackend {
   private voiceOverride: number | null = null
   private ctx: AudioContext | null = null
   private synth: WorkletSynthesizer | null = null
-  /** 已设 program 的 channel（避免重复 programChange） */
-  private programSet = new Set<number>()
+  /** adj446：音色 → 独占通道 分配（见 GmChannelAllocator） */
+  private channels = new GmChannelAllocator()
+  /** adj446：各通道**当前已设**的 program（键=通道）——按触发时刻维护，避免重复 programChange */
+  private channelProgram = new Map<number, number>()
   /** 待触发的调度定时器（setTimeout）——stop 时统一清理 */
   private timers = new Set<number>()
 
@@ -283,18 +287,22 @@ export class SpessaSynthBackend implements AudioBackend {
       return
     }
     const note = pitchToMidiNote(pitch)
-    const ch = channelOf(instrument)
     // adj330：用户选定的全局音色覆盖优先，否则按声部名自动路由
     // adj427：**伴奏/第二声部**（`opts.keepInstrument`）保留自己的音色——否则全局覆盖会把
     //   重叠区的两个声部压成同一种音色（用户报「两个声部的音色没有区分」）。
     const program = opts?.keepInstrument ? instrumentToProgram(instrument) : (this.voiceOverride ?? instrumentToProgram(instrument))
-    const key = ch * 128 + program
+    // adj446：按**音色**分配独占通道（不再按乐器族）——同族两个音色各占一个通道，互不覆盖
+    const ch = this.channels.channelFor(program)
     const velocity = Math.max(1, Math.min(127, Math.round(127 * gain)))
     const delay = Math.max(0, atMs)
     const onFn = () => {
-      if (!this.programSet.has(key)) {
+      // adj446：在**触发时刻**核对「本通道当前音色」——独占通道时只发一次；
+      // 通道被复用（同时 >15 种音色）时逐音补发，保证每个音都以自己的音色发声。
+      // 原实现用「(通道,音色) 是否发过」的集合判定：通道被同族另一音色占用后，
+      // 本音色的 program 永不再补发 ⇒ 整段用错音色。
+      if (this.channelProgram.get(ch) !== program) {
         synth.programChange(ch, program)
-        this.programSet.add(key)
+        this.channelProgram.set(ch, program)
       }
       synth.noteOn(ch, note, velocity)
     }
@@ -307,11 +315,14 @@ export class SpessaSynthBackend implements AudioBackend {
     for (const t of this.timers) window.clearTimeout(t)
     this.timers.clear()
     this.synth?.stopAll(true)
-    this.programSet.clear()
+    // adj446：`stopAll(true)` 会重置合成器状态 ⇒ 已设 program 的记录必须一起清掉，
+    // 否则下次播放会跳过 programChange、以重置后的默认音色（钢琴）演奏。
+    this.channelProgram.clear()
   }
 
   dispose(): void {
     this.stop()
+    this.channels.reset()
     this.synth?.disconnect()
     this.synth = null
     if (this.ctx) {

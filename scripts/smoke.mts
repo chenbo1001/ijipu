@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage } from '@ijipu/engine/index.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
-import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork } from '@ijipu/engine/playback/index.ts'
+import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS } from '@ijipu/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
@@ -6580,6 +6580,113 @@ console.log('[adj445] segment-note cursor linkage ({bz} / {dsb})')
     check('AL7 单段可容纳 >10 个音而不越入下一段 id 区块',
       decodeSegmentNoteId(a + 11)?.durSeq === 11 && a + 11 < b,
       `a=${a} a+11=${a + 11} b=${b}`)
+  }
+}
+
+// ---- adj446：多声部「多个 Y: 音色」必须各响各的音色（GM 通道按音色独占分配） ----
+// 用户报「多声部乐谱的描述区指定多个 Y: 音色，演奏时只用了第一个音色，其它没用上」。
+// 根因：HQ 后端按「乐器族」映射 MIDI 通道（钢琴族→0、弦乐族→2、长笛族→3…未识别→0），
+// 同族的两个音色被挤到同一通道；而 MIDI 通道**同时只能有一个 program** ⇒ 后设的音色把
+// 先前声部一起改掉，且「(通道,音色) 已发过」的判定让先设的 program 永不再补发 ⇒ 整段只剩一种音色。
+console.log('[adj446] multi-voice Y: instruments must each keep their GM program')
+{
+  // ① 分配器（engine/playback/channels.ts）：不同音色独占不同通道
+  {
+    const a = new GmChannelAllocator()
+    const c0 = a.channelFor(0)
+    const c4 = a.channelFor(4)
+    check(`AM1 同族不同音色分到不同通道（钢琴 0 vs 电钢琴 4；旧实现同为 0）`, c0 !== c4, `ch ${c0}/${c4}`)
+    check('AM2 同一音色复用同一通道（不浪费、programChange 只发一次）',
+      a.channelFor(0) === c0 && a.channelFor(4) === c4)
+    check('AM3 不占用 GM 打击乐通道 9', !GM_MELODIC_CHANNELS.includes(9))
+    const many = new GmChannelAllocator()
+    const byChannel = new Map<number, number[]>()
+    for (const p of [0, 4, 40, 42, 73, 75, 56, 60, 16, 19, 48, 52, 10, 11, 21, 22, 24, 25]) {
+      const ch = many.channelFor(p)
+      if (!byChannel.has(ch)) byChannel.set(ch, [])
+      byChannel.get(ch)!.push(p)
+    }
+    check('AM4 音色数超过通道数时只用 15 个旋律通道（9 除外）', byChannel.size === GM_MELODIC_CHANNELS.length,
+      `got ${byChannel.size}`)
+    check('AM5 前 15 种音色各自独占通道，第 16 种起才开始通道复用',
+      [...byChannel.values()].filter((ps) => ps.length > 1).length === 3,
+      `复用通道数=${[...byChannel.values()].filter((ps) => ps.length > 1).length}`)
+  }
+  // ② 端到端：真实事件序列 + 真实分配器 + 后端触发规则 ⇒ 每个音都以自己 Y 行的音色发声
+  {
+    const head = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+    // 同族（旧实现必撞通道）+ 异族（旧实现本就正常）都要覆盖
+    const cases: { nm: string; ys: [string, string] }[] = [
+      { nm: '钢琴+电钢琴', ys: ['钢琴', '电钢琴'] },
+      { nm: '小提琴+大提琴', ys: ['小提琴', '大提琴'] },
+      { nm: '长笛+竖笛', ys: ['长笛', '竖笛'] },
+      { nm: '钢琴+弦乐', ys: ['钢琴', '弦乐'] },
+    ]
+    for (const c of cases) {
+      const code =
+        head +
+        c.ys.map((y) => `Y: ${y}\n`).join('') +
+        'Q1: 1 3 5 3 | 1 - - - |\nQ2: 5 1 3 1 | 5 - - - |\nQ: 1 2 3 4 | 5 6 5 - |\n'
+      const pr = parseJps(code)
+      check(`AM6[${c.nm}] 两条 Y: 行都进了描述头`, pr.header.instruments.length === 2,
+        JSON.stringify(pr.header.instruments))
+      const layout = layoutScore(pr, DUR_CFG)
+      const seq = buildPlaySequence(pr, layout, 100)
+      const alloc = new GmChannelAllocator()
+      const plan = seq.events.map((e) => {
+        const p = instrumentToProgram(e.instrument)
+        return { p, ch: alloc.channelFor(p), at: e.atMs, voice: e.placed.id.voice }
+      })
+      // 声部 1 = Y[0]、声部 2 = Y[1]（engine 按声部序号取 Y 行）
+      const v1p = plan.find((x) => x.voice === 1)?.p
+      const v2p = plan.find((x) => x.voice === 2)?.p
+      check(`AM7[${c.nm}] 两声部解析出各自的 GM program（Y[0]≠Y[1]）`,
+        v1p !== undefined && v2p !== undefined && v1p !== v2p,
+        `v1=${v1p} v2=${v2p}`)
+      check(`AM8[${c.nm}] 不同音色不共用通道（撞通道即整段只剩一种音色）`,
+        plan.filter((x) => x.p === v1p).every((x) => x.ch !== plan.find((y) => y.p === v2p)!.ch))
+      // 后端触发规则：按 (atMs, 事件序) 触发；触发时通道音色 ≠ 本音色 → 补发 programChange
+      const order = plan.map((_, i) => i).sort((x, y) => plan[x].at - plan[y].at || x - y)
+      const cur = new Map<number, number>()
+      let wrong = 0
+      for (const i of order) {
+        const e = plan[i]
+        if (cur.get(e.ch) !== e.p) cur.set(e.ch, e.p) // 后端 programChange（按触发时刻核对）
+        if (cur.get(e.ch) !== e.p) wrong++
+      }
+      check(`AM9[${c.nm}] 全部 ${plan.length} 个事件都以自己的音色发声`, wrong === 0, `错 ${wrong} 个`)
+    }
+  }
+  // ③ 结构守卫：HQ 后端必须用「按音色独占通道」的分配器，不得退回按乐器族映射
+  {
+    const src = String(readFileSync('src/playback/spessaSynthBackend.ts', 'utf8'))
+    check('AMA 后端使用 GmChannelAllocator 分配通道', src.includes('GmChannelAllocator'))
+    check('AMB 后端不再按「乐器族 → 通道」映射（CHANNEL_OF 已删除）', !src.includes('CHANNEL_OF'))
+    check('AMC 触发时刻核对通道音色（channelProgram），而非「发过就不再发」',
+      src.includes('channelProgram.get(ch) !== program') && !src.includes('this.programSet'))
+    check('AMD stop() 清空通道音色记录（stopAll(true) 会重置合成器状态）',
+      /stop\(\)[\s\S]{0,400}channelProgram\.clear\(\)/.test(src))
+  }
+  // ④ 临时伴奏 `{bz}`：伴奏用 Y[1]、主声部用 Y[0]——两者同族时旧实现同样会互相覆盖
+  {
+    const code =
+      'V: 1.0\nB: t\nD: C\nP: 4/4\nY: 钢琴\nY: 电钢琴\n' +
+      "Q: 3 4 {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5 5 5 | 5 - - - |\n"
+    const pr = parseJps(code)
+    const layout = layoutScore(pr, DUR_CFG)
+    const seq = buildPlaySequence(pr, layout, 100)
+    const progOf = (pred: (e: (typeof seq.events)[number]) => boolean) =>
+      new Set(seq.events.filter(pred).map((e) => instrumentToProgram(e.instrument)))
+    const accProgs = progOf((e) => e.playVoice === 'accomp' || e.playVoice === 'second')
+    const mainProgs = progOf((e) => e.playVoice !== 'accomp' && e.playVoice !== 'second')
+    check('AMN[bz] 伴奏 = 第 2 条 Y（电钢琴 4）、主声部 = 第 1 条 Y（钢琴 0）',
+      accProgs.size === 1 && accProgs.has(4) && mainProgs.size === 1 && mainProgs.has(0),
+      `主=${[...mainProgs]} 伴=${[...accProgs]}`)
+    const alloc = new GmChannelAllocator()
+    const chMain = alloc.channelFor(0)
+    const chAcc = alloc.channelFor(4)
+    check('AMN2[bz] 伴奏与主声部各占一个通道（同族音色也不再互相覆盖）', chMain !== chAcc,
+      `主ch${chMain} 伴ch${chAcc}`)
   }
 }
 
