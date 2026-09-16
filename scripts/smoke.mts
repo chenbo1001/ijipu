@@ -5724,13 +5724,13 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
     check('X4 右大括号在右圆括号**右侧**（不重叠）', ykhX !== undefined && braceR >= ykhX.x + ykhX.width / 2 - 0.11, `braceL=${braceR} parenR=${ykhX ? (ykhX.x + ykhX.width / 2).toFixed(1) : 'n/a'}`)
     check('X5 大括号与内容不重叠（左括号槽右缘 ≤ 段首音）', segN.length > 0 && braceL + braceW <= segN[0].x + 0.11, `braceR=${(braceL + braceW).toFixed(1)} firstNote=${segN[0]?.x}`)
     // X6：线条加粗——渲染出的 `stroke-width` ≥ 1.8
-    // X6：大括号用**自绘填充轮廓**（带粗细变化、与字体无关）+ 纵向**真正包住**上下两层
+    // X6：大括号用**自绘描边路径**（细描边、与字体无关）+ 纵向**真正包住**上下两层
     const svgDsb = renderScoreToSvg(layoutScore(parseJps(src), DUR_CFG))[0]
     const mAll = svgDsb.match(/<path[^>]*data-segment-brace="dsb"[^>]*>/g) ?? []
-    check('X6 左右大括号各一条填充路径', mAll.length === 2, `got ${mAll.length}`)
-    check('X6b 用填充轮廓（fill 且无 stroke-width 等宽描边）', mAll.every((s) => /fill="#1b1b1b"/.test(s) && !/stroke-width="[1-9]/.test(s)), mAll[0]?.slice(0, 70) ?? '')
+    check('X6 左右大括号各一条路径', mAll.length === 2, `got ${mAll.length}`)
+    check('X6b 自绘描边路径（fill=none + 细 stroke-width，不用字体字形）', mAll.every((s) => /fill="none"/.test(s) && /stroke-width="[\d.]+"/.test(s)), mAll[0]?.slice(0, 70) ?? '')
     check('X6c 不依赖字体字形（不是 <text>）', !/<text[^>]*data-segment-brace/.test(svgDsb), '')
-    check('X6d 轮廓为闭合路径且含 4 段三次曲线（中段粗、两端与尖角收拢 → 粗细变化）', mAll.every((s) => /Z"/.test(s) && (s.match(/C /g) ?? []).length === 4), `C 段数=${mAll[0] ? (mAll[0].match(/C /g) ?? []).length : 'n/a'}`)
+    check('X6d 路径含 M/Q/L 描边指令（最简绘制方式）', mAll.every((s) => /M /.test(s) && /Q /.test(s) && /L /.test(s)), `got ${mAll[0]?.slice(0, 60)}`)
     // X6e：纵向**包住**——上过上一行音符上沿（数码顶 = 基线 − 0.8×字号）、下过下一行音符下沿
     {
       const nsx2 = DUR_CFG.note_size
