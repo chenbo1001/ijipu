@@ -5310,6 +5310,49 @@ console.log('[106] single-row section: bar slots = align_min_bars (adj421)')
   }
 }
 
+// ---- adj427：临时段 {bz / {dsb / } token 识别（Step 3/9，骨架） ----
+console.log('[adj427] tokenize {bz / {dsb segments')
+// 1. 简单 bz 段：{bz 1 2 3} 产出 open(2段内音/children) + close 一对 token
+{
+  const r = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {bz 1 2 3}\n')
+  const toks = r.groups[0].music.tokens
+  const segs = toks.filter((t) => t.kind === 'segment') as Array<{ kind: 'segment'; dir: string; type: string; children?: unknown[] }>
+  check('bz 段产出 open + close 两个 segment token', segs.length === 2, `got ${segs.length}`)
+  if (segs[0]) {
+    check('第一个 segment 是 bz open', segs[0].type === 'bz' && segs[0].dir === 'open', JSON.stringify(segs[0]))
+    check('open 含 3 个 children token（1 2 3 三个 note）', Array.isArray(segs[0].children) && segs[0].children!.length === 3, `got ${segs[0].children?.length}`)
+  }
+  if (segs[1]) {
+    check('第二个 segment 是 bz close', segs[1].type === 'bz' && segs[1].dir === 'close', JSON.stringify(segs[1]))
+  }
+}
+// 2. 简单 dsb 段：{dsb 1 2 | 3 4}
+{
+  const r = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {dsb 1 2 | 3 4}\n')
+  const toks = r.groups[0].music.tokens
+  const segs = toks.filter((t) => t.kind === 'segment') as Array<{ kind: 'segment'; type: string }>
+  check('dsb 段产出 open + close', segs.length === 2, `got ${segs.length}`)
+  check('dsb 段 type = dsb', segs[0]?.type === 'dsb', JSON.stringify(segs[0]))
+}
+// 3. 嵌套报错：{bz 1 {bz 2 } 3 } → 第二层 {bz 报"嵌套"错
+{
+  const r = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {bz 1 {bz 2 } 3 }\n')
+  const errs = r.errors.filter((e) => e.message.includes('不能嵌套'))
+  check('段内 {bz 嵌套报错', errs.length > 0, JSON.stringify(r.errors))
+}
+// 4. 未闭合 {bz → 报错
+{
+  const r = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {bz 1 2 3\n')
+  const errs = r.errors.filter((e) => e.message.includes('未找到结束'))
+  check('未闭合 {bz 报错', errs.length > 0, JSON.stringify(r.errors))
+}
+// 5. 多余 } → 报错
+{
+  const r = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 }\n')
+  const errs = r.errors.filter((e) => e.message.includes('多余的'))
+  check('多余 } 报错', errs.length > 0, JSON.stringify(r.errors))
+}
+
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
 runAdj363SaveTests()
   .catch((e) => {
