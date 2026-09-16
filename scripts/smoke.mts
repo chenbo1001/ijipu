@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage } from '@ijipu/engine/index.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
-import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS } from '@ijipu/engine/playback/index.ts'
+import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES } from '@ijipu/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
@@ -69,7 +69,7 @@ import { PAD_GROUPS } from '../src/editor/padLayout.ts'
 // adj416：音源来源解析（安装目录内置 SF2 / 缓存 / 远端）——用假 Tauri + 假缓存断言，不碰真 IndexedDB
 import { resolveHqBank, prefetchHqLibraryProgress } from '../src/playback/spessaCache.ts'
 import type { HqCache } from '../src/playback/spessaCache.ts'
-import { hasBuiltinBank } from '../src/playback/spessaSynthBackend.ts'
+import { hasBuiltinBank, GM_VOICE_OPTIONS } from '../src/playback/spessaSynthBackend.ts'
 import type { HqSampleLibrary } from '../src/playback/spessaSynthBackend.ts'
 // adj417：按钮图标清单（public/icons/ 下的文件名）——断言文件存在、sw.js 预热清单未漂移
 import { ICON_DIR, ICON_FILE_NAMES } from '../src/ui/toolIcons.ts'
@@ -6679,14 +6679,72 @@ console.log('[adj446] multi-voice Y: instruments must each keep their GM program
       new Set(seq.events.filter(pred).map((e) => instrumentToProgram(e.instrument)))
     const accProgs = progOf((e) => e.playVoice === 'accomp' || e.playVoice === 'second')
     const mainProgs = progOf((e) => e.playVoice !== 'accomp' && e.playVoice !== 'second')
-    check('AMN[bz] 伴奏 = 第 2 条 Y（电钢琴 4）、主声部 = 第 1 条 Y（钢琴 0）',
-      accProgs.size === 1 && accProgs.has(4) && mainProgs.size === 1 && mainProgs.has(0),
-      `主=${[...mainProgs]} 伴=${[...accProgs]}`)
+    // 期望值直接取自解析函数（adj447 后 `电钢琴` 按应用内列表 = GM 2，而非旧表的 4）
+    const wantAcc = instrumentToProgram('电钢琴')
+    const wantMain = instrumentToProgram('钢琴')
+    check('AMN[bz] 伴奏 = 第 2 条 Y（电钢琴）、主声部 = 第 1 条 Y（钢琴）',
+      accProgs.size === 1 && accProgs.has(wantAcc) && mainProgs.size === 1 && mainProgs.has(wantMain),
+      `主=${[...mainProgs]} 伴=${[...accProgs]} 期望 ${wantMain}/${wantAcc}`)
     const alloc = new GmChannelAllocator()
-    const chMain = alloc.channelFor(0)
-    const chAcc = alloc.channelFor(4)
+    const chMain = alloc.channelFor(wantMain)
+    const chAcc = alloc.channelFor(wantAcc)
     check('AMN2[bz] 伴奏与主声部各占一个通道（同族音色也不再互相覆盖）', chMain !== chAcc,
       `主ch${chMain} 伴ch${chAcc}`)
+  }
+}
+
+// ---- adj447：音色名 ↔ GM program 解析必须完整（用户在列表里看到的名称写进 Y: 要生效） ----
+// 与 adj446 同一用户报告的另一半根因：描述头 `Y:` / 曲内 `@乐器名@` 的名称解析只查一张约 40 条
+// 中文名的表（`GM_NAME_PROGRAMS`），用户在「设置 → 音色库」里看到的 128 个名称有 101 个解析不到
+// 自己的 program（如「钢片琴」→八音盒 10、「教堂风琴」→风琴 16、「弦乐合奏1/2」→同一个 48、
+// 「高音/中音/次中音/上低音萨克斯」→全部 65）⇒ 两个声部可能落到同一 program，听起来只剩一种音色。
+console.log('[adj447] instrument names must resolve to their own GM program')
+{
+  check('AN1 GM 音色表 = 128 项且 program 与序号一一对应',
+    GM_VOICES.length === 128 && GM_VOICES.every((v, i) => v.program === i),
+    `len=${GM_VOICES.length}`)
+  const badBare: string[] = []
+  const badLabel: string[] = []
+  for (const v of GM_VOICES) {
+    const bare = v.label.replace(/^\d+\s+/, '')
+    if (instrumentToProgram(bare) !== v.program) badBare.push(`${bare}→${instrumentToProgram(bare)}`)
+    if (instrumentToProgram(v.label) !== v.program) badLabel.push(`${v.label}→${instrumentToProgram(v.label)}`)
+  }
+  check('AN2 128 个音色名（不带编号）全部解析到自己的 program', badBare.length === 0,
+    `${badBare.length} 项错: ${badBare.slice(0, 6).join(' ')}`)
+  check('AN3 128 个音色名（带显示编号，如 `22 手风琴`）同样解析正确', badLabel.length === 0,
+    `${badLabel.length} 项错: ${badLabel.slice(0, 6).join(' ')}`)
+  // 常用写法与库前缀写法不受影响
+  check('AN4 常用名/纯编号/库前缀写法都取到正确 program',
+    instrumentToProgram('手风琴') === 21 &&
+    instrumentToProgram('21') === 21 &&
+    instrumentToProgram('generaluser_gs:大提琴') === 42 &&
+    instrumentToProgram('钢琴') === 0,
+    `${instrumentToProgram('手风琴')}/${instrumentToProgram('21')}/${instrumentToProgram('generaluser_gs:大提琴')}`)
+  // 音色库里"同名族"的选择项必须解析成不同 program（否则多声部必然只响一种）
+  const familyPairs: [string, string][] = [
+    ['高音萨克斯', '中音萨克斯'], ['弦乐合奏1', '弦乐合奏2'], ['钢片琴', '钟琴'], ['电钢琴', '电钢琴1'],
+  ]
+  const same = familyPairs.filter(([a, b]) => instrumentToProgram(a) === instrumentToProgram(b))
+  check('AN5 同族音色（萨克斯/弦乐合奏/钢片琴…）各解析到不同 program', same.length === 0,
+    same.map(([a, b]) => `${a}=${b}=${instrumentToProgram(a)}`).join(' '))
+  // 端到端：两条 Y: 行写库内名称 → 两声部 program 不同、通道不同、逐事件音色正确
+  {
+    const code =
+      'V: 1.0\nB: t\nD: C\nP: 4/4\nY: 弦乐合奏1\nY: 弦乐合奏2\n' +
+      'Q1: 1 3 5 3 | 1 - - - |\nQ2: 5 1 3 1 | 5 - - - |\n'
+    const pr = parseJps(code)
+    const layout = layoutScore(pr, DUR_CFG)
+    const seq = buildPlaySequence(pr, layout, 100)
+    const ps = new Set(seq.events.map((e) => instrumentToProgram(e.instrument)))
+    check('AN6[Y: 弦乐合奏1/2] 两声部取得不同 program（旧实现都为 48）',
+      ps.size === 2 && ps.has(48) && ps.has(49), `得到 ${[...ps].join(',')}`)
+  }
+  // 应用内音色列表必须就是这张表（唯一来源，避免再次分叉）
+  {
+    const appSrc = String(readFileSync('src/playback/spessaSynthBackend.ts', 'utf8'))
+    check('AN7 app 的 GM_VOICE_OPTIONS 直接取 engine 的 GM_VOICES（不再各存一份表）',
+      appSrc.includes('GM_VOICE_OPTIONS: GmVoice[] = GM_VOICES'))
   }
 }
 
