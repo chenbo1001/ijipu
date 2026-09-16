@@ -6,7 +6,7 @@
  */
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW } from '@ijipu/engine/index.ts'
+import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, computeSegments, mainSpans, mainSpansInRange, beatRatio } from '@ijipu/engine/index.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork } from '@ijipu/engine/playback/index.ts'
@@ -5439,6 +5439,91 @@ console.log('[adj427] tokenize {bz / {dsb segments')
   check('F2 格式化幂等（两次结果一致）', once === twice, `once=${once} twice=${twice}`)
   const r = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\n${once}\n`)
   check('F3 格式化后仍能解析出 segment token', r.groups[0].music.tokens.some((t) => t.kind === 'segment'), JSON.stringify(r.errors))
+}
+
+// ---- adj427 Step 5a：临时段**拍位包络**计算（layout/segments.ts 纯函数） ----
+console.log('[adj427] segment beat envelope (computeSegments / mainSpans)')
+{
+  // 图 1 场景：3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const toks = parseJps(src).groups[0].music.tokens
+  const segs = computeSegments(toks)
+  check('G1 图 1 识别出 1 个临时段', segs.length === 1, `got ${segs.length}`)
+  check('G2 段类型 = bz', segs[0]?.type === 'bz', `got ${segs[0]?.type}`)
+  // 段出现在 `3 4` 之后 → 拍位 2（段本身不占主旋律拍位）
+  check('G3 包络起始拍 = 2（`3 4` 之后）', segs[0]?.startBeat === 2, `got ${segs[0]?.startBeat}`)
+  // 段内 8 个音各 1 拍 → 8 拍
+  check('G4 段自身拍数 = 8', segs[0]?.beats === 8, `got ${segs[0]?.beats}`)
+  // 段内小节线按自身拍位推进：`1 2 3 4 | 5 6 7 1'` 的 `|` 在第 4 拍
+  check('G5 段内小节线拍位 = [4]（按自身拍位）', JSON.stringify(segs[0]?.barBeats) === '[4]', JSON.stringify(segs[0]?.barBeats))
+  check('G6 段内 token = 9 个（8 音 + 1 小节线）', segs[0]?.tokens.length === 9, `got ${segs[0]?.tokens.length}`)
+}
+{
+  // 主旋律跨度：段不占拍 → 12 个音拍位连续 0..11
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const toks = parseJps(src).groups[0].music.tokens
+  const spans = mainSpans(toks)
+  check('H1 主旋律 12 个计时 token（段内 8 音不计入）', spans.length === 12, `got ${spans.length}`)
+  check('H2 段后首音起拍 = 2（与段前连续，段不占拍）', spans[2]?.startBeat === 2, `got ${spans[2]?.startBeat}`)
+  check('H3 主旋律总拍数 = 12', spans[11] !== undefined && spans[11].startBeat + spans[11].beats === 12, `got ${spans[11] ? spans[11].startBeat + spans[11].beats : 'n/a'}`)
+  // 包络 [2,10) 内的主旋律 = 8 个音（即 dsb 的下层声部 = `5 6 7 1' | 1' 7 6 5`）
+  const inEnv = mainSpansInRange(spans, 2, 10)
+  check('H4 包络 [2,10) 内主旋律 = 8 个音', inEnv.length === 8, `got ${inEnv.length}`)
+  const pitches = inEnv.map((s) => (s.token.kind === 'note' ? s.token.pitch : -1))
+  check('H5 包络内音高序列 = 5 6 7 1 1 7 6 5', JSON.stringify(pitches) === '[5,6,7,1,1,7,6,5]', JSON.stringify(pitches))
+  // 包络外剩余 = 4 个音（`3 4` 之前 2 个 + `5 5` 之后 2 个）
+  const outEnv = mainSpansInRange(spans, 0, 2).concat(mainSpansInRange(spans, 10, 12))
+  check('H6 包络外剩余 = 4 个音（3 4 + 5 5）', outEnv.length === 4, `got ${outEnv.length}`)
+}
+{
+  // 图 2 场景（dsb）：包络与 bz 完全一致——两层同一时间轴
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const toks = parseJps(src).groups[0].music.tokens
+  const segs = computeSegments(toks)
+  check('I1 图 2 段类型 = dsb', segs[0]?.type === 'dsb', `got ${segs[0]?.type}`)
+  check('I2 dsb 包络起始拍 = 2（与 bz 同规则）', segs[0]?.startBeat === 2, `got ${segs[0]?.startBeat}`)
+  check('I3 dsb 段自身拍数 = 8', segs[0]?.beats === 8, `got ${segs[0]?.beats}`)
+  const spans = mainSpans(toks)
+  check('I4 dsb 下层声部（包络内主旋律）= 8 个音', mainSpansInRange(spans, 2, 10).length === 8, `got ${mainSpansInRange(spans, 2, 10).length}`)
+}
+{
+  // 段内多小节线：{bz 1 2 | 3 4 | 5 6} → 小节线拍位 [2, 4]
+  const toks = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {bz 1 2 | 3 4 | 5 6}\n').groups[0].music.tokens
+  const seg = computeSegments(toks)[0]
+  check('J1 段内多小节线拍位 = [2,4]', JSON.stringify(seg?.barBeats) === '[2,4]', JSON.stringify(seg?.barBeats))
+  check('J2 段内总拍数 = 6', seg?.beats === 6, `got ${seg?.beats}`)
+  check('J3 段写在行首 → 包络起始拍 = 0', seg?.startBeat === 0, `got ${seg?.startBeat}`)
+}
+{
+  // 段内时值：{bz 1- 2/ | 3} → 2 拍 + 0.5 拍 + 1 拍 = 3.5 拍，小节线在 2.5 拍
+  const toks = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {bz 1- 2/ | 3}\n').groups[0].music.tokens
+  const seg = computeSegments(toks)[0]
+  check('K1 段内时值累计 = 3.5 拍', seg?.beats === 3.5, `got ${seg?.beats}`)
+  check('K2 段内小节线在 2.5 拍', JSON.stringify(seg?.barBeats) === '[2.5]', JSON.stringify(seg?.barBeats))
+}
+{
+  // 空段与 beatRatio 钳制
+  const segsEmpty = computeSegments(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {bz}\n').groups[0].music.tokens)
+  check('L1 空段拍数 = 0（避免除零）', segsEmpty[0]?.beats === 0, `got ${segsEmpty[0]?.beats}`)
+  check('L2 空段小节线为空', JSON.stringify(segsEmpty[0]?.barBeats) === '[]', JSON.stringify(segsEmpty[0]?.barBeats))
+  check('L3 beatRatio 总拍 0 时返回 0（不产生 NaN）', beatRatio(3, 0) === 0, `got ${beatRatio(3, 0)}`)
+  check('L4 beatRatio 中位 = 0.5', beatRatio(4, 8) === 0.5, `got ${beatRatio(4, 8)}`)
+  check('L5 beatRatio 越界钳制到 1', beatRatio(99, 8) === 1, `got ${beatRatio(99, 8)}`)
+  check('L6 beatRatio 负值钳制到 0', beatRatio(-5, 8) === 0, `got ${beatRatio(-5, 8)}`)
+}
+{
+  // 无段时行为不变：computeSegments 空、mainSpans 覆盖全部音符
+  const toks = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n').groups[0].music.tokens
+  check('M1 无段时 computeSegments 为空', computeSegments(toks).length === 0, `got ${computeSegments(toks).length}`)
+  check('M2 无段时 mainSpans = 8 个音', mainSpans(toks).length === 8, `got ${mainSpans(toks).length}`)
+}
+{
+  // 一行多个段（bz + dsb 各一）：包络按源码顺序、各自独立
+  const toks = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 | {bz 2 3} 4 | {dsb 5 6} 7 |\n').groups[0].music.tokens
+  const segs = computeSegments(toks)
+  check('N1 一行两个段', segs.length === 2, `got ${segs.length}`)
+  check('N2 第一段 bz 起始拍 = 1', segs[0]?.type === 'bz' && segs[0]?.startBeat === 1, JSON.stringify(segs[0]))
+  check('N3 第二段 dsb 起始拍 = 2（段不占拍：`1` + `4` 各 1 拍）', segs[1]?.type === 'dsb' && segs[1]?.startBeat === 2, JSON.stringify(segs[1]))
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
