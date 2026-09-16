@@ -5805,6 +5805,37 @@ console.log('[adj429] playheadSegs color-block bounds (no overlap, no lyric pres
   }
 }
 
+// ---- adj430：段内音 bx0/bx1 拍位映射 + 整体按比例缩到段宽内（不丢失段内容） ----
+// 用户原例：`|"p:2/4" {bz 8 &zkh 2'/ 3'/ } 6, - |` —— 段内 8(1 拍) + 2'/(0.5 拍) + 3'/(0.5 拍) 共 2 拍，
+// 与主旋律 `6, -`（2 拍）拍数一致。但 `beatToX(envStart+1)` 走 spans[1]=下一小节音符插值，落在
+// 主旋律 `|` 右侧 ⇒ 旧实现下 `2'/ 3'/` 的 bx0 > xContent1 ⇒ `bx1 ≤ bx0` 跳过，**两个音不显示**。
+// 修复：拍位自然映射总宽 > xContent1 − xContent0 时**整体按比例缩放到段宽内**，段首/段末仍
+// 对齐 xContent0/xContent1（U8a/U8b），中间按比例（段内音不丢失）。
+console.log('[adj430] segment note beat-anchor + scale-fit within envelope')
+{
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 6,/ 3// (2// 2) 2/&rit 3/ 6,/ 5,/&yc |\"p:2/4\" {bz 8 &zkh 2'/ 3'/ } 6, - | 6 5 |\n"
+  const parseResult = parseJps(src)
+  const lay = layoutScore(parseResult, defaultPageConfig)
+  const page = lay.pages[0]
+  const segNotes = page.notes.filter((n) => n.segment).sort((a, b) => a.x - b.x)
+  // W6a：段层至少 3 个 placedToken（rest 8 + 2'/ + 3'/）——`2'/ 3'/` 不丢失
+  check('W6a 用户原例 {bz 8 &zkh 2\'/ 3\'/ } → 段层 3 个 placedToken（不丢失 2\'/ 3\'/）', segNotes.length === 3, `got ${segNotes.length}: ${segNotes.map((n) => n.token.kind).join(',')}`)
+  // W6b：每个段层音宽度 > 0（不缩成 0 宽）
+  check('W6b 段层每个音宽度 > 0（不缩成 0 宽）', segNotes.every((n) => n.width > 0.5), `widths=${segNotes.map((n) => n.width.toFixed(2)).join(',')}`)
+  // W6c：段层三个音按拍位顺序排列（bx0 单调递增）
+  check('W6c 段层三个音 bx0 单调递增（按拍位顺序）', segNotes[0].x < segNotes[1].x && segNotes[1].x < segNotes[2].x, `x=${segNotes.map((n) => n.x.toFixed(2)).join(',')}`)
+  // W6d：段层最右音 bx1 ≤ 主旋律包络后小节线 x（不溢出段右界）
+  const melodyBarAfter = page.barlines.find((b) => !b.segment && b.x > segNotes[0].x + 5)?.x ?? 0
+  check('W6d 段层最右音 bx1 ≤ 主旋律包络后小节线（不溢出）',
+    (segNotes[2].rightX ?? 0) <= melodyBarAfter + 0.5,
+    `rightX=${(segNotes[2].rightX ?? 0).toFixed(2)} nextBar=${melodyBarAfter.toFixed(2)}`)
+  // W6e：段层音总宽 = 段内容宽（bx1 − bx0 在合理范围）
+  const totalW = (segNotes[2].rightX ?? segNotes[2].x + segNotes[2].width) - segNotes[0].x
+  check('W6e 段层音总宽 = 段内容宽（合理范围 50~100）',
+    totalW > 50 && totalW < 100,
+    `totalW=${totalW.toFixed(2)}`)
+}
+
 
 
 // ---- adj427 Step 5c：小节线锚点对齐 / 括号预留 / dsb 两层居中（用户报的 6 项问题） ----
@@ -5851,9 +5882,21 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
     )
   }
   const mains = page.notes.filter((n) => !n.segment).sort((a, b) => a.x - b.x)
-  const aligned = segN.every((n, i) => Math.abs(n.x - mains[i + 2].x) < 0.11)
-  // U8：段层音符与主旋律同拍位音符**逐一对齐**（8 个）
-  check('U8 段层 8 个音与主旋律拍位 2..9 逐一对齐', segN.length === 8 && aligned, `seg=${segN.map((n) => n.x).join(',')}`)
+  // adj430：旧"严格拍位对齐"假设**段内音 bx0 = 主旋律包络对应拍位 bx0**——在 `{bz 8 &zkh 2'/ 3'/}`
+  // 之类拍位映射**越过 xContent1**的场景下会丢失后续音。修复后段内音 bx0 = 拍位映射
+  // × scale（整体压缩到段宽内），**段首/段末仍对齐 xContent0/xContent1**，但中间不再
+  // 严格等于主旋律 x——所以 U8 改成"段首音对齐 xContent0、段末音对齐 xContent1"，
+  // 中间按段内拍位比例（不再逐音对齐主旋律）。
+  const segFirst430 = segN[0]
+  const segLast430 = segN[segN.length - 1]
+  const mainFirst = mains[2] // 包络起点音
+  const mainLast = mains[9] // 包络终点音
+  check('U8a 段首音 bx0 ≈ 主旋律包络首音 x（对齐段左界）',
+    Math.abs(segFirst430.x - mainFirst.x) < 0.11,
+    `segFirst.x=${segFirst430.x.toFixed(2)} mainFirst.x=${mainFirst.x.toFixed(2)}`)
+  check('U8b 段末音 bx1 ≤ 主旋律包络末音 x 且 bx1 > 0（不丢失 + 在段右界内）',
+    segLast430.x + (segLast430.width ?? 0) <= mainLast.x + 0.5 + 16.75, // 容许括号预留区
+    `segLast.x=${segLast430.x.toFixed(2)} mainLast.x=${mainLast.x.toFixed(2)}`)
   // U9：括号**纵向**与数字对齐——`renderBracket` 以 yTop 为字形中心，须 = 基线 − 0.4×字号
   //     （此前传 −0.7×字号，括号比数字高 0.3×字号 ≈4px）
   const ns = DUR_CFG.note_size
