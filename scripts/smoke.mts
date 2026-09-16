@@ -5829,11 +5829,20 @@ console.log('[adj430] segment note beat-anchor + scale-fit within envelope')
   check('W6d 段层最右音 bx1 ≤ 主旋律包络后小节线（不溢出）',
     (segNotes[2].rightX ?? 0) <= melodyBarAfter + 0.5,
     `rightX=${(segNotes[2].rightX ?? 0).toFixed(2)} nextBar=${melodyBarAfter.toFixed(2)}`)
-  // W6e：段层音总宽 = 段内容宽（bx1 − bx0 在合理范围）
+  // W6e：段层音总宽 = 段内容宽（用户原例只有 &zkh 无 &ykh ⇒ tailPad=0，段铺到小节线）
   const totalW = (segNotes[2].rightX ?? segNotes[2].x + segNotes[2].width) - segNotes[0].x
-  check('W6e 段层音总宽 = 段内容宽（合理范围 50~100）',
-    totalW > 50 && totalW < 100,
+  check('W6e 段层音总宽 = 段内容宽（合理范围 60~130，bz 有 lead bracket 时更宽）',
+    totalW > 60 && totalW < 130,
     `totalW=${totalW.toFixed(2)}`)
+
+  // adj431：zkh 必须**靠近 2'/（第一个发声音）**而不是 hidden rest（8）的左缘——
+  // 例：`{bz 8 &zkh 2'/ 3'/}` 的 `&zkh` 应该紧贴 `2'/`（= 第一个发声音），而不是紧贴 `8`（= xContent0）。
+  const zk = page.brackets.find((b) => b.code === 'zkh')
+  const firstPlayed = segNotes.find((n) => !(n.token.kind === 'rest' && (n.token as { hidden?: boolean }).hidden))
+  check('W6f &zkh 靠近段内第一个发声音（不在 hidden rest 8 之前）',
+    zk !== undefined && firstPlayed !== undefined &&
+      Math.abs(zk.x - firstPlayed.x) < 20,  // zkh 中心离 2'/ 中心 < 20 px
+    `zkh.x=${zk?.x.toFixed(2)} firstPlayed.x=${firstPlayed?.x.toFixed(2)} firstPlayed.kind=${firstPlayed?.token.kind}`)
 }
 
 

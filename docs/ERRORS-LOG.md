@@ -1029,6 +1029,17 @@
 - **验证**：`npm run smoke` **17 项失败 == 改动前基线**（无新增），其中新增断言覆盖：线宽常量 1/2、`||`/`||/` 线间距 1px、`|`/`||`/`||/`/`|:`/`:|`/`:|:` 的**渲染几何逐项 == `barlineGeometry`**（线偏移/宽 + 点圆心）、占位总宽表（1/4/3/6.6/7.6/7.6/13.2，`|*`=1、`|/`=0）、几何对称性、高音点 x == 数字槽中心；`tsc -b` 通过；`obsidian-ijipu` 同步 `vendor/engine` 后其 smoke 99 项全绿；无头 Chrome 截图（示例 `yufa-quangai`）实测高八度点 `cx=51.93` 与数字槽中心 `47.9+13×0.31=51.93` 完全一致。
 - **预防**：① **同一几何量只能有一处定义**——渲染与布局必须消费同一个纯函数（本项目已对间距用 `spacing.ts` 集中管理，本次把"线组几何"也纳入；凡"渲染写偏移 + 布局写总宽"的形态都视为隐患）；② 改线宽/间距这类**影响占位**的常量时，必须**同时**核对「画出来的形状」与「占位表」，不能只看渲染；③ 断言要写成「渲染实测 == 几何函数」而不是「渲染 == 手抄的魔数」——手抄的魔数正是这次漂移的载体（`smoke.mts` 里 `0.55/1.95/4.2/8.1` 那套右缘表已全部改用 `barlineTotalW`）；④ 小节线中心 x 由布局以 `r1`（0.1px）取整，故"右缘 = 中心 + 半宽"可能有 ≤0.05px 取整外溢，断言按此放容差而不是硬 `<=`。
 
+### E-2026-169 段头括号被分到 `tailBrackets` → `&zkh` 跑到 `3'/` 之后（用户原例 `{bz 8 &zkh 2'/ 3'/}` 的 `&zkh` 显示在 `3'/` 右侧而非 `2'/` 之前）（adj431）
+
+- **场景**：adj430 修复后 `{bz 8 &zkh 2'/ 3'/}` 的 `2'/ 3'/` 已显示，但 `&zkh` 位置不对——画在 `3'/` 右侧（看起来像 `)` 跑到最右），而用户期望它在 `2'/` 之前。
+- **现象**（用户对照截图）：上方段层从左到右依次是 `2' 3'`（中间无空格），最右侧多了一个 `(2` 形状的括号。这是 `&zkh` 的位置。
+- **根因**：`placeSegmentOverlays` 用 `seenNote` 判断 lead/tail 分类——遇到任何 durational token 就视为"已发声"，后续 bracket 归 tailBrackets。但 `{bz 8 &zkh 2'/ 3'/}` 的 `8` 是 **hidden rest**（`hidden=true`，不画、不发声），却依然被 `seenNote = true` 触发，导致 `&zkh` 被分到 tailBrackets → 排在所有 durational token 之后。
+- **第一次修复（adj431a）**：把判断从 `isDurational(t)` 改为 `isDurational(t) && !(t.kind === 'rest' && t.hidden)` —— hidden rest 不算"已发声"。`&zkh` 现在正确分到 leadBrackets，渲染位置变成**段首音 `8` 之前**（x=189.90）。但用户期望**`&zkh` 靠近 `2'/`（第一个发声音）**，而不是 `8`（hidden rest）。
+- **第二次修复（adj431）**：把括号锚点从 `xContent0` 改成 **`firstPlayedX`**——扫一遍 seg.tokens 找到第一个真正发声的 token（跳过 hidden rest），用它的拍位作为 leadBrackets 的左锚点。bz 分支的 `leftSlots.x = firstPlayedX − bgap − leadW`、`rightSlots.x = lastPlayedRightX + bgap`（同样跳 hidden rest）。dsb 分支保持不变（dsb 包络起点 = 拍位映射起点 = dsb 下层主旋律基线，没有 hidden rest 占位语义）。
+- **几何**（用户原例）：`{bz 8 &zkh 2'/ 3'/}`，`firstPlayedBeatAbs = envStart + 1`（跳过 1 拍 hidden rest 后到达 `2'/`）→ `firstPlayedX = beatToX(envStart+1) = 266` → `&zkh.x = 266 − 6.5 − 5 + 2.5 = 257` ≈ 紧贴 `2'/`（x=251.60），`2'/ 3'/` 中间位置。
+- **预防**：① **"已发声"语义必须区分可见 vs 隐藏**——hidden rest `8` 用于占拍但**不画不响**，参与"声部对齐"语义但不参与"视觉布局"语义；所有"基于源码位置的视觉判断"都要把 hidden rest 排除；② lead/tail 分类不应用 `isDurational` 而应用 `isPlayedToken`（更严格：排除 hidden rest）；③ 段内音和段内括号的锚点**分别**用 `xContent0`（包络拍位映射起点，对齐主旋律）vs `firstPlayedX/lastPlayedRightX`（第一个/最后一个发声位置，决定括号视觉邻接）——两者在段内没有 hidden rest 时一致，有 hidden rest 时必须分开计算；④ smoke W6f 专门覆盖此场景（用户原例 + 检查 `&zkh` 离 `2'/` < 20 px）。
+- **验证**：smoke W6f 新增断言 `&zkh` 离段内第一个发声音 < 20 px；`tsc -b` 通过；smoke 失败项 18 == 基线；obsidian-ijipu `tsc -noEmit` + `smoke` 119/119 全绿。
+
 ### E-2026-168 段内音拍位映射越界 → 段内容丢失（用户原例 `|"p:2/4" {bz 8 &zkh 2'/ 3'/ } 6, - |` 的 `2'/ 3'/` 不显示）（adj430）
 
 - **场景**：`adj427` 实现段层拍位映射时直接用 `beatToX(envStart+beatAt)` 作为 bx0、`beatToX(envStart+beatAt+dur)` 作为 bx1。
