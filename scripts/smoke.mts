@@ -6,7 +6,7 @@
  */
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, computeSegments, mainSpans, mainSpansInRange, beatRatio } from '@ijipu/engine/index.ts'
+import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage } from '@ijipu/engine/index.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork } from '@ijipu/engine/playback/index.ts'
@@ -6475,6 +6475,112 @@ console.log('[adj443] desktop must not register a service worker')
     mainSrc.includes('getRegistrations') && mainSrc.includes('caches.delete'))
   check('AJ8c 注册 SW 的代码在 else 分支里（仅非桌面端注册）',
     /else\s*\{[\s\S]*serviceWorker[\s\S]*register\(/.test(mainSrc))
+}
+
+// ---- adj445（E-2026-186）：段内音符（`{bz …}` / `{dsb …}`）的光标联动契约 ----
+// 用户报「预览区点 {bz} 里的音符，编辑区不定位；编辑区点 {bz} 里的音符，预览区不标红」（dsb 同）。
+// 根因：临时段对主旋律时间轴贡献 **0 拍**，段内音符**不在** Q 行的「全局音符序号」流里，
+// 而 `codePosToNoteId` / `noteIdToCodePos` 只按主旋律序号推算 ⇒ 段内音符的 id 既算不出也对不上。
+// 另修：旧 id 编码 `900000 + 组号×1000 + 段头下标×10 + 序号` 的跨距只有 10，段内音 >10 个即撞号。
+console.log('[adj445] segment-note cursor linkage ({bz} / {dsb})')
+{
+  const head = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  const cases: { nm: string; q: string; digits: string[]; durSeqs: number[] }[] = [
+    {
+      nm: 'bz',
+      q: "Q: 3 4 {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5 5 5 | 5 - - - |",
+      digits: ['1', '2', '3', '4', '5', '6', '7', '1'],
+      durSeqs: [0, 1, 2, 3, 4, 5, 6, 7],
+    },
+    {
+      nm: 'dsb',
+      q: "Q: 3 4 {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5 5 5 | 5 - - - |",
+      digits: ['1', '2', '3', '4', '5', '6', '7', '1'],
+      durSeqs: [0, 1, 2, 3, 4, 5, 6, 7],
+    },
+    {
+      nm: '同组两段',
+      q: "Q: {bz 1 2} 3 4 {dsb 1 2} 5 6 | 7 1' 2' 3' |",
+      digits: ['1', '2', '1', '2'],
+      // 两段各自从 0 起算（且必须分别落在不同段头的 id 区块）
+      durSeqs: [0, 1, 0, 1],
+    },
+    {
+      // 段内含**非时值 token**（`&zkh` 括号、`@手风琴@` 乐器）——序号只数时值 token，
+      // 两端必须用同一套计数（否则 `1 2 3 4` 会整体错位）
+      nm: '含非时值 token',
+      q: "Q: 3 4 {bz &zkh @手风琴@ 1 2 3 4} 5 6 7 1' | 1' 7 6 5 | 5 5 5 5 | 5 - - - |",
+      digits: ['1', '2', '3', '4'],
+      durSeqs: [0, 1, 2, 3],
+    },
+  ]
+  const segLayouts = [
+    ['时值优先', DUR_CFG],
+    ['空间优先', { ...DUR_CFG, noteSpaceLayout: 'space' as const }],
+  ] as const
+  for (const c of cases) {
+    const code = head + c.q + '\n'
+    for (const [ln, cfg] of segLayouts) {
+      const pr = parseJps(code)
+      const layout = layoutScore(pr, cfg)
+      const svg = renderScoreToSvg(layout).join('')
+      const i2p = buildIndexToPage(layout)
+      const sg = layout.pages
+        .flatMap((p) => p.notes.filter((n) => n.segment))
+        .sort((a, b) => a.x - b.x)
+      check(
+        `AL1[${c.nm}/${ln}] 段内音符数 = ${c.digits.length}`,
+        sg.length === c.digits.length,
+        `got ${sg.length}`,
+      )
+      let okSeq = true
+      let okId = true
+      let okSvg = true
+      let okPos = true
+      let okBlock = true
+      const seen = new Set<number>()
+      let prevBase = -1
+      sg.forEach((n, i) => {
+        // ① id 必须能解码回「段内源码次序」（段内音 >10 个也不许错位）
+        const d = decodeSegmentNoteId(n.id.index)
+        if (!d || d.durSeq !== c.durSeqs[i]) okSeq = false
+        // ⑥ 同组内各段必须落在**互不重叠**的 id 区块（旧编码跨距 10 时会撞号）
+        if (d) {
+          const base = segmentNoteIndexBase(d.group, d.openIndex)
+          if (d.durSeq === 0) {
+            if (base <= prevBase) okBlock = false
+            prevBase = base
+          } else if (base !== prevBase) okBlock = false
+        }
+        // ② id 唯一、且 indexToPage（光标联动的 page 来源）命中本音符所在页
+        if (seen.has(n.id.index)) okId = false
+        seen.add(n.id.index)
+        if (i2p.get(n.id.index) !== n.id.page) okId = false
+        const id = `${n.id.page}_${n.id.voice}_${n.id.group}_${n.id.index}`
+        // ③ 渲染出的 data-notepos 必须与 id 契约逐字一致
+        if (!svg.includes(`data-notepos="${id}"`)) okSvg = false
+        // ④ 谱面 → 编辑器：id 必须落在该音符自己的源码字符上
+        const pos = noteIdToCodePos(code, id)
+        if (pos === null || code.slice(pos, pos + 1) !== c.digits[i]) okPos = false
+        // ⑤ 编辑器 → 谱面：光标在音符上/块末空隙都得到同一 id（块级规则）
+        if (pos !== null && codePosToNoteId(code, pos, i2p) !== id) okPos = false
+        if (pos !== null && code[pos + 1] === ' ' && codePosToNoteId(code, pos + 1, i2p) !== id) okPos = false
+      })
+      check(`AL2[${c.nm}/${ln}] 段内音符 id 解码 durSeq = 段内源码次序`, okSeq)
+      check(`AL3[${c.nm}/${ln}] 段内音符 id 唯一 + indexToPage 命中本页`, okId)
+      check(`AL4[${c.nm}/${ln}] 渲染 data-notepos 与 id 契约一致`, okSvg)
+      check(`AL5[${c.nm}/${ln}] 预览 ↔ 编辑区双向定位到本音符源码位置`, okPos)
+      check(`AL6[${c.nm}/${ln}] 同组各段 id 区块互不重叠（无撞号）`, okBlock)
+    }
+  }
+  // AL7：同一组内两段必须落在**不同的段头 id 区块**（旧编码跨距 10 时会互相撞号）
+  {
+    const a = segmentNoteIndexBase(0, 0)
+    const b = segmentNoteIndexBase(0, 2)
+    check('AL7 单段可容纳 >10 个音而不越入下一段 id 区块',
+      decodeSegmentNoteId(a + 11)?.durSeq === 11 && a + 11 < b,
+      `a=${a} a+11=${a + 11} b=${b}`)
+  }
 }
 
 runAdj363SaveTests()
