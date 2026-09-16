@@ -5526,6 +5526,98 @@ console.log('[adj427] segment beat envelope (computeSegments / mainSpans)')
   check('N3 第二段 dsb 起始拍 = 2（段不占拍：`1` + `4` 各 1 拍）', segs[1]?.type === 'dsb' && segs[1]?.startBeat === 2, JSON.stringify(segs[1]))
 }
 
+// ---- adj427 Step 5b/6：临时段叠加层**真正出图**（段层音符 / 小节线 / 括弧） ----
+console.log('[adj427] segment overlay placement (notes / barlines / brackets)')
+{
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const r = parseJps(src)
+  const page = layoutScore(r, DUR_CFG).pages[0]
+  const segNotes = page.notes.filter((n) => n.segment)
+  const mainNotes = page.notes.filter((n) => !n.segment).sort((a, b) => a.y - b.y || a.x - b.x)
+  check('O1 bz 段产出 8 个段层音符', segNotes.length === 8, `got ${segNotes.length}`)
+  check('O2 段层音符标记 type=bz / layer=upper', segNotes.every((n) => n.segment?.type === 'bz' && n.segment?.layer === 'upper'), JSON.stringify(segNotes[0]?.segment))
+  check('O3 段层音符在主旋律**上方**（y 更小）', segNotes.length > 0 && mainNotes.length > 0 && segNotes[0].y < mainNotes[0].y, `segY=${segNotes[0]?.y} mainY=${mainNotes[0]?.y}`)
+  // 同一拍位垂直对齐：段首音（包络起点 = 拍位 2）x 应等于主旋律拍位 2 的音符 x
+  const mainAtBeat2 = mainNotes[2]
+  check('O4 段首音与主旋律拍位 2 的音符 x 对齐', segNotes.length > 0 && Math.abs(segNotes[0].x - mainAtBeat2.x) < 0.51, `segX=${segNotes[0]?.x} mainX=${mainAtBeat2.x}`)
+  // 段层宽度落在包络范围内（0 < 宽，且不超出主旋律行右边界）
+  const sb = page.segmentBrackets ?? []
+  check('O5 产出 1 个段层括弧', sb.length === 1, `got ${sb.length}`)
+  check('O6 括弧 x1 < x2', sb.length > 0 && sb[0].x1 < sb[0].x2, JSON.stringify(sb[0]))
+  check('O7 bz 段无下层声部（yBottomLower 未设）', sb[0]?.yBottomLower === undefined, `got ${sb[0]?.yBottomLower}`)
+  // 段内小节线：`1 2 3 4 | 5 6 7 1'` 的 `|` 在段内第 4 拍
+  const segBars = page.barlines.filter((b) => b.segment)
+  check('O8 段内小节线 1 条', segBars.length === 1, `got ${segBars.length}`)
+  check('O9 段内小节线 x 落在包络范围内', segBars.length > 0 && sb.length > 0 && segBars[0].x >= sb[0].x1 - 0.51 && segBars[0].x <= sb[0].x2 + 0.51, `barX=${segBars[0]?.x} env=[${sb[0]?.x1},${sb[0]?.x2}]`)
+  const svg = renderScoreToSvg(layoutScore(r, DUR_CFG))[0]
+  check('O10 SVG 含段层圆括号 data-segment-paren="bz"', svg.includes('data-segment-paren="bz"'), '')
+  check('O11 SVG 含段层音符（音符数增加的 <text> 已绘制）', (svg.match(/data-notepos/g) ?? []).length >= 12, `notepos=${(svg.match(/data-notepos/g) ?? []).length}`)
+}
+{
+  // dsb：上层 + 跨两层花括号
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const r = parseJps(src)
+  const lay = layoutScore(r, DUR_CFG)
+  const page = lay.pages[0]
+  const segNotes = page.notes.filter((n) => n.segment)
+  check('P1 dsb 段产出 8 个段层音符', segNotes.length === 8, `got ${segNotes.length}`)
+  check('P2 dsb 段层标记 layer=upper', segNotes.every((n) => n.segment?.type === 'dsb'), JSON.stringify(segNotes[0]?.segment))
+  const sb = page.segmentBrackets ?? []
+  check('P3 dsb 设了 yBottomLower（跨两层）', sb[0]?.yBottomLower !== undefined, `got ${sb[0]?.yBottomLower}`)
+  check('P4 yBottomLower > yBottom（确实跨到下层）', sb.length > 0 && sb[0].yBottomLower! > sb[0].yBottom, `lower=${sb[0]?.yBottomLower} upper=${sb[0]?.yBottom}`)
+  const svg = renderScoreToSvg(lay)[0]
+  check('P5 SVG 含 dsb 花括号 data-segment-brace="dsb"', svg.includes('data-segment-brace="dsb"'), '')
+  check('P6 SVG 含 dsb 圆括号 data-segment-paren="dsb"', svg.includes('data-segment-paren="dsb"'), '')
+}
+{
+  // 无段时零影响：不产生段层音符 / 括弧，且音符几何与既有行为一致
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const page = layoutScore(parseJps(src), DUR_CFG).pages[0]
+  check('Q1 无段时不产生段层音符', page.notes.filter((n) => n.segment).length === 0, `got ${page.notes.filter((n) => n.segment).length}`)
+  check('Q2 无段时无段层括弧', (page.segmentBrackets ?? []).length === 0, `got ${(page.segmentBrackets ?? []).length}`)
+  check('Q3 无段时主旋律 12 个音符不变', page.notes.length === 12, `got ${page.notes.length}`)
+}
+{
+  // 段内音符时值参与段层宽度（按拍位比例映射）：`{bz 1- 2}` 的 1- 占 2 拍 → 宽度约为 2 的两倍
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | {bz 1- 2} 5 6 7 1 |\n"
+  const page = layoutScore(parseJps(src), DUR_CFG).pages[0]
+  const segNotes = page.notes.filter((n) => n.segment).sort((a, b) => a.x - b.x)
+  check('R1 段内 2 个音符都放置', segNotes.length === 2, `got ${segNotes.length}`)
+  check('R2 `1-`(2 拍) 宽 > `2`(1 拍) 宽 —— 按拍位比例映射', segNotes.length === 2 && segNotes[0].width > segNotes[1].width, `w0=${segNotes[0]?.width} w1=${segNotes[1]?.width}`)
+}
+{
+  // 一行两个段（bz + dsb）：各自独立出括弧
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | {bz 1 2} 5 6 | {dsb 1 2} 7 1 |\n"
+  const page = layoutScore(parseJps(src), DUR_CFG).pages[0]
+  const sb = page.segmentBrackets ?? []
+  check('S1 一行两段 → 2 个段层括弧', sb.length === 2, `got ${sb.length}`)
+  check('S2 两段类型分别为 bz / dsb', sb[0]?.type === 'bz' && sb[1]?.type === 'dsb', JSON.stringify(sb.map((x) => x.type)))
+  check('S3 两段互不重叠（x 递增）', sb.length === 2 && sb[0].x2 <= sb[1].x1 + 0.51, JSON.stringify(sb.map((x) => [x.x1, x.x2])))
+}
+
+// ---- adj427 Step 7：播放序列安全（段层音符不得破坏主旋律播放） ----
+console.log('[adj427] playback safety with segments')
+{
+  const plain = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const bzSrc = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const dsbSrc = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const seqOf = (src: string) => {
+    const rr = parseJps(src)
+    return buildPlaySequence(rr, layoutScore(rr, DUR_CFG), 120)
+  }
+  const sPlain = seqOf(plain)
+  const sBz = seqOf(bzSrc)
+  const sDsb = seqOf(dsbSrc)
+  check('T1 含 bz 段时 buildPlaySequence 不抛异常', sBz.events.length > 0, `events=${sBz.events.length}`)
+  check('T2 含 dsb 段时 buildPlaySequence 不抛异常', sDsb.events.length > 0, `events=${sDsb.events.length}`)
+  // 主旋律事件必须与无段时完全一致（段不占主旋律拍位）
+  const sig = (s: { events: { atMs: number; pitch: string | null }[] }) =>
+    s.events.filter((e) => e.pitch !== null).map((e) => `${e.atMs}:${e.pitch}`).join(',')
+  check('T3 bz 段不改变主旋律事件序列', sig(sBz) === sig(sPlain), `bz=${sig(sBz).slice(0, 90)} plain=${sig(sPlain).slice(0, 90)}`)
+  check('T4 dsb 段不改变主旋律事件序列', sig(sDsb) === sig(sPlain), `dsb=${sig(sDsb).slice(0, 90)}`)
+  check('T5 主旋律可发声事件数 = 12', sPlain.events.filter((e) => e.pitch !== null).length === 12, `got ${sPlain.events.filter((e) => e.pitch !== null).length}`)
+}
+
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
 runAdj363SaveTests()
   .catch((e) => {

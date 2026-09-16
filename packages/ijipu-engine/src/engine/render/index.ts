@@ -14,7 +14,7 @@
  * TODO(M1c)：歌词 <text data-cipos>
  * TODO(M7)：跳房子/连音线/装饰符号/多声部
  */
-import type { PageConfig, PlacedBarline, PlacedDynamic, PlacedLyric, PlacedSlur, PlacedToken, ScoreLayout, ScorePage, VoiceBlock } from '../types'
+import type { PageConfig, PlacedBarline, PlacedDynamic, PlacedLyric, PlacedSegmentBracket, PlacedSlur, PlacedToken, ScoreLayout, ScorePage, VoiceBlock } from '../types'
 import { tokenDuration } from '../duration'
 import { metaAnchorOf, metaAnchorPt } from '../layout/metaAnchors'
 import {
@@ -1385,6 +1385,45 @@ function renderBracket(
   return `<text x="${r1n(b.x)}" y="${r1n(b.yTop)}" text-anchor="middle" dominant-baseline="central" font-weight="bold" font-size="${size}" font-family="${noteFont(config.shuzi_font)}" fill="#1b1b1b">${glyph}</text>`
 }
 
+/**
+ * adj427：临时段（`{bz … }` / `{dsb … }`）叠加层的左右括弧。
+ *
+ * 画法（对应图 1 / 图 2）：
+ *  - 段内容层：一对**大圆括号** `( … )`，左括号落在包络起点 x、右括号落在包络终点 x，
+ *    纵向覆盖段层高度；
+ *  - dsb 额外画一对**跨两层的大花括号** `{ … }`（图 2 的 `{ (上) (下) }`），
+ *    把上层（dsb 段内容）与下层（包络内主旋律）括在一起——`yBottomLower` 给出下层底缘。
+ */
+function renderSegmentBracket(b: PlacedSegmentBracket, config: PageConfig): string {
+  const { x1, x2, yTop, yBottom } = b
+  const midY = (yTop + yBottom) / 2
+  const bulge = Math.min(7, Math.max(3, config.note_size * 0.3))
+  const out: string[] = []
+  // 圆括号：dir=+1 左括号（向右凸）、dir=-1 右括号（向左凸）
+  const paren = (x: number, dir: 1 | -1): string =>
+    `<path d="M ${r1n(x + dir * bulge)} ${r1n(yTop)} Q ${r1n(x - dir * bulge)} ${r1n(midY)} ` +
+    `${r1n(x + dir * bulge)} ${r1n(yBottom)}" fill="none" stroke="#1b1b1b" stroke-width="1.1" ` +
+    `data-segment-paren="${b.type}"/>`
+  out.push(paren(x1, 1), paren(x2, -1))
+  // dsb：跨两层的大花括号
+  const lo = b.yBottomLower
+  if (b.type === 'dsb' && lo !== undefined && lo > yTop) {
+    const my = (yTop + lo) / 2
+    const cw = Math.min(5, Math.max(2.5, config.note_size * 0.22))
+    const brace = (x: number, dir: 1 | -1): string =>
+      `<path d="M ${r1n(x)} ${r1n(yTop)} ` +
+      `Q ${r1n(x + dir * cw * 2)} ${r1n(yTop)} ${r1n(x + dir * cw)} ${r1n(yTop + cw)} ` +
+      `L ${r1n(x + dir * cw)} ${r1n(my - cw)} ` +
+      `Q ${r1n(x + dir * cw)} ${r1n(my)} ${r1n(x + dir * cw * 2)} ${r1n(my)} ` +
+      `Q ${r1n(x + dir * cw)} ${r1n(my)} ${r1n(x + dir * cw)} ${r1n(my + cw)} ` +
+      `L ${r1n(x + dir * cw)} ${r1n(lo - cw)} ` +
+      `Q ${r1n(x + dir * cw)} ${r1n(lo)} ${r1n(x)} ${r1n(lo)}" fill="none" stroke="#1b1b1b" ` +
+      `stroke-width="1.2" data-segment-brace="${b.type}"/>`
+    out.push(brace(x1 - bulge - 2, -1), brace(x2 + bulge + 2, 1))
+  }
+  return out.join('')
+}
+
 function renderPage(page: ScorePage, config: PageConfig, pageCount: number, opts?: RenderFontMeta): string {
   const { width, height } = page
   const body: string[] = []
@@ -1398,6 +1437,8 @@ function renderPage(page: ScorePage, config: PageConfig, pageCount: number, opts
   for (const n of page.notes) body.push(renderNote(n, config))
   // adj294：&zkh/&ykh 独立括号标记——按插位画括号
   for (const b of page.brackets) body.push(renderBracket(b, config))
+  // adj427：临时段（{bz … } / {dsb … }）叠加层括弧——段内容音符已并入 page.notes 一并绘制
+  for (const sb of page.segmentBrackets ?? []) body.push(renderSegmentBracket(sb, config))
   for (const b of page.barlines) body.push(renderBarline(b, config.note_size, noteFont(config.shuzi_font)))
   for (const l of page.lyrics) body.push(renderLyric(l, config))
   for (const vb of page.voiceBlocks) body.push(renderVoiceBlocks(page, vb, config.note_size))

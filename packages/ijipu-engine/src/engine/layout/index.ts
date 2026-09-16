@@ -34,6 +34,8 @@ import { splitNoteDur, noteBodyW, augBodyW, dotBodyW, accidentalBodyW, markBodyW
 import { hairpinEvents, resolveHairpins, type DynEvent, type NoteAnchors } from './hairpins'
 // adj303：乐器名标注需要用 parseInstrumentRef / 库名（@乐器名 / @@ 后下一个音符）
 import { parseInstrumentRef, INSTRUMENT_LIB_NAMES } from '../playback/instruments'
+// adj427：临时段（{bz … } / {dsb … }）叠加层的拍位包络与主旋律跨度（纯函数）
+import { computeSegments, mainSpans, isDurational } from './segments'
 
 // ============================================================
 // 音高映射：简谱音级 → 音名（如 C4 / F#5）
@@ -2537,6 +2539,200 @@ export function layoutScore(
     }
   }
 
+  // ---- adj427：临时段（`{bz … }` / `{dsb … }`）叠加层后处理 ----
+  // 为什么放在**最后**：段是「叠加」——不占主旋律拍位、不改既有排版结果。
+  // 在此一次性把段内容追加到 page.notes / page.barlines / page.segmentBrackets，
+  // 完全不触碰前面 2500 行的放置逻辑，把扰动面压到最小（连音线/跳房子等后处理已跑完，
+  // 不会把段内音符误纳入主旋律的连音配对与行高计算）。
+  placeSegmentOverlays(pages, result, config, keySemitone)
+
   const configKey = JSON.stringify(config)
   return { pages, config, configKey }
+}
+
+/**
+ * adj427：把临时段（`{bz … }` / `{dsb … }`）作为**叠加层**追加到已排版页面。
+ *
+ * 规则（用户规范 + 图 1/图 2 反推验证）：
+ *  - 段对该曲行的主旋律时间轴贡献 **0 拍**，因此段内内容不改变主旋律任何几何；
+ *  - **包络** = `[段所在拍位, 段所在拍位 + 段自身总拍数)`，由 `computeSegments` 给出；
+ *  - 段内容与段内小节线**按拍位映射**到包络范围内：`拍位 b → x = beatToX(包络起点 + b)`，
+ *    其中 `beatToX` 在**主旋律已放置音符的 x/宽**上做线性插值——这样同时满足
+ *    「按比例映射到该宽度内」与「上下两层同一拍位垂直对齐」；
+ *  - 段内容画在主旋律**上方**（用户规范：「将伴奏写在主旋律的上方」），
+ *    `y = 行音符 y − note_size × 1.7`。
+ *
+ * 已知局限（后续可完善）：段内容层是**叠加**而非重新回流行间距——若上方行距很紧，
+ * 段层可能与上一行靠近；跨行断行的段只在首行内映射（`x` 钳制在行右边界）。
+ */
+function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: PageConfig, keySemitone: number): void {
+  for (let gi = 0; gi < result.groups.length; gi++) {
+    const group = result.groups[gi]
+    const tokens = group.music.tokens
+    const segs = computeSegments(tokens)
+    if (segs.length === 0) continue
+    const spans = mainSpans(tokens)
+    if (spans.length === 0) continue
+
+    // 该曲行的全部已放置音符（按 页 → y → x 排序）——与 spans 顺序**一一对应**
+    // （段不产生主旋律音符，故两侧次序天然一致）
+    const placed: { note: PlacedToken; page: number }[] = []
+    for (let pi = 0; pi < pages.length; pi++) {
+      for (const n of pages[pi].notes) {
+        if (n.segment) continue // 跳过已放置的段层音符（幂等保护）
+        if (n.id.group === gi && n.id.voice === group.music.voice) placed.push({ note: n, page: pi })
+      }
+    }
+    const cnt = Math.min(placed.length, spans.length)
+    if (cnt === 0) continue
+    placed.sort((a, b) => a.page - b.page || a.note.y - b.note.y || a.note.x - b.note.x)
+
+    /** 音符占位右端（`rightX` = 本体宽 + 两侧分配留空；缺省回退本体右缘） */
+    const noteRightOf = (n: PlacedToken): number => n.rightX ?? n.x + n.width
+    /**
+     * 拍位 → x：**按音符起点锚点做分段线性插值**。
+     *
+     * 为什么不用「音符本体宽/占位宽」插值：相邻两个音符之间可能夹着**小节线**（占宽）
+     * 或槽间留白，用前一个音符的右缘当拍位边界会落在小节线**左侧**，比后一个音符的左缘
+     * 左偏一整个小节线宽 + 间距——段内容遂整体左移、与主旋律同拍位音符对不齐
+     * （实测偏差 13px ≈ 一个 note_size）。
+     * 锚点插值保证：**任一被锚定的拍位（音符起点）映射到该音符的 x**，
+     * 从而「上下两层同一拍位垂直对齐」精确成立；音符内部的拍位线性过渡。
+     */
+    const beatToX = (beat: number): number => {
+      if (beat <= spans[0].startBeat) return placed[0].note.x
+      for (let k = 0; k < cnt - 1; k++) {
+        const b0 = spans[k].startBeat
+        const b1 = spans[k + 1].startBeat
+        if (beat <= b1 + 1e-9) {
+          const t = b1 > b0 ? (beat - b0) / (b1 - b0) : 0
+          const x0 = placed[k].note.x
+          const x1 = placed[k + 1].note.x
+          return x0 + Math.min(1, Math.max(0, t)) * (x1 - x0)
+        }
+      }
+      // 末音之后：按末音自身时值线性延伸到其占位右端
+      const lastNote = placed[cnt - 1].note
+      const b0 = spans[cnt - 1].startBeat
+      const b1 = b0 + spans[cnt - 1].beats
+      const t = b1 > b0 ? (beat - b0) / (b1 - b0) : 1
+      return lastNote.x + Math.min(1, Math.max(0, t)) * (noteRightOf(lastNote) - lastNote.x)
+    }
+    /** 拍位所在**行**（同页同 y 的一组音符）——取行音符 y 与行右边界 */
+    const rowOf = (beat: number): { y: number; right: number; page: number } => {
+      let idx = cnt - 1
+      for (let k = 0; k < cnt; k++) {
+        if (beat <= spans[k].startBeat + spans[k].beats + 1e-9) {
+          idx = k
+          break
+        }
+      }
+      const p = placed[idx]
+      let right = p.note.x + p.note.width
+      for (let m = 0; m < cnt; m++) {
+        const q = placed[m]
+        if (q.page === p.page && Math.abs(q.note.y - p.note.y) < 0.5) right = Math.max(right, q.note.x + q.note.width)
+      }
+      return { y: p.note.y, right, page: p.page }
+    }
+
+    for (const seg of segs) {
+      if (seg.beats <= 0) continue
+      const envStart = seg.startBeat
+      const envEnd = seg.startBeat + seg.beats
+      const row = rowOf(envStart)
+      const page = pages[row.page]
+      if (!page) continue
+      const x0 = beatToX(envStart)
+      const x1 = Math.min(beatToX(envEnd), row.right)
+      if (!(x1 > x0)) continue
+      // 段层 y：主旋律上方一层（留出 note_size×1.7 的层间距）
+      const layerDy = config.note_size * 1.7
+      const yUpper = row.y - layerDy
+      const idBase = 900000 + gi * 1000 + seg.openIndex * 10
+      const barIdBase = 950000 + gi * 1000 + seg.openIndex * 10
+      let noteSeq = 0
+      let barSeq = 0
+
+      // ---- 段内音符 ----
+      let beat = 0
+      for (const t of seg.tokens) {
+        if (t.kind === 'barline') continue
+        if (!isDurational(t)) continue
+        const dur = tokenDuration(t)
+        const bx0 = beatToX(envStart + beat)
+        const bx1 = Math.max(bx0, beatToX(envStart + beat + dur))
+        beat += dur
+        if (bx1 <= bx0) continue
+        // 拍段：音符块 + 每条增时线 + 附点，按各分量的实际 x 位置给出
+        const sp = splitNoteDur(t)
+        const w = bx1 - bx0
+        const bodyDur = sp.noteDur
+        const augTotal = sp.augCount * sp.augDur
+        const dotTotal = sp.dotDur
+        const total = bodyDur + augTotal + dotTotal
+        const segList: { x: number; perBeat: number; beats: number; el?: 'note' | 'aug' | 'dot' }[] = []
+        let cx = bx0
+        if (total > 0) {
+          segList.push({ x: r1(cx), perBeat: r1((w * bodyDur) / total / Math.max(bodyDur, 1e-6)), beats: bodyDur, el: 'note' })
+          cx += (w * bodyDur) / total
+          for (let a = 0; a < sp.augCount; a++) {
+            const aw = (w * sp.augDur) / total
+            segList.push({ x: r1(cx), perBeat: r1(aw / Math.max(sp.augDur, 1e-6)), beats: sp.augDur, el: 'aug' })
+            cx += aw
+          }
+          if (sp.dotDur > 0) segList.push({ x: r1(cx), perBeat: r1(((w * sp.dotDur) / total) / Math.max(sp.dotDur, 1e-6)), beats: sp.dotDur, el: 'dot' })
+        }
+        page.notes.push({
+          id: { page: row.page, voice: group.music.voice, group: gi, index: idBase + noteSeq++ },
+          token: t,
+          x: r1(bx0),
+          y: r1(yUpper),
+          width: r1(w),
+          rightX: r1(bx1),
+          duration: dur,
+          beatPos: r1(beat - dur),
+          barIndex: 0,
+          segments: segList,
+          audioPitch: isPlayableNote(t) ? pitchToName(t.pitch, t.octaveShift, t.accidental, keySemitone) : null,
+          playable: isPlayableNote(t),
+          segment: { type: seg.type, layer: 'upper' },
+        })
+      }
+
+      // ---- 段内小节线（按段内自身拍位映射到包络内 x） ----
+      for (const bb of seg.barBeats) {
+        const bx = beatToX(envStart + bb)
+        if (bx < x0 - 1e-6 || bx > x1 + 1e-6) continue
+        page.barlines.push({
+          id: { page: row.page, voice: group.music.voice, group: gi, index: barIdBase + barSeq++ },
+          type: '|',
+          x: r1(bx),
+          yTop: r1(yUpper - config.note_size * 0.9),
+          yBottom: r1(yUpper + config.note_size * 0.35),
+          width: 0,
+          segment: { type: seg.type, layer: 'upper' },
+        })
+      }
+
+      // ---- 段层左右大括号（包住整个包络范围） ----
+      if (!page.segmentBrackets) page.segmentBrackets = []
+      page.segmentBrackets.push({
+        type: seg.type,
+        x1: r1(x0),
+        x2: r1(x1),
+        yTop: r1(yUpper - config.note_size * 0.95),
+        yBottom: r1(yUpper + config.note_size * 0.4),
+        // dsb：下层声部（包络内主旋律）底缘——供渲染画跨两层的大花括号
+        yBottomLower: seg.type === 'dsb' ? r1(row.y + config.note_size * 0.35) : undefined,
+        voice: group.music.voice,
+        group: gi,
+      })
+    }
+  }
+}
+
+/** adj427：可发声音符判定（供段内音符的 audioPitch / playable） */
+function isPlayableNote(t: MusicToken): t is NoteToken {
+  return t.kind === 'note'
 }
