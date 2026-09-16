@@ -6014,6 +6014,16 @@ console.log('[adj435] overlap beats sized by the denser layer (multi-voice style
           check(`AL4[${nm}] 段层色块不跨过段内小节线`,
             segBarXs.length >= 1 && !crosses,
             `segBars=${segBarXs.map((v) => v.toFixed(1)).join(',')} blocks=${upperSegs.map((s) => `${s.x.toFixed(1)}~${(s.x + s.width).toFixed(1)}`).join(' ')}`)
+          // AL5（adj440，E-2026-180）：段内**最后一个音**的色块延伸到**段层右界（大括号）**——
+        // `&ykh`/右括号是**无时值占宽元素**（占宽不占拍），其后的图形空白在时间上仍属本段末尾。
+        {
+          const lastBlk = [...upperSegs].sort((a, b) => a.x - b.x).pop()
+          const braceX2 = (p.segmentBrackets ?? [])[0]?.x2 ?? 0
+          const blkRight = lastBlk ? lastBlk.x + lastBlk.width : 0
+          check(`AL5[${nm}] 段内末音色块延伸到段层右界（大括号界限）`,
+            lastBlk !== undefined && braceX2 > 0 && Math.abs(blkRight - braceX2) < 0.6,
+            `blkRight=${blkRight.toFixed(2)} braceX2=${braceX2.toFixed(2)}`)
+        }
         }
       }
     }
