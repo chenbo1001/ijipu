@@ -5630,9 +5630,9 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
   const segBars = page.barlines.filter((b) => b.segment).map((b) => b.x).sort((a, b) => a - b)
   // U1：段内小节线必须与主旋律小节线**精确同 x**（不能再落在小节线之后的音符上）
   check('U1 段内小节线 x == 主旋律小节线 x（精确对齐）', segBars.length === 1 && mainBars.some((x) => Math.abs(x - segBars[0]) < 1e-6), `segBars=[${segBars}] mainBars=[${mainBars}]`)
-  // U2：包络右缘必须收在**主旋律小节线**处（不得越过它）
+  // U2：包络右缘必须收在**主旋律小节线内侧**（不越线、也不贴到线上）
   const barBefore55 = mainBars[mainBars.length - 1]
-  check('U2 包络右缘 x2 == 主旋律末小节线 x（不越线）', sb !== undefined && Math.abs(sb.x2 - barBefore55) < 0.11, `x2=${sb?.x2} bar=${barBefore55}`)
+  check('U2 包络右缘 x2 收在主旋律末小节线**内侧**（不贴线不越线）', sb !== undefined && sb.x2 <= barBefore55 - 0.11, `x2=${sb?.x2} bar=${barBefore55}`)
   check('U3 段层末音右缘不超过 x2（不压过右括号）', segN.length > 0 && (segN[segN.length - 1].rightX ?? 0) <= (sb?.x2 ?? 0) + 0.11, `segRight=${segN[segN.length - 1]?.rightX} x2=${sb?.x2}`)
   // U4：显式 &zkh 已渲染，且整体落在段首音**左侧**（位置被预留出来）
   const zkh = page.brackets.find((b) => b.code === 'zkh')
@@ -5644,9 +5644,26 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
   // U7：段层括号不重复——恰好 1 个 zkh + 1 个 ykh（不再叠加自动圆括号）
   const segMarks = page.brackets.filter((b) => b.code === 'zkh' || b.code === 'ykh')
   check('U7 段层括号恰好一对（不重复画）', segMarks.filter((b) => b.code === 'zkh').length === 1 && segMarks.filter((b) => b.code === 'ykh').length === 1, `marks=${segMarks.map((b) => b.code).join(',')}`)
-  // U8：段层音符与主旋律同拍位音符**逐一对齐**（8 个）
+  // U12/U13：括号与**两侧小节线**都要有净距（不得贴线/压线）——用户报「右括号明显偏右」的根因
+  {
+    const bzBars = page.barlines.filter((b) => !b.segment).map((b) => b.x).sort((a, b) => a - b)
+    const lB = bzBars[0]
+    const rB = bzBars[bzBars.length - 1]
+    const zk = page.brackets.find((b) => b.code === 'zkh')
+    const yk = page.brackets.find((b) => b.code === 'ykh')
+    const zkL = zk ? zk.x - zk.width / 2 : 0
+    const ykR = yk ? yk.x + yk.width / 2 : 0
+    check('U12 左括号与小节线有净距（不贴线）', zkL > lB + 0.4, `zkh左缘=${zkL.toFixed(1)} 左线=${lB}`)
+    check('U13 右括号与小节线有净距（不贴线/不越线）', ykR < rB - 0.4, `ykh右缘=${ykR.toFixed(1)} 右线=${rB}`)
+    check(
+      'U14 左右括号相对各自小节线的净距接近（不对称过大即为"偏右"）',
+      Math.abs((rB - ykR) - (zkL - lB)) < 6,
+      `左距=${(zkL - lB).toFixed(1)} 右距=${(rB - ykR).toFixed(1)}`,
+    )
+  }
   const mains = page.notes.filter((n) => !n.segment).sort((a, b) => a.x - b.x)
   const aligned = segN.every((n, i) => Math.abs(n.x - mains[i + 2].x) < 0.11)
+  // U8：段层音符与主旋律同拍位音符**逐一对齐**（8 个）
   check('U8 段层 8 个音与主旋律拍位 2..9 逐一对齐', segN.length === 8 && aligned, `seg=${segN.map((n) => n.x).join(',')}`)
   // U9：括号**纵向**与数字对齐——`renderBracket` 以 yTop 为字形中心，须 = 基线 − 0.4×字号
   //     （此前传 −0.7×字号，括号比数字高 0.3×字号 ≈4px）

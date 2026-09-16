@@ -2793,29 +2793,45 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         }
         return out
       }
-      // dsb：大括号 + 圆括号**都**必须落在「小节线内侧 ~ 内容边」之间，按槽位均分排布；
-      // bz：无大括号，沿用既有行为（括号与音符之间留 nonDurGap），保证已认可的效果不回归。
+      /**
+       * adj427：**边界净距**——括号（大括号/圆括号）与小节线之间必须留出
+       * 「小节线半宽 + barlinePad」，否则括号会**贴到/压在小节线上**。
+       *
+       * 用户观察到的现象正是这个：左 `(` 距左小节线 ~30px，而右 `)` 距右小节线只有 ~7px
+       * （右侧括号的右缘原本正好落在 `xEndBoundary` = 小节线**中心**）——左右明显不对称。
+       * 用户给的模型：把下一行两侧小节线**向上延伸**，段内容 `&zkh … &ykh` 在这两条线**内部**排布。
+       */
+      const barInset = barlineTotalW('|') / 2 + barlinePad(ns)
+      // bz：无大括号，括号与音符之间留 nonDurGap；**外加**与小节线的净距（barInset）。
+      // dsb：大括号 + 圆括号按槽位均分排布在小节线内侧 ~ 内容边之间。
       let leftSlots: { kind: 'brace' | 'bracket'; x: number; w: number }[] = []
       let rightSlots: { kind: 'brace' | 'bracket'; x: number; w: number }[] = []
       let xContent1: number
       if (isDsb) {
-        // 小节线**笔画**内侧（比 barlinePad 更贴线，给括号多腾一点空间）
-        const innerL = barAtStart ? barAtStart.x + barlineTotalW('|') / 2 + 1 : xContent0 - (leadW > 0 ? leadW + bgap : 0)
+        // 小节线**笔画**外侧再让 barlinePad（同一净距口径，与 bz 对称）
+        const innerL = barAtStart ? barAtStart.x + barInset : xContent0 - (leadW > 0 ? leadW + bgap : 0)
         leftSlots = placeSlots(innerL, xContent0, leftItems)
         const gapL2 = leftSlots.length > 0 ? Math.max(0, leftSlots[0].x - innerL) : bgap
         const rightTotal = rightItems.reduce((a, b) => a + b.w, 0)
-        const innerR = barAtEnd ? barAtEnd.x - barlineTotalW('|') / 2 - 1 : xEndBoundary + rightTotal + rightItems.length * gapL2
+        const innerR = barAtEnd ? barAtEnd.x - barInset : xEndBoundary + rightTotal + rightItems.length * gapL2
         xContent1 = Math.max(
           xContent0,
           innerR - rightTotal - (rightItems.length > 0 ? (rightItems.length + 1) * gapL2 : 0),
         )
         rightSlots = placeSlots(xContent1, innerR, rightItems)
       } else {
-        const leadPad = leadW > 0 ? leadW + bgap : 0
-        const tailPad = tailW > 0 ? tailW + bgap : 0
+        // bz：括号**紧邻内容**（留 nonDurGap）；横向位置再被「小节线内侧」钳制，
+        // 保证不会贴到/压在小节线上（`barInset` 只约束靠小节线那一侧，不占括号与音符的间距）。
+        const innerL2 = barAtStart ? barAtStart.x + barInset : Number.NEGATIVE_INFINITY
+        const innerR2 = barAtEnd ? barAtEnd.x - barInset : Number.POSITIVE_INFINITY
+        const tailPad = tailW > 0 && barAtEnd ? barInset + bgap + tailW : tailW > 0 ? bgap + tailW : 0
         xContent1 = Math.max(xContent0, xEndBoundary - tailPad)
-        leftSlots = leadW > 0 ? [{ kind: 'bracket', x: xContent0 - leadPad, w: leadW }] : []
-        rightSlots = tailW > 0 ? [{ kind: 'bracket', x: xContent1 + bgap, w: tailW }] : []
+        leftSlots = leadW > 0
+          ? [{ kind: 'bracket', x: Math.max(xContent0 - bgap - leadW, innerL2), w: leadW }]
+          : []
+        rightSlots = tailW > 0
+          ? [{ kind: 'bracket', x: Math.min(xContent1 + bgap, innerR2 - tailW), w: tailW }]
+          : []
       }
       const braceLeftX = leftSlots.find((s) => s.kind === 'brace')?.x
       const braceRightX = rightSlots.find((s) => s.kind === 'brace')?.x
