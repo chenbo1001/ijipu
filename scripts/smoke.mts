@@ -6023,6 +6023,13 @@ console.log('[adj435] overlap beats sized by the denser layer (multi-voice style
           check(`AL5[${nm}] 段内末音色块延伸到段层右界（大括号界限）`,
             lastBlk !== undefined && braceX2 > 0 && Math.abs(blkRight - braceX2) < 0.6,
             `blkRight=${blkRight.toFixed(2)} braceX2=${braceX2.toFixed(2)}`)
+          // AL6（adj442，E-2026-182）：**dsb 色块以大括号为界**——首个块左缘 = `x1`(`{`)、末块右缘 = `x2`(`}`)
+          const sortedBlk = [...upperSegs].sort((a, b) => a.x - b.x)
+          const braceX1 = (p.segmentBrackets ?? [])[0]?.x1 ?? 0
+          check(`AL6[${nm}] dsb 色块以大括号为界（首块左缘=`+'`{`'+`、末块右缘=`+'`}`'+`）`,
+            braceX1 > 0 && braceX2 > 0 && sortedBlk.length > 0 &&
+              Math.abs(sortedBlk[0].x - braceX1) < 0.6 && Math.abs(blkRight - braceX2) < 0.6,
+            `firstLeft=${sortedBlk[0]?.x.toFixed(2)} x1=${braceX1.toFixed(2)} lastRight=${blkRight.toFixed(2)} x2=${braceX2.toFixed(2)}`)
         }
         }
       }
