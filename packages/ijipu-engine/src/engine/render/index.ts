@@ -1386,34 +1386,39 @@ function renderBracket(
 }
 
 /**
- * adj427：临时段（`{bz … }` / `{dsb … }`）叠加层的**跨两层大花括号** `{ … }`（图 2）。
+ * adj427：临时段（`{bz … }` / `{dsb … }`）的**跨两层大花括号** `{ … }`（dsb 专用）。
  *
- * 圆括号 `( … )` **不在这里画**——段层左右圆括号由布局层发成 `page.brackets`
- * （`zkh`/`ykh` 文本括号字形），与全项目其它括号**同一套渲染与纵向基准**
- * （字形中心 = 数字中心 = 基线 − 0.4×字号），从而与数字同高、基线对齐；
- * 本函数只负责 dsb「把上/下两层括在一起」的那对花括号（`yBottomLower` 给出下层底缘）。
+ * - 位置由**布局层**给出：`x1` / `x2` 是大括号所占槽位的**左缘**（布局已把它们当作
+ *   「无时值占宽元素」排在小节线**内侧**——左大括号在小节线右侧、右大括号在小节线左侧）。
+ *   本函数只在给定槽位内画形状，**不做任何外扩**（此前按 `x ± bulge` 外扩，正好把括号
+ *   画到了小节线外面）。
+ * - 线形：**加粗**（`stroke-width ≈ 0.16×字号`，≥1.8），与细线条的小节线形成层次。
+ * - 圆括号 `( … )` 不在这里画——段层圆括号由布局层发成 `page.brackets`（`zkh`/`ykh`
+ *   文本字形），与全项目其它括号同一套渲染与纵向基准（字形中心 = 数字中心）。
  */
 function renderSegmentBracket(b: PlacedSegmentBracket, config: PageConfig): string {
-  const { x1, x2, yTop } = b
-  const out: string[] = []
-  // dsb：跨两层的大花括号
   const lo = b.yBottomLower
-  if (b.type === 'dsb' && lo !== undefined && lo > yTop) {
-    const bulge = Math.min(7, Math.max(3, config.note_size * 0.3))
-    const my = (yTop + lo) / 2
-    const cw = Math.min(5, Math.max(2.5, config.note_size * 0.22))
-    const brace = (x: number, dir: 1 | -1): string =>
-      `<path d="M ${r1n(x)} ${r1n(yTop)} ` +
-      `Q ${r1n(x + dir * cw * 2)} ${r1n(yTop)} ${r1n(x + dir * cw)} ${r1n(yTop + cw)} ` +
-      `L ${r1n(x + dir * cw)} ${r1n(my - cw)} ` +
-      `Q ${r1n(x + dir * cw)} ${r1n(my)} ${r1n(x + dir * cw * 2)} ${r1n(my)} ` +
-      `Q ${r1n(x + dir * cw)} ${r1n(my)} ${r1n(x + dir * cw)} ${r1n(my + cw)} ` +
-      `L ${r1n(x + dir * cw)} ${r1n(lo - cw)} ` +
-      `Q ${r1n(x + dir * cw)} ${r1n(lo)} ${r1n(x)} ${r1n(lo)}" fill="none" stroke="#1b1b1b" ` +
-      `stroke-width="1.2" data-segment-brace="${b.type}"/>`
-    out.push(brace(x1 - bulge - 2, -1), brace(x2 + bulge + 2, 1))
-  }
-  return out.join('')
+  if (b.type !== 'dsb' || lo === undefined || lo <= b.yTop) return ''
+  const ns = config.note_size
+  /** 大括号横向占宽——与布局层 `braceW` 同源（`max(3, 0.32×字号)`） */
+  const w = Math.max(3, ns * 0.32)
+  const cw = w / 2
+  const sw = Math.max(1.8, ns * 0.16) // 加粗线条
+  const yTop = b.yTop
+  const my = (yTop + lo) / 2
+  const spine = (x: number, dir: 1 | -1): string =>
+    `M ${r1n(x)} ${r1n(yTop)} ` +
+    `Q ${r1n(x + dir * w)} ${r1n(yTop)} ${r1n(x + dir * cw)} ${r1n(yTop + cw * 1.2)} ` +
+    `L ${r1n(x + dir * cw)} ${r1n(my - cw)} ` +
+    `Q ${r1n(x + dir * cw)} ${r1n(my)} ${r1n(x + dir * w)} ${r1n(my)} ` +
+    `Q ${r1n(x + dir * cw)} ${r1n(my)} ${r1n(x + dir * cw)} ${r1n(my + cw)} ` +
+    `L ${r1n(x + dir * cw)} ${r1n(lo - cw * 1.2)} ` +
+    `Q ${r1n(x + dir * cw)} ${r1n(lo)} ${r1n(x)} ${r1n(lo)}`
+  // 左 `{`：两端锚点取槽位右缘、cusp 朝左 → 形状正好占满 [x1, x1+w]
+  // 右 `}`：镜像（两端锚点取槽位左缘、cusp 朝右）→ 占满 [x2, x2+w]
+  const left = `<path d="${spine(b.x1 + w, -1)}" fill="none" stroke="#1b1b1b" stroke-width="${r1n(sw)}" stroke-linecap="round" data-segment-brace="dsb"/>`
+  const right = `<path d="${spine(b.x2, 1)}" fill="none" stroke="#1b1b1b" stroke-width="${r1n(sw)}" stroke-linecap="round" data-segment-brace="dsb"/>`
+  return left + right
 }
 
 function renderPage(page: ScorePage, config: PageConfig, pageCount: number, opts?: RenderFontMeta): string {

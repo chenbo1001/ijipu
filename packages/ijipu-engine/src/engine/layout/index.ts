@@ -1475,9 +1475,58 @@ export function layoutScore(
         }
       }
     }
+    /**
+     * adj427：**段边界小节加权**（「上下两层综合考虑占宽」）。
+     *
+     * 段层的大括号 / 圆括号要与主旋律**共用**同一段横向空间，且必须落在
+     * 「包络边界小节线内侧 ~ 内容边」之间。撑满行的富余 `W` 原本只按时值等比分配，
+     * 边界音符居中后的留白有限，塞下「大括号 + 圆括号 + 间距」后偏紧。
+     * 做法：给**段边界所在小节的音符**加权，使它们分到更多富余 → 槽更宽 → 居中留白更大。
+     * **无段时全部权重为 1**，分配与既有完全一致（零回归）。
+     */
+    const SEG_BOUNDARY_WEIGHT = 3.5
+    const segWeight = new Array(segs.length).fill(1)
+    {
+      const rowTokens: MusicToken[] = []
+      for (let b = row.start; b < row.end; b++) rowTokens.push(...segs[b].notes)
+      const rowSegs = computeSegments(rowTokens)
+      if (rowSegs.length > 0) {
+        const barStartBeat: number[] = []
+        let acc = 0
+        for (let b = row.start; b < row.end; b++) {
+          barStartBeat.push(acc)
+          for (const t of segs[b].notes) if (isDurational(t)) acc += tokenDuration(t)
+        }
+        const barAt = (beat: number): number => {
+          let bi = 0
+          for (let i = 0; i < barStartBeat.length; i++) if (barStartBeat[i] <= beat + 1e-9) bi = i
+          return bi
+        }
+        for (const sg of rowSegs) {
+          // 左边界：包络起点所在小节（其首音左侧要容纳 大括号 + 左圆括号）
+          segWeight[row.start + barAt(sg.startBeat)] = SEG_BOUNDARY_WEIGHT
+          // 右边界：包络终点**前一**小节（其末音右侧要容纳 右圆括号 + 大括号）
+          const biR = barAt(sg.startBeat + sg.beats) - 1
+          if (biR >= 0) segWeight[row.start + biR] = SEG_BOUNDARY_WEIGHT
+        }
+      }
+    }
+    /**
+     * 加权后的时值和（预计算）——**分母必须与既有 `totalDur` 同口径**：
+     * `Σ（音符块时值 + 每条增时线时值）`，否则增时线音符的分摊比例会变、
+     * 既有排版几何随之漂移（adj398 那类"不越右边距"断言会失败）。
+     * 权重全为 1 时本式 === `totalDur`，分配与既有完全等价。
+     */
+    const segWeightDurSum = noteList.reduce(
+      (a, n) => a + (n.noteDur + (n.hasDot ? n.dotDur : 0) + n.augCount * n.augDur) * segWeight[n.barIdx],
+      0,
+    )
     // 音符/增时线在「撑满(全局 W)」或「自然+小节对齐(per-bar extra)」下的可分配宽
     const extraOf = (barIdx: number, elDur: number): number => {
-      if (stretch) return totalDur > 0 ? (elDur / totalDur) * W : 0
+      if (stretch) {
+        // adj427：加权后重新归一（segWeight 全为 1 时与既有 `elDur/totalDur*W` 完全等价）
+        return segWeightDurSum > 0 ? ((elDur * segWeight[barIdx]) / segWeightDurSum) * W : 0
+      }
       return segDurSum[barIdx] > 0 ? (elDur / segDurSum[barIdx]) * extraWByBar[barIdx] : 0
     }
 
@@ -2702,25 +2751,84 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       const bgap = nonDurGap(ns)
       const leadW = segBrackets.length > 0 ? wOf(leadBrackets) : markBodyW('zkh', ns)
       const tailW = segBrackets.length > 0 ? wOf(tailBrackets) : markBodyW('ykh', ns)
-      const leadPad = leadW > 0 ? leadW + bgap : 0
-      const tailPad = tailW > 0 ? tailW + bgap : 0
 
-      // 内容左缘 = 包络起点处主旋律音符的 x（段首音与主旋律同拍位精确对齐）；
-      // 左括号安排在它**左侧**的预留区里（主旋律小节线右缘之后）。
+      // 内容左缘 = 包络起点处主旋律音符的 x（段首音与主旋律同拍位精确对齐，**固定不动**）
       const xContent0 = beatToX(envStart)
-      // 内容右缘 = 包络终点处的**主旋律小节线 x** 再往左让出尾括号预留区
-      // （不再用其后音符的 x，否则右括号越线——用户报「&ykh 超过主声部的小节线」）。
+      // 包络右界 = 包络终点处的**主旋律小节线 x**（不再用其后音符的 x，否则越线）
       const xEndBoundary = Math.min(beatToBarX(envEnd), row.right)
-      const xContent1 = Math.max(xContent0, xEndBoundary - tailPad)
-      const x0 = xContent0 - leadPad
-      const x1 = xEndBoundary
+      // 包络两端的主旋律小节线锚点（若有）——大括号/圆括号一律排在小节线**内侧**
+      const barAtStart = mainBarAnchors.find((a) => Math.abs(a.beat - envStart) < 1e-6)
+      const barAtEnd = mainBarAnchors.find((a) => Math.abs(a.beat - envEnd) < 1e-6)
+      const isDsb = seg.type === 'dsb'
+      /** 大括号横向占宽（无时值元素）——渲染端 `renderSegmentBracket` 取同一公式 */
+      const braceW = isDsb ? Math.max(3, ns * 0.32) : 0
+
+      /**
+       * adj427：段层「无时值占宽元素」排布——**大括号与圆括号同 `&zkh/&ykh` 同级**：
+       * 只占宽、不占拍，依次排在「小节线内侧」与「内容边」之间：
+       *   左侧：小节线 → 大括号 → 圆括号 → 内容左缘（= xContent0，与主旋律同拍位对齐）
+       *   右侧：内容右缘 → 圆括号 → 大括号 → 小节线
+       * 从而**左大括号在小节线右侧、右大括号在小节线左侧**（用户要求），
+       * 且不会被画到小节线外面去（此前按 `x ± bulge` 外扩，正好越线）。
+       */
+      const leftItems: { kind: 'brace' | 'bracket'; w: number }[] = []
+      if (braceW > 0) leftItems.push({ kind: 'brace', w: braceW })
+      if (leadW > 0) leftItems.push({ kind: 'bracket', w: leadW })
+      const rightItems: { kind: 'brace' | 'bracket'; w: number }[] = []
+      if (tailW > 0) rightItems.push({ kind: 'bracket', w: tailW })
+      if (braceW > 0) rightItems.push({ kind: 'brace', w: braceW })
+      /** 把 items 依次排进 [from, to)（左→右），间距取 min(nonDurGap, 均分)，放不下则压缩 */
+      const placeSlots = (from: number, to: number, items: { kind: 'brace' | 'bracket'; w: number }[]) => {
+        const n = items.length
+        if (n === 0) return [] as { kind: 'brace' | 'bracket'; x: number; w: number }[]
+        const total = items.reduce((a, b) => a + b.w, 0)
+        const span = Math.max(total, to - from)
+        let gap = Math.min(bgap, Math.max(0, (span - total) / (n + 1)))
+        if (total + (n + 1) * gap > span) gap = Math.max(0, (span - total) / (n + 1))
+        const out: { kind: 'brace' | 'bracket'; x: number; w: number }[] = []
+        let cx = from + gap
+        for (const it of items) {
+          out.push({ kind: it.kind, x: cx, w: it.w })
+          cx += it.w + gap
+        }
+        return out
+      }
+      // dsb：大括号 + 圆括号**都**必须落在「小节线内侧 ~ 内容边」之间，按槽位均分排布；
+      // bz：无大括号，沿用既有行为（括号与音符之间留 nonDurGap），保证已认可的效果不回归。
+      let leftSlots: { kind: 'brace' | 'bracket'; x: number; w: number }[] = []
+      let rightSlots: { kind: 'brace' | 'bracket'; x: number; w: number }[] = []
+      let xContent1: number
+      if (isDsb) {
+        // 小节线**笔画**内侧（比 barlinePad 更贴线，给括号多腾一点空间）
+        const innerL = barAtStart ? barAtStart.x + barlineTotalW('|') / 2 + 1 : xContent0 - (leadW > 0 ? leadW + bgap : 0)
+        leftSlots = placeSlots(innerL, xContent0, leftItems)
+        const gapL2 = leftSlots.length > 0 ? Math.max(0, leftSlots[0].x - innerL) : bgap
+        const rightTotal = rightItems.reduce((a, b) => a + b.w, 0)
+        const innerR = barAtEnd ? barAtEnd.x - barlineTotalW('|') / 2 - 1 : xEndBoundary + rightTotal + rightItems.length * gapL2
+        xContent1 = Math.max(
+          xContent0,
+          innerR - rightTotal - (rightItems.length > 0 ? (rightItems.length + 1) * gapL2 : 0),
+        )
+        rightSlots = placeSlots(xContent1, innerR, rightItems)
+      } else {
+        const leadPad = leadW > 0 ? leadW + bgap : 0
+        const tailPad = tailW > 0 ? tailW + bgap : 0
+        xContent1 = Math.max(xContent0, xEndBoundary - tailPad)
+        leftSlots = leadW > 0 ? [{ kind: 'bracket', x: xContent0 - leadPad, w: leadW }] : []
+        rightSlots = tailW > 0 ? [{ kind: 'bracket', x: xContent1 + bgap, w: tailW }] : []
+      }
+      const braceLeftX = leftSlots.find((s) => s.kind === 'brace')?.x
+      const braceRightX = rightSlots.find((s) => s.kind === 'brace')?.x
+      // 段层整体横向范围（供小节线过滤/范围记录）：从最左元素到最右元素右缘
+      const x0 = leftSlots.length > 0 ? leftSlots[0].x : xContent0
+      const lastR = rightSlots[rightSlots.length - 1]
+      const x1 = lastR ? lastR.x + lastR.w : xContent1
       if (!(x1 > x0)) continue
 
       // 层间距：bz 段画在主旋律上方；dsb 段**上下两层整体下移**使整块与主旋律居中
       // （用户要求「大括号里的整体与其它主声部部分居中对齐」）——
       // 做法：包络内的主旋律整体下移 dy/2、段层抬高 dy/2，两层中线落在行基线上。
       const dy = ns * 1.7
-      const isDsb = seg.type === 'dsb'
       const yUpper = isDsb ? row.y - dy / 2 : row.y - dy
       const idBase = 900000 + gi * 1000 + seg.openIndex * 10
       const barIdBase = 950000 + gi * 1000 + seg.openIndex * 10
@@ -2778,35 +2886,39 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         })
       }
 
-      // ---- 段层括号：统一走文本括号字形（`renderBracket`），与数字同高、基线对齐 ----
+      // ---- 段层圆括号：统一走文本括号字形（`renderBracket`），与数字同高、基线对齐 ----
       // 纵向：`renderBracket` 以 yTop 为**字形中心**（dominant-baseline=central），
       //       而数字中心 = 基线 − 0.4×字号（DIGIT_HEIGHT_RATIO=0.8 的一半）——
       //       此前传的是 基线 − 0.7×字号，括号比数字**高了 0.3×字号（≈4px）**（用户报「垂直位置」）。
-      // 横向：括号与相邻音符之间留 nonDurGap(=0.5×字号)（见上 leadPad/tailPad）。
+      // 横向：位置由上面的 `leftSlots/rightSlots` 槽位给出（与相邻音符留间距、且都在小节线内侧）。
       const yBracket = yUpper - ns * 0.4
-      if (leadW > 0) {
-        if (segBrackets.length > 0) {
-          let lx = xContent0 - bgap
-          for (let i = leadBrackets.length - 1; i >= 0; i--) {
-            const bt = leadBrackets[i]
-            const bw = markBodyW(bt.code, ns)
-            lx -= bw
-            page.brackets.push({ code: bt.code, dir: bt.dir, x: r1(lx + bw / 2), yTop: r1(yBracket), width: r1(bw), voice: group.music.voice, group: gi })
+      {
+        const lslot = leftSlots.find((s) => s.kind === 'bracket')
+        if (lslot) {
+          if (segBrackets.length > 0) {
+            let lx = lslot.x + lslot.w
+            for (let i = leadBrackets.length - 1; i >= 0; i--) {
+              const bt = leadBrackets[i]
+              const bw = markBodyW(bt.code, ns)
+              lx -= bw
+              page.brackets.push({ code: bt.code, dir: bt.dir, x: r1(lx + bw / 2), yTop: r1(yBracket), width: r1(bw), voice: group.music.voice, group: gi })
+            }
+          } else {
+            page.brackets.push({ code: 'zkh', dir: 'open', x: r1(lslot.x + lslot.w / 2), yTop: r1(yBracket), width: r1(lslot.w), voice: group.music.voice, group: gi })
           }
-        } else {
-          page.brackets.push({ code: 'zkh', dir: 'open', x: r1(xContent0 - bgap - leadW / 2), yTop: r1(yBracket), width: r1(leadW), voice: group.music.voice, group: gi })
         }
-      }
-      if (tailW > 0) {
-        if (segBrackets.length > 0) {
-          let rx = xContent1 + bgap
-          for (const bt of tailBrackets) {
-            const bw = markBodyW(bt.code, ns)
-            page.brackets.push({ code: bt.code, dir: bt.dir, x: r1(rx + bw / 2), yTop: r1(yBracket), width: r1(bw), voice: group.music.voice, group: gi })
-            rx += bw
+        const rslot = rightSlots.find((s) => s.kind === 'bracket')
+        if (rslot) {
+          if (segBrackets.length > 0) {
+            let rx = rslot.x
+            for (const bt of tailBrackets) {
+              const bw = markBodyW(bt.code, ns)
+              page.brackets.push({ code: bt.code, dir: bt.dir, x: r1(rx + bw / 2), yTop: r1(yBracket), width: r1(bw), voice: group.music.voice, group: gi })
+              rx += bw
+            }
+          } else {
+            page.brackets.push({ code: 'ykh', dir: 'close', x: r1(rslot.x + rslot.w / 2), yTop: r1(yBracket), width: r1(rslot.w), voice: group.music.voice, group: gi })
           }
-        } else {
-          page.brackets.push({ code: 'ykh', dir: 'close', x: r1(xContent1 + bgap + tailW / 2), yTop: r1(yBracket), width: r1(tailW), voice: group.music.voice, group: gi })
         }
       }
 
@@ -2828,11 +2940,13 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       // ---- 段层括弧 ----
       // 有显式 `&zkh/&ykh` 时不再自动画圆括号（避免双括号）；dsb 的花括号始终绘制。
       // ---- 段层范围（供 dsb 花括号使用；圆括号已由上面的文本括号字形绘制） ----
+      // ---- 段层范围（dsb 大花括号用；圆括号已由上面的文本括号字形绘制） ----
+      // x1/x2 = **大括号自身所在槽位的左缘**（已排在小节线内侧）；bz 无大括号，渲染端返回空串。
       if (!page.segmentBrackets) page.segmentBrackets = []
       page.segmentBrackets.push({
         type: seg.type,
-        x1: r1(x0),
-        x2: r1(x1),
+        x1: r1(braceLeftX ?? x0),
+        x2: r1(braceRightX ?? x1),
         yTop: r1(yUpper - ns * 0.95),
         yBottom: r1(yUpper + ns * 0.4),
         // dsb：下层声部（包络内主旋律）底缘——供渲染画跨两层的大花括号

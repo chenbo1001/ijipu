@@ -5690,6 +5690,53 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
     const sbx = page.barlines.filter((b) => b.segment).map((b) => b.x)
     return sbx.length === 1 && mb.some((x) => Math.abs(x - sbx[0]) < 1e-6)
   })(), `segBars=${page.barlines.filter((b) => b.segment).map((b) => b.x).join(',')}`)
+  // ---- X：大括号是「无时值占宽元素」，排在小节线**内侧**（用户报：原来跑到小节线外面了） ----
+  {
+    const nsx = DUR_CFG.note_size
+    const braceW = Math.max(3, nsx * 0.32)
+    const mainBars = page.barlines.filter((b) => !b.segment).map((b) => b.x).sort((a, b) => a - b)
+    const barLeft = mainBars[0]
+    const barRight = mainBars[mainBars.length - 1]
+    const zkhX = page.brackets.find((b) => b.code === 'zkh')
+    const ykhX = page.brackets.find((b) => b.code === 'ykh')
+    const braceL = sb?.x1 ?? 0
+    const braceR = sb?.x2 ?? 0
+    check('X1 左大括号在起始小节线**右侧**', braceL >= barLeft - 0.11, `braceL=${braceL} bar=${barLeft}`)
+    check('X2 右大括号在末尾小节线**左侧**', braceR + braceW <= barRight + 0.11, `braceR=${braceR}+${braceW.toFixed(2)} bar=${barRight}`)
+    check('X3 左大括号在左圆括号**左侧**（不重叠）', zkhX !== undefined && braceL + braceW <= zkhX.x - zkhX.width / 2 + 0.11, `braceR=${(braceL + braceW).toFixed(1)} parenL=${zkhX ? (zkhX.x - zkhX.width / 2).toFixed(1) : 'n/a'}`)
+    check('X4 右大括号在右圆括号**右侧**（不重叠）', ykhX !== undefined && braceR >= ykhX.x + ykhX.width / 2 - 0.11, `braceL=${braceR} parenR=${ykhX ? (ykhX.x + ykhX.width / 2).toFixed(1) : 'n/a'}`)
+    check('X5 大括号与内容不重叠（左括号槽右缘 ≤ 段首音）', segN.length > 0 && braceL + braceW <= segN[0].x + 0.11, `braceR=${(braceL + braceW).toFixed(1)} firstNote=${segN[0]?.x}`)
+    // X6：线条加粗——渲染出的 `stroke-width` ≥ 1.8
+    const svgDsb = renderScoreToSvg(layoutScore(parseJps(src), DUR_CFG))[0]
+    const m = /<path[^>]*data-segment-brace="dsb"[^>]*>/.exec(svgDsb)
+    const sw = m ? Number(/stroke-width="([\d.]+)"/.exec(m[0])?.[1] ?? 0) : 0
+    check('X6 大括号用加粗线条绘制（stroke-width ≥ 1.8）', sw >= 1.8, `stroke-width=${sw}`)
+    check('X7 大括号横向占宽 ≈ max(3, 0.32×字号)', Math.abs(braceW - Math.max(3, nsx * 0.32)) < 0.01, `w=${braceW}`)
+    // X8：dsb 内部三个元素（左大括号 / 左圆括号 / 内容）**依次不重叠**，且都在小节线内侧
+    const braceLEdge = braceL + braceW
+    const parenLEdge = zkhX ? zkhX.x - zkhX.width / 2 : Number.NaN
+    check(
+      'X8 dsb 内部依次不重叠（括号间 / 括号与内容 / 括号与小节线）',
+      braceLEdge <= parenLEdge + 0.11 && parenLEdge + (zkhX?.width ?? 0) <= (segN[0]?.x ?? 0) + 0.11 && braceL >= barLeft - 0.11,
+      `bar=${barLeft} brace=[${braceL.toFixed(1)},${braceLEdge.toFixed(1)}] paren=[${parenLEdge.toFixed(1)},${(parenLEdge + (zkhX?.width ?? 0)).toFixed(1)}] content=${segN[0]?.x?.toFixed(1)} 间距=(${(parenLEdge - braceLEdge).toFixed(2)},${((segN[0]?.x ?? 0) - parenLEdge - (zkhX?.width ?? 0)).toFixed(2)})`,
+    )
+    // X9：段边界加权应让小节的「小节线 → 内容」净空明显变宽（详见 extraOf 的 segWeight）
+    // X9：段边界加权（只作用于**空间优先**路径 = 应用默认布局）应让「小节线 → 内容」净空变宽。
+    //     注意：本块其余断言跑在 DUR_CFG（时值优先）下——段层叠加与括号几何两条路径共用，
+    //     但"逐拍加权"只在空间优先路径生效，故这里单独用空间优先配置测。
+    const SPC = { ...defaultPageConfig, noteSpaceLayout: 'space' as const }
+    const pageSp = layoutScore(parseJps(src), SPC).pages[0]
+    const segNSp = pageSp.notes.filter((n) => n.segment).sort((a, b) => a.x - b.x)
+    const barSp = pageSp.barlines.filter((b) => !b.segment).map((b) => b.x).sort((a, b) => a - b)[0]
+    const clearSp = (segNSp[0]?.x ?? 0) - barSp
+    check('X9 空间优先（默认布局）：段边界净空已加权加宽（≥ 20px）', clearSp >= 20, `净空=${clearSp.toFixed(1)}px bar=${barSp} content=${segNSp[0]?.x}`)
+    check('X10 空间优先：大括号同样在小节线内侧', (() => {
+      const sbSp = (pageSp.segmentBrackets ?? [])[0]
+      const barsSp = pageSp.barlines.filter((b) => !b.segment).map((b) => b.x).sort((a, b) => a - b)
+      const bw = Math.max(3, SPC.note_size * 0.32)
+      return sbSp !== undefined && sbSp.x1 >= barsSp[0] - 0.11 && sbSp.x2 + bw <= barsSp[barsSp.length - 1] + 0.11
+    })(), JSON.stringify((pageSp.segmentBrackets ?? [])[0]))
+  }
 }
 
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
