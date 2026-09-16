@@ -1386,31 +1386,20 @@ function renderBracket(
 }
 
 /**
- * adj427：临时段（`{bz … }` / `{dsb … }`）叠加层的左右括弧。
+ * adj427：临时段（`{bz … }` / `{dsb … }`）叠加层的**跨两层大花括号** `{ … }`（图 2）。
  *
- * 画法（对应图 1 / 图 2）：
- *  - 段内容层：一对**大圆括号** `( … )`，左括号落在包络起点 x、右括号落在包络终点 x，
- *    纵向覆盖段层高度；
- *  - dsb 额外画一对**跨两层的大花括号** `{ … }`（图 2 的 `{ (上) (下) }`），
- *    把上层（dsb 段内容）与下层（包络内主旋律）括在一起——`yBottomLower` 给出下层底缘。
+ * 圆括号 `( … )` **不在这里画**——段层左右圆括号由布局层发成 `page.brackets`
+ * （`zkh`/`ykh` 文本括号字形），与全项目其它括号**同一套渲染与纵向基准**
+ * （字形中心 = 数字中心 = 基线 − 0.4×字号），从而与数字同高、基线对齐；
+ * 本函数只负责 dsb「把上/下两层括在一起」的那对花括号（`yBottomLower` 给出下层底缘）。
  */
 function renderSegmentBracket(b: PlacedSegmentBracket, config: PageConfig): string {
-  const { x1, x2, yTop, yBottom } = b
-  const midY = (yTop + yBottom) / 2
-  const bulge = Math.min(7, Math.max(3, config.note_size * 0.3))
+  const { x1, x2, yTop } = b
   const out: string[] = []
-  // 圆括号：dir=+1 左括号（向右凸）、dir=-1 右括号（向左凸）
-  // parens === false（段内已写显式 &zkh/&ykh）时不画，避免双括号
-  if (b.parens !== false) {
-    const paren = (x: number, dir: 1 | -1): string =>
-      `<path d="M ${r1n(x + dir * bulge)} ${r1n(yTop)} Q ${r1n(x - dir * bulge)} ${r1n(midY)} ` +
-      `${r1n(x + dir * bulge)} ${r1n(yBottom)}" fill="none" stroke="#1b1b1b" stroke-width="1.1" ` +
-      `data-segment-paren="${b.type}"/>`
-    out.push(paren(x1, 1), paren(x2, -1))
-  }
   // dsb：跨两层的大花括号
   const lo = b.yBottomLower
   if (b.type === 'dsb' && lo !== undefined && lo > yTop) {
+    const bulge = Math.min(7, Math.max(3, config.note_size * 0.3))
     const my = (yTop + lo) / 2
     const cw = Math.min(5, Math.max(2.5, config.note_size * 0.22))
     const brace = (x: number, dir: 1 | -1): string =>

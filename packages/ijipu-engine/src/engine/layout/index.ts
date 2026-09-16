@@ -30,7 +30,7 @@ import type {
 } from '../types'
 import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, BRACKET_PAD, H_GAP, noteScaleOf, GRACE_SIZE_RATIO, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, VOLTA_BAR_GAP, VOLTA_RAISE, DYN_HALF_H, barlinePad, barlineTotalW, DOT_AFTER_DIGIT_GAP, DOT_R } from './spacing'
 // adj284：空间优先布局的度量（本体宽 / 时值拆分 / 非时值元素间距）
-import { splitNoteDur, noteBodyW, augBodyW, dotBodyW, accidentalBodyW, markBodyW, digitSlotW, hxBodyW, graceAtTail } from './spaceLayout'
+import { splitNoteDur, noteBodyW, augBodyW, dotBodyW, accidentalBodyW, markBodyW, digitSlotW, hxBodyW, graceAtTail, nonDurGap } from './spaceLayout'
 import { hairpinEvents, resolveHairpins, type DynEvent, type NoteAnchors } from './hairpins'
 // adj303：乐器名标注需要用 parseInstrumentRef / 库名（@乐器名 / @@ 后下一个音符）
 import { parseInstrumentRef, INSTRUMENT_LIB_NAMES } from '../playback/instruments'
@@ -2683,10 +2683,9 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       const page = pages[row.page]
       if (!page) continue
       const ns = config.note_size
-      // ---- 段内显式括号（`&zkh` / `&ykh` / `&hx`）：占宽要**预留**出来 ----
-      // 用户写 `{bz &zkh 1 2 … &ykh}` 时，左括号落在包络内容**左缘之外**（主旋律小节线
-      // 与首音之间的空隙）、右括号落在内容**右缘之外**——此前完全没渲染、也没留位，
-      // 导致 `(` 与首音重合。
+      // ---- 段层括号（`&zkh` / `&ykh`）：占宽 = 本体宽 + **非时值元素标准间距** ----
+      // 段内写了就用用户写的；没写则**合成一对**。两种情况都走与全项目一致的
+      // `renderBracket`（真实文本括号字形）——不用手绘弧线，保证与数字**同高、基线对齐**。
       const segBrackets = seg.tokens.filter((t): t is BracketTok => t.kind === 'bracket')
       const leadBrackets: BracketTok[] = []
       const tailBrackets: BracketTok[] = []
@@ -2698,16 +2697,18 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         }
       }
       const wOf = (bs: BracketTok[]): number => bs.reduce((a, t) => a + markBodyW(t.code, ns), 0)
-      // 自动圆括号（段内未写显式括号时由渲染端画）同样要**预留占宽**，
-      // 否则 `(` 与段首音重合（用户报「&zkh 的位置没有预留出来」）。
-      const autoW = segBrackets.length === 0 ? markBodyW('zkh', ns) : 0
-      const leadPad = wOf(leadBrackets) + autoW
-      const tailPad = wOf(tailBrackets) + autoW
+      // 括号与相邻音符之间要留出**非时值元素标准间距**（nonDurGap = 0.5×字号）：
+      // 此前把括号本体宽直接贴在音符左缘，渲染出来是 `(1` 紧贴、无间距（用户报「间距要调整」）。
+      const bgap = nonDurGap(ns)
+      const leadW = segBrackets.length > 0 ? wOf(leadBrackets) : markBodyW('zkh', ns)
+      const tailW = segBrackets.length > 0 ? wOf(tailBrackets) : markBodyW('ykh', ns)
+      const leadPad = leadW > 0 ? leadW + bgap : 0
+      const tailPad = tailW > 0 ? tailW + bgap : 0
 
       // 内容左缘 = 包络起点处主旋律音符的 x（段首音与主旋律同拍位精确对齐）；
-      // 左括号/左伴奏括号安排在它**左侧**的预留区里（主旋律小节线右缘之后）。
+      // 左括号安排在它**左侧**的预留区里（主旋律小节线右缘之后）。
       const xContent0 = beatToX(envStart)
-      // 内容右缘 = 包络终点处的**主旋律小节线 x** 再往左让出尾括号预留宽
+      // 内容右缘 = 包络终点处的**主旋律小节线 x** 再往左让出尾括号预留区
       // （不再用其后音符的 x，否则右括号越线——用户报「&ykh 超过主声部的小节线」）。
       const xEndBoundary = Math.min(beatToBarX(envEnd), row.right)
       const xContent1 = Math.max(xContent0, xEndBoundary - tailPad)
@@ -2777,19 +2778,35 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         })
       }
 
-      // ---- 段内显式括号：左括号排在内容左缘之外、右括号排在内容右缘之外 ----
-      if (segBrackets.length > 0) {
-        let lx = xContent0
-        for (const bt of leadBrackets) {
-          const bw = markBodyW(bt.code, ns)
-          lx -= bw
-          page.brackets.push({ code: bt.code, dir: bt.dir, x: r1(lx + bw / 2), yTop: r1(yUpper - ns * 0.7), width: r1(bw), voice: group.music.voice, group: gi })
+      // ---- 段层括号：统一走文本括号字形（`renderBracket`），与数字同高、基线对齐 ----
+      // 纵向：`renderBracket` 以 yTop 为**字形中心**（dominant-baseline=central），
+      //       而数字中心 = 基线 − 0.4×字号（DIGIT_HEIGHT_RATIO=0.8 的一半）——
+      //       此前传的是 基线 − 0.7×字号，括号比数字**高了 0.3×字号（≈4px）**（用户报「垂直位置」）。
+      // 横向：括号与相邻音符之间留 nonDurGap(=0.5×字号)（见上 leadPad/tailPad）。
+      const yBracket = yUpper - ns * 0.4
+      if (leadW > 0) {
+        if (segBrackets.length > 0) {
+          let lx = xContent0 - bgap
+          for (let i = leadBrackets.length - 1; i >= 0; i--) {
+            const bt = leadBrackets[i]
+            const bw = markBodyW(bt.code, ns)
+            lx -= bw
+            page.brackets.push({ code: bt.code, dir: bt.dir, x: r1(lx + bw / 2), yTop: r1(yBracket), width: r1(bw), voice: group.music.voice, group: gi })
+          }
+        } else {
+          page.brackets.push({ code: 'zkh', dir: 'open', x: r1(xContent0 - bgap - leadW / 2), yTop: r1(yBracket), width: r1(leadW), voice: group.music.voice, group: gi })
         }
-        let rx = xContent1
-        for (const bt of tailBrackets) {
-          const bw = markBodyW(bt.code, ns)
-          page.brackets.push({ code: bt.code, dir: bt.dir, x: r1(rx + bw / 2), yTop: r1(yUpper - ns * 0.7), width: r1(bw), voice: group.music.voice, group: gi })
-          rx += bw
+      }
+      if (tailW > 0) {
+        if (segBrackets.length > 0) {
+          let rx = xContent1 + bgap
+          for (const bt of tailBrackets) {
+            const bw = markBodyW(bt.code, ns)
+            page.brackets.push({ code: bt.code, dir: bt.dir, x: r1(rx + bw / 2), yTop: r1(yBracket), width: r1(bw), voice: group.music.voice, group: gi })
+            rx += bw
+          }
+        } else {
+          page.brackets.push({ code: 'ykh', dir: 'close', x: r1(xContent1 + bgap + tailW / 2), yTop: r1(yBracket), width: r1(tailW), voice: group.music.voice, group: gi })
         }
       }
 
@@ -2810,6 +2827,7 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
 
       // ---- 段层括弧 ----
       // 有显式 `&zkh/&ykh` 时不再自动画圆括号（避免双括号）；dsb 的花括号始终绘制。
+      // ---- 段层范围（供 dsb 花括号使用；圆括号已由上面的文本括号字形绘制） ----
       if (!page.segmentBrackets) page.segmentBrackets = []
       page.segmentBrackets.push({
         type: seg.type,
@@ -2819,7 +2837,6 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         yBottom: r1(yUpper + ns * 0.4),
         // dsb：下层声部（包络内主旋律）底缘——供渲染画跨两层的大花括号
         yBottomLower: isDsb ? r1(row.y + dy / 2 + ns * 0.35) : undefined,
-        parens: segBrackets.length === 0,
         voice: group.music.voice,
         group: gi,
       })

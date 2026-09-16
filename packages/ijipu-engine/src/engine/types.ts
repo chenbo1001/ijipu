@@ -633,11 +633,6 @@ export interface PlacedSegmentBracket {
    * （图 2 的 `{ … }`）；bz 无下层，不设该字段。
    */
   yBottomLower?: number
-  /**
-   * 是否自动画圆括号 `( … )`。默认 true；
-   * 段内已写显式 `&zkh` / `&ykh` 时为 false（避免与用户写的括号重复）。
-   */
-  parens?: boolean
   /** 所属声部 */
   voice: number
   /** 所属曲词分组下标（= result.groups 下标） */

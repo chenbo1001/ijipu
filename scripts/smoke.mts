@@ -5550,7 +5550,7 @@ console.log('[adj427] segment overlay placement (notes / barlines / brackets)')
   check('O8 段内小节线 1 条', segBars.length === 1, `got ${segBars.length}`)
   check('O9 段内小节线 x 落在包络范围内', segBars.length > 0 && sb.length > 0 && segBars[0].x >= sb[0].x1 - 0.51 && segBars[0].x <= sb[0].x2 + 0.51, `barX=${segBars[0]?.x} env=[${sb[0]?.x1},${sb[0]?.x2}]`)
   const svg = renderScoreToSvg(layoutScore(r, DUR_CFG))[0]
-  check('O10 SVG 含段层圆括号 data-segment-paren="bz"', svg.includes('data-segment-paren="bz"'), '')
+  check('O10 SVG 含段层括号字形（与数字同高的文本括号）', /<text[^>]*>\(<\/text>/.test(svg) && /<text[^>]*>\)<\/text>/.test(svg), '')
   check('O11 SVG 含段层音符（音符数增加的 <text> 已绘制）', (svg.match(/data-notepos/g) ?? []).length >= 12, `notepos=${(svg.match(/data-notepos/g) ?? []).length}`)
 }
 {
@@ -5567,7 +5567,7 @@ console.log('[adj427] segment overlay placement (notes / barlines / brackets)')
   check('P4 yBottomLower > yBottom（确实跨到下层）', sb.length > 0 && sb[0].yBottomLower! > sb[0].yBottom, `lower=${sb[0]?.yBottomLower} upper=${sb[0]?.yBottom}`)
   const svg = renderScoreToSvg(lay)[0]
   check('P5 SVG 含 dsb 花括号 data-segment-brace="dsb"', svg.includes('data-segment-brace="dsb"'), '')
-  check('P6 SVG 含 dsb 圆括号 data-segment-paren="dsb"', svg.includes('data-segment-paren="dsb"'), '')
+  check('P6 dsb 段层括号字形已绘制', /<text[^>]*>\(<\/text>/.test(svg), '')
 }
 {
   // 无段时零影响：不产生段层音符 / 括弧，且音符几何与既有行为一致
@@ -5641,21 +5641,34 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
   // U6：显式 &ykh 已渲染，且整体落在 x2 **之前**（不越主旋律小节线）
   const ykh = page.brackets.find((b) => b.code === 'ykh')
   check('U6 &ykh 已渲染且右缘 ≤ x2（不越主旋律小节线）', ykh !== undefined && sb !== undefined && ykh.x + ykh.width / 2 <= sb.x2 + 0.11, `ykhRight=${ykh ? ykh.x + ykh.width / 2 : 'n/a'} x2=${sb?.x2}`)
-  // U7：有显式括号时不再自动画圆括号（避免双括号）
-  check('U7 有显式 &zkh/&ykh → parens=false（不重复画）', sb?.parens === false, `parens=${sb?.parens}`)
+  // U7：段层括号不重复——恰好 1 个 zkh + 1 个 ykh（不再叠加自动圆括号）
+  const segMarks = page.brackets.filter((b) => b.code === 'zkh' || b.code === 'ykh')
+  check('U7 段层括号恰好一对（不重复画）', segMarks.filter((b) => b.code === 'zkh').length === 1 && segMarks.filter((b) => b.code === 'ykh').length === 1, `marks=${segMarks.map((b) => b.code).join(',')}`)
   // U8：段层音符与主旋律同拍位音符**逐一对齐**（8 个）
   const mains = page.notes.filter((n) => !n.segment).sort((a, b) => a.x - b.x)
   const aligned = segN.every((n, i) => Math.abs(n.x - mains[i + 2].x) < 0.11)
   check('U8 段层 8 个音与主旋律拍位 2..9 逐一对齐', segN.length === 8 && aligned, `seg=${segN.map((n) => n.x).join(',')}`)
+  // U9：括号**纵向**与数字对齐——`renderBracket` 以 yTop 为字形中心，须 = 基线 − 0.4×字号
+  //     （此前传 −0.7×字号，括号比数字高 0.3×字号 ≈4px）
+  const ns = DUR_CFG.note_size
+  check('U9 括号字形中心 = 段层数字中心（基线 − 0.4×字号）', zkh !== undefined && Math.abs(zkh.yTop - (segN[0].y - ns * 0.4)) < 0.11, `yTop=${zkh?.yTop} expect=${(segN[0].y - ns * 0.4).toFixed(1)}`)
+  // U10：括号**横向**与相邻音符留 nonDurGap（0.5×字号），不再紧贴
+  const gap = ns * 0.5
+  check('U10 &zkh 与段首音间距 = nonDurGap（0.5×字号）', zkh !== undefined && Math.abs(segN[0].x - gap - (zkh.x + zkh.width / 2)) < 0.11, `gap=${(segN[0].x - (zkh.x + zkh.width / 2)).toFixed(2)} expect=${gap}`)
+  const segLast = segN[segN.length - 1]
+  check('U11 &ykh 与段层末音右缘间距 = nonDurGap', ykh !== undefined && Math.abs((ykh.x - ykh.width / 2) - ((segLast.rightX ?? 0) + gap)) < 0.11, `gap=${((ykh.x - ykh.width / 2) - (segLast.rightX ?? 0)).toFixed(2)} expect=${gap}`)
 }
 {
-  // 无显式括号：自动括号同样要预留占宽（不得与段首音重合）
+  // 无显式括号：自动合成同一套文本括号字形（同样留间距、同纵向基准）
   const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
   const page = layoutScore(parseJps(src), DUR_CFG).pages[0]
   const segN = page.notes.filter((n) => n.segment).sort((a, b) => a.x - b.x)
-  const sb = (page.segmentBrackets ?? [])[0]
-  check('V1 无显式括号 → parens=true（自动画）', sb?.parens === true, `parens=${sb?.parens}`)
-  check('V2 自动括号左缘 x1 < 段首音 x（预留出占宽）', sb !== undefined && segN.length > 0 && sb.x1 < segN[0].x - 0.5, `x1=${sb?.x1} firstNote=${segN[0]?.x}`)
+  const ns2 = DUR_CFG.note_size
+  const zkh2 = page.brackets.find((b) => b.code === 'zkh')
+  const ykh2 = page.brackets.find((b) => b.code === 'ykh')
+  check('V1 无显式括号 → 自动合成一对 zkh/ykh', zkh2 !== undefined && ykh2 !== undefined, `marks=${page.brackets.map((b) => b.code).join(',')}`)
+  check('V2 自动括号也留 nonDurGap（右缘 = 首音 x − 0.5×字号）', zkh2 !== undefined && segN.length > 0 && Math.abs(segN[0].x - ns2 * 0.5 - (zkh2.x + zkh2.width / 2)) < 0.11, `right=${zkh2 ? (zkh2.x + zkh2.width / 2).toFixed(1) : 'n/a'} firstNote=${segN[0]?.x}`)
+  check('V3 自动括号纵向同样与数字中心对齐', zkh2 !== undefined && segN.length > 0 && Math.abs(zkh2.yTop - (segN[0].y - ns2 * 0.4)) < 0.11, `yTop=${zkh2?.yTop}`)
 }
 {
   // dsb：两层整体下移使整块与主旋律**居中**
