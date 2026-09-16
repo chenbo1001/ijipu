@@ -63,8 +63,11 @@ interface DocState {
    *  adj427：色块改为**按音色（instrument）着色**——不同音色不同颜色，播放中切换音色能看到变色；
    *  voice 保留用于「主声部保持既有红色」的判定
    *  adj429：`yTopMin` / `yBottomMax` = 色块按曲行几何动态定界的上下绝对 y（多声部/临时段自动避开重叠、压歌词）
-   *  adj432：`playVoice` = 段内声部角色（bz upper = 'accomp' / dsb upper = 'main' / dsb lower = 'second'）→ 预览层颜色区分 */
-  playheadTrack: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number; instrument?: string; yTopMin?: number; yBottomMax?: number; playVoice?: 'accomp' | 'main' | 'second' }[]
+   *  adj432：`playVoice` = 段内声部角色（bz upper = 'accomp' / dsb upper = 'main' / dsb lower = 'second'）→ 预览层颜色区分
+   *  adj451：`gain` = 该拍段所属事件的**力度倍率**（与音频事件同源，缺省 1）——目前由 adj427 写入
+   *  （重叠伴奏/第二声部 0.75），**预留给强弱单（渐强/渐弱）与力度记号**：后续算出逐音力度后，
+   *  音频与色块轨道自动同步，无需再改数据结构 */
+  playheadTrack: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number; instrument?: string; yTopMin?: number; yBottomMax?: number; playVoice?: 'accomp' | 'main' | 'second'; gain?: number }[]
   /** adj262：多声部 voiceBlocks（纯曲部 yTop/yBottom/x）——播放时渲染竖向色框覆盖整列 */
   voiceBlocks: { x: number; yTop: number; yBottom: number; pageIndex: number; voices: number[] }[]
   /** adj291：布局后的「全局音符 index → 物理页 page」映射（自动分页一致）——光标联动定位音符 id.page */

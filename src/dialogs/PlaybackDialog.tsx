@@ -392,6 +392,8 @@ export function PlaybackDialog() {
             ...(s.yBottomMax !== undefined ? { yBottomMax: s.yBottomMax } : {}),
             // adj432：声部角色（bz upper / dsb upper / dsb lower）→ 预览层颜色区分
             ...(s.playVoice !== undefined ? { playVoice: s.playVoice } : {}),
+            // adj451：力度倍率（与音频事件同源）——预留给强弱单/力度记号，先透传备用
+            ...(s.gain !== undefined ? { gain: s.gain } : {}),
           })),
         ),
       )

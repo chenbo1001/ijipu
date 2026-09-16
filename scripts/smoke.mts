@@ -6848,6 +6848,74 @@ console.log('[adj449] color bounds must follow the note own voice block')
   }
 }
 
+// ---- adj451：力度（gain）变量贯通「音频事件 ↔ 色块轨道」（为强弱单/力度记号预留）----
+// 用户：力度作为后继强弱单（渐强/渐弱）控制需要用得上，先补充这块的变量，后面再强化。
+// 口径：色块拍段 `playheadSegs[].gain` 必须与所属事件的 `PlayEvent.gain` **同源**（缺省 1），
+// 这样后续只要算出逐音力度，音频（schedulePlay 的 0.5×gain）与色块轨道就自动一致。
+console.log('[adj451] per-event 力度 (gain) must flow into the playhead track')
+{
+  check('AQ0 PlayheadSeg 类型带 gain（力度倍率）',
+    /export interface PlayheadSeg \{[\s\S]*?gain\?: number[\s\S]*?\n\}/.test(
+      String(readFileSync('packages/ijipu-engine/src/engine/playback/sequence.ts', 'utf8')),
+    ))
+  const cases: { nm: string; q: string }[] = [
+    { nm: '单声部', q: 'Q: 1 2 3 4 | 5 6 7 1\' |' },
+    { nm: 'bz 伴奏', q: "Q: 3 4 {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5 5 5 | 5 - - - |" },
+    { nm: 'dsb 两层', q: "Q: 3 4 {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5 5 5 | 5 - - - |" },
+    { nm: '连音合并', q: "Q: (1 - - - | 1) - 0 0 2 3 | 4 5 6 7 |" },
+    { nm: '倚音', q: 'Q: 3/[3/5/] 2 3 4 | 5 6 7 1\' |' },
+  ]
+  for (const c of cases) {
+    const pr = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\n' + c.q + '\n')
+    const layout = layoutScore(pr, DUR_CFG)
+    const seq = buildPlaySequence(pr, layout, 100)
+    let sameSource = true
+    let missing = 0
+    let segs = 0
+    let bad = ''
+    for (const e of seq.events) {
+      const evGain = e.gain ?? 1
+      for (const s of e.playheadSegs ?? []) {
+        segs++
+        if (s.gain === undefined) {
+          missing++
+          sameSource = false
+          bad = `事件 gain=${evGain} 的拍段缺 gain`
+        } else if (Math.abs(s.gain - evGain) > 1e-9) {
+          sameSource = false
+          bad = `拍段 gain=${s.gain} ≠ 事件 gain=${evGain}`
+        }
+      }
+    }
+    check(`AQ1[${c.nm}] 每个拍段的 gain 与所属事件同源（${segs} 段）`, sameSource && segs > 0,
+      bad || `segs=${segs} missing=${missing}`)
+  }
+  // bz 伴奏 = 0.75、主声部 = 1（adj427 的既有力度在色块轨道上也要看得到）
+  {
+    const pr = parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5 5 5 | 5 - - - |\n")
+    const seq = buildPlaySequence(pr, layoutScore(pr, DUR_CFG), 100)
+    const acc = new Set<number>()
+    const main = new Set<number>()
+    for (const e of seq.events) {
+      for (const s of e.playheadSegs ?? []) {
+        if (s.gain === undefined) continue
+        if (s.playVoice === 'accomp' || s.playVoice === 'second') acc.add(s.gain)
+        else main.add(s.gain)
+      }
+    }
+    check('AQ2[bz] 伴奏拍段 gain = 0.75、主声部 = 1（力度已随色块轨道透出）',
+      acc.size === 1 && acc.has(0.75) && main.size === 1 && main.has(1),
+      `伴奏=${[...acc]} 主=${[...main]}`)
+  }
+  // 应用层：轨道条目类型与映射都带上 gain（后续强弱单直接用）
+  {
+    const storeSrc = String(readFileSync('src/store/docStore.ts', 'utf8'))
+    const dlgSrc = String(readFileSync('src/dialogs/PlaybackDialog.tsx', 'utf8'))
+    check('AQ3 app 的 playheadTrack 条目类型含 gain', /playheadTrack: \{[\s\S]{0,700}gain\?: number/.test(storeSrc))
+    check('AQ4 PlaybackDialog 把拍段 gain 透传进播放轨道', dlgSrc.includes('{ gain: s.gain }'))
+  }
+}
+
 runAdj363SaveTests()
   .catch((e) => {
     failed++
