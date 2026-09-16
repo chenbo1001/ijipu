@@ -2,7 +2,7 @@
  * styles/theme.css — iJipu 品牌主题令牌（CSS 变量）
  * 与 src/brand/tokens.ts 保持同步。
  * 品牌色：深空蓝 #1E2A5E + 霓虹青 #00F0FF；VS Code 风格深色主题；
- * 乐谱预览区保持纸张白色。
+ * 乐谱预览区默认保持纸张白色（adj425：所有主题深色模式下预览区反相做"暗纸"，见后文）；
  */
 
 /* adj：不再附带大字体文件——谱面字体统一用系统字体栈（见 defaultPageConfig），
@@ -264,4 +264,17 @@
   --jp-text-muted: #777777;
   --jp-accent: #c9c9c9;
   --jp-editor-bg: #0b0b0b;
+}
+
+/* adj425（用户要求）：所有主题深色模式下预览区跟随反相做"暗纸"——
+   引擎 SVG 内写死 #1b1b1b 墨色（engine/render/index.ts 89 处），CSS 变量 --jp-paper-ink 不生效；
+   用 CSS 滤镜 filter: invert(1) 把 .score-page 整体（含 CSS 背景 + 内嵌 SVG）反相：
+     · .score-page 的 var(--jp-paper-bg)=#fff → #000（暗纸）
+     · SVG 内的黑墨色 → 浅色（反相白）
+     · adj244 已把 SVG 自带白底 rect 透明化，不会有"双重底色"干扰
+   优点：所有主题自动适配——深色编辑区背景下，预览也是暗纸，元素对比与反相前一致；
+   浅色模式不动（白纸黑字保留），其它模式也都不动。
+   真正落地仍需改引擎（参数化底色与墨色）以取消 filter；本次仅做快速适配测试。*/
+[data-mode='dark'] .score-page {
+  filter: invert(1);
 }

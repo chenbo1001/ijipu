@@ -47,6 +47,12 @@ export const ICON_FILES = {
   more: '更多',
   /** 输入条（简谱输入键盘） */
   keyboard: '键盘',
+  /** adj426：顶栏「浅深模式」三状态按钮——自动（随系统） */
+  themeAuto: '自动主题',
+  /** adj426：浅色主题 */
+  themeLight: '浅色主题',
+  /** adj426：深色主题 */
+  themeDark: '深色主题',
 } as const
 
 export type ToolIconName = keyof typeof ICON_FILES

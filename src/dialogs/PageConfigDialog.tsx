@@ -19,6 +19,8 @@ import { clampEditorFontSize, defaultPageConfig, EDITOR_FONT_OPTIONS, SCORE_FONT
 import { THEMES, type ThemeMode } from '../brand/themes'
 import { SoundBankPanel } from './SoundBankPanel'
 import type { PageConfig } from '@ijipu/engine'
+// adj426：主题按钮用 ToolIcon（与顶栏三状态按钮共用图标：自动主题/浅色主题/深色主题）
+import { ToolIcon } from '../ui/ToolIcon'
 
 type TabId = 'global' | 'theme' | 'soundbank' | 'score' | 'font'
 
@@ -150,19 +152,24 @@ export function PageConfigDialog() {
           <>
             <div className="ijipu-form-label">浅深模式</div>
             <div className="theme-mode-row" style={{ padding: 0 }}>
+              {/* adj426：设置面板三个按钮改用 ToolIcon（自动主题/浅色主题/深色主题），
+                  与顶栏新加的浅深模式三状态按钮视觉一致；点击直接选中该档（不走循环） */}
               {(
                 [
-                  { key: 'auto', label: '跟随系统' },
-                  { key: 'light', label: '浅色' },
-                  { key: 'dark', label: '深色' },
-                ] as { key: ThemeMode; label: string }[]
+                  { key: 'auto' as ThemeMode, label: '跟随系统', icon: 'themeAuto' as const },
+                  { key: 'light' as ThemeMode, label: '浅色', icon: 'themeLight' as const },
+                  { key: 'dark' as ThemeMode, label: '深色', icon: 'themeDark' as const },
+                ]
               ).map((m) => (
                 <button
                   key={m.key}
                   className={`theme-mode-btn${themeMode === m.key ? ' active' : ''}`}
                   onClick={() => setThemeMode(m.key)}
+                  title={m.label}
+                  aria-label={m.label}
                 >
-                  {m.label}
+                  <ToolIcon name={m.icon} />
+                  <span>{m.label}</span>
                 </button>
               ))}
             </div>

@@ -115,6 +115,9 @@ export function TopBar() {
   const setShowGuides = useUiStore((s) => s.setShowGuides)
   const previewZoom = useUiStore((s) => s.previewZoom)
   const setPreviewZoom = useUiStore((s) => s.setPreviewZoom)
+  // adj426：顶栏新增「浅深模式」三状态按钮（在支持作者之前），与设置里的浅深模式联动
+  const themeMode = useUiStore((s) => s.themeMode)
+  const setThemeMode = useUiStore((s) => s.setThemeMode)
   // adj383：主题（中国色主题 + 浅深模式）已移入「页面设置」对话框的「主题」标签，顶栏不再持有
   // adj281：折行 / 字体 / 字号（从状态栏设置组移到顶栏工具条）
   const autoWrap = useUiStore((s) => s.autoWrap)
@@ -320,6 +323,13 @@ export function TopBar() {
         return <ToolIcon name="font" />
       case 'scriptPad':
         return <ToolIcon name="keyboard" />
+      // adj426：浅深模式三状态按钮——按当前 mode 选不同图标（与品牌 copy 里的浅深色描述一致）
+      case 'themeAuto':
+        return <ToolIcon name="themeAuto" />
+      case 'themeLight':
+        return <ToolIcon name="themeLight" />
+      case 'themeDark':
+        return <ToolIcon name="themeDark" />
       default:
         return null
     }
@@ -842,6 +852,46 @@ export function TopBar() {
             </span>
           ))}
         </div>
+        {/* adj426：浅深模式三状态按钮（位于「支持」之前，独立于工具条常驻）——
+             点一次循环到下一档：auto → light → dark → auto；图标与文字随当前档位切换。
+             与「设置 → 主题 → 浅深模式」三个按钮共用 store（uiStore.setThemeMode），状态实时同步。 */}
+        <button
+          type="button"
+          className="topbar-btn topbar-theme-mode"
+          onClick={() => {
+            const next: Record<typeof themeMode, typeof themeMode> = {
+              auto: 'light',
+              light: 'dark',
+              dark: 'auto',
+            }
+            setThemeMode(next[themeMode])
+          }}
+          title={
+            themeMode === 'auto'
+              ? '浅深模式：随系统（点击切到浅色）'
+              : themeMode === 'light'
+                ? '浅深模式：浅色（点击切到深色）'
+                : '浅深模式：深色（点击切到随系统）'
+          }
+          aria-label={
+            themeMode === 'auto'
+              ? '浅深模式 当前为随系统，点击切到浅色'
+              : themeMode === 'light'
+                ? '浅深模式 当前为浅色，点击切到深色'
+                : '浅深模式 当前为深色，点击切到随系统'
+          }
+        >
+          {iconOf(
+            themeMode === 'auto'
+              ? 'themeAuto'
+              : themeMode === 'light'
+                ? 'themeLight'
+                : 'themeDark'
+          )}
+          <span className="tool-label">
+            {themeMode === 'auto' ? '自动' : themeMode === 'light' ? '浅色' : '深色'}
+          </span>
+        </button>
         {/* 支持作者：独立于工具条最右侧（不参与功能组/设置组折叠，始终可见） */}
         <button
           ref={donateRef}
