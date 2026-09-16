@@ -5962,7 +5962,33 @@ console.log('[adj435] overlap beats sized by the denser layer (multi-voice style
     // 段层前 3 个音 = `1/ 2// 3//`（同一拍内，时值 0.5/0.25/0.25）
     const head3 = segN.slice(0, 3)
     const coveredBeatNote = melN[2] // `5`（包络起点，段层该拍 3 个音）
-    // AJ4：段层首音仍与主旋律包络起点音精确对齐（坐标系修好后对齐不被破坏）
+    // AL1–AL3（adj437，E-2026-177）：**dsb 上下两层逐拍精确对齐**——
+    // 用户报 `{dsb 1 2 3 4 | 5 6 7 1' } 5 6&dy 7&yc 1' | …` 上下层拍子不对齐（实测逐拍漂移 1.95px、
+    // 末拍 13.6px，因 `segScale` 被误触发成 0.9435）。修复后 `segScale` 只在**真正越过小节线**时才压缩。
+    {
+      const srcD = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1' } 5 6&dy 7&yc 1' | 1' 7 6 5 | 5 5\n"
+      for (const [nm, cfg] of [['时值优先', DUR_CFG], ['空间优先', { ...DUR_CFG, noteSpaceLayout: 'space' as const }]] as const) {
+        const p = layoutScore(parseJps(srcD), cfg).pages[0]
+        const mm = p.notes.filter((n) => !n.segment).sort((a, b) => a.x - b.x)
+        const ss = p.notes.filter((n) => n.segment).sort((a, b) => a.x - b.x)
+        // 包络覆盖主旋律第 3..10 个音（`3 4` 之后的 8 拍）
+        const melEnv = mm.slice(2, 10)
+        const maxDrift = Math.max(...ss.map((n, i) => (melEnv[i] ? Math.abs(n.x - melEnv[i].x) : 0)))
+        check(`AL1[${nm}] dsb 上下两层**逐拍精确对齐**（最大偏差 < 0.51px；旧实现漂移到 13.6px）`,
+          ss.length === 8 && melEnv.length === 8 && maxDrift < 0.51,
+          `maxDrift=${maxDrift.toFixed(2)} seg=${ss.map((n) => n.x.toFixed(1)).join(',')} mel=${melEnv.map((n) => n.x.toFixed(1)).join(',')}`)
+        // AL2：段层末音右缘不与右括号重叠（括号在 xContent1 之外、段层内容之内收）
+        const ykh = p.brackets.find((b) => b.code === 'ykh')
+        check(`AL2[${nm}] 段层末音右缘 ≤ 右括号左缘（不压括号）`,
+          ykh !== undefined && (ss[ss.length - 1].rightX ?? 0) <= ykh.x - ykh.width / 2 + 0.51,
+          `segRight=${(ss[ss.length - 1].rightX ?? 0).toFixed(2)} ykhLeft=${ykh ? (ykh.x - ykh.width / 2).toFixed(2) : 'n/a'}`)
+        // AL3：段层各音宽度 > 0 且起始 x 单调递增
+        check(`AL3[${nm}] 段层各音宽 > 0 且 x 单调递增`,
+          ss.every((n) => n.width > 0) && ss.every((n, i) => i === 0 || n.x > ss[i - 1].x),
+          `w=${ss.map((n) => n.width.toFixed(1)).join(',')}`)
+      }
+    }
+  // AJ4：段层首音仍与主旋律包络起点音精确对齐（坐标系修好后对齐不被破坏）
     check(`AJ4[${nm}] 段层首音 x = 主旋律包络起点音 x（同拍位对齐）`,
       Math.abs(segN[0].x - coveredBeatNote.x) < 0.51,
       `seg0.x=${segN[0].x.toFixed(2)} mel.x=${coveredBeatNote.x.toFixed(2)}`)
