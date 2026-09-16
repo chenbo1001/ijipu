@@ -1417,10 +1417,15 @@ export function layoutScore(
     }
     // adj294：&zkh/&ykh 为独立括号标记（无时值元素）——占位从行宽扣（A 方案）
     // adj375：&hx 呼吸记号同为独立标记，宽度按 code 取
+    // adj427：**临时段内**的括号也要计入行宽预算——段层与主旋律共占同一横向空间，
+    // 段内 `&zkh/&ykh` 的占宽必须从行宽里扣，否则段首音会被括号压住（用户报「&zkh 位置没预留」）。
     let bracketPadSum = 0
     for (let bi = row.start; bi < row.end; bi++) {
       for (const tk of segs[bi].notes) {
         if (tk.kind === 'bracket') bracketPadSum += markBodyW(tk.code, m.noteSize)
+        else if (tk.kind === 'segment' && tk.children) {
+          for (const ct of tk.children) if (ct.kind === 'bracket') bracketPadSum += markBodyW(ct.code, m.noteSize)
+        }
       }
     }
     if (bracketPadSum > 0) nonDurPad += bracketPadSum
@@ -2636,6 +2641,40 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       return { y: p.note.y, right, page: p.page }
     }
 
+    /**
+     * 主旋律**小节线**锚点：拍位 → 小节线 x。
+     *
+     * 为什么必须单独一套：`beatToX` 只锚定**音符**，把「小节线所在拍位」映射成了
+     * 「小节线**之后**那个音符」的 x；而小节线自身有占宽（线宽 + 两侧间距 ≈ 15.6px），
+     * 于是段内小节线与包络右缘都会**右偏一个小节线占宽**：
+     *   - 段内 `|` 对不上主旋律 `|`（实测 315.3 vs 299.6）；
+     *   - 右括号/`&ykh` 越出主旋律小节线（477.7 vs 462.1）。
+     * 小节线拍位由**几何反推**：该小节线右侧第一个音符的起拍（同一曲行内）。
+     */
+    const mainBarAnchors: { beat: number; x: number }[] = []
+    {
+      const totalBeatsOfRow = spans[cnt - 1].startBeat + spans[cnt - 1].beats
+      for (const p of pages) {
+        for (const b of p.barlines) {
+          if (b.segment || b.id.group !== gi || b.id.voice !== group.music.voice || b.voltaOnly) continue
+          let beat = totalBeatsOfRow
+          for (let k = 0; k < cnt; k++) {
+            if (placed[k].page === p.index && placed[k].note.x > b.x + 1e-6) {
+              beat = spans[k].startBeat
+              break
+            }
+          }
+          mainBarAnchors.push({ beat, x: b.x })
+        }
+      }
+      mainBarAnchors.sort((a, b) => a.beat - b.beat)
+    }
+    /** 拍位 → x：该拍位**有主旋律小节线**时用小节线自身 x（精确对齐）；否则回落音符锚点 */
+    const beatToBarX = (beat: number): number => {
+      for (const a of mainBarAnchors) if (Math.abs(a.beat - beat) < 1e-6) return a.x
+      return beatToX(beat)
+    }
+
     for (const seg of segs) {
       if (seg.beats <= 0) continue
       const envStart = seg.startBeat
@@ -2643,25 +2682,63 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       const row = rowOf(envStart)
       const page = pages[row.page]
       if (!page) continue
-      const x0 = beatToX(envStart)
-      const x1 = Math.min(beatToX(envEnd), row.right)
+      const ns = config.note_size
+      // ---- 段内显式括号（`&zkh` / `&ykh` / `&hx`）：占宽要**预留**出来 ----
+      // 用户写 `{bz &zkh 1 2 … &ykh}` 时，左括号落在包络内容**左缘之外**（主旋律小节线
+      // 与首音之间的空隙）、右括号落在内容**右缘之外**——此前完全没渲染、也没留位，
+      // 导致 `(` 与首音重合。
+      const segBrackets = seg.tokens.filter((t): t is BracketTok => t.kind === 'bracket')
+      const leadBrackets: BracketTok[] = []
+      const tailBrackets: BracketTok[] = []
+      {
+        let seenNote = false
+        for (const t of seg.tokens) {
+          if (isDurational(t)) seenNote = true
+          else if (t.kind === 'bracket') (seenNote ? tailBrackets : leadBrackets).push(t)
+        }
+      }
+      const wOf = (bs: BracketTok[]): number => bs.reduce((a, t) => a + markBodyW(t.code, ns), 0)
+      // 自动圆括号（段内未写显式括号时由渲染端画）同样要**预留占宽**，
+      // 否则 `(` 与段首音重合（用户报「&zkh 的位置没有预留出来」）。
+      const autoW = segBrackets.length === 0 ? markBodyW('zkh', ns) : 0
+      const leadPad = wOf(leadBrackets) + autoW
+      const tailPad = wOf(tailBrackets) + autoW
+
+      // 内容左缘 = 包络起点处主旋律音符的 x（段首音与主旋律同拍位精确对齐）；
+      // 左括号/左伴奏括号安排在它**左侧**的预留区里（主旋律小节线右缘之后）。
+      const xContent0 = beatToX(envStart)
+      // 内容右缘 = 包络终点处的**主旋律小节线 x** 再往左让出尾括号预留宽
+      // （不再用其后音符的 x，否则右括号越线——用户报「&ykh 超过主声部的小节线」）。
+      const xEndBoundary = Math.min(beatToBarX(envEnd), row.right)
+      const xContent1 = Math.max(xContent0, xEndBoundary - tailPad)
+      const x0 = xContent0 - leadPad
+      const x1 = xEndBoundary
       if (!(x1 > x0)) continue
-      // 段层 y：主旋律上方一层（留出 note_size×1.7 的层间距）
-      const layerDy = config.note_size * 1.7
-      const yUpper = row.y - layerDy
+
+      // 层间距：bz 段画在主旋律上方；dsb 段**上下两层整体下移**使整块与主旋律居中
+      // （用户要求「大括号里的整体与其它主声部部分居中对齐」）——
+      // 做法：包络内的主旋律整体下移 dy/2、段层抬高 dy/2，两层中线落在行基线上。
+      const dy = ns * 1.7
+      const isDsb = seg.type === 'dsb'
+      const yUpper = isDsb ? row.y - dy / 2 : row.y - dy
       const idBase = 900000 + gi * 1000 + seg.openIndex * 10
       const barIdBase = 950000 + gi * 1000 + seg.openIndex * 10
       let noteSeq = 0
       let barSeq = 0
 
+      if (isDsb) shiftEnvelopeDown(pages, gi, group.music.voice, spans, placed, cnt, envStart, envEnd, row, dy / 2)
+
       // ---- 段内音符 ----
       let beat = 0
       for (const t of seg.tokens) {
-        if (t.kind === 'barline') continue
+        if (t.kind === 'barline' || t.kind === 'bracket') continue
         if (!isDurational(t)) continue
         const dur = tokenDuration(t)
-        const bx0 = beatToX(envStart + beat)
-        const bx1 = Math.max(bx0, beatToX(envStart + beat + dur))
+        const beatAt = beat
+        const bx0 = beatToX(envStart + beatAt)
+        let bx1 = Math.max(bx0, beatToX(envStart + beatAt + dur))
+        // 右缘不得超过「包络右界 − 尾括号预留宽」——最后几个音不会被右括号压出去
+        bx1 = Math.min(bx1, xContent1)
         beat += dur
         if (bx1 <= bx0) continue
         // 拍段：音符块 + 每条增时线 + 附点，按各分量的实际 x 位置给出
@@ -2691,7 +2768,7 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
           width: r1(w),
           rightX: r1(bx1),
           duration: dur,
-          beatPos: r1(beat - dur),
+          beatPos: r1(beatAt),
           barIndex: 0,
           segments: segList,
           audioPitch: isPlayableNote(t) ? pitchToName(t.pitch, t.octaveShift, t.accidental, keySemitone) : null,
@@ -2700,31 +2777,49 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         })
       }
 
-      // ---- 段内小节线（按段内自身拍位映射到包络内 x） ----
+      // ---- 段内显式括号：左括号排在内容左缘之外、右括号排在内容右缘之外 ----
+      if (segBrackets.length > 0) {
+        let lx = xContent0
+        for (const bt of leadBrackets) {
+          const bw = markBodyW(bt.code, ns)
+          lx -= bw
+          page.brackets.push({ code: bt.code, dir: bt.dir, x: r1(lx + bw / 2), yTop: r1(yUpper - ns * 0.7), width: r1(bw), voice: group.music.voice, group: gi })
+        }
+        let rx = xContent1
+        for (const bt of tailBrackets) {
+          const bw = markBodyW(bt.code, ns)
+          page.brackets.push({ code: bt.code, dir: bt.dir, x: r1(rx + bw / 2), yTop: r1(yUpper - ns * 0.7), width: r1(bw), voice: group.music.voice, group: gi })
+          rx += bw
+        }
+      }
+
+      // ---- 段内小节线：用**主旋律小节线锚点**映射（与主旋律 `|` 精确对齐） ----
       for (const bb of seg.barBeats) {
-        const bx = beatToX(envStart + bb)
+        const bx = beatToBarX(envStart + bb)
         if (bx < x0 - 1e-6 || bx > x1 + 1e-6) continue
         page.barlines.push({
           id: { page: row.page, voice: group.music.voice, group: gi, index: barIdBase + barSeq++ },
           type: '|',
           x: r1(bx),
-          yTop: r1(yUpper - config.note_size * 0.9),
-          yBottom: r1(yUpper + config.note_size * 0.35),
+          yTop: r1(yUpper - ns * 0.9),
+          yBottom: r1(yUpper + ns * 0.35),
           width: 0,
           segment: { type: seg.type, layer: 'upper' },
         })
       }
 
-      // ---- 段层左右大括号（包住整个包络范围） ----
+      // ---- 段层括弧 ----
+      // 有显式 `&zkh/&ykh` 时不再自动画圆括号（避免双括号）；dsb 的花括号始终绘制。
       if (!page.segmentBrackets) page.segmentBrackets = []
       page.segmentBrackets.push({
         type: seg.type,
         x1: r1(x0),
         x2: r1(x1),
-        yTop: r1(yUpper - config.note_size * 0.95),
-        yBottom: r1(yUpper + config.note_size * 0.4),
+        yTop: r1(yUpper - ns * 0.95),
+        yBottom: r1(yUpper + ns * 0.4),
         // dsb：下层声部（包络内主旋律）底缘——供渲染画跨两层的大花括号
-        yBottomLower: seg.type === 'dsb' ? r1(row.y + config.note_size * 0.35) : undefined,
+        yBottomLower: isDsb ? r1(row.y + dy / 2 + ns * 0.35) : undefined,
+        parens: segBrackets.length === 0,
         voice: group.music.voice,
         group: gi,
       })
@@ -2732,7 +2827,55 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
   }
 }
 
+/**
+ * adj427：把某曲行**包络范围内**的主旋律内容整体下移 `dy`（dsb 上下两层居中用）。
+ *
+ * 只动包络内的音符及其歌词、以及**严格落在包络内**的小节线与连音线——
+ * 包络两端的小节线（与包络外内容共享）不动，避免与外部内容错位。
+ */
+function shiftEnvelopeDown(
+  pages: ScorePage[],
+  gi: number,
+  voice: number,
+  spans: { startBeat: number; beats: number }[],
+  placed: { note: PlacedToken; page: number }[],
+  cnt: number,
+  envStart: number,
+  envEnd: number,
+  row: { y: number; page: number },
+  dy: number,
+): void {
+  const movedIds = new Set<number>()
+  let xMin = Number.POSITIVE_INFINITY
+  let xMax = Number.NEGATIVE_INFINITY
+  for (let k = 0; k < cnt; k++) {
+    const s = spans[k]
+    if (s.startBeat < envStart - 1e-9 || s.startBeat >= envEnd - 1e-9) continue
+    const p = placed[k]
+    if (Math.abs(p.note.y - row.y) > 0.5) continue
+    p.note.y = r1(p.note.y + dy)
+    movedIds.add(p.note.id.index)
+    xMin = Math.min(xMin, p.note.x)
+    xMax = Math.max(xMax, p.note.rightX ?? p.note.x + p.note.width)
+  }
+  if (movedIds.size === 0) return
+  for (const p of pages) {
+    for (const l of p.lyrics) if (movedIds.has(l.id.index) && l.id.group === gi && l.id.voice === voice) l.y = r1(l.y + dy)
+    for (const b of p.barlines) {
+      if (b.segment || b.id.group !== gi || b.id.voice !== voice) continue
+      if (b.x > xMin + 1e-6 && b.x < xMax - 1e-6) {
+        b.yTop = r1(b.yTop + dy)
+        b.yBottom = r1(b.yBottom + dy)
+      }
+    }
+    for (const s of p.slurs) if (s.x1 >= xMin - 1e-6 && s.x1 <= xMax + 1e-6) s.y = r1(s.y + dy)
+  }
+}
+
 /** adj427：可发声音符判定（供段内音符的 audioPitch / playable） */
 function isPlayableNote(t: MusicToken): t is NoteToken {
   return t.kind === 'note'
 }
+
+/** adj427：独立括号标记 token（`&zkh` / `&ykh` / `&hx`）——段内括号预留与渲染用 */
+type BracketTok = Extract<MusicToken, { kind: 'bracket' }>

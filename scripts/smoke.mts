@@ -5618,6 +5618,67 @@ console.log('[adj427] playback safety with segments')
   check('T5 主旋律可发声事件数 = 12', sPlain.events.filter((e) => e.pitch !== null).length === 12, `got ${sPlain.events.filter((e) => e.pitch !== null).length}`)
 }
 
+// ---- adj427 Step 5c：小节线锚点对齐 / 括号预留 / dsb 两层居中（用户报的 6 项问题） ----
+console.log('[adj427] segment barline align / bracket reserve / dsb centering')
+{
+  // 用户原例（含显式 &zkh / &ykh）
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz &zkh 1 2 3 4 | 5 6 7 1' &ykh } 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const page = layoutScore(parseJps(src), DUR_CFG).pages[0]
+  const segN = page.notes.filter((n) => n.segment).sort((a, b) => a.x - b.x)
+  const sb = (page.segmentBrackets ?? [])[0]
+  const mainBars = page.barlines.filter((b) => !b.segment).map((b) => b.x).sort((a, b) => a - b)
+  const segBars = page.barlines.filter((b) => b.segment).map((b) => b.x).sort((a, b) => a - b)
+  // U1：段内小节线必须与主旋律小节线**精确同 x**（不能再落在小节线之后的音符上）
+  check('U1 段内小节线 x == 主旋律小节线 x（精确对齐）', segBars.length === 1 && mainBars.some((x) => Math.abs(x - segBars[0]) < 1e-6), `segBars=[${segBars}] mainBars=[${mainBars}]`)
+  // U2：包络右缘必须收在**主旋律小节线**处（不得越过它）
+  const barBefore55 = mainBars[mainBars.length - 1]
+  check('U2 包络右缘 x2 == 主旋律末小节线 x（不越线）', sb !== undefined && Math.abs(sb.x2 - barBefore55) < 0.11, `x2=${sb?.x2} bar=${barBefore55}`)
+  check('U3 段层末音右缘不超过 x2（不压过右括号）', segN.length > 0 && (segN[segN.length - 1].rightX ?? 0) <= (sb?.x2 ?? 0) + 0.11, `segRight=${segN[segN.length - 1]?.rightX} x2=${sb?.x2}`)
+  // U4：显式 &zkh 已渲染，且整体落在段首音**左侧**（位置被预留出来）
+  const zkh = page.brackets.find((b) => b.code === 'zkh')
+  check('U4 &zkh 已渲染为独立括号', zkh !== undefined, `brackets=${page.brackets.map((b) => b.code).join(',')}`)
+  check('U5 &zkh 右缘 ≤ 段首音 x（位置已预留，不与首音重合）', zkh !== undefined && segN.length > 0 && zkh.x + zkh.width / 2 <= segN[0].x + 0.11, `zkhRight=${zkh ? zkh.x + zkh.width / 2 : 'n/a'} firstNote=${segN[0]?.x}`)
+  // U6：显式 &ykh 已渲染，且整体落在 x2 **之前**（不越主旋律小节线）
+  const ykh = page.brackets.find((b) => b.code === 'ykh')
+  check('U6 &ykh 已渲染且右缘 ≤ x2（不越主旋律小节线）', ykh !== undefined && sb !== undefined && ykh.x + ykh.width / 2 <= sb.x2 + 0.11, `ykhRight=${ykh ? ykh.x + ykh.width / 2 : 'n/a'} x2=${sb?.x2}`)
+  // U7：有显式括号时不再自动画圆括号（避免双括号）
+  check('U7 有显式 &zkh/&ykh → parens=false（不重复画）', sb?.parens === false, `parens=${sb?.parens}`)
+  // U8：段层音符与主旋律同拍位音符**逐一对齐**（8 个）
+  const mains = page.notes.filter((n) => !n.segment).sort((a, b) => a.x - b.x)
+  const aligned = segN.every((n, i) => Math.abs(n.x - mains[i + 2].x) < 0.11)
+  check('U8 段层 8 个音与主旋律拍位 2..9 逐一对齐', segN.length === 8 && aligned, `seg=${segN.map((n) => n.x).join(',')}`)
+}
+{
+  // 无显式括号：自动括号同样要预留占宽（不得与段首音重合）
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const page = layoutScore(parseJps(src), DUR_CFG).pages[0]
+  const segN = page.notes.filter((n) => n.segment).sort((a, b) => a.x - b.x)
+  const sb = (page.segmentBrackets ?? [])[0]
+  check('V1 无显式括号 → parens=true（自动画）', sb?.parens === true, `parens=${sb?.parens}`)
+  check('V2 自动括号左缘 x1 < 段首音 x（预留出占宽）', sb !== undefined && segN.length > 0 && sb.x1 < segN[0].x - 0.5, `x1=${sb?.x1} firstNote=${segN[0]?.x}`)
+}
+{
+  // dsb：两层整体下移使整块与主旋律**居中**
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1' } 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const page = layoutScore(parseJps(src), DUR_CFG).pages[0]
+  const segN = page.notes.filter((n) => n.segment)
+  const sb = (page.segmentBrackets ?? [])[0]
+  // 包络外主旋律（第 1、2、11、12 个音）与包络内主旋律 y 不同
+  const mains = page.notes.filter((n) => !n.segment)
+  const ys = [...new Set(mains.map((n) => n.y))].sort((a, b) => a - b)
+  check('W1 dsb 包络内主旋律已下移（出现两个 y）', ys.length === 2, `ys=${ys.join(',')}`)
+  const yOut = ys[0]
+  const yIn = ys[1]
+  check('W2 段层在主旋律上方（段层 y < 包络内 y）', segN.length > 0 && segN[0].y < yIn, `seg=${segN[0]?.y} in=${yIn}`)
+  check('W3 两层中线 == 行基线（整块居中）', Math.abs((segN[0].y + yIn) / 2 - yOut) < 0.11, `mid=${(segN[0].y + yIn) / 2} rowY=${yOut}`)
+  check('W4 yBottomLower 跨到下层（> yBottom）', sb?.yBottomLower !== undefined && sb.yBottomLower > sb.yBottom, `lo=${sb?.yBottomLower} hi=${sb?.yBottom}`)
+  check('W5 dsb 段内小节线仍与主旋律小节线对齐', (() => {
+    const mb = page.barlines.filter((b) => !b.segment).map((b) => b.x)
+    const sbx = page.barlines.filter((b) => b.segment).map((b) => b.x)
+    return sbx.length === 1 && mb.some((x) => Math.abs(x - sbx[0]) < 1e-6)
+  })(), `segBars=${page.barlines.filter((b) => b.segment).map((b) => b.x).join(',')}`)
+}
+
 // 收尾：合并同步 + 异步用例结果后统一输出/退出码
 runAdj363SaveTests()
   .catch((e) => {

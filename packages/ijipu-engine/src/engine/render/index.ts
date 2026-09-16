@@ -1400,11 +1400,14 @@ function renderSegmentBracket(b: PlacedSegmentBracket, config: PageConfig): stri
   const bulge = Math.min(7, Math.max(3, config.note_size * 0.3))
   const out: string[] = []
   // 圆括号：dir=+1 左括号（向右凸）、dir=-1 右括号（向左凸）
-  const paren = (x: number, dir: 1 | -1): string =>
-    `<path d="M ${r1n(x + dir * bulge)} ${r1n(yTop)} Q ${r1n(x - dir * bulge)} ${r1n(midY)} ` +
-    `${r1n(x + dir * bulge)} ${r1n(yBottom)}" fill="none" stroke="#1b1b1b" stroke-width="1.1" ` +
-    `data-segment-paren="${b.type}"/>`
-  out.push(paren(x1, 1), paren(x2, -1))
+  // parens === false（段内已写显式 &zkh/&ykh）时不画，避免双括号
+  if (b.parens !== false) {
+    const paren = (x: number, dir: 1 | -1): string =>
+      `<path d="M ${r1n(x + dir * bulge)} ${r1n(yTop)} Q ${r1n(x - dir * bulge)} ${r1n(midY)} ` +
+      `${r1n(x + dir * bulge)} ${r1n(yBottom)}" fill="none" stroke="#1b1b1b" stroke-width="1.1" ` +
+      `data-segment-paren="${b.type}"/>`
+    out.push(paren(x1, 1), paren(x2, -1))
+  }
   // dsb：跨两层的大花括号
   const lo = b.yBottomLower
   if (b.type === 'dsb' && lo !== undefined && lo > yTop) {
