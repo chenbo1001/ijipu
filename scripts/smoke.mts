@@ -5761,13 +5761,15 @@ console.log('[adj429] playheadSegs color-block bounds (no overlap, no lyric pres
     const lowerSeg = seq.events.find((e) => e.placed.playVoice === 'second')?.playheadSegs?.[0]
     check('V3 dsb upper 带 yTopMin/yBottomMax', upperSeg?.yTopMin !== undefined && upperSeg?.yBottomMax !== undefined, `up=${JSON.stringify(upperSeg)}`)
     check('V3 dsb lower 带 yTopMin/yBottomMax', lowerSeg?.yTopMin !== undefined && lowerSeg?.yBottomMax !== undefined, `lo=${JSON.stringify(lowerSeg)}`)
-    if (upperSeg?.yBottomMax !== undefined && lowerSeg?.yTopMin !== undefined) {
-      check('V3 dsb upper 底部 ≤ lower 顶部（不重叠）', upperSeg.yBottomMax <= lowerSeg.yTopMin + 0.01, `up.bot=${upperSeg.yBottomMax.toFixed(2)} lo.top=${lowerSeg.yTopMin.toFixed(2)}`)
-    }
-    // V3b：色块高度 ≥ 4 px（不到则隐藏；这里默认 dy=22 ⇒ 两层各约 11−0.5=10.5 px，满足）
     const upH = (upperSeg?.yBottomMax ?? 0) - (upperSeg?.yTopMin ?? 0)
     const loH = (lowerSeg?.yBottomMax ?? 0) - (lowerSeg?.yTopMin ?? 0)
-    check('V3b dsb 上下色块高度 ≥ 4 px（最小可见）', upH >= 4 && loH >= 4, `upH=${upH.toFixed(2)} loH=${loH.toFixed(2)}`)
+    if (upperSeg?.yBottomMax !== undefined && lowerSeg?.yTopMin !== undefined) {
+      check('V3 dsb upper 底部 ≤ lower 顶部（不重叠）', upperSeg.yBottomMax <= lowerSeg.yTopMin + 0.01, `up.bot=${upperSeg.yBottomMax.toFixed(2)} lo.top=${lowerSeg.yTopMin.toFixed(2)}`)
+      // adj429b：用户建议——dsb 上下色块**严格等高**（用 0.25×ns 中线偏移消化 TOP/BOT 不对称）
+      check('V3b dsb 上下色块**严格等高**（误差 < 0.1 px）', Math.abs(upH - loH) < 0.1, `upH=${upH.toFixed(2)} loH=${loH.toFixed(2)} 差=${(upH - loH).toFixed(2)}`)
+    }
+    // V3c：色块高度 ≥ 4 px（不到则隐藏；这里默认 dy=22 ⇒ 两层各约 22 px，满足）
+    check('V3c dsb 上下色块高度 ≥ 4 px（最小可见）', upH >= 4 && loH >= 4, `upH=${upH.toFixed(2)} loH=${loH.toFixed(2)}`)
   }
   // V4：bz 上层 → 底部 ≤ 主旋律色块顶（不重叠）
   {
@@ -5798,9 +5800,8 @@ console.log('[adj429] playheadSegs color-block bounds (no overlap, no lyric pres
     const lowerSeg = seq.events.find((e) => e.placed.playVoice === 'second')?.playheadSegs?.[0]
     const upH = (upperSeg?.yBottomMax ?? 0) - (upperSeg?.yTopMin ?? 0)
     const loH = (lowerSeg?.yBottomMax ?? 0) - (lowerSeg?.yTopMin ?? 0)
-    // dy=60 ⇒ 上下层各占用 ≥ dy/2 − 0.5 = 29.5 px；upper 用 TOP_EXT(1.1ns)=14.3、lower 用 BOT_EXT(0.6ns)=7.8，
-    // 上下高度允许有差异（44 vs 37 ≈ 1.1:0.6 = 14.3:7.8 的固有比）。
-    check('V5 dsb dy=60 → 上下色块均 ≥ 20 px（总可用 60 − 1 px 中缝 = 59 px）', upH > 20 && loH > 20, `upH=${upH.toFixed(2)} loH=${loH.toFixed(2)}`)
+    // adj429b：dsb 上下色块**严格等高**（不依赖 dy 大小）——用户建议，视觉更均衡
+    check('V5 dsb dy=60 → 上下色块**严格等高** + 均 ≥ 30 px', upH > 30 && loH > 30 && Math.abs(upH - loH) < 0.1, `upH=${upH.toFixed(2)} loH=${loH.toFixed(2)} 差=${(upH - loH).toFixed(2)}`)
   }
 }
 
