@@ -2854,6 +2854,23 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       if (isDsb) shiftEnvelopeDown(pages, gi, group.music.voice, spans, placed, cnt, envStart, envEnd, row, dy / 2)
 
       // ---- 段内音符 ----
+      /**
+       * adj427：段内拍位 → **覆盖它的主旋律音符**（播放用）。
+       *
+       * 为什么要复制锚点坐标：`sequence.ts` 的 `atMs` 是**由布局坐标算出来的**
+       * （`groupStartMs[g] + barStartMsInGroup[g][barIndex] + beatPos×beatMs`）。
+       * 段层音符只要带上"它所覆盖的那个主旋律音符"的 `barIndex`/`beatPos`，
+       * 现有事件循环就会让两者**同刻发声**，且 `passMs`（反复遍次）天然一致 ⇒ 反复/跳房子下也同步。
+       */
+      const anchorOf = (beatAbs: number): { note: PlacedToken; spanStart: number } | null => {
+        for (let k = 0; k < cnt; k++) {
+          const s = spans[k]
+          if (beatAbs >= s.startBeat - 1e-9 && beatAbs < s.startBeat + s.beats - 1e-9) {
+            return { note: placed[k].note, spanStart: s.startBeat }
+          }
+        }
+        return null
+      }
       let beat = 0
       for (const t of seg.tokens) {
         if (t.kind === 'barline' || t.kind === 'bracket') continue
@@ -2866,6 +2883,10 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         bx1 = Math.min(bx1, xContent1)
         beat += dur
         if (bx1 <= bx0) continue
+        // 覆盖坐标（播放用）：锚点 = 覆盖「段内该拍」的主旋律音
+        const anc = anchorOf(envStart + beatAt)
+        const playBarIndex = anc ? anc.note.barIndex : 0
+        const playBeatPos = anc ? r1(anc.note.beatPos + (envStart + beatAt - anc.spanStart)) : r1(beatAt)
         // 拍段：音符块 + 每条增时线 + 附点，按各分量的实际 x 位置给出
         const sp = splitNoteDur(t)
         const w = bx1 - bx0
@@ -2893,12 +2914,14 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
           width: r1(w),
           rightX: r1(bx1),
           duration: dur,
-          beatPos: r1(beatAt),
-          barIndex: 0,
+          beatPos: playBeatPos,
+          barIndex: playBarIndex,
           segments: segList,
           audioPitch: isPlayableNote(t) ? pitchToName(t.pitch, t.octaveShift, t.accidental, keySemitone) : null,
           playable: isPlayableNote(t),
           segment: { type: seg.type, layer: 'upper' },
+          // bz：段内容 = 伴奏声部；dsb：段内容 = 主声部（音色与主旋律一致）
+          playVoice: isDsb ? 'main' : 'accomp',
         })
       }
 
@@ -3004,6 +3027,9 @@ function shiftEnvelopeDown(
     const p = placed[k]
     if (Math.abs(p.note.y - row.y) > 0.5) continue
     p.note.y = r1(p.note.y + dy)
+    // adj427：dsb 重叠区的下层主旋律 = **第二声部**（用第 2 可用音色 + 0.75 力度，
+    // 色块也随之换色）——上层（段内容）仍为主声部，音色与色块不变。
+    p.note.playVoice = 'second'
     movedIds.add(p.note.id.index)
     xMin = Math.min(xMin, p.note.x)
     xMax = Math.max(xMax, p.note.rightX ?? p.note.x + p.note.width)

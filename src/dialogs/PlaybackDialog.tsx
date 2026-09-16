@@ -380,6 +380,8 @@ export function PlaybackDialog() {
             width: s.width,
             voice: s.voice,
             group: s.group,
+            // adj427：色块按**音色**着色（切换音色时颜色跟着变）
+            instrument: s.instrument,
           })),
         ),
       )

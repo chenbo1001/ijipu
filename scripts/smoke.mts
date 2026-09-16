@@ -5595,27 +5595,76 @@ console.log('[adj427] segment overlay placement (notes / barlines / brackets)')
   check('S3 两段互不重叠（x 递增）', sb.length === 2 && sb[0].x2 <= sb[1].x1 + 0.51, JSON.stringify(sb.map((x) => [x.x1, x.x2])))
 }
 
-// ---- adj427 Step 7：播放序列安全（段层音符不得破坏主旋律播放） ----
-console.log('[adj427] playback safety with segments')
+// ---- adj427 Step 7：演奏效果（段层发声 / 声部音色 / 力度 / 色块音色） ----
+console.log('[adj427] segment playback (voices / instruments / gain)')
 {
   const plain = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | 5 6 7 1' | 1' 7 6 5 | 5 5\n"
   const bzSrc = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
   const dsbSrc = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  type Ev = {
+    atMs: number
+    durationMs: number
+    gain?: number
+    instrument?: string
+    pitch?: string | null
+    playheadSegs?: { instrument?: string }[]
+    placed: { segment?: unknown; playVoice?: string; audioPitch: string | null }
+  }
   const seqOf = (src: string) => {
     const rr = parseJps(src)
-    return buildPlaySequence(rr, layoutScore(rr, DUR_CFG), 120)
+    return buildPlaySequence(rr, layoutScore(rr, DUR_CFG), 120, undefined, '大钢琴')
   }
   const sPlain = seqOf(plain)
   const sBz = seqOf(bzSrc)
   const sDsb = seqOf(dsbSrc)
+  const evs = (s: { events: unknown[] }): Ev[] => s.events as Ev[]
   check('T1 含 bz 段时 buildPlaySequence 不抛异常', sBz.events.length > 0, `events=${sBz.events.length}`)
   check('T2 含 dsb 段时 buildPlaySequence 不抛异常', sDsb.events.length > 0, `events=${sDsb.events.length}`)
-  // 主旋律事件必须与无段时完全一致（段不占主旋律拍位）
-  const sig = (s: { events: { atMs: number; pitch: string | null }[] }) =>
-    s.events.filter((e) => e.pitch !== null).map((e) => `${e.atMs}:${e.pitch}`).join(',')
-  check('T3 bz 段不改变主旋律事件序列', sig(sBz) === sig(sPlain), `bz=${sig(sBz).slice(0, 90)} plain=${sig(sPlain).slice(0, 90)}`)
-  check('T4 dsb 段不改变主旋律事件序列', sig(sDsb) === sig(sPlain), `dsb=${sig(sDsb).slice(0, 90)}`)
-  check('T5 主旋律可发声事件数 = 12', sPlain.events.filter((e) => e.pitch !== null).length === 12, `got ${sPlain.events.filter((e) => e.pitch !== null).length}`)
+  // 主旋律事件（非段层）的**时刻与音高**必须与无段时完全一致——段不占主旋律拍位
+  const sigMel = (s: { events: unknown[] }): string =>
+    evs(s)
+      .filter((e) => !e.placed.segment)
+      .map((e) => `${e.atMs}:${e.pitch ?? e.placed.audioPitch}`)
+      .join(',')
+  check('T3 bz 段不改变主旋律事件的时刻与音高', sigMel(sBz) === sigMel(sPlain), `bz=${sigMel(sBz).slice(0, 80)}`)
+  check('T4 dsb 段不改变主旋律事件的时刻与音高', sigMel(sDsb) === sigMel(sPlain), `dsb=${sigMel(sDsb).slice(0, 80)}`)
+  check('T5 无段时 12 个可发声事件', evs(sPlain).filter((e) => e.placed.audioPitch !== null).length === 12, `got ${evs(sPlain).filter((e) => e.placed.audioPitch !== null).length}`)
+
+  // ---- Z：段层真正发声 + 声部/音色/力度 ----
+  const bzSeg = evs(sBz).filter((e) => e.placed.segment)
+  const dsbSeg = evs(sDsb).filter((e) => e.placed.segment)
+  check('Z1 bz 段层补发 8 个发声事件', bzSeg.length === 8, `got ${bzSeg.length}`)
+  check('Z2 dsb 段层补发 8 个发声事件', dsbSeg.length === 8, `got ${dsbSeg.length}`)
+  {
+    const mel = evs(sBz).filter((e) => !e.placed.segment)
+    const ok = bzSeg.every((e, i) => Math.abs(e.atMs - mel[2 + i].atMs) < 1e-6)
+    check('Z3 bz 段层与主旋律同拍位**同刻发声**', ok, `seg=${bzSeg.map((e) => e.atMs).join(',')} mel=${mel.slice(2, 10).map((e) => e.atMs).join(',')}`)
+  }
+  check('Z4 bz 段层音高 = C4 D4 E4 F4 G4 A4 B4 C5（与所写一致）', bzSeg.map((e) => e.placed.audioPitch).join(',') === 'C4,D4,E4,F4,G4,A4,B4,C5', bzSeg.map((e) => e.placed.audioPitch).join(','))
+  check('Z5 bz 段层用**第 2 可用音色**（无 Y: 时回退手风琴）', bzSeg.every((e) => e.instrument === '手风琴'), `inst=${bzSeg[0]?.instrument}`)
+  check('Z6 bz 段层力度 = 0.75', bzSeg.every((e) => e.gain === 0.75), `gain=${bzSeg[0]?.gain}`)
+  check('Z7 bz 下层主旋律力度 = 1、音色 = 主声部（大钢琴）', evs(sBz).filter((e) => !e.placed.segment).every((e) => e.gain === 1 && e.instrument === '大钢琴'), `inst=${evs(sBz).find((e) => !e.placed.segment)?.instrument} gain=${evs(sBz).find((e) => !e.placed.segment)?.gain}`)
+  check('Z8 dsb 段层（上层）用**主声部音色**、力度 1', dsbSeg.every((e) => e.instrument === '大钢琴' && e.gain === 1), `inst=${dsbSeg[0]?.instrument} gain=${dsbSeg[0]?.gain}`)
+  {
+    const lower = evs(sDsb).filter((e) => !e.placed.segment && e.placed.playVoice === 'second')
+    check('Z9 dsb 重叠区主旋律（下层）改第二声部音色 + 力度 0.75', lower.length === 8 && lower.every((e) => e.instrument === '手风琴' && e.gain === 0.75), `n=${lower.length} inst=${lower[0]?.instrument} gain=${lower[0]?.gain}`)
+    const others = evs(sDsb).filter((e) => !e.placed.segment && e.placed.playVoice !== 'second')
+    check('Z10 dsb 重叠区外的主旋律仍为主声部（音色/力度不变）', others.length === 4 && others.every((e) => e.instrument === '大钢琴' && e.gain === 1), `n=${others.length}`)
+  }
+  check('Z11 段层色块轨道已生成且带 instrument（手风琴）', bzSeg.every((e) => (e.playheadSegs?.length ?? 0) > 0 && e.playheadSegs!.every((s) => s.instrument === '手风琴')), '')
+  check('Z12 主旋律色块轨道也带上 instrument（大钢琴）', evs(sPlain).every((e) => e.playheadSegs?.every((s) => s.instrument === '大钢琴')), '')
+  {
+    const lastSeg = Math.max(...bzSeg.map((e) => e.atMs + e.durationMs))
+    check('Z13 totalMs ≥ 段层事件末刻', sBz.totalMs >= lastSeg, `totalMs=${sBz.totalMs} segEnd=${lastSeg}`)
+  }
+  {
+    const repSrc = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 3 4 | {bz 1 2} 5 6 :| 7 |\n"
+    const rr = parseJps(repSrc)
+    const s = buildPlaySequence(rr, layoutScore(rr, DUR_CFG), 120, undefined, '大钢琴')
+    const seg = (s.events as Ev[]).filter((e) => e.placed.segment)
+    check('Z14 反复段落内的段：两遍各发声一次（4 个事件）', seg.length === 4, `got ${seg.length} at=${seg.map((e) => e.atMs).join(',')}`)
+    check('Z15 第二遍的段事件晚于第一遍', seg.length === 4 && seg.slice(2).every((e) => e.atMs > seg[0].atMs), `at=${seg.map((e) => e.atMs).join(',')}`)
+  }
 }
 
 // ---- adj427 Step 5c：小节线锚点对齐 / 括号预留 / dsb 两层居中（用户报的 6 项问题） ----

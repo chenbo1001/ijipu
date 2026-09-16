@@ -579,12 +579,12 @@ export function PreviewPane() {
  * 返回 null = 未播放/不在本页/已播完。
  */
 function playheadPosOf(
-  track: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number }[],
+  track: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number; instrument?: string }[],
   currentMs: number,
   page: ScorePage,
   noteSize: number,
   group: number,
-): { x: number; yTop: number; yBottom: number; width: number; voice: number } | null {
+): { x: number; yTop: number; yBottom: number; width: number; voice: number; instrument?: string } | null {
   if (track.length === 0 || currentMs <= 0) return null
   // 该曲行的段（atMs 单调）
   const segs = track.filter((t) => t.group === group)
@@ -613,17 +613,58 @@ function playheadPosOf(
   const ext = noteSize * 0.5
   const yTop = a.y - noteSize * 1.1 - ext
   const yBottom = a.y - noteSize * 1.1 + noteSize * 1.7 + ext
-  return { x, yTop, yBottom, width: a.width, voice: a.voice }
+  return { x, yTop, yBottom, width: a.width, voice: a.voice, instrument: a.instrument }
 }
 
-/** adj299：多声部各声部色块颜色（半透明；voice 1 保持红色——延续 adj285 单声部红块） */
+/** adj299：播放色块调色板（半透明基色，使用时拼透明度） */
 const PLAYHEAD_COLORS = [
-  'rgba(255, 93, 108,', // 红（声部 1）
-  'rgba(87, 170, 255,', // 蓝（声部 2）
+  'rgba(255, 93, 108,', // 红（第 1 个音色——延续 adj285/adj299 的单声部红块与 Q1 红）
+  'rgba(87, 170, 255,', // 蓝
   'rgba(63, 122, 46,', // 绿（声部 3）
   'rgba(255, 200, 87,', // 橙（声部 4）
   'rgba(138, 95, 184,', // 紫（声部 5）
+  'rgba(0, 188, 178,', // 青
+  'rgba(226, 118, 176,', // 粉
+  'rgba(150, 150, 90,', // 橄榄
 ]
+
+/**
+ * adj427：色块改为**按音色（instrument）着色**——不同音色不同颜色，
+ * 播放中 `@乐器名` 切换音色时色块颜色随之变化（用户要求）。
+ *
+ * 分配规则（保证既有观感不回退）：
+ *  ① 先把 **voice 1 的音色**排到第 1 位（⇒ 单声部仍是红块、多声部 Q1 仍是红、Q2 仍是蓝）；
+ *  ② 其余音色按**在播放轨道中出现的先后**依次取调色板后续颜色；
+ *  ③ 同一音色在任何遍次/任何曲行都是**同一颜色**（map 按音色名，不随位置变）。
+ */
+let colorMapTrack: unknown = null
+let colorMapCache = new Map<string, number>()
+function instrumentColorMap(
+  track: { voice: number; instrument?: string }[],
+): Map<string, number> {
+  if (colorMapTrack === track) return colorMapCache
+  const order: string[] = []
+  const push = (inst: string | undefined): void => {
+    const k = inst ?? ''
+    if (!order.includes(k)) order.push(k)
+  }
+  for (const t of track) if (t.voice === 1) push(t.instrument)
+  for (const t of track) push(t.instrument)
+  const map = new Map<string, number>()
+  order.forEach((inst, i) => map.set(inst, i % PLAYHEAD_COLORS.length))
+  colorMapTrack = track
+  colorMapCache = map
+  return map
+}
+
+/** 取某事件色块的半透明基色（按音色） */
+function playheadBaseOf(
+  pos: { voice: number; instrument?: string },
+  map: Map<string, number>,
+): string {
+  const idx = map.get(pos.instrument ?? '') ?? (pos.voice - 1) % PLAYHEAD_COLORS.length
+  return PLAYHEAD_COLORS[idx]
+}
 
 /**
  * adj282：跟随色块渲染层——仅订阅 currentMs/playheadTrack，避免 PreviewPane 主组件
@@ -645,7 +686,8 @@ function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }
       {groups.map((group) => {
         const pos = playheadPosOf(track, currentMs, page, noteSize, group)
         if (!pos) return null
-        const base = PLAYHEAD_COLORS[(pos.voice - 1) % PLAYHEAD_COLORS.length]
+        // adj427：按**音色**取色（不同音色不同颜色；同一音色恒定同色）
+        const base = playheadBaseOf(pos, instrumentColorMap(track))
         return (
           <div
             key={group}
