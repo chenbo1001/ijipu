@@ -571,24 +571,60 @@ export function PreviewPane() {
   )
 }
 
+/** 色块轨道的一项（= docStore.playheadTrack 的元素） */
+type PlayheadTrackItem = {
+  atMs: number
+  durationMs: number
+  pageIndex: number
+  x: number
+  y: number
+  width: number
+  voice: number
+  group: number
+  instrument?: string
+}
+
 /**
- * adj282：计算播放进度跟随色块位置——同页内按曲行（group）定位，每 group 独立色块。
- * adj299：按「拍段」定位（每段 ≤1 拍）；用 group（而非 voice）定位——多声部 Q1 与单声部行
- * 可共用 voice 号（如 Q1 与 Q 均 voice=1），必须用 group 区分；色块高度 = 该曲行
- * （音符基线推：行顶 基线-1.1×音符高、行底 基线+0.6×音符高，各加延伸 0.5×音符高）。
- * 返回 null = 未播放/不在本页/已播完。
+ * adj427：把播放轨道按「**页 + 曲行 + 声部 + 音色**」分组，供每组建一个色块。
+ *
+ * 为什么必须按这个键分组：重叠区（bz 伴奏 / dsb 第二声部）与主旋律在**同一曲行（group）**内
+ * **同时发声**——旧实现「每个 group 只取一个当前段」，于是重叠区**只画出一个色块**。
+ * （既有 Q1/Q2 多声部之所以能显示多块，是因为它们是**不同的 group**。）
+ * 按 (页, 曲行, 声部, 音色) 分组后，重叠区上下两层各有自己的色块、同步移动，
+ * 与多声部的表现一致。
+ *
+ * 结果按 track 引用缓存（track 每次开播才换新对象），避免逐帧重建分组。
  */
-function playheadPosOf(
-  track: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number; instrument?: string }[],
+let pathKeyCache: unknown = null
+let pathGroupCache = new Map<string, PlayheadTrackItem[]>()
+function trackKeysOf(track: PlayheadTrackItem[]): Map<string, PlayheadTrackItem[]> {
+  if (pathKeyCache === track) return pathGroupCache
+  const m = new Map<string, PlayheadTrackItem[]>()
+  for (const t of track) {
+    const k = `${t.pageIndex}|${t.group}|${t.voice}|${t.instrument ?? ''}`
+    const arr = m.get(k)
+    if (arr) arr.push(t)
+    else m.set(k, [t])
+  }
+  for (const arr of m.values()) arr.sort((a, b) => a.atMs - b.atMs)
+  pathKeyCache = track
+  pathGroupCache = m
+  return m
+}
+
+/**
+ * adj282：在**同一组**（同页/同曲行/同声部/同音色）的拍段序列里定位当前色块。
+ * adj299：按「拍段」定位（每段 ≤1 拍）；色块高度由音符基线推：
+ * 行顶 基线-1.1×音符高、行底 基线+0.6×音符高，各加延伸 0.5×音符高。
+ * 返回 null = 未播放/不在本页/该组当前段已播完。
+ */
+function playheadPosIn(
+  segs: PlayheadTrackItem[],
   currentMs: number,
-  page: ScorePage,
+  pageIndex: number,
   noteSize: number,
-  group: number,
 ): { x: number; yTop: number; yBottom: number; width: number; voice: number; instrument?: string } | null {
-  if (track.length === 0 || currentMs <= 0) return null
-  // 该曲行的段（atMs 单调）
-  const segs = track.filter((t) => t.group === group)
-  if (segs.length === 0) return null
+  if (segs.length === 0 || currentMs <= 0) return null
   // 二分：最后一个 atMs <= currentMs 的段
   let lo = 0
   let hi = segs.length
@@ -604,16 +640,14 @@ function playheadPosOf(
   // 结束时才隐藏（i === 最后段），遇到反复/跳房子跳跃产生的段间空隙（当前段已结束、
   // 下一段还未开始）时，会把旧行色块冻结驻留在原处——用户观感即「色块已走到新行，
   // 上一行色块还残留在行末」。改为：只要当前段已结束（该处已无声）就隐藏，
-  // 各曲行按各自发声时间出现/消失，旧行不再残留。
+  // 各组按各自发声时间出现/消失，旧行不再残留。
   if (currentMs >= a.atMs + a.durationMs) return null
-  if (a.pageIndex !== page.index) return null
-  // 停驻当前段 x（段间由 CSS transition 平滑过渡）
-  const x = a.x
-  // 高度 = 该曲行（音符基线推，天然区分各声部行/单声部行，不依赖 voiceBlock）
+  if (a.pageIndex !== pageIndex) return null
+  // 高度 = 该曲行的这个声部（音符基线推，天然区分各声部行/上下两层，不依赖 voiceBlock）
   const ext = noteSize * 0.5
   const yTop = a.y - noteSize * 1.1 - ext
   const yBottom = a.y - noteSize * 1.1 + noteSize * 1.7 + ext
-  return { x, yTop, yBottom, width: a.width, voice: a.voice, instrument: a.instrument }
+  return { x: a.x, yTop, yBottom, width: a.width, voice: a.voice, instrument: a.instrument }
 }
 
 /** adj299：播放色块调色板（半透明基色，使用时拼透明度） */
@@ -675,22 +709,23 @@ function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }
   const currentMs = useDocStore((s) => s.currentMs)
   const track = useDocStore((s) => s.playheadTrack)
   if (track.length === 0 || currentMs <= 0) return null
-  // 该页涉及的曲行（group 去重排序）
-  const groups = [
-    ...new Set(track.filter((t) => t.pageIndex === page.index).map((t) => t.group)),
-  ].sort((a, b) => a - b)
+  // adj427：按「本页 + 曲行 + 声部 + 音色」**逐组**定位——重叠区（bz 伴奏 / dsb 第二声部）
+  // 与主旋律**同曲行同时发声**，故各有自己的色块、同步移动（与多声部同理）；
+  // 旧实现「每个 group 只取一个当前段」在重叠区只画得出一块。
+  const items = [...trackKeysOf(track)].filter(([k]) => k.startsWith(`${page.index}|`))
+  const colorMap = instrumentColorMap(track)
   const pct = (v: number) => `${((v / page.width) * 100).toFixed(3)}%`
   const pctY = (v: number) => `${((v / page.height) * 100).toFixed(3)}%`
   return (
     <>
-      {groups.map((group) => {
-        const pos = playheadPosOf(track, currentMs, page, noteSize, group)
+      {items.map(([key, segs]) => {
+        const pos = playheadPosIn(segs, currentMs, page.index, noteSize)
         if (!pos) return null
         // adj427：按**音色**取色（不同音色不同颜色；同一音色恒定同色）
-        const base = playheadBaseOf(pos, instrumentColorMap(track))
+        const base = playheadBaseOf(pos, colorMap)
         return (
           <div
-            key={group}
+            key={key}
             className="playhead-marker"
             style={{
               left: pct(pos.x),

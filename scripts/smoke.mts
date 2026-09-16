@@ -5665,6 +5665,30 @@ console.log('[adj427] segment playback (voices / instruments / gain)')
     check('Z14 反复段落内的段：两遍各发声一次（4 个事件）', seg.length === 4, `got ${seg.length} at=${seg.map((e) => e.atMs).join(',')}`)
     check('Z15 第二遍的段事件晚于第一遍', seg.length === 4 && seg.slice(2).every((e) => e.atMs > seg[0].atMs), `at=${seg.map((e) => e.atMs).join(',')}`)
   }
+  // Z16/Z17：**色块层的分组前提**——重叠区同一时刻有两条轨道：同页同曲行、音色不同 ⇒ 画两块
+  //（既有 Q1/Q2 多声部是靠"不同 group"显示多块；段层与主旋律同 group，故必须靠"音色"再分一组）
+  {
+    const seg0 = bzSeg[0]
+    const melSame = evs(sBz).filter((e) => !e.placed.segment && Math.abs(e.atMs - seg0.atMs) < 1e-6)
+    const a0 = seg0.playheadSegs?.[0]
+    const b0 = melSame[0]?.playheadSegs?.[0]
+    check(
+      'Z16 bz 重叠区同刻两条轨道：同 (page,group)、**音色不同** → 色块画两块',
+      melSame.length >= 1 && a0 !== undefined && b0 !== undefined && a0.pageIndex === b0.pageIndex && a0.group === b0.group && a0.instrument !== b0.instrument,
+      `seg=${a0?.pageIndex}/${a0?.group}/${a0?.instrument} mel=${b0?.pageIndex}/${b0?.group}/${b0?.instrument}`,
+    )
+  }
+  {
+    const seg0 = dsbSeg[0]
+    const melSame = evs(sDsb).filter((e) => !e.placed.segment && Math.abs(e.atMs - seg0.atMs) < 1e-6)
+    const a0 = seg0.playheadSegs?.[0]
+    const b0 = melSame[0]?.playheadSegs?.[0]
+    check(
+      'Z17 dsb 重叠区同刻两条轨道且**上下分层**（y 不同）',
+      melSame.length >= 1 && a0 !== undefined && b0 !== undefined && a0.group === b0.group && a0.instrument !== b0.instrument && Math.abs(a0.y - b0.y) > 1,
+      `seg y=${a0?.y} inst=${a0?.instrument} mel y=${b0?.y} inst=${b0?.instrument}`,
+    )
+  }
 }
 
 // ---- adj427 Step 5c：小节线锚点对齐 / 括号预留 / dsb 两层居中（用户报的 6 项问题） ----
