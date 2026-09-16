@@ -6446,6 +6446,31 @@ console.log('[adj443] desktop must not register a service worker')
 {
   const mainSrc = String(require('node:fs').readFileSync('src/main.tsx', 'utf8'))
   check('AJ8 main.tsx 存在桌面端判定（isTauriDesktop）', mainSrc.includes('isTauriDesktop'))
+  // PROBE：用户报 `{bz 8 &zkh @手风琴@ 2'/ 3'/ }` 只显示 `&zkh 2/`
+  {
+    const sP = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 6,/ 3// (2// 2) 2/&rit 3/ 6,/ 5,/&yc |\"p:2/4\" {bz 8 &zkh @手风琴@ 2'/ 3'/ } 6, - |\"p:4/4\" 6/ 3'// 2'/ |\n"
+    const tk = parseJps(sP).groups[0].music.tokens
+    const segOpen = tk.find((t) => t.kind === 'segment' && (t as { dir?: string }).dir === 'open') as { children?: { kind: string; pitch?: number; diminishCount?: number }[] } | undefined
+    const lines: string[] = [`children: ${(segOpen?.children ?? []).map((c) => `${c.kind}${c.pitch !== undefined ? `(${c.pitch} di=${c.diminishCount ?? 0})` : ''}`).join(' ')}`]
+    void lines
+    // AK（adj444，E-2026-185）：段内写了 `@乐器名@` 时**段层音符不得丢失**——
+    // 用户报 `{bz 8 &zkh @手风琴@ 2'/ 3'/ }` 只显示到 `2'/`、`3'/` 不见了。
+    // 根因：`beatToX` 的「音符拍区间右端」用了 `nextNote.x`，**跨过小节线**伸到下一小节的音符
+    // ⇒ 本音符内部拍位被拉宽 ⇒ 段层内容溢出内容区 ⇒ 末音被钳成 0 宽而丢弃。
+    for (const [nm, cfg] of [['时值优先', DUR_CFG], ['空间优先', { ...DUR_CFG, noteSpaceLayout: 'space' as const }]] as const) {
+      const prP = parseJps(sP)
+      const pgP = layoutScore(prP, cfg).pages[0]
+      const sg = pgP.notes.filter((n) => n.segment).sort((a, b) => a.x - b.x)
+      check(`AK1[${nm}] 段内 @乐器名@ 不影响段层音符数（3 个：8 + 2'/ + 3'/）`,
+        sg.length === 3, `got ${sg.length}: ${sg.map((n) => (n.token as { pitch?: number }).pitch ?? 'r').join(',')}`)
+      check(`AK2[${nm}] 段层末音 3'/ 有正宽度（未被钳成 0 而丢弃）`,
+        sg.length === 3 && sg[2].width > 1, `w=${sg.map((n) => n.width.toFixed(1)).join(',')}`)
+      // AK3：每拍宽均匀——8(1 拍) / 2'(0.5) / 3'(0.5) 的宽度比应为 2:1:1
+      check(`AK3[${nm}] 段层每拍宽均匀（8 : 2'/ : 3'/ = 2:1:1）`,
+        sg.length === 3 && Math.abs(sg[0].width / sg[1].width - 2) < 0.15 && Math.abs(sg[1].width / sg[2].width - 1) < 0.15,
+        `比值=${(sg[0]?.width / sg[1]?.width).toFixed(3)} / ${(sg[1]?.width / sg[2]?.width).toFixed(3)}`)
+    }
+  }
   check('AJ8b 桌面端分支：注销旧 SW + 清 CacheStorage（老用户一次性摘掉污染缓存）',
     mainSrc.includes('getRegistrations') && mainSrc.includes('caches.delete'))
   check('AJ8c 注册 SW 的代码在 else 分支里（仅非桌面端注册）',
