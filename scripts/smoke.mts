@@ -5945,6 +5945,46 @@ console.log('[adj432] segment color-block voice colors + segment row guides')
   void ns432
 }
 
+// ---- adj435：重叠区按**多声部方式**算占宽（段层更密的拍拿到额外宽，音符不再挤在一起） ----
+// 用户原例：`{bz &zkh 1/ 2// 3// 2 3 4 | 5 6/ 5/ 7 1' &ykh } 5 6/ 5/ 7 1' | 1' 7 6 5 | 5 5`
+// 段层第 1 拍有 3 个音（`1/ 2// 3//`，最小时值 1/16），主旋律同拍只有 1 个音（`5`）。
+// 旧行为：主旋律按自己的密度给拍宽 ⇒ 段内 16 分被挤到 5px 互相重叠（用户报「音符挤在一起」）。
+// 现行为：重叠拍取"两层更密"的需求（同 `allocatePerBeats`/`singleRulePerBeats` 的 baseW 口径）。
+console.log('[adj435] overlap beats sized by the denser layer (multi-voice style)')
+{
+  const srcC = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz &zkh 1/ 2// 3// 2 3 4 | 5 6/ 5/ 7 1' &ykh } 5 6/ 5/ 7 1' | 1' 7 6 5 | 5 5\n"
+  // 时值优先：已验证「取更密层需求」全链路生效
+  // 空间优先：本轮只验证「不再产生坐标系跳变 + 段首对齐」（AJ4/AJ5）——占宽取更密层待续（见 ERRORS-LOG E-2026-175 待办）
+  for (const [nm, cfg] of [['时值优先', DUR_CFG], ['空间优先', { ...DUR_CFG, noteSpaceLayout: 'space' as const }]] as const) {
+    const pg = layoutScore(parseJps(srcC), cfg).pages[0]
+    const melN = pg.notes.filter((n) => !n.segment).sort((a, b) => a.x - b.x)
+    const segN = pg.notes.filter((n) => n.segment).sort((a, b) => a.x - b.x)
+    // 段层前 3 个音 = `1/ 2// 3//`（同一拍内，时值 0.5/0.25/0.25）
+    const head3 = segN.slice(0, 3)
+    const coveredBeatNote = melN[2] // `5`（包络起点，段层该拍 3 个音）
+    // AJ4：段层首音仍与主旋律包络起点音精确对齐（坐标系修好后对齐不被破坏）
+    check(`AJ4[${nm}] 段层首音 x = 主旋律包络起点音 x（同拍位对齐）`,
+      Math.abs(segN[0].x - coveredBeatNote.x) < 0.51,
+      `seg0.x=${segN[0].x.toFixed(2)} mel.x=${coveredBeatNote.x.toFixed(2)}`)
+    // AJ5：段层各音 bx0 单调递增（无倒序/重叠）
+    check(`AJ5[${nm}] 段层各音 bx0 单调递增`, segN.every((n, i) => i === 0 || n.x >= segN[i - 1].x - 1e-6), `x=${segN.map((n) => n.x.toFixed(1)).join(',')}`)
+    if (nm !== '时值优先') continue
+    const minGlyph = cfg.note_size * 0.5 // 数字约半个字号的净宽（小于它必然视觉重叠）
+    check(`AJ1[${nm}] 段层同拍的 3 个子拍音宽均 ≥ 数字净宽（不重叠）`,
+      head3.length === 3 && head3.every((n) => n.width >= minGlyph),
+      `w=${head3.map((n) => n.width.toFixed(2)).join(',')} 阈值=${minGlyph}`)
+    // AJ2：三个子拍宽度比 ≈ 2:1:1（对应 0.5 : 0.25 : 0.25）
+    check(`AJ2[${nm}] 段层子拍宽比 ≈ 2:1:1（时值比例正确、无跳变）`,
+      head3.length === 3 && Math.abs(head3[0].width / head3[1].width - 2) < 0.15 && Math.abs(head3[1].width / head3[2].width - 1) < 0.15,
+      `比值=${(head3[0].width / head3[1].width).toFixed(3)} / ${(head3[1].width / head3[2].width).toFixed(3)}`)
+    // AJ3：被段层覆盖的主旋律拍比未被覆盖的普通拍更宽（多声部式取更密需求）
+    const plainBeatNote = melN[0] // `3`（无段层覆盖）
+    check(`AJ3[${nm}] 被覆盖拍的占宽 > 未覆盖普通拍（重叠区按更密层加宽）`,
+      coveredBeatNote.width > plainBeatNote.width * 1.3,
+      `covered=${coveredBeatNote.width.toFixed(2)} plain=${plainBeatNote.width.toFixed(2)} 比值=${(coveredBeatNote.width / plainBeatNote.width).toFixed(2)}`)
+  }
+}
+
 // ---- adj433：段层拍位与主旋律**逐拍对齐**（用户报「bz/dsb 上下层拍子没对齐」） ----
 // 根因：`beatToX` 对**音符内部**的拍位用"跨到下一个音符"的锚点插值，把**小节线占宽+槽间留白**
 // 也算成时值宽 ⇒ 段层映射总宽虚大 ⇒ adj430 的 segScale 把它整体压缩 ⇒ 拍位错位。
