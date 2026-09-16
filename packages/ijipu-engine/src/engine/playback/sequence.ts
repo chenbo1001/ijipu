@@ -60,6 +60,12 @@ export interface PlayEvent {
    * 预留给后续的力度记号（`&mp` 等）扩展使用。
    */
   gain?: number
+  /**
+   * adj427：该事件的**声部角色**（来自 `PlacedToken.playVoice`）。
+   * `'accomp'` / `'second'` = 伴奏 / 第二声部——播放端须让它们**保留自己的音色**，
+   * 不被「试听音色」的全局覆盖压掉（否则两个声部会听成同一种音色）。
+   */
+  playVoice?: 'accomp' | 'main' | 'second'
   /** adj300：播放拍段轨道（连音合并时含被合并音符的拍段，覆盖完整时值；普通事件 = 音符拍段） */
   playheadSegs?: PlayheadSeg[]
 }
@@ -169,13 +175,23 @@ export function buildPlaySequence(
   }
   // ★ adj320：每个音符的色块右边界 = 同 group 内下一个时值元素左缘，或该小节线左缘（取先到者）。
   //   使色块「当前时值元素 → 下一时值元素/小节线前」连续覆盖，不依赖显示占宽右缘。
+  //   adj427：**必须排除段层音符**——它们与主旋律**同 x**（叠加对齐），若混进来排序，
+  //   主旋律音符的"下一个元素"会变成同 x 的那个段层音符（不满足 `> n.x + 1e-3`），
+  //   `nextNote` 退化为 Infinity ⇒ 边界只剩小节线 ⇒ **色块被拉长到整个小节**（用户报的现象）。
+  //   段层音符的右边界在 emitSegmentEvents 里按「同段内下一个段层音符」单独算。
   const rightEdgeByNoteIdx = new Map<number, number>()
   {
     const byGroupNotes = new Map<number, PlacedToken[]>()
     const byGroupBars = new Map<number, PlacedBarline[]>()
     for (const page of layout.pages) {
-      for (const n of page.notes) (byGroupNotes.get(n.id.group) ?? byGroupNotes.set(n.id.group, []).get(n.id.group)!).push(n)
-      for (const b of page.barlines) (byGroupBars.get(b.id.group) ?? byGroupBars.set(b.id.group, []).get(b.id.group)!).push(b)
+      for (const n of page.notes) {
+        if (n.segment) continue
+        ;(byGroupNotes.get(n.id.group) ?? byGroupNotes.set(n.id.group, []).get(n.id.group)!).push(n)
+      }
+      for (const b of page.barlines) {
+        if (b.segment) continue
+        ;(byGroupBars.get(b.id.group) ?? byGroupBars.set(b.id.group, []).get(b.id.group)!).push(b)
+      }
     }
     for (const [group, notes] of byGroupNotes) {
       const sorted = [...notes].sort((a, b) => a.x - b.x)
@@ -531,6 +547,18 @@ export function buildPlaySequence(
    * `'accomp'`（bz 上层）/ `'second'`（dsb 下层）= 第 2 可用音色 + 力度 0.75。
    */
   const emitSegmentEvents = (seg: { voice: number; children: MusicToken[] }, passMsNow: number): void => {
+    // adj427：段层内部色块右边界 = 同段内**下一个段层音符**左缘；最后一个用其占位右缘。
+    // （不能沿用主旋律那套 rightEdgeByNoteIdx——它已按设计排除段层音符，避免两套坐标互相污染。）
+    const segNotes = seg.children
+      .map((t) => segPlacedByToken.get(t))
+      .filter((n): n is PlacedToken => n !== undefined)
+      .sort((a, b) => a.x - b.x)
+    const edgeOf = (n: PlacedToken): number => {
+      const i = segNotes.findIndex((m) => m === n)
+      const next = i >= 0 && i < segNotes.length - 1 ? segNotes[i + 1].x : Number.POSITIVE_INFINITY
+      const own = n.rightX ?? n.x + n.width
+      return next === Number.POSITIVE_INFINITY ? own : Math.max(next, own)
+    }
     for (const t of seg.children) {
       if (t.kind !== 'note' && t.kind !== 'rest' && t.kind !== 'rhythm') continue
       const placed = segPlacedByToken.get(t)
@@ -552,7 +580,8 @@ export function buildPlaySequence(
         atMs: at2,
         durationMs: dur2,
         gain: gain2,
-        playheadSegs: buildPlayheadSegs(placed, 0, rightEdgeByNoteIdx.get(placed.id.index)).map((s) => ({ ...s, instrument: inst2 })),
+        playVoice: placed.playVoice,
+        playheadSegs: buildPlayheadSegs(placed, 0, edgeOf(placed)).map((s) => ({ ...s, instrument: inst2 })),
       })
       segEndMs = Math.max(segEndMs, at2 + dur2)
     }
@@ -685,6 +714,7 @@ export function buildPlaySequence(
         atMs: mainAtMs,
         durationMs: mainMs,
         gain,
+        playVoice: playRole,
         playheadSegs: buildPlayheadSegs(item.note, 0, rightEdgeByNoteIdx.get(item.note.id.index)).map((s) => ({ ...s, instrument })),
       })
       // adj375：本音符是某 &hx 的作用对象 → 标记该事件待结算（连音合并会累加时值后再一起算）

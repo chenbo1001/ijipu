@@ -276,7 +276,7 @@ export class SpessaSynthBackend implements AudioBackend {
   }
 
   /** 播放一个音：setTimeout 调度（规避 worklet {time} 时间语义，更可靠） */
-  play(pitch: string | null, atMs: number, durationMs: number, gain: number, instrument?: string): void {
+  play(pitch: string | null, atMs: number, durationMs: number, gain: number, instrument?: string, _t0?: number, opts?: { keepInstrument?: boolean }): void {
     const synth = this.synth
     if (!pitch || !synth || this.state !== 'ready') {
       if (!synth) console.warn('[SpessaSynth] play before ready (ignored)')
@@ -285,7 +285,9 @@ export class SpessaSynthBackend implements AudioBackend {
     const note = pitchToMidiNote(pitch)
     const ch = channelOf(instrument)
     // adj330：用户选定的全局音色覆盖优先，否则按声部名自动路由
-    const program = this.voiceOverride ?? instrumentToProgram(instrument)
+    // adj427：**伴奏/第二声部**（`opts.keepInstrument`）保留自己的音色——否则全局覆盖会把
+    //   重叠区的两个声部压成同一种音色（用户报「两个声部的音色没有区分」）。
+    const program = opts?.keepInstrument ? instrumentToProgram(instrument) : (this.voiceOverride ?? instrumentToProgram(instrument))
     const key = ch * 128 + program
     const velocity = Math.max(1, Math.min(127, Math.round(127 * gain)))
     const delay = Math.max(0, atMs)

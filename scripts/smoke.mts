@@ -5689,6 +5689,31 @@ console.log('[adj427] segment playback (voices / instruments / gain)')
       `seg y=${a0?.y} inst=${a0?.instrument} mel y=${b0?.y} inst=${b0?.instrument}`,
     )
   }
+  // Z18（回归）：段层**不得影响主旋律色块宽度**——段层音符与主旋律**同 x**，若混入 adj320 的
+  //   「下一个时值元素」计算，边界会退化为小节线 ⇒ 主旋律色块被拉长到**整个小节**（用户报的现象）
+  {
+    const segsSig = (s: { events: unknown[] }): string =>
+      evs(s)
+        .filter((e) => !e.placed.segment)
+        .map((e) => (e.playheadSegs ?? []).map((x) => `${x.x.toFixed(1)}:${x.width.toFixed(1)}`).join('|'))
+        .join(';')
+    check(
+      'Z18 有段时主旋律色块宽度与无段时**逐段一致**（段层不污染右边界）',
+      segsSig(sBz) === segsSig(sPlain) && segsSig(sDsb) === segsSig(sPlain),
+      `bz=${segsSig(sBz).slice(0, 70)} plain=${segsSig(sPlain).slice(0, 70)}`,
+    )
+    // 且主旋律色块不覆盖整小节：末块右缘应落在该小节线之前（留出间距）
+    const melEv = evs(sDsb).filter((e) => !e.placed.segment)
+    const w = melEv.flatMap((e) => e.playheadSegs ?? []).map((x) => x.width)
+    check('Z18b 主旋律单个色块宽不超过一个音符槽（无"整小节"色块）', w.every((v) => v < 60), `max=${Math.max(...w).toFixed(1)}`)
+  }
+  // Z19/Z20：声部角色带到事件上；音色路由确实不同（program 与 channel 都不同）
+  check('Z19 事件带 playVoice（bz=accomp / dsb 下层=second）', bzSeg.every((e) => e.playVoice === 'accomp') && evs(sDsb).filter((e) => e.placed.playVoice === 'second').length === 8, `bz=${bzSeg[0]?.playVoice}`)
+  check(
+    'Z20 音色路由：手风琴(program 21 / organ 通道) 与 大钢琴(0 / piano 通道) 都不同',
+    instrumentToProgram('手风琴') === 21 && instrumentToProgram('大钢琴') === 0 && matchInstrument('手风琴') !== matchInstrument('大钢琴'),
+    `手风琴=${instrumentToProgram('手风琴')}/${matchInstrument('手风琴')} 大钢琴=${instrumentToProgram('大钢琴')}/${matchInstrument('大钢琴')}`,
+  )
 }
 
 // ---- adj427 Step 5c：小节线锚点对齐 / 括号预留 / dsb 两层居中（用户报的 6 项问题） ----
