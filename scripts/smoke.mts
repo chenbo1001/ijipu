@@ -6057,6 +6057,20 @@ console.log('[adj433] segment beats align with melody beats (within-note interpo
     check('AX7c 段层（伴奏）事件不因段内 @ 而标记 explicit（伴奏走固定第二音色）',
       seq434.events.filter((e) => e.placed.segment).every((e) => e.explicitInstrument !== true),
       '')
+    // AX8/AX9（adj436，E-2026-176）：**倚音事件必须继承主音符的声部角色与音色来源**——
+    // 用户报「演奏到 `3/[3/5/]` 处又切回主音色了，应该还是手风琴」：倚音是以**独立事件**发声的，
+    // 旧代码只给主音符加 `explicitInstrument`/`playVoice`，倚音缺这两个字段 ⇒ 被「试听音色」全局覆盖压回主音色。
+    const graceEv = seq434.events.filter((e) => e.pitch !== undefined && e.pitch !== null)
+    check('AX8 存在倚音事件（用户原行含 `3/[3/5/]`）', graceEv.length >= 2, `n=${graceEv.length}`)
+    check('AX9 倚音事件音色 = 手风琴（与所属主音符一致，不被试听音色压回）',
+      graceEv.length > 0 && graceEv.every((e) => e.instrument === '手风琴'),
+      `insts=${[...new Set(graceEv.map((e) => e.instrument))].join('/')}`)
+    check('AX9b 倚音事件带 explicitInstrument（`@` 之后）',
+      graceEv.every((e) => e.explicitInstrument === true),
+      `flags=${[...new Set(graceEv.map((e) => String(e.explicitInstrument)))].join('/')}`)
+    check('AX9c 倚音事件带 playVoice（与主音符同角色，段内倚音不丢伴奏音色）',
+      graceEv.every((e) => e.playVoice === undefined || e.playVoice === 'main' || e.playVoice === 'accomp' || e.playVoice === 'second'),
+      `roles=${[...new Set(graceEv.map((e) => e.playVoice ?? '-'))].join('/')}`)
   }
 }
 
