@@ -3,7 +3,7 @@
  *
  * 布局（从左到右）：
  *   Logo（图标+标题） / 汉堡菜单 ☰ / 视图切换图标组（编码/拆分/预览） /
- *   <弹性间距> / 功能按钮组（排版辅助、试听、设置、导出）/ 缩放比率组（`-` `%` `+`）
+ *   <弹性间距> / 功能按钮组（排版辅助、试听、导出、设置）/ 缩放比率组（`-` `%` `+`）
  *
  * - 除了缩放比率组外，其它按钮均为「图标 + 标题」（宽屏）；窄屏全部仅图标
  * - 窄屏下：功能按钮组 + 缩放组隐藏到右侧「⋮ 更多」下拉中，避免按钮溢出顶栏
@@ -678,21 +678,28 @@ export function TopBar() {
     await saveFileAs()
   }
 
+  // adj424：菜单分组重排——「试听播放」「导出」从各自的播放/设置组挪到「文件」分组底部，
+  // 与文件操作连成一组；「设置」单独成组（与顶栏按钮布局对齐）。原「播放」分组随之取消（仅试听一项）。
+  // 顺序：新建/打开/打开示例/粘贴/保存/另存为 → 试听播放 → 导出；打开示例前的分隔线取消、与「打开」相邻。
   const fileEntries: (MenuEntry | 'sep')[] = [
     { label: '新建(&N)', kbd: 'Ctrl+N', hotkey: 'n', onPick: newDoc },
     { label: '打开(&O)…', kbd: 'Ctrl+O', hotkey: 'o', onPick: runOpen },
+    // adj423：新增「打开示例」——列出 public/samples 下的示例谱（该目录靠构建期 glob 自动发现，
+    // 往里加 .jps 文件即出现在列表里，无需改代码）；adj424：去掉其前的分隔线、与「打开」紧邻
+    { label: '打开示例(&E)…', hotkey: 'e', onPick: () => openModal('samples') },
     // adj406：粘贴源码导入——手机端系统文件选择器看不到 .jps 时的兜底入口
     { label: pasteImportCopy.menuLabel, hotkey: 'v', onPick: () => openModal('pasteImport') },
     { label: '保存(&S)', kbd: 'Ctrl+S', hotkey: 's', onPick: runSave },
     { label: '另存为(&A)…', hotkey: 'a', onPick: runSaveAs },
-    'sep',
-    // adj423：新增「打开示例」——列出 public/samples 下的示例谱（该目录靠构建期 glob 自动发现，
-    // 往里加 .jps 文件即出现在列表里，无需改代码）
-    { label: '打开示例(&E)…', hotkey: 'e', onPick: () => openModal('samples') },
-    'sep',
+    // adj424：从原「播放」分组挪到「文件」分组末尾（按用户要求的「试听-导出-设置」顺序）
+    { label: '试听播放(&P)', kbd: 'Ctrl+Q', hotkey: 'p', onPick: () => openModal('playback') },
+    // adj415/424：「导出」与「设置」原本在「文件」末位相连，adj424 拆开——导出留在文件组、设置单成一组
+    { label: '导出(&X)…', hotkey: 'x', onPick: () => openModal('export') },
+  ]
+  // adj424：新建「设置」分组（仅一项）——与文件组用分隔线隔开，与顶栏按钮「设置」一一对应
+  const settingsEntries: (MenuEntry | 'sep')[] = [
     // adj422：菜单项由「页面设置」改为「设置」（与对话框标题、顶栏按钮一致）
     { label: '设置(&G)…', hotkey: 'g', onPick: () => openModal('pageConfig') },
-    { label: '导出(&X)…', hotkey: 'x', onPick: () => openModal('export') },
   ]
   // adj422：原「编辑」子菜单（撤销/重做）已从菜单移除——用户要求菜单精简；
   // **功能保留**：撤销/重做仍走 Ctrl+Z / Ctrl+Y（见下方全局快捷键），store 与历史栈未改。
@@ -702,10 +709,8 @@ export function TopBar() {
     { label: '拆分(&S)', kbd: '2', hotkey: 's', onPick: () => setViewType(isNarrow ? 'split' : (splitHDir === 'editorLeft' ? 'splitHE' : 'splitH')) },
     { label: '预览(&P)', kbd: 'Tab', hotkey: 'p', onPick: () => setViewType('preview') },
   ]
-  const playEntries: (MenuEntry | 'sep')[] = [
-    { label: '试听播放(&P)', kbd: 'Ctrl+Q', hotkey: 'p', onPick: () => openModal('playback') },
-    // adj384：音色库管理入口已移除（移入「设置 → 音色库」标签，与主题组同样不再出现在菜单/顶栏）
-  ]
+  // adj424：原「播放」分组取消——「试听播放」已挪到「文件」分组末尾（与导出相邻），
+  // 音色库管理入口移入「设置 → 音色库」标签（adj384），菜单里没有第二项可单列，故整组移除。
   const helpEntries: (MenuEntry | 'sep')[] = [
     { label: '快捷键速查(&K)', kbd: 'Ctrl+~', hotkey: 'k', onPick: () => openModal('shortcuts') },
     { label: '操作手册(&M)', hotkey: 'm', onPick: () => openModal('manual') },
@@ -753,12 +758,14 @@ export function TopBar() {
             {/* adj422：取消「编辑」子菜单及其下的撤销/重做菜单项（用户要求）——
                 两个**功能**保留：Ctrl+Z / Ctrl+Y 快捷键照旧，历史栈与 store 不动 */}
             <div className="menu-sep" />
+            {/* adj424：「设置」单列一组（与文件组隔开），与顶栏「设置」按钮一一对应 */}
+            <div className="menu-group-title">设置</div>
+            <MenuPanel entries={settingsEntries} onClose={closeMenu} />
+            <div className="menu-sep" />
             <div className="menu-group-title">视图</div>
             <MenuPanel entries={viewEntries} onClose={closeMenu} />
             <div className="menu-sep" />
-            <div className="menu-group-title">播放</div>
-            <MenuPanel entries={playEntries} onClose={closeMenu} />
-            <div className="menu-sep" />
+            {/* adj424：原「播放」分组取消——试听已挪到「文件」分组末尾 */}
             <div className="menu-group-title">帮助</div>
             <MenuPanel entries={helpEntries} onClose={closeMenu} />
           </div>
