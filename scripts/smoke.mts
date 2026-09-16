@@ -5916,7 +5916,73 @@ console.log('[adj427] per-beat width uniform across measures')
   }
 }
 
-// 收尾：合并同步 + 异步用例结果后统一输出/退出码
+// ---- adj428：临时段上下层纵向间距 `segmentRowGap` 可调（bz/dsb 分别独立）----
+// 用户原例：硬编码 `note_size × 1.7 ≈ 22.1px`（ns=13）。允许在设置面板里改 `segmentRowGap.{bz,dsb}`。
+// 几何期望：
+//   - bz：主旋律行基线 yRow 不动；段层 yUpper = yRow − segmentRowGap.bz。
+//   - dsb：包络内主旋律 yIn = yRow + segmentRowGap.dsb / 2；段层 yUpper = yRow − segmentRowGap.dsb / 2；
+//         两层中线 = yRow（整块居中不变）。
+console.log('[adj428] segmentRowGap (bz/dsb) configurable')
+{
+  const srcBz = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const srcDsb = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  // 取主旋律包络外的音作为「行基线 yRow」参考（不受段影响）
+  const rowYOf = (pg: ReturnType<typeof layoutScore>['pages'][number]): number => {
+    const mains = pg.notes.filter((n) => !n.segment)
+    const ys = [...new Set(mains.map((n) => n.y))].sort((a, b) => a - b)
+    return ys[0]
+  }
+  // Y3：bz 默认间距 = 22 px（与 adj427 原值 ≈`note_size × 1.7` 一致，零回归）
+  {
+    const pg = layoutScore(parseJps(srcBz), DUR_CFG).pages[0]
+    const yRow = rowYOf(pg)
+    const segY = pg.notes.find((n) => n.segment)?.y
+    check('Y3 bz 默认间距 = 22 px（adj428 零回归）', segY !== undefined && Math.abs((yRow - segY) - 22) < 0.11, `gap=${(yRow - (segY ?? 0)).toFixed(2)}`)
+  }
+  // Y4：dsb 默认间距 = 22 px（包络内主旋律下移 11、段层上移 11）
+  {
+    const pg = layoutScore(parseJps(srcDsb), DUR_CFG).pages[0]
+    const yRow = rowYOf(pg)
+    const mains = pg.notes.filter((n) => !n.segment)
+    const ys = [...new Set(mains.map((n) => n.y))].sort((a, b) => a - b)
+    const yIn = ys[1]
+    const segY = pg.notes.find((n) => n.segment)?.y
+    check('Y4 dsb 默认间距 = 22 px（整块居中）',
+      yIn !== undefined && segY !== undefined && Math.abs((yIn - yRow) - 11) < 0.11 && Math.abs((yRow - segY) - 11) < 0.11,
+      `yRow=${yRow.toFixed(2)} yIn=${yIn?.toFixed(2)} segY=${segY?.toFixed(2)}`,
+    )
+  }
+  // Y5：bz 把 segmentRowGap.bz 改成 40 → 段层 y = yRow − 40（主旋律 yRow 不动）
+  {
+    const cfg = { ...DUR_CFG, segmentRowGap: { bz: 40 } }
+    const pg = layoutScore(parseJps(srcBz), cfg).pages[0]
+    const yRow = rowYOf(pg)
+    const segY = pg.notes.find((n) => n.segment)?.y
+    check('Y5 bz segmentRowGap=40 → 段层 y = yRow − 40（主旋律不动）',
+      segY !== undefined && Math.abs((yRow - segY) - 40) < 0.11,
+      `gap=${(yRow - (segY ?? 0)).toFixed(2)}`,
+    )
+  }
+  // Y6：dsb 把 segmentRowGap.dsb 改成 50 → 段层 / 包络内主旋律 各偏移 25
+  {
+    const cfg = { ...DUR_CFG, segmentRowGap: { dsb: 50 } }
+    const pg = layoutScore(parseJps(srcDsb), cfg).pages[0]
+    const yRow = rowYOf(pg)
+    const mains = pg.notes.filter((n) => !n.segment)
+    const ys = [...new Set(mains.map((n) => n.y))].sort((a, b) => a - b)
+    const yIn = ys[1]
+    const segY = pg.notes.find((n) => n.segment)?.y
+    check('Y6 dsb segmentRowGap=50 → 上移/下移各 25（整块居中仍成立）',
+      yIn !== undefined && segY !== undefined
+        && Math.abs((yIn - yRow) - 25) < 0.11
+        && Math.abs((yRow - segY) - 25) < 0.11
+        && Math.abs(((segY + yIn) / 2) - yRow) < 0.11,
+      `yRow=${yRow.toFixed(2)} yIn=${yIn?.toFixed(2)} segY=${segY?.toFixed(2)} mid=${((segY ?? 0) + (yIn ?? 0)) / 2}`,
+    )
+  }
+}
+
+
 runAdj363SaveTests()
   .catch((e) => {
     failed++

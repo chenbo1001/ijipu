@@ -15,8 +15,9 @@ import { useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
-import { clampEditorFontSize, defaultPageConfig, EDITOR_FONT_OPTIONS, SCORE_FONT_OPTIONS } from '@ijipu/engine'
+import { clampEditorFontSize, defaultPageConfig, EDITOR_FONT_OPTIONS, SCORE_FONT_OPTIONS, SEGMENT_ROW_GAP_DEFAULT } from '@ijipu/engine'
 import { THEMES, type ThemeMode } from '../brand/themes'
+import { uiCopy } from '../brand/copy'
 import { SoundBankPanel } from './SoundBankPanel'
 import type { PageConfig } from '@ijipu/engine'
 // adj426：主题按钮用 ToolIcon（与顶栏三状态按钮共用图标：自动主题/浅色主题/深色主题）
@@ -277,6 +278,29 @@ export function PageConfigDialog() {
               </Row>
             </div>
 
+            {/* adj428：临时叠加段（{bz … } / {dsb … }）上下两行纵向间距——谱面级设置，
+                跟随 .jps 走（与「间距」同一类，挨着放在它后面）。显示缺省回退 SEGMENT_ROW_GAP_DEFAULT。 */}
+            <div className="pcfg-group-title">{uiCopy.segmentRowGapGroup}</div>
+            <div className="pcfg-grid2">
+              <Row label={uiCopy.segmentRowGapBzLabel}>
+                <NumInput
+                  label=""
+                  value={draft.segmentRowGap?.bz ?? SEGMENT_ROW_GAP_DEFAULT.bz}
+                  onChange={(v) => updateDraft({ segmentRowGap: { ...draft.segmentRowGap, bz: clampGap(v) } })}
+                />
+              </Row>
+              <Row label={uiCopy.segmentRowGapDsbLabel}>
+                <NumInput
+                  label=""
+                  value={draft.segmentRowGap?.dsb ?? SEGMENT_ROW_GAP_DEFAULT.dsb}
+                  onChange={(v) => updateDraft({ segmentRowGap: { ...draft.segmentRowGap, dsb: clampGap(v) } })}
+                />
+              </Row>
+            </div>
+            <div style={{ color: 'var(--jp-text-muted)', fontSize: 12, marginTop: 2 }}>
+              {uiCopy.segmentRowGapHint}
+            </div>
+
             {/* adj419：音符布局组挪到「间距」下面（用户要求：先看纸张/边距，再调间距，最后是排布方式） */}
             <div className="pcfg-group-title">音符布局</div>
             <Row label="布局模式">
@@ -424,6 +448,12 @@ export function PageConfigDialog() {
  * 避免旧版"裸字体名"换机器掉到浏览器默认字体；跨机可用/适合简谱/保证有 fallback 三原则）。
  */
 const FONT_OPTIONS: { label: string; value: string }[] = SCORE_FONT_OPTIONS
+
+// adj428：临时段间距范围——bz 段至少要大于一行音符高（≈ 13 + 减时线 + 间距 ≈ 18），
+// 上限取 80（再大就跟上一行曲部挤到一起，反而比"上间距"还大，破坏排版层级）。
+const SEGMENT_ROW_GAP_MIN = 10
+const SEGMENT_ROW_GAP_MAX = 80
+const clampGap = (v: number): number => Math.max(SEGMENT_ROW_GAP_MIN, Math.min(SEGMENT_ROW_GAP_MAX, Math.round(v)))
 
 function FontSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const opts = value && !FONT_OPTIONS.some((o) => o.value === value) ? [{ label: value, value }, ...FONT_OPTIONS] : FONT_OPTIONS

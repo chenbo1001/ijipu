@@ -91,6 +91,11 @@ export const uiCopy = {
     '列表里找不到 .jps？① 先把文件「保存到手机／下载到本地」（网盘、微信里的文件不在本机列表里）；② 再从「下载」目录选；③ 把扩展名改成 .md/.txt 也能打开（按文本读入）；④ 或用「文件 → 粘贴源码导入」（adj406：把源码粘进来即可，不经过文件选择器）',
   // adj405：移动端文件选择器根本没弹出来（个别外壳/PWA 会静默失败，点了像"没反应"）
   openPickerSilent: '文件选择器没有弹出来（个别手机浏览器/PWA 会这样）：请改用浏览器打开本站，或用「文件 → 粘贴源码导入」把源码贴进来',
+  // adj428：临时叠加段上下层纵向间距可调（设置 → 谱面 → 临时段）
+  segmentRowGapGroup: '临时段',
+  segmentRowGapBzLabel: 'bz 段上下间距',
+  segmentRowGapDsbLabel: 'dsb 段上下间距',
+  segmentRowGapHint: '临时叠加段（{bz … } / {dsb … }）与主旋律之间的纵向间距（px）。默认 22（≈ 1.7×字号）。',
 } as const
 
 /**

@@ -61,6 +61,7 @@
 | 32 | `editorFontSize` | 未设 | **编辑器**字号 | ❌ | 同上 |
 | 33 | `metaPos` | 未设 | 描述头元素拖拽位置 | ✅ | 版式的一部分 |
 | 34 | `heights` | 未设 | 按页行距覆盖（旧） | ✅（只读兼容） | 引擎仍支持 `heights['a'+page]`；当前无 UI 写入 |
+| 35 | `segmentRowGap` | 未设 | 临时段（{bz/dsb}）上下层纵向间距（`{bz?,dsb?}`，单位 px） | ✅ | 决定临时叠加段的几何；属于"这份谱长什么样"，应随谱走 |
 
 ### 现存问题①：`editorFont/editorFontSize` 既进了 .jps，又是"两份存储"（真 bug 级）
 
