@@ -344,6 +344,30 @@ export interface BracketToken {
   raw: string
 }
 
+/**
+ * 临时段（adj427）：`{bz ... }` 临时伴奏、`{dsb ... }` 临时多声部。
+ *
+ * 语法：
+ *  - `{bz 1 2 3 | 4 5}` —— bz 段：包裹范围对应的主旋律拍位确定总宽；段内内容按比例映射到该宽度；
+ *    画在主旋律**上方**，用括号包裹；段内 `|` 按自身拍位映射到该宽度内。
+ *  - `{dsb 1 2 3 | 4 5}` —— dsb 段：临时多声部；上层画段内内容（主声部），下层画主旋律该拍位的
+ *    音（伴奏），两层同一拍位垂直对齐；段内/主旋律各自的小节线**三层对齐**。
+ *
+ * `}` 是**段结束** token（与 `{bz`/`{dsb` 配对）；段内 token 通过 `children` 挂在 open token 上。
+ * 段内允许任意 MusicToken（含小节线、装饰、连音线、倚音等）；段内**不嵌套** `{bz/dsb`（嵌套时报错）。
+ */
+export interface SegmentToken {
+  kind: 'segment'
+  /** 段类型：bz 临时伴奏 / dsb 临时多声部 */
+  type: 'bz' | 'dsb'
+  /** open = `{bz` / `{dsb`（段开始）；close = `}`（段结束） */
+  dir: 'open' | 'close'
+  pos: number
+  raw: string
+  /** 段内 token（仅 open 时存在；close 时为 undefined） */
+  children?: MusicToken[]
+}
+
 /** 音乐 token 联合 */
 export type MusicToken =
   | NoteToken
@@ -354,6 +378,7 @@ export type MusicToken =
   | SlurToken
   | InstrumentToken
   | BracketToken
+  | SegmentToken
 
 // ============================================================
 // 歌词（LyricChar）
