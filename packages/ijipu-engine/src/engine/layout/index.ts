@@ -1383,6 +1383,49 @@ export function layoutScore(
       if (seg.bar) barList.push({ bar: seg.bar, atEnd: b === row.end - 1, barIdx: b })
     }
 
+    /**
+     * adj427：**段边界小节线的额外间距**（取代此前的"段边界小节加权"）。
+     *
+     * 段层的大括号 / 圆括号要与主旋律共用同一段横向空间，落点正在包络两端**小节线的内侧**。
+     * 此前做法是"给边界小节的音符加权"来腾地方——副作用是**这些拍的占宽被撑大**：
+     * 实测段内每拍占宽达 `3 4 |` 小节的 **2.35 倍**（用户发现）。
+     *
+     * 现在改为把这份空间记在**那两条小节线**上（左边界线的**右侧**、右边界线的**左侧**
+     * 各留 `SEG_BOUNDARY_PAD`），并计入 `nonDurPad`。因为行宽被撑满，
+     * `nonDurPad` 增加只会让富余 `W` **等比缩小** → 各拍占宽**同比例**减小
+     * ⇒ **各小节每拍占宽仍保持均匀** ✓，而边界处确有多出的间隙 ✓。
+     */
+    const SEG_BOUNDARY_PAD = m.noteSize * 0.8
+    const segPadL = new Array(segs.length).fill(0)
+    const segPadR = new Array(segs.length).fill(0)
+    let segPadTotal = 0
+    {
+      const rowTokens: MusicToken[] = []
+      for (let b = row.start; b < row.end; b++) rowTokens.push(...segs[b].notes)
+      const rowSegs = computeSegments(rowTokens)
+      if (rowSegs.length > 0) {
+        // 各小节「末尾线」所在的拍位（小节线本身不计拍）
+        const barEndBeat: number[] = []
+        let acc = 0
+        for (let b = row.start; b < row.end; b++) {
+          for (const t of segs[b].notes) if (isDurational(t)) acc += tokenDuration(t)
+          barEndBeat.push(acc)
+        }
+        for (const sg of rowSegs) {
+          const iL = barEndBeat.findIndex((v) => Math.abs(v - sg.startBeat) < 1e-6)
+          if (iL >= 0) {
+            segPadR[row.start + iL] = SEG_BOUNDARY_PAD
+            segPadTotal += SEG_BOUNDARY_PAD
+          }
+          const iR = barEndBeat.findIndex((v) => Math.abs(v - (sg.startBeat + sg.beats)) < 1e-6)
+          if (iR >= 0) {
+            segPadL[row.start + iR] = SEG_BOUNDARY_PAD
+            segPadTotal += SEG_BOUNDARY_PAD
+          }
+        }
+      }
+    }
+
     // adj393：渐强/渐弱（`<`/`>`/`!`）——本路径此前**完全不处理**装饰 token，
     // 而默认配置 noteSpaceLayout='space' 走的正是这里 → 默认设置下记号静默不显示。
     // 现按行内小节顺序喂事件流，放置后再解析起止（语义见 layout/hairpins.ts）。
@@ -1429,6 +1472,9 @@ export function layoutScore(
       }
     }
     if (bracketPadSum > 0) nonDurPad += bracketPadSum
+    // adj427：段边界小节线的额外间距（见上 SEG_BOUNDARY_PAD）——计入非时值占位预算，
+    // 由富余 W 等比让出，从而**不改变各拍占宽的均匀性**。
+    nonDurPad += segPadTotal
     // adj293：&hx（滑音箭头，右侧）为无时值元素——依附其前的带时值元素之后，本体宽占位
     for (const n of noteList) {
       if (n.hasHx) nonDurPad += hxBodyW(m.noteSize)
@@ -1475,58 +1521,11 @@ export function layoutScore(
         }
       }
     }
-    /**
-     * adj427：**段边界小节加权**（「上下两层综合考虑占宽」）。
-     *
-     * 段层的大括号 / 圆括号要与主旋律**共用**同一段横向空间，且必须落在
-     * 「包络边界小节线内侧 ~ 内容边」之间。撑满行的富余 `W` 原本只按时值等比分配，
-     * 边界音符居中后的留白有限，塞下「大括号 + 圆括号 + 间距」后偏紧。
-     * 做法：给**段边界所在小节的音符**加权，使它们分到更多富余 → 槽更宽 → 居中留白更大。
-     * **无段时全部权重为 1**，分配与既有完全一致（零回归）。
-     */
-    const SEG_BOUNDARY_WEIGHT = 3.5
-    const segWeight = new Array(segs.length).fill(1)
-    {
-      const rowTokens: MusicToken[] = []
-      for (let b = row.start; b < row.end; b++) rowTokens.push(...segs[b].notes)
-      const rowSegs = computeSegments(rowTokens)
-      if (rowSegs.length > 0) {
-        const barStartBeat: number[] = []
-        let acc = 0
-        for (let b = row.start; b < row.end; b++) {
-          barStartBeat.push(acc)
-          for (const t of segs[b].notes) if (isDurational(t)) acc += tokenDuration(t)
-        }
-        const barAt = (beat: number): number => {
-          let bi = 0
-          for (let i = 0; i < barStartBeat.length; i++) if (barStartBeat[i] <= beat + 1e-9) bi = i
-          return bi
-        }
-        for (const sg of rowSegs) {
-          // 左边界：包络起点所在小节（其首音左侧要容纳 大括号 + 左圆括号）
-          segWeight[row.start + barAt(sg.startBeat)] = SEG_BOUNDARY_WEIGHT
-          // 右边界：包络终点**前一**小节（其末音右侧要容纳 右圆括号 + 大括号）
-          const biR = barAt(sg.startBeat + sg.beats) - 1
-          if (biR >= 0) segWeight[row.start + biR] = SEG_BOUNDARY_WEIGHT
-        }
-      }
-    }
-    /**
-     * 加权后的时值和（预计算）——**分母必须与既有 `totalDur` 同口径**：
-     * `Σ（音符块时值 + 每条增时线时值）`，否则增时线音符的分摊比例会变、
-     * 既有排版几何随之漂移（adj398 那类"不越右边距"断言会失败）。
-     * 权重全为 1 时本式 === `totalDur`，分配与既有完全等价。
-     */
-    const segWeightDurSum = noteList.reduce(
-      (a, n) => a + (n.noteDur + (n.hasDot ? n.dotDur : 0) + n.augCount * n.augDur) * segWeight[n.barIdx],
-      0,
-    )
     // 音符/增时线在「撑满(全局 W)」或「自然+小节对齐(per-bar extra)」下的可分配宽
+    // adj427：段边界所需空间已改为记在**小节线**上（见上 SEG_BOUNDARY_PAD + segPadTotal 进
+    // nonDurPad）——不再给音符加权，从而**各小节每拍占宽保持均匀**（等比缩放）。
     const extraOf = (barIdx: number, elDur: number): number => {
-      if (stretch) {
-        // adj427：加权后重新归一（segWeight 全为 1 时与既有 `elDur/totalDur*W` 完全等价）
-        return segWeightDurSum > 0 ? ((elDur * segWeight[barIdx]) / segWeightDurSum) * W : 0
-      }
+      if (stretch) return totalDur > 0 ? (elDur / totalDur) * W : 0
       return segDurSum[barIdx] > 0 ? (elDur / segDurSum[barIdx]) * extraWByBar[barIdx] : 0
     }
 
@@ -1668,8 +1667,9 @@ export function layoutScore(
         const bk = barList[barCursor]
         // adj315：间距只朝向有音符的一侧——行首/行末背对音符那侧不设间距（贴边）。
         // 中间小节线左侧/右侧各 barlinePad；行首（左侧无音符）gapL=0；行末（atEnd）gapR=0。
-        const gapL = segLastPb[b] === undefined ? 0 : barGapSide()
-        let gapR = bk.atEnd ? 0 : barGapSide()
+        // adj427：段边界线再各加 segPadL/segPadR（给段层的大括号/圆括号腾出内侧空间）
+        const gapL = (segLastPb[b] === undefined ? 0 : barGapSide()) + segPadL[b]
+        let gapR = (bk.atEnd ? 0 : barGapSide()) + segPadR[b]
         // adj357：临时节拍（|"P:2/4"）在小节线右侧画分数——右侧占位须含「分数半宽×2 + 2×s 起始 + 2px 末距」，
         // 空间优先路径原用固定 barGapSide（不含分数宽），导致分数压到下一小节音符；此处补足。
         // adj398：该间距同时计入上方 nonDurPad 预算（同源函数 meterGapRight），否则行内容右溢。

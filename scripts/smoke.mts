@@ -5722,6 +5722,18 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
       const digitTop = upperBaseline - nsx2 * 0.8
       check('X6e 大括号上端高于上一行音符上沿', (sb?.yTop ?? 0) < digitTop, `yTop=${sb?.yTop} digitTop=${digitTop.toFixed(1)}`)
       check('X6f 大括号下端低于下一行音符下沿', (sb?.yBottomLower ?? 0) > lowerBaseline, `yBotLo=${sb?.yBottomLower} lowerBaseline=${lowerBaseline.toFixed(1)}`)
+      // X6g：轮廓**完全落在自己的占宽槽位内**——两个边界曲线必须过 `xs ± e`（中轴两侧），
+      //      若误用 `xTip ± e` 会整体偏向外侧、越出槽位并压到圆括号（曾出现过该 bug）
+      const dAttr = /d="([^"]+)"/.exec(mAll[0] ?? '')?.[1] ?? ''
+      const coords = (dAttr.match(/-?[\d.]+/g) ?? []).map(Number)
+      const xs2 = coords.filter((_, i) => i % 2 === 0)
+      const slotL = sb?.x1 ?? 0
+      const slotR = slotL + Math.max(3, nsx2 * 0.32)
+      check(
+        'X6g 轮廓不越出自身占宽槽位（不压到圆括号）',
+        xs2.length > 0 && Math.min(...xs2) >= slotL - 0.11 && Math.max(...xs2) <= slotR + 0.11,
+        `x范围=[${Math.min(...xs2)},${Math.max(...xs2)}] 槽=[${slotL},${slotR.toFixed(1)}]`,
+      )
     }
     check('X7 大括号横向占宽 ≈ max(3, 0.32×字号)', Math.abs(braceW - Math.max(3, nsx * 0.32)) < 0.01, `w=${braceW}`)
     // X8：dsb 内部三个元素（左大括号 / 左圆括号 / 内容）**依次不重叠**，且都在小节线内侧
@@ -5741,13 +5753,51 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
     const segNSp = pageSp.notes.filter((n) => n.segment).sort((a, b) => a.x - b.x)
     const barSp = pageSp.barlines.filter((b) => !b.segment).map((b) => b.x).sort((a, b) => a - b)[0]
     const clearSp = (segNSp[0]?.x ?? 0) - barSp
-    check('X9 空间优先（默认布局）：段边界净空已加权加宽（≥ 20px）', clearSp >= 20, `净空=${clearSp.toFixed(1)}px bar=${barSp} content=${segNSp[0]?.x}`)
+    check('X9 空间优先（默认布局）：段边界小节线内侧净空已加宽（≥ 20px）', clearSp >= 20, `净空=${clearSp.toFixed(1)}px bar=${barSp} content=${segNSp[0]?.x}`)
     check('X10 空间优先：大括号同样在小节线内侧', (() => {
       const sbSp = (pageSp.segmentBrackets ?? [])[0]
       const barsSp = pageSp.barlines.filter((b) => !b.segment).map((b) => b.x).sort((a, b) => a - b)
       const bw = Math.max(3, SPC.note_size * 0.32)
       return sbSp !== undefined && sbSp.x1 >= barsSp[0] - 0.11 && sbSp.x2 + bw <= barsSp[barsSp.length - 1] + 0.11
     })(), JSON.stringify((pageSp.segmentBrackets ?? [])[0]))
+  }
+}
+
+// ---- adj427 Step 5h：**各小节每拍占宽必须均匀**（段内拍不得比其它主声部小节宽） ----
+// 用户实测发现过回归：段边界加权把 `3 4 |` 压到 21.70px/拍、段内撑到 51.05px/拍（2.35×）。
+// 这里直接量「同一小节内相邻音符间距」（= 每拍占宽，不含跨小节线的间隙），两种布局各跑一遍。
+console.log('[adj427] per-beat width uniform across measures')
+{
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const srcDsb = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const SPC2 = { ...defaultPageConfig, noteSpaceLayout: 'space' as const }
+  const diffs = (code: string, cfg: typeof DUR_CFG): number[] => {
+    const pg = layoutScore(parseJps(code), cfg).pages[0]
+    const bars = [...new Set(pg.notes.filter((n) => !n.segment).map((n) => n.barIndex))]
+    const out: number[] = []
+    for (const bi of bars) {
+      const ns2 = pg.notes.filter((n) => !n.segment && n.barIndex === bi).sort((a, b) => a.x - b.x)
+      for (let i = 1; i < ns2.length; i++) out.push(ns2[i].x - ns2[i - 1].x)
+    }
+    return out
+  }
+  for (const [nm, cfg] of [['空间优先(默认)', SPC2], ['时值优先', DUR_CFG]] as const) {
+    for (const [tag, code] of [['bz', src], ['dsb', srcDsb]] as const) {
+      const d = diffs(code, cfg)
+      const lo2 = Math.min(...d)
+      const hi2 = Math.max(...d)
+      check(
+        `Y1[${nm}/${tag}] 各小节每拍占宽均匀（max/min ≤ 1.05）`,
+        d.length >= 6 && hi2 / lo2 <= 1.05,
+        `每拍占宽=${d.map((v) => v.toFixed(1)).join(',')} 比值=${(hi2 / lo2).toFixed(3)}`,
+      )
+    }
+  }
+  // Y2：段内拍与「3 4」小节的每拍占宽**逐一相等**（同一行内不得有差异）
+  {
+    const pg = layoutScore(parseJps(src), SPC2).pages[0]
+    const d = diffs(src, SPC2)
+    check('Y2 空间优先：段内拍与 `3 4` 小节每拍占宽一致', Math.max(...d) - Math.min(...d) < 0.6, `差=${(Math.max(...d) - Math.min(...d)).toFixed(2)}px`)
   }
 }
 

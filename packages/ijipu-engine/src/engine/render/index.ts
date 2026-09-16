@@ -1416,23 +1416,25 @@ function renderSegmentBracket(b: PlacedSegmentBracket, config: PageConfig): stri
   const bow = Math.max(1, Math.min((yBot - yTop) * 0.16, ns * 0.55))
   /**
    * dir=+1 → `{`（中间尖角朝**左**、上下两端朝右）；dir=-1 → `}`（左右镜像）。
-   * `xTip` 为两端尖端所在的横坐标、`xCusp` 为中间尖角所在横坐标（二者相距 = 槽宽 w）。
+   * `xTip` 为两端尖端所在横坐标、`xCusp` 为中间尖角所在横坐标（二者相距 = 槽宽 w）。
+   * 两侧边界分别过 `xs ± e`（xs = 中轴）：中段厚度 = 2e = t，两端与尖角处收拢为一点。
    */
   const brace = (slotX: number, dir: 1 | -1): string => {
     const xTip = slotX + (dir > 0 ? w : 0)
     const xCusp = slotX + (dir > 0 ? 0 : w)
-    const xo = xTip + (dir > 0 ? -e : e) // 外缘中轴侧
-    const xi = xTip + (dir > 0 ? e : -e) // 内缘中轴侧
+    const xs = (xTip + xCusp) / 2
+    const a = xs + e
+    const b2 = xs - e
     const d =
       `M ${r1n(xTip)} ${r1n(yTop)} ` +
-      // 上段外缘：尖端 → 中缝尖角
-      `C ${r1n(xo)} ${r1n(yTop + bow)}, ${r1n(xo)} ${r1n(my - bow)}, ${r1n(xCusp)} ${r1n(my)} ` +
-      // 下段外缘：中缝尖角 → 下端尖端
-      `C ${r1n(xo)} ${r1n(my + bow)}, ${r1n(xo)} ${r1n(yBot - bow)}, ${r1n(xTip)} ${r1n(yBot)} ` +
-      // 下段内缘：下端尖端 → 中缝尖角
-      `C ${r1n(xi)} ${r1n(yBot - bow)}, ${r1n(xi)} ${r1n(my + bow)}, ${r1n(xCusp)} ${r1n(my)} ` +
-      // 上段内缘：中缝尖角 → 上端尖端
-      `C ${r1n(xi)} ${r1n(my - bow)}, ${r1n(xi)} ${r1n(yTop + bow)}, ${r1n(xTip)} ${r1n(yTop)} Z`
+      // 上段·侧 A：尖端 → 中缝尖角
+      `C ${r1n(a)} ${r1n(yTop + bow)}, ${r1n(a)} ${r1n(my - bow)}, ${r1n(xCusp)} ${r1n(my)} ` +
+      // 下段·侧 A：中缝尖角 → 下端尖端
+      `C ${r1n(a)} ${r1n(my + bow)}, ${r1n(a)} ${r1n(yBot - bow)}, ${r1n(xTip)} ${r1n(yBot)} ` +
+      // 下段·侧 B：下端尖端 → 中缝尖角
+      `C ${r1n(b2)} ${r1n(yBot - bow)}, ${r1n(b2)} ${r1n(my + bow)}, ${r1n(xCusp)} ${r1n(my)} ` +
+      // 上段·侧 B：中缝尖角 → 上端尖端
+      `C ${r1n(b2)} ${r1n(my - bow)}, ${r1n(b2)} ${r1n(yTop + bow)}, ${r1n(xTip)} ${r1n(yTop)} Z`
     return `<path d="${d}" fill="#1b1b1b" stroke="none" data-segment-brace="${b.type}"/>`
   }
   return brace(b.x1, 1) + brace(b.x2, -1)
