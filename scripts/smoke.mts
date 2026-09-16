@@ -5711,11 +5711,24 @@ console.log('[adj427] segment playback (voices / instruments / gain)')
         .filter((e) => !e.placed.segment)
         .map((e) => (e.playheadSegs ?? []).map((x) => `${x.x.toFixed(1)}:${x.width.toFixed(1)}`).join('|'))
         .join(';')
+    // adj439：**bz 不改主旋律几何**（bz 只在上方叠加，主旋律色块应与无段时逐段一致）；
+    // **dsb 下层**则按用户要求"以段层右界（大括号 `}`）为界限定占宽"——包络内最后一音的色块
+    // 会被收到大括号之内，故不再与无段时一致（下面 Z18c 单独断言"不越过大括号"）。
     check(
-      'Z18 有段时主旋律色块宽度与无段时**逐段一致**（段层不污染右边界）',
-      segsSig(sBz) === segsSig(sPlain) && segsSig(sDsb) === segsSig(sPlain),
+      'Z18 有段时 bz 的主旋律色块与无段时**逐段一致**（bz 不污染右边界）',
+      segsSig(sBz) === segsSig(sPlain),
       `bz=${segsSig(sBz).slice(0, 70)} plain=${segsSig(sPlain).slice(0, 70)}`,
     )
+    {
+      // Z18c（adj439，E-2026-179）：dsb 下层色块**不跨过段层右界（大括号）**
+      const layDsb = layoutScore(parseJps(dsbSrc), DUR_CFG)
+      const sbX2 = (layDsb.pages[0].segmentBrackets ?? [])[0]?.x2 ?? Number.POSITIVE_INFINITY
+      const dsbBlocks = evs(sDsb).filter((e) => !e.placed.segment).flatMap((e) => e.playheadSegs ?? [])
+      const crosses = dsbBlocks.some((s) => s.x < sbX2 - 1e-3 && s.x + s.width > sbX2 + 1e-3)
+      check('Z18c dsb 下层色块不跨过段层右界（大括号 `}`）',
+        Number.isFinite(sbX2) && dsbBlocks.length > 0 && !crosses,
+        `x2=${sbX2.toFixed(1)} blocks=${dsbBlocks.map((s) => `${s.x.toFixed(1)}~${(s.x + s.width).toFixed(1)}`).join(' ')}`)
+    }
     // 且主旋律色块不覆盖整小节：末块右缘应落在该小节线之前（留出间距）
     const melEv = evs(sDsb).filter((e) => !e.placed.segment)
     const w = melEv.flatMap((e) => e.playheadSegs ?? []).map((x) => x.width)
