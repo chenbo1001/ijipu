@@ -6026,10 +6026,13 @@ console.log('[adj435] overlap beats sized by the denser layer (multi-voice style
           // AL6（adj442，E-2026-182）：**dsb 色块以大括号为界**——首个块左缘 = `x1`(`{`)、末块右缘 = `x2`(`}`)
           const sortedBlk = [...upperSegs].sort((a, b) => a.x - b.x)
           const braceX1 = (p.segmentBrackets ?? [])[0]?.x1 ?? 0
-          check(`AL6[${nm}] dsb 色块以大括号为界（首块左缘=`+'`{`'+`、末块右缘=`+'`}`'+`）`,
-            braceX1 > 0 && braceX2 > 0 && sortedBlk.length > 0 &&
-              Math.abs(sortedBlk[0].x - braceX1) < 0.6 && Math.abs(blkRight - braceX2) < 0.6,
-            `firstLeft=${sortedBlk[0]?.x.toFixed(2)} x1=${braceX1.toFixed(2)} lastRight=${blkRight.toFixed(2)} x2=${braceX2.toFixed(2)}`)
+          // adj442（用户修正）：**左端不外扩**——色块从**起始音符**开始（音符左对齐，重叠区首音已对齐）；
+          // **右端**外扩到段层右界（`}` / 后小节线），因为 `&ykh`/括号是无时值占宽元素。
+          void braceX1
+          check(`AL6[${nm}] dsb 色块：左端=起始音符、右端=大括号界限`,
+            braceX2 > 0 && sortedBlk.length > 0 && ss.length > 0 &&
+              Math.abs(sortedBlk[0].x - ss[0].x) < 0.6 && Math.abs(blkRight - braceX2) < 0.6,
+            `firstLeft=${sortedBlk[0]?.x.toFixed(2)} firstNote=${ss[0]?.x.toFixed(2)} lastRight=${blkRight.toFixed(2)} x2=${braceX2.toFixed(2)}`)
         }
         }
       }
