@@ -61,8 +61,9 @@ interface DocState {
   /** adj282：播放轨道（事件 atMs 单调，含反复展开），PreviewPane 跟随色块定位用。
    *  adj299：group 唯一标识曲行（多声部 Q1 与单声部行可共用 voice 号，必须用 group 定位）；
    *  adj427：色块改为**按音色（instrument）着色**——不同音色不同颜色，播放中切换音色能看到变色；
-   *  voice 保留用于「主声部保持既有红色」的判定 */
-  playheadTrack: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number; instrument?: string }[]
+   *  voice 保留用于「主声部保持既有红色」的判定
+   *  adj429：`yTopMin` / `yBottomMax` = 色块按曲行几何动态定界的上下绝对 y（多声部/临时段自动避开重叠、压歌词） */
+  playheadTrack: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number; instrument?: string; yTopMin?: number; yBottomMax?: number }[]
   /** adj262：多声部 voiceBlocks（纯曲部 yTop/yBottom/x）——播放时渲染竖向色框覆盖整列 */
   voiceBlocks: { x: number; yTop: number; yBottom: number; pageIndex: number; voices: number[] }[]
   /** adj291：布局后的「全局音符 index → 物理页 page」映射（自动分页一致）——光标联动定位音符 id.page */

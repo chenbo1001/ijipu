@@ -382,6 +382,9 @@ export function PlaybackDialog() {
             group: s.group,
             // adj427：色块按**音色**着色（切换音色时颜色跟着变）
             instrument: s.instrument,
+            // adj429：色块按曲行几何动态定界（多声部/临时段不再互相覆盖、不压歌词）
+            ...(s.yTopMin !== undefined ? { yTopMin: s.yTopMin } : {}),
+            ...(s.yBottomMax !== undefined ? { yBottomMax: s.yBottomMax } : {}),
           })),
         ),
       )

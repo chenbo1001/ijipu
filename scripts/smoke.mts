@@ -5716,6 +5716,96 @@ console.log('[adj427] segment playback (voices / instruments / gain)')
   )
 }
 
+// ---- adj429：色块按曲行几何动态定界（多声部/临时段不再互相覆盖、不压歌词）----
+// 旧实现 `y−1.6×字号 ~ y+0.6×字号` 在三类场景出问题（用户报）：
+//  ① 多声部 Q1↔Q2 各自 28.6 px 高、基线仅差 ~22 px ⇒ 重叠 3.6 px；
+//  ② dsb 上下层基线差 dy=22、各自 28.6 px ⇒ 重叠 17.6 px；
+//  ③ bz 上层与主旋律相隔 dy=22、各自 28.6 px ⇒ 重叠 ~6.6 px；
+// 修复：playheadSegs 携带 `yTopMin`/`yBottomMax`（按 voiceBlock.voiceCenters 中线 / 段层对侧基线分块）。
+console.log('[adj429] playheadSegs color-block bounds (no overlap, no lyric press)')
+{
+  const ns = DUR_CFG.note_size
+  // V1：单声部 → 不设 yTopMin/yBottomMax（走渲染端默认；保持 adj299 既有观感零回归）
+  {
+    const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1' |\n"
+    const parseResult = parseJps(src)
+    const seq = buildPlaySequence(parseResult, layoutScore(parseResult, DUR_CFG), 120, undefined, '大钢琴')
+    const segs = seq.events.flatMap((e) => e.playheadSegs ?? [])
+    const withBounds = segs.filter((s) => s.yTopMin !== undefined || s.yBottomMax !== undefined)
+    check('V1 单声部 playheadSegs 不带 yTopMin/yBottomMax（默认定界、零回归）', withBounds.length === 0, `withBounds=${withBounds.length}`)
+  }
+  // V2：多声部 Q1+Q2 → Q1 底部 ≤ Q1/Q2 中线、Q2 顶部 ≥ Q1/Q2 中线（互不重叠）
+  {
+    const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 4 | 5 6 7 1' |\nQ2: 5 6 5 3 | 1 2 3 4 |\n"
+    const parseResult = parseJps(src)
+    const lay = layoutScore(parseResult, DUR_CFG)
+    const seq = buildPlaySequence(parseResult, lay, 120, undefined, '大钢琴')
+    // 取 Q1 和 Q2 各自的某个事件（来自 page.voiceBlocks）
+    const q1Seg = seq.events.find((e) => e.placed.id.voice === 1 && !e.placed.segment)?.playheadSegs?.[0]
+    const q2Seg = seq.events.find((e) => e.placed.id.voice === 2 && !e.placed.segment)?.playheadSegs?.[0]
+    check('V2 多声部：Q1 段带 yTopMin/yBottomMax', q1Seg !== undefined && q1Seg.yTopMin !== undefined && q1Seg.yBottomMax !== undefined, `q1Seg=${JSON.stringify(q1Seg)}`)
+    check('V2 多声部：Q2 段带 yTopMin/yBottomMax', q2Seg !== undefined && q2Seg.yTopMin !== undefined && q2Seg.yBottomMax !== undefined, `q2Seg=${JSON.stringify(q2Seg)}`)
+    if (q1Seg?.yBottomMax !== undefined && q2Seg?.yTopMin !== undefined) {
+      check('V2 多声部 Q1 底部 ≤ Q2 顶部（不重叠）', q1Seg.yBottomMax <= q2Seg.yTopMin + 0.01, `q1.bot=${q1Seg.yBottomMax.toFixed(2)} q2.top=${q2Seg.yTopMin.toFixed(2)}`)
+    }
+  }
+  // V3：dsb 上下层 → 上层底部 ≤ 上下层中线、下层顶部 ≥ 中线
+  {
+    const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+    // 重要：parseJps 只调一次，layout 和 sequence 共用同一个 ParseResult（否则段层 token 与
+    // placed 的 token 对象身份不同 → segPlacedByToken.get(t) 查不到，段层事件根本不补发）。
+    const parseResult = parseJps(src)
+    const lay = layoutScore(parseResult, DUR_CFG)
+    const seq = buildPlaySequence(parseResult, lay, 120, undefined, '大钢琴')
+    const upperSeg = seq.events.find((e) => e.placed.segment?.type === 'dsb' && e.placed.segment?.layer === 'upper')?.playheadSegs?.[0]
+    const lowerSeg = seq.events.find((e) => e.placed.playVoice === 'second')?.playheadSegs?.[0]
+    check('V3 dsb upper 带 yTopMin/yBottomMax', upperSeg?.yTopMin !== undefined && upperSeg?.yBottomMax !== undefined, `up=${JSON.stringify(upperSeg)}`)
+    check('V3 dsb lower 带 yTopMin/yBottomMax', lowerSeg?.yTopMin !== undefined && lowerSeg?.yBottomMax !== undefined, `lo=${JSON.stringify(lowerSeg)}`)
+    if (upperSeg?.yBottomMax !== undefined && lowerSeg?.yTopMin !== undefined) {
+      check('V3 dsb upper 底部 ≤ lower 顶部（不重叠）', upperSeg.yBottomMax <= lowerSeg.yTopMin + 0.01, `up.bot=${upperSeg.yBottomMax.toFixed(2)} lo.top=${lowerSeg.yTopMin.toFixed(2)}`)
+    }
+    // V3b：色块高度 ≥ 4 px（不到则隐藏；这里默认 dy=22 ⇒ 两层各约 11−0.5=10.5 px，满足）
+    const upH = (upperSeg?.yBottomMax ?? 0) - (upperSeg?.yTopMin ?? 0)
+    const loH = (lowerSeg?.yBottomMax ?? 0) - (lowerSeg?.yTopMin ?? 0)
+    check('V3b dsb 上下色块高度 ≥ 4 px（最小可见）', upH >= 4 && loH >= 4, `upH=${upH.toFixed(2)} loH=${loH.toFixed(2)}`)
+  }
+  // V4：bz 上层 → 底部 ≤ 主旋律色块顶（不重叠）
+  {
+    const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+    const parseResult = parseJps(src)
+    const lay = layoutScore(parseResult, DUR_CFG)
+    const seq = buildPlaySequence(parseResult, lay, 120, undefined, '大钢琴')
+    const bzSeg = seq.events.find((e) => e.placed.segment?.type === 'bz')?.playheadSegs?.[0]
+    const melodySeg = seq.events.find((e) => !e.placed.segment && e.placed.id.voice === 1)?.playheadSegs?.[0]
+    check('V4 bz upper 带 yTopMin/yBottomMax', bzSeg?.yTopMin !== undefined && bzSeg?.yBottomMax !== undefined, `bz=${JSON.stringify(bzSeg)}`)
+    // bz 主旋律是普通主声部 → melodySeg 默认无 bounds；用 melodySeg.y 推它的色块顶（−1.6×字号）
+    if (bzSeg?.yBottomMax !== undefined && melodySeg) {
+      const melodyBlockTop = melodySeg.y - ns * 1.6
+      check('V4 bz upper 底部 ≤ 主旋律色块顶（不重叠）', bzSeg.yBottomMax <= melodyBlockTop + 0.01, `bz.bot=${bzSeg.yBottomMax.toFixed(2)} melody.top=${melodyBlockTop.toFixed(2)}`)
+    }
+    // V4b：bz 色块高度 ≥ 4 px（默认 dy=22 ⇒ 22 − 1.1×字号 + 1.1×字号 − 0.5 = 21.5 px ≥ 4 ✓）
+    const h = (bzSeg?.yBottomMax ?? 0) - (bzSeg?.yTopMin ?? 0)
+    check('V4b bz 色块高度 ≥ 4 px（最小可见）', h >= 4, `h=${h.toFixed(2)}`)
+  }
+  // V5：把 dsb dy 调到 60 → 上下色块应更高（动态定界确实响应设置）
+  {
+    const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+    const parseResult = parseJps(src)
+    const cfg = { ...DUR_CFG, segmentRowGap: { dsb: 60 } }
+    const lay = layoutScore(parseResult, cfg)
+    const seq = buildPlaySequence(parseResult, lay, 120, undefined, '大钢琴')
+    const upperSeg = seq.events.find((e) => e.placed.segment?.type === 'dsb' && e.placed.segment?.layer === 'upper')?.playheadSegs?.[0]
+    const lowerSeg = seq.events.find((e) => e.placed.playVoice === 'second')?.playheadSegs?.[0]
+    const upH = (upperSeg?.yBottomMax ?? 0) - (upperSeg?.yTopMin ?? 0)
+    const loH = (lowerSeg?.yBottomMax ?? 0) - (lowerSeg?.yTopMin ?? 0)
+    // dy=60 ⇒ 上下层各占用 ≥ dy/2 − 0.5 = 29.5 px；upper 用 TOP_EXT(1.1ns)=14.3、lower 用 BOT_EXT(0.6ns)=7.8，
+    // 上下高度允许有差异（44 vs 37 ≈ 1.1:0.6 = 14.3:7.8 的固有比）。
+    check('V5 dsb dy=60 → 上下色块均 ≥ 20 px（总可用 60 − 1 px 中缝 = 59 px）', upH > 20 && loH > 20, `upH=${upH.toFixed(2)} loH=${loH.toFixed(2)}`)
+  }
+}
+
+
+
 // ---- adj427 Step 5c：小节线锚点对齐 / 括号预留 / dsb 两层居中（用户报的 6 项问题） ----
 console.log('[adj427] segment barline align / bracket reserve / dsb centering')
 {

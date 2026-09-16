@@ -582,6 +582,10 @@ type PlayheadTrackItem = {
   voice: number
   group: number
   instrument?: string
+  /** adj429：色块按曲行几何动态定界的上边界（多声部/临时段自动避开重叠、不压歌词） */
+  yTopMin?: number
+  /** adj429：色块按曲行几何动态定界的下边界 */
+  yBottomMax?: number
 }
 
 /**
@@ -616,7 +620,8 @@ function trackKeysOf(track: PlayheadTrackItem[]): Map<string, PlayheadTrackItem[
  * adj282：在**同一组**（同页/同曲行/同声部/同音色）的拍段序列里定位当前色块。
  * adj299：按「拍段」定位（每段 ≤1 拍）；色块高度由音符基线推：
  * 行顶 基线-1.1×音符高、行底 基线+0.6×音符高，各加延伸 0.5×音符高。
- * 返回 null = 未播放/不在本页/该组当前段已播完。
+ * adj429：若 track 项带 `yTopMin`/`yBottomMax`（由引擎按曲行几何动态定界），用它替代默认硬编码。
+ * 返回 null = 未播放/不在本页/该组当前段已播完/动态定界算不出可见高度。
  */
 function playheadPosIn(
   segs: PlayheadTrackItem[],
@@ -643,10 +648,19 @@ function playheadPosIn(
   // 各组按各自发声时间出现/消失，旧行不再残留。
   if (currentMs >= a.atMs + a.durationMs) return null
   if (a.pageIndex !== pageIndex) return null
-  // 高度 = 该曲行的这个声部（音符基线推，天然区分各声部行/上下两层，不依赖 voiceBlock）
-  const ext = noteSize * 0.5
-  const yTop = a.y - noteSize * 1.1 - ext
-  const yBottom = a.y - noteSize * 1.1 + noteSize * 1.7 + ext
+  // adj429：色块按曲行几何动态定界（多声部/临时叠加段不互相覆盖、不压歌词）。
+  // 仅当 a.yTopMin/a.yBottomMax 都有才走动态（避免单独传一个造成异常）；
+  // 否则回退到原硬编码 `[y−1.6×字号, y+0.6×字号]`。
+  let yTop: number
+  let yBottom: number
+  if (a.yTopMin !== undefined && a.yBottomMax !== undefined) {
+    yTop = a.yTopMin
+    yBottom = a.yBottomMax
+  } else {
+    const ext = noteSize * 0.5
+    yTop = a.y - noteSize * 1.1 - ext
+    yBottom = a.y - noteSize * 1.1 + noteSize * 1.7 + ext
+  }
   return { x: a.x, yTop, yBottom, width: a.width, voice: a.voice, instrument: a.instrument }
 }
 

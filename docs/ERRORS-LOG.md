@@ -1029,6 +1029,30 @@
 - **验证**：`npm run smoke` **17 项失败 == 改动前基线**（无新增），其中新增断言覆盖：线宽常量 1/2、`||`/`||/` 线间距 1px、`|`/`||`/`||/`/`|:`/`:|`/`:|:` 的**渲染几何逐项 == `barlineGeometry`**（线偏移/宽 + 点圆心）、占位总宽表（1/4/3/6.6/7.6/7.6/13.2，`|*`=1、`|/`=0）、几何对称性、高音点 x == 数字槽中心；`tsc -b` 通过；`obsidian-ijipu` 同步 `vendor/engine` 后其 smoke 99 项全绿；无头 Chrome 截图（示例 `yufa-quangai`）实测高八度点 `cx=51.93` 与数字槽中心 `47.9+13×0.31=51.93` 完全一致。
 - **预防**：① **同一几何量只能有一处定义**——渲染与布局必须消费同一个纯函数（本项目已对间距用 `spacing.ts` 集中管理，本次把"线组几何"也纳入；凡"渲染写偏移 + 布局写总宽"的形态都视为隐患）；② 改线宽/间距这类**影响占位**的常量时，必须**同时**核对「画出来的形状」与「占位表」，不能只看渲染；③ 断言要写成「渲染实测 == 几何函数」而不是「渲染 == 手抄的魔数」——手抄的魔数正是这次漂移的载体（`smoke.mts` 里 `0.55/1.95/4.2/8.1` 那套右缘表已全部改用 `barlineTotalW`）；④ 小节线中心 x 由布局以 `r1`（0.1px）取整，故"右缘 = 中心 + 半宽"可能有 ≤0.05px 取整外溢，断言按此放容差而不是硬 `<=`。
 
+### E-2026-166 试听色块用硬编码 28.6 px 高 → 多声部 Q1↔Q2 重叠 / dsb 上下层黏成一坨 / bz 段侵入上一行（用户报）（adj429）
+
+- **场景**：v0.20 起临时叠加段（bz/dsb）和多声部块同时存在时，试听色块按 `[y − 1.6×字号, y + 0.6×字号]` 硬编码 28.6 px 高延伸，多块之间互相覆盖、且可能侵入相邻行。
+- **现象**（用户报三类）：
+  1. **多声部**：Q1 与 Q2 色块分别从各自基线向下/向上延伸 28.6 px，而两基线仅相差 `1.7×字号 + shengbu` ≈ 22 px ⇒ **重叠 ~3.6 px**（用户看到"两个色块黏在一起"）。
+  2. **{dsb … }**：上下两层基线相差 `dy`（默认 22 px），每层延伸 28.6 px ⇒ **重叠 ~17.6 px**（两层色块几乎盖成一块，丧失"上下层"语义）。
+  3. **{bz … }**：段层在主旋律上方 dy 距离，段层色块底 `yUpper + 7.8` 与主旋律色块顶 `yRow − 20.8` **重叠 ~6.6 px**；同时段层色块顶 `yUpper − 20.8` 可能侵入**上一行**曲部/减时线区。
+- **根因**：色块高度由音符基线**对称**延伸，与相邻元素（中线、上一行基线、歌词行基线）**无关**。任何"两个垂直距离 < 2.2×字号"的相邻色块都会互相覆盖；用户调 `dy` 也救不了——只是把重叠推迟到更窄的 `dy` 才发生。
+- **解决**：色块**按曲行几何动态定界**（adj429）——
+  - `PlayheadSeg` 增加可选字段 `yTopMin` / `yBottomMax`（绝对 y，未设 = 用默认硬编码，单声部零回归）。
+  - `buildPlaySequence` 在构造 `playheadSegs` 时根据 `PlacedToken` 身份调 `computeColorBounds`：
+    - **多声部**：按 `voiceBlock.voiceCenters[vi]` 与相邻声部中线分块（Q1 底 = 中线 - 0.25、Q2 顶 = 中线 + 0.25，中间留 0.5 px 视觉细缝）。
+    - **bz upper**：底 = `min(yUpper + 0.6×字号, 主旋律基线 − 1.6×字号)`（恰好贴住主旋律色块顶）。
+    - **dsb upper**：顶 = `yUpper − 1.1×字号`、底 = `(yUpper + yLower)/2 − 0.25`（占上下层中线之上半部）。
+    - **dsb lower**（即包络内主旋律，`placed.playVoice === 'second'`）：顶 = `(yUpper + yLower)/2 + 0.25`、底 = `yLower + 0.6×字号`。
+    - **单声部**：不传 `yTopMin` / `yBottomMax`，渲染端走原 `[y−1.6×字号, y+0.6×字号]` 默认。
+  - 任一块高度 < 4 px → 返回 null（不传 bounds → 渲染端**完全不画**，避免色块"瘦成一条线"反而干扰视觉）。
+  - `playheadTrack` / `docStore.playheadTrack` 增加同名可选字段；`PlaybackDialog` 透传；`PreviewPane.playheadPosIn` 优先用 `a.yTopMin/a.yBottomMax`，未设才回退默认。
+- **关键实现陷阱**（自检发现）：
+  - **dsb 下层识别**不能用 `placed.segment?.layer === 'lower'`——`shiftEnvelopeDown` 只设 `placed.playVoice = 'second'`，**没**设 `placed.segment`！必须改用 `placed.playVoice === 'second'` 判下层，否则 V3 lower 的色块永远不出现 bounds。
+  - **`parseJps` 必须只调一次**——`layoutScore(parseJps(src), cfg)` 与 `buildPlaySequence(parseJps(src), lay, ...)` 各调一次会拿到**两份不同的 MusicToken 对象**，段层 children 的对象身份对不上 `page.notes[i].token` → `segPlacedByToken.get(t) === undefined` → **段层事件根本不补发**。smoke V3 第一次跑遇到的就是这个问题（debug emit 看到 `placed=UNDEFINED` 才定位到）。
+- **预防**：① **相邻色块的几何关系必须在数据层就约束**——渲染端拿到每个 `PlayheadSeg` 时只做"用 yTopMin / 用默认"二选一，不允许它自己在渲染时算"我的上面是谁"（那需要遍历整页，O(n²) 还会跨段不一致）；② **任何动态定界**必须配合**最小高度 + 隐藏**的下限（这里 4 px）；否则两个离得太近的块会缩成一条噪声线；③ **段层的"对侧"语义分两套**：bz 的对侧是主旋律基线（bz 不动主旋律），dsb 的对侧是另一个段层（dsb 包络上下移动）——别把这两套合并成一个公式；④ **新语法首次落地**就要把"几何参数清单"列一遍——色块高度、上下层间距、括号占宽等**都**是有可能需要用户调节的几何量，临时段这次缺了"色块按曲行几何"这条，是 v0.20 漏掉的。
+- **验证**：smoke 新增 V1–V5 共 7 条断言（V1 单声部不带 bounds 零回归、V2 多声部 Q1↔Q2 不重叠、V3 dsb 上下层各带 bounds 且不重叠、V4 bz upper 不侵入主旋律色块顶、V5 dsb dy=60 上下色块均 ≥ 20 px）；`tsc -b` + `npm run build` 通过；`smoke` 失败项 18 == 基线；`preview:render` 7 谱 `errors=0`；**涉及引擎改动**（`playback/sequence.ts` / `playback/types.ts` / `types.ts` + `preview/PreviewPane.tsx` + `store/docStore.ts` + `dialogs/PlaybackDialog.tsx`）→ 已同步 obsidian-ijipu/vendor/engine。
+
 ### E-2026-165 临时叠加段（`{bz … }` / `{dsb … }`）上下层间距写死 `note_size × 1.7` → 用户无法按需调整行距（用户要求）（adj428）
 
 - **场景**：adj427 实现临时段时，段层与主旋律基线的纵向偏移硬编码为 `dy = note_size × 1.7`（ns=13 ≈ 22.1 px），对 bz 是「段层到主旋律」的距离，对 dsb 是「上下两层各偏移 dy/2」的对称量。`spacing.ts` 里其它间距常量（`LAYER_GAP`、`barlinePad`、`BRACKET_PAD` 等）全部走集中管理，唯独这段层间距是 inline 的——违反了 `spacing.ts` 文件头"改间距只改本文件"的约定。
