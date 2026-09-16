@@ -16,16 +16,23 @@ import type { ParseError } from '../types'
  * 解析一行曲谱内容（不含 "Q..:" 行头）。
  * @param content 行内容
  * @param pos 行位置（用于错误定位）
+ * @param opts.inSegment adj427：当前调用是否为 `{bz/dsb}` 段内的递归调用；为 true 时
+ *   段内再遇到 `{bz/dsb` 会报"嵌套"错，段内遇到 `}` 会报"段内不应有 `}`"错。
  */
 export function tokenizeMusicLine(
   content: string,
   pos: SourcePos,
+  opts: { inSegment?: 'bz' | 'dsb' } = {},
 ): { tokens: MusicToken[]; errors: ParseError[] } {
   const tokens: MusicToken[] = []
   const errors: ParseError[] = []
   let i = 0
   const n = content.length
   const rawAt = (start: number, end: number) => content.slice(start, end)
+
+  // adj427：临时段栈——`{bz` / `{dsb` 入栈，`}` 出栈；close 段时按栈顶类型生成 close token。
+  // 段内**不嵌套** `{bz/dsb`（在 open 段内遇到 `{bz/dsb` 报 error）；段内允许任意 MusicToken。
+  const segmentStack: ('bz' | 'dsb')[] = []
 
   // adj393：渐强/渐弱配对的辅助查询（`<`/`>` 后到 `!` 之前为区间；`!` 必须有同一行内的起点）
   /** 行内最后一条渐强/渐弱起点 token 的下标；没有返回 -1 */
@@ -204,6 +211,105 @@ export function tokenizeMusicLine(
 
     // 空白跳过（空格仅用于格式化美观，不影响解析——`(` 修饰其后音符，可紧贴）
     if (c === ' ' || c === '\t') {
+      i++
+      continue
+    }
+
+    // adj427：临时段 `{bz ... }` / `{dsb ... }` —— `}` 是段结束（线性扫描到第一个 `}`）；
+    // 段内 token 递归 tokenize 后挂在 open token 的 children 上。
+    // 段内**不嵌套** `{bz/dsb` —— 段内再遇到 `{bz/dsb` 报"嵌套"错。
+    if (c === '{') {
+      const after = content.slice(i + 1, i + 5) // 看 4 字符足以区分 bz/dsb
+      let segType: 'bz' | 'dsb' | null = null
+      if (after.startsWith('bz')) segType = 'bz'
+      else if (after.startsWith('dsb')) segType = 'dsb'
+      if (segType) {
+        // 嵌套限制：段内不能再开新段（递归调用时 opts.inSegment 已设置）
+        if (segmentStack.length > 0 || opts.inSegment) {
+          errors.push(
+            err(
+              '临时段 "{' + segType + '}" 不能嵌套在已有段内（已有 ' + (opts.inSegment ?? ('{' + segmentStack[segmentStack.length - 1])) + '）',
+              { line: pos.line, col: pos.col + i },
+              'error',
+              '临时段 {bz} / {dsb} 不支持嵌套；请先 } 关闭外层段，再开新段',
+            ),
+          )
+          i++ // 跳过 `{`，继续解析（不阻塞后续 token）
+          continue
+        }
+        // 找 `}`：跳过 `bz`/`dsb` 后的可选空白，然后线性扫描第一个 `}`
+        let j = i + 1 + segType.length
+        while (j < n && (content[j] === ' ' || content[j] === '\t')) j++
+        const segStart = j
+        let segEnd = -1
+        while (j < n) {
+          if (content[j] === '}') {
+            segEnd = j
+            break
+          }
+          j++
+        }
+        if (segEnd === -1) {
+          errors.push(
+            err(
+              '临时段 "{' + segType + '}" 未找到结束 "}"',
+              { line: pos.line, col: pos.col + i },
+              'error',
+              '请用 "{' + segType + '} ... }" 包裹段内容',
+            ),
+          )
+          // 兜底：把段内剩余内容全部交给普通 tokenize（让其它错误暴露）
+          const innerRaw = content.slice(segStart)
+          const innerRes = tokenizeMusicLine(innerRaw, pos)
+          errors.push(...innerRes.errors)
+          tokens.push({
+            kind: 'segment',
+            type: segType,
+            dir: 'open',
+            pos: i,
+            raw: content.slice(i, segStart),
+            children: innerRes.tokens,
+          })
+          i = n
+          continue
+        }
+        // 递归 tokenize 段内内容：传入 inSegment 标志，让段内再遇 `{bz/dsb` 时报嵌套错
+        const innerRaw = content.slice(segStart, segEnd)
+        const innerRes = tokenizeMusicLine(innerRaw, pos, { inSegment: segType })
+        errors.push(...innerRes.errors)
+        // open 段 token（含 children）
+        tokens.push({
+          kind: 'segment',
+          type: segType,
+          dir: 'open',
+          pos: i,
+          raw: content.slice(i, segEnd + 1),
+          children: innerRes.tokens,
+        })
+        // close 段 token（`}`）
+        tokens.push({
+          kind: 'segment',
+          type: segType,
+          dir: 'close',
+          pos: segEnd,
+          raw: '}',
+        })
+        i = segEnd + 1
+        continue
+      }
+      // `{` 后不是 `bz`/`dsb`：当成无效字符警告并跳过
+      errors.push(
+        err(`无法识别的符号 "${c}"（临时段必须以 "{bz" 或 "{dsb" 开头）`, { line: pos.line, col: pos.col + i }, 'warning', HINT_SYMBOL),
+      )
+      i++
+      continue
+    }
+
+    // adj427：段外的 `}` —— 不应出现（段内的 `}` 由 `{bz/dsb` 处理时线性扫描吃掉了）
+    if (c === '}') {
+      errors.push(
+        err(`多余的 "}"（没有对应的 "{bz" 或 "{dsb"）`, { line: pos.line, col: pos.col + i }, 'warning', '`}` 只能用于关闭 `{bz` 或 `{dsb` 临时段'),
+      )
       i++
       continue
     }
