@@ -5986,6 +5986,22 @@ console.log('[adj435] overlap beats sized by the denser layer (multi-voice style
         check(`AL3[${nm}] 段层各音宽 > 0 且 x 单调递增`,
           ss.every((n) => n.width > 0) && ss.every((n, i) => i === 0 || n.x > ss[i - 1].x),
           `w=${ss.map((n) => n.width.toFixed(1)).join(',')}`)
+        // AL4（adj438，E-2026-178）：段层色块**不得跨过段内小节线**——
+        // 旧实现只看"下一个段层音符"，段内末音色块会越过 `|` 盖到下一小节首音前（用户截图）。
+        {
+          const segBarXs = p.barlines.filter((b) => b.segment).map((b) => b.x).sort((a, b) => a - b)
+          const prD = parseJps(srcD)
+          const seqD = buildPlaySequence(prD, layoutScore(prD, cfg), 120, undefined, '大钢琴')
+          const upperSegs = seqD.events
+            .filter((e) => e.placed.segment)
+            .flatMap((e) => e.playheadSegs ?? [])
+          const crosses = segBarXs.some((bx) =>
+            upperSegs.some((s) => s.x < bx - 1e-3 && s.x + s.width > bx + 1e-3),
+          )
+          check(`AL4[${nm}] 段层色块不跨过段内小节线`,
+            segBarXs.length >= 1 && !crosses,
+            `segBars=${segBarXs.map((v) => v.toFixed(1)).join(',')} blocks=${upperSegs.map((s) => `${s.x.toFixed(1)}~${(s.x + s.width).toFixed(1)}`).join(' ')}`)
+        }
       }
     }
   // AJ4：段层首音仍与主旋律包络起点音精确对齐（坐标系修好后对齐不被破坏）
