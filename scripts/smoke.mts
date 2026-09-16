@@ -5845,6 +5845,66 @@ console.log('[adj430] segment note beat-anchor + scale-fit within envelope')
     `zkh.x=${zk?.x.toFixed(2)} firstPlayed.x=${firstPlayed?.x.toFixed(2)} firstPlayed.kind=${firstPlayed?.token.kind}`)
 }
 
+// ---- adj432：色块按声部角色着色（bz upper 蓝 / dsb upper 红 / dsb lower 绿）+ 段层拖动虚线 ----
+console.log('[adj432] segment color-block voice colors + segment row guides')
+{
+  const ns432 = DUR_CFG.note_size
+  const bz432 = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  const dsb432 = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+  // X1：§PlayheadSeg.playVoice 透传到事件（bz upper = accomp）
+  {
+    const pr = parseJps(bz432)
+    const seq = buildPlaySequence(pr, layoutScore(pr, DUR_CFG), 120, undefined, '大钢琴')
+    const segs = seq.events.flatMap((e) => e.playheadSegs ?? [])
+    const accompSegs = segs.filter((s) => s.playVoice === 'accomp')
+    check('X1 bz 段层 playheadSegs.playVoice = accomp（伴奏角色透传）', accompSegs.length > 0, `n=${accompSegs.length}`)
+    const melSegs = segs.filter((s) => s.playVoice === undefined)
+    check('X1b bz 主旋律 playheadSegs 无 playVoice（普通声部走音色着色）', melSegs.length > 0, `n=${melSegs.length}`)
+  }
+  // X2：dsb upper = main、dsb lower = second
+  {
+    const pr = parseJps(dsb432)
+    const seq = buildPlaySequence(pr, layoutScore(pr, DUR_CFG), 120, undefined, '大钢琴')
+    const segs = seq.events.flatMap((e) => e.playheadSegs ?? [])
+    check('X2 dsb upper playheadSegs.playVoice = main', segs.some((s) => s.playVoice === 'main'), `roles=${[...new Set(segs.map((s) => s.playVoice ?? '-'))].join(',')}`)
+    check('X2b dsb lower playheadSegs.playVoice = second', segs.some((s) => s.playVoice === 'second'), `roles=${[...new Set(segs.map((s) => s.playVoice ?? '-'))].join(',')}`)
+  }
+  // X3：computeRowGuides 给段层行打 segType/segLayer 标记（bz 1 个上层；dsb 上下各 1）
+  {
+    const rowGuidesOf = (src: string) => {
+      const pr = parseJps(src)
+      const lay = layoutScore(pr, DUR_CFG)
+      return computeRowGuides(lay, { quci: DUR_CFG.height_quci, geci: DUR_CFG.geci_size }, DUR_CFG.note_size)[0] ?? []
+    }
+    const bzRows = rowGuidesOf(bz432)
+    const bzSegRows = bzRows.filter((r) => r.segType === 'bz')
+    check('X3 bz 段层行带 segType=bz + segLayer=upper', bzSegRows.length >= 1 && bzSegRows.every((r) => r.segLayer === 'upper'), `segRows=${bzSegRows.length} rows=${bzRows.length}`)
+    check('X3b bz 主旋律行**不带**段层标记', bzRows.some((r) => r.segType === undefined), `rows=${bzRows.length}`)
+    const dsbRows = rowGuidesOf(dsb432)
+    const dsbUp = dsbRows.filter((r) => r.segType === 'dsb' && r.segLayer === 'upper')
+    const dsbLo = dsbRows.filter((r) => r.segType === 'dsb' && r.segLayer === 'lower')
+    check('X3c dsb 上层行 segType=dsb/segLayer=upper', dsbUp.length >= 1, `n=${dsbUp.length}`)
+    check('X3d dsb 下层行 segType=dsb/segLayer=lower（= 被下移的主旋律，playVoice=second）', dsbLo.length >= 1, `n=${dsbLo.length} rows=${dsbRows.length}`)
+  }
+  // X4：GUIDE_LIMITS_EX 覆盖 segmentRowGap 两个键（供拖动钳制）
+  {
+    const ok = GUIDE_LIMITS_EX.segmentRowGap_bz !== undefined && GUIDE_LIMITS_EX.segmentRowGap_dsb !== undefined
+    check('X4 GUIDE_LIMITS_EX 含 segmentRowGap_bz/dsb（拖动钳制范围）', ok, `bz=${JSON.stringify(GUIDE_LIMITS_EX.segmentRowGap_bz)} dsb=${JSON.stringify(GUIDE_LIMITS_EX.segmentRowGap_dsb)}`)
+    check('X4b 段层间距范围 = [10,80]（与设置面板一致）', ok && GUIDE_LIMITS_EX.segmentRowGap_bz[0] === 10 && GUIDE_LIMITS_EX.segmentRowGap_bz[1] === 80 && GUIDE_LIMITS_EX.segmentRowGap_dsb[0] === 10 && GUIDE_LIMITS_EX.segmentRowGap_dsb[1] === 80, JSON.stringify(GUIDE_LIMITS_EX.segmentRowGap_bz))
+  }
+  // X5：段层间距变化 → 段层行 y 跟随（几何与拖动语义一致）
+  {
+    const pr1 = parseJps(bz432)
+    const lay1 = layoutScore(pr1, { ...DUR_CFG, segmentRowGap: { bz: 22 } })
+    const pr2 = parseJps(bz432)
+    const lay2 = layoutScore(pr2, { ...DUR_CFG, segmentRowGap: { bz: 50 } })
+    const y1 = (lay1.pages[0].notes.find((n) => n.segment)?.y ?? 0)
+    const y2 = (lay2.pages[0].notes.find((n) => n.segment)?.y ?? 0)
+    check('X5 bz 段层间距 22→50 → 段层 y 上移 28（拖动方向一致）', Math.abs((y1 - y2) - 28) < 0.2, `y1=${y1.toFixed(2)} y2=${y2.toFixed(2)} 差=${(y1 - y2).toFixed(2)}`)
+  }
+  void ns432
+}
+
 
 
 // ---- adj427 Step 5c：小节线锚点对齐 / 括号预留 / dsb 两层居中（用户报的 6 项问题） ----

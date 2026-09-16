@@ -385,6 +385,8 @@ export function PlaybackDialog() {
             // adj429：色块按曲行几何动态定界（多声部/临时段不再互相覆盖、不压歌词）
             ...(s.yTopMin !== undefined ? { yTopMin: s.yTopMin } : {}),
             ...(s.yBottomMax !== undefined ? { yBottomMax: s.yBottomMax } : {}),
+            // adj432：声部角色（bz upper / dsb upper / dsb lower）→ 预览层颜色区分
+            ...(s.playVoice !== undefined ? { playVoice: s.playVoice } : {}),
           })),
         ),
       )

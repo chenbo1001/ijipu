@@ -1029,6 +1029,19 @@
 - **验证**：`npm run smoke` **17 项失败 == 改动前基线**（无新增），其中新增断言覆盖：线宽常量 1/2、`||`/`||/` 线间距 1px、`|`/`||`/`||/`/`|:`/`:|`/`:|:` 的**渲染几何逐项 == `barlineGeometry`**（线偏移/宽 + 点圆心）、占位总宽表（1/4/3/6.6/7.6/7.6/13.2，`|*`=1、`|/`=0）、几何对称性、高音点 x == 数字槽中心；`tsc -b` 通过；`obsidian-ijipu` 同步 `vendor/engine` 后其 smoke 99 项全绿；无头 Chrome 截图（示例 `yufa-quangai`）实测高八度点 `cx=51.93` 与数字槽中心 `47.9+13×0.31=51.93` 完全一致。
 - **预防**：① **同一几何量只能有一处定义**——渲染与布局必须消费同一个纯函数（本项目已对间距用 `spacing.ts` 集中管理，本次把"线组几何"也纳入；凡"渲染写偏移 + 布局写总宽"的形态都视为隐患）；② 改线宽/间距这类**影响占位**的常量时，必须**同时**核对「画出来的形状」与「占位表」，不能只看渲染；③ 断言要写成「渲染实测 == 几何函数」而不是「渲染 == 手抄的魔数」——手抄的魔数正是这次漂移的载体（`smoke.mts` 里 `0.55/1.95/4.2/8.1` 那套右缘表已全部改用 `barlineTotalW`）；④ 小节线中心 x 由布局以 `r1`（0.1px）取整，故"右缘 = 中心 + 半宽"可能有 ≤0.05px 取整外溢，断言按此放容差而不是硬 `<=`。
 
+### E-2026-170 段层行虚线混在普通行距虚线里：颜色一样、拖错了变量（用户要求）（adj432）
+
+- **场景**：`computeRowGuides` 用 `page.notes` 推导行顶——临时叠加段的段层音符（`y = yUpper`）**也在 `page.notes` 里**，于是段层自动多出"行"，预览区为它画了一条普通曲行虚线（绿色）。
+- **问题**（用户要求）：① 段层虚线与普通曲行虚线段**颜色一样**，看不出这是"段层"；② 拖它会走 `ri===0 → body_margin_top` / `voiceIdx>0 → height_shengbu` / 否则 `height_ciqu(_lyric)` 的分支——**拖段层虚线会改谱面行距**，把排版改坏（段层是叠加层，不占主旋律拍位，跟行距无关）。
+- **解决**：
+  1. `RowGuide` 增加 `segType?: 'bz'|'dsb'` + `segLayer?: 'upper'|'lower'`；`computeRowGuides` 在累计行时记录来源——`n.segment?.type`（段内容层）或 `n.playVoice === 'second'`（dsb 下层 = 被 `shiftEnvelopeDown` 下移的主旋律，它**不设** `segment` 字段，只设 `playVoice`）。
+  2. 预览层给段层行加 `guide-seg` class（**紫色** `#a855f7`）区分；`onMouseDown` 走 `segmentRowGap_bz` / `segmentRowGap_dsb`。
+  3. 拖动写回是**子对象**（`PageConfig.segmentRowGap.{bz,dsb}`）而不是顶层字段——`onMove` 里对这两个 key 特判，写 `{ ...cur, [which]: val }`。
+  4. 拖拽方向：段层**上层**向上拖 = 增大间距（`invert: true`，因为 `dragDelta` 的 `curY - startY` 向上为负）；dsb **下层**向下拖 = 增大间距（不 invert）——两个方向都符合"往外拖 = 拉开"的直觉。
+  5. `GUIDE_LIMITS_EX` 补 `segmentRowGap_bz` / `segmentRowGap_dsb` = `[10, 80]`（与设置面板一致）。
+- **验证**：smoke 新增 X1–X5 共 12 条断言（playheadSegs.playVoice 透传三类角色；bz/dsb 段层行的 segType/segLayer 标记；GUIDE_LIMITS_EX 范围；`segmentRowGap` 22→50 时段层 y 上移 28 的几何一致性）；`tsc -b` + `npm run build` 通过；smoke 失败项 18 == 基线；`preview:render` 7 谱 `errors=0`；obsidian-ijipu 同步 `layout/guides.ts` + `playback/sequence.ts`，`tsc -noEmit` + `smoke` 119/119 全绿。
+- **预防**：① **叠加层元素混进"行结构推导"是结构性隐患**——`computeRowGuides` 假设"`page.notes` 里的每个 y 都是一个排版行"，段层打破了这个假设。凡新增"往 `page.notes` 追加元素"的功能，都要审查所有"遍历 `page.notes` 推结构"的代码（与 E-2026-163 同源）；② 虚线的**颜色必须与它拖的变量一一对应**（青=边距、橙=描述头、绿=行距、紫=段层间距），否则用户无法判断"我在拖什么"；③ 拖动写回要区分"顶层字段"与"子对象字段"——`GUIDE_LIMITS_EX` 的 key 是扁平字符串，但目标可能是嵌套路径，必须显式特判（这次用 `segmentRowGap_bz` 这种"路径编码"key + 特判）。
+
 ### E-2026-169 段头括号被分到 `tailBrackets` → `&zkh` 跑到 `3'/` 之后（用户原例 `{bz 8 &zkh 2'/ 3'/}` 的 `&zkh` 显示在 `3'/` 右侧而非 `2'/` 之前）（adj431）
 
 - **场景**：adj430 修复后 `{bz 8 &zkh 2'/ 3'/}` 的 `2'/ 3'/` 已显示，但 `&zkh` 位置不对——画在 `3'/` 右侧（看起来像 `)` 跑到最右），而用户期望它在 `2'/` 之前。

@@ -890,6 +890,18 @@ body {
   border-color: var(--jp-warning);
 }
 
+/* adj432：临时叠加段（{bz}/{dsb}）的段层虚线——**紫色**，与曲行绿/描述头橙/边距青区分；
+   拖它调的是「段层与主旋律的间距」（PageConfig.segmentRowGap），不是谱面行距。 */
+.guide-seg {
+  opacity: 0.75;
+  border-color: #a855f7;
+  border-top-style: dashed;
+}
+.guide-seg:hover {
+  opacity: 1;
+  border-color: #c084fc;
+}
+
 /* 曲词间距线（橙） / 词曲间距线（紫） */
 .guide-quci {
   opacity: 0.5;

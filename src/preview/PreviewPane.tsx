@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { tempoLabel } from '@ijipu/engine/parser/parser'
-import { layoutScore, renderScoreToSvg, noteIdToCodePos, buildIndexToPage } from '@ijipu/engine'
+import { layoutScore, renderScoreToSvg, noteIdToCodePos, buildIndexToPage, SEGMENT_ROW_GAP_DEFAULT } from '@ijipu/engine'
 import type { ScorePage } from '@ijipu/engine'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides'
 import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '@ijipu/engine/layout/metaAnchors'
@@ -123,6 +123,7 @@ export function PreviewPane() {
         : [],
     [layout, pageConfig.height_quci, pageConfig.geci_size, pageConfig.note_size],
   )
+
 
   // adj258：批量高亮播放中同时演奏的音符（多声部同步演奏——同一组多声部同 atMs 音符同时高亮）
   useEffect(() => {
@@ -336,7 +337,15 @@ export function PreviewPane() {
       const delta = dragDelta(drag.spec, drag.startX, drag.startY, ev.clientX, ev.clientY, scale)
       const [min, max] = limitsOf(drag.spec.key)
       // adj413：位移是浮点（鼠标位移 ÷ 预览缩放），取整后再写入——px 一律整数（与设置界面一致）
-      const next = { ...pageConfigRef.current, [drag.spec.key]: Math.round(clamp(drag.startVal + delta, min, max)) }
+      const val = Math.round(clamp(drag.startVal + delta, min, max))
+      // adj432：段层间距写在 `PageConfig.segmentRowGap.{bz,dsb}` 子对象里（不是顶层字段）
+      if (drag.spec.key === 'segmentRowGap_bz' || drag.spec.key === 'segmentRowGap_dsb') {
+        const which = drag.spec.key === 'segmentRowGap_bz' ? 'bz' : 'dsb'
+        const cur = pageConfigRef.current.segmentRowGap ?? {}
+        setPageConfig({ ...pageConfigRef.current, segmentRowGap: { ...cur, [which]: val } })
+        return
+      }
+      const next = { ...pageConfigRef.current, [drag.spec.key]: val }
       setPageConfig(next)
     }
     const onUp = () => {
@@ -490,48 +499,62 @@ export function PreviewPane() {
                       <div key={ri} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
                         {/* 曲部行虚线（adj72：数字中心为基准；多声部块内第 2+ 声部拖 height_shengbu 独立调声部间距）
                             adj79：行尾间距拆分——上一行有歌词（底部是词部）→ 曲部与上一行词部间距 height_ciqu_lyric；
-                            上一行无歌词（底部是曲部）→ 曲部与曲部间距 height_ciqu */}
-                        <div
-                          className="guide-line guide-h guide-row"
-                          style={{
-                            top: pctY(rg.yCenter),
-                            left: pct(pageConfig.margin_left),
-                            right: pct(pageConfig.margin_right),
-                            cursor: 'ns-resize',
-                            pointerEvents: 'auto',
-                          }}
-                          onMouseDown={(e) => {
-                            const prevHasLyric = ri > 0 ? (rowGuidesOfPage[ri - 1]?.lyricRows.length ?? 0) > 0 : false
-                            const key =
-                              ri === 0
-                                ? 'body_margin_top'
-                                : rg.voiceIdx > 0
-                                  ? 'height_shengbu'
-                                  : prevHasLyric
-                                    ? 'height_ciqu_lyric'
-                                    : 'height_ciqu'
-                            startDrag(
-                              { key, dir: 'v' },
-                              e,
-                              ri === 0
-                                ? pageConfig.body_margin_top
-                                : rg.voiceIdx > 0
-                                  ? pageConfig.height_shengbu
-                                  : prevHasLyric
-                                    ? pageConfig.height_ciqu_lyric
-                                    : pageConfig.height_ciqu,
-                            )
-                          }}
-                          title={
-                            ri === 0
-                              ? '曲部上间距（与描述头间距，拖动调整）'
+                            上一行无歌词（底部是曲部）→ 曲部与曲部间距 height_ciqu
+                            adj432：临时叠加段（{bz}/{dsb}）的段层行**换色 + 拖 segmentRowGap**——
+                            段层是叠加层，拖它调的是"段层与主旋律的间距"，不是谱面行距（混用会破坏排版） */}
+                        {(() => {
+                          const isSeg = rg.segType !== undefined
+                          const isUpper = rg.segLayer === 'upper'
+                          // 段层：拖 segmentRowGap.{bz,dsb}；bz 只有上层，dsb 有上下层（拖离中线 = 增大间距）
+                          const key = isSeg
+                            ? rg.segType === 'bz'
+                              ? 'segmentRowGap_bz'
+                              : 'segmentRowGap_dsb'
+                            : ri === 0
+                              ? 'body_margin_top'
                               : rg.voiceIdx > 0
-                                ? '声部行间距（拖动调整）'
+                                ? 'height_shengbu'
                                 : (rowGuidesOfPage[ri - 1]?.lyricRows.length ?? 0) > 0
-                                  ? '曲部与上一行词部间距（拖动调整）'
-                                  : '曲部与曲部间距（拖动调整）'
-                          }
-                        />
+                                  ? 'height_ciqu_lyric'
+                                  : 'height_ciqu'
+                          // 段层上层往上拖 = 增大间距（invert）；dsb 下层往下拖 = 增大间距（不 invert）
+                          const invert = isSeg && isUpper
+                          const startVal = isSeg
+                            ? (rg.segType === 'bz'
+                                ? (pageConfig.segmentRowGap?.bz ?? SEGMENT_ROW_GAP_DEFAULT.bz)
+                                : (pageConfig.segmentRowGap?.dsb ?? SEGMENT_ROW_GAP_DEFAULT.dsb))
+                            : ri === 0
+                              ? pageConfig.body_margin_top
+                              : rg.voiceIdx > 0
+                                ? pageConfig.height_shengbu
+                                : (rowGuidesOfPage[ri - 1]?.lyricRows.length ?? 0) > 0
+                                  ? pageConfig.height_ciqu_lyric
+                                  : pageConfig.height_ciqu
+                          return (
+                            <div
+                              className={`guide-line guide-h guide-row${isSeg ? ' guide-seg' : ''}`}
+                              style={{
+                                top: pctY(rg.yCenter),
+                                left: pct(pageConfig.margin_left),
+                                right: pct(pageConfig.margin_right),
+                                cursor: 'ns-resize',
+                                pointerEvents: 'auto',
+                              }}
+                              onMouseDown={(e) => startDrag({ key, dir: 'v', invert }, e, startVal)}
+                              title={
+                                isSeg
+                                  ? `${rg.segType === 'bz' ? '临时伴奏' : '临时多声部'}${isUpper ? '上层' : '下层'}间距（拖动调整）`
+                                  : ri === 0
+                                    ? '曲部上间距（与描述头间距，拖动调整）'
+                                    : rg.voiceIdx > 0
+                                      ? '声部行间距（拖动调整）'
+                                      : (rowGuidesOfPage[ri - 1]?.lyricRows.length ?? 0) > 0
+                                        ? '曲部与上一行词部间距（拖动调整）'
+                                        : '曲部与曲部间距（拖动调整）'
+                              }
+                            />
+                          )
+                        })()}
                         {/* 词部行虚线（adj72/73：每行歌词一条，歌词行区域中心；第 1 行拖曲词距、后续行拖歌词行距；quci/cici 独立线已移除） */}
                         {rg.lyricRows.map((lr, k) => (
                           <div
@@ -586,6 +609,8 @@ type PlayheadTrackItem = {
   yTopMin?: number
   /** adj429：色块按曲行几何动态定界的下边界 */
   yBottomMax?: number
+  /** adj432：段内声部角色（bz upper = 'accomp' / dsb upper = 'main' / dsb lower = 'second'）→ 颜色区分 */
+  playVoice?: 'accomp' | 'main' | 'second'
 }
 
 /**
@@ -628,7 +653,7 @@ function playheadPosIn(
   currentMs: number,
   pageIndex: number,
   noteSize: number,
-): { x: number; yTop: number; yBottom: number; width: number; voice: number; instrument?: string } | null {
+): { x: number; yTop: number; yBottom: number; width: number; voice: number; instrument?: string; playVoice?: 'accomp' | 'main' | 'second' } | null {
   if (segs.length === 0 || currentMs <= 0) return null
   // 二分：最后一个 atMs <= currentMs 的段
   let lo = 0
@@ -661,7 +686,7 @@ function playheadPosIn(
     yTop = a.y - noteSize * 1.1 - ext
     yBottom = a.y - noteSize * 1.1 + noteSize * 1.7 + ext
   }
-  return { x: a.x, yTop, yBottom, width: a.width, voice: a.voice, instrument: a.instrument }
+  return { x: a.x, yTop, yBottom, width: a.width, voice: a.voice, instrument: a.instrument, playVoice: a.playVoice }
 }
 
 /** adj299：播放色块调色板（半透明基色，使用时拼透明度） */
@@ -675,6 +700,18 @@ const PLAYHEAD_COLORS = [
   'rgba(226, 118, 176,', // 粉
   'rgba(150, 150, 90,', // 橄榄
 ]
+
+/** adj432：段内声部角色对应的固定色（覆盖 instrumentColorMap 推断）
+ *  - 'accomp'（bz upper）= 蓝——伴奏声部
+ *  - 'second'（dsb lower）= 绿——第二声部
+ *  - 'main'（dsb upper）= 红——与主旋律同色
+ *  - 普通主旋律音（playVoice 为空）走原来的 instrumentColorMap
+ */
+function segVoiceColor(role: 'accomp' | 'main' | 'second'): string {
+  if (role === 'accomp') return 'rgba(87, 170, 255,'  // 蓝
+  if (role === 'second') return 'rgba(63, 122, 46,'  // 绿
+  return 'rgba(255, 93, 108,'                          // 红（'main'）
+}
 
 /**
  * adj427：色块改为**按音色（instrument）着色**——不同音色不同颜色，
@@ -705,11 +742,13 @@ function instrumentColorMap(
   return map
 }
 
-/** 取某事件色块的半透明基色（按音色） */
+/** 取某事件色块的半透明基色（adj432：段内声部角色优先，否则按音色） */
 function playheadBaseOf(
-  pos: { voice: number; instrument?: string },
+  pos: { voice: number; instrument?: string; playVoice?: 'accomp' | 'main' | 'second' },
   map: Map<string, number>,
 ): string {
+  // adj432：临时段内声部角色有**固定色**（不依赖 instrument 推断，避免和主旋律撞色）
+  if (pos.playVoice) return segVoiceColor(pos.playVoice)
   const idx = map.get(pos.instrument ?? '') ?? (pos.voice - 1) % PLAYHEAD_COLORS.length
   return PLAYHEAD_COLORS[idx]
 }
