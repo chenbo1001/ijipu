@@ -2942,15 +2942,18 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       // ---- 段层范围（供 dsb 花括号使用；圆括号已由上面的文本括号字形绘制） ----
       // ---- 段层范围（dsb 大花括号用；圆括号已由上面的文本括号字形绘制） ----
       // x1/x2 = **大括号自身所在槽位的左缘**（已排在小节线内侧）；bz 无大括号，渲染端返回空串。
+      // 纵向：大括号必须**包得住上下两层**——上过上一行音符的**上沿**（数码顶 DIGIT_HEIGHT_RATIO
+      // =0.8×字号，再留 0.35×字号给高八度点等）、下过下一行音符的**下沿**（基线再留 0.3×字号）。
       if (!page.segmentBrackets) page.segmentBrackets = []
+      const lowerBaseline = row.y + dy / 2
       page.segmentBrackets.push({
         type: seg.type,
         x1: r1(braceLeftX ?? x0),
         x2: r1(braceRightX ?? x1),
-        yTop: r1(yUpper - ns * 0.95),
+        yTop: r1(yUpper - ns * 1.15),
         yBottom: r1(yUpper + ns * 0.4),
-        // dsb：下层声部（包络内主旋律）底缘——供渲染画跨两层的大花括号
-        yBottomLower: isDsb ? r1(row.y + dy / 2 + ns * 0.35) : undefined,
+        // dsb：下层声部（包络内主旋律）**下沿**——供渲染画跨两层的大花括号
+        yBottomLower: isDsb ? r1(lowerBaseline + ns * 0.3) : undefined,
         voice: group.music.voice,
         group: gi,
       })

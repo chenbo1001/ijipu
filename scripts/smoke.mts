@@ -5707,14 +5707,22 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
     check('X4 右大括号在右圆括号**右侧**（不重叠）', ykhX !== undefined && braceR >= ykhX.x + ykhX.width / 2 - 0.11, `braceL=${braceR} parenR=${ykhX ? (ykhX.x + ykhX.width / 2).toFixed(1) : 'n/a'}`)
     check('X5 大括号与内容不重叠（左括号槽右缘 ≤ 段首音）', segN.length > 0 && braceL + braceW <= segN[0].x + 0.11, `braceR=${(braceL + braceW).toFixed(1)} firstNote=${segN[0]?.x}`)
     // X6：线条加粗——渲染出的 `stroke-width` ≥ 1.8
-    // X6：大括号用**字体字形**（自带粗细变化）+ 纵向拉伸，**不是**手绘等宽粗线
+    // X6：大括号用**自绘填充轮廓**（带粗细变化、与字体无关）+ 纵向**真正包住**上下两层
     const svgDsb = renderScoreToSvg(layoutScore(parseJps(src), DUR_CFG))[0]
-    const m = /<text[^>]*data-segment-brace="dsb"[^>]*>[{}]<\/text>/.exec(svgDsb)
-    check('X6 大括号用字体字形绘制（含 { 与 } 字形）', m !== null, m ? m[0].slice(0, 80) : 'not found')
-    const mAll = svgDsb.match(/<text[^>]*data-segment-brace="dsb"[^>]*>[{}]<\/text>/g) ?? []
-    check('X6b 左右大括号各一个字形', mAll.length === 2, `got ${mAll.length}`)
-    check('X6c 大括号不再用等宽描边线条（无 stroke-width 粗线）', !/<path[^>]*data-segment-brace/.test(svgDsb), '')
-    check('X6d 大括号做纵向拉伸（transform 含 scale(1,…)）且横向压到槽宽', /scale\(1,[\d.]+\)/.test(m?.[0] ?? '') && /lengthAdjust="spacingAndGlyphs"/.test(m?.[0] ?? ''), m?.[0] ?? '')
+    const mAll = svgDsb.match(/<path[^>]*data-segment-brace="dsb"[^>]*>/g) ?? []
+    check('X6 左右大括号各一条填充路径', mAll.length === 2, `got ${mAll.length}`)
+    check('X6b 用填充轮廓（fill 且无 stroke-width 等宽描边）', mAll.every((s) => /fill="#1b1b1b"/.test(s) && !/stroke-width="[1-9]/.test(s)), mAll[0]?.slice(0, 70) ?? '')
+    check('X6c 不依赖字体字形（不是 <text>）', !/<text[^>]*data-segment-brace/.test(svgDsb), '')
+    check('X6d 轮廓为闭合路径且含 4 段三次曲线（中段粗、两端与尖角收拢 → 粗细变化）', mAll.every((s) => /Z"/.test(s) && (s.match(/C /g) ?? []).length === 4), `C 段数=${mAll[0] ? (mAll[0].match(/C /g) ?? []).length : 'n/a'}`)
+    // X6e：纵向**包住**——上过上一行音符上沿（数码顶 = 基线 − 0.8×字号）、下过下一行音符下沿
+    {
+      const nsx2 = DUR_CFG.note_size
+      const upperBaseline = Math.min(...segN.map((n) => n.y))
+      const lowerBaseline = Math.max(...page.notes.filter((n) => !n.segment).map((n) => n.y))
+      const digitTop = upperBaseline - nsx2 * 0.8
+      check('X6e 大括号上端高于上一行音符上沿', (sb?.yTop ?? 0) < digitTop, `yTop=${sb?.yTop} digitTop=${digitTop.toFixed(1)}`)
+      check('X6f 大括号下端低于下一行音符下沿', (sb?.yBottomLower ?? 0) > lowerBaseline, `yBotLo=${sb?.yBottomLower} lowerBaseline=${lowerBaseline.toFixed(1)}`)
+    }
     check('X7 大括号横向占宽 ≈ max(3, 0.32×字号)', Math.abs(braceW - Math.max(3, nsx * 0.32)) < 0.01, `w=${braceW}`)
     // X8：dsb 内部三个元素（左大括号 / 左圆括号 / 内容）**依次不重叠**，且都在小节线内侧
     const braceLEdge = braceL + braceW

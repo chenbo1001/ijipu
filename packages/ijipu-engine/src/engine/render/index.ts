@@ -1388,17 +1388,17 @@ function renderBracket(
 /**
  * adj427：临时段（`{bz … }` / `{dsb … }`）的**跨两层大花括号** `{ … }`（dsb 专用）。
  *
- * - 位置由**布局层**给出：`x1` / `x2` 是大括号所占槽位的**左缘**（布局已把它们当作
- *   「无时值占宽元素」排在小节线**内侧**——左大括号在小节线右侧、右大括号在小节线左侧）。
- *   本函数只在给定槽位内画形状，**不做任何外扩**。
- * - 形状：**用字体里的 `{` / `}` 字形**（`text-anchor=middle` + `lengthAdjust=spacingAndGlyphs`
- *   横向压到槽宽，再用 `scale(1, sy)` **纵向拉伸**到两层高度）。
- *   为什么用字形而不是手绘路径：字体的括号自带**粗细变化**（笔画中段粗、拐角与尖端细），
- *   这正是排版惯例想要的效果；手绘等宽线条无论加粗与否都是"均匀的一根"，观感不对
- *   （用户明确要求「细条带有粗细变化的大括号，不用粗线」）。
- *   粗细对比度**跟随「音符字体」**（`shuzi_font`）——衬线字体对比更强，可在设置里换。
- * - 圆括号 `( … )` 不在这里画——段层圆括号由布局层发成 `page.brackets`（`zkh`/`ykh`
- *   文本字形），与全项目其它括号同一套渲染与纵向基准（字形中心 = 数字中心）。
+ * - 位置由**布局层**给出：`x1` / `x2` 是大括号所占槽位的**左缘**（已排在小节线**内侧**——
+ *   左大括号在小节线右侧、右大括号在小节线左侧）；`yTop` / `yBottomLower` 由布局层按
+ *   **上下两层音符的外沿**给出（上过上一行音符上沿、下过下一行音符下沿），故能真正"包住"。
+ * - 形状：**自绘的填充轮廓**（非字体字形、非等宽描边）——
+ *   一条闭合路径由「上外缘 → 中缝尖 → 下外缘 → 下内缘 → 中缝尖 → 上内缘」组成，
+ *   两侧边界在中段相距 `t`（最粗处）、在**两端尖端与中间尖角处收拢为一点**，
+ *   于是呈现排版惯例的**粗细变化**（中段粗、尖端与拐角细）。
+ *   为什么不用字体字形：字形的高度/粗细/位置都受具体字体影响（换字体就变样），
+ *   而这里需要**精确包住两层**——自绘轮廓的纵向范围完全由布局给定，与字体无关。
+ * - 圆括号 `( … )` 不在这里画——由布局层发成 `page.brackets`（`zkh`/`ykh` 文本字形），
+ *   与全项目其它括号同一套渲染与纵向基准（字形中心 = 数字中心）。
  */
 function renderSegmentBracket(b: PlacedSegmentBracket, config: PageConfig): string {
   const lo = b.yBottomLower
@@ -1406,18 +1406,36 @@ function renderSegmentBracket(b: PlacedSegmentBracket, config: PageConfig): stri
   const ns = config.note_size
   /** 大括号横向占宽——与布局层 `braceW` 同源（`max(3, 0.32×字号)`） */
   const w = Math.max(3, ns * 0.32)
-  const h = lo - b.yTop
-  /** 基准字号：决定字形细节与笔画粗细（与槽宽联动，取 1.6×音符字号） */
-  const fs = ns * 1.6
-  /** 纵向拉伸系数（按「字形自然高度 ≈ 1.2×字号」估算，只拉伸纵向、不放大笔画） */
-  const sy = h / (fs * 1.2)
-  const my = (b.yTop + lo) / 2
-  const fam = noteFont(config.shuzi_font)
-  const glyph = (ch: string, slotX: number): string =>
-    `<text x="0" y="0" text-anchor="middle" dominant-baseline="central" font-size="${r1n(fs)}" ` +
-    `font-family="${fam}" fill="#1b1b1b" textLength="${r1n(w)}" lengthAdjust="spacingAndGlyphs" ` +
-    `transform="translate(${r1n(slotX + w / 2)},${r1n(my)}) scale(1,${r1n(sy)})" data-segment-brace="${b.type}">${ch}</text>`
-  return glyph('{', b.x1) + glyph('}', b.x2)
+  /** 笔画最粗处（细条：≈0.09×字号，约 1.2px） */
+  const t = Math.max(0.9, ns * 0.09)
+  const e = t / 2
+  const yTop = b.yTop
+  const yBot = lo
+  const my = (yTop + yBot) / 2
+  /** 拐角过渡长度（控制"从尖端收到中轴"的快慢） */
+  const bow = Math.max(1, Math.min((yBot - yTop) * 0.16, ns * 0.55))
+  /**
+   * dir=+1 → `{`（中间尖角朝**左**、上下两端朝右）；dir=-1 → `}`（左右镜像）。
+   * `xTip` 为两端尖端所在的横坐标、`xCusp` 为中间尖角所在横坐标（二者相距 = 槽宽 w）。
+   */
+  const brace = (slotX: number, dir: 1 | -1): string => {
+    const xTip = slotX + (dir > 0 ? w : 0)
+    const xCusp = slotX + (dir > 0 ? 0 : w)
+    const xo = xTip + (dir > 0 ? -e : e) // 外缘中轴侧
+    const xi = xTip + (dir > 0 ? e : -e) // 内缘中轴侧
+    const d =
+      `M ${r1n(xTip)} ${r1n(yTop)} ` +
+      // 上段外缘：尖端 → 中缝尖角
+      `C ${r1n(xo)} ${r1n(yTop + bow)}, ${r1n(xo)} ${r1n(my - bow)}, ${r1n(xCusp)} ${r1n(my)} ` +
+      // 下段外缘：中缝尖角 → 下端尖端
+      `C ${r1n(xo)} ${r1n(my + bow)}, ${r1n(xo)} ${r1n(yBot - bow)}, ${r1n(xTip)} ${r1n(yBot)} ` +
+      // 下段内缘：下端尖端 → 中缝尖角
+      `C ${r1n(xi)} ${r1n(yBot - bow)}, ${r1n(xi)} ${r1n(my + bow)}, ${r1n(xCusp)} ${r1n(my)} ` +
+      // 上段内缘：中缝尖角 → 上端尖端
+      `C ${r1n(xi)} ${r1n(my - bow)}, ${r1n(xi)} ${r1n(yTop + bow)}, ${r1n(xTip)} ${r1n(yTop)} Z`
+    return `<path d="${d}" fill="#1b1b1b" stroke="none" data-segment-brace="${b.type}"/>`
+  }
+  return brace(b.x1, 1) + brace(b.x2, -1)
 }
 
 function renderPage(page: ScorePage, config: PageConfig, pageCount: number, opts?: RenderFontMeta): string {
