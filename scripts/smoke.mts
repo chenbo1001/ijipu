@@ -5945,6 +5945,81 @@ console.log('[adj432] segment color-block voice colors + segment row guides')
   void ns432
 }
 
+// ---- adj433：段层拍位与主旋律**逐拍对齐**（用户报「bz/dsb 上下层拍子没对齐」） ----
+// 根因：`beatToX` 对**音符内部**的拍位用"跨到下一个音符"的锚点插值，把**小节线占宽+槽间留白**
+// 也算成时值宽 ⇒ 段层映射总宽虚大 ⇒ adj430 的 segScale 把它整体压缩 ⇒ 拍位错位。
+// 修法：音符内部只在**该音符自身范围**内插值（优先用 layout 已算好的拍段 `segments`）。
+console.log('[adj433] segment beats align with melody beats (within-note interpolation)')
+{
+  // 用户原例（问题 1 的最小复现）：`6, -` 跨 2 拍，段内 `2'/ 3'/` 各占半拍
+  const src433 = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 6,/ 3// (2// 2) 2/&rit 3/ 6,/ 5,/&yc |\"p:2/4\" {bz 8 &zkh 2'/ 3'/ } 6, - | 6 5 |\n"
+  const pr = parseJps(src433)
+  const page = layoutScore(pr, defaultPageConfig).pages[0]
+  const segNs = page.notes.filter((n) => n.segment).sort((a, b) => a.x - b.x)
+  const mainNs = page.notes.filter((n) => !n.segment).sort((a, b) => a.x - b.x)
+  // 段层 3 个音：8(hidden rest, 1 拍) + 2'/(0.5) + 3'/(0.5)；主旋律包络是 `6, -`（2 拍）
+  check('Y1 用户原例段层仍为 3 个音（不丢失）', segNs.length === 3, `got ${segNs.length}`)
+  // Y2：段层第 1 个音（rest 8）起点 = 主旋律**包络起点音**的 x（同拍位垂直对齐）。
+  // 包络起点音 = x 不大于段首音 x 的**最靠右**那个主旋律音（即 `6, -`，它跨 2 拍）。
+  const melEnv = [...mainNs].reverse().find((n) => n.x <= segNs[0].x + 0.51)
+  check('Y2 段层首音起点 = 主旋律包络起点音 x（同拍位垂直对齐）',
+    melEnv !== undefined && Math.abs(segNs[0].x - melEnv.x) < 0.51,
+    `seg0.x=${segNs[0].x.toFixed(2)} melEnv.x=${melEnv?.x.toFixed(2)}`)
+  const mel6 = melEnv
+  // Y3：段层总宽 = 主旋律 `6,-` 的占位宽（**不被压缩、也不溢出**）——这是"拍子对齐"的量化判据
+  const segTotalW = (segNs[2].rightX ?? 0) - segNs[0].x
+  const melW = (mel6?.rightX ?? 0) - (mel6?.x ?? 0)
+  check('Y3 段层占宽 ≈ 主旋律包络音占宽（比例 1.0，未被压缩）',
+    melW > 0 && Math.abs(segTotalW / melW - 1) < 0.06,
+    `segW=${segTotalW.toFixed(2)} melW=${melW.toFixed(2)} 比值=${(segTotalW / melW).toFixed(3)}`)
+  // Y4：段层每个音的 x 必须落在主旋律 `6,-` 的 x 范围内（不跨到后面的小节）
+  const melL = mel6?.x ?? 0
+  const melR = mel6?.rightX ?? 0
+  check('Y4 段层各音 x 均在主旋律包络音范围内（不跨小节）',
+    segNs.every((n) => n.x >= melL - 0.51 && (n.rightX ?? 0) <= melR + 0.51),
+    `mel=[${melL.toFixed(2)},${melR.toFixed(2)}] segs=${segNs.map((n) => `${n.x.toFixed(1)}~${(n.rightX ?? 0).toFixed(1)}`).join(' ')}`)
+
+  // ---- adj434：段内 `@乐器@` 与段后 `@乐器@` 的切换（用户报「主声部没切换为手风琴」）----
+  {
+    // 用户**完整原行**（含段后三小节）
+    const src434 = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 6,/ 3// (2// 2) 2/&rit 3/ 6,/ 5,/&yc |\"p:2/4\" {bz 8 &zkh @手风琴@ 2'/ 3'/ } 6, - |\"p:4/4\" @手风琴@ 6/\"原速\" 3'// (2'// 2') 2'/ 1'/ 6/ (5/ | 5/) (3/[3/5/] 3) - 2'/ 3'/ | 6/ 3'// (2'// 2') 2'/ 3'/ 5'/ (2'/ |\n"
+    const toks = parseJps(src434).groups[0].music.tokens
+    const topInsts = toks.filter((t) => t.kind === 'instrument')
+    const segTok = toks.find((t) => t.kind === 'segment' && (t as { dir?: string }).dir === 'open') as { children?: { kind: string }[] } | undefined
+    const segChildKinds = (segTok?.children ?? []).map((c) => c.kind)
+    check('AX1 段后 @手风琴@ 解析为顶层 instrument token',
+      topInsts.length === 1, `顶层 instrument=${topInsts.length} tokens=${toks.map((t) => t.kind).join(',')}`)
+    check('AX2 段 children 含 instrument（段内 @手风琴@）', segChildKinds.includes('instrument'), `children=${segChildKinds.join(',')}`)
+    // 引擎：段后 `@手风琴@` 是否让主声部（voice 1）后续事件用 手风琴
+    const pr434 = parseJps(src434)
+    const seq434 = buildPlaySequence(pr434, layoutScore(pr434, DUR_CFG), 120, undefined, '大钢琴')
+    const melEv = seq434.events.filter((e) => !e.placed.segment)
+    const instSeq = melEv.map((e) => e.instrument)
+    const firstInst = instSeq[0]
+    const lastInst = instSeq[instSeq.length - 1]
+    check('AX3 段前主声部音色 = 大钢琴（试听音色默认）', firstInst === '大钢琴', `first=${firstInst}`)
+    check('AX4 段后主声部音色 = 手风琴（@手风琴@ 生效）', lastInst === '手风琴', `last=${lastInst} 序列=${instSeq.join(',')}`)
+    // 段层（伴奏）音色
+    const segInst = [...new Set(seq434.events.filter((e) => e.placed.segment).map((e) => e.instrument))]
+    check('AX5 段层（伴奏）音色 = 手风琴（无 Y: 时回退）', segInst.length === 1 && segInst[0] === '手风琴', `seg=${segInst.join('/')}`)
+    // 色块：段后主旋律的音色变了 → 颜色也应跟着变（instrumentColorMap 按音色分配）
+    const trk = seq434.events.flatMap((e) => (e.playheadSegs ?? []).map((s) => ({ inst: s.instrument ?? '', pv: s.playVoice })))
+    const melTrkInsts = [...new Set(trk.filter((t) => t.pv === undefined).map((t) => t.inst))]
+    check('AX6 主旋律色块音色集合含 大钢琴 与 手风琴（段后换色可见）',
+      melTrkInsts.includes('大钢琴') && melTrkInsts.includes('手风琴'), `集合=${melTrkInsts.join('/')}`)
+    // AX7（E-2026-173）：`@乐器名@` 是**谱面显式指定**——必须标记 `explicitInstrument`，
+    // 供播放端在「试听音色」已选定具体音色时**不被全局覆盖压掉**（用户报「主声部没切换为手风琴」）。
+    const explicitEv = melEv.filter((e) => e.explicitInstrument === true)
+    check('AX7 @手风琴@ 之后的主声部事件标记 explicitInstrument=true', explicitEv.length > 0, `n=${explicitEv.length}`)
+    check('AX7b @手风琴@ 之前的主声部事件 explicitInstrument 不为 true（走 Y:/试听音色默认）',
+      melEv.filter((e) => e.explicitInstrument !== true).length > 0,
+      `n=${melEv.filter((e) => e.explicitInstrument !== true).length}`)
+    check('AX7c 段层（伴奏）事件不因段内 @ 而标记 explicit（伴奏走固定第二音色）',
+      seq434.events.filter((e) => e.placed.segment).every((e) => e.explicitInstrument !== true),
+      '')
+  }
+}
+
 
 
 // ---- adj427 Step 5c：小节线锚点对齐 / 括号预留 / dsb 两层居中（用户报的 6 项问题） ----
