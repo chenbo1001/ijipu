@@ -176,6 +176,23 @@ function App() {
     </>
   )
 
+  /**
+   * adj483：主题/浅色模式的 `data-theme` / `data-mode` 同步到 **`<html>`** 上。
+   *
+   * 为什么必须挂到 html：主题变量（`styles/theme.css` 的 `[data-theme]`/`[data-mode='light']`）是
+   * **按属性选择器**生效的，而 `index.css` 里 `body { color: var(--jp-text-primary) }` 是在 `body`
+   * 处**求值**的——属性此前挂在 `.app`（body 的子元素）上，于是 body 只能拿到 `:root` 的**深色**默认值，
+   * 所有"没有显式设色"的文本（如音色库的库名 span）在**浅色主题**下继承到深色主题的浅字 ⇒ 白底浅字看不清
+   * （用户报「通用音源（GeneralUser GS）在浅色主题下与背景过近」）。
+   * 挂到 `html` 后，`:root` 与主题属性落在同一元素上、变量从根上就是对的（浅色块在后，同特异性后者胜）。
+   * `.app` 上的属性保留：个别样式/嵌入方可能仍按 `.app[data-mode]` 取用。
+   */
+  useEffect(() => {
+    const el = document.documentElement
+    el.setAttribute('data-theme', theme)
+    el.setAttribute('data-mode', effectiveMode)
+  }, [theme, effectiveMode])
+
   return (
     <div className="app" data-theme={theme} data-mode={effectiveMode}>
       <TopBar />

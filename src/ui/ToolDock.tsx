@@ -29,6 +29,8 @@ import type { ComponentType } from 'react'
 import { useUiStore, type DockPanelKey } from '../store/uiStore'
 import { useDocStore } from '../store/docStore'
 import { dockCopy } from '../brand/copy'
+import { ToolIcon } from './ToolIcon'
+import type { ToolIconName } from './toolIcons'
 import { summarizeProblems } from './problems'
 import { ProblemPanel } from './dock/ProblemPanel'
 // adj462：导出面板是**为底栏重写的流式布局**（原 ExportDialog 是竖向堆叠的弹窗布局，宽度变化不重排）
@@ -115,11 +117,19 @@ const defaultH = (key: DockPanelKey, narrow: boolean, rowPitch: number): number 
 /** 夹紧到 [该面板的拖拽下限, 上限]（adj468：设置的下限更高，保证下方按钮行始终放得下） */
 const clampH = (v: number, key: DockPanelKey) => Math.min(Math.max(Math.round(v), minFor(key)), maxH())
 
-const TABS: { key: DockPanelKey; label: string; icon: string }[] = [
-  { key: 'problems', label: dockCopy.tabProblems, icon: '⚠' },
-  { key: 'tryout', label: dockCopy.tabTryout, icon: '▶' },
-  { key: 'export', label: dockCopy.tabExport, icon: '⬇' },
-  { key: 'settings', label: dockCopy.tabSettings, icon: '⚙' },
+/**
+ * 底栏四个面板页签（adj486：图标改用**顶栏同一套矢量图标**）。
+ *
+ * 由来（用户报）：这四个页签此前用的是 **Unicode 字符**（`⚠ ▶ ⬇ ⚙`）当图标——与顶栏按钮那套
+ * "用户设计的线稿图标"不是一路货：字形粗细/留白/基线各不相同，与面板里的其它图标摆在一起显得杂，
+ * 而同一个"试听/导出/设置"在顶栏是设计图标、在底栏却是个字符。现统一为 `ToolIcon`（同一套 PNG + mask 上色）。
+ * 告警暂无对应的设计图标，暂留 `⚠` 字符（等用户补图后替换）。
+ */
+const TABS: { key: DockPanelKey; label: string; icon?: ToolIconName; glyph?: string }[] = [
+  { key: 'problems', label: dockCopy.tabProblems, glyph: '⚠' },
+  { key: 'tryout', label: dockCopy.tabTryout, icon: 'play' },
+  { key: 'export', label: dockCopy.tabExport, icon: 'export' },
+  { key: 'settings', label: dockCopy.tabSettings, icon: 'settings' },
 ]
 
 /**
@@ -334,7 +344,8 @@ export function ToolDock() {
             title={t.label}
           >
             <span className="tool-dock-tab-icon" aria-hidden="true">
-              {t.icon}
+              {/* adj486：设计图标（顶栏同一套）优先；暂无对应图的（告警）用字符兜底 */}
+              {t.icon ? <ToolIcon name={t.icon} size={14} /> : t.glyph}
             </span>
             <span className="tool-dock-tab-label">{t.label}</span>
           </button>

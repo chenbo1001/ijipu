@@ -11,7 +11,7 @@
  *
  * 标签页顺序：全局 → 主题 → 音色库 → 谱面 → 字体。
  */
-import { useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
@@ -36,6 +36,16 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'score', label: '谱面', icon: '▤' },
   { id: 'font', label: '字体', icon: 'Aa' },
 ]
+
+/** adj482：内容是「字段行」的页签——dock 里套 `.pcfg-fields` 网格，按当页最长标签对齐；
+ *  主题（主题色块列表）与音色库（自带面板）不套该层，保持各自布局 */
+const FIELDS_TABS: TabId[] = ['global', 'score', 'font']
+
+/** adj482：字段网格的三个常量——标签与控件之间的间隙（与 CSS 的 row `gap` 一致）、
+ *  一格至少给控件留的宽度、格与格之间的列间距（与 CSS 的 `column-gap` 一致，用于算跨格数） */
+const ROW_GAP = 8
+const CTL_MIN_W = 140
+const COL_GAP = 18
 
 export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) {
   const pageConfig = useDocStore((s) => s.pageConfig)
@@ -63,8 +73,6 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
   // adj-font：字体覆盖（L1 用户个性；跨机缺字体时用我的字体，不改谱面文件）
   const fontOverride = useUiStore((s) => s.fontOverride)
   const setFontOverride = useUiStore((s) => s.setFontOverride)
-  // adj-font：把当前生效设置**全量**固化进谱面（差量写入下与默认相同的项不落盘）
-  const persistFullConfig = useDocStore((s) => s.persistFullConfig)
 
   const [draft, setDraft] = useState<PageConfig>({ ...pageConfig })
   const [tab, setTab] = useState<TabId>('global')
@@ -72,6 +80,75 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
   // 打开时快照原值，调整时临时应用（预览非持久化），保存才写 .jps；关闭未保存则恢复快照。
   const snapRef = useRef<PageConfig>({ ...pageConfig })
   const committedRef = useRef(false)
+  // adj482：字段区容器（dock 里按「当页最长标签」对齐，见下面的测量 effect）
+  const fieldsRef = useRef<HTMLDivElement | null>(null)
+
+  /**
+   * adj482：测量「当页最长标签宽」与**每个字段的自然宽**，据此在 dock 里排出**等宽字段网格**：
+   *   · `--pcfg-label-w` = 当页最长标签 ⇒ 每格的标签列一样宽、控件左缘对齐；
+   *   · `--pcfg-field-w` = 一格的基本宽（= 标签列 + 控件区最小宽 `CTL_MIN_W`）⇒ 各格等宽、跨格成列；
+   *   · 每行 `--pcfg-span` = 该字段自然宽需要跨几格 ⇒ 宽字段（如「边距」四个数值框、带长说明的勾选项）
+   *     跨 2 格，既**不折行**、也不把整页格子撑宽（配合 `grid-auto-flow` 的默认行优先放置）。
+   *
+   * 手法：把字段区**离屏克隆**一份探针（`.pcfg-measure-probe`：每行 `width: max-content` + 不换行），
+   * 读自然宽后立即丢弃——不碰真实 DOM、不依赖"测量态"覆盖规则，也不会闪。
+   * （先试过"给真实面板临时加 class 摊开字段"：控件容器是 `flex: 1`，`max-content` 会算成几千 px 的假值；
+   *   也试过直接读容器宽度：说明文字那类长块会把容器撑大 → 都不可靠。）
+   */
+  const measureFields = () => {
+    const el = fieldsRef.current
+    if (!el || !el.closest('.tool-dock')) return
+    const liveRows = Array.from(el.querySelectorAll<HTMLElement>('.pcfg-row'))
+    const probe = el.cloneNode(true) as HTMLElement
+    probe.className = 'pcfg-measure-probe'
+    probe.removeAttribute('style') // 丢掉上一轮写进去的 CSS 变量，避免影响本轮测量
+    el.parentElement?.appendChild(probe)
+    const probeRows = Array.from(probe.querySelectorAll<HTMLElement>('.pcfg-row'))
+    let labelW = 0
+    for (const row of probeRows) {
+      labelW = Math.max(labelW, Math.ceil(row.querySelector<HTMLElement>('.pcfg-row-label')?.offsetWidth ?? 0))
+    }
+    const rowWs = probeRows.map((r) => Math.ceil(r.offsetWidth))
+    probe.remove()
+    if (labelW === 0 || rowWs.length === 0) return
+    const cellW = labelW + ROW_GAP + CTL_MIN_W
+    /**
+     * adj483：跨格数必须**钳到当前实际列数**——`grid-column: span N` 在"显式列数 < N"时会**新建隐式列**
+     * （`grid-auto-columns: auto`），于是标题的 `grid-column: 1 / -1` 只跨显式列、其余元素被塞进隐式列
+     * ⇒ 窄 dock（单列）下"标题与字段挤在同一行"（用户报）。列数按容器宽推出来，故宽度变化要重测。
+     */
+    const cols = Math.max(1, Math.floor((el.clientWidth + COL_GAP) / (cellW + COL_GAP)))
+    el.style.setProperty('--pcfg-label-w', `${labelW}px`)
+    el.style.setProperty('--pcfg-field-w', `${cellW}px`)
+    liveRows.forEach((row, i) => {
+      const need = rowWs[i] ?? 0
+      const span = Math.min(cols, Math.max(1, Math.ceil((need + COL_GAP) / (cellW + COL_GAP))))
+      row.style.setProperty('--pcfg-span', String(span))
+    })
+  }
+
+  useLayoutEffect(measureFields, [tab])
+  useEffect(() => {
+    const el = fieldsRef.current
+    if (!el || !el.closest('.tool-dock')) return
+    // 字段增删（条件行：如「字体覆盖」开启后的"覆盖为"）或控件文本变化（选项变长变短）→ 重算；
+    // rAF 合并连续变化（测量用离屏探针，不会反过来触发本观察者）
+    let raf = 0
+    const schedule = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => measureFields())
+    }
+    const mo = new MutationObserver(schedule)
+    mo.observe(el, { childList: true, subtree: true, characterData: true })
+    // adj483：容器宽度变化（dock 拖宽/窗口 resize）→ 列数变了，跨格数要跟着重算
+    const ro = new ResizeObserver(schedule)
+    ro.observe(el)
+    return () => {
+      cancelAnimationFrame(raf)
+      mo.disconnect()
+      ro.disconnect()
+    }
+  }, [tab])
 
   const updateDraft = (patch: Partial<PageConfig>) => {
     const next = { ...draft, ...patch }
@@ -144,8 +221,9 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
                 <FontSelect value={fontOverride.font} onChange={(v) => setFontOverride({ ...fontOverride, font: v })} />
               </Row>
             )}
-            <div style={{ color: 'var(--jp-text-muted)', fontSize: 12, marginTop: 2 }}>
+            <div className="pcfg-note">
               以上为**本机偏好**（L1），不随谱保存；谱面字体在「字体」标签里设置（随谱走）。
+              {fontOverride.enabled && '　⚠ 字体覆盖已开启："你看到的字体"与别人不同（它不随谱走）——分享谱面时建议关掉。'}
             </div>
           </>
         )
@@ -171,7 +249,9 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
                   title={m.label}
                   aria-label={m.label}
                 >
-                  <ToolIcon name={m.icon} />
+                  {/* adj484：图标用 14（对话框按钮口径，见 ToolIcon 注释）——与 12px 文本同高更像一对；
+                      垂直居中与两侧留白由 CSS 的 `.theme-mode-btn`（inline-flex + padding）保证 */}
+                  <ToolIcon name={m.icon} size={14} />
                   <span>{m.label}</span>
                 </button>
               ))}
@@ -274,6 +354,11 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
               <Row label="曲部与上词部间距">
                 <NumInput label="" value={draft.height_ciqu_lyric} onChange={(v) => updateDraft({ height_ciqu_lyric: v })} />
               </Row>
+              {/* adj479：多声部块内声部行之间的额外间距——此前只挂在预览虚线拖拽上，
+                  设置里没有输入框，用户报「同一组的多个声部之间间距无法调整」。 */}
+              <Row label={uiCopy.shengbuGapLabel}>
+                <NumInput label="" value={draft.height_shengbu} onChange={(v) => updateDraft({ height_shengbu: v })} />
+              </Row>
               {/* adj297：两端对齐最小小节数——行小节数小于该值自然对齐（行尾留白），≥ 该值撑满两端对齐 */}
               <Row label="两端对齐最小小节数">
                 <NumInput label="" value={draft.align_min_bars} onChange={(v) => updateDraft({ align_min_bars: v })} />
@@ -299,7 +384,7 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
                 />
               </Row>
             </div>
-            <div style={{ color: 'var(--jp-text-muted)', fontSize: 12, marginTop: 2 }}>
+            <div className="pcfg-note">
               {uiCopy.segmentRowGapHint}
             </div>
 
@@ -405,8 +490,12 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
               </button>
             ))}
           </div>
-          {/* adj463：内容区包一层容器——dock 里它是「分组一行 + 内容项依次流式排列」的 flex 容器 */}
-          <div className="pcfg-panel">{renderPanel()}</div>
+          {/* adj463：内容区包一层容器；adj482：字段类页签再包一层 `.pcfg-fields`——
+              dock 里它是**等宽字段网格**（按当页最长标签对齐，见 measureFields），
+              主题/音色库这类自带排版的内容不套该层，保持各自布局。 */}
+          <div className="pcfg-panel">
+            {FIELDS_TABS.includes(tab) ? <div className="pcfg-fields" ref={fieldsRef}>{renderPanel()}</div> : renderPanel()}
+          </div>
         </div>
 
         <div className="modal-foot pcfg-foot">
@@ -419,25 +508,14 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
             恢复默认
           </button>
           <button
-            className="btn"
-            title="把当前生效的全部设置写成全量 # jps-config（与默认相同的项也会写入）——要把这份谱发给别人、保证任何机器上都长一样时用"
-            onClick={() => {
-              // adj-font（D1）：差量写入是默认；这里显式"固化全部"（全量写入），供分享/存档
-              committedRef.current = true
-              setPageConfig(snapRef.current, false) // 丢弃预览改动，按当前生效配置固化
-              persistFullConfig()
-              closeDock()
-            }}
-          >
-            固化到谱面
-          </button>
-          <button
             className="btn primary"
+            title="把这次改动写进这份谱的 # jps-config（只写与默认不同的项）——谱面因此自包含，复制给别人显示一致"
             onClick={() => {
               // adj83：保存设置时持久化到源码 # jps-config 注释（每首谱用自己的设置）
               // adj-font（D1）：默认**差量写入**（只写与默认不同的字段；全部为默认时删除设置行）
-              // adj454：传入打开时的快照 snapRef 作为基线——只固化**用户本次真正改动**的字段，
-              // 本机公共设置（localStorage 缓存）里带来的值不会被写进这首谱
+              // adj454：传入打开时的快照 snapRef 作为基线——只固化**用户本次真正改动**的字段
+              // adj480：本机页面设置缓存层已取消 ⇒ 生效配置 = 代码默认 ← 谱面，
+              //   于是"保存"就等于"把这份谱补成自包含"，不再需要单独的「固化到谱面」动作。
               committedRef.current = true
               setPageConfig(draft, true, snapRef.current)
               closeDock()
@@ -483,11 +561,11 @@ function FontSelect({ value, onChange }: { value: string; onChange: (v: string) 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     // adj418：标签列给足宽度且不换行（「两端对齐最小小节数」这类长标签不再折成两行）。
-    // adj463：加类名供 dock 布局使用——dock 里字段**整项不可压缩**（要么整项放进当前行，
-    // 要么整项换下一行），且项内「标签 + 控件」**强制同一行**（此前列宽不足会把控件挤到标签下方）。
-    <div className="pcfg-row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-      <span className="pcfg-row-label" style={{ minWidth: 96, color: 'var(--jp-text-secondary)', fontSize: 12, whiteSpace: 'nowrap' }}>{label}</span>
-      <div className="pcfg-row-ctl" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>{children}</div>
+    // adj482：布局**全部交给 CSS**（`.pcfg-row` / `.pcfg-row-label` / `.pcfg-row-ctl` 已从内联搬到
+    // index.css）——内联样式会压过 dock 里的覆盖规则，导致"按当页最长标签对齐"的规则无法生效。
+    <div className="pcfg-row">
+      <span className="pcfg-row-label">{label}</span>
+      <div className="pcfg-row-ctl">{children}</div>
     </div>
   )
 }

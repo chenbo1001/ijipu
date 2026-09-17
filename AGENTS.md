@@ -26,7 +26,7 @@
 4. 不主动重构成熟代码；不删校验/异常捕获；不用废弃 API；全部沟通、注释用简体中文
 
 ## 四、目录与约束
-- src 分层见 `src/AGENTS.md`；`samples/*.jps` + `src/samples/index.ts` 两处同步登记；`src-tauri/gen`、`target/`、`dist*` 禁止手改/提交
+- src 分层见 `src/AGENTS.md`；示例谱 = `public/samples/*.jps`（构建期自动发现，改/加文件即可，不用改代码）；**「新建」模板 = `src/samples/未命名.jps`**（adj481：改这个文件即改新建出来的空白谱；放源码目录，不随产物发布）；`src-tauri/gen`、`target/`、`dist*` 禁止手改/提交
 - 技能统一放 `.dsh/skills/<技能名>/SKILL.md`（frontmatter 必须含 `name`+`description`）
 
 ## 五、业务关键约定
@@ -58,6 +58,12 @@
 
 优先级：**L0 < L1 < L1.5 < L2**（L3 不参与合并）。
 
+> **adj480（用户确认）：`PageConfig` 没有 L1 层。** 版面/外观类设置只有两层——**代码默认 < 谱面自带**
+> （应用侧曾把"本机页面设置"缓存在 `localStorage` 并兜底未自带设置的谱面，已删除：那是"换台机器显示不一样"的根源）。
+> 目标口径：**谱面自包含 ⇒ 复制源码给别人效果一致**。宿主侧若确有默认层（插件设置 / frontmatter），
+> 只对"源内没写"的项生效，且**不随谱走**——用引擎 `configCarryover(code, effective)` 把差异显式化，
+> 让用户"复制给他人前先随谱固化"。
+
 判定三问：
 1. 改它会不会改变**谱面外观/排版结果**？会 → L2。
 2. 换台机器/换个人打开同一份 .jps，**期望看到一样吗**？一样 → L2；可以不一样 → L1。
@@ -65,7 +71,7 @@
 
 硬性约束：
 1. **编辑器/界面偏好永属 L1**，绝不写入 `# jps-config`（`PageConfig` 里不得再出现 `editorFont/editorFontSize` 之类字段）。
-2. **L2 写入用差量**（`writeJpsConfig` 默认 `mode:'diff'`：只写与 `defaultPageConfig` 不同的字段，无差量则删除该行）；需要"到哪都一样"时用 `mode:'full'`（界面上是「固化全部到谱面」）。
+2. **L2 写入用差量**（`writeJpsConfig` 默认 `mode:'diff'`：只写与 `defaultPageConfig` 不同的字段，无差量则删除该行）——因为 `PageConfig` 只有"默认 ← 谱面"两层，**保存即自包含**（adj480：应用侧不再有 L1 页面设置层，也不再需要单独的「固化到谱面」动作）；宿主侧若另有默认层（插件设置 / frontmatter），用它把差异显式化并让用户"随谱固化"，不要把默认值也写进谱面（`mode:'full'` 仅留给确有需要的存档场景）。
 3. **可选字段**（不在 `defaultPageConfig` 上）若属 L2，必须同时登记到 `engine/settings.ts` 的 `OPTIONAL_CONFIG_FIELDS`（有编译期断言兜底）。
 4. **字体一律用完整栈**（末尾必须落到 `sans-serif/serif/monospace`）：候选集中在 `engine/fonts.ts`，读取旧值经 `normalizeFontStack` 自动补 fallback。
 5. L1 的新键：集中定义在 `src/store/editorPrefs.ts` 或 store 顶部常量，`ijipu.` 前缀、损坏回退默认、越界钳制。

@@ -94,11 +94,6 @@ interface DocState {
    * 不传则退回旧行为（写回整份生效配置的差量）。
    */
   setPageConfig: (cfg: PageConfig, persist?: boolean, base?: PageConfig) => void
-  /**
-   * 把**当前生效的全部设置**固化进谱面 `# jps-config`（全量写入）。
-   * 差量写入下，与默认值相同的项不落盘；需要"这份谱在任何机器/任何人手里都长一样"时用它。
-   */
-  persistFullConfig: () => void
   setCursor: (line: number, col: number) => void
   setSelection: (start: number, end: number) => void
   setActiveNoteId: (id: string | null) => void
@@ -148,20 +143,54 @@ function loadDraft(): { code: string; name: string } | null {
   }
 }
 
-function loadPageConfig(): PageConfig {
+/**
+ * adj480 一次性迁移：删除旧版的「本机页面设置」缓存层。
+ *
+ * 背景（用户确认的目标）：`.jps` 应当**自包含**——"我把源码复制给别人，别人看到的效果一样"。
+ * 旧版把"本机页面设置"存在 `localStorage`，并套用到**未自带该设置**的谱面；而 `setPageConfig`
+ * 无论是否持久化都会把**整份生效配置**写回缓存（对话框实时预览、取消回写快照都算）⇒ 这一层
+ * 实际是"上一份谱的整份配置"，于是"你看到的"取决于本机历史，复制给他人必然不一致。
+ *
+ * 现在生效配置只有两层：**代码默认值 ← 谱面 `# jps-config`**（新建文档从 adj214 起本就不吃缓存，
+ * 故去掉这一层几乎没有便利性损失）。这里只做：删键 + 若旧值与默认不同则提示一次
+ * （不静默吞掉用户的历史设置而不告知）。
+ */
+function migrateLegacyPageConfig(): void {
+  let raw: string | null = null
   try {
-    const raw = localStorage.getItem(PAGE_CONFIG_KEY)
-    if (raw) return { ...defaultPageConfig, ...(JSON.parse(raw) as Partial<PageConfig>) }
+    raw = localStorage.getItem(PAGE_CONFIG_KEY)
+    if (raw === null) return
+    localStorage.removeItem(PAGE_CONFIG_KEY)
   } catch {
-    /* 损坏的配置忽略，用默认 */
+    return
   }
-  return { ...defaultPageConfig }
+  let diffCount = 0
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const def = defaultPageConfig as unknown as Record<string, unknown>
+    for (const [k, v] of Object.entries(parsed)) {
+      if (k in def && JSON.stringify(def[k]) !== JSON.stringify(v)) diffCount++
+    }
+  } catch {
+    /* 坏值：只删键 */
+  }
+  if (diffCount > 0) {
+    useUiStore
+      .getState()
+      .showNotice(
+        `已停用「本机页面设置」缓存（原 ${diffCount} 项非默认值）：版面设置现在只认谱面自带的 # jps-config，源码没写的项按默认值渲染——这样把谱复制给别人显示才一致`,
+        'warn',
+      )
+  }
 }
 
 /**
  * 解析**生效配置**（分层见 docs/SETTINGS-AUDIT.md）：
- *   L0 引擎默认 < L1 公共设置(localStorage pageConfig) < L2 谱面源码 # jps-config
- * 之后再叠加 L1 的「用我的字体覆盖谱面字体」（默认关，跨机缺字体时用）。
+ *   L0 引擎默认 < L2 谱面源码 # jps-config
+ * 之后再叠加 L1 的「用我的字体覆盖谱面字体」（默认关，跨机缺字体时用；它**不随谱走**，
+ * 会让"我看到的字体"与别人不同，故只作本机回退）。
+ *
+ * adj480：**不再有"本机页面设置"这一层**——谱面自包含是分享保真的前提（见 migrateLegacyPageConfig）。
  *
  * 顺带做一次性迁移：早期版本把编辑器偏好写进了谱面（`# jps-config` 里的 editorFont/editorFontSize），
  * 首次解析时搬到本机 L1 偏好（仅当本机从未设置过）；此后任何保存都会以差量写入自动清除它们。
@@ -174,8 +203,9 @@ function resolveConfig(code: string): PageConfig {
       if (typeof p.fontSize === 'number') ui.setEditorFontSize(p.fontSize)
     })
   }
-  return applyFontOverride(mergeJpsConfig(code, loadPageConfig()), loadFontOverride())
+  return applyFontOverride(mergeJpsConfig(code, null), loadFontOverride())
 }
+migrateLegacyPageConfig()
 const draft = loadDraft()
 
 /** 撤销/重做：将历史快照恢复到文档（code/解析/脏标记/选区/光标跳转） */
@@ -261,17 +291,13 @@ export const useDocStore = create<DocState>()((set, get) => ({
   },
   setAutoFormat: (b) => set({ autoFormat: b }),
   setPageConfig: (cfg, persist, base) => {
-    try {
-      localStorage.setItem(PAGE_CONFIG_KEY, JSON.stringify(cfg))
-    } catch {
-      /* 存储不可用时静默 */
-    }
-    // adj83：persist（对话框「保存设置」/ 拖拽虚线松手）时把设置写回源码 # jps-config 注释
-    // （每首谱用自己的设置）；拖拽实时预览不写源码，避免频繁重解析。
-    // adj-font：改为**差量写入**（只写与默认不同的字段；无差量则删除设置行），
-    // 避免把旧默认永久钉在文件里；编辑器偏好已不在 PageConfig 中，不会再被写入。
+    // adj480：**不再写本机缓存**。生效配置只有「代码默认 ← 谱面」两层，页面设置属于谱面（L2）：
+    //  · 预览态（persist=false）：只更新内存，不落盘（此前会把"当前文档的整份生效配置"写进
+    //    localStorage，等于把本机设置变成"上一份谱的配置"，是分享不一致的根源）；
+    //  · 持久态（persist=true）：写回源码 # jps-config —— 差量写入（只写与默认不同的字段），
+    //    于是"我看到的非默认部分"都在谱面里 ⇒ 文件自包含 ⇒ 复制给别人效果一致。
     // adj454：传了 base（本次编辑开始前的生效配置）时，只把**用户本次改动**并入源码层
-    // （mergeConfigEdits）——此前直接写整份生效配置，会把本机公共设置（缓存）固化进别人的谱。
+    // （mergeConfigEdits）；没传 base 时退回"整份生效配置按差量写"——两者在无缓存层后等价。
     if (persist) {
       const code = get().code
       const newCode = base
@@ -288,19 +314,6 @@ export const useDocStore = create<DocState>()((set, get) => ({
       }
     }
     set({ pageConfig: cfg })
-  },
-  persistFullConfig: () => {
-    const code = get().code
-    const cfg = get().pageConfig
-    const newCode = writeJpsConfig(code, cfg, { mode: 'full' })
-    if (newCode === code) return
-    try {
-      localStorage.setItem(DRAFT_KEY, newCode)
-    } catch {
-      /* 存储不可用时静默 */
-    }
-    set({ code: newCode, parseResult: parseJps(newCode), dirty: true })
-    useUiStore.getState().showNotice('已把当前全部设置固化到谱面（# jps-config）')
   },
   setCursor: (line, col) => set({ cursor: { line, col } }),
   setSelection: (start, end) => set({ sel: { start, end } }),
@@ -363,9 +376,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
     localStorage.setItem(DRAFT_NAME_KEY, '未命名')
     // adj161：新建文档不关联磁盘文件——清除句柄
     void saveFileHandle(null)
-    // adj214：新建文档强制使用 defaultPageConfig——不再被 localStorage 公共设置
-    // 旧值覆盖（此前 loadPageConfig() 会把用户历史设置带进新谱，默认值调整后
-    // 新建仍显示旧值）；模板无 # jps-config，merge(null) 即纯默认
+    // adj214：新建文档强制使用 defaultPageConfig——不再被本机历史设置覆盖
+    // （当时的问题是新建谱仍显示旧的本机设置；adj480 更进一步：本机页面设置层已整体取消）
+    // 模板无 # jps-config，merge(null) 即纯默认
     set({
       code: template,
       fileName: '未命名',

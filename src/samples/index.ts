@@ -1,5 +1,5 @@
 /**
- * src/samples/index.ts — 内置示例谱
+ * src/samples/index.ts — 内置示例谱 + 「新建」模板
  *
  * adj423（用户要求）：示例谱改为**目录驱动**——`public/samples/*.jps` 下的每个 `.jps` 文件
  * 都是一份示例谱，用 Vite 的 `import.meta.glob` 在**构建期**自动发现并读入（`?raw`）。
@@ -10,7 +10,10 @@
  *  - 说明：首个 `S:` 说明行（没有就留空）
  *  - id：文件名（去扩展名）
  *
- * `defaultSample()` 仍返回内置「新建」模板（编辑器初始默认谱，与示例谱无关）。
+ * adj481（用户要求）：「新建」模板同样**文件驱动**——模板就是 `src/samples/未命名.jps`，
+ * 想改"新建出来的空白谱长什么样"，直接编辑那个文件即可（重跑构建生效），代码里不再内嵌模板。
+ * 放在源码目录（而非 `public/`）是有意的：模板只在**构建期**被内联进产物，不需要作为静态资源发布
+ * （`public/` 下的文件会随构建出现在 `dist/`，Web 端还能按 URL 直接下载到）。
  */
 import { JPS_CONFIG_PREFIX } from '@ijipu/engine'
 
@@ -22,41 +25,31 @@ export interface SampleScore {
 }
 
 /**
- * 「新建」模板（adj：作为编辑器初始默认谱，替代原示例谱）
+ * adj481：「新建」模板 = `src/samples/未命名.jps`（**唯一来源**，改它即可改新建内容）。
  *
- * adj413：
- *  ① 两条分隔注释规范为**恰好 30 个字符**（原「#====…以下为描述头定义…====#」为 62 字符，过长）；
- *  ② 主体之后**5 个空行**，再给出「页面设置」区块：一条分隔注释 + 真正的 `# jps-config:` 设置行
- *     （用户要求：`#========== 以下为页面设置，请勿手动修改 ==========` 紧跟 `# jps-config:…`）。
+ * 为什么改成文件驱动：内嵌在代码里的模板每次调整都要改代码 + 重新构建，而模板本身是"用户可以随意
+ * 塑形"的谱面文本（分隔注释、默认拍号、署名行、页面设置区块…），放在文件里直接编辑最省事。
  *
- * 关于那条设置行：`{}` 表示"全部使用默认值"（`extractJpsConfig` 解析为空对象 → 不覆盖任何设置，
- * 与旧的"没有设置行"等价）。用户改动任一项页面设置后，程序会**原地**把字段写进这一行；
- * 若全部改回默认（差量写空），程序会删除该行、**保留上方那条分隔注释**——这是 `settings.ts` 的既有语义
- * （设置行是差量产物）。前缀用 `JPS_CONFIG_PREFIX` 常量拼而非手抄，避免两处各写一份而漂移。
+ * 兜底：文件被删/读不到时用下面这份**最小可解析**内容，避免新建出空文档（不是模板的"第二份副本"，
+ * 只是故障兜底；要改模板请改 `src/samples/未命名.jps`）。
  */
-const NEW_FILE_TEMPLATE = [
-  '#=========== 描述头定义 ===========',
+const TEMPLATE_FALLBACK = [
   'V: 1.0',
   'B: 未命名',
-  'Z: 佚名 词曲',
   'D: C',
   'P: 4/4',
-  // adj254：本乐谱使用「爱记谱」编制——谱尾署名/广告说明
-  'S: 本乐谱使用「爱记谱」编制',
-  '#========== 以下为简谱主体 ==========',
   'Q: 1 2 3 4 |',
-  'C: 这是歌词',
-  // adj413：与主体间隔 5 个空行（下面 5 个空串）
-  '',
-  '',
-  '',
-  '',
-  '',
-  // adj413：页面设置区块——分隔注释 + 空设置行（`{}` = 全部默认）
-  '#====== 以下为页面设置，请勿手动修改 =======',
   `${JPS_CONFIG_PREFIX}{}`,
   '',
 ].join('\n')
+
+/** 构建期读入模板文件（单文件 glob，直接取值以避开 glob 键的路径写法差异） */
+const TEMPLATE_FILES = import.meta.glob('./未命名.jps', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>
+const NEW_FILE_TEMPLATE = Object.values(TEMPLATE_FILES)[0] ?? TEMPLATE_FALLBACK
 
 /** 从示例源码里取首个 `B:` 标题（没有则空串） */
 function firstTitleOf(code: string): string {
@@ -95,7 +88,7 @@ export const SAMPLES: SampleScore[] = Object.entries(
   })
   .sort((a, b) => a.id.localeCompare(b.id, 'zh-Hans-CN'))
 
-/** 默认（新建）谱 —— 返回内置新建模板，不依赖 SAMPLES[0] */
+/** 默认（新建）谱 —— 返回「新建」模板（adj481：内容来自 `public/未命名.jps`，不依赖 SAMPLES[0]） */
 export function defaultSample(): SampleScore {
   return { id: 'new', name: '未命名', description: '', code: NEW_FILE_TEMPLATE }
 }

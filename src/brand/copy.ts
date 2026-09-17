@@ -96,6 +96,8 @@ export const uiCopy = {
   segmentRowGapBzLabel: 'bz 段上下间距',
   segmentRowGapDsbLabel: 'dsb 段上下间距',
   segmentRowGapHint: '临时叠加段（{bz … } / {dsb … }）与主旋律之间的纵向间距（px）。默认 22（≈ 1.7×字号）。',
+  // adj479：多声部块内「声部行间距」——此前只有预览虚线可拖（设置里没有输入框，用户报"无法调整"）
+  shengbuGapLabel: '声部间距',
 } as const
 
 /**

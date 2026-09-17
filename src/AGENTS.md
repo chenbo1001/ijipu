@@ -19,7 +19,7 @@
 | `brand/` | 品牌层：tokens（色板/字体/口号）、copy（面向用户文案）、themes（中国色主题）、version（版本号） | 所有品牌字面量集中于此，禁止在其它代码硬编码文案/色值/版本号 |
 | `styles/` | 主题样式：theme.css（品牌 token CSS 变量） | 样式统一用 `var(--jp-*)` 变量，禁止散落魔法色值 |
 | `gen/` | 自动生成：buildInfo.ts（BUILD_DATE/GIT_COMMIT） | 由 scripts/gen-build-info.mjs 生成，**禁止手改**（已在 .gitignore） |
-| `samples/` | 示例谱登记：index.ts（?raw 导入 samples/*.jps） | 新增示例谱两处同步：samples/ 原文 + 此登记（id/name/description/code） |
+| `samples/` | 示例谱登记：index.ts（?raw 导入 samples/*.jps） | 新增示例谱两处同步：`public/samples/*.jps` 原文 + 此登记（id/name/description/code）；**「新建」模板 = `src/samples/未命名.jps`**（adj481 文件驱动：改这个文件即改新建出来的空白谱，代码里不内嵌副本、只有极小兜底；放源码目录而非 `public/`，免得随产物发布） |
 
 > 本职责表是 AI 判断「代码该放哪」的依据：新增/调整目录或职责时，必须先更新本表再动代码。
 
@@ -37,7 +37,9 @@
 1. `docStore`（文档态）：code、parseResult、pageConfig、cursor/sel、撤销/重做历史（history.ts，上限 50 步、输入合并窗口）、草稿自动保存（ijipu.draft）
 2. `uiStore`（界面态）：modal、showGuides、theme/themeMode、splitPct、editorFontSize、previewZoom；写入 localStorage 前范围钳制（缩放 50~200、字号 10~26、拆分 15~85）
 3. **数据流**：组件通过 `useDocStore((s) => s.xxx)` 按字段订阅，禁止解构整个 store 造成全量重渲染；修改一律走 store action，禁止组件直接改 store 内部状态
-4. **持久化键**：`ijipu.` 前缀常量集中在 store 文件顶部（DRAFT_KEY/PAGE_CONFIG_KEY/PREVIEW_ZOOM_KEY 等），读取必须 try/catch 回退默认值
+4. **持久化键**：`ijipu.` 前缀常量集中在 store 文件顶部（DRAFT_KEY/PREVIEW_ZOOM_KEY 等），读取必须 try/catch 回退默认值。
+   **adj480：不再有"页面设置"缓存键**——`PageConfig` 只有「代码默认 ← 谱面 `# jps-config`」两层（谱面自包含才谈得上"复制给别人显示一致"）；
+   `ijipu.pageConfig` 只保留一次性迁移清理（`docStore.migrateLegacyPageConfig`），**不得再写入**
 
 ## 四、品牌与文案集中管理（强制）
 

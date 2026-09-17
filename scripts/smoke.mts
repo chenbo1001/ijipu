@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage } from '@ijipu/engine/index.ts'
+import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, slideExtraW, slideGlyphInk, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage } from '@ijipu/engine/index.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES, gmVoiceRef, gmVoiceProgram, countScoreInstrumentSwitches } from '@ijipu/engine/playback/index.ts'
@@ -3298,6 +3298,125 @@ const mbdDur = layoutScore(mbdRes, DUR_CFG)
 const mbdDurMaxR = Math.max(...mbdDur.pages[0].notes.map((n) => n.x + n.width))
 check('多声部空间优先 变音/附点溢出 ≤ 时值优先', mbdMaxR <= mbdDurMaxR + 0.5, JSON.stringify({ space: Math.round(mbdMaxR * 10) / 10, dur: Math.round(mbdDurMaxR * 10) / 10 }))
 
+// ---- 63b. 多声部：无时值「占宽元素」插位（adj479） ----
+// 用户报：多声部里 `&hx` 不显示、`&shy`/`&xhy` 与音符重叠。根因两条：
+//  ① 多声部块把独立标记（&zkh/&ykh/&hx）的宽度算进了拍宽，却**从不绘制**（page.brackets 里没有）；
+//  ② 滑音是音符修饰符、布局端**完全不占宽**，多声部每拍紧密排布时墨迹压到后一个数字。
+console.log('[63b] multi-voice zero-duration width elements (adj479)')
+{
+  const ns479 = defaultPageConfig.note_size
+  const digW479 = digitSlotW(ns479)
+  for (const [modeName, cfg479] of [
+    ['空间优先', mspCfg],
+    ['时值优先', DUR_CFG],
+  ] as const) {
+    // ① &hx：多声部必须渲染，且落在 6 与 5 之间（拍首前置占位）
+    const hxP = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 6 &hx 5 4 3 |\nQ2: 1 2 3 4 |\n'), cfg479).pages[0]
+    const hxQ1 = hxP.notes.filter((n) => n.id.voice === 1).sort((a, b) => a.x - b.x)
+    const hxQ2 = hxP.notes.filter((n) => n.id.voice === 2).sort((a, b) => a.x - b.x)
+    const hxMark = hxP.brackets.find((b) => b.code === 'hx')
+    check(`adj479 ${modeName} &hx 在多声部渲染（此前完全缺失）`, !!hxMark, JSON.stringify(hxP.brackets))
+    check(
+      `adj479 ${modeName} &hx 落在 6 与 5 之间`,
+      !!hxMark && hxMark.x - hxMark.width / 2 >= hxQ1[0].x + digW479 - 0.5 && hxMark.x + hxMark.width / 2 <= hxQ1[1].x + 0.6,
+      `mark=[${hxMark ? (hxMark.x - hxMark.width / 2).toFixed(1) : '-'},${hxMark ? (hxMark.x + hxMark.width / 2).toFixed(1) : '-'}] note0右=${(hxQ1[0].x + digW479).toFixed(1)} note1x=${hxQ1[1].x}`,
+    )
+    check(
+      `adj479 ${modeName} &hx 占位后同拍仍纵向对齐`,
+      Math.abs(hxQ1[1].x - hxQ2[1].x) < 0.6 && Math.abs(hxQ1[2].x - hxQ2[2].x) < 0.6,
+      `Q1=${hxQ1.map((n) => n.x).join(',')} Q2=${hxQ2.map((n) => n.x).join(',')}`,
+    )
+    // ② &zkh/&ykh：多声部同样必须渲染（首标记在首音符之前、尾标记在其后音符之前）
+    const bkP = layoutScore(parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: &zkh 5 6 7&ykh 1' |\nQ2: 1 2 3 4 |\n"), cfg479).pages[0]
+    const bkQ1 = bkP.notes.filter((n) => n.id.voice === 1).sort((a, b) => a.x - b.x)
+    const zkh = bkP.brackets.find((b) => b.code === 'zkh')
+    const ykh = bkP.brackets.find((b) => b.code === 'ykh')
+    check(`adj479 ${modeName} &zkh/&ykh 在多声部渲染`, !!zkh && !!ykh, JSON.stringify(bkP.brackets))
+    check(
+      `adj479 ${modeName} &zkh 在首音符之前、&ykh 在末音符之前`,
+      !!zkh && !!ykh && zkh.x + zkh.width / 2 <= bkQ1[0].x + 0.6 && ykh.x + ykh.width / 2 <= bkQ1[3].x + 0.6,
+      `zkh右=${zkh ? (zkh.x + zkh.width / 2).toFixed(1) : '-'} note0=${bkQ1[0]?.x} ykh右=${ykh ? (ykh.x + ykh.width / 2).toFixed(1) : '-'} note3=${bkQ1[3]?.x}`,
+    )
+    // ③ &shy/&xhy：音符本体宽 = 数字槽 + 滑音墨迹宽；墨迹不压后一数字
+    const slP = layoutScore(parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1&shy 2&xhy 3 4 |\nQ2: 5 6 7 1' |\n"), cfg479).pages[0]
+    const slQ1 = slP.notes.filter((n) => n.id.voice === 1).sort((a, b) => a.x - b.x)
+    const shyW = slideExtraW('shy', ns479)
+    const xhyW = slideExtraW('xhy', ns479)
+    // 本体宽口径只在空间优先成立（时值优先的 note.width 是整个时值段宽，不是本体宽）
+    if (modeName === '空间优先') {
+      check(
+        `adj479 ${modeName} 滑音音符本体宽含墨迹（#1 上滑音）`,
+        Math.abs(slQ1[0].width - (digW479 + shyW)) < 0.6,
+        `w=${slQ1[0].width} 期望=${(digW479 + shyW).toFixed(2)}`,
+      )
+    }
+    check(
+      `adj479 ${modeName} 滑音墨迹不压后一音符（两个滑音音都判）`,
+      slQ1[0].x + digW479 + shyW <= slQ1[1].x + 0.6 && slQ1[1].x + digW479 + xhyW <= slQ1[2].x + 0.6,
+      `shy右=${(slQ1[0].x + digW479 + shyW).toFixed(1)} 2x=${slQ1[1].x} xhy右=${(slQ1[1].x + digW479 + xhyW).toFixed(1)} 3x=${slQ1[2].x}`,
+    )
+    // ④ 附点（同为"无时值但有占宽"的元素）：本体宽逐拍归位后，不与后一拍数字重叠
+    const dtP = layoutScore(parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 2.&xhy 3 4 |\nQ2: 6 7 1' |\n"), cfg479).pages[0]
+    const dtQ1 = dtP.notes.filter((n) => n.id.voice === 1).sort((a, b) => a.x - b.x)
+    check(
+      `adj479 ${modeName} 附点+滑音的本体宽计入首拍（后一音符让开）`,
+      dtQ1[1].x >= dtQ1[0].x + digW479 + xhyW + dotBodyW(ns479) - 0.6,
+      `2.x=${dtQ1[0].x} 3.x=${dtQ1[1].x} 需求=${(digW479 + xhyW + dotBodyW(ns479)).toFixed(2)}`,
+    )
+  }
+  // ⑤ 渲染端与布局端**同源**：SVG 里滑音图形的 transform 正是 `slideGlyphInk` 给出的框
+  const ink479 = slideGlyphInk('shy', ns479)
+  const gl479 = MODIFIER_GLYPHS.shy
+  const sc479 = ink479.w / gl479.box.w
+  const slSvg = layoutScore(parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1&shy 2 3 4 |\nQ2: 5 6 7 1' |\n"), mspCfg)
+  const slNote = slSvg.pages[0].notes.filter((n) => n.id.voice === 1).sort((a, b) => a.x - b.x)[0]
+  const tx479 = Math.round((slNote.x + ink479.dx - gl479.box.x * sc479) * 100) / 100
+  const ty479 = Math.round((slNote.y + ink479.dy - gl479.box.y * sc479) * 100) / 100
+  const scStr479 = String(Math.round(sc479 * 1e6) / 1e6)
+  check(
+    'adj479 滑音渲染落位与占宽模型同源（同一份几何）',
+    renderScoreToSvg(slSvg)[0].includes(`translate(${tx479} ${ty479}) scale(${scStr479})`),
+    `期望 translate(${tx479} ${ty479}) scale(${scStr479})`,
+  )
+}
+
+// ---- 63c. 声部间距允许负值（adj479，用户报「虚线无法往负数方向调」） ----
+console.log('[63c] negative voice spacing (adj479)')
+{
+  const sbCode = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 4 |\nC1: 啊 啊 啊 啊\nQ2: 5 6 7 1' |\nC2: 啊 啊 啊 啊\n"
+  const sbLayer = (v: number) => layoutScore(parseJps(sbCode), { ...mspCfg, height_shengbu: v })
+  const yOf = (v: number, voice: number) => sbLayer(v).pages[0].notes.filter((n) => n.id.voice === voice)[0]?.y ?? 0
+  // ① 钳制范围允许负值（此前 [0,300] → 往上一拖就被钳回 0）
+  check(
+    'adj479 声部间距范围允许负值（此前下限 0）',
+    GUIDE_LIMITS_EX.height_shengbu[0] < 0 && GUIDE_LIMITS_EX.height_shengbu[1] === 300,
+    JSON.stringify(GUIDE_LIMITS_EX.height_shengbu),
+  )
+  // ② 拖拽换算（PreviewPane 用的同一套：dragDelta + clamp）——向上拖 12px 得到 −12，不被钳到 0
+  {
+    const [min, max] = GUIDE_LIMITS_EX.height_shengbu
+    const dragged = Math.round(clamp(0 + dragDelta({ key: 'height_shengbu', dir: 'v' }, 100, 200, 100, 188, 1), min, max))
+    const capped = Math.round(clamp(0 + dragDelta({ key: 'height_shengbu', dir: 'v' }, 100, 200, 100, 0, 1), min, max))
+    check('adj479 向上拖虚线得到负的声部间距（−12，不再钳回 0）', dragged === -12, String(dragged))
+    check('adj479 拖到极限取到下限（−30，两行刚好不压字）而不是 0', capped === GUIDE_LIMITS_EX.height_shengbu[0] && capped === -30, String(capped))
+  }
+  // ③ 负值真的生效：第二声部上移 |值|、第一声部不动
+  check('adj479 声部间距 −12：第二声部上移 12、第一声部不动', Math.abs(yOf(0, 2) - yOf(-12, 2) - 12) < 0.6 && Math.abs(yOf(0, 1) - yOf(-12, 1)) < 0.1, `v1 ${yOf(0, 1)}→${yOf(-12, 1)} v2 ${yOf(0, 2)}→${yOf(-12, 2)}`)
+  // ④ 负值下虚线仍判定为「声部行」（拖它改的仍是声部间距，不会退化成行距）
+  {
+    const g = computeRowGuides(sbLayer(-12), { quci: defaultPageConfig.height_quci, geci: defaultPageConfig.geci_size }, defaultPageConfig.note_size)[0]
+    const idx = [...g].sort((a, b) => a.yTop - b.yTop).map((r) => r.voiceIdx)
+    check('adj479 负声部间距下声部序号仍正确（块内第 2 行 = 1）', idx.length >= 2 && idx[idx.length - 1] >= 1, JSON.stringify(idx))
+  }
+  // ⑤ 负值写回谱面并回读（diff 模式：与默认 0 不同才写）
+  {
+    const w = writeJpsConfig('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 |\nQ2: 5 |\n', { ...mspCfg, height_shengbu: -12 })
+    const back = extractJpsConfig(w)
+    check('adj479 声部间距 −12 写回 # jps-config 并回读', back?.height_shengbu === -12, JSON.stringify(back))
+    check('adj479 写回默认 0 时不写该字段（差量口径）', !writeJpsConfig('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 |\nQ2: 5 |\n', { ...mspCfg, height_shengbu: 0 }).includes('height_shengbu'), '')
+  }
+}
+
 // ---- 64. 多声部空间优先：中间小节线两侧空白对称（adj316，拉伸空白均分到小节头/各拍后） ----
 console.log('[64] multi-voice space barline symmetry (adj316)')
 {
@@ -4006,6 +4125,9 @@ async function runStoreFileIdentityTests() {
   const kv: Record<string, string> = {
     'ijipu.draftName': 'A',
     'ijipu.draft': 'V: 1.0\nB: 甲\nD: C\nP: 4/4\nQ: 1 |\n',
+    // adj480：预置旧版的「本机页面设置」缓存——迁移必须在 store 首次 import 时清掉它，
+    // 且**不得**影响生效配置（此前它会作为 L1 层套用到所有未自带该项的谱面）
+    'ijipu.pageConfig': JSON.stringify({ margin_left: 99, note_size: 15 }),
   }
   const g = globalThis as unknown as Record<string, unknown>
   g.localStorage = {
@@ -4075,6 +4197,24 @@ async function runStoreFileIdentityTests() {
   const { useUiStore } = (await import('../src/store/uiStore.ts')) as any
   const st = () => useDocStore.getState()
   const hName = () => (st().fileHandle as { name?: string } | null)?.name ?? null
+
+  // adj480：旧「本机页面设置」缓存的迁移（在 store 首次 import 时执行）
+  //  ① 键被清掉（不再有这一层）；② 生效配置不吃旧缓存（否则"你看到的"取决于本机历史）；
+  //  ③ 若旧值确有非默认项，给出一次性提示（不静默丢弃）
+  check('adj480 旧本机页面设置缓存已在启动时清除', !('ijipu.pageConfig' in kv), Object.keys(kv).join(','))
+  check(
+    'adj480 生效配置不吃旧缓存（margin_left=默认、note_size=默认）',
+    st().pageConfig.margin_left === defaultPageConfig.margin_left && st().pageConfig.note_size === defaultPageConfig.note_size,
+    `left=${st().pageConfig.margin_left} size=${st().pageConfig.note_size}`,
+  )
+  {
+    const n = useUiStore.getState().notice as { text: string } | null
+    check('adj480 迁移给出一次可见提示（含项数）', !!n && n.text.includes('本机页面设置') && n.text.includes('2 项'), n?.text ?? 'null')
+  }
+  // 预览态（persist=false）也不再写缓存：本机不再保存"页面设置"这一层
+  st().setPageConfig({ ...st().pageConfig, margin_left: 61 }, false)
+  check('adj480 预览态不再写本机页面设置缓存', !('ijipu.pageConfig' in kv), Object.keys(kv).join(','))
+  st().setPageConfig({ ...st().pageConfig, margin_left: defaultPageConfig.margin_left }, false)
 
   check('adj370 启动：fileName 取草稿名（A）', st().fileName === 'A', st().fileName)
   await st().openFile()
@@ -5063,38 +5203,39 @@ console.log('[98] beam extends under trailing dot (adj411)')
   }
 }
 
-// ---- 99. 新建模板：三段分隔注释 + 页面设置区块（adj413） ----
-// ① 分隔注释规范为 30 个字符；② 主体后 5 个空行 → 「页面设置」分隔注释 → 真正的 `# jps-config:` 设置行；
-// ③ 设置行 `{}` 语义 = 全部默认（不覆盖任何设置）；改动后程序**原地**写入，改回默认则删行但保留分隔注释。
-console.log('[99] new-file template dividers & settings block (adj413)')
+// ---- 99. 新建模板：文件驱动（adj481）+ 页面设置区块语义（adj413） ----
+// adj481（用户要求）：`src/samples/未命名.jps` 就是「新建」的模板（唯一来源）——想改新建出来的空白谱，
+// 直接编辑那个文件即可，代码里不再内嵌模板。
+// 放在源码目录（不是 `public/`）是有意的：模板只在构建期被内联，不必作为静态资源随产物发布。
+// 因此这里只断言**行为**：模板确实来自该文件、能正常解析、设置行 `{}` 语义不变、写入后能读回。
+// （adj413 那几条"分隔注释恰好 30 字符 / 主体后 ≥5 空行"的**格式**断言已移除：模板格式现在由
+//  模板文件自己决定，用断言钉死它反而会妨碍直接编辑模板这一初衷。）
+console.log('[99] new-file template is file-driven (adj481) + settings block (adj413)')
 {
+  const tplPath = join(root, 'src', 'samples', '未命名.jps')
+  const tplRaw = existsSync(tplPath) ? readFileSync(tplPath, 'utf8') : null
   const tpl = defaultSample().code
-  const lines = tpl.replace(/\r\n/g, '\n').split('\n')
-  const dividers = lines.filter((l) => l.startsWith('#='))
-  check('adj413 模板有三条分隔注释（描述头 / 简谱主体 / 页面设置）', dividers.length === 3, JSON.stringify(dividers))
-  check('adj413 前两条分隔注释恰好 30 个字符', dividers[0].length === 30 && dividers[1].length === 30, dividers.slice(0, 2).map((l) => `${l.length}`).join(','))
-  check('adj413 第二条分隔注释为「以下为简谱主体」', dividers[1].includes('简谱主体'), dividers[1])
-  check('adj413 第三条分隔注释为「#====== 以下为页面设置，请勿手动修改 =======」', dividers[2] === '#====== 以下为页面设置，请勿手动修改 =======', dividers[2])
-  // 主体最后一行 → 页面设置分隔注释之间的空行数
-  const divIdx = lines.indexOf(dividers[2])
-  let blanks = 0
-  for (let i = divIdx - 1; i >= 0 && lines[i].trim() === ''; i--) blanks++
-  check('adj413 页面设置区块与主体间隔 ≥5 个空行', blanks >= 5, `空行数=${blanks}`)
-  // 分隔注释紧跟设置行
-  check('adj413 分隔注释的下一行就是设置行', (lines[divIdx + 1] ?? '').startsWith(JPS_CONFIG_PREFIX), lines[divIdx + 1])
-  check('adj413 模板设置行内容为 {}（表示全部默认）', lines[divIdx + 1] === `${JPS_CONFIG_PREFIX}{}`, lines[divIdx + 1])
-  check('adj413 空设置行不覆盖任何设置（读回无字段）', Object.keys(extractJpsConfig(tpl) ?? {}).length === 0, JSON.stringify(extractJpsConfig(tpl)))
-  check('adj413 空设置行不影响兜底配置合并', mergeJpsConfig(tpl, { ...defaultPageConfig, note_size: 17 }).note_size === 17)
-  // 写入差量设置：原地写进那条设置行（紧跟分隔注释），分隔注释保持不动
+  const norm = (s: string) => s.replace(/\r\n/g, '\n')
+  check('adj481 新建模板文件 src/samples/未命名.jps 存在且非空', !!tplRaw && tplRaw.trim().length > 0, tplPath)
+  check(
+    'adj481 新建模板内容 = 模板文件内容（文件驱动，改文件即改新建）',
+    !!tplRaw && norm(tpl) === norm(tplRaw),
+    `文件 ${tplRaw ? tplRaw.length : 0} 字符 / 模板 ${tpl.length} 字符`,
+  )
+  check('adj481 模板源码不再内嵌副本（samples/index.ts 无内嵌样板）', !String(readFileSync('src/samples/index.ts', 'utf8')).includes('以下为简谱主体'), '')
+  check('adj481 模板不放在 public/（不随构建产物发布）', !existsSync(join(root, 'public', '未命名.jps')), join(root, 'public', '未命名.jps'))
+  const parsed = parseJps(tpl)
+  check('adj481 模板能正常解析（无 error）', parsed.errors.every((e) => e.severity !== 'error'), JSON.stringify(parsed.errors.slice(0, 2)))
+  check('adj481 模板含标题 B: 未命名（新建文件名与标题一致）', /\nB:\s*未命名/.test(`\n${tpl}`), tpl.split('\n').slice(0, 5).join('|'))
+  // 设置行语义（adj413）：模板若带 `# jps-config:`（通常为 `{}`）→ 不覆盖任何设置；写入差量后能读回
+  check('adj413 模板设置行（若有）不覆盖任何设置', Object.keys(extractJpsConfig(tpl) ?? {}).length === 0, JSON.stringify(extractJpsConfig(tpl)))
+  check('adj413 设置行不影响兜底配置合并', mergeJpsConfig(tpl, { ...defaultPageConfig, note_size: 17 }).note_size === 17)
   const withCfg = writeJpsConfig(tpl, { ...defaultPageConfig, note_size: 15 })
-  const lines2 = withCfg.split('\n')
-  const divIdx2 = lines2.findIndex((l) => l.includes('以下为页面设置'))
-  check('adj413 写入设置后分隔注释位置不变、设置行原地更新', divIdx2 === divIdx && (lines2[divIdx2 + 1] ?? '').startsWith(JPS_CONFIG_PREFIX) && lines2[divIdx2 + 1].includes('"note_size":15'), lines2[divIdx2 + 1])
-  check('adj413 写入的设置行可读回', extractJpsConfig(withCfg)?.note_size === 15, JSON.stringify(extractJpsConfig(withCfg)))
-  check('adj413 模板仍只有一条设置行（未重复追加）', lines2.filter((l) => l.startsWith(JPS_CONFIG_PREFIX)).length === 1)
-  // 改回默认（差量清空）：删设置行但保留分隔注释
+  check('adj413 写入的设置行可读回（原地更新或追加均可）', extractJpsConfig(withCfg)?.note_size === 15, JSON.stringify(extractJpsConfig(withCfg)))
+  check('adj413 写回后仍有且只有一条设置行', withCfg.split('\n').filter((l) => l.startsWith(JPS_CONFIG_PREFIX)).length === 1, '')
+  // 改回默认（差量清空）：删设置行（模板里的「页面设置」分隔注释若存在则保留——它是模板文本的一部分）
   const back = writeJpsConfig(withCfg, { ...defaultPageConfig })
-  check('adj413 清空设置后删行但保留「页面设置」分隔注释', !back.split('\n').some((l) => l.startsWith(JPS_CONFIG_PREFIX)) && back.includes('以下为页面设置'), '')
+  check('adj413 清空设置后不再有设置行', !back.split('\n').some((l) => l.startsWith(JPS_CONFIG_PREFIX)), '')
 }
 
 // ---- 100. px 值一律整数：roundPxIntegers + 读写两端（adj413） ----
@@ -7390,6 +7531,173 @@ console.log('[108] mordent/slide modifiers are user-provided vector glyphs (adj4
   check(`adj458 ${GLYPH_KEYS.length} 枚修饰符的 SVG 源文件都在 public/icons/ 下`, missingSvg.length === 0, missingSvg.join(','))
 }
 
+// ---- 109. 谱面自包含：取消本机页面设置层、分享保真（adj480）----
+console.log('[109] score self-containment: no local page-config layer (adj480)')
+{
+  // ① 引擎：configCarryover —— 列出「生效≠默认、但谱面没写（或写得不一样）」的字段
+  const body = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n'
+  const eff = { ...defaultPageConfig, margin_left: 60, height_quci: 18 }
+  const carried = writeJpsConfig(body, eff)
+  check('adj480 写回后谱面自包含（无未携带项）', configCarryover(carried, mergeJpsConfig(carried, null)).ok, JSON.stringify(configCarryover(carried, eff).missing))
+  {
+    // 生效值里有非默认项、谱面却是干净源码 → 两项都算"未随谱携带"
+    const gap = configCarryover(body, eff)
+    check(
+      'adj480 未写设置行的谱：非默认项全部计入 missing',
+      !gap.ok && gap.missing.length === 2 && gap.missing.some((m) => m.key === 'margin_left' && m.value === 60),
+      JSON.stringify(gap.missing),
+    )
+    // 谱面写了但值与本机生效值不同 → 也算缺口（对方会看到谱面里的旧值）
+    const stale = writeJpsConfig(body, { ...defaultPageConfig, margin_left: 40 })
+    const gap2 = configCarryover(stale, eff)
+    check('adj480 谱面值与生效值不一致 → 计入 missing', gap2.missing.some((m) => m.key === 'margin_left'), JSON.stringify(gap2.missing))
+    // 与默认一致的项永远不算缺口（对方也用同一个默认值）
+    check('adj480 等于默认值的项不算缺口', !configCarryover(body, { ...defaultPageConfig }).missing.some((m) => m.key === 'margin_left'))
+  }
+  // ② 应用：不再读写「本机页面设置」缓存，且生效配置 = 默认 ← 谱面
+  {
+    const storeSrc = String(readFileSync('src/store/docStore.ts', 'utf8'))
+    check('adj480 docStore 不再写入本机页面设置缓存', !storeSrc.includes('setItem(PAGE_CONFIG_KEY'), '')
+    check('adj480 docStore 的生效配置改吃 null 兜底（只看谱面与默认）', storeSrc.includes('mergeJpsConfig(code, null)'), '')
+    check('adj480 docStore 保留旧缓存键的一次性清理', storeSrc.includes('removeItem(PAGE_CONFIG_KEY)'), '')
+    check('adj480 迁移会提示用户（不静默丢弃旧设置）', storeSrc.includes('已停用「本机页面设置」缓存'), '')
+    const dlgSrc = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
+    check(
+      'adj480 设置面板已移除「固化到谱面」按钮（保存即自包含）',
+      !dlgSrc.includes('persistFullConfig') && !storeSrc.includes('persistFullConfig') && !/>\s*固化到谱面\s*</.test(dlgSrc),
+      `dlg=${dlgSrc.includes('persistFullConfig')} store=${storeSrc.includes('persistFullConfig')}`,
+    )
+  }
+  // ③ 端到端：改一项设置 → 保存 → 用"无任何本机缓存"的环境解析，结果一致（分享保真）
+  {
+    const base = mergeJpsConfig(body, null)
+    const next = { ...base, note_size: 15, margin_left: 62 }
+    const saved = writeJpsConfig(body, mergeConfigEdits(body, base, next))
+    const onOtherMachine = mergeJpsConfig(saved, null)
+    check(
+      'adj480 保存后换一台机器（无缓存）解析结果一致',
+      onOtherMachine.note_size === 15 && onOtherMachine.margin_left === 62 && onOtherMachine.height_quci === base.height_quci,
+      `size=${onOtherMachine.note_size} left=${onOtherMachine.margin_left}`,
+    )
+    check('adj480 该谱此时自包含（无未随谱携带项）', configCarryover(saved, onOtherMachine).ok, JSON.stringify(configCarryover(saved, onOtherMachine).missing))
+  }
+}
+
+/**
+ * adj481：「新建」的内容必须等于模板文件 `public/未命名.jps`（文件驱动）。
+ * 这里走**真实 store 流程**（`newDoc()`）而不是只比较常量——把"菜单「新建」→ 模板文件"这条链路钉住。
+ * 依赖上一个用例已装好的 localStorage/window 桩（模块已加载，此处只取 store）。
+ */
+async function runNewDocTemplateTests() {
+  console.log('[81b] new document uses the template file (adj481)')
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const { useDocStore } = (await import('../src/store/docStore.ts')) as any
+  const st = () => useDocStore.getState()
+  st().newDoc()
+  const tpl = readFileSync(join(root, 'src', 'samples', '未命名.jps'), 'utf8')
+  const norm = (s: string) => s.replace(/\r\n/g, '\n')
+  check('adj481 菜单「新建」的正文 = 模板文件内容', norm(st().code) === norm(tpl), `${norm(st().code).length} vs ${norm(tpl).length} 字符`)
+  check('adj481 新建后文件名为「未命名」且未标脏', st().fileName === '未命名' && st().dirty === false, `${st().fileName}/${st().dirty}`)
+  check(
+    'adj481 新建后页面设置 = 默认（模板里 # jps-config:{} 不覆盖任何项）',
+    st().pageConfig.note_size === defaultPageConfig.note_size && st().pageConfig.margin_left === defaultPageConfig.margin_left,
+    `size=${st().pageConfig.note_size} left=${st().pageConfig.margin_left}`,
+  )
+  check('adj481 新建后能正常解析（无 error）', st().parseResult.errors.every((e: { severity: string }) => e.severity !== 'error'), JSON.stringify(st().parseResult.errors.slice(0, 2)))
+}
+
+// ---- 110. dock 设置面板：字段按「当页最长标签」对齐（adj482）----
+// 用户报：设置里的内容项流式排列 + 标签长短不一 ⇒ 控件落点参差。
+// 做法：`--pcfg-label-w`（当页最长标签）+ `--pcfg-field-w`（一格基本宽）+ 每行 `--pcfg-span`（宽字段跨格）
+// 全部由 JS 实测写成 CSS 变量，面板按等宽格网格排列 ⇒ 标签列对齐、控件跨格成列。
+console.log('[110] dock settings fields align by longest label (adj482)')
+{
+  const css = String(readFileSync('src/index.css', 'utf8'))
+  // 去掉注释再断言（规则之间常夹着"为什么"的中文注释，直接正则匹配会被注释长度绊住）
+  const cssFlat = css.replace(/\/\*[\s\S]*?\*\//g, '')
+  const dlg = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
+  check('adj482 字段网格按变量排（标签列 + 等宽格 + 跨格）',
+    /\.tool-dock \.pcfg-fields \{[\s\S]{0,160}grid-template-columns: repeat\(auto-fill, minmax\(var\(--pcfg-field-w/.test(css) &&
+      /\.pcfg-fields \.pcfg-row \{[\s\S]{0,220}grid-template-columns: var\(--pcfg-label-w/.test(css) &&
+      /grid-column: span var\(--pcfg-span/.test(css),
+    '')
+  check('adj482 分组标题跨整行（从 .pcfg-panel 起用后代选择器：任何嵌套层级都不会被当成字段格）',
+    /\.pcfg-panel \.pcfg-group-title \{[\s\S]{0,300}?grid-column: 1 \/ -1/.test(cssFlat),
+    '')
+  check('adj482 说明文字（.pcfg-note）同样跨整行', /\.pcfg-fields \.pcfg-note \{[^}]*grid-column: 1 \/ -1/.test(cssFlat), '')
+  check('adj482 窄 dock 退化为单列（仍以同一标签基准对齐）', /@container \(max-width: 560px\) \{\s*\.tool-dock \.pcfg-fields \{ grid-template-columns: minmax\(0, 1fr\)/.test(css), '')
+  check('adj482 测量用离屏克隆探针（不改真实 DOM）', css.includes('.pcfg-measure-probe') && dlg.includes("probe.className = 'pcfg-measure-probe'"), '')
+  check('adj482 测量值写回 CSS 变量（标签列 / 格宽 / 每行跨格）',
+    dlg.includes("setProperty('--pcfg-label-w'") && dlg.includes("setProperty('--pcfg-field-w'") && dlg.includes("setProperty('--pcfg-span'"),
+    '')
+  check('adj482 只在 dock 里测量（弹窗宽度固定，保持原两列布局）', dlg.includes("el.closest('.tool-dock')"), '')
+  // 回归护栏：Row 的布局**不能**写回内联 style——内联会压过 dock 的覆盖规则（本次踩过的坑）
+  const rowSrc = /function Row\([\s\S]*?\n\}/.exec(dlg)?.[0] ?? ''
+  check('adj482 Row 组件不再用内联布局样式（否则压过 dock 覆盖规则）',
+    rowSrc.length > 0 && !/style=\{\{/.test(rowSrc) && rowSrc.includes('className="pcfg-row"') && rowSrc.includes('className="pcfg-row-label"'),
+    rowSrc.replace(/\s+/g, ' ').slice(0, 120))
+  check('adj482 字段行的基样式落在 CSS（内联搬出）',
+    /\.pcfg-row \{[\s\S]{0,120}display: flex;[\s\S]{0,120}\}/.test(css) && /\.pcfg-row-label \{[\s\S]{0,80}min-width: 96px/.test(css),
+    '')
+  // adj483：跨格数必须钳到实际列数 + 窄栏取消跨格——否则 `span N` 会新建**隐式列**，
+  // 标题的 `1/-1` 只跨显式列 ⇒ 窄 dock 下"标题与字段挤在同一行"（用户报）
+  check('adj483 跨格数按容器宽钳到实际列数（不新建隐式列）',
+    /const cols = Math\.max\(1, Math\.floor\(\(el\.clientWidth \+ COL_GAP\)/.test(dlg) && /Math\.min\(cols, Math\.max\(1, Math\.ceil\(/.test(dlg),
+    '')
+  check('adj483 容器宽度变化（dock 拖宽/窗口 resize）→ 重新测量列数与跨格', dlg.includes('new ResizeObserver(schedule)') && dlg.includes('ro.observe(el)'), '')
+  check('adj483 窄栏（单列）取消跨格（CSS 兜底）',
+    /@container \(max-width: 560px\) \{[\s\S]{0,200}grid-template-columns: minmax\(0, 1fr\)[\s\S]{0,200}\.pcfg-row \{ grid-column: auto; \}/.test(cssFlat),
+    '')
+}
+
+// ---- 111. 主题/浅色模式属性挂到 <html>（adj483）----
+// 用户报：浅色主题下音色库的「通用音源（GeneralUser GS）」等**未显式设色**的文本看不清。
+// 根因：主题属性原先挂在 `.app`（body 的子元素）上，而 `body { color: var(--jp-text-primary) }`
+// 在 body 处求值——那时只有 `:root` 的**深色**默认值 ⇒ 继承色是深色主题的浅字（浅色主题下白底浅字）。
+console.log('[111] theme attrs on <html> so inherited colors match the palette (adj483)')
+{
+  const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+  check('adj483 data-theme / data-mode 同步挂到 documentElement',
+    appSrc.includes("document.documentElement") &&
+      /setAttribute\('data-theme'/.test(appSrc) &&
+      /setAttribute\('data-mode'/.test(appSrc),
+    '')
+  check('adj483 仍保留 .app 上的属性（个别样式/嵌入方按它取用）',
+    /className="app" data-theme=\{theme\} data-mode=\{effectiveMode\}/.test(appSrc),
+    '')
+  const cssBody = String(readFileSync('src/index.css', 'utf8'))
+  check('adj483 body 的继承色仍取主题变量（属性挂 html 后即在同一元素上求值）',
+    /body \{[\s\S]{0,120}color: var\(--jp-text-primary\)/.test(cssBody),
+    '')
+}
+
+// ---- 112. 底栏页签图标改用设计图标 + 浅深模式按钮对齐（adj486/adj484）----
+console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
+{
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  const css2 = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  // adj486：试听/导出/设置三枚页签改用顶栏同一套设计图标（不再用 ⚠ ▶ ⬇ ⚙ 字符）
+  check('adj486 底栏页签用 ToolIcon（试听→play / 导出→export / 设置→settings）',
+    dockSrc.includes("icon: 'play'") && dockSrc.includes("icon: 'export'") && dockSrc.includes("icon: 'settings'") && dockSrc.includes('<ToolIcon name={t.icon} size={14} />'),
+    '')
+  check('adj486 页签不再用 ▶ / ⬇ / ⚙ 字符当图标',
+    !dockSrc.includes("'▶'") && !dockSrc.includes("'⬇'") && !dockSrc.includes("'⚙'"),
+    '')
+  check('adj486 页签图标位统一占位并居中（字符与设计图标混用不跑偏）',
+    /\.tool-dock-tab-icon \{[\s\S]{0,220}display: inline-flex;[\s\S]{0,120}align-items: center;/.test(css2),
+    '')
+  // adj484：浅深模式按钮——图标与文本垂直居中 + 两侧留白 + 统一最小宽度
+  {
+    const btn = /\.theme-mode-btn \{[\s\S]{0,900}?\}/.exec(css2)?.[0] ?? ''
+    check('adj484 浅深模式按钮 inline-flex 居中 + 两侧内边距 + 最小宽度',
+      ['display: inline-flex', 'align-items: center', 'justify-content: center', 'gap: 6px', 'padding: 4px 10px', 'min-width: 72px', 'line-height: 1'].every((d) => btn.includes(d)),
+      btn.replace(/\s+/g, ' ').slice(0, 120))
+  }
+  check('adj484 浅深模式按钮图标用 14（对话框口径，与 12px 文本同高）',
+    /<ToolIcon name=\{m\.icon\} size=\{14\} \/>/.test(String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))),
+    '')
+}
+
 runAdj363SaveTests()
   .catch((e) => {
     failed++
@@ -7399,6 +7707,11 @@ runAdj363SaveTests()
   .catch((e) => {
     failed++
     console.error('  ✗ adj370 文件身份用例抛异常', e)
+  })
+  .then(() => runNewDocTemplateTests())
+  .catch((e) => {
+    failed++
+    console.error('  ✗ adj481 新建模板用例抛异常', e)
   })
   .then(() => runAdj416BankSourceTests())
   .catch((e) => {

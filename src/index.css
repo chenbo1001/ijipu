@@ -687,16 +687,29 @@ body {
   text-overflow: ellipsis;
 }
 
-/* 浅深色模式选择（adj48） */
+/* 浅深色模式选择（adj48；adj484：图标与文本**垂直居中** + 两侧留白 + 统一最小宽度） */
 .theme-mode-row {
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap; /* 窄 dock 下宁可换行也不挤压按钮 */
+  gap: 6px;
   padding: 6px 8px 2px;
 }
 
 .theme-mode-btn {
-  flex: 1;
-  padding: 4px 0;
+  flex: 1 1 auto;
+  min-width: 72px;
+  /* adj484（用户报"图标与文本没对齐、按钮太窄、两侧没留白"）：
+     此前是普通按钮——16px 的图标是 inline-block，底边贴着 12px 文本的**基线** ⇒ 看着偏上；
+     且 `padding: 4px 0` 让图标/文字直接贴边。改成 inline-flex 排"图标 + 文本"：
+     主轴居中 + 交叉轴居中，两侧给足内边距，`line-height: 1` 消掉行高带来的偏移。 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 10px;
+  min-height: 26px;
+  line-height: 1;
+  white-space: nowrap;
   font-size: 12px;
   background: transparent;
   border: 1px solid var(--jp-border);
@@ -1041,7 +1054,17 @@ body {
   color: var(--jp-accent);
   border-color: var(--jp-accent);
 }
-.tool-dock-tab-icon { font-size: 11px; line-height: 1; }
+/* adj486：页签图标位**统一占位并居中**——设计图标（mask 的 span）与兜底字符（⚠）混用时，
+   不这么写会因基线/字形宽度不同让"图标 + 文字"整体左右晃动 */
+.tool-dock-tab-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  font-size: 11px;
+  line-height: 1;
+}
 .tool-dock-close {
   margin-left: auto;
   background: transparent;
@@ -1365,14 +1388,11 @@ body {
 /* 中栏：内容 */
 .tool-dock .pcfg-panel {
   grid-area: 1 / 2 / 2 / 3;
-  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  align-content: flex-start;
-  gap: 2px 22px;
+  /* adj482：中栏本身只负责"占位 + 滚动"，字段对齐交给内层 `.pcfg-fields` 等宽网格。
+   * 此前这里是 `display:flex; flex-wrap:wrap` 的**流式容器**——那会让内层网格收缩成内容宽，
+   * 等宽字段格排不出来（实测：1280px 宽的 dock 里字段区只有 ~250px 宽）。 */
 }
 /* 右栏：操作按钮（宽屏竖排贴右上；窄屏折到下方横向右对齐） */
 .tool-dock .pcfg-foot {
@@ -1413,41 +1433,81 @@ body {
   }
 }
 
-/* ---------------- adj463b：设置字段的「分组一行 + 内容项依次流式排列」 ----------------
- * 上一版按宽度自动分栏（`repeat(auto-fit, minmax(168px,1fr))`）**列宽过小**，而字段的控件容器
- * 自身是 `flex-wrap: wrap` → 控件被挤到标签下方、一项占两三行，很难看。
- * 改为：
- *  · 内容区是 flex 容器，「分组标题」`flex-basis: 100%` **独占一行** ⇒ 天然「一组一行」；
- *  · 每个字段项**整体不可压缩**（`flex: 0 0 auto`）⇒ 要么整项放进当前行，要么整项换下一行；
- *  · 项内「标签 + 控件」`flex-wrap: nowrap` ⇒ **恒在同一行**；
- *  · 项与项 `gap` 均匀，同一行内基线对齐 ⇒ 上下项看起来是整齐的列。
- * `.pcfg-grid2` 在 dock 里退化为 `display: contents`（不再自己分栏，让字段直接参与上面的流式排列）。 */
-.tool-dock .pcfg-panel {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  align-content: flex-start;
-  gap: 2px 22px;
+/* ---------------- adj482：设置字段「按**当页最长标签**对齐」 ----------------
+ * 由来（用户报）：面板是**流式排列**、标签长短不一 ⇒ 每个字段的控件落点参差，整片看着乱。
+ * 做法：给每个字段一个**等宽格子**，格内再分成「固定标签列 + 内容列」——
+ *   · `--pcfg-label-w` = **当页最长标签宽**（JS 实测，见 PageConfigDialog.measureFields）；
+ *   · `--pcfg-field-w` = **一格的基本宽** = 标签列 + 控件区最小宽（`CTL_MIN_W`）；
+ *   · 每行 `--pcfg-span` = 该字段自然宽需要**跨几格** ⇒ 宽字段（"边距"的四个数值框、带长说明的勾选项）
+ *     跨 2 格，既不折行、也不把整页格子撑宽；
+ *   · 面板 = 等宽格网格（`auto-fill`：格子数随 dock 宽度自适应）⇒ 同一格里标签与控件左缘对齐、
+ *     各格等宽 ⇒ **跨行跨格都成列**，整片整齐。
+ * 为什么用实测值而不是纯 CSS：`max-content` 只能对齐"同一个网格内的列"，做不到"跨格等宽"；
+ * 实测只在**页签切换 / 字段增删或文本变化**时重算，且用**离屏克隆探针**读数（不改真实 DOM、不闪）。
+ * 注：此前 adj463b 的"流式排列"（`flex-wrap` + 窄 dock 下控件右对齐到行尾）由本块取代。 */
+.tool-dock .pcfg-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--pcfg-field-w, 200px), 1fr));
+  align-content: start;
+  gap: 2px 18px;
 }
-.tool-dock .pcfg-panel > .pcfg-group-title,
-.tool-dock .pcfg-panel .pcfg-group-title {
-  flex: 0 0 100%;
-  margin: 6px 0 2px;
+.tool-dock .pcfg-fields .pcfg-group-title,
+.tool-dock .pcfg-fields .pcfg-note {
+  /* 分组标题 / 说明文字独占整行。用**后代**选择器而不是 `>`：即便将来在字段区里再插一层包装
+     （或某个页签把标题写进自己的容器），标题也不会被当成一个"字段格"和字段挤在同一行。 */
+  grid-column: 1 / -1;
 }
-.tool-dock .pcfg-grid2 { display: contents; }
-.tool-dock .pcfg-row {
-  flex: 0 0 auto; /* 整项不可压缩：保证标签与控件同行 */
+.tool-dock .pcfg-fields .pcfg-grid2 { display: contents; } /* 淡出分栏包装，字段直接进网格 */
+.tool-dock .pcfg-fields .pcfg-row {
+  display: grid;
+  grid-template-columns: var(--pcfg-label-w, 96px) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
   margin-bottom: 2px;
+  /* 宽字段跨格（格数由 JS 实测写成 --pcfg-span），既保证标签列对齐、又不让它折行 */
+  grid-column: span var(--pcfg-span, 1);
 }
-.tool-dock .pcfg-row-label { flex: 0 0 auto; }
-.tool-dock .pcfg-row-ctl {
-  flex: 0 0 auto;
-  flex-wrap: nowrap; /* 项内强制同一行 */
+.tool-dock .pcfg-fields .pcfg-row-label { min-width: 0; }
+.tool-dock .pcfg-fields .pcfg-row-ctl {
+  flex-wrap: wrap; /* 窄格子里允许折到第二行，不横向溢出 */
+  min-width: 0;
 }
-/* 窄 dock：字段项占满一行（避免横向溢出），标签与控件仍同行 */
+/* 窄 dock：单列（布局模式退化为"标签列 + 内容列"，仍以同一标签基准对齐） */
 @container (max-width: 560px) {
-  .tool-dock .pcfg-row { flex: 1 1 100%; }
-  .tool-dock .pcfg-row-ctl { flex: 1 1 auto; justify-content: flex-end; }
+  .tool-dock .pcfg-fields { grid-template-columns: minmax(0, 1fr); }
+  /* adj483：单列时**取消跨格**——`span 2` 在只有 1 条显式列的网格里会新建**隐式列**，
+     于是标题的 `1 / -1` 只跨显式列、字段被塞进隐式列 ⇒ 标题与字段挤在同一行（用户报）。
+     JS 侧也按容器宽钳了跨格数（见 measureFields），这条是首帧/极端宽度下的兜底。 */
+  .tool-dock .pcfg-fields .pcfg-row { grid-column: auto; }
+}
+/* 测量探针：把字段区**离屏克隆**一份来读自然宽（见 PageConfigDialog.measureFields）。
+ * 只带"基样式 + 不换行/不压缩"，不套 `.pcfg-fields` 的网格规则，因此量到的是真实自然宽；
+ * `position: fixed` + 移出视口 ⇒ 不撑滚动条、不影响真实布局。 */
+.tool-dock .pcfg-measure-probe {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: max-content;
+  display: block;
+  visibility: hidden;
+  pointer-events: none;
+}
+.tool-dock .pcfg-measure-probe .pcfg-row {
+  display: flex;
+  flex-wrap: nowrap;
+  /* 逐行给 `max-content`：探针容器里还有说明文字这类长行，容器自身的 shrink-to-fit 会被它撑大，
+     所以"最宽字段"要按**每行的自然宽**取最大值（见 measureFields），不能读容器宽。 */
+  width: max-content;
+  margin-bottom: 0;
+}
+.tool-dock .pcfg-measure-probe .pcfg-row-label { min-width: 96px; }
+.tool-dock .pcfg-measure-probe .pcfg-row-ctl {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+.tool-dock .pcfg-measure-probe .pcfg-row-ctl > * {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* 窄 dock：页签只留图标（文字隐藏），给内容区让出宽度 */
@@ -1461,6 +1521,11 @@ body {
 .tool-dock .pcfg-panel > .pcfg-group-title,
 .tool-dock .pcfg-panel .pcfg-group-title {
   flex: 0 0 100%;
+  /* adj482：字段区是网格时，标题**必须跨整行**（它是"分组标题"而不是一个字段）。
+     这条规则用**后代**选择器从 `.pcfg-panel` 起覆盖，因此不论标题被包在哪一层
+     （`.pcfg-fields` 直系、还是将来某个页签自己包一层、甚至在 `.pcfg-grid2` 里），
+     都不会被当成一个"字段格"和字段挤在同一行。 */
+  grid-column: 1 / -1;
   margin: 8px 0 4px;
   padding: 2px 0 2px 7px;
   color: var(--jp-accent);
@@ -2546,6 +2611,35 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 2px 18px;
+}
+
+/* adj482：字段行 / 标签 / 控件容器的**基样式**（原先写在 Row 组件的内联 style 里——
+   内联样式会压过 dock 里的覆盖规则，故搬到这里；dock 内的对齐规则见文首 adj482 块） */
+.pcfg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.pcfg-row-label {
+  min-width: 96px;
+  color: var(--jp-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.pcfg-row-ctl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+/* 字段组下的说明文字（临时段间距说明、L1 偏好说明等） */
+.pcfg-note {
+  color: var(--jp-text-muted);
+  font-size: 12px;
+  margin-top: 2px;
 }
 
 /* ============ 通用 ============ */

@@ -108,27 +108,36 @@ bodyW[声部][b] = Σ 声部 b 小节 bodyW0
 
 #### ② `baseW[b]`：小节基准本体宽 = max(各声部 `bodyW[声部][b]`)
 
-#### ③ `nonDurPad` = pads + 独立标记（&zkh/&ykh 括号 + &hx 呼吸记号，adj375）
+#### ③ `nonDurPad`（仅单声部路径在用）
+
+单声部：`nonDurPad = pads + 独立标记（&zkh/&ykh 括号 + &hx 呼吸记号，adj375）`。
+多声部块**不使用它**——标记改成拍级插位（见 ③b），`&hx` 的"占时值"是演奏概念，与排版宽度无关。
 
 #### ③b `beatBodyW[b][k]`：每小节每拍最大本体占宽（跨声部取 max）
 
 ```
+# adj479：拍宽 = 拍首前置占位(块级) + max(各声部 本体宽 + 拍中标记宽)
+leadPad[abs] = max_p voiceLead[p][abs]        # 拍首标记（&zkh/&ykh/&hx 写在拍首）宽度之和
 for each 声部 p:
   voiceBeats[k] = 0 (k = 0..bb−1)
   for each token t in p.segs[b]:
     if 带时值元素:
-      bodyW0 = noteBodyW + accW + (dots?dotBodyW:0) + augCount·augBodyW
+      headW  = noteBodyW + accW + (dots?dotBodyW:0) + slideExtraW(&shy/&xhy 墨迹)
       dur    = tokenDuration(t)
       # ★ adj316：拍区间半开 [startBeat, endBeat)，endBeat 用 ceil（跨拍/半拍正确）
-      #   原 `k<=endBeat`（floor）会让整拍音符宽 2 倍 → 段宽远超本体 → 小节线侧右
       startBeat = floor(beatAcc + 1e−9)
       endBeat   = min(bb, ceil(beatAcc + dur − 1e−9))
       nSpan     = max(1, endBeat − startBeat)
-      perPiece  = bodyW0 / nSpan
-      for k in [startBeat, endBeat):  voiceBeats[k] += perPiece
+      # ★ adj479：**逐拍归位**——本体宽记在真正画出它的那一拍（不再"总宽 ÷ 覆盖拍数"平摊）
+      for i, k in [startBeat, endBeat):
+        w = (i==0 ? headW : (i<=augCount ? augBodyW : 0)) + (i==nSpan−1 ? grTailW : 0)
+        voiceBeats[k] += w
       beatAcc += dur
-    if (bracket): voiceBeats[floor(beatAcc)] += bracketBodyW()
+    if (bracket):
+      拍首(frac≈0) → voiceLead[p][abs] += markBodyW   # 前置占位
+      拍中(frac>0) → voiceBeats[k] += markBodyW        # 并进本体宽
   for k: perBeatMax[k] = max(perBeatMax[k], voiceBeats[k])    # 跨声部取最大
+  beatBodyW[b][k] = perBeatMax[k] + leadPad[barStartBeat[b]+k]
 ```
 
 #### ⑥ 段宽 = `beatBodyW[b][k]`（本体实际宽，不再拉伸段宽）
@@ -164,17 +173,23 @@ for each b in 0..numBars−1:
 x = blockStartX
 for each b:
   for each 声部 p:
+    beatCursor = Map(拍 → 本体右缘)      # ★ adj479 拍内本体游标（相对拍内容起点）
     for each token t in p.segs[b]:
       if (note/rest/rhythm):
         dur = tokenDuration(t); beatAcc = 0; pos = beatAcc; rem = dur
         while rem>0:
           pp = round/floor(pos)
           blockBeat = barStartB + pp
-          perBeat   = perBeats[blockBeat]                   # = beatBodyW[b][pp]
+          perBeat   = bodyPerBeat[blockBeat]                # = perBeats[blockBeat] − leadPad
+          off       = max(beatCursor[blockBeat], (pos−pp)·perBeat)   # ★ adj479
           piece     = min(rem, ..)
-          # ★ adj317 useSpace：段 x 用 mspSegX（不再用 beatStartX 差分）
-          x: x + BAR_PAD + (useSpace ? mspSegX[blockBeat] : (beatStartX差分)) + (pos−pp)·perBeat
+          x: x + BAR_PAD + (useSpace ? mspSegX : beatStartX差分) + leadPad[blockBeat] + off
+          beatCursor[blockBeat] = off + beatBodyOfNote(i)   # 逐拍本体宽（同 ③b）
         placeNoteAt(t, segments, ..., space)
+      if (bracket):                     # ★ adj479 多声部块内独立标记的绘制（此前完全缺失）
+        拍首 → cx = 拍起点 + leadCursor + w/2，leadCursor += w
+        拍中 → right = max(beatCursor, frac·bodyPerBeat)，cx = 内容起点 + right − w/2
+        page.brackets.push({ code, dir, x: cx, yTop: 行顶 + 0.7×字号, width: w })
   x += (useSpace ? mspBarRelW[b] : beatStartX差分) + (b<numBars−1 ? gapSpaces[b] : 0)
 ```
 
