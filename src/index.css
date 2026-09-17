@@ -958,35 +958,534 @@ body {
   border-top: 1px solid var(--jp-border);
 }
 
-/* ============ 编辑区问题提示条（adj394：脚本不符合语法时给出可读告警）============ */
-.problems-bar {
+/* ============ 底部 dock（adj462：告警 / 试听 / 导出 / 设置 共用一个 dock，互斥切换）============
+ * 入口保持原位（告警=状态栏告警文本；试听/导出/设置=顶栏按钮），都是**开关**：
+ * 关 → 开 + 切面板；已开且是该面板 → 收起；已开但不是 → 只切面板。标题栏另设 × 显式关闭。
+ * 高度：内容驱动，上限 min(50vh, 420px)；超出则内容区滚动（保证内容都可见）；顶部抓手可拖拽调高。 */
+.tool-dock {
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: min(50vh, 420px);
   border-top: 1px solid var(--jp-border);
   background: var(--jp-bg-panel);
   font-family: var(--jp-font-sans);
   font-size: 12px;
-  max-height: 40%;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+  overflow: hidden;
+  container-type: inline-size; /* 面板按 dock 自身宽度重排（窄/中/宽） */
 }
 
-/* 严重级别着色：错误红、告警橙（与行号栏 gutter-err/gutter-warn 同一套色） */
-.problems-bar.is-error {
-  border-top-color: var(--jp-danger);
-  box-shadow: inset 3px 0 0 var(--jp-danger);
+/* 顶部抓手：拖拽调整 dock 高度；hover/聚焦显出两条 grip 短横线 */
+.tool-dock-resize {
+  flex: 0 0 5px;
+  width: 100%;
+  cursor: ns-resize;
+  border-bottom: 1px solid var(--jp-border);
+  position: relative;
+  outline: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
-.problems-bar.is-warn {
-  border-top-color: var(--jp-warning);
-  box-shadow: inset 3px 0 0 var(--jp-warning);
+.tool-dock-resize:hover,
+.tool-dock-resize:focus-visible {
+  background: var(--jp-bg-hover, rgba(127, 127, 127, 0.08));
 }
+.tool-dock-resize:hover::before,
+.tool-dock-resize:focus-visible::before,
+.tool-dock-resize:hover::after,
+.tool-dock-resize:focus-visible::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 12px;
+  height: 1px;
+  background: var(--jp-text-muted);
+  transform: translateX(-50%);
+}
+.tool-dock-resize:hover::before,
+.tool-dock-resize:focus-visible::before { top: 1px; }
+.tool-dock-resize:hover::after,
+.tool-dock-resize:focus-visible::after { bottom: 1px; }
+
+/* 标题栏：四个面板 tab（点击切换）+ × 显式关闭 */
+.tool-dock-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--jp-border);
+}
+.tool-dock-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  /* adj466：页签高度取**固定值**（此前由 padding 撑，随字号/主题变而变）——统一 30px，点起来更稳 */
+  height: 30px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--jp-text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+}
+.tool-dock-tab:hover {
+  color: var(--jp-text-primary);
+  background: var(--jp-bg-hover, rgba(127, 127, 127, 0.08));
+}
+/* 当前面板高亮（与顶栏按钮 active 同一套口径） */
+.tool-dock-tab.is-active {
+  color: var(--jp-accent);
+  border-color: var(--jp-accent);
+}
+.tool-dock-tab-icon { font-size: 11px; line-height: 1; }
+.tool-dock-close {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  padding: 3px 8px;
+  cursor: pointer;
+  color: var(--jp-text-muted);
+  font-size: 12px;
+  line-height: 1;
+}
+.tool-dock-close:hover { color: var(--jp-danger); }
+
+/* 内容区：唯一滚动容器（保证"内容都可见"） */
+.tool-dock-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto; /* 单块面板（告警/试听/导出）由这里滚；设置面板见下方覆盖 */
+}
+.tool-dock-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px 12px 10px;
+}
+/* adj465：`[hidden]` 必须胜过各面板自己的 `display`。
+ * 这里用 `.tool-dock .tool-dock-pane[hidden]`（特异性 0,3,0）压过 `.tool-dock-pane.pane-settings`
+ * （0,2,0）——否则设置面板的 `display:flex` 会把 `hidden` 的 `display:none` 顶掉，
+ * 导致设置内容在**所有面板里都显示**、并叠在 dock 上（用户报的现象）。 */
+.tool-dock .tool-dock-pane[hidden] { display: none; }
+
+/* adj477：`Modal` 的 **inline 包裹层**（`ui/Modal.tsx` 在 inline 模式下渲染 `<div class="modal-inline">`）
+ * 必须透明掉。它若保持 `display: block`，就会插在 dock 面板（`.tool-dock-pane`，flex column）与面板内容
+ * 之间，**切断定高链**：`.pcfg-root` 的 `flex: 1 1 auto` 落在 block 父级上失效 → 高度退化为内容高 →
+ * 设置面板三栏拿不到受限高度、**不再滚动**，还会被 `.pane-settings{overflow:hidden}` 裁掉。
+ * （这条规则曾被误删，导致"窄屏设置不滚"；缺它时 dock 内所有面板都会受影响。） */
+.modal-inline { display: contents; }
+.dock-empty {
+  color: var(--jp-text-muted);
+  font-size: 12px;
+  padding: 6px 2px;
+}
+
+/* ---------------- adj462：dock 内容的「流式布局」原语 ----------------
+ * 目标：**dock 越宽 → 一层装下越多 → dock 越矮**。
+ * 弹窗那套「竖向堆叠 + 固定宽度」在底栏里会把高度顶得很高，所以面板一律改用这些原语：
+ *   · .dock-grid   自动换行的等宽网格（auto-fit）——最核心：宽度变化时**列数自动增减**
+ *   · .dock-fields 一行多个「标签 + 控件」组，自动换行（每个组各自不压缩）
+ *   · .dock-actions 动作按钮行，自动换行、每个按钮等宽自适应
+ *   · .dock-bar    一条横向条（进度/时间码等），窄时自动折行
+ * 另用容器查询按 dock 宽度微调单元格下限（越宽单元格越大→越可能一行装完）。 */
+.dock-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--dock-cell, 132px), 1fr));
+  gap: 6px 10px;
+  align-items: center;
+}
+.dock-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+.dock-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.dock-field > .dock-field-label {
+  color: var(--jp-text-secondary);
+  white-space: nowrap;
+}
+.dock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.dock-actions > button {
+  flex: 1 1 var(--dock-btn, 132px);
+  min-width: 0;
+}
+.dock-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+/* adj463：dock 里的**通用排布习惯**——信息/内容靠左（可伸缩、可折行），操作按钮靠右。
+ * 宽屏时整条压成一行：`信息 … 设置 … [右] 操作按钮`；窄屏自动折行且按钮仍贴右。 */
+.dock-split {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+.dock-split-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+.dock-split-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.dock-label {
+  color: var(--jp-text-secondary);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.dock-muted {
+  color: var(--jp-text-muted);
+  font-size: 11px;
+}
+/* dock 宽度分档：越宽 → 单元格越大、越少折行（高度越小）。
+ * 变量设在**消费它的后代**上（容器查询不能给容器自身设变量）。 */
+@container (min-width: 560px) {
+  .dock-grid { --dock-cell: 156px; }
+  .dock-actions > button { --dock-btn: 150px; }
+}
+@container (min-width: 800px) {
+  .dock-grid { --dock-cell: 184px; }
+  .dock-actions > button { --dock-btn: 168px; }
+}
+@container (min-width: 1100px) {
+  .dock-grid { --dock-cell: 210px; }
+  .dock-actions > button { --dock-btn: 186px; }
+}
+@container (max-width: 420px) {
+  /* 很窄时：标签与控件改为上下两行，避免横向挤爆 */
+  .dock-field { flex: 1 1 100%; justify-content: space-between; }
+}
+
+/* dock 内的通用控件（与弹窗同观感，但宽度自适应） */
+.dock-select {
+  background: var(--jp-bg-app);
+  border: 1px solid var(--jp-border);
+  color: var(--jp-text-primary);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  min-width: 0;
+}
+.dock-error {
+  color: var(--jp-danger);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+/* 导出面板（adj462，adj466 起**选项与动作分两行**）：
+   第一行 = 图片清晰度 + 说明；第二行 = 导出动作（auto-fit 等宽网格，占满整宽）。
+   按钮等宽、内容两端对齐（左标签 + 右扩展名），窄时靠 auto-fit 自动换行。 */
+.export-panel { display: flex; flex-direction: column; gap: 8px; }
+.export-options { min-height: 22px; }
+.export-actions > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  padding: 4px 10px;
+}
+.export-btn-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.export-btn-ext {
+  flex: 0 0 auto;
+  font-family: var(--jp-font-mono);
+  color: var(--jp-accent);
+  font-size: 11px;
+}
+
+/* 试听面板（adj462）：原为「设置框竖排 + 播放/停止上下两行」，底栏里高度压不下来；
+   现改为流式——宽屏时 曲目信息一行 + 控制区**一整行**（播放/停止/速度/音色/状态并排），
+   窄屏才靠 flex-wrap 自动折行。 */
+.playback-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.playback-meta { gap: 6px 10px; }
+.playback-title { font-weight: 700; font-size: 13px; }
+.playback-key { margin-left: auto; }
+.playback-controls { gap: 6px 12px; }
+/* adj471/472：试听面板 = **两栏**——右侧按钮栏**固定宽度**，左侧内容栏吃掉剩余宽度
+ * （随 dock 宽度变化、内部各项自行换行）。左右两栏顶部对齐。
+ * `--dock-side-w` 是这条固定宽的单一旋钮；窄屏略收窄，避免挤压左侧内容。 */
+:root { --dock-side-w: 104px; }
+.playback-panel .dock-split {
+  align-items: flex-start;
+  flex-wrap: nowrap; /* 两栏并排；换行交给左栏内部 */
+}
+.playback-panel .dock-split-main { flex: 1 1 auto; min-width: 0; }
+.playback-actions {
+  flex: 0 0 var(--dock-side-w);
+  width: var(--dock-side-w);
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start; /* 靠上固定 */
+  gap: 6px;
+}
+.playback-actions > button { width: 100%; }
+/* 宽屏（宽度足够）：**按钮横向、靠右排列**——右侧不再占固定窄栏，让整条压成一行。
+ * 注意：容器查询**不能给容器自身**设变量（`.tool-dock` 就是容器），所以把变量设在
+ * 真正消费它的后代元素上——否则规则是空转的（真实踩过：`--dock-cell/--dock-btn` 曾这样白写）。 */
+@container (min-width: 720px) {
+  .playback-actions {
+    --dock-side-w: auto; /* 取消固定宽 → flex-basis/width 都回落到内容宽 */
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+  }
+  .playback-actions > button { width: auto; }
+}
+/* 很窄：固定栏再收一点，避免挤压左侧内容 */
+@container (max-width: 480px) {
+  .playback-actions { --dock-side-w: 84px; }
+}
+/* 控制区里的按钮：不参与拉伸（保持贴合内容），窄屏才换到下一行 */
+.playback-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.playback-btn > .tool-icon { flex: 0 0 auto; }
+.playback-hints { gap: 4px 14px; font-size: 11px; }
+.dock-warn { color: var(--jp-warning); }
+.dock-error-inline { color: var(--jp-danger); }
+
+/* adj464：设置面板 = **三栏各自独立滚动**
+ *   宽屏：左（页签轨道）| 中（内容）| 右（操作按钮）——三栏各自 `overflow-y: auto`；
+ *   窄屏：左（页签，只图标）| 右（内容）在上，操作按钮折到**下方**——三块同样各自滚动。
+ * 实现要点：外层 `.tool-dock-body` / `.tool-dock-pane` 在这个面板上**不滚**（否则与栏内滚动打架、
+ * 出现双滚动条），高度沿 flex 链传下来（`min-height: 0` 是关键），三栏各拿 100% 高度自己滚。 */
+.tool-dock-pane.pane-settings {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* adj465：设置面板要**确定高度**，三栏才拿得到受限高度、各自滚动；按钮也才永远在可视区内。
+ * （dock 默认 `height: auto` 让内容撑高 → 三栏永不滚、且超出 max-height 的部分被 overflow:hidden
+ *  裁掉——窄屏时正好把下方那排按钮裁没。） */
+.tool-dock.dock-settings { height: min(50vh, 420px); }
+.tool-dock .pcfg-root {
+  height: auto;
+  max-height: none;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  /* adj476：**宽窄都用 grid**（不再依赖 flex 链）。grid 轨道 `minmax(0,1fr)` 给每一栏
+   * **确定的高度**，所以 `overflow-y: auto` 必然出滚动条。宽屏三列：页签 | 内容 | 按钮；
+   * 窄屏改成两列两行（见下面的 `@container (max-width: 720px)`）。
+   * 此前一直靠 flex 的 `min-height: 0` 逐级传高度，在部分组合下栏拿不到受限高度 →
+   * 不滚、内容被 `overflow: hidden` 裁掉（用户反复报的"滚动条消失"就是这个）。 */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 6px 10px;
+  align-items: stretch;
+}
+/* 这一层只作分组：透明掉，让页签与内容直接成为上面的 grid 项 */
+.tool-dock .pcfg-scroll { display: contents; }
+/* 三栏统一：可滚（行高由 grid 决定，不再叠一层 max-height） */
+.tool-dock .jp-tabs,
+.tool-dock .pcfg-panel,
+.tool-dock .pcfg-foot {
+  max-height: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+/* 左栏：页签轨道 */
+.tool-dock .jp-tabs {
+  grid-area: 1 / 1 / 2 / 2;
+  min-height: 0;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 2px;
+  padding: 0 6px 0 0;
+  border-right: 1px solid var(--jp-border);
+}
+.tool-dock .jp-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  justify-content: flex-start;
+  /* adj466：设置面板左栏的页签同样取**固定高度**（36px）——竖排时"名称之间的高度"更大且一律相等 */
+  flex: 0 0 36px;
+  height: 36px;
+  padding: 0 12px;
+}
+.tool-dock .jp-tab-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1;
+}
+/* 中栏：内容 */
+.tool-dock .pcfg-panel {
+  grid-area: 1 / 2 / 2 / 3;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  align-content: flex-start;
+  gap: 2px 22px;
+}
+/* 右栏：操作按钮（宽屏竖排贴右上；窄屏折到下方横向右对齐） */
+.tool-dock .pcfg-foot {
+  grid-area: 1 / 3 / 2 / 4;
+  flex: 0 0 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 0;
+  border-top: 0;
+}
+.tool-dock .pcfg-foot > button { white-space: nowrap; }
+
+/* 窄屏：**页签左（通高）| 右侧：上=内容、下=按钮横向**。
+ * adj475/476：宽窄统一用 grid（见 `.pcfg-root`），这里只把宽屏的三列一行改成两列两行——
+ * `grid-template-rows: minmax(0,1fr) auto` 让内容行拿到确定高度，两栏的 `overflow-y: auto`
+ * 才会真的出滚动条；页签跨两行（`1/1/3/2`）所以是左侧通高的一列，按钮只占内容那一列的下方。 */
+@container (max-width: 720px) {
+  .tool-dock .pcfg-root {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .tool-dock .jp-tabs { grid-area: 1 / 1 / 3 / 2; } /* 左侧通高（跨内容行与按钮行） */
+  .tool-dock .pcfg-panel { grid-area: 1 / 2 / 2 / 3; }
+  .tool-dock .pcfg-foot {
+    grid-area: 2 / 2 / 3 / 3; /* 内容下方，且只在页签右侧那一列 */
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: 0;
+    padding: 0;
+    border-top: 0;
+    overflow: visible;
+  }
+}
+
+/* ---------------- adj463b：设置字段的「分组一行 + 内容项依次流式排列」 ----------------
+ * 上一版按宽度自动分栏（`repeat(auto-fit, minmax(168px,1fr))`）**列宽过小**，而字段的控件容器
+ * 自身是 `flex-wrap: wrap` → 控件被挤到标签下方、一项占两三行，很难看。
+ * 改为：
+ *  · 内容区是 flex 容器，「分组标题」`flex-basis: 100%` **独占一行** ⇒ 天然「一组一行」；
+ *  · 每个字段项**整体不可压缩**（`flex: 0 0 auto`）⇒ 要么整项放进当前行，要么整项换下一行；
+ *  · 项内「标签 + 控件」`flex-wrap: nowrap` ⇒ **恒在同一行**；
+ *  · 项与项 `gap` 均匀，同一行内基线对齐 ⇒ 上下项看起来是整齐的列。
+ * `.pcfg-grid2` 在 dock 里退化为 `display: contents`（不再自己分栏，让字段直接参与上面的流式排列）。 */
+.tool-dock .pcfg-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  align-content: flex-start;
+  gap: 2px 22px;
+}
+.tool-dock .pcfg-panel > .pcfg-group-title,
+.tool-dock .pcfg-panel .pcfg-group-title {
+  flex: 0 0 100%;
+  margin: 6px 0 2px;
+}
+.tool-dock .pcfg-grid2 { display: contents; }
+.tool-dock .pcfg-row {
+  flex: 0 0 auto; /* 整项不可压缩：保证标签与控件同行 */
+  margin-bottom: 2px;
+}
+.tool-dock .pcfg-row-label { flex: 0 0 auto; }
+.tool-dock .pcfg-row-ctl {
+  flex: 0 0 auto;
+  flex-wrap: nowrap; /* 项内强制同一行 */
+}
+/* 窄 dock：字段项占满一行（避免横向溢出），标签与控件仍同行 */
+@container (max-width: 560px) {
+  .tool-dock .pcfg-row { flex: 1 1 100%; }
+  .tool-dock .pcfg-row-ctl { flex: 1 1 auto; justify-content: flex-end; }
+}
+
+/* 窄 dock：页签只留图标（文字隐藏），给内容区让出宽度 */
+@container (max-width: 560px) {
+  .tool-dock .jp-tab-label { display: none; }
+  .tool-dock .jp-tab { justify-content: center; }
+  .tool-dock .jp-tabs { padding-right: 4px; }
+}
+
+/* adj463c：组内标题**独占一行**并用更明显的样式与内容区分（原为虚线细边，与字段行区分不够） */
+.tool-dock .pcfg-panel > .pcfg-group-title,
+.tool-dock .pcfg-panel .pcfg-group-title {
+  flex: 0 0 100%;
+  margin: 8px 0 4px;
+  padding: 2px 0 2px 7px;
+  color: var(--jp-accent);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--jp-border);
+  box-shadow: inset 2px 0 0 var(--jp-accent); /* 左侧强调竖条，一眼区分"这是分组标题" */
+}
+.tool-dock .pcfg-panel .pcfg-group-title:first-child { margin-top: 0; }
+
+/* adj463c：主题页「浅深模式」等按钮文本**不折行**（窄列下此前会把"跟随系统"拆成两行） */
+.tool-dock .theme-mode-btn { flex: 0 0 auto; white-space: nowrap; }
+
+/* ============ 告警面板（adj394 问题提示条 → adj462 移入 dock）============ */
+.problem-panel { display: flex; flex-direction: column; min-height: 0; }
+.problem-panel.is-error { box-shadow: inset 3px 0 0 var(--jp-danger); }
+.problem-panel.is-warn { box-shadow: inset 3px 0 0 var(--jp-warning); }
 
 .problems-head {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 4px 12px;
+  padding: 2px 0 6px;
   color: var(--jp-text-primary);
   font-size: 12px;
 }
@@ -1034,13 +1533,13 @@ body {
   font-weight: 700;
 }
 
-.problems-bar.is-error .problems-icon,
-.problems-bar.is-error .problems-title {
+.problem-panel.is-error .problems-icon,
+.problem-panel.is-error .problems-title {
   color: var(--jp-danger);
 }
 
-.problems-bar.is-warn .problems-icon,
-.problems-bar.is-warn .problems-title {
+.problem-panel.is-warn .problems-icon,
+.problem-panel.is-warn .problems-title {
   color: var(--jp-warning);
 }
 
@@ -1057,17 +1556,45 @@ body {
 .problems-list {
   list-style: none;
   margin: 0;
-  padding: 0 0 4px;
-  overflow-y: auto;
-  min-height: 0;
+  padding: 0;
+}
+
+/* adj462：每条 = [展开按钮] + [问题行]；正确写法在下一行按需展开（默认收起）。
+   dock 的内容区是唯一滚动容器，列表自身不再滚动/不再占弹性高度。 */
+.problem-line {
+  display: flex;
+  align-items: baseline;
+}
+
+.problem-expand {
+  flex: 0 0 16px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--jp-text-muted);
+  font-size: 10px;
+  line-height: inherit;
+  text-align: center;
+}
+
+.problem-expand:hover {
+  color: var(--jp-text-primary);
+}
+.problem-expand.is-open {
+  color: var(--jp-text-secondary);
+}
+.problem-expand.is-placeholder {
+  cursor: default;
 }
 
 .problem-row {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  width: 100%;
-  padding: 2px 12px 2px 24px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 12px 2px 0;
   background: transparent;
   border: 0;
   cursor: pointer;
@@ -1106,9 +1633,10 @@ body {
   white-space: nowrap;
 }
 
-/* adj394：每条问题下方给出「正确写法」（引擎 hint，含最小示例）——可换行、不截断 */
+/* adj394：每条问题下方给出「正确写法」（引擎 hint，含最小示例）——可换行、不截断
+   adj462：默认收起，点行首 ▶ 才显示；缩进对齐到问题文字（让过 16px 展开列） */
 .problem-hint {
-  padding: 1px 12px 4px 24px;
+  padding: 1px 12px 4px 28px;
   color: var(--jp-text-muted);
   font-size: 11px;
   line-height: 1.5;
@@ -1120,13 +1648,62 @@ body {
   color: var(--jp-text-secondary);
 }
 
-/* 状态栏语法状态（adj394：小圆点 + 文字，明细见上方问题条） */
+/* 状态栏语法状态（adj394：小圆点 + 文字；adj462：同时是底部告警面板的开关） */
 .footer-problems {
-  cursor: default;
   max-width: 40%;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+.footer-problems:hover {
+  color: var(--jp-text-primary);
+}
+/* 该面板正在 dock 中显示时高亮 */
+.footer-problems.is-active {
+  color: var(--jp-accent);
+}
+
+/* adj462：导出进行中的动态指示（状态栏右侧；无任务时不渲染） */
+.footer-export {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--jp-accent);
+  font-family: inherit;
+  font-size: inherit;
+  max-width: 40%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.footer-export:hover {
+  text-decoration: underline;
+}
+.footer-export-spinner {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--jp-accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: jp-spin 0.8s linear infinite;
+}
+@keyframes jp-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .footer-export-spinner { animation-duration: 2.4s; }
 }
 
 /* ============ 底部栏（adj281：合并原 editor-head + StatusBar）============ */

@@ -2,13 +2,13 @@
  * App.tsx — iJipu（爱记谱）应用外壳
  * 布局（adj281）：
  *   TopBar（合并原菜单栏 + 工具栏）/ 主区域（编码·拆分·预览）/
- *   ProblemsBar（adj394：语法问题提示条，仅在有问题时出现）/
+ *   ToolDock（adj462：底部 dock，告警/试听/导出/设置互斥切换）/
  *   EditorFootBar（合并原脚本编辑器顶栏 + 状态栏）+ 模态框
  */
 import { Suspense, lazy, useEffect, useRef } from 'react'
 import { TopBar } from './ui/TopBar'
 import { EditorFootBar } from './ui/EditorFootBar'
-import { ProblemsBar } from './ui/ProblemsBar'
+import { ToolDock } from './ui/ToolDock'
 import { Toast } from './ui/Toast'
 import { UpdatePrompt } from './ui/UpdatePrompt'
 import { EditorPane } from './editor/EditorPane'
@@ -18,10 +18,8 @@ import { useUiStore } from './store/uiStore'
 // adj350：对话框懒加载（React.lazy）——首屏不加载它们，显著减小主包、加快首屏显示
 const AboutDialog = lazy(() => import('./dialogs/AboutDialog').then((m) => ({ default: m.AboutDialog })))
 const SamplesDialog = lazy(() => import('./dialogs/SamplesDialog').then((m) => ({ default: m.SamplesDialog })))
-const PageConfigDialog = lazy(() => import('./dialogs/PageConfigDialog').then((m) => ({ default: m.PageConfigDialog })))
-const PlaybackDialog = lazy(() => import('./dialogs/PlaybackDialog').then((m) => ({ default: m.PlaybackDialog })))
-// adj384：音色库不再是独立对话框（移入「设置 → 音色库」标签）
-const ExportDialog = lazy(() => import('./dialogs/ExportDialog').then((m) => ({ default: m.ExportDialog })))
+// adj462：试听/导出/设置的对话框内容已移到底部 dock（ToolDock 里的 registry 懒加载它们），
+// 不再从 App 作为模态渲染
 const ShortcutsDialog = lazy(() => import('./dialogs/ShortcutsDialog').then((m) => ({ default: m.ShortcutsDialog })))
 const DocDialog = lazy(() => import('./dialogs/DocDialog').then((m) => ({ default: m.DocDialog })))
 const DonateDialog = lazy(() => import('./dialogs/DonateDialog').then((m) => ({ default: m.DonateDialog })))
@@ -197,8 +195,8 @@ function App() {
         )}
         {(viewType === 'splitH' || viewType === 'splitHE') && renderSplitH()}
       </div>
-      {/* adj394：脚本不符合语法时，编辑区底部给出可读的告警提示条（无问题时整条不渲染） */}
-      <ProblemsBar />
+      {/* adj462：底部 dock——告警/试听/导出/设置 共用一个 dock，同一时间只显示一块（入口为开关） */}
+      <ToolDock />
       <EditorFootBar />
       <Toast />
       {/* adj379：检测到 SW 新版本时的「点击刷新」提示 */}
@@ -206,9 +204,6 @@ function App() {
 
       {modal === 'about' && <Suspense fallback={null}><AboutDialog /></Suspense>}
       {modal === 'samples' && <Suspense fallback={null}><SamplesDialog /></Suspense>}
-      {modal === 'pageConfig' && <Suspense fallback={null}><PageConfigDialog /></Suspense>}
-      {modal === 'playback' && <Suspense fallback={null}><PlaybackDialog /></Suspense>}
-      {modal === 'export' && <Suspense fallback={null}><ExportDialog /></Suspense>}
       {modal === 'shortcuts' && <Suspense fallback={null}><ShortcutsDialog /></Suspense>}
       {modal === 'manual' && <Suspense fallback={null}><DocDialog kind="manual" /></Suspense>}
       {modal === 'syntax' && <Suspense fallback={null}><DocDialog kind="syntax" /></Suspense>}

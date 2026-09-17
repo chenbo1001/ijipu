@@ -22,6 +22,13 @@ export type ModalKind =
   /** adj406：粘贴源码导入（不依赖系统文件选择器的兜底入口） */
   | 'pasteImport'
 
+/**
+ * adj462：底部 dock 的面板（互斥，同一时间只显示一块）。
+ * 入口：告警=状态栏告警文本；试听/导出/设置=顶栏对应按钮。均为「开关」：关→开+切到该面板；
+ * 已开且是该面板→收起 dock；已开但不是该面板→只切面板。
+ */
+export type DockPanelKey = 'problems' | 'tryout' | 'export' | 'settings'
+
 /** 轻量浮动提示（toast）：kind 决定配色；nonce 用于同文案重复触发时重置隐藏计时 */
 export type NoticeKind = 'ok' | 'warn' | 'error'
 export interface Notice {
@@ -173,6 +180,23 @@ interface UiState {
   notice: Notice | null
   /** adj379：检测到 SW 新版本（页面仍在跑旧 bundle）——右下角提示「点击刷新」 */
   updateReady: boolean
+  // ---- adj462：底部 dock（告警 / 试听 / 导出 / 设置 共用一个 dock，互斥切换） ----
+  /** dock 是否展开（false = 整条隐藏，由入口按钮或标题栏 × 关闭） */
+  dockOpen: boolean
+  /** 当前显示哪一块面板 */
+  dockPanel: DockPanelKey
+  /**
+   * 入口按钮统一语义（开关）：关 → 开 + 切到 panel；已开且是 panel → 收起 dock；
+   * 已开但不是 panel → 只切面板（保持展开）。
+   */
+  toggleDock: (panel: DockPanelKey) => void
+  /** dock 内部 tab 切换（保持展开）；dock 已关时同时展开 */
+  setDockPanel: (panel: DockPanelKey) => void
+  /** dock 标题栏 × 关闭：只关，不切面板（下次任意入口 toggle 会重新开） */
+  closeDock: () => void
+  /** adj462：导出任务指示（状态栏动态提示用；null = 无任务）。dock 切走/关闭时仍在，导出照常进行。 */
+  exportJob: string | null
+  setExportJob: (label: string | null) => void
   openModal: (m: ModalKind) => void
   closeModal: () => void
   setPlaybackStart: (id: string | null) => void
@@ -393,4 +417,18 @@ export const useUiStore = create<UiState>()((set) => ({
   // adj379：SW 新版本提示状态（部署新版后页面仍跑旧 bundle 时置 true）
   updateReady: false,
   setUpdateReady: (b) => set({ updateReady: b }),
+  // adj462：底部 dock 状态机 + 导出任务指示
+  dockOpen: false,
+  dockPanel: 'problems',
+  exportJob: null,
+  toggleDock: (panel) =>
+    set((s) => {
+      // 关 → 开 + 切到该面板；已开且正是该面板 → 收起；已开但不是该面板 → 只切面板
+      if (!s.dockOpen) return { dockOpen: true, dockPanel: panel }
+      if (s.dockPanel === panel) return { dockOpen: false }
+      return { dockPanel: panel }
+    }),
+  setDockPanel: (panel) => set({ dockOpen: true, dockPanel: panel }),
+  closeDock: () => set({ dockOpen: false }),
+  setExportJob: (label) => set({ exportJob: label }),
 }))

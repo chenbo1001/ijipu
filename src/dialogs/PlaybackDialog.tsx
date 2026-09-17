@@ -29,7 +29,7 @@ import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, gmVoiceRef, cou
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
 
-export function PlaybackDialog() {
+export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   const parseResult = useDocStore((s) => s.parseResult)
   const pageConfig = useDocStore((s) => s.pageConfig)
   const setActiveNoteId = useDocStore((s) => s.setActiveNoteId)
@@ -454,42 +454,31 @@ export function PlaybackDialog() {
   return (
     // adj87：试听时保持看谱——背景不遮罩（maskDim=0）、点击遮罩不关闭（仅 ✕ / Esc）
     // adj158/326：宽屏按编辑区方位停靠到左下/右下角（打开即停靠）；窄屏保持原样；用户可拖动自定义位置
-    <Modal title="试听播放" maskDim={0} closeOnMaskClick={false} dock={dockPos} compact>
-      <div style={{ fontSize: 12, lineHeight: 1.6 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 700, fontSize: 13 }}>{header.titles[0] ?? '未命名'}</span>
-          {header.authors.length > 0 && (
-            <span style={{ color: 'var(--jp-text-secondary)' }}>{header.authors.join('；')}</span>
-          )}
-          <span style={{ color: 'var(--jp-text-muted)', marginLeft: 'auto' }}>
-            {header.key ? `${header.key}调` : ''}
-            {header.meter ? ` ${header.meter}` : ''}
-          </span>
-        </div>
+    <Modal title="试听播放" maskDim={0} closeOnMaskClick={false} dock={dockPos} compact inline={inline}>
+      {/* adj462：**流式布局**（原为「设置框竖排 + 播放/停止上下两行」的弹窗布局，宽度变化不重排、
+          在底栏里高度压不下来）。现在：
+            · 曲目信息一行；
+            · 控制区（播放 / 停止 / 速度 / 音色 / 状态）走 `.dock-fields`（flex-wrap）——
+              **宽屏就是整整一行**，窄屏才自动折行；
+            · 提示/警告/错误/总时长只有存在时才占一行，同样随宽度折行。
+          逻辑（状态机、播放/暂停/续播、音源加载、提示文案）一行未改。 */}
+      <div className="playback-panel">
+        {/* adj463：一排 = 左「曲目信息 + 设置（速度/音色）」、右「播放/停止」。
+            宽屏整条压成**一行**；窄屏自动折行，按钮仍贴右。 */}
+        <div className="dock-split">
+          <div className="dock-split-main playback-meta">
+            <span className="playback-title">{header.titles[0] ?? '未命名'}</span>
+            {header.authors.length > 0 && <span className="dock-muted">{header.authors.join('；')}</span>}
+            {(header.key || header.meter) && (
+              <span className="dock-muted playback-key">
+                {header.key ? `${header.key}调` : ''}
+                {header.meter ? ` ${header.meter}` : ''}
+              </span>
+            )}
 
-        {/* 主体：左「设置框(速度/音色/说明)」 + 右「播放/停止(上下排列)」 */}
-        <div style={{ marginTop: 8, display: 'flex', alignItems: 'stretch', gap: 8 }}>
-          {/* 左：设置框 */}
-          <div
-            style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              padding: '8px 10px',
-              border: '1px solid var(--jp-border)',
-              borderRadius: 8,
-            }}
-          >
-            {/* 速度 */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: 'var(--jp-text-secondary)', flexShrink: 0 }}>速度</span>
-              <select
-                value={bpm}
-                onChange={(e) => setBpm(Number(e.target.value))}
-                disabled={playing}
-                style={{ background: 'var(--jp-bg-app)', border: '1px solid var(--jp-border)', color: 'var(--jp-text-primary)', borderRadius: 6, padding: '2px 6px', fontSize: 12, flex: 1, minWidth: 0 }}
-              >
+            <label className="dock-field">
+              <span className="dock-field-label">速度</span>
+              <select className="dock-select" value={bpm} onChange={(e) => setBpm(Number(e.target.value))} disabled={playing}>
                 {!BPM_OPTIONS.includes(bpm) && <option value={bpm}>{bpm} 拍/分（按乐谱）</option>}
                 {BPM_OPTIONS.map((v) => (
                   <option key={v} value={v}>
@@ -497,74 +486,39 @@ export function PlaybackDialog() {
                   </option>
                 ))}
               </select>
-            </div>
+            </label>
+
             {/* 音色：固定 SpessaSynth 高保真——只列用户启用的收藏音色（adj332/344） */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: 'var(--jp-text-muted)', flexShrink: 0 }}>{playbackCopy.synthLabel}</span>
+            <label className="dock-field">
+              <span className="dock-field-label">{playbackCopy.synthLabel}</span>
               <select
+                className="dock-select"
                 value={playbackHqVoice ?? ''}
                 onChange={(e) => setPlaybackHqVoice(e.target.value === '' ? null : Number(e.target.value))}
                 disabled={playing}
-                style={{ background: 'var(--jp-bg-app)', border: '1px solid var(--jp-border)', color: 'var(--jp-text-primary)', borderRadius: 6, padding: '2px 6px', fontSize: 12, flex: 1, minWidth: 0 }}
               >
-                {/* adj366：默认项 = 自动（跟随谱面声部/乐器）——也是未选择时的默认值 */}
+                {/* adj366：默认项 = 自动（跟随谱面声部/乐器） */}
                 <option value="">{playbackCopy.voiceAuto}</option>
                 {GM_VOICE_OPTIONS.filter((v) => playbackHqEnabled.includes(v.program)).map((v) => (
                   <option key={v.program} value={v.program}>{v.label}</option>
                 ))}
               </select>
-              <span style={{ color: samplerState === 'failed' ? 'var(--jp-danger)' : 'var(--jp-text-muted)', flexShrink: 0, fontSize: 11 }}>
-                {samplerState === 'loading' ? playbackCopy.loading : samplerState === 'failed' ? playbackCopy.failedFallback : ''}
-              </span>
-            </div>
-            {playbackHqVoice !== null && (
-              // adj448：选定具体音色时说明它会覆盖谱面 `Y:`（用户曾据此误判「多声部 Y: 不生效」）
-              // adj455：语义改为**全篇统一音色**；若谱面里确有 `@乐器名@` 切换，再补一句"已被覆盖"
-              //   （否则用户会以为"写了 @ 却不生效"= bug，见 E-2026-174）
-              <div style={{ color: 'var(--jp-text-muted)', fontSize: 11, lineHeight: 1.4 }}>
-                {playbackCopy.voiceOverrideHint}
-                {voiceSwitchCount > 0 && (
-                  <span style={{ color: 'var(--jp-warning)' }}> {playbackCopy.voiceOverrideAtHint(voiceSwitchCount)}</span>
-                )}
-              </div>
-            )}
-            {playbackHqEnabled.length === 0 && (
-              <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>尚未启用音色——请到「设置 → 音色库」勾选要试听的音色</div>
-            )}
-            {/* adj347/348：首次自动下载音源——后台进行，仅文字提示，不阻塞其它操作 */}
-            {downloading && (
-              <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>
-                ⏳ 正在后台下载音色库（约30MB，仅首次）…下载期间可正常操作。
-              </div>
-            )}
-            {/* adj416：桌面端随安装包内置音源（安装目录 generaluser_gs.sf2）→ 直接使用，不提示下载 */}
-            {builtinBank && !downloading && (
-              <div style={{ color: 'var(--jp-text-muted)', fontSize: 11 }}>{playbackCopy.builtinBankHint}</div>
-            )}
+            </label>
 
-            <div style={{ color: 'var(--jp-text-muted)', fontSize: 11, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-              <span>反复/跳房子自动展开 · 音色「自动」时按谱面声部/乐器路由 · 播放中音符高亮</span>
-              {totalMs > 0 && !playing && <span>总时长 {(totalMs / 1000).toFixed(1)}s</span>}
-            </div>
-            {/* adj293：播放异常提示（不再静默失败） */}
-            {playError && (
-              <div style={{ color: 'var(--jp-danger)', fontSize: 11, marginTop: 2 }}>✗ 播放失败：{playError}</div>
-            )}
+            {samplerState === 'loading' && <span className="dock-muted">{playbackCopy.loading}</span>}
+            {samplerState === 'failed' && <span className="dock-warn">{playbackCopy.failedFallback}</span>}
           </div>
 
-          {/* 右：播放 / 暂停 / 停止（上下排列，垂直居中） */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, justifyContent: 'center' }}>
-            {/* adj170：播放按钮与停止按钮风格一致（去掉 primary 强调样式）
-                adj408：按钮图标改用 public/icons/*.png（播放/暂停/停止），与顶栏同一套上色（mask + currentColor）
-                adj409：播放键改**开关**——播放中显示「暂停」（暂停.png），按一下暂停；暂停后显示「继续」（播放.png）
-                       再按恢复；点击后焦点留在本按钮，空格即可暂停/继续 */}
+          {/* 右：操作按钮（adj471：**竖排、靠上固定**，与设置面板右侧按钮列同一习惯；
+              左侧曲目信息与设置项流式排列，两者顶部对齐） */}
+          <div className="dock-split-actions playback-actions">
+            {/* adj170：播放/停止风格一致；adj408：图标用 public/icons/*.png（mask + currentColor）
+                adj409：播放键是**开关**——播放中显示「暂停」，暂停后显示「继续」；焦点留在本按钮，
+                       空格即可暂停/继续；准备期用 aria-busy（不用 disabled，避免丢焦点） */}
             <button
               ref={playBtnRef}
-              className="btn"
+              className="btn playback-btn"
               onClick={onPlayToggle}
-              /* adj409：准备期**不用 `disabled`**——被禁用的按钮会立刻失去焦点，
-                 而"点播放后焦点留在本按钮、空格即可暂停/继续"正是本需求；
-                 改为 `aria-busy` + 降透明度提示忙碌，连点由 onPlayToggle 里的 starting 守卫拦掉 */
               aria-busy={starting}
               aria-label={playing && !paused ? '暂停' : playing && paused ? '继续播放' : '播放'}
               title={
@@ -576,33 +530,42 @@ export function PlaybackDialog() {
                       ? '继续播放（或按空格）'
                       : '开始试听（或按空格）'
               }
-              style={{
-                padding: '4px 14px',
-                fontSize: 12,
-                whiteSpace: 'nowrap',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 5,
-                opacity: starting ? 0.7 : 1,
-                cursor: starting ? 'default' : 'pointer',
-              }}
+              style={{ opacity: starting ? 0.7 : 1, cursor: starting ? 'default' : 'pointer' }}
             >
               <ToolIcon name={playing && !paused ? 'pause' : 'play'} size={14} />
               {starting ? '准备中…' : playing && !paused ? '暂停' : playing && paused ? '继续' : '播放'}
             </button>
-            <button
-              className="btn"
-              onClick={stop}
-              disabled={!playing}
-              title="停止并回到开头"
-              style={{ padding: '4px 14px', fontSize: 12, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}
-            >
+            <button className="btn playback-btn" onClick={stop} disabled={!playing} title="停止并回到开头">
               <ToolIcon name="stop" size={14} />
               停止
             </button>
           </div>
         </div>
+
+        {/* 提示区：只在确有内容时占行 */}
+        {(playbackHqVoice !== null || playbackHqEnabled.length === 0 || downloading || builtinBank || playError || totalMs > 0) && (
+          <div className="dock-bar playback-hints">
+            {playbackHqVoice !== null && (
+              // adj448/adj455：选定具体音色 = **全篇统一音色**；谱面确有 `@` 时再补一句"已被覆盖"
+              <span className="dock-muted">
+                {playbackCopy.voiceOverrideHint}
+                {voiceSwitchCount > 0 && (
+                  <span className="dock-warn"> {playbackCopy.voiceOverrideAtHint(voiceSwitchCount)}</span>
+                )}
+              </span>
+            )}
+            {playbackHqEnabled.length === 0 && (
+              <span className="dock-warn">尚未启用音色——请到「设置 → 音色库」勾选要试听的音色</span>
+            )}
+            {/* adj347/348：首次自动下载音源（后台进行，仅文字提示） */}
+            {downloading && <span className="dock-warn">⏳ 正在后台下载音色库（约30MB，仅首次）…</span>}
+            {/* adj416：桌面端随安装包内置音源（安装目录 generaluser_gs.sf2）→ 不提示下载 */}
+            {builtinBank && !downloading && <span className="dock-muted">{playbackCopy.builtinBankHint}</span>}
+            {/* adj293：播放异常提示（不再静默失败） */}
+            {playError && <span className="dock-error-inline">✗ 播放失败：{playError}</span>}
+            {totalMs > 0 && !playing && <span className="dock-muted">总时长 {(totalMs / 1000).toFixed(1)}s</span>}
+          </div>
+        )}
       </div>
     </Modal>
   )

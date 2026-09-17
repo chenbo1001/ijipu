@@ -114,6 +114,10 @@ export function TopBar() {
   // 两个功能仍由编辑器里的 Ctrl+Z / Ctrl+Y 触发（EditorPane 直接调 store），行为未变。
   // ---- UI store ----
   const openModal = useUiStore((s) => s.openModal)
+  // adj462：底部 dock（试听/导出/设置 = dock 入口开关；dockOpen/dockPanel 用于按钮高亮）
+  const toggleDock = useUiStore((s) => s.toggleDock)
+  const dockOpen = useUiStore((s) => s.dockOpen)
+  const dockPanel = useUiStore((s) => s.dockPanel)
   const showGuides = useUiStore((s) => s.showGuides)
   const setShowGuides = useUiStore((s) => s.setShowGuides)
   const previewZoom = useUiStore((s) => s.previewZoom)
@@ -162,11 +166,14 @@ export function TopBar() {
     // —— 功能组（原顶栏功能按钮组） ——
     { key: 'guides', label: '排版', group: 'topbar' as const, kind: 'btn' as const, active: showGuides, onPick: () => setShowGuides(!showGuides) },
     // adj384：音色库按钮已移除（移入「设置 → 音色库」标签）
-    { key: 'playback', label: '试听', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('playback') },
+    // adj462：试听/导出/设置三个按钮改为**底部 dock 的入口（开关）**——不再打开对话框：
+    //   dock 关 → 展开并切到该面板；已开且正是该面板 → 收起 dock；已开但不是该面板 → 只切面板。
+    //   面板本体的状态（播放进度/导出选项/设置页签）由 dock 保持挂载而保留。
+    { key: 'playback', label: '试听', group: 'topbar' as const, kind: 'btn' as const, active: dockOpen && dockPanel === 'tryout', onPick: () => toggleDock('tryout') },
     // adj415：功能组内「导出」与「设置」位置对调（导出在前、设置在后）。
     // 本数组顺序即顶栏显示顺序，同时决定「更多」下拉里的排列与折叠测量的顺序——改这一处即可。
-    { key: 'export', label: '导出', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('export') },
-    { key: 'pageConfig', label: '设置', group: 'topbar' as const, kind: 'btn' as const, onPick: () => openModal('pageConfig') },
+    { key: 'export', label: '导出', group: 'topbar' as const, kind: 'btn' as const, active: dockOpen && dockPanel === 'export', onPick: () => toggleDock('export') },
+    { key: 'pageConfig', label: '设置', group: 'topbar' as const, kind: 'btn' as const, active: dockOpen && dockPanel === 'settings', onPick: () => toggleDock('settings') },
     { key: 'zoom', label: '缩放', group: 'topbar' as const, kind: 'zoom' as const, show: showZoom },
     // —— 设置组（从状态栏移来） ——
     { key: 'autoWrap', label: '折行', group: 'footer' as const, kind: 'btn' as const, active: autoWrap, onPick: () => setAutoWrap(!autoWrap) },
@@ -730,14 +737,15 @@ export function TopBar() {
     { label: '保存(&S)', kbd: 'Ctrl+S', hotkey: 's', onPick: runSave },
     { label: '另存为(&A)…', hotkey: 'a', onPick: runSaveAs },
     // adj424：从原「播放」分组挪到「文件」分组末尾（按用户要求的「试听-导出-设置」顺序）
-    { label: '试听播放(&P)', kbd: 'Ctrl+Q', hotkey: 'p', onPick: () => openModal('playback') },
+    // adj462：菜单项与顶栏按钮同源——都切到底部 dock 的对应面板（不再弹对话框）
+    { label: '试听播放(&P)', kbd: 'Ctrl+Q', hotkey: 'p', onPick: () => toggleDock('tryout') },
     // adj415/424：「导出」与「设置」原本在「文件」末位相连，adj424 拆开——导出留在文件组、设置单成一组
-    { label: '导出(&X)…', hotkey: 'x', onPick: () => openModal('export') },
+    { label: '导出(&X)…', hotkey: 'x', onPick: () => toggleDock('export') },
   ]
   // adj424：新建「设置」分组（仅一项）——与文件组用分隔线隔开，与顶栏按钮「设置」一一对应
   const settingsEntries: (MenuEntry | 'sep')[] = [
     // adj422：菜单项由「页面设置」改为「设置」（与对话框标题、顶栏按钮一致）
-    { label: '设置(&G)…', hotkey: 'g', onPick: () => openModal('pageConfig') },
+    { label: '设置(&G)…', hotkey: 'g', onPick: () => toggleDock('settings') },
   ]
   // adj422：原「编辑」子菜单（撤销/重做）已从菜单移除——用户要求菜单精简；
   // **功能保留**：撤销/重做仍走 Ctrl+Z / Ctrl+Y（见下方全局快捷键），store 与历史栈未改。

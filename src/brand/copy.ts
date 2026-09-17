@@ -146,6 +146,49 @@ export const problemCopy = {
   correctPrefix: '正确写法：',
   /** 打开内置「语法速查」对话框 */
   syntaxHelp: '语法速查',
+  /** adj462：每条问题行首的「正确写法」展开/收起（默认收起，按需展开） */
+  expandHint: '展开正确写法',
+  collapseHint: '收起正确写法',
+} as const
+
+/**
+ * adj462：底部 dock 文案（告警 / 试听 / 导出 / 设置 共用一个 dock，互斥切换）
+ */
+export const dockCopy = {
+  /** 四个面板标签 */
+  tabProblems: '告警',
+  tabTryout: '试听',
+  tabExport: '导出',
+  tabSettings: '设置',
+  /** 标题栏 × 按钮 */
+  closeTitle: '关闭底栏',
+  /** 顶部抓手（拖拽调整 dock 高度） */
+  resizeTitle: '拖动调整底栏高度',
+  /** 无告警时告警面板的占位文字 */
+  noProblems: '语法检查通过，没有问题。',
+  /** 导出进行中（状态栏动态指示），clickHint 提示可点击查看 */
+  exportRunning: (label: string): string => `导出中：${label}`,
+  exportRunningHint: '点击查看导出面板',
+} as const
+
+/**
+ * adj462：导出面板（底栏 dock 内，流式布局）文案——从 ExportDialog 的字面量收敛到此处
+ */
+export const exportCopy = {
+  svgLabel: 'SVG 矢量图',
+  pngLabel: 'PNG 高清图片',
+  jpgLabel: 'JPG 图片（白底）',
+  pdfLabel: 'PDF 文档（A4）',
+  midiLabel: 'MIDI 音频（分轨）',
+  wavLabel: 'WAV 音频（高保真）',
+  mp3Label: 'MP3 音频（体积小）',
+  jpsLabel: 'iJipu 源文件',
+  scaleLabel: '图片清晰度',
+  scaleHint: '适用于 PNG / JPG / PDF',
+  busy: '导出中…',
+  /** 有语法错误时图片/PDF 导出的拦截提示 */
+  blockedByError: '存在语法错误，无法导出。请先修正脚本。',
+  errorHint: '当前脚本存在语法错误，图片/PDF 导出需先修正。',
 } as const
 
 /** adj369：保存阶段中文名（保存慢时的提示与控制台明细用） */

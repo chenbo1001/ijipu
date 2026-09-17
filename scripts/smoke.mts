@@ -217,6 +217,26 @@ check('adj293 J:  欢快 热烈（值内空格保留）→ J: 欢快 热烈', fo
 check('adj293 描述头按 V/B/Z/D/P/J/Y/S 才规范化（Q/C 行由 Q 行逻辑处理）', formatLine('C: 一 二') === 'C: 一 二', formatLine('C: 一 二'))
 check('adj293 formatJps 描述头与内容之间值规范化', formatJps('Y:  钢琴\nQ:  1  2|\n').split('\n').slice(0, 2).join('|') === 'Y: 钢琴|Q: 1 2 |', formatJps('Y:  钢琴\nQ:  1  2|\n').split('\n').slice(0, 2).join('|'))
 
+// adj460：+/- 变号断开为 "++++ ---"，让 + 归前元素抬升、- 归后元素。
+// 不拆连音线抬降量 `(+/-...)` 与跳房子抬降量 `]+...`（保持同一语义单元）。
+check('adj460 5"注释"++++--- 拆为 5"注释"++++ ---', formatLine('Q: 5"注释"++++---') === 'Q: 5"注释"++++ ---', formatLine('Q: 5"注释"++++---'))
+check('adj460 5++++--- 拆为 5++++ ---', formatLine('Q: 5++++---') === 'Q: 5++++ ---', formatLine('Q: 5++++---'))
+check('adj460 5++-- 拆为 5++ --', formatLine('Q: 5++--') === 'Q: 5++ --', formatLine('Q: 5++--'))
+check('adj460 <++--- 拆为 <++ ---（渐强抬升后 augment）', formatLine('Q: <++---') === 'Q: <++ ---', formatLine('Q: <++---'))
+check('adj460 >+-- 拆为 >+ --', formatLine('Q: >+--') === 'Q: >+ --', formatLine('Q: >+--'))
+check('adj460 同号续行不拆（++++ 保持）', formatLine('Q: 5++++') === 'Q: 5++++', formatLine('Q: 5++++'))
+// adj460 跳房子抬降量 ]+ 不拆（紧跟 ] 的 +/- 属于跳房子；prevOut===] 不触发拆）
+check('adj460 ]++++ 跳房子抬升量原样（不拆）', formatLine('Q: 1 2 3]++++') === 'Q: 1 2 3]++++', formatLine('Q: 1 2 3]++++'))
+// adj460 连音线抬降量 (+--- 不拆（inSlurPrefix 区间内原样吞下；拆了会把 slur raise 1 low 3 拆成 raise 1 + 3 augment）
+check('adj460 (+--- 连音线抬升+降低原样不拆', formatLine('Q: 1 (+--- 2 3)') === 'Q: 1 (+--- 2 3)', formatLine('Q: 1 (+--- 2 3)'))
+check('adj460 (+ ++ 连音线连续抬升保持', formatLine('Q: 1 (+ ++ 2 3)') === 'Q: 1 (+ ++ 2 3)', formatLine('Q: 1 (+ ++ 2 3)'))
+// adj460 幂等：拆过一次后再次格式化不再变
+check('adj460 格式化幂等（5"注释"++++ --- 第二次不变）', formatLine(formatLine('Q: 5"注释"++++---')) === 'Q: 5"注释"++++ ---', formatLine(formatLine('Q: 5"注释"++++---')))
+// adj460 现有行为保持：单 +/- 不变 / 引号内原样 / 跳房子内原样
+check('adj460 单个 + 不变（不构成变号）', formatLine('Q: 5+') === 'Q: 5+', formatLine('Q: 5+'))
+check('adj460 单个 - 不变（augment，不构成变号）', formatLine('Q: 5-') === 'Q: 5-', formatLine('Q: 5-'))
+check('adj460 引号内 + / - 原样（不在 +/- run）', formatLine('Q: 5"a++b"') === 'Q: 5"a++b"', formatLine('Q: 5"a++b"'))
+
 // ---- 6. 错误处理 ----
 console.log('[6] error handling')
 const re = parseJps('V: 1.0\nB: t\nC: 歌词先行\nQ: 1 2\n')
@@ -1264,6 +1284,44 @@ check('adj119 实心三角仅 dy（1 个）', (svg109.match(/Z" fill="#1b1b1b"/g
 // 逐符号的路径一致性 / 包围盒 / 摆放口径见 [108]。
 const modGs109 = svg109.match(/<g transform=[^>]*fill="#1b1b1b"><path d="/g) ?? []
 check('adj458 r109 的 7 个修饰符（4 波音 + 2 滑音 + 1 延长记号）全部渲染为矢量 <g>', modGs109.length === 7, `got ${modGs109.length}`)
+
+// adj459：跨行连音线**端点弧线半径统一**为 leg=5（半条可占满整段 span，仅留 1px 安全间隙）。
+// 不依赖布局（行换行难稳定触发），直接调用 renderSlurForTest 构造 half=r/l 的连音线，验证
+// SVG 路径里的弧线命令 A R R 0 0 1 的 R 全部是 5。
+import { renderSlurForTest } from '@ijipu/engine/render/index.ts'
+const slurArcR = (half: 'l' | 'r' | undefined, span: number): number => {
+  const x1 = 100, x2 = x1 + span, y = 142.2
+  const d = renderSlurForTest({ x1, x2, y, depth: 0, style: 'flat', half, tupletCount: undefined }, 18)
+  const m = /A (\d+(?:\.\d+)?) \1 0 0 1/.exec(d)
+  return m ? Number(m[1]) : NaN
+}
+{
+  // 半条：span ≥ leg+1=6 时 R 统一为 5；span<6 极短半条按公式留 1px 间隙
+  const halfRs = [6, 10, 20, 50, 100, 500].map((s) => [s, slurArcR('r', s)] as [number, number])
+  check(
+    'adj459 半条弧线 R 统一为 5（half=r，span≥6，与总长无关）',
+    halfRs.every(([, r]) => r === 5),
+    halfRs.map(([s, r]) => `s=${s}→R=${r}`).join(' '),
+  )
+  const halfRsL = [6, 10, 20, 50, 100, 500].map((s) => [s, slurArcR('l', s)] as [number, number])
+  check(
+    'adj459 半条弧线 R 统一为 5（half=l，span≥6，与总长无关）',
+    halfRsL.every(([, r]) => r === 5),
+    halfRsL.map(([s, r]) => `s=${s}→R=${r}`).join(' '),
+  )
+}
+// 完整连音线 R 受半段约束（span<12 时收缩，避免两弧重叠）——保留现有行为
+check(
+  'adj459 完整连音线 R 在 span<12 时收缩（避免两弧重叠）',
+  slurArcR(undefined, 8) < 5 && slurArcR(undefined, 50) === 5,
+  `s=8→R=${slurArcR(undefined, 8)} s=50→R=${slurArcR(undefined, 50)}`,
+)
+// 短半条（span=5，<leg+1）按公式 R = min(leg, span-1) = 4（留 1px 间隙，不让弧线端碰到另一端）
+check(
+  'adj459 极短半条（span=5<leg+1）R=4 而非 5（公式的 1px 间隙保护）',
+  slurArcR('r', 5) === 4,
+  `R=${slurArcR('r', 5)}`,
+)
 // adj180：&hx 呼吸记号不加粗（stroke 0.8）、横向宽度 80%（半宽 2.8×s）
 // adj375：&hx 已独立化——用独立写法取样（原 r109 里 5&hx 已不再产生记号）
 const svgHx180 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 5 &hx 6 |\n'), DUR_CFG))[0]
@@ -6424,7 +6482,9 @@ console.log('[adj433] segment beats align with melody beats (within-note interpo
      * adj457（用户决策）：**导出始终按谱面音色**——MIDI/WAV/MP3 三条导出路径都不得传乐器覆盖，
      * 否则"选了试听音色再导出"会静默改变导出结果（用户明确要求导出跟随谱面 `Y:` / `@…@`）。
      */
-    const expSrc = String(readFileSync('src/dialogs/ExportDialog.tsx', 'utf8'))
+    // adj462：导出面板已从 src/dialogs/ExportDialog.tsx 移到底部 dock（src/ui/dock/ExportPanel.tsx，
+    // 重写为流式布局）；断言口径不变——三条导出路径仍不得传乐器覆盖。
+    const expSrc = String(readFileSync('src/ui/dock/ExportPanel.tsx', 'utf8'))
     const expCalls = [...expSrc.matchAll(/buildPlaySequence\(([^)]*)\)/g)].map((m) => m[1].trim())
     check('adj457 导出（MIDI/WAV/MP3）一律不传乐器覆盖（按谱面音色导出）',
       expCalls.length === 3 && expCalls.every((args) => args === 'parseResult, layout, bpm, undefined, defaultInstrumentRef'),

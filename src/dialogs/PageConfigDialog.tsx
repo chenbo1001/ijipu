@@ -25,21 +25,23 @@ import { ToolIcon } from '../ui/ToolIcon'
 
 type TabId = 'global' | 'theme' | 'soundbank' | 'score' | 'font'
 
-const TABS: { id: TabId; label: string }[] = [
-  { id: 'global', label: '全局' },
+// adj463：页签带图标 —— dock 里页签**竖向排在左侧**，窄屏时只留图标（文字用容器查询隐藏）
+const TABS: { id: TabId; label: string; icon: string }[] = [
+  { id: 'global', label: '全局', icon: '⚙' },
   // adj383：主题组从顶栏菜单移入设置，紧跟在「全局」之后
-  { id: 'theme', label: '主题' },
+  { id: 'theme', label: '主题', icon: '◐' },
   // adj384：音色库从顶栏按钮移入设置，紧跟「主题」之后
-  { id: 'soundbank', label: '音色库' },
+  { id: 'soundbank', label: '音色库', icon: '♪' },
   // adj418：原「页面 / 音符布局 / 间距 / 连音线」四个标签合并为「谱面」（都是"这份谱长什么样"）
-  { id: 'score', label: '谱面' },
-  { id: 'font', label: '字体' },
+  { id: 'score', label: '谱面', icon: '▤' },
+  { id: 'font', label: '字体', icon: 'Aa' },
 ]
 
-export function PageConfigDialog() {
+export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) {
   const pageConfig = useDocStore((s) => s.pageConfig)
   const setPageConfig = useDocStore((s) => s.setPageConfig)
-  const closeModal = useUiStore((s) => s.closeModal)
+  // adj462：设置面板已移入底部 dock——保存/固化后收起 dock（原为关闭弹窗）
+  const closeDock = useUiStore((s) => s.closeDock)
   // adj315：全局标签页是应用级偏好（uiStore，全局生效），不写入谱面 pageConfig
   const splitHDir = useUiStore((s) => s.splitHDir)
   const setSplitHDir = useUiStore((s) => s.setSplitHDir)
@@ -385,7 +387,7 @@ export function PageConfigDialog() {
     // width 用 min(700px, 100%) 固定成"桌面满宽上限 / 窄屏铺满"——此前没给宽度，
     // 弹窗宽度由内容撑开，切页签时**弹窗宽度会跟着跳**（各页签内容宽度不同），页签与面板也就对不齐。
     // adj422：标题与菜单统一为「设置」（里面包含 全局/主题/音色库/谱面/字体 五个标签）
-    <Modal title="设置" fill width="min(700px, 100%)" onClose={onCancelReset}>
+    <Modal title="设置" fill width="min(700px, 100%)" onClose={onCancelReset} inline={inline}>
       <div className="pcfg-root">
         {/* 中间滚动区：页签 + 面板（只有这里滚动，底部按钮永远可见） */}
         <div className="pcfg-scroll">
@@ -395,12 +397,16 @@ export function PageConfigDialog() {
                 key={t.id}
                 className={`jp-tab${tab === t.id ? ' active' : ''}`}
                 onClick={() => setTab(t.id)}
+                title={t.label}
               >
-                {t.label}
+                {/* adj463：图标常驻；文字在窄 dock 下由容器查询隐藏（只留图标） */}
+                <span className="jp-tab-icon" aria-hidden="true">{t.icon}</span>
+                <span className="jp-tab-label">{t.label}</span>
               </button>
             ))}
           </div>
-          {renderPanel()}
+          {/* adj463：内容区包一层容器——dock 里它是「分组一行 + 内容项依次流式排列」的 flex 容器 */}
+          <div className="pcfg-panel">{renderPanel()}</div>
         </div>
 
         <div className="modal-foot pcfg-foot">
@@ -420,10 +426,10 @@ export function PageConfigDialog() {
               committedRef.current = true
               setPageConfig(snapRef.current, false) // 丢弃预览改动，按当前生效配置固化
               persistFullConfig()
-              closeModal()
+              closeDock()
             }}
           >
-            固化全部到谱面
+            固化到谱面
           </button>
           <button
             className="btn primary"
@@ -434,7 +440,7 @@ export function PageConfigDialog() {
               // 本机公共设置（localStorage 缓存）里带来的值不会被写进这首谱
               committedRef.current = true
               setPageConfig(draft, true, snapRef.current)
-              closeModal()
+              closeDock()
             }}
           >
             保存设置
@@ -476,11 +482,12 @@ function FontSelect({ value, onChange }: { value: string; onChange: (v: string) 
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    // adj418：标签列给足宽度且不换行（「两端对齐最小小节数」这类长标签不再折成两行），
-    // 右侧控件按 flexWrap 自动换行，窄屏也不会横向溢出。
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-      <span style={{ minWidth: 96, color: 'var(--jp-text-secondary)', fontSize: 12, whiteSpace: 'nowrap' }}>{label}</span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>{children}</div>
+    // adj418：标签列给足宽度且不换行（「两端对齐最小小节数」这类长标签不再折成两行）。
+    // adj463：加类名供 dock 布局使用——dock 里字段**整项不可压缩**（要么整项放进当前行，
+    // 要么整项换下一行），且项内「标签 + 控件」**强制同一行**（此前列宽不足会把控件挤到标签下方）。
+    <div className="pcfg-row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+      <span className="pcfg-row-label" style={{ minWidth: 96, color: 'var(--jp-text-secondary)', fontSize: 12, whiteSpace: 'nowrap' }}>{label}</span>
+      <div className="pcfg-row-ctl" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>{children}</div>
     </div>
   )
 }

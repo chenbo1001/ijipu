@@ -19,6 +19,7 @@ export function Modal({
   fill,
   width,
   onClose,
+  inline,
 }: {
   title: string
   children: ReactNode
@@ -41,6 +42,12 @@ export function Modal({
   width?: number | string
   /** adj315：关闭（Esc/✕/遮罩）前回调——用于"取消不保存"时恢复设置快照 */
   onClose?: () => void
+  /**
+   * adj462：**内联模式**——不渲染遮罩/标题栏/✕，只把内容原样交出去。
+   * 供底部 dock 复用这些对话框的**内容**（试听/导出/设置移到底栏，不再弹窗）：
+   * 于是那三份内容不必重写，dock 只管容器与切换。内联模式下 Esc 关闭与拖动都不生效。
+   */
+  inline?: boolean
 }) {
   const closeModal = useUiStore((s) => s.closeModal)
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
@@ -55,12 +62,13 @@ export function Modal({
   }
 
   useEffect(() => {
+    if (inline) return // adj462：内联（dock 内）不受 Esc 影响，交给 dock 自己的 ✕
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') doClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [closeModal, onClose])
+  }, [closeModal, onClose, inline])
 
   // 按住标题栏拖动
   const onHeadMouseDown = (e: React.MouseEvent) => {
@@ -96,6 +104,9 @@ export function Modal({
     ...(width ? { width: typeof width === 'number' ? `${width}px` : width } : {}),
     ...(pos ? { position: 'fixed' as const, left: pos.x, top: pos.y, margin: 0 } : dockStyle),
   }
+
+  // adj462：内联模式——只交出内容（dock 自己提供 tab / × / 高度与滚动）
+  if (inline) return <div className="modal-inline">{children}</div>
 
   return (
     <div
