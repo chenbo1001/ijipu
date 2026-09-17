@@ -6,6 +6,7 @@
  */
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { inflateSync } from 'node:zlib'
 import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage } from '@ijipu/engine/index.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
@@ -17,6 +18,8 @@ import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, V
 import { clampMetaPos } from '@ijipu/engine/layout/metaAnchors.ts'
 import type { BarlineType } from '@ijipu/engine/types.ts'
 import { computeBeamsForTest } from '@ijipu/engine/render/index.ts'
+// adj458：波音/滑音/延长记号的矢量修饰符（生成常量 + 墨迹宽高比；摆放口径经渲染端到端断言）
+import { MODIFIER_GLYPHS, glyphInkAspect } from '@ijipu/engine/render/modifierGlyphs.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
 import { highlightCode } from '../src/editor/highlight.ts'
 import { highlightCodeWrapped } from '../src/editor/highlight.ts'
@@ -70,7 +73,7 @@ import type { HqCache } from '../src/playback/spessaCache.ts'
 import { hasBuiltinBank, GM_VOICE_OPTIONS } from '../src/playback/spessaSynthBackend.ts'
 import type { HqSampleLibrary } from '../src/playback/spessaSynthBackend.ts'
 // adj417：按钮图标清单（public/icons/ 下的文件名）——断言文件存在、sw.js 预热清单未漂移
-import { ICON_DIR, ICON_FILE_NAMES } from '../src/ui/toolIcons.ts'
+import { ICON_DIR, ICON_FILES, ICON_FILE_NAMES } from '../src/ui/toolIcons.ts'
 
 // adj213：布局断言常量——从 defaultPageConfig 派生，避免硬编码边距/右边界/
 // 描述头区域高等魔数（默认值调整时断言自动适配）
@@ -1250,14 +1253,17 @@ const n109 = r109.groups[0].music.tokens.filter((t) => t.kind === 'note')
 check('adj109 修饰符解析（yc bc zy dy shy xhy）', r109.errors.length === 0 && JSON.stringify(n109.slice(0, 6).map((t) => t.symbols[0])) === JSON.stringify(['yc', 'bc', 'zy', 'dy', 'shy', 'xhy']), JSON.stringify(n109.slice(0, 6).map((t) => t.symbols)))
 check('adj109 修饰符解析（sby xby sby+ xby+ cy cy+，含 + 后缀）', JSON.stringify(n109.slice(6, 12).map((t) => t.symbols[0])) === JSON.stringify(['sby', 'xby', 'sby+', 'xby+', 'cy', 'cy+']), JSON.stringify(n109.slice(6, 12).map((t) => t.symbols)))
 const svg109 = renderScoreToSvg(layoutScore(r109, DUR_CFG))[0]
-check('adj109 yc 渲染点 + 半圆弧（circle + Q）', svg109.includes('<circle ') && / Q /.test(svg109), '')
+// adj458（用户要求）：yc（延长记号）也改成**用户提供的矢量图形**（原为手绘"圆点 + 半圆弧"），
+// 故原断言「yc 渲染点 + 半圆弧（circle + Q）」随设计变更删除 —— 形态核对并入上方那条。
 // adj112：zy 线形 >、dy 仍实心倒三角；adj119：滑音箭头改线形 >（实心三角仅 dy 1 个）
 check('adj119 实心三角仅 dy（1 个）', (svg109.match(/Z" fill="#1b1b1b"/g) ?? []).length === 1, '')
-// adj114/115：波音锯齿 = 斜上细线(stroke 1) + 斜下粗线(stroke 1.8)，共 4 个波音
-// sby/xby 各 2 条下降段、sby+/xby+ 各 3 条 → stroke 1.8 共 10 条；xby 竖线细线
-check('adj115 波音锯齿斜下粗线（stroke 1.8 ≥ 10 条）', (svg109.match(/stroke-width="1.8"/g) ?? []).length >= 10, '')
-// adj116：下波音竖线为细线 stroke 0.8（xby/xby+ 各 1 条）
-check('adj116 下波音竖线为细线（stroke 0.8 ≥ 2 条）', (svg109.match(/stroke-width="0.8"/g) ?? []).length >= 2, '')
+// adj458（用户要求）：波音/滑音/延长记号改为**用户提供的矢量图形**（内联 SVG 路径），
+// 不再是手绘的锯齿线 / 弧线箭头 / 圆点半圆弧。原先此处的 adj115/adj116 断言钉的是**旧画法**
+// （波音斜下粗线 stroke 1.8 ≥10 条、下波音竖线 stroke 0.8 ≥2 条），随本次替换一并改写。
+// 本用例（r109）里有 7 个符号：4 波音 + 2 滑音 + 1 延长记号 → 应渲染出 7 个矢量 <g>；
+// 逐符号的路径一致性 / 包围盒 / 摆放口径见 [108]。
+const modGs109 = svg109.match(/<g transform=[^>]*fill="#1b1b1b"><path d="/g) ?? []
+check('adj458 r109 的 7 个修饰符（4 波音 + 2 滑音 + 1 延长记号）全部渲染为矢量 <g>', modGs109.length === 7, `got ${modGs109.length}`)
 // adj180：&hx 呼吸记号不加粗（stroke 0.8）、横向宽度 80%（半宽 2.8×s）
 // adj375：&hx 已独立化——用独立写法取样（原 r109 里 5&hx 已不再产生记号）
 const svgHx180 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 5 &hx 6 |\n'), DUR_CFG))[0]
@@ -1361,7 +1367,10 @@ check('adj139 两段跳房子共用小节线：线2 同时 voltaEnd+voltaStart',
 const svg137b = renderScoreToSvg(lay137b)[0]
 const voltas137b = [...svg137b.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)" stroke="#1b1b1b" stroke-width="0.8"/g)].filter((m) => Number(m[3]) - Number(m[1]) > 20).map((m) => `${m[1]}→${m[3]}`)
 check('adj137 两段跳房子渲染 2 条线', voltas137b.length === 2, voltas137b.join(' '))
-check('adj109 滑音渲染弧线（Q）+ 箭头（fill 三角）', svg109.includes(' Q '), '')
+// adj458（用户要求）：滑音/延长记号都改为**用户提供的矢量图形**（原为手绘"细线弧线 Q + 线形 > 箭头"
+// 与"圆点 + 半圆弧"）。原断言「滑音渲染弧线（Q）」与「yc 渲染点 + 半圆弧（circle + Q）」钉的是旧画法，
+// 随设计变更删除 —— 形态核对见上方那条"7 个矢量 <g>"，逐符号口径见 [108]。
+
 check('adj112 tr 文本加粗', /font-weight="bold"[^>]*>tr</.test(svg109), '')
 // adj294：括号独立渲染——加粗 + 垂直居中于数字中心（dominant-baseline=central @ 基线-0.4×字号）、字号=note_size
 const svgZkhSp = renderScoreToSvg(layoutScore(zkhSpace, DUR_CFG))[0]
@@ -5218,17 +5227,153 @@ async function runAdj416BankSourceTests() {
   }
 }
 
-// ---- 103. 图标集中到 public/icons/ 且只放用得到的（adj417） ----
+/**
+ * adj458：解出 PNG 里「有形状像素」（alpha > 0）的 RGB 集合 —— 按钮图标的**文件级口径**守卫。
+ *
+ * 为什么值得单独解一次 PNG：图标的形状编码在 **alpha 通道**里、界面颜色由 CSS mask + `currentColor`
+ * 决定，所以 PNG 的 RGB **只是文件层面的口径**、不影响观感 —— 正因为"看不出差别"，它极易悄悄漂移：
+ * adj457 把 19 个图标统一成纯黑之后，**下一批新图标就又混进了 #333333 / #7f7f7f**（用户报"图标颜色没统一"）。
+ * 于是把口径钉死：有形状像素一律 `0,0,0`，且必须带 alpha 通道（没 alpha 则 mask 完全失效，
+ * 图标在深色主题下会变成一块实心色）。
+ *
+ * 只认 8 位「灰度+alpha」(ct=4) 与「RGBA」(ct=6)——按钮图标就用这两种，不引入依赖。
+ */
+function pngShapeColors(file: string): { colorType: number; colors: Set<string>; shaped: number } {
+  const buf = readFileSync(file)
+  const sig = [137, 80, 78, 71, 13, 10, 26, 10]
+  if (!sig.every((b, i) => buf[i] === b)) throw new Error(`不是 PNG：${file}`)
+  let off = 8
+  let width = 0
+  let height = 0
+  let bitDepth = 0
+  let colorType = 0
+  const idat: Buffer[] = []
+  while (off + 8 <= buf.length) {
+    const len = buf.readUInt32BE(off)
+    const type = buf.toString('latin1', off + 4, off + 8)
+    const data = buf.subarray(off + 8, off + 8 + len)
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0)
+      height = data.readUInt32BE(4)
+      bitDepth = data[8]
+      colorType = data[9]
+    } else if (type === 'IDAT') idat.push(data)
+    else if (type === 'IEND') break
+    off += 12 + len // length(4) + type(4) + data + crc(4)
+  }
+  const bpp = colorType === 6 ? 4 : colorType === 4 ? 2 : 0
+  if (bitDepth !== 8 || bpp === 0) {
+    throw new Error(`按钮图标须为 8 位 RGBA / 灰度+alpha：${file}（bitDepth=${bitDepth} colorType=${colorType}）`)
+  }
+  const raw = inflateSync(Buffer.concat(idat))
+  const stride = width * bpp
+  const prev = Buffer.alloc(stride)
+  const cur = Buffer.alloc(stride)
+  const colors = new Set<string>()
+  let shaped = 0
+  let p = 0
+  for (let y = 0; y < height; y++) {
+    const ft = raw[p++] // 每行行首是滤波类型字节
+    for (let i = 0; i < stride; i++) {
+      const rawByte = raw[p + i]
+      const a = i >= bpp ? cur[i - bpp] : 0 // 左
+      const b = prev[i] // 上
+      const c = i >= bpp ? prev[i - bpp] : 0 // 左上
+      let v: number
+      if (ft === 0) v = rawByte
+      else if (ft === 1) v = rawByte + a
+      else if (ft === 2) v = rawByte + b
+      else if (ft === 3) v = rawByte + ((a + b) >> 1)
+      else {
+        // Paeth
+        const pa = Math.abs(b - c)
+        const pb = Math.abs(a - c)
+        const pc = Math.abs(a + b - 2 * c)
+        v = rawByte + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c)
+      }
+      cur[i] = v & 0xff
+    }
+    p += stride
+    for (let x = 0; x < width; x++) {
+      const o = x * bpp
+      const alpha = bpp === 4 ? cur[o + 3] : cur[o + 1]
+      if (alpha > 0) {
+        shaped++
+        colors.add(bpp === 4 ? `${cur[o]},${cur[o + 1]},${cur[o + 2]}` : `${cur[o]},${cur[o]},${cur[o]}`)
+      }
+    }
+    cur.copy(prev)
+  }
+  return { colorType, colors, shaped }
+}
+
+// ---- 103. 图标集中到 public/icons/ 且只放用得到的（adj417；adj458 补拆分方向绑定） ----
 // 过去图标全平铺在 public/ 根目录 → dist 根目录几十个 png，看不出哪些是构建产物、哪些是资源；
 // 现在统一放 public/icons/，并**只保留用得到的**（没用的不放，需要时再加）。这里守住四件事：
 // ①清单里的图标文件都真的存在；②public 根目录不再有 png/ico；③sw.js 的预热清单与清单一致
 // （此前就漂移过：漏了「暂停」「下载」）；④manifest / index.html 引用的图标都存在。
+// adj458 追加：编码/拆分两方向/预览/导出/输入条各绑自己的专属图标（不再"借用"+旋转复用），
+// 且图标 PNG 的像素口径（纯黑 + 带 alpha）逐张核对。
 console.log('[103] icons live in public/icons and only the used ones (adj417)')
 {
   const iconDir = join(root, 'public', ICON_DIR)
   const missing = ICON_FILE_NAMES.filter((n) => !existsSync(join(iconDir, `${n}.png`)))
   check(`adj417 清单里的 ${ICON_FILE_NAMES.length} 个按钮图标都存在于 public/icons/`, missing.length === 0, missing.join(','))
   check('adj417 图标清单无重复文件名', new Set(ICON_FILE_NAMES).size === ICON_FILE_NAMES.length)
+
+  // adj458：**图标绑定要名副其实**。此前有五处"借用"别的图标，语义与按钮对不上：
+  //   · 拆分(上下) 借「收起」+`rotate(90)`、拆分(左右) 借未旋转的「收起」→ 图示方向对不上，
+  //     且旋转会重采样 1px 级线稿，16px 下糊成一团；
+  //   · 导出借「下载」（字面像"从网上下载"，实际做的是"导出到文件"）；
+  //   · 编码借「文件」、预览借「查看」、输入条借「键盘」。
+  // 全部改为各自的专属图标后，用一张表把「图标键 → 期望 PNG → 该按钮在源码里的定位」钉住。
+  const topBarSrc = readFileSync(join(root, 'src', 'ui', 'TopBar.tsx'), 'utf8')
+  /** 取顶栏 VIEWS 里某个 label 紧跟着的 ToolIcon name（按源码顺序取首次出现） */
+  const viewIconOf = (label: string): string => {
+    const at = topBarSrc.indexOf(`label: '${label}'`)
+    return at < 0 ? '' : (/name="([^"]+)"/.exec(topBarSrc.slice(at))?.[1] ?? '')
+  }
+  /** 取顶栏 iconOf() 里某个 case 分支用到的 ToolIcon name */
+  const caseIconOf = (key: string): string => {
+    const at = topBarSrc.indexOf(`case '${key}':`)
+    return at < 0 ? '' : (/name="([^"]+)"/.exec(topBarSrc.slice(at))?.[1] ?? '')
+  }
+  const binds: { key: keyof typeof ICON_FILES; png: string; at: string; where: 'view' | 'case' }[] = [
+    { key: 'code', png: '编码', at: '编码', where: 'view' },
+    { key: 'splitH', png: '左右', at: '左右拆分', where: 'view' },
+    { key: 'splitV', png: '上下', at: '拆分(上下)', where: 'view' },
+    { key: 'view', png: '预览', at: '预览', where: 'view' },
+    { key: 'export', png: '导出', at: 'export', where: 'case' },
+    { key: 'keyboard', png: '输入', at: 'scriptPad', where: 'case' },
+  ]
+  for (const b of binds) {
+    const got = b.where === 'view' ? viewIconOf(b.at) : caseIconOf(b.at)
+    check(`adj458 「${b.png}」按钮绑 ${b.key} 图标 → ${b.png}.png`, ICON_FILES[b.key] === b.png && got === b.key, `ICON_FILES.${b.key}=${ICON_FILES[b.key]} 源码=${got}`)
+  }
+  // 被替换掉的旧图标必须**文件与引用一并清除**（adj417：只放用得到的；留半份最容易漂移）
+  const retired = ['收起', '下载', '文件', '查看', '键盘']
+  const leftover = retired.filter((n) => existsSync(join(iconDir, `${n}.png`)) || ICON_FILE_NAMES.includes(n) || topBarSrc.includes(`${n}.png`))
+  check(`adj458 已废弃图标（${retired.join('/')}）的文件与引用一并清除`, leftover.length === 0, leftover.join(','))
+  check('adj458 不再需要靠旋转复用图标（ToolIcon 无 rotate）', !/rotate/.test(readFileSync(join(root, 'src', 'ui', 'ToolIcon.tsx'), 'utf8')))
+
+  // adj458：图标 PNG 的**像素口径**——有形状像素一律纯黑 + 必须带 alpha 通道。
+  // 前者由 adj457 定下（统一文件层面的颜色口径），后者是 CSS mask 能上色/跟随主题的前提。
+  // 逐张解 PNG 核对，避免"下一批新图标又混进灰值"（这正是本轮发生的事）。
+  const iconPixels = ICON_FILE_NAMES.map((n) => ({ name: n, ...pngShapeColors(join(iconDir, `${n}.png`)) }))
+  const tinted = iconPixels.filter((i) => Array.from(i.colors).some((c) => c !== '0,0,0'))
+  check(
+    `adj458 全部 ${iconPixels.length} 个按钮图标的形状像素均为纯黑（adj457 口径）`,
+    tinted.length === 0,
+    tinted.map((i) => `${i.name}:[${Array.from(i.colors).join(' ')}]`).join(' '),
+  )
+  const noShape = iconPixels.filter((i) => i.shaped === 0)
+  check('adj458 按钮图标都有实际形状（alpha>0 的像素非空）', noShape.length === 0, noShape.map((i) => i.name).join(','))
+  const noAlpha = iconPixels.filter((i) => i.colorType !== 6 && i.colorType !== 4)
+  check(
+    'adj458 按钮图标都带 alpha 通道（形状靠 alpha，CSS mask 才能统一上色并适应明暗主题）',
+    noAlpha.length === 0,
+    noAlpha.map((i) => `${i.name}(ct=${i.colorType})`).join(','),
+  )
   const rootImages = readdirSync(join(root, 'public')).filter((f) => /\.(png|ico)$/i.test(f))
   check('adj417 public 根目录不再有散落的 png/ico', rootImages.length === 0, rootImages.join(','))
   const swJs = readFileSync(join(root, 'public', 'sw.js'), 'utf8')
@@ -7101,6 +7246,88 @@ console.log('[107] settings layering: source > cache > default, write-back = use
   check('adj454 缩进的设置行 → 告警「必须顶格」', parseJps(indented).errors.some((e) => e.message.includes('顶格')), JSON.stringify(parseJps(indented).errors.map((e) => e.message)))
   check('adj454 缩进的设置行确实不生效', mergeJpsConfig(indented, null).margin_left === defaultPageConfig.margin_left)
   check('adj454 合法的顶格设置行**不产生**任何告警', parseJps(srcCfg).errors.length === 0 && inspectJpsConfig(srcCfg).length === 0)
+}
+
+// ---- 108. 波音/滑音改用用户提供的**矢量修饰符**（adj458） ----
+// 六枚符号改为内联用户给的 SVG 路径（`public/icons/*.svg` → 生成 `engine/render/modifierGlyphs.ts`）。
+// 这里守住三件事：
+//  ① 生成常量与 SVG 源文件**不漂移**（路径标记逐字一致、包围盒为正）；
+//  ② 六种编码都真的渲染出**矢量**标记（`<g transform=... scale>`），且不再出现任何位图（`<image>`）；
+//  ③ 摆放尺寸符合预期口径（波音按宽度贴合 9s / 13.5s；滑音按高度贴合、左缘贴数字右缘）。
+console.log('[108] mordent/slide modifiers are user-provided vector glyphs (adj458)')
+{
+  const GLYPH_KEYS = ['sby', 'xby', 'sby+', 'xby+', 'shy', 'xhy', 'yc'] as const
+  /** 与 `scripts/gen-modifier-glyphs.mjs` 同一套剥离规则：取 SVG 内部标记（去声明/外层 svg/iconfont 元数据/写死填充色） */
+  const svgInner = (name: string): string =>
+    readFileSync(join(root, 'public', 'icons', `${name}.svg`), 'utf8')
+      .replace(/^[\s\S]*?<svg[^>]*>/, '')
+      .replace(/<\/svg>[\s\S]*$/, '')
+      .replace(/\s+p-id="[^"]*"/g, '')
+      .replace(/\s+t="[^"]*"/g, '')
+      .replace(/\s+class="[^"]*"/g, '')
+      // 写死的填充色去掉（颜色由渲染时外层 <g fill> 统一）；`fill="none"` 是描边语义，保留
+      .replace(/\s+fill="(?!none")[^"]*"/g, '')
+      .trim()
+
+  // ① 生成常量 vs SVG 源文件
+  for (const k of GLYPH_KEYS) {
+    const g = MODIFIER_GLYPHS[k]
+    check(`adj458 ${k} 的路径标记与 public/icons/${g.name}.svg 逐字一致`, g.path === svgInner(g.name), `${g.path.length} vs ${svgInner(g.name).length}`)
+    check(`adj458 ${k} 包围盒为正且宽高比合理`, g.box.w > 0 && g.box.h > 0 && glyphInkAspect(g) > 0.5 && glyphInkAspect(g) < 6, JSON.stringify(g.box))
+    // 生成路径不得带写死的颜色：源图「延长记号」自带 fill="#686868"，会被外层 <g fill> 之外单独生效，
+    // 于是它会是灰的、深色模式反相后也跟别处不一致 —— 生成器必须把非 none 的 fill 剥掉。
+    check(`adj458 ${k} 生成路径不带写死颜色（由外层 <g> 统一上色）`, !/\bfill=/.test(g.path) && !/stroke="#/.test(g.path))
+  }
+
+  // ② 端到端：把七种修饰符都写进一份谱，渲染后核对标记形态
+  const modCode = 'V: 1.0\nB: t\nD: C\nP: 4/4\nJ: 96\n\nQ: 1&sby 2&xby 3&sby+ 4&xby+ | 5&shy 6&xhy 7&yc 1 |\n'
+  const modParsed = parseJps(modCode)
+  check('adj458 七种修饰符谱面零解析错误', modParsed.errors.length === 0, JSON.stringify(modParsed.errors.map((e) => e.message)))
+  const modSvg = renderScoreToSvg(layoutScore(modParsed, defaultPageConfig))[0]
+  const groups = modSvg.match(/<g transform="translate\([^)]*\) scale\([^)]*\)" fill="#1b1b1b">/g) ?? []
+  check('adj458 谱面里渲染出 7 个矢量修饰符 <g>（每音一个）', groups.length === 7, `got ${groups.length}`)
+  check('adj458 修饰符是**矢量**：SVG 里没有任何 <image> 位图', !/<image\b/.test(modSvg))
+  check('adj458 修饰符不引用外部资源（无 href/xlink:href）', !/xlink:href|href="(?!#)/.test(modSvg))
+  check('adj458 每个 <g> 内都带着源路径（d= 属性）', (modSvg.match(/<g transform=[^>]*><path d="/g) ?? []).length === 7)
+
+  // ③ 摆放口径：波音按宽度（9s / 13.5s），滑音按高度（与旧弧线等高）
+  const inkOf = (svg: string, idx: number) => {
+    const m = [...svg.matchAll(/translate\(([-\d.]+) ([-\d.]+)\) scale\(([\d.]+)\)/g)][idx]
+    return m ? { tx: Number(m[1]), ty: Number(m[2]), s: Number(m[3]) } : null
+  }
+  const noteSize = defaultPageConfig.note_size ?? 13
+  const s = noteSize / 18
+  // 第 1~4 个音依次是 sby / xby / sby+ / xby+（宽度 9s / 9s / 13.5s / 13.5s）
+  const wantW = [9 * s, 9 * s, 13.5 * s, 13.5 * s]
+  const gotW = [0, 1, 2, 3].map((i) => {
+    const v = inkOf(modSvg, i)!
+    return MODIFIER_GLYPHS[GLYPH_KEYS[i]].box.w * v.s
+  })
+  check('adj458 波音墨迹宽度 = 9s / 9s / 13.5s / 13.5s（沿用 adj123 的占位口径）', gotW.every((w, i) => Math.abs(w - wantW[i]) < 0.15), gotW.map((w) => w.toFixed(2)).join(','))
+  // 第 5~6 个音是 shy / xhy：墨迹高度应与旧弧线包围盒等高（此处只核对两者一致量级、且都 > 4px）
+  const gotH = [4, 5].map((i) => {
+    const v = inkOf(modSvg, i)!
+    return MODIFIER_GLYPHS[GLYPH_KEYS[i]].box.h * v.s
+  })
+  check('adj458 滑音墨迹高度合理（> 4px，两方向同口径）', gotH.every((h) => h > 4) && Math.abs(gotH[0] - gotH[1]) < 1.5, gotH.map((h) => h.toFixed(2)).join(','))
+  // 滑音左缘贴数字右缘：target x = 数字左缘 + digitW；反推源坐标 → 实际墨迹左缘
+  const slideLeft = [4, 5].map((i) => {
+    const v = inkOf(modSvg, i)!
+    return MODIFIER_GLYPHS[GLYPH_KEYS[i]].box.x * v.s + v.tx
+  })
+  check('adj458 滑音左缘落在数字右缘右侧（不压字）', slideLeft.every((l) => l > 0), slideLeft.map((l) => l.toFixed(2)).join(','))
+
+  // 第 7 个音是 yc（延长记号）：墨迹宽度应为 9.6s（旧手绘的墨迹就是 cx ± 4.8s），
+  // 高度随用户图形自身比例（宽高比 1.89，故约 5.1s，比旧手绘的 4.4s 略高）。
+  const ycG = inkOf(modSvg, 6)!
+  const ycW = MODIFIER_GLYPHS.yc.box.w * ycG.s
+  const ycH = MODIFIER_GLYPHS.yc.box.h * ycG.s
+  check('adj458 延长记号墨迹宽度 = 9.6s（沿用旧手绘的横向口径）', Math.abs(ycW - 9.6 * s) < 0.15, ycW.toFixed(2))
+  check('adj458 延长记号墨迹高度合理（> 3px 且不高于 7s）', ycH > 3 && ycH < 7 * s + 1, ycH.toFixed(2))
+
+  // 源 SVG 必须在（生成器的输入；删了就没法重生成）
+  const missingSvg = GLYPH_KEYS.map((k) => MODIFIER_GLYPHS[k].name).filter((n) => !existsSync(join(root, 'public', 'icons', `${n}.svg`)))
+  check(`adj458 ${GLYPH_KEYS.length} 枚修饰符的 SVG 源文件都在 public/icons/ 下`, missingSvg.length === 0, missingSvg.join(','))
 }
 
 runAdj363SaveTests()

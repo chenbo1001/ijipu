@@ -27,7 +27,8 @@ export default defineConfig({
       fileName: (_format, entryName) => `${entryName}.cjs`,
     },
     rollupOptions: {
-      external: ['node:fs', 'node:url', 'node:path', 'fs', 'url', 'path'],
+      // adj458：加重建内置模块 `node:zlib`（smoke 里解 PNG 的 IDAT，核对按钮图标的像素口径）
+      external: ['node:fs', 'node:url', 'node:path', 'node:zlib', 'fs', 'url', 'path', 'zlib'],
     },
   },
 })

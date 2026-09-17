@@ -13,7 +13,7 @@
  *     图标都自动同色 —— 不需要为每种状态准备一套图片，也不会出现"深色主题下黑图标看不见"
  *     （原始 PNG 是黑线稿，直接铺在深色底上等于隐形）。
  *
- * 用法：`<ToolIcon name="layout" />`、`<ToolIcon name="collapse" rotate={90} />`。
+ * 用法：`<ToolIcon name="layout" />`、`<ToolIcon name="splitV" />`。
  */
 import type { CSSProperties } from 'react'
 import { ICON_DIR, ICON_FILES } from './toolIcons'
@@ -23,9 +23,8 @@ import type { ToolIconName } from './toolIcons'
  * 按钮图标：以 CSS mask 绘制，颜色 = 当前 `color`（因此随主题/激活态走）。
  * @param name 图标名（见 ui/toolIcons.ts 的 ICON_FILES）
  * @param size 边长（px）；顶栏按钮 16、对话框按钮 14
- * @param rotate 旋转角度（度）——上下拆分用「收起」图标转 90°
  */
-export function ToolIcon({ name, size = 16, rotate = 0 }: { name: ToolIconName; size?: number; rotate?: number }) {
+export function ToolIcon({ name, size = 16 }: { name: ToolIconName; size?: number }) {
   // encodeURI：文件名是中文，转成 %XX 后对各类 URL 解析都安全（mask url() 同样吃百分号编码）
   const url = encodeURI(`${import.meta.env.BASE_URL}${ICON_DIR}/${ICON_FILES[name]}.png`)
   const style: CSSProperties & Record<string, string | number> = {
@@ -33,6 +32,5 @@ export function ToolIcon({ name, size = 16, rotate = 0 }: { name: ToolIconName; 
     height: size,
     '--tool-icon': `url("${url}")`,
   }
-  if (rotate) style.transform = `rotate(${rotate}deg)`
   return <span className="tool-icon" aria-hidden="true" style={style} />
 }

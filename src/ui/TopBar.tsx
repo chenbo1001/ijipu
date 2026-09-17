@@ -79,11 +79,14 @@ function MenuPanel({
 }
 
 /** adj408：视图图标改用 `public/icons/*.png`（`ToolIcon` 统一上色）——
- *  编码=文件、左右拆分=收起、上下拆分=收起旋转 90°、预览=查看 */
+ *  编码=编码、左右拆分=左右、上下拆分=上下、预览=预览。
+ *  adj458：两个拆分方向改为**各自的专属图标**（此前共用「收起」并手动 `rotate(90)`——
+ *  形状与实际拆分方向对不上，且旋转会把 1px 级线稿糊掉）；「编码」「预览」也各自换成对应图标
+ *  （此前借用「文件」「查看」）。 */
 const VIEWS: { key: ViewType; label: string; icon: React.ReactNode }[] = [
-  { key: 'code', label: '编码', icon: <ToolIcon name="file" /> },
-  { key: 'split', label: '拆分(上下)', icon: <ToolIcon name="collapse" rotate={90} /> },
-  { key: 'splitH', label: '左右拆分', icon: <ToolIcon name="collapse" /> },
+  { key: 'code', label: '编码', icon: <ToolIcon name="code" /> },
+  { key: 'split', label: '拆分(上下)', icon: <ToolIcon name="splitV" /> },
+  { key: 'splitH', label: '左右拆分', icon: <ToolIcon name="splitH" /> },
   { key: 'preview', label: '预览', icon: <ToolIcon name="view" /> },
 ]
 
