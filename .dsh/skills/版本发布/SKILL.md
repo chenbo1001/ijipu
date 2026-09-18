@@ -122,6 +122,29 @@ Get-ChildItem $src -Recurse -File | ForEach-Object {
 
 **④ 长任务放后台**：`npx tauri build` 用后台任务（job），期间并行做 CHAIN-B，别空等。
 
+**⑤ 改已有文档 vs 追加内容（v0.27.4 实测两次自伤，见 `E-2026-235`）**
+
+```powershell
+# ✓ 改已有文档：只用 edit 工具（局部替换）。
+#   ✗ write 是【整文件替换】——对既有长文档使用会把它清成一行（v0.27.4 把 2870 行的 ERRORS-LOG 清成 1 行，
+#     靠 git checkout HEAD -- 该文件 + 逐条重插新条目才挽回）。
+# ✓ 追加表格行/段落（唯一可靠姿势）：
+#   1) write 工具生成临时文件（UTF-8）
+#   2) $utf8 = New-Object System.Text.UTF8Encoding($false)
+#      $row  = [IO.File]::ReadAllText($tmp, $utf8).TrimStart([char]0xFEFF)   # 显式 UTF-8，顺带去 BOM
+#      $bytes = $utf8.GetBytes($row)
+#      $fs = [IO.File]::Open($target,'Append','Write'); $fs.Write($bytes,0,$bytes.Length); $fs.Close()
+#   3) 严格模式复核：$strict = New-Object System.Text.UTF8Encoding($false,$true)
+#                    $s = $strict.GetString([IO.File]::ReadAllBytes($target))   # 非法 UTF-8 会抛异常
+# ✗ $row = Get-Content $tmp -Raw
+#   —— 本机 Get-Content 对【无 BOM 的 UTF-8】默认按 ANSI/GBK 解码（Console.InputEncoding 是 DBCS 代码页），
+#      读出来的字符串本身已是乱码，再以 UTF-8 写回就成了"合法 UTF-8 的错字"（发布 → 鍙戝竷）：
+#      字节层面完全合法（普通解码/校验都查不出来），只有 read 工具或上面那种**严格模式**才看得出。
+```
+
+> 两条铁律的推论：**"改"用 `edit`、"追加"用字节流、写完立刻 `read` 复核**。
+> 破坏性操作前先确认可恢复路径（文件是否已在 HEAD 里、新增内容是否能从对话记录逐字复现）。
+
 ---
 
 ## 4. 检查清单

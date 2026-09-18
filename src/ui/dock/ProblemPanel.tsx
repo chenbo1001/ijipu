@@ -79,10 +79,16 @@ export function ProblemPanel() {
                       title={expanded ? problemCopy.collapseHint : problemCopy.expandHint}
                       aria-expanded={expanded}
                     >
-                      {/* adj512：统一用一个 `▸` 字符 + 旋转 90° 表示展开，告别"▸ 收起 / ▾ 展开"
+                      {/* adj512：统一用一个三角字符 + 旋转 90° 表示展开，告别"▸ 收起 / ▾ 展开"
                           两字符在不同字体下尺寸不一致（用户报"下方向三角太小了"）。同一个字符
-                          旋转前后**等比放大**——视觉大小完全一致，只方向不同。 */}
-                      <span className="problem-expand-glyph" aria-hidden="true">▸</span>
+                          旋转前后**等比放大**——视觉大小完全一致，只方向不同。
+                          adj532（用户第 4 次反馈"三角箭头还是不够大"）：**换字符**而不是继续调字号——
+                          原先用的 `▸`（U+25B8 **BLACK RIGHT-POINTING SMALL TRIANGLE**）是"小号"变体，
+                          实测墨迹在 18px 字号下只有 **7×6px**（36px 也才 12×12），
+                          所以 adj515/516/517 三轮"10→14→16→18"几乎看不出变化；
+                          换成常规实心三角 `▶`（U+25B6）后，**同样 18px 字号墨迹 17×18px**（约 2.5 倍）。
+                          仍保持"单字符 + rotate(90deg)"的口径不变（收起右指、展开下指，视角一致）。 */}
+                      <span className="problem-expand-glyph" aria-hidden="true">▶</span>
                     </button>
                   ) : (
                     <span className="problem-expand is-placeholder" aria-hidden="true" />

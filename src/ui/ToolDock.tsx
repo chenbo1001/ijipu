@@ -629,15 +629,38 @@ export function ToolDock() {
           }
         }}
       />
-      {/* 标题栏：面板页签（可横向滑动）+ 常驻右侧的档位按钮与关闭按钮
+      {/* 标题栏：**左端**常驻的档位按钮 + 可横向滑动的面板页签 + **右端**常驻的关闭按钮
        *
        * adj525（用户要求"档位按钮和关闭按钮固定在右侧，如顶栏的主题/支持；其它页签超出视界可左右滑动"）：
        * 结构拆成「**可滚的页签区** + **两个常驻按钮**」——页签多了只在页签区内滚动，
-       * 右侧两个按钮永远可见、永远点得到。
+       * 两个按钮永远可见、永远点得到。
        * 与顶栏 adj453 的修法同源：**"必须始终可见"的元素不要放进会溢出的滚动容器**，
        * 否则它们会被内容顶出可视区（此前正是如此：页签一溢出，两个按钮就被推到右边看不见，
-       * 得先滑到最后才能点）。`role="tablist"` 随之移到页签区（它才是"页签的容器"）。 */}
+       * 得先滑到最后才能点）。`role="tablist"` 随之移到页签区（它才是"页签的容器"）。
+       * adj531（用户要求"把高度调整按钮移到最左边，手机上左边操作更顺手，也避免误按关闭按钮"）：
+       * 档位按钮从 ✕ 左侧移到**页签区左边**，顺序成为「档位 → 页签 → ✕」（DOM 顺序与视觉一致，
+       * Tab 序也随之，不做 `order` 反转以免视觉与读屏/焦点序不一致）。于是：
+       *   · 手机单手拇指在左半屏就能切高度；
+       *   · ✕ 独自留在最右端、与档位按钮之间隔着**整条页签区**，够不到也就按不到。
+       * 两个按钮**仍在可滚页签区之外**（adj525 的口径完全不变），页签溢出只推动页签区内部滚动。 */}
       <div className="tool-dock-tabs">
+        {/* adj520：底栏高度档位切换按钮（单按钮，4 相位循环）——
+            循环表见模块级 `SIZE_PHASES`；高度序列
+            `建议 → 最大 → 建议 → 最小 → 建议 → …`，
+            图标（`上.png` / `下.png`）指示"点一下会往哪走"：
+            相位 0（建议→最大）上、1（最大→建议）下、2（建议→最小）下、3（最小→建议）上。
+            adj525：移出页签区 ⇒ 常驻（不被溢出的页签顶走）；adj531：常驻在**最左端**。 */}
+        <button
+          type="button"
+          className="tool-dock-size-btn"
+          onClick={cycleDockHeight}
+          title={dockCopy.sizeTitle(dockCopy.sizeName[sizeStep.cur], dockCopy.sizeName[sizeStep.next])}
+          aria-label={dockCopy.sizeTitle(dockCopy.sizeName[sizeStep.cur], dockCopy.sizeName[sizeStep.next])}
+          data-size={sizeStep.cur}
+          data-current={heightPresetActive}
+        >
+          <ToolIcon name={sizeStep.icon} size={14} />
+        </button>
         <div className="tool-dock-tabstrip" role="tablist">
           {TABS.map((t) => (
             <button
@@ -659,23 +682,6 @@ export function ToolDock() {
             </button>
           ))}
         </div>
-        {/* adj520：底栏高度档位切换按钮（单按钮，4 相位循环）——
-            循环表见模块级 `SIZE_PHASES`；高度序列
-            `建议 → 最大 → 建议 → 最小 → 建议 → …`，
-            图标（`上.png` / `下.png`）指示"点一下会往哪走"：
-            相位 0（建议→最大）上、1（最大→建议）下、2（建议→最小）下、3（最小→建议）上。
-            adj525：移出页签区 ⇒ 常驻右侧（不被溢出的页签顶走）。 */}
-        <button
-          type="button"
-          className="tool-dock-size-btn"
-          onClick={cycleDockHeight}
-          title={dockCopy.sizeTitle(dockCopy.sizeName[sizeStep.cur], dockCopy.sizeName[sizeStep.next])}
-          aria-label={dockCopy.sizeTitle(dockCopy.sizeName[sizeStep.cur], dockCopy.sizeName[sizeStep.next])}
-          data-size={sizeStep.cur}
-          data-current={heightPresetActive}
-        >
-          <ToolIcon name={sizeStep.icon} size={14} />
-        </button>
         <button type="button" className="tool-dock-close" onClick={closeDock} title={dockCopy.closeTitle} aria-label={dockCopy.closeTitle}>
           ✕
         </button>

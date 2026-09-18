@@ -1,15 +1,17 @@
 /**
  * ui/TopBar.tsx — 顶部栏（adj281：合并原 MenuBar + Toolbar）
  *
- * 布局（从左到右）：
- *   Logo（图标+标题） / 汉堡菜单 ☰ / 视图切换图标组（编码/拆分/预览） /
- *   <弹性间距> / 功能按钮组（排版辅助、试听、导出、设置）/ 缩放比率组（`-` `%` `+`）
+ * 布局（从左到右，adj530 重排）：
+ *   Logo（图标+标题） / 汉堡菜单 ☰ / ┌ 功能按钮组（靠左）┐ / ┌ 编辑设置组（靠右）┐ / 支持 / 更多 ⋮
+ *   功能按钮组：视图 · 排版 · 试听 · 导出 · 主题 · 设置 · 预览比率缩放
+ *   编辑设置组：折行 · 输入条 · 字体 · 字号
  *
- * - 除了缩放比率组外，其它按钮均为「图标 + 标题」（宽屏）；窄屏全部仅图标
- * - 窄屏下：功能按钮组 + 缩放组隐藏到右侧「⋮ 更多」下拉中，避免按钮溢出顶栏
- *   导致整页左右滚动；汉堡下拉与「更多」下拉均支持上下滚动 + 点击外部关闭
+ * - 除了缩放比率组、字号组外，其它按钮均为「图标 + 标题」（宽屏）；窄屏全部仅图标
+ * - 窗口继续变窄时，按**可见优先级**（TOOL_PRIORITY，末位 = 字号最先）逐个把按钮收进右侧
+ *   「⋮ 更多」下拉，避免按钮溢出顶栏导致整页左右滚动；汉堡下拉与「更多」下拉均支持上下滚动 +
+ *   点击外部关闭
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useDocStore, type ViewType } from '../store/docStore'
 import { useUiStore, PREVIEW_ZOOM_RANGE, PREVIEW_ZOOM_STEP, PREVIEW_ZOOM_LIMITS } from '../store/uiStore'
 import { clampEditorFontSize, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE } from '@ijipu/engine'
@@ -19,6 +21,8 @@ import { ToolIcon } from './ToolIcon'
 import { ScrubValue } from './ScrubValue'
 // adj529：双击比率值 → 按预览区宽度反算适配比例（纯算式，不新增状态）
 import { fitZoomFor } from '../preview/zoomFit'
+// adj530：顶栏「放不下就收进更多」的折叠判定（纯算式，便于 smoke 直接断言）
+import { foldKeys } from './topbarFold'
 
 /** Alt+字母 → 菜单分组（adj185）
  *  adj383：主题组已移入「页面设置」对话框的「主题」标签，Alt+T 菜单分组随之取消 */
@@ -99,6 +103,64 @@ const normViewKey = (k: ViewType): string => (k === 'splitHE' ? 'splitH' : k)
 
 /** 查当前视图在 VIEWS 中的条目（splitHE 归入 splitH 条目，保证顶栏图标/标签正确显示） */
 const viewItem = (k: ViewType) => VIEWS.find((v) => v.key === normViewKey(k))
+
+/** adj530：顶栏可折叠按钮的键——与「更多」下拉、折叠优先级、测量用的 `data-tool-key` 一一对应 */
+type ToolKey =
+  | 'view'
+  | 'guides'
+  | 'playback'
+  | 'export'
+  | 'themeMode'
+  | 'pageConfig'
+  | 'zoom'
+  | 'autoWrap'
+  | 'scriptPad'
+  | 'font'
+  | 'fontSize'
+  | 'donate'
+
+/** adj530：按钮定义——只描述"这个按钮是什么"（文案/渲染分支/选中态/动作） */
+interface ToolDef {
+  key: ToolKey
+  label: string
+  kind: 'btn' | 'view' | 'theme' | 'zoom' | 'font' | 'fontSize'
+  active?: boolean
+  onPick?: () => void
+}
+
+/**
+ * adj530（用户要求）：顶栏按钮的**可见优先级**——数组靠前 = 越晚被收进「更多」。
+ *
+ * 用户口径：「保证下列按钮可见优先级按…来排：视图、支持、排版、试听、导出、主题、设置、
+ * 预览比率、折行、输入条、字体、字号」——即窗口变窄时**从本数组末位（字号）开始**逐个折叠，
+ * 与一直以来的模式一致（原先的贪心也是从右端先少显示，最右侧的编辑设置组先走）。
+ *
+ * 本数组**只描述"谁先消失"**，不决定显示顺序——显示顺序见 FN_ORDER / EDIT_ORDER。
+ * 想调整"谁先消失"就改这一行（用户给的顺序就是本数组顺序）。
+ */
+const TOOL_PRIORITY: readonly ToolKey[] = [
+  'view',
+  'donate',
+  'guides',
+  'playback',
+  'export',
+  'themeMode',
+  'pageConfig',
+  'zoom',
+  'autoWrap',
+  'scriptPad',
+  'font',
+  'fontSize',
+]
+
+/** adj530（用户要求）：功能按钮组（左侧）内的显示顺序——视图、排版、试听、导出、主题、设置、预览比率缩放 */
+const FN_ORDER: readonly ToolKey[] = ['view', 'guides', 'playback', 'export', 'themeMode', 'pageConfig', 'zoom']
+
+/** adj530（用户要求）：编辑设置组（右侧）内的显示顺序——折行、输入条、字体、字号 */
+const EDIT_ORDER: readonly ToolKey[] = ['autoWrap', 'scriptPad', 'font', 'fontSize']
+
+/** adj530：「更多」下拉里条目的排列顺序 = 两个组的显示顺序，最后接独立成组的「支持」 */
+const OVERFLOW_ORDER: readonly ToolKey[] = [...FN_ORDER, ...EDIT_ORDER, 'donate']
 
 export function TopBar() {
   // ---- 文档 store ----
@@ -183,33 +245,89 @@ export function TopBar() {
     setViewOpen(false)
   }
 
-  // ---- adj：功能按钮溢出（顶栏尽量显示，放不下的进「更多」下拉） ----
-  // 可见按钮数（前 N 个放在顶栏工具条，其余收进「更多」）；缩放组仅预览/拆分视图显示
+  // ---- adj530：功能按钮溢出（顶栏尽量显示，放不下的按可见优先级进「更多」下拉） ----
+  // 缩放组仅预览/拆分视图显示
   const showZoom = viewType !== 'code'
-  // 工具条按钮配置（顺序即顶栏工具条显示顺序；group: topbar=功能组 / footer=设置组）
-  const toolBtns = [
-    // —— 功能组（原顶栏功能按钮组） ——
-    { key: 'guides', label: '排版', group: 'topbar' as const, kind: 'btn' as const, active: showGuides, onPick: () => setShowGuides(!showGuides) },
+  /**
+   * adj530（用户要求）：按钮定义**按 key 查表**。
+   * 此前是一个顺序数组 + 按序号切片（"前 N 个显示"）——隐含"折叠就是从后往前连续截断"；
+   * 现在折叠改为按可见优先级挑**任意**按钮，因此必须能按键取到定义。三件事彻底解耦：
+   *   · 显示顺序 → FN_ORDER / EDIT_ORDER（组内）
+   *   · 折叠先后 → TOOL_PRIORITY
+   *   · 本表       → 只描述"这个按钮是什么"（文案 / 渲染分支 / 选中态 / 动作）
+   */
+  const toolDefs: Record<ToolKey, ToolDef> = {
+    // —— 功能组（左侧，靠左对齐） ——
+    // adj530：视图下拉按钮由"顶栏独立常驻"并入功能组首位（用户要求：视图 -> 靠左的组内第一个）
+    view: { key: 'view', label: '视图', kind: 'view' },
+    guides: {
+      key: 'guides',
+      label: '排版',
+      kind: 'btn',
+      active: showGuides,
+      onPick: () => setShowGuides(!showGuides),
+    },
     // adj384：音色库按钮已移除（移入「设置 → 音色库」标签）
     // adj462：试听/导出/设置三个按钮改为**底部 dock 的入口（开关）**——不再打开对话框：
     //   dock 关 → 展开并切到该面板；已开且正是该面板 → 收起 dock；已开但不是该面板 → 只切面板。
     //   面板本体的状态（播放进度/导出选项/设置页签）由 dock 保持挂载而保留。
-    { key: 'playback', label: '试听', group: 'topbar' as const, kind: 'btn' as const, active: dockOpen && dockPanel === 'tryout', onPick: () => toggleDock('tryout') },
-    // adj415：功能组内「导出」与「设置」位置对调（导出在前、设置在后）。
-    // 本数组顺序即顶栏显示顺序，同时决定「更多」下拉里的排列与折叠测量的顺序——改这一处即可。
-    { key: 'export', label: '导出', group: 'topbar' as const, kind: 'btn' as const, active: dockOpen && dockPanel === 'export', onPick: () => toggleDock('export') },
-    { key: 'pageConfig', label: '设置', group: 'topbar' as const, kind: 'btn' as const, active: dockOpen && dockPanel === 'settings', onPick: () => toggleDock('settings') },
-    { key: 'zoom', label: '缩放', group: 'topbar' as const, kind: 'zoom' as const, show: showZoom },
-    // —— 设置组（从状态栏移来） ——
-    { key: 'autoWrap', label: '折行', group: 'footer' as const, kind: 'btn' as const, active: autoWrap, onPick: () => setAutoWrap(!autoWrap) },
-    { key: 'scriptPad', label: '输入条', group: 'footer' as const, kind: 'btn' as const, active: showScriptPad, onPick: () => setShowScriptPad(!showScriptPad) },
-    // adj407：编辑器字体选择框在窄屏模式下不显示（顶栏与「更多」里都不出现；
-    // 设置项本身仍在「页面设置 → 全局 → 编辑器字体」，不会被弄丢）
-    { key: 'font', label: '字体', group: 'footer' as const, kind: 'font' as const, show: !isNarrow },
-    { key: 'fontSize', label: '字号', group: 'footer' as const, kind: 'fontSize' as const, show: true },
-    // adj407：统一按 show 过滤（此前只对 kind==='zoom' 生效）——俯仰视图/窄屏的隐藏项
-    // 必须在**测量容器**里也一并去掉，否则隐藏项仍占宽度预算、把本可显示的按钮挤进「更多」
-  ].filter((t) => !('show' in t) || t.show)
+    playback: {
+      key: 'playback',
+      label: '试听',
+      kind: 'btn',
+      active: dockOpen && dockPanel === 'tryout',
+      onPick: () => toggleDock('tryout'),
+    },
+    // adj415：功能组内「导出」与「设置」位置对调（导出在前、设置在后）——显示顺序见 FN_ORDER
+    export: {
+      key: 'export',
+      label: '导出',
+      kind: 'btn',
+      active: dockOpen && dockPanel === 'export',
+      onPick: () => toggleDock('export'),
+    },
+    // adj426：浅深模式三状态按钮（adj530 由顶栏独立常驻并入功能组）——
+    // 图标与文字随当前档位切换，与「设置 → 主题 → 浅深模式」共用 store
+    themeMode: { key: 'themeMode', label: '主题', kind: 'theme' },
+    pageConfig: {
+      key: 'pageConfig',
+      label: '设置',
+      kind: 'btn',
+      active: dockOpen && dockPanel === 'settings',
+      onPick: () => toggleDock('settings'),
+    },
+    zoom: { key: 'zoom', label: '缩放', kind: 'zoom' },
+    // —— 编辑设置组（右侧，靠右对齐） ——
+    autoWrap: {
+      key: 'autoWrap',
+      label: '折行',
+      kind: 'btn',
+      active: autoWrap,
+      onPick: () => setAutoWrap(!autoWrap),
+    },
+    scriptPad: {
+      key: 'scriptPad',
+      label: '输入条',
+      kind: 'btn',
+      active: showScriptPad,
+      onPick: () => setShowScriptPad(!showScriptPad),
+    },
+    font: { key: 'font', label: '字体', kind: 'font' },
+    fontSize: { key: 'fontSize', label: '字号', kind: 'fontSize' },
+    // —— 独立成组（不套组框、也不在两组里，但同样参与可见优先级折叠） ——
+    donate: { key: 'donate', label: '支持', kind: 'btn', onPick: () => openModal('donate') },
+  }
+  /**
+   * adj530：某按钮当前是否**适用**（沿用原 `show` 口径，与折叠无关）：
+   *   · 比率组只在预览/拆分视图有意义（编码视图没有预览区）
+   *   · adj407：字体按钮窄屏不显示（顶栏与「更多」里都不出现；
+   *     设置项本身仍在「设置 → 全局 → 编辑器字体」，不会被弄丢）
+   * 不适用的按钮**不进入折叠计算**——否则隐藏项仍占宽度预算，把本可显示的按钮挤进「更多」。
+   */
+  const isApplicable = useCallback(
+    (k: ToolKey): boolean => (k === 'zoom' ? showZoom : k === 'font' ? !isNarrow : true),
+    [showZoom, isNarrow],
+  )
   // 字体 split-button 状态（从状态栏移来，下拉从顶栏向下展开）
   const [fontOpen, setFontOpen] = useState(false)
   const fontRef = useRef<HTMLSpanElement>(null)
@@ -236,12 +354,14 @@ export function TopBar() {
 
   /**
    * adj386：字体下拉改 `position: fixed` + 按按钮实测位置定位。
-   * 原因：字体按钮在 `.topbar-toolbar` 内，而该容器 `overflow: hidden`（用于裁掉横向溢出的按钮），
+   * 原因：字体按钮在 `.topbar-toolbar` 内，而该容器对横向溢出做裁剪（用于裁掉横向溢出的按钮），
    * 向下弹出的下拉被它裁掉——DOM 与几何都正常，但**根本没画出来**（命中测试落到下方编辑器 textarea），
    * 表现就是"顶栏字体下拉打不开"。fixed 定位脱离祖先裁切，视觉效果仍是贴按钮右缘向下弹出。
+   * （adj530：该容器已改为 `overflow-x: clip` + `overflow-y: visible`，纵向不再裁；字体下拉的
+   *  fixed 定位照旧保留——已验证可用，不做无谓改动。视图下拉则用容器上的 `.open` 放开裁剪。）
    *
    * adj388：锚点改为**点击事件里的那个按钮**（`e.currentTarget`）而不是靠 ref 反查——避免顶栏重排
-   * （visCount 变化/旋转/缩放）后 ref 指向的按钮与用户点的不是同一个导致跑偏；并做**视口双向钳制**
+   * （按钮折叠结果变化/旋转/缩放）后 ref 指向的按钮与用户点的不是同一个导致跑偏；并做**视口双向钳制**
    * （横向夹在 [8, clientWidth - 宽 - 8]，纵向不越过视口底），在 resize/滚动时实时重算。
    */
   const [fontDdPos, setFontDdPos] = useState<{ top: number; left: number; width: number } | null>(null)
@@ -260,16 +380,19 @@ export function TopBar() {
     const top = Math.min(r.bottom + 6, Math.max(margin, ch - 60))
     setFontDdPos({ top: Math.round(top), left: Math.round(left), width: Math.round(width) })
   }, [])
-  const [visCount, setVisCount] = useState(toolBtns.length)
+  // adj530：被折叠进「更多」的按钮键（按**可见优先级从低到高**依次折叠，见下方测量算法）
+  const [hiddenKeys, setHiddenKeys] = useState<readonly ToolKey[]>([])
+  /** adj530：顶栏上真正显示的按钮键（适用 且 未被折叠） */
+  const shownKeys = new Set<ToolKey>(TOOL_PRIORITY.filter((k) => isApplicable(k) && !hiddenKeys.includes(k)))
+  /** adj530：「更多」下拉里的按钮键——按**显示顺序**排（功能组 → 编辑设置组 → 支持），与折叠先后无关 */
+  const hiddenList = OVERFLOW_ORDER.filter((k) => isApplicable(k) && hiddenKeys.includes(k))
   const btnsRef = useRef<HTMLDivElement>(null) // .topbar-buttons（功能组可见区）
   const settingsRef = useRef<HTMLDivElement>(null) // .topbar-settings（设置组可见区）
   const toolbarRef = useRef<HTMLDivElement>(null) // .topbar-toolbar（工具条）
   const measureRef = useRef<HTMLDivElement>(null) // 隐藏测量容器（渲染全部按钮量宽）
   const moreMeasureRef = useRef<HTMLButtonElement>(null) // 「更多」按钮的隐形副本（实测槽位宽）
-  const overflowBtnRef = useRef<HTMLDivElement>(null) // 「更多」按钮容器
+  const donateMeasureRef = useRef<HTMLButtonElement>(null) // 「支持」按钮的隐形副本（实测槽位宽，含外边距）
   const overflowDropdownRef = useRef<HTMLDivElement>(null) // 「更多」下拉容器
-  const donateRef = useRef<HTMLButtonElement>(null) // 「支持作者」独立按钮（宽度计入测量预算）
-  const themeModeRef = useRef<HTMLButtonElement>(null) // 浅深三状态按钮（宽度计入测量预算，adj453）
   // adj：视口很窄时下拉可能向左溢出视口，用 translateX 把它拉回视口内
   const [overflowShiftX, setOverflowShiftX] = useState(0)
   useLayoutEffect(() => {
@@ -325,7 +448,7 @@ export function TopBar() {
   useLayoutEffect(() => {
     if (!fontOpen) return
     placeFontDropdown(fontBtnRef.current)
-  }, [fontOpen, placeFontDropdown, visCount, isNarrow, previewZoom])
+  }, [fontOpen, placeFontDropdown, hiddenKeys, isNarrow, previewZoom])
 
   useEffect(() => {
     if (!fontOpen) return
@@ -372,8 +495,114 @@ export function TopBar() {
     }
   }
 
+  /**
+   * adj530：视图选项条目——**视图下拉**与**「更多」里被折叠的「视图」**共用同一份渲染
+   * （视图按钮本身也能被折叠，折叠后仍要能切视图，行为与下拉一致）。
+   * 点击后两个浮层都收起（二者互斥，同时关不会互相干扰）。
+   */
+  const renderViewEntries = () =>
+    // adj385：窄屏下拆分固定为上下，不再列出「左右拆分」（对窄屏没有意义）
+    VIEWS.filter((v) => !(isNarrow && v.key === 'splitH')).map((v) => {
+      // adj315：splitH/splitHE 归入同一「左右拆分」条目；active 用归一化 key 判断
+      const isActive = normViewKey(viewType) === v.key
+      return (
+        <div
+          key={v.key}
+          className={`menu-entry${isActive ? ' active' : ''}`}
+          onClick={() => {
+            // 点「左右拆分」按当前 splitHDir 决定方向（previewLeft→splitH / editorLeft→splitHE）
+            setViewType(v.key === 'splitH' ? (splitHDir === 'editorLeft' ? 'splitHE' : 'splitH') : v.key)
+            closeView()
+            closeOverflow()
+          }}
+        >
+          {v.icon}
+          <span>{v.label}</span>
+          {isActive && <span style={{ marginLeft: 'auto', color: 'var(--jp-accent)' }}>✓</span>}
+        </div>
+      )
+    })
+
   // 顶栏按钮渲染（用于可见区 / 隐藏测量容器）
-  const renderBtn = (t: (typeof toolBtns)[number], measuring = false) => {
+  const renderBtn = (t: ToolDef, measuring = false) => {
+    if (t.kind === 'view') {
+      /**
+       * adj530：视图下拉按钮——此前是顶栏左侧的独立常驻项，现并入功能组（组内第一位，靠左）。
+       * 下拉仍锚在 `.topbar-views`（`position: relative`）上，展开/选中行为完全不变。
+       * `measuring`（隐藏测量容器里的那份）不挂 ref、也不渲染下拉——与字体按钮同样的理由（adj386）：
+       * 否则同一个 ref 会被后渲染的测量实例覆盖，下拉会按"测量容器里那个按钮"的坐标定位。
+       */
+      return (
+        <div className={`topbar-views${viewOpen ? ' open' : ''}`} ref={measuring ? undefined : viewRef} key={t.key}>
+          <button
+            type="button"
+            className={`topbar-btn topbar-view-btn${viewOpen ? ' active' : ''}`}
+            onClick={() => {
+              setMenuOpen(false)
+              setOverflowOpen(false)
+              setViewOpen((v) => !v)
+            }}
+            title="切换视图"
+            aria-label="切换视图"
+            aria-expanded={viewOpen}
+          >
+            {viewItem(viewType)?.icon}
+            <span className="tool-label">{viewItem(viewType)?.label}</span>
+            {/* adj408：下拉指示箭头改用 public/icons/下.png（与其余按钮图标同一套上色） */}
+            <span className="arrow">
+              <ToolIcon name="down" size={9} />
+            </span>
+          </button>
+          {!measuring && viewOpen && (
+            <div
+              className="menu-dropdown topbar-view-dropdown"
+              ref={viewDdRef}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {renderViewEntries()}
+            </div>
+          )}
+        </div>
+      )
+    }
+    if (t.kind === 'theme') {
+      // adj426/adj530：浅深模式三状态按钮（在功能组内「导出」与「设置」之间）——
+      // 点一次循环到下一档：auto → light → dark → auto；图标与文字随当前档位切换。
+      // 与「设置 → 主题 → 浅深模式」三个按钮共用 store（uiStore.setThemeMode），状态实时同步。
+      return (
+        <button
+          type="button"
+          className="topbar-btn topbar-theme-mode"
+          onClick={() => {
+            const next: Record<typeof themeMode, typeof themeMode> = {
+              auto: 'light',
+              light: 'dark',
+              dark: 'auto',
+            }
+            setThemeMode(next[themeMode])
+          }}
+          title={
+            themeMode === 'auto'
+              ? '浅深模式：随系统（点击切到浅色）'
+              : themeMode === 'light'
+                ? '浅深模式：浅色（点击切到深色）'
+                : '浅深模式：深色（点击切到随系统）'
+          }
+          aria-label={
+            themeMode === 'auto'
+              ? '浅深模式 当前为随系统，点击切到浅色'
+              : themeMode === 'light'
+                ? '浅深模式 当前为浅色，点击切到深色'
+                : '浅深模式 当前为深色，点击切到随系统'
+          }
+        >
+          {iconOf(themeMode === 'auto' ? 'themeAuto' : themeMode === 'light' ? 'themeLight' : 'themeDark')}
+          <span className="tool-label">
+            {themeMode === 'auto' ? '自动' : themeMode === 'light' ? '浅色' : '深色'}
+          </span>
+        </button>
+      )
+    }
     if (t.kind === 'zoom') {
       return (
         <div className="topbar-zoom" key={t.key}>
@@ -517,7 +746,46 @@ export function TopBar() {
   }
 
   // 「更多」下拉里的条目渲染（图标 + 标题，宽屏显示标题）
-  const renderOverflowItem = (t: (typeof toolBtns)[number]) => {
+  const renderOverflowItem = (t: ToolDef) => {
+    if (t.kind === 'view') {
+      // adj530：「视图」被折叠后，在下拉里给出与视图下拉**同一份**选项（当前项打 ✓）
+      return (
+        <>
+          <div className="menu-sep" key={`${t.key}-sep`} />
+          <div className="menu-group-title" key={`${t.key}-title`}>视图</div>
+          {renderViewEntries()}
+        </>
+      )
+    }
+    if (t.kind === 'theme') {
+      // adj530：「主题（浅深三状态）」被折叠后，三个档位各自成条（当前档位打 ✓）——
+      // 与顶栏那个"点一次循环一档"的按钮等价，但少点两次；仍写同一个 store action。
+      const modes: { key: typeof themeMode; label: string }[] = [
+        { key: 'auto', label: '随系统' },
+        { key: 'light', label: '浅色' },
+        { key: 'dark', label: '深色' },
+      ]
+      return (
+        <>
+          <div className="menu-sep" key={`${t.key}-sep`} />
+          <div className="menu-group-title" key={`${t.key}-title`}>浅深模式</div>
+          {modes.map((m) => (
+            <div
+              key={m.key}
+              className="menu-entry"
+              onClick={() => {
+                setThemeMode(m.key)
+                closeOverflow()
+              }}
+            >
+              {iconOf(m.key === 'auto' ? 'themeAuto' : m.key === 'light' ? 'themeLight' : 'themeDark')}
+              <span>{m.label}</span>
+              {themeMode === m.key && <span style={{ marginLeft: 'auto', color: 'var(--jp-accent)' }}>✓</span>}
+            </div>
+          ))}
+        </>
+      )
+    }
     if (t.kind === 'zoom') {
       return (
         <>
@@ -602,7 +870,7 @@ export function TopBar() {
         key={t.key}
         className="menu-entry"
         onClick={() => {
-          t.onPick()
+          t.onPick?.()
           closeOverflow()
         }}
       >
@@ -613,7 +881,8 @@ export function TopBar() {
     )
   }
 
-  // 测量可用宽度 → 贪心按组(顶栏/设置)分配 visCount（useLayoutEffect 在绘制前执行，避免闪烁溢出）
+  // adj530：测量可用宽度 → 按**可见优先级**从低到高逐个把按钮收进「更多」
+  // （useLayoutEffect 在绘制前执行，避免闪烁溢出）
   useLayoutEffect(() => {
     const measure = () => {
       const topbar = topbarRef.current
@@ -623,13 +892,15 @@ export function TopBar() {
       const pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0)
       const gap = parseFloat(cs.gap) || 4
       /**
-       * adj453：**右侧常驻项全部先扣预算**——浅深三状态 / 支持作者 / 更多 三个按钮必须完整落在
-       * 顶栏右侧。用户报障「手机上三点只露一半、部分机型完全看不到」的根因有二：
+       * adj453：**常驻槽位全部先扣预算**——「支持」与「更多」两个按钮必须完整落在顶栏右侧。
+       * 用户当年报障「手机上三点只露一半、部分机型完全看不到」的根因有二：
        *   ① 老代码只扣了「支持作者」的宽度，**漏了浅深三状态按钮**（约 36px）；
-       *   ② 顶栏 flex 间距只扣了 1 个 `gap`，实际有 6~7 个（每个 4~6px）。
+       *   ② 顶栏 flex 间距只扣了 1 个 `gap`，实际有 5~6 个（每个 6px）。
        * 两者叠加使预算比真实可用宽度多出 ~40px → 工具条按虚高预算多留按钮 → 顶栏总额超出视口，
-       * 而工具条 `flex-shrink:0` 会把最后一个子项「更多」直接顶出视口右缘（被裁一半或整颗不见）。
-       * 现在：常驻项宽度**含外边距**实测 + 间距按**实际在流子项数**算 + 2px 安全余量。
+       * 而最后一个子项「更多」直接被顶出视口右缘（被裁一半或整颗不见）。
+       * 现在：槽位宽度**含外边距实测**（测量容器里各放了一份隐形副本）+ 间距按**实际在流子项数**算
+       * + 2px 安全余量。adj530：两者都取实测值（而非"当前是否显示"）——否则会抖动：
+       * "按钮消失→预算变大→按钮又出现"。
        */
       const outerW = (el: Element | null): number => {
         if (!el) return 0
@@ -638,23 +909,12 @@ export function TopBar() {
           el.getBoundingClientRect().width + (parseFloat(s.marginLeft) || 0) + (parseFloat(s.marginRight) || 0)
         )
       }
-      const fix = (sel: string) => outerW(topbar.querySelector(sel))
-      /**
-       * 「更多」按钮槽位**恒定预留**，且取**实测宽**（测量容器里放了它的隐形副本，见 JSX）——
-       * 与可见的「更多」当前是否存在无关，因此 visCount 不会随它有无而变，杜绝
-       * "按钮消失→预算变大→按钮又出现"的抖动；也不用估值，窄屏不会白扣几个像素。
-       */
-      const ovReserve = moreMeasureRef.current ? outerW(moreMeasureRef.current) : 30
-      const fixedW =
-        fix('.topbar-brand') + fix('.topbar-hamburger') + fix('.topbar-views') +
-        outerW(themeModeRef.current) + outerW(donateRef.current)
-      // 顶栏在流内的子项：Logo / 汉堡 / 视图 / 弹性间距 / 工具条 / 浅深 / 支持 [/ 更多]
-      // 间距数 = 子项数 − 1，按**含「更多」的最坏情况**算（「更多」未渲染时补 +1）
-      const flowKids = Array.from(topbar.children).filter((el) => getComputedStyle(el).position !== 'absolute')
-      const gapCount = Math.max(0, flowKids.length - 1 + (overflowBtnRef.current ? 0 : 1))
+      const donateSlot = outerW(donateMeasureRef.current)
+      const moreSlot = moreMeasureRef.current ? outerW(moreMeasureRef.current) : 30
+      // 顶栏左侧固定项：Logo + 汉堡（adj530：视图/主题已并入功能组，不再是常驻项）
+      const fixedW = outerW(topbar.querySelector('.topbar-brand')) + outerW(topbar.querySelector('.topbar-hamburger'))
       const SAFE = 2 // 安全余量：抵消亚像素取整（getBoundingClientRect 小数累加）带来的溢出
-      const avail = topbar.clientWidth - pad - gap * gapCount - fixedW - ovReserve - SAFE
-      // 测量每个按钮宽——**按 key 取**（不依赖测量容器里的 DOM 顺序，与 toolBtns 一一对应）。
+      // 测量每个按钮宽——**按 key 取**（不依赖测量容器里的 DOM 顺序，与 toolDefs 一一对应）。
       // 注意量的是包裹 span 的**第一个元素子节点**：包裹层是 `display:contents`（为了与实际
       // 工具条布局一致）本身不产生盒子，getBoundingClientRect 恒为 0，直接量它会得到全 0 宽度。
       const widthByKey = new Map<string, number>()
@@ -662,14 +922,13 @@ export function TopBar() {
         const box = el.firstElementChild instanceof HTMLElement ? el.firstElementChild : el
         widthByKey.set(el.dataset.toolKey ?? '', box.getBoundingClientRect().width)
       })
-      const widths = toolBtns.map((t) => widthByKey.get(t.key) ?? 0)
       /**
        * adj414：两个组的「盒子开销」（左右 padding + 左右 border）与**组内按钮间距**
        * 改为**从实际容器上读**，不再写死 `4 + … * 2`。
-       * 起因：本次取消了功能组/设置组的组框（background/border/radius/padding 全去掉），
+       * 起因：曾经取消过功能组/设置组的组框（background/border/padding 全去掉），
        * 若仍按写死的「padding 4 + gap 2」计算，宽度预算会比实际多算 → 本可显示的按钮被提前
        * 挤进「更多」（正是 E-2026-143 同一类"CSS 改了、宽度预算没跟上"的坑）。
-       * 读活值后 CSS 怎么调都自动同步。
+       * 读活值后 CSS 怎么调都自动同步。工具条自身的开销/间距同理（当前为 0，读了防以后加）。
        */
       const boxOf = (sel: string): { overhead: number; gap: number } => {
         const el = topbar.querySelector<HTMLElement>(sel)
@@ -684,30 +943,32 @@ export function TopBar() {
       }
       const box1 = boxOf('.topbar-buttons')
       const box2 = boxOf('.topbar-settings')
-      // 贪心：按 toolBtns 顺序累计，按 group 分两组
-      let n1 = 0
-      let n2 = 0
-      let w1 = 0
-      let w2 = 0
-      for (let i = 0; i < toolBtns.length; i++) {
-        const isT = toolBtns[i].group === 'topbar'
-        const newN1 = n1 + (isT ? 1 : 0)
-        const newN2 = n2 + (isT ? 0 : 1)
-        const newW1 = w1 + (isT ? widths[i] : 0)
-        const newW2 = w2 + (isT ? 0 : widths[i])
-        // 组宽 = 盒子开销（padding+border）+ 按钮宽和 + 按钮间 gap×(n−1)（adj414：均为实测值）
-        const group1 = newN1 > 0 ? box1.overhead + newW1 + (newN1 - 1) * box1.gap : 0
-        const group2 = newN2 > 0 ? box2.overhead + newW2 + (newN2 - 1) * box2.gap : 0
-        // 总宽：两组合框 + 工具条内两组间 gap 4
-        const total = group1 + (newN1 > 0 && newN2 > 0 ? 4 : 0) + group2
-        if (total <= avail) {
-          n1 = newN1
-          n2 = newN2
-          w1 = newW1
-          w2 = newW2
-        } else break
-      }
-      setVisCount(n1 + n2)
+      const tbox = boxOf('.topbar-toolbar')
+      /**
+       * adj530：折叠判定交给纯算式 `ui/topbarFold.ts`（可被 smoke 直接断言）——
+       * 本处只负责"量"（每个按钮多宽、各盒子开销、可用宽）与"读活值"，
+       * "谁先被折叠"的规则全在那个模块里，两份逻辑不会漂移。
+       */
+      setHiddenKeys((prev) => {
+        const hidden = foldKeys({
+          priority: TOOL_PRIORITY.filter(isApplicable),
+          widthByKey,
+          fnKeys: FN_ORDER.filter(isApplicable),
+          editKeys: EDIT_ORDER.filter(isApplicable),
+          fnBox: box1,
+          editBox: box2,
+          toolbar: tbox,
+          fixedW,
+          donateW: donateSlot,
+          moreW: moreSlot,
+          pad,
+          gap,
+          totalW: topbar.clientWidth,
+          safe: SAFE,
+        })
+        // 只在结果真的变化时写 state：ResizeObserver 每次回调都 setState 会白白多一轮重渲染
+        return prev.length === hidden.length && prev.every((k, i) => k === hidden[i]) ? prev : hidden
+      })
     }
     measure()
     const ro = new ResizeObserver(() => measure())
@@ -718,7 +979,7 @@ export function TopBar() {
       ro.disconnect()
       window.removeEventListener('resize', measure)
     }
-  }, [showZoom])
+  }, [isApplicable])
 
   // adj281：点击外部关闭任意打开的下拉（汉堡 / 更多 / 视图）；同时支持 Esc 关闭
   useEffect(() => {
@@ -880,133 +1141,52 @@ export function TopBar() {
         )}
       </div>
 
-      {/* 视图切换（adj314：改为下拉按钮，减少宽度占用） */}
-      <div className="topbar-views" ref={viewRef}>
-        <button
-          type="button"
-          className={`topbar-btn topbar-view-btn${viewOpen ? ' active' : ''}`}
-          onClick={() => {
-            setMenuOpen(false)
-            setOverflowOpen(false)
-            setViewOpen((v) => !v)
-          }}
-          title="切换视图"
-          aria-label="切换视图"
-          aria-expanded={viewOpen}
-        >
-          {viewItem(viewType)?.icon}
-          <span className="tool-label">{viewItem(viewType)?.label}</span>
-          {/* adj408：下拉指示箭头改用 public/icons/下.png（与其余按钮图标同一套上色） */}
-          <span className="arrow">
-            <ToolIcon name="down" size={9} />
-          </span>
-        </button>
-        {viewOpen && (
-          <div
-            className="menu-dropdown topbar-view-dropdown"
-            ref={viewDdRef}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* adj385：窄屏下拆分固定为上下，不再列出「左右拆分」（对窄屏没有意义） */}
-            {VIEWS.filter((v) => !(isNarrow && v.key === 'splitH')).map((v) => {
-              // adj315：splitH/splitHE 归入同一「左右拆分」条目；active 用归一化 key 判断
-              const isActive = normViewKey(viewType) === v.key
-              return (
-                <div
-                  key={v.key}
-                  className={`menu-entry${isActive ? ' active' : ''}`}
-                  onClick={() => {
-                    // 点「左右拆分」按当前 splitHDir 决定方向（previewLeft→splitH / editorLeft→splitHE）
-                    setViewType(v.key === 'splitH' ? (splitHDir === 'editorLeft' ? 'splitHE' : 'splitH') : v.key)
-                    closeView()
-                  }}
-                >
-                  {v.icon}
-                  <span>{v.label}</span>
-                  {isActive && <span style={{ marginLeft: 'auto', color: 'var(--jp-accent)' }}>✓</span>}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="topbar-spacer" />
-
-      {/* 工具条：**只**容纳可折叠的功能组 + 设置组（放不下的按钮收进右侧「更多」下拉）。
-          adj453：常驻的浅深三状态 /「支持作者」已移出本容器——本容器带 `overflow:hidden`
-          （用于裁掉超出 visCount 的按钮），常驻按钮放在里面会被裁掉或被挤出视口。 */}
+      {/* 工具条（adj530）：**功能按钮组靠左 + 编辑设置组靠右**，放不下的按钮按可见优先级
+          收进右侧「更多」下拉。
+          · 视图下拉按钮与浅深三状态按钮**已并入功能组**（见 renderBtn），不再是顶栏独立项；
+          · 原本的「弹性间距」占位 div 取消——"左组靠左、右组靠右"改由本容器（`flex: 1 1 auto`）
+            加右组 `margin-left: auto` 实现（两层弹性叠加容易互相打架）；
+          · adj453：常驻的「支持 / 更多」仍在本容器**之外**——本容器对横向溢出做裁剪
+            （用于裁掉工具条自身的意外溢出），常驻按钮放在里面会被裁掉或被挤出视口。 */}
       <div className="topbar-toolbar" ref={toolbarRef}>
         <div className="topbar-buttons" ref={btnsRef}>
-          {toolBtns.slice(0, visCount).filter((t) => t.group === 'topbar').map((t) => (
-            <span data-tool-key={t.key} key={t.key} style={{ display: 'contents' }}>
-              {renderBtn(t)}
+          {FN_ORDER.filter((k) => shownKeys.has(k)).map((k) => (
+            <span data-tool-key={k} key={k} style={{ display: 'contents' }}>
+              {renderBtn(toolDefs[k])}
             </span>
           ))}
         </div>
         <div className="topbar-settings" ref={settingsRef}>
-          {toolBtns.slice(0, visCount).filter((t) => t.group === 'footer').map((t) => (
-            <span data-tool-key={t.key} key={t.key} style={{ display: 'contents' }}>
-              {renderBtn(t)}
+          {EDIT_ORDER.filter((k) => shownKeys.has(k)).map((k) => (
+            <span data-tool-key={k} key={k} style={{ display: 'contents' }}>
+              {renderBtn(toolDefs[k])}
             </span>
           ))}
         </div>
       </div>
 
-      {/* adj453：顶栏右侧三个**常驻**按钮（浅深三状态 → 支持作者 → 更多）——
-          直接挂在 `.topbar` 下（不再放进带 `overflow:hidden` 的 `.topbar-toolbar`），
-          并统一 `flex-shrink:0`：无论工具条怎么压缩、屏幕多窄，它们都完整固定在顶栏右侧。 */}
-      {/* adj426：浅深模式三状态按钮（位于「支持」之前，独立于工具条常驻）——
-             点一次循环到下一档：auto → light → dark → auto；图标与文字随当前档位切换。
-             与「设置 → 主题 → 浅深模式」三个按钮共用 store（uiStore.setThemeMode），状态实时同步。 */}
-      <button
-        ref={themeModeRef}
-        type="button"
-        className="topbar-btn topbar-theme-mode"
-        onClick={() => {
-          const next: Record<typeof themeMode, typeof themeMode> = {
-            auto: 'light',
-            light: 'dark',
-            dark: 'auto',
-          }
-          setThemeMode(next[themeMode])
-        }}
-        title={
-          themeMode === 'auto'
-            ? '浅深模式：随系统（点击切到浅色）'
-            : themeMode === 'light'
-              ? '浅深模式：浅色（点击切到深色）'
-              : '浅深模式：深色（点击切到随系统）'
-        }
-        aria-label={
-          themeMode === 'auto'
-            ? '浅深模式 当前为随系统，点击切到浅色'
-            : themeMode === 'light'
-              ? '浅深模式 当前为浅色，点击切到深色'
-              : '浅深模式 当前为深色，点击切到随系统'
-        }
-      >
-        {iconOf(themeMode === 'auto' ? 'themeAuto' : themeMode === 'light' ? 'themeLight' : 'themeDark')}
-        <span className="tool-label">
-          {themeMode === 'auto' ? '自动' : themeMode === 'light' ? '浅色' : '深色'}
-        </span>
-      </button>
-      {/* 支持作者：常驻顶栏右侧（不参与功能组/设置组折叠，始终可见） */}
-      <button
-        ref={donateRef}
-        type="button"
-        className="topbar-btn topbar-donate"
-        onClick={() => openModal('donate')}
-        title="支持作者"
-        aria-label="支持作者"
-      >
-        {iconOf('donate')}
-        <span className="tool-label">支持</span>
-      </button>
+      {/* adj530：顶栏右侧两个**独立成组**的按钮（支持作者 → 更多）——
+          直接挂在 `.topbar` 下（不再放进会对横向溢出做裁剪的 `.topbar-toolbar`），
+          并统一 `flex-shrink:0`：无论工具条怎么压缩、屏幕多窄，它们都完整固定在顶栏右侧。
+          · 「支持」在可见优先级里排第 2（仅次于视图），正常宽度下不会被折叠；真到了极窄屏
+            也会连同其余按钮一起进「更多」（`shownKeys` 判定），而不是被裁掉。
+          · adj426：浅深三状态按钮已并入功能组（见 renderBtn 的 kind === 'theme'）。 */}
+      {shownKeys.has('donate') && (
+        <button
+          type="button"
+          className="topbar-btn topbar-donate"
+          onClick={() => openModal('donate')}
+          title="支持作者"
+          aria-label="支持作者"
+        >
+          {iconOf('donate')}
+          <span className="tool-label">支持</span>
+        </button>
+      )}
 
-      {/* 「更多」按钮：公共更多按钮，常驻顶栏最右、按需出现（有按钮被折叠时显示） */}
-      {visCount < toolBtns.length && (
-        <div className={`topbar-overflow${overflowOpen ? ' open' : ''}`} ref={overflowBtnRef}>
+      {/* 「更多」按钮：常驻顶栏最右、按需出现（**有按钮被折叠时**才显示，行为与之前一致） */}
+      {hiddenList.length > 0 && (
+        <div className={`topbar-overflow${overflowOpen ? ' open' : ''}`}>
           <button
             type="button"
             className="topbar-overflow-btn"
@@ -1030,7 +1210,9 @@ export function TopBar() {
               style={overflowShiftX ? { transform: `translateX(${overflowShiftX}px)` } : undefined}
             >
               <div className="menu-group-title">更多工具</div>
-              {toolBtns.slice(visCount).map(renderOverflowItem)}
+              {hiddenList.map((k) => (
+                <Fragment key={k}>{renderOverflowItem(toolDefs[k])}</Fragment>
+              ))}
             </div>
           )}
         </div>
@@ -1047,20 +1229,33 @@ export function TopBar() {
         style={{ position: 'absolute', visibility: 'hidden', pointerEvents: 'none', whiteSpace: 'nowrap', zIndex: -1 }}
       >
         <div className="topbar-buttons">
-          {toolBtns.filter((t) => t.group === 'topbar').map((t) => (
-            <span data-tool-key={t.key} key={t.key} style={{ display: 'contents' }}>
-              {renderBtn(t, true)}
+          {FN_ORDER.filter(isApplicable).map((k) => (
+            <span data-tool-key={k} key={k} style={{ display: 'contents' }}>
+              {renderBtn(toolDefs[k], true)}
             </span>
           ))}
         </div>
         <div className="topbar-settings">
-          {toolBtns.filter((t) => t.group === 'footer').map((t) => (
-            <span data-tool-key={t.key} key={t.key} style={{ display: 'contents' }}>
-              {renderBtn(t, true)}
+          {EDIT_ORDER.filter(isApplicable).map((k) => (
+            <span data-tool-key={k} key={k} style={{ display: 'contents' }}>
+              {renderBtn(toolDefs[k], true)}
             </span>
           ))}
         </div>
-        {/* 「更多」按钮的隐形副本——见 ovReserve 注释（恒定按实测宽预留它的槽位） */}
+        {/* 两个独立成组按钮的隐形副本——见 `donateSlot` / `moreSlot` 注释
+            （恒定按实测宽预留槽位；「支持」的副本必须在两组框**之外**，才能量到它的真实
+            样式宽度：进了组框会套用组内按钮的 padding/无边框规则，量出来偏窄） */}
+        <button
+          type="button"
+          className="topbar-btn topbar-donate"
+          ref={donateMeasureRef}
+          data-tool-key="donate"
+          tabIndex={-1}
+          aria-hidden="true"
+        >
+          {iconOf('donate')}
+          <span className="tool-label">支持</span>
+        </button>
         <button type="button" className="topbar-overflow-btn" ref={moreMeasureRef} tabIndex={-1} aria-hidden="true">
           <ToolIcon name="more" />
         </button>

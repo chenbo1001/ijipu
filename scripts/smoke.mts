@@ -94,6 +94,8 @@ import {
   fitZoomFor,
   clampPreviewZoom,
 } from '../src/preview/zoomFit.ts'
+// adj530：顶栏"放不下就收进更多"的折叠判定（纯算式）——按可见优先级从最低的一位开始折叠
+import { foldKeys, TOPBAR_DONATE_KEY, TOPBAR_FIXED_KIDS } from '../src/ui/topbarFold.ts'
 // adj526：谱面数值字段范围来自引擎同一份表（GUIDE_LIMITS/_EX）——断言"逐项相等"，防止抄成第二份
 import { PAGE_NUM_RANGES, coarseFor } from '../src/ui/numFieldRanges.ts'
 // （GUIDE_LIMITS_EX 见本文件顶部从 layout/guides 的导入；这里补 GUIDE_LIMITS 与字号范围）
@@ -7920,6 +7922,144 @@ function runAdj529PreviewFitTests() {
     '')
 }
 
+/**
+ * adj530：顶栏按钮重排 + 按**可见优先级**折叠（用户要求）。
+ *
+ * 需求（用户）：「① 功能按钮组（视图/排版/试听/导出/主题/设置/预览比率缩放）靠左对齐；
+ * ② 编辑设置组（折行/输入条/字体/字号）与独立成组的「支持」靠右对齐；③ 两组外框包围；
+ * ④ 窗口变窄时先图标化、再按 视图 > 支持 > 排版 > 试听 > 导出 > 主题 > 设置 > 预览比率 >
+ * 折行 > 输入条 > 字体 > 字号 的**可见优先级**逐步隐藏；⑤ 按钮样式/响应行为/更多菜单表现不变」。
+ *
+ * 断言分两层：
+ * ① **折叠算式本身**——拿一张"每个按钮多宽"的合成表，断言"谁先走、走几个"。这是最易错、
+ *    也最难用眼睛验的部分（宽度预算差 1~2px 就表现成"某个按钮不见了"），且历史上有过
+ *    E-2026-193 / adj453 的翻车记录；
+ * ② **组件接线**——顺序常量、两组结构、靠左/靠右/外框的 CSS、以及"更多"的出现条件。
+ */
+function runAdj530TopBarLayoutTests() {
+  console.log('[119] top bar: two groups + priority-based folding (adj530)')
+  // —— ① 折叠算式：合成环境（每个按钮 50px / Logo+汉堡 100px / 支持 50px / 更多 30px / 无间距）——
+  const P = ['view', TOPBAR_DONATE_KEY, 'a', 'b', 'c', 'd'] as const
+  const widths = new Map<string, number>(P.map((k) => [k, 50]))
+  const ZERO = { overhead: 0, gap: 0 }
+  const base = {
+    priority: P,
+    widthByKey: widths,
+    fnKeys: ['view', 'a', 'b'],
+    editKeys: ['c', 'd'],
+    fnBox: ZERO,
+    editBox: ZERO,
+    toolbar: ZERO,
+    fixedW: 100,
+    donateW: 50,
+    moreW: 30,
+    pad: 0,
+    gap: 0,
+    safe: 0,
+  }
+  const foldAt = (totalW: number) => foldKeys({ ...base, totalW })
+  const join2 = (a: readonly string[]) => a.join(',')
+  check('adj530 宽度够时一个都不折叠（不许"宁可提前收起来"）',
+    foldAt(400).length === 0 && foldAt(1200).length === 0,
+    join2(foldAt(399)))
+  check('adj530 先折叠**优先级最低**的一位（数组末位 = 字号位），而不是显示位最右',
+    join2(foldAt(399)) === 'd' && join2(foldAt(379)) === 'd,c' && join2(foldAt(329)) === 'd,c,b',
+    `${join2(foldAt(399))} / ${join2(foldAt(379))} / ${join2(foldAt(329))}`)
+  check('adj530 折叠顺序严格 = 可见优先级的**倒序**（末位最先走；支持早于视图、晚于排版等）',
+    join2(foldAt(1)) === join2([...P].reverse()) && join2(foldAt(229)) === 'd,c,b,a,donate',
+    `${join2(foldAt(1))} / ${join2(foldAt(229))}`)
+  check('adj530 「支持」也参与折叠（它在优先级里排第 2，只有极窄屏才会走）',
+    foldAt(279).includes(TOPBAR_DONATE_KEY) === false &&
+      foldAt(229).includes(TOPBAR_DONATE_KEY) === true &&
+      foldAt(179).join(',') === 'd,c,b,a,donate,view',
+    join2(foldAt(229)))
+  check('adj530 折叠出的「更多」自己也要占位（收一个不够就继续收）',
+    join2(foldKeys({ ...base, moreW: 80, totalW: 399 })) === 'd,c',
+    join2(foldKeys({ ...base, moreW: 80, totalW: 399 })))
+  check('adj530 极窄屏也能收敛（全部折叠后仍放不下就返回全部，不死循环/不抛异常）',
+    foldAt(1).length === P.length && foldAt(0).length === P.length && TOPBAR_FIXED_KIDS === 3,
+    `${foldAt(1).length}`)
+  // 组框开销/组内间距一律按**实测值**计入预算（CSS 改了预算自动跟上，E-2026-143 那一类坑）；
+  // 空组不占位（编辑组整体折叠后，它的 6px 组框开销与两组间距都不该再算）
+  const boxed = { ...base, fnBox: { overhead: 6, gap: 2 }, editBox: { overhead: 6, gap: 2 } }
+  check('adj530 组框开销与组内间距按实测计入（差 1px 也要能判定）',
+    foldKeys({ ...boxed, totalW: 417 }).length > 0 && foldKeys({ ...boxed, totalW: 418 }).length === 0,
+    join2(foldKeys({ ...boxed, totalW: 417 })))
+  const noEdit = { ...boxed, priority: ['view', TOPBAR_DONATE_KEY, 'a', 'b'] as const, editKeys: [] as const }
+  check('adj530 空组不占位（编辑组没有可见按钮时，组框开销与两组间间距都不计）',
+    foldKeys({ ...noEdit, totalW: 309 }).length > 0 && foldKeys({ ...noEdit, totalW: 310 }).length === 0,
+    join2(foldKeys({ ...noEdit, totalW: 309 })))
+
+  // —— ② 组件接线 ——
+  const top = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+  const cssFlat = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  /** 取源码里某个 `readonly ToolKey[]` 常量数组的内容（去空白/引号/尾随逗号，便于逐项比对顺序） */
+  const orderOf = (name: string): string => {
+    const m = new RegExp(`const ${name}: readonly ToolKey\\[\\] = \\[([^\\]]+)\\]`).exec(top)
+    return (m?.[1] ?? '').replace(/[\s']/g, '').replace(/,$/, '')
+  }
+  check('adj530 功能按钮组顺序 = 视图/排版/试听/导出/主题/设置/缩放（组靠左对齐）',
+    orderOf('FN_ORDER') === 'view,guides,playback,export,themeMode,pageConfig,zoom', orderOf('FN_ORDER'))
+  check('adj530 编辑设置组顺序 = 折行/输入条/字体/字号（组靠右对齐）',
+    orderOf('EDIT_ORDER') === 'autoWrap,scriptPad,font,fontSize', orderOf('EDIT_ORDER'))
+  check('adj530 可见优先级 = 用户给定顺序（视图>支持>排版>试听>导出>主题>设置>缩放>折行>输入条>字体>字号）',
+    orderOf('TOOL_PRIORITY') ===
+      'view,donate,guides,playback,export,themeMode,pageConfig,zoom,autoWrap,scriptPad,font,fontSize',
+    orderOf('TOOL_PRIORITY'))
+  check('adj530 折叠判定在独立纯算式里（组件只负责量宽/读活值；旧的按序号切片 visCount 已移除）',
+    /import \{ foldKeys \} from '\.\/topbarFold'/.test(top) &&
+      /setHiddenKeys\(\(prev\) => \{/.test(top) &&
+      !/visCount/.test(top) &&
+      !/toolBtns/.test(top),
+    '')
+  check('adj530 顶栏取消「弹性间距」占位 div（左组靠左/右组靠右改由工具条吃满 + 设置组 auto 外边距）',
+    !/topbar-spacer/.test(top) && !/topbar-spacer/.test(cssFlat) &&
+      /\.topbar-toolbar \{[\s\S]{0,300}?flex-grow: 1;/.test(cssFlat) &&
+      /\.topbar-settings \{[\s\S]{0,300}?margin-left: auto;/.test(cssFlat),
+    '')
+  check('adj530 两组的**外框**保留（border + 圆角 + 内 padding，adj414 口径不变）',
+    /\.topbar-buttons \{[\s\S]{0,300}?border: 1px solid var\(--jp-border\);[\s\S]{0,200}?border-radius: 7px;[\s\S]{0,120}?padding: 2px;/.test(cssFlat) &&
+      /\.topbar-settings \{[\s\S]{0,300}?border: 1px solid var\(--jp-border\);[\s\S]{0,200}?border-radius: 7px;[\s\S]{0,120}?padding: 2px;/.test(cssFlat),
+    '')
+  check('adj530 视图/主题由顶栏独立项并入功能组（renderBtn 各有一个分支，两边都不再常驻 JSX）',
+    /if \(t\.kind === 'view'\) \{/.test(top) &&
+      /if \(t\.kind === 'theme'\) \{/.test(top) &&
+      /FN_ORDER\.filter\(\(k\) => shownKeys\.has\(k\)\)/.test(top) &&
+      /EDIT_ORDER\.filter\(\(k\) => shownKeys\.has\(k\)\)/.test(top) &&
+      !/<div className="topbar-views" ref=\{viewRef\}>/.test(top),
+    '')
+  check('adj530 按钮文字/图标不变（renderBtn 仍是同一套结构：iconOf + tool-label + toolDefs 表）',
+    /const toolDefs: Record<ToolKey, ToolDef>/.test(top) &&
+      /<span className="tool-label">\{t\.label\}<\/span>/.test(top) &&
+      /const iconOf = \(key: string\)/.test(top),
+    '')
+  check('adj530 「支持」独立成组但同样参与折叠（优先级里第 2 + 更多下拉里能出现）',
+    /OVERFLOW_ORDER: readonly ToolKey\[\] = \[\.\.\.FN_ORDER, \.\.\.EDIT_ORDER, 'donate'\]/.test(top) &&
+      /const hiddenList = OVERFLOW_ORDER\.filter/.test(top),
+    '')
+  check('adj530 「更多」的出现条件与表现不变（= 确有按钮被折叠，条目按显示顺序列出）',
+    /\{hiddenList\.length > 0 && \(/.test(top) &&
+      /\{hiddenList\.map\(\(k\) => \(/.test(top) &&
+      /<div className="menu-group-title">更多工具<\/div>/.test(top),
+    '')
+  check('adj530 折叠后的「视图/主题」仍能用（更多下拉里各有条目，与下拉/按钮同一份数据）',
+    /renderViewEntries\(\)/.test(top) &&
+      /const modes: \{ key: typeof themeMode; label: string \}\[\] = \[/.test(top),
+    '')
+  check('adj530 「支持」的隐形测量副本在两组框**之外**（进组框会套用组内样式、量窄）',
+    /data-tool-key="donate"/.test(top) &&
+      /className="topbar-btn topbar-donate"\n\s*ref=\{donateMeasureRef\}/.test(top),
+    '')
+  // 视图按钮并入工具条后，它的下拉成了「工具条内绝对定位的浮层」——工具条对横向溢出做裁剪
+  // （adj453 的安全阀），纵向若也裁就把下拉切没了（字体下拉当年正是这个坑，见 adj386）。
+  check('adj530 视图下拉不会被工具条的裁剪切掉（纵向可见 + 打开时整体放开裁剪）',
+    /overflow-x: clip;/.test(cssFlat) &&
+      /overflow-y: visible;/.test(cssFlat) &&
+      /\.topbar-toolbar:has\(\.topbar-views\.open\) \{[\s\S]{0,120}?overflow: visible;/.test(cssFlat) &&
+      /className=\{`topbar-views\$\{viewOpen \? ' open' : ''\}`\}/.test(top),
+    '')
+}
+
 async function runNewDocTemplateTests() {
   console.log('[81b] new document uses the template file (adj481)')  /* eslint-disable @typescript-eslint/no-explicit-any */
   const { useDocStore } = (await import('../src/store/docStore.ts')) as any
@@ -8115,15 +8255,37 @@ console.log('[115] dock close: early-return guard & close button inside dock (ad
       /@media \(pointer: coarse\) \{[\s\S]{0,900}?\.tool-dock-close::before \{[\s\S]{0,220}?top: -7px;[\s\S]{0,80}?bottom: -7px;/.test(css),
     '')
 
-  // adj525：右侧两个按钮（高度档位 / 关闭）必须**常驻**——它们要在可滚页签区**之外**。
+  // adj525：两个按钮（高度档位 / 关闭）必须**常驻**——它们要在可滚页签区**之外**。
   // 依据同顶栏 adj453：「必须始终可见」的元素不能放进会溢出的滚动容器，否则会被内容顶出可视区
   // （此前页签一溢出，档位按钮与 ✕ 就被推到最右边看不见，得先滑到底才能点）。
-  const stripIdx = dockSrc.indexOf('className="tool-dock-tabstrip"')
+  // adj531：用户要求把档位按钮移到最左端 ⇒ 顺序变为「档位 → 页签 → ✕」，本组断言随之改为
+  // **与顺序无关**地钉"页签区里只有页签"，另加一条专门钉新顺序（见下）。
+  const stripIdx = dockSrc.indexOf('<div className="tool-dock-tabstrip"')
   const sizeIdx = dockSrc.indexOf('className="tool-dock-size-btn"')
-  const between = stripIdx >= 0 && sizeIdx > stripIdx ? dockSrc.slice(stripIdx, sizeIdx) : ''
-  check('adj525 页签区（可滚）与右侧常驻按钮分离：页签在 tabstrip 内、按钮在其外',
-    stripIdx >= 0 && sizeIdx > stripIdx && between.includes('TABS.map') && between.includes('</div>'),
-    `stripIdx=${stripIdx} sizeIdx=${sizeIdx}`)
+  const closeIdx = dockSrc.indexOf('className="tool-dock-close"')
+  const stripBlock = stripIdx >= 0 ? dockSrc.slice(stripIdx, dockSrc.indexOf('</div>', stripIdx)) : ''
+  check('adj525/adj531 页签区（可滚）里只有页签，两个按钮都在它之外',
+    stripIdx >= 0 && sizeIdx >= 0 && closeIdx >= 0 &&
+      stripBlock.includes('TABS.map') &&
+      !stripBlock.includes('tool-dock-size-btn') &&
+      !stripBlock.includes('tool-dock-close'),
+    `strip=${stripIdx} size=${sizeIdx} close=${closeIdx}`)
+  // adj531（用户要求"把高度调整按钮移到最左边，手机上左边操作更顺手，也避免误按关闭按钮"）：
+  check('adj531 档位按钮在页签区**左侧**、✕ 在最右端（顺序：档位 → 页签 → ✕）',
+    sizeIdx < stripIdx && stripIdx < closeIdx,
+    `size=${sizeIdx} strip=${stripIdx} close=${closeIdx}`)
+  check('adj531 档位按钮与 ✕ 之间隔着整条页签区（不再相邻 ⇒ 够档位按钮时不会误触关闭）',
+    dockSrc.slice(sizeIdx, stripIdx).includes('tool-dock-size-btn') &&
+      !dockSrc.slice(sizeIdx, stripIdx).includes('tool-dock-close') &&
+      dockSrc.slice(stripIdx, closeIdx).includes('TABS.map'),
+    '')
+  check('adj531 两个常驻按钮的"不压缩"口径不变（adj525 原样）',
+    /\.tool-dock-size-btn \{[\s\S]{0,400}?flex: 0 0 auto;/.test(css) &&
+      /\.tool-dock-close \{[\s\S]{0,300}?flex: 0 0 auto;/.test(css),
+    '')
+  check('adj531 `role="tablist"` 仍在页签区上（不因移动按钮而漂移）',
+    /className="tool-dock-tabstrip" role="tablist"/.test(dockSrc),
+    '')
   check('adj525 `role="tablist"` 挂在页签区上（它才是页签的容器）',
     /className="tool-dock-tabstrip" role="tablist"/.test(dockSrc) &&
       !/className="tool-dock-tabs" role="tablist"/.test(dockSrc),
@@ -8217,6 +8379,25 @@ console.log('[116] settings 6 rows, About in dock, divider touch hit-area (adj49
     /dockPanel !== 'problems'\) return pane\.scrollHeight/.test(dockSrc) &&
       /PROBS\.problemsContentHeight\(\{/.test(dockSrc) &&
       !/list\.scrollHeight/.test(dockSrc),
+    '')
+
+  // adj532：告警行首三角箭头——用户连报 4 次"太小"。根因是**字符**不是字号：
+  // `▸`（U+25B8）是 BLACK RIGHT-POINTING **SMALL** TRIANGLE，实测墨迹/字号 ≈ 0.4×0.33em
+  // （18px 时只有 7×6px，36px 也才 12×12），所以 adj515/516/517 三轮调字号几乎看不出变化；
+  // 换成常规实心 `▶`（U+25B6）后同样 18px 字号墨迹 17×18px（约 2.5 倍）。
+  // 口径不变：**单字符 + rotate(90deg)**（收起右指 / 展开下指，视角一致）。
+  const problemSrc = String(readFileSync('src/ui/dock/ProblemPanel.tsx', 'utf8'))
+  check('adj532 告警三角用常规实心 `▶`（U+25B6），不再用 SMALL 变体 `▸`（U+25B8）',
+    /problem-expand-glyph"[^>]*>▶</.test(problemSrc) && !/>▸</.test(problemSrc),
+    '')
+  check('adj532 仍是"单字符 + 旋转 90°"（收起/展开视觉大小一致，不做第二个字符）',
+    /\.problem-expand\.is-open \.problem-expand-glyph \{[\s\S]{0,80}?transform: rotate\(90deg\);/.test(css) &&
+      // adj533（用户报"偏大了一点，改 3/4 大小"）：字号 18 → 13.5px（= 18 × 3/4），只改字形大小
+      /\.problem-expand-glyph \{[\s\S]{0,300}?font-size: 13\.5px;/.test(css),
+    '')
+  check('adj532/adj533 glyph 盒子仍 20×20、父按钮预留仍 24px（改小的是字形，不是热区/行高）',
+    /\.problem-expand-glyph \{[\s\S]{0,200}?width: 20px;[\s\S]{0,80}?height: 20px;[\s\S]{0,80}?line-height: 20px;/.test(css) &&
+      /\.problem-expand \{[\s\S]{0,200}?flex: 0 0 24px;/.test(css),
     '')
 
   // adj523：AUTO_FIT 的"内容自然高"取自 `pane.scrollHeight`，而 `scrollHeight === max(内容高, clientHeight)`。
@@ -8631,6 +8812,14 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj529 预览比例适配宽度用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj530TopBarLayoutTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj530 顶栏按钮重排/优先级折叠用例抛异常', e)
     }
   })
   .then(() => {
