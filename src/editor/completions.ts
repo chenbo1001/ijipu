@@ -12,7 +12,9 @@ export const MODIFIER_SYMBOLS: { symbol: string; label: string; barline?: boolea
   { symbol: 'tr', label: '颤音（带波浪线）' },
   { symbol: 'cy', label: '颤音（仅 tr 文本）' },
   { symbol: 'cy+', label: '颤音（tr + 细密波浪线）' },
-  { symbol: 'bc', label: '波音（横线）' },
+  // adj496（用户确认）：`&bc` 是**保持音**（tenuto，音符上方一条短横线），不是波音的变体——
+  // 此前标签误写作「波音（横线）」，与渲染代码（render/index.ts 该分支注释即"保持音"）矛盾。
+  { symbol: 'bc', label: '保持音（上方短横线）' },
   { symbol: 'zy', label: '颤音记号（三角+线）' },
   { symbol: 'dy', label: '实心三角（顿音）' },
   { symbol: 'tu', label: '吐音（音符上方粗体 T）' },

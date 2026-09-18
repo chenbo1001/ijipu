@@ -157,11 +157,13 @@ export const problemCopy = {
  * adj462：底部 dock 文案（告警 / 试听 / 导出 / 设置 共用一个 dock，互斥切换）
  */
 export const dockCopy = {
-  /** 四个面板标签 */
+  /** 面板标签 */
   tabProblems: '告警',
   tabTryout: '试听',
   tabExport: '导出',
   tabSettings: '设置',
+  /** adj492：「关于」从弹窗迁入 dock */
+  tabAbout: '关于',
   /** 标题栏 × 按钮 */
   closeTitle: '关闭底栏',
   /** 顶部抓手（拖拽调整 dock 高度） */

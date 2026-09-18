@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
+import { beginDrag } from '../ui/dragGesture'
 import { tempoLabel } from '@ijipu/engine/parser/parser'
 import { layoutScore, renderScoreToSvg, noteIdToCodePos, buildIndexToPage, SEGMENT_ROW_GAP_DEFAULT } from '@ijipu/engine'
 import type { ScorePage, PageConfig } from '@ijipu/engine'
@@ -68,6 +69,8 @@ export function PreviewPane() {
   const showGuides = useUiStore((s) => s.showGuides)
   const previewZoom = useUiStore((s) => s.previewZoom)
   const modal = useUiStore((s) => s.modal)
+  const dockOpen = useUiStore((s) => s.dockOpen)
+  const dockPanel = useUiStore((s) => s.dockPanel)
   const setPlaybackStart = useUiStore((s) => s.setPlaybackStart)
   const bumpPlaybackTick = useUiStore((s) => s.bumpPlaybackTick)
   // adj354：@@ 显示默认音色名——无 Y 时用试听音色列表第一个启用音色（与播放端一致）
@@ -198,8 +201,14 @@ export function PreviewPane() {
     }
   }, [activeNoteId, pagesHtml])
 
+  // adj490：试听「可达」= 弹窗（`modal==='playback'`）**或**底栏 dock 当前在试听页签（`dockOpen && dockPanel==='tryout'`）。
+  // 此前只判 `modal==='playback'`——底栏 dock 的试听页签（adj462 引入）打开时**不会**设 modal（顶栏按钮只
+  // toggleDock('tryout') 不 openModal），导致「暂停/停止时点预览音符跳到该处重播」失效（用户报）。
+  // 这里提取统一谓词，onClick / onDoubleClick 共用。
+  const isPlaybackOpen = modal === 'playback' || (dockOpen && dockPanel === 'tryout')
+
   // 点击谱面音符/歌词 → 编辑器光标跳转（M3）
-  // adj284：试听对话框打开时（遮罩已穿透），单击音符 → 从该音符开始/重播（跳转到该处演奏）
+  // adj284：试听可达时单击音符 → 从该音符开始/重播（跳转到该处演奏）
   const onClick = (e: React.MouseEvent) => {
     const target = (e.target as Element).closest('[data-notepos], [data-cipos]')
     if (!target) return
@@ -208,7 +217,7 @@ export function PreviewPane() {
     setActiveNoteId(id)
     const pos = noteIdToCodePos(code, id)
     if (pos !== null) jumpCursor(pos)
-    if (modal === 'playback') {
+    if (isPlaybackOpen) {
       setPlaybackStart(id)
       bumpPlaybackTick()
     }
@@ -216,16 +225,18 @@ export function PreviewPane() {
 
   // adj88：双击谱面音符 → 定位试听起点并打开试听对话框（从该音符开始播放）
   // adj158：播放中双击 → 递增 playbackTick 让对话框从该音符重新播放（快速跳跃）
-  // adj166：仅在试听对话框**已打开**时，双击音符才跳到该处开始播放；
-  // 未打开试听时双击不弹窗（避免误触，改用菜单/快捷键打开试听）
-  // adj284：试听对话框打开时单击已触发跳转播放，双击不再重复触发
+  // adj166：仅在试听**可达**时双击才跳到该处开始播放；未打开试听时双击不弹窗（避免误触）
+  // adj284：试听可达时单击已触发跳转播放；双击单独点不同音符时仍触发（快速跳跃）
   const onDoubleClick = (e: React.MouseEvent) => {
     const target = (e.target as Element).closest('[data-notepos]')
     if (!target) return
     const id = target.getAttribute('data-notepos')
     if (!id) return
     setActiveNoteId(id)
-    if (modal !== 'playback') return
+    if (!isPlaybackOpen) return
+    // adj158：在已播放过程中双击别的音符 → 快速跳到那里重新播放
+    setPlaybackStart(id)
+    bumpPlaybackTick()
   }
 
   // ---- 描述头元素拖拽（adj9） ----
@@ -239,10 +250,9 @@ export function PreviewPane() {
     baseCfg: PageConfig
   } | null>(null)
 
-  const onMetaMouseDown = (e: React.MouseEvent) => {
+  const onMetaPointerDown = (e: React.PointerEvent) => {
     const el = (e.target as Element).closest('[data-meta]')
     if (!el) return
-    e.preventDefault()
     e.stopPropagation()
     const key = el.getAttribute('data-meta')!
     if (!layout) return
@@ -277,38 +287,37 @@ export function PreviewPane() {
       by = base ? base.y : Number(el.getAttribute('y')) - anchor.y
     }
     metaDragRef.current = { key, startX: e.clientX, startY: e.clientY, baseX: bx, baseY: by, baseCfg: { ...cfg } }
-    const onMove = (ev: MouseEvent) => {
-      const d = metaDragRef.current
-      if (!d) return
-      const next = { ...(pageConfigRef.current.metaPos ?? {}) }
-      // 相对锚点保存（adj16），钳制在区域内
-      const pos = clampMetaPos(
-        d.key,
-        d.baseX + (ev.clientX - d.startX) / scale,
-        d.baseY + (ev.clientY - d.startY) / scale,
-        pageW,
-        pageConfigRef.current,
-      )
-      next[d.key] = {
-        // adj413：描述头位置同样按整数 px 存（原为 0.1px 精度，与"px 一律整数"不符）
-        x: Math.round(pos.x),
-        y: Math.round(pos.y),
-      }
-      setPageConfig({ ...pageConfigRef.current, metaPos: next })
-    }
-    const onUp = () => {
-      // adj454：先取出按下时的基线快照（下面会清空 ref），写回时只固化本次拖拽改动的字段
-      const baseCfg = metaDragRef.current?.baseCfg
-      metaDragRef.current = null
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-      // adj83：拖拽结束把 metaPos 持久化到源码 # jps-config（每首谱用自己的设置）
-      if (pageConfigRef.current.metaPos) {
-        setPageConfig(pageConfigRef.current, true, baseCfg)
-      }
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
+    // adj487：描述头拖拽改用 Pointer Events（此前只监听 mousemove/mouseup，手机上拖不动）
+    beginDrag(e, {
+      onMove: (dx, dy) => {
+        const d = metaDragRef.current
+        if (!d) return
+        const next = { ...(pageConfigRef.current.metaPos ?? {}) }
+        // 相对锚点保存（adj16），钳制在区域内
+        const pos = clampMetaPos(
+          d.key,
+          d.baseX + dx / scale,
+          d.baseY + dy / scale,
+          pageW,
+          pageConfigRef.current,
+        )
+        next[d.key] = {
+          // adj413：描述头位置同样按整数 px 存（原为 0.1px 精度，与"px 一律整数"不符）
+          x: Math.round(pos.x),
+          y: Math.round(pos.y),
+        }
+        setPageConfig({ ...pageConfigRef.current, metaPos: next })
+      },
+      onEnd: () => {
+        // adj454：先取出按下时的基线快照（下面会清空 ref），写回时只固化本次拖拽改动的字段
+        const baseCfg = metaDragRef.current?.baseCfg
+        metaDragRef.current = null
+        // adj83：拖拽结束把 metaPos 持久化到源码 # jps-config（每首谱用自己的设置）
+        if (pageConfigRef.current.metaPos) {
+          setPageConfig(pageConfigRef.current, true, baseCfg)
+        }
+      },
+    })
   }
 
   // ---- 辅助虚线拖拽（adj7/adj10） ----
@@ -323,7 +332,7 @@ export function PreviewPane() {
 
   const startDrag = (
     spec: { key: string; dir: 'v' | 'h'; invert?: boolean },
-    e: React.MouseEvent,
+    e: React.PointerEvent, // adj487：Pointer Events（鼠标 / 触屏 / 触控笔同一套）
     startVal: number,
   ) => {
     e.preventDefault()
@@ -339,7 +348,7 @@ export function PreviewPane() {
       (GUIDE_LIMITS as Record<string, [number, number]>)[key] ??
       (GUIDE_LIMITS_EX as Record<string, [number, number]>)[key] ??
       [0, 400]
-    const onMove = (ev: MouseEvent) => {
+    const onMove = (ev: PointerEvent) => {
       const delta = dragDelta(drag.spec, drag.startX, drag.startY, ev.clientX, ev.clientY, scale)
       const [min, max] = limitsOf(drag.spec.key)
       // adj413：位移是浮点（鼠标位移 ÷ 预览缩放），取整后再写入——px 一律整数（与设置界面一致）
@@ -360,11 +369,14 @@ export function PreviewPane() {
       // adj454：以按下时的快照为基线（drag.baseCfg）——只固化本次拖拽改动的字段
       setPageConfig(pageConfigRef.current, true, drag.baseCfg)
     }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
+    // adj487：改 Pointer Events（触屏可拖）；pointercancel 处理"来电话 / 手势打断"
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
     return () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
     }
   }, [drag, layout, setPageConfig, previewZoom])
 
@@ -408,7 +420,7 @@ export function PreviewPane() {
 
   return (
     <div className="preview-pane">
-      <div className="pages" ref={containerRef} onClick={onClick} onDoubleClick={onDoubleClick} onMouseDown={onMetaMouseDown}>
+      <div className="pages" ref={containerRef} onClick={onClick} onDoubleClick={onDoubleClick} onPointerDown={onMetaPointerDown}>
         {pagesHtml.map((svg, i) => {
           const page = layout.pages[i]
           const pct = (v: number) => `${((v / page.width) * 100).toFixed(2)}%`
@@ -457,25 +469,25 @@ export function PreviewPane() {
                     <div
                       className="guide-line guide-h"
                       style={{ top: pctY(pageConfig.margin_top), left: 0, right: 0, cursor: 'ns-resize', pointerEvents: 'auto' }}
-                      onMouseDown={(e) => startDrag({ key: 'margin_top', dir: 'v' }, e, pageConfig.margin_top)}
+                      onPointerDown={(e) => startDrag({ key: 'margin_top', dir: 'v' }, e, pageConfig.margin_top)}
                       title="上边距（拖动调整）"
                     />
                     <div
                       className="guide-line guide-h"
                       style={{ top: pctY(page.height - pageConfig.margin_bottom), left: 0, right: 0, cursor: 'ns-resize', pointerEvents: 'auto' }}
-                      onMouseDown={(e) => startDrag({ key: 'margin_bottom', dir: 'v', invert: true }, e, pageConfig.margin_bottom)}
+                      onPointerDown={(e) => startDrag({ key: 'margin_bottom', dir: 'v', invert: true }, e, pageConfig.margin_bottom)}
                       title="下边距（拖动调整）"
                     />
                     <div
                       className="guide-line guide-v"
                       style={{ left: pct(pageConfig.margin_left), top: 0, bottom: 0, cursor: 'ew-resize', pointerEvents: 'auto' }}
-                      onMouseDown={(e) => startDrag({ key: 'margin_left', dir: 'h' }, e, pageConfig.margin_left)}
+                      onPointerDown={(e) => startDrag({ key: 'margin_left', dir: 'h' }, e, pageConfig.margin_left)}
                       title="左边距（拖动调整）"
                     />
                     <div
                       className="guide-line guide-v"
                       style={{ left: pct(page.width - pageConfig.margin_right), top: 0, bottom: 0, cursor: 'ew-resize', pointerEvents: 'auto' }}
-                      onMouseDown={(e) => startDrag({ key: 'margin_right', dir: 'h', invert: true }, e, pageConfig.margin_right)}
+                      onPointerDown={(e) => startDrag({ key: 'margin_right', dir: 'h', invert: true }, e, pageConfig.margin_right)}
                       title="右边距（拖动调整）"
                     />
                     {/* 描述头区域下端线（adj30：调整描述头内容区高度，与第一行曲部上端线区分） */}
@@ -488,7 +500,7 @@ export function PreviewPane() {
                         cursor: 'ns-resize',
                         pointerEvents: 'auto',
                       }}
-                      onMouseDown={(e) => startDrag({ key: 'descAreaH', dir: 'v' }, e, pageConfig.descAreaH)}
+                      onPointerDown={(e) => startDrag({ key: 'descAreaH', dir: 'v' }, e, pageConfig.descAreaH)}
                       title="描述头高度（拖动调整）"
                     />
                     {/* adj304：描述头区域水平中线——浅灰竖向虚线（纯标注，居中参考，不可拖拽） */}
@@ -547,7 +559,7 @@ export function PreviewPane() {
                                 cursor: 'ns-resize',
                                 pointerEvents: 'auto',
                               }}
-                              onMouseDown={(e) => startDrag({ key, dir: 'v', invert }, e, startVal)}
+                              onPointerDown={(e) => startDrag({ key, dir: 'v', invert }, e, startVal)}
                               title={
                                 isSeg
                                   ? `${rg.segType === 'bz' ? '临时伴奏' : '临时多声部'}${isUpper ? '上层' : '下层'}间距（拖动调整）`
@@ -574,7 +586,7 @@ export function PreviewPane() {
                               cursor: 'ns-resize',
                               pointerEvents: 'auto',
                             }}
-                            onMouseDown={(e) =>
+                            onPointerDown={(e) =>
                               startDrag(
                                 { key: k === 0 ? 'height_quci' : 'height_cici', dir: 'v' },
                                 e,

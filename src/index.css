@@ -74,7 +74,8 @@ body {
 
 .split-divider {
   flex-shrink: 0;
-  height: 5px;
+  /* adj499：厚度取自共用 token（与底栏高度调整线同一个值） */
+  height: var(--jp-resize-h, 5px);
   cursor: row-resize;
   background: var(--jp-bg-panel);
   border-top: 1px solid var(--jp-border);
@@ -82,6 +83,9 @@ body {
   position: relative;
   z-index: 3;
   transition: background 0.15s;
+  /* adj487：触屏拖拽必备——否则浏览器把手指的移动当成"滚动"自己消费掉，
+     `pointermove` 根本派发不到。鼠标拖不受影响。 */
+  touch-action: none;
 }
 
 .split-divider::after {
@@ -119,7 +123,7 @@ body {
   min-width: 0;
 }
 .split-divider-h {
-  width: 5px;
+  width: var(--jp-resize-h, 5px);
   height: auto;
   cursor: col-resize;
   border-top: none;
@@ -880,6 +884,9 @@ body {
   opacity: 0.7;
   z-index: 5;
   transition: opacity 0.15s;
+  /* adj487：触屏拖拽必备——虚线是 1px 元素，手指命中它会顺带被"滚动"吞掉。
+     设 none 后手指落下立刻进入 pointer 流程；1px 的目标对滚动影响极小。 */
+  touch-action: none;
 }
 
 .guide-line:hover {
@@ -981,7 +988,8 @@ body {
   flex-direction: column;
   min-height: 0;
   max-height: min(50vh, 420px);
-  border-top: 1px solid var(--jp-border);
+  /* adj495：不再自带 `border-top`——顶部抓手 `.tool-dock-resize` 已带同款上边框（与分屏线统一），
+     两者叠在一起会变成 2px 双线 */
   background: var(--jp-bg-panel);
   font-family: var(--jp-font-sans);
   font-size: 12px;
@@ -989,47 +997,87 @@ body {
   container-type: inline-size; /* 面板按 dock 自身宽度重排（窄/中/宽） */
 }
 
-/* 顶部抓手：拖拽调整 dock 高度；hover/聚焦显出两条 grip 短横线 */
+/* 顶部抓手：拖拽调整 dock 高度。
+ * adj495（用户要求"与预览区/编辑区中间的分屏线统一"）：整套外观**照抄 `.split-divider`**——
+ * 同样的 5px 高、`--jp-bg-panel` 底色、上下各 1px `--jp-border` 边框、**常显**的居中 40×2 圆角握把，
+ * hover/按住时底色转强调色、握把转白。
+ * 此前它是"两条 12×1 短横线、仅 hover 才出现"，与分屏线明显不是一路货，用户要求统一。
+ * 注意：dock 自身的 `border-top` 已删除——抓手自带同款上边框，留着会叠成 2px。 */
 .tool-dock-resize {
-  flex: 0 0 5px;
+  /* adj498：视觉顺序「抓手(0) → 内容(1) → 页签(2)」——此处显式写出，避免后人再往 dock 里加子元素时
+     order 默认值把它们插到页签后面 */
+  order: 0;
+  /* adj499：与分屏线共用同一个厚度 token */
+  flex: 0 0 var(--jp-resize-h, 5px);
   width: 100%;
-  cursor: ns-resize;
+  /* adj499：光标与分屏线（横档）**统一为 `row-resize`**——此前用 `ns-resize`，
+     两者语义相同但光标关键字不同，部分平台/浏览器渲染出的指针形状有差别（用户报"鼠标形状不统一"）。
+     `.split-divider` 用的就是 `row-resize`（纵向分屏线用 `col-resize`），这里对齐它。 */
+  cursor: row-resize;
+  background: var(--jp-bg-panel);
+  border-top: 1px solid var(--jp-border);
   border-bottom: 1px solid var(--jp-border);
   position: relative;
   outline: none;
   user-select: none;
   -webkit-user-select: none;
+  transition: background 0.15s;
+  /* adj487：触屏拖拽必备（与 .split-divider 同因） */
+  touch-action: none;
 }
-.tool-dock-resize:hover,
-.tool-dock-resize:focus-visible {
-  background: var(--jp-bg-hover, rgba(127, 127, 127, 0.08));
-}
-.tool-dock-resize:hover::before,
-.tool-dock-resize:focus-visible::before,
-.tool-dock-resize:hover::after,
-.tool-dock-resize:focus-visible::after {
+/* 握把：与 `.split-divider::after` 完全同款（居中 40×2 圆角、常显、hover 转白） */
+.tool-dock-resize::after {
   content: '';
   position: absolute;
   left: 50%;
-  width: 12px;
-  height: 1px;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 2px;
+  border-radius: 2px;
   background: var(--jp-text-muted);
-  transform: translateX(-50%);
+  opacity: 0.6;
 }
-.tool-dock-resize:hover::before,
-.tool-dock-resize:focus-visible::before { top: 1px; }
+/* 与分屏线同样：hover / 按住 / 键盘聚焦 → 底色转强调色、握把转白 */
+.tool-dock-resize:hover,
+.tool-dock-resize:active,
+.tool-dock-resize:focus-visible {
+  background: var(--jp-accent);
+}
 .tool-dock-resize:hover::after,
-.tool-dock-resize:focus-visible::after { bottom: 1px; }
+.tool-dock-resize:active::after,
+.tool-dock-resize:focus-visible::after {
+  background: #fff;
+  opacity: 1;
+}
 
-/* 标题栏：四个面板 tab（点击切换）+ × 显式关闭 */
+/* 标题栏：五个面板 tab（点击切换）+ ✕ 显式关闭。
+ * adj498（用户要求）：**整条移到 dock 底部**——dock 的底边固定在窗口底部，而顶边会随拖拽/各面板默认高度
+ * 上下移动；页签跟在顶边就会"每次都要上下找"，跟在底边则位置恒定（贴着状态栏）。
+ * 用 flex `order` 而不是调 DOM 顺序：DOM 仍是「页签 → 面板」，读屏/键盘 Tab 序不受影响，
+ * 只有视觉顺序改变（这是常见的 tablist 视觉倒置做法）。分隔线也随之由 border-bottom 翻成 border-top
+ * （放在内容与页签之间），且**不再要 border-bottom**——dock 下方是状态栏 `.footer`，它自带 border-top，
+ * 两者叠起来会成双线。 */
 .tool-dock-tabs {
-  flex: 0 0 auto;
+  order: 2;
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 2px 6px;
-  border-bottom: 1px solid var(--jp-border);
+  border-top: 1px solid var(--jp-border);
+  /* adj491：dock 用了 `container-type:inline-size` + `overflow:hidden`，实测在 390×844 视口下
+     `.tool-dock-tabs` 会被撑到 974px（远超 dock 的 384px）——`margin-left:auto` 因此算出 666px 左外距，
+     把关闭按钮推到 x=494（dock 之外）→ 被 `overflow:hidden` 裁掉 ⇒ **手机上 ✕ 看不见也点不动**（用户报）。
+     修法：`width:100%` 显式约束到 dock 宽；`min-width:0` + `overflow-x:auto` 让页签在过窄时横向滚动
+     （关闭按钮由 `flex-shrink:0` 保证留在可视区）。 */
+  width: 100%;
+  overflow-x: auto;
+  /* adj491：页签超窄时横向滚动兜底；工具条不该出现滚动条，隐藏之（内容仍可滚动/可触摸拖动） */
+  scrollbar-width: none;
 }
+.tool-dock-tabs::-webkit-scrollbar { display: none; }
 .tool-dock-tab {
   display: inline-flex;
   align-items: center;
@@ -1044,6 +1092,8 @@ body {
   color: var(--jp-text-secondary);
   font-size: 12px;
   font-family: inherit;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .tool-dock-tab:hover {
   color: var(--jp-text-primary);
@@ -1066,6 +1116,9 @@ body {
   line-height: 1;
 }
 .tool-dock-close {
+  /* adj491：**不许压缩**——`.tool-dock-tabs` 加宽/页签溢出的场合（窄屏、手机上），
+     必须保证 ✕ 始终留在 dock 可视区内（曾经的 bug：它被推到 dock 之外、被 overflow:hidden 裁掉）。 */
+  flex: 0 0 auto;
   margin-left: auto;
   background: transparent;
   border: 0;
@@ -1077,8 +1130,105 @@ body {
 }
 .tool-dock-close:hover { color: var(--jp-danger); }
 
+/* ---------------- adj492：「关于」面板（原 AboutDialog 内容，迁入 dock） ----------------
+ * 内容本身是"品牌介绍 + 正文若干段"，原为弹窗里的竖直窄栏；dock 里是**宽而扁**的一条，
+ * 所以：宽屏把「Logo + 名称/口号」与正文并成两栏（左品牌、右文字），窄栏（≤560px）再竖排。
+ * 文字用 CSS 类而不是内联样式，方便 dock 与弹窗两种容器共用。
+ * adj500（用户要求）：**标题（含口号）、版本、"用代码的严谨…"、支持作者行恢复居中**——
+ * 这四行在弹窗版里本来就是 `textAlign:'center'`，迁 dock 时被我改成了左对齐而丢掉。
+ * 注意居中要有意义，容器必须有确定宽度：品牌块给固定 `width` 并改为**竖排居中**
+ * （Logo 在上、标题/口号居中在下），版本/页脚/支持作者在正文列内 `text-align: center`。 */
+.about-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 22px;
+}
+.about-brand {
+  flex: 0 0 auto;
+  width: 216px;
+  display: flex;
+  /* adj501（用户要求）：**图标与标题贴在一起成一组，再把这组居中**——
+     所以文字块按内容定宽（`flex: 0 1 auto`，不再 `flex: 1` 撑满），
+     整行用 `justify-content: center` 让「图标 + 标题」这一对落在列中间；
+     口号在文字块内居中，正好落在标题下方。 */
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+}
+.about-brand-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: center;
+}
+.about-logo {
+  display: block;
+  border-radius: 10px;
+  border: 1px solid var(--jp-border);
+  background: var(--jp-bg-panel);
+}
+.about-title {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.about-tagline {
+  color: var(--jp-accent);
+  font-size: 12px;
+  margin-top: 2px;
+}
+.about-body {
+  flex: 1 1 320px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--jp-text-secondary);
+}
+/* adj500：正文/署名保持左对齐，版本、"用代码的严谨…"、支持作者行居中（与原弹窗一致） */
+.about-meta,
+.about-footer,
+.about-cta { text-align: center; }
+.about-p { margin: 0 0 6px; }
+.about-author { margin: 6px 0; }
+.about-contact { margin-left: 10px; color: var(--jp-text-muted); }
+.about-meta { color: var(--jp-text-muted); font-size: 12px; }
+.about-footer {
+  margin: 6px 0;
+  color: var(--jp-text-muted);
+  font-style: italic;
+}
+.about-cta { margin-top: 8px; }
+.about-license { color: var(--jp-text-muted); font-size: 12px; }
+.about-donate {
+  display: inline-block;
+  padding: 6px 16px;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  border: none;
+  cursor: pointer;
+  /* 品牌渐变（与顶栏「支持作者」同一套 token，见 brand/tokens.ts：deepSpaceBlue → neonCyan） */
+  background: linear-gradient(135deg, var(--jp-deep-space-blue), var(--jp-neon-cyan));
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+}
+.about-donate:hover { filter: brightness(1.08); }
+/* 窄 dock：品牌块与正文竖排（与上面 flex-wrap 配合，把正文挤到下一行） */
+@container (max-width: 560px) {
+  .about-brand { flex: 1 1 100%; }
+  .about-body { flex: 1 1 100%; }
+}
+/* adj491：粗指针设备（手机/平板）放大 ✕ 的命中区——原 26×18 手指很难点中
+   （与 adj487 给调整条/分隔条加宽的同一理由）。视觉仍是小 ✕，只是内边距变大。 */
+@media (pointer: coarse) {
+  .tool-dock-close { padding: 10px 14px; font-size: 14px; }
+}
+
 /* 内容区：唯一滚动容器（保证"内容都可见"） */
 .tool-dock-body {
+  /* adj498：见 `.tool-dock-tabs` 的说明——页签在底部，内容在中间 */
+  order: 1;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -2808,10 +2958,10 @@ body {
     z-index: 50;
   }
 
-  /* —— 拆分视图分隔条加粗，便于手指拖动 —— */
-  .split-divider {
-    height: 8px;
-  }
+  /* adj499：此处原有「拆分视图分隔条加粗到 8px」——**已删除**。
+     它按"窄屏 = 触屏"的旧假设只加粗了分屏线，而底栏高度调整线不加 ⇒ 窄窗口下两条线粗细不一致
+     （用户报"线高/宽不统一"）。现在统一口径：**默认都是 5px；`(pointer: coarse)` 设备上两条一起变 14px**
+     （见文件末尾那组规则），与窗口宽度无关。 */
 
   /* —— 对话框：宽度自适应窄屏，靠下方弹出（bottom sheet），内容上下滚动 —— */
   .modal-mask {
@@ -2857,4 +3007,39 @@ body {
   .pcfg-foot {
     padding: 8px 0 0;
   }
+}
+
+/* adj493：粗指针设备（手机/平板）给分隔条一个**放大的隐形命中区**——
+   视觉仍是 5px 细条（改粗细会挤压版面），但手指能稳定抓住。
+   起因：用户报"拆分屏的拖动框拖不动"。实测（真实应用 + 合成 pointer 序列）mouse / touch 两种
+   事件序列都能正常改分屏比例（587 → 707），所以问题不在事件处理，而在**手指点不中 5–14px 的细条**
+   （手指触点约 40px，偏一点就落到窗格上变成滚动）。
+   用 `::before` 向两侧各扩 12px（伪元素参与命中测试，事件仍以分隔条为 target），
+   于是有效命中区 = 14 + 12×2 = 38px，够手指点；
+   只在 `pointer: coarse` 下生效 —— 鼠标环境不受影响（否则会挡住窗格边缘的点击/选择）。 */
+@media (pointer: coarse) {
+  .split-divider { position: relative; }
+  .split-divider::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -12px;
+    bottom: -12px;
+  }
+  .split-divider-h::before {
+    left: -12px;
+    right: -12px;
+    top: 0;
+    bottom: 0;
+  }
+}
+
+/* adj487/adj499：粗指针设备（手机/平板/带触屏的笔记本）把两条调整线**一起**加粗到 14px——
+ * 只改共用 token `--jp-resize-h` 一处，分屏线与底栏高度线**必然同步**（不会再出现只改一条的漂移）。
+ * 各元素上的 `var(--jp-resize-h)` 会自动跟着变；只需额外补纵向分屏线的 `height: 100%`。
+ * `pointer: coarse` 只匹配指针类型，不影响纯鼠标的桌面体验。 */
+@media (pointer: coarse) {
+  :root { --jp-resize-h: 14px; }
+  .split-divider-h { height: 100%; }
 }

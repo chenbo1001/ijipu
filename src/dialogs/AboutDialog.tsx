@@ -3,95 +3,60 @@
  *
  * adj419：脚本兼容说明 / 致谢 / 谱师 / 命令行工作流四段移到「操作手册」（docs/USER-GUIDE.md §九），
  * 关于对话框只留品牌介绍、署名、版本与协议。
+ * adj492：内容**迁入底栏 dock**（顶栏菜单「关于」改为开关 dock 的关于页签，与原「试听/导出/设置」
+ * 同一套路）——`inline` 模式只交出内容，不带遮罩/标题栏/✕。
  */
 import { Modal } from '../ui/Modal'
 import { aboutCopy, uiCopy, donate } from '../brand/copy'
-import { palette } from '../brand/tokens'
 import { APP_VERSION_FULL } from '../brand/version'
 import { useUiStore } from '../store/uiStore'
 
-export function AboutDialog() {
+export function AboutDialog({ inline = false }: { inline?: boolean } = {}) {
   const openModal = useUiStore((s) => s.openModal)
 
   return (
-    <Modal title={uiCopy.about}>
-      <div style={{ textAlign: 'center', padding: '8px 0 16px' }}>
-        <img
-          src="/icons/Jianpu.png"
-          alt="爱记谱 iJipu Logo"
-          width={64}
-          height={64}
-          style={{
-            display: 'block',
-            margin: '0 auto 12px',
-            borderRadius: 14,
-            border: `1px solid ${palette.deepSpaceBlueBorder}`,
-            boxShadow: `0 0 16px rgba(0,240,255,0.35)`,
-            background: 'var(--jp-bg-panel)',
-          }}
-        />
-        <div style={{ fontSize: 18, fontWeight: 700 }}>{aboutCopy.title}</div>
-        <div style={{ color: 'var(--jp-accent)', fontSize: 13, marginTop: 4 }}>
-          {aboutCopy.tagline}
+    <Modal title={uiCopy.about} inline={inline}>
+      {/* adj492：`.about-panel` 的流式布局见 index.css——dock 里是「宽而扁」的一行，
+          弹窗里是窄栏竖排；同一份内容两种容器都不别扭 */}
+      <div className="about-panel">
+        <div className="about-brand">
+          <img
+            className="about-logo"
+            src="/icons/Jianpu.png"
+            alt="爱记谱 iJipu Logo"
+            width={inline ? 40 : 64}
+            height={inline ? 40 : 64}
+          />
+          <div className="about-brand-text">
+            <div className="about-title">{aboutCopy.title}</div>
+            <div className="about-tagline">{aboutCopy.tagline}</div>
+          </div>
         </div>
-      </div>
-      <div style={{ fontSize: 13, lineHeight: 1.9, color: 'var(--jp-text-secondary)' }}>
-        {aboutCopy.body.split('\n').map((p, i) => (
-          <p key={i} style={{ margin: '0 0 8px' }}>
-            {p}
+        <div className="about-body">
+          {aboutCopy.body.split('\n').map((p, i) => (
+            <p key={i} className="about-p">
+              {p}
+            </p>
+          ))}
+          {/* adj419：作者署名（+ 可选联系方式，邮箱留空则不显示） */}
+          <p className="about-author">
+            <strong>{aboutCopy.author}</strong>
+            {aboutCopy.contact && <span className="about-contact">{aboutCopy.contact}</span>}
           </p>
-        ))}
-        {/* adj419：作者署名（+ 可选联系方式，邮箱留空则不显示） */}
-        <p style={{ margin: '8px 0' }}>
-          <strong>{aboutCopy.author}</strong>
-          {aboutCopy.contact && <span style={{ marginLeft: 10 }}>{aboutCopy.contact}</span>}
-        </p>
-        <div
-          style={{
-            marginTop: 12,
-            textAlign: 'center',
-            color: 'var(--jp-text-muted)',
-            fontSize: 12,
-          }}
-        >
-          {APP_VERSION_FULL}
-        </div>
-        <p
-          style={{
-            marginTop: 10,
-            textAlign: 'center',
-            color: 'var(--jp-text-muted)',
-            fontStyle: 'italic',
-          }}
-        >
-          {aboutCopy.footer}
-        </p>
-        {/* adj419：脚本兼容说明 / 致谢 / 谱师 / 命令行工作流四段移到「操作手册」（docs/USER-GUIDE.md §九），
-            adj422：连「本项目以 AGPL-3.0 协议开源…」这句也一并移过去——关于对话框只留品牌介绍、署名、版本
-            与底部的支持入口；协议说明在操作手册与仓库 LICENSE 里 */}
-        <div style={{ marginTop: 10, textAlign: 'center' }}>
-          {donate.image ? (
-            <button
-              type="button"
-              onClick={() => openModal('donate')}
-              style={{
-                display: 'inline-block',
-                padding: '8px 20px',
-                borderRadius: 8,
-                color: '#fff',
-                fontWeight: 700,
-                fontSize: 13,
-                border: 'none',
-                cursor: 'pointer',
-                background: `linear-gradient(135deg, ${palette.deepSpaceBlue}, ${palette.neonCyan})`,
-                boxShadow: `0 0 10px rgba(0,240,255,0.3)`,
-              }}
-            >
-              {donate.label}
-            </button>
-          ) : (
-            <span style={{ color: 'var(--jp-text-muted)', fontSize: 12 }}>{aboutCopy.license}</span>
-          )}
+          <div className="about-meta">{APP_VERSION_FULL}</div>
+          <p className="about-footer">{aboutCopy.footer}</p>
+          {/* adj419：脚本兼容说明 / 致谢 / 谱师 / 命令行工作流四段移到「操作手册」（docs/USER-GUIDE.md §九），
+              adj422：连「本项目以 AGPL-3.0 协议开源…」这句也一并移过去——关于只留品牌介绍、署名、版本
+              与底部的支持入口；协议说明在操作手册与仓库 LICENSE 里 */}
+          <div className="about-cta">
+            {donate.image ? (
+              <button type="button" className="about-donate" onClick={() => openModal('donate')}>
+                {donate.label}
+              </button>
+            ) : (
+              <span className="about-license">{aboutCopy.license}</span>
+            )}
+          </div>
         </div>
       </div>
     </Modal>

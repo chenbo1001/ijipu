@@ -468,13 +468,15 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
         <div className="dock-split">
           <div className="dock-split-main playback-meta">
             <span className="playback-title">{header.titles[0] ?? '未命名'}</span>
-            {header.authors.length > 0 && <span className="dock-muted">{header.authors.join('；')}</span>}
+            {/* adj488：曲目信息里"调式拍号"与"作者"位置对调——作者写在前面更显眼
+                （看谱时先想"谁写的"再看"什么调"），调式拍号放进次级灰色行 */}
             {(header.key || header.meter) && (
               <span className="dock-muted playback-key">
                 {header.key ? `${header.key}调` : ''}
                 {header.meter ? ` ${header.meter}` : ''}
               </span>
             )}
+            {header.authors.length > 0 && <span className="dock-muted">{header.authors.join('；')}</span>}
 
             <label className="dock-field">
               <span className="dock-field-label">速度</span>

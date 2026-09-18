@@ -24,10 +24,11 @@ export type ModalKind =
 
 /**
  * adj462：底部 dock 的面板（互斥，同一时间只显示一块）。
- * 入口：告警=状态栏告警文本；试听/导出/设置=顶栏对应按钮。均为「开关」：关→开+切到该面板；
+ * 入口：告警=状态栏告警文本；试听/导出/设置/关于=顶栏对应按钮与菜单。均为「开关」：关→开+切到该面板；
  * 已开且是该面板→收起 dock；已开但不是该面板→只切面板。
+ * adj492：'about'（关于）从弹窗迁入 dock（与原「试听/导出/设置」同一套路）。
  */
-export type DockPanelKey = 'problems' | 'tryout' | 'export' | 'settings'
+export type DockPanelKey = 'problems' | 'tryout' | 'export' | 'settings' | 'about'
 
 /** 轻量浮动提示（toast）：kind 决定配色；nonce 用于同文案重复触发时重置隐藏计时 */
 export type NoticeKind = 'ok' | 'warn' | 'error'

@@ -763,7 +763,8 @@ export function TopBar() {
     // adj422：原「脚本语法」与「脚本规则说明」（独立 HTML 页）合并为一份「脚本语法说明」——
     // 两个入口内容重叠、容易互相漂移；现在统一读 docs/SYNTAX.md（列表页已删除）
     { label: '脚本语法说明(&S)', hotkey: 's', onPick: () => openModal('syntax') },
-    { label: '关于(&A)', hotkey: 'a', onPick: () => openModal('about') },
+    // adj492：「关于」从弹窗迁入底栏 dock（与原「试听/导出/设置」同一套路：入口保持原位、改为开关）
+    { label: '关于(&A)', hotkey: 'a', onPick: () => toggleDock('about') },
   ]
 
   return (

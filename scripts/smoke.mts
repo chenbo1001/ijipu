@@ -14,6 +14,8 @@ import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInst
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
+// adj502：波音演奏时值（纯函数）
+import { mordentOf, mordentPlan, mordentShortMs, neighborDegree, MORDENT_SYMBOLS, ORNAMENT_SHORT_MIN_MS, ORNAMENT_SHORT_MAX_MS } from '@ijipu/engine/playback/ornaments.ts'
 import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos } from '@ijipu/engine/layout/metaAnchors.ts'
 import type { BarlineType } from '@ijipu/engine/types.ts'
@@ -3748,14 +3750,25 @@ console.log('[76] playback jump order: volta / repeat / D.C. / D.S. / ty (adj359
     const uRes = parseJps(uSrc)
     const uP = buildPlaySequence(uRes, layoutScore(uRes, DUR_CFG), 120)
       .events.filter((e) => e.placed.audioPitch)
-      .map((e) => e.placed.audioPitch)
+      // adj502：取**实际发声音高**（`e.pitch ?? placed.audioPitch`）——波音的邻音事件带 `pitch`，
+      // 只看 placed.audioPitch 会把邻音显示成主音音高、漏掉波形
+      .map((e) => e.pitch ?? e.placed.audioPitch)
       .join(' ')
     // 段A(A3 E3 G3) 段B(A3 G3 A3 D4 E4 D4 C4 A3 G3) 段C(A3 G4 G4 C4 D4 E4) 房子1(D4 C4 A3 E4 G4 A3 E3 G3)
     // 第2遍 段B 段C 房子2(D4 C4 A3) / 第3遍 段C 房子3(D4 C4 A3 D4 E4 A3)
+    // adj502：段B 里两处 `&sby`（`2/&sby`、`6,/&sby`）现在会**多出邻音事件**——
+    //   每个波音音符 = 短音(主) + 邻音 + 按住的主音 三个事件（后两者都沿用 placed.audioPitch 时按各自主音计）
+    //   ⇒ `2/&sby` = D4,E4,D4；`6,/&sby` = A3,B3,A3 ⇒ 段B 从 9 个事件变 13 个；段B 走两遍 ⇒ 共 +8。
     const uExpect =
-      'A3 E3 G3 A3 G3 A3 D4 E4 D4 C4 A3 G3 A3 G4 G4 C4 D4 E4 D4 C4 A3 E4 G4 A3 E3 G3 ' +
-      'A3 G3 A3 D4 E4 D4 C4 A3 G3 A3 G4 G4 C4 D4 E4 D4 C4 A3 ' +
-      'A3 G4 G4 C4 D4 E4 D4 C4 A3 D4 E4 A3'
+      'A3 E3 G3 ' +
+      'A3 G3 A3 D4 E4 D4 E4 D4 C4 A3 B3 A3 G3 ' +
+      'A3 G4 G4 C4 D4 E4 ' +
+      'D4 C4 A3 E4 G4 A3 E3 G3 ' +
+      'A3 G3 A3 D4 E4 D4 E4 D4 C4 A3 B3 A3 G3 ' +
+      'A3 G4 G4 C4 D4 E4 ' +
+      'D4 C4 A3 ' +
+      'A3 G4 G4 C4 D4 E4 ' +
+      'D4 C4 A3 D4 E4 A3'
     check('adj362 用户真实谱：三遍跳跃结构（D.S. 后从 &hs 起走房子3）', uRes.errors.length === 0 && uP === uExpect, `err=${uRes.errors.length} n=${uP.split(' ').length}\n  ${uP}`)
   }
 }
@@ -4912,8 +4925,6 @@ console.log('[91] equal-duration tuplet (y...) rule (adj395)')
 console.log('[92] grace note timing & position (adj396)')
 {
   const BEAT_MS = 1000 // 60 BPM → 1 拍 = 1000ms
-  /** 倚音实际时值（拍）：1/2^(减时线条数+1) */
-  const gBeats = (dc: number) => 1 / Math.pow(2, dc + 1)
   /** 取某行第 idx 个音符的 token（note 类型断言） */
   type N92 = { kind: string; pitch?: number; augmentCount: number; dots: number; diminishCount: number; gracenotes?: { after: boolean; notes: { pitch: number; diminishCount: number }[] } }
   const toks92 = (code: string): N92[] => parseJps(code).groups[0].music.tokens as unknown as N92[]
@@ -4926,33 +4937,122 @@ console.log('[92] grace note timing & position (adj396)')
   check('adj396 解析：`3 -[h5/]` 增时线后写后倚音（音符增时 1 拍 + 后倚音）', gB92[0].augmentCount === 1 && gB92[0].gracenotes?.after === true && gB92[0].gracenotes?.notes[0].pitch === 5, JSON.stringify(gB92[0]))
   const gC92 = toks92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3.[h5/] 3 .[h5/] |\n')
   check('adj396 解析：独立附点归前音符（`3 .[h5/]` 等价 `3.[h5/]`）', gC92[0].dots === 1 && gC92[1].dots === 1 && gC92[1].gracenotes?.after === true, `dots=${gC92.map((t) => t.dots).join(',')}`)
-  // 倚音总时值超过主音符 → 告警（主音符会被钳制为 0 拍、不发声）
+  // adj489：旧版 `graceSum > total` 告警已删除（现在倚音不够时**向邻居借**）。
+  // 顺带：主音符时长较短时仍**不报警**，改为演奏时智能借时。
   const rOver92 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3,//[2] 1 |\n')
   const over92 = rOver92.errors.find((e) => e.message.includes('倚音总时值'))
-  check('adj396 告警：倚音总时值超过主音符时值（带正确写法）', over92 !== undefined && over92.severity === 'warning' && (over92.hint ?? '').includes('减时线条数'), JSON.stringify(rOver92.errors.map((e) => e.message)))
+  check('adj489 不再因倚音总时值>主音符而告警（借用机制接管）', over92 === undefined, JSON.stringify(rOver92.errors.map((e) => e.message)))
 
-  // ---- ② 演奏时值（60 BPM：1 拍 = 1000ms；倚音不再向相邻音符借时间） ----
+  // ---- ② 演奏时值（60 BPM：1 拍 = 1000ms）adj489：短倚音按组时值、组内均分；长倚音主音/2；不够时**向前/后借** ----
   /** 按发生时刻排序的事件 [{at, dur, pitch}] */
   const evs92 = (code: string) => {
     const r = parseJps(code)
     const seq = buildPlaySequence(r, layoutScore(r, defaultPageConfig), 60)
     return { ev: [...seq.events].sort((a, b) => a.atMs - b.atMs), totalMs: seq.totalMs }
   }
+  // adj507（用户规范）：**短倚音组时值 = 主音符因子 × 倚音因子**
+  //   主音符因子：不带减时线 1、**有**减时线 1/2（只看有无，与条数无关）
+  //   倚音因子：1 条 1/4、2 条 1/8、≥3 条 1/16（封顶）
+  //   ⇒ `3[2/]` = 1/4 拍（主音符 1 拍）、`3/[2/]` = 1/8 拍（主音符 1/2 拍）
+  const g250 = (1 / 4) * BEAT_MS // 1/4 拍 = 250ms（主音符无减时线 + 倚音 1 条）
+  const g125 = (1 / 8) * BEAT_MS // 1/8 拍 = 125ms（主音符有减时线 + 倚音 1 条；或主音符无 + 倚音 2 条）
+  const g625 = (1 / 16) * BEAT_MS // 1/16 拍 = 62.5ms（借用断言里"缺的 1/16 拍"）
+
+  // 单短倚音：主音符 1 拍（无减时线）⇒ 组时值 1/4，主音符余 3/4
   const q1 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[2/] 1 2 3 |\n')
-  const g250 = gBeats(1) * BEAT_MS // 1/4 拍 = 250ms（`2/` 的倚音实际时值）
-  check('adj396 前倚音：先 1/4 拍倚音再 3/4 拍主音符（合计 1 拍）', Math.abs(q1.ev[0].atMs - 0) < 1 && Math.abs(q1.ev[0].durationMs - g250) < 1 && Math.abs(q1.ev[1].atMs - g250) < 1 && Math.abs(q1.ev[1].durationMs - (BEAT_MS - g250)) < 1, q1.ev.slice(0, 3).map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
-  check('adj396 前倚音：后续音符仍在整拍位置（不因倚音整体后移）', Math.abs(q1.ev[2].atMs - 1000) < 1 && Math.abs(q1.ev[4].atMs - 3000) < 1 && Math.abs(q1.totalMs - 4000) < 1, q1.ev.map((e) => e.atMs).join(','))
+  check('adj489/507 单短倚音 `3[2/]`（主音符 1 拍）：组时值 1/4，单个倚音 1/4 + 主音符 3/4',
+    Math.abs(q1.ev[0].atMs - 0) < 1 && Math.abs(q1.ev[0].durationMs - g250) < 1 &&
+    Math.abs(q1.ev[1].atMs - g250) < 1 && Math.abs(q1.ev[1].durationMs - (BEAT_MS - g250)) < 1,
+    q1.ev.slice(0, 3).map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
+  check('adj489 单短倚音后续音符仍在整拍位置（不后移）',
+    Math.abs(q1.ev[2].atMs - 1000) < 1 && Math.abs(q1.ev[4].atMs - 3000) < 1 && Math.abs(q1.totalMs - 4000) < 1,
+    q1.ev.map((e) => e.atMs).join(','))
+
+  // 后倚音单短：主音符先 3/4 拍，最后 1/4 拍倚音
   const q2 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[h2/] 1 2 3 |\n')
-  check('adj396 后倚音：先 3/4 拍主音符，最后 1/4 拍奏倚音', Math.abs(q2.ev[0].atMs - 0) < 1 && Math.abs(q2.ev[0].durationMs - (BEAT_MS - g250)) < 1 && Math.abs(q2.ev[1].atMs - (BEAT_MS - g250)) < 1 && Math.abs(q2.ev[1].durationMs - g250) < 1, q2.ev.slice(0, 3).map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
+  check('adj489/507 单短后倚音 `3[h2/]`：主音符 3/4 + 末尾倚音 1/4，合计 1 拍',
+    Math.abs(q2.ev[0].atMs - 0) < 1 && Math.abs(q2.ev[0].durationMs - (BEAT_MS - g250)) < 1 &&
+    Math.abs(q2.ev[1].atMs - (BEAT_MS - g250)) < 1 && Math.abs(q2.ev[1].durationMs - g250) < 1,
+    q2.ev.slice(0, 3).map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
+
+  // **多短倚音（adj489 + adj507）：组时值 1/4，组内均分 ⇒ 每个 1/8**
   const q3 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[3/2/] 1 2 3 |\n')
-  check('adj396 多倚音：1/4 + 1/4 倚音后主音符余 1/2 拍', Math.abs(q3.ev[0].durationMs - g250) < 1 && Math.abs(q3.ev[1].atMs - g250) < 1 && Math.abs(q3.ev[1].durationMs - g250) < 1 && Math.abs(q3.ev[2].atMs - 2 * g250) < 1 && Math.abs(q3.ev[2].durationMs - (BEAT_MS - 2 * g250)) < 1, q3.ev.slice(0, 3).map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
-  // ④ 增时线/附点后倚音：主音符先奏满（到末尾前），最后一段才是倚音
+  check('adj489/507 多短倚音 `3[3/2/]`（主音符 1 拍）：组时值 1/4，两个倚音各 1/8 + 主音符 3/4',
+    q3.ev[0].durationMs > 0 && Math.abs(q3.ev[0].durationMs - g125) < 1 &&
+    Math.abs(q3.ev[1].atMs - g125) < 1 && Math.abs(q3.ev[1].durationMs - g125) < 1 &&
+    Math.abs(q3.ev[2].atMs - 2 * g125) < 1 && Math.abs(q3.ev[2].durationMs - (BEAT_MS - 2 * g125)) < 1,
+    q3.ev.slice(0, 3).map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
+
+  // 三个短倚音：组时值 1/4，三个各 1/12
+  const q3b = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[2/1/2/] 1 2 3 |\n')
+  const per12 = (1 / 12) * BEAT_MS
+  check('adj489/507 三短倚音 `3[2/1/2/]`（主音符 1 拍）：组时值 1/4，三个各 1/12 + 主音符 3/4',
+    q3b.ev[0].durationMs > 0 && Math.abs(q3b.ev[0].durationMs - per12) < 1 &&
+    Math.abs(q3b.ev[1].atMs - per12) < 1 && Math.abs(q3b.ev[1].durationMs - per12) < 1 &&
+    Math.abs(q3b.ev[2].atMs - 2 * per12) < 1 && Math.abs(q3b.ev[2].durationMs - per12) < 1 &&
+    Math.abs(q3b.ev[3].atMs - 3 * per12) < 1 && Math.abs(q3b.ev[3].durationMs - (BEAT_MS - 3 * per12)) < 1,
+    q3b.ev.slice(0, 4).map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
+
+  // 长倚音单：主音符/2，组时值 1/2
+  const qL = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[2] 1 2 3 |\n')
+  check('adj489 长倚音 `3[2]`：组时值 = 主音符/2 = 1/2 拍，单个倚音 1/2 + 主音符 1/2',
+    Math.abs(qL.ev[0].durationMs - 500) < 1 && Math.abs(qL.ev[1].atMs - 500) < 1 && Math.abs(qL.ev[1].durationMs - 500) < 1,
+    qL.ev.slice(0, 3).map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
+
+  // 长倚音多：主音符/2，组内均分
+  const qLm = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[32] 1 2 3 |\n')
+  check('adj489 长倚音多 `3[32]`：组时值 1/2，两个倚音各 1/4 + 主音符 1/2',
+    Math.abs(qLm.ev[0].durationMs - 250) < 1 && Math.abs(qLm.ev[1].atMs - 250) < 1 && Math.abs(qLm.ev[1].durationMs - 250) < 1 &&
+    Math.abs(qLm.ev[2].atMs - 500) < 1 && Math.abs(qLm.ev[2].durationMs - 500) < 1,
+    qLm.ev.slice(0, 3).map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
+
+  // **借用（adj489；adj506 后触发条件变窄）**：主音符时长 < 倚音组时值 → 向前（前倚音）/ 后（后倚音）借；
+  // 借走的量从被借的那个主音符事件里扣，**两主音符总时值不变**（总时值守恒）。
+  // adj506 把短倚音组时值减半（`2/` 由 1/4 → 1/8 拍）⇒ 要触发借，主音符必须**短于 1/8 拍**：
+  // 这里用四条减时线的主音符（`6,////` = 1/16 拍），组时值 1/8 > 1/16 ⇒ 缺 1/16 ⇒ 从前一个主音符借。
+  const qB = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 5 - 6,////[2/] 1 |\n')
+  check('adj508 短前倚音向**前一个主音符**借整段窗口（拍点前 1/8 拍），主音符稳落拍点',
+    qB.ev.length >= 4 &&
+    Math.abs(qB.ev[0].durationMs - (2 * BEAT_MS - g125)) < 1 && // 前主音 2000 → 1875（让出整个倚音窗口）
+    Math.abs(qB.ev[1].atMs - (2 * BEAT_MS - g125)) < 1 && // 倚音起于 1875
+    Math.abs(qB.ev[1].durationMs - g125) < 1 && // 倚音占满 1/8 拍窗口
+    Math.abs(qB.ev[2].atMs - 2 * BEAT_MS) < 1 && // 主音符**正好在拍点** 2000
+    Math.abs(qB.ev[2].durationMs - g625) < 1, // 且保持原时值 1/16 拍
+    qB.ev.slice(0, 4).map((e) => `${Math.round(e.atMs)}+${Math.round(e.durationMs)}`).join(' '))
+
+  // ---- adj508（用户要求）：**短前倚音总是"抢在拍前"**，保证主音符总在拍点上 ----
+  {
+    // 有前一个音 ⇒ 走"抢拍前"：倚音占 [1000−250, 1000]，主音符 3 整拍落在 1000，前一个 1 缩短到 750
+    const a1 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 3[2/] 1 |\n')
+    check('adj508 短前倚音抢拍前：`1 3[2/] 1` ⇒ 前音 0+750、倚音 750+250、主音 **1000+1000**（整拍在拍点）',
+      Math.abs(a1.ev[0].durationMs - 750) < 1 &&
+        Math.abs(a1.ev[1].atMs - 750) < 1 && Math.abs(a1.ev[1].durationMs - 250) < 1 &&
+        Math.abs(a1.ev[2].atMs - 1000) < 1 && Math.abs(a1.ev[2].durationMs - 1000) < 1 &&
+        Math.abs(a1.ev[3].atMs - 2000) < 1,
+      a1.ev.slice(0, 4).map((e) => `${Math.round(e.atMs)}+${Math.round(e.durationMs)}`).join(' '))
+    // 长前倚音**仍占拍点**（主音符后移）：倚音 1000+500、主音符 1500+500 —— 与短倚音相反，符合规范
+    const a2 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 3[2] 1 |\n')
+    check('adj508 长前倚音仍占拍点（主音符后移）：`1 3[2] 1` ⇒ 倚音 1000+500、主音 1500+500',
+      Math.abs(a2.ev[0].durationMs - 1000) < 1 &&
+        Math.abs(a2.ev[1].atMs - 1000) < 1 && Math.abs(a2.ev[1].durationMs - 500) < 1 &&
+        Math.abs(a2.ev[2].atMs - 1500) < 1 && Math.abs(a2.ev[2].durationMs - 500) < 1,
+      a2.ev.slice(0, 4).map((e) => `${Math.round(e.atMs)}+${Math.round(e.durationMs)}`).join(' '))
+    // 后倚音不受影响（占自己主音符的尾部）
+    const a3 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 3[h2/] 1 |\n')
+    check('adj508 短后倚音不受影响：`1 3[h2/] 1` ⇒ 主音 1000+750、倚音 1750+250',
+      Math.abs(a3.ev[0].durationMs - 1000) < 1 &&
+        Math.abs(a3.ev[1].atMs - 1000) < 1 && Math.abs(a3.ev[1].durationMs - 750) < 1 &&
+        Math.abs(a3.ev[2].atMs - 1750) < 1 && Math.abs(a3.ev[2].durationMs - 250) < 1,
+      a3.ev.slice(0, 4).map((e) => `${Math.round(e.atMs)}+${Math.round(e.durationMs)}`).join(' '))
+  }
+
+  // 增时线/附点后倚音：主音符先奏满（到末尾前），最后一段才是倚音
   const q4 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 -[h5/] 1 |\n')
-  check('adj396 `3 -[h5/]`：主音符奏 1.75 拍、最后 1/4 拍奏倚音（总 2 拍）', Math.abs(q4.ev[0].atMs - 0) < 1 && Math.abs(q4.ev[0].durationMs - (2 * BEAT_MS - g250)) < 1 && Math.abs(q4.ev[1].atMs - (2 * BEAT_MS - g250)) < 1 && Math.abs(q4.ev[1].durationMs - g250) < 1 && Math.abs(q4.ev[2].atMs - 2000) < 1, q4.ev.map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
-  check('adj396 `3 -[h5/]`：总时长仍为 3 拍（倚音不额外占时）', Math.abs(q4.totalMs - 3000) < 1, String(q4.totalMs))
-  const q5 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3.[h5/] 1 2 |\n')
-  check('adj396 `3.[h5/]`：主音符奏 1.25 拍、末 1/4 拍奏倚音（总 1.5 拍）', Math.abs(q5.ev[0].durationMs - (1.5 * BEAT_MS - g250)) < 1 && Math.abs(q5.ev[1].atMs - (1.5 * BEAT_MS - g250)) < 1 && Math.abs(q5.ev[1].durationMs - g250) < 1, q5.ev.map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
-  check('adj396 倚音不越界到相邻音符（前倚音不早于本音符起点、后倚音不晚于本音符终点）', q1.ev[0].atMs >= 0 && Math.abs(q2.ev[1].atMs + q2.ev[1].durationMs - 1000) < 1, `${q2.ev[1].atMs}+${q2.ev[1].durationMs}`)
+  check('adj489/507 `3 -[h5/]`：主音符奏 1.75 拍、最后 1/4 拍奏倚音（总 2 拍）',
+    Math.abs(q4.ev[0].atMs - 0) < 1 && Math.abs(q4.ev[0].durationMs - (2 * BEAT_MS - g250)) < 1 &&
+    Math.abs(q4.ev[1].atMs - (2 * BEAT_MS - g250)) < 1 && Math.abs(q4.ev[1].durationMs - g250) < 1 &&
+    Math.abs(q4.ev[2].atMs - 2000) < 1, q4.ev.map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
+  check('adj489 `3 -[h5/]`：总时长仍为 3 拍（倚音不额外占时）', Math.abs(q4.totalMs - 3000) < 1, String(q4.totalMs))
 
   // ---- ③ 谱面位置：倚音紧靠「数字 / 增时线 / 附点」（三种情形，两种布局） ----
   const graceXs92 = (svg: string) => [...svg.matchAll(new RegExp(`<text x="([\\d.]+)" y="[\\d.]+" font-size="${GRACE_FS}"`, 'g'))].map((m) => Number(m[1]))
@@ -7696,6 +7796,491 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
   check('adj484 浅深模式按钮图标用 14（对话框口径，与 12px 文本同高）',
     /<ToolIcon name=\{m\.icon\} size=\{14\} \/>/.test(String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))),
     '')
+}
+
+// ---- 113. 触屏拖拽（adj487：dock 调整条 + split 分隔条 + 预览虚线 → Pointer Events）----
+console.log('[113] touch-friendly drag handles (adj487)')
+{
+  const css = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+  const prevSrc = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
+  const dragSrc = String(readFileSync('src/ui/dragGesture.ts', 'utf8'))
+  check('adj487 统一拖拽入口：ui/dragGesture.ts 用 Pointer Events（窗口级 move/up/cancel + setPointerCapture）',
+    dragSrc.includes('export function beginDrag') &&
+      dragSrc.includes('React.PointerEvent') &&
+      dragSrc.includes('setPointerCapture(pointerId)') &&
+      dragSrc.includes('pointermove') &&
+      dragSrc.includes('pointerup') &&
+      dragSrc.includes('pointercancel'),
+    '')
+  check('adj487 触屏必备：dock 调整条 / split 分隔条 / 预览虚线 均 touch-action: none',
+    /\.tool-dock-resize \{[\s\S]{0,500}?touch-action: none/.test(css) &&
+      /\.split-divider \{[\s\S]{0,500}?touch-action: none/.test(css) &&
+      /\.guide-line \{[\s\S]{0,500}?touch-action: none/.test(css),
+    '')
+  // adj499：两条线的粗细改由**共用 token** 统一，粗指针设备的加粗也走同一个 token ⇒ 断言改看 token
+  check('adj487/499 粗指针设备把两条调整线一起加粗到 14px（只改共用 token 一处）',
+    /@media \(pointer: coarse\) \{\s*:root \{ --jp-resize-h: 14px; \}/.test(css),
+    '')
+  check('adj487 调整条与 split 分隔条改为 Pointer Events（不再 onMouseDown）',
+    dockSrc.includes('onPointerDown={startDrag}') && /onPointerDown=\{startSplitDrag/.test(appSrc),
+    '')
+  check('adj487 预览里描述头 / 辅助虚线拖拽也用 Pointer Events',
+    /onPointerDown=\{onMetaPointerDown\}/.test(prevSrc) &&
+      prevSrc.includes('pointermove') && prevSrc.includes('pointerup') && prevSrc.includes('pointercancel'),
+    '')
+  check('adj487 预览虚线 startDrag 签名改为 React.PointerEvent',
+    /spec: \{[^}]+\},\s*e: React\.PointerEvent[\s\S]{0,200}?startVal/.test(prevSrc),
+    '')
+  check('adj487 App / ToolDock 已不再用 mousedown/mousemove/mouseup 装拖拽监听',
+    !/startSplitDrag[^}]*e\.clientX[\s\S]{0,400}mousemove/.test(appSrc) &&
+      !/addEventListener\('mousemove', onMove\)[\s\S]{0,200}addEventListener\('mouseup', onUp\)/.test(dockSrc),
+    '')
+}
+
+// ---- 114. 试听可达：底栏 dock 试听页签下，点预览音符也能从该处开始播放（adj490）----
+console.log('[114] playback reachable: clicking preview note while dock tryout is open (adj490)')
+{
+  const prevSrc = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
+  // adj490：之前 onClick / onDoubleClick 只判 `modal === 'playback'`，底栏 dock 试听页签打开时
+  //（顶栏按钮只 toggleDock('tryout') 不 openModal）点击预览音符无效。改为同时接受 dock 试听状态。
+  check('adj490 PreviewPane.onClick：试听可达 = 弹窗 modal 或 dock 试听页签',
+    /isPlaybackOpen = modal === 'playback' \|\| \(dockOpen && dockPanel === 'tryout'\)/.test(prevSrc),
+    '')
+  check('adj490 PreviewPane.onDoubleClick：同样接受 dock 试听（adj158 播放中双击快速跳跃）',
+    /if \(!isPlaybackOpen\) return[\s\S]{0,200}setPlaybackStart\(id\)[\s\S]{0,80}bumpPlaybackTick\(\)/.test(prevSrc),
+    '')
+  check('adj490 PreviewPane 已从 uiStore 订阅 dockOpen / dockPanel', /dockOpen = useUiStore\(\(s\) => s\.dockOpen\)/.test(prevSrc) && /dockPanel = useUiStore\(\(s\) => s\.dockPanel\)/.test(prevSrc), '')
+}
+
+// ---- 115. dock 关闭：`!dockOpen` 早退守卫 + 关闭按钮必须留在可视区（adj491）----
+console.log('[115] dock close: early-return guard & close button inside dock (adj491)')
+{
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  const css = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  // 回归护栏：adj487 把拖拽从 mouse 改 Pointer Events 时**连带删掉了 `if (!dockOpen) return null`**，
+  // 后果是「点 ✕ 后 dockOpen 已置 false，但组件照样渲染」⇒ 关闭按钮看着失灵（用户报 E-2026-211）。
+  check('adj491 dock 关闭时不渲染：保留 `if (!dockOpen) return null` 早退守卫',
+    /if \(!dockOpen\) return null/.test(dockSrc),
+    '')
+  check('adj491 关闭按钮接线到 store 的 closeDock', /className="tool-dock-close" onClick=\{closeDock\}/.test(dockSrc), '')
+  // 布局护栏：`.tool-dock-tabs` 必须约束在 dock 宽度内，否则 margin-left:auto 会把 ✕ 推出可视区
+  check('adj491 页签容器约束在 dock 宽度内（width:100% + min-width:0）',
+    /\.tool-dock-tabs \{[\s\S]{0,600}?width: 100%;/.test(css) && /\.tool-dock-tabs \{[\s\S]{0,600}?min-width: 0;/.test(css),
+    '')
+  check('adj491 页签超窄时横向滚动兜底（overflow-x:auto）且关闭按钮不被压缩',
+    /\.tool-dock-tabs \{[\s\S]{0,700}?overflow-x: auto;/.test(css) && /\.tool-dock-close \{[\s\S]{0,200}?flex: 0 0 auto;/.test(css),
+    '')
+  check('adj491 粗指针设备放大 ✕ 命中区（与 adj487 调整条同一口径）',
+    /@media \(pointer: coarse\) \{[\s\S]{0,300}?\.tool-dock-close \{ padding: 10px 14px/.test(css),
+    '')
+}
+
+// ---- 116. 设置默认 6 行 + 「关于」迁入 dock（adj492）+ 分隔条手指命中区（adj493）----
+console.log('[116] settings 6 rows, About in dock, divider touch hit-area (adj492/adj493)')
+{
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  const css = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  const aboutSrc = String(readFileSync('src/dialogs/AboutDialog.tsx', 'utf8'))
+  const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+  const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+  const storeSrc = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+
+  // adj492：设置面板默认高度 = 内容 6 行
+  check('adj492 设置面板内容区默认 6 行（SETTINGS_ROWS = 6）',
+    /const SETTINGS_ROWS = 6/.test(dockSrc),
+    '')
+  check('adj492 设置高度仍按自己的行高单独算（与告警解绑）',
+    /settingsDefaultH = \(rowPitch: number, narrow: boolean\): number =>[\s\S]{0,160}?rowPitch \* SETTINGS_ROWS/.test(dockSrc),
+    '')
+
+  // adj492：关于面板进 dock
+  check('adj492 DockPanelKey 增加 about', /\| 'settings' \| 'about'/.test(storeSrc), '')
+  check('adj492 dock 面板与页签均含 about（5 个）',
+    /\{ key: 'about', render: AboutPanel \}/.test(dockSrc) && /\{ key: 'about', label: dockCopy\.tabAbout/.test(dockSrc),
+    '')
+  check('adj492 AboutDialog 支持 inline（不带遮罩/标题栏）',
+    /export function AboutDialog\(\{ inline = false \}/.test(aboutSrc) && /<Modal title=\{uiCopy\.about\} inline=\{inline\}>/.test(aboutSrc),
+    '')
+  check('adj492 顶栏菜单「关于」改为开关 dock（不再 openModal）',
+    /'关于\(&A\)'[\s\S]{0,80}toggleDock\('about'\)/.test(topSrc) && !/'关于\(&A\)'[\s\S]{0,80}openModal\('about'\)/.test(topSrc),
+    '')
+  check('adj492 App 不再渲染 about 弹窗（已迁 dock）',
+    !/modal === 'about'/.test(appSrc) && !/AboutDialog/.test(appSrc),
+    '')
+  check('adj492 关于内容用 CSS 类排版（.about-panel，dock 宽屏两栏 / 窄屏竖排）',
+    /\.about-panel \{/.test(css) && /\.about-brand \{/.test(css) && /\.about-body \{/.test(css) && aboutSrc.includes('className="about-panel"'),
+    '')
+  // adj494：关于面板打开时按"能显示全内容的最小高度"（走 AUTO_FIT 实测，与试听/导出同一机制）
+  check('adj494 关于面板纳入 AUTO_FIT（打开即完整显示内容）',
+    /const AUTO_FIT: readonly DockPanelKey\[\] = \['tryout', 'export', 'about'\]/.test(dockSrc),
+    '')
+
+  // adj493：分隔条的手指命中区
+  check('adj493 分隔条在粗指针设备上扩出隐形命中区（::before ±12px）',
+    /@media \(pointer: coarse\) \{[\s\S]{0,400}?\.split-divider::before \{[\s\S]{0,200}?top: -12px;/.test(css) &&
+      /\.split-divider-h::before \{[\s\S]{0,120}?left: -12px;/.test(css),
+    '')
+  check('adj493 命中区扩展只在粗指针生效（鼠标环境不受影响）',
+    (() => {
+      // 把 "@media (pointer: coarse) { … }" 整块抠掉（大括号配对），余下不应再有 .split-divider::before
+      const strip = (src: string, header: string): string => {
+        let out = src
+        for (;;) {
+          const i = out.indexOf(header)
+          if (i < 0) return out
+          let depth = 0
+          let j = out.indexOf('{', i)
+          const start = j
+          for (; j < out.length; j++) {
+            if (out[j] === '{') depth++
+            else if (out[j] === '}') {
+              depth--
+              if (depth === 0) break
+            }
+          }
+          out = out.slice(0, i) + out.slice(j + 1)
+          void start
+        }
+      }
+      const noCoarse = strip(css, '@media (pointer: coarse)')
+      return !noCoarse.includes('.split-divider::before') && noCoarse.includes('.split-divider {')
+    })(),
+    '')
+}
+
+// ---- 117. 底栏抓手与拆分隔条外观统一（adj495）+ `&bc` = 保持音（adj496）----
+console.log('[117] dock handle matches split divider (adj495) & bc = tenuto (adj496)')
+{
+  const css = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  const oneOf = (sel: string, props: string[]): boolean => {
+    const m = new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}').exec(css)
+    if (!m) return false
+    return props.every((p) => m[1].includes(p))
+  }
+  // adj495：抓手 = 分屏线同款（5px、面板底色、上下 1px 边框、居中 40×2 圆角握把、hover 转强调色+白握把）
+  check('adj495/499 抓手与分屏线同款外观（高度/底色/边框/握把；厚度走共用 token）',
+    oneOf('.split-divider', ['height: var(--jp-resize-h', 'background: var(--jp-bg-panel)', 'border-top: 1px solid var(--jp-border)', 'border-bottom: 1px solid var(--jp-border)']) &&
+      oneOf('.tool-dock-resize', ['flex: 0 0 var(--jp-resize-h', 'background: var(--jp-bg-panel)', 'border-top: 1px solid var(--jp-border)', 'border-bottom: 1px solid var(--jp-border)']),
+    '')
+  check('adj495 两者的握把 ::after 完全同款（40×2、radius 2、muted、opacity .6）',
+    /\.split-divider::after \{[\s\S]{0,260}?width: 40px;[\s\S]{0,60}?height: 2px;[\s\S]{0,60}?border-radius: 2px;[\s\S]{0,60}?background: var\(--jp-text-muted\);[\s\S]{0,40}?opacity: 0\.6;/.test(css) &&
+      /\.tool-dock-resize::after \{[\s\S]{0,260}?width: 40px;[\s\S]{0,60}?height: 2px;[\s\S]{0,60}?border-radius: 2px;[\s\S]{0,60}?background: var\(--jp-text-muted\);[\s\S]{0,40}?opacity: 0\.6;/.test(css),
+    '')
+  check('adj495 hover/按住/聚焦都转强调色 + 白握把（与分屏线同一套状态）',
+    /\.tool-dock-resize:hover,\s*\.tool-dock-resize:active,\s*\.tool-dock-resize:focus-visible \{\s*background: var\(--jp-accent\);/.test(css) &&
+      /\.tool-dock-resize:hover::after,[\s\S]{0,120}?background: #fff;/.test(css),
+    '')
+  check('adj495 dock 自身不再带 border-top（避免与抓手叠成双线）',
+    oneOf('.tool-dock', ['flex-shrink: 0']) && !/\.tool-dock \{[^}]*border-top: 1px solid var\(--jp-border\);/.test(css),
+    '')
+  // adj496：`&bc` 是保持音，不是波音 —— 代码字典与 SYNTAX.md 必须一致（此前两处都误写「波音（横线）」）
+  const compl = String(readFileSync('src/editor/completions.ts', 'utf8'))
+  const syntax = String(readFileSync('docs/SYNTAX.md', 'utf8'))
+  check('adj496 修饰符字典：`bc` = 保持音（标签不再是波音）',
+    /\{ symbol: 'bc', label: '保持音（上方短横线）' \}/.test(compl) && !/label: '波音（横线）'/.test(compl),
+    '')
+  check('adj496 文档同步：`&bc` 行写作保持音（tenuto）',
+    /\| `&bc` \| \*\*保持音\*\*（tenuto）/.test(syntax),
+    '')
+  check('adj496 波音族只含 sby/xby/sby+/xby+（`&bc` 不在其中）',
+    /const MORDENT_SYMBOLS[^\n]*= \[[^\]]*'sby'[^\]]*'xby'[^\]]*'sby\+'[^\]]*'xby\+'[^\]]*\]/.test(String(readFileSync('src/editor/completions.ts', 'utf8'))) ||
+      // 引擎侧尚未抽出 MORDENT_SYMBOLS 时，退化为断言字典里四个波音编码齐全
+      (['sby', 'xby', 'sby+', 'xby+'].every((s) => compl.includes(`symbol: '${s}'`)) && !compl.includes("symbol: 'bc', label: '上波音")),
+    '')
+}
+
+// ---- 118. dock 五页签全懒加载（adj497）+ 页签栏移到底部（adj498）+ 两条调整线统一（adj499）----
+console.log('[118] lazy dock panels, tabs at bottom, unified resize lines (adj497-adj499)')
+{
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  const css = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  const theme = String(readFileSync('src/styles/theme.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+
+  // adj497：五个面板全部 lazy（此前告警/导出是静态 import ⇒ 拖着一串重依赖进主包）
+  check('adj497 五个面板全部走 React.lazy',
+    ['../dialogs/PlaybackDialog', '../dialogs/PageConfigDialog', '../dialogs/AboutDialog', './dock/ProblemPanel', './dock/ExportPanel'].every((p) =>
+      dockSrc.includes(`lazy(() => import('${p}')`),
+    ),
+    '')
+  check('adj497 不再静态 import 任何 dock 面板（ToolDock 顶部无 import { ProblemPanel/ExportPanel }）',
+    !/^import \{ (ProblemPanel|ExportPanel) \} from/m.test(dockSrc),
+    '')
+  check('adj497 懒加载只在首次激活时发生（PANELS.filter(everActive) 守卫在位）',
+    /PANELS\.filter\(\(p\) => everActive\.includes\(p\.key\)\)/.test(dockSrc) && /<Suspense fallback=/.test(dockSrc),
+    '')
+
+  // adj498：页签栏移到底部（视觉顺序 抓手 → 内容 → 页签），DOM 顺序不变（读屏/Tab 序不受影响）
+  check('adj498 页签栏 order=2、内容 order=1、抓手 order=0（视觉顺序倒置）',
+    /\.tool-dock-tabs \{[\s\S]{0,200}?order: 2;/.test(css) &&
+      /\.tool-dock-body \{[\s\S]{0,200}?order: 1;/.test(css) &&
+      /\.tool-dock-resize \{[\s\S]{0,200}?order: 0;/.test(css),
+    '')
+  check('adj498 分隔线由 border-bottom 翻成 border-top（避免与状态栏 border-top 叠成双线）',
+    /\.tool-dock-tabs \{[\s\S]{0,600}?border-top: 1px solid var\(--jp-border\);/.test(css) &&
+      !/\.tool-dock-tabs \{[^}]*border-bottom: 1px solid var\(--jp-border\)/.test(css),
+    '')
+
+  // adj499：两条调整线共用厚度 token + 同款光标（横档都用 row-resize）
+  check('adj499 厚度取自共用 token `--jp-resize-h`（分屏线 / 纵向分屏线 / 底栏线三处同一来源）',
+    /--jp-resize-h: 5px;/.test(theme) &&
+      /\.split-divider \{[\s\S]{0,120}?height: var\(--jp-resize-h/.test(css) &&
+      /\.split-divider-h \{[\s\S]{0,120}?width: var\(--jp-resize-h/.test(css) &&
+      /\.tool-dock-resize \{[\s\S]{0,200}?flex: 0 0 var\(--jp-resize-h/.test(css),
+    '')
+  check('adj499 粗指针设备只改 token 一处（两条线必然同步加粗）',
+    /@media \(pointer: coarse\) \{\s*:root \{ --jp-resize-h: 14px; \}/.test(css),
+    '')
+  check('adj499 光标统一：两条横档都用 row-resize（纵向分屏线用 col-resize）',
+    /\.split-divider \{[\s\S]{0,200}?cursor: row-resize;/.test(css) &&
+      /\.tool-dock-resize \{[\s\S]{0,300}?cursor: row-resize;/.test(css) &&
+      !/\.tool-dock-resize \{[^}]*cursor: ns-resize/.test(css) &&
+      /\.split-divider-h \{[\s\S]{0,200}?cursor: col-resize;/.test(css),
+    '')
+  check('adj499 旧的「窄屏(≤640)只把分屏线加粗到 8px」规则已删除',
+    !/\.split-divider \{\s*height: 8px;\s*\}/.test(css),
+    '')
+  // adj500：关于面板的标题（含口号）/版本/页脚/支持作者行居中（正文与署名仍左对齐）
+  // 精确取出第一条 `.about-brand` 规则体再判断（用窗口正则会误伤后面 `.tool-dock-body{flex-direction:column}`）
+  const brandRule = /\.about-brand \{([^}]*)\}/.exec(css)?.[1] ?? ''
+  check('adj500/501 品牌块：图标与标题贴合成组、整组居中（文字块按内容定宽 + justify-content: center）',
+    brandRule.includes('display: flex') &&
+      brandRule.includes('justify-content: center') &&
+      !brandRule.includes('flex-direction: column') &&
+      /\.about-brand-text \{[^}]*flex: 0 1 auto;[^}]*text-align: center;/.test(css),
+    brandRule.replace(/\s+/g, ' ').slice(0, 120))
+  check('adj500 版本 / 页脚 / 支持作者行居中（正文与署名不加居中）',
+    /\.about-meta,\s*\.about-footer,\s*\.about-cta \{ text-align: center; \}/.test(css) &&
+      !/\.about-p \{[^}]*text-align: center/.test(css) &&
+      !/\.about-author \{[^}]*text-align: center/.test(css),
+    '')
+}
+
+// ---- 119. 波音（mordent）演奏时值（adj502）----
+// 用户规范：波音时值从主音符里匀出、总时值守恒；**从主音开始**波动（与倚音相反）。
+//   单波音：主→邻→主，占 P/4；复波音：主→邻→主→邻→主，占 P/2；每个短音 = clamp(P/8, 45, 110)。
+//   极短音符上复波音降级为单波音；邻音取调内二度、不继承临时变音；7 上翻八度、1 下翻八度。
+console.log('[119] mordent playback timing (adj502)')
+{
+  const BEAT = 1000 // 60 BPM → 1 拍 = 1000ms
+  const evs = (code: string) => {
+    const r = parseJps(code)
+    const seq = buildPlaySequence(r, layoutScore(r, defaultPageConfig), 60)
+    return { ev: [...seq.events].sort((a, b) => a.atMs - b.atMs), totalMs: seq.totalMs }
+  }
+  const ms = (code: string) => evs(code).ev.slice(0, 6).map((e) => `${Math.round(e.atMs)}+${Math.round(e.durationMs)}@${e.pitch ?? '主'}`).join(' ')
+  const dur = (e: { durationMs: number }) => Math.round(e.durationMs)
+
+  // 纯函数层：守恒 + 主音保留一半以上 + 单/复占比
+  {
+    const p1 = mordentPlan(BEAT, 'sby')
+    check('adj502 不变式守恒：单波音 shortMs×2 + held ≡ P',
+      Math.abs(p1.shortMs * p1.steps.length + p1.heldMs - BEAT) < 1e-6,
+      `${p1.shortMs}×${p1.steps.length}+${p1.heldMs}`)
+    check('adj502 主音保留 ≥ P/2（重音仍在主音上）',
+      p1.heldMs >= BEAT / 2 - 1e-6 && mordentPlan(BEAT, 'sby+').heldMs >= BEAT / 2 - 1e-6,
+      `${p1.heldMs}`)
+    check('adj502 单波音 steps = 主→邻（2 个短音，收尾主音另计）', p1.steps.join('') === 'PU', p1.steps.join(''))
+    check('adj502 复波音 steps = 主→邻→主→邻（4 个短音）', mordentPlan(BEAT, 'sby+').steps.join('') === 'PUPU', '')
+    check('adj502 下波音用下邻音（L）',
+      mordentPlan(BEAT, 'xby').steps.join('') === 'PL' && mordentPlan(BEAT, 'xby+').steps.join('') === 'PLPL',
+      '')
+    check('adj502 短音时值 = clamp(P/8, 45, 110)',
+      Math.abs(mordentShortMs(2000) - 110) < 1e-6 && Math.abs(mordentShortMs(1000) - 110) < 1e-6 &&
+        Math.abs(mordentShortMs(500) - 62.5) < 1e-6 && Math.abs(mordentShortMs(250) - 45) < 1e-6,
+      [mordentShortMs(2000), mordentShortMs(1000), mordentShortMs(500), mordentShortMs(250)].join(','))
+    check('adj502 长音符占比更小（全音符上波音只占 5.5%）',
+      mordentPlan(4000, 'sby').shortMs * 2 / 4000 < 0.06,
+      String(mordentPlan(4000, 'sby').shortMs * 2 / 4000))
+    check('adj502 极短音符：复波音降级为单波音（2 个短音）',
+      mordentPlan(250, 'sby+').steps.length === 2,
+      mordentPlan(250, 'sby+').steps.join(''))
+    check('adj502 邻音：调内二度 + 八度回卷（7 上→1 高八度；1 下→7 低八度）',
+      JSON.stringify(neighborDegree(7, true)) === JSON.stringify({ pitch: 1, octave: 1 }) &&
+        JSON.stringify(neighborDegree(1, false)) === JSON.stringify({ pitch: 7, octave: -1 }) &&
+        JSON.stringify(neighborDegree(3, true)) === JSON.stringify({ pitch: 4, octave: 0 }),
+      '')
+    check('adj502 从 symbols 取波音（`+` 优先；无记号返回 null）',
+      mordentOf(['sby']) === 'sby' && mordentOf(['sby', 'sby+']) === 'sby+' && mordentOf(['tr']) === null && mordentOf(undefined) === null,
+      '')
+    check('adj502 常量与文档口径一致（波音四码 / 夹紧 45–110ms）',
+      MORDENT_SYMBOLS.join(',') === 'sby,xby,sby+,xby+' && ORNAMENT_SHORT_MIN_MS === 45 && ORNAMENT_SHORT_MAX_MS === 110,
+      `${MORDENT_SYMBOLS.join(',')} / ${ORNAMENT_SHORT_MIN_MS}–${ORNAMENT_SHORT_MAX_MS}`)
+  }
+
+  // 播放层：事件序列与音高
+  const q1 = evs('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3&sby 1 2 3 |\n')
+  check('adj502 单上波音 `3&sby`（1 拍）：主 110 → 上邻 110 → 主 780，合计 1000',
+    q1.ev.length >= 3 && dur(q1.ev[0]) === 110 && dur(q1.ev[1]) === 110 && dur(q1.ev[2]) === 780 &&
+      Math.abs(q1.ev[2].atMs - 220) < 1 && q1.ev[3].atMs === BEAT,
+    ms('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3&sby 1 2 3 |\n'))
+  check('adj502 单上波音的邻音是**上邻音**（C 调 3=E → 4=F），且首音就是主音（pitch 缺省=主音本体）',
+    q1.ev[0].pitch === undefined && q1.ev[1].pitch === 'F4',
+    `${q1.ev[0].pitch ?? '主'} / ${q1.ev[1].pitch}`)
+  const q2 = evs('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3&xby 1 2 3 |\n')
+  check('adj502 单下波音 `3&xby`：邻音是**下邻音**（C 调 3=E → 2=D）', q2.ev[1].pitch === 'D4', String(q2.ev[1].pitch))
+  const q3 = evs('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3&sby+ 1 2 3 |\n')
+  check('adj502 复上波音 `3&sby+`（1 拍）：110×4 + 主 560 = 1000（4 个短音 + 收尾主音）',
+    q3.ev.length >= 5 && [0, 1, 2, 3].every((i) => dur(q3.ev[i]) === 110) && dur(q3.ev[4]) === 560 &&
+      Math.abs(q3.ev[4].atMs - 440) < 1 && q3.ev[5].atMs === BEAT,
+    ms('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3&sby+ 1 2 3 |\n'))
+  const q4 = evs('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3&sby 1 2 3 4 |\n')
+  check('adj502 后续音符仍在整拍位置（波音不拖延总拍子；5 个音符共 5 拍）',
+    q4.ev[3].atMs === BEAT && Math.abs(q4.totalMs - 5000) < 1,
+    `${q4.ev.map((e) => Math.round(e.atMs)).join(',')} total=${q4.totalMs}`)
+  const q5 = evs('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3,//&sby 1 |\n')
+  check('adj502 极短主音符（1/4 拍 = 250ms）上波音占 90ms、主音留 160ms，且下一个音符仍从其终点起',
+    Math.abs(q5.ev[0].durationMs - 45) < 1 && Math.abs(q5.ev[1].durationMs - 45) < 1 &&
+      Math.abs(q5.ev[2].durationMs - 160) < 1 &&
+      Math.abs(q5.ev[2].atMs + q5.ev[2].durationMs - 250) < 1 &&
+      Math.abs((q5.ev[3]?.atMs ?? -1) - 250) < 1,
+    ms('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3,//&sby 1 |\n'))
+  const q6 = evs('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 7&sby 1 |\n')
+  check('adj502 `7&sby` 的上邻音上翻八度（1\'）',
+    String(q6.ev[1].pitch ?? '').includes("'") || String(q6.ev[1].pitch ?? '') !== String(q6.ev[0].pitch ?? 'x'),
+    String(q6.ev[1].pitch))
+  const q7 = evs('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[2/]&sby 1 |\n')
+  check('adj502/507 倚音 + 波音共存：先倚音（组时值 1/4 拍）→ 再波动（3 事件合计 750ms）→ 下一音符仍在 1000',
+    Math.abs(q7.ev[0].durationMs - 250) < 1 && q7.ev[0].atMs === 0 &&
+      Math.abs(q7.ev[1].atMs - 250) < 1 &&
+      Math.abs(q7.ev[1].durationMs + q7.ev[2].durationMs + q7.ev[3].durationMs - 750) < 1 &&
+      Math.abs(q7.ev[4].atMs - 1000) < 1,
+    ms('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[2/]&sby 1 |\n'))
+  // adj502：倚音括号**之后**写的 `&sby` 必须挂到音符 `symbols` 上（此前会漏成独立 decoration）
+  {
+    const rr = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[2/]&sby 3&sby[2/] 3&hx[2/] 1 |\n')
+    const toks = (rr.groups[0].music.tokens as unknown as { kind: string; pitch?: number; symbols?: string[] }[]).filter((t) => t.kind === 'note')
+    check('adj502 倚音括号后的 `&sby` 也挂到音符 symbols（`&zkh/&ykh/&hx` 仍独立）',
+      (toks[0].symbols ?? []).includes('sby') && (toks[1].symbols ?? []).includes('sby') && !(toks[2].symbols ?? []).includes('hx'),
+      toks.map((t) => `p${t.pitch}:[${(t.symbols ?? []).join(',')}]`).join(' | '))
+    // 强等价：`3[2/]&sby` 与 `3&sby[2/]` 语义相同 ⇒ 渲染出的 SVG 应当**完全一致**
+    // （若括号后的 `&sby` 丢成独立 decoration，波音图形的位置/层级就会与音符符号路径不同而出现差异）
+    const svgA = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[2/]&sby 1 |\n'), defaultPageConfig))[0]
+    const svgB = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3&sby[2/] 1 |\n'), defaultPageConfig))[0]
+    check('adj502 `3[2/]&sby` 与 `3&sby[2/]` 渲染完全一致（括号后的 & 不再丢成 decoration）',
+      svgA === svgB,
+      svgA === svgB ? '' : `lenA=${svgA.length} lenB=${svgB.length}`)
+    // adj503：连音里"带波音的音符 + 后一个同音"
+    //   ① `(5/&sby 5)`：第二个 5 **延长**（不重新起奏）——事件数 = 波音 3 个（主/邻/按住），
+    //      且"按住的主音"时长 = 自己的 held + 第二个音符的整拍；
+    //   ② `(5 5/&sby)`：第二个 5 带波音 ⇒ **必须重新起奏**（不能被并进前一个），事件数 +3。
+    const m1 = evs('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (5/&sby 5) 1 2 |\n')
+    check('adj503 `(5/&sby 5)`：第二个 5 延长（合并进"按住的主音"，不重新起奏）',
+      // 波音 3 事件（主 62.5 / 邻 62.5 / 按住 375）+ 后半小节 2 个音符 = 5；
+      // 「按住的主音」被并入第二个 5 的整拍 ⇒ 375 + 1000 = 1375（中间没有第二个起奏事件）
+      m1.ev.length === 5 &&
+        Math.abs(m1.ev[2].durationMs - (375 + 1000)) < 1 &&
+        Math.abs(m1.ev[2].atMs - 125) < 1 &&
+        m1.ev[3].pitch === undefined &&
+        Math.abs(m1.ev[3].atMs - 1500) < 1,
+      ms('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (5/&sby 5) 1 2 |\n'))
+    const m2 = evs('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (5 5/&sby) 1 2 |\n')
+    check('adj503 `(5 5/&sby)`：带波音的那个 5 **重新起奏**（不被并进前一个）',
+      // 前一个 5 奏满 1 拍（1000ms）→ 第二个 5 在 1000 处**重新起奏**并波动（共 3 个事件）
+      m2.ev.length === 6 &&
+        Math.abs(m2.ev[0].durationMs - 1000) < 1 &&
+        Math.abs(m2.ev[1].atMs - 1000) < 1 &&
+        Math.abs(m2.ev[1].durationMs - 62.5) < 1,
+      ms('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (5 5/&sby) 1 2 |\n'))
+    // adj504：连音里"带**前**倚音的音符 + 后一个同音" ⇒ 后一个应**延长**（合并只延长主音事件，
+    // 倚音在开头不受影响）。用户报的 `(3/[3/5/] 3)`：此前一刀切禁合并 ⇒ 倚音后又弹了一次 3 ✗。
+    const g1 = evs('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (3/[3/5/] 3) 1 2 |\n')
+    check('adj504/507 `(3/[3/5/] 3)`：第二个 3 **延长**（前倚音后不再重新起奏）',
+      // adj507：主音符 `3/` 有减时线 ⇒ 主音符因子 1/2；倚音 `3/5/` 各 1 条 ⇒ 倚音因子 1/4
+      // ⇒ 组时值 = 1/8 拍 = 125ms，两个倚音各 62.5ms（占 0、62.5）
+      // → 主音 3 从 125 起、被并入第二个 3 的整拍 ⇒ (500 − 125) + 1000 = 1375
+      g1.ev.length === 5 &&
+        Math.abs(g1.ev[0].durationMs - 62.5) < 1 &&
+        Math.abs(g1.ev[1].atMs - 62.5) < 1 &&
+        Math.abs(g1.ev[2].atMs - 125) < 1 &&
+        Math.abs(g1.ev[2].durationMs - 1375) < 1 &&
+        Math.abs(g1.ev[3].atMs - 1500) < 1,
+      ms('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (3/[3/5/] 3) 1 2 |\n'))
+    // 后倚音占**尾部** ⇒ 若合并，主音会盖住后倚音那段（倚音在延长的音里"插一嘴"）⇒ 仍然不合并
+    // `3[h5/]`（主音符 `3` 无减时线 ⇒ 主音符因子 1、倚音因子 1/4 ⇒ 组时值 1/4 拍 = 250ms）：
+    // 主音 1 拍 1000ms − 250 = 750，倚音 5 在 750 处占 250 ⇒ 下一个 3 从 1000 起（照常起奏）
+    const g2 = evs('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (3[h5/] 3) 1 2 |\n')
+    check('adj504/507 `(3[h5/] 3)`：**后倚音**占尾部 ⇒ 仍不合并（第二个 3 照常起奏）',
+      g2.ev.length === 5 &&
+        Math.abs(g2.ev[0].durationMs - 750) < 1 &&
+        Math.abs(g2.ev[1].atMs - 750) < 1 &&
+        Math.abs(g2.ev[1].durationMs - 250) < 1 &&
+        Math.abs(g2.ev[2].atMs - 1000) < 1,
+      ms('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (3[h5/] 3) 1 2 |\n'))
+    // ---- adj505：长倚音时值按用户规范修订（只有带 . 用 2/3；增时线不计入）----
+    //   3[2]   1 拍   → 倚 1/2、主 1/2
+    //   3.[2]  1.5 拍 → 倚 2/3×1.5 = 1 拍、主 1/2 拍
+    //   3 -[2] 2 拍   → 倚 1/2×(2−1) = 1/2 拍、主 3/2 拍（增时线那 1 拍不计）
+    //   3. -[2] 2.5 拍→ 倚 2/3×(2.5−1) = 1 拍、主 3/2 拍
+    {
+      const lg = (q: string) => evs(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q} |\n`).ev
+      const a = lg('3[2]')
+      check('adj505 长倚音 `3[2]`（1 拍）：倚 1/2 拍、主 1/2 拍', Math.abs(a[0].durationMs - 500) < 1 && Math.abs(a[1].durationMs - 500) < 1, `${a[0].durationMs}/${a[1].durationMs}`)
+      const b = lg('3.[2]')
+      check('adj505 长倚音 + 附点 `3.[2]`（1.5 拍）：倚 **2/3** = 1 拍、主 1/2 拍',
+        Math.abs(b[0].durationMs - 1000) < 1 && Math.abs(b[1].durationMs - 500) < 1,
+        `${b[0].durationMs}/${b[1].durationMs}`)
+      const c = lg('3 -[2]')
+      check('adj505 长倚音 + 增时线 `3 -[2]`（2 拍）：倚 1/2 × **(2−1)** = 1/2 拍、主 3/2 拍',
+        Math.abs(c[0].durationMs - 500) < 1 && Math.abs(c[1].durationMs - 1500) < 1,
+        `${c[0].durationMs}/${c[1].durationMs}`)
+      const d = lg('3. -[2]')
+      check('adj505 长倚音 + 附点 + 增时线 `3. -[2]`：倚 = 2/3 × **本体 1.5** = 1 拍、主 = 总时值 − 1 拍',
+        Math.abs(d[0].durationMs - 1000) < 1 && Math.abs(d[1].durationMs - (d[0].durationMs + d[1].durationMs - 1000)) < 1,
+        `${d[0].durationMs}/${d[1].durationMs}`)
+      const e = lg('3[32]')
+      check('adj505 多个长倚音仍**共享**组时值（`3[32]`：两个各 1/4 拍）',
+        Math.abs(e[0].durationMs - 250) < 1 && Math.abs(e[1].durationMs - 250) < 1 && Math.abs(e[2].durationMs - 500) < 1,
+        `${e[0].durationMs}/${e[1].durationMs}/${e[2].durationMs}`)
+      const f = lg('3.[32]')
+      check('adj505 多个长倚音 + 附点共享 2/3：`3.[32]` 两个各 1/2 拍、主 1/2 拍',
+        Math.abs(f[0].durationMs - 500) < 1 && Math.abs(f[1].durationMs - 500) < 1 && Math.abs(f[2].durationMs - 500) < 1,
+        `${f[0].durationMs}/${f[1].durationMs}/${f[2].durationMs}`)
+      const g = lg('3[2/]')
+      check('adj489/507 短倚音时值（`3[2/]`：主音符 1 拍无减时线 ⇒ 组时值 1/4 拍 = 250ms、主音符 3/4 拍）',
+        Math.abs(g[0].durationMs - 250) < 1 && Math.abs(g[1].durationMs - 750) < 1,
+        `${g[0].durationMs}/${g[1].durationMs}`)
+      // adj507 的核心：**倚音长短跟着主音符走**——同样写 `[2/]`，主音符 1 拍 vs 1/2 拍的组时值差一倍
+      const gShort = lg('3/[2/]')
+      check('adj507 主音符有减时线 ⇒ 半价（`3/[2/]`：组时值 1/8 拍 = 125ms、主音符 3/8 拍）',
+        Math.abs(gShort[0].durationMs - 125) < 1 && Math.abs(gShort[1].durationMs - 375) < 1,
+        `${gShort[0].durationMs}/${gShort[1].durationMs}`)
+      check('adj507 `3[2/]` 的倚音时值 = `3/[2/]` 的两倍（两者听觉不同）',
+        Math.abs(g[0].durationMs - 2 * gShort[0].durationMs) < 1,
+        `${g[0].durationMs} vs ${gShort[0].durationMs}`)
+      // 倚音因子：1 条 1/4、2 条 1/8、≥3 条 1/16（封顶）
+      const g2b = lg('3[2//]')
+      check('adj507 倚音 2 条减时线 ⇒ 1/8 拍（`3[2//]` 组时值 125ms、主音符 875ms）',
+        Math.abs(g2b[0].durationMs - 125) < 1 && Math.abs(g2b[1].durationMs - 875) < 1,
+        `${g2b[0].durationMs}/${g2b[1].durationMs}`)
+      const g3b = lg('3[2///]')
+      const g4b = lg('3[2////]')
+      check('adj507 倚音 ≥3 条减时线封顶 1/16 拍（`3[2///]` 与 `3[2////]` 都是 62.5ms）',
+        Math.abs(g3b[0].durationMs - 62.5) < 1 && Math.abs(g4b[0].durationMs - 62.5) < 1,
+        `${g3b[0].durationMs}/${g4b[0].durationMs}`)
+      const gShort2 = lg('3/[2//]')
+      check('adj507 两个因子相乘（`3/[2//]`：1/2 × 1/8 = 1/16 拍 = 62.5ms、主音符 437.5ms）',
+        Math.abs(gShort2[0].durationMs - 62.5) < 1 && Math.abs(gShort2[1].durationMs - 437.5) < 1,
+        `${gShort2[0].durationMs}/${gShort2[1].durationMs}`)
+      // ---- adj505：力度（方案 b，只做力度区分）：短倚音 90%、长倚音不变（前/后同尺子）----
+      const bg = 1 // 主声部基础 gain
+      const v1 = lg('3[2/] 4') // 短前倚音
+      check('adj505 短**前**倚音力度 = 90%（重音在主音符上，稍弱起）',
+        Math.abs((v1[0].gain ?? 1) - bg * 0.9) < 1e-9 && Math.abs((v1[1].gain ?? 1) - bg) < 1e-9,
+        `倚=${v1[0].gain} 主=${v1[1].gain}`)
+      const v2 = lg('3[2] 4') // 长前倚音
+      check('adj505 长**前**倚音力度不变（拍点上的重音）',
+        Math.abs((v2[0].gain ?? 1) - bg) < 1e-9 && Math.abs((v2[1].gain ?? 1) - bg) < 1e-9,
+        `倚=${v2[0].gain} 主=${v2[1].gain}`)
+      const v3 = lg('3[h2/] 4') // 短后倚音
+      check('adj505 短**后**倚音力度 = 90%',
+        Math.abs((v3[0].gain ?? 1) - bg) < 1e-9 && Math.abs((v3[1].gain ?? 1) - bg * 0.9) < 1e-9,
+        `主=${v3[0].gain} 倚=${v3[1].gain}`)
+      const v4 = lg('3[h2] 4') // 长后倚音
+      check('adj505 长**后**倚音力度不变', Math.abs((v4[1].gain ?? 1) - bg) < 1e-9, `倚=${v4[1].gain}`)
+    }
+  }
 }
 
 runAdj363SaveTests()

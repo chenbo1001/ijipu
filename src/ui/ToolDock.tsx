@@ -31,22 +31,36 @@ import { useDocStore } from '../store/docStore'
 import { dockCopy } from '../brand/copy'
 import { ToolIcon } from './ToolIcon'
 import type { ToolIconName } from './toolIcons'
+import { beginDrag } from './dragGesture'
+// 状态栏的告警计数要用它（纯函数，很小，留在主包）
 import { summarizeProblems } from './problems'
-import { ProblemPanel } from './dock/ProblemPanel'
-// adj462：导出面板是**为底栏重写的流式布局**（原 ExportDialog 是竖向堆叠的弹窗布局，宽度变化不重排）
-import { ExportPanel } from './dock/ExportPanel'
 
-// adj462：试听/设置两块暂仍复用对话框内容（以 Modal 的 inline 模式渲染）。
-// TODO(adj462 续)：这两块也要按 ExportPanel 的方式重写成**流式布局**（随 dock 宽度重排、压低高度）。
+/**
+ * adj497（用户要求"各页签做成懒加载、首次打开才加载，以加快启动"）：**五个面板全部走 `React.lazy`**。
+ *
+ * 此前只有试听/设置/关于是 lazy，**告警与导出是静态 import** ⇒ 它们的代码（以及导出侧那串重依赖：
+ * `export/export` 的 PDF 链、`export/audio` 的 WAV/MP3 编码、`playback/spessaCache` 等）
+ * 会**在启动时就进主包并被加载**，白白拖慢首屏。
+ *
+ * 懒加载只在**首次渲染到该面板**时触发（`PANELS.filter(p => everActive.includes(p.key))` 保证
+ * 只有"被打开过"的面板才渲染）⇒ 没点开过的页签，其 chunk 永远不会被下载。
+ * `Suspense` 的 fallback（`.dock-empty`「加载中…」）只会在首次打开的那一瞬出现。
+ */
 const TryoutPanel = lazy(() => import('../dialogs/PlaybackDialog').then((m) => ({ default: () => <m.PlaybackDialog inline /> })))
 const SettingsPanel = lazy(() => import('../dialogs/PageConfigDialog').then((m) => ({ default: () => <m.PageConfigDialog inline /> })))
+// adj492：「关于」从弹窗迁入 dock（与原「试听/导出/设置」同一套路）
+const AboutPanel = lazy(() => import('../dialogs/AboutDialog').then((m) => ({ default: () => <m.AboutDialog inline /> })))
+// adj497：告警 / 导出改为懒加载（原为静态 import）
+const ProblemPanel = lazy(() => import('./dock/ProblemPanel').then((m) => ({ default: m.ProblemPanel })))
+const ExportPanel = lazy(() => import('./dock/ExportPanel').then((m) => ({ default: m.ExportPanel })))
 
-/** 四个面板（顺序即标签栏顺序）；告警为专用面板（原 ui/ProblemsBar 拆来） */
+/** 五个面板（顺序即标签栏顺序）；告警为专用面板（原 ui/ProblemsBar 拆来） */
 const PANELS: readonly { key: DockPanelKey; render: ComponentType }[] = [
   { key: 'problems', render: ProblemPanel },
   { key: 'tryout', render: TryoutPanel },
   { key: 'export', render: ExportPanel },
   { key: 'settings', render: SettingsPanel },
+  { key: 'about', render: AboutPanel },
 ]
 
 /**
@@ -84,8 +98,9 @@ const PROBLEMS_ROWS = 5
 /**
  * adj478：设置面板的内容区固定留 **5 行**内容的高度，且**与告警高度解绑**（不再共用
  * PROBLEMS_ROWS 那一份计算）。窄屏时按钮行折到内容下方，还要再加上 `FOOT_H` 与行间距。
+ * adj492：**5 行 → 6 行**（用户要求"打开设置时高度为显示内容 6 行"）。
  */
-const SETTINGS_ROWS = 5
+const SETTINGS_ROWS = 6
 /** 与 CSS 里设置面板的窄屏断点（`@container (max-width: 720px)`）保持一致 */
 const DOCK_NARROW_W = 720
 
@@ -105,12 +120,14 @@ const settingsDefaultH = (rowPitch: number, narrow: boolean): number =>
 /**
  * 各面板默认高度。
  * · 告警：固定 PROBLEMS_ROWS 行；
- * · 设置：见 `settingsDefaultH`（内容区 5 行，与告警解绑）；
- * · 试听/导出：最小高度（实际由 AUTO_FIT 实测覆盖为"能显示全内容的最小高度"）。
+ * · 设置：见 `settingsDefaultH`（内容区 `SETTINGS_ROWS` 行，与告警解绑）；
+ * · 试听/导出/关于：最小高度（实际由 AUTO_FIT 实测覆盖为"能显示全内容的最小高度"）。
  */
 const defaultH = (key: DockPanelKey, narrow: boolean, rowPitch: number): number => {
   if (key === 'problems') return CHROME_H + PANE_PAD_H + ROW_H * PROBLEMS_ROWS
   if (key === 'settings') return settingsDefaultH(rowPitch, narrow)
+  // adj494：关于走 AUTO_FIT（实测内容高）；这里的值是**首次测量前的兜底**
+  if (key === 'about') return CHROME_H + PANE_PAD_H + ROW_H * PROBLEMS_ROWS
   return MIN_H
 }
 
@@ -118,27 +135,30 @@ const defaultH = (key: DockPanelKey, narrow: boolean, rowPitch: number): number 
 const clampH = (v: number, key: DockPanelKey) => Math.min(Math.max(Math.round(v), minFor(key)), maxH())
 
 /**
- * 底栏四个面板页签（adj486：图标改用**顶栏同一套矢量图标**）。
+ * 底栏五个面板页签（adj486：图标改用**顶栏同一套矢量图标**；adj492：新增「关于」）。
  *
- * 由来（用户报）：这四个页签此前用的是 **Unicode 字符**（`⚠ ▶ ⬇ ⚙`）当图标——与顶栏按钮那套
+ * 由来（用户报）：这几个页签此前用的是 **Unicode 字符**（`⚠ ▶ ⬇ ⚙`）当图标——与顶栏按钮那套
  * "用户设计的线稿图标"不是一路货：字形粗细/留白/基线各不相同，与面板里的其它图标摆在一起显得杂，
  * 而同一个"试听/导出/设置"在顶栏是设计图标、在底栏却是个字符。现统一为 `ToolIcon`（同一套 PNG + mask 上色）。
- * 告警暂无对应的设计图标，暂留 `⚠` 字符（等用户补图后替换）。
+ * 告警与关于暂无对应的设计图标，暂留字符（`⚠` / `ⓘ`，等用户补图后替换）。
  */
 const TABS: { key: DockPanelKey; label: string; icon?: ToolIconName; glyph?: string }[] = [
   { key: 'problems', label: dockCopy.tabProblems, glyph: '⚠' },
   { key: 'tryout', label: dockCopy.tabTryout, icon: 'play' },
   { key: 'export', label: dockCopy.tabExport, icon: 'export' },
   { key: 'settings', label: dockCopy.tabSettings, icon: 'settings' },
+  { key: 'about', label: dockCopy.tabAbout, glyph: 'ⓘ' },
 ]
 
 /**
- * adj469：**内容较少的面板（试听 / 导出）默认高度 = "能显示全内容的最小高度"**。
- * 这两块的内容高度随 dock 宽度重排而变（导出按钮是 auto-fit 网格），常量定不准，所以实测：
- * `pane.scrollHeight` 不受当前可视高度影响，恒为内容自然高度。
- * 告警不用它（规格是固定 5 行），设置也不用（规格是与告警同高）。
+ * adj469：**内容较少的面板默认高度 = "能显示全内容的最小高度"**。
+ * 这几块的内容高度随 dock 宽度重排而变（导出按钮是 auto-fit 网格、关于是「品牌 + 正文」两栏），
+ * 常量定不准，所以实测：`pane.scrollHeight` 不受当前可视高度影响，恒为内容自然高度。
+ * 告警不用它（规格是固定 5 行）；设置也不用（规格是固定 `SETTINGS_ROWS` 行）。
+ * adj494：加入 `about` —— 用户要求"打开关于时应以能够显示全内容为宜"。
+ * （内容再长也受 `maxH()` 上限约束，超长时仍可滚动。）
  */
-const AUTO_FIT: readonly DockPanelKey[] = ['tryout', 'export']
+const AUTO_FIT: readonly DockPanelKey[] = ['tryout', 'export', 'about']
 
 /**
  * adj470：告警**少于这个数量**时，也按"能显示全部内容的最小高度"显示（不必预留 5 行的空档）；
@@ -269,35 +289,33 @@ export function ToolDock() {
   const baseH = fitKeys ? forPanel(dockPanel) : (heights[dockPanel] ?? forPanel(dockPanel))
   const dockH = clampH(baseH, dockPanel)
 
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      const d = dragRef.current
-      if (!d) return
-      e.preventDefault()
-      const next = clampH(d.h + (d.y - e.clientY), dockPanel) // 向上拖 → 变高
-      setHeights((prev) => ({ ...prev, [dockPanel]: next }))
-    }
-    const onUp = () => {
-      dragRef.current = null
-      document.body.style.userSelect = ''
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-    return () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-  }, [dockPanel])
-
-  if (!dockOpen) return null
-
-  const startDrag = (e: React.MouseEvent) => {
-    if (e.button !== 0) return
-    e.preventDefault()
-    dragRef.current = { y: e.clientY, h: dockH }
-    document.body.style.userSelect = 'none'
+  // adj487：拖拽改用 Pointer Events（鼠标 + 触屏 + 触控笔）——此前只监听 mousemove/mouseup，
+  // 手机上拖不动。位移与结束回调都在手势里处理，不再常驻 window 监听。
+  const startDrag = (e: React.PointerEvent) => {
+    const panel = dockPanel
+    beginDrag(e, {
+      onStart: () => {
+        dragRef.current = { y: e.clientY, h: dockH }
+        document.body.style.userSelect = 'none'
+      },
+      onMove: (_dx, dy) => {
+        const d = dragRef.current
+        if (!d) return
+        // 手指/鼠标向上拖（dy < 0）→ dock 变高
+        setHeights((prev) => ({ ...prev, [panel]: clampH(d.h - dy, panel) }))
+      },
+      onEnd: () => {
+        dragRef.current = null
+        document.body.style.userSelect = ''
+      },
+    })
   }
   const bump = (delta: number) => setHeights((prev) => ({ ...prev, [dockPanel]: clampH(dockH + delta, dockPanel) }))
+
+  // adj491：dock 关闭时**不渲染**。⚠ 这条守卫曾在 adj487（把拖拽从 mouse 改 Pointer Events）时
+  // 被连带删除——后果是「点 ✕ 后 `dockOpen` 已置 false，但组件照样渲染」⇒ 关闭按钮看着"失灵"（用户报）。
+  // 凡是"按状态决定渲染与否"的早退守卫，重构它前后的代码块时必须单独核对有没有被一起删掉。
+  if (!dockOpen) return null
 
   return (
     <section
@@ -319,7 +337,7 @@ export function ToolDock() {
         aria-valuemax={maxH()}
         tabIndex={0}
         title={dockCopy.resizeTitle}
-        onMouseDown={startDrag}
+        onPointerDown={startDrag}
         onKeyDown={(e) => {
           const big = e.key === 'PageUp' || e.key === 'PageDown'
           if (e.key === 'ArrowUp' || e.key === 'PageUp') {

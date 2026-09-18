@@ -9,6 +9,7 @@ import { Suspense, lazy, useEffect, useRef } from 'react'
 import { TopBar } from './ui/TopBar'
 import { EditorFootBar } from './ui/EditorFootBar'
 import { ToolDock } from './ui/ToolDock'
+import { beginDrag } from './ui/dragGesture'
 import { Toast } from './ui/Toast'
 import { UpdatePrompt } from './ui/UpdatePrompt'
 import { EditorPane } from './editor/EditorPane'
@@ -16,7 +17,7 @@ import { PreviewPane } from './preview/PreviewPane'
 import { useDocStore } from './store/docStore'
 import { useUiStore } from './store/uiStore'
 // adj350：对话框懒加载（React.lazy）——首屏不加载它们，显著减小主包、加快首屏显示
-const AboutDialog = lazy(() => import('./dialogs/AboutDialog').then((m) => ({ default: m.AboutDialog })))
+// adj492：「关于」已迁入底栏 dock（见 ui/ToolDock），此处不再需要弹窗版懒加载
 const SamplesDialog = lazy(() => import('./dialogs/SamplesDialog').then((m) => ({ default: m.SamplesDialog })))
 // adj462：试听/导出/设置的对话框内容已移到底部 dock（ToolDock 里的 registry 懒加载它们），
 // 不再从 App 作为模态渲染
@@ -138,25 +139,17 @@ function App() {
   // 拆分视图：拖动分隔条调整窗格占比（adj46 上下；adj315 左右）。
   // dir='v' 上下（分隔条在上/下窗格间，按高度占比）；dir='h' 左右（按宽度占比）。
   // 上下/左右共用同一 splitPct（"第一个窗格"占比）。
-  const startSplitDrag = (dir: 'v' | 'h') => (e: React.MouseEvent) => {
-    e.preventDefault()
+  // adj487：改用 Pointer Events（见 ui/dragGesture）——此前只监听 mousemove/mouseup，手机上拖不动。
+  const startSplitDrag = (dir: 'v' | 'h') => (e: React.PointerEvent) => {
     const main = mainRef.current
     if (!main) return
     const rect = main.getBoundingClientRect()
-    const start = dir === 'v' ? e.clientY : e.clientX
-    const startPct = splitPct
     const size = dir === 'v' ? rect.height : rect.width
     if (size <= 0) return
-    const onMove = (ev: MouseEvent) => {
-      const d = (dir === 'v' ? ev.clientY : ev.clientX) - start
-      setSplitPct(startPct + (d / size) * 100)
-    }
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
+    const startPct = splitPct
+    beginDrag(e, {
+      onMove: (dx, dy) => setSplitPct(startPct + ((dir === 'v' ? dy : dx) / size) * 100),
+    })
   }
 
   // 左右拆分布局（adj315）：方位由全局设置 splitHDir 决定
@@ -169,7 +162,7 @@ function App() {
       <div className="split-pane split-pane-h" style={{ flex: `0 0 ${splitPct}%` }}>
         {previewOnLeft ? <PreviewPane /> : <EditorPane />}
       </div>
-      <div className="split-divider split-divider-h" onMouseDown={startSplitDrag('h')} title="拖动调整左右窗格宽度" />
+      <div className="split-divider split-divider-h" onPointerDown={startSplitDrag('h')} title="拖动调整左右窗格宽度" />
       <div className="split-pane split-pane-h">
         {previewOnLeft ? <EditorPane /> : <PreviewPane />}
       </div>
@@ -204,7 +197,7 @@ function App() {
             <div className="split-pane" style={{ flex: `0 0 ${splitPct}%` }}>
               <PreviewPane />
             </div>
-            <div className="split-divider" onMouseDown={startSplitDrag('v')} title="拖动调整上下窗格高度" />
+            <div className="split-divider" onPointerDown={startSplitDrag('v')} title="拖动调整上下窗格高度" />
             <div className="split-pane">
               <EditorPane />
             </div>
@@ -219,7 +212,6 @@ function App() {
       {/* adj379：检测到 SW 新版本时的「点击刷新」提示 */}
       <UpdatePrompt />
 
-      {modal === 'about' && <Suspense fallback={null}><AboutDialog /></Suspense>}
       {modal === 'samples' && <Suspense fallback={null}><SamplesDialog /></Suspense>}
       {modal === 'shortcuts' && <Suspense fallback={null}><ShortcutsDialog /></Suspense>}
       {modal === 'manual' && <Suspense fallback={null}><DocDialog kind="manual" /></Suspense>}
