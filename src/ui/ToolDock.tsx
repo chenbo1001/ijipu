@@ -63,10 +63,16 @@ const PANELS: readonly { key: DockPanelKey; render: ComponentType }[] = [
 /**
  * dock 高度 = 外壳（抓手 + 页签栏）+ 内容区（上下内边距 + 内容本身）。
  * 这些值要和 `index.css` 里的实际样式对齐：
- *  · 抓手 `.tool-dock-resize` = 5px；
+ *  · 抓手 `.tool-dock-resize` = 5px（**桌面**；粗指针设备上 CSS 把 `--jp-resize-h` 加到 14px）；
  *  · 页签栏（adj509：参照顶栏按钮样式 + 固定高度）= 38px（`.tool-dock-tabs` 高度固定，内含
  *    上下 padding 2×2 + 下边框 1 + 内置页签 28px）；
  *  · 内容区 `.tool-dock-pane` 上下内边距 = 8 + 10 = 18px。
+ *
+ * ⚠ adj521：下面这几个常量只是**首帧兜底**——真正参与计算的外壳高度是**运行时实测**的
+ * `chromeH`（见组件内的测量 effect）。原因：抓手高度由 CSS 变量 `--jp-resize-h` 决定，而它在
+ * `@media (pointer: coarse)`（手机/平板）下是 **14px** 而不是 5px ⇒ 写死的 `CHROME_H=43`
+ * 在手机上比真实外壳（14+38=52）**矮 9px**，最小档会把页签栏压掉一截（用户报"底栏最小化时
+ * 下压、显示的最小高度小于页签栏高度"）。实测后这类"常量与 CSS 悄悄不一致"的坑从根上消失。
  */
 const RESIZE_H = 5
 const TABS_H = 38
@@ -77,7 +83,7 @@ const ROW_H = 22
 /**
  * adj510：告警面板的"面板头"高度（`problems-head` = 标题/折叠按钮/语法速查按钮那一行）。
  * 计为 28px（padding 4×2 + 文字 14px ≈ 22 + 行间距 ≈ 28，实测）。用于"告警 dock 兜底高度 =
- * 头 + 最多 2 行告警"的计算。
+ * 头 + `PROBLEMS_MAX_VISIBLE_ROWS` 行告警"的计算。
  */
 const PROBLEMS_HEAD_H = 28
 /**
@@ -88,18 +94,18 @@ const FOOT_H = 38
 /** 设置面板窄屏布局的**行间距**（与 CSS `grid-template-rows: … auto` 的 row-gap 对齐） */
 const GRID_GAP_V = 6
 /**
- * adj520：dock 的**绝对最小高度** —— 只留外壳（抓手 5 + 页签栏 38 = **43px**），内容区收起到 0。
- * 「最小高度」档位与拖拽/键盘的下限都用它：最小化后**仍能看到并点击页签 / 关闭 / 档位按钮**，
- * 随时可点回建议档、或向上拖回来。
+ * adj520：dock 的**绝对最小高度** = 外壳高度（抓手 + 页签栏）——「最小高度」档位与拖拽/键盘的
+ * 下限都用它：最小化后**仍能看到并点击页签 / 关闭 / 档位按钮**，随时可点回建议档、或向上拖回来。
  *
  * 为什么不再是 `MIN_H`(=95) / `MIN_H_SETTINGS`(=133)（adj468-adj516 的"留出可交互内容"兜底）：
  *   它们是**拖拽下限**，会让"最小高度"这一档**根本到不了**——用户点"最小"时高度被钳回 95/133，
  *   看起来就是"只有两段在切换"（用户报的就是这个）。adj513/516 又给告警面板开了"无告警时可低于
  *   MIN_H"的口子，导致同一份下限**按面板/告警数给出 0 / 95 / 133 三种结果**，语义已经混乱。
  *   现在统一成一个物理下限（外壳高度），既让三段都真正可达，也顺带让"始终允许调整高度"成立。
- */
-const MIN_DOCK_H = CHROME_H
-/**
+ *
+ * adj521：**没有对应的常量**——下限一律取组件内**实测的 `chromeH`**（原因见其状态说明：
+ * 手机上抓手是 14px 而非 5px）。`CHROME_H` 只作为"尚未测量"时的首帧兜底。
+ *
  * adj509：调整上限——宽屏下让"设置左栏页签"能**至少显示 3 个**（之前的鼠标滚动一档=3 项，
  * 但宽屏只能看到 2 个 ⇒ 第 3 个"音色库"一直显示不到）。把上限从 420 提到 460，让宽屏的
  * `dock-height` 默认值相应抬升。
@@ -140,43 +146,56 @@ const DOCK_NARROW_W = 720
  *  · 所以设置的高度按自己的行高单独算，`rowPitch` 由运行时实测（见 ToolDock 内的测量）。
  *
  * 两档只差**结构性**的一段：窄屏按钮行折到内容下方（行间距 + 按钮行高），宽屏按钮在右侧第三列、不占内容高度。
- * 于是：宽屏 = 外壳 58 + 内容 5 行；窄屏 = 同上 + 44（按钮行与行间距）。**两边内容区都是 5 行**。
+ * 于是：宽屏 = 外壳 + 内容 6 行；窄屏 = 同上 + 44（按钮行与行间距）。**两边内容区都是 6 行**。
+ *
+ * adj521：外壳高度改为**传入**（实测值 `chromeH`），不再用写死的 `CHROME_H`（手机上抓手是 14px 而非 5px）。
  */
-const settingsDefaultH = (rowPitch: number, narrow: boolean): number =>
-  CHROME_H + PANE_PAD_H + rowPitch * SETTINGS_ROWS + (narrow ? GRID_GAP_V + FOOT_H : 0)
+const settingsDefaultH = (rowPitch: number, narrow: boolean, chromeH: number): number =>
+  chromeH + PANE_PAD_H + rowPitch * SETTINGS_ROWS + (narrow ? GRID_GAP_V + FOOT_H : 0)
 
 /**
  * 各面板**兜底**默认高度（实测 AUTO_FIT 前的占位；AUTO_FIT 项在 `measured` 到位后会被覆盖）。
  * · 告警/试听/导出/关于：实测"能显示全内容的最小高度"（AUTO_FIT）；
  * · 设置：见 `settingsDefaultH`（内容区 `SETTINGS_ROWS` 行）。
  *
- * adj510：告警的兜底改为「**最多 2 条**可见」的高度（= `CHROME_H + PANE_PAD_H + 2×ROW_H + problems-head`），
- * ——用户要求"打开告警页签时底栏 dock 最高只显示两个告警的高度"。多于 2 条时面板内部
- * 滚动查看（`problems-list` 的 `overflow-y: auto`）。
+ * adj510：告警的兜底改为「**最多 `PROBLEMS_MAX_VISIBLE_ROWS` 条**可见」的高度
+ * （= 外壳 + `PANE_PAD_H` + `ROW_H × PROBLEMS_MAX_VISIBLE_ROWS` + problems-head），
+ * ——用户要求"打开告警页签时底栏 dock 最高只显示两个告警的高度"（adj524：该上限已放宽到 4 行）。
+ * 多于 `PROBLEMS_MAX_VISIBLE_ROWS` 条时面板内部滚动查看（`problems-list` 的 `overflow-y: auto`）。
+ * adj521：外壳高度改为**传入**（实测 `chromeH`），理由同 `settingsDefaultH`。
  */
-const defaultH = (key: DockPanelKey, narrow: boolean, rowPitch: number): number => {
-  // adj510：告警**兜底** = 2 行告警 + 面板头（problems-head ≈ 28px）；AUTO_FIT 实测接管后会按
-  // "内容自然高" 调整，但始终 cap 在 `PROBLEMS_MAX_VISIBLE_ROWS` 行（`measured` 已在 `forPanel`
+const defaultH = (key: DockPanelKey, narrow: boolean, rowPitch: number, chromeH: number): number => {
+  // adj510：告警**兜底** = `PROBLEMS_MAX_VISIBLE_ROWS` 行告警 + 面板头（problems-head ≈ 28px）；
+  // AUTO_FIT 实测接管后会按"内容自然高" 调整，但始终 cap 在同一行数（`measured` 已在 `forPanel`
   // 里钳制过；详见 `capProblemsContentHeight`）。
-  if (key === 'problems') return CHROME_H + PANE_PAD_H + PROBLEMS_HEAD_H + ROW_H * PROBLEMS_MAX_VISIBLE_ROWS
+  if (key === 'problems') return chromeH + PANE_PAD_H + PROBLEMS_HEAD_H + ROW_H * PROBLEMS_MAX_VISIBLE_ROWS
   // adj509：设置面板**默认高度**直接拉到上限（用户要求"调大 dock 高度让左栏页签至少显示 3 个"，
   // 宽屏下默认 dock 高度 ~235px 才能装下 6 行内容区，但左栏 jp-tab 36px×6=216px 只能装下 6 个；
   // 取 maxH 作为默认 = "第一次打开就让用户看到全部 5 个页签 + 还能看几行内容"，避免「打开设置 →
   // 还得先拖大才能看到音色库」。narrow 时仍走 settingsDefaultH（避免矮屏默认过高撑爆视口）。
-  if (key === 'settings') return narrow ? settingsDefaultH(rowPitch, narrow) : maxH()
+  if (key === 'settings') return narrow ? settingsDefaultH(rowPitch, narrow, chromeH) : maxH()
   // adj494：关于/试听/导出走 AUTO_FIT（实测内容高）；这里的值是**首次测量前的兜底**
-  return MIN_DOCK_H
+  return chromeH
 }
 
 /**
  * 夹紧到 [**外壳最小高度**, 上限]。
  *
- * adj520：下限统一为 `MIN_DOCK_H`（= 抓手 + 页签栏 = 43px），**不再按面板/告警数给不同的下限**
+ * adj520：下限统一为**外壳高度**（抓手 + 页签栏），**不再按面板/告警数给不同的下限**
  * （adj468/adj513/adj516 曾给出 0 / 95 / 133 三种结果，把"能到多小"变成了面板相关的隐式规则，
  *  直接后果是"最小高度"档永远到不了、以及"只有两段在切换"）。物理下限之外由内容区的
  * `overflow-y: auto` 兜底——高度不够就滚动，不需要用"抬高下限"来保护内容。
+ *
+ * adj521：下限不再取写死的 `MIN_DOCK_H`，而是**由调用方传入实测的 `chromeH`**——粗指针设备
+ * （手机）上 CSS 把抓手 `--jp-resize-h` 从 5px 加到 14px，写死的 43px 会比真实外壳（52px）矮，
+ * 最小档因此把页签栏压掉一截（用户报"下压、显示的最小高度小于页签栏高度"）。
+ * 上限同时兜一道 `Math.max(maxH(), chromeH)`：视口极矮时 `maxH()` 可能比外壳还小，
+ * 不兜会出现"下限 > 上限"的反向钳制（三档排序与档位判定都会失真）。
  */
-const clampH = (v: number) => Math.min(Math.max(Math.round(v), MIN_DOCK_H), maxH())
+const clampH = (v: number, chromeH: number) => {
+  const hi = Math.max(maxH(), chromeH)
+  return Math.min(Math.max(Math.round(v), chromeH), hi)
+}
 
 /**
  * 底栏五个面板页签（adj486：图标改用**顶栏同一套矢量图标**；adj492：新增「关于」）。
@@ -197,10 +216,18 @@ const TABS: { key: DockPanelKey; label: string; icon?: ToolIconName; glyph?: str
 /**
  * adj469：**内容较少的面板默认高度 = "能显示全内容的最小高度"**。
  * 这几块的内容高度随 dock 宽度重排而变（导出按钮是 auto-fit 网格、关于是「品牌 + 正文」两栏），
- * 常量定不准，所以实测：`pane.scrollHeight` 不受当前可视高度影响，恒为内容自然高度。
+ * 常量定不准，所以实测：取 `pane.scrollHeight` 作为"内容自然高"。
+ *
+ * ⚠ adj523：这里原写的是"`pane.scrollHeight` 不受当前可视高度影响，恒为内容自然高度"——**这句是错的**，
+ * 也正是"建议高度随切过来的方向而变"的根因：`scrollHeight === max(内容高, clientHeight)`，
+ * 而当时 `.tool-dock-pane` 是 `flex: 1 1 auto`（被拉伸到 dock 高度）⇒ **内容比可用高度小时候，
+ * 读数就等于"当前 dock 有多高"**。于是从"最大"切"建议"时量到的是 417px（拉伸后的可用高度）、
+ * 从"最小"切过来量到的才是真实内容高（用户报：从最大切不正好、从最小切正好）。
+ * 现由 CSS 保证 pane **按内容取高**（`.tool-dock-pane { flex: 0 0 auto }`，设置/告警两条例外
+ * 各自覆盖回 `1 1 auto` 且不依赖这个读数），`scrollHeight` 才真正恒等于内容自然高。
  * 告警**也**用它（adj510：与试听/导出/关于同一套机制 ——
  * "能装下内容的最小高度"），但**内容本身高度被 cap**（见 `PROBLEMS_MAX_VISIBLE_ROWS`）：
- * 告警自然内容 > 2 行时，pane 内部可滚动，dock 自身只装 2 行的可见高度。
+ * 告警自然内容 > `PROBLEMS_MAX_VISIBLE_ROWS` 行时，列表内部可滚动，dock 自身只装这么多行的可见高度。
  * 设置不走 AUTO_FIT（规格是固定 `SETTINGS_ROWS` 行）。
  * adj494：加入 `about` —— 用户要求"打开关于时应以能够显示全内容为宜"。
  * adj510：告警（`problems`）加入 AUTO_FIT，与试听/导出/关于统一按"内容自然高"定 dock 高度。
@@ -209,11 +236,16 @@ const TABS: { key: DockPanelKey; label: string; icon?: ToolIconName; glyph?: str
 const AUTO_FIT: readonly DockPanelKey[] = ['problems', 'tryout', 'export', 'about']
 
 /**
- * adj510：告警面板**最多显示 2 条**的高度 —— 告警通常用作「一眼看到脚本有什么问题」，
- * 多于 2 条的额外信息在面板内**自行滚动**查看（避免 dock 过高挤压编辑区）。
- * 设为 2 后：1 条告警 = "能装下的最小高度"；≥ 2 条 = 固定 2 行 + 面板内滚动。
+ * 告警面板在**建议档**下最多显示几行（超出部分由列表自身滚动查看）。
+ *
+ * adj510：定为 **2 行** —— 当时底栏高度只能靠拖拽调整，"默认就给很高"会挤占编辑区，
+ * 所以取一个保守值，让用户需要时自己拖高。
+ * adj524（用户要求）：**2 → 4 行** —— 底栏有了高度档位按钮（adj519/adj520）之后，
+ * "默认给多一点"不再是负担：嫌高按一下就能切到最小（只留页签栏），想要更高按一下切到最大。
+ * 于是建议档可以承担"一次看全常见告警量（4 条）"的职责，减少"还得先拖大才看得见"的次数。
+ * （0/1/2 条告警仍按内容自然高收缩，不受本上限影响；只有超过本行数才滚动。）
  */
-const PROBLEMS_MAX_VISIBLE_ROWS = 2
+const PROBLEMS_MAX_VISIBLE_ROWS = 4
 
 export function ToolDock() {
   const dockOpen = useUiStore((s) => s.dockOpen)
@@ -235,6 +267,17 @@ export function ToolDock() {
    * 声明在这里（而非使用处附近）是因为下面几个 effect 也要重置它。
    */
   const [sizePhase, setSizePhase] = useState(0)
+  /**
+   * adj521：**实测的外壳高度**（抓手 `.tool-dock-resize` + 页签栏 `.tool-dock-tabs`）。
+   *
+   * 为什么必须实测：抓手高度来自 CSS 变量 `--jp-resize-h`，桌面是 5px、而 `@media (pointer: coarse)`
+   * （手机/平板）下是 **14px** ⇒ 写死的 `CHROME_H=43` 在手机上比真实外壳（14+38=**52**）矮 9px。
+   * 后果：最小档把 dock 设成 43px 时，容器比"抓手+页签栏"的需要还矮，页签栏被 `overflow: hidden`
+   * 裁掉一截（用户报"手机端底栏最小化时下压、显示的最小高度小于页签栏高度"）。
+   * 同一处偏差还会污染所有按 `CHROME_H` 算出来的高度（告警 cap、设置 6 行、建议档……），
+   * 所以统一改为"量出来再用"。首帧未量到之前用常量兜底。
+   */
+  const [chromeH, setChromeH] = useState(CHROME_H)
   /**
    * adj478：判断"是否窄屏布局"。CSS 用的是**容器查询**（按 dock 自身宽度，断点 720px），
    * 但设置面板的默认高度需要在 JS 里算（窄屏要额外留出下方按钮行），所以这里量一下 dock 宽度，
@@ -260,6 +303,35 @@ export function ToolDock() {
     }
   }, [dockOpen])
   const narrow = dockW > 0 && dockW <= DOCK_NARROW_W
+  /**
+   * adj521：实测外壳高度（抓手 + 页签栏）——见 `chromeH` 状态的说明。
+   * 观察这两个元素自身的尺寸：`--jp-resize-h` 随 `(pointer: coarse)` 变化（5px ↔ 14px）时
+   * ResizeObserver 会触发重测；窗口 resize / 旋转屏 / 缩放也一并覆盖（外加 `resize` 监听兜底）。
+   * 这两个元素都是 `flex: 0 0 auto`（不随 dock 高度收缩），所以"量它们"不会与"设置 dock 高度"
+   * 形成互相触发；量到之后只在变化超过 0.5px 时才 setState，进一步避免抖动。
+   */
+  useLayoutEffect(() => {
+    if (!dockOpen) return
+    const root = dockRef.current
+    if (!root) return
+    const resizeEl = root.querySelector<HTMLElement>('.tool-dock-resize')
+    const tabsEl = root.querySelector<HTMLElement>('.tool-dock-tabs')
+    const measure = () => {
+      const h =
+        (resizeEl?.getBoundingClientRect().height ?? RESIZE_H) + (tabsEl?.getBoundingClientRect().height ?? TABS_H)
+      if (h <= 0) return
+      setChromeH((prev) => (Math.abs(prev - h) > 0.5 ? h : prev))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    if (resizeEl) ro.observe(resizeEl)
+    if (tabsEl) ro.observe(tabsEl)
+    window.addEventListener('resize', measure)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [dockOpen])
   /**
    * adj478：设置面板**一行字段**的实际高度（含其行距）——用于算"内容区留 5 行"的高度。
    * 设置的一行是「标签 + 输入框」，比告警文字行高得多，所以必须实测；未测到前先用 ROW_H 兜底。
@@ -299,7 +371,7 @@ export function ToolDock() {
   }, [dockPanel])
 
   // adj510：告警**始终**走 AUTO_FIT（与试听/导出/关于同源）——实测 pane.scrollHeight，
-  // 并在 `capProblemsContentHeight` 里把"内容自然高"钳到「头 + 最多 2 行告警」的高度上限。
+  // 并在 `capProblemsContentHeight` 里把"内容自然高"钳到「头 + `PROBLEMS_MAX_VISIBLE_ROWS` 行告警」的高度上限。
   // 因此：0 条 = 一行占位；1 条 = 头 + 1 行；≥ 2 条 = 头 + 2 行（面板内可滚动）。
   // adj520：不再需要订阅"告警条数"——下限统一为 `MIN_DOCK_H` 后，"少于 2 条告警要按内容自然高收缩"
   // 由 AUTO_FIT 的自然结果直接给出（73px / 64px 都 ≥ 43px 的下限，不会被钳），无需特判。
@@ -327,8 +399,25 @@ export function ToolDock() {
     if (!dockOpen || !fitAllNow) return
     const pane = bodyRef.current?.querySelector<HTMLElement>(`.pane-${dockPanel}`)
     if (!pane) return
+    /**
+     * adj522：取"内容自然高"（与当前 dock 多高**无关**）。
+     *
+     * 告警面板要单独算：它的 pane 现在是弹性列（`.pane-problems`，adj522 为让列表能滚而建立），
+     * 列表收缩后 pane 自身**不再溢出** ⇒ `pane.scrollHeight` 会退化成"可用高度"（充气式增长，
+     * 越量越高）。改取 `头部高度 + 列表 scrollHeight`：两者都与可见高度无关
+     * （列表用 `flex: 0 1 auto`，未收缩时 clientHeight = 内容高、已收缩时 scrollHeight = 内容高），
+     * 因此稳定且无反馈。`.problems-head/.problems-list` 不存在时（如无告警时的 `.dock-empty` 占位）
+     * 回落到 `pane.scrollHeight`。
+     */
+    const measureNatural = (): number => {
+      if (dockPanel !== 'problems') return pane.scrollHeight
+      const head = pane.querySelector<HTMLElement>('.problems-head')
+      const list = pane.querySelector<HTMLElement>('.problems-list')
+      if (!head || !list) return pane.scrollHeight
+      return PANE_PAD_H + head.getBoundingClientRect().height + list.scrollHeight
+    }
     const measure = () => {
-      const nat = pane.scrollHeight
+      const nat = measureNatural()
       if (nat <= 0) return
       setMeasured((prev) => (Math.abs((prev[dockPanel] ?? 0) - nat) > 2 ? { ...prev, [dockPanel]: nat } : prev))
     }
@@ -346,23 +435,23 @@ export function ToolDock() {
   }, [dockOpen, dockPanel, everActive.length, fitAllNow])
 
   /**
-   * adj510：告警面板的"内容自然高"会被 **cap** —— 超过「头 + 最多 2 行告警」时，
+   * adj510：告警面板的"内容自然高"会被 **cap** —— 超过「头 + `PROBLEMS_MAX_VISIBLE_ROWS` 行告警」时，
    * 仍记为这个上限；超出部分由 `problems-list` 的 `overflow-y: auto` 在面板内滚动查看。
    * 其它 AUTO_FIT 面板（试听/导出/关于）直接返回 `h`，由内层 `overflow-y: auto` 兜底超长内容。
    */
   const capProblemsContentHeight = (h: number): number => {
     if (h <= 0) return h
-    // 头 + 最多 2 行 = PANE_PAD_H + PROBLEMS_HEAD_H + 2 × ROW_H（实测；与 defaultH 兜底对齐）
+    // 头 + `PROBLEMS_MAX_VISIBLE_ROWS` 行 = PANE_PAD_H + PROBLEMS_HEAD_H + ROW_H × 行数（实测；与 defaultH 兜底对齐）
     return Math.min(h, PANE_PAD_H + PROBLEMS_HEAD_H + ROW_H * PROBLEMS_MAX_VISIBLE_ROWS)
   }
 
   const forPanel = (key: DockPanelKey): number => {
-    // 实测值（pane.scrollHeight）已含内容区上下内边距，所以这里只加外壳
+    // 实测值（pane.scrollHeight）已含内容区上下内边距，所以这里只加外壳（adj521：外壳用实测值）
     if (AUTO_FIT.includes(key) && measured[key]) {
       const measuredContent = key === 'problems' ? capProblemsContentHeight(measured[key]!) : measured[key]!
-      return CHROME_H + measuredContent
+      return chromeH + measuredContent
     }
-    return defaultH(key, narrow, settingsRowPitch)
+    return defaultH(key, narrow, settingsRowPitch, chromeH)
   }
   // adj518：baseH **始终优先用用户拖拽后的高度** `heights[dockPanel]`（仅当未设置才回退到
   // `forPanel`）。此前 bug：`fitKeys=true` 时 `baseH` 永远用 `forPanel(dockPanel)`，**完全忽略**
@@ -370,7 +459,7 @@ export function ToolDock() {
   // 外其它几个页签都不能调整高度"。修法：把"是否 AUTO_FIT"的判断从 baseH 来源里去掉——
   // AUTO_FIT 仍负责"初始默认值 = 实测内容自然高"，但**一旦用户拖了**就以用户值为准。
   const baseH = heights[dockPanel] ?? forPanel(dockPanel)
-  const dockH = clampH(baseH)
+  const dockH = clampH(baseH, chromeH)
 
   // ---- adj520：三段高度的单按钮循环 ------------------------------------------------
   /**
@@ -380,15 +469,15 @@ export function ToolDock() {
    * 一次看全，把"打开时的默认高度"直接拉到了上限）。若建议档也用它，就会出现 `建议 === 最大`，
    * 三段里有两段重合 ⇒ 用户看到的仍是"两段切换"。所以这里改用 `settingsDefaultH`（内容区 6 行，
    * 即 adj492 的口径，宽屏 ≈235px，左栏仍能露出 4~5 个页签 ≥ adj509 要求的 3 个），
-   * 保证 **最小(43) < 建议(≈235) < 最大(460)** 三档严格单调。
+   * 保证 **最小 < 建议 < 最大** 三档严格单调。
    *
    * 末尾再夹一道 `(min+8, max−8)`：极矮视口下（`maxH()` 会随视口缩到很小）"内容自然高"可能贴到
    * 上限或下限，与相邻档重合 ⇒ 又变成"只有两段"。夹一下就能把"三档两两不同"变成**结构性保证**，
    * 而不是靠数值凑巧。夹到偏小时内容不会丢——内容区本来就有 `overflow-y: auto`。
    */
   const suggestedH = (): number => {
-    const raw = dockPanel === 'settings' ? settingsDefaultH(settingsRowPitch, narrow) : forPanel(dockPanel)
-    const lo = MIN_DOCK_H + 8
+    const raw = dockPanel === 'settings' ? settingsDefaultH(settingsRowPitch, narrow, chromeH) : forPanel(dockPanel)
+    const lo = chromeH + 8
     const hi = Math.max(lo, maxH() - 8)
     return Math.min(Math.max(raw, lo), hi)
   }
@@ -397,10 +486,10 @@ export function ToolDock() {
    * 三档目标高度（**语义严格单调**：min < suggested < max）：
    * · max       = `maxH()`（与抓手拖拽上限一致）
    * · suggested = `suggestedH()` = "刚好装下当前面板内容"的高度
-   * · min       = `MIN_DOCK_H` = 只留外壳（抓手 + 页签栏），内容区收起到 0
+   * · min       = `chromeH`（实测外壳 = 抓手 + 页签栏），内容区收起到 0
    */
   const dockHeightFor = (size: SizePreset): number =>
-    size === 'max' ? maxH() : size === 'min' ? MIN_DOCK_H : suggestedH()
+    size === 'max' ? maxH() : size === 'min' ? chromeH : suggestedH()
 
   /**
    * **4 相位**循环表（用户规格）——每点一次按钮**走一步**：
@@ -421,7 +510,7 @@ export function ToolDock() {
 
   const cycleDockHeight = () => {
     // 先按"当前相位声明的下一步"落高度，再把相位推进一格（4 步一循环）
-    setHeights((prev) => ({ ...prev, [dockPanel]: clampH(dockHeightFor(sizeStep.next)) }))
+    setHeights((prev) => ({ ...prev, [dockPanel]: clampH(dockHeightFor(sizeStep.next), chromeH) }))
     setSizePhase((p) => (p + 1) % SIZE_PHASES.length)
   }
 
@@ -431,7 +520,7 @@ export function ToolDock() {
    * 用 memo 反而要么漏依赖、要么每帧重算，是纯粹的负担（lint 也会报 exhaustive-deps）。
    */
   const heightPresetActive: SizePreset | 'custom' =
-    Math.abs(dockH - MIN_DOCK_H) <= 2
+    Math.abs(dockH - chromeH) <= 2
       ? 'min'
       : Math.abs(dockH - maxH()) <= 2
         ? 'max'
@@ -449,7 +538,7 @@ export function ToolDock() {
    * 落到 `suggested` 时刻意**不拨**——它对应相位 0 / 2 两格，拨哪一个都是猜。
    */
   const syncPhaseFromManualHeight = (h: number) => {
-    if (Math.abs(h - MIN_DOCK_H) <= 2) setSizePhase(3)
+    if (Math.abs(h - chromeH) <= 2) setSizePhase(3)
     else if (Math.abs(h - maxH()) <= 2) setSizePhase(1)
   }
 
@@ -466,7 +555,7 @@ export function ToolDock() {
         const d = dragRef.current
         if (!d) return
         // 手指/鼠标向上拖（dy < 0）→ dock 变高
-        const next = clampH(d.h - dy)
+        const next = clampH(d.h - dy, chromeH)
         setHeights((prev) => ({ ...prev, [panel]: next }))
         syncPhaseFromManualHeight(next)
       },
@@ -477,7 +566,7 @@ export function ToolDock() {
     })
   }
   const bump = (delta: number) => {
-    const next = clampH(dockH + delta)
+    const next = clampH(dockH + delta, chromeH)
     setHeights((prev) => ({ ...prev, [dockPanel]: next }))
     syncPhaseFromManualHeight(next)
   }
@@ -498,15 +587,15 @@ export function ToolDock() {
     >
       {/* 顶部抓手（拖拽调整高度；键盘 ↑/↓ /PageUp/PageDown）
          * adj518：抓手**总是可拖**。
-         * adj520：`aria-valuemin` 直接取 `MIN_DOCK_H`——与 `clampH` 共用**同一个下限常量**，
-         * 不再出现"ARIA 报 95、实际能拖到 43"这类两处各写一份的漂移（本项目的老坑）。 */}
+         * adj520/adj521：`aria-valuemin` 取 `chromeH`（**实测**外壳高度）——与 `clampH` 共用**同一个取值**，
+         * 不再出现"ARIA 报 95、实际能拖到 43"或"手机上 ARIA 报 43、实际外壳 52"这类两处各写一份的漂移。 */}
       <div
         className="tool-dock-resize"
         role="separator"
         aria-orientation="horizontal"
         aria-label={dockCopy.resizeTitle}
         aria-valuenow={dockH}
-        aria-valuemin={MIN_DOCK_H}
+        aria-valuemin={chromeH}
         aria-valuemax={maxH()}
         tabIndex={0}
         title={dockCopy.resizeTitle}

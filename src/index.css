@@ -1296,12 +1296,37 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow-y: auto; /* 单块面板（试听/导出/关于）由这里滚；告警由 `.problems-list` 自身滚（adj510：dock 高度被 cap 时避免双滚动条）；设置面板见下方覆盖 */
+  overflow-y: auto; /* 单块面板（试听/导出/关于）由这里滚；告警由 `.problems-list` 自身滚（adj522 建立了受限高度链），这里保留 `auto` 作**兜底**——链万一断了也还能滚、不会把内容裁掉；设置面板见下方覆盖 */
 }
-/* adj510：告警面板里 `.problems-list` 自己滚动；body 不要抢着滚 —— 否则会与列表的双滚动条打架 */
-.tool-dock-body:has(.problem-panel) { overflow-y: hidden; }
-.tool-dock-pane {
+/* adj522：告警面板那条 pane 要当**弹性列容器**，`.problem-panel` / `.problems-list` 才拿得到受限高度。
+ * adj510 曾以为"给 `.problems-list` 加 `overflow-y: auto` 它就会自己滚"，但 pane 是普通 block、
+ * `.problem-panel` 高度 auto ⇒ 列表的 `flex: 1 1 auto` 拿不到可用高度，`overflow` 永不触发；
+ * 内容超出后既不滚也无人裁（被 `.tool-dock{overflow:hidden}` 裁掉），用户报"展开信息超过视界、
+ * 但没有滚动条"（更严重的是展开的「正确写法」根本看不到）。
+ * `.pane-settings` 早就是这个写法（adj464），这里补齐告警这一条。 */
+.tool-dock-pane.pane-problems {
+  display: flex;
+  flex-direction: column;
+  /* adj523：同样**显式填满 dock**——列表的受限高度靠这条链（基类已改为"按内容取高"）。 */
   flex: 1 1 auto;
+  min-height: 0;
+}
+.tool-dock-pane {
+  /* adj523：面板**按内容取高**（`flex: 0 0 auto`），不再被拉伸到 dock 高度。
+   *
+   * 为什么必须这样：AUTO_FIT 的"内容自然高"是量 `pane.scrollHeight`，而
+   * `scrollHeight === max(内容高, clientHeight)`——pane 一旦被拉伸，**内容比可用高度小时
+   * 读数就等于"当前 dock 有多高"**，测量被当前高度污染，于是同一个"建议高度"会因为你
+   * 从哪一档切过来而不同（用户报：从最大切到建议，建议高度明显偏大；从最小切过来才正好）。
+   * 改成内容取高后：pane 的盒子恒等于内容 ⇒ `scrollHeight` 恒等于内容自然高，与 dock 高度无关；
+   * 顺带还有两个好处：① pane 尺寸不再随 dock 变化 ⇒ 挂在上面的 ResizeObserver 不会因
+   * "拖高度"而反复触发测量；② 内容比 dock 高时是 `flex-shrink: 0`（不压缩）⇒ 由
+   * `.tool-dock-body` 滚动兜底，而不是把内容裁掉。
+   *
+   * 例外（各自覆盖回 `flex: 1 1 auto`）：**设置面板**（三栏要受限高度才能各自滚）与
+   * **告警面板**（列表要受限高度才能滚）——它们需要"填满 dock"，且都不依赖这个读数
+   * （设置的量的是行高；告警量的是"头部 + 列表 scrollHeight"）。 */
+  flex: 0 0 auto;
   min-height: 0;
   padding: 8px 12px 10px;
 }
@@ -1538,6 +1563,10 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* adj523：基类 `.tool-dock-pane` 改成"按内容取高"后，这里要**显式填满 dock**——
+   * 三栏的受限高度正是从 dock 高度沿 flex 链传下来的（`min-height: 0` 链上的关键一环）。 */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 /* adj465：设置面板要**确定高度**，三栏才拿得到受限高度、各自滚动；按钮也才永远在可视区内。
  * （dock 默认 `height: auto` 让内容撑高 → 三栏永不滚、且超出 max-height 的部分被 overflow:hidden
@@ -1806,6 +1835,9 @@ body {
   padding: 2px 0 6px;
   color: var(--jp-text-primary);
   font-size: 12px;
+  /* adj522：头部**不参与收缩**——面板变成弹性列后，空间不够时只应压缩"列表"（列表自己滚），
+     头部（标题 / 语法速查 / 收起按钮）必须始终完整可见，否则用户滚到底就找不到收起入口了。 */
+  flex: 0 0 auto;
 }
 
 .problems-head-main {
@@ -1875,11 +1907,16 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
-  /* adj510：告警面板本身**最多 2 行可见**（由 ToolDock 的 `capProblemsContentHeight` 钳住 dock 高度）；
-     这里让列表在 dock 高度被 cap 时**自身滚动**显示多于 2 条的告警。`.tool-dock-body`
-     的 `overflow-y: auto` 也兜底；两套可滚动互不影响（dock 高度已被 JS 钳住不会触发 dock 滚动）。
-     设 `flex: 1 1 auto` 让列表接管 `.problem-panel` 的剩余空间，配合 dock 的定高才能"内容多时滚动"。 */
-  flex: 1 1 auto;
+  /* adj510：告警面板本身**最多 2 行可见**（由 ToolDock 的 `capProblemsContentHeight` 钳住 dock 高度），
+     超出部分由**列表自身滚动**显示。
+     adj522：`flex` 由 `1 1 auto` 改为 **`0 1 auto`** —— 列表按**内容**取高（basis auto、不 grow），
+     空间不够时**可收缩**（`min-height: 0`），收缩后 `overflow-y: auto` 才会真的出滚动条；
+     若用 `1 1 auto`，列表会被拉满到可用高度，"内容 < 可用"时 `scrollHeight` 会等于可用高度，
+     反过来污染"内容自然高"的测量（充气式增长）。现在恒有 `scrollHeight == 内容高`：
+       · 未收缩：clientHeight = 内容高 ⇒ scrollHeight = 内容高
+       · 已收缩：clientHeight < 内容高 ⇒ scrollHeight = 内容高
+     测量因此与"当前 dock 多高"无关，不会形成反馈。 */
+  flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
 }

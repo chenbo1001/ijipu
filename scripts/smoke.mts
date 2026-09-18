@@ -7889,12 +7889,13 @@ console.log('[116] settings 6 rows, About in dock, divider touch hit-area (adj49
   const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
   const storeSrc = String(readFileSync('src/store/uiStore.ts', 'utf8'))
 
-  // adj492：设置面板默认高度 = 内容 6 行
+  // adj492：设置面板默认高度 = 内容 6 行（adj521：`settingsDefaultH` 多了一个 `chromeH` 参数
+  // ——外壳高度改为实测传入以适配手机 14px 抓手；断言改为不绑定具体参数表，只钉"用 rowPitch × SETTINGS_ROWS"）
   check('adj492 设置面板内容区默认 6 行（SETTINGS_ROWS = 6）',
     /const SETTINGS_ROWS = 6/.test(dockSrc),
     '')
   check('adj492 设置高度仍按自己的行高单独算（与告警解绑）',
-    /settingsDefaultH = \(rowPitch: number, narrow: boolean\): number =>[\s\S]{0,160}?rowPitch \* SETTINGS_ROWS/.test(dockSrc),
+    /settingsDefaultH = \([^)]*\): number =>[\s\S]{0,200}?rowPitch \* SETTINGS_ROWS/.test(dockSrc),
     '')
 
   // adj492：关于面板进 dock
@@ -7918,6 +7919,44 @@ console.log('[116] settings 6 rows, About in dock, divider touch hit-area (adj49
   // adj510：告警也纳入 AUTO_FIT（"能装下内容的最小高度"，但 cap 在最多 2 条可见）
   check('adj494 关于面板纳入 AUTO_FIT（打开即完整显示内容）；adj510 告警亦纳入 AUTO_FIT',
     /const AUTO_FIT: readonly DockPanelKey\[\] = \['problems', 'tryout', 'export', 'about'\]/.test(dockSrc),
+    '')
+  // adj524：告警"建议档"最多显示 4 行（adj510 原为 2 行）。放宽的依据是底栏有了高度档位按钮——
+  // "默认多给一点"不再挤占编辑区（嫌高按一下到最小、想更高按一下到最大），所以让建议档
+  // 承担"一次看全常见告警量（4 条）"，减少"还得先拖大才看得见"。0/1/2 条仍按内容自然高收缩。
+  check('adj524 告警建议档最多显示 4 行（PROBLEMS_MAX_VISIBLE_ROWS = 4）',
+    /const PROBLEMS_MAX_VISIBLE_ROWS = 4/.test(dockSrc),
+    '')
+
+  // adj522：告警面板"展开后内容超过视界却没有滚动条"——高度链必须成立，列表才会真的滚。
+  // 三件套缺一不可：① 告警那条 pane 是弹性列（给列表受限高度）；
+  //                ② 列表 `flex: 0 1 auto`（按内容取高、可收缩）+ `overflow-y: auto`（收缩后出滚动条）；
+  //                ③ 头部不参与收缩（滚到底也要能点"收起"）。
+  // 另守一句：`.tool-dock-body` 的滚动**不被关掉**（恢复 `auto` 作兜底，链断了也不会把内容裁掉）。
+  check('adj522 告警列表高度链成立（pane 弹性列 + 列表可收缩可滚 + 头部不收缩）',
+    /\.tool-dock-pane\.pane-problems \{[\s\S]{0,120}?display: flex;[\s\S]{0,80}?flex-direction: column;/.test(css) &&
+      /\.problems-list \{[\s\S]{0,900}?flex: 0 1 auto;[\s\S]{0,120}?min-height: 0;[\s\S]{0,120}?overflow-y: auto;/.test(css) &&
+      /\.problems-head \{[\s\S]{0,300}?flex: 0 0 auto;/.test(css),
+    '')
+  check('adj522 取消"关掉 dock 内容区滚动"的覆盖（链断了仍可滚，不裁内容）',
+    !/\.tool-dock-body:has\(\.problem-panel\)/.test(css),
+    '')
+  // 告警的"内容自然高"不再读 pane.scrollHeight（弹性列下它会退化成可用高度、越量越高），
+  // 改读「头部高度 + 列表 scrollHeight」——两者都与可见高度无关。
+  check('adj522 告警内容自然高改由 head + list.scrollHeight 量取（避免充气式增长）',
+    /dockPanel !== 'problems'\) return pane\.scrollHeight/.test(dockSrc) &&
+      /list\.scrollHeight/.test(dockSrc),
+    '')
+
+  // adj523：AUTO_FIT 的"内容自然高"取自 `pane.scrollHeight`，而 `scrollHeight === max(内容高, clientHeight)`。
+  // 若 pane 被拉伸到 dock 高度（`flex: 1 1 auto`），"内容比可用高度小"时读数就等于**当前 dock 高度**，
+  // 测量被污染 ⇒ 同一个"建议高度"会随"从哪一档切过来"而变（用户报：从最大切不正好、从最小切正好）。
+  // 契约：基类按内容取高；设置/告警两条需要填满 dock 的 pane 各自显式覆盖回 `1 1 auto`。
+  check('adj523 AUTO_FIT 面板的 pane 按内容取高（测量不被当前 dock 高度污染）',
+    /\.tool-dock-pane \{[\s\S]{0,1200}?flex: 0 0 auto;/.test(css),
+    '')
+  check('adj523 设置 / 告警两条 pane 显式填满 dock（分别要靠受限高度滚动）',
+    /\.tool-dock-pane\.pane-settings \{[\s\S]{0,400}?flex: 1 1 auto;/.test(css) &&
+      /\.tool-dock-pane\.pane-problems \{[\s\S]{0,300}?flex: 1 1 auto;/.test(css),
     '')
 
   // adj493：分隔条的手指命中区
