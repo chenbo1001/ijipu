@@ -173,6 +173,15 @@ export const dockCopy = {
   /** 导出进行中（状态栏动态指示），clickHint 提示可点击查看 */
   exportRunning: (label: string): string => `导出中：${label}`,
   exportRunningHint: '点击查看导出面板',
+  /**
+   * adj520：dock 高度档位切换按钮（位于关闭按钮左侧）—— 单按钮 4 相位循环
+   * `建议 → 最大 → 建议 → 最小 → 建议`，图标（`上.png` / `下.png`）方向按"点一下会往哪走"切换。
+   */
+  sizeGroupTitle: '底栏高度档位',
+  /** 三个档位的中文名（用于按钮 title / aria-label 的拼装） */
+  sizeName: { max: '最大', suggested: '建议', min: '最小' } as const,
+  /** 按钮提示：当前档 + 点一下会到哪一档 */
+  sizeTitle: (cur: string, next: string): string => `底栏高度：${cur}（点击 → ${next}）`,
 } as const
 
 /**

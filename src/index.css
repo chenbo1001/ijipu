@@ -1142,9 +1142,12 @@ body {
 }
 .tool-dock-close {
   /* adj491：**不许压缩**——`.tool-dock-tabs` 加宽/页签溢出的场合（窄屏、手机上），
-     必须保证 ✕ 始终留在 dock 可视区内（曾经的 bug：它被推到 dock 之外、被 overflow:hidden 裁掉）。 */
+     必须保证 ✕ 始终留在 dock 可视区内（曾经的 bug：它被推到 dock 之外、被 overflow:hidden 裁掉）。
+     adj520：去掉自身的 `margin-left: auto`——"推到右端"的责任交给
+     `.tool-dock-size-btn`（见其 CSS），避免两个 `margin-left: auto` 互相争抢剩余空间
+     导致 size-btn / close 中间出现意外间隙。close 紧贴 size-btn 右侧（size-btn 已用
+     `margin-left: auto` 占据剩余空间，close 自己没有 auto 可吃）。 */
   flex: 0 0 auto;
-  margin-left: auto;
   background: transparent;
   border: 0;
   padding: 3px 8px;
@@ -1154,6 +1157,41 @@ body {
   line-height: 1;
 }
 .tool-dock-close:hover { color: var(--jp-danger); }
+/**
+ * adj520：底栏高度档位切换按钮——单按钮循环 `建议 → 最大 → 建议 → 最小 → 建议`，
+ * 视觉沿用 adj509/511 顶栏按钮同款（5px 圆角 / 1px 边框 / 12px 字号 / hover 三联动），
+ * 高 28px 紧贴关闭按钮左侧（与 `.tool-dock-tab` 同高）；图标用 `上.png` / `下.png`，
+ * 方向按"按一下会往哪走"指示（详见 JSX 注释 + `cycleDockHeight`）。
+ */
+.tool-dock-size-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  width: 28px;
+  margin-left: auto;
+  margin-right: 4px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--jp-border);
+  border-radius: 7px;
+  cursor: pointer;
+  color: var(--jp-text-primary);
+  /* 与 `.topbar-btn` 同款 hover 三联动（border + color + bg-panel-hover） */
+  transition: all 0.15s;
+  /* 不参与 tab flex 流压缩：保证关闭按钮仍能 `flex-shrink:0` */
+  flex-shrink: 0;
+}
+.tool-dock-size-btn:hover {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+  background: var(--jp-bg-panel-hover);
+}
+.tool-dock-size-btn:focus-visible {
+  outline: 2px solid var(--jp-accent);
+  outline-offset: -2px;
+}
 
 /* ---------------- adj492：「关于」面板（原 AboutDialog 内容，迁入 dock） ----------------
  * 内容本身是"品牌介绍 + 正文若干段"，原为弹窗里的竖直窄栏；dock 里是**宽而扁**的一条，

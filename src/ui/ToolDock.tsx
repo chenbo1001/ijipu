@@ -24,16 +24,13 @@
  * `max-height` —— 这样"各栏独立滚动"是**算出来的确定值**，不依赖 flex 链的隐式收窄
  * （此前依赖 flex 链，在部分情况下栏不会收窄 → 内容溢出被 overflow:hidden 裁掉、无法操作）。
  */
-import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import { useUiStore, type DockPanelKey } from '../store/uiStore'
-import { useDocStore } from '../store/docStore'
 import { dockCopy } from '../brand/copy'
 import { ToolIcon } from './ToolIcon'
 import type { ToolIconName } from './toolIcons'
 import { beginDrag } from './dragGesture'
-// adj513：告警数（用于"无告警时不走 MIN_H 下限"）——纯函数，留在主包
-import { summarizeProblems } from './problems'
 
 /**
  * adj497（用户要求"各页签做成懒加载、首次打开才加载，以加快启动"）：**五个面板全部走 `React.lazy`**。
@@ -83,26 +80,47 @@ const ROW_H = 22
  * 头 + 最多 2 行告警"的计算。
  */
 const PROBLEMS_HEAD_H = 28
-/** 内容区最小可用内容高度（试听/导出的"最小高度"） */
-const MIN_CONTENT_H = 34
 /**
  * adj468/478：设置面板在**窄屏**下按钮行折到内容下方（横向一行，实测 ≈31px）。
- * 既用于它的拖拽下限（否则内容行会跟按钮行抢高度、按钮被挤出视界），
- * 也用于它的默认高度。
+ * 用于它的**建议高度**（`settingsDefaultH`）。
  */
 const FOOT_H = 38
 /** 设置面板窄屏布局的**行间距**（与 CSS `grid-template-rows: … auto` 的 row-gap 对齐） */
 const GRID_GAP_V = 6
-/** 拖拽下限：普通面板 = 最小内容高度；设置 = 再留出下方按钮行 */
-const MIN_H = CHROME_H + PANE_PAD_H + MIN_CONTENT_H
-const MIN_H_SETTINGS = CHROME_H + PANE_PAD_H + FOOT_H + MIN_CONTENT_H
-const minFor = (key: DockPanelKey) => (key === 'settings' ? MIN_H_SETTINGS : MIN_H)
+/**
+ * adj520：dock 的**绝对最小高度** —— 只留外壳（抓手 5 + 页签栏 38 = **43px**），内容区收起到 0。
+ * 「最小高度」档位与拖拽/键盘的下限都用它：最小化后**仍能看到并点击页签 / 关闭 / 档位按钮**，
+ * 随时可点回建议档、或向上拖回来。
+ *
+ * 为什么不再是 `MIN_H`(=95) / `MIN_H_SETTINGS`(=133)（adj468-adj516 的"留出可交互内容"兜底）：
+ *   它们是**拖拽下限**，会让"最小高度"这一档**根本到不了**——用户点"最小"时高度被钳回 95/133，
+ *   看起来就是"只有两段在切换"（用户报的就是这个）。adj513/516 又给告警面板开了"无告警时可低于
+ *   MIN_H"的口子，导致同一份下限**按面板/告警数给出 0 / 95 / 133 三种结果**，语义已经混乱。
+ *   现在统一成一个物理下限（外壳高度），既让三段都真正可达，也顺带让"始终允许调整高度"成立。
+ */
+const MIN_DOCK_H = CHROME_H
 /**
  * adj509：调整上限——宽屏下让"设置左栏页签"能**至少显示 3 个**（之前的鼠标滚动一档=3 项，
  * 但宽屏只能看到 2 个 ⇒ 第 3 个"音色库"一直显示不到）。把上限从 420 提到 460，让宽屏的
  * `dock-height` 默认值相应抬升。
  */
 const maxH = () => Math.min(Math.round((typeof window !== 'undefined' ? window.innerHeight : 800) * 0.55), 460)
+
+/** adj520：三段高度的三个档位名 */
+type SizePreset = 'max' | 'suggested' | 'min'
+
+/**
+ * adj520：档位按钮的**4 相位循环表**（用户规格，见 `ToolDock` 内 `cycleDockHeight` 的说明）。
+ * 高度序列：`建议 → 最大 → 建议 → 最小 → 建议 → 最大 → …`
+ * `icon` 是该相位下按钮要显示的图标（`上.png` / `下.png`，见 `toolIcons.ts` 的 `up` / `down`），
+ * 语义 = "点一下会往哪走"：向上（变高）显示上箭头、向下（变矮）显示下箭头。
+ */
+const SIZE_PHASES: readonly { cur: SizePreset; next: SizePreset; icon: 'up' | 'down' }[] = [
+  { cur: 'suggested', next: 'max', icon: 'up' },
+  { cur: 'max', next: 'suggested', icon: 'down' },
+  { cur: 'suggested', next: 'min', icon: 'down' },
+  { cur: 'min', next: 'suggested', icon: 'up' },
+]
 
 /**
  * adj478：设置面板的内容区固定留 **5 行**内容的高度，且**与告警高度解绑**（不再共用
@@ -147,20 +165,18 @@ const defaultH = (key: DockPanelKey, narrow: boolean, rowPitch: number): number 
   // 还得先拖大才能看到音色库」。narrow 时仍走 settingsDefaultH（避免矮屏默认过高撑爆视口）。
   if (key === 'settings') return narrow ? settingsDefaultH(rowPitch, narrow) : maxH()
   // adj494：关于/试听/导出走 AUTO_FIT（实测内容高）；这里的值是**首次测量前的兜底**
-  return MIN_H
+  return MIN_DOCK_H
 }
 
 /**
- * 夹紧到 [该面板的拖拽下限, 上限]（adj468：设置的下限更高，保证下方按钮行始终放得下）。
- * adj513：告警面板在**无告警**时不再套用 `MIN_H` 下限——`.dock-empty` 只是一行"语法检查通过"**
- * 文字，dock 应按内容自然高收缩（用户报告"无告警却显示 ≥ 4 行高度"是 MIN_H=95 钳到 95px 造成的）。
- * adj516：扩到"**少于 2 条告警**都按最小高度"——1 条告警时仅头 + 1 行 ≈ 80px，无需硬撑 95px；
- * ≥ 2 条时再回到头 + 2 行 = 133px（≥ 2 条时面板内滚动）。其它面板保留 `MIN_H`。
+ * 夹紧到 [**外壳最小高度**, 上限]。
+ *
+ * adj520：下限统一为 `MIN_DOCK_H`（= 抓手 + 页签栏 = 43px），**不再按面板/告警数给不同的下限**
+ * （adj468/adj513/adj516 曾给出 0 / 95 / 133 三种结果，把"能到多小"变成了面板相关的隐式规则，
+ *  直接后果是"最小高度"档永远到不了、以及"只有两段在切换"）。物理下限之外由内容区的
+ * `overflow-y: auto` 兜底——高度不够就滚动，不需要用"抬高下限"来保护内容。
  */
-const clampH = (v: number, key: DockPanelKey, noProblems = false) => {
-  const lower = key === 'problems' && noProblems ? 0 : minFor(key)
-  return Math.min(Math.max(Math.round(v), lower), maxH())
-}
+const clampH = (v: number) => Math.min(Math.max(Math.round(v), MIN_DOCK_H), maxH())
 
 /**
  * 底栏五个面板页签（adj486：图标改用**顶栏同一套矢量图标**；adj492：新增「关于」）。
@@ -215,6 +231,11 @@ export function ToolDock() {
    */
   const [measured, setMeasured] = useState<Partial<Record<DockPanelKey, number>>>({})
   /**
+   * adj520：档位按钮的**循环相位**（0..3，见模块级 `SIZE_PHASES`）。
+   * 声明在这里（而非使用处附近）是因为下面几个 effect 也要重置它。
+   */
+  const [sizePhase, setSizePhase] = useState(0)
+  /**
    * adj478：判断"是否窄屏布局"。CSS 用的是**容器查询**（按 dock 自身宽度，断点 720px），
    * 但设置面板的默认高度需要在 JS 里算（窄屏要额外留出下方按钮行），所以这里量一下 dock 宽度，
    * 阈值与 CSS 的 `DOCK_NARROW_W` 保持同一个数。
@@ -265,36 +286,40 @@ export function ToolDock() {
     if (dockOpen && !wasOpenRef.current) {
       setHeights({})
       setMeasured({})
+      // adj520：重新打开 = 各面板回到默认高度 ⇒ 档位循环也回到起点（相位 0 = 建议，图标上箭头）
+      setSizePhase(0)
     }
     wasOpenRef.current = dockOpen
   }, [dockOpen])
 
+  // adj520：切换面板时档位循环回到起点（相位 0）——各面板高度互相独立，
+  // 上一个面板循环走到哪一格不该带到下一个面板（否则新面板的"当前档"与图标指示会对不上）。
+  useEffect(() => {
+    setSizePhase(0)
+  }, [dockPanel])
+
   // adj510：告警**始终**走 AUTO_FIT（与试听/导出/关于同源）——实测 pane.scrollHeight，
   // 并在 `capProblemsContentHeight` 里把"内容自然高"钳到「头 + 最多 2 行告警」的高度上限。
-  // 因此：1 条告警 = 头 + 1 行；2 条 = 头 + 2 行；≥ 2 条 = 头 + 2 行（面板内可滚动）。
-  // adj513/516：告警数（用于"无告警 / 少于 2 条时不走 MIN_H 下限"）：
-  // · 0 条 = ".dock-empty" 一行文字 ≈ 30px；
-  // · 1 条 = 头 + 1 行 ≈ 80px；
-  // · ≥ 2 条 = 头 + 2 行 = 133px（≥ 2 条时面板内滚动）。
-  const errors = useDocStore((s) => s.parseResult.errors)
-  const problemCount = useMemo(() => summarizeProblems(errors).total, [errors])
-  // adj516：扩展为「< 2 条告警都不走 MIN_H 下限」——1 条告警时也按内容自然高收缩。
-  const noProblems = problemCount < 2
+  // 因此：0 条 = 一行占位；1 条 = 头 + 1 行；≥ 2 条 = 头 + 2 行（面板内可滚动）。
+  // adj520：不再需要订阅"告警条数"——下限统一为 `MIN_DOCK_H` 后，"少于 2 条告警要按内容自然高收缩"
+  // 由 AUTO_FIT 的自然结果直接给出（73px / 64px 都 ≥ 43px 的下限，不会被钳），无需特判。
   /** 当前面板是否要按"能显示全内容的最小高度"定高（AUTO_FIT 机制） */
   const fitAllNow = AUTO_FIT.includes(dockPanel)
 
   /**
-   * adj474：试听 / 导出是**内容固定的小面板**——每次**打开或切换过去**都把高度重置为
-   * 「能显示全部内容的最小高度」（即丢掉该面板当次的手工调整），保证一定看得全。
-   * adj510：告警与关于一并加入；告警的"丢手工调整"与 cap "最多 2 行可见" 双生效，
-   * 关于 / 试听 / 导出则一律按实测内容高。
-   * 在**停留在该面板期间**拖拽仍然立即生效（本 effect 只在 dockPanel 变化时跑）。
-   * 设置不在此列：按固定 `SETTINGS_ROWS` 行，尊重当次调整。
+   * adj518（用户报"底栏 dock 应始终允许通过高度调整线调整 dock 的高度；目前除了设置页签
+   * 是可以调整高度的外，其它几个页签都不能调整"）：
+   *   1. 上面 `baseH` 改为 `heights[dockPanel] ?? forPanel(dockPanel)`，去掉 AUTO_FIT
+   *      的"完全忽略用户拖拽值"分支（这是用户拖拽不生效的根因）。
+   *   2. 本 effect 由"切换面板 / 重新打开时清掉 AUTO_FIT 面板的拖拽值"改为**只在 dock
+   *      重新打开时清掉所有当次调整**（沿用 `wasOpenRef` 的"关 → 开"判定 ——见下方的
+   *      `useEffect`，adj465 设计），**切换面板不再清掉用户拖拽的高度**。
+   *   ⇒ 用户拖到任意高度后会**保留**到面板切换/重新打开 dock；
+   *   重新打开 dock = 清掉所有当次调整 → 各面板回到各自的"内容自然高"默认。
+   *   设置面板本来就不在此列（按 `SETTINGS_ROWS` 固定行），保持原行为。
    */
-  useEffect(() => {
-    if (!dockOpen || !AUTO_FIT.includes(dockPanel)) return
-    setHeights((prev) => (prev[dockPanel] !== undefined ? { ...prev, [dockPanel]: undefined } : prev))
-  }, [dockOpen, dockPanel])
+  // 注：原 adj474 的"切换面板也清掉"分支已删除——保留会导致用户拖拽的值在切走再切回时
+  // 被无意义地清掉，与"始终允许调整"的诉求冲突。
 
   // adj469/510：实测当前面板的内容高度（告警/试听/导出/关于均走 AUTO_FIT）。
   // 宽度变化会重排 → resize 复测；内容是懒加载的，chunk 到位后才真正出现 → MutationObserver 复测。
@@ -339,11 +364,94 @@ export function ToolDock() {
     }
     return defaultH(key, narrow, settingsRowPitch)
   }
-  // adj510：告警/试听/导出/关于一律以实测的「能显示全的最小高度」为准（当次手工调整已在上面被清掉）
-  const fitKeys = AUTO_FIT.includes(dockPanel)
-  const baseH = fitKeys ? forPanel(dockPanel) : (heights[dockPanel] ?? forPanel(dockPanel))
-  // adj513：告警面板在**无告警**时不再套用 `MIN_H` 下限（详见 `clampH`）。
-  const dockH = clampH(baseH, dockPanel, noProblems)
+  // adj518：baseH **始终优先用用户拖拽后的高度** `heights[dockPanel]`（仅当未设置才回退到
+  // `forPanel`）。此前 bug：`fitKeys=true` 时 `baseH` 永远用 `forPanel(dockPanel)`，**完全忽略**
+  // `heights[dockPanel]` ⇒ 告警/试听/导出/关于的手工拖拽不会生效，用户侧的表现是"除设置页签
+  // 外其它几个页签都不能调整高度"。修法：把"是否 AUTO_FIT"的判断从 baseH 来源里去掉——
+  // AUTO_FIT 仍负责"初始默认值 = 实测内容自然高"，但**一旦用户拖了**就以用户值为准。
+  const baseH = heights[dockPanel] ?? forPanel(dockPanel)
+  const dockH = clampH(baseH)
+
+  // ---- adj520：三段高度的单按钮循环 ------------------------------------------------
+  /**
+   * 「建议高度」——"刚好装下当前面板内容"的高度。
+   *
+   * ⚠ 设置面板是**特例**：`forPanel('settings')` 在宽屏下返回 `maxH()`（adj509：为了让左栏 5 个页签
+   * 一次看全，把"打开时的默认高度"直接拉到了上限）。若建议档也用它，就会出现 `建议 === 最大`，
+   * 三段里有两段重合 ⇒ 用户看到的仍是"两段切换"。所以这里改用 `settingsDefaultH`（内容区 6 行，
+   * 即 adj492 的口径，宽屏 ≈235px，左栏仍能露出 4~5 个页签 ≥ adj509 要求的 3 个），
+   * 保证 **最小(43) < 建议(≈235) < 最大(460)** 三档严格单调。
+   *
+   * 末尾再夹一道 `(min+8, max−8)`：极矮视口下（`maxH()` 会随视口缩到很小）"内容自然高"可能贴到
+   * 上限或下限，与相邻档重合 ⇒ 又变成"只有两段"。夹一下就能把"三档两两不同"变成**结构性保证**，
+   * 而不是靠数值凑巧。夹到偏小时内容不会丢——内容区本来就有 `overflow-y: auto`。
+   */
+  const suggestedH = (): number => {
+    const raw = dockPanel === 'settings' ? settingsDefaultH(settingsRowPitch, narrow) : forPanel(dockPanel)
+    const lo = MIN_DOCK_H + 8
+    const hi = Math.max(lo, maxH() - 8)
+    return Math.min(Math.max(raw, lo), hi)
+  }
+
+  /**
+   * 三档目标高度（**语义严格单调**：min < suggested < max）：
+   * · max       = `maxH()`（与抓手拖拽上限一致）
+   * · suggested = `suggestedH()` = "刚好装下当前面板内容"的高度
+   * · min       = `MIN_DOCK_H` = 只留外壳（抓手 + 页签栏），内容区收起到 0
+   */
+  const dockHeightFor = (size: SizePreset): number =>
+    size === 'max' ? maxH() : size === 'min' ? MIN_DOCK_H : suggestedH()
+
+  /**
+   * **4 相位**循环表（用户规格）——每点一次按钮**走一步**：
+   * ```
+   *   相位 0：当前=建议 → 点击后=最大，图标 上.png（向上＝变高）
+   *   相位 1：当前=最大 → 点击后=建议，图标 下.png（向下＝变矮）
+   *   相位 2：当前=建议 → 点击后=最小，图标 下.png
+   *   相位 3：当前=最小 → 点击后=建议，图标 上.png
+   * ```
+   * ⇒ 高度序列 `建议 → 最大 → 建议 → 最小 → 建议 → 最大 …`，图标始终指示"点一下会往哪走"。
+   *
+   * ⚠ 为什么必须是 4 相位、而不是"记住当前档位就够"：序列里**"建议"出现了两次**，
+   * 但两次的下一步方向相反（先→最大、后→最小）。只按"当前高度是哪一档"推下一步是**推不出来的**
+   * ——之前那版就是栽在这里：`lastSizeRef` 的两分支（suggested↔max）永远解不出 `min`，
+   * 于是"只有两段在切换"（用户报）。相位计数器把这段历史显式记下来，问题自然消失。
+   */
+  const sizeStep = SIZE_PHASES[sizePhase] ?? SIZE_PHASES[0]
+
+  const cycleDockHeight = () => {
+    // 先按"当前相位声明的下一步"落高度，再把相位推进一格（4 步一循环）
+    setHeights((prev) => ({ ...prev, [dockPanel]: clampH(dockHeightFor(sizeStep.next)) }))
+    setSizePhase((p) => (p + 1) % SIZE_PHASES.length)
+  }
+
+  /**
+   * 当前 dock 高度处于哪一档（±2px 容差）；用户手动拖到的中间值记为 `custom`。
+   * 只有几次比较、极廉价，**不用 `useMemo`** —— 它的依赖里有 `dockHeightFor`（每次渲染新建的函数），
+   * 用 memo 反而要么漏依赖、要么每帧重算，是纯粹的负担（lint 也会报 exhaustive-deps）。
+   */
+  const heightPresetActive: SizePreset | 'custom' =
+    Math.abs(dockH - MIN_DOCK_H) <= 2
+      ? 'min'
+      : Math.abs(dockH - maxH()) <= 2
+        ? 'max'
+        : Math.abs(dockH - suggestedH()) <= 2
+          ? 'suggested'
+          : 'custom'
+
+  /**
+   * 手动调整（拖拽 / 键盘 bump）落到 **min / max** 后，把相位拨到"下一步回建议"的那一格
+   * （min → 相位 3、max → 相位 1），使下一次点击的方向符合直觉。
+   *
+   * 刻意**不用 effect 监听高度**去做同步：那会让"点击按钮"与"高度变化"互相触发
+   * （点击设了相位 → 高度变了 → effect 又按高度把相位改回去 ⇒ 循环卡死在同一档）。
+   * 只在**用户明确的手动路径**里拨相位，按钮点击就绝不会被覆盖。
+   * 落到 `suggested` 时刻意**不拨**——它对应相位 0 / 2 两格，拨哪一个都是猜。
+   */
+  const syncPhaseFromManualHeight = (h: number) => {
+    if (Math.abs(h - MIN_DOCK_H) <= 2) setSizePhase(3)
+    else if (Math.abs(h - maxH()) <= 2) setSizePhase(1)
+  }
 
   // adj487：拖拽改用 Pointer Events（鼠标 + 触屏 + 触控笔）——此前只监听 mousemove/mouseup，
   // 手机上拖不动。位移与结束回调都在手势里处理，不再常驻 window 监听。
@@ -358,7 +466,9 @@ export function ToolDock() {
         const d = dragRef.current
         if (!d) return
         // 手指/鼠标向上拖（dy < 0）→ dock 变高
-        setHeights((prev) => ({ ...prev, [panel]: clampH(d.h - dy, panel, noProblems) }))
+        const next = clampH(d.h - dy)
+        setHeights((prev) => ({ ...prev, [panel]: next }))
+        syncPhaseFromManualHeight(next)
       },
       onEnd: () => {
         dragRef.current = null
@@ -366,8 +476,11 @@ export function ToolDock() {
       },
     })
   }
-  const bump = (delta: number) =>
-    setHeights((prev) => ({ ...prev, [dockPanel]: clampH(dockH + delta, dockPanel, noProblems) }))
+  const bump = (delta: number) => {
+    const next = clampH(dockH + delta)
+    setHeights((prev) => ({ ...prev, [dockPanel]: next }))
+    syncPhaseFromManualHeight(next)
+  }
 
   // adj491：dock 关闭时**不渲染**。⚠ 这条守卫曾在 adj487（把拖拽从 mouse 改 Pointer Events）时
   // 被连带删除——后果是「点 ✕ 后 `dockOpen` 已置 false，但组件照样渲染」⇒ 关闭按钮看着"失灵"（用户报）。
@@ -383,14 +496,17 @@ export function ToolDock() {
       style={{ height: `${dockH}px` }}
       aria-label="底部工具面板"
     >
-      {/* 顶部抓手（拖拽调整高度；键盘 ↑/↓ /PageUp/PageDown） */}
+      {/* 顶部抓手（拖拽调整高度；键盘 ↑/↓ /PageUp/PageDown）
+         * adj518：抓手**总是可拖**。
+         * adj520：`aria-valuemin` 直接取 `MIN_DOCK_H`——与 `clampH` 共用**同一个下限常量**，
+         * 不再出现"ARIA 报 95、实际能拖到 43"这类两处各写一份的漂移（本项目的老坑）。 */}
       <div
         className="tool-dock-resize"
         role="separator"
         aria-orientation="horizontal"
         aria-label={dockCopy.resizeTitle}
         aria-valuenow={dockH}
-        aria-valuemin={minFor(dockPanel)}
+        aria-valuemin={MIN_DOCK_H}
         aria-valuemax={maxH()}
         tabIndex={0}
         title={dockCopy.resizeTitle}
@@ -427,6 +543,22 @@ export function ToolDock() {
             <span className="tool-dock-tab-label">{t.label}</span>
           </button>
         ))}
+        {/* adj520：底栏高度档位切换按钮（单按钮，4 相位循环）——
+            循环表见模块级 `SIZE_PHASES`；高度序列
+            `建议 → 最大 → 建议 → 最小 → 建议 → …`，
+            图标（`上.png` / `下.png`）指示"点一下会往哪走"：
+            相位 0（建议→最大）上、1（最大→建议）下、2（建议→最小）下、3（最小→建议）上。 */}
+        <button
+          type="button"
+          className="tool-dock-size-btn"
+          onClick={cycleDockHeight}
+          title={dockCopy.sizeTitle(dockCopy.sizeName[sizeStep.cur], dockCopy.sizeName[sizeStep.next])}
+          aria-label={dockCopy.sizeTitle(dockCopy.sizeName[sizeStep.cur], dockCopy.sizeName[sizeStep.next])}
+          data-size={sizeStep.cur}
+          data-current={heightPresetActive}
+        >
+          <ToolIcon name={sizeStep.icon} size={14} />
+        </button>
         <button type="button" className="tool-dock-close" onClick={closeDock} title={dockCopy.closeTitle} aria-label={dockCopy.closeTitle}>
           ✕
         </button>
