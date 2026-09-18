@@ -21,6 +21,8 @@ export type ModalKind =
   | 'donate'
   /** adj406：粘贴源码导入（不依赖系统文件选择器的兜底入口） */
   | 'pasteImport'
+  /** adj509：试听音色选择对话框（从音色库面板「指定音色」按钮触发） */
+  | 'voicePicker'
 
 /**
  * adj462：底部 dock 的面板（互斥，同一时间只显示一块）。

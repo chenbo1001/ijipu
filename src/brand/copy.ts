@@ -195,6 +195,27 @@ export const exportCopy = {
   errorHint: '当前脚本存在语法错误，图片/PDF 导出需先修正。',
 } as const
 
+/**
+ * adj509：试听音色选择对话框（设置 → 音色库 → 「指定音色」按钮触发）文案
+ */
+export const voicePickerCopy = {
+  /** 对话框标题 */
+  title: '指定试听音色',
+  /** 搜索框 placeholder */
+  searchPlaceholder: '按名称搜索',
+  /** 顶部统计行 */
+  summary: (selected: number, total: number): string =>
+    `已选 ${selected} / ${total} 种 GM 音色（仅勾选项进入「试听」面板的音色下拉）。`,
+  /** 快捷按钮 */
+  selectAll: '全选',
+  clearAll: '全消',
+  invert: '反选',
+  selectGroup: '选本组',
+  clearGroup: '消本组',
+  /** 底部按钮 */
+  done: '完成',
+} as const
+
 /** adj369：保存阶段中文名（保存慢时的提示与控制台明细用） */
 export const savePhaseCopy = {
   open: '打开写入流',

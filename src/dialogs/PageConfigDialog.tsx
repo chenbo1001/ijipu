@@ -265,33 +265,31 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
             </div>
 
             <div className="ijipu-form-label">主题配色</div>
+            {/* adj509：取消原来的「竖向列表 + 单选」布局，改为**流式复选框**——
+                 · 与全局页签里的复选框（输入条/折行/排版等）保持一致的手感；
+                 · 流式 = flex-wrap 自动换行，窄 dock 下也不会把整页撑高；
+                 · 但主题在 store 仍是**单选**（`setTheme(id)`），所以行为不变。 */}
             <div className="theme-list">
               {THEMES.map((t) => (
-                <div key={t.id} className="theme-entry" onClick={() => setTheme(t.id)} title={t.desc}>
-                  {theme === t.id ? (
-                    <span
-                      className="theme-swatch"
-                      style={{
-                        background: themeMode === 'light' ? t.accentLight : t.accent,
-                        borderColor: themeMode === 'light' ? t.accentLight : t.accent,
-                      }}
-                    >
-                      ✓
-                    </span>
-                  ) : (
-                    <span
-                      className="theme-swatch"
-                      style={{
-                        background: themeMode === 'light' ? t.bgLight : t.bg,
-                        borderColor: themeMode === 'light' ? t.accentLight : t.accent,
-                      }}
-                    />
-                  )}
+                <label key={t.id} className="theme-entry" title={t.desc}>
+                  <input
+                    type="radio"
+                    name="ijipu-theme"
+                    checked={theme === t.id}
+                    onChange={() => setTheme(t.id)}
+                  />
+                  <span
+                    className="theme-swatch"
+                    style={{
+                      background: themeMode === 'light' ? t.bgLight : t.bg,
+                      borderColor: themeMode === 'light' ? t.accentLight : t.accent,
+                    }}
+                  />
                   <span className="theme-name">{t.name}</span>
                   <span className="theme-desc" style={{ color: themeMode === 'light' ? t.accentLight : t.accent }}>
                     {t.desc}
                   </span>
-                </div>
+                </label>
               ))}
             </div>
             <div className="ijipu-form-hint" style={{ marginTop: 8 }}>

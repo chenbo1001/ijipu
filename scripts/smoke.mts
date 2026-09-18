@@ -7777,8 +7777,10 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
   const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
   const css2 = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
   // adj486：试听/导出/设置三枚页签改用顶栏同一套设计图标（不再用 ⚠ ▶ ⬇ ⚙ 字符）
-  check('adj486 底栏页签用 ToolIcon（试听→play / 导出→export / 设置→settings）',
-    dockSrc.includes("icon: 'play'") && dockSrc.includes("icon: 'export'") && dockSrc.includes("icon: 'settings'") && dockSrc.includes('<ToolIcon name={t.icon} size={14} />'),
+  // adj514：页签图标尺寸与顶栏按钮图标**对齐**（默认 size=16；此前 size=14 比顶栏小 2px 偏虚）
+  check('adj486 底栏页签用 ToolIcon（试听→play / 导出→export / 设置→settings）；adj514 图标与顶栏同 16px',
+    dockSrc.includes("icon: 'play'") && dockSrc.includes("icon: 'export'") && dockSrc.includes("icon: 'settings'") &&
+      /<ToolIcon name=\{t\.icon\}\s*\/>/.test(dockSrc),
     '')
   check('adj486 页签不再用 ▶ / ⬇ / ⚙ 字符当图标',
     !dockSrc.includes("'▶'") && !dockSrc.includes("'⬇'") && !dockSrc.includes("'⚙'"),
@@ -7913,8 +7915,9 @@ console.log('[116] settings 6 rows, About in dock, divider touch hit-area (adj49
     /\.about-panel \{/.test(css) && /\.about-brand \{/.test(css) && /\.about-body \{/.test(css) && aboutSrc.includes('className="about-panel"'),
     '')
   // adj494：关于面板打开时按"能显示全内容的最小高度"（走 AUTO_FIT 实测，与试听/导出同一机制）
-  check('adj494 关于面板纳入 AUTO_FIT（打开即完整显示内容）',
-    /const AUTO_FIT: readonly DockPanelKey\[\] = \['tryout', 'export', 'about'\]/.test(dockSrc),
+  // adj510：告警也纳入 AUTO_FIT（"能装下内容的最小高度"，但 cap 在最多 2 条可见）
+  check('adj494 关于面板纳入 AUTO_FIT（打开即完整显示内容）；adj510 告警亦纳入 AUTO_FIT',
+    /const AUTO_FIT: readonly DockPanelKey\[\] = \['problems', 'tryout', 'export', 'about'\]/.test(dockSrc),
     '')
 
   // adj493：分隔条的手指命中区

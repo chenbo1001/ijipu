@@ -79,7 +79,10 @@ export function ProblemPanel() {
                       title={expanded ? problemCopy.collapseHint : problemCopy.expandHint}
                       aria-expanded={expanded}
                     >
-                      {expanded ? '▾' : '▶'}
+                      {/* adj512：统一用一个 `▸` 字符 + 旋转 90° 表示展开，告别"▸ 收起 / ▾ 展开"
+                          两字符在不同字体下尺寸不一致（用户报"下方向三角太小了"）。同一个字符
+                          旋转前后**等比放大**——视觉大小完全一致，只方向不同。 */}
+                      <span className="problem-expand-glyph" aria-hidden="true">▸</span>
                     </button>
                   ) : (
                     <span className="problem-expand is-placeholder" aria-hidden="true" />

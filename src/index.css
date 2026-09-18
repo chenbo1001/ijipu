@@ -689,6 +689,9 @@ body {
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* adj509：流式布局下「色块 + 名称 + 描述」三个一起放在一行太长 ⇒ 描述最多吃 140px，
+     超出的省略号；窄 dock 下三个块会自动换行。 */
+  max-width: 140px;
 }
 
 /* 浅深色模式选择（adj48；adj484：图标与文本**垂直居中** + 两侧留白 + 统一最小宽度） */
@@ -743,33 +746,43 @@ body {
 }
 
 /* adj383：主题组移入「页面设置」对话框——列表与表单标签样式
-   （原 .menu-dropdown .theme-entry 的作用域只在菜单里，对话框内需要等价布局） */
+   （原 .menu-dropdown .theme-entry 的作用域只在菜单里，对话框内需要等价布局）
+   adj509：取消「竖向列表 + 单选色块勾选」，改为**流式单选框**（flex-wrap 自动换行）——
+     · 单选 = `<input type="radio" name="ijipu-theme">`（行为不变，只换视觉）；
+     · 流式 = 窄 dock 下每个主题自动换行，不会撑高整页；
+     · 视觉与全局页签里的「输入条/折行/排版」等**复选框选项**统一（边距、字号、间距）。 */
 .theme-list {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   width: 100%;
-  max-height: 300px;
-  overflow-y: auto;
   padding: 2px;
-  border: 1px solid var(--jp-border);
-  border-radius: 6px;
 }
 
 .theme-list .theme-entry {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 7px;
+  gap: 6px;
   white-space: nowrap;
-  padding: 5px 8px;
+  padding: 3px 8px;
   border-radius: 5px;
   cursor: pointer;
-  transition: background 0.12s;
+  border: 1px solid var(--jp-border);
+  /* adj509：与全局页签复选项同款的字号 / 行高（一致手感） */
+  font-size: 12px;
+  line-height: 1.5;
+  transition: background 0.12s, border-color 0.12s;
 }
 
 .theme-list .theme-entry:hover {
   background: var(--jp-bg-panel);
+  border-color: var(--jp-accent);
+}
+/* 选中态：与「输入条/折行/排版」复选项同款 highlight —— 背景板 + 强调边 */
+.theme-list .theme-entry:has(input:checked) {
+  background: var(--jp-bg-panel-active);
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
 }
 
 .ijipu-form-label {
@@ -987,7 +1000,9 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  max-height: min(50vh, 420px);
+  /* adj509：上限抬到 `min(55vh, 460px)`——与 ToolDock.tsx 的 `maxH()` 对齐；
+     让宽屏下设置面板左栏页签至少能显示 3 个（解决"滚一档跳 3 项，但第 3 项显示不到"） */
+  max-height: min(55vh, 460px);
   /* adj495：不再自带 `border-top`——顶部抓手 `.tool-dock-resize` 已带同款上边框（与分屏线统一），
      两者叠在一起会变成 2px 双线 */
   background: var(--jp-bg-panel);
@@ -1057,14 +1072,18 @@ body {
  * 用 flex `order` 而不是调 DOM 顺序：DOM 仍是「页签 → 面板」，读屏/键盘 Tab 序不受影响，
  * 只有视觉顺序改变（这是常见的 tablist 视觉倒置做法）。分隔线也随之由 border-bottom 翻成 border-top
  * （放在内容与页签之间），且**不再要 border-bottom**——dock 下方是状态栏 `.footer`，它自带 border-top，
- * 两者叠起来会成双线。 */
+ * 两者叠起来会成双线。
+ * adj509（用户要求"底栏页签样式参照顶栏按钮，并固定页签栏高度"）：页签换成 `.topbar-btn` 同一套
+ * 视觉口径（圆角 7px + 同款边框/字号/边距），与顶栏工具条按钮成对；页签栏**高度固定**（与抓手
+ * 一起被内容区拉伸/收缩时，页签栏高度不变——避免"拖拽调整线时页签跟着变高"的视觉跳动）。 */
 .tool-dock-tabs {
   order: 2;
-  flex: 1 1 auto;
+  flex: 0 0 auto; /* adj509：固定页签栏高度——不再让它随内容伸缩 */
+  height: 38px; /* adj509：与 `.topbar-btn` 同高的视觉口径（含上下 padding 5+5+border 1×2） */
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px; /* adj509：与顶栏工具条按钮间距统一 */
   padding: 2px 6px;
   border-top: 1px solid var(--jp-border);
   /* adj491：dock 用了 `container-type:inline-size` + `overflow:hidden`，实测在 390×844 视口下
@@ -1078,29 +1097,35 @@ body {
   scrollbar-width: none;
 }
 .tool-dock-tabs::-webkit-scrollbar { display: none; }
+/* adj509：页签样式**与顶栏 `.topbar-btn` 同源**——同款边框 / 圆角 / 字号 / padding / hover；
+   由 `.tool-dock-tab` 继承 `.topbar-btn` 的视觉规范，与顶栏工具条按钮成对，让"功能"和"面板"
+   两个层级的入口观感一致。 */
 .tool-dock-tab {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  /* adj466：页签高度取**固定值**（此前由 padding 撑，随字号/主题变而变）——统一 30px，点起来更稳 */
-  height: 30px;
-  padding: 0 10px;
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  cursor: pointer;
-  color: var(--jp-text-secondary);
+  border: 1px solid var(--jp-border);
+  border-radius: 7px; /* 与 .topbar-btn 同款 */
+  padding: 5px 10px; /* 与 .topbar-btn 同款 */
   font-size: 12px;
-  font-family: inherit;
+  font-family: var(--jp-font-sans);
+  cursor: pointer;
+  color: var(--jp-text-primary); /* 与 .topbar-btn 基色同 */
   flex-shrink: 0;
   white-space: nowrap;
+  /* adj509：页签**固定高**——与 `.topbar-btn` 同 26px 内容高（padding 5×2 + 文字 12px×1.4
+     ≈ 27.8 → 取 28px 装得下）；不再由内容撑开，杜绝"拖拽调整线时页签跟着变高" */
+  height: 28px;
 }
 .tool-dock-tab:hover {
-  color: var(--jp-text-primary);
-  background: var(--jp-bg-hover, rgba(127, 127, 127, 0.08));
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+  background: var(--jp-bg-panel-hover); /* adj414 同一套 hover 高亮 */
 }
 /* 当前面板高亮（与顶栏按钮 active 同一套口径） */
 .tool-dock-tab.is-active {
+  background: var(--jp-bg-panel-active);
   color: var(--jp-accent);
   border-color: var(--jp-accent);
 }
@@ -1233,8 +1258,10 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow-y: auto; /* 单块面板（告警/试听/导出）由这里滚；设置面板见下方覆盖 */
+  overflow-y: auto; /* 单块面板（试听/导出/关于）由这里滚；告警由 `.problems-list` 自身滚（adj510：dock 高度被 cap 时避免双滚动条）；设置面板见下方覆盖 */
 }
+/* adj510：告警面板里 `.problems-list` 自己滚动；body 不要抢着滚 —— 否则会与列表的双滚动条打架 */
+.tool-dock-body:has(.problem-panel) { overflow-y: hidden; }
 .tool-dock-pane {
   flex: 1 1 auto;
   min-height: 0;
@@ -1476,8 +1503,11 @@ body {
 }
 /* adj465：设置面板要**确定高度**，三栏才拿得到受限高度、各自滚动；按钮也才永远在可视区内。
  * （dock 默认 `height: auto` 让内容撑高 → 三栏永不滚、且超出 max-height 的部分被 overflow:hidden
- *  裁掉——窄屏时正好把下方那排按钮裁没。） */
-.tool-dock.dock-settings { height: min(50vh, 420px); }
+ *  裁掉——窄屏时正好把下方那排按钮裁没。）
+ * adj509：上限抬到 `min(55vh, 460px)`——让宽屏下设置面板**左栏页签至少能显示 3 个**（修"滚一档
+ * 跳 3 项、第 3 项'音色库'显示不到"的问题；设置面板左栏 jp-tab 高度 36px 不变 ⇒ 460 - 43 (chrome)
+ * - 18 (pane padding) ≈ 400px 的左栏可以装下 11+ 个 jp-tab，用户滚三档毫无障碍）。 */
+.tool-dock.dock-settings { height: min(55vh, 460px); }
 .tool-dock .pcfg-root {
   height: auto;
   max-height: none;
@@ -1558,6 +1588,41 @@ body {
   border-top: 0;
 }
 .tool-dock .pcfg-foot > button { white-space: nowrap; }
+/**
+ * adj511（用户要求"恢复默认/保存设置按钮的样式也参考顶栏按钮，保持一致性"）：设置面板底部两个
+ * 按钮**视觉口径**与顶栏 `.topbar-btn` 对齐（同款 padding/字号/圆角/hover/active），避免
+ * "dock 里页签 + 操作按钮"用的是 `.topbar-btn` 风、但底部按钮跳回通用 `.btn` 的视觉断层。
+ *
+ * 仅作用于设置面板的底部按钮（`.tool-dock .pcfg-foot > button`），不污染其它对话框的 `.btn`——
+ * `恢复默认` = 普通顶栏按钮；`save设置` = 顶栏 active 按钮（强调色高亮 = 主操作）。
+ * 特异性压过 `.btn`（0,2,1 > 0,1,0）。
+ */
+.tool-dock .pcfg-foot > button.btn {
+  /* 与 `.topbar-btn` 同款：5×10 padding、12px 字号、7px 圆角 */
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: 7px;
+  /* 与 `.topbar-btn:hover` 同款：边框 + 文字 + 背景板联动 */
+  transition: all 0.15s;
+}
+.tool-dock .pcfg-foot > button.btn:hover {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+  background: var(--jp-bg-panel-hover);
+}
+/* 主操作「保存设置」= 顶栏 `.topbar-btn.active-guide` 同款（背景板 + 强调色文字 + 强调边） */
+.tool-dock .pcfg-foot > button.btn.primary {
+  background: var(--jp-bg-panel-active);
+  color: var(--jp-accent);
+  border-color: var(--jp-accent);
+}
+.tool-dock .pcfg-foot > button.btn.primary:hover {
+  /* hover 时维持 active 视觉 + 稍亮（顶栏 active 按钮 hover 行为） */
+  background: var(--jp-bg-panel-active);
+  color: var(--jp-accent);
+  border-color: var(--jp-accent);
+  filter: brightness(1.05);
+}
 
 /* 窄屏：**页签左（通高）| 右侧：上=内容、下=按钮横向**。
  * adj475/476：宽窄统一用 grid（见 `.pcfg-root`），这里只把宽屏的三列一行改成两列两行——
@@ -1772,6 +1837,13 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
+  /* adj510：告警面板本身**最多 2 行可见**（由 ToolDock 的 `capProblemsContentHeight` 钳住 dock 高度）；
+     这里让列表在 dock 高度被 cap 时**自身滚动**显示多于 2 条的告警。`.tool-dock-body`
+     的 `overflow-y: auto` 也兜底；两套可滚动互不影响（dock 高度已被 JS 钳住不会触发 dock 滚动）。
+     设 `flex: 1 1 auto` 让列表接管 `.problem-panel` 的剩余空间，配合 dock 的定高才能"内容多时滚动"。 */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* adj462：每条 = [展开按钮] + [问题行]；正确写法在下一行按需展开（默认收起）。
@@ -1782,13 +1854,13 @@ body {
 }
 
 .problem-expand {
-  flex: 0 0 16px;
+  flex: 0 0 22px;
   background: transparent;
   border: 0;
   padding: 0;
   cursor: pointer;
   color: var(--jp-text-muted);
-  font-size: 10px;
+  font-size: 16px;
   line-height: inherit;
   text-align: center;
 }
@@ -1801,6 +1873,35 @@ body {
 }
 .problem-expand.is-placeholder {
   cursor: default;
+}
+/**
+ * adj512（用户报"展开后的下方向三角箭头太小了，应与收起时的右方向箭头一样大小"）：
+ * 收起/展开**只用同一个字符** `▸`（U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE），
+ * 展开态用 CSS `transform: rotate(90deg)` 把它转成下三角 —— 同字符旋转前后**视觉大小
+ * 完全一致**，告别"▸ / ▾"两个字符在不同字体下尺寸不一致的视觉断层。
+ *
+ * adj515/516：glyph 字号从 10 → 14 → 16，仍偏小。
+ * adj517（用户报"三角箭头改 18"）：glyph 字号/盒子提到 18×18，父按钮 flex 0 0 提到 22px。
+ * 18px 是与告警正文(12px) + 行距的 1.5 倍——既能与文字平衡，又不至于盖过
+ * `.problem-tag` 的色块标签；盒子 18×18 + 父按钮预留 22px 保证字符旋转 90° 后不挤压。
+ *
+ * 把 glyph 包成 inline-block 元素而非用 ::before 伪元素，是因为伪元素里的字符在不同
+ * 浏览器/字体下也存在尺寸差异，且伪元素不便做"基于 is-open 类旋转"的条件 transform。
+ * `display: inline-block` + `width/height: 18px` + `line-height: 18px` 锁死字符占位
+ * ——旋转 90° 后依然是同一个 18×18 盒子，文字按中线居中旋转，不抖不偏。 */
+.problem-expand-glyph {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  font-size: 18px;
+  text-align: center;
+  transition: transform 0.15s;
+  /* 默认 transform: none（收起 = 右指）；
+     展开态由父按钮 `.problem-expand.is-open .problem-expand-glyph` 旋转 90° */
+}
+.problem-expand.is-open .problem-expand-glyph {
+  transform: rotate(90deg);
 }
 
 .problem-row {
