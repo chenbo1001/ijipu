@@ -8,6 +8,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
+// adj529：预览页基准宽（与顶栏"双击比率按宽度适配"的反算算式同源）
+import { PREVIEW_BASE_W } from './zoomFit'
 import { beginDrag } from '../ui/dragGesture'
 import { tempoLabel } from '@ijipu/engine/parser/parser'
 import { layoutScore, renderScoreToSvg, noteIdToCodePos, buildIndexToPage, SEGMENT_ROW_GAP_DEFAULT } from '@ijipu/engine'
@@ -52,8 +54,11 @@ function measureFont(text: string, fontSize: number, fontFamily: string): number
   }
 }
 
-/** 预览 SVG 基准显示宽度（与渲染容器一致）；实际显示宽度 = PREVIEW_W × zoom（adj51） */
-const PREVIEW_W = 760
+/**
+ * 预览 SVG 基准显示宽度（与渲染容器一致）；实际显示宽度 = 基准宽 × zoom%（adj51）。
+ * adj529：基准宽搬到 `preview/zoomFit.ts`（与"按宽度适配"的反算算式同处一地，单一来源）。
+ */
+const PREVIEW_W = PREVIEW_BASE_W
 
 export function PreviewPane() {
   const parseResult = useDocStore((s) => s.parseResult)
@@ -435,7 +440,21 @@ export function PreviewPane() {
               <div
                 className="preview-zoom-scale"
                 style={{
-                  width: PREVIEW_W * (previewZoom / 100),
+                  /**
+                   * adj529（用户报"预览区越窄，按页宽算出的比率差异越大／缩得更小"）：
+                   * **这里不能再把 width 乘一次 zoom**。CSS `zoom` 会把**本元素自己声明的 width 也乘一遍**
+                   * （见 MDN `zoom` 的示例：`width:25px` + `zoom:200%` ⇒ 实际 50px），
+                   * 所以"`width: 760×z` + `zoom: z`"的实际渲染宽是 **760×z²（平方关系）**：
+                   *   · 可用宽 952px → z=125% → 实际 1187px（偏宽）；
+                   *   · 可用宽 552px → z=73%  → 实际 **405px**，只有容器的 73% ⇒ 越窄越"缩得更小"；
+                   * 而拖拽换算 `scale = (PREVIEW_W / page.width) × z%`（见下方两处）用的正是**线性**模型
+                   * ⇒ 作者本意就是线性，`width` 上那次乘法是多余的。
+                   * 现在只声明 `width: PREVIEW_BASE_W`（基准宽），由 `zoom` 负责缩放：
+                   * 实际显示宽 = `760 × z%`（线性），"按宽度适配"的反算（`preview/zoomFit.ts`）因此精确。
+                   * `zoom` 必须保留：虚线线宽、播放头等**用 px 定位的子元素**要靠它一起缩放
+                   * （它们的位置已经是百分比，只有粗细/偏移是 px）。
+                   */
+                  width: PREVIEW_W,
                   position: 'relative',
                   zoom: previewZoom / 100,
                 }}

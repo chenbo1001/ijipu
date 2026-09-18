@@ -15,13 +15,17 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
-import { clampEditorFontSize, defaultPageConfig, EDITOR_FONT_OPTIONS, SCORE_FONT_OPTIONS, SEGMENT_ROW_GAP_DEFAULT } from '@ijipu/engine'
+import { clampEditorFontSize, defaultPageConfig, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE, SCORE_FONT_OPTIONS, SEGMENT_ROW_GAP_DEFAULT } from '@ijipu/engine'
 import { THEMES, type ThemeMode } from '../brand/themes'
-import { uiCopy } from '../brand/copy'
+import { uiCopy, numCopy } from '../brand/copy'
 import { SoundBankPanel } from './SoundBankPanel'
 import type { PageConfig } from '@ijipu/engine'
 // adj426：主题按钮用 ToolIcon（与顶栏三状态按钮共用图标：自动主题/浅色主题/深色主题）
 import { ToolIcon } from '../ui/ToolIcon'
+// adj526：数值"按住上下拖"+`−`/`+` 步进（手机端没有原生上下小按钮，靠这两条路径改数）
+import { useNumberScrub, useHoldRepeat } from '../ui/numberScrubGesture'
+// adj526：谱面数值字段的 [min,max] 单一来源（逐项引用引擎 GUIDE_LIMITS / GUIDE_LIMITS_EX）
+import { PAGE_NUM_RANGES as RANGE, coarseFor } from '../ui/numFieldRanges'
 
 type TabId = 'global' | 'theme' | 'soundbank' | 'score' | 'font'
 
@@ -196,7 +200,14 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
               </label>
             </Row>
             <Row label="编辑器字号">
-              <NumInput label="" value={editorFontSize} onChange={(v) => setEditorFontSize(clampEditorFontSize(Number.isFinite(v) ? v : 14))} />
+              {/* adj526：范围取引擎的 EDITOR_FONT_SIZE_RANGE（与 clampEditorFontSize 同源），
+                  这样"按住拖 / 步进钮"知道边界，不会拖出可输入范围 */}
+              <NumInput
+                label=""
+                range={EDITOR_FONT_SIZE_RANGE}
+                value={editorFontSize}
+                onChange={(v) => setEditorFontSize(clampEditorFontSize(Number.isFinite(v) ? v : 14))}
+              />
             </Row>
             <Row label="编辑器字体">
               <select value={editorFont} onChange={(e) => setEditorFont(e.target.value)}>
@@ -325,37 +336,37 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
               </select>
             </Row>
             <Row label="边距(px)">
-              <NumInput label="上" value={draft.margin_top} onChange={(v) => updateDraft({ margin_top: v })} />
-              <NumInput label="下" value={draft.margin_bottom} onChange={(v) => updateDraft({ margin_bottom: v })} />
-              <NumInput label="左" value={draft.margin_left} onChange={(v) => updateDraft({ margin_left: v })} />
-              <NumInput label="右" value={draft.margin_right} onChange={(v) => updateDraft({ margin_right: v })} />
+              <NumInput label="上" range={RANGE.margin_top} value={draft.margin_top} onChange={(v) => updateDraft({ margin_top: v })} />
+              <NumInput label="下" range={RANGE.margin_bottom} value={draft.margin_bottom} onChange={(v) => updateDraft({ margin_bottom: v })} />
+              <NumInput label="左" range={RANGE.margin_left} value={draft.margin_left} onChange={(v) => updateDraft({ margin_left: v })} />
+              <NumInput label="右" range={RANGE.margin_right} value={draft.margin_right} onChange={(v) => updateDraft({ margin_right: v })} />
             </Row>
 
             <div className="pcfg-group-title">间距(px)</div>
             {/* adj105：间距项两列排列，节省纵向空间；adj418：铺满页签宽度（不再右侧留白） */}
             <div className="pcfg-grid2">
               <Row label="描述头高">
-                <NumInput label="" value={draft.descAreaH} onChange={(v) => updateDraft({ descAreaH: v })} />
+                <NumInput label="" range={RANGE.descAreaH} value={draft.descAreaH} onChange={(v) => updateDraft({ descAreaH: v })} />
               </Row>
               <Row label="首行至描述头间距">
-                <NumInput label="" value={draft.body_margin_top} onChange={(v) => updateDraft({ body_margin_top: v })} />
+                <NumInput label="" range={RANGE.body_margin_top} value={draft.body_margin_top} onChange={(v) => updateDraft({ body_margin_top: v })} />
               </Row>
               <Row label="曲部与曲部间距">
-                <NumInput label="" value={draft.height_ciqu} onChange={(v) => updateDraft({ height_ciqu: v })} />
+                <NumInput label="" range={RANGE.height_ciqu} value={draft.height_ciqu} onChange={(v) => updateDraft({ height_ciqu: v })} />
               </Row>
               <Row label="曲部与词部间距">
-                <NumInput label="" value={draft.height_quci} onChange={(v) => updateDraft({ height_quci: v })} />
+                <NumInput label="" range={RANGE.height_quci} value={draft.height_quci} onChange={(v) => updateDraft({ height_quci: v })} />
               </Row>
               <Row label="词部与词部间距">
-                <NumInput label="" value={draft.height_cici} onChange={(v) => updateDraft({ height_cici: v })} />
+                <NumInput label="" range={RANGE.height_cici} value={draft.height_cici} onChange={(v) => updateDraft({ height_cici: v })} />
               </Row>
               <Row label="曲部与上词部间距">
-                <NumInput label="" value={draft.height_ciqu_lyric} onChange={(v) => updateDraft({ height_ciqu_lyric: v })} />
+                <NumInput label="" range={RANGE.height_ciqu_lyric} value={draft.height_ciqu_lyric} onChange={(v) => updateDraft({ height_ciqu_lyric: v })} />
               </Row>
               {/* adj479：多声部块内声部行之间的额外间距——此前只挂在预览虚线拖拽上，
                   设置里没有输入框，用户报「同一组的多个声部之间间距无法调整」。 */}
               <Row label={uiCopy.shengbuGapLabel}>
-                <NumInput label="" value={draft.height_shengbu} onChange={(v) => updateDraft({ height_shengbu: v })} />
+                <NumInput label="" range={RANGE.height_shengbu} value={draft.height_shengbu} onChange={(v) => updateDraft({ height_shengbu: v })} />
               </Row>
               {/* adj297：两端对齐最小小节数——行小节数小于该值自然对齐（行尾留白），≥ 该值撑满两端对齐 */}
               <Row label="两端对齐最小小节数">
@@ -370,6 +381,7 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
               <Row label={uiCopy.segmentRowGapBzLabel}>
                 <NumInput
                   label=""
+                  range={RANGE.segmentRowGap_bz}
                   value={draft.segmentRowGap?.bz ?? SEGMENT_ROW_GAP_DEFAULT.bz}
                   onChange={(v) => updateDraft({ segmentRowGap: { ...draft.segmentRowGap, bz: clampGap(v) } })}
                 />
@@ -377,6 +389,7 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
               <Row label={uiCopy.segmentRowGapDsbLabel}>
                 <NumInput
                   label=""
+                  range={RANGE.segmentRowGap_dsb}
                   value={draft.segmentRowGap?.dsb ?? SEGMENT_ROW_GAP_DEFAULT.dsb}
                   onChange={(v) => updateDraft({ segmentRowGap: { ...draft.segmentRowGap, dsb: clampGap(v) } })}
                 />
@@ -568,36 +581,87 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   )
 }
 
+/**
+ * 数值输入框（adj526 重写）——三类操作并存，桌面/手机都顺手：
+ *  1. **键盘输入**（点一下即可）：编辑期间用**本地草稿文本**，**不再"输入即钳制"**。
+ *     这是手机端"数字改不动"的直接原因——受控值 + 每次按键立即钳制，想输 `50` 打到 `5` 就被钳成 `10`；
+ *     现在改为**失焦 / 回车才提交并钳制**，中途可以自由打完整数字；
+ *  2. **`−`/`+` 步进**：点一下一步，**按住连续**（长按 420ms 后每 90ms 一步）——手机上可见
+ *     （桌面靠原生 spinner，故用 `(pointer: coarse)` 只在触屏显示，见 CSS）；
+ *  3. **按住上下拖**（`useNumberScrub`）：上拖增大、下拖减小，横向位移转粗调（×10）；
+ *     触屏需先长按 250ms（给"滚面板"留出通道），鼠标按住即拖。
+ * `range` 来自 `PAGE_NUM_RANGES`（谱面字段 = 引擎 `GUIDE_LIMITS` 的同一份范围）；不给就是"不限范围"，
+ * 拖动只做相对增量（保住设置里可填极值的能力）。
+ */
 function NumInput(props: {
-  label: string
+  label?: string
   value: number
   onChange: (v: number) => void
+  /** [min,max]；缺省 = 不限范围（拖动只做相对增量，输入也不钳制） */
+  range?: readonly [number, number]
+  /** 步长（默认 1） */
+  step?: number
 }) {
+  const { label = '', value, onChange, range, step = 1 } = props
+  const min = range?.[0]
+  const max = range?.[1]
+  const clampV = (v: number): number => {
+    let n = Math.round(v)
+    if (min !== undefined) n = Math.max(min, n)
+    if (max !== undefined) n = Math.min(max, n)
+    return n
+  }
+  /** 编辑中的文本；非 null = 正在输入（此时**不**钳制、也不回写） */
+  const [draft, setDraft] = useState<string | null>(null)
+  /** 把草稿提交到配置（失焦 / 回车）：空串视为"放弃编辑"，不把 0 写进去 */
+  const commit = () => {
+    if (draft === null) return
+    const raw = draft.trim()
+    if (raw !== '') {
+      const n = Number(raw)
+      if (Number.isFinite(n)) onChange(clampV(n))
+    }
+    setDraft(null)
+  }
+  const scrub = useNumberScrub(value, onChange, { step, min, max, coarse: coarseFor(range) })
+  const dec = useHoldRepeat(() => onChange(clampV(value - step)))
+  const inc = useHoldRepeat(() => onChange(clampV(value + step)))
   return (
-    <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-      {props.label && (
-        <span style={{ color: 'var(--jp-text-muted)', fontSize: 12 }}>{props.label}</span>
-      )}
+    <span className="num-input">
+      {label && <span className="num-input-label">{label}</span>}
+      <button type="button" className="num-step" title={numCopy.decrease} aria-label={numCopy.decrease} {...dec}>
+        −
+      </button>
       <input
+        className={`num-field${scrub.scrubbing ? ' is-scrubbing' : ''}`}
         type="number"
-        // adj413：设置与间距里的 px 一律整数——输入即四舍五入（step=1 + 取整双保险）
-        step={1}
-        value={props.value}
-        onChange={(e) => {
-          const n = Number(e.target.value)
-          // 输入中途（空串 / 单独一个负号）会得到 NaN：此时不动配置，避免把 NaN 写进设置
-          if (Number.isFinite(n)) props.onChange(Math.round(n))
+        // 手机弹数字键盘（并给出"完成"键）；桌面仍是普通数字框（保留原生上下小按钮）
+        inputMode="numeric"
+        enterKeyHint="done"
+        step={step}
+        min={min}
+        max={max}
+        value={draft ?? String(value)}
+        title={numCopy.scrubHint}
+        onFocus={() => setDraft(String(value))}
+        // 只改本地草稿：**这是"手机能正常输入"的关键**（不即时钳制）
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            commit()
+            e.currentTarget.blur()
+          } else if (e.key === 'Escape') {
+            setDraft(null)
+            e.currentTarget.blur()
+          }
         }}
-        style={{
-          width: 52,
-          padding: '3px 6px',
-          background: 'var(--jp-bg-app)',
-          border: '1px solid var(--jp-border)',
-          borderRadius: 6,
-          color: 'var(--jp-text-primary)',
-          fontFamily: 'var(--jp-font-mono)',
-        }}
+        onPointerDown={scrub.onPointerDown}
+        onClickCapture={scrub.onClickCapture}
       />
-    </label>
+      <button type="button" className="num-step" title={numCopy.increase} aria-label={numCopy.increase} {...inc}>
+        +
+      </button>
+    </span>
   )
 }

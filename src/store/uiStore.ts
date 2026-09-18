@@ -44,6 +44,23 @@ const THEME_KEY = 'ijipu.theme'
 const THEME_MODE_KEY = 'ijipu.themeMode'
 const SPLIT_KEY = 'ijipu.splitPct'
 const PREVIEW_ZOOM_KEY = 'ijipu.previewZoom'
+/**
+ * 预览缩放的**手动调节范围**（%）：顶栏 `−`/`+` 与"按住上下拖"用它定边界。
+ * adj51 起就是这个范围，本轮**不动**（用户的直接操作保持在"好用"的区间内）。
+ */
+export const PREVIEW_ZOOM_RANGE: readonly [number, number] = [50, 200]
+/** 顶栏缩放步进/拖动一档的比例（%） */
+export const PREVIEW_ZOOM_STEP = 10
+/**
+ * 预览缩放的**绝对范围**（%）：`setPreviewZoom` 的钳制用它，即"允许被存储/生效的值"。
+ *
+ * adj529（用户确认按建议放宽）：**"按宽度适配"（双击比率）需要越出手动范围**——
+ * 预览区很窄时（如手机上分屏、只剩 ~340px）要贴合就得小于 50%，很宽时（4K 全宽）又可能要大于 200%；
+ * 若沿用 `PREVIEW_ZOOM_RANGE` 钳制，适配结果就贴不上（窄屏偏宽出横向滚动条 / 宽屏留大片空白）。
+ * 于是分两层：**手动操作守 [50,200]，适配结果可到 [30,400]**。
+ */
+export const PREVIEW_ZOOM_LIMITS: readonly [number, number] = [30, 400]
+/** 与上面的范围常量之间留一行，避免与存储键混在一起（`AUTO_WRAP_KEY` 起为存储键区） */
 const AUTO_WRAP_KEY = 'ijipu.autoWrap'
 const SHOW_SCRIPT_PAD_KEY = 'ijipu.showScriptPad'
 const SHOW_GUIDES_KEY = 'ijipu.showGuides'
@@ -346,7 +363,8 @@ export const useUiStore = create<UiState>()((set) => ({
     set({ fontOverride: next })
   },
   setPreviewZoom: (z) => {
-    const v = Math.min(200, Math.max(50, Math.round(z)))
+    // adj529：钳到**绝对范围**（含适配允许的越界值）；手动边界由顶栏的 ±/拖动守 [50,200]
+    const v = Math.min(PREVIEW_ZOOM_LIMITS[1], Math.max(PREVIEW_ZOOM_LIMITS[0], Math.round(z)))
     try {
       localStorage.setItem(PREVIEW_ZOOM_KEY, String(v))
     } catch {

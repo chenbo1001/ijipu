@@ -24,13 +24,18 @@
  * `max-height` —— 这样"各栏独立滚动"是**算出来的确定值**，不依赖 flex 链的隐式收窄
  * （此前依赖 flex 链，在部分情况下栏不会收窄 → 内容溢出被 overflow:hidden 裁掉、无法操作）。
  */
-import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import { useUiStore, type DockPanelKey } from '../store/uiStore'
+import { useDocStore } from '../store/docStore'
 import { dockCopy } from '../brand/copy'
 import { ToolIcon } from './ToolIcon'
 import type { ToolIconName } from './toolIcons'
 import { beginDrag } from './dragGesture'
+// adj528：告警面板的高度常量与算式（单一来源 + 纯函数，smoke 有断言）
+import * as PROBS from './dock/problemsHeight'
+// adj528：告警条数（用于"条数 × 单行实测"算出内容自然高）——纯函数，留在主包
+import { summarizeProblems } from './problems'
 
 /**
  * adj497（用户要求"各页签做成懒加载、首次打开才加载，以加快启动"）：**五个面板全部走 `React.lazy`**。
@@ -77,15 +82,14 @@ const PANELS: readonly { key: DockPanelKey; render: ComponentType }[] = [
 const RESIZE_H = 5
 const TABS_H = 38
 const CHROME_H = RESIZE_H + TABS_H
-const PANE_PAD_H = 18
-/** 告警单行高度（行内边距 + 12px 文字，实测约 22px；hint 展开时才更高） */
-const ROW_H = 22
 /**
- * adj510：告警面板的"面板头"高度（`problems-head` = 标题/折叠按钮/语法速查按钮那一行）。
- * 计为 28px（padding 4×2 + 文字 14px ≈ 22 + 行间距 ≈ 28，实测）。用于"告警 dock 兜底高度 =
- * 头 + `PROBLEMS_MAX_VISIBLE_ROWS` 行告警"的计算。
+ * 告警面板的各项高度常量与算式**统一来自 `ui/dock/problemsHeight.ts`**（adj528）——
+ * 那里是"单一来源 + 纯函数"，并被 `scripts/smoke.mts` 直接断言；
+ * 本文件只做"读 DOM 数值 → 调用"的薄接线。
  */
-const PROBLEMS_HEAD_H = 28
+const PANE_PAD_H = PROBS.PANE_PAD_H
+const ROW_H = PROBS.ROW_H
+const PROBLEMS_HEAD_H = PROBS.PROBLEMS_HEAD_H
 /**
  * adj468/478：设置面板在**窄屏**下按钮行折到内容下方（横向一行，实测 ≈31px）。
  * 用于它的**建议高度**（`settingsDefaultH`）。
@@ -244,8 +248,9 @@ const AUTO_FIT: readonly DockPanelKey[] = ['problems', 'tryout', 'export', 'abou
  * "默认给多一点"不再是负担：嫌高按一下就能切到最小（只留页签栏），想要更高按一下切到最大。
  * 于是建议档可以承担"一次看全常见告警量（4 条）"的职责，减少"还得先拖大才看得见"的次数。
  * （0/1/2 条告警仍按内容自然高收缩，不受本上限影响；只有超过本行数才滚动。）
+ * adj528：常量搬到 `ui/dock/problemsHeight.ts`（与算式同处一地，smoke 直接断言）。
  */
-const PROBLEMS_MAX_VISIBLE_ROWS = 4
+const PROBLEMS_MAX_VISIBLE_ROWS = PROBS.PROBLEMS_MAX_VISIBLE_ROWS
 
 export function ToolDock() {
   const dockOpen = useUiStore((s) => s.dockOpen)
@@ -377,6 +382,14 @@ export function ToolDock() {
   // 由 AUTO_FIT 的自然结果直接给出（73px / 64px 都 ≥ 43px 的下限，不会被钳），无需特判。
   /** 当前面板是否要按"能显示全内容的最小高度"定高（AUTO_FIT 机制） */
   const fitAllNow = AUTO_FIT.includes(dockPanel)
+  /**
+   * adj528：**告警条数**（渲染出的行数）。
+   * "告警面板的内容自然高"现在由它（数据）× 单行实测算出，而不再读 `pane.scrollHeight`
+   * —— 那条 pane 为了列表能滚必须填满 dock，读总量会被"可用高度"充气，
+   * 于是"从最大切建议"会得到一个虚高的建议高度（用户连报两次，见 `ui/dock/problemsHeight.ts`）。
+   */
+  const errors = useDocStore((s) => s.parseResult.errors)
+  const problemCount = useMemo(() => summarizeProblems(errors).total, [errors])
 
   /**
    * adj518（用户报"底栏 dock 应始终允许通过高度调整线调整 dock 的高度；目前除了设置页签
@@ -400,21 +413,32 @@ export function ToolDock() {
     const pane = bodyRef.current?.querySelector<HTMLElement>(`.pane-${dockPanel}`)
     if (!pane) return
     /**
-     * adj522：取"内容自然高"（与当前 dock 多高**无关**）。
+     * adj522/adj528：取"内容自然高"（与当前 dock 多高**无关**）。
      *
-     * 告警面板要单独算：它的 pane 现在是弹性列（`.pane-problems`，adj522 为让列表能滚而建立），
-     * 列表收缩后 pane 自身**不再溢出** ⇒ `pane.scrollHeight` 会退化成"可用高度"（充气式增长，
-     * 越量越高）。改取 `头部高度 + 列表 scrollHeight`：两者都与可见高度无关
-     * （列表用 `flex: 0 1 auto`，未收缩时 clientHeight = 内容高、已收缩时 scrollHeight = 内容高），
-     * 因此稳定且无反馈。`.problems-head/.problems-list` 不存在时（如无告警时的 `.dock-empty` 占位）
-     * 回落到 `pane.scrollHeight`。
+     * 非告警面板：pane 已按内容取高（`.tool-dock-pane { flex: 0 0 auto }`，adj523）
+     * ⇒ `pane.scrollHeight` 恒等于内容自然高。
+     *
+     * 告警面板**不能这么量**：它那条 pane 必须"填满 dock"（列表要受限高度才能滚），
+     * 于是 dock 高时 `pane.scrollHeight` 会退化成"可用高度"（充气）。**adj528 起彻底不读总量**，
+     * 改为「**条数（数据）× 单行实测**」——见 `ui/dock/problemsHeight.ts`：
+     * 行数来自 store（不来自布局），单行高实测 `.problem-line`（**不含**展开的「正确写法」，
+     * 那是它的兄弟节点），面板头/占位块也都是内容尺寸的弹性项。
+     * 这样"从最大切建议"与"从最小切建议"必然算出同一个高度（用户连报两次的正是这一点）。
      */
     const measureNatural = (): number => {
       if (dockPanel !== 'problems') return pane.scrollHeight
       const head = pane.querySelector<HTMLElement>('.problems-head')
       const list = pane.querySelector<HTMLElement>('.problems-list')
-      if (!head || !list) return pane.scrollHeight
-      return PANE_PAD_H + head.getBoundingClientRect().height + list.scrollHeight
+      const empty = pane.querySelector<HTMLElement>('.dock-empty')
+      const line = list?.querySelector<HTMLElement>('.problem-line')
+      return PROBS.problemsContentHeight({
+        problemCount,
+        headH: head?.getBoundingClientRect().height ?? 0,
+        rowH: line?.getBoundingClientRect().height ?? 0,
+        emptyH: empty?.getBoundingClientRect().height ?? 0,
+        // 面板"收起"（`open === false`）时只剩面板头、不渲染列表
+        collapsed: !!head && !list,
+      })
     }
     const measure = () => {
       const nat = measureNatural()
@@ -432,23 +456,17 @@ export function ToolDock() {
       ro.disconnect()
       window.removeEventListener('resize', measure)
     }
-  }, [dockOpen, dockPanel, everActive.length, fitAllNow])
+  }, [dockOpen, dockPanel, everActive.length, fitAllNow, problemCount])
 
   /**
-   * adj510：告警面板的"内容自然高"会被 **cap** —— 超过「头 + `PROBLEMS_MAX_VISIBLE_ROWS` 行告警」时，
-   * 仍记为这个上限；超出部分由 `problems-list` 的 `overflow-y: auto` 在面板内滚动查看。
-   * 其它 AUTO_FIT 面板（试听/导出/关于）直接返回 `h`，由内层 `overflow-y: auto` 兜底超长内容。
+   * adj528：cap 算式搬到 `ui/dock/problemsHeight.ts`（与"内容自然高"同一处、smoke 可断言）。
+   * 说明：`problemsContentHeight()` 已经按 `PROBLEMS_MAX_VISIBLE_ROWS` 收口，
+   * 所以 cap 对它是**幂等**的；留着它是为了兜住"实测值异常偏大"的输入。
    */
-  const capProblemsContentHeight = (h: number): number => {
-    if (h <= 0) return h
-    // 头 + `PROBLEMS_MAX_VISIBLE_ROWS` 行 = PANE_PAD_H + PROBLEMS_HEAD_H + ROW_H × 行数（实测；与 defaultH 兜底对齐）
-    return Math.min(h, PANE_PAD_H + PROBLEMS_HEAD_H + ROW_H * PROBLEMS_MAX_VISIBLE_ROWS)
-  }
-
   const forPanel = (key: DockPanelKey): number => {
-    // 实测值（pane.scrollHeight）已含内容区上下内边距，所以这里只加外壳（adj521：外壳用实测值）
+    // 实测值已含内容区上下内边距，所以这里只加外壳（adj521：外壳用实测值）
     if (AUTO_FIT.includes(key) && measured[key]) {
-      const measuredContent = key === 'problems' ? capProblemsContentHeight(measured[key]!) : measured[key]!
+      const measuredContent = key === 'problems' ? PROBS.capProblemsContentHeight(measured[key]!) : measured[key]!
       return chromeH + measuredContent
     }
     return defaultH(key, narrow, settingsRowPitch, chromeH)
@@ -611,32 +629,42 @@ export function ToolDock() {
           }
         }}
       />
-      {/* 标题栏：四个面板 tab（点击切换）+ × 显式关闭 */}
-      <div className="tool-dock-tabs" role="tablist">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            role="tab"
-            aria-selected={dockPanel === t.key}
-            className={`tool-dock-tab${dockPanel === t.key ? ' is-active' : ''}`}
-            onClick={() => setDockPanel(t.key)}
-            title={t.label}
-          >
-            <span className="tool-dock-tab-icon" aria-hidden="true">
-              {/* adj486：设计图标（顶栏同一套）优先；暂无对应图的（告警）用字符兜底。
-                  adj514：**与顶栏按钮图标同尺寸**（`ToolIcon` 默认 size=16，与顶栏一致）——
-                  此前 `size={14}` 比顶栏小 2px，视觉"虚"（用户报）。 */}
-              {t.icon ? <ToolIcon name={t.icon} /> : t.glyph}
-            </span>
-            <span className="tool-dock-tab-label">{t.label}</span>
-          </button>
-        ))}
+      {/* 标题栏：面板页签（可横向滑动）+ 常驻右侧的档位按钮与关闭按钮
+       *
+       * adj525（用户要求"档位按钮和关闭按钮固定在右侧，如顶栏的主题/支持；其它页签超出视界可左右滑动"）：
+       * 结构拆成「**可滚的页签区** + **两个常驻按钮**」——页签多了只在页签区内滚动，
+       * 右侧两个按钮永远可见、永远点得到。
+       * 与顶栏 adj453 的修法同源：**"必须始终可见"的元素不要放进会溢出的滚动容器**，
+       * 否则它们会被内容顶出可视区（此前正是如此：页签一溢出，两个按钮就被推到右边看不见，
+       * 得先滑到最后才能点）。`role="tablist"` 随之移到页签区（它才是"页签的容器"）。 */}
+      <div className="tool-dock-tabs">
+        <div className="tool-dock-tabstrip" role="tablist">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={dockPanel === t.key}
+              className={`tool-dock-tab${dockPanel === t.key ? ' is-active' : ''}`}
+              onClick={() => setDockPanel(t.key)}
+              title={t.label}
+            >
+              <span className="tool-dock-tab-icon" aria-hidden="true">
+                {/* adj486：设计图标（顶栏同一套）优先；暂无对应图的（告警）用字符兜底。
+                    adj514：**与顶栏按钮图标同尺寸**（`ToolIcon` 默认 size=16，与顶栏一致）——
+                    此前 `size={14}` 比顶栏小 2px，视觉"虚"（用户报）。 */}
+                {t.icon ? <ToolIcon name={t.icon} /> : t.glyph}
+              </span>
+              <span className="tool-dock-tab-label">{t.label}</span>
+            </button>
+          ))}
+        </div>
         {/* adj520：底栏高度档位切换按钮（单按钮，4 相位循环）——
             循环表见模块级 `SIZE_PHASES`；高度序列
             `建议 → 最大 → 建议 → 最小 → 建议 → …`，
             图标（`上.png` / `下.png`）指示"点一下会往哪走"：
-            相位 0（建议→最大）上、1（最大→建议）下、2（建议→最小）下、3（最小→建议）上。 */}
+            相位 0（建议→最大）上、1（最大→建议）下、2（建议→最小）下、3（最小→建议）上。
+            adj525：移出页签区 ⇒ 常驻右侧（不被溢出的页签顶走）。 */}
         <button
           type="button"
           className="tool-dock-size-btn"

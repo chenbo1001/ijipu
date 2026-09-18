@@ -76,6 +76,28 @@ import { hasBuiltinBank, GM_VOICE_OPTIONS } from '../src/playback/spessaSynthBac
 import type { HqSampleLibrary } from '../src/playback/spessaSynthBackend.ts'
 // adj417：按钮图标清单（public/icons/ 下的文件名）——断言文件存在、sw.js 预热清单未漂移
 import { ICON_DIR, ICON_FILES, ICON_FILE_NAMES } from '../src/ui/toolIcons.ts'
+// adj526：数值"按住上下拖"的纯换算（上拖增大 / 粗调 / 钳制 / 无范围时相对增量）
+import { scrubTarget, SCRUB_PX_PER_STEP, SCRUB_COARSE_FACTOR, SCRUB_COARSE_TOL } from '../src/ui/numberScrub.ts'
+// adj528：告警面板高度算式（单一来源纯函数）——"条数 × 单行实测"，与 dock 当前高度无关
+import {
+  problemsContentHeight,
+  capProblemsContentHeight,
+  PANE_PAD_H as PROB_PANE_PAD_H,
+  ROW_H as PROB_ROW_H,
+  PROBLEMS_HEAD_H as PROB_HEAD_H,
+  PROBLEMS_MAX_VISIBLE_ROWS as PROB_MAX_ROWS,
+} from '../src/ui/dock/problemsHeight.ts'
+// adj529：预览比例"双击比率值按宽度适配"的反算算式（纯函数）
+import {
+  PREVIEW_BASE_W,
+  PREVIEW_PANE_PAD_X,
+  fitZoomFor,
+  clampPreviewZoom,
+} from '../src/preview/zoomFit.ts'
+// adj526：谱面数值字段范围来自引擎同一份表（GUIDE_LIMITS/_EX）——断言"逐项相等"，防止抄成第二份
+import { PAGE_NUM_RANGES, coarseFor } from '../src/ui/numFieldRanges.ts'
+// （GUIDE_LIMITS_EX 见本文件顶部从 layout/guides 的导入；这里补 GUIDE_LIMITS 与字号范围）
+import { GUIDE_LIMITS, EDITOR_FONT_SIZE_RANGE } from '@ijipu/engine/index.ts'
 
 // adj213：布局断言常量——从 defaultPageConfig 派生，避免硬编码边距/右边界/
 // 描述头区域高等魔数（默认值调整时断言自动适配）
@@ -7688,9 +7710,218 @@ console.log('[109] score self-containment: no local page-config layer (adj480)')
  * 这里走**真实 store 流程**（`newDoc()`）而不是只比较常量——把"菜单「新建」→ 模板文件"这条链路钉住。
  * 依赖上一个用例已装好的 localStorage/window 桩（模块已加载，此处只取 store）。
  */
+/**
+ * adj526：数值「按住上下拖」的**纯换算**断言 + 范围"单一来源"守卫。
+ *
+ * 由来（用户报，手机端）：数字输入框没有原生上下小按钮、且部分字段限定范围，
+ * 配合"输入即钳制"导致数字改不动；现统一为「键盘输入 / `−`+` 步进 / 按住上下拖」三条路径。
+ * 这里断言换算规则本身（可确定性验证），并守卫"谱面字段范围 = 引擎同一份表"。
+ */
+function runAdj526NumberScrubTests() {
+  console.log('[117] number scrub: drag math & single-source ranges (adj526)')
+  const S = SCRUB_PX_PER_STEP // 8px 一个步长
+  check('adj526 按住上拖增大、下拖减小（每 8px 一档）',
+    scrubTarget(100, 0, -S) === 101 &&
+      scrubTarget(100, 0, S) === 99 &&
+      scrubTarget(100, 0, -S * 3) === 103 &&
+      scrubTarget(100, 0, S * 3) === 97,
+    `up=${scrubTarget(100, 0, -S)} down=${scrubTarget(100, 0, S)}`)
+  check('adj526 位移不足半步不改值（手指微抖不误改）',
+    scrubTarget(50, 0, -3) === 50 && scrubTarget(50, 0, 3) === 50,
+    '')
+  check('adj526 横向位移超阈值转粗调（×10），范围内仍可用',
+    scrubTarget(100, 0, -S) === 101 &&
+      scrubTarget(100, SCRUB_COARSE_TOL + 1, -S) === 100 + SCRUB_COARSE_FACTOR,
+    `coarse=${scrubTarget(100, SCRUB_COARSE_TOL + 1, -S)}`)
+  check('adj526 可关闭粗调（小区间字段：一划不跳过头）',
+    scrubTarget(14, SCRUB_COARSE_TOL + 100, -S, { coarse: false }) === 15,
+    '')
+  check('adj526 步长按字段给（预览缩放 = 10）',
+    scrubTarget(100, 0, -S, { step: 10 }) === 110 && scrubTarget(100, 0, S, { step: 10 }) === 90,
+    '')
+  check('adj526 有范围时钳制到区间内',
+    scrubTarget(25, 0, S * 10, { min: 20, max: 400 }) === 20 &&
+      scrubTarget(395, 0, -S * 10, { min: 20, max: 400 }) === 400 &&
+      scrubTarget(50, 0, -S * 30, { min: 10, max: 80 }) === 80,
+    '')
+  check('adj526 无范围时只做相对增量（不钳制、允许极值，保住"设置里能填极值"的口径）',
+    // 上拖（dy 负）= 增大到 140；下拖越过 0 允许变负（−5）——正是"声部间距可为负"这类字段需要的
+    scrubTarget(40, 0, -S * 100, {}) === 140 && scrubTarget(0, 0, S * 5, {}) === -5,
+    `big=${scrubTarget(40, 0, -S * 100, {})} neg=${scrubTarget(0, 0, S * 5, {})}`)
+  check('adj526 谱面数值范围逐项等于引擎 GUIDE_LIMITS / GUIDE_LIMITS_EX（不是抄第二份）',
+    PAGE_NUM_RANGES.margin_top === GUIDE_LIMITS.margin_top &&
+      PAGE_NUM_RANGES.margin_right === GUIDE_LIMITS.margin_right &&
+      PAGE_NUM_RANGES.height_ciqu === GUIDE_LIMITS.height_ciqu &&
+      PAGE_NUM_RANGES.descAreaH === GUIDE_LIMITS_EX.descAreaH &&
+      PAGE_NUM_RANGES.body_margin_top === GUIDE_LIMITS_EX.body_margin_top &&
+      PAGE_NUM_RANGES.height_shengbu === GUIDE_LIMITS_EX.height_shengbu &&
+      PAGE_NUM_RANGES.segmentRowGap_bz === GUIDE_LIMITS_EX.segmentRowGap_bz &&
+      PAGE_NUM_RANGES.segmentRowGap_dsb === GUIDE_LIMITS_EX.segmentRowGap_dsb,
+    '')
+  check('adj526 编辑器字号范围来自引擎 EDITOR_FONT_SIZE_RANGE（10~26）',
+    EDITOR_FONT_SIZE_RANGE[0] === 10 && EDITOR_FONT_SIZE_RANGE[1] === 26 &&
+      coarseFor(EDITOR_FONT_SIZE_RANGE) === false,
+    '')
+  check('adj526 只有跨度 > 120 的字段启用粗调；无范围字段不启用',
+    coarseFor([20, 400]) === true && coarseFor([0, 120]) === false && coarseFor(undefined) === false,
+    '')
+
+  // —— 结构护栏：这些是"手机端能改数字"的必需件，缺一件就会回到原问题 ——
+  const pageSrc = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
+  const cssAll = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  check('adj526 数值输入改为"本地草稿 + 失焦/回车才钳制"（输入过程中不钳制）',
+    /const \[draft, setDraft\] = useState<string \| null>\(null\)/.test(pageSrc) &&
+      /onChange=\{\(e\) => setDraft\(e\.target\.value\)\}/.test(pageSrc) &&
+      /onBlur=\{commit\}/.test(pageSrc),
+    '')
+  check('adj526 输入框带手机数字键盘 / 完成键，且接线了拖动与步进',
+    /inputMode="numeric"/.test(pageSrc) &&
+      /enterKeyHint="done"/.test(pageSrc) &&
+      /useNumberScrub\(value, onChange/.test(pageSrc) &&
+      (pageSrc.match(/useHoldRepeat\(/g) ?? []).length === 2,
+    '')
+  check('adj526 步进钮只在粗指针（触屏）显示——桌面保留原生 spinner',
+    /\.num-step \{ display: none; \}/.test(cssAll) &&
+      /@media \(pointer: coarse\) \{[\s\S]{0,400}?\.num-step \{/.test(cssAll),
+    '')
+  const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+  // adj526：工具条上的"预览比率 / 编辑器字号"两处值都可按住上下拖；
+  // adj529：又给「更多」下拉里的比率补了一处（同一组件），故断言为"至少 2 处"，
+  // 具体的 3 处由 adj529 那条断言钉住。
+  check('adj526 顶栏"预览比率 / 编辑器字号"两处值都可按住上下拖',
+    (topSrc.match(/<ScrubValue/g) ?? []).length >= 2 &&
+      topSrc.includes('PREVIEW_ZOOM_RANGE') &&
+      topSrc.includes('EDITOR_FONT_SIZE_RANGE'),
+    `ScrubValue=${(topSrc.match(/<ScrubValue/g) ?? []).length}`)
+  const storeSrc = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+  // adj529：setter 的钳制改用**绝对范围** PREVIEW_ZOOM_LIMITS（适配允许越出手动范围），
+  // 手动边界改由顶栏 zoomBy 守 PREVIEW_ZOOM_RANGE（见 adj529 那组断言）。
+  check('adj526/adj529 预览缩放范围是单一来源（常量导出 + setter 用它钳制）',
+    /export const PREVIEW_ZOOM_RANGE: readonly \[number, number\] = \[50, 200\]/.test(storeSrc) &&
+      /export const PREVIEW_ZOOM_LIMITS: readonly \[number, number\] = \[30, 400\]/.test(storeSrc) &&
+      /setPreviewZoom[\s\S]{0,200}?PREVIEW_ZOOM_LIMITS\[1\][\s\S]{0,80}?PREVIEW_ZOOM_LIMITS\[0\]/.test(storeSrc),
+    '')
+
+  // ---- adj528：告警面板"内容自然高"的纯算式（用户连报两次：从最大切建议高度不对） ----
+  const RAW = { problemCount: 0, headH: PROB_HEAD_H, rowH: PROB_ROW_H, emptyH: 24, collapsed: false }
+  check('adj528 0 条告警 = 内边距 + 占位行（不随 dock 高度变化，也不预留面板头/4 行）',
+    problemsContentHeight(RAW) === PROB_PANE_PAD_H + 24,
+    `${problemsContentHeight(RAW)}`)
+  check('adj528 n 条告警 = 内边距 + 面板头 + n × 单行高（n ≤ 上限）',
+    problemsContentHeight({ ...RAW, problemCount: 1 }) === PROB_PANE_PAD_H + PROB_HEAD_H + PROB_ROW_H &&
+      problemsContentHeight({ ...RAW, problemCount: 3 }) === PROB_PANE_PAD_H + PROB_HEAD_H + PROB_ROW_H * 3,
+    `${problemsContentHeight({ ...RAW, problemCount: 3 })}`)
+  check('adj528 超过上限（4 行）按上限计（其余由列表自身滚动）',
+    problemsContentHeight({ ...RAW, problemCount: 9 }) === PROB_PANE_PAD_H + PROB_HEAD_H + PROB_ROW_H * PROB_MAX_ROWS &&
+      PROB_MAX_ROWS === 4,
+    `${problemsContentHeight({ ...RAW, problemCount: 9 })}`)
+  check('adj528 面板"收起"时只算面板头（列表没渲染）',
+    problemsContentHeight({ ...RAW, problemCount: 3, collapsed: true }) === PROB_PANE_PAD_H + PROB_HEAD_H,
+    '')
+  check('adj528 单行高/占位高缺测时回落到常量（不会算出 0 或负数）',
+    problemsContentHeight({ ...RAW, problemCount: 2, rowH: 0 }) === PROB_PANE_PAD_H + PROB_HEAD_H + PROB_ROW_H * 2 &&
+      problemsContentHeight({ ...RAW, problemCount: 2, headH: 0 }) === PROB_PANE_PAD_H + PROB_HEAD_H &&
+      problemsContentHeight({ ...RAW, problemCount: 0, emptyH: 0 }) === PROB_PANE_PAD_H + PROB_ROW_H,
+    '')
+  check('adj528 cap 对算式结果幂等（不放大、能把异常偏大的输入收口到 4 行）',
+    capProblemsContentHeight(problemsContentHeight({ ...RAW, problemCount: 9 })) ===
+      problemsContentHeight({ ...RAW, problemCount: 9 }) &&
+      capProblemsContentHeight(9999) === PROB_PANE_PAD_H + PROB_HEAD_H + PROB_ROW_H * PROB_MAX_ROWS,
+    '')
+  // 结构护栏：ToolDock 里告警的高度常量必须引用同一来源（不重新写死数字）
+  const dockModuleSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  check('adj528 ToolDock 的高度常量与告警算式同源（引用 dock/problemsHeight）',
+    /const PANE_PAD_H = PROBS\.PANE_PAD_H/.test(dockModuleSrc) &&
+      /const ROW_H = PROBS\.ROW_H/.test(dockModuleSrc) &&
+      /const PROBLEMS_MAX_VISIBLE_ROWS = PROBS\.PROBLEMS_MAX_VISIBLE_ROWS/.test(dockModuleSrc) &&
+      /PROBS\.capProblemsContentHeight/.test(dockModuleSrc),
+    '')
+}
+
+/**
+ * adj529：预览比例「双击比率值 → 按宽度适配」——纯算式断言 + 接线护栏。
+ *
+ * 需求（用户）："**双击顶栏上的预览比率值**这个文本时，按宽度适配的比率显示"，
+ * 并明确 **不新增变量、设置**。所以它是"一次性跳到适配值"（写进已有的 `previewZoom`），
+ * 不是"适配模式"，也没有新的 store 字段/持久化键。
+ */
+function runAdj529PreviewFitTests() {
+  console.log('[118] preview zoom fit-to-width on double click (adj529)')
+  const RANGE = [50, 200] as const
+  // 基准宽 + 左右内边距刚好等于 100%：808 − 48 = 760 = 基准宽
+  check('adj529 适配比例 = 预览区可用宽 ÷ 基准宽（可用宽 = clientWidth − 左右内边距）',
+    fitZoomFor(PREVIEW_BASE_W + PREVIEW_PANE_PAD_X * 2, RANGE) === 100 &&
+      fitZoomFor(1000, RANGE) === 125 &&
+      fitZoomFor(760, RANGE) === 94,
+    `${fitZoomFor(1000, RANGE)} / ${fitZoomFor(760, RANGE)}`)
+  check('adj529 适配比例钳到绝对范围（窄预览区可 <50%、很宽的预览区可 >200%）',
+    fitZoomFor(340, [30, 400]) === 38 &&
+      fitZoomFor(3000, [30, 400]) === 388 &&
+      fitZoomFor(300, [30, 400]) === 33 &&
+      fitZoomFor(200, [30, 400]) === 30,
+    `${fitZoomFor(340, [30, 400])} / ${fitZoomFor(3000, [30, 400])}`)
+  check('adj529 手动范围 [50,200] 仍照旧（适配越界值不受它限制）',
+    fitZoomFor(340, RANGE) === 50 && fitZoomFor(3000, RANGE) === 200,
+    `${fitZoomFor(340, RANGE)} / ${fitZoomFor(3000, RANGE)}`)
+  check('adj529 预览区不存在/过窄时返回 0（双击当作无操作，写不进错值）',
+    fitZoomFor(0, RANGE) === 0 && fitZoomFor(PREVIEW_PANE_PAD_X, RANGE) === 0 && fitZoomFor(Number.NaN, RANGE) === 0,
+    '')
+  check('adj529 比例钳制取整',
+    clampPreviewZoom(137.6, RANGE) === 138 && clampPreviewZoom(10, RANGE) === 50 && clampPreviewZoom(9e9, RANGE) === 200,
+    '')
+
+  // —— 接线护栏 ——
+  const storeSrc529 = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+  const topSrc529 = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+  const previewSrc = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
+  const scrubSrc = String(readFileSync('src/ui/ScrubValue.tsx', 'utf8'))
+  check('adj529 双击比率值 → 现量 .preview-pane 宽度 → 写进已有的 previewZoom（一次到位）',
+    /onDoubleClick=\{applyFitZoom\}/.test(topSrc529) &&
+      /document\.querySelector<HTMLElement>\('\.preview-pane'\)/.test(topSrc529) &&
+      /fitZoomFor\(pane\?\.clientWidth \?\? 0, PREVIEW_ZOOM_LIMITS\)/.test(topSrc529) &&
+      /if \(z > 0\) setPreviewZoom\(z\)/.test(topSrc529),
+    '')
+  // 用户确认"按建议放宽"：适配用**绝对范围** [30,400]（窄/宽预览区都能贴合），
+  // 手动 `−`/`+` 仍守 [50,200]（`zoomBy` 里夹），store 的钳制用绝对范围。
+  check('adj529 适配/手动两层范围各就各位（适配 PREVIEW_ZOOM_LIMITS；手动 zoomBy 守 PREVIEW_ZOOM_RANGE）',
+    /export const PREVIEW_ZOOM_RANGE: readonly \[number, number\] = \[50, 200\]/.test(storeSrc529) &&
+      /export const PREVIEW_ZOOM_LIMITS: readonly \[number, number\] = \[30, 400\]/.test(storeSrc529) &&
+      /setPreviewZoom[\s\S]{0,200}?PREVIEW_ZOOM_LIMITS\[1\][\s\S]{0,80}?PREVIEW_ZOOM_LIMITS\[0\]/.test(storeSrc529) &&
+      /const zoomBy = \(delta: number\) =>[\s\S]{0,200}?PREVIEW_ZOOM_RANGE\[1\][\s\S]{0,80}?PREVIEW_ZOOM_RANGE\[0\]/.test(topSrc529) &&
+      (topSrc529.match(/zoomBy\(/g) ?? []).length === 4, // 4 处调用（工具条 ± / 更多下拉 ±）
+    `zoomBy=${(topSrc529.match(/zoomBy\(/g) ?? []).length}`)
+  check('adj529 不新增设置/状态：无适配开关字段、无新持久化键',
+    !/previewZoomFit|previewFitZoom/.test(storeSrc529) &&
+      !/ijipu\.previewZoomFit/.test(storeSrc529) &&
+      !/previewZoomFit|previewFitZoom/.test(topSrc529) &&
+      !/previewZoomFit|previewFitZoom/.test(previewSrc),
+    '')
+  check('adj529 ScrubValue 支持双击回调（其余调用方不传即无行为）',
+    /onDoubleClick\?: \(\) => void/.test(scrubSrc) && /onDoubleClick=\{onDoubleClick\}/.test(scrubSrc),
+    '')
+  // 用户报"缩进更多菜单后双击比率无效"：工具条折叠进「更多」时，那一行原先是个纯文本 span
+  // ⇒ 拖动与双击都丢了。现在两处都用同一个 ScrubValue（`<ScrubValue` 应出现 3 次：
+  // 工具条比率、工具条字号、更多下拉比率）。
+  check('adj529 「更多」下拉里的比率也能拖/双击（与工具条同一个 ScrubValue）',
+    (topSrc529.match(/<ScrubValue/g) ?? []).length === 3 &&
+      /className="menu-scrub-val"[\s\S]{0,400}?onDoubleClick=\{applyFitZoom\}/.test(topSrc529),
+    `ScrubValue=${(topSrc529.match(/<ScrubValue/g) ?? []).length}`)
+  // 用户报"预览区越窄，按页宽算出的比率差异越大（缩得更小）"：根因是 `.preview-zoom-scale` 同时
+  // 声明了 `width: 760×z` **和** `zoom: z`，而 CSS `zoom` 会把元素自己声明的 width 再乘一遍
+  // （MDN 示例：width:25px + zoom:200% ⇒ 50px）⇒ 实际渲染宽是 760×z²（平方）。
+  // 契约：width 只写基准宽，缩放全部交给 `zoom`（线性），拖拽换算与适配反算才成立。
+  check('adj529 预览缩放按**线性**渲染（width 只写基准宽，不能再乘 zoom，否则是平方关系）',
+    /width: PREVIEW_W,\n\s*position: 'relative',\n\s*zoom: previewZoom \/ 100,/.test(previewSrc) &&
+      !/PREVIEW_W \* \(previewZoom \/ 100\)/.test(previewSrc),
+    '')
+  check('adj529 预览基准宽单一来源（PreviewPane 复用 zoomFit 的 PREVIEW_BASE_W）',
+    /const PREVIEW_W = PREVIEW_BASE_W/.test(previewSrc) &&
+      /export const PREVIEW_BASE_W = 760/.test(readFileSync('src/preview/zoomFit.ts', 'utf8')),
+    '')
+}
+
 async function runNewDocTemplateTests() {
-  console.log('[81b] new document uses the template file (adj481)')
-  /* eslint-disable @typescript-eslint/no-explicit-any */
+  console.log('[81b] new document uses the template file (adj481)')  /* eslint-disable @typescript-eslint/no-explicit-any */
   const { useDocStore } = (await import('../src/store/docStore.ts')) as any
   const st = () => useDocStore.getState()
   st().newDoc()
@@ -7867,15 +8098,52 @@ console.log('[115] dock close: early-return guard & close button inside dock (ad
     /if \(!dockOpen\) return null/.test(dockSrc),
     '')
   check('adj491 关闭按钮接线到 store 的 closeDock', /className="tool-dock-close" onClick=\{closeDock\}/.test(dockSrc), '')
-  // 布局护栏：`.tool-dock-tabs` 必须约束在 dock 宽度内，否则 margin-left:auto 会把 ✕ 推出可视区
-  check('adj491 页签容器约束在 dock 宽度内（width:100% + min-width:0）',
-    /\.tool-dock-tabs \{[\s\S]{0,600}?width: 100%;/.test(css) && /\.tool-dock-tabs \{[\s\S]{0,600}?min-width: 0;/.test(css),
+  // 布局护栏：页签栏必须约束在 dock 宽度内，否则「右侧常驻按钮」会被推出可视区
+  check('adj491 页签栏约束在 dock 宽度内（width:100% + min-width:0）',
+    /\.tool-dock-tabs \{[\s\S]{0,900}?width: 100%;/.test(css) && /\.tool-dock-tabs \{[\s\S]{0,900}?min-width: 0;/.test(css),
     '')
-  check('adj491 页签超窄时横向滚动兜底（overflow-x:auto）且关闭按钮不被压缩',
-    /\.tool-dock-tabs \{[\s\S]{0,700}?overflow-x: auto;/.test(css) && /\.tool-dock-close \{[\s\S]{0,200}?flex: 0 0 auto;/.test(css),
+  // adj525：横向滚动能力从 `.tool-dock-tabs` 移到了内层 `.tool-dock-tabstrip`——
+  // 页签只在页签区里滚，右侧两个按钮（档位 / 关闭）在页签区**之外**因而永远可见可点。
+  check('adj491/adj525 页签区自己横滚（overflow-x:auto + min-width:0）且关闭按钮不被压缩',
+    /\.tool-dock-tabstrip \{[\s\S]{0,400}?min-width: 0;[\s\S]{0,200}?overflow-x: auto;/.test(css) &&
+      /\.tool-dock-close \{[\s\S]{0,300}?flex: 0 0 auto;/.test(css),
     '')
-  check('adj491 粗指针设备放大 ✕ 命中区（与 adj487 调整条同一口径）',
-    /@media \(pointer: coarse\) \{[\s\S]{0,300}?\.tool-dock-close \{ padding: 10px 14px/.test(css),
+  // adj527：粗指针下 ✕ 的命中区**不再靠横向 padding 撑**（那会把按钮的视觉盒子撑宽、
+  // 与左侧档位按钮之间空出一大截，用户报"分得比较开"），改为小内边距 + 隐形 `::before` **上下**扩。
+  check('adj491/adj527 粗指针设备放大 ✕ 命中区（隐形 ::before 上下扩，不再撑宽视觉盒子）',
+    /@media \(pointer: coarse\) \{[\s\S]{0,900}?\.tool-dock-close \{ padding: 6px 5px/.test(css) &&
+      /@media \(pointer: coarse\) \{[\s\S]{0,900}?\.tool-dock-close::before \{[\s\S]{0,220}?top: -7px;[\s\S]{0,80}?bottom: -7px;/.test(css),
+    '')
+
+  // adj525：右侧两个按钮（高度档位 / 关闭）必须**常驻**——它们要在可滚页签区**之外**。
+  // 依据同顶栏 adj453：「必须始终可见」的元素不能放进会溢出的滚动容器，否则会被内容顶出可视区
+  // （此前页签一溢出，档位按钮与 ✕ 就被推到最右边看不见，得先滑到底才能点）。
+  const stripIdx = dockSrc.indexOf('className="tool-dock-tabstrip"')
+  const sizeIdx = dockSrc.indexOf('className="tool-dock-size-btn"')
+  const between = stripIdx >= 0 && sizeIdx > stripIdx ? dockSrc.slice(stripIdx, sizeIdx) : ''
+  check('adj525 页签区（可滚）与右侧常驻按钮分离：页签在 tabstrip 内、按钮在其外',
+    stripIdx >= 0 && sizeIdx > stripIdx && between.includes('TABS.map') && between.includes('</div>'),
+    `stripIdx=${stripIdx} sizeIdx=${sizeIdx}`)
+  check('adj525 `role="tablist"` 挂在页签区上（它才是页签的容器）',
+    /className="tool-dock-tabstrip" role="tablist"/.test(dockSrc) &&
+      !/className="tool-dock-tabs" role="tablist"/.test(dockSrc),
+    '')
+  check('adj525 两个常驻按钮都不被压缩（flex: 0 0 auto），页签区可收缩（min-width: 0）',
+    /\.tool-dock-size-btn \{[\s\S]{0,400}?flex: 0 0 auto;/.test(css) &&
+      /\.tool-dock-size-btn \{[\s\S]{0,500}?flex-shrink: 0;/.test(css) &&
+      /\.tool-dock-tabstrip \{[\s\S]{0,300}?flex: 1 1 auto;/.test(css),
+    '')
+
+  // adj527：用户要求"页签按钮宽度缩小一些，刚好放得下 5 个"。
+  // 5 个页签的宽度 = 5×(边框2 + 左右内边距 + 图标16 + 间距4 + 两个中文字24) + 4×间距，
+  // 再加栏开销（左右内边距 + 档位钮 28 + ✕）——横向内边距一旦回到 10px 就会超出手机宽度、
+  // 又变成"必须横滑才看得到第 5 个"。这里钉住"紧凑档 + 更窄 dock 再收紧一档"。
+  check('adj527 页签横向内边距收到 7px（5 个页签在常规手机宽上整栏放得下）',
+    /\.tool-dock-tab \{[\s\S]{0,600}?padding: 5px 7px;/.test(css) &&
+      /\.tool-dock-tabstrip \{[\s\S]{0,300}?gap: 3px;/.test(css),
+    '')
+  check('adj527 更窄 dock（≤400px）再收紧一档（横向内边距 5px）',
+    /@container \(max-width: 400px\) \{[\s\S]{0,200}?\.tool-dock-tab \{ padding: 5px 5px; \}/.test(css),
     '')
 }
 
@@ -7923,9 +8191,11 @@ console.log('[116] settings 6 rows, About in dock, divider touch hit-area (adj49
   // adj524：告警"建议档"最多显示 4 行（adj510 原为 2 行）。放宽的依据是底栏有了高度档位按钮——
   // "默认多给一点"不再挤占编辑区（嫌高按一下到最小、想更高按一下到最大），所以让建议档
   // 承担"一次看全常见告警量（4 条）"，减少"还得先拖大才看得见"。0/1/2 条仍按内容自然高收缩。
-  check('adj524 告警建议档最多显示 4 行（PROBLEMS_MAX_VISIBLE_ROWS = 4）',
-    /const PROBLEMS_MAX_VISIBLE_ROWS = 4/.test(dockSrc),
-    '')
+  // adj528：常量与算式搬到 `ui/dock/problemsHeight.ts`（单一来源 + 纯函数），断言随之改到该文件。
+  check('adj524/adj528 告警建议档最多显示 4 行（PROBLEMS_MAX_VISIBLE_ROWS = 4，单一来源）',
+    PROB_MAX_ROWS === 4 &&
+      /export const PROBLEMS_MAX_VISIBLE_ROWS = 4/.test(readFileSync('src/ui/dock/problemsHeight.ts', 'utf8')),
+    `maxRows=${PROB_MAX_ROWS}`)
 
   // adj522：告警面板"展开后内容超过视界却没有滚动条"——高度链必须成立，列表才会真的滚。
   // 三件套缺一不可：① 告警那条 pane 是弹性列（给列表受限高度）；
@@ -7940,11 +8210,13 @@ console.log('[116] settings 6 rows, About in dock, divider touch hit-area (adj49
   check('adj522 取消"关掉 dock 内容区滚动"的覆盖（链断了仍可滚，不裁内容）',
     !/\.tool-dock-body:has\(\.problem-panel\)/.test(css),
     '')
-  // 告警的"内容自然高"不再读 pane.scrollHeight（弹性列下它会退化成可用高度、越量越高），
-  // 改读「头部高度 + 列表 scrollHeight」——两者都与可见高度无关。
-  check('adj522 告警内容自然高改由 head + list.scrollHeight 量取（避免充气式增长）',
+  // adj528：告警的"内容自然高"**不得再读任何 scrollHeight 总量**——那条 pane 为了列表能滚必须
+  // 填满 dock，读总量会被"可用高度"充气，从而"从最大切建议"算出虚高的建议高度（用户连报两次）。
+  // 现在改为「条数（数据）× 单行实测」，见 `ui/dock/problemsHeight.ts`（纯函数，下方有断言）。
+  check('adj528 告警内容自然高改由"条数 × 单行实测"量取（不再读 scrollHeight，避免充气）',
     /dockPanel !== 'problems'\) return pane\.scrollHeight/.test(dockSrc) &&
-      /list\.scrollHeight/.test(dockSrc),
+      /PROBS\.problemsContentHeight\(\{/.test(dockSrc) &&
+      !/list\.scrollHeight/.test(dockSrc),
     '')
 
   // adj523：AUTO_FIT 的"内容自然高"取自 `pane.scrollHeight`，而 `scrollHeight === max(内容高, clientHeight)`。
@@ -8344,6 +8616,22 @@ runAdj363SaveTests()
   .catch((e) => {
     failed++
     console.error('  ✗ adj416 音源来源用例抛异常', e)
+  })
+  .then(() => {
+    try {
+      runAdj526NumberScrubTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj526 数值拖动调节用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj529PreviewFitTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj529 预览比例适配宽度用例抛异常', e)
+    }
   })
   .then(() => {
     console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)

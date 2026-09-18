@@ -11,10 +11,14 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useDocStore, type ViewType } from '../store/docStore'
-import { useUiStore } from '../store/uiStore'
-import { EDITOR_FONT_OPTIONS } from '@ijipu/engine'
-import { pasteImportCopy } from '../brand/copy'
+import { useUiStore, PREVIEW_ZOOM_RANGE, PREVIEW_ZOOM_STEP, PREVIEW_ZOOM_LIMITS } from '../store/uiStore'
+import { clampEditorFontSize, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE } from '@ijipu/engine'
+import { pasteImportCopy, numCopy } from '../brand/copy'
 import { ToolIcon } from './ToolIcon'
+// adj526：可"按住上下拖"的数值显示（预览比率 / 编辑器字号）
+import { ScrubValue } from './ScrubValue'
+// adj529：双击比率值 → 按预览区宽度反算适配比例（纯算式，不新增状态）
+import { fitZoomFor } from '../preview/zoomFit'
 
 /** Alt+字母 → 菜单分组（adj185）
  *  adj383：主题组已移入「页面设置」对话框的「主题」标签，Alt+T 菜单分组随之取消 */
@@ -122,6 +126,27 @@ export function TopBar() {
   const setShowGuides = useUiStore((s) => s.setShowGuides)
   const previewZoom = useUiStore((s) => s.previewZoom)
   const setPreviewZoom = useUiStore((s) => s.setPreviewZoom)
+
+  /**
+   * adj529（用户要求）：**双击顶栏的预览比率值 → 按预览区宽度适配的比例显示**。
+   *
+   * 实现刻意**不新增任何状态/设置**：双击时**现量**预览滚动容器（`.preview-pane`）的
+   * `clientWidth`，按 `preview/zoomFit.ts` 的反算算出比例，直接写进**已有的** `previewZoom`
+   * （与点 `−`/`+`、拖动比率完全同一条路：照常钳制、照常持久化）。
+   * 于是它是一次"跳到适配值"的动作，而不是一个会长期跟随的"适配模式"——
+   * 之后窗口再变宽变窄，比例保持不动（想再适配就再双击一次）。
+   * 用 `clientWidth` 是因为它已排除纵向滚动条，"撑满"不会自己把页面挤出横向滚动条。
+   * 范围用**绝对范围** `PREVIEW_ZOOM_LIMITS`（[30,400]）：窄预览区（手机分屏 ~340px）要贴合就得 <50%，
+   * 很宽的预览区又要 >200%；手动 `−`/`+`/拖动仍守 `PREVIEW_ZOOM_RANGE`（[50,200]）。
+   */
+  const applyFitZoom = () => {
+    const pane = document.querySelector<HTMLElement>('.preview-pane')
+    const z = fitZoomFor(pane?.clientWidth ?? 0, PREVIEW_ZOOM_LIMITS)
+    if (z > 0) setPreviewZoom(z)
+  }
+  /** 手动步进（`−`/`+`）：守**手动范围**（当前值可能因适配落在范围外，先按当前值加减再夹回来） */
+  const zoomBy = (delta: number) =>
+    setPreviewZoom(Math.min(PREVIEW_ZOOM_RANGE[1], Math.max(PREVIEW_ZOOM_RANGE[0], previewZoom + delta)))
   // adj426：顶栏新增「浅深模式」三状态按钮（在支持作者之前），与设置里的浅深模式联动
   const themeMode = useUiStore((s) => s.themeMode)
   const setThemeMode = useUiStore((s) => s.setThemeMode)
@@ -352,11 +377,23 @@ export function TopBar() {
     if (t.kind === 'zoom') {
       return (
         <div className="topbar-zoom" key={t.key}>
-          <button className="topbar-btn icon-btn" title="缩小预览" onClick={() => setPreviewZoom(previewZoom - 10)}>
+          <button className="topbar-btn icon-btn" title="缩小预览" onClick={() => zoomBy(-PREVIEW_ZOOM_STEP)}>
             −
           </button>
-          <span className="topbar-zoom-val">{previewZoom}%</span>
-          <button className="topbar-btn icon-btn" title="放大预览" onClick={() => setPreviewZoom(previewZoom + 10)}>
+          {/* adj526：比率值本身也能"按住上下拖"调节（手机上进不了输入框时尤其有用）
+              adj529：**双击**它 = 按预览区宽度适配（跳到"页面宽度撑满预览区"的比例） */}
+          <ScrubValue
+            className="topbar-zoom-val"
+            value={previewZoom}
+            onChange={setPreviewZoom}
+            onDoubleClick={applyFitZoom}
+            step={PREVIEW_ZOOM_STEP}
+            min={PREVIEW_ZOOM_RANGE[0]}
+            max={PREVIEW_ZOOM_RANGE[1]}
+            text={`${previewZoom}%`}
+            title={numCopy.zoomScrubHint}
+          />
+          <button className="topbar-btn icon-btn" title="放大预览" onClick={() => zoomBy(PREVIEW_ZOOM_STEP)}>
             +
           </button>
         </div>
@@ -370,18 +407,28 @@ export function TopBar() {
             className="topbar-btn icon-btn"
             title="减小字号"
             onClick={() => {
-              const v = Math.max(10, effectiveFontSize - 1)
+              const v = Math.max(EDITOR_FONT_SIZE_RANGE[0], effectiveFontSize - 1)
               setEditorFontSize(v)
             }}
           >
             A−
           </button>
-          <span className="topbar-zoom-val">{effectiveFontSize}px</span>
+          {/* adj526：字号值本身也能"按住上下拖"调节 */}
+          <ScrubValue
+            className="topbar-zoom-val"
+            value={effectiveFontSize}
+            onChange={(v) => setEditorFontSize(clampEditorFontSize(v))}
+            step={1}
+            min={EDITOR_FONT_SIZE_RANGE[0]}
+            max={EDITOR_FONT_SIZE_RANGE[1]}
+            text={`${effectiveFontSize}px`}
+            title={numCopy.fontSizeScrubHint}
+          />
           <button
             className="topbar-btn icon-btn"
             title="增大字号"
             onClick={() => {
-              const v = Math.min(26, effectiveFontSize + 1)
+              const v = Math.min(EDITOR_FONT_SIZE_RANGE[1], effectiveFontSize + 1)
               setEditorFontSize(v)
             }}
           >
@@ -477,9 +524,23 @@ export function TopBar() {
           <div className="menu-sep" key={`${t.key}-sep`} />
           <div className="menu-group-title" key={`${t.key}-title`}>预览缩放</div>
           <div className="menu-entry" style={{ justifyContent: 'space-between' }}>
-            <button className="menu-entry-btn" onClick={() => setPreviewZoom(previewZoom - 10)} title="缩小预览" aria-label="缩小预览">−</button>
-            <span style={{ fontFamily: 'var(--jp-font-mono)', fontSize: 12 }}>{previewZoom}%</span>
-            <button className="menu-entry-btn" onClick={() => setPreviewZoom(previewZoom + 10)} title="放大预览" aria-label="放大预览">+</button>
+            <button className="menu-entry-btn" onClick={() => zoomBy(-PREVIEW_ZOOM_STEP)} title="缩小预览" aria-label="缩小预览">−</button>
+            {/* adj529（用户报"缩进更多菜单后双击比率无效"）：这里原先是个**纯文本 span**，
+                所以顶栏工具条折叠进「更多」后，"按住拖 / 双击适配"两条路径都丢了。
+                改用与工具条**同一个组件** `ScrubValue`（拖动 + 双击 + 方向键一致），
+                样式用 `.menu-scrub-val` 保持下拉里的等宽小字号。 */}
+            <ScrubValue
+              className="menu-scrub-val"
+              value={previewZoom}
+              onChange={setPreviewZoom}
+              onDoubleClick={applyFitZoom}
+              step={PREVIEW_ZOOM_STEP}
+              min={PREVIEW_ZOOM_RANGE[0]}
+              max={PREVIEW_ZOOM_RANGE[1]}
+              text={`${previewZoom}%`}
+              title={numCopy.zoomScrubHint}
+            />
+            <button className="menu-entry-btn" onClick={() => zoomBy(PREVIEW_ZOOM_STEP)} title="放大预览" aria-label="放大预览">+</button>
           </div>
         </>
       )

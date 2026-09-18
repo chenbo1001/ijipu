@@ -577,6 +577,99 @@ body {
   color: var(--jp-text-primary);
 }
 
+/* ============ adj526：数值统一调节（设置里的 px 框 / 顶栏比率与字号）============
+ * 由来（用户报，手机端）：数字输入框在手机上**不显示原生上下小按钮**，而部分字段又限定范围，
+ * 配合"输入即钳制"导致数字改不动。统一给三条路径：
+ *   ① 点一下用键盘输入（输入期间不钳制，见 PageConfigDialog 的 NumInput）；
+ *   ② `−`/`+` 步进钮（点一下一步、**按住连续**）——桌面有原生 spinner，故只在触屏显示；
+ *   ③ **按住数值上下拖**（`ui/numberScrub.ts`；触屏先长按 250ms，给"滚面板"留通道）。
+ * 数值文字（`.scrub-value`，顶栏比率/字号）与输入框（`.num-field`）共用"可拖"的视觉暗示：`ns-resize` 光标。 */
+.scrub-value {
+  cursor: ns-resize;
+  user-select: none;
+  -webkit-user-select: none;
+  /* 顶栏这一条不会滚动，可以**直接**接管手势（不像设置面板里要长按门槛） */
+  touch-action: none;
+  border-radius: 5px;
+  padding: 2px 4px;
+  transition: background 0.12s, color 0.12s;
+}
+.scrub-value:hover { background: var(--jp-bg-panel-hover); }
+/* 正在拖动：与"当前项"高亮同一套口径（bg-panel-active + accent） */
+.scrub-value.is-scrubbing {
+  background: var(--jp-bg-panel-active);
+  color: var(--jp-accent);
+}
+.scrub-value:focus-visible {
+  outline: 2px solid var(--jp-accent);
+  outline-offset: -2px;
+}
+/* adj529：「更多」下拉里的数值显示（预览缩放那一行）——沿用原来的等宽小字号观感 */
+.menu-scrub-val {
+  font-family: var(--jp-font-mono);
+  font-size: 12px;
+}
+/* 数值输入框组：`−` 输入框 `+` */
+.num-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+.num-input-label {
+  color: var(--jp-text-muted);
+  font-size: 12px;
+}
+.num-field {
+  width: 52px;
+  padding: 3px 6px;
+  background: var(--jp-bg-app);
+  border: 1px solid var(--jp-border);
+  border-radius: 6px;
+  color: var(--jp-text-primary);
+  font-family: var(--jp-font-mono);
+  /* 数值右对齐（进位/退位时位数变化不左右跳） */
+  text-align: right;
+  /* 暗示"可按住上下拖"；注意**不设** `touch-action: none`——设置面板要能滚，
+     手势由 numberScrub.ts 在长按成功后才接管 */
+  cursor: ns-resize;
+}
+.num-field:focus {
+  cursor: text;
+  outline: none;
+  border-color: var(--jp-accent);
+}
+.num-field.is-scrubbing {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+}
+/* 步进钮：桌面靠原生 spinner，故**只在粗指针（手机/平板）显示**——正是用户报缺按钮的场景 */
+.num-step { display: none; }
+@media (pointer: coarse) {
+  .num-step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    background: var(--jp-bg-app);
+    border: 1px solid var(--jp-border);
+    border-radius: 6px;
+    color: var(--jp-text-primary);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    /* 按住连续调节时不要选中文字 */
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .num-step:active {
+    background: var(--jp-bg-panel-active);
+    color: var(--jp-accent);
+  }
+}
+
 /* ============ 汉堡下拉（共享 menu-* 样式）============ */
 .menu-dropdown {
   position: absolute;
@@ -1083,31 +1176,60 @@ body {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 4px; /* adj509：与顶栏工具条按钮间距统一 */
-  padding: 2px 6px;
+  gap: 3px; /* adj509 统一间距；adj527：4 → 3（页签区/档位钮/✕ 之间都更紧凑一点） */
+  padding: 2px 5px; /* adj527：左右 6 → 5（省下的宽度留给页签） */
   border-top: 1px solid var(--jp-border);
-  /* adj491：dock 用了 `container-type:inline-size` + `overflow:hidden`，实测在 390×844 视口下
-     `.tool-dock-tabs` 会被撑到 974px（远超 dock 的 384px）——`margin-left:auto` 因此算出 666px 左外距，
-     把关闭按钮推到 x=494（dock 之外）→ 被 `overflow:hidden` 裁掉 ⇒ **手机上 ✕ 看不见也点不动**（用户报）。
-     修法：`width:100%` 显式约束到 dock 宽；`min-width:0` + `overflow-x:auto` 让页签在过窄时横向滚动
-     （关闭按钮由 `flex-shrink:0` 保证留在可视区）。 */
+  /* adj491（历史）：dock 用了 `container-type:inline-size` + `overflow:hidden`，实测在 390×844 视口下
+     这一条会被内容撑到 974px（远超 dock 宽）——`margin-left:auto` 因此算出巨大左外距，
+     把关闭按钮推到 dock 之外、被 `overflow:hidden` 裁掉 ⇒ **手机上 ✕ 看不见也点不动**（用户报）。
+     adj525：**横向滚动能力移到内层 `.tool-dock-tabstrip`**，本层只负责"一条固定高的横条"，
+     并用 `width:100%` 显式约束到 dock 宽（不再自己滚——两个常驻按钮要留在这里）。 */
   width: 100%;
-  overflow-x: auto;
-  /* adj491：页签超窄时横向滚动兜底；工具条不该出现滚动条，隐藏之（内容仍可滚动/可触摸拖动） */
-  scrollbar-width: none;
 }
-.tool-dock-tabs::-webkit-scrollbar { display: none; }
+/**
+ * adj525（用户要求）：**页签区**（只这一块可横向滚动）+ 右侧两个**常驻**按钮（档位切换、关闭）。
+ *
+ * 此前页签与两个按钮在同一个 `overflow-x:auto` 容器里 ⇒ 页签一溢出，两个按钮被一起推到可视区外，
+ * 必须先滑到最后才能点（正是顶栏 adj453 修过的同一类问题：**"必须始终可见"的元素不能放进会溢出的滚动容器**）。
+ * 现在的分工：
+ *   · `.tool-dock-tabstrip` —— `flex: 1 1 auto`（吃掉剩余宽度）+ `min-width: 0`（**关键**：
+ *     不加它 flex 项的最小尺寸是内容宽，永远不会收缩、也就永远不滚）+ `overflow-x: auto`
+ *     ⇒ 页签放得下时自然铺开、放不下时**可在页签区内左右滑动**（触屏直接滑，桌面可 shift+滚轮/触控板）；
+ *   · 档位按钮 / 关闭按钮 —— 在页签区**之外**，`flex: 0 0 auto` ⇒ 无论页签多少都固定在最右侧、永远可点
+ *     （与顶栏「浅深模式 / 支持作者」常驻右侧同理）。
+ * 滚动条隐藏：保持与顶栏一致的无滚动条观感（内容仍可滚/可触摸拖动）。
+ */
+.tool-dock-tabstrip {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  /* 触屏横向滑动：交给浏览器原生处理（不要用 pan-y 之类挡住横向手势） */
+  -webkit-overflow-scrolling: touch;
+}
+.tool-dock-tabstrip::-webkit-scrollbar { display: none; }
 /* adj509：页签样式**与顶栏 `.topbar-btn` 同源**——同款边框 / 圆角 / 字号 / padding / hover；
    由 `.tool-dock-tab` 继承 `.topbar-btn` 的视觉规范，与顶栏工具条按钮成对，让"功能"和"面板"
-   两个层级的入口观感一致。 */
+   两个层级的入口观感一致。
+   adj527（用户要求"页签宽度缩小一些，刚好放得下 5 个"）：**横向内边距 10px → 7px、图标与文字间距 5px → 4px**。
+   宽度账（每个页签 = 边框 2 + 左右内边距 + 图标 16 + 间距 + 两个中文字 24）：
+   · 改前 67px ⇒ 5 个 335 + 4×3 间距 ≈ 347，加栏开销（内边距 10 + 按钮 28 + ✕ 22 + 间距）≈ **420px 以上**，
+     360/375/390 的手机都放不下 ⇒ 必须横滑才看得到第 5 个；
+   · 改后 60px ⇒ 5 个 300 + 间距 12 = 312，加栏开销 ≈ **370px** 起可整栏放下；
+   · 更窄（dock ≤ 400px，见下方容器查询）再收紧到 56px ⇒ **≈354px**，360 的手机也放得下。
+   只收横向内边距、不动边框/圆角/字号/行高——视觉仍与顶栏按钮同族，只是更紧凑。 */
 .tool-dock-tab {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   background: transparent;
   border: 1px solid var(--jp-border);
   border-radius: 7px; /* 与 .topbar-btn 同款 */
-  padding: 5px 10px; /* 与 .topbar-btn 同款 */
+  padding: 5px 7px; /* adj527：横向由 10px 收到 7px（纵向与顶栏按钮一致，保留 28px 高） */
   font-size: 12px;
   font-family: var(--jp-font-sans);
   cursor: pointer;
@@ -1140,17 +1262,29 @@ body {
   font-size: 11px;
   line-height: 1;
 }
+/**
+ * adj527：**更窄的 dock 再收紧一档**，让 5 个页签在 360px 的手机上也整栏放得下。
+ * `.tool-dock` 带 `container-type: inline-size`，所以这里按 **dock 自身宽度**判断（与窗口宽无关）。
+ * 宽度账：横向内边距 7 → 5（每签 −4px）、页签区间距 3 → 2、栏内边距 5 → 3
+ * ⇒ 每签 56px，5 个 + 间距 ≈ 288，加栏开销 ≈ **354px**——360 的机器也放得下。
+ * 到这一步仍放不下的极窄场景，由 `.tool-dock-tabstrip` 的横向滚动兜底（不丢页签）。
+ */
+@container (max-width: 400px) {
+  .tool-dock-tab { padding: 5px 5px; }
+  .tool-dock-tabstrip { gap: 2px; }
+  .tool-dock-tabs { padding: 2px 3px; }
+}
 .tool-dock-close {
-  /* adj491：**不许压缩**——`.tool-dock-tabs` 加宽/页签溢出的场合（窄屏、手机上），
-     必须保证 ✕ 始终留在 dock 可视区内（曾经的 bug：它被推到 dock 之外、被 overflow:hidden 裁掉）。
-     adj520：去掉自身的 `margin-left: auto`——"推到右端"的责任交给
-     `.tool-dock-size-btn`（见其 CSS），避免两个 `margin-left: auto` 互相争抢剩余空间
-     导致 size-btn / close 中间出现意外间隙。close 紧贴 size-btn 右侧（size-btn 已用
-     `margin-left: auto` 占据剩余空间，close 自己没有 auto 可吃）。 */
+  /* adj491：**不许压缩**——页签溢出的场合（窄屏、手机上）也必须保证 ✕ 始终可见、可点。
+     adj520：去掉 `margin-left: auto`（去掉两个 auto 互相争抢剩余空间）。
+     adj525：它现在位于**可滚页签区之外**，与档位按钮一起构成"右侧常驻区"——
+     页签再多也只会推动 `.tool-dock-tabstrip` 内部的滚动，动不到它们。
+     adj527：横向内边距 8 → 5（桌面端也一起收窄，与手机端观感一致）。 */
   flex: 0 0 auto;
+  position: relative; /* adj527：给"隐形命中区"当定位上下文（见文件末尾的粗指针规则） */
   background: transparent;
   border: 0;
-  padding: 3px 8px;
+  padding: 3px 5px;
   cursor: pointer;
   color: var(--jp-text-muted);
   font-size: 12px;
@@ -1160,8 +1294,10 @@ body {
 /**
  * adj520：底栏高度档位切换按钮——单按钮循环 `建议 → 最大 → 建议 → 最小 → 建议`，
  * 视觉沿用 adj509/511 顶栏按钮同款（5px 圆角 / 1px 边框 / 12px 字号 / hover 三联动），
- * 高 28px 紧贴关闭按钮左侧（与 `.tool-dock-tab` 同高）；图标用 `上.png` / `下.png`，
+ * 高 28px（与 `.tool-dock-tab` 同高）；图标用 `上.png` / `下.png`，
  * 方向按"按一下会往哪走"指示（详见 JSX 注释 + `cycleDockHeight`）。
+ * adj525：**位于可滚页签区之外**、常驻右侧（去掉 `margin-left:auto`／`margin-right:4px`，
+ * 间距交给父级 `.tool-dock-tabs` 的 `gap`），页签溢出时不会被顶出可视区。
  */
 .tool-dock-size-btn {
   flex: 0 0 auto;
@@ -1170,8 +1306,6 @@ body {
   justify-content: center;
   height: 28px;
   width: 28px;
-  margin-left: auto;
-  margin-right: 4px;
   padding: 0;
   background: transparent;
   border: 1px solid var(--jp-border);
@@ -1180,7 +1314,7 @@ body {
   color: var(--jp-text-primary);
   /* 与 `.topbar-btn` 同款 hover 三联动（border + color + bg-panel-hover） */
   transition: all 0.15s;
-  /* 不参与 tab flex 流压缩：保证关闭按钮仍能 `flex-shrink:0` */
+  /* 不参与 flex 压缩：常驻右侧、始终完整可见 */
   flex-shrink: 0;
 }
 .tool-dock-size-btn:hover {
@@ -1283,9 +1417,23 @@ body {
   .about-body { flex: 1 1 100%; }
 }
 /* adj491：粗指针设备（手机/平板）放大 ✕ 的命中区——原 26×18 手指很难点中
-   （与 adj487 给调整条/分隔条加宽的同一理由）。视觉仍是小 ✕，只是内边距变大。 */
+   （与 adj487 给调整条/分隔条加宽的同一理由）。
+   adj527（用户报"手机上高度切换按钮与关闭按钮分得比较开，要再靠近一点"）：
+   此前用 `padding: 10px 14px` 换命中区 —— **横向 padding 会同时把两个按钮的视觉盒子撑开**
+   （✕ 的字形只有 ~10px 宽，盒子却有 38px），于是它与左侧档位按钮之间看着空出一大截。
+   现改为 **"视觉盒子只留小内边距 + 命中区用隐形 `::before` 向上下扩"**：
+   按钮彼此贴近了，手指依然点得中（命中区 ≈ 26×42，纵向比原来还大）。
+   ⚠ 只向**上下**扩、**不向左右扩**——向右/左扩会吃掉相邻的档位按钮的命中区（谁在上层谁先命中）。 */
 @media (pointer: coarse) {
-  .tool-dock-close { padding: 10px 14px; font-size: 14px; }
+  .tool-dock-close { padding: 6px 5px; font-size: 14px; }
+  .tool-dock-close::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -7px;
+    bottom: -7px;
+  }
 }
 
 /* 内容区：唯一滚动容器（保证"内容都可见"） */

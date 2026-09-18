@@ -130,7 +130,7 @@
 | `ijipu.editorFontSize` | 14 | 编辑器字号 10~26 | 用户个性 | 同上 |
 | `ijipu.autoWrap` | true | 自动折行 | 用户个性 | 同上 |
 | `ijipu.showScriptPad` | 触屏/窄屏=true | 输入工具条显隐 | 用户个性 | 同上 |
-| `ijipu.previewZoom` | 100 | 预览缩放 50~200 | 用户个性 | 保留但**意义有限**（窗格宽度由宿主决定，建议改为"适应宽度"） |
+| `ijipu.previewZoom` | 100 | 预览缩放 50~200 | 用户个性 | 保留但**意义有限**（窗格宽度由宿主决定）——adj529 已补上"**双击顶栏比率值即按预览区宽度适配**"的一次性动作（不新增设置/状态） |
 | `ijipu.splitPct` | 50 | 拆分比例 | 用户个性（视口相关） | **改用宿主/窗格**，嵌入时不再持久化 |
 | `ijipu.splitHDir` | previewLeft | 左右拆分方向 | 同上 | 同上 |
 | `ijipu.viewType` | split | 视图偏好（拆分/编辑/预览） | 同上 | 同上（由宿主决定布局） |
