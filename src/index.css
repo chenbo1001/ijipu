@@ -3503,8 +3503,21 @@ body {
   color: var(--jp-text-secondary);
 }
 .ws-root {
+  flex: none;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
   color: var(--jp-accent);
+  font: inherit;
   font-weight: 700;
+  cursor: pointer;
+}
+/* adj540：根目录名是"换工作区目录"的按钮（用户要求，省掉右侧按钮），给一点可点的视觉反馈 */
+.ws-root:hover,
+.ws-root:focus-visible {
+  background: var(--jp-bg-panel-active);
+  text-decoration: underline;
 }
 .ws-sep {
   color: var(--jp-text-muted);
@@ -3645,10 +3658,30 @@ body {
   flex: 0 0 auto;
   flex-direction: column;
   gap: 4px;
-  width: 96px;
+  width: 92px;
   /* 兜底：极矮的 dock（用户把底栏压到最小）下按钮列可滚动，绝不出现"按钮被裁掉点不到" */
   min-height: 0;
   overflow-y: auto;
+}
+/* adj540：分组下拉按钮（保存▾ / 新建▾ / 操作▾）——按钮高度**与其它按钮一致**（用户要求），
+ * 靠"分组"而不是"压扁"来少占地方：默认只 4 个按钮，展开后最多 5 个。 */
+.ws-side-group {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+.ws-caret {
+  color: var(--jp-text-secondary);
+  font-size: 9px;
+  line-height: 1;
+}
+/* 二级（下拉里的）按钮：窄一点，一眼看出层级 */
+.ws-sub-btn {
+  width: 100%;
+  padding: 5px 4px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 .ws-side-btn {
   width: 100%;
@@ -3677,6 +3710,21 @@ body {
 .ws-row.is-selected {
   background: var(--jp-bg-panel-active);
   box-shadow: inset 2px 0 0 var(--jp-accent);
+}
+/* adj540（用户要求）：文件名前的**复选框**——勾选=选中（供改名/移动/删除），点名字=打开/进入。
+ * 16px 并靠 `accent-color` 跟主题；"上级目录"行与移动模式用等宽占位，保证各行左对齐。 */
+.ws-check {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0 2px 0 0;
+  accent-color: var(--jp-accent);
+}
+input.ws-check {
+  cursor: pointer;
+}
+span.ws-check {
+  display: inline-block;
 }
 /* 输入/确认区（重命名、新建文件夹、删除确认、另存文件名）——独立一行，不占列表行数 */
 .ws-editbar {
@@ -3805,13 +3853,11 @@ body {
 }
 /* adj540：窄屏（手机）把工作区面板收紧——**这段必须放在所有 `.ws-*` 基础规则之后**：
  * CSS 同级选择器"后写的赢"，把窄屏覆盖写在文件前面的容器查询里会被下面的 `.ws-side-btn`
- * 基础规则（`padding: 6px 4px; font-size: 12px`）盖掉 —— 本轮真踩过这一脚：
- * 按钮没变矮 ⇒ 一列 6 个溢出 27px ⇒ 最后一个「存到此处」被裁在可视区外。
- * 每签压到 ≈21px 的账：`padding 3px 2px` + `font-size 11px` + **`line-height 1.25`**
- * （继承的行高 1.6 才是主要元凶：11×1.6=17.6 + 8 + 2 ≈ 28px）。
- * 列表最小高度同时调小，保证"列表 + 右侧按钮列"都装得下。 */
+ * 基础规则盖掉 —— 本轮真踩过这一脚（按钮没变矮 ⇒ 一列 6 个溢出 27px ⇒ 最后一个被裁）。
+ * 注意：**按钮高度刻意不再压扁**（用户要求"高度参考其它按钮"）——靠分组下拉把按钮数从 8 降到 4~5，
+ * 于是窄屏也不用滚动；这里只收窄列宽与二级按钮。 */
 @container (max-width: 430px) {
-  .ws-side { width: 78px; gap: 2px; }
-  .ws-side-btn { padding: 3px 2px; font-size: 11px; line-height: 1.25; }
+  .ws-side { width: 82px; }
+  .ws-sub-btn { padding: 5px 2px; font-size: 11px; }
   .ws-panel .ws-list { min-height: 72px; }
 }

@@ -10,15 +10,19 @@
  *
  * 布局（adj540 用户要求）：**左侧列表 + 右侧操作按钮**——
  * 此前"每行展开操作菜单 + 底部按钮行"会吃掉列表的行数（手机上尤其明显）；
- * 现在操作集中到右侧竖排按钮，行数全留给文件列表。
+ * 现在操作集中到右侧，行数全留给文件列表。
  *
- * 交互模型（配合上面的布局）：**点一下 = 选中（右侧按钮随之可用），再点同一行 = 打开/进入**。
- * 之所以不是"点一下直接打开"：右侧那些破坏性按钮（重命名/移动/删除）必须有个明确的**作用对象**，
- * 否则"删除"删的是谁全靠猜。未选中时右侧标签会提示"点一下选中"。
+ * 交互模型（用户要求加复选框后定型）：
+ *  · **点文件名/图标 = 打开（目录则进入）** —— 一步到位，不需要点两次；
+ *  · **点前面的复选框 = 选中**（可多选）—— 右侧「操作」里的 改名/移动/删除 作用在选中项上。
+ *    两件事互不打架：想删就勾，想看就点。
+ *
+ * 右侧按钮用**分组下拉**（用户建议"按钮别铺太多"）：默认 打开 / 保存▾ / 新建▾ / 操作▾ 四个，
+ * 同一时刻只展开一组，最多 5 个按钮 ⇒ 窄屏不用滚动，按钮高度也保持与其它按钮一致（不靠压扁）。
  *
  * 文件操作与安全约束（都是用户确认的行为）：
- *  · 打开 / 保存到此处 / 新建文件夹 / 重命名 / 移动到… / 删除；
- *  · **重命名与移动**：FSA 对用户选中的目录**没有 `move()`**（只对 OPFS 生效）⇒ 实现是
+ *  · 打开 / 保存 / 另存 / 新建（空谱）/ 新建夹 / 改名 / 移动 / 删除；
+ *  · **改名与移动**：FSA 对用户选中的目录**没有 `move()`**（只对 OPFS 生效）⇒ 实现是
  *    "读出 → 写新位置 → 回读校验一致 → 才删原文件"，中途失败宁可留重复也不丢内容；
  *  · **删除是永久的**（浏览器文件 API 没有回收站）⇒ 必须二次确认；目录**只允许删空的**
  *    （递归删目录会把用户放在里面的照片/文档一起删掉）；
@@ -45,26 +49,38 @@ import {
   type DirEntry,
 } from '../../store/workspace'
 
-/** 「选择文件夹」静默失败的判定时间（超过它还没弹选择器就提示，而不是让用户干等） */
+/** 「选择文件夹」静默失败的判定时间（超过它还没弹选择框就提示，而不是让用户干等） */
 const PICKER_NO_RESPONSE_MS = 5000
 
-/** 正在编辑的输入框：重命名（带原文件名）或新建文件夹 */
-type EditState = { kind: 'rename' | 'newFolder'; value: string; name?: string }
-/** 正在"移动到…"：记住来源，列表切成为"目标目录选择器" */
-type MoveState = { name: string; fromSegs: string[]; dir: string[] }
+/** 正在编辑的输入框：重命名 / 新建夹 / 另存 / 新建谱（四者共用同一个输入区） */
+type EditState = { kind: 'rename' | 'newFolder' | 'saveAs' | 'newScore'; value: string; name?: string }
+
+/** 输入区的标题与占位符（四种用途只差这两个字段，避免在 JSX 里堆三元） */
+const EDIT_META: Record<EditState['kind'], { label: string; placeholder: string }> = {
+  rename: { label: workspaceCopy.actRename, placeholder: workspaceCopy.renamePlaceholder },
+  newFolder: { label: workspaceCopy.actNewFolder, placeholder: workspaceCopy.folderNamePlaceholder },
+  saveAs: { label: workspaceCopy.actSaveAs, placeholder: workspaceCopy.namePlaceholder },
+  newScore: { label: workspaceCopy.actNewScore, placeholder: workspaceCopy.newScorePlaceholder },
+}
+
+/** "移动到…"模式：**开跑时就把要搬的路径定下来**（随后可自由进子目录选目标，选中项不再变） */
+type MoveState = { list: string[][] }
+
+/** 删除确认：待删条目 + 摘要文案（单个显示名字，多个显示条数） */
+type DelState = { items: { segs: string[]; kind: 'file' | 'dir' }[]; label: string }
 
 export function WorkspacePanel() {
   const showNotice = useUiStore((s) => s.showNotice)
   const closeDock = useUiStore((s) => s.closeDock)
   const active = useUiStore((s) => s.dockOpen && s.dockPanel === 'workspace')
   const openWorkspaceFile = useDocStore((s) => s.openWorkspaceFile)
+  const saveFile = useDocStore((s) => s.saveFile)
   const saveToWorkspace = useDocStore((s) => s.saveToWorkspace)
+  const newWorkspaceScore = useDocStore((s) => s.newWorkspaceScore)
   const createWorkspaceDir = useDocStore((s) => s.createWorkspaceDir)
   const renameWorkspaceFile = useDocStore((s) => s.renameWorkspaceFile)
-  const moveWorkspaceFile = useDocStore((s) => s.moveWorkspaceFile)
-  const deleteWorkspaceFile = useDocStore((s) => s.deleteWorkspaceFile)
-  const deleteWorkspaceDir = useDocStore((s) => s.deleteWorkspaceDir)
-  const currentName = useDocStore((s) => s.fileName)
+  const moveWorkspaceFiles = useDocStore((s) => s.moveWorkspaceFiles)
+  const deleteWorkspaceEntries = useDocStore((s) => s.deleteWorkspaceEntries)
 
   const [ws, setWs] = useState<WorkspaceRecord | null>(null)
   const [path, setPath] = useState<string[]>([])
@@ -72,16 +88,25 @@ export function WorkspacePanel() {
   const [perm, setPerm] = useState<'granted' | 'prompt' | 'denied' | 'unknown'>('unknown')
   const [busy, setBusy] = useState(false)
   /**
-   * 当前选中项（文件名或目录名）。右侧操作按钮作用在它身上 ⇒ 窄屏不用每行展开操作菜单，
-   * 行数就都留给列表本身（用户要求"左列表 + 右操作按钮"）。
+   * **选中的条目名**（当前目录内，支持多选）。每行前面的复选框控制它；
+   * 右侧「操作」里的 改名/移动/删除 作用在这些选中项上（用户要求）。
    */
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string[]>([])
   const [edit, setEdit] = useState<EditState | null>(null)
   const [moving, setMoving] = useState<MoveState | null>(null)
-  const [confirmDel, setConfirmDel] = useState<{ name: string; kind: 'file' | 'dir' } | null>(null)
-  const [saveName, setSaveName] = useState<string | null>(null)
+  const [confirmDel, setConfirmDel] = useState<DelState | null>(null)
+  /**
+   * 右侧操作区分组下拉（用户建议）：默认只显示 打开 / 保存▾ / 新建▾ / 操作▾，
+   * 同一时刻只展开一组 ⇒ 最多 5 个按钮，窄屏也不挤。
+   */
+  const [openGroup, setOpenGroup] = useState<'save' | 'new' | 'ops' | null>(null)
 
-  const selectedEntry = entries.find((e) => e.name === selected) ?? null
+  const selectedEntries = entries.filter((e) => selected.includes(e.name))
+  const selectedFiles = selectedEntries.filter((e) => e.kind === 'file')
+  const selCount = selectedEntries.length
+  const hasDirSelected = selectedEntries.some((e) => e.kind === 'dir')
+  const toggleSelect = (name: string) =>
+    setSelected((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]))
 
   /** 列目录（读不到就提示，不静默——否则用户只看到"空的"） */
   const refresh = useCallback(
@@ -91,7 +116,7 @@ export function WorkspacePanel() {
         const list = await readDirEntries(rec.handle, next)
         setEntries(list)
         setPath(next)
-        setSelected(null)
+        setSelected([])
         setEdit(null)
         setConfirmDel(null)
         void rememberWorkspacePath(next)
@@ -113,11 +138,11 @@ export function WorkspacePanel() {
    */
   useEffect(() => {
     if (!active) {
-      setSelected(null)
+      setSelected([])
       setEdit(null)
       setMoving(null)
       setConfirmDel(null)
-      setSaveName(null)
+      setOpenGroup(null)
       return
     }
     let alive = true
@@ -125,9 +150,9 @@ export function WorkspacePanel() {
       const rec = await getWorkspace()
       if (!alive) return
       setWs(rec)
-      // adj540：手机端「另存为 / 保存」带过来的意图 ⇒ 直接把文件名输入框展开（消费掉，不做持久化）
+      // adj540：手机端「保存/另存」带过来的意图 ⇒ 直接把"另存"输入框展开（消费掉，不做持久化）
       if (rec && useUiStore.getState().workspaceSaveIntent) {
-        setSaveName(fileBaseName(useDocStore.getState().fileName))
+        setEdit({ kind: 'saveAs', value: fileBaseName(useDocStore.getState().fileName) })
         useUiStore.getState().clearWorkspaceSaveIntent()
       }
       if (!rec) return
@@ -181,34 +206,23 @@ export function WorkspacePanel() {
     }
   }
 
-  /** 打开当前选中项（目录 ⇒ 进入；文件 ⇒ 打开并收起底栏） */
+  /** 打开某一项（目录 ⇒ 进入；文件 ⇒ 打开并收起底栏）——**点行就是这件事**，不需先选中 */
+  const openEntry = async (entry: DirEntry) => {
+    if (!ws) return
+    if (entry.kind === 'dir') {
+      await refresh(ws, [...path, entry.name])
+      return
+    }
+    const ok = await openWorkspaceFile([...path, entry.name])
+    if (ok) closeDock()
+  }
+
+  /** 「打开」按钮：仅在恰好选中一项时可用 */
   const openSelected = async () => {
-    if (!ws || !selectedEntry) return
-    if (selectedEntry.kind === 'dir') {
-      await refresh(ws, [...path, selectedEntry.name])
-      return
-    }
-    const ok = await openWorkspaceFile([...path, selectedEntry.name])
-    if (ok) closeDock() // 打开就把底栏收起来，让用户看到谱
+    if (selCount === 1) await openEntry(selectedEntries[0])
   }
 
-  /** 点行：**先选中，再点同一行才打开**（理由见文件头"交互模型"） */
-  const onRowTap = (e: DirEntry) => {
-    if (moving) {
-      // 移动到…模式：点目录 = 进入该目录选目标
-      if (e.kind === 'dir' && ws) void refreshMovingTarget([...path, e.name])
-      return
-    }
-    if (selected === e.name) {
-      void openSelected()
-      return
-    }
-    setSelected(e.name)
-    setEdit(null)
-    setConfirmDel(null)
-  }
-
-  /** 移动模式下切换目标目录（不动 `selected`，保持"正在移动的那一项"不变） */
+  /** 移动模式下切换目标目录（不动已定的搬运清单） */
   const refreshMovingTarget = async (next: string[]) => {
     if (!ws) return
     setBusy(true)
@@ -222,14 +236,14 @@ export function WorkspacePanel() {
     } finally {
       setBusy(false)
     }
-    // refresh 会清空 selected，这里不需要（moving 模式下 selected 仅作展示）
   }
 
-  /** 提交「重命名」/「新建文件夹」（同一个输入框，两处复用） */
+  /** 提交输入区：改名 / 新建夹 / 另存 / 新建谱（四者共用一个输入框，故集中在这里分派） */
   const submitEdit = async () => {
     if (!ws || !edit) return
     const value = edit.value.trim()
     if (!value) return
+    const segsOf = (raw: string): string[] => [...path, `${stripJpsExt(raw)}.jps`]
     if (edit.kind === 'rename' && edit.name) {
       const ok = await renameWorkspaceFile(path, edit.name, `${stripJpsExt(value)}.jps`)
       if (ok) {
@@ -238,44 +252,86 @@ export function WorkspacePanel() {
       }
       return
     }
-    const ok = await createWorkspaceDir(path, value)
+    if (edit.kind === 'newFolder') {
+      const ok = await createWorkspaceDir(path, value)
+      if (ok) {
+        setEdit(null)
+        await refresh(ws, path)
+      }
+      return
+    }
+    if (edit.kind === 'saveAs') {
+      const ok = await saveToWorkspace(segsOf(value))
+      if (ok) {
+        setEdit(null)
+        await refresh(ws, path)
+      }
+      return
+    }
+    // newScore：在当前目录写一份空谱（沿用「新建」模板内容），写完直接打开它
+    const ok = await newWorkspaceScore(segsOf(value))
     if (ok) {
       setEdit(null)
       await refresh(ws, path)
     }
   }
 
-  /** 「移动到…」确认：把文件搬到当前浏览的目录 */
+  /**
+   * 「保存」：已绑定工作区文件 ⇒ 直接写回（`saveFile` 内部走工作区分支）；
+   * **未绑定** ⇒ 转成「另存」（展开文件名输入）——不让它变成"按了没反应"的死路。
+   */
+  const onSave = async () => {
+    if (!ws) return
+    if (useDocStore.getState().workspacePath) {
+      await saveFile()
+      await refresh(ws, path)
+      return
+    }
+    setEdit({ kind: 'saveAs', value: fileBaseName(useDocStore.getState().fileName) })
+  }
+
+  /** 进入"移动到…"模式：把当前选中的**文件**路径定下来（目录不支持移动） */
+  const startMove = () => {
+    if (selectedFiles.length === 0) {
+      showNotice(workspaceCopy.moveDirUnsupported, 'warn')
+      return
+    }
+    setOpenGroup(null)
+    setMoving({ list: selectedFiles.map((e) => [...path, e.name]) })
+  }
+
   const submitMove = async () => {
     if (!ws || !moving) return
-    const ok = await moveWorkspaceFile(moving.fromSegs, path)
+    const ok = await moveWorkspaceFiles(moving.list, path)
     if (ok) {
       setMoving(null)
       await refresh(ws, path)
     }
   }
 
+  const startDelete = () => {
+    if (selCount === 0) return
+    setOpenGroup(null)
+    setConfirmDel({
+      items: selectedEntries.map((e) => ({ segs: [...path, e.name], kind: e.kind as 'file' | 'dir' })),
+      label:
+        selCount === 1
+          ? selectedEntries[0].kind === 'file'
+            ? workspaceCopy.deleteFileConfirm(selectedEntries[0].name)
+            : workspaceCopy.deleteDirConfirm(selectedEntries[0].name)
+          : workspaceCopy.deleteManyConfirm(selCount),
+    })
+  }
+
   const doDelete = async () => {
     if (!ws || !confirmDel) return
-    const { name, kind } = confirmDel
     setBusy(true)
     try {
-      const ok = kind === 'file' ? await deleteWorkspaceFile([...path, name]) : await deleteWorkspaceDir(path, name)
+      const ok = await deleteWorkspaceEntries(confirmDel.items)
       setConfirmDel(null)
       if (ok) await refresh(ws, path)
     } finally {
       setBusy(false)
-    }
-  }
-
-  const onSaveHere = async () => {
-    if (!ws) return
-    const raw = (saveName ?? '').trim()
-    if (!raw) return
-    const ok = await saveToWorkspace([...path, `${stripJpsExt(raw)}.jps`])
-    if (ok) {
-      setSaveName(null)
-      await refresh(ws, path)
     }
   }
 
@@ -325,10 +381,19 @@ export function WorkspacePanel() {
     <div className="ws-panel">
       <div className="ws-head">
         <div className="ws-crumb" title={wsPathText}>
-          {/* adj540：面包屑**首段用真实文件夹名**（不再写死"工作区"）——用户要能看到当前是哪个目录 */}
-          <span className="ws-root" title={wsPathText}>
+          {/* adj540：面包屑首段 = **工作区根目录名**，它本身就是一个按钮：
+              · 平时点它 = 换一个工作区目录（`onPick`）——于是头部不必再放「换一个文件夹」按钮（用户要求）；
+              · 「移动到…」模式下点它 = 把工作区根目录当移动目标（与后面的子目录面包屑语义一致）。
+              注：FSA 不给完整磁盘路径，所以这里显示的是文件夹名（`title` 里给出"名/子路径"全串）。 */}
+          <button
+            type="button"
+            className="ws-crumb-seg ws-root"
+            onClick={() => void (moving ? refreshMovingTarget([]) : onPick())}
+            title={moving ? wsPathText : `${wsPathText} · ${workspaceCopy.switchDirHint}`}
+            disabled={busy}
+          >
             {ws.handle.name}
-          </span>
+          </button>
           <span className="ws-sep">/</span>
           {path.map((seg, i) => (
             <span key={`${seg}-${i}`}>
@@ -344,26 +409,23 @@ export function WorkspacePanel() {
             </span>
           ))}
         </div>
-        {moving ? (
-          <span className="ws-move-hint">{workspaceCopy.moveHere}：{crumb}</span>
-        ) : (
-          <button type="button" className="btn" onClick={() => void onPick()} disabled={busy}>
-            {workspaceCopy.switchDir}
-          </button>
+        {/* 「移动到…」模式下头部显示目标提示；平时不再放按钮（根目录名就是换目录入口） */}
+        {moving && (
+          <span className="ws-move-hint">
+            {workspaceCopy.moveHere}·{moving.list.length} → {crumb || ''}
+          </span>
         )}
       </div>
 
-      {/* 输入/确认区：重命名、新建文件夹、删除确认都放这里（不占用列表行） */}
+      {/* 输入/确认区：改名、新建、另存、删除确认都放这里（不占用列表行） */}
       {edit && (
         <div className="ws-editbar">
-          <span className="ws-edit-label">
-            {edit.kind === 'rename' ? workspaceCopy.actRename : workspaceCopy.actNewFolder}
-          </span>
+          <span className="ws-edit-label">{EDIT_META[edit.kind].label}</span>
           <input
             className="ws-input"
             value={edit.value}
             autoFocus
-            placeholder={edit.kind === 'rename' ? workspaceCopy.renamePlaceholder : workspaceCopy.folderNamePlaceholder}
+            placeholder={EDIT_META[edit.kind].placeholder}
             onChange={(ev) => setEdit({ ...edit, value: ev.target.value })}
             onKeyDown={(ev) => {
               if (ev.key === 'Enter') void submitEdit()
@@ -380,11 +442,7 @@ export function WorkspacePanel() {
       )}
       {confirmDel && (
         <div className="ws-editbar ws-editbar-danger">
-          <span className="ws-danger-text">
-            {confirmDel.kind === 'file'
-              ? workspaceCopy.deleteFileConfirm(confirmDel.name)
-              : workspaceCopy.deleteDirConfirm(confirmDel.name)}
-          </span>
+          <span className="ws-danger-text">{confirmDel.label}</span>
           <button type="button" className="btn ws-danger" onClick={() => void doDelete()} disabled={busy}>
             {workspaceCopy.actDelete}
           </button>
@@ -393,39 +451,18 @@ export function WorkspacePanel() {
           </button>
         </div>
       )}
-      {saveName !== null && (
-        <div className="ws-editbar">
-          <span className="ws-edit-label">{workspaceCopy.saveNameLabel}</span>
-          <input
-            className="ws-input"
-            value={saveName}
-            autoFocus
-            placeholder={workspaceCopy.namePlaceholder}
-            onChange={(ev) => setSaveName(ev.target.value)}
-            onKeyDown={(ev) => {
-              if (ev.key === 'Enter') void onSaveHere()
-              if (ev.key === 'Escape') setSaveName(null)
-            }}
-          />
-          <button type="button" className="btn primary" onClick={() => void onSaveHere()} disabled={busy}>
-            {workspaceCopy.saveBtn}
-          </button>
-          <button type="button" className="btn" onClick={() => setSaveName(null)} disabled={busy}>
-            {workspaceCopy.cancelBtn2}
-          </button>
-        </div>
-      )}
 
-      {/* 主体：**左列表 + 右操作按钮**（用户要求：把行数都留给列表） */}
+      {/* 主体：**左列表（带复选框）+ 右操作按钮** */}
       <div className="ws-body">
         <div className="ws-list" title={workspaceCopy.onlyListed}>
           {path.length > 0 && (
-            <div className={`ws-row${selected === '__up__' ? ' is-selected' : ''}`}>
+            <div className="ws-row">
+              <span className="ws-check" aria-hidden="true" />
               <button
                 type="button"
                 className="ws-row-open ws-row-up"
                 onClick={() => {
-                  setSelected(null)
+                  setSelected([])
                   void (moving ? refreshMovingTarget(parentPath(path)) : refresh(ws, parentPath(path)))
                 }}
                 disabled={busy}
@@ -438,8 +475,25 @@ export function WorkspacePanel() {
           {entries
             .filter((e) => !moving || e.kind === 'dir')
             .map((e) => (
-              <div key={`${e.kind}-${e.name}`} className={`ws-row${selected === e.name ? ' is-selected' : ''}`}>
-                <button type="button" className="ws-row-open" onClick={() => onRowTap(e)} disabled={busy}>
+              <div key={`${e.kind}-${e.name}`} className={`ws-row${selected.includes(e.name) ? ' is-selected' : ''}`}>
+                {/* adj540（用户要求）：文件名前的**复选框** —— 勾选 = 选中（供 改名/移动/删除 用），
+                    点名字 = 打开/进入。两者分开，不再需要"点两次才打开" */}
+                {moving ? (
+                  <span className="ws-check" aria-hidden="true" />
+                ) : (
+                  <input
+                    type="checkbox"
+                    className="ws-check"
+                    checked={selected.includes(e.name)}
+                    aria-label={e.name}
+                    onChange={() => {
+                      setEdit(null)
+                      setConfirmDel(null)
+                      toggleSelect(e.name)
+                    }}
+                  />
+                )}
+                <button type="button" className="ws-row-open" onClick={() => void openEntry(e)} disabled={busy}>
                   <span className="ws-icon">{e.kind === 'dir' ? '📁' : '🎼'}</span>
                   <span className="ws-name">{e.name}</span>
                 </button>
@@ -451,10 +505,8 @@ export function WorkspacePanel() {
         <div className="ws-side">
           {moving ? (
             <>
-              <div className="ws-side-label" title={moving.name}>
-                {workspaceCopy.actMove}
-                <br />
-                <span className="ws-side-name">{moving.name}</span>
+              <div className="ws-side-label">
+                {workspaceCopy.actMove}·{moving.list.length}
               </div>
               <button type="button" className="btn primary ws-side-btn" onClick={() => void submitMove()} disabled={busy}>
                 {workspaceCopy.moveHere}
@@ -465,64 +517,145 @@ export function WorkspacePanel() {
             </>
           ) : (
             <>
-              <div className="ws-side-label" title={selectedEntry?.name ?? ''}>
-                {selectedEntry ? <span className="ws-side-name">{selectedEntry.name}</span> : workspaceCopy.tapToSelect}
+              <div className="ws-side-label" title={selectedEntries.map((e) => e.name).join('、')}>
+                {selCount === 0 ? (
+                  workspaceCopy.tapToSelect
+                ) : selCount === 1 ? (
+                  <span className="ws-side-name">{selectedEntries[0].name}</span>
+                ) : (
+                  <span className="ws-side-name">{workspaceCopy.selectedCount(selCount)}</span>
+                )}
               </div>
+
+              {/* 打开（选中恰好一项时可用；也可直接点列表里的名字打开） */}
               <button
                 type="button"
                 className="btn primary ws-side-btn"
                 onClick={() => void openSelected()}
-                disabled={busy || !selectedEntry}
+                disabled={busy || selCount !== 1}
               >
                 {workspaceCopy.actOpen}
               </button>
+
+              {/* 保存 ▾：写回当前文件 / 另存到当前目录 */}
               <button
                 type="button"
-                className="btn ws-side-btn"
-                onClick={() =>
-                  selectedEntry?.kind === 'file' &&
-                  setEdit({ kind: 'rename', value: stripJpsExt(selectedEntry.name), name: selectedEntry.name })
-                }
-                disabled={busy || selectedEntry?.kind !== 'file'}
-              >
-                {workspaceCopy.actRename}
-              </button>
-              <button
-                type="button"
-                className="btn ws-side-btn"
-                onClick={() =>
-                  selectedEntry?.kind === 'file' &&
-                  setMoving({ name: selectedEntry.name, fromSegs: [...path, selectedEntry.name], dir: path })
-                }
-                disabled={busy || selectedEntry?.kind !== 'file'}
-              >
-                {workspaceCopy.actMove}
-              </button>
-              <button
-                type="button"
-                className="btn ws-danger ws-side-btn"
-                onClick={() => selectedEntry && setConfirmDel({ name: selectedEntry.name, kind: selectedEntry.kind })}
-                disabled={busy || !selectedEntry}
-              >
-                {workspaceCopy.actDelete}
-              </button>
-              <div className="ws-side-gap" />
-              <button
-                type="button"
-                className="btn ws-side-btn"
-                onClick={() => setEdit({ kind: 'newFolder', value: '' })}
+                className="btn ws-side-btn ws-side-group"
+                aria-expanded={openGroup === 'save'}
+                onClick={() => setOpenGroup(openGroup === 'save' ? null : 'save')}
                 disabled={busy}
               >
-                {workspaceCopy.actNewFolder}
+                {workspaceCopy.actSave}
+                <span className="ws-caret">{openGroup === 'save' ? '▴' : '▾'}</span>
               </button>
-              <button
-                type="button"
-                className="btn ws-side-btn"
-                onClick={() => setSaveName(fileBaseName(currentName))}
-                disabled={busy}
-              >
-                {workspaceCopy.saveHere}
-              </button>
+              {openGroup === 'save' && (
+                <>
+                  <button type="button" className="btn ws-sub-btn" onClick={() => void onSave()} disabled={busy}>
+                    {workspaceCopy.actSave}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ws-sub-btn"
+                    onClick={() => {
+                      setOpenGroup(null)
+                      setEdit({ kind: 'saveAs', value: fileBaseName(useDocStore.getState().fileName) })
+                    }}
+                    disabled={busy}
+                  >
+                    {workspaceCopy.actSaveAs}
+                  </button>
+                </>
+              )}
+
+              {/* 新建 ▾：新建空谱 / 新建文件夹 */}
+              {openGroup !== 'save' && openGroup !== 'ops' && (
+                <>
+                  <button
+                    type="button"
+                    className="btn ws-side-btn ws-side-group"
+                    aria-expanded={openGroup === 'new'}
+                    onClick={() => setOpenGroup(openGroup === 'new' ? null : 'new')}
+                    disabled={busy}
+                  >
+                    {workspaceCopy.actNewScore}
+                    <span className="ws-caret">{openGroup === 'new' ? '▴' : '▾'}</span>
+                  </button>
+                  {openGroup === 'new' && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn ws-sub-btn"
+                        onClick={() => {
+                          setOpenGroup(null)
+                          setEdit({ kind: 'newScore', value: '' })
+                        }}
+                        disabled={busy}
+                      >
+                        {workspaceCopy.actNewScore}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn ws-sub-btn"
+                        onClick={() => {
+                          setOpenGroup(null)
+                          setEdit({ kind: 'newFolder', value: '' })
+                        }}
+                        disabled={busy}
+                      >
+                        {workspaceCopy.actNewFolder}
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+
+              {/* 操作 ▾：作用在勾选项上（改名 / 移动 / 删除） */}
+              {openGroup !== 'save' && openGroup !== 'new' && (
+                <>
+                  <button
+                    type="button"
+                    className="btn ws-side-btn ws-side-group"
+                    aria-expanded={openGroup === 'ops'}
+                    onClick={() => setOpenGroup(openGroup === 'ops' ? null : 'ops')}
+                    disabled={busy || selCount === 0}
+                  >
+                    {workspaceCopy.actOps}
+                    <span className="ws-caret">{openGroup === 'ops' ? '▴' : '▾'}</span>
+                  </button>
+                  {openGroup === 'ops' && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn ws-sub-btn"
+                        onClick={() => {
+                          const one = selCount === 1 ? selectedEntries[0] : null
+                          if (!one || one.kind !== 'file') {
+                            showNotice(workspaceCopy.renameSingleOnly, 'warn')
+                            return
+                          }
+                          setOpenGroup(null)
+                          setEdit({ kind: 'rename', value: stripJpsExt(one.name), name: one.name })
+                        }}
+                        disabled={busy || selCount !== 1 || selectedEntries[0]?.kind !== 'file'}
+                      >
+                        {workspaceCopy.actRename}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn ws-sub-btn"
+                        onClick={startMove}
+                        disabled={busy || selectedFiles.length === 0 || hasDirSelected}
+                        title={hasDirSelected ? workspaceCopy.moveDirUnsupported : undefined}
+                      >
+                        {workspaceCopy.actMove}
+                      </button>
+                      <button type="button" className="btn ws-danger ws-sub-btn" onClick={startDelete} disabled={busy}>
+                        {workspaceCopy.actDelete}
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
             </>
           )}
         </div>

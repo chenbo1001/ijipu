@@ -8465,23 +8465,37 @@ function runAdj540WorkspaceTests() {
       /\.ws-side \{[\s\S]{0,220}?flex-direction: column/.test(cssAll) &&
       /@container \(max-width: 430px\) \{[\s\S]{0,160}?\.tool-dock-tab-icon \{ display: none/.test(cssAll),
     '')
-  check('adj540 窄屏覆盖**必须写在基础规则之后**（同级选择器后者胜；写前面会被下面的 `.ws-side-btn` 盖掉 ⇒ 按钮不变矮、一列 6 个被裁）',
-    cssAll.indexOf('.ws-side-btn {') > -1 &&
-      cssAll.indexOf('.ws-side-btn { padding: 3px 2px') > cssAll.indexOf('.ws-side-btn {') &&
-      /@container \(max-width: 430px\) \{[\s\S]{0,200}?\.ws-panel \.ws-list \{ min-height: 72px/.test(cssAll),
+  check('adj540 右侧操作区用**分组下拉**少占地方（默认 4 个按钮，按钮高度与其它按钮一致，不靠压扁），窄屏覆盖仍写在基础规则之后',
+    // 顺序类陷阱（E-2026-244）：窄屏覆盖必须在基础规则之后，否则被盖掉
+    cssAll.indexOf('.ws-sub-btn {') > -1 &&
+      cssAll.indexOf('.ws-sub-btn { padding: 5px 2px') > cssAll.indexOf('.ws-sub-btn {') &&
+      // 按钮高度**不许**再压扁（用户要求"高度参考其它按钮"）
+      !/\.ws-side-btn \{[^}]*line-height: 1\.25/.test(cssAll) &&
+      /const \[openGroup, setOpenGroup\]/.test(panelSrc) &&
+      /workspaceCopy\.actOps/.test(panelSrc) &&
+      /actOps: '操作'/.test(copySrc) &&
+      /actSave: '保存'/.test(copySrc) &&
+      /actSaveAs: '另存'/.test(copySrc) &&
+      /actNewScore: '新建'/.test(copySrc),
     '')
   check('adj540 重新授权时**显示要授权的目录**（文件夹名 + 工作区内相对路径），并说明"浏览器不给完整路径"',
     /const wsPathText = ws \? joinPath\(\[ws\.handle\.name, \.\.\.\(ws\.path \?\? \[\]\)\]\) : ''/.test(panelSrc) &&
       /className="ws-grant-dir" title=\{wsPathText\}/.test(panelSrc) &&
       /\{wsPathText\}/.test(panelSrc) &&
       /grantTitle: '需要重新授权访问这个文件夹'/.test(copySrc) &&
-      /grantPathHint/.test(copySrc) &&
-      // 面包屑首段也用真实文件夹名（不再写死"工作区"）
-      /<span className="ws-root" title=\{wsPathText\}>[\s\S]{0,40}?\{ws\.handle\.name\}/.test(panelSrc),
+      /grantPathHint/.test(copySrc),
     '')
-  check('adj540 入口接线：**窄屏以工作区为主入口**（菜单里工作区排第一、隐藏系统选择器相关项）',
-    // 窄屏分支：工作区在最前，且**不含**系统选择器/另存为那几项
-    /const fileEntries: \(MenuEntry \| 'sep'\)\[\] = isNarrow\s*\?\s*\[entryWorkspace, entryNew, entrySamples, entryPaste, entrySave, entryTryout, entryExport\]/.test(
+  check('adj540 面包屑首段（工作区根目录名）本身就是**换目录按钮**（省掉右侧「换一个文件夹」；移动模式下它=选根目录为目标）',
+    /className="ws-crumb-seg ws-root"[\s\S]{0,200}?onClick=\{\(\) => void \(moving \? refreshMovingTarget\(\[\]\) : onPick\(\)\)\}/.test(
+      panelSrc,
+    ) &&
+      /switchDirHint/.test(copySrc) &&
+      // 平时头部不再有"换一个文件夹"按钮（授权视图里那个仍在，故只断言头部那处已移除）
+      !/workspaceCopy\.switchDir\}\s*<\/button>\s*\)\}\s*<\/div>/.test(panelSrc),
+    '')
+  check('adj540 入口接线：**窄屏以工作区为主入口**（菜单里工作区排第一，只留平台无关项）',
+    // 窄屏分支：工作区在最前，且**不含**系统选择器/新建/保存/另存为那些项（都在面板里或只在 PC 上成立）
+    /const fileEntries: \(MenuEntry \| 'sep'\)\[\] = isNarrow\s*\?\s*\[entryWorkspace, entrySamples, entryPaste, entryTryout, entryExport\]/.test(
       topSrc,
     ) &&
       /\{ label: workspaceCopy\.openSystemLabel, onPick: runOpen \}/.test(topSrc) &&
@@ -8507,16 +8521,32 @@ function runAdj540WorkspaceTests() {
     '')
   check('adj540 子目录真的能进（列目录 + 面包屑 + 上级）且**每次打开都重读**（手机上刚存进来的谱要立刻可见）',
     /const list = await readDirEntries\(rec\.handle, next\)/.test(panelSrc) &&
-      /refresh\(ws, \[\.\.\.path, selectedEntry\.name\]\)/.test(panelSrc) &&
+      /onClick=\{\(\) => void openEntry\(e\)\}/.test(panelSrc) &&
       /parentPath\(path\)/.test(panelSrc) &&
       /const active = useUiStore\(\(s\) => s\.dockOpen && s\.dockPanel === 'workspace'\)/.test(panelSrc) &&
       /if \(!active\) \{[\s\S]{0,300}?return\n\s*\}[\s\S]{0,400}?await getWorkspace\(\)/.test(panelSrc),
     '')
-  check('adj540 交互模型：**点一下选中、再点同一行才打开**（右侧破坏性按钮必须有明确作用对象）',
-    /if \(selected === e\.name\) \{[\s\S]{0,80}?void openSelected\(\)[\s\S]{0,120}?setSelected\(e\.name\)/.test(panelSrc) &&
-      /const selectedEntry = entries\.find\(\(e\) => e\.name === selected\) \?\? null/.test(panelSrc) &&
-      /disabled=\{busy \|\| !selectedEntry\}/.test(panelSrc) &&
-      /tapToSelect/.test(copySrc),
+  check('adj540 列表行带**复选框**（勾选=选中供 改名/移动/删除；点名字=打开/进入），且支持多选',
+    /<input[\s\S]{0,200}?type="checkbox"[\s\S]{0,200}?className="ws-check"/.test(panelSrc) &&
+      /const \[selected, setSelected\] = useState<string\[\]>\(\[\]\)/.test(panelSrc) &&
+      /const toggleSelect = \(name: string\)/.test(panelSrc) &&
+      /selectedCount: \(n: number\)/.test(copySrc) &&
+      /deleteManyConfirm/.test(copySrc) &&
+      /\.ws-check \{/.test(cssAll),
+    '')
+  check('adj540 交互模型：**点名字=打开/进入**（不再要点两次），勾选与打开互不干扰',
+    /const openEntry = async \(entry: DirEntry\) => \{[\s\S]{0,200}?await refresh\(ws, \[\.\.\.path, entry\.name\]\)[\s\S]{0,200}?await openWorkspaceFile\(\[\.\.\.path, entry\.name\]\)/.test(
+      panelSrc,
+    ) &&
+      /onClick=\{\(\) => void openEntry\(e\)\}/.test(panelSrc) &&
+      !/onRowTap/.test(panelSrc),
+    '')
+  check('adj540 批量移动/删除逐个执行并汇总（部分失败如实报出，不假装全成功）',
+    /moveWorkspaceFiles: async \(fromSegsList, toDirSegs\)/.test(store) &&
+      /deleteWorkspaceEntries: async \(items\)/.test(store) &&
+      /opPartial/.test(copySrc) &&
+      /const ok = await deleteWorkspaceEntries\(confirmDel\.items\)/.test(panelSrc) &&
+      /const ok = await moveWorkspaceFiles\(moving\.list, path\)/.test(panelSrc),
     '')
   check('adj540 选择器没反应时不静默（5 秒给可操作指引：改用浏览器打开）',
     /PICKER_NO_RESPONSE_MS/.test(panelSrc) && /pickerNoResponse/.test(copySrc),
@@ -8553,14 +8583,15 @@ function runAdj540WorkspaceTests() {
       // 明确**不用** recursive：它会连目录里的照片/文档一起删掉
       !/recursive:\s*true/.test(wsCode),
     '')
-  check('adj540 文件操作维护"当前文档的工作区绑定"（重命名/移动跟着改，删除则解绑并提示）',
+  check('adj540 文件操作维护"当前文档的工作区绑定"（改名/移动跟着改，删除则解绑并提示）',
     /renameWorkspaceFile: async/.test(store) &&
-      /moveWorkspaceFile: async/.test(store) &&
-      /deleteWorkspaceFile: async/.test(store) &&
-      /deleteWorkspaceDir: async/.test(store) &&
+      /moveWorkspaceFiles: async/.test(store) &&
+      /deleteWorkspaceEntries: async/.test(store) &&
+      /newWorkspaceScore: async/.test(store) &&
       /createWorkspaceDir: async/.test(store) &&
       /if \(cur && joinPath\(cur\) === joinPath\(from\)\) set\(\{ workspacePath: to, fileName: fileBaseName\(toName\) \}\)/.test(store) &&
-      /const unbound = !!cur && joinPath\(cur\) === joinPath\(target\)/.test(store),
+      /const target = joinPath\(segs\)/.test(store) &&
+      /set\(\{ workspacePath: null \}\)/.test(store),
     '')
 }
 

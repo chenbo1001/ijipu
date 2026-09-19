@@ -34,6 +34,7 @@ import { normalizePastedSource } from './importSource'
 import { pickPrimary, writeExternalFile, type ExternalFile } from './externalOpen'
 // adj540：工作区目录（Android/移动端"选一个文件夹当工作区"，纯网页，不需要壳）
 import {
+  createFile,
   createSubdir,
   getWorkspace,
   hasEntry,
@@ -166,14 +167,24 @@ interface DocState {
   saveToWorkspace: (path: string[]) => Promise<boolean>
   /** adj540：在工作区里新建子目录 */
   createWorkspaceDir: (dirPath: string[], name: string) => Promise<boolean>
-  /** adj540：重命名工作区里的 `.jps`（同目录换名；当前文档绑定会跟着改） */
+  /** adj540：重命名工作区里的 `.jps`（同目录换名；当前文档绑定会跟着改）。一次只改一个。 */
   renameWorkspaceFile: (dirPath: string[], fromName: string, toName: string) => Promise<boolean>
-  /** adj540：把 `.jps` 移到另一个目录（当前文档绑定会跟着改） */
-  moveWorkspaceFile: (fromSegs: string[], toDirSegs: string[]) => Promise<boolean>
-  /** adj540：删除工作区里的 `.jps`（**永久**；若删的是当前文档则解绑并提示） */
-  deleteWorkspaceFile: (segs: string[]) => Promise<boolean>
-  /** adj540：删除工作区里的目录（**仅当为空**，避免连带删掉用户目录里其它文件） */
-  deleteWorkspaceDir: (dirPath: string[], name: string) => Promise<boolean>
+  /**
+   * adj540：把若干个 `.jps` 移到另一个目录（列表支持**多选**）。当前文档绑定会跟着改。
+   * 目录不在支持范围（递归搬运风险大）——调用方只传文件路径。
+   */
+  moveWorkspaceFiles: (fromSegsList: string[][], toDirSegs: string[]) => Promise<boolean>
+  /**
+   * adj540：删除若干个条目（文件 / **空**目录，支持多选）。
+   * 逐个执行并汇总结果：全成功给"已删除 N 项"，部分失败如实报出失败项与原因（不假装全成功）。
+   */
+  deleteWorkspaceEntries: (items: { segs: string[]; kind: 'file' | 'dir' }[]) => Promise<boolean>
+  /**
+   * adj540：在工作区里**新建一份空谱**（内容取「新建」模板 `src/samples/未命名.jps`）并打开它。
+   * 手机上"新建一份谱"最自然的落点就是工作区当前目录——不用先去系统文件选择器里找地方。
+   * 同名已存在 ⇒ 拒绝并提示（不覆盖已有谱）。
+   */
+  newWorkspaceScore: (segs: string[]) => Promise<boolean>
   /**
    * adj538：载入桌面壳送来的外部文件（双击打开）。
    * 取第一个载入编辑器；返回是否载入成功（读失败时给提示并返回 false）。
@@ -767,32 +778,90 @@ export const useDocStore = create<DocState>()((set, get) => ({
       return false
     }
   },
-  moveWorkspaceFile: async (fromSegs, toDirSegs) => {
+  moveWorkspaceFiles: async (fromSegsList, toDirSegs) => {
     const ui = useUiStore.getState()
     const ws = await getWorkspace()
     if (!ws) {
       ui.showNotice(workspaceCopy.noWorkspace, 'warn')
       return false
     }
-    const from = normalizeRelPath(fromSegs)
     const toDir = normalizeRelPath(toDirSegs)
-    if (from.length === 0) return false
-    const name = from[from.length - 1]
-    if (joinPath(from.slice(0, -1)) === joinPath(toDir)) return true // 原地不动
-    try {
-      await moveFile(ws.handle, from, toDir)
-      const cur = get().workspacePath
-      if (cur && joinPath(cur) === joinPath(from)) set({ workspacePath: [...toDir, name] })
-      console.info(`[iJipu] 工作区移动：${joinPath(from)} → ${joinPath([...toDir, name])}`)
-      ui.showNotice(workspaceCopy.moved(name, joinPath(toDir)), 'ok')
-      return true
-    } catch (e) {
-      console.warn('[iJipu] 移动失败', e)
-      ui.showNotice(workspaceOpErrorText(name, e), 'error')
+    let ok = 0
+    let firstErr = ''
+    let failedName = ''
+    for (const raw of fromSegsList) {
+      const from = normalizeRelPath(raw)
+      if (from.length === 0) continue
+      const name = from[from.length - 1]
+      if (joinPath(from.slice(0, -1)) === joinPath(toDir)) {
+        ok++ // 原地不动也算成功
+        continue
+      }
+      try {
+        await moveFile(ws.handle, from, toDir)
+        const cur = get().workspacePath
+        if (cur && joinPath(cur) === joinPath(from)) set({ workspacePath: [...toDir, name] })
+        ok++
+      } catch (e) {
+        if (!firstErr) {
+          firstErr = e instanceof Error ? e.message : String(e)
+          failedName = name
+        }
+      }
+    }
+    console.info(`[iJipu] 工作区移动：成功 ${ok} / 失败 ${fromSegsList.length - ok} → ${joinPath(toDir) || '根目录'}`)
+    if (ok === 0) {
+      ui.showNotice(workspaceOpErrorText(failedName, new Error(firstErr)), 'error')
       return false
     }
+    if (firstErr) ui.showNotice(workspaceCopy.opPartial(ok, fromSegsList.length - ok, firstErr), 'warn')
+    else ui.showNotice(workspaceCopy.movedMany(ok, joinPath(toDir)), 'ok')
+    return true
   },
-  deleteWorkspaceFile: async (segs) => {
+  deleteWorkspaceEntries: async (items) => {
+    const ui = useUiStore.getState()
+    const ws = await getWorkspace()
+    if (!ws) {
+      ui.showNotice(workspaceCopy.noWorkspace, 'warn')
+      return false
+    }
+    let ok = 0
+    let firstErr = ''
+    let failedName = ''
+    let unbound = false
+    for (const it of items) {
+      const segs = normalizeRelPath(it.segs)
+      if (segs.length === 0) continue
+      const name = segs[segs.length - 1]
+      try {
+        if (it.kind === 'dir') await removeEmptyDir(ws.handle, segs.slice(0, -1), name)
+        else await removeFile(ws.handle, segs)
+        // 当前文档正被删掉的那一项 ⇒ 解绑（内容仍留在编辑器里）
+        const cur = get().workspacePath
+        const target = joinPath(segs)
+        if (cur && (joinPath(cur) === target || (it.kind === 'dir' && joinPath(cur).startsWith(`${target}/`)))) {
+          set({ workspacePath: null })
+          unbound = true
+        }
+        ok++
+      } catch (e) {
+        if (!firstErr) {
+          firstErr = e instanceof Error ? e.message : String(e)
+          failedName = name
+        }
+      }
+    }
+    console.info(`[iJipu] 工作区删除：成功 ${ok} / 失败 ${items.length - ok}${unbound ? '（含当前文档，已解绑）' : ''}`)
+    if (ok === 0) {
+      ui.showNotice(workspaceOpErrorText(failedName, new Error(firstErr)), 'error')
+      return false
+    }
+    if (unbound) ui.showNotice(workspaceCopy.deletedOpenFile(failedName || '当前文件'), 'warn')
+    else if (firstErr) ui.showNotice(workspaceCopy.opPartial(ok, items.length - ok, firstErr), 'warn')
+    else ui.showNotice(workspaceCopy.deletedMany(ok), 'ok')
+    return true
+  },
+  newWorkspaceScore: async (segs) => {
     const ui = useUiStore.getState()
     const ws = await getWorkspace()
     if (!ws) {
@@ -803,50 +872,17 @@ export const useDocStore = create<DocState>()((set, get) => ({
     if (target.length === 0) return false
     const name = target[target.length - 1]
     try {
-      await removeFile(ws.handle, target)
-      // 正在编辑的就是这个文件 ⇒ 解绑（内容仍留在编辑器里，可用「保存到此处」重新落盘）
-      const cur = get().workspacePath
-      const unbound = !!cur && joinPath(cur) === joinPath(target)
-      if (unbound) {
-        set({ workspacePath: null })
-        ui.showNotice(workspaceCopy.deletedOpenFile(name), 'warn')
-      } else {
-        ui.showNotice(workspaceCopy.deleted(name), 'ok')
-      }
-      console.info(`[iJipu] 工作区删除文件：${joinPath(target)}（${unbound ? '并解绑当前文档' : '非当前文档'}）`)
-      return true
+      // 内容用「新建」模板（`src/samples/未命名.jps`，adj481 文件驱动），同名则拒绝
+      await createFile(ws.handle, target.slice(0, -1), name, defaultSample().code)
+      console.info(`[iJipu] 工作区新建谱：${joinPath(target)}`)
+      ui.showNotice(workspaceCopy.created(name), 'ok')
     } catch (e) {
-      console.warn('[iJipu] 删除文件失败', e)
+      console.warn('[iJipu] 新建谱失败', e)
       ui.showNotice(workspaceOpErrorText(name, e), 'error')
       return false
     }
-  },
-  deleteWorkspaceDir: async (dirPath, name) => {
-    const ui = useUiStore.getState()
-    const ws = await getWorkspace()
-    if (!ws) {
-      ui.showNotice(workspaceCopy.noWorkspace, 'warn')
-      return false
-    }
-    const dir = normalizeRelPath(dirPath)
-    try {
-      await removeEmptyDir(ws.handle, dir, name)
-      // 当前文档正在这个目录里 ⇒ 解绑（目录都没了）
-      const cur = get().workspacePath
-      const prefix = joinPath([...dir, name])
-      if (cur && (joinPath(cur) === prefix || joinPath(cur).startsWith(`${prefix}/`))) {
-        set({ workspacePath: null })
-        ui.showNotice(workspaceCopy.deletedOpenFile(name), 'warn')
-      } else {
-        ui.showNotice(workspaceCopy.deleted(name), 'ok')
-      }
-      console.info(`[iJipu] 工作区删除目录：${prefix}`)
-      return true
-    } catch (e) {
-      console.warn('[iJipu] 删除目录失败', e)
-      ui.showNotice(workspaceOpErrorText(name, e), 'error')
-      return false
-    }
+    // 新建完直接打开它（用户的下一步必然是编辑）
+    return get().openWorkspaceFile(target)
   },
   saveFile: async () => {
     fileStateTouched = true

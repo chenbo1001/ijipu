@@ -146,6 +146,8 @@ export const workspaceCopy = {
   grantPathHint: '浏览器出于隐私不提供完整磁盘路径，这里显示的是「文件夹名 + 工作区内相对路径」',
   grantWhy: '刷新或重新打开页面后，浏览器会把目录权限重置为"待确认"，需要在点击后重新授予一次。',
   switchDir: '换一个文件夹',
+  /** adj540：面包屑首段（工作区根目录名）本身就是"换工作区目录"的按钮——省掉右侧那个按钮（用户要求） */
+  switchDirHint: '点击更换工作区目录',
   up: '上级目录',
   emptyDir: '这个文件夹里没有 .jps 文件',
   rootLabel: '工作区',
@@ -169,13 +171,25 @@ export const workspaceCopy = {
   // 「存到此处」= 把当前谱写进当前目录（与全局「保存 Ctrl+S」区分开）。
   /** 行尾「更多操作」按钮（打开/改名/移动/删除） */
   moreActions: '更多操作',
-  /** adj540：未选中任何项时右侧操作区的提示（点一下行 = 选中，再点 = 打开） */
-  tapToSelect: '点一下选中',
+  /** adj540：未选中任何项时右侧操作区的提示（点名字=打开、点复选框=选中） */
+  tapToSelect: '勾选后可操作',
+  /** adj540：多选时的选中条数 */
+  selectedCount: (n: number): string => `已选 ${n} 项`,
   actOpen: '打开',
+  /** adj540：写回当前谱绑定的工作区文件；未绑定时等同于「另存」（不出现"按了没反应"的死路） */
+  actSave: '保存',
+  /** adj540：把当前谱**写进当前目录**（可改文件名） */
+  actSaveAs: '另存',
+  /** adj540：在当前目录新建一份空谱（用「新建」模板内容）并打开 */
+  actNewScore: '新建',
   actRename: '改名',
   actMove: '移动',
   actDelete: '删除',
-  actNewFolder: '新建',
+  /** adj540：在当前目录新建子文件夹（"夹"字省地方，两列按钮里也读得懂） */
+  actNewFolder: '新建夹',
+  /** adj540：分组下拉的第三组——作用在选中项上的操作（改名/移动/删除） */
+  actOps: '操作',
+  newScorePlaceholder: '新谱名（不用写 .jps）',
   folderNamePlaceholder: '文件夹名',
   renamePlaceholder: '新名字（不用写 .jps）',
   confirmBtn: '确定',
@@ -190,8 +204,21 @@ export const workspaceCopy = {
   exists: (n: string): string => `已存在同名「${n}」，换个名字`,
   invalidName: '名字不能为空，也不能包含 / \\ 或 ..',
   dirCreated: (n: string): string => `已新建文件夹「${n}」`,
+  /** adj540：新建谱（写进工作区当前目录） */
+  created: (n: string): string => `已新建「${n}」`,
   renamed: (a: string, b: string): string => `已把「${a}」重命名为「${b}」`,
   moved: (n: string, dir: string): string => `已把「${n}」移动到「${dir || '根目录'}」`,
+  /** adj540：多选批量移动/删除的汇总文案 */
+  movedMany: (n: number, dir: string): string => `已移动 ${n} 个到「${dir || '根目录'}」`,
+  deletedMany: (n: number): string => `已删除 ${n} 项`,
+  /** 部分成功：如实报出成功数与第一个失败原因（不假装全成功） */
+  opPartial: (ok: number, fail: number, reason: string): string => `${ok} 项成功、${fail} 项失败（${reason}）`,
+  /** 多选时删除确认里的条数提示 */
+  deleteManyConfirm: (n: number): string => `永久删除选中的 ${n} 项？删了就找不回来了`,
+  /** 多选里含目录时不能移动 */
+  moveDirUnsupported: '选中的里有文件夹，移动只支持 .jps 文件',
+  /** 重命名只支持单个 */
+  renameSingleOnly: '重命名一次只能改一个',
   deleted: (n: string): string => `已删除「${n}」`,
   deletedOpenFile: (n: string): string => `「${n}」已被删除——内容仍在编辑器里，可用「保存当前谱到此处」重新存一份`,
   verifyFailed: (n: string): string => `「${n}」写入后校验不一致，已保留原文件（请重试）`,

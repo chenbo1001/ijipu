@@ -1089,9 +1089,10 @@ export function TopBar() {
   //  · 「工作区」提到**第一位**；
   //  · **隐藏只在 PC 上才成立的项**：「打开…」（系统选择器）、「打开（系统文件选择器）…」、「另存为…」。
   //    它们在手机上要么不可靠（`showOpenFilePicker` 在 PWA 里"点了没反应"，adj405），要么本来就走不通
-  //    （`showSaveFilePicker`），留着只会让用户在"两条路"之间猜；手机上统一从工作区走。
-  //  · 「保存」保留：它先写回已绑定的文件（工作区/磁盘），**没有绑定时会自动引导到工作区另存**
-  //    （见 runSaveSmart），所以手机上不需要"另存为"这一项。
+  //    （`showSaveFilePicker`），留着只会让用户在"两条路"之间猜；
+  //  · 续（用户要求"窄屏菜单可以更简化，主要操作以工作区操作按钮为主"）：连「新建」「保存」也收进面板
+  //    —— 工作区面板里已有 新建（空谱）/ 保存 / 另存，菜单只留平台无关的入口：
+  //    工作区 / 打开示例 / 粘贴源码导入 / 试听播放 / 导出。
   const entryNew: MenuEntry = { label: '新建(&N)', kbd: 'Ctrl+N', hotkey: 'n', onPick: newDoc }
   const entryOpen: MenuEntry = { label: '打开(&O)…', kbd: 'Ctrl+O', hotkey: 'o', onPick: runOpenSmart }
   const entryOpenSystem: MenuEntry = { label: workspaceCopy.openSystemLabel, onPick: runOpen }
@@ -1103,7 +1104,7 @@ export function TopBar() {
   const entryTryout: MenuEntry = { label: '试听播放(&P)', kbd: 'Ctrl+Q', hotkey: 'p', onPick: () => toggleDock('tryout') }
   const entryExport: MenuEntry = { label: '导出(&X)…', hotkey: 'x', onPick: () => toggleDock('export') }
   const fileEntries: (MenuEntry | 'sep')[] = isNarrow
-    ? [entryWorkspace, entryNew, entrySamples, entryPaste, entrySave, entryTryout, entryExport]
+    ? [entryWorkspace, entrySamples, entryPaste, entryTryout, entryExport]
     : [
         entryNew,
         entryOpen,
