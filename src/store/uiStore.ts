@@ -116,7 +116,7 @@ function loadNum(key: string, fallback: number): number {
   }
 }
 
-/** 当前系统浅深色偏好（无 matchMedia 时默认深色） */
+/** 当前系统深浅色偏好（无 matchMedia 时默认深色） */
 function detectSystemLight(): boolean {
   try {
     return window.matchMedia('(prefers-color-scheme: light)').matches
@@ -166,9 +166,9 @@ interface UiState {
   showGuides: boolean
   /** 中国色主题 id */
   theme: string
-  /** 浅深色模式：auto=跟随系统 prefers-color-scheme（adj48） */
+  /** 深浅色模式：auto=跟随系统 prefers-color-scheme（adj48） */
   themeMode: ThemeMode
-  /** 系统当前是否浅色（auto 模式下决定实际浅深色） */
+  /** 系统当前是否浅色（auto 模式下决定实际深浅色） */
   systemLight: boolean
   /** 拆分视图上（预览）窗格高度占比（%），下（编辑器）窗格占剩余 */
   splitPct: number

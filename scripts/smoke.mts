@@ -8060,6 +8060,86 @@ function runAdj530TopBarLayoutTests() {
     '')
 }
 
+/**
+ * adj534–adj537（用户 5 条界面调整）：
+ *  ① 输入条按键高度 = 顶栏按钮高度；② 试听播放/停止按钮同高；
+ *  ③ 设置→主题「深浅模式」文案（原「浅深模式」）+ 选中项在**浅色模式**下看不清；
+ *  ④ 拆分调整线 / 底栏高度调整线加主题色；⑤ 输入条最左插入撤销/重做图标按钮。
+ *
+ * 这里的断言分两类：**"单一来源"类**（高度只允许有一个数：`--jp-btn-h`）与
+ * **"接线"类**（图标键、栈长度、preventDefault 保焦点）——都是"改一处忘一处"最容易漂的地方。
+ */
+function runAdj534to537UiTests() {
+  console.log('[119b] unified button height / 深浅模式 / tinted resize lines / pad undo-redo (adj534-adj537)')
+  const css = String(readFileSync('src/index.css', 'utf8'))
+  const themeCss = String(readFileSync('src/styles/theme.css', 'utf8'))
+  const padLayoutSrc = String(readFileSync('src/editor/padLayout.ts', 'utf8'))
+  const padSrc = String(readFileSync('src/editor/ScriptToolbar.tsx', 'utf8'))
+  const editorSrc = String(readFileSync('src/editor/EditorPane.tsx', 'utf8'))
+  const pageSrc = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
+  const top = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+
+  // ---- adj534：按钮高度单一来源 ----
+  check('adj534 界面按钮统一高度有单一来源（`--jp-btn-h`，取自顶栏按钮实测 24px）',
+    /--jp-btn-h: 24px;/.test(themeCss) &&
+      /\.script-pad \.pad-key \{[\s\S]{0,400}?height: var\(--jp-btn-h, 24px\);/.test(css) &&
+      /\.playback-btn \{[\s\S]{0,400}?height: var\(--jp-btn-h, 24px\);/.test(css),
+    '')
+  check('adj534 输入条按键不再写死 min-height: 30px（旧值比顶栏高 6px）',
+    !/\.script-pad \.pad-key \{[\s\S]{0,400}?min-height: 30px;/.test(css),
+    '')
+  check('adj534 试听按钮纵向内边距清零（`.btn` 的 padding 6px 声明更靠后，会把 height 顶开）',
+    /\.playback-btn \{[\s\S]{0,400}?padding: 0 14px;/.test(css) &&
+      !/\.playback-btn \{[\s\S]{0,400}?padding: 4px 14px;/.test(css),
+    '')
+
+  // ---- adj535：深浅模式（文案 + 选中态反色）----
+  check('adj535 文案「浅深模式」已改为「深浅模式」（设置标签 / 顶栏 title·aria / 更多菜单组标题）',
+    /深浅模式/.test(pageSrc) && /深浅模式/.test(top) && !/浅深模式/.test(pageSrc) && !/浅深模式/.test(top),
+    '')
+  check('adj535 选中项字色取「面板底色」而非写死 #101010（后者只在深色模式下成立）',
+    /\.theme-mode-btn\.active \{[\s\S]{0,240}?color: var\(--jp-bg-panel\);/.test(css) &&
+      !/\.theme-mode-btn\.active \{[\s\S]{0,240}?color: #101010;/.test(css),
+    '')
+
+  // ---- adj536：两条调整线同款主题色 ----
+  check('adj536 两条调整线底色掺强调色（同一配方 10% accent + 面板底）',
+    (css.match(/color-mix\(in srgb, var\(--jp-accent\) 10%, var\(--jp-bg-panel\)\)/g) ?? []).length === 2,
+    `命中 ${(css.match(/color-mix\(in srgb, var\(--jp-accent\) 10%, var\(--jp-bg-panel\)\)/g) ?? []).length} 处`)
+  check('adj536 两条线的握把都改用强调色（原为不带色相的 --jp-text-muted 灰）',
+    /\.split-divider::after \{[\s\S]{0,240}?background: var\(--jp-accent\);/.test(css) &&
+      /\.tool-dock-resize::after \{[\s\S]{0,240}?background: var\(--jp-accent\);/.test(css),
+    '')
+
+  // ---- adj537：输入条行首撤销/重做 ----
+  check('adj537 输入条行首两个图标键（撤销 / 重做），空栈时 disabled',
+    /export const PAD_UNDO_KEY/.test(padLayoutSrc) &&
+      /export const PAD_REDO_KEY/.test(padLayoutSrc) &&
+      (padSrc.match(/className="pad-key pad-icon"/g) ?? []).length === 2 &&
+      /disabled=\{!canUndo\}/.test(padSrc) &&
+      /disabled=\{!canRedo\}/.test(padSrc) &&
+      /<svg/.test(padSrc),
+    '')
+  check('adj537 图标键在最左（撤销 → 重做 → 分隔点 → 主键组）',
+    /<div className="pad-scroll">[\s\S]{0,900}?PAD_UNDO_KEY\.hint[\s\S]{0,400}?PAD_REDO_KEY\.hint[\s\S]{0,300}?<div className="pad-sep"[\s\S]{0,200}?PAD_GROUPS\.map/.test(padSrc),
+    '')
+  check('adj537 接线到 docStore（onUndo/onRedo + 栈长度选择器，不订阅整个数组）',
+    /onUndo=\{undo\}/.test(editorSrc) &&
+      /onRedo=\{redo\}/.test(editorSrc) &&
+      /canUndo=\{undoStackLen > 0\}/.test(editorSrc) &&
+      /canRedo=\{redoStackLen > 0\}/.test(editorSrc) &&
+      /s\.undoStack\.length/.test(editorSrc) &&
+      /s\.redoStack\.length/.test(editorSrc),
+    '')
+  check('adj537 输入条按键"点按不夺焦点"（preventDefault；否则手机上点撤销后编辑器失焦、后续按键落空）',
+    (padSrc.match(/onMouseDown=\{\(e\) => e\.preventDefault\(\)\}/g) ?? []).length >= 4,
+    `命中 ${(padSrc.match(/onMouseDown=\{\(e\) => e\.preventDefault\(\)\}/g) ?? []).length} 处`)
+  check('adj537 图标键为方形（宽 = --jp-btn-h）、禁用态不吃 hover 强调色',
+    /\.script-pad \.pad-key\.pad-icon \{[\s\S]{0,240}?width: var\(--jp-btn-h, 24px\);/.test(css) &&
+      /\.script-pad \.pad-key:disabled \{[\s\S]{0,160}?opacity: 0\.35;/.test(css),
+    '')
+}
+
 async function runNewDocTemplateTests() {
   console.log('[81b] new document uses the template file (adj481)')  /* eslint-disable @typescript-eslint/no-explicit-any */
   const { useDocStore } = (await import('../src/store/docStore.ts')) as any
@@ -8454,14 +8534,16 @@ console.log('[117] dock handle matches split divider (adj495) & bc = tenuto (adj
     if (!m) return false
     return props.every((p) => m[1].includes(p))
   }
-  // adj495：抓手 = 分屏线同款（5px、面板底色、上下 1px 边框、居中 40×2 圆角握把、hover 转强调色+白握把）
-  check('adj495/499 抓手与分屏线同款外观（高度/底色/边框/握把；厚度走共用 token）',
-    oneOf('.split-divider', ['height: var(--jp-resize-h', 'background: var(--jp-bg-panel)', 'border-top: 1px solid var(--jp-border)', 'border-bottom: 1px solid var(--jp-border)']) &&
-      oneOf('.tool-dock-resize', ['flex: 0 0 var(--jp-resize-h', 'background: var(--jp-bg-panel)', 'border-top: 1px solid var(--jp-border)', 'border-bottom: 1px solid var(--jp-border)']),
+  // adj495：抓手 = 分屏线同款（5px、上下 1px 边框、居中 40×2 圆角握把、hover 转强调色+白握把）
+  // adj536（用户要求"给两条调整线加点主题色，方便区域视觉区分"）：底色由纯 `--jp-bg-panel`
+  // 改为**掺 10% 强调色**的同一配方（`color-mix(...)`）；本断言随之改为钉新配方 + 仍要"两处同款"。
+  check('adj495/499/536 抓手与分屏线同款外观（高度/底色/边框/握把；厚度走共用 token）',
+    oneOf('.split-divider', ['height: var(--jp-resize-h', 'background: color-mix(in srgb, var(--jp-accent) 10%, var(--jp-bg-panel))', 'border-top: 1px solid var(--jp-border)', 'border-bottom: 1px solid var(--jp-border)']) &&
+      oneOf('.tool-dock-resize', ['flex: 0 0 var(--jp-resize-h', 'background: color-mix(in srgb, var(--jp-accent) 10%, var(--jp-bg-panel))', 'border-top: 1px solid var(--jp-border)', 'border-bottom: 1px solid var(--jp-border)']),
     '')
-  check('adj495 两者的握把 ::after 完全同款（40×2、radius 2、muted、opacity .6）',
-    /\.split-divider::after \{[\s\S]{0,260}?width: 40px;[\s\S]{0,60}?height: 2px;[\s\S]{0,60}?border-radius: 2px;[\s\S]{0,60}?background: var\(--jp-text-muted\);[\s\S]{0,40}?opacity: 0\.6;/.test(css) &&
-      /\.tool-dock-resize::after \{[\s\S]{0,260}?width: 40px;[\s\S]{0,60}?height: 2px;[\s\S]{0,60}?border-radius: 2px;[\s\S]{0,60}?background: var\(--jp-text-muted\);[\s\S]{0,40}?opacity: 0\.6;/.test(css),
+  check('adj495/536 两者的握把 ::after 完全同款（40×2、radius 2、强调色、opacity .55）',
+    /\.split-divider::after \{[\s\S]{0,260}?width: 40px;[\s\S]{0,60}?height: 2px;[\s\S]{0,60}?border-radius: 2px;[\s\S]{0,60}?background: var\(--jp-accent\);[\s\S]{0,40}?opacity: 0\.55;/.test(css) &&
+      /\.tool-dock-resize::after \{[\s\S]{0,260}?width: 40px;[\s\S]{0,60}?height: 2px;[\s\S]{0,60}?border-radius: 2px;[\s\S]{0,60}?background: var\(--jp-accent\);[\s\S]{0,40}?opacity: 0\.55;/.test(css),
     '')
   check('adj495 hover/按住/聚焦都转强调色 + 白握把（与分屏线同一套状态）',
     /\.tool-dock-resize:hover,\s*\.tool-dock-resize:active,\s*\.tool-dock-resize:focus-visible \{\s*background: var\(--jp-accent\);/.test(css) &&
@@ -8820,6 +8902,14 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj530 顶栏按钮重排/优先级折叠用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj534to537UiTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj534-537 界面调整用例抛异常', e)
     }
   })
   .then(() => {

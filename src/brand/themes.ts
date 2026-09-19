@@ -2,7 +2,7 @@
  * brand/themes.ts — 中国色主题定义
  * 黛蓝为品牌默认（深空蓝 + 霓虹青）；其余为中国传统色变体。
  * bg/accent 用于菜单中的配色预览（与 CSS 变量一致）。
- * 每个主题均有深色/浅色两套（adj48：自动跟随系统浅深色）。
+ * 每个主题均有深色/浅色两套（adj48：自动跟随系统深浅色）。
  */
 export interface Theme {
   id: string
@@ -30,7 +30,7 @@ export const THEMES: Theme[] = [
 
 export const DEFAULT_THEME = 'dianlan'
 
-/** 浅深色模式：auto = 跟随系统 prefers-color-scheme */
+/** 深浅色模式：auto = 跟随系统 prefers-color-scheme */
 export type ThemeMode = 'auto' | 'light' | 'dark'
 
 export const DEFAULT_THEME_MODE: ThemeMode = 'auto'

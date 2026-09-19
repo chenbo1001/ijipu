@@ -127,6 +127,9 @@ export function EditorPane() {
   const wrapPointsRef = useRef<number[][]>([])
   const undo = useDocStore((s) => s.undo)
   const redo = useDocStore((s) => s.redo)
+  // adj537：输入条行首「撤销 / 重做」按钮的可用态——取栈长度（数字选择器，避免整个数组订阅引起重渲染）
+  const undoStackLen = useDocStore((s) => s.undoStack.length)
+  const redoStackLen = useDocStore((s) => s.redoStack.length)
   // adj165：当前光标行/列（1-based 行、0-based 列），供高亮当前行与当前区块
   const cursor = useDocStore((s) => s.cursor)
   const jumpCursor = useDocStore((s) => s.jumpCursor)
@@ -871,6 +874,10 @@ export function EditorPane() {
           onToggleKb={toggleSystemKb}
           kbActive={kbActive}
           activeGroupId={padMenu?.groupId ?? null}
+          onUndo={undo}
+          onRedo={redo}
+          canUndo={undoStackLen > 0}
+          canRedo={redoStackLen > 0}
         />
       )}
       {/* adj323：一级主键组浮层——点主键在按钮位置弹出该组二级键（insert + 中文说明） */}

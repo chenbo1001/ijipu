@@ -69,7 +69,7 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
   const setEditorFontSize = useUiStore((s) => s.setEditorFontSize)
   const editorFont = useUiStore((s) => s.editorFont)
   const setEditorFont = useUiStore((s) => s.setEditorFont)
-  // adj383：主题（中国色主题 + 浅深模式）——从顶栏菜单移入设置「主题」标签（本机界面偏好，不随谱保存）
+  // adj383：主题（中国色主题 + 深浅模式）——从顶栏菜单移入设置「主题」标签（本机界面偏好，不随谱保存）
   const theme = useUiStore((s) => s.theme)
   const setTheme = useUiStore((s) => s.setTheme)
   const themeMode = useUiStore((s) => s.themeMode)
@@ -239,13 +239,13 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
           </>
         )
       case 'theme':
-        // adj383：主题组（原顶栏菜单「主题」）——浅深模式 + 中国色主题；本机界面偏好，即时生效、不随谱保存
+        // adj383：主题组（原顶栏菜单「主题」）——深浅模式 + 中国色主题；本机界面偏好，即时生效、不随谱保存
         return (
           <>
-            <div className="ijipu-form-label">浅深模式</div>
+            <div className="ijipu-form-label">深浅模式</div>
             <div className="theme-mode-row" style={{ padding: 0 }}>
               {/* adj426：设置面板三个按钮改用 ToolIcon（自动主题/浅色主题/深色主题），
-                  与顶栏新加的浅深模式三状态按钮视觉一致；点击直接选中该档（不走循环） */}
+                  与顶栏新加的深浅模式三状态按钮视觉一致；点击直接选中该档（不走循环） */}
               {(
                 [
                   { key: 'auto' as ThemeMode, label: '跟随系统', icon: 'themeAuto' as const },
@@ -269,7 +269,7 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
             </div>
             <div className="ijipu-form-hint">
               {themeMode === 'auto'
-                ? '自动跟随系统浅深色设置'
+                ? '自动跟随系统深浅色设置'
                 : themeMode === 'light'
                   ? '固定使用浅色配色'
                   : '固定使用深色配色'}

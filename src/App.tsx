@@ -45,7 +45,7 @@ function App() {
   const splitHDir = useUiStore((s) => s.splitHDir)
   const mainRef = useRef<HTMLDivElement>(null)
 
-  // adj48：跟随系统浅深色——监听 prefers-color-scheme 变化
+  // adj48：跟随系统深浅色——监听 prefers-color-scheme 变化
   useEffect(() => {
     try {
       const mq = window.matchMedia('(prefers-color-scheme: light)')
@@ -91,7 +91,7 @@ function App() {
     }
   }, [isNarrow])
 
-  // 实际浅深色：auto 模式下跟随系统偏好
+  // 实际深浅色：auto 模式下跟随系统偏好
   const effectiveMode = themeMode === 'auto' ? (systemLight ? 'light' : 'dark') : themeMode
 
   // 全局快捷键（adj185：capture 阶段监听——bubble 阶段可能被子元素 stopPropagation 拦截，

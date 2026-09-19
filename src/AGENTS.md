@@ -45,7 +45,7 @@
 
 1. 品牌 token（应用名/中文名/Slogan/用户身份/色板/字体）统一定义在 `src/brand/tokens.ts`，其余代码经 `brand` 导入引用，禁止硬编码
 2. 面向用户的文案集中定义在 `src/brand/copy.ts`（aboutCopy/uiCopy），组件不得直接写字面量文案
-3. 主题集中定义在 `src/brand/themes.ts`（中国色主题 + 浅深色模式），样式消费 `var(--jp-*)` CSS 变量
+3. 主题集中定义在 `src/brand/themes.ts`（中国色主题 + 深浅色模式），样式消费 `var(--jp-*)` CSS 变量
 4. 版本号唯一手动维护点 `src/brand/version.ts` 的 `APP_VERSION`；发布时与 `package.json version`、`src-tauri/tauri.conf.json version` 三处一致（根 AGENTS 十一）
 5. 新增任何品牌字面量时，先在 brand 对应文件添加常量并写中文注释，再在调用处引用
 

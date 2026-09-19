@@ -77,7 +77,11 @@ body {
   /* adj499：厚度取自共用 token（与底栏高度调整线同一个值） */
   height: var(--jp-resize-h, 5px);
   cursor: row-resize;
-  background: var(--jp-bg-panel);
+  /* adj536（用户要求"给拆分调整线、底栏 dock 高度调整线加点主题色，方便区域视觉区分）"：
+     底色由纯 `--jp-bg-panel` 改为**掺一点强调色**（10%）——两条调整线因此与普通 1px 边框/面板底色
+     一眼可分，用户能立刻认出"这里可以拖"。两处用**同一配方**（`--jp-accent` 10% + 面板底），
+     保持一致；hover/按住仍是底色转满强调色（下方规则）。 */
+  background: color-mix(in srgb, var(--jp-accent) 10%, var(--jp-bg-panel));
   border-top: 1px solid var(--jp-border);
   border-bottom: 1px solid var(--jp-border);
   position: relative;
@@ -88,6 +92,8 @@ body {
   touch-action: none;
 }
 
+/* 居中握把（常显）：adj536 起用**强调色**（原先是不带色相的 `--jp-text-muted` 灰），
+   与"两条线同款"的口径一起，让分屏线/dock 高度线在视觉上自成一类"可拖区域"。 */
 .split-divider::after {
   content: '';
   position: absolute;
@@ -97,8 +103,8 @@ body {
   width: 40px;
   height: 2px;
   border-radius: 2px;
-  background: var(--jp-text-muted);
-  opacity: 0.6;
+  background: var(--jp-accent);
+  opacity: 0.55;
 }
 
 .split-divider:hover,
@@ -381,7 +387,7 @@ body {
 }
 
 /* adj453：顶栏左侧固定项 + 右侧三个常驻按钮一律**不收缩**——空间不足时只让
-   `.topbar-toolbar` 让步，保证 Logo / 汉堡 / 视图 / 浅深三状态 / 支持 / 更多 完整可见 */
+   `.topbar-toolbar` 让步，保证 Logo / 汉堡 / 视图 / 深浅三状态 / 支持 / 更多 完整可见 */
 .topbar-brand,
 .topbar-hamburger,
 .topbar-views,
@@ -806,7 +812,7 @@ body {
   max-width: 140px;
 }
 
-/* 浅深色模式选择（adj48；adj484：图标与文本**垂直居中** + 两侧留白 + 统一最小宽度） */
+/* 深浅色模式选择（adj48；adj484：图标与文本**垂直居中** + 两侧留白 + 统一最小宽度） */
 .theme-mode-row {
   display: flex;
   flex-wrap: wrap; /* 窄 dock 下宁可换行也不挤压按钮 */
@@ -844,10 +850,18 @@ body {
   color: var(--jp-accent);
 }
 
+/* adj535（用户报"浅色模式下选中项文字与背景太接近、看不清"）：
+   选中态是「实心强调色底 + 反色字」，原先把字色**写死成 #101010**——那只对**深色模式**成立
+   （深色主题的 `--jp-accent` 都是亮色：霓虹青 #00f0ff、竹青 #8fbf6f、缃色 #e3c13d…，深字压亮底 ✓）；
+   而**浅色模式**下强调色本来就是**深色**（黛蓝浅 #0891a6、竹青浅 #3f7a2e、玄墨浅 #666…），
+   深字压深底 ⇒ 几乎看不见。
+   改为 `color: var(--jp-bg-panel)`（"面板底色"，两个模式下都恰好是强调色的反色）：
+   浅色模式 = #ffffff（白字压实底 ✓）、深色模式 = 深面板色（深字压亮底 ✓），
+   且**随主题自动成立**，不必给 6 个主题 × 2 个模式各写一个字色。 */
 .theme-mode-btn.active {
   background: var(--jp-accent);
   border-color: var(--jp-accent);
-  color: #101010;
+  color: var(--jp-bg-panel);
   font-weight: 600;
 }
 
@@ -1141,7 +1155,8 @@ body {
      两者语义相同但光标关键字不同，部分平台/浏览器渲染出的指针形状有差别（用户报"鼠标形状不统一"）。
      `.split-divider` 用的就是 `row-resize`（纵向分屏线用 `col-resize`），这里对齐它。 */
   cursor: row-resize;
-  background: var(--jp-bg-panel);
+  /* adj536：与 `.split-divider` **同一配方**（强调色 10% + 面板底）——两条调整线同款主题色 */
+  background: color-mix(in srgb, var(--jp-accent) 10%, var(--jp-bg-panel));
   border-top: 1px solid var(--jp-border);
   border-bottom: 1px solid var(--jp-border);
   position: relative;
@@ -1152,7 +1167,8 @@ body {
   /* adj487：触屏拖拽必备（与 .split-divider 同因） */
   touch-action: none;
 }
-/* 握把：与 `.split-divider::after` 完全同款（居中 40×2 圆角、常显、hover 转白） */
+/* 握把：与 `.split-divider::after` 完全同款（居中 40×2 圆角、常显、hover 转白）；
+   adj536：底色改强调色（与分屏线一致，见上） */
 .tool-dock-resize::after {
   content: '';
   position: absolute;
@@ -1162,8 +1178,8 @@ body {
   width: 40px;
   height: 2px;
   border-radius: 2px;
-  background: var(--jp-text-muted);
-  opacity: 0.6;
+  background: var(--jp-accent);
+  opacity: 0.55;
 }
 /* 与分屏线同样：hover / 按住 / 键盘聚焦 → 底色转强调色、握把转白 */
 .tool-dock-resize:hover,
@@ -1216,7 +1232,7 @@ body {
  *     不加它 flex 项的最小尺寸是内容宽，永远不会收缩、也就永远不滚）+ `overflow-x: auto`
  *     ⇒ 页签放得下时自然铺开、放不下时**可在页签区内左右滑动**（触屏直接滑，桌面可 shift+滚轮/触控板）；
  *   · 档位按钮 / 关闭按钮 —— 在页签区**之外**、`flex: 0 0 auto` ⇒ 无论页签多少都固定可见、永远可点
- *     （与顶栏「浅深模式 / 支持作者」常驻同理）。
+ *     （与顶栏「深浅模式 / 支持作者」常驻同理）。
  *     adj531（用户要求）：档位按钮从 ✕ 左边移到**最左端**——手机单手拇指够得到，
  *     且它与 ✕ 之间隔着整条页签区，不会在够档位按钮时误触关闭。
  * 滚动条隐藏：保持与顶栏一致的无滚动条观感（内容仍可滚/可触摸拖动）。
@@ -1711,7 +1727,11 @@ body {
 @container (max-width: 480px) {
   .playback-actions { --dock-side-w: 84px; }
 }
-/* 控制区里的按钮：不参与拉伸（保持贴合内容），窄屏才换到下一行 */
+/* 控制区里的按钮：不参与拉伸（保持贴合内容），窄屏才换到下一行。
+   adj534（用户要求"播放/停止按钮高度与顶栏按钮一致"）：高度取共用 token `--jp-btn-h`（24px）。
+   注意这里必须同时把**纵向内边距清零**——`.btn` 基础样式（文件末尾，声明更靠后）是 `padding: 6px 16px`，
+   会盖掉本类原先写的 `padding: 4px 14px`，实测高 31px；只写 height 会被 padding 顶开（border-box 下
+   内容区被挤到 10px、文字溢出）。留横向内边距即可。 */
 .playback-btn {
   display: inline-flex;
   align-items: center;
@@ -1719,7 +1739,8 @@ body {
   gap: 5px;
   flex: 0 0 auto;
   white-space: nowrap;
-  padding: 4px 14px;
+  height: var(--jp-btn-h, 24px);
+  padding: 0 14px;
   font-size: 12px;
   font-family: inherit;
 }
@@ -1993,7 +2014,7 @@ body {
 }
 .tool-dock .pcfg-panel .pcfg-group-title:first-child { margin-top: 0; }
 
-/* adj463c：主题页「浅深模式」等按钮文本**不折行**（窄列下此前会把"跟随系统"拆成两行） */
+/* adj463c：主题页「深浅模式」等按钮文本**不折行**（窄列下此前会把"跟随系统"拆成两行） */
 .tool-dock .theme-mode-btn { flex: 0 0 auto; white-space: nowrap; }
 
 /* ============ 告警面板（adj394 问题提示条 → adj462 移入 dock）============ */
@@ -2687,15 +2708,18 @@ body {
   gap: 4px;
 }
 
-/* 按键基础样式（adj314：粗体；高度与顶栏按钮匹配——顶栏高 40px、按钮约 30px，pad-key 取 30px，
-   工具条整体高 = 5px×2 padding + 30px = 40px，与顶栏高完全呼应） */
+/* 按键基础样式（adj314：粗体）。
+   adj534（用户要求"输入条按钮高度与顶栏按钮一致"）：高度改取共用 token `--jp-btn-h`
+   （= 顶栏 `.topbar-btn` 实测 24px），不再写死 30px——原注释按"顶栏高 40px⇒按钮约 30px"估算，
+   实际顶栏按钮是 24px（padding 4+4 + 12px 字），所以输入条看着比顶栏高出一截。 */
 .script-pad .pad-key {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 3px;
-  min-height: 30px;
+  height: var(--jp-btn-h, 24px);
+  min-height: var(--jp-btn-h, 24px);
   padding: 0 12px;
   background: var(--jp-bg-app);
   border: 1px solid var(--jp-border);
@@ -2741,6 +2765,29 @@ body {
   background: var(--jp-bg-panel-active);
   color: var(--jp-accent);
   border-color: var(--jp-accent);
+}
+
+/* adj537（用户要求）：输入条行首的**图标键**（撤销 / 重做）——
+   方形（宽 = 高 = `--jp-btn-h`）、零横向内边距，只放一枚 16px 图标；
+   与文字键同高同边框，但更窄，不抢主键组的位置。 */
+.script-pad .pad-key.pad-icon {
+  width: var(--jp-btn-h, 24px);
+  padding: 0;
+  font-size: 0; /* 去掉 inline-block 的基线空隙（图标是 svg，不参与文字排版） */
+}
+.script-pad .pad-key.pad-icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+/* 空栈（无可撤销/重做）时置灰且不吃 hover 强调色——否则"看着能点却没反应" */
+.script-pad .pad-key:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.script-pad .pad-key:disabled:hover {
+  border-color: var(--jp-border);
+  color: var(--jp-text-secondary);
 }
 
 /* 二级键返回键：独立醒目配色（区别于普通按键，一眼可辨）+ 加宽便于手指点击 */

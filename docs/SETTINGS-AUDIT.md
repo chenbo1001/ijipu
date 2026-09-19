@@ -125,7 +125,7 @@
 |---|---|---|---|---|
 | `ijipu.pageConfig` | `{}` | ~~**公共默认页面设置**（L1 默认层）~~ **adj480 已删除**（仅保留一次性迁移清理） | 用户个性 | 无（谱面自包含；宿主的"默认层"另见插件设置） |
 | `ijipu.theme` | 品牌默认 | 中国色主题 id | 用户个性 | 保留；建议增加"跟随 Obsidian"（D5） |
-| `ijipu.themeMode` | auto | 浅/深/跟随系统 | 用户个性 | 跟随 Obsidian 浅深（D5） |
+| `ijipu.themeMode` | auto | 浅/深/跟随系统 | 用户个性 | 跟随 Obsidian 深浅（D5） |
 | `ijipu.editorFont` | Consolas | 编辑器字体（限等宽） | 用户个性 | → 插件按库缓存（编辑体验） |
 | `ijipu.editorFontSize` | 14 | 编辑器字号 10~26 | 用户个性 | 同上 |
 | `ijipu.autoWrap` | true | 自动折行 | 用户个性 | 同上 |

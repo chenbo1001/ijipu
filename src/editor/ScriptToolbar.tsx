@@ -15,8 +15,48 @@
  */
 import { useRef, type RefObject } from 'react'
 import { useUiStore } from '../store/uiStore'
-import { PAD_GROUPS, PAD_KB_KEY, type PadGroup } from './padLayout'
+import { PAD_GROUPS, PAD_KB_KEY, PAD_REDO_KEY, PAD_UNDO_KEY, type PadGroup } from './padLayout'
 import { GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
+
+/** adj537：撤销 / 重做图标（内联 SVG，16px，走 currentColor）——
+ *  随按钮文字色自动变（hover / 禁用 / 主题都跟着走），不受字体区别影响。 */
+function UndoIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9.5 14.5 4.5 9.5l5-5" />
+      <path d="M4.5 9.5h9.5a5.5 5.5 0 0 1 0 11h-3" />
+    </svg>
+  )
+}
+
+function RedoIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m14.5 14.5 5-5-5-5" />
+      <path d="M19.5 9.5H10a5.5 5.5 0 0 0 0 11h3" />
+    </svg>
+  )
+}
 
 export function ScriptToolbar({
   padAreaRef,
@@ -24,6 +64,10 @@ export function ScriptToolbar({
   onToggleKb,
   kbActive,
   activeGroupId,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
 }: {
   /** 工具条容器 ref——父级用它读取工具条 rect（adj323b 底部统一对齐） */
   padAreaRef: RefObject<HTMLDivElement | null>
@@ -35,6 +79,11 @@ export function ScriptToolbar({
   kbActive: boolean
   /** adj407：当前已展开菜单的组 id——主键按钮按"开关"语义，展开时高亮（再点即收起） */
   activeGroupId: string | null
+  /** adj537：撤销 / 重做（手机端不依赖 Ctrl+Z 的入口）；`can*` 为空栈时按钮置灰 */
+  onUndo: () => void
+  onRedo: () => void
+  canUndo: boolean
+  canRedo: boolean
 }) {
   const btnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   // adj333：动态「乐器」——把收藏的采样音色（GM 音色）加入乐器组，插入 @名
@@ -57,6 +106,33 @@ export function ScriptToolbar({
   return (
     <div className="script-pad" role="toolbar" aria-label="简谱输入工具条" ref={padAreaRef}>
       <div className="pad-scroll">
+        {/* adj537（用户要求）：行首常驻「撤销 / 重做」图标按钮——手机端不必依赖 Ctrl+Z。
+            放在**最左**（左手拇指第一落点），与后面的主键组用分隔点隔开；
+            `onMouseDown.preventDefault()` 与其它按键一致：保住 textarea 焦点（否则点一下就失焦、
+            接下来在输入条上打字会落空）。空栈时 `disabled` 置灰，避免"点了没反应"的疑惑。 */}
+        <button
+          type="button"
+          className="pad-key pad-icon"
+          title={PAD_UNDO_KEY.hint}
+          aria-label={PAD_UNDO_KEY.label}
+          disabled={!canUndo}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onUndo}
+        >
+          <UndoIcon />
+        </button>
+        <button
+          type="button"
+          className="pad-key pad-icon"
+          title={PAD_REDO_KEY.hint}
+          aria-label={PAD_REDO_KEY.label}
+          disabled={!canRedo}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onRedo}
+        >
+          <RedoIcon />
+        </button>
+        <div className="pad-sep" aria-hidden="true" />
         {PAD_GROUPS.map((g) => (
           <button
             key={g.id}

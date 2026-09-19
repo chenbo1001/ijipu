@@ -209,10 +209,10 @@ export function TopBar() {
   /** 手动步进（`−`/`+`）：守**手动范围**（当前值可能因适配落在范围外，先按当前值加减再夹回来） */
   const zoomBy = (delta: number) =>
     setPreviewZoom(Math.min(PREVIEW_ZOOM_RANGE[1], Math.max(PREVIEW_ZOOM_RANGE[0], previewZoom + delta)))
-  // adj426：顶栏新增「浅深模式」三状态按钮（在支持作者之前），与设置里的浅深模式联动
+  // adj426：顶栏新增「深浅模式」三状态按钮（在支持作者之前），与设置里的深浅模式联动
   const themeMode = useUiStore((s) => s.themeMode)
   const setThemeMode = useUiStore((s) => s.setThemeMode)
-  // adj383：主题（中国色主题 + 浅深模式）已移入「页面设置」对话框的「主题」标签，顶栏不再持有
+  // adj383：主题（中国色主题 + 深浅模式）已移入「页面设置」对话框的「主题」标签，顶栏不再持有
   // adj281：折行 / 字体 / 字号（从状态栏设置组移到顶栏工具条）
   const autoWrap = useUiStore((s) => s.autoWrap)
   const setAutoWrap = useUiStore((s) => s.setAutoWrap)
@@ -286,8 +286,8 @@ export function TopBar() {
       active: dockOpen && dockPanel === 'export',
       onPick: () => toggleDock('export'),
     },
-    // adj426：浅深模式三状态按钮（adj530 由顶栏独立常驻并入功能组）——
-    // 图标与文字随当前档位切换，与「设置 → 主题 → 浅深模式」共用 store
+    // adj426：深浅模式三状态按钮（adj530 由顶栏独立常驻并入功能组）——
+    // 图标与文字随当前档位切换，与「设置 → 主题 → 深浅模式」共用 store
     themeMode: { key: 'themeMode', label: '主题', kind: 'theme' },
     pageConfig: {
       key: 'pageConfig',
@@ -483,7 +483,7 @@ export function TopBar() {
         return <ToolIcon name="font" />
       case 'scriptPad':
         return <ToolIcon name="keyboard" />
-      // adj426：浅深模式三状态按钮——按当前 mode 选不同图标（与品牌 copy 里的浅深色描述一致）
+      // adj426：深浅模式三状态按钮——按当前 mode 选不同图标（与品牌 copy 里的深浅色描述一致）
       case 'themeAuto':
         return <ToolIcon name="themeAuto" />
       case 'themeLight':
@@ -566,9 +566,9 @@ export function TopBar() {
       )
     }
     if (t.kind === 'theme') {
-      // adj426/adj530：浅深模式三状态按钮（在功能组内「导出」与「设置」之间）——
+      // adj426/adj530：深浅模式三状态按钮（在功能组内「导出」与「设置」之间）——
       // 点一次循环到下一档：auto → light → dark → auto；图标与文字随当前档位切换。
-      // 与「设置 → 主题 → 浅深模式」三个按钮共用 store（uiStore.setThemeMode），状态实时同步。
+      // 与「设置 → 主题 → 深浅模式」三个按钮共用 store（uiStore.setThemeMode），状态实时同步。
       return (
         <button
           type="button"
@@ -583,17 +583,17 @@ export function TopBar() {
           }}
           title={
             themeMode === 'auto'
-              ? '浅深模式：随系统（点击切到浅色）'
+              ? '深浅模式：随系统（点击切到浅色）'
               : themeMode === 'light'
-                ? '浅深模式：浅色（点击切到深色）'
-                : '浅深模式：深色（点击切到随系统）'
+                ? '深浅模式：浅色（点击切到深色）'
+                : '深浅模式：深色（点击切到随系统）'
           }
           aria-label={
             themeMode === 'auto'
-              ? '浅深模式 当前为随系统，点击切到浅色'
+              ? '深浅模式 当前为随系统，点击切到浅色'
               : themeMode === 'light'
-                ? '浅深模式 当前为浅色，点击切到深色'
-                : '浅深模式 当前为深色，点击切到随系统'
+                ? '深浅模式 当前为浅色，点击切到深色'
+                : '深浅模式 当前为深色，点击切到随系统'
           }
         >
           {iconOf(themeMode === 'auto' ? 'themeAuto' : themeMode === 'light' ? 'themeLight' : 'themeDark')}
@@ -758,7 +758,7 @@ export function TopBar() {
       )
     }
     if (t.kind === 'theme') {
-      // adj530：「主题（浅深三状态）」被折叠后，三个档位各自成条（当前档位打 ✓）——
+      // adj530：「主题（深浅三状态）」被折叠后，三个档位各自成条（当前档位打 ✓）——
       // 与顶栏那个"点一次循环一档"的按钮等价，但少点两次；仍写同一个 store action。
       const modes: { key: typeof themeMode; label: string }[] = [
         { key: 'auto', label: '随系统' },
@@ -768,7 +768,7 @@ export function TopBar() {
       return (
         <>
           <div className="menu-sep" key={`${t.key}-sep`} />
-          <div className="menu-group-title" key={`${t.key}-title`}>浅深模式</div>
+          <div className="menu-group-title" key={`${t.key}-title`}>深浅模式</div>
           {modes.map((m) => (
             <div
               key={m.key}
@@ -894,7 +894,7 @@ export function TopBar() {
       /**
        * adj453：**常驻槽位全部先扣预算**——「支持」与「更多」两个按钮必须完整落在顶栏右侧。
        * 用户当年报障「手机上三点只露一半、部分机型完全看不到」的根因有二：
-       *   ① 老代码只扣了「支持作者」的宽度，**漏了浅深三状态按钮**（约 36px）；
+       *   ① 老代码只扣了「支持作者」的宽度，**漏了深浅三状态按钮**（约 36px）；
        *   ② 顶栏 flex 间距只扣了 1 个 `gap`，实际有 5~6 个（每个 6px）。
        * 两者叠加使预算比真实可用宽度多出 ~40px → 工具条按虚高预算多留按钮 → 顶栏总额超出视口，
        * 而最后一个子项「更多」直接被顶出视口右缘（被裁一半或整颗不见）。
@@ -1143,7 +1143,7 @@ export function TopBar() {
 
       {/* 工具条（adj530）：**功能按钮组靠左 + 编辑设置组靠右**，放不下的按钮按可见优先级
           收进右侧「更多」下拉。
-          · 视图下拉按钮与浅深三状态按钮**已并入功能组**（见 renderBtn），不再是顶栏独立项；
+          · 视图下拉按钮与深浅三状态按钮**已并入功能组**（见 renderBtn），不再是顶栏独立项；
           · 原本的「弹性间距」占位 div 取消——"左组靠左、右组靠右"改由本容器（`flex: 1 1 auto`）
             加右组 `margin-left: auto` 实现（两层弹性叠加容易互相打架）；
           · adj453：常驻的「支持 / 更多」仍在本容器**之外**——本容器对横向溢出做裁剪
@@ -1170,7 +1170,7 @@ export function TopBar() {
           并统一 `flex-shrink:0`：无论工具条怎么压缩、屏幕多窄，它们都完整固定在顶栏右侧。
           · 「支持」在可见优先级里排第 2（仅次于视图），正常宽度下不会被折叠；真到了极窄屏
             也会连同其余按钮一起进「更多」（`shownKeys` 判定），而不是被裁掉。
-          · adj426：浅深三状态按钮已并入功能组（见 renderBtn 的 kind === 'theme'）。 */}
+          · adj426：深浅三状态按钮已并入功能组（见 renderBtn 的 kind === 'theme'）。 */}
       {shownKeys.has('donate') && (
         <button
           type="button"

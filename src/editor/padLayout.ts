@@ -164,3 +164,13 @@ export const PAD_GROUPS: PadGroup[] = [
 
 /** 未分组主键：软键盘显示/隐藏开关（常驻最右，不随二级态隐藏） */
 export const PAD_KB_KEY: PadKey = { label: '⌨', insert: '', hint: '显示 / 隐藏系统软键盘' }
+
+/**
+ * adj537（用户要求"在输入条最左边插入撤销、重做按钮，图标方式，方便手机端的操作"）：
+ * 行首两个**编辑操作**图标键的文案（与 `PAD_KB_KEY` 一样放在本文件——输入条的文案一直跟着
+ * 它的键表走，不拆到 brand/copy）。
+ * 图标用内联 SVG（见 `ScriptToolbar.tsx`）：本轮没有对应的设计图，且 SVG 走 `currentColor`，
+ * hover / 禁用 / 主题随按钮文字色一起变，也不受字体影响（E-2026-234 的教训：字形墨迹随码位/字体差异极大）。
+ */
+export const PAD_UNDO_KEY = { label: '撤销', hint: '撤销上一步编辑（同 Ctrl+Z）' }
+export const PAD_REDO_KEY = { label: '重做', hint: '重做被撤销的编辑（同 Ctrl+Y）' }
