@@ -8536,6 +8536,15 @@ function runAdj540WorkspaceTests() {
       /searching\s*\?\s*\(hits \?\? \[\]\)\.map/.test(panelSrc) &&
       /workspaceCopy\.filterPlaceholder/.test(panelSrc),
     '')
+  check('adj540 搜索**没搜完必须说出来**（上限截断 ⇒ `truncated` + 提示；"没搜到"与"没搜完"分开）',
+    /export interface SearchResult \{[\s\S]{0,200}?truncated: boolean/.test(wsSrc) &&
+      /return \{ hits, truncated \}/.test(wsSrc) &&
+      /setHitsTruncated\(r\.truncated\)/.test(panelSrc) &&
+      /searchTruncated/.test(copySrc) &&
+      // 上限不能太小（"* 列不全"的另一种解释就是上限太低）：默认深度 ≥10、条目 ≥5000
+      /maxDepth \?\? 10/.test(wsSrc) &&
+      /maxEntries \?\? 5000/.test(wsSrc),
+    '')
   check('adj540 过滤匹配是纯函数（无通配符按子串；有 `*` `?` 按 glob 整体匹配；大小写不敏感；空查询不过滤）',
     // 无通配符：子串（文件名或相对路径都算）
     matchesQuery('小星星.jps', '2.曲谱集/小星星.jps', '星星') &&
@@ -8558,6 +8567,11 @@ function runAdj540WorkspaceTests() {
       /switchDirTitle\(ws\.handle\.name\)/.test(panelSrc) &&
       /switchDirTitle: \(dir: string\): string => `切换工作区目录（当前：\$\{dir\}）`/.test(copySrc) &&
       /\.ws-root \{[\s\S]{0,300}?border: 1px solid var\(--jp-border\)/.test(cssAll),
+    '')
+  check('adj540 根目录名**不许被截断**（用户反馈"只显示到工作区根目录时名字不全"）——长名字让面包屑横向滚动',
+    !/\.ws-root \{[\s\S]{0,400}?max-width/.test(cssAll) &&
+      !/\.ws-root \{[\s\S]{0,400}?text-overflow: ellipsis/.test(cssAll) &&
+      /\.ws-root \{[\s\S]{0,400}?white-space: nowrap/.test(cssAll),
     '')
   check('adj540 列表行带**复选框**（勾选=选中供 改名/移动/删除；点名字=打开/进入），且支持多选',
     /<input[\s\S]{0,200}?type="checkbox"[\s\S]{0,200}?className="ws-check"/.test(panelSrc) &&

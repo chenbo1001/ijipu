@@ -105,6 +105,8 @@ export function WorkspacePanel() {
    */
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<SearchHit[] | null>(null)
+  /** 命中数被上限截断（"没搜到"与"没搜完"要分开告诉用户，见 E-2026-247） */
+  const [hitsTruncated, setHitsTruncated] = useState(false)
   const searching = query.trim().length > 0
   /**
    * adj540（用户要求）：右侧**只留一个下拉按钮**「操作」——点它**弹出菜单**再选具体操作。
@@ -136,17 +138,24 @@ export function WorkspacePanel() {
     const t = window.setTimeout(() => {
       void searchWorkspaceJps(ws.handle, query)
         .then((r) => {
-          if (alive) setHits(r)
+          if (!alive) return
+          setHits(r.hits)
+          setHitsTruncated(r.truncated)
+          // 没搜完必须说出来：否则用户会以为"工作区里就没有这些谱"
+          if (r.truncated) showNotice(workspaceCopy.searchTruncated(r.hits.length), 'warn')
         })
         .catch(() => {
-          if (alive) setHits([])
+          if (alive) {
+            setHits([])
+            setHitsTruncated(false)
+          }
         })
     }, 200)
     return () => {
       alive = false
       window.clearTimeout(t)
     }
-  }, [ws, perm, query, searching])
+  }, [ws, perm, query, searching, showNotice])
 
   /** 弹出菜单：点外面/按 Esc 关闭（菜单渲染在 portal 里，不在 dock 的裁剪范围内） */
   useEffect(() => {
@@ -645,7 +654,10 @@ export function WorkspacePanel() {
             <>
               <div className="ws-side-label" title={selectedEntries.map((e) => e.name).join('、')}>
                 {searching ? (
-                  <span className="ws-side-name">{workspaceCopy.searchResults(hits?.length ?? 0)}</span>
+                  <span className="ws-side-name">
+                    {workspaceCopy.searchResults(hits?.length ?? 0)}
+                    {hitsTruncated ? '…' : ''}
+                  </span>
                 ) : selCount === 0 ? (
                   workspaceCopy.tapToSelect
                 ) : selCount === 1 ? (

@@ -3503,10 +3503,12 @@ body {
   color: var(--jp-text-secondary);
 }
 /* adj540：面包屑首段 = 工作区根目录名，**做成按钮样子**（用户反馈：像纯文字就看不出用途）：
- * 与 `.btn` 同族（边框/圆角/底色），只是更紧凑；hover 换强调色边框，与其它按钮一致。 */
+ * 与 `.btn` 同族（边框/圆角/底色），只是更紧凑；hover 换强调色边框，与其它按钮一致。
+ * ⚠️ **不要给它 `max-width` 截断**（用户反馈"只显示到工作区根目录时名字不全"）：根目录下这一行
+ * 只有"按钮 + /"，本该占满；名字长就让 `.ws-crumb` 自己横向滚动（它已有 `overflow-x: auto`），
+ * 而不是把名字切掉——用户看的就是这个目录名。 */
 .ws-root {
   flex: none;
-  max-width: 60%;
   padding: 2px 8px;
   border: 1px solid var(--jp-border);
   border-radius: 7px;
@@ -3516,8 +3518,6 @@ body {
   font-size: 12px;
   font-weight: 700;
   line-height: 1.5;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
 }

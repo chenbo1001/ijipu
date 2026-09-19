@@ -117,25 +117,47 @@ export interface SearchHit {
   dirSegs: string[]
 }
 
+/** 搜索结果 + **是否被上限截断**（截断必须让用户看见，否则就成了"我的文件不见了"） */
+export interface SearchResult {
+  hits: SearchHit[]
+  /** true = 因深度/条目/命中数上限而**没搜完**（"没搜到"与"没搜完"对用户是两件事） */
+  truncated: boolean
+}
+
 /**
  * adj540（用户要求）：把**整个工作区（含所有子目录）**里符合条件的 `.jps` 收成一个**平坦列表**，
  * 供"过滤即快速打开"用——层级浏览适合整理，找某一份谱还是平坦列表快。
  *
- * 防呆（真实目录可能很大）：限制**深度**（默认 6 层）、**访问条目数**（默认 2000）、**命中数**（默认 200）；
+ * 防呆（真实目录可能很大）：限制**深度**（默认 10 层）、**访问条目数**（默认 5000）、**命中数**（默认 500）；
  * 某一层读不动（权限/竞态）就跳过该层，而不是整次搜索失败。
+ * ⚠️ 因为上限提前结束时返回 `truncated: true`，调用方**必须**把这个事实告诉用户
+ * （否则用户会以为"工作区里就没有这些谱"）。
  */
 export async function searchWorkspaceJps(
   root: FileSystemDirectoryHandle,
   query: string,
   limits: { maxDepth?: number; maxEntries?: number; maxHits?: number } = {},
-): Promise<SearchHit[]> {
-  const maxDepth = limits.maxDepth ?? 6
-  const maxEntries = limits.maxEntries ?? 2000
-  const maxHits = limits.maxHits ?? 200
+): Promise<SearchResult> {
+  const maxDepth = limits.maxDepth ?? 10
+  const maxEntries = limits.maxEntries ?? 5000
+  const maxHits = limits.maxHits ?? 500
   const hits: SearchHit[] = []
   let visited = 0
+  let truncated = false
+  /** 是否已达上限（达到即置 `truncated`，让调用方能把"没搜完"说出来） */
+  const limited = (): boolean => {
+    if (hits.length >= maxHits || visited >= maxEntries) {
+      truncated = true
+      return true
+    }
+    return false
+  }
   const walk = async (dir: FileSystemDirectoryHandle, dirSegs: string[], depth: number): Promise<void> => {
-    if (depth > maxDepth || hits.length >= maxHits || visited >= maxEntries) return
+    if (depth > maxDepth) {
+      truncated = true
+      return
+    }
+    if (limited()) return
     let children: FileSystemHandle[] = []
     try {
       for await (const h of dir.values()) children.push(h)
@@ -143,7 +165,7 @@ export async function searchWorkspaceJps(
       return // 某一层读不动就跳过，不影响其它目录
     }
     for (const h of children) {
-      if (hits.length >= maxHits || visited >= maxEntries) return
+      if (limited()) return
       visited++
       if (h.kind === 'directory') {
         await walk(h as FileSystemDirectoryHandle, [...dirSegs, h.name], depth + 1)
@@ -156,7 +178,7 @@ export async function searchWorkspaceJps(
     }
   }
   await walk(root, [], 1)
-  return hits
+  return { hits, truncated }
 }
 
 /**

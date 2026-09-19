@@ -223,6 +223,8 @@ export const workspaceCopy = {
   /** 通配符说明（输入框 title） */
   filterHint: '不含 * ? 时按子串匹配；含 * ? 时按通配符整体匹配（如 小星*、*练习*、第?课）',
   searchEmpty: '工作区里没有匹配的 .jps',
+  /** 命中数被上限截断时如实告知（否则用户以为"文件不见了"） */
+  searchTruncated: (n: number): string => `匹配项很多，先显示前 ${n} 个（输入更具体的关键词可缩小范围）`,
   /** 过滤结果条数（侧栏标签用） */
   searchResults: (n: number): string => `匹配 ${n} 个`,
   /** 过滤模式下的说明（点击结果=直接打开） */
