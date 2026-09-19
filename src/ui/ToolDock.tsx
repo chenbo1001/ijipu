@@ -58,12 +58,12 @@ const ExportPanel = lazy(() => import('./dock/ExportPanel').then((m) => ({ defau
 // adj540：工作区（移动端的"文件管理器"：选文件夹当工作区 + 子目录 + 打开/新建/重命名/移动/删除）
 const WorkspacePanel = lazy(() => import('./dock/WorkspacePanel').then((m) => ({ default: m.WorkspacePanel })))
 
-/** 六个面板（顺序即标签栏顺序）；告警为专用面板（原 ui/ProblemsBar 拆来） */
+/** 六个面板（顺序即标签栏顺序）；adj540：工作区**排第一**（手机端文件操作主入口，用户要求） */
 const PANELS: readonly { key: DockPanelKey; render: ComponentType }[] = [
+  { key: 'workspace', render: WorkspacePanel },
   { key: 'problems', render: ProblemPanel },
   { key: 'tryout', render: TryoutPanel },
   { key: 'export', render: ExportPanel },
-  { key: 'workspace', render: WorkspacePanel },
   { key: 'settings', render: SettingsPanel },
   { key: 'about', render: AboutPanel },
 ]
@@ -161,6 +161,15 @@ const settingsDefaultH = (rowPitch: number, narrow: boolean, chromeH: number): n
   chromeH + PANE_PAD_H + rowPitch * SETTINGS_ROWS + (narrow ? GRID_GAP_V + FOOT_H : 0)
 
 /**
+ * adj540：工作区面板的**窄屏默认高度**。
+ * 它不像设置面板按"6 行字段"算——右边是一列**固定数量的操作按钮**（打开/改名/移动/删除/新建/存到此处），
+ * 面板高度必须装得下这一列，否则「新建 / 存到此处」会被挤到可视区外（实测 390px 手机上正是如此）。
+ * 取「设置面板那套 + 44px」（再多半行按钮的余量）；上限仍由外层 `maxH()` 夹（宽屏直接给满）。
+ */
+const workspaceDefaultH = (rowPitch: number, narrow: boolean, chromeH: number): number =>
+  narrow ? settingsDefaultH(rowPitch, narrow, chromeH) + 44 : maxH()
+
+/**
  * 各面板**兜底**默认高度（实测 AUTO_FIT 前的占位；AUTO_FIT 项在 `measured` 到位后会被覆盖）。
  * · 告警/试听/导出/关于：实测"能显示全内容的最小高度"（AUTO_FIT）；
  * · 设置：见 `settingsDefaultH`（内容区 `SETTINGS_ROWS` 行）。
@@ -181,10 +190,10 @@ const defaultH = (key: DockPanelKey, narrow: boolean, rowPitch: number, chromeH:
   // 取 maxH 作为默认 = "第一次打开就让用户看到全部 5 个页签 + 还能看几行内容"，避免「打开设置 →
   // 还得先拖大才能看到音色库」。narrow 时仍走 settingsDefaultH（避免矮屏默认过高撑爆视口）。
   if (key === 'settings') return narrow ? settingsDefaultH(rowPitch, narrow, chromeH) : maxH()
-  // adj540：工作区面板沿用「设置面板」那套固定默认（窄屏适中、宽屏拉满）——
-  // 它的内容是**动态列表**（进/出子目录、增删改之后行数都在变），走 AUTO_FIT 会让 dock 高度
-  // 随每次导航跳来跳去；固定默认 + 列表自身滚动更稳。
-  if (key === 'workspace') return narrow ? settingsDefaultH(rowPitch, narrow, chromeH) : maxH()
+  // adj540：工作区面板——窄屏要装得下右侧那列操作按钮（见 workspaceDefaultH），宽屏直接给满。
+  // 内容是**动态列表**（进出子目录、增删改后行数都在变），走 AUTO_FIT 会让高度每次导航都跳，
+  // 故用固定默认 + 列表自身滚动。
+  if (key === 'workspace') return workspaceDefaultH(rowPitch, narrow, chromeH)
   // adj494：关于/试听/导出走 AUTO_FIT（实测内容高）；这里的值是**首次测量前的兜底**
   return chromeH
 }
@@ -217,13 +226,11 @@ const clampH = (v: number, chromeH: number) => {
  * 告警与关于暂无对应的设计图标，暂留字符（`⚠` / `ⓘ`，等用户补图后替换）。
  */
 const TABS: { key: DockPanelKey; label: string; icon?: ToolIconName; glyph?: string }[] = [
+  // adj540：工作区排第一（手机端文件操作主入口，用户要求）；图标用 `public/icons/工作区.png`
+  { key: 'workspace', label: dockCopy.tabWorkspace, icon: 'workspace' },
   { key: 'problems', label: dockCopy.tabProblems, glyph: '⚠' },
   { key: 'tryout', label: dockCopy.tabTryout, icon: 'play' },
   { key: 'export', label: dockCopy.tabExport, icon: 'export' },
-  // adj540：工作区（移动端主路径：选文件夹当工作区，在里面打开/保存/改名/移动/删除）。
-  // 图标用字符兜底——图标集里目前没有"文件夹"这张图（`toolIcons.ICON_FILES`），
-  // 与告警 ⚠ / 关于 ⓘ 同一处理；将来补了设计图再换 `icon`。
-  { key: 'workspace', label: dockCopy.tabWorkspace, glyph: '📁' },
   { key: 'settings', label: dockCopy.tabSettings, icon: 'settings' },
   { key: 'about', label: dockCopy.tabAbout, glyph: 'ⓘ' },
 ]

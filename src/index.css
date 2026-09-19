@@ -1312,6 +1312,18 @@ body {
   .tool-dock-tabstrip { gap: 2px; }
   .tool-dock-tabs { padding: 2px 3px; }
 }
+/**
+ * adj540（用户要求）：页签已经有 6 个（工作区/告警/试听/导出/设置/关于），窄屏放不下——
+ * 宽度账：带图标每签 56px（边框 2 + 内边距 10 + 图标 16 + 间距 4 + 两个中文字 24），
+ * 6 个 + 间距 ≈ 346，加栏开销（档位按钮 28 + ✕ 22 + 间隙）≈ **411px** ⇒ 390 的手机必须横滑才看得到后两个。
+ * 页签本身已按 adj527 收到最小（再压就挤到文字），所以这里**窄屏去掉图标、只留文字**：
+ * 每签 36px ⇒ 6 个 + 间距 ≈ 226，加栏开销 ≈ **291px**，320 的窄机也能整栏放下、不用横滑。
+ * 宽屏（桌面）保留图标——那里宽度富余，图标更有辨识度。
+ */
+@container (max-width: 430px) {
+  .tool-dock-tab-icon { display: none; }
+  .tool-dock-tab { padding: 5px 6px; }
+}
 .tool-dock-close {
   /* adj491：**不许压缩**——页签溢出的场合（窄屏、手机上）也必须保证 ✕ 始终可见、可点。
      adj520：去掉 `margin-left: auto`（去掉两个 auto 互相争抢剩余空间）。
@@ -3616,11 +3628,112 @@ body {
   flex: 1 1 auto;
   max-height: none;
 }
+/* adj540（用户要求）：**左列表 + 右操作按钮**——操作集中到右侧竖排，把行数都留给列表。
+ * 窄屏下右侧固定 96px，列表仍能显示 5~6 行（此前"每行展开操作 + 底部按钮行"只够 3 行）。 */
+.ws-body {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 8px;
+  min-height: 0;
+}
+.ws-body .ws-list {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ws-side {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 4px;
+  width: 96px;
+  /* 兜底：极矮的 dock（用户把底栏压到最小）下按钮列可滚动，绝不出现"按钮被裁掉点不到" */
+  min-height: 0;
+  overflow-y: auto;
+}
+.ws-side-btn {
+  width: 100%;
+  padding: 6px 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* 右侧顶部：当前选中项（未选中时提示"点一下选中"） */
+.ws-side-label {
+  overflow: hidden;
+  color: var(--jp-text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-side-name {
+  color: var(--jp-accent);
+  font-weight: 700;
+}
+.ws-side-gap {
+  flex: 1 1 auto;
+}
+/* 被选中的行（右侧按钮的作用对象） */
+.ws-row.is-selected {
+  background: var(--jp-bg-panel-active);
+  box-shadow: inset 2px 0 0 var(--jp-accent);
+}
+/* 输入/确认区（重命名、新建文件夹、删除确认、另存文件名）——独立一行，不占列表行数 */
+.ws-editbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--jp-border);
+  border-radius: 8px;
+  background: var(--jp-bg-app);
+}
+.ws-editbar-danger {
+  border-color: #ff6b81;
+}
+.ws-edit-label {
+  color: var(--jp-text-secondary);
+  font-size: 12px;
+}
+.ws-editbar .btn {
+  padding: 5px 10px;
+  font-size: 12px;
+}
 .ws-panel-gate {
   align-items: center;
   justify-content: center;
   gap: 10px;
   text-align: center;
+}
+/* adj540：授权前必须让用户看清"要授权的是哪个目录"（含"浏览器不给完整路径"的说明） */
+.ws-grant {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
+}
+.ws-grant-title {
+  color: var(--jp-text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+.ws-grant-dir {
+  overflow: hidden;
+  padding: 6px 10px;
+  border: 1px solid var(--jp-border);
+  border-radius: 8px;
+  background: var(--jp-bg-app);
+  color: var(--jp-accent);
+  font-family: var(--jp-font-mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-grant-hint {
+  color: var(--jp-text-muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 /* 行内「更多操作」展开区（打开/重命名/移动到…/删除），缩进对齐到行文字下方 */
 .ws-actions {
@@ -3690,14 +3803,15 @@ body {
   font-size: 12px;
   white-space: nowrap;
 }
-/* adj540：窄屏（手机）下页脚必须**始终可见**——实测 390px 时「只列出文件夹与 .jps 文件」这行提示
- * 会把「新建文件夹 / 保存当前谱到此处」挤到第二行、被底栏裁掉（要滚动才看得到主按钮）。
- * 故窄屏隐藏该提示（它只是说明文字）并把列表最小高度调小，保证两个主按钮留在可视区内。 */
-@media (max-width: 520px) {
-  .ws-foot .ws-hint {
-    display: none;
-  }
-  .ws-panel .ws-list {
-    min-height: 72px;
-  }
+/* adj540：窄屏（手机）把工作区面板收紧——**这段必须放在所有 `.ws-*` 基础规则之后**：
+ * CSS 同级选择器"后写的赢"，把窄屏覆盖写在文件前面的容器查询里会被下面的 `.ws-side-btn`
+ * 基础规则（`padding: 6px 4px; font-size: 12px`）盖掉 —— 本轮真踩过这一脚：
+ * 按钮没变矮 ⇒ 一列 6 个溢出 27px ⇒ 最后一个「存到此处」被裁在可视区外。
+ * 每签压到 ≈21px 的账：`padding 3px 2px` + `font-size 11px` + **`line-height 1.25`**
+ * （继承的行高 1.6 才是主要元凶：11×1.6=17.6 + 8 + 2 ≈ 28px）。
+ * 列表最小高度同时调小，保证"列表 + 右侧按钮列"都装得下。 */
+@container (max-width: 430px) {
+  .ws-side { width: 78px; gap: 2px; }
+  .ws-side-btn { padding: 3px 2px; font-size: 11px; line-height: 1.25; }
+  .ws-panel .ws-list { min-height: 72px; }
 }

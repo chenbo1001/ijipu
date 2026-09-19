@@ -57,6 +57,8 @@ export const ICON_FILES = {
   themeLight: '浅色主题',
   /** adj426：深色主题 */
   themeDark: '深色主题',
+  /** adj540：工作区（选文件夹当工作区；底栏「工作区」页签用） */
+  workspace: '工作区',
 } as const
 
 export type ToolIconName = keyof typeof ICON_FILES

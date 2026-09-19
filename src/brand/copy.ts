@@ -136,6 +136,15 @@ export const workspaceCopy = {
   pick: '选择文件夹当工作区',
   /** 已有工作区但授权过期（真机实测：重新打开页面后是 prompt） */
   grant: '继续访问（需授权）',
+  /** adj540：授权前**必须让用户看清是哪个目录**（用户要求） */
+  grantTitle: '需要重新授权访问这个文件夹',
+  /**
+   * 授权区里那条"为什么看不到完整路径"的说明。
+   * File System Access 出于隐私**只暴露文件夹名**（句柄的 `name`），**不提供完整磁盘路径**
+   * （`resolve()` 也只能在工作区内算相对路径）⇒ 这里如实说明，别让用户以为是显示不全。
+   */
+  grantPathHint: '浏览器出于隐私不提供完整磁盘路径，这里显示的是「文件夹名 + 工作区内相对路径」',
+  grantWhy: '刷新或重新打开页面后，浏览器会把目录权限重置为"待确认"，需要在点击后重新授予一次。',
   switchDir: '换一个文件夹',
   up: '上级目录',
   emptyDir: '这个文件夹里没有 .jps 文件',
@@ -149,26 +158,31 @@ export const workspaceCopy = {
   openFailed: (p: string, reason: string): string => `打开 ${p} 失败：${reason}`,
   saved: (p: string): string => `已保存到工作区：${p}`,
   saveFailed: (p: string, reason: string): string => `保存到工作区失败（${p}）：${reason}`,
-  saveHere: '保存当前谱到此处',
+  saveHere: '存到此处',
   saveNameLabel: '文件名',
   namePlaceholder: '例如 小星星',
   saveBtn: '保存',
   closeBtn: '关闭',
-  // ---- adj540 续：文件操作（新建/重命名/移动/删除；破坏性操作必须二次确认） ----
-  /** 行尾「更多操作」按钮（打开/重命名/移动到…/删除） */
+  // ---- adj540 续：文件操作（新建/改名/移动/删除；破坏性操作必须二次确认） ----
+  // 文案从简（用户要求"能指明指示为宜"）：右侧按钮列窄（96px），短标签更好读、也更少换行。
+  // 「改名/移动」而不写"重命名/移动到…"，「新建」在本面板里只有"新建文件夹"一种含义，
+  // 「存到此处」= 把当前谱写进当前目录（与全局「保存 Ctrl+S」区分开）。
+  /** 行尾「更多操作」按钮（打开/改名/移动/删除） */
   moreActions: '更多操作',
+  /** adj540：未选中任何项时右侧操作区的提示（点一下行 = 选中，再点 = 打开） */
+  tapToSelect: '点一下选中',
   actOpen: '打开',
-  actRename: '重命名',
-  actMove: '移动到…',
+  actRename: '改名',
+  actMove: '移动',
   actDelete: '删除',
-  actNewFolder: '新建文件夹',
+  actNewFolder: '新建',
   folderNamePlaceholder: '文件夹名',
-  renamePlaceholder: '新文件名（不用写 .jps）',
+  renamePlaceholder: '新名字（不用写 .jps）',
   confirmBtn: '确定',
   cancelBtn2: '取消',
-  /** 移动到…：进入目标目录后再点它 */
-  moveHere: '移动到此处',
-  moveCancel: '取消移动',
+  /** 移动模式：进入目标目录后再点它 */
+  moveHere: '移到此处',
+  moveCancel: '取消',
   /** 永久删除的二次确认（FSA 没有回收站） */
   deleteFileConfirm: (n: string): string => `永久删除「${n}」？删了就找不回来了（浏览器文件 API 没有回收站）`,
   deleteDirConfirm: (n: string): string => `永久删除空文件夹「${n}」？`,

@@ -8444,29 +8444,53 @@ function runAdj540WorkspaceTests() {
   const copySrc = String(readFileSync('src/brand/copy.ts', 'utf8'))
   // 断言 CSS 前先剥注释：注释里**故意写了**要禁用的写法（同 E-2026-237 的坑）
   const cssAll = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
-  check('adj540 工作区是底栏 dock 的页签（与试听/导出/设置一致），不再是弹窗',
+  check('adj540 工作区是底栏 dock 的页签 + **排第一**（手机端文件操作主入口），图标用 `public/icons/工作区.png`',
     /\| 'workspace'/.test(ui) && // DockPanelKey
       !/\| 'workspace'/.test(ui.split('export type DockPanelKey')[0]) && // 不再出现在 ModalKind 里
-      /\{ key: 'workspace', render: WorkspacePanel \}/.test(dockSrc) &&
-      /\{ key: 'workspace', label: dockCopy\.tabWorkspace/.test(dockSrc) &&
+      // 顺序：PANELS/TABS 的第一项都是 workspace
+      /\{ key: 'workspace', render: WorkspacePanel \},\s*\{ key: 'problems'/.test(dockSrc) &&
+      /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace' \}/.test(dockSrc) &&
+      /workspace: '工作区'/.test(String(readFileSync('src/ui/toolIcons.ts', 'utf8'))) &&
       /if \(key === 'workspace'\)/.test(dockSrc) &&
       /export const workspaceCopy/.test(copySrc) &&
       /tabWorkspace: '工作区'/.test(copySrc) &&
       !/modal === 'workspace'/.test(appSrc),
     '')
-  check('adj540 面板走"受限高度链"（pane 当弹性列容器 ⇒ 列表自己滚、页脚主按钮常驻可见，与 .pane-problems 同套路）',
+  check('adj540 面板走"受限高度链"（pane 当弹性列容器 ⇒ 列表自己滚、右侧操作区常驻，与 .pane-problems 同套路）',
     /\.tool-dock-pane\.pane-workspace \{[\s\S]{0,220}?min-height: 0/.test(cssAll) &&
-      /\.ws-panel \{[\s\S]{0,200}?flex: 1 1 auto;[\s\S]{0,80}?min-height: 0/.test(cssAll) &&
-      // 窄屏要隐藏页脚提示、调小列表最小高度（否则 390px 上「保存当前谱到此处」被挤出可视区）
-      /@media \(max-width: 520px\) \{[\s\S]{0,300}?\.ws-foot \.ws-hint \{[\s\S]{0,80}?display: none/.test(cssAll),
+      /\.ws-panel \{[\s\S]{0,200}?flex: 1 1 auto;[\s\S]{0,80}?min-height: 0/.test(cssAll),
     '')
-  check('adj540 入口接线：菜单开面板 + **手机端以工作区优先**（系统选择器另留独立入口）',
-    /workspaceCopy\.menuLabel, hotkey: 'w', onPick: \(\) => toggleDock\('workspace'\)/.test(topSrc) &&
-      // 手机端（粗指针）+ 浏览器支持选文件夹 ⇒ 直接开面板，不等"是否已设工作区"
-      /if \(\(isCoarsePointerDevice\(\) && isWorkspaceSupported\(\)\) \|\| \(await getWorkspace\(\)\)\) \{[\s\S]{0,80}?toggleDock\('workspace'\)/.test(
-        topSrc,
-      ) &&
-      /workspaceCopy\.openSystemLabel, onPick: runOpen/.test(topSrc),
+  check('adj540 窄屏「左列表 + 右操作按钮」（把行数留给列表），且窄屏隐藏页签图标以放下 6 个页签',
+    /\.ws-body \{[\s\S]{0,220}?display: flex/.test(cssAll) &&
+      /\.ws-side \{[\s\S]{0,220}?flex-direction: column/.test(cssAll) &&
+      /@container \(max-width: 430px\) \{[\s\S]{0,160}?\.tool-dock-tab-icon \{ display: none/.test(cssAll),
+    '')
+  check('adj540 窄屏覆盖**必须写在基础规则之后**（同级选择器后者胜；写前面会被下面的 `.ws-side-btn` 盖掉 ⇒ 按钮不变矮、一列 6 个被裁）',
+    cssAll.indexOf('.ws-side-btn {') > -1 &&
+      cssAll.indexOf('.ws-side-btn { padding: 3px 2px') > cssAll.indexOf('.ws-side-btn {') &&
+      /@container \(max-width: 430px\) \{[\s\S]{0,200}?\.ws-panel \.ws-list \{ min-height: 72px/.test(cssAll),
+    '')
+  check('adj540 重新授权时**显示要授权的目录**（文件夹名 + 工作区内相对路径），并说明"浏览器不给完整路径"',
+    /const wsPathText = ws \? joinPath\(\[ws\.handle\.name, \.\.\.\(ws\.path \?\? \[\]\)\]\) : ''/.test(panelSrc) &&
+      /className="ws-grant-dir" title=\{wsPathText\}/.test(panelSrc) &&
+      /\{wsPathText\}/.test(panelSrc) &&
+      /grantTitle: '需要重新授权访问这个文件夹'/.test(copySrc) &&
+      /grantPathHint/.test(copySrc) &&
+      // 面包屑首段也用真实文件夹名（不再写死"工作区"）
+      /<span className="ws-root" title=\{wsPathText\}>[\s\S]{0,40}?\{ws\.handle\.name\}/.test(panelSrc),
+    '')
+  check('adj540 入口接线：**窄屏以工作区为主入口**（菜单里工作区排第一、隐藏系统选择器相关项）',
+    // 窄屏分支：工作区在最前，且**不含**系统选择器/另存为那几项
+    /const fileEntries: \(MenuEntry \| 'sep'\)\[\] = isNarrow\s*\?\s*\[entryWorkspace, entryNew, entrySamples, entryPaste, entrySave, entryTryout, entryExport\]/.test(
+      topSrc,
+    ) &&
+      /\{ label: workspaceCopy\.openSystemLabel, onPick: runOpen \}/.test(topSrc) &&
+      /\| 'workspace'/.test(ui),
+    '')
+  check('adj540 手机端「保存」未绑定任何文件时自动引导到工作区另存（手机上不走 showSaveFilePicker）',
+    /const runSaveSmart = async \(\) => \{[\s\S]{0,260}?isCoarsePointerDevice\(\) && isWorkspaceSupported\(\) && !useDocStore\.getState\(\)\.workspacePath[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)/.test(
+      topSrc,
+    ) && /entrySave: MenuEntry = \{ label: '保存\(&S\)', kbd: 'Ctrl\+S', hotkey: 's', onPick: runSaveSmart \}/.test(topSrc),
     '')
   check('adj540 手机端「另存为」也走工作区（开面板 + 展开文件名输入），桌面端仍用系统另存为',
     /const runSaveAsSmart = async \(\) => \{[\s\S]{0,240}?isCoarsePointerDevice\(\) && isWorkspaceSupported\(\)[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)[\s\S]{0,80}?await saveFileAs\(\)/.test(
@@ -8482,11 +8506,17 @@ function runAdj540WorkspaceTests() {
       /shouldUseFileInputPicker\(isCoarsePointerDevice\(\)/.test(store),
     '')
   check('adj540 子目录真的能进（列目录 + 面包屑 + 上级）且**每次打开都重读**（手机上刚存进来的谱要立刻可见）',
-    /refresh\(ws, \[\.\.\.path, e\.name\]\)/.test(panelSrc) &&
-      /readDirEntries/.test(panelSrc) &&
+    /const list = await readDirEntries\(rec\.handle, next\)/.test(panelSrc) &&
+      /refresh\(ws, \[\.\.\.path, selectedEntry\.name\]\)/.test(panelSrc) &&
       /parentPath\(path\)/.test(panelSrc) &&
       /const active = useUiStore\(\(s\) => s\.dockOpen && s\.dockPanel === 'workspace'\)/.test(panelSrc) &&
       /if \(!active\) \{[\s\S]{0,300}?return\n\s*\}[\s\S]{0,400}?await getWorkspace\(\)/.test(panelSrc),
+    '')
+  check('adj540 交互模型：**点一下选中、再点同一行才打开**（右侧破坏性按钮必须有明确作用对象）',
+    /if \(selected === e\.name\) \{[\s\S]{0,80}?void openSelected\(\)[\s\S]{0,120}?setSelected\(e\.name\)/.test(panelSrc) &&
+      /const selectedEntry = entries\.find\(\(e\) => e\.name === selected\) \?\? null/.test(panelSrc) &&
+      /disabled=\{busy \|\| !selectedEntry\}/.test(panelSrc) &&
+      /tapToSelect/.test(copySrc),
     '')
   check('adj540 选择器没反应时不静默（5 秒给可操作指引：改用浏览器打开）',
     /PICKER_NO_RESPONSE_MS/.test(panelSrc) && /pickerNoResponse/.test(copySrc),

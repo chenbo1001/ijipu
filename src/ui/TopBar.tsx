@@ -1042,9 +1042,6 @@ export function TopBar() {
   const runOpen = async () => {
     await openFile()
   }
-  const runSave = async () => {
-    await saveFile()
-  }
   /**
    * adj540：「打开…」智能分流（用户确认：**手机端以工作区优先**）——
    *  · **手机/平板（粗指针）且浏览器支持选文件夹** ⇒ 一律开底栏工作区面板（没设工作区时面板里就是
@@ -1061,6 +1058,19 @@ export function TopBar() {
     }
     await openFile()
   }
+  /**
+   * adj540：「保存」——**手机端没有绑定任何文件时，直接引导到工作区另存**（用户要求"窄屏下通过工作区做文件操作"）。
+   * 手机上 `showSaveFilePicker` 不可靠，若还按老路走"保存 → 另存为对话框"，用户会撞到"点了没反应"。
+   * 已经绑定（工作区文件 / 桌面外部文件 / 浏览器句柄）的情况仍走 `saveFile()` 直接写回。
+   */
+  const runSaveSmart = async () => {
+    if (isCoarsePointerDevice() && isWorkspaceSupported() && !useDocStore.getState().workspacePath) {
+      requestWorkspaceSave()
+      toggleDock('workspace')
+      return
+    }
+    await saveFile()
+  }
   /** adj540：手机端「另存为」= 开工作区面板并直接展开文件名输入（`showSaveFilePicker` 在移动端不可靠） */
   const runSaveAsSmart = async () => {
     if (isCoarsePointerDevice() && isWorkspaceSupported()) {
@@ -1074,27 +1084,38 @@ export function TopBar() {
   // adj424：菜单分组重排——「试听播放」「导出」从各自的播放/设置组挪到「文件」分组底部，
   // 与文件操作连成一组；「设置」单独成组（与顶栏按钮布局对齐）。原「播放」分组随之取消（仅试听一项）。
   // 顺序：新建/打开/打开示例/粘贴/保存/另存为 → 试听播放 → 导出；打开示例前的分隔线取消、与「打开」相邻。
-  const fileEntries: (MenuEntry | 'sep')[] = [
-    { label: '新建(&N)', kbd: 'Ctrl+N', hotkey: 'n', onPick: newDoc },
-    // adj540：已设工作区就开工作区面板，否则走系统选择器（见 runOpenSmart）
-    { label: '打开(&O)…', kbd: 'Ctrl+O', hotkey: 'o', onPick: runOpenSmart },
-    // adj540：把系统文件选择器**单独留一个入口**——桌面端/需要挑本机任意文件时不至于被剥夺
-    { label: workspaceCopy.openSystemLabel, onPick: runOpen },
-    // adj423：新增「打开示例」——列出 public/samples 下的示例谱（该目录靠构建期 glob 自动发现，
-    // 往里加 .jps 文件即出现在列表里，无需改代码）；adj424：去掉其前的分隔线、与「打开」紧邻
-    { label: '打开示例(&E)…', hotkey: 'e', onPick: () => openModal('samples') },
-    // adj406：粘贴源码导入——手机端系统文件选择器看不到 .jps 时的兜底入口
-    { label: pasteImportCopy.menuLabel, hotkey: 'v', onPick: () => openModal('pasteImport') },
-    { label: '保存(&S)', kbd: 'Ctrl+S', hotkey: 's', onPick: runSave },
-    { label: '另存为(&A)…', hotkey: 'a', onPick: runSaveAsSmart },
-    // adj540：工作区——手机上打开/保存的主路径（选一个文件夹，之后都在里面挑文件/写文件，支持子目录）
-    { label: workspaceCopy.menuLabel, hotkey: 'w', onPick: () => toggleDock('workspace') },
-    // adj424：从原「播放」分组挪到「文件」分组末尾（按用户要求的「试听-导出-设置」顺序）
-    // adj462：菜单项与顶栏按钮同源——都切到底部 dock 的对应面板（不再弹对话框）
-    { label: '试听播放(&P)', kbd: 'Ctrl+Q', hotkey: 'p', onPick: () => toggleDock('tryout') },
-    // adj415/424：「导出」与「设置」原本在「文件」末位相连，adj424 拆开——导出留在文件组、设置单成一组
-    { label: '导出(&X)…', hotkey: 'x', onPick: () => toggleDock('export') },
-  ]
+  //
+  // adj540：**窄屏（手机）以工作区为文件操作主入口**（用户要求）——
+  //  · 「工作区」提到**第一位**；
+  //  · **隐藏只在 PC 上才成立的项**：「打开…」（系统选择器）、「打开（系统文件选择器）…」、「另存为…」。
+  //    它们在手机上要么不可靠（`showOpenFilePicker` 在 PWA 里"点了没反应"，adj405），要么本来就走不通
+  //    （`showSaveFilePicker`），留着只会让用户在"两条路"之间猜；手机上统一从工作区走。
+  //  · 「保存」保留：它先写回已绑定的文件（工作区/磁盘），**没有绑定时会自动引导到工作区另存**
+  //    （见 runSaveSmart），所以手机上不需要"另存为"这一项。
+  const entryNew: MenuEntry = { label: '新建(&N)', kbd: 'Ctrl+N', hotkey: 'n', onPick: newDoc }
+  const entryOpen: MenuEntry = { label: '打开(&O)…', kbd: 'Ctrl+O', hotkey: 'o', onPick: runOpenSmart }
+  const entryOpenSystem: MenuEntry = { label: workspaceCopy.openSystemLabel, onPick: runOpen }
+  const entrySamples: MenuEntry = { label: '打开示例(&E)…', hotkey: 'e', onPick: () => openModal('samples') }
+  const entryPaste: MenuEntry = { label: pasteImportCopy.menuLabel, hotkey: 'v', onPick: () => openModal('pasteImport') }
+  const entrySave: MenuEntry = { label: '保存(&S)', kbd: 'Ctrl+S', hotkey: 's', onPick: runSaveSmart }
+  const entrySaveAs: MenuEntry = { label: '另存为(&A)…', hotkey: 'a', onPick: runSaveAsSmart }
+  const entryWorkspace: MenuEntry = { label: workspaceCopy.menuLabel, hotkey: 'w', onPick: () => toggleDock('workspace') }
+  const entryTryout: MenuEntry = { label: '试听播放(&P)', kbd: 'Ctrl+Q', hotkey: 'p', onPick: () => toggleDock('tryout') }
+  const entryExport: MenuEntry = { label: '导出(&X)…', hotkey: 'x', onPick: () => toggleDock('export') }
+  const fileEntries: (MenuEntry | 'sep')[] = isNarrow
+    ? [entryWorkspace, entryNew, entrySamples, entryPaste, entrySave, entryTryout, entryExport]
+    : [
+        entryNew,
+        entryOpen,
+        entryOpenSystem,
+        entrySamples,
+        entryPaste,
+        entrySave,
+        entrySaveAs,
+        entryWorkspace,
+        entryTryout,
+        entryExport,
+      ]
   // adj424：新建「设置」分组（仅一项）——与文件组用分隔线隔开，与顶栏按钮「设置」一一对应
   const settingsEntries: (MenuEntry | 'sep')[] = [
     // adj422：菜单项由「页面设置」改为「设置」（与对话框标题、顶栏按钮一致）
