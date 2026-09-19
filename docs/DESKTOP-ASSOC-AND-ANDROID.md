@@ -17,7 +17,7 @@
 
 1. **PC**：安装时把 `.jps` 关联到 iJipu 桌面版（双击即用 iJipu 打开），卸载时注销关联。
 2. **Android**：网页版在手机上"打开/保存"体验差；希望有一个 app 壳，能**选一个目录当工作区**来打开/保存 `.jps`；
-   且 UI 仍来自 `ijipu.page.dev`，**不发版就能更新**。
+   且 UI 仍来自 `https://ijipu.pages.dev`（Cloudflare Pages，push 到 `main` 即自动构建），**不发版就能更新**。
 
 ---
 
