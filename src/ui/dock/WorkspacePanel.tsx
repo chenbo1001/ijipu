@@ -552,6 +552,22 @@ export function WorkspacePanel() {
             if (ev.key === 'Escape') setQuery('')
           }}
         />
+        {/* adj540（用户要求）：一键 `*` = 列出工作区**全部** .jps（再点一下清空回到层级列表）。
+            `*` 在过滤口径里是"任意串"，所以等价于"不过滤但走平坦列表"。 */}
+        <button
+          type="button"
+          className={`btn ws-filter-all${query.trim() === '*' ? ' is-active' : ''}`}
+          title={workspaceCopy.filterAllTitle}
+          aria-label={workspaceCopy.filterAllTitle}
+          aria-pressed={query.trim() === '*'}
+          onClick={() => {
+            setQuery(query.trim() === '*' ? '' : '*')
+            setEdit(null)
+            setConfirmDel(null)
+          }}
+        >
+          {workspaceCopy.filterAll}
+        </button>
         {searching && (
           <button type="button" className="btn ws-filter-clear" onClick={() => setQuery('')} title={workspaceCopy.filterClear}>
             ✕

@@ -72,6 +72,17 @@ export function joinPath(segs: readonly string[]): string {
   return segs.join('/')
 }
 
+/**
+ * adj540（用户要求）：是否"隐藏条目"——**名字以 `.` 开头**。
+ *
+ * 为什么列表与过滤都要跳过：用户的谱夹旁边常混着 `.git`、`.obsidian`、`.trash`、`.thumbnails`
+ * 这类系统目录（还有 `.DS_Store` 之类文件），它们既不是谱、数量还多（会把递归过滤的配额吃光），
+ * 列出来只会干扰"找谱"。这与系统文件管理器"默认不显示隐藏文件"的口径一致。
+ */
+export function isHiddenName(name: string): boolean {
+  return name.startsWith('.')
+}
+
 /** 上一级目录（根目录再上一级仍是根：`[]`） */
 export function parentPath(segs: readonly string[]): string[] {
   return segs.slice(0, Math.max(0, segs.length - 1))
@@ -167,6 +178,9 @@ export async function searchWorkspaceJps(
     for (const h of children) {
       if (limited()) return
       visited++
+      // adj540（用户要求）：**跳过 `.` 开头的条目**（`.git`/`.obsidian`/`.trash` 这类系统目录
+      // 既不是谱又会把配额吃光；隐藏条目一律不进结果）
+      if (isHiddenName(h.name)) continue
       if (h.kind === 'directory') {
         await walk(h as FileSystemDirectoryHandle, [...dirSegs, h.name], depth + 1)
         continue
@@ -444,6 +458,8 @@ export async function readDirEntries(
   const dir = await resolveDir(root, path)
   const out: DirEntry[] = []
   for await (const handle of dir.values()) {
+    // adj540（用户要求）：列表也**跳过 `.` 开头的条目**（与过滤口径一致，见 isHiddenName）
+    if (isHiddenName(handle.name)) continue
     if (handle.kind === 'directory') {
       out.push({ kind: 'dir', name: handle.name, mtime: 0 })
       continue

@@ -3708,6 +3708,18 @@ body {
   padding: 5px 9px;
   font-size: 12px;
 }
+/* adj540（用户要求）：一键列出全部 .jps 的 `*` 按钮——与清空按钮同款，激活时高亮 */
+.ws-filter-all {
+  flex: none;
+  padding: 5px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+.ws-filter-all.is-active {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+}
 /* 过滤结果里那条相对目录（告诉用户这份谱在哪个子目录下） */
 .ws-hit-dir {
   flex: none;

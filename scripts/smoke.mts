@@ -100,6 +100,7 @@ import { foldKeys, TOPBAR_DONATE_KEY, TOPBAR_FIXED_KIDS } from '../src/ui/topbar
 import { pickPrimary, hasShell, type ExternalFile } from '../src/store/externalOpen.ts'
 // adj540：工作区（Android/移动端"文件夹当工作区"）——纯逻辑部分在 Node 里直接断言
 import {
+  isHiddenName,
   isJpsName,
   isValidEntryName,
   joinPath,
@@ -8536,6 +8537,13 @@ function runAdj540WorkspaceTests() {
       /searching\s*\?\s*\(hits \?\? \[\]\)\.map/.test(panelSrc) &&
       /workspaceCopy\.filterPlaceholder/.test(panelSrc),
     '')
+  check('adj540 过滤框旁有**一键 `*` 按钮**（列出工作区全部 .jps；再点一下清空，激活态高亮）',
+    /className=\{`btn ws-filter-all\$\{query\.trim\(\) === '\*' \? ' is-active' : ''\}`\}/.test(panelSrc) &&
+      /setQuery\(query\.trim\(\) === '\*' \? '' : '\*'\)/.test(panelSrc) &&
+      /filterAll: '\*'/.test(copySrc) &&
+      /filterAllTitle/.test(copySrc) &&
+      /\.ws-filter-all\.is-active/.test(cssAll),
+    '')
   check('adj540 搜索**没搜完必须说出来**（上限截断 ⇒ `truncated` + 提示；"没搜到"与"没搜完"分开）',
     /export interface SearchResult \{[\s\S]{0,200}?truncated: boolean/.test(wsSrc) &&
       /return \{ hits, truncated \}/.test(wsSrc) &&
@@ -8544,6 +8552,16 @@ function runAdj540WorkspaceTests() {
       // 上限不能太小（"* 列不全"的另一种解释就是上限太低）：默认深度 ≥10、条目 ≥5000
       /maxDepth \?\? 10/.test(wsSrc) &&
       /maxEntries \?\? 5000/.test(wsSrc),
+    '')
+  check('adj540 列表与过滤都**跳过 `.` 开头的条目**（`.git`/`.obsidian`/`.trash` 这类系统目录不算谱，还会吃光搜索配额）',
+    /export function isHiddenName/.test(wsSrc) &&
+      /if \(isHiddenName\(handle\.name\)\) continue/.test(wsSrc) && // 列目录
+      /if \(isHiddenName\(h\.name\)\) continue/.test(wsSrc) && // 递归过滤
+      isHiddenName('.git') &&
+      isHiddenName('.obsidian') &&
+      isHiddenName('.DS_Store') &&
+      !isHiddenName('杂记') &&
+      !isHiddenName('2.曲谱集'),
     '')
   check('adj540 过滤匹配是纯函数（无通配符按子串；有 `*` `?` 按 glob 整体匹配；大小写不敏感；空查询不过滤）',
     // 无通配符：子串（文件名或相对路径都算）

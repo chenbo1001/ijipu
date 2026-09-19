@@ -220,6 +220,9 @@ export const workspaceCopy = {
   /** adj540：过滤框（用户要求）——过滤时列出**整个工作区**里符合条件的 .jps（平坦列表，便于快速打开） */
   filterPlaceholder: '过滤 .jps（支持 * ?，含子目录）…',
   filterClear: '清空过滤',
+  /** adj540（用户要求）：过滤框旁的一键按钮——填入 `*` 即列出工作区全部 .jps（再点一下清空） */
+  filterAll: '*',
+  filterAllTitle: '列出工作区全部 .jps（含子目录）',
   /** 通配符说明（输入框 title） */
   filterHint: '不含 * ? 时按子串匹配；含 * ? 时按通配符整体匹配（如 小星*、*练习*、第?课）',
   searchEmpty: '工作区里没有匹配的 .jps',
