@@ -55,12 +55,15 @@ const AboutPanel = lazy(() => import('../dialogs/AboutDialog').then((m) => ({ de
 // adj497：告警 / 导出改为懒加载（原为静态 import）
 const ProblemPanel = lazy(() => import('./dock/ProblemPanel').then((m) => ({ default: m.ProblemPanel })))
 const ExportPanel = lazy(() => import('./dock/ExportPanel').then((m) => ({ default: m.ExportPanel })))
+// adj540：工作区（移动端的"文件管理器"：选文件夹当工作区 + 子目录 + 打开/新建/重命名/移动/删除）
+const WorkspacePanel = lazy(() => import('./dock/WorkspacePanel').then((m) => ({ default: m.WorkspacePanel })))
 
-/** 五个面板（顺序即标签栏顺序）；告警为专用面板（原 ui/ProblemsBar 拆来） */
+/** 六个面板（顺序即标签栏顺序）；告警为专用面板（原 ui/ProblemsBar 拆来） */
 const PANELS: readonly { key: DockPanelKey; render: ComponentType }[] = [
   { key: 'problems', render: ProblemPanel },
   { key: 'tryout', render: TryoutPanel },
   { key: 'export', render: ExportPanel },
+  { key: 'workspace', render: WorkspacePanel },
   { key: 'settings', render: SettingsPanel },
   { key: 'about', render: AboutPanel },
 ]
@@ -178,6 +181,10 @@ const defaultH = (key: DockPanelKey, narrow: boolean, rowPitch: number, chromeH:
   // 取 maxH 作为默认 = "第一次打开就让用户看到全部 5 个页签 + 还能看几行内容"，避免「打开设置 →
   // 还得先拖大才能看到音色库」。narrow 时仍走 settingsDefaultH（避免矮屏默认过高撑爆视口）。
   if (key === 'settings') return narrow ? settingsDefaultH(rowPitch, narrow, chromeH) : maxH()
+  // adj540：工作区面板沿用「设置面板」那套固定默认（窄屏适中、宽屏拉满）——
+  // 它的内容是**动态列表**（进/出子目录、增删改之后行数都在变），走 AUTO_FIT 会让 dock 高度
+  // 随每次导航跳来跳去；固定默认 + 列表自身滚动更稳。
+  if (key === 'workspace') return narrow ? settingsDefaultH(rowPitch, narrow, chromeH) : maxH()
   // adj494：关于/试听/导出走 AUTO_FIT（实测内容高）；这里的值是**首次测量前的兜底**
   return chromeH
 }
@@ -213,6 +220,10 @@ const TABS: { key: DockPanelKey; label: string; icon?: ToolIconName; glyph?: str
   { key: 'problems', label: dockCopy.tabProblems, glyph: '⚠' },
   { key: 'tryout', label: dockCopy.tabTryout, icon: 'play' },
   { key: 'export', label: dockCopy.tabExport, icon: 'export' },
+  // adj540：工作区（移动端主路径：选文件夹当工作区，在里面打开/保存/改名/移动/删除）。
+  // 图标用字符兜底——图标集里目前没有"文件夹"这张图（`toolIcons.ICON_FILES`），
+  // 与告警 ⚠ / 关于 ⓘ 同一处理；将来补了设计图再换 `icon`。
+  { key: 'workspace', label: dockCopy.tabWorkspace, glyph: '📁' },
   { key: 'settings', label: dockCopy.tabSettings, icon: 'settings' },
   { key: 'about', label: dockCopy.tabAbout, glyph: 'ⓘ' },
 ]

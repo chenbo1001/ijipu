@@ -99,7 +99,16 @@ import { foldKeys, TOPBAR_DONATE_KEY, TOPBAR_FIXED_KIDS } from '../src/ui/topbar
 // adj538：桌面壳「外部打开」——多文件取舍是纯逻辑，可在 Node 里直接断言（模块不碰 window 顶层）
 import { pickPrimary, hasShell, type ExternalFile } from '../src/store/externalOpen.ts'
 // adj540：工作区（Android/移动端"文件夹当工作区"）——纯逻辑部分在 Node 里直接断言
-import { isJpsName, joinPath, normalizeRelPath, parentPath, sortDirEntries, type DirEntry } from '../src/store/workspace.ts'
+import {
+  isJpsName,
+  isValidEntryName,
+  joinPath,
+  normalizeRelPath,
+  parentPath,
+  sortDirEntries,
+  stripJpsExt,
+  type DirEntry,
+} from '../src/store/workspace.ts'
 // adj526：谱面数值字段范围来自引擎同一份表（GUIDE_LIMITS/_EX）——断言"逐项相等"，防止抄成第二份
 import { PAGE_NUM_RANGES, coarseFor } from '../src/ui/numFieldRanges.ts'
 // （GUIDE_LIMITS_EX 见本文件顶部从 layout/guides 的导入；这里补 GUIDE_LIMITS 与字号范围）
@@ -8430,20 +8439,98 @@ function runAdj540WorkspaceTests() {
   const ui = String(readFileSync('src/store/uiStore.ts', 'utf8'))
   const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
   const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
-  const dlgSrc = String(readFileSync('src/dialogs/WorkspaceDialog.tsx', 'utf8'))
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  const panelSrc = String(readFileSync('src/ui/dock/WorkspacePanel.tsx', 'utf8'))
   const copySrc = String(readFileSync('src/brand/copy.ts', 'utf8'))
-  check('adj540 入口接线齐全（modal kind + App 渲染 + 文件菜单项 + 文案集中）',
-    /\| 'workspace'/.test(ui) &&
-      /modal === 'workspace' && <Suspense fallback=\{null\}><WorkspaceDialog \/>/.test(appSrc) &&
-      /workspaceCopy\.menuLabel/.test(topSrc) &&
-      /export const workspaceCopy/.test(copySrc),
+  // 断言 CSS 前先剥注释：注释里**故意写了**要禁用的写法（同 E-2026-237 的坑）
+  const cssAll = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  check('adj540 工作区是底栏 dock 的页签（与试听/导出/设置一致），不再是弹窗',
+    /\| 'workspace'/.test(ui) && // DockPanelKey
+      !/\| 'workspace'/.test(ui.split('export type DockPanelKey')[0]) && // 不再出现在 ModalKind 里
+      /\{ key: 'workspace', render: WorkspacePanel \}/.test(dockSrc) &&
+      /\{ key: 'workspace', label: dockCopy\.tabWorkspace/.test(dockSrc) &&
+      /if \(key === 'workspace'\)/.test(dockSrc) &&
+      /export const workspaceCopy/.test(copySrc) &&
+      /tabWorkspace: '工作区'/.test(copySrc) &&
+      !/modal === 'workspace'/.test(appSrc),
     '')
-  check('adj540 子目录真的能进（列目录 + 面包屑 + 上级）且**不静默失败**（选择器没弹时给可操作指引）',
-    /refresh\(ws, \[\.\.\.path, e\.name\]\)/.test(dlgSrc) &&
-      /readDirEntries/.test(dlgSrc) &&
-      /parentPath\(path\)/.test(dlgSrc) &&
-      /PICKER_NO_RESPONSE_MS/.test(dlgSrc) &&
-      /pickerNoResponse/.test(copySrc),
+  check('adj540 面板走"受限高度链"（pane 当弹性列容器 ⇒ 列表自己滚、页脚主按钮常驻可见，与 .pane-problems 同套路）',
+    /\.tool-dock-pane\.pane-workspace \{[\s\S]{0,220}?min-height: 0/.test(cssAll) &&
+      /\.ws-panel \{[\s\S]{0,200}?flex: 1 1 auto;[\s\S]{0,80}?min-height: 0/.test(cssAll) &&
+      // 窄屏要隐藏页脚提示、调小列表最小高度（否则 390px 上「保存当前谱到此处」被挤出可视区）
+      /@media \(max-width: 520px\) \{[\s\S]{0,300}?\.ws-foot \.ws-hint \{[\s\S]{0,80}?display: none/.test(cssAll),
+    '')
+  check('adj540 入口接线：菜单开面板 + **手机端以工作区优先**（系统选择器另留独立入口）',
+    /workspaceCopy\.menuLabel, hotkey: 'w', onPick: \(\) => toggleDock\('workspace'\)/.test(topSrc) &&
+      // 手机端（粗指针）+ 浏览器支持选文件夹 ⇒ 直接开面板，不等"是否已设工作区"
+      /if \(\(isCoarsePointerDevice\(\) && isWorkspaceSupported\(\)\) \|\| \(await getWorkspace\(\)\)\) \{[\s\S]{0,80}?toggleDock\('workspace'\)/.test(
+        topSrc,
+      ) &&
+      /workspaceCopy\.openSystemLabel, onPick: runOpen/.test(topSrc),
+    '')
+  check('adj540 手机端「另存为」也走工作区（开面板 + 展开文件名输入），桌面端仍用系统另存为',
+    /const runSaveAsSmart = async \(\) => \{[\s\S]{0,240}?isCoarsePointerDevice\(\) && isWorkspaceSupported\(\)[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)[\s\S]{0,80}?await saveFileAs\(\)/.test(
+      topSrc,
+    ) &&
+      /另存为\(&A\)…', hotkey: 'a', onPick: runSaveAsSmart/.test(topSrc) &&
+      /workspaceSaveIntent/.test(String(readFileSync('src/store/uiStore.ts', 'utf8'))) &&
+      /clearWorkspaceSaveIntent\(\)/.test(panelSrc),
+    '')
+  check('adj540 「手机端」判据只有一处（pick 策略与打开/另存为分流共用 saveSupport.isCoarsePointerDevice）',
+    /export function isCoarsePointerDevice/.test(String(readFileSync('src/store/saveSupport.ts', 'utf8'))) &&
+      !/function isCoarsePointer\(/.test(store) &&
+      /shouldUseFileInputPicker\(isCoarsePointerDevice\(\)/.test(store),
+    '')
+  check('adj540 子目录真的能进（列目录 + 面包屑 + 上级）且**每次打开都重读**（手机上刚存进来的谱要立刻可见）',
+    /refresh\(ws, \[\.\.\.path, e\.name\]\)/.test(panelSrc) &&
+      /readDirEntries/.test(panelSrc) &&
+      /parentPath\(path\)/.test(panelSrc) &&
+      /const active = useUiStore\(\(s\) => s\.dockOpen && s\.dockPanel === 'workspace'\)/.test(panelSrc) &&
+      /if \(!active\) \{[\s\S]{0,300}?return\n\s*\}[\s\S]{0,400}?await getWorkspace\(\)/.test(panelSrc),
+    '')
+  check('adj540 选择器没反应时不静默（5 秒给可操作指引：改用浏览器打开）',
+    /PICKER_NO_RESPONSE_MS/.test(panelSrc) && /pickerNoResponse/.test(copySrc),
+    '')
+
+  // ---- ⑤ adj540 续：文件操作（新建/重命名/移动/删除）与安全约束 ----
+  // 先剥注释再断言：`workspace.ts` 的注释里**故意提到** `FileSystemHandle.move()` 与
+  // `removeEntry(..., {recursive:true})`（说明为什么不用它们），不剥注释会把负向断言绊倒（E-2026-237 同款坑）
+  const wsCode = wsSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  check('adj540 条目名校验是纯函数（空 / 含 `/` `\\` / `..` / 控制字符 / 超长都不合法）',
+    isValidEntryName('小星星') &&
+      isValidEntryName('第2课-练习') &&
+      !isValidEntryName('') &&
+      !isValidEntryName('   ') &&
+      !isValidEntryName('a/b') &&
+      !isValidEntryName('a\\b') &&
+      !isValidEntryName('..') &&
+      !isValidEntryName('a\u0000b') &&
+      !isValidEntryName('x'.repeat(81)),
+    '')
+  check('adj540 另存/重命名时把名字补成 `.jps` 且不会出现 `a.jps.jps`',
+    stripJpsExt('小星星') === '小星星' && stripJpsExt('小星星.jps') === '小星星' && stripJpsExt('A.JPS') === 'A',
+    '')
+  check('adj540 重命名/移动 = 读→写新位置→**回读校验一致才删原文件**（FSA 对用户选中的目录没有 move()，非 OPFS 的移动还停在提案）',
+    /async function transferFile\([\s\S]{0,700}?await writeWorkspaceText\(root, to, text\)[\s\S]{0,200}?if \(back !== text\) throw new Error\('VERIFY'\)[\s\S]{0,120}?await removeFile\(root, from\)/.test(
+      wsCode,
+    ) &&
+      !/\.move\(/.test(wsCode),
+    '')
+  check('adj540 删除是**永久**的：二次确认 + 目录只允许删空的（避免递归删掉用户目录里其它文件）',
+    /export async function removeEmptyDir[\s\S]{0,500}?NOT_EMPTY[\s\S]{0,300}?removeEntry\(name\)/.test(wsCode) &&
+      /deleteFileConfirm/.test(copySrc) &&
+      /confirmDel/.test(panelSrc) &&
+      // 明确**不用** recursive：它会连目录里的照片/文档一起删掉
+      !/recursive:\s*true/.test(wsCode),
+    '')
+  check('adj540 文件操作维护"当前文档的工作区绑定"（重命名/移动跟着改，删除则解绑并提示）',
+    /renameWorkspaceFile: async/.test(store) &&
+      /moveWorkspaceFile: async/.test(store) &&
+      /deleteWorkspaceFile: async/.test(store) &&
+      /deleteWorkspaceDir: async/.test(store) &&
+      /createWorkspaceDir: async/.test(store) &&
+      /if \(cur && joinPath\(cur\) === joinPath\(from\)\) set\(\{ workspacePath: to, fileName: fileBaseName\(toName\) \}\)/.test(store) &&
+      /const unbound = !!cur && joinPath\(cur\) === joinPath\(target\)/.test(store),
     '')
 }
 

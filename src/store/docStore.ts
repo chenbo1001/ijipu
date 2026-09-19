@@ -21,6 +21,7 @@ import {
   createSavePhaseLog,
   fileBaseName,
   fileInputAccept,
+  isCoarsePointerDevice,
   isUserCancel,
   saveTextToHandle,
   shouldUseFileInputPicker,
@@ -33,11 +34,18 @@ import { normalizePastedSource } from './importSource'
 import { pickPrimary, writeExternalFile, type ExternalFile } from './externalOpen'
 // adj540：工作区目录（Android/移动端"选一个文件夹当工作区"，纯网页，不需要壳）
 import {
+  createSubdir,
   getWorkspace,
+  hasEntry,
+  isValidEntryName,
   joinPath,
+  moveFile,
   normalizeRelPath,
   readWorkspaceText,
   rememberWorkspacePath,
+  removeEmptyDir,
+  removeFile,
+  renameFile,
   writeWorkspaceText,
 } from './workspace'
 
@@ -153,8 +161,19 @@ interface DocState {
   /**
    * adj540：把当前谱**另存到工作区**的指定位置（`path` 最后一段是文件名，缺失的子目录会创建）。
    * 写入后回读校验；成功即把本文档与该路径绑定（后续「保存」写回它）。
+   * 若目标位置**已有同名文件且它不是本文档当前绑定的那个** ⇒ 拒绝并提示（不静默覆盖别人的谱）。
    */
   saveToWorkspace: (path: string[]) => Promise<boolean>
+  /** adj540：在工作区里新建子目录 */
+  createWorkspaceDir: (dirPath: string[], name: string) => Promise<boolean>
+  /** adj540：重命名工作区里的 `.jps`（同目录换名；当前文档绑定会跟着改） */
+  renameWorkspaceFile: (dirPath: string[], fromName: string, toName: string) => Promise<boolean>
+  /** adj540：把 `.jps` 移到另一个目录（当前文档绑定会跟着改） */
+  moveWorkspaceFile: (fromSegs: string[], toDirSegs: string[]) => Promise<boolean>
+  /** adj540：删除工作区里的 `.jps`（**永久**；若删的是当前文档则解绑并提示） */
+  deleteWorkspaceFile: (segs: string[]) => Promise<boolean>
+  /** adj540：删除工作区里的目录（**仅当为空**，避免连带删掉用户目录里其它文件） */
+  deleteWorkspaceDir: (dirPath: string[], name: string) => Promise<boolean>
   /**
    * adj538：载入桌面壳送来的外部文件（双击打开）。
    * 取第一个载入编辑器；返回是否载入成功（读失败时给提示并返回 false）。
@@ -547,7 +566,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
     // 降级用 <input type=file> 读取 .jps 文本——打开本质只读文本，不依赖文件系统 API
     // adj405：**移动端一律走 input 路径**——真机上已安装的 PWA 里 showOpenFilePicker 可能
     // "点了没反应"（浏览器同一地址却正常），且 Android 拿不到可写回句柄（移动端保存走「导出」）。
-    if (shouldUseFileInputPicker(isCoarsePointer(), typeof picker === 'function')) return openFileViaInput()
+    if (shouldUseFileInputPicker(isCoarsePointerDevice(), typeof picker === 'function')) return openFileViaInput()
     try {
       const [handle] = await picker({
         types: [{ description: 'iJipu 乐谱', accept: { 'text/plain': ['.jps'] } }],
@@ -667,6 +686,13 @@ export const useDocStore = create<DocState>()((set, get) => ({
     const cancelHint = armSavingHint()
     try {
       const code = get().code
+      // 重名保护：目标位置已有同名文件、且**不是本文档当前绑定的那个** ⇒ 拒绝（不静默覆盖别人的谱）
+      const cur = get().workspacePath
+      const same = !!cur && joinPath(cur) === joinPath(segs)
+      if (!same && (await hasEntry(ws.handle, segs.slice(0, -1), segs[segs.length - 1]))) {
+        ui.showNotice(workspaceCopy.exists(segs[segs.length - 1]), 'warn')
+        return false
+      }
       await writeWorkspaceText(ws.handle, segs, code)
       const name = fileBaseName(segs[segs.length - 1])
       set({
@@ -689,6 +715,137 @@ export const useDocStore = create<DocState>()((set, get) => ({
       return false
     } finally {
       cancelHint()
+    }
+  },
+  createWorkspaceDir: async (dirPath, name) => {
+    const ui = useUiStore.getState()
+    const ws = await getWorkspace()
+    if (!ws) {
+      ui.showNotice(workspaceCopy.noWorkspace, 'warn')
+      return false
+    }
+    if (!isValidEntryName(name)) {
+      ui.showNotice(workspaceCopy.invalidName, 'warn')
+      return false
+    }
+    try {
+      await createSubdir(ws.handle, dirPath, name)
+      console.info(`[iJipu] 工作区新建目录：${joinPath([...dirPath, name])}`)
+      ui.showNotice(workspaceCopy.dirCreated(name), 'ok')
+      return true
+    } catch (e) {
+      console.warn('[iJipu] 新建目录失败', e)
+      ui.showNotice(workspaceOpErrorText(name, e), 'error')
+      return false
+    }
+  },
+  renameWorkspaceFile: async (dirPath, fromName, toName) => {
+    const ui = useUiStore.getState()
+    const ws = await getWorkspace()
+    if (!ws) {
+      ui.showNotice(workspaceCopy.noWorkspace, 'warn')
+      return false
+    }
+    if (!isValidEntryName(toName)) {
+      ui.showNotice(workspaceCopy.invalidName, 'warn')
+      return false
+    }
+    const dir = normalizeRelPath(dirPath)
+    const from = [...dir, fromName]
+    const to = [...dir, toName]
+    try {
+      await renameFile(ws.handle, dir, fromName, toName)
+      // 正在编辑的就是这个文件 ⇒ 绑定跟着改名（否则「保存」会指向一个已不存在的名字）
+      const cur = get().workspacePath
+      if (cur && joinPath(cur) === joinPath(from)) set({ workspacePath: to, fileName: fileBaseName(toName) })
+      console.info(`[iJipu] 工作区重命名：${joinPath(from)} → ${joinPath(to)}`)
+      ui.showNotice(workspaceCopy.renamed(fromName, toName), 'ok')
+      return true
+    } catch (e) {
+      console.warn('[iJipu] 重命名失败', e)
+      ui.showNotice(workspaceOpErrorText(toName, e), 'error')
+      return false
+    }
+  },
+  moveWorkspaceFile: async (fromSegs, toDirSegs) => {
+    const ui = useUiStore.getState()
+    const ws = await getWorkspace()
+    if (!ws) {
+      ui.showNotice(workspaceCopy.noWorkspace, 'warn')
+      return false
+    }
+    const from = normalizeRelPath(fromSegs)
+    const toDir = normalizeRelPath(toDirSegs)
+    if (from.length === 0) return false
+    const name = from[from.length - 1]
+    if (joinPath(from.slice(0, -1)) === joinPath(toDir)) return true // 原地不动
+    try {
+      await moveFile(ws.handle, from, toDir)
+      const cur = get().workspacePath
+      if (cur && joinPath(cur) === joinPath(from)) set({ workspacePath: [...toDir, name] })
+      console.info(`[iJipu] 工作区移动：${joinPath(from)} → ${joinPath([...toDir, name])}`)
+      ui.showNotice(workspaceCopy.moved(name, joinPath(toDir)), 'ok')
+      return true
+    } catch (e) {
+      console.warn('[iJipu] 移动失败', e)
+      ui.showNotice(workspaceOpErrorText(name, e), 'error')
+      return false
+    }
+  },
+  deleteWorkspaceFile: async (segs) => {
+    const ui = useUiStore.getState()
+    const ws = await getWorkspace()
+    if (!ws) {
+      ui.showNotice(workspaceCopy.noWorkspace, 'warn')
+      return false
+    }
+    const target = normalizeRelPath(segs)
+    if (target.length === 0) return false
+    const name = target[target.length - 1]
+    try {
+      await removeFile(ws.handle, target)
+      // 正在编辑的就是这个文件 ⇒ 解绑（内容仍留在编辑器里，可用「保存到此处」重新落盘）
+      const cur = get().workspacePath
+      const unbound = !!cur && joinPath(cur) === joinPath(target)
+      if (unbound) {
+        set({ workspacePath: null })
+        ui.showNotice(workspaceCopy.deletedOpenFile(name), 'warn')
+      } else {
+        ui.showNotice(workspaceCopy.deleted(name), 'ok')
+      }
+      console.info(`[iJipu] 工作区删除文件：${joinPath(target)}（${unbound ? '并解绑当前文档' : '非当前文档'}）`)
+      return true
+    } catch (e) {
+      console.warn('[iJipu] 删除文件失败', e)
+      ui.showNotice(workspaceOpErrorText(name, e), 'error')
+      return false
+    }
+  },
+  deleteWorkspaceDir: async (dirPath, name) => {
+    const ui = useUiStore.getState()
+    const ws = await getWorkspace()
+    if (!ws) {
+      ui.showNotice(workspaceCopy.noWorkspace, 'warn')
+      return false
+    }
+    const dir = normalizeRelPath(dirPath)
+    try {
+      await removeEmptyDir(ws.handle, dir, name)
+      // 当前文档正在这个目录里 ⇒ 解绑（目录都没了）
+      const cur = get().workspacePath
+      const prefix = joinPath([...dir, name])
+      if (cur && (joinPath(cur) === prefix || joinPath(cur).startsWith(`${prefix}/`))) {
+        set({ workspacePath: null })
+        ui.showNotice(workspaceCopy.deletedOpenFile(name), 'warn')
+      } else {
+        ui.showNotice(workspaceCopy.deleted(name), 'ok')
+      }
+      console.info(`[iJipu] 工作区删除目录：${prefix}`)
+      return true
+    } catch (e) {
+      console.warn('[iJipu] 删除目录失败', e)
+      ui.showNotice(workspaceOpErrorText(name, e), 'error')
+      return false
     }
   },
   saveFile: async () => {
@@ -963,34 +1120,30 @@ function disconnectFileHandle(): void {
   void saveFileHandle(null)
 }
 
+/**
+ * adj540：把工作区 IO 抛出的**错误码**翻译成给用户看的一句话。
+ * 这些是"预期内的失败"（重名 / 目录非空 / 校验不一致），必须给人话，不能把原始异常抛给用户。
+ */
+function workspaceOpErrorText(name: string, e: unknown): string {
+  const code = e instanceof Error ? e.message : String(e)
+  if (code === 'EXISTS') return workspaceCopy.exists(name)
+  if (code === 'NOT_EMPTY') return workspaceCopy.dirNotEmpty(name)
+  if (code === 'VERIFY') return workspaceCopy.verifyFailed(name)
+  return workspaceCopy.opFailed(name, code)
+}
+
 // ---- adj281：降级打开（无 Web File System Access API 时） ----
 // 非安全上下文（http://、file://）或非 Chromium 内核下没有 showOpenFilePicker；
 // 打开本身只需读取 .jps 文本，改用标准 <input type="file"> 任何环境都可用。
 // 该环境无法写回磁盘，故 fileHandle 置 null，并提示改走「导出」保存成果。
 
 /**
- * adj399：是否触屏/移动端（粗指针 = 手机/PAD，判据与 uiStore 的工具条默认开关一致，另加 UA 兜底）。
- * 移动端文件管理器**按 MIME 过滤**：`.jps` 是自定义扩展，系统没有对应 MIME 记录
- * （Android SAF / iOS 文件 App 会当作未知类型隐藏或置灰），
- * 因此无论 accept 里写扩展名还是 `application/octet-stream`，用户都**看不到自己的 .jps 文件**
- * （用户反馈：手机端打开对话框里 .jps 不出现）。故移动端一律不设 accept，全部文件可见。
+ * adj399/adj540：是否触屏/移动端 —— 判据已收敛到 `saveSupport.isCoarsePointerDevice()`
+ * （「打开/另存为」在手机端要**以工作区优先**，两处必须用同一个判断，见该函数注释）。
  */
-function isCoarsePointer(): boolean {
-  try {
-    if (window.matchMedia('(pointer: coarse)').matches) return true
-  } catch {
-    /* 媒体特性不可用时走 UA 兜底 */
-  }
-  try {
-    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '')
-  } catch {
-    return false
-  }
-}
-
 function openFileViaInput(): Promise<boolean> {
   return new Promise((resolve) => {
-    const mobile = isCoarsePointer()
+    const mobile = isCoarsePointerDevice()
     const input = document.createElement('input')
     input.type = 'file'
     // adj281：桌面降级路径保留过滤（未知扩展在桌面浏览器上按文件名后缀匹配，能正常筛出 .jps）；

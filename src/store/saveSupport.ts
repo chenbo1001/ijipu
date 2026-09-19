@@ -113,6 +113,31 @@ export function shouldUseFileInputPicker(coarsePointer: boolean, hasFileSystemAc
 }
 
 /**
+ * adj399/adj540：是否**触屏/移动端**（粗指针 = 手机/PAD，另加 UA 兜底）。
+ *
+ * 两处都要用这个判据，故收敛到一处（原先只在 docStore 里，adj540 起「打开/另存为」的分流
+ * ——**手机端以工作区优先**——也要用同一个判断，不能各写一份）：
+ *  ① 移动端文件管理器**按 MIME 过滤**（adj399）：`.jps` 是自定义扩展，系统没有对应 MIME 记录
+ *     （Android SAF / iOS 文件 App 会当作未知类型隐藏或置灰），所以移动端 `<input type=file>` 不设 accept；
+ *  ② adj540：移动端**以工作区优先**——系统选择器在手机上不可靠（adj405 + Chromium 457203705），
+ *     工作区（`showDirectoryPicker`）才是主路径。
+ * 注意与 `uiStore.detectTouch()` 的区别：那个把"窄屏 ≤1024"也算移动端（用于脚本工具条默认开关），
+ * **不能**拿来做文件选择策略——窄窗口的桌面 Chrome 里系统选择器是好的。
+ */
+export function isCoarsePointerDevice(): boolean {
+  try {
+    if (window.matchMedia('(pointer: coarse)').matches) return true
+  } catch {
+    /* 媒体特性不可用时走 UA 兜底 */
+  }
+  try {
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '')
+  } catch {
+    return false
+  }
+}
+
+/**
  * 确认句柄可写：先 queryPermission，未授权时在**用户手势内** requestPermission。
  * 返回最终状态；环境不支持权限 API 时返回 'unknown'（交给真正的写入判定）。
  * 注意：requestPermission 必须在用户手势（Ctrl+S / 菜单点击）尚未被消耗时调用。

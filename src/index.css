@@ -3592,3 +3592,112 @@ body {
   color: var(--jp-text-primary);
   font-size: 13px;
 }
+
+/* adj540：工作区**面板**（dock 内，见 ui/dock/WorkspacePanel.tsx）——
+ * 面板要撑满底栏内容区：列表自己滚动、页脚按钮固定在下；`.ws-panel-gate` 是"还没设工作区/待授权"时的居中态。 */
+.ws-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* adj540：工作区面板要走"**受限高度链**"——列表自己滚、页脚（新建文件夹 / 保存当前谱到此处）**常驻可见**。
+ * 与 `.pane-problems`（adj522）同一套路：pane 必须当弹性列容器，`.ws-panel` 才拿得到确定高度；
+ * 否则面板按内容取高（`.tool-dock-pane` 基类是 `flex: 0 0 auto`）⇒ 内容一多就把页脚挤出可视区
+ * （实测 390px 手机上「保存当前谱到此处」看不见、要滚动才够得到）。 */
+.tool-dock-pane.pane-workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.ws-panel .ws-list {
+  flex: 1 1 auto;
+  max-height: none;
+}
+.ws-panel-gate {
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+}
+/* 行内「更多操作」展开区（打开/重命名/移动到…/删除），缩进对齐到行文字下方 */
+.ws-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 6px 30px;
+}
+.ws-actions .btn,
+.ws-editor .btn {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.ws-row-open {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ws-row-open:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ws-menu-btn {
+  flex: none;
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--jp-text-secondary);
+  font-size: 16px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.ws-menu-btn:hover {
+  background: var(--jp-bg-panel-active);
+  color: var(--jp-accent);
+}
+/* 重命名/新建文件夹/删除确认的输入行 */
+.ws-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 6px 30px;
+}
+.ws-danger {
+  color: #ff6b81;
+  border-color: #ff6b81;
+}
+.ws-danger-text {
+  color: #ff6b81;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ws-move-hint {
+  color: var(--jp-accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* adj540：窄屏（手机）下页脚必须**始终可见**——实测 390px 时「只列出文件夹与 .jps 文件」这行提示
+ * 会把「新建文件夹 / 保存当前谱到此处」挤到第二行、被底栏裁掉（要滚动才看得到主按钮）。
+ * 故窄屏隐藏该提示（它只是说明文字）并把列表最小高度调小，保证两个主按钮留在可视区内。 */
+@media (max-width: 520px) {
+  .ws-foot .ws-hint {
+    display: none;
+  }
+  .ws-panel .ws-list {
+    min-height: 72px;
+  }
+}

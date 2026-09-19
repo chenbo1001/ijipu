@@ -23,8 +23,6 @@ export type ModalKind =
   | 'pasteImport'
   /** adj509：试听音色选择对话框（从音色库面板「指定音色」按钮触发） */
   | 'voicePicker'
-  /** adj540：工作区（选一个文件夹当工作区；Android/移动端的打开/保存主路径） */
-  | 'workspace'
 
 /**
  * adj462：底部 dock 的面板（互斥，同一时间只显示一块）。
@@ -32,7 +30,7 @@ export type ModalKind =
  * 已开且是该面板→收起 dock；已开但不是该面板→只切面板。
  * adj492：'about'（关于）从弹窗迁入 dock（与原「试听/导出/设置」同一套路）。
  */
-export type DockPanelKey = 'problems' | 'tryout' | 'export' | 'settings' | 'about'
+export type DockPanelKey = 'problems' | 'tryout' | 'export' | 'settings' | 'about' | 'workspace'
 
 /** 轻量浮动提示（toast）：kind 决定配色；nonce 用于同文案重复触发时重置隐藏计时 */
 export type NoticeKind = 'ok' | 'warn' | 'error'
@@ -221,6 +219,13 @@ interface UiState {
   setExportJob: (label: string | null) => void
   openModal: (m: ModalKind) => void
   closeModal: () => void
+  /**
+   * adj540：**手机端「另存为」= 打开工作区面板并把文件名输入框直接展开**（少点一步）。
+   * 一次性的"意图"标记：面板在激活时消费掉它再清空（不做持久化——它描述的是"这一次动作"）。
+   */
+  workspaceSaveIntent: boolean
+  requestWorkspaceSave: () => void
+  clearWorkspaceSaveIntent: () => void
   setPlaybackStart: (id: string | null) => void
   bumpPlaybackTick: () => void
   setShowGuides: (b: boolean) => void
@@ -311,6 +316,9 @@ export const useUiStore = create<UiState>()((set) => ({
     }
   })(),
   openModal: (m) => set({ modal: m }),
+  workspaceSaveIntent: false,
+  requestWorkspaceSave: () => set({ workspaceSaveIntent: true }),
+  clearWorkspaceSaveIntent: () => set({ workspaceSaveIntent: false }),
   closeModal: () => set({ modal: null, playbackStartId: null }),
   setPlaybackStart: (id) => set({ playbackStartId: id }),
   bumpPlaybackTick: () => set((s) => ({ playbackTick: s.playbackTick + 1 })),

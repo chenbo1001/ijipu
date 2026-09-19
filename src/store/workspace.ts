@@ -77,6 +77,139 @@ export function parentPath(segs: readonly string[]): string[] {
   return segs.slice(0, Math.max(0, segs.length - 1))
 }
 
+/**
+ * 条目名是否合法（纯函数，新建/重命名时校验）：
+ * 不能为空、不能含路径分隔符（`/` `\`）或 `..`、不能含控制字符、长度 ≤ 80。
+ * 这些字符在 FSA 里本就非法（`getFileHandle` 会抛），但**先在 UI 拦住**才能给出人话提示。
+ */
+export function isValidEntryName(name: string): boolean {
+  const n = name.trim()
+  if (n.length === 0 || n.length > 80) return false
+  if (n === '.' || n === '..') return false
+  if (/[/\\]/.test(n)) return false
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f]/.test(n)) return false
+  return true
+}
+
+/** 去掉 `.jps` 后缀（新建/另存时把用户输入的名字补成 `xxx.jps`，避免出现 `a.jps.jps`） */
+export function stripJpsExt(name: string): string {
+  return isJpsName(name) ? name.slice(0, name.length - 4) : name
+}
+
+/** 某个名字在目录里是否已被占用（文件或目录都算；用于"重名就明确报错而不是静默覆盖"） */
+export async function hasEntry(
+  root: FileSystemDirectoryHandle,
+  dirPath: readonly string[],
+  name: string,
+): Promise<boolean> {
+  const dir = await resolveDir(root, dirPath)
+  for await (const h of dir.values()) if (h.name === name) return true
+  return false
+}
+
+/** 目录是否**完全为空**（列**所有**条目，不只看 `.jps`——删目录前必须确认真空） */
+export async function isDirEmpty(root: FileSystemDirectoryHandle, path: readonly string[]): Promise<boolean> {
+  const dir = await resolveDir(root, path)
+  for await (const _ of dir.values()) return false
+  return true
+}
+
+/** 新建子目录（同名已存在 ⇒ 抛错，交给调用方提示；不静默复用） */
+export async function createSubdir(
+  root: FileSystemDirectoryHandle,
+  dirPath: readonly string[],
+  name: string,
+): Promise<void> {
+  if (await hasEntry(root, dirPath, name)) throw new Error('EXISTS')
+  const dir = await resolveDir(root, dirPath)
+  await dir.getDirectoryHandle(name, { create: true })
+}
+
+/** 新建（或写入）一个 `.jps`（同名已存在 ⇒ 抛错，避免"另存"覆盖已有谱） */
+export async function createFile(
+  root: FileSystemDirectoryHandle,
+  dirPath: readonly string[],
+  name: string,
+  text: string,
+): Promise<void> {
+  if (await hasEntry(root, dirPath, name)) throw new Error('EXISTS')
+  await writeWorkspaceText(root, [...dirPath, name], text)
+}
+
+/** 删除一个文件 */
+export async function removeFile(root: FileSystemDirectoryHandle, path: readonly string[]): Promise<void> {
+  const segs = normalizeRelPath(path)
+  if (segs.length === 0) throw new Error('empty path')
+  const dir = await resolveDir(root, segs.slice(0, -1))
+  await dir.removeEntry(segs[segs.length - 1])
+}
+
+/**
+ * 删除一个目录——**仅当它为空**。
+ * 为什么不做递归删除：工作区是用户自己的文件夹，里面可能混着照片/文档等**非 .jps**的东西，
+ * `removeEntry(name, {recursive:true})` 会一起抹掉，且 **FSA 没有回收站、删了就没了**。
+ * 非空时抛 `NOT_EMPTY`，由 UI 给明确提示（而不是"删了但没反应"）。
+ */
+export async function removeEmptyDir(
+  root: FileSystemDirectoryHandle,
+  dirPath: readonly string[],
+  name: string,
+): Promise<void> {
+  const target = [...normalizeRelPath(dirPath), name]
+  if (!(await isDirEmpty(root, target))) throw new Error('NOT_EMPTY')
+  const dir = await resolveDir(root, normalizeRelPath(dirPath))
+  await dir.removeEntry(name)
+}
+
+/**
+ * **重命名/移动一个 `.jps` 的公共实现**：读出 → 写到新位置 → **确认新文件内容与原文一致** → 才删原文件。
+ *
+ * 为什么不用 `FileSystemHandle.move()`：本机与规范都确认 **`move()` 目前只对 OPFS 生效**，
+ * 用户选中的目录上不可用（非 OPFS 的移动还停在 WICG 提案：
+ * https://github.com/whatwg/fs/blob/main/proposals/MovingNonOpfsFiles.md）。
+ * 于是只能"复制 + 删除"——而**顺序必须是"先确认新文件正确、再删旧的"**：中途失败宁可留下重复文件，
+ * 也不能出现"两个都没了"。`.jps` 是纯文本、体积小，这条路安全。
+ */
+async function transferFile(
+  root: FileSystemDirectoryHandle,
+  fromSegs: readonly string[],
+  toSegs: readonly string[],
+): Promise<void> {
+  const from = normalizeRelPath(fromSegs)
+  const to = normalizeRelPath(toSegs)
+  if (from.length === 0 || to.length === 0) throw new Error('empty path')
+  if (joinPath(from) === joinPath(to)) return
+  if (await hasEntry(root, to.slice(0, -1), to[to.length - 1])) throw new Error('EXISTS')
+  const text = await readWorkspaceText(root, from)
+  await writeWorkspaceText(root, to, text) // 内部已做写入后回读校验
+  const back = await readWorkspaceText(root, to)
+  if (back !== text) throw new Error('VERIFY') // 双保险：不一致就**不删原文件**
+  await removeFile(root, from)
+}
+
+/** 重命名（同目录换名） */
+export async function renameFile(
+  root: FileSystemDirectoryHandle,
+  dirPath: readonly string[],
+  fromName: string,
+  toName: string,
+): Promise<void> {
+  const dir = normalizeRelPath(dirPath)
+  await transferFile(root, [...dir, fromName], [...dir, toName])
+}
+
+/** 移动到另一个目录（同名） */
+export async function moveFile(
+  root: FileSystemDirectoryHandle,
+  fromSegs: readonly string[],
+  toDirSegs: readonly string[],
+): Promise<void> {
+  const from = normalizeRelPath(fromSegs)
+  if (from.length === 0) throw new Error('empty path')
+  await transferFile(root, from, [...normalizeRelPath(toDirSegs), from[from.length - 1]])
+}
+
 // ---- 会话内缓存：对话框与保存流程会反复取同一个工作区，避免每次都读库 ----
 let cached: WorkspaceRecord | null = null
 let loaded = false

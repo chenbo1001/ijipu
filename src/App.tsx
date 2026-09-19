@@ -30,8 +30,6 @@ const DonateDialog = lazy(() => import('./dialogs/DonateDialog').then((m) => ({ 
 const PasteImportDialog = lazy(() => import('./dialogs/PasteImportDialog').then((m) => ({ default: m.PasteImportDialog })))
 // adj509：试听音色选择对话框（从音色库面板的「指定音色」按钮触发）
 const VoicePickerDialog = lazy(() => import('./dialogs/VoicePickerDialog').then((m) => ({ default: m.VoicePickerDialog })))
-// adj540：工作区（选一个文件夹当工作区；手机上的打开/保存主路径）
-const WorkspaceDialog = lazy(() => import('./dialogs/WorkspaceDialog').then((m) => ({ default: m.WorkspaceDialog })))
 
 function App() {
   const viewType = useDocStore((s) => s.viewType)
@@ -245,7 +243,6 @@ function App() {
       {modal === 'pasteImport' && <Suspense fallback={null}><PasteImportDialog /></Suspense>}
       {/* adj509：试听音色选择对话框（音色库「指定音色」按钮触发） */}
       {modal === 'voicePicker' && <Suspense fallback={null}><VoicePickerDialog /></Suspense>}
-      {modal === 'workspace' && <Suspense fallback={null}><WorkspaceDialog /></Suspense>}
     </div>
   )
 }

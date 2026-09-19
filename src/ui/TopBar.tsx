@@ -16,6 +16,9 @@ import { useDocStore, type ViewType } from '../store/docStore'
 import { useUiStore, PREVIEW_ZOOM_RANGE, PREVIEW_ZOOM_STEP, PREVIEW_ZOOM_LIMITS } from '../store/uiStore'
 import { clampEditorFontSize, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE } from '@ijipu/engine'
 import { pasteImportCopy, numCopy, workspaceCopy } from '../brand/copy'
+// adj540：「打开/另存为」要按平台分流（**手机端以工作区优先**）并判断"是否已设工作区"
+import { isCoarsePointerDevice } from '../store/saveSupport'
+import { getWorkspace, isWorkspaceSupported } from '../store/workspace'
 import { ToolIcon } from './ToolIcon'
 // adj526：可"按住上下拖"的数值显示（预览比率 / 编辑器字号）
 import { ScrubValue } from './ScrubValue'
@@ -182,6 +185,7 @@ export function TopBar() {
   const openModal = useUiStore((s) => s.openModal)
   // adj462：底部 dock（试听/导出/设置 = dock 入口开关；dockOpen/dockPanel 用于按钮高亮）
   const toggleDock = useUiStore((s) => s.toggleDock)
+  const requestWorkspaceSave = useUiStore((s) => s.requestWorkspaceSave)
   const dockOpen = useUiStore((s) => s.dockOpen)
   const dockPanel = useUiStore((s) => s.dockPanel)
   const showGuides = useUiStore((s) => s.showGuides)
@@ -1041,7 +1045,29 @@ export function TopBar() {
   const runSave = async () => {
     await saveFile()
   }
-  const runSaveAs = async () => {
+  /**
+   * adj540：「打开…」智能分流（用户确认：**手机端以工作区优先**）——
+   *  · **手机/平板（粗指针）且浏览器支持选文件夹** ⇒ 一律开底栏工作区面板（没设工作区时面板里就是
+   *    「选择文件夹当工作区」那个大按钮）。手机上的系统选择器不可靠：`.jps` 这种自定义扩展名会被
+   *    按 MIME 隐藏（adj399），PWA 里 `showOpenFilePicker` 还出现过"点了没反应"（adj405 + Chromium 457203705）；
+   *  · 已经设过工作区 ⇒ 同样开面板（桌面端也遵循"工作区优先"）；
+   *  · 其余（桌面端未设工作区 / iOS 等不支持选文件夹的浏览器）⇒ 保持原样走系统选择器 / input 降级。
+   * 系统选择器另留一个菜单项（runOpenSystem），不做成"必须先设工作区才能打开"。
+   */
+  const runOpenSmart = async () => {
+    if ((isCoarsePointerDevice() && isWorkspaceSupported()) || (await getWorkspace())) {
+      toggleDock('workspace')
+      return
+    }
+    await openFile()
+  }
+  /** adj540：手机端「另存为」= 开工作区面板并直接展开文件名输入（`showSaveFilePicker` 在移动端不可靠） */
+  const runSaveAsSmart = async () => {
+    if (isCoarsePointerDevice() && isWorkspaceSupported()) {
+      requestWorkspaceSave()
+      toggleDock('workspace')
+      return
+    }
     await saveFileAs()
   }
 
@@ -1050,16 +1076,19 @@ export function TopBar() {
   // 顺序：新建/打开/打开示例/粘贴/保存/另存为 → 试听播放 → 导出；打开示例前的分隔线取消、与「打开」相邻。
   const fileEntries: (MenuEntry | 'sep')[] = [
     { label: '新建(&N)', kbd: 'Ctrl+N', hotkey: 'n', onPick: newDoc },
-    { label: '打开(&O)…', kbd: 'Ctrl+O', hotkey: 'o', onPick: runOpen },
+    // adj540：已设工作区就开工作区面板，否则走系统选择器（见 runOpenSmart）
+    { label: '打开(&O)…', kbd: 'Ctrl+O', hotkey: 'o', onPick: runOpenSmart },
+    // adj540：把系统文件选择器**单独留一个入口**——桌面端/需要挑本机任意文件时不至于被剥夺
+    { label: workspaceCopy.openSystemLabel, onPick: runOpen },
     // adj423：新增「打开示例」——列出 public/samples 下的示例谱（该目录靠构建期 glob 自动发现，
     // 往里加 .jps 文件即出现在列表里，无需改代码）；adj424：去掉其前的分隔线、与「打开」紧邻
     { label: '打开示例(&E)…', hotkey: 'e', onPick: () => openModal('samples') },
     // adj406：粘贴源码导入——手机端系统文件选择器看不到 .jps 时的兜底入口
     { label: pasteImportCopy.menuLabel, hotkey: 'v', onPick: () => openModal('pasteImport') },
     { label: '保存(&S)', kbd: 'Ctrl+S', hotkey: 's', onPick: runSave },
-    { label: '另存为(&A)…', hotkey: 'a', onPick: runSaveAs },
+    { label: '另存为(&A)…', hotkey: 'a', onPick: runSaveAsSmart },
     // adj540：工作区——手机上打开/保存的主路径（选一个文件夹，之后都在里面挑文件/写文件，支持子目录）
-    { label: workspaceCopy.menuLabel, hotkey: 'w', onPick: () => openModal('workspace') },
+    { label: workspaceCopy.menuLabel, hotkey: 'w', onPick: () => toggleDock('workspace') },
     // adj424：从原「播放」分组挪到「文件」分组末尾（按用户要求的「试听-导出-设置」顺序）
     // adj462：菜单项与顶栏按钮同源——都切到底部 dock 的对应面板（不再弹对话框）
     { label: '试听播放(&P)', kbd: 'Ctrl+Q', hotkey: 'p', onPick: () => toggleDock('tryout') },

@@ -129,6 +129,8 @@ export const pasteImportCopy = {
  */
 export const workspaceCopy = {
   menuLabel: '工作区(&W)…',
+  /** adj540：系统文件选择器的独立入口（「打开…」在工作区就绪后会改开工作区面板） */
+  openSystemLabel: '打开（系统文件选择器）(&F)…',
   title: '工作区',
   desc: '选一个文件夹当工作区：之后打开 / 保存都在这个文件夹里（支持子目录）。手机上都走这条路，不用每次翻系统文件选择器。',
   pick: '选择文件夹当工作区',
@@ -152,6 +154,36 @@ export const workspaceCopy = {
   namePlaceholder: '例如 小星星',
   saveBtn: '保存',
   closeBtn: '关闭',
+  // ---- adj540 续：文件操作（新建/重命名/移动/删除；破坏性操作必须二次确认） ----
+  /** 行尾「更多操作」按钮（打开/重命名/移动到…/删除） */
+  moreActions: '更多操作',
+  actOpen: '打开',
+  actRename: '重命名',
+  actMove: '移动到…',
+  actDelete: '删除',
+  actNewFolder: '新建文件夹',
+  folderNamePlaceholder: '文件夹名',
+  renamePlaceholder: '新文件名（不用写 .jps）',
+  confirmBtn: '确定',
+  cancelBtn2: '取消',
+  /** 移动到…：进入目标目录后再点它 */
+  moveHere: '移动到此处',
+  moveCancel: '取消移动',
+  /** 永久删除的二次确认（FSA 没有回收站） */
+  deleteFileConfirm: (n: string): string => `永久删除「${n}」？删了就找不回来了（浏览器文件 API 没有回收站）`,
+  deleteDirConfirm: (n: string): string => `永久删除空文件夹「${n}」？`,
+  dirNotEmpty: (n: string): string => `「${n}」里还有东西，本轮只删空文件夹（避免连带删掉里面其它文件）`,
+  exists: (n: string): string => `已存在同名「${n}」，换个名字`,
+  invalidName: '名字不能为空，也不能包含 / \\ 或 ..',
+  dirCreated: (n: string): string => `已新建文件夹「${n}」`,
+  renamed: (a: string, b: string): string => `已把「${a}」重命名为「${b}」`,
+  moved: (n: string, dir: string): string => `已把「${n}」移动到「${dir || '根目录'}」`,
+  deleted: (n: string): string => `已删除「${n}」`,
+  deletedOpenFile: (n: string): string => `「${n}」已被删除——内容仍在编辑器里，可用「保存当前谱到此处」重新存一份`,
+  verifyFailed: (n: string): string => `「${n}」写入后校验不一致，已保留原文件（请重试）`,
+  opFailed: (n: string, reason: string): string => `「${n}」操作失败：${reason}`,
+  /** 目录暂不支持重命名/移动（递归搬运风险大，本轮只做文件） */
+  dirOpUnsupported: '文件夹暂不支持重命名/移动（本轮只对 .jps 文件做）',
   /** 点了"选择文件夹"但系统没弹选择器（静默失败）时的可操作指引 —— 见 ERRORS-LOG E-2026-241 */
   pickerNoResponse:
     '系统没有弹出文件夹选择器。如果你是从桌面图标（已安装的应用）打开的，请改用 Chrome 浏览器打开本站再试一次——数据不会丢。',
@@ -202,6 +234,8 @@ export const dockCopy = {
   tabSettings: '设置',
   /** adj492：「关于」从弹窗迁入 dock */
   tabAbout: '关于',
+  /** adj540：工作区（选文件夹当工作区；移动端的打开/保存主路径） */
+  tabWorkspace: '工作区',
   /** 标题栏 × 按钮 */
   closeTitle: '关闭底栏',
   /** 顶部抓手（拖拽调整 dock 高度） */
