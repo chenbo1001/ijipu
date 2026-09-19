@@ -103,6 +103,7 @@ import {
   isJpsName,
   isValidEntryName,
   joinPath,
+  matchesQuery,
   normalizeRelPath,
   parentPath,
   sortDirEntries,
@@ -8465,18 +8466,19 @@ function runAdj540WorkspaceTests() {
       /\.ws-side \{[\s\S]{0,220}?flex-direction: column/.test(cssAll) &&
       /@container \(max-width: 430px\) \{[\s\S]{0,160}?\.tool-dock-tab-icon \{ display: none/.test(cssAll),
     '')
-  check('adj540 右侧操作区用**分组下拉**少占地方（默认 4 个按钮，按钮高度与其它按钮一致，不靠压扁），窄屏覆盖仍写在基础规则之后',
-    // 顺序类陷阱（E-2026-244）：窄屏覆盖必须在基础规则之后，否则被盖掉
+  check('adj540 右侧**只留一个下拉按钮**（点它弹出操作菜单，菜单走 portal 以免被 dock 的 overflow 裁掉）',
+    /ref=\{menuBtnRef\}[\s\S]{0,260}?aria-haspopup="menu"[\s\S]{0,200}?workspaceCopy\.menuBtn/.test(panelSrc) &&
+      /createPortal\(/.test(panelSrc) &&
+      /className="ws-menu-pop"/.test(panelSrc) &&
+      /\.ws-menu-pop \{[\s\S]{0,200}?position: fixed/.test(cssAll) &&
+      // 三个分组下拉（保存▾/新建▾/操作▾）已被这一个替代
+      !/openGroup/.test(panelSrc) &&
+      /menuBtn: '操作'/.test(copySrc),
+    '')
+  check('adj540 窄屏覆盖仍写在基础规则之后（同级后者胜；E-2026-244）+ 按钮高度不靠压扁',
     cssAll.indexOf('.ws-sub-btn {') > -1 &&
-      cssAll.indexOf('.ws-sub-btn { padding: 5px 2px') > cssAll.indexOf('.ws-sub-btn {') &&
-      // 按钮高度**不许**再压扁（用户要求"高度参考其它按钮"）
       !/\.ws-side-btn \{[^}]*line-height: 1\.25/.test(cssAll) &&
-      /const \[openGroup, setOpenGroup\]/.test(panelSrc) &&
-      /workspaceCopy\.actOps/.test(panelSrc) &&
-      /actOps: '操作'/.test(copySrc) &&
-      /actSave: '保存'/.test(copySrc) &&
-      /actSaveAs: '另存'/.test(copySrc) &&
-      /actNewScore: '新建'/.test(copySrc),
+      /@container \(max-width: 430px\) \{[\s\S]{0,200}?\.ws-panel \.ws-list \{ min-height: 72px/.test(cssAll),
     '')
   check('adj540 重新授权时**显示要授权的目录**（文件夹名 + 工作区内相对路径），并说明"浏览器不给完整路径"',
     /const wsPathText = ws \? joinPath\(\[ws\.handle\.name, \.\.\.\(ws\.path \?\? \[\]\)\]\) : ''/.test(panelSrc) &&
@@ -8524,7 +8526,23 @@ function runAdj540WorkspaceTests() {
       /onClick=\{\(\) => void openEntry\(e\)\}/.test(panelSrc) &&
       /parentPath\(path\)/.test(panelSrc) &&
       /const active = useUiStore\(\(s\) => s\.dockOpen && s\.dockPanel === 'workspace'\)/.test(panelSrc) &&
-      /if \(!active\) \{[\s\S]{0,300}?return\n\s*\}[\s\S]{0,400}?await getWorkspace\(\)/.test(panelSrc),
+      /if \(!active\) \{[\s\S]{0,400}?return[\s\S]{0,30}?\}[\s\S]{0,700}?await getWorkspace\(\)/.test(panelSrc),
+    '')
+  check('adj540 过滤框：默认层级列表；一过滤就把**整个工作区**符合条件的 .jps 收成**平坦列表**（点一条直接打开）',
+    /export async function searchWorkspaceJps/.test(wsSrc) &&
+      /export function matchesQuery/.test(wsSrc) &&
+      /const \[query, setQuery\] = useState\(''\)/.test(panelSrc) &&
+      /const searching = query\.trim\(\)\.length > 0/.test(panelSrc) &&
+      /void searchWorkspaceJps\(ws\.handle, query\)/.test(panelSrc) &&
+      /searching\s*\?\s*\(hits \?\? \[\]\)\.map/.test(panelSrc) &&
+      /workspaceCopy\.filterPlaceholder/.test(panelSrc),
+    '')
+  check('adj540 过滤匹配是纯函数（大小写不敏感，文件名与相对路径都参与；空查询不过滤）',
+    matchesQuery('小星星.jps', '2.曲谱集/小星星.jps', '星星') &&
+      matchesQuery('小星星.jps', '2.曲谱集/小星星.jps', '曲谱') && // 目录名也能命中
+      matchesQuery('A.JPS', 'A.JPS', 'a.jps') && // 大小写不敏感
+      !matchesQuery('小星星.jps', '2.曲谱集/小星星.jps', '两只老虎') &&
+      matchesQuery('小星星.jps', '2.曲谱集/小星星.jps', '  '), // 空白 = 不过滤
     '')
   check('adj540 列表行带**复选框**（勾选=选中供 改名/移动/删除；点名字=打开/进入），且支持多选',
     /<input[\s\S]{0,200}?type="checkbox"[\s\S]{0,200}?className="ws-check"/.test(panelSrc) &&

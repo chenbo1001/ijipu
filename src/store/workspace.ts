@@ -78,6 +78,69 @@ export function parentPath(segs: readonly string[]): string[] {
 }
 
 /**
+ * adj540：过滤匹配（纯函数）——**大小写不敏感的子串匹配**，同时看文件名与相对路径。
+ * 于是「练习」能命中 `2.曲谱集/练习曲/小星星.jps`（目录名也参与匹配），符合"在工作区里找谱"的直觉。
+ * 空白查询返回 `true`（不过滤）。
+ */
+export function matchesQuery(name: string, relPath: string, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  return name.toLowerCase().includes(q) || relPath.toLowerCase().includes(q)
+}
+
+/** 扁平搜索结果：一个 `.jps` 的位置与显示名（`relPath` 用于告诉用户它在哪个子目录下） */
+export interface SearchHit {
+  /** 文件名（含 `.jps`） */
+  name: string
+  /** 工作区内的相对路径（含文件名；用于显示与打开） */
+  relPath: string
+  /** 所在目录的相对段（打开时用它拼路径） */
+  dirSegs: string[]
+}
+
+/**
+ * adj540（用户要求）：把**整个工作区（含所有子目录）**里符合条件的 `.jps` 收成一个**平坦列表**，
+ * 供"过滤即快速打开"用——层级浏览适合整理，找某一份谱还是平坦列表快。
+ *
+ * 防呆（真实目录可能很大）：限制**深度**（默认 6 层）、**访问条目数**（默认 2000）、**命中数**（默认 200）；
+ * 某一层读不动（权限/竞态）就跳过该层，而不是整次搜索失败。
+ */
+export async function searchWorkspaceJps(
+  root: FileSystemDirectoryHandle,
+  query: string,
+  limits: { maxDepth?: number; maxEntries?: number; maxHits?: number } = {},
+): Promise<SearchHit[]> {
+  const maxDepth = limits.maxDepth ?? 6
+  const maxEntries = limits.maxEntries ?? 2000
+  const maxHits = limits.maxHits ?? 200
+  const hits: SearchHit[] = []
+  let visited = 0
+  const walk = async (dir: FileSystemDirectoryHandle, dirSegs: string[], depth: number): Promise<void> => {
+    if (depth > maxDepth || hits.length >= maxHits || visited >= maxEntries) return
+    let children: FileSystemHandle[] = []
+    try {
+      for await (const h of dir.values()) children.push(h)
+    } catch {
+      return // 某一层读不动就跳过，不影响其它目录
+    }
+    for (const h of children) {
+      if (hits.length >= maxHits || visited >= maxEntries) return
+      visited++
+      if (h.kind === 'directory') {
+        await walk(h as FileSystemDirectoryHandle, [...dirSegs, h.name], depth + 1)
+        continue
+      }
+      if (!isJpsName(h.name)) continue
+      const relPath = joinPath([...dirSegs, h.name])
+      if (!matchesQuery(h.name, relPath, query)) continue
+      hits.push({ name: h.name, relPath, dirSegs })
+    }
+  }
+  await walk(root, [], 1)
+  return hits
+}
+
+/**
  * 条目名是否合法（纯函数，新建/重命名时校验）：
  * 不能为空、不能含路径分隔符（`/` `\`）或 `..`、不能含控制字符、长度 ≤ 80。
  * 这些字符在 FSA 里本就非法（`getFileHandle` 会抛），但**先在 UI 拦住**才能给出人话提示。

@@ -215,10 +215,22 @@ export const workspaceCopy = {
   opPartial: (ok: number, fail: number, reason: string): string => `${ok} 项成功、${fail} 项失败（${reason}）`,
   /** 多选时删除确认里的条数提示 */
   deleteManyConfirm: (n: number): string => `永久删除选中的 ${n} 项？删了就找不回来了`,
-  /** 多选里含目录时不能移动 */
-  moveDirUnsupported: '选中的里有文件夹，移动只支持 .jps 文件',
+  /** adj540：过滤框（用户要求）——过滤时列出**整个工作区**里符合条件的 .jps（平坦列表，便于快速打开） */
+  filterPlaceholder: '过滤 .jps（含子目录）…',
+  filterClear: '清空过滤',
+  searchEmpty: '工作区里没有匹配的 .jps',
+  /** 过滤结果条数（侧栏标签用） */
+  searchResults: (n: number): string => `匹配 ${n} 个`,
+  /** 过滤模式下的说明（点击结果=直接打开） */
+  searchHint: '点一条直接打开',
+  /** 只有一个下拉按钮（用户要求）：点它弹出操作菜单 */
+  menuBtn: '操作',
+  /** 过滤模式下不能改名/移动/删除（没有勾选项） */
+  opNeedsSelection: '先清空过滤，在目录里勾选文件',
   /** 重命名只支持单个 */
   renameSingleOnly: '重命名一次只能改一个',
+  /** 多选里含目录时不能移动 */
+  moveDirUnsupported: '选中的里有文件夹，移动只支持 .jps 文件',
   deleted: (n: string): string => `已删除「${n}」`,
   deletedOpenFile: (n: string): string => `「${n}」已被删除——内容仍在编辑器里，可用「保存当前谱到此处」重新存一份`,
   verifyFailed: (n: string): string => `「${n}」写入后校验不一致，已保留原文件（请重试）`,

@@ -28,7 +28,8 @@
  *    （递归删目录会把用户放在里面的照片/文档一起删掉）；
  *  · 列表**每次打开都重读**（用户确认）：手机上刚用系统工具/微信存进来的 `.jps` 能立刻看到。
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useDocStore } from '../../store/docStore'
 import { useUiStore } from '../../store/uiStore'
 import { workspaceCopy } from '../../brand/copy'
@@ -44,9 +45,11 @@ import {
   readDirEntries,
   rememberWorkspacePath,
   requestWorkspacePermission,
+  searchWorkspaceJps,
   setWorkspace,
   stripJpsExt,
   type DirEntry,
+  type SearchHit,
 } from '../../store/workspace'
 
 /** 「选择文件夹」静默失败的判定时间（超过它还没弹选择框就提示，而不是让用户干等） */
@@ -96,10 +99,22 @@ export function WorkspacePanel() {
   const [moving, setMoving] = useState<MoveState | null>(null)
   const [confirmDel, setConfirmDel] = useState<DelState | null>(null)
   /**
-   * 右侧操作区分组下拉（用户建议）：默认只显示 打开 / 保存▾ / 新建▾ / 操作▾，
-   * 同一时刻只展开一组 ⇒ 最多 5 个按钮，窄屏也不挤。
+   * adj540（用户要求）：**过滤框**——默认为层级列表（进目录逐级浏览）；一旦输入过滤词，
+   * 就把**整个工作区（含子目录）**里符合条件的 `.jps` 收成**平坦列表**，点一条直接打开。
+   * `hits === null` 表示"当前没在过滤"（走层级模式）。
    */
-  const [openGroup, setOpenGroup] = useState<'save' | 'new' | 'ops' | null>(null)
+  const [query, setQuery] = useState('')
+  const [hits, setHits] = useState<SearchHit[] | null>(null)
+  const searching = query.trim().length > 0
+  /**
+   * adj540（用户要求）：右侧**只留一个下拉按钮**「操作」——点它**弹出菜单**再选具体操作。
+   * 为什么必须用 portal：dock 容器是 `overflow: hidden`，就地展开的浮层会被裁掉
+   * （内联展开又会挤占列表行数），所以菜单渲染到 `document.body` 并 `position: fixed` 锚在按钮上方。
+   */
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ left: number; bottom: number; width: number } | null>(null)
+  const menuBtnRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
 
   const selectedEntries = entries.filter((e) => selected.includes(e.name))
   const selectedFiles = selectedEntries.filter((e) => e.kind === 'file')
@@ -107,6 +122,62 @@ export function WorkspacePanel() {
   const hasDirSelected = selectedEntries.some((e) => e.kind === 'dir')
   const toggleSelect = (name: string) =>
     setSelected((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]))
+
+  /**
+   * 过滤（debounce 200ms）：对整个工作区递归找 `.jps`（`searchWorkspaceJps` 自带深度/条数上限）。
+   * 清空过滤即回到层级模式（原目录列表仍在，不用重读）。
+   */
+  useEffect(() => {
+    if (!ws || perm !== 'granted' || !searching) {
+      setHits(null)
+      return
+    }
+    let alive = true
+    const t = window.setTimeout(() => {
+      void searchWorkspaceJps(ws.handle, query)
+        .then((r) => {
+          if (alive) setHits(r)
+        })
+        .catch(() => {
+          if (alive) setHits([])
+        })
+    }, 200)
+    return () => {
+      alive = false
+      window.clearTimeout(t)
+    }
+  }, [ws, perm, query, searching])
+
+  /** 弹出菜单：点外面/按 Esc 关闭（菜单渲染在 portal 里，不在 dock 的裁剪范围内） */
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (menuRef.current?.contains(t) || menuBtnRef.current?.contains(t)) return
+      setMenuOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown, true)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown, true)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
+
+  /** 打开菜单：按按钮位置定位（锚在按钮**上方**，因为 dock 在屏幕底部），并**夹进视口**：
+   *  侧栏贴右边缘，若直接用按钮 left 会让菜单溢出屏幕右侧（实测 390px 视口溢出 56px）。 */
+  const openMenu = () => {
+    const r = menuBtnRef.current?.getBoundingClientRect()
+    if (r) {
+      const width = Math.max(r.width, 150)
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8))
+      setMenuPos({ left, bottom: window.innerHeight - r.top + 6, width })
+    }
+    setMenuOpen(true)
+  }
 
   /** 列目录（读不到就提示，不静默——否则用户只看到"空的"） */
   const refresh = useCallback(
@@ -142,7 +213,9 @@ export function WorkspacePanel() {
       setEdit(null)
       setMoving(null)
       setConfirmDel(null)
-      setOpenGroup(null)
+      setMenuOpen(false)
+      setQuery('')
+      setHits(null)
       return
     }
     let alive = true
@@ -292,11 +365,11 @@ export function WorkspacePanel() {
 
   /** 进入"移动到…"模式：把当前选中的**文件**路径定下来（目录不支持移动） */
   const startMove = () => {
+    setMenuOpen(false)
     if (selectedFiles.length === 0) {
       showNotice(workspaceCopy.moveDirUnsupported, 'warn')
       return
     }
-    setOpenGroup(null)
     setMoving({ list: selectedFiles.map((e) => [...path, e.name]) })
   }
 
@@ -310,8 +383,8 @@ export function WorkspacePanel() {
   }
 
   const startDelete = () => {
+    setMenuOpen(false)
     if (selCount === 0) return
-    setOpenGroup(null)
     setConfirmDel({
       items: selectedEntries.map((e) => ({ segs: [...path, e.name], kind: e.kind as 'file' | 'dir' })),
       label:
@@ -452,54 +525,104 @@ export function WorkspacePanel() {
         </div>
       )}
 
+      {/* adj540（用户要求）：**过滤框**——默认为层级列表；一过滤就把整个工作区符合条件的 .jps 收成平坦列表 */}
+      <div className="ws-filter-row">
+        <input
+          className="ws-input ws-filter"
+          value={query}
+          placeholder={workspaceCopy.filterPlaceholder}
+          onChange={(ev) => {
+            setQuery(ev.target.value)
+            setEdit(null)
+            setConfirmDel(null)
+          }}
+          onKeyDown={(ev) => {
+            if (ev.key === 'Escape') setQuery('')
+          }}
+        />
+        {searching && (
+          <button type="button" className="btn ws-filter-clear" onClick={() => setQuery('')} title={workspaceCopy.filterClear}>
+            ✕
+          </button>
+        )}
+      </div>
+
       {/* 主体：**左列表（带复选框）+ 右操作按钮** */}
       <div className="ws-body">
         <div className="ws-list" title={workspaceCopy.onlyListed}>
-          {path.length > 0 && (
-            <div className="ws-row">
-              <span className="ws-check" aria-hidden="true" />
-              <button
-                type="button"
-                className="ws-row-open ws-row-up"
-                onClick={() => {
-                  setSelected([])
-                  void (moving ? refreshMovingTarget(parentPath(path)) : refresh(ws, parentPath(path)))
-                }}
-                disabled={busy}
-              >
-                <span className="ws-icon">↰</span>
-                <span className="ws-name">{workspaceCopy.up}</span>
-              </button>
-            </div>
-          )}
-          {entries
-            .filter((e) => !moving || e.kind === 'dir')
-            .map((e) => (
-              <div key={`${e.kind}-${e.name}`} className={`ws-row${selected.includes(e.name) ? ' is-selected' : ''}`}>
-                {/* adj540（用户要求）：文件名前的**复选框** —— 勾选 = 选中（供 改名/移动/删除 用），
-                    点名字 = 打开/进入。两者分开，不再需要"点两次才打开" */}
-                {moving ? (
+          {/* 过滤模式：**平坦结果**（跨子目录），点一条直接打开 —— 不提供勾选（改名/移动/删除要先清空过滤） */}
+          {searching
+            ? (hits ?? []).map((h) => (
+                <div key={h.relPath} className="ws-row">
                   <span className="ws-check" aria-hidden="true" />
-                ) : (
-                  <input
-                    type="checkbox"
-                    className="ws-check"
-                    checked={selected.includes(e.name)}
-                    aria-label={e.name}
-                    onChange={() => {
-                      setEdit(null)
-                      setConfirmDel(null)
-                      toggleSelect(e.name)
+                  <button
+                    type="button"
+                    className="ws-row-open"
+                    title={h.relPath}
+                    onClick={() => {
+                      void (async () => {
+                        const ok = await openWorkspaceFile([...h.dirSegs, h.name])
+                        if (ok) closeDock()
+                      })()
                     }}
-                  />
+                    disabled={busy}
+                  >
+                    <span className="ws-icon">🎼</span>
+                    <span className="ws-name">{h.name}</span>
+                    {h.dirSegs.length > 0 && <span className="ws-hit-dir">{joinPath(h.dirSegs)}</span>}
+                  </button>
+                </div>
+              ))
+            : (
+              <>
+                {path.length > 0 && (
+                  <div className="ws-row">
+                    <span className="ws-check" aria-hidden="true" />
+                    <button
+                      type="button"
+                      className="ws-row-open ws-row-up"
+                      onClick={() => {
+                        setSelected([])
+                        void (moving ? refreshMovingTarget(parentPath(path)) : refresh(ws, parentPath(path)))
+                      }}
+                      disabled={busy}
+                    >
+                      <span className="ws-icon">↰</span>
+                      <span className="ws-name">{workspaceCopy.up}</span>
+                    </button>
+                  </div>
                 )}
-                <button type="button" className="ws-row-open" onClick={() => void openEntry(e)} disabled={busy}>
-                  <span className="ws-icon">{e.kind === 'dir' ? '📁' : '🎼'}</span>
-                  <span className="ws-name">{e.name}</span>
-                </button>
-              </div>
-            ))}
-          {entries.length === 0 && <div className="ws-none">{workspaceCopy.emptyDir}</div>}
+                {entries
+                  .filter((e) => !moving || e.kind === 'dir')
+                  .map((e) => (
+                    <div key={`${e.kind}-${e.name}`} className={`ws-row${selected.includes(e.name) ? ' is-selected' : ''}`}>
+                      {/* adj540（用户要求）：文件名前的**复选框** —— 勾选 = 选中（供 改名/移动/删除 用），
+                          点名字 = 打开/进入。两者分开，不再需要"点两次才打开" */}
+                      {moving ? (
+                        <span className="ws-check" aria-hidden="true" />
+                      ) : (
+                        <input
+                          type="checkbox"
+                          className="ws-check"
+                          checked={selected.includes(e.name)}
+                          aria-label={e.name}
+                          onChange={() => {
+                            setEdit(null)
+                            setConfirmDel(null)
+                            toggleSelect(e.name)
+                          }}
+                        />
+                      )}
+                      <button type="button" className="ws-row-open" onClick={() => void openEntry(e)} disabled={busy}>
+                        <span className="ws-icon">{e.kind === 'dir' ? '📁' : '🎼'}</span>
+                        <span className="ws-name">{e.name}</span>
+                      </button>
+                    </div>
+                  ))}
+                {entries.length === 0 && <div className="ws-none">{workspaceCopy.emptyDir}</div>}
+              </>
+            )}
+          {searching && hits !== null && hits.length === 0 && <div className="ws-none">{workspaceCopy.searchEmpty}</div>}
         </div>
 
         <div className="ws-side">
@@ -518,7 +641,9 @@ export function WorkspacePanel() {
           ) : (
             <>
               <div className="ws-side-label" title={selectedEntries.map((e) => e.name).join('、')}>
-                {selCount === 0 ? (
+                {searching ? (
+                  <span className="ws-side-name">{workspaceCopy.searchResults(hits?.length ?? 0)}</span>
+                ) : selCount === 0 ? (
                   workspaceCopy.tapToSelect
                 ) : selCount === 1 ? (
                   <span className="ws-side-name">{selectedEntries[0].name}</span>
@@ -537,129 +662,97 @@ export function WorkspacePanel() {
                 {workspaceCopy.actOpen}
               </button>
 
-              {/* 保存 ▾：写回当前文件 / 另存到当前目录 */}
+              {/* adj540（用户要求）：右侧**只留一个下拉按钮**——点它**弹出菜单**再选具体操作。
+                  菜单用 portal 渲染（dock 是 overflow:hidden，就地浮层会被裁掉），锚在本按钮**上方**。 */}
               <button
+                ref={menuBtnRef}
                 type="button"
                 className="btn ws-side-btn ws-side-group"
-                aria-expanded={openGroup === 'save'}
-                onClick={() => setOpenGroup(openGroup === 'save' ? null : 'save')}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
                 disabled={busy}
               >
-                {workspaceCopy.actSave}
-                <span className="ws-caret">{openGroup === 'save' ? '▴' : '▾'}</span>
+                {workspaceCopy.menuBtn}
+                <span className="ws-caret">{menuOpen ? '▴' : '▾'}</span>
               </button>
-              {openGroup === 'save' && (
-                <>
-                  <button type="button" className="btn ws-sub-btn" onClick={() => void onSave()} disabled={busy}>
-                    {workspaceCopy.actSave}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn ws-sub-btn"
-                    onClick={() => {
-                      setOpenGroup(null)
-                      setEdit({ kind: 'saveAs', value: fileBaseName(useDocStore.getState().fileName) })
-                    }}
-                    disabled={busy}
-                  >
-                    {workspaceCopy.actSaveAs}
-                  </button>
-                </>
-              )}
-
-              {/* 新建 ▾：新建空谱 / 新建文件夹 */}
-              {openGroup !== 'save' && openGroup !== 'ops' && (
-                <>
-                  <button
-                    type="button"
-                    className="btn ws-side-btn ws-side-group"
-                    aria-expanded={openGroup === 'new'}
-                    onClick={() => setOpenGroup(openGroup === 'new' ? null : 'new')}
-                    disabled={busy}
-                  >
-                    {workspaceCopy.actNewScore}
-                    <span className="ws-caret">{openGroup === 'new' ? '▴' : '▾'}</span>
-                  </button>
-                  {openGroup === 'new' && (
-                    <>
-                      <button
-                        type="button"
-                        className="btn ws-sub-btn"
-                        onClick={() => {
-                          setOpenGroup(null)
-                          setEdit({ kind: 'newScore', value: '' })
-                        }}
-                        disabled={busy}
-                      >
-                        {workspaceCopy.actNewScore}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn ws-sub-btn"
-                        onClick={() => {
-                          setOpenGroup(null)
-                          setEdit({ kind: 'newFolder', value: '' })
-                        }}
-                        disabled={busy}
-                      >
-                        {workspaceCopy.actNewFolder}
-                      </button>
-                    </>
-                  )}
-                </>
-              )}
-
-              {/* 操作 ▾：作用在勾选项上（改名 / 移动 / 删除） */}
-              {openGroup !== 'save' && openGroup !== 'new' && (
-                <>
-                  <button
-                    type="button"
-                    className="btn ws-side-btn ws-side-group"
-                    aria-expanded={openGroup === 'ops'}
-                    onClick={() => setOpenGroup(openGroup === 'ops' ? null : 'ops')}
-                    disabled={busy || selCount === 0}
-                  >
-                    {workspaceCopy.actOps}
-                    <span className="ws-caret">{openGroup === 'ops' ? '▴' : '▾'}</span>
-                  </button>
-                  {openGroup === 'ops' && (
-                    <>
-                      <button
-                        type="button"
-                        className="btn ws-sub-btn"
-                        onClick={() => {
-                          const one = selCount === 1 ? selectedEntries[0] : null
-                          if (!one || one.kind !== 'file') {
-                            showNotice(workspaceCopy.renameSingleOnly, 'warn')
-                            return
-                          }
-                          setOpenGroup(null)
-                          setEdit({ kind: 'rename', value: stripJpsExt(one.name), name: one.name })
-                        }}
-                        disabled={busy || selCount !== 1 || selectedEntries[0]?.kind !== 'file'}
-                      >
-                        {workspaceCopy.actRename}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn ws-sub-btn"
-                        onClick={startMove}
-                        disabled={busy || selectedFiles.length === 0 || hasDirSelected}
-                        title={hasDirSelected ? workspaceCopy.moveDirUnsupported : undefined}
-                      >
-                        {workspaceCopy.actMove}
-                      </button>
-                      <button type="button" className="btn ws-danger ws-sub-btn" onClick={startDelete} disabled={busy}>
-                        {workspaceCopy.actDelete}
-                      </button>
-                    </>
-                  )}
-                </>
-              )}
             </>
           )}
         </div>
       </div>
+      {/* 操作菜单（portal → body：dock 有 overflow:hidden，就地浮层会被裁掉；
+          锚在按钮**上方**，因为底栏就在屏幕底部） */}
+      {menuOpen &&
+        menuPos &&
+        createPortal(
+          <div ref={menuRef} className="ws-menu-pop" role="menu" style={{ left: menuPos.left, bottom: menuPos.bottom, width: menuPos.width }}>
+            <button type="button" className="ws-menu-item" role="menuitem" onClick={() => { setMenuOpen(false); void onSave() }}>
+              {workspaceCopy.actSave}
+            </button>
+            <button
+              type="button"
+              className="ws-menu-item"
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false)
+                setEdit({ kind: 'saveAs', value: fileBaseName(useDocStore.getState().fileName) })
+              }}
+            >
+              {workspaceCopy.actSaveAs}
+            </button>
+            <button
+              type="button"
+              className="ws-menu-item"
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false)
+                setEdit({ kind: 'newScore', value: '' })
+              }}
+            >
+              {workspaceCopy.actNewScore}
+            </button>
+            <button
+              type="button"
+              className="ws-menu-item"
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false)
+                setEdit({ kind: 'newFolder', value: '' })
+              }}
+            >
+              {workspaceCopy.actNewFolder}
+            </button>
+            <div className="ws-menu-sep" />
+            <button
+              type="button"
+              className="ws-menu-item"
+              role="menuitem"
+              disabled={selCount !== 1 || selectedEntries[0]?.kind !== 'file'}
+              onClick={() => {
+                const one = selCount === 1 ? selectedEntries[0] : null
+                setMenuOpen(false)
+                if (!one || one.kind !== 'file') return
+                setEdit({ kind: 'rename', value: stripJpsExt(one.name), name: one.name })
+              }}
+            >
+              {workspaceCopy.actRename}
+            </button>
+            <button
+              type="button"
+              className="ws-menu-item"
+              role="menuitem"
+              disabled={selectedFiles.length === 0 || hasDirSelected}
+              title={hasDirSelected ? workspaceCopy.moveDirUnsupported : undefined}
+              onClick={startMove}
+            >
+              {workspaceCopy.actMove}
+            </button>
+            <button type="button" className="ws-menu-item ws-danger" role="menuitem" disabled={selCount === 0} onClick={startDelete}>
+              {workspaceCopy.actDelete}
+            </button>
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
