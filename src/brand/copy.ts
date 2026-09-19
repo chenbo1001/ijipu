@@ -147,7 +147,9 @@ export const workspaceCopy = {
   grantWhy: '刷新或重新打开页面后，浏览器会把目录权限重置为"待确认"，需要在点击后重新授予一次。',
   switchDir: '换一个文件夹',
   /** adj540：面包屑首段（工作区根目录名）本身就是"换工作区目录"的按钮——省掉右侧那个按钮（用户要求） */
-  switchDirHint: '点击更换工作区目录',
+  switchDirHint: '切换工作区目录',
+  /** 悬浮提示：写清"点它会做什么 + 当前是哪个目录"（用户反馈原来的提示不够明确） */
+  switchDirTitle: (dir: string): string => `切换工作区目录（当前：${dir}）`,
   up: '上级目录',
   emptyDir: '这个文件夹里没有 .jps 文件',
   rootLabel: '工作区',
@@ -216,8 +218,10 @@ export const workspaceCopy = {
   /** 多选时删除确认里的条数提示 */
   deleteManyConfirm: (n: number): string => `永久删除选中的 ${n} 项？删了就找不回来了`,
   /** adj540：过滤框（用户要求）——过滤时列出**整个工作区**里符合条件的 .jps（平坦列表，便于快速打开） */
-  filterPlaceholder: '过滤 .jps（含子目录）…',
+  filterPlaceholder: '过滤 .jps（支持 * ?，含子目录）…',
   filterClear: '清空过滤',
+  /** 通配符说明（输入框 title） */
+  filterHint: '不含 * ? 时按子串匹配；含 * ? 时按通配符整体匹配（如 小星*、*练习*、第?课）',
   searchEmpty: '工作区里没有匹配的 .jps',
   /** 过滤结果条数（侧栏标签用） */
   searchResults: (n: number): string => `匹配 ${n} 个`,

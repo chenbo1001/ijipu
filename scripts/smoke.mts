@@ -8488,10 +8488,9 @@ function runAdj540WorkspaceTests() {
       /grantPathHint/.test(copySrc),
     '')
   check('adj540 面包屑首段（工作区根目录名）本身就是**换目录按钮**（省掉右侧「换一个文件夹」；移动模式下它=选根目录为目标）',
-    /className="ws-crumb-seg ws-root"[\s\S]{0,200}?onClick=\{\(\) => void \(moving \? refreshMovingTarget\(\[\]\) : onPick\(\)\)\}/.test(
+    /className="btn ws-root"[\s\S]{0,260}?onClick=\{\(\) => void \(moving \? refreshMovingTarget\(\[\]\) : onPick\(\)\)\}/.test(
       panelSrc,
     ) &&
-      /switchDirHint/.test(copySrc) &&
       // 平时头部不再有"换一个文件夹"按钮（授权视图里那个仍在，故只断言头部那处已移除）
       !/workspaceCopy\.switchDir\}\s*<\/button>\s*\)\}\s*<\/div>/.test(panelSrc),
     '')
@@ -8537,12 +8536,28 @@ function runAdj540WorkspaceTests() {
       /searching\s*\?\s*\(hits \?\? \[\]\)\.map/.test(panelSrc) &&
       /workspaceCopy\.filterPlaceholder/.test(panelSrc),
     '')
-  check('adj540 过滤匹配是纯函数（大小写不敏感，文件名与相对路径都参与；空查询不过滤）',
+  check('adj540 过滤匹配是纯函数（无通配符按子串；有 `*` `?` 按 glob 整体匹配；大小写不敏感；空查询不过滤）',
+    // 无通配符：子串（文件名或相对路径都算）
     matchesQuery('小星星.jps', '2.曲谱集/小星星.jps', '星星') &&
-      matchesQuery('小星星.jps', '2.曲谱集/小星星.jps', '曲谱') && // 目录名也能命中
-      matchesQuery('A.JPS', 'A.JPS', 'a.jps') && // 大小写不敏感
+      matchesQuery('小星星.jps', '2.曲谱集/小星星.jps', '曲谱') &&
+      matchesQuery('A.JPS', 'A.JPS', 'a.jps') &&
       !matchesQuery('小星星.jps', '2.曲谱集/小星星.jps', '两只老虎') &&
-      matchesQuery('小星星.jps', '2.曲谱集/小星星.jps', '  '), // 空白 = 不过滤
+      matchesQuery('小星星.jps', '2.曲谱集/小星星.jps', '  ') &&
+      // 通配符：`*` 任意串、`?` 单字符；整体匹配（`小星*` 不命中 `我的小星星.jps`）
+      matchesQuery('小星星.jps', '小星星.jps', '小星*') &&
+      matchesQuery('我的小星星.jps', '我的小星星.jps', '*星星*') &&
+      matchesQuery('小星星.jps', '2.曲谱集/小星星.jps', '*曲谱*') &&
+      matchesQuery('小星星.jps', '小星星.jps', '小?星*') &&
+      !matchesQuery('我的小星星.jps', '我的小星星.jps', '小星*') &&
+      // 查询里的 `.` 是**字面点**，不能当"任意字符"（globToRegexSource 会转义）
+      matchesQuery('a.jps', 'a.jps', 'a.jps') &&
+      !matchesQuery('axjps', 'axjps', 'a.jps'),
+    '')
+  check('adj540 面包屑首段是**按钮样式**的"切换工作区目录"入口（用户反馈：像纯文字看不出用途、提示要写清做什么）',
+    /className="btn ws-root"/.test(panelSrc) &&
+      /switchDirTitle\(ws\.handle\.name\)/.test(panelSrc) &&
+      /switchDirTitle: \(dir: string\): string => `切换工作区目录（当前：\$\{dir\}）`/.test(copySrc) &&
+      /\.ws-root \{[\s\S]{0,300}?border: 1px solid var\(--jp-border\)/.test(cssAll),
     '')
   check('adj540 列表行带**复选框**（勾选=选中供 改名/移动/删除；点名字=打开/进入），且支持多选',
     /<input[\s\S]{0,200}?type="checkbox"[\s\S]{0,200}?className="ws-check"/.test(panelSrc) &&

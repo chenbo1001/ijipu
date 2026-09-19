@@ -78,14 +78,33 @@ export function parentPath(segs: readonly string[]): string[] {
 }
 
 /**
- * adj540：过滤匹配（纯函数）——**大小写不敏感的子串匹配**，同时看文件名与相对路径。
- * 于是「练习」能命中 `2.曲谱集/练习曲/小星星.jps`（目录名也参与匹配），符合"在工作区里找谱"的直觉。
+ * 把 **glob**（`*` = 任意串、`?` = 单个字符）转成正则源码片段（纯函数）。
+ * 其它字符一律转义——尤其是 `.`：查询里写 `小星星.jps` 时那个点是**字面点**，不能当"任意字符"。
+ */
+export function globToRegexSource(glob: string): string {
+  return glob
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.')
+}
+
+/**
+ * adj540：过滤匹配（纯函数）——**大小写不敏感**，同时看文件名与相对路径
+ * （于是「练习」能命中 `2.曲谱集/练习曲/小星星.jps`，符合"在工作区里找谱"的直觉）。
+ *
+ * 两种口径（用户要求支持通配符）：
+ *  · **不含 `*` `?`** ⇒ 子串匹配（最好用，`星星` 就能找到 `小星星.jps`）；
+ *  · **含 `*` `?`** ⇒ 当 glob 用（`小星*`、`*练习*`、`第?课`），此时**从头尾匹配**（`小星*` 不会命中
+ *    `我的小星星.jps`——用户既然写了通配符，就按他给的形状来）。
  * 空白查询返回 `true`（不过滤）。
  */
 export function matchesQuery(name: string, relPath: string, query: string): boolean {
   const q = query.trim().toLowerCase()
   if (!q) return true
-  return name.toLowerCase().includes(q) || relPath.toLowerCase().includes(q)
+  const targets = [name.toLowerCase(), relPath.toLowerCase()]
+  if (!/[*?]/.test(q)) return targets.some((t) => t.includes(q))
+  const re = new RegExp(`^${globToRegexSource(q)}$`)
+  return targets.some((t) => re.test(t))
 }
 
 /** 扁平搜索结果：一个 `.jps` 的位置与显示名（`relPath` 用于告诉用户它在哪个子目录下） */

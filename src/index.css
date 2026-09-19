@@ -3502,22 +3502,31 @@ body {
   font-size: 12px;
   color: var(--jp-text-secondary);
 }
+/* adj540：面包屑首段 = 工作区根目录名，**做成按钮样子**（用户反馈：像纯文字就看不出用途）：
+ * 与 `.btn` 同族（边框/圆角/底色），只是更紧凑；hover 换强调色边框，与其它按钮一致。 */
 .ws-root {
   flex: none;
-  padding: 2px 4px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
+  max-width: 60%;
+  padding: 2px 8px;
+  border: 1px solid var(--jp-border);
+  border-radius: 7px;
+  background: var(--jp-bg-app);
   color: var(--jp-accent);
-  font: inherit;
+  font-family: var(--jp-font-sans);
+  font-size: 12px;
   font-weight: 700;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
 }
-/* adj540：根目录名是"换工作区目录"的按钮（用户要求，省掉右侧按钮），给一点可点的视觉反馈 */
-.ws-root:hover,
-.ws-root:focus-visible {
-  background: var(--jp-bg-panel-active);
-  text-decoration: underline;
+.ws-root:hover:not(:disabled) {
+  border-color: var(--jp-accent);
+}
+.ws-root:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .ws-sep {
   color: var(--jp-text-muted);

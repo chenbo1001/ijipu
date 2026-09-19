@@ -453,16 +453,18 @@ export function WorkspacePanel() {
   return (
     <div className="ws-panel">
       <div className="ws-head">
-        <div className="ws-crumb" title={wsPathText}>
+        <div className="ws-crumb">
           {/* adj540：面包屑首段 = **工作区根目录名**，它本身就是一个按钮：
               · 平时点它 = 换一个工作区目录（`onPick`）——于是头部不必再放「换一个文件夹」按钮（用户要求）；
               · 「移动到…」模式下点它 = 把工作区根目录当移动目标（与后面的子目录面包屑语义一致）。
-              注：FSA 不给完整磁盘路径，所以这里显示的是文件夹名（`title` 里给出"名/子路径"全串）。 */}
+              用户反馈两点已修：**要长得像按钮**（用途才明确）、**悬浮提示要写清"切换工作区目录"**
+              （原来只给路径，看不出点它会干什么）；注：FSA 不给完整磁盘路径，所以显示文件夹名。 */}
           <button
             type="button"
-            className="ws-crumb-seg ws-root"
+            className="btn ws-root"
             onClick={() => void (moving ? refreshMovingTarget([]) : onPick())}
-            title={moving ? wsPathText : `${wsPathText} · ${workspaceCopy.switchDirHint}`}
+            title={moving ? workspaceCopy.moveHere : workspaceCopy.switchDirTitle(ws.handle.name)}
+            aria-label={workspaceCopy.switchDirTitle(ws.handle.name)}
             disabled={busy}
           >
             {ws.handle.name}
@@ -531,6 +533,7 @@ export function WorkspacePanel() {
           className="ws-input ws-filter"
           value={query}
           placeholder={workspaceCopy.filterPlaceholder}
+          title={workspaceCopy.filterHint}
           onChange={(ev) => {
             setQuery(ev.target.value)
             setEdit(null)
