@@ -9,6 +9,16 @@
  * adj417：图标集中在 `/icons/`（`public/icons/`），dist 根目录不再散落几十个 png。
  */
 const CACHE = 'jps-shell-v3'
+/**
+ * adj539：**桌面壳里绝不用 SW**（Tauri 在 Windows 用 `http(s)://tauri.localhost`，是安全上下文、
+ * SW 本可注册，但资源随二进制内嵌，SW 只会带来陈旧缓存）。历史版本注册过的 SW 曾在壳里造成**白屏**：
+ * 它在 SW 上下文里取不到 Tauri 自定义协议 → 回退缓存的旧 `index.html` → 旧 HTML 引用的
+ * `/assets/<旧 hash>.js` 新版本已不存在 → 资源协议回 index.html（text/html）→ 模块脚本 MIME 失败。
+ * 而"注销 SW"的补救代码在页面 JS 里、页面 JS 又被该 SW 挡住 ⇒ 死锁。
+ * 故这里加一道**自毁保险**：一旦发现自己在桌面壳里，就清空缓存并注销自己，且不拦截任何请求。
+ * （Rust 侧 `purge_stale_service_worker` 会在启动前直接删掉它的存储，这里是第二道防线。）
+ */
+const IN_DESKTOP_SHELL = self.location.hostname === 'tauri.localhost'
 const PRECACHE = ['/', '/index.html', '/manifest.webmanifest', '/icons/Jianpu.ico', '/icons/Jianpu.png', '/icons/pwa-192.png', '/icons/pwa-512.png', '/icons/good.png']
 /* adj408：按钮 PNG 图标（`public/icons/*.png`，约 60KB）——首屏渲染就会用到，离线时必须命中缓存。
    单独**逐个**预热而**不并进 PRECACHE**：`addAll` 是"任一失败则整体失败"，图标文件名是中文，
@@ -26,6 +36,11 @@ const ICON_FILES = ['菜单', '编码', '左右', '上下', '预览', '排版', 
 const ICONS = ICON_FILES.map((n) => `/icons/${n}.png`)
 
 self.addEventListener('install', (event) => {
+  // adj539：桌面壳里不预热、直接进入等待（配合 activate 的自毁逻辑）
+  if (IN_DESKTOP_SHELL) {
+    event.waitUntil(self.skipWaiting())
+    return
+  }
   event.waitUntil(
     caches
       .open(CACHE)
@@ -53,6 +68,18 @@ self.addEventListener('install', (event) => {
 })
 
 self.addEventListener('activate', (event) => {
+  // adj539：桌面壳里**清空所有缓存并注销自己**（自毁保险，见文件顶部注释）
+  if (IN_DESKTOP_SHELL) {
+    event.waitUntil(
+      (async () => {
+        const keys = await caches.keys()
+        await Promise.all(keys.map((k) => caches.delete(k)))
+        await self.registration.unregister()
+        await self.clients.claim()
+      })(),
+    )
+    return
+  }
   event.waitUntil(
     caches
       .keys()
@@ -62,6 +89,8 @@ self.addEventListener('activate', (event) => {
 })
 
 self.addEventListener('fetch', (event) => {
+  // adj539：桌面壳里**完全不拦截**（自毁保险，见文件顶部注释）——让 Tauri 资源协议自己处理
+  if (IN_DESKTOP_SHELL) return
   const req = event.request
   if (req.method !== 'GET') return
   const url = new URL(req.url)

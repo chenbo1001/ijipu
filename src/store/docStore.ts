@@ -29,12 +29,23 @@ import {
 import { useUiStore } from './uiStore'
 import { loadFontOverride, migrateLegacyEditorPrefs } from './editorPrefs'
 import { normalizePastedSource } from './importSource'
+// adj538：桌面壳的「外部打开」（双击 .jps）——纯网页下这些函数一律惰性/空转，见该模块注释
+import { pickPrimary, writeExternalFile, type ExternalFile } from './externalOpen'
+// adj540：工作区目录（Android/移动端"选一个文件夹当工作区"，纯网页，不需要壳）
+import {
+  getWorkspace,
+  joinPath,
+  normalizeRelPath,
+  readWorkspaceText,
+  rememberWorkspacePath,
+  writeWorkspaceText,
+} from './workspace'
 
 /** adj200：用户是否已主导过文件状态（新建/打开/保存/另存为）。「启动恢复」异步读 IndexedDB，
  *  必须只在用户还未进行任何文件操作时应用，避免它在用户新建/另存为之后才完成，从而把
  *  fileHandle / fileName 覆盖回旧文件（旧值 A）。 */
 let fileStateTouched = false
-import { uiCopy, savePhaseCopy, pasteImportCopy } from '../brand/copy'
+import { uiCopy, savePhaseCopy, pasteImportCopy, externalOpenCopy, workspaceCopy } from '../brand/copy'
 
 export type ViewType = 'code' | 'split' | 'splitH' | 'splitHE' | 'preview'
 
@@ -119,6 +130,36 @@ interface DocState {
   // ---- 文件读写（adj70：Web File System Access API 打开/保存对话框） ----
   /** 当前已打开文件的句柄（null = 未关联磁盘文件） */
   fileHandle: FileSystemFileHandle | null
+  /**
+   * adj538：当前文档的**外部路径**（双击 `.jps` / 文件关联打开时由桌面壳给出；浏览器里恒为 null）。
+   * 它与 `fileHandle` 是同一件事的两种来源，故**互斥**：设了 nativePath 就清掉 fileHandle，反之亦然。
+   * 只存内存、不持久化——重启后原文件可能已被移走/改名，静默写回旧路径比重开一次更危险。
+   */
+  nativePath: string | null
+  /**
+   * adj540：当前文档在**工作区**里的相对路径（最后一段是文件名，如 `['杂记','小星星.jps']`）。
+   *
+   * 与 `fileHandle` / `nativePath` 是"同一个文档存在哪"的三种来源，**三者互斥**：设了谁就清掉另两个，
+   * 否则「保存」会写错地方（把工作区文档写回上一个外部文件）。
+   * 只存内存：工作区**根句柄**持久化在 IndexedDB（`fileHandleDb.saveWorkspace`），路径丢了只是
+   * "下次保存要重新选位置"，而写错文件是不可逆的。
+   */
+  workspacePath: string[] | null
+  /**
+   * adj540：从工作区打开一个 `.jps`（`path` 含子目录，最后一段是文件名）。
+   * 读失败/无工作区时给提示并返回 false。
+   */
+  openWorkspaceFile: (path: string[]) => Promise<boolean>
+  /**
+   * adj540：把当前谱**另存到工作区**的指定位置（`path` 最后一段是文件名，缺失的子目录会创建）。
+   * 写入后回读校验；成功即把本文档与该路径绑定（后续「保存」写回它）。
+   */
+  saveToWorkspace: (path: string[]) => Promise<boolean>
+  /**
+   * adj538：载入桌面壳送来的外部文件（双击打开）。
+   * 取第一个载入编辑器；返回是否载入成功（读失败时给提示并返回 false）。
+   */
+  openExternalFiles: (files: ExternalFile[]) => boolean
   /** 打开文件对话框：读取 .jps 载入；用户取消返回 false */
   openFile: () => Promise<boolean>
   /** 保存：已有句柄直接写入；否则走另存为对话框 */
@@ -358,6 +399,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
       pageConfig: resolveConfig(s.code),
       dirty: false,
       fileHandle: null,
+      nativePath: null,
+      // adj540：三者互斥——与工作区里的任何文件解绑
+      workspacePath: null,
       activeNoteId: null,
       activeNoteIds: [],
       playheadTrack: [],
@@ -387,6 +431,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
       pageConfig: applyFontOverride(mergeJpsConfig(template, null), loadFontOverride()),
       dirty: false,
       fileHandle: null,
+      nativePath: null,
+      // adj540：三者互斥——与工作区里的任何文件解绑
+      workspacePath: null,
       activeNoteId: null,
       activeNoteIds: [],
       playheadTrack: [],
@@ -424,6 +471,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
       pageConfig: resolveConfig(code),
       dirty: true, // 内容尚未落到任何文件，提醒用户用「导出」保存
       fileHandle: null,
+      nativePath: null,
+      // adj540：三者互斥——与工作区里的任何文件解绑
+      workspacePath: null,
       activeNoteId: null,
       activeNoteIds: [],
       playheadTrack: [],
@@ -439,6 +489,57 @@ export const useDocStore = create<DocState>()((set, get) => ({
 
   // ---- 文件读写（adj70） ----
   fileHandle: null,
+  nativePath: null,
+  // adj540：工作区相对路径（见类型注释；同样只存内存）
+  workspacePath: null,
+  /**
+   * adj538：桌面壳送来"要打开的文件"（双击 `.jps`）——与"打开对话框"共用同一段装载逻辑，
+   * 差别只有两点：① 文本已由 Rust 侧读好；② 记下 `nativePath`（后续 Ctrl+S 写回原文件）。
+   */
+  openExternalFiles: (files) => {
+    const { primary, extraCount } = pickPrimary(files)
+    if (!primary) return false
+    const ui = useUiStore.getState()
+    if (primary.error) {
+      // 读失败（权限/文件被移走/不是文本）如实提示，不静默
+      ui.showNotice(externalOpenCopy.openFailed(primary.name, primary.error), 'error')
+      return false
+    }
+    fileStateTouched = true
+    const name = fileBaseName(primary.name)
+    try {
+      localStorage.setItem(DRAFT_KEY, primary.code)
+      localStorage.setItem(DRAFT_NAME_KEY, name)
+    } catch {
+      /* 存储不可用时静默 */
+    }
+    // 与「打开对话框」同款装载：解析 + 页面设置 + 清空历史/联动状态；
+    // 数据源是外部路径 ⇒ 清掉 FSA 句柄（两者互斥），避免"保存写到了上一个文件"
+    disconnectFileHandle()
+    set({
+      code: primary.code,
+      fileName: name,
+      parseResult: parseJps(primary.code),
+      pageConfig: resolveConfig(primary.code),
+      dirty: false,
+      nativePath: primary.path,
+      // adj540：外部路径与工作区互斥
+      workspacePath: null,
+      activeNoteId: null,
+      activeNoteIds: [],
+      voiceBlocks: [],
+      cursorJump: null,
+      undoStack: [],
+      redoStack: [],
+      lastEditAt: 0,
+      sel: { start: 0, end: 0 },
+    })
+    ui.showNotice(
+      extraCount > 0 ? externalOpenCopy.openedWithExtra(name, extraCount) : externalOpenCopy.opened(name),
+      'ok',
+    )
+    return true
+  },
   openFile: async () => {
     fileStateTouched = true
     const picker = (window as any).showOpenFilePicker
@@ -472,6 +573,10 @@ export const useDocStore = create<DocState>()((set, get) => ({
         pageConfig: resolveConfig(code),
         dirty: false,
         fileHandle: handle,
+        // adj538：改用对话框打开 ⇒ 与"外部路径"解绑（两者互斥，否则保存会写回上一个外部文件）
+        nativePath: null,
+        // adj540：同理与工作区解绑（三者互斥）
+        workspacePath: null,
         activeNoteId: null,
         activeNoteIds: [],
         voiceBlocks: [],
@@ -494,6 +599,96 @@ export const useDocStore = create<DocState>()((set, get) => ({
       console.warn('[iJipu] 打开文件失败', e)
       useUiStore.getState().showNotice(`${uiCopy.openFailedPrefix}${reason}`, 'error')
       return false
+    }
+  },
+
+  // ---- adj540：工作区（Android/移动端的"文件夹当工作区"；含子目录） ----
+  openWorkspaceFile: async (path) => {
+    fileStateTouched = true
+    const ui = useUiStore.getState()
+    const segs = normalizeRelPath(path)
+    if (segs.length === 0) return false
+    const ws = await getWorkspace()
+    if (!ws) {
+      ui.showNotice(workspaceCopy.noWorkspace, 'warn')
+      return false
+    }
+    try {
+      const code = await readWorkspaceText(ws.handle, segs)
+      const name = fileBaseName(segs[segs.length - 1])
+      try {
+        localStorage.setItem(DRAFT_KEY, code)
+        localStorage.setItem(DRAFT_NAME_KEY, name)
+      } catch {
+        /* 存储不可用时静默 */
+      }
+      // 数据源是工作区 ⇒ 断开磁盘句柄（三者互斥），避免"保存写到了上一个文件"
+      disconnectFileHandle()
+      set({
+        code,
+        fileName: name,
+        parseResult: parseJps(code),
+        pageConfig: resolveConfig(code),
+        dirty: false,
+        fileHandle: null,
+        nativePath: null,
+        workspacePath: segs,
+        activeNoteId: null,
+        activeNoteIds: [],
+        voiceBlocks: [],
+        cursorJump: null,
+        undoStack: [],
+        redoStack: [],
+        lastEditAt: 0,
+        sel: { start: 0, end: 0 },
+      })
+      // 记住所在子目录：下次打开对话框直接落回原处（用户要求支持子目录）
+      void rememberWorkspacePath(segs.slice(0, -1))
+      console.info(`[iJipu] 从工作区打开：${joinPath(segs)}`)
+      ui.showNotice(workspaceCopy.opened(joinPath(segs)), 'ok')
+      return true
+    } catch (e) {
+      const reason = e instanceof Error ? `${e.name}${e.message ? `: ${e.message}` : ''}` : String(e)
+      console.warn('[iJipu] 从工作区打开失败', e)
+      ui.showNotice(workspaceCopy.openFailed(joinPath(segs), reason), 'error')
+      return false
+    }
+  },
+  saveToWorkspace: async (path) => {
+    fileStateTouched = true
+    const ui = useUiStore.getState()
+    const segs = normalizeRelPath(path)
+    if (segs.length === 0) return false
+    const ws = await getWorkspace()
+    if (!ws) {
+      ui.showNotice(workspaceCopy.noWorkspace, 'warn')
+      return false
+    }
+    const cancelHint = armSavingHint()
+    try {
+      const code = get().code
+      await writeWorkspaceText(ws.handle, segs, code)
+      const name = fileBaseName(segs[segs.length - 1])
+      set({
+        fileName: name,
+        fileHandle: null,
+        nativePath: null,
+        workspacePath: segs,
+        // 写入期间用户可能继续输入 ⇒ 内容变了就保留未保存标记（与句柄路径同一口径）
+        dirty: get().code !== code,
+      })
+      void saveFileHandle(null)
+      void rememberWorkspacePath(segs.slice(0, -1))
+      console.info(`[iJipu] 另存到工作区：${joinPath(segs)}`)
+      ui.showNotice(workspaceCopy.saved(joinPath(segs)), 'ok')
+      return true
+    } catch (e) {
+      const reason = e instanceof Error ? `${e.name}${e.message ? `: ${e.message}` : ''}` : String(e)
+      console.warn('[iJipu] 另存到工作区失败', e)
+      ui.showNotice(workspaceCopy.saveFailed(joinPath(segs), reason), 'error')
+      return false
+    } finally {
+      cancelHint()
     }
   },
   saveFile: async () => {
@@ -557,7 +752,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       void saveFileHandle(handle)
       // adj363：写入期间用户可能继续输入，内容已变则保留未保存标记
       const tUi = performance.now()
-      set({ fileHandle: handle, fileName: name, dirty: get().code !== code })
+      set({ fileHandle: handle, fileName: name, dirty: get().code !== code, nativePath: null, workspacePath: null })
       phaseLog.tail('ui', performance.now() - tUi)
       reportSaved(t0, phaseLog, name)
       return true
@@ -643,6 +838,61 @@ function reportSaved(t0: number, log?: SavePhaseLog, savedName?: string): void {
 
 /** 「保存」主流程：有可用句柄直接写回；否则走另存为 */
 async function doSaveFile(): Promise<boolean> {
+  const st = useDocStore.getState()
+  // adj538：双击 `.jps` 打开（externalPath 有值）⇒ Ctrl+S **写回原文件**（用户确认的桌面标准行为）。
+  // 写入与回读校验都在 Rust 侧（`write_external_file`），与 FSA 路径同口径；失败如实提示、
+  // **不自动弹另存为**——外部文件写失败多是"被移走/改名/无权限"，静默换个对话框反而更迷惑，
+  // 提示里已写明可改用「另存为」。
+  if (st.nativePath) {
+    const path = st.nativePath
+    const ui = useUiStore.getState()
+    const t0 = performance.now()
+    const cancelHint = armSavingHint()
+    try {
+      const code = useDocStore.getState().code
+      await writeExternalFile(path, code)
+      // 写入期间用户可能继续输入 ⇒ 内容变了就保留未保存标记（与句柄路径同一口径）
+      useDocStore.setState({ dirty: useDocStore.getState().code !== code })
+      console.info(`[iJipu] 保存到原文件：${path}（${Math.round(performance.now() - t0)}ms）`)
+      ui.showNotice(externalOpenCopy.savedToSource(st.fileName), 'ok')
+      return true
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e)
+      console.warn('[iJipu] 保存到原文件失败', e)
+      ui.showNotice(externalOpenCopy.saveToSourceFailed(st.fileName, reason), 'error')
+      return false
+    } finally {
+      cancelHint()
+    }
+  }
+  // adj540：工作区文档 ⇒ 写回工作区里的**同一个文件**（含子目录），与桌面 nativePath 同语义。
+  // 权限用根目录句柄申请（工作区授权是目录级的），必须在用户手势内完成 ⇒ 放在这里、写入之前。
+  if (st.workspacePath && st.workspacePath.length > 0) {
+    const wsPath = st.workspacePath
+    const ui = useUiStore.getState()
+    const t0 = performance.now()
+    const cancelHint = armSavingHint()
+    try {
+      const ws = await getWorkspace()
+      if (!ws) {
+        ui.showNotice(workspaceCopy.noWorkspace, 'warn')
+        return false
+      }
+      const code = useDocStore.getState().code
+      await writeWorkspaceText(ws.handle, wsPath, code)
+      useDocStore.setState({ dirty: useDocStore.getState().code !== code })
+      console.info(`[iJipu] 保存到工作区：${joinPath(wsPath)}（${Math.round(performance.now() - t0)}ms）`)
+      ui.showNotice(workspaceCopy.saved(joinPath(wsPath)), 'ok')
+      return true
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e)
+      console.warn('[iJipu] 保存到工作区失败', e)
+      ui.showNotice(workspaceCopy.saveFailed(joinPath(wsPath), reason), 'error')
+      return false
+    } finally {
+      cancelHint()
+    }
+  }
   const handle = useDocStore.getState().fileHandle
   if (!handle) return useDocStore.getState().saveFileAs()
   const ui = useUiStore.getState()
@@ -799,6 +1049,10 @@ function openFileViaInput(): Promise<boolean> {
           dirty: false,
           // adj281：降级环境无写回权限，不关联磁盘句柄（保存走 saveFileAs → 会提示 saveUnsupported）
           fileHandle: null,
+          // adj538：同理与"外部路径"解绑
+          nativePath: null,
+          // adj540：降级打开也没有工作区绑定（下次保存走另存为/导出）
+          workspacePath: null,
           activeNoteId: null,
           activeNoteIds: [],
           voiceBlocks: [],

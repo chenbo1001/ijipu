@@ -3451,3 +3451,144 @@ body {
   :root { --jp-resize-h: 14px; }
   .split-divider-h { height: 100%; }
 }
+
+/* adj540：工作区对话框（选文件夹当工作区 / 子目录浏览 / 另存到此处）
+ * 手机优先：整行可点、列表自己滚动、底栏按钮不参与滚动。 */
+.ws-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+.ws-desc {
+  color: var(--jp-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.ws-empty {
+  display: flex;
+  justify-content: center;
+  padding: 18px 0;
+}
+.ws-big {
+  padding: 12px 18px;
+  font-size: 14px;
+}
+.ws-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ws-crumb {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--jp-text-secondary);
+}
+.ws-root {
+  color: var(--jp-accent);
+  font-weight: 700;
+}
+.ws-sep {
+  color: var(--jp-text-muted);
+  margin: 0 2px;
+}
+.ws-crumb-seg {
+  padding: 2px;
+  border: 0;
+  background: none;
+  color: var(--jp-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.ws-crumb-seg:hover {
+  color: var(--jp-accent);
+  text-decoration: underline;
+}
+.ws-gate {
+  display: flex;
+  justify-content: center;
+  padding: 14px 0;
+}
+.ws-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 120px;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--jp-border);
+  border-radius: 8px;
+  background: var(--jp-bg-app);
+}
+.ws-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--jp-text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.ws-row:hover {
+  background: var(--jp-bg-panel-hover);
+}
+.ws-row:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ws-row-up {
+  color: var(--jp-text-secondary);
+}
+.ws-icon {
+  flex: none;
+  width: 18px;
+  text-align: center;
+}
+.ws-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-none {
+  padding: 16px 8px;
+  color: var(--jp-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+.ws-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ws-hint {
+  color: var(--jp-text-muted);
+  font-size: 11px;
+}
+.ws-save {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ws-input {
+  width: 150px;
+  padding: 6px 8px;
+  border: 1px solid var(--jp-border);
+  border-radius: 6px;
+  background: var(--jp-bg-app);
+  color: var(--jp-text-primary);
+  font-size: 13px;
+}

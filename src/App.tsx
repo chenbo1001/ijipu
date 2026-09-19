@@ -16,6 +16,8 @@ import { EditorPane } from './editor/EditorPane'
 import { PreviewPane } from './preview/PreviewPane'
 import { useDocStore } from './store/docStore'
 import { useUiStore } from './store/uiStore'
+// adj538：桌面壳「外部打开」（双击 .jps）——拉取待打开队列 + 监听后续打开请求
+import { drainExternalFiles, hasShell, onExternalOpen } from './store/externalOpen'
 // adj350：对话框懒加载（React.lazy）——首屏不加载它们，显著减小主包、加快首屏显示
 // adj492：「关于」已迁入底栏 dock（见 ui/ToolDock），此处不再需要弹窗版懒加载
 const SamplesDialog = lazy(() => import('./dialogs/SamplesDialog').then((m) => ({ default: m.SamplesDialog })))
@@ -28,6 +30,8 @@ const DonateDialog = lazy(() => import('./dialogs/DonateDialog').then((m) => ({ 
 const PasteImportDialog = lazy(() => import('./dialogs/PasteImportDialog').then((m) => ({ default: m.PasteImportDialog })))
 // adj509：试听音色选择对话框（从音色库面板的「指定音色」按钮触发）
 const VoicePickerDialog = lazy(() => import('./dialogs/VoicePickerDialog').then((m) => ({ default: m.VoicePickerDialog })))
+// adj540：工作区（选一个文件夹当工作区；手机上的打开/保存主路径）
+const WorkspaceDialog = lazy(() => import('./dialogs/WorkspaceDialog').then((m) => ({ default: m.WorkspaceDialog })))
 
 function App() {
   const viewType = useDocStore((s) => s.viewType)
@@ -44,6 +48,24 @@ function App() {
   // adj315：左右拆分排列方向（全局设置——预览/编辑在 splitH 时的左右方位）
   const splitHDir = useUiStore((s) => s.splitHDir)
   const mainRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * adj538：桌面壳「外部打开」（双击 `.jps` / 文件关联）接线。
+   * 两条路都指向 Rust 侧同一个**取走即清空**的队列，因此既不会漏也不会重复打开：
+   *   ① 冷启动：双击时应用还没起，事件可能早于我此刻注册监听 ⇒ mount 时**主动拉取一次**；
+   *   ② 热启动：应用已在运行，单实例插件把路径入队并 emit `ijipu://open-files` ⇒ 监听后拉取。
+   * 纯浏览器里 `hasShell()` 恒为 false，这段整体空转（不影响网页版行为）。
+   */
+  useEffect(() => {
+    if (!hasShell()) return
+    const load = () => {
+      void drainExternalFiles().then((files) => {
+        if (files.length > 0) useDocStore.getState().openExternalFiles(files)
+      })
+    }
+    load() // ① 冷启动：处理启动参数带来的文件
+    return onExternalOpen(load) // ② 热启动：后续再有双击就再拉一次
+  }, [])
 
   // adj48：跟随系统深浅色——监听 prefers-color-scheme 变化
   useEffect(() => {
@@ -223,6 +245,7 @@ function App() {
       {modal === 'pasteImport' && <Suspense fallback={null}><PasteImportDialog /></Suspense>}
       {/* adj509：试听音色选择对话框（音色库「指定音色」按钮触发） */}
       {modal === 'voicePicker' && <Suspense fallback={null}><VoicePickerDialog /></Suspense>}
+      {modal === 'workspace' && <Suspense fallback={null}><WorkspaceDialog /></Suspense>}
     </div>
   )
 }

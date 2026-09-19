@@ -96,6 +96,10 @@ import {
 } from '../src/preview/zoomFit.ts'
 // adj530：顶栏"放不下就收进更多"的折叠判定（纯算式）——按可见优先级从最低的一位开始折叠
 import { foldKeys, TOPBAR_DONATE_KEY, TOPBAR_FIXED_KIDS } from '../src/ui/topbarFold.ts'
+// adj538：桌面壳「外部打开」——多文件取舍是纯逻辑，可在 Node 里直接断言（模块不碰 window 顶层）
+import { pickPrimary, hasShell, type ExternalFile } from '../src/store/externalOpen.ts'
+// adj540：工作区（Android/移动端"文件夹当工作区"）——纯逻辑部分在 Node 里直接断言
+import { isJpsName, joinPath, normalizeRelPath, parentPath, sortDirEntries, type DirEntry } from '../src/store/workspace.ts'
 // adj526：谱面数值字段范围来自引擎同一份表（GUIDE_LIMITS/_EX）——断言"逐项相等"，防止抄成第二份
 import { PAGE_NUM_RANGES, coarseFor } from '../src/ui/numFieldRanges.ts'
 // （GUIDE_LIMITS_EX 见本文件顶部从 layout/guides 的导入；这里补 GUIDE_LIMITS 与字号范围）
@@ -8140,6 +8144,309 @@ function runAdj534to537UiTests() {
     '')
 }
 
+/**
+ * adj538：PC 端 `.jps` 文件关联 + 「外部打开」（双击打开 → Ctrl+S 写回原文件）。
+ *
+ * 这条链路的四段，缺任何一段用户都会觉得"双击没反应/存不回原文件"：
+ *   ① 安装包注册关联（tauri.conf.json 的 fileAssociations + `name` 即 Windows ProgID）
+ *   ② NSIS 钩子补 Tauri 模板不写的三件事：`OpenWithProgids`（右键「打开方式」才可见）、
+ *      `SHChangeNotify`（资源管理器立刻刷新）、卸载时清掉自己的残留值
+ *   ③ Rust 侧：单实例插件（避免开第二个窗口）+ argv 入队 + 取队列/写回命令
+ *   ④ 前端：nativePath 与 fileHandle 互斥；保存时"外部路径"优先走写回
+ *
+ * 另有一条**纯函数**断言（`pickPrimary`）：多选/连开多个文件时"载入第一个 + 提示剩余"。
+ */
+function runAdj538ExternalOpenTests() {
+  console.log('[120] desktop .jps file association + external open (adj538)')
+  // ---- ① 纯逻辑：多文件时的取舍 ----
+  const mk = (path: string, name: string, error: string | null = null): ExternalFile => ({
+    path,
+    name,
+    code: 'Q: 1',
+    error,
+  })
+  const three = [mk('/a/甲.jps', '甲'), mk('/a/乙.jps', '乙'), mk('/a/丙.jps', '丙')]
+  check('adj538 多文件打开：载入第一个并给出剩余个数（空列表则什么都不载）',
+    pickPrimary([]).primary === null &&
+      pickPrimary([]).extraCount === 0 &&
+      pickPrimary(three).primary?.name === '甲' &&
+      pickPrimary(three).extraCount === 2,
+    `${pickPrimary(three).primary?.name}/${pickPrimary(three).extraCount}`)
+  // 在 Node（无 window）里 `hasShell()` 必须返回 false 而不是抛错——这是"纯网页构建不受影响"的前提
+  check('adj538 无 Tauri 环境下外开模块安全（hasShell() 为 false，不抛错）',
+    typeof hasShell === 'function' && hasShell() === false,
+    `hasShell=${hasShell()}`)
+
+  // ---- ② 安装包配置与 NSIS 钩子 ----
+  const conf = String(readFileSync('src-tauri/tauri.conf.json', 'utf8'))
+  check('adj538 注册 .jps 关联（ext + name 即 ProgID + 描述 + mimeType）',
+    /"fileAssociations"/.test(conf) &&
+      /"ext":\s*\["jps"\]/.test(conf) &&
+      /"name":\s*"iJipu\.jps"/.test(conf) &&
+      /"description":\s*"[^"]*"/.test(conf) &&
+      /"mimeType":\s*"application\/x-jps"/.test(conf),
+    '')
+  check('adj538 挂上 NSIS 安装钩子（installerHooks → nsis/hooks.nsh）',
+    /"installerHooks":\s*"nsis\/hooks\.nsh"/.test(conf),
+    '')
+  const hooks = String(readFileSync('src-tauri/nsis/hooks.nsh', 'utf8'))
+  // 断言前列掉注释：本文件的注释里**故意提到**了 `DeleteRegKey /ifempty`（说明为什么不能用它），
+  // 不剥注释的话"禁用该写法"的负向断言会被自己的注释绊倒（本项目的老坑：断言匹配到注释）
+  const hooksCode = hooks.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*;.*$/gm, '')
+  check('adj538 安装钩子写 OpenWithProgids（右键「打开方式」才看得到 iJipu）+ 通知资源管理器刷新',
+    /!macro NSIS_HOOK_POSTINSTALL/.test(hooks) &&
+      /OpenWithProgids/.test(hooks) &&
+      /SHChangeNotify/.test(hooks),
+    '')
+  check('adj538 卸载钩子只删我方值名，且在键确空时才删键（不误伤别的程序）',
+    /!macro NSIS_HOOK_POSTUNINSTALL/.test(hooksCode) &&
+      /DeleteRegValue/.test(hooksCode) &&
+      /EnumRegValue/.test(hooksCode) &&
+      /EnumRegKey/.test(hooksCode) &&
+      // 明确**不用** DeleteRegKey /ifempty：它不检查值，会在"键里还有别的程序的值"时把整个键删掉
+      !/DeleteRegKey\s+\/ifempty/.test(hooksCode),
+    '')
+  check('adj538 钩子里 ProgID 与备份值名同源（`iJipu.jps` / `iJipu.jps_backup`，不各写一遍字面量）',
+    /!define IJIPU_PROGID "iJipu\.jps"/.test(hooksCode) && /\$\{IJIPU_PROGID\}_backup/.test(hooksCode),
+    '')
+
+  // ---- ③ Rust 侧 ----
+  const lib = String(readFileSync('src-tauri/src/lib.rs', 'utf8'))
+  const cargo = String(readFileSync('src-tauri/Cargo.toml', 'utf8'))
+  check('adj538 单实例插件第一个注册（第二次双击不再开新窗口）+ 依赖已声明',
+    /tauri-plugin-single-instance = "2"/.test(cargo) &&
+      /\.plugin\(tauri_plugin_single_instance::init\(/.test(lib) &&
+      lib.indexOf('tauri_plugin_single_instance::init') < lib.indexOf('.manage(PendingOpen::default())'),
+    '')
+  check('adj538 单实例回调把窗口置前（unminimize/show/set_focus，最小化时也要弹出来）',
+    /unminimize\(\)/.test(lib) && /\.show\(\)/.test(lib) && /set_focus\(\)/.test(lib),
+    '')
+  check('adj538 Rust 侧提供"取队列"与"写回"命令，并注册进 invoke_handler',
+    /fn take_pending_open_files/.test(lib) &&
+      /fn write_external_file/.test(lib) &&
+      /take_pending_open_files,/.test(lib) &&
+      /write_external_file\b/.test(lib),
+    '')
+  check('adj538 写回做回读校验（宁可报错也不谎报已保存，与 FSA 路径同口径）',
+    /fn write_external_file[\s\S]{0,700}?let back = std::fs::read_to_string\(&p\)[\s\S]{0,200}?back != text/.test(lib),
+    '')
+  check('adj538 .jps 参数按后缀筛选而非位置（兼容 argv 是否含 exe 自身）',
+    /fn is_jps_arg[\s\S]{0,200}?ends_with\("\.jps"\)/.test(lib) && !/\.skip\(1\)/.test(lib),
+    '')
+  check('adj538 冷启动走 setup 入队 + macOS/iOS 走 RunEvent::Opened（cfg 门控）',
+    // 不再用"距 `fn run()` 多少字符"来定位：adj539 在 run() 前面插了 windows 专属的"启动前清陈旧 SW"，
+    // 字符窗口随之失效（本轮已被绊一次）。改为直接要求 `.setup` 里紧随其后的那条入队语句。
+    /pub fn run\(\)[\s\S]*?\.setup\(\|app\| \{[\s\S]{0,300}?queue_open_paths\(app\.handle\(\), jps_paths_from_os_args\(app\.env\(\)\.args_os\.clone\(\)\)\)/.test(
+      lib,
+    ) &&
+      /#\[cfg\(any\(target_os = "macos", target_os = "ios"\)\)\]/.test(lib),
+    '')
+
+  // ---- ④ 前端接线 ----
+  const store = String(readFileSync('src/store/docStore.ts', 'utf8'))
+  const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+  check('adj538 nativePath 与 fileHandle 互斥：所有装载/新建/导入路径都重置它',
+    /nativePath: string \| null/.test(store) &&
+      (store.match(/nativePath: null,/g) ?? []).length >= 6 &&
+      /nativePath: primary\.path/.test(store) &&
+      /openExternalFiles: \(files\) =>/.test(store),
+    `重置点 ${(store.match(/nativePath: null,/g) ?? []).length} 处`)
+  check('adj538 Ctrl+S 对"外部打开"的文档走写回原文件（nativePath 优先于句柄/另存为）',
+    /if \(st\.nativePath\) \{[\s\S]{0,1500}?await writeExternalFile\(path, code\)/.test(store) &&
+      /saveToSourceFailed/.test(store),
+    '')
+  check('adj538 App：冷启动主动拉取 + 热启动监听（同一"取走即清空"队列 ⇒ 不漏不重）',
+    /drainExternalFiles\(\)/.test(appSrc) &&
+      /onExternalOpen\(load\)/.test(appSrc) &&
+      /if \(!hasShell\(\)\) return/.test(appSrc),
+    '')
+}
+
+/**
+ * adj539：桌面壳里的两件"系统集成"效果，都是**只有真机才看得见**、且**编译通过 ≠ 效果对**。
+ *
+ * ① 白屏根因（E-2026-238）：陈旧 Service Worker 缓存了旧 `index.html`，把 `/assets/*.js` 喂成 `text/html`
+ *    ⇒ 前端整包加载失败。**页面的自救代码救不了自己**（页面 JS 正是被它挡住的），所以必须双保险：
+ *    Rust 在 webview 起来之前物理删掉 SW 存储 + `sw.js` 发现自己在桌面壳里就自毁。
+ * ② 快捷方式中文名/备注 + 右键动词（E-2026-239）：全是 NSIS 层面的坑——
+ *    钩子被 `!include` 得比模板 `!define` 更早（用不了 `${PRODUCTNAME}`/`${BUNDLEID}`）、
+ *    `!define` 不能重定义、含中文的 .nsh 必须带 BOM、`CreateShortcut` 的显示方式只能写 `SW_SHOWNORMAL`、
+ *    GUI 的桌面快捷方式建在 POSTINSTALL **之后**（必须再挂 `.onGUIEnd`）。
+ * 这些坑里**只有 BOM 能靠读文件断言**，其余靠"文本里必须是这么写的"来防回归。
+ */
+function runAdj539ShellTests() {
+  console.log('[121] desktop shell white-screen guard + NSIS shortcut naming (adj539)')
+  // 临时探针页面（Android FSA 探针）**不该随版本发布**：这里只提醒、不失败（它存在期间 smoke 仍应全绿）
+  if (existsSync('public/probe-fsa.html')) {
+    console.warn('  ⚠️ public/probe-fsa.html 仍在（Android 临时探针页面）—— 拿到结果后必须删除，别随版本发布')
+  }
+  const conf = String(readFileSync('src-tauri/tauri.conf.json', 'utf8'))
+  const identifier = /"identifier":\s*"([^"]+)"/.exec(conf)?.[1] ?? ''
+  const productName = /"productName":\s*"([^"]+)"/.exec(conf)?.[1] ?? ''
+
+  // ---- ① 白屏：sw.js 在桌面壳里自毁 ----
+  const sw = String(readFileSync('public/sw.js', 'utf8'))
+  check('adj539 sw.js 认出桌面壳（Tauri 在 Windows 用 tauri.localhost，是安全上下文，SW 本可注册）',
+    /IN_DESKTOP_SHELL = self\.location\.hostname === 'tauri\.localhost'/.test(sw),
+    '')
+  check('adj539 桌面壳里三处都不干活：install 跳过预热 / activate 清空缓存并注销自己 / fetch 不拦截',
+    /addEventListener\('install'[\s\S]{0,260}?if \(IN_DESKTOP_SHELL\) \{[\s\S]{0,120}?skipWaiting\(\)/.test(sw) &&
+      /addEventListener\('activate'[\s\S]{0,300}?caches\.keys\(\)[\s\S]{0,200}?self\.registration\.unregister\(\)/.test(sw) &&
+      /addEventListener\('fetch'[\s\S]{0,220}?if \(IN_DESKTOP_SHELL\) return/.test(sw),
+    '')
+  const lib = String(readFileSync('src-tauri/src/lib.rs', 'utf8'))
+  check('adj539 Rust 在 webview 起来之前物理删掉陈旧 SW 存储（第二道防线，不依赖页面 JS——页面的自救正是被 SW 挡住的）',
+    /fn purge_stale_service_worker\(app_local_dir: &Path\)/.test(lib) &&
+      /fn run\(\)[\s\S]{0,700}?purge_stale_service_worker\(&PathBuf::from\(local\)\.join\(identifier\)\)/.test(lib),
+    '')
+  check('adj539 清理只删 `Service Worker` 子目录，不碰 Local Storage / IndexedDB（否则等于清用户数据）',
+    /fn purge_stale_service_worker[\s\S]{0,400}?"EBWebView"[\s\S]{0,120}?"Default"[\s\S]{0,120}?"Service Worker"[\s\S]{0,200}?remove_dir_all\(&sw\)/.test(
+      lib,
+    ) && !/remove_dir_all\(&?app_local_dir/.test(lib),
+    '')
+
+  // ---- ② 快捷方式中文名 + 备注 + 右键动词 ----
+  const hooksBuf = readFileSync('src-tauri/nsis/hooks.nsh')
+  check('adj539 钩子文件带 UTF-8 BOM（makensis 对无 BOM 脚本按 ANSI 解析，含中文直接 `Bad text encoding` 中止）',
+    hooksBuf[0] === 0xef && hooksBuf[1] === 0xbb && hooksBuf[2] === 0xbf,
+    `首字节 ${hooksBuf[0]?.toString(16)} ${hooksBuf[1]?.toString(16)} ${hooksBuf[2]?.toString(16)}`)
+  const hooks = String(hooksBuf)
+  const hooksCode = hooks.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*;.*$/gm, '')
+  check('adj539 快捷方式名与备注是用户给的原文（备注只能靠 `CreateShortCut` 第 7 个参数写）',
+    hooks.includes('!define IJIPU_LNK_NEW "i记谱 iJipu.lnk"') &&
+      hooks.includes('!define IJIPU_LNK_DESC "爱记谱 - 码即成，谱自现，代码式简谱制谱引擎。"'),
+    '')
+  check('adj539 新名首字是拉丁字母 `i`（不是「爱记谱」）——「爱记谱 iJipu.lnk」是 Chrome 装的网页版(PWA)快捷方式，同名会把它覆盖掉',
+    !hooks.includes('!define IJIPU_LNK_NEW "爱记谱') && hooks.includes('!define IJIPU_LNK_NEW "i记谱'),
+    '')
+  check('adj539 删旧名前先摘固定项（改名后旧 pin 必然失效，主动摘掉不留幽灵图标）',
+    (hooksCode.match(/!insertmacro UnpinShortcut "\$(DESKTOP|SMPROGRAMS)\\\$\{IJIPU_LNK_OLD\}"/g) ?? []).length === 2,
+    '')
+  check('adj539 旧快捷方式名/主程序名与 tauri.conf.json 同源（productName 一改这里就红）',
+    hooks.includes(`!define IJIPU_LNK_OLD "${productName}.lnk"`) && /!define IJIPU_EXE "ijipu\.exe"/.test(hooks),
+    `productName=${productName}`)
+  check('adj539 自备 AUMI 宏取代模板宏（模板宏体里的 `${BUNDLEID}` 在钩子包含点尚未定义 ⇒ 会把字面量 {BUNDLEID} 当 AUMI 写进 .lnk，只给 warning 不报错）',
+    /!macro IJIPU_SET_AUMI shortcut aumi/.test(hooksCode) &&
+      !/!insertmacro SetLnkAppUserModelId/.test(hooksCode) &&
+      hooks.includes(`!define IJIPU_AUMI "${identifier}"`),
+    `identifier=${identifier}`)
+  check('adj539 CreateShortcut 的显示方式写符号名 `SW_SHOWNORMAL`（写数字会被 makensis 拒绝：unknown show mode "1"）',
+    (hooksCode.match(/0 SW_SHOWNORMAL "" "\$\{IJIPU_LNK_DESC\}"/g) ?? []).length === 2 &&
+      !/CreateShortcut[^\n]*\s0 1 ""/.test(hooksCode),
+    '')
+  check('adj539 两条路径都覆盖：POSTINSTALL（静默/被动 + 开始菜单）与 .onGUIEnd（GUI 的桌面快捷方式建在完成页之后）',
+    /!macro NSIS_HOOK_POSTINSTALL[\s\S]{0,900}?Call IJIPU_FixShortcuts/.test(hooksCode) &&
+      /Function \.onGUIEnd[\s\S]{0,120}?Call IJIPU_FixShortcuts/.test(hooksCode) &&
+      (hooksCode.match(/Function \.onGUIEnd/g) ?? []).length === 1,
+    '')
+  check('adj539 迁移幂等且尊重用户选择（旧名 .lnk 与主程序都在才动手）+ 重建后补 AUMI（否则任务栏图标分裂）',
+    /Function IJIPU_FixShortcuts[\s\S]{0,200}?IfFileExists "\$INSTDIR\\\$\{IJIPU_EXE\}" 0/.test(hooksCode) &&
+      /IfFileExists "\$DESKTOP\\\$\{IJIPU_LNK_OLD\}" 0/.test(hooksCode) &&
+      (hooksCode.match(/!insertmacro IJIPU_SET_AUMI/g) ?? []).length === 2,
+    '')
+  check('adj539 卸载补删中文名快捷方式，且与模板同样受 `$UpdateMode` 保护（更新流程会先跑卸载器，删了就白丢图标）',
+    /!macro NSIS_HOOK_PREUNINSTALL[\s\S]{0,500}?\$\{If\} \$UpdateMode <> 1[\s\S]{0,500}?Delete "\$DESKTOP\\\$\{IJIPU_LNK_NEW\}"/.test(
+      hooksCode,
+    ),
+    '')
+  check('adj539 右键动词覆写成中文（模板把 `Open with iJipu` 硬编码进 COMMANDTEXT，配置改不了）',
+    hooks.includes('!define IJIPU_OPEN_VERB "使用 iJipu 打开"') &&
+      /WriteRegStr HKCU "Software\\Classes\\\$\{IJIPU_PROGID\}\\shell\\open" "" "\$\{IJIPU_OPEN_VERB\}"/.test(hooksCode),
+    '')
+}
+
+/**
+ * adj540：工作区（Android/移动端"选一个文件夹当工作区"）——**真机探针已证明纯网页可行**
+ * （Chrome 151 / Android 10：选目录 → readwrite → 写入 → 回读一致 → 刷新后仍可写），
+ * 故不做 Android 壳。用户追加要求：**支持子目录**（能打开/保存子目录里的 .jps）。
+ *
+ * 这里只断言**能在 Node 里跑的部分**：路径与列表的纯函数（`.jps` 判定、目录优先排序、
+ * 相对路径规整/拼接/上级）以及"接线是否齐全"（三个存储来源互斥、保存分支、UI 入口）。
+ * 真正的目录读写只能在浏览器/真机上验（会写用户磁盘），不放进 smoke。
+ */
+function runAdj540WorkspaceTests() {
+  console.log('[122] workspace directory for Android/mobile (adj540)')
+  // ---- ① `.jps` 判定（大小写不敏感；裸 `.jps` 这种隐藏文件不算） ----
+  check('adj540 只认「有主干名 + .jps」的文件（大小写不敏感，裸 `.jps`/别的扩展名都不算）',
+    isJpsName('小星星.jps') &&
+      isJpsName('A.JPS') &&
+      !isJpsName('.jps') &&
+      !isJpsName('jps') &&
+      !isJpsName('a.txt') &&
+      !isJpsName('a.jps.bak') &&
+      !isJpsName(''),
+    '')
+
+  // ---- ② 列表排序：目录在前，文件按修改时间倒序（刚存的排最上面） ----
+  const mk = (kind: DirEntry['kind'], name: string, mtime = 0): DirEntry => ({ kind, name, mtime })
+  const sorted = sortDirEntries([
+    mk('file', '旧.jps', 100),
+    mk('dir', '乙'),
+    mk('file', '新.jps', 900),
+    mk('dir', '甲'),
+    mk('file', '同.jps', 900),
+  ])
+  check('adj540 列表排序：目录在前（按名），文件按修改时间倒序、时间相同再按名',
+    // 期望顺序按实现口径写：目录 甲/乙（拼音），文件 900ms 的「同」在「新」前（tóng < xīn），最后是 100ms 的旧
+    sorted.map((e) => e.name).join(',') === '甲,乙,同.jps,新.jps,旧.jps',
+    sorted.map((e) => e.name).join(','))
+  check('adj540 排序不改变入参（纯函数，列表来自真实目录遍历）',
+    sorted !== undefined && sortDirEntries([]).length === 0,
+    '')
+
+  // ---- ③ 相对路径：规整 / 拼接 / 上级 ----
+  check('adj540 路径规整会丢掉空段、`.` 与 `..`（"上级"由弹栈实现，绝不把 `..` 写进持久化路径）',
+    normalizeRelPath(['a', '', '.', '..', 'b.jps']).join(',') === 'a,b.jps' &&
+      normalizeRelPath(['..', '..']).length === 0 &&
+      normalizeRelPath(['a/b', 'c\\d']).length === 0,
+    '')
+  check('adj540 路径拼接与上级：`joinPath([])` 为空串、`parentPath([])` 仍是根',
+    joinPath([]) === '' &&
+      joinPath(['杂记', '小星星.jps']) === '杂记/小星星.jps' &&
+      parentPath(['杂记', '小星星.jps']).join(',') === '杂记' &&
+      parentPath([]).length === 0,
+    '')
+
+  // ---- ④ 接线：三个存储来源互斥 + 保存分支 + UI 入口 ----
+  const store = String(readFileSync('src/store/docStore.ts', 'utf8'))
+  const wsSrc = String(readFileSync('src/store/workspace.ts', 'utf8'))
+  const resets = (store.match(/workspacePath: null,/g) ?? []).length
+  check('adj540 文档来源三者互斥：每个"清空文件句柄/外部路径"的装载路径都清掉 workspacePath',
+    resets >= 6 &&
+      // 注意用 `[\s\S]` 而不是 `\n\s*`：本仓库源文件是 CRLF，`\n` 会匹配不上
+      /nativePath: primary\.path,[\s\S]{0,80}?adj540：外部路径与工作区互斥[\s\S]{0,80}?workspacePath: null,/.test(store) &&
+      /workspacePath: string\[\] \| null/.test(store),
+    `重置点 ${resets} 处`)
+  check('adj540 「保存」对工作区文档写回同一个文件（含子目录），并复用目录级授权（用户手势内申请）',
+    /if \(st\.workspacePath && st\.workspacePath\.length > 0\) \{[\s\S]{0,900}?await writeWorkspaceText\(ws\.handle, wsPath, code\)/.test(store) &&
+      /openWorkspaceFile: async \(path\) =>/.test(store) &&
+      /saveToWorkspace: async \(path\) =>/.test(store),
+    '')
+  check('adj540 工作区模块自包含：权限复用 saveSupport（不另写一套）、路径只存根句柄 + 相对段',
+    /from '\.\/saveSupport'/.test(wsSrc) &&
+      /resolveWorkspaceFile/.test(wsSrc) &&
+      /export interface WorkspaceRecord/.test(String(readFileSync('src/store/fileHandleDb.ts', 'utf8'))),
+    '')
+  const ui = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+  const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+  const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+  const dlgSrc = String(readFileSync('src/dialogs/WorkspaceDialog.tsx', 'utf8'))
+  const copySrc = String(readFileSync('src/brand/copy.ts', 'utf8'))
+  check('adj540 入口接线齐全（modal kind + App 渲染 + 文件菜单项 + 文案集中）',
+    /\| 'workspace'/.test(ui) &&
+      /modal === 'workspace' && <Suspense fallback=\{null\}><WorkspaceDialog \/>/.test(appSrc) &&
+      /workspaceCopy\.menuLabel/.test(topSrc) &&
+      /export const workspaceCopy/.test(copySrc),
+    '')
+  check('adj540 子目录真的能进（列目录 + 面包屑 + 上级）且**不静默失败**（选择器没弹时给可操作指引）',
+    /refresh\(ws, \[\.\.\.path, e\.name\]\)/.test(dlgSrc) &&
+      /readDirEntries/.test(dlgSrc) &&
+      /parentPath\(path\)/.test(dlgSrc) &&
+      /PICKER_NO_RESPONSE_MS/.test(dlgSrc) &&
+      /pickerNoResponse/.test(copySrc),
+    '')
+}
+
 async function runNewDocTemplateTests() {
   console.log('[81b] new document uses the template file (adj481)')  /* eslint-disable @typescript-eslint/no-explicit-any */
   const { useDocStore } = (await import('../src/store/docStore.ts')) as any
@@ -8910,6 +9217,30 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj534-537 界面调整用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj538ExternalOpenTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj538 文件关联/外部打开用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj539ShellTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj539 桌面壳白屏护栏/快捷方式命名用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj540WorkspaceTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj540 工作区（含子目录）用例抛异常', e)
     }
   })
   .then(() => {

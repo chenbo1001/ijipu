@@ -23,6 +23,8 @@ export type ModalKind =
   | 'pasteImport'
   /** adj509：试听音色选择对话框（从音色库面板「指定音色」按钮触发） */
   | 'voicePicker'
+  /** adj540：工作区（选一个文件夹当工作区；Android/移动端的打开/保存主路径） */
+  | 'workspace'
 
 /**
  * adj462：底部 dock 的面板（互斥，同一时间只显示一块）。

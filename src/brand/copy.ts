@@ -120,6 +120,44 @@ export const pasteImportCopy = {
 } as const
 
 /**
+ * adj540：「工作区」文案（Android/移动端"选一个文件夹当工作区"）
+ *
+ * 解决的是手机上的真实痛点：系统文件选择器对 `.jps` 这种自定义扩展名态度不一致
+ * （按 MIME 隐藏、只能看到已下载的文件），保存用的 `showSaveFilePicker` 在移动端还出现过
+ * "点了没反应"（adj405）。工作区把打开/保存变成"在同一个文件夹里挑文件/写文件"，
+ * 一次授权、之后都在这个文件夹里操作（含**子目录**）。
+ */
+export const workspaceCopy = {
+  menuLabel: '工作区(&W)…',
+  title: '工作区',
+  desc: '选一个文件夹当工作区：之后打开 / 保存都在这个文件夹里（支持子目录）。手机上都走这条路，不用每次翻系统文件选择器。',
+  pick: '选择文件夹当工作区',
+  /** 已有工作区但授权过期（真机实测：重新打开页面后是 prompt） */
+  grant: '继续访问（需授权）',
+  switchDir: '换一个文件夹',
+  up: '上级目录',
+  emptyDir: '这个文件夹里没有 .jps 文件',
+  rootLabel: '工作区',
+  onlyListed: '只列出文件夹与 .jps 文件',
+  unsupported: '当前浏览器不支持选择文件夹（需要 Chrome / Edge 等 Chromium 内核浏览器）；请改用「文件 → 导出」保存',
+  noWorkspace: '还没有设工作区：请先在「文件 → 工作区…」里选一个文件夹',
+  picked: (name: string): string => `工作区已设为「${name}」`,
+  loadFailed: (reason: string): string => `读工作区失败：${reason}`,
+  opened: (p: string): string => `已从工作区打开 ${p}`,
+  openFailed: (p: string, reason: string): string => `打开 ${p} 失败：${reason}`,
+  saved: (p: string): string => `已保存到工作区：${p}`,
+  saveFailed: (p: string, reason: string): string => `保存到工作区失败（${p}）：${reason}`,
+  saveHere: '保存当前谱到此处',
+  saveNameLabel: '文件名',
+  namePlaceholder: '例如 小星星',
+  saveBtn: '保存',
+  closeBtn: '关闭',
+  /** 点了"选择文件夹"但系统没弹选择器（静默失败）时的可操作指引 —— 见 ERRORS-LOG E-2026-241 */
+  pickerNoResponse:
+    '系统没有弹出文件夹选择器。如果你是从桌面图标（已安装的应用）打开的，请改用 Chrome 浏览器打开本站再试一次——数据不会丢。',
+} as const
+
+/**
  * adj394：编辑区「问题提示条」文案（脚本不符合语法时在编辑区内显式可见，
  * 此前只有行号栏着色 + 悬停 tooltip，用户看不出哪里不对）
  */
@@ -272,4 +310,22 @@ export const playbackCopy = {
   failedFallback: '加载失败',
   /** adj416：桌面端随安装包内置音源（安装目录 generaluser_gs.sf2）→ 直接读取，无需下载 */
   builtinBankHint: '✓ 使用随应用内置音源（安装目录 generaluser_gs.sf2），无需下载、离线可用。',
+} as const
+
+/**
+ * adj538：**外部打开**（双击 `.jps` / 文件关联 / 右键"打开方式"）相关文案。
+ * 链路：NSIS 注册关联 → 双击时以 `"ijipu.exe" "%1"` 启动 → 已有窗口由单实例插件接管 →
+ * 前端拉取队列并载入；此后 Ctrl+S 直接写回**原文件**（不再要求"另存为"）。
+ */
+export const externalOpenCopy = {
+  /** 从系统打开成功（给用户一个"文件确实换了"的确认，尤其是窗口被置前时） */
+  opened: (name: string) => `已打开 ${name}.jps`,
+  /** 一次打开多个：载入第一个，并告知还有几个没打开 */
+  openedWithExtra: (name: string, extra: number) => `已打开 ${name}.jps（另有 ${extra} 个文件未打开）`,
+  /** 读取失败（路径没权限/文件被删/不是文本）——如实报错，不静默 */
+  openFailed: (name: string, reason: string) => `打不开 ${name}.jps：${reason}`,
+  /** 写回原文件成功 */
+  savedToSource: (name: string) => `已保存到 ${name}.jps`,
+  /** 写回失败（Rust 侧回读校验不过/无权限/文件被移走）——提示另存为，绝不谎报已保存 */
+  saveToSourceFailed: (name: string, reason: string) => `保存到 ${name}.jps 失败：${reason}（可改用「另存为」）`,
 } as const

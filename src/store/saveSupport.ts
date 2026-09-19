@@ -116,9 +116,13 @@ export function shouldUseFileInputPicker(coarsePointer: boolean, hasFileSystemAc
  * 确认句柄可写：先 queryPermission，未授权时在**用户手势内** requestPermission。
  * 返回最终状态；环境不支持权限 API 时返回 'unknown'（交给真正的写入判定）。
  * 注意：requestPermission 必须在用户手势（Ctrl+S / 菜单点击）尚未被消耗时调用。
+ *
+ * adj540：参数放宽到**目录句柄**也用同一个实现——工作区（`showDirectoryPicker`）授权是**目录级**的，
+ * 子目录/文件句柄权限随之继承，所以只要在根目录上拿到 granted 即可（真机实测：刷新后先 `prompt`、
+ * 在用户手势里 `requestPermission` 变 `granted`，再写就成功）。
  */
 export async function ensureWritePermission(
-  handle: FileSystemFileHandle,
+  handle: FileSystemFileHandle | FileSystemDirectoryHandle,
 ): Promise<'granted' | 'denied' | 'unknown'> {
   const h = handle as unknown as PermissionCapableHandle
   if (typeof h.queryPermission !== 'function') return 'unknown'

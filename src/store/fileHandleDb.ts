@@ -57,3 +57,53 @@ export async function loadFileHandle(): Promise<FileSystemFileHandle | null> {
     return null
   }
 }
+
+/**
+ * adj540：**工作区目录**（Android/移动端「选一个文件夹当工作区」）。
+ *
+ * 同一个库同一个 store，只是换一个键——目录句柄与文件句柄一样是内存对象，只能存 IndexedDB。
+ * 为什么连 `path` 一起存：工作区支持**子目录**（用户要求：能打开子目录里的 .jps），
+ * 记住"上次浏览/保存到哪个子目录"，重新打开对话框时能直接落回原处。
+ *
+ * 为什么存**根句柄 + 相对路径**、而不是存一堆子目录句柄：相对路径是纯数据，
+ * 便于持久化/比较/显示（面包屑），而句柄链每次都从根解析（`getDirectoryHandle` 逐级下钻）。
+ */
+export interface WorkspaceRecord {
+  /** 工作区根目录句柄 */
+  handle: FileSystemDirectoryHandle
+  /** 上次所在的子目录（相对根；`[]` = 根目录本身） */
+  path: string[]
+}
+
+/** 保存工作区（null 清除） */
+export async function saveWorkspace(rec: WorkspaceRecord | null): Promise<void> {
+  try {
+    const db = await openDb()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite')
+      tx.objectStore(STORE).put(rec, 'workspace')
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+    db.close()
+  } catch {
+    /* IndexedDB 不可用时静默（退化为仅会话内记忆） */
+  }
+}
+
+/** 恢复工作区（无则 null）；句柄可能已失效/被撤销授权，调用方仍需查权限 */
+export async function loadWorkspace(): Promise<WorkspaceRecord | null> {
+  try {
+    const db = await openDb()
+    const val = await new Promise<WorkspaceRecord | null>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly')
+      const req = tx.objectStore(STORE).get('workspace')
+      req.onsuccess = () => resolve((req.result as WorkspaceRecord | undefined) ?? null)
+      req.onerror = () => reject(req.error)
+    })
+    db.close()
+    return val
+  } catch {
+    return null
+  }
+}

@@ -15,7 +15,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } f
 import { useDocStore, type ViewType } from '../store/docStore'
 import { useUiStore, PREVIEW_ZOOM_RANGE, PREVIEW_ZOOM_STEP, PREVIEW_ZOOM_LIMITS } from '../store/uiStore'
 import { clampEditorFontSize, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE } from '@ijipu/engine'
-import { pasteImportCopy, numCopy } from '../brand/copy'
+import { pasteImportCopy, numCopy, workspaceCopy } from '../brand/copy'
 import { ToolIcon } from './ToolIcon'
 // adj526：可"按住上下拖"的数值显示（预览比率 / 编辑器字号）
 import { ScrubValue } from './ScrubValue'
@@ -1058,6 +1058,8 @@ export function TopBar() {
     { label: pasteImportCopy.menuLabel, hotkey: 'v', onPick: () => openModal('pasteImport') },
     { label: '保存(&S)', kbd: 'Ctrl+S', hotkey: 's', onPick: runSave },
     { label: '另存为(&A)…', hotkey: 'a', onPick: runSaveAs },
+    // adj540：工作区——手机上打开/保存的主路径（选一个文件夹，之后都在里面挑文件/写文件，支持子目录）
+    { label: workspaceCopy.menuLabel, hotkey: 'w', onPick: () => openModal('workspace') },
     // adj424：从原「播放」分组挪到「文件」分组末尾（按用户要求的「试听-导出-设置」顺序）
     // adj462：菜单项与顶栏按钮同源——都切到底部 dock 的对应面板（不再弹对话框）
     { label: '试听播放(&P)', kbd: 'Ctrl+Q', hotkey: 'p', onPick: () => toggleDock('tryout') },
