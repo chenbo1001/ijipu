@@ -146,6 +146,7 @@
 | 存储 | 内容 | 类别 | 嵌入后的归属 |
 |---|---|---|---|
 | IDB `ijipu` / store `fileHandle` | 上次打开的 `FileSystemFileHandle`（免重选文件） | 独立应用专用 | **禁用**（Obsidian 已绑定文件） |
+| IDB `ijipu` / store `fileHandle` 键 `workspace` | **adj540 工作区**：目录根句柄 + 上次所在子目录的相对路径（移动端"选一个文件夹当工作区"）。**L1**：与"这个人怎么用"有关、与具体谱无关；换台设备可以不一样 ⇒ 不写进 `.jps`，也不写 `# jps-config` | 独立应用专用 | **禁用**（Obsidian 里文件由笔记决定，无需工作区） |
 | IDB `ijipu-soundfonts-hq` | HQ 音源缓存（约 30~90MB） | 用户缓存 | 保留（建议共享缓存省流量，见 D4） |
 | IDB `ijipu-soundfonts` | 旧采样缓存 | 用户缓存 | 保留/清理 |
 | Tauri `sf_cache_read/write/remove` | 桌面版音源缓存落地（应用数据目录） | 平台实现 | 收敛为宿主能力（Obsidian 用 IDB/插件目录） |

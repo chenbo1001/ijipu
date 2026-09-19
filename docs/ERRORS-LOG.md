@@ -1432,6 +1432,200 @@
   ④ **控件折叠进"更多"菜单时要检查交互是否等值**：折叠版常被写成"简化版"（这里退化成纯文本 span），
   于是拖动/双击/提示一起消失；做法是**复用同一个组件**，而不是复制一份简化的 JSX。
 
+### E-2026-241 「手机上打开/保存不好用」不是 Android 的限制，而是我们**在移动端一律降级**；但降级的理由只对**文件选择器**成立，对**目录选择器**不成立（adj540）
+- **场景**（用户需求）："网页版在手机上打开/保存体验差；希望有 app 壳能选一个目录当工作区"。到底要不要做壳，
+  取决于 Android Chrome 的 File System Access API 能不能"选目录 + 写入 + 重启后仍有权限"。
+- **根因**：`saveSupport.shouldUseFileInputPicker()` 只要 `coarsePointer` 就返回 `true` ⇒ **手机上一次都没走过 FSA 路径**。
+  而这条降级的真实理由（adj405）是**文件选择器**：已安装的 PWA 里 `showOpenFilePicker` 可能"点了没反应"
+  （同一个地址在浏览器里却正常），Android 上还有对应的已知回归
+  （[Chromium 457203705：Android showOpenFilePicker broken since M142](https://issues.chromium.org/issues/457203705)）。
+  我们把这个结论**扩大到了整个 FSA**，于是"目录选择器"这条本来可用的通道也被一起关掉了。
+- **真机探针（临时页面 `/probe-fsa.html`，已删除）实测**（Android 10 / Chrome 151 / https）：
+  ① 三个 picker 都是 `function`、`isSecureContext = true`；② 选目录后 `readwrite` **granted**，
+  `createWritable/write/close` 成功且**回读一致**，目录可列举（27 项），句柄成功存入 IndexedDB；
+  ③ **刷新后**句柄仍在，`queryPermission = prompt` →（用户手势内）`requestPermission = granted` → **仍可写**。
+- **解决**：**不做 Android 壳**，改为纯网页「工作区目录」（adj540）：
+  `store/workspace.ts`（选目录/授权/列目录含子目录/读写+回读校验）+ `docStore.workspacePath`（与
+  `fileHandle`/`nativePath` 三者互斥）+ `dialogs/WorkspaceDialog.tsx`（面包屑/上级/进子目录/打开/另存到此处）。
+  **不动**移动端原有的 `打开`/`另存为` 降级逻辑——那是为文件选择器踩的坑，与目录选择器无关。
+- **验证**：① smoke 新增 `[122]` 11 条（`.jps` 判定、目录优先+时间倒序、路径规整/拼接/上级、三者互斥重置点、
+  保存分支、UI 接线、子目录与"不静默失败"）；② 无头 Chrome（390px 手机视口）真跑一遍完整流程：
+  桩掉 `showDirectoryPicker` 返回 **OPFS 真句柄** → 造"子目录 + 2 个 .jps + 1 个 .txt"→ 列表只出现
+  **文件夹 + .jps**（`.txt` 被过滤）→ 进子目录后面包屑 `工作区/杂记/`、出现「上级目录」→
+  「保存当前谱到此处」**真的写进了子目录**（回读文件内容确认）且对话框关闭；零控制台错误。
+- **预防**：① **"某个 API 在 A 环境有坑"不等于"这一类 API 都有坑"**——降级判断要精确到**具体 API**
+  （开文件 vs 选目录是两条通道、两套 Android 实现），一刀切会把能用的功能也关掉；
+  ② **"要不要做原生壳"这类决定，先花 15 分钟写一个能真机点一下的探针页面**：本轮探针直接免掉了整个 Android 壳
+  （Tauri Android 的 `cdylib`/ACL/单人维护插件/信任边界等一堆风险）；
+  ③ 权限只在**用户手势内**可申请 ⇒ UI 必须"挂载时只查、给按钮让用户点"，探针的 `prompt → granted` 也证明了这一点；
+  ④ 探针页要**真机、https、用户点**：控制台直接调用会因缺手势得到假阴性。
+
+### E-2026-240 临时探针脚本两次自伤：GUI 子系统 exe 用 `&` 启动**不会等待**（备份/还原与探针写入竞态，改坏了用户真实的快捷方式）；复用宏时忽略了它把 `$0`–`$5` 当草稿寄存器（第二个 `CreateShortcut` 的目标被写坏）（验证流程）
+- **场景**：验证"安装器把 `iJipu.lnk` 迁成「i记谱 iJipu」+ 备注"时，最可信的做法是在**真机**上跑真实的
+  `IJIPU_FixShortcuts`。但 `$DESKTOP`/`$SMPROGRAMS` 是 **NSIS 只读常量**（`StrCpy $DESKTOP …` 直接报
+  `cannot change constants`），没法把探针重定向到临时目录 ⇒ 只能动**真实桌面/开始菜单**，
+  于是外层 PowerShell 先备份这两个 .lnk、跑完再还原。
+- **现象/根因一（竞态）**：`& "$d\probe4.exe"` 之后 `$LASTEXITCODE` 是**空的**、桌面文件看起来也没变 ⇒ 原来
+  **PowerShell 的 `&` 只对控制台程序等待，对 GUI 子系统的 exe 立即返回**。探针还在后台跑，"还原"就已经执行：
+  它删掉 `iJipu.lnk` 并把备份放回；紧接着探针又 `CreateShortcut` + `IJIPU_FixShortcuts` ⇒ 用户真实的
+  `iJipu.lnk` 最终指向 **`%TEMP%\ijipu-shortcut-probe\ijipu.exe`**（探针的假主程序，而且跑完就被删了），
+  桌面与开始菜单各坏一个（等于给用户桌面留了个点不开的图标）。
+- **现象/根因二（草稿寄存器）**：修回时写了 repair.nsi：`StrCpy $0 "<目标>"` → `CreateShortcut 桌面 "$0"` →
+  `!insertmacro IJIPU_SET_AUMI` → `CreateShortcut 开始菜单 "$0"`，结果开始菜单那个 .lnk 的 target 变成
+  `D:\主文件夹\桌面\8557320`（垃圾值）。原因：`IJIPU_SET_AUMI`（照抄模板 `SetLnkAppUserModelId`）内部用
+  `r0`–`r5`，即 **`$0`–`$5` 全被当草稿寄存器写掉**，两次 Create 之间 `$0` 已不是目标路径。
+- **解决**：① 探针一律 `Start-Process -Wait -PassThru` 并核对 `$ExitCode`；
+  ② 修复脚本改成"两个 `CreateShortcut` 全部建完，再统一调 `IJIPU_SET_AUMI`"；
+  ③ 把"本宏会写坏 `$0`–`$5`"写进 `IJIPU_SET_AUMI` 的注释（这是宏的公有副作用，必须让调用者看见）；
+  ④ 事后用 NSIS 重建出**与安装器一致**的快捷方式（目标 `%LOCALAPPDATA%\iJipu\ijipu.exe` + AUMI
+  `com.ijipu.app`），并逐个读回 `TargetPath`/`Description`/`System.AppUserModel.ID` 核对，同时确认
+  桌面上那个 Chrome PWA 的「爱记谱 iJipu.lnk」**始终未被触碰**。
+- **预防**：① **探针要动用户真实目录（桌面/开始菜单/注册表）时，先把"等待"做对**：GUI exe 必须
+  `Start-Process -Wait`；**`&` 之后 `$LASTEXITCODE` 为空本身就是"没等到"的信号**，不要当成"成功且无输出"；
+  ② **备份/还原必须覆盖探针的完整生命周期**，绝不能"启动后立刻还原"；能重定向就绝不碰真实目录
+  （本轮 `$DESKTOP` 是常量、只能碰真实目录 ⇒ 更要把等待与还原做扎实）；
+  ③ **NSIS 里含 COM 的宏都是"草稿寄存器黑洞"（`$0`–`$5`）**，调用前后不要指望这些寄存器的值还在——
+  这也解释了模板自己的宏为什么每次用完就丢掉、不复用寄存器；
+  ④ 复用/照抄别人的宏时，把它的副作用（占用哪些寄存器、会写哪些文件/注册表）写进注释。
+
+### E-2026-239 NSIS 里"改快捷方式名 + 加备注"的五个硬约束：包含时机早于 `!define`、`!define` 不能重定义、中文必须带 BOM、显示方式只能写符号名、新名可能与用户已有文件重名（adj539）
+- **场景**（用户要求）："PC 版创建的桌面链接命名为「爱记谱 iJipu」，备注为「爱记谱 - 码即成，谱自现，代码式简谱制谱引擎。」"；
+  顺带把右键「打开方式」里的英文 `Open with iJipu` 改成中文「使用 iJipu 打开」。
+- **根因 / 五个硬约束**（全部实测踩出，非推测）：
+  1. **不能用 `productName` 改名**：`tauri.conf.json` 的 `productName` 就是模板里的 `${PRODUCTNAME}`，
+     它还决定安装目录（`$LOCALAPPDATA\<productName>`）与"卸载"注册表键 ⇒ 一改名老用户会被装进新目录、
+     旧目录与旧卸载项永久残留。只能在钩子里把模板建好的 `iJipu.lnk` **重建**成中文名。
+     为什么是"重建"而不是"改名"：快捷方式「备注」只能通过 `CreateShortCut` 的**第 7 个参数**写一次，
+     事后纯 NSIS 改不了（要写 COM 的 `IPropertyStore`）。
+  2. **钩子文件的包含时机比模板 `!define` 更早**：`installer.nsi` 第 **31** 行 `!include hooks.nsh`，而
+     `PRODUCTNAME`（36 行）、`MAINBINARYNAME`（47 行）、`BUNDLEID`（49 行）都在**其后**。于是在钩子里：
+     · 用不了 `${PRODUCTNAME}` 这类符号（报未定义），只能自带等价字面量；
+     · **尤其不能**照搬 `!insertmacro SetLnkAppUserModelId`——它宏体里是 `${BUNDLEID}`，展开时未定义，
+       makensis 只给 `warning 6000: unknown variable/constant "{BUNDLEID}"`，然后**把字面量 `{BUNDLEID}`
+       当成 AUMI 写进 .lnk**（任务栏会把快捷方式当成另一个应用 ⇒ 图标分裂），静默写坏；
+     · 也**不能**在钩子里抢先 `!define BUNDLEID`——NSIS 的 `!define` 重复定义是**编译错误**
+       （实测 `!define: "X" already defined!` 后 `aborting creation process`），不是覆盖。
+     ⇒ 解法：自备参数化宏 `IJIPU_SET_AUMI shortcut aumi`；它用到的 `CLSID_ShellLink`/`IID_*`/`PKEY_*`/
+       `VT_BSTR`/`SYSSTRUCT_*` 都来自第 25-26 行的 `Win\COM.nsh`/`Win\Propkey.nsh`，**在包含点之前**，可用。
+  3. **含中文的 .nsh 必须带 UTF-8 BOM**：makensis 对无 BOM 的脚本按 **ANSI（ACP）** 解析，直接
+     `Bad text encoding: …:1` 中止编译（**连注释里的中文都会炸**，不只是字符串常量）。
+     `installer.nsi`/`utils.nsh` 都是带 BOM 的；`hooks.nsh` 原先没有 BOM，是因为它此前只在注释里出现中文才侥幸没炸。
+  4. **`CreateShortcut` 的"显示方式"只能写符号名**：写数字会被拒——实测 `CreateShortcut: unknown show mode "1"`，
+     必须写 `SW_SHOWNORMAL`。这是**位置参数**的坑：想补第 7 个参数（备注），中间的图标/显示方式就得一起补齐。
+  另有一处**时序**坑：GUI 安装的桌面快捷方式是**完成页勾选时才建**的
+  （模板 `MUI_FINISHPAGE_SHOWREADME_FUNCTION CreateOrUpdateDesktopShortcut`），那时
+  `NSIS_HOOK_POSTINSTALL` 早已跑完 ⇒ 只在钩子里改会漏掉最常见的 GUI 路径。
+  5. **新快捷方式名可能与"用户在同一文件夹里已有的同名文件"撞车**：`CreateShortcut`/`Delete` 都是
+     **静默按名覆盖**，不问也不改名。本机实测：桌面上**已经有一个** `爱记谱 iJipu.lnk`，但它是
+     **Chrome 装的网页版(PWA)** 快捷方式（目标 `chrome_proxy.exe` + `--app-id=…`、AUMI `Chrome._crx_…`）；
+     若照最初要求把桌面版也叫「爱记谱 iJipu」，安装器就会**悄悄把这个 PWA 图标换成桌面版快捷方式**
+     （用户莫名少一个图标，且极难联想到是安装器干的）。⇒ 必须**先查用户机器上的实际文件**再定名：
+     查清后用户定为 `i记谱 iJipu`（首字是**拉丁字母 i**，与「爱记谱」区分，两个图标并存）。
+- **解决**（`src-tauri/nsis/hooks.nsh`）：
+  ① `Function IJIPU_FixShortcuts`：**幂等**，仅在「旧名 .lnk 确实存在」且「`$INSTDIR\ijipu.exe` 已就位」时动手
+     （⇒ 用户取消勾选桌面快捷方式时我们什么都不做；安装中途取消也不会去改上一版留下的快捷方式）；
+     桌面与开始菜单都重建为「i记谱 iJipu」+ 备注，重建后补 AUMI，并在删旧名前 `UnpinShortcut`
+     （改名后旧 pin 必然失效，主动摘掉比留个点不开的幽灵图标好）；
+  ② `NSIS_HOOK_POSTINSTALL` 覆写 `Software\Classes\iJipu.jps\shell\open` 默认值为「使用 iJipu 打开」；
+  ③ `Function .onGUIEnd` 再调一次 `IJIPU_FixShortcuts`（补齐 GUI 完成页那条路径；静默模式重复调用无害）；
+  ④ 新增 `NSIS_HOOK_PREUNINSTALL`：模板只删 `${PRODUCTNAME}.lnk`，不认中文名，故补删——**同样受
+     `$UpdateMode <> 1` 保护**，否则更新流程（先跑卸载器）会白删用户的快捷方式、而更新路径又不重建。
+- **验证**：① 用 `makensis` **真编译生成的 `installer.nsi`**：exit 0 且**零告警**（改前有 2 条 `{BUNDLEID}` 告警）；
+  ② 临时探针 `_nsis_probe/probe.nsi` 真建 .lnk 再读回：`WScript.Shell.CreateShortcut(…).Description`
+  == 备注原文（中文正确）、中文文件名正确、**无备注对照组为空** ✓；
+  ③ 探针 `probe2.nsi` 包含**真实 `hooks.nsh`** 并调 `IJIPU_SET_AUMI`：`Shell.Application … ExtendedProperty("System.AppUserModel.ID")`
+  读回 `com.ijipu.app`，**对照组为空** ✓；④ 探针 `probe3.nsi` 在**隔离目录**里跑**真实的
+  `IJIPU_FixShortcuts`**（先用模板的写法建 `iJipu.lnk`、再造一个假 `$INSTDIR\ijipu.exe`，然后连调两次验幂等），
+  再读回新名 .lnk 的 `Description` / `System.AppUserModel.ID`/旧名已被删除 ⇒ 迁移结果与幂等性都被证明；
+  ⑤ smoke 新增断言（BOM 存在性、备注原文、新名首字必须是拉丁 `i`（负向断言防同名覆盖 PWA）、
+  `SW_SHOWNORMAL`、`IJIPU_AUMI` 与 `identifier` 同源、`.onGUIEnd` 唯一、删旧名前 Unpin、
+  PREUNINSTALL 受 `$UpdateMode` 保护、无模板 AUMI 宏残留）。
+- **预防**：① **在 NSIS 钩子里引用模板的宏/常量前，先确认其定义在包含点之前**——钩子被包含得极早，
+  模板常量几乎都在其后；错序往往只给 `warning 6000` 而不报错，**静默写坏数据**是最坑的失败模式；
+  ② **`!define` 重复定义是编译错误**（既非覆盖也非警告），"我先定义、让模板后面重复定义"这条路不通；
+  ③ **含非 ASCII 的 .nsi/.nsh 一律带 BOM，并把 BOM 写成断言**——本轮 `edit` 工具每次写回都会**抹掉 BOM**，
+  故 BOM 必须在**最后一次内容编辑之后**才补（顺序反了就白干）；
+  ④ 凡是"给用户看的系统集成效果"（快捷方式名/备注、右键动词）**必须真建真读**：编译通过 ≠ 效果对
+  （`unknown show mode` 只在编译期暴露，`{BUNDLEID}` 甚至只给告警）；
+  ⑤ 探针要带**对照组**（无备注 / 无 AUMI），否则分不清"本来就对"还是"我们写对了"；
+  ⑥ **凡"按名创建/删除文件"的安装器行为（快捷方式、关联、开始菜单项），定名前先列出用户机器上该目录的现有文件**
+  ——同名是**静默覆盖**，用户只会看到"图标怎么变了/没了"。本轮就是先 `Get-ChildItem` 桌面才发现的冲突。
+
+### E-2026-238 装好的桌面版打开是白屏——陈旧的 Service Worker 把旧 `index.html` 变成了"毒丸"，而页面的自救代码正被它自己挡着（死锁）（adj538/adj539）
+- **场景**（用户报告）："安装好的 ijipu 应用打开是一个白屏。"
+- **现象**：安装版启动后窗口全白。用
+  `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` 挂 CDP 观察：
+  `#root` 的 `innerHTML` 长度为 **0**（React 根本没挂载），控制台 **7 条**
+  `Failed to load module script: … responded with a MIME type of "text/html"`。
+- **根因**（三层叠加，缺任何一层都解释不通）：
+  1. 历史版本在桌面壳里注册过 PWA Service Worker——Tauri 在 Windows 用 `http(s)://tauri.localhost`，
+     是**安全上下文**，SW 完全能注册；它把旧构建的 `/index.html`、`/assets/*` 存进了
+     `%LOCALAPPDATA%\com.ijipu.app\EBWebView\Default\Service Worker\CacheStorage`
+     （实测 17+ 份 index.html，最早一份是 2026-09-13）；
+  2. SW 上下文里 `fetch('/assets/index-XXXX.js')` 取不到 Tauri 的**自定义协议**，`.catch()` 便回退到缓存的
+     **旧 `index.html`**；而旧 HTML 引用的 `/assets/index_D_ON1muP.js` 在新安装里**已不存在**，Tauri 资源协议
+     对不存在的路径返回 `index.html`（HTTP 200 + `text/html`）⇒ 模块脚本 MIME 校验失败 ⇒ `main.tsx` 不执行 ⇒ 白屏；
+  3. **死锁**：`src/main.tsx` 里本来就有一段"发现自己在桌面壳里就注销 SW"的自救代码（adj443），
+     但那段代码属于**页面 JS**，而页面 JS 恰恰被这个 SW 挡着 ⇒ 自救永远执行不到。
+  证据链的另一半：把**同一份生产构建**放进无头 Chrome（带/不带 `__TAURI__` 桩）跑，控制台**零错误**、
+  正常挂载 ⇒ 前端产物无辜，问题只出在壳里的 SW 缓存。
+- **解决**（两道防线，都不依赖页面 JS）：
+  ① **Rust 侧启动前物理清理**：新增 `purge_stale_service_worker(&Path)`，删除
+     `<LOCALAPPDATA>\<identifier>\EBWebView\Default\Service Worker`，在 `run()` 最开始调用；
+     identifier 取自 `tauri::generate_context!().config().identifier`，不写死字面量；
+  ② **SW 自毁保险**（`public/sw.js`）：新增 `const IN_DESKTOP_SHELL = self.location.hostname === 'tauri.localhost'`，
+     `install` 直接 `skipWaiting()`、`activate` **清空所有缓存 + `self.registration.unregister()`**、
+     `fetch` 直接 `return` 不拦截任何请求 ⇒ 就算某个旧 SW 抢先激活，它也会立刻把自己注销掉。
+- **验证**：装上**新包**并**故意保留**那份陈旧 SW 存储再启动 → 正常挂载（`mounted: true`、`rootHtmlLen > 0`）、
+  CDP 目标列表里不再出现 `service_worker`；同时用生产构建在无头 Chrome 复核渲染无回归。
+- **预防**：① **"在页面里写自救代码"对 SW 造成的白屏天然无效**——SW 拦截的正是页面 JS 本身；自救必须放在
+  **SW 够不到的地方**（Rust 启动钩子 / SW 自己的 `activate`）。这是本轮最值钱的一条；
+  ② **桌面壳里不要注册 PWA SW**：资源随二进制内嵌，SW 在这里只剩"陈旧缓存"这一种作用；
+  ③ 排查白屏先看 **CDP 控制台的 MIME 报错 + `#root.innerHTML` 长度**，不要凭"像前端崩了"就去翻 React 代码；
+  ④ `responded with a MIME type of "text/html"` 是"资源 404 被回退成 index.html"的典型指纹，
+  在「SPA + 自定义协议 + SW」三者同场时要第一时间往这条线上想；
+  ⑤ 清理类修复要**只删自己名下的目录**（`<identifier>\EBWebView\Default\Service Worker`），
+  不要删整个 `EBWebView`（会把用户的 Cookie/缓存一起抹掉）。
+
+### E-2026-237 Tauri 的 NSIS 文件关联"配了就以为完整"其实漏三件事；且 `DeleteRegKey /ifempty` 会误删别人的键（adj538）
+- **场景**（用户要求）："PC 版安装时注册 `.jps` 扩展名、用 iJipu 打开；卸载时注销 `.jps` 的应用关联。"
+- **根因**（查源码 + **本机真实生成的 `installer.nsi`/`FileAssociation.nsh`**，不是只看文档）：
+  Tauri v2 的 NSIS 模板只做 `APP_ASSOCIATE`（安装）/ `APP_UNASSOCIATE`（卸载），而后者只做两件事——
+  把 `.jps` 默认值**还原**（备份为空时写入的是**空串**，不是删值）+ 删我方 ProgID 键。于是缺三件事：
+  1. **不写** `Software\Classes\.jps\OpenWithProgids` ⇒ 右键「打开方式」列表里**看不到 iJipu**，
+     用户只能走"选择其他应用"（Microsoft 明确要求该项；上游 tauri#9803 至今未修）；
+  2. **不调** `SHChangeNotify`（`UPDATEFILEASSOC` 宏在 `FileAssociation.nsh` 里定义了，但 `installer.nsi`
+     从未 `!insertmacro` 它）⇒ 资源管理器可能继续显示旧图标/旧关联，要重启或重新登录才刷新；
+  3. 卸载**不删** `Software\Classes\.jps` 键本身、也不删它写的 `<ProgID>_backup` 备份值 ⇒ 永久残留。
+     更隐蔽的是：一次**覆盖安装**（`/UPDATE` 路径不先卸载）会把我们自己的 ProgID 读进备份值，
+     之后再卸载就会把默认值"还原"成一个指向**已删键**的悬空 ProgID。
+  此外 `FileAssociation.nsh` 是 vendored 的第三方宏（Saivert/nikku），其默认 ProgID 直接取 `name`，
+  **省略 `name` 时 ProgID 就是裸 `jps`**（易撞名，Microsoft 建议 `Vendor.Component`）。
+- **解决**：
+  ① `bundle.fileAssociations: [{ ext:["jps"], name:"iJipu.jps", description:"简谱工程文件", role:"Editor", mimeType:"application/x-jps" }]`
+     —— `name` 同时是 Windows ProgID 与 macOS 的 `CFBundleTypeName`，故显式给出；
+  ② `bundle.windows.nsis.installerHooks: "nsis/hooks.nsh"`（键名取自本机 `@tauri-apps/cli` 的 `config.schema.json`），
+     钩子里 `NSIS_HOOK_POSTINSTALL` 写 `OpenWithProgids` + `SHChangeNotify`，
+     `NSIS_HOOK_POSTUNINSTALL` 删我方两个值名（`iJipu.jps_backup`、OpenWithProgids 里的 `iJipu.jps`），
+     再**手工枚举**（`EnumRegValue`/`EnumRegKey`）确认"默认值为空 + 无其它值 + 无子键"后才删键。
+- **验证**：打包后**检查真实生成的 `installer.nsi`**（这是唯一可信的"配置生效"证据）：
+  L31 `!include …hooks.nsh`、L649 `APP_ASSOCIATE "jps" "iJipu.jps" …`、
+  L708-709 `NSIS_HOOK_POSTINSTALL`（在关联写入之后）、L770 `APP_UNASSOCIATE "jps" "iJipu.jps"`、
+  L844-845 `NSIS_HOOK_POSTUNINSTALL`（在关联移除之后）✓；makensis 编译通过 ⇒ 钩子语法有效 ✓；
+  `iJipu_0.28.0_x64-setup.exe` 31194 KB，`check:installer 全部通过` ✓；
+  smoke 新增 16 条断言（含"多文件载入第一个 + 剩余计数"纯函数、`hasShell()` 在 Node 为 false、
+  以及"**禁用** `DeleteRegKey /ifempty`"的负向护栏）全部通过 ✓。
+- **预防**：① **"配置开了"不等于"功能完整"**——文件关联这类要动系统注册表的功能，改完必须
+  **打开生成的 `installer.nsi` 逐行核对**（配置对不对、钩子进没进、顺序对不对），只看文档或只看"打包成功"都会漏；
+  ② **清理注册表永远"只删自己的值名，再枚举确空才删键"**——`DeleteRegKey /ifempty` 在 NSIS 里
+  **不检查值**（社区专门有 "How to delete a registry key only if it has no values" 与
+  "DeleteRegKey /IfEmpty doesn't work" 的 bug 报告），拿它清"可能还有别人数据的键"会误删；
+  ③ 做"禁用某写法"的负向断言时**先剥掉注释**——本轮就被自己注释里写着的 `DeleteRegKey /ifempty` 绊了一次
+  （断言匹配到注释 ⇒ 假失败）；
+  ④ `.jps` 并非无人认领的扩展名（JPEG Stereo 图像、Java Print Service 也在用）⇒ 预期"部分机器上
+  首次双击仍会弹一次系统选择框"（Windows 8+ 的 `UserChoice` 受哈希保护，安装器无法静默接管），
+  这属于系统策略而非缺陷，不要试图绕过。
+
 ### E-2026-236 设置→主题「浅深模式」选中项在**浅色模式**下几乎看不见——字色写死了只对深色模式成立的 `#101010`（adj535）
 - **场景**（用户报）："设置-主题-浅深模式的选中项的文本在浅色模式下，因为文本颜色与背景颜色过于接近，看不清楚。"
 - **根因**：选中态是「**实心强调色底 + 反色字**」，但字色**写死成 `#101010`**——它只对**深色模式**成立：
