@@ -1,0 +1,333 @@
+<!doctype html>
+<!-- ⚠️ 临时文件（Android FSA 探针）：验证完必须删除，勿随版本发布 —— 删除清单见 docs/DESKTOP-ASSOC-AND-ANDROID.md §3.1 -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>iJipu · Android 工作区探针（临时）</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0d1220;
+        --card: #151b2e;
+        --line: #24315e;
+        --fg: #e8ecf8;
+        --dim: #93a0c8;
+        --acc: #00f0ff;
+        --ok: #3ddc97;
+        --bad: #ff6b81;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px 14px 48px;
+        background: var(--bg);
+        color: var(--fg);
+        font: 16px/1.6 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+        -webkit-text-size-adjust: 100%;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 19px;
+      }
+      h2 {
+        margin: 0 0 8px;
+        font-size: 16px;
+        color: var(--acc);
+      }
+      .sub {
+        margin: 0 0 14px;
+        color: var(--dim);
+        font-size: 13px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        margin: 0 0 12px;
+      }
+      .hint {
+        margin: 0 0 8px;
+        color: var(--dim);
+        font-size: 13px;
+      }
+      button {
+        display: block;
+        width: 100%;
+        padding: 15px;
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--acc);
+        background: #161d3a;
+        border: 1px solid var(--acc);
+        border-radius: 10px;
+      }
+      button:active {
+        background: #1e2750;
+      }
+      button.ghost {
+        color: var(--dim);
+        border-color: var(--line);
+        font-weight: 400;
+      }
+      pre {
+        margin: 10px 0 0;
+        padding: 8px;
+        min-height: 8px;
+        background: #0a0e19;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font: 12px/1.5 Consolas, Menlo, monospace;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      pre:empty {
+        display: none;
+      }
+      .verdict {
+        margin: 0 0 12px;
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: #131a2c;
+        font-weight: 700;
+      }
+      .verdict.pending {
+        color: var(--dim);
+      }
+      .verdict.ok {
+        color: var(--ok);
+        border-color: var(--ok);
+      }
+      .verdict.bad {
+        color: var(--bad);
+        border-color: var(--bad);
+      }
+      .verdict.warn {
+        color: #ffcf5c;
+        border-color: #ffcf5c;
+      }
+      code {
+        color: var(--acc);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>iJipu · Android 工作区探针</h1>
+    <p class="sub">
+      临时页面（用完即删）。只在你<b>亲手选中</b>的目录里创建/读写一个 <code>ijipu-probe.txt</code>，不碰其它文件。
+    </p>
+
+    <div id="verdict" class="verdict pending">结论：还没测 —— 请依次点下面 ①②③（③ 之前要先刷新本页）</div>
+
+    <div class="card">
+      <h2>环境</h2>
+      <pre id="env"></pre>
+    </div>
+
+    <div class="card">
+      <h2>① 检测能力</h2>
+      <p class="hint">不用选目录，点一下就知道这台手机有没有目录选择器。</p>
+      <button id="b1">① 检测能力</button>
+      <pre id="o1"></pre>
+    </div>
+
+    <div class="card">
+      <h2>② 选目录 → 读 / 写（最关键）</h2>
+      <p class="hint">
+        点它 → 系统弹目录选择器 → 选一个<b>普通目录</b>（例：新建「文档/iJipu」）→「使用此文件夹」→ 允许。<br />
+        ⚠️ 别选内部存储根目录、<code>Android/data</code>、<code>Android/obb</code>（Android 11+ 禁止）。
+      </p>
+      <button id="b2">② 选择目录并写入探针文件</button>
+      <pre id="o2"></pre>
+    </div>
+
+    <div class="card">
+      <h2>③ 刷新后复检（重开还在吗）</h2>
+      <p class="hint">点了 ② 之后：<b>刷新本页</b>，再点 ③（验证句柄持久化 + 免重授权）。</p>
+      <button id="b3">③ 刷新后复检</button>
+      <pre id="o3"></pre>
+    </div>
+
+    <div class="card">
+      <h2>把结果发我</h2>
+      <p class="hint">点下面按钮复制全部输出（或直接截图本页）。</p>
+      <button id="copy" class="ghost">复制全部结果</button>
+    </div>
+
+    <script>
+      /* iJipu — Android「工作区目录」可行性探针（临时页面版）
+       * 与 .ui-preview/fsa-probe-android.js 同一套判断，只是把"控制台注入面板"改成"页面自己的按钮"：
+       * FSA 的 showDirectoryPicker 必须由**用户手势**触发，页面上直接放按钮最稳（手机上点得到、无需 DevTools）。
+       * 三个问题依次回答：① 有没有 API；② 选目录后**能不能写**（最大不确定点）；③ 刷新后是否仍可写。
+       */
+      const $ = (id) => document.getElementById(id)
+      const all = []
+      const pre = { 1: $('o1'), 2: $('o2'), 3: $('o3') }
+
+      function log(step, s) {
+        const line = s == null ? '' : String(s)
+        if (step && pre[step]) pre[step].textContent += line + '\n'
+        all.push(step ? '[' + step + '] ' + line : line)
+      }
+      function verdict(kind, msg) {
+        const el = $('verdict')
+        el.className = 'verdict ' + kind
+        el.textContent = '结论：' + msg
+        log(null, '=> ' + msg)
+      }
+      function env() {
+        return {
+          浏览器: navigator.userAgent,
+          协议: location.protocol,
+          安全上下文: window.isSecureContext,
+          showDirectoryPicker: typeof window.showDirectoryPicker,
+          showOpenFilePicker: typeof window.showOpenFilePicker,
+          showSaveFilePicker: typeof window.showSaveFilePicker,
+          FileSystemDirectoryHandle: typeof window.FileSystemDirectoryHandle,
+          FileSystemFileHandle: typeof window.FileSystemFileHandle,
+          navigatorStorage: !!navigator.storage,
+        }
+      }
+
+      // ---- 句柄持久化（与产品里 src/store/fileHandleDb.ts 同一套路：IndexedDB 存目录句柄）----
+      const DB = 'ijipu-probe',
+        STORE = 'handles'
+      const idb = () =>
+        new Promise((res, rej) => {
+          const rq = indexedDB.open(DB, 1)
+          rq.onupgradeneeded = () => rq.result.createObjectStore(STORE)
+          rq.onsuccess = () => res(rq.result)
+          rq.onerror = () => rej(rq.error)
+        })
+      const idbPut = async (k, v) => {
+        const db = await idb()
+        await new Promise((res, rej) => {
+          const tx = db.transaction(STORE, 'readwrite')
+          tx.objectStore(STORE).put(v, k)
+          tx.oncomplete = res
+          tx.onerror = () => rej(tx.error)
+        })
+        db.close()
+      }
+      const idbGet = async (k) => {
+        const db = await idb()
+        const v = await new Promise((res, rej) => {
+          const tx = db.transaction(STORE, 'readonly')
+          const rq = tx.objectStore(STORE).get(k)
+          rq.onsuccess = () => res(rq.result)
+          rq.onerror = () => rej(rq.error)
+        })
+        db.close()
+        return v
+      }
+
+      const bind = (id, fn) =>
+        $(id).addEventListener('click', async () => {
+          const step = Number(id.slice(1))
+          try {
+            await fn()
+          } catch (e) {
+            // AbortError = 用户取消；NotAllowedError = 缺手势/缺权限；其余照实报
+            const name = (e && e.name) || '?'
+            log(step, '✗ 抛错 name=' + name + ' message=' + ((e && e.message) || ''))
+            if (name === 'AbortError') verdict('warn', '你取消了目录选择，请再点一次并选中一个目录')
+            else verdict('bad', '失败（' + name + '）→ 需要做 Android 壳（由壳通过 SAF 提供目录读写）')
+          }
+        })
+
+      // 页面加载就把环境印出来（也当"脚本确实跑起来了"的证据）
+      const e0 = env()
+      $('env').textContent = Object.entries(e0)
+        .map(([k, v]) => k + ' = ' + v)
+        .join('\n')
+      for (const [k, v] of Object.entries(e0)) all.push('[env] ' + k + ' = ' + v)
+
+      bind('b1', async () => {
+        log(1, '--- ① 检测能力 ---')
+        const has = typeof window.showDirectoryPicker === 'function' && window.isSecureContext
+        log(1, has ? '✓ 具备 FSA 目录选择的基本条件' : '✗ 不满足：需要 https + showDirectoryPicker')
+        if (!has) {
+          verdict(
+            'bad',
+            !window.isSecureContext
+              ? '不是安全上下文（必须 https 打开）→ 换 https 地址再试'
+              : '没有 showDirectoryPicker → 先把 Chrome 更新到最新；仍没有就需要做壳',
+          )
+        } else {
+          verdict('pending', '① 通过，请继续点 ②')
+        }
+      })
+
+      bind('b2', async () => {
+        log(2, '--- ② 选目录 → 读/写 ---')
+        if (typeof window.showDirectoryPicker !== 'function') {
+          log(2, '✗ 没有 showDirectoryPicker，直接判"需要壳"')
+          verdict('bad', '没有目录选择器 → 需要做壳')
+          return
+        }
+        // 手势来自"点击本按钮"，所以选择器能弹出来
+        const dir = await window.showDirectoryPicker({ mode: 'readwrite' })
+        log(2, '✓ 选到目录: ' + dir.name)
+        log(2, '   queryPermission(readwrite) = ' + (await dir.queryPermission({ mode: 'readwrite' })))
+        log(2, '   requestPermission(readwrite) = ' + (await dir.requestPermission({ mode: 'readwrite' })))
+        // 写入探针：与产品 saveSupport.ts 的 writeTextToHandle 同一套 API
+        const stamp = new Date().toISOString()
+        const fh = await dir.getFileHandle('ijipu-probe.txt', { create: true })
+        const w = await fh.createWritable()
+        await w.write('iJipu probe ' + stamp)
+        await w.close()
+        log(2, '✓ createWritable/write/close 成功（能写）')
+        const back = await (await fh.getFile()).text()
+        log(2, (back.includes(stamp) ? '✓ ' : '✗ ') + '回读校验: ' + JSON.stringify(back.slice(0, 60)))
+        let n = 0
+        for await (const _ of dir.values()) n++
+        log(2, '✓ 目录可列举，条目数 = ' + n)
+        await idbPut('ws', dir)
+        log(2, '✓ 目录句柄已存入 IndexedDB')
+        verdict('ok', '② 能写 ✅ —— 现在刷新本页，再点 ③ 确认刷新后仍可写')
+      })
+
+      bind('b3', async () => {
+        log(3, '--- ③ 刷新后复检 ---')
+        const dir = await idbGet('ws')
+        if (!dir) {
+          log(3, '✗ IndexedDB 里没有目录句柄——请先点 ②（若已刷新则说明句柄没存住）')
+          verdict('bad', '句柄没存住（刷新后丢失）→ 工作区无法持久化，需要壳或每次重新选目录')
+          return
+        }
+        log(3, '✓ 从 IndexedDB 取回句柄: ' + dir.name)
+        const q = await dir.queryPermission({ mode: 'readwrite' })
+        log(3, '   queryPermission(readwrite) = ' + q + (q === 'granted' ? '（无需再授权）' : '（需按一下授权）'))
+        if (q !== 'granted') log(3, '   requestPermission(readwrite) = ' + (await dir.requestPermission({ mode: 'readwrite' })))
+        let n = 0
+        for await (const _ of dir.values()) n++
+        const fh = await dir.getFileHandle('ijipu-probe.txt', { create: true })
+        const w = await fh.createWritable()
+        await w.write('iJipu probe again ' + new Date().toISOString())
+        await w.close()
+        log(3, '✓ 刷新后仍可列举(' + n + ' 项)且可写')
+        verdict('ok', '✅✅ 全绿：Android 上纯网页工作区成立，不需要做壳')
+      })
+
+      $('copy').addEventListener('click', async () => {
+        const text = all.join('\n')
+        try {
+          await navigator.clipboard.writeText(text)
+          $('copy').textContent = '已复制 ✓（直接粘贴发我即可）'
+        } catch (e) {
+          $('copy').textContent = '复制失败，请长按下方文字手动全选'
+          const ta = document.createElement('textarea')
+          ta.value = text
+          ta.style.cssText = 'width:100%;height:180px;margin-top:8px'
+          document.body.appendChild(ta)
+          ta.select()
+        }
+      })
+    </script>
+  </body>
+</html>
