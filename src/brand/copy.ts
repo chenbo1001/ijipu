@@ -172,8 +172,6 @@ export const workspaceCopy = {
   // 「存到此处」= 把当前谱写进当前目录（与全局「保存 Ctrl+S」区分开）。
   /** 行尾「更多操作」按钮（打开/改名/移动/删除） */
   moreActions: '更多操作',
-  /** adj540：未选中任何项时右侧操作区的提示（点名字=打开、点复选框=选中） */
-  tapToSelect: '勾选后可操作',
   /** adj540：多选时的选中条数 */
   selectedCount: (n: number): string => `已选 ${n} 项`,
   actOpen: '打开',
