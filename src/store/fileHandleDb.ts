@@ -161,3 +161,52 @@ export async function loadWorkspaceList(): Promise<WorkspaceRecord[]> {
     return []
   }
 }
+
+/**
+ * adj546（用户实测：5550 文件 / 117 目录的工作区，`*` 过滤在手机上 27 秒）：
+ * **把"全工作区 .jps 索引"落盘**——第一次扫描仍然要那几十秒，但**之后每次过滤都是秒开**
+ * （先在内存/库里查，再后台重扫刷新）。
+ *
+ * 只存**相对路径字符串**（`a/b/c.jps`）：5550 条约 200KB，比存对象小得多；
+ * 读出来再 `split('/')` 还原成 `SearchHit`。带 `wsId` 与时间戳，换工作区/太旧就不采用。
+ */
+export interface CachedIndex {
+  wsId: string
+  at: number
+  /** 区内相对路径（含文件名），如 `2.曲谱集/小星星.jps` */
+  relPaths: string[]
+}
+
+/** 保存索引（按工作区身份覆盖；写失败静默） */
+export async function saveWorkspaceIndex(idx: CachedIndex): Promise<void> {
+  try {
+    const db = await openDb()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite')
+      tx.objectStore(STORE).put(idx, 'workspaceIndex')
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+    db.close()
+  } catch {
+    /* 静默降级（下次照旧全量扫） */
+  }
+}
+
+/** 读索引（无 / 身份不符 / 格式不对 ⇒ null） */
+export async function loadWorkspaceIndex(wsId: string): Promise<CachedIndex | null> {
+  try {
+    const db = await openDb()
+    const val = await new Promise<CachedIndex | null>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly')
+      const req = tx.objectStore(STORE).get('workspaceIndex')
+      req.onsuccess = () => resolve((req.result as CachedIndex | undefined) ?? null)
+      req.onerror = () => reject(req.error)
+    })
+    db.close()
+    if (!val || val.wsId !== wsId || !Array.isArray(val.relPaths)) return null
+    return val
+  } catch {
+    return null
+  }
+}

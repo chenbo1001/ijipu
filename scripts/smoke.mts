@@ -107,6 +107,7 @@ import {
   matchesQuery,
   normalizeRelPath,
   parentPath,
+  searchWorkspaceJps,
   sortDirEntries,
   stripJpsExt,
   type DirEntry,
@@ -8541,10 +8542,11 @@ function runAdj540WorkspaceTests() {
       /export function matchesQuery/.test(wsSrc) &&
       /const \[query, setQuery\] = useState\(''\)/.test(panelSrc) &&
       /const searching = query\.trim\(\)\.length > 0/.test(panelSrc) &&
-      // adj543：过滤改为"走一次建索引 + 内存 filter"，故这里断言索引路径而不是直接调搜索
-      /void buildIndex\(ws\.handle\)/.test(panelSrc) &&
-      /idx\.filter\(\(h\) => matchesQuery\(h\.name, h\.relPath, query\)\)/.test(panelSrc) &&
-      /searching\s*\?\s*\(hits \?\? \[\]\)\.map/.test(panelSrc) &&
+      // adj543/adj546：过滤改为"走一次建索引（可落盘、可后台重扫） + 内存 filter"
+      /void buildIndex\(ws\.handle, ws\.id\)/.test(panelSrc) &&
+      /const match = compileQuery\(query\)/.test(panelSrc) &&
+      /idx\.filter\(\(h\) => match\(h\.name, h\.relPath\)\)/.test(panelSrc) &&
+      /searching\s*\?\s*\(hits \?\? \[\]\)\.slice\(0, RESULT_RENDER_MAX\)\.map/.test(panelSrc) &&
       /workspaceCopy\.filterPlaceholder/.test(panelSrc),
     '')
   check('adj540 过滤框旁有**一键 `*` 按钮**（列出工作区全部 .jps；再点一下清空，激活态高亮）',
@@ -8554,10 +8556,10 @@ function runAdj540WorkspaceTests() {
       /filterAllTitle/.test(copySrc) &&
       /\.ws-filter-all\.is-active/.test(cssAll),
     '')
-  check('adj540 搜索**没搜完 / 读不动的目录**都必须说出来（API 加 `truncated` 和 `blocked` 两个字段；面板 notice）',
-    /export interface SearchResult \{[\s\S]{0,300}?truncated: boolean[\s\S]{0,80}?blocked: string\[\]/.test(wsSrc) &&
-      /return \{ hits, truncated, blocked \}/.test(wsSrc) &&
-      // adj543：截断/读不动来自"建索引"那次的结果（存进 idxMetaRef，过滤时回填）
+  check('adj540/adj546 搜索**没搜完 / 读不动的目录**都必须说出来（API 加 `truncated`/`blocked` 字段；面板 notice）',
+    /export interface SearchResult \{[\s\S]{0,400}?truncated: boolean[\s\S]{0,80}?blocked: string\[\]/.test(wsSrc) &&
+      /return \{ hits, truncated, blocked, scanned \}/.test(wsSrc) &&
+      // adj543/adj546：截断/读不动来自"建索引/重扫"那次的结果（存进 idxMetaRef，过滤时回填）
       /idxMetaRef\.current = \{ truncated: r\.truncated, blocked: r\.blocked \}/.test(panelSrc) &&
       /setHitsTruncated\(idxMetaRef\.current\.truncated\)/.test(panelSrc) &&
       /setBlockedDirs\(idxMetaRef\.current\.blocked\)/.test(panelSrc) &&
@@ -8683,7 +8685,7 @@ function runAdj540WorkspaceTests() {
  *  另：两个图标都必须是"纯黑 + alpha"的图（adj457 口径），且 alpha 要**够实**——
  *  用户反馈"图标有点糊"就是半透明过渡过多 + 按钮 `opacity` + 灰字色三者叠加。
  */
-function runAdj541DockToggleTests() {
+async function runAdj541DockToggleTests() {
   console.log('[123] dock expand/collapse entries (adj541)')
   const editorSrc = String(readFileSync('src/editor/EditorPane.tsx', 'utf8'))
   const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
@@ -8771,19 +8773,93 @@ function runAdj541DockToggleTests() {
       /await resolvePendingBinding\(\)/.test(wsPanelSrc) &&
       /bindingRestored/.test(copySrc2),
     '')
-  check('adj543 过滤提速：**先建一次索引，之后每次输入只在内存里过滤**（不再每敲一个字重走整棵目录树）',
+  check('adj545（用户要求）面板**左右两栏**：左=切换工作路径 + 路径 + 列表；右=固定宽度（过滤 / `*` 所有 / 消除过滤 / 操作▾）',
+    /<div className="ws-body">[\s\S]{0,400}?<div className="ws-left">[\s\S]{0,1200}?className="ws-workspace-btn"[\s\S]{0,2000}?className="ws-crumb"[\s\S]{0,6000}?className="ws-list"[\s\S]{0,6000}?<div className="ws-side">/.test(
+      wsPanelSrc,
+    ) &&
+      // 过滤三件套 + 操作▾ 都在右栏里（顺序：过滤框 → * / ✕ 一行 → 操作）
+      /className="ws-input ws-filter"[\s\S]{0,900}?className="ws-filter-row"[\s\S]{0,900}?ws-filter-all[\s\S]{0,900}?ws-filter-clear[\s\S]{0,900}?ws-side-group/.test(
+        wsPanelSrc,
+      ) &&
+      // 消除过滤常驻（无过滤时禁用）——位置固定，不因是否有过滤而跳动
+      /className="btn ws-filter-clear"[\s\S]{0,200}?disabled=\{!searching\}/.test(wsPanelSrc) &&
+      /\.ws-left \{[\s\S]{0,220}?flex: 1 1 auto/.test(cssSrc) &&
+      /\.ws-side \{[\s\S]{0,260}?width: 132px/.test(cssSrc) &&
+      // 窄屏右栏收窄到 116px（仍放得下过滤框），且**写在基础规则之后**（同级后者胜，见 E-2026-244）
+      /@container \(max-width: 430px\) \{[\s\S]{0,200}?\.ws-side \{ width: 116px; \}/.test(cssSrc),
+    '')
+  check('adj543/adj546 过滤提速：**先建一次索引，之后每次输入只在内存里过滤**，且索引可落盘、可后台重扫',
     /const indexRef = useRef<SearchHit\[\] \| null>\(null\)/.test(wsPanelSrc) &&
-      /const buildIndex = useCallback\(async \(handle: FileSystemDirectoryHandle\) => \{/.test(wsPanelSrc) &&
-      /searchWorkspaceJps\(handle, '', \{ maxHits: 3000, maxEntries: 30000 \}\)/.test(wsPanelSrc) &&
+      /const buildIndex = useCallback\(\s*\n?\s*async \(handle: FileSystemDirectoryHandle, wsId: string, force = false\)/.test(wsPanelSrc) &&
+      /const refreshIndex = useCallback\(async \(handle: FileSystemDirectoryHandle, wsId: string\)/.test(wsPanelSrc) &&
+      // ① 先用落盘的索引（秒开）② **只有过期才**后台重扫 ③ 扫完落盘
+      /const cached = force \? null : await loadWorkspaceIndex\(wsId\)/.test(wsPanelSrc) &&
+      /const stale = Date\.now\(\) - \(cached\.at \?\? 0\) > INDEX_STALE_MS/.test(wsPanelSrc) &&
+      /if \(stale\) void refreshIndex\(handle, wsId\)/.test(wsPanelSrc) &&
+      /await saveWorkspaceIndex\(\{ wsId, at: Date\.now\(\), relPaths: r\.hits\.map\(\(h\) => h\.relPath\) \}\)/.test(wsPanelSrc) &&
+      // 边扫边出结果（慢节流地把 partial 引用交给索引 + 进度状态；不再每跳复制数组/重算正则）
+      /onProgress: \(scanned, partial\) => \{[\s\S]{0,400}?indexRef\.current = partial/.test(wsPanelSrc) &&
+      /setScanInfo\(\{ scanned, found: partial\.length, ms: Date\.now\(\) - t0 \}\)/.test(wsPanelSrc) &&
       /const filterFromIndex = \(\): boolean => \{/.test(wsPanelSrc) &&
-      /idx\.filter\(\(h\) => matchesQuery\(h\.name, h\.relPath, query\)\)/.test(wsPanelSrc) &&
+      /idx\.filter\(\(h\) => match\(h\.name, h\.relPath\)\)/.test(wsPanelSrc) &&
       /if \(filterFromIndex\(\)\) return/.test(wsPanelSrc) &&
-      /void buildIndex\(ws\.handle\)/.test(wsPanelSrc) &&
       // 写操作（invalidateCache）与面板打开都让索引作废
       /indexRef\.current = null/.test(wsPanelSrc) &&
       // 不再用 200ms debounce 包着整树搜索
       !/setTimeout\(\(\) => \{[\s\S]{0,80}?void searchWorkspaceJps\(ws\.handle, query\)/.test(wsPanelSrc),
     '')
+  // adj546：用户实测「5550 文件 / 117 目录，`*` 过滤 27 秒」。FSA 每条都要跟浏览器进程往返一次
+  // （手机上约 5ms）⇒ **串行枚举=延迟叠加**。三条对症措施：
+  //   ① 并发枚举目录（默认 4 路，把往返延迟重叠）② `.开头的条目直接跳过且不下钻` ③ 边扫边出 + 落盘索引
+  check('adj546 性能：目录**并发枚举**（把 FSA 每次往返的延迟重叠），`. 开头`的条目**跳过且不下钻**',
+    /const concurrency = Math\.max\(1, Math\.min\(8, options\.concurrency \?\? 4\)\)/.test(wsSrc) &&
+      /Array\.from\(\{ length: concurrency \}, \(\) => worker\(\)\)/.test(wsSrc) &&
+      // 隐藏项判定放在 scanned++ **之前**（连扫描计数都不占），且 continue 不下钻
+      /if \(isHiddenName\(h\.name\)\) continue[\s\S]{0,200}?scanned\+\+/.test(wsSrc) &&
+      /onProgress\?: \(scanned: number, hits: SearchHit\[\]\) => void/.test(wsSrc) &&
+      // 落盘索引：按工作区身份 + 只存相对路径
+      /export interface CachedIndex \{[\s\S]{0,200}?wsId: string[\s\S]{0,120}?relPaths: string\[\]/.test(fhSrc) &&
+      /export async function loadWorkspaceIndex\(wsId: string\)/.test(fhSrc),
+    '')
+  // adj546：**用"假句柄 + 手机量级延迟"实测并发收益**——真机 FSA 每次枚举约 5ms，
+  // 这里给每个条目注入 2ms 延迟，比较 concurrency=1 与 4 的耗时。确定性（不依赖真实磁盘）。
+  {
+    const mkDir = (name: string, children: unknown[], perEntryMs: number): unknown => ({
+      kind: 'directory',
+      name,
+      values: async function* () {
+        for (const c of children) {
+          await new Promise((r) => setTimeout(r, perEntryMs))
+          yield c
+        }
+      },
+    })
+    const files = (n: number, perEntryMs: number) =>
+      Array.from({ length: n }, (_, i) => ({ kind: 'file', name: `s${i}.jps`, getFile: async () => null }) as unknown)
+    const perEntry = 2
+    const root = mkDir('root', Array.from({ length: 8 }, (_, i) => mkDir(`d${i}`, files(20, perEntry), perEntry)), perEntry) as never
+    const t1 = Date.now()
+    const r1 = await searchWorkspaceJps(root, '*', { concurrency: 1 })
+    const serialMs = Date.now() - t1
+    const t4 = Date.now()
+    const r4 = await searchWorkspaceJps(root, '*', { concurrency: 4 })
+    const parMs = Date.now() - t4
+    console.log(`    并发实测（假句柄 ${perEntry}ms/条）：串行 ${serialMs}ms → 并发4 ${parMs}ms（提速 ${(serialMs / Math.max(1, parMs)).toFixed(1)}×）`)
+    check(
+      'adj546 并发枚举确实快于串行（假句柄注入 2ms/条延迟；真机 FSA 就是这个量级）',
+      r1.hits.length === 160 && r4.hits.length === 160 && parMs * 1.6 < serialMs,
+      `串行 ${serialMs}ms / 并发4 ${parMs}ms（命中 ${r4.hits.length}）`,
+    )
+    // 隐藏项：`.git` 下的谱一个都不能进结果，且不该被计数
+    const hidden = mkDir('.git', files(50, perEntry), perEntry)
+    const root2 = mkDir('root', [hidden, mkDir('ok', files(3, perEntry), perEntry)], perEntry) as never
+    const r5 = await searchWorkspaceJps(root2, '*', { concurrency: 4 })
+    check(
+      'adj546 `. 开头`的目录**不进结果也不下钻**（`.git` 里 50 个文件一个都不该被扫到）',
+      r5.hits.length === 3 && r5.scanned === 4, // 1 个 .git + 1 个 ok + ok 里 3 个文件 … 见下方口径
+      `命中 ${r5.hits.length}、扫描 ${r5.scanned}`,
+    )
+  }
   // E-2026-249：面板"一直闪 + 点不动"= **无限刷新循环**。
   // 根因：`invalidateCache` 是普通函数（每次渲染新引用）却进了 `refresh` 的 useCallback 依赖，
   // 使 `refresh` 每次渲染都变 ⇒ 依赖它的"面板激活"effect 每渲染重跑 ⇒ setState ⇒ 再渲染……
@@ -9595,9 +9671,9 @@ runAdj363SaveTests()
       console.error('  ✗ adj540 工作区（含子目录）用例抛异常', e)
     }
   })
-  .then(() => {
+  .then(async () => {
     try {
-      runAdj541DockToggleTests()
+      await runAdj541DockToggleTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj541 底栏展开/收起用例抛异常', e)

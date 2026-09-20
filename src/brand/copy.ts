@@ -216,8 +216,9 @@ export const workspaceCopy = {
   opPartial: (ok: number, fail: number, reason: string): string => `${ok} 项成功、${fail} 项失败（${reason}）`,
   /** 多选时删除确认里的条数提示 */
   deleteManyConfirm: (n: number): string => `永久删除选中的 ${n} 项？删了就找不回来了`,
-  /** adj540：过滤框（用户要求）——过滤时列出**整个工作区**里符合条件的 .jps（平坦列表，便于快速打开） */
-  filterPlaceholder: '过滤 .jps（支持 * ?，含子目录）…',
+  /** adj540：过滤框（用户要求）——过滤时列出**整个工作区**里符合条件的 .jps（平坦列表，便于快速打开）
+   *  adj545：右栏固定宽度很窄，占位符只留最短提示（完整规则在 `filterHint` 悬浮提示里） */
+  filterPlaceholder: '过滤 .jps…',
   filterClear: '清空过滤',
   /** adj540（用户要求）：过滤框旁的一键按钮——填入 `*` 即列出工作区全部 .jps（再点一下清空） */
   filterAll: '*',
@@ -227,6 +228,14 @@ export const workspaceCopy = {
   searchEmpty: '工作区里没有匹配的 .jps',
   /** adj543：首次过滤要建立索引（走一次目录树）——给个等待提示，别让用户以为"什么都没有" */
   searchIndexing: '正在读取工作区…',
+  /**
+   * adj546（用户实测 5550 文件/117 目录的工作区要 27 秒）：扫描期间显示进度——
+   * `边扫边出结果` + 计数，用户能看到在动，也能马上打开已找到的谱。
+   */
+  scanning: (scanned: number, found: number, ms: number): string =>
+    `正在扫描…已查 ${scanned} 项 / 找到 ${found} 个 / ${(ms / 1000).toFixed(1)}s`,
+  /** adj546：命中太多时不全部渲染（手机上一次画几千行要几百毫秒），如实说明并引导缩小范围 */
+  searchCapped: (total: number, shown: number): string => `共 ${total} 个，只显示前 ${shown} 个（输入关键词可缩小范围）`,
   /** adj540（用户报告 `*` 仍看不到文件）：读不动的目录也主动说出来——"没搜到"与"没搜完/搜到一半"是两件事 */
   searchBlockedDirs: (dirs: string[]): string =>
     `有 ${dirs.length} 个子目录读不动（可能在里面），已跳过：${dirs.slice(0, 3).join('、')}${dirs.length > 3 ? '…' : ''}`,
@@ -259,6 +268,8 @@ export const workspaceCopy = {
     `这份谱来自工作区「${wsName}」的 ${path}：重新授权该工作区后，「保存」即可写回原文件`,
   /** adj544：最近工作区列表标题（面板可一键切回） */
   recentWorkspaces: '最近的工作区',
+  /** adj546：手动重新扫描工作区（外部新增文件 / 索引过期时用；平时靠落盘索引秒开） */
+  rescan: '重新扫描工作区',
   /** adj544：从"最近工作区"切回失败（目录被删/移动、授权被拒） */
   activateFailed: (n: string): string => `无法打开工作区「${n}」（目录可能已被移动/删除，或授权被拒绝）`,
   verifyFailed: (n: string): string => `「${n}」写入后校验不一致，已保留原文件（请重试）`,

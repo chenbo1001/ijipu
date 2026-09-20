@@ -3785,24 +3785,34 @@ body {
   flex: 1 1 auto;
   max-height: none;
 }
-/* adj540（用户要求）：**左列表 + 右操作按钮**——操作集中到右侧竖排，把行数都留给列表。
- * 窄屏下右侧固定 96px，列表仍能显示 5~6 行（此前"每行展开操作 + 底部按钮行"只够 3 行）。 */
+/* adj540/adj545（用户要求）：**左右两栏**——
+ * 左栏（弹性）：切换工作路径按钮 + 路径面包屑 + 列表；右栏（**固定宽度**）：过滤 / `*` 所有 / 消除过滤 / 操作▾。
+ * 过滤控件从"各占一整行的横条"搬进右栏后，列表拿到全部纵向空间（窄屏尤其明显）。 */
 .ws-body {
   display: flex;
   flex: 1 1 auto;
   gap: 8px;
   min-height: 0;
 }
-.ws-body .ws-list {
+.ws-left {
+  display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
+  min-height: 0;
+}
+.ws-left .ws-list {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .ws-side {
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
   gap: 4px;
-  width: 92px;
+  /* adj545：固定宽度——要放得下过滤框（可输入 ~10 个字）与两个小按钮 */
+  width: 132px;
   /* 兜底：极矮的 dock（用户把底栏压到最小）下按钮列可滚动，绝不出现"按钮被裁掉点不到" */
   min-height: 0;
   overflow-y: auto;
@@ -3827,26 +3837,30 @@ body {
   font-size: 12px;
   white-space: nowrap;
 }
-/* adj540（用户要求）：**过滤框**——默认层级列表，一过滤就把整个工作区的 .jps 收成平坦列表 */
+/* adj540（用户要求）：**过滤框**——默认层级列表，一过滤就把整个工作区的 .jps 收成平坦列表。
+ * adj545：搬到右栏（固定宽度那一列）⇒ 宽度 100% 由列宽决定；下面一行放 `*` 与 ✕ 两个小按钮。 */
 .ws-filter-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+}
+.ws-filter-row .ws-filter-all,
+.ws-filter-row .ws-filter-clear {
+  flex: 1 1 0;
+  min-width: 0;
 }
 .ws-filter {
-  flex: 1 1 auto;
-  width: auto;
+  /* adj545：在右栏里占满列宽（不再依赖横条里的 flex 伸缩） */
+  width: 100%;
   min-width: 0;
 }
 .ws-filter-clear {
-  flex: none;
-  padding: 5px 9px;
+  padding: 5px 6px;
   font-size: 12px;
 }
 /* adj540（用户要求）：一键列出全部 .jps 的 `*` 按钮——与清空按钮同款，激活时高亮 */
 .ws-filter-all {
-  flex: none;
-  padding: 5px 10px;
+  padding: 5px 8px;
   font-size: 13px;
   font-weight: 700;
   line-height: 1;
@@ -4079,7 +4093,10 @@ span.ws-check {
  * 注意：**按钮高度刻意不再压扁**（用户要求"高度参考其它按钮"）——靠分组下拉把按钮数从 8 降到 4~5，
  * 于是窄屏也不用滚动；这里只收窄列宽与二级按钮。 */
 @container (max-width: 430px) {
-  .ws-side { width: 82px; }
+  /* adj545：窄屏右栏也要放得下过滤框（约 10 个字）+ 两个小按钮；列表仍留 ~240px 宽 */
+  .ws-side { width: 116px; }
   .ws-sub-btn { padding: 5px 2px; font-size: 11px; }
   .ws-panel .ws-list { min-height: 72px; }
+  /* 窄屏过滤框字号降一档，让列宽内能多显示几个字 */
+  .ws-filter { font-size: 11px; padding-left: 6px; padding-right: 6px; }
 }

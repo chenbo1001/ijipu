@@ -43,7 +43,7 @@ import {
   joinPath,
   listWorkspaces,
   makeWorkspaceRecord,
-  matchesQuery,
+  compileQuery,
   parentPath,
   pickWorkspaceDir,
   queryWorkspacePermission,
@@ -55,10 +55,26 @@ import {
   stripJpsExt,
   type DirEntry,
   type SearchHit,
+  type SearchResult,
 } from '../../store/workspace'
+import { loadWorkspaceIndex, saveWorkspaceIndex } from '../../store/fileHandleDb'
 
 /** 「选择文件夹」静默失败的判定时间（超过它还没弹选择框就提示，而不是让用户干等） */
 const PICKER_NO_RESPONSE_MS = 5000
+
+/**
+ * adj546：过滤结果**最多渲染多少行**（索引仍是全量）。
+ * 手机上一次渲染 5499 行要 ~600ms（实测），而用户不可能靠滚动翻 5000 行——
+ * 封顶后 `*`/过滤都是"秒出"，余量让他用关键词缩小范围（列表底部有提示）。
+ */
+const RESULT_RENDER_MAX = 300
+
+/**
+ * adj546：落盘索引的**保鲜期**——过期才在后台重扫。
+ * 为什么不是"每次打开面板都重扫"：手机上扫一遍 5550 文件要几十秒（用户实测 27s），
+ * 每次进面板都跑一遍是灾难。10 分钟内直接用落盘索引（秒开），过期或用户手动「重新扫描」才重扫。
+ */
+const INDEX_STALE_MS = 10 * 60 * 1000
 
 /** 正在编辑的输入框：重命名 / 新建夹 / 另存 / 新建谱（四者共用同一个输入区） */
 type EditState = { kind: 'rename' | 'newFolder' | 'saveAs' | 'newScore'; value: string; name?: string }
@@ -131,13 +147,90 @@ export function WorkspacePanel() {
    */
   const indexRef = useRef<SearchHit[] | null>(null)
   const idxMetaRef = useRef<{ truncated: boolean; blocked: string[] }>({ truncated: false, blocked: [] })
-  /** 建索引（走一次整树；上限放大，因为只走一次）——`useCallback([])` 保证引用稳定（E-2026-249） */
-  const buildIndex = useCallback(async (handle: FileSystemDirectoryHandle) => {
-    const r = await searchWorkspaceJps(handle, '', { maxHits: 3000, maxEntries: 30000 })
-    indexRef.current = r.hits
-    idxMetaRef.current = { truncated: r.truncated, blocked: r.blocked }
-    return r
+  /** adj546：后台重扫是否在进行（避免重复起扫）＋ 扫描进度（让 UI 边扫边显示，不再干等） */
+  const refreshingRef = useRef(false)
+  const [scanInfo, setScanInfo] = useState<{ scanned: number; found: number; ms: number } | null>(null)
+  /** 索引版本号：索引内容变化（载入缓存/扫描进度/重扫完成）就 +1，驱动过滤重新计算 */
+  const [indexVersion, setIndexVersion] = useState(0)
+
+  /**
+   * adj546（用户实测 27 秒）：**后台重扫**——一边扫一边把已找到的写进 `indexRef` 并让 UI 刷新，
+   * 扫完落盘（下次直接秒开）。扫描期间界面上会显示"已扫描 N 项 / 找到 M 个"。
+   */
+  const refreshIndex = useCallback(async (handle: FileSystemDirectoryHandle, wsId: string) => {
+    if (refreshingRef.current) return
+    refreshingRef.current = true
+    const t0 = Date.now()
+    setScanInfo({ scanned: 0, found: indexRef.current?.length ?? 0, ms: 0 })
+    /**
+     * adj546（关键）：进度回调**节流到 500ms，且只更新计数**——不复制数组、不触发过滤重算。
+     * 之前 150ms 一跳 + 每跳 `[...partial]` + 重新过滤 ⇒ 扫描过程被 UI 自己拖慢（手机上尤其明显）。
+     * 结果按"扫到一半"渐进显示交给下面的 `lastShown` 慢节流（1.2s 一次），足够"看着有动静"。
+     */
+    let lastShown = 0
+    try {
+      const r = await searchWorkspaceJps(handle, '', {
+        maxHits: 20000,
+        maxEntries: 200000,
+        onProgress: (scanned, partial) => {
+          setScanInfo({ scanned, found: partial.length, ms: Date.now() - t0 })
+          const now = Date.now()
+          if (now - lastShown < 1200) return
+          lastShown = now
+          indexRef.current = partial // 引用即可（不改动它），慢节流地让用户看到部分结果
+          setIndexVersion((v) => v + 1)
+        },
+      })
+      indexRef.current = r.hits
+      idxMetaRef.current = { truncated: r.truncated, blocked: r.blocked }
+      const ms = Date.now() - t0
+      await saveWorkspaceIndex({ wsId, at: Date.now(), relPaths: r.hits.map((h) => h.relPath) })
+      // adj546：把"扫了多少、花了多久、每条多少钱"打出来——真机排查速度问题要靠这个数
+      console.info(
+        `[iJipu] 工作区索引完成：扫描 ${r.scanned} 项 / 命中 ${r.hits.length} 个 / ${ms}ms` +
+          `（${r.scanned > 0 ? (ms / r.scanned).toFixed(2) : '0'}ms 每项）`,
+      )
+      setIndexVersion((v) => v + 1)
+    } catch {
+      /* 重扫失败：保留已有索引（可能是落盘的旧索引），不打断用户 */
+    } finally {
+      refreshingRef.current = false
+      setScanInfo(null)
+    }
   }, [])
+
+  /**
+   * adj543/adj546：**确保有索引可用**——
+   * ① 内存里已有 ⇒ 直接用；② 否则先读**落盘的索引**（秒出，可能略旧）并同时启动后台重扫；
+   * ③ 都没有 ⇒ 全量扫一次（期间有进度与部分结果）。
+   * `useCallback([])` 保证引用稳定（E-2026-249：进依赖的必须是稳定引用）。
+   */
+  const buildIndex = useCallback(
+    async (handle: FileSystemDirectoryHandle, wsId: string, force = false): Promise<SearchResult> => {
+      if (indexRef.current && !force) return { hits: indexRef.current, ...idxMetaRef.current, scanned: 0 }
+      const cached = force ? null : await loadWorkspaceIndex(wsId)
+      if (cached && cached.relPaths.length > 0) {
+        const hits = cached.relPaths.map((relPath) => {
+          const segs = relPath.split('/')
+          return { name: segs[segs.length - 1], relPath, dirSegs: segs.slice(0, -1) }
+        })
+        indexRef.current = hits
+        idxMetaRef.current = { truncated: false, blocked: [] }
+        setIndexVersion((v) => v + 1)
+        // adj546：**只在索引过期时才后台重扫**——此前每次打开面板都无条件重扫，
+        // 在手机上等于每次都跑一遍几十秒的枚举（用户实测 27s）。落盘的索引够新鲜就直接用。
+        const stale = Date.now() - (cached.at ?? 0) > INDEX_STALE_MS
+        if (stale) void refreshIndex(handle, wsId)
+        return { hits, truncated: false, blocked: [], scanned: 0 }
+      }
+      const r = await searchWorkspaceJps(handle, '', { maxHits: 20000, maxEntries: 200000 })
+      indexRef.current = r.hits
+      idxMetaRef.current = { truncated: r.truncated, blocked: r.blocked }
+      void saveWorkspaceIndex({ wsId, at: Date.now(), relPaths: r.hits.map((h) => h.relPath) })
+      return r
+    },
+    [refreshIndex],
+  )
   /**
    * adj540（用户要求）：右侧**只留一个下拉按钮**「操作」——点它**弹出菜单**再选具体操作。
    * 为什么必须用 portal：dock 容器是 `overflow: hidden`，就地展开的浮层会被裁掉
@@ -181,13 +274,15 @@ export function WorkspacePanel() {
     const filterFromIndex = (): boolean => {
       const idx = indexRef.current
       if (!idx) return false
-      setHits(idx.filter((h) => matchesQuery(h.name, h.relPath, query)))
+      // adj546：查询只编译一次（5000+ 条时别再每条 new RegExp）
+      const match = compileQuery(query)
+      setHits(idx.filter((h) => match(h.name, h.relPath)))
       setHitsTruncated(idxMetaRef.current.truncated)
       setBlockedDirs(idxMetaRef.current.blocked)
       return true
     }
     if (filterFromIndex()) return
-    void buildIndex(ws.handle)
+    void buildIndex(ws.handle, ws.id)
       .then((r) => {
         if (!alive) return
         filterFromIndex()
@@ -206,7 +301,7 @@ export function WorkspacePanel() {
     return () => {
       alive = false
     }
-  }, [ws, perm, query, searching, showNotice, buildIndex])
+  }, [ws, perm, query, searching, showNotice, buildIndex, indexVersion])
   /** 弹出菜单：点外面/按 Esc 关闭（菜单渲染在 portal 里，不在 dock 的裁剪范围内） */
   useEffect(() => {
     if (!menuOpen) return
@@ -612,158 +707,123 @@ export function WorkspacePanel() {
 
   return (
     <div className="ws-panel">
-      <div className="ws-head">
-        {/* adj540（用户第二轮反馈）：左侧放一个"切换工作区"图标按钮（`public/icons/工作区.png`）；
-            路径面包屑从**第一个段（根目录名）**开始就是普通段，点击=回到工作区根目录——
-            解决了"根目录名点不开"的别扭，把"切换工作区"这个动作彻底从路径里分离出去。 */}
-        <button
-          type="button"
-          className="ws-workspace-btn"
-          onClick={() => void (moving ? refreshMovingTarget([]) : onPick())}
-          title={workspaceCopy.workspaceBtnTitle}
-          aria-label={workspaceCopy.workspaceBtnTitle}
-          disabled={busy}
-        >
-          <ToolIcon name="workspace" />
-        </button>
-        <div className="ws-crumb" title={wsPathText}>
-          {/* 根目录名 = 普通面包屑段（"回到工作区根目录"或"移动模式下选工作区根作目标"） */}
-          <button
-            type="button"
-            className="ws-crumb-seg ws-crumb-root"
-            onClick={() => void (moving ? refreshMovingTarget([]) : refresh(ws, []))}
-            disabled={busy}
-          >
-            {ws.handle.name}
-          </button>
-          <span className="ws-sep">/</span>
-          {path.map((seg, i) => (
-            <span key={`${seg}-${i}`}>
+      {/* adj545（用户要求）：面板分**左右两栏**——
+          左栏（弹性）：切换工作路径按钮 + 路径面包屑 + 列表；
+          右栏（固定宽度）：过滤框 / `*` 所有 / 消除过滤 / 操作▾。
+          好处：过滤那几件控件不再各占一整行，列表拿到全部纵向空间。 */}
+      <div className="ws-body">
+        <div className="ws-left">
+          <div className="ws-head">
+            {/* adj540（用户第二轮反馈）：左侧放一个"切换工作区"图标按钮（`public/icons/工作区.png`）；
+                路径面包屑从**第一个段（根目录名）**开始就是普通段，点击=回到工作区根目录——
+                解决了"根目录名点不开"的别扭，把"切换工作区"这个动作彻底从路径里分离出去。 */}
+            <button
+              type="button"
+              className="ws-workspace-btn"
+              onClick={() => void (moving ? refreshMovingTarget([]) : onPick())}
+              title={workspaceCopy.workspaceBtnTitle}
+              aria-label={workspaceCopy.workspaceBtnTitle}
+              disabled={busy}
+            >
+              <ToolIcon name="workspace" />
+            </button>
+            <div className="ws-crumb" title={wsPathText}>
+              {/* 根目录名 = 普通面包屑段（"回到工作区根目录"或"移动模式下选工作区根作目标"） */}
               <button
                 type="button"
-                className="ws-crumb-seg"
-                onClick={() => void (moving ? refreshMovingTarget(path.slice(0, i + 1)) : refresh(ws, path.slice(0, i + 1)))}
+                className="ws-crumb-seg ws-crumb-root"
+                onClick={() => void (moving ? refreshMovingTarget([]) : refresh(ws, []))}
                 disabled={busy}
               >
-                {seg}
+                {ws.handle.name}
               </button>
               <span className="ws-sep">/</span>
-            </span>
-          ))}
-        </div>
-        {/* 「移动到…」模式下头部显示目标提示 */}
-        {moving && (
-          <span className="ws-move-hint">
-            {workspaceCopy.moveHere}·{moving.list.length} → {crumb || ''}
-          </span>
-        )}
-      </div>
-
-      {/* 输入/确认区：改名、新建、另存、删除确认都放这里（不占用列表行） */}
-      {edit && (
-        <div className="ws-editbar">
-          <span className="ws-edit-label">{EDIT_META[edit.kind].label}</span>
-          <input
-            className="ws-input"
-            value={edit.value}
-            autoFocus
-            placeholder={EDIT_META[edit.kind].placeholder}
-            onChange={(ev) => setEdit({ ...edit, value: ev.target.value })}
-            onKeyDown={(ev) => {
-              if (ev.key === 'Enter') void submitEdit()
-              if (ev.key === 'Escape') setEdit(null)
-            }}
-          />
-          <button type="button" className="btn primary" onClick={() => void submitEdit()} disabled={busy}>
-            {workspaceCopy.confirmBtn}
-          </button>
-          <button type="button" className="btn" onClick={() => setEdit(null)} disabled={busy}>
-            {workspaceCopy.cancelBtn2}
-          </button>
-        </div>
-      )}
-      {confirmDel && (
-        <div className="ws-editbar ws-editbar-danger">
-          <span className="ws-danger-text">{confirmDel.label}</span>
-          <button type="button" className="btn ws-danger" onClick={() => void doDelete()} disabled={busy}>
-            {workspaceCopy.actDelete}
-          </button>
-          <button type="button" className="btn" onClick={() => setConfirmDel(null)} disabled={busy}>
-            {workspaceCopy.cancelBtn2}
-          </button>
-        </div>
-      )}
-
-      {/* adj540（用户要求）：**过滤框**——默认为层级列表；一过滤就把整个工作区符合条件的 .jps 收成平坦列表 */}
-      <div className="ws-filter-row">
-        <input
-          className="ws-input ws-filter"
-          value={query}
-          placeholder={workspaceCopy.filterPlaceholder}
-          title={workspaceCopy.filterHint}
-          onChange={(ev) => {
-            setQuery(ev.target.value)
-            setEdit(null)
-            setConfirmDel(null)
-          }}
-          onKeyDown={(ev) => {
-            if (ev.key === 'Escape') setQuery('')
-          }}
-        />
-        {/* adj540（用户要求）：一键 `*` = 列出工作区**全部** .jps（再点一下清空回到层级列表）。
-            `*` 在过滤口径里是"任意串"，所以等价于"不过滤但走平坦列表"。 */}
-        <button
-          type="button"
-          className={`btn ws-filter-all${query.trim() === '*' ? ' is-active' : ''}`}
-          title={workspaceCopy.filterAllTitle}
-          aria-label={workspaceCopy.filterAllTitle}
-          aria-pressed={query.trim() === '*'}
-          onClick={() => {
-            setQuery(query.trim() === '*' ? '' : '*')
-            setEdit(null)
-            setConfirmDel(null)
-          }}
-        >
-          {workspaceCopy.filterAll}
-        </button>
-        {searching && (
-          <button type="button" className="btn ws-filter-clear" onClick={() => setQuery('')} title={workspaceCopy.filterClear}>
-            ✕
-          </button>
-        )}
-      </div>
-
-      {/* adj544（用户要求 C）：正常视图里也能"切回最近的工作区"——点「操作 → 最近的工作区…」就地展开 */}
-      {showRecent && recent.length > 0 && (
-        <div className="ws-recent ws-recent-inline">
-          <div className="ws-recent-title">{workspaceCopy.recentWorkspaces}</div>
-          <div className="ws-recent-row">
-            {recent.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                className={`btn ws-recent-item${ws?.id === r.id ? ' is-current' : ''}`}
-                onClick={() => {
-                  setShowRecent(false)
-                  void onActivate(r)
-                }}
-                disabled={busy}
-                title={r.name}
-              >
-                <span className="ws-icon">📁</span>
-                <span className="ws-recent-name">{r.name}</span>
-              </button>
-            ))}
+              {path.map((seg, i) => (
+                <span key={`${seg}-${i}`}>
+                  <button
+                    type="button"
+                    className="ws-crumb-seg"
+                    onClick={() => void (moving ? refreshMovingTarget(path.slice(0, i + 1)) : refresh(ws, path.slice(0, i + 1)))}
+                    disabled={busy}
+                  >
+                    {seg}
+                  </button>
+                  <span className="ws-sep">/</span>
+                </span>
+              ))}
+            </div>
+            {/* 「移动到…」模式下头部显示目标提示 */}
+            {moving && (
+              <span className="ws-move-hint">
+                {workspaceCopy.moveHere}·{moving.list.length} → {crumb || ''}
+              </span>
+            )}
           </div>
-        </div>
-      )}
 
-      {/* 主体：**左列表（带复选框）+ 右操作按钮** */}
-      <div className="ws-body">
-        <div className="ws-list" title={workspaceCopy.onlyListed}>
+          {/* 输入/确认区：改名、新建、另存、删除确认都放这里（不占用列表行） */}
+          {edit && (
+            <div className="ws-editbar">
+              <span className="ws-edit-label">{EDIT_META[edit.kind].label}</span>
+              <input
+                className="ws-input"
+                value={edit.value}
+                autoFocus
+                placeholder={EDIT_META[edit.kind].placeholder}
+                onChange={(ev) => setEdit({ ...edit, value: ev.target.value })}
+                onKeyDown={(ev) => {
+                  if (ev.key === 'Enter') void submitEdit()
+                  if (ev.key === 'Escape') setEdit(null)
+                }}
+              />
+              <button type="button" className="btn primary" onClick={() => void submitEdit()} disabled={busy}>
+                {workspaceCopy.confirmBtn}
+              </button>
+              <button type="button" className="btn" onClick={() => setEdit(null)} disabled={busy}>
+                {workspaceCopy.cancelBtn2}
+              </button>
+            </div>
+          )}
+          {confirmDel && (
+            <div className="ws-editbar ws-editbar-danger">
+              <span className="ws-danger-text">{confirmDel.label}</span>
+              <button type="button" className="btn ws-danger" onClick={() => void doDelete()} disabled={busy}>
+                {workspaceCopy.actDelete}
+              </button>
+              <button type="button" className="btn" onClick={() => setConfirmDel(null)} disabled={busy}>
+                {workspaceCopy.cancelBtn2}
+              </button>
+            </div>
+          )}
+
+          {/* adj544（用户要求 C）：正常视图里也能"切回最近的工作区"——点「操作 → 最近的工作区…」就地展开 */}
+          {showRecent && recent.length > 0 && (
+            <div className="ws-recent ws-recent-inline">
+              <div className="ws-recent-title">{workspaceCopy.recentWorkspaces}</div>
+              <div className="ws-recent-row">
+                {recent.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    className={`btn ws-recent-item${ws?.id === r.id ? ' is-current' : ''}`}
+                    onClick={() => {
+                      setShowRecent(false)
+                      void onActivate(r)
+                    }}
+                    disabled={busy}
+                    title={r.name}
+                  >
+                    <span className="ws-icon">📁</span>
+                    <span className="ws-recent-name">{r.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="ws-list" title={workspaceCopy.onlyListed}>
           {/* 过滤模式：**平坦结果**（跨子目录），点一条直接打开 —— 不提供勾选（改名/移动/删除要先清空过滤） */}
           {searching
-            ? (hits ?? []).map((h) => (
+            ? (hits ?? []).slice(0, RESULT_RENDER_MAX).map((h) => (
                 <div key={h.relPath} className="ws-row">
                   <span className="ws-check" aria-hidden="true" />
                   <button
@@ -834,8 +894,13 @@ export function WorkspacePanel() {
               </>
             )}
           {searching && hits !== null && hits.length === 0 && <div className="ws-none">{workspaceCopy.searchEmpty}</div>}
-          {/* adj543：首次过滤要走一次目录树建索引——期间给个提示（否则那一下看着像"空的"） */}
-          {searching && hits === null && <div className="ws-none">{workspaceCopy.searchIndexing}</div>}
+          {/* adj546：命中数超过渲染上限 ⇒ 如实说明（索引是全量的，只是没全画出来） */}
+          {searching && (hits?.length ?? 0) > RESULT_RENDER_MAX && (
+            <div className="ws-none">{workspaceCopy.searchCapped(hits?.length ?? 0, RESULT_RENDER_MAX)}</div>
+          )}
+          {/* adj546：正在后台重扫/首次扫描 ⇒ 显示进度（用户不必对着空白等半分钟） */}
+          {scanInfo && <div className="ws-none">{workspaceCopy.scanning(scanInfo.scanned, scanInfo.found, scanInfo.ms)}</div>}
+          </div>
         </div>
 
         <div className="ws-side">
@@ -860,12 +925,58 @@ export function WorkspacePanel() {
                     {hitsTruncated ? '…' : ''}
                   </span>
                 ) : selCount === 0 ? (
-                  workspaceCopy.tapToSelect
+                  // adj546（用户要求）：没勾选时**不显示任何文字**（原来那句"勾选后可操作"去掉）
+                  null
                 ) : selCount === 1 ? (
                   <span className="ws-side-name">{selectedEntries[0].name}</span>
                 ) : (
                   <span className="ws-side-name">{workspaceCopy.selectedCount(selCount)}</span>
                 )}
+              </div>
+
+              {/* adj545（用户要求）：**过滤三件套搬到右栏**（固定宽度那一列）——
+                  过滤框 / `*` 所有 / 消除过滤。默认层级列表；一过滤就把整个工作区符合条件的
+                  `.jps` 收成平坦列表（`*` 在过滤口径里是"任意串"⇒ 等价于"不过滤但走平坦列表"）。 */}
+              <input
+                className="ws-input ws-filter"
+                value={query}
+                placeholder={workspaceCopy.filterPlaceholder}
+                title={workspaceCopy.filterHint}
+                onChange={(ev) => {
+                  setQuery(ev.target.value)
+                  setEdit(null)
+                  setConfirmDel(null)
+                }}
+                onKeyDown={(ev) => {
+                  if (ev.key === 'Escape') setQuery('')
+                }}
+              />
+              <div className="ws-filter-row">
+                <button
+                  type="button"
+                  className={`btn ws-filter-all${query.trim() === '*' ? ' is-active' : ''}`}
+                  title={workspaceCopy.filterAllTitle}
+                  aria-label={workspaceCopy.filterAllTitle}
+                  aria-pressed={query.trim() === '*'}
+                  onClick={() => {
+                    setQuery(query.trim() === '*' ? '' : '*')
+                    setEdit(null)
+                    setConfirmDel(null)
+                  }}
+                >
+                  {workspaceCopy.filterAll}
+                </button>
+                {/* 消除过滤：常驻（无过滤时禁用）——位置固定，不因是否有过滤而跳动 */}
+                <button
+                  type="button"
+                  className="btn ws-filter-clear"
+                  onClick={() => setQuery('')}
+                  disabled={!searching}
+                  title={workspaceCopy.filterClear}
+                  aria-label={workspaceCopy.filterClear}
+                >
+                  ✕
+                </button>
               </div>
 
               {/* adj540（用户反馈）：列表里点文件名就能打开/进入——右侧不再放独立的「打开」按钮（与行点击功能重复）。只剩一个「操作▾」下拉。 */}
@@ -928,6 +1039,21 @@ export function WorkspacePanel() {
               {workspaceCopy.actNewFolder}
             </button>
             <div className="ws-menu-sep" />
+            {/* adj546：手动**重新扫描**（外部新增了文件、或索引过期时用；否则靠落盘索引秒开） */}
+            <button
+              type="button"
+              className="ws-menu-item"
+              role="menuitem"
+              disabled={!ws || busy}
+              onClick={() => {
+                setMenuOpen(false)
+                if (!ws) return
+                indexRef.current = null
+                void buildIndex(ws.handle, ws.id, true).then(() => setIndexVersion((v) => v + 1))
+              }}
+            >
+              {workspaceCopy.rescan}
+            </button>
             {/* adj544：切回最近工作区（重启后 / 换过工作区后都用得着） */}
             {recent.length > 0 && (
               <button
