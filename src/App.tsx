@@ -179,14 +179,35 @@ function App() {
   // 改 splitHDir 后立即生效（renderSplitH 响应式读 uiStore）。
   const isSplitHView = viewType === 'splitH' || viewType === 'splitHE'
   const previewOnLeft = splitHDir !== 'editorLeft'
+
+  /**
+   * adj552（用户要求）：**宽屏左右拆分时，底栏 dock 是"编辑区的底栏"**——只占编辑那一侧，
+   * 布局成为「左：预览（通高） | 右：上编辑 / 下底栏」。
+   *
+   * ⚠️ **窄屏模式不变**（用户明确要求）：上下拆分 / 纯编辑 / 纯预览这三种视图里，
+   * 底栏仍在**窗口底部**（原行为，整幅宽度），不受本次改动影响。
+   * （窄屏走的是 `split`；`splitH/splitHE` 只在宽屏成立。）
+   *
+   * ⚠️ 必须**包一层列容器** `.editor-col`：`.split-pane-h` 是 `flex-direction: row`
+   * （左右两栏就靠它），直接把编辑区和底栏并列进去会变成**横向**排、底栏被挤成 0 宽（实测 x=1280,w=0）。
+   *
+   * 为什么必须放进列里（而不是给整幅底栏加左右偏移）：预览那一列要**通高到底**——
+   * 若底栏仍是整幅宽度、只把右侧让出来，预览列下方会留一块空白，两列高度关系就断了。
+   */
+  const editorWithDock = (
+    <div className="editor-col">
+      <EditorPane />
+      <ToolDock />
+    </div>
+  )
   const renderSplitH = () => (
     <>
       <div className="split-pane split-pane-h" style={{ flex: `0 0 ${splitPct}%` }}>
-        {previewOnLeft ? <PreviewPane /> : <EditorPane />}
+        {previewOnLeft ? <PreviewPane /> : editorWithDock}
       </div>
       <div className="split-divider split-divider-h" onPointerDown={startSplitDrag('h')} title="拖动调整左右窗格宽度" />
       <div className="split-pane split-pane-h">
-        {previewOnLeft ? <EditorPane /> : <PreviewPane />}
+        {previewOnLeft ? editorWithDock : <PreviewPane />}
       </div>
     </>
   )
@@ -225,10 +246,12 @@ function App() {
             </div>
           </>
         )}
+        {/* adj552：**只有**宽屏左右拆分把底栏放进编辑列（见 editorWithDock） */}
         {(viewType === 'splitH' || viewType === 'splitHE') && renderSplitH()}
       </div>
-      {/* adj462：底部 dock——告警/试听/导出/设置 共用一个 dock，同一时间只显示一块（入口为开关） */}
-      <ToolDock />
+      {/* adj462/adj552：底部 dock（告警/试听/导出/设置 共用一个 dock，同一时间只显示一块）。
+          **窄屏及非左右拆分的视图保持原样**：底栏仍在窗口底部、整幅宽度。 */}
+      {!isSplitHView && <ToolDock />}
       <EditorFootBar />
       <Toast />
       {/* adj379：检测到 SW 新版本时的「点击刷新」提示 */}

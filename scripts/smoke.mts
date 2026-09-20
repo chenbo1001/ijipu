@@ -8914,6 +8914,24 @@ async function runAdj541DockToggleTests() {
       `命中 ${r5.hits.length}、扫描 ${r5.scanned}`,
     )
   }
+  // adj552（用户要求）：**宽屏左右拆分时底栏 dock 是"编辑区的底栏"**（左预览通高 | 右：上编辑/下底栏）；
+  // **窄屏模式不变**（上下拆分/纯编辑/纯预览仍在窗口底部、整幅宽度）。
+  // 实测坑：`.split-pane-h` 是 row 方向，编辑区与底栏必须包一层**列**容器（否则底栏被挤成 0 宽，实测 x=1280,w=0）。
+  {
+    const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+    check('adj552（用户要求）宽屏左右拆分：底栏只占编辑侧（上编辑/下底栏）；**窄屏及非左右拆分保持不变**',
+      /const editorWithDock = \(\s*\n\s*<div className="editor-col">[\s\S]{0,200}?<EditorPane \/>[\s\S]{0,100}?<ToolDock \/>/.test(appSrc) &&
+        /\{previewOnLeft \? <PreviewPane \/> : editorWithDock\}/.test(appSrc) &&
+        /\{previewOnLeft \? editorWithDock : <PreviewPane \/>\}/.test(appSrc) &&
+        // 其余视图仍是纯 EditorPane（窄屏不变）
+        /\{viewType === 'code' && <EditorPane \/>\}/.test(appSrc) &&
+        /\{viewType === 'split' && \([\s\S]{0,600}?<EditorPane \/>/.test(appSrc) &&
+        // 窗口底部那份底栏**只在非左右拆分**时渲染
+        /\{!isSplitHView && <ToolDock \/>\}/.test(appSrc) &&
+        // CSS：编辑列必须显式 column（`.split-pane-h` 是 row）
+        /\.split-pane-h > \.editor-col \{[\s\S]{0,220}?flex-direction: column/.test(cssSrc),
+      '')
+  }
   // E-2026-249：面板"一直闪 + 点不动"= **无限刷新循环**。
   // 根因：`invalidateCache` 是普通函数（每次渲染新引用）却进了 `refresh` 的 useCallback 依赖，
   // 使 `refresh` 每次渲染都变 ⇒ 依赖它的"面板激活"effect 每渲染重跑 ⇒ setState ⇒ 再渲染……

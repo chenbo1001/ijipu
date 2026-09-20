@@ -128,6 +128,17 @@ body {
   flex: 1;
   min-width: 0;
 }
+/* adj552（用户要求）：左右拆分里**编辑列** = 上编辑 + 下底栏（底栏只占编辑侧）。
+ * 必须显式成列：`.split-pane-h` 是 `flex-direction: row`（左右两栏就靠它），
+ * 把编辑区与底栏直接并列进去会变成**横排**、底栏被挤成 0 宽（实测 x=1280, w=0）。 */
+.split-pane-h > .editor-col {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .split-divider-h {
   width: var(--jp-resize-h, 5px);
   height: auto;
