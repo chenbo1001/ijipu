@@ -8421,15 +8421,19 @@ function runAdj540WorkspaceTests() {
   // ---- ④ 接线：三个存储来源互斥 + 保存分支 + UI 入口 ----
   const store = String(readFileSync('src/store/docStore.ts', 'utf8'))
   const wsSrc = String(readFileSync('src/store/workspace.ts', 'utf8'))
-  const resets = (store.match(/workspacePath: null,/g) ?? []).length
-  check('adj540 文档来源三者互斥：每个"清空文件句柄/外部路径"的装载路径都清掉 workspacePath',
+  // adj544：绑定字段改名 `workspacePath` → `binding`（带工作区身份），重置点同时清 `pendingBinding`
+  const resets = (store.match(/binding: null,/g) ?? []).length
+  const pendingResets = (store.match(/pendingBinding: null,/g) ?? []).length
+  check('adj540/adj544 文档来源三者互斥：每个"清空文件句柄/外部路径"的装载路径都清掉工作区绑定',
     resets >= 6 &&
+      pendingResets >= 6 &&
       // 注意用 `[\s\S]` 而不是 `\n\s*`：本仓库源文件是 CRLF，`\n` 会匹配不上
-      /nativePath: primary\.path,[\s\S]{0,80}?adj540：外部路径与工作区互斥[\s\S]{0,80}?workspacePath: null,/.test(store) &&
-      /workspacePath: string\[\] \| null/.test(store),
-    `重置点 ${resets} 处`)
-  check('adj540 「保存」对工作区文档写回同一个文件（含子目录），并复用目录级授权（用户手势内申请）',
-    /if \(st\.workspacePath && st\.workspacePath\.length > 0\) \{[\s\S]{0,900}?await writeWorkspaceText\(ws\.handle, wsPath, code\)/.test(store) &&
+      /nativePath: primary\.path,[\s\S]{0,80}?adj540：外部路径与工作区互斥[\s\S]{0,80}?binding: null,/.test(store) &&
+      /binding: WorkspaceBinding \| null/.test(store),
+    `绑定重置点 ${resets} 处 / 待校验绑定重置点 ${pendingResets} 处`)
+  check('adj540/adj544 「保存」对工作区文档写回同一个文件（含子目录），且**先过三道校验**（身份/存在）',
+    /if \(st\.binding && st\.binding\.segs\.length > 0\) \{[\s\S]{0,1400}?await writeWorkspaceText\(ws\.handle, wsPath, code\)/.test(store) &&
+      /if \(ws\.id !== bind\.wsId\) \{/.test(store) &&
       /openWorkspaceFile: async \(path\) =>/.test(store) &&
       /saveToWorkspace: async \(path\) =>/.test(store),
     '')
@@ -8508,7 +8512,7 @@ function runAdj540WorkspaceTests() {
       /\| 'workspace'/.test(ui),
     '')
   check('adj540 手机端「保存」未绑定任何文件时自动引导到工作区另存（手机上不走 showSaveFilePicker）',
-    /const runSaveSmart = async \(\) => \{[\s\S]{0,260}?isCoarsePointerDevice\(\) && isWorkspaceSupported\(\) && !useDocStore\.getState\(\)\.workspacePath[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)/.test(
+    /const runSaveSmart = async \(\) => \{[\s\S]{0,260}?isCoarsePointerDevice\(\) && isWorkspaceSupported\(\) && !useDocStore\.getState\(\)\.binding[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)/.test(
       topSrc,
     ) && /entrySave: MenuEntry = \{ label: '保存\(&S\)', kbd: 'Ctrl\+S', hotkey: 's', onPick: runSaveSmart \}/.test(topSrc),
     '')
@@ -8662,9 +8666,10 @@ function runAdj540WorkspaceTests() {
       /deleteWorkspaceEntries: async/.test(store) &&
       /newWorkspaceScore: async/.test(store) &&
       /createWorkspaceDir: async/.test(store) &&
-      /if \(cur && joinPath\(cur\) === joinPath\(from\)\) set\(\{ workspacePath: to, fileName: fileBaseName\(toName\) \}\)/.test(store) &&
+      /const cur = get\(\)\.binding[\s\S]{0,200}?saveDraftSrc\(next\)[\s\S]{0,200}?set\(\{ binding: next, fileName: fileBaseName\(toName\) \}\)/.test(store) &&
       /const target = joinPath\(segs\)/.test(store) &&
-      /set\(\{ workspacePath: null \}\)/.test(store),
+      // adj544：删除当前打开的谱 ⇒ 解绑并清掉持久化的来源（否则重启后又"以为"绑定在已删文件上）
+      /set\(\{ binding: null, pendingBinding: null \}\)/.test(store),
     '')
 }
 
@@ -8686,6 +8691,10 @@ function runAdj541DockToggleTests() {
   const copySrc2 = String(readFileSync('src/brand/copy.ts', 'utf8'))
   const iconSrc = String(readFileSync('src/ui/toolIcons.ts', 'utf8'))
   const wsPanelSrc = String(readFileSync('src/ui/dock/WorkspacePanel.tsx', 'utf8'))
+  // adj544：绑定/持久化断言要读这几份源码（copy 文案用上面的 copySrc2）
+  const wsSrc = String(readFileSync('src/store/workspace.ts', 'utf8'))
+  const fhSrc = String(readFileSync('src/store/fileHandleDb.ts', 'utf8'))
+  const store = String(readFileSync('src/store/docStore.ts', 'utf8'))
   check('adj541 两个新图标登记进 ICON_FILES（文件名与设计稿一致）',
     /dockExpand: '底栏展开'/.test(iconSrc) && /dockCollapse: '底栏收起'/.test(iconSrc),
     '')
@@ -8720,6 +8729,47 @@ function runAdj541DockToggleTests() {
       // 反查"最后一个可见源码行"用视觉行前缀和二分（折行不产生新行号）
       /visualTopRef\.current/.test(editorSrc) &&
       /Math\.floor\(\(top \+ Math\.max\(0, clientH - 1\)\) \/ lineH\)/.test(editorSrc),
+    '')
+  // E-2026-251 / adj544：**绑定必须带工作区身份**，否则"换了工作区再保存"会把旧相对路径写进新根
+  // （没同名就新建、有同名就覆盖）⇒ 静默写错文件。下面这些断言守住四件事：
+  //   ① 记录带 id/name（含旧记录迁移）② 绑定带 wsId 且**随草稿持久化**
+  //   ③ 保存前三道校验（身份/权限/存在）④ 启动与授权后能"恢复绑定"
+  check('adj544 工作区记录带**身份 id**（旧记录读取时补发），并有"最近工作区"列表可一键切回',
+    /export interface WorkspaceRecord \{[\s\S]{0,400}?id: string[\s\S]{0,120}?name: string/.test(fhSrc) &&
+      /function normalizeRecord\(rec: WorkspaceRecord \| null\): WorkspaceRecord \| null/.test(wsSrc) &&
+      /export function makeWorkspaceRecord\(handle: FileSystemDirectoryHandle/.test(wsSrc) &&
+      /export async function listWorkspaces\(\): Promise<WorkspaceRecord\[\]>/.test(wsSrc) &&
+      /export async function activateWorkspace\(id: string\)/.test(wsSrc) &&
+      /saveWorkspaceList/.test(fhSrc),
+    '')
+  check('adj544 文档绑定 = {工作区身份, 相对路径}，并**随草稿持久化**（ijipu.draftSrc，损坏回退 null）',
+    /export interface WorkspaceBinding \{[\s\S]{0,260}?wsId: string[\s\S]{0,80}?wsName: string[\s\S]{0,80}?segs: string\[\]/.test(store) &&
+      /const DRAFT_SRC_KEY = 'ijipu\.draftSrc'/.test(store) &&
+      /function loadDraftSrc\(\): WorkspaceBinding \| null/.test(store) &&
+      /function saveDraftSrc\(b: WorkspaceBinding \| null\): void/.test(store) &&
+      /pendingBinding: draft\?\.src \?\? null/.test(store) &&
+      // 打开/另存都写来源；删除时清掉
+      /saveDraftSrc\(bind\)/.test(store) &&
+      /saveDraftSrc\(null\)/.test(store),
+    '')
+  check('adj544（E-2026-251）保存前**三道校验**：工作区身份不符 ⇒ 拒绝写盘并解释；原文件不存在 ⇒ 转另存',
+    /if \(ws\.id !== bind\.wsId\) \{[\s\S]{0,400}?boundToOtherWorkspace\([\s\S]{0,120}?return false/.test(store) &&
+      /if \(!\(await hasEntry\(ws\.handle, wsPath\.slice\(0, -1\), wsPath\[wsPath\.length - 1\]\)\)\) \{[\s\S]{0,300}?sourceMissing\([\s\S]{0,120}?return false/.test(
+        store,
+      ) &&
+      // 拒绝文案要把"东西在哪 + 为什么没写 + 怎么办"说全
+      /boundToOtherWorkspace: \(boundWs: string, currentWs: string, path: string\)/.test(copySrc2) &&
+      /sourceMissing: \(path: string\)/.test(copySrc2),
+    '')
+  check('adj544 启动/授权后**恢复绑定**（三个条件全满足才升级成正式绑定，否则保持待校验）',
+    /export async function resolvePendingBinding\(\): Promise<boolean>/.test(store) &&
+      /if \(ws\.id !== pending\.wsId\)/.test(store) &&
+      /await queryWorkspacePermission\(ws\.handle\)/.test(store) &&
+      /await hasEntry\(ws\.handle, segs\.slice\(0, -1\), segs\[segs\.length - 1\]\)/.test(store) &&
+      /void getWorkspace\(\)\s*\n\s*\.then\(\(\) => resolvePendingBinding\(\)\)/.test(store) &&
+      // 面板：授权成功后、以及每次打开面板都会尝试恢复
+      /await resolvePendingBinding\(\)/.test(wsPanelSrc) &&
+      /bindingRestored/.test(copySrc2),
     '')
   check('adj543 过滤提速：**先建一次索引，之后每次输入只在内存里过滤**（不再每敲一个字重走整棵目录树）',
     /const indexRef = useRef<SearchHit\[\] \| null>\(null\)/.test(wsPanelSrc) &&

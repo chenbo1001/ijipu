@@ -69,13 +69,27 @@ export async function loadFileHandle(): Promise<FileSystemFileHandle | null> {
  * 便于持久化/比较/显示（面包屑），而句柄链每次都从根解析（`getDirectoryHandle` 逐级下钻）。
  */
 export interface WorkspaceRecord {
+  /**
+   * adj544：**工作区身份**（首次选定该目录时生成的稳定 id）。
+   *
+   * 为什么需要它：`docStore` 里"这份文档绑定在工作区哪个文件"必须能回答"哪个工作区"。
+   * 此前绑定只存相对路径，于是**换了工作区后按保存，会把旧相对路径写进新根**
+   * （没同名就新建、有同名就覆盖）——静默写错文件（见 E-2026-251）。
+   * FSA 不给稳定磁盘路径，所以身份只能自己发一个 id 并随记录落 IndexedDB。
+   */
+  id: string
+  /** 根目录名（`handle.name`；FSA 只给名字，拿不到完整路径）——用于提示与"最近工作区"列表 */
+  name: string
   /** 工作区根目录句柄 */
   handle: FileSystemDirectoryHandle
   /** 上次所在的子目录（相对根；`[]` = 根目录本身） */
   path: string[]
 }
 
-/** 保存工作区（null 清除） */
+/** 最近工作区列表上限（超出丢弃最旧的）——只用于"切换回上次那个"，不需要无限增长 */
+const RECENT_MAX = 8
+
+/** 保存工作区（null 清除"当前"，但**保留**最近列表） */
 export async function saveWorkspace(rec: WorkspaceRecord | null): Promise<void> {
   try {
     const db = await openDb()
@@ -105,5 +119,45 @@ export async function loadWorkspace(): Promise<WorkspaceRecord | null> {
     return val
   } catch {
     return null
+  }
+}
+
+/**
+ * adj544（用户要求 C）：**记住多个工作区**（最近使用的列表，最近在前）。
+ *
+ * 为什么需要：① 浏览器重启后要能"切回原工作区"继续编辑原文件；
+ * ② FSA 拿不到磁盘路径，用户**重新选同一个文件夹**会得到新句柄+新 id——
+ * 有了这个列表，"上次那个工作区"仍然可以直接点回去（句柄还能用/只需重新授权），
+ * 不必依赖"重新选目录能不能被认成同一个"。
+ */
+export async function saveWorkspaceList(list: WorkspaceRecord[]): Promise<void> {
+  try {
+    const db = await openDb()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite')
+      tx.objectStore(STORE).put(list.slice(0, RECENT_MAX), 'workspaceList')
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+    db.close()
+  } catch {
+    /* 静默降级 */
+  }
+}
+
+/** 读最近工作区列表（无则空数组） */
+export async function loadWorkspaceList(): Promise<WorkspaceRecord[]> {
+  try {
+    const db = await openDb()
+    const val = await new Promise<WorkspaceRecord[]>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly')
+      const req = tx.objectStore(STORE).get('workspaceList')
+      req.onsuccess = () => resolve((req.result as WorkspaceRecord[] | undefined) ?? [])
+      req.onerror = () => reject(req.error)
+    })
+    db.close()
+    return Array.isArray(val) ? val : []
+  } catch {
+    return []
   }
 }

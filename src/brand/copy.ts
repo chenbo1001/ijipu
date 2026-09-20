@@ -246,6 +246,21 @@ export const workspaceCopy = {
   moveDirUnsupported: '选中的里有文件夹，移动只支持 .jps 文件',
   deleted: (n: string): string => `已删除「${n}」`,
   deletedOpenFile: (n: string): string => `「${n}」已被删除——内容仍在编辑器里，可用「保存当前谱到此处」重新存一份`,
+  /**
+   * adj544（E-2026-251）：绑定的谱属于**另一个工作区** ⇒ 保存**拒绝写盘**。
+   * 必须说清"东西在哪、为什么没写、接下来怎么办"——静默写错文件不可接受。
+   */
+  boundToOtherWorkspace: (boundWs: string, currentWs: string, path: string): string =>
+    `这份谱绑定在工作区「${boundWs}」的 ${path}，当前工作区是「${currentWs}」——为避免写错文件，本次未保存。请切回「${boundWs}」再保存，或用「操作 → 另存」存到当前工作区`,
+  /** adj544：绑定的原文件已不在（被外部移动/删除）⇒ 提示并转另存，不静默重建同名文件 */
+  sourceMissing: (path: string): string => `原文件 ${path} 已不在工作区里（可能被移动或删除）——请用「操作 → 另存」确认保存位置`,
+  /** adj544：重启后恢复了来源绑定，需重新授权才能写回原文件 */
+  bindingRestored: (wsName: string, path: string): string =>
+    `这份谱来自工作区「${wsName}」的 ${path}：重新授权该工作区后，「保存」即可写回原文件`,
+  /** adj544：最近工作区列表标题（面板可一键切回） */
+  recentWorkspaces: '最近的工作区',
+  /** adj544：从"最近工作区"切回失败（目录被删/移动、授权被拒） */
+  activateFailed: (n: string): string => `无法打开工作区「${n}」（目录可能已被移动/删除，或授权被拒绝）`,
   verifyFailed: (n: string): string => `「${n}」写入后校验不一致，已保留原文件（请重试）`,
   opFailed: (n: string, reason: string): string => `「${n}」操作失败：${reason}`,
   /** 目录暂不支持重命名/移动（递归搬运风险大，本轮只做文件） */

@@ -30,16 +30,19 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useDocStore } from '../../store/docStore'
+import { resolvePendingBinding, useDocStore } from '../../store/docStore'
 import { useUiStore } from '../../store/uiStore'
 import { workspaceCopy } from '../../brand/copy'
 import { fileBaseName } from '../../store/saveSupport'
 import type { WorkspaceRecord } from '../../store/fileHandleDb'
 import { ToolIcon } from '../ToolIcon'
 import {
+  activateWorkspace,
   getWorkspace,
   isWorkspaceSupported,
   joinPath,
+  listWorkspaces,
+  makeWorkspaceRecord,
   matchesQuery,
   parentPath,
   pickWorkspaceDir,
@@ -144,6 +147,13 @@ export function WorkspacePanel() {
   const [menuPos, setMenuPos] = useState<{ left: number; bottom: number; width: number } | null>(null)
   const menuBtnRef = useRef<HTMLButtonElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
+
+  /** adj544：**最近工作区**（一键切回；重启后不用重新选目录） */
+  const [recent, setRecent] = useState<WorkspaceRecord[]>([])
+  /** adj544：正常视图里点「最近的工作区…」就地展开列表（不用切到形同虚设的空态视图） */
+  const [showRecent, setShowRecent] = useState(false)
+  /** adj544：待校验绑定（随草稿恢复，需要重新授权才能写回原文件）——只用于提示 */
+  const pending = useDocStore((s) => s.pendingBinding)
 
   const selectedEntries = entries.filter((e) => selected.includes(e.name))
   const selectedFiles = selectedEntries.filter((e) => e.kind === 'file')
@@ -302,6 +312,9 @@ export function WorkspacePanel() {
       setWs(rec)
       // adj543：每次打开面板都让过滤索引作废——期间用户可能在别的 App 里增删过文件
       indexRef.current = null
+      // adj544：读最近工作区列表（供"一键切回"），并尝试恢复绑定（权限已授予时）
+      setRecent(await listWorkspaces())
+      await resolvePendingBinding()
       // adj540：手机端「保存/另存」带过来的意图 ⇒ 直接把"另存"输入框展开（消费掉，不做持久化）
       if (rec && useUiStore.getState().workspaceSaveIntent) {
         setEdit({ kind: 'saveAs', value: fileBaseName(useDocStore.getState().fileName) })
@@ -330,11 +343,13 @@ export function WorkspacePanel() {
     try {
       const dir = await pickWorkspaceDir()
       if (!dir) return // 用户取消
-      const rec: WorkspaceRecord = { handle: dir, path: [] }
+      // adj544：工作区记录带**身份 id**（保存校验要用它判断"这份谱属于哪个工作区"）
+      const rec: WorkspaceRecord = makeWorkspaceRecord(dir)
       await setWorkspace(rec)
       setWs(rec)
       setPerm('granted')
       await refresh(rec, [])
+      setRecent(await listWorkspaces())
       showNotice(workspaceCopy.picked(dir.name), 'ok')
     } catch (e) {
       const reason = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
@@ -345,14 +360,48 @@ export function WorkspacePanel() {
     }
   }
 
-  /** 补授权（用户点了按钮 ⇒ 手势成立） */
+  /** 补授权（用户点了按钮 ⇒ 手势成立）；adj544：授权成功后顺便尝试"恢复绑定到原文件" */
   const onGrant = async () => {
     if (!ws) return
     setBusy(true)
     try {
       const r = await requestWorkspacePermission(ws.handle)
       setPerm(r === 'granted' ? 'granted' : r === 'denied' ? 'denied' : 'unknown')
-      if (r === 'granted') await refresh(ws, path)
+      if (r === 'granted') {
+        await refresh(ws, path)
+        await resolvePendingBinding()
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /**
+   * adj544（用户要求 C）：从"最近工作区"切回某个工作区。
+   * 句柄可能已失效（目录被删/移动）⇒ 申请权限失败时如实提示，不静默失败。
+   */
+  const onActivate = async (rec: WorkspaceRecord) => {
+    setBusy(true)
+    try {
+      const next = await activateWorkspace(rec.id)
+      if (!next) {
+        showNotice(workspaceCopy.activateFailed(rec.name), 'error')
+        return
+      }
+      setWs(next)
+      const r = await requestWorkspacePermission(next.handle)
+      if (r !== 'granted') {
+        setPerm(r === 'denied' ? 'denied' : 'unknown')
+        showNotice(workspaceCopy.activateFailed(next.name), 'warn')
+        return
+      }
+      setPerm('granted')
+      await refresh(next, next.path)
+      await resolvePendingBinding()
+      showNotice(workspaceCopy.picked(next.name), 'ok')
+    } catch (e) {
+      const reason = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+      showNotice(workspaceCopy.loadFailed(reason), 'error')
     } finally {
       setBusy(false)
     }
@@ -432,10 +481,16 @@ export function WorkspacePanel() {
    */
   const onSave = async () => {
     if (!ws) return
-    if (useDocStore.getState().workspacePath) {
+    // adj544：绑定属于**当前**工作区 ⇒ 写回原文件；属于别的工作区 ⇒ 先讲清原因（否则用户只看到
+    // "保存怎么变成另存了"），再展开另存输入框让他决定存到哪儿（绝不静默写进当前工作区）
+    const bind = useDocStore.getState().binding
+    if (bind && bind.wsId === ws.id) {
       await saveFile()
       await refresh(ws, path)
       return
+    }
+    if (bind && bind.wsId !== ws.id) {
+      showNotice(workspaceCopy.boundToOtherWorkspace(bind.wsName || '另一个工作区', ws.name, joinPath(bind.segs)), 'warn')
     }
     setEdit({ kind: 'saveAs', value: fileBaseName(useDocStore.getState().fileName) })
   }
@@ -495,6 +550,29 @@ export function WorkspacePanel() {
    */
   const wsPathText = ws ? joinPath([ws.handle.name, ...(ws.path ?? [])]) : ''
 
+  /**
+   * adj544（用户要求 C）：**最近工作区**列表——一键切回上次那个（重启后尤其有用：
+   * 重新选同一个文件夹会因为 FSA 不给稳定路径而变成"新工作区"，从列表点回去就不用重选）。
+   */
+  const recentList = (
+    <div className="ws-recent">
+      <div className="ws-recent-title">{workspaceCopy.recentWorkspaces}</div>
+      {recent.map((r) => (
+        <button
+          key={r.id}
+          type="button"
+          className={`btn ws-recent-item${ws?.id === r.id ? ' is-current' : ''}`}
+          onClick={() => void onActivate(r)}
+          disabled={busy}
+          title={r.name}
+        >
+          <span className="ws-icon">📁</span>
+          <span className="ws-recent-name">{r.name}</span>
+        </button>
+      ))}
+    </div>
+  )
+
   // ---- 未设工作区：只有一个大按钮，先把前提做掉 ----
   if (!ws) {
     return (
@@ -503,6 +581,7 @@ export function WorkspacePanel() {
         <button type="button" className="btn primary ws-big" onClick={() => void onPick()} disabled={busy}>
           {workspaceCopy.pick}
         </button>
+        {recent.length > 0 && recentList}
       </div>
     )
   }
@@ -519,6 +598,8 @@ export function WorkspacePanel() {
           <div className="ws-grant-hint">{workspaceCopy.grantPathHint}</div>
           <div className="ws-grant-hint">{workspaceCopy.grantWhy}</div>
         </div>
+        {/* adj544：待校验绑定 ⇒ 说明"重新授权后就能写回原文件"，把这一步的意义讲清楚 */}
+        {pending && <div className="ws-binding-hint">{workspaceCopy.bindingRestored(pending.wsName || ws.name, joinPath(pending.segs))}</div>}
         <button type="button" className="btn primary ws-big" onClick={() => void onGrant()} disabled={busy}>
           {workspaceCopy.grant}
         </button>
@@ -651,6 +732,31 @@ export function WorkspacePanel() {
           </button>
         )}
       </div>
+
+      {/* adj544（用户要求 C）：正常视图里也能"切回最近的工作区"——点「操作 → 最近的工作区…」就地展开 */}
+      {showRecent && recent.length > 0 && (
+        <div className="ws-recent ws-recent-inline">
+          <div className="ws-recent-title">{workspaceCopy.recentWorkspaces}</div>
+          <div className="ws-recent-row">
+            {recent.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                className={`btn ws-recent-item${ws?.id === r.id ? ' is-current' : ''}`}
+                onClick={() => {
+                  setShowRecent(false)
+                  void onActivate(r)
+                }}
+                disabled={busy}
+                title={r.name}
+              >
+                <span className="ws-icon">📁</span>
+                <span className="ws-recent-name">{r.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 主体：**左列表（带复选框）+ 右操作按钮** */}
       <div className="ws-body">
@@ -821,6 +927,23 @@ export function WorkspacePanel() {
             >
               {workspaceCopy.actNewFolder}
             </button>
+            <div className="ws-menu-sep" />
+            {/* adj544：切回最近工作区（重启后 / 换过工作区后都用得着） */}
+            {recent.length > 0 && (
+              <button
+                type="button"
+                className="ws-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false)
+                  // adj544：展开前重读列表——刚切换过工作区时，面板激活时拿到的那份已经旧了
+                  void listWorkspaces().then(setRecent)
+                  setShowRecent((v) => !v)
+                }}
+              >
+                {workspaceCopy.recentWorkspaces}…
+              </button>
+            )}
             <div className="ws-menu-sep" />
             <button
               type="button"

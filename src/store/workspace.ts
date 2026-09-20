@@ -17,7 +17,13 @@
  *  - 文件读写复用 `saveSupport` 的权限判定与写入实现（写后回读校验、错误归类同一口径）。
  *  - 纯逻辑（`.jps` 判定、排序、路径规整/拼接）都是可单测的纯函数，smoke 有断言。
  */
-import { saveWorkspace, loadWorkspace, type WorkspaceRecord } from './fileHandleDb'
+import {
+  saveWorkspace,
+  loadWorkspace,
+  saveWorkspaceList,
+  loadWorkspaceList,
+  type WorkspaceRecord,
+} from './fileHandleDb'
 import { ensureWritePermission } from './saveSupport'
 
 /** 目录里的一项（只列子目录与 .jps 文件——工作区是"谱夹"，不该把别的文件混进来） */
@@ -337,29 +343,99 @@ export async function moveFile(
 
 // ---- 会话内缓存：对话框与保存流程会反复取同一个工作区，避免每次都读库 ----
 let cached: WorkspaceRecord | null = null
+let cachedList: WorkspaceRecord[] = []
+let listLoaded = false
 let loaded = false
 
-/** 取当前工作区（首次会读 IndexedDB；返回的 `path` 已规整） */
+/** 生成工作区身份（adj544）。优先 `crypto.randomUUID`，老环境退回随机串 */
+function newWorkspaceId(): string {
+  const c = globalThis.crypto as { randomUUID?: () => string } | undefined
+  if (typeof c?.randomUUID === 'function') return c.randomUUID()
+  return `ws-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+/**
+ * adj544：用户刚选定一个目录 ⇒ 造一条**带身份**的工作区记录。
+ * 身份（`id`）在这里发；`name` 只能取 `handle.name`（FSA 不给磁盘路径，隐私限制）。
+ */
+export function makeWorkspaceRecord(handle: FileSystemDirectoryHandle, path: readonly string[] = []): WorkspaceRecord {
+  return { id: newWorkspaceId(), name: handle.name, handle, path: normalizeRelPath(path) }
+}
+
+/**
+ * adj544：**兼容旧记录**——adj540 存下来的工作区记录没有 `id`/`name`（那时候还不需要身份）。
+ * 读出来就补一个 id 并把名字从句柄取出来，同时补进最近列表（只补一次，之后都带 id）。
+ */
+function normalizeRecord(rec: WorkspaceRecord | null): WorkspaceRecord | null {
+  if (!rec || !rec.handle) return null
+  const id = typeof rec.id === 'string' && rec.id ? rec.id : newWorkspaceId()
+  const name = typeof rec.name === 'string' && rec.name ? rec.name : rec.handle.name
+  return { id, name, handle: rec.handle, path: normalizeRelPath(rec.path ?? []) }
+}
+
+/** 取当前工作区（首次会读 IndexedDB；返回的 `path` 已规整；旧记录会补上 id/name） */
 export async function getWorkspace(): Promise<WorkspaceRecord | null> {
   if (!loaded) {
-    cached = await loadWorkspace()
+    const raw = await loadWorkspace()
+    const rec = normalizeRecord(raw)
+    cached = rec
     loaded = true
+    // 旧记录补了 id ⇒ 落库一次，并登记进"最近工作区"
+    if (rec && (!raw?.id || !raw?.name)) void upsertWorkspaceList(rec)
   }
   return cached
 }
 
-/** 设/清工作区（同步更新缓存并落库） */
+/** 设/清工作区（同步更新缓存并落库；设置时登记进"最近工作区"列表） */
 export async function setWorkspace(rec: WorkspaceRecord | null): Promise<void> {
-  cached = rec
+  cached = normalizeRecord(rec)
   loaded = true
-  await saveWorkspace(rec)
+  await saveWorkspace(cached)
+  if (cached) await upsertWorkspaceList(cached)
 }
 
-/** 记住"上次所在子目录"（只是更新记录里的 path，不改根句柄） */
+/** 记住"上次所在子目录"（只改记录里的 path，不动根句柄，也不动 id/name） */
 export async function rememberWorkspacePath(path: readonly string[]): Promise<void> {
   if (!cached) return
-  cached = { handle: cached.handle, path: normalizeRelPath(path) }
+  cached = { ...cached, path: normalizeRelPath(path) }
   await saveWorkspace(cached)
+}
+
+/** 读"最近工作区"（最近在前；当前那个也在里面） */
+export async function listWorkspaces(): Promise<WorkspaceRecord[]> {
+  if (!listLoaded) {
+    cachedList = (await loadWorkspaceList()).map((r) => normalizeRecord(r)).filter((r): r is WorkspaceRecord => !!r)
+    listLoaded = true
+  }
+  return cachedList
+}
+
+/**
+ * 把某个"最近工作区"切换成当前工作区（用户点列表项 ⇒ 手势成立，可顺带申请权限）。
+ * 句柄可能已失效（文件被删/权限被撤）⇒ 调用方用返回结果判断，失败给出提示。
+ */
+export async function activateWorkspace(id: string): Promise<WorkspaceRecord | null> {
+  const list = await listWorkspaces()
+  const hit = list.find((r) => r.id === id)
+  if (!hit) return null
+  // 提到最前（最近使用）
+  await setWorkspace(hit)
+  return hit
+}
+
+/** 从"最近工作区"里移除一个（用户在列表里删掉） */
+export async function forgetWorkspace(id: string): Promise<void> {
+  await upsertWorkspaceList(null, id)
+}
+
+/** 列表登记：把 rec 提到最前（按 id 去重）；`removeId` 用于删除 */
+async function upsertWorkspaceList(rec: WorkspaceRecord | null, removeId?: string): Promise<void> {
+  const list = await listWorkspaces()
+  let next = list.filter((r) => r.id !== rec?.id && r.id !== removeId)
+  if (rec) next = [rec, ...next]
+  cachedList = next
+  listLoaded = true
+  await saveWorkspaceList(next)
 }
 
 /** 让用户选一个文件夹当工作区（必须由**用户手势**触发）；用户取消返回 null */

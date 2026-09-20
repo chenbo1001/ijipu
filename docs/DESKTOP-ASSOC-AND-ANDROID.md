@@ -210,13 +210,42 @@
   "纯网页可行，但**已安装的 PWA 里被限制**"，此时对策是引导用户用浏览器打开本站（PWA 仍可编辑/导出），
   真要"桌面图标里也能选目录"才需要回头考虑 §3.2 的壳。
 
+### 3.1.2 文档 ↔ 工作区文件的**绑定与三道校验**（adj544；背景见 ERRORS-LOG E-2026-251）
+
+**不变量：绑定必须是「(哪个工作区, 区内相对路径)」，写盘前必须校验。**
+
+| 概念 | 位置 | 说明 |
+|---|---|---|
+| 工作区身份 | `WorkspaceRecord.id`（IndexedDB） | 首次选定目录时 `crypto.randomUUID()` 生成；**旧记录读取时自动补发**。FSA 不给磁盘路径，身份只能自己发 |
+| 最近工作区 | `fileHandleDb` 键 `workspaceList`（上限 8，最近在前） | 面板可一键切回；也解决"重新选同一文件夹 = 新工作区"的别扭 |
+| 文档绑定 | `docStore.binding = { wsId, wsName, segs }` | 与 `fileHandle` / `nativePath` **三者互斥** |
+| 绑定持久化 | `localStorage['ijipu.draftSrc']` | 随草稿写/读；损坏回退 null。恢复出来的是**待校验绑定** `pendingBinding` |
+| 绑定恢复 | `resolvePendingBinding()` | 启动时、以及面板"授权成功"后各试一次；三个条件全满足才升级成正式绑定 |
+
+**保存（`saveFile`）对工作区文档的三道校验**（任一不过 ⇒ **不写盘**）：
+
+1. **身份**：`ws.id === binding.wsId`？否 ⇒ 用户换了工作区 ⇒ 拒绝并提示「这份谱绑定在工作区「A」的 …，
+   当前是「B」——为避免写错文件，本次未保存；请切回 A，或用『操作 → 另存』存到当前工作区」。
+2. **存在性**：绑定的文件还在吗（`hasEntry`）？否 ⇒ 提示「原文件已不在（可能被移动/删除）」并转另存
+   ——**不静默重建同名文件**。
+3. **权限**：由 `writeWorkspaceText` → `ensureWritePermission` 在**用户手势内**申请（工作区授权是目录级）。
+
+**验收（实测口径）**：
+
+- [ ] 在 A 打开 `2.曲谱集/小星星.jps` → 切到工作区 B → 按保存：**B 里既不能多出该文件、也不能被覆盖**，
+      并且**弹出解释**（含"A 的哪个文件、当前是 B、怎么办"）
+- [ ] 「操作 → 最近的工作区…」能一键切回 A → 再保存**写回 A** 的原文件
+- [ ] **刷新页面（=关了再开）**后：日志出现「已恢复工作区绑定」，此时保存仍写回原文件；
+      若浏览器把权限重置为待确认，面板会显示「这份谱来自工作区「A」的 …：重新授权后即可写回原文件」
+- [ ] 同一工作区内保存**照旧**写回原文件（不能因新校验把正常路径改坏）
+
 ### 3.1.1 已实现的方案：工作区目录（adj540，含子目录）
 
 | 层 | 位置 | 说明 |
 |---|---|---|
 | 句柄持久化 | `store/fileHandleDb.ts`（`saveWorkspace`/`loadWorkspace`） | 同一个 IndexedDB 库，新增键 `workspace`：存**根目录句柄 + 上次所在子目录的相对路径**。存根句柄 + 相对路径（而不是一串子目录句柄）⇒ 路径是纯数据，便于持久化与面包屑显示 |
 | 工作区逻辑 | `store/workspace.ts`（新增） | 选目录（`showDirectoryPicker({id:'ijipu-workspace', mode:'readwrite', startIn:'documents'})`）/ 只查权限 / 申请权限 / 列目录（**子目录 + `.jps`**，其它文件过滤）/ 读写（写后**回读校验**）/ **新建文件夹 / 重命名 / 移动 / 删除**（见下"安全约束"）/ 纯函数：`.jps` 判定、条目名校验、目录优先排序、路径规整拼接 |
-| 文档绑定 | `store/docStore.ts` | 新增 `workspacePath: string[] \| null`，与 `fileHandle` / `nativePath` **三者互斥**；`openWorkspaceFile()` / `saveToWorkspace()` / `createWorkspaceDir()` / `renameWorkspaceFile()` / `moveWorkspaceFile()` / `deleteWorkspaceFile()` / `deleteWorkspaceDir()`；`doSaveFile()` 里对工作区文档**写回同一文件**（含子目录），与桌面 `nativePath` 同语义；重命名/移动会同步绑定，删除则**解绑并提示**（内容仍在编辑器里） |
+| 文档绑定 | `store/docStore.ts` | **adj544：`binding = { wsId, wsName, segs }`**（带**工作区身份**，见 §3.1.2），与 `fileHandle` / `nativePath` **三者互斥**，并随草稿持久化（`ijipu.draftSrc`）；`openWorkspaceFile()` / `saveToWorkspace()` / `createWorkspaceDir()` / `renameWorkspaceFile()` / `moveWorkspaceFiles()` / `deleteWorkspaceEntries()`；`doSaveFile()` 里对工作区文档**写回同一文件**（含子目录）且**先过三道校验**，与桌面 `nativePath` 同语义；重命名/移动会同步绑定，删除则**解绑并提示**（内容仍在编辑器里） |
 | UI | `ui/dock/WorkspacePanel.tsx`（新增，**底栏 dock 页签「工作区」，排第一**） | **左列表（带复选框）+ 右按钮**。列表：面包屑（**首段=工作区根目录名，做成按钮样式**，点它=切换工作区目录，悬浮提示写明"切换工作区目录（当前：X）"）+ **过滤框**（默认**层级列表**；一过滤就把**整个工作区（含子目录）**符合条件的 `.jps` 收成**平坦列表**，每行显示所在目录，点一条**直接打开**；**支持 `*` `?` 通配符**，不带通配符按子串；旁边有**一键 `*` 按钮**列出全部、再点一次清空）+「上级目录」/目录进入 / `.jps` 打开；右侧只有 **打开** + **一个「操作▾」下拉**（点它**弹出菜单**再选 保存/另存/新建/新建夹/改名/移动/删除）。**列表与过滤都跳过 `.` 开头的条目**（`.git`/`.obsidian`/`.trash` 这类系统目录不算谱，还会吃光搜索配额）。图标用 `public/icons/工作区.png`（`toolIcons.ICON_FILES.workspace`，同时登记进 `public/sw.js` 预热清单——两处必须同步，smoke 有断言） |
 | 权限复用 | `saveSupport.ensureWritePermission()` | 参数放宽到**目录句柄**（授权是目录级的，子目录/文件继承）——不另写一套权限逻辑 |
 | 平台分流 | `ui/TopBar.tsx` + `saveSupport.isCoarsePointerDevice()` | **手机端（粗指针）以工作区优先**；**窄屏菜单**只留平台无关项：工作区 / 打开示例 / 粘贴源码导入 / 试听播放 / 导出（「打开…/系统选择器/新建/保存/另存为」都收进面板或只在桌面成立）。桌面端保持原样。粗指针判据收敛到 `isCoarsePointerDevice()` 一处 |

@@ -42,6 +42,7 @@ import {
   joinPath,
   moveFile,
   normalizeRelPath,
+  queryWorkspacePermission,
   readWorkspaceText,
   rememberWorkspacePath,
   removeEmptyDir,
@@ -146,14 +147,22 @@ interface DocState {
    */
   nativePath: string | null
   /**
-   * adj540：当前文档在**工作区**里的相对路径（最后一段是文件名，如 `['杂记','小星星.jps']`）。
+   * adj540 / adj544：当前文档**绑定在哪个工作区的哪个文件**上。
    *
-   * 与 `fileHandle` / `nativePath` 是"同一个文档存在哪"的三种来源，**三者互斥**：设了谁就清掉另两个，
-   * 否则「保存」会写错地方（把工作区文档写回上一个外部文件）。
-   * 只存内存：工作区**根句柄**持久化在 IndexedDB（`fileHandleDb.saveWorkspace`），路径丢了只是
-   * "下次保存要重新选位置"，而写错文件是不可逆的。
+   * adj544 的关键修正：绑定必须带**工作区身份**（`wsId`）。此前只存相对路径，
+   * 于是"换了工作区后按保存"会拿**新根句柄 + 旧相对路径**去写——没同名就新建、有同名就覆盖，
+   * **静默写错文件**（用户以为存回了原文件）。详见 E-2026-251 与 `saveFile` 的三道校验。
+   *
+   * 与 `fileHandle` / `nativePath` 是"同一个文档存在哪"的三种来源，**三者互斥**。
+   * adj544：现在会随草稿**持久化**（`ijipu.draftSrc`），重启后能"想起这份代码来自哪个文件"，
+   * 但恢复出来的是**待校验绑定**（`pendingBinding`）——权限与文件存在性核对通过后才真正生效。
    */
-  workspacePath: string[] | null
+  binding: WorkspaceBinding | null
+  /**
+   * adj544：从草稿恢复出来的绑定（**尚未校验**：权限可能未授予、文件可能已被移走）。
+   * 校验通过后由 `resolvePendingBinding` 转成正式 `binding`；否则只用于提示"这份谱来自哪里"。
+   */
+  pendingBinding: WorkspaceBinding | null
   /**
    * adj540：从工作区打开一个 `.jps`（`path` 含子目录，最后一段是文件名）。
    * 读失败/无工作区时给提示并返回 false。
@@ -201,16 +210,54 @@ interface DocState {
 /** 本地草稿（localStorage，自动保存） */
 const DRAFT_KEY = 'ijipu.draft'
 const DRAFT_NAME_KEY = 'ijipu.draftName'
+/**
+ * adj544：草稿的**来源绑定**（`{wsId, wsName, segs}` 或 null）——"这份代码是从哪个工作区的哪个文件来的"。
+ * 与草稿一起写/读，重启后能恢复（校验通过前只是 `pendingBinding`）。属于 L3 会话态，不是设置项。
+ */
+const DRAFT_SRC_KEY = 'ijipu.draftSrc'
 const PAGE_CONFIG_KEY = 'ijipu.pageConfig'
 
-function loadDraft(): { code: string; name: string } | null {
+/** adj544：文档在工作区里的绑定（身份 + 相对路径） */
+export interface WorkspaceBinding {
+  /** 工作区身份（`WorkspaceRecord.id`）——保存前必须与当前工作区比对 */
+  wsId: string
+  /** 工作区名（`handle.name`），仅用于提示文案 */
+  wsName: string
+  /** 区内相对路径（最后一段是文件名） */
+  segs: string[]
+}
+
+function loadDraft(): { code: string; name: string; src: WorkspaceBinding | null } | null {
   try {
     const code = localStorage.getItem(DRAFT_KEY)
     if (code === null) return null
     const name = localStorage.getItem(DRAFT_NAME_KEY) ?? '未命名'
-    return { code, name }
+    return { code, name, src: loadDraftSrc() }
   } catch {
     return null
+  }
+}
+
+/** 读草稿的来源绑定（损坏/缺失 → null，绝不抛） */
+function loadDraftSrc(): WorkspaceBinding | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_SRC_KEY)
+    if (!raw) return null
+    const o = JSON.parse(raw) as Partial<WorkspaceBinding>
+    if (!o || typeof o.wsId !== 'string' || !Array.isArray(o.segs) || o.segs.length === 0) return null
+    return { wsId: o.wsId, wsName: typeof o.wsName === 'string' ? o.wsName : '', segs: o.segs.map(String) }
+  } catch {
+    return null
+  }
+}
+
+/** 写草稿的来源绑定（null = 清除；存储不可用时静默） */
+function saveDraftSrc(b: WorkspaceBinding | null): void {
+  try {
+    if (!b) localStorage.removeItem(DRAFT_SRC_KEY)
+    else localStorage.setItem(DRAFT_SRC_KEY, JSON.stringify(b))
+  } catch {
+    /* 忽略 */
   }
 }
 
@@ -431,7 +478,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
       fileHandle: null,
       nativePath: null,
       // adj540：三者互斥——与工作区里的任何文件解绑
-      workspacePath: null,
+      binding: null,
+      pendingBinding: null,
       activeNoteId: null,
       activeNoteIds: [],
       playheadTrack: [],
@@ -463,7 +511,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
       fileHandle: null,
       nativePath: null,
       // adj540：三者互斥——与工作区里的任何文件解绑
-      workspacePath: null,
+      binding: null,
+      pendingBinding: null,
       activeNoteId: null,
       activeNoteIds: [],
       playheadTrack: [],
@@ -503,7 +552,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
       fileHandle: null,
       nativePath: null,
       // adj540：三者互斥——与工作区里的任何文件解绑
-      workspacePath: null,
+      binding: null,
+      pendingBinding: null,
       activeNoteId: null,
       activeNoteIds: [],
       playheadTrack: [],
@@ -521,7 +571,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
   fileHandle: null,
   nativePath: null,
   // adj540：工作区相对路径（见类型注释；同样只存内存）
-  workspacePath: null,
+  // adj544：`binding` 带工作区身份；`pendingBinding` 是随草稿恢复出来的**待校验**绑定
+  binding: null,
+  pendingBinding: draft?.src ?? null,
   /**
    * adj538：桌面壳送来"要打开的文件"（双击 `.jps`）——与"打开对话框"共用同一段装载逻辑，
    * 差别只有两点：① 文本已由 Rust 侧读好；② 记下 `nativePath`（后续 Ctrl+S 写回原文件）。
@@ -554,7 +606,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
       dirty: false,
       nativePath: primary.path,
       // adj540：外部路径与工作区互斥
-      workspacePath: null,
+      binding: null,
+      pendingBinding: null,
       activeNoteId: null,
       activeNoteIds: [],
       voiceBlocks: [],
@@ -606,7 +659,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
         // adj538：改用对话框打开 ⇒ 与"外部路径"解绑（两者互斥，否则保存会写回上一个外部文件）
         nativePath: null,
         // adj540：同理与工作区解绑（三者互斥）
-        workspacePath: null,
+        binding: null,
+        pendingBinding: null,
         activeNoteId: null,
         activeNoteIds: [],
         voiceBlocks: [],
@@ -652,6 +706,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
       } catch {
         /* 存储不可用时静默 */
       }
+      // adj544：绑定带**工作区身份**（保存前要拿它跟"当前工作区"比对），并随草稿持久化
+      const bind: WorkspaceBinding = { wsId: ws.id, wsName: ws.name, segs }
+      saveDraftSrc(bind)
       // 数据源是工作区 ⇒ 断开磁盘句柄（三者互斥），避免"保存写到了上一个文件"
       disconnectFileHandle()
       set({
@@ -662,7 +719,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
         dirty: false,
         fileHandle: null,
         nativePath: null,
-        workspacePath: segs,
+        binding: bind,
+        pendingBinding: null,
         activeNoteId: null,
         activeNoteIds: [],
         voiceBlocks: [],
@@ -698,19 +756,23 @@ export const useDocStore = create<DocState>()((set, get) => ({
     try {
       const code = get().code
       // 重名保护：目标位置已有同名文件、且**不是本文档当前绑定的那个** ⇒ 拒绝（不静默覆盖别人的谱）
-      const cur = get().workspacePath
-      const same = !!cur && joinPath(cur) === joinPath(segs)
+      // adj544：绑定带工作区身份 ⇒ 只有"同属当前工作区且路径相同"才算同一个文件
+      const cur = get().binding
+      const same = !!cur && cur.wsId === ws.id && joinPath(cur.segs) === joinPath(segs)
       if (!same && (await hasEntry(ws.handle, segs.slice(0, -1), segs[segs.length - 1]))) {
         ui.showNotice(workspaceCopy.exists(segs[segs.length - 1]), 'warn')
         return false
       }
       await writeWorkspaceText(ws.handle, segs, code)
       const name = fileBaseName(segs[segs.length - 1])
+      const bind: WorkspaceBinding = { wsId: ws.id, wsName: ws.name, segs }
+      saveDraftSrc(bind)
       set({
         fileName: name,
         fileHandle: null,
         nativePath: null,
-        workspacePath: segs,
+        binding: bind,
+        pendingBinding: null,
         // 写入期间用户可能继续输入 ⇒ 内容变了就保留未保存标记（与句柄路径同一口径）
         dirty: get().code !== code,
       })
@@ -767,8 +829,13 @@ export const useDocStore = create<DocState>()((set, get) => ({
     try {
       await renameFile(ws.handle, dir, fromName, toName)
       // 正在编辑的就是这个文件 ⇒ 绑定跟着改名（否则「保存」会指向一个已不存在的名字）
-      const cur = get().workspacePath
-      if (cur && joinPath(cur) === joinPath(from)) set({ workspacePath: to, fileName: fileBaseName(toName) })
+      // adj544：绑定现在带身份，改路径时**保留 wsId/wsName**，并同步持久化的草稿来源
+      const cur = get().binding
+      if (cur && cur.wsId === ws.id && joinPath(cur.segs) === joinPath(from)) {
+        const next: WorkspaceBinding = { ...cur, segs: to }
+        saveDraftSrc(next)
+        set({ binding: next, fileName: fileBaseName(toName) })
+      }
       console.info(`[iJipu] 工作区重命名：${joinPath(from)} → ${joinPath(to)}`)
       ui.showNotice(workspaceCopy.renamed(fromName, toName), 'ok')
       return true
@@ -799,8 +866,13 @@ export const useDocStore = create<DocState>()((set, get) => ({
       }
       try {
         await moveFile(ws.handle, from, toDir)
-        const cur = get().workspacePath
-        if (cur && joinPath(cur) === joinPath(from)) set({ workspacePath: [...toDir, name] })
+        // adj544：绑定带身份 ⇒ 只更新路径（保留 wsId/wsName）并同步持久化的草稿来源
+        const cur = get().binding
+        if (cur && cur.wsId === ws.id && joinPath(cur.segs) === joinPath(from)) {
+          const next: WorkspaceBinding = { ...cur, segs: [...toDir, name] }
+          saveDraftSrc(next)
+          set({ binding: next })
+        }
         ok++
       } catch (e) {
         if (!firstErr) {
@@ -837,10 +909,12 @@ export const useDocStore = create<DocState>()((set, get) => ({
         if (it.kind === 'dir') await removeEmptyDir(ws.handle, segs.slice(0, -1), name)
         else await removeFile(ws.handle, segs)
         // 当前文档正被删掉的那一项 ⇒ 解绑（内容仍留在编辑器里）
-        const cur = get().workspacePath
+        // adj544：解绑要连**持久化的草稿来源**一起清掉，否则重启后又"以为"绑定在已删的文件上
+        const cur = get().binding
         const target = joinPath(segs)
-        if (cur && (joinPath(cur) === target || (it.kind === 'dir' && joinPath(cur).startsWith(`${target}/`)))) {
-          set({ workspacePath: null })
+        if (cur && cur.wsId === ws.id && (joinPath(cur.segs) === target || (it.kind === 'dir' && joinPath(cur.segs).startsWith(`${target}/`)))) {
+          saveDraftSrc(null)
+          set({ binding: null, pendingBinding: null })
           unbound = true
         }
         ok++
@@ -945,7 +1019,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       void saveFileHandle(handle)
       // adj363：写入期间用户可能继续输入，内容已变则保留未保存标记
       const tUi = performance.now()
-      set({ fileHandle: handle, fileName: name, dirty: get().code !== code, nativePath: null, workspacePath: null })
+      set({ fileHandle: handle, fileName: name, dirty: get().code !== code, nativePath: null, binding: null })
       phaseLog.tail('ui', performance.now() - tUi)
       reportSaved(t0, phaseLog, name)
       return true
@@ -1060,8 +1134,15 @@ async function doSaveFile(): Promise<boolean> {
   }
   // adj540：工作区文档 ⇒ 写回工作区里的**同一个文件**（含子目录），与桌面 nativePath 同语义。
   // 权限用根目录句柄申请（工作区授权是目录级的），必须在用户手势内完成 ⇒ 放在这里、写入之前。
-  if (st.workspacePath && st.workspacePath.length > 0) {
-    const wsPath = st.workspacePath
+  //
+  // adj544：写之前**三道校验**，任一不过就绝不写盘（E-2026-251）：
+  //   ① 绑定里的工作区身份 == 当前工作区？否 ⇒ 说明用户换了工作区，**不能**拿新根 + 旧相对路径去写
+  //      （否则没同名就新建、有同名就覆盖，静默写错文件）；给出明确指引后放弃。
+  //   ② 文件**仍然存在**？否 ⇒ 原文件被外部移走/删了；**不静默重建同名文件**，转另存让用户确认位置。
+  //   ③ 权限由 `writeWorkspaceText` 内部在用户手势内申请（保持原样）。
+  if (st.binding && st.binding.segs.length > 0) {
+    const bind = st.binding
+    const wsPath = bind.segs
     const ui = useUiStore.getState()
     const t0 = performance.now()
     const cancelHint = armSavingHint()
@@ -1069,6 +1150,18 @@ async function doSaveFile(): Promise<boolean> {
       const ws = await getWorkspace()
       if (!ws) {
         ui.showNotice(workspaceCopy.noWorkspace, 'warn')
+        return false
+      }
+      // ① 工作区身份校验：换了工作区就绝不写（这是本轮修掉的数据风险）
+      if (ws.id !== bind.wsId) {
+        console.warn(`[iJipu] 绑定的工作区(${bind.wsId})与当前工作区(${ws.id})不一致，拒绝写盘`)
+        ui.showNotice(workspaceCopy.boundToOtherWorkspace(bind.wsName || '另一个工作区', ws.name, joinPath(wsPath)), 'warn')
+        return false
+      }
+      // ② 存在性校验：原文件不在了 ⇒ 转另存（用户确认位置），不静默重建
+      if (!(await hasEntry(ws.handle, wsPath.slice(0, -1), wsPath[wsPath.length - 1]))) {
+        console.warn(`[iJipu] 绑定的工作区文件已不存在：${joinPath(wsPath)}`)
+        ui.showNotice(workspaceCopy.sourceMissing(joinPath(wsPath)), 'warn')
         return false
       }
       const code = useDocStore.getState().code
@@ -1241,7 +1334,8 @@ function openFileViaInput(): Promise<boolean> {
           // adj538：同理与"外部路径"解绑
           nativePath: null,
           // adj540：降级打开也没有工作区绑定（下次保存走另存为/导出）
-          workspacePath: null,
+          binding: null,
+          pendingBinding: null,
           activeNoteId: null,
           activeNoteIds: [],
           voiceBlocks: [],
@@ -1292,3 +1386,50 @@ void loadFileHandle().then((h) => {
   if (draftName && draftName !== name) return
   useDocStore.setState({ fileHandle: h, fileName: name })
 })
+
+// adj544：启动时恢复「这份草稿来自哪个工作区文件」——但只作为**待校验绑定**。
+// 校验（工作区身份一致 + 权限已授予 + 文件仍在）通过后才真正绑定，之后「保存」才能写回原文件。
+// 权限通常在重启后是 prompt ⇒ 这一步会"什么都不做"，等用户在面板里点一次授权后由
+// `resolvePendingBinding()` 再试一次（申请权限必须在用户手势内，不能在这里硬要）。
+void getWorkspace()
+  .then(() => resolvePendingBinding())
+  .catch(() => {
+    /* 无工作区/读库失败：保持未绑定，保存走另存 */
+  })
+
+/**
+ * adj544：把**待校验绑定**升级成正式绑定（不改内容，只决定"保存能不能写回原文件"）。
+ *
+ * 三个条件全满足才升级：① 当前工作区就是绑定里那个（`wsId` 相同）；
+ * ② 目录权限已授予（`queryWorkspacePermission`，只查不申请）；③ 绑定的那个文件仍然存在。
+ * 任一不满足就保持 `pendingBinding`（界面据此提示"这份谱来自哪里"），**绝不**猜测性地写盘。
+ */
+export async function resolvePendingBinding(): Promise<boolean> {
+  const st = useDocStore.getState()
+  const pending = st.pendingBinding
+  if (!pending) return false
+  if (st.binding) return false
+  const ws = await getWorkspace()
+  if (!ws) {
+    console.info('[iJipu] 未恢复工作区绑定：当前没有工作区')
+    return false
+  }
+  if (ws.id !== pending.wsId) {
+    console.info(`[iJipu] 未恢复工作区绑定：绑定属于工作区 ${pending.wsName || pending.wsId}，当前是 ${ws.name}`)
+    return false
+  }
+  const perm = await queryWorkspacePermission(ws.handle)
+  if (perm !== 'granted') {
+    console.info(`[iJipu] 未恢复工作区绑定：目录权限为 ${perm}（需用户手势里重新授权）`)
+    return false
+  }
+  const segs = pending.segs
+  if (!(await hasEntry(ws.handle, segs.slice(0, -1), segs[segs.length - 1]))) {
+    console.info(`[iJipu] 未恢复工作区绑定：${joinPath(segs)} 已不在工作区里`)
+    return false
+  }
+  useDocStore.setState({ binding: pending, pendingBinding: null })
+  useUiStore.getState().showNotice(workspaceCopy.bindingRestored(ws.name, joinPath(segs)), 'ok')
+  console.info(`[iJipu] 已恢复工作区绑定：${joinPath(segs)}`)
+  return true
+}

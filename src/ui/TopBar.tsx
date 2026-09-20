@@ -1064,7 +1064,7 @@ export function TopBar() {
    * 已经绑定（工作区文件 / 桌面外部文件 / 浏览器句柄）的情况仍走 `saveFile()` 直接写回。
    */
   const runSaveSmart = async () => {
-    if (isCoarsePointerDevice() && isWorkspaceSupported() && !useDocStore.getState().workspacePath) {
+    if (isCoarsePointerDevice() && isWorkspaceSupported() && !useDocStore.getState().binding) {
       requestWorkspaceSave()
       toggleDock('workspace')
       return

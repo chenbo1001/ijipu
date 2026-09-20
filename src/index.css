@@ -3571,7 +3571,59 @@ body {
 /* adj540（用户第二轮反馈）：左侧"切换工作区"图标按钮 ——**无底色圆角按钮**——
  * 只用圆角 + 悬停/按下时的强调色，没有边框与底色（不像普通 .btn 那么"重"），让面包屑
  * 区域更轻。`public/icons/工作区.png` 经 `ToolIcon` 渲染（CSS mask 跟着主题色）。 */
-/* adj540/adj543（用户要求）：左侧"切换工作区"图标按钮——**与底栏"收起底栏"按钮同款样式**
+/* adj544：面板里的"最近工作区"列表（一键切回上次那个；重启后不用重新选目录） */
+.ws-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-top: 4px;
+  text-align: left;
+}
+.ws-recent-title {
+  color: var(--jp-text-muted);
+  font-size: 11px;
+}
+.ws-recent-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-start;
+  width: 100%;
+  overflow: hidden;
+  text-align: left;
+}
+.ws-recent-item .ws-recent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-recent-item.is-current {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+}
+/* adj544：正常视图里的"最近工作区"（点「操作 → 最近的工作区…」展开）——横向排列更省纵向空间 */
+.ws-recent-inline {
+  margin-top: 0;
+}
+.ws-recent-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ws-recent-row .ws-recent-item {
+  width: auto;
+  max-width: 100%;
+}
+/* adj544：绑定提示（"这份谱来自哪个工作区文件、重授权后即可写回"）——提示性，不抢眼但要看得见 */
+.ws-binding-hint {
+  width: 100%;
+  color: var(--jp-text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: left;
+}
+/* adj544（用户要求）：左侧"切换工作区"图标按钮——**与底栏"收起底栏"按钮同款样式**
  * （`.tool-dock-collapse`：1px 边框 + 7px 圆角 + 主文字色 + hover 三联动），
  * 让"图标 + 边框按钮"在底栏与面板里观感一致；图标经 `ToolIcon`（CSS mask 跟主题色）。 */
 .ws-workspace-btn {
