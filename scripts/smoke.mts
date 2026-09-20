@@ -8537,7 +8537,9 @@ function runAdj540WorkspaceTests() {
       /export function matchesQuery/.test(wsSrc) &&
       /const \[query, setQuery\] = useState\(''\)/.test(panelSrc) &&
       /const searching = query\.trim\(\)\.length > 0/.test(panelSrc) &&
-      /void searchWorkspaceJps\(ws\.handle, query\)/.test(panelSrc) &&
+      // adj543：过滤改为"走一次建索引 + 内存 filter"，故这里断言索引路径而不是直接调搜索
+      /void buildIndex\(ws\.handle\)/.test(panelSrc) &&
+      /idx\.filter\(\(h\) => matchesQuery\(h\.name, h\.relPath, query\)\)/.test(panelSrc) &&
       /searching\s*\?\s*\(hits \?\? \[\]\)\.map/.test(panelSrc) &&
       /workspaceCopy\.filterPlaceholder/.test(panelSrc),
     '')
@@ -8551,8 +8553,10 @@ function runAdj540WorkspaceTests() {
   check('adj540 搜索**没搜完 / 读不动的目录**都必须说出来（API 加 `truncated` 和 `blocked` 两个字段；面板 notice）',
     /export interface SearchResult \{[\s\S]{0,300}?truncated: boolean[\s\S]{0,80}?blocked: string\[\]/.test(wsSrc) &&
       /return \{ hits, truncated, blocked \}/.test(wsSrc) &&
-      /setHitsTruncated\(r\.truncated\)/.test(panelSrc) &&
-      /setBlockedDirs\(r\.blocked\)/.test(panelSrc) &&
+      // adj543：截断/读不动来自"建索引"那次的结果（存进 idxMetaRef，过滤时回填）
+      /idxMetaRef\.current = \{ truncated: r\.truncated, blocked: r\.blocked \}/.test(panelSrc) &&
+      /setHitsTruncated\(idxMetaRef\.current\.truncated\)/.test(panelSrc) &&
+      /setBlockedDirs\(idxMetaRef\.current\.blocked\)/.test(panelSrc) &&
       /searchTruncated/.test(copySrc) &&
       /searchBlockedDirs/.test(copySrc) &&
       // 上限不能太小（"* 列不全"的另一种解释就是上限太低）：默认深度 ≥10、条目 ≥5000
@@ -8586,10 +8590,12 @@ function runAdj540WorkspaceTests() {
       matchesQuery('a.jps', 'a.jps', 'a.jps') &&
       !matchesQuery('axjps', 'axjps', 'a.jps'),
     '')
-  check('adj540 面包屑**左对齐**（去掉 .ws-head 里的 space-between）+ 切换按钮**无底色圆角**（border:0 + border-radius:50% + 无 background）',
+  check('adj540 面包屑**左对齐**（去掉 .ws-head 里的 space-between）+ 切换按钮**与底栏收起按钮同款样式**（1px 边框 + 7px 圆角 + 主文字色）',
     !/\.ws-head \{[\s\S]{0,400}?justify-content: space-between/.test(cssAll) &&
-      /\.ws-workspace-btn \{[\s\S]{0,300}?border: 0\b[\s\S]{0,100}?border-radius: 50%/.test(cssAll) &&
-      /\.ws-workspace-btn \{[\s\S]{0,400}?background: transparent/.test(cssAll) &&
+      // adj543（用户要求）：切换工作区按钮改成与 `.tool-dock-collapse` 一致（不是无底色圆形了）
+      /\.ws-workspace-btn \{[\s\S]{0,300}?border: 1px solid var\(--jp-border\)[\s\S]{0,120}?border-radius: 7px/.test(cssAll) &&
+      /\.ws-workspace-btn \{[\s\S]{0,400}?color: var\(--jp-text-primary\)/.test(cssAll) &&
+      /\.tool-dock-collapse \{[\s\S]{0,300}?border: 1px solid var\(--jp-border\)/.test(cssAll) &&
       /white-space: nowrap/.test(cssAll) &&
       !/\.ws-crumb-root \{[\s\S]{0,200}?text-overflow: ellipsis/.test(cssAll),
     '')
@@ -8714,6 +8720,19 @@ function runAdj541DockToggleTests() {
       // 反查"最后一个可见源码行"用视觉行前缀和二分（折行不产生新行号）
       /visualTopRef\.current/.test(editorSrc) &&
       /Math\.floor\(\(top \+ Math\.max\(0, clientH - 1\)\) \/ lineH\)/.test(editorSrc),
+    '')
+  check('adj543 过滤提速：**先建一次索引，之后每次输入只在内存里过滤**（不再每敲一个字重走整棵目录树）',
+    /const indexRef = useRef<SearchHit\[\] \| null>\(null\)/.test(wsPanelSrc) &&
+      /const buildIndex = useCallback\(async \(handle: FileSystemDirectoryHandle\) => \{/.test(wsPanelSrc) &&
+      /searchWorkspaceJps\(handle, '', \{ maxHits: 3000, maxEntries: 30000 \}\)/.test(wsPanelSrc) &&
+      /const filterFromIndex = \(\): boolean => \{/.test(wsPanelSrc) &&
+      /idx\.filter\(\(h\) => matchesQuery\(h\.name, h\.relPath, query\)\)/.test(wsPanelSrc) &&
+      /if \(filterFromIndex\(\)\) return/.test(wsPanelSrc) &&
+      /void buildIndex\(ws\.handle\)/.test(wsPanelSrc) &&
+      // 写操作（invalidateCache）与面板打开都让索引作废
+      /indexRef\.current = null/.test(wsPanelSrc) &&
+      // 不再用 200ms debounce 包着整树搜索
+      !/setTimeout\(\(\) => \{[\s\S]{0,80}?void searchWorkspaceJps\(ws\.handle, query\)/.test(wsPanelSrc),
     '')
   // E-2026-249：面板"一直闪 + 点不动"= **无限刷新循环**。
   // 根因：`invalidateCache` 是普通函数（每次渲染新引用）却进了 `refresh` 的 useCallback 依赖，

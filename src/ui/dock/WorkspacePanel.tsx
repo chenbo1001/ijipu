@@ -40,6 +40,7 @@ import {
   getWorkspace,
   isWorkspaceSupported,
   joinPath,
+  matchesQuery,
   parentPath,
   pickWorkspaceDir,
   queryWorkspacePermission,
@@ -122,6 +123,19 @@ export function WorkspacePanel() {
   const [hitsTruncated, setHitsTruncated] = useState(false)
   const searching = query.trim().length > 0
   /**
+   * adj543：**整个工作区 `.jps` 的索引**（首次过滤时走一次树建好，之后输入只在内存里 filter）。
+   * 写操作后作废（`invalidateCache` 一并清掉）。
+   */
+  const indexRef = useRef<SearchHit[] | null>(null)
+  const idxMetaRef = useRef<{ truncated: boolean; blocked: string[] }>({ truncated: false, blocked: [] })
+  /** 建索引（走一次整树；上限放大，因为只走一次）——`useCallback([])` 保证引用稳定（E-2026-249） */
+  const buildIndex = useCallback(async (handle: FileSystemDirectoryHandle) => {
+    const r = await searchWorkspaceJps(handle, '', { maxHits: 3000, maxEntries: 30000 })
+    indexRef.current = r.hits
+    idxMetaRef.current = { truncated: r.truncated, blocked: r.blocked }
+    return r
+  }, [])
+  /**
    * adj540（用户要求）：右侧**只留一个下拉按钮**「操作」——点它**弹出菜单**再选具体操作。
    * 为什么必须用 portal：dock 容器是 `overflow: hidden`，就地展开的浮层会被裁掉
    * （内联展开又会挤占列表行数），所以菜单渲染到 `document.body` 并 `position: fixed` 锚在按钮上方。
@@ -139,8 +153,13 @@ export function WorkspacePanel() {
     setSelected((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]))
 
   /**
-   * 过滤（debounce 200ms）：对整个工作区递归找 `.jps`（`searchWorkspaceJps` 自带深度/条数上限）。
-   * 清空过滤即回到层级模式（原目录列表仍在，不用重读）。
+   * adj543（用户反馈"过滤筛选的速度很慢"）：**先建一次索引，之后每次输入只在内存里过滤**。
+   *
+   * 之前每次输入（debounce 200ms）都把整个工作区**递归重走一遍**（每层目录都是一次 FSA 调用），
+   * 大工作区下每敲一个字都要等一轮遍历 ⇒ 明显卡顿。
+   * 现在：首次过滤时整棵走一次（带更大的上限，因为只走一次），把全部 `.jps` 存进 `indexRef`；
+   * 之后同一面板会话内的每次输入都只是 `Array.filter(matchesQuery)`（纯字符串比较，微秒级）。
+   * 索引在**任何写操作**（改名/新建/另存/移动/删除）后作废（见 `invalidateCache`），下次过滤重建。
    */
   useEffect(() => {
     if (!ws || perm !== 'granted' || !searching) {
@@ -148,31 +167,36 @@ export function WorkspacePanel() {
       return
     }
     let alive = true
-    const t = window.setTimeout(() => {
-      void searchWorkspaceJps(ws.handle, query)
-        .then((r) => {
-          if (!alive) return
-          setHits(r.hits)
-          setHitsTruncated(r.truncated)
-          setBlockedDirs(r.blocked)
-          // 没搜完必须说出来：否则用户会以为"工作区里就没有这些谱"
-          if (r.truncated) showNotice(workspaceCopy.searchTruncated(r.hits.length), 'warn')
-          // 读不动的目录也说出来：不然 `*` 看不到就是"文件不见了"
-          if (r.blocked.length > 0) showNotice(workspaceCopy.searchBlockedDirs(r.blocked), 'warn')
-        })
-        .catch(() => {
-          if (alive) {
-            setHits([])
-            setHitsTruncated(false)
-            setBlockedDirs([])
-          }
-        })
-    }, 200)
+    /** 有索引 ⇒ 同步过滤（零等待）；没索引 ⇒ 走一次整树建索引，再过滤 */
+    const filterFromIndex = (): boolean => {
+      const idx = indexRef.current
+      if (!idx) return false
+      setHits(idx.filter((h) => matchesQuery(h.name, h.relPath, query)))
+      setHitsTruncated(idxMetaRef.current.truncated)
+      setBlockedDirs(idxMetaRef.current.blocked)
+      return true
+    }
+    if (filterFromIndex()) return
+    void buildIndex(ws.handle)
+      .then((r) => {
+        if (!alive) return
+        filterFromIndex()
+        // 没搜完必须说出来：否则用户会以为"工作区里就没有这些谱"
+        if (r.truncated) showNotice(workspaceCopy.searchTruncated(r.hits.length), 'warn')
+        // 读不动的目录也说出来：不然 `*` 看不到就是"文件不见了"
+        if (r.blocked.length > 0) showNotice(workspaceCopy.searchBlockedDirs(r.blocked), 'warn')
+      })
+      .catch(() => {
+        if (alive) {
+          setHits([])
+          setHitsTruncated(false)
+          setBlockedDirs([])
+        }
+      })
     return () => {
       alive = false
-      window.clearTimeout(t)
     }
-  }, [ws, perm, query, searching, showNotice])
+  }, [ws, perm, query, searching, showNotice, buildIndex])
   /** 弹出菜单：点外面/按 Esc 关闭（菜单渲染在 portal 里，不在 dock 的裁剪范围内） */
   useEffect(() => {
     if (!menuOpen) return
@@ -215,6 +239,7 @@ export function WorkspacePanel() {
    */
   const invalidateCache = useCallback(() => {
     entriesCacheRef.current.clear()
+    indexRef.current = null // adj543：写操作后过滤索引也作废，下次过滤重建
   }, [])
   /** 列目录（带缓存——同一路径再次访问直接走缓存，避免每次都打 IndexedDB / FSA） */
   const refresh = useCallback(
@@ -275,6 +300,8 @@ export function WorkspacePanel() {
       const rec = await getWorkspace()
       if (!alive) return
       setWs(rec)
+      // adj543：每次打开面板都让过滤索引作废——期间用户可能在别的 App 里增删过文件
+      indexRef.current = null
       // adj540：手机端「保存/另存」带过来的意图 ⇒ 直接把"另存"输入框展开（消费掉，不做持久化）
       if (rec && useUiStore.getState().workspaceSaveIntent) {
         setEdit({ kind: 'saveAs', value: fileBaseName(useDocStore.getState().fileName) })
@@ -701,6 +728,8 @@ export function WorkspacePanel() {
               </>
             )}
           {searching && hits !== null && hits.length === 0 && <div className="ws-none">{workspaceCopy.searchEmpty}</div>}
+          {/* adj543：首次过滤要走一次目录树建索引——期间给个提示（否则那一下看着像"空的"） */}
+          {searching && hits === null && <div className="ws-none">{workspaceCopy.searchIndexing}</div>}
         </div>
 
         <div className="ws-side">

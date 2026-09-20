@@ -225,6 +225,8 @@ export const workspaceCopy = {
   /** 通配符说明（输入框 title） */
   filterHint: '不含 * ? 时按子串匹配；含 * ? 时按通配符整体匹配（如 小星*、*练习*、第?课）',
   searchEmpty: '工作区里没有匹配的 .jps',
+  /** adj543：首次过滤要建立索引（走一次目录树）——给个等待提示，别让用户以为"什么都没有" */
+  searchIndexing: '正在读取工作区…',
   /** adj540（用户报告 `*` 仍看不到文件）：读不动的目录也主动说出来——"没搜到"与"没搜完/搜到一半"是两件事 */
   searchBlockedDirs: (dirs: string[]): string =>
     `有 ${dirs.length} 个子目录读不动（可能在里面），已跳过：${dirs.slice(0, 3).join('、')}${dirs.length > 3 ? '…' : ''}`,

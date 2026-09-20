@@ -3571,6 +3571,9 @@ body {
 /* adj540（用户第二轮反馈）：左侧"切换工作区"图标按钮 ——**无底色圆角按钮**——
  * 只用圆角 + 悬停/按下时的强调色，没有边框与底色（不像普通 .btn 那么"重"），让面包屑
  * 区域更轻。`public/icons/工作区.png` 经 `ToolIcon` 渲染（CSS mask 跟着主题色）。 */
+/* adj540/adj543（用户要求）：左侧"切换工作区"图标按钮——**与底栏"收起底栏"按钮同款样式**
+ * （`.tool-dock-collapse`：1px 边框 + 7px 圆角 + 主文字色 + hover 三联动），
+ * 让"图标 + 边框按钮"在底栏与面板里观感一致；图标经 `ToolIcon`（CSS mask 跟主题色）。 */
 .ws-workspace-btn {
   flex: none;
   display: inline-flex;
@@ -3579,19 +3582,21 @@ body {
   width: 28px;
   height: 28px;
   padding: 0;
-  border: 0;
-  border-radius: 50%;
+  border: 1px solid var(--jp-border);
+  border-radius: 7px;
   background: transparent;
-  color: var(--jp-text-secondary);
+  color: var(--jp-text-primary);
   cursor: pointer;
-  transition: background-color 0.12s ease-out, color 0.12s ease-out;
+  transition: all 0.15s;
 }
 .ws-workspace-btn:hover:not(:disabled) {
-  background: var(--jp-bg-panel-hover);
+  border-color: var(--jp-accent);
   color: var(--jp-accent);
+  background: var(--jp-bg-panel-hover);
 }
-.ws-workspace-btn:active:not(:disabled) {
-  background: var(--jp-bg-panel-active);
+.ws-workspace-btn:focus-visible {
+  outline: 2px solid var(--jp-accent);
+  outline-offset: -2px;
 }
 .ws-workspace-btn:disabled {
   opacity: 0.5;
