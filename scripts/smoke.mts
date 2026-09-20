@@ -8829,21 +8829,33 @@ async function runAdj541DockToggleTests() {
       /workspaceCopy\.loadingWorkspace/.test(wsPanelSrc) &&
       /workspaceCopy\.readingTarget/.test(wsPanelSrc),
     '')
-  // adj548（用户反馈）：目录位置必须记住——**进入时就记**，不能只在面板关闭时记：
-  // 底栏收起 / 切到别的页签时面板是**直接卸载**的，关闭分支跑不到 ⇒ 重开永远回根目录（实测三个场景全丢）。
-  check('adj548（用户反馈）**进入目录就记住位置**（收起底栏/切页签/重启都能恢复）+ 位置不存在则回退到仍存在的最外层',
-    // 进入目录（refresh）与移动选目标都立即记；落盘防抖、内存立即生效
+  // adj550（用户要求，**一条规则**）：进入工作区 ⇒ 定位到该工作区的最新位置。
+  // 「授权」只是前置条件：未授权 ⇒ 授权成功后调用；已授权 ⇒ 激活/切工作区时直接调用。
+  // 三条入口共用 `enterAtLatestPos`（一条规则只有一处实现），位置不存在则收敛到仍存在的最外层。
+  check('adj550（用户要求）**进入工作区就定位到最新位置**——激活/授权后/切工作区三条入口共用同一个 `enterAtLatestPos`',
+    /const enterAtLatestPos = useCallback\(\s*\n?\s*async \(rec: WorkspaceRecord, label: string\) => \{/.test(wsPanelSrc) &&
+      /const want = rec\.path \?\? \[\]/.test(wsPanelSrc) &&
+      /const dir = await resolveExistingDir\(rec\.handle, want\)/.test(wsPanelSrc) &&
+      /showNotice\(workspaceCopy\.dirGone\(joinPath\(want\) \|\| '根目录', joinPath\(dir\)\), 'warn'\)/.test(wsPanelSrc) &&
+      /await refresh\(rec, dir, label\)/.test(wsPanelSrc) &&
+      // useCallback 固定引用（否则进 effect 依赖会无限刷新，E-2026-249）
+      /\[\s*refresh, showNotice\s*\],/.test(wsPanelSrc) &&
+      // 三条入口都在调它：激活（已授权）/ 授权成功后 / 切工作区
+      (wsPanelSrc.match(/await enterAtLatestPos\(/g) ?? []).length >= 3 &&
+      // 不再各自内联拼路径（旧写法）
+      !/const want = path\.length > 0 \? path/.test(wsPanelSrc),
+    '')
+  check('adj548/adj550（用户反馈）**进入目录就记住位置**（每次切换立即落盘，列表条目同步最新位置）',
     /void rememberWorkspacePath\(next\)/.test(wsPanelSrc) &&
       /void rememberWorkspacePath\(next\) \/\/ adj548：移动模式下选目标也记住/.test(wsPanelSrc) &&
-      /let pathSaveTimer: ReturnType<typeof setTimeout> \| null = null/.test(wsSrc) &&
+      // 立即落盘（无防抖）＋ 最近工作区列表里的那条也跟着更新（否则切回该工作区会拿到旧位置）
       /cached = \{ \.\.\.cached, path: normalizeRelPath\(path\) \}/.test(wsSrc) &&
-      /pathSaveTimer = setTimeout\(\(\) => \{[\s\S]{0,140}?void saveWorkspace\(cached\)/.test(wsSrc) &&
-      // 恢复前校验路径仍存在；不存在就收敛并说明
-      /export async function resolveExistingDir\(/.test(wsSrc) &&
-      /const dir = await resolveExistingDir\(rec\.handle, want\)/.test(wsPanelSrc) &&
-      /if \(joinPath\(dir\) !== joinPath\(want\)\)/.test(wsPanelSrc) &&
-      /dirGone: \(was: string, now: string\)/.test(copySrc2) &&
-      /await refresh\(rec, dir, workspaceCopy\.loadingWorkspace\)/.test(wsPanelSrc),
+      /await saveWorkspace\(cached\)[\s\S]{0,120}?syncListPath\(cached\)/.test(wsSrc) &&
+      /function syncListPath\(rec: WorkspaceRecord\): void/.test(wsSrc) &&
+      !/pathSaveTimer/.test(wsSrc) &&
+      /flushWorkspacePath\(\)/.test(wsPanelSrc) &&
+      /export function flushWorkspacePath\(\)/.test(wsSrc) &&
+      /dirGone: \(was: string, now: string\)/.test(copySrc2),
     '')
   check('adj548（用户反馈）操作按钮的下三角改用 `下.png`/`上.png` 图标（不再是 9px 的 ▾ 字符）',
     /<ToolIcon name=\{menuOpen \? 'up' : 'down'\} size=\{12\} \/>/.test(wsPanelSrc) &&
@@ -8911,8 +8923,8 @@ async function runAdj541DockToggleTests() {
       !/\[showNotice, invalidateCache\]/.test(wsPanelSrc) &&
       // refresh 的依赖数组里只有 showNotice（store action，稳定引用）
       /\[\s*showNotice,?\s*\]/.test(wsPanelSrc) &&
-      // 激活 effect：active / refresh / showNotice —— 都是稳定或布尔量，不会每次渲染都换引用
-      /\}, \[active, refresh, showNotice\]\)/.test(wsPanelSrc) &&
+      // 激活 effect：active / refresh / showNotice / enterAtLatestPos —— 都是稳定引用或布尔量
+      /\}, \[active, refresh, showNotice, enterAtLatestPos\]\)/.test(wsPanelSrc) &&
       // 关闭面板时写路径记忆走 ref，不把 `path` 塞进依赖（否则每次导航都会重跑 effect）
       /rememberWorkspacePath\(pathRef\.current\)/.test(wsPanelSrc),
     '')

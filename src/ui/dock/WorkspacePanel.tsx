@@ -38,6 +38,7 @@ import type { WorkspaceRecord } from '../../store/fileHandleDb'
 import { ToolIcon } from '../ToolIcon'
 import {
   activateWorkspace,
+  flushWorkspacePath,
   getWorkspace,
   isWorkspaceSupported,
   joinPath,
@@ -392,6 +393,30 @@ export function WorkspacePanel() {
     },
     [showNotice],
   )
+  /**
+   * adj550（用户要求，**一条规则**）：**进入工作区 ⇒ 定位到该工作区的最新位置**。
+   *
+   * 「授权」只是前置条件，不是另一条规则：
+   *  · 未授权 ⇒ 先显示授权视图，**授权成功后**调用本函数；
+   *  · 已授权 ⇒ 切页签回来 / 切到某个工作区 / 打开面板时**直接**调用本函数。
+   * 位置已被外部删/移动 ⇒ 收敛到**仍存在的最外层**并提示（不会给空列表让人以为文件没了）。
+   * 三条入口（激活 / 授权后 / 切工作区）都走这里，保证行为一致。
+   *
+   * 定义位置在 `refresh` 之后、激活 effect **之前**，并用 `useCallback` 固定引用——
+   * 否则它进 effect 依赖会让激活 effect 每次渲染都重跑（E-2026-249 的无限刷新）。
+   */
+  const enterAtLatestPos = useCallback(
+    async (rec: WorkspaceRecord, label: string) => {
+      const want = rec.path ?? []
+      const dir = await resolveExistingDir(rec.handle, want)
+      if (joinPath(dir) !== joinPath(want)) {
+        showNotice(workspaceCopy.dirGone(joinPath(want) || '根目录', joinPath(dir)), 'warn')
+      }
+      await refresh(rec, dir, label)
+    },
+    [refresh, showNotice],
+  )
+
 
   /**
    * **每次打开面板都重读**（用户确认）：从 IndexedDB 取最新工作区 → 只查权限（申请必须由用户手势触发）
@@ -432,24 +457,16 @@ export function WorkspacePanel() {
       if (!alive) return
       setPerm(q)
       if (q === 'granted') {
-        /**
-         * adj548（用户要求"除非该位置已不存在"）：恢复上次所在目录前**先确认它还在**——
-         * 外部删/移动过就把路径收敛到仍存在的最长前缀（最少根目录），并说明一句，
-         * 而不是给用户一个空列表让他以为"文件都没了"。
-         */
-        const want = rec.path ?? []
-        const dir = await resolveExistingDir(rec.handle, want)
-        if (!alive) return
-        if (joinPath(dir) !== joinPath(want)) {
-          showNotice(workspaceCopy.dirGone(joinPath(want) || '根目录', joinPath(dir)), 'warn')
-        }
-        await refresh(rec, dir, workspaceCopy.loadingWorkspace) // adj547：读工作区也有提示
+        // adj550：**已授权 ⇒ 进入工作区直接定位到最新位置**（与"授权后"走同一个函数）
+        await enterAtLatestPos(rec, workspaceCopy.loadingWorkspace)
       } else setBusy(false)
     })()
     return () => {
       alive = false
+      // adj550：面板卸载时把"待写的目录位置"立刻落盘（刚进完目录就收起底栏/关页面也不丢）
+      flushWorkspacePath()
     }
-  }, [active, refresh, showNotice])
+  }, [active, refresh, showNotice, enterAtLatestPos])
 
   const onPick = async () => {
     if (!isWorkspaceSupported()) {
@@ -480,18 +497,22 @@ export function WorkspacePanel() {
   }
 
   /** 补授权（用户点了按钮 ⇒ 手势成立）；adj544：授权成功后顺便尝试"恢复绑定到原文件" */
+
+  /** 补授权（用户点了按钮 ⇒ 手势成立）；授权成功 = 满足前置条件 ⇒ 走同一条"定位到最新位置" */
   const onGrant = async () => {
     if (!ws) return
     setBusy(true)
+    setBusyLabel(workspaceCopy.loadingWorkspace)
     try {
       const r = await requestWorkspacePermission(ws.handle)
       setPerm(r === 'granted' ? 'granted' : r === 'denied' ? 'denied' : 'unknown')
       if (r === 'granted') {
-        await refresh(ws, path)
+        await enterAtLatestPos(ws, workspaceCopy.loadingWorkspace)
         await resolvePendingBinding()
       }
     } finally {
       setBusy(false)
+      setBusyLabel(null)
     }
   }
 
@@ -515,7 +536,8 @@ export function WorkspacePanel() {
         return
       }
       setPerm('granted')
-      await refresh(next, next.path)
+      // adj550：切换到某个工作区 = 又一条"进入工作区"的入口 ⇒ 同一条规则：定位到它的最新位置
+      await enterAtLatestPos(next, workspaceCopy.loadingWorkspace)
       await resolvePendingBinding()
       showNotice(workspaceCopy.picked(next.name), 'ok')
     } catch (e) {

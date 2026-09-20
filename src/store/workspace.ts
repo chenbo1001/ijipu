@@ -461,23 +461,44 @@ export async function setWorkspace(rec: WorkspaceRecord | null): Promise<void> {
 }
 
 /**
- * 记住"上次所在的子目录"（adj540 / adj548）。
+ * 记住"上次所在的子目录"（adj540 / adj548 / adj550）。
  *
  * adj548（用户反馈）：**必须在"进入目录"时就记**，不能只在"面板关闭"时记——
  * 底栏收起、切到别的页签时面板是**直接卸载**的，关闭分支根本没机会执行，
  * 于是重新打开永远回到根目录（用户实测三个场景全丢）。
- * 落盘用**防抖 800ms**（连续进出多个目录只写最后一次），内存里的 `cached` 立即更新
- * （同一会话内切换页签/重挂载马上就能读到新位置）。
+ *
+ * adj550（用户要求）：**每次切换目录都立刻落盘**，作为该工作区的"最新位置"——
+ * 不再用防抖（导航是用户手速，一次几毫秒的 IndexedDB 写入无压力；
+ * 防抖会让"刚切完目录就关浏览器"丢掉最后那次导航）。内存里的 `cached` 同步更新，
+ * 因此同一会话内切页签/重挂载马上就能读到新位置。
  */
-let pathSaveTimer: ReturnType<typeof setTimeout> | null = null
 export async function rememberWorkspacePath(path: readonly string[]): Promise<void> {
   if (!cached) return
   cached = { ...cached, path: normalizeRelPath(path) }
-  if (pathSaveTimer) clearTimeout(pathSaveTimer)
-  pathSaveTimer = setTimeout(() => {
-    pathSaveTimer = null
-    void saveWorkspace(cached)
-  }, 800)
+  await saveWorkspace(cached)
+  syncListPath(cached) // adj550：**最近工作区列表里的那条也要跟着更新**，否则切回该工作区会拿到旧位置
+}
+
+/**
+ * adj550：把最新位置同步进"最近工作区"列表（**不改变顺序**——列表顺序表示"最近使用"）。
+ * 不这么做的话：列表里存的是"加入列表那一刻"的 path，切换回该工作区时会恢复成旧位置（实测踩到）。
+ * 列表未加载时跳过（面板激活时已经 `listWorkspaces()` 过，实践中总是已加载）。
+ */
+function syncListPath(rec: WorkspaceRecord): void {
+  if (!listLoaded) return
+  const i = cachedList.findIndex((r) => r.id === rec.id)
+  if (i < 0) return
+  if (joinPath(cachedList[i].path) === joinPath(rec.path)) return
+  cachedList = cachedList.map((r, k) => (k === i ? rec : r))
+  void saveWorkspaceList(cachedList)
+}
+
+/**
+ * adj550：把当前记录立刻落盘（面板卸载时调一次，作为"关页面前"的最后一道保险）。
+ * 因为 `rememberWorkspacePath` 已经即时写，这里通常是空转；保留是为了异常路径兜底。
+ */
+export function flushWorkspacePath(): void {
+  if (cached) void saveWorkspace(cached)
 }
 
 /**
