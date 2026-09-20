@@ -13,7 +13,7 @@
  *
  * 本组件纯 UI：插入逻辑经 props 的 onInsert 交由 EditorPane 统一处理。
  */
-import { useRef, type RefObject } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { useUiStore } from '../store/uiStore'
 import { PAD_GROUPS, PAD_KB_KEY, PAD_REDO_KEY, PAD_UNDO_KEY, type PadGroup } from './padLayout'
 import { GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
@@ -103,9 +103,67 @@ export function ScriptToolbar({
     onGroupMenuOpen(ext, rect)
   }
 
+  /**
+   * adj553（用户反馈"输入条放不下时 PC 端无法像手机端那样滑到后面的按钮"）：
+   *
+   * 手机上靠触摸滑动（`overflow-x: auto` + `-webkit-overflow-scrolling: touch`）就能翻看后面的按键，
+   * 而**鼠标滚轮在横向容器上默认无效**（滚轮只驱动纵向滚动），加上这里又隐藏了滚动条
+   * （`scrollbar-width: none`）⇒ PC 上既没有可见的滚动条、也没有可用的滑动方式，后面的按钮等于够不到。
+   *
+   * 三条对症措施（互补，缺一不可）：
+   *   ① **滚轮转横向**：把纵向 `deltaY` 投到 `scrollLeft`（触摸板横向滚动、Shift+滚轮原样放行）；
+   *   ② **左右箭头按钮**：只在真的溢出、且该方向还有内容时出现——既提供"不必滚轮"的鼠标路径，
+   *      也让"后面还有按键"这件事**看得见**（隐藏滚动条的代价就是没有这个提示）；
+   *   ③ 滚动/尺寸变化时实时更新两个箭头的可用状态。
+   */
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const [padOverflow, setPadOverflow] = useState({ left: false, right: false })
+
+  const syncOverflow = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const max = el.scrollWidth - el.clientWidth
+    setPadOverflow({ left: el.scrollLeft > 1, right: max > 1 && el.scrollLeft < max - 1 })
+  }, [])
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    syncOverflow()
+    // 滚轮转横向：只在容器**确实溢出**时接管，否则放行给页面（不劫持正常滚动）
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth) return
+      if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return // 触摸板横向滚动：交给浏览器
+      e.preventDefault()
+      el.scrollLeft += e.deltaY
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('scroll', syncOverflow, { passive: true })
+    const ro = new ResizeObserver(syncOverflow)
+    ro.observe(el)
+    // 按键组数量/文案变化会改变内容宽 ⇒ 也要重算（ResizeObserver 只盯盒子尺寸）
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('scroll', syncOverflow)
+      ro.disconnect()
+    }
+  }, [syncOverflow, hqVoiceKeys.length])
+
+  /** 箭头：按"一屏的 80%"翻页，滚到位就自动禁用 */
+  const pageBy = (dir: -1 | 1) => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollBy({ left: dir * Math.max(120, el.clientWidth * 0.8), behavior: 'smooth' })
+  }
+
   return (
     <div className="script-pad" role="toolbar" aria-label="简谱输入工具条" ref={padAreaRef}>
-      <div className="pad-scroll">
+      {padOverflow.left && (
+        <button type="button" className="pad-key pad-scroll-btn" title="向左翻看按键" aria-label="向左翻看按键" onClick={() => pageBy(-1)}>
+          ‹
+        </button>
+      )}
+      <div className="pad-scroll" ref={scrollRef}>
         {/* adj537（用户要求）：行首常驻「撤销 / 重做」图标按钮——手机端不必依赖 Ctrl+Z。
             放在**最左**（左手拇指第一落点），与后面的主键组用分隔点隔开；
             `onMouseDown.preventDefault()` 与其它按键一致：保住 textarea 焦点（否则点一下就失焦、
@@ -166,6 +224,11 @@ export function ScriptToolbar({
           <span className="pad-key-icon">{PAD_KB_KEY.label}</span>
         </button>
       </div>
+      {padOverflow.right && (
+        <button type="button" className="pad-key pad-scroll-btn" title="向右翻看按键" aria-label="向右翻看按键" onClick={() => pageBy(1)}>
+          ›
+        </button>
+      )}
     </div>
   )
 }

@@ -8136,8 +8136,8 @@ function runAdj534to537UiTests() {
       /disabled=\{!canRedo\}/.test(padSrc) &&
       /<svg/.test(padSrc),
     '')
-  check('adj537 图标键在最左（撤销 → 重做 → 分隔点 → 主键组）',
-    /<div className="pad-scroll">[\s\S]{0,900}?PAD_UNDO_KEY\.hint[\s\S]{0,400}?PAD_REDO_KEY\.hint[\s\S]{0,300}?<div className="pad-sep"[\s\S]{0,200}?PAD_GROUPS\.map/.test(padSrc),
+  check('adj537 图标键在最左（撤销 → 重做 → 分隔点 → 主键组；adj553 的翻看箭头在 .pad-scroll **之外**，不影响这个次序）',
+    /<div className="pad-scroll" ref=\{scrollRef\}>[\s\S]{0,900}?PAD_UNDO_KEY\.hint[\s\S]{0,400}?PAD_REDO_KEY\.hint[\s\S]{0,300}?<div className="pad-sep"[\s\S]{0,200}?PAD_GROUPS\.map/.test(padSrc),
     '')
   check('adj537 接线到 docStore（onUndo/onRedo + 栈长度选择器，不订阅整个数组）',
     /onUndo=\{undo\}/.test(editorSrc) &&
@@ -8899,6 +8899,24 @@ async function runAdj541DockToggleTests() {
     const r4 = await searchWorkspaceJps(root, '*', { concurrency: 4 })
     const parMs = Date.now() - t4
     console.log(`    并发实测（假句柄 ${perEntry}ms/条）：串行 ${serialMs}ms → 并发4 ${parMs}ms（提速 ${(serialMs / Math.max(1, parMs)).toFixed(1)}×）`)
+    // adj553（用户反馈）：输入条放不下时，**PC 端也要能滑到后面的按键**——手机上靠触摸滑动，
+    // 而鼠标滚轮默认只驱动纵向滚动、滚动条又被隐藏 ⇒ 后面的按键够不到、也看不出"还有内容"。
+    {
+      const padSrc = String(readFileSync('src/editor/ScriptToolbar.tsx', 'utf8'))
+      check('adj553（用户反馈）PC 端输入条放不下时可横向翻看：**滚轮转横向** + 溢出时才出现的**左右箭头**',
+        // 滚轮：非 passive 才能 preventDefault；触摸板横向滚动放行；只在溢出时接管
+        /el\.addEventListener\('wheel', onWheel, \{ passive: false \}\)/.test(padSrc) &&
+          /if \(el\.scrollWidth <= el\.clientWidth\) return/.test(padSrc) &&
+          /if \(Math\.abs\(e\.deltaX\) >= Math\.abs\(e\.deltaY\)\) return/.test(padSrc) &&
+          /el\.scrollLeft \+= e\.deltaY/.test(padSrc) &&
+          // 箭头：只在对应方向还有内容时出现；滚动/尺寸变化实时同步
+          /\{padOverflow\.left && \(/.test(padSrc) &&
+          /\{padOverflow\.right && \(/.test(padSrc) &&
+          /new ResizeObserver\(syncOverflow\)/.test(padSrc) &&
+          /className="pad-key pad-scroll-btn"/.test(padSrc) &&
+          /\.script-pad \.pad-scroll-btn \{/.test(cssSrc),
+        '')
+    }
     check(
       'adj546 并发枚举确实快于串行（假句柄注入 2ms/条延迟；真机 FSA 就是这个量级）',
       r1.hits.length === 160 && r4.hits.length === 160 && parMs * 1.6 < serialMs,
