@@ -8773,11 +8773,12 @@ async function runAdj541DockToggleTests() {
       /await resolvePendingBinding\(\)/.test(wsPanelSrc) &&
       /bindingRestored/.test(copySrc2),
     '')
-  check('adj545（用户要求）面板**左右两栏**：左=切换工作路径 + 路径 + 列表；右=固定宽度（过滤 / `*` 所有 / 消除过滤 / 操作▾）',
-    /<div className="ws-body">[\s\S]{0,400}?<div className="ws-left">[\s\S]{0,1200}?className="ws-workspace-btn"[\s\S]{0,2000}?className="ws-crumb"[\s\S]{0,6000}?className=\{`ws-list[\s\S]{0,6000}?<div className="ws-side">/.test(
+  check('adj545/adj549（用户要求）面板**上面包屑整行 + 下分左右两栏**：左=列表；右=固定宽度（过滤 / `*` / ✕ / 操作▾）',
+    // 上：ws-head（切换工作区按钮 + 面包屑）在 ws-body **之前**，独占一行
+    /<div className="ws-panel">[\s\S]{0,600}?<div className="ws-head">[\s\S]{0,1400}?className="ws-workspace-btn"[\s\S]{0,2000}?className="ws-crumb"[\s\S]{0,4000}?<div className="ws-body">[\s\S]{0,400}?<div className="ws-left">[\s\S]{0,800}?className=\{`ws-list[\s\S]{0,7000}?<div className="ws-side">/.test(
       wsPanelSrc,
     ) &&
-      // 过滤三件套 + 操作▾ 都在右栏里（顺序：过滤框 → * / ✕ 一行 → 操作）
+      // 下：过滤三件套 + 操作▾ 都在右栏里（顺序：过滤框 → * / ✕ 一行 → 操作）
       /className="ws-input ws-filter"[\s\S]{0,900}?className="ws-filter-row"[\s\S]{0,900}?ws-filter-all[\s\S]{0,900}?ws-filter-clear[\s\S]{0,900}?ws-side-group/.test(
         wsPanelSrc,
       ) &&

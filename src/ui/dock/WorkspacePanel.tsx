@@ -757,58 +757,55 @@ export function WorkspacePanel() {
 
   return (
     <div className="ws-panel">
-      {/* adj545（用户要求）：面板分**左右两栏**——
-          左栏（弹性）：切换工作路径按钮 + 路径面包屑 + 列表；
-          右栏（固定宽度）：过滤框 / `*` 所有 / 消除过滤 / 操作▾。
-          好处：过滤那几件控件不再各占一整行，列表拿到全部纵向空间。 */}
-      <div className="ws-body">
-        <div className="ws-left">
-          <div className="ws-head">
-            {/* adj540（用户第二轮反馈）：左侧放一个"切换工作区"图标按钮（`public/icons/工作区.png`）；
-                路径面包屑从**第一个段（根目录名）**开始就是普通段，点击=回到工作区根目录——
-                解决了"根目录名点不开"的别扭，把"切换工作区"这个动作彻底从路径里分离出去。 */}
-            <button
-              type="button"
-              className="ws-workspace-btn"
-              onClick={() => void (moving ? refreshMovingTarget([]) : onPick())}
-              title={workspaceCopy.workspaceBtnTitle}
-              aria-label={workspaceCopy.workspaceBtnTitle}
-              disabled={busy}
-            >
-              <ToolIcon name="workspace" />
-            </button>
-            <div className="ws-crumb" title={wsPathText}>
-              {/* 根目录名 = 普通面包屑段（"回到工作区根目录"或"移动模式下选工作区根作目标"） */}
+      {/* adj549（用户要求）：**面包屑独占一整行**（切换工作区按钮 + 路径 + 移动提示），
+          下面才分左右：左=目录/文件列表，右=过滤 / `*` / 消除过滤 / 操作▾。
+          这样路径能拿到整个面板宽度（此前被右栏挤掉一百多像素，深目录看不全）。 */}
+      <div className="ws-head">
+        {/* adj540（用户第二轮反馈）：左侧放一个"切换工作区"图标按钮（`public/icons/工作区.png`）；
+            路径面包屑从**第一个段（根目录名）**开始就是普通段，点击=回到工作区根目录——
+            解决了"根目录名点不开"的别扭，把"切换工作区"这个动作彻底从路径里分离出去。 */}
+        <button
+          type="button"
+          className="ws-workspace-btn"
+          onClick={() => void (moving ? refreshMovingTarget([]) : onPick())}
+          title={workspaceCopy.workspaceBtnTitle}
+          aria-label={workspaceCopy.workspaceBtnTitle}
+          disabled={busy}
+        >
+          <ToolIcon name="workspace" />
+        </button>
+        <div className="ws-crumb" title={wsPathText}>
+          {/* 根目录名 = 普通面包屑段（"回到工作区根目录"或"移动模式下选工作区根作目标"） */}
+          <button
+            type="button"
+            className="ws-crumb-seg ws-crumb-root"
+            onClick={() => void (moving ? refreshMovingTarget([]) : refresh(ws, []))}
+            disabled={busy}
+          >
+            {ws.handle.name}
+          </button>
+          <span className="ws-sep">/</span>
+          {path.map((seg, i) => (
+            <span key={`${seg}-${i}`}>
               <button
                 type="button"
-                className="ws-crumb-seg ws-crumb-root"
-                onClick={() => void (moving ? refreshMovingTarget([]) : refresh(ws, []))}
+                className="ws-crumb-seg"
+                onClick={() => void (moving ? refreshMovingTarget(path.slice(0, i + 1)) : refresh(ws, path.slice(0, i + 1)))}
                 disabled={busy}
               >
-                {ws.handle.name}
+                {seg}
               </button>
               <span className="ws-sep">/</span>
-              {path.map((seg, i) => (
-                <span key={`${seg}-${i}`}>
-                  <button
-                    type="button"
-                    className="ws-crumb-seg"
-                    onClick={() => void (moving ? refreshMovingTarget(path.slice(0, i + 1)) : refresh(ws, path.slice(0, i + 1)))}
-                    disabled={busy}
-                  >
-                    {seg}
-                  </button>
-                  <span className="ws-sep">/</span>
-                </span>
-              ))}
-            </div>
-            {/* 「移动到…」模式下头部显示目标提示 */}
-            {moving && (
-              <span className="ws-move-hint">
-                {workspaceCopy.moveHere}·{moving.list.length} → {crumb || ''}
-              </span>
-            )}
-          </div>
+            </span>
+          ))}
+        </div>
+        {/* 「移动到…」模式下头部显示目标提示 */}
+        {moving && (
+          <span className="ws-move-hint">
+            {workspaceCopy.moveHere}·{moving.list.length} → {crumb || ''}
+          </span>
+        )}
+      </div>
 
           {/* 输入/确认区：改名、新建、另存、删除确认都放这里（不占用列表行） */}
           {edit && (
@@ -870,6 +867,9 @@ export function WorkspacePanel() {
             </div>
           )}
 
+      {/* adj549：下面分左右两栏——**左栏只有列表**，右栏是过滤 / `*` / 消除过滤 / 操作▾（固定宽度）。 */}
+      <div className="ws-body">
+        <div className="ws-left">
           <div className={`ws-list${busyLabel ? ' is-busy' : ''}`} title={workspaceCopy.onlyListed}>
             {/* adj547（用户反馈）：**进行中的提示**放在列表最上方**立刻**出现（转圈 + 文案），
                 同时把旧内容变淡——用户一眼能分清"在忙"而不是"点不动/不能点"。 */}
