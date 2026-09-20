@@ -8679,6 +8679,7 @@ function runAdj541DockToggleTests() {
   const cssSrc = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
   const copySrc2 = String(readFileSync('src/brand/copy.ts', 'utf8'))
   const iconSrc = String(readFileSync('src/ui/toolIcons.ts', 'utf8'))
+  const wsPanelSrc = String(readFileSync('src/ui/dock/WorkspacePanel.tsx', 'utf8'))
   check('adj541 两个新图标登记进 ICON_FILES（文件名与设计稿一致）',
     /dockExpand: '底栏展开'/.test(iconSrc) && /dockCollapse: '底栏收起'/.test(iconSrc),
     '')
@@ -8713,6 +8714,19 @@ function runAdj541DockToggleTests() {
       // 反查"最后一个可见源码行"用视觉行前缀和二分（折行不产生新行号）
       /visualTopRef\.current/.test(editorSrc) &&
       /Math\.floor\(\(top \+ Math\.max\(0, clientH - 1\)\) \/ lineH\)/.test(editorSrc),
+    '')
+  // E-2026-249：面板"一直闪 + 点不动"= **无限刷新循环**。
+  // 根因：`invalidateCache` 是普通函数（每次渲染新引用）却进了 `refresh` 的 useCallback 依赖，
+  // 使 `refresh` 每次渲染都变 ⇒ 依赖它的"面板激活"effect 每渲染重跑 ⇒ setState ⇒ 再渲染……
+  // 断言要点：**进依赖的必须是稳定引用**（useCallback([]) / ref / store action）。
+  check('adj540 面板不会无限刷新（E-2026-249）：`invalidateCache` 用 useCallback([]) 固定、`refresh` 依赖只有稳定项、激活 effect 依赖 `[active, refresh]`',
+    /const invalidateCache = useCallback\(\(\) => \{[\s\S]{0,200}?\}, \[\]\)/.test(wsPanelSrc) &&
+      !/\[showNotice, invalidateCache\]/.test(wsPanelSrc) &&
+      // refresh 的依赖数组里只有 showNotice（store action，稳定引用）
+      /\[\s*showNotice,?\s*\]/.test(wsPanelSrc) &&
+      /\}, \[active, refresh\]\)/.test(wsPanelSrc) &&
+      // 关闭面板时写路径记忆走 ref，不把 `path` 塞进依赖（否则每次导航都会重跑 effect）
+      /rememberWorkspacePath\(pathRef\.current\)/.test(wsPanelSrc),
     '')
 }
 

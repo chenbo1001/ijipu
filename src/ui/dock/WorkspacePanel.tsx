@@ -106,6 +106,9 @@ export function WorkspacePanel() {
    * 是慢的次要来源）。整张缓存只在任何写操作（重命名/删除/新建/移动）后清空——写之后缓存里的列表已过期。
    */
   const entriesCacheRef = useRef<Map<string, DirEntry[]>>(new Map())
+  /** 当前路径的 ref（供 effect 读取，避免把 `path` 加进依赖导致 effect 反复重跑） */
+  const pathRef = useRef<string[]>([])
+  pathRef.current = path
   /** adj540（用户报告 `*` 列不出文件）：搜索期间读不动的目录名——**主动告知**而非静默 */
   const [, setBlockedDirs] = useState<string[]>([])
   /**
@@ -202,9 +205,17 @@ export function WorkspacePanel() {
   }
 
   /** 写操作后**整张列表缓存都过期**——统一清空比按路径精确失效简单且足够（写不频繁） */
-  const invalidateCache = () => {
+  /**
+   * 写操作后**整张列表缓存都过期**——统一清空比按路径精确失效简单且足够（写不频繁）。
+   *
+   * ⚠️ **必须 `useCallback([])` 固定引用**（E-2026-249）：它进了 `refresh` 的依赖数组，
+   * 而 `refresh` 又在"面板激活"effect 的依赖里——普通函数每次渲染都换新引用，
+   * 会让 `refresh` 每次渲染都变 ⇒ effect 每渲染重跑 ⇒ `setState` ⇒ 再渲染……
+   * **无限刷新循环**（表现为面板内容一直闪、点目录/文件没反应）。
+   */
+  const invalidateCache = useCallback(() => {
     entriesCacheRef.current.clear()
-  }
+  }, [])
   /** 列目录（带缓存——同一路径再次访问直接走缓存，避免每次都打 IndexedDB / FSA） */
   const refresh = useCallback(
     async (rec: WorkspaceRecord, next: string[]) => {
@@ -229,7 +240,6 @@ export function WorkspacePanel() {
         setEdit(null)
         setConfirmDel(null)
         // 路径记忆**只在打开/关闭时写一次**（activation effect 里），不在每次导航都写——少写 N 次 IndexedDB
-        invalidateCache() // 写操作都 invalidate；这里 refresh 自己是读、不算，但保持语义统一
       } catch (e) {
         const reason = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
         showNotice(workspaceCopy.loadFailed(reason), 'error')
@@ -238,7 +248,7 @@ export function WorkspacePanel() {
         setBusy(false)
       }
     },
-    [showNotice, invalidateCache],
+    [showNotice],
   )
 
   /**
@@ -255,8 +265,9 @@ export function WorkspacePanel() {
       setMenuOpen(false)
       setQuery('')
       setHits(null)
-      // adj540：路径记忆写在**关闭面板时**（打开时已经在 IDB 里读到了 ws.path），写一次就够
-      void rememberWorkspacePath(path).catch(() => {})
+      // adj540：路径记忆写在**关闭面板时**（打开时已经在 IDB 里读到了 ws.path），写一次就够。
+      // 经 ref 读当前路径——不把 `path` 放进依赖数组（那样每次导航都会重跑本 effect）。
+      void rememberWorkspacePath(pathRef.current).catch(() => {})
       return
     }
     let alive = true
@@ -354,6 +365,7 @@ export function WorkspacePanel() {
     if (!ws || !edit) return
     const value = edit.value.trim()
     if (!value) return
+    invalidateCache() // adj540：写操作 ⇒ 列表缓存先作废（否则刷新时吃到旧列表）
     const segsOf = (raw: string): string[] => [...path, `${stripJpsExt(raw)}.jps`]
     if (edit.kind === 'rename' && edit.name) {
       const ok = await renameWorkspaceFile(path, edit.name, `${stripJpsExt(value)}.jps`)
@@ -413,6 +425,7 @@ export function WorkspacePanel() {
 
   const submitMove = async () => {
     if (!ws || !moving) return
+    invalidateCache() // adj540：移动会改动源目录与目标目录两处列表
     const ok = await moveWorkspaceFiles(moving.list, path)
     if (ok) {
       setMoving(null)
@@ -438,6 +451,7 @@ export function WorkspacePanel() {
     if (!ws || !confirmDel) return
     setBusy(true)
     try {
+      invalidateCache() // adj540：删除后列表缓存作废
       const ok = await deleteWorkspaceEntries(confirmDel.items)
       setConfirmDel(null)
       if (ok) await refresh(ws, path)
