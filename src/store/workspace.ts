@@ -128,11 +128,13 @@ export interface SearchHit {
   dirSegs: string[]
 }
 
-/** 搜索结果 + **是否被上限截断**（截断必须让用户看见，否则就成了"我的文件不见了"） */
+/** 搜索结果 + **是否被上限截断 / 是否跳过了读不动的目录**（两种都必告诉用户） */
 export interface SearchResult {
   hits: SearchHit[]
   /** true = 因深度/条目/命中数上限而**没搜完**（"没搜到"与"没搜完"对用户是两件事） */
   truncated: boolean
+  /** 读不动而**被跳过的目录名列表**（权限/竞态等）—— 不主动说就成了"文件不见了" */
+  blocked: string[]
 }
 
 /**
@@ -155,6 +157,7 @@ export async function searchWorkspaceJps(
   const hits: SearchHit[] = []
   let visited = 0
   let truncated = false
+  const blocked: string[] = []
   /** 是否已达上限（达到即置 `truncated`，让调用方能把"没搜完"说出来） */
   const limited = (): boolean => {
     if (hits.length >= maxHits || visited >= maxEntries) {
@@ -169,11 +172,15 @@ export async function searchWorkspaceJps(
       return
     }
     if (limited()) return
+    // adj540（用户报告 `*` 列不出文件）：**某一层读不动不能把整棵树废掉**——
+    // 把已经成功读到的 children 继续处理，只记录读不动的那个目录名（"没搜到"与"没搜到但
+    // 有目录读不动"对用户是两件事：前者是工作区里没有，后者是访问被拒/被竞态）。
     let children: FileSystemHandle[] = []
     try {
       for await (const h of dir.values()) children.push(h)
     } catch {
-      return // 某一层读不动就跳过，不影响其它目录
+      blocked.push(joinPath(dirSegs))
+      // 不 return——children 里已有的项继续
     }
     for (const h of children) {
       if (limited()) return
@@ -192,7 +199,7 @@ export async function searchWorkspaceJps(
     }
   }
   await walk(root, [], 1)
-  return { hits, truncated }
+  return { hits, truncated, blocked }
 }
 
 /**

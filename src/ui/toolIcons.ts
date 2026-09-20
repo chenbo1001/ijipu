@@ -59,6 +59,10 @@ export const ICON_FILES = {
   themeDark: '深色主题',
   /** adj540：工作区（选文件夹当工作区；底栏「工作区」页签用） */
   workspace: '工作区',
+  /** adj541：底栏展开（底栏收起时，编辑区左下角的悬浮按钮） */
+  dockExpand: '底栏展开',
+  /** adj541：底栏收起（底栏页签栏里、高度档位按钮左边的按钮） */
+  dockCollapse: '底栏收起',
 } as const
 
 export type ToolIconName = keyof typeof ICON_FILES

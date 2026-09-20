@@ -35,6 +35,7 @@ import { useUiStore } from '../../store/uiStore'
 import { workspaceCopy } from '../../brand/copy'
 import { fileBaseName } from '../../store/saveSupport'
 import type { WorkspaceRecord } from '../../store/fileHandleDb'
+import { ToolIcon } from '../ToolIcon'
 import {
   getWorkspace,
   isWorkspaceSupported,
@@ -99,6 +100,15 @@ export function WorkspacePanel() {
   const [moving, setMoving] = useState<MoveState | null>(null)
   const [confirmDel, setConfirmDel] = useState<DelState | null>(null)
   /**
+   * adj540（用户报告"手机上打开进入子目录有点慢"）：**进入子目录的列表缓存**——用过一遍的路径
+   * 留着，再次访问时（"上级目录"返回、子目录之间跳转）**直接用缓存**。同时**减少 IndexedDB 写入**：
+   * `rememberWorkspacePath` 只在面板打开/关闭时写一次，**不在每次导航时都写**（IndexedDB 写在 Android 上动辄 20-50ms，
+   * 是慢的次要来源）。整张缓存只在任何写操作（重命名/删除/新建/移动）后清空——写之后缓存里的列表已过期。
+   */
+  const entriesCacheRef = useRef<Map<string, DirEntry[]>>(new Map())
+  /** adj540（用户报告 `*` 列不出文件）：搜索期间读不动的目录名——**主动告知**而非静默 */
+  const [, setBlockedDirs] = useState<string[]>([])
+  /**
    * adj540（用户要求）：**过滤框**——默认为层级列表（进目录逐级浏览）；一旦输入过滤词，
    * 就把**整个工作区（含子目录）**里符合条件的 `.jps` 收成**平坦列表**，点一条直接打开。
    * `hits === null` 表示"当前没在过滤"（走层级模式）。
@@ -141,13 +151,17 @@ export function WorkspacePanel() {
           if (!alive) return
           setHits(r.hits)
           setHitsTruncated(r.truncated)
+          setBlockedDirs(r.blocked)
           // 没搜完必须说出来：否则用户会以为"工作区里就没有这些谱"
           if (r.truncated) showNotice(workspaceCopy.searchTruncated(r.hits.length), 'warn')
+          // 读不动的目录也说出来：不然 `*` 看不到就是"文件不见了"
+          if (r.blocked.length > 0) showNotice(workspaceCopy.searchBlockedDirs(r.blocked), 'warn')
         })
         .catch(() => {
           if (alive) {
             setHits([])
             setHitsTruncated(false)
+            setBlockedDirs([])
           }
         })
     }, 200)
@@ -156,7 +170,6 @@ export function WorkspacePanel() {
       window.clearTimeout(t)
     }
   }, [ws, perm, query, searching, showNotice])
-
   /** 弹出菜单：点外面/按 Esc 关闭（菜单渲染在 portal 里，不在 dock 的裁剪范围内） */
   useEffect(() => {
     if (!menuOpen) return
@@ -188,18 +201,35 @@ export function WorkspacePanel() {
     setMenuOpen(true)
   }
 
-  /** 列目录（读不到就提示，不静默——否则用户只看到"空的"） */
+  /** 写操作后**整张列表缓存都过期**——统一清空比按路径精确失效简单且足够（写不频繁） */
+  const invalidateCache = () => {
+    entriesCacheRef.current.clear()
+  }
+  /** 列目录（带缓存——同一路径再次访问直接走缓存，避免每次都打 IndexedDB / FSA） */
   const refresh = useCallback(
     async (rec: WorkspaceRecord, next: string[]) => {
       setBusy(true)
+      const key = joinPath(next)
+      const cached = entriesCacheRef.current.get(key)
+      if (cached) {
+        setEntries(cached)
+        setPath(next)
+        setSelected([])
+        setEdit(null)
+        setConfirmDel(null)
+        setBusy(false)
+        return
+      }
       try {
         const list = await readDirEntries(rec.handle, next)
+        entriesCacheRef.current.set(key, list)
         setEntries(list)
         setPath(next)
         setSelected([])
         setEdit(null)
         setConfirmDel(null)
-        void rememberWorkspacePath(next)
+        // 路径记忆**只在打开/关闭时写一次**（activation effect 里），不在每次导航都写——少写 N 次 IndexedDB
+        invalidateCache() // 写操作都 invalidate；这里 refresh 自己是读、不算，但保持语义统一
       } catch (e) {
         const reason = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
         showNotice(workspaceCopy.loadFailed(reason), 'error')
@@ -208,7 +238,7 @@ export function WorkspacePanel() {
         setBusy(false)
       }
     },
-    [showNotice],
+    [showNotice, invalidateCache],
   )
 
   /**
@@ -225,6 +255,8 @@ export function WorkspacePanel() {
       setMenuOpen(false)
       setQuery('')
       setHits(null)
+      // adj540：路径记忆写在**关闭面板时**（打开时已经在 IDB 里读到了 ws.path），写一次就够
+      void rememberWorkspacePath(path).catch(() => {})
       return
     }
     let alive = true
@@ -288,7 +320,9 @@ export function WorkspacePanel() {
     }
   }
 
-  /** 打开某一项（目录 ⇒ 进入；文件 ⇒ 打开并收起底栏）——**点行就是这件事**，不需先选中 */
+  /** 打开某一项（目录 ⇒ 进入；文件 ⇒ 打开并收起底栏）——**点行就是这件事**，不需先选中
+   * adj540（用户反馈）：列表里点击文件名就能打开/进入，所以右侧独立的「打开」按钮意义不大——
+   * 删除掉（要打开选中项时直接点行）。 */
   const openEntry = async (entry: DirEntry) => {
     if (!ws) return
     if (entry.kind === 'dir') {
@@ -297,11 +331,6 @@ export function WorkspacePanel() {
     }
     const ok = await openWorkspaceFile([...path, entry.name])
     if (ok) closeDock()
-  }
-
-  /** 「打开」按钮：仅在恰好选中一项时可用 */
-  const openSelected = async () => {
-    if (selCount === 1) await openEntry(selectedEntries[0])
   }
 
   /** 移动模式下切换目标目录（不动已定的搬运清单） */
@@ -462,18 +491,25 @@ export function WorkspacePanel() {
   return (
     <div className="ws-panel">
       <div className="ws-head">
-        <div className="ws-crumb">
-          {/* adj540：面包屑首段 = **工作区根目录名**，它本身就是一个按钮：
-              · 平时点它 = 换一个工作区目录（`onPick`）——于是头部不必再放「换一个文件夹」按钮（用户要求）；
-              · 「移动到…」模式下点它 = 把工作区根目录当移动目标（与后面的子目录面包屑语义一致）。
-              用户反馈两点已修：**要长得像按钮**（用途才明确）、**悬浮提示要写清"切换工作区目录"**
-              （原来只给路径，看不出点它会干什么）；注：FSA 不给完整磁盘路径，所以显示文件夹名。 */}
+        {/* adj540（用户第二轮反馈）：左侧放一个"切换工作区"图标按钮（`public/icons/工作区.png`）；
+            路径面包屑从**第一个段（根目录名）**开始就是普通段，点击=回到工作区根目录——
+            解决了"根目录名点不开"的别扭，把"切换工作区"这个动作彻底从路径里分离出去。 */}
+        <button
+          type="button"
+          className="ws-workspace-btn"
+          onClick={() => void (moving ? refreshMovingTarget([]) : onPick())}
+          title={workspaceCopy.workspaceBtnTitle}
+          aria-label={workspaceCopy.workspaceBtnTitle}
+          disabled={busy}
+        >
+          <ToolIcon name="workspace" />
+        </button>
+        <div className="ws-crumb" title={wsPathText}>
+          {/* 根目录名 = 普通面包屑段（"回到工作区根目录"或"移动模式下选工作区根作目标"） */}
           <button
             type="button"
-            className="btn ws-root"
-            onClick={() => void (moving ? refreshMovingTarget([]) : onPick())}
-            title={moving ? workspaceCopy.moveHere : workspaceCopy.switchDirTitle(ws.handle.name)}
-            aria-label={workspaceCopy.switchDirTitle(ws.handle.name)}
+            className="ws-crumb-seg ws-crumb-root"
+            onClick={() => void (moving ? refreshMovingTarget([]) : refresh(ws, []))}
             disabled={busy}
           >
             {ws.handle.name}
@@ -493,7 +529,7 @@ export function WorkspacePanel() {
             </span>
           ))}
         </div>
-        {/* 「移动到…」模式下头部显示目标提示；平时不再放按钮（根目录名就是换目录入口） */}
+        {/* 「移动到…」模式下头部显示目标提示 */}
         {moving && (
           <span className="ws-move-hint">
             {workspaceCopy.moveHere}·{moving.list.length} → {crumb || ''}
@@ -683,18 +719,7 @@ export function WorkspacePanel() {
                 )}
               </div>
 
-              {/* 打开（选中恰好一项时可用；也可直接点列表里的名字打开） */}
-              <button
-                type="button"
-                className="btn primary ws-side-btn"
-                onClick={() => void openSelected()}
-                disabled={busy || selCount !== 1}
-              >
-                {workspaceCopy.actOpen}
-              </button>
-
-              {/* adj540（用户要求）：右侧**只留一个下拉按钮**——点它**弹出菜单**再选具体操作。
-                  菜单用 portal 渲染（dock 是 overflow:hidden，就地浮层会被裁掉），锚在本按钮**上方**。 */}
+              {/* adj540（用户反馈）：列表里点文件名就能打开/进入——右侧不再放独立的「打开」按钮（与行点击功能重复）。只剩一个「操作▾」下拉。 */}
               <button
                 ref={menuBtnRef}
                 type="button"

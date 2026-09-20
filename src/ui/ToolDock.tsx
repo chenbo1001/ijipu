@@ -662,6 +662,18 @@ export function ToolDock() {
        *   · ✕ 独自留在最右端、与档位按钮之间隔着**整条页签区**，够不到也就按不到。
        * 两个按钮**仍在可滚页签区之外**（adj525 的口径完全不变），页签溢出只推动页签区内部滚动。 */}
       <div className="tool-dock-tabs">
+        {/* adj541（用户要求）：**收起底栏**按钮，位置在高度档位按钮**左边**。
+            点它 = 收起底栏，并在编辑区左下角浮出「展开底栏」按钮（见 EditorPane 的 `.dock-fab`）。
+            与档位/✕ 一样常驻（在可滚页签区之外），页签再多也不影响。 */}
+        <button
+          type="button"
+          className="tool-dock-collapse"
+          onClick={closeDock}
+          title={dockCopy.collapseTitle}
+          aria-label={dockCopy.collapseTitle}
+        >
+          <ToolIcon name="dockCollapse" size={16} />
+        </button>
         {/* adj520：底栏高度档位切换按钮（单按钮，4 相位循环）——
             循环表见模块级 `SIZE_PHASES`；高度序列
             `建议 → 最大 → 建议 → 最小 → 建议 → …`，

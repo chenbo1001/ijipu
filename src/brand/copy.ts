@@ -146,10 +146,9 @@ export const workspaceCopy = {
   grantPathHint: '浏览器出于隐私不提供完整磁盘路径，这里显示的是「文件夹名 + 工作区内相对路径」',
   grantWhy: '刷新或重新打开页面后，浏览器会把目录权限重置为"待确认"，需要在点击后重新授予一次。',
   switchDir: '换一个文件夹',
-  /** adj540：面包屑首段（工作区根目录名）本身就是"换工作区目录"的按钮——省掉右侧那个按钮（用户要求） */
-  switchDirHint: '切换工作区目录',
-  /** 悬浮提示：写清"点它会做什么 + 当前是哪个目录"（用户反馈原来的提示不够明确） */
-  switchDirTitle: (dir: string): string => `切换工作区目录（当前：${dir}）`,
+  /** adj540（用户第二轮反馈）：左侧的"切换工作区"按钮改用图标（`public/icons/工作区.png`）+ 通用悬浮提示
+      ——把"切换工作区"这个动作从路径面包屑里彻底分离出去，根目录名恢复成普通的面包屑段（点击=回工作区根） */
+  workspaceBtnTitle: '切换工作区目录',
   up: '上级目录',
   emptyDir: '这个文件夹里没有 .jps 文件',
   rootLabel: '工作区',
@@ -226,6 +225,9 @@ export const workspaceCopy = {
   /** 通配符说明（输入框 title） */
   filterHint: '不含 * ? 时按子串匹配；含 * ? 时按通配符整体匹配（如 小星*、*练习*、第?课）',
   searchEmpty: '工作区里没有匹配的 .jps',
+  /** adj540（用户报告 `*` 仍看不到文件）：读不动的目录也主动说出来——"没搜到"与"没搜完/搜到一半"是两件事 */
+  searchBlockedDirs: (dirs: string[]): string =>
+    `有 ${dirs.length} 个子目录读不动（可能在里面），已跳过：${dirs.slice(0, 3).join('、')}${dirs.length > 3 ? '…' : ''}`,
   /** 命中数被上限截断时如实告知（否则用户以为"文件不见了"） */
   searchTruncated: (n: number): string => `匹配项很多，先显示前 ${n} 个（输入更具体的关键词可缩小范围）`,
   /** 过滤结果条数（侧栏标签用） */
@@ -300,6 +302,9 @@ export const dockCopy = {
   tabWorkspace: '工作区',
   /** 标题栏 × 按钮 */
   closeTitle: '关闭底栏',
+  /** adj541：底栏展开/收起（编辑区左下角悬浮按钮 + 页签栏里的收起按钮） */
+  expandTitle: '展开底栏',
+  collapseTitle: '收起底栏',
   /** 顶部抓手（拖拽调整 dock 高度） */
   resizeTitle: '拖动调整底栏高度',
   /** 无告警时告警面板的占位文字 */

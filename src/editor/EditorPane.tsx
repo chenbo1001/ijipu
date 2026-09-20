@@ -17,6 +17,8 @@ import { formatLine, codePosToNoteId } from '@ijipu/engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 import { isBarlineModifierContext, filterModifierHints } from './completions'
 import { ScriptToolbar } from './ScriptToolbar'
+import { ToolIcon } from '../ui/ToolIcon'
+import { dockCopy } from '../brand/copy'
 import type { PadGroup, PadKey } from './padLayout'
 
 /** adj165：自动提示浮层状态（null = 不显示）
@@ -73,6 +75,10 @@ export function EditorPane() {
   const autoWrap = useUiStore((s) => s.autoWrap)
   // adj314：嵌入式简谱输入工具条显示开关
   const showScriptPad = useUiStore((s) => s.showScriptPad)
+  // adj541：底栏展开悬浮按钮要读的两个状态（关着才显示；点开时保留上次的页签）
+  const dockOpen = useUiStore((s) => s.dockOpen)
+  const dockPanel = useUiStore((s) => s.dockPanel)
+  const setDockPanel = useUiStore((s) => s.setDockPanel)
   // 编辑器字体/字号属 L1「用户个性」（本机偏好，**不随谱保存**；分层见 docs/SETTINGS-AUDIT.md）——
   // adj-font：此前这里读 `pageConfig.editorFontSize ?? editorFontSize`（谱面里有值就优先），
   // 而谱面里的这两个键是早期版本误写进去的；现已从 PageConfig 移除，只认本机偏好。
@@ -100,6 +106,18 @@ export function EditorPane() {
   // 避免 scrollTop 同步被各自 scrollHeight 钳制（滚动到底时显示层停住、textarea 继续滚）
   const hlInnerRef = useRef<HTMLDivElement>(null)
   const gutterInnerRef = useRef<HTMLDivElement>(null)
+  /**
+   * adj542（用户要求）：行号栏**默认按两位数**宽，只有**滚动到超过两位数的行号**时才加宽。
+   *
+   * 之前是按"整篇行数"算（`String(lineCount).length`）——一份 300 行的谱，打开时明明在第 1 行，
+   * 行号栏也已占三位的宽度，白白挤掉代码区。
+   * 口径：`gutterDigits` 只**增长**（缩窄会让代码区在滚动时左右跳动），并受整篇行数上限约束
+   * （`min(gutterDigits, String(lineCount).length)`）——换到短文档/删行后自动回到两位。
+   * 为了不因滚动而频繁重渲染，只在**数字位数**变化时 `setState`（见下面的 `syncGutterDigitsRef`）。
+   */
+  const [gutterDigits, setGutterDigits] = useState(2)
+  /** 滚动的"位数同步"回调：`visualTopOfLine` 在其后定义，故经 ref 调用（与 onScrollRef 同套路） */
+  const syncGutterDigitsRef = useRef<(top: number, clientH: number) => void>(() => {})
   const formatTimer = useRef<number | null>(null)
   // adj110：最近编辑行（光标所在行）；光标离开该行时格式化它，避免输入时抢光标
   const editingLineRef = useRef<number>(-1)
@@ -221,6 +239,8 @@ export function EditorPane() {
     const gutterInner = gutterInnerRef.current
     if (hlInner) hlInner.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`
     if (gutterInner) gutterInner.style.transform = `translateY(${-ta.scrollTop}px)`
+    // adj542：滚到三位数行号时才把行号栏加宽（只在位数变化时 setState，不按像素重渲染）
+    syncGutterDigitsRef.current(ta.scrollTop, ta.clientHeight)
     setCompletion(null) // adj165：滚动时关闭提示（位置不再准确）
   }
 
@@ -397,6 +417,30 @@ export function EditorPane() {
   // adj223：视觉行前缀和经 ref 供光标跳转滚动读取（避免加入 effect 依赖）
   const visualTopRef = useRef(visualTopOfLine)
   visualTopRef.current = visualTopOfLine
+
+  /**
+   * adj542：由「视口底部落在第几视觉行」反查**最后一个可见源码行号**，据此决定行号栏位数。
+   * 用视觉行前缀和二分（折行算在同一源码行内），O(log n)，滚动时开销可忽略。
+   */
+  syncGutterDigitsRef.current = (top: number, clientH: number) => {
+    const tops = visualTopRef.current
+    if (tops.length === 0) return
+    const lastRow = Math.floor((top + Math.max(0, clientH - 1)) / lineH)
+    let lo = 0
+    let hi = tops.length - 1
+    let idx = 0
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1
+      if (tops[mid] <= lastRow) {
+        idx = mid
+        lo = mid + 1
+      } else {
+        hi = mid - 1
+      }
+    }
+    const need = Math.max(2, String(idx + 1).length)
+    setGutterDigits((prev) => (prev >= need ? prev : need)) // 只增不减（缩窄会让代码区左右跳动）
+  }
 
   // 光标写入 store + 谱面联动（M3）
   const onSelect = () => {
@@ -767,7 +811,9 @@ export function EditorPane() {
   const html = highlightCodeWrapped(code, new Set(errByLine.keys()), cursor, wrapPoints, blockMarks)
   const gutterLines = Array.from({ length: lineCount }, (_, i) => i + 1)
   // adj242：行号字号跟随脚本字号后，按行号位数自适应栏宽（避免大字号/多位数被裁切）
-  const gutterNumW = Math.max(46, String(lineCount).length * effectiveFontSize * 0.62 + 16)
+  // adj542（用户要求）：**默认两位数**宽度；`gutterDigits` 只随滚动增长，且不超过整篇行数的位数
+  // （所以短文档/删行后自然回到两位）。栏宽公式与原来一致，只把"位数"的来源换掉。
+  const gutterNumW = Math.max(46, Math.max(2, Math.min(gutterDigits, String(lineCount).length)) * effectiveFontSize * 0.62 + 16)
 
   // 编辑器字号 → CSS 变量（--jp-editor-fs / --jp-editor-lh），驱动 textarea/高亮层/行号栏
   // adj163：字体值保留 monospace 回退——避免所选字体缺失时退化为非等宽默认字体导致
@@ -780,6 +826,9 @@ export function EditorPane() {
     '--jp-editor-font': `${effectiveFont}, monospace`,
     // adj224：高亮层宽度跟随 textarea 内容区（滚动条占宽后两侧折行一致）
     '--jp-editor-content-w': taClientW > 0 ? `${taClientW}px` : '100%',
+    // adj541：把行号栏宽度透出成变量——"展开底栏"悬浮按钮据此**居中在行号列上**（不压代码内容），
+    // 且行号位数变化（栏宽自适应）时自动跟着居中。
+    '--jp-gutter-w': `${gutterNumW}px`,
   } as React.CSSProperties
 
   return (
@@ -864,6 +913,23 @@ export function EditorPane() {
             />
           )}
         </div>
+
+        {/* adj541（用户要求）：底栏收起时，在**行号栏位置**（不遮代码内容）浮出「展开底栏」按钮。
+            放在 `.editor-body` 里、用 `--jp-gutter-w` 居中到行号列上——行号栏本身是 `aria-hidden`
+            的装饰层，不能把可点按钮塞进去；放这里既能对齐行号列，又保留可访问性。
+            又因为它属于 `.editor-body`（输入条 `.script-pad` 在其下方、属于 `.editor-pane`），
+            输入条显示时按钮**自然位于输入条上方**、不占输入条位置。 */}
+        {!dockOpen && (
+          <button
+            type="button"
+            className="dock-fab"
+            onClick={() => setDockPanel(dockPanel)}
+            title={dockCopy.expandTitle}
+            aria-label={dockCopy.expandTitle}
+          >
+            <ToolIcon name="dockExpand" />
+          </button>
+        )}
       </div>
       {/* adj314：嵌入式简谱输入工具条——编辑器底部常驻（编辑区与预览/分页之间），
           单行横向滑动，一级主键/软键盘开关（adj323：二级键改为浮层弹出） */}

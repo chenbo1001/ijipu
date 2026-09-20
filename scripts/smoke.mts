@@ -8488,12 +8488,16 @@ function runAdj540WorkspaceTests() {
       /grantTitle: '需要重新授权访问这个文件夹'/.test(copySrc) &&
       /grantPathHint/.test(copySrc),
     '')
-  check('adj540 面包屑首段（工作区根目录名）本身就是**换目录按钮**（省掉右侧「换一个文件夹」；移动模式下它=选根目录为目标）',
-    /className="btn ws-root"[\s\S]{0,260}?onClick=\{\(\) => void \(moving \? refreshMovingTarget\(\[\]\) : onPick\(\)\)\}/.test(
+  check('adj540 面包屑：**左侧图标按钮 = 切换工作区** + **根目录名是普通面包屑段**（用户第二轮反馈：根目录名做换目录很别扭——改成纯路径段，点它=回工作区根）',
+    /className="ws-workspace-btn"[\s\S]{0,200}?onClick=\{\(\) => void \(moving \? refreshMovingTarget\(\[\]\) : onPick\(\)\)\}/.test(
       panelSrc,
     ) &&
-      // 平时头部不再有"换一个文件夹"按钮（授权视图里那个仍在，故只断言头部那处已移除）
-      !/workspaceCopy\.switchDir\}\s*<\/button>\s*\)\}\s*<\/div>/.test(panelSrc),
+      /<ToolIcon name="workspace" \/>/.test(panelSrc) &&
+      /className="ws-crumb-seg ws-crumb-root"[\s\S]{0,200}?onClick=\{\(\) => void \(moving \? refreshMovingTarget\(\[\]\) : refresh\(ws, \[\]\)\)\}/.test(
+        panelSrc,
+      ) &&
+      !/className="btn ws-root"/.test(panelSrc) &&
+      /workspaceBtnTitle/.test(copySrc),
     '')
   check('adj540 入口接线：**窄屏以工作区为主入口**（菜单里工作区排第一，只留平台无关项）',
     // 窄屏分支：工作区在最前，且**不含**系统选择器/新建/保存/另存为那些项（都在面板里或只在 PC 上成立）
@@ -8544,11 +8548,13 @@ function runAdj540WorkspaceTests() {
       /filterAllTitle/.test(copySrc) &&
       /\.ws-filter-all\.is-active/.test(cssAll),
     '')
-  check('adj540 搜索**没搜完必须说出来**（上限截断 ⇒ `truncated` + 提示；"没搜到"与"没搜完"分开）',
-    /export interface SearchResult \{[\s\S]{0,200}?truncated: boolean/.test(wsSrc) &&
-      /return \{ hits, truncated \}/.test(wsSrc) &&
+  check('adj540 搜索**没搜完 / 读不动的目录**都必须说出来（API 加 `truncated` 和 `blocked` 两个字段；面板 notice）',
+    /export interface SearchResult \{[\s\S]{0,300}?truncated: boolean[\s\S]{0,80}?blocked: string\[\]/.test(wsSrc) &&
+      /return \{ hits, truncated, blocked \}/.test(wsSrc) &&
       /setHitsTruncated\(r\.truncated\)/.test(panelSrc) &&
+      /setBlockedDirs\(r\.blocked\)/.test(panelSrc) &&
       /searchTruncated/.test(copySrc) &&
+      /searchBlockedDirs/.test(copySrc) &&
       // 上限不能太小（"* 列不全"的另一种解释就是上限太低）：默认深度 ≥10、条目 ≥5000
       /maxDepth \?\? 10/.test(wsSrc) &&
       /maxEntries \?\? 5000/.test(wsSrc),
@@ -8580,16 +8586,12 @@ function runAdj540WorkspaceTests() {
       matchesQuery('a.jps', 'a.jps', 'a.jps') &&
       !matchesQuery('axjps', 'axjps', 'a.jps'),
     '')
-  check('adj540 面包屑首段是**按钮样式**的"切换工作区目录"入口（用户反馈：像纯文字看不出用途、提示要写清做什么）',
-    /className="btn ws-root"/.test(panelSrc) &&
-      /switchDirTitle\(ws\.handle\.name\)/.test(panelSrc) &&
-      /switchDirTitle: \(dir: string\): string => `切换工作区目录（当前：\$\{dir\}）`/.test(copySrc) &&
-      /\.ws-root \{[\s\S]{0,300}?border: 1px solid var\(--jp-border\)/.test(cssAll),
-    '')
-  check('adj540 根目录名**不许被截断**（用户反馈"只显示到工作区根目录时名字不全"）——长名字让面包屑横向滚动',
-    !/\.ws-root \{[\s\S]{0,400}?max-width/.test(cssAll) &&
-      !/\.ws-root \{[\s\S]{0,400}?text-overflow: ellipsis/.test(cssAll) &&
-      /\.ws-root \{[\s\S]{0,400}?white-space: nowrap/.test(cssAll),
+  check('adj540 面包屑**左对齐**（去掉 .ws-head 里的 space-between）+ 切换按钮**无底色圆角**（border:0 + border-radius:50% + 无 background）',
+    !/\.ws-head \{[\s\S]{0,400}?justify-content: space-between/.test(cssAll) &&
+      /\.ws-workspace-btn \{[\s\S]{0,300}?border: 0\b[\s\S]{0,100}?border-radius: 50%/.test(cssAll) &&
+      /\.ws-workspace-btn \{[\s\S]{0,400}?background: transparent/.test(cssAll) &&
+      /white-space: nowrap/.test(cssAll) &&
+      !/\.ws-crumb-root \{[\s\S]{0,200}?text-overflow: ellipsis/.test(cssAll),
     '')
   check('adj540 列表行带**复选框**（勾选=选中供 改名/移动/删除；点名字=打开/进入），且支持多选',
     /<input[\s\S]{0,200}?type="checkbox"[\s\S]{0,200}?className="ws-check"/.test(panelSrc) &&
@@ -8657,6 +8659,60 @@ function runAdj540WorkspaceTests() {
       /if \(cur && joinPath\(cur\) === joinPath\(from\)\) set\(\{ workspacePath: to, fileName: fileBaseName\(toName\) \}\)/.test(store) &&
       /const target = joinPath\(segs\)/.test(store) &&
       /set\(\{ workspacePath: null \}\)/.test(store),
+    '')
+}
+
+/**
+ * adj541：底栏的**展开 / 收起**两个入口（用户要求）。
+ *
+ *  - 底栏收起时：编辑区**行号栏位置**浮出「展开底栏」图标按钮（`public/icons/底栏展开.png`）。
+ *    放在 `.editor-body` 里、按 `--jp-gutter-w` 居中到行号列上（行号栏本身是 `aria-hidden` 的装饰层，
+ *    不能往里塞可点按钮）；又因为输入条在 `.editor-body` 之外的下方，按钮**自然不占输入条位置**。
+ *  - 底栏展开时：页签栏里、**高度档位按钮左边**是「收起底栏」按钮（`public/icons/底栏收起.png`）。
+ *  另：两个图标都必须是"纯黑 + alpha"的图（adj457 口径），且 alpha 要**够实**——
+ *  用户反馈"图标有点糊"就是半透明过渡过多 + 按钮 `opacity` + 灰字色三者叠加。
+ */
+function runAdj541DockToggleTests() {
+  console.log('[123] dock expand/collapse entries (adj541)')
+  const editorSrc = String(readFileSync('src/editor/EditorPane.tsx', 'utf8'))
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  const cssSrc = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  const copySrc2 = String(readFileSync('src/brand/copy.ts', 'utf8'))
+  const iconSrc = String(readFileSync('src/ui/toolIcons.ts', 'utf8'))
+  check('adj541 两个新图标登记进 ICON_FILES（文件名与设计稿一致）',
+    /dockExpand: '底栏展开'/.test(iconSrc) && /dockCollapse: '底栏收起'/.test(iconSrc),
+    '')
+  check('adj541 收起底栏时，编辑区**行号栏位置**浮出「展开底栏」按钮（`!dockOpen` 才渲染 + 点它展开且保留上次页签）',
+    /\{!dockOpen && \([\s\S]{0,400}?className="dock-fab"[\s\S]{0,300}?onClick=\{\(\) => setDockPanel\(dockPanel\)\}/.test(editorSrc) &&
+      /<ToolIcon name="dockExpand" \/>/.test(editorSrc) &&
+      // 用文案断言"组件确实引用了集中管理的文案"（文案本体在 copy.ts 的 dockCopy 里）
+      /dockCopy\.expandTitle/.test(editorSrc) &&
+      /expandTitle: '展开底栏'/.test(copySrc2),
+    '')
+  check('adj541 悬浮按钮对齐**行号栏列**（用 `--jp-gutter-w` 居中，不压代码内容）且**不透明**（用户反馈"糊"）',
+    /--jp-gutter-w/.test(editorSrc) &&
+      /\.dock-fab \{[\s\S]{0,200}?left: max\(2px, calc\(\(var\(--jp-gutter-w/.test(cssSrc) &&
+      /\.dock-fab \{[\s\S]{0,400}?color: var\(--jp-text-primary\)/.test(cssSrc) &&
+      // 不许再有 opacity（半透明会让图标"发虚"）
+      !/\.dock-fab \{[\s\S]{0,400}?opacity:/.test(cssSrc),
+    '')
+  check('adj541 底栏页签栏：**高度档位按钮左边**是「收起底栏」按钮（点它 closeDock）',
+    dockSrc.indexOf('className="tool-dock-collapse"') > -1 &&
+      dockSrc.indexOf('className="tool-dock-collapse"') < dockSrc.indexOf('className="tool-dock-size-btn"') &&
+      /<ToolIcon name="dockCollapse" size=\{16\} \/>/.test(dockSrc) &&
+      /dockCopy\.collapseTitle/.test(dockSrc) &&
+      /collapseTitle: '收起底栏'/.test(copySrc2) &&
+      /\.tool-dock-collapse \{/.test(cssSrc),
+    '')
+  check('adj542 行号栏**默认两位数**宽，滚到超过两位数行号才加宽（不再按整篇行数一次给足）',
+    /const \[gutterDigits, setGutterDigits\] = useState\(2\)/.test(editorSrc) &&
+      /syncGutterDigitsRef\.current\(ta\.scrollTop, ta\.clientHeight\)/.test(editorSrc) &&
+      /const need = Math\.max\(2, String\(idx \+ 1\)\.length\)/.test(editorSrc) &&
+      /setGutterDigits\(\(prev\) => \(prev >= need \? prev : need\)\)/.test(editorSrc) &&
+      /Math\.min\(gutterDigits, String\(lineCount\)\.length\)/.test(editorSrc) &&
+      // 反查"最后一个可见源码行"用视觉行前缀和二分（折行不产生新行号）
+      /visualTopRef\.current/.test(editorSrc) &&
+      /Math\.floor\(\(top \+ Math\.max\(0, clientH - 1\)\) \/ lineH\)/.test(editorSrc),
     '')
 }
 
@@ -9454,6 +9510,14 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj540 工作区（含子目录）用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj541DockToggleTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj541 底栏展开/收起用例抛异常', e)
     }
   })
   .then(() => {

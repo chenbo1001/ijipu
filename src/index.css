@@ -1380,6 +1380,69 @@ body {
   outline: 2px solid var(--jp-accent);
   outline-offset: -2px;
 }
+/* adj541（用户要求）：**收起底栏**按钮——与档位按钮**同款外观**，位置在它**左边**（页签栏最左端）。
+ * 与档位/✕ 一样常驻（在可滚页签区之外），页签再多也不影响；点它收起底栏，
+ * 编辑区左下角随即浮出「展开底栏」按钮（`.dock-fab`）。 */
+.tool-dock-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--jp-border);
+  border-radius: 7px;
+  color: var(--jp-text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tool-dock-collapse:hover {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+  background: var(--jp-bg-panel-hover);
+}
+.tool-dock-collapse:focus-visible {
+  outline: 2px solid var(--jp-accent);
+  outline-offset: -2px;
+}
+/* adj541（用户要求）：底栏收起时，**行号栏位置**的悬浮「展开底栏」按钮（不遮代码内容）。
+ * 水平位置 = 按行号栏宽度 `--jp-gutter-w` 居中（行号位数变化时会自动跟着居中）；
+ * 垂直位置 = `.editor-body` 底部 ⇒ 输入条（`.script-pad`，在 `.editor-body` 之外的下方）显示时，
+ * 按钮自然位于输入条上方、不占输入条位置。
+ * z-index 15：压住行号栏与编辑区，低于自动提示浮层（20）。
+ * adj541b（用户反馈"图标有点糊"）：**不要半透明**——之前 `opacity: .92` + 灰字色让图标看着发虚；
+ * 现在用 `--jp-text-primary` 全不透明，配合图标本身做了 alpha 锐化、图标按 16px 渲染
+ * （32px 源 → DPR2 下 1:1、DPR1 下 2:1，都是整数缩放 ⇒ 不糊）。 */
+.dock-fab {
+  position: absolute;
+  left: max(2px, calc((var(--jp-gutter-w, 46px) - 28px) / 2));
+  bottom: 8px;
+  z-index: 15;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--jp-border);
+  border-radius: 7px;
+  background: var(--jp-bg-panel);
+  color: var(--jp-text-primary);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: all 0.15s;
+}
+.dock-fab:hover {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+  opacity: 1;
+}
+.dock-fab:focus-visible {
+  outline: 2px solid var(--jp-accent);
+  outline-offset: -2px;
+}
 
 /* ---------------- adj492：「关于」面板（原 AboutDialog 内容，迁入 dock） ----------------
  * 内容本身是"品牌介绍 + 正文若干段"，原为弹窗里的竖直窄栏；dock 里是**宽而扁**的一条，
@@ -2430,6 +2493,8 @@ body {
   display: flex;
   min-height: 0;
   overflow: hidden;
+  /* adj541：给"展开底栏"悬浮按钮当定位上下文（按钮按 `--jp-gutter-w` 居中到行号列上） */
+  position: relative;
   --jp-editor-fs: 14px; /* 默认字号（adj46：可调） */
   --jp-editor-lh: 24px; /* 字号 × 1.7 取整（adj165：整数行高避免 textarea 与高亮层累积错位） */
   /* adj160：编辑器字体（可调）；adj173：排除带编程连字的字体（Cascadia Code 等），
@@ -3489,8 +3554,9 @@ body {
 .ws-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
+  /* adj540（用户第二轮反馈）：**路径面包屑左对齐**——不再 `justify-content: space-between`，
+     让面包屑紧跟在切换工作区按钮之后自然左对齐，移动提示在右边。 */
 }
 .ws-crumb {
   display: flex;
@@ -3502,31 +3568,43 @@ body {
   font-size: 12px;
   color: var(--jp-text-secondary);
 }
-/* adj540：面包屑首段 = 工作区根目录名，**做成按钮样子**（用户反馈：像纯文字就看不出用途）：
- * 与 `.btn` 同族（边框/圆角/底色），只是更紧凑；hover 换强调色边框，与其它按钮一致。
- * ⚠️ **不要给它 `max-width` 截断**（用户反馈"只显示到工作区根目录时名字不全"）：根目录下这一行
- * 只有"按钮 + /"，本该占满；名字长就让 `.ws-crumb` 自己横向滚动（它已有 `overflow-x: auto`），
- * 而不是把名字切掉——用户看的就是这个目录名。 */
-.ws-root {
+/* adj540（用户第二轮反馈）：左侧"切换工作区"图标按钮 ——**无底色圆角按钮**——
+ * 只用圆角 + 悬停/按下时的强调色，没有边框与底色（不像普通 .btn 那么"重"），让面包屑
+ * 区域更轻。`public/icons/工作区.png` 经 `ToolIcon` 渲染（CSS mask 跟着主题色）。 */
+.ws-workspace-btn {
   flex: none;
-  padding: 2px 8px;
-  border: 1px solid var(--jp-border);
-  border-radius: 7px;
-  background: var(--jp-bg-app);
-  color: var(--jp-accent);
-  font-family: var(--jp-font-sans);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.5;
-  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--jp-text-secondary);
   cursor: pointer;
+  transition: background-color 0.12s ease-out, color 0.12s ease-out;
 }
-.ws-root:hover:not(:disabled) {
-  border-color: var(--jp-accent);
+.ws-workspace-btn:hover:not(:disabled) {
+  background: var(--jp-bg-panel-hover);
+  color: var(--jp-accent);
 }
-.ws-root:disabled {
+.ws-workspace-btn:active:not(:disabled) {
+  background: var(--jp-bg-panel-active);
+}
+.ws-workspace-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+/* adj540：面包屑里的根目录名按钮——只是普通段样式（hover 高亮、accent 色），
+ * 不再有边框/底色（"切换工作区"的动作已经完全移到左侧图标按钮）。 */
+.ws-crumb-root {
+  font-weight: 700;
+  color: var(--jp-text-primary);
+}
+.ws-crumb-root:hover:not(:disabled) {
+  color: var(--jp-accent);
 }
 .ws-sep {
   color: var(--jp-text-muted);
