@@ -50,6 +50,7 @@ import {
   readDirEntries,
   rememberWorkspacePath,
   requestWorkspacePermission,
+  resolveExistingDir,
   searchWorkspaceJps,
   setWorkspace,
   stripJpsExt,
@@ -111,6 +112,12 @@ export function WorkspacePanel() {
   const [entries, setEntries] = useState<DirEntry[]>([])
   const [perm, setPerm] = useState<'granted' | 'prompt' | 'denied' | 'unknown'>('unknown')
   const [busy, setBusy] = useState(false)
+  /**
+   * adj547（用户反馈）：**进行中的提示文案**——点目录/文件、重新读取列表这些"要等"的动作，
+   * 必须**立刻**在界面上显示"在做什么"（转圈 + 文案），否则用户分不清是"不能点/没响应/在忙"。
+   * `busy` 负责禁用控件，`busyLabel` 负责把原因说出来。
+   */
+  const [busyLabel, setBusyLabel] = useState<string | null>(null)
   /**
    * **选中的条目名**（当前目录内，支持多选）。每行前面的复选框控制它；
    * 右侧「操作」里的 改名/移动/删除 作用在这些选中项上（用户要求）。
@@ -348,8 +355,9 @@ export function WorkspacePanel() {
   }, [])
   /** 列目录（带缓存——同一路径再次访问直接走缓存，避免每次都打 IndexedDB / FSA） */
   const refresh = useCallback(
-    async (rec: WorkspaceRecord, next: string[]) => {
+    async (rec: WorkspaceRecord, next: string[], label?: string) => {
       setBusy(true)
+      setBusyLabel(label ?? workspaceCopy.refreshing) // adj547：立刻给出"在忙什么"
       const key = joinPath(next)
       const cached = entriesCacheRef.current.get(key)
       if (cached) {
@@ -359,6 +367,7 @@ export function WorkspacePanel() {
         setEdit(null)
         setConfirmDel(null)
         setBusy(false)
+        setBusyLabel(null)
         return
       }
       try {
@@ -369,13 +378,16 @@ export function WorkspacePanel() {
         setSelected([])
         setEdit(null)
         setConfirmDel(null)
-        // 路径记忆**只在打开/关闭时写一次**（activation effect 里），不在每次导航都写——少写 N 次 IndexedDB
+        // adj548（用户反馈）：**进入目录就记住位置**——不能在关闭时才记：底栏收起/切页签时
+        // 面板是直接卸载的，关闭分支跑不到，重开就永远回到根目录。
+        void rememberWorkspacePath(next)
       } catch (e) {
         const reason = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
         showNotice(workspaceCopy.loadFailed(reason), 'error')
         setEntries([])
       } finally {
         setBusy(false)
+        setBusyLabel(null)
       }
     },
     [showNotice],
@@ -419,13 +431,25 @@ export function WorkspacePanel() {
       const q = await queryWorkspacePermission(rec.handle)
       if (!alive) return
       setPerm(q)
-      if (q === 'granted') await refresh(rec, rec.path)
-      else setBusy(false)
+      if (q === 'granted') {
+        /**
+         * adj548（用户要求"除非该位置已不存在"）：恢复上次所在目录前**先确认它还在**——
+         * 外部删/移动过就把路径收敛到仍存在的最长前缀（最少根目录），并说明一句，
+         * 而不是给用户一个空列表让他以为"文件都没了"。
+         */
+        const want = rec.path ?? []
+        const dir = await resolveExistingDir(rec.handle, want)
+        if (!alive) return
+        if (joinPath(dir) !== joinPath(want)) {
+          showNotice(workspaceCopy.dirGone(joinPath(want) || '根目录', joinPath(dir)), 'warn')
+        }
+        await refresh(rec, dir, workspaceCopy.loadingWorkspace) // adj547：读工作区也有提示
+      } else setBusy(false)
     })()
     return () => {
       alive = false
     }
-  }, [active, refresh])
+  }, [active, refresh, showNotice])
 
   const onPick = async () => {
     if (!isWorkspaceSupported()) {
@@ -503,31 +527,57 @@ export function WorkspacePanel() {
   }
 
   /** 打开某一项（目录 ⇒ 进入；文件 ⇒ 打开并收起底栏）——**点行就是这件事**，不需先选中
-   * adj540（用户反馈）：列表里点击文件名就能打开/进入，所以右侧独立的「打开」按钮意义不大——
-   * 删除掉（要打开选中项时直接点行）。 */
+   * adj540（用户反馈）：列表里点击文件名就能打开/进入，所以右侧独立的「打开」按钮意义不大——删除掉。
+   * adj547（用户反馈）：目录**先进去**（面包屑立刻变、列表显示"正在进入…"），再去读里面的 `.jps`——
+   * 点完马上有反馈，不会让人以为"点不动"；读失败则回滚路径。 */
   const openEntry = async (entry: DirEntry) => {
     if (!ws) return
     if (entry.kind === 'dir') {
-      await refresh(ws, [...path, entry.name])
+      const next = [...path, entry.name]
+      const prev = path
+      setBusy(true)
+      setBusyLabel(workspaceCopy.enteringDir(entry.name)) // 立刻反馈
+      setPath(next) // 乐观更新面包屑：先"进目录"
+      setSelected([])
+      setEdit(null)
+      setConfirmDel(null)
+      try {
+        await refresh(ws, next, workspaceCopy.enteringDir(entry.name))
+      } catch {
+        setPath(prev) // 读失败回滚
+      } finally {
+        setBusy(false)
+        setBusyLabel(null)
+      }
       return
     }
-    const ok = await openWorkspaceFile([...path, entry.name])
-    if (ok) closeDock()
+    setBusy(true)
+    setBusyLabel(workspaceCopy.openingFile(entry.name))
+    try {
+      const ok = await openWorkspaceFile([...path, entry.name])
+      if (ok) closeDock()
+    } finally {
+      setBusy(false)
+      setBusyLabel(null)
+    }
   }
 
   /** 移动模式下切换目标目录（不动已定的搬运清单） */
   const refreshMovingTarget = async (next: string[]) => {
     if (!ws) return
     setBusy(true)
+    setBusyLabel(workspaceCopy.readingTarget) // adj547
     try {
       const list = await readDirEntries(ws.handle, next)
       setEntries(list)
       setPath(next)
+      void rememberWorkspacePath(next) // adj548：移动模式下选目标也记住
     } catch (e) {
       const reason = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
       showNotice(workspaceCopy.loadFailed(reason), 'error')
     } finally {
       setBusy(false)
+      setBusyLabel(null)
     }
   }
 
@@ -820,7 +870,15 @@ export function WorkspacePanel() {
             </div>
           )}
 
-          <div className="ws-list" title={workspaceCopy.onlyListed}>
+          <div className={`ws-list${busyLabel ? ' is-busy' : ''}`} title={workspaceCopy.onlyListed}>
+            {/* adj547（用户反馈）：**进行中的提示**放在列表最上方**立刻**出现（转圈 + 文案），
+                同时把旧内容变淡——用户一眼能分清"在忙"而不是"点不动/不能点"。 */}
+            {busyLabel && (
+              <div className="ws-loading" role="status" aria-live="polite">
+                <span className="ws-spin" aria-hidden="true" />
+                <span className="ws-loading-text">{busyLabel}</span>
+              </div>
+            )}
           {/* 过滤模式：**平坦结果**（跨子目录），点一条直接打开 —— 不提供勾选（改名/移动/删除要先清空过滤） */}
           {searching
             ? (hits ?? []).slice(0, RESULT_RENDER_MAX).map((h) => (
@@ -990,7 +1048,11 @@ export function WorkspacePanel() {
                 disabled={busy}
               >
                 {workspaceCopy.menuBtn}
-                <span className="ws-caret">{menuOpen ? '▴' : '▾'}</span>
+                {/* adj548（用户反馈）：文本后的下三角**用 `下.png` 图标**（原来的 ▾ 字符太小看不清）；
+                    展开时翻成 `上.png`，与顶栏视图下拉同一套观感。 */}
+                <span className="ws-caret">
+                  <ToolIcon name={menuOpen ? 'up' : 'down'} size={12} />
+                </span>
               </button>
             </>
           )}

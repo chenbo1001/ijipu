@@ -234,6 +234,17 @@ export const workspaceCopy = {
     `正在扫描…已查 ${scanned} 项 / 找到 ${found} 个 / ${(ms / 1000).toFixed(1)}s`,
   /** adj546：命中太多时不全部渲染（手机上一次画几千行要几百毫秒），如实说明并引导缩小范围 */
   searchCapped: (total: number, shown: number): string => `共 ${total} 个，只显示前 ${shown} 个（输入关键词可缩小范围）`,
+  /**
+   * adj547（用户反馈）：点目录/文件后到内容出来之间是"黑的"——用户分不清是"不能点""没响应"还是"在忙"。
+   * 所有会等的动作都必须在界面上**立刻**显示"进行中"的提示（转圈 + 说清在做什么）。
+   */
+  enteringDir: (name: string): string => `正在进入「${name}」…`,
+  openingFile: (name: string): string => `正在打开「${name}」…`,
+  loadingWorkspace: '正在读取工作区…',
+  refreshing: '正在刷新…',
+  readingTarget: '正在读取目标目录…',
+  /** adj548：上次所在的目录已不存在（被外部删/移动）⇒ 回到仍存在的最外层并说明 */
+  dirGone: (was: string, now: string): string => `上次所在的「${was}」已不在，已回到「${now || '工作区根目录'}」`,
   /** adj540（用户报告 `*` 仍看不到文件）：读不动的目录也主动说出来——"没搜到"与"没搜完/搜到一半"是两件事 */
   searchBlockedDirs: (dirs: string[]): string =>
     `有 ${dirs.length} 个子目录读不动（可能在里面），已跳过：${dirs.slice(0, 3).join('、')}${dirs.length > 3 ? '…' : ''}`,

@@ -8613,8 +8613,8 @@ function runAdj540WorkspaceTests() {
       /deleteManyConfirm/.test(copySrc) &&
       /\.ws-check \{/.test(cssAll),
     '')
-  check('adj540 交互模型：**点名字=打开/进入**（不再要点两次），勾选与打开互不干扰',
-    /const openEntry = async \(entry: DirEntry\) => \{[\s\S]{0,200}?await refresh\(ws, \[\.\.\.path, entry\.name\]\)[\s\S]{0,200}?await openWorkspaceFile\(\[\.\.\.path, entry\.name\]\)/.test(
+  check('adj540/adj547 交互模型：**点名字=打开/进入**（不再要点两次），勾选与打开互不干扰',
+    /const openEntry = async \(entry: DirEntry\) => \{[\s\S]{0,900}?await refresh\(ws, next, workspaceCopy\.enteringDir\(entry\.name\)\)[\s\S]{0,600}?await openWorkspaceFile\(\[\.\.\.path, entry\.name\]\)/.test(
       panelSrc,
     ) &&
       /onClick=\{\(\) => void openEntry\(e\)\}/.test(panelSrc) &&
@@ -8774,7 +8774,7 @@ async function runAdj541DockToggleTests() {
       /bindingRestored/.test(copySrc2),
     '')
   check('adj545（用户要求）面板**左右两栏**：左=切换工作路径 + 路径 + 列表；右=固定宽度（过滤 / `*` 所有 / 消除过滤 / 操作▾）',
-    /<div className="ws-body">[\s\S]{0,400}?<div className="ws-left">[\s\S]{0,1200}?className="ws-workspace-btn"[\s\S]{0,2000}?className="ws-crumb"[\s\S]{0,6000}?className="ws-list"[\s\S]{0,6000}?<div className="ws-side">/.test(
+    /<div className="ws-body">[\s\S]{0,400}?<div className="ws-left">[\s\S]{0,1200}?className="ws-workspace-btn"[\s\S]{0,2000}?className="ws-crumb"[\s\S]{0,6000}?className=\{`ws-list[\s\S]{0,6000}?<div className="ws-side">/.test(
       wsPanelSrc,
     ) &&
       // 过滤三件套 + 操作▾ 都在右栏里（顺序：过滤框 → * / ✕ 一行 → 操作）
@@ -8807,6 +8807,47 @@ async function runAdj541DockToggleTests() {
       /indexRef\.current = null/.test(wsPanelSrc) &&
       // 不再用 200ms debounce 包着整树搜索
       !/setTimeout\(\(\) => \{[\s\S]{0,80}?void searchWorkspaceJps\(ws\.handle, query\)/.test(wsPanelSrc),
+    '')
+  // adj547（用户反馈）：点目录/文件之后到内容出来之间是"黑的"——用户分不清是"不能点/没响应/在忙"。
+  // 要求：**先进入**（面包屑立刻变）+ 列表里立刻出现"转圈 + 在做什么" + 旧内容变淡；读完提示消失。
+  check('adj547（用户反馈）点目录/文件**立刻有进行中的提示**（面包屑先变 + 转圈文案 + 旧列表变淡）',
+    /const \[busyLabel, setBusyLabel\] = useState<string \| null>\(null\)/.test(wsPanelSrc) &&
+      /setBusyLabel\(workspaceCopy\.enteringDir\(entry\.name\)\)/.test(wsPanelSrc) &&
+      /setBusyLabel\(workspaceCopy\.openingFile\(entry\.name\)\)/.test(wsPanelSrc) &&
+      // 面包屑"先进入"（乐观更新），失败回滚
+      /setPath\(next\) \/\/ 乐观更新面包屑：先"进目录"/.test(wsPanelSrc) &&
+      /setPath\(prev\) \/\/ 读失败回滚/.test(wsPanelSrc) &&
+      // 提示渲染 + 变淡 + 转圈
+      /\{busyLabel && \([\s\S]{0,300}?className="ws-loading"[\s\S]{0,200}?className="ws-spin"/.test(wsPanelSrc) &&
+      /className=\{`ws-list\$\{busyLabel \? ' is-busy' : ''\}`\}/.test(wsPanelSrc) &&
+      /enteringDir: \(name: string\): string => `正在进入「\$\{name\}」…`/.test(copySrc2) &&
+      /openingFile: \(name: string\): string/.test(copySrc2) &&
+      /\.ws-spin \{[\s\S]{0,320}?animation: ws-spin/.test(cssSrc) &&
+      /\.ws-list\.is-busy \.ws-row \{[\s\S]{0,80}?opacity/.test(cssSrc) &&
+      // 打开工作区/读取目标目录也都有提示
+      /workspaceCopy\.loadingWorkspace/.test(wsPanelSrc) &&
+      /workspaceCopy\.readingTarget/.test(wsPanelSrc),
+    '')
+  // adj548（用户反馈）：目录位置必须记住——**进入时就记**，不能只在面板关闭时记：
+  // 底栏收起 / 切到别的页签时面板是**直接卸载**的，关闭分支跑不到 ⇒ 重开永远回根目录（实测三个场景全丢）。
+  check('adj548（用户反馈）**进入目录就记住位置**（收起底栏/切页签/重启都能恢复）+ 位置不存在则回退到仍存在的最外层',
+    // 进入目录（refresh）与移动选目标都立即记；落盘防抖、内存立即生效
+    /void rememberWorkspacePath\(next\)/.test(wsPanelSrc) &&
+      /void rememberWorkspacePath\(next\) \/\/ adj548：移动模式下选目标也记住/.test(wsPanelSrc) &&
+      /let pathSaveTimer: ReturnType<typeof setTimeout> \| null = null/.test(wsSrc) &&
+      /cached = \{ \.\.\.cached, path: normalizeRelPath\(path\) \}/.test(wsSrc) &&
+      /pathSaveTimer = setTimeout\(\(\) => \{[\s\S]{0,140}?void saveWorkspace\(cached\)/.test(wsSrc) &&
+      // 恢复前校验路径仍存在；不存在就收敛并说明
+      /export async function resolveExistingDir\(/.test(wsSrc) &&
+      /const dir = await resolveExistingDir\(rec\.handle, want\)/.test(wsPanelSrc) &&
+      /if \(joinPath\(dir\) !== joinPath\(want\)\)/.test(wsPanelSrc) &&
+      /dirGone: \(was: string, now: string\)/.test(copySrc2) &&
+      /await refresh\(rec, dir, workspaceCopy\.loadingWorkspace\)/.test(wsPanelSrc),
+    '')
+  check('adj548（用户反馈）操作按钮的下三角改用 `下.png`/`上.png` 图标（不再是 9px 的 ▾ 字符）',
+    /<ToolIcon name=\{menuOpen \? 'up' : 'down'\} size=\{12\} \/>/.test(wsPanelSrc) &&
+      !/ws-caret">\{menuOpen \? '▴'/.test(wsPanelSrc) &&
+      /\.ws-caret \{[\s\S]{0,300}?display: inline-flex/.test(cssSrc),
     '')
   // adj546：用户实测「5550 文件 / 117 目录，`*` 过滤 27 秒」。FSA 每条都要跟浏览器进程往返一次
   // （手机上约 5ms）⇒ **串行枚举=延迟叠加**。三条对症措施：
@@ -8864,12 +8905,13 @@ async function runAdj541DockToggleTests() {
   // 根因：`invalidateCache` 是普通函数（每次渲染新引用）却进了 `refresh` 的 useCallback 依赖，
   // 使 `refresh` 每次渲染都变 ⇒ 依赖它的"面板激活"effect 每渲染重跑 ⇒ setState ⇒ 再渲染……
   // 断言要点：**进依赖的必须是稳定引用**（useCallback([]) / ref / store action）。
-  check('adj540 面板不会无限刷新（E-2026-249）：`invalidateCache` 用 useCallback([]) 固定、`refresh` 依赖只有稳定项、激活 effect 依赖 `[active, refresh]`',
+  check('adj540 面板不会无限刷新（E-2026-249）：`invalidateCache` 用 useCallback([]) 固定、`refresh` 依赖只有稳定项、激活 effect 依赖全是稳定引用',
     /const invalidateCache = useCallback\(\(\) => \{[\s\S]{0,200}?\}, \[\]\)/.test(wsPanelSrc) &&
       !/\[showNotice, invalidateCache\]/.test(wsPanelSrc) &&
       // refresh 的依赖数组里只有 showNotice（store action，稳定引用）
       /\[\s*showNotice,?\s*\]/.test(wsPanelSrc) &&
-      /\}, \[active, refresh\]\)/.test(wsPanelSrc) &&
+      // 激活 effect：active / refresh / showNotice —— 都是稳定或布尔量，不会每次渲染都换引用
+      /\}, \[active, refresh, showNotice\]\)/.test(wsPanelSrc) &&
       // 关闭面板时写路径记忆走 ref，不把 `path` 塞进依赖（否则每次导航都会重跑 effect）
       /rememberWorkspacePath\(pathRef\.current\)/.test(wsPanelSrc),
     '')

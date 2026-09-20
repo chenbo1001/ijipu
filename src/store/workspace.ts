@@ -460,11 +460,46 @@ export async function setWorkspace(rec: WorkspaceRecord | null): Promise<void> {
   if (cached) await upsertWorkspaceList(cached)
 }
 
-/** 记住"上次所在子目录"（只改记录里的 path，不动根句柄，也不动 id/name） */
+/**
+ * 记住"上次所在的子目录"（adj540 / adj548）。
+ *
+ * adj548（用户反馈）：**必须在"进入目录"时就记**，不能只在"面板关闭"时记——
+ * 底栏收起、切到别的页签时面板是**直接卸载**的，关闭分支根本没机会执行，
+ * 于是重新打开永远回到根目录（用户实测三个场景全丢）。
+ * 落盘用**防抖 800ms**（连续进出多个目录只写最后一次），内存里的 `cached` 立即更新
+ * （同一会话内切换页签/重挂载马上就能读到新位置）。
+ */
+let pathSaveTimer: ReturnType<typeof setTimeout> | null = null
 export async function rememberWorkspacePath(path: readonly string[]): Promise<void> {
   if (!cached) return
   cached = { ...cached, path: normalizeRelPath(path) }
-  await saveWorkspace(cached)
+  if (pathSaveTimer) clearTimeout(pathSaveTimer)
+  pathSaveTimer = setTimeout(() => {
+    pathSaveTimer = null
+    void saveWorkspace(cached)
+  }, 800)
+}
+
+/**
+ * adj548（用户要求"除非该位置已不存在"）：把记忆的路径**收敛到仍然存在的目录**。
+ * 逐级下钻，遇到不存在的段就停（返回已存在的最长前缀，最少是根 `[]`）。
+ * 场景：上次停在 `A/B/C`，其中 `B` 被外部删了 ⇒ 回到 `A`，而不是报错或永远空列表。
+ */
+export async function resolveExistingDir(
+  root: FileSystemDirectoryHandle,
+  segs: readonly string[],
+): Promise<string[]> {
+  const out: string[] = []
+  let dir = root
+  for (const seg of normalizeRelPath(segs)) {
+    try {
+      dir = await dir.getDirectoryHandle(seg)
+      out.push(seg)
+    } catch {
+      break // 这一级没了 ⇒ 停在上一级
+    }
+  }
+  return out
 }
 
 /** 读"最近工作区"（最近在前；当前那个也在里面） */

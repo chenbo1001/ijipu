@@ -3785,7 +3785,46 @@ body {
   flex: 1 1 auto;
   max-height: none;
 }
-/* adj540/adj545（用户要求）：**左右两栏**——
+/* adj547（用户反馈）：点目录/文件后的**进行中提示**——转圈 + 文案，立刻出现；
+ * 同时把旧内容变淡，用户一眼分清"在忙"而不是"点不动/不能点"（否则只能靠猜）。 */
+.ws-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  color: var(--jp-accent);
+  font-size: 12px;
+}
+.ws-loading-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-spin {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--jp-accent) 35%, transparent);
+  border-top-color: var(--jp-accent);
+  border-radius: 50%;
+  animation: ws-spin 0.7s linear infinite;
+}
+@keyframes ws-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* 进行中：旧列表变淡（内容还是上一次的，别让人以为已经刷新好了） */
+.ws-list.is-busy .ws-row {
+  opacity: 0.5;
+}
+/* 尊重"减少动态效果"偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .ws-spin {
+    animation-duration: 2s;
+  }
+}
+/* adj545（用户要求）：面板分**左右两栏**——
  * 左栏（弹性）：切换工作路径按钮 + 路径面包屑 + 列表；右栏（**固定宽度**）：过滤 / `*` 所有 / 消除过滤 / 操作▾。
  * 过滤控件从"各占一整行的横条"搬进右栏后，列表拿到全部纵向空间（窄屏尤其明显）。 */
 .ws-body {
@@ -3826,9 +3865,13 @@ body {
   gap: 3px;
 }
 .ws-caret {
+  /* adj548（用户反馈）：下三角改用 `下.png`/`上.png` 图标（原来 9px 的 ▾ 字符太小）——
+     与顶栏视图下拉同款；尺寸由 ToolIcon size 控制，这里只压一下不透明度别抢主体。 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--jp-text-secondary);
-  font-size: 9px;
-  line-height: 1;
+  opacity: 0.9;
 }
 /* adj540：二级（下拉里的）按钮：窄一点，一眼看出层级 */
 .ws-sub-btn {
