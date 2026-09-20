@@ -29,6 +29,21 @@ const SOURCES = [
   ['resources/soundfonts/generaluser_gs.sf2', 'resources/soundfonts/generaluser_gs.sf2', 20_000_000],
 ]
 
+/**
+ * adj551（用户要求"快捷方式名与备注要记住、下次发布继续保持"）：把这**两条品牌设置**钉成发布前硬校验。
+ *
+ * 为什么必须钉：桌面/开始菜单快捷方式的**中文名**与**备注**只能由 `nsis/hooks.nsh` 里的
+ * `IJIPU_FixShortcuts` 写入（Tauri 模板只会建 `${PRODUCTNAME}.lnk` = `iJipu.lnk`、且**不写备注**）。
+ * 这些是**字符串常量**，一旦被改动/漏 include/钩子没被调用，安装包会"看起来正常"但快捷方式退回英文名、
+ * 备注丢失——而这类问题只有装到真机才发现（2026-09-21 用户就是这么报的）。
+ * 故：① 断言两个常量**逐字**正确；② 断言模板确实 include 了钩子文件；
+ *     ③ 断言钩子确实挂在 POSTINSTALL 与 `.onGUIEnd` 两个时机上（GUI 安装的桌面快捷方式是完成页才建的）；
+ *     ④ 交叉校验钩子里的 exe 名 / AUMI 与本次构建生成的值一致（防 E-2026-240 那类"名字对不上"）。
+ */
+const HOOKS = 'src-tauri/nsis/hooks.nsh'
+const LNK_NAME = 'i记谱 iJipu.lnk'
+const LNK_DESC = '爱记谱 - 码即成，谱自现，代码式简谱制谱引擎。'
+
 const NSI = 'src-tauri/target/release/nsis/x64/installer.nsi'
 const SETUP_DIR = 'src-tauri/target/release/bundle/nsis'
 
@@ -37,6 +52,7 @@ if (!existsSync(NSI)) {
   process.exit(1)
 }
 const nsi = readFileSync(NSI, 'utf8')
+const hooks = existsSync(HOOKS) ? readFileSync(HOOKS, 'utf8') : ''
 
 let failed = 0
 console.log('[check-installer] 安装包必需文件自检：')
@@ -44,6 +60,27 @@ for (const [label, re] of REQUIRED) {
   const ok = re.test(nsi)
   console.log(`  ${ok ? '✓' : '✗'} ${label}`)
   if (!ok) failed++
+}
+
+console.log('[check-installer] 快捷方式（中文名 + 备注）自检：')
+{
+  const bundleId = (nsi.match(/!define BUNDLEID "([^"]+)"/) ?? [])[1] ?? ''
+  const mainExe = (nsi.match(/!define MAINBINARYNAME "([^"]+)"/) ?? [])[1] ?? ''
+  const checks = [
+    ['钩子文件存在且含快捷方式函数', hooks.includes('Function IJIPU_FixShortcuts')],
+    [`快捷方式名逐字正确（${LNK_NAME}）`, hooks.includes(`!define IJIPU_LNK_NEW "${LNK_NAME}"`)],
+    [`快捷方式备注逐字正确（${LNK_DESC}）`, hooks.includes(`!define IJIPU_LNK_DESC "${LNK_DESC}"`)],
+    ['模板已 include 该钩子文件', /!include\s+"[^"]*nsis[\\/]hooks\.nsh"/.test(nsi)],
+    ['钩子挂在 NSIS_HOOK_POSTINSTALL', (hooks.match(/macro NSIS_HOOK_POSTINSTALL/g) ?? []).length === 1 && nsi.includes('!insertmacro NSIS_HOOK_POSTINSTALL')],
+    ['钩子挂在 .onGUIEnd（GUI 安装的桌面快捷方式是完成页才建的）', hooks.includes('Function .onGUIEnd') && hooks.includes('Call IJIPU_FixShortcuts')],
+    ['钩子里的主程序名与本构建一致', hooks.includes(`!define IJIPU_EXE "${mainExe}.exe"`)],
+    ['钩子里的 AUMI 与本构建 identifier 一致', hooks.includes(`!define IJIPU_AUMI "${bundleId}"`)],
+  ]
+  for (const [label, ok] of checks) {
+    console.log(`  ${ok ? '✓' : '✗'} ${label}`)
+    if (!ok) failed++
+  }
+  if (hooks) console.log(`  · 名称 ${LNK_NAME} / 备注 ${LNK_DESC}`)
 }
 
 console.log('[check-installer] 打包源文件自检：')
