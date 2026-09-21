@@ -1259,6 +1259,11 @@ body {
   scrollbar-width: none;
   /* 触屏横向滑动：交给浏览器原生处理（不要用 pan-y 之类挡住横向手势） */
   -webkit-overflow-scrolling: touch;
+  /* adj560：**触屏拖动不触发子页签的 `:active`**——明确告诉浏览器"这是横向滚动容器，
+   * 不要把按下的手势当作对子按钮的点击"。这样按下 tab A → 拖动横向 → tab A 不会被
+   * `:active` 描边 + 染色（看起来像"被选中"），而是直接驱动 tabstrip 滚动；
+   * 真正要"切换面板"的轻点（无移动）依然走 click，因为 tap 不是 pan。 */
+  touch-action: pan-x;
 }
 .tool-dock-tabstrip::-webkit-scrollbar { display: none; }
 /**
@@ -1291,9 +1296,14 @@ body {
   transition: color .15s, background-color .15s, border-color .15s;
 }
 .tool-dock-tab-arrow:hover {
-  background: var(--jp-bg-panel-hover);
-  color: var(--jp-text-primary);
-  border-color: var(--jp-border-strong);
+  /* adj560：移到下面的 `@media (hover: hover)` 块——避免触屏按下时箭头也"挂"高亮 */
+}
+@media (hover: hover) and (pointer: fine) {
+  .tool-dock-tab-arrow:hover {
+    background: var(--jp-bg-panel-hover);
+    color: var(--jp-text-primary);
+    border-color: var(--jp-border-strong);
+  }
 }
 /* adj509：页签样式**与顶栏 `.topbar-btn` 同源**——同款边框 / 圆角 / 字号 / padding / hover；
    由 `.tool-dock-tab` 继承 `.topbar-btn` 的视觉规范，与顶栏工具条按钮成对，让"功能"和"面板"
@@ -1324,15 +1334,37 @@ body {
   height: 28px;
 }
 .tool-dock-tab:hover {
+  /* adj560：把 `:hover` 高亮收窄到**真正有 hover 的设备**——`(hover: hover) and (pointer: fine)`
+   * 才是鼠标 / 触控板；触屏 `(hover: none)` 在按下时也会触发 `:hover`（且**粘住不放**直到点别处），
+   * 于是触屏拖动 tabstrip 时，**最先按下的页签**会被 `:hover` 描边 + 染色，视觉上像被选中；
+   * 而真正的当前页签由 `.is-active` 高亮 ⇒ 两处同时高亮，用户误以为"两个都选中"。
+   * 修法：触屏设备下，hover 样式不生效 ⇒ 拖动过程中没有任何页签看起来"被选中"。
+   * 触屏的"按下反馈"通过 `:active`（见下面的 `@media (hover: hover)` 块之外的简写）—— */
+}
+/* adj560：触屏的"按下瞬间反馈"——只在按下那一帧出现，避免和"当前面板"视觉混淆。
+ * 用 `:where(:not(.is-active))` 排除已选中的（已选中的不响应，避免反复高亮闪烁）；
+ * 用 `:active` 而非 `:hover`，因为触屏的 `:hover` 是粘住的（上面那段已禁掉），`:active` 才是按下瞬间。 */
+.tool-dock-tab:active:not(.is-active) {
+  background: var(--jp-bg-panel-hover);
   border-color: var(--jp-accent);
   color: var(--jp-accent);
-  background: var(--jp-bg-panel-hover); /* adj414 同一套 hover 高亮 */
+  /* 极短过渡：松开立即消失 ⇒ 拖动过程中不"挂"在某个页签上 */
+  transition: none;
 }
 /* 当前面板高亮（与顶栏按钮 active 同一套口径） */
 .tool-dock-tab.is-active {
   background: var(--jp-bg-panel-active);
   color: var(--jp-accent);
   border-color: var(--jp-accent);
+}
+/* adj560：把鼠标/触控板的 `:hover` 高亮放回 `hover:hover` 设备（与上面的"裸 `:hover`"对称）。
+ * 桌面/笔记本上 hover 仍然有反馈（描边 + 染色）；触屏上 hover 不触发 ⇒ 拖动 tabstrip 不再"选中错页签"。 */
+@media (hover: hover) and (pointer: fine) {
+  .tool-dock-tab:hover {
+    border-color: var(--jp-accent);
+    color: var(--jp-accent);
+    background: var(--jp-bg-panel-hover); /* adj414 同一套 hover 高亮 */
+  }
 }
 /* adj486：页签图标位**统一占位并居中**——设计图标（mask 的 span）与兜底字符（⚠）混用时，
    不这么写会因基线/字形宽度不同让"图标 + 文字"整体左右晃动 */

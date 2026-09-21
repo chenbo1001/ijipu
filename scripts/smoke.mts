@@ -8785,6 +8785,73 @@ async function runAdj540WorkspaceTests() {
 }
 
 /**
+ * adj559（v0.28.2，用户反馈）：**设置面板调整字体/字号/谱面时，预览必须即时更新**——
+ * 当前 `setPageConfig(cfg, persist=false)` 只走 `set({ pageConfig: cfg })`，理论上触发 Zustand
+ * 订阅者重新计算，但用户实测"看不到预览变化"。本组断言把整条管线钉死：
+ *   ① 数据层：`setPageConfig(cfg,false)` 后 `useDocStore.getState().pageConfig` 立即反映新值；
+ *   ② 渲染层：用新 pageConfig 调 `layoutScore` + `renderScoreToSvg`，SVG 中必须出现新
+ *     `font-family` 与新字号（避免"预览层在用旧 pageConfig"的同类 bug）；
+ *   ③ 完整路径：先取**当前生效** pageConfig（含 `applyFontOverride` 等派生层），修改某项，
+ *     传给引擎，SVG 跟着变。
+ *   这一组通过后，如果用户实测仍看不到预览变化 ⇒ 是 React/Zustand 订阅层的问题，需要
+ *   PreviewPane 那边加订阅（或把 pageConfig 改成不可变对象强制重渲），不是数据层的问题。
+ */
+async function runAdj559PreviewLiveUpdateTests() {
+  console.log('[122.5] preview live update on settings change (adj559)')
+  const { useDocStore } = (await import('../src/store/docStore.ts')) as { useDocStore: { getState: () => { pageConfig: PageConfig; setPageConfig: (cfg: PageConfig, persist?: boolean, base?: PageConfig) => void; parseResult: ParseResult; code: string } } }
+
+  // 用真谱面代码（含元数据 + 曲部 + 歌词）确保预览里有可观察的字体元素
+  const sample = 'V: 1.0\nB: 测试\nD: C\nP: 4/4\nQ: 1 2 3 4 |\nG: 小星星\n'
+  const st = () => useDocStore.getState()
+  // 先把 store 切到该样本（不影响后续测试——`setCode` 只在本测试函数内）
+  st().setPageConfig(defaultPageConfig, false) // 确保有 basePageConfig 可用
+  st().setPageConfig({ ...defaultPageConfig, miaoshu_font: 'Georgia', biaoti_font: 'Comic Sans MS' }, false)
+  // 用刚才的 pageConfig + 真实 sample 渲染
+  const cfg0 = st().pageConfig
+  const parse0 = parseJps(sample)
+  const lay0 = layoutScore(parse0, cfg0)
+  const svg0 = renderScoreToSvg(lay0)[0] ?? ''
+
+  // ① 数据层：调 setPageConfig 后 pageConfig 立即反映新值
+  st().setPageConfig({ ...cfg0, miaoshu_font: 'KaiTi', miaoshu_size: 18 }, false)
+  check('adj559 数据层：`setPageConfig(_,false)` 后 store.pageConfig.miaoshu_font 立即更新',
+    st().pageConfig.miaoshu_font === 'KaiTi', `got=${st().pageConfig.miaoshu_font}`)
+  check('adj559 数据层：`setPageConfig(_,false)` 后 store.pageConfig.miaoshu_size 立即更新',
+    st().pageConfig.miaoshu_size === 18, `got=${st().pageConfig.miaoshu_size}`)
+
+  // ② 渲染层：用最新 pageConfig 渲染，SVG 必须出现新 font-family
+  const cfg1 = st().pageConfig
+  const lay1 = layoutScore(parse0, cfg1)
+  const svg1 = renderScoreToSvg(lay1)[0] ?? ''
+  check('adj559 渲染层：换 miaoshu_font 后 SVG 含新字体（font-family 含 KaiTi）',
+    svg1.includes('KaiTi'), `svg 片段：${svg1.match(/font-family="[^"]+"/g)?.slice(0, 3).join(' | ')}`)
+  check('adj559 渲染层：换 miaoshu_size 后 SVG 含新字号',
+    svg1.includes('font-size="18"'), '未见 font-size="18"')
+
+  // ③ 标题字体同步
+  st().setPageConfig({ ...cfg1, biaoti_font: 'Times New Roman', biaoti_size: 26 }, false)
+  const cfg2 = st().pageConfig
+  const svg2 = renderScoreToSvg(layoutScore(parse0, cfg2))[0] ?? ''
+  check('adj559 渲染层：标题字号 biaoti_size=26 即时生效',
+    svg2.includes('font-size="26"'), '未见 font-size="26"')
+  check('adj559 渲染层：标题字体 biaoti_font=Times New Roman 即时生效',
+    svg2.includes('Times New Roman'), '未见 Times New Roman')
+
+  // ④ 谱面类（边距、note_size 等）即时生效
+  st().setPageConfig({ ...cfg2, note_size: 30, margin_left: 40 }, false)
+  const cfg3 = st().pageConfig
+  const lay3 = layoutScore(parse0, cfg3)
+  const svg3 = renderScoreToSvg(lay3)[0] ?? ''
+  check('adj559 谱面：note_size=30 即时生效（SVG 含 font-size="30"）',
+    svg3.includes('font-size="30"'), '未见 font-size="30"')
+  check('adj559 谱面：margin_left=40 即时生效（layout 实际宽度变了）',
+    lay3.pages[0].width !== lay0.pages[0].width || lay3.config.margin_left === 40,
+    `width before=${lay0.pages[0].width} after=${lay3.pages[0].width} cfg.margin_left=${lay3.config.margin_left}`)
+  // 恢复避免污染后续测试
+  st().setPageConfig(cfg0, false)
+}
+
+/**
  * adj541：底栏的**展开 / 收起**两个入口（用户要求）。
  *
  *  - 底栏收起时：编辑区**行号栏位置**浮出「展开底栏」图标按钮（`public/icons/底栏展开.png`）。
@@ -9203,6 +9270,19 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
   check('adj556 箭头按钮 CSS 存在：`.tool-dock-tab-arrow` 常驻（`flex: 0 0 auto`）+ 28px 高 + 与页签同款 hover',
     /\.tool-dock-tab-arrow \{[\s\S]{0,300}?flex: 0 0 auto[\s\S]{0,200}?height: 28px/.test(css2) &&
       /\.tool-dock-tab-arrow:hover \{[\s\S]{0,200}?background: var\(--jp-bg-panel-hover\)/.test(css2),
+    '')
+  // ---- adj560（v0.28.2）：触屏拖动 tabstrip 时，**没有任何页签呈选中态**（用户报"非当前页签选中") ----
+  // ① **页签的 `:hover` 高亮必须在 `@media (hover: hover)` 内**——裸 `.tool-dock-tab:hover` 不允许
+  //   出现在触屏也能触发的位置（触屏 `(hover: none)` 在按下时也会触发 `:hover` 并粘住 ⇒
+  //   拖动时最先按下的页签会被 hover 染色，看起来像"被选中"，与真正的 `.is-active` 重合）。
+  check('adj560 `.tool-dock-tab:hover` 高亮**收窄到 `hover:hover` 设备**（裸 `:hover` 不带任何样式）',
+    // 直接匹配 hover 块必须出现在 `@media (hover: hover)` 之后
+    /@media \(hover: hover\)[\s\S]{0,800}?\.tool-dock-tab:hover[\s\S]{0,500}?border-color: var\(--jp-accent\)/.test(css2),
+    '')
+  // ② **tabstrip 上挂 `touch-action: pan-x`**——告诉浏览器"这是横向滚动容器"，按下 + 横向移动
+  //   直接判为滚动、不冒泡到子按钮的 `:active` / `:hover`，拖动过程中没有任何页签"被选中"。
+  check('adj560 `.tool-dock-tabstrip` 声明 `touch-action: pan-x`（触屏拖动不触发子按钮 active）',
+    /\.tool-dock-tabstrip \{[\s\S]{0,600}?touch-action: pan-x/.test(css2),
     '')
   // ---- adj557（v0.28.2）：左 / 右两侧按钮**结构性**不随页签滚动（DOM 上是 tabstrip 的兄弟） ----
   check('adj557 「收起底栏」「高度档位」「关闭」三个固定按钮在 DOM 上是 `.tool-dock-tabstrip` 的**兄弟**，不是子节点',
@@ -9911,6 +9991,14 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj540 工作区（含子目录）用例抛异常', e)
+    }
+  })
+  .then(async () => {
+    try {
+      await runAdj559PreviewLiveUpdateTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj559 预览即时更新用例抛异常', e)
     }
   })
   .then(async () => {
