@@ -7822,17 +7822,24 @@ function runAdj526NumberScrubTests() {
 
   // ---- adj528：告警面板"内容自然高"的纯算式（用户连报两次：从最大切建议高度不对） ----
   const RAW = { problemCount: 0, headH: PROB_HEAD_H, rowH: PROB_ROW_H, emptyH: 24, collapsed: false }
-  check('adj528 0 条告警 = 内边距 + 占位行（不随 dock 高度变化，也不预留面板头/4 行）',
+  check('adj528 0 条告警 = 内边距 + 占位行（不随 dock 高度变化，也不预留面板头/5 行）',
     problemsContentHeight(RAW) === PROB_PANE_PAD_H + 24,
     `${problemsContentHeight(RAW)}`)
   check('adj528 n 条告警 = 内边距 + 面板头 + n × 单行高（n ≤ 上限）',
     problemsContentHeight({ ...RAW, problemCount: 1 }) === PROB_PANE_PAD_H + PROB_HEAD_H + PROB_ROW_H &&
       problemsContentHeight({ ...RAW, problemCount: 3 }) === PROB_PANE_PAD_H + PROB_HEAD_H + PROB_ROW_H * 3,
     `${problemsContentHeight({ ...RAW, problemCount: 3 })}`)
-  check('adj528 超过上限（4 行）按上限计（其余由列表自身滚动）',
+  check('adj528 超过上限（5 行）按上限计（其余由列表自身滚动）',
     problemsContentHeight({ ...RAW, problemCount: 9 }) === PROB_PANE_PAD_H + PROB_HEAD_H + PROB_ROW_H * PROB_MAX_ROWS &&
-      PROB_MAX_ROWS === 4,
+      PROB_MAX_ROWS === 5,
     `${problemsContentHeight({ ...RAW, problemCount: 9 })}`)
+  // adj555（用户口径）：告警建议高度"≤ N 按实际、> N 按 N"——少时不高出实际内容、多时按上限封顶。
+  // 三档边界钉死：n=4（按 4）、n=5（按 5）、n=6（按 5）。后续若误把算式改成"强制 5 行"会立即失败。
+  check('adj555 告警行数 ≤ 5 按实际、> 5 按 5 封顶（n=4/5/6 三档边界）',
+    problemsContentHeight({ ...RAW, problemCount: 4 }) === PROB_PANE_PAD_H + PROB_HEAD_H + PROB_ROW_H * 4 &&
+      problemsContentHeight({ ...RAW, problemCount: 5 }) === PROB_PANE_PAD_H + PROB_HEAD_H + PROB_ROW_H * 5 &&
+      problemsContentHeight({ ...RAW, problemCount: 6 }) === PROB_PANE_PAD_H + PROB_HEAD_H + PROB_ROW_H * 5,
+    `n=4 → ${problemsContentHeight({ ...RAW, problemCount: 4 })}; n=5 → ${problemsContentHeight({ ...RAW, problemCount: 5 })}; n=6 → ${problemsContentHeight({ ...RAW, problemCount: 6 })}`)
   check('adj528 面板"收起"时只算面板头（列表没渲染）',
     problemsContentHeight({ ...RAW, problemCount: 3, collapsed: true }) === PROB_PANE_PAD_H + PROB_HEAD_H,
     '')
@@ -7841,10 +7848,15 @@ function runAdj526NumberScrubTests() {
       problemsContentHeight({ ...RAW, problemCount: 2, headH: 0 }) === PROB_PANE_PAD_H + PROB_HEAD_H &&
       problemsContentHeight({ ...RAW, problemCount: 0, emptyH: 0 }) === PROB_PANE_PAD_H + PROB_ROW_H,
     '')
-  check('adj528 cap 对算式结果幂等（不放大、能把异常偏大的输入收口到 4 行）',
+  check('adj528 cap 对算式结果幂等（不放大、能把异常偏大的输入收口到 5 行）',
     capProblemsContentHeight(problemsContentHeight({ ...RAW, problemCount: 9 })) ===
       problemsContentHeight({ ...RAW, problemCount: 9 }) &&
       capProblemsContentHeight(9999) === PROB_PANE_PAD_H + PROB_HEAD_H + PROB_ROW_H * PROB_MAX_ROWS,
+    '')
+  // adj555：cap 也必须遵守"≤N 不放大"——2 条告警的实测值是 2 行，cap 后不能变成 5 行
+  check('adj555 cap 不会把"少"的告警放大到上限（2 条仍按 2 行算）',
+    capProblemsContentHeight(problemsContentHeight({ ...RAW, problemCount: 2 })) ===
+      PROB_PANE_PAD_H + PROB_HEAD_H + PROB_ROW_H * 2,
     '')
   // 结构护栏：ToolDock 里告警的高度常量必须引用同一来源（不重新写死数字）
   const dockModuleSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
@@ -8378,6 +8390,9 @@ function runAdj539ShellTests() {
  */
 function runAdj540WorkspaceTests() {
   console.log('[122] workspace directory for Android/mobile (adj540)')
+  // adj554：本函数里要用 `dockModuleSrc` 检查工作区高度算式 —— 在本函数局部读一次，
+  // 不要复用 adj526 函数内的同名变量（那个作用域只在 526 那段）
+  const dockModuleSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
   // ---- ① `.jps` 判定（大小写不敏感；裸 `.jps` 这种隐藏文件不算） ----
   check('adj540 只认「有主干名 + .jps」的文件（大小写不敏感，裸 `.jps`/别的扩展名都不算）',
     isJpsName('小星星.jps') &&
@@ -8467,10 +8482,11 @@ function runAdj540WorkspaceTests() {
     /\.tool-dock-pane\.pane-workspace \{[\s\S]{0,220}?min-height: 0/.test(cssAll) &&
       /\.ws-panel \{[\s\S]{0,200}?flex: 1 1 auto;[\s\S]{0,80}?min-height: 0/.test(cssAll),
     '')
-  check('adj540 窄屏「左列表 + 右操作按钮」（把行数留给列表），且窄屏隐藏页签图标以放下 6 个页签',
+  check('adj540 窄屏「左列表 + 右操作按钮」（把行数留给列表）；adj556（v0.28.2）窄屏页签**不再隐藏图标**——靠 tabstrip 滚动 + 箭头兜住',
     /\.ws-body \{[\s\S]{0,220}?display: flex/.test(cssAll) &&
       /\.ws-side \{[\s\S]{0,220}?flex-direction: column/.test(cssAll) &&
-      /@container \(max-width: 430px\) \{[\s\S]{0,160}?\.tool-dock-tab-icon \{ display: none/.test(cssAll),
+      // adj556：窄屏不再有 display:none 的图标隐藏规则（仍然可以有 @container ≤430px 的内边距收紧）
+      !/@container \(max-width: 430px\) \{[\s\S]{0,200}?\.tool-dock-tab-icon \{ display: none/.test(cssAll),
     '')
   check('adj540 右侧**只留一个下拉按钮**（点它弹出操作菜单，菜单走 portal 以免被 dock 的 overflow 裁掉）',
     /ref=\{menuBtnRef\}[\s\S]{0,260}?aria-haspopup="menu"[\s\S]{0,200}?workspaceCopy\.menuBtn/.test(panelSrc) &&
@@ -8485,6 +8501,24 @@ function runAdj540WorkspaceTests() {
     cssAll.indexOf('.ws-sub-btn {') > -1 &&
       !/\.ws-side-btn \{[^}]*line-height: 1\.25/.test(cssAll) &&
       /@container \(max-width: 430px\) \{[\s\S]{0,200}?\.ws-panel \.ws-list \{ min-height: 72px/.test(cssAll),
+    '')
+  // ---- adj554（v0.28.2）：工作区窄屏建议高度 = 列表 5 项 + 面板头；行高/头高实测 ----
+  check('adj554 工作区建议高度算式 = chrome + pane_pad + head + gap + 5×row + list_pad/border（不含旧的 settingsDefaultH + 44）',
+    /const workspaceDefaultH = \([\s\S]{0,200}?rowH \* WORKSPACE_VISIBLE_ROWS \+ WS_LIST_PAD_V \+ WS_LIST_BORDER_V/.test(dockModuleSrc) &&
+      /const WORKSPACE_VISIBLE_ROWS = 5/.test(dockModuleSrc) &&
+      // 旧的"settingsDefaultH + 44"近似已替换
+      !/workspaceDefaultH = \([^)]*settingsDefaultH/.test(dockModuleSrc),
+    '')
+  check('adj554 工作区面板行高/头高由 useState 实测（`.ws-list .ws-row` + `.ws-head`）',
+    /const \[workspaceRowH, setWorkspaceRowH\] = useState\(WORKSPACE_ROW_H_FALLBACK\)/.test(dockModuleSrc) &&
+      /const \[workspaceHeadH, setWorkspaceHeadH\] = useState\(WORKSPACE_HEAD_H_FALLBACK\)/.test(dockModuleSrc) &&
+      /bodyRef\.current\?\.querySelector<HTMLElement>\('\.pane-workspace'\)/.test(dockModuleSrc) &&
+      /\.ws-list \.ws-row/.test(dockModuleSrc) &&
+      /\.ws-head/.test(dockModuleSrc) &&
+      /getBoundingClientRect\(\)\.height/.test(dockModuleSrc),
+    '')
+  check('adj554 工作区 wide 仍走 maxH()（adj540 "宽屏一次看全"口径不变），narrow 才走新算式',
+    /if \(key === 'workspace'\)[\s\S]{0,200}?workspaceDefaultH\(workspaceRowH, workspaceHeadH, chromeH\)[\s\S]{0,60}?: maxH/.test(dockModuleSrc),
     '')
   check('adj540 重新授权时**显示要授权的目录**（文件夹名 + 工作区内相对路径），并说明"浏览器不给完整路径"',
     /const wsPathText = ws \? joinPath\(\[ws\.handle\.name, \.\.\.\(ws\.path \?\? \[\]\)\]\) : ''/.test(panelSrc) &&
@@ -9053,6 +9087,8 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
 {
   const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
   const css2 = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  // adj556：本块也用到文案键（tabsLeftTitle / tabsRightTitle），局部读一次
+  const copySrc = String(readFileSync('src/brand/copy.ts', 'utf8'))
   // adj486：试听/导出/设置三枚页签改用顶栏同一套设计图标（不再用 ⚠ ▶ ⬇ ⚙ 字符）
   // adj514：页签图标尺寸与顶栏按钮图标**对齐**（默认 size=16；此前 size=14 比顶栏小 2px 偏虚）
   check('adj486 底栏页签用 ToolIcon（试听→play / 导出→export / 设置→settings）；adj514 图标与顶栏同 16px',
@@ -9064,6 +9100,45 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
     '')
   check('adj486 页签图标位统一占位并居中（字符与设计图标混用不跑偏）',
     /\.tool-dock-tab-icon \{[\s\S]{0,220}display: inline-flex;[\s\S]{0,120}align-items: center;/.test(css2),
+    '')
+  // ---- adj556（v0.28.2）：页签始终显示图标；靠滚动 + 箭头兜住视界外的页签 ----
+  check('adj556 页签**始终显示图标**——窄屏不再 `display: none` 隐藏图标（兜底靠 tabstrip 横向滚动）',
+    // 整份 CSS（含所有 @container）里都不能再出现"页签图标 display:none"的窄屏兜底
+    !/\.tool-dock-tab-icon \{ display: none/.test(css2),
+    '')
+  check('adj556 滚轮转横向：tabstrip 上挂非 passive 的 wheel 监听，仅在 `scrollWidth > clientWidth` 时把 `deltaY` 投给 `scrollLeft`',
+    /tabstripRef[\s\S]{0,400}?onWheel = \(e: WheelEvent\) => \{[\s\S]{0,200}?el\.scrollWidth <= el\.clientWidth[\s\S]{0,200}?el\.scrollLeft \+= e\.deltaY/.test(dockSrc) &&
+      /addEventListener\('wheel', onWheel, \{ passive: false \}\)/.test(dockSrc),
+    '')
+  check('adj556 左右翻页箭头：只在"该方向还有内容"时才渲染（`tabOverflow.left/right`），滚到尽头就消失',
+    /tabOverflow\.left && \(/.test(dockSrc) &&
+      /tabOverflow\.right && \(/.test(dockSrc) &&
+      /className="tool-dock-tab-arrow"/.test(dockSrc) &&
+      /onClick=\{\(\) => pageTabsBy\(-1\)\}/.test(dockSrc) &&
+      /onClick=\{\(\) => pageTabsBy\(1\)\}/.test(dockSrc) &&
+      // 箭头字符与输入条 adj553 同款：‹ / ›——左箭头在 tabstrip 之前、右箭头在之后（中间可能隔着
+      // 整段 tabstrip JSX，所以 gap 给到 5000）；`>` 与字符之间允许任意空白换行
+      />[\s\S]{0,30}?‹[\s\S]{0,5000}?>[\s\S]{0,30}?›/.test(dockSrc),
+    '')
+  check('adj556 箭头按"一屏 80%"翻页、`smooth`，并接 dockCopy 的两条 title 文案',
+    /const pageTabsBy = \(dir: -1 \| 1\) =>[\s\S]{0,200}?el\.scrollBy\(\{ left: dir \* Math\.max\(80, el\.clientWidth \* 0\.8\), behavior: 'smooth' \}\)/.test(dockSrc) &&
+      /tabsLeftTitle: '向左翻看页签'/.test(copySrc) &&
+      /tabsRightTitle: '向右翻看页签'/.test(copySrc),
+    '')
+  check('adj556 箭头按钮 CSS 存在：`.tool-dock-tab-arrow` 常驻（`flex: 0 0 auto`）+ 28px 高 + 与页签同款 hover',
+    /\.tool-dock-tab-arrow \{[\s\S]{0,300}?flex: 0 0 auto[\s\S]{0,200}?height: 28px/.test(css2) &&
+      /\.tool-dock-tab-arrow:hover \{[\s\S]{0,200}?background: var\(--jp-bg-panel-hover\)/.test(css2),
+    '')
+  // ---- adj557（v0.28.2）：左 / 右两侧按钮**结构性**不随页签滚动（DOM 上是 tabstrip 的兄弟） ----
+  check('adj557 「收起底栏」「高度档位」「关闭」三个固定按钮在 DOM 上是 `.tool-dock-tabstrip` 的**兄弟**，不是子节点',
+    // 截取 tabstrip 块（className 起 → 配对 </div> 收尾的最外层标签），三个固定按钮的 className
+    // 都不能落在这块里面——否则它们就是 tabstrip 的子节点，会跟着溢出被滚走。
+    (() => {
+      const m = /<div\s+className="tool-dock-tabstrip"[\s\S]*?<\/div>\s*(?=\{tabOverflow\.right|<!-- 内容区|\{PANELS\.filter)/.exec(dockSrc)
+      if (!m) return false
+      const tabstripBlock = m[0]
+      return !/className="tool-dock-(collapse|size-btn|close)"/.test(tabstripBlock)
+    })(),
     '')
   // adj484：浅深模式按钮——图标与文本垂直居中 + 两侧留白 + 统一最小宽度
   {
@@ -9256,13 +9331,14 @@ console.log('[116] settings 6 rows, About in dock, divider touch hit-area (adj49
   check('adj494 关于面板纳入 AUTO_FIT（打开即完整显示内容）；adj510 告警亦纳入 AUTO_FIT',
     /const AUTO_FIT: readonly DockPanelKey\[\] = \['problems', 'tryout', 'export', 'about'\]/.test(dockSrc),
     '')
-  // adj524：告警"建议档"最多显示 4 行（adj510 原为 2 行）。放宽的依据是底栏有了高度档位按钮——
-  // "默认多给一点"不再挤占编辑区（嫌高按一下到最小、想更高按一下到最大），所以让建议档
-  // 承担"一次看全常见告警量（4 条）"，减少"还得先拖大才看得见"。0/1/2 条仍按内容自然高收缩。
-  // adj528：常量与算式搬到 `ui/dock/problemsHeight.ts`（单一来源 + 纯函数），断言随之改到该文件。
-  check('adj524/adj528 告警建议档最多显示 4 行（PROBLEMS_MAX_VISIBLE_ROWS = 4，单一来源）',
-    PROB_MAX_ROWS === 4 &&
-      /export const PROBLEMS_MAX_VISIBLE_ROWS = 4/.test(readFileSync('src/ui/dock/problemsHeight.ts', 'utf8')),
+  // adj555（v0.28.2）：告警"建议档"最多显示 5 行（adj510: 2 行 → adj524: 4 行 → adj555: 5 行）。
+  // 放宽的依据是底栏有了高度档位按钮——"默认多给一点"不再挤占编辑区（嫌高按一下到最小、
+  // 想更高按一下到最大），所以让建议档承担"一次看全 5 条告警"。**0/1/2/3/4 条仍按内容自然高收缩**，
+  // 只在 > 5 条时按上限封顶（其余由列表自身滚动）。adj528：常量与算式搬到 `ui/dock/problemsHeight.ts`
+  // （单一来源 + 纯函数），断言随之改到该文件。
+  check('adj555/adj528 告警建议档最多显示 5 行（PROBLEMS_MAX_VISIBLE_ROWS = 5，单一来源）',
+    PROB_MAX_ROWS === 5 &&
+      /export const PROBLEMS_MAX_VISIBLE_ROWS = 5/.test(readFileSync('src/ui/dock/problemsHeight.ts', 'utf8')),
     `maxRows=${PROB_MAX_ROWS}`)
 
   // adj522：告警面板"展开后内容超过视界却没有滚动条"——高度链必须成立，列表才会真的滚。

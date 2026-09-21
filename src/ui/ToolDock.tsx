@@ -16,15 +16,16 @@
  *
  * ## 高度（adj465，用户规格）
  * 每个面板有**自己的默认高度**，并且**用户当次的拖拽调整按面板各自记住**：
- *  · 告警：默认 **4 行**高；设置：默认与告警同高（先这样，后续可调）；
+ *  · 告警：默认 **5 行**高（adj555：4 → 5）；设置：默认与告警同高（先这样，后续可调）；
  *  · 试听 / 导出：默认**最小高度**；
+ *  · 工作区：窄屏按"列表 5 项 + 面板头"算（adj554），宽屏直接给满；
  *  · 拖拽调整 → 只影响**当次**（切走再切回该面板仍是你的高度）；
  *  · **重新打开**（关闭后再次通过入口打开）→ 清掉所有当次调整、回到各自默认。
  * 高度用**内联 px** 落到 `.tool-dock`，并同步一个 CSS 变量 `--dock-cols-h` 给设置面板的三栏当
  * `max-height` —— 这样"各栏独立滚动"是**算出来的确定值**，不依赖 flex 链的隐式收窄
  * （此前依赖 flex 链，在部分情况下栏不会收窄 → 内容溢出被 overflow:hidden 裁掉、无法操作）。
  */
-import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import { useUiStore, type DockPanelKey } from '../store/uiStore'
 import { useDocStore } from '../store/docStore'
@@ -101,6 +102,26 @@ const FOOT_H = 38
 /** 设置面板窄屏布局的**行间距**（与 CSS `grid-template-rows: … auto` 的 row-gap 对齐） */
 const GRID_GAP_V = 6
 /**
+ * adj554（v0.28.2，用户要求）：工作区窄屏建议高度 = 列表**5 项** + 面板头 + 结构间隙；
+ *  宽屏仍走 `maxH()`（adj540 "宽屏一次看全"口径不变）。
+ *  这些是**结构常数**——`.ws-row` / `.ws-head` 的具体像素由运行时实测（见下面 `workspaceRowH` /
+ *  `workspaceHeadH`），常量仅保留 5 项 + 盒子自身 padding/border/gap。
+ *  列出来的目的是：哪几个像素是"盒子自身的"、哪几个是"列表行数 × 单行高"，一眼能分清，
+ *  改的时候不至于把测量与硬编码混在一起调。
+ */
+/** `.ws-list` 上下内边距（4 + 4 = 8） */
+const WS_LIST_PAD_V = 8
+/** `.ws-list` 上下边框（1 + 1 = 2） */
+const WS_LIST_BORDER_V = 2
+/** `.ws-panel` `gap`（面板头与列表之间的间距） */
+const WS_PANEL_GAP = 8
+/** 窄屏下"建议档"要显示多少项（用户口径：与告警 adj555 保持一致的"5"） */
+const WORKSPACE_VISIBLE_ROWS = 5
+/** adj554：`.ws-row` 高度实测未到位时的兜底（`padding: 9px 8px; font-size: 13px` 实测 ≈ 36） */
+const WORKSPACE_ROW_H_FALLBACK = 36
+/** adj554：`.ws-head` 高度实测未到位时的兜底（28px 按钮 + 面包屑 → 取大者） */
+const WORKSPACE_HEAD_H_FALLBACK = 28
+/**
  * adj520：dock 的**绝对最小高度** = 外壳高度（抓手 + 页签栏）——「最小高度」档位与拖拽/键盘的
  * 下限都用它：最小化后**仍能看到并点击页签 / 关闭 / 档位按钮**，随时可点回建议档、或向上拖回来。
  *
@@ -161,13 +182,19 @@ const settingsDefaultH = (rowPitch: number, narrow: boolean, chromeH: number): n
   chromeH + PANE_PAD_H + rowPitch * SETTINGS_ROWS + (narrow ? GRID_GAP_V + FOOT_H : 0)
 
 /**
- * adj540：工作区面板的**窄屏默认高度**。
- * 它不像设置面板按"6 行字段"算——右边是一列**固定数量的操作按钮**（打开/改名/移动/删除/新建/存到此处），
- * 面板高度必须装得下这一列，否则「新建 / 存到此处」会被挤到可视区外（实测 390px 手机上正是如此）。
- * 取「设置面板那套 + 44px」（再多半行按钮的余量）；上限仍由外层 `maxH()` 夹（宽屏直接给满）。
+ * adj554（v0.28.2，用户要求）：工作区窄屏建议高度 = "**刚好装下列表 5 项 + 面板头**"。
+ *
+ * 此前（adj540）沿用 `settingsDefaultH + 44px` 的近似——能装下右侧那列操作按钮，却把列表压成
+ * "看不到几条"。改为按面板真实结构算：chrome + pane padding + 面板头 + 8px gap + 5 × 行高
+ * + list 自身 padding/border；行高/面板头都用实测值（见下面的 `workspaceRowH` / `workspaceHeadH`），
+ * 实测不到位则用 `*_FALLBACK`。宽屏仍走 `maxH()`（adj540 口径不变），所以这个函数只在窄屏被调。
  */
-const workspaceDefaultH = (rowPitch: number, narrow: boolean, chromeH: number): number =>
-  narrow ? settingsDefaultH(rowPitch, narrow, chromeH) + 44 : maxH()
+const workspaceDefaultH = (rowH: number, headH: number, chromeH: number): number =>
+  chromeH
+    + PANE_PAD_H
+    + headH
+    + WS_PANEL_GAP
+    + (rowH * WORKSPACE_VISIBLE_ROWS + WS_LIST_PAD_V + WS_LIST_BORDER_V)
 
 /**
  * 各面板**兜底**默认高度（实测 AUTO_FIT 前的占位；AUTO_FIT 项在 `measured` 到位后会被覆盖）。
@@ -176,11 +203,20 @@ const workspaceDefaultH = (rowPitch: number, narrow: boolean, chromeH: number): 
  *
  * adj510：告警的兜底改为「**最多 `PROBLEMS_MAX_VISIBLE_ROWS` 条**可见」的高度
  * （= 外壳 + `PANE_PAD_H` + `ROW_H × PROBLEMS_MAX_VISIBLE_ROWS` + problems-head），
- * ——用户要求"打开告警页签时底栏 dock 最高只显示两个告警的高度"（adj524：该上限已放宽到 4 行）。
+ * ——用户要求"打开告警页签时底栏 dock 最高只显示两个告警的高度"（adj524：4 行 ⇒ adj555：5 行）。
  * 多于 `PROBLEMS_MAX_VISIBLE_ROWS` 条时面板内部滚动查看（`problems-list` 的 `overflow-y: auto`）。
  * adj521：外壳高度改为**传入**（实测 `chromeH`），理由同 `settingsDefaultH`。
  */
-const defaultH = (key: DockPanelKey, narrow: boolean, rowPitch: number, chromeH: number): number => {
+const defaultH = (
+  key: DockPanelKey,
+  narrow: boolean,
+  rowPitch: number,
+  chromeH: number,
+  // adj554：工作区面板的"实测行高 + 面板头高"——由 `forPanel` 把组件内的 useState 传进来；
+  // 不能直接读模块外作用域（`defaultH` 是模块级函数、不是组件）。
+  workspaceRowH: number,
+  workspaceHeadH: number,
+): number => {
   // adj510：告警**兜底** = `PROBLEMS_MAX_VISIBLE_ROWS` 行告警 + 面板头（problems-head ≈ 28px）；
   // AUTO_FIT 实测接管后会按"内容自然高" 调整，但始终 cap 在同一行数（`measured` 已在 `forPanel`
   // 里钳制过；详见 `capProblemsContentHeight`）。
@@ -190,10 +226,14 @@ const defaultH = (key: DockPanelKey, narrow: boolean, rowPitch: number, chromeH:
   // 取 maxH 作为默认 = "第一次打开就让用户看到全部 5 个页签 + 还能看几行内容"，避免「打开设置 →
   // 还得先拖大才能看到音色库」。narrow 时仍走 settingsDefaultH（避免矮屏默认过高撑爆视口）。
   if (key === 'settings') return narrow ? settingsDefaultH(rowPitch, narrow, chromeH) : maxH()
-  // adj540：工作区面板——窄屏要装得下右侧那列操作按钮（见 workspaceDefaultH），宽屏直接给满。
+  // adj554：工作区面板——窄屏按 `workspaceDefaultH(workspaceRowH, workspaceHeadH, chromeH)` 算出
+  // "列表 5 项 + 面板头"的高度（用户要求）；宽屏仍走 maxH()（adj540 口径）。
   // 内容是**动态列表**（进出子目录、增删改后行数都在变），走 AUTO_FIT 会让高度每次导航都跳，
   // 故用固定默认 + 列表自身滚动。
-  if (key === 'workspace') return workspaceDefaultH(rowPitch, narrow, chromeH)
+  if (key === 'workspace')
+    return narrow
+      ? workspaceDefaultH(workspaceRowH, workspaceHeadH, chromeH)
+      : maxH()
   // adj494：关于/试听/导出走 AUTO_FIT（实测内容高）；这里的值是**首次测量前的兜底**
   return chromeH
 }
@@ -264,7 +304,8 @@ const AUTO_FIT: readonly DockPanelKey[] = ['problems', 'tryout', 'export', 'abou
  * 所以取一个保守值，让用户需要时自己拖高。
  * adj524（用户要求）：**2 → 4 行** —— 底栏有了高度档位按钮（adj519/adj520）之后，
  * "默认给多一点"不再是负担：嫌高按一下就能切到最小（只留页签栏），想要更高按一下切到最大。
- * 于是建议档可以承担"一次看全常见告警量（4 条）"的职责，减少"还得先拖大才看得见"的次数。
+ * adj555（v0.28.2，用户要求）：**4 → 5 行** —— 与工作区窄屏"列表 5 项"保持一致；
+ * 建议档可以承担"一次看全 5 条告警"的职责，减少"还得先拖大才看得见"的次数。
  * （0/1/2 条告警仍按内容自然高收缩，不受本上限影响；只有超过本行数才滚动。）
  * adj528：常量搬到 `ui/dock/problemsHeight.ts`（与算式同处一地，smoke 直接断言）。
  */
@@ -370,6 +411,77 @@ export function ToolDock() {
     const pitch = row.getBoundingClientRect().height + mb
     if (pitch > 8 && Math.abs(pitch - settingsRowPitch) > 0.5) setSettingsRowPitch(pitch)
   }, [dockOpen, dockPanel, everActive.length, settingsRowPitch, narrow])
+  /**
+   * adj554：工作区面板的**列表行高**（实测 `.ws-list .ws-row`）——用于算"窄屏显示 5 项"的高度。
+   * `.ws-row` 在窄屏时是图标 + 文件名一行文字（搜索结果可能两行兜底），行高在不同视口下会随
+   * 字号/dpi 变化，所以必须实测；空目录没有行可量，未测到前用 `WORKSPACE_ROW_H_FALLBACK` 兜底。
+   */
+  const [workspaceRowH, setWorkspaceRowH] = useState(WORKSPACE_ROW_H_FALLBACK)
+  /**
+   * adj554：工作区面板**顶部行**（切换工作区按钮 + 路径面包屑）的实测高度——
+   * 也是"5 项"高度里的固定开销之一；未测到前用 `WORKSPACE_HEAD_H_FALLBACK` 兜底。
+   */
+  const [workspaceHeadH, setWorkspaceHeadH] = useState(WORKSPACE_HEAD_H_FALLBACK)
+  useEffect(() => {
+    if (!dockOpen || dockPanel !== 'workspace') return
+    const pane = bodyRef.current?.querySelector<HTMLElement>('.pane-workspace')
+    if (!pane) return
+    const head = pane.querySelector<HTMLElement>('.ws-head')
+    const row = pane.querySelector<HTMLElement>('.ws-list .ws-row')
+    if (head) {
+      const h = head.getBoundingClientRect().height
+      if (h > 0 && Math.abs(h - workspaceHeadH) > 0.5) setWorkspaceHeadH(h)
+    }
+    if (row) {
+      const h = row.getBoundingClientRect().height
+      if (h > 0 && Math.abs(h - workspaceRowH) > 0.5) setWorkspaceRowH(h)
+    }
+  }, [dockOpen, dockPanel, everActive.length, workspaceHeadH, workspaceRowH, narrow])
+
+  /**
+   * adj556（用户要求"页签始终显示图标，靠左右滚动查看视界外的页签"）：
+   * `.tool-dock-tabstrip` 的**横向溢出状态**——左右两端是否还能再滚。
+   * 两个箭头按钮（`.tool-dock-tab-arrow`）只在"该方向还有内容"时才渲染，滚到尽头就消失。
+   * 与输入条 adj553 的 `padOverflow` 同思路，但去掉了移动端触摸滑动的部分（移动端本就可触摸滑动；
+   * 这里补的是**桌面端**鼠标路径——滚轮转横向 + 箭头翻页）。
+   */
+  const tabstripRef = useRef<HTMLDivElement | null>(null)
+  const [tabOverflow, setTabOverflow] = useState({ left: false, right: false })
+  const syncTabOverflow = useCallback(() => {
+    const el = tabstripRef.current
+    if (!el) return
+    const max = el.scrollWidth - el.clientWidth
+    // 与 adj553 同款容差：1px 之内视作"贴边"，避免 sub-pixel 抖动
+    setTabOverflow({ left: el.scrollLeft > 1, right: max > 1 && el.scrollLeft < max - 1 })
+  }, [])
+  useLayoutEffect(() => {
+    const el = tabstripRef.current
+    if (!el) return
+    syncTabOverflow()
+    // adj556：滚轮转横向——只在容器**确实溢出**时接管；触摸板横向滚动（`deltaX` 已占主导）
+    // 与 Shift+滚轮（浏览器原生已支持横向）原样放行，不劫持正常滚动（adj553 同款三条）。
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth) return
+      if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return
+      e.preventDefault()
+      el.scrollLeft += e.deltaY
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('scroll', syncTabOverflow, { passive: true })
+    const ro = new ResizeObserver(syncTabOverflow)
+    ro.observe(el)
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('scroll', syncTabOverflow)
+      ro.disconnect()
+    }
+  }, [syncTabOverflow])
+  /** adj556：箭头翻页——按"一屏的 80%"翻；滚到尽头自动禁用（箭头消失） */
+  const pageTabsBy = (dir: -1 | 1) => {
+    const el = tabstripRef.current
+    if (!el) return
+    el.scrollBy({ left: dir * Math.max(80, el.clientWidth * 0.8), behavior: 'smooth' })
+  }
 
   useEffect(() => {
     if (!dockOpen) return
@@ -487,7 +599,8 @@ export function ToolDock() {
       const measuredContent = key === 'problems' ? PROBS.capProblemsContentHeight(measured[key]!) : measured[key]!
       return chromeH + measuredContent
     }
-    return defaultH(key, narrow, settingsRowPitch, chromeH)
+    // adj554：工作区的"5 项"算式需要实测的 `.ws-row` / `.ws-head` 高度，从模块外传入
+    return defaultH(key, narrow, settingsRowPitch, chromeH, workspaceRowH, workspaceHeadH)
   }
   // adj518：baseH **始终优先用用户拖拽后的高度** `heights[dockPanel]`（仅当未设置才回退到
   // `forPanel`）。此前 bug：`fitKeys=true` 时 `baseH` 永远用 `forPanel(dockPanel)`，**完全忽略**
@@ -647,20 +760,23 @@ export function ToolDock() {
           }
         }}
       />
-      {/* 标题栏：**左端**常驻的档位按钮 + 可横向滑动的面板页签 + **右端**常驻的关闭按钮
+      {/* 标题栏：**左端**常驻的档位/收起按钮 + 可横向滑动的面板页签 + **右端**常驻的关闭按钮
        *
        * adj525（用户要求"档位按钮和关闭按钮固定在右侧，如顶栏的主题/支持；其它页签超出视界可左右滑动"）：
-       * 结构拆成「**可滚的页签区** + **两个常驻按钮**」——页签多了只在页签区内滚动，
-       * 两个按钮永远可见、永远点得到。
+       * 结构拆成「**可滚的页签区** + **三个常驻按钮**」——页签多了只在页签区内滚动，
+       * 三个按钮永远可见、永远点得到。
        * 与顶栏 adj453 的修法同源：**"必须始终可见"的元素不要放进会溢出的滚动容器**，
        * 否则它们会被内容顶出可视区（此前正是如此：页签一溢出，两个按钮就被推到右边看不见，
        * 得先滑到最后才能点）。`role="tablist"` 随之移到页签区（它才是"页签的容器"）。
        * adj531（用户要求"把高度调整按钮移到最左边，手机上左边操作更顺手，也避免误按关闭按钮"）：
-       * 档位按钮从 ✕ 左侧移到**页签区左边**，顺序成为「档位 → 页签 → ✕」（DOM 顺序与视觉一致，
+       * 档位按钮从 ✕ 左侧移到**页签区左边**，顺序成为「收起 → 档位 → 页签 → ✕」（DOM 顺序与视觉一致，
        * Tab 序也随之，不做 `order` 反转以免视觉与读屏/焦点序不一致）。于是：
        *   · 手机单手拇指在左半屏就能切高度；
        *   · ✕ 独自留在最右端、与档位按钮之间隔着**整条页签区**，够不到也就按不到。
-       * 两个按钮**仍在可滚页签区之外**（adj525 的口径完全不变），页签溢出只推动页签区内部滚动。 */}
+       * adj541：多加一个「收起底栏」按钮（更靠左），让"收起"与"调高度"两件事在手机上都能单手点。
+       * 三个按钮**仍在可滚页签区之外**（adj525 的口径完全不变），页签溢出只推动页签区内部滚动。
+       * adj557（用户要求"左 / 右两侧不随页签滚动"）：这条**结构性保证**——常驻按钮在 DOM 上
+       * 就是 `.tool-dock-tabstrip` 的兄弟节点、不是子节点 ⇒ 物理上不可能被页签溢出顶走。 */}
       <div className="tool-dock-tabs">
         {/* adj541（用户要求）：**收起底栏**按钮，位置在高度档位按钮**左边**。
             点它 = 收起底栏，并在编辑区左下角浮出「展开底栏」按钮（见 EditorPane 的 `.dock-fab`）。
@@ -691,7 +807,21 @@ export function ToolDock() {
         >
           <ToolIcon name={sizeStep.icon} size={14} />
         </button>
-        <div className="tool-dock-tabstrip" role="tablist">
+        {/* adj556（用户要求"页签始终显示图标"）：图标不再窄屏隐藏，靠这条可滚页签区
+            + 滚轮转横向 + 左右翻页箭头兜住视界外的页签。三个固定按钮（档位 / ✕）放在
+            tabstrip 之外 ⇒ 永远不被页签溢出顶走（adj557：用户要求"左右两侧不随页签滚动"）。 */}
+        {tabOverflow.left && (
+          <button
+            type="button"
+            className="tool-dock-tab-arrow"
+            title={dockCopy.tabsLeftTitle}
+            aria-label={dockCopy.tabsLeftTitle}
+            onClick={() => pageTabsBy(-1)}
+          >
+            ‹
+          </button>
+        )}
+        <div className="tool-dock-tabstrip" role="tablist" ref={tabstripRef}>
           {TABS.map((t) => (
             <button
               key={t.key}
@@ -705,13 +835,25 @@ export function ToolDock() {
               <span className="tool-dock-tab-icon" aria-hidden="true">
                 {/* adj486：设计图标（顶栏同一套）优先；暂无对应图的（告警）用字符兜底。
                     adj514：**与顶栏按钮图标同尺寸**（`ToolIcon` 默认 size=16，与顶栏一致）——
-                    此前 `size={14}` 比顶栏小 2px，视觉"虚"（用户报）。 */}
+                    此前 `size={14}` 比顶栏小 2px，视觉"虚"（用户报）。
+                    adj556：图标**窄屏也不再隐藏**——与 `.tool-dock-tab-label` 同显。 */}
                 {t.icon ? <ToolIcon name={t.icon} /> : t.glyph}
               </span>
               <span className="tool-dock-tab-label">{t.label}</span>
             </button>
           ))}
         </div>
+        {tabOverflow.right && (
+          <button
+            type="button"
+            className="tool-dock-tab-arrow"
+            title={dockCopy.tabsRightTitle}
+            aria-label={dockCopy.tabsRightTitle}
+            onClick={() => pageTabsBy(1)}
+          >
+            ›
+          </button>
+        )}
         <button type="button" className="tool-dock-close" onClick={closeDock} title={dockCopy.closeTitle} aria-label={dockCopy.closeTitle}>
           ✕
         </button>

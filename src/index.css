@@ -1261,6 +1261,40 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 .tool-dock-tabstrip::-webkit-scrollbar { display: none; }
+/**
+ * adj556（用户要求"页签多到放不下时，PC 也能翻看视界外的页签"）：页签区左右两端的
+ * **翻页箭头按钮**——只在"该方向还有内容"时才出现，滚到尽头就消失。
+ * 与输入条 adj553 的 `.pad-scroll-btn` 同思路：箭头既是提示（"后面还有页签"），也是
+ * "不必用滚轮"的鼠标路径；滚轮转横向由 ToolDock 的 wheel 监听接管（adj553 同款）。
+ * 位于 `.tool-dock-tabstrip` **之外** ⇒ 不参与页签区的滚动计算，只在出现/消失时挤压
+ * tabstrip 的可用宽度；`flex: 0 0 auto` 常驻、不被压扁。
+ * 视觉沿用页签同款高度（28px），与档位按钮 / ✕ 共用同一套 hover 颜色（与 `.topbar-btn` 一族）。
+ */
+.tool-dock-tab-arrow {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  min-width: 18px;
+  height: 28px;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+  color: var(--jp-text-primary);
+  font-size: 13px;
+  line-height: 1;
+  /* 与页签同款 hover：主文字色 + 面板悬停底色 + 边框色——三联动 */
+  transition: color .15s, background-color .15s, border-color .15s;
+}
+.tool-dock-tab-arrow:hover {
+  background: var(--jp-bg-panel-hover);
+  color: var(--jp-text-primary);
+  border-color: var(--jp-border-strong);
+}
 /* adj509：页签样式**与顶栏 `.topbar-btn` 同源**——同款边框 / 圆角 / 字号 / padding / hover；
    由 `.tool-dock-tab` 继承 `.topbar-btn` 的视觉规范，与顶栏工具条按钮成对，让"功能"和"面板"
    两个层级的入口观感一致。
@@ -1327,12 +1361,12 @@ body {
  * adj540（用户要求）：页签已经有 6 个（工作区/告警/试听/导出/设置/关于），窄屏放不下——
  * 宽度账：带图标每签 56px（边框 2 + 内边距 10 + 图标 16 + 间距 4 + 两个中文字 24），
  * 6 个 + 间距 ≈ 346，加栏开销（档位按钮 28 + ✕ 22 + 间隙）≈ **411px** ⇒ 390 的手机必须横滑才看得到后两个。
- * 页签本身已按 adj527 收到最小（再压就挤到文字），所以这里**窄屏去掉图标、只留文字**：
- * 每签 36px ⇒ 6 个 + 间距 ≈ 226，加栏开销 ≈ **291px**，320 的窄机也能整栏放下、不用横滑。
- * 宽屏（桌面）保留图标——那里宽度富余，图标更有辨识度。
+ * adj556（用户反馈"窄屏下页签图标被去掉，难以一眼分辨"）：**不再窄屏隐藏图标**——图标与
+ * 文字同显，靠 `.tool-dock-tabstrip` 横向滚动（+ 滚轮转横向 / 左右翻页箭头，见 ToolDock）
+ * 兜住视界外的页签。这里仍保留窄屏下的内边距收紧（让可装下的页签更多一些），但**图标不再藏**。
+ * 宽屏（桌面）保持图标 + 内边距原状。
  */
 @container (max-width: 430px) {
-  .tool-dock-tab-icon { display: none; }
   .tool-dock-tab { padding: 5px 6px; }
 }
 .tool-dock-close {

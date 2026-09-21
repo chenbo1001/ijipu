@@ -3,7 +3,8 @@
  *
  * ## 为什么要单独一个模块
  * 告警面板的高度被三处用到：**AUTO_FIT 实测**（打开/切档时的"内容自然高"）、
- * **内容 cap**（建议档最多显示 4 行）、**defaultH 兜底**。它们必须用同一组常量，
+ * **内容 cap**（建议档最多显示 5 行；告警 ≤ 5 条按实际行数算、> 5 条按 5 封顶，adj555 用户口径）、
+ * **defaultH 兜底**。它们必须用同一组常量，
  * 而"内容自然高"的算法又必须在 smoke 里可断言（纯算术，不依赖真实 DOM）——
  * 所以常量与算式一起收在这里，`ToolDock.tsx` 只做"读 DOM 数值 → 调用本模块"的薄接线。
  *
@@ -31,14 +32,21 @@ export const ROW_H = 22
 export const PROBLEMS_HEAD_H = 28
 /**
  * 建议档最多显示几行告警（超出由列表自身滚动）。
- * adj510：2 行 → adj524：4 行（用户要求，依据是底栏有了高度档位按钮，"默认多给"不再挤占编辑区）。
+ *
+ * **作用方式（adj555 用户明确口径）**：
+ *  · 告警行数 **≤ N**（N = 本常量 = 5）→ **按实际行数算**（少时不高出实际内容），
+ *  · 告警行数 **> N** → 按 **N 行封顶**（列表内部滚动，超出部分照常可看）。
+ *
+ * 历史：adj510：2 行 → adj524：4 行（用户要求，依据是底栏有了高度档位按钮，"默认多给"不再挤占编辑区）→
+ * adj555（v0.28.2，用户要求）：4 → 5 行（与工作区窄屏"5 项"保持一致；宽屏空间更宽，多 1 行也无副作用）。
  */
-export const PROBLEMS_MAX_VISIBLE_ROWS = 4
+export const PROBLEMS_MAX_VISIBLE_ROWS = 5
 
 /**
  * 告警"内容自然高"的 **cap**：超过「面板头 + `PROBLEMS_MAX_VISIBLE_ROWS` 行」就记为上限，
  * 超出部分由 `.problems-list` 的 `overflow-y: auto` 在面板内滚动查看。
- * （对下面 `problemsContentHeight` 的结果是**幂等**的，保留它是为了兜住"实测值异常偏大"的输入。）
+ * （对下面 `problemsContentHeight` 的结果是**幂等**的——它本身已按"≤N 按实际、>N 按 N"算过，
+ * 留着这个 cap 是为了兜住"实测值异常偏大"的输入。）
  */
 export function capProblemsContentHeight(h: number): number {
   if (h <= 0) return h
@@ -47,6 +55,9 @@ export function capProblemsContentHeight(h: number): number {
 
 /**
  * 告警面板的"内容自然高"（含 pane 上下内边距）——**纯算术**，输入全是"与 dock 高度无关"的量。
+ *
+ * 行数走"**≤ N 按实际、> N 按 N**"（adj555 用户口径）：
+ * `rows = min(problemCount, PROBLEMS_MAX_VISIBLE_ROWS)`——少时不高出实际、多时按上限封顶。
  *
  * @param problemCount 告警条数（= 渲染出的行数）
  * @param headH 面板头高度（面板未渲染时为 0）
@@ -66,6 +77,8 @@ export function problemsContentHeight(o: {
   if (o.problemCount <= 0) return PANE_PAD_H + (o.emptyH > 0 ? o.emptyH : rowH)
   // 面板被收起 / 头部还没量到：只有面板头
   if (o.collapsed || o.headH <= 0) return PANE_PAD_H + (o.headH > 0 ? o.headH : PROBLEMS_HEAD_H)
+  // adj555：「≤ N 按实际、> N 按 N」——少时不高出实际内容、多时按上限封顶
+  // （烟测中 n=4/n=5/n=9 三档钉住这条规则，避免后续误改成"强制 5 行"）
   const rows = Math.min(o.problemCount, PROBLEMS_MAX_VISIBLE_ROWS)
   return PANE_PAD_H + o.headH + rowH * rows
 }
