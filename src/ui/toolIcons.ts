@@ -63,6 +63,12 @@ export const ICON_FILES = {
   dockExpand: '底栏展开',
   /** adj541：底栏收起（底栏页签栏里、高度档位按钮左边的按钮） */
   dockCollapse: '底栏收起',
+  /** adj564：「滚动指示」左箭头（底栏页签区的 `‹`、输入条的 `‹` 都改用它，不再用字符） */
+  left: '左',
+  /** adj564：「滚动指示」右箭头（同上，对应 `›`） */
+  right: '右',
+  /** adj562：底栏「导入」页签（粘贴源码导入）——adj564 由 `⤓` 字符换成设计图标 */
+  import: '导入',
 } as const
 
 export type ToolIconName = keyof typeof ICON_FILES

@@ -8520,7 +8520,7 @@ async function runAdj540WorkspaceTests() {
       // 顺序：PANELS 的前两项是 workspace → import（adj562：导入紧跟工作区，用户要求）
       /\{ key: 'workspace', render: WorkspacePanel \},\s*\{ key: 'import', render: ImportPanel \},\s*\{ key: 'problems'/.test(dockSrc) &&
       // 顺序：TABS 的前两项同上
-      /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace' \},\s*[\s\S]{0,200}?\{ key: 'import', label: dockCopy\.tabImport, glyph: '⤓' \}/.test(dockSrc) &&
+      /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace' \},\s*[\s\S]{0,200}?\{ key: 'import', label: dockCopy\.tabImport, icon: 'import' \}/.test(dockSrc) &&
       /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace' \}/.test(dockSrc) &&
       /workspace: '工作区'/.test(String(readFileSync('src/ui/toolIcons.ts', 'utf8'))) &&
       /if \(key === 'workspace'\)/.test(dockSrc) &&
@@ -9299,6 +9299,9 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
   const css2 = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
   // adj556：本块也用到文案键（tabsLeftTitle / tabsRightTitle），局部读一次
   const copySrc = String(readFileSync('src/brand/copy.ts', 'utf8'))
+  // adj564：图标清单（toolIcons.ts）与输入条源码（ScriptToolbar.tsx）——本块局部读
+  const iconsSrc = String(readFileSync('src/ui/toolIcons.ts', 'utf8'))
+  const toolSrc = String(readFileSync('src/editor/ScriptToolbar.tsx', 'utf8'))
   // adj486：试听/导出/设置三枚页签改用顶栏同一套设计图标（不再用 ⚠ ▶ ⬇ ⚙ 字符）
   // adj514：页签图标尺寸与顶栏按钮图标**对齐**（默认 size=16；此前 size=14 比顶栏小 2px 偏虚）
   check('adj486 底栏页签用 ToolIcon（试听→play / 导出→export / 设置→settings）；adj514 图标与顶栏同 16px',
@@ -9326,9 +9329,11 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
       /className="tool-dock-tab-arrow"/.test(dockSrc) &&
       /onClick=\{\(\) => pageTabsBy\(-1\)\}/.test(dockSrc) &&
       /onClick=\{\(\) => pageTabsBy\(1\)\}/.test(dockSrc) &&
-      // 箭头字符与输入条 adj553 同款：‹ / ›——左箭头在 tabstrip 之前、右箭头在之后（中间可能隔着
-      // 整段 tabstrip JSX，所以 gap 给到 5000）；`>` 与字符之间允许任意空白换行
-      />[\s\S]{0,30}?‹[\s\S]{0,5000}?>[\s\S]{0,30}?›/.test(dockSrc),
+      // adj564（用户要求）：滚动指示改用**设计图标**（`左.png` / `右.png`），不再是 `‹` / `›` 字符。
+      // 左箭头在 tabstrip 之前、右箭头在之后（中间隔着整段 tabstrip JSX，故 gap 给到 5000）。
+      /<ToolIcon name="left" size=\{14\} \/>[\s\S]{0,5000}?<ToolIcon name="right" size=\{14\} \/>/.test(dockSrc) &&
+      // 反向：这两个按钮里不应再有 `‹` / `›` 字符（注释里可以提，故先剥注释）
+      !/[‹›]/.test(dockSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')),
     '')
   check('adj556 箭头按"一屏 80%"翻页、`smooth`，并接 dockCopy 的两条 title 文案',
     /const pageTabsBy = \(dir: -1 \| 1\) =>[\s\S]{0,200}?el\.scrollBy\(\{ left: dir \* Math\.max\(80, el\.clientWidth \* 0\.8\), behavior: 'smooth' \}\)/.test(dockSrc) &&
@@ -9338,6 +9343,33 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
   check('adj556 箭头按钮 CSS 存在：`.tool-dock-tab-arrow` 常驻（`flex: 0 0 auto`）+ 28px 高 + 与页签同款 hover',
     /\.tool-dock-tab-arrow \{[\s\S]{0,300}?flex: 0 0 auto[\s\S]{0,200}?height: 28px/.test(css2) &&
       /\.tool-dock-tab-arrow:hover \{[\s\S]{0,200}?background: var\(--jp-bg-panel-hover\)/.test(css2),
+    '')
+  // ---- adj564（用户要求）：滚动指示的 `<>` 按钮改用设计图标；「导入」页签改用设计图标 ----
+  // ① 图标清单新增 `左` / `右` / `导入` 三项，且 `sw.js` 预热清单同步（顺序必须一致，见 adj417 那条）
+  check('adj564 新增 `left: 左` / `right: 右` / `import: 导入` 三个图标（`ICON_FILES` 与 sw.js 同步）',
+    /left: '左'/.test(iconsSrc) &&
+      /right: '右'/.test(iconsSrc) &&
+      /import: '导入'/.test(iconsSrc) &&
+      ['左', '右', '导入'].every((n) => existsSync(join(root, 'public', ICON_DIR, `${n}.png`))),
+    '')
+  // ② 底栏页签区的两个箭头按钮 → ToolIcon left/right（已在上面那条反向断言里钉住"不再用字符"）
+  check('adj564 底栏页签箭头用 `<ToolIcon name="left|right" />`（不再是 `‹` / `›` 字符）',
+    /<ToolIcon name="left" size=\{14\} \/>/.test(dockSrc) && /<ToolIcon name="right" size=\{14\} \/>/.test(dockSrc),
+    '')
+  // ③ 输入条的滚动指示按钮（adj553）用**同一对**设计图标——两处观感一致
+  {
+    const padNoComment = toolSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    check('adj564 输入条的左右翻看按钮用同一对 `<ToolIcon name="left|right" />`（两处观感一致）',
+      /pad-scroll-btn[\s\S]{0,300}?<ToolIcon name="left" size=\{14\} \/>/.test(padNoComment) &&
+        /pad-scroll-btn[\s\S]{0,300}?<ToolIcon name="right" size=\{14\} \/>/.test(padNoComment) &&
+        !/[‹›]/.test(padNoComment) &&
+        /import \{ ToolIcon \} from '\.\.\/ui\/ToolIcon'/.test(toolSrc),
+      '')
+  }
+  // ④ 「导入」页签：图标由字符兜底改成设计图标（TABS 里不再有 `glyph: '⤓'`）
+  check('adj564 「导入」页签用 `<ToolIcon name="import" />`（TABS 里不再有 `glyph: \'⤓\'`）',
+    /\{ key: 'import', label: dockCopy\.tabImport, icon: 'import' \}/.test(dockSrc) &&
+      !/glyph: '⤓'/.test(dockSrc),
     '')
   // ---- adj560（v0.28.2）：触屏拖动 tabstrip 时，**没有任何页签呈选中态**（用户报"非当前页签选中") ----
   // ① **页签的 `:hover` 高亮必须在 `@media (hover: hover)` 内**——裸 `.tool-dock-tab:hover` 不允许

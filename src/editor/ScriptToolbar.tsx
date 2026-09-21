@@ -17,6 +17,7 @@ import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from '
 import { useUiStore } from '../store/uiStore'
 import { PAD_GROUPS, PAD_KB_KEY, PAD_REDO_KEY, PAD_UNDO_KEY, type PadGroup } from './padLayout'
 import { GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
+import { ToolIcon } from '../ui/ToolIcon'
 
 /** adj537：撤销 / 重做图标（内联 SVG，16px，走 currentColor）——
  *  随按钮文字色自动变（hover / 禁用 / 主题都跟着走），不受字体区别影响。 */
@@ -160,7 +161,8 @@ export function ScriptToolbar({
     <div className="script-pad" role="toolbar" aria-label="简谱输入工具条" ref={padAreaRef}>
       {padOverflow.left && (
         <button type="button" className="pad-key pad-scroll-btn" title="向左翻看按键" aria-label="向左翻看按键" onClick={() => pageBy(-1)}>
-          ‹
+          {/* adj564（用户要求）：滚动指示改用设计图标 `public/icons/左.png`（原来用 `‹` 字符） */}
+          <ToolIcon name="left" size={14} />
         </button>
       )}
       <div className="pad-scroll" ref={scrollRef}>
@@ -226,7 +228,8 @@ export function ScriptToolbar({
       </div>
       {padOverflow.right && (
         <button type="button" className="pad-key pad-scroll-btn" title="向右翻看按键" aria-label="向右翻看按键" onClick={() => pageBy(1)}>
-          ›
+          {/* adj564：同左箭头，改用 `public/icons/右.png` */}
+          <ToolIcon name="right" size={14} />
         </button>
       )}
     </div>

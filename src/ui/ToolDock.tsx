@@ -284,8 +284,8 @@ const clampH = (v: number, chromeH: number) => {
 const TABS: { key: DockPanelKey; label: string; icon?: ToolIconName; glyph?: string }[] = [
   // adj540：工作区排第一（手机端文件操作主入口，用户要求）；图标用 `public/icons/工作区.png`
   { key: 'workspace', label: dockCopy.tabWorkspace, icon: 'workspace' },
-  // adj562：导入紧跟工作区（用户要求）；暂无设计图标 ⇒ 用 `⤓`（"取进来"）当字符兜底
-  { key: 'import', label: dockCopy.tabImport, glyph: '⤓' },
+  // adj562：导入紧跟工作区（用户要求）；adj564：图标用设计图 `public/icons/导入.png`
+  { key: 'import', label: dockCopy.tabImport, icon: 'import' },
   { key: 'problems', label: dockCopy.tabProblems, glyph: '⚠' },
   { key: 'tryout', label: dockCopy.tabTryout, icon: 'play' },
   { key: 'export', label: dockCopy.tabExport, icon: 'export' },
@@ -876,7 +876,8 @@ export function ToolDock() {
             aria-label={dockCopy.tabsLeftTitle}
             onClick={() => pageTabsBy(-1)}
           >
-            ‹
+            {/* adj564（用户要求）：滚动指示改用设计图标 `public/icons/左.png`（原来用 `‹` 字符） */}
+            <ToolIcon name="left" size={14} />
           </button>
         )}
         <div className="tool-dock-tabstrip" role="tablist" ref={tabstripRef}>
@@ -909,7 +910,8 @@ export function ToolDock() {
             aria-label={dockCopy.tabsRightTitle}
             onClick={() => pageTabsBy(1)}
           >
-            ›
+            {/* adj564：同左箭头，改用 `public/icons/右.png` */}
+            <ToolIcon name="right" size={14} />
           </button>
         )}
         <button type="button" className="tool-dock-close" onClick={closeDock} title={dockCopy.closeTitle} aria-label={dockCopy.closeTitle}>
