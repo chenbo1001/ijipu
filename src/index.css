@@ -1965,6 +1965,13 @@ body {
   flex-wrap: nowrap;
   gap: 2px;
   padding: 0 6px 0 0;
+  /* adj583（用户反馈"设置页签栏没延伸到底、下面留一小段空白"）：根因是**横向页签那套基础样式**
+     仍在生效——`.jp-tabs { border-bottom: 1px; margin-bottom: 14px }` 是给对话框顶部横向页签写的；
+     在 dock 的**竖向**轨道里它是 grid 项（`align-self: stretch`），而 `margin-bottom` 会从拉伸结果里
+     扣掉 14px（实测可用高 176 → 实际 162），于是右侧分隔线在离底 14px 处断掉。
+     竖向轨道这里显式清掉这两条（分隔线只留 `border-right`）。 */
+  margin-bottom: 0;
+  border-bottom: 0;
   border-right: 1px solid var(--jp-border);
 }
 .tool-dock .jp-tab {
@@ -2152,12 +2159,19 @@ body {
   .tool-dock .jp-tabs { padding-right: 4px; }
 }
 
-/* adj463c：组内标题**独占一行**并用更明显的样式与内容区分（原为虚线细边，与字段行区分不够） */
-.tool-dock .pcfg-panel > .pcfg-group-title,
-.tool-dock .pcfg-panel .pcfg-group-title {
-  flex: 0 0 100%;
+/* adj463c：组内标题**独占一行**并用更明显的样式与内容区分（原为虚线细边，与字段行区分不够）
+ * adj581（用户要求）：底栏 dock 里**所有"内容标题"统一成这一个样式**——即设置→谱面里
+ * 「纸张与边距」那种**行标题**（强调色 + 加粗 + 左侧强调竖条 + 下边框）。
+ * 为此把作用域从 `.tool-dock .pcfg-panel .pcfg-group-title` **放宽到 `.tool-dock .pcfg-group-title`**：
+ * 设置各页签本来就在 `.pcfg-panel` 里（不受影响），而工作区「选择工作区」、导入「粘贴源码」
+ * 这类不在 `.pcfg-panel` 里的标题也能直接复用同一套声明——**只有一处出处**，不会出现"两套口径"。 */
+.tool-dock .pcfg-group-title {
+  /* adj581：**不要**在这里写 `flex: 0 0 100%`——它只在"横向 flex"里表示"占满整行宽"，
+     而同一个类现在也用在**纵向 flex**（导入面板 `.import-body`）里，主轴变成高度 ⇒ 标题会被撑满整块高度
+     （实测 300px 高）。字段区本来就是 **grid**，整行靠下面的 `grid-column: 1 / -1` 保证；
+     需要"独占一行"的横向 flex 场景由各自的作用域显式声明（见 `.ws-choose-title`）。 */
   /* adj482：字段区是网格时，标题**必须跨整行**（它是"分组标题"而不是一个字段）。
-     这条规则用**后代**选择器从 `.pcfg-panel` 起覆盖，因此不论标题被包在哪一层
+     这条规则用**后代**选择器从 `.tool-dock` 起覆盖，因此不论标题被包在哪一层
      （`.pcfg-fields` 直系、还是将来某个页签自己包一层、甚至在 `.pcfg-grid2` 里），
      都不会被当成一个"字段格"和字段挤在同一行。 */
   grid-column: 1 / -1;
@@ -2170,7 +2184,7 @@ body {
   border-bottom: 1px solid var(--jp-border);
   box-shadow: inset 2px 0 0 var(--jp-accent); /* 左侧强调竖条，一眼区分"这是分组标题" */
 }
-.tool-dock .pcfg-panel .pcfg-group-title:first-child { margin-top: 0; }
+.tool-dock .pcfg-group-title:first-child { margin-top: 0; }
 
 /* adj463c：主题页「深浅模式」等按钮文本**不折行**（窄列下此前会把"跟随系统"拆成两行） */
 .tool-dock .theme-mode-btn { flex: 0 0 auto; white-space: nowrap; }
@@ -3720,17 +3734,64 @@ body {
   line-height: 1.5;
   text-align: left;
 }
-/* ---- adj575（用户要求）：**工作区选择界面**（先列清单让人选，而不是一按就弹系统对话框）----
- * 竖排一行一个工作区：[📁 名字 …… 当前] + [✕ 移除]。
- * `✕` 只从这份清单里去掉该条（不动磁盘、也不动当前正在用的工作区）。
- * 清单可能很长（最多 8 条）⇒ 自己滚，并预留滚动条宽（adj566 的教训：滚动条出现/消失会改可用宽）。 */
+/* ---- adj575 / adj577（用户要求）：**工作区选择界面** ----
+ * adj577 起改成**左右分栏**（左=清单、右=操作按钮），与文件列表那一屏同构：
+ * 复用 `.ws-panel` + `.ws-body` + `.ws-left` + `.ws-side` 这套现成的弹性布局，
+ * 于是**清单拿到真实高度**（`.ws-list` 自带 `min-height: 120px`、自己滚动）——
+ * 这是用户特意叮嘱的"确保清单能够显示出来"；右栏 `ws-side` 固定宽度，保证清单拿到剩余宽度。
+ *
+ * 一行一个工作区：[📁 名字 …… 当前] (+ [✕] 仅非当前项)。
+ * `✕` 只从这份清单里去掉该条（不动磁盘、也不动当前正在用的工作区）；
+ * **当前项没有 ✕**（它必须一直留在清单里）——点当前项 = 回到文件列表。 */
+.ws-choose-head {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* adj578/adj579（用户要求）：通用的 `?` 小图标——把长说明收进**悬浮提示**，腾出高度给真正的输入区
+   （工作区选择界面的标题后、「导入」页签的「粘贴源码：」标签后都用它）。 */
+.help-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--jp-border);
+  border-radius: 50%;
+  color: var(--jp-text-muted);
+  font-size: 10px;
+  line-height: 1;
+  cursor: help;
+  user-select: none;
+}
+.help-badge:hover {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+}
+/* 触屏（无 hover）弹不出悬浮提示 ⇒ 这类说明在触屏上仍然**直接显示**（否则用户永远看不到它） */
+.help-hint-touch {
+  display: none;
+}
+@media (hover: none) and (pointer: coarse) {
+  .help-hint-touch {
+    display: block;
+  }
+}
+/* adj579：「导入」页签里编辑器上方的标题行（字号/颜色/下边框走 `.pcfg-group-title`，
+   这里只负责"标题文字 + `?`"横向排布与"高度=内容高"） */
+.import-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+.import-desc {
+  color: var(--jp-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
 .ws-choose-list {
-  width: 100%;
-  max-width: 460px;
-  max-height: 34vh;
-  gap: 4px;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
+  gap: 2px;
 }
 .ws-choose-row {
   display: flex;
@@ -3752,8 +3813,7 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 清单里那枚「当前」小标（标出正在用的那个；✕ 每一行都有——它只从清单里移除，
-   不动磁盘、也不动当前会话，所以误点也不会把正在编辑的绑定踢掉） */
+/* 清单里那枚「当前」小标（标出正在用的那个；它没有 ✕，点它即回到文件列表） */
 .ws-choose-tag {
   flex: none;
   margin-left: auto;
@@ -3780,10 +3840,6 @@ body {
 .ws-forget:hover:not(:disabled) {
   border-color: var(--jp-danger, var(--jp-accent));
   color: var(--jp-danger, var(--jp-accent));
-}
-.ws-recent-empty {
-  color: var(--jp-text-muted);
-  font-size: 12px;
 }
 /* adj544（用户要求）：左侧"切换工作区"图标按钮——**与底栏"收起底栏"按钮同款样式**
  * （`.tool-dock-collapse`：1px 边框 + 7px 圆角 + 主文字色 + hover 三联动），
@@ -4114,6 +4170,26 @@ body {
   border-color: var(--jp-accent);
   color: var(--jp-accent);
 }
+/* ---- adj584（用户要求）：底栏 dock 里的**动作按钮**统一到"基础 `.btn` 那一档" ----
+ * 用户按页签逐个点名要求"与其它按钮一致"（工作区的新工作区/`*`/`✕`/操作、导入的三个、试听的播放/停止）。
+ * 此前一个底栏里混了**五套口径**：基础 `.btn` 13px+6/16+31px（导入/导出/设置）；
+ * 工作区右栏 12px+6/4+30px；过滤 `*` 13px+5/8+25px、`✕` 12px+5/6+25px；试听播放/停止 12px+0/14+**24px**。
+ * 这里统一到基础档（字号/内边距/高度），只保留各自的**布局**声明：
+ *   · `.ws-side-btn` 的 `width: 100%`（右栏固定宽度，按钮要占满）；
+ *   · `.ws-filter-row` 两枚的 `flex: 1 1 0`（平分右栏）。
+ * ⚠ 与 adj534 相反：那一轮按用户要求把"播放/停止"对齐**顶栏**的 24px（`--jp-btn-h`），
+ *   这一轮以"**底栏内部一致**"为准 ⇒ 试听按钮在底栏里跟随基础档（顶栏/输入条仍是 24px，互不影响）。
+ * 选择器带 `.tool-dock` 前缀：既压过上面这些自带声明（特异性更高），又**只作用于底栏**。 */
+.tool-dock .ws-side-btn,
+.tool-dock .ws-filter-row .btn,
+.tool-dock .playback-btn {
+  padding: 6px 16px;
+  font-size: 13px;
+  /* 清掉 `.playback-btn` 的 24px 定高：定高 + 6px 内边距会把内容区挤到不足一行 */
+  height: auto;
+  /* `*` 那枚自带 `line-height: 1`，会让它比其他按钮矮 4px（实测 27 vs 31）⇒ 一并拉回默认行高 */
+  line-height: normal;
+}
 /* 过滤结果里的那条相对目录（告诉用户这份谱在哪个子目录下）
  * adj571（用户反馈"文件名被截断得看不到全名"）：原来是 `flex: none` —— 目录后缀**不可压缩**，
  * 于是窄行里被挤掉的永远是**文件名**（`.ws-name` 带省略号），深目录下名字甚至只剩一两个字符。
@@ -4273,10 +4349,16 @@ span.ws-check {
   gap: 4px;
   max-width: 100%;
 }
-.ws-grant-title {
-  color: var(--jp-text-primary);
-  font-size: 13px;
-  font-weight: 700;
+/* adj581（用户要求）：底栏各面板的内容标题统一用**谱面页的行标题样式**（`.pcfg-group-title`）——
+   原先"选择工作区"用这里 13px 加粗的独有样式（`.ws-grant-title`，已删），现并入统一口径。 */
+.ws-choose-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* 容器是**横向** flex（`.ws-head`）⇒ 这里显式要"独占一行"（标题一行、路径一行） */
+  flex: 0 0 100%;
+  /* 标题在 `.ws-head` 里，顶部已有内边距 ⇒ 不再叠标题自己的上边距 */
+  margin-top: 0;
 }
 .ws-grant-dir {
   overflow: hidden;

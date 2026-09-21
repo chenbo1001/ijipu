@@ -38,9 +38,11 @@ import type { WorkspaceRecord } from '../../store/fileHandleDb'
 import { ToolIcon } from '../ToolIcon'
 import {
   activateWorkspace,
+  dedupeWorkspaceRecord,
   flushWorkspacePath,
   forgetWorkspace,
   getWorkspace,
+  indexScopeKey,
   isPathWorkspace,
   isWorkspaceAvailable,
   joinPath,
@@ -157,6 +159,11 @@ export function WorkspacePanel() {
    */
   const indexRef = useRef<SearchHit[] | null>(null)
   const idxMetaRef = useRef<{ truncated: boolean; blocked: string[] }>({ truncated: false, blocked: [] })
+  /**
+   * adj580（用户反馈）：`indexRef` 里那份索引覆盖的**作用域**（`工作区id|起始目录`）。
+   * 用户切到别的目录/别的工区后，旧索引不能再拿来过滤（否则看到的是别的目录的命中）。
+   */
+  const indexKeyRef = useRef<string | null>(null)
   /** adj546：后台重扫是否在进行（避免重复起扫）＋ 扫描进度（让 UI 边扫边显示，不再干等） */
   const refreshingRef = useRef(false)
   const [scanInfo, setScanInfo] = useState<{ scanned: number; found: number; ms: number } | null>(null)
@@ -167,7 +174,7 @@ export function WorkspacePanel() {
    * adj546（用户实测 27 秒）：**后台重扫**——一边扫一边把已找到的写进 `indexRef` 并让 UI 刷新，
    * 扫完落盘（下次直接秒开）。扫描期间界面上会显示"已扫描 N 项 / 找到 M 个"。
    */
-  const refreshIndex = useCallback(async (rec: WorkspaceRecord, wsId: string) => {
+  const refreshIndex = useCallback(async (rec: WorkspaceRecord, wsId: string, from: readonly string[]) => {
     if (refreshingRef.current) return
     refreshingRef.current = true
     const t0 = Date.now()
@@ -179,9 +186,11 @@ export function WorkspacePanel() {
      */
     let lastShown = 0
     try {
+      // adj580（用户反馈）：扫描范围 = **当前目录及其下级**（`from`），不是整个工作区
       const r = await searchWorkspaceJps(rec, '', {
         maxHits: 20000,
         maxEntries: 200000,
+        from,
         onProgress: (scanned, partial) => {
           setScanInfo({ scanned, found: partial.length, ms: Date.now() - t0 })
           const now = Date.now()
@@ -192,9 +201,10 @@ export function WorkspacePanel() {
         },
       })
       indexRef.current = r.hits
+      indexKeyRef.current = indexScopeKey(rec, from)
       idxMetaRef.current = { truncated: r.truncated, blocked: r.blocked }
       const ms = Date.now() - t0
-      await saveWorkspaceIndex({ wsId, at: Date.now(), relPaths: r.hits.map((h) => h.relPath) })
+      await saveWorkspaceIndex({ wsId, from: joinPath(from), at: Date.now(), relPaths: r.hits.map((h) => h.relPath) })
       // adj546：把"扫了多少、花了多久、每条多少钱"打出来——真机排查速度问题要靠这个数
       console.info(
         `[iJipu] 工作区索引完成：扫描 ${r.scanned} 项 / 命中 ${r.hits.length} 个 / ${ms}ms` +
@@ -212,31 +222,40 @@ export function WorkspacePanel() {
   /**
    * adj543/adj546：**确保有索引可用**——
    * ① 内存里已有 ⇒ 直接用；② 否则先读**落盘的索引**（秒出，可能略旧）并同时启动后台重扫；
-   * ③ 都没有 ⇒ 全量扫一次（期间有进度与部分结果）。
+   * ③ 都没有 ⇒ 在**当前目录**下扫一次（期间有进度与部分结果）。
    * `useCallback([])` 保证引用稳定（E-2026-249：进依赖的必须是稳定引用）。
+   *
+   * adj580（用户反馈）：索引与过滤都**按目录分作用域**——`from` 是"从哪个子目录开始"，
+   * 内存索引用 `indexKeyRef` 记住自己的作用域（`未命中当前作用域就当作没有索引`），
+   * 落盘索引也按 `from` 分开存（`loadWorkspaceIndex(wsId, from)`）。
    */
   const buildIndex = useCallback(
-    async (rec: WorkspaceRecord, wsId: string, force = false): Promise<SearchResult> => {
-      if (indexRef.current && !force) return { hits: indexRef.current, ...idxMetaRef.current, scanned: 0 }
-      const cached = force ? null : await loadWorkspaceIndex(wsId)
+    async (rec: WorkspaceRecord, wsId: string, from: readonly string[], force = false): Promise<SearchResult> => {
+      const scope = indexScopeKey(rec, from)
+      if (indexRef.current && indexKeyRef.current === scope && !force) {
+        return { hits: indexRef.current, ...idxMetaRef.current, scanned: 0 }
+      }
+      const cached = force ? null : await loadWorkspaceIndex(wsId, joinPath(from))
       if (cached && cached.relPaths.length > 0) {
         const hits = cached.relPaths.map((relPath) => {
           const segs = relPath.split('/')
           return { name: segs[segs.length - 1], relPath, dirSegs: segs.slice(0, -1) }
         })
         indexRef.current = hits
+        indexKeyRef.current = scope
         idxMetaRef.current = { truncated: false, blocked: [] }
         setIndexVersion((v) => v + 1)
         // adj546：**只在索引过期时才后台重扫**——此前每次打开面板都无条件重扫，
         // 在手机上等于每次都跑一遍几十秒的枚举（用户实测 27s）。落盘的索引够新鲜就直接用。
         const stale = Date.now() - (cached.at ?? 0) > INDEX_STALE_MS
-        if (stale) void refreshIndex(rec, wsId)
+        if (stale) void refreshIndex(rec, wsId, from)
         return { hits, truncated: false, blocked: [], scanned: 0 }
       }
-      const r = await searchWorkspaceJps(rec, '', { maxHits: 20000, maxEntries: 200000 })
+      const r = await searchWorkspaceJps(rec, '', { maxHits: 20000, maxEntries: 200000, from })
       indexRef.current = r.hits
+      indexKeyRef.current = scope
       idxMetaRef.current = { truncated: r.truncated, blocked: r.blocked }
-      void saveWorkspaceIndex({ wsId, at: Date.now(), relPaths: r.hits.map((h) => h.relPath) })
+      void saveWorkspaceIndex({ wsId, from: joinPath(from), at: Date.now(), relPaths: r.hits.map((h) => h.relPath) })
       return r
     },
     [refreshIndex],
@@ -279,6 +298,10 @@ export function WorkspacePanel() {
    * 现在：首次过滤时整棵走一次（带更大的上限，因为只走一次），把全部 `.jps` 存进 `indexRef`；
    * 之后同一面板会话内的每次输入都只是 `Array.filter(matchesQuery)`（纯字符串比较，微秒级）。
    * 索引在**任何写操作**（改名/新建/另存/移动/删除）后作废（见 `invalidateCache`），下次过滤重建。
+   *
+   * adj580（用户反馈）：**范围 = 当前目录及其下级**（`from = path`）——
+   * 所以目录一变，作用域键就变，旧索引自动作废（`filterFromIndex` 里比对 `indexKeyRef`），
+   * 于是"在子目录里过滤"只看这一层子树，而不是把整个工作区翻一遍。
    */
   useEffect(() => {
     if (!ws || perm !== 'granted' || !searching) {
@@ -286,10 +309,12 @@ export function WorkspacePanel() {
       return
     }
     let alive = true
-    /** 有索引 ⇒ 同步过滤（零等待）；没索引 ⇒ 走一次整树建索引，再过滤 */
+    const from = path // adj580：当前目录（子目录过滤的作用域起点）
+    const scope = indexScopeKey(ws, from)
+    /** 有索引（且**是当前作用域的**）⇒ 同步过滤（零等待）；否则走一次建索引再过滤 */
     const filterFromIndex = (): boolean => {
       const idx = indexRef.current
-      if (!idx) return false
+      if (!idx || indexKeyRef.current !== scope) return false
       // adj546：查询只编译一次（5000+ 条时别再每条 new RegExp）
       const match = compileQuery(query)
       setHits(idx.filter((h) => match(h.name, h.relPath)))
@@ -298,11 +323,11 @@ export function WorkspacePanel() {
       return true
     }
     if (filterFromIndex()) return
-    void buildIndex(ws, ws.id)
+    void buildIndex(ws, ws.id, from)
       .then((r) => {
         if (!alive) return
         filterFromIndex()
-        // 没搜完必须说出来：否则用户会以为"工作区里就没有这些谱"
+        // 没搜完必须说出来：否则用户会以为"这里就没有这些谱"
         if (r.truncated) showNotice(workspaceCopy.searchTruncated(r.hits.length), 'warn')
         // 读不动的目录也说出来：不然 `*` 看不到就是"文件不见了"
         if (r.blocked.length > 0) showNotice(workspaceCopy.searchBlockedDirs(r.blocked), 'warn')
@@ -317,7 +342,7 @@ export function WorkspacePanel() {
     return () => {
       alive = false
     }
-  }, [ws, perm, query, searching, showNotice, buildIndex, indexVersion])
+  }, [ws, perm, query, searching, showNotice, buildIndex, indexVersion, path])
   /** 弹出菜单：点外面/按 Esc 关闭（菜单渲染在 portal 里，不在 dock 的裁剪范围内） */
   useEffect(() => {
     if (!menuOpen) return
@@ -361,6 +386,7 @@ export function WorkspacePanel() {
   const invalidateCache = useCallback(() => {
     entriesCacheRef.current.clear()
     indexRef.current = null // adj543：写操作后过滤索引也作废，下次过滤重建
+    indexKeyRef.current = null // adj580：索引的**作用域**（工作区+目录）也一起作废
   }, [])
   /** 列目录（带缓存——同一路径再次访问直接走缓存，避免每次都打 IndexedDB / FSA） */
   const refresh = useCallback(
@@ -496,8 +522,15 @@ export function WorkspacePanel() {
     try {
       // adj568：`pickWorkspaceDir()` 现在**分平台**——桌面壳走原生选择器拿绝对路径（路径后端），
       // 浏览器走 FSA 拿句柄（句柄后端）；返回的已是带身份的完整记录。
-      const rec = await pickWorkspaceDir()
-      if (!rec) return // 用户取消（网页版里也可能是"目录被内核黑名单拦下"——两句同一个 AbortError）
+      const picked = await pickWorkspaceDir()
+      if (!picked) return // 用户取消（网页版里也可能是"目录被内核黑名单拦下"——两句同一个 AbortError）
+      /**
+       * adj577（用户要求"相同的目录只能有一个工作区"）：选到的目录若**已经是历史工作区**
+       * ⇒ 直接用历史那条（保留它的身份 id / 名字），不新建重复项。
+       * 桌面端按绝对路径当身份（天然去重）；网页端用句柄的 `isSameEntry()` 比（原先每次重选
+       * 同一个文件夹都会在清单里堆一个新工作区）。
+       */
+      const rec = await dedupeWorkspaceRecord(picked)
       await setWorkspace(rec)
       setWs(rec)
       setPerm('granted')
@@ -508,7 +541,7 @@ export function WorkspacePanel() {
       setChoose(false) // adj575：选完就回到文件列表
       await refresh(rec, [])
       setRecent(await listWorkspaces())
-      showNotice(workspaceCopy.picked(rec.name), 'ok')
+      showNotice(rec.id === picked.id ? workspaceCopy.picked(rec.name) : workspaceCopy.reused(rec.name), 'ok')
     } catch (e) {
       const reason = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
       showNotice(workspaceCopy.loadFailed(reason), 'error')
@@ -769,8 +802,8 @@ export function WorkspacePanel() {
 
   /**
    * adj575（用户要求）：把一项从"最近工作区"清单里移除（✕）。
-   * 语义刻意收窄成"**只动这份清单**"：不动磁盘上的文件夹，也**不动当前正在用的工作区**——
-   * 于是误点不会把正在编辑的绑定踢掉（要移除当前那个，先切到别的再移除）。
+   * 语义刻意收窄成"**只动这份清单**"：不动磁盘上的文件夹，也**不动当前正在用的工作区**
+   * （adj577 起 ✕ 只出现在**非当前**项上，所以根本点不到当前那条——见下面 `isCurrent` 分支）。
    */
   const onForget = async (rec: WorkspaceRecord) => {
     await forgetWorkspace(rec.id)
@@ -788,79 +821,121 @@ export function WorkspacePanel() {
    *  · 当前工作区**已不在**（桌面版目录被删/改名）⇒ 显示目录 + 说明（只能重选）；
    *  · 网页版还要带上"内核敏感目录黑名单"的提示（必须**选之前**说，见 E-2026-271）。
    */
+  /**
+   * adj575（用户要求）：**工作区选择界面**——先列出"之前打开过的工作区"让人选。
+   *
+   * adj577（用户要求）改成**左右分栏**（左=清单、右=操作按钮），与文件列表那一屏同构：
+   *  · 右栏只有一个主按钮「**新工作区**」（原「打开其它目录」，语义更直白），
+   *    当前工作区待授权时上面再叠一个「继续访问（需授权）」；
+   *  · **取消**「返回文件列表」按钮——改为**点当前工作区那一项**回到文件列表
+   *    （所以当前项**不给 ✕**：它必须一直留在清单里，"已打开的工作区才能成为当前工作区"）；
+   *  · 用 `.ws-panel` + `.ws-body` 这套现成的弹性布局（而不是居中的 `-gate`），
+   *    列表因此拿到真实高度（`.ws-list` 有 `min-height: 120px`）——**清单一定显示得出来**；
+   *  · 仍然把原先"待授权 / 目录已不在"的信息并进来（一屏解决三件事）。
+   */
   if (choose || !ws || perm !== 'granted') {
     const needGrant = !!ws && perm !== 'granted' && !isPathWorkspace(ws)
     const gone = !!ws && perm !== 'granted' && isPathWorkspace(ws)
     return (
-      <div className="ws-panel ws-panel-gate">
-        <div className="ws-grant">
-          <div className="ws-grant-title">{workspaceCopy.chooseTitle}</div>
+      <div className="ws-panel">
+        <div className="ws-head ws-choose-head">
+          {/* adj581（用户要求）：底栏各面板的内容标题统一样式——用**谱面页的行标题样式**
+              （`.pcfg-group-title`，即设置→谱面里「纸张与边距」那种：强调色 + 加粗 + 左侧强调竖条 + 下边框）。
+              `?` 放在标题元素**内部**：标题是 flex 容器 ⇒ 图标紧跟文字，而标题本身仍占满整行、
+              那条下边框与左侧竖条横贯整行（与「纸张与边距」观感一致）。 */}
+          <div className="pcfg-group-title ws-choose-title">
+            <span>{workspaceCopy.chooseTitle}</span>
+            <span className="help-badge" role="img" aria-label={workspaceCopy.blockedHint} title={workspaceCopy.blockedHint}>
+              ?
+            </span>
+          </div>
           {ws && (needGrant || gone) && (
             <div className="ws-grant-dir" title={wsPathText}>
               {wsPathText}
             </div>
           )}
-          {needGrant && <div className="ws-grant-hint">{workspaceCopy.grantPathHint}</div>}
-          {needGrant && <div className="ws-grant-hint">{workspaceCopy.grantWhy}</div>}
-          {gone && <div className="ws-grant-hint">{workspaceCopy.dirMissingWhy}</div>}
-          <div className="ws-grant-hint">{workspaceCopy.chooseHint}</div>
         </div>
-        {/* adj544：待校验绑定 ⇒ 说明"重新授权后就能写回原文件"，把这一步的意义讲清楚 */}
-        {needGrant && pending && (
-          <div className="ws-binding-hint">
-            {workspaceCopy.bindingRestored(pending.wsName || ws?.name || '', joinPath(pending.segs))}
-          </div>
-        )}
-        {recent.length === 0 ? (
-          <div className="ws-recent-empty">{workspaceCopy.chooseEmpty}</div>
-        ) : (
-          <div className="ws-recent ws-choose-list">
-            {recent.map((r) => (
-              <div key={r.id} className={`ws-choose-row${ws?.id === r.id ? ' is-current' : ''}`}>
-                <button
-                  type="button"
-                  className="btn ws-choose-item"
-                  onClick={() => void onActivate(r)}
-                  disabled={busy}
-                  title={recentTitle(r)}
-                >
-                  <span className="ws-icon">📁</span>
-                  <span className="ws-choose-name">{r.name}</span>
-                  {ws?.id === r.id && <span className="ws-choose-tag">{workspaceCopy.currentTag}</span>}
-                </button>
-                {/* ✕ = 从这份清单里移除（只动清单，不动磁盘、也不动当前工作区） */}
-                <button
-                  type="button"
-                  className="btn ws-forget"
-                  onClick={() => void onForget(r)}
-                  disabled={busy}
-                  title={workspaceCopy.forgetTitle}
-                  aria-label={`${workspaceCopy.forgetTitle}：${r.name}`}
-                >
-                  ✕
-                </button>
+        <div className="ws-body">
+          <div className="ws-left">
+            {recent.length === 0 ? (
+              <div className="ws-list ws-choose-list">
+                <div className="ws-none">{workspaceCopy.chooseEmpty}</div>
               </div>
-            ))}
+            ) : (
+              <div className="ws-list ws-choose-list">
+                {recent.map((r) => {
+                  const isCurrent = ws?.id === r.id
+                  return (
+                    <div key={r.id} className={`ws-choose-row${isCurrent ? ' is-current' : ''}`}>
+                      <button
+                        type="button"
+                        className="btn ws-choose-item"
+                        // 当前那一项：点它 = **回到文件列表**（这就是取消"返回"按钮后的退路）
+                        onClick={() => (isCurrent ? setChoose(false) : void onActivate(r))}
+                        disabled={busy}
+                        title={isCurrent ? workspaceCopy.backToFilesTitle : recentTitle(r)}
+                      >
+                        <span className="ws-icon">📁</span>
+                        <span className="ws-choose-name">{r.name}</span>
+                        {isCurrent && <span className="ws-choose-tag">{workspaceCopy.currentTag}</span>}
+                      </button>
+                      {/* ✕ 只在**非当前**项上：当前工作区必须留在清单里（同目录只有一个工作区） */}
+                      {!isCurrent && (
+                        <button
+                          type="button"
+                          className="btn ws-forget"
+                          onClick={() => void onForget(r)}
+                          disabled={busy}
+                          title={workspaceCopy.forgetTitle}
+                          aria-label={`${workspaceCopy.forgetTitle}：${r.name}`}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {/* adj578（用户要求）："内核敏感目录黑名单"那条说明已收进标题后的 `?` 悬浮提示；
+                但**触屏没有 hover**（提示弹不出来）⇒ 触屏上仍直接显示这条，否则用户永远看不到。
+                同时也只在网页版有意义（桌面壳走原生选择器，不受这条 Web 策略约束，见 E-2026-271）。 */}
+            {!supportsPathWorkspace() && (
+              <div className="ws-grant-hint ws-blocked-hint help-hint-touch">{workspaceCopy.blockedHint}</div>
+            )}
+            {needGrant && <div className="ws-grant-hint">{workspaceCopy.grantPathHint}</div>}
+            {needGrant && <div className="ws-grant-hint">{workspaceCopy.grantWhy}</div>}
+            {gone && <div className="ws-grant-hint">{workspaceCopy.dirMissingWhy}</div>}
+            {/* adj544：待校验绑定 ⇒ 说明"重新授权后就能写回原文件"，把这一步的意义讲清楚 */}
+            {needGrant && pending && (
+              <div className="ws-binding-hint">
+                {workspaceCopy.bindingRestored(pending.wsName || ws?.name || '', joinPath(pending.segs))}
+              </div>
+            )}
           </div>
-        )}
-        {needGrant && (
-          <button type="button" className="btn primary ws-big" onClick={() => void onGrant()} disabled={busy}>
-            {workspaceCopy.grant}
-          </button>
-        )}
-        <button type="button" className={needGrant || gone ? 'btn' : 'btn primary ws-big'} onClick={() => void onPick()} disabled={busy}>
-          {workspaceCopy.openOther}
-        </button>
-        {/* adj568（用户反馈"下载目录没法当工作区"）：**选之前**就把内核的敏感目录黑名单讲清楚——
-            被拦时内核抛的是与"用户取消"完全一样的 AbortError，应用侧事后根本补不出提示（见 E-2026-271）。
-            桌面壳走原生选择器、不受这条 Web 策略约束 ⇒ 只在网页版显示。 */}
-        {!supportsPathWorkspace() && <div className="ws-grant-hint ws-blocked-hint">{workspaceCopy.blockedHint}</div>}
-        {/* 有可用工作区时给一条退路：本屏是从标题按钮点进来的，没选就直接回去 */}
-        {ws && perm === 'granted' && (
-          <button type="button" className="btn" onClick={() => setChoose(false)} disabled={busy}>
-            {workspaceCopy.backToFiles}
-          </button>
-        )}
+          {/* 右侧操作区：与文件列表那一屏同一个 `.ws-side`（固定宽度，保证"清单"拿到剩余宽度） */}
+          <div className="ws-side ws-choose-side">
+            {needGrant && (
+              <button type="button" className="btn primary ws-side-btn" onClick={() => void onGrant()} disabled={busy}>
+                {workspaceCopy.grant}
+              </button>
+            )}
+            {/* adj577：原「打开其它目录」⇒「**新工作区**」，并且从底部大按钮移到右侧操作区。
+                adj578（用户要求）：用法说明收进这个按钮的**悬浮提示**，把高度让给清单。
+                adj582（用户要求）：**样式与其它按钮一致**——去掉 `primary`（那是"强调色描边"样式，
+                在本栏里和「操作▾」/清单行那些**浅底填充**的按钮观感不一致；
+                真机对照：`primary` = 透明底 + 强调色边框/文字，普通 `.btn` = 浅底 + 常规文字色）。 */}
+            <button
+              type="button"
+              className="btn ws-side-btn"
+              onClick={() => void onPick()}
+              disabled={busy}
+              title={workspaceCopy.chooseHint}
+            >
+              {workspaceCopy.openOther}
+            </button>
+          </div>
+        </div>
       </div>
     )
   }
@@ -1241,8 +1316,8 @@ export function WorkspacePanel() {
               onClick={() => {
                 setMenuOpen(false)
                 if (!ws) return
-                indexRef.current = null
-                void buildIndex(ws, ws.id, true).then(() => setIndexVersion((v) => v + 1))
+                invalidateCache() // adj580：手动重扫 = 连作用域一起作废，按**当前目录**重扫
+                void buildIndex(ws, ws.id, path, true).then(() => setIndexVersion((v) => v + 1))
               }}
             >
               {workspaceCopy.rescan}

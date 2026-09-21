@@ -186,9 +186,15 @@ export async function loadWorkspaceList(): Promise<WorkspaceRecord[]> {
  *
  * 只存**相对路径字符串**（`a/b/c.jps`）：5550 条约 200KB，比存对象小得多；
  * 读出来再 `split('/')` 还原成 `SearchHit`。带 `wsId` 与时间戳，换工作区/太旧就不采用。
+ *
+ * adj580（用户反馈）：过滤范围改成"**当前目录及其下级**" ⇒ 索引也要**按目录分别缓存**，
+ * 于是多一个 `from`（索引起始目录，工作区内相对路径，`''` = 整个工作区）。
+ * 读取时 `from` 必须一致才采用（旧记录没有这个字段 ⇒ 只当作"整个工作区"的索引）。
  */
 export interface CachedIndex {
   wsId: string
+  /** adj580：这份索引覆盖的**起始目录**（工作区内相对路径；`''` = 整个工作区） */
+  from: string
   at: number
   /** 区内相对路径（含文件名），如 `2.曲谱集/小星星.jps` */
   relPaths: string[]
@@ -210,8 +216,8 @@ export async function saveWorkspaceIndex(idx: CachedIndex): Promise<void> {
   }
 }
 
-/** 读索引（无 / 身份不符 / 格式不对 ⇒ null） */
-export async function loadWorkspaceIndex(wsId: string): Promise<CachedIndex | null> {
+/** 读索引（无 / 身份或**范围**不符 / 格式不对 ⇒ null） */
+export async function loadWorkspaceIndex(wsId: string, from = ''): Promise<CachedIndex | null> {
   try {
     const db = await openDb()
     const val = await new Promise<CachedIndex | null>((resolve, reject) => {
@@ -221,7 +227,8 @@ export async function loadWorkspaceIndex(wsId: string): Promise<CachedIndex | nu
       req.onerror = () => reject(req.error)
     })
     db.close()
-    if (!val || val.wsId !== wsId || !Array.isArray(val.relPaths)) return null
+    // adj580：`from` 也要对得上——旧记录没有该字段（`undefined`）⇒ 只认"整个工作区"这一种范围
+    if (!val || val.wsId !== wsId || (val.from ?? '') !== from || !Array.isArray(val.relPaths)) return null
     return val
   } catch {
     return null

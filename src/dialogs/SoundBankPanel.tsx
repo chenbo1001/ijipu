@@ -138,7 +138,8 @@ export function SoundBankPanel() {
     <div className="soundbank-panel" style={{ fontSize: 12, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* —— 1. 音源状态 —— */}
       <section>
-        <div className="ijipu-form-label">音源</div>
+        {/* adj581（用户要求）：底栏内容标题统一成"行标题"样式（与设置→谱面里「纸张与边距」一致） */}
+        <div className="pcfg-group-title">音源</div>
         <div
           style={{
             display: 'flex',
@@ -174,7 +175,8 @@ export function SoundBankPanel() {
 
       {/* —— 2. 音色启用 —— */}
       <section>
-        <div className="ijipu-form-label">
+        {/* adj581（用户要求）：同上——统一成行标题样式 */}
+        <div className="pcfg-group-title">
           音色启用
           <span style={{ color: HIGHLIGHT, marginLeft: 6, fontSize: 11 }}>
             （仅已勾选项进入「试听」面板的音色下拉）

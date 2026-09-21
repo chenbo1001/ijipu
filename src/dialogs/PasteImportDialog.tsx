@@ -66,7 +66,24 @@ export function PasteImportDialog({ inline = false }: { inline?: boolean } = {})
         className={inline ? 'import-body' : undefined}
         style={inline ? undefined : { display: 'flex', flexDirection: 'column', gap: 10 }}
       >
-        <div style={{ color: 'var(--jp-text-muted)', fontSize: 12, lineHeight: 1.6 }}>{pasteImportCopy.desc}</div>
+        {/* adj579（用户要求）：编辑器上方改成**标签 + `?` 小图标**——原来那条两行说明（`desc`）
+            收进 `?` 的**悬浮提示**，把高度让给粘贴框（与 adj578 工作区选择界面同一套路）。
+            adj581（用户要求）：文案去掉冒号，且标题统一成**谱面页的行标题样式**
+            （`.pcfg-group-title`，即设置→谱面里「纸张与边距」那种）——`?` 放在标题元素内部，
+            于是图标紧跟文字、而下边框与左侧强调竖条横贯整行。
+            触屏没有 hover ⇒ 触屏上仍直接显示那条说明。 */}
+        <div className="pcfg-group-title import-label">
+          <span>{pasteImportCopy.label}</span>
+          <span
+            className="help-badge"
+            role="img"
+            aria-label={pasteImportCopy.desc}
+            title={pasteImportCopy.desc}
+          >
+            ?
+          </span>
+        </div>
+        <div className="import-desc help-hint-touch">{pasteImportCopy.desc}</div>
         <textarea
           className={inline ? 'import-text' : undefined}
           value={text}

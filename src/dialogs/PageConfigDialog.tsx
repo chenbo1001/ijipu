@@ -242,7 +242,8 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
         // adj383：主题组（原顶栏菜单「主题」）——深浅模式 + 中国色主题；本机界面偏好，即时生效、不随谱保存
         return (
           <>
-            <div className="ijipu-form-label">深浅模式</div>
+            {/* adj581（用户要求）：底栏内容标题统一成"行标题"样式（与设置→谱面里「纸张与边距」一致） */}
+            <div className="pcfg-group-title">深浅模式</div>
             <div className="theme-mode-row" style={{ padding: 0 }}>
               {/* adj426：设置面板三个按钮改用 ToolIcon（自动主题/浅色主题/深色主题），
                   与顶栏新加的深浅模式三状态按钮视觉一致；点击直接选中该档（不走循环） */}
@@ -275,7 +276,8 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
                   : '固定使用深色配色'}
             </div>
 
-            <div className="ijipu-form-label">主题配色</div>
+            {/* adj581（用户要求）：同上——统一成行标题样式 */}
+            <div className="pcfg-group-title">主题配色</div>
             {/* adj509：取消原来的「竖向列表 + 单选」布局，改为**流式复选框**——
                  · 与全局页签里的复选框（输入条/折行/排版等）保持一致的手感；
                  · 流式 = flex-wrap 自动换行，窄 dock 下也不会把整页撑高；

@@ -106,6 +106,10 @@ import {
   isJpsName,
   isValidEntryName,
   joinPath,
+  // adj577：同目录判定（"相同的目录只能有一个工作区"）——纯函数，直接用假记录/假句柄断言
+  findSameWorkspace,
+  // adj580：索引/过滤的作用域键（工作区 + 起始目录）
+  indexScopeKey,
   matchesQuery,
   normalizeRelPath,
   parentPath,
@@ -8648,24 +8652,159 @@ async function runAdj540WorkspaceTests() {
       /const active = useUiStore\(\(s\) => s\.dockOpen && s\.dockPanel === 'workspace'\)/.test(panelSrc) &&
       /if \(!active\) \{[\s\S]{0,520}?return[\s\S]{0,30}?\}[\s\S]{0,700}?await getWorkspace\(\)/.test(panelSrc),
     '')
-  check('adj575（用户要求）**工作区选择界面**：先列清单（每项带 ✕ 移除）+「打开其它目录」，标题按钮点它进这一屏',
-    // 三件事在同一屏：清单（带 ✕）/ 打开其它目录 / 需要重新授权或目录已不在时的说明
+  check('adj575/adj577（用户要求）**工作区选择界面**：左右分栏（左=清单 / 右=「新工作区」），当前项无 ✕、点它回文件列表',
+    // 一屏解决：清单（非当前项带 ✕）/ 右栏操作按钮 / 待授权或目录已不在的说明
     /if \(choose \|\| !ws \|\| perm !== 'granted'\) \{/.test(panelSrc) &&
       /const \[choose, setChoose\] = useState\(false\)/.test(panelSrc) &&
       /把一项从"最近工作区"清单里移除（✕）/.test(panelSrc) &&
       /const onForget = async \(rec: WorkspaceRecord\) => \{[\s\S]{0,240}?await forgetWorkspace\(rec\.id\)[\s\S]{0,200}?setRecent\(await listWorkspaces\(\)\)/.test(
         panelSrc,
       ) &&
-      /className="btn ws-forget"[\s\S]{0,200}?onClick=\{\(\) => void onForget\(r\)\}/.test(panelSrc) &&
+      // adj577：左右分栏 = 复用 `.ws-body` + `.ws-left`(清单) + `.ws-side`(操作)
+      /<div className="ws-body">[\s\S]{0,400}?className="ws-list ws-choose-list"[\s\S]{0,3000}?className="ws-side ws-choose-side"/.test(panelSrc) &&
+      /\.ws-choose-list \{[\s\S]{0,80}?gap: 2px/.test(cssAll) &&
+      // adj577：按钮改名「新工作区」且落在右栏；「返回文件列表」按钮已取消（改为点当前项返回）
+      /openOther: '新工作区'/.test(copySrc) &&
+      !/backToFiles:/.test(copySrc) &&
+      /backToFilesTitle: '点它回到文件列表'/.test(copySrc) &&
       /workspaceCopy\.openOther/.test(panelSrc) &&
-      /openOther: '打开其它目录'/.test(copySrc) &&
+      !/workspaceCopy\.backToFiles\b/.test(panelSrc) &&
+      // adj577：当前项**不给 ✕**（"已打开的工作区才能成为当前工作区"），点它 = setChoose(false)
+      /const isCurrent = ws\?\.id === r\.id[\s\S]{0,900}?isCurrent \? setChoose\(false\) : void onActivate\(r\)[\s\S]{0,900}?\{!isCurrent && \(/.test(
+        panelSrc,
+      ) &&
+      /isCurrent && <span className="ws-choose-tag">/.test(panelSrc) &&
       /forgetTitle: '从这份清单里移除（不会删除磁盘上的文件夹）'/.test(copySrc) &&
-      // 当前工作区标「当前」；✕ 只动清单（不动磁盘、也不动当前会话）
-      /ws\?\.id === r\.id && <span className="ws-choose-tag">/.test(panelSrc) &&
       // 选完就回文件列表；收起面板时也复位，不会"下次打开还停在选择界面"
       /setChoose\(false\)[\s\S]{0,160}?await refresh\(rec, \[\]\)/.test(panelSrc) &&
       /setChoose\(false\)/.test(panelSrc.split('if (!active) {')[1]?.slice(0, 400) ?? ''),
     '')
+  check('adj578（用户要求）选择界面把两条长说明收进**悬浮提示**（标题后的 `?` = 黑名单说明；「新工作区」= 用法说明），高度让给清单',
+    // `?` 小图标 + 它的 title = blockedHint；按钮 title = chooseHint；两条常驻说明已从正文移除
+    /<span className="help-badge" role="img" aria-label=\{workspaceCopy\.blockedHint\} title=\{workspaceCopy\.blockedHint\}>/.test(panelSrc) &&
+      /title=\{workspaceCopy\.chooseHint\}/.test(panelSrc) &&
+      // 正文里不再有常驻的这两条（黑名单那条只在**触屏**下渲染，故带 ws-hint-touch 类）
+      !/\{workspaceCopy\.chooseHint\}<\/div>/.test(panelSrc) &&
+      /ws-blocked-hint help-hint-touch/.test(panelSrc) &&
+      /\.help-badge \{[\s\S]{0,320}?cursor: help/.test(cssAll) &&
+      // 触屏（无 hover）弹不出提示 ⇒ 黑名单说明改回可见
+      /\.help-hint-touch \{\s*display: none;\s*\}/.test(cssAll) &&
+      /@media \(hover: none\) and \(pointer: coarse\) \{[\s\S]{0,120}?\.help-hint-touch \{\s*display: block;/.test(cssAll),
+    '')
+  check('adj579/adj581（用户要求）「导入」页签：编辑器上方是「粘贴源码」标题 + `?`（悬浮 = 那条长说明，正文不再常驻）',
+    /import-label/.test(String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8'))) &&
+      /pasteImportCopy\.label/.test(String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8'))) &&
+      // adj581：去掉冒号 + 用统一的**行标题**样式（`.pcfg-group-title`，谱面页口径）
+      /label: '粘贴源码'/.test(copySrc) &&
+      !/label: '粘贴源码：'/.test(copySrc) &&
+      /className="pcfg-group-title import-label"/.test(String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8'))) &&
+      // `?` 的悬浮提示就是那条 desc（内容与用户给的一字不差）
+      /把谱面源码粘贴到下面（微信\/网盘里复制的文本、笔记里的 ```jps 代码块都可以），点「导入」即替换当前内容。不会写入磁盘，保存请用「导出」。/.test(
+        copySrc,
+      ) &&
+      // 触屏没有 hover ⇒ 这条说明在触屏上仍直接显示
+      /import-desc help-hint-touch/.test(String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8'))),
+    '')
+  check('adj581（用户要求）底栏内容标题统一成**谱面页的行标题样式**（`.pcfg-group-title`，即「纸张与边距」那种）：选择工作区 / 粘贴源码 / 深浅模式 / 主题配色 / 音源 / 音色启用',
+    (() => {
+      const panelDlg = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
+      const bank = String(readFileSync('src/dialogs/SoundBankPanel.tsx', 'utf8'))
+      const paste = String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8'))
+      const wsPanel = String(readFileSync('src/ui/dock/WorkspacePanel.tsx', 'utf8'))
+      // 六处标题都用同一个类名——任何一处改回自带样式都会在这里断掉
+      return (
+        /className="pcfg-group-title">深浅模式</.test(panelDlg) &&
+        /className="pcfg-group-title">主题配色</.test(panelDlg) &&
+        /className="pcfg-group-title">音源</.test(bank) &&
+        /className="pcfg-group-title">\s*音色启用/.test(bank) &&
+        /className="pcfg-group-title import-label"/.test(paste) &&
+        // ⚠ adj581 踩过的坑：dock 的 `.pcfg-group-title` **绝不能**带 `flex: 0 0 100%`——
+        // 那在横向 flex 里是"占满整行宽"，到了**纵向** flex（导入面板）主轴变成高度 ⇒ 标题被撑满整块高度
+        // （实测 300px）。独占一行交给 `.ws-choose-title`（横向场景）显式声明。
+        !/\.tool-dock \.pcfg-group-title \{[\s\S]{0,120}?flex: 0 0 100%/.test(cssAll) &&
+        /\.ws-choose-title \{[\s\S]{0,220}?flex: 0 0 100%/.test(cssAll) &&
+        /className="pcfg-group-title ws-choose-title"/.test(wsPanel) &&
+        // 反向：这六处不再用「表单标签」那套（`.ijipu-form-label`）——那是"字段标签"口径，不是行标题
+        !/ijipu-form-label">深浅模式/.test(panelDlg) &&
+        !/ijipu-form-label">主题配色/.test(panelDlg) &&
+        !/ijipu-form-label">音源/.test(bank) &&
+        !/ijipu-form-label">\s*音色启用/.test(bank) &&
+        !/ijipu-form-label (import-label|ws-choose-title)/.test(paste + wsPanel) &&
+        // 反向：那个"独有样式"已删干净（`.ws-grant-title` 规则与用法都不在）
+        !/ws-grant-title/.test(wsPanel) &&
+        !/\.ws-grant-title \{/.test(cssAll) &&
+        // 样式只有一处出处，且**dock 里任何** `.pcfg-group-title` 都吃这一套（不再限定在 `.pcfg-panel` 内，
+        // 否则工作区/导入那两处会退化成文件里另一套虚线样式）
+        /\.tool-dock \.pcfg-group-title \{[\s\S]{0,520}?box-shadow: inset 2px 0 0 var\(--jp-accent\)/.test(cssAll) &&
+        !/\.tool-dock \.pcfg-panel > \.pcfg-group-title/.test(cssAll)
+      )
+    })(),
+    '')
+  check('adj583（用户反馈）设置面板左栏页签轨道**延伸到底**（清掉横向页签基础样式带来的 margin-bottom/border-bottom）',
+    // dock 的竖向轨道里必须显式清掉这两条，否则 grid 拉伸高度少 14px、分隔线在离底处断掉
+    /\.tool-dock \.jp-tabs \{[\s\S]{0,600}?margin-bottom: 0;[\s\S]{0,80}?border-bottom: 0;[\s\S]{0,120}?border-right: 1px solid var\(--jp-border\)/.test(
+      cssAll,
+    ) &&
+      // 基础（横向）页签那套仍在：对话框顶部横向页签照旧有下边框/下外边距
+      /^\.jp-tabs \{[\s\S]{0,200}?border-bottom: 1px solid var\(--jp-border\);[\s\S]{0,80}?margin-bottom: 14px;/m.test(cssAll),
+    '')
+  check('adj584（用户要求）底栏 dock 的动作按钮统一到"基础 `.btn` 档"（工作区右栏 / 过滤 `*`✕ / 试听播放停止）',
+    // 一条规则同时覆盖三组，且带 `.tool-dock` 前缀（只作用于底栏、且压过各组自带声明）
+    /\.tool-dock \.ws-side-btn,\s*\n?\.tool-dock \.ws-filter-row \.btn,\s*\n?\.tool-dock \.playback-btn \{[\s\S]{0,400}?padding: 6px 16px;[\s\S]{0,160}?font-size: 13px;[\s\S]{0,200}?height: auto;[\s\S]{0,160}?line-height: normal;/.test(
+      cssAll,
+    ) &&
+      // 布局声明仍在各自规则里（不能被"统一样式"顺手删掉）
+      /\.ws-side-btn \{[\s\S]{0,120}?width: 100%/.test(cssAll) &&
+      /\.ws-filter-row \.ws-filter-all,[\s\S]{0,120}?flex: 1 1 0/.test(cssAll) &&
+      // 顶栏/输入条的 24px 定高**不受影响**（那是另一套口径，见 adj534）
+      /\.playback-btn \{[\s\S]{0,260}?height: var\(--jp-btn-h, 24px\)/.test(cssAll),
+    '')
+  check('adj577（用户要求）**同目录只保留一个工作区**：新选到历史里的目录时复用历史那条记录',
+    // 面板接线：选完先 `dedupeWorkspaceRecord` 再落库；命中历史时用另一句提示
+    /const picked = await pickWorkspaceDir\(\)[\s\S]{0,1400}?const rec = await dedupeWorkspaceRecord\(picked\)/.test(panelSrc) &&
+      /rec\.id === picked\.id \? workspaceCopy\.picked\(rec\.name\) : workspaceCopy\.reused\(rec\.name\)/.test(panelSrc) &&
+      /reused: \(n: string\): string => `这个文件夹已经是工作区「\$\{n\}」了，已直接切过去`/.test(copySrc) &&
+      // 判定本身：路径后端比"去末尾分隔符 + 小写"的路径；FSA 后端用规范的 isSameEntry（两侧都试）
+      /export async function findSameWorkspace\(/.test(wsSrc) &&
+      /function sameDirKey\(dir: string\): string \{[\s\S]{0,120}?trimTrailingSep\(dir\)\.toLowerCase\(\)/.test(wsSrc) &&
+      /const asEntry = \(h: unknown\): SameEntry \| null/.test(wsSrc) &&
+      /if \(await a\.isSameEntry\(b\)\) return r/.test(wsSrc) &&
+      /export async function dedupeWorkspaceRecord\(rec: WorkspaceRecord\): Promise<WorkspaceRecord>/.test(wsSrc),
+    '')
+  // adj577：同目录判定**行为**验证（纯函数，喂假记录即可，不必真去选目录）
+  {
+    const listA = [
+      { id: 'path:c:\\a', name: 'a', dir: 'C:\\A', path: [] },
+      { id: 'path:c:\\b', name: 'b', dir: 'C:\\B\\', path: [] },
+    ] as unknown as Parameters<typeof findSameWorkspace>[0]
+    const hit = await findSameWorkspace(listA, { id: 'x', name: 'x', dir: 'c:\\a\\', path: [] } as never)
+    const miss = await findSameWorkspace(listA, { id: 'y', name: 'y', dir: 'C:\\C', path: [] } as never)
+    // FSA 后端：靠句柄的 isSameEntry 认"同一个目录"（两个方向都试：任一侧句柄失效时另一侧仍能认出）
+    const fakeHandle = (same: boolean): FileSystemDirectoryHandle =>
+      ({ name: 'w', isSameEntry: async () => same }) as unknown as FileSystemDirectoryHandle
+    const fsaHit = await findSameWorkspace(
+      [{ id: 'fsa-1', name: 'w', handle: fakeHandle(false), path: [] }] as unknown as Parameters<typeof findSameWorkspace>[0],
+      { id: 'fsa-2', name: 'w', handle: fakeHandle(true), path: [] } as never,
+    )
+    // 新句柄那侧报错 ⇒ 回退用**历史那条**的句柄去比，仍应认出是同一个目录
+    const fsaFallback = await findSameWorkspace(
+      [{ id: 'fsa-3', name: 'w', handle: fakeHandle(true), path: [] }] as unknown as Parameters<typeof findSameWorkspace>[0],
+      {
+        id: 'fsa-4',
+        name: 'w',
+        handle: { name: 'w', isSameEntry: async () => { throw new Error('boom') } } as unknown as FileSystemDirectoryHandle,
+        path: [],
+      } as never,
+    )
+    // 两侧都比不了 / 都不是同一个 ⇒ 不命中（不能把不同目录误并成一个工作区）
+    const fsaMiss = await findSameWorkspace(
+      [{ id: 'fsa-5', name: 'w', handle: fakeHandle(false), path: [] }] as unknown as Parameters<typeof findSameWorkspace>[0],
+      { id: 'fsa-6', name: 'w', handle: fakeHandle(false), path: [] } as never,
+    )
+    check('adj577 同目录判定：路径后端忽略大小写与末尾分隔符；FSA 后端用 isSameEntry（两侧都试）且**比不了就不算命中**',
+      hit?.id === 'path:c:\\a' && miss === null && fsaHit?.id === 'fsa-1' && fsaFallback?.id === 'fsa-3' && fsaMiss === null,
+      `hit=${hit?.id} miss=${miss} fsaHit=${fsaHit?.id} fsaFallback=${fsaFallback?.id} fsaMiss=${fsaMiss}`)
+  }
   check('adj576（用户反馈）换工作区后**目录列表缓存与过滤索引都作废**（缓存键也带上工作区身份）',
     // 缓存键从 `joinPath(path)` 改成 `${rec.id}|${path}`：不同工作区天然不同键（根目录不再互相串）
     /const cacheKey = `\$\{rec\.id\}\|\$\{key\}`/.test(panelSrc) &&
@@ -8676,13 +8815,15 @@ async function runAdj540WorkspaceTests() {
       /invalidateCache\(\)[\s\S]{0,80}?setChoose\(false\)/.test(panelSrc) &&
       /adj576：顺手把\*\*目录列表缓存\*\*也清掉[\s\S]{0,240}?invalidateCache\(\)/.test(panelSrc),
     '')
-  check('adj540 过滤框：默认层级列表；一过滤就把**整个工作区**符合条件的 .jps 收成**平坦列表**（点一条直接打开）',
+  check('adj540/adj580 过滤框：默认层级列表；一过滤就把**当前目录（含下级）**符合条件的 .jps 收成**平坦列表**（点一条直接打开）',
     /export async function searchWorkspaceJps/.test(wsSrc) &&
       /export function matchesQuery/.test(wsSrc) &&
       /const \[query, setQuery\] = useState\(''\)/.test(panelSrc) &&
       /const searching = query\.trim\(\)\.length > 0/.test(panelSrc) &&
       // adj543/adj546：过滤改为"走一次建索引（可落盘、可后台重扫） + 内存 filter"
-      /void buildIndex\(ws, ws\.id\)/.test(panelSrc) &&
+      // adj580：建索引时带上**当前目录**作为扫描起点（子目录过滤）
+      /void buildIndex\(ws, ws\.id, from\)/.test(panelSrc) &&
+      /const from = path \/\/ adj580/.test(panelSrc) &&
       /const match = compileQuery\(query\)/.test(panelSrc) &&
       /idx\.filter\(\(h\) => match\(h\.name, h\.relPath\)\)/.test(panelSrc) &&
       /searching\s*\?\s*\(hits \?\? \[\]\)\.slice\(0, RESULT_RENDER_MAX\)\.map/.test(panelSrc) &&
@@ -8887,6 +9028,53 @@ async function runAdj540WorkspaceTests() {
   check('adj558 创建子目录后，readDirEntries 立刻看到新条目（不依赖缓存重建）',
     !adj558DirCaseErr,
     adj558DirCaseErr)
+
+  // ---- adj580（用户反馈）：过滤范围 = **当前目录及其下级**，不是整个工作区 ----
+  // 行为级验证：造一棵 root/{A/{a1.jps, skip.txt, deep/{d1.jps}}, B/{b1.jps}, r.jps}，
+  // 断言"从 A 起搜"只拿到 A 子树里的两个 .jps（含更深的 deep/），从 B 起搜只拿到 B 的。
+  {
+    let scopeErr = ''
+    let detail = ''
+    try {
+      const root = mkDir('root')
+      const A = await root.getDirectoryHandle('A', { create: true })
+      const B = await root.getDirectoryHandle('B', { create: true })
+      const deep = await A.getDirectoryHandle('deep', { create: true })
+      await A.getFileHandle('a1.jps', { create: true })
+      await A.getFileHandle('skip.txt', { create: true }) // 非 .jps 不该进结果
+      await deep.getFileHandle('d1.jps', { create: true })
+      await B.getFileHandle('b1.jps', { create: true })
+      await root.getFileHandle('r.jps', { create: true })
+      const rec = { id: 'smoke-scope', name: 'root', handle: root, path: [] } as never
+      const all = await searchWorkspaceJps(rec, '*', {})
+      const subA = await searchWorkspaceJps(rec, '*', { from: ['A'] })
+      const subB = await searchWorkspaceJps(rec, '*', { from: ['B'] })
+      const rels = (r: { hits: SearchHit[] }): string[] => r.hits.map((h) => h.relPath).sort()
+      detail = `全部=${JSON.stringify(rels(all))} A=${JSON.stringify(rels(subA))} B=${JSON.stringify(rels(subB))}`
+      const ok =
+        // 不传 from ⇒ 整个工作区（4 个 .jps，含 A 下面更深的那层）
+        JSON.stringify(rels(all)) === JSON.stringify(['A/a1.jps', 'A/deep/d1.jps', 'B/b1.jps', 'r.jps']) &&
+        // 从 A 起 ⇒ 只有 A 及其下级（a1 + deep/d1），拿不到 B 与根目录那些
+        JSON.stringify(rels(subA)) === JSON.stringify(['A/a1.jps', 'A/deep/d1.jps']) &&
+        JSON.stringify(rels(subB)) === JSON.stringify(['B/b1.jps'])
+      if (!ok) throw new Error('范围不符：' + detail)
+    } catch (e) {
+      scopeErr = (e as Error).message
+    }
+    check('adj580（用户反馈）过滤范围 = **起始目录及其下级**（不传 `from` 才是整个工作区）', !scopeErr, scopeErr || detail)
+  }
+  check('adj580 索引作用域键 = 工作区身份 + 起始目录（换目录/换工作区都不复用旧索引）',
+    indexScopeKey({ id: 'w1' } as never, []) === 'w1|' &&
+      indexScopeKey({ id: 'w1' } as never, ['A', 'B']) === 'w1|A/B' &&
+      indexScopeKey({ id: 'w2' } as never, ['A']) !== indexScopeKey({ id: 'w1' } as never, ['A']) &&
+      indexScopeKey({ id: 'w1' } as never, ['A']) !== indexScopeKey({ id: 'w1' } as never, []) &&
+      // 面板接线：建索引时把当前目录带进去；文案也改成"当前目录"
+      /void buildIndex\(ws, ws\.id, from\)/.test(panelSrc) &&
+      /filterAllTitle: '列出当前目录（含子目录）全部 \.jps'/.test(copySrc) &&
+      /searchEmpty: '当前目录里没有匹配的 \.jps'/.test(copySrc) &&
+      /searchIndexing: '正在读取当前目录…'/.test(copySrc) &&
+      /filterHint: '在当前目录及其子目录里过滤/.test(copySrc),
+    '')
 
   // ---- adj562：粘贴源码导入迁入底栏「导入」页签（用户要求"就在工作区后面"） ----
   check('adj562 「导入」面板接线：懒加载 + `inline` 模式 + 排在 workspace 之后 + 文案 `tabImport`',
@@ -9129,11 +9317,12 @@ async function runAdj541DockToggleTests() {
         /return Err\("NOT_EMPTY"\.to_string\(\)\)/.test(rustSrc) &&
         !/remove_dir_all/.test(wsRemoveDirBody),
       '')
-    check('adj568 网页版：**选目录之前**就把内核敏感目录黑名单讲清楚（被拦时错误与"用户取消"同为 AbortError，事后补不出提示）',
+    check('adj568/adj578 网页版：**选目录之前**就把内核敏感目录黑名单讲清楚（被拦时错误与"用户取消"同为 AbortError，事后补不出提示）',
       /blockedHint:/.test(copySrc2) &&
         /下载 \/ 桌面 \/ 文档 \/ 用户主目录/.test(copySrc2) &&
         /子文件夹/.test(copySrc2) &&
-        /!supportsPathWorkspace\(\) && <div className="ws-grant-hint ws-blocked-hint">\{workspaceCopy\.blockedHint\}<\/div>/.test(
+        // adj578 起正文那条只在**触屏**下渲染（桌面/鼠标走标题后的 `?` 悬浮提示，见下一条断言）
+        /!supportsPathWorkspace\(\) && \([\s\S]{0,220}?ws-blocked-hint help-hint-touch[\s\S]{0,160}?workspaceCopy\.blockedHint/.test(
           wsPanelSrc,
         ),
       '')
@@ -9193,15 +9382,22 @@ async function runAdj541DockToggleTests() {
       /\.ws-row-plain \{[\s\S]{0,120}?padding: 5px 4px/.test(cssSrc) &&
       /\.ws-list \{[\s\S]{0,200}?gap: 1px/.test(cssSrc),
     '')
-  check('adj543/adj546 过滤提速：**先建一次索引，之后每次输入只在内存里过滤**，且索引可落盘、可后台重扫',
+  check('adj543/adj546 过滤提速：**先建一次索引，之后每次输入只在内存里过滤**，且索引可落盘（按工作区+目录分作用域）、可后台重扫',
     /const indexRef = useRef<SearchHit\[\] \| null>\(null\)/.test(wsPanelSrc) &&
-      /const buildIndex = useCallback\(\s*\n?\s*async \(rec: WorkspaceRecord, wsId: string, force = false\)/.test(wsPanelSrc) &&
-      /const refreshIndex = useCallback\(async \(rec: WorkspaceRecord, wsId: string\)/.test(wsPanelSrc) &&
+      // adj580：索引与过滤**按作用域**（工作区 + 起始目录）区分：内存用 indexKeyRef 记住，落盘按 (wsId, from)
+      /const indexKeyRef = useRef<string \| null>\(null\)/.test(wsPanelSrc) &&
+      /async \(rec: WorkspaceRecord, wsId: string, from: readonly string\[\], force = false\)/.test(wsPanelSrc) &&
+      /const refreshIndex = useCallback\(async \(rec: WorkspaceRecord, wsId: string, from: readonly string\[\]\)/.test(wsPanelSrc) &&
+      /const scope = indexScopeKey\(rec, from\)/.test(wsPanelSrc) &&
+      /indexKeyRef\.current === scope && !force/.test(wsPanelSrc) &&
+      /if \(!idx \|\| indexKeyRef\.current !== scope\) return false/.test(wsPanelSrc) &&
       // ① 先用落盘的索引（秒开）② **只有过期才**后台重扫 ③ 扫完落盘
-      /const cached = force \? null : await loadWorkspaceIndex\(wsId\)/.test(wsPanelSrc) &&
+      /const cached = force \? null : await loadWorkspaceIndex\(wsId, joinPath\(from\)\)/.test(wsPanelSrc) &&
       /const stale = Date\.now\(\) - \(cached\.at \?\? 0\) > INDEX_STALE_MS/.test(wsPanelSrc) &&
-      /if \(stale\) void refreshIndex\(rec, wsId\)/.test(wsPanelSrc) &&
-      /await saveWorkspaceIndex\(\{ wsId, at: Date\.now\(\), relPaths: r\.hits\.map\(\(h\) => h\.relPath\) \}\)/.test(wsPanelSrc) &&
+      /if \(stale\) void refreshIndex\(rec, wsId, from\)/.test(wsPanelSrc) &&
+      /await saveWorkspaceIndex\(\{ wsId, from: joinPath\(from\), at: Date\.now\(\), relPaths: r\.hits\.map\(\(h\) => h\.relPath\) \}\)/.test(
+        wsPanelSrc,
+      ) &&
       // 边扫边出结果（慢节流地把 partial 引用交给索引 + 进度状态；不再每跳复制数组/重算正则）
       /onProgress: \(scanned, partial\) => \{[\s\S]{0,400}?indexRef\.current = partial/.test(wsPanelSrc) &&
       /setScanInfo\(\{ scanned, found: partial\.length, ms: Date\.now\(\) - t0 \}\)/.test(wsPanelSrc) &&
@@ -9275,9 +9471,10 @@ async function runAdj541DockToggleTests() {
       // 隐藏项判定放在 scanned++ **之前**（连扫描计数都不占），且 continue 不下钻
       /if \(isHiddenName\(h\.name\)\) continue[\s\S]{0,200}?scanned\+\+/.test(wsSrc) &&
       /onProgress\?: \(scanned: number, hits: SearchHit\[\]\) => void/.test(wsSrc) &&
-      // 落盘索引：按工作区身份 + 只存相对路径
-      /export interface CachedIndex \{[\s\S]{0,200}?wsId: string[\s\S]{0,120}?relPaths: string\[\]/.test(fhSrc) &&
-      /export async function loadWorkspaceIndex\(wsId: string\)/.test(fhSrc),
+      // 落盘索引：按工作区身份 + **范围**（adj580：起始目录）+ 只存相对路径
+      /export interface CachedIndex \{[\s\S]{0,260}?wsId: string[\s\S]{0,200}?from: string[\s\S]{0,160}?relPaths: string\[\]/.test(fhSrc) &&
+      /export async function loadWorkspaceIndex\(wsId: string, from = ''\)/.test(fhSrc) &&
+      /\(val\.from \?\? ''\) !== from/.test(fhSrc),
     '')
   // adj546：**用"假句柄 + 手机量级延迟"实测并发收益**——真机 FSA 每次枚举约 5ms，
   // 这里给每个条目注入 2ms 延迟，比较 concurrency=1 与 4 的耗时。确定性（不依赖真实磁盘）。
@@ -9405,8 +9602,8 @@ console.log('[110] dock settings fields align by longest label (adj482)')
       /\.pcfg-fields \.pcfg-row \{[\s\S]{0,220}grid-template-columns: var\(--pcfg-label-w/.test(css) &&
       /grid-column: span var\(--pcfg-span/.test(css),
     '')
-  check('adj482 分组标题跨整行（从 .pcfg-panel 起用后代选择器：任何嵌套层级都不会被当成字段格）',
-    /\.pcfg-panel \.pcfg-group-title \{[\s\S]{0,300}?grid-column: 1 \/ -1/.test(cssFlat),
+  check('adj482/adj581 分组标题跨整行（dock 里用后代选择器：任何嵌套层级都不会被当成字段格）',
+    /\.tool-dock \.pcfg-group-title \{[\s\S]{0,400}?grid-column: 1 \/ -1/.test(cssFlat),
     '')
   check('adj482 说明文字（.pcfg-note）同样跨整行', /\.pcfg-fields \.pcfg-note \{[^}]*grid-column: 1 \/ -1/.test(cssFlat), '')
   check('adj482 窄 dock 退化为单列（仍以同一标签基准对齐）', /@container \(max-width: 560px\) \{\s*\.tool-dock \.pcfg-fields \{ grid-template-columns: minmax\(0, 1fr\)/.test(css), '')

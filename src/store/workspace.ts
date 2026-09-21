@@ -119,6 +119,18 @@ export function joinPath(segs: readonly string[]): string {
 }
 
 /**
+ * adj580（用户反馈）：过滤/索引的**作用域键** = 工作区身份 + **起始目录**。
+ *
+ * 为什么要它：过滤范围是"当前目录及其下级"，所以索引必须按目录分开——
+ * ① 内存里那份索引要知道自己覆盖的是哪个目录（换了目录不能拿旧的过滤结果）；
+ * ② 落盘索引也按这个维度分开存（见 `fileHandleDb.loadWorkspaceIndex(wsId, from)`）。
+ * 放这里（而不是组件文件）的两个原因：`react/only-export-components`；以及 smoke 可直接断言。
+ */
+export function indexScopeKey(rec: WorkspaceRecord, from: readonly string[]): string {
+  return `${rec.id}|${joinPath(from)}`
+}
+
+/**
  * adj540（用户要求）：是否"隐藏条目"——**名字以 `.` 开头**。
  *
  * 为什么列表与过滤都要跳过：用户的谱夹旁边常混着 `.git`、`.obsidian`、`.trash`、`.thumbnails`
@@ -206,6 +218,15 @@ export interface SearchOptions {
    * UI 可以据此"边扫边显示"，而不是让用户对着空白等半分钟。
    */
   onProgress?: (scanned: number, hits: SearchHit[]) => void
+  /**
+   * adj580（用户反馈）：**只搜这个子目录及其下级**（工作区内的相对段；`[]` / 不传 = 整个工作区）。
+   *
+   * 用户口径：当前路径已经是工作区里的某个子目录时，过滤应当**只针对该目录及其以下子目录**，
+   * 而不是把整个工作区翻一遍——"我在这个目录里找东西"才是他的预期。
+   * 命中项的 `relPath` / `dirSegs` 仍然**相对工作区根**（打开文件、显示所在目录都按这个口径），
+   * 所以这里只影响"从哪儿开始走"，不影响命中项的语义。
+   */
+  from?: readonly string[]
 }
 
 /**
@@ -217,6 +238,9 @@ export interface SearchOptions {
  *  · `onProgress` 让 UI 边扫边出结果；
  *  · **`.开头的条目直接跳过**（用户明确指出：这些不是要找的东西）——既不进结果，
  *    也**不下钻**（`.git`/`.obsidian` 里动辄上千文件，是最大的无效开销来源）。
+ *
+ * adj580（用户反馈）：**范围由 `options.from` 决定**——传了子目录段就只搜**该目录及其下级**
+ * （"我在这个目录里找东西"才是用户的预期），不传/传空数组才是整个工作区。
  *
  * 防呆（真实目录可能很大）：深度 10 层 / 访问 5000 条目 / 命中 500 条上限；
  * 某一层读不动（权限/竞态）就跳过该层，而不是整次搜索失败。因上限提前结束返回 `truncated: true`，
@@ -258,9 +282,12 @@ export async function searchWorkspaceJps(
    * 待枚举的目录队列 + 在飞任务计数（计数保证"队列暂时空但还有目录在枚举"时 worker 不提前收工）。
    * adj568：入队的是**相对段**（后端无关）+ 可选句柄（FSA 后端把子目录句柄顺带带下去，
    * 免得每层都用路径重解析——adj546 的并发枚举性能就靠这个）。
+   * adj580：起点由 `options.from` 决定（子目录过滤）；空数组才是"整个工作区"。
+   * 起点非空时不给句柄（`listRaw` 会按相对段解析一次），根目录仍走 `rec.handle` 的快路。
    */
   type Job = { segs: string[]; handle?: FileSystemDirectoryHandle; depth: number }
-  const queue: Job[] = [{ segs: [], handle: rec.handle, depth: 1 }]
+  const from = normalizeRelPath(options.from ?? [])
+  const queue: Job[] = [{ segs: from, handle: from.length === 0 ? rec.handle : undefined, depth: 1 }]
   let inFlight = 0
   let done = false
 
@@ -804,6 +831,66 @@ export async function activateWorkspace(id: string): Promise<WorkspaceRecord | n
 /** 从"最近工作区"里移除一个（用户在列表里删掉） */
 export async function forgetWorkspace(id: string): Promise<void> {
   await upsertWorkspaceList(null, id)
+}
+
+/** 规整成"用来比较目录是否相同"的键（去末尾分隔符 + 小写；Windows 路径大小写不敏感） */
+function sameDirKey(dir: string): string {
+  return trimTrailingSep(dir).toLowerCase()
+}
+
+/**
+ * adj577（用户要求"**相同的目录只能有一个工作区**"）：在给定清单里找"与 `rec` 是同一个目录"的那条。
+ *
+ * 两套后端的判定方式不同：
+ *  · **桌面（路径后端）**：身份 id 就是规整后的绝对路径 ⇒ 直接比路径（忽略末尾分隔符与大小写）；
+ *  · **网页（FSA）**：FSA 不给磁盘路径、只有句柄 ⇒ 用规范里专为此提供的 `isSameEntry()`
+ *    逐个比。`isSameEntry` 抛错（句柄失效 / 跨源等）就当"不是同一个"，不影响正常选新目录。
+ *
+ * 单独导出是为了**可单测**（smoke 直接喂假记录/假句柄，不必真去选目录）。
+ */
+export async function findSameWorkspace(
+  list: readonly WorkspaceRecord[],
+  rec: WorkspaceRecord,
+): Promise<WorkspaceRecord | null> {
+  if (rec.dir) {
+    const key = sameDirKey(rec.dir)
+    return list.find((r) => !!r.dir && sameDirKey(r.dir) === key) ?? null
+  }
+  type SameEntry = { isSameEntry(o: unknown): Promise<boolean> }
+  const asEntry = (h: unknown): SameEntry | null => {
+    const x = h as Partial<SameEntry> | undefined
+    return typeof x?.isSameEntry === 'function' ? (x as SameEntry) : null
+  }
+  const self = asEntry(rec.handle)
+  if (!self) return null
+  for (const r of list) {
+    const other = asEntry(r.handle)
+    if (!other) continue
+    // **两个方向都试**：任一侧的句柄失效（刷新后旧句柄可能报错）时，另一侧仍可能认出"是同一个目录"；
+    // 两侧都失败 ⇒ 当作"不是同一个"，不影响正常选新目录。
+    for (const [a, b] of [
+      [self, r.handle],
+      [other, rec.handle],
+    ] as const) {
+      try {
+        if (await a.isSameEntry(b)) return r
+      } catch {
+        /* 这一侧比不了，换另一侧 */
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * adj577：用户刚选中的目录若**已经是历史工作区** ⇒ 复用历史那条记录（保留它的身份 id 与名字），
+ * 不新建。这样"同目录只有一个工作区"在**两套后端**上都成立：
+ *  · 桌面端本来按路径当身份（天然去重）；
+ *  · 网页端原先每次重选同一个文件夹都会发一个新 id、在清单里堆出重复项——现在也归并到同一条。
+ */
+export async function dedupeWorkspaceRecord(rec: WorkspaceRecord): Promise<WorkspaceRecord> {
+  const hit = await findSameWorkspace(await listWorkspaces(), rec)
+  return hit ?? rec
 }
 
 /** 列表登记：把 rec 提到最前（按 id 去重）；`removeId` 用于删除 */
