@@ -170,6 +170,8 @@ export const workspaceCopy = {
   // 文案从简（用户要求"能指明指示为宜"）：右侧按钮列窄（96px），短标签更好读、也更少换行。
   // 「改名/移动」而不写"重命名/移动到…"，「新建」在本面板里只有"新建文件夹"一种含义，
   // 「存到此处」= 把当前谱写进当前目录（与全局「保存 Ctrl+S」区分开）。
+  // adj558（用户反馈"新建夹太口语化"）：「新建夹」→「新建目录」；行为也改——创建完成后
+  // **自动进入**该新目录（与文件管理器一致），不再停在父目录让用户再点一次进去。
   /** 行尾「更多操作」按钮（打开/改名/移动/删除） */
   moreActions: '更多操作',
   /** adj540：多选时的选中条数 */
@@ -184,8 +186,8 @@ export const workspaceCopy = {
   actRename: '改名',
   actMove: '移动',
   actDelete: '删除',
-  /** adj540：在当前目录新建子文件夹（"夹"字省地方，两列按钮里也读得懂） */
-  actNewFolder: '新建夹',
+  /** adj558（v0.28.2，用户要求）：「新建夹」→「新建目录」——"夹"字偏口语，目录更准确 */
+  actNewFolder: '新建目录',
   /** adj540：分组下拉的第三组——作用在选中项上的操作（改名/移动/删除） */
   actOps: '操作',
   newScorePlaceholder: '新谱名（不用写 .jps）',
@@ -202,7 +204,8 @@ export const workspaceCopy = {
   dirNotEmpty: (n: string): string => `「${n}」里还有东西，本轮只删空文件夹（避免连带删掉里面其它文件）`,
   exists: (n: string): string => `已存在同名「${n}」，换个名字`,
   invalidName: '名字不能为空，也不能包含 / \\ 或 ..',
-  dirCreated: (n: string): string => `已新建文件夹「${n}」`,
+  /** adj558：「已新建文件夹」→「已新建目录」——与新文案一致 */
+  dirCreated: (n: string): string => `已新建目录「${n}」`,
   /** adj540：新建谱（写进工作区当前目录） */
   created: (n: string): string => `已新建「${n}」`,
   renamed: (a: string, b: string): string => `已把「${a}」重命名为「${b}」`,

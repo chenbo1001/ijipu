@@ -21,7 +21,7 @@
  * 同一时刻只展开一组，最多 5 个按钮 ⇒ 窄屏不用滚动，按钮高度也保持与其它按钮一致（不靠压扁）。
  *
  * 文件操作与安全约束（都是用户确认的行为）：
- *  · 打开 / 保存 / 另存 / 新建（空谱）/ 新建夹 / 改名 / 移动 / 删除；
+ *  · 打开 / 保存 / 另存 / 新建（空谱）/ 新建目录 / 改名 / 移动 / 删除；
  *  · **改名与移动**：FSA 对用户选中的目录**没有 `move()`**（只对 OPFS 生效）⇒ 实现是
  *    "读出 → 写新位置 → 回读校验一致 → 才删原文件"，中途失败宁可留重复也不丢内容；
  *  · **删除是永久的**（浏览器文件 API 没有回收站）⇒ 必须二次确认；目录**只允许删空的**
@@ -603,7 +603,7 @@ export function WorkspacePanel() {
     }
   }
 
-  /** 提交输入区：改名 / 新建夹 / 另存 / 新建谱（四者共用一个输入框，故集中在这里分派） */
+  /** 提交输入区：改名 / 新建目录 / 另存 / 新建谱（四者共用一个输入框，故集中在这里分派） */
   const submitEdit = async () => {
     if (!ws || !edit) return
     const value = edit.value.trim()
@@ -622,7 +622,11 @@ export function WorkspacePanel() {
       const ok = await createWorkspaceDir(path, value)
       if (ok) {
         setEdit(null)
-        await refresh(ws, path)
+        // adj558（v0.28.2，用户要求）：创建后**自动进入新目录**（与文件管理器一致），
+        // 不再停在父目录让用户再点一次进去——空目录的 "当前目录为空" 占位 + 操作▾的
+        // 「新建」/「另存」都立即可用，省一次手动导航。`refresh` 内部走 `resolveDir`
+        // 按 segs 走到底层 `getDirectoryHandle`，新建的目录句柄即时生效。
+        await refresh(ws, [...path, value])
       }
       return
     }

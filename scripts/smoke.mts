@@ -48,6 +48,8 @@ import {
   saveTextToHandle,
   writeTextToHandle,
 } from '../src/store/saveSupport.ts'
+// adj558：工作区"新建目录"端到端验证（createSubdir + readDirEntries 在假 FSA 上闭环）
+import { createSubdir, readDirEntries } from '../src/store/workspace.ts'
 // adj373：作者署名（品牌 tokens + 关于对话框文案）
 import { brand } from '../src/brand/tokens.ts'
 import { aboutCopy } from '../src/brand/copy.ts'
@@ -8388,7 +8390,7 @@ function runAdj539ShellTests() {
  * 相对路径规整/拼接/上级）以及"接线是否齐全"（三个存储来源互斥、保存分支、UI 入口）。
  * 真正的目录读写只能在浏览器/真机上验（会写用户磁盘），不放进 smoke。
  */
-function runAdj540WorkspaceTests() {
+async function runAdj540WorkspaceTests() {
   console.log('[122] workspace directory for Android/mobile (adj540)')
   // adj554：本函数里要用 `dockModuleSrc` 检查工作区高度算式 —— 在本函数局部读一次，
   // 不要复用 adj526 函数内的同名变量（那个作用域只在 526 那段）
@@ -8707,6 +8709,79 @@ function runAdj540WorkspaceTests() {
       // adj544：删除当前打开的谱 ⇒ 解绑并清掉持久化的来源（否则重启后又"以为"绑定在已删文件上）
       /set\(\{ binding: null, pendingBinding: null \}\)/.test(store),
     '')
+
+  // ---- adj558（v0.28.2）：工作区"新建目录"——文案 + 行为两件事一起修 ----
+  // ① 文案："新建夹" → "新建目录"；notice 里"已新建文件夹" → "已新建目录"
+  check('adj558 菜单按钮 / 输入框标题 文案改为"新建目录"（不再用"夹"/"文件夹"）',
+    /actNewFolder: '新建目录'/.test(copySrc) &&
+      /dirCreated: \(n: string\): string => `已新建目录「\$\{n\}」`/.test(copySrc) &&
+      // 整个项目不再出现"新建夹"/"新建文件夹"作为按钮文案（注释里讨论旧文案可以保留）
+      !/actNewFolder:\s*'新建夹'/.test(copySrc) &&
+      !/dirCreated:\s*\(n: string\): string => `已新建文件夹/.test(copySrc),
+    '')
+  // ② 行为：创建完成后**自动进入**新目录（用 path 的 spread 形式，与 `resolveDir` 的 segs 同型）
+  check('adj558 提交"新建目录"后 `refresh` 的目标路径 = `[...path, value]`（自动进入新目录，不再停在父目录）',
+    /if \(edit\.kind === 'newFolder'\) \{[\s\S]{0,300}?await createWorkspaceDir\(path, value\)[\s\S]{0,300}?await refresh\(ws, \[\.\.\.path, value\]\)/.test(panelSrc),
+    '')
+  // ③ 行为：刷新父目录时**新目录要能被列出来**——根因级测试，确保 `createSubdir` 之后
+  // `readDirEntries` 立刻看到新增条目（不是依赖缓存或下一次 re-mount）。
+  // 极简 FSA 假实现：父目录用一个 Map<name, child> 模拟 `values()` 迭代，
+  // `getDirectoryHandle({create:true})` 创建并加入 Map，构造出的 dir handle 的
+  // `values()` 重新生成——和真实浏览器 FSA 的"每次取都是新迭代器"语义一致。
+  const mkDir = (name: string, children = new Map<string, unknown>()): FileSystemDirectoryHandle => {
+    const childrenRef = children
+    const handle = {
+      kind: 'directory' as const,
+      name,
+      async queryPermission() { return 'granted' as const },
+      async requestPermission() { return 'granted' as const },
+      async isSameEntry(other: FileSystemHandle) {
+        return (other as { name?: string }).name === name
+      },
+      async getDirectoryHandle(seg: string, opts?: { create?: boolean }) {
+        let child = childrenRef.get(seg) as ReturnType<typeof mkDir> | undefined
+        if (!child) {
+          if (!opts?.create) throw new DOMException('NotFound', 'NotFoundError')
+          child = mkDir(seg, new Map())
+          childrenRef.set(seg, child)
+        }
+        return child
+      },
+      async getFileHandle(seg: string, opts?: { create?: boolean }) {
+        let child = childrenRef.get(seg) as { name: string; kind: 'file'; getFile(): Promise<File>; createWritable(): Promise<unknown>; isSameEntry(o: FileSystemHandle): Promise<boolean> } | undefined
+        if (!child) {
+          if (!opts?.create) throw new DOMException('NotFound', 'NotFoundError')
+          child = { kind: 'file' as const, name: seg, async getFile() { return new File([''], seg) }, async createWritable() { return { write: async () => {}, close: async () => {}, abort: async () => {} } }, async isSameEntry(other: FileSystemHandle) { return (other as { name?: string }).name === seg } }
+          childrenRef.set(seg, child)
+        }
+        return child as unknown as FileSystemFileHandle
+      },
+      async removeEntry(seg: string) { childrenRef.delete(seg) },
+      async resolve() { return null },
+      async *values() {
+        // 每次迭代都基于 childrenRef 的**当前**值生成新迭代器
+        for (const c of childrenRef.values()) yield c as unknown as FileSystemHandle
+      },
+    } as unknown as FileSystemDirectoryHandle
+    return handle
+  }
+  let adj558DirCaseErr = ''
+  try {
+    const root = mkDir('root')
+    const before = await readDirEntries(root, [])
+    if (before.length !== 0) throw new Error(`expected empty dir, got ${before.length}`)
+    await createSubdir(root, [], 'NewDir')
+    const after = await readDirEntries(root, [])
+    const hasNew = after.some((e) => e.kind === 'dir' && e.name === 'NewDir')
+    if (!hasNew) throw new Error(`after create, root listing=${JSON.stringify(after.map((e) => e.name))}`)
+    // 再创建同名 → 应抛 EXISTS（与 createSubdir 的 hasEntry 校验一致）
+    let threwExists = false
+    try { await createSubdir(root, [], 'NewDir') } catch (e) { threwExists = (e as Error).message === 'EXISTS' }
+    if (!threwExists) throw new Error('duplicate createSubdir did not throw EXISTS')
+  } catch (e) { adj558DirCaseErr = (e as Error).message }
+  check('adj558 创建子目录后，readDirEntries 立刻看到新条目（不依赖缓存重建）',
+    !adj558DirCaseErr,
+    adj558DirCaseErr)
 }
 
 /**

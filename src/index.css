@@ -3830,7 +3830,8 @@ body {
   flex: 1 1 auto;
   min-height: 0;
 }
-/* adj540：工作区面板要走"**受限高度链**"——列表自己滚、页脚（新建文件夹 / 保存当前谱到此处）**常驻可见**。
+/* adj540：工作区面板要走"**受限高度链**"——列表自己滚、页脚（新建目录 / 保存当前谱到此处）**常驻可见**。
+ * adj558（v0.28.2）："新建夹 / 新建文件夹"→"新建目录"，与 copy.ts 的 `actNewFolder` 文案统一。
  * 与 `.pane-problems`（adj522）同一套路：pane 必须当弹性列容器，`.ws-panel` 才拿得到确定高度；
  * 否则面板按内容取高（`.tool-dock-pane` 基类是 `flex: 0 0 auto`）⇒ 内容一多就把页脚挤出可视区
  * （实测 390px 手机上「保存当前谱到此处」看不见、要滚动才够得到）。 */
@@ -4064,7 +4065,7 @@ input.ws-check {
 span.ws-check {
   display: inline-block;
 }
-/* 输入/确认区（重命名、新建文件夹、删除确认、另存文件名）——独立一行，不占列表行数 */
+/* 输入/确认区（重命名、新建目录、删除确认、另存文件名）——独立一行，不占列表行数 */
 .ws-editbar {
   display: flex;
   flex-wrap: wrap;
@@ -4167,7 +4168,7 @@ span.ws-check {
   background: var(--jp-bg-panel-active);
   color: var(--jp-accent);
 }
-/* 重命名/新建文件夹/删除确认的输入行 */
+/* 重命名/新建目录/删除确认的输入行 */
 .ws-editor {
   display: flex;
   flex-wrap: wrap;
