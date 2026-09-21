@@ -279,18 +279,24 @@ const clampH = (v: number, chromeH: number) => {
  * 由来（用户报）：这几个页签此前用的是 **Unicode 字符**（`⚠ ▶ ⬇ ⚙`）当图标——与顶栏按钮那套
  * "用户设计的线稿图标"不是一路货：字形粗细/留白/基线各不相同，与面板里的其它图标摆在一起显得杂，
  * 而同一个"试听/导出/设置"在顶栏是设计图标、在底栏却是个字符。现统一为 `ToolIcon`（同一套 PNG + mask 上色）。
- * 告警 / 关于 / 导入暂无对应的设计图标，暂留字符（`⚠` / `ⓘ` / `⤓`，等用户补图后替换）。
+ *
+ * adj565（用户要求）：**最后一个字符兜底也没了**——告警用 `public/icons/告警.png`、关于用
+ * `public/icons/关于.png`。至此 7 个页签**全部**是设计图标，于是把 `glyph` 字段与
+ * `t.icon ? <ToolIcon/> : t.glyph` 那个分支一并删掉（类型上 `icon` 变为**必填**），
+ * 从结构上杜绝"再借某个字符当图标"（与 adj458 删掉 `rotate` 复用同一思路）。
  */
-const TABS: { key: DockPanelKey; label: string; icon?: ToolIconName; glyph?: string }[] = [
+const TABS: { key: DockPanelKey; label: string; icon: ToolIconName }[] = [
   // adj540：工作区排第一（手机端文件操作主入口，用户要求）；图标用 `public/icons/工作区.png`
   { key: 'workspace', label: dockCopy.tabWorkspace, icon: 'workspace' },
   // adj562：导入紧跟工作区（用户要求）；adj564：图标用设计图 `public/icons/导入.png`
   { key: 'import', label: dockCopy.tabImport, icon: 'import' },
-  { key: 'problems', label: dockCopy.tabProblems, glyph: '⚠' },
+  // adj565：告警图标由 `⚠` 字符换成设计图 `public/icons/告警.png`
+  { key: 'problems', label: dockCopy.tabProblems, icon: 'problems' },
   { key: 'tryout', label: dockCopy.tabTryout, icon: 'play' },
   { key: 'export', label: dockCopy.tabExport, icon: 'export' },
   { key: 'settings', label: dockCopy.tabSettings, icon: 'settings' },
-  { key: 'about', label: dockCopy.tabAbout, glyph: 'ⓘ' },
+  // adj565：关于图标由 `ⓘ` 字符换成设计图 `public/icons/关于.png`
+  { key: 'about', label: dockCopy.tabAbout, icon: 'about' },
 ]
 
 /**
@@ -464,7 +470,18 @@ export function ToolDock() {
    * 这里补的是**桌面端**鼠标路径——滚轮转横向 + 箭头翻页）。
    */
   const tabstripRef = useRef<HTMLDivElement | null>(null)
-  const [tabOverflow, setTabOverflow] = useState({ left: false, right: false })
+  /**
+   * adj567：`overflowing` = **页面是否真的溢出**（与滚动位置无关），用来决定"要不要预留两个箭头槽位"。
+   * 见下面 JSX：一旦溢出，两个箭头按钮就**始终占位**、只切换 `visibility`
+   * ⇒ tabstrip 的宽度在滚动过程中**恒定**。
+   *
+   * 为什么必须这样：箭头是 tabstrip 的**兄弟节点**（adj557：左右两侧不随页签滚动），
+   * 所以"箭头出现/消失"会**改变 tabstrip 的可用宽**（每个 21px，两个都出现就是 42px）。
+   * 于是"把当前页签滚进视界"这类**按当前宽度算出目标位置**的操作会被自己触发的变化推翻：
+   * 对齐后箭头才出现 → 可滚区变窄 → 刚对齐的页签又被挤出 21~42px。
+   * 预留槽位把这个反馈彻底切掉（本轮真机测试就是这样抓到的：顶栏点「设置」后差 21px）。
+   */
+  const [tabOverflow, setTabOverflow] = useState({ left: false, right: false, overflowing: false })
   const syncTabOverflow = useCallback(() => {
     const el = tabstripRef.current
     if (!el) return
@@ -475,7 +492,10 @@ export function ToolDock() {
     // （虽不会死循环，但没必要），用"同值返回 prev"直接短路。
     const left = el.scrollLeft > 1
     const right = max > 1 && el.scrollLeft < max - 1
-    setTabOverflow((prev) => (prev.left === left && prev.right === right ? prev : { left, right }))
+    const overflowing = max > 1
+    setTabOverflow((prev) =>
+      prev.left === left && prev.right === right && prev.overflowing === overflowing ? prev : { left, right, overflowing },
+    )
   }, [])
   /**
    * adj561（用户报"手机端页签过多/滚动时**没有适时显示** `<` `>` 按钮，PC 端却有"）：
@@ -540,6 +560,45 @@ export function ToolDock() {
     if (!el) return
     el.scrollBy({ left: dir * Math.max(80, el.clientWidth * 0.8), behavior: 'smooth' })
   }
+
+  /**
+   * adj567（用户反馈）：**当前面板的页签必须可见**。
+   *
+   * ⚠ 第一版把这段逻辑写在页签自己的 `onClick` 里 —— **只覆盖"用户用手点页签"这一条路**，
+   * 而用户报的场景恰恰是"**页签在视界外**（所以根本点不到它），我是从顶栏按钮 / 菜单 /
+   * 状态栏把面板打开的"：那条路不经过任何页签的 `onClick` ⇒ 修复等于没做（用户实测确认）。
+   * 所以对齐函数由**两处**调用：① `dockPanel` / `dockOpen` 变化的 effect（覆盖顶栏/菜单/状态栏/快捷键）；
+   * ② 页签自身的 `onClick`（覆盖"点的是**已激活**的那个页签"——此时 `dockPanel` 没变，effect 不会跑）。
+   *
+   * 实现要点：
+   *  · **绝对** `scrollTo`（不是 `scrollBy`）：重复调用幂等；相对位移会叠加成双倍。
+   *  · 用 `behavior: 'auto'`（立即到位）而不是 `'smooth'`：下面那次"延迟补正"如果撞上平滑动画，
+   *    会因为"动画还没走完就算目标"而算错；立即到位则每遍都是确定性的。
+   *  · 溢出时箭头**始终占位**（见 `tabOverflow.overflowing` 的说明）⇒ 宽度恒定、一遍就准；
+   *    那个 60ms 的补正只是兜底（布局/字体就绪、dock 高度变化带动重排等），且**幂等**。
+   *  · 只做**一次**延迟补正，不做循环——避免和用户手动滚动打架。
+   */
+  const alignActiveTab = useCallback(() => {
+    const strip = tabstripRef.current
+    if (!strip) return
+    const pass = () => {
+      const btn = strip.querySelector<HTMLElement>(`[data-key="${dockPanel}"]`)
+      if (!btn) return
+      const br = btn.getBoundingClientRect()
+      const sr = strip.getBoundingClientRect()
+      // 已在视界内（1px 容差）⇒ 就地不动，符合"就近"语义
+      const delta = br.left < sr.left - 1 ? br.left - sr.left : br.right > sr.right + 1 ? br.right - sr.right : 0
+      if (delta === 0) return
+      strip.scrollTo({ left: strip.scrollLeft + delta, behavior: 'auto' })
+    }
+    pass()
+    window.setTimeout(pass, 60)
+  }, [dockPanel])
+
+  useEffect(() => {
+    if (!dockOpen) return
+    alignActiveTab()
+  }, [dockOpen, dockPanel, alignActiveTab])
 
   useEffect(() => {
     if (!dockOpen) return
@@ -867,11 +926,18 @@ export function ToolDock() {
         </button>
         {/* adj556（用户要求"页签始终显示图标"）：图标不再窄屏隐藏，靠这条可滚页签区
             + 滚轮转横向 + 左右翻页箭头兜住视界外的页签。三个固定按钮（档位 / ✕）放在
-            tabstrip 之外 ⇒ 永远不被页签溢出顶走（adj557：用户要求"左右两侧不随页签滚动"）。 */}
-        {tabOverflow.left && (
+            tabstrip 之外 ⇒ 永远不被页签溢出顶走（adj557：用户要求"左右两侧不随页签滚动"）。
+            adj567：**一旦溢出，两个箭头就始终占位、只切 `visibility`**——见 `tabOverflow.overflowing`
+            的说明（箭头一增一减会改变 tabstrip 可用宽，把"刚对齐好的页签"又挤出去）。 */}
+        {tabOverflow.overflowing && (
           <button
             type="button"
             className="tool-dock-tab-arrow"
+            // 占位但不可见/不可点（`visibility` 保留布局，`disabled` + `tabIndex=-1` 保持可访问性正确）
+            style={{ visibility: tabOverflow.left ? 'visible' : 'hidden' }}
+            disabled={!tabOverflow.left}
+            tabIndex={tabOverflow.left ? 0 : -1}
+            aria-hidden={!tabOverflow.left}
             title={dockCopy.tabsLeftTitle}
             aria-label={dockCopy.tabsLeftTitle}
             onClick={() => pageTabsBy(-1)}
@@ -888,24 +954,36 @@ export function ToolDock() {
               role="tab"
               aria-selected={dockPanel === t.key}
               className={`tool-dock-tab${dockPanel === t.key ? ' is-active' : ''}`}
-              onClick={() => setDockPanel(t.key)}
+              // adj567：`data-key` 供"把当前面板的页签滚进视界"按 key 找 DOM
+              data-key={t.key}
+              onClick={() => {
+                setDockPanel(t.key)
+                // adj567：点**已激活**的那个页签时 `dockPanel` 不变 ⇒ 上面那个 effect 不会跑，
+                // 于是"我把页签栏手动滚开、再点回当前页签"就永远回不来 ⇒ 这里也补一次对齐。
+                alignActiveTab()
+              }}
               title={t.label}
             >
               <span className="tool-dock-tab-icon" aria-hidden="true">
-                {/* adj486：设计图标（顶栏同一套）优先；暂无对应图的（告警）用字符兜底。
+                {/* adj486：设计图标（顶栏同一套）。
                     adj514：**与顶栏按钮图标同尺寸**（`ToolIcon` 默认 size=16，与顶栏一致）——
                     此前 `size={14}` 比顶栏小 2px，视觉"虚"（用户报）。
-                    adj556：图标**窄屏也不再隐藏**——与 `.tool-dock-tab-label` 同显。 */}
-                {t.icon ? <ToolIcon name={t.icon} /> : t.glyph}
+                    adj556：图标**窄屏也不再隐藏**——与 `.tool-dock-tab-label` 同显。
+                    adj565：7 个页签全部有设计图标 ⇒ 删掉字符兜底分支（`icon` 现在是必填）。 */}
+                <ToolIcon name={t.icon} />
               </span>
               <span className="tool-dock-tab-label">{t.label}</span>
             </button>
           ))}
         </div>
-        {tabOverflow.right && (
+        {tabOverflow.overflowing && (
           <button
             type="button"
             className="tool-dock-tab-arrow"
+            style={{ visibility: tabOverflow.right ? 'visible' : 'hidden' }}
+            disabled={!tabOverflow.right}
+            tabIndex={tabOverflow.right ? 0 : -1}
+            aria-hidden={!tabOverflow.right}
             title={dockCopy.tabsRightTitle}
             aria-label={dockCopy.tabsRightTitle}
             onClick={() => pageTabsBy(1)}

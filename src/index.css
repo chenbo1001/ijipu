@@ -1639,6 +1639,12 @@ body {
   display: flex;
   flex-direction: column;
   overflow-y: auto; /* 单块面板（试听/导出/关于）由这里滚；告警由 `.problems-list` 自身滚（adj522 建立了受限高度链），这里保留 `auto` 作**兜底**——链万一断了也还能滚、不会把内容裁掉；设置面板见下方覆盖 */
+  /* adj566（用户实测确诊）：当「关于」面板 AUTO_FIT 测得高度恰在 body 出/不出滚动条的临界
+     时，滚动条出现 → dock-body 可用宽减 ~24px → pane 内容软折行变高 → measuredContent 增
+     → dockH 增 → editor-body 减 → 临界翻越 → 滚动条消失 → 宽恢复 → 软折行回原 → dockH 减
+     → 临界回翻 → … 形成可见的「换行 ↔ 不换行」无限回路（dockH/paneW/taClientH 同呼吸）。
+     `scrollbar-gutter: stable` 永远预留滚动条宽度，clientWidth 不再跳 ⇒ 回路立刻关闭。 */
+  scrollbar-gutter: stable;
 }
 /* adj522：告警面板那条 pane 要当**弹性列容器**，`.problem-panel` / `.problems-list` 才拿得到受限高度。
  * adj510 曾以为"给 `.problems-list` 加 `overflow-y: auto` 它就会自己滚"，但 pane 是普通 block、

@@ -9308,11 +9308,61 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
     dockSrc.includes("icon: 'play'") && dockSrc.includes("icon: 'export'") && dockSrc.includes("icon: 'settings'") &&
       /<ToolIcon name=\{t\.icon\}\s*\/>/.test(dockSrc),
     '')
-  check('adj486 页签不再用 ▶ / ⬇ / ⚙ 字符当图标',
-    !dockSrc.includes("'▶'") && !dockSrc.includes("'⬇'") && !dockSrc.includes("'⚙'"),
+  check('adj486/adj565 页签不再用任何字符当图标（▶ ⬇ ⚙ ⚠ ⓘ ⤓ 都已换成设计图）',
+    // 先剥注释：注释里为了说明历史会引用这些字符（同 E-2026-237 的坑）
+    !/[▶⬇⚙⚠ⓘ⤓]/.test(dockSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')),
     '')
-  check('adj486 页签图标位统一占位并居中（字符与设计图标混用不跑偏）',
+  check('adj486 页签图标位统一占位并居中',
     /\.tool-dock-tab-icon \{[\s\S]{0,220}display: inline-flex;[\s\S]{0,120}align-items: center;/.test(css2),
+    '')
+  // adj566 用户实测确诊：dock-body 滚动条 ↔ 内容软折行 ↔ AUTO_FIT 高度的回路
+  // → `.tool-dock-body { scrollbar-gutter: stable }` 根治（永远预留滚动条宽度，clientWidth 不再跳）
+  // 注释里点明理由，回滚 = 删这一行 CSS
+  check('adj566 `.tool-dock-body` 有 `scrollbar-gutter: stable`（根治"关于"内容狂闪的四方回路）',
+    /\.tool-dock-body \{[\s\S]{0,200}?overflow-y: auto[\s\S]{0,500}?scrollbar-gutter: stable/.test(css2),
+    '')
+  // adj567（用户反馈）：**当前面板的页签必须可见**——无论面板是被谁切过去的
+  // （页签点击 / 顶栏按钮 / 汉堡菜单 / 状态栏告警 / 快捷键）。
+  // ⚠ 第一版错写在页签的 `onClick` 里 ⇒ 只覆盖"手点页签"，而用户报的场景恰恰是
+  //   "页签在视界外、根本点不到它，是从顶栏/菜单打开的" ⇒ 等于没修。断言因此**必须**
+  //   钉在"`dockPanel` 变化触发的 effect"上，而不是 onClick 上。
+  check('adj567 页签标 `data-key={t.key}`（供"把当前面板的页签滚进视界"按 key 找 DOM）',
+    /data-key=\{t\.key\}/.test(dockSrc) &&
+      /strip\.querySelector<HTMLElement>\(`\[data-key="\$\{dockPanel\}"\]`\)/.test(dockSrc),
+    '')
+  check('adj567 对齐函数由 **`dockPanel`/`dockOpen` 的 effect** 调用（覆盖顶栏/菜单/状态栏入口，而不仅页签点击）',
+    /useEffect\(\(\) => \{[\s\S]{0,200}?if \(!dockOpen\) return[\s\S]{0,200}?alignActiveTab\(\)[\s\S]{0,120}?\}, \[dockOpen, dockPanel, alignActiveTab\]\)/.test(dockSrc) &&
+      // 页签自己的 onClick 也调它 —— 覆盖"点的是**已激活**页签"（那时 dockPanel 没变、effect 不会跑）
+      /onClick=\{\(\) => \{[\s\S]{0,200}?setDockPanel\(t\.key\)[\s\S]{0,200}?alignActiveTab\(\)/.test(dockSrc),
+    '')
+  check('adj567 对齐用**绝对** `scrollTo` + 一次延迟补正（幂等、不循环、不与用户手动滚动打架）',
+    /strip\.scrollTo\(\{ left: strip\.scrollLeft \+ delta, behavior: 'auto' \}\)/.test(dockSrc) &&
+      /window\.setTimeout\(pass, 60\)/.test(dockSrc),
+    '')
+  check('adj567 溢出时箭头**始终占位**（`tabOverflow.overflowing &&` + 只切 `visibility`），避免宽度跳变推翻对齐结果',
+    /const overflowing = max > 1/.test(dockSrc) &&
+      /prev\.overflowing === overflowing \? prev : \{ left, right, overflowing \}/.test(dockSrc) &&
+      (dockSrc.match(/tabOverflow\.overflowing && \(/g) ?? []).length === 2 &&
+      (dockSrc.match(/visibility: tabOverflow\.(left|right) \? 'visible' : 'hidden'/g) ?? []).length === 2,
+    '')
+  // ---- adj565（用户要求）：告警 / 关于也用设计图标；至此**字符兜底整体删除** ----
+  check('adj565 `problems: 告警` / `about: 关于` 已登记（PNG 存在 + sw.js 同步）',
+    /problems: '告警'/.test(iconsSrc) &&
+      /about: '关于'/.test(iconsSrc) &&
+      existsSync(join(root, 'public', ICON_DIR, '告警.png')) &&
+      existsSync(join(root, 'public', ICON_DIR, '关于.png')),
+    '')
+  check('adj565 底栏两个页签改用设计图标（`icon: \'problems\'` / `icon: \'about\'`）',
+    /\{ key: 'problems', label: dockCopy\.tabProblems, icon: 'problems' \}/.test(dockSrc) &&
+      /\{ key: 'about', label: dockCopy\.tabAbout, icon: 'about' \}/.test(dockSrc),
+    '')
+  // 结构性护栏：`glyph` 字段与 `t.icon ? … : t.glyph` 分支已删除，`icon` 在类型上**必填**
+  // ⇒ 以后再加页签只能给设计图标，不会再"借个字符凑合"（与 adj458 删 `rotate` 同思路）
+  check('adj565 字符兜底已整体删除（TABS 无 `glyph`、`icon` 必填、渲染只有 ToolIcon 一条路）',
+    // 剥注释后再查 `glyph`：上面 TABS 的文档注释里为了说明"已删除"会提到这个字段名
+    !/glyph/.test(dockSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')) &&
+      /\{ key: DockPanelKey; label: string; icon: ToolIconName \}\[\]/.test(dockSrc) &&
+      /<ToolIcon name=\{t\.icon\} \/>/.test(dockSrc),
     '')
   // ---- adj556（v0.28.2）：页签始终显示图标；靠滚动 + 箭头兜住视界外的页签 ----
   check('adj556 页签**始终显示图标**——窄屏不再 `display: none` 隐藏图标（兜底靠 tabstrip 横向滚动）',
@@ -9323,9 +9373,11 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
     /tabstripRef[\s\S]{0,400}?onWheel = \(e: WheelEvent\) => \{[\s\S]{0,200}?el\.scrollWidth <= el\.clientWidth[\s\S]{0,200}?el\.scrollLeft \+= e\.deltaY/.test(dockSrc) &&
       /addEventListener\('wheel', onWheel, \{ passive: false \}\)/.test(dockSrc),
     '')
-  check('adj556 左右翻页箭头：只在"该方向还有内容"时才渲染（`tabOverflow.left/right`），滚到尽头就消失',
-    /tabOverflow\.left && \(/.test(dockSrc) &&
-      /tabOverflow\.right && \(/.test(dockSrc) &&
+  check('adj556/adj567 左右翻页箭头：溢出时**占位但按方向切可见性**（滚到尽头只隐藏、不摘掉 DOM）',
+    /tabOverflow\.left \? 'visible' : 'hidden'/.test(dockSrc) &&
+      /tabOverflow\.right \? 'visible' : 'hidden'/.test(dockSrc) &&
+      /disabled=\{!tabOverflow\.left\}/.test(dockSrc) &&
+      /disabled=\{!tabOverflow\.right\}/.test(dockSrc) &&
       /className="tool-dock-tab-arrow"/.test(dockSrc) &&
       /onClick=\{\(\) => pageTabsBy\(-1\)\}/.test(dockSrc) &&
       /onClick=\{\(\) => pageTabsBy\(1\)\}/.test(dockSrc) &&
@@ -9402,15 +9454,15 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
     '')
   // ③ **同值短路**：箭头出现/消失会改变 tabstrip 可用宽并再次触发 RO；无条件 `setState({...})`
   //    每次换新对象引用会多一轮渲染，用"同值返回 prev"短路。
-  check('adj561 `setTabOverflow` 同值短路（返回 prev，不做无谓重渲染）',
-    /setTabOverflow\(\(prev\) => \(prev\.left === left && prev\.right === right \? prev : \{ left, right \}\)\)/.test(dockSrc),
+  check('adj561/adj567 `setTabOverflow` 同值短路（含新增的 `overflowing`，返回 prev 不做无谓重渲染）',
+    /setTabOverflow\(\(prev\) =>[\s\S]{0,200}?prev\.left === left && prev\.right === right && prev\.overflowing === overflowing \? prev : \{ left, right, overflowing \}/.test(dockSrc),
     '')
   // ---- adj557（v0.28.2）：左 / 右两侧按钮**结构性**不随页签滚动（DOM 上是 tabstrip 的兄弟） ----
   check('adj557 「收起底栏」「高度档位」「关闭」三个固定按钮在 DOM 上是 `.tool-dock-tabstrip` 的**兄弟**，不是子节点',
     // 截取 tabstrip 块（className 起 → 配对 </div> 收尾的最外层标签），三个固定按钮的 className
     // 都不能落在这块里面——否则它们就是 tabstrip 的子节点，会跟着溢出被滚走。
     (() => {
-      const m = /<div\s+className="tool-dock-tabstrip"[\s\S]*?<\/div>\s*(?=\{tabOverflow\.right|<!-- 内容区|\{PANELS\.filter)/.exec(dockSrc)
+      const m = /<div\s+className="tool-dock-tabstrip"[\s\S]*?<\/div>\s*(?=\{tabOverflow\.overflowing|<!-- 内容区|\{PANELS\.filter)/.exec(dockSrc)
       if (!m) return false
       const tabstripBlock = m[0]
       return !/className="tool-dock-(collapse|size-btn|close)"/.test(tabstripBlock)

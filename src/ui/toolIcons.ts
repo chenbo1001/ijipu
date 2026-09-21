@@ -69,6 +69,10 @@ export const ICON_FILES = {
   right: '右',
   /** adj562：底栏「导入」页签（粘贴源码导入）——adj564 由 `⤓` 字符换成设计图标 */
   import: '导入',
+  /** adj565：底栏「告警」页签——由 `⚠` 字符换成设计图标 */
+  problems: '告警',
+  /** adj565：底栏「关于」页签——由 `ⓘ` 字符换成设计图标 */
+  about: '关于',
 } as const
 
 export type ToolIconName = keyof typeof ICON_FILES
