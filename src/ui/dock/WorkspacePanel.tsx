@@ -39,6 +39,7 @@ import { ToolIcon } from '../ToolIcon'
 import {
   activateWorkspace,
   flushWorkspacePath,
+  forgetWorkspace,
   getWorkspace,
   isPathWorkspace,
   isWorkspaceAvailable,
@@ -254,6 +255,12 @@ export function WorkspacePanel() {
   const [recent, setRecent] = useState<WorkspaceRecord[]>([])
   /** adj544：正常视图里点「最近的工作区…」就地展开列表（不用切到形同虚设的空态视图） */
   const [showRecent, setShowRecent] = useState(false)
+  /**
+   * adj575（用户要求）：是否显示**工作区选择界面**——由标题左侧的「切换工作区目录」按钮打开，
+   * 也可以在没有工作区 / 待授权 / 目录已不在时自动落在这里（见下面的 `if (choose || …)`）。
+   * 语义是"**先列清单让人选**"，而不是一按就直接弹系统对话框。
+   */
+  const [choose, setChoose] = useState(false)
   /** adj544：待校验绑定（随草稿恢复，需要重新授权才能写回原文件）——只用于提示 */
   const pending = useDocStore((s) => s.pendingBinding)
 
@@ -361,7 +368,13 @@ export function WorkspacePanel() {
       setBusy(true)
       setBusyLabel(label ?? workspaceCopy.refreshing) // adj547：立刻给出"在忙什么"
       const key = joinPath(next)
-      const cached = entriesCacheRef.current.get(key)
+      /**
+       * adj576（用户反馈"打开其它工作区后列表应重新刷新缓存"）：缓存键**必须带上工作区身份**——
+       * 原先只按区内相对路径做键，于是"切到别的工作区、相对路径同为根目录"时会**命中上一个工作区的
+       * 目录列表**（看到的是旧工作区的内容）。带上 `rec.id` 后，不同工作区天然是不同键。
+       */
+      const cacheKey = `${rec.id}|${key}`
+      const cached = entriesCacheRef.current.get(cacheKey)
       if (cached) {
         setEntries(cached)
         setPath(next)
@@ -374,7 +387,7 @@ export function WorkspacePanel() {
       }
       try {
         const list = await readDirEntries(rec, next)
-        entriesCacheRef.current.set(key, list)
+        entriesCacheRef.current.set(cacheKey, list)
         setEntries(list)
         setPath(next)
         setSelected([])
@@ -433,6 +446,8 @@ export function WorkspacePanel() {
       setMenuOpen(false)
       setQuery('')
       setHits(null)
+      // adj575：收起面板时回到"文件列表"视图（下次打开不该还停在选择界面）
+      setChoose(false)
       // adj540：路径记忆写在**关闭面板时**（打开时已经在 IDB 里读到了 ws.path），写一次就够。
       // 经 ref 读当前路径——不把 `path` 放进依赖数组（那样每次导航都会重跑本 effect）。
       void rememberWorkspacePath(pathRef.current).catch(() => {})
@@ -444,7 +459,8 @@ export function WorkspacePanel() {
       if (!alive) return
       setWs(rec)
       // adj543：每次打开面板都让过滤索引作废——期间用户可能在别的 App 里增删过文件
-      indexRef.current = null
+      // adj576：顺手把**目录列表缓存**也清掉（它同理可能过期：用户在别的程序里增删过文件）
+      invalidateCache()
       // adj544：读最近工作区列表（供"一键切回"），并尝试恢复绑定（权限已授予时）
       setRecent(await listWorkspaces())
       await resolvePendingBinding()
@@ -467,7 +483,7 @@ export function WorkspacePanel() {
       // adj550：面板卸载时把"待写的目录位置"立刻落盘（刚进完目录就收起底栏/关页面也不丢）
       flushWorkspacePath()
     }
-  }, [active, refresh, showNotice, enterAtLatestPos])
+  }, [active, refresh, showNotice, enterAtLatestPos, invalidateCache])
 
   const onPick = async () => {
     if (!isWorkspaceAvailable()) {
@@ -485,6 +501,11 @@ export function WorkspacePanel() {
       await setWorkspace(rec)
       setWs(rec)
       setPerm('granted')
+      // adj576（用户反馈）：换了工作区 ⇒ **目录列表缓存与过滤索引都必须作废**。
+      // 原先只有"写操作"与"打开面板"会清（`invalidateCache`），切工作区时两条路都没走到，
+      // 于是新工作区的根目录会命中上个工作区留下的 `'' → 旧列表` 缓存（看到上一个工作区的内容）。
+      invalidateCache()
+      setChoose(false) // adj575：选完就回到文件列表
       await refresh(rec, [])
       setRecent(await listWorkspaces())
       showNotice(workspaceCopy.picked(rec.name), 'ok')
@@ -537,6 +558,9 @@ export function WorkspacePanel() {
         return
       }
       setPerm('granted')
+      // adj576（用户反馈"打开其它工作区后列表应重新刷新缓存"）：切工作区 ⇒ 目录列表缓存与过滤索引作废
+      invalidateCache()
+      setChoose(false) // adj575：选完就回到文件列表
       // adj550：切换到某个工作区 = 又一条"进入工作区"的入口 ⇒ 同一条规则：定位到它的最新位置
       await enterAtLatestPos(next, workspaceCopy.loadingWorkspace)
       await resolvePendingBinding()
@@ -735,72 +759,108 @@ export function WorkspacePanel() {
   })()
 
   /**
-   * adj544（用户要求 C）：**最近工作区**列表——一键切回上次那个（重启后尤其有用：
+   * adj544（用户要求 C）：**最近工作区**——一键切回上次那个（重启后尤其有用：
    * 重新选同一个文件夹会因为 FSA 不给稳定路径而变成"新工作区"，从列表点回去就不用重选）。
+   *
+   * adj575（用户要求）：原先这里有一份"竖排大按钮"清单（只在"还没设工作区"那一屏用），
+   * 现在**统一到工作区选择界面**（带 ✕ 移除 + 目录路径提示，见下面的 `choose` 分支），
+   * 因此这份旧渲染已删除；正常视图里那份横排"最近的工作区"（操作▾ 里展开）保持不变。
    */
-  const recentList = (
-    <div className="ws-recent">
-      <div className="ws-recent-title">{workspaceCopy.recentWorkspaces}</div>
-      {recent.map((r) => (
-        <button
-          key={r.id}
-          type="button"
-          className={`btn ws-recent-item${ws?.id === r.id ? ' is-current' : ''}`}
-          onClick={() => void onActivate(r)}
-          disabled={busy}
-          title={r.name}
-        >
-          <span className="ws-icon">📁</span>
-          <span className="ws-recent-name">{r.name}</span>
-        </button>
-      ))}
-    </div>
-  )
 
-  // ---- 未设工作区：只有一个大按钮，先把前提做掉 ----
-  if (!ws) {
+  /**
+   * adj575（用户要求）：把一项从"最近工作区"清单里移除（✕）。
+   * 语义刻意收窄成"**只动这份清单**"：不动磁盘上的文件夹，也**不动当前正在用的工作区**——
+   * 于是误点不会把正在编辑的绑定踢掉（要移除当前那个，先切到别的再移除）。
+   */
+  const onForget = async (rec: WorkspaceRecord) => {
+    await forgetWorkspace(rec.id)
+    setRecent(await listWorkspaces())
+    showNotice(workspaceCopy.forgotten(rec.name), 'ok')
+  }
+  /** 清单里每项的悬浮提示：桌面路径后端能给出**完整磁盘路径**（网页版只有文件夹名） */
+  const recentTitle = (r: WorkspaceRecord): string => (r.dir ? r.dir : r.name)
+
+  /**
+   * adj575（用户要求）：**工作区选择界面**——先列出"之前打开过的工作区"让人选，
+   * 每项后面一个 ✕ 用于从清单里移除，底部「打开其它目录」直接开系统选择对话框。
+   * 骨架复用了原先"待授权"那一屏，并把它需要的信息**并进来**（同一屏解决三件事）：
+   *  · 当前工作区需要**重新授权**（网页版刷新后是 prompt）⇒ 显示目录 + 原因 + 「继续访问」按钮；
+   *  · 当前工作区**已不在**（桌面版目录被删/改名）⇒ 显示目录 + 说明（只能重选）；
+   *  · 网页版还要带上"内核敏感目录黑名单"的提示（必须**选之前**说，见 E-2026-271）。
+   */
+  if (choose || !ws || perm !== 'granted') {
+    const needGrant = !!ws && perm !== 'granted' && !isPathWorkspace(ws)
+    const gone = !!ws && perm !== 'granted' && isPathWorkspace(ws)
     return (
       <div className="ws-panel ws-panel-gate">
-        <div className="ws-desc">{workspaceCopy.desc}</div>
-        <button type="button" className="btn primary ws-big" onClick={() => void onPick()} disabled={busy}>
-          {workspaceCopy.pick}
+        <div className="ws-grant">
+          <div className="ws-grant-title">{workspaceCopy.chooseTitle}</div>
+          {ws && (needGrant || gone) && (
+            <div className="ws-grant-dir" title={wsPathText}>
+              {wsPathText}
+            </div>
+          )}
+          {needGrant && <div className="ws-grant-hint">{workspaceCopy.grantPathHint}</div>}
+          {needGrant && <div className="ws-grant-hint">{workspaceCopy.grantWhy}</div>}
+          {gone && <div className="ws-grant-hint">{workspaceCopy.dirMissingWhy}</div>}
+          <div className="ws-grant-hint">{workspaceCopy.chooseHint}</div>
+        </div>
+        {/* adj544：待校验绑定 ⇒ 说明"重新授权后就能写回原文件"，把这一步的意义讲清楚 */}
+        {needGrant && pending && (
+          <div className="ws-binding-hint">
+            {workspaceCopy.bindingRestored(pending.wsName || ws?.name || '', joinPath(pending.segs))}
+          </div>
+        )}
+        {recent.length === 0 ? (
+          <div className="ws-recent-empty">{workspaceCopy.chooseEmpty}</div>
+        ) : (
+          <div className="ws-recent ws-choose-list">
+            {recent.map((r) => (
+              <div key={r.id} className={`ws-choose-row${ws?.id === r.id ? ' is-current' : ''}`}>
+                <button
+                  type="button"
+                  className="btn ws-choose-item"
+                  onClick={() => void onActivate(r)}
+                  disabled={busy}
+                  title={recentTitle(r)}
+                >
+                  <span className="ws-icon">📁</span>
+                  <span className="ws-choose-name">{r.name}</span>
+                  {ws?.id === r.id && <span className="ws-choose-tag">{workspaceCopy.currentTag}</span>}
+                </button>
+                {/* ✕ = 从这份清单里移除（只动清单，不动磁盘、也不动当前工作区） */}
+                <button
+                  type="button"
+                  className="btn ws-forget"
+                  onClick={() => void onForget(r)}
+                  disabled={busy}
+                  title={workspaceCopy.forgetTitle}
+                  aria-label={`${workspaceCopy.forgetTitle}：${r.name}`}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {needGrant && (
+          <button type="button" className="btn primary ws-big" onClick={() => void onGrant()} disabled={busy}>
+            {workspaceCopy.grant}
+          </button>
+        )}
+        <button type="button" className={needGrant || gone ? 'btn' : 'btn primary ws-big'} onClick={() => void onPick()} disabled={busy}>
+          {workspaceCopy.openOther}
         </button>
         {/* adj568（用户反馈"下载目录没法当工作区"）：**选之前**就把内核的敏感目录黑名单讲清楚——
             被拦时内核抛的是与"用户取消"完全一样的 AbortError，应用侧事后根本补不出提示（见 E-2026-271）。
             桌面壳走原生选择器、不受这条 Web 策略约束 ⇒ 只在网页版显示。 */}
         {!supportsPathWorkspace() && <div className="ws-grant-hint ws-blocked-hint">{workspaceCopy.blockedHint}</div>}
-        {recent.length > 0 && recentList}
-      </div>
-    )
-  }
-
-  // ---- 授权过期（真机实测：刷新后是 prompt）：**先显示是哪个目录**，再由用户点一下重新授权 ----
-  // adj568：**桌面路径后端没有"授权"这回事** ⇒ 走到这里只可能是目录被外部删/改名/移走，
-  // 文案与动作都要换（不能照搬"浏览器把权限重置了"那套，也不能给一个点了没用的授权按钮）。
-  if (perm !== 'granted') {
-    const gone = isPathWorkspace(ws)
-    return (
-      <div className="ws-panel ws-panel-gate">
-        <div className="ws-grant">
-          <div className="ws-grant-title">{gone ? workspaceCopy.dirMissingTitle : workspaceCopy.grantTitle}</div>
-          <div className="ws-grant-dir" title={wsPathText}>
-            {wsPathText}
-          </div>
-          <div className="ws-grant-hint">{gone ? workspaceCopy.dirMissingWhy : workspaceCopy.grantPathHint}</div>
-          {!gone && <div className="ws-grant-hint">{workspaceCopy.grantWhy}</div>}
-        </div>
-        {/* adj544：待校验绑定 ⇒ 说明"重新授权后就能写回原文件"，把这一步的意义讲清楚 */}
-        {!gone && pending && (
-          <div className="ws-binding-hint">{workspaceCopy.bindingRestored(pending.wsName || ws.name, joinPath(pending.segs))}</div>
-        )}
-        {!gone && (
-          <button type="button" className="btn primary ws-big" onClick={() => void onGrant()} disabled={busy}>
-            {workspaceCopy.grant}
+        {/* 有可用工作区时给一条退路：本屏是从标题按钮点进来的，没选就直接回去 */}
+        {ws && perm === 'granted' && (
+          <button type="button" className="btn" onClick={() => setChoose(false)} disabled={busy}>
+            {workspaceCopy.backToFiles}
           </button>
         )}
-        <button type="button" className={gone ? 'btn primary ws-big' : 'btn'} onClick={() => void onPick()} disabled={busy}>
-          {gone ? workspaceCopy.pick : workspaceCopy.switchDir}
-        </button>
       </div>
     )
   }
@@ -820,7 +880,7 @@ export function WorkspacePanel() {
         <button
           type="button"
           className="ws-workspace-btn"
-          onClick={() => void (moving ? refreshMovingTarget([]) : onPick())}
+          onClick={() => void (moving ? refreshMovingTarget([]) : setChoose(true))}
           title={workspaceCopy.workspaceBtnTitle}
           aria-label={workspaceCopy.workspaceBtnTitle}
           disabled={busy}

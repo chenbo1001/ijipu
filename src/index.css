@@ -3720,6 +3720,71 @@ body {
   line-height: 1.5;
   text-align: left;
 }
+/* ---- adj575（用户要求）：**工作区选择界面**（先列清单让人选，而不是一按就弹系统对话框）----
+ * 竖排一行一个工作区：[📁 名字 …… 当前] + [✕ 移除]。
+ * `✕` 只从这份清单里去掉该条（不动磁盘、也不动当前正在用的工作区）。
+ * 清单可能很长（最多 8 条）⇒ 自己滚，并预留滚动条宽（adj566 的教训：滚动条出现/消失会改可用宽）。 */
+.ws-choose-list {
+  width: 100%;
+  max-width: 460px;
+  max-height: 34vh;
+  gap: 4px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.ws-choose-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+.ws-choose-item {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  justify-content: flex-start;
+  text-align: left;
+}
+.ws-choose-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 清单里那枚「当前」小标（标出正在用的那个；✕ 每一行都有——它只从清单里移除，
+   不动磁盘、也不动当前会话，所以误点也不会把正在编辑的绑定踢掉） */
+.ws-choose-tag {
+  flex: none;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--jp-accent) 16%, transparent);
+  color: var(--jp-accent);
+  font-size: 10px;
+  line-height: 16px;
+}
+.ws-choose-row.is-current .ws-choose-item {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+}
+/* 每项后面的「移除」（✕）——比主按钮窄，避免误点 */
+.ws-forget {
+  flex: none;
+  width: 28px;
+  padding: 4px 0;
+  color: var(--jp-text-secondary);
+  font-size: 12px;
+  line-height: 1;
+}
+.ws-forget:hover:not(:disabled) {
+  border-color: var(--jp-danger, var(--jp-accent));
+  color: var(--jp-danger, var(--jp-accent));
+}
+.ws-recent-empty {
+  color: var(--jp-text-muted);
+  font-size: 12px;
+}
 /* adj544（用户要求）：左侧"切换工作区"图标按钮——**与底栏"收起底栏"按钮同款样式**
  * （`.tool-dock-collapse`：1px 边框 + 7px 圆角 + 主文字色 + hover 三联动），
  * 让"图标 + 边框按钮"在底栏与面板里观感一致；图标经 `ToolIcon`（CSS mask 跟主题色）。 */

@@ -8600,8 +8600,9 @@ async function runAdj540WorkspaceTests() {
       /grantTitle: '需要重新授权访问这个文件夹'/.test(copySrc) &&
       /grantPathHint/.test(copySrc),
     '')
-  check('adj540 面包屑：**左侧图标按钮 = 切换工作区** + **根目录名是普通面包屑段**（用户第二轮反馈：根目录名做换目录很别扭——改成纯路径段，点它=回工作区根）',
-    /className="ws-workspace-btn"[\s\S]{0,200}?onClick=\{\(\) => void \(moving \? refreshMovingTarget\(\[\]\) : onPick\(\)\)\}/.test(
+  check('adj540/adj575 面包屑：**左侧图标按钮 = 切换工作区**（点它开**工作区选择界面**，不再直接弹系统对话框）+ **根目录名是普通面包屑段**',
+    // adj575（用户要求）：按钮改成打开选择界面（清单 + 打开其它目录）；"移动到…"模式下仍是选根目录作目标
+    /className="ws-workspace-btn"[\s\S]{0,200}?onClick=\{\(\) => void \(moving \? refreshMovingTarget\(\[\]\) : setChoose\(true\)\)\}/.test(
       panelSrc,
     ) &&
       // adj569：改用专用的 `切换工作区.png`（与底栏「工作区」页签的 `workspace` 图标区分开）
@@ -8645,7 +8646,35 @@ async function runAdj540WorkspaceTests() {
       /onClick=\{\(\) => void openEntry\(e\)\}/.test(panelSrc) &&
       /parentPath\(path\)/.test(panelSrc) &&
       /const active = useUiStore\(\(s\) => s\.dockOpen && s\.dockPanel === 'workspace'\)/.test(panelSrc) &&
-      /if \(!active\) \{[\s\S]{0,400}?return[\s\S]{0,30}?\}[\s\S]{0,700}?await getWorkspace\(\)/.test(panelSrc),
+      /if \(!active\) \{[\s\S]{0,520}?return[\s\S]{0,30}?\}[\s\S]{0,700}?await getWorkspace\(\)/.test(panelSrc),
+    '')
+  check('adj575（用户要求）**工作区选择界面**：先列清单（每项带 ✕ 移除）+「打开其它目录」，标题按钮点它进这一屏',
+    // 三件事在同一屏：清单（带 ✕）/ 打开其它目录 / 需要重新授权或目录已不在时的说明
+    /if \(choose \|\| !ws \|\| perm !== 'granted'\) \{/.test(panelSrc) &&
+      /const \[choose, setChoose\] = useState\(false\)/.test(panelSrc) &&
+      /把一项从"最近工作区"清单里移除（✕）/.test(panelSrc) &&
+      /const onForget = async \(rec: WorkspaceRecord\) => \{[\s\S]{0,240}?await forgetWorkspace\(rec\.id\)[\s\S]{0,200}?setRecent\(await listWorkspaces\(\)\)/.test(
+        panelSrc,
+      ) &&
+      /className="btn ws-forget"[\s\S]{0,200}?onClick=\{\(\) => void onForget\(r\)\}/.test(panelSrc) &&
+      /workspaceCopy\.openOther/.test(panelSrc) &&
+      /openOther: '打开其它目录'/.test(copySrc) &&
+      /forgetTitle: '从这份清单里移除（不会删除磁盘上的文件夹）'/.test(copySrc) &&
+      // 当前工作区标「当前」；✕ 只动清单（不动磁盘、也不动当前会话）
+      /ws\?\.id === r\.id && <span className="ws-choose-tag">/.test(panelSrc) &&
+      // 选完就回文件列表；收起面板时也复位，不会"下次打开还停在选择界面"
+      /setChoose\(false\)[\s\S]{0,160}?await refresh\(rec, \[\]\)/.test(panelSrc) &&
+      /setChoose\(false\)/.test(panelSrc.split('if (!active) {')[1]?.slice(0, 400) ?? ''),
+    '')
+  check('adj576（用户反馈）换工作区后**目录列表缓存与过滤索引都作废**（缓存键也带上工作区身份）',
+    // 缓存键从 `joinPath(path)` 改成 `${rec.id}|${path}`：不同工作区天然不同键（根目录不再互相串）
+    /const cacheKey = `\$\{rec\.id\}\|\$\{key\}`/.test(panelSrc) &&
+      /entriesCacheRef\.current\.set\(cacheKey, list\)/.test(panelSrc) &&
+      /entriesCacheRef\.current\.get\(cacheKey\)/.test(panelSrc) &&
+      // 三条"换工作区"的入口都清缓存：选新目录 / 从清单切回 / 打开面板
+      (panelSrc.match(/invalidateCache\(\)/g) ?? []).length >= 4 &&
+      /invalidateCache\(\)[\s\S]{0,80}?setChoose\(false\)/.test(panelSrc) &&
+      /adj576：顺手把\*\*目录列表缓存\*\*也清掉[\s\S]{0,240}?invalidateCache\(\)/.test(panelSrc),
     '')
   check('adj540 过滤框：默认层级列表；一过滤就把**整个工作区**符合条件的 .jps 收成**平坦列表**（点一条直接打开）',
     /export async function searchWorkspaceJps/.test(wsSrc) &&
@@ -9337,8 +9366,8 @@ async function runAdj541DockToggleTests() {
       !/\[showNotice, invalidateCache\]/.test(wsPanelSrc) &&
       // refresh 的依赖数组里只有 showNotice（store action，稳定引用）
       /\[\s*showNotice,?\s*\]/.test(wsPanelSrc) &&
-      // 激活 effect：active / refresh / showNotice / enterAtLatestPos —— 都是稳定引用或布尔量
-      /\}, \[active, refresh, showNotice, enterAtLatestPos\]\)/.test(wsPanelSrc) &&
+      // 激活 effect：active / refresh / showNotice / enterAtLatestPos / invalidateCache —— 都是稳定引用或布尔量
+      /\}, \[active, refresh, showNotice, enterAtLatestPos, invalidateCache\]\)/.test(wsPanelSrc) &&
       // 关闭面板时写路径记忆走 ref，不把 `path` 塞进依赖（否则每次导航都会重跑 effect）
       /rememberWorkspacePath\(pathRef\.current\)/.test(wsPanelSrc),
     '')
