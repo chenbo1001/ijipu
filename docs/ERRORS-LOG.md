@@ -1432,6 +1432,89 @@
   ④ **控件折叠进"更多"菜单时要检查交互是否等值**：折叠版常被写成"简化版"（这里退化成纯文本 span），
   于是拖动/双击/提示一起消失；做法是**复用同一个组件**，而不是复制一份简化的 JSX。
 
+### E-2026-271 「下载」当不了工作区，弹框说"**包含系统文件**"——这条限制**不在 iJipu 里**，是 Chromium 的敏感目录黑名单（adj568）
+- **现象**（用户反馈）："工作区无法打开下载目录作为工作区，说是有系统文件，工作区只允许操作 .jps 文件，
+  应该不影响才对"；随后追问"我需要了解是**基于什么考虑**，不添加带系统文件的目录作为工作区，以便我做出合理判断"。
+- **先说结论**：iJipu **没有**"目录里有系统文件就拒绝"这条规则——那句提示是**浏览器内核自己弹的**。
+  排查三步（都留了证据）：
+  ① 全仓库搜「系统文件 / 包含系统 / 敏感目录 / 不安全」：只命中"**系统文件选择器**"这类词，
+  **没有任何"拒绝该目录"的校验分支**；
+  ② `WorkspacePanel.onPick()` 拿到目录后直接 `setWorkspace → refresh`，**完全不看目录内容**
+  （不数 `.jps`、也不看非谱文件）；
+  ③ `pickWorkspaceDir()` 只有一条失败分支：`AbortError` ⇒ 当"用户取消"**静默返回 `null`**，
+  没有任何"系统文件"文案。⇒ 只可能是 `showDirectoryPicker()`（网页版 Chrome / 桌面版 WebView2，同为 Chromium 内核）。
+- **根因（Chromium 源码为证）**：`chrome/browser/file_system_access/chrome_file_system_access_permission_context.cc`
+  的 `GenerateBlockPaths()` 维护一张**敏感目录黑名单**，而且它**不看目录里有什么，只看这个目录在系统里扮演什么角色**：
+
+  | 规则 | BlockType | 含义 |
+  |---|---|---|
+  | `DIR_HOME` / `DIR_USER_DESKTOP` / `DIR_USER_DOCUMENTS` / **`DIR_DEFAULT_DOWNLOADS`** | `kDontBlockChildren` | **只有该目录本身（及其父）被封，子项放行** |
+  | `DIR_WINDOWS` / `Program Files` / `ProgramData` / `AppData`(Roaming,Local) / Chrome 安装目录 | `kBlockAllChildren` | 连子项一起封 |
+  | `.ssh` / `.gnupg` | `kBlockAllChildren` | 全封；`.git/hooks` 只封写 |
+
+  判定函数 `ShouldBlockAccessToPath()` 只看**最近的被列祖先**：`kDontBlockChildren` ⇒ 放行、
+  `kBlockAllChildren` ⇒ 拦。于是：**`下载` ❌ / `下载\任意子文件夹` ✅**，与"有没有 .jps / 有没有系统文件"毫无关系。
+  顺带把文案来历也查清了：Chromium 自己的头文件把这类目录统称为 *sensitive (i.e. system files)*，
+  **同一个对话框给所有被拦目录复用**，所以对干净的「下载」说"包含系统文件"其实**文案不准确**
+  （Chromium 已知问题：[Issue 41475404](https://issues.chromium.org/issues/41475404)、
+  [SO 71981146](https://stackoverflow.com/questions/71981146/file-system-api-states-it-cant-open-the-documents-folder-because-it-contains-sy)）。
+  另外 `file_system_access_restricted_directory_dialog.h` 的注释写明那是**纯告知**框
+  （*"A dialog that **informs** the user that they can't give a website access to a specific folder"*）
+  ⇒ **没有"仍然继续"这个出口**；而且被拦后抛出的错误是 **`AbortError`——与"用户取消"完全同一个错误**
+  （Electron [#42459](https://github.com/electron/electron/issues/42459) 抱怨的就是这一点）
+  ⇒ **应用侧既绕不过、也分不清**，当时那句"静默 return"等于"用户只看到浏览器的框、App 一声不响"。
+- **为什么内核要这么设计**（用户问的"基于什么考虑"）：`下载 / 桌面 / 文档` 是**"用户信任的落地点"**——
+  下载里躺的是刚下载、准备双击运行的东西，桌面/文档被系统与其它程序当作可信内容；
+  一旦把**整个**这种目录以可写权限交给网页，恶意站点就能往里塞伪装成安装包的可执行文件、
+  替换你已下好的安装包、往桌面丢 `.lnk`/脚本，或遍历读走私密文件。
+  而"用户是想授权这一个文件夹、还是手滑授权了整个下载目录"在选择器层面**无法区分**，
+  所以内核一刀切：**整个目录不给、子文件夹给**（逼出一个权限范围明确的专用目录）——
+  iJipu 的工作区本来就是"专用子目录"模型，恰好就是内核期望的用法。
+- **解决**（两步，用户选定"A + B 一起做"）：
+  · **A 文案**：新增 `workspaceCopy.blockedHint`，在**选目录之前**就把这条规矩讲清楚
+  （"浏览器不允许把这几个目录**本身**当工作区，与有没有 .jps 无关；在它们里面新建子文件夹再选即可；
+  桌面版不受此限制"）。之所以必须"事前说"：被拦时错误与"取消"同形，**事后补不出任何提示**。
+  该提示**只在网页版渲染**（`{!supportsPathWorkspace() && …}`，桌面端不显示）。
+  · **B 桌面端换后端**：桌面壳**不再用 FSA**——原生选择器（`tauri-plugin-dialog`，仅 Rust 依赖）
+  拿**绝对路径**，读写交给 Rust `std::fs`（9 个 `ws_*` 命令：`pick_dir / list_dir / dir_exists /
+  is_dir_empty / read_text / write_text / create_dir / remove_file / remove_empty_dir`）。
+  两套后端共用**同一组 IO 原语**（`listRaw / readTextRaw / writeTextRaw / isDirEmptyRaw / makeDirRaw / removeRaw`），
+  纯逻辑（路径规整、`.jps` 过滤、排序、搜索）**一行都不用改** ⇒ 不会出现"网页版与桌面版对什么该显示各说各话"。
+  顺带两个好处：① 桌面端**不再有"重开应用要重新授权目录"**；② 身份改用**规整后的绝对路径**
+  ⇒ **反复选同一个文件夹仍是同一个工作区**（FSA 拿不到路径，只能每次发新 id）。
+- **验证**：
+  · `npx tsc -b` 0 错 / `npm run lint` 0 error（28 warnings == 基线）/ `npm run build` ✓ /
+  **`npm run smoke` ALL PASSED ✅**（新增 adj568 断言 6 条：后端分流、原生选择器优先、身份=路径、
+  路径后端无授权、9 个 Rust 命令且**全部登记进 `invoke_handler`**、Rust 侧路径穿越防护 + 写后回读 +
+  不做递归删除、黑名单提示只在网页版渲染；并更新 adj540/adj544/adj558/adj546 等 **11 条**因签名改动而失效的旧断言）；
+  · `cargo check` 通过（`. .\scripts\tauri-env.ps1; cargo check --manifest-path src-tauri\Cargo.toml`）；
+  · **真机（打包好的桌面版 + CDP 直连 WebView2，15/15 通过）**：`npx tauri build --no-bundle` 出
+    `src-tauri/target/release/ijipu.exe`，带 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333`
+    启动后用 CDP 直连页面实测：① 9 条 `ws_*` 命令在**真实文件系统**上往返全对（建目录 → 同名 `EXISTS`
+    → 写/读一致 → 列目录含非 0 mtime → 非空目录 `NOT_EMPTY` → 删文件 → 删空目录 → `..` 被拒）；
+    ② **「下载」目录能读出条目**（正是网页版被内核黑名单挡住的那个目录）；
+    ③ 把路径记录写进 IndexedDB 后刷新页面，底栏「工作区」面板的 `crumb.title` =
+    `C:\Users\…\Downloads`（**完整磁盘路径**，不再是"文件夹名 + 区内相对路径"），并正确列出
+    `📁 杂记` + `🎼 小星星.jps`（注：下载目录里只有 3 个 `.xlsx` ⇒ 面板 0 行是"只列目录与 `.jps`"的
+    **正确**行为，不是读盘失败）；④ 桌面端**没有**渲染网页版那条黑名单提示；
+    ⑤ **杀掉进程重启**后：面板**无授权提示**直接列出内容（路径后端不需要重新授权）。
+    复现脚本留在仓库外 `.ui-preview/_tmp_tauri_ws.mjs`（CDP 直连桌面壳，以后改桌面后端可直接复用）。
+    ⚠️ 唯一没覆盖的点：**原生文件夹对话框本身**（CDP 点不到系统对话框）⇒ 需按
+    `docs/DESKTOP-ASSOC-AND-ANDROID.md` 的「桌面端工作区验收清单」**手点一次**确认。
+    ⚠️ 附带发现：本项目（**GNU 工具链**）下 `cargo test` 的测试进程起不来——
+    `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)`（即使把 `WebView2Loader.dll` 放到 exe 同目录 / `deps/` 也一样），
+    所以后端改动的"真机级"验证只能走**打开应用点一遍 / CDP 直连**这条路，别指望 `cargo test`。
+- **预防**：① **"应用没有这条规则"要先自证再答**——用户报"你们为什么不让…"时，第一步是**在仓库里搜这条规则**，
+  搜不到就把"到底谁在拦"查到源码级（本轮因此才定位到 `GenerateBlockPaths()`），
+  否则会顺着用户的前提去"改一个根本不存在的判断"；
+  ② **平台能力里有一类"看不见的拒绝"**：内核黑名单 / 企业策略 / 权限壳，报错往往被折叠成
+  **与"用户取消"同形的错误**（`AbortError` / `NotAllowedError`）⇒ **凡是"用户说点了没反应/被拒"的入口，
+  都要问一句"这个错误码是不是被复用了"**：能区分才谈得上事后提示，不能区分就必须**事前说明**；
+  ③ **换后端要换在"最薄的一层"**：本轮把差异关进 6 个 IO 原语、纯逻辑零改动，
+  所以"网页版行为不变"这件事是**结构上成立**的，而不是靠逐处小心；
+  ④ **同一份数据两种来源，身份定义必须显式**：桌面端用绝对路径当 id 反而比 FSA 的随机 id 更强
+  （同一目录反复选仍是同一工作区），这类"换了后端反而能修好旧毛病"的地方要主动利用。
+
 ### E-2026-270 点了**视界外**的页签后，底栏开了、内容切了，**但页签自己还在视界外**——用户看不到自己点了什么（adj567）
 - **现象**（用户反馈）："如果设置在底栏页签的视界外，我点了设置，虽然打开了设置内容页，但设置页签还在视界外。"
   即：**点击 → 面板切换是生效的**，但页签栏**没有跟着滚**，被点的那个页签仍停在可视区之外。
@@ -3949,3 +4032,5 @@
 | v0.28.3 | 2026-09-21 | 发布 v0.28.3（**底栏「导入」页签 + 页签箭头/滚动修复 + 字体折叠不再消失 + 滚动指示/导入改用设计图标**，PATCH 级，共 4 项 adj561–adj564、4 条排错 E-2026-264~267、**不涉及引擎**）：**① 底栏页签 `<` `>` 箭头与横向滚动"从来没生效过"（`adj561`，E-2026-264）**——用户先报"手机端页签过多时没显示箭头、PC 端有"，再报"**PC 端发布的版本里也没有**"，第二条推翻了"平台差异"这一错误假设；真因：负责"算溢出 + 挂 `scroll`/`wheel` 监听 + 建 `ResizeObserver`"的 `useLayoutEffect` 依赖写成 **`[syncTabOverflow]`**（`useCallback(…, [])` ⇒ 引用永久稳定）⇒ **整个 effect 有生以来只跑过一次**，且那一次发生在启动时**底栏关闭**（组件走 `if (!dockOpen) return null`，`.tool-dock-tabstrip` 不在 DOM）⇒ `tabstripRef.current === null` ⇒ 第一行 return ⇒ 箭头状态/滚动监听/滚轮转横向/尺寸观察**全都没装上**；PC 上偶尔"看起来有"只是切视图/分屏导致 `ToolDock` 重挂载、恰好那次底栏开着。修法：① 依赖补 **`dockOpen`**；② `ResizeObserver` 从"只观察容器"扩到 **"容器 + 每个页签"**（页签内容变宽时容器盒宽不变、`scrollWidth` 却变，只盯容器收不到回调）并补 `fonts.ready`/首帧 `rAF`/`window.resize`/`MutationObserver`；③ `setTabOverflow` 改**同值短路**。**真机 A/B**（headless Chrome 153 + CDP 真实点击）：手机 390 溢出 72px 时修复前 `arrows=[]` 且滚轮无效 → 修复后 `["›"]`、滚轮把 `scrollLeft` 推到 93 且箭头变 `["‹"]`；PC 420 同理（50→71px）；PC 620/1280 真的放得下 6 个页签 ⇒ **无箭头是设计正确**。教训：adj556 的 4 条断言全是**源码文本/结构断言**，只能证明"代码写了这些字"、证明不了"运行时真的跑到了"。**② 底栏新增「导入」页签（`adj562`，E-2026-265）**——「粘贴源码导入」（adj406 的手机端兜底入口）从**弹窗**迁入底栏，页签**紧跟在「工作区」之后**（用户要求）；顶栏菜单项改为**开关该页签**；粘贴框做成"**吃掉剩余高度**"（dock 拖高时框跟着变高，长源码不必在小框里滚）；弹窗那条路**整体下线**（`ModalKind` 去掉 `pasteImport`、App 删渲染分支、`DockPanelKey` 加 `import`、`PasteImportDialog` 增 `inline` 且按容器分流收场动作）。**注意**："填满 dock"的 pane **绝不能进 AUTO_FIT**（`pane.scrollHeight` 会退化成"当前 dock 高" ⇒ 内容自然高被充气，E-2026-226/263 记过两次）故用固定 `IMPORT_DEFAULT_CONTENT_H = 300`。实测页签顺序 = `工作区 → 导入 → 告警 → 试听 → 导出 → 设置 → 关于`；粘贴框 211px / pane 318px。**③ 顶栏「字体」沉入「更多」后消失（`adj563`，E-2026-266）**——`isApplicable` 里 adj407 留下的 `k === 'font' ? !isNarrow : true` 让字体在 `isNarrow`（≤1024px）时被判"不适用"，而 **「更多」下拉的 `hiddenList` 也按 `isApplicable` 过滤** ⇒ 它在**顶栏与「更多」里同时消失**（用户："沉到更多里就隐藏了"）；根因是**一个判据同时回答了两个问题**（"有没有意义" vs "放不放得下"）——后者该由折叠链回答。改为字体**永远适用**（放得下留顶栏、放不下走折叠链进「更多」，下拉里那项点击打开「设置」底栏）。顺带用 `ModalKind` 收窄抓出**三处"模态已迁走、调用还在"的死接线**：「更多」字体项 `openModal('pageConfig')`、**Ctrl+Q** `openModal('playback')`（菜单上印着却什么都不发生，还留下悬空 modal 挡住 Tab 切视图）、以及 `PreviewPane` 的 `modal === 'playback'`（已按"只认底栏试听页签"简化）；`ModalKind` 收窄为**真正还有渲染分支的 6 种**（samples/shortcuts/manual/syntax/donate/voicePicker），这类死调用从此**直接编译报错**。**真机 A/B**：360/390/420/460/500/560 六个宽度，修复前 **0/6**（顶栏无、「更多」里也没有）→ 修复后 **6/6**（「更多」里有「字体」，点击真的打开设置底栏）；另实测 Ctrl+Q 真的打开「试听」底栏、菜单「粘贴源码导入」真的打开底栏「导入」页签。**验证**：`npx tsc -b` / `npm run lint`（0 error，28 warnings == 基线）/ `npm run build` / `npm run smoke` **ALL SMOKE TESTS PASSED ✅（0 失败；新增 adj561 3 项 + adj562 5 项 + adj563 4 项，并更新 3 条被改动行为钉住的旧断言）**；`npm run check:installer` 8 条快捷方式断言全过；`npx tauri build` 产出 `iJipu_0.28.3_x64-setup.exe`。**排错条目** `E-2026-264`（"依赖了一个恒定的回调"= 高危写法 + 条件渲染读 DOM 的陷阱 + 文本断言证明不了运行时生效 + "平台差异"是危险先验）/ `E-2026-265`（迁移模态的四步清单：入口/渲染/类型/容器适配；"填满 dock"的 pane 不能进 AUTO_FIT）/ `E-2026-266`（一个判据不要同时回答"有没有意义"与"放不放得下"；类型收窄是唯一能自动拦住死调用的手段）/ `E-2026-267`（加图标要动三处：PNG / `toolIcons.ts` / `sw.js` 预热清单且顺序一致；用户给的图常带"下载重名后缀"要先改名；换图后必须重新构建并核对 public↔dist 哈希；新图标先体检"纯黑 + alpha"再登记） |
 
 | v0.29.0 | 2026-09-21 | 发布 v0.29.0（**底栏 7 个页签图标全部设计图化 + 「关于」内容狂闪修复 + 点视界外的页签自己滚进视界**，MINOR 级，共 3 项 adj565–adj567、3 条排错 E-2026-268~270、**不涉及引擎**）：**① 「告警」「关于」页签改用设计图标，字符兜底从代码里删净（`adj565`，E-2026-268）**——用户要求"关于、告警按钮图标使用 `public/icons` 里的 png 文件"：告警 `⚠`→`告警.png`、关于 `ⓘ`→`关于.png`，至此底栏 **7 个页签全是设计图标**，于是把 `glyph` 字段与 `t.icon ? <ToolIcon/> : t.glyph` 分支**一并删除**（`icon` 在类型上变必填），从结构上杜绝"再借个字符凑合"（与 adj458 删 `rotate` 同思路）；用户给的 `关于.png` **混了灰值**（形状像素 7 种颜色 `50,50,50`~`55,55,55`）——图标走 mask **只取 alpha** ⇒ 屏幕上看不出、但破坏"图标集统一纯黑"口径且 smoke 逐张断言 ⇒ **只改 RGB 不动 alpha** 归一化（验证：形状像素计数守恒 307→307），1018B→454B；真机 CDP 实测 7 个页签均 16px `ToolIcon`、图标位无字符残留、`mask` 正确指向。**② 「关于」页签在编辑区列宽 ≈880px 时内容狂闪（`adj566`，E-2026-269）**——用户自己定位到"换行与不换行之间闪"，跑诊断片段实测 `dockH`(359↔335) / `paneW`(444.3↔434.3) / `taClientH`(311↔335) **三者同步跳 89 次/120 帧**，而 `taScrollH` 与 `gutterW` 稳定 ⇒ 真因是**四方互锁回路**：`.tool-dock-body` 垂直滚动条出现/消失 ↔ 面板可用宽 ↔ 内容软折行 ↔ AUTO_FIT 高度；修法是**一行 CSS** `scrollbar-gutter: stable`（永远预留滚动条宽 ⇒ clientWidth 不跳 ⇒ 回路断开，回滚 = 删这行）；因依赖用户字号/缩放/字体把临界推到 880，**本机 6 组离线探针全部复现不到**，决定性证据来自用户跑的诊断片段（留在 `.ui-preview/_diag_about_flicker.txt`）。**③ 点视界外的页签后，页签自己滚进视界（`adj567`，E-2026-270）**——用户报"设置在页签视界外时我点了设置，内容开了但设置页签还在视界外"；**第一版修错了地方**：对齐逻辑只写在页签 `onClick` 里，而用户的真实入口是**顶栏/菜单**（页签在视界外、根本点不到）⇒ 用户复测"我测试是没有实现"推翻（此前 CDP 9/9 是**假阳性**：脚本直接点页签 DOM，与用户路径不是同一条）；重做为 `alignActiveTab` 由**两处**调用（`dockPanel`/`dockOpen` 的 effect 覆盖顶栏/菜单/状态栏/快捷键 + 页签 `onClick` 覆盖"点已激活页签"），按 `data-key` 找 DOM 与 tabstrip 比 `getBoundingClientRect()` **就近**对齐，用**绝对** `scrollTo` + `behavior:'auto'`（幂等、不被平滑动画干扰）而非 `scrollBy`、更不是会滚祖先的 `scrollIntoView`，末尾 `setTimeout(pass, 60)` **一次**幂等补正、不循环；真机复测又抓出两个连锁 bug：**箭头按"该方向还有内容"增删会让 tabstrip 宽突变 21~42px**（把刚对齐的页签又挤出去）⇒ 改为**一旦溢出两个箭头始终占位、只切 `visibility`**（配 `disabled` / `tabIndex=-1` / `aria-hidden`），以及**点已激活页签时 `dockPanel` 不变 ⇒ effect 不跑** ⇒ 由 `onClick` 补调解决。**验证**：`npx tsc -b` / `npm run lint`（0 error，28 warnings == 基线）/ `npm run build` / `npm run smoke` **ALL SMOKE TESTS PASSED ✅（0 失败；新增 adj565/adj566/adj567 断言，并更新 adj556/adj557/adj561 三条被改动行为钉住的旧断言）**；真机 CDP 390px 视口（溢出 152px）**14/14 通过**（含"从**顶栏**打开视界外页签"这条用户真实路径、tabstrip `left/right/width` 在任一滚动位置恒定）；`npm run check:installer` 全部通过；`npx tauri build` 产出 `iJipu_0.29.0_x64-setup.exe`。**排错条目** `E-2026-268`（图标混灰值：mask 只取 alpha ⇒ 屏幕看不出但口径已破；归一化只改 RGB 不动 alpha，用形状像素计数守恒验证，脚本要幂等）/ `E-2026-269`（「内容在闪」可能是布局回路而非渲染 bug：`overflow-y: auto` 滚动条出现/消失 = 隐形宽度跳变，与内容软折行 + AUTO_FIT 高度互锁 ⇒ 统一 `scrollbar-gutter: stable`；文本断言完全抓不到，只能靠诊断片段看数值序列）/ `E-2026-270`（"点了它但它自己还看不见"是独立 UX 缺陷；`scrollIntoView` 会滚祖先要手算 `scrollTo`；⭐ **CDP 假阳性**——脚本点 DOM、用户点屏幕，测试必须复现用户真实入口；⭐ **不要写随状态增删的占位元素**，元素出现/消失本身就是宽度突变） |
+
+| v0.30.0 | 2026-09-21 | 发布 v0.30.0（**桌面端工作区换用原生后端（可直接把「下载」设为工作区）+ 顶栏/底栏一批布局与可读性调整**，MINOR 级，共 7 项 adj568–adj574、1 条排错 E-2026-271、**不涉及引擎**）：起点是用户报"**工作区无法打开下载目录**，说是有系统文件，工作区只允许操作 .jps 文件，应该不影响才对"，并追问"是基于什么考虑"。**① 先自证"这条规则不在我们这儿"再答（`E-2026-271`）**——全仓库搜「系统文件/包含系统/敏感目录/不安全」只命中"系统文件选择器"这类词、`WorkspacePanel.onPick()` 拿到目录后**不看目录内容**、`pickWorkspaceDir()` 只有 `AbortError ⇒ 静默 return null` 一条失败分支 ⇒ 那句提示只能是浏览器弹的。查到 Chromium 源码 `chrome_file_system_access_permission_context.cc` 的 `GenerateBlockPaths()`：黑名单**按"目录在系统里扮演什么角色"判定、与目录里有什么文件无关**——`DIR_HOME / DIR_USER_DESKTOP / DIR_USER_DOCUMENTS / DIR_DEFAULT_DOWNLOADS` 是 `kDontBlockChildren`（**只有该目录自身被封、子文件夹放行**），`DIR_WINDOWS / Program Files / ProgramData / AppData / Chrome 安装目录` 是 `kBlockAllChildren`，`.ssh`/`.gnupg` 全封、`.git/hooks` 只封写；判定只看**最近的被列祖先**。于是 **`下载` ❌ / `下载\任意子文件夹` ✅**。文案来历也查清：Chromium 头文件把这类目录统称 *sensitive (i.e. system files)*、**同一个对话框给所有被拦目录复用**，对干净的「下载」说"包含系统文件"**文案本身不准确**（Chromium 已知问题 41475404 / SO 71981146）；`file_system_access_restricted_directory_dialog.h` 注释写明那是**纯告知**框（无"仍然继续"出口），且被拦后抛的是 **`AbortError`——与"用户取消"完全同一个错误**（Electron #42459 抱怨的正是这点）⇒ 应用侧**既绕不过也分不清**。设计动机（回答用户的"基于什么考虑"）：下载/桌面/文档是"用户信任的落地点"，把**整个**目录的可写权限交给网页，恶意站点能替换你刚下好的安装包、往桌面丢 `.lnk`，而"想授权这一个文件夹 vs 手滑授权整个下载目录"在选择器层面无法区分 ⇒ 内核一刀切"整目录不给、子文件夹给"。**② 网页版事前说明（adj568）**：新增 `workspaceCopy.blockedHint`（"…在它们里面新建子文件夹再选即可；桌面版不受此限制"），**只在 `!supportsPathWorkspace()` 时渲染**——被拦时错误与取消同形、**事后补不出提示**，所以必须事前说。**③ 桌面端整条换后端（adj568）**：不再用 FSA——`tauri-plugin-dialog`（**仅 Rust 依赖**，无需 npm 包/ACL 权限）拿**绝对路径** + Rust `std::fs` 读写（9 个 `ws_*` 命令，一律 `#[tauri::command(async)]`：同步命令跑主线程，而列目录一次扫描要调几百次）；两套后端共用**同一组 IO 原语**（`listRaw/readTextRaw/writeTextRaw/isDirEmptyRaw/makeDirRaw/removeRaw`），路径规整/`.jps` 过滤/排序/搜索**一行未改** ⇒ "网页版行为不变"是**结构上成立**而非靠逐处小心；安全口径不变（Rust 侧**逐段校验** `..`/分隔符/控制字符再拼路径、写入**回读校验**、目录**只删空的**）。附带好处：桌面端**不再"重开要重新授权"**；身份改用**规整后的绝对路径** ⇒ **反复选同一目录仍是同一工作区**（FSA 拿不到路径只能每次发新 id）。顺带修掉"桌面端目录被外部删/改名时落到网页版那套'重新授权'文案（点了没用）"⇒ 改为"**工作区目录已不在**，请重新选"。**④ 其余 6 项 UI（adj569–adj574）**：`adj569` 「切换工作区目录」按钮换专用 `切换工作区.png`（页签仍 `工作区.png`，两处语义不同：页签=打开面板 / 按钮=换目录；图标三处同步 + 体检纯黑带 alpha）；`adj570` 顶栏**主题与设置对换位置**，`FN_ORDER` 与 `TOOL_PRIORITY` **一起换**（折叠语义是"先把显示顺序最右端收进「更多」"，只改一边会出现"右边还在、左边先没了"；实测 设置@490 < 主题@555，740px 时主题先收起、设置仍在栏上）；`adj571` 工作区**右栏 132→112px**（窄屏 116→100px，列表多拿 20px）+ 列表行整行加 `title` ⇒ **悬浮显示工作区内完整相对路径**（窄列表截断文件名也能看全）；`adj572` 过滤结果**没有复选框**却仍留 16px 占位 ⇒ 去掉并把行左内边距收到 4px，🎼 与文件名**左移 30px**（实测 39→9px）；`adj573` **「字体」沉进「更多」后不再列为菜单项**（`OVERFLOW_EXCLUDE = ['font']`；它原先只是个"转开设置底栏"的替身，与同菜单里真能调的「字号」和「设置」都重复）——安全前提是折叠顺序末两位 `font, fontSize`（字号先走）⇒ 字体沉下去时「更多」里至少还有字号、按钮不消失；`adj574` 过滤结果改**两行**（**文件名左对齐 / 目录右对齐**，各吃满整行宽、不再互相截断），行高 44px 正好当手机点按热区 ⇒ 行内上下留白 9→5px、行距 2→1px。**验证**：`npx tsc -b` 0 错 / `npm run lint` 0 error（28 warnings == 基线）/ `npm run build` ✓ / **`npm run smoke` ALL PASSED ✅**（新增 adj568 六条 + adj569–adj574 各条，并更新 adj530/adj540/adj544/adj546/adj556/adj557/adj558/adj561/adj563 等因签名或列表口径改动而失效的旧断言）；桌面端 `cargo check` 通过；**真机三轮**（打包 `ijipu.exe` + CDP 直连 WebView2）：工作区 **15/15**（9 条 `ws_*` 真实文件系统往返、**「下载」可读**、面板显示完整磁盘路径并列出内容、**杀进程重启后无授权提示**）、顶栏 **10 档宽度**（字体沉下去时菜单里均无字体项、设置/主题位置与折叠先后正确）、列表 **3 档宽度**（两行各拿整行宽、路径右对齐、行高 44px），并出截图目视。**排错条目** `E-2026-271`（"应用没有这条规则"要先自证再答——顺着用户前提会去改一个**根本不存在的判断**；平台能力里有一类**"看不见的拒绝"**（内核黑名单/企业策略/权限壳），错误常被折叠成**与"用户取消"同形**的码 ⇒ 能区分才谈得上事后提示、**不能区分就必须事前说明**；换后端要换在**最薄的一层**；同数据两种来源时**身份定义必须显式**；另记：本项目 GNU 工具链下 `cargo test` 起不来（`STATUS_ENTRYPOINT_NOT_FOUND`），后端真机验证只能走"点一遍 / CDP 直连"） |
