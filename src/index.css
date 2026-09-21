@@ -3873,6 +3873,39 @@ body {
   flex: 1 1 auto;
   min-height: 0;
 }
+/**
+ * adj562（用户要求"把粘贴源码导入加到底栏，在工作区后面加一个「导入」页签"）：
+ * 导入面板也走"填满 dock"——粘贴框**吃掉剩余高度**，dock 往上拖时框跟着变高，长源码不必
+ * 在小框里来回滚。`.modal-inline`（Modal 的内联外壳）与 `.import-body` 都要一起 flex 下去，
+ * 否则中间那层 block 会把高度吃掉、`.import-text` 的 `flex: 1` 失效。
+ *
+ * ⚠ 正因为它填满 dock，`pane.scrollHeight` 会退化成"当前 dock 有多高"（`scrollHeight ===
+ *   max(内容高, clientHeight)`）⇒ **不能进 AUTO_FIT**，否则"内容自然高"被充气（E-2026-226/263
+ *   记过两次的测量污染）。高度改由 ToolDock 的固定默认值 `IMPORT_DEFAULT_CONTENT_H` 给。
+ */
+.tool-dock-pane.pane-import {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.tool-dock-pane.pane-import .modal-inline {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.pane-import .import-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.pane-import .import-text {
+  flex: 1 1 auto;
+  min-height: 120px;
+}
 .ws-panel .ws-list {
   flex: 1 1 auto;
   max-height: none;

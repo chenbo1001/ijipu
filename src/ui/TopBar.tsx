@@ -324,14 +324,14 @@ export function TopBar() {
   /**
    * adj530：某按钮当前是否**适用**（沿用原 `show` 口径，与折叠无关）：
    *   · 比率组只在预览/拆分视图有意义（编码视图没有预览区）
-   *   · adj407：字体按钮窄屏不显示（顶栏与「更多」里都不出现；
-   *     设置项本身仍在「设置 → 全局 → 编辑器字体」，不会被弄丢）
+   *   · adj563（用户要求"字体按钮一旦沉到更多里，就不隐藏"）：**取消 adj407 的"窄屏直接不适用"**——
+   *     那条老口径让 `font` 在 `isNarrow` 时从 `isApplicable` 出局，而「更多」下拉的
+   *     `hiddenList` 也按 `isApplicable` 过滤 ⇒ 它**在顶栏和「更多」里同时消失**（用户看到的就是
+   *     "沉到更多里就没了"）。现在 `font` 永远适用：放得下就留在顶栏（带字体下拉），
+   *     放不下就走正常的折叠链**进「更多」**（下拉里那项点击打开设置，见 `kind === 'font'` 分支）。
    * 不适用的按钮**不进入折叠计算**——否则隐藏项仍占宽度预算，把本可显示的按钮挤进「更多」。
    */
-  const isApplicable = useCallback(
-    (k: ToolKey): boolean => (k === 'zoom' ? showZoom : k === 'font' ? !isNarrow : true),
-    [showZoom, isNarrow],
-  )
+  const isApplicable = useCallback((k: ToolKey): boolean => (k === 'zoom' ? showZoom : true), [showZoom])
   // 字体 split-button 状态（从状态栏移来，下拉从顶栏向下展开）
   const [fontOpen, setFontOpen] = useState(false)
   const fontRef = useRef<HTMLSpanElement>(null)
@@ -853,14 +853,17 @@ export function TopBar() {
       )
     }
     if (t.kind === 'font') {
-      // 字体项在更多下拉里：点击直接弹页面设置（含字体选择）
+      // 字体项在更多下拉里：点击打开「设置」底栏（字体在「字体」页签里选）。
+      // adj563：原先写的是 `openModal('pageConfig')`——但页面设置早已在 adj462 迁入底栏 dock，
+      // `modal === 'pageConfig'` **在 App 里没有任何渲染分支** ⇒ 点它是**死的**（什么都不发生，
+      // 还留下一个悬空的 modal 状态挡住 Tab 切视图）。改为与顶栏其它项一致的"开关底栏"。
       return (
         <div
           key={t.key}
           className="menu-entry"
           onClick={() => {
             closeOverflow()
-            openModal('pageConfig')
+            toggleDock('settings')
           }}
         >
           {iconOf('font')}
@@ -1097,7 +1100,7 @@ export function TopBar() {
   const entryOpen: MenuEntry = { label: '打开(&O)…', kbd: 'Ctrl+O', hotkey: 'o', onPick: runOpenSmart }
   const entryOpenSystem: MenuEntry = { label: workspaceCopy.openSystemLabel, onPick: runOpen }
   const entrySamples: MenuEntry = { label: '打开示例(&E)…', hotkey: 'e', onPick: () => openModal('samples') }
-  const entryPaste: MenuEntry = { label: pasteImportCopy.menuLabel, hotkey: 'v', onPick: () => openModal('pasteImport') }
+  const entryPaste: MenuEntry = { label: pasteImportCopy.menuLabel, hotkey: 'v', onPick: () => toggleDock('import') }
   const entrySave: MenuEntry = { label: '保存(&S)', kbd: 'Ctrl+S', hotkey: 's', onPick: runSaveSmart }
   const entrySaveAs: MenuEntry = { label: '另存为(&A)…', hotkey: 'a', onPick: runSaveAsSmart }
   const entryWorkspace: MenuEntry = { label: workspaceCopy.menuLabel, hotkey: 'w', onPick: () => toggleDock('workspace') }

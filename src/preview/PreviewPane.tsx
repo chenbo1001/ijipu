@@ -73,7 +73,7 @@ export function PreviewPane() {
   const jumpCursor = useDocStore((s) => s.jumpCursor)
   const showGuides = useUiStore((s) => s.showGuides)
   const previewZoom = useUiStore((s) => s.previewZoom)
-  const modal = useUiStore((s) => s.modal)
+  // adj563：原先这里还订阅了 `modal`（用于 `modal === 'playback'`），试听只剩底栏一条路后已不需要
   const dockOpen = useUiStore((s) => s.dockOpen)
   const dockPanel = useUiStore((s) => s.dockPanel)
   const setPlaybackStart = useUiStore((s) => s.setPlaybackStart)
@@ -206,11 +206,12 @@ export function PreviewPane() {
     }
   }, [activeNoteId, pagesHtml])
 
-  // adj490：试听「可达」= 弹窗（`modal==='playback'`）**或**底栏 dock 当前在试听页签（`dockOpen && dockPanel==='tryout'`）。
-  // 此前只判 `modal==='playback'`——底栏 dock 的试听页签（adj462 引入）打开时**不会**设 modal（顶栏按钮只
-  // toggleDock('tryout') 不 openModal），导致「暂停/停止时点预览音符跳到该处重播」失效（用户报）。
-  // 这里提取统一谓词，onClick / onDoubleClick 共用。
-  const isPlaybackOpen = modal === 'playback' || (dockOpen && dockPanel === 'tryout')
+  // adj490：试听「可达」= 底栏 dock 当前在试听页签（`dockOpen && dockPanel==='tryout'`）。
+  // 历史：此前只判 `modal==='playback'`——底栏 dock 的试听页签（adj462 引入）打开时**不会**设 modal
+  // （顶栏按钮只 toggleDock('tryout') 不 openModal），导致「暂停/停止时点预览音符跳到该处重播」失效（用户报）。
+  // adj563：`modal === 'playback'` 那一半**已经永远为假**（试听在 adj462 之后只剩底栏这一条路，
+  // ModalKind 里也不再有 'playback'）⇒ 删掉死支，只留真正生效的底栏判据。
+  const isPlaybackOpen = dockOpen && dockPanel === 'tryout'
 
   // 点击谱面音符/歌词 → 编辑器光标跳转（M3）
   // adj284：试听可达时单击音符 → 从该音符开始/重播（跳转到该处演奏）

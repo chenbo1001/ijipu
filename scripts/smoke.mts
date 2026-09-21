@@ -5238,7 +5238,20 @@ console.log('[95] PWA update mechanism & mobile open hint (adj400/adj401)')
   check('adj406 清洗：无关围栏语言不误伤', normalizePastedSource('```bash\necho hi\n```').includes('```bash'))
   check('adj406 清洗：纯文本原样（仅去行尾空白）', normalizePastedSource('V: 1.0\nQ: 1 2 3  ') === 'V: 1.0\nQ: 1 2 3')
   check('adj406 空内容清洗后为空 → importSource 直接返回 false（不替换文档）', normalizePastedSource('   \n  ') === '')
-  check('adj406 菜单与对话框已接线', readFileSync(join(root, 'src', 'ui', 'TopBar.tsx'), 'utf8').includes('pasteImportCopy.menuLabel') && readFileSync(join(root, 'src', 'App.tsx'), 'utf8').includes("modal === 'pasteImport'"))
+  // adj562：粘贴源码导入迁入底栏「导入」页签（原弹窗入口下线）。
+  // 注意：本块的变量只到 `normalizePastedSource`，故这里**就地读文件**（避免引用别处的 const）。
+  {
+    const top = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+    const app = String(readFileSync('src/App.tsx', 'utf8'))
+    const store = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+    check('adj562 「粘贴源码导入」菜单项改为**开关底栏**（不再是 openModal 弹窗）',
+      /label: pasteImportCopy\.menuLabel, hotkey: 'v', onPick: \(\) => toggleDock\('import'\)/.test(top) &&
+        !/openModal\('pasteImport'\)/.test(top),
+      '')
+    check('adj562 App 不再渲染粘贴导入弹窗；`ModalKind` 里也不再有 `pasteImport`',
+      !/modal === 'pasteImport'/.test(app) && !/'pasteImport'/.test(store),
+      '')
+  }
 }
 
 // ---- 96. 试听暂停/续播：剩余事件平移（adj409） ----
@@ -8088,6 +8101,39 @@ function runAdj530TopBarLayoutTests() {
       /\.topbar-toolbar:has\(\.topbar-views\.open\) \{[\s\S]{0,120}?overflow: visible;/.test(cssFlat) &&
       /className=\{`topbar-views\$\{viewOpen \? ' open' : ''\}`\}/.test(top),
     '')
+  // ---- adj563（用户要求"顶栏的字体按钮一旦沉到更多里，就不隐藏" + 附带的两处死接线） ----
+  // ① 字体**永远适用**：取消 adj407 的 `k === 'font' ? !isNarrow : true`（那会让它从顶栏与
+  //    「更多」里同时消失——因为 hiddenList 也按 isApplicable 过滤）。现在放不下就走正常折叠
+  //    进「更多」，在下拉里仍可用。
+  check('adj563 `font` 不再被 `isNarrow` 判为"不适用"（放得下留顶栏、放不下进「更多」，不再凭空消失）',
+    /const isApplicable = useCallback\(\(k: ToolKey\): boolean => \(k === 'zoom' \? showZoom : true\), \[showZoom\]\)/.test(top) &&
+      !/k === 'font' \? !isNarrow/.test(top.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')),
+    '')
+  // ② 「更多」下拉里的字体项必须**真的有反应**——原先 `openModal('pageConfig')` 是死调用
+  //    （页面设置在 adj462 已迁入底栏，App 里没有 `modal === 'pageConfig'` 分支）⇒ 改为开关底栏。
+  //    ⚠ 负向断言前**先剥注释**（上面的说明里故意引用了旧写法，同 E-2026-237 的坑）。
+  const topCode = top.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  check('adj563 「更多」下拉里的字体项改为开关「设置」底栏（原 `openModal(\'pageConfig\')` 是死调用）',
+    /if \(t\.kind === 'font'\) \{[\s\S]{0,400}?toggleDock\('settings'\)/.test(topCode) &&
+      /\{iconOf\('font'\)\}/.test(topCode) &&
+      !/openModal\('pageConfig'\)/.test(topCode),
+    '')
+  // ③ `ModalKind` 只留**真的有渲染分支**的模态——防止同类死调用再次通过类型检查。
+  check('adj563 `ModalKind` 已收窄为仍有渲染分支的 6 种（about/pageConfig/playback/export 四个残留已删）',
+    /export type ModalKind = 'samples' \| 'shortcuts' \| 'manual' \| 'syntax' \| 'donate' \| 'voicePicker'/.test(
+      String(readFileSync('src/store/uiStore.ts', 'utf8')),
+    ),
+    '')
+  // ④ Ctrl+Q 是真快捷键（菜单上印着），原先 `openModal('playback')` 同样是死的 ⇒ 改为开关试听底栏。
+  {
+    const appCode = String(readFileSync('src/App.tsx', 'utf8'))
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '')
+    check('adj563 Ctrl+Q 改为开关「试听」底栏（原 `openModal(\'playback\')` 是死调用）',
+      /toLowerCase\(\) === 'q'\)[\s\S]{0,200}?ui\.toggleDock\('tryout'\)/.test(appCode) &&
+        !/openModal\('playback'\)/.test(appCode),
+      '')
+  }
 }
 
 /**
@@ -8468,11 +8514,13 @@ async function runAdj540WorkspaceTests() {
   const copySrc = String(readFileSync('src/brand/copy.ts', 'utf8'))
   // 断言 CSS 前先剥注释：注释里**故意写了**要禁用的写法（同 E-2026-237 的坑）
   const cssAll = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
-  check('adj540 工作区是底栏 dock 的页签 + **排第一**（手机端文件操作主入口），图标用 `public/icons/工作区.png`',
+  check('adj540/adj562 工作区是底栏 dock 的页签 + **排第一**（手机端文件操作主入口），「导入」紧随其后',
     /\| 'workspace'/.test(ui) && // DockPanelKey
       !/\| 'workspace'/.test(ui.split('export type DockPanelKey')[0]) && // 不再出现在 ModalKind 里
-      // 顺序：PANELS/TABS 的第一项都是 workspace
-      /\{ key: 'workspace', render: WorkspacePanel \},\s*\{ key: 'problems'/.test(dockSrc) &&
+      // 顺序：PANELS 的前两项是 workspace → import（adj562：导入紧跟工作区，用户要求）
+      /\{ key: 'workspace', render: WorkspacePanel \},\s*\{ key: 'import', render: ImportPanel \},\s*\{ key: 'problems'/.test(dockSrc) &&
+      // 顺序：TABS 的前两项同上
+      /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace' \},\s*[\s\S]{0,200}?\{ key: 'import', label: dockCopy\.tabImport, glyph: '⤓' \}/.test(dockSrc) &&
       /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace' \}/.test(dockSrc) &&
       /workspace: '工作区'/.test(String(readFileSync('src/ui/toolIcons.ts', 'utf8'))) &&
       /if \(key === 'workspace'\)/.test(dockSrc) &&
@@ -8782,6 +8830,26 @@ async function runAdj540WorkspaceTests() {
   check('adj558 创建子目录后，readDirEntries 立刻看到新条目（不依赖缓存重建）',
     !adj558DirCaseErr,
     adj558DirCaseErr)
+
+  // ---- adj562：粘贴源码导入迁入底栏「导入」页签（用户要求"就在工作区后面"） ----
+  check('adj562 「导入」面板接线：懒加载 + `inline` 模式 + 排在 workspace 之后 + 文案 `tabImport`',
+    /const ImportPanel = lazy\(\(\) => import\('\.\.\/dialogs\/PasteImportDialog'\)\.then\(\(m\) => \(\{ default: \(\) => <m\.PasteImportDialog inline \/> \}\)\)\)/.test(dockSrc) &&
+      /tabImport: '导入'/.test(copySrc) &&
+      /export function PasteImportDialog\(\{ inline = false \}: \{ inline\?: boolean \} = \{\}\)/.test(
+        String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8')),
+      ),
+    '')
+  check('adj562 「导入」**不进 AUTO_FIT**、用固定默认内容高（填满 dock 的 pane 会让 scrollHeight 充气）',
+    /const IMPORT_DEFAULT_CONTENT_H = 300/.test(dockSrc) &&
+      /if \(key === 'import'\) return chromeH \+ PANE_PAD_H \+ IMPORT_DEFAULT_CONTENT_H/.test(dockSrc) &&
+      /const AUTO_FIT: readonly DockPanelKey\[\] = \['problems', 'tryout', 'export', 'about'\]/.test(dockSrc),
+    '')
+  check('adj562 `.pane-import` 走"填满 dock"链路（pane/modal-inline/import-body 层层 flex + 粘贴框吃剩余高）',
+    /\.tool-dock-pane\.pane-import \{[\s\S]{0,200}?flex: 1 1 auto/.test(cssAll) &&
+      /\.tool-dock-pane\.pane-import \.modal-inline \{[\s\S]{0,200}?flex: 1 1 auto/.test(cssAll) &&
+      /\.pane-import \.import-body \{[\s\S]{0,200}?flex: 1 1 auto/.test(cssAll) &&
+      /\.pane-import \.import-text \{[\s\S]{0,120}?flex: 1 1 auto/.test(cssAll),
+    '')
 }
 
 /**
@@ -9284,6 +9352,27 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
   check('adj560 `.tool-dock-tabstrip` 声明 `touch-action: pan-x`（触屏拖动不触发子按钮 active）',
     /\.tool-dock-tabstrip \{[\s\S]{0,600}?touch-action: pan-x/.test(css2),
     '')
+  // ---- adj561：箭头/滚动"从来不生效"的根因——effect 依赖 + 观察对象 + 幂等 setState ----
+  // ① **`dockOpen` 必须在依赖里**：底栏关着时组件 `return null`、tabstrip 不在 DOM，
+  //    effect 若只依赖稳定的 `syncTabOverflow` ⇒ 首次运行 ref 为 null 直接 early return、
+  //    **永不重跑** ⇒ 箭头状态 / scroll 监听 / 滚轮转横向全都装不上（用户实测：手机与 PC
+  //    在"确实溢出"时都没有箭头、也不能滚）。
+  check('adj561 溢出同步 effect **依赖含 `dockOpen`**（底栏打开时才拿得到 tabstrip 的 DOM）',
+    /useLayoutEffect\(\(\) => \{[\s\S]{0,120}?if \(!dockOpen\) return[\s\S]{0,3000}?\}, \[syncTabOverflow, dockOpen\]\)/.test(dockSrc),
+    '')
+  // ② **同时观察每个页签子元素**：RO 只盯"被观察元素自身盒尺寸"，页签内容变宽
+  //    （webfont 就绪 / 文案变化）时容器盒宽不变、`scrollWidth` 却变了 ⇒ 只观察容器收不到回调。
+  check('adj561 除容器外**还观察每个页签**（内容变宽也会重算溢出）+ 兜底 `fonts.ready` / `resize`',
+    /for \(const child of Array\.from\(el\.children\)\) ro\.observe\(child\)/.test(dockSrc) &&
+      /document\.fonts\?\.ready\.then\(sync\)/.test(dockSrc) &&
+      /window\.addEventListener\('resize', sync\)/.test(dockSrc) &&
+      /new MutationObserver\(\(\) => \{[\s\S]{0,120}?observeAll\(\)/.test(dockSrc),
+    '')
+  // ③ **同值短路**：箭头出现/消失会改变 tabstrip 可用宽并再次触发 RO；无条件 `setState({...})`
+  //    每次换新对象引用会多一轮渲染，用"同值返回 prev"短路。
+  check('adj561 `setTabOverflow` 同值短路（返回 prev，不做无谓重渲染）',
+    /setTabOverflow\(\(prev\) => \(prev\.left === left && prev\.right === right \? prev : \{ left, right \}\)\)/.test(dockSrc),
+    '')
   // ---- adj557（v0.28.2）：左 / 右两侧按钮**结构性**不随页签滚动（DOM 上是 tabstrip 的兄弟） ----
   check('adj557 「收起底栏」「高度档位」「关闭」三个固定按钮在 DOM 上是 `.tool-dock-tabstrip` 的**兄弟**，不是子节点',
     // 截取 tabstrip 块（className 起 → 配对 </div> 收尾的最外层标签），三个固定按钮的 className
@@ -9354,8 +9443,13 @@ console.log('[114] playback reachable: clicking preview note while dock tryout i
   const prevSrc = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
   // adj490：之前 onClick / onDoubleClick 只判 `modal === 'playback'`，底栏 dock 试听页签打开时
   //（顶栏按钮只 toggleDock('tryout') 不 openModal）点击预览音符无效。改为同时接受 dock 试听状态。
-  check('adj490 PreviewPane.onClick：试听可达 = 弹窗 modal 或 dock 试听页签',
-    /isPlaybackOpen = modal === 'playback' \|\| \(dockOpen && dockPanel === 'tryout'\)/.test(prevSrc),
+  // adj563：`modal === 'playback'` 那一半已**永远为假**（试听只剩底栏一条路，ModalKind 里已无 'playback'）
+  // ⇒ 断言随之改为"只认底栏试听页签"，并反向断言不再引用已下线的 modal 判据。
+  // ⚠ 反向断言前**先剥注释**：上面两行注释里故意引用了旧写法（同 E-2026-237 的坑）。
+  const prevNoComment = prevSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  check('adj490/adj563 PreviewPane：试听可达 = **底栏试听页签**（不再引用已下线的 `modal === \'playback\'`）',
+    /isPlaybackOpen = dockOpen && dockPanel === 'tryout'/.test(prevNoComment) &&
+      !/modal === 'playback'/.test(prevNoComment),
     '')
   check('adj490 PreviewPane.onDoubleClick：同样接受 dock 试听（adj158 播放中双击快速跳跃）',
     /if \(!isPlaybackOpen\) return[\s\S]{0,200}setPlaybackStart\(id\)[\s\S]{0,80}bumpPlaybackTick\(\)/.test(prevSrc),

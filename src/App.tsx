@@ -26,8 +26,7 @@ const SamplesDialog = lazy(() => import('./dialogs/SamplesDialog').then((m) => (
 const ShortcutsDialog = lazy(() => import('./dialogs/ShortcutsDialog').then((m) => ({ default: m.ShortcutsDialog })))
 const DocDialog = lazy(() => import('./dialogs/DocDialog').then((m) => ({ default: m.DocDialog })))
 const DonateDialog = lazy(() => import('./dialogs/DonateDialog').then((m) => ({ default: m.DonateDialog })))
-// adj406：粘贴源码导入
-const PasteImportDialog = lazy(() => import('./dialogs/PasteImportDialog').then((m) => ({ default: m.PasteImportDialog })))
+// adj562：「粘贴源码导入」已迁入底栏（ToolDock 的「导入」页签）⇒ 不再从 App 作为模态渲染
 // adj509：试听音色选择对话框（从音色库面板的「指定音色」按钮触发）
 const VoicePickerDialog = lazy(() => import('./dialogs/VoicePickerDialog').then((m) => ({ default: m.VoicePickerDialog })))
 
@@ -144,7 +143,10 @@ function App() {
       } else if (e.ctrlKey && e.key.toLowerCase() === 'q') {
         e.preventDefault()
         e.stopPropagation()
-        ui.openModal('playback')
+        // adj563：原为 `openModal('playback')`，但试听早在 adj462 迁进底栏 dock
+        // ⇒ `modal === 'playback'` 没有渲染分支、**Ctrl+Q 是死的**（菜单上还印着 Ctrl+Q）。
+        // 与菜单项 `entryTryout` 同口径：开关「试听」底栏。
+        ui.toggleDock('tryout')
       } else if (e.key === 'Tab' && !ui.modal && !(e.target as HTMLElement | null)?.closest?.('.editor-main')) {
         // 编辑器内 Tab 留给自动补全/默认行为（completion 时补全），其余区域切换视图
         e.preventDefault()
@@ -262,8 +264,7 @@ function App() {
       {modal === 'manual' && <Suspense fallback={null}><DocDialog kind="manual" /></Suspense>}
       {modal === 'syntax' && <Suspense fallback={null}><DocDialog kind="syntax" /></Suspense>}
       {modal === 'donate' && <Suspense fallback={null}><DonateDialog /></Suspense>}
-      {/* adj406：粘贴源码导入（不依赖系统文件选择器的兜底入口） */}
-      {modal === 'pasteImport' && <Suspense fallback={null}><PasteImportDialog /></Suspense>}
+      {/* adj562：「粘贴源码导入」已迁入底栏「导入」页签（原 adj406 的弹窗入口下线） */}
       {/* adj509：试听音色选择对话框（音色库「指定音色」按钮触发） */}
       {modal === 'voicePicker' && <Suspense fallback={null}><VoicePickerDialog /></Suspense>}
     </div>

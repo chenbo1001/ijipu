@@ -9,28 +9,27 @@ import { DEFAULT_THEME, DEFAULT_THEME_MODE, type ThemeMode } from '../brand/them
 import { loadEditorFont, loadEditorFontSize, loadFontOverride, saveEditorFont, saveEditorFontSize, saveFontOverride } from './editorPrefs'
 import type { FontOverride } from '@ijipu/engine'
 
-export type ModalKind =
-  | 'about'
-  | 'samples'
-  | 'pageConfig'
-  | 'playback'
-  | 'export'
-  | 'shortcuts'
-  | 'manual'
-  | 'syntax'
-  | 'donate'
-  /** adj406：粘贴源码导入（不依赖系统文件选择器的兜底入口） */
-  | 'pasteImport'
-  /** adj509：试听音色选择对话框（从音色库面板「指定音色」按钮触发） */
-  | 'voicePicker'
+/**
+ * adj563：**只保留 App 里真的还有渲染分支的模态**（原来还躺着 'about' / 'pageConfig' / 'playback' /
+ * 'export' 四个"已经迁进底栏 dock、却仍留在联合类型里"的残留）——它们让
+ * `openModal('pageConfig')`、`openModal('playback')` 这类**死调用**能通过类型检查：
+ * 运行时什么都没发生（没有渲染分支），编译期也一言不发，于是"更多里的字体项点了没反应"、
+ * "Ctrl+Q 试听假的"两个 bug 一直没人发现。收窄后这类调用**直接编译报错**。
+ * 需要打开底栏面板请用 `toggleDock(key)`；需要弹窗请用下面这些。
+ */
+export type ModalKind = 'samples' | 'shortcuts' | 'manual' | 'syntax' | 'donate' | 'voicePicker'
 
 /**
  * adj462：底部 dock 的面板（互斥，同一时间只显示一块）。
  * 入口：告警=状态栏告警文本；试听/导出/设置/关于=顶栏对应按钮与菜单。均为「开关」：关→开+切到该面板；
  * 已开且是该面板→收起 dock；已开但不是该面板→只切面板。
  * adj492：'about'（关于）从弹窗迁入 dock（与原「试听/导出/设置」同一套路）。
+ * adj540：'workspace'（工作区）排第一（手机端文件操作主入口）。
+ * adj562：'import'（粘贴源码导入）**排在工作区之后**（用户要求"把粘贴源码导入对话框也加到底栏，
+ *   就在工作区后面加一个「导入」页签"）——原 `ModalKind` 的 `pasteImport` 弹窗入口随之**下线**
+ *   （同一份内容改由 dock 承载，避免"弹窗 + 页签"两条路并存让用户犯选择困难，与 adj492 关于同策）。
  */
-export type DockPanelKey = 'problems' | 'tryout' | 'export' | 'settings' | 'about' | 'workspace'
+export type DockPanelKey = 'problems' | 'tryout' | 'export' | 'settings' | 'about' | 'workspace' | 'import'
 
 /** 轻量浮动提示（toast）：kind 决定配色；nonce 用于同文案重复触发时重置隐藏计时 */
 export type NoticeKind = 'ok' | 'warn' | 'error'

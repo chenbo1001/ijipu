@@ -58,10 +58,14 @@ const ProblemPanel = lazy(() => import('./dock/ProblemPanel').then((m) => ({ def
 const ExportPanel = lazy(() => import('./dock/ExportPanel').then((m) => ({ default: m.ExportPanel })))
 // adj540：工作区（移动端的"文件管理器"：选文件夹当工作区 + 子目录 + 打开/新建/重命名/移动/删除）
 const WorkspacePanel = lazy(() => import('./dock/WorkspacePanel').then((m) => ({ default: m.WorkspacePanel })))
+// adj562：「粘贴源码导入」迁入底栏（页签排在工作区之后）——原弹窗入口下线，与 adj492「关于」同套路
+const ImportPanel = lazy(() => import('../dialogs/PasteImportDialog').then((m) => ({ default: () => <m.PasteImportDialog inline /> })))
 
-/** 六个面板（顺序即标签栏顺序）；adj540：工作区**排第一**（手机端文件操作主入口，用户要求） */
+/** 七个面板（顺序即标签栏顺序）；adj540：工作区**排第一**（手机端文件操作主入口，用户要求）；
+ *  adj562：导入**紧跟在它后面**（用户要求"就在工作区后面加一个「导入」页签"） */
 const PANELS: readonly { key: DockPanelKey; render: ComponentType }[] = [
   { key: 'workspace', render: WorkspacePanel },
+  { key: 'import', render: ImportPanel },
   { key: 'problems', render: ProblemPanel },
   { key: 'tryout', render: TryoutPanel },
   { key: 'export', render: ExportPanel },
@@ -121,6 +125,16 @@ const WORKSPACE_VISIBLE_ROWS = 5
 const WORKSPACE_ROW_H_FALLBACK = 36
 /** adj554：`.ws-head` 高度实测未到位时的兜底（28px 按钮 + 面包屑 → 取大者） */
 const WORKSPACE_HEAD_H_FALLBACK = 28
+/**
+ * adj562（用户要求"把粘贴源码导入加到工作区后面"）：导入面板的**默认内容高度**。
+ *
+ * 为什么给固定值而**不进 AUTO_FIT**：这个面板做成"填满 dock"（`.pane-import { flex: 1 1 auto }`），
+ * 让粘贴框随 dock 拉高而变高（长源码不用在小框里滚）。而 `flex: 1 1 auto` 的 pane 一旦被拉伸，
+ * `pane.scrollHeight` 就退化成"当前 dock 有多高"（`scrollHeight === max(内容高, clientHeight)`），
+ * AUTO_FIT 会读到**被充气**的"内容自然高"——正是 E-2026-226 / E-2026-263 记过两次的测量污染。
+ * 所以这里与设置面板同一处置：**不进 AUTO_FIT，用固定默认高度**（说明 + 粘贴框 + 按钮 ≈ 300）。
+ */
+const IMPORT_DEFAULT_CONTENT_H = 300
 /**
  * adj520：dock 的**绝对最小高度** = 外壳高度（抓手 + 页签栏）——「最小高度」档位与拖拽/键盘的
  * 下限都用它：最小化后**仍能看到并点击页签 / 关闭 / 档位按钮**，随时可点回建议档、或向上拖回来。
@@ -234,6 +248,8 @@ const defaultH = (
     return narrow
       ? workspaceDefaultH(workspaceRowH, workspaceHeadH, chromeH)
       : maxH()
+  // adj562：导入面板——固定默认高度（粘贴框做成"填满 dock"，故**不进 AUTO_FIT**，理由见常量注释）
+  if (key === 'import') return chromeH + PANE_PAD_H + IMPORT_DEFAULT_CONTENT_H
   // adj494：关于/试听/导出走 AUTO_FIT（实测内容高）；这里的值是**首次测量前的兜底**
   return chromeH
 }
@@ -258,16 +274,18 @@ const clampH = (v: number, chromeH: number) => {
 }
 
 /**
- * 底栏五个面板页签（adj486：图标改用**顶栏同一套矢量图标**；adj492：新增「关于」）。
+ * 底栏面板页签（adj486：图标改用**顶栏同一套矢量图标**；adj492：新增「关于」；adj562：新增「导入」）。
  *
  * 由来（用户报）：这几个页签此前用的是 **Unicode 字符**（`⚠ ▶ ⬇ ⚙`）当图标——与顶栏按钮那套
  * "用户设计的线稿图标"不是一路货：字形粗细/留白/基线各不相同，与面板里的其它图标摆在一起显得杂，
  * 而同一个"试听/导出/设置"在顶栏是设计图标、在底栏却是个字符。现统一为 `ToolIcon`（同一套 PNG + mask 上色）。
- * 告警与关于暂无对应的设计图标，暂留字符（`⚠` / `ⓘ`，等用户补图后替换）。
+ * 告警 / 关于 / 导入暂无对应的设计图标，暂留字符（`⚠` / `ⓘ` / `⤓`，等用户补图后替换）。
  */
 const TABS: { key: DockPanelKey; label: string; icon?: ToolIconName; glyph?: string }[] = [
   // adj540：工作区排第一（手机端文件操作主入口，用户要求）；图标用 `public/icons/工作区.png`
   { key: 'workspace', label: dockCopy.tabWorkspace, icon: 'workspace' },
+  // adj562：导入紧跟工作区（用户要求）；暂无设计图标 ⇒ 用 `⤓`（"取进来"）当字符兜底
+  { key: 'import', label: dockCopy.tabImport, glyph: '⤓' },
   { key: 'problems', label: dockCopy.tabProblems, glyph: '⚠' },
   { key: 'tryout', label: dockCopy.tabTryout, icon: 'play' },
   { key: 'export', label: dockCopy.tabExport, icon: 'export' },
@@ -451,13 +469,35 @@ export function ToolDock() {
     const el = tabstripRef.current
     if (!el) return
     const max = el.scrollWidth - el.clientWidth
-    // 与 adj553 同款容差：1px 之内视作"贴边"，避免 sub-pixel 抖动
-    setTabOverflow({ left: el.scrollLeft > 1, right: max > 1 && el.scrollLeft < max - 1 })
+    // 与 adj553 同款容差：1px 之内视作"贴边"，避免 sub-pixel 抖动。
+    // adj561：**只在真的变化时才 setState**——箭头出现/消失会改变 tabstrip 的可用宽，
+    // 进而再触发一次 RO 回调；若无条件 `setState({...})` 每次都换新对象引用，会多一轮渲染
+    // （虽不会死循环，但没必要），用"同值返回 prev"直接短路。
+    const left = el.scrollLeft > 1
+    const right = max > 1 && el.scrollLeft < max - 1
+    setTabOverflow((prev) => (prev.left === left && prev.right === right ? prev : { left, right }))
   }, [])
+  /**
+   * adj561（用户报"手机端页签过多/滚动时**没有适时显示** `<` `>` 按钮，PC 端却有"）：
+   * **依赖必须含 `dockOpen`**——底栏关着时组件走 `if (!dockOpen) return null`，
+   * `.tool-dock-tabstrip` 根本没进 DOM，而本 effect 原先只依赖稳定的 `syncTabOverflow`
+   * ⇒ 首次（也是唯一一次）运行发生在底栏关闭时，`tabstripRef.current === null` 直接 early
+   * return，**之后永不重跑** ⇒ 箭头状态、scroll 监听、滚轮转横向**全都没装上**。
+   * PC 端之所以"看起来正常"，是因为中途切过视图/分屏时 `ToolDock` 被重挂载、而那时底栏恰好开着。
+   *
+   * adj561 第二处：**同时观察每个页签子元素**——`ResizeObserver` 只盯"被观察元素自身的盒尺寸"，
+   * 页签内容变宽（字体加载完成、文案变化）时 tabstrip 的**盒宽不变**、`scrollWidth` 却变了，
+   * 只观察容器就收不到回调（手机上首次打开时 webfont 还没就绪，正是这种情况）。
+   * 另外补一次 `fonts.ready` 与首帧后的 rAF，兜住"测量时字体/布局尚未稳定"。
+   */
   useLayoutEffect(() => {
+    if (!dockOpen) return // 底栏关着 ⇒ tabstrip 未渲染，无 DOM 可测（见上）
     const el = tabstripRef.current
     if (!el) return
-    syncTabOverflow()
+    const sync = () => syncTabOverflow()
+    sync()
+    // 首帧之后（含字体子集加载、容器查询命中后的重排）再补测一次
+    const raf = requestAnimationFrame(sync)
     // adj556：滚轮转横向——只在容器**确实溢出**时接管；触摸板横向滚动（`deltaX` 已占主导）
     // 与 Shift+滚轮（浏览器原生已支持横向）原样放行，不劫持正常滚动（adj553 同款三条）。
     const onWheel = (e: WheelEvent) => {
@@ -467,15 +507,33 @@ export function ToolDock() {
       el.scrollLeft += e.deltaY
     }
     el.addEventListener('wheel', onWheel, { passive: false })
-    el.addEventListener('scroll', syncTabOverflow, { passive: true })
-    const ro = new ResizeObserver(syncTabOverflow)
-    ro.observe(el)
-    return () => {
-      el.removeEventListener('wheel', onWheel)
-      el.removeEventListener('scroll', syncTabOverflow)
+    el.addEventListener('scroll', sync, { passive: true })
+    const ro = new ResizeObserver(sync)
+    /** 观察容器 + 全部页签：容器盒宽变（拖宽/旋转屏）与内容宽变（页签变宽）都要重算溢出 */
+    const observeAll = () => {
       ro.disconnect()
+      ro.observe(el)
+      for (const child of Array.from(el.children)) ro.observe(child)
     }
-  }, [syncTabOverflow])
+    observeAll()
+    // 页签增删（当前 TABS 静态，将来若变）⇒ 重新登记观察对象并立刻重算
+    const mo = new MutationObserver(() => {
+      observeAll()
+      sync()
+    })
+    mo.observe(el, { childList: true })
+    // 字体就绪后页签宽度会变（首次打开时 webfont 往往还没加载完）——这是手机上最常踩的一次
+    void document.fonts?.ready.then(sync).catch(() => {})
+    window.addEventListener('resize', sync)
+    return () => {
+      cancelAnimationFrame(raf)
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('scroll', sync)
+      window.removeEventListener('resize', sync)
+      ro.disconnect()
+      mo.disconnect()
+    }
+  }, [syncTabOverflow, dockOpen])
   /** adj556：箭头翻页——按"一屏的 80%"翻；滚到尽头自动禁用（箭头消失） */
   const pageTabsBy = (dir: -1 | 1) => {
     const el = tabstripRef.current
