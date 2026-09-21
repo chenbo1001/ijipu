@@ -73,6 +73,13 @@ export const ICON_FILES = {
   problems: '告警',
   /** adj565：底栏「关于」页签——由 `ⓘ` 字符换成设计图标 */
   about: '关于',
+  /**
+   * adj569：工作区面板左上的**「切换工作区目录」**按钮。
+   * 与页签用的 `workspace`（`工作区.png`）**分开**：同一个「工作区」概念，两处语义不同——
+   * 页签是"打开工作区面板"，这个按钮是"换一个目录当工作区"，
+   * 用户为此单独给了一张图（`public/icons/切换工作区.png`）。
+   */
+  switchWorkspace: '切换工作区',
 } as const
 
 export type ToolIconName = keyof typeof ICON_FILES

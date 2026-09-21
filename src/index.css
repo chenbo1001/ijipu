@@ -3784,7 +3784,9 @@ body {
 .ws-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  /* adj574（用户建议）：过滤行改成两行后本身够高 ⇒ 行间距再收一档（2 → 1px），
+     同一屏能多看一条；普通浏览行的 9px 上下内边距不变（它是单行，需要内边距撑点按高度）。 */
+  gap: 1px;
   min-height: 120px;
   max-height: 46vh;
   overflow-y: auto;
@@ -3981,8 +3983,12 @@ body {
   flex: 0 0 auto;
   flex-direction: column;
   gap: 4px;
-  /* adj545：固定宽度——要放得下过滤框（可输入 ~10 个字）与两个小按钮 */
-  width: 132px;
+  /* adj545：固定宽度——要放得下过滤框与两个小按钮。
+     adj571（用户要求"右栏更窄一些"）：132 → **112px**——这一列只有
+     「已选 N 项」标签 + 过滤框 + `*`/✕ 两个小按钮 + 「操作▾」四行，
+     实测（真机 CDP 量过）每行都吃 `width:100%`、内部文字只需 ~50px，
+     132px 有 20px 是白送的；收窄后列表多拿 20px，窄屏更明显。 */
+  width: 112px;
   /* 兜底：极矮的 dock（用户把底栏压到最小）下按钮列可滚动，绝不出现"按钮被裁掉点不到" */
   min-height: 0;
   overflow-y: auto;
@@ -4043,13 +4049,35 @@ body {
   border-color: var(--jp-accent);
   color: var(--jp-accent);
 }
-/* 过滤结果里那条相对目录（告诉用户这份谱在哪个子目录下） */
+/* 过滤结果里的那条相对目录（告诉用户这份谱在哪个子目录下）
+ * adj571（用户反馈"文件名被截断得看不到全名"）：原来是 `flex: none` —— 目录后缀**不可压缩**，
+ * 于是窄行里被挤掉的永远是**文件名**（`.ws-name` 带省略号），深目录下名字甚至只剩一两个字符。
+ * adj574（用户建议）：干脆不跟文件名抢同一行了——见下面的两行布局。 */
 .ws-hit-dir {
-  flex: none;
-  margin-left: auto;
-  padding-left: 8px;
+  align-self: flex-end; /* 两行布局里的**下一行**：右对齐 */
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
   color: var(--jp-text-muted);
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* adj574（用户建议）：过滤结果的"文件名 + 所在目录"改**两行**——
+ * 上行文件名左对齐、下行目录右对齐，两行各自吃满整行宽度 ⇒ 两者都拿得到可读宽度，
+ * 不再互相截断；行高翻倍也正好当手机的点按热区（高度 ≥ 44px）。 */
+.ws-row-open-2l {
+  align-items: flex-start; /* 🎼 图标贴第一行，不要在两行之间垂直居中 */
+}
+.ws-hit-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.ws-hit-main .ws-name {
+  text-align: left;
 }
 /* adj540（用户要求）：**弹出菜单**（只有"操作"一个下拉按钮，点它弹出）。
  * 用 portal 渲染到 body + `position: fixed`——因为 dock 是 `overflow: hidden`，
@@ -4136,6 +4164,15 @@ input.ws-check {
 span.ws-check {
   display: inline-block;
 }
+/* adj572（用户反馈）：过滤（平坦结果）行**没有复选框**——原先为"各行左对齐"保留了一个
+ * 16px 占位，于是左边多出 16+2+8 = 26px 空白。过滤行不再渲染占位后，这里再把左内边距
+ * 收一档（8 → 4px），🎼 图标与文件名整体左移 30px；行背景（hover/选中）仍铺满整行不受影响。
+ * adj574（用户建议）：这一行现在是**两行**（名字 + 路径）⇒ 本身已经够高，上下内边距可以
+ * 收一档（9 → 5px），行与行之间的视觉间距随之变小、同一屏能多看几条（实测行高仍 ≈ 46px，
+ * 大于手机 44px 的点按热区下限）。 */
+.ws-row-plain {
+  padding: 5px 4px;
+}
 /* 输入/确认区（重命名、新建目录、删除确认、另存文件名）——独立一行，不占列表行数 */
 .ws-editbar {
   display: flex;
@@ -4192,6 +4229,16 @@ span.ws-check {
   color: var(--jp-text-muted);
   font-size: 11px;
   line-height: 1.5;
+}
+/* adj568：网页版"选目录之前"的内核黑名单提示——比普通说明更值得看一眼，但**不抢主按钮**
+   （左侧一条强调色竖线 + 稍宽行距；桌面端不渲染这个元素） */
+.ws-blocked-hint {
+  padding: 8px 10px;
+  border-left: 2px solid var(--jp-accent);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--jp-accent) 8%, transparent);
+  line-height: 1.6;
+  text-align: left;
 }
 /* 行内「更多操作」展开区（打开/重命名/移动到…/删除），缩进对齐到行文字下方 */
 .ws-actions {
@@ -4267,8 +4314,10 @@ span.ws-check {
  * 注意：**按钮高度刻意不再压扁**（用户要求"高度参考其它按钮"）——靠分组下拉把按钮数从 8 降到 4~5，
  * 于是窄屏也不用滚动；这里只收窄列宽与二级按钮。 */
 @container (max-width: 430px) {
-  /* adj545：窄屏右栏也要放得下过滤框（约 10 个字）+ 两个小按钮；列表仍留 ~240px 宽 */
-  .ws-side { width: 116px; }
+  /* adj545：窄屏右栏也要放得下过滤框 + 两个小按钮；列表仍留 ~240px 宽。
+     adj571：116 → **100px**（与宽屏同步收窄一档；真机实测 360/390/430 三档
+     都无溢出：`scrollWidth == clientWidth`、四行子元素全部 100% 宽且不裁字） */
+  .ws-side { width: 100px; }
   .ws-sub-btn { padding: 5px 2px; font-size: 11px; }
   .ws-panel .ws-list { min-height: 72px; }
   /* 窄屏过滤框字号降一档，让列宽内能多显示几个字 */

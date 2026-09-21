@@ -22,3 +22,11 @@ serde_json = "1"
 # adj538：单实例——第二次双击 .jps 时不再开新进程，而是把路径交给已有窗口并置前。
 # 官方插件（tauri-apps/plugins-workspace），仅 Rust 依赖、无需 npm 包与 ACL 权限。
 tauri-plugin-single-instance = "2"
+# adj568：桌面端工作区改用**原生文件夹选择器** + **按路径读写**。
+# 为什么必须换掉网页版那条路：Chromium 的 File System Access **敏感目录黑名单**
+# 把「下载 / 桌面 / 文档 / 用户主目录」**整个目录**列为不可授予（子文件夹才放行），
+# 且该拦截在网页层无 API 可绕过、报错还是与"用户取消"无法区分的 AbortError
+# （见 E-2026-271）。桌面壳里我们不需要受这条 Web 安全策略约束，直接用原生选择器取
+# **磁盘路径**，再用 Rust 侧 fs 操作即可；顺带消除"重开要重新授权"。
+# 同样只作 Rust 依赖（自定义 command 调用），无需 npm 包与 ACL 权限。
+tauri-plugin-dialog = "2"

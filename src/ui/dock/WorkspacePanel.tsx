@@ -40,10 +40,10 @@ import {
   activateWorkspace,
   flushWorkspacePath,
   getWorkspace,
-  isWorkspaceSupported,
+  isPathWorkspace,
+  isWorkspaceAvailable,
   joinPath,
   listWorkspaces,
-  makeWorkspaceRecord,
   compileQuery,
   parentPath,
   pickWorkspaceDir,
@@ -55,6 +55,7 @@ import {
   searchWorkspaceJps,
   setWorkspace,
   stripJpsExt,
+  supportsPathWorkspace,
   type DirEntry,
   type SearchHit,
   type SearchResult,
@@ -165,7 +166,7 @@ export function WorkspacePanel() {
    * adj546（用户实测 27 秒）：**后台重扫**——一边扫一边把已找到的写进 `indexRef` 并让 UI 刷新，
    * 扫完落盘（下次直接秒开）。扫描期间界面上会显示"已扫描 N 项 / 找到 M 个"。
    */
-  const refreshIndex = useCallback(async (handle: FileSystemDirectoryHandle, wsId: string) => {
+  const refreshIndex = useCallback(async (rec: WorkspaceRecord, wsId: string) => {
     if (refreshingRef.current) return
     refreshingRef.current = true
     const t0 = Date.now()
@@ -177,7 +178,7 @@ export function WorkspacePanel() {
      */
     let lastShown = 0
     try {
-      const r = await searchWorkspaceJps(handle, '', {
+      const r = await searchWorkspaceJps(rec, '', {
         maxHits: 20000,
         maxEntries: 200000,
         onProgress: (scanned, partial) => {
@@ -214,7 +215,7 @@ export function WorkspacePanel() {
    * `useCallback([])` 保证引用稳定（E-2026-249：进依赖的必须是稳定引用）。
    */
   const buildIndex = useCallback(
-    async (handle: FileSystemDirectoryHandle, wsId: string, force = false): Promise<SearchResult> => {
+    async (rec: WorkspaceRecord, wsId: string, force = false): Promise<SearchResult> => {
       if (indexRef.current && !force) return { hits: indexRef.current, ...idxMetaRef.current, scanned: 0 }
       const cached = force ? null : await loadWorkspaceIndex(wsId)
       if (cached && cached.relPaths.length > 0) {
@@ -228,10 +229,10 @@ export function WorkspacePanel() {
         // adj546：**只在索引过期时才后台重扫**——此前每次打开面板都无条件重扫，
         // 在手机上等于每次都跑一遍几十秒的枚举（用户实测 27s）。落盘的索引够新鲜就直接用。
         const stale = Date.now() - (cached.at ?? 0) > INDEX_STALE_MS
-        if (stale) void refreshIndex(handle, wsId)
+        if (stale) void refreshIndex(rec, wsId)
         return { hits, truncated: false, blocked: [], scanned: 0 }
       }
-      const r = await searchWorkspaceJps(handle, '', { maxHits: 20000, maxEntries: 200000 })
+      const r = await searchWorkspaceJps(rec, '', { maxHits: 20000, maxEntries: 200000 })
       indexRef.current = r.hits
       idxMetaRef.current = { truncated: r.truncated, blocked: r.blocked }
       void saveWorkspaceIndex({ wsId, at: Date.now(), relPaths: r.hits.map((h) => h.relPath) })
@@ -290,7 +291,7 @@ export function WorkspacePanel() {
       return true
     }
     if (filterFromIndex()) return
-    void buildIndex(ws.handle, ws.id)
+    void buildIndex(ws, ws.id)
       .then((r) => {
         if (!alive) return
         filterFromIndex()
@@ -372,7 +373,7 @@ export function WorkspacePanel() {
         return
       }
       try {
-        const list = await readDirEntries(rec.handle, next)
+        const list = await readDirEntries(rec, next)
         entriesCacheRef.current.set(key, list)
         setEntries(list)
         setPath(next)
@@ -408,7 +409,7 @@ export function WorkspacePanel() {
   const enterAtLatestPos = useCallback(
     async (rec: WorkspaceRecord, label: string) => {
       const want = rec.path ?? []
-      const dir = await resolveExistingDir(rec.handle, want)
+      const dir = await resolveExistingDir(rec, want)
       if (joinPath(dir) !== joinPath(want)) {
         showNotice(workspaceCopy.dirGone(joinPath(want) || '根目录', joinPath(dir)), 'warn')
       }
@@ -453,7 +454,7 @@ export function WorkspacePanel() {
         useUiStore.getState().clearWorkspaceSaveIntent()
       }
       if (!rec) return
-      const q = await queryWorkspacePermission(rec.handle)
+      const q = await queryWorkspacePermission(rec)
       if (!alive) return
       setPerm(q)
       if (q === 'granted') {
@@ -469,7 +470,7 @@ export function WorkspacePanel() {
   }, [active, refresh, showNotice, enterAtLatestPos])
 
   const onPick = async () => {
-    if (!isWorkspaceSupported()) {
+    if (!isWorkspaceAvailable()) {
       showNotice(workspaceCopy.unsupported, 'warn')
       return
     }
@@ -477,16 +478,16 @@ export function WorkspacePanel() {
     // 静默失败兜底：已安装的 PWA 里选择器可能不弹（adj405 的同类现象）
     const timer = window.setTimeout(() => showNotice(workspaceCopy.pickerNoResponse, 'warn'), PICKER_NO_RESPONSE_MS)
     try {
-      const dir = await pickWorkspaceDir()
-      if (!dir) return // 用户取消
-      // adj544：工作区记录带**身份 id**（保存校验要用它判断"这份谱属于哪个工作区"）
-      const rec: WorkspaceRecord = makeWorkspaceRecord(dir)
+      // adj568：`pickWorkspaceDir()` 现在**分平台**——桌面壳走原生选择器拿绝对路径（路径后端），
+      // 浏览器走 FSA 拿句柄（句柄后端）；返回的已是带身份的完整记录。
+      const rec = await pickWorkspaceDir()
+      if (!rec) return // 用户取消（网页版里也可能是"目录被内核黑名单拦下"——两句同一个 AbortError）
       await setWorkspace(rec)
       setWs(rec)
       setPerm('granted')
       await refresh(rec, [])
       setRecent(await listWorkspaces())
-      showNotice(workspaceCopy.picked(dir.name), 'ok')
+      showNotice(workspaceCopy.picked(rec.name), 'ok')
     } catch (e) {
       const reason = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
       showNotice(workspaceCopy.loadFailed(reason), 'error')
@@ -504,7 +505,7 @@ export function WorkspacePanel() {
     setBusy(true)
     setBusyLabel(workspaceCopy.loadingWorkspace)
     try {
-      const r = await requestWorkspacePermission(ws.handle)
+      const r = await requestWorkspacePermission(ws)
       setPerm(r === 'granted' ? 'granted' : r === 'denied' ? 'denied' : 'unknown')
       if (r === 'granted') {
         await enterAtLatestPos(ws, workspaceCopy.loadingWorkspace)
@@ -529,7 +530,7 @@ export function WorkspacePanel() {
         return
       }
       setWs(next)
-      const r = await requestWorkspacePermission(next.handle)
+      const r = await requestWorkspacePermission(next)
       if (r !== 'granted') {
         setPerm(r === 'denied' ? 'denied' : 'unknown')
         showNotice(workspaceCopy.activateFailed(next.name), 'warn')
@@ -590,7 +591,7 @@ export function WorkspacePanel() {
     setBusy(true)
     setBusyLabel(workspaceCopy.readingTarget) // adj547
     try {
-      const list = await readDirEntries(ws.handle, next)
+      const list = await readDirEntries(ws, next)
       setEntries(list)
       setPath(next)
       void rememberWorkspacePath(next) // adj548：移动模式下选目标也记住
@@ -713,13 +714,25 @@ export function WorkspacePanel() {
     }
   }
 
-  const crumb = path.length > 0 ? joinPath(path) : (ws?.handle.name ?? '')
+  const crumb = path.length > 0 ? joinPath(path) : (ws?.name ?? '')
   /**
-   * 工作区目录的**可读路径**：`文件夹名 / 子目录 / …`。
+   * 工作区目录的**可读路径**：
+   *  · 桌面**路径后端**（adj568）= 完整磁盘路径（`D:\谱\小星星`）——原生选择器给的就是路径；
+   *  · 网页 FSA = `文件夹名 / 子目录 / …`。
    * ⚠️ FSA 只给文件夹名（`handle.name`），**拿不到完整磁盘路径**（隐私限制，`resolve()` 也只能算区内相对路径）
    * ⇒ 授权提示里就显示这个，并在旁边说明原因（用户要求"授权时要显示要授权的目录"）。
+   * 分隔符跟随根路径本身（Windows `\` / 其它 `/`），免得显示成 `D:\谱/小星星` 这种混搭。
    */
-  const wsPathText = ws ? joinPath([ws.handle.name, ...(ws.path ?? [])]) : ''
+  const wsPathText = (() => {
+    if (!ws) return ''
+    const segs = ws.path ?? []
+    if (isPathWorkspace(ws)) {
+      const dir = ws.dir ?? ''
+      const sep = dir.includes('\\') ? '\\' : '/'
+      return [dir.replace(/[\\/]+$/, ''), ...segs].join(sep)
+    }
+    return joinPath([ws.name, ...segs])
+  })()
 
   /**
    * adj544（用户要求 C）：**最近工作区**列表——一键切回上次那个（重启后尤其有用：
@@ -752,30 +765,41 @@ export function WorkspacePanel() {
         <button type="button" className="btn primary ws-big" onClick={() => void onPick()} disabled={busy}>
           {workspaceCopy.pick}
         </button>
+        {/* adj568（用户反馈"下载目录没法当工作区"）：**选之前**就把内核的敏感目录黑名单讲清楚——
+            被拦时内核抛的是与"用户取消"完全一样的 AbortError，应用侧事后根本补不出提示（见 E-2026-271）。
+            桌面壳走原生选择器、不受这条 Web 策略约束 ⇒ 只在网页版显示。 */}
+        {!supportsPathWorkspace() && <div className="ws-grant-hint ws-blocked-hint">{workspaceCopy.blockedHint}</div>}
         {recent.length > 0 && recentList}
       </div>
     )
   }
 
   // ---- 授权过期（真机实测：刷新后是 prompt）：**先显示是哪个目录**，再由用户点一下重新授权 ----
+  // adj568：**桌面路径后端没有"授权"这回事** ⇒ 走到这里只可能是目录被外部删/改名/移走，
+  // 文案与动作都要换（不能照搬"浏览器把权限重置了"那套，也不能给一个点了没用的授权按钮）。
   if (perm !== 'granted') {
+    const gone = isPathWorkspace(ws)
     return (
       <div className="ws-panel ws-panel-gate">
         <div className="ws-grant">
-          <div className="ws-grant-title">{workspaceCopy.grantTitle}</div>
+          <div className="ws-grant-title">{gone ? workspaceCopy.dirMissingTitle : workspaceCopy.grantTitle}</div>
           <div className="ws-grant-dir" title={wsPathText}>
             {wsPathText}
           </div>
-          <div className="ws-grant-hint">{workspaceCopy.grantPathHint}</div>
-          <div className="ws-grant-hint">{workspaceCopy.grantWhy}</div>
+          <div className="ws-grant-hint">{gone ? workspaceCopy.dirMissingWhy : workspaceCopy.grantPathHint}</div>
+          {!gone && <div className="ws-grant-hint">{workspaceCopy.grantWhy}</div>}
         </div>
         {/* adj544：待校验绑定 ⇒ 说明"重新授权后就能写回原文件"，把这一步的意义讲清楚 */}
-        {pending && <div className="ws-binding-hint">{workspaceCopy.bindingRestored(pending.wsName || ws.name, joinPath(pending.segs))}</div>}
-        <button type="button" className="btn primary ws-big" onClick={() => void onGrant()} disabled={busy}>
-          {workspaceCopy.grant}
-        </button>
-        <button type="button" className="btn" onClick={() => void onPick()} disabled={busy}>
-          {workspaceCopy.switchDir}
+        {!gone && pending && (
+          <div className="ws-binding-hint">{workspaceCopy.bindingRestored(pending.wsName || ws.name, joinPath(pending.segs))}</div>
+        )}
+        {!gone && (
+          <button type="button" className="btn primary ws-big" onClick={() => void onGrant()} disabled={busy}>
+            {workspaceCopy.grant}
+          </button>
+        )}
+        <button type="button" className={gone ? 'btn primary ws-big' : 'btn'} onClick={() => void onPick()} disabled={busy}>
+          {gone ? workspaceCopy.pick : workspaceCopy.switchDir}
         </button>
       </div>
     )
@@ -787,9 +811,12 @@ export function WorkspacePanel() {
           下面才分左右：左=目录/文件列表，右=过滤 / `*` / 消除过滤 / 操作▾。
           这样路径能拿到整个面板宽度（此前被右栏挤掉一百多像素，深目录看不全）。 */}
       <div className="ws-head">
-        {/* adj540（用户第二轮反馈）：左侧放一个"切换工作区"图标按钮（`public/icons/工作区.png`）；
+        {/* adj540（用户第二轮反馈）：左侧放一个"切换工作区"图标按钮；
             路径面包屑从**第一个段（根目录名）**开始就是普通段，点击=回到工作区根目录——
-            解决了"根目录名点不开"的别扭，把"切换工作区"这个动作彻底从路径里分离出去。 */}
+            解决了"根目录名点不开"的别扭，把"切换工作区"这个动作彻底从路径里分离出去。
+            adj569（用户要求）：图标从 `工作区.png` 换成专用的 `切换工作区.png`——
+            同一个"工作区"概念下两处语义不同：底栏**页签**是"打开工作区面板"，
+            这个**按钮**是"换一个目录当工作区"，用同一张图会让人以为它也是开关面板。 */}
         <button
           type="button"
           className="ws-workspace-btn"
@@ -798,7 +825,7 @@ export function WorkspacePanel() {
           aria-label={workspaceCopy.workspaceBtnTitle}
           disabled={busy}
         >
-          <ToolIcon name="workspace" />
+          <ToolIcon name="switchWorkspace" />
         </button>
         <div className="ws-crumb" title={wsPathText}>
           {/* 根目录名 = 普通面包屑段（"回到工作区根目录"或"移动模式下选工作区根作目标"） */}
@@ -808,7 +835,7 @@ export function WorkspacePanel() {
             onClick={() => void (moving ? refreshMovingTarget([]) : refresh(ws, []))}
             disabled={busy}
           >
-            {ws.handle.name}
+            {ws.name}
           </button>
           <span className="ws-sep">/</span>
           {path.map((seg, i) => (
@@ -908,12 +935,20 @@ export function WorkspacePanel() {
           {/* 过滤模式：**平坦结果**（跨子目录），点一条直接打开 —— 不提供勾选（改名/移动/删除要先清空过滤） */}
           {searching
             ? (hits ?? []).slice(0, RESULT_RENDER_MAX).map((h) => (
-                <div key={h.relPath} className="ws-row">
-                  <span className="ws-check" aria-hidden="true" />
+                /* adj571（用户反馈）：列表窄时文件名会被省略号截断 ⇒ **悬浮显示完整相对路径**
+                   （含文件名与所在子目录）。title 放在**整行 div** 上而不是里面的按钮上：
+                   按钮旁边还有复选框/目录后缀，放行上则悬停任意位置都能看到。
+                   adj572（用户反馈）：过滤结果**本来就没有复选框**，却仍用 16px 占位保对齐 ⇒
+                   左边白白空出 26px（16 占位 + 2 右边距 + 8 间距）。这里**不再渲染占位**，
+                   🎼 图标与文件名整体左移，文件名也因此多拿到这 26px。
+                   adj574（用户建议）：窄列表里"文件名 + 路径"挤在同一行会**互相截断** ⇒ 改**两行**：
+                   上行文件名左对齐、下行所在目录右对齐（颜色口径不变：名字主文字色、路径弱化色）。
+                   两行各自吃满整行宽度 ⇒ 两者都拿到完整可读宽度，行也更高、手机上更好点按；
+                   也正因如此，行距可以再收紧一点（见 `.ws-row-plain`）。 */
+                <div key={h.relPath} className="ws-row ws-row-plain" title={h.relPath}>
                   <button
                     type="button"
-                    className="ws-row-open"
-                    title={h.relPath}
+                    className="ws-row-open ws-row-open-2l"
                     onClick={() => {
                       void (async () => {
                         const ok = await openWorkspaceFile([...h.dirSegs, h.name])
@@ -923,8 +958,10 @@ export function WorkspacePanel() {
                     disabled={busy}
                   >
                     <span className="ws-icon">🎼</span>
-                    <span className="ws-name">{h.name}</span>
-                    {h.dirSegs.length > 0 && <span className="ws-hit-dir">{joinPath(h.dirSegs)}</span>}
+                    <span className="ws-hit-main">
+                      <span className="ws-name">{h.name}</span>
+                      {h.dirSegs.length > 0 && <span className="ws-hit-dir">{joinPath(h.dirSegs)}</span>}
+                    </span>
                   </button>
                 </div>
               ))
@@ -950,7 +987,15 @@ export function WorkspacePanel() {
                 {entries
                   .filter((e) => !moving || e.kind === 'dir')
                   .map((e) => (
-                    <div key={`${e.kind}-${e.name}`} className={`ws-row${selected.includes(e.name) ? ' is-selected' : ''}`}>
+                    /* adj571（用户反馈）：普通列表行**原来没有任何 title** ⇒ 窗口窄 / 底栏窄时
+                       文件名被省略号截断后**无处可看全名**。这里补上"工作区内完整相对路径"
+                       （含文件名，例如 `2.曲谱集/小星星.jps`）——既给出全名，也顺带说明它在哪一层。
+                       title 放整行 div：悬停在复选框、图标、名字任意位置都能看到。 */
+                    <div
+                      key={`${e.kind}-${e.name}`}
+                      className={`ws-row${selected.includes(e.name) ? ' is-selected' : ''}`}
+                      title={joinPath([...path, e.name])}
+                    >
                       {/* adj540（用户要求）：文件名前的**复选框** —— 勾选 = 选中（供 改名/移动/删除 用），
                           点名字 = 打开/进入。两者分开，不再需要"点两次才打开" */}
                       {moving ? (
@@ -1137,7 +1182,7 @@ export function WorkspacePanel() {
                 setMenuOpen(false)
                 if (!ws) return
                 indexRef.current = null
-                void buildIndex(ws.handle, ws.id, true).then(() => setIndexVersion((v) => v + 1))
+                void buildIndex(ws, ws.id, true).then(() => setIndexVersion((v) => v + 1))
               }}
             >
               {workspaceCopy.rescan}

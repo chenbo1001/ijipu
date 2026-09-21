@@ -7973,6 +7973,10 @@ function runAdj529PreviewFitTests() {
  * ④ 窗口变窄时先图标化、再按 视图 > 支持 > 排版 > 试听 > 导出 > 主题 > 设置 > 预览比率 >
  * 折行 > 输入条 > 字体 > 字号 的**可见优先级**逐步隐藏；⑤ 按钮样式/响应行为/更多菜单表现不变」。
  *
+ * adj570（用户要求"主题与设置对换位置"）：功能组显示顺序改为 …导出 > **设置 > 主题** > 缩放，
+ * 可见优先级同步对换（主题在右 ⇒ 主题先被折叠）——下面两条顺序断言按新口径更新。
+ * 之所以两处必须一起改：折叠 = "先把显示顺序最右端收起来"，只改一边会出现"右边还在、左边先没了"。
+ *
  * 断言分两层：
  * ① **折叠算式本身**——拿一张"每个按钮多宽"的合成表，断言"谁先走、走几个"。这是最易错、
  *    也最难用眼睛验的部分（宽度预算差 1~2px 就表现成"某个按钮不见了"），且历史上有过
@@ -8041,13 +8045,13 @@ function runAdj530TopBarLayoutTests() {
     const m = new RegExp(`const ${name}: readonly ToolKey\\[\\] = \\[([^\\]]+)\\]`).exec(top)
     return (m?.[1] ?? '').replace(/[\s']/g, '').replace(/,$/, '')
   }
-  check('adj530 功能按钮组顺序 = 视图/排版/试听/导出/主题/设置/缩放（组靠左对齐）',
-    orderOf('FN_ORDER') === 'view,guides,playback,export,themeMode,pageConfig,zoom', orderOf('FN_ORDER'))
+  check('adj530/adj570 功能按钮组顺序 = 视图/排版/试听/导出/**设置/主题**/缩放（组靠左对齐；adj570 对换主题与设置）',
+    orderOf('FN_ORDER') === 'view,guides,playback,export,pageConfig,themeMode,zoom', orderOf('FN_ORDER'))
   check('adj530 编辑设置组顺序 = 折行/输入条/字体/字号（组靠右对齐）',
     orderOf('EDIT_ORDER') === 'autoWrap,scriptPad,font,fontSize', orderOf('EDIT_ORDER'))
-  check('adj530 可见优先级 = 用户给定顺序（视图>支持>排版>试听>导出>主题>设置>缩放>折行>输入条>字体>字号）',
+  check('adj530/adj570 可见优先级 = 视图>支持>排版>试听>导出>**设置>主题**>缩放>折行>输入条>字体>字号（与显示顺序的右端先折叠一致）',
     orderOf('TOOL_PRIORITY') ===
-      'view,donate,guides,playback,export,themeMode,pageConfig,zoom,autoWrap,scriptPad,font,fontSize',
+      'view,donate,guides,playback,export,pageConfig,themeMode,zoom,autoWrap,scriptPad,font,fontSize',
     orderOf('TOOL_PRIORITY'))
   check('adj530 折叠判定在独立纯算式里（组件只负责量宽/读活值；旧的按序号切片 visCount 已移除）',
     /import \{ foldKeys \} from '\.\/topbarFold'/.test(top) &&
@@ -8109,13 +8113,20 @@ function runAdj530TopBarLayoutTests() {
     /const isApplicable = useCallback\(\(k: ToolKey\): boolean => \(k === 'zoom' \? showZoom : true\), \[showZoom\]\)/.test(top) &&
       !/k === 'font' \? !isNarrow/.test(top.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')),
     '')
-  // ② 「更多」下拉里的字体项必须**真的有反应**——原先 `openModal('pageConfig')` 是死调用
-  //    （页面设置在 adj462 已迁入底栏，App 里没有 `modal === 'pageConfig'` 分支）⇒ 改为开关底栏。
-  //    ⚠ 负向断言前**先剥注释**（上面的说明里故意引用了旧写法，同 E-2026-237 的坑）。
+  // ② adj573（用户要求）：字体**不再作为「更多」条目出现**——见 OVERFLOW_EXCLUDE 的说明。
+  //    这条推翻了 adj563 的做法（当时把它改成"打开设置底栏"）：用户认为那条与「字号」「设置」
+  //    都重复、且在下拉里并不能选字体，要求沉下去后干脆不显示。
+  //    ⚠ 负向断言前**先剥注释**（注释里故意引用了旧写法，同 E-2026-237 的坑）。
   const topCode = top.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
-  check('adj563 「更多」下拉里的字体项改为开关「设置」底栏（原 `openModal(\'pageConfig\')` 是死调用）',
-    /if \(t\.kind === 'font'\) \{[\s\S]{0,400}?toggleDock\('settings'\)/.test(topCode) &&
-      /\{iconOf\('font'\)\}/.test(topCode) &&
+  check('adj573（用户要求）「字体」沉进「更多」后**不再列为菜单项**（仍保留显式 null 分支防"死条目"复发）',
+    /const OVERFLOW_EXCLUDE: readonly ToolKey\[\] = \['font'\]/.test(topCode) &&
+      /hiddenList = OVERFLOW_ORDER\.filter\([\s\S]{0,160}?!OVERFLOW_EXCLUDE\.includes\(k\)/.test(topCode) &&
+      /if \(t\.kind === 'font'\) \{[\s\S]{0,500}?return null/.test(topCode) &&
+      // 前提：折叠顺序末两位是 `font, fontSize` ⇒ 字号**先**被收走，字体沉下去时「更多」里还有字号，
+      // 按钮不会消失、入口不会断（把 font 挪到 fontSize 之后就会断）
+      /font,fontSize\]?\]?$/.test(orderOf('TOOL_PRIORITY')) &&
+      // 字体分支里**不再有**转开设置底栏的替身（那是 adj563 的做法，已被本轮推翻）
+      !/kind === 'font'\) \{[\s\S]{0,400}?toggleDock\('settings'\)/.test(topCode) &&
       !/openModal\('pageConfig'\)/.test(topCode),
     '')
   // ③ `ModalKind` 只留**真的有渲染分支**的模态——防止同类死调用再次通过类型检查。
@@ -8496,15 +8507,26 @@ async function runAdj540WorkspaceTests() {
       /binding: WorkspaceBinding \| null/.test(store),
     `绑定重置点 ${resets} 处 / 待校验绑定重置点 ${pendingResets} 处`)
   check('adj540/adj544 「保存」对工作区文档写回同一个文件（含子目录），且**先过三道校验**（身份/存在）',
-    /if \(st\.binding && st\.binding\.segs\.length > 0\) \{[\s\S]{0,1400}?await writeWorkspaceText\(ws\.handle, wsPath, code\)/.test(store) &&
+    /if \(st\.binding && st\.binding\.segs\.length > 0\) \{[\s\S]{0,1400}?await writeWorkspaceText\(ws, wsPath, code\)/.test(store) &&
       /if \(ws\.id !== bind\.wsId\) \{/.test(store) &&
       /openWorkspaceFile: async \(path\) =>/.test(store) &&
       /saveToWorkspace: async \(path\) =>/.test(store),
     '')
-  check('adj540 工作区模块自包含：权限复用 saveSupport（不另写一套）、路径只存根句柄 + 相对段',
+  // adj568：工作区模块自包含 + **两套后端**（`fsa` 句柄 / `path` 磁盘路径）共用同一组 IO 原语。
+  check('adj540/adj568 工作区模块自包含：权限复用 saveSupport（不另写一套）、路径只存根句柄/根路径 + 相对段，且 IO 收敛到原语',
     /from '\.\/saveSupport'/.test(wsSrc) &&
-      /resolveWorkspaceFile/.test(wsSrc) &&
-      /export interface WorkspaceRecord/.test(String(readFileSync('src/store/fileHandleDb.ts', 'utf8'))),
+      /async function resolveFileHandle/.test(wsSrc) &&
+      /export interface WorkspaceRecord/.test(String(readFileSync('src/store/fileHandleDb.ts', 'utf8'))) &&
+      // 两套后端：`backendOf` 分流 + 原语层（列目录/读/写/判空）
+      /export function backendOf\(rec: \{ handle\?: FileSystemDirectoryHandle; dir\?: string \} \| null\): WorkspaceBackend \| null/.test(
+        wsSrc,
+      ) &&
+      /async function listRaw\(/.test(wsSrc) &&
+      /async function readTextRaw\(/.test(wsSrc) &&
+      /async function writeTextRaw\(/.test(wsSrc) &&
+      /async function isDirEmptyRaw\(/.test(wsSrc) &&
+      // 路径后端一律经 `invokeWs` 调 Rust（不在前端手拼路径去读磁盘）
+      /invokeWs<[^>]*>\('ws_list_dir'/.test(wsSrc),
     '')
   const ui = String(readFileSync('src/store/uiStore.ts', 'utf8'))
   const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
@@ -8570,8 +8592,9 @@ async function runAdj540WorkspaceTests() {
   check('adj554 工作区 wide 仍走 maxH()（adj540 "宽屏一次看全"口径不变），narrow 才走新算式',
     /if \(key === 'workspace'\)[\s\S]{0,200}?workspaceDefaultH\(workspaceRowH, workspaceHeadH, chromeH\)[\s\S]{0,60}?: maxH/.test(dockModuleSrc),
     '')
-  check('adj540 重新授权时**显示要授权的目录**（文件夹名 + 工作区内相对路径），并说明"浏览器不给完整路径"',
-    /const wsPathText = ws \? joinPath\(\[ws\.handle\.name, \.\.\.\(ws\.path \?\? \[\]\)\]\) : ''/.test(panelSrc) &&
+  check('adj540/adj568 重新授权时**显示要授权的目录**（网页版=文件夹名 + 区内相对路径；桌面路径后端=完整磁盘路径），并说明"浏览器不给完整路径"',
+    /const wsPathText = \(\(\) => \{[\s\S]{0,700}?if \(isPathWorkspace\(ws\)\)[\s\S]{0,300}?return \[dir\.replace/.test(panelSrc) &&
+      /return joinPath\(\[ws\.name, \.\.\.segs\]\)/.test(panelSrc) &&
       /className="ws-grant-dir" title=\{wsPathText\}/.test(panelSrc) &&
       /\{wsPathText\}/.test(panelSrc) &&
       /grantTitle: '需要重新授权访问这个文件夹'/.test(copySrc) &&
@@ -8581,7 +8604,10 @@ async function runAdj540WorkspaceTests() {
     /className="ws-workspace-btn"[\s\S]{0,200}?onClick=\{\(\) => void \(moving \? refreshMovingTarget\(\[\]\) : onPick\(\)\)\}/.test(
       panelSrc,
     ) &&
-      /<ToolIcon name="workspace" \/>/.test(panelSrc) &&
+      // adj569：改用专用的 `切换工作区.png`（与底栏「工作区」页签的 `workspace` 图标区分开）
+      /<ToolIcon name="switchWorkspace" \/>/.test(panelSrc) &&
+      /switchWorkspace: '切换工作区'/.test(String(readFileSync('src/ui/toolIcons.ts', 'utf8'))) &&
+      !/<ToolIcon name="workspace" \/>/.test(panelSrc) &&
       /className="ws-crumb-seg ws-crumb-root"[\s\S]{0,200}?onClick=\{\(\) => void \(moving \? refreshMovingTarget\(\[\]\) : refresh\(ws, \[\]\)\)\}/.test(
         panelSrc,
       ) &&
@@ -8597,12 +8623,12 @@ async function runAdj540WorkspaceTests() {
       /\| 'workspace'/.test(ui),
     '')
   check('adj540 手机端「保存」未绑定任何文件时自动引导到工作区另存（手机上不走 showSaveFilePicker）',
-    /const runSaveSmart = async \(\) => \{[\s\S]{0,260}?isCoarsePointerDevice\(\) && isWorkspaceSupported\(\) && !useDocStore\.getState\(\)\.binding[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)/.test(
+    /const runSaveSmart = async \(\) => \{[\s\S]{0,260}?isCoarsePointerDevice\(\) && isWorkspaceAvailable\(\) && !useDocStore\.getState\(\)\.binding[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)/.test(
       topSrc,
     ) && /entrySave: MenuEntry = \{ label: '保存\(&S\)', kbd: 'Ctrl\+S', hotkey: 's', onPick: runSaveSmart \}/.test(topSrc),
     '')
   check('adj540 手机端「另存为」也走工作区（开面板 + 展开文件名输入），桌面端仍用系统另存为',
-    /const runSaveAsSmart = async \(\) => \{[\s\S]{0,240}?isCoarsePointerDevice\(\) && isWorkspaceSupported\(\)[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)[\s\S]{0,80}?await saveFileAs\(\)/.test(
+    /const runSaveAsSmart = async \(\) => \{[\s\S]{0,240}?isCoarsePointerDevice\(\) && isWorkspaceAvailable\(\)[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)[\s\S]{0,80}?await saveFileAs\(\)/.test(
       topSrc,
     ) &&
       /另存为\(&A\)…', hotkey: 'a', onPick: runSaveAsSmart/.test(topSrc) &&
@@ -8615,7 +8641,7 @@ async function runAdj540WorkspaceTests() {
       /shouldUseFileInputPicker\(isCoarsePointerDevice\(\)/.test(store),
     '')
   check('adj540 子目录真的能进（列目录 + 面包屑 + 上级）且**每次打开都重读**（手机上刚存进来的谱要立刻可见）',
-    /const list = await readDirEntries\(rec\.handle, next\)/.test(panelSrc) &&
+    /const list = await readDirEntries\(rec, next\)/.test(panelSrc) &&
       /onClick=\{\(\) => void openEntry\(e\)\}/.test(panelSrc) &&
       /parentPath\(path\)/.test(panelSrc) &&
       /const active = useUiStore\(\(s\) => s\.dockOpen && s\.dockPanel === 'workspace'\)/.test(panelSrc) &&
@@ -8627,7 +8653,7 @@ async function runAdj540WorkspaceTests() {
       /const \[query, setQuery\] = useState\(''\)/.test(panelSrc) &&
       /const searching = query\.trim\(\)\.length > 0/.test(panelSrc) &&
       // adj543/adj546：过滤改为"走一次建索引（可落盘、可后台重扫） + 内存 filter"
-      /void buildIndex\(ws\.handle, ws\.id\)/.test(panelSrc) &&
+      /void buildIndex\(ws, ws\.id\)/.test(panelSrc) &&
       /const match = compileQuery\(query\)/.test(panelSrc) &&
       /idx\.filter\(\(h\) => match\(h\.name, h\.relPath\)\)/.test(panelSrc) &&
       /searching\s*\?\s*\(hits \?\? \[\]\)\.slice\(0, RESULT_RENDER_MAX\)\.map/.test(panelSrc) &&
@@ -8655,7 +8681,7 @@ async function runAdj540WorkspaceTests() {
     '')
   check('adj540 列表与过滤都**跳过 `.` 开头的条目**（`.git`/`.obsidian`/`.trash` 这类系统目录不算谱，还会吃光搜索配额）',
     /export function isHiddenName/.test(wsSrc) &&
-      /if \(isHiddenName\(handle\.name\)\) continue/.test(wsSrc) && // 列目录
+      /if \(isHiddenName\(e\.name\)\) continue/.test(wsSrc) && // 列目录（adj568：条目改成后端无关的 RawEntry）
       /if \(isHiddenName\(h\.name\)\) continue/.test(wsSrc) && // 递归过滤
       isHiddenName('.git') &&
       isHiddenName('.obsidian') &&
@@ -8734,13 +8760,13 @@ async function runAdj540WorkspaceTests() {
     stripJpsExt('小星星') === '小星星' && stripJpsExt('小星星.jps') === '小星星' && stripJpsExt('A.JPS') === 'A',
     '')
   check('adj540 重命名/移动 = 读→写新位置→**回读校验一致才删原文件**（FSA 对用户选中的目录没有 move()，非 OPFS 的移动还停在提案）',
-    /async function transferFile\([\s\S]{0,700}?await writeWorkspaceText\(root, to, text\)[\s\S]{0,200}?if \(back !== text\) throw new Error\('VERIFY'\)[\s\S]{0,120}?await removeFile\(root, from\)/.test(
+    /async function transferFile\([\s\S]{0,700}?await writeWorkspaceText\(rec, to, text\)[\s\S]{0,200}?if \(back !== text\) throw new Error\('VERIFY'\)[\s\S]{0,120}?await removeFile\(rec, from\)/.test(
       wsCode,
     ) &&
       !/\.move\(/.test(wsCode),
     '')
   check('adj540 删除是**永久**的：二次确认 + 目录只允许删空的（避免递归删掉用户目录里其它文件）',
-    /export async function removeEmptyDir[\s\S]{0,500}?NOT_EMPTY[\s\S]{0,300}?removeEntry\(name\)/.test(wsCode) &&
+    /export async function removeEmptyDir[\s\S]{0,500}?NOT_EMPTY[\s\S]{0,300}?removeRaw\(rec, target, true\)/.test(wsCode) &&
       /deleteFileConfirm/.test(copySrc) &&
       /confirmDel/.test(panelSrc) &&
       // 明确**不用** recursive：它会连目录里的照片/文档一起删掉
@@ -8816,15 +8842,17 @@ async function runAdj540WorkspaceTests() {
   let adj558DirCaseErr = ''
   try {
     const root = mkDir('root')
-    const before = await readDirEntries(root, [])
+    // adj568：IO 收 `WorkspaceRecord`（`fsa` 后端 = 句柄；`path` 后端 = 绝对路径）
+    const rec = { id: 'smoke-fsa', name: 'root', handle: root, path: [] } as never
+    const before = await readDirEntries(rec, [])
     if (before.length !== 0) throw new Error(`expected empty dir, got ${before.length}`)
-    await createSubdir(root, [], 'NewDir')
-    const after = await readDirEntries(root, [])
+    await createSubdir(rec, [], 'NewDir')
+    const after = await readDirEntries(rec, [])
     const hasNew = after.some((e) => e.kind === 'dir' && e.name === 'NewDir')
     if (!hasNew) throw new Error(`after create, root listing=${JSON.stringify(after.map((e) => e.name))}`)
     // 再创建同名 → 应抛 EXISTS（与 createSubdir 的 hasEntry 校验一致）
     let threwExists = false
-    try { await createSubdir(root, [], 'NewDir') } catch (e) { threwExists = (e as Error).message === 'EXISTS' }
+    try { await createSubdir(rec, [], 'NewDir') } catch (e) { threwExists = (e as Error).message === 'EXISTS' }
     if (!threwExists) throw new Error('duplicate createSubdir did not throw EXISTS')
   } catch (e) { adj558DirCaseErr = (e as Error).message }
   check('adj558 创建子目录后，readDirEntries 立刻看到新条目（不依赖缓存重建）',
@@ -9000,7 +9028,7 @@ async function runAdj541DockToggleTests() {
     '')
   check('adj544（E-2026-251）保存前**三道校验**：工作区身份不符 ⇒ 拒绝写盘并解释；原文件不存在 ⇒ 转另存',
     /if \(ws\.id !== bind\.wsId\) \{[\s\S]{0,400}?boundToOtherWorkspace\([\s\S]{0,120}?return false/.test(store) &&
-      /if \(!\(await hasEntry\(ws\.handle, wsPath\.slice\(0, -1\), wsPath\[wsPath\.length - 1\]\)\)\) \{[\s\S]{0,300}?sourceMissing\([\s\S]{0,120}?return false/.test(
+      /if \(!\(await hasEntry\(ws, wsPath\.slice\(0, -1\), wsPath\[wsPath\.length - 1\]\)\)\) \{[\s\S]{0,300}?sourceMissing\([\s\S]{0,120}?return false/.test(
         store,
       ) &&
       // 拒绝文案要把"东西在哪 + 为什么没写 + 怎么办"说全
@@ -9010,13 +9038,77 @@ async function runAdj541DockToggleTests() {
   check('adj544 启动/授权后**恢复绑定**（三个条件全满足才升级成正式绑定，否则保持待校验）',
     /export async function resolvePendingBinding\(\): Promise<boolean>/.test(store) &&
       /if \(ws\.id !== pending\.wsId\)/.test(store) &&
-      /await queryWorkspacePermission\(ws\.handle\)/.test(store) &&
-      /await hasEntry\(ws\.handle, segs\.slice\(0, -1\), segs\[segs\.length - 1\]\)/.test(store) &&
+      /await queryWorkspacePermission\(ws\)/.test(store) &&
+      /await hasEntry\(ws, segs\.slice\(0, -1\), segs\[segs\.length - 1\]\)/.test(store) &&
       /void getWorkspace\(\)\s*\n\s*\.then\(\(\) => resolvePendingBinding\(\)\)/.test(store) &&
       // 面板：授权成功后、以及每次打开面板都会尝试恢复
       /await resolvePendingBinding\(\)/.test(wsPanelSrc) &&
       /bindingRestored/.test(copySrc2),
     '')
+  // ---- adj568（用户反馈"下载目录没法当工作区"）：桌面端改用**原生选择器 + 路径读写** ----
+  //
+  // 背景（Chromium 源码为证，`chrome_file_system_access_permission_context.cc` 的 `GenerateBlockPaths()`）：
+  // 「下载 / 桌面 / 文档 / 用户主目录」被列为 `kDontBlockChildren`——**该目录自身不能授予网页、
+  // 子文件夹可以**；被拦时弹的框说"包含系统文件"、抛的错却与"用户取消"同为 `AbortError`
+  // ⇒ 网页层既绕不过也分不清。桌面壳不受这条 **Web** 策略约束，故改用原生选择器拿路径 + Rust 读写。
+  {
+    const rustSrc = String(readFileSync('src-tauri/src/lib.rs', 'utf8'))
+    // 剥注释后再查"禁用写法"（注释里为解释原因会提到它们——同 E-2026-237 的坑）
+    const rustCode = rustSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    /** 只取 `ws_remove_empty_dir` 的函数体（文件别处——清 SW 缓存——合法地用着 `remove_dir_all`） */
+    const wsRemoveDirBody = rustCode.slice(
+      rustCode.indexOf('fn ws_remove_empty_dir'),
+      rustCode.indexOf('fn ws_pick_dir'),
+    )
+    check('adj568 桌面端走 `path` 后端：有桌面壳时**先**用原生选择器，绝不退回 `showDirectoryPicker`',
+      /export function backendOf\(rec: \{ handle\?: FileSystemDirectoryHandle; dir\?: string \} \| null\): WorkspaceBackend \| null/.test(
+        wsSrc,
+      ) &&
+        /if \(typeof rec\.dir === 'string' && rec\.dir\) return 'path'/.test(wsSrc) &&
+        /export function supportsPathWorkspace\(\): boolean \{[\s\S]{0,120}?return shellInvoke\(\) !== null/.test(wsSrc) &&
+        // 选目录：**壳里那条 return 必须先于 FSA 那条**（否则桌面端又会被黑名单挡住）
+        /export async function pickWorkspaceDir\(\): Promise<WorkspaceRecord \| null> \{[\s\S]{0,200}?if \(shellInvoke\(\)\) \{[\s\S]{0,200}?ws_pick_dir[\s\S]{0,160}?makePathWorkspaceRecord\(dir\)/.test(
+          wsSrc,
+        ) &&
+        /export function isWorkspaceAvailable\(\): boolean \{[\s\S]{0,140}?return supportsPathWorkspace\(\) \|\| isWorkspaceSupported\(\)/.test(
+          wsSrc,
+        ),
+      '')
+    check('adj568 桌面端身份 = 规整后的**绝对路径**（同一目录反复选仍是同一个工作区，不像 FSA 每次发新 id）',
+      /export function makePathWorkspaceRecord\(dir: string, path: readonly string\[\] = \[\]\): WorkspaceRecord \{[\s\S]{0,320}?id: `path:\$\{norm\.toLowerCase\(\)\}`/.test(
+        wsSrc,
+      ) &&
+        /const name = norm\.split\(\/\[\\\\\/\]\/\)\.filter\(Boolean\)\.pop\(\) \?\? norm/.test(wsSrc),
+      '')
+    check('adj568 路径后端**没有"授权"这回事**（原生选择器给的就是用户自己的目录）：权限只回答"目录还在不在"',
+      /export async function queryWorkspacePermission\([\s\S]{0,400}?backendOf\(rec\) !== 'fsa' \|\| !root[\s\S]{0,200}?dirExistsRaw\(rec, \[\]\)\) \? 'granted' : 'denied'/.test(
+        wsSrc,
+      ) &&
+        /export async function requestWorkspacePermission\([\s\S]{0,400}?backendOf\(rec\) !== 'fsa' \|\| !root/.test(wsSrc),
+      '')
+    check('adj568 Rust 侧 9 个 `ws_*` 命令齐备、且**全部登记进 invoke_handler**（漏登记 ⇒ 前端调用直接失败）',
+      ['ws_pick_dir', 'ws_list_dir', 'ws_dir_exists', 'ws_is_dir_empty', 'ws_read_text', 'ws_write_text', 'ws_create_dir', 'ws_remove_file', 'ws_remove_empty_dir'].every(
+        (c) => new RegExp(`fn ${c}\\(`).test(rustSrc) && new RegExp(`^\\s+${c},$`, 'm').test(rustSrc),
+      ) &&
+        /tauri_plugin_dialog::init\(\)/.test(rustSrc),
+      '')
+    check('adj568 路径后端**双重防路径穿越**（Rust 侧逐段校验）+ 写入回读校验（与 FSA 分支同口径）+ 不做递归删除',
+      /fn check_ws_seg\(seg: &str\) -> Result<\(\), String>/.test(rustSrc) &&
+        /fn ws_path\(root: &str, segs: &\[String\]\) -> Result<PathBuf, String>/.test(rustSrc) &&
+        /fn ws_write_text[\s\S]{0,1200}?if back != text \{[\s\S]{0,80}?写入后回读内容与预期不一致/.test(rustSrc) &&
+        // 用户目录里可能混着非 .jps 的东西，且**没有回收站** ⇒ 只删空目录
+        /return Err\("NOT_EMPTY"\.to_string\(\)\)/.test(rustSrc) &&
+        !/remove_dir_all/.test(wsRemoveDirBody),
+      '')
+    check('adj568 网页版：**选目录之前**就把内核敏感目录黑名单讲清楚（被拦时错误与"用户取消"同为 AbortError，事后补不出提示）',
+      /blockedHint:/.test(copySrc2) &&
+        /下载 \/ 桌面 \/ 文档 \/ 用户主目录/.test(copySrc2) &&
+        /子文件夹/.test(copySrc2) &&
+        /!supportsPathWorkspace\(\) && <div className="ws-grant-hint ws-blocked-hint">\{workspaceCopy\.blockedHint\}<\/div>/.test(
+          wsPanelSrc,
+        ),
+      '')
+  }
   check('adj545/adj549（用户要求）面板**上面包屑整行 + 下分左右两栏**：左=列表；右=固定宽度（过滤 / `*` / ✕ / 操作▾）',
     // 上：ws-head（切换工作区按钮 + 面包屑）在 ws-body **之前**，独占一行
     /<div className="ws-panel">[\s\S]{0,600}?<div className="ws-head">[\s\S]{0,1400}?className="ws-workspace-btn"[\s\S]{0,2000}?className="ws-crumb"[\s\S]{0,4000}?<div className="ws-body">[\s\S]{0,400}?<div className="ws-left">[\s\S]{0,800}?className=\{`ws-list[\s\S]{0,7000}?<div className="ws-side">/.test(
@@ -9029,18 +9121,57 @@ async function runAdj541DockToggleTests() {
       // 消除过滤常驻（无过滤时禁用）——位置固定，不因是否有过滤而跳动
       /className="btn ws-filter-clear"[\s\S]{0,200}?disabled=\{!searching\}/.test(wsPanelSrc) &&
       /\.ws-left \{[\s\S]{0,220}?flex: 1 1 auto/.test(cssSrc) &&
-      /\.ws-side \{[\s\S]{0,260}?width: 132px/.test(cssSrc) &&
-      // 窄屏右栏收窄到 116px（仍放得下过滤框），且**写在基础规则之后**（同级后者胜，见 E-2026-244）
-      /@container \(max-width: 430px\) \{[\s\S]{0,200}?\.ws-side \{ width: 116px; \}/.test(cssSrc),
+      // adj571（用户要求"右栏更窄一些"）：宽屏 132 → 112px
+      /\.ws-side \{[\s\S]{0,600}?width: 112px/.test(cssSrc) &&
+      // 窄屏同档收窄（100px），且**写在基础规则之后**（同级后者胜，见 E-2026-244）
+      /@container \(max-width: 430px\) \{[\s\S]{0,300}?\.ws-side \{ width: 100px; \}/.test(cssSrc) &&
+      // 反向：旧的 132 / 116 不许残留（改了宽度就得连带清干净，否则"哪条生效"要靠后写的赢去猜）
+      !/\.ws-side \{ width: (132|116)px/.test(cssSrc),
+    '')
+  // adj571（用户反馈）：右栏收窄/窗口窄时**文件名会被省略号截断，看不到全名** ⇒
+  // 列表行给整行 `title` = 工作区内完整相对路径（含文件名与所在子目录），悬浮即见全名。
+  check('adj571（用户反馈）工作区列表行**悬浮显示完整路径**（窄列表下文件名被截断也能看全名）',
+    /className=\{`ws-row\$\{selected\.includes\(e\.name\) \? ' is-selected' : ''\}`\}[\s\S]{0,160}?title=\{joinPath\(\[\.\.\.path, e\.name\]\)\}/.test(
+      wsPanelSrc,
+    ) &&
+      // 过滤结果的平坦列表：title 放在**整行**（原先只在按钮上，悬停复选框/目录后缀处看不到）
+      /className="ws-row ws-row-plain" title=\{h\.relPath\}/.test(wsPanelSrc),
+    '')
+  // adj572（用户反馈）：过滤结果本来就没有复选框，却仍用 16px 占位保"各行左对齐" ⇒
+  // 左边白白空出 26px（16 占位 + 2 右边距 + 8 间距）。实测：去掉占位并把行左内边距收到 4px 后，
+  // 🎼 图标左移 30px（真机量过），文件名同步多拿到这段宽度。
+  check('adj572（用户反馈）过滤结果行**不再留复选框占位**（无复选框就不该空出那段），左内边距同步收一档',
+    /className="ws-row ws-row-plain" title=\{h\.relPath\}/.test(wsPanelSrc) &&
+      !/ws-row-plain"[\s\S]{0,200}?className="ws-check"/.test(wsPanelSrc) &&
+      /\.ws-row-plain \{[\s\S]{0,120}?padding: 5px 4px/.test(cssSrc) &&
+      // 普通（有复选框）行不受影响：真实复选框仍在，"上级目录"行仍保留等宽占位
+      /<input[\s\S]{0,200}?type="checkbox"[\s\S]{0,200}?className="ws-check"/.test(wsPanelSrc),
+    '')
+  // adj574（用户建议）：过滤结果的"文件名 + 所在目录"挤在一行会**互相截断** ⇒ 改**两行**：
+  // 上行文件名左对齐、下行目录右对齐，两行各自吃满整行宽度；行更高（手机好点按）⇒ 行距随之收紧。
+  check('adj574（用户建议）过滤结果改**两行**（文件名左对齐 / 目录右对齐，各拿整行宽），行距与行内上下留白同步收紧',
+    /className="ws-row ws-row-plain" title=\{h\.relPath\}/.test(wsPanelSrc) &&
+      /<span className="ws-hit-main">[\s\S]{0,400}?<span className="ws-name">\{h\.name\}<\/span>[\s\S]{0,220}?<span className="ws-hit-dir">\{joinPath\(h\.dirSegs\)\}<\/span>/.test(
+        wsPanelSrc,
+      ) &&
+      // 两行的容器：竖排 + 可缩（否则省略号不生效）
+      /\.ws-hit-main \{[\s\S]{0,240}?flex-direction: column[\s\S]{0,160}?min-width: 0/.test(cssSrc) &&
+      // 上行左对齐、下行右对齐；图标贴第一行
+      /\.ws-hit-main \.ws-name \{[\s\S]{0,90}?text-align: left/.test(cssSrc) &&
+      /\.ws-hit-dir \{[\s\S]{0,140}?align-self: flex-end/.test(cssSrc) &&
+      /\.ws-row-open-2l \{[\s\S]{0,90}?align-items: flex-start/.test(cssSrc) &&
+      // 行内上下留白 9 → 5px、行间距 2 → 1px（两行本身已撑起点按高度）
+      /\.ws-row-plain \{[\s\S]{0,120}?padding: 5px 4px/.test(cssSrc) &&
+      /\.ws-list \{[\s\S]{0,200}?gap: 1px/.test(cssSrc),
     '')
   check('adj543/adj546 过滤提速：**先建一次索引，之后每次输入只在内存里过滤**，且索引可落盘、可后台重扫',
     /const indexRef = useRef<SearchHit\[\] \| null>\(null\)/.test(wsPanelSrc) &&
-      /const buildIndex = useCallback\(\s*\n?\s*async \(handle: FileSystemDirectoryHandle, wsId: string, force = false\)/.test(wsPanelSrc) &&
-      /const refreshIndex = useCallback\(async \(handle: FileSystemDirectoryHandle, wsId: string\)/.test(wsPanelSrc) &&
+      /const buildIndex = useCallback\(\s*\n?\s*async \(rec: WorkspaceRecord, wsId: string, force = false\)/.test(wsPanelSrc) &&
+      /const refreshIndex = useCallback\(async \(rec: WorkspaceRecord, wsId: string\)/.test(wsPanelSrc) &&
       // ① 先用落盘的索引（秒开）② **只有过期才**后台重扫 ③ 扫完落盘
       /const cached = force \? null : await loadWorkspaceIndex\(wsId\)/.test(wsPanelSrc) &&
       /const stale = Date\.now\(\) - \(cached\.at \?\? 0\) > INDEX_STALE_MS/.test(wsPanelSrc) &&
-      /if \(stale\) void refreshIndex\(handle, wsId\)/.test(wsPanelSrc) &&
+      /if \(stale\) void refreshIndex\(rec, wsId\)/.test(wsPanelSrc) &&
       /await saveWorkspaceIndex\(\{ wsId, at: Date\.now\(\), relPaths: r\.hits\.map\(\(h\) => h\.relPath\) \}\)/.test(wsPanelSrc) &&
       // 边扫边出结果（慢节流地把 partial 引用交给索引 + 进度状态；不再每跳复制数组/重算正则）
       /onProgress: \(scanned, partial\) => \{[\s\S]{0,400}?indexRef\.current = partial/.test(wsPanelSrc) &&
@@ -9051,7 +9182,7 @@ async function runAdj541DockToggleTests() {
       // 写操作（invalidateCache）与面板打开都让索引作废
       /indexRef\.current = null/.test(wsPanelSrc) &&
       // 不再用 200ms debounce 包着整树搜索
-      !/setTimeout\(\(\) => \{[\s\S]{0,80}?void searchWorkspaceJps\(ws\.handle, query\)/.test(wsPanelSrc),
+      !/setTimeout\(\(\) => \{[\s\S]{0,80}?void searchWorkspaceJps\(ws, query\)/.test(wsPanelSrc),
     '')
   // adj547（用户反馈）：点目录/文件之后到内容出来之间是"黑的"——用户分不清是"不能点/没响应/在忙"。
   // 要求：**先进入**（面包屑立刻变）+ 列表里立刻出现"转圈 + 在做什么" + 旧内容变淡；读完提示消失。
@@ -9079,7 +9210,7 @@ async function runAdj541DockToggleTests() {
   check('adj550（用户要求）**进入工作区就定位到最新位置**——激活/授权后/切工作区三条入口共用同一个 `enterAtLatestPos`',
     /const enterAtLatestPos = useCallback\(\s*\n?\s*async \(rec: WorkspaceRecord, label: string\) => \{/.test(wsPanelSrc) &&
       /const want = rec\.path \?\? \[\]/.test(wsPanelSrc) &&
-      /const dir = await resolveExistingDir\(rec\.handle, want\)/.test(wsPanelSrc) &&
+      /const dir = await resolveExistingDir\(rec, want\)/.test(wsPanelSrc) &&
       /showNotice\(workspaceCopy\.dirGone\(joinPath\(want\) \|\| '根目录', joinPath\(dir\)\), 'warn'\)/.test(wsPanelSrc) &&
       /await refresh\(rec, dir, label\)/.test(wsPanelSrc) &&
       // useCallback 固定引用（否则进 effect 依赖会无限刷新，E-2026-249）
@@ -9134,13 +9265,16 @@ async function runAdj541DockToggleTests() {
     })
     const files = (n: number, perEntryMs: number) =>
       Array.from({ length: n }, (_, i) => ({ kind: 'file', name: `s${i}.jps`, getFile: async () => null }) as unknown)
+    // adj568：工作区 IO 现在收 `WorkspaceRecord`（两套后端二选一）⇒ 假句柄要包成记录
+    const fsaRec = (h: unknown) =>
+      ({ id: 'smoke-fsa', name: (h as { name: string }).name, handle: h as FileSystemDirectoryHandle, path: [] }) as never
     const perEntry = 2
     const root = mkDir('root', Array.from({ length: 8 }, (_, i) => mkDir(`d${i}`, files(20, perEntry), perEntry)), perEntry) as never
     const t1 = Date.now()
-    const r1 = await searchWorkspaceJps(root, '*', { concurrency: 1 })
+    const r1 = await searchWorkspaceJps(fsaRec(root), '*', { concurrency: 1 })
     const serialMs = Date.now() - t1
     const t4 = Date.now()
-    const r4 = await searchWorkspaceJps(root, '*', { concurrency: 4 })
+    const r4 = await searchWorkspaceJps(fsaRec(root), '*', { concurrency: 4 })
     const parMs = Date.now() - t4
     console.log(`    并发实测（假句柄 ${perEntry}ms/条）：串行 ${serialMs}ms → 并发4 ${parMs}ms（提速 ${(serialMs / Math.max(1, parMs)).toFixed(1)}×）`)
     // adj553（用户反馈）：输入条放不下时，**PC 端也要能滑到后面的按键**——手机上靠触摸滑动，
@@ -9169,7 +9303,7 @@ async function runAdj541DockToggleTests() {
     // 隐藏项：`.git` 下的谱一个都不能进结果，且不该被计数
     const hidden = mkDir('.git', files(50, perEntry), perEntry)
     const root2 = mkDir('root', [hidden, mkDir('ok', files(3, perEntry), perEntry)], perEntry) as never
-    const r5 = await searchWorkspaceJps(root2, '*', { concurrency: 4 })
+    const r5 = await searchWorkspaceJps(fsaRec(root2), '*', { concurrency: 4 })
     check(
       'adj546 `. 开头`的目录**不进结果也不下钻**（`.git` 里 50 个文件一个都不该被扫到）',
       r5.hits.length === 3 && r5.scanned === 4, // 1 个 .git + 1 个 ok + ok 里 3 个文件 … 见下方口径

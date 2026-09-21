@@ -16,6 +16,16 @@
  *  - 支持**子目录**：`path` 的最后一段是文件名时表示"某个文件"，少一段则是一个目录。
  *  - 文件读写复用 `saveSupport` 的权限判定与写入实现（写后回读校验、错误归类同一口径）。
  *  - 纯逻辑（`.jps` 判定、排序、路径规整/拼接）都是可单测的纯函数，smoke 有断言。
+ *
+ * adj568：**两套后端**
+ *  - `fsa`（网页版）：`showDirectoryPicker()` 拿句柄。受 Chromium **敏感目录黑名单**约束——
+ *    「下载 / 桌面 / 文档 / 用户主目录」**整个目录**不可授予（子文件夹可以），
+ *    且拦截报错与"用户取消"同为 `AbortError`，前端无法区分（见 `E-2026-271`）。
+ *  - `path`（桌面壳）：原生选择器拿**绝对路径**，读写走 Rust `std::fs`——绕开上述黑名单，
+ *    也没有"重开要重新授权"。记录里 `dir` 有值即路径后端。
+ *
+ * 两套后端共用全部纯逻辑与**同一组 IO 原语**（`listRaw` / `readTextRaw` / `writeTextRaw` / …），
+ * 所以"什么该显示、怎么写才算安全"不会各自漂移。
  */
 import {
   saveWorkspace,
@@ -41,6 +51,36 @@ export function isWorkspaceSupported(): boolean {
   } catch {
     return false
   }
+}
+
+/** 工作区后端（adj568）：`fsa` = 网页版句柄；`path` = 桌面壳磁盘路径 */
+export type WorkspaceBackend = 'fsa' | 'path'
+
+/** 该记录走哪套后端（`dir` 优先：桌面端新选的工作区一律是路径后端）；两样都没有 ⇒ null */
+export function backendOf(rec: { handle?: FileSystemDirectoryHandle; dir?: string } | null): WorkspaceBackend | null {
+  if (!rec) return null
+  if (typeof rec.dir === 'string' && rec.dir) return 'path'
+  if (rec.handle) return 'fsa'
+  return null
+}
+
+/** 是否是桌面端的**路径后端**（UI 据此显示真实磁盘路径、隐藏"授权"按钮） */
+export function isPathWorkspace(rec: { handle?: FileSystemDirectoryHandle; dir?: string } | null): boolean {
+  return backendOf(rec) === 'path'
+}
+
+/** 是否走**桌面端路径后端**（原生选择器 + Rust 侧读写）——有桌面壳就是 */
+export function supportsPathWorkspace(): boolean {
+  return shellInvoke() !== null
+}
+
+/**
+ * 工作区功能是否**可用**：桌面壳（原生选目录 + 路径读写）**或**浏览器支持 FSA 选目录。
+ * adj568：桌面壳里 `showDirectoryPicker` 其实也存在（WebView2 也有 FSA），
+ * 但那条路会被敏感目录黑名单挡住，所以桌面端一律走 `path`——判定必须**先看壳**。
+ */
+export function isWorkspaceAvailable(): boolean {
+  return supportsPathWorkspace() || isWorkspaceSupported()
 }
 
 /**
@@ -183,7 +223,7 @@ export interface SearchOptions {
  * 调用方**必须**把这个事实告诉用户（否则用户会以为"工作区里就没有这些谱"）。
  */
 export async function searchWorkspaceJps(
-  root: FileSystemDirectoryHandle,
+  rec: WorkspaceRecord,
   query: string,
   options: SearchOptions = {},
 ): Promise<SearchResult> {
@@ -214,9 +254,13 @@ export async function searchWorkspaceJps(
     return false
   }
 
-  /** 待枚举的目录队列 + 在飞任务计数（计数保证"队列暂时空但还有目录在枚举"时 worker 不提前收工） */
-  type Job = { dir: FileSystemDirectoryHandle; segs: string[]; depth: number }
-  const queue: Job[] = [{ dir: root, segs: [], depth: 1 }]
+  /**
+   * 待枚举的目录队列 + 在飞任务计数（计数保证"队列暂时空但还有目录在枚举"时 worker 不提前收工）。
+   * adj568：入队的是**相对段**（后端无关）+ 可选句柄（FSA 后端把子目录句柄顺带带下去，
+   * 免得每层都用路径重解析——adj546 的并发枚举性能就靠这个）。
+   */
+  type Job = { segs: string[]; handle?: FileSystemDirectoryHandle; depth: number }
+  const queue: Job[] = [{ segs: [], handle: rec.handle, depth: 1 }]
   let inFlight = 0
   let done = false
 
@@ -225,9 +269,9 @@ export async function searchWorkspaceJps(
       truncated = true
       return
     }
-    let children: FileSystemHandle[] = []
+    let children: RawEntry[] = []
     try {
-      for await (const h of job.dir.values()) children.push(h)
+      children = await listRaw(rec, job.segs, job.handle, false)
     } catch {
       blocked.push(joinPath(job.segs))
       return // 这一层读不动就跳过（不 return 整棵树）
@@ -238,8 +282,8 @@ export async function searchWorkspaceJps(
       // 判断放在 `scanned++` 之前：隐藏项连"扫描计数"都不该占。
       if (isHiddenName(h.name)) continue
       scanned++
-      if (h.kind === 'directory') {
-        queue.push({ dir: h as FileSystemDirectoryHandle, segs: [...job.segs, h.name], depth: job.depth + 1 })
+      if (h.kind === 'dir') {
+        queue.push({ segs: [...job.segs, h.name], handle: h.handle, depth: job.depth + 1 })
         continue
       }
       if (!isJpsName(h.name)) continue
@@ -294,52 +338,240 @@ export function stripJpsExt(name: string): string {
   return isJpsName(name) ? name.slice(0, name.length - 4) : name
 }
 
-/** 某个名字在目录里是否已被占用（文件或目录都算；用于"重名就明确报错而不是静默覆盖"） */
-export async function hasEntry(
+// ---- adj568：两套后端共用的 **IO 原语** --------------------------------------------
+//
+// 上面全是纯逻辑（路径 / 过滤 / 排序），两套后端**完全共用**；真正"碰磁盘"的只有下面这几个原语。
+// 其余函数一律建立在它们之上——这样网页版（FSA）与桌面版（路径）不会各自漂移出
+// "什么该显示"或"怎么写才算安全"的分歧。
+
+/** 取桌面壳的 `invoke`（不在壳里 ⇒ null；纯浏览器构建下恒为 null，行为与从前一致） */
+function shellInvoke(): ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null {
+  try {
+    const g = (window as unknown as { __TAURI__?: { core?: { invoke?: unknown } } }).__TAURI__
+    const fn = g?.core?.invoke
+    return typeof fn === 'function'
+      ? (fn as (cmd: string, args?: Record<string, unknown>) => Promise<unknown>)
+      : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 调一个桌面壳命令。
+ * Rust 侧用 `Err("EXISTS")` / `Err("NOT_EMPTY")` 这类**约定字符串**表达业务错误，
+ * 这里原样还原成 `Error.message`，调用方才能与 FSA 分支按同一口径判断（`e.message === 'EXISTS'`）。
+ */
+async function invokeWs<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
+  const invoke = shellInvoke()
+  if (!invoke) throw new Error('当前环境不支持桌面端工作区')
+  try {
+    return (await invoke(cmd, args)) as T
+  } catch (e) {
+    if (typeof e === 'string') throw new Error(e)
+    if (e instanceof Error) throw new Error(e.message)
+    throw new Error(String(e))
+  }
+}
+
+/** 列目录的原始结果（**未过滤**）：`handle` 只在 FSA 后端有值，供搜索把子目录句柄带下去 */
+interface RawEntry {
+  name: string
+  kind: 'dir' | 'file'
+  mtime: number
+  handle?: FileSystemDirectoryHandle
+}
+
+/** FSA：逐级解析相对路径拿到目录句柄（`create` 时缺失的中间目录会被创建） */
+async function resolveDirHandle(
   root: FileSystemDirectoryHandle,
-  dirPath: readonly string[],
-  name: string,
-): Promise<boolean> {
-  const dir = await resolveDir(root, dirPath)
-  for await (const h of dir.values()) if (h.name === name) return true
-  return false
+  path: readonly string[],
+  create = false,
+): Promise<FileSystemDirectoryHandle> {
+  let dir = root
+  for (const seg of normalizeRelPath(path)) dir = await dir.getDirectoryHandle(seg, { create })
+  return dir
+}
+
+/** FSA：解析到**文件**句柄（`path` 最后一段是文件名） */
+async function resolveFileHandle(
+  root: FileSystemDirectoryHandle,
+  path: readonly string[],
+  create = false,
+): Promise<FileSystemFileHandle> {
+  const segs = normalizeRelPath(path)
+  if (segs.length === 0) throw new Error('empty workspace path')
+  const dir = await resolveDirHandle(root, segs.slice(0, -1), create)
+  return dir.getFileHandle(segs[segs.length - 1], { create })
+}
+
+/**
+ * **列目录**（唯一原语）：列**全部**条目（含隐藏项与非 `.jps`）——过滤口径一律交给上层，
+ * 免得两套后端对"什么该显示"各说各话。
+ *
+ * `dirHandle` 只在 FSA 后端被用到：搜索时把上一层的子目录句柄直接带下来，省掉"用相对路径
+ * 逐级重解析"（adj546 的并发枚举性能正是靠这一点）。
+ * `needMtime=false` 用于搜索——FSA 读 `lastModified` 要**每条一次往返**，搜索并不需要时间。
+ */
+async function listRaw(
+  rec: WorkspaceRecord,
+  segs: readonly string[],
+  dirHandle?: FileSystemDirectoryHandle,
+  needMtime = true,
+): Promise<RawEntry[]> {
+  const root = rec.handle
+  if (backendOf(rec) !== 'fsa' || !root) {
+    const list = await invokeWs<{ name: string; dir: boolean; mtime: number }[]>('ws_list_dir', {
+      root: rec.dir,
+      segs: normalizeRelPath(segs),
+    })
+    return list.map((e) => ({ name: e.name, kind: e.dir ? ('dir' as const) : ('file' as const), mtime: e.mtime }))
+  }
+  const dir = dirHandle ?? (await resolveDirHandle(root, segs))
+  const out: RawEntry[] = []
+  for await (const handle of dir.values()) {
+    if (handle.kind === 'directory') {
+      out.push({ name: handle.name, kind: 'dir', mtime: 0, handle })
+      continue
+    }
+    let mtime = 0
+    if (needMtime && isJpsName(handle.name)) {
+      try {
+        mtime = (await (handle as FileSystemFileHandle).getFile()).lastModified
+      } catch {
+        /* 读不到时间不影响列出 */
+      }
+    }
+    out.push({ name: handle.name, kind: 'file', mtime })
+  }
+  return out
+}
+
+/** 目录是否存在（工作区根被外部删掉/移动时，UI 据此**如实提示**而不是给一个空列表） */
+async function dirExistsRaw(rec: WorkspaceRecord, segs: readonly string[]): Promise<boolean> {
+  const root = rec.handle
+  if (backendOf(rec) !== 'fsa' || !root) {
+    try {
+      return await invokeWs<boolean>('ws_dir_exists', { root: rec.dir, segs: normalizeRelPath(segs) })
+    } catch {
+      return false
+    }
+  }
+  try {
+    await resolveDirHandle(root, segs)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** 目录是否**完全为空**（列**所有**条目，不只看 `.jps`——删目录前必须确认真空） */
-export async function isDirEmpty(root: FileSystemDirectoryHandle, path: readonly string[]): Promise<boolean> {
-  const dir = await resolveDir(root, path)
+async function isDirEmptyRaw(rec: WorkspaceRecord, segs: readonly string[]): Promise<boolean> {
+  const root = rec.handle
+  if (backendOf(rec) !== 'fsa' || !root) {
+    return invokeWs<boolean>('ws_is_dir_empty', { root: rec.dir, segs: normalizeRelPath(segs) })
+  }
+  const dir = await resolveDirHandle(root, segs)
   for await (const _ of dir.values()) return false
   return true
 }
 
+/** 读文本 */
+async function readTextRaw(rec: WorkspaceRecord, segs: readonly string[]): Promise<string> {
+  const root = rec.handle
+  if (backendOf(rec) !== 'fsa' || !root) {
+    return invokeWs<string>('ws_read_text', { root: rec.dir, segs: normalizeRelPath(segs) })
+  }
+  const fh = await resolveFileHandle(root, segs)
+  return (await fh.getFile()).text()
+}
+
+/**
+ * 写文本——两套后端都**写完回读校验**（与 `write_external_file` 同一口径：
+ * 宁可如实报失败，也绝不谎报"已保存"）。
+ * FSA 侧沿用 `saveSupport.ensureWritePermission`（必须在用户手势内调用）。
+ */
+async function writeTextRaw(rec: WorkspaceRecord, segs: readonly string[], text: string): Promise<void> {
+  const root = rec.handle
+  if (backendOf(rec) !== 'fsa' || !root) {
+    await invokeWs<null>('ws_write_text', { root: rec.dir, segs: normalizeRelPath(segs), text })
+    return
+  }
+  const perm = await ensureWritePermission(root)
+  if (perm === 'denied') throw new Error('permission denied')
+  const fh = await resolveFileHandle(root, segs, true)
+  const w = await (fh as unknown as { createWritable: () => Promise<FileSystemWritableFileStream> }).createWritable()
+  await w.write(text)
+  await w.close()
+  const back = await (await fh.getFile()).text()
+  if (back !== text) throw new Error('回读内容与预期不一致')
+}
+
+/** 新建目录（同名已存在 ⇒ `EXISTS`，交给调用方提示；不静默复用） */
+async function makeDirRaw(rec: WorkspaceRecord, segs: readonly string[]): Promise<void> {
+  const root = rec.handle
+  if (backendOf(rec) !== 'fsa' || !root) {
+    await invokeWs<null>('ws_create_dir', { root: rec.dir, segs: normalizeRelPath(segs) })
+    return
+  }
+  const s = normalizeRelPath(segs)
+  if (s.length === 0) throw new Error('empty path')
+  const dir = await resolveDirHandle(root, s.slice(0, -1), true)
+  await dir.getDirectoryHandle(s[s.length - 1], { create: true })
+}
+
+/** 删除一个条目（`isDir` 只影响桌面后端的命令选择；FSA 的 `removeEntry` 两者通吃） */
+async function removeRaw(rec: WorkspaceRecord, segs: readonly string[], isDir: boolean): Promise<void> {
+  const root = rec.handle
+  const s = normalizeRelPath(segs)
+  if (s.length === 0) throw new Error('empty path')
+  if (backendOf(rec) !== 'fsa' || !root) {
+    await invokeWs<null>(isDir ? 'ws_remove_empty_dir' : 'ws_remove_file', { root: rec.dir, segs: s })
+    return
+  }
+  const dir = await resolveDirHandle(root, s.slice(0, -1))
+  await dir.removeEntry(s[s.length - 1])
+}
+
+/** 某个名字在目录里是否已被占用（文件或目录都算；用于"重名就明确报错而不是静默覆盖"） */
+export async function hasEntry(
+  rec: WorkspaceRecord,
+  dirPath: readonly string[],
+  name: string,
+): Promise<boolean> {
+  const list = await listRaw(rec, dirPath, undefined, false)
+  return list.some((e) => e.name === name)
+}
+
+/** 目录是否**完全为空**（列**所有**条目，不只看 `.jps`——删目录前必须确认真空） */
+export async function isDirEmpty(rec: WorkspaceRecord, path: readonly string[]): Promise<boolean> {
+  return isDirEmptyRaw(rec, path)
+}
+
 /** 新建子目录（同名已存在 ⇒ 抛错，交给调用方提示；不静默复用） */
 export async function createSubdir(
-  root: FileSystemDirectoryHandle,
+  rec: WorkspaceRecord,
   dirPath: readonly string[],
   name: string,
 ): Promise<void> {
-  if (await hasEntry(root, dirPath, name)) throw new Error('EXISTS')
-  const dir = await resolveDir(root, dirPath)
-  await dir.getDirectoryHandle(name, { create: true })
+  if (await hasEntry(rec, dirPath, name)) throw new Error('EXISTS')
+  await makeDirRaw(rec, [...normalizeRelPath(dirPath), name])
 }
 
 /** 新建（或写入）一个 `.jps`（同名已存在 ⇒ 抛错，避免"另存"覆盖已有谱） */
 export async function createFile(
-  root: FileSystemDirectoryHandle,
+  rec: WorkspaceRecord,
   dirPath: readonly string[],
   name: string,
   text: string,
 ): Promise<void> {
-  if (await hasEntry(root, dirPath, name)) throw new Error('EXISTS')
-  await writeWorkspaceText(root, [...dirPath, name], text)
+  if (await hasEntry(rec, dirPath, name)) throw new Error('EXISTS')
+  await writeWorkspaceText(rec, [...dirPath, name], text)
 }
 
 /** 删除一个文件 */
-export async function removeFile(root: FileSystemDirectoryHandle, path: readonly string[]): Promise<void> {
-  const segs = normalizeRelPath(path)
-  if (segs.length === 0) throw new Error('empty path')
-  const dir = await resolveDir(root, segs.slice(0, -1))
-  await dir.removeEntry(segs[segs.length - 1])
+export async function removeFile(rec: WorkspaceRecord, path: readonly string[]): Promise<void> {
+  await removeRaw(rec, path, false)
 }
 
 /**
@@ -349,14 +581,13 @@ export async function removeFile(root: FileSystemDirectoryHandle, path: readonly
  * 非空时抛 `NOT_EMPTY`，由 UI 给明确提示（而不是"删了但没反应"）。
  */
 export async function removeEmptyDir(
-  root: FileSystemDirectoryHandle,
+  rec: WorkspaceRecord,
   dirPath: readonly string[],
   name: string,
 ): Promise<void> {
   const target = [...normalizeRelPath(dirPath), name]
-  if (!(await isDirEmpty(root, target))) throw new Error('NOT_EMPTY')
-  const dir = await resolveDir(root, normalizeRelPath(dirPath))
-  await dir.removeEntry(name)
+  if (!(await isDirEmptyRaw(rec, target))) throw new Error('NOT_EMPTY')
+  await removeRaw(rec, target, true)
 }
 
 /**
@@ -369,7 +600,7 @@ export async function removeEmptyDir(
  * 也不能出现"两个都没了"。`.jps` 是纯文本、体积小，这条路安全。
  */
 async function transferFile(
-  root: FileSystemDirectoryHandle,
+  rec: WorkspaceRecord,
   fromSegs: readonly string[],
   toSegs: readonly string[],
 ): Promise<void> {
@@ -377,34 +608,34 @@ async function transferFile(
   const to = normalizeRelPath(toSegs)
   if (from.length === 0 || to.length === 0) throw new Error('empty path')
   if (joinPath(from) === joinPath(to)) return
-  if (await hasEntry(root, to.slice(0, -1), to[to.length - 1])) throw new Error('EXISTS')
-  const text = await readWorkspaceText(root, from)
-  await writeWorkspaceText(root, to, text) // 内部已做写入后回读校验
-  const back = await readWorkspaceText(root, to)
+  if (await hasEntry(rec, to.slice(0, -1), to[to.length - 1])) throw new Error('EXISTS')
+  const text = await readWorkspaceText(rec, from)
+  await writeWorkspaceText(rec, to, text) // 内部已做写入后回读校验
+  const back = await readWorkspaceText(rec, to)
   if (back !== text) throw new Error('VERIFY') // 双保险：不一致就**不删原文件**
-  await removeFile(root, from)
+  await removeFile(rec, from)
 }
 
 /** 重命名（同目录换名） */
 export async function renameFile(
-  root: FileSystemDirectoryHandle,
+  rec: WorkspaceRecord,
   dirPath: readonly string[],
   fromName: string,
   toName: string,
 ): Promise<void> {
   const dir = normalizeRelPath(dirPath)
-  await transferFile(root, [...dir, fromName], [...dir, toName])
+  await transferFile(rec, [...dir, fromName], [...dir, toName])
 }
 
 /** 移动到另一个目录（同名） */
 export async function moveFile(
-  root: FileSystemDirectoryHandle,
+  rec: WorkspaceRecord,
   fromSegs: readonly string[],
   toDirSegs: readonly string[],
 ): Promise<void> {
   const from = normalizeRelPath(fromSegs)
   if (from.length === 0) throw new Error('empty path')
-  await transferFile(root, from, [...normalizeRelPath(toDirSegs), from[from.length - 1]])
+  await transferFile(rec, from, [...normalizeRelPath(toDirSegs), from[from.length - 1]])
 }
 
 // ---- 会话内缓存：对话框与保存流程会反复取同一个工作区，避免每次都读库 ----
@@ -421,22 +652,52 @@ function newWorkspaceId(): string {
 }
 
 /**
- * adj544：用户刚选定一个目录 ⇒ 造一条**带身份**的工作区记录。
+ * adj544：用户刚选定一个目录 ⇒ 造一条**带身份**的工作区记录（网页版 / FSA 后端）。
  * 身份（`id`）在这里发；`name` 只能取 `handle.name`（FSA 不给磁盘路径，隐私限制）。
  */
 export function makeWorkspaceRecord(handle: FileSystemDirectoryHandle, path: readonly string[] = []): WorkspaceRecord {
   return { id: newWorkspaceId(), name: handle.name, handle, path: normalizeRelPath(path) }
 }
 
+/** 去掉路径末尾的分隔符（根目录 `C:\` 除外——它本身就是 `C:\`） */
+function trimTrailingSep(dir: string): string {
+  const trimmed = dir.replace(/[\\/]+$/, '')
+  return trimmed === '' ? dir : trimmed
+}
+
+/**
+ * adj568：桌面端（**路径后端**）的工作区记录。
+ *
+ * 身份直接用**规整后的绝对路径**（`path:<小写路径>`）——这带来一个网页版没有的好处：
+ * **反复选同一个文件夹仍是同一个工作区**（FSA 拿不到路径，只能每次发新 id，
+ * 于是"重新选一遍"与"从最近列表切回"是两件事）。Windows 路径大小写不敏感，故统一小写。
+ */
+export function makePathWorkspaceRecord(dir: string, path: readonly string[] = []): WorkspaceRecord {
+  const norm = trimTrailingSep(dir)
+  const name = norm.split(/[\\/]/).filter(Boolean).pop() ?? norm
+  return { id: `path:${norm.toLowerCase()}`, name, dir: norm, path: normalizeRelPath(path) }
+}
+
 /**
  * adj544：**兼容旧记录**——adj540 存下来的工作区记录没有 `id`/`name`（那时候还不需要身份）。
  * 读出来就补一个 id 并把名字从句柄取出来，同时补进最近列表（只补一次，之后都带 id）。
+ * adj568：路径后端（有 `dir`）没有"补名"问题，缺 id 时按路径补。
  */
 function normalizeRecord(rec: WorkspaceRecord | null): WorkspaceRecord | null {
-  if (!rec || !rec.handle) return null
-  const id = typeof rec.id === 'string' && rec.id ? rec.id : newWorkspaceId()
-  const name = typeof rec.name === 'string' && rec.name ? rec.name : rec.handle.name
-  return { id, name, handle: rec.handle, path: normalizeRelPath(rec.path ?? []) }
+  if (!rec) return null
+  const dir = typeof rec.dir === 'string' && rec.dir ? trimTrailingSep(rec.dir) : undefined
+  const handle = rec.handle
+  if (!dir && !handle) return null
+  const fallbackId = dir ? `path:${dir.toLowerCase()}` : ''
+  const id = typeof rec.id === 'string' && rec.id ? rec.id : fallbackId || newWorkspaceId()
+  const name = typeof rec.name === 'string' && rec.name ? rec.name : (handle?.name ?? '')
+  return {
+    id,
+    name,
+    ...(handle ? { handle } : {}),
+    ...(dir ? { dir } : {}),
+    path: normalizeRelPath(rec.path ?? []),
+  }
 }
 
 /** 取当前工作区（首次会读 IndexedDB；返回的 `path` 已规整；旧记录会补上 id/name） */
@@ -507,18 +768,13 @@ export function flushWorkspacePath(): void {
  * 场景：上次停在 `A/B/C`，其中 `B` 被外部删了 ⇒ 回到 `A`，而不是报错或永远空列表。
  */
 export async function resolveExistingDir(
-  root: FileSystemDirectoryHandle,
+  rec: WorkspaceRecord,
   segs: readonly string[],
 ): Promise<string[]> {
   const out: string[] = []
-  let dir = root
   for (const seg of normalizeRelPath(segs)) {
-    try {
-      dir = await dir.getDirectoryHandle(seg)
-      out.push(seg)
-    } catch {
-      break // 这一级没了 ⇒ 停在上一级
-    }
+    if (!(await dirExistsRaw(rec, [...out, seg]))) break // 这一级没了 ⇒ 停在上一级
+    out.push(seg)
   }
   return out
 }
@@ -560,14 +816,28 @@ async function upsertWorkspaceList(rec: WorkspaceRecord | null, removeId?: strin
   await saveWorkspaceList(next)
 }
 
-/** 让用户选一个文件夹当工作区（必须由**用户手势**触发）；用户取消返回 null */
-export async function pickWorkspaceDir(): Promise<FileSystemDirectoryHandle | null> {
+/**
+ * 让用户选一个文件夹当工作区（必须由**用户手势**触发）；用户取消返回 null。
+ *
+ * adj568：**分平台**——
+ *  · 桌面壳：走**原生选择器**拿绝对路径（`ws_pick_dir`）⇒ 绕开 Chromium 的敏感目录黑名单，
+ *    于是「下载 / 桌面 / 文档」这些目录**本身**也能直接当工作区；
+ *  · 浏览器：走 `showDirectoryPicker()`（句柄）。这条路受内核黑名单约束（只有子文件夹能选），
+ *    而且**无法区分"用户取消"与"选中的目录被内核拦下"**——两者都是 `AbortError`（见 E-2026-271），
+ *    所以这里只能返回 null，由 UI 用一句常驻提示把这件事讲清楚（`workspaceCopy.blockedHint`）。
+ */
+export async function pickWorkspaceDir(): Promise<WorkspaceRecord | null> {
+  if (shellInvoke()) {
+    const dir = await invokeWs<string | null>('ws_pick_dir', {})
+    return dir ? makePathWorkspaceRecord(dir) : null
+  }
   const picker = (window as unknown as {
     showDirectoryPicker?: (opts?: { id?: string; mode?: string; startIn?: string }) => Promise<FileSystemDirectoryHandle>
   }).showDirectoryPicker
   if (typeof picker !== 'function') return null
   try {
-    return await picker({ id: 'ijipu-workspace', mode: 'readwrite', startIn: 'documents' })
+    const handle = await picker({ id: 'ijipu-workspace', mode: 'readwrite', startIn: 'documents' })
+    return makeWorkspaceRecord(handle)
   } catch (e) {
     // AbortError = 用户取消（正常路径，调用方静默处理）；其余错误如实抛出
     if ((e as { name?: string })?.name === 'AbortError') return null
@@ -579,11 +849,17 @@ export async function pickWorkspaceDir(): Promise<FileSystemDirectoryHandle | nu
  * **只查**工作区根目录的读写授权状态（不发请求）。
  * UI 在挂载时用它决定显示「继续访问（授权）」按钮还是直接列目录——
  * `requestPermission` 必须由用户手势触发，**不能在挂载时静默调用**（会被浏览器拒绝/忽略）。
+ * adj568：桌面**路径后端没有"授权"这回事**（原生选择器给的就是用户自己的目录）
+ * ⇒ 只回答"目录还在不在"。
  */
 export async function queryWorkspacePermission(
-  dir: FileSystemDirectoryHandle,
+  rec: WorkspaceRecord,
 ): Promise<'granted' | 'prompt' | 'denied' | 'unknown'> {
-  const h = dir as unknown as { queryPermission?: (o: { mode: string }) => Promise<PermissionState> }
+  const root = rec.handle
+  if (backendOf(rec) !== 'fsa' || !root) {
+    return (await dirExistsRaw(rec, [])) ? 'granted' : 'denied'
+  }
+  const h = root as unknown as { queryPermission?: (o: { mode: string }) => Promise<PermissionState> }
   if (typeof h.queryPermission !== 'function') return 'unknown'
   try {
     const state = await h.queryPermission({ mode: 'readwrite' })
@@ -595,41 +871,18 @@ export async function queryWorkspacePermission(
 
 /** **申请**工作区根目录的读写授权（必须在用户手势内调用；真机实测刷新后是 prompt → granted） */
 export async function requestWorkspacePermission(
-  dir: FileSystemDirectoryHandle,
+  rec: WorkspaceRecord,
 ): Promise<'granted' | 'denied' | 'unknown'> {
-  return ensureWritePermission(dir)
-}
-
-/** 逐级解析相对路径，拿到目录句柄（`create` 时缺失的中间目录会被创建） */
-async function resolveDir(
-  root: FileSystemDirectoryHandle,
-  path: readonly string[],
-  create = false,
-): Promise<FileSystemDirectoryHandle> {
-  let dir = root
-  for (const seg of normalizeRelPath(path)) {
-    dir = await dir.getDirectoryHandle(seg, { create })
+  const root = rec.handle
+  if (backendOf(rec) !== 'fsa' || !root) {
+    return (await dirExistsRaw(rec, [])) ? 'granted' : 'denied'
   }
-  return dir
-}
-
-/** 解析到**文件**句柄（`path` 最后一段是文件名） */
-export async function resolveWorkspaceFile(
-  root: FileSystemDirectoryHandle,
-  path: readonly string[],
-  create = false,
-): Promise<FileSystemFileHandle> {
-  const segs = normalizeRelPath(path)
-  if (segs.length === 0) throw new Error('empty workspace path')
-  const dir = await resolveDir(root, segs.slice(0, -1), create)
-  return dir.getFileHandle(segs[segs.length - 1], { create })
+  return ensureWritePermission(root)
 }
 
 /** 读工作区里的一个 .jps 文本 */
-export async function readWorkspaceText(root: FileSystemDirectoryHandle, path: readonly string[]): Promise<string> {
-  const fh = await resolveWorkspaceFile(root, path)
-  const file = await fh.getFile()
-  return file.text()
+export async function readWorkspaceText(rec: WorkspaceRecord, path: readonly string[]): Promise<string> {
+  return readTextRaw(rec, path)
 }
 
 /**
@@ -637,18 +890,11 @@ export async function readWorkspaceText(root: FileSystemDirectoryHandle, path: r
  * 宁可报错也不谎报已保存）。
  */
 export async function writeWorkspaceText(
-  root: FileSystemDirectoryHandle,
+  rec: WorkspaceRecord,
   path: readonly string[],
   text: string,
 ): Promise<void> {
-  const perm = await ensureWritePermission(root)
-  if (perm === 'denied') throw new Error('permission denied')
-  const fh = await resolveWorkspaceFile(root, path, true)
-  const w = await (fh as unknown as { createWritable: () => Promise<FileSystemWritableFileStream> }).createWritable()
-  await w.write(text)
-  await w.close()
-  const back = await (await fh.getFile()).text()
-  if (back !== text) throw new Error('回读内容与预期不一致')
+  return writeTextRaw(rec, path, text)
 }
 
 /**
@@ -657,26 +903,20 @@ export async function writeWorkspaceText(
  * 文件修改时间读失败时按 0 处理（不因为一个读不到就整列失败）。
  */
 export async function readDirEntries(
-  root: FileSystemDirectoryHandle,
+  rec: WorkspaceRecord,
   path: readonly string[] = [],
 ): Promise<DirEntry[]> {
-  const dir = await resolveDir(root, path)
+  const list = await listRaw(rec, path)
   const out: DirEntry[] = []
-  for await (const handle of dir.values()) {
+  for (const e of list) {
     // adj540（用户要求）：列表也**跳过 `.` 开头的条目**（与过滤口径一致，见 isHiddenName）
-    if (isHiddenName(handle.name)) continue
-    if (handle.kind === 'directory') {
-      out.push({ kind: 'dir', name: handle.name, mtime: 0 })
+    if (isHiddenName(e.name)) continue
+    if (e.kind === 'dir') {
+      out.push({ kind: 'dir', name: e.name, mtime: 0 })
       continue
     }
-    if (!isJpsName(handle.name)) continue
-    let mtime = 0
-    try {
-      mtime = (await (handle as FileSystemFileHandle).getFile()).lastModified
-    } catch {
-      /* 读不到时间不影响列出 */
-    }
-    out.push({ kind: 'file', name: handle.name, mtime })
+    if (!isJpsName(e.name)) continue
+    out.push({ kind: 'file', name: e.name, mtime: e.mtime })
   }
   return sortDirEntries(out)
 }

@@ -8,6 +8,8 @@
  *    放在安装目录，运行时直接读该文件（离线、无需联网下载）。
  *  - adj538：**外部打开**（双击 `.jps` / 文件关联）——路径经命令行参数进来，入队后通知前端；
  *    并提供"写回原文件"（保存时回读校验）。关联的注册/注销由 NSIS 钩子负责，见 `nsis/hooks.nsh`。
+ *  - adj568：**桌面端工作区**——原生"选文件夹" + 按**磁盘路径**读写 `.jps`（绕开 Chromium
+ *    对「下载/桌面/文档」整个目录的敏感目录黑名单，见下方 `ws_*` 命令段的说明）。
  */
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -192,6 +194,179 @@ fn sf_soundfont_resource_read(
     Err(format!("内置音源资源缺失: {}.sf2（未随包提供）", lib_id))
 }
 
+// ============================================================================
+// adj568：桌面端「工作区」——原生选文件夹 + 按路径读写
+//
+// 为什么桌面端要另起一套（而不是继续用网页版的 File System Access）：
+// Chromium 把「下载 / 桌面 / 文档 / 用户主目录」**整个目录**列进了敏感目录黑名单
+// （`chrome_file_system_access_permission_context.cc` 的 `GenerateBlockPaths()`，
+// BlockType = kDontBlockChildren ⇒ **只有该目录自身被封，子文件夹放行**），
+// 于是"把「下载」直接设为工作区"必然被拒。更麻烦的是：
+//   ① 该拦截**没有 API 可绕过**，网页层无法覆盖；
+//   ② 抛出的错误是 **AbortError —— 与"用户点了取消"完全同一个错误**，
+//      前端因此无法区分、只能静默（用户只看到浏览器弹框，App 一声不响）。
+// 桌面壳里我们本就不受这条 **Web** 安全策略约束（用户在自己的电脑上显式选自己的目录），
+// 所以直接用原生选择器拿**磁盘路径**，读写交给 Rust 侧的 `std::fs`。
+// 附带好处：桌面端不再有"重开应用要重新授权目录"这一步。
+//
+// 安全口径不变：**所有相对段都在 Rust 侧再校验一次**（`check_ws_seg`），
+// 前端 `normalizeRelPath` 不是唯一防线；写入同样**回读校验**（与 FSA 分支、`write_external_file` 一致）。
+//
+// ⚠ 这些命令一律写成 `#[tauri::command(async)]`：Tauri 的**同步命令跑在主线程上**，
+// 而"列目录"在一次工作区扫描里会被调用几百次（还带并发）⇒ 同步实现会把整个窗口卡住、
+// 并发也退化成串行。标 `async` 后 Tauri 把它们丢进线程池执行（函数体里是阻塞的 `std::fs`，正合适）。
+// ============================================================================
+
+/// 工作区目录里的一项（前端 `DirEntry` 的镜像；`mtime` 供"新的在上"排序用）
+#[derive(serde::Serialize)]
+struct WsEntry {
+    name: String,
+    /// 是否目录（`dir` 而非 `is_dir`：与前端 `DirEntry.kind` 的分流更直观）
+    dir: bool,
+    /// 修改时间（Unix 毫秒；取不到时为 0）
+    mtime: u64,
+}
+
+/// 校验一段相对路径：非空、不是 `.` / `..`、不含路径分隔符与控制字符。
+///
+/// 前端 `normalizeRelPath()` 已经规整过一次，这里**必须再挡一次**——Rust 这侧拿到的是
+/// 普通字符串，拼接前不校验的话一个 `..` 就能越出工作区；前端那道防线不该是唯一一道。
+fn check_ws_seg(seg: &str) -> Result<(), String> {
+    let bad = seg.is_empty()
+        || seg == "."
+        || seg == ".."
+        || seg.contains('/')
+        || seg.contains('\\')
+        || seg.contains('\0');
+    if bad {
+        return Err(format!("非法路径段：{}", seg));
+    }
+    Ok(())
+}
+
+/// 工作区根 + 相对段 ⇒ 绝对路径（逐段校验，防路径穿越）
+fn ws_path(root: &str, segs: &[String]) -> Result<PathBuf, String> {
+    let mut p = PathBuf::from(root);
+    for s in segs {
+        check_ws_seg(s)?;
+        p.push(s);
+    }
+    Ok(p)
+}
+
+/// 列目录——**刻意不过滤**（隐藏项 / 扩展名的口径留给前端，与 FSA 分支完全一致，
+/// 免得两套后端对"什么该显示"出现分歧）。单条读元数据失败就跳过该条，不让整个列表失败。
+#[tauri::command(async)]
+fn ws_list_dir(root: String, segs: Vec<String>) -> Result<Vec<WsEntry>, String> {
+    let dir = ws_path(&root, &segs)?;
+    let rd = std::fs::read_dir(&dir).map_err(|e| format!("{}: {}", dir.display(), e))?;
+    let mut out: Vec<WsEntry> = Vec::new();
+    for item in rd.flatten() {
+        let Ok(meta) = item.metadata() else { continue };
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        out.push(WsEntry {
+            name: item.file_name().to_string_lossy().to_string(),
+            dir: meta.is_dir(),
+            mtime,
+        });
+    }
+    Ok(out)
+}
+
+/// 目录是否存在——工作区根被外部删掉/改名时，前端据此提示"目录已不在"而不是空列表
+#[tauri::command(async)]
+fn ws_dir_exists(root: String, segs: Vec<String>) -> bool {
+    ws_path(&root, &segs).map(|p| p.is_dir()).unwrap_or(false)
+}
+
+/// 目录是否**完全为空**（判"空目录"必须列全部条目，不能只看 `.jps`——与 FSA 分支同口径）
+#[tauri::command(async)]
+fn ws_is_dir_empty(root: String, segs: Vec<String>) -> Result<bool, String> {
+    let dir = ws_path(&root, &segs)?;
+    let mut rd = std::fs::read_dir(&dir).map_err(|e| format!("{}: {}", dir.display(), e))?;
+    Ok(rd.next().is_none())
+}
+
+/// 读一个文件的文本
+#[tauri::command(async)]
+fn ws_read_text(root: String, segs: Vec<String>) -> Result<String, String> {
+    let p = ws_path(&root, &segs)?;
+    std::fs::read_to_string(&p).map_err(|e| format!("{}: {}", p.display(), e))
+}
+
+/// 写一个文件并**回读校验**——与 FSA 分支、`write_external_file` 同一口径：
+/// 宁可如实报失败，也绝不谎报"已保存"。
+#[tauri::command(async)]
+fn ws_write_text(root: String, segs: Vec<String>, text: String) -> Result<(), String> {
+    let p = ws_path(&root, &segs)?;
+    // 与 FSA 分支同口径：FSA 那条路 `getFileHandle(..., {create:true})` 会**顺带建出缺失的父目录**，
+    // 桌面这条若只 `fs::write` 就会在"另存到子目录"时直接失败 ⇒ 这里显式补上，保持两套后端行为一致。
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {}", parent.display(), e))?;
+    }
+    std::fs::write(&p, &text).map_err(|e| format!("{}: {}", p.display(), e))?;
+    let back = std::fs::read_to_string(&p).map_err(|e| format!("回读失败 {}: {}", p.display(), e))?;
+    if back != text {
+        return Err("写入后回读内容与预期不一致".to_string());
+    }
+    Ok(())
+}
+
+/// 新建目录（同名已存在 ⇒ 返回 `EXISTS` 交给前端提示，不静默复用）
+#[tauri::command(async)]
+fn ws_create_dir(root: String, segs: Vec<String>) -> Result<(), String> {
+    let p = ws_path(&root, &segs)?;
+    if p.exists() {
+        return Err("EXISTS".to_string());
+    }
+    std::fs::create_dir(&p).map_err(|e| format!("{}: {}", p.display(), e))
+}
+
+/// 删除一个文件
+#[tauri::command(async)]
+fn ws_remove_file(root: String, segs: Vec<String>) -> Result<(), String> {
+    let p = ws_path(&root, &segs)?;
+    std::fs::remove_file(&p).map_err(|e| format!("{}: {}", p.display(), e))
+}
+
+/// 删除一个**空**目录（非空 ⇒ 返回 `NOT_EMPTY`）
+///
+/// 为什么不做递归删除（与 FSA 分支同一理由）：工作区是用户自己的文件夹，
+/// 里面可能混着照片/文档等**非 `.jps`** 的东西，`remove_dir_all` 会一起抹掉，**且没有回收站**。
+#[tauri::command(async)]
+fn ws_remove_empty_dir(root: String, segs: Vec<String>) -> Result<(), String> {
+    let p = ws_path(&root, &segs)?;
+    let mut rd = std::fs::read_dir(&p).map_err(|e| format!("{}: {}", p.display(), e))?;
+    if rd.next().is_some() {
+        return Err("NOT_EMPTY".to_string());
+    }
+    std::fs::remove_dir(&p).map_err(|e| format!("{}: {}", p.display(), e))
+}
+
+/// 原生「选文件夹」（adj568）——返回绝对路径；用户取消 ⇒ `None`。
+///
+/// 必须放在 `spawn_blocking` 里等：`blocking_pick_folder()` 是**阻塞**调用，
+/// 直接在命令线程（主线程）上等会让窗口假死。
+#[tauri::command]
+async fn ws_pick_dir(app: tauri::AppHandle) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("选择工作区文件夹")
+            .blocking_pick_folder()
+    })
+    .await
+    .ok()
+    .flatten()
+    .and_then(|fp| fp.as_path().map(|p| p.to_string_lossy().into_owned()))
+}
+
 /// adj539：桌面端**不使用** Service Worker（前端资源随二进制内嵌，见 `src/main.tsx` 的 adj443 决定）。
 ///
 /// 但**历史版本注册过的 SW 会跨版本存活在 WebView2 用户数据目录里**（实测：`com.ijipu.app\EBWebView\
@@ -246,6 +421,9 @@ pub fn run() {
             }
             queue_open_paths(app, jps_paths_from_string_args(argv));
         }))
+        // adj568：原生文件夹选择器（工作区）。同单实例插件：**只作 Rust 依赖**，
+        // 我们用自己的 command 调它，故不需要 npm 包，也不需要补 ACL 权限。
+        .plugin(tauri_plugin_dialog::init())
         .manage(PendingOpen::default())
         .setup(|app| {
             // 冷启动：双击 `.jps` 时路径就在本进程的命令行参数里（NSIS 写的是 `"ijipu.exe" "%1"`）。
@@ -260,7 +438,17 @@ pub fn run() {
             sf_soundfont_builtin_path,
             sf_soundfont_resource_read,
             take_pending_open_files,
-            write_external_file
+            write_external_file,
+            // adj568：桌面端工作区（原生选目录 + 按路径读写）
+            ws_pick_dir,
+            ws_list_dir,
+            ws_dir_exists,
+            ws_is_dir_empty,
+            ws_read_text,
+            ws_write_text,
+            ws_create_dir,
+            ws_remove_file,
+            ws_remove_empty_dir,
         ])
         .build(context)
         .expect("error while building tauri application")

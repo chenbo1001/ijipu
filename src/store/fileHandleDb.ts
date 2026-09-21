@@ -67,6 +67,9 @@ export async function loadFileHandle(): Promise<FileSystemFileHandle | null> {
  *
  * 为什么存**根句柄 + 相对路径**、而不是存一堆子目录句柄：相对路径是纯数据，
  * 便于持久化/比较/显示（面包屑），而句柄链每次都从根解析（`getDirectoryHandle` 逐级下钻）。
+ *
+ * adj568：桌面端改为存**根目录绝对路径**（`dir`）——原生选择器直接给路径，
+ * 子目录同理用"根 + 相对段"在 Rust 侧拼（见 `src-tauri/src/lib.rs` 的 `ws_*` 命令）。
  */
 export interface WorkspaceRecord {
   /**
@@ -78,10 +81,24 @@ export interface WorkspaceRecord {
    * FSA 不给稳定磁盘路径，所以身份只能自己发一个 id 并随记录落 IndexedDB。
    */
   id: string
-  /** 根目录名（`handle.name`；FSA 只给名字，拿不到完整路径）——用于提示与"最近工作区"列表 */
+  /** 根目录名（FSA 只给名字、拿不到完整路径；桌面版取绝对路径的末级目录名）——用于提示与"最近工作区"列表 */
   name: string
-  /** 工作区根目录句柄 */
-  handle: FileSystemDirectoryHandle
+  /**
+   * 网页版（FSA）的**根目录句柄**——浏览器不给磁盘路径，句柄是内存对象，只能存 IndexedDB。
+   * adj568 起与 `dir` **二选一**（桌面版走 `dir`，此处为 undefined）。
+   */
+  handle?: FileSystemDirectoryHandle
+  /**
+   * adj568：**桌面版的根目录绝对路径**。
+   *
+   * 为什么桌面端要改用路径：Chromium 把「下载 / 桌面 / 文档 / 用户主目录」**整个目录**
+   * 列入敏感目录黑名单（`chrome_file_system_access_permission_context.cc` 的 `GenerateBlockPaths()`，
+   * BlockType = `kDontBlockChildren`），于是"把「下载」直接设为工作区"在网页层**必然被拒**，
+   * 且没有 API 可绕过、报错还与"用户取消"同为一个 `AbortError`（见 E-2026-271）。
+   * 桌面壳用**原生选择器**拿路径、用 Rust `std::fs` 读写，既绕开这条 Web 安全策略，
+   * 也顺带省掉"重开应用要重新授权目录"这一步。
+   */
+  dir?: string
   /** 上次所在的子目录（相对根；`[]` = 根目录本身） */
   path: string[]
 }

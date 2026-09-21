@@ -18,7 +18,7 @@ import { clampEditorFontSize, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE } from
 import { pasteImportCopy, numCopy, workspaceCopy } from '../brand/copy'
 // adj540：「打开/另存为」要按平台分流（**手机端以工作区优先**）并判断"是否已设工作区"
 import { isCoarsePointerDevice } from '../store/saveSupport'
-import { getWorkspace, isWorkspaceSupported } from '../store/workspace'
+import { getWorkspace, isWorkspaceAvailable } from '../store/workspace'
 import { ToolIcon } from './ToolIcon'
 // adj526：可"按住上下拖"的数值显示（预览比率 / 编辑器字号）
 import { ScrubValue } from './ScrubValue'
@@ -140,6 +140,11 @@ interface ToolDef {
  *
  * 本数组**只描述"谁先消失"**，不决定显示顺序——显示顺序见 FN_ORDER / EDIT_ORDER。
  * 想调整"谁先消失"就改这一行（用户给的顺序就是本数组顺序）。
+ *
+ * adj570（用户要求"顶栏主题按钮与设置按钮对换位置"）：**FN_ORDER 与 TOOL_PRIORITY 必须一起换**——
+ * 折叠的语义是"先把**显示顺序最右端**的收进「更多」"（E-2026-232 立的规矩），
+ * 只改显示顺序会让"右边那个反而后消失"，窄屏下出现"肉眼上右边还在、左边先没了"的错位。
+ * 对换后 主题 在右 ⇒ 主题 先被折叠，与末位=最先折叠的规则一致。
  */
 const TOOL_PRIORITY: readonly ToolKey[] = [
   'view',
@@ -147,8 +152,8 @@ const TOOL_PRIORITY: readonly ToolKey[] = [
   'guides',
   'playback',
   'export',
-  'themeMode',
   'pageConfig',
+  'themeMode',
   'zoom',
   'autoWrap',
   'scriptPad',
@@ -156,14 +161,29 @@ const TOOL_PRIORITY: readonly ToolKey[] = [
   'fontSize',
 ]
 
-/** adj530（用户要求）：功能按钮组（左侧）内的显示顺序——视图、排版、试听、导出、主题、设置、预览比率缩放 */
-const FN_ORDER: readonly ToolKey[] = ['view', 'guides', 'playback', 'export', 'themeMode', 'pageConfig', 'zoom']
+/** adj530（用户要求）：功能按钮组（左侧）内的显示顺序——视图、排版、试听、导出、设置、主题、预览比率缩放
+    （adj570：用户要求"主题与设置对换位置" ⇒ 现在是**设置在前、主题在后**） */
+const FN_ORDER: readonly ToolKey[] = ['view', 'guides', 'playback', 'export', 'pageConfig', 'themeMode', 'zoom']
 
 /** adj530（用户要求）：编辑设置组（右侧）内的显示顺序——折行、输入条、字体、字号 */
 const EDIT_ORDER: readonly ToolKey[] = ['autoWrap', 'scriptPad', 'font', 'fontSize']
 
 /** adj530：「更多」下拉里条目的排列顺序 = 两个组的显示顺序，最后接独立成组的「支持」 */
 const OVERFLOW_ORDER: readonly ToolKey[] = [...FN_ORDER, ...EDIT_ORDER, 'donate']
+
+/**
+ * adj573（用户要求）：**折进「更多」之后也不再列出的项**。
+ *
+ * 「字体」在顶栏里是个**下拉**（点开就是字体列表）；被折叠后，它在「更多」里只能是个
+ * "转开设置底栏"的替身（adj563）——与同一菜单里**真能直接调**的「字号」以及「设置」都重复，
+ * 看起来像多出来的一条。用户要求：**沉下去之后就不要再显示字体项**。
+ * 想改字体：点「设置」（底栏面板里有字体页签），或把窗口拉宽让字体下拉回到顶栏。
+ *
+ * ⚠ 安全前提：折叠顺序里 **「字号」先于「字体」**被收走（`TOOL_PRIORITY` 末位先折叠，
+ * 而它是 `…, 'font', 'fontSize'`）⇒ 只要「字体」沉下去了，「更多」里至少还有「字号」，
+ * 按钮本身不会消失、入口不会断。这条顺序有 smoke 断言守着，别把 `font` 挪到 `fontSize` 之后。
+ */
+const OVERFLOW_EXCLUDE: readonly ToolKey[] = ['font']
 
 export function TopBar() {
   // ---- 文档 store ----
@@ -389,7 +409,9 @@ export function TopBar() {
   /** adj530：顶栏上真正显示的按钮键（适用 且 未被折叠） */
   const shownKeys = new Set<ToolKey>(TOOL_PRIORITY.filter((k) => isApplicable(k) && !hiddenKeys.includes(k)))
   /** adj530：「更多」下拉里的按钮键——按**显示顺序**排（功能组 → 编辑设置组 → 支持），与折叠先后无关 */
-  const hiddenList = OVERFLOW_ORDER.filter((k) => isApplicable(k) && hiddenKeys.includes(k))
+  const hiddenList = OVERFLOW_ORDER.filter(
+    (k) => isApplicable(k) && hiddenKeys.includes(k) && !OVERFLOW_EXCLUDE.includes(k),
+  )
   const btnsRef = useRef<HTMLDivElement>(null) // .topbar-buttons（功能组可见区）
   const settingsRef = useRef<HTMLDivElement>(null) // .topbar-settings（设置组可见区）
   const toolbarRef = useRef<HTMLDivElement>(null) // .topbar-toolbar（工具条）
@@ -853,24 +875,11 @@ export function TopBar() {
       )
     }
     if (t.kind === 'font') {
-      // 字体项在更多下拉里：点击打开「设置」底栏（字体在「字体」页签里选）。
-      // adj563：原先写的是 `openModal('pageConfig')`——但页面设置早已在 adj462 迁入底栏 dock，
-      // `modal === 'pageConfig'` **在 App 里没有任何渲染分支** ⇒ 点它是**死的**（什么都不发生，
-      // 还留下一个悬空的 modal 状态挡住 Tab 切视图）。改为与顶栏其它项一致的"开关底栏"。
-      return (
-        <div
-          key={t.key}
-          className="menu-entry"
-          onClick={() => {
-            closeOverflow()
-            toggleDock('settings')
-          }}
-        >
-          {iconOf('font')}
-          <span>{t.label}</span>
-          <span style={{ marginLeft: 'auto', color: 'var(--jp-text-muted)', fontSize: 11 }}>{effectiveFont}</span>
-        </div>
-      )
+      // adj573（用户要求）：**字体不再出现在「更多」里**——见 `OVERFLOW_EXCLUDE` 的说明。
+      // 这里刻意**保留一个显式分支返回 null**（而不是删掉）：万一以后有人把 `font` 又塞回
+      // 溢出清单，也不会掉进下面的通用分支变成一个"点了没反应/和设置重复"的死条目
+      // （E-2026-266 就是这类死接线）。改字体请走「设置」底栏里的字体页签。
+      return null
     }
     return (
       <div
@@ -1055,7 +1064,7 @@ export function TopBar() {
    * 系统选择器另留一个菜单项（runOpenSystem），不做成"必须先设工作区才能打开"。
    */
   const runOpenSmart = async () => {
-    if ((isCoarsePointerDevice() && isWorkspaceSupported()) || (await getWorkspace())) {
+    if ((isCoarsePointerDevice() && isWorkspaceAvailable()) || (await getWorkspace())) {
       toggleDock('workspace')
       return
     }
@@ -1067,7 +1076,7 @@ export function TopBar() {
    * 已经绑定（工作区文件 / 桌面外部文件 / 浏览器句柄）的情况仍走 `saveFile()` 直接写回。
    */
   const runSaveSmart = async () => {
-    if (isCoarsePointerDevice() && isWorkspaceSupported() && !useDocStore.getState().binding) {
+    if (isCoarsePointerDevice() && isWorkspaceAvailable() && !useDocStore.getState().binding) {
       requestWorkspaceSave()
       toggleDock('workspace')
       return
@@ -1076,7 +1085,7 @@ export function TopBar() {
   }
   /** adj540：手机端「另存为」= 开工作区面板并直接展开文件名输入（`showSaveFilePicker` 在移动端不可靠） */
   const runSaveAsSmart = async () => {
-    if (isCoarsePointerDevice() && isWorkspaceSupported()) {
+    if (isCoarsePointerDevice() && isWorkspaceAvailable()) {
       requestWorkspaceSave()
       toggleDock('workspace')
       return

@@ -698,7 +698,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       return false
     }
     try {
-      const code = await readWorkspaceText(ws.handle, segs)
+      const code = await readWorkspaceText(ws, segs)
       const name = fileBaseName(segs[segs.length - 1])
       try {
         localStorage.setItem(DRAFT_KEY, code)
@@ -759,11 +759,11 @@ export const useDocStore = create<DocState>()((set, get) => ({
       // adj544：绑定带工作区身份 ⇒ 只有"同属当前工作区且路径相同"才算同一个文件
       const cur = get().binding
       const same = !!cur && cur.wsId === ws.id && joinPath(cur.segs) === joinPath(segs)
-      if (!same && (await hasEntry(ws.handle, segs.slice(0, -1), segs[segs.length - 1]))) {
+      if (!same && (await hasEntry(ws, segs.slice(0, -1), segs[segs.length - 1]))) {
         ui.showNotice(workspaceCopy.exists(segs[segs.length - 1]), 'warn')
         return false
       }
-      await writeWorkspaceText(ws.handle, segs, code)
+      await writeWorkspaceText(ws, segs, code)
       const name = fileBaseName(segs[segs.length - 1])
       const bind: WorkspaceBinding = { wsId: ws.id, wsName: ws.name, segs }
       saveDraftSrc(bind)
@@ -802,7 +802,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       return false
     }
     try {
-      await createSubdir(ws.handle, dirPath, name)
+      await createSubdir(ws, dirPath, name)
       console.info(`[iJipu] 工作区新建目录：${joinPath([...dirPath, name])}`)
       ui.showNotice(workspaceCopy.dirCreated(name), 'ok')
       return true
@@ -827,7 +827,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
     const from = [...dir, fromName]
     const to = [...dir, toName]
     try {
-      await renameFile(ws.handle, dir, fromName, toName)
+      await renameFile(ws, dir, fromName, toName)
       // 正在编辑的就是这个文件 ⇒ 绑定跟着改名（否则「保存」会指向一个已不存在的名字）
       // adj544：绑定现在带身份，改路径时**保留 wsId/wsName**，并同步持久化的草稿来源
       const cur = get().binding
@@ -865,7 +865,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
         continue
       }
       try {
-        await moveFile(ws.handle, from, toDir)
+        await moveFile(ws, from, toDir)
         // adj544：绑定带身份 ⇒ 只更新路径（保留 wsId/wsName）并同步持久化的草稿来源
         const cur = get().binding
         if (cur && cur.wsId === ws.id && joinPath(cur.segs) === joinPath(from)) {
@@ -906,8 +906,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
       if (segs.length === 0) continue
       const name = segs[segs.length - 1]
       try {
-        if (it.kind === 'dir') await removeEmptyDir(ws.handle, segs.slice(0, -1), name)
-        else await removeFile(ws.handle, segs)
+        if (it.kind === 'dir') await removeEmptyDir(ws, segs.slice(0, -1), name)
+        else await removeFile(ws, segs)
         // 当前文档正被删掉的那一项 ⇒ 解绑（内容仍留在编辑器里）
         // adj544：解绑要连**持久化的草稿来源**一起清掉，否则重启后又"以为"绑定在已删的文件上
         const cur = get().binding
@@ -947,7 +947,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
     const name = target[target.length - 1]
     try {
       // 内容用「新建」模板（`src/samples/未命名.jps`，adj481 文件驱动），同名则拒绝
-      await createFile(ws.handle, target.slice(0, -1), name, defaultSample().code)
+      await createFile(ws, target.slice(0, -1), name, defaultSample().code)
       console.info(`[iJipu] 工作区新建谱：${joinPath(target)}`)
       ui.showNotice(workspaceCopy.created(name), 'ok')
     } catch (e) {
@@ -1159,13 +1159,13 @@ async function doSaveFile(): Promise<boolean> {
         return false
       }
       // ② 存在性校验：原文件不在了 ⇒ 转另存（用户确认位置），不静默重建
-      if (!(await hasEntry(ws.handle, wsPath.slice(0, -1), wsPath[wsPath.length - 1]))) {
+      if (!(await hasEntry(ws, wsPath.slice(0, -1), wsPath[wsPath.length - 1]))) {
         console.warn(`[iJipu] 绑定的工作区文件已不存在：${joinPath(wsPath)}`)
         ui.showNotice(workspaceCopy.sourceMissing(joinPath(wsPath)), 'warn')
         return false
       }
       const code = useDocStore.getState().code
-      await writeWorkspaceText(ws.handle, wsPath, code)
+      await writeWorkspaceText(ws, wsPath, code)
       useDocStore.setState({ dirty: useDocStore.getState().code !== code })
       console.info(`[iJipu] 保存到工作区：${joinPath(wsPath)}（${Math.round(performance.now() - t0)}ms）`)
       ui.showNotice(workspaceCopy.saved(joinPath(wsPath)), 'ok')
@@ -1418,13 +1418,13 @@ export async function resolvePendingBinding(): Promise<boolean> {
     console.info(`[iJipu] 未恢复工作区绑定：绑定属于工作区 ${pending.wsName || pending.wsId}，当前是 ${ws.name}`)
     return false
   }
-  const perm = await queryWorkspacePermission(ws.handle)
+  const perm = await queryWorkspacePermission(ws)
   if (perm !== 'granted') {
     console.info(`[iJipu] 未恢复工作区绑定：目录权限为 ${perm}（需用户手势里重新授权）`)
     return false
   }
   const segs = pending.segs
-  if (!(await hasEntry(ws.handle, segs.slice(0, -1), segs[segs.length - 1]))) {
+  if (!(await hasEntry(ws, segs.slice(0, -1), segs[segs.length - 1]))) {
     console.info(`[iJipu] 未恢复工作区绑定：${joinPath(segs)} 已不在工作区里`)
     return false
   }
