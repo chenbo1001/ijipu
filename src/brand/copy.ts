@@ -276,6 +276,16 @@ export const workspaceCopy = {
    */
   scanning: (scanned: number, found: number, ms: number): string =>
     `正在扫描…已查 ${scanned} 项 / 找到 ${found} 个 / ${(ms / 1000).toFixed(1)}s`,
+  /**
+   * adj590（用户要求"工作区在索引操作时，应该有提示消息"）：建索引是**几十秒级**的长操作，
+   * 而且现在会在"打开面板/切工作区"之后**空闲时自己跑起来**——不说一声用户只会觉得"卡住了/没反应"。
+   * 这句放在列表**最上方**（与其它进行中提示同款：转圈 + 文案，滚动也看得见）。
+   */
+  indexing: (scanned: number, found: number): string => `正在建立索引：已扫描 ${scanned} 项 / 找到 ${found} 个谱`,
+  /** adj590：索引建好后的**收尾提示**（用户要求"应该有提示消息"）——告诉它成了、有几个谱、花了多久 */
+  indexReady: (found: number, sec: string): string => `索引完成：${found} 个谱（用时 ${sec}s）`,
+  /** adj590：索引没建成时也要说（否则用户以为"就是没有这些谱"） */
+  indexFailed: '建立索引失败（可稍后在「操作 ▾ → 重新扫描工作区」重试）',
   /** adj546：命中太多时不全部渲染（手机上一次画几千行要几百毫秒），如实说明并引导缩小范围 */
   searchCapped: (total: number, shown: number): string => `共 ${total} 个，只显示前 ${shown} 个（输入关键词可缩小范围）`,
   /**

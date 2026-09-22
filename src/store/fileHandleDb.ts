@@ -200,32 +200,92 @@ export interface CachedIndex {
   relPaths: string[]
 }
 
-/** 保存索引（按工作区身份覆盖；写失败静默） */
+/**
+ * adj590（用户反馈"切换工作区后，新的工作区好像没有索引"）：索引**按工作区各存一份**。
+ *
+ * 此前固定存一个键 `'workspaceIndex'`（值里带 `wsId`）⇒ 换工作区就把上一个的索引**覆盖**了，
+ * 切回去只能整树重扫（真机 20s 量级），用户看到的现象正是"新工作区没有索引 / 老工作区也得重扫"。
+ *
+ * 现在用**数组键** `['workspaceIndex', at, wsId]`：
+ *  · 键里带 `at` ⇒ 清理时只读键就能按新旧排序（不必把上百 KB 的 `relPaths` 都读出来）；
+ *  · 键里带 `wsId` ⇒ 每个工作区各存一份，来回切都是秒开；
+ *  · 只保留最近 `INDEX_KEEP` 份（单份 ≈ 百 KB 量级；够"几个工作区来回切"，也不会无限长大）。
+ * 旧的字符串键照旧能读（迁移：命中即用，下次保存就落到新键上）。
+ */
+const INDEX_KEY = 'workspaceIndex'
+const INDEX_KEEP = 3
+
+/** 索引键（数组键：`[前缀, 时间戳, 工作区id]`） */
+type IndexKey = [typeof INDEX_KEY, number, string]
+const isIndexKey = (k: IDBValidKey): k is IndexKey => Array.isArray(k) && k[0] === INDEX_KEY && typeof k[2] === 'string'
+
+function getAllKeysOf(db: IDBDatabase): Promise<IDBValidKey[]> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly')
+    const req = tx.objectStore(STORE).getAllKeys()
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+function getValue<T>(db: IDBDatabase, key: IDBValidKey): Promise<T | undefined> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly')
+    const req = tx.objectStore(STORE).get(key)
+    req.onsuccess = () => resolve(req.result as T | undefined)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+/** 索引按工作区各存一份；顺手清掉该工作区的旧记录，并把总份数收在 `INDEX_KEEP` 以内 */
 export async function saveWorkspaceIndex(idx: CachedIndex): Promise<void> {
   try {
     const db = await openDb()
+    const key: IndexKey = [INDEX_KEY, idx.at, idx.wsId]
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE, 'readwrite')
-      tx.objectStore(STORE).put(idx, 'workspaceIndex')
+      const store = tx.objectStore(STORE)
+      store.put(idx, key)
+      // 同一个工作区只留最新一份：键里带时间，同 wsId 的旧键直接删
+      const keysReq = store.getAllKeys()
+      keysReq.onsuccess = () => {
+        for (const k of keysReq.result) {
+          if (isIndexKey(k) && k[2] === idx.wsId && k[1] !== idx.at) store.delete(k)
+        }
+      }
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
+    // 超出保留份数的（最旧的先走）——只读键，不读值
+    const keys = (await getAllKeysOf(db)).filter(isIndexKey)
+    if (keys.length > INDEX_KEEP) {
+      keys.sort((a, b) => b[1] - a[1])
+      const drop = keys.slice(INDEX_KEEP)
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite')
+        for (const k of drop) tx.objectStore(STORE).delete(k)
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error)
+      })
+    }
     db.close()
   } catch {
     /* 静默降级（下次照旧全量扫） */
   }
 }
 
-/** 读索引（无 / 身份或**范围**不符 / 格式不对 ⇒ null） */
+/** 读某个工作区的索引（没有 / 身份或**范围**不符 / 格式不对 ⇒ null）；兼容旧的单槽键 */
 export async function loadWorkspaceIndex(wsId: string, from = ''): Promise<CachedIndex | null> {
   try {
     const db = await openDb()
-    const val = await new Promise<CachedIndex | null>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readonly')
-      const req = tx.objectStore(STORE).get('workspaceIndex')
-      req.onsuccess = () => resolve((req.result as CachedIndex | undefined) ?? null)
-      req.onerror = () => reject(req.error)
-    })
+    const mine = (await getAllKeysOf(db)).filter((k): k is IndexKey => isIndexKey(k) && k[2] === wsId)
+    mine.sort((a, b) => b[1] - a[1])
+    let val = mine.length > 0 ? await getValue<CachedIndex>(db, mine[0]) : undefined
+    if (!val) {
+      // adj590：兼容 adj546~589 那份"单个键"的记录（迁移路径：命中即用，下次保存落到新键）
+      const legacy = await getValue<CachedIndex>(db, INDEX_KEY)
+      if (legacy && legacy.wsId === wsId) val = legacy
+    }
     db.close()
     // adj580：`from` 也要对得上——旧记录没有该字段（`undefined`）⇒ 只认"整个工作区"这一种范围
     if (!val || val.wsId !== wsId || (val.from ?? '') !== from || !Array.isArray(val.relPaths)) return null

@@ -229,6 +229,7 @@ export function WorkspacePanel() {
         }
         indexRef.current = r.hits
         indexKeyRef.current = indexScopeKey(rec)
+        indexAtRef.current = Date.now()
         idxMetaRef.current = { truncated: r.truncated, blocked: r.blocked }
         const ms = Date.now() - t0
         await saveWorkspaceIndex({ wsId, from: '', at: Date.now(), relPaths: r.hits.map((h) => h.relPath) })
@@ -237,10 +238,15 @@ export function WorkspacePanel() {
           `[iJipu] 工作区索引完成：扫描 ${r.scanned} 项 / 命中 ${r.hits.length} 个 / ${ms}ms` +
             `（${r.scanned > 0 ? (ms / r.scanned).toFixed(2) : '0'}ms 每项）`,
         )
+        // adj590（用户要求"索引操作时应该有提示消息"）：**建完说一声**——
+        // 现在索引会在"打开面板/切工作区"后空闲时自己跑，不提示的话用户只看到列表突然变全。
+        // 用 getState() 取 store action（不进依赖数组，保持 runScan 引用稳定）。
+        useUiStore.getState().showNotice(workspaceCopy.indexReady(r.hits.length, (ms / 1000).toFixed(1)), 'ok')
         setIndexVersion((v) => v + 1)
         return r
       } catch {
-        // 扫失败：保留已有索引（可能是落盘的旧索引），不打断用户
+        // 扫失败：保留已有索引（可能是落盘的旧索引），不打断用户——但要说一声（否则以为"就是没有这些谱"）
+        useUiStore.getState().showNotice(workspaceCopy.indexFailed, 'warn')
         return { hits: indexRef.current ?? [], ...idxMetaRef.current, scanned: 0 }
       } finally {
         scanPromiseRef.current = null
@@ -681,6 +687,9 @@ export function WorkspacePanel() {
       // 于是新工作区的根目录会命中上个工作区留下的 `'' → 旧列表` 缓存（看到上一个工作区的内容）。
       invalidateCache()
       setChoose(false) // adj575：选完就回到文件列表
+      // adj590（用户反馈"切换工作区后，新的工作区好像没有索引"）：新工作区的索引**现在就准备好**
+      // （内存/落盘命中即秒开；缺了就空闲时扫起来）——否则切过去第一次过滤又得干等一次整树扫描。
+      await ensureIndexFresh(rec)
       await refresh(rec, [])
       setRecent(await listWorkspaces())
       showNotice(rec.id === picked.id ? workspaceCopy.picked(rec.name) : workspaceCopy.reused(rec.name), 'ok')
@@ -733,9 +742,11 @@ export function WorkspacePanel() {
         return
       }
       setPerm('granted')
-      // adj576（用户反馈"打开其它工作区后列表应重新刷新缓存"）：切工作区 ⇒ 目录列表缓存与过滤索引作废
+      // adj576（用户反馈"打开其它工作区后列表应重新刷新缓存"）：切工作区 ⇒ 目录列表缓存作废
       invalidateCache()
       setChoose(false) // adj575：选完就回到文件列表
+      // adj590：从"最近工作区"切过去时，同样**立刻把新工作区的索引准备好**（每个工作区各存一份，切回也是秒开）
+      await ensureIndexFresh(next)
       // adj550：切换到某个工作区 = 又一条"进入工作区"的入口 ⇒ 同一条规则：定位到它的最新位置
       await enterAtLatestPos(next, workspaceCopy.loadingWorkspace)
       await resolvePendingBinding()
@@ -1234,6 +1245,15 @@ export function WorkspacePanel() {
                 <span className="ws-loading-text">{busyLabel}</span>
               </div>
             )}
+            {/* adj590（用户要求"工作区在索引操作时，应该有提示消息"）：建索引是几十秒级的长操作，
+                而且现在会在"打开面板/切工作区"之后**空闲时自己跑**——提示必须放在**列表最上方**、
+                与其它进行中提示同款（转圈 + 文案），否则它夹在几百行列表底部等于没提示。 */}
+            {scanInfo && (
+              <div className="ws-loading" role="status" aria-live="polite">
+                <span className="ws-spin" aria-hidden="true" />
+                <span className="ws-loading-text">{workspaceCopy.indexing(scanInfo.scanned, scanInfo.found)}</span>
+              </div>
+            )}
           {/* 过滤模式：**平坦结果**（跨子目录），点一条直接打开 —— 不提供勾选（改名/移动/删除要先清空过滤） */}
           {searching
             ? (hits ?? []).slice(0, RESULT_RENDER_MAX).map((h) => (
@@ -1329,8 +1349,8 @@ export function WorkspacePanel() {
           {searching && (hits?.length ?? 0) > RESULT_RENDER_MAX && (
             <div className="ws-none">{workspaceCopy.searchCapped(hits?.length ?? 0, RESULT_RENDER_MAX)}</div>
           )}
-          {/* adj546：正在后台重扫/首次扫描 ⇒ 显示进度（用户不必对着空白等半分钟） */}
-          {scanInfo && <div className="ws-none">{workspaceCopy.scanning(scanInfo.scanned, scanInfo.found, scanInfo.ms)}</div>}
+          {/* adj546：正在后台重扫/首次扫描 ⇒ 显示进度
+              adj590：进度改到**列表最上方**（`.ws-loading` 同款），这里不再重复显示 */}
           </div>
         </div>
 

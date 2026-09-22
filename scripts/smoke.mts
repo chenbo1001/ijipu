@@ -8538,6 +8538,8 @@ async function runAdj540WorkspaceTests() {
   const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
   const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
   const panelSrc = String(readFileSync('src/ui/dock/WorkspacePanel.tsx', 'utf8'))
+  // adj590：索引的落盘格式（按工作区各存一份）也在这个作用域里断言
+  const fhSrc = String(readFileSync('src/store/fileHandleDb.ts', 'utf8'))
   // adj585：可点击展开的 `?` 徽标（工作区选择界面与导入页签共用）
   const badgeSrc = String(readFileSync('src/ui/HelpBadge.tsx', 'utf8'))
   const copySrc = String(readFileSync('src/brand/copy.ts', 'utf8'))
@@ -8685,7 +8687,8 @@ async function runAdj540WorkspaceTests() {
       /isCurrent && <span className="ws-choose-tag">/.test(panelSrc) &&
       /forgetTitle: '从这份清单里移除（不会删除磁盘上的文件夹）'/.test(copySrc) &&
       // 选完就回文件列表；收起面板时也复位，不会"下次打开还停在选择界面"
-      /setChoose\(false\)[\s\S]{0,160}?await refresh\(rec, \[\]\)/.test(panelSrc) &&
+      // adj590：切完工作区**先把新工作区的索引准备好**再刷新列表（用户反馈"新工作区好像没有索引"）
+      /setChoose\(false\)[\s\S]{0,400}?await ensureIndexFresh\(rec\)[\s\S]{0,120}?await refresh\(rec, \[\]\)/.test(panelSrc) &&
       /setChoose\(false\)/.test(panelSrc.split('if (!active) {')[1]?.slice(0, 400) ?? ''),
     '')
   check('adj578/adj585/adj586（用户要求）选择界面把说明收进标题后的 `?`：**点一下就地展开**（PC 仍可悬浮），高度让给清单',
@@ -9207,6 +9210,38 @@ async function runAdj540WorkspaceTests() {
       // 注释里留下"两种基准结论不同"的原因，避免以后又被 CPU 受限的基准带偏
       /延迟受限时并发才有意义/.test(wsSrc) &&
       /CPU 受限时多了只是增加切换开销/.test(wsSrc),
+    '')
+  check('adj590（用户反馈）**索引按工作区各存一份**（数组键 `[前缀, 时间, wsId]`）+ 只读键做清理 + 兼容旧的单槽记录',
+    // ① 键带 wsId ⇒ 切工作区不再互相覆盖（用户现象："切换工作区后，新的工作区好像没有索引"）
+    /const INDEX_KEY = 'workspaceIndex'/.test(fhSrc) &&
+      /type IndexKey = \[typeof INDEX_KEY, number, string\]/.test(fhSrc) &&
+      /const isIndexKey = \(k: IDBValidKey\): k is IndexKey =>/.test(fhSrc) &&
+      /const key: IndexKey = \[INDEX_KEY, idx\.at, idx\.wsId\]/.test(fhSrc) &&
+      // ② 同一 wsId 只留最新一份 + 总份数收在 INDEX_KEEP 以内（只读键排序，不读 relPaths）
+      /if \(isIndexKey\(k\) && k\[2\] === idx\.wsId && k\[1\] !== idx\.at\) store\.delete\(k\)/.test(fhSrc) &&
+      /keys\.sort\(\(a, b\) => b\[1\] - a\[1\]\)[\s\S]{0,200}?keys\.slice\(INDEX_KEEP\)/.test(fhSrc) &&
+      /const INDEX_KEEP = 3/.test(fhSrc) &&
+      // ③ 读的时候按 wsId 找最新那份；找不到再回退到旧的单槽键（迁移不丢索引）
+      /const mine = \(await getAllKeysOf\(db\)\)\.filter\(\(k\): k is IndexKey => isIndexKey\(k\) && k\[2\] === wsId\)/.test(
+        fhSrc,
+      ) &&
+      /const legacy = await getValue<CachedIndex>\(db, INDEX_KEY\)/.test(fhSrc) &&
+      /if \(legacy && legacy\.wsId === wsId\) val = legacy/.test(fhSrc) &&
+      // ④ 面板：打开面板 / 选新目录 / 从最近清单切过去，三条路都**立刻准备索引**
+      (panelSrc.match(/await ensureIndexFresh\(/g) ?? []).length >= 3 &&
+      /if \(rec\) await ensureIndexFresh\(rec\)/.test(panelSrc),
+    '')
+  check('adj590（用户要求）**索引操作有提示消息**：列表最上方转圈+进度，完成/失败都有 toast',
+    /workspaceCopy\.indexing\(scanInfo\.scanned, scanInfo\.found\)/.test(panelSrc) &&
+      /indexing: \(scanned: number, found: number\): string => `正在建立索引：已扫描 \$\{scanned\} 项 \/ 找到 \$\{found\} 个谱`/.test(
+        copySrc,
+      ) &&
+      // 完成 / 失败都有 toast（用户要求"应该有提示消息"）
+      /showNotice\(workspaceCopy\.indexReady\(r\.hits\.length, \(ms \/ 1000\)\.toFixed\(1\)\), 'ok'\)/.test(panelSrc) &&
+      /showNotice\(workspaceCopy\.indexFailed, 'warn'\)/.test(panelSrc) &&
+      /indexReady: \(found: number, sec: string\): string => `索引完成：\$\{found\} 个谱（用时 \$\{sec\}s）`/.test(copySrc) &&
+      // 旧的"夹在列表底部"的那行已撤掉（底部那行用户看不见）
+      !/\{scanInfo && <div className="ws-none">/.test(panelSrc),
     '')
   check('adj588（用户反馈"手机上 `*` 过滤还是有点长"）索引**按工作区一份**（不再按目录分）+ 作用域靠纯函数前缀裁剪',
     // ① 作用域键只剩工作区身份 ⇒ 进子目录不会换作用域、不会重扫
