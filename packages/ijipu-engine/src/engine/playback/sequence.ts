@@ -736,11 +736,7 @@ export function buildPlaySequence(
   let totalMs = 0
   {
     let ms = 0
-    // 每个 voice 在 result.groups 中按顺序的下一个待处理 group 索引（多组多声部各自独立 ms）
-    const voiceNextGroupIdx = new Map<number, number>()
-    // 已纳入 voiceBlock 的 groupIndex
-    const covered = new Set<number>()
-    // 块拍数（块内 max groupBeats）
+    // 块拍数（块内 max groupBeats：多声部块以"最长声部"为准推进时间）
     const blockBeatsOf = (gis: number[]) => {
       let bb = 0
       for (const gi of gis) {
@@ -764,46 +760,47 @@ export function buildPlaySequence(
       bsMs.push(beats * beatMs)
       return bsMs
     }
-    // 1. 多声部块（voiceBlock）— 每个 voice 在该 vb 取下一个未处理的 group（adj307）
-    for (const page of layout.pages) {
-      for (const vb of page.voiceBlocks) {
-        const gis: number[] = []
-        for (const v of vb.voices) {
-          // 找该 voice 下一个属于本 vb 的 group（按 result.groups 顺序遍历，跳过已覆盖）
-          let cur = voiceNextGroupIdx.get(v.voice) ?? 0
-          while (
-            cur < result.groups.length &&
-            (covered.has(cur) || result.groups[cur].music.voice !== v.voice)
-          ) {
-            cur++
-          }
-          if (cur < result.groups.length && result.groups[cur].music.voice === v.voice) {
-            gis.push(cur)
-            voiceNextGroupIdx.set(v.voice, cur + 1)
-          }
-        }
-        if (gis.length === 0) continue
-        gis.sort((a, b) => a - b)
-        const bb = blockBeatsOf(gis)
-        for (const gi of gis) {
-          groupStartMs[gi] = ms
-          barStartMsInGroup[gi] = bsMsOf(gi)
-          covered.add(gi)
-        }
-        ms += bb * beatMs
-      }
-    }
-    // 2. 单声部 group（不在任何 voiceBlock 内）按 groups 顺序自成块累加
-    for (let gi = 0; gi < result.groups.length; gi++) {
-      if (covered.has(gi)) continue
-      groupStartMs[gi] = ms
-      barStartMsInGroup[gi] = bsMsOf(gi)
-      let bb = 0
-      for (const tk of result.groups[gi].music.tokens) {
-        if (tk.kind === 'note' || tk.kind === 'rest' || tk.kind === 'rhythm') bb += tokenDuration(tk)
+    /**
+     * adj595（用户要求）：**按源码顺序把曲行切成"块"，再逐块累加时间**。
+     *
+     * 用户口径（原话）：单声部行（`Q:`）单独用第一音色演奏；紧随其后的 `Q1:`+`Q2:` 组成
+     * 一组多声部（两音色**同时**）；再接一组就接在**上一组之后**；再遇到 `Q:` 又回到单声部……
+     * 分块规则与排版完全一致（layout 构建 unit 时"声部号在本块内重复即断块"），
+     * 并同样在 `---` 分页标记处断块（跨页不该被合成同时发声）。
+     *
+     * 旧实现是"先遍历所有 voiceBlock、再遍历剩下的单声部 group"，有两个错：
+     *  ① **顺序错**：穿插在多声部块之间的单声部行被挪到所有多声部块之后；
+     *  ② **配对错**：块内按"该声部下一个未被占用的 group"取行，于是**块前那一行单声部**
+     *     （同为声部 1）会被吸进第一个多声部块，两组双声部整体错位
+     *     （实测 `Q: … / Q1: … / Q2: … / Q1: … / Q2: … / Q: …` 得到 g0=0、g2=0、g1=2000、g4=2000）。
+     */
+    let chunk: number[] = []
+    let chunkVoices = new Set<number>()
+    const flushChunk = (): void => {
+      if (chunk.length === 0) return
+      const bb = blockBeatsOf(chunk)
+      for (const gi of chunk) {
+        groupStartMs[gi] = ms
+        barStartMsInGroup[gi] = bsMsOf(gi)
       }
       ms += bb * beatMs
+      chunk = []
+      chunkVoices = new Set()
     }
+    for (const line of result.lines) {
+      if (line.kind === 'pagebreak') {
+        flushChunk()
+        continue
+      }
+      if (line.kind !== 'music') continue
+      const gi = result.groups.findIndex((g) => g.music === line)
+      if (gi === -1) continue
+      const v = result.groups[gi].music.voice
+      if (chunk.length > 0 && chunkVoices.has(v)) flushChunk()
+      chunk.push(gi)
+      chunkVoices.add(v)
+    }
+    flushChunk()
     totalMs = ms
   }
 

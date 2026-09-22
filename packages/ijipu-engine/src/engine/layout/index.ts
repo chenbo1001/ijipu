@@ -2103,7 +2103,17 @@ export function layoutScore(
       const outPerBeat: number[] = []
       let baseBarSum = 0
       for (let b = 0; b < numBars; b++) {
-        baseBarSum += (beatBodyW[b] ?? []).reduce((a, s) => a + s, 0) + (barBeats[b] > 0 ? (barBeats[b] - 1) * NOTE_GAP : 0)
+        /**
+         * adj593：这里必须与下面**真正建宽度时的口径一致**——
+         * 建宽度时"本体宽为 0 的拍"会被替换成 `BPW_NATURAL`（占位拍也要有宽度），
+         * 而本行此前直接用原始 `beatBodyW`（零就是零）求和 ⇒ 两套账：
+         * 用户谱（两声部 6 小节）里模型算出 `baseBarSum=307 → avStretch=152`（以为放得下），
+         * 实际建出来 `ΣbarRelW=529`、需要 557px 而可用只有 481px ⇒ **右溢 76px**（最后两拍画到纸外）。
+         * 统一口径后 `baseBarSum` 与真实宽度一致，超限时才会走到下面的 `shrink` 压缩分支。
+         */
+        baseBarSum +=
+          (beatBodyW[b] ?? []).reduce((a, s) => a + (s > 0 ? s : BPW_NATURAL), 0) +
+          (barBeats[b] > 0 ? (barBeats[b] - 1) * NOTE_GAP : 0)
       }
       const totalSlots = totalBeats + numBars - 1
       // adj317c：末节线钳制到 rightLimit - halfW（与单声部 atEnd 行末线一致），avStretch 反推 ΣbarBar
@@ -2118,6 +2128,20 @@ export function layoutScore(
       const targetBarSum = stretchBars ? Math.max(0, targetEndBarX - blockStartX - sumGapSpaces - BAR_PAD) : 0
       const avStretch = stretchBars ? Math.max(0, targetBarSum - baseBarSum) : 0
       const s = totalSlots > 0 ? avStretch / totalSlots : 0
+      /**
+       * adj593（用户反馈"一行放不下"）：**自然宽已经超过可用宽时，等比压缩到刚好放得下**。
+       *
+       * 此前只算了"还有多少富余可以拉伸"（`avStretch` 被 `Math.max(0, …)` 钳成 0），
+       * 没有处理"已经超了"这一支 ⇒ 整行**直接右溢**：用户两个声部、6 小节的行，
+       * 块内每拍宽取各声部最大值后自然宽 ≈520px > 可用 ≈495px，实测内容右缘 590 而
+       * 纸张右边界只有 545（越界 45px，最后两拍画到纸外）。
+       * 单声部路径对同一情形是**等比压缩**（`allocatePerBeats` 的 `scale = avail / total`，
+       * adj253 规则②"Σ≥avail ⇒ 等比压缩"）——多声部块缺的正是这一步，现在补齐、口径一致：
+       * 压缩比同时作用于**拍本体宽与拍间距**，压缩后仍严格贴右边界（不越界、不留白）。
+       * ⚠ 只在 `stretchBars`（≥ `align_min_bars` 小节、即"撑满"行）时压缩：
+       * 少小节行按既有规则保持自然宽（行尾留白），与单声部 `!stretch` 分支口径相同。
+       */
+      const shrink = stretchBars && baseBarSum > targetBarSum && baseBarSum > 0 ? targetBarSum / baseBarSum : 1
       for (let b = 0; b < numBars; b++) {
         const bb = barBeats[b]
         const start = barStartBeat[b]
@@ -2126,13 +2150,14 @@ export function layoutScore(
         let rel = b === 0 ? 0 : s
         for (let k = 0; k < bb; k++) {
           const idx = start + k
-          const wb = beatBodyW[b][k] > 0 ? beatBodyW[b][k] : BPW_NATURAL
+          // adj593：自然宽超限时按 `shrink` 压缩（拍宽与拍间距同比例），压缩后正好贴右边界
+          const wb = (beatBodyW[b][k] > 0 ? beatBodyW[b][k] : BPW_NATURAL) * shrink
           outPerBeat[idx] = wb
           mspSegX[idx] = rel
-          rel += wb + NOTE_GAP + s
+          rel += wb + NOTE_GAP * shrink + s
         }
         // 末拍后净间隙 = s（去 NOTE_GAP）—— 末小节末拍后 s 撑到内容右界
-        rel -= NOTE_GAP
+        rel -= NOTE_GAP * shrink
         mspBarRelW[b] = rel
       }
       while (outPerBeat.length < totalBeats) outPerBeat.push(BPW_NATURAL)

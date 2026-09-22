@@ -7,7 +7,18 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, slideExtraW, slideGlyphInk, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, slideExtraW, slideGlyphInk, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, measureBeatsOf, meterBeatsOf, inlineMeterBeats } from '@ijipu/engine/index.ts'
+/**
+ * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
+ * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
+ * （`Q: 1 2` 之类）——那不是那些断言要测的东西，也不该因此变红。
+ * 所以：**断言用的 `parseJps` 默认滤掉小节时值告警**；要验证这个新校验时用 `parseJpsRaw`。
+ */
+const METER_WARN_RE = /^(第 \d+ 小节共|首（弱起）小节共)/
+const parseJps = (src: string) => {
+  const r = parseJpsRaw(src)
+  return { ...r, errors: r.errors.filter((e) => !METER_WARN_RE.test(e.message)) }
+}
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES, gmVoiceRef, gmVoiceProgram, countScoreInstrumentSwitches } from '@ijipu/engine/playback/index.ts'
@@ -3191,6 +3202,33 @@ check('adj307 v1/v2 第一组第一拍 atMs=0', ev1Multi[0]?.atMs === 0 && ev2Mu
 check('adj307 v1 第二组第一拍 atMs=1000（延续第一组不覆盖）', ev1Multi[2]?.atMs === 1000, String(ev1Multi[2]?.atMs))
 check('adj307 v2 第二组第一拍 atMs=1000（与 v1 第二组第一拍同步）', ev2Multi[2]?.atMs === 1000 && ev1Multi[2].atMs === ev2Multi[2].atMs, `v1=${ev1Multi[2]?.atMs} v2=${ev2Multi[2]?.atMs}`)
 check('adj307 多组二声部总拍 = 4 拍 = 2000ms', seqMultiGrp.totalMs === 2000, String(seqMultiGrp.totalMs))
+
+// ---- adj595（用户要求）：**单声部行与多声部组混合**时，演奏按源码顺序"逐块"串行推进 ----
+// 用户给的形态：Q:（单声部，第一音色）→ Q1:+Q2:（第一组多声部，同时）→ Q1:+Q2:（第二组）→ Q:（单声部）…
+// 期望：单声部 A 0~2000、组 B 2000~4000、组 C 4000~6000、单声部 D 6000~8000（120bpm，每小节 2000ms）
+const rMixV = parseJps(
+  'V: 1.0\nB: t\nD: C\nP: 4/4\nY: 钢琴\nY: 弦乐\nQ: 1 2 3 4 |\nQ1: 5 5 5 5 |\nQ2: 3 3 3 3 |\nQ1: 6 6 6 6 |\nQ2: 2 2 2 2 |\nQ: 7 7 7 7 |\n',
+)
+const layMixV = layoutScore(rMixV, defaultPageConfig)
+const seqMixV = buildPlaySequence(rMixV, layMixV, 120)
+{
+  // 组号 = result.groups 下标：0=Q:、1=Q1(组B)、2=Q2(组B)、3=Q1(组C)、4=Q2(组C)、5=Q:
+  const firstAt = (gi: number) =>
+    seqMixV.events.filter((e) => e.placed.id.group === gi).sort((a, b) => a.atMs - b.atMs)[0]?.atMs
+  const instOf = (gi: number) => seqMixV.events.find((e) => e.placed.id.group === gi)?.instrument
+  const detail = JSON.stringify({ g0: firstAt(0), g1: firstAt(1), g2: firstAt(2), g3: firstAt(3), g4: firstAt(4), g5: firstAt(5), total: seqMixV.totalMs })
+  check('adj595 混合声部 24 事件（6 小节 × 4 音）', seqMixV.events.length === 24, String(seqMixV.events.length))
+  check('adj595 首个单声部行 `Q:` 从 0ms 起（不被后面的多声部块挤到后面）', firstAt(0) === 0, detail)
+  check('adj595 第一组 `Q1:`+`Q2:` 同刻起于 2000ms（两音色同时）', firstAt(1) === 2000 && firstAt(2) === 2000, detail)
+  check('adj595 第二组 `Q1:`+`Q2:` 同刻起于 4000ms（接在第一组之后，不是与它同时）', firstAt(3) === 4000 && firstAt(4) === 4000, detail)
+  check('adj595 尾随的单声部行 `Q:` 起于 6000ms（接在第二组之后）', firstAt(5) === 6000, detail)
+  check('adj595 全曲时长 = 4 块 × 2000ms = 8000ms', seqMixV.totalMs === 8000, detail)
+  check(
+    'adj595 音色：单声部行与 Q1 都用第一音色（`Y: 钢琴`），Q2 用第二音色（`Y: 弦乐`）',
+    instOf(0) === '钢琴' && instOf(1) === '钢琴' && instOf(3) === '钢琴' && instOf(5) === '钢琴' && instOf(2) === '弦乐' && instOf(4) === '弦乐',
+    JSON.stringify({ g0: instOf(0), g1: instOf(1), g2: instOf(2), g3: instOf(3), g4: instOf(4), g5: instOf(5) }),
+  )
+}
 
 // ---- 58. 空间优先布局 P1：时值拆分 + 本体宽度（adj283） ----
 console.log('[58] space-first layout P1 (adj283)')
@@ -9377,6 +9415,243 @@ async function runAdj559PreviewLiveUpdateTests() {
  *  另：两个图标都必须是"纯黑 + alpha"的图（adj457 口径），且 alpha 要**够实**——
  *  用户反馈"图标有点糊"就是半透明过渡过多 + 按钮 `opacity` + 灰字色三者叠加。
  */
+/**
+ * adj593（用户反馈"检查下面脚本的谱面，一行放不下，是什么情况？"）：
+ * **多声部块行宽两套账** —— 算富余量用原始拍本体宽、建宽度时却把"本体宽为 0 的拍"换成 `BPW_NATURAL`
+ * ⇒ 模型以为放得下（avStretch>0），实际建出来超出可用宽，整行右溢（真机实测 45px、最后两拍画到纸外）。
+ * 这里用**用户那份两声部脚本**做行为级断言：任何音符/小节线的右缘都不得越过纸张右边界。
+ */
+function runAdj593MultiVoiceFitTests() {
+  console.log('[124] multi-voice block line width must not overflow (adj593)')
+  const rightMostOf = (src: string): { noteRight: number; barRight: number; limit: number; rows: number } => {
+    const r = parseJpsRaw(src)
+    const lay = layoutScore(r, defaultPageConfig)
+    const pg = lay.pages[0]
+    const limit = pg.width - defaultPageConfig.margin_right
+    let noteRight = 0
+    let barRight = 0
+    for (const n of pg.notes) noteRight = Math.max(noteRight, n.rightX ?? n.x + n.width)
+    for (const b of pg.barlines) barRight = Math.max(barRight, b.x + (b.width ?? 0))
+    for (const br of pg.brackets ?? []) noteRight = Math.max(noteRight, br.x + (br.w ?? 0))
+    return { noteRight, barRight, limit, rows: new Set(pg.notes.map((n) => Math.round(n.y))).size }
+  }
+  // 用户脚本原样（只有 Q 行）+ 补上描述头的版本，都要不越界
+  const userQ1 = '6,/ 6,. 7,/ 1. | 1/ 1 1/ 2. 3/ | (6, - - - | 6,) - - - &hx | 6,/ 6,. 7,/ 7,. | 1/ 1. 2/ 5. |'
+  const userQ2 = '6,/ 6,. 5,/ 5,. | 6,/ 6, 6,/ 5,. 1/ | (1 - - - | 1) - - - &hx | 6,/ 6, 5,/ 5. | 6,/ 6,. 5,/ 2. |'
+  const twoVoice = `V: 1.0\nB: 诊断\nZ: 佚名 词曲\nD: C\nP: 4/4\nQ1: ${userQ1}\nQ2: ${userQ2}\n`
+  const oneVoice = `V: 1.0\nB: 诊断\nD: C\nP: 4/4\nQ1: ${userQ1}\n`
+  const a = rightMostOf(twoVoice)
+  const b = rightMostOf(oneVoice)
+  check(
+    'adj593 两个声部的行**音符内容**不再越出右边界（修前越界 45px）',
+    a.noteRight <= a.limit + 1,
+    `两声部 音符右缘 ${Math.round(a.noteRight)} / 边界 ${Math.round(a.limit)}（超 ${Math.round(a.noteRight - a.limit)}px），${a.rows} 行`,
+  )
+  check(
+    'adj593 单声部（对照）同样不越界',
+    b.noteRight <= b.limit + 1,
+    `单声部 音符右缘 ${Math.round(b.noteRight)} / 边界 ${Math.round(b.limit)}`,
+  )
+  /**
+   * 行末小节线本身还有 **4px** 落在边界外（`x=545 / width=4`，即**笔画宽度**压在边界上）——
+   * 这是**两条路径都有的既有小口径**（单声部实测同样是 549 vs 545），与本次的 45px 溢出不是一回事，
+   * 本轮不动它（动它会整体平移行末对齐、牵动一批既有的位置断言）；这里只把它**记录在案**：
+   * 断言"不超出边界 + 小节线自身笔画宽"。要收口时改 `targetEndBarX` 的钳制量即可。
+   */
+  check(
+    'adj593 行末小节线只在"自身笔画宽"内落位（≤ +5px，既有小口径，见注释）',
+    a.barRight <= a.limit + 5 && b.barRight <= b.limit + 5,
+    `两声部 小节线右缘 ${Math.round(a.barRight)} / 单声部 ${Math.round(b.barRight)} / 边界 ${Math.round(a.limit)}`,
+  )
+  // 富余量与实际建宽必须同源：不可再出现"算出来 307、建出来 529"的两套账
+  const wsSrc = String(readFileSync('packages/ijipu-engine/src/engine/layout/index.ts', 'utf8'))
+  check(
+    'adj593 富余量与实际宽度**同一口径**（零本体宽的拍按 BPW_NATURAL 计入 baseBarSum）',
+    /\(beatBodyW\[b\] \?\? \[\]\)\.reduce\(\(a, s\) => a \+ \(s > 0 \? s : BPW_NATURAL\), 0\)/.test(wsSrc) &&
+      // 超限时等比压缩到刚好放得下（与单声部 adj253 规则②同款）
+      /const shrink = stretchBars && baseBarSum > targetBarSum && baseBarSum > 0 \? targetBarSum \/ baseBarSum : 1/.test(wsSrc) &&
+      /const wb = \(beatBodyW\[b\]\[k\] > 0 \? beatBodyW\[b\]\[k\] : BPW_NATURAL\) \* shrink/.test(wsSrc),
+    '',
+  )
+}
+
+/**
+ * adj594（用户要求）：**小节时值校验**——4/4 的小节必须 4 拍，`|"p:2/4"` 起改 2 拍并延续到下一个临时拍号。
+ * 断言既覆盖纯函数，也覆盖"解析器自动并入 ParseResult.errors"这条端到端链路（用 `parseJpsRaw`）。
+ */
+function runAdj594MeasureBeatsTests() {
+  console.log('[125] measure beats validation vs meter (adj594)')
+  const meterWarns = (src: string) => parseJpsRaw(src).errors.filter((e) => METER_WARN_RE.test(e.message))
+
+  // ① 纯函数：拍号解析 / 临时拍号解析 / 小节时值合计
+  check(
+    'adj594 `meterBeatsOf` 取分子（`4/4`→4、`6/8 (2/4)`→6、缺省→null）',
+    meterBeatsOf('4/4') === 4 && meterBeatsOf('6/8 (2/4)') === 6 && meterBeatsOf(undefined) === null && meterBeatsOf('行板') === null,
+    `4/4=${meterBeatsOf('4/4')} 6/8(2/4)=${meterBeatsOf('6/8 (2/4)')} 缺省=${meterBeatsOf(undefined)}`,
+  )
+  check(
+    'adj594 `inlineMeterBeats` 认小节线备注里的临时拍号（大小写/夹带文字都认）',
+    inlineMeterBeats('p:2/4') === 2 && inlineMeterBeats('P: 3/4 渐慢') === 3 && inlineMeterBeats('渐强') === null && inlineMeterBeats(undefined) === null,
+    `p:2/4=${inlineMeterBeats('p:2/4')} P:3/4=${inlineMeterBeats('P: 3/4 渐慢')}`,
+  )
+  {
+    const r = parseJpsRaw('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 6,/ 6,. 7,/ 1. | 1/ 1 1/ 2. 3/ |\n')
+    const firstBar = r.groups[0].music.tokens.slice(0, r.groups[0].music.tokens.findIndex((t) => t.kind === 'barline'))
+    check(
+      'adj594 `measureBeatsOf`：`6,/ 6,. 7,/ 1.`（减时线+附点）= 4 拍',
+      Math.abs(measureBeatsOf(firstBar) - 4) < 1e-9,
+      `得到 ${measureBeatsOf(firstBar)}`,
+    )
+  }
+
+  // ② 用户那份脚本：Q1 全 4 拍（无告警）、Q2 第 5 小节 `6,/ 6, 5,/ 5.` 只有 3.5 拍 ⇒ 恰好 1 条告警
+  const userSrc = `V: 1.0\nB: 诊断\nZ: 佚名 词曲\nD: C\nP: 4/4\nQ1: 6,/ 6,. 7,/ 1. | 1/ 1 1/ 2. 3/ | (6, - - - | 6,) - - - &hx | 6,/ 6,. 7,/ 7,. | 1/ 1. 2/ 5. |\nQ2: 6,/ 6,. 5,/ 5,. | 6,/ 6, 6,/ 5,. 1/ | (1 - - - | 1) - - - &hx | 6,/ 6, 5,/ 5. | 6,/ 6,. 5,/ 2. |\n`
+  {
+    const w = meterWarns(userSrc)
+    const detail = JSON.stringify(w.map((e) => `${e.line}:${e.col} ${e.message}`))
+    check(
+      'adj594 用户脚本：只有 Q2 第 5 小节不满 4 拍，报**恰好 1 条**告警（3.5 拍 / 4/4）',
+      w.length === 1 && /3\.5 拍/.test(w[0].message) && /4\/4/.test(w[0].message) && w[0].severity === 'warning',
+      detail,
+    )
+    check(
+      'adj594 告警带**正确写法**提示（补齐 / 改 `P:` / 用 `|"p:2/4"` 临时拍号）且定位到该小节首音符所在行',
+      typeof w[0].hint === 'string' && /临时拍号/.test(w[0].hint ?? '') && w[0].line === 7 && w[0].col > 3,
+      `line=${w[0].line} col=${w[0].col} hint=${(w[0].hint ?? '').slice(0, 30)}…`,
+    )
+  }
+
+  // ③ 临时拍号：语法文档里那个例子必须**一条告警都没有**（4/4 → 2/4 分段都对齐）
+  check(
+    'adj594 临时拍号：`… | 5 6 7 1\' |"p:2/4" 1 2 | 3 - |` 全部对齐 ⇒ 无告警',
+    meterWarns("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1' |\"p:2/4\" 1 2 | 3 - |\n").length === 0,
+    JSON.stringify(meterWarns("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1' |\"p:2/4\" 1 2 | 3 - |\n").map((e) => e.message)),
+  )
+  // ④ 临时拍号**延续**到下一个临时拍号（跨行也算），所以 2/4 之后写 3 拍要报
+  check(
+    'adj594 临时拍号延续：`|"p:2/4" 1 2 | 3 - | 1 2 3 |` 第 3 小节 3 拍 ⇒ 报到 2/4 上',
+    (() => {
+      const w = meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |"p:2/4" 1 2 | 3 - | 1 2 3 |\n')
+      // 小节序号是**从 1 起按小节线数**：`1 2 3 4`=第 1、`1 2`=第 2、`3 -`=第 3、`1 2 3`=**第 4**
+      return w.length === 1 && /第 4 小节/.test(w[0].message) && /2\/4/.test(w[0].message) && /3 拍/.test(w[0].message)
+    })(),
+    JSON.stringify(meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |"p:2/4" 1 2 | 3 - | 1 2 3 |\n').map((e) => e.message)),
+  )
+  // ⑤ 6/8 按 6 拍算（adj595：首小节只查整数拍，故用第 2 小节做判据）
+  check(
+    'adj594 `P: 6/8` 按 6 拍算（第 2 小节 `1 2` 2 拍 ⇒ 告警；`1 2 3 4 5 6` ⇒ 不告警）',
+    meterWarns('V: 1.0\nB: t\nD: C\nP: 6/8\nQ: 1 2 3 4 5 6 | 1 2 |\n').length === 1 &&
+      meterWarns('V: 1.0\nB: t\nD: C\nP: 6/8\nQ: 1 2 3 4 5 6 | 1 2 3 4 5 6 |\n').length === 0,
+    JSON.stringify(meterWarns('V: 1.0\nB: t\nD: C\nP: 6/8\nQ: 1 2 3 4 5 6 | 1 2 |\n').map((e) => e.message)),
+  )
+  // ⑥ 不占拍的元素不能影响合计：&hx（呼吸记号，槽位不变）、括号、渐强渐弱、倚音（借主音符的时值）
+  check(
+    'adj594 `&hx` / `&zkh`+`&ykh` / 渐强渐弱 / 倚音 都不改变小节时值合计',
+    meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 6,/ 6,. 7,/ 1. &hx | &zkh 1 2 3 4 &ykh | 1< 2 3 4 | 3[2/] - - - |\n').length === 0,
+    JSON.stringify(meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 6,/ 6,. 7,/ 1. &hx | &zkh 1 2 3 4 &ykh | 1< 2 3 4 | 3[2/] - - - |\n').map((e) => e.message)),
+  )
+  // ⑦ 多声部：各声部各自数小节（Q2 的小节号不从 1 重来）
+  check(
+    'adj594 多声部各声部独立计小节号（Q2 第 2 小节不满 ⇒ 报「第 2 小节」而不是「第 1 小节」）',
+    (() => {
+      const w = meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 4 | 1 2 3 4 |\nQ2: 1 2 3 4 | 1 2 |\n')
+      // 行号：1 V、2 B、3 D、4 P、5 Q1、6 **Q2**；小节号按**该声部**从 1 数（Q2 的第 2 小节）
+      return w.length === 1 && /第 2 小节/.test(w[0].message) && w[0].line === 6
+    })(),
+    JSON.stringify(meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 4 | 1 2 3 4 |\nQ2: 1 2 3 4 | 1 2 |\n').map((e) => `${e.line} ${e.message}`)),
+  )
+  // ⑧ 空小节（一个带时值元素都没有，多声部填充用）不该报
+  check(
+    'adj594 空小节 / 只有记号的"小节"不报（多声部填充空小节是合法的）',
+    meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 4 | | 1 2 3 4 |\n').length === 0,
+    JSON.stringify(meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 4 | | 1 2 3 4 |\n').map((e) => e.message)),
+  )
+  // ⑨ 没写 P: 时按 4/4 检查（adj595：首小节豁免 ⇒ 用第 2 小节做判据）
+  check(
+    'adj594 没写 `P:` 时按 4/4 兜底检查',
+    meterWarns('V: 1.0\nB: t\nD: C\nQ: 1 2 3 4 | 1 2 3 |\n').length === 1,
+    JSON.stringify(meterWarns('V: 1.0\nB: t\nD: C\nQ: 1 2 3 4 | 1 2 3 |\n').map((e) => e.message)),
+  )
+  // ⑩ 告警不阻断渲染：带告警的谱照样能排版出页面
+  check(
+    'adj594 时值告警是 `warning`，不阻断排版/渲染（谱面照常出页）',
+    (() => {
+      const r = parseJpsRaw('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3/ |\n')
+      const lay = layoutScore(r, defaultPageConfig)
+      return r.errors.some((e) => e.severity === 'warning' && METER_WARN_RE.test(e.message)) && lay.pages.length > 0
+    })(),
+    '',
+  )
+  // ⑪ 同一旋律折成多行 `Q:`（同声部）时，小节号**继续累加**（不按行重来）
+  check(
+    'adj594 同一旋律折成多行 `Q:` 时小节号继续累加（第 2 行的小节是「第 3/4 小节」）',
+    (() => {
+      const w = meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 |\nQ: 1 2 3 4 | 1 2 |\n')
+      // 第 1 行：第 1 小节 4 拍 ✓、第 2 小节 3 拍 ✗；第 2 行：第 3 小节 4 拍 ✓、第 4 小节 2 拍 ✗
+      return w.length === 2 && /第 2 小节共 3 拍/.test(w[0].message) && /第 4 小节共 2 拍/.test(w[1].message) && w[1].line === 6
+    })(),
+    JSON.stringify(meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 |\nQ: 1 2 3 4 | 1 2 |\n').map((e) => `${e.line} ${e.message}`)),
+  )
+  // ⑫ 临时拍号同样**按声部跨行延续**（Q1 改成 2/4 不影响 Q2 仍按 4/4）
+  check(
+    'adj594 临时拍号按声部跨行延续：Q1 用 `|"p:2/4"` 后 Q2 仍按描述头的 4/4 校验',
+    (() => {
+      // Q1：第 2 小节 2 拍 ✓（2/4）；Q2：第 2 小节 2 拍 ✗（仍按 4/4）⇒ 只该报 Q2 第 2 小节
+      const w = meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 4 |"p:2/4" 1 2 |\nQ2: 1 2 3 4 | 1 2 |\n')
+      return w.length === 1 && w[0].line === 6 && /第 2 小节共 2 拍/.test(w[0].message) && /4\/4/.test(w[0].message)
+    })(),
+    JSON.stringify(meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 4 |"p:2/4" 1 2 |\nQ2: 1 2 3 4 | 1 2 |\n').map((e) => `${e.line} ${e.message}`)),
+  )
+  // ⑬ 误报回归：仓库里的**示例谱都是真实曲谱**（含弱起、跨行、多段反复），新校验不该在其中任何一份上报。
+  // 一并检查「新建」模板 `src/samples/未命名.jps`——它一报，用户每建一份新谱就看到告警。
+  {
+    const scanDirs = ['public/samples', 'src/samples']
+    const sampleFiles = scanDirs.flatMap((d) =>
+      existsSync(d) ? readdirSync(d).filter((f) => f.endsWith('.jps')).map((f) => join(d, f)) : [],
+    )
+    const bad = sampleFiles.filter((f) => meterWarns(String(readFileSync(f, 'utf8'))).length > 0)
+    check(
+      `adj594 误报回归：${sampleFiles.length} 份示例谱/新建模板（真实曲谱）零小节时值告警`,
+      sampleFiles.length >= 3 && bad.length === 0,
+      bad.length ? `误报文件：${bad.join(', ')}` : '',
+    )
+  }
+
+  // ⑭ adj595（用户要求）：**首小节只查整数拍**——弱起可以短于拍号
+  check(
+    'adj595 弱起首小节：`1 |` 1 拍 / `1 2 |` 2 拍都不告警（首小节豁免拍号）',
+    meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 | 1 2 3 4 |\n').length === 0 &&
+      meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 | 1 2 3 4 |\n').length === 0,
+    JSON.stringify(meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 | 1 2 3 4 |\n').map((e) => e.message)),
+  )
+  check(
+    'adj595 弱起首小节：3.5 拍这种**半拍**仍告警（提示写明"不是整数拍"+ 弱起写法）',
+    (() => {
+      const w = meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3/ |\n')
+      return w.length === 1 && /首（弱起）小节共 2\.5 拍/.test(w[0].message) && /不是整数拍/.test(w[0].message) && /弱起/.test(w[0].hint ?? '')
+    })(),
+    JSON.stringify(meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3/ |\n').map((e) => `${e.message} | ${(e.hint ?? '').slice(0, 24)}`)),
+  )
+  check(
+    'adj595 弱起只豁免**首小节**：`1 | 1 2 3 |` 的第 2 小节 3 拍照样报',
+    (() => {
+      const w = meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 | 1 2 3 |\n')
+      return w.length === 1 && /第 2 小节共 3 拍/.test(w[0].message)
+    })(),
+    JSON.stringify(meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 | 1 2 3 |\n').map((e) => e.message)),
+  )
+  check(
+    'adj595 多声部各自弱起：Q1 `1 2 |`、Q2 `1 |` 都豁免（各声部首小节各算各的）',
+    meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 | 1 2 3 4 |\nQ2: 1 | 1 2 3 4 |\n').length === 0,
+    JSON.stringify(meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 | 1 2 3 4 |\nQ2: 1 | 1 2 3 4 |\n').map((e) => e.message)),
+  )
+  check(
+    'adj595 首小节**长于**拍号但整数（如 4/4 里 6 拍）也不报——本轮口径只有"整数拍"一条',
+    meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 5 6 | 1 2 3 4 |\n').length === 0,
+    JSON.stringify(meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 5 6 | 1 2 3 4 |\n').map((e) => e.message)),
+  )
+}
+
 async function runAdj541DockToggleTests() {
   console.log('[123] dock expand/collapse entries (adj541)')
   const editorSrc = String(readFileSync('src/editor/EditorPane.tsx', 'utf8'))
@@ -10780,6 +11055,22 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj541 底栏展开/收起用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj593MultiVoiceFitTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj593 多声部块行宽用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj594MeasureBeatsTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj594 小节时值校验用例抛异常', e)
     }
   })
   .then(() => {
