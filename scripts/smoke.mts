@@ -8598,11 +8598,13 @@ async function runAdj540WorkspaceTests() {
   check('adj554 工作区 wide 仍走 maxH()（adj540 "宽屏一次看全"口径不变），narrow 才走新算式',
     /if \(key === 'workspace'\)[\s\S]{0,200}?workspaceDefaultH\(workspaceRowH, workspaceHeadH, chromeH\)[\s\S]{0,60}?: maxH/.test(dockModuleSrc),
     '')
-  check('adj540/adj568 重新授权时**显示要授权的目录**（网页版=文件夹名 + 区内相对路径；桌面路径后端=完整磁盘路径），并说明"浏览器不给完整路径"',
+  check('adj540/adj568/adj586 重新授权相关的信息：目录归属靠清单里带「当前」的那一行 + `?` 说明（授权前的目录框按用户要求取消）',
     /const wsPathText = \(\(\) => \{[\s\S]{0,700}?if \(isPathWorkspace\(ws\)\)[\s\S]{0,300}?return \[dir\.replace/.test(panelSrc) &&
       /return joinPath\(\[ws\.name, \.\.\.segs\]\)/.test(panelSrc) &&
-      /className="ws-grant-dir" title=\{wsPathText\}/.test(panelSrc) &&
-      /\{wsPathText\}/.test(panelSrc) &&
+      // adj586：`.ws-grant-dir`（看起来像按钮、点了没反应的那个框）已删除
+      !/className="ws-grant-dir"/.test(panelSrc) &&
+      // wsPathText 仍在用（文件列表那一屏的面包屑 title）
+      /className="ws-crumb" title=\{wsPathText\}/.test(panelSrc) &&
       /grantTitle: '需要重新授权访问这个文件夹'/.test(copySrc) &&
       /grantPathHint/.test(copySrc),
     '')
@@ -8662,17 +8664,19 @@ async function runAdj540WorkspaceTests() {
       /const onForget = async \(rec: WorkspaceRecord\) => \{[\s\S]{0,240}?await forgetWorkspace\(rec\.id\)[\s\S]{0,200}?setRecent\(await listWorkspaces\(\)\)/.test(
         panelSrc,
       ) &&
-      // adj577：左右分栏 = 复用 `.ws-body` + `.ws-left`(清单) + `.ws-side`(操作)
+      // adj577/adj586：左右分栏 = 复用 `.ws-body` + `.ws-left`(清单) + `.ws-side`(操作)
       /<div className="ws-body">[\s\S]{0,400}?className="ws-list ws-choose-list"[\s\S]{0,3000}?className="ws-side ws-choose-side"/.test(panelSrc) &&
-      /\.ws-choose-list \{[\s\S]{0,80}?gap: 2px/.test(cssAll) &&
+      // adj586：清单行距与"5 行高"写在同一条（`.ws-panel .ws-list.ws-choose-list`），行距 1px
+      /\.ws-panel \.ws-list\.ws-choose-list \{[\s\S]{0,120}?gap: 1px/.test(cssAll) &&
       // adj577：按钮改名「新工作区」且落在右栏；「返回文件列表」按钮已取消（改为点当前项返回）
       /openOther: '新工作区'/.test(copySrc) &&
       !/backToFiles:/.test(copySrc) &&
       /backToFilesTitle: '点它回到文件列表'/.test(copySrc) &&
       /workspaceCopy\.openOther/.test(panelSrc) &&
       !/workspaceCopy\.backToFiles\b/.test(panelSrc) &&
-      // adj577：当前项**不给 ✕**（"已打开的工作区才能成为当前工作区"），点它 = setChoose(false)
-      /const isCurrent = ws\?\.id === r\.id[\s\S]{0,900}?isCurrent \? setChoose\(false\) : void onActivate\(r\)[\s\S]{0,900}?\{!isCurrent && \(/.test(
+      // adj577/adj586：当前项**不给 ✕**（"已打开的工作区才能成为当前工作区"），点它 = tapCurrent()
+      //（待授权时补授权、目录已不在时提示、否则回文件列表——见下一条断言）
+      /const isCurrent = ws\?\.id === r\.id[\s\S]{0,900}?isCurrent \? tapCurrent\(\) : void onActivate\(r\)[\s\S]{0,900}?\{!isCurrent && \(/.test(
         panelSrc,
       ) &&
       /isCurrent && <span className="ws-choose-tag">/.test(panelSrc) &&
@@ -8681,11 +8685,12 @@ async function runAdj540WorkspaceTests() {
       /setChoose\(false\)[\s\S]{0,160}?await refresh\(rec, \[\]\)/.test(panelSrc) &&
       /setChoose\(false\)/.test(panelSrc.split('if (!active) {')[1]?.slice(0, 400) ?? ''),
     '')
-  check('adj578/adj585（用户要求）选择界面把说明收进标题后的 `?`：**点一下就地展开**（PC 仍可悬浮），高度让给清单',
-    // adj585：`?` 换成可点击展开的 HelpBadge（用法 + 黑名单两条都收在这里）
-    /<HelpBadge[\s\S]{0,260}?workspaceCopy\.chooseHint[\s\S]{0,200}?workspaceCopy\.blockedHint/.test(panelSrc) &&
+  check('adj578/adj585/adj586（用户要求）选择界面把说明收进标题后的 `?`：**点一下就地展开**（PC 仍可悬浮），高度让给清单',
+    // adj585：`?` 换成可点击展开的 HelpBadge；adj586：用法/状态原因/绑定/黑名单四类都进这个数组
+    /const chooseHints = \[[\s\S]{0,900}?workspaceCopy\.chooseHint[\s\S]{0,900}?workspaceCopy\.blockedHint/.test(panelSrc) &&
+      /<HelpBadge[\s\S]{0,200}?hint=\{chooseHints\}/.test(panelSrc) &&
       /title=\{workspaceCopy\.chooseHint\}/.test(panelSrc) &&
-      // 正文里不再有这两条常驻说明（旧版触屏会常驻那一大块，占掉清单高度）
+      // 正文里不再有这些常驻说明（旧版会在清单下面铺一大片，占掉清单高度）
       !/\{workspaceCopy\.chooseHint\}<\/div>/.test(panelSrc) &&
       !/help-hint-touch/.test(panelSrc) &&
       /\.help-badge \{[\s\S]{0,420}?cursor: help/.test(cssAll) &&
@@ -8694,6 +8699,28 @@ async function runAdj540WorkspaceTests() {
       /onClick=\{\(e\) => \{[\s\S]{0,120}?e\.stopPropagation\(\)[\s\S]{0,120}?setOpen\(\(v\) => !v\)/.test(badgeSrc) &&
       /\.help-hint \{[\s\S]{0,200}?flex: 0 0 100%/.test(cssAll) &&
       /\.ws-choose-title \{[\s\S]{0,200}?flex-wrap: wrap/.test(cssAll),
+    '')
+  check('adj586（用户要求）选择界面：**清单是主角**——左栏只剩清单，常驻说明全部撤掉，清单默认 5 行高',
+    // ① 左栏（`.ws-left`）里除了清单没有别的常驻块
+    !/className="ws-grant-hint"|className="ws-binding-hint"|className="ws-grant-dir"/.test(panelSrc) &&
+      // ② 说明都进了 `?`（按当前状态拼：待授权原因 / 绑定 / 目录已不在 / 内核黑名单）
+      /workspaceCopy\.grantWhy, workspaceCopy\.grantPathHint/.test(panelSrc) &&
+      /workspaceCopy\.bindingRestored\(/.test(panelSrc) &&
+      /gone \? \[workspaceCopy\.dirMissingWhy\]/.test(panelSrc) &&
+      // ③ 清单默认 5 行高：`.ws-panel .ws-list.ws-choose-list`（特异性必须压过窄屏的 `.ws-panel .ws-list`）
+      /\.ws-panel \.ws-list\.ws-choose-list \{[\s\S]{0,300}?min-height: calc\(5 \* var\(--ws-choose-row-h\)/.test(cssAll) &&
+      // 窄屏那条 72px 的兜底仍在（它只管文件列表，选择界面用上面的 5 行高）
+      /\.ws-panel \.ws-list \{ min-height: 72px; \}/.test(cssAll),
+    '')
+  check('adj586（用户要求）取消「继续访问（需授权）」按钮：**点当前工作区那一项**即补授权并回文件列表',
+    // 当前项点击：待授权 ⇒ onGrant()；目录已不在 ⇒ 如实提示；否则回文件列表
+    /const tapCurrent = \(\) => \{[\s\S]{0,500}?if \(needGrant\) \{[\s\S]{0,160}?void onGrant\(\)[\s\S]{0,500}?setChoose\(false\)/.test(panelSrc) &&
+      /onClick=\{\(\) => \(isCurrent \? tapCurrent\(\) : void onActivate\(r\)\)\}/.test(panelSrc) &&
+      /grantTapTitle: '点它即可重新授权访问，并回到文件列表'/.test(copySrc) &&
+      // 按钮本身与它的文案都删掉了
+      !/\{workspaceCopy\.grant\}/.test(panelSrc) &&
+      // ⚠ 用行首锚定：copy.ts 的注释里也提到了这句被删掉的文案，裸匹配会误判
+      !/^\s*grant: '继续访问（需授权）',$/m.test(copySrc),
     '')
   check('adj585（用户要求）工作区：内核要求**只在「新工作区」按钮下方**留一句短提示（长说明收进 `?`）',
     // 短提示 = 新文案，且落在右栏（`.ws-side`）里、紧跟在「新工作区」按钮之后

@@ -723,7 +723,11 @@ function normalizeRecord(rec: WorkspaceRecord | null): WorkspaceRecord | null {
     name,
     ...(handle ? { handle } : {}),
     ...(dir ? { dir } : {}),
-    path: normalizeRelPath(rec.path ?? []),
+    // adj586：`path` 必须**是数组**才交给 `normalizeRelPath`——库里存着损坏记录（比如 `path: ''`）时
+    // 它会 `segs.filter is not a function` 抛错，而调用方（`listWorkspaces()`）在 async effect 里
+    // 一抛就**整份清单静默变空**（真机调试时踩到：面板显示"还没有打开过的工作区"，但 IndexedDB
+    // 里明明有 5 条）。按项目口径"损坏回退默认值"，这里退回空路径（= 工作区根目录）。
+    path: normalizeRelPath(Array.isArray(rec.path) ? rec.path : []),
   }
 }
 

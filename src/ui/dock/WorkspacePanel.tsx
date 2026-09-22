@@ -838,6 +838,40 @@ export function WorkspacePanel() {
   if (choose || !ws || perm !== 'granted') {
     const needGrant = !!ws && perm !== 'granted' && !isPathWorkspace(ws)
     const gone = !!ws && perm !== 'granted' && isPathWorkspace(ws)
+    /**
+     * adj586（用户要求）：这一屏的**常驻文字全部收进标题后的 `?`**（点开才占高度），左栏只留清单。
+     * 用户原话："列表下面还是大片的文字，导致列表高度太小……要么增加默认工作区清单高度为 5 行，
+     * 下面大片文字可以通过滚动后可见，要么这些文字整理进 `?` 点击可以列出提示信息"，
+     * 外加"为什么老把清单整得小小的，甚至不可见，非得我调整底栏 dock 高度才看得到"。
+     * ⇒ 两条都做：① 说明一律进 `?`；② 清单默认就给 **5 行**（`.ws-choose-list` 的 min-height）。
+     * 顺序：用法 → 当前状态的原因（待授权 / 目录已不在）→ 待校验绑定的说明 → 网页版内核黑名单。
+     */
+    const chooseHints = [
+      workspaceCopy.chooseHint,
+      ...(needGrant ? [workspaceCopy.grantWhy, workspaceCopy.grantPathHint] : []),
+      ...(needGrant && pending
+        ? [workspaceCopy.bindingRestored(pending.wsName || ws?.name || '', joinPath(pending.segs))]
+        : []),
+      ...(gone ? [workspaceCopy.dirMissingWhy] : []),
+      ...(supportsPathWorkspace() ? [] : [workspaceCopy.blockedHint]),
+    ]
+    /** 点**当前**那一项做什么：待授权 ⇒ 顺手把授权办掉；目录已不在 ⇒ 如实说一句；否则回文件列表 */
+    const tapCurrent = () => {
+      if (needGrant) {
+        void onGrant()
+        return
+      }
+      if (gone) {
+        showNotice(workspaceCopy.dirMissingWhy, 'warn')
+        return
+      }
+      setChoose(false)
+    }
+    const currentTitle = needGrant
+      ? workspaceCopy.grantTapTitle
+      : gone
+        ? workspaceCopy.dirMissingWhy
+        : workspaceCopy.backToFilesTitle
     return (
       <div className="ws-panel">
         <div className="ws-head ws-choose-head">
@@ -845,27 +879,18 @@ export function WorkspacePanel() {
               （`.pcfg-group-title`，即设置→谱面里「纸张与边距」那种：强调色 + 加粗 + 左侧强调竖条 + 下边框）。
               `?` 放在标题元素**内部**：标题是 flex 容器 ⇒ 图标紧跟文字，而标题本身仍占满整行、
               那条下边框与左侧竖条横贯整行（与「纸张与边距」观感一致）。
-              adj585（用户要求）：说明**点 `?` 才展开**（PC 仍可悬浮）——手机端这些常驻说明
-              会占掉工作区清单的高度。用法与内核黑名单两条都收进这里，右栏只留一句短提示。 */}
+              adj585/adj586：说明**点 `?` 才展开**（PC 仍可悬浮）。 */}
           <div className="pcfg-group-title ws-choose-title">
             <span>{workspaceCopy.chooseTitle}</span>
             <HelpBadge
-              hint={
-                supportsPathWorkspace()
-                  ? workspaceCopy.chooseHint
-                  : [workspaceCopy.chooseHint, workspaceCopy.blockedHint]
-              }
+              hint={chooseHints}
               // 带内核黑名单那条时用 adj568 的强调卡片样式（左竖条 + 淡底），一眼能分出"这条是限制"
               hintClassName={supportsPathWorkspace() ? undefined : 'ws-blocked-hint'}
             />
           </div>
-          {ws && (needGrant || gone) && (
-            <div className="ws-grant-dir" title={wsPathText}>
-              {wsPathText}
-            </div>
-          )}
         </div>
         <div className="ws-body">
+          {/* adj586：左栏**只有清单**——此前"当前目录框 + 三条说明"把清单挤到只剩一两行 */}
           <div className="ws-left">
             {recent.length === 0 ? (
               <div className="ws-list ws-choose-list">
@@ -880,10 +905,12 @@ export function WorkspacePanel() {
                       <button
                         type="button"
                         className="btn ws-choose-item"
-                        // 当前那一项：点它 = **回到文件列表**（这就是取消"返回"按钮后的退路）
-                        onClick={() => (isCurrent ? setChoose(false) : void onActivate(r))}
+                        // adj586（用户要求）：点当前那一项 = 回文件列表；**待授权时这一下顺便把授权办掉**
+                        //（点击即用户手势，浏览器才允许弹权限询问）——因此原来的「继续访问（需授权）」
+                        // 按钮取消："通过点击当前工作区项可以切回文件列表"。
+                        onClick={() => (isCurrent ? tapCurrent() : void onActivate(r))}
                         disabled={busy}
-                        title={isCurrent ? workspaceCopy.backToFilesTitle : recentTitle(r)}
+                        title={isCurrent ? currentTitle : recentTitle(r)}
                       >
                         <span className="ws-icon">📁</span>
                         <span className="ws-choose-name">{r.name}</span>
@@ -907,32 +934,15 @@ export function WorkspacePanel() {
                 })}
               </div>
             )}
-            {/* adj578（用户要求）："内核敏感目录黑名单"那条**长**说明已收进标题后的 `?`；
-                adj585（用户要求）：这里只留**一句短的**——"仅支持 Chromium 内核浏览器"，
-                位置也按用户说的挪到**「新工作区」按钮下方**（右栏），不再横在清单上方占高度。
-                只在网页版有意义（桌面壳走原生选择器，不受这条 Web 策略约束，见 E-2026-271）。 */}
-            {needGrant && <div className="ws-grant-hint">{workspaceCopy.grantPathHint}</div>}
-            {needGrant && <div className="ws-grant-hint">{workspaceCopy.grantWhy}</div>}
-            {gone && <div className="ws-grant-hint">{workspaceCopy.dirMissingWhy}</div>}
-            {/* adj544：待校验绑定 ⇒ 说明"重新授权后就能写回原文件"，把这一步的意义讲清楚 */}
-            {needGrant && pending && (
-              <div className="ws-binding-hint">
-                {workspaceCopy.bindingRestored(pending.wsName || ws?.name || '', joinPath(pending.segs))}
-              </div>
-            )}
           </div>
           {/* 右侧操作区：与文件列表那一屏同一个 `.ws-side`（固定宽度，保证"清单"拿到剩余宽度） */}
           <div className="ws-side ws-choose-side">
-            {needGrant && (
-              <button type="button" className="btn primary ws-side-btn" onClick={() => void onGrant()} disabled={busy}>
-                {workspaceCopy.grant}
-              </button>
-            )}
             {/* adj577：原「打开其它目录」⇒「**新工作区**」，并且从底部大按钮移到右侧操作区。
                 adj578（用户要求）：用法说明收进这个按钮的**悬浮提示**，把高度让给清单。
                 adj582（用户要求）：**样式与其它按钮一致**——去掉 `primary`（那是"强调色描边"样式，
                 在本栏里和「操作▾」/清单行那些**浅底填充**的按钮观感不一致；
-                真机对照：`primary` = 透明底 + 强调色边框/文字，普通 `.btn` = 浅底 + 常规文字色）。 */}
+                真机对照：`primary` = 透明底 + 强调色边框/文字，普通 `.btn` = 浅底 + 常规文字色）。
+                adj586（用户要求）：原来叠在它上面的「继续访问（需授权）」**取消**（点当前项即可授权）。 */}
             <button
               type="button"
               className="btn ws-side-btn"

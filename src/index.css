@@ -3726,14 +3726,9 @@ body {
   width: auto;
   max-width: 100%;
 }
-/* adj544：绑定提示（"这份谱来自哪个工作区文件、重授权后即可写回"）——提示性，不抢眼但要看得见 */
-.ws-binding-hint {
-  width: 100%;
-  color: var(--jp-text-secondary);
-  font-size: 11px;
-  line-height: 1.5;
-  text-align: left;
-}
+/* adj586（用户要求）：绑定提示（"这份谱来自哪个工作区文件、重授权后即可写回"）不再常驻在
+   清单下面占高度 —— 这条文案改由标题后的 `?` 呈现（见 `ui/HelpBadge.tsx`），故 `.ws-binding-hint`
+   样式随之删除。 */
 /* ---- adj575 / adj577（用户要求）：**工作区选择界面** ----
  * adj577 起改成**左右分栏**（左=清单、右=操作按钮），与文件列表那一屏同构：
  * 复用 `.ws-panel` + `.ws-body` + `.ws-left` + `.ws-side` 这套现成的弹性布局，
@@ -3804,8 +3799,20 @@ body {
   gap: 5px;
   margin-bottom: 6px;
 }
-.ws-choose-list {
-  gap: 2px;
+/* adj586（用户要求）：**选择工作区这一屏，清单是主角**——默认就给 5 行的高度。
+ * 用户原话："最主要的是选择工作区这个页面为主的是工作区清单，为什么老把清单整得小小的，
+ * 甚至不可见，非得我调整底栏 dock 高度才看得到"。
+ * 5 行 = 5 × 行高 + 4 × 行距 + 清单自身内边距(4+4) + 上下边框(1+1)；行高 **31px 是实测值**
+ * （`.ws-choose-item` = `.btn` 基础档：13px 字号 + 6px 上下内边距 + 1px 边框，
+ * 带 📁/名字/「当前」标都是 31px，见 ERRORS-LOG E-2026-275）。
+ * ⚠ 选择器必须写成 `.ws-panel .ws-list.ws-choose-list`（0,3,0）：文件列表那边有
+ * `.ws-panel .ws-list { min-height: 120px }`、窄屏容器查询里还有 `.ws-panel .ws-list { min-height: 72px }`
+ * （0,2,0）——只写 `.ws-choose-list` 会被它们压住，手机上清单就只剩 72px（"甚至不可见"的真凶）。 */
+.ws-panel .ws-list.ws-choose-list {
+  --ws-choose-row-h: 31px;
+  /* 行距写成 1px：`.ws-list` 的 `gap: 1px` 在本文件里更靠后，原来那句 `gap: 2px` 其实一直没生效 */
+  gap: 1px;
+  min-height: calc(5 * var(--ws-choose-row-h) + 4 * 1px + 10px); /* = 169px */
 }
 .ws-choose-row {
   display: flex;
@@ -4412,23 +4419,10 @@ span.ws-check {
   /* 标题在 `.ws-head` 里，顶部已有内边距 ⇒ 不再叠标题自己的上边距 */
   margin-top: 0;
 }
-.ws-grant-dir {
-  overflow: hidden;
-  padding: 6px 10px;
-  border: 1px solid var(--jp-border);
-  border-radius: 8px;
-  background: var(--jp-bg-app);
-  color: var(--jp-accent);
-  font-family: var(--jp-font-mono);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ws-grant-hint {
-  color: var(--jp-text-muted);
-  font-size: 11px;
-  line-height: 1.5;
-}
+/* adj586（用户要求）：`.ws-grant-dir`（授权前显示"要授权哪个目录"的那个**看起来像按钮**的框）
+   已按用户要求取消——"标题下面的类似按钮的『悟乐居杂记』是什么，这个点了没什么响应，不要出现"。
+   清单里带「当前」标记的那一行就是他正在用的工作区，信息不丢。`.ws-grant-hint`（那一屏的三条
+   常驻说明）也一并撤掉：全部收进标题后的 `?`，见 `ui/HelpBadge.tsx`。 */
 /* adj585（用户要求）：右栏「新工作区」按钮**下方**那句短提示（"仅支持 Chromium 内核浏览器"）。
    右栏只有 112px（窄屏 100px）宽 ⇒ 字号再降一档、行距收紧，两三行内说完。 */
 .ws-side-hint {
