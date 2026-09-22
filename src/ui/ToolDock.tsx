@@ -99,13 +99,6 @@ const PANE_PAD_H = PROBS.PANE_PAD_H
 const ROW_H = PROBS.ROW_H
 const PROBLEMS_HEAD_H = PROBS.PROBLEMS_HEAD_H
 /**
- * adj468/478：设置面板在**窄屏**下按钮行折到内容下方（横向一行，实测 ≈31px）。
- * 用于它的**建议高度**（`settingsDefaultH`）。
- */
-const FOOT_H = 38
-/** 设置面板窄屏布局的**行间距**（与 CSS `grid-template-rows: … auto` 的 row-gap 对齐） */
-const GRID_GAP_V = 6
-/**
  * adj554（v0.28.2，用户要求）：工作区窄屏建议高度 = 列表**5 项** + 面板头 + 结构间隙；
  *  宽屏仍走 `maxH()`（adj540 "宽屏一次看全"口径不变）。
  *  这些是**结构常数**——`.ws-row` / `.ws-head` 的具体像素由运行时实测（见下面 `workspaceRowH` /
@@ -125,16 +118,6 @@ const WORKSPACE_VISIBLE_ROWS = 5
 const WORKSPACE_ROW_H_FALLBACK = 36
 /** adj554：`.ws-head` 高度实测未到位时的兜底（28px 按钮 + 面包屑 → 取大者） */
 const WORKSPACE_HEAD_H_FALLBACK = 28
-/**
- * adj562（用户要求"把粘贴源码导入加到工作区后面"）：导入面板的**默认内容高度**。
- *
- * 为什么给固定值而**不进 AUTO_FIT**：这个面板做成"填满 dock"（`.pane-import { flex: 1 1 auto }`），
- * 让粘贴框随 dock 拉高而变高（长源码不用在小框里滚）。而 `flex: 1 1 auto` 的 pane 一旦被拉伸，
- * `pane.scrollHeight` 就退化成"当前 dock 有多高"（`scrollHeight === max(内容高, clientHeight)`），
- * AUTO_FIT 会读到**被充气**的"内容自然高"——正是 E-2026-226 / E-2026-263 记过两次的测量污染。
- * 所以这里与设置面板同一处置：**不进 AUTO_FIT，用固定默认高度**（说明 + 粘贴框 + 按钮 ≈ 300）。
- */
-const IMPORT_DEFAULT_CONTENT_H = 300
 /**
  * adj520：dock 的**绝对最小高度** = 外壳高度（抓手 + 页签栏）——「最小高度」档位与拖拽/键盘的
  * 下限都用它：最小化后**仍能看到并点击页签 / 关闭 / 档位按钮**，随时可点回建议档、或向上拖回来。
@@ -170,30 +153,8 @@ const SIZE_PHASES: readonly { cur: SizePreset; next: SizePreset; icon: 'up' | 'd
   { cur: 'min', next: 'suggested', icon: 'up' },
 ]
 
-/**
- * adj478：设置面板的内容区固定留 **5 行**内容的高度，且**与告警高度解绑**（不再共用
- * 告警那份行数/行高）。窄屏时按钮行折到内容下方，还要再加上 `FOOT_H` 与行间距。
- * adj492：**5 行 → 6 行**（用户要求"打开设置时高度为显示内容 6 行"）。
- * adj510：告警不再使用固定行数（详见 `PROBLEMS_MAX_VISIBLE_ROWS`）。
- */
-const SETTINGS_ROWS = 6
 /** 与 CSS 里设置面板的窄屏断点（`@container (max-width: 720px)`）保持一致 */
 const DOCK_NARROW_W = 720
-
-/**
- * adj478：设置面板的默认高度 —— **窄屏/宽屏同一条规则：内容区一律留 `SETTINGS_ROWS` 行**。
- *
- * 与告警高度**完全解绑**（不再共用告警那份行数/行高）：
- *  · 告警的一行是纯文字行（`ROW_H`）；设置的一行是「标签 + 输入框」的字段行，实测 `rowPitch ≈ 29px`；
- *  · 所以设置的高度按自己的行高单独算，`rowPitch` 由运行时实测（见 ToolDock 内的测量）。
- *
- * 两档只差**结构性**的一段：窄屏按钮行折到内容下方（行间距 + 按钮行高），宽屏按钮在右侧第三列、不占内容高度。
- * 于是：宽屏 = 外壳 + 内容 6 行；窄屏 = 同上 + 44（按钮行与行间距）。**两边内容区都是 6 行**。
- *
- * adj521：外壳高度改为**传入**（实测值 `chromeH`），不再用写死的 `CHROME_H`（手机上抓手是 14px 而非 5px）。
- */
-const settingsDefaultH = (rowPitch: number, narrow: boolean, chromeH: number): number =>
-  chromeH + PANE_PAD_H + rowPitch * SETTINGS_ROWS + (narrow ? GRID_GAP_V + FOOT_H : 0)
 
 /**
  * adj554（v0.28.2，用户要求）：工作区窄屏建议高度 = "**刚好装下列表 5 项 + 面板头**"。
@@ -201,7 +162,10 @@ const settingsDefaultH = (rowPitch: number, narrow: boolean, chromeH: number): n
  * 此前（adj540）沿用 `settingsDefaultH + 44px` 的近似——能装下右侧那列操作按钮，却把列表压成
  * "看不到几条"。改为按面板真实结构算：chrome + pane padding + 面板头 + 8px gap + 5 × 行高
  * + list 自身 padding/border；行高/面板头都用实测值（见下面的 `workspaceRowH` / `workspaceHeadH`），
- * 实测不到位则用 `*_FALLBACK`。宽屏仍走 `maxH()`（adj540 口径不变），所以这个函数只在窄屏被调。
+ * 实测不到位则用 `*_FALLBACK`。宽屏走 `maxH()`（adj540 口径不变），所以这个函数只在窄屏被调。
+ *
+ * adj587（用户要求"将导入、设置页的底栏高度设置为与工作区页的高度相同"）：这个算式现在也是
+ * **导入 / 设置**两个页签的建议高度 ⇒ 三者同高；各自面板内部自己滚动。
  */
 const workspaceDefaultH = (rowH: number, headH: number, chromeH: number): number =>
   chromeH
@@ -213,18 +177,17 @@ const workspaceDefaultH = (rowH: number, headH: number, chromeH: number): number
 /**
  * 各面板**兜底**默认高度（实测 AUTO_FIT 前的占位；AUTO_FIT 项在 `measured` 到位后会被覆盖）。
  * · 告警/试听/导出/关于：实测"能显示全内容的最小高度"（AUTO_FIT）；
- * · 设置：见 `settingsDefaultH`（内容区 `SETTINGS_ROWS` 行）。
+ * · **工作区 / 导入 / 设置：同一个高度**（adj587，见下）。
  *
  * adj510：告警的兜底改为「**最多 `PROBLEMS_MAX_VISIBLE_ROWS` 条**可见」的高度
  * （= 外壳 + `PANE_PAD_H` + `ROW_H × PROBLEMS_MAX_VISIBLE_ROWS` + problems-head），
  * ——用户要求"打开告警页签时底栏 dock 最高只显示两个告警的高度"（adj524：4 行 ⇒ adj555：5 行）。
  * 多于 `PROBLEMS_MAX_VISIBLE_ROWS` 条时面板内部滚动查看（`problems-list` 的 `overflow-y: auto`）。
- * adj521：外壳高度改为**传入**（实测 `chromeH`），理由同 `settingsDefaultH`。
+ * adj521：外壳高度改为**传入**（实测 `chromeH`）。
  */
 const defaultH = (
   key: DockPanelKey,
   narrow: boolean,
-  rowPitch: number,
   chromeH: number,
   // adj554：工作区面板的"实测行高 + 面板头高"——由 `forPanel` 把组件内的 useState 传进来；
   // 不能直接读模块外作用域（`defaultH` 是模块级函数、不是组件）。
@@ -235,21 +198,22 @@ const defaultH = (
   // AUTO_FIT 实测接管后会按"内容自然高" 调整，但始终 cap 在同一行数（`measured` 已在 `forPanel`
   // 里钳制过；详见 `capProblemsContentHeight`）。
   if (key === 'problems') return chromeH + PANE_PAD_H + PROBLEMS_HEAD_H + ROW_H * PROBLEMS_MAX_VISIBLE_ROWS
-  // adj509：设置面板**默认高度**直接拉到上限（用户要求"调大 dock 高度让左栏页签至少显示 3 个"，
-  // 宽屏下默认 dock 高度 ~235px 才能装下 6 行内容区，但左栏 jp-tab 36px×6=216px 只能装下 6 个；
-  // 取 maxH 作为默认 = "第一次打开就让用户看到全部 5 个页签 + 还能看几行内容"，避免「打开设置 →
-  // 还得先拖大才能看到音色库」。narrow 时仍走 settingsDefaultH（避免矮屏默认过高撑爆视口）。
-  if (key === 'settings') return narrow ? settingsDefaultH(rowPitch, narrow, chromeH) : maxH()
-  // adj554：工作区面板——窄屏按 `workspaceDefaultH(workspaceRowH, workspaceHeadH, chromeH)` 算出
-  // "列表 5 项 + 面板头"的高度（用户要求）；宽屏仍走 maxH()（adj540 口径）。
-  // 内容是**动态列表**（进出子目录、增删改后行数都在变），走 AUTO_FIT 会让高度每次导航都跳，
-  // 故用固定默认 + 列表自身滚动。
-  if (key === 'workspace')
-    return narrow
-      ? workspaceDefaultH(workspaceRowH, workspaceHeadH, chromeH)
-      : maxH()
-  // adj562：导入面板——固定默认高度（粘贴框做成"填满 dock"，故**不进 AUTO_FIT**，理由见常量注释）
-  if (key === 'import') return chromeH + PANE_PAD_H + IMPORT_DEFAULT_CONTENT_H
+  /**
+   * adj587（用户要求）：**工作区 / 导入 / 设置三个页签的建议高度完全一致**——用户原话"将导入、
+   * 设置页的底栏高度设置为与工作区页的高度相同"。
+   *
+   * 三个面板原来各算各的：工作区 = 5 项列表 + 面板头（窄屏）/ `maxH()`（宽屏）；设置 = 内容区
+   * `SETTINGS_ROWS` 行（窄屏）/ `maxH()`（宽屏）；导入 = 固定的 `IMPORT_DEFAULT_CONTENT_H`。
+   * 结果是"切页签时底栏高度乱跳"，用户要的是**一个高度**。
+   *
+   * 所以这里统一成**工作区那一套**（窄屏 = 列表 5 项 + 面板头；宽屏 = `maxH()`），
+   * 三个面板的内容区各自 `overflow-y: auto` 兜住放不下的部分：
+   *  · 工作区/导入都是**动态列表/填满型**内容（进出子目录、增删改、粘贴框随高度变），走 AUTO_FIT
+   *    会让高度每次导航都跳，故一律**固定默认 + 内部滚动**（adj523/adj562 的口径不变）；
+   *  · 设置面板同理（它本来就不在 `AUTO_FIT` 里，见 `AUTO_FIT` 常量的说明）。
+   */
+  if (key === 'workspace' || key === 'settings' || key === 'import')
+    return narrow ? workspaceDefaultH(workspaceRowH, workspaceHeadH, chromeH) : maxH()
   // adj494：关于/试听/导出走 AUTO_FIT（实测内容高）；这里的值是**首次测量前的兜底**
   return chromeH
 }
@@ -314,7 +278,7 @@ const TABS: { key: DockPanelKey; label: string; icon: ToolIconName }[] = [
  * 告警**也**用它（adj510：与试听/导出/关于同一套机制 ——
  * "能装下内容的最小高度"），但**内容本身高度被 cap**（见 `PROBLEMS_MAX_VISIBLE_ROWS`）：
  * 告警自然内容 > `PROBLEMS_MAX_VISIBLE_ROWS` 行时，列表内部可滚动，dock 自身只装这么多行的可见高度。
- * 设置不走 AUTO_FIT（规格是固定 `SETTINGS_ROWS` 行）。
+ * 设置/导入/工作区不走 AUTO_FIT（三者按 adj587 的同一个建议高度定高，内容各自内部滚动）。
  * adj494：加入 `about` —— 用户要求"打开关于时应以能够显示全内容为宜"。
  * adj510：告警（`problems`）加入 AUTO_FIT，与试听/导出/关于统一按"内容自然高"定 dock 高度。
  * （内容再长也受 `maxH()` 上限约束，超长时仍可滚动。）
@@ -420,21 +384,6 @@ export function ToolDock() {
       window.removeEventListener('resize', measure)
     }
   }, [dockOpen])
-  /**
-   * adj478：设置面板**一行字段**的实际高度（含其行距）——用于算"内容区留 5 行"的高度。
-   * 设置的一行是「标签 + 输入框」，比告警文字行高得多，所以必须实测；未测到前先用 ROW_H 兜底。
-   */
-  const [settingsRowPitch, setSettingsRowPitch] = useState(ROW_H)
-  useEffect(() => {
-    if (!dockOpen || dockPanel !== 'settings') return
-    const pane = bodyRef.current?.querySelector<HTMLElement>('.pane-settings')
-    const row = pane?.querySelector<HTMLElement>('.pcfg-row')
-    if (!row) return
-    // 行高 + 行下外边距 = 相邻两行的间距（外边距来自 Row 的内联样式，故用 computedStyle 取实际值）
-    const mb = parseFloat(getComputedStyle(row).marginBottom || '0') || 0
-    const pitch = row.getBoundingClientRect().height + mb
-    if (pitch > 8 && Math.abs(pitch - settingsRowPitch) > 0.5) setSettingsRowPitch(pitch)
-  }, [dockOpen, dockPanel, everActive.length, settingsRowPitch, narrow])
   /**
    * adj554：工作区面板的**列表行高**（实测 `.ws-list .ws-row`）——用于算"窄屏显示 5 项"的高度。
    * `.ws-row` 在窄屏时是图标 + 文件名一行文字（搜索结果可能两行兜底），行高在不同视口下会随
@@ -648,7 +597,7 @@ export function ToolDock() {
    *      `useEffect`，adj465 设计），**切换面板不再清掉用户拖拽的高度**。
    *   ⇒ 用户拖到任意高度后会**保留**到面板切换/重新打开 dock；
    *   重新打开 dock = 清掉所有当次调整 → 各面板回到各自的"内容自然高"默认。
-   *   设置面板本来就不在此列（按 `SETTINGS_ROWS` 固定行），保持原行为。
+   *   设置面板本来就不在此列（adj587：与工作区/导入同一个建议高度），保持原行为。
    */
   // 注：原 adj474 的"切换面板也清掉"分支已删除——保留会导致用户拖拽的值在切走再切回时
   // 被无意义地清掉，与"始终允许调整"的诉求冲突。
@@ -717,7 +666,8 @@ export function ToolDock() {
       return chromeH + measuredContent
     }
     // adj554：工作区的"5 项"算式需要实测的 `.ws-row` / `.ws-head` 高度，从模块外传入
-    return defaultH(key, narrow, settingsRowPitch, chromeH, workspaceRowH, workspaceHeadH)
+    // adj587：导入 / 设置也走同一条（三者在 `defaultH` 里已经统一）
+    return defaultH(key, narrow, chromeH, workspaceRowH, workspaceHeadH)
   }
   // adj518：baseH **始终优先用用户拖拽后的高度** `heights[dockPanel]`（仅当未设置才回退到
   // `forPanel`）。此前 bug：`fitKeys=true` 时 `baseH` 永远用 `forPanel(dockPanel)`，**完全忽略**
@@ -731,18 +681,17 @@ export function ToolDock() {
   /**
    * 「建议高度」——"刚好装下当前面板内容"的高度。
    *
-   * ⚠ 设置面板是**特例**：`forPanel('settings')` 在宽屏下返回 `maxH()`（adj509：为了让左栏 5 个页签
-   * 一次看全，把"打开时的默认高度"直接拉到了上限）。若建议档也用它，就会出现 `建议 === 最大`，
-   * 三段里有两段重合 ⇒ 用户看到的仍是"两段切换"。所以这里改用 `settingsDefaultH`（内容区 6 行，
-   * 即 adj492 的口径，宽屏 ≈235px，左栏仍能露出 4~5 个页签 ≥ adj509 要求的 3 个），
-   * 保证 **最小 < 建议 < 最大** 三档严格单调。
+   * adj587（用户要求）：**工作区 / 导入 / 设置三个页签同一个建议高度**（`forPanel` 已经统一成
+   * 工作区那一套），所以这里不再按面板分叉；原来那个"设置面板特例"（改用 `settingsDefaultH`
+   * 以免宽屏下 `建议 === 最大`）不再需要——宽屏下三者都是 `maxH()`，末尾那道
+   * `(min+8, max−8)` 夹逼本来就会把建议压到 `max−8`，三档依然严格单调。
    *
-   * 末尾再夹一道 `(min+8, max−8)`：极矮视口下（`maxH()` 会随视口缩到很小）"内容自然高"可能贴到
+   * 末尾夹一道 `(min+8, max−8)`：极矮视口下（`maxH()` 会随视口缩到很小）"内容自然高"可能贴到
    * 上限或下限，与相邻档重合 ⇒ 又变成"只有两段"。夹一下就能把"三档两两不同"变成**结构性保证**，
    * 而不是靠数值凑巧。夹到偏小时内容不会丢——内容区本来就有 `overflow-y: auto`。
    */
   const suggestedH = (): number => {
-    const raw = dockPanel === 'settings' ? settingsDefaultH(settingsRowPitch, narrow, chromeH) : forPanel(dockPanel)
+    const raw = forPanel(dockPanel)
     const lo = chromeH + 8
     const hi = Math.max(lo, maxH() - 8)
     return Math.min(Math.max(raw, lo), hi)

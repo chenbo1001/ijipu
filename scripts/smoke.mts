@@ -8551,7 +8551,8 @@ async function runAdj540WorkspaceTests() {
       /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace' \},\s*[\s\S]{0,200}?\{ key: 'import', label: dockCopy\.tabImport, icon: 'import' \}/.test(dockSrc) &&
       /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace' \}/.test(dockSrc) &&
       /workspace: '工作区'/.test(String(readFileSync('src/ui/toolIcons.ts', 'utf8'))) &&
-      /if \(key === 'workspace'\)/.test(dockSrc) &&
+      // adj587：三个同高页签由同一条分支给出（工作区 / 设置 / 导入）
+      /if \(key === 'workspace' \|\| key === 'settings' \|\| key === 'import'\)/.test(dockSrc) &&
       /export const workspaceCopy/.test(copySrc) &&
       /tabWorkspace: '工作区'/.test(copySrc) &&
       !/modal === 'workspace'/.test(appSrc),
@@ -8595,8 +8596,9 @@ async function runAdj540WorkspaceTests() {
       /\.ws-head/.test(dockModuleSrc) &&
       /getBoundingClientRect\(\)\.height/.test(dockModuleSrc),
     '')
-  check('adj554 工作区 wide 仍走 maxH()（adj540 "宽屏一次看全"口径不变），narrow 才走新算式',
-    /if \(key === 'workspace'\)[\s\S]{0,200}?workspaceDefaultH\(workspaceRowH, workspaceHeadH, chromeH\)[\s\S]{0,60}?: maxH/.test(dockModuleSrc),
+  check('adj554/adj587 工作区算式只在窄屏被调，宽屏仍走 maxH()（"宽屏一次看全"口径不变）',
+    /return narrow \? workspaceDefaultH\(workspaceRowH, workspaceHeadH, chromeH\) : maxH\(\)/.test(dockModuleSrc) &&
+      /const workspaceDefaultH = \(rowH: number, headH: number, chromeH: number\): number =>/.test(dockModuleSrc),
     '')
   check('adj540/adj568/adj586 重新授权相关的信息：目录归属靠清单里带「当前」的那一行 + `?` 说明（授权前的目录框按用户要求取消）',
     /const wsPathText = \(\(\) => \{[\s\S]{0,700}?if \(isPathWorkspace\(ws\)\)[\s\S]{0,300}?return \[dir\.replace/.test(panelSrc) &&
@@ -9144,10 +9146,10 @@ async function runAdj540WorkspaceTests() {
         String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8')),
       ),
     '')
-  check('adj562 「导入」**不进 AUTO_FIT**、用固定默认内容高（填满 dock 的 pane 会让 scrollHeight 充气）',
-    /const IMPORT_DEFAULT_CONTENT_H = 300/.test(dockSrc) &&
-      /if \(key === 'import'\) return chromeH \+ PANE_PAD_H \+ IMPORT_DEFAULT_CONTENT_H/.test(dockSrc) &&
-      /const AUTO_FIT: readonly DockPanelKey\[\] = \['problems', 'tryout', 'export', 'about'\]/.test(dockSrc),
+  check('adj562/adj587 「导入」**不进 AUTO_FIT**（填满 dock 的 pane 会让 scrollHeight 充气），改用与工作区同一个建议高度',
+    /if \(key === 'workspace' \|\| key === 'settings' \|\| key === 'import'\)/.test(dockSrc) &&
+      /const AUTO_FIT: readonly DockPanelKey\[\] = \['problems', 'tryout', 'export', 'about'\]/.test(dockSrc) &&
+      !/IMPORT_DEFAULT_CONTENT_H/.test(dockSrc.replace(/\/\*[\s\S]*?\*\//g, '')),
     '')
   check('adj562 `.pane-import` 走"填满 dock"链路（pane/modal-inline/import-body 层层 flex + 粘贴框吃剩余高）',
     /\.tool-dock-pane\.pane-import \{[\s\S]{0,200}?flex: 1 1 auto/.test(cssAll) &&
@@ -10056,11 +10058,20 @@ console.log('[116] settings 6 rows, About in dock, divider touch hit-area (adj49
 
   // adj492：设置面板默认高度 = 内容 6 行（adj521：`settingsDefaultH` 多了一个 `chromeH` 参数
   // ——外壳高度改为实测传入以适配手机 14px 抓手；断言改为不绑定具体参数表，只钉"用 rowPitch × SETTINGS_ROWS"）
-  check('adj492 设置面板内容区默认 6 行（SETTINGS_ROWS = 6）',
-    /const SETTINGS_ROWS = 6/.test(dockSrc),
-    '')
-  check('adj492 设置高度仍按自己的行高单独算（与告警解绑）',
-    /settingsDefaultH = \([^)]*\): number =>[\s\S]{0,200}?rowPitch \* SETTINGS_ROWS/.test(dockSrc),
+  check('adj587（用户要求）工作区 / 导入 / 设置**同一个建议高度**（窄屏 = 5 项列表算式；宽屏 = maxH()）',
+    // 一条分支同时管三个页签
+    /if \(key === 'workspace' \|\| key === 'settings' \|\| key === 'import'\)\s*\n?\s*return narrow \? workspaceDefaultH\(workspaceRowH, workspaceHeadH, chromeH\) : maxH\(\)/.test(
+      dockSrc,
+    ) &&
+      // 旧的"各算各的"三套算式与常量都已删除（设置 6 行 / 导入固定 300 / 设置字段行距实测）
+      !/settingsDefaultH/.test(dockSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')) &&
+      !/const SETTINGS_ROWS/.test(dockSrc) &&
+      !/const IMPORT_DEFAULT_CONTENT_H/.test(dockSrc) &&
+      !/const settingsRowPitch/.test(dockSrc) &&
+      // 建议档不再按面板分叉（原来设置面板有个特例）
+      /const raw = forPanel\(dockPanel\)/.test(dockSrc) &&
+      // 三档仍严格单调：末尾那道 (min+8, max−8) 夹逼保留
+      /const lo = chromeH \+ 8[\s\S]{0,80}?const hi = Math\.max\(lo, maxH\(\) - 8\)/.test(dockSrc),
     '')
 
   // adj492：关于面板进 dock
