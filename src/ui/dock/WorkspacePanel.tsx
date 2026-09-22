@@ -41,6 +41,7 @@ import { HelpBadge } from '../HelpBadge'
 import {
   activateWorkspace,
   dedupeWorkspaceRecord,
+  filterHitsInScope,
   flushWorkspacePath,
   forgetWorkspace,
   getWorkspace,
@@ -82,7 +83,7 @@ const RESULT_RENDER_MAX = 300
  * 为什么不是"每次打开面板都重扫"：手机上扫一遍 5550 文件要几十秒（用户实测 27s），
  * 每次进面板都跑一遍是灾难。10 分钟内直接用落盘索引（秒开），过期或用户手动「重新扫描」才重扫。
  */
-const INDEX_STALE_MS = 10 * 60 * 1000
+const INDEX_STALE_MS = 30 * 60 * 1000
 
 /** 正在编辑的输入框：重命名 / 新建夹 / 另存 / 新建谱（四者共用同一个输入区） */
 type EditState = { kind: 'rename' | 'newFolder' | 'saveAs' | 'newScore'; value: string; name?: string }
@@ -166,101 +167,132 @@ export function WorkspacePanel() {
    * 用户切到别的目录/别的工区后，旧索引不能再拿来过滤（否则看到的是别的目录的命中）。
    */
   const indexKeyRef = useRef<string | null>(null)
-  /** adj546：后台重扫是否在进行（避免重复起扫）＋ 扫描进度（让 UI 边扫边显示，不再干等） */
-  const refreshingRef = useRef(false)
+  /** adj546/adj588：扫描进度（让 UI 边扫边显示，不再干等）；"是否在扫"由 `scanPromiseRef` 判断 */
   const [scanInfo, setScanInfo] = useState<{ scanned: number; found: number; ms: number } | null>(null)
   /** 索引版本号：索引内容变化（载入缓存/扫描进度/重扫完成）就 +1，驱动过滤重新计算 */
   const [indexVersion, setIndexVersion] = useState(0)
 
   /**
-   * adj546（用户实测 27 秒）：**后台重扫**——一边扫一边把已找到的写进 `indexRef` 并让 UI 刷新，
-   * 扫完落盘（下次直接秒开）。扫描期间界面上会显示"已扫描 N 项 / 找到 M 个"。
+   * adj546/adj588：**扫描整棵工作区**并把命中写进 `indexRef` + 落盘索引。
+   *
+   * adj588（用户反馈"手机上 `*` 过滤还是有点长"）改了三件事：
+   *  ① **索引不再按目录分**（见 `indexScopeKey`）——进子目录不再重扫，只做前缀裁剪；
+   *  ② **首次扫描也走这条**（以前"没有索引"那条路是"前台静默扫"，界面上什么都不显示，
+   *     用户对着空列表等几十秒 ⇒ 现在从一开始就有"已扫描 N 项 / 找到 M 个"和渐进结果）；
+   *  ③ **同一个扫描只跑一份**（`scanPromiseRef`）：前台首次扫描与后台刷新用同一个诺言，
+   *     不再出现"用户一输入就前台扫一遍、同时后台又扫一遍"的双份枚举。
+   *
+   * 进度回调**节流到 1.2s 且只更新计数**（不复制数组、不触发过滤重算）——扫描过程被 UI 自己拖慢
+   * 是 adj546 记过的坑（手机上尤其明显）。
    */
-  const refreshIndex = useCallback(async (rec: WorkspaceRecord, wsId: string, from: readonly string[]) => {
-    if (refreshingRef.current) return
-    refreshingRef.current = true
+  const scanPromiseRef = useRef<Promise<SearchResult> | null>(null)
+  /**
+   * adj588：扫描**代际**。写操作（改名/新建/移动/删除/换工作区）会让正在跑的扫描结果作废——
+   * 否则"扫描期间删除的文件"会被扫描结果重新写回索引（越写越错）。
+   */
+  const scanGenRef = useRef(0)
+  const runScan = useCallback((rec: WorkspaceRecord, wsId: string, preferFirst: readonly string[] = []): Promise<SearchResult> => {
+    if (scanPromiseRef.current) return scanPromiseRef.current
+    const gen = scanGenRef.current
     const t0 = Date.now()
     setScanInfo({ scanned: 0, found: indexRef.current?.length ?? 0, ms: 0 })
-    /**
-     * adj546（关键）：进度回调**节流到 500ms，且只更新计数**——不复制数组、不触发过滤重算。
-     * 之前 150ms 一跳 + 每跳 `[...partial]` + 重新过滤 ⇒ 扫描过程被 UI 自己拖慢（手机上尤其明显）。
-     * 结果按"扫到一半"渐进显示交给下面的 `lastShown` 慢节流（1.2s 一次），足够"看着有动静"。
-     */
     let lastShown = 0
-    try {
-      // adj580（用户反馈）：扫描范围 = **当前目录及其下级**（`from`），不是整个工作区
-      const r = await searchWorkspaceJps(rec, '', {
-        maxHits: 20000,
-        maxEntries: 200000,
-        from,
-        onProgress: (scanned, partial) => {
-          setScanInfo({ scanned, found: partial.length, ms: Date.now() - t0 })
-          const now = Date.now()
-          if (now - lastShown < 1200) return
-          lastShown = now
-          indexRef.current = partial // 引用即可（不改动它），慢节流地让用户看到部分结果
-          setIndexVersion((v) => v + 1)
-        },
-      })
-      indexRef.current = r.hits
-      indexKeyRef.current = indexScopeKey(rec, from)
-      idxMetaRef.current = { truncated: r.truncated, blocked: r.blocked }
-      const ms = Date.now() - t0
-      await saveWorkspaceIndex({ wsId, from: joinPath(from), at: Date.now(), relPaths: r.hits.map((h) => h.relPath) })
-      // adj546：把"扫了多少、花了多久、每条多少钱"打出来——真机排查速度问题要靠这个数
-      console.info(
-        `[iJipu] 工作区索引完成：扫描 ${r.scanned} 项 / 命中 ${r.hits.length} 个 / ${ms}ms` +
-          `（${r.scanned > 0 ? (ms / r.scanned).toFixed(2) : '0'}ms 每项）`,
-      )
-      setIndexVersion((v) => v + 1)
-    } catch {
-      /* 重扫失败：保留已有索引（可能是落盘的旧索引），不打断用户 */
-    } finally {
-      refreshingRef.current = false
-      setScanInfo(null)
-    }
+    const p = (async (): Promise<SearchResult> => {
+      try {
+        const r = await searchWorkspaceJps(rec, '', {
+          maxHits: 20000,
+          maxEntries: 200000,
+          // adj588：先扫**用户当前所在目录**那一支——整树索引照旧，只是让"我自己的谱"最先出来
+          preferFirst,
+          onProgress: (scanned, partial) => {
+            setScanInfo({ scanned, found: partial.length, ms: Date.now() - t0 })
+            const now = Date.now()
+            if (now - lastShown < 1200) return
+            lastShown = now
+            if (gen !== scanGenRef.current) return // 扫描期间动过文件 ⇒ 这批部分结果已过期
+            indexRef.current = partial // 引用即可（不改动它），慢节流地让用户看到部分结果
+            indexKeyRef.current = indexScopeKey(rec)
+            setIndexVersion((v) => v + 1)
+          },
+        })
+        if (gen !== scanGenRef.current) {
+          // 扫描期间用户改过文件 ⇒ 这份结果已经不代表磁盘现状：丢掉，交给下一次过滤重扫
+          indexRef.current = null
+          indexKeyRef.current = null
+          return { hits: [], truncated: false, blocked: [], scanned: r.scanned }
+        }
+        indexRef.current = r.hits
+        indexKeyRef.current = indexScopeKey(rec)
+        idxMetaRef.current = { truncated: r.truncated, blocked: r.blocked }
+        const ms = Date.now() - t0
+        await saveWorkspaceIndex({ wsId, from: '', at: Date.now(), relPaths: r.hits.map((h) => h.relPath) })
+        // adj546：把"扫了多少、花了多久、每条多少钱"打出来——真机排查速度问题要靠这个数
+        console.info(
+          `[iJipu] 工作区索引完成：扫描 ${r.scanned} 项 / 命中 ${r.hits.length} 个 / ${ms}ms` +
+            `（${r.scanned > 0 ? (ms / r.scanned).toFixed(2) : '0'}ms 每项）`,
+        )
+        setIndexVersion((v) => v + 1)
+        return r
+      } catch {
+        // 扫失败：保留已有索引（可能是落盘的旧索引），不打断用户
+        return { hits: indexRef.current ?? [], ...idxMetaRef.current, scanned: 0 }
+      } finally {
+        scanPromiseRef.current = null
+        setScanInfo(null)
+      }
+    })()
+    scanPromiseRef.current = p
+    return p
   }, [])
 
   /**
-   * adj543/adj546：**确保有索引可用**——
-   * ① 内存里已有 ⇒ 直接用；② 否则先读**落盘的索引**（秒出，可能略旧）并同时启动后台重扫；
-   * ③ 都没有 ⇒ 在**当前目录**下扫一次（期间有进度与部分结果）。
-   * `useCallback([])` 保证引用稳定（E-2026-249：进依赖的必须是稳定引用）。
+   * adj588：**过期索引的后台重扫挪到浏览器空闲时段**——用户在手机上刚打开面板就点 `*` 时，
+   * 那一下最需要的是"立刻看到上次的列表"，而不是同时跑一遍几十秒的枚举（还会和滚动/点击抢 FSA）。
+   * `requestIdleCallback` 不可用时退回 1.2s 定时（也有"先让当前这一帧画完"的效果）。
+   */
+  const scheduleIdleScan = useCallback(
+    (rec: WorkspaceRecord, wsId: string) => {
+      const run = (): void => void runScan(rec, wsId, pathRef.current)
+      const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number })
+        .requestIdleCallback
+      if (typeof ric === 'function') ric(run, { timeout: 3000 })
+      else window.setTimeout(run, 1200)
+    },
+    [runScan],
+  )
+
+  /**
+   * adj543/adj546/adj588：**确保有索引可用**——
+   * ① 内存里已有（且是本工作区的）⇒ 直接用；② 否则先读**落盘的整树索引**（秒出，可能略旧）
+   * 并在**空闲时**后台重扫；③ 都没有 ⇒ **带进度地扫一次**（立刻有进度与渐进结果，不再静默空等）。
+   * `useCallback` 保证引用稳定（E-2026-249：进依赖的必须是稳定引用）。
    *
-   * adj580（用户反馈）：索引与过滤都**按目录分作用域**——`from` 是"从哪个子目录开始"，
-   * 内存索引用 `indexKeyRef` 记住自己的作用域（`未命中当前作用域就当作没有索引`），
-   * 落盘索引也按 `from` 分开存（`loadWorkspaceIndex(wsId, from)`）。
+   * adj580/adj588：过滤范围仍是"当前目录及其下级"，但**不再靠"按目录分别索引"实现**，
+   * 而是拿整树索引做 `filterHitsInScope()` 前缀裁剪（见 `workspace.ts`——换目录零扫描）。
    */
   const buildIndex = useCallback(
-    async (rec: WorkspaceRecord, wsId: string, from: readonly string[], force = false): Promise<SearchResult> => {
-      const scope = indexScopeKey(rec, from)
-      if (indexRef.current && indexKeyRef.current === scope && !force) {
+    async (rec: WorkspaceRecord, wsId: string, force = false): Promise<SearchResult> => {
+      const key = indexScopeKey(rec)
+      if (indexRef.current && indexKeyRef.current === key && !force) {
         return { hits: indexRef.current, ...idxMetaRef.current, scanned: 0 }
       }
-      const cached = force ? null : await loadWorkspaceIndex(wsId, joinPath(from))
+      const cached = force ? null : await loadWorkspaceIndex(wsId, '')
       if (cached && cached.relPaths.length > 0) {
         const hits = cached.relPaths.map((relPath) => {
           const segs = relPath.split('/')
           return { name: segs[segs.length - 1], relPath, dirSegs: segs.slice(0, -1) }
         })
         indexRef.current = hits
-        indexKeyRef.current = scope
+        indexKeyRef.current = key
         idxMetaRef.current = { truncated: false, blocked: [] }
         setIndexVersion((v) => v + 1)
-        // adj546：**只在索引过期时才后台重扫**——此前每次打开面板都无条件重扫，
-        // 在手机上等于每次都跑一遍几十秒的枚举（用户实测 27s）。落盘的索引够新鲜就直接用。
-        const stale = Date.now() - (cached.at ?? 0) > INDEX_STALE_MS
-        if (stale) void refreshIndex(rec, wsId, from)
+        if (Date.now() - (cached.at ?? 0) > INDEX_STALE_MS) scheduleIdleScan(rec, wsId)
         return { hits, truncated: false, blocked: [], scanned: 0 }
       }
-      const r = await searchWorkspaceJps(rec, '', { maxHits: 20000, maxEntries: 200000, from })
-      indexRef.current = r.hits
-      indexKeyRef.current = scope
-      idxMetaRef.current = { truncated: r.truncated, blocked: r.blocked }
-      void saveWorkspaceIndex({ wsId, from: joinPath(from), at: Date.now(), relPaths: r.hits.map((h) => h.relPath) })
-      return r
+      // adj588：首次扫描也**先扫当前目录**，让用户马上看到自己这个目录里的谱
+      return await runScan(rec, wsId, pathRef.current)
     },
-    [refreshIndex],
+    [runScan, scheduleIdleScan],
   )
   /**
    * adj540（用户要求）：右侧**只留一个下拉按钮**「操作」——点它**弹出菜单**再选具体操作。
@@ -312,20 +344,21 @@ export function WorkspacePanel() {
     }
     let alive = true
     const from = path // adj580：当前目录（子目录过滤的作用域起点）
-    const scope = indexScopeKey(ws, from)
-    /** 有索引（且**是当前作用域的**）⇒ 同步过滤（零等待）；否则走一次建索引再过滤 */
+    const key = indexScopeKey(ws)
+    /** 有索引（且**是本工作区的**）⇒ 同步过滤（零等待）；否则走一次建索引再过滤 */
     const filterFromIndex = (): boolean => {
       const idx = indexRef.current
-      if (!idx || indexKeyRef.current !== scope) return false
+      if (!idx || indexKeyRef.current !== key) return false
       // adj546：查询只编译一次（5000+ 条时别再每条 new RegExp）
       const match = compileQuery(query)
-      setHits(idx.filter((h) => match(h.name, h.relPath)))
+      // adj588：索引是**整棵树**的 ⇒ 先按当前目录裁剪作用域（纯函数，微秒级），再套查询条件
+      setHits(filterHitsInScope(idx, from).filter((h) => match(h.name, h.relPath)))
       setHitsTruncated(idxMetaRef.current.truncated)
       setBlockedDirs(idxMetaRef.current.blocked)
       return true
     }
     if (filterFromIndex()) return
-    void buildIndex(ws, ws.id, from)
+    void buildIndex(ws, ws.id)
       .then((r) => {
         if (!alive) return
         filterFromIndex()
@@ -388,7 +421,11 @@ export function WorkspacePanel() {
   const invalidateCache = useCallback(() => {
     entriesCacheRef.current.clear()
     indexRef.current = null // adj543：写操作后过滤索引也作废，下次过滤重建
-    indexKeyRef.current = null // adj580：索引的**作用域**（工作区+目录）也一起作废
+    indexKeyRef.current = null // adj580：索引的**归属**（哪个工作区）也一起作废
+    // adj588：正在跑的扫描作废（代际 +1）——否则"扫描期间改名/删除"的结果会被写回索引。
+    // 这里**只动 ref、不 setState**：`invalidateCache` 进了 `refresh` 的依赖链，
+    // 在里面 setState 会把"渲染 → effect → setState"重新引回来（E-2026-249 那个无限刷新循环）。
+    scanGenRef.current += 1
   }, [])
   /** 列目录（带缓存——同一路径再次访问直接走缓存，避免每次都打 IndexedDB / FSA） */
   const refresh = useCallback(
@@ -1336,8 +1373,8 @@ export function WorkspacePanel() {
               onClick={() => {
                 setMenuOpen(false)
                 if (!ws) return
-                invalidateCache() // adj580：手动重扫 = 连作用域一起作废，按**当前目录**重扫
-                void buildIndex(ws, ws.id, path, true).then(() => setIndexVersion((v) => v + 1))
+                invalidateCache() // adj588：手动重扫 = 索引与代际一起作废，重扫**整棵树**
+                void buildIndex(ws, ws.id, true).then(() => setIndexVersion((v) => v + 1))
               }}
             >
               {workspaceCopy.rescan}

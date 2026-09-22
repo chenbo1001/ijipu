@@ -108,7 +108,8 @@ import {
   joinPath,
   // adj577：同目录判定（"相同的目录只能有一个工作区"）——纯函数，直接用假记录/假句柄断言
   findSameWorkspace,
-  // adj580：索引/过滤的作用域键（工作区 + 起始目录）
+  // adj588：索引按工作区一份（作用域键）+ 命中按当前目录前缀裁剪（纯函数）
+  filterHitsInScope,
   indexScopeKey,
   matchesQuery,
   normalizeRelPath,
@@ -8883,11 +8884,11 @@ async function runAdj540WorkspaceTests() {
       /const \[query, setQuery\] = useState\(''\)/.test(panelSrc) &&
       /const searching = query\.trim\(\)\.length > 0/.test(panelSrc) &&
       // adj543/adj546：过滤改为"走一次建索引（可落盘、可后台重扫） + 内存 filter"
-      // adj580：建索引时带上**当前目录**作为扫描起点（子目录过滤）
-      /void buildIndex\(ws, ws\.id, from\)/.test(panelSrc) &&
+      // adj580/adj588：索引是**整棵树**的，当前目录的作用域靠**前缀裁剪**实现
+      /void buildIndex\(ws, ws\.id\)/.test(panelSrc) &&
       /const from = path \/\/ adj580/.test(panelSrc) &&
       /const match = compileQuery\(query\)/.test(panelSrc) &&
-      /idx\.filter\(\(h\) => match\(h\.name, h\.relPath\)\)/.test(panelSrc) &&
+      /filterHitsInScope\(idx, from\)\.filter\(\(h\) => match\(h\.name, h\.relPath\)\)/.test(panelSrc) &&
       /searching\s*\?\s*\(hits \?\? \[\]\)\.slice\(0, RESULT_RENDER_MAX\)\.map/.test(panelSrc) &&
       /workspaceCopy\.filterPlaceholder/.test(panelSrc),
     '')
@@ -9125,13 +9126,72 @@ async function runAdj540WorkspaceTests() {
     }
     check('adj580（用户反馈）过滤范围 = **起始目录及其下级**（不传 `from` 才是整个工作区）', !scopeErr, scopeErr || detail)
   }
-  check('adj580 索引作用域键 = 工作区身份 + 起始目录（换目录/换工作区都不复用旧索引）',
-    indexScopeKey({ id: 'w1' } as never, []) === 'w1|' &&
-      indexScopeKey({ id: 'w1' } as never, ['A', 'B']) === 'w1|A/B' &&
-      indexScopeKey({ id: 'w2' } as never, ['A']) !== indexScopeKey({ id: 'w1' } as never, ['A']) &&
-      indexScopeKey({ id: 'w1' } as never, ['A']) !== indexScopeKey({ id: 'w1' } as never, []) &&
-      // 面板接线：建索引时把当前目录带进去；文案也改成"当前目录"
-      /void buildIndex\(ws, ws\.id, from\)/.test(panelSrc) &&
+
+  // ---- adj588：`preferFirst` = 先枚举"当前目录"那一支（结果更早出现在眼前），索引仍是整棵树 ----
+  {
+    let preferErr = ''
+    let detail = ''
+    try {
+      const root = mkDir('root2')
+      const C = await root.getDirectoryHandle('C', { create: true })
+      const D = await root.getDirectoryHandle('D', { create: true })
+      await C.getFileHandle('c1.jps', { create: true })
+      await D.getFileHandle('d1.jps', { create: true })
+      await root.getFileHandle('r.jps', { create: true })
+      const rec = { id: 'smoke-prefer', name: 'root2', handle: root, path: [] } as never
+      const normal = await searchWorkspaceJps(rec, '*', {})
+      const prefer = await searchWorkspaceJps(rec, '*', { preferFirst: ['C'] })
+      const order = (r: { hits: SearchHit[] }): string[] => r.hits.map((h) => h.relPath)
+      detail = `普通=${JSON.stringify(order(normal))} 先扫C=${JSON.stringify(order(prefer))} scanned=${normal.scanned}/${prefer.scanned}`
+      const ok =
+        // 默认顺序：根那一层先（`r.jps` 在最前）
+        order(normal)[0] === 'r.jps' &&
+        // preferFirst=['C']：C 的命中排到最前……
+        order(prefer)[0] === 'C/c1.jps' &&
+        // ……但**结果集完全一致**（索引仍是整棵树，不是只扫了 C）
+        JSON.stringify([...order(prefer)].sort()) === JSON.stringify([...order(normal)].sort()) &&
+        // 两个起点（C 与根）重叠时**不重复枚举**：扫描条目数与普通跑法一致
+        prefer.scanned === normal.scanned
+      if (!ok) throw new Error('顺序/覆盖不符：' + detail)
+    } catch (e) {
+      preferErr = (e as Error).message
+    }
+    check(
+      'adj588 `preferFirst`：先枚举"当前目录"那一支（用户的谱更早出现），但索引仍是整棵树、且不重复枚举',
+      !preferErr,
+      preferErr || detail,
+    )
+  }
+  check('adj588（用户反馈"手机上 `*` 过滤还是有点长"）索引**按工作区一份**（不再按目录分）+ 作用域靠纯函数前缀裁剪',
+    // ① 作用域键只剩工作区身份 ⇒ 进子目录不会换作用域、不会重扫
+    indexScopeKey({ id: 'w1' } as never) === 'w1' &&
+      indexScopeKey({ id: 'w2' } as never) !== indexScopeKey({ id: 'w1' } as never) &&
+      /export function indexScopeKey\(rec: WorkspaceRecord\): string \{\s*return rec\.id\s*\}/.test(wsSrc) &&
+      // ② 作用域裁剪是纯函数，且**边界必须带分隔符**（`A` 不能吃掉 `AB/` 里的谱）
+      /export function filterHitsInScope\(hits: readonly SearchHit\[\], from: readonly string\[\]\): SearchHit\[\]/.test(wsSrc) &&
+      /const withSep = `\$\{prefix\}\/`/.test(wsSrc) &&
+      (() => {
+        const hits = [
+          { name: 'x.jps', relPath: 'A/x.jps', dirSegs: ['A'] },
+          { name: 'y.jps', relPath: 'A/B/y.jps', dirSegs: ['A', 'B'] },
+          { name: 'z.jps', relPath: 'AB/z.jps', dirSegs: ['AB'] },
+          { name: 'r.jps', relPath: 'r.jps', dirSegs: [] },
+        ] as never
+        const at = (from: string[]) => filterHitsInScope(hits, from).map((h) => (h as { relPath: string }).relPath)
+        return (
+          JSON.stringify(at([])) === JSON.stringify(['A/x.jps', 'A/B/y.jps', 'AB/z.jps', 'r.jps']) &&
+          JSON.stringify(at(['A'])) === JSON.stringify(['A/x.jps', 'A/B/y.jps']) &&
+          JSON.stringify(at(['A', 'B'])) === JSON.stringify(['A/B/y.jps']) &&
+          JSON.stringify(at(['AB'])) === JSON.stringify(['AB/z.jps']) &&
+          at([]) !== hits // 返回副本，别把索引本身交出去（调用方可能就地排序）
+        )
+      })() &&
+      // ③ 面板接线：索引按工作区键、过滤走前缀裁剪、进子目录不再建索引
+      /const key = indexScopeKey\(ws\)/.test(panelSrc) &&
+      /filterHitsInScope\(idx, from\)/.test(panelSrc) &&
+      /void buildIndex\(ws, ws\.id\)/.test(panelSrc) &&
+      !/buildIndex\(ws, ws\.id, from/.test(panelSrc) &&
+      // 文案仍是"当前目录"口径（作用域没变，变的是实现）
       /filterAllTitle: '列出当前目录（含子目录）全部 \.jps'/.test(copySrc) &&
       /searchEmpty: '当前目录里没有匹配的 \.jps'/.test(copySrc) &&
       /searchIndexing: '正在读取当前目录…'/.test(copySrc) &&
@@ -9445,25 +9505,27 @@ async function runAdj541DockToggleTests() {
       /\.ws-row-plain \{[\s\S]{0,120}?padding: 5px 4px/.test(cssSrc) &&
       /\.ws-list \{[\s\S]{0,200}?gap: 1px/.test(cssSrc),
     '')
-  check('adj543/adj546 过滤提速：**先建一次索引，之后每次输入只在内存里过滤**，且索引可落盘（按工作区+目录分作用域）、可后台重扫',
+  check('adj543/adj546/adj588 过滤提速：**先建一次整树索引，之后每次输入只在内存里过滤**，且索引落盘、可后台重扫、换目录零扫描',
     /const indexRef = useRef<SearchHit\[\] \| null>\(null\)/.test(wsPanelSrc) &&
-      // adj580：索引与过滤**按作用域**（工作区 + 起始目录）区分：内存用 indexKeyRef 记住，落盘按 (wsId, from)
+      // adj580/adj588：内存索引记住自己的**归属**（哪个工作区；索引本身是整棵树的）
       /const indexKeyRef = useRef<string \| null>\(null\)/.test(wsPanelSrc) &&
-      /async \(rec: WorkspaceRecord, wsId: string, from: readonly string\[\], force = false\)/.test(wsPanelSrc) &&
-      /const refreshIndex = useCallback\(async \(rec: WorkspaceRecord, wsId: string, from: readonly string\[\]\)/.test(wsPanelSrc) &&
-      /const scope = indexScopeKey\(rec, from\)/.test(wsPanelSrc) &&
-      /indexKeyRef\.current === scope && !force/.test(wsPanelSrc) &&
-      /if \(!idx \|\| indexKeyRef\.current !== scope\) return false/.test(wsPanelSrc) &&
-      // ① 先用落盘的索引（秒开）② **只有过期才**后台重扫 ③ 扫完落盘
-      /const cached = force \? null : await loadWorkspaceIndex\(wsId, joinPath\(from\)\)/.test(wsPanelSrc) &&
-      /const stale = Date\.now\(\) - \(cached\.at \?\? 0\) > INDEX_STALE_MS/.test(wsPanelSrc) &&
-      /if \(stale\) void refreshIndex\(rec, wsId, from\)/.test(wsPanelSrc) &&
-      /await saveWorkspaceIndex\(\{ wsId, from: joinPath\(from\), at: Date\.now\(\), relPaths: r\.hits\.map\(\(h\) => h\.relPath\) \}\)/.test(
+      // adj588：**一个扫描函数**同时服务"首次扫描"与"后台重扫"（`scanPromiseRef` 保证只跑一份）
+      /const runScan = useCallback\(\(rec: WorkspaceRecord, wsId: string, preferFirst: readonly string\[\] = \[\]\): Promise<SearchResult> => \{/.test(
         wsPanelSrc,
       ) &&
+      /if \(scanPromiseRef\.current\) return scanPromiseRef\.current/.test(wsPanelSrc) &&
+      /async \(rec: WorkspaceRecord, wsId: string, force = false\): Promise<SearchResult>/.test(wsPanelSrc) &&
+      // 索引读/写都用**根作用域**（`from: ''`）：一份索引覆盖整棵树
+      /const cached = force \? null : await loadWorkspaceIndex\(wsId, ''\)/.test(wsPanelSrc) &&
+      /await saveWorkspaceIndex\(\{ wsId, from: '', at: Date\.now\(\), relPaths: r\.hits\.map\(\(h\) => h\.relPath\) \}\)/.test(
+        wsPanelSrc,
+      ) &&
+      // 只有在过期时、且**挪到空闲时段**才后台重扫（不再一打开面板就烧几十秒）
+      /if \(Date\.now\(\) - \(cached\.at \?\? 0\) > INDEX_STALE_MS\) scheduleIdleScan\(rec, wsId\)/.test(wsPanelSrc) &&
+      /requestIdleCallback/.test(wsPanelSrc) &&
       // 边扫边出结果（慢节流地把 partial 引用交给索引 + 进度状态；不再每跳复制数组/重算正则）
       /onProgress: \(scanned, partial\) => \{[\s\S]{0,400}?indexRef\.current = partial/.test(wsPanelSrc) &&
-      /setScanInfo\(\{ scanned, found: partial\.length, ms: Date\.now\(\) - t0 \}\)/.test(wsPanelSrc) &&
+      /setScanInfo\(\{ scanned, found: partial\.length, ms: Date\.now\(\) - t0 \}\)/.test(wsPanelSrc),
       /const filterFromIndex = \(\): boolean => \{/.test(wsPanelSrc) &&
       /idx\.filter\(\(h\) => match\(h\.name, h\.relPath\)\)/.test(wsPanelSrc) &&
       /if \(filterFromIndex\(\)\) return/.test(wsPanelSrc) &&
@@ -9622,7 +9684,7 @@ async function runAdj541DockToggleTests() {
   // 使 `refresh` 每次渲染都变 ⇒ 依赖它的"面板激活"effect 每渲染重跑 ⇒ setState ⇒ 再渲染……
   // 断言要点：**进依赖的必须是稳定引用**（useCallback([]) / ref / store action）。
   check('adj540 面板不会无限刷新（E-2026-249）：`invalidateCache` 用 useCallback([]) 固定、`refresh` 依赖只有稳定项、激活 effect 依赖全是稳定引用',
-    /const invalidateCache = useCallback\(\(\) => \{[\s\S]{0,200}?\}, \[\]\)/.test(wsPanelSrc) &&
+    /const invalidateCache = useCallback\(\(\) => \{[\s\S]{0,700}?\}, \[\]\)/.test(wsPanelSrc) &&
       !/\[showNotice, invalidateCache\]/.test(wsPanelSrc) &&
       // refresh 的依赖数组里只有 showNotice（store action，稳定引用）
       /\[\s*showNotice,?\s*\]/.test(wsPanelSrc) &&

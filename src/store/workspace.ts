@@ -119,15 +119,32 @@ export function joinPath(segs: readonly string[]): string {
 }
 
 /**
- * adj580（用户反馈）：过滤/索引的**作用域键** = 工作区身份 + **起始目录**。
+ * adj580/adj588：过滤/索引的**作用域键**。
  *
- * 为什么要它：过滤范围是"当前目录及其下级"，所以索引必须按目录分开——
- * ① 内存里那份索引要知道自己覆盖的是哪个目录（换了目录不能拿旧的过滤结果）；
- * ② 落盘索引也按这个维度分开存（见 `fileHandleDb.loadWorkspaceIndex(wsId, from)`）。
- * 放这里（而不是组件文件）的两个原因：`react/only-export-components`；以及 smoke 可直接断言。
+ * adj580 时它是「工作区身份 + 起始目录」——索引按目录分开存，为的是"在子目录里过滤只看这一层子树"。
+ * adj588（用户反馈"手机上 `*` 过滤还是有点长"）改成**只按工作区身份**：实测下来真正的开销不是单次
+ * 扫描的并发度（真机 + OPFS 基准里并发 4 已经到平台期，8/16 只快 5%），而是**作用域一变就重扫**——
+ * 用户进一个子目录、按一次 `*`，就要把那个子树重新枚举一遍（真机大工作区实测 27s 量级）；
+ * 而"整棵树的索引"其实**已经包含**了任何子树的答案。
+ *
+ * 所以现在的口径是：**索引永远是整棵工作区的**（一次扫描、落盘一份），
+ * "只看当前目录及其下级"这件事改由**纯函数 `filterHitsInScope()` 在命中集上做前缀裁剪**完成
+ * —— 结果与以前完全一致（adj580 的口径不丢），但换目录/换子目录都只是内存里 filter，**零扫描**。
  */
-export function indexScopeKey(rec: WorkspaceRecord, from: readonly string[]): string {
-  return `${rec.id}|${joinPath(from)}`
+export function indexScopeKey(rec: WorkspaceRecord): string {
+  return rec.id
+}
+
+/**
+ * adj588（纯函数）：把"整棵树的命中"裁到**某个起始目录及其下级**——过滤作用域的实际执行者。
+ * `from` 为空 = 整棵工作区（不做裁剪）。前缀比较用的是 `from + '/'`，
+ * 所以 `2.曲谱集` 不会把 `2.曲谱集备份/` 里的谱算进来（同名前缀目录必须区分开）。
+ */
+export function filterHitsInScope(hits: readonly SearchHit[], from: readonly string[]): SearchHit[] {
+  const prefix = joinPath(normalizeRelPath(from))
+  if (!prefix) return hits.slice()
+  const withSep = `${prefix}/`
+  return hits.filter((h) => h.relPath.startsWith(withSep))
 }
 
 /**
@@ -227,6 +244,15 @@ export interface SearchOptions {
    * 所以这里只影响"从哪儿开始走"，不影响命中项的语义。
    */
   from?: readonly string[]
+  /**
+   * adj588：**先枚举这个子树**，再照 `from`（默认根）广度优先补齐全树。
+   *
+   * 为什么需要：过滤结果按"当前目录"裁剪（见 `filterHitsInScope`），而 `preferFirst` 让
+   * **用户当前所在的那个目录先被扫完** ⇒ 进度回调里最先冒出来的就是他自己的谱，
+   * 而不是"整棵树扫到一半才轮到我这一支"。索引本身仍是**整棵树**的（这里只影响遍历顺序），
+   * 所以不影响任何正确性；`visited` 保证每个目录**只枚举一次**（不会因为两个起点重叠而重复往返）。
+   */
+  preferFirst?: readonly string[]
 }
 
 /**
@@ -287,11 +313,20 @@ export async function searchWorkspaceJps(
    */
   type Job = { segs: string[]; handle?: FileSystemDirectoryHandle; depth: number }
   const from = normalizeRelPath(options.from ?? [])
-  const queue: Job[] = [{ segs: from, handle: from.length === 0 ? rec.handle : undefined, depth: 1 }]
+  // adj588：当前目录的子树**先入队**（用户最想马上看到自己这个目录里的谱）
+  const prefer = normalizeRelPath(options.preferFirst ?? [])
+  const queue: Job[] = []
+  if (prefer.length > 0) queue.push({ segs: prefer, handle: undefined, depth: prefer.length + 1 })
+  queue.push({ segs: from, handle: from.length === 0 ? rec.handle : undefined, depth: 1 })
+  /** adj588：目录只枚举一次（两个起点重叠时不会重复往返；重复枚举正是手机上最贵的那部分） */
+  const visited = new Set<string>()
   let inFlight = 0
   let done = false
 
   const visit = async (job: Job): Promise<void> => {
+    const jobKey = joinPath(job.segs)
+    if (visited.has(jobKey)) return
+    visited.add(jobKey)
     if (job.depth > maxDepth) {
       truncated = true
       return
