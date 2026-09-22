@@ -18,6 +18,7 @@ import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 import { isBarlineModifierContext, filterModifierHints } from './completions'
 import { ScriptToolbar } from './ScriptToolbar'
 import { ToolIcon } from '../ui/ToolIcon'
+import { summarizeProblems } from '../ui/problems'
 import { dockCopy } from '../brand/copy'
 import type { PadGroup, PadKey } from './padLayout'
 
@@ -79,6 +80,17 @@ export function EditorPane() {
   const dockOpen = useUiStore((s) => s.dockOpen)
   const dockPanel = useUiStore((s) => s.dockPanel)
   const setDockPanel = useUiStore((s) => s.setDockPanel)
+  /**
+   * adj591（用户要求）：**脚本有告警时，「展开底栏」先切到告警页签；没有告警就不切换**
+   * （维持上次用的那个页签）。
+   *
+   * 为什么：告警是"需要处理"的东西，展开底栏时优先让人看见；而没有告警时把用户从
+   * "上次正在用的页签"（比如设置/试听）强行拽走只会碍事。所以判定放在**这个通用入口**上，
+   * 顶栏/菜单里那些**点名**要开某个页签的按钮（试听/导出/设置…）保持原样——用户点谁就开谁。
+   * 口径与左下角状态栏一致：`summarizeProblems()` 把错误与警告都算作"告警"（total > 0）。
+   */
+  const problems = useMemo(() => summarizeProblems(parseResult.errors), [parseResult.errors])
+  const expandDock = () => setDockPanel(problems.total > 0 ? 'problems' : dockPanel)
   // 编辑器字体/字号属 L1「用户个性」（本机偏好，**不随谱保存**；分层见 docs/SETTINGS-AUDIT.md）——
   // adj-font：此前这里读 `pageConfig.editorFontSize ?? editorFontSize`（谱面里有值就优先），
   // 而谱面里的这两个键是早期版本误写进去的；现已从 PageConfig 移除，只认本机偏好。
@@ -923,9 +935,10 @@ export function EditorPane() {
           <button
             type="button"
             className="dock-fab"
-            onClick={() => setDockPanel(dockPanel)}
-            title={dockCopy.expandTitle}
-            aria-label={dockCopy.expandTitle}
+            onClick={expandDock}
+            // adj591：有告警时把"点开先看告警"写进 tooltip，别让用户以为"我上次的页签丢了"
+            title={problems.total > 0 ? dockCopy.expandWithProblems(problems.total) : dockCopy.expandTitle}
+            aria-label={problems.total > 0 ? dockCopy.expandWithProblems(problems.total) : dockCopy.expandTitle}
           >
             <ToolIcon name="dockExpand" />
           </button>

@@ -9392,12 +9392,30 @@ async function runAdj541DockToggleTests() {
   check('adj541 两个新图标登记进 ICON_FILES（文件名与设计稿一致）',
     /dockExpand: '底栏展开'/.test(iconSrc) && /dockCollapse: '底栏收起'/.test(iconSrc),
     '')
-  check('adj541 收起底栏时，编辑区**行号栏位置**浮出「展开底栏」按钮（`!dockOpen` 才渲染 + 点它展开且保留上次页签）',
-    /\{!dockOpen && \([\s\S]{0,400}?className="dock-fab"[\s\S]{0,300}?onClick=\{\(\) => setDockPanel\(dockPanel\)\}/.test(editorSrc) &&
+  check('adj541/adj591 收起底栏时，编辑区**行号栏位置**浮出「展开底栏」按钮（`!dockOpen` 才渲染 + 点它展开）',
+    /\{!dockOpen && \([\s\S]{0,400}?className="dock-fab"[\s\S]{0,300}?onClick=\{expandDock\}/.test(editorSrc) &&
       /<ToolIcon name="dockExpand" \/>/.test(editorSrc) &&
       // 用文案断言"组件确实引用了集中管理的文案"（文案本体在 copy.ts 的 dockCopy 里）
       /dockCopy\.expandTitle/.test(editorSrc) &&
       /expandTitle: '展开底栏'/.test(copySrc2),
+    '')
+  check('adj591（用户要求）**有告警时「展开底栏」先切到告警页签，没有告警就不切换**（顶栏/菜单里点名开某个页签的入口不受影响）',
+    // 判定：total > 0 ⇒ 'problems'，否则维持上次的 `dockPanel`
+    /const problems = useMemo\(\(\) => summarizeProblems\(parseResult\.errors\), \[parseResult\.errors\]\)/.test(editorSrc) &&
+      /const expandDock = \(\) => setDockPanel\(problems\.total > 0 \? 'problems' : dockPanel\)/.test(editorSrc) &&
+      /import \{ summarizeProblems \} from '\.\.\/ui\/problems'/.test(editorSrc) &&
+      // 有告警时 tooltip 说清楚"点开会先看告警"（别让用户以为上次的页签丢了）
+      /problems\.total > 0 \? dockCopy\.expandWithProblems\(problems\.total\) : dockCopy\.expandTitle/.test(editorSrc) &&
+      /expandWithProblems: \(n: number\): string => `展开底栏（先看告警：\$\{n\} 条）`/.test(copySrc2) &&
+      // 顶栏/菜单那几条**点名**的入口仍是直开（试听/导出/设置/关于），不受上面的判定影响
+      (() => {
+        const top = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+        return (
+          /onPick: \(\) => toggleDock\('tryout'\)/.test(top) &&
+          /onPick: \(\) => toggleDock\('settings'\)/.test(top) &&
+          /label: '关于\(&A\)', hotkey: 'a', onPick: \(\) => toggleDock\('about'\)/.test(top)
+        )
+      })(),
     '')
   check('adj541 悬浮按钮对齐**行号栏列**（用 `--jp-gutter-w` 居中，不压代码内容）且**不透明**（用户反馈"糊"）',
     /--jp-gutter-w/.test(editorSrc) &&
