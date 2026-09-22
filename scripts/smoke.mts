@@ -8537,6 +8537,8 @@ async function runAdj540WorkspaceTests() {
   const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
   const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
   const panelSrc = String(readFileSync('src/ui/dock/WorkspacePanel.tsx', 'utf8'))
+  // adj585：可点击展开的 `?` 徽标（工作区选择界面与导入页签共用）
+  const badgeSrc = String(readFileSync('src/ui/HelpBadge.tsx', 'utf8'))
   const copySrc = String(readFileSync('src/brand/copy.ts', 'utf8'))
   // 断言 CSS 前先剥注释：注释里**故意写了**要禁用的写法（同 E-2026-237 的坑）
   const cssAll = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
@@ -8679,31 +8681,47 @@ async function runAdj540WorkspaceTests() {
       /setChoose\(false\)[\s\S]{0,160}?await refresh\(rec, \[\]\)/.test(panelSrc) &&
       /setChoose\(false\)/.test(panelSrc.split('if (!active) {')[1]?.slice(0, 400) ?? ''),
     '')
-  check('adj578（用户要求）选择界面把两条长说明收进**悬浮提示**（标题后的 `?` = 黑名单说明；「新工作区」= 用法说明），高度让给清单',
-    // `?` 小图标 + 它的 title = blockedHint；按钮 title = chooseHint；两条常驻说明已从正文移除
-    /<span className="help-badge" role="img" aria-label=\{workspaceCopy\.blockedHint\} title=\{workspaceCopy\.blockedHint\}>/.test(panelSrc) &&
+  check('adj578/adj585（用户要求）选择界面把说明收进标题后的 `?`：**点一下就地展开**（PC 仍可悬浮），高度让给清单',
+    // adj585：`?` 换成可点击展开的 HelpBadge（用法 + 黑名单两条都收在这里）
+    /<HelpBadge[\s\S]{0,260}?workspaceCopy\.chooseHint[\s\S]{0,200}?workspaceCopy\.blockedHint/.test(panelSrc) &&
       /title=\{workspaceCopy\.chooseHint\}/.test(panelSrc) &&
-      // 正文里不再有常驻的这两条（黑名单那条只在**触屏**下渲染，故带 ws-hint-touch 类）
+      // 正文里不再有这两条常驻说明（旧版触屏会常驻那一大块，占掉清单高度）
       !/\{workspaceCopy\.chooseHint\}<\/div>/.test(panelSrc) &&
-      /ws-blocked-hint help-hint-touch/.test(panelSrc) &&
-      /\.help-badge \{[\s\S]{0,320}?cursor: help/.test(cssAll) &&
-      // 触屏（无 hover）弹不出提示 ⇒ 黑名单说明改回可见
-      /\.help-hint-touch \{\s*display: none;\s*\}/.test(cssAll) &&
-      /@media \(hover: none\) and \(pointer: coarse\) \{[\s\S]{0,120}?\.help-hint-touch \{\s*display: block;/.test(cssAll),
+      !/help-hint-touch/.test(panelSrc) &&
+      /\.help-badge \{[\s\S]{0,420}?cursor: help/.test(cssAll) &&
+      // 徽标本体是 button（键盘可达 + 表达展开态），说明块独占下一行 ⇒ 展开前高度为 0
+      /className="help-badge"[\s\S]{0,200}?aria-expanded=\{open\}/.test(badgeSrc) &&
+      /onClick=\{\(e\) => \{[\s\S]{0,120}?e\.stopPropagation\(\)[\s\S]{0,120}?setOpen\(\(v\) => !v\)/.test(badgeSrc) &&
+      /\.help-hint \{[\s\S]{0,200}?flex: 0 0 100%/.test(cssAll) &&
+      /\.ws-choose-title \{[\s\S]{0,200}?flex-wrap: wrap/.test(cssAll),
     '')
-  check('adj579/adj581（用户要求）「导入」页签：编辑器上方是「粘贴源码」标题 + `?`（悬浮 = 那条长说明，正文不再常驻）',
+  check('adj585（用户要求）工作区：内核要求**只在「新工作区」按钮下方**留一句短提示（长说明收进 `?`）',
+    // 短提示 = 新文案，且落在右栏（`.ws-side`）里、紧跟在「新工作区」按钮之后
+    /chromiumOnly: '仅支持 Chromium 内核浏览器'/.test(copySrc) &&
+      /ws-side-btn[\s\S]{0,400}?\{workspaceCopy\.openOther\}[\s\S]{0,240}?ws-side-hint[\s\S]{0,80}?workspaceCopy\.chromiumOnly/.test(
+        panelSrc,
+      ) &&
+      // 左栏（清单上方）不再有常驻的黑名单段落
+      !/ws-blocked-hint help-hint-touch/.test(panelSrc) &&
+      /\.ws-side-hint \{/.test(cssAll) &&
+      // 文案里也不再出现 Markdown 星号（`**本身**` 在 title/正文里是字面量，会原样显示）
+      !/\*\*本身\*\*/.test(copySrc),
+    '')
+  check('adj579/adj581/adj585（用户要求）「导入」页签：「粘贴源码」标题 + `?`（点开/悬浮都可看，正文不再常驻）',
     /import-label/.test(String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8'))) &&
       /pasteImportCopy\.label/.test(String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8'))) &&
       // adj581：去掉冒号 + 用统一的**行标题**样式（`.pcfg-group-title`，谱面页口径）
       /label: '粘贴源码'/.test(copySrc) &&
       !/label: '粘贴源码：'/.test(copySrc) &&
       /className="pcfg-group-title import-label"/.test(String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8'))) &&
-      // `?` 的悬浮提示就是那条 desc（内容与用户给的一字不差）
+      // `?` 的提示就是那条 desc（内容与用户给的一字不差）
       /把谱面源码粘贴到下面（微信\/网盘里复制的文本、笔记里的 ```jps 代码块都可以），点「导入」即替换当前内容。不会写入磁盘，保存请用「导出」。/.test(
         copySrc,
       ) &&
-      // 触屏没有 hover ⇒ 这条说明在触屏上仍直接显示
-      /import-desc help-hint-touch/.test(String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8'))),
+      // adj585：常驻说明撤掉，改用 HelpBadge（点一下展开）；旧的 `.import-desc help-hint-touch` 不再存在
+      /<HelpBadge hint=\{pasteImportCopy\.desc\} \/>/.test(String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8'))) &&
+      !/help-hint-touch/.test(String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8'))) &&
+      !/\.help-hint-touch/.test(cssAll),
     '')
   check('adj581（用户要求）底栏内容标题统一成**谱面页的行标题样式**（`.pcfg-group-title`，即「纸张与边距」那种）：选择工作区 / 粘贴源码 / 深浅模式 / 主题配色 / 音源 / 音色启用',
     (() => {
@@ -8758,6 +8776,21 @@ async function runAdj540WorkspaceTests() {
       /\.ws-filter-row \.ws-filter-all,[\s\S]{0,120}?flex: 1 1 0/.test(cssAll) &&
       // 顶栏/输入条的 24px 定高**不受影响**（那是另一套口径，见 adj534）
       /\.playback-btn \{[\s\S]{0,260}?height: var\(--jp-btn-h, 24px\)/.test(cssAll),
+    '')
+  check('adj585（用户要求）底栏 dock **所有页签的按钮高度**统一到「设置 → 保存设置」（真机实测 28px）',
+    // 基准 = 保存设置所在的那条规则；统一定高写进 `--jp-dock-btn-h`（值 = 真机量到的 28px）
+    /\.tool-dock \{\s*\n?\s*--jp-dock-btn-h: 28px;/.test(cssAll) &&
+      // 一条规则覆盖六个页签的动作按钮 + 关于页的渐变按钮（它不是 `.btn`）
+      /\.tool-dock \.pcfg-foot > button\.btn,[\s\S]{0,600}?\.tool-dock \.pane-export \.btn,[\s\S]{0,200}?\.tool-dock \.about-donate \{/.test(
+        cssAll,
+      ) &&
+      /height: var\(--jp-dock-btn-h\);[\s\S]{0,120}?padding-top: 0;[\s\S]{0,80}?padding-bottom: 0;[\s\S]{0,200}?display: inline-flex;[\s\S]{0,80}?align-items: center;/.test(
+        cssAll,
+      ) &&
+      // 两条**必须**保住的反例：工作区清单/最近列表是"行"（手机点按热区），设置内部页签是"页签"
+      /\.tool-dock \.pane-workspace \.btn:not\(\.ws-choose-item\):not\(\.ws-recent-item\)/.test(cssAll) &&
+      // 页签 36px 的定高没被顺手改掉
+      /\.jp-tab \{[\s\S]{0,200}?height: 36px/.test(cssAll),
     '')
   check('adj577（用户要求）**同目录只保留一个工作区**：新选到历史里的目录时复用历史那条记录',
     // 面板接线：选完先 `dedupeWorkspaceRecord` 再落库；命中历史时用另一句提示
@@ -9317,14 +9350,15 @@ async function runAdj541DockToggleTests() {
         /return Err\("NOT_EMPTY"\.to_string\(\)\)/.test(rustSrc) &&
         !/remove_dir_all/.test(wsRemoveDirBody),
       '')
-    check('adj568/adj578 网页版：**选目录之前**就把内核敏感目录黑名单讲清楚（被拦时错误与"用户取消"同为 AbortError，事后补不出提示）',
+    check('adj568/adj578/adj585 网页版：**选目录之前**就把内核敏感目录黑名单讲清楚（被拦时错误与"用户取消"同为 AbortError，事后补不出提示）',
       /blockedHint:/.test(copySrc2) &&
         /下载 \/ 桌面 \/ 文档 \/ 用户主目录/.test(copySrc2) &&
         /子文件夹/.test(copySrc2) &&
-        // adj578 起正文那条只在**触屏**下渲染（桌面/鼠标走标题后的 `?` 悬浮提示，见下一条断言）
-        /!supportsPathWorkspace\(\) && \([\s\S]{0,220}?ws-blocked-hint help-hint-touch[\s\S]{0,160}?workspaceCopy\.blockedHint/.test(
+        // adj578/adj585：细节收进标题后的 `?`（点开可见），正文只留「新工作区」按钮下那一句短提示
+        /!supportsPathWorkspace\(\) && <div className="ws-side-hint">\{workspaceCopy\.chromiumOnly\}<\/div>/.test(
           wsPanelSrc,
-        ),
+        ) &&
+        /workspaceCopy\.blockedHint/.test(wsPanelSrc),
       '')
   }
   check('adj545/adj549（用户要求）面板**上面包屑整行 + 下分左右两栏**：左=列表；右=固定宽度（过滤 / `*` / ✕ / 操作▾）',

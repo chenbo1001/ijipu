@@ -3747,8 +3747,12 @@ body {
   flex-wrap: wrap;
   gap: 6px;
 }
-/* adj578/adj579（用户要求）：通用的 `?` 小图标——把长说明收进**悬浮提示**，腾出高度给真正的输入区
-   （工作区选择界面的标题后、「导入」页签的「粘贴源码：」标签后都用它）。 */
+/* adj578/adj579（用户要求）：通用的 `?` 小图标——把长说明收进**提示**，腾出高度给真正的输入区
+   （工作区选择界面的标题后、「导入」页签的「粘贴源码」标签后都用它）。
+ * adj585（用户要求）：改成**可点击展开**的 `<button>`——触屏没有 hover，旧版只能让说明常驻，
+   手机上白占一大块高度（用户原话"提示信息让给工作区列表"）。
+   PC 上 `title` 悬浮提示保持不变；点一下就地展开/收起（再点收起），两种设备都能拿到说明。
+   注意：`<button>` 自带 background/padding/字体，必须显式清掉，否则圆形徽标会被撑成方块。 */
 .help-badge {
   flex: none;
   display: inline-flex;
@@ -3756,9 +3760,12 @@ body {
   justify-content: center;
   width: 15px;
   height: 15px;
+  padding: 0;
   border: 1px solid var(--jp-border);
   border-radius: 50%;
+  background: transparent;
   color: var(--jp-text-muted);
+  font-family: inherit;
   font-size: 10px;
   line-height: 1;
   cursor: help;
@@ -3768,27 +3775,34 @@ body {
   border-color: var(--jp-accent);
   color: var(--jp-accent);
 }
-/* 触屏（无 hover）弹不出悬浮提示 ⇒ 这类说明在触屏上仍然**直接显示**（否则用户永远看不到它） */
-.help-hint-touch {
-  display: none;
+.help-badge:focus-visible {
+  outline: 1px solid var(--jp-accent);
+  outline-offset: 1px;
 }
-@media (hover: none) and (pointer: coarse) {
-  .help-hint-touch {
-    display: block;
-  }
-}
-/* adj579：「导入」页签里编辑器上方的标题行（字号/颜色/下边框走 `.pcfg-group-title`，
-   这里只负责"标题文字 + `?`"横向排布与"高度=内容高"） */
-.import-label {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-bottom: 6px;
-}
-.import-desc {
+/* adj585：`?` 展开出来的说明块——**独占下一行**（父容器是 flex row + `flex-wrap: wrap`：
+   `.ws-choose-title` / `.import-label`），于是展开前高度为 0、展开后把下面内容顶下去。 */
+.help-hint {
+  flex: 0 0 100%;
+  width: 100%;
+  margin-top: 2px;
   color: var(--jp-text-muted);
   font-size: 12px;
   line-height: 1.6;
+  text-align: left;
+  white-space: normal;
+}
+.help-hint-line + .help-hint-line {
+  margin-top: 3px;
+}
+/* adj579：「导入」页签里编辑器上方的标题行（字号/颜色/下边框走 `.pcfg-group-title`，
+   这里只负责"标题文字 + `?`"横向排布与"高度=内容高"）
+ * adj585：`flex-wrap: wrap` 是 `?` 展开出来的说明能换到第二行的前提（见 `.help-hint`）。 */
+.import-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
 }
 .ws-choose-list {
   gap: 2px;
@@ -4190,6 +4204,42 @@ body {
   /* `*` 那枚自带 `line-height: 1`，会让它比其他按钮矮 4px（实测 27 vs 31）⇒ 一并拉回默认行高 */
   line-height: normal;
 }
+/* ---- adj585（用户要求）：底栏 dock 里**所有页签的按钮高度**统一到「设置 → 保存设置」----
+ * 用户口径："底栏 dock 里的所有页签里的按钮的高度，按设置页签里的「保存设置」的高度进行调整"。
+ * 所以这里把**保存设置**当作基准：它由 `.tool-dock .pcfg-foot > button.btn`（adj511：5px 10px
+ * 内边距 + 12px 字号）定高，真机 CDP 实测 **28px**——`--jp-dock-btn-h` 就是这个实测值。
+ *
+ * 统一前逐个量过（1400×900 真机）：工作区「新工作区」31、导入三个 31、试听播放/停止 31、
+ * 导出 8 个格式按钮 **27**、关于「支持作者」31、设置底部两个 **28** —— 六个页签五套高度。
+ *
+ * 实现要点（每一条都是踩过的坑）：
+ *  · **纵向内边距必须清零**：`.btn` 基础/adj584 的内边距会被写进内容盒，定高后把文字挤出可视区
+ *    （`.playback-btn` 在 adj534 就栽过：只写 height、内边距还在 ⇒ 文字溢出）；横向内边距保留各自口径。
+ *  · **`display: inline-flex` + 居中**：`.btn` 多数是 `display: block`，定高 + 零纵向内边距后文字会
+ *    贴顶；转成 inline-flex 才真正垂直居中（在 flex/grid 容器里 inline-level 会被块化，布局不受影响）。
+ *  · **排除清单行**：工作区清单/最近列表的每一行也是 `.btn`（`.ws-choose-item`/`.ws-recent-item`），
+ *    它们是"行"（手机点按热区，adj574 特意做成两行高），不属于"按钮"，不能压成 28px。
+ *  · 设置页的内部页签 `.jp-tab`（36px）是**页签**不是按钮，保持原样。 */
+.tool-dock {
+  --jp-dock-btn-h: 28px;
+}
+.tool-dock .pcfg-foot > button.btn,
+.tool-dock .pane-workspace .btn:not(.ws-choose-item):not(.ws-recent-item),
+.tool-dock .pane-import .btn,
+.tool-dock .pane-problems .btn,
+.tool-dock .pane-tryout .btn,
+.tool-dock .pane-export .btn,
+.tool-dock .pane-settings .btn,
+.tool-dock .pane-about .btn,
+.tool-dock .about-donate {
+  height: var(--jp-dock-btn-h);
+  padding-top: 0;
+  padding-bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: normal;
+}
 /* 过滤结果里的那条相对目录（告诉用户这份谱在哪个子目录下）
  * adj571（用户反馈"文件名被截断得看不到全名"）：原来是 `flex: none` —— 目录后缀**不可压缩**，
  * 于是窄行里被挤掉的永远是**文件名**（`.ws-name` 带省略号），深目录下名字甚至只剩一两个字符。
@@ -4353,6 +4403,8 @@ span.ws-check {
    原先"选择工作区"用这里 13px 加粗的独有样式（`.ws-grant-title`，已删），现并入统一口径。 */
 .ws-choose-title {
   display: flex;
+  /* adj585（用户要求）：`?` 展开的说明要能换到第二行（见 `.help-hint` 的 `flex: 0 0 100%`） */
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   /* 容器是**横向** flex（`.ws-head`）⇒ 这里显式要"独占一行"（标题一行、路径一行） */
@@ -4376,6 +4428,15 @@ span.ws-check {
   color: var(--jp-text-muted);
   font-size: 11px;
   line-height: 1.5;
+}
+/* adj585（用户要求）：右栏「新工作区」按钮**下方**那句短提示（"仅支持 Chromium 内核浏览器"）。
+   右栏只有 112px（窄屏 100px）宽 ⇒ 字号再降一档、行距收紧，两三行内说完。 */
+.ws-side-hint {
+  color: var(--jp-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: center;
+  text-wrap: pretty;
 }
 /* adj568：网页版"选目录之前"的内核黑名单提示——比普通说明更值得看一眼，但**不抢主按钮**
    （左侧一条强调色竖线 + 稍宽行距；桌面端不渲染这个元素） */

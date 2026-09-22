@@ -36,6 +36,8 @@ import { workspaceCopy } from '../../brand/copy'
 import { fileBaseName } from '../../store/saveSupport'
 import type { WorkspaceRecord } from '../../store/fileHandleDb'
 import { ToolIcon } from '../ToolIcon'
+// adj585（用户要求）：长说明收进可点击展开的 `?` 徽标（触屏也能看），不再常驻占高度
+import { HelpBadge } from '../HelpBadge'
 import {
   activateWorkspace,
   dedupeWorkspaceRecord,
@@ -842,12 +844,20 @@ export function WorkspacePanel() {
           {/* adj581（用户要求）：底栏各面板的内容标题统一样式——用**谱面页的行标题样式**
               （`.pcfg-group-title`，即设置→谱面里「纸张与边距」那种：强调色 + 加粗 + 左侧强调竖条 + 下边框）。
               `?` 放在标题元素**内部**：标题是 flex 容器 ⇒ 图标紧跟文字，而标题本身仍占满整行、
-              那条下边框与左侧竖条横贯整行（与「纸张与边距」观感一致）。 */}
+              那条下边框与左侧竖条横贯整行（与「纸张与边距」观感一致）。
+              adj585（用户要求）：说明**点 `?` 才展开**（PC 仍可悬浮）——手机端这些常驻说明
+              会占掉工作区清单的高度。用法与内核黑名单两条都收进这里，右栏只留一句短提示。 */}
           <div className="pcfg-group-title ws-choose-title">
             <span>{workspaceCopy.chooseTitle}</span>
-            <span className="help-badge" role="img" aria-label={workspaceCopy.blockedHint} title={workspaceCopy.blockedHint}>
-              ?
-            </span>
+            <HelpBadge
+              hint={
+                supportsPathWorkspace()
+                  ? workspaceCopy.chooseHint
+                  : [workspaceCopy.chooseHint, workspaceCopy.blockedHint]
+              }
+              // 带内核黑名单那条时用 adj568 的强调卡片样式（左竖条 + 淡底），一眼能分出"这条是限制"
+              hintClassName={supportsPathWorkspace() ? undefined : 'ws-blocked-hint'}
+            />
           </div>
           {ws && (needGrant || gone) && (
             <div className="ws-grant-dir" title={wsPathText}>
@@ -897,12 +907,10 @@ export function WorkspacePanel() {
                 })}
               </div>
             )}
-            {/* adj578（用户要求）："内核敏感目录黑名单"那条说明已收进标题后的 `?` 悬浮提示；
-                但**触屏没有 hover**（提示弹不出来）⇒ 触屏上仍直接显示这条，否则用户永远看不到。
-                同时也只在网页版有意义（桌面壳走原生选择器，不受这条 Web 策略约束，见 E-2026-271）。 */}
-            {!supportsPathWorkspace() && (
-              <div className="ws-grant-hint ws-blocked-hint help-hint-touch">{workspaceCopy.blockedHint}</div>
-            )}
+            {/* adj578（用户要求）："内核敏感目录黑名单"那条**长**说明已收进标题后的 `?`；
+                adj585（用户要求）：这里只留**一句短的**——"仅支持 Chromium 内核浏览器"，
+                位置也按用户说的挪到**「新工作区」按钮下方**（右栏），不再横在清单上方占高度。
+                只在网页版有意义（桌面壳走原生选择器，不受这条 Web 策略约束，见 E-2026-271）。 */}
             {needGrant && <div className="ws-grant-hint">{workspaceCopy.grantPathHint}</div>}
             {needGrant && <div className="ws-grant-hint">{workspaceCopy.grantWhy}</div>}
             {gone && <div className="ws-grant-hint">{workspaceCopy.dirMissingWhy}</div>}
@@ -934,6 +942,8 @@ export function WorkspacePanel() {
             >
               {workspaceCopy.openOther}
             </button>
+            {/* adj585（用户要求）：内核要求这句短提示**只**留在「新工作区」按钮下方 */}
+            {!supportsPathWorkspace() && <div className="ws-side-hint">{workspaceCopy.chromiumOnly}</div>}
           </div>
         </div>
       </div>
