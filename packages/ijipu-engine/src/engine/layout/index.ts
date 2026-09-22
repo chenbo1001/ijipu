@@ -416,6 +416,15 @@ interface MarkSlot {
   frac: number
   /** 拍首（前置占位）：该拍内容整体右移，记号画在空出的位置上 */
   lead: boolean
+  /**
+   * adj596（用户反馈：第二组末尾的 `&ykh` 与末小节线/附点重叠）：记号落在**小节内容的末尾**。
+   *
+   * 为什么单列一个判据：多声部块里小节线是**以"小节内容右端"为中心**画的
+   * （`lineX0 = 内容右端`，行末那根还会被钳到页边距），其墨迹会**向左伸**
+   * `barlineTotalW/2`（`:|` 这类反复线更宽）——末尾记号若紧贴内容右端，
+   * 就正好压在小节线上（用户截图）。所以末尾记号要为自己留出「小节线半宽 + 一点净距」。
+   */
+  atBarEnd: boolean
 }
 
 /**
@@ -436,10 +445,18 @@ function collectMarkSlots(seg: BarSeg, barStartB: number, barBeats: number, note
     const frac = Math.max(0, Math.min(1, beatAcc - k))
     out.push({
       token: t,
-      slot: { w: markBodyW(t.code, noteSize), beat: barStartB + k, frac, lead: frac < 1e-6 },
+      slot: { w: markBodyW(t.code, noteSize), beat: barStartB + k, frac, lead: frac < 1e-6, atBarEnd: frac >= 1 - 1e-6 },
     })
   }
   return out
+}
+
+/**
+ * adj596：小节内容末尾要留给「最后那根小节线」的净空 = 线的半宽 + 1px 净距。
+ * 末尾记号（`&ykh`/`&hx`）靠它避开小节线墨迹（用户截图：括号压在小节线与附点上）。
+ */
+function barEndPadOf(type: BarlineType | undefined): number {
+  return barlineTotalW(type ?? '|') / 2 + 1
 }
 
 /**
@@ -1969,7 +1986,21 @@ export function layoutScore(
     // adj276：每组占位独立计算（按本组最长注释宽；无注释小、有注释大），括号与其曲/词部紧凑、不与上一组对齐
     const maxNameLen = parts.reduce((mx, p) => Math.max(mx, p.name ? p.name.length : 0), 0)
     const labelPad = maxNameLen * m.noteSize * 0.72
-    const blockPad = labelPad + 14
+    /**
+     * adj597（用户反馈"多声部的大括号与声部之间还有一些空白，其间距可以缩小一些"）：
+     * 块首若以**拍首记号**（`&zkh` 等）开头，这个记号自己就会占出 `BRACKET_PAD` 宽的槽位
+     * （拍首前置占位，该拍内容整体右移）——若块级留白照旧，就变成
+     * 「大括号 →（空白 11px）→ 记号 → 音符」，比没有记号时多出一段看得见的空白。
+     * 所以块级留白按该槽位宽度扣回来：**记号填进原本空着的位置，音符相对大括号的位置不变**。
+     */
+    let firstLeadMarkW = 0
+    for (const p of parts) {
+      const seg0 = p.segs[0]
+      if (!seg0) continue
+      const lead = collectMarkSlots(seg0, 0, Math.max(1, Math.ceil(segBeats(seg0))), m.noteSize).find(({ slot }) => slot.lead)
+      if (lead) firstLeadMarkW = Math.max(firstLeadMarkW, lead.slot.w)
+    }
+    const blockPad = labelPad + 14 - firstLeadMarkW
     const blockStartX = config.margin_left + blockPad
     const blockAvailW = availW - blockPad
     const numBars = Math.max(...parts.map((p) => p.segs.length))
@@ -1987,12 +2018,8 @@ export function layoutScore(
       barBeats.push(mb)
       blockBeats += mb
     }
-    // 块级每小节间隔空间：统一所有声部（取该小节线上类型；|/ 不占位），保证纵向对齐
-    const gapSpaces: number[] = []
-    for (let b = 0; b < numBars - 1; b++) {
-      gapSpaces.push(barlinePad(m.noteSize))
-    }
-    const pads = BAR_PAD * 2 + gapSpaces.reduce((a, s) => a + s, 0)
+    // 块级每小节间隔空间与整体留白——**放在 barStartBeat 之后**算：
+    // adj596 的「末尾记号让位」要用到每小节起始拍（见下面的 `endMarkPad`）
     // adj250：多声部块改用拍级每拍宽（allocatePerBeats，与单声部 bars 行一致）——
     // 小节线按切分后的拍子位置排列（不是对行宽平均分割）；>3 小节两端分散对齐（撑满）
     // 各小节块内起始拍（整数，barBeats 已向上取整）
@@ -2004,6 +2031,38 @@ export function layoutScore(
         acc += barBeats[b]
       }
     }
+    /**
+     * adj596：每个小节的**末尾记号让位量**（该小节无末尾记号 = 0）。
+     *
+     * 背景（用户反馈）：第二组多声部末尾的 `&ykh` 与末小节线、附点叠在一起，而括号后面还有空。
+     * 成因：独立记号画在「小节内容右端」，而小节线正是**以"小节内容右端"为中心**画的
+     * （`lineX0 = 内容右端 + 后间隙/2`；行末那根后间隙为 0，还会被钳到页边距），
+     * 其墨迹向左伸 `barlineTotalW/2`——`:|` 这类反复终止线更宽 ⇒ 记号的墨迹正好压上去。
+     * 解法：**只把线推离**（记号与音符都不动，各声部记号仍纵向对齐）——
+     * 该小节内容与其小节线之间补一段间隙：行末那根用「尾间隙」，
+     * 中间那些用「加宽的小节间距」，两者都取 `2×endPad`，使线的中心恰好离内容右端 `endPad`。
+     */
+    const endMarkPad: number[] = []
+    for (let b = 0; b < numBars; b++) {
+      let pad = 0
+      for (const p of parts) {
+        const seg = p.segs[b]
+        if (!seg) continue
+        if (collectMarkSlots(seg, barStartBeat[b], barBeats[b], m.noteSize).some(({ slot }) => slot.atBarEnd)) {
+          pad = Math.max(pad, barEndPadOf(seg.bar?.type))
+        }
+      }
+      endMarkPad.push(pad)
+    }
+    // 块级每小节间隔空间：统一所有声部（取该小节线上类型；|/ 不占位），保证纵向对齐
+    // adj596：该小节以末尾记号收尾时按 `2×endPad` 加宽（只增不减）
+    const gapSpaces: number[] = []
+    for (let b = 0; b < numBars - 1; b++) {
+      gapSpaces.push(Math.max(barlinePad(m.noteSize), 2 * endMarkPad[b]))
+    }
+    /** 块级两端留白：两个 BAR_PAD + 各小节间距 + **末小节的行末尾间隙**（adj596） */
+    const lastTrailGap = 2 * (endMarkPad[numBars - 1] ?? 0)
+    const pads = BAR_PAD * 2 + gapSpaces.reduce((a, s) => a + s, 0) + lastTrailGap
     // 块内总拍 = Σ 每小节整数拍（barBeats 已向上取整）
     const totalBeats = blockBeats
     // ---- adj479：独立标记（&zkh/&ykh/&hx）的插位与「拍首前置占位」 ----
@@ -2125,7 +2184,8 @@ export function layoutScore(
       const sumGapSpaces = gapSpaces.reduce((a, s) => a + s, 0)
       const halfBarW = barlineTotalW('|') / 2
       const targetEndBarX = pages[pageIndex].width - config.margin_right - halfBarW
-      const targetBarSum = stretchBars ? Math.max(0, targetEndBarX - blockStartX - sumGapSpaces - BAR_PAD) : 0
+      // adj596：末小节线要离"小节内容右端" `endPad`（末尾记号让位）⇒ 内容右端相应左移 `endPad`
+      const targetBarSum = stretchBars ? Math.max(0, targetEndBarX - blockStartX - sumGapSpaces - BAR_PAD - lastTrailGap / 2) : 0
       const avStretch = stretchBars ? Math.max(0, targetBarSum - baseBarSum) : 0
       const s = totalSlots > 0 ? avStretch / totalSlots : 0
       /**
@@ -2362,6 +2422,9 @@ export function layoutScore(
             } else {
               // 拍中：右缘落在「本体游标 / 拍内时值比例位置」中较后者 → 前后元素都不重叠
               // （坐标相对该拍内容起点 = 拍起点 + 前置占位，与音符同一基准）
+              // adj596：落在小节末尾的记号不在这里让位——**让位的是末小节线**：
+              // 布局层给它加了「线半宽 + 净距」的尾间隙（见 MarkSlot.atBarEnd 与 `endPad`），
+              // 记号仍停在内容右端（各声部纵向对齐），线被推离。
               const cursor = beatCursor.get(kAbs) ?? 0
               const right = Math.max(cursor, slot.frac * (bodyPerBeat[kAbs] ?? 0))
               cx = beatX + markShift[kAbs] + right - slot.w / 2
@@ -2411,7 +2474,8 @@ export function layoutScore(
       // 小节宽度 = 拍宽累计（含拍间距）；小节线在小节内容右端 + 空间/2（与音符段 x 一致）
       const barWb = useSpace ? (mspBarRelW[b] ?? 0) : ((beatStartX[barStartBeat[b] + barBeats[b]] ?? 0) - (beatStartX[barStartBeat[b]] ?? 0))
       // adj315：与 xBar 推进用同一 gapSpaces（barlinePad），小节线 = 小节内容右端 + 半间距
-      const barToNextGap = b < numBars - 1 ? gapSpaces[b] : 0
+      // adj596：**末小节**改用「尾间隙」（末尾记号让位；无末尾记号时为 0，与旧行为一致）
+      const barToNextGap = b < numBars - 1 ? gapSpaces[b] : lastTrailGap
       const lineX0 = xBar + BAR_PAD + barWb + barToNextGap / 2
       barX[b] = r1(
         Math.min(

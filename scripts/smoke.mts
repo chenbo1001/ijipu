@@ -9652,6 +9652,83 @@ function runAdj594MeasureBeatsTests() {
   )
 }
 
+function runAdj596MixedRepeatAndEndMarkTests() {
+  console.log('[126] multi-voice group + :| playback order & trailing mark clearance (adj596)')
+  // ① 多声部组末尾的 `:|` 各声部都写了一遍（用户谱的写法）——
+  //    回跳必须发生在**整小节（各声部）都排完之后**，否则"第二组多声部只演奏第一声部"：
+  //    旧实现按行拼 seq，走查到 Q1 行末的 `:|` 就回跳，Q2 那一行要到下一遍才走到。
+  {
+    const src = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\nQ1: 5 5 5 5 :|\nQ2: 3 3 3 3 :|\n'
+    const r = parseJps(src)
+    const seq = buildPlaySequence(r, layoutScore(r, defaultPageConfig), 120)
+    const ev1 = seq.events.filter((e) => e.placed.id.voice === 1).sort((a, b) => a.atMs - b.atMs)
+    const ev2 = seq.events.filter((e) => e.placed.id.voice === 2).sort((a, b) => a.atMs - b.atMs)
+    check(
+      'adj596 多声部组末尾 `:|`：两遍**两个声部都演奏**（v1 = 单声部行+Q1 = 4 音×2 遍×2 行，v2 = 4 音×2 遍）',
+      ev1.length === 16 && ev2.length === 8,
+      `v1=${ev1.length} v2=${ev2.length}`,
+    )
+    check(
+      'adj596 第一遍：Q1（v1 第 5 个音）与 Q2 **同刻**起奏于 2000ms（接在单声部行之后）',
+      ev1[0]?.atMs === 0 && ev2[0]?.atMs === 2000 && ev1[4]?.atMs === 2000,
+      `v1[0]=${ev1[0]?.atMs} v1[4]=${ev1[4]?.atMs} v2[0]=${ev2[0]?.atMs}`,
+    )
+    check(
+      'adj596 第二遍：Q1（v1 第 13 个音）与 Q2 仍**同刻**起奏于 6000ms，不是"第二声部晚一整遍"',
+      ev1[12]?.atMs === 6000 && ev2[4]?.atMs === 6000,
+      `v1[12]=${ev1[12]?.atMs} v2[4]=${ev2[4]?.atMs}`,
+    )
+    check('adj596 全曲 = 4 小节 × 2000ms（两遍）= 8000ms', seq.totalMs === 8000, String(seq.totalMs))
+  }
+  // ② 末尾记号（`&ykh`）与**末小节线**的墨迹不得重叠：记号槽右缘要落在线的墨迹左缘之前
+  //   （4 小节才撑满行宽，与用户那份两块 4 小节的谱一致）
+  {
+    const src =
+      'V: 1.0\nB: t\nD: C\nP: 4/4\n' +
+      'Q1: &zkh 5 5 5 5 | 6 6 6 6 | 5 5 5 5 | 6 6 6 6 &ykh :|\n' +
+      'Q2: &zkh 3 3 3 3 | 2 2 2 2 | 3 3 3 3 | 2 2 2 2 &ykh :|\n'
+    const r = parseJps(src)
+    const page = layoutScore(r, defaultPageConfig).pages[0]
+    const ykh = page.brackets.filter((b) => b.code === 'ykh')
+    const lastBar = page.barlines.filter((b) => b.type === ':|')
+    const info = JSON.stringify({
+      ykh: ykh.map((b) => Math.round(b.x * 10) / 10),
+      lastBar: lastBar.map((b) => Math.round(b.x * 10) / 10),
+    })
+    check(
+      'adj596 末尾 `&ykh`（两声部）不再压在小节线上（记号右缘 < 线墨迹左缘）',
+      ykh.length === 2 &&
+        lastBar.length === 2 &&
+        ykh.every((bk) => {
+          const bar = lastBar.find((b) => b.id.voice === bk.voice)
+          return bar !== undefined && bk.x + bk.width / 2 <= bar.x - barlineTotalW(bar.type) / 2
+        }),
+      info,
+    )
+    check(
+      'adj596 末小节线仍在页边距内（让位不代表越界）',
+      lastBar.every((b) => b.x + barlineTotalW(b.type) / 2 <= 595.28 - defaultPageConfig.margin_right + 0.1),
+      info,
+    )
+  }
+  // ③ 没有末尾记号的小节**不受影响**：末小节线照旧贴到页边距（不给既有谱面添乱）
+  {
+    const r = parseJps(
+      'V: 1.0\nB: t\nD: C\nP: 4/4\n' +
+        'Q1: 5 5 5 5 | 6 6 6 6 | 5 5 5 5 | 6 6 6 6 :|\n' +
+        'Q2: 3 3 3 3 | 2 2 2 2 | 3 3 3 3 | 2 2 2 2 :|\n',
+    )
+    const page = layoutScore(r, defaultPageConfig).pages[0]
+    const lastBar = page.barlines.filter((b) => b.type === ':|')
+    const expect = 595.28 - defaultPageConfig.margin_right - barlineTotalW(':|') / 2
+    check(
+      'adj596 无末尾记号时末小节线仍贴页边距（既有版面零位移）',
+      lastBar.length === 2 && lastBar.every((b) => Math.abs(b.x - expect) < 0.6),
+      JSON.stringify(lastBar.map((b) => Math.round(b.x * 10) / 10)) + ` 期望≈${Math.round(expect * 10) / 10}`,
+    )
+  }
+}
+
 async function runAdj541DockToggleTests() {
   console.log('[123] dock expand/collapse entries (adj541)')
   const editorSrc = String(readFileSync('src/editor/EditorPane.tsx', 'utf8'))
@@ -11071,6 +11148,14 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj594 小节时值校验用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj596MixedRepeatAndEndMarkTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj596 多声部反复/末尾记号用例抛异常', e)
     }
   })
   .then(() => {
