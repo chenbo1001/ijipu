@@ -46,6 +46,7 @@ import {
   forgetWorkspace,
   getWorkspace,
   indexScopeKey,
+  isJpsName,
   isPathWorkspace,
   isWorkspaceAvailable,
   joinPath,
@@ -169,6 +170,11 @@ export function WorkspacePanel() {
   const indexKeyRef = useRef<string | null>(null)
   /** adj546/adj588：扫描进度（让 UI 边扫边显示，不再干等）；"是否在扫"由 `scanPromiseRef` 判断 */
   const [scanInfo, setScanInfo] = useState<{ scanned: number; found: number; ms: number } | null>(null)
+  /**
+   * adj589：当前内存索引的**时间戳**（落盘索引的 `at` 或本次扫描完成时刻）——
+   * 决定"打开面板时要不要空闲重扫"（见 `ensureIndexFresh`）。
+   */
+  const indexAtRef = useRef(0)
   /** 索引版本号：索引内容变化（载入缓存/扫描进度/重扫完成）就 +1，驱动过滤重新计算 */
   const [indexVersion, setIndexVersion] = useState(0)
 
@@ -294,6 +300,86 @@ export function WorkspacePanel() {
     },
     [runScan, scheduleIdleScan],
   )
+
+  /**
+   * adj589：**打开面板时就把索引准备好**（内存里没有就先装落盘的；缺失/过期就**空闲时**扫起来）。
+   *
+   * 为什么：用户实测"27 秒 → 20 秒"，那 20 秒就是他**第一次按 `*`** 时的那次整树扫描。
+   * 把它挪到"打开工作区面板"之后的空闲时段 ⇒ 多数情况下用户点 `*` 时索引已经就绪（秒开），
+   * 最坏也只是"边看文件列表边在后台扫"，而不是"点下去之后干等"。
+   * 找不到索引就**不 pretend**：照样显示进度，并在扫到一半时给出渐进结果（adj588）。
+   */
+  const ensureIndexFresh = useCallback(
+    async (rec: WorkspaceRecord): Promise<void> => {
+      const key = indexScopeKey(rec)
+      const memFresh =
+        !!indexRef.current && indexKeyRef.current === key && Date.now() - indexAtRef.current <= INDEX_STALE_MS
+      if (memFresh) return
+      if (!indexRef.current || indexKeyRef.current !== key) {
+        const cached = await loadWorkspaceIndex(rec.id, '')
+        if (cached && cached.relPaths.length > 0) {
+          indexRef.current = cached.relPaths.map((relPath) => {
+            const segs = relPath.split('/')
+            return { name: segs[segs.length - 1], relPath, dirSegs: segs.slice(0, -1) }
+          })
+          indexKeyRef.current = key
+          indexAtRef.current = cached.at ?? 0
+          idxMetaRef.current = { truncated: false, blocked: [] }
+          setIndexVersion((v) => v + 1)
+          // 落盘索引够新鲜就直接用；过期才**空闲时**重扫（不占用户当前这一下）
+          if (Date.now() - (cached.at ?? 0) > INDEX_STALE_MS) scheduleIdleScan(rec, rec.id)
+          return
+        }
+      }
+      // 内存、落盘都没有（或内存那份已过期）⇒ 空闲时先把整树扫起来，用户待会儿一过滤就是秒开
+      scheduleIdleScan(rec, rec.id)
+    },
+    [scheduleIdleScan],
+  )
+
+  /**
+   * adj589（用户反馈"写操作之后还得整棵重扫一遍"）：**把"刚列出来的这一层"并回过滤索引**。
+   *
+   * 写操作（改名/另存/新建谱/移动/删除）之后，此前一律 `invalidateCache()` 丢掉整棵索引 ⇒
+   * 下一次过滤要么吃旧快照、要么整树重扫（真机 20s 量级）。而写操作**只会改动当前这一层**，
+   * 且 `refresh()` 紧接着就会拿到这一层的最新列表 ⇒ 直接拿它**局部替换**索引里这一层的命中即可：
+   * 零额外 IO、结果立刻正确、整树索引仍然有效。
+   * `persist=true` 时才落盘（导航时也走这里，但导航不该写 IndexedDB——Android 上一次 20-50ms）。
+   */
+  const patchIndexDir = useCallback(
+    (rec: WorkspaceRecord, dirSegs: readonly string[], list: DirEntry[], persist: boolean): void => {
+      const idx = indexRef.current
+      if (!idx) return
+      const prefix = joinPath(dirSegs)
+      const withSep = prefix ? `${prefix}/` : ''
+      // 只替换"本层文件"的命中（子目录里的命中不归这一层管）
+      const atThisLevel = (relPath: string): boolean =>
+        relPath.startsWith(withSep) && !relPath.slice(withSep.length).includes('/')
+      const next = idx.filter((h) => !atThisLevel(h.relPath))
+      for (const e of list) {
+        if (e.kind !== 'file' || !isJpsName(e.name)) continue
+        next.push({ name: e.name, relPath: joinPath([...dirSegs, e.name]), dirSegs: [...dirSegs] })
+      }
+      indexRef.current = next
+      indexAtRef.current = Date.now()
+      setIndexVersion((v) => v + 1)
+      if (persist) {
+        void saveWorkspaceIndex({ wsId: rec.id, from: '', at: Date.now(), relPaths: next.map((h) => h.relPath) })
+      }
+    },
+    [],
+  )
+
+  /** adj589：删除**目录**时把该子树下的命中一并摘掉（`patchIndexDir` 只管本层） */
+  const dropIndexSubtrees = useCallback((rec: WorkspaceRecord, dirs: readonly string[][]): void => {
+    const idx = indexRef.current
+    if (!idx || dirs.length === 0) return
+    const prefixes = dirs.map((d) => `${joinPath(d)}/`)
+    indexRef.current = idx.filter((h) => !prefixes.some((p) => h.relPath.startsWith(p)))
+    indexAtRef.current = Date.now()
+    setIndexVersion((v) => v + 1)
+    void saveWorkspaceIndex({ wsId: rec.id, from: '', at: Date.now(), relPaths: indexRef.current.map((h) => h.relPath) })
+  }, [])
   /**
    * adj540（用户要求）：右侧**只留一个下拉按钮**「操作」——点它**弹出菜单**再选具体操作。
    * 为什么必须用 portal：dock 容器是 `overflow: hidden`，就地展开的浮层会被裁掉
@@ -420,16 +506,27 @@ export function WorkspacePanel() {
    */
   const invalidateCache = useCallback(() => {
     entriesCacheRef.current.clear()
-    indexRef.current = null // adj543：写操作后过滤索引也作废，下次过滤重建
-    indexKeyRef.current = null // adj580：索引的**归属**（哪个工作区）也一起作废
+    /**
+     * adj589（用户反馈"写操作之后还得整棵重扫"）：**不再丢掉过滤索引**——索引是整棵树的，
+     * 而写操作只改动当前这一层，`refresh()` 拿到新列表后会由 `patchIndexDir()` **局部替换**那一层；
+     * 整树索引因此一直有效 ⇒ 改完名/删完文件再按 `*` 依然是秒开（此前是"丢索引 → 整树重扫 20s"，
+     * 或者"吃旧快照、新文件看不见"）。
+     * 打开面板/切工作区也走这里：前者由 `ensureIndexFresh()` 决定要不要空闲重扫，
+     * 后者靠 `indexKeyRef` 与 `wsId` 天然隔离（换工作区不会复用旧索引）。
+     */
     // adj588：正在跑的扫描作废（代际 +1）——否则"扫描期间改名/删除"的结果会被写回索引。
     // 这里**只动 ref、不 setState**：`invalidateCache` 进了 `refresh` 的依赖链，
     // 在里面 setState 会把"渲染 → effect → setState"重新引回来（E-2026-249 那个无限刷新循环）。
     scanGenRef.current += 1
   }, [])
-  /** 列目录（带缓存——同一路径再次访问直接走缓存，避免每次都打 IndexedDB / FSA） */
+  /**
+   * 列目录（带缓存——同一路径再次访问直接走缓存，避免每次都打 IndexedDB / FSA）。
+   * adj589：返回这一次真正用到的列表（缓存命中就返回缓存），供写操作之后**局部更新过滤索引**
+   * （`patchIndexDir`）；同时**每次拿到新列表都顺手把索引里这一层对齐**（零额外 IO、
+   * 记不记盘由 `persistIndex` 决定：导航不写盘，写操作写盘）。
+   */
   const refresh = useCallback(
-    async (rec: WorkspaceRecord, next: string[], label?: string) => {
+    async (rec: WorkspaceRecord, next: string[], label?: string, persistIndex = false): Promise<DirEntry[]> => {
       setBusy(true)
       setBusyLabel(label ?? workspaceCopy.refreshing) // adj547：立刻给出"在忙什么"
       const key = joinPath(next)
@@ -448,7 +545,8 @@ export function WorkspacePanel() {
         setConfirmDel(null)
         setBusy(false)
         setBusyLabel(null)
-        return
+        patchIndexDir(rec, next, cached, persistIndex)
+        return cached
       }
       try {
         const list = await readDirEntries(rec, next)
@@ -461,16 +559,19 @@ export function WorkspacePanel() {
         // adj548（用户反馈）：**进入目录就记住位置**——不能在关闭时才记：底栏收起/切页签时
         // 面板是直接卸载的，关闭分支跑不到，重开就永远回到根目录。
         void rememberWorkspacePath(next)
+        patchIndexDir(rec, next, list, persistIndex)
+        return list
       } catch (e) {
         const reason = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
         showNotice(workspaceCopy.loadFailed(reason), 'error')
         setEntries([])
+        return []
       } finally {
         setBusy(false)
         setBusyLabel(null)
       }
     },
-    [showNotice],
+    [showNotice, patchIndexDir],
   )
   /**
    * adj550（用户要求，**一条规则**）：**进入工作区 ⇒ 定位到该工作区的最新位置**。
@@ -523,9 +624,11 @@ export function WorkspacePanel() {
       const rec = await getWorkspace()
       if (!alive) return
       setWs(rec)
-      // adj543：每次打开面板都让过滤索引作废——期间用户可能在别的 App 里增删过文件
       // adj576：顺手把**目录列表缓存**也清掉（它同理可能过期：用户在别的程序里增删过文件）
+      // adj589：过滤索引**不再在这里丢掉**——改为交给 `ensureIndexFresh()`：内存里没有就装落盘的
+      //（第一次过滤即秒开），缺失或过期才**空闲时**重扫。这样"打开面板"不再等于"下次过滤要等 20s"。
       invalidateCache()
+      if (rec) await ensureIndexFresh(rec)
       // adj544：读最近工作区列表（供"一键切回"），并尝试恢复绑定（权限已授予时）
       setRecent(await listWorkspaces())
       await resolvePendingBinding()
@@ -548,7 +651,7 @@ export function WorkspacePanel() {
       // adj550：面板卸载时把"待写的目录位置"立刻落盘（刚进完目录就收起底栏/关页面也不丢）
       flushWorkspacePath()
     }
-  }, [active, refresh, showNotice, enterAtLatestPos, invalidateCache])
+  }, [active, refresh, showNotice, enterAtLatestPos, invalidateCache, ensureIndexFresh])
 
   const onPick = async () => {
     if (!isWorkspaceAvailable()) {
@@ -705,13 +808,14 @@ export function WorkspacePanel() {
     if (!ws || !edit) return
     const value = edit.value.trim()
     if (!value) return
+    // adj589：写操作只作废**目录列表缓存**（过滤索引保留，随后由 `refresh` 的局部对齐更新那一层）
     invalidateCache() // adj540：写操作 ⇒ 列表缓存先作废（否则刷新时吃到旧列表）
     const segsOf = (raw: string): string[] => [...path, `${stripJpsExt(raw)}.jps`]
     if (edit.kind === 'rename' && edit.name) {
       const ok = await renameWorkspaceFile(path, edit.name, `${stripJpsExt(value)}.jps`)
       if (ok) {
         setEdit(null)
-        await refresh(ws, path)
+        await refresh(ws, path, undefined, true) // adj589：改名 ⇒ 索引这一层对齐并落盘
       }
       return
     }
@@ -723,7 +827,7 @@ export function WorkspacePanel() {
         // 不再停在父目录让用户再点一次进去——空目录的 "当前目录为空" 占位 + 操作▾的
         // 「新建」/「另存」都立即可用，省一次手动导航。`refresh` 内部走 `resolveDir`
         // 按 segs 走到底层 `getDirectoryHandle`，新建的目录句柄即时生效。
-        await refresh(ws, [...path, value])
+        await refresh(ws, [...path, value], undefined, true)
       }
       return
     }
@@ -731,7 +835,7 @@ export function WorkspacePanel() {
       const ok = await saveToWorkspace(segsOf(value))
       if (ok) {
         setEdit(null)
-        await refresh(ws, path)
+        await refresh(ws, path, undefined, true) // adj589：另存 ⇒ 新文件进索引
       }
       return
     }
@@ -739,7 +843,7 @@ export function WorkspacePanel() {
     const ok = await newWorkspaceScore(segsOf(value))
     if (ok) {
       setEdit(null)
-      await refresh(ws, path)
+      await refresh(ws, path, undefined, true)
     }
   }
 
@@ -754,7 +858,7 @@ export function WorkspacePanel() {
     const bind = useDocStore.getState().binding
     if (bind && bind.wsId === ws.id) {
       await saveFile()
-      await refresh(ws, path)
+      await refresh(ws, path, undefined, true) // adj589：写回 ⇒ 索引这一层对齐并落盘
       return
     }
     if (bind && bind.wsId !== ws.id) {
@@ -775,11 +879,12 @@ export function WorkspacePanel() {
 
   const submitMove = async () => {
     if (!ws || !moving) return
+    // adj589：移动只影响**当前这一层**（源与目标都在当前目录）⇒ 不丢索引，随后局部对齐
     invalidateCache() // adj540：移动会改动源目录与目标目录两处列表
     const ok = await moveWorkspaceFiles(moving.list, path)
     if (ok) {
       setMoving(null)
-      await refresh(ws, path)
+      await refresh(ws, path, undefined, true)
     }
   }
 
@@ -802,9 +907,14 @@ export function WorkspacePanel() {
     setBusy(true)
     try {
       invalidateCache() // adj540：删除后列表缓存作废
+      const deletedDirs = confirmDel.items.filter((it) => it.kind === 'dir').map((it) => it.segs)
       const ok = await deleteWorkspaceEntries(confirmDel.items)
       setConfirmDel(null)
-      if (ok) await refresh(ws, path)
+      if (ok) {
+        // adj589：删掉的**目录**要把整棵子树的命中摘掉（本层文件的增删由 refresh 的局部对齐负责）
+        if (deletedDirs.length > 0) dropIndexSubtrees(ws, deletedDirs)
+        await refresh(ws, path, undefined, true)
+      }
     } finally {
       setBusy(false)
     }

@@ -9027,8 +9027,10 @@ async function runAdj540WorkspaceTests() {
       !/dirCreated:\s*\(n: string\): string => `已新建文件夹/.test(copySrc),
     '')
   // ② 行为：创建完成后**自动进入**新目录（用 path 的 spread 形式，与 `resolveDir` 的 segs 同型）
-  check('adj558 提交"新建目录"后 `refresh` 的目标路径 = `[...path, value]`（自动进入新目录，不再停在父目录）',
-    /if \(edit\.kind === 'newFolder'\) \{[\s\S]{0,300}?await createWorkspaceDir\(path, value\)[\s\S]{0,300}?await refresh\(ws, \[\.\.\.path, value\]\)/.test(panelSrc),
+  check('adj558/adj589 提交"新建目录"后 `refresh` 的目标路径 = `[...path, value]`（自动进入新目录，不再停在父目录）',
+    /if \(edit\.kind === 'newFolder'\) \{[\s\S]{0,300}?await createWorkspaceDir\(path, value\)[\s\S]{0,300}?await refresh\(ws, \[\.\.\.path, value\], undefined, true\)/.test(
+      panelSrc,
+    ),
     '')
   // ③ 行为：刷新父目录时**新目录要能被列出来**——根因级测试，确保 `createSubdir` 之后
   // `readDirEntries` 立刻看到新增条目（不是依赖缓存或下一次 re-mount）。
@@ -9162,6 +9164,50 @@ async function runAdj540WorkspaceTests() {
       preferErr || detail,
     )
   }
+
+  // ---- adj589（用户实测"27 秒 → 20 秒"，剩下的 20s 是"第一次过滤时那次整树扫描"）----
+  check('adj589 写操作**不再丢掉整棵索引**：只作废目录列表缓存，索引由 `refresh` 局部对齐那一层',
+    // `invalidateCache` 里不再把 indexRef/indexKeyRef 清空（只剩"清列表缓存 + 代际 +1"）
+    !/invalidateCache = useCallback\(\(\) => \{[\s\S]{0,1400}?indexRef\.current = null/.test(panelSrc) &&
+      /scanGenRef\.current \+= 1/.test(panelSrc) &&
+      // 局部对齐：`patchIndexDir` 替换"本层文件"的命中（子目录的命中不动），并可选落盘
+      /const patchIndexDir = useCallback\(/.test(panelSrc) &&
+      /const atThisLevel = \(relPath: string\): boolean =>[\s\S]{0,160}?!relPath\.slice\(withSep\.length\)\.includes\('\/'\)/.test(
+        panelSrc,
+      ) &&
+      /if \(persist\) \{[\s\S]{0,200}?saveWorkspaceIndex\(\{ wsId: rec\.id, from: '', at: Date\.now\(\), relPaths: next\.map/.test(
+        panelSrc,
+      ) &&
+      // 删目录时摘掉整棵子树（本层对齐管不到它）
+      /const dropIndexSubtrees = useCallback\(\(rec: WorkspaceRecord, dirs: readonly string\[\]\[\]\): void => \{/.test(
+        panelSrc,
+      ) &&
+      /const deletedDirs = confirmDel\.items\.filter\(\(it\) => it\.kind === 'dir'\)/.test(panelSrc) &&
+      // 写操作那几条路径都带上 persistIndex=true（索引落盘，重开面板也是新的）
+      [
+        /renameWorkspaceFile\(path, edit\.name[\s\S]{0,200}?await refresh\(ws, path, undefined, true\)/,
+        /saveToWorkspace\(segsOf\(value\)\)[\s\S]{0,200}?await refresh\(ws, path, undefined, true\)/,
+        /newWorkspaceScore\(segsOf\(value\)\)[\s\S]{0,200}?await refresh\(ws, path, undefined, true\)/,
+        /await saveFile\(\)[\s\S]{0,120}?await refresh\(ws, path, undefined, true\)/,
+        /moveWorkspaceFiles\(moving\.list, path\)[\s\S]{0,200}?await refresh\(ws, path, undefined, true\)/,
+      ].every((re) => re.test(panelSrc)),
+    '')
+  check('adj589 打开面板就把索引准备好：内存没有装落盘的、缺失/过期才**空闲时**扫（不再等第一次过滤才扫）',
+    /const ensureIndexFresh = useCallback\(/.test(panelSrc) &&
+      /const memFresh =\s*\n?\s*!!indexRef\.current && indexKeyRef\.current === key && Date\.now\(\) - indexAtRef\.current <= INDEX_STALE_MS/.test(
+        panelSrc,
+      ) &&
+      /const cached = await loadWorkspaceIndex\(rec\.id, ''\)/.test(panelSrc) &&
+      /scheduleIdleScan\(rec, rec\.id\)/.test(panelSrc) &&
+      // 面板激活时调用它（且索引**不在**那里被丢掉）
+      /if \(rec\) await ensureIndexFresh\(rec\)/.test(panelSrc),
+    '')
+  check('adj589 并发默认 **8**（延迟受限实测的最佳点；上限 16）——依据是 5616 条目的注入延迟基准',
+    /const concurrency = Math\.max\(1, Math\.min\(16, options\.concurrency \?\? 8\)\)/.test(wsSrc) &&
+      // 注释里留下"两种基准结论不同"的原因，避免以后又被 CPU 受限的基准带偏
+      /延迟受限时并发才有意义/.test(wsSrc) &&
+      /CPU 受限时多了只是增加切换开销/.test(wsSrc),
+    '')
   check('adj588（用户反馈"手机上 `*` 过滤还是有点长"）索引**按工作区一份**（不再按目录分）+ 作用域靠纯函数前缀裁剪',
     // ① 作用域键只剩工作区身份 ⇒ 进子目录不会换作用域、不会重扫
     indexScopeKey({ id: 'w1' } as never) === 'w1' &&
@@ -9590,8 +9636,8 @@ async function runAdj541DockToggleTests() {
   // adj546：用户实测「5550 文件 / 117 目录，`*` 过滤 27 秒」。FSA 每条都要跟浏览器进程往返一次
   // （手机上约 5ms）⇒ **串行枚举=延迟叠加**。三条对症措施：
   //   ① 并发枚举目录（默认 4 路，把往返延迟重叠）② `.开头的条目直接跳过且不下钻` ③ 边扫边出 + 落盘索引
-  check('adj546 性能：目录**并发枚举**（把 FSA 每次往返的延迟重叠），`. 开头`的条目**跳过且不下钻**',
-    /const concurrency = Math\.max\(1, Math\.min\(8, options\.concurrency \?\? 4\)\)/.test(wsSrc) &&
+  check('adj546/adj589 性能：目录**并发枚举**（把 FSA 每次往返的延迟重叠；默认 8、上限 16），`. 开头`的条目**跳过且不下钻**',
+    /const concurrency = Math\.max\(1, Math\.min\(16, options\.concurrency \?\? 8\)\)/.test(wsSrc) &&
       /Array\.from\(\{ length: concurrency \}, \(\) => worker\(\)\)/.test(wsSrc) &&
       // 隐藏项判定放在 scanned++ **之前**（连扫描计数都不占），且 continue 不下钻
       /if \(isHiddenName\(h\.name\)\) continue[\s\S]{0,200}?scanned\+\+/.test(wsSrc) &&
@@ -9684,12 +9730,14 @@ async function runAdj541DockToggleTests() {
   // 使 `refresh` 每次渲染都变 ⇒ 依赖它的"面板激活"effect 每渲染重跑 ⇒ setState ⇒ 再渲染……
   // 断言要点：**进依赖的必须是稳定引用**（useCallback([]) / ref / store action）。
   check('adj540 面板不会无限刷新（E-2026-249）：`invalidateCache` 用 useCallback([]) 固定、`refresh` 依赖只有稳定项、激活 effect 依赖全是稳定引用',
-    /const invalidateCache = useCallback\(\(\) => \{[\s\S]{0,700}?\}, \[\]\)/.test(wsPanelSrc) &&
+    /const invalidateCache = useCallback\(\(\) => \{[\s\S]{0,1400}?\}, \[\]\)/.test(wsPanelSrc) &&
       !/\[showNotice, invalidateCache\]/.test(wsPanelSrc) &&
-      // refresh 的依赖数组里只有 showNotice（store action，稳定引用）
-      /\[\s*showNotice,?\s*\]/.test(wsPanelSrc) &&
-      // 激活 effect：active / refresh / showNotice / enterAtLatestPos / invalidateCache —— 都是稳定引用或布尔量
-      /\}, \[active, refresh, showNotice, enterAtLatestPos, invalidateCache\]\)/.test(wsPanelSrc) &&
+      // refresh 的依赖数组里只有两个**稳定引用**（store action + useCallback([]) 的 patchIndexDir）
+      /\[\s*showNotice, patchIndexDir\s*\]/.test(wsPanelSrc) &&
+      /const patchIndexDir = useCallback\([\s\S]*?\n    \[\],\n  \)/.test(wsPanelSrc) &&
+      // 激活 effect：active / refresh / showNotice / enterAtLatestPos / invalidateCache / ensureIndexFresh
+      // —— 全是稳定引用或布尔量（adj589 新增的 `ensureIndexFresh` 也是 useCallback 链上的稳定引用）
+      /\}, \[active, refresh, showNotice, enterAtLatestPos, invalidateCache, ensureIndexFresh\]\)/.test(wsPanelSrc) &&
       // 关闭面板时写路径记忆走 ref，不把 `path` 塞进依赖（否则每次导航都会重跑 effect）
       /rememberWorkspacePath\(pathRef\.current\)/.test(wsPanelSrc),
     '')

@@ -280,7 +280,16 @@ export async function searchWorkspaceJps(
   const maxDepth = options.maxDepth ?? 10
   const maxEntries = options.maxEntries ?? 5000
   const maxHits = options.maxHits ?? 500
-  const concurrency = Math.max(1, Math.min(8, options.concurrency ?? 4))
+  /**
+   * adj589：并发默认 **4 → 8**（上限 8 → 16），依据是**延迟受限**模型下的实测（真机 FSA 手机上约 5ms/条，
+   * 117 目录 × 47 文件 = 5616 条目、每条注入 5ms）：串行 32331ms，并发 2 / 4 / 6 / 8 / 12 / 16 =
+   * 16616 / 8732 / 6077 / 4702 / 4713 / 4726ms ⇒ **8 是最佳点（比 4 快 1.86 倍），12 起进入平台期**。
+   *
+   * ⚠ 与 adj546 的 OPFS 基准（0.15ms/条、CPU 受限）结论**不同**：那里 4 已到平台期、8 甚至略慢。
+   * 差别在瓶颈：**延迟受限时并发才有意义**（把往返重叠），CPU 受限时多了只是增加切换开销。
+   * 手机 FSA 是前者，所以默认取 8；桌面（本地快盘/路径后端）有 16 的上限可调，且差别在 ±20% 噪声内。
+   */
+  const concurrency = Math.max(1, Math.min(16, options.concurrency ?? 8))
   const hits: SearchHit[] = []
   let scanned = 0
   let truncated = false
