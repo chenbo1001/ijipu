@@ -16,6 +16,10 @@ import { useDocStore, type ViewType } from '../store/docStore'
 import { useUiStore, PREVIEW_ZOOM_RANGE, PREVIEW_ZOOM_STEP, PREVIEW_ZOOM_LIMITS } from '../store/uiStore'
 import { clampEditorFontSize, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE } from '@ijipu/engine'
 import { pasteImportCopy, numCopy, workspaceCopy } from '../brand/copy'
+// adj614：深浅模式的循环表（顶栏「深浅模式」按钮与 `Ctrl+T` 共用一份，见 `nextThemeMode`）
+import { nextThemeMode } from '../brand/themes'
+// adj617（用户要求）：快捷键提示的唯一出处——菜单 kbd 角标与顶栏/底栏/浮动栏的 title 都引它
+import { KBD, withKbd } from '../brand/shortcuts'
 // adj540：「打开/另存为」要按平台分流（**手机端以工作区优先**）并判断"是否已设工作区"
 import { isCoarsePointerDevice } from '../store/saveSupport'
 import { getWorkspace, isWorkspaceAvailable } from '../store/workspace'
@@ -295,6 +299,8 @@ export function TopBar() {
     guides: {
       key: 'guides',
       label: '排版',
+      // adj617（用户要求）：按钮提示文本后面带上快捷键（键名只在 `brand/shortcuts.ts` 定义一次）
+      title: withKbd('排版辅助虚线', KBD.guides),
       kind: 'btn',
       active: showGuides,
       onPick: () => setShowGuides(!showGuides),
@@ -306,6 +312,7 @@ export function TopBar() {
     playback: {
       key: 'playback',
       label: '试听',
+      title: withKbd('试听播放', KBD.tryout),
       kind: 'btn',
       active: dockOpen && dockPanel === 'tryout',
       onPick: () => toggleDock('tryout'),
@@ -314,6 +321,7 @@ export function TopBar() {
     export: {
       key: 'export',
       label: '导出',
+      title: withKbd('导出', KBD.export),
       kind: 'btn',
       active: dockOpen && dockPanel === 'export',
       onPick: () => toggleDock('export'),
@@ -344,6 +352,7 @@ export function TopBar() {
     autoWrap: {
       key: 'autoWrap',
       label: '折行',
+      title: withKbd('自动折行', KBD.wrap),
       kind: 'btn',
       active: autoWrap,
       onPick: () => setAutoWrap(!autoWrap),
@@ -351,6 +360,7 @@ export function TopBar() {
     scriptPad: {
       key: 'scriptPad',
       label: '输入条',
+      title: withKbd('简谱输入条', KBD.pad),
       kind: 'btn',
       active: showScriptPad,
       onPick: () => setShowScriptPad(!showScriptPad),
@@ -590,7 +600,7 @@ export function TopBar() {
               setOverflowOpen(false)
               setViewOpen((v) => !v)
             }}
-            title="切换视图"
+            title={withKbd('切换视图（点击选）', KBD.view)}
             aria-label="切换视图"
             aria-expanded={viewOpen}
           >
@@ -622,20 +632,17 @@ export function TopBar() {
           type="button"
           className="topbar-btn topbar-theme-mode"
           onClick={() => {
-            const next: Record<typeof themeMode, typeof themeMode> = {
-              auto: 'light',
-              light: 'dark',
-              dark: 'auto',
-            }
-            setThemeMode(next[themeMode])
+            // adj614：循环表挪进 `brand/themes.ts` 的 `nextThemeMode()`（`Ctrl+T` 也用同一份）
+            setThemeMode(nextThemeMode(themeMode))
           }}
-          title={
+          title={withKbd(
             themeMode === 'auto'
               ? '深浅模式：随系统（点击切到浅色）'
               : themeMode === 'light'
                 ? '深浅模式：浅色（点击切到深色）'
-                : '深浅模式：深色（点击切到随系统）'
-          }
+                : '深浅模式：深色（点击切到随系统）',
+            KBD.theme,
+          )}
           aria-label={
             themeMode === 'auto'
               ? '深浅模式 当前为随系统，点击切到浅色'
@@ -1127,18 +1134,24 @@ export function TopBar() {
   //  · 续（用户要求"窄屏菜单可以更简化，主要操作以工作区操作按钮为主"）：连「新建」「保存」也收进面板
   //    —— 工作区面板里已有 新建（空谱）/ 保存 / 另存，菜单只留平台无关的入口：
   //    工作区 / 打开示例 / 粘贴源码导入 / 试听播放 / 导出。
-  const entryNew: MenuEntry = { label: '新建(&N)', kbd: 'Ctrl+N', hotkey: 'n', onPick: newDoc }
-  const entryOpen: MenuEntry = { label: '打开(&O)…', kbd: 'Ctrl+O', hotkey: 'o', onPick: runOpenSmart }
+  const entryNew: MenuEntry = { label: '新建(&N)', kbd: KBD.newDoc, hotkey: 'n', onPick: newDoc }
+  const entryOpen: MenuEntry = { label: '打开(&O)…', kbd: KBD.openDoc, hotkey: 'o', onPick: runOpenSmart }
   const entryOpenSystem: MenuEntry = { label: workspaceCopy.openSystemLabel, onPick: runOpen }
   const entrySamples: MenuEntry = { label: '打开示例(&E)…', hotkey: 'e', onPick: () => openModal('samples') }
-  const entryPaste: MenuEntry = { label: pasteImportCopy.menuLabel, hotkey: 'v', onPick: () => toggleDock('import') }
-  const entrySave: MenuEntry = { label: '保存(&S)', kbd: 'Ctrl+S', hotkey: 's', onPick: runSaveSmart }
+  const entryPaste: MenuEntry = { label: pasteImportCopy.menuLabel, kbd: KBD.import, hotkey: 'v', onPick: () => toggleDock('import') }
+  const entrySave: MenuEntry = { label: '保存(&S)', kbd: KBD.save, hotkey: 's', onPick: runSaveSmart }
   const entrySaveAs: MenuEntry = { label: '另存为(&A)…', hotkey: 'a', onPick: runSaveAsSmart }
-  const entryWorkspace: MenuEntry = { label: workspaceCopy.menuLabel, hotkey: 'w', onPick: () => toggleDock('workspace') }
-  const entryTryout: MenuEntry = { label: '试听播放(&P)', kbd: 'Ctrl+Q', hotkey: 'p', onPick: () => toggleDock('tryout') }
-  const entryExport: MenuEntry = { label: '导出(&X)…', hotkey: 'x', onPick: () => toggleDock('export') }
+  const entryWorkspace: MenuEntry = { label: workspaceCopy.menuLabel, kbd: KBD.workspace, hotkey: 'w', onPick: () => toggleDock('workspace') }
+  const entryTryout: MenuEntry = { label: '试听播放(&P)', kbd: KBD.tryout, hotkey: 'p', onPick: () => toggleDock('tryout') }
+  /**
+   * adj615（用户要求）：`Ctrl+O` 从「打开文件」改挂**导出开关**（用户口径"让 Ctrl+O 响应导出开关操作"）
+   * ⇒ `entryOpen` 不再显示 `Ctrl+O` 这个 kbd（否则菜单在说谎）；打开文件仍可用菜单项 / 顶栏按钮。
+   */
+  const entryExport: MenuEntry = { label: '导出(&X)…', kbd: KBD.export, hotkey: 'x', onPick: () => toggleDock('export') }
+  /** adj615（用户要求）：菜单里**紧跟在「导出」下面**加「打印」（打开打印对话框打印当前谱面） */
+  const entryPrint: MenuEntry = { label: '打印(&D)…', kbd: KBD.print, hotkey: 'd', onPick: () => useDocStore.getState().printScore() }
   const fileEntries: (MenuEntry | 'sep')[] = isNarrow
-    ? [entryWorkspace, entrySamples, entryPaste, entryTryout, entryExport]
+    ? [entryWorkspace, entrySamples, entryPaste, entryTryout, entryExport, entryPrint]
     : [
         entryNew,
         entryOpen,
@@ -1150,6 +1163,7 @@ export function TopBar() {
         entryWorkspace,
         entryTryout,
         entryExport,
+        entryPrint,
       ]
   // adj424：新建「设置」分组（仅一项）——与文件组用分隔线隔开，与顶栏按钮「设置」一一对应
   // adj603（用户要求）：拆成两项——「全局设置」对底栏「全局」页签、「谱面设置」对底栏「谱面」页签
@@ -1158,17 +1172,15 @@ export function TopBar() {
     { label: '谱面设置(&P)…', hotkey: 'p', onPick: () => toggleDock('score') },
   ]
   // adj422：原「编辑」子菜单（撤销/重做）已从菜单移除——用户要求菜单精简；
-  // **功能保留**：撤销/重做仍走 Ctrl+Z / Ctrl+Y（见下方全局快捷键），store 与历史栈未改。
-  const viewEntries: (MenuEntry | 'sep')[] = [
-    { label: '编码(&C)', kbd: '1', hotkey: 'c', onPick: () => setViewType('code') },
-    // adj322：按宽窄屏选上下(split) 还是左右(splitH/splitHE)
-    { label: '拆分(&S)', kbd: '2', hotkey: 's', onPick: () => setViewType(isNarrow ? 'split' : (splitHDir === 'editorLeft' ? 'splitHE' : 'splitH')) },
-    { label: '预览(&P)', kbd: 'Tab', hotkey: 'p', onPick: () => setViewType('preview') },
-  ]
+  // **功能保留**：撤销 Ctrl+Z / 重做 Ctrl+Shift+Z（见全局快捷键；adj619b 起重做从 Ctrl+Y 挪过来），
+  // store 与历史栈未改。
+  // adj620（用户要求）：原「视图」菜单组（编码/拆分/预览）**整体删除**——顶栏「视图」下拉、
+  // `Ctrl+M` 循环、`Tab` 三个入口已够；`VIEWS`（下拉用）保留，见 `renderViewEntries`。
   // adj424：原「播放」分组取消——「试听播放」已挪到「文件」分组末尾（与导出相邻），
   // 音色库管理入口移入「设置 → 音色库」标签（adj384），菜单里没有第二项可单列，故整组移除。
   const helpEntries: (MenuEntry | 'sep')[] = [
-    { label: '快捷键速查(&K)', kbd: 'Ctrl+~', hotkey: 'k', onPick: () => openModal('shortcuts') },
+    // adj619c（用户要求）：速查的快捷键改成 `Alt+F1`（键名一处定义在 `brand/shortcuts.ts`）
+    { label: '快捷键速查(&K)', kbd: KBD.shortcuts, hotkey: 'k', onPick: () => openModal('shortcuts') },
     { label: '操作手册(&M)', hotkey: 'm', onPick: () => openModal('manual') },
     // adj422：原「脚本语法」与「脚本规则说明」（独立 HTML 页）合并为一份「脚本语法说明」——
     // 两个入口内容重叠、容易互相漂移；现在统一读 docs/SYNTAX.md（列表页已删除）
@@ -1219,10 +1231,9 @@ export function TopBar() {
             <div className="menu-group-title">设置</div>
             <MenuPanel entries={settingsEntries} onClose={closeMenu} />
             <div className="menu-sep" />
-            <div className="menu-group-title">视图</div>
-            <MenuPanel entries={viewEntries} onClose={closeMenu} />
-            <div className="menu-sep" />
-            {/* adj424：原「播放」分组取消——试听已挪到「文件」分组末尾 */}
+            {/* adj620（用户要求）：原「视图」分组（编码/拆分/预览）**整体去掉**——"以节省不必要的菜单项"。
+                视图切换仍有三个入口：顶栏「视图」下拉、`Ctrl+M` 循环、`Tab`（编码 ↔ 预览），
+                菜单里再抄一份只是重复占位。`viewEntries` 与 `renderViewEntries` 只服务下拉。 */}
             <div className="menu-group-title">帮助</div>
             <MenuPanel entries={helpEntries} onClose={closeMenu} />
           </div>

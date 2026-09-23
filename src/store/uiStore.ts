@@ -235,6 +235,18 @@ interface UiState {
    */
   dockSizeStep: number
   requestDockSizeStep: () => void
+  /**
+   * adj619（用户要求）：**底栏入口快捷键的一次性请求**（`Ctrl+Q/O/B/I/\`` 各自对应一个底栏页签）。
+   *
+   * 用户口径："底栏按钮响应快捷键时，如果此时底栏 dock 为最小化，则应是展开到建议高度。"
+   *
+   * 为什么要发请求而不是直接 `toggleDock`：**"是否最小化"是 `ToolDock` 的内部状态**
+   * （`minimized`，见 `ToolDock` 里那段说明），只有它知道该"展开到建议高度"还是走普通开关语义
+   * ——最小化时若走 `toggleDock`，同页签会把底栏**收起来**、异页签会**静默切页签但内容区仍是 0 高**
+   * （用户看到的正是"按了没反应"）。与 `dockSizeStep` 同一套路：只描述"这一次动作"，不持久化。
+   */
+  dockPanelRequest: { panel: DockPanelKey; nonce: number } | null
+  requestDockPanel: (panel: DockPanelKey) => void
   /** adj462：导出任务指示（状态栏动态提示用；null = 无任务）。dock 切走/关闭时仍在，导出照常进行。 */
   exportJob: string | null
   setExportJob: (label: string | null) => void
@@ -487,5 +499,8 @@ export const useUiStore = create<UiState>()((set) => ({
   // adj610：Ctrl+H 的"按一下档位按钮"请求（nonce 自增，由 ToolDock 消费）
   dockSizeStep: 0,
   requestDockSizeStep: () => set((s) => ({ dockSizeStep: s.dockSizeStep + 1 })),
+  // adj619：底栏入口快捷键的"打开某个页签"请求（nonce 自增，由 ToolDock 按自己的 minimized 决定语义）
+  dockPanelRequest: null,
+  requestDockPanel: (panel) => set((s) => ({ dockPanelRequest: { panel, nonce: (s.dockPanelRequest?.nonce ?? 0) + 1 } })),
   setExportJob: (label) => set({ exportJob: label }),
 }))

@@ -132,6 +132,9 @@ import {
 } from '../src/store/workspace.ts'
 // adj526：谱面数值字段范围来自引擎同一份表（GUIDE_LIMITS/_EX）——断言"逐项相等"，防止抄成第二份
 import { PAGE_NUM_RANGES, coarseFor } from '../src/ui/numFieldRanges.ts'
+// adj614：Ctrl+M 的视图循环顺序 + Ctrl+T 的深浅模式循环（各只有一处定义，顶栏与快捷键共用）
+import { VIEW_CYCLE, nextViewType, normViewType } from '../src/ui/viewCycle.ts'
+import { THEME_MODE_CYCLE, nextThemeMode } from '../src/brand/themes.ts'
 // （GUIDE_LIMITS_EX 见本文件顶部从 layout/guides 的导入；这里补 GUIDE_LIMITS 与字号范围）
 import { GUIDE_LIMITS, EDITOR_FONT_SIZE_RANGE } from '@ijipu/engine/index.ts'
 
@@ -5288,7 +5291,8 @@ console.log('[95] PWA update mechanism & mobile open hint (adj400/adj401)')
     const app = String(readFileSync('src/App.tsx', 'utf8'))
     const store = String(readFileSync('src/store/uiStore.ts', 'utf8'))
     check('adj562 「粘贴源码导入」菜单项改为**开关底栏**（不再是 openModal 弹窗）',
-      /label: pasteImportCopy\.menuLabel, hotkey: 'v', onPick: \(\) => toggleDock\('import'\)/.test(top) &&
+      // adj617：kbd 角标改引 `KBD.import`（键名一处定义），故断言里不再写死 'Ctrl+I'
+      /label: pasteImportCopy\.menuLabel, kbd: KBD\.import, hotkey: 'v', onPick: \(\) => toggleDock\('import'\)/.test(top) &&
         !/openModal\('pasteImport'\)/.test(top),
       '')
     check('adj562 App 不再渲染粘贴导入弹窗；`ModalKind` 里也不再有 `pasteImport`',
@@ -8201,7 +8205,8 @@ function runAdj530TopBarLayoutTests() {
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/\/\/[^\n]*/g, '')
     check('adj563 Ctrl+Q 改为开关「试听」底栏（原 `openModal(\'playback\')` 是死调用）',
-      /toLowerCase\(\) === 'q'\)[\s\S]{0,200}?ui\.toggleDock\('tryout'\)/.test(appCode) &&
+      // adj619：底栏入口快捷键统一走 `requestDockPanel`（最小化时先展开到建议高度，见 [144]）
+      /toLowerCase\(\) === 'q'\)[\s\S]{0,300}?ui\.requestDockPanel\('tryout'\)/.test(appCode) &&
         !/openModal\('playback'\)/.test(appCode),
       '')
   }
@@ -8605,9 +8610,9 @@ async function runAdj540WorkspaceTests() {
       !/\| 'workspace'/.test(ui.split('export type DockPanelKey')[0]) && // 不再出现在 ModalKind 里
       // 顺序：PANELS 的前两项是 workspace → import（adj562：导入紧跟工作区，用户要求）
       /\{ key: 'workspace', render: WorkspacePanel \},\s*\{ key: 'import', render: ImportPanel \},\s*\{ key: 'problems'/.test(dockSrc) &&
-      // 顺序：TABS 的前两项同上
-      /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace' \},\s*[\s\S]{0,200}?\{ key: 'import', label: dockCopy\.tabImport, icon: 'import' \}/.test(dockSrc) &&
-      /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace' \}/.test(dockSrc) &&
+      // 顺序：TABS 的前两项同上（adj617：两页签各带 `kbd` 快捷键提示）
+      /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace', kbd: KBD\.workspace \},\s*[\s\S]{0,200}?\{ key: 'import', label: dockCopy\.tabImport, icon: 'import', kbd: KBD\.import \}/.test(dockSrc) &&
+      /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace', kbd: KBD\.workspace \}/.test(dockSrc) &&
       /workspace: '工作区'/.test(String(readFileSync('src/ui/toolIcons.ts', 'utf8'))) &&
       // adj587：三个同高页签由同一条分支给出（工作区 / 全局 / 导入）；adj603：再加「谱面」
       /if \(key === 'workspace' \|\| key === 'settings' \|\| key === 'score' \|\| key === 'import'\)/.test(dockSrc) &&
@@ -8685,7 +8690,8 @@ async function runAdj540WorkspaceTests() {
     '')
   check('adj540 入口接线：**窄屏以工作区为主入口**（菜单里工作区排第一，只留平台无关项）',
     // 窄屏分支：工作区在最前，且**不含**系统选择器/新建/保存/另存为那些项（都在面板里或只在 PC 上成立）
-    /const fileEntries: \(MenuEntry \| 'sep'\)\[\] = isNarrow\s*\?\s*\[entryWorkspace, entrySamples, entryPaste, entryTryout, entryExport\]/.test(
+    // adj615：末尾多了平台无关的「打印」
+    /const fileEntries: \(MenuEntry \| 'sep'\)\[\] = isNarrow\s*\?\s*\[entryWorkspace, entrySamples, entryPaste, entryTryout, entryExport, entryPrint\]/.test(
       topSrc,
     ) &&
       /\{ label: workspaceCopy\.openSystemLabel, onPick: runOpen \}/.test(topSrc) &&
@@ -8694,7 +8700,7 @@ async function runAdj540WorkspaceTests() {
   check('adj540 手机端「保存」未绑定任何文件时自动引导到工作区另存（手机上不走 showSaveFilePicker）',
     /const runSaveSmart = async \(\) => \{[\s\S]{0,260}?isCoarsePointerDevice\(\) && isWorkspaceAvailable\(\) && !useDocStore\.getState\(\)\.binding[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)/.test(
       topSrc,
-    ) && /entrySave: MenuEntry = \{ label: '保存\(&S\)', kbd: 'Ctrl\+S', hotkey: 's', onPick: runSaveSmart \}/.test(topSrc),
+    ) && /entrySave: MenuEntry = \{ label: '保存\(&S\)', kbd: KBD\.save, hotkey: 's', onPick: runSaveSmart \}/.test(topSrc),
     '')
   check('adj540 手机端「另存为」也走工作区（开面板 + 展开文件名输入），桌面端仍用系统另存为',
     /const runSaveAsSmart = async \(\) => \{[\s\S]{0,240}?isCoarsePointerDevice\(\) && isWorkspaceAvailable\(\)[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)[\s\S]{0,80}?await saveFileAs\(\)/.test(
@@ -10046,7 +10052,7 @@ function runAdj608Tests() {
   // ---- ⑤ 快捷键速查里能查到这条 ----
   check(
     'adj608/adj613 快捷键速查登记了「最小化底栏（输入框里先退出输入）」',
-    /\['Esc', '最小化底栏（输入框里先退出输入）'\]/.test(scSrc),
+    /\[KBD\.dockMin, '最小化底栏（输入框里先退出输入）'\]/.test(scSrc),
     '',
   )
 }
@@ -10145,7 +10151,8 @@ function runAdj609610Tests() {
   )
   check(
     'adj610 快捷键速查登记 Ctrl+D / Ctrl+H',
-    /\['Ctrl\+D', '展开 \/ 收起底栏'\]/.test(scSrc) && /\['Ctrl\+H', '底栏高度档位/.test(scSrc),
+    // adj617：键名改引 `KBD.*`（一处定义）
+    /\[KBD\.dock, '展开 \/ 收起底栏'\]/.test(scSrc) && /\[KBD\.dockSize, '底栏高度档位/.test(scSrc),
     '',
   )
 }
@@ -10272,6 +10279,447 @@ function runAdj612613Tests() {
     '',
   )
 }
+
+/**
+ * adj614（用户要求）：四个新快捷键——`Ctrl+L` 折行、`Ctrl+K` 输入条、`Ctrl+T` 深浅模式、`Ctrl+M` 视图循环。
+ *
+ * 两条设计口径（都是"同一份顺序/同一处实现"的老教训）：
+ *  · 视图顺序与"下一个是谁"放 `ui/viewCycle.ts`，顶栏「视图」下拉按它排、`Ctrl+M` 按它切；
+ *  · 深浅模式循环放 `brand/themes.ts` 的 `nextThemeMode()`，顶栏按钮与 `Ctrl+T` 共用。
+ *
+ * ⚠ 平台限制（真机实测，见 E-2026-300）：**浏览器把 `Ctrl+T` 留给了"新标签页"**，
+ * `preventDefault` 拦不住（`Ctrl+L`/`Ctrl+K`/`Ctrl+M` 在浏览器里都能拦下）；
+ * 桌面壳（WebView2 没有标签页 UI）四条都可用。
+ */
+function runAdj614Tests() {
+  console.log('[140] 四个新快捷键：Ctrl+L 折行 / Ctrl+K 输入条 / Ctrl+T 深浅模式 / Ctrl+M 视图循环（adj614）')
+  const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+  const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+  const scSrc = String(readFileSync('src/dialogs/ShortcutsDialog.tsx', 'utf8'))
+
+  // ---- ① 四条快捷键的接线：都 preventDefault + stopPropagation（capture 阶段先吃下）----
+  check(
+    'adj614 四条快捷键都注册在全局 handler 里且都 `preventDefault + stopPropagation`',
+    (appSrc.match(/if \(e\.ctrlKey && e\.key\.toLowerCase\(\) === '[lktm]'\) \{\s*\n\s*e\.preventDefault\(\)\s*\n\s*e\.stopPropagation\(\)/g) ?? []).length === 4,
+    '',
+  )
+  check(
+    'adj614 Ctrl+L / Ctrl+K 直接翻顶栏那两个开关的**同一个 store 字段**（`autoWrap` / `showScriptPad`）',
+    /ui\.setAutoWrap\(!ui\.autoWrap\)/.test(appSrc) &&
+      /onPick: \(\) => setAutoWrap\(!autoWrap\)/.test(topSrc) &&
+      /ui\.setShowScriptPad\(!ui\.showScriptPad\)/.test(appSrc) &&
+      /onPick: \(\) => setShowScriptPad\(!showScriptPad\)/.test(topSrc),
+    '',
+  )
+  check(
+    'adj614 Ctrl+T / 顶栏「深浅模式」按钮共用 `nextThemeMode()`（顶栏里那份内联三元已删除）',
+    /ui\.setThemeMode\(nextThemeMode\(ui\.themeMode\)\)/.test(appSrc) &&
+      /setThemeMode\(nextThemeMode\(themeMode\)\)/.test(topSrc) &&
+      !/const next: Record<typeof themeMode, typeof themeMode>/.test(topSrc),
+    '',
+  )
+  check(
+    'adj614 Ctrl+M 调 `nextViewType(cur, { narrow, splitHDir })`（窄屏与左右拆分方向都按顶栏口径）',
+    /st\.setViewType\(nextViewType\(st\.viewType, \{ narrow: ui\.isNarrow, splitHDir: ui\.splitHDir \}\)\)/.test(appSrc),
+    '',
+  )
+
+  // ---- ② 纯函数：深浅模式循环 ----
+  check(
+    'adj614 `nextThemeMode`：随系统 → 浅色 → 深色 → 随系统（三档一圈）',
+    THEME_MODE_CYCLE.join(',') === 'auto,light,dark' &&
+      nextThemeMode('auto') === 'light' &&
+      nextThemeMode('light') === 'dark' &&
+      nextThemeMode('dark') === 'auto',
+    '',
+  )
+
+  // ---- ③ 纯函数：视图循环（宽屏四档 / 窄屏三档 / 方向归一）----
+  check(
+    'adj614 `nextViewType` 宽屏：编码 → 拆分(上下) → 左右拆分 → 预览 → 编码',
+    VIEW_CYCLE.join(',') === 'code,split,splitH,preview' &&
+      nextViewType('code', { narrow: false, splitHDir: 'previewLeft' }) === 'split' &&
+      nextViewType('split', { narrow: false, splitHDir: 'previewLeft' }) === 'splitH' &&
+      nextViewType('splitH', { narrow: false, splitHDir: 'previewLeft' }) === 'preview' &&
+      nextViewType('preview', { narrow: false, splitHDir: 'previewLeft' }) === 'code',
+    '',
+  )
+  check(
+    'adj614 `nextViewType` 窄屏：跳过「左右拆分」（编码 → 拆分(上下) → 预览 → 编码）',
+    nextViewType('code', { narrow: true, splitHDir: 'previewLeft' }) === 'split' &&
+      nextViewType('split', { narrow: true, splitHDir: 'previewLeft' }) === 'preview' &&
+      nextViewType('preview', { narrow: true, splitHDir: 'previewLeft' }) === 'code' &&
+      // 当前正是「左右拆分」时窄屏也回得到循环里
+      nextViewType('splitHE', { narrow: true, splitHDir: 'previewLeft' }) === 'code',
+    '',
+  )
+  check(
+    'adj614 `splitHE` 与 `splitH` 算**同一档**，方向由 `splitHDir` 决定（编辑器在左 ⇒ splitHE）',
+    normViewType('splitHE') === 'splitH' &&
+      nextViewType('split', { narrow: false, splitHDir: 'editorLeft' }) === 'splitHE' &&
+      nextViewType('split', { narrow: false, splitHDir: 'previewLeft' }) === 'splitH',
+    '',
+  )
+  check(
+    'adj614 顶栏「视图」下拉的**选项顺序 == `VIEW_CYCLE`**（同一份顺序，两处不可能漂移）',
+    (() => {
+      const m = topSrc.match(/const VIEWS: \{[^}]*\}\[\] = \[([\s\S]*?)\n\]/)
+      const keys = [...(m?.[1] ?? '').matchAll(/key: '([a-zA-Z]+)'/g)].map((x) => x[1])
+      return keys.join(',') === VIEW_CYCLE.join(',')
+    })(),
+    '',
+  )
+
+  // ---- ④ 可发现性 + 平台限制的记录 ----
+  check(
+    'adj614 快捷键速查登记四条，并写明浏览器里 Ctrl+L/K/T 被内核占用',
+    // adj617：键名改引 `KBD.*`（一处定义）
+    /\[KBD\.wrap, '折行开关'\]/.test(scSrc) &&
+      /\[KBD\.pad, '输入条开关'\]/.test(scSrc) &&
+      /\[KBD\.theme, '深浅模式/.test(scSrc) &&
+      /\[KBD\.view, '视图循环/.test(scSrc) &&
+      /浏览器.*内核占用.*新标签页/.test(scSrc),
+    '',
+  )
+}
+
+/**
+ * adj615（用户要求）：`Ctrl+O` = 导出开关、菜单「导出」下面加「打印」、`Ctrl+P` = 打印。
+ *
+ * 三个要点：
+ *  · `Ctrl+O` 是**改绑**（原为「打开文件」）——菜单里的 kbd 提示必须同步摘掉，不能让菜单说谎；
+ *  · 打印走**同一窗口 + 打印期专用布局**（`export/print.ts` + `index.css` 的打印段），
+ *    不开新窗口（adj411 实测过"新窗口会被拦"）；
+ *  · 两条入口（应用自己触发 / 平台自己弹）都要正确 ⇒ `beforeprint` 钩子（`installPrintSupport`）。
+ */
+function runAdj615Tests() {
+  console.log('[141] 打印（菜单「打印」+ Ctrl+P）+ 键位最终口径（Ctrl+O 打开 / Ctrl+Y 导出）（adj615/619b）')
+  const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+  const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+  const storeSrc = String(readFileSync('src/store/docStore.ts', 'utf8'))
+  const printSrc = String(readFileSync('src/export/print.ts', 'utf8'))
+  const cssSrc = String(readFileSync('src/index.css', 'utf8'))
+  const scSrc = String(readFileSync('src/dialogs/ShortcutsDialog.tsx', 'utf8'))
+  const kbdSrc = String(readFileSync('src/brand/shortcuts.ts', 'utf8'))
+
+  // ---- Ctrl+O / Ctrl+Y：用户先要求 Ctrl+O 改挂导出，后又要求"Ctrl+O 保持打开对话框、导出改 Ctrl+Y"
+  //      （adj619b）——这里钉住**最终口径**，免得下次又被中间那版带偏 ----
+  check(
+    'adj619b `Ctrl+O` ⇒ 打开文件（`st.openFile()`，菜单「打开」的 kbd 角标也回来了）',
+    /e\.ctrlKey && e\.key\.toLowerCase\(\) === 'o'[\s\S]{0,700}?void st\.openFile\(\)/.test(appSrc) &&
+      /const entryOpen: MenuEntry = \{ label: '打开\(&O\)…', kbd: KBD\.openDoc, hotkey: 'o'/.test(topSrc) &&
+      /openDoc: 'Ctrl\+O'/.test(kbdSrc),
+    '',
+  )
+  check(
+    'adj619b `Ctrl+Y` ⇒ 导出开关（与菜单「导出」/顶栏「导出」同一条入口），菜单 kbd 引 `KBD.export`',
+    /e\.ctrlKey && e\.key\.toLowerCase\(\) === 'y'[\s\S]{0,600}?ui\.requestDockPanel\('export'\)/.test(appSrc) &&
+      /onPick: \(\) => toggleDock\('export'\)/.test(topSrc) &&
+      /const entryExport: MenuEntry = \{ label: '导出\(&X\)…', kbd: KBD\.export/.test(topSrc) &&
+      /export: 'Ctrl\+Y'/.test(kbdSrc),
+    '',
+  )
+  check(
+    'adj619b `Ctrl+Y` 让给导出后，**重做挪到 `Ctrl+Shift+Z`**（不能让一个键既重做又开导出）',
+    /toLowerCase\(\) === 'z' && e\.shiftKey[\s\S]{0,300}?st\.redo\(\)/.test(appSrc) &&
+      /redo: 'Ctrl\+Shift\+Z'/.test(kbdSrc) &&
+      /\[KBD\.redo, '重做'\]/.test(scSrc) &&
+      !/\['Ctrl\+Y', '重做'\]/.test(scSrc),
+    '',
+  )
+  check(
+    'adj619c `Alt+F1` ⇒ 快捷键速查（`openModal(\'shortcuts\')`；菜单那条 kbd 也引 `KBD.shortcuts`）',
+    /e\.altKey && e\.key === 'F1'[\s\S]{0,500}?ui\.openModal\('shortcuts'\)/.test(appSrc) &&
+      /shortcuts: 'Alt\+F1'/.test(kbdSrc) &&
+      /\{ label: '快捷键速查\(&K\)', kbd: KBD\.shortcuts, hotkey: 'k'/.test(topSrc),
+    '',
+  )
+
+  // ---- 菜单：打印紧跟在导出下面，热键不与既有项冲突 ----
+  check(
+    'adj615 菜单「打印(&D)…」紧跟「导出」之后（窄屏那份清单也要有），标注 Ctrl+P、热键 d 不撞车',
+    /const entryPrint: MenuEntry = \{ label: '打印\(&D\)…', kbd: KBD\.print, hotkey: 'd', onPick: \(\) => useDocStore\.getState\(\)\.printScore\(\) \}/.test(
+      topSrc,
+    ) &&
+      /entryTryout, entryExport, entryPrint\]/.test(topSrc) &&
+      /entryExport,\n\s+entryPrint,\n\s+\]/.test(topSrc) &&
+      (topSrc.match(/hotkey: 'd'/g) ?? []).length === 1,
+    '',
+  )
+
+  // ---- Ctrl+P：与菜单同一条 printScore ----
+  check(
+    'adj615 Ctrl+P ⇒ `st.printScore()`（与菜单项同一个动作）',
+    /e\.ctrlKey && e\.key\.toLowerCase\(\) === 'p'[\s\S]{0,900}?st\.printScore\(\)/.test(appSrc) && /printScore: \(\) => void/.test(storeSrc),
+    '',
+  )
+  check(
+    'adj615 打印页与导出同一口径：引擎现算布局 + 渲染，**有语法错误就返回空**（不打半张谱）',
+    /function currentPrintPages\(s: DocState\): string\[\] \{[\s\S]{0,400}?errors\.some\(\(e\) => e\.severity === 'error'\)\) return \[\]/.test(
+      storeSrc,
+    ) &&
+      /renderScoreToSvg\(layoutScore\(s\.parseResult, s\.pageConfig, instrumentRef\)\)/.test(storeSrc) &&
+      /showNotice\(exportCopy\.blockedByError, 'warn'\)/.test(storeSrc),
+    '',
+  )
+
+  // ---- 打印实现：同一窗口 + 打印期专用布局 + beforeprint 兜底 ----
+  check(
+    'adj615 打印**不开新窗口**：往 `#jp-print-root` 装页面 + `<body>` 打 `.jp-printing` + `window.print()`',
+    /export const PRINT_ROOT_ID = 'jp-print-root'/.test(printSrc) &&
+      /export const PRINT_BODY_CLASS = 'jp-printing'/.test(printSrc) &&
+      /document\.body\.classList\.add\(PRINT_BODY_CLASS\)\s*\n\s*window\.print\(\)/.test(printSrc) &&
+      !/window\.open\(/.test(printSrc),
+    '',
+  )
+  check(
+    'adj615 `installPrintHooks` 兜住"平台自己弹打印"（`beforeprint` 补页面、`afterprint` 收尾），且幂等',
+    /export function installPrintHooks\(getPages: \(\) => readonly string\[\]\): void \{[\s\S]{0,200}?if \(hooksInstalled\) return/.test(
+      printSrc,
+    ) &&
+      /addEventListener\('beforeprint'/.test(printSrc) &&
+      /addEventListener\('afterprint'/.test(printSrc) &&
+      /installPrintHooks\(\(\) => currentPrintPages\(get\(\)\)\)/.test(storeSrc) &&
+      /useDocStore\.getState\(\)\.installPrintSupport\(\)/.test(appSrc),
+    '',
+  )
+  check(
+    'adj615 打印期 CSS：屏幕不显示容器；打印时**只留**容器（应用界面 display:none）+ 分页 + A4 零边距',
+    /#jp-print-root \{\s*\n\s*display: none;/.test(cssSrc) &&
+      /@page \{\s*\n\s*size: A4;\s*\n\s*margin: 0;/.test(cssSrc) &&
+      /body\.jp-printing > \*:not\(#jp-print-root\) \{\s*\n\s*display: none !important;/.test(cssSrc) &&
+      /#jp-print-root \.jp-print-page \{\s*\n\s*break-after: page;\s*\n\s*page-break-after: always;/.test(cssSrc) &&
+      /#jp-print-root \.jp-print-page:last-child \{\s*\n\s*break-after: auto;/.test(cssSrc),
+    '',
+  )
+
+  // ---- 可发现性 ----
+  check(
+    'adj615 快捷键速查：新增「Ctrl+P 打印」，文件组按最终键位列出（打开 Ctrl+O / 导出 Ctrl+Y / 重做 Ctrl+Shift+Z）',
+    /\[KBD\.print, '打印/.test(scSrc) &&
+      /\[KBD\.openDoc, '打开文件'\]/.test(scSrc) &&
+      /\[KBD\.export, '导出（底栏）'\]/.test(scSrc) &&
+      /\[KBD\.redo, '重做'\]/.test(scSrc),
+    '',
+  )
+  check(
+    'adj616 Ctrl+E / Ctrl+B / Ctrl+I 分别翻排版（showGuides）/ 工作区 / 导入（后两者走底栏入口请求），且速查表登记三条',
+    /e\.ctrlKey && e\.key\.toLowerCase\(\) === 'e'[\s\S]{0,600}?ui\.setShowGuides\(!ui\.showGuides\)/.test(appSrc) &&
+      /e\.ctrlKey && e\.key\.toLowerCase\(\) === 'b'[\s\S]{0,300}?ui\.requestDockPanel\('workspace'\)/.test(appSrc) &&
+      /e\.ctrlKey && e\.key\.toLowerCase\(\) === 'i'[\s\S]{0,300}?ui\.requestDockPanel\('import'\)/.test(appSrc) &&
+      /\[KBD\.guides, '排版辅助虚线开关'\]/.test(scSrc) &&
+      /\[KBD\.workspace, '工作区开关'\]/.test(scSrc) &&
+      /\[KBD\.import, '导入开关'\]/.test(scSrc),
+    '',
+  )
+  check(
+    'adj614/615/616 键名的**唯一出处**是 `brand/shortcuts.ts` 的 `KBD`（速查表不再写字面量）',
+    /export const KBD = \{/.test(String(readFileSync('src/brand/shortcuts.ts', 'utf8'))) &&
+      /export const withKbd = \(text: string, kbd: string\): string => `\$\{text\}（\$\{kbd\}）`/.test(
+        String(readFileSync('src/brand/shortcuts.ts', 'utf8')),
+      ) &&
+      // 速查表：本批这些键一律走 KBD.*
+      !/\['Ctrl\+(D|H|L|K|T|M|E|B|I|P)', /.test(scSrc),
+    '',
+  )
+}
+
+/**
+ * adj617（用户要求）：快捷键要**显示在菜单项后面、顶栏/底栏/浮动栏按钮的提示文本后面**。
+ */
+function runAdj617Tests() {
+  console.log('[142] 快捷键提示落到菜单项 / 顶栏 / 底栏 / 浮动栏（adj617）')
+  const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  const edSrc = String(readFileSync('src/editor/EditorPane.tsx', 'utf8'))
+  const scSrc = String(readFileSync('src/dialogs/ShortcutsDialog.tsx', 'utf8'))
+
+  check(
+    'adj617 菜单项 kbd 角标改引 `KBD.*`（新建/保存/导入/工作区/试听/导出/打印）',
+    /entryNew: MenuEntry = \{ label: '新建\(&N\)', kbd: KBD\.newDoc/.test(topSrc) &&
+      /entrySave: MenuEntry = \{ label: '保存\(&S\)', kbd: KBD\.save/.test(topSrc) &&
+      /entryPaste: MenuEntry = \{ label: pasteImportCopy\.menuLabel, kbd: KBD\.import/.test(topSrc) &&
+      /entryWorkspace: MenuEntry = \{ label: workspaceCopy\.menuLabel, kbd: KBD\.workspace/.test(topSrc) &&
+      /entryTryout: MenuEntry = \{ label: '试听播放\(&P\)', kbd: KBD\.tryout/.test(topSrc) &&
+      /entryExport: MenuEntry = \{ label: '导出\(&X\)…', kbd: KBD\.export/.test(topSrc) &&
+      /entryPrint: MenuEntry = \{ label: '打印\(&D\)…', kbd: KBD\.print/.test(topSrc),
+    '',
+  )
+  check(
+    'adj617 顶栏按钮 `title` 用 `withKbd(...)` 带上快捷键（排版/折行/输入条/试听/导出/深浅模式/视图）',
+    /title: withKbd\('排版辅助虚线', KBD\.guides\)/.test(topSrc) &&
+      /title: withKbd\('自动折行', KBD\.wrap\)/.test(topSrc) &&
+      /title: withKbd\('简谱输入条', KBD\.pad\)/.test(topSrc) &&
+      /title: withKbd\('试听播放', KBD\.tryout\)/.test(topSrc) &&
+      /title: withKbd\('导出', KBD\.export\)/.test(topSrc) &&
+      /title=\{withKbd\(\s*\n?\s*themeMode === 'auto'/.test(topSrc) &&
+      /title=\{withKbd\('切换视图（点击选）', KBD\.view\)\}/.test(topSrc),
+    '',
+  )
+  check(
+    'adj617 底栏：页签带 `kbd`（工作区/导入/试听/导出）、「收起底栏」带 Ctrl+D、档位带 Ctrl+H／Esc',
+    /kbd\?: string \}\[\]/.test(dockSrc) &&
+      /key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace', kbd: KBD\.workspace/.test(dockSrc) &&
+      /key: 'import', label: dockCopy\.tabImport, icon: 'import', kbd: KBD\.import/.test(dockSrc) &&
+      /key: 'tryout', label: dockCopy\.tabTryout, icon: 'play', kbd: KBD\.tryout/.test(dockSrc) &&
+      /key: 'export', label: dockCopy\.tabExport, icon: 'export', kbd: KBD\.export/.test(dockSrc) &&
+      /title=\{t\.kbd \? withKbd\(t\.label, t\.kbd\) : t\.label\}/.test(dockSrc) &&
+      /withKbd\(dockCopy\.collapseTitle, KBD\.dock\)/.test(dockSrc) &&
+      /withKbd\(dockCopy\.sizeTitle\([\s\S]{0,120}?\$\{KBD\.dockSize\}／\$\{KBD\.dockMin\}/.test(dockSrc),
+    '',
+  )
+  check(
+    'adj617 浮动栏「展开底栏」按钮的提示带 Ctrl+D（有告警时那句也带）',
+    /title=\{withKbd\(problems\.total > 0 \? dockCopy\.expandWithProblems\(problems\.total\) : dockCopy\.expandTitle, KBD\.dock\)\}/.test(
+      edSrc,
+    ),
+    '',
+  )
+  check(
+    'adj617 速查表键名列也引 `KBD.*`（与提示文本同源，不会出现"菜单写 Ctrl+B、速查表写 Ctrl+I"）',
+    /\[KBD\.newDoc, '新建'\]/.test(scSrc) &&
+      /\[KBD\.guides, '排版辅助虚线开关'\]/.test(scSrc) &&
+      /\[KBD\.workspace, '工作区开关'\]/.test(scSrc) &&
+      /\[KBD\.import, '导入开关'\]/.test(scSrc) &&
+      /\[KBD\.dock, '展开 \/ 收起底栏'\]/.test(scSrc) &&
+      /\[KBD\.dockSize, '底栏高度档位/.test(scSrc) &&
+      /\[KBD\.dockMin, '最小化底栏/.test(scSrc),
+    '',
+  )
+}
+
+/**
+ * adj618（用户要求）：`Ctrl+`` = 告警开关；同一个物理键按住 Shift（`Ctrl+~`）= 快捷键速查
+ * ——后者在菜单与速查表里**一直写着**，代码里却从来没绑过，本轮顺手补上（提示与实现对齐）。
+ */
+function runAdj618Tests() {
+  console.log('[143] Ctrl+` 告警开关 + 补上菜单里写着却没绑的 Ctrl+~ 速查（adj618）')
+  const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  const footSrc = String(readFileSync('src/ui/EditorFootBar.tsx', 'utf8'))
+  const scSrc = String(readFileSync('src/dialogs/ShortcutsDialog.tsx', 'utf8'))
+  const kbdSrc = String(readFileSync('src/brand/shortcuts.ts', 'utf8'))
+
+  check(
+    'adj618 `Ctrl+`` ⇒ 告警开关（底栏入口请求，与底栏「告警」页签、状态栏那条告警按钮同一条路）',
+    /e\.ctrlKey && \(e\.code === 'Backquote' \|\| e\.key === '`' \|\| e\.key === '~'\)[\s\S]{0,900}?ui\.requestDockPanel\('problems'\)/.test(
+      appSrc,
+    ) && /const toggleDock = useUiStore\(\(s\) => s\.toggleDock\)/.test(footSrc),
+    '',
+  )
+  check(
+    'adj619c 速查不再挂在反引号的 Shift 档上（`Ctrl+~` 与 `Ctrl+`` 同为告警，不留死键），改由 Alt+F1 承担',
+    !/e\.shiftKey \|\| e\.key === '~'\) ui\.openModal\('shortcuts'\)/.test(appSrc) &&
+      /\[KBD\.shortcuts, '本快捷键速查'\]/.test(scSrc),
+    '',
+  )
+  check(
+    'adj618 认的是**物理键** `e.code === \'Backquote\'`（中文/其它布局下字符不同也能按）',
+    /e\.code === 'Backquote'/.test(appSrc),
+    '',
+  )
+  check(
+    'adj618/619c 键名进 `KBD`（`problems: \'Ctrl+`\'` / `shortcuts: \'Alt+F1\'`），速查表引它',
+    /problems: 'Ctrl\+`'/.test(kbdSrc) &&
+      /shortcuts: 'Alt\+F1'/.test(kbdSrc) &&
+      /\[KBD\.problems, '告警面板开关'\]/.test(scSrc) &&
+      /\[KBD\.shortcuts, '本快捷键速查'\]/.test(scSrc),
+    '',
+  )
+  check(
+    'adj618 提示落位：底栏「告警」页签带 `kbd`、状态栏告警按钮的 title 用 `withKbd(..., KBD.problems)`',
+    /key: 'problems', label: dockCopy\.tabProblems, icon: 'problems', kbd: KBD\.problems/.test(dockSrc) &&
+      /title=\{withKbd\(`\$\{dotTitle\}（点击\$\{problemsShown \? '收起' : '展开'\}底部告警）`, KBD\.problems\)\}/.test(footSrc),
+    '',
+  )
+}
+
+/**
+ * adj619（用户要求）：**底栏入口快捷键在"最小化"时先展开到建议高度**。
+ *
+ * 背景：底栏入口快捷键（`Ctrl+Q/Y/B/I/\``）原先直接 `toggleDock`，于是最小化时按同页签会**收起底栏**、
+ * 按异页签会"静默切页签但内容区仍是 0 高"——两种都表现为"按了没反应"。
+ * "是否最小化"是 `ToolDock` 的内部状态 ⇒ App 只发请求（`requestDockPanel`），由 `ToolDock` 定语义
+ * （与 `requestDockSizeStep` 同一套路）。
+ */
+function runAdj619Tests() {
+  console.log('[144] 底栏入口快捷键：最小化时先展开到建议高度（adj619）')
+  const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+  const uiSrc = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+
+  check(
+    'adj619 五条底栏入口快捷键都走 `requestDockPanel`（试听/导出/工作区/导入/告警），不再直接 toggleDock',
+    ['tryout', 'export', 'workspace', 'import', 'problems'].every((p) => new RegExp(`ui\\.requestDockPanel\\('${p}'\\)`).test(appSrc)) &&
+      !/ui\.toggleDock\('(tryout|export|workspace|import|problems)'\)/.test(appSrc),
+    '',
+  )
+  check(
+    'adj619 uiStore 提供"打开某页签"的一次性请求（nonce 自增，不持久化；含为什么不能直接 toggle 的说明）',
+    /dockPanelRequest: \{ panel: DockPanelKey; nonce: number \} \| null/.test(uiSrc) &&
+      /requestDockPanel: \(panel\) => set\(\(s\) => \(\{ dockPanelRequest: \{ panel, nonce: \(s\.dockPanelRequest\?\.nonce \?\? 0\) \+ 1 \} \}\)\)/.test(
+        uiSrc,
+      ),
+    '',
+  )
+  check(
+    'adj619 ToolDock 消费请求：**最小化 ⇒ 退出最小化 + 切页签**（= 展开到建议高度），否则保持开关语义',
+    /if \(minimizedRef\.current\) \{\s*\n\s*exitMinimizedRef\.current\(\)\s*\n\s*ui\.setDockPanel\(req\.panel\)\s*\n\s*return\s*\n\s*\}\s*\n\s*ui\.toggleDock\(req\.panel\)/.test(
+      dockSrc,
+    ),
+    '',
+  )
+  check(
+    'adj619 该 effect **只依赖 nonce 这个数字**（请求对象/minimized/exitMinimized 都经 ref 取最新值），不新增 lint warning',
+    /const dockPanelNonce = dockPanelRequest\?\.nonce \?\? 0/.test(dockSrc) &&
+      /const dockPanelRequestRef = useRef\(dockPanelRequest\)/.test(dockSrc) &&
+      /const minimizedRef = useRef\(minimized\)/.test(dockSrc) &&
+      /const exitMinimizedRef = useRef\(exitMinimized\)/.test(dockSrc) &&
+      /\}, \[dockPanelNonce\]\)/.test(dockSrc),
+    '',
+  )
+}
+
+/**
+ * adj620（用户要求）：菜单里的「视图」分组整体去掉（"以节省不必要的菜单项"）。
+ * 视图切换仍有三个入口：顶栏「视图」下拉、`Ctrl+M` 循环、`Tab`（编码 ↔ 预览）。
+ */
+function runAdj620Tests() {
+  console.log('[145] 菜单去掉「视图」分组（adj620）')
+  const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+
+  check(
+    'adj620 菜单渲染里不再有「视图」组（`viewEntries` 与其 MenuPanel 一并删除），三组仍在：文件 / 设置 / 帮助',
+    (() => {
+      // 只看**汉堡菜单**那一段：`更多`下拉里那个"视图"组标题（视图按钮被折叠时用）是另一处，不动它
+      const i = topSrc.indexOf('menu-dropdown topbar-hamburger-dropdown')
+      const j = topSrc.indexOf('工具条（adj530）', i)
+      const menu = i >= 0 && j > i ? topSrc.slice(i, j) : ''
+      // 负向断言先剥注释：注释里为说明"为什么删"会提到 `viewEntries`（E-2026-237 同款坑）
+      const code = topSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+      return (
+        !/viewEntries/.test(code) &&
+        menu.length > 0 &&
+        !/menu-group-title">视图</.test(menu) &&
+        /menu-group-title">文件</.test(menu) &&
+        /menu-group-title">设置</.test(menu) &&
+        /menu-group-title">帮助</.test(menu)
+      )
+    })(),
+    '',
+  )
+  check(
+    'adj620 视图下拉与 `Ctrl+M` 循环**不受影响**（`VIEWS` / `renderViewEntries` 仍在，顺序仍等于 `VIEW_CYCLE`）',
+    /const renderViewEntries = \(\)/.test(topSrc) && /const VIEWS: \{ key: ViewType; label: string; icon: React\.ReactNode \}\[\]/.test(topSrc),
+    '',
+  )
+  check(
+    'adj620 菜单里再也没有 `编码/拆分/预览` 那三条（避免与下拉、快捷键重复占位）',
+    !/label: '编码\(&C\)'/.test(topSrc) && !/label: '拆分\(&S\)'/.test(topSrc) && !/label: '预览\(&P\)'/.test(topSrc),
+    '',
+  )
+}
+
 
 function runAdj600Tests() {
   console.log('[129] settings panel reseeds when the score config changes (adj600)')
@@ -11122,7 +11570,8 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
       existsSync(join(root, 'public', ICON_DIR, '关于.png')),
     '')
   check('adj565 底栏两个页签改用设计图标（`icon: \'problems\'` / `icon: \'about\'`）',
-    /\{ key: 'problems', label: dockCopy\.tabProblems, icon: 'problems' \}/.test(dockSrc) &&
+    // adj618：「告警」页签多了 `kbd: KBD.problems`（提示带快捷键）
+    /\{ key: 'problems', label: dockCopy\.tabProblems, icon: 'problems', kbd: KBD\.problems \}/.test(dockSrc) &&
       /\{ key: 'about', label: dockCopy\.tabAbout, icon: 'about' \}/.test(dockSrc),
     '')
   // 结构性护栏：`glyph` 字段与 `t.icon ? … : t.glyph` 分支已删除，`icon` 在类型上**必填**
@@ -11130,7 +11579,8 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
   check('adj565 字符兜底已整体删除（TABS 无 `glyph`、`icon` 必填、渲染只有 ToolIcon 一条路）',
     // 剥注释后再查 `glyph`：上面 TABS 的文档注释里为了说明"已删除"会提到这个字段名
     !/glyph/.test(dockSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')) &&
-      /\{ key: DockPanelKey; label: string; icon: ToolIconName \}\[\]/.test(dockSrc) &&
+      // adj617：TABS 类型多了可选的 `kbd`（提示文本后面带快捷键），`icon` 仍必填
+      /\{ key: DockPanelKey; label: string; icon: ToolIconName; kbd\?: string \}\[\]/.test(dockSrc) &&
       /<ToolIcon name=\{t\.icon\} \/>/.test(dockSrc),
     '')
   // ---- adj556（v0.28.2）：页签始终显示图标；靠滚动 + 箭头兜住视界外的页签 ----
@@ -11189,7 +11639,8 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
   }
   // ④ 「导入」页签：图标由字符兜底改成设计图标（TABS 里不再有 `glyph: '⤓'`）
   check('adj564 「导入」页签用 `<ToolIcon name="import" />`（TABS 里不再有 `glyph: \'⤓\'`）',
-    /\{ key: 'import', label: dockCopy\.tabImport, icon: 'import' \}/.test(dockSrc) &&
+    // adj617：页签多了 `kbd`（提示带快捷键），故断言放宽到"键与图标都在"
+    /\{ key: 'import', label: dockCopy\.tabImport, icon: 'import', kbd: KBD\.import \}/.test(dockSrc) &&
       !/glyph: '⤓'/.test(dockSrc),
     '')
   // ---- adj560（v0.28.2）：触屏拖动 tabstrip 时，**没有任何页签呈选中态**（用户报"非当前页签选中") ----
@@ -12091,6 +12542,54 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj612/613 ESC 判据与两次 ESC 用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj614Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj614 四个新快捷键用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj615Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj615 打印用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj617Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj617 快捷键提示落位用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj618Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj618 Ctrl+` 告警开关用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj619Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj619 底栏入口快捷键展开用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj620Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj620 菜单去掉视图组用例抛异常', e)
     }
   })
   .then(() => {

@@ -20,6 +20,8 @@ import { ScriptToolbar } from './ScriptToolbar'
 import { ToolIcon } from '../ui/ToolIcon'
 import { summarizeProblems } from '../ui/problems'
 import { dockCopy } from '../brand/copy'
+// adj617（用户要求）：浮动栏「展开底栏」按钮的提示后面带快捷键（键名一处定义）
+import { KBD, withKbd } from '../brand/shortcuts'
 import type { PadGroup, PadKey } from './padLayout'
 
 /** adj165：自动提示浮层状态（null = 不显示）
@@ -938,8 +940,9 @@ export function EditorPane() {
             className="dock-fab"
             onClick={expandDock}
             // adj591：有告警时把"点开先看告警"写进 tooltip，别让用户以为"我上次的页签丢了"
-            title={problems.total > 0 ? dockCopy.expandWithProblems(problems.total) : dockCopy.expandTitle}
-            aria-label={problems.total > 0 ? dockCopy.expandWithProblems(problems.total) : dockCopy.expandTitle}
+            // adj617（用户要求）：提示文本后面带上快捷键（Ctrl+D 展开/收起底栏）
+            title={withKbd(problems.total > 0 ? dockCopy.expandWithProblems(problems.total) : dockCopy.expandTitle, KBD.dock)}
+            aria-label={withKbd(problems.total > 0 ? dockCopy.expandWithProblems(problems.total) : dockCopy.expandTitle, KBD.dock)}
           >
             <ToolIcon name="dockExpand" />
           </button>

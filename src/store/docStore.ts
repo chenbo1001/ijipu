@@ -4,7 +4,7 @@
  */
 import './localStorageMigration'
 import { create } from 'zustand'
-import { parseJps, defaultPageConfig, applyFontOverride, mergeJpsConfig, mergeConfigEdits, writeJpsConfig } from '@ijipu/engine'
+import { parseJps, defaultPageConfig, applyFontOverride, mergeJpsConfig, mergeConfigEdits, writeJpsConfig, layoutScore, renderScoreToSvg } from '@ijipu/engine'
 import type { PageConfig, ParseResult } from '@ijipu/engine'
 import { SAMPLES, defaultSample } from '../samples'
 import {
@@ -55,9 +55,26 @@ import {
  *  必须只在用户还未进行任何文件操作时应用，避免它在用户新建/另存为之后才完成，从而把
  *  fileHandle / fileName 覆盖回旧文件（旧值 A）。 */
 let fileStateTouched = false
-import { uiCopy, savePhaseCopy, pasteImportCopy, externalOpenCopy, workspaceCopy } from '../brand/copy'
+import { uiCopy, savePhaseCopy, pasteImportCopy, externalOpenCopy, workspaceCopy, exportCopy } from '../brand/copy'
+// adj615：打印（菜单「打印」/ Ctrl+P）——浏览器侧原语在 export/print.ts，页面在这里现算
+import { installPrintHooks, printPages } from '../export/print'
+// adj615：与预览/导出面板同一个"默认音色"口径（只用到 `gmVoiceRef`，不拉进合成器实现，故不增包体）
+import { firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
 
 export type ViewType = 'code' | 'split' | 'splitH' | 'splitHE' | 'preview'
+
+/**
+ * adj615（用户要求：菜单「打印」+ `Ctrl+P`）：**当前文档的打印页**（每页一段 SVG）。
+ *
+ * 与导出面板同一口径（`ExportPanel.getPages`）：
+ *  · 用**引擎现算**的布局与渲染，与当前视图无关（纯代码视图下也能打印，不必先切到预览）；
+ *  · **有语法错误就返回空**（宁可什么都不打，也别打出半张谱——调用方负责提示）。
+ */
+function currentPrintPages(s: DocState): string[] {
+  if (s.parseResult.errors.some((e) => e.severity === 'error')) return []
+  const instrumentRef = firstEnabledInstrumentRef(useUiStore.getState().playbackHqEnabled)
+  return renderScoreToSvg(layoutScore(s.parseResult, s.pageConfig, instrumentRef))
+}
 
 interface DocState {
   code: string
@@ -136,6 +153,16 @@ interface DocState {
   markSaved: () => void
   /** adj406：粘贴源码导入（返回 false = 内容为空、未替换） */
   importSource: (raw: string) => boolean
+  /**
+   * adj615（用户要求）：**打印当前谱面**——菜单「打印」与 `Ctrl+P` 共用。
+   * 与导出同一口径：有语法错误就提示并**不打**（别打出半张谱）。
+   */
+  printScore: () => void
+  /**
+   * adj615：注册 `beforeprint` / `afterprint`（**幂等**，`App` 挂载时一次）——
+   * 兜住"平台自己弹打印对话框"那条路（那时代码里谁都跑不到，只有 `beforeprint` 会触发）。
+   */
+  installPrintSupport: () => void
 
   // ---- 文件读写（adj70：Web File System Access API 打开/保存对话框） ----
   /** 当前已打开文件的句柄（null = 未关联磁盘文件） */
@@ -566,6 +593,18 @@ export const useDocStore = create<DocState>()((set, get) => ({
     })
     return true
   },
+  // adj615（用户要求）：菜单「打印」与 `Ctrl+P` 共用这一条
+  printScore: () => {
+    const s = get()
+    const pages = currentPrintPages(s)
+    // 有语法错误 / 算不出页面 ⇒ 如实提示、不打（与导出面板同一口径）
+    if (pages.length === 0) {
+      useUiStore.getState().showNotice(exportCopy.blockedByError, 'warn')
+      return
+    }
+    printPages(pages)
+  },
+  installPrintSupport: () => installPrintHooks(() => currentPrintPages(get())),
 
   // ---- 文件读写（adj70） ----
   fileHandle: null,

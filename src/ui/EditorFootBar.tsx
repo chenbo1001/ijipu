@@ -12,6 +12,8 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { problemCopy, dockCopy } from '../brand/copy'
 import { summarizeProblems } from './problems'
+// adj618（用户要求）：状态栏那条告警按钮的提示后面带快捷键（键名一处定义）
+import { KBD, withKbd } from '../brand/shortcuts'
 
 export function EditorFootBar() {
   const code = useDocStore((s) => s.code)
@@ -50,7 +52,7 @@ export function EditorFootBar() {
       <button
         type="button"
         className={`footer-cursor footer-problems${problemsShown ? ' is-active' : ''}`}
-        title={`${dotTitle}（点击${problemsShown ? '收起' : '展开'}底部告警）`}
+        title={withKbd(`${dotTitle}（点击${problemsShown ? '收起' : '展开'}底部告警）`, KBD.problems)}
         onClick={() => toggleDock('problems')}
       >
         <span className={`dot ${dotCls}`} />

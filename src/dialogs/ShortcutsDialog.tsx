@@ -6,14 +6,20 @@
  *          `s`（说明文字）与 `v`（版本）；③ 去掉解析器并不认识的 `h`。
  */
 import { Modal } from '../ui/Modal'
+// adj617（用户要求）：键名只在 `brand/shortcuts.ts` 定义一次——速查表也引它（不写字面量）
+import { KBD } from '../brand/shortcuts'
 
 const SHORTCUTS: [string, string][] = [
-  ['Ctrl+N', '新建'],
-  ['Ctrl+O', '打开文件'],
-  ['Ctrl+S', '保存'],
+  [KBD.newDoc, '新建'],
+  // adj619b（用户要求）：`Ctrl+O` 回到「打开文件」；导出改用 `Ctrl+Y`
+  [KBD.openDoc, '打开文件'],
+  [KBD.export, '导出（底栏）'],
+  [KBD.print, '打印（浏览器里被内核占用，见下）'],
+  [KBD.save, '保存'],
   ['Ctrl+Z', '撤销'],
-  ['Ctrl+Y', '重做'],
-  ['Ctrl+Q', '试听播放'],
+  // adj619b：`Ctrl+Y` 让给「导出」后，重做改用跨平台惯例 `Ctrl+Shift+Z`
+  [KBD.redo, '重做'],
+  [KBD.tryout, '试听播放'],
   ['Tab', '编码 / 预览 切换'],
   ['1 / 2 / 3', '视图：编码 / 拆分 / 预览'],
   ['q / c', '行首插入曲行 Q: / 词行 C:'],
@@ -23,11 +29,25 @@ const SHORTCUTS: [string, string][] = [
   ['v', '行首插入版本 V:'],
   // adj608/adj612/adj613（用户要求）：ESC = 最小化底栏（底栏开着就生效；更内层的输入/菜单/对话框优先，
   // 焦点在底栏的输入框里时：第一次退出输入框、第二次才最小化）
-  ['Esc', '最小化底栏（输入框里先退出输入）'],
+  [KBD.dockMin, '最小化底栏（输入框里先退出输入）'],
   // adj610（用户要求）：底栏展开/收起 + 高度档位各配一个快捷键
-  ['Ctrl+D', '展开 / 收起底栏'],
-  ['Ctrl+H', '底栏高度档位（建议 → 最大 → 建议 → 最小）'],
-  ['Ctrl+~', '本快捷键速查'],
+  [KBD.dock, '展开 / 收起底栏'],
+  [KBD.dockSize, '底栏高度档位（建议 → 最大 → 建议 → 最小）'],
+  // adj614（用户要求）：折行 / 输入条 / 深浅模式 / 视图 各配一个快捷键
+  // （注：`Ctrl+T` 在**浏览器**里被内核占用（新标签页）、拦不住 ⇒ 网页版请点顶栏按钮；
+  //   桌面端实测四条都可用，见 E-2026-300）
+  [KBD.wrap, '折行开关'],
+  [KBD.pad, '输入条开关'],
+  [KBD.theme, '深浅模式（随系统 → 浅色 → 深色）'],
+  [KBD.view, '视图循环（编码 → 拆分 → 左右拆分 → 预览）'],
+  // adj616（用户要求）：排版 / 工作区 / 导入 三个开关
+  [KBD.guides, '排版辅助虚线开关'],
+  [KBD.workspace, '工作区开关'],
+  [KBD.import, '导入开关'],
+  // adj618（用户要求）：告警开关（按 Shift 的 `Ctrl+~` 同款同效，不留死键）
+  [KBD.problems, '告警面板开关'],
+  // adj619c（用户要求）：速查改成 `Alt+F1`
+  [KBD.shortcuts, '本快捷键速查'],
 ]
 
 export function ShortcutsDialog() {

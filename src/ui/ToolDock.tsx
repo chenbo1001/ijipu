@@ -34,7 +34,9 @@ import { ToolIcon } from './ToolIcon'
 import type { ToolIconName } from './toolIcons'
 import { beginDrag } from './dragGesture'
 // adj609：ESC 最小化底栏后把焦点交回编辑区（选择器留在编辑层，见该模块说明）
-import { focusEditorTextarea } from '../editor/editorFocus'// adj528：告警面板的高度常量与算式（单一来源 + 纯函数，smoke 有断言）
+import { focusEditorTextarea } from '../editor/editorFocus'
+// adj617（用户要求）：快捷键提示的唯一出处（页签 / 收起 / 档位按钮的 title 都引它）
+import { KBD, withKbd } from '../brand/shortcuts'// adj528：告警面板的高度常量与算式（单一来源 + 纯函数，smoke 有断言）
 import * as PROBS from './dock/problemsHeight'
 // adj528：告警条数（用于"条数 × 单行实测"算出内容自然高）——纯函数，留在主包
 import { summarizeProblems } from './problems'
@@ -256,15 +258,16 @@ const clampH = (v: number, chromeH: number) => {
  * `t.icon ? <ToolIcon/> : t.glyph` 那个分支一并删掉（类型上 `icon` 变为**必填**），
  * 从结构上杜绝"再借某个字符当图标"（与 adj458 删掉 `rotate` 复用同一思路）。
  */
-const TABS: { key: DockPanelKey; label: string; icon: ToolIconName }[] = [
+const TABS: { key: DockPanelKey; label: string; icon: ToolIconName; kbd?: string }[] = [
   // adj540：工作区排第一（手机端文件操作主入口，用户要求）；图标用 `public/icons/工作区.png`
-  { key: 'workspace', label: dockCopy.tabWorkspace, icon: 'workspace' },
+  // adj617（用户要求）：页签的提示文本后面带上快捷键（键名来自 `brand/shortcuts.ts` 一处定义）
+  { key: 'workspace', label: dockCopy.tabWorkspace, icon: 'workspace', kbd: KBD.workspace },
   // adj562：导入紧跟工作区（用户要求）；adj564：图标用设计图 `public/icons/导入.png`
-  { key: 'import', label: dockCopy.tabImport, icon: 'import' },
+  { key: 'import', label: dockCopy.tabImport, icon: 'import', kbd: KBD.import },
   // adj565：告警图标由 `⚠` 字符换成设计图 `public/icons/告警.png`
-  { key: 'problems', label: dockCopy.tabProblems, icon: 'problems' },
-  { key: 'tryout', label: dockCopy.tabTryout, icon: 'play' },
-  { key: 'export', label: dockCopy.tabExport, icon: 'export' },
+  { key: 'problems', label: dockCopy.tabProblems, icon: 'problems', kbd: KBD.problems },
+  { key: 'tryout', label: dockCopy.tabTryout, icon: 'play', kbd: KBD.tryout },
+  { key: 'export', label: dockCopy.tabExport, icon: 'export', kbd: KBD.export },
   // adj603：原「设置」页签改名为「全局」（本机偏好），紧跟其后新增「谱面」（谱面设置）
   { key: 'settings', label: dockCopy.tabSettings, icon: 'settings' },
   { key: 'score', label: dockCopy.tabScore, icon: 'scoreSettings' },
@@ -936,6 +939,43 @@ export function ToolDock() {
     setSizePhase(0)
   }
 
+  /**
+   * adj619（用户要求）：**底栏入口快捷键**（`Ctrl+Q/Y/B/I/\`` → 试听/导出/工作区/导入/告警）
+   * 发来的"打开这个页签"请求。
+   *
+   * 用户口径："底栏按钮响应快捷键时，如果此时底栏 dock 为最小化，则应是展开到建议高度。"
+   *
+   * 语义与**点页签**完全一致（adj611：最小档下点页签 = 切页签 + 回建议高度）：
+   *  · **最小化时** ⇒ 退出最小化（回到该面板自己的高度 = 建议高度 / 用户拖过的值）+ 切到该页签，
+   *    **不走**"同页签就收起"那套开关语义（否则用户按下去看到的是"没反应"，甚至"底栏没了"）；
+   *  · **没最小化时** ⇒ 保持原有开关语义（关 → 开；已开且正是它 → 收起；已开但不是 → 只切页签）。
+   *
+   * "是否最小化"是本组件的内部状态，所以 App 只发请求、由这里决定语义——与 `requestDockSizeStep`
+   * 同一套路。实现上**只依赖 nonce 这个数字**，请求对象 / `minimized` / `exitMinimized` 都经 ref
+   * 取最新值：否则 effect 会因为"捕获了对象/函数"被 lint 判为每次渲染都要重跑
+   * （那会变成"渲染一次就开一次底栏"）。
+   */
+  const dockPanelRequest = useUiStore((s) => s.dockPanelRequest)
+  const dockPanelNonce = dockPanelRequest?.nonce ?? 0
+  const dockPanelRequestRef = useRef(dockPanelRequest)
+  dockPanelRequestRef.current = dockPanelRequest
+  const minimizedRef = useRef(minimized)
+  minimizedRef.current = minimized
+  const exitMinimizedRef = useRef(exitMinimized)
+  exitMinimizedRef.current = exitMinimized
+  useEffect(() => {
+    if (dockPanelNonce === 0) return // 初始值（没人按过）不触发
+    const req = dockPanelRequestRef.current
+    if (!req) return
+    const ui = useUiStore.getState()
+    if (minimizedRef.current) {
+      exitMinimizedRef.current()
+      ui.setDockPanel(req.panel)
+      return
+    }
+    ui.toggleDock(req.panel)
+  }, [dockPanelNonce])
+
   // adj487：拖拽改用 Pointer Events（鼠标 + 触屏 + 触控笔）——此前只监听 mousemove/mouseup，
   // 手机上拖不动。位移与结束回调都在手势里处理，不再常驻 window 监听。
   const startDrag = (e: React.PointerEvent) => {
@@ -1032,8 +1072,9 @@ export function ToolDock() {
           type="button"
           className="tool-dock-collapse"
           onClick={closeDock}
-          title={dockCopy.collapseTitle}
-          aria-label={dockCopy.collapseTitle}
+          // adj617（用户要求）：提示文本后面带上快捷键（Ctrl+D 展开/收起；Esc 最小化）
+          title={withKbd(dockCopy.collapseTitle, KBD.dock)}
+          aria-label={withKbd(dockCopy.collapseTitle, KBD.dock)}
         >
           <ToolIcon name="dockCollapse" size={16} />
         </button>
@@ -1047,8 +1088,12 @@ export function ToolDock() {
           type="button"
           className="tool-dock-size-btn"
           onClick={cycleDockHeight}
-          title={dockCopy.sizeTitle(dockCopy.sizeName[sizeStep.cur], dockCopy.sizeName[sizeStep.next])}
-          aria-label={dockCopy.sizeTitle(dockCopy.sizeName[sizeStep.cur], dockCopy.sizeName[sizeStep.next])}
+          // adj617（用户要求）：档位按钮的提示后面带 Ctrl+H（Esc 最小化也写在这条上）
+          title={withKbd(dockCopy.sizeTitle(dockCopy.sizeName[sizeStep.cur], dockCopy.sizeName[sizeStep.next]), `${KBD.dockSize}／${KBD.dockMin}`)}
+          aria-label={withKbd(
+            dockCopy.sizeTitle(dockCopy.sizeName[sizeStep.cur], dockCopy.sizeName[sizeStep.next]),
+            `${KBD.dockSize}／${KBD.dockMin}`,
+          )}
           data-size={sizeStep.cur}
           data-current={heightPresetActive}
         >
@@ -1095,7 +1140,8 @@ export function ToolDock() {
                 // 于是"我把页签栏手动滚开、再点回当前页签"就永远回不来 ⇒ 这里也补一次对齐。
                 alignActiveTab()
               }}
-              title={t.label}
+              // adj617（用户要求）：提示文本后面带上快捷键（有快捷键的页签才有）
+              title={t.kbd ? withKbd(t.label, t.kbd) : t.label}
             >
               <span className="tool-dock-tab-icon" aria-hidden="true">
                 {/* adj486：设计图标（顶栏同一套）。

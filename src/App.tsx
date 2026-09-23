@@ -21,6 +21,10 @@ import { drainExternalFiles, hasShell, onExternalOpen } from './store/externalOp
 import { startWorkspaceIndexWarmup } from './store/workspaceIndexWarm'
 // adj610：Ctrl+D / Ctrl+H 的"有告警先看告警"判据与「展开底栏」按钮同一份（`ui/problems.ts`）
 import { summarizeProblems } from './ui/problems'
+// adj614：Ctrl+M 的视图循环顺序（与顶栏「视图」下拉同一份，见 `ui/viewCycle.ts`）
+import { nextViewType } from './ui/viewCycle'
+// adj614：Ctrl+T 的深浅模式循环（与顶栏「深浅模式」按钮同一份）
+import { nextThemeMode } from './brand/themes'
 // adj350：对话框懒加载（React.lazy）——首屏不加载它们，显著减小主包、加快首屏显示
 // adj492：「关于」已迁入底栏 dock（见 ui/ToolDock），此处不再需要弹窗版懒加载
 const SamplesDialog = lazy(() => import('./dialogs/SamplesDialog').then((m) => ({ default: m.SamplesDialog })))
@@ -76,6 +80,17 @@ function App() {
    */
   useEffect(() => {
     startWorkspaceIndexWarmup()
+  }, [])
+
+  /**
+   * adj615（用户要求）：注册**打印钩子**（`beforeprint` / `afterprint`，幂等，只装一次）。
+   *
+   * 为什么要它：`Ctrl+P` 在浏览器里会被内核收去**弹自己的打印对话框**（页面收不到 keydown ⇒
+   * 应用里的打印处理跑不到）；但那种情况仍会触发 `beforeprint` ⇒ 在这里补上"打印用页面 + 隐藏应用界面"，
+   * 打出来的才是谱面而不是整个应用界面（见 `export/print.ts`）。
+   */
+  useEffect(() => {
+    useDocStore.getState().installPrintSupport()
   }, [])
 
   // adj48：跟随系统深浅色——监听 prefers-color-scheme 变化
@@ -134,14 +149,27 @@ function App() {
       const st = useDocStore.getState()
       const ui = useUiStore.getState()
       if (e.ctrlKey && e.key.toLowerCase() === 'z' && !e.shiftKey) {
-        // adj70：撤销 Ctrl+Z（重做统一为 Ctrl+Y）
+        // adj70：撤销 Ctrl+Z（重做原为 Ctrl+Y；adj619b 起挪到 Ctrl+Shift+Z）
         e.preventDefault()
         e.stopPropagation()
         st.undo()
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'z' && e.shiftKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        /**
+         * adj619b：`Ctrl+Y` 让给「导出」之后，**重做改用跨平台惯例 `Ctrl+Shift+Z`**
+         * （`Ctrl+Z` 撤销那条带 `!e.shiftKey`，两条互不抢键；速查表与菜单提示同步改了）。
+         */
+        st.redo()
       } else if (e.ctrlKey && e.key.toLowerCase() === 'y') {
         e.preventDefault()
         e.stopPropagation()
-        st.redo()
+        /**
+         * adj619b（用户要求）：**`Ctrl+Y` = 导出开关**（用户口径"导出的快捷键改为 Ctrl+Y"）。
+         * ⚠ 这个键原来是"重做" ⇒ 重做已挪到 `Ctrl+Shift+Z`（见上一条分支与速查表），
+         * 一个键不能既重做又开导出。
+         */
+        ui.requestDockPanel('export')
       } else if (e.ctrlKey && e.key.toLowerCase() === 's') {
         e.preventDefault()
         e.stopPropagation()
@@ -150,17 +178,108 @@ function App() {
         e.preventDefault()
         e.stopPropagation()
         st.newDoc()
-      } else if (e.ctrlKey && e.key.toLowerCase() === 'o') {
-        e.preventDefault()
-        e.stopPropagation()
-        void st.openFile()
       } else if (e.ctrlKey && e.key.toLowerCase() === 'q') {
         e.preventDefault()
         e.stopPropagation()
         // adj563：原为 `openModal('playback')`，但试听早在 adj462 迁进底栏 dock
         // ⇒ `modal === 'playback'` 没有渲染分支、**Ctrl+Q 是死的**（菜单上还印着 Ctrl+Q）。
         // 与菜单项 `entryTryout` 同口径：开关「试听」底栏。
-        ui.toggleDock('tryout')
+        // adj619（用户要求）：底栏入口快捷键走 `requestDockPanel`——**最小化时先展开到建议高度**
+        //（"是否最小化"只有 ToolDock 自己知道，故只发请求，见 uiStore 里那条说明）。
+        ui.requestDockPanel('tryout')
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault()
+        e.stopPropagation()
+        /**
+         * adj619b（用户要求）：**`Ctrl+O` 改回「打开文件」**——用户口径"对于 Ctrl+O 还是保持
+         * 对应打开对话框吧"。于是 adj615 那次"改挂导出"整体回退：菜单里「打开」的 `Ctrl+O`
+         * 角标也回来了，导出改用 `Ctrl+Y`（见上面的分支）。
+         */
+        void st.openFile()
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault()
+        e.stopPropagation()
+        /**
+         * adj615（用户要求）：**Ctrl+P = 打印**（打开打印对话框，打印当前谱面）。
+         * 与菜单「打印(&D)…」共用 `printScore()`：现算布局与 SVG、有语法错误就提示不打。
+         *
+         * ⚠ 平台差异（实测见 E-2026-301）：**浏览器**把 `Ctrl+P` 留给了自己的打印对话框
+         * （页面收不到 keydown）——不过那条路同样会走 `beforeprint`，打印内容一样正确
+         * （`installPrintSupport()` 在那里补页面）；桌面壳里本 handler 正常生效。
+         */
+        st.printScore()
+      } else if (e.ctrlKey && e.key.toLowerCase() === 't') {
+        e.preventDefault()
+        e.stopPropagation()
+        /**
+         * adj614（用户要求）：**Ctrl+T = 深浅模式循环**（`auto → light → dark → auto`）。
+         * 循环表在 `brand/themes.ts` 的 `nextThemeMode()`，与顶栏「深浅模式」按钮**同一份**
+         * （按钮的提示文案"点击切到哪一档"说的就是它的结果）。
+         *
+         * ⚠ **平台限制（实测）**：浏览器把 `Ctrl+T` 留给了"新标签页"，`preventDefault` 拦不住
+         * ⇒ 网页版这一条按不动（`Ctrl+L` / `Ctrl+K` / `Ctrl+M` 浏览器里都能拦下）；
+         * 桌面壳（WebView2 没有标签页 UI）**四条都可用**——含 Ctrl+T 在内已用真机 CDP 验过，见 E-2026-300。
+         */
+        ui.setThemeMode(nextThemeMode(ui.themeMode))
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault()
+        e.stopPropagation()
+        // adj614（用户要求）：Ctrl+L = 折行开关（与顶栏「折行」按钮同一个 store 字段）
+        ui.setAutoWrap(!ui.autoWrap)
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        e.stopPropagation()
+        // adj614（用户要求）：Ctrl+K = 输入条开关（与顶栏「输入条」按钮同一个 store 字段）
+        ui.setShowScriptPad(!ui.showScriptPad)
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault()
+        e.stopPropagation()
+        /**
+         * adj614（用户要求）：**Ctrl+M = 视图循环**（编码 → 拆分 → 左右拆分 → 预览 → 编码）。
+         * 顺序与"下一个是谁"收敛在 `ui/viewCycle.ts`，与顶栏「视图」下拉**同一份**
+         * （窄屏跳过「左右拆分」、`splitHE`/`splitH` 按 `splitHDir` 选方向，两处口径一致）。
+         */
+        st.setViewType(nextViewType(st.viewType, { narrow: ui.isNarrow, splitHDir: ui.splitHDir }))
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'e') {
+        e.preventDefault()
+        e.stopPropagation()
+        /**
+         * adj616（用户要求）：**Ctrl+E = 排版开关**（排版辅助虚线；与顶栏「排版」按钮、
+         * 菜单「排版」同一件事）——直接翻 `uiStore.showGuides` 这一个字段（顶栏那个按钮也是
+         * 这么做的），不另建一份状态。
+         */
+        ui.setShowGuides(!ui.showGuides)
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault()
+        e.stopPropagation()
+        // adj616（用户要求）：Ctrl+B = 工作区开关（与菜单「工作区」、底栏「工作区」页签同一条入口）
+        ui.requestDockPanel('workspace')
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'i') {
+        e.preventDefault()
+        e.stopPropagation()
+        // adj616（用户要求）：Ctrl+I = 导入开关（与菜单「粘贴源码导入」、底栏「导入」页签同一条入口）
+        ui.requestDockPanel('import')
+      } else if (e.ctrlKey && (e.code === 'Backquote' || e.key === '`' || e.key === '~')) {
+        e.preventDefault()
+        e.stopPropagation()
+        /**
+         * adj618（用户要求）：**`Ctrl+`` = 告警开关**——与底栏「告警」页签、状态栏里那条告警文本按钮
+         * 共用同一条入口。按 Shift 的那一档（`Ctrl+~`）**同样走告警**（同一个物理键，不给它留死键）。
+         *
+         * 用 `e.code === 'Backquote'`（物理键）而不是只看 `e.key`：这个键在中文/其它布局下
+         * 产出的字符各不相同，认物理键才不会"换个输入法就按不动"。
+         *
+         * （原先 `Ctrl+~` 兼作"快捷键速查"，adj619c 起速查改成 `Alt+F1`，见下一条分支。）
+         */
+        ui.requestDockPanel('problems')
+      } else if (e.altKey && e.key === 'F1') {
+        e.preventDefault()
+        e.stopPropagation()
+        /**
+         * adj619c（用户要求）：**`Alt+F1` = 快捷键速查**（用户口径"快捷键速查改为 Alt+F1"）。
+         * 与菜单「快捷键速查(&K)…」共用同一个 `openModal('shortcuts')`。
+         */
+        ui.openModal('shortcuts')
       } else if (e.ctrlKey && e.key.toLowerCase() === 'd') {
         e.preventDefault()
         e.stopPropagation()

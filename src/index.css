@@ -4564,3 +4564,43 @@ span.ws-check {
   /* 窄屏过滤框字号降一档，让列宽内能多显示几个字 */
   .ws-filter { font-size: 11px; padding-left: 6px; padding-right: 6px; }
 }
+
+/* ============ 打印（adj615：菜单「打印」/ Ctrl+P）============
+ *
+ * 口径：**就在当前窗口打印**（`src/export/print.ts` 把每一页 SVG 塞进 `#jp-print-root`，
+ * 并给 `<body>` 加 `.jp-printing`）——不开新窗口，因为 adj411 实测过"新窗口会被拦"。
+ * 这里只做两件事：
+ *   ① 屏幕上永远不显示打印容器（`display: none`）；
+ *   ② 打印时**只留**打印容器（`body.jp-printing > *:not(#jp-print-root)` 全部隐藏）。
+ * `@page` 用 A4、零边距：分页与四边留白都已经画在**页面本身**（`pageConfig` 的边距）
+ * 里了，再加打印机边距会变成双份。
+ */
+#jp-print-root {
+  display: none;
+}
+@page {
+  size: A4;
+  margin: 0;
+}
+@media print {
+  body.jp-printing > *:not(#jp-print-root) {
+    display: none !important;
+  }
+  body.jp-printing #jp-print-root {
+    display: block;
+  }
+  /* 每一页独占一张纸（末页不留空白页）；SVG 按纸宽等比缩放 */
+  #jp-print-root .jp-print-page {
+    break-after: page;
+    page-break-after: always;
+  }
+  #jp-print-root .jp-print-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+  #jp-print-root svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+}

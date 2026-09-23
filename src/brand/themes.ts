@@ -34,3 +34,18 @@ export const DEFAULT_THEME = 'dianlan'
 export type ThemeMode = 'auto' | 'light' | 'dark'
 
 export const DEFAULT_THEME_MODE: ThemeMode = 'auto'
+
+/**
+ * adj614（用户要求 Ctrl+T 切主题模式）：深浅模式的**循环顺序**——`auto → light → dark → auto`。
+ *
+ * 为什么放在这里：这个顺序有两个消费方（顶栏「深浅模式」按钮与 `Ctrl+T`），
+ * **同一份顺序只能有一处定义**（两份清单必然漂移，E-2026-076 同类教训）。
+ * 顶栏按钮的提示文案里写着"点击切到哪一档"，说的就是这个函数的结果。
+ */
+export const THEME_MODE_CYCLE: readonly ThemeMode[] = ['auto', 'light', 'dark']
+
+/** 下一个深浅模式（`Ctrl+T` / 顶栏按钮共用） */
+export function nextThemeMode(m: ThemeMode): ThemeMode {
+  const at = THEME_MODE_CYCLE.indexOf(m)
+  return THEME_MODE_CYCLE[(at + 1) % THEME_MODE_CYCLE.length]
+}
