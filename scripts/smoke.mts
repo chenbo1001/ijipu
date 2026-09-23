@@ -9729,6 +9729,65 @@ function runAdj596MixedRepeatAndEndMarkTests() {
   }
 }
 
+function runAdj598UnclosedVoltaScopeTests() {
+  console.log('[127] unclosed volta house: play to next jump/end (adj598)')
+  const HEAD = 'V: 1.0\nB: t\nD: C\nP: 4/4\nJ: 120\n'
+  const play = (src: string) => {
+    const r = parseJps(src)
+    const seq = buildPlaySequence(r, layoutScore(r, defaultPageConfig), 120)
+    const events = [...seq.events].sort((a, b) => a.atMs - b.atMs)
+    return { totalMs: seq.totalMs, n: events.length, pitch: events.map((e) => e.pitch ?? e.placed.audioPitch ?? '') }
+  }
+  // ① 未封闭房子后面**第一根「跳跃/结束」线**是 `|&fine`：落到它时它自己的「曲终」要生效
+  //   （旧口径只认 `:|`/`||`，会把房子一路吞到更远的 `:|`，于是 `&fine` 形同没写）
+  {
+    const p = play(
+      HEAD +
+        'Q: 1 1 1 1 |&ds\n' +
+        'Q: 2 2 2 2 |["1." 3 3 3 3 |]/\n' +
+        'Q: 4 4 4 4 |&fine\n' +
+        'Q: 5 5 5 5 :|\n' +
+        'Q: 6 6 6 6 ||\n',
+    )
+    check(
+      'adj598 未封闭房子 → 下一根 `|&fine`：跳过房子后落到该线即**曲终**（3 小节 / 12 音 / 6000ms）',
+      p.totalMs === 6000 && p.n === 12,
+      JSON.stringify({ totalMs: p.totalMs, n: p.n, pitch: p.pitch.join(',') }),
+    )
+    check(
+      'adj598 上例只奏 `1 1 1 1`（大反复前）+ `1 1 1 1` + `2 2 2 2`；`4 4 4 4`/`5 5 5 5`/`6 6 6 6` 都不奏',
+      p.pitch.join(',') === 'C4,C4,C4,C4,C4,C4,C4,C4,D4,D4,D4,D4',
+      p.pitch.join(','),
+    )
+  }
+  // ② 未封闭房子后面第一根是 `|&ds`：落到该线（此时 `&ds` 已在本遍触发过、为 no-op）后
+  //   **继续演奏其后的音乐**，而不是一路吞到更远的 `:|`
+  {
+    const p = play(
+      HEAD +
+        'Q: 1 1 1 1 |["1." 2 2 2 2 |]/\n' +
+        'Q: 3 3 3 3 |&ds\n' +
+        'Q: 4 4 4 4 :|\n' +
+        'Q: 5 5 5 5 ||\n',
+    )
+    check(
+      'adj598 未封闭房子 → 下一根 `|&ds`：跳过房子后从该线之后继续（6 小节 / 24 音 / 12000ms，含 `4 4 4 4`）',
+      p.totalMs === 12000 && p.n === 24 && p.pitch.join(',').includes('F4,F4,F4,F4'),
+      JSON.stringify({ totalMs: p.totalMs, n: p.n, pitch: p.pitch.join(',') }),
+    )
+  }
+  // ③ 源码级：判据必须把三种"跳跃/结束"修饰符都算进去（防止后续"简化"漏掉某个）
+  {
+    const src = String(readFileSync('packages/ijipu-engine/src/engine/playback/sequence.ts', 'utf8'))
+    check(
+      'adj598 「下一处跳跃或结束」判据含 `&ds`/`&dc`/`&fine`（源码级）',
+      /isJumpOrEndBar/.test(src) &&
+        /m\.includes\('ds'\)[\s\S]{0,160}m\.includes\('dc'\)[\s\S]{0,160}m\.includes\('fine'\)/.test(src),
+      '',
+    )
+  }
+}
+
 async function runAdj541DockToggleTests() {
   console.log('[123] dock expand/collapse entries (adj541)')
   const editorSrc = String(readFileSync('src/editor/EditorPane.tsx', 'utf8'))
@@ -11156,6 +11215,14 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj596 多声部反复/末尾记号用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj598UnclosedVoltaScopeTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj598 未封闭房子范围用例抛异常', e)
     }
   })
   .then(() => {
