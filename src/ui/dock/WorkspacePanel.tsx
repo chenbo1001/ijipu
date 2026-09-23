@@ -68,6 +68,7 @@ import {
   type SearchResult,
 } from '../../store/workspace'
 import { loadWorkspaceIndex, saveWorkspaceIndex } from '../../store/fileHandleDb'
+import { INDEX_STALE_MS, getInflightWarmScan, markWorkspaceDataChanged } from '../../store/workspaceIndexWarm'
 
 /** 「选择文件夹」静默失败的判定时间（超过它还没弹选择框就提示，而不是让用户干等） */
 const PICKER_NO_RESPONSE_MS = 5000
@@ -82,9 +83,10 @@ const RESULT_RENDER_MAX = 300
 /**
  * adj546：落盘索引的**保鲜期**——过期才在后台重扫。
  * 为什么不是"每次打开面板都重扫"：手机上扫一遍 5550 文件要几十秒（用户实测 27s），
- * 每次进面板都跑一遍是灾难。10 分钟内直接用落盘索引（秒开），过期或用户手动「重新扫描」才重扫。
+ * 每次进面板都跑一遍是灾难。30 分钟内直接用落盘索引（秒开），过期或用户手动「重新扫描」才重扫。
+ *
+ * adj599：常量移到 `store/workspaceIndexWarm.ts`（启动后台预热也用同一个）——**一处维护**。
  */
-const INDEX_STALE_MS = 30 * 60 * 1000
 
 /** 正在编辑的输入框：重命名 / 新建夹 / 另存 / 新建谱（四者共用同一个输入区） */
 type EditState = { kind: 'rename' | 'newFolder' | 'saveAs' | 'newScore'; value: string; name?: string }
@@ -199,6 +201,33 @@ export function WorkspacePanel() {
   const scanGenRef = useRef(0)
   const runScan = useCallback((rec: WorkspaceRecord, wsId: string, preferFirst: readonly string[] = []): Promise<SearchResult> => {
     if (scanPromiseRef.current) return scanPromiseRef.current
+    /**
+     * adj599：**启动后台预热可能正在扫同一个工作区** —— 直接复用那一次枚举
+     * （同一份数据没必要跑两遍，E-2026-277 同类教训）。代价是这次没有"已扫描 N 项"的渐进显示，
+     * 但预热本来就已经扫了一部分，用户看到的是"稍等一下就出结果"。
+     */
+    const warm = getInflightWarmScan(wsId)
+    if (warm) {
+      setScanInfo({ scanned: 0, found: indexRef.current?.length ?? 0, ms: 0 })
+      const reuse = (async (): Promise<SearchResult> => {
+        try {
+          const r = await warm
+          indexRef.current = r.hits
+          indexKeyRef.current = indexScopeKey(rec)
+          indexAtRef.current = Date.now()
+          idxMetaRef.current = { truncated: r.truncated, blocked: r.blocked }
+          setIndexVersion((v) => v + 1)
+          return r
+        } catch {
+          return { hits: indexRef.current ?? [], ...idxMetaRef.current, scanned: 0 }
+        } finally {
+          scanPromiseRef.current = null
+          setScanInfo(null)
+        }
+      })()
+      scanPromiseRef.current = reuse
+      return reuse
+    }
     const gen = scanGenRef.current
     const t0 = Date.now()
     setScanInfo({ scanned: 0, found: indexRef.current?.length ?? 0, ms: 0 })
@@ -524,6 +553,12 @@ export function WorkspacePanel() {
     // 这里**只动 ref、不 setState**：`invalidateCache` 进了 `refresh` 的依赖链，
     // 在里面 setState 会把"渲染 → effect → setState"重新引回来（E-2026-249 那个无限刷新循环）。
     scanGenRef.current += 1
+    /**
+     * adj599：同时作废**启动后台预热**正在跑的那一次枚举（`gen` 是模块级的）——
+     * 否则"预热扫描期间改名/删除"的结果会被预热当作可信结果**写回落盘索引**，
+     * 下次打开面板就吃到一份错的索引。
+     */
+    markWorkspaceDataChanged()
   }, [])
   /**
    * 列目录（带缓存——同一路径再次访问直接走缓存，避免每次都打 IndexedDB / FSA）。

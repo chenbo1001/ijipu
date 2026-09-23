@@ -9788,6 +9788,41 @@ function runAdj598UnclosedVoltaScopeTests() {
   }
 }
 
+function runAdj599WarmTests() {
+  console.log('[128] workspace index warmup on startup (adj599)')
+  const src = String(readFileSync('src/store/workspaceIndexWarm.ts', 'utf8'))
+  const app = String(readFileSync('src/App.tsx', 'utf8'))
+  const panel = String(readFileSync('src/ui/dock/WorkspacePanel.tsx', 'utf8'))
+  check('adj599 App 启动时调用预热（幂等，只跑一次）', /startWorkspaceIndexWarmup\(\)/.test(app) && /if \(started\) return/.test(src) && /let started = false/.test(src), '')
+  check(
+    'adj599 **当前工作区优先**，其余按"最近工作区"列表顺序，逐个串行',
+    /\[\.\.\.\(cur \? \[cur\] : \[\]\), \.\.\.list\.filter\(\(r\) => r\.id !== cur\?\.id\)\]/.test(src) && /for \(const rec of ordered\)/.test(src),
+    '',
+  )
+  check(
+    'adj599 未授权不申请（`prompt`/`denied` 跳过；模块内不得出现 requestWorkspacePermission）',
+    /perm === 'denied' \|\| perm === 'prompt'/.test(src) && !/requestWorkspacePermission/.test(src),
+    '',
+  )
+  check(
+    'adj599 新鲜落盘索引跳过重扫，且 `INDEX_STALE_MS` **单处维护**（模块导出、面板引用）',
+    /export const INDEX_STALE_MS/.test(src) && /INDEX_STALE_MS/.test(panel) && !/const INDEX_STALE_MS =/.test(panel),
+    '',
+  )
+  check(
+    'adj599 空闲调度（requestIdleCallback，不可用回退 setTimeout）',
+    /requestIdleCallback/.test(src) && /window\.setTimeout\(cb, 1500\)/.test(src),
+    '',
+  )
+  check(
+    'adj599 写操作作废在跑的预热（面板 invalidateCache 调 markWorkspaceDataChanged）',
+    /markWorkspaceDataChanged\(\)/.test(panel) && /export function markWorkspaceDataChanged/.test(src),
+    '',
+  )
+  check('adj599 面板复用**正在跑的预热扫描**（同一工作区不叠两份枚举）', /getInflightWarmScan\(wsId\)/.test(panel) && /export function getInflightWarmScan/.test(src), '')
+  check('adj599 后台预热**不弹提示**（只 console.info；否则启动时一串"索引完成"是噪声）', !/showNotice/.test(src) && /console\.info/.test(src), '')
+}
+
 async function runAdj541DockToggleTests() {
   console.log('[123] dock expand/collapse entries (adj541)')
   const editorSrc = String(readFileSync('src/editor/EditorPane.tsx', 'utf8'))
@@ -11223,6 +11258,14 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj598 未封闭房子范围用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj599WarmTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj599 启动预热索引用例抛异常', e)
     }
   })
   .then(() => {

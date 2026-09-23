@@ -18,6 +18,7 @@ import { useDocStore } from './store/docStore'
 import { useUiStore } from './store/uiStore'
 // adj538：桌面壳「外部打开」（双击 .jps）——拉取待打开队列 + 监听后续打开请求
 import { drainExternalFiles, hasShell, onExternalOpen } from './store/externalOpen'
+import { startWorkspaceIndexWarmup } from './store/workspaceIndexWarm'
 // adj350：对话框懒加载（React.lazy）——首屏不加载它们，显著减小主包、加快首屏显示
 // adj492：「关于」已迁入底栏 dock（见 ui/ToolDock），此处不再需要弹窗版懒加载
 const SamplesDialog = lazy(() => import('./dialogs/SamplesDialog').then((m) => ({ default: m.SamplesDialog })))
@@ -62,6 +63,17 @@ function App() {
     }
     load() // ① 冷启动：处理启动参数带来的文件
     return onExternalOpen(load) // ② 热启动：后续再有双击就再拉一次
+  }, [])
+
+  /**
+   * adj599（用户要求）：**启动后在后台空闲时段预热历史工作区的索引**。
+   * 用户口径："打开网站后就在后台异步进行，对历史工作区的目录进行索引缓存，先当前工作区，
+   * 再其它工作区，这样在用户点击工作区时，基本就已索引完成；当然对于新工作区，就只能立即索引缓存。"
+   * 细节（空闲调度、当前优先、只扫已授权且索引过期的、写操作作废在跑的扫描、不弹提示）都在
+   * `startWorkspaceIndexWarmup()` 里；这里只负责"启动一次"（幂等）。
+   */
+  useEffect(() => {
+    startWorkspaceIndexWarmup()
   }, [])
 
   // adj48：跟随系统深浅色——监听 prefers-color-scheme 变化
