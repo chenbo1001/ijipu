@@ -102,22 +102,38 @@ function App() {
    *
    * 三处都来自 `brand/version.ts` 的 `APP_TITLE_FULL` 单一来源：
    *   ① `document.title`：浏览器页签 + PWA 页签（同一份 window.title，无副作用）；
-   *   ② `__TAURI__.window.getCurrentWindow().setTitle(...)`：桌面 OS 窗口标题栏 / 任务栏；
+   *   ② `core.invoke('plugin:window|set_title', { label, value })`：桌面 OS 窗口标题栏 / 任务栏
+   *      —— 用裸 IPC 而非 `getCurrentWindow().setTitle()` JS API，因为后者在 React mount 时
+   *      可能撞上 `window.__TAURI__` 注入时机（adj621 实测：mount 那一刻 `__TAURI__.window`
+   *      子树可能还没 ready，JS API 包装的 setTitle 静默失败、document.title 改对了但 OS 窗口标题
+   *      没动；用户实测看到的 OS 任务栏一直是 `tauri.conf.json` 里的硬编码「爱记谱 iJipu」）。
+   *      用 `core.invoke` 走短路径更稳：capability 已声明 `core:window:allow-set-title`，
+   *      IPC 参数 `{ label: 'main', value: APP_TITLE_FULL }`（v2 命令签名是 `value` 不是 `title`）。
    *   ③ 初始 `index.html` <title> 仍是 `爱记谱 iJipu`（无版本），挂载前那一瞬的占位——
    *      几十毫秒内就被本 effect 覆盖；用户能看到的最终标题就是这里 set 的完整形式。
    *
-   * `setTitle` 失败（如非 Tauri 环境或权限缺失）静默忽略——浏览器里没这个 API，
-   * `document.title` 已设好；桌面壳里 capability 已声明 `core:window:allow-set-title`。
+   * 设置 OS 窗口标题放在 `requestAnimationFrame` 之后跑，确保 WebView 的 `withGlobalTauri`
+   * 注入窗口标题 IPC 通道就绪（adj621 实测：mount 那一刻直接调会被静默吞掉，延一帧就好）。
+   *
+   * 失败（非 Tauri 环境 / 权限缺失）静默忽略——浏览器里没这个 IPC。
    */
   useEffect(() => {
     document.title = APP_TITLE_FULL
-    const g = (window as unknown as { __TAURI__?: { window?: { getCurrentWindow?: () => { setTitle?: (t: string) => Promise<unknown> } } } }).__TAURI__
-    const setter = g?.window?.getCurrentWindow?.().setTitle
-    if (typeof setter === 'function') {
-      void setter(APP_TITLE_FULL).catch(() => {
-        /* setTitle 失败不影响页面功能 */
-      })
-    }
+    const raf = requestAnimationFrame(() => {
+      const g = (window as unknown as {
+        __TAURI__?: {
+          core?: { invoke?: (cmd: string, args?: unknown) => Promise<unknown> }
+        }
+      }).__TAURI__
+      const invoke = g?.core?.invoke
+      if (typeof invoke === 'function') {
+        void invoke('plugin:window|set_title', { label: 'main', value: APP_TITLE_FULL }).catch(() => {
+          /* setTitle 失败不影响页面功能 —— document.title 已生效，至少页签/任务栏 tooltip
+             用的是页面 title（多数浏览器/Win 任务栏 hover 都看这个） */
+        })
+      }
+    })
+    return () => cancelAnimationFrame(raf)
   }, [])
 
   // adj48：跟随系统深浅色——监听 prefers-color-scheme 变化
