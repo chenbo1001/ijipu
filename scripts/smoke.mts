@@ -9823,6 +9823,32 @@ function runAdj599WarmTests() {
   check('adj599 后台预热**不弹提示**（只 console.info；否则启动时一串"索引完成"是噪声）', !/showNotice/.test(src) && /console\.info/.test(src), '')
 }
 
+function runAdj600Tests() {
+  console.log('[129] settings panel reseeds when the score config changes (adj600)')
+  const src = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
+  const store = String(readFileSync('src/store/docStore.ts', 'utf8'))
+  check(
+    'adj600 `pageConfig` 变化时面板**重新取种子**（draft + snapRef + committedRef 一起更新）',
+    /useEffect\(\(\) => \{[\s\S]{0,300}?setDraft\(\{ \.\.\.pageConfig \}\)[\s\S]{0,200}?snapRef\.current = \{ \.\.\.pageConfig \}[\s\S]{0,200}?committedRef\.current = false/.test(src),
+    '',
+  )
+  check(
+    'adj600 判据：**不是本面板刚写进去的那一份**才算外部变化（引用 + JSON 兜底）',
+    /pageConfig === lastAppliedRef\.current \|\| JSON\.stringify\(pageConfig\) === JSON\.stringify\(lastAppliedRef\.current\)/.test(src),
+    '',
+  )
+  check(
+    'adj600 三处写入都同步 `lastAppliedRef`（预览 / 取消恢复 / 保存）',
+    (src.match(/lastAppliedRef\.current = /g) ?? []).length >= 4,
+    String((src.match(/lastAppliedRef\.current = /g) ?? []).length),
+  )
+  check(
+    'adj600 「本机页面设置」缓存确实已取消（`ijipu.pageConfig` 只在一次性迁移里被**读+删**，不再写入）',
+    /removeItem\(PAGE_CONFIG_KEY\)/.test(store) && !/setItem\(PAGE_CONFIG_KEY/.test(store),
+    '',
+  )
+}
+
 async function runAdj541DockToggleTests() {
   console.log('[123] dock expand/collapse entries (adj541)')
   const editorSrc = String(readFileSync('src/editor/EditorPane.tsx', 'utf8'))
@@ -11266,6 +11292,14 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj599 启动预热索引用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj600Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj600 设置面板取种子用例抛异常', e)
     }
   })
   .then(() => {

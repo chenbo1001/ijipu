@@ -84,6 +84,27 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
   // 打开时快照原值，调整时临时应用（预览非持久化），保存才写 .jps；关闭未保存则恢复快照。
   const snapRef = useRef<PageConfig>({ ...pageConfig })
   const committedRef = useRef(false)
+  /**
+   * adj600（用户反馈）：本面板**常驻挂载**在底栏 dock 里，`draft`/`snapRef` 原先只在挂载那一刻取种子
+   * ⇒ **打开另一份谱（或手改源码里的 `# jps-config`）后，面板还停在上一份谱/默认值上**：
+   *   · 面板显示的不是这份谱的设置（用户："谱面的设置没有更新覆盖设置里的默认值"）；
+   *   · 用户一动任何字段，`setPageConfig({...draft, ...patch}, false)` 就把那套**错值**当主体应用，
+   *     预览立刻被打回默认观感；保存时基线（`snapRef`）也是错的 ⇒ 谱面设置被打乱。
+   *
+   * 判据：`pageConfig` 变了、而且**不是本面板自己刚写进去的那一份**（`lastAppliedRef`）⇒ 说明
+   * 变化来自外部（打开文件 / 源码改设置 / 预览里拖辅助虚线并已固化）⇒ 重新取种子。
+   * 用引用比较 + JSON 兜底：本面板自己写的值就是同一个对象，不会被误判成"外部变化"而清掉用户正在改的内容。
+   */
+  const lastAppliedRef = useRef<PageConfig>({ ...pageConfig })
+  useEffect(() => {
+    const same =
+      pageConfig === lastAppliedRef.current || JSON.stringify(pageConfig) === JSON.stringify(lastAppliedRef.current)
+    if (same) return
+    setDraft({ ...pageConfig })
+    snapRef.current = { ...pageConfig }
+    lastAppliedRef.current = { ...pageConfig }
+    committedRef.current = false
+  }, [pageConfig])
   // adj482：字段区容器（dock 里按「当页最长标签」对齐，见下面的测量 effect）
   const fieldsRef = useRef<HTMLDivElement | null>(null)
 
@@ -157,12 +178,17 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
   const updateDraft = (patch: Partial<PageConfig>) => {
     const next = { ...draft, ...patch }
     setDraft(next)
+    // adj600：记下"这份值是本面板写进 store 的" ⇒ 上面的重新取种子 effect 不会把用户正在改的内容清掉
+    lastAppliedRef.current = next
     setPageConfig(next, false) // 预览（临时应用，不持久化）；保存才持久化
   }
 
   // adj315：取消（X/遮罩/Esc）未保存 → 恢复快照到 store（预览层），丢弃 draft
   const onCancelReset = () => {
-    if (!committedRef.current) setPageConfig(snapRef.current, false)
+    if (!committedRef.current) {
+      lastAppliedRef.current = snapRef.current
+      setPageConfig(snapRef.current, false)
+    }
   }
 
   /** 当前标签页面板内容（各组原字段，去掉 fieldset 边框——标签已表达分组边界） */
@@ -530,6 +556,8 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
               // adj480：本机页面设置缓存层已取消 ⇒ 生效配置 = 代码默认 ← 谱面，
               //   于是"保存"就等于"把这份谱补成自包含"，不再需要单独的「固化到谱面」动作。
               committedRef.current = true
+              // adj600：保存的基线随之推进（本面板自己写的这份不算"外部变化"，不必重新取种子）
+              lastAppliedRef.current = draft
               setPageConfig(draft, true, snapRef.current)
               closeDock()
             }}
