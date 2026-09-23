@@ -10720,6 +10720,193 @@ function runAdj620Tests() {
   )
 }
 
+/**
+ * adj621（用户要求）：应用标题统一为 `爱记谱 iJipu - vX.Y.Z (YYYY-MM-DD @commit)` 形式，
+ * 覆盖浏览器页签 / PWA 页签 / Tauri 桌面窗口标题三处（便于 OS 任务栏、Alt+Tab、浏览器页签一眼看出当前版本）。
+ *
+ * 设计：单一来源 `brand/version.ts` 的 `APP_TITLE_FULL`。
+ *   ① `index.html` <title>：静态前缀 `爱记谱 iJipu`（无版本后缀，避免每次 commit 产生无意义 diff）；
+ *   ② `App.tsx` mount 后 `document.title = APP_TITLE_FULL`（覆盖浏览器页签 + PWA 页签）；
+ *   ③ `App.tsx` mount 后 `__TAURI__.window.getCurrentWindow().setTitle(APP_TITLE_FULL)`（覆盖桌面窗口标题栏/任务栏）；
+ *   ④ capability `core:window:allow-set-title` 必须声明，否则桌面端 `setTitle` 会被 IPC 拒绝。
+ */
+function runAdj621Tests() {
+  console.log('[146] 应用标题统一来源：页签 + 桌面窗口标题（adj621）')
+  const versionSrc = String(readFileSync('src/brand/version.ts', 'utf8'))
+  const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+  const indexSrc = String(readFileSync('index.html', 'utf8'))
+  const capSrc = String(readFileSync('src-tauri/capabilities/default.json', 'utf8'))
+
+  // ① brand/version.ts 提供单一来源 `APP_TITLE_PREFIX` + `APP_TITLE_FULL`
+  check(
+    'adj621 `brand/version.ts` 导出 `APP_TITLE_PREFIX = \'爱记谱 iJipu\'` 与 `APP_TITLE_FULL`（单一来源）',
+    /export const APP_TITLE_PREFIX = '爱记谱 iJipu'/.test(versionSrc) &&
+      /export const APP_TITLE_FULL = `\$\{APP_TITLE_PREFIX\} - \$\{APP_VERSION_FULL\}`/.test(versionSrc),
+    '',
+  )
+
+  // ② App.tsx 在挂载时把 document.title 与 Tauri 窗口标题都设为 APP_TITLE_FULL
+  check(
+    'adj621 `App.tsx` mount 后 `document.title = APP_TITLE_FULL`（覆盖浏览器页签 + PWA 页签）',
+    /document\.title = APP_TITLE_FULL/.test(appSrc) &&
+      /import \{ APP_TITLE_FULL \} from '\.\/brand\/version'/.test(appSrc),
+    '',
+  )
+  check(
+    'adj621 `App.tsx` mount 后桌面端调 `__TAURI__.window.getCurrentWindow().setTitle(APP_TITLE_FULL)`（覆盖 OS 窗口标题/任务栏）',
+    // 实际写法：把 `__TAURI__` 取到 `g` 再拆行访问 `g?.window?.getCurrentWindow?.().setTitle`
+    // 三段分别匹配（避免跨行 lazy 匹配踩坑）
+    /__TAURI__[\s\S]*?\.window[\s\S]*?\.getCurrentWindow[\s\S]*?\.setTitle/.test(appSrc) &&
+      /setter\(APP_TITLE_FULL\)/.test(appSrc),
+    '',
+  )
+
+  // ③ index.html <title> 静态前缀是「爱记谱 iJipu」（不带版本后缀），避免每次 GIT_COMMIT 变化产生 diff
+  check(
+    'adj621 `index.html` 静态 <title> 用不带版本的前缀 `爱记谱 iJipu`，由运行时 `APP_TITLE_FULL` 覆盖完整形式',
+    /<title>爱记谱 iJipu<\/title>/.test(indexSrc) && !/v\d+\.\d+\.\d+/.test(indexSrc.match(/<title>[^<]*<\/title>/)?.[0] ?? ''),
+    '',
+  )
+
+  // ④ capability 已声明 `core:window:allow-set-title`（否则桌面 setTitle 会被 IPC 拒）
+  check(
+    'adj621 capability `default.json` 含 `core:window:allow-set-title`（Tauri 桌面 setTitle 必要权限）',
+    /"core:window:allow-set-title"/.test(capSrc),
+    '',
+  )
+
+  // ⑤ 运行时产物 `APP_TITLE_FULL` 拼接结果正确：`爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)`
+  check(
+    'adj621 运行时 `APP_TITLE_FULL` 拼接正确（爱记谱 iJipu - vX.Y.Z (date @commit)）',
+    (() => {
+      // 直接用 src/gen/buildInfo.ts 与 brand/version.ts 的字面量，跑一遍模板，断言产物含版本/日期/commit 三要素
+      const buildInfoSrc = String(readFileSync('src/gen/buildInfo.ts', 'utf8'))
+      const dateMatch = buildInfoSrc.match(/BUILD_DATE = '([^']+)'/)
+      const commitMatch = buildInfoSrc.match(/GIT_COMMIT = '([^']+)'/)
+      const verMatch = versionSrc.match(/APP_VERSION = '([^']+)'/)
+      if (!dateMatch || !commitMatch || !verMatch) return false
+      const expanded = `爱记谱 iJipu - v${verMatch[1]} (${dateMatch[1]} @${commitMatch[1]})`
+      return (
+        expanded.startsWith('爱记谱 iJipu - v') &&
+        /\(\d{4}-\d{2}-\d{2} @[0-9a-f]{8}\)/.test(expanded) &&
+        expanded === `爱记谱 iJipu - v${verMatch[1]} (${dateMatch[1]} @${commitMatch[1]})`
+      )
+    })(),
+    '',
+  )
+}
+
+/**
+ * adj622（用户要求）：三项 UI 收口
+ *  · ① 状态栏文件名改成「工作区/路径/文件名」格式（`src/ui/docLocation.ts` 单一来源，
+ *    `EditorFootBar` 引用它）；
+ *  · ② 试听播放/暂停按钮加 mnemonics `(&A)`（两态共用字母 A），停止按钮加 `(&S)`，并声明
+ *    HTML `accessKey` 让浏览器原生响应 `Alt+字母` 触发；
+ *  · ③ 工作区右栏顺序：操作按钮 → 过滤框 → `*` 按钮 → x 按钮 → 「匹配 n 个」提示。
+ *
+ * 验证都走源码静态检查（DOM/JSX 顺序、accessKey 属性、文案字面量）。
+ */
+function runAdj622Tests() {
+  console.log('[147] 状态栏文件名 + 试听热键 + 工作区右栏顺序（adj622）')
+  const footBarSrc = String(readFileSync('src/ui/EditorFootBar.tsx', 'utf8'))
+  const docLocSrc = String(readFileSync('src/ui/docLocation.ts', 'utf8'))
+  const playbackSrc = String(readFileSync('src/dialogs/PlaybackDialog.tsx', 'utf8'))
+  const wsPanelSrc = String(readFileSync('src/ui/dock/WorkspacePanel.tsx', 'utf8'))
+
+  // ----- ① 状态栏文件名 -----
+  check(
+    'adj622 `src/ui/docLocation.ts` 提供单一来源（`formatDocLocation` 处理三种来源）',
+    /export function formatDocLocation/.test(docLocSrc) &&
+      /export interface DocLocationInput[\s\S]*binding[\s\S]*nativePath[\s\S]*fileHandle/.test(docLocSrc) &&
+      /import type \{ WorkspaceBinding \} from '\.\.\/store\/docStore'/.test(docLocSrc),
+    '',
+  )
+  check(
+    'adj622 `formatDocLocation` 工作区分支渲染「工作区/路径/文件名」形式',
+    /renderWorkspacePath/.test(docLocSrc) &&
+      /const parts = \[b\.wsName, \.\.\.dirs, file\]\.filter/.test(docLocSrc) &&
+      /parts\.join\(SEP\)/.test(docLocSrc),
+    '',
+  )
+  check(
+    'adj622 `EditorFootBar` 改用 `formatDocLocation` 并订阅 binding/nativePath/fileHandle 三处来源',
+    /import \{ formatDocLocation \} from '\.\/docLocation'/.test(footBarSrc) &&
+      /const binding = useDocStore\(\(s\) => s\.binding\)/.test(footBarSrc) &&
+      /const nativePath = useDocStore\(\(s\) => s\.nativePath\)/.test(footBarSrc) &&
+      /const fileHandle = useDocStore\(\(s\) => s\.fileHandle\)/.test(footBarSrc) &&
+      /formatDocLocation\(\{ binding, nativePath, fileHandle, fileName \}\)/.test(footBarSrc),
+    '',
+  )
+  check(
+    'adj622 `.footer-file` 加 ellipsis + max-width（避免长路径撑爆状态栏）',
+    /\.footer-file\s*\{[^}]*text-overflow:\s*ellipsis/.test(String(readFileSync('src/index.css', 'utf8'))) &&
+      /\.footer-file\s*\{[^}]*max-width:\s*50%/.test(String(readFileSync('src/index.css', 'utf8'))),
+    '',
+  )
+
+  // ----- ② 试听热键 -----
+  check(
+    'adj622 播放按钮加 `(&A)` mnemonics（两态共用字母 A）并声明 accessKey="a"',
+    /accessKey="a"/.test(playbackSrc) &&
+      /播放\(&A\)/.test(playbackSrc) &&
+      /暂停\(&A\)/.test(playbackSrc) &&
+      /继续\(&A\)/.test(playbackSrc),
+    '',
+  )
+  check(
+    'adj622 停止按钮加 `(&S)` mnemonics + accessKey="s"（停止按钮的 disabled 时 accessKey 由浏览器忽略，符合直觉）',
+    /accessKey="s"/.test(playbackSrc) && /停止\(&S\)/.test(playbackSrc),
+    '',
+  )
+  check(
+    'adj622 播放按钮的 title 提示带上 Alt+A 热键说明（与菜单 kbd 角标口径一致）',
+    /开始试听（或按空格 \/ Alt\+A）/.test(playbackSrc) &&
+      /暂停（或按空格 \/ Alt\+A）/.test(playbackSrc) &&
+      /继续播放（或按空格 \/ Alt\+A）/.test(playbackSrc),
+    '',
+  )
+
+  // ----- ③ 工作区右栏顺序 -----
+  // `.ws-side` 是 `flex-direction: column`，DOM 顺序 = 视觉顺序。
+  // 截取"非 moving"那一支的右栏（操作按钮 → 过滤框 → * 按钮 → x 按钮 → 提示），
+  // 断言五块的相对位置：操作按钮 < 过滤框 < `*` 按钮 < x 按钮 < ws-side-label。
+  // 注意：源码里 "moving" 分支也含一个 ws-side-label（"actMove·N"），要取"非 moving"分支那一份，
+  // 即**第二次**出现的位置（或者：在 ws-side-group 那块之后的 ws-side-label）。
+  check(
+    'adj622 工作区右栏顺序：操作按钮 → 过滤框 → `*` 按钮 → x 按钮 → "匹配 n 个" 提示',
+    (() => {
+      const iGroup = wsPanelSrc.indexOf('ws-side-group')
+      // 锚到 ws-side-group 之后的那一份 ws-side-label
+      const iLabel = wsPanelSrc.indexOf('ws-side-label', iGroup)
+      const iInput = wsPanelSrc.indexOf('ws-filter"', iGroup)
+      const iAll = wsPanelSrc.indexOf('ws-filter-all', iGroup)
+      const iClear = wsPanelSrc.indexOf('ws-filter-clear', iGroup)
+      const ok =
+        iGroup > 0 &&
+        iInput > iGroup &&
+        iAll > iInput &&
+        iClear > iAll &&
+        iLabel > iClear
+      if (!ok) {
+        console.log('    debug: iGroup=', iGroup, 'iInput=', iInput, 'iAll=', iAll, 'iClear=', iClear, 'iLabel=', iLabel)
+      }
+      return ok
+    })(),
+    '',
+  )
+  check(
+    'adj622 第一个右栏元素是 `操作▾` 下拉（ws-side-btn ws-side-group），不是 ws-side-label',
+    /<div className="ws-side"[^>]*>[\s\S]{0,200}?<button[\s\S]*?ws-side-group/.test(wsPanelSrc) ||
+      // 兼容换行 / 注释写法：操作按钮块在 ws-side-label 块之前
+      (() => {
+        const idxLabel = wsPanelSrc.indexOf('ws-side-label"')
+        const idxGroup = wsPanelSrc.indexOf('ws-side-group"')
+        return idxGroup > 0 && idxGroup < idxLabel
+      })(),
+    '',
+  )
+}
+
 
 function runAdj600Tests() {
   console.log('[129] settings panel reseeds when the score config changes (adj600)')
@@ -11178,13 +11365,16 @@ async function runAdj541DockToggleTests() {
         /workspaceCopy\.blockedHint/.test(wsPanelSrc),
       '')
   }
-  check('adj545/adj549（用户要求）面板**上面包屑整行 + 下分左右两栏**：左=列表；右=固定宽度（过滤 / `*` / ✕ / 操作▾）',
+  check('adj545/adj549（用户要求）面板**上面包屑整行 + 下分左右两栏**：左=列表；右=固定宽度（操作▾ / 过滤 / `*` / ✕ / 匹配提示）',
     // 上：ws-head（切换工作区按钮 + 面包屑）在 ws-body **之前**，独占一行
     /<div className="ws-panel">[\s\S]{0,600}?<div className="ws-head">[\s\S]{0,1400}?className="ws-workspace-btn"[\s\S]{0,2000}?className="ws-crumb"[\s\S]{0,4000}?<div className="ws-body">[\s\S]{0,400}?<div className="ws-left">[\s\S]{0,800}?className=\{`ws-list[\s\S]{0,7000}?<div className="ws-side">/.test(
       wsPanelSrc,
     ) &&
-      // 下：过滤三件套 + 操作▾ 都在右栏里（顺序：过滤框 → * / ✕ 一行 → 操作）
-      /className="ws-input ws-filter"[\s\S]{0,900}?className="ws-filter-row"[\s\S]{0,900}?ws-filter-all[\s\S]{0,900}?ws-filter-clear[\s\S]{0,900}?ws-side-group/.test(
+      // adj622（用户要求）：下右栏顺序调整为「操作▾ → 过滤框 → `*`/✕ 一行 → 匹配提示」
+      // （操作按钮在最上面，状态信息在最后面 ——"匹配 n 个"提示也走 ws-side-label，
+      //  锚到 ws-side-group 之后的那份 ws-side-label，避免被 moving 分支的那条「actMove·N」干扰）。
+      // 注：操作按钮的实际 className 是 `"btn ws-side-btn ws-side-group"`（不是裸 ws-side-group）。
+      /className="btn ws-side-btn ws-side-group"[\s\S]{0,900}?className="ws-input ws-filter"[\s\S]{0,900}?className="ws-filter-row"[\s\S]{0,900}?ws-filter-all[\s\S]{0,900}?ws-filter-clear[\s\S]{0,900}?ws-side-label/.test(
         wsPanelSrc,
       ) &&
       // 消除过滤常驻（无过滤时禁用）——位置固定，不因是否有过滤而跳动
@@ -12590,6 +12780,22 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj620 菜单去掉视图组用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj621Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj621 应用标题统一来源用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj622Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj622 状态栏 + 试听热键 + 工作区右栏顺序用例抛异常', e)
     }
   })
   .then(() => {

@@ -14,6 +14,8 @@ import { problemCopy, dockCopy } from '../brand/copy'
 import { summarizeProblems } from './problems'
 // adj618（用户要求）：状态栏那条告警按钮的提示后面带快捷键（键名一处定义）
 import { KBD, withKbd } from '../brand/shortcuts'
+// adj622（用户要求）：状态栏文件名改成「工作区/路径/文件名」格式
+import { formatDocLocation } from './docLocation'
 
 export function EditorFootBar() {
   const code = useDocStore((s) => s.code)
@@ -21,6 +23,10 @@ export function EditorFootBar() {
   const dirty = useDocStore((s) => s.dirty)
   const cursor = useDocStore((s) => s.cursor)
   const errors = useDocStore((s) => s.parseResult.errors)
+  // adj622：状态栏展示「工作区/路径/文件名」需要拿三处来源（互斥）
+  const binding = useDocStore((s) => s.binding)
+  const nativePath = useDocStore((s) => s.nativePath)
+  const fileHandle = useDocStore((s) => s.fileHandle)
   // adj462：dock（告警面板开关 + 导出指示）
   const toggleDock = useUiStore((s) => s.toggleDock)
   const dockOpen = useUiStore((s) => s.dockOpen)
@@ -36,11 +42,16 @@ export function EditorFootBar() {
       ? problemCopy.clean
       : `${problems.worst === 'error' ? problemCopy.hasErrors : problemCopy.hasWarnings}：${problemCopy.title(problems.total, problems.errorCount, problems.warnCount)}`
   const problemsShown = dockOpen && dockPanel === 'problems'
+  // adj622：状态栏文件名按"工作区绑定 / 桌面外部打开 / 浏览器本地句柄"三种来源渲染
+  const docLoc = useMemo(
+    () => formatDocLocation({ binding, nativePath, fileHandle, fileName }),
+    [binding, nativePath, fileHandle, fileName],
+  )
 
   return (
     <div className="footer">
-      <span className="footer-file">
-        {(fileName || '未命名') + '.jps'}
+      <span className="footer-file" title={docLoc.title}>
+        {docLoc.display}
         {dirty && <span className="dirty-dot" title="有未保存的修改" />}
       </span>
 

@@ -523,23 +523,31 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
               onClick={onPlayToggle}
               aria-busy={starting}
               aria-label={playing && !paused ? '暂停' : playing && paused ? '继续播放' : '播放'}
+              // adj622（用户要求）：播放按钮加 `(&A)` mnemonics（同一字母跨两个状态不变），
+              // 并声明 accessKey="a" 让浏览器原生响应 Alt+A 触发；
+              // 同时提示文本加上热键说明，与菜单项 kbd 角标口径一致。
+              accessKey="a"
               title={
                 starting
-                  ? '正在准备音源…'
+                  ? '正在准备音源…（Alt+A 可激活）'
                   : playing && !paused
-                    ? '暂停（或按空格）'
+                    ? '暂停（或按空格 / Alt+A）'
                     : playing && paused
-                      ? '继续播放（或按空格）'
-                      : '开始试听（或按空格）'
+                      ? '继续播放（或按空格 / Alt+A）'
+                      : '开始试听（或按空格 / Alt+A）'
               }
               style={{ opacity: starting ? 0.7 : 1, cursor: starting ? 'default' : 'pointer' }}
             >
               <ToolIcon name={playing && !paused ? 'pause' : 'play'} size={14} />
-              {starting ? '准备中…' : playing && !paused ? '暂停' : playing && paused ? '继续' : '播放'}
+              {/* adj622：按钮文本按用户口径加 mnemonics —— 两个状态共用 `&A`，
+                  因为 `accessKey` 是按钮的，不是按钮状态的；键不变 */}
+              {starting ? '准备中…' : playing && !paused ? '暂停(&A)' : playing && paused ? '继续(&A)' : '播放(&A)'}
             </button>
-            <button className="btn playback-btn" onClick={stop} disabled={!playing} title="停止并回到开头">
+            {/* adj622：停止按钮加 `(&S)` mnemonics + accessKey="s"；disabled 时浏览器不响应 accessKey
+                ——这是符合直觉的（没在播就别响应停止） */}
+            <button className="btn playback-btn" onClick={stop} disabled={!playing} accessKey="s" title="停止并回到开头（Alt+S）">
               <ToolIcon name="stop" size={14} />
-              停止
+              停止(&S)
             </button>
           </div>
         </div>

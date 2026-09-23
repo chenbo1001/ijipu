@@ -25,6 +25,8 @@ import { summarizeProblems } from './ui/problems'
 import { nextViewType } from './ui/viewCycle'
 // adj614：Ctrl+T 的深浅模式循环（与顶栏「深浅模式」按钮同一份）
 import { nextThemeMode } from './brand/themes'
+// adj621：应用标题统一来源（浏览器页签 + 桌面窗口标题共用 `APP_TITLE_FULL`）
+import { APP_TITLE_FULL } from './brand/version'
 // adj350：对话框懒加载（React.lazy）——首屏不加载它们，显著减小主包、加快首屏显示
 // adj492：「关于」已迁入底栏 dock（见 ui/ToolDock），此处不再需要弹窗版懒加载
 const SamplesDialog = lazy(() => import('./dialogs/SamplesDialog').then((m) => ({ default: m.SamplesDialog })))
@@ -91,6 +93,31 @@ function App() {
    */
   useEffect(() => {
     useDocStore.getState().installPrintSupport()
+  }, [])
+
+  /**
+   * adj621（用户要求）：**统一应用标题**——浏览器页签、PWA 页签、Tauri 桌面窗口标题都用
+   * 「爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)」形式，方便在 OS 任务栏 / Alt+Tab /
+   * Chrome 页签一眼看出当前应用版本。
+   *
+   * 三处都来自 `brand/version.ts` 的 `APP_TITLE_FULL` 单一来源：
+   *   ① `document.title`：浏览器页签 + PWA 页签（同一份 window.title，无副作用）；
+   *   ② `__TAURI__.window.getCurrentWindow().setTitle(...)`：桌面 OS 窗口标题栏 / 任务栏；
+   *   ③ 初始 `index.html` <title> 仍是 `爱记谱 iJipu`（无版本），挂载前那一瞬的占位——
+   *      几十毫秒内就被本 effect 覆盖；用户能看到的最终标题就是这里 set 的完整形式。
+   *
+   * `setTitle` 失败（如非 Tauri 环境或权限缺失）静默忽略——浏览器里没这个 API，
+   * `document.title` 已设好；桌面壳里 capability 已声明 `core:window:allow-set-title`。
+   */
+  useEffect(() => {
+    document.title = APP_TITLE_FULL
+    const g = (window as unknown as { __TAURI__?: { window?: { getCurrentWindow?: () => { setTitle?: (t: string) => Promise<unknown> } } } }).__TAURI__
+    const setter = g?.window?.getCurrentWindow?.().setTitle
+    if (typeof setter === 'function') {
+      void setter(APP_TITLE_FULL).catch(() => {
+        /* setTitle 失败不影响页面功能 */
+      })
+    }
   }, [])
 
   // adj48：跟随系统深浅色——监听 prefers-color-scheme 变化

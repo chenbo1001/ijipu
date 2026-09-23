@@ -2102,6 +2102,89 @@
   ⑤ **"多入口的同一件事"要定期回收**：视图在顶栏下拉、快捷键、菜单里各有一份，菜单那份就是纯重复
   （用户主动提出删）。删的时候要确认**另一个入口没被顺手删掉**（本轮 smoke 专门断言顶部下拉与
   `renderViewEntries` 仍在、顺序仍等于 `VIEW_CYCLE`）。
+### E-2026-303 应用标题（页签 / 桌面窗口）**没有一个统一来源**，"想看版本"得翻 CHANGELOG（adj621）
+
+- **需求**（用户）："规范 PWA 标题、浏览器打开时的页签、PC 端标题为类似：
+  `爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)` 这样的形式，以方便查看应用版本。"
+  实际上当时**三处都缺**或不一致：
+  · `index.html` `<title>` = `爱记谱 iJipu — 码即成，谱自现`（带 slogan，无版本，且走的是 0.36.0 之前的口径）；
+  · Tauri `tauri.conf.json` `windows[0].title` = `爱记谱 iJipu`（无版本）；
+  · 运行时 `document.title` 从未被任何代码 set 过 ⇒ 浏览器页签与 PWA 页签里
+    看到的永远是 `<title>` 的静态值。
+- **根因**：① **没有单一来源**——`APP_VERSION` / `APP_VERSION_FULL` 在 `brand/version.ts` 里有，
+  但没暴露"完整应用标题"的常量；② **`<title>` 与窗口 `title` 也没在运行时被覆盖过**，
+  设计上从一开始就没有"运行时再写一次"的钩子。③ **`core:window:default` 默认不开
+  `core:window:allow-set-title`**——Tauri v2 把 `set_title` 从默认权限集里**拆出去**了
+  （schema 里 `allow-set-title` 是独立标识，需要显式声明才能调 `setTitle()`），
+  这是 Tauri v2 与 v1 在 capability 上的一个隐性差异，没看 schema 很容易踩到。
+- **解决**（adj621）：① 在 `brand/version.ts` 集中 `APP_TITLE_PREFIX = '爱记谱 iJipu'` 与
+  `APP_TITLE_FULL = \`${APP_TITLE_PREFIX} - ${APP_VERSION_FULL}\``，**作为唯一来源**。
+  ② `App.tsx` 在 mount 后跑一次 `document.title = APP_TITLE_FULL`（浏览器页签 + PWA 页签同一份
+  `window.title`，无副作用）；若检测到 Tauri 全局（`__TAURI__.window.getCurrentWindow()`），
+  再 `setTitle(APP_TITLE_FULL)`，覆盖 OS 窗口标题栏 / Alt+Tab / 任务栏提示。
+  ③ `src-tauri/capabilities/default.json` 增加 `core:window:allow-set-title`。
+  ④ `index.html` 静态 `<title>` 只保留不带版本的前缀 `爱记谱 iJipu`（JS mount 后会被覆盖）——
+  **刻意不**在静态 HTML 里写 `v0.36.0 (...)`，否则每次 commit（`GIT_COMMIT` 变）build 产物 diff
+  会污染 `index.html`，而运行时反正会立刻覆盖它，写了反而是噪音。
+- **验证**：真机 CDP 浏览器端 `document.title` 与 `tauri.conf.json` 渲染后的窗口标题均含
+  `爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)`（构建期 `BUILD_DATE`/`GIT_COMMIT` 来自
+  `scripts/gen-build-info.mjs`）；`npm run smoke` 新增 `[146]` adj621 五条（单一来源常量、
+  mount 后 `document.title` 与 `setTitle`、静态前缀不带版本、`allow-set-title` 已声明、
+  模板展开产物对得上 `爱记谱 iJipu - vX.Y.Z (date @commit)`）。`npm run build` /
+  `npm run lint` / `npx tsc -b` 全绿。
+  实测桌面壳：`tauri build --no-bundle` + `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333`
+  启动 `ijipu.exe`，CDP `/json/list` 里那个 target 的 `title` 字段就是
+  `爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)`（OS 任务栏 / Alt+Tab 取的就是这一份）；
+  WebView 内 `document.title` 也同步到同一字符串。**唯一不一致的是 `window.__TAURI__.window.getCurrentWindow().title()`
+  JS API 直读**——它仍报 `爱记谱 iJipu`（初值），因为 Tauri v2 的 `title()` getter 走 JS 端缓存，
+  这个缓存只在 `onTitleChanged` 事件触发时刷新，我们用 `setTitle()` 改的是 OS，
+  没有 `onTitleChanged` 监听器 ⇒ getter 看不到。这条不影响用户看到的任何东西（OS 显示对，
+  `document.title` 对），只是脚本直读时会让"看起来好像没生效"；写断言时认
+  **CDP target title** 与 `document.title` 两份，不要钉 `window.title()`。
+- **预防**：① **任何"用户在多处都能看到的字符串"都必须有单一来源常量**——这次的版本串之前就有
+  `APP_VERSION_FULL`，但应用标题把它"再包一层"后并没有暴露出来，导致两处都得自己拼。
+  规则：**派生串若用户可见，必然要 export**（不要让调用方各自写模板拼接）。
+  ② **静态 HTML / Tauri config / 运行时覆盖三者协调**的取舍——给运行时覆盖让位，配置里只写
+  "不含会变的部分"（这里是不带版本的前缀），避免 `GIT_COMMIT` 每次变就把这两个文件搞脏。
+  ③ **Tauri v2 capability 改了默认值要先查 schema**——`core:window:default` 在 v1 是"全开"，
+  v2 拆出一批单独权限（`set-title` / `set-size` / `set-position` 等），光看 `core:default` 不够，
+  必须用 `src-tauri/gen/schemas/acl-manifests.json` 对一遍本动作需要的标识。
+### E-2026-304 用户一次性给了三条 UI 收口："状态栏工作区/路径/文件名" + "试听播放/停止 Alt+字母" + "工作区右栏顺序调整"（adj622）
+
+- **需求**（用户）：① 状态栏文件名改成「工作区/路径/文件名」格式（`工作区/路径/文件名`三段拼接）；
+  ② 试听播放按钮文本改为「播放(&A)/暂停(&A)」（两个状态共用字母 A），停止按钮「停止(&S)」，
+  响应 `Alt+字母` 的热键；③ 工作区右侧操作区元素调整顺序为：操作按钮 → 过滤框 → `*` 按钮 →
+  x 按钮 → "匹配 n 个" 提示信息。
+- **三件事的根因**：
+  · ① 状态栏原来只渲染 `fileName + '.jps'`，**完全没考虑工作区路径**——adj480 把页面设置改成"无 L1 层"之后
+    文件来源变成了三处互斥的 `binding` / `nativePath` / `fileHandle`，状态栏却一个都没消费。
+  · ② 试听按钮的 `&A` / `(&S)` 是**字面量**，HTML 并不自动响应 Alt+字母——必须显式声明 `accessKey="a"` /
+    `accessKey="s"` 浏览器才认（Chromium 走 `Alt+accessKey`，Firefox 走 `Alt+Shift+accessKey`，跨浏览器
+    口径不变；项目主要场景是 Chromium 系）。
+  · ③ 工作区右栏 `.ws-side` 是 `flex-direction: column`，DOM 顺序即视觉顺序——但 adj540 把"匹配 n 个"提示
+    放在了**顶部**，把"操作▾"放在**底部**，与用户"可点击主操作在最上面"的视觉习惯反了。
+- **解决**（adj622）：
+  · ① 新建 `src/ui/docLocation.ts` 单一来源 `formatDocLocation({ binding, nativePath, fileHandle, fileName })`：
+    工作区绑定 → `wsName/dir/fileName`；桌面 `nativePath` → 标准化 `\` 为 `/` 再拼；`fileHandle` → 仅文件名；
+    无任何来源 → `未命名`。`EditorFootBar` 改用 `formatDocLocation`（订阅 binding/nativePath/fileHandle 三处），
+    `.footer-file` 加 `text-overflow: ellipsis` + `max-width: 50%` 避免长路径撑爆。
+  · ② `PlaybackDialog` 播放按钮 `accessKey="a"` + 三态文本都加 `(&A)`（`accessKey` 是按钮的属性、不随
+    label 切换；用户口径"两态共用字母"恰好契合），停止按钮 `accessKey="s"` + `停止(&S)`。title 提示同步
+    加上 `Alt+A` 热键说明。
+  · ③ `WorkspacePanel.tsx` 非 moving 分支重排 DOM：**操作▾ → 过滤框 → `*` 行（`*` + ✕）→ `ws-side-label`**
+    （命中数 / 选中项 / selCount 落到最底）。`.moving` 分支保持原顺序（独立布局，不受影响）。
+- **验证**：真机 Chrome + 桌面壳均通过。① 状态栏初始状态显示「未命名」（无 binding/nativePath/fileHandle）。
+  ② 试听面板打开后两枚按钮：`播放(&A)` / `停止(&S)`，`accessKey="a"` / `accessKey="s"`，title
+  `开始试听（或按空格 / Alt+A）` / `停止并回到开头（Alt+S）`。③ 工作区面板挂载正常，DOM 顺序
+  与源码一致（操作 58214 → 过滤框 58999 → */✕ 59808 → 提示 60979）。`npm run smoke` 新增 `[147]` adj622
+  9 条 + 修正 `[130]` adj545/adj549 那条钉右栏顺序的断言（原来是 `ws-filter → ws-side-group`，现在反过来）。
+  `tsc -b` / `npm run lint` / `npm run build` 全绿。
+- **预防**：① **状态栏要消费**所有文件来源——adj480 引入"三种互斥来源"时同步把状态栏文案改到
+  `formatDocLocation` 那一层（这次是被用户逮出来的；后续任何"显示当前文档在哪"的地方都该走这一份）。
+  ② **`(&X)` 只是字面量提示**，必须配 `accessKey` 才生效；字面量是给人看的、`accessKey` 是给浏览器听的，
+  缺一会"看着像一样又按不动"。
+  ③ **DOM 顺序就是视觉顺序**（flex column 是最常见的情况）——加新元素 / 调位置时**直接改 DOM**，
+  不要用 CSS `order` 倒序（那样 tab 顺序、屏幕阅读器朗读顺序都跟着乱）。
 ### E-2026-290 多声部块之间的**小节线不对齐**：每块的"自然宽 / 撑满"完全独立，谁也不知道"上一组"排在哪（adj601）
 
 - **现象**（用户反馈，附谱）：两组多声部（第一组 4 小节、第二组 2 小节，都是 Q1/Q2）——
@@ -4995,4 +5078,4 @@
 
 | v0.34.0 | 2026-09-23 | 发布 v0.34.0（**设置拆成「全局 / 谱面」两个底栏页签 + 谱面非默认项红 `*` 标记 + 多声部块跨块小节线对齐 + 工作区索引后台预热**，MINOR 级，共 8 项 adj599–adj606、6 条排错 E-2026-290~295、**涉及引擎**）：**① 设置按"归属"分家（`adj603`，`E-2026-292`）**——用户口径"将底栏 dock 里的设置页签拆分为两个页签，全局 和 谱面 页签……"：「全局」= 版面/主题/音色库（本机偏好，改完即时生效、不写谱面），「谱面」= 布局/字体（这份谱长什么样，随谱保存进 `# jps-config`）；同一个 `PageConfigDialog` 渲染两份、按 section 过滤子页签（状态各自独立），**「恢复默认 / 保存设置」只出现在「谱面」那一半**（全局是本机偏好，本就不该有"保存"）；入口成对：菜单「全局设置 / 谱面设置」+ 顶栏「全局 / 谱面」两个按钮（`谱面设置.png`）；子页签「视图」改名「版面」避免与父页签重名。踩到一个**只有规则能拦**的坑：`TOOL_PRIORITY` 漏登记新按钮 ⇒ 顶栏根本不渲染它（补了 `FN_ORDER ⊆ TOOL_PRIORITY` 的完整性断言）。**② 非默认项红 `*`（`adj605`，用户要求）**——用户口径"当谱面上的设置为非默认值时，在设置项的标签后加一个红色 `*`"，并要求"值改变后应重新判断是否为默认值"。**选 `*` 不选标签底色**：底色是整块区域、易被读成"错误/禁用/选中"，且要在四套中国色主题 × 深浅模式里各自配对比度；`*` 取 `--jp-danger` 一处即可。判据与差量写出**同一份**（引擎新增 `nonDefaultConfigKeys` = `writeJpsConfig` 差量写的键集）⇒ **带 `*` ⇔ 保存后会写进谱面**；标记位固定 8px（未标记时透明占位）⇒ 亮灭不改变"当页最长标签"算出的标签列宽、字段网格不横跳；面板末尾按当页给一行图例，并暴露 `data-nondefault` 供真机核对。**③ 多声部块跨块小节线对齐（`adj601`，用户要求）**——用户口径"第二组多声部，当自然对齐时，应尽量与上一组的小节线对齐，除非第二组的小节宽度比上一级对应小节宽"：`layoutScore` 记住"上一组多声部块每小节的内容宽"，下一组以此为**下限**（换页清空、中间夹单声部行不清），与上一组内侧小节线对齐时补回 `小节线宽/2` 的笔迹偏移，整组放不下则放弃对齐。真机实测第二组 `[115.9,161.7]` → **`[176.5,299.8]`**（与第一组同列），"自然更宽"的那组照旧不对齐（`184.3 > 176.5`）。**④ 工作区索引后台预热（`adj599`，用户要求）**——用户口径"打开网站后就在后台异步进行，对历史工作区的目录进行索引缓存，先当前工作区，再其它工作区……新工作区就只能立即索引缓存"：新增 `workspaceIndexWarm.ts`，空闲时段（`requestIdleCallback`，回退 1.5s）按"当前 → 其余"预热，只扫已授权且过期（30 分钟）的、跳过 `prompt`/`denied`（**绝不主动弹权限**）、全程静默（只 `console.info`）；面板扫描**复用在跑的预热 Promise**，写操作作废在跑的扫描。**⑤ 三条把上面功能自己绊倒的修复**——`adj604`（`E-2026-293`）：一段说明写成**裸块注释**，JSX 只认 `{/* … */}` ⇒ 它被当**文本节点**渲染成 `.pcfg-root` 网格的匿名项，max-content 宽（不折行的整行文字，实测 **671px**）把 `minmax(0,1fr)` 的内容列挤成 **0px**，症状是"只看得见左列子页签和右列按钮"（第一轮误判为高度链问题，因为旧判据只量了高度、没量宽度；修后五档宽度内容列 **592/512/821/557/471px**），并打开 `react/jsx-no-comment-textnodes: error` 永久防呆；`adj606`（`E-2026-294`）：「乐器显示」勾上有 `*`、取消后不灭——`showInstrument`/`lyricShrink` 不在 `defaultPageConfig` 里（默认 `undefined`），复选框取消却写 `false`，`false ≠ undefined` ⇒ 永远算"非默认"（还会往谱面写冗余 `"showInstrument":false`），改为取消时写 `undefined` 并让 `sameValue` 把**布尔**的 `false` 与 `undefined` 视为同一状态（只布尔，`0`/`''` 不在此列）；`adj600`（`E-2026-295`）：面板**常驻挂载**却只在挂载时取种子 ⇒ 打开另一份谱后动任何字段都会把错值当主体应用、保存基线也是错的（"打乱原来的设置"），改为"外部变化就重新取种子"（引用比较 + JSON 兜底）。**验证**：`npx tsc -b` 0 键 / `npm run lint` 0 error（28 warnings == 基线）/ `npm run build` ✓ / **`npm run smoke` 0 失败**（新增 `[128]`~`[134]` 七块共 45 条）；真机（无头 Chrome + CDP 走真实 UI）逐项实测：预热顺序与不弹权限、跨块小节线坐标、两页签五档宽度面板内容可见、`*` 随值亮灭 + 导入带 `# jps-config` 的谱后"布局页标边距/两端对齐、字体页标音符"且保存写出的正是这三项、勾选/取消的保存三连（写 `true` / 取消后设置行被删）。**排错条目** `E-2026-290`（同一几何量在"测算"与"构建"两条路径必须同口径）/ `E-2026-291`（"合并标签 + 分组"改版要按"用户的找法"复核每个字段的归属）/ `E-2026-292`（一个面板里的设置要按归属分家，子标签别与父标签重名）/ `E-2026-293`（"看不见"类问题的判据必须包含可见性与尺寸，且必须**截图**）/ `E-2026-294`（可选字段的"关值"必须与默认口径对齐；归并假值要按类型限定）/ `E-2026-295`（常驻挂载组件的"打开时取种子"不可靠；"编辑副本 + 快照基线"要一起问基线会不会过期） |
 | v0.35.0 | 2026-09-23 | 发布 v0.35.0（**手机端工作区索引两处真因修复 + 底栏 dock 的 ESC / Ctrl+D / Ctrl+H 一整套键盘与最小化行为**，MINOR 级，共 7 项 adj607–adj613、4 条排错 E-2026-296~299、**不涉及引擎**）：**① 手机端 `*` 过滤"什么都不出"（`adj607`，`E-2026-296`）**——真因是**没授权就先扫了**：面板激活时 `ensureIndexFresh()` 排在权限查询之前，未授权句柄读取一律 `NotAllowedError` ⇒ 每个目录进 `blocked`、命中 0，而这份"0 命中"被当成**扫描成功**装进内存索引并落盘（还弹"索引完成：0 个谱"）；`filterFromIndex()` 认它（空数组也是"有索引"）⇒ 之后按 `*` **永不重扫**，用户只看到"自己点进去过的目录"那几层。改为：扫描前先查权限（`prompt`/`denied` 直接拒绝，提示 `indexNeedGrant`）；根目录读不动一律判定"**没扫到**"（不装不存、提示 `indexUnreadable`，与"确实没有谱"分开）；面板**先列目录、授权之后再准备索引**，`onGrant`（刷新后重新授权这条最常见的手机路径）补一次。真机三档（61/201/1201 个谱）：修复前根目录 `*` 只有 1 条、进目录才出该目录的 10 条 ⇒ 修复后 `*` = **61/201/1201**。**② 进目录慢（`adj607`，`E-2026-297`）**——`listRaw` 在枚举循环里**逐条 `await getFile()`** 取 mtime，进一个目录 = 2 × 文件数 × 单趟往返（注入 10ms/趟、50 个谱实测 **1267ms**）；改为与枚举**并发**读 + **限流 8 路**（排序与"读不到按 0"口径不变）⇒ **615ms（2.06 倍）**；后台扫描**给前台让路**（前台读目录时不再派新活）。**③ ESC 最小化底栏（`adj608`，用户要求）**——焦点在底栏里按 ESC ⇒ 切"最小高度"档（只留抓手 + 页签栏），档位按钮相位同步到"下一按 = 建议高度"（最小化 ≠ 收起：底栏仍在，点页签即回建议高度）。**④ `Ctrl+D` / `Ctrl+H`（`adj610`，用户要求）**——展开动作收进 `uiStore.expandDock(preferProblems)`（**唯一实现**，含"有告警先看告警"，三个入口共用：左下角「展开底栏」按钮 / Ctrl+D / Ctrl+H）；档位循环状态在 `ToolDock` 内部 ⇒ 快捷键只发**一次性 nonce 请求**、由它跑**同一个** `cycleDockHeight()`；未展开时 Ctrl+H 先展开；两条都进快捷键速查。**⑤ ESC 判据与落点收敛（`adj609`/`adj612`/`adj613`，用户要求）**——最小化后**焦点归编辑区**；判据从"焦点在底栏里"放宽为"**底栏开着、且内层没用掉这个键**"（用户先报"底栏**最高**时 ESC 不响应"、追问后说准"焦点在**内容区**时不响应、在页签上可以"；真因是**点内容区的空白/文字根本不会移动焦点**，`activeElement` 仍是编辑器，而 ESC 当时挂在 `<section>` 上收不到事件 ⇒ 处理挪到 **window 冒泡** + 用 `defaultPrevented` 做"最内层优先"的交接，对话框那条在 App 捕获阶段补 `preventDefault`）；焦点在**底栏内容区的输入框**里 ⇒ **第一次 ESC 退出输入框、第二次才最小化**。**⑥ 最小化状态化 + 点页签回建议高度（`adj611`，用户要求）**——原来最小化把"外壳高"写进该面板的高度记忆（等于那个面板**记住自己收缩了**，实测「导出」切走再切回仍是 43px）；改成独立状态 `minimized`（最小化**不破坏**用户拖出来的高度），**最小化时点页签 = 切页签 + 回建议高度 + 相位回「建议（点击 → 最大）」**。**⑦ 顺手修掉三处老毛病**：设置数字框的 ESC "取消输入"实际在**提交**（`999` 被钳成 `26` 写进设置，`E-2026-298`）；`beginDrag` 的 `preventDefault` 连带挡掉"按下聚焦"⇒ 抓手上的 ↑↓/PageUp·PageDown 调高度鼠标用户够不到；档位循环到"最小"时相位被拨两次（按钮显示与实际高度不符）。**验证**：`tsc -b` 0 错 / `lint` 0 error（28 warnings == 基线）/ `build` ✓ / **`smoke` ALL PASSED（0 失败，新增 `[135]`~`[139]` 五块 + 更新 6 条被取代的旧断言）**；真机 Chrome + CDP（派真实按键）**37/37**（索引三档、"进目录 1267→615ms"、ESC 各焦点位置、Ctrl+D/Ctrl+H 整圈、最小化点页签、输入框两次 ESC、菜单/对话框内层优先、拖拽后焦点）。 |
-| v0.36.0 | 2026-09-23 | 发布 v0.36.0（**底栏 dock 的整轮键盘与最小化行为收口**）：① 五条入口快捷键（`Ctrl+Q/Y/B/I/\``）最小化时**展开到建议高度**（`adj619`）；② 键位最终口径——`Ctrl+O` 打开文件 / `Ctrl+Y` 导出 / `Ctrl+Shift+Z` 重做 / `Alt+F1` 速查（`adj619b/c`）；③ 菜单去掉「视图」组（`adj620`）。MINOR 级，共 5 项 `adj614`/`adj616`/`adj618`/`adj619`/`adj620`、4 条排错 `E-2026-300`–`303`（含"键位改主意的冲突链 / 多入口回收 / 浏览器加速键占 Ctrl+T/P"），**不涉及引擎**。 |
+| v0.36.0 | 2026-09-23 | 发布 v0.36.0（**底栏 dock 的整轮键盘与最小化行为收口 + 应用标题/状态栏/试听/工作区右栏四处 UI 收口**）：① 五条入口快捷键（`Ctrl+Q/Y/B/I/\``）最小化时**展开到建议高度**（`adj619`）；② 键位最终口径——`Ctrl+O` 打开文件 / `Ctrl+Y` 导出 / `Ctrl+Shift+Z` 重做 / `Alt+F1` 速查（`adj619b/c`）；③ 菜单去掉「视图」组（`adj620`）；④ **应用标题统一来源（`adj621`，用户要求"方便查看应用版本"）**——`brand/version.ts` 新增 `APP_TITLE_PREFIX` + `APP_TITLE_FULL`，浏览器页签 / PWA 页签 / Tauri 桌面窗口标题都用 `爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)` 形式（`App.tsx` mount 后 `document.title = APP_TITLE_FULL`；桌面壳另调 `__TAURI__.window.getCurrentWindow().setTitle`、capability 声明 `core:window:allow-set-title`；`index.html` 静态 `<title>` 故意不带版本号，避免 commit 触发无意义 diff）；⑤ **三项 UI 收口（`adj622`，用户当日追加）**：状态栏文件名按「工作区/路径/文件名」格式（`src/ui/docLocation.ts` 单一来源，三种互斥来源——`binding` / `nativePath` / `fileHandle`——各走各的口径 + `.footer-file` 加 ellipsis）；试听播放/停止按钮加 mnemonics `(&A)`/`(&S)`（两态共用 `&A`、`accessKey="a"`/`accessKey="s"` 让 Chromium 原生响应 `Alt+A`/`Alt+S`）；工作区右栏顺序调整为「操作▾ → 过滤框 → `*` 按钮 → x 按钮 → "匹配 n 个" 提示」（`.moving` 分支独立、保持原顺序）。MINOR 级，共 7 项 `adj614`/`adj616`/`adj618`/`adj619`/`adj620`/`adj621`/`adj622`、5 条排错 `E-2026-300`–`304`（含"键位改主意的冲突链 / 多入口回收 / 浏览器加速键占 Ctrl+T/P / Tauri v2 capability 拆 `set-title` / 状态栏未消费文件来源 + `(&X)` 字面量必须配 `accessKey` + DOM 顺序即视觉顺序"），**不涉及引擎**。 |

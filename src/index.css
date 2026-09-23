@@ -2500,6 +2500,15 @@ body {
 .footer-file {
   font-family: var(--jp-font-mono);
   color: var(--jp-accent);
+  /* adj622：工作区/路径/文件名 路径可能很长，按状态栏宽度截断；
+     完整字符串仍在 `title` 上（hover 可看）。flex: 0 1 auto 让它能缩，
+     min-width:0 是 flex 子项允许收缩的必需条件。 */
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .footer-cursor {

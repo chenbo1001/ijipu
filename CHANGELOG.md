@@ -1,11 +1,13 @@
 # iJipu 更新日志（Changelog）
 
-## [0.36.0] — 2026-09-23（底栏 dock 的整轮键盘与最小化行为收口；MINOR 级）
+## [0.36.0] — 2026-09-23（底栏 dock 的整轮键盘与最小化行为收口 + 应用标题/状态栏/试听/工作区右栏四处 UI 收口；MINOR 级）
 
 > 主题：**"底栏按钮响应快捷键时，如果此时底栏 dock 为最小化，则应是展开到建议高度"**——加上
 > 用户当天反复微调的键位（最终口径：`Ctrl+O` = 打开文件 / `Ctrl+Y` = 导出 / `Ctrl+Shift+Z` = 重做 /
-> `Alt+F1` = 快捷键速查）和"菜单瘦身"。本轮 5 项（`adj614`/`adj616`/`adj618`/`adj619`/`adj620`）、
-> 4 条排错（`E-2026-300`–`303`，含"键位改主意"的冲突链），**不涉及引擎**（无 CHAIN-B）。
+> `Alt+F1` = 快捷键速查）和"菜单瘦身"，再加四项 UI 收口：应用标题统一来源（页签 + 桌面窗口）、
+> 状态栏文件名格式「工作区/路径/文件名」、试听热键 `Alt+A`/`Alt+S`、工作区右栏顺序调整。本轮
+> 7 项（`adj614`/`adj616`/`adj618`/`adj619`/`adj620`/`adj621`/`adj622`）、5 条排错（`E-2026-300`–`304`），
+> **不涉及引擎**（无 CHAIN-B）。
 >
 > 沿用一个口径——**键名只在 `src/brand/shortcuts.ts` 的 `KBD` 表里定义一次**，菜单项 `kbd` 角标、
 > 顶栏/底栏/浮动栏按钮的 `title`、快捷键速查表 五处都引用它 + 用 `withKbd(text, kbd)` 拼成
@@ -23,6 +25,23 @@
   用户先要求 "`Ctrl+O` 响应导出"，后又要求 "`Ctrl+O` 还是保持打开对话框、导出改 `Ctrl+Y`"。
   ⇒ 最终 `Ctrl+O` 回打开文件、导出改 `Ctrl+Y`；`Ctrl+Y` 原是**重做** ⇒ **冲突显式处理**：重做挪到
   跨平台惯例 `Ctrl+Shift+Z`（`Ctrl+Z` 那条本来就带 `!e.shiftKey`，两条天然不抢键），菜单/速查表/`KBD` 三处同步。
+- **应用标题统一来源：`爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)`（`adj621`，用户要求"方便查看应用版本"）**——
+  浏览器页签、PWA 页签、Tauri 桌面窗口标题都从这里出：`brand/version.ts` 新增 `APP_TITLE_PREFIX` +
+  `APP_TITLE_FULL`，`App.tsx` mount 后 `document.title = APP_TITLE_FULL`（覆盖浏览器 + PWA），并在
+  桌面壳里 `__TAURI__.window.getCurrentWindow().setTitle(APP_TITLE_FULL)`（覆盖 OS 任务栏 / Alt+Tab）。
+  capability 声明 `core:window:allow-set-title`。`index.html` 静态 `<title>` 故意不带版本号——
+  避免每次 commit 让源文件出无意义 diff（运行时覆盖完整形式）。
+- **状态栏文件名按用户口径改成「工作区/路径/文件名」（`adj622`）**——`src/ui/docLocation.ts` 单一来源
+  `formatDocLocation({ binding, nativePath, fileHandle, fileName })`：工作区绑定 ⇒
+  `wsName/路径/文件名`；桌面 `nativePath` ⇒ `dir/filename`（`\` 标准化为 `/`）；浏览器 `fileHandle` ⇒ 仅文件名；
+  无任何来源 ⇒ `未命名`。`.footer-file` 加 `text-overflow:ellipsis` + `max-width:50%` 防止长路径撑爆。
+- **试听播放/停止按钮加 mnemonics `(&A)`/`(&S)`（`adj622`，用户要求"响应 Alt+字母 的热键"）**——播放按钮在
+  「播放/暂停/继续」三态共用 `&A`（`accessKey` 是按钮的属性、不随状态切换），停止按钮加 `&S`。
+  HTML `accessKey="a"`/`accessKey="s"` 让 Chromium 系浏览器原生响应 `Alt+A`/`Alt+S` 触发
+  （Firefox 走 `Alt+Shift+accessKey`，跨浏览器口径不变）。按钮 title 提示里同步加上 Alt+A 热键说明。
+- **工作区右栏顺序调整为「操作按钮 → 过滤框 → `*` 按钮 → x 按钮 → "匹配 n 个" 提示」（`adj622`，用户要求）**——
+  `.ws-side` 是 `flex-direction:column`，DOM 顺序即视觉顺序。操作▾ 下拉挪到顶部（视觉落点优先），
+  状态信息（命中数 / 选中项）挪到底部（背景信息）。`.moving` 分支（移到这里 / 取消按钮）保持原顺序不动。
 
 ### 变更
 
@@ -52,14 +71,18 @@
 ### 验证
 
 - `tsc -b` 0 错 / `npm run lint` 0 error / **28 warnings == 基线** / `npm run build` ✓ /
-  **`npm run smoke` ALL SMOKE TESTS PASSED（0 失败）**——新增 `[144]` adj619 4 条 + `[145]` adj620 3 条，
-  并把 8 条钉旧键位的断言改到最终口径（`Ctrl+O` = 打开文件 / `Ctrl+Y` = 导出 / `Ctrl+Shift+Z` = 重做 /
-  `Alt+F1` = 速查）。
+  **`npm run smoke` ALL SMOKE TESTS PASSED（0 失败）**——新增 `[144]` adj619 4 条 + `[145]` adj620 3 条 +
+  `[146]` adj621 5 条 + `[147]` adj622 9 条；并把 8 条钉旧键位的断言改到最终口径
+  （`Ctrl+O` = 打开文件 / `Ctrl+Y` = 导出 / `Ctrl+Shift+Z` = 重做 / `Alt+F1` = 速查），
+  以及 adj545/adj549 那条右栏顺序断言同步改为 adj622 新口径。
 - 真机 Chrome CDP **12/12**：最小化（43px）下 `Ctrl+Y` ⇒ 155px 并切「导出」、相位回"建议"；按同页签也展开；
   非最小化仍是开关语义（再按收起）；`Ctrl+O` 真的调起 `showOpenFilePicker`、底栏不动；`Ctrl+Shift+Z`
   撤销后重做内容一致；菜单分组 = 文件 / 设置 / 帮助、不再有编码/拆分/预览。
 - 真机桌面壳（WebView2 + CDP）**5/5**：最小化下 `Ctrl+Y` ⇒ 380px 并切「导出」；`Ctrl+` → 告警；
   `Alt+F1` → 速查；`Ctrl+O` 不开关底栏（走打开文件）；五键都到页面。
+- 真机 Chrome + 桌面壳 `document.title` **均等于** `爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)`
+  （adj621：CDP target list 里桌面壳那个 title 字段就是 OS 显示的窗口标题）；
+  试听面板里两枚按钮均带 accessKey 与 `(&A)`/`(&S)`（adj622）。
 - **不涉及引擎**（`packages/ijipu-engine/src/engine/**` 未改）⇒ 不走 CHAIN-B。
 
 ## [0.35.0] — 2026-09-23（手机端工作区索引两处真因修复 + 底栏 dock 的 ESC / Ctrl+D / Ctrl+H 一整套键盘与最小化行为；MINOR 级）

@@ -1466,21 +1466,27 @@ export function WorkspacePanel() {
             </>
           ) : (
             <>
-              <div className="ws-side-label" title={selectedEntries.map((e) => e.name).join('、')}>
-                {searching ? (
-                  <span className="ws-side-name">
-                    {workspaceCopy.searchResults(hits?.length ?? 0)}
-                    {hitsTruncated ? '…' : ''}
-                  </span>
-                ) : selCount === 0 ? (
-                  // adj546（用户要求）：没勾选时**不显示任何文字**（原来那句"勾选后可操作"去掉）
-                  null
-                ) : selCount === 1 ? (
-                  <span className="ws-side-name">{selectedEntries[0].name}</span>
-                ) : (
-                  <span className="ws-side-name">{workspaceCopy.selectedCount(selCount)}</span>
-                )}
-              </div>
+              {/* adj622（用户要求）：右栏顺序调整为「操作按钮 → 过滤框 → `*` 按钮 → x 按钮 → "匹配 n 个" 提示」。
+                  把可点击的主操作（操作▾）放在最上面（视觉落点最优先），把状态信息（命中数 / 选中项）
+                  放在最下面（背景信息，不抢视线）。其余三件套顺序与原来一致。 */}
+
+              {/* adj540（用户反馈）：列表里点文件名就能打开/进入——右侧不再放独立的「打开」按钮（与行点击功能重复）。只剩一个「操作▾」下拉。 */}
+              <button
+                ref={menuBtnRef}
+                type="button"
+                className="btn ws-side-btn ws-side-group"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
+                disabled={busy}
+              >
+                {workspaceCopy.menuBtn}
+                {/* adj548（用户反馈）：文本后的下三角**用 `下.png` 图标**（原来的 ▾ 字符太小看不清）；
+                    展开时翻成 `上.png`，与顶栏视图下拉同一套观感。 */}
+                <span className="ws-caret">
+                  <ToolIcon name={menuOpen ? 'up' : 'down'} size={12} />
+                </span>
+              </button>
 
               {/* adj545（用户要求）：**过滤三件套搬到右栏**（固定宽度那一列）——
                   过滤框 / `*` 所有 / 消除过滤。默认层级列表；一过滤就把整个工作区符合条件的
@@ -1535,23 +1541,24 @@ export function WorkspacePanel() {
                 </button>
               </div>
 
-              {/* adj540（用户反馈）：列表里点文件名就能打开/进入——右侧不再放独立的「打开」按钮（与行点击功能重复）。只剩一个「操作▾」下拉。 */}
-              <button
-                ref={menuBtnRef}
-                type="button"
-                className="btn ws-side-btn ws-side-group"
-                aria-haspopup="menu"
-                aria-expanded={menuOpen}
-                onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
-                disabled={busy}
-              >
-                {workspaceCopy.menuBtn}
-                {/* adj548（用户反馈）：文本后的下三角**用 `下.png` 图标**（原来的 ▾ 字符太小看不清）；
-                    展开时翻成 `上.png`，与顶栏视图下拉同一套观感。 */}
-                <span className="ws-caret">
-                  <ToolIcon name={menuOpen ? 'up' : 'down'} size={12} />
-                </span>
-              </button>
+              {/* adj622：放最底——背景信息（命中数 / 选中项），不抢上方三个可点控件的视线。
+                  `moving` 模式那条 `actMove·N` 提示也走 `.ws-side-label`，上面的分支已经在
+                  这个 slot 的正上方渲染，所以这里只动"非移动"那一支的顺序。 */}
+              <div className="ws-side-label" title={selectedEntries.map((e) => e.name).join('、')}>
+                {searching ? (
+                  <span className="ws-side-name">
+                    {workspaceCopy.searchResults(hits?.length ?? 0)}
+                    {hitsTruncated ? '…' : ''}
+                  </span>
+                ) : selCount === 0 ? (
+                  // adj546（用户要求）：没勾选时**不显示任何文字**（原来那句"勾选后可操作"去掉）
+                  null
+                ) : selCount === 1 ? (
+                  <span className="ws-side-name">{selectedEntries[0].name}</span>
+                ) : (
+                  <span className="ws-side-name">{workspaceCopy.selectedCount(selCount)}</span>
+                )}
+              </div>
             </>
           )}
         </div>
