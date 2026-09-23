@@ -10753,11 +10753,19 @@ function runAdj621Tests() {
     '',
   )
   check(
-    'adj621 `App.tsx` mount 后桌面端调 `__TAURI__.window.getCurrentWindow().setTitle(APP_TITLE_FULL)`（覆盖 OS 窗口标题/任务栏）',
-    // 实际写法：把 `__TAURI__` 取到 `g` 再拆行访问 `g?.window?.getCurrentWindow?.().setTitle`
-    // 三段分别匹配（避免跨行 lazy 匹配踩坑）
-    /__TAURI__[\s\S]*?\.window[\s\S]*?\.getCurrentWindow[\s\S]*?\.setTitle/.test(appSrc) &&
-      /setter\(APP_TITLE_FULL\)/.test(appSrc),
+    // adj621b（用户实测：CDP 看到 document.title 已更新，但 OS 任务栏/Alt+Tab 仍是「爱记谱 iJipu」——
+    // 实测 WebView2 下 document.title 与 OS 窗标题是两份独立状态；React mount 时
+    // `__TAURI__.window.getCurrentWindow().setTitle()` 也可能在子树未 ready 时静默失败，
+    // 错误被 `void setter().catch(()=>{})` 吞掉。修法：走裸 IPC `core.invoke('plugin:window|set_title', { label, value })`，
+    // 包在 requestAnimationFrame 里跑确保 IPC 通道就绪；Tauri v2 set_title 参数是 `value`（不是 `title`）。
+    'adj621b `App.tsx` mount 后桌面端走 core.invoke 改 OS 窗口标题（不再用 setTitle JS API）',
+    /core\.invoke\(['"]plugin:window\|set_title['"]/.test(appSrc) &&
+      /label:\s*['"]main['"]/.test(appSrc) &&
+      /value:\s*APP_TITLE_FULL/.test(appSrc) &&
+      // 反向：旧的 JS API 调用路径不应再出现（避免有人改回去后又踩同一个坑）
+      !/__TAURI__[\s\S]*?\.window[\s\S]*?\.getCurrentWindow[\s\S]*?\.setTitle/.test(appSrc) &&
+      // requestAnimationFrame 包了一层（避免 mount 时 IPC 通道未就绪）
+      /requestAnimationFrame/.test(appSrc),
     '',
   )
 
@@ -10841,6 +10849,52 @@ function runAdj622Tests() {
     'adj622 `.footer-file` 加 ellipsis + max-width（避免长路径撑爆状态栏）',
     /\.footer-file\s*\{[^}]*text-overflow:\s*ellipsis/.test(String(readFileSync('src/index.css', 'utf8'))) &&
       /\.footer-file\s*\{[^}]*max-width:\s*50%/.test(String(readFileSync('src/index.css', 'utf8'))),
+    '',
+  )
+  // adj622c（用户口径"紧凑形式"）：状态栏行/列/总行数从「行5,列10/共123行」改成 `[5,10/123]`
+  // ——只留三个数字 + 三个分隔符；title 仍保留中文「行 X / 列 Y / 共 Z 行」可读形式（鼠标悬停看）。
+  check(
+    'adj622c 状态栏行/列/总行数渲染为 `[i,j/k]` 形式（同时 title 保留中文）',
+    // 注意两处的表达式语法**不一样**：
+    //   · line 79 的 `title` 是 **JSX attribute 里的 template literal**（反引号）⇒ 用 `${...}`
+    //   · line 80 的正文是 **JSX 文本节点**（不是字符串）⇒ 用裸 `{...}`，**不加 `$`**
+    //     （写 `${...}` 会让 `$` 变成字面字符，渲染出 `[$5,$10/123]`）
+    /className="footer-cursor"\s+title=\{`\u884c \$\{cursor\.line\} \/ \u5217 \$\{cursor\.col \+ 1\} \/ \u5171 \$\{totalLines\} \u884c`\}/.test(footBarSrc) &&
+      // JSX 文本：`[{cursor.line},{cursor.col + 1}/{totalLines}]`（裸花括号，无 `$`）
+      /\[\{cursor\.line\},\{cursor\.col \+ 1\}\/\{totalLines\}\]/.test(footBarSrc) &&
+      // 反向 ①：JSX 文本里**不许**出现 `${`（会渲染成字面 `$`）
+      !/\[\$\{cursor\.line\}/.test(footBarSrc) &&
+      // 反向 ②：旧的长格式（行 X,列 Y/共 Z 行）不能残留
+      !/\u884c\{cursor\.line\},\u5217\{cursor\.col \+ 1\}\/\u5171\{totalLines\}\u884c/.test(footBarSrc),
+    '',
+  )
+  // adj622d（用户口径"直接输出 n告警..."）：状态栏告警文本去"个"，整体更紧凑；
+  // 单等级时退化为「5 告警」「3 错误」，两等级时为「5问题 (3错误/2告警)」；
+  // ProblemPanel 头部不受影响（仍走 problemCopy.title() 完整形式）。
+  check(
+    'adj622d 状态栏告警紧凑形式：单等级直接「N错误/告警」、两等级「N问题 (N错误/N告警)」',
+    (() => {
+      // 负向断言前先**剥注释**：源码注释里为说明"去掉了什么"会原样写出
+      // 「X 个问题（Y 个错误 / Z 个告警）」（E-2026-237 同款坑，adj620 也踩过）
+      const code = footBarSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+      return (
+        // 1) 渲染处用了 problemsBadge（不再直调 problemCopy.title()）
+        /const problemsBadge[\s\S]{0,800}?problems\.total === 0[\s\S]{0,200}?problemCopy\.clean/.test(code) &&
+        /\$\{problems\.errorCount\}\u9519\u8bef/.test(code) &&
+        /\$\{problems\.warnCount\}\u544a\u8b66/.test(code) &&
+        // 两等级形式：「N问题 (N错误/N告警)」—— join 的实参 `'/'` 是引号+斜杠+引号三个字符
+        /\$\{problems\.total\}\u95ee\u9898 \(\$\{parts\.join\(['"`]\/['"`]\)\}\)/.test(code) &&
+        // 单等级形式：**只输出 `parts[0]`**（它已含数字，如「5告警」）——
+        // 不能再前缀 `${problems.total}`，否则「总数 == 该档数」会渲染成「55告警」（真机实测踩到）
+        /return parts\.length === 1\s*\?\s*parts\[0\]/.test(code) &&
+        // 反向：不许出现 `${problems.total}${parts[0]}`
+        !/\$\{problems\.total\}\$\{parts\[0\]\}/.test(code) &&
+        // 2) 反向：状态栏代码里不再有「X 个错误 / Y 个告警 / Z 个问题」（剥注释后）
+        !/\u4e2a\u9519\u8bef|\u4e2a\u544a\u8b66|\u4e2a\u95ee\u9898/.test(code) &&
+        // 3) ProblemPanel 头部仍走完整 problemCopy.title（不受影响）
+        String(readFileSync('src/ui/dock/ProblemPanel.tsx', 'utf8')).includes('problemCopy.title')
+      )
+    })(),
     '',
   )
 

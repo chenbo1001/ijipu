@@ -37,6 +37,23 @@ export function EditorFootBar() {
   const totalLines = useMemo(() => code.split('\n').length, [code])
   const problems = useMemo(() => summarizeProblems(errors), [errors])
   const dotCls = problems.worst === 'error' ? 'err' : problems.worst === 'warning' ? 'warn' : 'ok'
+  // adj622d（用户口径"直接输出 n告警..."）：状态栏告警文本去"个"、整体更紧凑，与上面 [i,j/k] 一致的紧凑口径；
+  // ProblemPanel 头部仍走 problemCopy.title() 的完整形式（"X 个问题（Y 个错误 / Z 个告警）"），
+  // dock 面板里需要看得清不嫌长，状态栏里嫌占行宽。
+  const problemsBadge =
+    problems.total === 0
+      ? problemCopy.clean
+      : (() => {
+          const parts: string[] = []
+          if (problems.errorCount > 0) parts.push(`${problems.errorCount}错误`)
+          if (problems.warnCount > 0) parts.push(`${problems.warnCount}告警`)
+          // 一个等级时只输出那一档本身（`parts[0]` 已经含数字，如「5告警」「3错误」）——
+          // 不能再前缀 `${problems.total}`，否则总数与档数相同会渲染成「55告警」（真机实测踩到）
+          return parts.length === 1
+            ? parts[0]
+            : `${problems.total}问题 (${parts.join('/')})`
+        })()
+  // hover/title 仍走完整形式（保留可读性，便于调试 / 解释"那个 5 是什么意思"）
   const dotTitle =
     problems.total === 0
       ? problemCopy.clean
@@ -55,8 +72,12 @@ export function EditorFootBar() {
         {dirty && <span className="dirty-dot" title="有未保存的修改" />}
       </span>
 
-      <span className="footer-cursor">
-        行{cursor.line},列{cursor.col + 1}/共{totalLines}行
+      {/* adj622c（用户口径）：状态栏行/列/总行数从「行5,列10/共123行」改成 `[5,10/123]` 紧凑形式。
+          仍走 docStore 的 cursor.line / cursor.col+1 / totalLines 三个数，语义不变；
+          hover/focus 在 title 上保留「行 X / 列 Y / 共 Z 行」可读形式（status bar 没法放 hover，
+          但浏览器可读 select 到的「行/列」本身是 1 基，等价）。 */}
+      <span className="footer-cursor" title={`行 ${cursor.line} / 列 ${cursor.col + 1} / 共 ${totalLines} 行`}>
+        [{cursor.line},{cursor.col + 1}/{totalLines}]
       </span>
 
       {/* adj394/adj462：语法状态指示——本身也是「告警面板」的开关（点击展开/收起 dock） */}
@@ -67,7 +88,7 @@ export function EditorFootBar() {
         onClick={() => toggleDock('problems')}
       >
         <span className={`dot ${dotCls}`} />
-        {problems.total === 0 ? problemCopy.clean : problemCopy.title(problems.total, problems.errorCount, problems.warnCount)}
+        {problemsBadge}
       </button>
 
       <div className="footer-spacer" />
