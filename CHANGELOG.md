@@ -6,7 +6,7 @@
 > 用户当天反复微调的键位（最终口径：`Ctrl+O` = 打开文件 / `Ctrl+Y` = 导出 / `Ctrl+Shift+Z` = 重做 /
 > `Alt+F1` = 快捷键速查）和"菜单瘦身"，再加四项 UI 收口：应用标题统一来源（页签 + 桌面窗口）、
 > 状态栏文件名格式「工作区/路径/文件名」、试听热键 `Alt+A`/`Alt+S`、工作区右栏顺序调整。本轮
-> 7 项（`adj614`/`adj616`/`adj618`/`adj619`/`adj620`/`adj621`/`adj622`）、5 条排错（`E-2026-300`–`304`），
+> 8 项（`adj614`/`adj616`/`adj618`/`adj619`/`adj620`/`adj621`/`adj622`/`adj622b`）、6 条排错（`E-2026-300`–`305`），
 > **不涉及引擎**（无 CHAIN-B）。
 >
 > 沿用一个口径——**键名只在 `src/brand/shortcuts.ts` 的 `KBD` 表里定义一次**，菜单项 `kbd` 角标、
@@ -35,10 +35,14 @@
   `formatDocLocation({ binding, nativePath, fileHandle, fileName })`：工作区绑定 ⇒
   `wsName/路径/文件名`；桌面 `nativePath` ⇒ `dir/filename`（`\` 标准化为 `/`）；浏览器 `fileHandle` ⇒ 仅文件名；
   无任何来源 ⇒ `未命名`。`.footer-file` 加 `text-overflow:ellipsis` + `max-width:50%` 防止长路径撑爆。
-- **试听播放/停止按钮加 mnemonics `(&A)`/`(&S)`（`adj622`，用户要求"响应 Alt+字母 的热键"）**——播放按钮在
-  「播放/暂停/继续」三态共用 `&A`（`accessKey` 是按钮的属性、不随状态切换），停止按钮加 `&S`。
-  HTML `accessKey="a"`/`accessKey="s"` 让 Chromium 系浏览器原生响应 `Alt+A`/`Alt+S` 触发
-  （Firefox 走 `Alt+Shift+accessKey`，跨浏览器口径不变）。按钮 title 提示里同步加上 Alt+A 热键说明。
+- **试听播放/停止按钮加 mnemonics + `accessKey="a"`/`accessKey="s"` 让 Chromium 原生响应 `Alt+A`/`Alt+S`
+  触发（`adj622`，用户要求"响应 Alt+字母 的热键"）**——播放按钮在「播放/暂停/继续」三态共用字母 A
+  （`accessKey` 是按钮的属性、不随状态切换），停止按钮用字母 S。
+  Firefox 走 `Alt+Shift+accessKey`，跨浏览器口径不变。按钮 title 提示里同步加上 Alt+A 热键说明。
+- **试听按钮文本去 `&` 改成 `(A)`/`(S)`（`adj622b`，用户口径"让用户清楚按相应热键可操作按钮即可"）**——
+  `&` 是 Win32 菜单"先按 Alt 看下划线再按字母"两步引导的语法残留，但 HTML `accessKey` 实际是
+  `Alt+字母` **直接激活**按钮（Chromium），`&` 是误导信息。改后：播放按钮三态 `播放(A)` / `暂停(A)` /
+  `继续(A)`，停止按钮 `停止(S)`；title 提示里的"Alt+A"字面量保留（那是描述触发方式本身）。
 - **工作区右栏顺序调整为「操作按钮 → 过滤框 → `*` 按钮 → x 按钮 → "匹配 n 个" 提示」（`adj622`，用户要求）**——
   `.ws-side` 是 `flex-direction:column`，DOM 顺序即视觉顺序。操作▾ 下拉挪到顶部（视觉落点优先），
   状态信息（命中数 / 选中项）挪到底部（背景信息）。`.moving` 分支（移到这里 / 取消按钮）保持原顺序不动。
@@ -82,7 +86,7 @@
   `Alt+F1` → 速查；`Ctrl+O` 不开关底栏（走打开文件）；五键都到页面。
 - 真机 Chrome + 桌面壳 `document.title` **均等于** `爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)`
   （adj621：CDP target list 里桌面壳那个 title 字段就是 OS 显示的窗口标题）；
-  试听面板里两枚按钮均带 accessKey 与 `(&A)`/`(&S)`（adj622）。
+  试听面板里两枚按钮均带 accessKey；adj622b 实测渲染为 `播放(A)` / `停止(S)`（无 `&`），accessKey 仍是 `a` / `s`。
 - **不涉及引擎**（`packages/ijipu-engine/src/engine/**` 未改）⇒ 不走 CHAIN-B。
 
 ## [0.35.0] — 2026-09-23（手机端工作区索引两处真因修复 + 底栏 dock 的 ESC / Ctrl+D / Ctrl+H 一整套键盘与最小化行为；MINOR 级）
