@@ -10846,16 +10846,25 @@ function runAdj622Tests() {
 
   // ----- ② 试听热键 -----
   check(
-    'adj622 播放按钮加 `(&A)` mnemonics（两态共用字母 A）并声明 accessKey="a"',
+    // adj622b（用户口径"按相应热键可操作按钮即可"）：去 `&`，只留 `(A)`——告诉用户字母就是触发它的热键。
+    // Chromium 系 accessKey 是 Alt+字母直接激活按钮（不走"按 Alt 看到下划线再按字母"的两步）；
+    // `&` 的存在反而让人误以为需要"先按 Alt 看下划线"，所以去掉更直白。
+    'adj622b 播放按钮 `(A)` mnemonics（两态共用字母 A，去 `&`）+ accessKey="a"',
     /accessKey="a"/.test(playbackSrc) &&
-      /播放\(&A\)/.test(playbackSrc) &&
-      /暂停\(&A\)/.test(playbackSrc) &&
-      /继续\(&A\)/.test(playbackSrc),
+      /播放\(A\)/.test(playbackSrc) &&
+      /暂停\(A\)/.test(playbackSrc) &&
+      /继续\(A\)/.test(playbackSrc) &&
+      // 反向：旧的 `&A` 不能残留（避免"看着像快捷键，实际没接 accessKey"的双标）
+      !/播放\(&A\)/.test(playbackSrc) &&
+      !/暂停\(&A\)/.test(playbackSrc) &&
+      !/继续\(&A\)/.test(playbackSrc),
     '',
   )
   check(
-    'adj622 停止按钮加 `(&S)` mnemonics + accessKey="s"（停止按钮的 disabled 时 accessKey 由浏览器忽略，符合直觉）',
-    /accessKey="s"/.test(playbackSrc) && /停止\(&S\)/.test(playbackSrc),
+    'adj622b 停止按钮 `(S)` mnemonics（去 `&`）+ accessKey="s"（disabled 时浏览器不响应 accessKey，符合直觉）',
+    /accessKey="s"/.test(playbackSrc) &&
+      /停止\(S\)/.test(playbackSrc) &&
+      !/停止\(&S\)/.test(playbackSrc),
     '',
   )
   check(

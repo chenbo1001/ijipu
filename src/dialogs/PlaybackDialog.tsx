@@ -523,8 +523,9 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
               onClick={onPlayToggle}
               aria-busy={starting}
               aria-label={playing && !paused ? '暂停' : playing && paused ? '继续播放' : '播放'}
-              // adj622（用户要求）：播放按钮加 `(&A)` mnemonics（同一字母跨两个状态不变），
-              // 并声明 accessKey="a" 让浏览器原生响应 Alt+A 触发；
+              // adj622（用户要求）：播放按钮加 mnemonics + accessKey="a" 让浏览器原生响应 Alt+A 触发；
+              // adj622b（用户口径"按相应热键可操作按钮即可"）：按钮文本里去 `&`，只留 `(A)`——直接告诉
+              // 用户这个字母是触发它的快捷键；accessKey 本身保留（按下 Alt+A 直接激活按钮，不走两步）。
               // 同时提示文本加上热键说明，与菜单项 kbd 角标口径一致。
               accessKey="a"
               title={
@@ -539,15 +540,15 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
               style={{ opacity: starting ? 0.7 : 1, cursor: starting ? 'default' : 'pointer' }}
             >
               <ToolIcon name={playing && !paused ? 'pause' : 'play'} size={14} />
-              {/* adj622：按钮文本按用户口径加 mnemonics —— 两个状态共用 `&A`，
-                  因为 `accessKey` 是按钮的，不是按钮状态的；键不变 */}
-              {starting ? '准备中…' : playing && !paused ? '暂停(&A)' : playing && paused ? '继续(&A)' : '播放(&A)'}
+              {/* adj622b：按钮文本按用户口径去 `&`（因为 Chromium 系 accessKey 是 Alt+A 直接触发，
+                  不需要"按 Alt 看到下划线再按 A"的两步引导）。两态共用 `(A)`，accessKey 是按钮的属性。 */}
+              {starting ? '准备中…' : playing && !paused ? '暂停(A)' : playing && paused ? '继续(A)' : '播放(A)'}
             </button>
-            {/* adj622：停止按钮加 `(&S)` mnemonics + accessKey="s"；disabled 时浏览器不响应 accessKey
-                ——这是符合直觉的（没在播就别响应停止） */}
+            {/* adj622b：停止按钮同款去掉 `&`，accessKey="s" 让 Alt+S 直接激活；
+                disabled 时浏览器不响应 accessKey（没在播就别响应停止，符合直觉）。 */}
             <button className="btn playback-btn" onClick={stop} disabled={!playing} accessKey="s" title="停止并回到开头（Alt+S）">
               <ToolIcon name="stop" size={14} />
-              停止(&S)
+              停止(S)
             </button>
           </div>
         </div>
