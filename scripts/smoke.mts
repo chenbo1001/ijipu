@@ -9849,6 +9849,71 @@ function runAdj600Tests() {
   )
 }
 
+function runAdj601BlockBarAlignTests() {
+  console.log('[130] next multi-voice block aligns barlines to the previous one (adj601)')
+  const HEAD = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  const barsOf = (src: string) => {
+    const r = parseJps(src)
+    const page = layoutScore(r, defaultPageConfig).pages[0]
+    const m = new Map<number, number[]>()
+    for (const b of page.barlines) {
+      const arr = m.get(b.id.group) ?? []
+      arr.push(Math.round(b.x * 10) / 10)
+      m.set(b.id.group, arr)
+    }
+    let maxRight = 0
+    for (const n of page.notes) maxRight = Math.max(maxRight, n.rightX ?? n.x)
+    return { m, maxRight: Math.round(maxRight * 10) / 10 }
+  }
+  const USER = HEAD + 'Q1: 1 1 7 6 | 5 6 1 - | 0 0 0 0 | 0 (4 3) - |\nQ2: 6, 3 2 1 | 7, 2 1 - | 6, 1 1 7, | 1 - - - |\nQ1: 6, 1 1 7, | 1 - - - ||\nQ2: 6, 1 1 7, | 1 - - - ||\n'
+  // ① 用户那份谱：第二组（2 小节、未撑满）的小节线应与第一组（4 小节、撑满）的**前两根完全对齐**
+  {
+    const { m, maxRight } = barsOf(USER)
+    const first = m.get(0) ?? []
+    const second = m.get(2) ?? []
+    check(
+      'adj601 用户谱：第二组 2 小节的小节线与上一组前 2 根**完全对齐**',
+      first.length === 4 && second.length === 2 && Math.abs(first[0] - second[0]) < 0.05 && Math.abs(first[1] - second[1]) < 0.05,
+      JSON.stringify({ 上一组: first, 第二组: second }),
+    )
+    check(
+      'adj601 对齐后同一块内两个声部的小节线仍逐根一致（块内小节等宽没被破坏）',
+      JSON.stringify(m.get(2)) === JSON.stringify(m.get(3)),
+      JSON.stringify({ v1: m.get(2), v2: m.get(3) }),
+    )
+    check('adj601 对齐是"加宽到上一组"，不越界（音符右缘 ≤ 页边距）', maxRight <= 595.28 - defaultPageConfig.margin_right, String(maxRight))
+  }
+  // ② 例外（用户原话"除非第二组的小节宽度比上一级对应小节宽"）：本组某小节自然更宽 ⇒ 用它自己的宽度
+  {
+    const dense = HEAD + 'Q1: 1 1 7 6 | 5 6 1 - | 0 0 0 0 | 0 (4 3) - |\nQ2: 6, 3 2 1 | 7, 2 1 - | 6, 1 1 7, | 1 - - - |\nQ1: 1/2/3/4/5/6/7/1/ 2 3 4 | 1 - - - ||\nQ2: 1 2 3 4 | 1 - - - ||\n'
+    const { m, maxRight } = barsOf(dense)
+    const first = m.get(0) ?? []
+    const second = m.get(2) ?? []
+    check(
+      'adj601 例外：下一组首小节自然更宽 ⇒ 保留自然宽（首根小节线比上一组**更靠右**，不压缩）',
+      second.length === 2 && second[0] > first[0] + 1,
+      JSON.stringify({ 上一组首根: first[0], 第二组首根: second[0] }),
+    )
+    check('adj601 例外情形同样不越界', maxRight <= 595.28 - defaultPageConfig.margin_right, String(maxRight))
+  }
+  // ③ 链式：第三组（2 小节）也对齐到第一组（4 小节）
+  {
+    const { m } = barsOf(
+      HEAD +
+        'Q1: 1 1 7 6 | 5 6 1 - | 0 0 0 0 | 0 (4 3) - |\nQ2: 6, 3 2 1 | 7, 2 1 - | 6, 1 1 7, | 1 - - - |\n' +
+        'Q1: 1 2 3 4 | 1 - - - | 1 2 3 4 ||\nQ2: 1 2 3 4 | 1 - - - | 1 2 3 4 ||\n' +
+        'Q1: 5 5 5 5 | 5 - - - ||\nQ2: 5 5 5 5 | 5 - - - ||\n',
+    )
+    const first = m.get(0) ?? []
+    const third = m.get(4) ?? []
+    check(
+      'adj601 链式：第三组两小节仍对齐到**第一组**的前两根（不只跟着紧邻的上一组）',
+      first.length === 4 && third.length === 2 && Math.abs(first[0] - third[0]) < 0.05 && Math.abs(first[1] - third[1]) < 0.05,
+      JSON.stringify({ 第一组: first, 第三组: third }),
+    )
+  }
+}
+
 async function runAdj541DockToggleTests() {
   console.log('[123] dock expand/collapse entries (adj541)')
   const editorSrc = String(readFileSync('src/editor/EditorPane.tsx', 'utf8'))
@@ -11300,6 +11365,14 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj600 设置面板取种子用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj601BlockBarAlignTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj601 多声部块小节线对齐用例抛异常', e)
     }
   })
   .then(() => {
