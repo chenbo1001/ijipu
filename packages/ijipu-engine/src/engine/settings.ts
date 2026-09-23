@@ -371,9 +371,19 @@ export function configCarryover(
   return { ok: missing.length === 0, missing }
 }
 
-/** 深比较（只用于判断"是否与默认值相同"，值都是原始类型/小对象） */
+/**
+ * 深比较（只用于判断"是否与默认值相同"，值都是原始类型/小对象）。
+ *
+ * adj606（用户反馈"乐器显示复选框点击时 `*` 没有变化"）：**可选布尔字段的"关"有两种写法**——
+ * `false`（复选框取消时写的）与 `undefined`（`defaultPageConfig` 里根本没这个字段 = 未设置）。
+ * 渲染侧一律按 `=== true` 判定（`showInstrument`/`lyricShrink` 都是），所以两者是**同一个状态**；
+ * 若把它们当成不同，`false` 会永远算作"与默认不同"：面板上的红色 `*` 取消勾选后也不熄灭，
+ * 保存时还会往文件里写一条冗余的 `false`。
+ */
 function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true
+  // adj606：未设置 ↔ 显式关闭（仅布尔；`0`/`''` 这类"假值"不在此列——它们语义上确实与未设置不同）
+  if ((a === false && b === undefined) || (a === undefined && b === false)) return true
   if (a === null || b === null || a === undefined || b === undefined) return a === b
   if (typeof a !== 'object' || typeof b !== 'object') return false
   try {

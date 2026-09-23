@@ -561,13 +561,15 @@ export function PageConfigDialog({
               <FontSelect value={draft.shuzi_font} onChange={(v) => updateDraft({ shuzi_font: v })} />
               <NumInput label="字号" value={draft.note_size} onChange={(v) => updateDraft({ note_size: v })} />
             </Row>
-            {/* adj303：显示乐器名——@乐器名 / @@ 切换后的下一个音符正上方标注乐器名（默认不显示） */}
+            {/* adj303：显示乐器名——@乐器名 / @@ 切换后的下一个音符正上方标注乐器名（默认不显示）
+                adj606：取消勾选写 `undefined`（= 未设置）而不是 `false`——可选字段的"关"就是"没写"，
+                这样红 `*` 会熄灭、保存时也不会往谱面里留一条冗余的 `false` */}
             <Row label="乐器显示" mark={isNonDefault('showInstrument')}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
                 <input
                   type="checkbox"
                   checked={draft.showInstrument === true}
-                  onChange={(e) => updateDraft({ showInstrument: e.target.checked })}
+                  onChange={(e) => updateDraft({ showInstrument: e.target.checked ? true : undefined })}
                 />
                 显示乐器名（@切换处音符上方标注）
               </label>
@@ -576,13 +578,14 @@ export function PageConfigDialog({
               <FontSelect value={draft.geci_font} onChange={(v) => updateDraft({ geci_font: v })} />
               <NumInput label="字号" value={draft.geci_size} onChange={(v) => updateDraft({ geci_size: v })} />
             </Row>
-            {/* adj292：歌词宽度不足时压缩字宽（默认不压缩允许重叠，选中才压缩） */}
+            {/* adj292：歌词宽度不足时压缩字宽（默认不压缩允许重叠，选中才压缩）
+                adj606：同「乐器显示」——取消勾选写 `undefined`（可选字段的"关"= 没写） */}
             <Row label="歌词压缩" mark={isNonDefault('lyricShrink')}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
                 <input
                   type="checkbox"
                   checked={draft.lyricShrink === true}
-                  onChange={(e) => updateDraft({ lyricShrink: e.target.checked })}
+                  onChange={(e) => updateDraft({ lyricShrink: e.target.checked ? true : undefined })}
                 />
                 宽度不足时压缩文字宽度
               </label>

@@ -9978,6 +9978,46 @@ function runAdj603Tests() {
   check('adj603 `DockPanelKey` 增加 score（面板集合与类型同步）', /\| 'settings' \| 'score' \| 'about'/.test(storeSrc), '')
 }
 
+function runAdj606Tests() {
+  console.log('[134] 可选布尔字段：取消勾选 = 未设置（adj606）')
+  const cfgSrc = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
+  // 用户报："乐器显示 复选框点击时 * 没有变化"——根因：取消勾选写 `false`，而可选字段的默认是
+  // `undefined`，`false ≠ undefined` ⇒ 永远算"非默认"（`*` 不熄灭，还会往文件里写冗余 `false`）。
+  check(
+    'adj606 勾选 → 算非默认；取消勾选（false）→ 与"未设置"同义，不再算非默认',
+    nonDefaultConfigKeys({ ...defaultPageConfig, showInstrument: true }).includes('showInstrument') &&
+      !nonDefaultConfigKeys({ ...defaultPageConfig, showInstrument: false }).includes('showInstrument') &&
+      !nonDefaultConfigKeys({ ...defaultPageConfig, lyricShrink: false }).includes('lyricShrink'),
+    JSON.stringify(nonDefaultConfigKeys({ ...defaultPageConfig, showInstrument: false })),
+  )
+  check(
+    'adj606 差量写入不再写冗余 `false`（未勾选的开关不出现在 `# jps-config`）',
+    !writeJpsConfig('', { ...defaultPageConfig, showInstrument: false }, { mode: 'diff' }).includes('showInstrument') &&
+      writeJpsConfig('', { ...defaultPageConfig, showInstrument: true }, { mode: 'diff' }).includes('"showInstrument":true'),
+    writeJpsConfig('', { ...defaultPageConfig, showInstrument: false }, { mode: 'diff' }),
+  )
+  // 老文件里已经写进去的 `"showInstrument":false`：不再当成非默认，且下次保存会把这条噪音清掉
+  const legacy = '# jps-config:{"showInstrument":false}'
+  const legacyEdited = mergeConfigEdits(legacy, defaultPageConfig, defaultPageConfig)
+  check(
+    'adj606 老文件里的 `"showInstrument":false` 不当非默认；保存时该噪音被清掉（设置行删除）',
+    !nonDefaultConfigKeys({ ...defaultPageConfig, ...extractJpsConfig(legacy)! }).includes('showInstrument') &&
+      !writeJpsConfig(legacy, legacyEdited, { mode: 'diff' }).includes('showInstrument'),
+    writeJpsConfig(legacy, legacyEdited, { mode: 'diff' }),
+  )
+  check(
+    'adj606 归一化**只针对布尔**：`margin_top: 0` 这类"假值"仍是货真价实的非默认',
+    nonDefaultConfigKeys({ ...defaultPageConfig, margin_top: 0 }).includes('margin_top'),
+    JSON.stringify(nonDefaultConfigKeys({ ...defaultPageConfig, margin_top: 0 })),
+  )
+  check(
+    'adj606 面板两个可选布尔字段取消勾选时写 `undefined`（乐器显示 / 歌词压缩）',
+    /updateDraft\(\{ showInstrument: e\.target\.checked \? true : undefined \}\)/.test(cfgSrc) &&
+      /updateDraft\(\{ lyricShrink: e\.target\.checked \? true : undefined \}\)/.test(cfgSrc),
+    '',
+  )
+}
+
 function runAdj605Tests() {
   console.log('[133] 设置项"非默认"红色 * 标记 (adj605)')
   const cfgSrc = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
@@ -11562,6 +11602,14 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj605 非默认标记用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj606Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj606 可选布尔字段用例抛异常', e)
     }
   })
   .then(() => {
