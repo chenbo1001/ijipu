@@ -396,10 +396,6 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
               <Row label={uiCopy.shengbuGapLabel}>
                 <NumInput label="" range={RANGE.height_shengbu} value={draft.height_shengbu} onChange={(v) => updateDraft({ height_shengbu: v })} />
               </Row>
-              {/* adj297：两端对齐最小小节数——行小节数小于该值自然对齐（行尾留白），≥ 该值撑满两端对齐 */}
-              <Row label="两端对齐最小小节数">
-                <NumInput label="" value={draft.align_min_bars} onChange={(v) => updateDraft({ align_min_bars: v })} />
-              </Row>
             </div>
 
             {/* adj428：临时叠加段（{bz … } / {dsb … }）上下两行纵向间距——谱面级设置，
@@ -448,6 +444,12 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
                 <option value={1}>圆弧</option>
                 <option value={2}>平顶</option>
               </select>
+            </Row>
+            {/* adj297/adj602：两端对齐最小小节数——行小节数 < 该值自然对齐（行尾留白）、≥ 该值撑满两端对齐。
+                adj602（用户要求）：从「间距」组挪到**音符布局**组——它决定的是"行内怎么排"，
+                与间距无关（放在间距里会被当成"调间隙"去找）。 */}
+            <Row label="两端对齐最小小节数">
+              <NumInput label="" value={draft.align_min_bars} onChange={(v) => updateDraft({ align_min_bars: v })} />
             </Row>
           </>
         )
