@@ -50,7 +50,10 @@ import { summarizeProblems } from './problems'
  * `Suspense` 的 fallback（`.dock-empty`「加载中…」）只会在首次打开的那一瞬出现。
  */
 const TryoutPanel = lazy(() => import('../dialogs/PlaybackDialog').then((m) => ({ default: () => <m.PlaybackDialog inline /> })))
-const SettingsPanel = lazy(() => import('../dialogs/PageConfigDialog').then((m) => ({ default: () => <m.PageConfigDialog inline /> })))
+// adj603（用户要求）：原「设置」一个页签拆成两个——「全局」（视图/主题/音色库）与「谱面」（布局/字体）。
+// 同一个 PageConfigDialog 渲染**两份**（各带 section），子页签状态因此各自独立。
+const SettingsPanel = lazy(() => import('../dialogs/PageConfigDialog').then((m) => ({ default: () => <m.PageConfigDialog inline section="global" /> })))
+const ScoreSettingsPanel = lazy(() => import('../dialogs/PageConfigDialog').then((m) => ({ default: () => <m.PageConfigDialog inline section="score" /> })))
 // adj492：「关于」从弹窗迁入 dock（与原「试听/导出/设置」同一套路）
 const AboutPanel = lazy(() => import('../dialogs/AboutDialog').then((m) => ({ default: () => <m.AboutDialog inline /> })))
 // adj497：告警 / 导出改为懒加载（原为静态 import）
@@ -61,8 +64,9 @@ const WorkspacePanel = lazy(() => import('./dock/WorkspacePanel').then((m) => ({
 // adj562：「粘贴源码导入」迁入底栏（页签排在工作区之后）——原弹窗入口下线，与 adj492「关于」同套路
 const ImportPanel = lazy(() => import('../dialogs/PasteImportDialog').then((m) => ({ default: () => <m.PasteImportDialog inline /> })))
 
-/** 七个面板（顺序即标签栏顺序）；adj540：工作区**排第一**（手机端文件操作主入口，用户要求）；
- *  adj562：导入**紧跟在它后面**（用户要求"就在工作区后面加一个「导入」页签"） */
+/** 面板（顺序即标签栏顺序）；adj540：工作区**排第一**（手机端文件操作主入口，用户要求）；
+ *  adj562：导入**紧跟在它后面**（用户要求"就在工作区后面加一个「导入」页签"）；
+ *  adj603：「谱面」紧跟在「全局」（原「设置」）后面（用户要求拆分后再成对出现） */
 const PANELS: readonly { key: DockPanelKey; render: ComponentType }[] = [
   { key: 'workspace', render: WorkspacePanel },
   { key: 'import', render: ImportPanel },
@@ -70,6 +74,7 @@ const PANELS: readonly { key: DockPanelKey; render: ComponentType }[] = [
   { key: 'tryout', render: TryoutPanel },
   { key: 'export', render: ExportPanel },
   { key: 'settings', render: SettingsPanel },
+  { key: 'score', render: ScoreSettingsPanel },
   { key: 'about', render: AboutPanel },
 ]
 
@@ -212,7 +217,8 @@ const defaultH = (
    *    会让高度每次导航都跳，故一律**固定默认 + 内部滚动**（adj523/adj562 的口径不变）；
    *  · 设置面板同理（它本来就不在 `AUTO_FIT` 里，见 `AUTO_FIT` 常量的说明）。
    */
-  if (key === 'workspace' || key === 'settings' || key === 'import')
+  // adj603：'score'（谱面设置）与 'settings'（全局设置）同一套高度口径
+  if (key === 'workspace' || key === 'settings' || key === 'score' || key === 'import')
     return narrow ? workspaceDefaultH(workspaceRowH, workspaceHeadH, chromeH) : maxH()
   // adj494：关于/试听/导出走 AUTO_FIT（实测内容高）；这里的值是**首次测量前的兜底**
   return chromeH
@@ -258,7 +264,9 @@ const TABS: { key: DockPanelKey; label: string; icon: ToolIconName }[] = [
   { key: 'problems', label: dockCopy.tabProblems, icon: 'problems' },
   { key: 'tryout', label: dockCopy.tabTryout, icon: 'play' },
   { key: 'export', label: dockCopy.tabExport, icon: 'export' },
+  // adj603：原「设置」页签改名为「全局」（本机偏好），紧跟其后新增「谱面」（谱面设置）
   { key: 'settings', label: dockCopy.tabSettings, icon: 'settings' },
+  { key: 'score', label: dockCopy.tabScore, icon: 'scoreSettings' },
   // adj565：关于图标由 `ⓘ` 字符换成设计图 `public/icons/关于.png`
   { key: 'about', label: dockCopy.tabAbout, icon: 'about' },
 ]
@@ -794,7 +802,7 @@ export function ToolDock() {
   return (
     <section
       ref={dockRef}
-      className={`tool-dock${dockPanel === 'settings' ? ' dock-settings' : ''}`}
+      className={`tool-dock${dockPanel === 'settings' || dockPanel === 'score' ? ' dock-settings' : ''}`}
       // adj476：高度用内联 px 落到 `.tool-dock`。设置面板的"各栏独立滚动"改由 CSS grid 的
       // `minmax(0,1fr)` 行高保证（不再依赖 flex 链，也不再需要 --dock-cols-h 兜底）。
       style={{ height: `${dockH}px` }}

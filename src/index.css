@@ -1912,7 +1912,10 @@ body {
  *   窄屏：左（页签，只图标）| 右（内容）在上，操作按钮折到**下方**——三块同样各自滚动。
  * 实现要点：外层 `.tool-dock-body` / `.tool-dock-pane` 在这个面板上**不滚**（否则与栏内滚动打架、
  * 出现双滚动条），高度沿 flex 链传下来（`min-height: 0` 是关键），三栏各拿 100% 高度自己滚。 */
-.tool-dock-pane.pane-settings {
+/* adj603：底栏「谱面」页签与「全局（原设置）」**同一个面板形状**——三栏受限高度链、按钮高度等
+ * 一律共用（新增页签必须一起登记，漏了就会"内容被 overflow:hidden 裁掉"，即用户报的"子页签内容不见了"）。 */
+.tool-dock-pane.pane-settings,
+.tool-dock-pane.pane-score {
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -4237,6 +4240,7 @@ body {
 .tool-dock .pane-tryout .btn,
 .tool-dock .pane-export .btn,
 .tool-dock .pane-settings .btn,
+.tool-dock .pane-score .btn,
 .tool-dock .pane-about .btn,
 .tool-dock .about-donate {
   height: var(--jp-dock-btn-h);

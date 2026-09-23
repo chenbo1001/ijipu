@@ -8088,14 +8088,31 @@ function runAdj530TopBarLayoutTests() {
     const m = new RegExp(`const ${name}: readonly ToolKey\\[\\] = \\[([^\\]]+)\\]`).exec(top)
     return (m?.[1] ?? '').replace(/[\s']/g, '').replace(/,$/, '')
   }
-  check('adj530/adj570 功能按钮组顺序 = 视图/排版/试听/导出/**设置/主题**/缩放（组靠左对齐；adj570 对换主题与设置）',
-    orderOf('FN_ORDER') === 'view,guides,playback,export,pageConfig,themeMode,zoom', orderOf('FN_ORDER'))
+  check('adj530/adj570/adj603 功能按钮组顺序 = 视图/排版/试听/导出/**设置(全局)/谱面**/主题/缩放（组靠左对齐）',
+    orderOf('FN_ORDER') === 'view,guides,playback,export,pageConfig,scoreConfig,themeMode,zoom', orderOf('FN_ORDER'))
   check('adj530 编辑设置组顺序 = 折行/输入条/字体/字号（组靠右对齐）',
     orderOf('EDIT_ORDER') === 'autoWrap,scriptPad,font,fontSize', orderOf('EDIT_ORDER'))
-  check('adj530/adj570 可见优先级 = 视图>支持>排版>试听>导出>**设置>主题**>缩放>折行>输入条>字体>字号（与显示顺序的右端先折叠一致）',
+  check('adj530/adj570/adj603 可见优先级 = 视图>支持>排版>试听>导出>**设置(全局)>谱面**>主题>缩放>折行>输入条>字体>字号',
     orderOf('TOOL_PRIORITY') ===
-      'view,donate,guides,playback,export,pageConfig,themeMode,zoom,autoWrap,scriptPad,font,fontSize',
+      'view,donate,guides,playback,export,pageConfig,scoreConfig,themeMode,zoom,autoWrap,scriptPad,font,fontSize',
     orderOf('TOOL_PRIORITY'))
+  /**
+   * adj603（用户报"顶栏也没创建谱面按钮"的真因）：**新按钮只加进 `FN_ORDER`、忘了 `TOOL_PRIORITY`** ⇒
+   * 它不在 `shownKeys` 里、主栏根本不渲染（只在「更多」里露脸）。上面那条只比对优先级表自己的内容，
+   * 表里少一项照样通过 ⇒ 这里补一条**完整性**断言：功能组里每个按钮都必须在可见优先级表里。
+   */
+  check('adj530/adj603 功能组每个按钮都在可见优先级表里（新增按钮不能只进 FN_ORDER）',
+    (() => {
+      const fn = orderOf('FN_ORDER').split(',').filter(Boolean)
+      const pr = orderOf('TOOL_PRIORITY').split(',').filter(Boolean)
+      const missing = fn.filter((k) => !pr.includes(k))
+      return missing.length === 0 || `缺：${missing.join(',')}`
+    })() === true,
+    (() => {
+      const fn = orderOf('FN_ORDER').split(',').filter(Boolean)
+      const pr = orderOf('TOOL_PRIORITY').split(',').filter(Boolean)
+      return `缺：${fn.filter((k) => !pr.includes(k)).join(',') || '（无）'}`
+    })())
   check('adj530 折叠判定在独立纯算式里（组件只负责量宽/读活值；旧的按序号切片 visCount 已移除）',
     /import \{ foldKeys \} from '\.\/topbarFold'/.test(top) &&
       /setHiddenKeys\(\(prev\) => \{/.test(top) &&
@@ -8592,8 +8609,8 @@ async function runAdj540WorkspaceTests() {
       /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace' \},\s*[\s\S]{0,200}?\{ key: 'import', label: dockCopy\.tabImport, icon: 'import' \}/.test(dockSrc) &&
       /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace' \}/.test(dockSrc) &&
       /workspace: '工作区'/.test(String(readFileSync('src/ui/toolIcons.ts', 'utf8'))) &&
-      // adj587：三个同高页签由同一条分支给出（工作区 / 设置 / 导入）
-      /if \(key === 'workspace' \|\| key === 'settings' \|\| key === 'import'\)/.test(dockSrc) &&
+      // adj587：三个同高页签由同一条分支给出（工作区 / 全局 / 导入）；adj603：再加「谱面」
+      /if \(key === 'workspace' \|\| key === 'settings' \|\| key === 'score' \|\| key === 'import'\)/.test(dockSrc) &&
       /export const workspaceCopy/.test(copySrc) &&
       /tabWorkspace: '工作区'/.test(copySrc) &&
       !/modal === 'workspace'/.test(appSrc),
@@ -9325,8 +9342,8 @@ async function runAdj540WorkspaceTests() {
         String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8')),
       ),
     '')
-  check('adj562/adj587 「导入」**不进 AUTO_FIT**（填满 dock 的 pane 会让 scrollHeight 充气），改用与工作区同一个建议高度',
-    /if \(key === 'workspace' \|\| key === 'settings' \|\| key === 'import'\)/.test(dockSrc) &&
+  check('adj562/adj587/adj603 「导入」与「全局 / 谱面」**不进 AUTO_FIT**，改用与工作区同一个建议高度',
+    /if \(key === 'workspace' \|\| key === 'settings' \|\| key === 'score' \|\| key === 'import'\)/.test(dockSrc) &&
       /const AUTO_FIT: readonly DockPanelKey\[\] = \['problems', 'tryout', 'export', 'about'\]/.test(dockSrc) &&
       !/IMPORT_DEFAULT_CONTENT_H/.test(dockSrc.replace(/\/\*[\s\S]*?\*\//g, '')),
     '')
@@ -9912,6 +9929,53 @@ function runAdj601BlockBarAlignTests() {
       JSON.stringify({ 第一组: first, 第三组: third }),
     )
   }
+}
+
+function runAdj603Tests() {
+  console.log('[131] settings split into 全局 / 谱面 dock tabs (adj603)')
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  const cfgSrc = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
+  const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+  const copySrc = String(readFileSync('src/brand/copy.ts', 'utf8'))
+  const storeSrc = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+  check(
+    'adj603 底栏「全局」+「谱面」两个页签（页签表里 settings 之后紧跟 score，图标用 谱面设置）',
+    /\{ key: 'settings', label: dockCopy\.tabSettings, icon: 'settings' \},\s*\{ key: 'score', label: dockCopy\.tabScore, icon: 'scoreSettings' \}/.test(dockSrc) &&
+      /tabSettings: '全局'/.test(copySrc) &&
+      /tabScore: '谱面'/.test(copySrc),
+    '',
+  )
+  check(
+    'adj603 两个页签渲染**同一个设置组件、不同 section**（子页签状态各自独立）',
+    /<m\.PageConfigDialog inline section="global" \/>/.test(dockSrc) && /<m\.PageConfigDialog inline section="score" \/>/.test(dockSrc) && /\{ key: 'score', render: ScoreSettingsPanel \}/.test(dockSrc),
+    '',
+  )
+  check(
+    'adj603 子页签按 section 分组：全局=视图/主题/音色库，谱面=布局/字体（改名到位）',
+    /\{ id: 'global', label: '视图', icon: '⚙', section: 'global' \}/.test(cfgSrc) &&
+      /\{ id: 'score', label: '布局', icon: '▤', section: 'score' \}/.test(cfgSrc) &&
+      /ALL_TABS\.filter\(\(t\) => t\.section === section\)/.test(cfgSrc),
+    '',
+  )
+  check(
+    'adj603 「恢复默认 / 保存设置」只在**谱面**那一半（全局是本机偏好，改完即时生效）',
+    /\{section === 'score' && \(/.test(cfgSrc) && /modal-foot pcfg-foot/.test(cfgSrc),
+    '',
+  )
+  check(
+    'adj603 菜单：「全局设置」+「谱面设置」两项，分别指向底栏 settings / score',
+    /\{ label: '全局设置\(&G\)…', hotkey: 'g', onPick: \(\) => toggleDock\('settings'\) \},\s*\{ label: '谱面设置\(&P\)…', hotkey: 'p', onPick: \(\) => toggleDock\('score'\) \}/.test(topSrc),
+    '',
+  )
+  check(
+    'adj603 顶栏：「全局」按钮（提示「全局设置」）后跟「谱面」按钮（提示「谱面设置」、图标 scoreSettings）',
+    /label: '全局',\s*title: '全局设置'/.test(topSrc) &&
+      /label: '谱面',\s*title: '谱面设置'/.test(topSrc) &&
+      /case 'scoreConfig':[\s\S]{0,120}?<ToolIcon name="scoreSettings" \/>/.test(topSrc) &&
+      /title=\{t\.title \?\? t\.label\}/.test(topSrc),
+    '',
+  )
+  check('adj603 `DockPanelKey` 增加 score（面板集合与类型同步）', /\| 'settings' \| 'score' \| 'about'/.test(storeSrc), '')
 }
 
 async function runAdj541DockToggleTests() {
@@ -10758,9 +10822,9 @@ console.log('[116] settings 6 rows, About in dock, divider touch hit-area (adj49
 
   // adj492：设置面板默认高度 = 内容 6 行（adj521：`settingsDefaultH` 多了一个 `chromeH` 参数
   // ——外壳高度改为实测传入以适配手机 14px 抓手；断言改为不绑定具体参数表，只钉"用 rowPitch × SETTINGS_ROWS"）
-  check('adj587（用户要求）工作区 / 导入 / 设置**同一个建议高度**（窄屏 = 5 项列表算式；宽屏 = maxH()）',
-    // 一条分支同时管三个页签
-    /if \(key === 'workspace' \|\| key === 'settings' \|\| key === 'import'\)\s*\n?\s*return narrow \? workspaceDefaultH\(workspaceRowH, workspaceHeadH, chromeH\) : maxH\(\)/.test(
+  check('adj587/adj603（用户要求）工作区 / 导入 / 全局 / 谱面**同一个建议高度**（窄屏 = 5 项列表算式；宽屏 = maxH()）',
+    // 一条分支同时管四个页签（adj603：设置拆成「全局」+「谱面」后，两个都走这条）
+    /if \(key === 'workspace' \|\| key === 'settings' \|\| key === 'score' \|\| key === 'import'\)\s*\n?\s*return narrow \? workspaceDefaultH\(workspaceRowH, workspaceHeadH, chromeH\) : maxH\(\)/.test(
       dockSrc,
     ) &&
       // 旧的"各算各的"三套算式与常量都已删除（设置 6 行 / 导入固定 300 / 设置字段行距实测）
@@ -10775,7 +10839,7 @@ console.log('[116] settings 6 rows, About in dock, divider touch hit-area (adj49
     '')
 
   // adj492：关于面板进 dock
-  check('adj492 DockPanelKey 增加 about', /\| 'settings' \| 'about'/.test(storeSrc), '')
+  check('adj492/adj603 DockPanelKey 含 about 与 score（设置拆成 全局 settings + 谱面 score）', /\| 'settings' \| 'score' \| 'about'/.test(storeSrc), '')
   check('adj492 dock 面板与页签均含 about（5 个）',
     /\{ key: 'about', render: AboutPanel \}/.test(dockSrc) && /\{ key: 'about', label: dockCopy\.tabAbout/.test(dockSrc),
     '')
@@ -10854,8 +10918,8 @@ console.log('[116] settings 6 rows, About in dock, divider touch hit-area (adj49
   check('adj523 AUTO_FIT 面板的 pane 按内容取高（测量不被当前 dock 高度污染）',
     /\.tool-dock-pane \{[\s\S]{0,1200}?flex: 0 0 auto;/.test(css),
     '')
-  check('adj523 设置 / 告警两条 pane 显式填满 dock（分别要靠受限高度滚动）',
-    /\.tool-dock-pane\.pane-settings \{[\s\S]{0,400}?flex: 1 1 auto;/.test(css) &&
+  check('adj523/adj603 设置 / 谱面 / 告警三条 pane 显式填满 dock（分别要靠受限高度滚动）',
+    /\.tool-dock-pane\.pane-settings,\s*\.tool-dock-pane\.pane-score \{[\s\S]{0,500}?flex: 1 1 auto;/.test(css) &&
       /\.tool-dock-pane\.pane-problems \{[\s\S]{0,300}?flex: 1 1 auto;/.test(css),
     '')
 
@@ -11373,6 +11437,14 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj601 多声部块小节线对齐用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj603Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj603 设置页签拆分用例抛异常', e)
     }
   })
   .then(() => {

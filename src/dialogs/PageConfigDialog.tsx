@@ -29,19 +29,28 @@ import { PAGE_NUM_RANGES as RANGE, coarseFor } from '../ui/numFieldRanges'
 
 type TabId = 'global' | 'theme' | 'soundbank' | 'score' | 'font'
 
+/**
+ * adj603（用户要求）：设置**拆成两个底栏页签**——
+ *   · 「全局」= 视图 / 主题 / 音色库（本机偏好，改完即时生效、**不写谱面**）
+ *   · 「谱面」= 布局 / 字体（这份谱长什么样，**随谱保存**进 `# jps-config`）
+ * 所以子页签按 `section` 分组，同一个组件渲染两次（两个 dock 页签各一份，子页签状态各自独立）。
+ */
+export type SettingsSection = 'global' | 'score'
+
 // adj463：页签带图标 —— dock 里页签**竖向排在左侧**，窄屏时只留图标（文字用容器查询隐藏）
-const TABS: { id: TabId; label: string; icon: string }[] = [
-  { id: 'global', label: '全局', icon: '⚙' },
-  // adj383：主题组从顶栏菜单移入设置，紧跟在「全局」之后
-  { id: 'theme', label: '主题', icon: '◐' },
+// adj603：子页签改名——原「全局」→ **视图**（避免与父页签「全局」同名）、原「谱面」→ **布局**
+const ALL_TABS: { id: TabId; label: string; icon: string; section: SettingsSection }[] = [
+  { id: 'global', label: '视图', icon: '⚙', section: 'global' },
+  // adj383：主题组从顶栏菜单移入设置，紧跟在「视图」之后
+  { id: 'theme', label: '主题', icon: '◐', section: 'global' },
   // adj384：音色库从顶栏按钮移入设置，紧跟「主题」之后
-  { id: 'soundbank', label: '音色库', icon: '♪' },
-  // adj418：原「页面 / 音符布局 / 间距 / 连音线」四个标签合并为「谱面」（都是"这份谱长什么样"）
-  { id: 'score', label: '谱面', icon: '▤' },
-  { id: 'font', label: '字体', icon: 'Aa' },
+  { id: 'soundbank', label: '音色库', icon: '♪', section: 'global' },
+  // adj418：原「页面 / 音符布局 / 间距 / 连音线」四个标签合并为「布局」（都是"这份谱长什么样"）
+  { id: 'score', label: '布局', icon: '▤', section: 'score' },
+  { id: 'font', label: '字体', icon: 'Aa', section: 'score' },
 ]
 
-/** adj482：内容是「字段行」的页签——dock 里套 `.pcfg-fields` 网格，按当页最长标签对齐；
+/** adj482：内容是「字段行」的子页签——dock 里套 `.pcfg-fields` 网格，按当页最长标签对齐；
  *  主题（主题色块列表）与音色库（自带面板）不套该层，保持各自布局 */
 const FIELDS_TABS: TabId[] = ['global', 'score', 'font']
 
@@ -51,7 +60,12 @@ const ROW_GAP = 8
 const CTL_MIN_W = 140
 const COL_GAP = 18
 
-export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) {
+export function PageConfigDialog({
+  inline = false,
+  section = 'global',
+}: { inline?: boolean; section?: SettingsSection } = {}) {
+  /** 本实例负责的子页签（按 section 过滤；两个 dock 页签各渲染一份，互不干扰） */
+  const TABS = ALL_TABS.filter((t) => t.section === section)
   const pageConfig = useDocStore((s) => s.pageConfig)
   const setPageConfig = useDocStore((s) => s.setPageConfig)
   // adj462：设置面板已移入底部 dock——保存/固化后收起 dock（原为关闭弹窗）
@@ -79,7 +93,8 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
   const setFontOverride = useUiStore((s) => s.setFontOverride)
 
   const [draft, setDraft] = useState<PageConfig>({ ...pageConfig })
-  const [tab, setTab] = useState<TabId>('global')
+  // adj603：默认子页签取本 section 的第一个（全局 → 视图、谱面 → 布局）
+  const [tab, setTab] = useState<TabId>(() => ALL_TABS.find((t) => t.section === section)?.id ?? 'global')
   // adj315：页面设置"即刻预览 + 保存持久化 + X 恢复"——
   // 打开时快照原值，调整时临时应用（预览非持久化），保存才写 .jps；关闭未保存则恢复快照。
   const snapRef = useRef<PageConfig>({ ...pageConfig })
@@ -513,7 +528,14 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
     // width 用 min(700px, 100%) 固定成"桌面满宽上限 / 窄屏铺满"——此前没给宽度，
     // 弹窗宽度由内容撑开，切页签时**弹窗宽度会跟着跳**（各页签内容宽度不同），页签与面板也就对不齐。
     // adj422：标题与菜单统一为「设置」（里面包含 全局/主题/音色库/谱面/字体 五个标签）
-    <Modal title="设置" fill width="min(700px, 100%)" onClose={onCancelReset} inline={inline}>
+    <Modal
+      // adj603：弹窗模式按 section 给标题（dock 内联时由底栏页签表达，不显示标题）
+      title={section === 'score' ? '谱面设置' : '全局设置'}
+      fill
+      width="min(700px, 100%)"
+      onClose={onCancelReset}
+      inline={inline}
+    >
       <div className="pcfg-root">
         {/* 中间滚动区：页签 + 面板（只有这里滚动，底部按钮永远可见） */}
         <div className="pcfg-scroll">
@@ -539,7 +561,13 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
           </div>
         </div>
 
-        <div className="modal-foot pcfg-foot">
+        /**
+         * adj603：底部「恢复默认 / 保存设置」**只属于「谱面」这一半**——
+         * 它们读写的是 `# jps-config`（谱面级）；而「全局」（视图/主题/音色库）是本机偏好，
+         * 改一下就即时生效，不需要（也不该有）"保存"这一步。
+         */
+        {section === 'score' && (
+          <div className="modal-foot pcfg-foot">
           <button
             className="btn"
             onClick={() => {
@@ -566,7 +594,8 @@ export function PageConfigDialog({ inline = false }: { inline?: boolean } = {}) 
           >
             保存设置
           </button>
-        </div>
+          </div>
+        )}
       </div>
     </Modal>
   )

@@ -115,6 +115,7 @@ type ToolKey =
   | 'export'
   | 'themeMode'
   | 'pageConfig'
+  | 'scoreConfig'
   | 'zoom'
   | 'autoWrap'
   | 'scriptPad'
@@ -126,6 +127,8 @@ type ToolKey =
 interface ToolDef {
   key: ToolKey
   label: string
+  /** adj603：悬浮提示（缺省用 `label`）——「全局」按钮文本要短、提示要说全「全局设置」 */
+  title?: string
   kind: 'btn' | 'view' | 'theme' | 'zoom' | 'font' | 'fontSize'
   active?: boolean
   onPick?: () => void
@@ -145,6 +148,10 @@ interface ToolDef {
  * 折叠的语义是"先把**显示顺序最右端**的收进「更多」"（E-2026-232 立的规矩），
  * 只改显示顺序会让"右边那个反而后消失"，窄屏下出现"肉眼上右边还在、左边先没了"的错位。
  * 对换后 主题 在右 ⇒ 主题 先被折叠，与末位=最先折叠的规则一致。
+ *
+ * adj603：新增的「谱面」按钮**必须一起登记进本表**——不在表里就进不了 `shownKeys`，
+ * 结果"只在「更多」里、主栏根本不渲染"（用户报"顶栏没创建谱面按钮"就是这个）。
+ * 位置紧跟 `pageConfig`（显示顺序 全局 → 谱面，折叠从最右端开始 ⇒ 谱面 先收）。
  */
 const TOOL_PRIORITY: readonly ToolKey[] = [
   'view',
@@ -153,6 +160,7 @@ const TOOL_PRIORITY: readonly ToolKey[] = [
   'playback',
   'export',
   'pageConfig',
+  'scoreConfig',
   'themeMode',
   'zoom',
   'autoWrap',
@@ -163,7 +171,7 @@ const TOOL_PRIORITY: readonly ToolKey[] = [
 
 /** adj530（用户要求）：功能按钮组（左侧）内的显示顺序——视图、排版、试听、导出、设置、主题、预览比率缩放
     （adj570：用户要求"主题与设置对换位置" ⇒ 现在是**设置在前、主题在后**） */
-const FN_ORDER: readonly ToolKey[] = ['view', 'guides', 'playback', 'export', 'pageConfig', 'themeMode', 'zoom']
+const FN_ORDER: readonly ToolKey[] = ['view', 'guides', 'playback', 'export', 'pageConfig', 'scoreConfig', 'themeMode', 'zoom']
 
 /** adj530（用户要求）：编辑设置组（右侧）内的显示顺序——折行、输入条、字体、字号 */
 const EDIT_ORDER: readonly ToolKey[] = ['autoWrap', 'scriptPad', 'font', 'fontSize']
@@ -313,12 +321,23 @@ export function TopBar() {
     // adj426：深浅模式三状态按钮（adj530 由顶栏独立常驻并入功能组）——
     // 图标与文字随当前档位切换，与「设置 → 主题 → 深浅模式」共用 store
     themeMode: { key: 'themeMode', label: '主题', kind: 'theme' },
+    // adj603（用户要求）：原「设置」按钮改名为「全局」（提示文本「全局设置」）——对应底栏「全局」页签；
+    // 紧跟其后新增「谱面」按钮（提示「谱面设置」）——对应底栏「谱面」页签。
     pageConfig: {
       key: 'pageConfig',
-      label: '设置',
+      label: '全局',
+      title: '全局设置',
       kind: 'btn',
       active: dockOpen && dockPanel === 'settings',
       onPick: () => toggleDock('settings'),
+    },
+    scoreConfig: {
+      key: 'scoreConfig',
+      label: '谱面',
+      title: '谱面设置',
+      kind: 'btn',
+      active: dockOpen && dockPanel === 'score',
+      onPick: () => toggleDock('score'),
     },
     zoom: { key: 'zoom', label: '缩放', kind: 'zoom' },
     // —— 编辑设置组（右侧，靠右对齐） ——
@@ -501,6 +520,9 @@ export function TopBar() {
         return <ToolIcon name="heart" />
       case 'pageConfig':
         return <ToolIcon name="settings" />
+      case 'scoreConfig':
+        // adj603：「谱面」按钮用专门的设计图 `public/icons/谱面设置.png`
+        return <ToolIcon name="scoreSettings" />
       case 'export':
         return <ToolIcon name="export" />
       case 'autoWrap':
@@ -762,8 +784,8 @@ export function TopBar() {
         key={t.key}
         className={`topbar-btn${t.active ? ' active-guide' : ''}`}
         onClick={t.onPick}
-        title={t.label}
-        aria-label={t.label}
+        title={t.title ?? t.label}
+        aria-label={t.title ?? t.label}
       >
         {iconOf(t.key)}
         <span className="tool-label">{t.label}</span>
@@ -1130,9 +1152,10 @@ export function TopBar() {
         entryExport,
       ]
   // adj424：新建「设置」分组（仅一项）——与文件组用分隔线隔开，与顶栏按钮「设置」一一对应
+  // adj603（用户要求）：拆成两项——「全局设置」对底栏「全局」页签、「谱面设置」对底栏「谱面」页签
   const settingsEntries: (MenuEntry | 'sep')[] = [
-    // adj422：菜单项由「页面设置」改为「设置」（与对话框标题、顶栏按钮一致）
-    { label: '设置(&G)…', hotkey: 'g', onPick: () => toggleDock('settings') },
+    { label: '全局设置(&G)…', hotkey: 'g', onPick: () => toggleDock('settings') },
+    { label: '谱面设置(&P)…', hotkey: 'p', onPick: () => toggleDock('score') },
   ]
   // adj422：原「编辑」子菜单（撤销/重做）已从菜单移除——用户要求菜单精简；
   // **功能保留**：撤销/重做仍走 Ctrl+Z / Ctrl+Y（见下方全局快捷键），store 与历史栈未改。

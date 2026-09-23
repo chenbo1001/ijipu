@@ -28,8 +28,10 @@ export type ModalKind = 'samples' | 'shortcuts' | 'manual' | 'syntax' | 'donate'
  * adj562：'import'（粘贴源码导入）**排在工作区之后**（用户要求"把粘贴源码导入对话框也加到底栏，
  *   就在工作区后面加一个「导入」页签"）——原 `ModalKind` 的 `pasteImport` 弹窗入口随之**下线**
  *   （同一份内容改由 dock 承载，避免"弹窗 + 页签"两条路并存让用户犯选择困难，与 adj492 关于同策）。
+ * adj603（用户要求）：原 'settings' 一个页签**拆成两个**——'settings' = 全局（视图/主题/音色库，
+ *   本机偏好，页签文本「全局」）、'score' = 谱面（布局/字体，随谱保存，页签文本「谱面」）。
  */
-export type DockPanelKey = 'problems' | 'tryout' | 'export' | 'settings' | 'about' | 'workspace' | 'import'
+export type DockPanelKey = 'problems' | 'tryout' | 'export' | 'settings' | 'score' | 'about' | 'workspace' | 'import'
 
 /** 轻量浮动提示（toast）：kind 决定配色；nonce 用于同文案重复触发时重置隐藏计时 */
 export type NoticeKind = 'ok' | 'warn' | 'error'
