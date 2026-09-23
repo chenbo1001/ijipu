@@ -212,6 +212,11 @@ export function WorkspacePanel() {
       const reuse = (async (): Promise<SearchResult> => {
         try {
           const r = await warm
+          /**
+           * adj607（E-2026-296）：预热那次同样可能是"整棵树都没读到"（它只在已授权时才扫，
+           * 但授权可能在扫描途中被撤）——与下面主路径同一口径：**空结果不许装进索引**。
+           */
+          if (r.blocked.includes('')) return { hits: indexRef.current ?? [], ...idxMetaRef.current, scanned: r.scanned }
           indexRef.current = r.hits
           indexKeyRef.current = indexScopeKey(rec)
           indexAtRef.current = Date.now()
@@ -234,6 +239,24 @@ export function WorkspacePanel() {
     let lastShown = 0
     const p = (async (): Promise<SearchResult> => {
       try {
+        /**
+         * adj607（E-2026-296，用户反馈"`*` 过滤无索引内容出来，要点进有 jps 的目录后才有"）：
+         * **没授权就别扫**。
+         *
+         * 未授权的目录句柄（刷新/重开后浏览器把权限重置成 `prompt`）读取原语一律抛
+         * `NotAllowedError` ⇒ 整棵树每个目录都会进 `blocked`、`hits` 为 0。而这份"0 命中"的结果
+         * 以前会被当成**扫描成功**：装进内存索引 + 落盘 + 弹"索引完成：0 个谱"，
+         * 于是 `filterFromIndex()` 认它（空数组也是"有索引"）⇒ **后续按 `*` 永远不再重扫**，
+         * 用户看到的就只有 `patchIndexDir` 顺路攒下的"自己点进去过的目录"的谱。
+         *
+         * 授权只能由用户手势触发（启动/挂载时静默申请会被浏览器拒绝），所以这里只能**如实拒绝扫描**；
+         * 授权成功后三条入口（点当前工作区项授权 / 选新目录 / 从清单切过去）都会重新准备索引。
+         */
+        const perm = await queryWorkspacePermission(rec)
+        if (perm === 'denied' || perm === 'prompt') {
+          useUiStore.getState().showNotice(workspaceCopy.indexNeedGrant, 'warn')
+          return { hits: indexRef.current ?? [], ...idxMetaRef.current, scanned: 0 }
+        }
         const r = await searchWorkspaceJps(rec, '', {
           maxHits: 20000,
           maxEntries: 200000,
@@ -242,6 +265,8 @@ export function WorkspacePanel() {
           onProgress: (scanned, partial) => {
             setScanInfo({ scanned, found: partial.length, ms: Date.now() - t0 })
             const now = Date.now()
+            // 第一次报告一定通过（`lastShown` 从 0 起）⇒ 用户刚授权就按 `*` 时，第一份部分结果
+            // 立刻可见、之后每 1.2s 越长越多；节流只为限制"扫描期间"的重渲染频率（adj546）。
             if (now - lastShown < 1200) return
             lastShown = now
             if (gen !== scanGenRef.current) return // 扫描期间动过文件 ⇒ 这批部分结果已过期
@@ -255,6 +280,16 @@ export function WorkspacePanel() {
           indexRef.current = null
           indexKeyRef.current = null
           return { hits: [], truncated: false, blocked: [], scanned: r.scanned }
+        }
+        /**
+         * adj607（E-2026-296）：**整棵树都没读到** ⇒ 这不是"工作区里没有谱"，而是"根本没扫到"
+         * （根目录被拒 / 目录被删 / 授权被撤）。这种结果**绝不能装进索引、更不能落盘**：
+         * 一份空索引会让过滤一直短路，用户再按 `*` 也不会重扫（正是上面那个现象的另一半）。
+         * 保留已有索引（哪怕旧）比换成"空"要好，所以这里直接原样返回、什么都不改。
+         */
+        if (r.blocked.includes('')) {
+          useUiStore.getState().showNotice(workspaceCopy.indexUnreadable, 'warn')
+          return { hits: indexRef.current ?? [], truncated: false, blocked: [], scanned: r.scanned }
         }
         indexRef.current = r.hits
         indexKeyRef.current = indexScopeKey(rec)
@@ -507,14 +542,22 @@ export function WorkspacePanel() {
       if (menuRef.current?.contains(t) || menuBtnRef.current?.contains(t)) return
       setMenuOpen(false)
     }
+    /**
+     * adj608：**用捕获阶段把 ESC 吃掉**——菜单开着时按 ESC 只应关菜单，不该顺带把底栏最小化
+     * （`ToolDock` 的 ESC 处理挂在 `<section>` 上，属于冒泡路径；document 的捕获先跑，
+     * `stopPropagation` 之后它就收不到这个事件了）。菜单是 portal 到 body 的，不在底栏子树里，
+     * 所以只能靠"抢在它前面消费"这一条路。
+     */
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false)
+      if (e.key !== 'Escape') return
+      setMenuOpen(false)
+      e.stopPropagation()
     }
     document.addEventListener('mousedown', onDown, true)
-    document.addEventListener('keydown', onKey)
+    document.addEventListener('keydown', onKey, true)
     return () => {
       document.removeEventListener('mousedown', onDown, true)
-      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('keydown', onKey, true)
     }
   }, [menuOpen])
 
@@ -669,7 +712,6 @@ export function WorkspacePanel() {
       // adj589：过滤索引**不再在这里丢掉**——改为交给 `ensureIndexFresh()`：内存里没有就装落盘的
       //（第一次过滤即秒开），缺失或过期才**空闲时**重扫。这样"打开面板"不再等于"下次过滤要等 20s"。
       invalidateCache()
-      if (rec) await ensureIndexFresh(rec)
       // adj544：读最近工作区列表（供"一键切回"），并尝试恢复绑定（权限已授予时）
       setRecent(await listWorkspaces())
       await resolvePendingBinding()
@@ -683,8 +725,16 @@ export function WorkspacePanel() {
       if (!alive) return
       setPerm(q)
       if (q === 'granted') {
-        // adj550：**已授权 ⇒ 进入工作区直接定位到最新位置**（与"授权后"走同一个函数）
+        /**
+         * adj550：**已授权 ⇒ 进入工作区直接定位到最新位置**（与"授权后"走同一个函数）。
+         *
+         * adj607（E-2026-296）：顺序是 **先列目录、再准备索引**——
+         *  ① 索引只能在**已授权**之后准备（未授权扫描会读出"0 命中"并把空索引装进内存，
+         *     见 `runScan` 里的授权门槛）；
+         *  ② 首屏那一次列目录本来就慢（手机 FSA 每条一趟往返），索引扫描没必要跟它抢同一个通道。
+         */
         await enterAtLatestPos(rec, workspaceCopy.loadingWorkspace)
+        await ensureIndexFresh(rec)
       } else setBusy(false)
     })()
     return () => {
@@ -749,6 +799,12 @@ export function WorkspacePanel() {
       setPerm(r === 'granted' ? 'granted' : r === 'denied' ? 'denied' : 'unknown')
       if (r === 'granted') {
         await enterAtLatestPos(ws, workspaceCopy.loadingWorkspace)
+        /**
+         * adj607（E-2026-296）：**刚授权 ⇒ 现在才开始准备索引**（与"打开面板"同序：先列目录再索引）。
+         * 不补这一步的话，"刷新后重新授权"这条最常见的手机路径会一直停在"没有索引"，
+         * 用户按下 `*` 时才现扫（真机 20s 量级）。
+         */
+        await ensureIndexFresh(ws)
         await resolvePendingBinding()
       }
     } finally {
@@ -1220,7 +1276,13 @@ export function WorkspacePanel() {
                 onChange={(ev) => setEdit({ ...edit, value: ev.target.value })}
                 onKeyDown={(ev) => {
                   if (ev.key === 'Enter') void submitEdit()
-                  if (ev.key === 'Escape') setEdit(null)
+                  if (ev.key === 'Escape') {
+                    // adj608：`preventDefault` = "这个 ESC 我用了"——底栏的"ESC 最小化"据此让路
+                    //（ESC 先关最里面那一层：正在改名的输入框先取消，再按一次才最小化底栏）
+                    // adj613：取消即"退出输入框"（这个输入框随之卸载，焦点自然释放）
+                    ev.preventDefault()
+                    setEdit(null)
+                  }
                 }}
               />
               <button type="button" className="btn primary" onClick={() => void submitEdit()} disabled={busy}>
@@ -1434,7 +1496,15 @@ export function WorkspacePanel() {
                   setConfirmDel(null)
                 }}
                 onKeyDown={(ev) => {
-                  if (ev.key === 'Escape') setQuery('')
+                  /**
+                   * adj608：清空过滤是"这个 ESC 的用途"，标记已用 ⇒ 底栏不再顺手最小化（见 ToolDock）
+                   * adj613（用户要求）：同时**退出输入框** ——"第一次 ESC 退出输入框、第二次才最小化底栏"。
+                   */
+                  if (ev.key === 'Escape') {
+                    ev.preventDefault()
+                    setQuery('')
+                    ev.currentTarget.blur()
+                  }
                 }}
               />
               <div className="ws-filter-row">

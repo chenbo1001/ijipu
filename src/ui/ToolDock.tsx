@@ -33,7 +33,8 @@ import { dockCopy } from '../brand/copy'
 import { ToolIcon } from './ToolIcon'
 import type { ToolIconName } from './toolIcons'
 import { beginDrag } from './dragGesture'
-// adj528：告警面板的高度常量与算式（单一来源 + 纯函数，smoke 有断言）
+// adj609：ESC 最小化底栏后把焦点交回编辑区（选择器留在编辑层，见该模块说明）
+import { focusEditorTextarea } from '../editor/editorFocus'// adj528：告警面板的高度常量与算式（单一来源 + 纯函数，smoke 有断言）
 import * as PROBS from './dock/problemsHeight'
 // adj528：告警条数（用于"条数 × 单行实测"算出内容自然高）——纯函数，留在主包
 import { summarizeProblems } from './problems'
@@ -312,6 +313,8 @@ export function ToolDock() {
   const dockPanel = useUiStore((s) => s.dockPanel)
   const setDockPanel = useUiStore((s) => s.setDockPanel)
   const closeDock = useUiStore((s) => s.closeDock)
+  /** adj610：Ctrl+H 发来的"按一下档位按钮"请求（nonce 自增；见 `cycleDockHeightRef` 处的消费逻辑） */
+  const dockSizeStep = useUiStore((s) => s.dockSizeStep)
   // 首次激活即挂载；此后常挂载（切换仅用 hidden 隐藏）→ 面板内部状态天然保留
   const [everActive, setEverActive] = useState<readonly DockPanelKey[]>([])
   /** adj465：各面板"当次"被拖拽调整过的高度（未调整则用 DEFAULT_H） */
@@ -327,6 +330,23 @@ export function ToolDock() {
    * 声明在这里（而非使用处附近）是因为下面几个 effect 也要重置它。
    */
   const [sizePhase, setSizePhase] = useState(0)
+  /**
+   * adj611（用户要求）：**"最小化"是底栏的一个状态，不是某个面板记住的高度**。
+   *
+   * 用户口径："底栏最小化的情况下点击底栏页签，应该切换到该页签并切换建议高度，
+   * 底栏高度调整按钮状态同步调整。"
+   *
+   * 为什么必须做成独立状态（而不是像 adj608 那样写 `heights[dockPanel] = 外壳高`）：
+   *  · 写进 `heights` 等于**那个面板"记住了"外壳高** ⇒ 从最小档切走、再切回该面板时，
+   *    内容区仍是 0 高（用户看到的是"这个页签坏掉了"）；实测就是这么撞出来的：
+   *    在「导出」上按 ESC 最小化 → 切到别的页签 → 再切回「导出」，高度是 43px 而不是它的内容高。
+   *  · 独立状态还有一个好处：最小化**不破坏**用户给该面板拖出来的高度——退出最小化后
+   *    回到的就是"他自己那个高度"（没拖过则是建议高度）。
+   *
+   * 于是 `dockH = minimized ? 外壳高 : clamp(heights[panel] ?? forPanel(panel))`；
+   * 任何"落具体高度"的动作（拖拽 / 键盘 bump / 档位循环 / 点页签）都经 `applyHeight()` 退出该状态。
+   */
+  const [minimized, setMinimized] = useState(false)
   /**
    * adj521：**实测的外壳高度**（抓手 `.tool-dock-resize` + 页签栏 `.tool-dock-tabs`）。
    *
@@ -567,6 +587,8 @@ export function ToolDock() {
     if (dockOpen && !wasOpenRef.current) {
       setHeights({})
       setMeasured({})
+      // adj611：重新打开 ⇒ 退出"最小化"状态（与"清掉当次调整"同一时机）
+      setMinimized(false)
       // adj520：重新打开 = 各面板回到默认高度 ⇒ 档位循环也回到起点（相位 0 = 建议，图标上箭头）
       setSizePhase(0)
     }
@@ -683,7 +705,8 @@ export function ToolDock() {
   // 外其它几个页签都不能调整高度"。修法：把"是否 AUTO_FIT"的判断从 baseH 来源里去掉——
   // AUTO_FIT 仍负责"初始默认值 = 实测内容自然高"，但**一旦用户拖了**就以用户值为准。
   const baseH = heights[dockPanel] ?? forPanel(dockPanel)
-  const dockH = clampH(baseH, chromeH)
+  // adj611：最小化是"状态"而不是某面板记住的高度（见 `minimized` 的说明）
+  const dockH = minimized ? chromeH : clampH(baseH, chromeH)
 
   // ---- adj520：三段高度的单按钮循环 ------------------------------------------------
   /**
@@ -733,9 +756,144 @@ export function ToolDock() {
 
   const cycleDockHeight = () => {
     // 先按"当前相位声明的下一步"落高度，再把相位推进一格（4 步一循环）
-    setHeights((prev) => ({ ...prev, [dockPanel]: clampH(dockHeightFor(sizeStep.next), chromeH) }))
+    if (sizeStep.next === 'min') {
+      /**
+       * adj611：最小档 = **状态**（`minimized`），不写进该面板的高度记忆（见 `minimized` 的说明）。
+       * ⚠ 这里刻意**不调 `minimizeDock()`**：那个函数自己会把相位拨到"最小"那一格（ESC 那条路
+       * 需要），而本函数末尾还要再自增一格 ⇒ 拨两次就跳过了"最小 → 建议"这一格
+       * （实测：循环到最小时按钮显示的是「建议（点击 → 最大）」，与实际高度不符）。
+       */
+      setMinimized(true)
+      blurCollapsedPane()
+    } else {
+      applyHeight(dockHeightFor(sizeStep.next))
+    }
     setSizePhase((p) => (p + 1) % SIZE_PHASES.length)
   }
+
+  /**
+   * adj608：内容区被收起来时，把**焦点从内容区里挪走**。
+   *
+   * 最小档只留外壳（抓手 + 页签栏），内容区高度为 0 且 `overflow: hidden`——若焦点还停在里面的
+   * 输入框上，界面看不见光标、接着敲键盘却在往看不见的框里打字（点了"最小"或按了 ESC 之后都会撞上）。
+   * 只处理**内容区**（`.tool-dock-body`）里的焦点：页签栏上的按钮是可见的，不动它。
+   */
+  const blurCollapsedPane = () => {
+    const active = document.activeElement
+    if (active instanceof HTMLElement && bodyRef.current?.contains(active)) active.blur()
+  }
+
+  /**
+   * adj611（用户要求）：**落实一个具体高度**（拖拽 / 键盘 bump / 档位循环共用）——
+   * 写入该面板的"当次高度"，同时**退出最小化状态**。
+   *
+   * ⚠ 最小化**不再**写成"该面板的高度 = 外壳高"（见 `minimized` 的说明）：那样一来
+   * "最小化时所在的那个面板"会**记住**外壳高，切走再切回时内容区仍是 0 高（看起来就是"坏掉了"）。
+   */
+  const applyHeight = (next: number, key: DockPanelKey = dockPanel) => {
+    setMinimized(false)
+    setHeights((prev) => ({ ...prev, [key]: clampH(next, chromeH) }))
+  }
+
+  /**
+   * 手动调整（拖拽 / 键盘 bump）落到一个高度：**落到外壳高就当作"最小化"**（不写面板高度记忆），
+   * 否则落具体高度；两种情况都把相位拨到"下一步回建议"（见 `syncPhaseFromManualHeight`）。
+   */
+  const applyManualHeight = (next: number) => {
+    const h = clampH(next, chromeH)
+    if (h <= chromeH + 0.5) minimizeDock(false)
+    else applyHeight(h)
+    syncPhaseFromManualHeight(h)
+  }
+
+  /**
+   * adj608（用户要求）：**把底栏最小化** = 切到"最小高度"档（只留抓手 + 页签栏），
+   * 并让**高度档位按钮的状态跟着变**：相位拨到"当前 = 最小、下一按 = 建议高度"
+   * （图标上箭头、title 显示「底栏高度：最小（点击 → 建议）」）。
+   *
+   * 为什么拨相位而不是"只改高度"：档位循环是**4 相位**（`建议 → 最大 → 建议 → 最小 → 建议`），
+   * 序列里"建议"出现两次、两次的下一步方向相反，所以"当前高度"推不出"下一按去哪"——
+   * 用户要的"下一按为建议高度"只能靠把相位显式拨到 `min` 那一格（`syncPhaseFromManualHeight`
+   * 与手动拖到最小是同一个处理）。
+   *
+   * adj609（用户要求）：`toEditor = true` 时把焦点**交给编辑区**——用户口径"最小化 dock 就是
+   * dock 碍事不方便编辑"，所以收完之后焦点应当在编辑区里，接着就能打字。
+   * 只给 **ESC 这条路**（`toEditor = true`）用：档位按钮是个"连点循环"的控件，
+   * 点完一下还可能再点第二下（建议 → 最大 → 建议 → 最小），焦点不该被抢走。
+   * 编辑区不在 DOM 里（预览视图）时退回"只把焦点从被收起的内容区里挪开"。
+   */
+  const minimizeDock = (toEditor: boolean) => {
+    setMinimized(true)
+    syncPhaseFromManualHeight(chromeH)
+    if (!toEditor || !focusEditorTextarea()) blurCollapsedPane()
+  }
+
+  /**
+   * adj612（用户反馈"焦点在底栏**内容区**时不响应 ESC，在页签上可以"）：
+   * **ESC 的判据从"焦点在底栏里"改成"底栏开着、且没有更内层的东西用掉它"**。
+   *
+   * 真机实测的现象与根因（`_tmp_esc_content_probe`）：
+   *  · 焦点在**页签 / 抓手 / 内容里的按钮、勾选框、下拉、子页签**上 ⇒ ESC 有效；
+   *  · 焦点在**内容里的不可聚焦元素**（面板容器、`.pcfg-row`、"空白处"）⇒ **点击根本不会移动焦点**，
+   *    它仍停在编辑器文本域上 ⇒ 挂在 `<section>` 上的 `onKeyDown` 收不到事件，表现为"内容区不响应 ESC"
+   *    （底栏越高、内容区越大，越容易点在空白上——所以用户先在"高度最高"时撞到）。
+   *
+   * 为什么这个更宽的判据是安全的：
+   *  · **内层优先靠 `defaultPrevented`**：输入框（设置数字框 / 工作区过滤、改名）取消输入、
+   *    顶栏菜单关闭、对话框关闭都会标记（前两者本来就标了，对话框那条在 `App.tsx` 里补上）；
+   *    工作区「操作▾」菜单在**捕获阶段** `stopPropagation`，本监听在**冒泡阶段**、压根收不到；
+   *  · 挂在 **window 冒泡**：所有内层消费者都先有机会处理；
+   *  · 最小化是**非破坏**动作（只收内容区、页签栏留着，点页签即回建议高度）。
+   *
+   * `escMinimizeDock`（原来挂在 `<section>` 上那版）随之删除——**同一个按键只保留一条处理路径**，
+   * 免得"焦点在底栏里"那条与这条各判一次、日后又漂移。
+   */
+  const minimizeDockRef = useRef(minimizeDock)
+  minimizeDockRef.current = minimizeDock
+  /**
+   * adj613（用户要求）：`isTextEntry` = "这个元素正在接受键盘输入"。
+   * 焦点在**底栏内容区的输入框**里时，ESC 的第一次只应"退出输入框"（blur），第二次才最小化底栏。
+   * （各个输入框自己的 ESC 语义——清空过滤 / 放弃输入 / 回退数值——由它们自己的 handler 处理，
+   * 这里兜的是"没有自带 ESC 处理的输入框"，比如导入页的粘贴框。）
+   */
+  const isTextEntry = (el: HTMLElement): boolean =>
+    el instanceof HTMLTextAreaElement ||
+    (el instanceof HTMLInputElement && !['checkbox', 'radio', 'button', 'submit', 'range', 'file'].includes(el.type)) ||
+    el.isContentEditable
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      if (useUiStore.getState().modal) return // 对话框还没被关掉时（极端时序）也不抢
+      if (!useUiStore.getState().dockOpen) return
+      // adj613：底栏内容区里的输入框 ⇒ 这一下先退出输入（第二下才最小化）
+      const active = document.activeElement
+      if (active instanceof HTMLElement && isTextEntry(active) && dockRef.current?.contains(active)) {
+        active.blur()
+        return
+      }
+      // adj609：ESC 最小化之后焦点归编辑区（见 `minimizeDock` 的说明）
+      minimizeDockRef.current(true)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  /**
+   * adj610（用户要求）：`Ctrl+H` = "按一下底栏高度档位按钮"。
+   *
+   * 档位循环的状态（相位 / 各面板当次高度 / 实测外壳高）都在本组件里，所以 App 只发一个
+   * 一次性请求（`uiStore.requestDockSizeStep()`，nonce 自增），这里消费它并执行**同一个**
+   * `cycleDockHeight()` —— 快捷键与鼠标点击走的是同一条代码，不会各自漂移。
+   *
+   * 用 ref 拿"最新的 cycleDockHeight"：它每次渲染都是新函数，直接进依赖数组会让本 effect
+   * 每次渲染都跑（就变成"每渲染按一下按钮"了）；只依赖 nonce 才是"按一次跑一次"。
+   */
+  const cycleDockHeightRef = useRef(cycleDockHeight)
+  cycleDockHeightRef.current = cycleDockHeight
+  useEffect(() => {
+    if (dockSizeStep === 0) return // 初始值（没按过 Ctrl+H）不触发
+    cycleDockHeightRef.current()
+  }, [dockSizeStep])
 
   /**
    * 当前 dock 高度处于哪一档（±2px 容差）；用户手动拖到的中间值记为 `custom`。
@@ -752,8 +910,7 @@ export function ToolDock() {
           : 'custom'
 
   /**
-   * 手动调整（拖拽 / 键盘 bump）落到 **min / max** 后，把相位拨到"下一步回建议"的那一格
-   * （min → 相位 3、max → 相位 1），使下一次点击的方向符合直觉。
+   * 手动调整（拖拽 / 键盘 bump）落到 **min / max** 后，把相位拨到"下一步回建议"的那一格   * （min → 相位 3、max → 相位 1），使下一次点击的方向符合直觉。
    *
    * 刻意**不用 effect 监听高度**去做同步：那会让"点击按钮"与"高度变化"互相触发
    * （点击设了相位 → 高度变了 → effect 又按高度把相位改回去 ⇒ 循环卡死在同一档）。
@@ -765,10 +922,30 @@ export function ToolDock() {
     else if (Math.abs(h - maxH()) <= 2) setSizePhase(1)
   }
 
+  /**
+   * adj611（用户要求）：最小化状态下点页签 = "**我要看这个面板**" ⇒ 退出最小化，
+   * 让**目标面板**回到它自己的高度（用户当次拖过的值，没拖过则建议高度），
+   * 并把档位按钮的相位拨回 **0**（当前=建议、下一按=最大、图标上箭头）——用户要的
+   * "底栏高度调整按钮状态同步调整"就是指这个：不能停在「最小（点击 → 建议）」那一格。
+   *
+   * 为什么相位也在这里显式拨（明明 `dockPanel` 一变就有个 effect 会拨到 0）：
+   * 用户点的是**当前已激活**的那个页签时 `dockPanel` 不变、effect 不跑，相位会留在"最小"那格。
+   */
+  const exitMinimized = () => {
+    setMinimized(false)
+    setSizePhase(0)
+  }
+
   // adj487：拖拽改用 Pointer Events（鼠标 + 触屏 + 触控笔）——此前只监听 mousemove/mouseup，
   // 手机上拖不动。位移与结束回调都在手势里处理，不再常驻 window 监听。
   const startDrag = (e: React.PointerEvent) => {
-    const panel = dockPanel
+    /**
+     * adj612：`beginDrag` 会 `preventDefault()`（免得拖拽时选中文字/触发原生拖放），
+     * 连带**把"按下即聚焦"也挡掉了** ⇒ 抓手从来拿不到焦点：鼠标拖过之后
+     * ① 抓手上的 ↑↓/PageUp/PageDown（文档里写明的键盘调高度）用不了；② 焦点还留在原处。
+     * 这里补一次显式聚焦（抓手是 `tabIndex=0` 的 `role="separator"`，本就该可聚焦）。
+     */
+    ;(e.currentTarget as HTMLElement).focus?.()
     beginDrag(e, {
       onStart: () => {
         dragRef.current = { y: e.clientY, h: dockH }
@@ -777,10 +954,8 @@ export function ToolDock() {
       onMove: (_dx, dy) => {
         const d = dragRef.current
         if (!d) return
-        // 手指/鼠标向上拖（dy < 0）→ dock 变高
-        const next = clampH(d.h - dy, chromeH)
-        setHeights((prev) => ({ ...prev, [panel]: next }))
-        syncPhaseFromManualHeight(next)
+        // 手指/鼠标向上拖（dy < 0）→ dock 变高；拖到底（外壳高）= 最小化（adj611：不写面板高度记忆）
+        applyManualHeight(d.h - dy)
       },
       onEnd: () => {
         dragRef.current = null
@@ -789,9 +964,7 @@ export function ToolDock() {
     })
   }
   const bump = (delta: number) => {
-    const next = clampH(dockH + delta, chromeH)
-    setHeights((prev) => ({ ...prev, [dockPanel]: next }))
-    syncPhaseFromManualHeight(next)
+    applyManualHeight(dockH + delta)
   }
 
   // adj491：dock 关闭时**不渲染**。⚠ 这条守卫曾在 adj487（把拖拽从 mouse 改 Pointer Events）时
@@ -915,6 +1088,9 @@ export function ToolDock() {
               data-key={t.key}
               onClick={() => {
                 setDockPanel(t.key)
+                // adj611（用户要求）：最小档下点页签 = "我要看这个面板" ⇒ 回到建议高度
+                //（否则内容区是 0 高，点了只有高亮变化、像"没反应"）
+                if (minimized) exitMinimized()
                 // adj567：点**已激活**的那个页签时 `dockPanel` 不变 ⇒ 上面那个 effect 不会跑，
                 // 于是"我把页签栏手动滚开、再点回当前页签"就永远回不来 ⇒ 这里也补一次对齐。
                 alignActiveTab()

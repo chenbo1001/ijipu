@@ -256,6 +256,54 @@ export interface SearchOptions {
 }
 
 /**
+ * adj607（E-2026-297，用户反馈"打开工作区后，进入目录慢"）：**后台扫描给前台让路**。
+ *
+ * 索引扫描是**后台**工作（用户没在等它），而"进目录"是**前台**工作（用户正盯着转圈）。
+ * 两者打的是同一个 FSA 通道：扫描并发 8 路不停派活，用户的列表请求就排在它们后面——
+ * 手机上一次目录列举本来就 0.5~1.3s 量级，被压住就更明显。
+ *
+ * 口径：**前台有读取在飞时，扫描在"取下一个目录"前等一等**（最多等
+ * `FOREGROUND_WAIT_MAX_MS`，免得前台万一卡住把后台扫描拖死）。注意已经派出去的请求
+ * 无法取消（FSA 没有 abort），所以这里保证的是"不再往里塞新的"，而不是"立刻清空"。
+ */
+const FOREGROUND_WAIT_MAX_MS = 2000
+
+/** 前台（用户正等着）的目录读取计数 */
+let foregroundReads = 0
+/** 等"前台读完"的唤醒队列（计数归零时全部唤醒） */
+const foregroundIdleWaiters: (() => void)[] = []
+
+/** 前台读取开始（`readDirEntries` 这类"用户点了要等结果"的读取） */
+function beginForegroundRead(): void {
+  foregroundReads += 1
+}
+
+/** 前台读取结束：最后一个结束时唤醒所有等着的后台扫描 */
+function endForegroundRead(): void {
+  foregroundReads = Math.max(0, foregroundReads - 1)
+  if (foregroundReads > 0) return
+  for (const wake of foregroundIdleWaiters.splice(0)) wake()
+}
+
+/** 后台扫描在取下一个目录前调用：前台在读就等（有上限，不会永远等） */
+async function waitForegroundIdle(): Promise<void> {
+  if (foregroundReads === 0) return
+  await new Promise<void>((resolve) => {
+    let settled = false
+    /** 唤醒即"注销自己"（超时那条路也要注销，否则等待队列会一直长） */
+    const done = (): void => {
+      if (settled) return
+      settled = true
+      const i = foregroundIdleWaiters.indexOf(done)
+      if (i >= 0) foregroundIdleWaiters.splice(i, 1)
+      resolve()
+    }
+    foregroundIdleWaiters.push(done)
+    setTimeout(done, FOREGROUND_WAIT_MAX_MS)
+  })
+}
+
+/**
  * adj540（用户要求）：把**整个工作区（含所有子目录）**里符合条件的 `.jps` 收成一个**平坦列表**，
  * 供"过滤即快速打开"用——层级浏览适合整理，找某一份谱还是平坦列表快。
  *
@@ -367,6 +415,9 @@ export async function searchWorkspaceJps(
 
   const worker = async (): Promise<void> => {
     for (;;) {
+      // adj607：用户在等目录列表时让路（见 `waitForegroundIdle`）——先让路再取活，
+      // 免得"拿着活等"，队列里的目录也不会因此被漏掉。
+      await waitForegroundIdle()
       const job = queue.shift()
       if (!job) {
         if (inFlight === 0) return // 没有在飞的任务且队列空 ⇒ 收工
@@ -477,6 +528,19 @@ async function resolveFileHandle(
 }
 
 /**
+ * adj607（E-2026-297，用户反馈"打开工作区后进入目录慢"）：列目录时**并发读修改时间**。
+ *
+ * 原来 `await dir.values()` 的循环里**逐条 await `getFile()`** 取 `lastModified`——
+ * 每次都是一趟到浏览器进程的往返，于是"进一个目录"的开销 = **2 × 文件数 × 单趟延迟**
+ * （枚举一趟 + 取时间一趟）。真机量级：50 个谱 / 10ms 一趟实测 **1267ms**，用户感知就是"进目录慢"。
+ *
+ * 现在：**一看到文件就派出取时间的请求**（与枚举重叠），并**限流 8 路**
+ * （手机上一次打太多 IPC 反而更慢，与 `searchWorkspaceJps` 的并发口径一致）。
+ * 返回值与排序口径完全不变——`sortDirEntries` 拿到的仍是全部已就绪的 `mtime`。
+ */
+const MTIME_CONCURRENCY = 8
+
+/**
  * **列目录**（唯一原语）：列**全部**条目（含隐藏项与非 `.jps`）——过滤口径一律交给上层，
  * 免得两套后端对"什么该显示"各说各话。
  *
@@ -500,21 +564,36 @@ async function listRaw(
   }
   const dir = dirHandle ?? (await resolveDirHandle(root, segs))
   const out: RawEntry[] = []
+  /** adj607：在飞的 mtime 请求（限流用；读不到时间不影响列出） */
+  const inflight = new Set<Promise<void>>()
+  const startMtime = (entry: RawEntry, handle: FileSystemFileHandle): void => {
+    const p = handle
+      .getFile()
+      .then((f) => {
+        entry.mtime = f.lastModified
+      })
+      .catch(() => {
+        /* 读不到时间不影响列出 */
+      })
+      .finally(() => {
+        inflight.delete(p)
+      })
+    inflight.add(p)
+  }
   for await (const handle of dir.values()) {
     if (handle.kind === 'directory') {
       out.push({ name: handle.name, kind: 'dir', mtime: 0, handle })
       continue
     }
-    let mtime = 0
+    const entry: RawEntry = { name: handle.name, kind: 'file', mtime: 0 }
+    out.push(entry)
     if (needMtime && isJpsName(handle.name)) {
-      try {
-        mtime = (await (handle as FileSystemFileHandle).getFile()).lastModified
-      } catch {
-        /* 读不到时间不影响列出 */
-      }
+      startMtime(entry, handle as FileSystemFileHandle)
+      // 到上限就等一个完成——既与枚举重叠，又不至于一次打出几十上百个请求
+      if (inflight.size >= MTIME_CONCURRENCY) await Promise.race(inflight)
     }
-    out.push({ name: handle.name, kind: 'file', mtime })
   }
+  if (inflight.size > 0) await Promise.all(inflight)
   return out
 }
 
@@ -1036,12 +1115,21 @@ export async function writeWorkspaceText(
  * 列出某个目录下的**子目录 + .jps 文件**（其它文件忽略：工作区是谱夹，
  * 真机实测的目录里混着几十个无关文件，全列出来反而找不到谱）。
  * 文件修改时间读失败时按 0 处理（不因为一个读不到就整列失败）。
+ *
+ * adj607：这是**前台**读取（用户点了目录在等结果）——标记区间，后台索引扫描会在这期间让路
+ * （见 `beginForegroundRead` / `waitForegroundIdle`）。
  */
 export async function readDirEntries(
   rec: WorkspaceRecord,
   path: readonly string[] = [],
 ): Promise<DirEntry[]> {
-  const list = await listRaw(rec, path)
+  beginForegroundRead()
+  let list: RawEntry[]
+  try {
+    list = await listRaw(rec, path)
+  } finally {
+    endForegroundRead()
+  }
   const out: DirEntry[] = []
   for (const e of list) {
     // adj540（用户要求）：列表也**跳过 `.` 开头的条目**（与过滤口径一致，见 isHiddenName）

@@ -76,10 +76,11 @@ export function EditorPane() {
   const autoWrap = useUiStore((s) => s.autoWrap)
   // adj314：嵌入式简谱输入工具条显示开关
   const showScriptPad = useUiStore((s) => s.showScriptPad)
-  // adj541：底栏展开悬浮按钮要读的两个状态（关着才显示；点开时保留上次的页签）
+  // adj541：底栏展开悬浮按钮要读的状态（关着才显示；点开时保留上次的页签）
   const dockOpen = useUiStore((s) => s.dockOpen)
-  const dockPanel = useUiStore((s) => s.dockPanel)
-  const setDockPanel = useUiStore((s) => s.setDockPanel)
+  // adj610：展开动作收进 store（`expandDock(preferProblems)`）——「展开底栏」按钮 / Ctrl+D / Ctrl+H
+  // 三个入口共用同一条规则，避免"点按钮"与"按快捷键"打开的页签不一致
+  const expandDockPanel = useUiStore((s) => s.expandDock)
   /**
    * adj591（用户要求）：**脚本有告警时，「展开底栏」先切到告警页签；没有告警就不切换**
    * （维持上次用的那个页签）。
@@ -90,7 +91,7 @@ export function EditorPane() {
    * 口径与左下角状态栏一致：`summarizeProblems()` 把错误与警告都算作"告警"（total > 0）。
    */
   const problems = useMemo(() => summarizeProblems(parseResult.errors), [parseResult.errors])
-  const expandDock = () => setDockPanel(problems.total > 0 ? 'problems' : dockPanel)
+  const expandDock = () => expandDockPanel(problems.total > 0)
   // 编辑器字体/字号属 L1「用户个性」（本机偏好，**不随谱保存**；分层见 docs/SETTINGS-AUDIT.md）——
   // adj-font：此前这里读 `pageConfig.editorFontSize ?? editorFontSize`（谱面里有值就优先），
   // 而谱面里的这两个键是早期版本误写进去的；现已从 PageConfig 移除，只认本机偏好。

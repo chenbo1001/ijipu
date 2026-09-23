@@ -9257,8 +9257,8 @@ async function runAdj540WorkspaceTests() {
       ) &&
       /const cached = await loadWorkspaceIndex\(rec\.id, ''\)/.test(panelSrc) &&
       /scheduleIdleScan\(rec, rec\.id\)/.test(panelSrc) &&
-      // 面板激活时调用它（且索引**不在**那里被丢掉）
-      /if \(rec\) await ensureIndexFresh\(rec\)/.test(panelSrc),
+      // 面板激活时调用它（adj607：挪到"授权之后、首屏列目录之后"，见 [135]；索引**不在**那里被丢掉）
+      /await ensureIndexFresh\(rec\)/.test(panelSrc),
     '')
   check('adj589 并发默认 **8**（延迟受限实测的最佳点；上限 16）——依据是 5616 条目的注入延迟基准',
     /const concurrency = Math\.max\(1, Math\.min\(16, options\.concurrency \?\? 8\)\)/.test(wsSrc) &&
@@ -9282,9 +9282,10 @@ async function runAdj540WorkspaceTests() {
       ) &&
       /const legacy = await getValue<CachedIndex>\(db, INDEX_KEY\)/.test(fhSrc) &&
       /if \(legacy && legacy\.wsId === wsId\) val = legacy/.test(fhSrc) &&
-      // ④ 面板：打开面板 / 选新目录 / 从最近清单切过去，三条路都**立刻准备索引**
-      (panelSrc.match(/await ensureIndexFresh\(/g) ?? []).length >= 3 &&
-      /if \(rec\) await ensureIndexFresh\(rec\)/.test(panelSrc),
+      // ④ 面板：打开面板 / 选新目录 / 从最近清单切过去 / 授权成功，四条路都**准备索引**
+      //    （adj607：都在"已授权"之后调用——见 [135]）
+      (panelSrc.match(/await ensureIndexFresh\(/g) ?? []).length >= 4 &&
+      /await ensureIndexFresh\(rec\)/.test(panelSrc),
     '')
   check('adj590（用户要求）**索引操作有提示消息**：列表最上方转圈+进度，完成/失败都有 toast',
     /workspaceCopy\.indexing\(scanInfo\.scanned, scanInfo\.found\)/.test(panelSrc) &&
@@ -9840,6 +9841,438 @@ function runAdj599WarmTests() {
   check('adj599 后台预热**不弹提示**（只 console.info；否则启动时一串"索引完成"是噪声）', !/showNotice/.test(src) && /console\.info/.test(src), '')
 }
 
+/**
+ * adj607（E-2026-296 / E-2026-297）——用户反馈两条：
+ *   ① "打开工作区后，进入目录慢"
+ *   ② "`*` 过滤无索引内容出来（确认工作区内有 jps 文件）；要点进有 jps 文件的目录后，
+ *       `*` 过滤才会出有浏览过的目录的 jps 文件"
+ *
+ * ② 的真因：**没授权就扫了**。手机刷新/重开后目录权限回落到 `prompt`，未授权句柄的读取原语
+ * 一律抛 `NotAllowedError` ⇒ 整棵树每个目录都进 `blocked`、`hits` 为 0；而这份"0 命中"被当成
+ * **扫描成功**（装进内存索引 + 落盘 + 弹"索引完成：0 个谱"）⇒ `filterFromIndex()` 认它，
+ * 之后按 `*` 永不重扫——用户只看到 `patchIndexDir` 顺路攒下的"自己点进去过的目录"。
+ *
+ * ① 的真因：`listRaw` 在 `dir.values()` 循环里**逐条 await `getFile()`** 取 mtime，
+ * 进一个目录 = 2 × 文件数 × 单趟延迟（真机 50 个谱实测 1267ms）；另外后台扫描会跟前台抢通道。
+ */
+function runAdj607Tests() {
+  console.log('[135] 工作区索引：未授权不许扫 + 空结果不许装进索引 + 进目录提速（adj607）')
+  const panel = String(readFileSync('src/ui/dock/WorkspacePanel.tsx', 'utf8'))
+  const wsSrc = String(readFileSync('src/store/workspace.ts', 'utf8'))
+  const copySrc = String(readFileSync('src/brand/copy.ts', 'utf8'))
+
+  // ---- ① 权限门槛：扫描前先查权限，未授权一律不扫（不装、不存、不谎报"完成"）----
+  check(
+    'adj607 扫描前先查权限：`prompt`/`denied` 直接拒绝（否则未授权扫描会写出空索引）',
+    /const perm = await queryWorkspacePermission\(rec\)\s*\n\s*if \(perm === 'denied' \|\| perm === 'prompt'\) \{[\s\S]{0,240}?showNotice\(workspaceCopy\.indexNeedGrant, 'warn'\)/.test(
+      panel,
+    ),
+    '',
+  )
+  check(
+    'adj607 未授权分支**提前 return**（不落到 `searchWorkspaceJps`，也不碰 indexRef）',
+    (() => {
+      const i = panel.indexOf("if (perm === 'denied' || perm === 'prompt')")
+      const j = panel.indexOf('const r = await searchWorkspaceJps(rec', i)
+      const seg = i >= 0 && j > i ? panel.slice(i, j) : ''
+      return seg.includes('return { hits: indexRef.current ?? []') && !seg.includes('indexRef.current =')
+    })(),
+    '',
+  )
+  check(
+    'adj607 面板：**先列目录、授权之后再准备索引**（激活 effect 里的顺序）',
+    /if \(q === 'granted'\) \{[\s\S]{0,320}?await enterAtLatestPos\(rec, workspaceCopy\.loadingWorkspace\)\s*\n\s*await ensureIndexFresh\(rec\)/.test(
+      panel,
+    ) &&
+      // 旧写法（授权之前就建索引）必须消失
+      !/if \(rec\) await ensureIndexFresh\(rec\)/.test(panel),
+    '',
+  )
+  check(
+    'adj607 授权成功那条路（`onGrant`）也补一次"准备索引"（刷新后重新授权是最常见的手机路径）',
+    /if \(r === 'granted'\) \{[\s\S]{0,320}?await enterAtLatestPos\(ws, workspaceCopy\.loadingWorkspace\)[\s\S]{0,320}?await ensureIndexFresh\(ws\)/.test(
+      panel,
+    ),
+    '',
+  )
+
+  // ---- ② 空结果/读不动 ⇒ 不许装进索引（"没扫到" ≠ "没有谱"）----
+  check(
+    'adj607 **整棵树都没读到**（根目录 blocked）⇒ 不装索引、不落盘、如实提示',
+    // 主路径 + 预热复用路径各一道（`blocked` 里出现空串 = 根目录本身就没读动）
+    (panel.match(/r\.blocked\.includes\(''\)/g) ?? []).length >= 2 &&
+      /if \(r\.blocked\.includes\(''\)\) \{[\s\S]{0,300}?showNotice\(workspaceCopy\.indexUnreadable, 'warn'\)[\s\S]{0,200}?return \{ hits: indexRef\.current \?\? \[\], truncated: false, blocked: \[\], scanned: r\.scanned \}/.test(
+        panel,
+      ) &&
+      // 顺序：守卫必须**在** `indexRef.current = r.hits`（装索引）之前
+      panel.indexOf("r.blocked.includes('')") < panel.indexOf('indexRef.current = r.hits'),
+    '',
+  )
+  check(
+    'adj607 "没扫到"与"没有谱"两句文案分开（用户不会以为自己的谱不见了）',
+    /indexNeedGrant: '[^']+'/.test(copySrc) &&
+      /indexUnreadable: '[^']+'/.test(copySrc) &&
+      /workspaceCopy\.indexNeedGrant/.test(panel) &&
+      /workspaceCopy\.indexUnreadable/.test(panel),
+    '',
+  )
+
+  // ---- ③ 进目录提速：mtime 读取与枚举**并发**（限流 8），不再是"每条一趟串行 await" ----
+  check(
+    'adj607 mtime 并发读（限流 8）+ 与 `values()` 枚举重叠；旧的串行写法已删除',
+    /const MTIME_CONCURRENCY = 8/.test(wsSrc) &&
+      /const startMtime = \(entry: RawEntry, handle: FileSystemFileHandle\): void => \{/.test(wsSrc) &&
+      /if \(inflight\.size >= MTIME_CONCURRENCY\) await Promise\.race\(inflight\)/.test(wsSrc) &&
+      /if \(inflight\.size > 0\) await Promise\.all\(inflight\)/.test(wsSrc) &&
+      !/mtime = \(await \(handle as FileSystemFileHandle\)\.getFile\(\)\)\.lastModified/.test(wsSrc),
+    '',
+  )
+  check(
+    'adj607 排序口径不变：读取失败仍按 mtime=0 回退（不因为一个读不到就整列失败）',
+    /\.catch\(\(\) => \{\s*\n\s*\/\* 读不到时间不影响列出 \*\/\s*\n\s*\}\)/.test(wsSrc) && /return sortDirEntries\(out\)/.test(wsSrc),
+    '',
+  )
+
+  // ---- ④ 后台扫描给前台让路（进目录时不再跟 8 路枚举抢 FSA 通道）----
+  check(
+    'adj607 前台读取计数 + 扫描"取下一个目录前"让路（有上限，不会把扫描拖死）',
+    /const FOREGROUND_WAIT_MAX_MS = 2000/.test(wsSrc) &&
+      /async function waitForegroundIdle\(\): Promise<void> \{/.test(wsSrc) &&
+      /export async function readDirEntries\([\s\S]{0,700}?beginForegroundRead\(\)[\s\S]{0,300}?endForegroundRead\(\)/.test(wsSrc) &&
+      /await waitForegroundIdle\(\)\s*\n\s*const job = queue\.shift\(\)/.test(wsSrc),
+    '',
+  )
+  check(
+    'adj607 让路是"尽力而为"：不改变搜索结果（并发/上限/命中口径一个字没动）',
+    /const concurrency = Math\.max\(1, Math\.min\(16, options\.concurrency \?\? 8\)\)/.test(wsSrc) &&
+      /hits\.length >= maxHits \|\| scanned >= maxEntries/.test(wsSrc),
+    '',
+  )
+}
+
+/**
+ * adj608（用户要求）：**焦点在底栏里时按 ESC ⇒ 最小化底栏**（切到"最小高度"档），
+ * 并且**高度档位按钮的状态跟着变**——拨到"当前 = 最小、下一按 = 建议高度"（图标上箭头）。
+ *
+ * 三个要点：
+ *  ① 判据用 `<section onKeyDown>`（React 只在事件**从底栏内部冒泡**时调用）⇒ "焦点在底栏里"
+ *     天然成立，不必自己比对 `document.activeElement`，也不会抢编辑区 / 顶栏的 ESC；
+ *  ② "最小化底栏 ≠ 收起底栏"：最小档仍保留外壳（抓手 + 页签栏），所以档位按钮还在、还能点回建议；
+ *  ③ **内层优先**：底栏里的输入框 / 弹出菜单先把 ESC 用掉（`preventDefault` / 捕获阶段
+ *     `stopPropagation`），底栏就不再最小化——符合"ESC 先关最里面那一层"。
+ */
+function runAdj608Tests() {
+  console.log('[136] 焦点在底栏里按 ESC ⇒ 最小化底栏 + 档位状态同步（adj608）')
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  const wsPanel = String(readFileSync('src/ui/dock/WorkspacePanel.tsx', 'utf8'))
+  const cfgSrc = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
+  const scSrc = String(readFileSync('src/dialogs/ShortcutsDialog.tsx', 'utf8'))
+
+  // ---- ① ESC 的处理路径（adj612 起：**window 冒泡**上的全局监听，不再要求焦点在底栏里）----
+  check(
+    'adj608/adj612 ESC 挂在 **window 冒泡**阶段（不再挂 `<section>`：判据从"焦点在底栏里"放宽为"底栏开着且内层没用掉"）',
+    /window\.addEventListener\('keydown', onKey\)/.test(dockSrc) &&
+      // 老那条"挂在容器上"的路径必须消失——同一个按键只留一条处理路径
+      !/onKeyDown=\{escMinimizeDock\}/.test(dockSrc) &&
+      !/const escMinimizeDock = \(e: React\.KeyboardEvent\)/.test(dockSrc),
+    '',
+  )
+  check(
+    'adj608/adj612 ESC 的判据：Escape / 内层没用掉（`defaultPrevented`）/ 没有对话框 / 底栏开着 / 相位取自最新渲染',
+    /if \(e\.key !== 'Escape' \|\| e\.defaultPrevented\) return/.test(dockSrc) &&
+      /if \(useUiStore\.getState\(\)\.modal\) return/.test(dockSrc) &&
+      /if \(!useUiStore\.getState\(\)\.dockOpen\) return/.test(dockSrc) &&
+      /const minimizeDockRef = useRef\(minimizeDock\)[\s\S]{0,120}?minimizeDockRef\.current = minimizeDock/.test(dockSrc),
+    '',
+  )
+
+  // ---- ② 最小化 = "最小高度档"（不是收起底栏），且档位状态跟着变 ----
+  check(
+    'adj608 `minimizeDock()`：高度收到 `chromeH`（外壳）**并**把相位拨成"下一按 = 建议"',
+    // adj609：签名多了 `toEditor`（ESC 那条路要把焦点交给编辑区）
+    // adj611：高度不再"写进该面板的高度记忆"，而是置 `minimized` 状态（见 [138]）
+    /const minimizeDock = \(toEditor: boolean\) => \{[\s\S]{0,320}?setMinimized\(true\)[\s\S]{0,160}?syncPhaseFromManualHeight\(chromeH\)/.test(
+      dockSrc,
+    ),
+    '',
+  )
+  check(
+    'adj608 `minimizeDock` **不调用 closeDock**（最小化 ≠ 收起：只收内容区，页签栏仍在，随时能点回建议）',
+    (() => {
+      const i = dockSrc.indexOf('const minimizeDock = (')
+      const seg = i >= 0 ? dockSrc.slice(i, i + 460) : ''
+      return seg.length > 0 && !seg.includes('closeDock')
+    })(),
+    '',
+  )
+  check(
+    'adj608 相位表里"最小"那一格就是"下一按 = 建议、图标上箭头"（`syncPhaseFromManualHeight` 拨到它）',
+    /\{ cur: 'min', next: 'suggested', icon: 'up' \}/.test(dockSrc) &&
+      /if \(Math\.abs\(h - chromeH\) <= 2\) setSizePhase\(3\)/.test(dockSrc),
+    '',
+  )
+
+  // ---- ③ 收到最小档时把焦点从"看不见的内容区"里挪走（ESC 与档位按钮同口径）----
+  check(
+    'adj608 收到最小档 ⇒ 内容区里的焦点被 blur（否则看不见光标、却在往隐藏输入框里打字）',
+    /const blurCollapsedPane = \(\) => \{[\s\S]{0,320}?bodyRef\.current\?\.contains\(active\)[\s\S]{0,80}?active\.blur\(\)/.test(dockSrc) &&
+      // adj611：ESC 那条路走 `minimizeDock`，档位循环那条路在 min 分支里直接调它
+      /if \(!toEditor \|\| !focusEditorTextarea\(\)\) blurCollapsedPane\(\)/.test(dockSrc) &&
+      /setMinimized\(true\)\s*\n\s*blurCollapsedPane\(\)/.test(dockSrc),
+    '',
+  )
+
+  // ---- ④ 内层优先：底栏里的输入框 / 弹出菜单先用掉 ESC ----
+  check(
+    'adj608 工作区面板两个输入框的 ESC 都标了"已用"（`preventDefault`）⇒ 先取消输入，再按才最小化',
+    (wsPanel.match(/ev\.key === 'Escape'\) \{\s*\n\s*\/\/[^\n]*adj608[\s\S]{0,200}?ev\.preventDefault\(\)/g) ?? []).length >= 2 ||
+      (wsPanel.match(/ev\.preventDefault\(\)/g) ?? []).length >= 2,
+    '',
+  )
+  check(
+    'adj608 工作区「操作▾」菜单开着时，ESC 在**捕获阶段**被吃掉（只关菜单，不顺手最小化底栏）',
+    /document\.addEventListener\('keydown', onKey, true\)/.test(wsPanel) &&
+      /setMenuOpen\(false\)\s*\n\s*e\.stopPropagation\(\)/.test(wsPanel),
+    '',
+  )
+  check(
+    'adj608 设置里的数字框：ESC = **放弃这次输入**（不再把草稿提交上去），并标"已用"',
+    /const skipCommitRef = useRef\(false\)/.test(cfgSrc) &&
+      /if \(skipCommitRef\.current\) \{\s*\n\s*skipCommitRef\.current = false\s*\n\s*setDraft\(null\)\s*\n\s*return\s*\n\s*\}/.test(cfgSrc) &&
+      /e\.key === 'Escape'[\s\S]{0,200}?e\.preventDefault\(\)[\s\S]{0,120}?skipCommitRef\.current = true[\s\S]{0,80}?blur\(\)/.test(cfgSrc),
+    '',
+  )
+
+  // ---- ⑤ 快捷键速查里能查到这条 ----
+  check(
+    'adj608/adj613 快捷键速查登记了「最小化底栏（输入框里先退出输入）」',
+    /\['Esc', '最小化底栏（输入框里先退出输入）'\]/.test(scSrc),
+    '',
+  )
+}
+
+/**
+ * adj609 / adj610（同一天的用户追加）：
+ *  · **adj609**：ESC 最小化底栏后，**焦点归编辑区**——用户口径"最小化 dock 就是 dock 碍事不方便编辑"，
+ *    所以收完之后焦点应当在编辑区里，接着就能打字（光标位置不丢）；
+ *  · **adj610**：`Ctrl+D` = 底栏展开/收起，`Ctrl+H` = "按一下高度档位按钮"。
+ *
+ * 两条都在"同一个动作有多个入口"上做收敛：展开底栏的规则（有告警先看告警）收进 store 一处实现；
+ * 高度档位状态在 `ToolDock` 内部，快捷键只发一次性请求（nonce），由它跑**同一个** `cycleDockHeight()`。
+ */
+function runAdj609610Tests() {
+  console.log('[137] 底栏键盘操作补全：ESC 焦点归编辑区 + Ctrl+D / Ctrl+H（adj609/adj610）')
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+  const uiSrc = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+  const edSrc = String(readFileSync('src/editor/EditorPane.tsx', 'utf8'))
+  const focusSrc = String(readFileSync('src/editor/editorFocus.ts', 'utf8'))
+  const scSrc = String(readFileSync('src/dialogs/ShortcutsDialog.tsx', 'utf8'))
+
+  // ---- adj609：焦点归编辑区（选择器留在编辑层；只挪焦点不动光标）----
+  check(
+    'adj609 新增 `editor/editorFocus.ts`：选择器**只在编辑层**（`.editor-main textarea`），返回是否交出去了',
+    /const EDITOR_TEXTAREA_SELECTOR = '\.editor-main textarea'/.test(focusSrc) &&
+      /export function focusEditorTextarea\(\): boolean/.test(focusSrc) &&
+      /return document\.activeElement === ta/.test(focusSrc) &&
+      // 不动光标：不得出现 selection 赋值
+      !/selectionStart =/.test(focusSrc),
+    '',
+  )
+  check(
+    'adj609 ESC 最小化 ⇒ 焦点交回编辑区；编辑区不在（预览视图）才退回"只把焦点挪开"',
+    // adj612：ESC 那条路经 `minimizeDockRef.current(true)` 调用（监听挂在 window 上、每次渲染换引用）
+    /if \(!toEditor \|\| !focusEditorTextarea\(\)\) blurCollapsedPane\(\)/.test(dockSrc) &&
+      /minimizeDockRef\.current\(true\)/.test(dockSrc),
+    '',
+  )
+  check(
+    'adj609 档位按钮走到最小**不抢焦点**（它是"连点循环"控件，焦点该留在按钮上）',
+    (() => {
+      const i = dockSrc.indexOf('const cycleDockHeight = ()')
+      const seg = i >= 0 ? dockSrc.slice(i, i + 420) : ''
+      return seg.length > 0 && !seg.includes('focusEditorTextarea')
+    })(),
+    '',
+  )
+
+  // ---- adj610：展开底栏的规则**单处实现**（三个入口共用）----
+  check(
+    'adj610 `uiStore.expandDock(preferProblems)` = 展开底栏的唯一实现（有告警 → 告警页签，否则保留上次页签）',
+    /expandDock: \(preferProblems: boolean\) => void/.test(uiSrc) &&
+      /expandDock: \(preferProblems\) => set\(\(s\) => \(\{ dockOpen: true, dockPanel: preferProblems \? 'problems' : s\.dockPanel \}\)\)/.test(
+        uiSrc,
+      ),
+    '',
+  )
+  check(
+    'adj610 三个入口都走 `expandDock`：编辑区「展开底栏」按钮 / Ctrl+D / Ctrl+H（旧的内联三元已删除）',
+    /const expandDock = \(\) => expandDockPanel\(problems\.total > 0\)/.test(edSrc) &&
+      !/setDockPanel\(problems\.total > 0 \? 'problems' : dockPanel\)/.test(edSrc) &&
+      (appSrc.match(/ui\.expandDock\(summarizeProblems\(st\.parseResult\.errors\)\.total > 0\)/g) ?? []).length >= 2,
+    '',
+  )
+
+  // ---- adj610：Ctrl+D 展开/收起 ----
+  check(
+    'adj610 Ctrl+D：展开着 ⇒ 收起（`closeDock`）；关着 ⇒ 走 `expandDock` 那条路',
+    /e\.ctrlKey && e\.key\.toLowerCase\(\) === 'd'/.test(appSrc) &&
+      /if \(ui\.dockOpen\) ui\.closeDock\(\)\s*\n\s*else ui\.expandDock\(/.test(appSrc),
+    '',
+  )
+
+  // ---- adj610：Ctrl+H = 按一下档位按钮（一次性请求 + 同一个 cycleDockHeight）----
+  check(
+    'adj610 Ctrl+H 发一次性请求（`dockSizeStep` nonce 自增），未展开时先展开（那个按钮不存在）',
+    /dockSizeStep: number/.test(uiSrc) &&
+      /requestDockSizeStep: \(\) => set\(\(s\) => \(\{ dockSizeStep: s\.dockSizeStep \+ 1 \}\)\)/.test(uiSrc) &&
+      /if \(ui\.dockOpen\) ui\.requestDockSizeStep\(\)\s*\n\s*else ui\.expandDock\(/.test(appSrc),
+    '',
+  )
+  check(
+    'adj610 ToolDock 消费该请求：只依赖 nonce（经 ref 取最新的 `cycleDockHeight`，不是每渲染跑一次）',
+    /const cycleDockHeightRef = useRef\(cycleDockHeight\)/.test(dockSrc) &&
+      /cycleDockHeightRef\.current\(\)/.test(dockSrc) &&
+      /if \(dockSizeStep === 0\) return/.test(dockSrc) &&
+      /\}, \[dockSizeStep\]\)/.test(dockSrc) &&
+      /const dockSizeStep = useUiStore\(\(s\) => s\.dockSizeStep\)/.test(dockSrc),
+    '',
+  )
+  check(
+    'adj610 两条快捷键都 `preventDefault + stopPropagation`（Ctrl+D=书签、Ctrl+H=历史，浏览器里拦得住）',
+    (appSrc.match(/if \(e\.ctrlKey && e\.key\.toLowerCase\(\) === '[dh]'\) \{\s*\n\s*e\.preventDefault\(\)\s*\n\s*e\.stopPropagation\(\)/g) ?? []).length === 2,
+    '',
+  )
+  check(
+    'adj610 快捷键速查登记 Ctrl+D / Ctrl+H',
+    /\['Ctrl\+D', '展开 \/ 收起底栏'\]/.test(scSrc) && /\['Ctrl\+H', '底栏高度档位/.test(scSrc),
+    '',
+  )
+}
+
+/**
+ * adj611（用户要求）：**底栏最小化时点页签** ⇒ 切到该页签 + 回到建议高度 + 档位按钮状态同步。
+ *
+ * 关键是把它做成**状态**而不是"给该面板写一个外壳高"：后者等于那个面板"记住了"外壳高，
+ * 从最小档切走再切回时内容区仍是 0 高（实测撞到：在「导出」上 ESC 最小化 → 切走 → 切回，
+ * 高度是 43px 而不是它的内容高）。状态化之后：最小化不破坏用户给该面板拖出来的高度，
+ * 退出最小化 = 回到"该面板自己的高度（没拖过则是建议高度）"。
+ */
+function runAdj611Tests() {
+  console.log('[138] 底栏最小化时点页签：切页签 + 回建议高度 + 档位状态同步（adj611）')
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+
+  check(
+    'adj611 「最小化」是**状态**（不是某面板记住的高度）：`dockH = minimized ? 外壳高 : clamp(...)`',
+    /const \[minimized, setMinimized\] = useState\(false\)/.test(dockSrc) &&
+      /const dockH = minimized \? chromeH : clampH\(baseH, chromeH\)/.test(dockSrc),
+    '',
+  )
+  check(
+    'adj611 `minimizeDock` **不再**把外壳高写进该面板的高度记忆（只置状态 + 拨相位 + 处理焦点）',
+    (() => {
+      const i = dockSrc.indexOf('const minimizeDock = (toEditor: boolean)')
+      const seg = i >= 0 ? dockSrc.slice(i, i + 420) : ''
+      return seg.length > 0 && seg.includes('setMinimized(true)') && !seg.includes('setHeights')
+    })(),
+    '',
+  )
+  check(
+    'adj611 `applyHeight()` = 落具体高度时**退出最小化**（拖拽 / 键盘 bump / 档位循环共用）',
+    /const applyHeight = \(next: number, key: DockPanelKey = dockPanel\) => \{[\s\S]{0,200}?setMinimized\(false\)[\s\S]{0,160}?setHeights\(\(prev\) => \(\{ \.\.\.prev, \[key\]: clampH\(next, chromeH\) \}\)\)/.test(
+      dockSrc,
+    ),
+    '',
+  )
+  check(
+    'adj611 拖拽 / 键盘 bump 落到外壳高 = 最小化（不写面板高度记忆）；落在别处 = 具体高度',
+    /const applyManualHeight = \(next: number\) => \{[\s\S]{0,320}?if \(h <= chromeH \+ 0\.5\) minimizeDock\(false\)\s*\n\s*else applyHeight\(h\)/.test(
+      dockSrc,
+    ) &&
+      /applyManualHeight\(d\.h - dy\)/.test(dockSrc) &&
+      /const bump = \(delta: number\) => \{\s*\n\s*applyManualHeight\(dockH \+ delta\)/.test(dockSrc),
+    '',
+  )
+  check(
+    'adj611 档位循环到「最小」走 `setMinimized(true)`（**不**调会自己拨相位的 `minimizeDock`，否则相位跳格）',
+    /if \(sizeStep\.next === 'min'\) \{[\s\S]{0,600}?setMinimized\(true\)\s*\n\s*blurCollapsedPane\(\)/.test(dockSrc) &&
+      (() => {
+        // 负向断言先剥注释：那段注释里为了说明原因**故意提到** `minimizeDock()`（E-2026-237 同款坑）；
+        // 并且只取 `cycleDockHeight` **函数体本身**——再往后 900 字就进入 `applyManualHeight`
+        //（那里合法地调用了 `minimizeDock(false)`），窗口开大反而会误判。
+        const code = dockSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+        const body = code.match(/const cycleDockHeight = \(\) => \{[\s\S]*?\n  \}/)?.[0] ?? ''
+        return body.length > 0 && !body.includes('minimizeDock(')
+      })(),
+    '',
+  )
+  check(
+    'adj611 最小化时点页签 ⇒ `exitMinimized()`（退出状态 + 相位回 0 = 「建议（点击 → 最大）」）',
+    /if \(minimized\) exitMinimized\(\)/.test(dockSrc) &&
+      /const exitMinimized = \(\) => \{\s*\n\s*setMinimized\(false\)\s*\n\s*setSizePhase\(0\)/.test(dockSrc),
+    '',
+  )
+  check(
+    'adj611 重新打开底栏时同时退出最小化（与"清掉当次调整"同一时机）',
+    /setHeights\(\{\}\)[\s\S]{0,220}?setMinimized\(false\)[\s\S]{0,220}?setSizePhase\(0\)/.test(dockSrc),
+    '',
+  )
+}
+
+/**
+ * adj612 / adj613（用户反馈两条，同一天）：
+ *  · **adj612**「当底栏高度最高时不响应 ESC」→「应该说是焦点在底栏的**内容区**时不响应，在页签上可以」：
+ *    真因是**点击内容区的不可聚焦元素根本不会移动焦点**（还停在编辑器里），而当时的判据是
+ *    "焦点在底栏里"（挂在 `<section>` 的 onKeyDown 上）⇒ 收不到事件。底栏越高内容区越大、
+ *    越容易点在空白上，所以先在"最高"时被撞到。
+ *  · **adj613**「在底栏内容区的输入框里，ESC 应该是：第一次退出输入框、第二次才最小化底栏」。
+ */
+function runAdj612613Tests() {
+  console.log('[139] ESC 判据放宽（焦点不必在底栏里）+ 输入框里"两次 ESC"（adj612/adj613）')
+  const dockSrc = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+  const wsPanel = String(readFileSync('src/ui/dock/WorkspacePanel.tsx', 'utf8'))
+
+  // ---- adj612：焦点不在底栏里（点内容区空白⇒焦点仍在编辑器）也要能最小化 ----
+  check(
+    'adj612 ESC 判据不再依赖"焦点在底栏里"：window 冒泡监听 + `dockOpen` 守卫（见 [136]）',
+    /window\.addEventListener\('keydown', onKey\)/.test(dockSrc) && /if \(!useUiStore\.getState\(\)\.dockOpen\) return/.test(dockSrc),
+    '',
+  )
+  check(
+    'adj612 对话框那条 ESC 在 **App 捕获阶段**标记 `preventDefault`（先把"对话框关了"交接出去）',
+    /e\.key === 'Escape' && ui\.modal[\s\S]{0,420}?e\.preventDefault\(\)[\s\S]{0,80}?ui\.closeModal\(\)/.test(appSrc),
+    '',
+  )
+  check(
+    'adj612 拖抓手的**按下即聚焦**（`beginDrag` 会 preventDefault，把"按下聚焦"一起挡掉了 ⇒ 抓手上的 ↑↓/PageUp/Down 原本鼠标够不到）',
+    /const startDrag = \(e: React\.PointerEvent\) => \{[\s\S]{0,360}?\(e\.currentTarget as HTMLElement\)\.focus\?\.\(\)[\s\S]{0,120}?beginDrag\(e, \{/.test(
+      dockSrc,
+    ),
+    '',
+  )
+
+  // ---- adj613：底栏内容区的输入框里"第一次退出输入、第二次最小化" ----
+  check(
+    'adj613 全局 ESC 兜底：焦点在**底栏内容区**的输入框里 ⇒ 先 `blur()` 退出输入（没自带 ESC 处理的输入框靠这一步）',
+    /const isTextEntry = \(el: HTMLElement\): boolean =>/.test(dockSrc) &&
+      /el instanceof HTMLTextAreaElement/.test(dockSrc) &&
+      /el instanceof HTMLInputElement && !\['checkbox'/.test(dockSrc) &&
+      /isTextEntry\(active\) && dockRef\.current\?\.contains\(active\)[\s\S]{0,120}?active\.blur\(\)\s*\n\s*return/.test(dockSrc),
+    '',
+  )
+  check(
+    'adj613 过滤框的 ESC 也**退出输入框**（清空 + blur）⇒ 再按一次才最小化底栏',
+    /ev\.key === 'Escape'[\s\S]{0,320}?setQuery\(''\)[\s\S]{0,120}?ev\.currentTarget\.blur\(\)/.test(wsPanel),
+    '',
+  )
+  check(
+    'adj613 设置里的数字框（`NumInput`）本来就会 blur ⇒ 与"两次 ESC"口径一致（见 [136] 的断言）',
+    /skipCommitRef\.current = true[\s\S]{0,120}?e\.currentTarget\.blur\(\)/.test(String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))),
+    '',
+  )
+}
+
 function runAdj600Tests() {
   console.log('[129] settings panel reseeds when the score config changes (adj600)')
   const src = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
@@ -10143,8 +10576,14 @@ async function runAdj541DockToggleTests() {
     '')
   check('adj591（用户要求）**有告警时「展开底栏」先切到告警页签，没有告警就不切换**（顶栏/菜单里点名开某个页签的入口不受影响）',
     // 判定：total > 0 ⇒ 'problems'，否则维持上次的 `dockPanel`
+    // adj610：判定本体挪进 `uiStore.expandDock(preferProblems)`（Ctrl+D / Ctrl+H 也要用同一条规则，
+    // 三处各写一份必然漂移）；编辑区只负责"当前有没有告警"这一个布尔量。
     /const problems = useMemo\(\(\) => summarizeProblems\(parseResult\.errors\), \[parseResult\.errors\]\)/.test(editorSrc) &&
-      /const expandDock = \(\) => setDockPanel\(problems\.total > 0 \? 'problems' : dockPanel\)/.test(editorSrc) &&
+      /const expandDock = \(\) => expandDockPanel\(problems\.total > 0\)/.test(editorSrc) &&
+      /const expandDockPanel = useUiStore\(\(s\) => s\.expandDock\)/.test(editorSrc) &&
+      /expandDock: \(preferProblems\) => set\(\(s\) => \(\{ dockOpen: true, dockPanel: preferProblems \? 'problems' : s\.dockPanel \}\)\)/.test(
+        String(readFileSync('src/store/uiStore.ts', 'utf8')),
+      ) &&
       /import \{ summarizeProblems \} from '\.\.\/ui\/problems'/.test(editorSrc) &&
       // 有告警时 tooltip 说清楚"点开会先看告警"（别让用户以为上次的页签丢了）
       /problems\.total > 0 \? dockCopy\.expandWithProblems\(problems\.total\) : dockCopy\.expandTitle/.test(editorSrc) &&
@@ -10365,7 +10804,8 @@ async function runAdj541DockToggleTests() {
       /if \(Date\.now\(\) - \(cached\.at \?\? 0\) > INDEX_STALE_MS\) scheduleIdleScan\(rec, wsId\)/.test(wsPanelSrc) &&
       /requestIdleCallback/.test(wsPanelSrc) &&
       // 边扫边出结果（慢节流地把 partial 引用交给索引 + 进度状态；不再每跳复制数组/重算正则）
-      /onProgress: \(scanned, partial\) => \{[\s\S]{0,400}?indexRef\.current = partial/.test(wsPanelSrc) &&
+      // adj607：函数里多了一段"第一次报告一定通过"的说明，窗口随之放宽
+      /onProgress: \(scanned, partial\) => \{[\s\S]{0,800}?indexRef\.current = partial/.test(wsPanelSrc) &&
       /setScanInfo\(\{ scanned, found: partial\.length, ms: Date\.now\(\) - t0 \}\)/.test(wsPanelSrc),
       /const filterFromIndex = \(\): boolean => \{/.test(wsPanelSrc) &&
       /idx\.filter\(\(h\) => match\(h\.name, h\.relPath\)\)/.test(wsPanelSrc) &&
@@ -10661,7 +11101,8 @@ console.log('[112] dock tab icons & theme-mode buttons (adj486/adj484)')
   check('adj567 对齐函数由 **`dockPanel`/`dockOpen` 的 effect** 调用（覆盖顶栏/菜单/状态栏入口，而不仅页签点击）',
     /useEffect\(\(\) => \{[\s\S]{0,200}?if \(!dockOpen\) return[\s\S]{0,200}?alignActiveTab\(\)[\s\S]{0,120}?\}, \[dockOpen, dockPanel, alignActiveTab\]\)/.test(dockSrc) &&
       // 页签自己的 onClick 也调它 —— 覆盖"点的是**已激活**页签"（那时 dockPanel 没变、effect 不会跑）
-      /onClick=\{\(\) => \{[\s\S]{0,200}?setDockPanel\(t\.key\)[\s\S]{0,200}?alignActiveTab\(\)/.test(dockSrc),
+      //（adj611 在两者之间插了"最小化状态下点页签 ⇒ 退出最小化"，故窗口放宽）
+      /onClick=\{\(\) => \{[\s\S]{0,420}?setDockPanel\(t\.key\)[\s\S]{0,420}?alignActiveTab\(\)/.test(dockSrc),
     '')
   check('adj567 对齐用**绝对** `scrollTo` + 一次延迟补正（幂等、不循环、不与用户手动滚动打架）',
     /strip\.scrollTo\(\{ left: strip\.scrollLeft \+ delta, behavior: 'auto' \}\)/.test(dockSrc) &&
@@ -11610,6 +12051,46 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj606 可选布尔字段用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj607Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj607 工作区索引（未授权不许扫 / 空结果不装索引 / 进目录提速）用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj608Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj608 底栏里按 ESC 最小化用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj609610Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj609/610 底栏键盘操作补全用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj611Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj611 最小化点页签用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj612613Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj612/613 ESC 判据与两次 ESC 用例抛异常', e)
     }
   })
   .then(() => {

@@ -783,8 +783,23 @@ function NumInput(props: {
   }
   /** 编辑中的文本；非 null = 正在输入（此时**不**钳制、也不回写） */
   const [draft, setDraft] = useState<string | null>(null)
+  /**
+   * adj608：**ESC = 放弃这次输入**用的标记。
+   *
+   * 为什么需要它：按 ESC 会 `blur()`，而 blur 触发 `commit()`——`commit` 读的是**本次渲染的
+   * `draft`**（还是刚敲进去的那串），于是"按 ESC 取消"实际会把值提交上去（实测：输入 `999`
+   * 按 ESC，被钳成 `26` 写进了设置）。加一个"这次 blur 别提交"的一次性标记，
+   * ESC 才真的只是回退到已提交的值。
+   */
+  const skipCommitRef = useRef(false)
   /** 把草稿提交到配置（失焦 / 回车）：空串视为"放弃编辑"，不把 0 写进去 */
   const commit = () => {
+    // adj608：ESC 之后的这次 blur 不提交（标记一次性）
+    if (skipCommitRef.current) {
+      skipCommitRef.current = false
+      setDraft(null)
+      return
+    }
     if (draft === null) return
     const raw = draft.trim()
     if (raw !== '') {
@@ -822,7 +837,10 @@ function NumInput(props: {
             commit()
             e.currentTarget.blur()
           } else if (e.key === 'Escape') {
-            setDraft(null)
+            // adj608：ESC = **放弃这次输入**（回退到已提交的值）；`preventDefault` 同时告诉底栏
+            // "这个 ESC 我用了"（别顺手最小化底栏，见 ToolDock 的 `escMinimizeDock`）。
+            e.preventDefault()
+            skipCommitRef.current = true
             e.currentTarget.blur()
           }
         }}

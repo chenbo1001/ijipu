@@ -213,8 +213,28 @@ interface UiState {
   toggleDock: (panel: DockPanelKey) => void
   /** dock 内部 tab 切换（保持展开）；dock 已关时同时展开 */
   setDockPanel: (panel: DockPanelKey) => void
+  /**
+   * adj610：**展开底栏**（已展开时是幂等的无操作）。`preferProblems` = "当前有告警"，
+   * 由调用方传入（告警条数在 docStore，这里不做跨 store 读取）：
+   * 有告警就切到告警页签（adj591 口径："告警是需要处理的东西，展开时优先让人看见"），
+   * 否则保留上次用的页签。
+   *
+   * 为什么放进 store：**这条规则只能有一处实现**——用它的入口已有三个
+   * （编辑区左下角「展开底栏」按钮 / `Ctrl+D` / `Ctrl+H`），各写一份必然会漂移
+   * （E-2026-076 同类教训：同一个"展开给哪个页签"的判据两处维护）。
+   */
+  expandDock: (preferProblems: boolean) => void
   /** dock 标题栏 × 关闭：只关，不切面板（下次任意入口 toggle 会重新开） */
   closeDock: () => void
+  /**
+   * adj610（用户要求）：`Ctrl+H` = "按一下底栏高度档位按钮"。
+   *
+   * 档位循环的状态（相位 / 各面板当次高度 / 实测外壳高）都在 `ToolDock` 组件内部，
+   * 所以这里**只发一个一次性"请求"**（nonce 自增），由 `ToolDock` 消费后执行它自己的
+   * `cycleDockHeight()`——与 `workspaceSaveIntent` 同一套路：描述"这一次动作"，不持久化。
+   */
+  dockSizeStep: number
+  requestDockSizeStep: () => void
   /** adj462：导出任务指示（状态栏动态提示用；null = 无任务）。dock 切走/关闭时仍在，导出照常进行。 */
   exportJob: string | null
   setExportJob: (label: string | null) => void
@@ -461,6 +481,11 @@ export const useUiStore = create<UiState>()((set) => ({
       return { dockPanel: panel }
     }),
   setDockPanel: (panel) => set({ dockOpen: true, dockPanel: panel }),
+  // adj610：展开底栏的唯一实现（有告警先看告警；见接口处的说明）
+  expandDock: (preferProblems) => set((s) => ({ dockOpen: true, dockPanel: preferProblems ? 'problems' : s.dockPanel })),
   closeDock: () => set({ dockOpen: false }),
+  // adj610：Ctrl+H 的"按一下档位按钮"请求（nonce 自增，由 ToolDock 消费）
+  dockSizeStep: 0,
+  requestDockSizeStep: () => set((s) => ({ dockSizeStep: s.dockSizeStep + 1 })),
   setExportJob: (label) => set({ exportJob: label }),
 }))

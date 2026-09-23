@@ -19,6 +19,8 @@ import { useUiStore } from './store/uiStore'
 // adj538：桌面壳「外部打开」（双击 .jps）——拉取待打开队列 + 监听后续打开请求
 import { drainExternalFiles, hasShell, onExternalOpen } from './store/externalOpen'
 import { startWorkspaceIndexWarmup } from './store/workspaceIndexWarm'
+// adj610：Ctrl+D / Ctrl+H 的"有告警先看告警"判据与「展开底栏」按钮同一份（`ui/problems.ts`）
+import { summarizeProblems } from './ui/problems'
 // adj350：对话框懒加载（React.lazy）——首屏不加载它们，显著减小主包、加快首屏显示
 // adj492：「关于」已迁入底栏 dock（见 ui/ToolDock），此处不再需要弹窗版懒加载
 const SamplesDialog = lazy(() => import('./dialogs/SamplesDialog').then((m) => ({ default: m.SamplesDialog })))
@@ -159,12 +161,46 @@ function App() {
         // ⇒ `modal === 'playback'` 没有渲染分支、**Ctrl+Q 是死的**（菜单上还印着 Ctrl+Q）。
         // 与菜单项 `entryTryout` 同口径：开关「试听」底栏。
         ui.toggleDock('tryout')
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault()
+        e.stopPropagation()
+        /**
+         * adj610（用户要求）：**Ctrl+D = 底栏展开 / 收起**。
+         *
+         * 展开走 `ui.expandDock()`（**唯一实现**，含 adj591「有告警先切到告警页签」的口径），
+         * 收起就是 `closeDock()`——与左下角「展开底栏」按钮 / 页签栏「收起底栏」按钮**完全同路**，
+         * 不会出现"按快捷键打开看到的页签与点按钮不一样"。
+         *
+         * ⚠ 与 Ctrl+N/Ctrl+T 不同：Ctrl+D（书签）与 Ctrl+H（历史）**在浏览器里可以被
+         * `preventDefault()` 拦下**，所以网页版里这两条也能用（Ctrl+N 在 Chrome 里拦不住）。
+         */
+        if (ui.dockOpen) ui.closeDock()
+        else ui.expandDock(summarizeProblems(st.parseResult.errors).total > 0)
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'h') {
+        e.preventDefault()
+        e.stopPropagation()
+        /**
+         * adj610（用户要求）：**Ctrl+H = 按一下底栏高度档位按钮**（建议 → 最大 → 建议 → 最小 → …）。
+         *
+         * 档位状态在 `ToolDock` 内部，所以这里只发一次性请求（`requestDockSizeStep`），
+         * 由它执行自己的 `cycleDockHeight()`——与点按钮走的是同一条代码。
+         * 底栏**没展开时那个按钮不存在** ⇒ 先按「展开底栏」同一条路展开（建议高度），
+         * 让这个键不会"按了没反应"。
+         */
+        if (ui.dockOpen) ui.requestDockSizeStep()
+        else ui.expandDock(summarizeProblems(st.parseResult.errors).total > 0)
       } else if (e.key === 'Tab' && !ui.modal && !(e.target as HTMLElement | null)?.closest?.('.editor-main')) {
         // 编辑器内 Tab 留给自动补全/默认行为（completion 时补全），其余区域切换视图
         e.preventDefault()
         e.stopPropagation()
         st.setViewType(st.viewType === 'preview' ? 'split' : 'preview')
       } else if (e.key === 'Escape' && ui.modal) {
+        /**
+         * adj612：关对话框时**标记"这个 ESC 我用掉了"**——底栏那侧的全局 ESC（最小化底栏）挂在
+         * **window 冒泡**阶段，而本 handler 是**捕获**阶段（先跑）：此刻 `ui.modal` 已被置空，
+         * 底栏那边再读 state 就看不到"刚才有对话框"，`preventDefault` 是唯一可靠的交接方式。
+         */
+        e.preventDefault()
         ui.closeModal()
       }
     }
