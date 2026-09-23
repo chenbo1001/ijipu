@@ -11,11 +11,11 @@
  *
  * 标签页顺序：全局 → 主题 → 音色库 → 谱面 → 字体。
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
-import { clampEditorFontSize, defaultPageConfig, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE, SCORE_FONT_OPTIONS, SEGMENT_ROW_GAP_DEFAULT } from '@ijipu/engine'
+import { clampEditorFontSize, defaultPageConfig, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE, nonDefaultConfigKeys, SCORE_FONT_OPTIONS, SEGMENT_ROW_GAP_DEFAULT } from '@ijipu/engine'
 import { THEMES, type ThemeMode } from '../brand/themes'
 import { uiCopy, numCopy } from '../brand/copy'
 import { SoundBankPanel } from './SoundBankPanel'
@@ -59,6 +59,49 @@ const FIELDS_TABS: TabId[] = ['global', 'score', 'font']
 const ROW_GAP = 8
 const CTL_MIN_W = 140
 const COL_GAP = 18
+
+/**
+ * adj605（用户要求）：**谱面级字段的登记表**——「布局」「字体」两个子页签各自有哪些 `PageConfig` 字段。
+ * 用途：① 判断当前子页签里有没有"非默认项"，决定底部图例是否出现；② smoke 用它核对
+ * "登记表里的每个字段都真的有一行在用它"（`isNonDefault('键')`），防止加了字段忘了登记。
+ * 只列 `PageConfig` 字段——「版面/主题/音色库」是本机偏好（uiStore），不参与这套标记。
+ */
+const TAB_CONFIG_KEYS: Partial<Record<TabId, readonly string[]>> = {
+  score: [
+    'page',
+    'margin_top',
+    'margin_bottom',
+    'margin_left',
+    'margin_right',
+    'descAreaH',
+    'body_margin_top',
+    'height_ciqu',
+    'height_quci',
+    'height_cici',
+    'height_ciqu_lyric',
+    'height_shengbu',
+    'segmentRowGap',
+    'noteSpaceLayout',
+    'lianyinxian_type',
+    'align_min_bars',
+  ],
+  font: [
+    'miaoshu_font',
+    'miaoshu_size',
+    'biaoti_font',
+    'biaoti_size',
+    'fubiaoti_font',
+    'fubiaoti_size',
+    'shuzi_font',
+    'note_size',
+    'showInstrument',
+    'geci_font',
+    'geci_size',
+    'lyricShrink',
+    'notes_font',
+    'notes_size',
+  ],
+}
 
 export function PageConfigDialog({
   inline = false,
@@ -122,6 +165,23 @@ export function PageConfigDialog({
   }, [pageConfig])
   // adj482：字段区容器（dock 里按「当页最长标签」对齐，见下面的测量 effect）
   const fieldsRef = useRef<HTMLDivElement | null>(null)
+
+  /**
+   * adj605（用户要求）：**"这一项与代码默认值不同"**的红色 `*` 标记。
+   *
+   * 判据来自引擎 `nonDefaultConfigKeys`——与 `writeJpsConfig` 的**差量写出**是同一份口径，
+   * 于是"标签后带 `*`"严格等价于"点「保存设置」后会写进这份谱的 `# jps-config`"，
+   * 不会出现"标了却没写"或"写了却没标"。
+   *
+   * 比较的是**面板正在显示的值**（`draft`）而不是"存盘那一刻的源码"：
+   *   ① 打开一份谱时，亮着的正是这份谱自己写过的项；
+   *   ② 用户改一项 → `*` 立刻出现（保存后它就会进谱面），等于改动预览；
+   *   ③ 改回默认值 → `*` 消失（"回到默认"这件事一眼可见）。
+   */
+  const nonDefaultKeys = useMemo(() => new Set(nonDefaultConfigKeys(draft)), [draft])
+  const isNonDefault = (key: string) => nonDefaultKeys.has(key)
+  /** 当前子页签里"非默认"的项数——>0 才在面板末尾给出图例（没标记时不占地方） */
+  const tabNonDefaultCount = (TAB_CONFIG_KEYS[tab] ?? []).filter((k) => nonDefaultKeys.has(k)).length
 
   /**
    * adj482：测量「当页最长标签宽」与**每个字段的自然宽**，据此在 dock 里排出**等宽字段网格**：
@@ -367,7 +427,7 @@ export function PageConfigDialog({
         return (
           <>
             <div className="pcfg-group-title">纸张与边距</div>
-            <Row label="纸张">
+            <Row label="纸张" mark={isNonDefault('page')}>
               <select
                 value={draft.page}
                 onChange={(e) => updateDraft({ page: e.target.value as PageConfig['page'] })}
@@ -378,7 +438,15 @@ export function PageConfigDialog({
                 <option value="A5_horizontal">横版 A5</option>
               </select>
             </Row>
-            <Row label="边距(px)">
+            <Row
+              label="边距(px)"
+              mark={
+                isNonDefault('margin_top') ||
+                isNonDefault('margin_bottom') ||
+                isNonDefault('margin_left') ||
+                isNonDefault('margin_right')
+              }
+            >
               <NumInput label="上" range={RANGE.margin_top} value={draft.margin_top} onChange={(v) => updateDraft({ margin_top: v })} />
               <NumInput label="下" range={RANGE.margin_bottom} value={draft.margin_bottom} onChange={(v) => updateDraft({ margin_bottom: v })} />
               <NumInput label="左" range={RANGE.margin_left} value={draft.margin_left} onChange={(v) => updateDraft({ margin_left: v })} />
@@ -388,27 +456,27 @@ export function PageConfigDialog({
             <div className="pcfg-group-title">间距(px)</div>
             {/* adj105：间距项两列排列，节省纵向空间；adj418：铺满页签宽度（不再右侧留白） */}
             <div className="pcfg-grid2">
-              <Row label="描述头高">
+              <Row label="描述头高" mark={isNonDefault('descAreaH')}>
                 <NumInput label="" range={RANGE.descAreaH} value={draft.descAreaH} onChange={(v) => updateDraft({ descAreaH: v })} />
               </Row>
-              <Row label="首行至描述头间距">
+              <Row label="首行至描述头间距" mark={isNonDefault('body_margin_top')}>
                 <NumInput label="" range={RANGE.body_margin_top} value={draft.body_margin_top} onChange={(v) => updateDraft({ body_margin_top: v })} />
               </Row>
-              <Row label="曲部与曲部间距">
+              <Row label="曲部与曲部间距" mark={isNonDefault('height_ciqu')}>
                 <NumInput label="" range={RANGE.height_ciqu} value={draft.height_ciqu} onChange={(v) => updateDraft({ height_ciqu: v })} />
               </Row>
-              <Row label="曲部与词部间距">
+              <Row label="曲部与词部间距" mark={isNonDefault('height_quci')}>
                 <NumInput label="" range={RANGE.height_quci} value={draft.height_quci} onChange={(v) => updateDraft({ height_quci: v })} />
               </Row>
-              <Row label="词部与词部间距">
+              <Row label="词部与词部间距" mark={isNonDefault('height_cici')}>
                 <NumInput label="" range={RANGE.height_cici} value={draft.height_cici} onChange={(v) => updateDraft({ height_cici: v })} />
               </Row>
-              <Row label="曲部与上词部间距">
+              <Row label="曲部与上词部间距" mark={isNonDefault('height_ciqu_lyric')}>
                 <NumInput label="" range={RANGE.height_ciqu_lyric} value={draft.height_ciqu_lyric} onChange={(v) => updateDraft({ height_ciqu_lyric: v })} />
               </Row>
               {/* adj479：多声部块内声部行之间的额外间距——此前只挂在预览虚线拖拽上，
                   设置里没有输入框，用户报「同一组的多个声部之间间距无法调整」。 */}
-              <Row label={uiCopy.shengbuGapLabel}>
+              <Row label={uiCopy.shengbuGapLabel} mark={isNonDefault('height_shengbu')}>
                 <NumInput label="" range={RANGE.height_shengbu} value={draft.height_shengbu} onChange={(v) => updateDraft({ height_shengbu: v })} />
               </Row>
             </div>
@@ -417,7 +485,7 @@ export function PageConfigDialog({
                 跟随 .jps 走（与「间距」同一类，挨着放在它后面）。显示缺省回退 SEGMENT_ROW_GAP_DEFAULT。 */}
             <div className="pcfg-group-title">{uiCopy.segmentRowGapGroup}</div>
             <div className="pcfg-grid2">
-              <Row label={uiCopy.segmentRowGapBzLabel}>
+              <Row label={uiCopy.segmentRowGapBzLabel} mark={isNonDefault('segmentRowGap')}>
                 <NumInput
                   label=""
                   range={RANGE.segmentRowGap_bz}
@@ -425,7 +493,7 @@ export function PageConfigDialog({
                   onChange={(v) => updateDraft({ segmentRowGap: { ...draft.segmentRowGap, bz: clampGap(v) } })}
                 />
               </Row>
-              <Row label={uiCopy.segmentRowGapDsbLabel}>
+              <Row label={uiCopy.segmentRowGapDsbLabel} mark={isNonDefault('segmentRowGap')}>
                 <NumInput
                   label=""
                   range={RANGE.segmentRowGap_dsb}
@@ -440,7 +508,7 @@ export function PageConfigDialog({
 
             {/* adj419：音符布局组挪到「间距」下面（用户要求：先看纸张/边距，再调间距，最后是排布方式） */}
             <div className="pcfg-group-title">音符布局</div>
-            <Row label="布局模式">
+            <Row label="布局模式" mark={isNonDefault('noteSpaceLayout')}>
               <select
                 value={draft.noteSpaceLayout}
                 onChange={(e) => updateDraft({ noteSpaceLayout: e.target.value as PageConfig['noteSpaceLayout'] })}
@@ -450,7 +518,7 @@ export function PageConfigDialog({
                 <option value="duration">时值优先</option>
               </select>
             </Row>
-            <Row label="连音线样式">
+            <Row label="连音线样式" mark={isNonDefault('lianyinxian_type')}>
               <select
                 value={draft.lianyinxian_type}
                 onChange={(e) => updateDraft({ lianyinxian_type: Number(e.target.value) as 0 | 1 | 2 })}
@@ -463,32 +531,38 @@ export function PageConfigDialog({
             {/* adj297/adj602：两端对齐最小小节数——行小节数 < 该值自然对齐（行尾留白）、≥ 该值撑满两端对齐。
                 adj602（用户要求）：从「间距」组挪到**音符布局**组——它决定的是"行内怎么排"，
                 与间距无关（放在间距里会被当成"调间隙"去找）。 */}
-            <Row label="两端对齐最小小节数">
+            <Row label="两端对齐最小小节数" mark={isNonDefault('align_min_bars')}>
               <NumInput label="" value={draft.align_min_bars} onChange={(v) => updateDraft({ align_min_bars: v })} />
             </Row>
+            {tabNonDefaultCount > 0 && (
+              <div className="pcfg-note pcfg-def-legend">
+                <span className="pcfg-def-mark on" aria-hidden="true">*</span>
+                与默认值不同——点「保存设置」后会写进这份谱的设置（# jps-config）。
+              </div>
+            )}
           </>
         )
       case 'font':
         return (
           <>
-            <Row label="描述头">
+            <Row label="描述头" mark={isNonDefault('miaoshu_font') || isNonDefault('miaoshu_size')}>
               <FontSelect value={draft.miaoshu_font} onChange={(v) => updateDraft({ miaoshu_font: v })} />
               <NumInput label="字号" value={draft.miaoshu_size} onChange={(v) => updateDraft({ miaoshu_size: v })} />
             </Row>
-            <Row label="标题">
+            <Row label="标题" mark={isNonDefault('biaoti_font') || isNonDefault('biaoti_size')}>
               <FontSelect value={draft.biaoti_font} onChange={(v) => updateDraft({ biaoti_font: v })} />
               <NumInput label="字号" value={draft.biaoti_size} onChange={(v) => updateDraft({ biaoti_size: v })} />
             </Row>
-            <Row label="副标题">
+            <Row label="副标题" mark={isNonDefault('fubiaoti_font') || isNonDefault('fubiaoti_size')}>
               <FontSelect value={draft.fubiaoti_font} onChange={(v) => updateDraft({ fubiaoti_font: v })} />
               <NumInput label="字号" value={draft.fubiaoti_size} onChange={(v) => updateDraft({ fubiaoti_size: v })} />
             </Row>
-            <Row label="音符">
+            <Row label="音符" mark={isNonDefault('shuzi_font') || isNonDefault('note_size')}>
               <FontSelect value={draft.shuzi_font} onChange={(v) => updateDraft({ shuzi_font: v })} />
               <NumInput label="字号" value={draft.note_size} onChange={(v) => updateDraft({ note_size: v })} />
             </Row>
             {/* adj303：显示乐器名——@乐器名 / @@ 切换后的下一个音符正上方标注乐器名（默认不显示） */}
-            <Row label="乐器显示">
+            <Row label="乐器显示" mark={isNonDefault('showInstrument')}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
                 <input
                   type="checkbox"
@@ -498,12 +572,12 @@ export function PageConfigDialog({
                 显示乐器名（@切换处音符上方标注）
               </label>
             </Row>
-            <Row label="歌词">
+            <Row label="歌词" mark={isNonDefault('geci_font') || isNonDefault('geci_size')}>
               <FontSelect value={draft.geci_font} onChange={(v) => updateDraft({ geci_font: v })} />
               <NumInput label="字号" value={draft.geci_size} onChange={(v) => updateDraft({ geci_size: v })} />
             </Row>
             {/* adj292：歌词宽度不足时压缩字宽（默认不压缩允许重叠，选中才压缩） */}
-            <Row label="歌词压缩">
+            <Row label="歌词压缩" mark={isNonDefault('lyricShrink')}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
                 <input
                   type="checkbox"
@@ -514,10 +588,16 @@ export function PageConfigDialog({
               </label>
             </Row>
             {/* adj154：说明（S 行）字体独立于描述头 */}
-            <Row label="说明">
+            <Row label="说明" mark={isNonDefault('notes_font') || isNonDefault('notes_size')}>
               <FontSelect value={draft.notes_font ?? draft.miaoshu_font} onChange={(v) => updateDraft({ notes_font: v })} />
               <NumInput label="字号" value={draft.notes_size ?? draft.miaoshu_size} onChange={(v) => updateDraft({ notes_size: v })} />
             </Row>
+            {tabNonDefaultCount > 0 && (
+              <div className="pcfg-note pcfg-def-legend">
+                <span className="pcfg-def-mark on" aria-hidden="true">*</span>
+                与默认值不同——点「保存设置」后会写进这份谱的设置（# jps-config）。
+              </div>
+            )}
           </>
         )
     }
@@ -557,7 +637,11 @@ export function PageConfigDialog({
               dock 里它是**等宽字段网格**（按当页最长标签对齐，见 measureFields），
               主题/音色库这类自带排版的内容不套该层，保持各自布局。 */}
           <div className="pcfg-panel">
-            {FIELDS_TABS.includes(tab) ? <div className="pcfg-fields" ref={fieldsRef}>{renderPanel()}</div> : renderPanel()}
+            {FIELDS_TABS.includes(tab) ? (
+              // adj605：`data-nondefault` 把"当前被算作非默认的字段"暴露到 DOM——
+              // 真机验证/回归脚本据此判断标记是否**随值变化同步**（不必反推视觉效果）
+              <div className="pcfg-fields" ref={fieldsRef} data-nondefault={[...nonDefaultKeys].join(',')}>{renderPanel()}</div>
+            ) : renderPanel()}
           </div>
         </div>
 
@@ -631,13 +715,34 @@ function FontSelect({ value, onChange }: { value: string; onChange: (v: string) 
   )
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * 一行设置：标签 + 控件。
+ *
+ * adj605（用户要求）：`mark` 表达**"这一项与代码默认值不同"**——
+ *   · `true`  → 标签后一个**红色 `*`**（`title` 说明含义）；
+ *   · `false` → **空占位**（宽度固定）：标记出现/消失都不会改变标签列宽，
+ *               否则字段网格会随 `*` 的亮灭左右横跳（`--pcfg-label-w` 是"当页最长标签"）；
+ *   · `undefined`（不给）→ 该页不参与标记（「版面/主题/音色库」是本机偏好，没有"谱面默认值"一说），
+ *               连占位都不渲染，不给这些页白添宽度。
+ */
+function Row({ label, mark, children }: { label: string; mark?: boolean; children: React.ReactNode }) {
   return (
     // adj418：标签列给足宽度且不换行（「两端对齐最小小节数」这类长标签不再折成两行）。
     // adj482：布局**全部交给 CSS**（`.pcfg-row` / `.pcfg-row-label` / `.pcfg-row-ctl` 已从内联搬到
     // index.css）——内联样式会压过 dock 里的覆盖规则，导致"按当页最长标签对齐"的规则无法生效。
     <div className="pcfg-row">
-      <span className="pcfg-row-label">{label}</span>
+      <span className="pcfg-row-label">
+        {label}
+        {mark !== undefined && (
+          <span
+            className={`pcfg-def-mark${mark ? ' on' : ''}`}
+            aria-hidden="true"
+            title={mark ? '与默认值不同：保存后会写进这份谱的设置（# jps-config）' : undefined}
+          >
+            {mark ? '*' : ''}
+          </span>
+        )}
+      </span>
       <div className="pcfg-row-ctl">{children}</div>
     </div>
   )

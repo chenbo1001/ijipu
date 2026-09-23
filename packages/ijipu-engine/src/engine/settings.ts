@@ -405,6 +405,17 @@ function pickWritableConfig(cfg: Partial<PageConfig>, mode: JpsConfigWriteMode):
 }
 
 /**
+ * adj605（用户要求）：列出 `cfg` 里**与代码默认值不同**的字段——设置面板据此在标签后加红色 `*`。
+ *
+ * 判据与写盘**同一份**（`pickWritableConfig(cfg, 'diff')` 的键集）⇒ 面板上"带了 `*`"严格等价于
+ * "点「保存设置」后会写进这份谱的 `# jps-config`"，不会出现"标了却没写"或"写了却没标"。
+ * 只认白名单字段（`CONFIG_FIELDS`）；`undefined`/`null`（= 未设置）一律不算（等同默认）。
+ */
+export function nonDefaultConfigKeys(cfg: Partial<PageConfig>): string[] {
+  return Object.keys(pickWritableConfig(cfg, 'diff'))
+}
+
+/**
  * adj454：把「用户本次改动」并入**源码层**设置，得到应写回 `# jps-config` 的配置。
  *
  * 规则（用户确认的分层「源码 > 缓存 > 默认」在**写方向**上的对应实现）：

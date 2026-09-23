@@ -3391,6 +3391,41 @@ body {
   margin-top: 2px;
 }
 
+/**
+ * adj605（用户要求）：**"与默认值不同"的红色 `*`**（谱面级设置项）。
+ * 选择 `*` 而不是"标签底色"：底色是整块区域、容易被读成"错误/禁用/选中"，
+ * 而且在四套中国色主题 × 深浅模式里都要各自配对比度；`*` 一处取 `--jp-danger` 即可，
+ * 语义靠 `title` 与面板末尾图例自证。
+ *
+ * 宽度**恒定**（`inline-block` + `width`）：标签列宽是"当页最长标签"算出来的（`--pcfg-label-w`），
+ * `*` 若只在亮起时占宽，字段网格会随标记亮灭左右横跳——故未标记时也占住同一个空位
+ * （`color: transparent`，文字为空，读屏也看不到 `aria-hidden`）。
+ */
+.pcfg-def-mark {
+  display: inline-block;
+  width: 8px;
+  margin-left: 2px;
+  color: transparent;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+.pcfg-def-mark.on {
+  color: var(--jp-danger);
+}
+/* 面板末尾的图例：整行（字段网格里独占一行），只在当页真有标记时出现 */
+.pcfg-def-legend {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  margin-bottom: 2px;
+}
+.pcfg-def-legend .pcfg-def-mark {
+  width: auto;
+  margin-left: 0;
+  margin-right: 1px;
+  cursor: default;
+}
+
 /* ============ 通用 ============ */
 .btn {
   background: var(--jp-bg-app);

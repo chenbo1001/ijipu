@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, slideExtraW, slideGlyphInk, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, measureBeatsOf, meterBeatsOf, inlineMeterBeats } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, slideExtraW, slideGlyphInk, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, measureBeatsOf, meterBeatsOf, inlineMeterBeats } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -9978,6 +9978,68 @@ function runAdj603Tests() {
   check('adj603 `DockPanelKey` 增加 score（面板集合与类型同步）', /\| 'settings' \| 'score' \| 'about'/.test(storeSrc), '')
 }
 
+function runAdj605Tests() {
+  console.log('[133] 设置项"非默认"红色 * 标记 (adj605)')
+  const cfgSrc = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
+  const cssSrc = String(readFileSync('src/index.css', 'utf8'))
+  // ---- 引擎判据：与"差量写出"是同一份口径 ----
+  check('adj605 默认配置本身没有任何「非默认」字段（空标记）', nonDefaultConfigKeys(defaultPageConfig).length === 0, JSON.stringify(nonDefaultConfigKeys(defaultPageConfig)))
+  const marked = { ...defaultPageConfig, margin_top: defaultPageConfig.margin_top + 5, note_size: 18, showInstrument: true }
+  const keys = nonDefaultConfigKeys(marked).sort()
+  check(
+    'adj605 只列出与默认不同的字段（3 项）',
+    keys.join(',') === ['margin_top', 'note_size', 'showInstrument'].sort().join(','),
+    keys.join(','),
+  )
+  // 关键：面板上"带了 *"必须严格等价于"保存后会写进 # jps-config"（差量写的键集）
+  const writtenCode = writeJpsConfig('V: 1.0\n', marked, { mode: 'diff' })
+  const writtenKeys = Object.keys(extractJpsConfig(writtenCode) ?? {}).sort()
+  check(
+    'adj605 标记集 == `writeJpsConfig` 差量写出的键集（不会"标了没写/写了没标"）',
+    keys.join(',') === writtenKeys.join(','),
+    `标记=${keys.join(',')} 写出=${writtenKeys.join(',')}`,
+  )
+  const backToDefault = { ...marked, note_size: defaultPageConfig.note_size }
+  check('adj605 改回默认值 → 不再标记（"回到默认"可见）', !nonDefaultConfigKeys(backToDefault).includes('note_size'), nonDefaultConfigKeys(backToDefault).join(','))
+  const explicitUndef = { ...defaultPageConfig, notes_font: undefined } as unknown as typeof defaultPageConfig
+  check('adj605 undefined/null（未设置）不算非默认', nonDefaultConfigKeys(explicitUndef).length === 0, nonDefaultConfigKeys(explicitUndef).join(','))
+  // ---- 面板接线：登记表里的每个字段都得真有一行在用它 ----
+  const tabKeys = [
+    ...(cfgSrc.match(/\n\s{2}score: \[[\s\S]*?\n\s{2}\],/)?.[0].match(/'[A-Za-z_]+'/g) ?? []),
+    ...(cfgSrc.match(/\n\s{2}font: \[[\s\S]*?\n\s{2}\],/)?.[0].match(/'[A-Za-z_]+'/g) ?? []),
+  ].map((s) => s.slice(1, -1))
+  const notWired = tabKeys.filter((k) => !cfgSrc.includes(`isNonDefault('${k}')`))
+  check(
+    `adj605 登记表（score+font，${tabKeys.length} 项）每项都有字段行在用 \`isNonDefault('键')\``,
+    tabKeys.length >= 25 && notWired.length === 0,
+    `未接线：${notWired.join(',')}`,
+  )
+  check(
+    'adj605 `Row` 支持 `mark`（true=红星 / false=空占位 / 不给=该页不参与）+ 两页末尾都有图例',
+    /function Row\(\{ label, mark, children \}/.test(cfgSrc) &&
+      /pcfg-def-mark\$\{mark \? ' on' : ''\}/.test(cfgSrc) &&
+      (cfgSrc.match(/pcfg-note pcfg-def-legend/g) ?? []).length === 2,
+    '',
+  )
+  check(
+    'adj605 标记随值变化重算（`draft` 变 → `useMemo` 重算）+ 暴露 `data-nondefault` 供真机核对',
+    /const nonDefaultKeys = useMemo\(\(\) => new Set\(nonDefaultConfigKeys\(draft\)\), \[draft\]\)/.test(cfgSrc) &&
+      /data-nondefault=\{/.test(cfgSrc),
+    '',
+  )
+  check(
+    'adj605 图例文字是**纯文本**（`.pcfg-note` 不解析 Markdown：写成 `**…**` 会原样显示）',
+    /pcfg-def-legend[\s\S]{0,220}?与默认值不同——点「保存设置」后会写进这份谱的设置/.test(cfgSrc) &&
+      !/pcfg-def-legend[\s\S]{0,300}?\*\*/.test(cfgSrc),
+    '',
+  )
+  check(
+    'adj605 标记位宽度恒定（否则字段网格随 * 亮灭横跳）+ 红色取 `--jp-danger`',
+    /\.pcfg-def-mark \{[\s\S]*?width: 8px;[\s\S]*?\}/.test(cssSrc) && /\.pcfg-def-mark\.on \{\s*color: var\(--jp-danger\);/.test(cssSrc),
+    '',
+  )
+}
+
 /**
  * adj604（用户反馈"谱面的内容还是不可见，只能看到子页签和按钮"）：
  * `PageConfigDialog` 里那段"底部按钮只属于谱面"的说明**写成了裸块注释**，而 JSX 子节点位置
@@ -11492,6 +11554,14 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj604 设置面板内容不可见用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj605Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj605 非默认标记用例抛异常', e)
     }
   })
   .then(() => {
