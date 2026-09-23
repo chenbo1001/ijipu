@@ -4,9 +4,11 @@
 
 > 主题：**"底栏按钮响应快捷键时，如果此时底栏 dock 为最小化，则应是展开到建议高度"**——加上
 > 用户当天反复微调的键位（最终口径：`Ctrl+O` = 打开文件 / `Ctrl+Y` = 导出 / `Ctrl+Shift+Z` = 重做 /
-> `Alt+F1` = 快捷键速查）和"菜单瘦身"，再加四项 UI 收口：应用标题统一来源（页签 + 桌面窗口）、
-> 状态栏文件名格式「工作区/路径/文件名」、试听热键 `Alt+A`/`Alt+S`、工作区右栏顺序调整。本轮
-> 8 项（`adj614`/`adj616`/`adj618`/`adj619`/`adj620`/`adj621`/`adj622`/`adj622b`）、6 条排错（`E-2026-300`–`305`），
+> `Alt+F1` = 快捷键速查）和"菜单瘦身"，再加六项 UI 收口：应用标题统一来源（页签 + 桌面窗口）、
+> 状态栏文件名格式「工作区/路径/文件名」、试听热键 `Alt+A`/`Alt+S`、工作区右栏顺序调整、
+> 状态栏行/列紧凑格式 `[i,j/k]`、状态栏告警文本去「个」。本轮
+> 11 项（`adj614`/`adj616`/`adj618`/`adj619`/`adj620`/`adj621`/`adj621b`/`adj622`/`adj622b`/`adj622c`/`adj622d`）、
+> 7 条排错（`E-2026-300`–`306`），
 > **不涉及引擎**（无 CHAIN-B）。
 >
 > 沿用一个口径——**键名只在 `src/brand/shortcuts.ts` 的 `KBD` 表里定义一次**，菜单项 `kbd` 角标、
@@ -46,6 +48,17 @@
 - **工作区右栏顺序调整为「操作按钮 → 过滤框 → `*` 按钮 → x 按钮 → "匹配 n 个" 提示」（`adj622`，用户要求）**——
   `.ws-side` 是 `flex-direction:column`，DOM 顺序即视觉顺序。操作▾ 下拉挪到顶部（视觉落点优先），
   状态信息（命中数 / 选中项）挪到底部（背景信息）。`.moving` 分支（移到这里 / 取消按钮）保持原顺序不动。
+- **应用标题在桌面端真正生效（`adj621b`，用户报"桌面版窗口标题没按显示版本的要求实现"）**——
+  之前 `App.tsx` 调 `__TAURI__.window.getCurrentWindow().setTitle(...)`，实测在 mount 那一刻
+  `__TAURI__.window` 子树尚未就绪、调用被 `.catch(()=>{})` 静默吞掉 ⇒ `document.title` 改对了、
+  **OS 任务栏 / 窗口标题栏却仍是 `tauri.conf.json` 的静态「爱记谱 iJipu」**（WebView2 下两者是独立状态）。
+  改为裸 IPC `core.invoke('plugin:window|set_title', { label: 'main', value: APP_TITLE_FULL })`
+  并包进 `requestAnimationFrame` 等 IPC 通道就绪；Tauri v2 该命令参数名是 `value`（不是 `title`）。
+- **状态栏行/列/总行数改为 `[i,j/k]` 紧凑格式（`adj622c`，用户要求）**——原 `行5,列10/共123行`
+  改 `[5,10/123]`；`title` 保留中文「行 X / 列 Y / 共 Z 行」可读形式。注意 JSX 文本节点用裸 `{...}`
+  （不是 template literal，写 `$` 会渲染出字面 `$`）。
+- **状态栏告警文本去「个」（`adj622d`，用户口径"直接输出 n告警..."）**——单等级 `5告警` / `3错误`，
+  两等级 `5问题 (3错误/2告警)`；ProblemPanel 头部不受影响（仍走 `problemCopy.title()` 完整形式）。
 
 ### 变更
 
@@ -76,7 +89,7 @@
 
 - `tsc -b` 0 错 / `npm run lint` 0 error / **28 warnings == 基线** / `npm run build` ✓ /
   **`npm run smoke` ALL SMOKE TESTS PASSED（0 失败）**——新增 `[144]` adj619 4 条 + `[145]` adj620 3 条 +
-  `[146]` adj621 5 条 + `[147]` adj622 9 条；并把 8 条钉旧键位的断言改到最终口径
+  `[146]` adj621 5 条 + `[147]` adj622 9 条 + `[147]` 追加 adj622c/adj622d 2 条；并把 8 条钉旧键位的断言改到最终口径
   （`Ctrl+O` = 打开文件 / `Ctrl+Y` = 导出 / `Ctrl+Shift+Z` = 重做 / `Alt+F1` = 速查），
   以及 adj545/adj549 那条右栏顺序断言同步改为 adj622 新口径。
 - 真机 Chrome CDP **12/12**：最小化（43px）下 `Ctrl+Y` ⇒ 155px 并切「导出」、相位回"建议"；按同页签也展开；
@@ -84,9 +97,12 @@
   撤销后重做内容一致；菜单分组 = 文件 / 设置 / 帮助、不再有编码/拆分/预览。
 - 真机桌面壳（WebView2 + CDP）**5/5**：最小化下 `Ctrl+Y` ⇒ 380px 并切「导出」；`Ctrl+` → 告警；
   `Alt+F1` → 速查；`Ctrl+O` 不开关底栏（走打开文件）；五键都到页面。
-- 真机 Chrome + 桌面壳 `document.title` **均等于** `爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)`
-  （adj621：CDP target list 里桌面壳那个 title 字段就是 OS 显示的窗口标题）；
+- 真机 Chrome + 桌面壳 `document.title` **均等于** `爱记谱 iJipu - v0.36.0 (2026-09-23 @…​)`；
+  **桌面端 OS 窗口标题也已实测生效**（`adj621b` 修复后 PowerShell `MainWindowTitle` 读到完整版本串，
+  修复前只有「爱记谱 iJipu」）；
   试听面板里两枚按钮均带 accessKey；adj622b 实测渲染为 `播放(A)` / `停止(S)`（无 `&`），accessKey 仍是 `a` / `s`。
+- 真机 Chrome 状态栏实测（adj622c/d）：`[1,1/18]` + title「行 1 / 列 1 / 共 18 行」；告警 `3告警`
+  （单等级，无「个」字）、title 仍是完整「3 个问题（3 个告警）」。
 - **不涉及引擎**（`packages/ijipu-engine/src/engine/**` 未改）⇒ 不走 CHAIN-B。
 
 ## [0.35.0] — 2026-09-23（手机端工作区索引两处真因修复 + 底栏 dock 的 ESC / Ctrl+D / Ctrl+H 一整套键盘与最小化行为；MINOR 级）
