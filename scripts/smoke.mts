@@ -9951,8 +9951,8 @@ function runAdj603Tests() {
     '',
   )
   check(
-    'adj603 子页签按 section 分组：全局=视图/主题/音色库，谱面=布局/字体（改名到位）',
-    /\{ id: 'global', label: '视图', icon: '⚙', section: 'global' \}/.test(cfgSrc) &&
+    'adj603 子页签按 section 分组：全局=版面/主题/音色库，谱面=布局/字体（改名到位）',
+    /\{ id: 'global', label: '版面', icon: '⚙', section: 'global' \}/.test(cfgSrc) &&
       /\{ id: 'score', label: '布局', icon: '▤', section: 'score' \}/.test(cfgSrc) &&
       /ALL_TABS\.filter\(\(t\) => t\.section === section\)/.test(cfgSrc),
     '',
@@ -9976,6 +9976,45 @@ function runAdj603Tests() {
     '',
   )
   check('adj603 `DockPanelKey` 增加 score（面板集合与类型同步）', /\| 'settings' \| 'score' \| 'about'/.test(storeSrc), '')
+}
+
+/**
+ * adj604（用户反馈"谱面的内容还是不可见，只能看到子页签和按钮"）：
+ * `PageConfigDialog` 里那段"底部按钮只属于谱面"的说明**写成了裸块注释**，而 JSX 子节点位置
+ * 只有 `{/* … *\/}` 才是注释——裸块注释被当**文本节点**渲染，成为 `.pcfg-root`（grid）的匿名项，
+ * 它的 max-content 宽（不折行的整行文字）把 `minmax(0,1fr)` 的内容列挤成 **0 宽**，
+ * 屏幕上就只剩左列子页签 + 右列按钮。这里钉住三件事：注释形态、lint 规则、面板 CSS 共用。
+ */
+function runAdj604Tests() {
+  console.log('[132] dock 设置面板内容不可见：JSX 裸块注释 + 面板受限高度链 (adj604)')
+  const cfgSrc = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
+  const cssSrc = String(readFileSync('src/index.css', 'utf8'))
+  const lintCfg = String(readFileSync('.oxlintrc.json', 'utf8'))
+  check(
+    'adj604 底部按钮的说明是 **JSX 注释**（`{/*` 开场、`*/}` 收尾，紧接条件渲染）',
+    /\{\/\* adj603：底部「恢复默认 \/ 保存设置」/.test(cfgSrc) && !/\/\*\/\s*\n\s*\{section === 'score' && \(/.test(cfgSrc),
+    '',
+  )
+  check(
+    'adj604 lint 打开 `react/jsx-no-comment-textnodes: error`（同类写法编译期就拦住）',
+    /"react\/jsx-no-comment-textnodes": "error"/.test(lintCfg),
+    '',
+  )
+  check(
+    'adj604 「谱面」与「全局」面板共用受限高度链（`.pane-score` 与 `.pane-settings` 同一组选择器）',
+    /\.tool-dock-pane\.pane-settings,\s*\.tool-dock-pane\.pane-score \{/.test(cssSrc),
+    '',
+  )
+  check(
+    'adj604 两档高度都按设置面板口径（`.dock-settings` 定高，缺它内容会被 overflow:hidden 裁掉）',
+    /\.tool-dock\.dock-settings \{ height: min\(55vh, 460px\); \}/.test(cssSrc),
+    '',
+  )
+  check(
+    'adj604 子页签「版面」改名落到文案来源（全局 section 的第一个子页签）',
+    /label: '版面'/.test(cfgSrc) && !/label: '视图'/.test(cfgSrc),
+    '',
+  )
 }
 
 async function runAdj541DockToggleTests() {
@@ -11445,6 +11484,14 @@ runAdj363SaveTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj603 设置页签拆分用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj604Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj604 设置面板内容不可见用例抛异常', e)
     }
   })
   .then(() => {

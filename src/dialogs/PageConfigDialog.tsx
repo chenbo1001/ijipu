@@ -31,17 +31,17 @@ type TabId = 'global' | 'theme' | 'soundbank' | 'score' | 'font'
 
 /**
  * adj603（用户要求）：设置**拆成两个底栏页签**——
- *   · 「全局」= 视图 / 主题 / 音色库（本机偏好，改完即时生效、**不写谱面**）
+ *   · 「全局」= 版面 / 主题 / 音色库（本机偏好，改完即时生效、**不写谱面**）
  *   · 「谱面」= 布局 / 字体（这份谱长什么样，**随谱保存**进 `# jps-config`）
  * 所以子页签按 `section` 分组，同一个组件渲染两次（两个 dock 页签各一份，子页签状态各自独立）。
  */
 export type SettingsSection = 'global' | 'score'
 
 // adj463：页签带图标 —— dock 里页签**竖向排在左侧**，窄屏时只留图标（文字用容器查询隐藏）
-// adj603：子页签改名——原「全局」→ **视图**（避免与父页签「全局」同名）、原「谱面」→ **布局**
+// adj603：子页签改名——原「全局」→ **版面**（避免与父页签「全局」同名）、原「谱面」→ **布局**
 const ALL_TABS: { id: TabId; label: string; icon: string; section: SettingsSection }[] = [
-  { id: 'global', label: '视图', icon: '⚙', section: 'global' },
-  // adj383：主题组从顶栏菜单移入设置，紧跟在「视图」之后
+  { id: 'global', label: '版面', icon: '⚙', section: 'global' },
+  // adj383：主题组从顶栏菜单移入设置，紧跟在「版面」之后
   { id: 'theme', label: '主题', icon: '◐', section: 'global' },
   // adj384：音色库从顶栏按钮移入设置，紧跟「主题」之后
   { id: 'soundbank', label: '音色库', icon: '♪', section: 'global' },
@@ -93,7 +93,7 @@ export function PageConfigDialog({
   const setFontOverride = useUiStore((s) => s.setFontOverride)
 
   const [draft, setDraft] = useState<PageConfig>({ ...pageConfig })
-  // adj603：默认子页签取本 section 的第一个（全局 → 视图、谱面 → 布局）
+  // adj603：默认子页签取本 section 的第一个（全局 → 版面、谱面 → 布局）
   const [tab, setTab] = useState<TabId>(() => ALL_TABS.find((t) => t.section === section)?.id ?? 'global')
   // adj315：页面设置"即刻预览 + 保存持久化 + X 恢复"——
   // 打开时快照原值，调整时临时应用（预览非持久化），保存才写 .jps；关闭未保存则恢复快照。
@@ -561,11 +561,12 @@ export function PageConfigDialog({
           </div>
         </div>
 
-        /**
-         * adj603：底部「恢复默认 / 保存设置」**只属于「谱面」这一半**——
-         * 它们读写的是 `# jps-config`（谱面级）；而「全局」（视图/主题/音色库）是本机偏好，
-         * 改一下就即时生效，不需要（也不该有）"保存"这一步。
-         */
+        {/* adj603：底部「恢复默认 / 保存设置」**只属于「谱面」这一半**——
+            它们读写的是 `# jps-config`（谱面级）；而「全局」（版面/主题/音色库）是本机偏好，
+            改一下就即时生效，不需要（也不该有）"保存"这一步。
+            ⚠️ 这段**必须是 JSX 注释**（花括号包起来的块注释）：写成裸的块注释会被当成文本节点渲染，
+            成为 `.pcfg-root` 网格里的匿名项 → 它的 max-content 宽把 `minmax(0,1fr)` 的内容列挤成 0 宽，
+            表现为"只看得见子页签和按钮、子页签内容全不见了"（见 E-2026-293）。 */}
         {section === 'score' && (
           <div className="modal-foot pcfg-foot">
           <button
