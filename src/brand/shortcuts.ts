@@ -12,13 +12,22 @@
  * ⚠ 平台限制（实测见 E-2026-300/301）：浏览器把 `Ctrl+T`（新标签页）、`Ctrl+P`（打印）留给了自己，
  * 页面收不到 keydown ⇒ 网页版这两条按不动（桌面壳正常）。速查对话框里已注明。
  *
+ * ⚠ adj628（用户报"Ctrl+N 新建后状态栏还是上一个文件名"）：**`Ctrl+N` 也是浏览器自己占的**（开新窗口），
+ * 而且后果比"按不动"严重——新窗口会**恢复上次草稿与文件绑定**，看着像新建、其实还绑在老文件上，
+ * 在新窗口里编辑再保存就**覆盖原文件**（真机复现见 `E-2026-310`）。所以：
+ *   · 桌面壳（wry 已 `SetAreBrowserAcceleratorKeysEnabled(false)`，页面收得到）＝ `Ctrl+N`；
+ *   · 网页版＝ **`Alt+N`**（页面能拦下；`Ctrl+N` 仍被内核收走，拦不住）。
+ * 两条键在 `App.tsx` 里都接受（桌面按 Alt+N 也生效），菜单/速查只显示当前平台那一个。
+ *
  * ⚠ 键位调整史（写在这里免得下次又"发现冲突"）：`Ctrl+O` 一度按用户要求改挂「导出」（adj615），
  * 后来又按用户要求**改回「打开文件」**；导出改用 `Ctrl+Y`（adj619b），
  * 而 `Ctrl+Y` 原是"重做" ⇒ **重做挪到跨平台惯例 `Ctrl+Shift+Z`**。
  */
+import { isDesktopShell } from './platform'
+
 export const KBD = {
-  /** adj185 起：文件类 */
-  newDoc: 'Ctrl+N',
+  /** adj185 起：文件类。adj628：网页版改用 `Alt+N`（`Ctrl+N` 被浏览器收走，见上） */
+  newDoc: isDesktopShell() ? 'Ctrl+N' : 'Alt+N',
   /** 打开文件（adj615 一度改挂「导出」，adj619b 按用户要求**改回**打开文件） */
   openDoc: 'Ctrl+O',
   save: 'Ctrl+S',

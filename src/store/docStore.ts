@@ -508,6 +508,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
     localStorage.setItem(DRAFT_NAME_KEY, s.name)
     // adj161：载入示例不是磁盘文件——清除文件句柄，避免误写回旧文件
     void saveFileHandle(null)
+    // adj628：**同时清掉落盘的来源绑定**（见 newDoc 里那段说明）——否则重启/新开窗口会把老工作区文件重新绑回来
+    saveDraftSrc(null)
     set({
       code: s.code,
       fileName: s.name,
@@ -537,6 +539,17 @@ export const useDocStore = create<DocState>()((set, get) => ({
     localStorage.setItem(DRAFT_NAME_KEY, '未命名')
     // adj161：新建文档不关联磁盘文件——清除句柄
     void saveFileHandle(null)
+    /**
+     * adj628（用户报"Ctrl+N 新建后状态栏还是上一个文件名，会不会覆盖原文件"）：**这里是真凶**。
+     *
+     * `pendingBinding` 是从**落盘草稿的来源**（`DRAFT_SRC_KEY`）恢复的（见文件末尾 `draft?.src`），
+     * 而新建原先只写了 `DRAFT_KEY`/`DRAFT_NAME_KEY`、**没清来源** ⇒ 内存里虽然解绑了，
+     * 但只要重新加载（浏览器 Ctrl+N 开的新窗口 / 新标签 / 重启桌面应用），`resolvePendingBinding()`
+     * 就会把这**老文件重新绑回到这份新草稿**上：状态栏显示老文件名、而内容是新建的空谱，
+     * 此时「保存」直接把原文件覆盖成空谱（真机复现见 E-2026-310）。
+     * 所以"解绑"必须**同时落到草稿记录里**——下列每个"非工作区来源"的载入路径都要清。
+     */
+    saveDraftSrc(null)
     // adj214：新建文档强制使用 defaultPageConfig——不再被本机历史设置覆盖
     // （当时的问题是新建谱仍显示旧的本机设置；adj480 更进一步：本机页面设置层已整体取消）
     // 模板无 # jps-config，merge(null) 即纯默认
@@ -562,6 +575,10 @@ export const useDocStore = create<DocState>()((set, get) => ({
       lastEditAt: 0,
       sel: { start: 0, end: 0 },
     })
+    // adj628：新建后**明说一句**——用户报过"Ctrl+N 之后状态栏还是上一个文件名"，而根因是
+    // 浏览器把 Ctrl+N 收走（它自己开新窗口，新窗口恢复上次草稿与绑定）。这条提示让两件事都看得见：
+    // "新建真的生效了" + "这份谱未关联任何文件（保存会走另存为）"。
+    useUiStore.getState().showNotice(uiCopy.newDocDone, 'ok')
   },
   markSaved: () => set({ dirty: false }),
 
@@ -582,6 +599,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
     }
     // adj161：粘贴导入不是磁盘文件——清除句柄，避免误写回旧文件
     void saveFileHandle(null)
+    // adj628：来源绑定同样要落盘清掉（否则重启后又把老工作区文件绑到这份粘贴稿上）
+    saveDraftSrc(null)
     set({
       code,
       fileName: pasteImportCopy.name,
@@ -649,6 +668,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
     // 与「打开对话框」同款装载：解析 + 页面设置 + 清空历史/联动状态；
     // 数据源是外部路径 ⇒ 清掉 FSA 句柄（两者互斥），避免"保存写到了上一个文件"
     disconnectFileHandle()
+    // adj628：工作区来源同样要落盘清掉（外部路径与工作区互斥，见下面 binding: null）
+    saveDraftSrc(null)
     set({
       code: primary.code,
       fileName: name,
@@ -698,6 +719,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
       }
       // adj161：打开的文件成为操作主体，句柄持久化（下次保存直接写回）
       void saveFileHandle(handle)
+      // adj628：来源换成了这个本地文件 ⇒ 落盘的工作区来源必须清掉（否则下次加载又绑回老工作区文件）
+      saveDraftSrc(null)
       // adj212：打开文件时同步 pageConfig——此前漏了 mergeJpsConfig，
       // 其它浏览器打开带 # jps-config 的谱时页面设置仍是打开前的旧值
       set({
@@ -1374,6 +1397,8 @@ function openFileViaInput(): Promise<boolean> {
         } catch {
           /* 存储不可用时静默 */
         }
+        // adj628：换成了这个本地文件 ⇒ 落盘的工作区来源要清掉（否则下次加载又绑回老工作区文件）
+        saveDraftSrc(null)
         useDocStore.setState({
           code,
           fileName: name,
@@ -1436,6 +1461,9 @@ void loadFileHandle().then((h) => {
   const draftName = useDocStore.getState().fileName
   if (draftName && draftName !== name) return
   useDocStore.setState({ fileHandle: h, fileName: name })
+  // adj628：新窗口/新标签（含浏览器自己开的那种）会走到这里 ⇒ **明确告知"这份草稿仍绑在它上面"**，
+  // 否则用户会把它当成"新建出来的空谱"，改完一保存就把原文件覆盖了（真机复现见 E-2026-310）。
+  useUiStore.getState().showNotice(uiCopy.restoredFile(name), 'warn')
 })
 
 // adj544：启动时恢复「这份草稿来自哪个工作区文件」——但只作为**待校验绑定**。
@@ -1475,12 +1503,34 @@ export async function resolvePendingBinding(): Promise<boolean> {
     return false
   }
   const segs = pending.segs
+  /**
+   * adj628（纵深防御）：**草稿名必须与绑定文件名一致**才恢复——与 `loadFileHandle()` 那条口径相同。
+   *
+   * 为什么还要这道保险：来源绑定是**另一把键**（`DRAFT_SRC_KEY`）落盘的，任何"解绑了内存但没落盘"
+   * 的路径（新建/载入示例/粘贴导入/换本地文件……）都会让它活到下一次加载，把老文件重新绑到**别的**草稿上。
+   * 本轮已给那些路径都补了 `saveDraftSrc(null)`；这里再按"草稿属于哪个文件"复核一次，
+   * 万一以后又新增一条载入路径漏了清，也不会静默地把新内容写进老文件（E-2026-310）。
+   */
+  const draftName = st.fileName
+  const bindBaseName = fileBaseName(segs[segs.length - 1] ?? '')
+  if (draftName && bindBaseName && draftName !== bindBaseName) {
+    console.info(
+      `[iJipu] 不恢复工作区绑定：草稿名(${draftName})与绑定文件(${joinPath(segs)})不是同一份` +
+        `（多半是新建/换文件后残留的来源记录）`,
+    )
+    useDocStore.setState({ pendingBinding: null })
+    return false
+  }
   if (!(await hasEntry(ws, segs.slice(0, -1), segs[segs.length - 1]))) {
     console.info(`[iJipu] 未恢复工作区绑定：${joinPath(segs)} 已不在工作区里`)
     return false
   }
   useDocStore.setState({ binding: pending, pendingBinding: null })
-  useUiStore.getState().showNotice(workspaceCopy.bindingRestored(ws.name, joinPath(segs)), 'ok')
+  // adj628：**成功恢复绑定**时给一句"保存会写回它"的明确提示——新窗口/新标签（含浏览器自己开的窗口）
+  // 都会走到这里，用户很容易把这种窗口当成"新建出来的空谱"，改完一保存就覆盖了原文件
+  // （用户报的正是"Ctrl+N 后状态栏还是上一个文件名"，真机复现见 E-2026-310）。
+  // `bindingRestored`（"重新授权后即可写回"）留给**待授权**那种情况（见 WorkspacePanel 的提示行）。
+  useUiStore.getState().showNotice(uiCopy.restoredFile(joinPath(segs)), 'warn')
   console.info(`[iJipu] 已恢复工作区绑定：${joinPath(segs)}`)
   return true
 }

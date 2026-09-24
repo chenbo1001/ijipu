@@ -10,6 +10,8 @@ import { Modal } from '../ui/Modal'
 import { KBD } from '../brand/shortcuts'
 
 const SHORTCUTS: [string, string][] = [
+  // adj628：键名来自 `KBD.newDoc`（**按平台给**：桌面 = Ctrl+N；网页版 = Alt+N，
+  // 因为浏览器把 Ctrl+N 占作"开新窗口"、页面收不到）——这里不写字面量，平台差异见表下的说明行。
   [KBD.newDoc, '新建'],
   // adj619b（用户要求）：`Ctrl+O` 回到「打开文件」；导出改用 `Ctrl+Y`
   [KBD.openDoc, '打开文件'],
@@ -75,6 +77,12 @@ export function ShortcutsDialog() {
         <div style={{ color: 'var(--jp-text-muted)', fontSize: 12, marginTop: 4 }}>
           行首命令：光标在**行首**（行首或换行后）按上述字母即插入命令头，字母大小写均可；
           插入的永远是标准大写命令头（如按 q 得到 `Q: `）。
+        </div>
+        {/* adj628：平台差异统一说明（左列显示的**就是当前平台可用的键**，不写字面量免得与 KBD 表漂移）：
+            浏览器会把"开新窗口 / 新标签页 / 打印"这类组合留给自己，页面收不到 ⇒ 网页版那几条改用别的键或走菜单/按钮。 */}
+        <div style={{ color: 'var(--jp-text-muted)', fontSize: 12, marginTop: 4 }}>
+          左列是**当前平台**实际可用的键：浏览器会把"开新窗口 / 新标签页 / 打印"这类组合留给自己（页面收不到），
+          因此网页版个别条目换成了别的键（如「新建」），或请改点菜单 / 顶栏按钮；桌面端不受此限。
         </div>
       </div>
     </Modal>

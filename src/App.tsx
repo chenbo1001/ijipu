@@ -217,7 +217,16 @@ function App() {
         e.preventDefault()
         e.stopPropagation()
         void st.saveFile()
-      } else if (e.ctrlKey && e.key.toLowerCase() === 'n') {
+      } else if ((e.ctrlKey || e.altKey) && !e.shiftKey && e.key.toLowerCase() === 'n') {
+        /**
+         * adj628：**新建**同时接受 `Ctrl+N` 与 `Alt+N`。
+         *
+         * 为什么两条都要：`Ctrl+N` 是**浏览器自己占的快捷键**（开新窗口）——网页版页面收不到它，
+         * 于是"看着像新建、其实新窗口恢复了上次的草稿与文件绑定"，在新窗口里编辑保存会**覆盖原文件**
+         * （用户报的正是这个：Ctrl+N 后状态栏还是上一个文件名；真机复现见 E-2026-310）。
+         * 网页版因此改用页面能拦下的 `Alt+N`（菜单/速查显示的也是它，见 `brand/shortcuts.ts`）；
+         * 桌面壳（wry 关掉了 WebView2 的浏览器快捷键）照旧 `Ctrl+N`，两条都收，省得用户换机时按错。
+         */
         e.preventDefault()
         e.stopPropagation()
         st.newDoc()
