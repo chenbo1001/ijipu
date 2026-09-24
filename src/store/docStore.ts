@@ -58,6 +58,7 @@ let fileStateTouched = false
 import { uiCopy, savePhaseCopy, pasteImportCopy, externalOpenCopy, workspaceCopy, exportCopy } from '../brand/copy'
 // adj615：打印（菜单「打印」/ Ctrl+P）——浏览器侧原语在 export/print.ts，页面在这里现算
 import { installPrintHooks, printPages } from '../export/print'
+import { printFileNameOfResult } from '../export/printName'
 // adj615：与预览/导出面板同一个"默认音色"口径（只用到 `gmVoiceRef`，不拉进合成器实现，故不增包体）
 import { firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
 
@@ -74,6 +75,17 @@ function currentPrintPages(s: DocState): string[] {
   if (s.parseResult.errors.some((e) => e.severity === 'error')) return []
   const instrumentRef = firstEnabledInstrumentRef(useUiStore.getState().playbackHqEnabled)
   return renderScoreToSvg(layoutScore(s.parseResult, s.pageConfig, instrumentRef))
+}
+
+/**
+ * adj626（用户要求）：**打印 / 另存 PDF 的默认文件名** = **第一个描述头 `B:` 的值**（标题）。
+ *
+ * 浏览器与桌面壳都拿 `document.title` 当"另存为 PDF"的默认文件名，所以打印期由
+ * `export/print.ts` 临时改标题、`afterprint` 还原；这里只负责**算出那个名字**
+ * （没有 `B:` 时退回文件名，规则与用例见 `export/printName.ts`）。
+ */
+function currentPrintTitle(s: DocState): string {
+  return printFileNameOfResult(s.parseResult, s.fileName)
 }
 
 interface DocState {
@@ -602,9 +614,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
       useUiStore.getState().showNotice(exportCopy.blockedByError, 'warn')
       return
     }
-    printPages(pages)
+    printPages(pages, currentPrintTitle(s))
   },
-  installPrintSupport: () => installPrintHooks(() => currentPrintPages(get())),
+  installPrintSupport: () => installPrintHooks(() => currentPrintPages(get()), () => currentPrintTitle(get())),
 
   // ---- 文件读写（adj70） ----
   fileHandle: null,

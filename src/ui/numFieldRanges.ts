@@ -27,6 +27,7 @@ export type PageNumKey =
   | 'height_shengbu'
   | 'segmentRowGap_bz'
   | 'segmentRowGap_dsb'
+  | 'barCountInterval'
 
 /**
  * 谱面数值字段 → [min, max]。
@@ -47,6 +48,7 @@ export const PAGE_NUM_RANGES: Record<PageNumKey, [number, number]> = {
   height_shengbu: GUIDE_LIMITS_EX.height_shengbu,
   segmentRowGap_bz: GUIDE_LIMITS_EX.segmentRowGap_bz,
   segmentRowGap_dsb: GUIDE_LIMITS_EX.segmentRowGap_dsb,
+  barCountInterval: GUIDE_LIMITS_EX.barCountInterval,
 }
 
 /**

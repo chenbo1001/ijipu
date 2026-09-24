@@ -28,10 +28,34 @@ const PRINT_PAGE_CLASS = 'jp-print-page'
 /** 是否已经注册过 `beforeprint` / `afterprint`（幂等） */
 let hooksInstalled = false
 
-/** 清掉打印容器与标记（打印结束 / 重复打印前都调） */
+/**
+ * adj626：打印期临时改过的 `document.title` 原值（null = 当前没改）。
+ *
+ * 为什么要改标题：浏览器/桌面壳把**文档标题**当作"打印 → 另存为 PDF"的**默认文件名**，
+ * 代码里没有别的入口能设定它。用户口径：默认文件名 = **第一个描述头 `Z:` 的值**
+ * （见 `export/printName.ts`）。收尾（`afterprint`）时还原，应用标题仍由 `App` 统一维护。
+ */
+let savedTitle: string | null = null
+
+/** 打印期把标题换成"这份谱的名字"（幂等：只记一次原值）；名字别用 `use*` 前缀——会被当成 React Hook */
+function applyPrintTitle(name?: string): void {
+  if (!name) return
+  if (savedTitle === null) savedTitle = document.title
+  document.title = name
+}
+
+/** 还原打印期改过的标题（没改过则不动） */
+function restoreTitle(): void {
+  if (savedTitle === null) return
+  document.title = savedTitle
+  savedTitle = null
+}
+
+/** 清掉打印容器与标记（打印结束 / 重复打印前都调），并把标题还原 */
 export function clearPrintRoot(): void {
   document.getElementById(PRINT_ROOT_ID)?.remove()
   document.body.classList.remove(PRINT_BODY_CLASS)
+  restoreTitle()
 }
 
 /** 把页面 SVG 装进打印容器（先清旧的，避免重复打印叠一份） */
@@ -54,25 +78,33 @@ function fillPrintRoot(pages: readonly string[]): void {
 /**
  * 打印这些页面（同一窗口）。
  * @param pages 每一页的 SVG 字符串（`renderScoreToSvg()` 的产物）
+ * @param fileName adj626：打印/另存 PDF 的默认文件名（缺省则不动标题）
  */
-export function printPages(pages: readonly string[]): void {
+export function printPages(pages: readonly string[], fileName?: string): void {
   fillPrintRoot(pages)
+  applyPrintTitle(fileName)
   document.body.classList.add(PRINT_BODY_CLASS)
   window.print()
   // `window.print()` 在部分环境是**非阻塞**的（打印预览独立窗口）⇒ 收尾交给 `afterprint`；
-  // 不走"print() 之后立刻 clear"（那会把正在排版的容器删掉）。
+  // 不走"print() 之后立刻 clear"（那会把正在排版的容器删掉、标题也会在对话框取名字之前被还原）。
 }
 
 /**
  * 注册"平台自己弹打印"时补页面（**幂等**，`App` 挂载时调一次即可）。
  * @param getPages 现取当前文档的打印页（返回空数组 = 这次没什么可打）
+ * @param getFileName adj626：现取"另存为 PDF"的默认文件名（第一个 `Z:` 的值，见 `printName.ts`）——
+ *   平台把 `Ctrl+P` 收走时页面收不到 keydown，只能靠 `beforeprint` 在这里补上标题
  */
-export function installPrintHooks(getPages: () => readonly string[]): void {
+export function installPrintHooks(
+  getPages: () => readonly string[],
+  getFileName?: () => string | undefined,
+): void {
   if (hooksInstalled) return
   hooksInstalled = true
   window.addEventListener('beforeprint', () => {
     // 应用自己触发时容器已经装好，这里再装一次内容相同（幂等）；平台自己弹时全靠这一步
     fillPrintRoot(getPages())
+    applyPrintTitle(getFileName?.())
     document.body.classList.add(PRINT_BODY_CLASS)
   })
   window.addEventListener('afterprint', () => clearPrintRoot())

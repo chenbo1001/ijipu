@@ -27,7 +27,7 @@ import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } f
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
 import { mordentOf, mordentPlan, mordentShortMs, neighborDegree, MORDENT_SYMBOLS, ORNAMENT_SHORT_MIN_MS, ORNAMENT_SHORT_MAX_MS } from '@ijipu/engine/playback/ornaments.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos } from '@ijipu/engine/layout/metaAnchors.ts'
 import type { BarlineType } from '@ijipu/engine/types.ts'
 import { computeBeamsForTest } from '@ijipu/engine/render/index.ts'
@@ -73,6 +73,9 @@ import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from '../src/pwa/swUpdat
 import { shiftEventsFrom } from '../src/playback/playbackTimeline.ts'
 // adj411：直接生成 PDF（不再开新窗口）——PDF 字节结构（纯逻辑）
 import { buildPdf, A4_W_PT, A4_H_PT } from '../src/export/pdf.ts'
+// adj626：打印链路 + 「另存为 PDF 的默认文件名」纯函数
+import { printPages, clearPrintRoot } from '../src/export/print.ts'
+import { printFileNameOf } from '../src/export/printName.ts'
 // adj413：新建模板（分隔注释 30 字符 + 尾部页面设置区块）+ px 一律整数
 import { defaultSample } from '../src/samples/index.ts'
 import { roundPxIntegers } from '@ijipu/engine/index.ts'
@@ -10478,12 +10481,11 @@ function runAdj615Tests() {
   )
   check(
     'adj615 `installPrintHooks` 兜住"平台自己弹打印"（`beforeprint` 补页面、`afterprint` 收尾），且幂等',
-    /export function installPrintHooks\(getPages: \(\) => readonly string\[\]\): void \{[\s\S]{0,200}?if \(hooksInstalled\) return/.test(
-      printSrc,
-    ) &&
+    // adj626：签名多了可选的"默认文件名"取值器（打印期临时改 document.title）
+    /export function installPrintHooks\([\s\S]{0,160}if \(hooksInstalled\) return/.test(printSrc) &&
       /addEventListener\('beforeprint'/.test(printSrc) &&
       /addEventListener\('afterprint'/.test(printSrc) &&
-      /installPrintHooks\(\(\) => currentPrintPages\(get\(\)\)\)/.test(storeSrc) &&
+      /installPrintHooks\(\(\) => currentPrintPages\(get\(\)\), \(\) => currentPrintTitle\(get\(\)\)\)/.test(storeSrc) &&
       /useDocStore\.getState\(\)\.installPrintSupport\(\)/.test(appSrc),
     '',
   )
@@ -12900,7 +12902,270 @@ runAdj363SaveTests()
     }
   })
   .then(() => {
+    try {
+      runAdj625Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj625 方框小节序号用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj626Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj626 PDF 走打印 + 默认文件名用例抛异常', e)
+    }
+  })
+  .then(() => {
     console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
     process.exit(failed === 0 ? 0 : 1)
   })
 
+
+/**
+ * adj625（用户要求）：**方框小节序号**——谱面设置「显示小节计数」+「序号间隔」。
+ *
+ * 用户口径：① 复选框打开后，在小节**左侧小节线下方**画带方框的序号，每 N 个小节一个（默认 4 ⇒ 4/8/12/16）；
+ * ② 高度在「小节线底下」，**字号与音符注释文本一致**；
+ * ③ 行首第一个小节通常不画小节线（隐藏小节线）⇒ 序号放在隐藏线的位置下（= 边距线）；
+ * ④ 多声部块的块首序号放在**大括号与音符之间**，与小节线底下**同高**。
+ */
+function runAdj625Tests() {
+  console.log('[148] 方框小节序号：显示小节计数 + 序号间隔（adj625）')
+  const BAR8 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 | 3 4 5 6 | 7 1 2 3 | 4 5 6 7 | 1 2 3 4 |\n'
+  const OFF: PageConfig = { ...defaultPageConfig }
+  const ON: PageConfig = { ...defaultPageConfig, showBarCount: true }
+  const ON1: PageConfig = { ...defaultPageConfig, showBarCount: true, barCountInterval: 1 }
+  const lay = (src: string, cfg: PageConfig) => layoutScore(parseJps(src), cfg)
+  const numsOf = (src: string, cfg: PageConfig) => lay(src, cfg).pages.flatMap((p) => p.barNumbers)
+
+  // ---- ① 默认关闭：不产生锚点（既有谱面零变化）----
+  check('adj625 默认关闭 ⇒ 无小节序号锚点', numsOf(BAR8, OFF).length === 0, `${numsOf(BAR8, OFF).length}`)
+
+  // ---- ② 编号：全曲连续，间隔 4 ⇒ 只有第 4、8 小节 ----
+  const n4 = numsOf(BAR8, ON)
+  check('adj625 间隔 4 ⇒ 8 小节里只画第 4、8 小节（全曲连续编号）',
+    n4.map((x) => x.n).join(',') === '4,8', n4.map((x) => x.n).join(','))
+  const n8 = numsOf(BAR8, { ...defaultPageConfig, showBarCount: true, barCountInterval: 8 })
+  check('adj625 间隔 8 ⇒ 只画第 8 小节', n8.map((x) => x.n).join(',') === '8', n8.map((x) => x.n).join(','))
+  const n3 = numsOf(BAR8, { ...defaultPageConfig, showBarCount: true, barCountInterval: 3 })
+  check('adj625 间隔 3 ⇒ 第 3、6 小节', n3.map((x) => x.n).join(',') === '3,6', n3.map((x) => x.n).join(','))
+
+  // ---- ③ 位置：落在「该小节左侧小节线」正下方（x = 该线 x、y = 该行线底）；
+  //          行首那格（隐藏小节线）落在边距线上 ----
+  const p0 = lay(BAR8, ON).pages[0]
+  const nearBarOf = (x: number) =>
+    p0.barlines.reduce((best, b) => (Math.abs(b.x - x) < Math.abs(best.x - x) ? b : best), p0.barlines[0])
+  const posOk = n4.every((bn) => {
+    if (Math.abs(bn.x - defaultPageConfig.margin_left) < 0.6) return true // 行首隐藏小节线 ⇒ 边距线
+    const bar = nearBarOf(bn.x)
+    return Math.abs(bn.x - bar.x) < 0.6 && Math.abs(bn.yBarBottom - bar.yBottom) < 0.6
+  })
+  check('adj625 序号画在该小节左侧小节线正下方（x/y 都与小节线对齐；行首落在边距线）', posOk,
+    n4.map((x) => `${x.n}@${x.x},${x.yBarBottom}`).join(' '))
+
+  // ---- ④ 行首隐藏小节线：间隔 1 ⇒ 每行首个小节的序号落在边距线上 ----
+  const p1 = lay(BAR8, ON1).pages[0]
+  const rowCount = new Set(p1.notes.map((n) => Math.round(n.y))).size
+  const atMargin = p1.barNumbers.filter((bn) => Math.abs(bn.x - defaultPageConfig.margin_left) < 0.6)
+  check('adj625 间隔 1 ⇒ 每个小节都有序号（含全曲第 1 小节）',
+    p1.barNumbers.length === 8 && p1.barNumbers[0].n === 1 && p1.barNumbers[0].x === defaultPageConfig.margin_left,
+    `n=${p1.barNumbers.length} first=${p1.barNumbers[0]?.n}@${p1.barNumbers[0]?.x}`)
+  check('adj625 间隔 1 ⇒ 每个行首小节都落在边距线上（行首小节线隐藏）',
+    atMargin.length >= 1 && atMargin.length <= rowCount,
+    `行首锚点=${atMargin.length} 行数=${rowCount}`)
+
+  // ---- ⑤ 多声部：块首序号在**大括号与音符之间**，高度取**最上面声部**的小节线底缘 ----
+  const MV = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 4 | 5 6 7 1 |\nQ2: 1, 2, 3, 4 | 5, 6, 7, 1 |\n'
+  const mvPage = lay(MV, ON1).pages[0]
+  const vb = mvPage.voiceBlocks[0]
+  const firstNoteX = Math.min(...mvPage.notes.filter((n) => n.id.voice === 1).map((n) => n.x))
+  const topBar = mvPage.barlines.reduce((best, b) => (b.yTop < best.yTop ? b : best), mvPage.barlines[0])
+  const bn1 = mvPage.barNumbers.find((x) => x.n === 1)
+  check('adj625 多声部块首序号在**大括号与音符之间**',
+    !!vb && !!bn1 && bn1.x > vb.x && bn1.x < firstNoteX,
+    `brace=${vb?.x} 序号=${bn1?.x} 音符=${firstNoteX}`)
+  check('adj625 多声部块首序号高度 = **最上面声部**的小节线底缘',
+    !!bn1 && Math.abs(bn1.yBarBottom - topBar.yBottom) < 0.6,
+    `序号y=${bn1?.yBarBottom} 顶部线底=${topBar.yBottom}`)
+  // 空隙原本固定 12px，放不下方框（≈10px）⇒ 打开该选项且块首带序号时自动撑开，方框不压括号双线
+  check('adj625 多声部块首序号不压大括号（方框左缘 > 括号右细线）+ 不压音符',
+    !!vb && !!bn1 &&
+      bn1.x - barNumberBoxW(bn1.n, defaultPageConfig.note_size) / 2 > vb.x + 3 &&
+      bn1.x + barNumberBoxW(bn1.n, defaultPageConfig.note_size) / 2 < firstNoteX,
+    `brace=${vb?.x} 序号=${bn1?.x} 音符=${firstNoteX}`)
+  check('adj625 多声部块内序号每小节只画一次（2 小节 ⇒ 2 条，不按声部重复）',
+    mvPage.barNumbers.length === 2, `${mvPage.barNumbers.length}`)
+
+  // ---- ⑥ adj625c（用户要求）：**序号算在曲部行里，显隐不影响排版** ----
+  //  开/关两态下：行高、音符 y、词部 y、分页结果必须逐项完全相同（序号只是"多画一个框"）
+  const LYR = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 |\nC: 一 二 三 四 五 六 七 八 九 十 百 千 万 亿 兆 京\n'
+  const geomOf = (cfg: PageConfig) => {
+    const L = lay(LYR, cfg)
+    return JSON.stringify({
+      pages: L.pages.length,
+      notes: L.pages.flatMap((p) => p.notes.map((n) => [n.x, n.y])),
+      lyrics: L.pages.flatMap((p) => p.lyrics.map((l) => [l.x, l.y])),
+      barlines: L.pages.flatMap((p) => p.barlines.map((b) => [b.x, b.yTop, b.yBottom])),
+    })
+  }
+  check('adj625c 显示小节计数**不影响排版**（开/关两态：音符/词部/小节线/分页逐项一致）',
+    geomOf(ON) === geomOf(OFF), geomOf(ON) === geomOf(OFF) ? '' : `on=${geomOf(ON).slice(0, 120)} off=${geomOf(OFF).slice(0, 120)}`)
+  check('adj625c 有歌词时序号框不压歌词（框底 ≤ 歌词文字顶，仍在曲部行自己的空隙里）',
+    (() => {
+      const L = lay(LYR, ON)
+      const box = L.pages[0].barNumbers[0]
+      if (!box) return false
+      const bottom = box.yBarBottom + BAR_NUMBER_BOTTOM_GAP + barNumberBoxH(defaultPageConfig.note_size)
+      const lyricTop = L.pages[0].lyrics[0].y - defaultPageConfig.geci_size * 0.8
+      return bottom <= lyricTop
+    })(),
+    (() => {
+      const L = lay(LYR, ON)
+      const box = L.pages[0].barNumbers[0]
+      const bottom = box.yBarBottom + BAR_NUMBER_BOTTOM_GAP + barNumberBoxH(defaultPageConfig.note_size)
+      const lyricTop = L.pages[0].lyrics[0].y - defaultPageConfig.geci_size * 0.8
+      return `框底=${bottom.toFixed(2)} 歌词顶=${lyricTop.toFixed(2)} 净距=${(lyricTop - bottom).toFixed(2)}px`
+    })())
+
+  // ---- ⑦ 间隔钳制：0 / 负数 / NaN 回退 4；小数取整；上限 99 ----
+  const c = (v: number): PageConfig => ({ ...defaultPageConfig, showBarCount: true, barCountInterval: v })
+  check('adj625 间隔 0 / -3 / NaN ⇒ 回退默认 4（不产生"每小节都画"的意外）',
+    numsOf(BAR8, c(0)).map((x) => x.n).join(',') === '4,8' &&
+      numsOf(BAR8, c(-3)).map((x) => x.n).join(',') === '4,8' &&
+      numsOf(BAR8, c(Number.NaN)).map((x) => x.n).join(',') === '4,8',
+    `${numsOf(BAR8, c(0)).map((x) => x.n).join(',')}`)
+  check('adj625 间隔 3.6 ⇒ 四舍五入 4；间隔 200 ⇒ 封顶 99（≥ 小节数即不画）',
+    numsOf(BAR8, c(3.6)).map((x) => x.n).join(',') === '4,8' &&
+      numsOf(BAR8, c(200)).length === 0,
+    `${numsOf(BAR8, c(200)).length}`)
+
+  // ---- ⑧ 谱面设置往返（# jps-config 差量）----
+  const SRC1 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n'
+  const written = writeJpsConfig(SRC1, { showBarCount: true, barCountInterval: 8 })
+  check('adj625 两项都能写进 # jps-config',
+    /"showBarCount":true/.test(written) && /"barCountInterval":8/.test(written), written.split('\n').pop())
+  const back = extractJpsConfig(written)
+  check('adj625 读回一致（保存后重开不丢）',
+    back?.showBarCount === true && back?.barCountInterval === 8, JSON.stringify(back))
+  check('adj625 两项都与默认不同时进「非默认」标记（设置面板红 *）',
+    nonDefaultConfigKeys({ ...defaultPageConfig, showBarCount: true, barCountInterval: 8 }).sort().join(',') ===
+      'barCountInterval,showBarCount',
+    nonDefaultConfigKeys({ ...defaultPageConfig, showBarCount: true, barCountInterval: 8 }).join(','))
+  check('adj625 关掉且间隔为默认 ⇒ 不写设置行（等于默认，文件干净）',
+    writeJpsConfig(SRC1, { showBarCount: false, barCountInterval: 4 }) === SRC1, '')
+  check('adj625 默认配置本身没有任何「非默认」字段（新增项不污染默认）',
+    nonDefaultConfigKeys(defaultPageConfig).length === 0, JSON.stringify(nonDefaultConfigKeys(defaultPageConfig)))
+
+  // ---- ⑨ 渲染：方框 + 序号文字（字号 = **倚音音符**字号 × 3/4）----
+  const svg = renderScoreToSvg(lay(BAR8, ON))[0]
+  const graceFs = Math.max(6 * noteScaleOf(defaultPageConfig.note_size), defaultPageConfig.note_size * GRACE_SIZE_RATIO)
+  const fs = graceFs * BAR_NUMBER_SCALE
+  const fsSvg = Math.round(fs * 10) / 10 // 渲染端字号经 r1n 取到 0.1
+  check('adj625 渲染出方框序号（data-barnumber + rect 外框）',
+    /data-barnumber="4"/.test(svg) && /data-barnumber="8"/.test(svg) &&
+      /<rect x="[\d.-]+" y="[\d.-]+" width="[\d.-]+" height="[\d.-]+" fill="none" stroke="#1b1b1b"/.test(svg),
+    '')
+  check('adj625b 序号字号 = 倚音字号 × 3/4（用户要求整体缩到 3/4）',
+    Math.abs(BAR_NUMBER_SCALE - 0.75) < 1e-9 &&
+      Math.abs(barNumberFontSize(defaultPageConfig.note_size) - graceFs * 0.75) < 1e-9,
+    `grace=${graceFs} fs=${fs}`)
+  check('adj625b 方框同步按 3/4 缩（框高 = 字号 + 1.125×2 + 0.6；空隙与线宽都已 ×0.75）',
+    Math.abs(barNumberBoxH(defaultPageConfig.note_size) -
+      (fs + 1.5 * 0.75 * 2 + 0.8 * 0.75)) < 1e-9 &&
+      Math.abs(BAR_NUMBER_PAD - 1.125) < 1e-9 && Math.abs(BAR_NUMBER_STROKE - 0.6) < 1e-9,
+    `boxH=${barNumberBoxH(defaultPageConfig.note_size)} pad=${BAR_NUMBER_PAD} stroke=${BAR_NUMBER_STROKE}`)
+  check('adj625b 渲染字号 = 倚音字号 × 0.75（取到 0.1）',
+    new RegExp(`data-barnumber="4"[\\s\\S]{0,400}font-size="${fsSvg}"`).test(svg) &&
+      new RegExp(`data-barnumber="8"[\\s\\S]{0,400}font-size="${fsSvg}"`).test(svg),
+    `fsSvg=${fsSvg}`)
+  // adj625 用户反馈"序号在方框里偏靠上"：必须 `central`（字符中心对齐）——
+  // `middle` 对齐的是 x-height 中线、数字整体偏上；本库增时线 `-`、段层括号一直用 `central`
+  check('adj625 序号在框内垂直居中（dominant-baseline=central，不是 middle）',
+    /data-barnumber="4"[\s\S]{0,400}dominant-baseline="central"/.test(svg) &&
+      !/data-barnumber="4"[\s\S]{0,400}dominant-baseline="middle"/.test(svg),
+    '')
+  check('adj625 关闭时不渲染任何方框序号', !/data-barnumber=/.test(renderScoreToSvg(lay(BAR8, OFF))[0]), '')
+}
+
+/**
+ * adj626（用户要求）：**PDF 改走系统打印（矢量、不开新窗口）**，且
+ * **打印/另存 PDF 的默认文件名 = 第一个描述头 `B:` 的值**（标题）。
+ */
+function runAdj626Tests() {
+  console.log('[149] PDF 走打印 + 默认文件名 = 第一个 B:（adj626）')
+  // ---- ① 命名规则（纯函数）----
+  check('adj626 有 B: ⇒ 用第一个 B: 的值（标题）', printFileNameOf(['排排坐'], '曲子.jps') === '排排坐', printFileNameOf(['排排坐'], '曲子.jps'))
+  check('adj626 多个 B: ⇒ 取第一个（主标题；其余是副标题）', printFileNameOf(['主标题', '副标题'], 'x.jps') === '主标题')
+  check('adj626 没有 B: ⇒ 退回文件名（剥掉 .jps/.md/.txt）',
+    printFileNameOf([], '排排坐.jps') === '排排坐' && printFileNameOf([], '歌.md') === '歌' && printFileNameOf([], 'a.txt') === 'a',
+    printFileNameOf([], '排排坐.jps'))
+  check('adj626 非法字符（\\ / : * ? " < > | 与控制字符）替换为空格并收敛空白',
+    printFileNameOf(['a/b:c*d?e"f<g>h|i'], 'x') === 'a b c d e f g h i' &&
+      printFileNameOf(['  多  空  白  '], 'x') === '多 空 白',
+    printFileNameOf(['a/b:c*d?e"f<g>h|i'], 'x'))
+  check('adj626 都没有 ⇒ 未命名', printFileNameOf([], '') === '未命名' && printFileNameOf(['   '], '  ') === '未命名')
+  check('adj626 超长标题截到 80 字（不撑爆对话框/文件系统）', printFileNameOf(['甲'.repeat(200)], 'x').length === 80)
+
+  // ---- ② 打印期临时改 document.title（用 DOM 桩，Node 里没有 DOM）----
+  {
+    const g = globalThis as unknown as Record<string, unknown>
+    const savedDoc = g.document
+    const savedWin = g.window
+    let printed = 0
+    const fakeDoc = {
+      title: '爱记谱 iJipu - v0.37.0 (2026-09-24 @abc1234)',
+      getElementById: () => null,
+      createElement: () => ({ id: '', className: '', innerHTML: '', setAttribute() {}, appendChild() {} }),
+      body: { classList: { add() {}, remove() {} }, appendChild() {} },
+    }
+    g.document = fakeDoc
+    g.window = { print: () => { printed++ } }
+    try {
+      printPages(['<svg/>'], '排排坐')
+      const during = fakeDoc.title
+      clearPrintRoot()
+      check('adj626 打印期标题 = 默认文件名（浏览器/桌面壳据此给 PDF 起名）', during === '排排坐' && printed === 1, `during=${during} print=${printed}`)
+      check('adj626 打印结束（afterprint 收尾）标题还原为应用标题', fakeDoc.title === '爱记谱 iJipu - v0.37.0 (2026-09-24 @abc1234)', fakeDoc.title)
+      // 不给文件名时不动标题
+      printPages(['<svg/>'])
+      check('adj626 未给文件名 ⇒ 不动标题', fakeDoc.title === '爱记谱 iJipu - v0.37.0 (2026-09-24 @abc1234)', fakeDoc.title)
+      clearPrintRoot()
+    } finally {
+      g.document = savedDoc
+      g.window = savedWin
+    }
+  }
+
+  // ---- ③ 接线（源码级：docStore / 导出面板 / 文案）----
+  const printSrc = String(readFileSync('src/export/print.ts', 'utf8'))
+  const storeSrc = String(readFileSync('src/store/docStore.ts', 'utf8'))
+  const panelSrc = String(readFileSync('src/ui/dock/ExportPanel.tsx', 'utf8'))
+  check('adj626 `printPages` 接受默认文件名 + 收尾还原标题 + `beforeprint` 也补标题（平台自己弹 Ctrl+P 那条路）',
+    /export function printPages\(pages: readonly string\[\], fileName\?: string\)/.test(printSrc) &&
+      /function restoreTitle\(\)/.test(printSrc) &&
+      /restoreTitle\(\)\n\}/.test(printSrc) &&
+      /applyPrintTitle\(getFileName\?\.\(\)\)/.test(printSrc) &&
+      /export function installPrintHooks\(\s*getPages: \(\) => readonly string\[\],\s*getFileName\?: \(\) => string \| undefined,?\s*\)/.test(printSrc),
+    '')
+  check('adj626 `docStore` 用「第一个 B:」当打印文件名（页面与文件名都走同一份状态）',
+    /import \{ printFileNameOfResult \} from '\.\.\/export\/printName'/.test(storeSrc) &&
+      /function currentPrintTitle\(s: DocState\): string \{\s*return printFileNameOfResult\(s\.parseResult, s\.fileName\)/.test(storeSrc) &&
+      /printPages\(pages, currentPrintTitle\(s\)\)/.test(storeSrc) &&
+      /installPrintHooks\(\(\) => currentPrintPages\(get\(\)\), \(\) => currentPrintTitle\(get\(\)\)\)/.test(storeSrc),
+    '')
+  check('adj626 导出面板 PDF 走打印（`printScore()`，与 Ctrl+P 同一条路）',
+    /key: 'pdf',[\s\S]{0,300}run: \(\) => run\('pdf', \(\) => printScore\(\)\)/.test(panelSrc) &&
+      /const printScore = useDocStore\(\(s\) => s\.printScore\)/.test(panelSrc),
+    '')
+  check('adj626 位图 PDF 保留为二级入口（`pdfImg` → exportPdf，不经对话框一键出文件）',
+    /key: 'pdfImg',[\s\S]{0,300}exportPdf\(getPages\(\), baseName, imgScale\)/.test(panelSrc),
+    '')
+  check('adj626 文案讲清两条 PDF 路径（打印=矢量/不开新窗口；图片=位图按清晰度）',
+    /pdfPrintHint:[\s\S]{0,400}另存为 PDF/.test(String(readFileSync('src/brand/copy.ts', 'utf8'))) &&
+      /pdfPrintHint:[\s\S]{0,400}无弹窗拦截/.test(String(readFileSync('src/brand/copy.ts', 'utf8'))),
+    '')
+  check('adj626 面板把提示渲染出来（否则用户不知道要在打印对话框里选「另存为 PDF」）',
+    /\{exportCopy\.pdfPrintHint\}/.test(panelSrc), '')
+}

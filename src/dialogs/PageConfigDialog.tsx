@@ -534,6 +534,27 @@ export function PageConfigDialog({
             <Row label="两端对齐最小小节数" mark={isNonDefault('align_min_bars')}>
               <NumInput label="" value={draft.align_min_bars} onChange={(v) => updateDraft({ align_min_bars: v })} />
             </Row>
+            {/* adj625（用户要求）：**方框小节序号**——复选框开关 + 序号的"每隔几个小节"。
+                位置口径：画在小节**左侧小节线下方**（行首隐藏小节线 ⇒ 边距线位置；
+                多声部块首 ⇒ 大括号与音符之间），字号与音符注释一致。 */}
+            <Row label="显示小节计数" mark={isNonDefault('showBarCount')}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={draft.showBarCount === true}
+                  onChange={(e) => updateDraft({ showBarCount: e.target.checked })}
+                />
+                在小节线下方显示带方框的小节序号
+              </label>
+            </Row>
+            <Row label="序号间隔" mark={isNonDefault('barCountInterval')}>
+              <NumInput
+                label="小节"
+                range={RANGE.barCountInterval}
+                value={draft.barCountInterval}
+                onChange={(v) => updateDraft({ barCountInterval: Math.round(v) })}
+              />
+            </Row>
             {tabNonDefaultCount > 0 && (
               <div className="pcfg-note pcfg-def-legend">
                 <span className="pcfg-def-mark on" aria-hidden="true">*</span>

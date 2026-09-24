@@ -493,13 +493,19 @@ export const exportCopy = {
   svgLabel: 'SVG 矢量图',
   pngLabel: 'PNG 高清图片',
   jpgLabel: 'JPG 图片（白底）',
-  pdfLabel: 'PDF 文档（A4）',
+  // adj626（用户要求）：PDF 改走**系统打印 → 另存为 PDF**（矢量、放大不糊），
+  // 不再默认用"SVG 栅格化内嵌"的位图 PDF；位图那份保留为二级入口（无需对话框、一键出文件）。
+  pdfLabel: 'PDF 文档（打印·矢量）',
+  pdfImageLabel: 'PDF 图片（位图）',
+  pdfPrintHint:
+    'PDF：调用系统打印对话框 → 目标选「另存为 PDF」。矢量输出、放大不糊，且不开新窗口（无弹窗拦截）；' +
+    '默认文件名取谱面第一个 B:（标题）。需要不经对话框直接拿文件时，用「PDF 图片」按上面的清晰度导出。',
   midiLabel: 'MIDI 音频（分轨）',
   wavLabel: 'WAV 音频（高保真）',
   mp3Label: 'MP3 音频（体积小）',
   jpsLabel: 'iJipu 源文件',
   scaleLabel: '图片清晰度',
-  scaleHint: '适用于 PNG / JPG / PDF',
+  scaleHint: '适用于 PNG / JPG / PDF 图片',
   busy: '导出中…',
   /** 有语法错误时图片/PDF 导出的拦截提示 */
   blockedByError: '存在语法错误，无法导出。请先修正脚本。',

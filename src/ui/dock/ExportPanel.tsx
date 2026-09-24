@@ -24,7 +24,7 @@ import { exportSvg, exportPng, exportJpg, exportPdf } from '../../export/export'
 import { createHqCache, resolveHqBank } from '../../playback/spessaCache'
 import { getHqLibrary, firstEnabledInstrumentRef } from '../../playback/spessaSynthBackend'
 
-type ExportKey = 'svg' | 'png' | 'jpg' | 'pdf' | 'midi' | 'wav' | 'mp3' | 'jps'
+type ExportKey = 'svg' | 'png' | 'jpg' | 'pdf' | 'pdfImg' | 'midi' | 'wav' | 'mp3' | 'jps'
 
 /** 下载字节（Blob + 临时 <a>） */
 function downloadBytes(bytes: Uint8Array, name: string, type: string) {
@@ -42,7 +42,8 @@ const JOB_LABEL: Record<ExportKey, string> = {
   svg: 'SVG 矢量图',
   png: 'PNG 图片',
   jpg: 'JPG 图片',
-  pdf: 'PDF 文档',
+  pdf: 'PDF（打印为 PDF）',
+  pdfImg: 'PDF 图片（位图）',
   midi: 'MIDI 音频',
   wav: 'WAV 音频',
   mp3: 'MP3 音频',
@@ -57,6 +58,8 @@ export function ExportPanel() {
   // adj354：@@ 恢复默认音色——无 Y 时用试听音色列表第一个启用音色（MIDI/音频导出与试听一致）
   const playbackHqEnabled = useUiStore((s) => s.playbackHqEnabled)
   const setExportJob = useUiStore((s) => s.setExportJob)
+  // adj626：PDF 走打印（与 Ctrl+P / 菜单「打印」同一条路：同一份页面 + 同一个默认文件名）
+  const printScore = useDocStore((s) => s.printScore)
   const defaultInstrumentRef = useMemo(() => firstEnabledInstrumentRef(playbackHqEnabled), [playbackHqEnabled])
 
   const [busy, setBusy] = useState<ExportKey | null>(null)
@@ -120,8 +123,22 @@ export function ExportPanel() {
     },
     { key: 'png', label: exportCopy.pngLabel, ext: '.png', run: () => run('png', async () => exportPng(getPages(), baseName, imgScale)) },
     { key: 'jpg', label: exportCopy.jpgLabel, ext: '.jpg', run: () => run('jpg', async () => exportJpg(getPages(), baseName, imgScale)) },
-    // adj411：直接生成 .pdf 并下载（不再开新窗口 → 无「浏览器拦截新窗口」）
-    { key: 'pdf', label: exportCopy.pdfLabel, ext: '.pdf', run: () => run('pdf', () => exportPdf(getPages(), baseName, imgScale)) },
+    {
+      // adj626（用户要求）：PDF 改走**系统打印 → 另存为 PDF**——矢量输出、放大不糊；
+      // 打印走**当前窗口**（`window.print()`），不开新窗口 ⇒ 不存在"浏览器拦截新窗口"的问题。
+      // 与 `Ctrl+P` / 菜单「打印」共用 `printScore()`（同一份页面、同一个默认文件名 = 第一个 Z:）。
+      key: 'pdf',
+      label: exportCopy.pdfLabel,
+      ext: '.pdf',
+      run: () => run('pdf', () => printScore()),
+    },
+    {
+      // 位图 PDF 保留为二级入口（不经对话框一键出文件；清晰度跟随上方档位）
+      key: 'pdfImg',
+      label: exportCopy.pdfImageLabel,
+      ext: '.pdf',
+      run: () => run('pdfImg', () => exportPdf(getPages(), baseName, imgScale)),
+    },
     {
       // adj289：MIDI——复用播放序列（含反复展开），多声部每声部一条音轨
       key: 'midi',
@@ -186,6 +203,8 @@ export function ExportPanel() {
           </button>
         ))}
       </div>
+      {/* adj626：说明 PDF 两条路的差别（默认那条走系统打印对话框，故必须讲清怎么选） */}
+      <div className="dock-muted">{exportCopy.pdfPrintHint}</div>
       {hasError && <div className="dock-error">⚠ {exportCopy.errorHint}</div>}
       {error && <div className="dock-error">✗ {error}</div>}
     </div>
