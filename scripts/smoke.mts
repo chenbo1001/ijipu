@@ -5002,10 +5002,11 @@ console.log('[91] equal-duration tuplet (y...) rule (adj395)')
   check('adj395 多声部：组内减时线连成一条', mvTupBeam395 !== undefined && Math.abs(mvTupBeam395.x2 - (mv395[4].x + digitW395 - 1)) < 0.15, mvBeams395.map((b) => `${b.x1}~${b.x2}`).join(' | '))
 }
 
-// ---- 92. 倚音时值与位置规则（adj396） ----
+// ---- 92. 倚音时值与位置规则（adj396；时值口径 adj489/505/507，摆放口径 adj623） ----
 // 用户规范：
-//   ① 倚音**占用主音符的时值**——单个倚音实际时值 = 1/2^(括号内减时线条数 + 1) 拍
-//      （`3[2/]`：主音符 3 为 1 拍、倚音 2 为 1/4 拍 → 先奏 1/4 拍倚音再奏 3/4 拍主音符，合计 1 拍）；
+//   ① 倚音**占用本音符的时值**（adj623：**不向相邻音符借**）——组时值见下（短倚音 adj507、
+//      长倚音 adj505），主音符发声时值 = 本音符总时值 − 组时值
+//      （`3[2/]`：主音符 3 为 1 拍、倚音 2 占 1/4 拍 → 先奏 1/4 拍倚音再奏 3/4 拍主音符，合计 1 拍）；
 //   ② 后倚音同理但排在**末尾**（先主音符 3/4 拍，最后 1/4 拍奏倚音）；
 //   ③ 多倚音各占各自时值依次排列（`3[3/2/]` = 1/4 + 1/4 倚音，主音符余 1/2 拍）；
 //   ④ **增时线/附点后可写后倚音**（`3 -[h5/]` / `3.[h5/]`）：总时值 = 主音符总时值（2 拍 / 1.5 拍），
@@ -5025,13 +5026,13 @@ console.log('[92] grace note timing & position (adj396)')
   check('adj396 解析：`3 -[h5/]` 增时线后写后倚音（音符增时 1 拍 + 后倚音）', gB92[0].augmentCount === 1 && gB92[0].gracenotes?.after === true && gB92[0].gracenotes?.notes[0].pitch === 5, JSON.stringify(gB92[0]))
   const gC92 = toks92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3.[h5/] 3 .[h5/] |\n')
   check('adj396 解析：独立附点归前音符（`3 .[h5/]` 等价 `3.[h5/]`）', gC92[0].dots === 1 && gC92[1].dots === 1 && gC92[1].gracenotes?.after === true, `dots=${gC92.map((t) => t.dots).join(',')}`)
-  // adj489：旧版 `graceSum > total` 告警已删除（现在倚音不够时**向邻居借**）。
-  // 顺带：主音符时长较短时仍**不报警**，改为演奏时智能借时。
+  // adj489：旧版 `graceSum > total` 告警已删除（倚音占用主音符的时值，adj623 后**不向邻居借**）。
+  // 顺带：主音符时长较短时仍**不报警**，改为演奏时按本音符的时值匀。
   const rOver92 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3,//[2] 1 |\n')
   const over92 = rOver92.errors.find((e) => e.message.includes('倚音总时值'))
-  check('adj489 不再因倚音总时值>主音符而告警（借用机制接管）', over92 === undefined, JSON.stringify(rOver92.errors.map((e) => e.message)))
+  check('adj489 不再因倚音总时值>主音符而告警（改为从本音符时值里匀）', over92 === undefined, JSON.stringify(rOver92.errors.map((e) => e.message)))
 
-  // ---- ② 演奏时值（60 BPM：1 拍 = 1000ms）adj489：短倚音按组时值、组内均分；长倚音主音/2；不够时**向前/后借** ----
+  // ---- ② 演奏时值（60 BPM：1 拍 = 1000ms）adj489：短倚音按组时值、组内均分；长倚音本体因子；**都吃本音符的时值** ----
   /** 按发生时刻排序的事件 [{at, dur, pitch}] */
   const evs92 = (code: string) => {
     const r = parseJps(code)
@@ -5044,7 +5045,8 @@ console.log('[92] grace note timing & position (adj396)')
   //   ⇒ `3[2/]` = 1/4 拍（主音符 1 拍）、`3/[2/]` = 1/8 拍（主音符 1/2 拍）
   const g250 = (1 / 4) * BEAT_MS // 1/4 拍 = 250ms（主音符无减时线 + 倚音 1 条）
   const g125 = (1 / 8) * BEAT_MS // 1/8 拍 = 125ms（主音符有减时线 + 倚音 1 条；或主音符无 + 倚音 2 条）
-  const g625 = (1 / 16) * BEAT_MS // 1/16 拍 = 62.5ms（借用断言里"缺的 1/16 拍"）
+  const g625 = (1 / 16) * BEAT_MS // 1/16 拍 = 62.5ms（`6,////` 这种极短主音符的整段本体时值）
+  const g3125 = (1 / 32) * BEAT_MS // 1/32 拍 = 31.25ms（本体 1/16 拍的倚音上限 = 本体的一半）
 
   // 单短倚音：主音符 1 拍（无减时线）⇒ 组时值 1/4，主音符余 3/4
   const q1 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[2/] 1 2 3 |\n')
@@ -5094,40 +5096,42 @@ console.log('[92] grace note timing & position (adj396)')
     Math.abs(qLm.ev[2].atMs - 500) < 1 && Math.abs(qLm.ev[2].durationMs - 500) < 1,
     qLm.ev.slice(0, 3).map((e) => `${e.atMs}+${e.durationMs}`).join(' '))
 
-  // **借用（adj489；adj506 后触发条件变窄）**：主音符时长 < 倚音组时值 → 向前（前倚音）/ 后（后倚音）借；
-  // 借走的量从被借的那个主音符事件里扣，**两主音符总时值不变**（总时值守恒）。
-  // adj506 把短倚音组时值减半（`2/` 由 1/4 → 1/8 拍）⇒ 要触发借，主音符必须**短于 1/8 拍**：
-  // 这里用四条减时线的主音符（`6,////` = 1/16 拍），组时值 1/8 > 1/16 ⇒ 缺 1/16 ⇒ 从前一个主音符借。
+  // adj623（用户规范）：**前倚音占用本音符的时值**——倚音从**本音符的拍点**起奏、主音符顺延，
+  // 时值从本音符自己里匀（不再向前一个音符借、不再"抢在拍点之前"）。
+  // adj624（用户规范）再补一条时值上限：本体 < 1/2 拍时倚音 = 本体的 1/2
+  // ⇒ `6,////`（本体 1/16 拍）的倚音是 **1/32 拍**（adj507 会算成 1/8 拍 = 把整个音符吃光），
+  // 前一个 `5 -` **照常奏满 2 拍**，本音符总时值不变（倚音 1/32 + 主音符 1/32）。
   const qB = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 5 - 6,////[2/] 1 |\n')
-  check('adj508 短前倚音向**前一个主音符**借整段窗口（拍点前 1/8 拍），主音符稳落拍点',
+  check('adj624 极短主音符（本体 1/16 拍）⇒ 倚音 = 本体的一半（1/32 拍），主音符余 1/32 拍',
     qB.ev.length >= 4 &&
-    Math.abs(qB.ev[0].durationMs - (2 * BEAT_MS - g125)) < 1 && // 前主音 2000 → 1875（让出整个倚音窗口）
-    Math.abs(qB.ev[1].atMs - (2 * BEAT_MS - g125)) < 1 && // 倚音起于 1875
-    Math.abs(qB.ev[1].durationMs - g125) < 1 && // 倚音占满 1/8 拍窗口
-    Math.abs(qB.ev[2].atMs - 2 * BEAT_MS) < 1 && // 主音符**正好在拍点** 2000
-    Math.abs(qB.ev[2].durationMs - g625) < 1, // 且保持原时值 1/16 拍
+    Math.abs(qB.ev[0].durationMs - 2 * BEAT_MS) < 1 && // 前主音 `5 -` 保持 2000（不向前一个音符借）
+    Math.abs(qB.ev[1].atMs - 2 * BEAT_MS) < 1 && // 倚音仍从本音符的拍点 2000 起
+    Math.abs(qB.ev[1].durationMs - g3125) < 1 && // 压缩到本体的一半 = 1/32 拍
+    Math.abs(qB.ev[2].atMs - (2 * BEAT_MS + g3125)) < 1 && // 主音符顺延到倚音之后
+    Math.abs(qB.ev[2].durationMs - g3125) < 1 && // 主音符余 1/32 拍（不再被挤成 0 拍）
+    Math.abs(qB.ev[3].atMs - (2 * BEAT_MS + g625)) < 1, // 本音符总时值不变 ⇒ 后一个音仍在其槽位末尾
     qB.ev.slice(0, 4).map((e) => `${Math.round(e.atMs)}+${Math.round(e.durationMs)}`).join(' '))
 
-  // ---- adj508（用户要求）：**短前倚音总是"抢在拍前"**，保证主音符总在拍点上 ----
+  // ---- adj623（用户规范）：**前倚音占用本音符的时值**（前/长前倚音同一口径） ----
   {
-    // 有前一个音 ⇒ 走"抢拍前"：倚音占 [1000−250, 1000]，主音符 3 整拍落在 1000，前一个 1 缩短到 750
+    // 短前倚音：倚音占本音符开头 1/4 拍，主音符 3/4 拍顺延；**前一个 1 奏满整拍**、后一个 1 仍在 2000
     const a1 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 3[2/] 1 |\n')
-    check('adj508 短前倚音抢拍前：`1 3[2/] 1` ⇒ 前音 0+750、倚音 750+250、主音 **1000+1000**（整拍在拍点）',
-      Math.abs(a1.ev[0].durationMs - 750) < 1 &&
-        Math.abs(a1.ev[1].atMs - 750) < 1 && Math.abs(a1.ev[1].durationMs - 250) < 1 &&
-        Math.abs(a1.ev[2].atMs - 1000) < 1 && Math.abs(a1.ev[2].durationMs - 1000) < 1 &&
+    check('adj623 短前倚音占本音符开头：`1 3[2/] 1` ⇒ 前音 0+1000、倚音 1000+250、主音 1250+750、后音 2000',
+      Math.abs(a1.ev[0].durationMs - 1000) < 1 &&
+        Math.abs(a1.ev[1].atMs - 1000) < 1 && Math.abs(a1.ev[1].durationMs - 250) < 1 &&
+        Math.abs(a1.ev[2].atMs - 1250) < 1 && Math.abs(a1.ev[2].durationMs - 750) < 1 &&
         Math.abs(a1.ev[3].atMs - 2000) < 1,
       a1.ev.slice(0, 4).map((e) => `${Math.round(e.atMs)}+${Math.round(e.durationMs)}`).join(' '))
-    // 长前倚音**仍占拍点**（主音符后移）：倚音 1000+500、主音符 1500+500 —— 与短倚音相反，符合规范
+    // 长前倚音本就是"占本音符时值"（adj396 起的口径）⇒ 行为零变化：倚音 1000+500、主音符 1500+500
     const a2 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 3[2] 1 |\n')
-    check('adj508 长前倚音仍占拍点（主音符后移）：`1 3[2] 1` ⇒ 倚音 1000+500、主音 1500+500',
+    check('adj623 长前倚音同口径（占本音符时值）：`1 3[2] 1` ⇒ 前音 0+1000、倚音 1000+500、主音 1500+500',
       Math.abs(a2.ev[0].durationMs - 1000) < 1 &&
         Math.abs(a2.ev[1].atMs - 1000) < 1 && Math.abs(a2.ev[1].durationMs - 500) < 1 &&
         Math.abs(a2.ev[2].atMs - 1500) < 1 && Math.abs(a2.ev[2].durationMs - 500) < 1,
       a2.ev.slice(0, 4).map((e) => `${Math.round(e.atMs)}+${Math.round(e.durationMs)}`).join(' '))
     // 后倚音不受影响（占自己主音符的尾部）
     const a3 = evs92('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 3[h2/] 1 |\n')
-    check('adj508 短后倚音不受影响：`1 3[h2/] 1` ⇒ 主音 1000+750、倚音 1750+250',
+    check('adj623 短后倚音不受影响：`1 3[h2/] 1` ⇒ 主音 1000+750、倚音 1750+250',
       Math.abs(a3.ev[0].durationMs - 1000) < 1 &&
         Math.abs(a3.ev[1].atMs - 1000) < 1 && Math.abs(a3.ev[1].durationMs - 750) < 1 &&
         Math.abs(a3.ev[2].atMs - 1750) < 1 && Math.abs(a3.ev[2].durationMs - 250) < 1,
@@ -9568,7 +9572,7 @@ function runAdj594MeasureBeatsTests() {
       meterWarns('V: 1.0\nB: t\nD: C\nP: 6/8\nQ: 1 2 3 4 5 6 | 1 2 3 4 5 6 |\n').length === 0,
     JSON.stringify(meterWarns('V: 1.0\nB: t\nD: C\nP: 6/8\nQ: 1 2 3 4 5 6 | 1 2 |\n').map((e) => e.message)),
   )
-  // ⑥ 不占拍的元素不能影响合计：&hx（呼吸记号，槽位不变）、括号、渐强渐弱、倚音（借主音符的时值）
+  // ⑥ 不占拍的元素不能影响合计：&hx（呼吸记号，槽位不变）、括号、渐强渐弱、倚音（占用主音符自己的时值）
   check(
     'adj594 `&hx` / `&zkh`+`&ykh` / 渐强渐弱 / 倚音 都不改变小节时值合计',
     meterWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 6,/ 6,. 7,/ 1. &hx | &zkh 1 2 3 4 &ykh | 1< 2 3 4 | 3[2/] - - - |\n').length === 0,
@@ -12557,6 +12561,40 @@ console.log('[119] mordent playback timing (adj502)')
       check('adj507 两个因子相乘（`3/[2//]`：1/2 × 1/8 = 1/16 拍 = 62.5ms、主音符 437.5ms）',
         Math.abs(gShort2[0].durationMs - 62.5) < 1 && Math.abs(gShort2[1].durationMs - 437.5) < 1,
         `${gShort2[0].durationMs}/${gShort2[1].durationMs}`)
+      // ---- adj624（用户规范）：主音符**本体**（不含增时线和附点）< 1/2 拍 ⇒ 倚音时值 = 本体的 1/2 ----
+      // 上限生效后倚音**永远装得进本音符**：`3///`（本体 1/8 拍）的倚音 1/16 拍
+      // （adj507 是 1/8 拍 = 把整个音符吃光、主音符被挤成 0 拍）。
+      const c1 = lg('3//[2/]') // 本体 1/4 拍 → 1/8（= 本体的一半，与 adj507 同值）
+      const c2 = lg('3///[2/]') // 本体 1/8 拍 → 1/16（adj507 是 1/8）
+      const c3 = lg('3////[2/]') // 本体 1/16 拍 → 1/32
+      check('adj624 本体 < 1/2 拍 ⇒ 倚音 = 本体的一半（`3//`→1/8、`3///`→1/16、`3////`→1/32 拍）',
+        Math.abs(c1[0].durationMs - 125) < 1 && Math.abs(c1[1].durationMs - 125) < 1 &&
+        Math.abs(c2[0].durationMs - 62.5) < 1 && Math.abs(c2[1].durationMs - 62.5) < 1 &&
+        Math.abs(c3[0].durationMs - 31.25) < 1 && Math.abs(c3[1].durationMs - 31.25) < 1,
+        [c1, c2, c3].map((e) => `${e[0].durationMs}+${e[1].durationMs}`).join(' / '))
+      // adj624：**增时线与附点不计入本体**——`3 -[2/]`（总 2 拍）、`3.[2/]`（总 1.5 拍）都按本体 1 拍算
+      const c4 = lg('3 -[2/]')
+      const c5 = lg('3.[2/]')
+      check('adj624 增时线/附点不计入本体（`3 -[2/]`、`3.[2/]` 的倚音都是 1/4 拍 = 250ms）',
+        Math.abs(c4[0].durationMs - 250) < 1 && Math.abs(c5[0].durationMs - 250) < 1,
+        `${c4[0].durationMs}/${c5[0].durationMs}`)
+      // adj624：上限与"倚音因子"的关系——本体 1/8 拍的上限是 1/16 拍，1 条/2 条减时线的相乘值
+      // （1/8、1/16）都不低于上限 ⇒ 都落在 1/16 拍上；3 条（相乘 1/32）在上限之下 ⇒ 仍是更短的 1/32。
+      const c6 = lg('3///[2//]')
+      const c6b = lg('3///[2///]')
+      check('adj624 上限与倚音因子并存（`3///[2//]` = 1/16 拍；`3///[2///]` 更短 = 1/32 拍）',
+        Math.abs(c6[0].durationMs - 62.5) < 1 && Math.abs(c6b[0].durationMs - 31.25) < 1,
+        `${c6[0].durationMs}/${c6b[0].durationMs}`)
+      // adj624：前、后倚音**同一把尺子**——后倚音同样吃上限（改动前是 1/8 拍 = 吃掉整个音符）
+      const c7 = lg('3///[h2/]')
+      check('adj624 后倚音同尺子（`3///[h2/]`：主音符 1/16 拍 + 末尾倚音 1/16 拍 = 总 1/8 拍）',
+        Math.abs(c7[0].durationMs - 62.5) < 1 && Math.abs(c7[1].atMs - 62.5) < 1 && Math.abs(c7[1].durationMs - 62.5) < 1,
+        `${c7[0].durationMs}/${c7[1].atMs}+${c7[1].durationMs}`)
+      // adj624：后倚音写在增时线之后时，**位置**在那段之后、**时值**仍按本体 1 拍算
+      const c8 = lg('3 -[h2/]')
+      check('adj624 `3 -[h2/]`：后倚音仍是 1/4 拍（按本体 1 拍算），排在增时线之后 1750ms 处',
+        Math.abs(c8[0].durationMs - 1750) < 1 && Math.abs(c8[1].atMs - 1750) < 1 && Math.abs(c8[1].durationMs - 250) < 1,
+        `${c8[0].durationMs}/${c8[1].atMs}+${c8[1].durationMs}`)
       // ---- adj505：力度（方案 b，只做力度区分）：短倚音 90%、长倚音不变（前/后同尺子）----
       const bg = 1 // 主声部基础 gain
       const v1 = lg('3[2/] 4') // 短前倚音
