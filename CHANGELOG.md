@@ -1,3 +1,53 @@
+## [0.38.0] — 2026-09-24（**方框小节计数** + **PDF 走系统打印为矢量**；MINOR 级）
+
+> 主题：**谱面设置里加两个新项**（方框小节序号的开关/间隔），**PDF 导出改走系统打印 → 另存为 PDF**——拿到矢量、避开弹窗拦截、默认文件名取谱面第一个 `B:`。本轮 2 项（`adj625`/`adj626`）、
+> `E-2026-307`/`308`/`309` 排错，**涉及引擎**（同步 `obsidian-ijipu/vendor/engine` 并升插件 0.16.0 → 0.17.0）。
+
+### 新增
+
+- **方框小节序号：「显示小节计数」+「序号间隔」**（`adj625`，用户要求）—— 在「谱面设置 → 音符布局」底部两个 L2 谱面级项
+  （`showBarCount` 复选框默认关、`barCountInterval` 整数 1–99 默认 4 ⇒ 第 4、8、12、16 小节）。
+  - **位置**（用户四条口径）：① 画在该小节**左侧**那根小节线**正下方**，高度 = 那根线底缘；
+    ② **行首第一个小节**通常不画小节线（隐藏小节线） ⇒ 序号落在**边距线**位置（x = `margin_left`）；
+    ③ **多声部**块首的序号落在**大括号与音符之间那条空隙里**（`braceX` 与 `blockStartX` 中点），高度按**最上面声部**的小节线底缘算；行中间仍画在该线正下方；
+    ④ **字号 = 倚音音符字号 × 3/4**（`max(6×s, note_size × 0.5) × 0.75`，与渲染倚音同一算式），框内空隙与线宽同步 ×0.75。
+  - **不影响排版**（用户原话："显隐不应影响排版"）—— 序号**算在曲部行自己的空间里**：画在小节线底下、落在「曲下间距 `height_quci`（默认 15px）」/
+    「行尾间距 `height_ciqu`（默认 20px）」这段本来就空着的区域内，**不参与行高计算**（行高公式不再加 `barNumberExtraH`；开/关两态音符/词部/小节线/分页**逐项完全一致**，smoke `[148]` 用 `JSON.stringify` 全量对比已钉死）。
+  - **多声部**块的"大括号与音符之间"原本只有 12px（括号占 3px + 框 ≈10px 放不下）—— 开着该选项且块首带序号时自动把留白撑到
+    `barNumberGapNeed`（`boxW + 5`），方框不压括号。
+- **PDF 改走「系统打印 → 另存为 PDF」**（`adj626`，用户要求"使用之前打印 PDF 的方式、但不要弹窗拦截"）——
+  - **导出面板的「PDF 文档（打印·矢量）」**与 `Ctrl+P` / 菜单「打印」同一条路（`printScore()`，调 `window.print()` 在**当前窗口**）。
+    浏览器/桌面壳都把**文档标题**当"另存为 PDF"的默认文件名 ⇒ 打印期把 `document.title` 临时换成 `printNameOf(...)`，`afterprint` / `clearPrintRoot` 还原。
+  - **矢量输出、放大不糊**；且**不开新窗口**（`window.open` 0 次、CDP page 目标 1→1），不存在"弹窗拦截"问题（E-2026-145 / E-2026-301 已证伪该顾虑）。
+  - **默认文件名 = 谱面第一个描述头 `B:`（标题）的值**（用户原话）：纯函数 `printFileNameOf(titles, fileName)` ⇒ 没有 B: 退文件名（剥 `.jps/.md/.txt`）⇒ 还退「未命名」；
+    非法字符（`\ / : * ? " < > |` 与控制字符）替换空格、收敛空白、超长截 80 字。
+  - **位图 PDF 保留为二级入口**「PDF 图片（位图）」：一键出文件，清晰度跟随 2x/4x/6x（不需要过对话框就要文件时用这个）。
+  - 面板底部加了一行说明（点 PDF 文档 → 在打印对话框里目标选「另存为 PDF」），否则用户不知道要点哪里。
+
+### 变更
+
+- `src/export/print.ts` — `printPages(pages, fileName?)` / `installPrintHooks(getPages, getFileName?)`：打印期 `usePrintTitle` 临时改 `document.title`、`restoreTitle` 收尾。
+  名字别用 `use*` 前缀（会被 React Hook 规则误判）。
+- `src/store/docStore.ts` — `currentPrintTitle(s)` = `printFileNameOfResult(s.parseResult, s.fileName)`；
+  `printScore` 与 `installPrintSupport` 都把"取名字"这一项接上去。
+- `docs/USER-GUIDE.md` §七 导出 + §十 疑难：PDF 两条路径说清、FAQ 把"被弹窗拦截"+"文件名不对"两行更新到新口径。
+
+### 验证
+
+- `tsc -b` 0 错 / `npm run lint` 0 error（28 warnings == 基线）/ `npm run build` ✔ / **`npm run smoke` ALL SMOKE TESTS PASSED**。
+- 新增断言（`[148]` 16 条 + `[149]` 12 条）：
+  - adj625：编号/位置/多声部/歌词让位/钳制/`# jps-config` 往返/渲染字号与居中；**开/关两态几何全量逐项一致**（`JSON.stringify`）防排版漂移。
+  - adj626：命名规则 6 条 + **DOM 桩**下真实调 `printPages` 验证标题临时替换与 `afterprint` 还原；docStore/ExportPanel/copy 接线。
+- 引擎 `packages/ijipu-engine/` 5 文件改动 → 已同步 `obsidian-ijipu/vendor/engine`（35/35、0 差异）。
+- 插件 tsc / smoke：**166 passed, 0 failed**（新增 `[3b]` 6 条：frontmatter `ijipu_showBarCount` / `ijipu_barCountInterval` 双向识别，`DEFS` 同步两项）。
+- 应用 `preview:render` 与改动前基线完全一致（`samples/` 的 4 条错是历史样例自带的，stash 对照确认过）。
+
+### 升级
+
+- 想给谱子编号？**「谱面设置 → 音符布局」**勾选「显示小节计数」、按需调「序号间隔」→ 保存设置即可写进 `# jps-config`（谱面自包含、复制给他人显示一致）。
+- 想导出**矢量** PDF？点导出面板的「**PDF 文档（打印·矢量）**」→ 在系统打印对话框里目标选「另存为 PDF」；默认文件名 = 谱面第一个 `B:`。
+- 想要一键出 PDF 文件、不过对话框？用「**PDF 图片（位图）**」（清晰度跟随上方档位）。
+
 ## [0.37.0] — 2026-09-24（倚音时值口径重写：占用本音符时值 + 短倚音"本体 < 1/2 拍取一半"上限；MINOR 级）
 
 > 主题：**"前倚音占用本音符的时值，不向相邻音符借；本体不足半拍时只取本体的一半"**——把
