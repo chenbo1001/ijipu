@@ -6,7 +6,11 @@
  *  - 音符数字/增时线 → note（橙）；小节线/反复记号 → barline（灰蓝）
  *  - 歌词 → lyric（绿）；注释 → comment（暗蓝）；[fenye] → pagebreak（粉）
  *  - & 装饰编码 → decoration（青淡）
+ *  - adj629h：歌词行里的 `{tp … }` **替谱段** → 段内按**曲部颜色**着色（音符/小节线等），
+ *    段头 `{tp` 与 `}` 用行头色标出（它本质是曲部内容，不该整段显示成歌词绿）
  */
+// adj629h：`{tp … }` 段头/段尾识别（与 parser 同一套规则，避免两处口径漂移）
+import { matchSegmentHead, findSegmentEnd } from '@ijipu/engine'
 
 // adj186：Y/S 描述头与其它行头同色（与 parser HEADER_KEYS 一致：V/B/Z/D/P/J/Y/S）
 const HEADER_KEYS = 'QCBZD PJVYS'.replace(/\s/g, '')
@@ -85,9 +89,38 @@ function highlightMusicContent(content: string): string {
   return out
 }
 
-/** 高亮 C 行内容 */
-function highlightLyricContent(content: string): string {
-  return span('hl-lyric', content)
+/**
+ * 高亮 C 行内容。
+ *
+ * adj629h（用户问）：歌词行里的 `{tp … }` 是**替谱段**——段内是曲部内容，按**曲部规则着色**
+ * （音符 `hl-note`、小节线 `hl-barline` 等，与 Q 行同一套颜色）；歌词文字仍是 `hl-lyric`；
+ * 段头 `{tp` 与收尾 `}` 用行头色标出来，一眼能看出"这里进了替谱段"。
+ */
+function highlightLyricContent(content: string, rs = 0, re = content.length): string {
+  const parts: string[] = []
+  /** 只输出 [rs, re) 这一段（折行变体按视觉行切片调用）；段内音乐片段按需重新着色 */
+  const push = (cls: string | null, from: number, to: number): void => {
+    const a = Math.max(from, rs)
+    const b = Math.min(to, re)
+    if (b <= a) return
+    parts.push(cls === null ? highlightMusicContent(content.slice(a, b)) : span(cls, content.slice(a, b)))
+  }
+  let i = 0
+  while (i < content.length) {
+    const at = content.indexOf('{', i)
+    if (at < 0 || matchSegmentHead(content, at) !== 'tp') break
+    let k = at + 3
+    while (k < content.length && (content[k] === ' ' || content[k] === '\t')) k++
+    const end = findSegmentEnd(content, k)
+    if (end < 0) break
+    push('hl-lyric', i, at)
+    push('hl-line-header', at, k) // `{tp` + 其后的空白
+    push(null, k, end) // 段内 = 曲部着色
+    push('hl-line-header', end, end + 1) // `}`
+    i = end + 1
+  }
+  push('hl-lyric', i, content.length)
+  return parts.join('')
 }
 
 /** 整份代码高亮为 HTML；errLines 中的行号（1-based）整行红底标记；
@@ -284,7 +317,8 @@ export function highlightCodeWrapped(
           }
           inner = out
         } else if (m[1] === 'C') {
-          inner = span('hl-lyric', rest.slice(rs, re))
+          // adj629h：歌词行里的 `{tp … }` 段内按**曲部颜色**着色（此前整行一律歌词绿）
+          inner = highlightLyricContent(rest, rs, re)
         } else {
           inner = esc(rest.slice(rs, re))
         }

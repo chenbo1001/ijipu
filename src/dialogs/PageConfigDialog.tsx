@@ -15,7 +15,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
-import { clampEditorFontSize, defaultPageConfig, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE, nonDefaultConfigKeys, SCORE_FONT_OPTIONS, SEGMENT_ROW_GAP_DEFAULT } from '@ijipu/engine'
+import { clampEditorFontSize, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE, nonDefaultConfigKeys, SCORE_FONT_OPTIONS, SEGMENT_ROW_GAP_DEFAULT } from '@ijipu/engine'
+// adj629x：恢复默认的草稿**整份替换**（纯函数，见该文件头的踩坑说明）
+import { draftAfterReset } from './pageConfigReset'
 import { THEMES, type ThemeMode } from '../brand/themes'
 import { uiCopy, numCopy } from '../brand/copy'
 import { SoundBankPanel } from './SoundBankPanel'
@@ -84,6 +86,10 @@ const TAB_CONFIG_KEYS: Partial<Record<TabId, readonly string[]>> = {
     'noteSpaceLayout',
     'lianyinxian_type',
     'align_min_bars',
+    // adj629z：方框小节序号两项（adj625 加的行）此前漏登记 —— 漏了只是"当页非默认计数"少算这两项
+    // （红色 `*` 仍会亮，图例可能因此不出现），补上并由 smoke 反向断言守住。
+    'showBarCount',
+    'barCountInterval',
   ],
   font: [
     'miaoshu_font',
@@ -256,6 +262,20 @@ export function PageConfigDialog({
     // adj600：记下"这份值是本面板写进 store 的" ⇒ 上面的重新取种子 effect 不会把用户正在改的内容清掉
     lastAppliedRef.current = next
     setPageConfig(next, false) // 预览（临时应用，不持久化）；保存才持久化
+  }
+
+  /**
+   * adj629x：**恢复默认 = 整份替换草稿**（不能走 `updateDraft` 的浅合并）。
+   * `defaultConfigForReset()` 是"默认值 + 移除可选字段"——浅合并进旧草稿时，旧草稿里的
+   * `metaPos`/`heights`/`segmentRowGap`… 会原样留下，保存时又写回 `# jps-config`
+   * （用户复报："点击恢复默认时，还是没有清空"）。语义见 `dialogs/pageConfigReset.ts`。
+   */
+  const resetDraft = () => {
+    const next = draftAfterReset(draft)
+    setDraft(next)
+    lastAppliedRef.current = next
+    // 预览态应用默认值（不落盘）；`snapRef` 保持"打开时快照"不动 —— 它是保存时的差量基线
+    setPageConfig(next, false)
   }
 
   // adj315：取消（X/遮罩/Esc）未保存 → 恢复快照到 store（预览层），丢弃 draft
@@ -501,6 +521,15 @@ export function PageConfigDialog({
                   onChange={(v) => updateDraft({ segmentRowGap: { ...draft.segmentRowGap, dsb: clampGap(v) } })}
                 />
               </Row>
+              {/* adj629：替谱段（歌词行里的 `{tp … }`）与**它所属那条歌词行**的间距 */}
+              <Row label={uiCopy.segmentRowGapTpLabel} mark={isNonDefault('segmentRowGap')}>
+                <NumInput
+                  label=""
+                  range={RANGE.segmentRowGap_tp}
+                  value={draft.segmentRowGap?.tp ?? SEGMENT_ROW_GAP_DEFAULT.tp}
+                  onChange={(v) => updateDraft({ segmentRowGap: { ...draft.segmentRowGap, tp: clampGap(v) } })}
+                />
+              </Row>
             </div>
             <div className="pcfg-note">
               {uiCopy.segmentRowGapHint}
@@ -679,9 +708,7 @@ export function PageConfigDialog({
           <div className="modal-foot pcfg-foot">
           <button
             className="btn"
-            onClick={() => {
-              updateDraft({ ...defaultPageConfig })
-            }}
+            onClick={resetDraft}
           >
             恢复默认
           </button>

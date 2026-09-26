@@ -105,7 +105,10 @@ export const uiCopy = {
   segmentRowGapGroup: '临时段',
   segmentRowGapBzLabel: 'bz 段上下间距',
   segmentRowGapDsbLabel: 'dsb 段上下间距',
-  segmentRowGapHint: '临时叠加段（{bz … } / {dsb … }）与主旋律之间的纵向间距（px）。默认 22（≈ 1.7×字号）。',
+  // adj629e：替谱行与其**下方歌词行**的间距
+  segmentRowGapTpLabel: '替谱行与下方歌词间距',
+  segmentRowGapHint:
+    '临时叠加段的纵向间距（px）。`bz`/`dsb` 是段层与主旋律的间距；`tp`（替谱段 `{tp … }`）= **替谱行与其下方那条歌词行的间距**——拖它上下移动的是替谱层本身（下方歌词行不动）；歌词行 1 的虚线管「歌词区↔曲部」，歌词行 2 及以后的虚线管「歌词行之间」。默认：bz/dsb 22、tp 14。',
   // adj479：多声部块内「声部行间距」——此前只有预览虚线可拖（设置里没有输入框，用户报"无法调整"）
   shengbuGapLabel: '声部间距',
 } as const

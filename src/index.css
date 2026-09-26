@@ -1024,8 +1024,14 @@ body {
 
 /* 排版辅助虚线（adj7） */
 /* adj244：预览层把 SVG 自带的页面白底 rect 透明化（白底由 .score-page 提供），
-   否则 SVG 层（z-index:1）的白底会盖住虚线层——虚线不可见但仍可命中 */
-.preview-svg rect:first-child {
+   否则 SVG 层（z-index:1）的白底会盖住虚线层——虚线不可见但仍可命中。
+   adj629n（用户报「伴奏里的 `0/ 2/` 预览里下面没有减时线」）：**只能按 `[data-page-bg]` 选**。
+   原来写的是 `.preview-svg rect:first-child`——那个选择器匹配的是"**任意父元素**下的第一个 rect"：
+   段层（`{bz}`/`{dsb}`/`{tp}`）整层包在一个 `<g>` 里，而该 `<g>` 的**第一个子元素就是第一根减时线**，
+   于是它被一起填成透明（同一层里第二根线却正常）。下面保留 `> svg > rect:first-child`
+   作为兜底（老渲染产物没有标记时也能透明化，且不会误伤 `<g>` 内的线）。 */
+.preview-svg [data-page-bg],
+.preview-svg > svg > rect:first-child {
   fill: transparent;
 }
 .guide-line {

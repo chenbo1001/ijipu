@@ -111,7 +111,11 @@ export function PreviewPane() {
     const cfg = lay.config
     const w1eq = measureFont('1 = ', cfg.miaoshu_size, cfg.miaoshu_font)
     const wAcc = measureFont('♯', cfg.miaoshu_size * (3 / 4), cfg.miaoshu_font)
-    return { layout: lay, pagesHtml: renderScoreToSvg(lay, { w1eq, wAcc }), summary: sum }
+    // adj629v：描述头 D 行「1 = B」与 J 行「♩= 62」的 = 号要对齐 ⇒ 按实测「1 」/「♩」宽摆节拍行
+    // （估算宽在真实字体下可能差几 px）
+    const w1sp = measureFont('1 ', cfg.miaoshu_size, cfg.miaoshu_font)
+    const wTempo = measureFont('♩', cfg.miaoshu_size, cfg.miaoshu_font)
+    return { layout: lay, pagesHtml: renderScoreToSvg(lay, { w1eq, wAcc, w1sp, wTempo }), summary: sum }
   }, [parseResult, pageConfig, defaultInstrumentRef])
 
   // adj291：布局后把「音符 index → 物理页」映射回填 store，供编辑器光标联动对齐音符 id.page（自动分页一致）
@@ -360,8 +364,9 @@ export function PreviewPane() {
       // adj413：位移是浮点（鼠标位移 ÷ 预览缩放），取整后再写入——px 一律整数（与设置界面一致）
       const val = Math.round(clamp(drag.startVal + delta, min, max))
       // adj432：段层间距写在 `PageConfig.segmentRowGap.{bz,dsb}` 子对象里（不是顶层字段）
-      if (drag.spec.key === 'segmentRowGap_bz' || drag.spec.key === 'segmentRowGap_dsb') {
-        const which = drag.spec.key === 'segmentRowGap_bz' ? 'bz' : 'dsb'
+      // adj629：加 `tp`（替谱段与所属歌词行的间距）——三者同为子对象里的键
+      if (drag.spec.key.startsWith('segmentRowGap_')) {
+        const which = drag.spec.key.slice('segmentRowGap_'.length) as 'bz' | 'dsb' | 'tp'
         const cur = pageConfigRef.current.segmentRowGap ?? {}
         setPageConfig({ ...pageConfigRef.current, segmentRowGap: { ...cur, [which]: val } })
         return
@@ -544,11 +549,14 @@ export function PreviewPane() {
                         {(() => {
                           const isSeg = rg.segType !== undefined
                           const isUpper = rg.segLayer === 'upper'
-                          // 段层：拖 segmentRowGap.{bz,dsb}；bz 只有上层，dsb 有上下层（拖离中线 = 增大间距）
+                          // 段层：拖 segmentRowGap.{bz,dsb,tp}；bz 只有上层，dsb 有上下层（拖离中线 = 增大间距）
+                          // adj629：tp（替谱段）画在所属歌词行上方，拖它调"与那条歌词行的间距"
                           const key = isSeg
                             ? rg.segType === 'bz'
                               ? 'segmentRowGap_bz'
-                              : 'segmentRowGap_dsb'
+                              : rg.segType === 'tp'
+                                ? 'segmentRowGap_tp'
+                                : 'segmentRowGap_dsb'
                             : ri === 0
                               ? 'body_margin_top'
                               : rg.voiceIdx > 0
@@ -557,11 +565,14 @@ export function PreviewPane() {
                                   ? 'height_ciqu_lyric'
                                   : 'height_ciqu'
                           // 段层上层往上拖 = 增大间距（invert）；dsb 下层往下拖 = 增大间距（不 invert）
+                          // adj629e：替谱层挂在其下方歌词行之上，`tp` 越大层越高 ⇒ 往上拖增大（同 isUpper）
                           const invert = isSeg && isUpper
                           const startVal = isSeg
-                            ? (rg.segType === 'bz'
-                                ? (pageConfig.segmentRowGap?.bz ?? SEGMENT_ROW_GAP_DEFAULT.bz)
-                                : (pageConfig.segmentRowGap?.dsb ?? SEGMENT_ROW_GAP_DEFAULT.dsb))
+                            ? rg.segType === 'bz'
+                              ? (pageConfig.segmentRowGap?.bz ?? SEGMENT_ROW_GAP_DEFAULT.bz)
+                              : rg.segType === 'tp'
+                                ? (pageConfig.segmentRowGap?.tp ?? SEGMENT_ROW_GAP_DEFAULT.tp)
+                                : (pageConfig.segmentRowGap?.dsb ?? SEGMENT_ROW_GAP_DEFAULT.dsb)
                             : ri === 0
                               ? pageConfig.body_margin_top
                               : rg.voiceIdx > 0
@@ -582,7 +593,9 @@ export function PreviewPane() {
                               onPointerDown={(e) => startDrag({ key, dir: 'v', invert }, e, startVal)}
                               title={
                                 isSeg
-                                  ? `${rg.segType === 'bz' ? '临时伴奏' : '临时多声部'}${isUpper ? '上层' : '下层'}间距（拖动调整）`
+                                  ? rg.segType === 'tp'
+                                    ? '替谱段（第 k 段歌词 = 第 k 遍）与所属歌词行的间距（拖动调整）'
+                                    : `${rg.segType === 'bz' ? '临时伴奏' : '临时多声部'}${isUpper ? '上层' : '下层'}间距（拖动调整）`
                                   : ri === 0
                                     ? '曲部上间距（与描述头间距，拖动调整）'
                                     : rg.voiceIdx > 0
@@ -608,15 +621,18 @@ export function PreviewPane() {
                             }}
                             onPointerDown={(e) =>
                               startDrag(
-                                { key: k === 0 ? 'height_quci' : 'height_cici', dir: 'v' },
+                                // adj629g：按键**歌词行序号**选目标：第 1 行 = 歌词区↔曲部（quci），
+                                // 第 2 行及以后 = 歌词行之间（cici）。不能按"在本行里的序号"判——
+                                // 替谱层插进来后，第 2 行歌词会被归到替谱那一行、序号又变 0（用户报）。
+                                { key: (lr.line ?? k) === 0 ? 'height_quci' : 'height_cici', dir: 'v' },
                                 e,
-                                k === 0 ? pageConfig.height_quci : pageConfig.height_cici,
+                                (lr.line ?? k) === 0 ? pageConfig.height_quci : pageConfig.height_cici,
                               )
                             }
                             title={
-                              k === 0
+                              (lr.line ?? k) === 0
                                 ? '歌词行 1（与曲部间距，拖动调整）'
-                                : `歌词行 ${k + 1} 间距（与上一行歌词，拖动调整）`
+                                : `歌词行 ${(lr.line ?? k) + 1} 间距（与上一行歌词，拖动调整）`
                             }
                           />
                         ))}

@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, slideExtraW, slideGlyphInk, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, measureBeatsOf, meterBeatsOf, inlineMeterBeats } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, slideExtraW, slideGlyphInk, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -27,8 +27,8 @@ import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } f
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
 import { mordentOf, mordentPlan, mordentShortMs, neighborDegree, MORDENT_SYMBOLS, ORNAMENT_SHORT_MIN_MS, ORNAMENT_SHORT_MAX_MS } from '@ijipu/engine/playback/ornaments.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, beamBottomY, octaveTopY, digitBottomY, BARLINE_DOT_R, BARLINE_DOT_OFF, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP } from '@ijipu/engine/layout/spacing.ts'
-import { clampMetaPos } from '@ijipu/engine/layout/metaAnchors.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, TP_BRACKET_GAP } from '@ijipu/engine/layout/spacing.ts'
+import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 import type { BarlineType } from '@ijipu/engine/types.ts'
 import { computeBeamsForTest } from '@ijipu/engine/render/index.ts'
 // adj458：波音/滑音/延长记号的矢量修饰符（生成常量 + 墨迹宽高比；摆放口径经渲染端到端断言）
@@ -37,6 +37,8 @@ import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shor
 import { highlightCode } from '../src/editor/highlight.ts'
 import { highlightCodeWrapped } from '../src/editor/highlight.ts'
 import { HEADER_HINTS, filterHeaderHints, BARLINE_MODIFIER_HINTS, NOTE_MODIFIER_HINTS, isBarlineModifierContext, filterModifierHints } from '../src/editor/completions.ts'
+// adj629x：设置面板「恢复默认」的草稿语义（整份替换；浅合并会把可选字段留下）
+import { draftAfterReset } from '../src/dialogs/pageConfigReset.ts'
 import {
   createHistoryState,
   recordEdit,
@@ -939,6 +941,68 @@ check('writeJpsConfig 原位更新已有行（margin_top=200，不重复追加�
 // 损坏 JSON 忽略（回退默认）
 const badCfg = mergeJpsConfig('V: 1.0\n# jps-config:{bad json\nQ: 1 2 3 4 |\n', null)
 check('损坏 # jps-config 静默回退默认', badCfg.margin_top === defaultPageConfig.margin_top, `mt=${badCfg.margin_top}`)
+
+// ---- 16b. adj629s「恢复默认」= 默认值 + **移除可选字段**（用户报：恢复默认后 # jps-config 还剩 metaPos） ----
+console.log('[16b] reset-to-default clears optional config fields (adj629s)')
+{
+  const reset = defaultConfigForReset()
+  check('adj629s 恢复默认**不含任何可选字段**（metaPos/heights/segmentRowGap/lyricShrink/showInstrument）',
+    OPTIONAL_CONFIG_FIELDS.every((k) => !(k in (reset as unknown as Record<string, unknown>))),
+    JSON.stringify({ optional: [...OPTIONAL_CONFIG_FIELDS], inReset: OPTIONAL_CONFIG_FIELDS.filter((k) => k in (reset as unknown as Record<string, unknown>)) }))
+  check('adj629s 恢复默认的其余字段 == 代码默认（逐项相等）',
+    Object.keys(defaultPageConfig).every((k) => (reset as unknown as Record<string, unknown>)[k] === (defaultPageConfig as unknown as Record<string, unknown>)[k]) &&
+      Object.keys(reset).length === Object.keys(defaultPageConfig).length,
+    JSON.stringify({ reset: Object.keys(reset).length, def: Object.keys(defaultPageConfig).length }))
+  check('adj629s 恢复默认 ⇒ 差量写入为空（没有"比默认多出来的项"）', nonDefaultConfigKeys(reset).length === 0, JSON.stringify(nonDefaultConfigKeys(reset)))
+  // 用户原例：谱面里已有 metaPos（拖过描述头），点「恢复默认」再保存后必须**清掉**
+  const withMeta = `V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n\n# jps-config:{"metaPos":{"keyline":{"x":0,"y":-21}}}\n`
+  const saved = writeJpsConfig(withMeta, reset)
+  const savedCfg = extractJpsConfig(saved)
+  check('adj629s/adj629t 用户原例：恢复默认后保存，设置行**清空为 `# jps-config:{}`**（不再含 metaPos）',
+    saved.split('\n').filter((l) => l.startsWith(JPS_CONFIG_PREFIX)).join('|') === `${JPS_CONFIG_PREFIX}{}` && !saved.includes('metaPos'),
+    JSON.stringify({ savedLine: saved.split('\n').find((l) => l.startsWith(JPS_CONFIG_PREFIX)) ?? '(无)', cfg: savedCfg }))
+  // 反例：直接展开 `defaultPageConfig`（旧写法）会把 metaPos 留在草稿里 ⇒ 仍被算作"与默认不同"
+  const legacyDraft = { ...defaultPageConfig, metaPos: { keyline: { x: 0, y: -21 } } } as typeof defaultPageConfig
+  check('adj629s 反例：`{...defaultPageConfig}` 展开**不会**清掉可选字段（这正是旧 bug 的成因）',
+    nonDefaultConfigKeys(legacyDraft).includes('metaPos'))
+
+  // adj629x（用户复报「点击恢复默认时，还是没有清空 # jps-config」）：
+  // 应用**真实写回路径**是 `writeJpsConfig(code, mergeConfigEdits(code, base, draft))`
+  // （`docStore.setPageConfig(cfg, persist=true, base=snapRef)`）——只测 `writeJpsConfig(code, reset)`
+  // 测不到这一层：`mergeConfigEdits` 以「源码层原有字段**原样保留**」为出发点，只把 next≠base 的键并进去。
+  const codeX = `V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n# jps-config:{"metaPos":{"keyline":{"x":0,"y":-21}},"height_quci":31}\n`
+  const baseX = mergeJpsConfig(codeX) // 打开设置面板时的生效配置（= 默认 ← 谱面）
+  const mergedX = mergeConfigEdits(codeX, baseX, reset as typeof baseX)
+  const savedX = writeJpsConfig(codeX, mergedX)
+  check('adj629x 恢复默认走**真实路径**（mergeConfigEdits + writeJpsConfig）也清空设置行为 `{}`',
+    savedX.split('\n').filter((l) => l.startsWith(JPS_CONFIG_PREFIX)).join('|') === `${JPS_CONFIG_PREFIX}{}` && !savedX.includes('metaPos') && !savedX.includes('height_quci'),
+    JSON.stringify({ line: savedX.split('\n').find((l) => l.startsWith(JPS_CONFIG_PREFIX)) ?? '(无)', merged: mergedX }))
+  check('adj629x mergeConfigEdits 的结果里没有"该清掉却没清掉"的残留键',
+    nonDefaultConfigKeys(mergedX).length === 0, JSON.stringify(nonDefaultConfigKeys(mergedX)))
+
+  // adj629x 真因：面板的「恢复默认」此前写成 `updateDraft(defaultConfigForReset())`，
+  // 而 `updateDraft` 是**浅合并** `{...draft, ...patch}` ⇒ 旧草稿里的可选字段原样留下。
+  const draftWithOptional: PageConfig = {
+    ...defaultPageConfig,
+    metaPos: { keyline: { x: 0, y: -21 } },
+    heights: { '0': [12, 8, 20, 0] },
+    segmentRowGap: { bz: 30 },
+    lyricShrink: true,
+    showInstrument: true,
+  }
+  const afterReset = draftAfterReset(draftWithOptional)
+  check('adj629x 恢复默认是**整份替换**：旧草稿里的可选字段全部消失（浅合并的旧写法做不到）',
+    OPTIONAL_CONFIG_FIELDS.every((k) => !(k in (afterReset as unknown as Record<string, unknown>))),
+    JSON.stringify({ optional: [...OPTIONAL_CONFIG_FIELDS], left: OPTIONAL_CONFIG_FIELDS.filter((k) => k in (afterReset as unknown as Record<string, unknown>)) }))
+  check('adj629x 反例（旧写法）：浅合并会把 `metaPos` 留在草稿里 ⇒ 差量写入仍会写回谱面',
+    nonDefaultConfigKeys({ ...draftWithOptional, ...defaultConfigForReset() } as PageConfig).includes('metaPos'))
+  check('adj629x 恢复默认后保存走真实路径 ⇒ 设置行清空为 `{}`（用户复报的这一条）',
+    writeJpsConfig(codeX, mergeConfigEdits(codeX, baseX, afterReset)).split('\n').filter((l) => l.startsWith(JPS_CONFIG_PREFIX)).join('|') === `${JPS_CONFIG_PREFIX}{}`)
+  // 源码级：按钮必须调 `resetDraft`（整份替换），不得再回到 `updateDraft(defaultConfigForReset())`
+  const pcfgSrc = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
+  check('adj629x 源码级：面板「恢复默认」按钮调 `resetDraft`（整份替换），不再用 `updateDraft(defaultConfigForReset())`',
+    /onClick=\{resetDraft\}/.test(pcfgSrc) && !/updateDraft\(defaultConfigForReset\(\)\)/.test(pcfgSrc) && /draftAfterReset\(draft\)/.test(pcfgSrc))
+}
 
 // ---- 17. 多声部（M7a） ----
 console.log('[17] voice blocks (M7a)')
@@ -1981,23 +2045,65 @@ const getMeta = (key: string) => {
   return m ? { x: Number(m[1]), y: Number(m[2]) } : null
 }
 const tTitle = getMeta('title')
-// 标题居中：x = 页宽/2，y = 上边距 + 30.6（字号安全边距，adj32）
-check('标题居中靠上（文字顶不越顶部虚线，adj32）', tTitle !== null && Math.abs(tTitle.x - 595.28 / 2) < 0.5 && Math.abs(tTitle.y - (MT + 30.6)) < 0.5, JSON.stringify(tTitle))
+// adj629u：默认偏移 = **贴角**（标题字顶贴区域上沿；左栏/右栏末行贴区域下沿），公式见 metaCornerOffsets
+const CORNER_ER = metaCornerOffsets({
+  mSize: defaultPageConfig.miaoshu_size,
+  biaotiSize: defaultPageConfig.biaoti_size,
+  hasKeyRow: true,
+  hasTempoRow: true,
+})
+const AUTHORS_ER = (metaSvg.match(/data-meta="author_\d+"/g) ?? []).length
+// 标题居中：x = 页宽/2，y = 上边距 + 贴角偏移（字顶距区域上沿 ≈0.12 字号，adj32/adj629u）
+check('标题居中靠上（字顶贴描述头区域上沿，adj32/adj629u）', tTitle !== null && Math.abs(tTitle.x - 595.28 / 2) < 0.5 && Math.abs(tTitle.y - (MT + CORNER_ER.title)) < 0.5, JSON.stringify(tTitle))
 const tAuthor = getMeta('author_0')
-// 作者右下：x = 右内容边界（右对齐），y = 描述头区域下沿 - 16（右下角往上）
-check('作者右下（右对齐，描述头区域右下角往上）', tAuthor !== null && Math.abs(tAuthor.x - RIGHT_EDGE) < 0.5 && Math.abs(tAuthor.y - (MT + defaultPageConfig.descAreaH - 16)) < 0.5, JSON.stringify(tAuthor))
+// 作者右下：x = 右内容边界（右对齐）；y = 区域下沿 + 贴角偏移（多作者时首行在最高处）
+check('作者右下（右对齐，末行贴区域下沿往上排，adj629u）', tAuthor !== null && Math.abs(tAuthor.x - RIGHT_EDGE) < 0.5 && Math.abs(tAuthor.y - (MT + defaultPageConfig.descAreaH + metaAuthorRowY(0, AUTHORS_ER, defaultPageConfig.miaoshu_size))) < 0.5, JSON.stringify(tAuthor))
+const tAuthorLast = getMeta(`author_${AUTHORS_ER - 1}`)
+check('作者末行贴区域下沿（adj629u）', tAuthorLast !== null && Math.abs(tAuthorLast.y - (MT + defaultPageConfig.descAreaH + metaAuthorRowY(AUTHORS_ER - 1, AUTHORS_ER, defaultPageConfig.miaoshu_size))) < 0.5, JSON.stringify(tAuthorLast))
 const tKey = getMeta('keyline')
 // adj176：调号/拍号/节拍整体右移 6px（为字母左侧升降号角标留空间）
-// keyline x = 左边距 + 6，y = 描述头区域下沿 - 44（左下角往上 44）
-check('调式+拍号左下（描述头区域左下角，右移 6px）', tKey !== null && Math.abs(tKey.x - (ML + 6)) < 0.5 && Math.abs(tKey.y - (MT + defaultPageConfig.descAreaH - 44)) < 0.5, JSON.stringify(tKey))
+// keyline x = 左边距 + 6，y = 描述头区域下沿 + 贴角偏移（有节拍行时 = 节拍行之上一行）
+check('调式+拍号左下（描述头区域左下角，右移 6px；adj629u）', tKey !== null && Math.abs(tKey.x - (ML + 6)) < 0.5 && Math.abs(tKey.y - (MT + defaultPageConfig.descAreaH + CORNER_ER.keyline)) < 0.5, JSON.stringify(tKey))
 const tTempo = getMeta('tempo')
-// adj42：节拍行 = 号与调式行对齐 → x = 左边距 + (w("1 ") - w("♩")) + 6；y = keyline 下 32
-check('节拍在 keyline 下（D↔J 间距加大，-20→-12；= 号与调式行对齐；右移 6px）', tTempo !== null && Math.abs(tTempo.x - (ML + 10.47)) < 0.5 && Math.abs(tTempo.y - (MT + defaultPageConfig.descAreaH - 44 + 32)) < 0.5, JSON.stringify(tTempo))
+// adj42：节拍行 = 号与调式行对齐 → x = 左边距 + (w("1 ") - w("♩")) + 6；
+// y = 区域下沿 + 贴角偏移（节拍行 = 左栏末行，贴下沿；行距随字号，adj629u）
+// adj42：节拍行 = 号与调式行对齐 → x = 左边距 + (w("1 ") - w("♩")) + 6；
+// y = 区域下沿 + 贴角偏移（节拍行 = 左栏末行，贴下沿；行距随字号，adj629u）；
+// adj629v：w("♩") 用浏览器实测的全角宽 13（YaHei 无 U+2669 → 回退 CJK 字体）
+check('节拍 = 左栏末行贴左下角（= 号与调式行对齐；右移 6px；adj629u）', tTempo !== null && Math.abs(tTempo.x - (ML + 6 + (11.47 - 13.0))) < 0.5 && Math.abs(tTempo.y - (MT + defaultPageConfig.descAreaH + CORNER_ER.tempo)) < 0.5, JSON.stringify(tTempo))
+check('左栏末行与右栏末行同基线（贴角对齐，adj629u）', tTempo !== null && tAuthorLast !== null && Math.abs(tTempo.y - tAuthorLast.y) < 0.5, `tempo=${tTempo?.y} author=${tAuthorLast?.y}`)
 // metaPos 覆盖（相对锚点偏移，adj16）：title 锚=上中点(297.64,MT)，绝对 = 297.64+100, MT+50
 const layErM = layoutScore(rEr, { ...DUR_CFG, metaPos: { title: { x: 100, y: 50 } } })
 const svgErM = renderScoreToSvg(layErM)[0]
 const m2 = /data-meta="title" x="([\d.]+)" y="([\d.]+)"/.exec(svgErM)
 check('metaPos 覆盖标题位置（锚点+偏移）', m2 !== null && Math.abs(Number(m2[1]) - (595.28 / 2 + 100)) < 0.5 && Math.abs(Number(m2[2]) - (MT + 50)) < 0.5, m2?.[0])
+
+// ---- 30b. adj629v（用户要求）：描述头 D 行「1 = B」的 = 与 J 行「♩= 62」的 = 保持对齐 ----
+console.log('[30b] keyline "=" and tempo "=" stay aligned (adj629v)')
+{
+  // 浏览器实测（Blink measureText，13px 默认字体栈）：w("1 ") = 11.47、w("♩") = 13.0（全角回退）、
+  // w("1 = ") = 24.959、w("♯") = 9.75；ASCII 与 GDI 实测一致（E-2026-066），只有 `♩` 不同。
+  const W1SP = 11.47
+  const WTEMPO = 13.0
+  const tempoXOf = (svg: string) => Number(/data-meta="tempo"[^>]*x="([\d.]+)"/.exec(svg)?.[1] ?? NaN)
+  const keyXOf = (svg: string) => Number(/<text data-meta="keyline" x="([\d.]+)"/.exec(svg)?.[1] ?? NaN)
+  for (const key of ['C', 'Bb', '$B', 'F#', 'bE']) {
+    const src = `V: 1.0\nB: t\nD: ${key}\nP: 4/4\nJ: 96\nQ: 1 2 3 4 |\n`
+    const svg = renderScoreToSvg(layoutScore(parseJps(src), DUR_CFG))[0]
+    const kx = keyXOf(svg)
+    const tx = tempoXOf(svg)
+    // 调式行 = 左缘 = keyX + w("1 ")；节拍行 = 左缘 = tempoX + w("♩")（adj181 的 accShift 已去掉）
+    check(`adj629v 调号 ${key}：D 行 = 与 J 行 = 左缘对齐（不再随升降号右移）`,
+      Math.abs(kx + W1SP - (tx + WTEMPO)) < 0.01, `kx=${kx} tx=${tx} diff=${(kx + W1SP - tx - WTEMPO).toFixed(2)}`)
+  }
+  // 实测宽优先（PreviewPane 走 canvas.measureText，adj199 同口径）：tempo x = KeyShift + (w1sp − wTempo)
+  const svgV = renderScoreToSvg(
+    layoutScore(parseJps('V: 1.0\nB: t\nD: Bb\nP: 4/4\nJ: 96\nQ: 1 2 3 4 |\n'), DUR_CFG),
+    { w1eq: 22, wAcc: 8, w1sp: 12, wTempo: 5 },
+  )[0]
+  check('adj629v 传入实测「1 」/「♩」宽时按实测摆放（x = 左边距 + 6 + (w1sp − wTempo)）',
+    Math.abs(tempoXOf(svgV) - (ML + 6 + (12 - 5))) < 0.01, `tx=${tempoXOf(svgV)}`)
+}
 
 // ---- 31. 行结构虚线（adj10） ----
 console.log('[31] row guides (adj10)')
@@ -2344,7 +2450,7 @@ check('descAreaH 增大 → 曲部第一行下移', Math.abs(firstY39a - (MT + 1
 // 描述头元素（作者，右下锚）跟随描述头区域（descAreaH），不出区域
 const svg39 = renderScoreToSvg(lay39a)[0]
 const m39 = /data-meta="author_0" x="[\d.]+" y="([\d.]+)"/.exec(svg39)
-check('作者跟随描述头区域下移（在 descAreaH 内）', m39 !== null && Math.abs(Number(m39[1]) - (MT + 140 - 16)) < 0.5, `y=${m39?.[1]}`)
+check('作者跟随描述头区域下移（在 descAreaH 内）', m39 !== null && Math.abs(Number(m39[1]) - (MT + 140 + metaAuthorRowY(0, AUTHORS_ER, defaultPageConfig.miaoshu_size))) < 0.5, `y=${m39?.[1]}`)
 // body_margin_top 最小 4px（描述头下端线最小间距）
 const exLimits = GUIDE_LIMITS_EX as Record<string, [number, number]>
 check('body_margin_top 最小 4px', exLimits['body_margin_top'][0] === 4)
@@ -2364,6 +2470,22 @@ const lay40b = layoutScore(r40b, DUR_CFG)
 const ys40b = [...new Set(lay40b.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
 const rowLyricH = rowMusicH + defaultPageConfig.height_quci + (defaultPageConfig.geci_size + 4 + 10) + defaultPageConfig.height_ciqu_lyric
 check('有歌词行高 = 曲高+词曲间距+词高+曲上词距', ys40b.length >= 2 && Math.abs(ys40b[1] - ys40b[0] - rowLyricH) < 0.5, `dy=${ys40b[1] - ys40b[0]} expect=${rowLyricH}`)
+// adj629w（用户要求）：曲部与上词部间距默认 10 → −5（歌词行与下一行曲部压得更紧）
+check('adj629w 曲部与上词部间距默认 = −5', defaultPageConfig.height_ciqu_lyric === -5, String(defaultPageConfig.height_ciqu_lyric))
+const ys40old = [...new Set(layoutScore(r40b, { ...DUR_CFG, height_ciqu_lyric: 10 }).pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
+check('adj629w 默认值真的进了布局：比旧默认 10 紧 15px（行距随设置走，不是只改了常量）',
+  Math.abs(ys40old[1] - ys40old[0] - (ys40b[1] - ys40b[0]) - 15) < 0.5,
+  `旧=${ys40old[1] - ys40old[0]} 新=${ys40b[1] - ys40b[0]}`)
+check('adj629w 默认值在可调范围内（否则设置面板一打开就把默认值钳掉）',
+  GUIDE_LIMITS_EX.height_ciqu_lyric[0] <= defaultPageConfig.height_ciqu_lyric && defaultPageConfig.height_ciqu_lyric <= GUIDE_LIMITS_EX.height_ciqu_lyric[1],
+  `default=${defaultPageConfig.height_ciqu_lyric} range=${JSON.stringify(GUIDE_LIMITS_EX.height_ciqu_lyric)}`)
+// adj629y（用户要求）：曲部与词部间距默认 15 → 20（曲部与它下面那行歌词拉开 5px）
+check('adj629y 曲部与词部间距默认 = 20', defaultPageConfig.height_quci === 20, String(defaultPageConfig.height_quci))
+const ys40y = [...new Set(layoutScore(r40b, { ...DUR_CFG, height_quci: 15 }).pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
+check('adj629y 默认值真的进了布局：比旧默认 15 松 5px',
+  Math.abs(ys40b[1] - ys40b[0] - (ys40y[1] - ys40y[0]) - 5) < 0.5, `旧=${ys40y[1] - ys40y[0]} 新=${ys40b[1] - ys40b[0]}`)
+check('adj629y 默认值在可调范围内', GUIDE_LIMITS_EX.height_quci[0] <= defaultPageConfig.height_quci && defaultPageConfig.height_quci <= GUIDE_LIMITS_EX.height_quci[1],
+  `default=${defaultPageConfig.height_quci} range=${JSON.stringify(GUIDE_LIMITS_EX.height_quci)}`)
 
 // ---- 41. 小节线高度与反复点（adj34） ----
 console.log('[41] barline height & dots (adj34)')
@@ -2704,9 +2826,9 @@ check('拍号分数：横线与调式文字垂直居中', Number.isFinite(lineY4
 check('拍号分数：分子在线上、分母在线下', txt49.length === 2 && txt49[0].y < lineY49 && txt49[1].y > lineY49, JSON.stringify(txt49))
 check('拍号分数：分子底部距线 2px', txt49.length === 2 && Math.abs(txt49[0].y + 13 * 0.05 + 2 - lineY49) < 0.5, `numY=${txt49[0]?.y} line=${lineY49}`)
 check('拍号分数：分母顶部距线 2px', txt49.length === 2 && Math.abs(txt49[1].y - 13 * 0.85 - lineY49 - 2) < 0.5, `denY=${txt49[1]?.y} line=${lineY49}`)
-// 节拍行下移：D 行与 J 行间距加大（默认偏移 -20 → -12）
+// 节拍行与调式行的基线间距 = 左栏行距（adj629u：随描述头字号缩放，13px 时 1.85em ≈ 24px）
 const tempoY49 = Number(/data-meta="tempo"[^>]*y="([\d.]+)"/.exec(svg49)?.[1] ?? NaN)
-check('D↔J 基线间距 32px（-44 → -12）', Math.abs(tempoY49 - keyY49 - 32) < 0.5, `tempo=${tempoY49} key=${keyY49}`)
+check('D↔J 基线间距 = 1.85×描述头字号（adj629u）', Math.abs(tempoY49 - keyY49 - defaultPageConfig.miaoshu_size * 1.85) < 0.5, `tempo=${tempoY49} key=${keyY49}`)
 // adj45：描述头字体/字号可配置（miaoshu_font/miaoshu_size 作用于调式/拍号/节拍/作者）
 const r45 = parseJps('V: 1.0\nB: t\nZ: 词曲作者\nD: C\nP: 4/4\nJ: 96\nQ: 1 2 3 4 |\n')
 const svg45 = renderScoreToSvg(layoutScore(r45, { ...DUR_CFG, miaoshu_font: 'SimSun', miaoshu_size: 15 }))[0]
@@ -4882,10 +5004,14 @@ console.log('[90] settings layering: diff write, editor prefs out of score, font
   check('adj-font 差量写入可正确读回', extractJpsConfig(oneChange)?.margin_left === 32 && extractJpsConfig(oneChange)?.note_size === 15)
   check('adj-font 差量写入不含默认字段（margin_top 不落盘）', !('margin_top' in obj1))
 
-  // ② 全部回到默认 → 删除设置行（并收敛空行）
+  // ② 全部回到默认 → 设置行**清空为 `{}`**（adj629t：用户要求"清空为 # jps-config:{}"，不再整行删除）
   const back = writeJpsConfig(oneChange, { ...defaultPageConfig })
-  check('adj-font 回到默认时删除设置行', !back.includes(JPS_CONFIG_PREFIX), JSON.stringify(back))
-  check('adj-font 删除后不留多余空行', !back.includes('\n\n\n'), JSON.stringify(back))
+  check('adj-font/adj629t 回到默认时设置行清空为 `# jps-config:{}`',
+    back.split('\n').filter((l) => l.startsWith(JPS_CONFIG_PREFIX)).join('|') === `${JPS_CONFIG_PREFIX}{}` && !back.includes('margin_top'),
+    JSON.stringify(back))
+  check('adj629t 清空为 `{}` 时**只改设置行本身**（其它行/空行原样保留）',
+    back === oneChange.replace(/# jps-config:[^\n]*/, `${JPS_CONFIG_PREFIX}{}`),
+    JSON.stringify(back))
 
   // ③ 全量模式（固化）：与默认相同的项也写入
   const full = writeJpsConfig(oneChange, { ...defaultPageConfig, margin_left: 32 }, { mode: 'full' })
@@ -5442,9 +5568,11 @@ console.log('[99] new-file template is file-driven (adj481) + settings block (ad
   const withCfg = writeJpsConfig(tpl, { ...defaultPageConfig, note_size: 15 })
   check('adj413 写入的设置行可读回（原地更新或追加均可）', extractJpsConfig(withCfg)?.note_size === 15, JSON.stringify(extractJpsConfig(withCfg)))
   check('adj413 写回后仍有且只有一条设置行', withCfg.split('\n').filter((l) => l.startsWith(JPS_CONFIG_PREFIX)).length === 1, '')
-  // 改回默认（差量清空）：删设置行（模板里的「页面设置」分隔注释若存在则保留——它是模板文本的一部分）
+  // 改回默认（差量清空）：设置行**清空为 `{}`**（adj629t；模板里的「页面设置」分隔注释若存在则保留）
   const back = writeJpsConfig(withCfg, { ...defaultPageConfig })
-  check('adj413 清空设置后不再有设置行', !back.split('\n').some((l) => l.startsWith(JPS_CONFIG_PREFIX)), '')
+  check('adj413/adj629t 清空设置后该行变为 `# jps-config:{}`（不再整行删除）',
+    back.split('\n').filter((l) => l.startsWith(JPS_CONFIG_PREFIX)).join('|') === `${JPS_CONFIG_PREFIX}{}`,
+    JSON.stringify(back))
 }
 
 // ---- 100. px 值一律整数：roundPxIntegers + 读写两端（adj413） ----
@@ -6200,7 +6328,10 @@ console.log('[adj427] segment overlay placement (notes / barlines / brackets)')
   check('O8 段内小节线 1 条', segBars.length === 1, `got ${segBars.length}`)
   check('O9 段内小节线 x 落在包络范围内', segBars.length > 0 && sb.length > 0 && segBars[0].x >= sb[0].x1 - 0.51 && segBars[0].x <= sb[0].x2 + 0.51, `barX=${segBars[0]?.x} env=[${sb[0]?.x1},${sb[0]?.x2}]`)
   const svg = renderScoreToSvg(layoutScore(r, DUR_CFG))[0]
-  check('O10 SVG 含段层括号字形（与数字同高的文本括号）', /<text[^>]*>\(<\/text>/.test(svg) && /<text[^>]*>\)<\/text>/.test(svg), '')
+  // adj629l（用户要求）：「`{bz … }` 是伴奏部分，主曲部上的伴奏部分**不要强加两侧括号**」——
+  // 没写 `&zkh/&ykh` 的伴奏层不再自动合成圆括号（替谱层 `{tp}` 仍自动画，见 §[151]）。
+  check('O10 SVG **不再**给伴奏层自动加括号字形（用户要求 adj629l）',
+    !/<text[^>]*>\(<\/text>/.test(svg) && !/<text[^>]*>\)<\/text>/.test(svg), '')
   check('O11 SVG 含段层音符（音符数增加的 <text> 已绘制）', (svg.match(/data-notepos/g) ?? []).length >= 12, `notepos=${(svg.match(/data-notepos/g) ?? []).length}`)
 }
 {
@@ -6900,30 +7031,57 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
   check('U8a 段首音 bx0 ≈ 主旋律包络首音 x（对齐段左界）',
     Math.abs(segFirst430.x - mainFirst.x) < 0.11,
     `segFirst.x=${segFirst430.x.toFixed(2)} mainFirst.x=${mainFirst.x.toFixed(2)}`)
-  check('U8b 段末音 bx1 ≤ 主旋律包络末音 x 且 bx1 > 0（不丢失 + 在段右界内）',
-    segLast430.x + (segLast430.width ?? 0) <= mainLast.x + 0.5 + 16.75, // 容许括号预留区
-    `segLast.x=${segLast430.x.toFixed(2)} mainLast.x=${mainLast.x.toFixed(2)}`)
+  check('U8b 段末音右缘不越过该行**下一根小节线**（不丢失 + 在段右界内）', (() => {
+    // adj629b：段层括号占位缩到 2/3 ⇒ 段内容可多用约 1/3 的预留区；
+    // 这里改用"下一根主旋律小节线"当硬边界（比原先固定容差 16.75 更贴合语义）
+    const barR = page.barlines
+      .filter((b) => !b.segment)
+      .map((b) => b.x)
+      .sort((a, b) => a - b)
+      .find((x) => x > mainLast.x)
+    return segLast430.x + (segLast430.width ?? 0) <= (barR ?? Number.POSITIVE_INFINITY) + 0.9
+  })(),
+    `segLast.x=${segLast430.x.toFixed(2)} w=${(segLast430.width ?? 0).toFixed(2)}`)
   // U9：括号**纵向**与数字对齐——`renderBracket` 以 yTop 为字形中心，须 = 基线 − 0.4×字号
   //     （此前传 −0.7×字号，括号比数字高 0.3×字号 ≈4px）
   const ns = DUR_CFG.note_size
-  check('U9 括号字形中心 = 段层数字中心（基线 − 0.4×字号）', zkh !== undefined && Math.abs(zkh.yTop - (segN[0].y - ns * 0.4)) < 0.11, `yTop=${zkh?.yTop} expect=${(segN[0].y - ns * 0.4).toFixed(1)}`)
+  check('U9 括号字形中心 = 段层数字中心（基线 − 0.4×字号；adj629b 字号不变，压缩只作用于纵向）', zkh !== undefined && Math.abs(zkh.yTop - (segN[0].y - ns * 0.4)) < 0.11, `yTop=${zkh?.yTop} expect=${(segN[0].y - ns * 0.4).toFixed(1)}`)
   // U10：括号**横向**与相邻音符留 nonDurGap（0.5×字号），不再紧贴
-  const gap = ns * 0.5
+  const gap = ns * 0.5 // adj629b：字号不变 ⇒ 括号横向间距仍是 0.5×字号
   check('U10 &zkh 与段首音间距 = nonDurGap（0.5×字号）', zkh !== undefined && Math.abs(segN[0].x - gap - (zkh.x + zkh.width / 2)) < 0.11, `gap=${(segN[0].x - (zkh.x + zkh.width / 2)).toFixed(2)} expect=${gap}`)
   const segLast = segN[segN.length - 1]
   check('U11 &ykh 与段层末音右缘间距 = nonDurGap', ykh !== undefined && Math.abs((ykh.x - ykh.width / 2) - ((segLast.rightX ?? 0) + gap)) < 0.11, `gap=${((ykh.x - ykh.width / 2) - (segLast.rightX ?? 0)).toFixed(2)} expect=${gap}`)
 }
 {
-  // 无显式括号：自动合成同一套文本括号字形（同样留间距、同纵向基准）
+  // adj629l（用户要求）：**伴奏层 `{bz … }` 不强加两侧圆括号**（只有自己写了 `&zkh/&ykh` 才画）。
+  // 附带收益：不再为这对括号预留"小节线净距 + 间距 + 括号宽"的尾部空间 ⇒ 段内容可用到小节线，
+  // 段内**末音不会被挤掉**（用户报「伴奏最后面的 `5/` 没有显示出来」）。
   const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
   const page = layoutScore(parseJps(src), DUR_CFG).pages[0]
   const segN = page.notes.filter((n) => n.segment).sort((a, b) => a.x - b.x)
-  const ns2 = DUR_CFG.note_size
-  const zkh2 = page.brackets.find((b) => b.code === 'zkh')
-  const ykh2 = page.brackets.find((b) => b.code === 'ykh')
-  check('V1 无显式括号 → 自动合成一对 zkh/ykh', zkh2 !== undefined && ykh2 !== undefined, `marks=${page.brackets.map((b) => b.code).join(',')}`)
-  check('V2 自动括号也留 nonDurGap（右缘 = 首音 x − 0.5×字号）', zkh2 !== undefined && segN.length > 0 && Math.abs(segN[0].x - ns2 * 0.5 - (zkh2.x + zkh2.width / 2)) < 0.11, `right=${zkh2 ? (zkh2.x + zkh2.width / 2).toFixed(1) : 'n/a'} firstNote=${segN[0]?.x}`)
-  check('V3 自动括号纵向同样与数字中心对齐', zkh2 !== undefined && segN.length > 0 && Math.abs(zkh2.yTop - (segN[0].y - ns2 * 0.4)) < 0.11, `yTop=${zkh2?.yTop}`)
+  check('V1 没写括号的伴奏层**不画** zkh/ykh（用户要求）',
+    page.brackets.filter((b) => b.code === 'zkh' || b.code === 'ykh').length === 0,
+    `marks=${page.brackets.map((b) => b.code).join(',')}`)
+  check('V2 伴奏层 8 个音**一个都不少**、且末音右缘不越小节线',
+    segN.length === 8 &&
+      (segN[7].rightX ?? 0) <=
+        (page.barlines
+          .filter((b) => !b.segment)
+          .map((b) => b.x)
+          .sort((a, b) => a - b)
+          .find((x) => x > segN[7].x) ?? Number.POSITIVE_INFINITY) +
+          0.9,
+    JSON.stringify({ n: segN.length, lastX: segN[7]?.x, lastR: segN[7]?.rightX }))
+  const segLastV = segN[segN.length - 1]
+  check('V3 去掉尾部括号预留后，末音占宽足够画出数字（≥ 半个字号）',
+    segLastV !== undefined && (segLastV.width ?? 0) >= DUR_CFG.note_size * 0.5,
+    JSON.stringify({ w: segLastV?.width, ns: DUR_CFG.note_size }))
+  // 自己写了括号的伴奏层照旧渲染，且**不重复**（自动与显式不叠加）
+  const pageBk = layoutScore(parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz &zkh 1 2 3 4 | 5 6 7 1' &ykh } 5 6 7 1' | 1' 7 6 5 | 5 5\n"), DUR_CFG).pages[0]
+  const marks = pageBk.brackets.filter((b) => b.code === 'zkh' || b.code === 'ykh')
+  check('V4 自己写了 `&zkh/&ykh` 的伴奏层照旧画一对（不重复画）',
+    marks.filter((b) => b.code === 'zkh').length === 1 && marks.filter((b) => b.code === 'ykh').length === 1,
+    `marks=${marks.map((b) => b.code).join(',')}`)
 }
 {
   // dsb：两层整体下移使整块与主旋律**居中**
@@ -7620,7 +7778,10 @@ console.log('[107] settings layering: source > cache > default, write-back = use
   const noChange = writeJpsConfig(srcCfg, mergeConfigEdits(srcCfg, base, base))
   check('adj454 无改动时不新增字段', extractJpsConfig(noChange)?.note_size === undefined && extractJpsConfig(noChange)?.margin_left === 55, JSON.stringify(extractJpsConfig(noChange)))
   const reset = writeJpsConfig(srcCfg, mergeConfigEdits(srcCfg, { ...merged, margin_left: 60 }, { ...merged, margin_left: defaultPageConfig.margin_left }))
-  check('adj454 用户把某项改回默认 → 设置行里该项被移除（差量语义）', !reset.includes(JPS_CONFIG_PREFIX), JSON.stringify(reset.slice(-40)))
+  check('adj454/adj629t 用户把某项改回默认 → 该字段被移除（设置行清空为 `{}`）',
+    !reset.includes('"margin_left"') &&
+      reset.split('\n').filter((l) => l.startsWith(JPS_CONFIG_PREFIX)).join('|') === `${JPS_CONFIG_PREFIX}{}`,
+    JSON.stringify(reset.slice(-40)))
 
   // ③ 设置行类型校验：坏 JSON / 坏值 / 拼错的键都要**可见告警**（此前一律静默）
   const badJson = 'V: 1.0\nQ: 1 2 3 4 |\n\n# jps-config:{"margin_left":55\n'
@@ -9808,12 +9969,15 @@ function runAdj598UnclosedVoltaScopeTests() {
     )
   }
   // ③ 源码级：判据必须把三种"跳跃/结束"修饰符都算进去（防止后续"简化"漏掉某个）
+  // adj627b：判据已抽到布局端 `isJumpOrEndBarline`（转调复原与房子终点必须同一口径），播放端改为复用
   {
     const src = String(readFileSync('packages/ijipu-engine/src/engine/playback/sequence.ts', 'utf8'))
+    const laySrc = String(readFileSync('packages/ijipu-engine/src/engine/layout/index.ts', 'utf8'))
     check(
-      'adj598 「下一处跳跃或结束」判据含 `&ds`/`&dc`/`&fine`（源码级）',
+      'adj598/adj627b 「下一处跳跃或结束」判据含 `&ds`/`&dc`/`&fine`（判据集中在布局端，播放端复用同一份）',
       /isJumpOrEndBar/.test(src) &&
-        /m\.includes\('ds'\)[\s\S]{0,160}m\.includes\('dc'\)[\s\S]{0,160}m\.includes\('fine'\)/.test(src),
+        /isJumpOrEndBarline\(it\.bar\)/.test(src) &&
+        /export function isJumpOrEndBarline[\s\S]{0,500}m\.includes\('ds'\)[\s\S]{0,160}m\.includes\('dc'\)[\s\S]{0,160}m\.includes\('fine'\)/.test(laySrc),
       '',
     )
   }
@@ -11191,6 +11355,28 @@ function runAdj605Tests() {
     tabKeys.length >= 25 && notWired.length === 0,
     `未接线：${notWired.join(',')}`,
   )
+  // adj629z：**反向**也要成立——凡是带 `mark={isNonDefault('键')}` 的字段行，都必须登记进 TAB_CONFIG_KEYS。
+  // 漏登记的后果：红线照亮、但"当页非默认项数"少算它 ⇒ 末尾图例可能不出现（adj625 的方框小节两项就漏了）。
+  const markedKeys = [...new Set([...cfgSrc.matchAll(/isNonDefault\('([A-Za-z_][A-Za-z0-9_]*)'\)/g)].map((m) => m[1]))]
+  const unregistered = markedKeys.filter((k) => !tabKeys.includes(k))
+  check(
+    `adj629z 每个带 \`mark\` 的字段行都登记进 TAB_CONFIG_KEYS（共 ${markedKeys.length} 项）`,
+    markedKeys.length >= 25 && unregistered.length === 0,
+    `未登记：${unregistered.join(',')}`,
+  )
+  // adj629z：`docs/SETTINGS-AUDIT.md` 的「默认」列也必须跟着引擎走 —— 改默认值最容易漏文档
+  // （插件 README 也有同一类断言，见 obsidian-ijipu/scripts/smoke-frontmatter.mts §[3f]）
+  const auditSrc = String(readFileSync('docs/SETTINGS-AUDIT.md', 'utf8'))
+  const auditRow = (marker: string) =>
+    auditSrc.split('\n').find((l) => l.trim().startsWith('|') && l.includes(marker)) ?? ''
+  check('adj629z SETTINGS-AUDIT 边距行默认值与引擎一致（40 / 40 / 50 / 50）',
+    auditRow('`margin_top/bottom/left/right`').includes('40 / 40 / 50 / 50'),
+    auditRow('`margin_top/bottom/left/right`'))
+  check('adj629z SETTINGS-AUDIT 行距行默认值与引擎一致（quci/cici/ciqu/ciqu_lyric/shengbu）',
+    auditRow('`height_quci/cici/ciqu/ciqu_lyric/shengbu`').includes(
+      [defaultPageConfig.height_quci, defaultPageConfig.height_cici, defaultPageConfig.height_ciqu, defaultPageConfig.height_ciqu_lyric, defaultPageConfig.height_shengbu].join('/'),
+    ),
+    `${auditRow('`height_quci/cici/ciqu/ciqu_lyric/shengbu`').slice(0, 120)} vs ${[defaultPageConfig.height_quci, defaultPageConfig.height_cici, defaultPageConfig.height_ciqu, defaultPageConfig.height_ciqu_lyric, defaultPageConfig.height_shengbu].join('/')}`)
   check(
     'adj605 `Row` 支持 `mark`（true=红星 / false=空占位 / 不给=该页不参与）+ 两页末尾都有图例',
     /function Row\(\{ label, mark, children \}/.test(cfgSrc) &&
@@ -12918,6 +13104,20 @@ runAdj363SaveTests()
     }
   })
   .then(() => {
+    try {
+      runAdj627Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj627 临时转调用例抛异常', e)
+    }
+    try {
+      runAdj629Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj629 替谱段用例抛异常', e)
+    }
+  })
+  .then(() => {
     console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
     process.exit(failed === 0 ? 0 : 1)
   })
@@ -13168,4 +13368,955 @@ function runAdj626Tests() {
     '')
   check('adj626 面板把提示渲染出来（否则用户不知道要在打印对话框里选「另存为 PDF」）',
     /\{exportCopy\.pdfPrintHint\}/.test(panelSrc), '')
+}
+
+/**
+ * adj627（用户要求）：**临时转调**——与 `"p:2/4"` 临时拍号同槽位，写在小节线引号里。
+ *   · `|"d:1=D"` / `|"d:D"` / `|"d:Eb"` / `|"d:F#"` ⇒ 从该小节线之后改调；
+ *   · `|"d:"` 单用 ⇒ 恢复描述头 `D:` 调号；
+ *   · 预览：该小节线右上方显示 `转1=D`（`d:` 时显示恢复后的调名）。
+ *
+ * adj627b（用户要求，三条）：
+ *   ① 调名**按用户写法显示**（标 `Ab` 就显示 `转1=Ab`，不折算成 `#G`）；
+ *   ② 调名后紧跟 `+` / `-` ⇒ **抬升 / 降低转调记号**（每级 `NOTE_COMMENT_RAISE`，口径同 adj392）；
+ *   ③ 遇到**跳跃标志 / 终结标志**（`:|` `:|:` `||` `||/` 及 `&dc`/`&ds`/`&fine`）⇒ **自然恢复原调号**。
+ */
+function runAdj627Tests() {
+  console.log('[150] 临时转调 d:（adj627）')
+  const barOf = (code: string) =>
+    parseJps(code).groups[0].music.tokens.filter((t) => t.kind === 'barline') as unknown as {
+      keyChange?: { targetKey?: number; clear?: boolean; keyText?: string; plus?: number; minus?: number }
+      comment?: string
+      marks?: string[]
+    }[]
+  const KC = (code: string) => barOf(code).map((b) => b.keyChange)
+
+  // ---- ① 解析：调名写法与描述头 D: 同一套 ----
+  check('adj627 `|"d:1=D"` ⇒ targetKey=2（D）+ keyText 原文，且指令不再留在 comment 里',
+    JSON.stringify(KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:1=D" 2 |\n')[0]) === '{"targetKey":2,"keyText":"D"}' &&
+      barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:1=D" 2 |\n')[0].comment === undefined,
+    JSON.stringify(barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:1=D" 2 |\n')[0]))
+  check('adj627 简写与升降号各写法：d:D=2、d:Eb=3、d:F#=6、d:$B=10、d:#F=6、d:bB=10',
+    KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D" 2 |\n')[0]?.targetKey === 2 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:Eb" 2 |\n')[0]?.targetKey === 3 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:F#" 2 |\n')[0]?.targetKey === 6 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:$B" 2 |\n')[0]?.targetKey === 10 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:#F" 2 |\n')[0]?.targetKey === 6 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:bB" 2 |\n')[0]?.targetKey === 10,
+    JSON.stringify(['D', 'Eb', 'F#', '$B', '#F', 'bB'].map((k) => KC(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:${k}" 2 |\n`)[0])))
+  check('adj627 `|"d:"` 单用 ⇒ clear=true（恢复描述头调号）',
+    JSON.stringify(KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:" 2 |\n')[0]) === '{"clear":true}',
+    JSON.stringify(KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:" 2 |\n')[0]))
+
+  // ---- ② 与普通备注共存：指令后还能写文字；非 d: 的备注不受影响 ----
+  check('adj627 `"d:1=D强音"` ⇒ 转 D 调 + 备注只留「强音」',
+    KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:1=D强音" 2 |\n')[0]?.targetKey === 2 &&
+      barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:1=D强音" 2 |\n')[0].comment === '强音',
+    JSON.stringify(barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:1=D强音" 2 |\n')[0]))
+  check('adj627 普通备注与临时拍号都不被误判（`"随便"` / `"p:2/4"` 无 keyChange）',
+    KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"随便" 2 |\n')[0] === undefined &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"p:2/4" 2 |\n')[0] === undefined &&
+      barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"p:2/4" 2 |\n')[0].comment === 'p:2/4',
+    '')
+  check('adj627 `"d:abc"`（非调名）不当作转调，整条备注原样保留',
+    KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:abc" 2 |\n')[0] === undefined &&
+      barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:abc" 2 |\n')[0].comment === 'd:abc',
+    JSON.stringify(barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:abc" 2 |\n')[0]))
+  check('adj627 音名**必须大写**（与描述头 `D:` 同口径；`d:d` 不当转调）',
+    KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:d" 2 |\n')[0] === undefined &&
+      barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:d" 2 |\n')[0].comment === 'd:d',
+    JSON.stringify(barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:d" 2 |\n')[0]))
+  check('adj627 与 `&` 修饰符**顺序无关**（`|&hs"d:1=D"` 与 `|"d:1=D"&hs` 等价）',
+    (() => {
+      const a = barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |&hs"d:1=D" 2 |\n')[0]
+      const b = barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:1=D"&hs 2 |\n')[0]
+      return a.marks?.[0] === 'hs' && b.marks?.[0] === 'hs' && a.keyChange?.targetKey === 2 && b.keyChange?.targetKey === 2
+    })(),
+    '')
+
+  // ---- ③ 生效范围：从该小节线**之后**的小节起（该线之前的音不动） ----
+  const pitchOf = (code: string) => {
+    const r = parseJps(code)
+    const layout = layoutScore(r, defaultPageConfig)
+    return layout.pages[0].notes.filter((n) => n.playable).map((n) => n.audioPitch)
+  }
+  const mixed = pitchOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |"d:1=D" 1 2 3 4 |"d:" 1 2 3 4 |\n')
+  check('adj627 音高：前 4 音 C 调（C4 D4 E4 F4）→ 中 4 音 D 调（D4 E4 F#4 G4）→ 后 4 音回 C 调',
+    mixed.slice(0, 4).join(',') === 'C4,D4,E4,F4' &&
+      mixed.slice(4, 8).join(',') === 'D4,E4,F#4,G4' &&
+      mixed.slice(8, 12).join(',') === 'C4,D4,E4,F4',
+    mixed.join(' '))
+  const descD = pitchOf('V: 1.0\nB: t\nD: D\nP: 4/4\nQ: 1 2 |"d:1=G" 1 2 |"d:" 1 2 |\n')
+  check('adj627 描述头 `D: D` 时：`d:1=G` 转 G 调、`d:` 回 D 调',
+    descD.slice(0, 2).join(',') === 'D4,E4' && descD.slice(2, 4).join(',') === 'G4,A4' && descD.slice(4, 6).join(',') === 'D4,E4',
+    descD.join(' '))
+
+  // ---- ④ 播放序列：转调后的音高进入事件（导出 MIDI/WAV 同源） ----
+  const seqPitch = (code: string) => {
+    const r = parseJps(code)
+    const layout = layoutScore(r, defaultPageConfig)
+    const seq = buildPlaySequence(r, layout, 60)
+    return seq.events.filter((e) => e.pitched !== false).map((e) => e.pitch ?? e.placed.audioPitch)
+  }
+  const played = seqPitch('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |"d:1=D" 1 2 3 4 |\n')
+  check('adj627 播放事件音高同样转调（前 4 音 C 调、后 4 音 D 调）',
+    played.slice(0, 4).join(',') === 'C4,D4,E4,F4' && played.slice(4, 8).join(',') === 'D4,E4,F#4,G4',
+    played.join(' '))
+
+  // ---- ⑤ 渲染：小节线右上方画 `转1=D` / `转1=C` ----
+  const svg = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |"d:1=D" 1 2 3 4 |"d:" 1 2 3 4 |\n'), defaultPageConfig))[0]
+  const labels = [...svg.matchAll(/data-keychange="([^"]+)"/g)].map((m) => m[1])
+  check('adj627 渲染出 `转1=D` 与恢复原调的 `转1=C`',
+    labels.join(',') === '转1=D,转1=C', labels.join(','))
+  check('adj627 不写 `d:` 时完全不渲染转调记号',
+    !/data-keychange=/.test(renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n'), defaultPageConfig))[0]),
+    '')
+
+  // ============================================================
+  // adj627b（用户要求，三条）
+  // ============================================================
+  const svgOf = (code: string) => renderScoreToSvg(layoutScore(parseJps(code), defaultPageConfig))[0]
+  const labelsOf = (code: string) => [...svgOf(code).matchAll(/data-keychange="([^"]+)"/g)].map((m) => m[1]).join(',')
+
+  // ---- ⑥ 调名按**用户写法**显示（不折算等音） ----
+  check('adj627b `d:Ab` ⇒ 半音 8 但 keyText 原文 `Ab`（不换算成 `#G`）',
+    KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:Ab" 2 |\n')[0]?.targetKey === 8 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:Ab" 2 |\n')[0]?.keyText === 'Ab',
+    JSON.stringify(KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:Ab" 2 |\n')[0]))
+  check('adj627b 渲染按用户写法：`d:Ab` ⇒ `转1=Ab`、`d:$B` ⇒ `转1=$B`（而非 `转1=#G`/`转1=A#`）',
+    labelsOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:Ab" 2 |\n') === '转1=Ab' &&
+      labelsOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:$B" 2 |\n') === '转1=$B',
+    '')
+  check('adj627b 升降号写在字母前也照原样显示（`d:bE` ⇒ `转1=bE`）',
+    labelsOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:bE" 2 |\n') === '转1=bE',
+    '')
+  check('adj627b `d:` 恢复时显示**描述头调号原文**（`D: $B` ⇒ `转1=$B`，不是 `转1=A#`）',
+    labelsOf('V: 1.0\nB: t\nD: $B\nP: 4/4\nQ: 1 |"d:1=D" 2 |"d:" 2 |\n') === '转1=D,转1=$B',
+    labelsOf('V: 1.0\nB: t\nD: $B\nP: 4/4\nQ: 1 |"d:1=D" 2 |"d:" 2 |\n'))
+
+  // ---- ⑦ 调名后紧跟 `+` / `-`：逐级抬升 / 降低转调记号 ----
+  check('adj627b 解析 `d:1=D+` / `d:D++` / `d:Eb-` / `d:F#+-` ⇒ plus/minus 级数',
+    KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:1=D+" 2 |\n')[0]?.plus === 1 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D++" 2 |\n')[0]?.plus === 2 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:Eb-" 2 |\n')[0]?.minus === 1 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:F#+-" 2 |\n')[0]?.plus === 1 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:F#+-" 2 |\n')[0]?.minus === 1 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D+" 2 |\n')[0]?.keyText === 'D',
+    JSON.stringify(['D+', 'D++', 'Eb-', 'F#+-'].map((k) => KC(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:${k}" 2 |\n`)[0])))
+  check('adj627b `+` 之后的文字仍是普通备注（`d:D+强` ⇒ 显示「强」；`+` 不留在注释里）',
+    KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D+强" 2 |\n')[0]?.plus === 1 &&
+      barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D+强" 2 |\n')[0].comment === '强',
+    JSON.stringify(barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D+强" 2 |\n')[0]))
+  check('adj627b **引号之后**紧跟 `+` / `-` 同样生效（与 adj392 音符注释 `1"注"+` 同一位置）',
+    KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:1=D"+ 2 |\n')[0]?.plus === 1 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D"++ 2 |\n')[0]?.plus === 2 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D"- 2 |\n')[0]?.minus === 1 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D"+- 2 |\n')[0]?.plus === 1 &&
+      KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D"+- 2 |\n')[0]?.minus === 1 &&
+      barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:1=D"+ 2 |\n')[0].comment === undefined,
+    JSON.stringify(['"d:1=D"+', '"d:D"++', '"d:D"-', '"d:D"+-'].map((s) => KC(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |${s} 2 |\n`)[0])))
+  check('adj627b 普通备注（非转调）后的 `+` 不受本改动影响（`"p:2/4"+` 仍无 keyChange、注释原样）',
+    KC('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"p:2/4"+ 2 |\n')[0] === undefined &&
+      barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"p:2/4"+ 2 |\n')[0].comment === 'p:2/4',
+    JSON.stringify(barOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"p:2/4"+ 2 |\n')[0]))
+  const kcYOf = (code: string) => {
+    // 转调记号 <text> 的 y：它带 data-keychange，属性顺序固定（渲染端一处生成）
+    const m = /<text x="[^"]*" y="(-?[\d.]+)"[^>]*data-keychange="/.exec(svgOf(code))
+    return m ? Number(m[1]) : Number.NaN
+  }
+  const yPlain = kcYOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D" 2 |\n')
+  const yPlus1 = kcYOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D+" 2 |\n')
+  const yMinus1 = kcYOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D-" 2 |\n')
+  const yPlus2 = kcYOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D++" 2 |\n')
+  check('adj627b 渲染：`+` 抬升 1 级（y 减少 NOTE_COMMENT_RAISE）、`-` 降低 1 级、`++` 抬升 2 级',
+    Math.abs(yPlain - yPlus1 - NOTE_COMMENT_RAISE) < 0.05 &&
+      Math.abs(yMinus1 - yPlain - NOTE_COMMENT_RAISE) < 0.05 &&
+      Math.abs(yPlain - yPlus2 - 2 * NOTE_COMMENT_RAISE) < 0.05,
+    JSON.stringify({ yPlain, yPlus1, yMinus1, yPlus2 }))
+  check('adj627b 引号内（`"d:D+"`）与引号外（`"d:D"+`）两种写法渲染同一高度（口径一致，可混用）',
+    Math.abs(kcYOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D"+ 2 |\n') - yPlus1) < 0.05,
+    JSON.stringify({ inQuote: yPlus1, outQuote: kcYOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D"+ 2 |\n') }))
+
+  // ---- ⑧ 跳跃 / 终结标志处**自然恢复原调号** ----
+  const revertCases: Array<[string, string]> = [
+    [':| 反复线', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |"d:1=D" 1 2 3 4 :| 1 2 3 4 |\n'],
+    ['|| 终止线', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"d:1=D" 1 2 || 1 2 |\n'],
+    ['||/ 终止线', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"d:1=D" 1 2 ||/ 1 2 |\n'],
+    ['&dc 从头反复', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"d:1=D" 1 2 |&dc 1 2 |\n'],
+    ['&ds 大反复', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"d:1=D" 1 2 |&ds 1 2 |\n'],
+    ['&fine 曲终', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"d:1=D" 1 2 |&fine 1 2 |\n'],
+  ]
+  const CDF = 'C4,D4,E4,F4'
+  const DEFS = 'D4,E4,F#4,G4'
+  const CD = 'C4,D4'
+  const DE = 'D4,E4'
+  revertCases.forEach(([name, code]) => {
+    const p = pitchOf(code)
+    // 第 1 小节 C 调、第 2 小节已转 D 调、**跳跃/终结线之后**回到 C 调（第 3 小节）
+    const ok =
+      name.startsWith(':|')
+        ? p.slice(0, 4).join(',') === CDF && p.slice(4, 8).join(',') === DEFS && p.slice(8, 12).join(',') === CDF
+        : p.slice(0, 2).join(',') === CD && p.slice(2, 4).join(',') === DE && p.slice(4, 6).join(',') === CD
+    check(`adj627b 布局音高：${name} 之后自动回描述头调号（${p.join(' ')}）`, ok, p.join(' '))
+    const sp = seqPitch(code)
+    const okSeq =
+      name.startsWith(':|')
+        ? sp.slice(0, 4).join(',') === CDF && sp.slice(4, 8).join(',') === DEFS
+        : sp.slice(0, 2).join(',') === CD && sp.slice(2, 4).join(',') === DE
+    check(`adj627b 播放音高：${name} 与布局同一口径（${sp.join(' ')}）`, okSeq, sp.join(' '))
+  })
+
+  // ---- ⑩ 调名与描述头**同款**：字母 + 左上角 ♯/♭ 角标（adj627c，用户要求） ----
+  /**
+   * 取「前缀 + 字母(+角标)」这一组 `<text>` 的几何：字母字号/x/y、角标 x/y/字号、字母右移量。
+   * `marker` 用来在众多 `<text>` 里挑出目标（描述头 `data-meta="keyline"` / 转调记号 `data-keychange=`）。
+   */
+  const keyNameGeom = (svg: string, marker: string) => {
+    const re =
+      /<text ([^>]*)>[^<]*<tspan dx="([\d.]+)">([A-G])<\/tspan><\/text>\s*<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>([♯♭])<\/text>/g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(svg))) {
+      if (!m[1].includes(marker)) continue
+      const num = (re2: RegExp) => Number(re2.exec(m![1])?.[1] ?? NaN)
+      return {
+        lx: num(/x="([\d.]+)"/),
+        ly: num(/y="([\d.]+)"/),
+        lfs: num(/font-size="([\d.]+)"/),
+        dx: Number(m[2]),
+        letter: m[3],
+        ax: Number(m[4]),
+        ay: Number(m[5]),
+        afs: Number(m[6]),
+        glyph: m[7],
+      }
+    }
+    return null
+  }
+  const svgAb = svgOf('V: 1.0\nB: t\nD: Ab\nP: 4/4\nQ: 1 |"d:Ab" 2 |\n')
+  const gHead = keyNameGeom(svgAb, 'data-meta="keyline"')
+  const gKc = keyNameGeom(svgAb, 'data-keychange="转1=Ab"')
+  check('adj627c 转调记号的调名与描述头**同款**：都是「字母 + 左上角 ♯/♭ 角标」两笔（不再是普通字母 b）',
+    gHead !== null && gKc !== null && gHead.glyph === '♭' && gKc.glyph === '♭' && gKc.letter === 'A' && gKc.dx > 0,
+    JSON.stringify({ gHead, gKc }))
+  check('adj627c 两处笔法一致：角标字号 = 字母 3/4、角标上移 0.35×字母字号、字母右移 0.9×角标字号让位',
+    gHead !== null && gKc !== null &&
+      Math.abs(gHead.afs - gHead.lfs * 0.75) <= 0.1 && Math.abs(gHead.ay - (gHead.ly - 0.35 * gHead.lfs)) <= 0.1 &&
+      Math.abs(gHead.dx - 0.9 * gHead.afs) <= 0.1 &&
+      Math.abs(gKc.afs - gKc.lfs * 0.75) <= 0.1 && Math.abs(gKc.ay - (gKc.ly - 0.35 * gKc.lfs)) <= 0.1 &&
+      Math.abs(gKc.dx - 0.9 * gKc.afs) <= 0.1,
+    JSON.stringify({ gHead, gKc }))
+  check('adj627c 角标落在字母**左上方**（比字母基线高、且从调名起点之后起笔）',
+    gHead !== null && gKc !== null &&
+      gHead.ax > gHead.lx && gHead.ay < gHead.ly && gKc.ax > gKc.lx && gKc.ay < gKc.ly,
+    JSON.stringify({ gHead, gKc }))
+  check('adj627c `转1=$B` / `转1=bE` 的降号、`转1=#F` 的升号同样按角标画（两种降号写法都认）',
+    keyNameGeom(svgOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:$B" 2 |\n'), 'data-keychange="转1=$B"')?.glyph === '♭' &&
+      keyNameGeom(svgOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:bE" 2 |\n'), 'data-keychange="转1=bE"')?.glyph === '♭' &&
+      keyNameGeom(svgOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:#F" 2 |\n'), 'data-keychange="转1=#F"')?.glyph === '♯',
+    '')
+  check('adj627c 无升降号的调名仍是单笔文字（`转1=C` 不带角标，与描述头 `1 = C` 一致）',
+    !/data-keychange="转1=C"[^>]*>转1=<tspan/.test(svgOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:1=D" 2 |"d:" 2 |\n')) &&
+      /data-keychange="转1=C"[^>]*>转1=C<\/text>/.test(svgOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:1=D" 2 |"d:" 2 |\n')),
+    '')
+  check('adj627c 布局端把调名原文单独给出（`keyChangeName`，渲染端才能拆成字母+角标两笔）',
+    layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:Ab" 2 |\n'), defaultPageConfig)
+      .pages[0].barlines.some((b) => b.keyChangeName === 'Ab' && b.keyChangeLabel === '转1=Ab'),
+    '')
+  check('adj627c `+` 抬升对「字母 + 角标」整体生效（角标跟着字母一起抬，不能只抬一半）',
+    (() => {
+      const y0 = keyNameGeom(svgOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:Ab" 2 |\n'), 'data-keychange')!
+      const y1 = keyNameGeom(svgOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:Ab"+ 2 |\n'), 'data-keychange')!
+      return Math.abs(y0.ly - y1.ly - NOTE_COMMENT_RAISE) < 0.05 && Math.abs(y0.ay - y1.ay - NOTE_COMMENT_RAISE) < 0.05 &&
+        Math.abs(y1.ay - (y1.ly - 0.35 * y1.lfs)) < 0.1
+    })(),
+    '')
+
+  check('adj627d 转调记号只要粗体、**不要斜体**（用户要求；斜体让角标与字母贴合发飘）',
+    (() => {
+      const s = svgOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:Ab" 2 |\n')
+      const tag = /<text [^>]*data-keychange="转1=Ab"[^>]*>/.exec(s)?.[0] ?? ''
+      return tag.includes('font-weight="bold"') && !tag.includes('font-style="italic"')
+    })(),
+    /<text [^>]*data-keychange="转1=Ab"[^>]*>/.exec(svgOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:Ab" 2 |\n'))?.[0] ?? '')
+
+  // ---- ⑪ 复原规则不反向影响：显式 `d:` 压过隐式回原调；无转调时一切照旧 ----
+  check('adj627b 跳跃线上**显式**转调照常生效（`:|"d:1=D"` ⇒ 该线之后是 D 调；显式压过隐式回原调）',
+    pitchOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 :|"d:1=D" 1 2 |\n').slice(2, 4).join(',') === DE,
+    pitchOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 :|"d:1=D" 1 2 |\n').join(' '))
+  check('adj627b 转调线与跳跃线**紧邻**时（`|"d:1=D" :|`）中间没有小节可转 ⇒ 立即回原调（口径即"跳跃标志回原调"）',
+    pitchOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"d:1=D" :| 1 2 |\n').join(' ') === 'C4 D4 C4 D4',
+    pitchOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"d:1=D" :| 1 2 |\n').join(' '))
+  check('adj627b 没有 `d:` 的谱面，反复/终止线处不受影响（全曲 C 调）',
+    pitchOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 | 3 4 :| 5 6 || 7 1 |\n').join(' ') ===
+      'C4,D4,E4,F4,G4,A4,B4,C4'.split(',').join(' '),
+    pitchOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 | 3 4 :| 5 6 || 7 1 |\n').join(' '))
+  check('adj627b 转调记号在跳跃线上**照样渲染**（记号与"回原调"是两件事）',
+    labelsOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"d:1=D" 1 2 :| 1 2 |\n') === '转1=D',
+    '')
+}
+
+/**
+ * adj629（用户要求）：**替谱段 `{tp … }`**——"同一小节两遍不同奏法"（谱面上那种括号 ossia）。
+ *
+ * 语法（用户确认的方案）：写在**歌词行**里，**第 k 段歌词 = 第 k 遍**
+ *   · `C:` = 第 1 遍、`C2:` = 第 2 遍、`C3:` = 第 3 遍……加一段歌词就多一套替谱；
+ *   · 段内 = "这一遍与主旋律不同"的那几个音（按曲谱语法写，可含时值/连音/倚音/装饰）；
+ *   · **锚点** = 段后第一个歌词字对应的音符；**长度** = 段内总拍数（段本身不占主旋律拍）。
+ *
+ * 预览：画在**所属歌词行上方**（即曲行下方、第 k 行歌词之上）、自动圆括号、与主旋律同拍位对齐；
+ * 主旋律与所有歌词行照常显示。没写 `{tp}` 的谱面零影响（逐项几何断言）。
+ */
+function runAdj629Tests() {
+  console.log('[151] 替谱段 {tp … }（adj629）')
+  const HEAD = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  const QROW = 'Q: |: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 :|\n'
+  const L1 = 'C: 一 二 三 四 五 六 七 八 九 十 甲 乙 丙 丁 戊 己\n'
+  // 第 2 段歌词：前 8 字与主旋律前两小节一一对应 ⇒ `{tp}` 锚在第 9 个音（第 3 小节第 1 拍）
+  const L2 = 'C2: 一 二 三 四 五 六 七 八 {tp 4/ 3/ 6,/ 6,/ 1/ 1/ 1} 九 十 甲 乙 丙 丁 戊 己\n'
+  const CODE = HEAD + QROW + L1 + L2
+  // 基线（对照）：同样的两行歌词，但**不写 `{tp}`**
+  const NO_TP = HEAD + QROW + L1 + 'C2: 一 二 三 四 五 六 七 八 九 十 甲 乙 丙 丁 戊 己\n'
+
+  // ---- ① 解析：段落在歌词行上，锚点 = 段前已提交的字数（= 槽位号），段内按曲谱语法解析 ----
+  const parsed = parseJps(CODE)
+  const v = parsed.groups[0].lyrics[1]?.variants?.[0]
+  check('adj629 歌词行里的 `{tp … }` 被解析成该行的 variants（含锚点槽位与段内 token）',
+    parsed.errors.length === 0 && v !== undefined && v.slot === 8 && v.tokens.length === 7,
+    JSON.stringify({ errors: parsed.errors.map((e) => e.message), slot: v?.slot, tokens: v?.tokens.length }))
+  const vTok = v?.tokens ?? []
+  const vBeats = vTok.reduce((a, t) => a + tokenDuration(t as never), 0)
+  check('adj629 段内 token 按曲谱语法解析（音符/减时线都认：4/ 3/ 6,/ 6,/ 1/ 1/ 1 = 4 拍）',
+    vTok.length === 7 && vTok.every((t) => t.kind === 'note') && Math.abs(vBeats - 4) < 1e-9,
+    JSON.stringify({ kinds: vTok.map((t) => t.kind), beats: vBeats }))
+  check('adj629 段本身**不占歌词位**（本行歌词仍是 16 个字，字位不变）',
+    parsed.groups[0].lyrics[1].chars.length === 16,
+    String(parsed.groups[0].lyrics[1].chars.length))
+
+  // ---- ② 注入：替谱段以 `segment(type:'tp', pass:2)` 出现在曲行 token 流里，位置正好在锚点音之前 ----
+  const toks = parsed.groups[0].music.tokens
+  const tpOpen = toks.findIndex((t) => t.kind === 'segment' && t.type === 'tp' && t.dir === 'open')
+  const durIdx: number[] = []
+  toks.forEach((t, i) => {
+    if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') durIdx.push(i)
+  })
+  check('adj629 替谱段注入曲行 token 流：`type=tp` + `pass=2`（= 第 2 条歌词行）',
+    tpOpen >= 0 && (toks[tpOpen] as { pass?: number }).pass === 2,
+    JSON.stringify(toks[tpOpen]))
+  check('adj629 注入位置 = 第 9 个计时 token（锚点音）之前 ⇒ 包络从第 3 小节第 1 拍起',
+    durIdx[8] === tpOpen + 2,
+    JSON.stringify({ open: tpOpen, close: tpOpen + 1, dur9: durIdx[8] }))
+
+  // ---- ③ 报错：曲行里写 `{tp}` / 未闭合 / 段内再嵌套 ----
+  const errOf = (code: string) => parseJps(code).errors.map((e) => e.message).join(' | ')
+  check('adj629 `{tp … }` 写在**曲行**里报错并提示"只能写在歌词行"',
+    /只能写在歌词行/.test(errOf(HEAD + 'Q: 1 2 {tp 3 4} 5 6 |\n')),
+    errOf(HEAD + 'Q: 1 2 {tp 3 4} 5 6 |\n'))
+  check('adj629 歌词行里的 `{tp` 未闭合报错（提示成对闭合）',
+    /替谱段/.test(errOf(HEAD + QROW + 'C2: 一 二 {tp 3 4\n')),
+    errOf(HEAD + QROW + 'C2: 一 二 {tp 3 4\n'))
+  check('adj629 替谱段内**不支持嵌套**（段内再写段头报"嵌套"）',
+    /嵌套/.test(errOf(HEAD + QROW + 'C2: 一 二 {tp 3 {bz 4 5} 6}\n')),
+    errOf(HEAD + QROW + 'C2: 一 二 {tp 3 {bz 4 5} 6}\n'))
+
+  // ---- ④ 排版：替谱层音符带 `segment.type='tp'`、位置在所属歌词行**上方**、与锚点音同 x 起 ----
+  const lay = layoutScore(parseJps(CODE), defaultPageConfig)
+  const layNo = layoutScore(parseJps(NO_TP), defaultPageConfig)
+  const p0 = lay.pages[0]
+  const mainNotes = p0.notes.filter((n) => !n.segment)
+  const tpNotes = p0.notes.filter((n) => n.segment?.type === 'tp')
+  check('adj629 替谱层的 7 个音都放进页面（带 `segment.type=tp` 标记，不混进主旋律）',
+    tpNotes.length === 7 && mainNotes.length === 16 && tpNotes.every((n) => n.segment?.pass === 2),
+    JSON.stringify({ tp: tpNotes.length, main: mainNotes.length }))
+  check('adj629 本行富余充足时主旋律逐项不动（段层更密的拍会按多声部规则撑宽，见 §adj629m）',
+    JSON.stringify(layNo.pages[0].notes.map((n) => [n.x, n.y, n.audioPitch])) ===
+      JSON.stringify(mainNotes.map((n) => [n.x, n.y, n.audioPitch])),
+    '')
+  const lyricRows = [...new Set(p0.lyrics.map((l) => l.y))].sort((a, b) => a - b)
+  check('adj629 替谱层夹在**第 1 行歌词与第 2 行歌词之间**（画在所属歌词行上方，不压字）',
+    lyricRows.length === 2 &&
+      tpNotes.every((n) => n.y > lyricRows[0] && n.y < lyricRows[1]),
+    JSON.stringify({ lyricRows, tpTop: Math.min(...tpNotes.map((n) => n.y)), tpBottom: Math.max(...tpNotes.map((n) => n.y)) }))
+  const anchor = mainNotes[8] // 第 9 个音 = 第 3 小节第 1 拍 = 「九」
+  const tpFirst = tpNotes.reduce((a, b) => (b.x < a.x ? b : a))
+  const tpLast = tpNotes.reduce((a, b) => ((b.rightX ?? b.x) > (a.rightX ?? a.x) ? b : a))
+  // 第 3 小节**末尾**的小节线 = 锚点音右侧第一根主旋律小节线（不按下标数，避免数错）
+  const bar3End = Math.min(...p0.barlines.filter((b) => !b.segment && b.x > anchor.x).map((b) => b.x))
+  check('adj629 替谱层与主旋律**同拍位对齐**：层首音 x = 锚点音 x（第 3 小节第 1 拍）',
+    Math.abs(tpFirst.x - anchor.x) < 1.5,
+    JSON.stringify({ tpFirst: tpFirst.x, anchor: anchor.x }))
+  check('adj629 替谱层右端不越过第 3 小节的小节线（包络右界 = 该线）',
+    (tpLast.rightX ?? tpLast.x) <= bar3End + 1.5,
+    JSON.stringify({ tpRight: tpLast.rightX ?? tpLast.x, bar3End }))
+  const lyric2No = [...new Set(layNo.pages[0].lyrics.map((l) => l.y))].sort((a, b) => a - b)[1]
+  check('adj629 为该行**预留了高度**（第 2 行歌词被推下）而曲行本身不动',
+    lyricRows.length === 2 && lyric2No !== undefined && lyricRows[1] > lyric2No &&
+      mainNotes[0].y === layNo.pages[0].notes.filter((n) => !n.segment)[0].y,
+    JSON.stringify({ withTp: lyricRows[1], noTp: lyric2No }))
+
+  // ---- ⑤ 预览：替谱层自动圆括号（一对 `(` `)`）+ 包络范围（供色块用） ----
+  const tpBracketBand = p0.brackets.filter(
+    (b) => b.yTop > lyricRows[0] && b.yTop < lyricRows[1] + 2 && (b.code === 'zkh' || b.code === 'ykh'),
+  )
+  check('adj629 替谱层自动画**一对圆括号**（zkh/ykh，落在该层的纵向带内）',
+    tpBracketBand.length === 2 && tpBracketBand.some((b) => b.code === 'zkh') && tpBracketBand.some((b) => b.code === 'ykh'),
+    JSON.stringify(tpBracketBand.map((b) => [b.code, b.x, b.yTop])))
+  const tpRange = (p0.segmentBrackets ?? []).filter((b) => b.type === 'tp')
+  check('adj629 替谱段记录包络范围（`segmentBrackets.type= tp`，左右界分别贴着锚点音与小节线）',
+    tpRange.length === 1 && Math.abs(tpRange[0].x1 - anchor.x) < 18 && tpRange[0].x2 <= bar3End + 1.5,
+    JSON.stringify(tpRange.map((b) => [b.x1, b.x2])))
+  const svg = renderScoreToSvg(lay)[0]
+  // 渲染端的 `data-notepos` 是 `page_voice_group_index` 编码（见 render 的 `noteposId`）
+  const nidOf = (n: (typeof tpNotes)[number]) => `${n.id.page}_${n.id.voice}_${n.id.group}_${n.id.index}`
+  check('adj629 渲染出替谱层：SVG 里出现段层括号字形与段内音符（不再只是普通文字）',
+    tpBracketBand.length === 2 &&
+      tpBracketBand.every((b) => svg.includes(`x="${b.x}"`)) &&
+      tpNotes.every((n) => svg.includes(`data-notepos="${nidOf(n)}"`)),
+    JSON.stringify({ bands: tpBracketBand.map((b) => b.x), ids: tpNotes.map((n) => n.id.index) }))
+
+  // ---- ⑥ 设置项：`segmentRowGap.tp` = 替谱层基线到**所属歌词行**的间距（默认 22） ----
+  const layBig = layoutScore(parseJps(CODE), { ...defaultPageConfig, segmentRowGap: { tp: 60 } })
+  const tpY = Math.min(...tpNotes.map((n) => n.y))
+  const tpYBig = Math.min(...layBig.pages[0].notes.filter((n) => n.segment?.type === 'tp').map((n) => n.y))
+  const lyric2Big = [...new Set(layBig.pages[0].lyrics.map((l) => l.y))].sort((a, b) => a - b)[1]
+  // ---- ⑩ adj629e/f（用户要求）：拖替谱虚线动**替谱层**；拖歌词虚线只改歌词间距；虚线取压缩后的层中心 ----
+  const tpYof = (l: ReturnType<typeof layoutScore>) =>
+    Math.min(...l.pages[0].notes.filter((n) => n.segment?.type === 'tp').map((n) => n.y))
+  const lyricYsOf = (l: ReturnType<typeof layoutScore>) =>
+    [...new Set(l.pages[0].lyrics.map((x) => x.y))].sort((a, b) => a - b)
+  // 三条虚线的口径（用户明确）：歌词1↔曲部 = quci；歌词2↔歌词1 = cici(A)；替谱行↔其下方歌词行 = tp
+  const ciciCfg = { ...defaultPageConfig, height_cici: (defaultPageConfig.height_cici ?? 0) + 60 }
+  const layCici = layoutScore(parseJps(CODE), ciciCfg)
+  check('adj629e 拖**歌词行虚线**（`height_cici` = A）⇒ 歌词行之间距离整体拉开（替谱层紧随其下方歌词行）',
+    lyricYsOf(layCici)[1] > lyricRows[1] + 30 &&
+      Math.abs(lyricYsOf(layCici)[1] - lyricRows[1] - (tpYof(layCici) - tpYof(lay))) < 0.2,
+    JSON.stringify({ lyric2: [lyricRows[1], lyricYsOf(layCici)[1]], tp: [tpYof(lay), tpYof(layCici)] }))
+  const layGap = layoutScore(parseJps(CODE), { ...defaultPageConfig, segmentRowGap: { tp: 30 } })
+  check('adj629e 拖**替谱虚线**（`segmentRowGap.tp`）⇒ **只动替谱层**：tp 越大层越高，下方歌词行纹丝不动',
+    tpYof(layGap) < tpYof(lay) - 10 && Math.abs(lyricYsOf(layGap)[1] - lyricRows[1]) < 0.15,
+    JSON.stringify({ tp: [tpYof(lay), tpYof(layGap)], lyric2: [lyricRows[1], lyricYsOf(layGap)[1]] }))
+  check('adj629e 有替谱时歌词行间距 = A + B（B ≈ 替谱层高），没替谱时 = A',
+    lyricRows[1] - lyricRows[0] > lyricYsOf(layNo)[1] - lyricYsOf(layNo)[0] + 4 &&
+      Math.abs(lyricYsOf(layNo)[1] - lyricYsOf(layNo)[0] - (defaultPageConfig.geci_size + 4 + (defaultPageConfig.height_cici ?? 0))) <
+        0.15,
+    JSON.stringify({
+      withTp: lyricRows[1] - lyricRows[0],
+      noTp: lyricYsOf(layNo)[1] - lyricYsOf(layNo)[0],
+      cici: defaultPageConfig.height_cici,
+    }))
+  const guidesTp = computeRowGuides(lay, { quci: 15, geci: defaultPageConfig.geci_size }, defaultPageConfig.note_size)[0]
+  const wantCenter = tpYof(lay) - defaultPageConfig.note_size * 0.4 * SEGMENT_LAYER_YSCALE
+  check('adj629f 替谱层虚线画在**压缩后**的层高中间（基线 − 0.4×字号×2/3，而不是未压缩的中心）',
+    guidesTp.some((g) => g.segType === 'tp' && Math.abs(g.yCenter - wantCenter) < 0.2),
+    JSON.stringify({ want: wantCenter, got: guidesTp.filter((g) => g.segType === 'tp').map((g) => g.yCenter) }))
+  // adj629g：歌词虚线的目标键要按**歌词行序号**判，否则替谱层会让第 2 行歌词的序号重置成 0 → 错拖 quci
+  const lyricLines = lay.pages[0].lyrics.map((l) => l.line)
+  const guideLines = guidesTp.flatMap((g) => g.lyricRows.map((lr) => lr.line))
+  check('adj629g 歌词行序号随 `PlacedLyric.line` 落到 `RowGuide.lyricRows[].line`（第 2 行 = 1 ⇒ 拖 cici）',
+    lyricLines.includes(0) &&
+      lyricLines.includes(1) &&
+      guideLines.includes(0) &&
+      guideLines.includes(1) &&
+      new Set(guideLines).size >= 2,
+    JSON.stringify({ placed: [...new Set(lyricLines)], guides: guideLines }))
+  check('adj629g 预览按 `lr.line ?? k` 选 `height_quci` / `height_cici`（源码级；替谱层不影响第 2 行的判定）',
+    /\(lr\.line \?\? k\) === 0 \? 'height_quci' : 'height_cici'/.test(String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))),
+    '')
+
+  // ---- ⑪ adj629h：歌词行里的 `{tp … }` 也要按**曲部规则**格式化 / 着色 ----
+  check('adj629h 格式化：`{tp … }` 段内按曲行规则补空格，歌词文字原样（`4/3/6` → `4/ 3/ 6`）',
+    formatLine('C2: 有 人 {tp 4/3/6|1} 借 一') === 'C2: 有 人 {tp 4/ 3/ 6 | 1} 借 一',
+    formatLine('C2: 有 人 {tp 4/3/6|1} 借 一'))
+  check('adj629h 格式化：没有替谱段的歌词行**原样不动**（不会被动到字距）',
+    formatLine('C2: 有 人 唱 情 歌') === 'C2: 有 人 唱 情 歌' &&
+      formatLine('C: 一 二 三') === 'C: 一 二 三',
+    formatLine('C2: 有 人 唱 情 歌'))
+  check('adj629h 格式化：`C…:` 行头后统一一个空格，段内多个空格收敛',
+    formatLine('C2:   有 人 {tp   4  3  }  借') === 'C2: 有 人 {tp 4 3} 借',
+    formatLine('C2:   有 人 {tp   4  3  }  借'))
+  // adj629h：**按视觉行折行的那个变体**（编辑器实际用的那条）也必须把段内着色成曲部颜色
+  // —— 上一轮只改了非折行变体，用户截图里整行仍是歌词绿，就是这个原因（本断言即行为级回归）
+  {
+    const hlCode = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |\nC: 一 二\nC2: 一 二 {tp 4 3} 三 四\n'
+    const html = highlightCodeWrapped(hlCode, undefined, null, [])
+    const tpAt = html.indexOf('{tp')
+    const tail = html.slice(tpAt, tpAt + 400)
+    check('adj629h 折行变体：`{tp … }` 段内出现 `hl-note`（曲部音符色），不再是整行歌词绿',
+      tpAt >= 0 && /hl-note/.test(tail),
+      tail.slice(0, 160))
+    check('adj629h 折行变体：歌词部分仍是 `hl-lyric`、段头 `{tp` 与段尾 `}` 用行头色',
+      /hl-lyric">[^<]*一 二/.test(html) && /hl-line-header">\{tp/.test(html) && /hl-line-header">\}/.test(tail),
+      html.slice(0, 240))
+  }
+  check('adj629 没写 `{tp}` 的谱面：`segmentRowGap.tp` 不产生任何影响（逐项几何一致）',
+    JSON.stringify(layoutScore(parseJps(NO_TP), { ...defaultPageConfig, segmentRowGap: { tp: 60 } }).pages[0].notes.map((n) => [n.x, n.y])) ===
+      JSON.stringify(layNo.pages[0].notes.map((n) => [n.x, n.y])),
+    '')
+  check('adj629 `# jps-config` 能写 `segmentRowGap.tp`（嵌套数值字段的校验/取整已覆盖）',
+    /segmentRowGap[\s\S]{0,200}tp/.test(String(readFileSync('packages/ijipu-engine/src/engine/settings.ts', 'utf8'))),
+    '')
+
+  // ---- ⑦ 播放：第 k 遍用替谱**替代**主旋律那一段，其它遍仍奏主旋律 ----
+  const playPitch = (code: string) => {
+    const r = parseJps(code)
+    const l = layoutScore(r, defaultPageConfig)
+    const sq = buildPlaySequence(r, l, 60)
+    return sq.events.filter((e) => e.pitched !== false).map((e) => e.pitch ?? e.placed.audioPitch)
+  }
+  // 主旋律：第 3 小节 = `2 3 4 5`（C 调 = D4 E4 F4 G4）；替谱（第 2 遍）= `4/ 3/ 6,/ 6,/ 1/ 1/ 1`（7 音 4 拍）
+  const played = playPitch(CODE)
+  const tp7 = ['F4', 'E4', 'A3', 'A3', 'C4', 'C4', 'C4']
+  check('adj629 播放：第 1 遍奏主旋律、第 2 遍**改奏替谱**（第 3 小节被替换）',
+    played.slice(8, 12).join(',') === 'D4,E4,F4,G4' && played.slice(24, 31).join(',') === tp7.join(','),
+    JSON.stringify({ n: played.length, bar3p1: played.slice(8, 12), tp2: played.slice(24, 31) }))
+  check('adj629 播放：替谱**只换第 3 小节的内容**——两遍的第 4 小节照旧（`6 7 1 2`）',
+    played.slice(12, 16).join(',') === played.slice(31, 35).join(',') &&
+      played.slice(31, 35).join(',') === 'A4,B4,C4,D4',
+    JSON.stringify({ bar4p1: played.slice(12, 16), bar4p2: played.slice(31, 35) }))
+  const evWithTp = (() => {
+    const r = parseJps(CODE)
+    const l = layoutScore(r, defaultPageConfig)
+    return buildPlaySequence(r, l, 60).events.filter((e) => e.placed.segment?.type === 'tp')
+  })()
+  check('adj629 播放：替谱层事件只出现**一遍**（7 个音 = 段内 7 个音符；不是每遍都奏）',
+    evWithTp.length === 7 && evWithTp.every((e) => e.placed.segment?.pass === 2),
+    JSON.stringify({ n: evWithTp.length, passes: [...new Set(evWithTp.map((e) => e.placed.segment?.pass))] }))
+  check('adj629 播放：替谱层音高按曲谱音名给出（`4/ 3/ 6,/ 6,/ 1/ 1/ 1` = F4 E4 A3 A3 C4 C4 C4）',
+    evWithTp.map((e) => e.pitch ?? e.placed.audioPitch).join(',') === tp7.join(','),
+    evWithTp.map((e) => e.pitch ?? e.placed.audioPitch).join(','))
+  check('adj629 告警：没有反复结构时提示"第 2 段歌词的替谱不会生效"（不阻断预览）',
+    (() => {
+      const r = parseJps(HEAD + 'Q: 1 2 3 4 | 5 6 7 1 |\n' + 'C: 一 二 三 四 五 六 七 八\n' + 'C2: 一 二 三 四 {tp 5 5} 五 六 七 八\n')
+      return r.errors.some((e) => e.severity === 'warning' && /替谱段不会生效/.test(e.message))
+    })(),
+    JSON.stringify(parseJps(HEAD + 'Q: 1 2 3 4 | 5 6 7 1 |\n' + 'C: 一 二 三 四 五 六 七 八\n' + 'C2: 一 二 三 四 {tp 5 5} 五 六 七 八\n').errors.map((e) => e.message)))
+
+  // ---- ⑧ adj629b（用户三条要求）：叠层高度压到 2/3（字号不变）、圆括号贴内容、段内连音线 ----
+  const ns6 = defaultPageConfig.note_size
+  const kY = Math.round(SEGMENT_LAYER_YSCALE * 1000) / 1000
+  /** 该层那**一个** `<g transform>` 里的全部内容（整层压扁：不逐个元素各包一层） */
+  const layerGroup = new RegExp(`<g transform="translate\\(0 [\\d.-]+\\) scale\\(1 ${kY}\\)">([\\s\\S]*?)</g>`).exec(svg)?.[1] ?? ''
+  check('adj629b 叠层高度压到 2/3 且**字号不变**（整层一个 `<g>` 压扁，数字仍是主旋律字号）',
+    layerGroup !== '' &&
+      svg.includes(`data-notepos="${nidOf(tpNotes[0])}" font-size="${ns6}"`) &&
+      svg.includes(`data-notepos="${nidOf(mainNotes[0])}" font-size="${ns6}"`) &&
+      layerGroup.includes(`data-notepos="${nidOf(tpNotes[0])}"`),
+    JSON.stringify({ ns: ns6, kY, hasWrap: svg.includes(`scale(1 ${kY})`) }))
+  check('adj629b **整层只包一层 `<g>`**（用户要求：整体压扁，不逐个元素压）',
+    [...svg.matchAll(new RegExp(`scale\\(1 ${kY}\\)">`, 'g'))].length === 1 &&
+      tpNotes.every((n) => layerGroup.includes(`data-notepos="${nidOf(n)}"`)),
+    String([...svg.matchAll(new RegExp(`scale\\(1 ${kY}\\)">`, 'g'))].length))
+  check('adj629b 压扁以**层基线**为不动点（translate = 基线×(1−k)，纵向非等比缩放）',
+    svg.includes(`translate(0 ${Math.round(tpNotes[0].y * (1 - kY) * 10) / 10}) scale(1 ${kY})`),
+    JSON.stringify(tpNotes.slice(0, 2).map((n) => n.y)))
+  check('adj629b 主旋律音符**不受压扁影响**（不在这个 `<g>` 里）',
+    !layerGroup.includes(`data-notepos="${nidOf(mainNotes[0])}"`),
+    '')
+  // 减时线：在同一个 `<g>` 里，且线高已 ÷k 补偿（0.8 / 0.667 ≈ 1.2），压扁后仍是 0.8px
+  check('adj629b 段层**减时线**在同一层组里，且线高预先补偿（压扁后仍可见、不与低八度点相撞）',
+    layerGroup.includes('<rect') && /<rect [^>]*height="1\.2"/.test(layerGroup),
+    JSON.stringify({ hasRect: layerGroup.includes('<rect'), comp: /<rect [^>]*height="1\.2"/.test(layerGroup) }))
+  const ykhTp = tpBracketBand.find((b) => b.code === 'ykh')
+  // 括号中心 = 末音 x + 墨迹宽 + nonDurGap + 括号半宽 ⇒ 距末音 x 约 1.2~1.5×字号；
+  // 关键是"贴着内容"而不是"贴着小节线"（下面第二条：距小节线还有明显余量）
+  check('adj629b **右括号贴最后一个音的墨迹**（不再飘到小节线附近；与末音留出适度间距）',
+    ykhTp !== undefined && ykhTp.x > tpLast.x && ykhTp.x - tpLast.x < ns6 * 1.5 && bar3End - ykhTp.x > 5,
+    JSON.stringify({ ykh: ykhTp?.x, lastNoteX: tpLast.x, bar3End, ns: ns6 }))
+
+  // 段内连音线：`{tp ( 4 3 6 6 )}`（括号前后留空格 = 连音线，与 `(1)` 虚音符区分）
+  const CODE_SLUR = HEAD + QROW + L1 + 'C2: 一 二 三 四 五 六 七 八 {tp ( 4 3 6 6 )} 九 十 甲 乙 丙 丁 戊 己\n'
+  const laySlur = layoutScore(parseJps(CODE_SLUR), defaultPageConfig)
+  const slurTp = laySlur.pages[0].slurs
+  const slurTpNotes = laySlur.pages[0].notes.filter((n) => n.segment?.type === 'tp').sort((a, b) => a.x - b.x)
+  check('adj629b 段内连音线 `( … )` 被放置（段内音符自成一组，LIFO 配对）',
+    slurTp.length === 1 && slurTpNotes.length === 4,
+    JSON.stringify({ slurs: slurTp.length, segNotes: slurTpNotes.length }))
+  check('adj629b 段内连音线两端落在段内首末音上、纵向在段内音符**上方**（并带层内字号比例）',
+    slurTp.length === 1 &&
+      slurTp[0].x1 < slurTpNotes[1].x &&
+      slurTp[0].x2 > slurTpNotes[2].x &&
+      slurTp[0].y < slurTpNotes[0].y &&
+      slurTp[0].layerScale === SEGMENT_LAYER_YSCALE,
+    JSON.stringify(slurTp[0] ?? null))
+  check('adj629b 段内连音线渲染进 SVG（弧线 path 存在）',
+    /<path[^>]*stroke-width/.test(renderScoreToSvg(laySlur)[0]),
+    '')
+
+  // 段层**减时线**也必须一起压扁——否则"数字压了、线没压"，低八度点会与减时线撞在一起
+  // （用户报「现在低八度点与减时线重叠了」）
+  const CODE_BEAM = HEAD + QROW + L1 + 'C2: 一 二 三 四 五 六 七 八 {tp 4/ 3/ 6,/ 6,/} 九 十 甲 乙 丙 丁 戊 己\n'
+  const svgBeam = renderScoreToSvg(layoutScore(parseJps(CODE_BEAM), defaultPageConfig))[0]
+  const beamGroup =
+    new RegExp(`<g transform="translate\\(0 [\\d.-]+\\) scale\\(1 ${kY}\\)">([\\s\\S]*?)</g>`).exec(svgBeam)?.[1] ?? ''
+  check('adj629b 带低八度点的段层：数字/减时线/低八度点同在**一个层组**里，且线高已补偿（不会压在一起）',
+    beamGroup.includes('<rect') && /<rect [^>]*height="1\.2"/.test(beamGroup) && beamGroup.includes('<circle'),
+    JSON.stringify({ hasRect: beamGroup.includes('<rect'), hasDot: beamGroup.includes('<circle') }))
+
+  // ---- ⑨ adj629d：点谱面跳脚本 / 点脚本回谱面 / 试听"点替谱音符跳过去" ----
+  const codeLines = CODE.split('\n')
+  const c2Idx = codeLines.findIndex((l) => l.trimStart().startsWith('C2:'))
+  const c2Start = codeLines.slice(0, c2Idx).reduce((a, l) => a + l.length + 1, 0)
+  const c2 = codeLines[c2Idx]
+  const tpidOf = (n: (typeof tpNotes)[number]) => `${n.id.page}_${n.id.voice}_${n.id.group}_${n.id.index}`
+  const pos0 = noteIdToCodePos(CODE, tpidOf(tpNotes[0]))
+  check('adj629d 替谱音符 → 脚本位置：落在 C2 行的 `{tp … }` 里、且正好是**第一个音**那一列',
+    pos0 !== null && pos0 > c2Start && pos0 < c2Start + c2.length && CODE.slice(pos0, pos0 + 1) === '4',
+    JSON.stringify({ pos: pos0, c2Start, ch: pos0 === null ? null : CODE.slice(pos0, pos0 + 1) }))
+  const posLast = noteIdToCodePos(CODE, tpidOf(tpNotes[tpNotes.length - 1]))
+  check('adj629d 段内**任意一个**音都能定位（最后一个音落在行内后面的列上）',
+    pos0 !== null && posLast !== null && posLast > pos0 && CODE.slice(posLast, posLast + 1) === '1',
+    JSON.stringify({ first: pos0, last: posLast, ch: posLast === null ? null : CODE.slice(posLast, posLast + 1) }))
+  check('adj629d 反向：脚本位置 → 音符 id 与布局给出的 id **完全一致**（往返闭合）',
+    pos0 !== null && codePosToNoteId(CODE, pos0) === tpidOf(tpNotes[0]) &&
+      posLast !== null && codePosToNoteId(CODE, posLast) === tpidOf(tpNotes[tpNotes.length - 1]),
+    JSON.stringify({ back: pos0 === null ? null : codePosToNoteId(CODE, pos0), want: tpidOf(tpNotes[0]) }))
+  check('adj629d 光标落在 `{tp` 段头/段内文字上也算命中（取段内第一个音，不会返回 null）',
+    codePosToNoteId(CODE, c2Start + c2.indexOf('{tp')) === tpidOf(tpNotes[0]),
+    JSON.stringify({ at: c2Start + c2.indexOf('{tp') }))
+  check('adj629d 歌词行里**普通文字**处不产生谱面联动（不会误把歌词当音符）',
+    codePosToNoteId(CODE, c2Start + c2.indexOf('有')) === null,
+    '')
+  // 注意：必须用**同一份** parseResult + layout（段层事件按 token 标识关联，两次 parse 的 token 不是同一批）
+  const rTp = parseJps(CODE)
+  const lTp = layoutScore(rTp, defaultPageConfig)
+  const tpNotesL = lTp.pages[0].notes.filter((n) => n.segment?.type === 'tp')
+  check('adj629d 替谱音符 id 落在**替谱专用命名空间**（组号 + 歌词行号 + 行内序号，可反解）',
+    decodeTpNoteId(tpNotesL[0].id.index) !== null &&
+      tpNotesL[0].id.index === tpNoteIndexBase(0, 1, 0) &&
+      decodeTpNoteId(tpNotesL[3].id.index)?.durSeq === 3,
+    JSON.stringify({ first: tpNotesL[0].id.index, dec: decodeTpNoteId(tpNotesL[0].id.index) }))
+  const seqFromTp = buildPlaySequence(rTp, lTp, 60, tpidOf(tpNotesL[0] as never))
+  check('adj629d 试听：点替谱层第一个音 ⇒ **从该音开始**（第一个事件就是它、atMs=0）',
+    seqFromTp.events.length > 0 &&
+      seqFromTp.events[0].placed.id.index === tpNotesL[0].id.index &&
+      seqFromTp.events[0].atMs === 0,
+    JSON.stringify({
+      first: seqFromTp.events[0]?.placed.id.index,
+      want: tpNotesL[0]?.id.index,
+      atMs: seqFromTp.events[0]?.atMs,
+    }))
+  const seqFromMain = buildPlaySequence(rTp, lTp, 60, nidOf(mainNotes[0]))
+  check('adj629d 主旋律音符的试听起点**不受影响**（仍是原来那一套序号定位）',
+    seqFromMain.events.length > 0 && seqFromMain.events[0].placed.id.index === mainNotes[0].id.index,
+    '')
+
+  // ---- ⑫ adj629k（用户实测《世界赠予我的》三条口径）：拍位精度 / 覆盖判据 / 括号间距 / 歌词跟替谱音 ----
+  // 复刻用户谱面的一段：第 3 小节主旋律 `4/ 3// (6,// 6,/) 1/ 1-`，第 2 遍（C2 行）写
+  // `{tp 4/ 3// (6,// 6,//) 1/.}` = 前两拍。用户报：① 演奏到替谱处"跳音"；
+  // ② 替谱行只压高度不压宽度、上下拍子看着不齐；③ 替谱奏完，第 3 拍那个 `1-` 没演奏到。
+  const K_HEAD = 'V: 1.0\nB: t\nD: Bb\nP: 4/4\n'
+  const K_Q =
+    'Q: |: 1/ 2/ 2/ 3// (5// 5)- | 6,/ 1/ (2// 1//) 1// (3// 3)- | 4/ 3// (6,// 6,/) 1/ 1- | 2/ 3// (4// 4//) (5/ 3//) 3- :|\n'
+  const K_L1 = 'C: 一 二 三 四 五 六 七 八 九 十 甲 乙 丙 丁 戊 己 庚 辛 壬 癸 子 丑 寅 卯 辰 巳 午 未\n'
+  const K_L2 =
+    'C2: 一 二 三 四 五 六 七 八 九 十 甲 乙 丙 {tp 4/ 3// (6,// 6,//) 1/.} 丁 戊 己 庚 辛 壬 癸 子 丑 寅 卯 辰 巳 午 未\n'
+  const K_CODE = K_HEAD + K_Q + K_L1 + K_L2
+  const kr = parseJps(K_CODE)
+  const kl = layoutScore(kr, defaultPageConfig)
+  const kTp = kl.pages[0].notes.filter((n) => n.segment?.type === 'tp')
+  const kMain = kl.pages[0].notes.filter((n) => !n.segment)
+  check('adj629k 解析：段前 13 个非标点字 ⇒ 替谱锚在第 3 小节第 1 拍（`4/`）',
+    kr.errors.length === 0 && kr.groups[0].lyrics[1]?.variants?.[0]?.slot === 13 && kTp.length === 5,
+    JSON.stringify({ errors: kr.errors.map((e) => e.message), slot: kr.groups[0].lyrics[1]?.variants?.[0]?.slot, tp: kTp.length }))
+  check('adj629k 替谱音拍位**保留精度**（0.75 / 1.25，不再被「圆到 0.1」变成 0.8 / 1.3）',
+    kTp.map((n) => n.beatPos).join(',') === '0,0.5,0.75,1,1.25',
+    JSON.stringify(kTp.map((n) => n.beatPos)))
+  const kMainX = (bar: number, beat: number) =>
+    kMain.find((n) => n.barIndex === bar && Math.abs(n.beatPos - beat) < 1e-6)?.x ?? Number.NaN
+  // 注意：布局的 `barIndex` 是**1 基**（第 1 小节 = 1）——替谱锚在第 3 小节 ⇒ barIndex = 3
+  check('adj629k 替谱层与主旋律**逐拍同位**（同一拍 x 完全一致，不是整体压缩后的位置）',
+    [0, 0.5, 0.75, 1].every((b, i) => Math.abs(kTp[i].x - kMainX(3, b)) < 0.15) &&
+      kTp[4].x > kMainX(3, 1) && kTp[4].x < kMainX(3, 1.5),
+    JSON.stringify({ tp: kTp.map((n) => n.x), main: [0, 0.5, 0.75, 1, 1.5, 2].map((b) => kMainX(3, b)) }))
+  // 播放：一遍 = 16 拍 = 16000ms（bpm 60）⇒ 用 atMs 判遍次，不依赖布局内部
+  const kEv = buildPlaySequence(kr, kl, 60).events.filter((e) => e.pitched !== false)
+  const kPassOf = (atMs: number) => Math.floor(atMs / 16000) + 1
+  const kMainEv = (bar: number, beat: number, pass: number) =>
+    kEv.find(
+      (e) => !e.placed.segment && e.placed.barIndex === bar && Math.abs(e.placed.beatPos - beat) < 1e-6 && kPassOf(e.atMs) === pass,
+    )
+  check('adj629k 播放：替谱覆盖区间按**重叠**判定 ⇒ 被盖住的主旋律音（第 2 拍后半的 `1/`）那一遍不发声',
+    kMainEv(3, 1.5, 1) !== undefined && kMainEv(3, 1.5, 2) === undefined,
+    JSON.stringify({ p1: kMainEv(3, 1.5, 1)?.atMs, p2: kMainEv(3, 1.5, 2)?.atMs }))
+  check('adj629k 播放：**替谱奏完回主曲部**——第 3 拍的 `1-`（起点 = 替谱终点）照常发声',
+    kMainEv(3, 2, 2) !== undefined && kMainEv(3, 2, 2)?.atMs === 26000,
+    JSON.stringify({ at: kMainEv(3, 2, 2)?.atMs, pitch: kMainEv(3, 2, 2)?.pitch ?? kMainEv(3, 2, 2)?.placed.audioPitch }))
+  const kTpEv = kEv.filter((e) => e.placed.segment?.type === 'tp')
+  check('adj629k/adj629p 播放：替谱音时刻与拍位精确对应（0.75 拍 = 750ms、1.25 拍 = 1250ms）' +
+    '，且段内同音连音 `(6,// 6,//)` **合并成一个长音**',
+    kTpEv.map((e) => e.atMs).join(',') === [0, 500, 750, 1250].map((b) => 24000 + b).join(',') &&
+      Math.round(kTpEv[2].durationMs) === 500,
+    JSON.stringify(kTpEv.map((e) => `${e.atMs}/${Math.round(e.durationMs)}`)))
+  // 括号：两端都要与音符留间距（左端允许越到小节线左侧，替谱层独占一行）
+  const kBz = kl.pages[0].brackets.filter((b) => b.layerScale !== undefined)
+  const kZkh = kBz.find((b) => b.code === 'zkh')
+  const kYkh = kBz.find((b) => b.code === 'ykh')
+  const kGapL = kZkh ? kTp[0].x - (kZkh.x + kZkh.width / 2) : Number.NaN
+  const kGapR = kYkh ? kYkh.x - kYkh.width / 2 - (kTp[4].x + Math.min(0.62 * defaultPageConfig.note_size, kTp[4].width)) : Number.NaN
+  check('adj629k 替谱两端的括号与音符**留出间距**（左端不再压住首音：旧实现为 −1.7px）',
+    kGapL >= TP_BRACKET_GAP(defaultPageConfig.note_size) - 4 && kGapR >= TP_BRACKET_GAP(defaultPageConfig.note_size) - 1,
+    JSON.stringify({ gapL: kGapL, gapR: kGapR, want: TP_BRACKET_GAP(defaultPageConfig.note_size) }))
+  // 歌词：落在替谱覆盖区里的字跟着**替谱层的音**走（用户要求）
+  const kLy = kl.pages[0].lyrics.filter((l) => l.line === 1)
+  const kLyOf = (n: (typeof kMain)[number] | undefined) =>
+    n ? kLy.find((l) => l.id.index === n.id.index && l.id.group === n.id.group) : undefined
+  const kFirstMain = kMain.find((n) => n.barIndex === 3 && n.beatPos === 0)
+  const kOff = (kLyOf(kFirstMain)?.x ?? 0) - kMainX(3, 0)
+  const kLastMain = kMain.find((n) => n.barIndex === 3 && n.beatPos === 1.5)
+  const kLastLy = kLyOf(kLastMain)
+  check('adj629k 歌词：替谱覆盖区里的字对齐**替谱层的音**（末字跟到替谱最后一个音，而不是停在主旋律音上）',
+    kLastLy !== undefined && kLastMain !== undefined && Math.abs(kLastLy.x - kOff - kTp[4].x) < 0.15,
+    JSON.stringify({ ly: kLastLy?.x, off: kOff, tp: kTp[4].x, main: kMainX(3, 1.5) }))
+
+  // ---- ⑬ adj629m（用户要求）：临时伴奏 / 临时多声部 / 替谱 **三种段层**都按"多声部规则"
+  //      参与**相应曲部**的占宽计算 ⇒ 段层更密的拍把主旋律那一拍一并撑宽（行总宽不变），
+  //      段内最密的音因此拿到 ≥ `minNoteW` 的槽宽（不再被挤成 7px）。 ----
+  const K_HEAD_M = 'V: 1.0\nB: t\nD: Bb\nP: 4/4\n'
+  const K_LINE = (mid: string) =>
+    K_HEAD_M +
+    `Q: |: 1/ 2/ 2/ 3// (5// 5)- | 6,/ 1/ (2// 1//) 1// (3// 3)- | ${mid} 4/ 3// (6,// 6,/) 1/ 1- | 2/ 3// (4// 4//) (5/ 3//) 3- :|\n` +
+    K_L1
+  /** 某小节某拍上主旋律音符的槽宽 */
+  const beatW = (lay: ReturnType<typeof layoutScore>, bar: number, beat: number): number =>
+    lay.pages.flatMap((p) => p.notes).find((n) => !n.segment && n.barIndex === bar && Math.abs(n.beatPos - beat) < 1e-6)?.width ?? Number.NaN
+  const wNoSeg = beatW(layoutScore(parseJps(K_LINE('')), defaultPageConfig), 3, 1)
+  /** 段层最密的音（16 分）的槽宽 —— 多声部规则要求它 ≥ `minNoteW`（= 数字槽 + H_GAP） */
+  const minSlotW = digitSlotW(defaultPageConfig.note_size) + H_GAP - 0.6
+  for (const t of ['bz', 'dsb'] as const) {
+    const lay = layoutScore(parseJps(K_LINE(`{${t} 4/ 3// (6,// 6,//) 1/.}`)), defaultPageConfig)
+    const wSeg = beatW(lay, 3, 1)
+    const seg16 = lay.pages
+      .flatMap((p) => p.notes)
+      .filter((n) => n.segment && Math.abs(n.duration - 0.25) < 1e-9)
+      .sort((a, b) => a.x - b.x)[0]
+    check(`adj629m \`{${t}}\` 更密的拍按**多声部规则**撑宽主旋律那一拍（行总宽不变）`,
+      wSeg > wNoSeg + 1 && seg16 !== undefined && (seg16.width ?? 0) >= minSlotW,
+      JSON.stringify({ noSeg: wNoSeg, withSeg: wSeg, seg16: seg16?.width, need: minSlotW }))
+  }
+  {
+    // tp：同一段内容写在**歌词行**里（第 2 遍），主旋律那一拍同样要按多声部规则让出宽度
+    const layTp = layoutScore(
+      parseJps(
+        K_HEAD_M +
+          `Q: |: 1/ 2/ 2/ 3// (5// 5)- | 6,/ 1/ (2// 1//) 1// (3// 3)- | 4/ 3// (6,// 6,/) 1/ 1- | 2/ 3// (4// 4//) (5/ 3//) 3- :|\n` +
+          K_L1 +
+          'C2: 一 二 三 四 五 六 七 八 九 十 甲 乙 丙 {tp 4/ 3// (6,// 6,//) 1/.} 丁 戊 己 庚 辛 壬 癸 子 丑 寅 卯 辰 巳 午 未\n',
+      ),
+      defaultPageConfig,
+    )
+    const wTp = beatW(layTp, 3, 1)
+    const tp16 = layTp.pages
+      .flatMap((p) => p.notes)
+      .filter((n) => n.segment?.type === 'tp' && Math.abs(n.duration - 0.25) < 1e-9)
+      .sort((a, b) => a.x - b.x)[0]
+    check('adj629m `{tp}` 同样参与该拍占宽（多声部规则）——替谱内 16 分音符拿到足够槽宽',
+      wTp > wNoSeg + 1 && tp16 !== undefined && (tp16.width ?? 0) >= minSlotW,
+      JSON.stringify({ noSeg: wNoSeg, withTp: wTp, tp16: tp16?.width, need: minSlotW }))
+  }
+}
+
+// ---- adj629n（用户报「伴奏里的 `0/ 2/` 预览里下面没有减时线」）----
+// 根因不在引擎，而在**预览 CSS**：`.preview-svg rect:first-child` 想透明化页面白底，
+// 但它匹配"任意父元素下的第一个 rect"——段层（`{bz}`/`{dsb}`/`{tp}`）整层包在一个 `<g>` 里，
+// 该 `<g>` 的第一个子元素**正是第一条减时线** ⇒ 被填成透明（同层第二条正常）。
+console.log('[adj629n] page background rect marker / preview CSS selector scope')
+{
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 0 0/ 2/ 3 | {bz 2' 1' 0/ 2/ 3/ 5/ } 1 - - - |\n"
+  const svg = renderScoreToSvg(layoutScore(parseJps(src), DUR_CFG))[0]
+  check('adj629n 页面白底 rect 带 `data-page-bg` 标记（宿主透明化时按它选，不能用 rect:first-child）',
+    /<rect data-page-bg="1" x="0" y="0" width="100%" height="100%" fill="#ffffff"\/>/.test(svg),
+    svg.slice(0, 200))
+  const groups = [...svg.matchAll(/<g transform="translate\(0 [\d.-]+\) scale\(1 0\.667\)">([\s\S]*?)<\/g>/g)].map((m) => m[1])
+  const beamsOf = (g: string): string[] => [...g.matchAll(/<rect x="[\d.]+" y="[\d.]+" width="[\d.]+" height="1\.2"/g)].map((m) => m[0])
+  check('adj629n 段层里**含休止符**的那对八分音符也有减时线（`0/ 2/` 与 `3/ 5/` 两条都在）',
+    groups.length === 1 && beamsOf(groups[0]).length === 2,
+    JSON.stringify({ groups: groups.length, beams: groups.map((g) => beamsOf(g).length) }))
+  check('adj629n 段层 `<g>` 的第一个子元素就是减时线（所以"按 first-child 选"必然误伤它）',
+    groups.length === 1 && groups[0].trimStart().startsWith('<rect '),
+    groups[0]?.slice(0, 80) ?? '(none)')
+  const cssFlat = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  check('adj629n 预览 CSS 按 `[data-page-bg]` 透明白底，**不再**用裸 `.preview-svg rect:first-child`',
+    /\.preview-svg \[data-page-bg\]/.test(cssFlat) && !/\.preview-svg rect:first-child/.test(cssFlat),
+    '')
+}
+
+// ---- adj629r（用户报「`(6- | 6[h1'/])` 该是一个 `6` 奏 4 拍 + 末尾一个后倚音，实际 6 奏了两次」）----
+// 跨小节同音连线 + **末尾后倚音**：后倚音占的正是这个长音的末尾 ⇒ 允许合并（延长前者、把后倚音挪到末尾），
+// 而**前倚音**仍不合并（它要占本音符开头，并进来会被吞）。
+console.log('[adj629r] tie across bars + trailing grace merges into one long note')
+{
+  const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (6- | 6[h1'/])- | 1 2 3 4 |\n"
+  const r = parseJps(src)
+  const evs = buildPlaySequence(r, layoutScore(r, defaultPageConfig), 60).events.filter((e) => e.pitched !== false)
+  const a4 = evs.filter((e) => (e.pitch ?? e.placed.audioPitch) === 'A4')
+  const c5 = evs.find((e) => (e.pitch ?? e.placed.audioPitch) === 'C5')
+  check('adj629r 跨小节同音连线**只起奏一次**（A4 只有一个事件，而不是两个）',
+    r.errors.length === 0 && a4.length === 1,
+    JSON.stringify(evs.map((e) => `${Math.round(e.atMs)}+${Math.round(e.durationMs)}:${e.pitch ?? e.placed.audioPitch}`)))
+  check('adj629r 末尾**后倚音**排在这个长音的末尾（主音让出最后一小段；两者合计 = 4 拍 = 4000ms）',
+    a4[0] !== undefined &&
+      c5 !== undefined &&
+      Math.round(a4[0].atMs) === 0 &&
+      Math.round(c5.atMs) === Math.round(a4[0].atMs + a4[0].durationMs) &&
+      Math.round(c5.atMs + c5.durationMs) === 4000,
+    JSON.stringify({ a4: `${a4[0]?.atMs}+${a4[0]?.durationMs}`, c5: `${c5?.atMs}+${c5?.durationMs}` }))
+  // 反例：**前**倚音不合并（它要占本音符开头，并进来会被吞）
+  const srcFront = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (6- | 6[1'/]-)- | 1 2 3 4 |\n"
+  const r2 = parseJps(srcFront)
+  const evs2 = buildPlaySequence(r2, layoutScore(r2, defaultPageConfig), 60).events.filter((e) => e.pitched !== false)
+  const a4b = evs2.filter((e) => (e.pitch ?? e.placed.audioPitch) === 'A4')
+  check('adj629r 带**前**倚音的同音不合并（前倚音必须有自己的起奏点）',
+    a4b.length === 2,
+    JSON.stringify(evs2.map((e) => `${Math.round(e.atMs)}+${Math.round(e.durationMs)}:${e.pitch ?? e.placed.audioPitch}`)))
+}
+
+// ---- adj629p（用户报「`{tp 4/ 5// (6// 6/) 5/}` 里 `(6// 6/)` 是连音，但实际演奏了两个音符」）----
+// 段层事件原来是逐音 push 的，没走主旋律那套"同音 + 同连音线 ⇒ 合并"（adj89）⇒ 连音成了两次起奏。
+console.log('[adj629p] tied notes inside a segment are merged (same pitch + same slur)')
+{
+  const tap = (tp: string) =>
+    'V: 1.0\nB: t\nD: C\nP: 4/4\n' +
+    'Q: |: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 :|\n' +
+    'C: 一 二 三 四 五 六 七 八 九 十 甲 乙 丙 丁 戊 己\n' +
+    `C2: 一 二 三 四 五 六 七 八 {tp ${tp}} 九 十 甲 乙 丙 丁 戊 己\n`
+  const segEvs = (tp: string) => {
+    const r = parseJps(tap(tp))
+    return buildPlaySequence(r, layoutScore(r, defaultPageConfig), 60).events.filter((e) => e.placed.segment?.type === 'tp')
+  }
+  const tied = segEvs('4/ 5// (6// 6/) 5/')
+  check('adj629p 段内**同音连音** `(6// 6/)` 合并成一个长音（0.25 + 0.5 = 0.75 拍 = 750ms）',
+    tied.length === 4 && Math.round(tied[2].durationMs) === 750 && Math.round(tied[2].atMs) === 24750,
+    JSON.stringify(tied.map((e) => `${e.atMs}/${Math.round(e.durationMs)}`)))
+  const notTied = segEvs('4/ 5// (6// 7/) 5/')
+  check('adj629p 段内**不同音高**的连音不合并（仍是两个音）',
+    notTied.length === 5 && Math.round(notTied[2].durationMs) === 250 && Math.round(notTied[3].durationMs) === 500,
+    JSON.stringify(notTied.map((e) => `${e.atMs}/${Math.round(e.durationMs)}`)))
+}
+
+// ---- adj629o（用户报「上面这段里 XXX 这几拍没有演奏出来」）----
+// 根因：替谱"覆盖区间"的坐标只算到**本组内的绝对拍**、**没带组号** ⇒ 任意一行里的 `{tp}`
+// 会把**别的行**同拍位区间的主旋律音一起静音。下面用"两行同拍位编排"复现：
+// 第 1 行的替谱盖住"第 3 小节第 1~2 拍"，第 2 行同位置也必须照常发声。
+console.log('[adj629o] tp suppression is scoped to its own group')
+{
+  const src =
+    'V: 1.0\nB: t\nD: C\nP: 4/4\n' +
+    'Q: |: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 :|\n' +
+    'C: 一 二 三 四 五 六 七 八 九 十 甲 乙 丙 丁 戊 己\n' +
+    "C2: 一 二 三 四 五 六 七 八 {tp 1' 2'} 九 十 甲 乙 丙 丁 戊 己\n" +
+    'Q: |: 2 3 4 5 | 6 7 1 2 | 5 4 3 2 | 3 2 1 7 :|\n'
+  const r = parseJps(src)
+  const seq = buildPlaySequence(r, layoutScore(r, defaultPageConfig), 60)
+  const evs = seq.events.filter((e) => e.pitched !== false)
+  const g0 = evs.filter((e) => e.placed.id.group === 0)
+  const g0Main = g0.filter((e) => !e.placed.segment)
+  const g0Tp = g0.filter((e) => e.placed.segment?.type === 'tp')
+  const g1 = evs.filter((e) => e.placed.id.group === 1)
+  check('adj629o 别的曲行**同拍位区间照常发声**（替谱只替代它自己那一行）',
+    g1.length === 32,
+    JSON.stringify({ g1: g1.length, want: 32, bars: g1.map((e) => `${e.placed.barIndex}@${e.placed.beatPos}`) }))
+  check('adj629o 替谱那一行**自己的**被覆盖拍仍然静音（第 2 遍第 3 小节前两拍不发声，替谱补 2 个音）',
+    g0Main.length === 30 &&
+      g0Tp.length === 2 &&
+      g0Main.some((e) => e.atMs < 16000 && e.placed.barIndex === 3 && e.placed.beatPos === 0) &&
+      !g0Main.some((e) => e.atMs >= 16000 && e.placed.barIndex === 3 && e.placed.beatPos < 2),
+    JSON.stringify({
+      main: g0Main.length,
+      tp: g0Tp.length,
+      p2bar3: g0Main.filter((e) => e.atMs >= 16000 && e.placed.barIndex === 3).map((e) => e.placed.beatPos),
+    }))
+}
+
+// ---- adj629u（用户报「空设置下描述头没有按『左靠左下角 / 右靠右下角 / 居中靠中上』排列」）----
+// 根因：默认偏移是与字号脱钩的硬编码（标题 30.6 = 旧字号 36×0.85，调式 -44 / 节拍 -12 / 作者 -16-18n），
+// adj213 把描述头/标题字号改小后这些魔数就悬空了 ⇒ 三块恰好都落在描述头区域中部、不贴角。
+// 现在由 `metaCornerOffsets` / `metaAuthorRowY` 统一推导（末行贴区域下沿、标题字顶贴区域上沿）。
+console.log('[adj629u] description header hugs the area corners by default')
+{
+  const areaTop = defaultPageConfig.margin_top
+  const areaBottom = defaultPageConfig.margin_top + defaultPageConfig.descAreaH
+  const metaOf = (svg: string, key: string) => {
+    const m = new RegExp(`data-meta="${key}" x="([\\d.]+)" y="([\\d.]+)"`).exec(svg)
+    return m ? { x: Number(m[1]), y: Number(m[2]) } : null
+  }
+  const renderSrc = (src: string, cfg: PageConfig = defaultPageConfig) =>
+    renderScoreToSvg(layoutScore(parseJps(src), cfg))[0]
+  const mSize = defaultPageConfig.miaoshu_size
+  const biaoti = defaultPageConfig.biaoti_size
+  const edgePad = mSize * 0.45
+
+  // ① 三块齐全：标题贴上沿、左栏末行（节拍）与右栏末行（末位作者）同基线且都贴下沿
+  const svgFull = renderSrc('V: 1.0\nB: 标题\nZ: 甲\nZ: 乙\nZ: 丙\nD: C\nP: 4/4\nJ: 96\nQ: 1 2 3 4 |\n')
+  const tU = metaOf(svgFull, 'title')
+  const kU = metaOf(svgFull, 'keyline')
+  const jU = metaOf(svgFull, 'tempo')
+  const a0U = metaOf(svgFull, 'author_0')
+  const a2U = metaOf(svgFull, 'author_2')
+  check('adj629u 标题贴上沿（基线 = 上沿 + 1.1×标题字号；字身顶仍在上沿之下）',
+    tU !== null && Math.abs(tU.y - (areaTop + biaoti * 1.1)) < 0.5 && tU.y - biaoti * 0.88 > areaTop, `title=${JSON.stringify(tU)} top=${areaTop}`)
+  check('adj629u 标题默认偏移在钳制范围内（不低于 clampMetaPos 下限）',
+    tU !== null && tU.y - areaTop >= biaoti * 0.85 - 0.01, `relY=${tU ? (tU.y - areaTop).toFixed(2) : 'n/a'} min=${(biaoti * 0.85).toFixed(2)}`)
+  check('adj629u 节拍（左栏末行）贴区域下沿', jU !== null && Math.abs(jU.y - (areaBottom - edgePad)) < 0.5, `tempo=${JSON.stringify(jU)} bottom=${areaBottom}`)
+  check('adj629u 末位作者（右栏末行）贴区域下沿，与节拍行同基线',
+    a2U !== null && jU !== null && Math.abs(a2U.y - jU.y) < 0.5, `author2=${JSON.stringify(a2U)} tempo=${JSON.stringify(jU)}`)
+  check('adj629u 作者行从下往上排（首行最高、行距 1.42×作者字号）',
+    a0U !== null && a2U !== null && Math.abs((a2U.y - a0U.y) - 2 * (mSize - 1) * 1.42) < 0.5,
+    `a0=${a0U?.y} a2=${a2U?.y}`)
+  check('adj629u 调式/拍号行在节拍行之上（行距 1.85×描述头字号）',
+    kU !== null && jU !== null && Math.abs((jU.y - kU.y) - mSize * 1.85) < 0.5, `key=${kU?.y} tempo=${jU?.y}`)
+
+  // ② 只有调式行（无 J）⇒ 它自己就是末行，仍贴下沿（不能吊在半空）
+  const svgKeyOnly = renderSrc('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n')
+  const kOnly = metaOf(svgKeyOnly, 'keyline')
+  check('adj629u 没有节拍行时，调式/拍号行自己贴下沿',
+    kOnly !== null && metaOf(svgKeyOnly, 'tempo') === null && Math.abs(kOnly.y - (areaBottom - edgePad)) < 0.5,
+    `key=${JSON.stringify(kOnly)}`)
+
+  // ③ 只有节拍行（无 D）⇒ 同样贴下沿
+  const svgTempoOnly = renderSrc('V: 1.0\nB: t\nP: 4/4\nJ: 96\nQ: 1 2 3 4 |\n')
+  const jOnly = metaOf(svgTempoOnly, 'tempo')
+  check('adj629u 没有调式行时节拍行贴下沿',
+    jOnly !== null && Math.abs(jOnly.y - (areaBottom - edgePad)) < 0.5, `tempo=${JSON.stringify(jOnly)}`)
+
+  // ④ 行距随字号缩放（大字号下仍不重叠、仍贴下沿）——固定 px 会在 20px 时叠在一起
+  const big: PageConfig = { ...defaultPageConfig, miaoshu_size: 20, biaoti_size: 30 }
+  const svgBig = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: 大标题\nZ: 甲\nD: C\nP: 4/4\nJ: 96\nQ: 1 2 3 4 |\n'), big))[0]
+  const kBig = metaOf(svgBig, 'keyline')
+  const jBig = metaOf(svgBig, 'tempo')
+  const aBig = metaOf(svgBig, 'author_0')
+  check('adj629u 描述头字号变大：末行仍贴下沿、行距按 1.85em 放大（不会与拍号分母重叠）',
+    kBig !== null && jBig !== null && Math.abs(jBig.y - (areaBottom - 20 * 0.45)) < 0.5 && Math.abs(jBig.y - kBig.y - 20 * 1.85) < 0.5,
+    `key=${kBig?.y} tempo=${jBig?.y}`)
+  check('adj629u 描述头字号变大：标题字顶仍贴区域上沿（1.1×标题字号）',
+    metaOf(svgBig, 'title') !== null && Math.abs(metaOf(svgBig, 'title')!.y - (areaTop + 30 * 1.1)) < 0.5,
+    `title=${JSON.stringify(metaOf(svgBig, 'title'))}`)
+  check('adj629u 描述头字号变大：作者行距同步放大（1.42×作者字号）',
+    aBig !== null && jBig !== null && Math.abs(jBig.y - aBig.y) < 0.5, `author=${aBig?.y} tempo=${jBig?.y}`)
+
+  // ⑤ 区域变高 ⇒ 贴角元素跟着区域下沿走（锚点语义不变）
+  const tall: PageConfig = { ...defaultPageConfig, descAreaH: 140 }
+  const svgTall = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nJ: 96\nQ: 1 2 3 4 |\n'), tall))[0]
+  const jTall = metaOf(svgTall, 'tempo')
+  check('adj629u 描述头区域变高 ⇒ 贴角默认值跟随下沿（不是固定绝对坐标）',
+    jTall !== null && Math.abs(jTall.y - (defaultPageConfig.margin_top + 140 - edgePad)) < 0.5, `tempo=${JSON.stringify(jTall)}`)
+
+  // ⑥ 谱面自带 metaPos ⇒ 完全按用户拖拽值走（贴角默认值不能覆盖它）
+  const svgPinned = renderScoreToSvg(
+    layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nJ: 96\nQ: 1 2 3 4 |\n'), {
+      ...defaultPageConfig,
+      metaPos: { keyline: { x: 2, y: -22 }, tempo: { x: 0, y: -4 } },
+    }),
+  )[0]
+  const kPin = metaOf(svgPinned, 'keyline')
+  const jPin = metaOf(svgPinned, 'tempo')
+  check('adj629u 谱面自带 metaPos 时用拖拽值（贴角默认不覆盖）：keyline = 下沿 − 22、左边距 + 2',
+    kPin !== null && Math.abs(kPin.y - (areaBottom - 22)) < 0.5 && Math.abs(kPin.x - (defaultPageConfig.margin_left + 2)) < 0.5,
+    `key=${JSON.stringify(kPin)}`)
+  check('adj629u 谱面自带 metaPos 时用拖拽值：tempo y = 下沿 − 4（用户实测口径）',
+    jPin !== null && Math.abs(jPin.y - (areaBottom - 4)) < 0.5, `tempo=${JSON.stringify(jPin)}`)
+
+  // ⑦ 贴角偏移只依赖描述头区域（与页面尺寸/页数无关：换纸张不改纵向位置）
+  const svgA5 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nJ: 96\nQ: 1 2 3 4 |\n'), { ...defaultPageConfig, page: 'A5' }))[0]
+  check('adj629u 换纸张（A5）⇒ 贴角纵向位置不变（只随描述头区域，不随页高）',
+    metaOf(svgA5, 'tempo') !== null && Math.abs(metaOf(svgA5, 'tempo')!.y - (areaBottom - edgePad)) < 0.5,
+    `tempo=${JSON.stringify(metaOf(svgA5, 'tempo'))}`)
 }

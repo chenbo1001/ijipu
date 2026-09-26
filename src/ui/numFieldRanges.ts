@@ -27,6 +27,7 @@ export type PageNumKey =
   | 'height_shengbu'
   | 'segmentRowGap_bz'
   | 'segmentRowGap_dsb'
+  | 'segmentRowGap_tp' // adj629：替谱段与所属歌词行的间距
   | 'barCountInterval'
 
 /**
@@ -48,6 +49,7 @@ export const PAGE_NUM_RANGES: Record<PageNumKey, [number, number]> = {
   height_shengbu: GUIDE_LIMITS_EX.height_shengbu,
   segmentRowGap_bz: GUIDE_LIMITS_EX.segmentRowGap_bz,
   segmentRowGap_dsb: GUIDE_LIMITS_EX.segmentRowGap_dsb,
+  segmentRowGap_tp: GUIDE_LIMITS_EX.segmentRowGap_tp, // adj629
   barCountInterval: GUIDE_LIMITS_EX.barCountInterval,
 }
 
