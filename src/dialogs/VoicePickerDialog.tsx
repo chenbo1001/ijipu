@@ -13,25 +13,13 @@ import { Modal } from '../ui/Modal'
 import { useUiStore } from '../store/uiStore'
 import { voicePickerCopy } from '../brand/copy'
 import { GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
+import { GM_GROUPS } from '@ijipu/engine'
 import type { GmVoice } from '@ijipu/engine'
 
-/** GM 音色按 program 0-127 分为 10 大类（沿用 GM 标准 1=钢琴家族，每类 8 段） */
-const GM_GROUPS: { title: string; range: [number, number] }[] = [
-  { title: '钢琴家族（Piano）', range: [0, 7] },
-  { title: '色彩打击乐（Chromatic Percussion）', range: [8, 15] },
-  { title: '风琴（Organ）', range: [16, 23] },
-  { title: '吉他（Guitar）', range: [24, 31] },
-  { title: '贝斯（Bass）', range: [32, 39] },
-  { title: '弦乐（Strings）', range: [40, 47] },
-  { title: '合奏/合唱（Ensemble）', range: [48, 55] },
-  { title: '铜管（Brass）', range: [56, 63] },
-  { title: '簧管/双簧管（Reed）', range: [64, 71] },
-  { title: '笛管（Pipe）', range: [72, 79] },
-  { title: '合成领奏/垫音/效果（Synth）', range: [80, 95] },
-  { title: '民族/其它（Ethnic / Others）', range: [96, 111] },
-  { title: '打击乐（Percussive）', range: [112, 119] },
-  { title: '声音效果（Sound Effects）', range: [120, 127] },
-]
+/**
+ * GM 音色分类（14 类）——adj631 起**收敛到引擎** `GM_GROUPS`（唯一来源），
+ * Obsidian 插件的「音色库 → 收藏音色」用同一张表（流式分类列表），两处不再各写一份。
+ */
 
 const HIGHLIGHT = 'var(--jp-text-muted)'
 
