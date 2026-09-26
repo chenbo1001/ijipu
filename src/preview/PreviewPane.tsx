@@ -12,7 +12,7 @@ import { useUiStore } from '../store/uiStore'
 import { PREVIEW_BASE_W } from './zoomFit'
 import { beginDrag } from '../ui/dragGesture'
 import { tempoLabel } from '@ijipu/engine/parser/parser'
-import { layoutScore, renderScoreToSvg, noteIdToCodePos, buildIndexToPage, SEGMENT_ROW_GAP_DEFAULT } from '@ijipu/engine'
+import { layoutScore, renderScoreToSvg, noteIdToCodePos, buildIndexToPage, SEGMENT_ROW_GAP_DEFAULT, notesRowBaseline } from '@ijipu/engine'
 import type { ScorePage, PageConfig } from '@ijipu/engine'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides'
 import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '@ijipu/engine/layout/metaAnchors'
@@ -279,7 +279,21 @@ export function PreviewPane() {
       const lineIdx = Number(el.getAttribute('data-notes-line') ?? '0')
       // adj153：换行后的子行（data-notes-sub）基准 y 也要计入，避免把子行偏移混进 metaPos
       const subIdx = Number(el.getAttribute('data-notes-sub') ?? '0')
-      const baseY = layout.pages[0].height - cfg.margin_bottom - 24 + (lineIdx + subIdx) * (cfg.notes_size ?? cfg.miaoshu_size) * 1.4
+      /**
+       * adj630b：说明的默认 y 改为**自下而上**（末行贴下边距线、往上逐行）⇒ 基准 y 由
+       * 引擎的 `notesRowBaseline()` 给出（渲染端同一函数）。行序号/总行数由渲染端写在
+       * `data-notes-row` / `data-notes-total` 上（跨 `S:` 段与换行子行连续编号）——
+       * **不能**再用 `lineIdx + subIdx` 推（多段时它不是整块行号）。
+       */
+      const row = Number(el.getAttribute('data-notes-row') ?? String(lineIdx + subIdx))
+      const totalRows = Number(el.getAttribute('data-notes-total') ?? '1')
+      const baseY = notesRowBaseline({
+        pageH: layout.pages[0].height,
+        marginBottom: cfg.margin_bottom,
+        nSize: cfg.notes_size ?? cfg.miaoshu_size,
+        row,
+        totalRows,
+      })
       if (key === 'notes') {
         // 旧 metaPos["notes"]（adj83 语义）：基准 = 页面居中（兼容旧配置拖拽）
         const baseX = pageW / 2

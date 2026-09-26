@@ -29,6 +29,8 @@ import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 import { mordentOf, mordentPlan, mordentShortMs, neighborDegree, MORDENT_SYMBOLS, ORNAMENT_SHORT_MIN_MS, ORNAMENT_SHORT_MAX_MS } from '@ijipu/engine/playback/ornaments.ts'
 import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, TP_BRACKET_GAP } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
+// adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
+import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
 import type { BarlineType } from '@ijipu/engine/types.ts'
 import { computeBeamsForTest } from '@ijipu/engine/render/index.ts'
 // adj458：波音/滑音/延长记号的矢量修饰符（生成常量 + 墨迹宽高比；摆放口径经渲染端到端断言）
@@ -856,31 +858,88 @@ check('S 多行说明解析', rYs.header.notes.length === 2 && rYs.header.notes[
 const layYs = layoutScore(rYs, DUR_CFG)
 const svgYs = renderScoreToSvg(layYs)[0]
 check('乐器渲染在副标题下（data-meta=instrument_i）', svgYs.includes('data-meta="instrument_0"') && svgYs.includes('data-meta="instrument_1"'), '')
-check('adj151 说明渲染在谱尾左对齐（data-meta=notes_i）', svgYs.includes('data-meta="notes_0"') && svgYs.includes('data-meta="notes_1"') && svgYs.includes('这是一段说明') && svgYs.includes('第二行说明'), '')
-// 说明文字位置：最后一页下边距线上方、左边距（左对齐，adj151）
-const ysNotesEl = /data-meta="notes_0" data-notes-line="0" data-notes-sub="0" x="([\d.]+)" y="([\d.]+)"/.exec(svgYs)
-check('adj151 说明默认在下边距线上方且左对齐（x=左边距）', ysNotesEl !== null && Number(ysNotesEl[2]) < layoutScore(rYs, DUR_CFG).pages[0].height - defaultPageConfig.margin_bottom && Math.abs(Number(ysNotesEl[1]) - defaultPageConfig.margin_left) < 0.5, `x=${ysNotesEl?.[1]} y=${ysNotesEl?.[2]}`)
+check('adj151/adj630 说明渲染在谱尾（data-meta=notes_i）', svgYs.includes('data-meta="notes_0"') && svgYs.includes('data-meta="notes_1"') && svgYs.includes('这是一段说明') && svgYs.includes('第二行说明'), '')
+// adj630/adj630b（用户要求）：默认**紧靠边距内的右下角** —— 右对齐到右边距（text-anchor=end），
+// 且整块自下而上：**末行贴下边距线**、往上逐行
+const ysNotesEl = /data-meta="notes_(\d+)" data-notes-line="\d+" data-notes-sub="\d+" data-notes-row="(\d+)" data-notes-total="(\d+)" x="([\d.]+)" y="([\d.]+)" text-anchor="end"/.exec(svgYs)
+const layYsPages = layoutScore(rYs, DUR_CFG).pages[0]
+const pageWYs = layYsPages.width
+const pageHYs = layYsPages.height
+const nSizeYs = defaultPageConfig.notes_size
+const noteBottomLine = pageHYs - defaultPageConfig.margin_bottom
+check('adj630 说明默认贴右边距（右下角，text-anchor=end、x = 页宽 − 右边距）',
+  ysNotesEl !== null && Math.abs(Number(ysNotesEl[4]) - (pageWYs - defaultPageConfig.margin_right)) < 0.5, `x=${ysNotesEl?.[4]} expect=${pageWYs - defaultPageConfig.margin_right}`)
+// 末行（row = total-1）基线 + 字底（0.15em）≈ 下边距线 − 2px（"紧靠"）
+{
+  const all = [...svgYs.matchAll(/data-meta="notes_(\d+)" data-notes-line="\d+" data-notes-sub="\d+" data-notes-row="(\d+)" data-notes-total="(\d+)" x="([\d.]+)" y="([\d.]+)"/g)].map((m) => ({
+    line: Number(m[1]), row: Number(m[2]), total: Number(m[3]), x: Number(m[4]), y: Number(m[5]),
+  }))
+  const last = all.find((e) => e.row === e.total - 1)
+  check('adj630b 末行紧靠下边距线（字底距线 = 2px，不再"离线 24px"）',
+    last !== undefined && Math.abs(last.y + nSizeYs * 0.15 - (noteBottomLine - 2)) < 0.5,
+    `末行 y=${last?.y} 字底=${last ? (last.y + nSizeYs * 0.15).toFixed(1) : 'n/a'} 下边距线=${noteBottomLine}`)
+  check('adj630b 多行自下而上（row 越大 y 越大、行距 = 字号×1.4）',
+    all.length >= 2 && all.every((e, i) => i === 0 || Math.abs(e.y - all[i - 1].y - nSizeYs * 1.4) < 0.2),
+    all.map((e) => `${e.row}/${e.y}`).join('|'))
+  check('adj630b 渲染出的 y 与引擎 `notesRowBaseline()` 逐行一致（渲染端与预览端同一函数）',
+    all.every((e) =>
+      Math.abs(e.y - notesRowBaseline({ pageH: pageHYs, marginBottom: defaultPageConfig.margin_bottom, nSize: nSizeYs, row: e.row, totalRows: e.total })) < 0.11),
+    all.map((e) => `${e.row}:${e.y}`).join('|'))
+}
+// 随边距线调整：改 margin_bottom / margin_right，整块跟着走（不是写死绝对坐标）
+{
+  const cfgMb: PageConfig = { ...DUR_CFG, margin_bottom: 90, margin_right: 120 }
+  const svgMb = renderScoreToSvg(layoutScore(rYs, cfgMb))[0]
+  const els = [...svgMb.matchAll(/data-meta="notes_\d+"[^>]*data-notes-row="(\d+)" data-notes-total="(\d+)" x="([\d.]+)" y="([\d.]+)"/g)].map((m) => ({ row: Number(m[1]), total: Number(m[2]), x: Number(m[3]), y: Number(m[4]) }))
+  const lastMb = els.find((e) => e.row === e.total - 1)
+  check('adj630b 改下边距 ⇒ 说明整块跟着下边距线上移（末行仍紧靠它）',
+    lastMb !== undefined && Math.abs(lastMb.y + nSizeYs * 0.15 - (pageHYs - 90 - 2)) < 0.5, `末行 y=${lastMb?.y}`)
+  check('adj630b 改右边距 ⇒ 说明整块跟着右边距线左移（右缘仍贴它）',
+    els.length > 0 && els.every((e) => Math.abs(e.x - (pageWYs - 120)) < 0.5), els.map((e) => e.x).join('|'))
+}
+// 多段 S: 与同段换行子行**都**右对齐（整块右缘贴线）
+{
+  const multi = [...svgYs.matchAll(/<text data-meta="notes_(\d+)"[^>]*x="([\d.]+)"[^>]*text-anchor="(\w+)"/g)]
+  check('adj630 每个 S 段都右对齐到同一条右边距（多段一致）',
+    multi.length >= 2 && multi.every((m) => m[3] === 'end' && Math.abs(Number(m[2]) - (pageWYs - defaultPageConfig.margin_right)) < 0.11),
+    multi.map((m) => `${m[1]}:${m[2]}/${m[3]}`).join('|'))
+}
 // adj153：说明内容不超边距——超宽自动换行、x 钳制在左右边距内（右缘不超右边距）
 const longNotesSrc = 'V: 1.0\nB: 测试\nD: C\nP: 4/4\nS: ' + '超长说明文字'.repeat(12) + '\nQ: 1 |\n'
 const rLn = parseJps(longNotesSrc)
 const layLn = layoutScore(rLn, DUR_CFG)
 const svgLn = renderScoreToSvg(layLn)[0]
-const lnSubs = [...svgLn.matchAll(/data-meta="notes_0" data-notes-line="0" data-notes-sub="(\d+)" x="([\d.]+)"[^>]*>([^<]*)</g)]
+const lnSubs = [...svgLn.matchAll(/data-meta="notes_0" data-notes-line="0" data-notes-sub="(\d+)"[^>]*x="([\d.]+)"[^>]*text-anchor="(\w+)"[^>]*>([^<]*)</g)]
 check('adj153 超宽 S 行自动换行为多个子行', lnSubs.length > 1, `子行数=${lnSubs.length}`)
 const pageW0 = layLn.pages[0].width
 const rightEdge = pageW0 - defaultPageConfig.margin_right
+// adj630：默认右对齐 ⇒ 每子行「x = 右边距」且「左缘 = x − 文本宽 ≥ 左边距」
 const within = lnSubs.every((m) => {
   const x = Number(m[2])
-  const text = m[3]
+  const anchor = m[3]
+  const text = m[4]
   // 估算宽（中文按 notes_size/字符，拉丁按 0.62×notes_size）
   const w = [...text].reduce((s, ch) => s + (ch.charCodeAt(0) > 127 ? defaultPageConfig.notes_size : defaultPageConfig.notes_size * 0.62), 0)
+  if (anchor === 'end') return Math.abs(x - rightEdge) < 0.11 && x - w >= defaultPageConfig.margin_left - 0.01
   return x >= defaultPageConfig.margin_left - 0.01 && x + w <= rightEdge + 0.01
 })
-check('adj153 每个子行左缘不超左边距、右缘不超右边距', within, lnSubs.map((m) => `${m[2]}+${m[3].length}字`).join('|'))
+check('adj153/adj630 每个子行都在左右边距内（默认右对齐：右缘贴右边距、左缘不越左边距）', within, lnSubs.map((m) => `${m[2]}/${m[3]}+${m[4].length}字`).join('|'))
 // 拖拽偏移很大时 x 仍被钳制（不超右边距）
 const svgLn2 = renderScoreToSvg(layoutScore(rLn, { ...DUR_CFG, metaPos: { notes_0: { x: 900, y: 0 } } }))[0]
-const ln2 = /data-meta="notes_0" data-notes-line="0" data-notes-sub="0" x="([\d.]+)"/.exec(svgLn2)
-check('adj153 大偏移下 x 钳制（右缘不超右边距）', ln2 !== null && Number(ln2[1]) <= rightEdge, `x=${ln2?.[1]} rightEdge=${rightEdge}`)
+const ln2 = /data-meta="notes_0"[^>]*x="([\d.]+)"[^>]*text-anchor="(\w+)"/.exec(svgLn2)
+check('adj153 大偏移下 x 钳制（右缘不超右边距）', ln2 !== null && ln2[2] === 'start' && Number(ln2[1]) <= rightEdge, `x=${ln2?.[1]} rightEdge=${rightEdge}`)
+// adj630：**拖拽过**的段落按旧口径（左缘基准、start）渲染 ⇒ 位置与拖动行为不变；恢复默认后回到右下角
+{
+  // 用短说明（rYs）避免被"右缘不超右边距"的钳制盖住基准本身
+  const notesXOf = (cfg: PageConfig) =>
+    /data-meta="notes_0"[^>]*x="([\d.]+)"[^>]*text-anchor="(\w+)"/.exec(renderScoreToSvg(layoutScore(rYs, cfg))[0])
+  const pinned = notesXOf({ ...DUR_CFG, metaPos: { notes_0: { x: 20, y: 0 } } })
+  check('adj630 拖过的段落仍按左缘基准渲染（x = 左边距 + 偏移 20，anchor=start）',
+    pinned !== null && pinned[2] === 'start' && Math.abs(Number(pinned[1]) - (defaultPageConfig.margin_left + 20)) < 0.5, `x=${pinned?.[1]}`)
+  const legacy = notesXOf({ ...DUR_CFG, metaPos: { notes: { x: 0, y: 0 } } })
+  check('adj630 旧 metaPos["notes"]（页面居中基准）兼容不变',
+    legacy !== null && legacy[2] === 'start' && Math.abs(Number(legacy[1]) - pageWYs / 2) < 0.5, `x=${legacy?.[1]}`)
+}
 
 // ---- 16d. S 说明 \n 换行 + 独立字体字号（adj154） ----
 console.log('[16d] notes \\n wrap & independent font (adj154)')
@@ -890,18 +949,20 @@ check('adj154 S 行 \\n 拆成 2 行说明', rNl.header.notes.length === 2 && rN
 const svgNl = renderScoreToSvg(layoutScore(rNl, DUR_CFG))[0]
 check('adj154 \\n 拆行渲染为两个 text（notes_0/notes_1）', svgNl.includes('data-meta="notes_0"') && svgNl.includes('data-meta="notes_1"') && svgNl.includes('第一段') && svgNl.includes('第二段'), '')
 const svgNl2 = renderScoreToSvg(layoutScore(rNl, { ...DUR_CFG, notes_font: 'KaiTi', notes_size: 16 }))[0]
-const nl2 = /data-meta="notes_0" data-notes-line="0" data-notes-sub="0" x="([\d.]+)" y="([\d.]+)"[^>]*>第一段/.exec(svgNl2)
+const nl2 = /data-meta="notes_0"[^>]*x="([\d.]+)"[^>]*y="([\d.]+)"[^>]*>第一段/.exec(svgNl2)
 check('adj154 S 独立字体字号生效（KaiTi/16）', nl2 !== null && svgNl2.includes('font-family="KaiTi"') && svgNl2.includes('font-size="16"'), '')
-const nl2b = /data-meta="notes_1" data-notes-line="1" data-notes-sub="0" x="([\d.]+)" y="([\d.]+)"/.exec(svgNl2)
+const nl2b = /data-meta="notes_1"[^>]*x="([\d.]+)"[^>]*y="([\d.]+)"/.exec(svgNl2)
 check('adj154 \\n 第二行按独立字号下移（y 差 = 16×1.4）', nl2 !== null && nl2b !== null && Math.abs(Number(nl2b[2]) - Number(nl2[2]) - 16 * 1.4) < 0.2, `y0=${nl2?.[2]} y1=${nl2b?.[2]}`)
-// 独立字号下不超右边距（16px 中文 16/字符）
-const nl3 = [...svgNl2.matchAll(/data-meta="notes_\d+" data-notes-line="\d+" data-notes-sub="0" x="([\d.]+)"[^>]*>([^<]*)</g)]
+// 独立字号下不超右边距（16px 中文 16/字符）——adj630：默认右对齐，改为核「左缘不越左边距」
+const nl3 = [...svgNl2.matchAll(/data-meta="notes_\d+"[^>]*x="([\d.]+)"[^>]*text-anchor="(\w+)"[^>]*>([^<]*)</g)]
 const nlWithin = nl3.every((m) => {
   const x = Number(m[1])
-  const w = [...m[2]].reduce((s, ch) => s + (ch.charCodeAt(0) > 127 ? 13 : 7.62), 0) * (16 / 13)
+  const anchor = m[2]
+  const w = [...m[3]].reduce((s, ch) => s + (ch.charCodeAt(0) > 127 ? 13 : 7.62), 0) * (16 / 13)
+  if (anchor === 'end') return Math.abs(x - (pageW0 - defaultPageConfig.margin_right)) < 0.11 && x - w >= defaultPageConfig.margin_left - 0.01
   return x >= defaultPageConfig.margin_left - 0.01 && x + w <= rightEdge + 0.01
 })
-check('adj154 独立字号下说明仍不超边距', nlWithin, nl3.map((m) => m[1]).join('|'))
+check('adj154/adj630 独立字号下说明仍不越边距（默认右对齐）', nlWithin, nl3.map((m) => `${m[1]}/${m[2]}/${m[3].length}`).join('|'))
 
 // ---- 16c. 谱面级设置 # jps-config（adj83） ----
 console.log('[16c] per-score settings # jps-config (adj83)')
@@ -13134,14 +13195,15 @@ runAdj363SaveTests()
 function runAdj625Tests() {
   console.log('[148] 方框小节序号：显示小节计数 + 序号间隔（adj625）')
   const BAR8 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 | 3 4 5 6 | 7 1 2 3 | 4 5 6 7 | 1 2 3 4 |\n'
-  const OFF: PageConfig = { ...defaultPageConfig }
+  // adj630c：默认已改为**勾选** ⇒ "关闭"必须显式写 false（本组用它当对照态）
+  const OFF: PageConfig = { ...defaultPageConfig, showBarCount: false }
   const ON: PageConfig = { ...defaultPageConfig, showBarCount: true }
   const ON1: PageConfig = { ...defaultPageConfig, showBarCount: true, barCountInterval: 1 }
   const lay = (src: string, cfg: PageConfig) => layoutScore(parseJps(src), cfg)
   const numsOf = (src: string, cfg: PageConfig) => lay(src, cfg).pages.flatMap((p) => p.barNumbers)
 
-  // ---- ① 默认关闭：不产生锚点（既有谱面零变化）----
-  check('adj625 默认关闭 ⇒ 无小节序号锚点', numsOf(BAR8, OFF).length === 0, `${numsOf(BAR8, OFF).length}`)
+  // ---- ① 显式关闭（adj630c 后默认已是开）：不产生锚点 ----
+  check('adj625 显式关闭 ⇒ 无小节序号锚点', numsOf(BAR8, OFF).length === 0, `${numsOf(BAR8, OFF).length}`)
 
   // ---- ② 编号：全曲连续，间隔 4 ⇒ 只有第 4、8 小节 ----
   const n4 = numsOf(BAR8, ON)
@@ -13243,18 +13305,25 @@ function runAdj625Tests() {
 
   // ---- ⑧ 谱面设置往返（# jps-config 差量）----
   const SRC1 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n'
-  const written = writeJpsConfig(SRC1, { showBarCount: true, barCountInterval: 8 })
+  const written = writeJpsConfig(SRC1, { showBarCount: false, barCountInterval: 8 })
   check('adj625 两项都能写进 # jps-config',
-    /"showBarCount":true/.test(written) && /"barCountInterval":8/.test(written), written.split('\n').pop())
+    /"showBarCount":false/.test(written) && /"barCountInterval":8/.test(written), written.split('\n').pop())
   const back = extractJpsConfig(written)
   check('adj625 读回一致（保存后重开不丢）',
-    back?.showBarCount === true && back?.barCountInterval === 8, JSON.stringify(back))
-  check('adj625 两项都与默认不同时进「非默认」标记（设置面板红 *）',
-    nonDefaultConfigKeys({ ...defaultPageConfig, showBarCount: true, barCountInterval: 8 }).sort().join(',') ===
+    back?.showBarCount === false && back?.barCountInterval === 8, JSON.stringify(back))
+  check('adj625/adj630c 两项都与默认不同时进「非默认」标记（设置面板红 *）',
+    nonDefaultConfigKeys({ ...defaultPageConfig, showBarCount: false, barCountInterval: 8 }).sort().join(',') ===
       'barCountInterval,showBarCount',
-    nonDefaultConfigKeys({ ...defaultPageConfig, showBarCount: true, barCountInterval: 8 }).join(','))
-  check('adj625 关掉且间隔为默认 ⇒ 不写设置行（等于默认，文件干净）',
-    writeJpsConfig(SRC1, { showBarCount: false, barCountInterval: 4 }) === SRC1, '')
+    nonDefaultConfigKeys({ ...defaultPageConfig, showBarCount: false, barCountInterval: 8 }).join(','))
+  check('adj625/adj630c 两项都为默认值时 ⇒ 不写设置行（等于默认，文件干净）',
+    writeJpsConfig(SRC1, { showBarCount: true, barCountInterval: 4 }) === SRC1, '')
+  check('adj630c（用户要求）「显示小节计数」默认 = 勾选（true）',
+    defaultPageConfig.showBarCount === true && /showBarCount: true/.test(String(readFileSync('packages/ijipu-engine/src/engine/types.ts', 'utf8'))),
+    String(defaultPageConfig.showBarCount))
+  check('adj630c 默认配置下就画方框序号（新谱/未写该项的谱都显示）',
+    /data-barnumber="/.test(renderScoreToSvg(lay(BAR8, defaultPageConfig))[0]) &&
+      !/data-barnumber="/.test(renderScoreToSvg(lay(BAR8, { ...defaultPageConfig, showBarCount: false }))[0]),
+    '')
   check('adj625 默认配置本身没有任何「非默认」字段（新增项不污染默认）',
     nonDefaultConfigKeys(defaultPageConfig).length === 0, JSON.stringify(nonDefaultConfigKeys(defaultPageConfig)))
 
