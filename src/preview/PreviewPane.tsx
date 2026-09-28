@@ -225,7 +225,9 @@ export function PreviewPane() {
     const id = target.getAttribute('data-notepos') ?? target.getAttribute('data-cipos')
     if (!id) return
     setActiveNoteId(id)
-    const pos = noteIdToCodePos(code, id)
+    // adj634（用户要求）：光标落在**音符块末尾**（与后一块之间的空格之前），而不是块首——
+    // 修饰符（& 编码、注释、倚音括号）都跟在主音符后面，落在块末就可以直接接着写。
+    const pos = noteIdToCodePos(code, id, 'end')
     if (pos !== null) jumpCursor(pos)
     if (isPlaybackOpen) {
       setPlaybackStart(id)

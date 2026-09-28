@@ -19,15 +19,18 @@ export const MODIFIER_SYMBOLS: { symbol: string; label: string; barline?: boolea
   { symbol: 'dy', label: '实心三角（顿音）' },
   { symbol: 'tu', label: '吐音（音符上方粗体 T）' },
   { symbol: 'ku', label: '吐音（音符上方粗体 K）' },
-  { symbol: 'da', label: '打音（音符上方粗体 扌）' },
-  { symbol: 'die', label: '叠音（音符上方粗体 又）' },
+  // adj635（用户说明）：打音/叠音是竹笛、葫芦丝的传统装饰音——**会改变演奏**
+  //  打音 = 主音→下邻音→主音（辅助音极短，常用来把两个相同的音断开）
+  //  叠音 = 上邻音→主音（极快的上倚音）
+  { symbol: 'da', label: '打音（扌；演奏：主音→下邻音→主音，辅助音极短）' },
+  { symbol: 'die', label: '叠音（又；演奏：上邻音→主音，极快的上倚音）' },
   { symbol: 'yc', label: '圆点 + 圆弧（跳音）' },
   { symbol: 'sby', label: '上波音（2.5 齿）' },
   { symbol: 'sby+', label: '上波音（3.5 齿）' },
   { symbol: 'xby', label: '下波音（带竖线）' },
   { symbol: 'xby+', label: '下波音（3.5 齿）' },
-  { symbol: 'shy', label: '上滑音（弧线）' },
-  { symbol: 'xhy', label: '下滑音（弧线）' },
+  { symbol: 'shy', label: '上滑音（弧线；从**下方**滑进本音，记号画在音符左侧）' },
+  { symbol: 'xhy', label: '下滑音（弧线；从**上方**滑进本音，记号画在音符左侧）' },
   // adj375：&hx 已独立为标记块（不再依附音符）——可写在音符前或后，占宽；播放时占用
   // 前一个音符总时值（含同音连音/增时线/附点）的 1/4 作呼吸换气（最多 1/2 拍，静音）
   { symbol: 'hx', label: '呼吸记号（独立块，换气静音）' },
@@ -59,10 +62,11 @@ export const BARLINE_MODIFIER_HINTS: { code: string; label: string }[] = MODIFIE
 
 /**
  * adj632：**倚音括号内**可用的 & 编码（与 `engine/types.ts` 的 `GRACE_MARK_CODES` 同源口径）。
- * 倚音只支持这 5 个：`&tu`/`&die`/`&da` 画在倚音正上方、`&shy`/`&xhy` 画在倚音右侧。
+ * 倚音支持这些：`&tu`/`&die`/`&da` 画在倚音正上方、`&shy`/`&xhy` 画在倚音右侧；
+ * adj633 起再加 4 个波音 `&sby`/`&xby`/`&sby+`/`&xby+`（画在倚音正上方，随倚音等比缩小）。
  * 其余编码写在倚音括号内会被解析器告警——所以候选池必须单独收窄，不能给用户一份会报错的列表。
  */
-export const GRACE_MODIFIER_CODES = ['tu', 'die', 'da', 'shy', 'xhy'] as const
+export const GRACE_MODIFIER_CODES = ['tu', 'die', 'da', 'shy', 'xhy', 'sby', 'xby', 'sby+', 'xby+'] as const
 
 /** 倚音括号内的 & 编码提示：由 MODIFIER_SYMBOLS 派生（只取 GRACE_MODIFIER_CODES 那几条，标签同源） */
 export const GRACE_MODIFIER_HINTS: { code: string; label: string }[] = MODIFIER_SYMBOLS.filter((m) =>
@@ -131,7 +135,7 @@ export function isBarlineModifierContext(lineBefore: string): boolean {
 
 /**
  * adj632：判断光标前的 `&` 编码是否位于**倚音括号内**（如 `6/[5/&`、`3[h5/&s`）——
- * 是则只提示倚音支持的那 5 个编码（见 `GRACE_MODIFIER_HINTS`）。
+ * 是则只提示倚音支持的那 9 个编码（见 `GRACE_MODIFIER_HINTS`）。
  *
  * 判定依据与 tokenizer 一致：**光标前最后一个 `[` 之后还没有 `]`**，就还在倚音括号里
  * （跳房子 `[` 内本来也不允许写 `&` 编码，同一判定不会误伤）。

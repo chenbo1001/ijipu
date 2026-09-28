@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -27,7 +27,21 @@ import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } f
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
 import { mordentOf, mordentPlan, mordentShortMs, neighborDegree, MORDENT_SYMBOLS, ORNAMENT_SHORT_MIN_MS, ORNAMENT_SHORT_MAX_MS } from '@ijipu/engine/playback/ornaments.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, digitInkW, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, TP_BRACKET_GAP } from '@ijipu/engine/layout/spacing.ts'
+// adj635/adj636：打音·叠音（`&da`/`&die`）与滑音（`&shy`/`&xhy`）的演奏（纯函数）
+import {
+  portOf,
+  portPlan,
+  portShortMs,
+  ornamentOf,
+  ornamentPlan,
+  PORT_SYMBOLS,
+  ORNAMENT_SYMBOLS,
+  ORNAMENT_PORT_MIN_MS,
+  ORNAMENT_PORT_MAX_MS,
+} from '@ijipu/engine/playback/ornaments.ts'
+import { slideOf, slidePlan, slideStepMs, SLIDE_SYMBOLS, SLIDE_STEP_MIN_MS, SLIDE_STEP_MAX_MS } from '@ijipu/engine/playback/slides.ts'
+import { midiToPitchName } from '@ijipu/engine/playback/midi.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, TP_BRACKET_GAP } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
@@ -464,20 +478,21 @@ check('adj192 带声部名模板含 cursorAt（光标停引号内）', HEADER_HI
   check('输入 &f 前缀 → 过滤出 f/ff/fff（力度）', ['f', 'ff', 'fff'].every((c) => ffilt.some((h) => h.code === c)), ffilt.map((h) => h.code).join(','))
   // adj334：吐音/打音/叠音修饰符在音符修饰符池
   check('adj334 音符修饰符池含 tu/ku/da/die', ['tu', 'ku', 'da', 'die'].every((c) => NOTE_MODIFIER_HINTS.some((h) => h.code === c)), NOTE_MODIFIER_HINTS.map((h) => h.code).join(','))
-  // adj632：**倚音括号内**的 & 提示单独收窄到 5 个（其余写在括号里会被解析器告警）
-  check('adj632 倚音括号内 & → 倚音专属候选池（tu/die/da/shy/xhy，共 5 项）',
+  // adj632/adj633：**倚音括号内**的 & 提示单独收窄（其余写在括号里会被解析器告警）
+  check('adj632 倚音括号内 & → 倚音专属候选池（tu/die/da/shy/xhy + adj633 的 4 个波音，共 9 项）',
     isGraceModifierContext('Q: 6/[5/&') && isGraceModifierContext('Q: 3[h5/&s') &&
-      !isGraceModifierContext('Q: 6/[5/] &') && !isGraceModifierContext('Q: 1 2 3 &') && !isGraceModifierContext('Q: 1 2 3 | &'),
+      isGraceModifierContext('Q: 2[3/&sb') && !isGraceModifierContext('Q: 6/[5/] &') &&
+      !isGraceModifierContext('Q: 1 2 3 &') && !isGraceModifierContext('Q: 1 2 3 | &'),
     '')
   const fg632 = filterModifierHints('', false, true)
-  check('adj632 倚音候选池 = tu/die/da/shy/xhy（不含会告警的 sby/tr/mp 等）',
-    fg632.length === GRACE_MODIFIER_HINTS.length && fg632.length === 5 &&
-      ['tu', 'die', 'da', 'shy', 'xhy'].every((c) => fg632.some((h) => h.code === c)) &&
-      !fg632.some((h) => h.code === 'sby' || h.code === 'tr' || h.code === 'mp'),
+  check('adj633 倚音候选池 = tu/die/da/shy/xhy/sby/xby/sby+/xby+（不含仍会告警的 tr/mp/zkh）',
+    fg632.length === GRACE_MODIFIER_HINTS.length && fg632.length === 9 &&
+      ['tu', 'die', 'da', 'shy', 'xhy', 'sby', 'xby', 'sby+', 'xby+'].every((c) => fg632.some((h) => h.code === c)) &&
+      !fg632.some((h) => h.code === 'tr' || h.code === 'mp' || h.code === 'zkh'),
     fg632.map((h) => h.code).join(','))
   check('adj632 倚音候选池内按前缀过滤（&sh → shy）', filterModifierHints('sh', false, true).length === 1 && filterModifierHints('sh', false, true)[0].code === 'shy', '')
   // 候选池顺序随 `MODIFIER_SYMBOLS` 字典序（UI 与主音符池同一份来源），故只比**同一组编码**
-  check('adj632 倚音候选池与引擎 GRACE_MARK_CODES 是**同一组**编码（不会两处漂移）',
+  check('adj633 倚音候选池与引擎 GRACE_MARK_CODES 是**同一组**编码（不会两处漂移）',
     JSON.stringify([...GRACE_MARK_CODES].sort()) === JSON.stringify(fg632.map((h) => h.code).sort()),
     `engine=${[...GRACE_MARK_CODES].join(',')} ui=${fg632.map((h) => h.code).join(',')}`)
 }
@@ -3629,7 +3644,7 @@ console.log('[63b] multi-voice zero-duration width elements (adj479)')
       !!zkh && !!ykh && zkh.x + zkh.width / 2 <= bkQ1[0].x + 0.6 && ykh.x + ykh.width / 2 <= bkQ1[3].x + 0.6,
       `zkh右=${zkh ? (zkh.x + zkh.width / 2).toFixed(1) : '-'} note0=${bkQ1[0]?.x} ykh右=${ykh ? (ykh.x + ykh.width / 2).toFixed(1) : '-'} note3=${bkQ1[3]?.x}`,
     )
-    // ③ &shy/&xhy：音符本体宽 = 数字槽 + 滑音墨迹宽；墨迹不压后一数字
+    // ③ &shy/&xhy：音符本体宽 = 数字槽 + 滑音墨迹宽（记号侧由右侧改为**左侧**后，这截宽度记在左边）
     const slP = layoutScore(parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1&shy 2&xhy 3 4 |\nQ2: 5 6 7 1' |\n"), cfg479).pages[0]
     const slQ1 = slP.notes.filter((n) => n.id.voice === 1).sort((a, b) => a.x - b.x)
     const shyW = slideExtraW('shy', ns479)
@@ -3642,10 +3657,11 @@ console.log('[63b] multi-voice zero-duration width elements (adj479)')
         `w=${slQ1[0].width} 期望=${(digW479 + shyW).toFixed(2)}`,
       )
     }
+    // adj636b：记号改画在数字**左侧** ⇒ 关键变成"不压**前一**个音符"（并把左伸量算进本体宽）
     check(
-      `adj479 ${modeName} 滑音墨迹不压后一音符（两个滑音音都判）`,
-      slQ1[0].x + digW479 + shyW <= slQ1[1].x + 0.6 && slQ1[1].x + digW479 + xhyW <= slQ1[2].x + 0.6,
-      `shy右=${(slQ1[0].x + digW479 + shyW).toFixed(1)} 2x=${slQ1[1].x} xhy右=${(slQ1[1].x + digW479 + xhyW).toFixed(1)} 3x=${slQ1[2].x}`,
+      `adj479/adj636b ${modeName} 滑音墨迹（左侧）不压前一音符（两个滑音音都判）`,
+      slQ1[1].x - xhyW >= slQ1[0].x + digW479 - 0.6 && slQ1[0].x - shyW >= cfg479.margin_left - 0.6,
+      `1x=${slQ1[0].x} 1左缘=${(slQ1[0].x - shyW).toFixed(1)} 2x=${slQ1[1].x} 2左缘=${(slQ1[1].x - xhyW).toFixed(1)} 1数字右=${(slQ1[0].x + digW479).toFixed(1)}`,
     )
     // ④ 附点（同为"无时值但有占宽"的元素）：本体宽逐拍归位后，不与后一拍数字重叠
     const dtP = layoutScore(parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 2.&xhy 3 4 |\nQ2: 6 7 1' |\n"), cfg479).pages[0]
@@ -6988,7 +7004,11 @@ console.log('[adj433] segment beats align with melody beats (within-note interpo
     // AX8/AX9（adj436，E-2026-176）：**倚音事件必须继承主音符的声部角色与音色来源**——
     // 用户报「演奏到 `3/[3/5/]` 处又切回主音色了，应该还是手风琴」：倚音是以**独立事件**发声的，
     // 旧代码只给主音符加 `explicitInstrument`/`playVoice`，倚音缺这两个字段 ⇒ 被「试听音色」全局覆盖压回主音色。
-    const graceEv = seq434.events.filter((e) => e.pitch !== undefined && e.pitch !== null)
+    // adj637：段内音符现在也会展开装饰/滑音/倚音（那些事件带显式 `pitch`），但它们按设计**不走**
+    // `explicitInstrument`（AX7c：段层走固定第二音色）——故这里只看**主旋律**的倚音事件。
+    const graceEv = seq434.events.filter(
+      (e) => !e.placed.segment && e.pitch !== undefined && e.pitch !== null,
+    )
     check('AX8 存在倚音事件（用户原行含 `3/[3/5/]`）', graceEv.length >= 2, `n=${graceEv.length}`)
     check('AX9 倚音事件音色 = 手风琴（与所属主音符一致，不被试听音色压回）',
       graceEv.length > 0 && graceEv.every((e) => e.instrument === '手风琴'),
@@ -14457,27 +14477,30 @@ console.log('[adj632] grace note marks: &tu/&die/&da above, &shy/&xhy at right')
       JSON.stringify([0, 1, 2, 3, 4].map(symOf632)) === '[["tu"],["die"],["da"],["shy"],["xhy"]]',
     JSON.stringify({ err: rAll632.errors.map((e) => e.message), syms: [0, 1, 2, 3, 4].map(symOf632) }))
   // 不支持的编码 / 编码没跟在倚音之后 → 告警（不静默丢弃）
-  const badSym632 = parseJpsRaw('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1[2/&sby] |\n')
-  check('adj632 解析：倚音内不支持的编码（&sby）→ 告警而不静默丢弃',
-    badSym632.errors.some((e) => e.message === '倚音不支持修饰符 "&sby"'),
+  // adj633：`&sby` 等 4 个波音已改为**支持**（见 [adj633] 段），这里改用仍不支持的 `&tr`
+  const badSym632 = parseJpsRaw('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1[2/&tr] |\n')
+  check('adj632 解析：倚音内不支持的编码（&tr）→ 告警而不静默丢弃',
+    badSym632.errors.some((e) => e.message === '倚音不支持修饰符 "&tr"'),
     JSON.stringify(badSym632.errors.map((e) => e.message)))
   const badHost632 = parseJpsRaw('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1[&tu2/] |\n')
   check('adj632 解析：编码写在倚音数字**之前** → 告警「要写在倚音音符之后」',
     badHost632.errors.some((e) => e.message.includes('要写在倚音音符之后')),
     JSON.stringify(badHost632.errors.map((e) => e.message)))
 
-  // ---- ② 槽位几何（渲染与布局**同源**）：右侧修饰把下一个槽位与组总宽一并推开 ----
+  // ---- ② 槽位几何（渲染与布局**同源**）：adj636c 起滑音在**左侧** ⇒ 让开的是组**左缘**、不再推开后一个 ----
   const slotNone632 = graceSlotLayout([{ pitch: 5 }, { pitch: 5 }], defaultPageConfig.note_size)
   const slotShy632 = graceSlotLayout([{ pitch: 5, symbols: ['shy'] }, { pitch: 5 }], defaultPageConfig.note_size)
-  // adj632b：滑音墨迹从**数字左缘**算起的右端（= 紧贴数字墨迹右缘 + 墨迹宽）
-  const shyInk632 = graceSlideInk('shy', GRACE_FS, '5')
-  const shyExtent632 = shyInk632.dx + shyInk632.w
+  // adj636c：滑音墨迹从**数字左缘**算起的左伸量（= 净距 + 墨迹宽）
+  const shyInk632 = graceSlideInk('shy', GRACE_FS)
+  const shyLeft632 = -shyInk632.dx
   check('adj632 槽位几何：无修饰时与 adj103 既有间距**逐值一致**（旧谱排版不变）',
     Math.abs(slotNone632.offs[1] - GAPW632) < 1e-9 && Math.abs(slotNone632.width - (GAPW632 + GW632)) < 1e-9 &&
-      Math.abs(slotNone632.gW - GW632) < 1e-9,
+      Math.abs(slotNone632.gW - GW632) < 1e-9 && slotNone632.leftExt0 === 0,
     JSON.stringify(slotNone632))
-  check('adj632/adj632b 槽位几何：前一个倚音带 &shy ⇒ 下一个槽位让开**滑音墨迹右缘** + 净距 1×gs',
-    Math.abs(slotShy632.offs[1] - (shyExtent632 + GS632)) < 1e-9 &&
+  check('adj636c 槽位几何：首音带 &shy ⇒ 左伸量记进 `leftExt0` 与组宽（`offs[0]` 即它）、**下一个槽位回到紧凑间距**',
+    Math.abs(slotShy632.leftExt0 - shyLeft632) < 1e-9 &&
+      Math.abs(slotShy632.offs[0] - shyLeft632) < 1e-9 &&
+      Math.abs(slotShy632.offs[1] - (shyLeft632 + GAPW632)) < 1e-9 &&
       Math.abs(slotShy632.width - (slotShy632.offs[1] + GW632)) < 1e-9,
     JSON.stringify(slotShy632))
 
@@ -14521,18 +14544,18 @@ console.log('[adj632] grace note marks: &tu/&die/&da above, &shy/&xhy at right')
       Math.abs(Number(dieM632[3]) - MFS632) < 0.05,
     `m=${JSON.stringify(dieM632?.slice(0, 4))} digit=${JSON.stringify(gdDie632)} expect=${MFS632}`)
 
-  // ---- ④ 渲染 + 占宽：右侧两个（`&shy`/`&xhy`）——与主音符那套**不同**，按用户三条口径 ----
-  //   大小与倚音一样大（墨迹高 = 数字墨迹高）／与倚音水平（纵向与数字墨迹完全对齐）／紧跟倚音（贴数字墨迹右缘）
+  // ---- ④ 渲染 + 占宽：滑音两个（`&shy`/`&xhy`）——尺寸按用户三条口径，侧由 adj636c 改到**左侧** ----
+  //   大小与倚音一样大（墨迹高 = 数字墨迹高）／与倚音水平（纵向与数字墨迹完全对齐）／紧跟倚音（贴数字墨迹**左**缘）
   const svgShy632 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 6/[5/&shy] 1/ |\n'), defaultPageConfig))[0]
   const gdShy632 = graceDigit632(svgShy632)
   const inkShy632 = inkRect632(svgShy632, 'shy')
   const d6Shy632 = digitX632(svgShy632, '6')
   const digitH632 = digitInkH(GRACE_FS)
-  check('adj632b 渲染：`&shy` **紧跟**倚音——左缘 = 倚音数字左缘 + 数字**墨迹**宽（不是数字槽宽）+ 净距',
+  check('adj636c 渲染：倚音上的 `&shy` **改画在数字左侧、紧跟**——右缘 = 倚音数字左缘 − 净距 1×gs',
     gdShy632 !== null && inkShy632 !== null &&
-      Math.abs(inkShy632.x1 - (gdShy632.x + digitInkW('5', GRACE_FS) + 1 * GS632)) < 0.02 &&
-      inkShy632.x1 < gdShy632.x + GW632,
-    `digit=${JSON.stringify(gdShy632)} inkX1=${inkShy632?.x1} 墨迹右缘=${gdShy632 ? gdShy632.x + digitInkW('5', GRACE_FS) : NaN}`)
+      Math.abs(inkShy632.x2 - (gdShy632.x - 1 * GS632)) < 0.02 &&
+      inkShy632.x1 < gdShy632.x,
+    `digit=${JSON.stringify(gdShy632)} inkX2=${inkShy632?.x2} 期望=${gdShy632 ? gdShy632.x - 1 * GS632 : NaN}`)
   check('adj632b 渲染：`&shy` **与倚音一样大**——墨迹高 = 倚音数字墨迹高（≈0.785×倚音字号）',
     inkShy632 !== null && Math.abs(inkShy632.y2 - inkShy632.y1 - digitH632) < 0.06 &&
       digitH632 > slideGlyphInk('shy', GRACE_FS).h,
@@ -14542,26 +14565,648 @@ console.log('[adj632] grace note marks: &tu/&die/&da above, &shy/&xhy at right')
       Math.abs(inkShy632.y1 - (gdShy632.y - DIGIT_INK_ASC_RATIO * GRACE_FS)) < 0.02 &&
       Math.abs(inkShy632.y2 - (gdShy632.y + (digitH632 - DIGIT_INK_ASC_RATIO * GRACE_FS))) < 0.02,
     `ink=[${inkShy632?.y1},${inkShy632?.y2}] digitTop=${gdShy632 ? gdShy632.y - DIGIT_INK_ASC_RATIO * GRACE_FS : NaN}`)
-  check('adj632 渲染：前倚音的滑音**不压主音符**（墨迹右缘 ≤ 主音符数字左缘）',
-    inkShy632 !== null && Number.isFinite(d6Shy632) && inkShy632.x2 <= d6Shy632 + 1e-9,
-    `inkRight=${inkShy632?.x2} mainDigit=${d6Shy632}`)
+  check('adj632/adj636c 渲染：前倚音的滑音（左侧）**不压主音符**，也不越出行首（组左缘按左伸量让开）',
+    inkShy632 !== null && Number.isFinite(d6Shy632) && inkShy632.x2 <= d6Shy632 + 1e-9 && inkShy632.x1 > 0,
+    `ink=[${inkShy632?.x1},${inkShy632?.x2}] mainDigit=${d6Shy632}`)
   const svgXhy632 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[h5/&xhy] 1 2 |\n'), defaultPageConfig))[0]
   const layXhy632 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[h5/&xhy] 1 2 |\n'), defaultPageConfig)
   const inkXhy632 = inkRect632(svgXhy632, 'xhy')
   const n0Xhy632 = [...layXhy632.pages[0].notes].sort((a, b) => a.x - b.x)[0]
   const rightOf632 = n0Xhy632.rightX ?? n0Xhy632.x + n0Xhy632.width
-  check('adj632 渲染+占宽：后倚音的 `&xhy` 墨迹落在音符占位宽**之内**（不会压到下一个音符）',
+  check('adj632/adj636c 渲染+占宽：后倚音的 `&xhy`（左侧）墨迹落在音符占位宽**之内**、且在主音符收尾元素**之后**',
     inkXhy632 !== null && inkXhy632.x2 <= rightOf632 + 1e-9 && inkXhy632.x1 > digitX632(svgXhy632, '3'),
     `ink=${JSON.stringify(inkXhy632)} rightX=${rightOf632} digit=${digitX632(svgXhy632, '3')}`)
 
-  // ---- ⑤ 多倚音：前一个倚音带右侧修饰 ⇒ 后一个倚音被推开，不压在前一个的滑音墨迹上 ----
+  // ---- ⑤ 多倚音：首音的滑音在**左侧** ⇒ 它只把组左缘让出去，后一个倚音回到紧凑间距 ----
   const svgMulti632 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 6/[5/&shy2/] 1/ |\n'), defaultPageConfig))[0]
   const g1Multi632 = graceDigit632(svgMulti632, 0)
   const g2Multi632 = graceDigit632(svgMulti632, 1)
   const inkMulti632 = inkRect632(svgMulti632, 'shy')
-  check('adj632 多倚音：前一个倚音带 &shy ⇒ 后一个倚音右移让开滑音墨迹（相邻不重叠）',
+  check('adj636c 多倚音：首音带 &shy ⇒ 记号在**组左缘之外**（不压相邻倚音、也不压更左边的元素）',
     g1Multi632 !== null && g2Multi632 !== null && inkMulti632 !== null &&
-      g2Multi632.x - g1Multi632.x >= shyExtent632 && inkMulti632.x2 <= g2Multi632.x + 1e-9,
-    `g1=${g1Multi632?.x} g2=${g2Multi632?.x} inkRight=${inkMulti632?.x2} need=${shyExtent632}`)
+      Math.abs(g2Multi632.x - g1Multi632.x - GAPW632) < 0.05 &&
+      inkMulti632.x2 <= g1Multi632.x + 1e-9 && inkMulti632.x1 > 0 &&
+      // 组左缘（首音数字左缘 − 左伸量）仍在页内、且左伸量与槽位几何一致
+      Math.abs((g1Multi632.x - inkMulti632.x1) - shyLeft632) < 0.05,
+    `g1=${g1Multi632?.x} g2=${g2Multi632?.x} ink=[${inkMulti632?.x1},${inkMulti632?.x2}] 紧凑间距=${GAPW632} 左伸=${shyLeft632}`)
 }
+
+// ---- adj633：倚音上的**波音**（`&sby`/`&xby`/`&sby+`/`&xby+`） ----
+// 用户要求：倚音也能挂波音（示例 `2[3/&sby]`），**大小参考波音与主音符的比率**——
+// 即"波音 : 所属音符"同一比率（同一款矢量图形，倚音按自己的字号等比缩小 ⇒ 正好是主音符上的一半）；
+// 演奏口径（用户原话）：「倚音的演奏参考主音符，只在时值按比率缩得更短」。
+console.log('[adj633] mordents on grace notes (&sby/&xby/&sby+/&xby+)')
+{
+  const NSize633 = defaultPageConfig.note_size
+  const NS633 = noteScaleOf(NSize633) // 主音符缩放因子 s = 字号/18
+  const GS633 = GRACE_FS / 18 // 倚音缩放因子 gs
+  const GW633 = GRACE_FS * GRACE_SLOT_RATIO // 倚音数字槽宽
+  const svgOf633 = (q: string) =>
+    renderScoreToSvg(layoutScore(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), defaultPageConfig))[0]
+  /** 某编码的图形在 SVG 里出现次数（按源路径前缀认图，不依赖它是第几个 `<g>`） */
+  const glyphCount633 = (svg: string, key: keyof typeof MODIFIER_GLYPHS) =>
+    svg.split(MODIFIER_GLYPHS[key].path.slice(0, 24)).length - 1
+  /** 某编码的矢量图形所在 `<g>` 的 translate/scale（取该图形**紧邻之前**的那个 `<g>`） */
+  const glyphOf633 = (svg: string, key: keyof typeof MODIFIER_GLYPHS, idx = 0) => {
+    const head = MODIFIER_GLYPHS[key].path.slice(0, 24)
+    const hits: number[] = []
+    for (let from = 0; ; ) {
+      const at = svg.indexOf(head, from)
+      if (at < 0) break
+      hits.push(at)
+      from = at + head.length
+    }
+    const at = hits[idx]
+    if (at === undefined) return null
+    const gs = [...svg.slice(0, at).matchAll(/<g transform="translate\(([-\d.]+) ([-\d.]+)\) scale\(([\d.]+)\)"/g)]
+    const m = gs[gs.length - 1]
+    return m ? { tx: Number(m[1]), ty: Number(m[2]), sc: Number(m[3]) } : null
+  }
+  /** 该图形的**墨迹包围盒**（源紧包围盒 × scale + translate） */
+  const inkOf633 = (g: { tx: number; ty: number; sc: number } | null, key: keyof typeof MODIFIER_GLYPHS) => {
+    if (!g) return null
+    const b = MODIFIER_GLYPHS[key].box
+    return { x1: g.tx + b.x * g.sc, y1: g.ty + b.y * g.sc, x2: g.tx + (b.x + b.w) * g.sc, y2: g.ty + (b.y + b.h) * g.sc }
+  }
+  /** 第 idx 个**倚音数字**的落点（渲染端倚音数字不带 data-notepos，靠倚音字号锚定） */
+  const graceDigit633 = (svg: string, idx = 0) => {
+    const m = [...svg.matchAll(new RegExp(`<text x="([\\d.]+)" y="([\\d.]+)" font-size="${GRACE_FS}" font-family=`, 'g'))][idx]
+    return m ? { x: Number(m[1]), y: Number(m[2]) } : null
+  }
+
+  // ---- ① 解析：四个波音编码收在**倚音自己**身上（主音符不受影响），且无告警 ----
+  const rAll633 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1[2/&sby] 1[3/&xby] 1[4/&sby+] 1[5/&xby+] 1[6/&tu] |\n')
+  const symOf633 = (i: number) => {
+    const tk = rAll633.groups[0].music.tokens[i]
+    return tk.kind === 'note' ? (tk.gracenotes?.notes[0].symbols ?? []) : []
+  }
+  check('adj633 解析：四个波音编码（&sby/&xby/&sby+/&xby+）全部收在**倚音自己**身上，无告警',
+    rAll633.errors.length === 0 && JSON.stringify([0, 1, 2, 3, 4].map(symOf633)) === '[["sby"],["xby"],["sby+"],["xby+"],["tu"]]',
+    JSON.stringify({ err: rAll633.errors.map((e) => e.message), syms: [0, 1, 2, 3, 4].map(symOf633) }))
+  check('adj633 编码清单自洽：4 个波音 ⊆ 倚音支持的 GRACE_MARK_CODES（与补全候选池同源）',
+    GRACE_MORDENT_CODES.length === 4 && GRACE_MORDENT_CODES.every((c) => (GRACE_MARK_CODES as readonly string[]).includes(c)),
+    `${[...GRACE_MORDENT_CODES].join(',')} ⊆ ${[...GRACE_MARK_CODES].join(',')}`)
+
+  // ---- ② 尺寸：与主音符**同一把尺子**（同比率 ⇒ 倚音上的波音正好小一半） ----
+  check('adj633 尺寸：`mordentInkW` 与主音符既有口径逐值相等（单 9×s、加长 13.5×s）',
+    mordentInkW('sby', NS633) === 9 * NS633 && mordentInkW('xby', 1) === 9 &&
+      mordentInkW('sby+', NS633) === 13.5 * NS633 && mordentInkW('xby+', 1) === 13.5,
+    `sby=${mordentInkW('sby', NS633)} sby+=${mordentInkW('sby+', NS633)}`)
+  check('adj633 尺寸：倚音上的波音 = 主音符上的 × 倚音字号比（同一比率，而非固定绝对值）',
+    Math.abs(mordentInkW('sby', GS633) / mordentInkW('sby', NS633) - GRACE_SIZE_RATIO) < 1e-9 &&
+      Math.abs(mordentInkW('sby+', GS633) / mordentInkW('sby+', NS633) - GRACE_SIZE_RATIO) < 1e-9,
+    `sby 比=${mordentInkW('sby', GS633) / mordentInkW('sby', NS633)} 期望=${GRACE_SIZE_RATIO}`)
+
+  // ---- ③ 渲染：画在**该倚音正上方**、图形随倚音等比缩小（与主音符同款图形） ----
+  const svgGraceSby633 = svgOf633('2[3/&sby] 4 |')
+  const svgPlainGrace633 = svgOf633('2[3/] 4 |')
+  const svgMainSby633 = svgOf633('2&sby 4 |')
+  const gGrace633 = glyphOf633(svgGraceSby633, 'sby')
+  const gMain633 = glyphOf633(svgMainSby633, 'sby')
+  const inkGrace633 = inkOf633(gGrace633, 'sby')
+  const dGrace633 = graceDigit633(svgGraceSby633, 0)
+  check('adj633 渲染：`2[3/&sby]` 画出波音图形、`2[3/]` 不画（图形数 1 : 0，同款矢量图形）',
+    glyphCount633(svgGraceSby633, 'sby') === 1 && glyphCount633(svgPlainGrace633, 'sby') === 0 &&
+      glyphCount633(svgMainSby633, 'sby') === 1,
+    `grace=${glyphCount633(svgGraceSby633, 'sby')} plain=${glyphCount633(svgPlainGrace633, 'sby')} main=${glyphCount633(svgMainSby633, 'sby')}`)
+  check('adj633 渲染：倚音上的波音**随倚音等比缩小**（scale 比 = 倚音字号比，= 主音符上的一半）',
+    // 容差 1e-3：`glyphMarkup` 把 scale 四舍五入到 6 位小数，比值天然带 ~1.5e-4 的量化误差
+    gGrace633 !== null && gMain633 !== null &&
+      Math.abs(gGrace633.sc / gMain633.sc - GRACE_SIZE_RATIO) < 1e-3 &&
+      Math.abs(gGrace633.sc - mordentInkW('sby', GS633) / MODIFIER_GLYPHS.sby.box.w) < 1e-6,
+    `grace=${gGrace633?.sc} main=${gMain633?.sc} 比=${gGrace633 && gMain633 ? gGrace633.sc / gMain633.sc : NaN}`)
+  check('adj633 渲染：波音画在该倚音**正上方**（墨迹底在数字墨迹顶之上、又不飘太高）',
+    inkGrace633 !== null && dGrace633 !== null &&
+      inkGrace633.y2 <= dGrace633.y - DIGIT_INK_ASC_RATIO * GRACE_FS - 1 * GS633 &&
+      inkGrace633.y2 >= dGrace633.y - DIGIT_INK_ASC_RATIO * GRACE_FS - 0.5 * GRACE_FS,
+    `inkBottom=${inkGrace633?.y2} digitTop=${dGrace633 ? dGrace633.y - DIGIT_INK_ASC_RATIO * GRACE_FS : NaN}`)
+  check('adj633 渲染：波音以**该倚音数字槽中心**居中（横向与数字对齐）',
+    inkGrace633 !== null && dGrace633 !== null &&
+      Math.abs((inkGrace633.x1 + inkGrace633.x2) / 2 - (dGrace633.x + GW633 / 2)) < 0.05,
+    `inkCenter=${inkGrace633 ? (inkGrace633.x1 + inkGrace633.x2) / 2 : NaN} 期望=${dGrace633 ? dGrace633.x + GW633 / 2 : NaN}`)
+  // 占宽：前倚音的波音墨迹含进组宽（组右缘仍停在「主音符数字左缘 − 1px×s」），不压主音符数字
+  const dMainSby633 = Number(svgGraceSby633.match(new RegExp(`<text x="([\\d.]+)" y="[^"]+" data-notepos="0_1_0_0" font-size="${NSize633}"`))?.[1] ?? 'NaN')
+  check('adj633 渲染+占宽：前倚音的波音墨迹 R 缘 ≤ 主音符数字左缘（组宽把它算进去了，不会压主音符）',
+    inkGrace633 !== null && Number.isFinite(dMainSby633) && inkGrace633.x2 <= dMainSby633 + 1e-9,
+    `inkRight=${inkGrace633?.x2} 主音符数字=${dMainSby633}`)
+  // 多倚音：加长波音比数字槽宽 ⇒ 下一个倚音被推开（相邻不压在一起）
+  const multiCode633 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 6/[5/&sby+2/] 1/ |\n'
+  const tokMulti633 = parseJps(multiCode633).groups[0].music.tokens.filter((t) => t.kind === 'note')[3]
+  const notesMulti633 = tokMulti633.kind === 'note' ? (tokMulti633.gracenotes?.notes ?? []) : []
+  const slotMulti633 = graceSlotLayout(notesMulti633, NSize633)
+  const svgMulti633 = svgOf633('1 2 3 6/[5/&sby+2/] 1/ |')
+  const g1Multi633 = graceDigit633(svgMulti633, 0)
+  const g2Multi633 = graceDigit633(svgMulti633, 1)
+  const needMulti633 = GW633 / 2 + mordentInkW('sby+', GS633) / 2 + 1 * GS633 // 槽中心 → 墨迹右缘 + 净距
+  check('adj633 槽位几何：加长波音比数字槽宽 ⇒ 下一个倚音被推开（offs[1] = 槽半宽 + 墨迹半宽 + 净距）',
+    slotMulti633.offs.length === 2 && Math.abs(slotMulti633.offs[1] - needMulti633) < 1e-9,
+    `offs=${JSON.stringify(slotMulti633.offs)} need=${needMulti633}`)
+  check('adj633 渲染：多倚音时被推开的间距与引擎槽位几何一致（渲染端 x 取整到 0.1，容差 0.25）',
+    g1Multi633 !== null && g2Multi633 !== null && Math.abs(g2Multi633.x - g1Multi633.x - needMulti633) < 0.25,
+    `g1=${g1Multi633?.x} g2=${g2Multi633?.x} need=${needMulti633}`)
+
+  // ---- ④ 演奏：「参考主音符，只在时值按比率缩得更短」 ----
+  // `2[3/&sby]`：主音符 2 共 1 拍 = 500ms（@120bpm），短倚音 = 1/4 拍 = 125ms ⇒ 主音符发声时值 P = 375ms。
+  const evOf633 = (q: string) => {
+    const r = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`)
+    const seq = buildPlaySequence(r, layoutScore(r, defaultPageConfig), 120)
+    return [...seq.events].sort((a, b) => a.atMs - b.atMs)
+  }
+  const nameOf633 = (e: { pitch?: string | null; placed: unknown }): string =>
+    e.pitch ?? (e.placed as { audioPitch?: string | null }).audioPitch ?? ''
+  const evG633 = evOf633('2[3/&sby] |')
+  const evPlain633 = evOf633('2[3/] |')
+  const evMain633 = evOf633('2&sby |')
+  const planMain633 = mordentPlan(375, 'sby') // 主音符口径的计划（P = 375ms）
+  const k633 = 125 / 375 // 时值比率（倚音发声时值 ÷ 主音符发声时值）
+  check('adj633 演奏：无波音的倚音不受影响（`2[3/]` 仍是 1 个倚音事件 + 1 个主音符）',
+    evPlain633.length === 2 && Math.abs(evPlain633[0].durationMs - 125) < 1e-6 && Math.abs(evPlain633[1].atMs - 125) < 1e-6,
+    `n=${evPlain633.length} ${evPlain633.map((e) => `${Math.round(e.atMs)}+${e.durationMs}`).join(' ')}`)
+  check('adj633 演奏：`2[3/&sby]` = 波音（主→上邻→按住的主音）+ 主音符 = 4 个事件，全部在该倚音的 125ms 窗口内',
+    evG633.length === 4 && Math.abs(evG633[0].atMs) < 1e-6 &&
+      Math.abs(evG633[2].atMs + evG633[2].durationMs - 125) < 1e-6 && Math.abs(evG633[3].atMs - 125) < 1e-6,
+    `n=${evG633.length} ${evG633.map((e) => `${Math.round(e.atMs)}(${nameOf633(e)},${e.durationMs.toFixed(3)})`).join(' ')}`)
+  check('adj633 演奏：音序 = 倚音 3(E4) → 上邻 4(F4) → 按住 E4（邻音取**该倚音**音级的调内二度）',
+    nameOf633(evG633[0]) === 'E4' && nameOf633(evG633[1]) === 'F4' && nameOf633(evG633[2]) === 'E4',
+    [0, 1, 2].map((i) => nameOf633(evG633[i])).join(','))
+  check('adj633 演奏：每一步时长 = **主音符计划里的时长 × 比率 k**（形状与主音符一致，只是按比率变快）',
+    Math.abs(evG633[0].durationMs - planMain633.shortMs * k633) < 1e-6 &&
+      Math.abs(evG633[1].durationMs - planMain633.shortMs * k633) < 1e-6 &&
+      Math.abs(evG633[2].durationMs - planMain633.heldMs * k633) < 1e-6,
+    `倚音=[${evG633.slice(0, 3).map((e) => e.durationMs.toFixed(4)).join(',')}] 期望=[${[(planMain633.shortMs * k633).toFixed(4), (planMain633.shortMs * k633).toFixed(4), (planMain633.heldMs * k633).toFixed(4)].join(',')}]`)
+  check('adj633 演奏：与主音符自己的波音**占比相同**（短音/时值 = 1/8，只是被等比缩短）',
+    Math.abs(evG633[0].durationMs / 125 - planMain633.shortMs / 375) < 1e-9 &&
+      Math.abs(evMain633[0].durationMs / 500 - mordentPlan(500, 'sby').shortMs / 500) < 1e-9,
+    `倚音=${evG633[0].durationMs / 125} 主音符=${evMain633[0].durationMs / 500} 主音符口径=${planMain633.shortMs / 375}`)
+  check('adj633 演奏：时值守恒——波音三段之和 = 该倚音的时值（不额外占拍、后续拍位不动）',
+    Math.abs(evG633[0].durationMs + evG633[1].durationMs + evG633[2].durationMs - 125) < 1e-6 &&
+      Math.abs(evG633[3].atMs + evG633[3].durationMs - 500) < 1e-6,
+    `sum=${(evG633[0].durationMs + evG633[1].durationMs + evG633[2].durationMs).toFixed(6)} 本音符末尾=${evG633[3].atMs + evG633[3].durationMs}`)
+  const evXBy633 = evOf633('2[3/&xby] |')
+  check('adj633 演奏：下波音 `&xby` 取**下邻音**（C 调 3=E → 2=D）',
+    nameOf633(evXBy633[1]) === 'D4', nameOf633(evXBy633[1]))
+  const planPlus633 = mordentPlan(375, 'sby+')
+  const evPlus633 = evOf633('2[3/&sby+] |')
+  check('adj633 演奏：长上波音 `&sby+` = 主→邻→主→邻→按住（5 个事件）+ 主音符，各步同样按 k 缩放',
+    evPlus633.length === 6 && [0, 1, 2, 3].every((i) => Math.abs(evPlus633[i].durationMs - planPlus633.shortMs * k633) < 1e-6) &&
+      Math.abs(evPlus633[4].durationMs - planPlus633.heldMs * k633) < 1e-6 &&
+      [0, 1, 2, 3, 4].map((i) => nameOf633(evPlus633[i])).join(',') === 'E4,F4,E4,F4,E4',
+    `n=${evPlus633.length} ${evPlus633.map((e) => `${nameOf633(e)}:${e.durationMs.toFixed(3)}`).join(' ')}`)
+}
+
+// ---- adj635：竹笛/葫芦丝的传统装饰音——打音 `&da` / 叠音 `&die` 的演奏 ----
+// 用户说明：叠音 = 主音前先极快吹一下**上方**邻音（"2 → 1"，像极快的上倚音）；
+// 打音 = 主音发出后快速打下**下方**邻音（"1 → 7 → 1"，7 非常短促；常用来把两个相同的音断开）；
+// 两者都"辅助音极短，否则会变成普通的倚音"。
+console.log('[adj635] 打音 da / 叠音 die performance')
+{
+  const evs635 = (q: string, bpm = 60) => {
+    const r = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`)
+    const seq = buildPlaySequence(r, layoutScore(r, defaultPageConfig), bpm)
+    return [...seq.events].sort((a, b) => a.atMs - b.atMs)
+  }
+  const nm635 = (e: { pitch?: string | null; placed: unknown }): string =>
+    e.pitch ?? (e.placed as { audioPitch?: string | null }).audioPitch ?? ''
+  const msOf635 = (ev: { atMs: number; durationMs: number; pitch?: string | null; placed: unknown }[]) =>
+    ev.map((e) => `${nm635(e)}@${e.atMs}+${e.durationMs}`).join(' ')
+
+  // ---- ① 纯函数：步骤 / 守恒 / 预算 / 夹紧 / 取记号 ----
+  check('adj635 打音 steps = 主→下邻（`PL`）；叠音 steps = 上邻（`U`）——与用户说明的顺序一致',
+    portPlan(1000, 'da').steps.join('') === 'PL' && portPlan(1000, 'die').steps.join('') === 'U' &&
+      ornamentPlan(1000, 'die').steps.join('') === 'U' && ornamentPlan(1000, 'sby').steps.join('') === 'PU',
+    `${portPlan(1000, 'da').steps.join('')} / ${portPlan(1000, 'die').steps.join('')}`)
+  {
+    const daP = portPlan(1000, 'da')
+    const dieP = portPlan(1000, 'die')
+    check('adj635 不变式：辅助音 × 步数 + 按住的主音 ≡ P，且主音保留 ≥ P/2（打音 / 叠音各验三档）',
+      Math.abs(daP.shortMs * 2 + daP.heldMs - 1000) < 1e-6 && daP.heldMs >= 500 - 1e-6 &&
+        Math.abs(dieP.shortMs * 1 + dieP.heldMs - 1000) < 1e-6 && dieP.heldMs >= 500 - 1e-6 &&
+        [200, 4000].every((P) => {
+          const a = portPlan(P, 'da')
+          const b = portPlan(P, 'die')
+          return Math.abs(a.shortMs * a.steps.length + a.heldMs - P) < 1e-6 && a.heldMs >= P / 2 - 1e-6 &&
+            Math.abs(b.shortMs * b.steps.length + b.heldMs - P) < 1e-6 && b.heldMs >= P / 2 - 1e-6
+        }),
+      `da=${daP.shortMs}×2+${daP.heldMs} die=${dieP.shortMs}+${dieP.heldMs}`)
+  }
+  check('adj635 辅助音 = clamp(P/16, 30, 70)ms —— 比波音（P/8、45–110ms）更"极小"',
+    portShortMs(2000) === 70 && portShortMs(480) === 30 && portShortMs(1000) === 62.5 &&
+      portShortMs(1000) < mordentShortMs(1000) &&
+      ORNAMENT_PORT_MIN_MS === 30 && ORNAMENT_PORT_MAX_MS === 70,
+    `P=1000: 打音/叠音 ${portShortMs(1000)}ms vs 波音 ${mordentShortMs(1000)}ms`)
+  check('adj635 取记号：`ornamentOf` 波音 → 打音 → 叠音（同时写只取一个），且与 `portOf` 互不串味',
+    ornamentOf(['die']) === 'die' && ornamentOf(['da']) === 'da' && ornamentOf(['sby', 'da']) === 'sby' &&
+      ornamentOf(['da', 'die']) === 'da' && ornamentOf(['tu']) === null && ornamentOf([]) === null &&
+      portOf(['sby']) === null && portOf(['xby+']) === null && PORT_SYMBOLS.join(',') === 'da,die' &&
+      ORNAMENT_SYMBOLS.join(',') === 'sby,xby,sby+,xby+,da,die',
+    `sby+da=${ornamentOf(['sby', 'da'])} da+die=${ornamentOf(['da', 'die'])} tu=${ornamentOf(['tu'])}`)
+
+  // ---- ② 演奏：叠音 = 上邻 → 主（主音顺延）；打音 = 主 → 下邻 → 主 ----
+  const die1 = evs635('3&die 1 |')
+  check('adj635 演奏：叠音 `3&die`（1 拍 = 1000ms）= 上邻 4(F4) 62.5ms → 主 3(E4) 937.5ms（起点顺延、总时值不变）',
+    die1.length === 3 && nm635(die1[0]) === 'F4' && die1[0].atMs === 0 && die1[0].durationMs === 62.5 &&
+      nm635(die1[1]) === 'E4' && die1[1].atMs === 62.5 && die1[1].durationMs === 937.5 && die1[2].atMs === 1000,
+    msOf635(die1))
+  const da1 = evs635('3&da 1 |')
+  check('adj635 演奏：打音 `3&da`（1 拍）= 主 3(E4) 62.5ms → 下邻 2(D4) 62.5ms → 主 3(E4) 875ms',
+    da1.length === 4 && nm635(da1[0]) === 'E4' && da1[0].atMs === 0 && da1[0].durationMs === 62.5 &&
+      nm635(da1[1]) === 'D4' && da1[1].atMs === 62.5 && da1[1].durationMs === 62.5 &&
+      nm635(da1[2]) === 'E4' && da1[2].atMs === 125 && da1[2].durationMs === 875 && da1[3].atMs === 1000,
+    msOf635(da1))
+  const die7 = evs635('7&die 1 |')
+  check('adj635 演奏：`7&die` 的上邻音上翻八度（B4 → C5）——邻音取调内二度、随八度回卷',
+    nm635(die7[0]) === 'C5' && nm635(die7[1]) === 'B4',
+    msOf635(die7))
+  // 极短主音符：辅助音按比例压缩（"塞得进去"优先于"够长"）
+  const daShort = evs635('3,//////&da 1 |') // 1/64 拍 = 15.625ms
+  check('adj635 演奏：极短主音符上辅助音按比例压缩，三段之和仍 ≡ P（不越界、不撑长小节）',
+    daShort.length === 4 && Math.abs(daShort[0].durationMs + daShort[1].durationMs + daShort[2].durationMs - 15.625) < 1e-6 &&
+      daShort[0].durationMs === daShort[1].durationMs && daShort[3].atMs === 15.625,
+    msOf635(daShort))
+
+  // ---- ③ 与连音的关系：带打音/叠音的音**自己不能被并入前一个**（打音正是"把两个相同的音断开"） ----
+  const slurPlain = evs635('(3 3)') // 对照：同音连音合并成一个长音
+  const slurBreak = evs635('(3 3&da)') // 第二个 3 带打音 ⇒ 必须重新起奏
+  const slurFirst = evs635('(3&da 3)') // 第一个带打音 ⇒ 后一个并入"按住的主音"那一段
+  check('adj635/adj503 连音对照：`(3 3)` 合并成 1 个 2000ms 长音（既有行为不变）',
+    slurPlain.length === 1 && slurPlain[0].durationMs === 2000 && slurPlain[0].atMs === 0,
+    msOf635(slurPlain))
+  check('adj635/adj503 「音断意连」：`(3 3&da)` 第二个 3 **不合并**——前一个 3 照常 1000ms，第二个 3 从头打音',
+    slurBreak.length === 4 && slurBreak[0].durationMs === 1000 &&
+      nm635(slurBreak[1]) === 'E4' && slurBreak[1].atMs === 1000 &&
+      nm635(slurBreak[2]) === 'D4' && slurBreak[2].atMs === 1062.5 &&
+      nm635(slurBreak[3]) === 'E4' && slurBreak[3].atMs === 1125 && slurBreak[3].durationMs === 875,
+    msOf635(slurBreak))
+  check('adj635/adj503 `(3&da 3)`：后一个同音并入**按住的主音**那一段（1875ms），打音短音在开头不受影响',
+    slurFirst.length === 3 && nm635(slurFirst[0]) === 'E4' && slurFirst[0].durationMs === 62.5 &&
+      nm635(slurFirst[1]) === 'D4' && nm635(slurFirst[2]) === 'E4' &&
+      slurFirst[2].atMs === 125 && slurFirst[2].durationMs === 1875,
+    msOf635(slurFirst))
+
+  // ---- ④ 与倚音共存：先奏倚音，再在本音符剩余时值里匀（P = 扣掉倚音后的发声时值） ----
+  const dieGrace = evs635('3[2/]&die 1 |')
+  check('adj635 演奏：`3[2/]&die` = 倚音 2(D4) 250ms → 叠音上邻 4(F4) 46.875ms → 主 3(E4) 703.125ms',
+    dieGrace.length === 4 && nm635(dieGrace[0]) === 'D4' && dieGrace[0].atMs === 0 && dieGrace[0].durationMs === 250 &&
+      nm635(dieGrace[1]) === 'F4' && dieGrace[1].atMs === 250 && dieGrace[1].durationMs === 46.875 &&
+      nm635(dieGrace[2]) === 'E4' && dieGrace[2].atMs === 296.875 && dieGrace[2].durationMs === 703.125 &&
+      dieGrace[3].atMs === 1000,
+    msOf635(dieGrace))
+
+  // ---- ⑤ 写在**倚音**上（adj633 口径：计划按主音符算、时值按比率缩得更短） ----
+  const dieOnGrace = evs635('3[2/&die] 1 |')
+  check('adj635 演奏：`3[2/&die]` 倚音上叠音——倚音窗口 250ms 内奏「上邻 3(E4) → 倚音 2(D4)」，主音仍从 250ms 起',
+    dieOnGrace.length === 4 && nm635(dieOnGrace[0]) === 'E4' && dieOnGrace[0].atMs === 0 &&
+      nm635(dieOnGrace[1]) === 'D4' &&
+      Math.abs(dieOnGrace[0].durationMs + dieOnGrace[1].durationMs - 250) < 1e-6 &&
+      nm635(dieOnGrace[2]) === 'E4' && dieOnGrace[2].atMs === 250 && dieOnGrace[3].atMs === 1000,
+    msOf635(dieOnGrace))
+  const daOnGrace = evs635('3[2/&da] 1 |')
+  check('adj635 演奏：`3[2/&da]` 倚音上打音——三段之和 = 倚音窗口 250ms（主音 3 仍从 250ms 起）',
+    daOnGrace.length === 5 && Math.abs(daOnGrace[0].durationMs + daOnGrace[1].durationMs + daOnGrace[2].durationMs - 250) < 1e-6 &&
+      nm635(daOnGrace[0]) === 'D4' && nm635(daOnGrace[1]) === 'C4' && nm635(daOnGrace[2]) === 'D4' &&
+      nm635(daOnGrace[3]) === 'E4' && daOnGrace[3].atMs === 250,
+    msOf635(daOnGrace))
+}
+
+// ---- adj636：滑音（上滑音 `&shy` / 下滑音 `&xhy`）的演奏——"线状"的音高滑行 ----
+// 用户说明：滑音与打音/叠音最大的不同是"**线状**"（"让音高平滑地过渡，中间没有断痕"）；
+// 口径（用户确认）：**两种都当成"从上／下一个音滑进本音"**——`&shy` 从**下方**滑进本音、`&xhy` 从**上方**滑进；
+// 用户举的例子：`6&shy` = 5 → 5# → 6、`5&xhy` = 6 → 5# → 5（逐半音的连续渐变，而不是直接跳过去）。
+console.log('[adj636] 上滑音 shy / 下滑音 xhy performance (chromatic glide)')
+{
+  const evs636 = (q: string, bpm = 60) => {
+    const r = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`)
+    const seq = buildPlaySequence(r, layoutScore(r, defaultPageConfig), bpm)
+    return [...seq.events].sort((a, b) => a.atMs - b.atMs)
+  }
+  const nm636 = (e: { pitch?: string | null; placed: unknown }): string =>
+    e.pitch ?? (e.placed as { audioPitch?: string | null }).audioPitch ?? ''
+  const msOf636 = (ev: { atMs: number; durationMs: number; pitch?: string | null; placed: unknown }[]) =>
+    ev.map((e) => `${nm636(e)}@${Math.round(e.atMs * 100) / 100}+${Math.round(e.durationMs * 100) / 100}`).join(' ')
+
+  // ---- ① 纯函数：阶梯形状 / 每格时长 / 预算（不越 P/2） ----
+  check('adj636 音名 ↔ MIDI 互逆（逐半音阶梯要按 MIDI 算）：68 → G#4、C4 → 60 等',
+    midiToPitchName(60) === 'C4' && midiToPitchName(68) === 'G#4' && midiToPitchName(61) === 'C#4' &&
+      midiToPitchName(47) === 'B2' && pitchToMidiNote(midiToPitchName(68)) === 68,
+    `${midiToPitchName(60)} ${midiToPitchName(68)} ${midiToPitchName(47)}`)
+  {
+    // 用户在 C 调下的两个例子：`6&shy`（从 5 滑进 6）与 `5&xhy`（从 6 滑进 5）
+    const up = slidePlan(pitchToMidiNote('G4'), pitchToMidiNote('A4'), 1000, midiToPitchName)
+    const down = slidePlan(pitchToMidiNote('A4'), pitchToMidiNote('G4'), 1000, midiToPitchName)
+    check('adj636 阶梯形状与用户例子逐音一致：`6&shy` = G4 → G#4 →(到达)A4；`5&xhy` = A4 → G#4 →(到达)G4',
+      up.steps.join(',') === 'G4,G#4' && down.steps.join(',') === 'A4,G#4' &&
+        up.from === 'G4' && down.from === 'A4' && up.stepMs === down.stepMs,
+      `up=${up.steps.join(',')} down=${down.steps.join(',')}`)
+    check('adj636 不变式：到达时刻 + 按住时长 ≡ P，且按住（本音自己的音高）≥ P/2',
+      Math.abs(up.arrivedMs + up.heldMs - 1000) < 1e-6 && up.heldMs >= 500 - 1e-6 &&
+        [200, 4000].every((P) => {
+          const p = slidePlan(pitchToMidiNote('G4'), pitchToMidiNote('A4'), P, midiToPitchName)
+          return Math.abs(p.arrivedMs + p.heldMs - P) < 1e-6 && p.heldMs >= P / 2 - 1e-6
+        }),
+      `arrived=${up.arrivedMs} held=${up.heldMs}`)
+  }
+  check('adj636 每格时长 = clamp(P/8, 30, 60)ms，整段滑行 ≤ P/2（"逐渐、缓慢"但不拖）',
+    slideStepMs(4000) === 60 && slideStepMs(160) === 30 && slideStepMs(1000) === 60 &&
+      SLIDE_STEP_MIN_MS === 30 && SLIDE_STEP_MAX_MS === 60 &&
+      // 大音程（7 个半音）在短音符上被 P/2 预算压住
+      Math.abs(slidePlan(60, 67, 200, midiToPitchName).stepMs - 200 / 2 / 7) < 1e-9,
+    `P=1000: ${slideStepMs(1000)}ms；P=200 七个半音: ${slidePlan(60, 67, 200, midiToPitchName).stepMs}ms`)
+  check('adj636 取记号：`slideOf` 只认 shy/xhy（同写取上滑音）；`ornamentOf` 不把滑音当点状装饰',
+    slideOf(['shy']) === 'shy' && slideOf(['xhy']) === 'xhy' && slideOf(['shy', 'xhy']) === 'shy' &&
+      slideOf(['sby']) === null && slideOf([]) === null && ornamentOf(['shy']) === null && ornamentOf(['xhy']) === null &&
+      SLIDE_SYMBOLS.join(',') === 'shy,xhy',
+    `shy=${slideOf(['shy'])} ornamentOf(shy)=${ornamentOf(['shy'])}`)
+
+  // ---- ② 演奏：`6&shy`（C 调）——5 → 5# → 6，然后按住 6 到本音符结束 ----
+  const shy6 = evs636('6&shy 1 |')
+  check('adj636 演奏：`6&shy`（1 拍 = 1000ms）= G4 60ms → G#4 60ms → A4 880ms（本音音高按住到结束）',
+    shy6.length === 4 && nm636(shy6[0]) === 'G4' && shy6[0].atMs === 0 && shy6[0].durationMs === 60 &&
+      nm636(shy6[1]) === 'G#4' && shy6[1].atMs === 60 && shy6[1].durationMs === 60 &&
+      nm636(shy6[2]) === 'A4' && shy6[2].atMs === 120 && shy6[2].durationMs === 880 && shy6[3].atMs === 1000,
+    msOf636(shy6))
+  const xhy5 = evs636('5&xhy 1 |')
+  check('adj636 演奏：`5&xhy`（1 拍）——从**上方**滑进：A4 60ms → G#4 60ms → G4 880ms',
+    xhy5.length === 4 && nm636(xhy5[0]) === 'A4' && nm636(xhy5[1]) === 'G#4' &&
+      nm636(xhy5[2]) === 'G4' && xhy5[2].atMs === 120 && xhy5[2].durationMs === 880,
+    msOf636(xhy5))
+  // 半音相邻（4 → 3）：阶梯只有一格
+  const shy4 = evs636('4&shy 1 |')
+  check('adj636 演奏：`4&shy` 的邻音只差半音（E4 → F4）⇒ 阶梯一格就到达（不硬塞多余半音）',
+    shy4.length === 3 && nm636(shy4[0]) === 'E4' && shy4[0].durationMs === 60 &&
+      nm636(shy4[1]) === 'F4' && shy4[1].atMs === 60 && shy4[1].durationMs === 940,
+    msOf636(shy4))
+  const shy7 = evs636('7&shy 1 |')
+  check('adj636 演奏：`7&shy` 的下方邻音是 6（A4 → B4，两个半音）⇒ A4 → A#4 → B4',
+    nm636(shy7[0]) === 'A4' && nm636(shy7[1]) === 'A#4' && nm636(shy7[2]) === 'B4',
+    msOf636(shy7))
+  // 首音（前面没有音）也照样成立——滑音只依「本音 + 方向」，不依赖前一个音
+  const shyFirst = evs636('3&shy |')
+  check('adj636 演奏：`3&shy` 写在**全谱第一个音**上同样成立（起点只由方向与调内二度决定）',
+    shyFirst.length === 3 && nm636(shyFirst[0]) === 'D4' && nm636(shyFirst[2]) === 'E4' &&
+      shyFirst[0].atMs === 0 && shyFirst[2].atMs === 120,
+    msOf636(shyFirst))
+
+  // ---- ③ 时值不变：滑音不占额外拍（本音符总时值不变、后续音符起点不动） ----
+  const seq636 = evs636('6&shy 1 2 3 |')
+  check('adj636 演奏：滑音**不改变时值**——本音符仍占满 1 拍，后续音符起点依次 1000/2000/3000',
+    seq636.length === 6 && nm636(seq636[2]) === 'A4' &&
+      Math.abs(seq636[2].atMs + seq636[2].durationMs - 1000) < 1e-6 &&
+      seq636[3].atMs === 1000 && seq636[4].atMs === 2000 && seq636[5].atMs === 3000,
+    msOf636(seq636))
+
+  // ---- ④ 与连音：带滑音的音**自己不能被并入前一个**（并进去滑行就没了） ----
+  const slurSlide = evs636('(5 5&xhy)')
+  check('adj636/adj503 连音：`(5 5&xhy)` 第二个 5 带滑音 ⇒ **不合并**，前一个 5 照常 1000ms、第二个从头滑进',
+    slurSlide.length === 4 && slurSlide[0].durationMs === 1000 &&
+      nm636(slurSlide[1]) === 'A4' && slurSlide[1].atMs === 1000 &&
+      nm636(slurSlide[2]) === 'G#4' && nm636(slurSlide[3]) === 'G4' && slurSlide[3].atMs === 1120,
+    msOf636(slurSlide))
+
+  // ---- ⑤ 记号优先级与共存：点状装饰（波音/打音/叠音）优先；滑音可与倚音共存 ----
+  const both = evs636('3&da&shy 1 |')
+  check('adj636 优先级：同一音符同时写点状装饰与滑音 ⇒ **点状装饰优先**（`3&da&shy` 奏打音，不叠加滑音）',
+    both.length === 4 && nm636(both[0]) === 'E4' && nm636(both[1]) === 'D4' && nm636(both[2]) === 'E4' &&
+      both[0].durationMs === 62.5,
+    msOf636(both))
+  const shyGrace = evs636('3[2/]&shy 1 |')
+  check('adj636 与倚音共存：`3[2/]&shy` = 倚音 2(D4) 250ms → 滑行按**扣掉倚音后的 P=750ms** 算（D4 → D#4 → E4）→ 落回本音',
+    shyGrace.length === 5 && nm636(shyGrace[0]) === 'D4' && shyGrace[0].atMs === 0 && shyGrace[0].durationMs === 250 &&
+      nm636(shyGrace[1]) === 'D4' && shyGrace[1].atMs === 250 && shyGrace[1].durationMs === 60 &&
+      nm636(shyGrace[2]) === 'D#4' && nm636(shyGrace[3]) === 'E4' &&
+      Math.abs(shyGrace[3].atMs + shyGrace[3].durationMs - 1000) < 1e-6 && shyGrace[4].atMs === 1000,
+    msOf636(shyGrace))
+
+  // ---- ⑥ 写在**倚音**上（adj633 口径：计划按主音符算、时值按比率缩得更短） ----
+  const shyOnGrace = evs636('3[2/&shy] 1 |')
+  check('adj636 演奏：`3[2/&shy]` 倚音上滑音——在倚音的 250ms 窗口内奏完阶梯并落到倚音音高，主音仍从 250ms 起',
+    shyOnGrace.length === 5 && nm636(shyOnGrace[0]) === 'C4' && shyOnGrace[0].atMs === 0 && shyOnGrace[0].durationMs === 20 &&
+      nm636(shyOnGrace[1]) === 'C#4' && shyOnGrace[1].atMs === 20 &&
+      nm636(shyOnGrace[2]) === 'D4' &&
+      Math.abs(shyOnGrace[0].durationMs + shyOnGrace[1].durationMs + shyOnGrace[2].durationMs - 250) < 1e-6 &&
+      nm636(shyOnGrace[3]) === 'E4' && shyOnGrace[3].atMs === 250,
+    msOf636(shyOnGrace))
+}
+
+// ---- adj636b：滑音记号改画在**数字左侧**（用户要求：原来画在右侧是错的；高度、大小不变） ----
+// 语义上"滑进本音"的记号写在音的左边才读得通（与 adj636 的演奏口径一致）。
+console.log('[adj636b] slide glyph moves to the LEFT of the note (size/height unchanged)')
+{
+  const ns636b = defaultPageConfig.note_size
+  const digW636b = digitSlotW(ns636b)
+  const accW636b = accidentalBodyW(ns636b)
+  const shy636b = slideGlyphInk('shy', ns636b)
+  const xhy636b = slideGlyphInk('xhy', ns636b)
+  check('adj636b 几何：墨迹**右缘贴数字左缘**（`dx + w = 0`，即全在数字左侧）；有变音角标时再让开角标占位',
+    shy636b.dx < 0 && xhy636b.dx < 0 &&
+      Math.abs(shy636b.dx + shy636b.w) < 1e-9 && Math.abs(xhy636b.dx + xhy636b.w) < 1e-9 &&
+      Math.abs(slideGlyphInk('shy', ns636b, accW636b).dx + accW636b + shy636b.w) < 1e-9 &&
+      Math.abs(slideGlyphInk('xhy', ns636b, accW636b).dx + accW636b + xhy636b.w) < 1e-9,
+    `shy dx=${shy636b.dx} w=${shy636b.w}；xhy dx=${xhy636b.dx} w=${xhy636b.w}；accW=${accW636b}`)
+  check('adj636b 高度与大小**不变**：h 与旧口径（右侧时代）逐值相同、w = h × 图形宽高比、占宽仍是 w',
+    Math.abs(shy636b.h - 6.59) < 0.02 && Math.abs(xhy636b.h - 7.3) < 0.02 &&
+      Math.abs(shy636b.w - shy636b.h * glyphInkAspect(MODIFIER_GLYPHS.shy)) < 1e-9 &&
+      Math.abs(xhy636b.w - xhy636b.h * glyphInkAspect(MODIFIER_GLYPHS.xhy)) < 1e-9 &&
+      slideExtraW('shy', ns636b) === shy636b.w && slideExtraW('xhy', ns636b) === xhy636b.w,
+    `shy h=${shy636b.h} w=${shy636b.w}；xhy h=${xhy636b.h} w=${xhy636b.w}`)
+  // 渲染：图形 transform 落在数字左侧，且纵向（高度/上下沿）不变
+  const q636b = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1&shy 2&xhy 3 4 |\nQ2: 5 6 7 1' |\n"
+  const lay636b = layoutScore(parseJps(q636b), mspCfg)
+  const svg636b = renderScoreToSvg(lay636b)[0]
+  const q1Notes636b = lay636b.pages[0].notes.filter((n) => n.id.voice === 1).sort((a, b) => a.x - b.x)
+  const glyphBox636b = (sym: 'shy' | 'xhy', idx = 0) => {
+    const ink = slideGlyphInk(sym, ns636b)
+    const sc = ink.w / MODIFIER_GLYPHS[sym].box.w
+    const tx = Math.round((q1Notes636b[idx].x + ink.dx - MODIFIER_GLYPHS[sym].box.x * sc) * 100) / 100
+    const ty = Math.round((q1Notes636b[idx].y + ink.dy - MODIFIER_GLYPHS[sym].box.y * sc) * 100) / 100
+    return { tx, ty, sc: String(Math.round(sc * 1e6) / 1e6), ink, noteX: q1Notes636b[idx].x, noteY: q1Notes636b[idx].y }
+  }
+  const gShy636b = glyphBox636b('shy', 0)
+  const gXhy636b = glyphBox636b('xhy', 1)
+  check('adj636b 渲染：滑音图形恰在**该音数字的左侧**（墨迹右缘 = 数字左缘），纵向与旧口径相同（全在基线上方）',
+    svg636b.includes(`translate(${gShy636b.tx} ${gShy636b.ty}) scale(${gShy636b.sc})`) &&
+      svg636b.includes(`translate(${gXhy636b.tx} ${gXhy636b.ty}) scale(${gXhy636b.sc})`) &&
+      Math.abs(gShy636b.noteX + gShy636b.ink.dx + gShy636b.ink.w - gShy636b.noteX) < 1e-9 &&
+      gShy636b.ink.dy + gShy636b.ink.h <= 0 && gShy636b.ink.dy < 0 &&
+      gXhy636b.noteX + gXhy636b.ink.dx + gXhy636b.ink.w <= gXhy636b.noteX + 1e-9,
+    `shy translate=${gShy636b.tx},${gShy636b.ty} noteX=${gShy636b.noteX} ink=[${gShy636b.ink.dx},${gShy636b.ink.dx + gShy636b.ink.w}]`)
+  check('adj636b 占宽：滑音音的**左伸量**进了本体宽与数字左移量 ⇒ 图形不压**前一个**音符，且不越出本音符占位',
+    q1Notes636b.length >= 3 &&
+      // 音符 1 的滑音左缘 ≥ 行首/前一个数字右缘（这里是行首，故只需 ≥ 自己的左伸不再越界）
+      // 音符 2 的滑音左缘 ≥ 音符 1 的数字右缘
+      q1Notes636b[1].x - slideGlyphInk('xhy', ns636b).w >= q1Notes636b[0].x + digW636b - 0.6 &&
+      Math.abs(q1Notes636b[0].width - (digW636b + shy636b.w)) < 0.6 &&
+      Math.abs(q1Notes636b[1].width - (digW636b + xhy636b.w)) < 0.6,
+    `n1.x=${q1Notes636b[0].x} n2.x=${q1Notes636b[1].x} 需求=${(q1Notes636b[0].x + digW636b).toFixed(2)}；w1=${q1Notes636b[0].width} 期望=${(digW636b + shy636b.w).toFixed(2)}`)
+  // 变音 + 滑音：图形再让开角标，不与 `#` 重叠
+  const svgAcc636b = renderScoreToSvg(layoutScore(parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 4#&shy 5 6 7 |\n"), mspCfg))[0]
+  const accNote636b = layoutScore(parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 4#&shy 5 6 7 |\n"), mspCfg).pages[0].notes[0]
+  const inkAcc636b = slideGlyphInk('shy', ns636b, accW636b)
+  check('adj636b 变音+滑音：图形右缘 = 数字左缘 − 变音角标占位（不压 `#`），且仍在页内',
+    inkAcc636b.dx + inkAcc636b.w + accW636b <= 1e-9 &&
+      svgAcc636b.includes(String(Math.round((inkAcc636b.w / MODIFIER_GLYPHS.shy.box.w) * 1e6) / 1e6)) &&
+      accNote636b.x - accW636b - inkAcc636b.w > 0,
+    `dx=${inkAcc636b.dx} w=${inkAcc636b.w} accW=${accW636b} noteX=${accNote636b.x}`)
+  // 前倚音 + 滑音：图形要再让开**倚音组**（否则箭头压在倚音上）
+  const srcGraceSlide636b = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[2/]&shy 1 2 3 |\n"
+  const svgGraceSlide636b = renderScoreToSvg(layoutScore(parseJps(srcGraceSlide636b), mspCfg))[0]
+  const noteGraceSlide636b = layoutScore(parseJps(srcGraceSlide636b), mspCfg).pages[0].notes[0]
+  const clearGrace636b = 1 * noteScaleOf(ns636b) + graceSlotLayout([{ pitch: 2, symbols: [] }], ns636b).width
+  const inkGraceSlide636b = slideGlyphInk('shy', ns636b, clearGrace636b)
+  check('adj636b 前倚音+滑音：图形右缘让开**倚音组**占用的横向范围（落在倚音墨迹左侧），且墨迹仍在本音符占位内',
+    Math.abs(inkGraceSlide636b.dx + inkGraceSlide636b.w + clearGrace636b) < 1e-9 &&
+      noteGraceSlide636b.width + 0.6 >= clearGrace636b + inkGraceSlide636b.w &&
+      svgGraceSlide636b.includes(String(Math.round((inkGraceSlide636b.w / MODIFIER_GLYPHS.shy.box.w) * 1e6) / 1e6)),
+    `clear=${clearGrace636b.toFixed(2)} dx=${inkGraceSlide636b.dx.toFixed(2)} 本体宽=${noteGraceSlide636b.width} 需求=${(clearGrace636b + inkGraceSlide636b.w).toFixed(2)}`)
+}
+
+
+// ---- adj637：段层（`{bz}`/`{dsb}`/`{tp}`）也补齐倚音 / 演奏型装饰 / 滑音 ----
+// 用户要求（原话）"一起补齐以保持一致"——段内音符此前只发一个整音事件：倚音不奏、`&sby`/`&da`/`&die`/滑音都不奏。
+console.log('[adj637] segment layer also plays graces / ornaments / slides')
+{
+  const segEvs637 = (q: string, bpm = 60) => {
+    const r = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`)
+    const seq = buildPlaySequence(r, layoutScore(r, defaultPageConfig), bpm)
+    return [...seq.events].sort((a, b) => a.atMs - b.atMs)
+  }
+  const nm637 = (e: { pitch?: string | null; placed: unknown }): string =>
+    e.pitch ?? (e.placed as { audioPitch?: string | null }).audioPitch ?? ''
+  const segOf637 = (ev: { placed: { segment?: unknown } }[]) => ev.filter((e) => e.placed.segment !== undefined)
+  const rel637 = (ev: { atMs: number; durationMs: number; pitch?: string | null; placed: unknown }[]) => {
+    const base = ev[0]?.atMs ?? 0
+    return ev.map((e) => `${nm637(e)}@${Math.round((e.atMs - base) * 1000) / 1000}+${Math.round(e.durationMs * 1000) / 1000}`).join(' ')
+  }
+
+  // ① 无装饰的段内音：事件形状不变（单事件、不带显式 pitch）——AX7c/AX9b 的既有契约
+  const plain637 = segOf637(segEvs637('1 {bz 3 4} 5 |'))
+  check('adj637 段内无装饰音：仍是"一音一事件"且不带显式 `pitch`（既有事件形状不变）',
+    plain637.length === 2 && plain637.every((e) => e.pitch === undefined) &&
+      plain637.every((e) => Math.abs(e.durationMs - 1000) < 1e-6),
+    JSON.stringify(plain637.map((e) => `${nm637(e)}/${e.durationMs}`)))
+
+  // ② 段内**倚音**：前倚音先奏、主音顺延（时值只从本音符里匀）
+  const grace637 = segOf637(segEvs637('1 {bz 3[2/]} 5 |'))
+  check('adj637 段内前倚音发声：`{bz 3[2/]}` = 倚音 2(D4) 250ms → 主音 3(E4) 750ms（合计仍是 1 拍）',
+    grace637.length === 2 && nm637(grace637[0]) === 'D4' && nm637(grace637[1]) === 'E4' &&
+      Math.abs(grace637[0].durationMs - 250) < 1e-6 && Math.abs(grace637[1].durationMs - 750) < 1e-6 &&
+      Math.abs(grace637[1].atMs - grace637[0].atMs - 250) < 1e-6,
+    rel637(grace637))
+  // ③ 段内**后倚音**：主音先奏满、倚音接在末尾
+  const tGrace637 = segOf637(segEvs637('1 {bz 3[h2/]} 5 |'))
+  check('adj637 段内后倚音发声：`{bz 3[h2/]}` = 主音 3(E4) 750ms → 倚音 2(D4) 250ms（位置在末尾）',
+    tGrace637.length === 2 && nm637(tGrace637[0]) === 'E4' && nm637(tGrace637[1]) === 'D4' &&
+      Math.abs(tGrace637[0].durationMs - 750) < 1e-6 && Math.abs(tGrace637[1].durationMs - 250) < 1e-6 &&
+      Math.abs(tGrace637[1].atMs - tGrace637[0].atMs - 750) < 1e-6,
+    rel637(tGrace637))
+
+  // ④ 段内**打音 / 叠音**：与主旋律同一套计划（辅助音极小、总时值守恒）
+  const da637 = segOf637(segEvs637('1 {bz 3&da} 5 |'))
+  check('adj637 段内打音发声：`{bz 3&da}` = 主 3(E4) 62.5ms → 下邻 2(D4) 62.5ms → 主 3(E4) 875ms',
+    da637.length === 3 && nm637(da637[0]) === 'E4' && nm637(da637[1]) === 'D4' && nm637(da637[2]) === 'E4' &&
+      Math.abs(da637[0].durationMs - 62.5) < 1e-6 && Math.abs(da637[1].durationMs - 62.5) < 1e-6 &&
+      Math.abs(da637[2].durationMs - 875) < 1e-6,
+    rel637(da637))
+  const die637 = segOf637(segEvs637('1 {bz 3&die} 5 |'))
+  check('adj637 段内叠音发声：`{bz 3&die}` = 上邻 4(F4) 62.5ms → 主 3(E4) 937.5ms（主音顺延）',
+    die637.length === 2 && nm637(die637[0]) === 'F4' && nm637(die637[1]) === 'E4' &&
+      Math.abs(die637[0].durationMs - 62.5) < 1e-6 && Math.abs(die637[1].durationMs - 937.5) < 1e-6,
+    rel637(die637))
+  const sby637 = segOf637(segEvs637('1 {bz 3&sby} 5 |'))
+  check('adj637 段内波音发声（`&sby` 当年就没覆盖段层）：`{bz 3&sby}` = 主→上邻→按住（3 个事件）',
+    sby637.length === 3 && nm637(sby637[0]) === 'E4' && nm637(sby637[1]) === 'F4' && nm637(sby637[2]) === 'E4' &&
+      Math.abs(sby637[0].durationMs + sby637[1].durationMs + sby637[2].durationMs - 1000) < 1e-6,
+    rel637(sby637))
+
+  // ⑤ 段内**滑音**：逐半音阶梯（`6&shy` 的下方邻音是 5）
+  const shy637 = segOf637(segEvs637('1 {bz 6&shy} 5 |'))
+  check('adj637 段内滑音发声：`{bz 6&shy}` = G4 60ms → G#4 60ms → A4 880ms（与主旋律同一套阶梯）',
+    shy637.length === 3 && nm637(shy637[0]) === 'G4' && nm637(shy637[1]) === 'G#4' && nm637(shy637[2]) === 'A4' &&
+      Math.abs(shy637[0].durationMs - 60) < 1e-6 && Math.abs(shy637[2].durationMs - 880) < 1e-6,
+    rel637(shy637))
+
+  // ⑥ 段内**倚音 + 装饰**（倚音自己带记号，adj633 口径：计划按主音符算、时值 × 比率）
+  const graceOrn637 = segOf637(segEvs637('1 {bz 3[2/&die]} 5 |'))
+  check('adj637 段内倚音带装饰：`{bz 3[2/&die]}` 在 250ms 窗口内奏「上邻 3(E4) → 倚音 2(D4)」，主音仍接在其后',
+    graceOrn637.length === 3 && nm637(graceOrn637[0]) === 'E4' && nm637(graceOrn637[1]) === 'D4' &&
+      nm637(graceOrn637[2]) === 'E4' &&
+      Math.abs(graceOrn637[0].durationMs + graceOrn637[1].durationMs - 250) < 1e-6 &&
+      Math.abs(graceOrn637[2].atMs - graceOrn637[0].atMs - 250) < 1e-6,
+    rel637(graceOrn637))
+
+  // ⑦ 时值不变：段层展开不改变段内总时长（第 2 个段内音仍从 1 拍起）
+  const two637 = segOf637(segEvs637('1 {bz 3&da 4} 5 |'))
+  check('adj637 段内展开**不改时值**：`{bz 3&da 4}` 的第 2 个音仍从第 2 拍起（1000ms）',
+    two637.length === 4 && Math.abs(two637[3].atMs - two637[0].atMs - 1000) < 1e-6,
+    rel637(two637))
+}
+
+// ---- adj634：预览 → 编辑器：光标落在**音符块末尾（空格之前）** ----
+console.log('[adj634] preview click → caret at end of the note block (before the space)')
+{
+  const at634 = (p: number | null, s: string) => (p === null ? null : s[p])
+  const idsOf634 = (lay: ReturnType<typeof layoutScore>) =>
+    [...lay.pages[0].notes].sort((a, b) => a.x - b.x).map((n) => `${n.id.page}_${n.id.voice}_${n.id.group}_${n.id.index}`)
+
+  // ① 普通行：块末 = 块内最后一个字符之后、与下一块之间的空格之前
+  const code634 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2[3/&sby] 4&sby 5 |\n'
+  const lay634 = layoutScore(parseJps(code634), defaultPageConfig)
+  const i2p634 = buildIndexToPage(lay634)
+  const ids634 = idsOf634(lay634)
+  const ends634 = ids634.map((id) => noteIdToCodePos(code634, id, 'end'))
+  check('adj634 预览→编辑器：每个音符块都落到**块末、空格之前**（`code[pos]` 是空格、`code[pos−1]` 是块内末字符）',
+    ends634.every((p) => p !== null && code634[p] === ' ' && !/\s/.test(code634[p - 1] ?? ' ')),
+    JSON.stringify(ends634.map((p) => (p === null ? null : code634.slice(Math.max(0, p - 3), p + 1)))))
+  check('adj634 带修饰符/倚音的块：块末在**修饰符之后**（`2[3/&sby]` → 落在 `]` 之后、`4&sby` → 落在 `sby` 之后）',
+    at634(ends634[1], code634) === ' ' && code634[(ends634[1] ?? 0) - 1] === ']' &&
+      code634.slice((ends634[2] ?? 0) - 3, ends634[2] ?? 0) === 'sby',
+    JSON.stringify(ids634.map((id, i) => `${id}→${ends634[i] === null ? 'null' : JSON.stringify(code634.slice(Math.max(0, ends634[i]! - 4), ends634[i]))}`)))
+  check('adj634 块级规则不变：块末位置（空格上）的 `codePosToNoteId` 仍是**该音符**（不偏到后一个）',
+    ids634.every((id, i) => ends634[i] !== null && codePosToNoteId(code634, ends634[i]!, i2p634) === id),
+    JSON.stringify(ids634.map((id, i) => ({ id, back: ends634[i] === null ? null : codePosToNoteId(code634, ends634[i]!, i2p634) }))))
+  check('adj634 默认落点仍是**块首**（`anchor` 缺省 = \'start\'，既有 round-trip 契约不破坏）',
+    noteIdToCodePos(code634, ids634[0]) === noteIdToCodePos(code634, ids634[0], 'start') &&
+      at634(noteIdToCodePos(code634, ids634[0]), code634) === '1' &&
+      at634(noteIdToCodePos(code634, ids634[1]), code634) === '2',
+    `${noteIdToCodePos(code634, ids634[0])} / ${noteIdToCodePos(code634, ids634[1])}`)
+
+  // ② 行尾块 / 紧邻小节线（块后没有空格时，落点 = 那个字符本身）
+  const code634b = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2|3\nQ: 4 5\n'
+  const n634b = layoutScore(parseJps(code634b), defaultPageConfig).pages[0].notes.length
+  const bar634 = noteIdToCodePos(code634b, '0_1_0_1', 'end') // `2` 后面紧接小节线
+  const lineEnd634 = noteIdToCodePos(code634b, '0_1_0_2', 'end') // `3` 在行尾
+  const last634 = noteIdToCodePos(code634b, '0_1_1_4', 'end') // 全谱最后一个音符
+  check('adj634 块后无空格：落到紧邻的字符上（小节线 `|` / 行尾换行），不是块首也不是下一块',
+    at634(bar634, code634b) === '|' && at634(lineEnd634, code634b) === '\n' && at634(last634, code634b) === '\n' &&
+      n634b === 5,
+    JSON.stringify({ bar: at634(bar634, code634b), lineEnd: at634(lineEnd634, code634b), last: at634(last634, code634b), n: n634b }))
+
+  // ③ 临时段 `{bz … }` 与替谱段 `{tp … }` 内同样按块末（段内 token 序列取后继）
+  const code634c = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 {bz 3/ 4/} 5 |\n'
+  const lay634c = layoutScore(parseJps(code634c), defaultPageConfig)
+  const segIds634c = idsOf634(lay634c).filter((id) => decodeSegmentNoteId(Number(id.split('_')[3])) !== null)
+  const segEnds634c = segIds634c.map((id) => noteIdToCodePos(code634c, id, 'end'))
+  check('adj634 临时段 `{bz … }`：段内音符的块末落在段内该音之后（末音落在 `}` 之前）',
+    segIds634c.length === 2 && segEnds634c.every((p) => p !== null) &&
+      code634c.slice(segEnds634c[0]! - 2, segEnds634c[0]!) === '3/' &&
+      at634(segEnds634c[1], code634c) === '}',
+    JSON.stringify(segEnds634c.map((p) => (p === null ? null : code634c.slice(Math.max(0, p - 3), p + 1)))))
+  const tpCode634 =
+    'V: 1.0\nB: t\nD: C\nP: 4/4\n' +
+    'Q: |: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 :|\n' +
+    'C: 一 二 三 四 五 六 七 八 九 十 甲 乙 丙 丁 戊 己\n' +
+    'C2: 一 二 三 四 五 六 七 八 {tp 4/ 3/ 6,/ 6,/ 1/ 1/ 1} 九 十 甲 乙 丙 丁 戊 己\n'
+  const tpLay634 = layoutScore(parseJps(tpCode634), defaultPageConfig)
+  const tpIds634 = [...tpLay634.pages[0].notes]
+    .filter((n) => n.segment?.type === 'tp')
+    .sort((a, b) => a.x - b.x)
+    .map((n) => `${n.id.page}_${n.id.voice}_${n.id.group}_${n.id.index}`)
+  const tpEnds634 = tpIds634.map((id) => noteIdToCodePos(tpCode634, id, 'end'))
+  check('adj634 替谱段 `{tp … }`：段内音符的块末落在该音之后（`4/` → 落在 `/` 之后、`{tp 4/ 3/ …}` 里）',
+    tpIds634.length === 7 && tpEnds634.every((p) => p !== null) &&
+      tpCode634.slice(tpEnds634[0]! - 2, tpEnds634[0]!) === '4/' &&
+      at634(tpEnds634[1], tpCode634) === ' ' &&
+      at634(tpEnds634[6], tpCode634) === '}',
+    JSON.stringify(tpEnds634.map((p) => (p === null ? null : tpCode634.slice(Math.max(0, p - 3), p + 1)))))
+}
+
 
