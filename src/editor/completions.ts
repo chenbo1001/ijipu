@@ -57,6 +57,18 @@ export const NOTE_MODIFIER_HINTS: { code: string; label: string }[] = MODIFIER_S
 /** 小节线修饰符（& 编码，adj126）提示：由 MODIFIER_SYMBOLS 派生（barline 项） */
 export const BARLINE_MODIFIER_HINTS: { code: string; label: string }[] = MODIFIER_SYMBOLS.filter((m) => m.barline).map(({ symbol, label }) => ({ code: symbol, label }))
 
+/**
+ * adj632：**倚音括号内**可用的 & 编码（与 `engine/types.ts` 的 `GRACE_MARK_CODES` 同源口径）。
+ * 倚音只支持这 5 个：`&tu`/`&die`/`&da` 画在倚音正上方、`&shy`/`&xhy` 画在倚音右侧。
+ * 其余编码写在倚音括号内会被解析器告警——所以候选池必须单独收窄，不能给用户一份会报错的列表。
+ */
+export const GRACE_MODIFIER_CODES = ['tu', 'die', 'da', 'shy', 'xhy'] as const
+
+/** 倚音括号内的 & 编码提示：由 MODIFIER_SYMBOLS 派生（只取 GRACE_MODIFIER_CODES 那几条，标签同源） */
+export const GRACE_MODIFIER_HINTS: { code: string; label: string }[] = MODIFIER_SYMBOLS.filter((m) =>
+  (GRACE_MODIFIER_CODES as readonly string[]).includes(m.symbol),
+).map(({ symbol, label }) => ({ code: symbol, label }))
+
 /** 小节线后输入 [ 的跳房子提示 */
 export const VOLTA_HINTS: { code: string; label: string }[] = [
   { code: '"1."', label: '第一遍番号' },
@@ -118,14 +130,30 @@ export function isBarlineModifierContext(lineBefore: string): boolean {
 }
 
 /**
+ * adj632：判断光标前的 `&` 编码是否位于**倚音括号内**（如 `6/[5/&`、`3[h5/&s`）——
+ * 是则只提示倚音支持的那 5 个编码（见 `GRACE_MODIFIER_HINTS`）。
+ *
+ * 判定依据与 tokenizer 一致：**光标前最后一个 `[` 之后还没有 `]`**，就还在倚音括号里
+ * （跳房子 `[` 内本来也不允许写 `&` 编码，同一判定不会误伤）。
+ */
+export function isGraceModifierContext(lineBefore: string): boolean {
+  const m = /&([a-zA-Z+]*)$/.exec(lineBefore)
+  if (!m) return false
+  const prev = lineBefore.slice(0, m.index)
+  return prev.lastIndexOf('[') > prev.lastIndexOf(']')
+}
+
+/**
  * adj203：按上下文过滤 & 修饰符提示——小节线后显示 BARLINE_MODIFIER_HINTS，
  * 音符后显示 NOTE_MODIFIER_HINTS；前缀为空返回对应全量；无匹配返回空数组。
+ * adj632：`inGrace`（倚音括号内）优先级最高，用 GRACE_MODIFIER_HINTS。
  */
 export function filterModifierHints(
   prefix: string,
   onBarline: boolean,
+  inGrace = false,
 ): { code: string; label: string }[] {
-  const pool = onBarline ? BARLINE_MODIFIER_HINTS : NOTE_MODIFIER_HINTS
+  const pool = inGrace ? GRACE_MODIFIER_HINTS : onBarline ? BARLINE_MODIFIER_HINTS : NOTE_MODIFIER_HINTS
   if (prefix === '') return pool
   return pool.filter((h) => h.code.startsWith(prefix))
 }

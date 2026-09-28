@@ -15,7 +15,7 @@ import { highlightCodeWrapped } from './highlight'
 import type { BlockMarks } from './highlight'
 import { formatLine, codePosToNoteId } from '@ijipu/engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
-import { isBarlineModifierContext, filterModifierHints } from './completions'
+import { isBarlineModifierContext, isGraceModifierContext, filterModifierHints } from './completions'
 import { ScriptToolbar } from './ScriptToolbar'
 import { ToolIcon } from '../ui/ToolIcon'
 import { summarizeProblems } from '../ui/problems'
@@ -595,7 +595,8 @@ export function EditorPane() {
     if (mod !== null) {
       // adj203：小节线后（| &、:| &）提示小节线修饰符（&fine/&dc/&ds/&ty/&hs），
       // 音符后提示音符修饰符——按光标上下文切换候选池
-      const items = filterModifierHints(mod, isBarlineModifierContext(lineBefore))
+      // adj632：倚音括号内（`6/[5/&`）只提示倚音支持的 5 个编码（其余写在里面会告警）
+      const items = filterModifierHints(mod, isBarlineModifierContext(lineBefore), isGraceModifierContext(lineBefore))
       if (items.length === 0) {
         setCompletion(null)
         return

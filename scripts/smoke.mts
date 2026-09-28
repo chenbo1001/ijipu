@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, slideExtraW, slideGlyphInk, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -27,7 +27,7 @@ import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } f
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
 import { mordentOf, mordentPlan, mordentShortMs, neighborDegree, MORDENT_SYMBOLS, ORNAMENT_SHORT_MIN_MS, ORNAMENT_SHORT_MAX_MS } from '@ijipu/engine/playback/ornaments.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, TP_BRACKET_GAP } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, digitInkW, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, TP_BRACKET_GAP } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
@@ -38,7 +38,7 @@ import { MODIFIER_GLYPHS, glyphInkAspect } from '@ijipu/engine/render/modifierGl
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
 import { highlightCode } from '../src/editor/highlight.ts'
 import { highlightCodeWrapped } from '../src/editor/highlight.ts'
-import { HEADER_HINTS, filterHeaderHints, BARLINE_MODIFIER_HINTS, NOTE_MODIFIER_HINTS, isBarlineModifierContext, filterModifierHints } from '../src/editor/completions.ts'
+import { HEADER_HINTS, filterHeaderHints, BARLINE_MODIFIER_HINTS, NOTE_MODIFIER_HINTS, GRACE_MODIFIER_HINTS, isBarlineModifierContext, isGraceModifierContext, filterModifierHints } from '../src/editor/completions.ts'
 // adj629x：设置面板「恢复默认」的草稿语义（整份替换；浅合并会把可选字段留下）
 import { draftAfterReset } from '../src/dialogs/pageConfigReset.ts'
 import {
@@ -464,6 +464,22 @@ check('adj192 带声部名模板含 cursorAt（光标停引号内）', HEADER_HI
   check('输入 &f 前缀 → 过滤出 f/ff/fff（力度）', ['f', 'ff', 'fff'].every((c) => ffilt.some((h) => h.code === c)), ffilt.map((h) => h.code).join(','))
   // adj334：吐音/打音/叠音修饰符在音符修饰符池
   check('adj334 音符修饰符池含 tu/ku/da/die', ['tu', 'ku', 'da', 'die'].every((c) => NOTE_MODIFIER_HINTS.some((h) => h.code === c)), NOTE_MODIFIER_HINTS.map((h) => h.code).join(','))
+  // adj632：**倚音括号内**的 & 提示单独收窄到 5 个（其余写在括号里会被解析器告警）
+  check('adj632 倚音括号内 & → 倚音专属候选池（tu/die/da/shy/xhy，共 5 项）',
+    isGraceModifierContext('Q: 6/[5/&') && isGraceModifierContext('Q: 3[h5/&s') &&
+      !isGraceModifierContext('Q: 6/[5/] &') && !isGraceModifierContext('Q: 1 2 3 &') && !isGraceModifierContext('Q: 1 2 3 | &'),
+    '')
+  const fg632 = filterModifierHints('', false, true)
+  check('adj632 倚音候选池 = tu/die/da/shy/xhy（不含会告警的 sby/tr/mp 等）',
+    fg632.length === GRACE_MODIFIER_HINTS.length && fg632.length === 5 &&
+      ['tu', 'die', 'da', 'shy', 'xhy'].every((c) => fg632.some((h) => h.code === c)) &&
+      !fg632.some((h) => h.code === 'sby' || h.code === 'tr' || h.code === 'mp'),
+    fg632.map((h) => h.code).join(','))
+  check('adj632 倚音候选池内按前缀过滤（&sh → shy）', filterModifierHints('sh', false, true).length === 1 && filterModifierHints('sh', false, true)[0].code === 'shy', '')
+  // 候选池顺序随 `MODIFIER_SYMBOLS` 字典序（UI 与主音符池同一份来源），故只比**同一组编码**
+  check('adj632 倚音候选池与引擎 GRACE_MARK_CODES 是**同一组**编码（不会两处漂移）',
+    JSON.stringify([...GRACE_MARK_CODES].sort()) === JSON.stringify(fg632.map((h) => h.code).sort()),
+    `engine=${[...GRACE_MARK_CODES].join(',')} ui=${fg632.map((h) => h.code).join(',')}`)
 }
 // adj165：当前行背景 + 当前音符区块背景（光标行/列；Q: 为 3 字符，rest 从 col=3 起）
 // adj171：当前行整行背景由 EditorPane 铺满层渲染，highlightCode 不再输出 hl-current-line
@@ -14389,3 +14405,163 @@ console.log('[adj629u] description header hugs the area corners by default')
     metaOf(svgA5, 'tempo') !== null && Math.abs(metaOf(svgA5, 'tempo')!.y - (areaBottom - edgePad)) < 0.5,
     `tempo=${JSON.stringify(metaOf(svgA5, 'tempo'))}`)
 }
+
+// ---- adj632：倚音自身的修饰符（`&tu`/`&die`/`&da` 画正上方、`&shy`/`&xhy` 画右侧） ----
+// 用户要求（示例 `6/[5/&tu]`，形状见示例图）：编码写在**倚音括号内、该倚音数字之后**；
+// 位置——上方/右侧；尺寸——**与倚音等高**（随倚音字号，字形/图形与主音符同名编码同款）。
+console.log('[adj632] grace note marks: &tu/&die/&da above, &shy/&xhy at right')
+{
+  const GS632 = GRACE_FS / 18 // 倚音缩放因子 gs
+  const GW632 = GRACE_FS * GRACE_SLOT_RATIO // 倚音数字槽宽
+  const GAPW632 = GRACE_FS * GRACE_SLOT_RATIO_MULTI // 多倚音时的紧凑槽距（adj103）
+  /** 第 idx 个**倚音数字**的落点（渲染端倚音数字不带 data-notepos，用倚音字号锚定） */
+  const graceDigit632 = (svg: string, idx = 0) => {
+    const all = [...svg.matchAll(new RegExp(`<text x="([\\d.]+)" y="([\\d.]+)" font-size="${GRACE_FS}" font-family=`, 'g'))]
+    const m = all[idx]
+    return m ? { x: Number(m[1]), y: Number(m[2]) } : null
+  }
+  /** 主音符数字左缘 x（data-notepos 那一份） */
+  const digitX632 = (svg: string, glyph: string) =>
+    Number(svg.match(new RegExp(`<text x="([\\d.]+)" y="[^"]+" data-notepos="[^"]+" font-size="${defaultPageConfig.note_size}"[^>]*>${glyph}<`))?.[1] ?? 'NaN')
+  /** 倚音**正上方**修饰符文本（T / 扌）的落点与字号 */
+  const aboveMark632 = (svg: string, ch: string) => {
+    const m = svg.match(new RegExp(`<text x="([\\d.]+)" y="([\\d.]+)" text-anchor="middle" font-size="([\\d.]+)" font-weight="bold"[^>]*>${ch}</text>`))
+    return m ? { x: Number(m[1]), y: Number(m[2]), fs: Number(m[3]) } : null
+  }
+  /** 谱面里第 idx 个矢量修饰符 `<g>` 的**墨迹包围盒**（源紧包围盒 × 实际 scale + translate） */
+  const inkRect632 = (svg: string, key: keyof typeof MODIFIER_GLYPHS, idx = 0) => {
+    const m = [...svg.matchAll(/<g transform="translate\(([-\d.]+) ([-\d.]+)\) scale\(([\d.]+)\)"/g)][idx]
+    if (!m) return null
+    const g = MODIFIER_GLYPHS[key]
+    const tx = Number(m[1])
+    const ty = Number(m[2])
+    const sc = Number(m[3])
+    return { x1: tx + g.box.x * sc, y1: ty + g.box.y * sc, x2: tx + (g.box.x + g.box.w) * sc, y2: ty + (g.box.y + g.box.h) * sc }
+  }
+
+  // ---- ① 解析：编码收在**倚音自己**身上，不串到主音符 ----
+  const rTu632 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 6/[5/&tu] 2 3 4 |\n')
+  const nTu632 = rTu632.groups[0].music.tokens[0]
+  check('adj632 解析：`6/[5/&tu]` 无告警，&tu 挂在倚音 5 上（主音符 symbols 不受影响）',
+    rTu632.errors.length === 0 && nTu632.kind === 'note' && nTu632.symbols.length === 0 &&
+      JSON.stringify(nTu632.kind === 'note' ? nTu632.gracenotes?.notes[0].symbols : null) === '["tu"]' &&
+      nTu632.kind === 'note' && nTu632.gracenotes?.notes[0].pitch === 5 && nTu632.gracenotes?.notes[0].diminishCount === 1,
+    JSON.stringify({ err: rTu632.errors.map((e) => e.message), tok: nTu632 }))
+  const rAll632 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1[2/&tu] 1[3/&die] 1[4/&da] 1[5/&shy] 1[6/&xhy] |\n')
+  const symOf632 = (i: number) => {
+    const tk = rAll632.groups[0].music.tokens[i]
+    return tk.kind === 'note' ? (tk.gracenotes?.notes[0].symbols ?? []) : []
+  }
+  check('adj632 解析：五个编码（&tu/&die/&da/&shy/&xhy）全部收下',
+    rAll632.errors.length === 0 &&
+      JSON.stringify([0, 1, 2, 3, 4].map(symOf632)) === '[["tu"],["die"],["da"],["shy"],["xhy"]]',
+    JSON.stringify({ err: rAll632.errors.map((e) => e.message), syms: [0, 1, 2, 3, 4].map(symOf632) }))
+  // 不支持的编码 / 编码没跟在倚音之后 → 告警（不静默丢弃）
+  const badSym632 = parseJpsRaw('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1[2/&sby] |\n')
+  check('adj632 解析：倚音内不支持的编码（&sby）→ 告警而不静默丢弃',
+    badSym632.errors.some((e) => e.message === '倚音不支持修饰符 "&sby"'),
+    JSON.stringify(badSym632.errors.map((e) => e.message)))
+  const badHost632 = parseJpsRaw('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1[&tu2/] |\n')
+  check('adj632 解析：编码写在倚音数字**之前** → 告警「要写在倚音音符之后」',
+    badHost632.errors.some((e) => e.message.includes('要写在倚音音符之后')),
+    JSON.stringify(badHost632.errors.map((e) => e.message)))
+
+  // ---- ② 槽位几何（渲染与布局**同源**）：右侧修饰把下一个槽位与组总宽一并推开 ----
+  const slotNone632 = graceSlotLayout([{ pitch: 5 }, { pitch: 5 }], defaultPageConfig.note_size)
+  const slotShy632 = graceSlotLayout([{ pitch: 5, symbols: ['shy'] }, { pitch: 5 }], defaultPageConfig.note_size)
+  // adj632b：滑音墨迹从**数字左缘**算起的右端（= 紧贴数字墨迹右缘 + 墨迹宽）
+  const shyInk632 = graceSlideInk('shy', GRACE_FS, '5')
+  const shyExtent632 = shyInk632.dx + shyInk632.w
+  check('adj632 槽位几何：无修饰时与 adj103 既有间距**逐值一致**（旧谱排版不变）',
+    Math.abs(slotNone632.offs[1] - GAPW632) < 1e-9 && Math.abs(slotNone632.width - (GAPW632 + GW632)) < 1e-9 &&
+      Math.abs(slotNone632.gW - GW632) < 1e-9,
+    JSON.stringify(slotNone632))
+  check('adj632/adj632b 槽位几何：前一个倚音带 &shy ⇒ 下一个槽位让开**滑音墨迹右缘** + 净距 1×gs',
+    Math.abs(slotShy632.offs[1] - (shyExtent632 + GS632)) < 1e-9 &&
+      Math.abs(slotShy632.width - (slotShy632.offs[1] + GW632)) < 1e-9,
+    JSON.stringify(slotShy632))
+
+  // ---- ③ 渲染：上方三个（`&tu`→T、`&die`→又、`&da`→扌），位置正上方 ----
+  // adj632b（用户要求「记号要随倚音变小，别比倚音还大」）：字号 = 倚音字号 × SYM_FONT_RATIO（主音符同一把尺子）
+  const MFS632 = markFontSize(GRACE_FS)
+  const svgTu632 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 6/[5/&tu] 1/ |\n'), defaultPageConfig))[0]
+  const gdTu632 = graceDigit632(svgTu632)
+  const mkTu632 = aboveMark632(svgTu632, 'T')
+  check('adj632b 渲染：`&tu` 的 T 字号 = 倚音字号 × 10/18（随倚音变小，不再与倚音数字同高）',
+    gdTu632 !== null && mkTu632 !== null && Math.abs(mkTu632.fs - MFS632) < 0.05 && mkTu632.fs < GRACE_FS * 0.7,
+    `mark=${JSON.stringify(mkTu632)} expect=${MFS632} grid=${GRACE_FS}`)
+  check('adj632 渲染：T 画在倚音**正上方**（底在数字墨迹顶之上）、水平居中于倚音数字槽',
+    gdTu632 !== null && mkTu632 !== null &&
+      Math.abs(mkTu632.x - (gdTu632.x + GW632 / 2)) < 0.15 &&
+      mkTu632.y < gdTu632.y - DIGIT_INK_ASC_RATIO * GRACE_FS,
+    `digit=${JSON.stringify(gdTu632)} mark=${JSON.stringify(mkTu632)}`)
+  // adj632b：与用户示例图对齐——示例图实测 T 墨迹高 13px、倚音数字 5 墨迹高 24px（13/24 = 0.542）
+  const T_INK_H632 = 0.76 // YaHei 粗体「T」墨迹高 / 字号（Chrome measureText 实测）
+  const ratio632 = (T_INK_H632 * MFS632) / digitInkH(GRACE_FS)
+  check('adj632b 尺寸：倚音 T 墨迹高 / 倚音数字墨迹高 ≈ 用户示例图实测的 13/24 = 0.542',
+    Math.abs(ratio632 - 13 / 24) < 0.02, `ratio=${ratio632}（示例图 0.542）`)
+  const svgDa632 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 6/[5/&da] 1/ |\n'), defaultPageConfig))[0]
+  check('adj632b 渲染：`&da` 用主音符同款字形 扌（粗体、居中、倚音记号的字号）',
+    aboveMark632(svgDa632, '扌') !== null && Math.abs(aboveMark632(svgDa632, '扌')!.fs - MFS632) < 0.05,
+    JSON.stringify(aboveMark632(svgDa632, '扌')))
+  // 倚音带**高八度点**时，上方记号要从「最高高八度点层顶」起算（否则压在点上）——与主音符同一套口径
+  const svgOct632 = renderScoreToSvg(layoutScore(parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 6/[5''/&tu] 1/ |\n"), defaultPageConfig))[0]
+  const gdOct632 = graceDigit632(svgOct632)
+  const mkOct632 = aboveMark632(svgOct632, 'T')
+  check('adj632 渲染：倚音带高八度点时，上方记号叠在**高八度点层之上**（不压在点上）',
+    gdOct632 !== null && mkOct632 !== null &&
+      mkOct632.y < octaveTopY(gdOct632.y, 2, GRACE_FS) - 0.1 &&
+      mkOct632.y < gdOct632.y - DIGIT_INK_ASC_RATIO * GRACE_FS,
+    `digit=${JSON.stringify(gdOct632)} mark=${JSON.stringify(mkOct632)} octaveTop=${gdOct632 ? octaveTopY(gdOct632.y, 2, GRACE_FS) : NaN}`)
+  const svgDie632 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 6/[5/&die] 1/ |\n'), defaultPageConfig))[0]
+  const gdDie632 = graceDigit632(svgDie632)
+  const dieM632 = svgDie632.match(/<text x="0" y="0" text-anchor="middle" transform="translate\(([\d.]+),([\d.]+)\) scale\(0\.75,1\)" font-size="([\d.]+)" font-weight="bold"[^>]*>又<\/text>/)
+  check('adj632b 渲染：`&die` 的 又 与主音符同款（横向缩 0.75、锚点 = 倚音数字槽中心、记号字号）',
+    dieM632 !== null && gdDie632 !== null && Math.abs(Number(dieM632[1]) - (gdDie632.x + GW632 / 2)) < 0.15 &&
+      Math.abs(Number(dieM632[3]) - MFS632) < 0.05,
+    `m=${JSON.stringify(dieM632?.slice(0, 4))} digit=${JSON.stringify(gdDie632)} expect=${MFS632}`)
+
+  // ---- ④ 渲染 + 占宽：右侧两个（`&shy`/`&xhy`）——与主音符那套**不同**，按用户三条口径 ----
+  //   大小与倚音一样大（墨迹高 = 数字墨迹高）／与倚音水平（纵向与数字墨迹完全对齐）／紧跟倚音（贴数字墨迹右缘）
+  const svgShy632 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 6/[5/&shy] 1/ |\n'), defaultPageConfig))[0]
+  const gdShy632 = graceDigit632(svgShy632)
+  const inkShy632 = inkRect632(svgShy632, 'shy')
+  const d6Shy632 = digitX632(svgShy632, '6')
+  const digitH632 = digitInkH(GRACE_FS)
+  check('adj632b 渲染：`&shy` **紧跟**倚音——左缘 = 倚音数字左缘 + 数字**墨迹**宽（不是数字槽宽）+ 净距',
+    gdShy632 !== null && inkShy632 !== null &&
+      Math.abs(inkShy632.x1 - (gdShy632.x + digitInkW('5', GRACE_FS) + 1 * GS632)) < 0.02 &&
+      inkShy632.x1 < gdShy632.x + GW632,
+    `digit=${JSON.stringify(gdShy632)} inkX1=${inkShy632?.x1} 墨迹右缘=${gdShy632 ? gdShy632.x + digitInkW('5', GRACE_FS) : NaN}`)
+  check('adj632b 渲染：`&shy` **与倚音一样大**——墨迹高 = 倚音数字墨迹高（≈0.785×倚音字号）',
+    inkShy632 !== null && Math.abs(inkShy632.y2 - inkShy632.y1 - digitH632) < 0.06 &&
+      digitH632 > slideGlyphInk('shy', GRACE_FS).h,
+    `inkH=${inkShy632 ? inkShy632.y2 - inkShy632.y1 : NaN} digitH=${digitH632} 主音符口径=${slideGlyphInk('shy', GRACE_FS).h}`)
+  check('adj632b 渲染：`&shy` **与倚音水平**——纵向范围与数字墨迹完全对齐（同顶同底）',
+    gdShy632 !== null && inkShy632 !== null &&
+      Math.abs(inkShy632.y1 - (gdShy632.y - DIGIT_INK_ASC_RATIO * GRACE_FS)) < 0.02 &&
+      Math.abs(inkShy632.y2 - (gdShy632.y + (digitH632 - DIGIT_INK_ASC_RATIO * GRACE_FS))) < 0.02,
+    `ink=[${inkShy632?.y1},${inkShy632?.y2}] digitTop=${gdShy632 ? gdShy632.y - DIGIT_INK_ASC_RATIO * GRACE_FS : NaN}`)
+  check('adj632 渲染：前倚音的滑音**不压主音符**（墨迹右缘 ≤ 主音符数字左缘）',
+    inkShy632 !== null && Number.isFinite(d6Shy632) && inkShy632.x2 <= d6Shy632 + 1e-9,
+    `inkRight=${inkShy632?.x2} mainDigit=${d6Shy632}`)
+  const svgXhy632 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[h5/&xhy] 1 2 |\n'), defaultPageConfig))[0]
+  const layXhy632 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[h5/&xhy] 1 2 |\n'), defaultPageConfig)
+  const inkXhy632 = inkRect632(svgXhy632, 'xhy')
+  const n0Xhy632 = [...layXhy632.pages[0].notes].sort((a, b) => a.x - b.x)[0]
+  const rightOf632 = n0Xhy632.rightX ?? n0Xhy632.x + n0Xhy632.width
+  check('adj632 渲染+占宽：后倚音的 `&xhy` 墨迹落在音符占位宽**之内**（不会压到下一个音符）',
+    inkXhy632 !== null && inkXhy632.x2 <= rightOf632 + 1e-9 && inkXhy632.x1 > digitX632(svgXhy632, '3'),
+    `ink=${JSON.stringify(inkXhy632)} rightX=${rightOf632} digit=${digitX632(svgXhy632, '3')}`)
+
+  // ---- ⑤ 多倚音：前一个倚音带右侧修饰 ⇒ 后一个倚音被推开，不压在前一个的滑音墨迹上 ----
+  const svgMulti632 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 6/[5/&shy2/] 1/ |\n'), defaultPageConfig))[0]
+  const g1Multi632 = graceDigit632(svgMulti632, 0)
+  const g2Multi632 = graceDigit632(svgMulti632, 1)
+  const inkMulti632 = inkRect632(svgMulti632, 'shy')
+  check('adj632 多倚音：前一个倚音带 &shy ⇒ 后一个倚音右移让开滑音墨迹（相邻不重叠）',
+    g1Multi632 !== null && g2Multi632 !== null && inkMulti632 !== null &&
+      g2Multi632.x - g1Multi632.x >= shyExtent632 && inkMulti632.x2 <= g2Multi632.x + 1e-9,
+    `g1=${g1Multi632?.x} g2=${g2Multi632?.x} inkRight=${inkMulti632?.x2} need=${shyExtent632}`)
+}
+
