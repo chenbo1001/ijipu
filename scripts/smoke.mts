@@ -2189,12 +2189,18 @@ console.log('[30b] keyline "=" and tempo "=" stay aligned (adj629v)')
       Math.abs(kx + W1SP - (tx + WTEMPO)) < 0.01, `kx=${kx} tx=${tx} diff=${(kx + W1SP - tx - WTEMPO).toFixed(2)}`)
   }
   // 实测宽优先（PreviewPane 走 canvas.measureText，adj199 同口径）：tempo x = KeyShift + (w1sp − wTempo)
+  // adj638：角标占宽 wAcc 现在**只用于拍号定位**（角标与字母已内联，位置由字体推进量决定）
   const svgV = renderScoreToSvg(
     layoutScore(parseJps('V: 1.0\nB: t\nD: Bb\nP: 4/4\nJ: 96\nQ: 1 2 3 4 |\n'), DUR_CFG),
     { w1eq: 22, wAcc: 8, w1sp: 12, wTempo: 5 },
   )[0]
   check('adj629v 传入实测「1 」/「♩」宽时按实测摆放（x = 左边距 + 6 + (w1sp − wTempo)）',
     Math.abs(tempoXOf(svgV) - (ML + 6 + (12 - 5))) < 0.01, `tx=${tempoXOf(svgV)}`)
+  // （这里用局部正则取 dx——`kKeyOf` 是后面小节才定义的辅助函数，此处不可用）
+  const dxOf = (svg: string): number =>
+    Number(/<text data-meta="keyline"[^>]*>1 = <tspan[^>]*>[♯♭]<\/tspan><tspan dy="[-\d.]+" dx="([-\d.]+)">/.exec(svg)?.[1] ?? NaN)
+  check('adj638 传入实测角标占宽后，字母净距仍固定 0.2px（占宽只影响拍号落点）',
+    Math.abs(dxOf(svgV) - 0.2) < 0.06, `dx=${dxOf(svgV)}`)
 }
 
 // ---- 31. 行结构虚线（adj10） ----
@@ -2817,31 +2823,59 @@ check('adj174 升降号前置/后置半音偏移一致（#F = F#）', parseKey(r
 const svgK174a = renderScoreToSvg(layoutScore(rK174a, DUR_CFG))[0]
 const svgK174b = renderScoreToSvg(layoutScore(rK174b, DUR_CFG))[0]
 /**
- * adj456：调号角标这一组（adj174/175/179/189/190/191）此前长期失败，排查结论是**断言口径整体过时**，
- * 不是渲染退化——现行设计（render/index.ts 调号分支）已改成：
- *   ① 角标字号 = 调号 3/4（`mSize * 3/4`，13 → 9.8），不再是 0.6×字号；
- *   ② 角标 y = 调号基线 − **0.35×字号**（下沿贴字母中线），不再是 0.4×字号；
- *   ③ 字母让位改用 **`<tspan dx="0.9×角标宽">`**（8.8），**不再是整体右移 keyline 的 x**；
- *   ④ 角标 x = "1 = " 宽之后的**原字母左缘**（即它占的正是让位让出来的空档）。
- * 旧的硬编码字形 advance（7.62+3.85+9.64+3.85）仍可用于算 "1 = " 宽，但必须**再加上 tspan dx**
- * 才等于字母真实左缘——旧断言漏了这一步，于是把"角标在字母左侧"判成了失败（实测只差 0.04px）。
- * 现按现行设计逐项断言，并补一条真正用户可见的不变量：**调号与拍号不重叠**。
+ * adj456/adj638：调号角标这一组（adj174/175/179/189/190/191/638）的现行口径：
+ *   ① 角标字号 = 调号 3/4（`mSize * 3/4`，13 → 9.75）；② 角标上移 0.35×字号（下沿贴字母中线）；
+ *   ③ **adj638 起角标与字母内联在同一条 `<text>` 里**：
+ *      `<text data-meta="keyline" …>1 = <tspan font-size="9.75" dy="-4.55">♯</tspan><tspan dy="4.55" dx="0.2">F</tspan></text>`
+ *      ——相对位置由**字体推进量**决定，我们只加固定 `0.2px`（`dx`）净距。
+ *
+ * 为什么改内联（E-2026-328）：引擎零 DOM，拿不到字形度量；♯/♭ 可能是西文窄字形，也可能是**全角 CJK
+ * 字形**（占宽 1em、墨迹仅 0.62em、右侧留白 1.75px）。此前"让位 + 估算/实测字宽"两条路都会在某个字体上
+ * 出错（用户报过"压字"也报过"明显过宽"）。内联后**浏览器按真实推进量排版**，结构上就不可能压字，
+ * 断言也随之从"算让位量"改成"验结构 + 验那 0.2px"。
  */
-const kAccOf = (svg: string): RegExpExecArray | null => /<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>([♯♭])<\/text>/.exec(svg)
-const kKeyOf = (svg: string): RegExpExecArray | null => /<text data-meta="keyline" x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>1 = (?:<tspan dx="([\d.]+)">([A-G])<\/tspan>|([A-G]))<\/text>/.exec(svg)
+const kAccRe = /<tspan font-size="([\d.]+)" dy="([-\d.]+)">([♯♭])<\/tspan>/
+const kKeyOf = (svg: string): RegExpExecArray | null =>
+  /<text data-meta="keyline" x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>1 = (?:<tspan font-size="[\d.]+" dy="[-\d.]+">[♯♭]<\/tspan><tspan dy="[-\d.]+" dx="([-\d.]+)">([A-G])<\/tspan>|([A-G]))<\/text>/.exec(
+    svg,
+  )
+/** 角标是**内联 tspan**（没有 x/y）：由"前缀结束处"与 `dy` 推出等效的 x/y，索引沿用旧断言约定 */
+const kAccOf = (svg: string): RegExpExecArray | null => {
+  const m = kAccRe.exec(svg)
+  if (!m) return null
+  const k = kKeyOf(svg)
+  const x = k ? Number(k[1]) + kPrefixW : NaN // 紧跟 `1 = ` 之后
+  const y = k ? Number(k[2]) + Number(m[2]) : NaN // 基线 + dy（dy 为负 = 抬高）
+  return [m[0], String(x), String(y), m[1], m[3]] as unknown as RegExpExecArray
+}
 const kMeterOf = (svg: string): RegExpExecArray | null => /<g data-meta="meter"[^>]*><text x="([\d.]+)"/.exec(svg)
 /** "1 = " 在 13px 基准下的估算宽（与 render 的 metaTextW 口径一致：1=7.62 空格=3.85 ==9.64 空格=3.85） */
 const kPrefixW = (7.62 + 3.85 + 9.64 + 3.85) * (defaultPageConfig.miaoshu_size / 13)
-/** 字母真实左缘 = keyline.x + "1 = " 宽 + tspan dx（有升降号时字母被 dx 右移让位） */
+/** 13px 调号下 ♯ 的**推进量**（浏览器实测；默认字体栈里 U+266F 是全角字形 = 1em） */
+const ACC_ADV_13 = 9.75
+/** 字母起点 = keyline.x + "1 = " 宽 + 角标推进量（内联，随角标字号等比） + 字母 tspan 的 dx */
 const kLetterLeftOf = (svg: string): number => {
   const k = kKeyOf(svg)
   if (!k) return NaN
-  return Number(k[1]) + kPrefixW + Number(k[4] ?? 0)
+  const accAdv = kAccRe.test(svg) ? ACC_ADV_13 * ((defaultPageConfig.miaoshu_size * 0.75) / 9.75) : 0
+  return Number(k[1]) + kPrefixW + accAdv + Number(k[4] ?? 0)
 }
 const kLetterOf = (svg: string): string | undefined => kKeyOf(svg)?.[5] ?? kKeyOf(svg)?.[6]
-check('adj174 前置 #F：调号文本 = 1 = ♯F（字母用 tspan 让位）', kLetterOf(svgK174a) === 'F' && kAccOf(svgK174a)?.[4] === '♯' && kKeyOf(svgK174a)?.[4] !== undefined, `key=${kKeyOf(svgK174a)?.[0]}`)
+/** 字母 tspan 的 `dx` = 角标与字母之间的**固定净距**（adj638） */
+const kLetterDxOf = (svg: string): number => Number(kKeyOf(svg)?.[4] ?? NaN)
+/** 角标 dy（内联 tspan 上；负值 = 相对调号基线上抬） */
+const kAccDyOf = (svg: string): number => Number(kAccRe.exec(svg)?.[2] ?? NaN)
+/** 角标 tspan 的完整文本（用于结构断言） */
+const accTspanOf = (svg: string): string => kAccRe.exec(svg)?.[0] ?? ''
+/** 字母 tspan 的 dy（应正好抵消角标抬升，让字母回到调号基线） */
+const kLetterDyOf = (svg: string): number => {
+  const m = /<tspan dy="([-\d.]+)" dx="[-\d.]+">[A-G]/.exec(svg)
+  return m ? Number(m[1]) : NaN
+}
+check('adj174 前置 #F：调号文本 = 1 = ♯F（角标内联 tspan + 字母 tspan）', kLetterOf(svgK174a) === 'F' && kAccOf(svgK174a)?.[4] === '♯' && kKeyOf(svgK174a)?.[4] !== undefined, `key=${kKeyOf(svgK174a)?.[0]}`)
 check('adj174 后置 F# 与前置完全等价（同字母、同角标、同几何）',
-  kLetterOf(svgK174b) === 'F' && kAccOf(svgK174b)?.[4] === '♯' && kLetterLeftOf(svgK174b) === kLetterLeftOf(svgK174a) && Number(kAccOf(svgK174b)?.[1]) === Number(kAccOf(svgK174a)?.[1]),
+  kLetterOf(svgK174b) === 'F' && kAccOf(svgK174b)?.[4] === '♯' &&
+    kLetterLeftOf(svgK174b) === kLetterLeftOf(svgK174a) && Number(kAccOf(svgK174b)?.[1]) === Number(kAccOf(svgK174a)?.[1]),
   `${kLetterLeftOf(svgK174b)} vs ${kLetterLeftOf(svgK174a)}`)
 const rK174c = parseJps('V: 1.0\nB: t\nD: B$\nP: 4/4\nQ: 1 2 3 4 |\n')
 const svgK174c = renderScoreToSvg(layoutScore(rK174c, DUR_CFG))[0]
@@ -2855,17 +2889,61 @@ const svgK175 = renderScoreToSvg(layoutScore(rK175a, DUR_CFG))[0]
 check('adj175 bE 渲染为 1 = ♭E 角标', kLetterOf(svgK175) === 'E' && kAccOf(svgK175)?.[4] === '♭', `key=${kKeyOf(svgK175)?.[0]}`)
 const k175Acc = kAccOf(svgK175)
 const k175Key = kKeyOf(svgK175)
-// adj189：角标在**字母真实左缘**之左（含 tspan 让位量）、y 更高、字号 = 调号 3/4
-check('adj189 ♭ 角标在字母左侧、更高、字号 = 3/4×调号（9.8）',
+// adj189：角标在字母之左、y 更高、字号 = 调号 3/4
+check('adj189 ♭ 角标在字母左侧、更高、字号 = 3/4×调号（9.75）',
   k175Acc !== null && k175Key !== null &&
     Number(k175Acc[1]) < kLetterLeftOf(svgK175) &&
     Number(k175Acc[2]) < Number(k175Key[2]) &&
     Math.abs(Number(k175Acc[3]) - defaultPageConfig.miaoshu_size * 0.75) < 0.1,
   JSON.stringify([k175Acc?.[1], k175Acc?.[2], k175Acc?.[3], kLetterLeftOf(svgK175)]))
-// adj191（并入角标不压字母的不变量）：角标右缘不得越过字母真实左缘（允许设计上的 0.1×角标宽叠入）
-check('adj191 角标占用的是让位空档，不压到字母（右缘 ≤ 字母左缘 + 0.1×角标宽）',
-  k175Acc !== null && Number(k175Acc[1]) + Number(k175Acc[3]) <= kLetterLeftOf(svgK175) + 0.1 * Number(k175Acc[3]) + 0.5,
-  `accRight=${k175Acc ? Number(k175Acc[1]) + Number(k175Acc[3]) : NaN} letterLeft=${kLetterLeftOf(svgK175)}`)
+// adj638（用户四轮口径后的最终形态）：角标与字母**内联**，只加固定 0.2px（随调号字号等比）。
+// 位置不再由引擎"估/量字宽"决定 ⇒ 任何字体下都不会多出一整个右侧留白（旧口径 11.7 / 8.2 都会）。
+const KEY_ACC_GAP_PX = 0.2
+const expectGapDx = (size = 13): number => KEY_ACC_GAP_PX * (size / 13)
+check('adj638 字母 tspan 只带固定 0.2px 净距（不再是按占宽/墨迹算的让位）',
+  Math.abs(kLetterDxOf(svgK175) - expectGapDx()) < 0.06,
+  `dx=${kKeyOf(svgK175)?.[4]} 期望=${expectGapDx().toFixed(2)}`)
+check('adj638 ♯ 与 ♭ 的净距完全一致（固定 px，不再因两者墨迹宽不同而差 0.1px）',
+  Math.abs(kLetterDxOf(svgK174a) - kLetterDxOf(svgK175)) < 0.001,
+  `♯=${kLetterDxOf(svgK174a)} ♭=${kLetterDxOf(svgK175)}`)
+check('adj638 角标是内联 tspan（在字母 tspan 之前、不带 dx），字母 dy 抵消角标抬升 ⇒ 字母仍落在基线上',
+  !accTspanOf(svgK175).includes('dx=') && Math.abs(kAccDyOf(svgK175) + kLetterDyOf(svgK175)) < 0.15,
+  `accDy=${kAccDyOf(svgK175)} letterDy=${kLetterDyOf(svgK175)}`)
+// 净距随**调号字号**等比：16px 调号 ⇒ 0.2 × 16/13 = 0.25
+{
+  const svgBig = renderScoreToSvg(
+    layoutScore(parseJps('V: 1.0\nB: t\nD: C#\nP: 4/4\nQ: 1 2 3 4 |\n'), { ...DUR_CFG, miaoshu_size: 16 }),
+  )[0]
+  check('adj638 净距随调号字号等比（16px 调号 ⇒ dx = 0.2×16/13 = 0.25）',
+    kAccRe.test(svgBig) && Math.abs(kLetterDxOf(svgBig) - expectGapDx(16)) < 0.01,
+    `dx=${kLetterDxOf(svgBig)} 期望=${expectGapDx(16).toFixed(3)}`)
+}
+// 宿主实测的角标占宽/墨迹右缘：占宽决定拍号落点，二者之差（右侧留白）用于**补偿**角标与字母的间距
+{
+  const src = 'V: 1.0\nB: t\nD: C#\nP: 4/4\nQ: 1 2 3 4 |\n'
+  const svgDefault = renderScoreToSvg(layoutScore(parseJps(src), DUR_CFG))[0]
+  const svgMeasured = renderScoreToSvg(layoutScore(parseJps(src), DUR_CFG), { wAcc: 9.75, accInkRight: 8 })[0]
+  const meterOf = (svg: string): number => Number(/<g data-meta="meter"[^>]*><text x="([\d.]+)"/.exec(svg)?.[1] ?? NaN)
+  check('adj638 传入实测「占宽 9.75 / 墨迹右缘 8」⇒ 右侧留白 1.75px 被补偿（dx = 0.2 − 1.75 = −1.55）',
+    Math.abs(kLetterDxOf(svgMeasured) - (expectGapDx() - 1.75)) < 0.006,
+    `dx=${kLetterDxOf(svgMeasured)} 期望=${(expectGapDx() - 1.75).toFixed(2)}`)
+  check('adj638 补偿后拍号跟着文字末端一起左移 1.75px（不在角标后留空洞）',
+    Math.abs(meterOf(svgMeasured) - meterOf(svgDefault) + 1.75) < 0.06,
+    `拍号位移=${(meterOf(svgMeasured) - meterOf(svgDefault)).toFixed(2)}`)
+  // 防御：实测值不合理（墨迹右缘 > 占宽）时不补偿，绝不能把字母推进角标里
+  const svgBad = renderScoreToSvg(layoutScore(parseJps(src), DUR_CFG), { wAcc: 5, accInkRight: 9 })[0]
+  check('adj638 拒绝不合理的实测（墨迹右缘 > 占宽）⇒ 退回"字体自然留白 + 0.2px"（dx = +0.2）',
+    Math.abs(kLetterDxOf(svgBad) - expectGapDx()) < 0.006,
+    `dx=${kLetterDxOf(svgBad)}`)
+}
+// adj191（并入角标不压字母的不变量）：内联排版下**结构上不可能压字**——
+// 角标 tspan 一定排在字母 tspan 之前，字母只带非负的固定净距（不会左移进角标）。
+check('adj191 角标内联在字母之前、字母 dx ≥ 0（结构上不可能压字）',
+  k175Acc !== null &&
+    svgK175.indexOf(kAccRe.exec(svgK175)?.[0] ?? '@@') <
+      svgK175.indexOf(/<tspan dy="[-\d.]+" dx="[-\d.]+">E<\/tspan>/.exec(svgK175)?.[0] ?? '@@') &&
+    kLetterDxOf(svgK175) >= 0,
+  `accFirst=${svgK175.indexOf(kAccRe.exec(svgK175)?.[0] ?? '@@') < svgK175.indexOf(/dx="[-\d.]+">E<\/tspan>/.exec(svgK175)?.[0] ?? '@@')} dx=${kLetterDxOf(svgK175)}`)
 // adj179：角标 y = 调号基线 − 0.35×字号（下沿贴字母中线）
 check('adj179 角标 y = 基线 - 0.35×字号（下沿贴字母中线）',
   k175Acc !== null && k175Key !== null && Math.abs(Number(k175Acc[2]) - (Number(k175Key[2]) - 0.35 * defaultPageConfig.miaoshu_size)) < 0.15,
@@ -2873,16 +2951,15 @@ check('adj179 角标 y = 基线 - 0.35×字号（下沿贴字母中线）',
 // adj178：孤立 &（输入中未完成）为 warning 而非 error——预览不阻断
 const r178 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 &\n')
 check('adj178 孤立 & 降为 warning（不阻断预览）', r178.errors.some((e) => e.message.includes('&') && e.severity === 'warning') && !r178.errors.some((e) => e.severity === 'error'), JSON.stringify(r178.errors))
-// adj190：字母让位——**机制已从"整体右移 keyline.x"改为"字母 tspan dx 右移"**（旧断言因此长期失败）
-// 现断言可观测结果：① 有升降号时字母真实左缘 = 无升降号时字母左缘 + tspan dx（>0）；② 无升降号时没有 tspan
+// adj190：让位机制三代演进——整体右移 keyline.x → `tspan dx=0.9×角标宽` → **adj638 内联 + 固定 0.2px**。
+// 现断言：① 有升降号时字母 tspan 带 dx = 0.2px（不再是按宽度算的让位）；② 无升降号时没有 tspan。
 const k181PlainKey = kKeyOf(svgM48) // 无升降号 D: C
-check('adj190 有升降号时字母用 tspan dx 右移让位（无升降号时无 tspan）',
-  kKeyOf(svgK175)?.[4] !== undefined && Number(kKeyOf(svgK175)?.[4]) > 0 &&
-    k181PlainKey !== null && k181PlainKey[4] === undefined &&
-    kLetterLeftOf(svgK175) - (Number(k181PlainKey[1]) + kPrefixW) > 0.5,
-  `dx=${kKeyOf(svgK175)?.[4]} letterLeft=${kLetterLeftOf(svgK175)} plainLetterLeft=${Number(k181PlainKey?.[1]) + kPrefixW}`)
-// 角标 x = "1 = " 宽之后的**原字母左缘**（即角标占的正是让位让出来的空档）
-check('adj190b 角标 x = keyline.x + "1 = " 宽（让位空档起点）',
+check('adj190 有升降号时字母 tspan 只带 0.2px 净距（无升降号时无 tspan）',
+  kKeyOf(svgK175)?.[4] !== undefined && Math.abs(Number(kKeyOf(svgK175)?.[4]) - 0.2) < 0.06 &&
+    k181PlainKey !== null && k181PlainKey[4] === undefined,
+  `dx=${kKeyOf(svgK175)?.[4]}`)
+// 角标紧跟 `1 = ` 之后（内联，紧接前缀末尾）——它不再"占让位空档"，因为已无需让位
+check('adj190b 角标紧跟 `1 = ` 之后（内联 tspan，起点 = keyline.x + "1 = " 宽）',
   k175Acc !== null && k175Key !== null && Math.abs(Number(k175Acc[1]) - (Number(k175Key[1]) + kPrefixW)) < 0.15,
   JSON.stringify([k175Acc?.[1], Number(k175Key?.[1] ?? NaN) + kPrefixW]))
 // 用户可见不变量：调号与拍号不打架——拍号左缘必须在字母（含让位与字宽）之后
@@ -13677,22 +13754,26 @@ function runAdj627Tests() {
    * `marker` 用来在众多 `<text>` 里挑出目标（描述头 `data-meta="keyline"` / 转调记号 `data-keychange=`）。
    */
   const keyNameGeom = (svg: string, marker: string) => {
+    // adj638：角标与字母已**内联**在同一条 `<text>` 里（`<tspan font-size dy>♯</tspan><tspan dy dx>F</tspan>`），
+    // 所以这里一次解析出两段 tspan 的几何（角标不再有独立的 x/y，其 x 视为"紧跟前缀末尾"）。
     const re =
-      /<text ([^>]*)>[^<]*<tspan dx="([\d.]+)">([A-G])<\/tspan><\/text>\s*<text x="([\d.]+)" y="([\d.]+)" font-size="([\d.]+)"[^>]*>([♯♭])<\/text>/g
+      /<text ([^>]*)>[^<]*<tspan font-size="([\d.]+)" dy="([-\d.]+)">([♯♭])<\/tspan><tspan dy="([-\d.]+)" dx="([-\d.]+)">([A-G])<\/tspan><\/text>/g
     let m: RegExpExecArray | null
     while ((m = re.exec(svg))) {
       if (!m[1].includes(marker)) continue
       const num = (re2: RegExp) => Number(re2.exec(m![1])?.[1] ?? NaN)
+      const lx = num(/x="([\d.]+)"/)
+      const ly = num(/y="([\d.]+)"/)
       return {
-        lx: num(/x="([\d.]+)"/),
-        ly: num(/y="([\d.]+)"/),
+        lx,
+        ly,
         lfs: num(/font-size="([\d.]+)"/),
-        dx: Number(m[2]),
-        letter: m[3],
-        ax: Number(m[4]),
-        ay: Number(m[5]),
-        afs: Number(m[6]),
-        glyph: m[7],
+        dx: Number(m[6]),
+        letter: m[7],
+        ax: lx, // 内联：角标起点 = 前缀之后（此处只用于"在字母左侧"的结构判断）
+        ay: ly + Number(m[3]),
+        afs: Number(m[2]),
+        glyph: m[4],
       }
     }
     return null
@@ -13703,16 +13784,15 @@ function runAdj627Tests() {
   check('adj627c 转调记号的调名与描述头**同款**：都是「字母 + 左上角 ♯/♭ 角标」两笔（不再是普通字母 b）',
     gHead !== null && gKc !== null && gHead.glyph === '♭' && gKc.glyph === '♭' && gKc.letter === 'A' && gKc.dx > 0,
     JSON.stringify({ gHead, gKc }))
-  check('adj627c 两处笔法一致：角标字号 = 字母 3/4、角标上移 0.35×字母字号、字母右移 0.9×角标字号让位',
+  check('adj627c 两处笔法一致：角标字号 = 字母 3/4、角标上移 0.35×字母字号、字母净距 = 0.2×字号/13（adj638 内联口径）',
     gHead !== null && gKc !== null &&
-      Math.abs(gHead.afs - gHead.lfs * 0.75) <= 0.1 && Math.abs(gHead.ay - (gHead.ly - 0.35 * gHead.lfs)) <= 0.1 &&
-      Math.abs(gHead.dx - 0.9 * gHead.afs) <= 0.1 &&
-      Math.abs(gKc.afs - gKc.lfs * 0.75) <= 0.1 && Math.abs(gKc.ay - (gKc.ly - 0.35 * gKc.lfs)) <= 0.1 &&
-      Math.abs(gKc.dx - 0.9 * gKc.afs) <= 0.1,
+      Math.abs(gHead.afs - gHead.lfs * 0.75) <= 0.15 && Math.abs(gHead.ay - (gHead.ly - 0.35 * gHead.lfs)) <= 0.15 &&
+      Math.abs(gHead.dx - KEY_ACC_GAP_PX * (gHead.lfs / 13)) <= 0.02 &&
+      Math.abs(gKc.afs - gKc.lfs * 0.75) <= 0.15 && Math.abs(gKc.ay - (gKc.ly - 0.35 * gKc.lfs)) <= 0.15 &&
+      Math.abs(gKc.dx - KEY_ACC_GAP_PX * (gKc.lfs / 13)) <= 0.02,
     JSON.stringify({ gHead, gKc }))
-  check('adj627c 角标落在字母**左上方**（比字母基线高、且从调名起点之后起笔）',
-    gHead !== null && gKc !== null &&
-      gHead.ax > gHead.lx && gHead.ay < gHead.ly && gKc.ax > gKc.lx && gKc.ay < gKc.ly,
+  check('adj627c 角标落在字母**左上方**（内联在字母之前 ⇒ 天然在左；基线更高）',
+    gHead !== null && gKc !== null && gHead.ay < gHead.ly && gKc.ay < gKc.ly,
     JSON.stringify({ gHead, gKc }))
   check('adj627c `转1=$B` / `转1=bE` 的降号、`转1=#F` 的升号同样按角标画（两种降号写法都认）',
     keyNameGeom(svgOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:$B" 2 |\n'), 'data-keychange="转1=$B"')?.glyph === '♭' &&
