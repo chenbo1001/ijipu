@@ -13,6 +13,9 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { highlightCodeWrapped } from './highlight'
 import type { BlockMarks } from './highlight'
+// adj642（用户要求）：查找命中在编辑区的**高亮**——走浏览器自己的机制（CSS Custom Highlight API）
+import { applyFindHighlights, clearFindHighlights } from './findHighlight'
+import { currentMatchIndex, findMatches } from './findReplace'
 import { formatLine, codePosToNoteId } from '@ijipu/engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 import { isBarlineModifierContext, isGraceModifierContext, filterModifierHints } from './completions'
@@ -165,6 +168,12 @@ export function EditorPane() {
   const redoStackLen = useDocStore((s) => s.redoStack.length)
   // adj165：当前光标行/列（1-based 行、0-based 列），供高亮当前行与当前区块
   const cursor = useDocStore((s) => s.cursor)
+  /**
+   * adj642：选区（textarea 坐标）——查找高亮要用它判定"当前项是哪一处"
+   * （`currentMatchIndex(matches, sel)`：与选区完全重合的那一项）。
+   * 编辑器本来就会随 caret 移动重渲染（`cursor` 已订阅），这里不额外增加渲染成本。
+   */
+  const sel = useDocStore((s) => s.sel)
   const jumpCursor = useDocStore((s) => s.jumpCursor)
   const onSelectRef = useRef<() => void>(() => {})
 
@@ -825,6 +834,41 @@ export function EditorPane() {
 
   // adj227：按实际层折行点分视觉行高亮（每视觉行一个 .hl-line，white-space: pre）
   const html = highlightCodeWrapped(code, new Set(errByLine.keys()), cursor, wrapPoints, blockMarks)
+  /**
+   * adj642（用户要求："按下 Ctrl+F 时编辑区选中的文本自动成为查找框的内容，并完成查找，
+   * 同时高亮编辑区里已找到的内容"）：把查找命中注册成**浏览器自己的高亮**。
+   *
+   * 做法见 `editor/findHighlight.ts`：用 CSS Custom Highlight API（`CSS.highlights` + `::highlight()`）
+   * 在**语法高亮层**的文本节点上建 Range —— 那一层就在 textarea 底下、逐字符对应源码。
+   * 这里只负责"拿到命中项 + 当前项"：
+   *  · 查找内容/大小写来自 uiStore（与查找面板同一份，见该面板处的说明）；
+   *  · 当前项 = 与选区完全重合的那一项（`currentMatchIndex`）。
+   *
+   * 换行归一：高亮层内部把 `\r\n` 规范成 `\n`（见 highlight.ts），所以按**同一份归一化后的代码**
+   * 算命中，DOM 偏移才对得上；这正是 .jps 里极少见但仍可能出现的 CRLF 场景。
+   */
+  const findQuery = useUiStore((s) => s.findQuery)
+  const findCase = useUiStore((s) => s.findCaseSensitive)
+  const findHtmlRef = useRef<HTMLDivElement | null>(null)
+  const normForFind = useMemo(() => {
+    const norm = code.replace(/\r\n/g, '\n')
+    const shifted = norm === code
+    return { norm, shifted }
+  }, [code])
+  const findMatchesNow = useMemo(
+    () => (findQuery ? findMatches(normForFind.norm, findQuery, { caseSensitive: findCase }) : []),
+    [normForFind, findQuery, findCase],
+  )
+  // 选区（textarea 坐标）→ 归一化坐标：CRLF 时减去其前面的 `\r` 个数
+  const findSel = useMemo(() => {
+    if (normForFind.shifted) return sel
+    const before = (p: number) => (code.slice(0, p).match(/\r\n/g)?.length ?? 0)
+    return { start: sel.start - before(sel.start), end: sel.end - before(sel.end) }
+  }, [normForFind, sel, code])
+  useLayoutEffect(() => {
+    applyFindHighlights(findHtmlRef.current, normForFind.norm, findMatchesNow, currentMatchIndex(findMatchesNow, findSel))
+    return clearFindHighlights
+  }, [html, normForFind, findMatchesNow, findSel])
   const gutterLines = Array.from({ length: lineCount }, (_, i) => i + 1)
   // adj242：行号字号跟随脚本字号后，按行号位数自适应栏宽（避免大字号/多位数被裁切）
   // adj542（用户要求）：**默认两位数**宽度；`gutterDigits` 只随滚动增长，且不超过整篇行数的位数
@@ -914,6 +958,8 @@ export function EditorPane() {
                   当前块/选中由 .hl-current-block 背景（accent 18%）文字级高亮承担，参考排版按钮选中风格 */}
               <div
                 className="highlight-content"
+                /* adj642：查找高亮就在这一层上注册 Range（见 findHighlight.ts 的文件头说明） */
+                ref={findHtmlRef}
                 dangerouslySetInnerHTML={{ __html: html }}
               />
             </div>

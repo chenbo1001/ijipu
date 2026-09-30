@@ -2198,6 +2198,105 @@ body {
 /* adj463c：主题页「深浅模式」等按钮文本**不折行**（窄列下此前会把"跟随系统"拆成两行） */
 .tool-dock .theme-mode-btn { flex: 0 0 auto; white-space: nowrap; }
 
+/* ============ 查找替换面板（adj641，用户要求：底栏「查找替换」页签）============
+ * 结构（见 ui/dock/FindPanel.tsx）：两行「标签 + 输入框（+ 统计 / 开关）」+ 一行按钮 + 一行说明。
+ * 沿用 dock 既有排布原语（`.dock-actions` 的自动换行与等宽按钮），窄屏时按钮自动折行、不挤压输入框。 */
+.find-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.find-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+/* 标签定宽 ⇒ 查找/替换两行的输入框左缘对齐 */
+.find-label {
+  flex: 0 0 auto;
+  width: 30px;
+  color: var(--jp-text-secondary);
+  font-size: 13px;
+}
+/* 输入框吃掉剩余宽（dock 拖宽时跟着变宽）；窄屏各占一行 */
+.find-input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--jp-border);
+  border-radius: 6px;
+  background: var(--jp-bg-app);
+  color: var(--jp-text-primary);
+  font-size: 13px;
+  font-family: inherit;
+}
+.find-input:focus {
+  outline: none;
+  border-color: var(--jp-accent);
+}
+/* 查找统计：常驻一行，等宽字体避免数字跳动时左右晃 */
+.find-stats {
+  flex: 0 0 auto;
+  min-width: 96px;
+  font-size: 12px;
+  color: var(--jp-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.find-stats.is-ok { color: var(--jp-text-secondary); }
+.find-stats.is-none { color: var(--jp-warning); }
+/* 区分大小写开关（与工作区/设置里的复选框同一套观感） */
+.find-check {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--jp-text-secondary);
+  cursor: pointer;
+}
+.find-actions { --dock-btn: 96px; }
+.find-btn {
+  padding: 5px 10px;
+  border: 1px solid var(--jp-border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--jp-text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+.find-btn:hover:not(:disabled) {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+  background: var(--jp-bg-panel-hover);
+}
+.find-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* 说明行（字面匹配 / 替换口径）——常驻可见，不占按钮位置 */
+.find-hint {
+  color: var(--jp-text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* ============ 查找高亮（adj642，用户要求；走浏览器自己的机制）============
+ * 用 **CSS Custom Highlight API**：`editor/findHighlight.ts` 把命中 `Range` 注册进 `CSS.highlights`，
+ * 这里只负责上色 —— 与浏览器页内查找（Chrome 自己的"查找"高亮）同一套机制：不改 DOM、不插标记，
+ * 所以不会与语法着色/当前区块高亮的 markup 打架，也不会因插入标签破坏逐字符对齐。
+ * 颜色用主题 token：全部命中 = 警示黄（浅），当前项 = 强调色（更实），与 `--jp-warning/--jp-accent`
+ * 在深浅主题下的取值一起自动适配。
+ * 注：不支持该 API 的旧浏览器（Firefox < 140 等）静默降级 —— 查找/替换照常可用，只是没有底色。 */
+::highlight(ijipu-find) {
+  background-color: color-mix(in srgb, var(--jp-warning) 42%, transparent);
+}
+::highlight(ijipu-find-current) {
+  background-color: color-mix(in srgb, var(--jp-accent) 55%, transparent);
+}
+
 /* ============ 告警面板（adj394 问题提示条 → adj462 移入 dock）============ */
 .problem-panel { display: flex; flex-direction: column; min-height: 0; }
 .problem-panel.is-error { box-shadow: inset 3px 0 0 var(--jp-danger); }

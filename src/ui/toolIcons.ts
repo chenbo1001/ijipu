@@ -85,6 +85,12 @@ export const ICON_FILES = {
    * 用户为此单独给了一张图（`public/icons/切换工作区.png`）。
    */
   switchWorkspace: '切换工作区',
+  /**
+   * adj641（用户要求）：底栏「**查找替换**」页签（编辑区 `Ctrl+F` 的落点）。
+   * 图标是本次按同一套线稿风格新画的**放大镜**（`public/icons/查找.png`，32×32、形状在 alpha 通道）——
+   * 页签图标口径见 `ToolDock` 的 TABS 说明：**一律设计图标，不用字符兜底**。
+   */
+  find: '查找',
 } as const
 
 export type ToolIconName = keyof typeof ICON_FILES

@@ -445,6 +445,11 @@ export const dockCopy = {
   tabScore: '谱面',
   /** adj562：导入（粘贴源码导入）——排在工作区之后（用户要求） */
   tabImport: '导入',
+  /**
+   * adj641（用户要求）：**查找替换**页签——用户口径："编辑区只有 Ctrl+F 搜索操作，还缺少一个替换操作……
+   * 在底栏 dock 里增加一个查找替换页签，将查找和替换进行整合"。排在「导入」之后（同属"改内容"的动作）。
+   */
+  tabFind: '查找替换',
   /** 标题栏 × 按钮 */
   closeTitle: '关闭底栏',
   /** adj541：底栏展开/收起（编辑区左下角悬浮按钮 + 页签栏里的收起按钮） */
@@ -478,6 +483,42 @@ export const dockCopy = {
   sizeName: { max: '最大', suggested: '建议', min: '最小' } as const,
   /** 按钮提示：当前档 + 点一下会到哪一档 */
   sizeTitle: (cur: string, next: string): string => `底栏高度：${cur}（点击 → ${next}）`,
+} as const
+
+/**
+ * adj641（用户要求）：**查找替换面板**（底栏「查找替换」页签）的文案。
+ *
+ * 用户口径："页签里有查找内容框、替换内容框，有查找统计，还有查找按钮、替换按钮。"
+ * 匹配与替换的**算法**在 `editor/findReplace.ts`（纯函数、smoke 断言），这里只有文案。
+ */
+export const findCopy = {
+  /** 两个输入框的行标签 */
+  findLabel: '查找',
+  replaceLabel: '替换',
+  findPlaceholder: '要查找的内容（支持 # $ [ ] 等语法字符，按字面匹配）',
+  replacePlaceholder: '替换为（留空 = 删除匹配到的内容）',
+  /** 查找按钮（上一个 / 下一个） */
+  prev: '上一个',
+  next: '下一个',
+  prevTitle: '查找上一个（Shift+Enter）',
+  nextTitle: '查找下一个（Enter）',
+  /** 替换按钮（当前项 / 全部） */
+  replaceOne: '替换',
+  replaceOneTitle: '替换当前一处，并继续找下一处',
+  replaceAll: '全部替换',
+  replaceAllTitle: '一次替换全部匹配（可一步撤销）',
+  /** 区分大小写开关（默认开：`.jps` 里 `Q:` 与 `b` 这类大小写有语义） */
+  caseSensitive: '区分大小写',
+  caseSensitiveTitle: '区分大小写（默认开：谱面源码里大小写有意义）',
+  /** 查找统计 */
+  statIdle: '输入要查找的内容',
+  statNone: '无匹配',
+  statTotal: (n: number): string => `共 ${n} 处`,
+  statCurrent: (i: number, n: number): string => `第 ${i}/${n} 处`,
+  /** 一次性提示（较长的说明放在「说明」行，常驻可见） */
+  hint: '查找为字面匹配（不解析正则）；「替换」改当前一处并自动续到下一处，「全部替换」一次改完、可一步撤销。',
+  /** 替换结果提示（短暂显示在统计行，避免额外弹 toast 打断输入） */
+  replaced: (n: number): string => `已替换 ${n} 处`,
 } as const
 
 /**

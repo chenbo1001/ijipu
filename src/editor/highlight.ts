@@ -243,8 +243,18 @@ export function highlightCodeWrapped(
     }
     // adj322：当前行整行背景——属于光标源码行的视觉行叠加 .hl-current-line
     //   （每视觉行一个 .hl-line；当前行所有视觉行都高亮，补齐 v0.5.1 移除的整行背景）
-    const hlLine = (inner: string) =>
-      `<div class="${cursor && cursor.line === lineNo ? 'hl-line hl-current-line' : 'hl-line'}">${inner}</div>`
+    /**
+     * adj642（用户要求"高亮编辑区里已找到的内容"，做法照浏览器页内查找那套）：
+     * 每个视觉行 div 带上 **`data-line` / `data-col`**（该段在本源码行内的起始列）。
+     *
+     * 为什么要标出来：查找高亮用 **CSS Custom Highlight API**（`CSS.highlights` + `::highlight()`，
+     * 即浏览器页内查找自己的机制）在**本高亮层的文本节点**上建 `Range` —— 这一层就在 textarea 底下、
+     * 逐字符对应源码。但折行后被切成多个 `.hl-line`（字符合集里没有换行符），
+     * 若不做标记，把源码偏移换算到 DOM 位置就得靠"猜每段长度"；标上行列号后换算是一次直读：
+     * `data-line` 找到行 → `data-col` 找到段 → 段内偏移 = `列 − data-col`，再在段内数文本节点即可。
+     */
+    const hlLine = (inner: string, col = 0) =>
+      `<div class="${cursor && cursor.line === lineNo ? 'hl-line hl-current-line' : 'hl-line'}" data-line="${lineNo}" data-col="${col}">${inner}</div>`
     const trimmed = raw.trim()
     if (trimmed === '') {
       parts.push(wrap(hlLine('')))
@@ -256,7 +266,7 @@ export function highlightCodeWrapped(
       // 与 Q 行一致，按实际折行点切成多个 .hl-line 每段用 hl-comment 着色。
       const segs = segsOf(raw.length, pts)
       const segHtml = segs
-        .map((s) => hlLine(span('hl-comment', raw.slice(s.start, s.end))))
+        .map((s) => hlLine(span('hl-comment', raw.slice(s.start, s.end)), s.start))
         .join('')
       parts.push(wrap(segHtml))
       continue
@@ -325,14 +335,14 @@ export function highlightCodeWrapped(
         return s.start < headLen ? span('hl-line-header', head) + inner : inner
       }
       const segHtml = segs
-        .map((s) => hlLine(renderSeg(s)))
+        .map((s) => hlLine(renderSeg(s), s.start))
         .join('')
       parts.push(wrap(segHtml))
       continue
     }
     // 普通行（含长歌词/注释外文本）：按折行点切段，每段一个 .hl-line
     const segs = segsOf(raw.length, pts)
-    const segHtml = segs.map((s) => hlLine(esc(raw.slice(s.start, s.end)))).join('')
+    const segHtml = segs.map((s) => hlLine(esc(raw.slice(s.start, s.end)), s.start)).join('')
     parts.push(wrap(segHtml))
   }
   // adj227：div 块级已自动分行，不能 join('\n')——父级 white-space: pre-wrap

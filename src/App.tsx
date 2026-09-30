@@ -13,6 +13,8 @@ import { beginDrag } from './ui/dragGesture'
 import { Toast } from './ui/Toast'
 import { UpdatePrompt } from './ui/UpdatePrompt'
 import { EditorPane } from './editor/EditorPane'
+// adj642（用户要求）：Ctrl+F 用编辑区选中文本预填查找框（纯函数，冒烟有断言）
+import { seedQueryFromSelection } from './editor/findReplace'
 import { PreviewPane } from './preview/PreviewPane'
 import { useDocStore } from './store/docStore'
 import { useUiStore } from './store/uiStore'
@@ -311,6 +313,24 @@ function App() {
         e.stopPropagation()
         // adj616（用户要求）：Ctrl+I = 导入开关（与菜单「粘贴源码导入」、底栏「导入」页签同一条入口）
         ui.requestDockPanel('import')
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        e.stopPropagation()
+        /**
+         * adj641（用户要求）：**Ctrl+F = 查找替换**。
+         *
+         * 用户口径："编辑区只有 Ctrl+F 搜索操作，还缺少一个替换操作……在底栏 dock 里增加一个查找替换页签，
+         * 将查找和替换进行整合"。此前 Ctrl+F 落在**浏览器原生查找**上（只查、不能替换，也只在网页版有）。
+         * 这里把它接管到应用自己的「查找替换」面板：
+         *  · `preventDefault` 挡掉原生查找条（否则两条查找并存、各说各的）；
+         *  · 走 `ui.requestFind()` 而**不是** `requestDockPanel('find')`——后者是开关语义，
+         *    连按会把底栏收起来；查找键应当是"回到查找框"（见 uiStore 里 `findFocus` 的说明）。
+         *
+         * adj642（用户要求"编辑区选中的文本自动成为查找框的内容，并完成查找，同时高亮…"）：
+         * 有选区时把**选中文本**当查找内容一起带进去（`seedQueryFromSelection` 是纯函数，冒烟有断言）；
+         * 没选区就只聚焦、保持上次的查找内容不动（避免把用户刚查的内容洗掉）。
+         */
+        ui.requestFind(seedQueryFromSelection(st.code, st.sel))
       } else if (e.ctrlKey && (e.code === 'Backquote' || e.key === '`' || e.key === '~')) {
         e.preventDefault()
         e.stopPropagation()

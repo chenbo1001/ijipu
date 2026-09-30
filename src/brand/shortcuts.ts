@@ -51,6 +51,11 @@ export const KBD = {
   /** adj616：工作区 / 导入开关 */
   workspace: 'Ctrl+B',
   import: 'Ctrl+I',
+  /**
+   * adj641（用户要求）：**查找替换**——与导入/工作区那批"底栏页签开关"不同，这条**不是开关**：
+   * 连按 Ctrl+F 只重新聚焦查找框（收起底栏不是用户按这个键想要的结果），见 `uiStore.requestFind`。
+   */
+  find: 'Ctrl+F',
   /** adj618：告警开关 */
   problems: 'Ctrl+`',
   /** 快捷键速查（adj619c：用户要求改成 `Alt+F1`；原先挂在这个物理键的 Shift 档 `Ctrl+~` 上） */

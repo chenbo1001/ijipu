@@ -30,8 +30,18 @@ export type ModalKind = 'samples' | 'shortcuts' | 'manual' | 'syntax' | 'donate'
  *   （同一份内容改由 dock 承载，避免"弹窗 + 页签"两条路并存让用户犯选择困难，与 adj492 关于同策）。
  * adj603（用户要求）：原 'settings' 一个页签**拆成两个**——'settings' = 全局（视图/主题/音色库，
  *   本机偏好，页签文本「全局」）、'score' = 谱面（布局/字体，随谱保存，页签文本「谱面」）。
+ * adj641（用户要求）：新增 'find'（查找替换）——编辑区 `Ctrl+F` 的落点，把查找与替换整合在一个页签里。
  */
-export type DockPanelKey = 'problems' | 'tryout' | 'export' | 'settings' | 'score' | 'about' | 'workspace' | 'import'
+export type DockPanelKey =
+  | 'problems'
+  | 'tryout'
+  | 'export'
+  | 'settings'
+  | 'score'
+  | 'about'
+  | 'workspace'
+  | 'import'
+  | 'find'
 
 /** 轻量浮动提示（toast）：kind 决定配色；nonce 用于同文案重复触发时重置隐藏计时 */
 export type NoticeKind = 'ok' | 'warn' | 'error'
@@ -247,6 +257,31 @@ interface UiState {
    */
   dockPanelRequest: { panel: DockPanelKey; nonce: number } | null
   requestDockPanel: (panel: DockPanelKey) => void
+  /**
+   * adj641（用户要求）：**`Ctrl+F` = 打开底栏「查找替换」并聚焦查找框**。
+   *
+   * 为什么不直接用 `requestDockPanel('find')`：那个请求的语义是"开关"（已开着同一个面板再按会**收起**底栏），
+   * 而用户连按 Ctrl+F 的预期是"回到查找框继续找"，不是把面板收起来。另外"已经在本页签再按一次"时
+   * `dockPanel` 没变，单靠 effect 收不到信号 ⇒ 这里用一个自增 nonce 描述"这一次要我聚焦"。
+   * 于是 `requestFind()` = 打开底栏 + 切到查找页签 + nonce 自增（面板据此聚焦并全选输入框）。
+   */
+  findFocus: number
+  /**
+   * adj642（用户要求："按下 Ctrl+F 时编辑区选中的文本自动成为查找框的内容，并完成查找，
+   * 同时高亮编辑区里已找到的内容"）：
+   * **查找内容与大小写开关放在 store 里**，而不是面板自己的 useState——
+   * 因为编辑区的高亮（`editor/findHighlight.ts`）也要读同一份查找内容；两份状态必然漂移。
+   * 替换内容仍留在面板内（它只影响替换动作，与高亮无关）。
+   */
+  findQuery: string
+  findCaseSensitive: boolean
+  setFindQuery: (q: string) => void
+  setFindCaseSensitive: (v: boolean) => void
+  /**
+   * 发一次"打开查找替换并聚焦查找框"的请求。`seed` 非空时**同时**把查找内容换成它
+   * （`Ctrl+F` 带选区文本；由 `App` 算出后传入——本 store 不跨读 docStore，与其他入口同口径）。
+   */
+  requestFind: (seed?: string | null) => void
   /** adj462：导出任务指示（状态栏动态提示用；null = 无任务）。dock 切走/关闭时仍在，导出照常进行。 */
   exportJob: string | null
   setExportJob: (label: string | null) => void
@@ -502,5 +537,20 @@ export const useUiStore = create<UiState>()((set) => ({
   // adj619：底栏入口快捷键的"打开某个页签"请求（nonce 自增，由 ToolDock 按自己的 minimized 决定语义）
   dockPanelRequest: null,
   requestDockPanel: (panel) => set((s) => ({ dockPanelRequest: { panel, nonce: (s.dockPanelRequest?.nonce ?? 0) + 1 } })),
+  // adj641：Ctrl+F = 打开「查找替换」并聚焦查找框（**不走开关语义**，连按只重新聚焦；
+  // 见接口处 `findFocus` 的说明）
+  findFocus: 0,
+  findQuery: '',
+  findCaseSensitive: true,
+  setFindQuery: (findQuery) => set({ findQuery }),
+  setFindCaseSensitive: (findCaseSensitive) => set({ findCaseSensitive }),
+  // adj642：带 seed 时连查找内容一起换掉（Ctrl+F 有选区 ⇒ 选中文本即查找内容，随即完成查找）
+  requestFind: (seed) =>
+    set((s) => ({
+      dockOpen: true,
+      dockPanel: 'find',
+      findFocus: s.findFocus + 1,
+      ...(seed ? { findQuery: seed } : {}),
+    })),
   setExportJob: (label) => set({ exportJob: label }),
 }))

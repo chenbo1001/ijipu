@@ -66,13 +66,17 @@ const ExportPanel = lazy(() => import('./dock/ExportPanel').then((m) => ({ defau
 const WorkspacePanel = lazy(() => import('./dock/WorkspacePanel').then((m) => ({ default: m.WorkspacePanel })))
 // adj562：「粘贴源码导入」迁入底栏（页签排在工作区之后）——原弹窗入口下线，与 adj492「关于」同套路
 const ImportPanel = lazy(() => import('../dialogs/PasteImportDialog').then((m) => ({ default: () => <m.PasteImportDialog inline /> })))
+// adj641（用户要求）：查找替换（编辑区 Ctrl+F 的落点；查找与替换整合在一个页签里）
+const FindPanel = lazy(() => import('./dock/FindPanel').then((m) => ({ default: m.FindPanel })))
 
 /** 面板（顺序即标签栏顺序）；adj540：工作区**排第一**（手机端文件操作主入口，用户要求）；
  *  adj562：导入**紧跟在它后面**（用户要求"就在工作区后面加一个「导入」页签"）；
+ *  adj641：查找替换**再紧跟导入**（同属"改内容"的动作，且它与导入一样是编辑期的操作面板）；
  *  adj603：「谱面」紧跟在「全局」（原「设置」）后面（用户要求拆分后再成对出现） */
 const PANELS: readonly { key: DockPanelKey; render: ComponentType }[] = [
   { key: 'workspace', render: WorkspacePanel },
   { key: 'import', render: ImportPanel },
+  { key: 'find', render: FindPanel },
   { key: 'problems', render: ProblemPanel },
   { key: 'tryout', render: TryoutPanel },
   { key: 'export', render: ExportPanel },
@@ -264,6 +268,8 @@ const TABS: { key: DockPanelKey; label: string; icon: ToolIconName; kbd?: string
   { key: 'workspace', label: dockCopy.tabWorkspace, icon: 'workspace', kbd: KBD.workspace },
   // adj562：导入紧跟工作区（用户要求）；adj564：图标用设计图 `public/icons/导入.png`
   { key: 'import', label: dockCopy.tabImport, icon: 'import', kbd: KBD.import },
+  // adj641（用户要求）：查找替换紧跟导入（同属"改内容"的动作）；图标是本次新画的放大镜（`public/icons/查找.png`）
+  { key: 'find', label: dockCopy.tabFind, icon: 'find', kbd: KBD.find },
   // adj565：告警图标由 `⚠` 字符换成设计图 `public/icons/告警.png`
   { key: 'problems', label: dockCopy.tabProblems, icon: 'problems', kbd: KBD.problems },
   { key: 'tryout', label: dockCopy.tabTryout, icon: 'play', kbd: KBD.tryout },
@@ -293,9 +299,11 @@ const TABS: { key: DockPanelKey; label: string; icon: ToolIconName; kbd?: string
  * 设置/导入/工作区不走 AUTO_FIT（三者按 adj587 的同一个建议高度定高，内容各自内部滚动）。
  * adj494：加入 `about` —— 用户要求"打开关于时应以能够显示全内容为宜"。
  * adj510：告警（`problems`）加入 AUTO_FIT，与试听/导出/关于统一按"内容自然高"定 dock 高度。
+ * adj641（用户要求）：**查找替换（`find`）也走 AUTO_FIT** —— 它是一个两行输入 + 一行按钮的小面板，
+ *   按内容自然高最合适（拖高之后输入框跟着变宽、内容仍在上沿，不会像工作区那样需要"列表 5 项"的口径）。
  * （内容再长也受 `maxH()` 上限约束，超长时仍可滚动。）
  */
-const AUTO_FIT: readonly DockPanelKey[] = ['problems', 'tryout', 'export', 'about']
+const AUTO_FIT: readonly DockPanelKey[] = ['problems', 'tryout', 'export', 'about', 'find']
 
 /**
  * 告警面板在**建议档**下最多显示几行（超出部分由列表自身滚动查看）。
