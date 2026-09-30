@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -41,7 +41,7 @@ import {
 } from '@ijipu/engine/playback/ornaments.ts'
 import { slideOf, slidePlan, slideStepMs, SLIDE_SYMBOLS, SLIDE_STEP_MIN_MS, SLIDE_STEP_MAX_MS } from '@ijipu/engine/playback/slides.ts'
 import { midiToPitchName } from '@ijipu/engine/playback/midi.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, TP_BRACKET_GAP } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, TP_BRACKET_GAP, accidentalGap } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
@@ -49,7 +49,22 @@ import type { BarlineType } from '@ijipu/engine/types.ts'
 import { computeBeamsForTest } from '@ijipu/engine/render/index.ts'
 // adj458：波音/滑音/延长记号的矢量修饰符（生成常量 + 墨迹宽高比；摆放口径经渲染端到端断言）
 import { MODIFIER_GLYPHS, glyphInkAspect } from '@ijipu/engine/render/modifierGlyphs.ts'
+// adj644：大括号墨迹右缘（布局用它把括号贴到音符一侧；与渲染同一份几何）
+import { braceInkRightOffset } from '@ijipu/engine/layout/spaceLayout.ts'
 import { insertLineHeader, lineColOf, isLineHeaderKey } from '../src/editor/shortcuts.ts'
+// adj641（用户要求）：查找替换的纯逻辑（匹配 / 当前项 / 前后跳转 / 替换 / 全部替换）
+// adj642：再加"Ctrl+F 选区预填"（`seedQueryFromSelection`）
+import {
+  findMatches,
+  seedQueryFromSelection,
+  currentMatchIndex,
+  targetMatchIndex,
+  replaceTargetIndex,
+  replaceOne,
+  replaceAllMatches,
+} from '../src/editor/findReplace.ts'
+// adj641：快捷键键名的唯一出处（断言 Ctrl+F 不与既有键位撞车）
+import { KBD } from '../src/brand/shortcuts.ts'
 import { highlightCode } from '../src/editor/highlight.ts'
 import { highlightCodeWrapped } from '../src/editor/highlight.ts'
 import { HEADER_HINTS, filterHeaderHints, BARLINE_MODIFIER_HINTS, NOTE_MODIFIER_HINTS, GRACE_MODIFIER_HINTS, isBarlineModifierContext, isGraceModifierContext, filterModifierHints } from '../src/editor/completions.ts'
@@ -1535,8 +1550,7 @@ const slurArcR = (half: 'l' | 'r' | undefined, span: number): number => {
 // 完整连音线 R 受半段约束（span<12 时收缩，避免两弧重叠）——保留现有行为
 check(
   'adj459 完整连音线 R 在 span<12 时收缩（避免两弧重叠）',
-  slurArcR(undefined, 8) < 5 && slurArcR(undefined, 50) === 5,
-  `s=8→R=${slurArcR(undefined, 8)} s=50→R=${slurArcR(undefined, 50)}`,
+  slurArcR(undefined, 8) < 5 && slurArcR(undefined, 50) === 5,  `s=8→R=${slurArcR(undefined, 8)} s=50→R=${slurArcR(undefined, 50)}`,
 )
 // 短半条（span=5，<leg+1）按公式 R = min(leg, span-1) = 4（留 1px 间隙，不让弧线端碰到另一端）
 check(
@@ -1544,6 +1558,42 @@ check(
   slurArcR('r', 5) === 4,
   `R=${slurArcR('r', 5)}`,
 )
+/**
+ * adj649（用户反馈多声部拍内 `(5 5/)` / `(7 7/)` 的连音线"跑偏"）：**圆弧垂度随跨度自适应**。
+ *
+ * 原为固定 9px：两音符连音线的跨度只有 8~25px（多声部拍内相邻音符，adj648 起随拍宽摊开），
+ * 弧高≈跨度 ⇒ 立成半圆、两端很陡，看着像悬在两个音符之间而不是连着它们。
+ * 新口径 `垂度 = clamp(跨度 × 0.28, 2.5, 9)`：跨度 ≥ 32px 时仍是原来的 9px（长连音线一字不变），
+ * 常见的 18~22px 跨度 ⇒ 5~6.2px（浅弧、两端贴住数字）。
+ */
+{
+  const arcCtrlY = (span: number): number => {
+    const d = renderSlurForTest(
+      { x1: 100, x2: 100 + span, y: 142.2, depth: 0, style: 'arc', half: undefined, tupletCount: undefined },
+      18,
+    )
+    const m = /Q [\d.]+ ([\d.]+)/.exec(d)
+    return m ? Number(m[1]) : NaN
+  }
+  const sagOf = (span: number): number => 142.2 - arcCtrlY(span)
+  check(
+    'adj649 圆弧垂度随跨度自适应（≥32px 仍是老口径 9px；常见 20px ⇒ 5.6px；极窄下限 2.5px）',
+    Math.abs(sagOf(60) - 9) < 1e-6 &&
+      Math.abs(sagOf(32) - 8.96) < 0.02 &&
+      Math.abs(sagOf(20) - 5.6) < 1e-6 &&
+      Math.abs(sagOf(12) - 3.36) < 1e-6 &&
+      Math.abs(sagOf(5) - 2.5) < 1e-6,
+    [60, 32, 20, 12, 5].map((s) => `跨度${s}→垂度${sagOf(s).toFixed(2)}`).join(' '),
+  )
+  // 两端仍落在同一条基线上（y 不变），只有顶点高度随跨度变
+  check(
+    'adj649 只改顶点高度：两端 y 不变（弧线仍从两个音符上方起落）',
+    /^<path d="M 100 142\.2 Q [\d.]+ [\d.]+ 110 142\.2"/.test(
+      renderSlurForTest({ x1: 100, x2: 110, y: 142.2, depth: 0, style: 'arc', half: undefined, tupletCount: undefined }, 18),
+    ),
+    '',
+  )
+}
 // adj180：&hx 呼吸记号不加粗（stroke 0.8）、横向宽度 80%（半宽 2.8×s）
 // adj375：&hx 已独立化——用独立写法取样（原 r109 里 5&hx 已不再产生记号）
 const svgHx180 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 5 &hx 6 |\n'), DUR_CFG))[0]
@@ -3574,7 +3624,267 @@ const spXs = spNotes.map((n) => n.segments?.[0]?.x).filter((x): x is number => t
 check('space 音符块 x 单调递增（不重叠）', spXs.length >= 4 && spXs.every((x, i) => i === 0 || x > spXs[i - 1]), JSON.stringify(spXs))
 const durXs = layoutScore(parseJps(spSrc), DUR_CFG).pages[0].notes.map((n) => n.segments?.[0]?.x ?? n.x)
 check('space 与时值优先音符块位置不同', JSON.stringify(spXs) !== JSON.stringify(durXs), `sp=${JSON.stringify(spXs)} dur=${JSON.stringify(durXs)}`)
-check('accidentalBodyW(13)=7.62', Math.abs(accidentalBodyW(13) - 7.62) < 1e-6, String(accidentalBodyW(13)))
+/**
+ * adj645（用户要求"升降符的占宽按**墨宽**而非字宽来计算"）：占宽 = 角标**墨迹宽** + 与数字净距，
+ * 都在**角标字号**（= 音符字号 × 12/18）上量。旧的 `7.62×(字号/13)` 是 keyline 处 `♯` 的**字宽**、
+ * 而且对应 13px 字号（角标实际画在 ≈0.667×字号 上）⇒ 每个角标白留 ≈2.4px；`♮`（全角字形，
+ * 字宽 1em / 墨迹 0.355em）按字宽定位还会压到自己的数字上。
+ */
+{
+  const ns645 = defaultPageConfig.note_size
+  const fs645 = accidentalFontSize(ns645)
+  const oldW645 = 7.62 * (ns645 / 13)
+  const gap645 = accidentalGap(ns645)
+  check('adj645 角标占宽 = 墨迹宽 + 净距（不再按字宽 7.62）',
+    Math.abs(accidentalBodyW(ns645, '#') - (0.6 * fs645 + gap645)) < 1e-6 &&
+      accidentalBodyW(ns645, '#') < oldW645 - 1.5,
+    `#=${accidentalBodyW(ns645, '#').toFixed(2)} 旧=${oldW645.toFixed(2)} 角标字号=${fs645.toFixed(2)} 净距=${gap645.toFixed(2)}`)
+  check('adj645 逐字形占宽：♮（全角字形）明显窄于 # / b',
+    accidentalBodyW(ns645, '=') < accidentalBodyW(ns645, '$') &&
+      accidentalBodyW(ns645, '$') < accidentalBodyW(ns645, '#'),
+    `#=${accidentalBodyW(ns645, '#').toFixed(2)} b=${accidentalBodyW(ns645, '$').toFixed(2)} ♮=${accidentalBodyW(ns645, '=').toFixed(2)}`)
+  check('adj645 墨迹左缘 = 数字左缘 − 占宽（渲染锚点与占宽同源，不留多余缝）',
+    ['#', '$', '='].every((acc) => {
+      const a = acc as '#' | '$' | '='
+      return Math.abs(accidentalInkLeftDx(ns645, a) + accidentalBodyW(ns645, a)) < 1e-6
+    }),
+    `#=${accidentalInkLeftDx(ns645, '#').toFixed(3)} b=${accidentalInkLeftDx(ns645, '$').toFixed(3)} ♮=${accidentalInkLeftDx(ns645, '=').toFixed(3)}`)
+  check('adj645 墨迹右缘离数字左缘固定净距（♮ 不再压进数字）',
+    ['#', '$', '='].every((acc) => {
+      const a = acc as '#' | '$' | '='
+      return Math.abs(accidentalInkRightDx(ns645, a) + gap645) < 1e-6 && accidentalInkRightDx(ns645, a) < 0
+    }),
+    `#=${accidentalInkRightDx(ns645, '#').toFixed(3)} ♮=${accidentalInkRightDx(ns645, '=').toFixed(3)}`)
+  // 端到端：段起点就是角标墨迹左缘（空间优先多声部；`=` 自然号最容易压数字，单列一条）
+  // 注意变音是**后缀**写法（`3#` / `3=`），与 render 把它画在数字左侧不矛盾
+  const e2e = layoutScore(
+    parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 2 3# 4 5 |\nQ2: 1 2 3= 4 |\n'),
+    { ...defaultPageConfig, noteSpaceLayout: 'space' as const },
+  ).pages[0]
+  const accNotes = e2e.notes.filter((n) => n.token.kind === 'note' && n.token.accidental)
+  check('adj645 端到端：变音音符的段起点 = 角标墨迹左缘（占宽刚好是墨迹，无多余留白）',
+    accNotes.length === 2 &&
+      accNotes.every((n) => {
+        const t = n.token as { kind: 'note'; accidental: '#' | '$' | '=' }
+        const inkLeft = n.x + accidentalInkLeftDx(ns645, t.accidental)
+        return Math.abs(inkLeft - Number(n.segments?.[0]?.x)) < 0.06
+      }),
+    JSON.stringify(accNotes.map((n) => {
+      const t = n.token as { kind: 'note'; accidental: '#' | '$' | '=' }
+      return { acc: t.accidental, seg: Number(n.segments?.[0]?.x).toFixed(2), inkLeft: (n.x + accidentalInkLeftDx(ns645, t.accidental)).toFixed(2) }
+    })))
+}
+check('accidentalBodyW(13) = 墨迹宽 + 净距 ≈ 5.40（adj645 起；旧值 7.62 是字宽）',
+  Math.abs(accidentalBodyW(13) - (0.6 * 13 * (12 / 18) + accidentalGap(13))) < 1e-6, String(accidentalBodyW(13)))
+
+/**
+ * adj646（用户要求"与描述头的升降符的间距做一个对比，看是否可以进行规则统一"）：
+ * **净距口径统一** —— 描述头调号（`D: C#` 的 ♯/♭）与音符变音（`3#` 的 #/b/♮）共用同一条规则
+ * `accidentalGap(所在字号)` = 0.2px @13px 基准、随该行字号等比。
+ *
+ * 对比结论（改前）：描述头 = 0.2px（adj638 用户四轮定死）；音符 = `0.05 × 角标字号` = 13px 下 0.43px，
+ * 是描述头的 **2.4 倍**——两处都是"角标紧贴邻字"，没有理由差一倍多。
+ * 两处**不必统一**的部分（有意保留，理由写在断言里）：
+ *  · 排版方式：描述头**内联 tspan**（浏览器真实推进量 + 右侧留白补偿）；音符角标是独立 `<text>`，
+ *    按"墨迹右缘 = 数字左缘 − 净距"自行定位。
+ *  · 墨迹来源：**adj647 起已统一为"宿主实测优先 + 内置常量表兜底"**（见下面那组断言）。
+ */
+{
+  const gap13 = accidentalGap(13)
+  const srcKey = 'V: 1.0\nB: t\nD: C#\nP: 4/4\nQ: 1 2 3 4 |\n'
+  const svgKey = renderScoreToSvg(layoutScore(parseJps(srcKey), DUR_CFG))[0]
+  const svgKey16 = renderScoreToSvg(layoutScore(parseJps(srcKey), { ...DUR_CFG, miaoshu_size: 16 }))[0]
+  check('adj646 净距规则两处同一条：13px 字号下调号 dx 与音符净距都 = 0.2px',
+    Math.abs(gap13 - 0.2) < 1e-9 &&
+      Math.abs(kLetterDxOf(svgKey) - gap13) < 0.06 &&
+      Math.abs(-accidentalInkRightDx(13, '#') - gap13) < 1e-9,
+    `调号 dx=${kLetterDxOf(svgKey)} 音符=${(-accidentalInkRightDx(13, '#')).toFixed(3)} 规则=${gap13}`)
+  check('adj646 净距各自随所在行字号等比（调号 16 ⇒ 0.246；音符 16 ⇒ 0.246）',
+    Math.abs(accidentalGap(16) - (0.2 * 16) / 13) < 1e-9 &&
+      Math.abs(kLetterDxOf(svgKey16) - accidentalGap(16)) < 0.01 &&
+      Math.abs(-accidentalInkRightDx(16, '#') - accidentalGap(16)) < 1e-9,
+    `调号16 dx=${kLetterDxOf(svgKey16)} 音符16=${(-accidentalInkRightDx(16, '#')).toFixed(3)} 规则=${accidentalGap(16).toFixed(3)}`)
+  check('adj646 占宽口径同源：音符占宽 = 角标墨迹宽 + 同一条净距（逐字形）',
+    (['#', '$', '='] as const).every((a) => {
+      const inkW = { '#': 0.6, $: 0.515, '=': 0.355 }[a] * accidentalFontSize(13)
+      return Math.abs(accidentalBodyW(13, a) - (inkW + gap13)) < 1e-9
+    }),
+    `#=${accidentalBodyW(13, '#').toFixed(3)} b=${accidentalBodyW(13, '$').toFixed(3)} ♮=${accidentalBodyW(13, '=').toFixed(3)}`)
+  const acc646 = kAccOf(svgKey)
+  check('adj646 描述头调号仍是 adj638 的内联口径（角标内联 tspan + 字母 dy 抵消 + 只带净距 dx）',
+    acc646 !== null && kLetterOf(svgKey) === 'C' &&
+      Math.abs(Number(acc646[3]) - defaultPageConfig.miaoshu_size * 0.75) < 0.1 &&
+      !accTspanOf(svgKey).includes('dx=') && Math.abs(kAccDyOf(svgKey) + kLetterDyOf(svgKey)) < 0.15,
+    `${accTspanOf(svgKey)} letterDx=${kLetterDxOf(svgKey)} accFs=${acc646?.[3]}`)
+}
+
+/**
+ * adj647（用户要求"墨迹来源也统一"）：变音角标的字形度量**改由宿主实测传入**
+ * （`layoutScore(..., fontMeta)` 的第 4 参），内置常量表退化为兜底。
+ *
+ * 这是"引擎零 DOM + 布局先行"的收口：布局期拿不到字形度量，而 `shuzi_font` 是用户可配的
+ * （`♮` 在有些字体是全角、有些是窄字形）⇒ 宿主一次性量 `#`/`b`/`♮` 的**墨迹宽/左偏**传进来；
+ * 布局据此算占宽，并把**解析结果**写进 `PlacedToken.accidentalGeo` 供渲染直接消费
+ * （渲染不再自己按常量表算一遍 ⇒ 不会"布局按实测、渲染按常量表"两套账）。
+ */
+{
+  const ns647 = defaultPageConfig.note_size
+  const inkCfg = { ...defaultPageConfig, noteSpaceLayout: 'space' as const }
+  const src647 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 2 3# 4 5 |\nQ2: 1 2 3= 4 |\n'
+  // 造一份"明显不同的字体"度量：`#` 墨迹宽 0.9em、左偏 0.1em；`♮` 0.5/0.2
+  const hostInk = { '#': { inkW: 0.9, lsb: 0.1 }, '♮': { inkW: 0.5, lsb: 0.2 } }
+  check('adj647 宿主实测优先：占宽/锚点随实测值走（不再固定按常量表）',
+    Math.abs(accidentalBodyW(ns647, '#', hostInk) - (0.9 * accidentalFontSize(ns647) + accidentalGap(ns647))) < 1e-9 &&
+      Math.abs(accidentalBodyW(ns647, '=', hostInk) - (0.5 * accidentalFontSize(ns647) + accidentalGap(ns647))) < 1e-9 &&
+      accidentalBodyW(ns647, '#', hostInk) > accidentalBodyW(ns647, '#') + 1,
+    `实测#=${accidentalBodyW(ns647, '#', hostInk).toFixed(2)} 表#=${accidentalBodyW(ns647, '#').toFixed(2)} 实测♮=${accidentalBodyW(ns647, '=', hostInk).toFixed(2)}`)
+  check('adj647 未给的字形仍走常量表（部分实测也成立）',
+    Math.abs(accidentalBodyW(ns647, '$', hostInk) - accidentalBodyW(ns647, '$')) < 1e-9,
+    `b=${accidentalBodyW(ns647, '$', hostInk).toFixed(3)}`)
+  check('adj647 不合理实测被拒（退回常量表）：inkW=0 / inkW 过大 / lsb 越界',
+    Math.abs(accidentalBodyW(ns647, '#', { '#': { inkW: 0, lsb: 0 } }) - accidentalBodyW(ns647, '#')) < 1e-9 &&
+      Math.abs(accidentalBodyW(ns647, '#', { '#': { inkW: 5, lsb: 0 } }) - accidentalBodyW(ns647, '#')) < 1e-9 &&
+      Math.abs(accidentalBodyW(ns647, '#', { '#': { inkW: 0.6, lsb: 9 } }) - accidentalBodyW(ns647, '#')) < 1e-9,
+    JSON.stringify({ bad0: accidentalBodyW(ns647, '#', { '#': { inkW: 0, lsb: 0 } }), good: accidentalBodyW(ns647, '#') }))
+  /**
+   * 宿主实测与内置常量表在**默认字体栈**下必须等价（否则"有实测/无实测"两条路会给出不同版面）：
+   * 下表是本次用 Edge canvas 在 **200px 基准**上实测的比值（`inkW = actualBoundingBoxRight + Left`、
+   * `lsb = −actualBoundingBoxLeft`，再除以字号）——与常量表逐项吻合（`#` 0.605 vs 0.600 属像素取整差）。
+   */
+  {
+    const measuredInk = {
+      '#': { inkW: 0.605, lsb: 0.015 },
+      b: { inkW: 0.515, lsb: 0.08 },
+      '♮': { inkW: 0.355, lsb: 0.325 },
+    }
+    const diffs = (['#', '$', '='] as const).map((a) => accidentalBodyW(ns647, a, measuredInk) - accidentalBodyW(ns647, a))
+    check('adj647 默认字体栈下「宿主实测」与「内置常量表」等价（占宽差 < 0.06px ⇒ 有无实测版面一致）',
+      diffs.every((d) => Math.abs(d) < 0.06),
+      `差=${diffs.map((d) => d.toFixed(3)).join(',')}`)
+  }
+  // 布局 → 渲染：几何由布局解析并写进 PlacedToken；渲染直接消费（与实测一致、与常量表不同）
+  {
+    const lay647 = layoutScore(parseJps(src647), inkCfg, undefined, { accidentalInk: hostInk })
+    const page647 = lay647.pages[0]
+    const acc647 = page647.notes.filter((n) => n.token.kind === 'note' && n.token.accidental)
+    check('adj647 布局把解析几何写进 PlacedToken.accidentalGeo（= 实测算出的 penDx/leadW）',
+      acc647.length === 2 &&
+        acc647.every((n) => {
+          const t = n.token as { kind: 'note'; accidental: '#' | '$' | '=' }
+          const g = n.accidentalGeo
+          return !!g &&
+            Math.abs(g.leadW - accidentalBodyW(ns647, t.accidental, hostInk)) < 1e-9 &&
+            Math.abs(g.penDx - accidentalPenDx(ns647, t.accidental, hostInk)) < 1e-9
+        }),
+      JSON.stringify(acc647.map((n) => n.accidentalGeo)))
+    const svg647 = renderScoreToSvg(lay647)[0]
+    const sharp647 = acc647.find((n) => (n.token as { accidental: string }).accidental === '#')
+    const m647 = svg647.match(/<text x="([\d.]+)" y="[-\d.]+" font-size="[\d.]+" font-family="[^"]*" fill="#1b1b1b">#<\/text>/)
+    const penFromSvg = m647 ? Number(m647[1]) : NaN
+    check('adj647 渲染消费布局的几何（SVG 里角标 x = 数字左缘 + 实测 penDx，不是常量表那份）',
+      !!sharp647 && Number.isFinite(penFromSvg) &&
+        Math.abs(penFromSvg - (sharp647.x + (sharp647.accidentalGeo?.penDx ?? 0))) < 0.06 &&
+        Math.abs(penFromSvg - (sharp647.x + accidentalPenDx(ns647, '#'))) > 0.5,
+      `SVG=${penFromSvg} 实测=${(sharp647.x + (sharp647.accidentalGeo?.penDx ?? 0)).toFixed(2)} 表=${(sharp647.x + accidentalPenDx(ns647, '#')).toFixed(2)}`)
+    // 端到端不变量：角标墨迹左缘 = 段起点（实测字体下同样成立）
+    check('adj647 端到端：实测字体下角标墨迹左缘仍 = 段起点（占宽与锚点同一份度量）',
+      acc647.every((n) => {
+        const t = n.token as { kind: 'note'; accidental: '#' | '$' | '=' }
+        return Math.abs(n.x + accidentalInkLeftDx(ns647, t.accidental, hostInk) - Number(n.segments?.[0]?.x)) < 0.02
+      }),
+      JSON.stringify(acc647.map((n) => Number((n.x + accidentalInkLeftDx(ns647, (n.token as { accidental: '#' | '$' | '=' }).accidental, hostInk) - Number(n.segments?.[0]?.x)).toFixed(3)))))
+  }
+  // 不传实测 ⇒ 与旧行为逐值一致（常量表），且几何照样写进 PlacedToken（渲染有据可依）
+  {
+    const noInk = layoutScore(parseJps(src647), inkCfg).pages[0].notes.filter((n) => n.token.kind === 'note' && n.token.accidental)
+    check('adj647 不传实测 ⇒ 退回常量表（与 adj645/646 的既有口径逐值一致）',
+      noInk.length === 2 &&
+        noInk.every((n) => {
+          const t = n.token as { kind: 'note'; accidental: '#' | '$' | '=' }
+          return !!n.accidentalGeo &&
+            Math.abs(n.accidentalGeo.leadW - accidentalBodyW(ns647, t.accidental)) < 1e-9 &&
+            Math.abs(n.accidentalGeo.penDx - accidentalPenDx(ns647, t.accidental)) < 1e-9
+        }),
+      JSON.stringify(noInk.map((n) => n.accidentalGeo)))
+  }
+}
+
+/**
+ * adj648（用户反馈"拍子里的音符没有合理分散，导致拍子之间空白过大"）：
+ * **撑满行的小节富余宽摊进每一拍自己的拍宽**（不再像 adj316 那样堆在"小节头 + 拍与拍之间"）。
+ *
+ * 机理：拍内落位 = `max(本体游标, 拍内时值位置 × 拍宽)`，而拍宽此前只取"该拍各音符本体宽之和"
+ * ⇒ 富余宽留在拍外，拍内永远拿不到它：一个数字一个槽宽挤在一起（八分/十六分密拍最明显），
+ * 而全部富余变成拍与拍之间的大空档（用户截图正是如此）。
+ * 摊进拍宽后：拍内按**时值比例**分开（十六分比八分靠得近）；拍与拍之间只剩 NOTE_GAP + 本拍末尾空档。
+ * 与单声部"元素本体宽 + 剩余宽按比例分摊"（adj283）口径一致。
+ */
+console.log('[63c] multi-voice beat stretch goes inside beats (adj648)')
+{
+  // 横向 A4 放大富余宽效应：4 小节（≥ align_min_bars 撑满）× 每拍 2~3 个音符
+  const cfg648 = { ...defaultPageConfig, page: 'A4_horizontal' as const, noteSpaceLayout: 'space' as const }
+  const bar648 = '5/ 5// 6// 5/ 3/ 2./ 1// 2/ 3/'
+  const music648 = Array.from({ length: 4 }, () => bar648).join(' | ')
+  const src648 = `V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: ${music648} |\nQ2: ${music648} |\nQ3: ${music648} |\n`
+  const page648 = layoutScore(parseJps(src648), cfg648).pages[0]
+  const ns648 = cfg648.note_size
+  const slot648 = digitSlotW(ns648)
+  const v1 = page648.notes.filter((n) => n.token.kind === 'note' && n.id.voice === 1 && n.barIndex === 0)
+  const byBeat = new Map<number, typeof v1>()
+  for (const n of v1) {
+    const k = Math.floor(n.beatPos + 1e-6)
+    byBeat.set(k, [...(byBeat.get(k) ?? []), n])
+  }
+  const beats = [...byBeat.keys()].sort((a, b) => a - b)
+  // "两个八分"的那一拍：时值各半，拍宽 = 2×槽宽 + 分摊到的富余宽
+  const two = beats.find((k) => (byBeat.get(k) ?? []).length === 2 && (byBeat.get(k) ?? [])[1].beatPos - k === 0.5)
+  const g648 = two === undefined ? [] : (byBeat.get(two) ?? [])
+  const perBeat648 = g648[0]?.segments?.[0]?.perBeat ?? 0
+  const pen648 = g648.length === 2 ? g648[1].x - g648[0].x : NaN
+  const sBeat648 = perBeat648 - 2 * slot648 // 拍宽 −（两个八分的本体宽）＝ 本拍分到的富余
+  // 旧口径：富余在"拍间/小节头"槽位里摊（槽位数 = 总拍数 + 小节数 − 1）
+  const sOld648 = (sBeat648 * 16) / 19
+  check('adj648 撑满行：拍宽 = 本体宽 + 本拍分摊的富余宽（不再只有本体宽）',
+    sBeat648 > 3 && Math.abs(perBeat648 - (2 * slot648 + sBeat648)) < 1e-6,
+    `perBeat=${perBeat648.toFixed(2)} 2×槽宽=${(2 * slot648).toFixed(2)} sBeat=${sBeat648.toFixed(2)}`)
+  check('adj648 拍内音符按"时值位置 × 拍宽"分开（八分不再是"一个数字一个槽宽"）',
+    Math.abs(pen648 - perBeat648 / 2) < 0.2 && pen648 > 1.5 * slot648,
+    `笔距=${pen648.toFixed(2)} 期望≈perBeat/2=${(perBeat648 / 2).toFixed(2)} 槽宽=${slot648.toFixed(2)}`)
+  {
+    // 拍间净空：新口径 = NOTE_GAP + 本拍末尾空档；旧口径至少是 NOTE_GAP + s（富余全在拍间）
+    const lastOfBeat = g648[1]
+    const nextBeat = two === undefined ? undefined : beats[beats.indexOf(two) + 1]
+    const nextFirst = nextBeat === undefined ? undefined : (byBeat.get(nextBeat) ?? [])[0]
+    const inter =
+      lastOfBeat && nextFirst ? nextFirst.x - (lastOfBeat.rightX ?? lastOfBeat.x + lastOfBeat.width) : NaN
+    check('adj648 拍与拍之间的净空回落到 NOTE_GAP 量级（富余不再堆在拍间）',
+      Number.isFinite(inter) && inter >= 3.99 && inter < 4 + sOld648 - 1,
+      `拍间净空=${Number(inter).toFixed(2)} 旧口径≈${(4 + sOld648).toFixed(2)}（s=${sOld648.toFixed(2)}）`)
+  }
+  // 行仍恰好撑满：富余只是换了位置，总量不变（末小节线落在 targetEndBarX）
+  {
+    const bars648 = page648.barlines.filter((b) => b.id.group === 0)
+    const last648 = bars648[bars648.length - 1]
+    const target = page648.width - cfg648.margin_right - barlineTotalW('|') / 2
+    check('adj648 行仍恰好撑满（富余只是换了位置：末小节线仍落在 targetEndBarX）',
+      !!last648 && Math.abs(last648.x - target) < 0.8,
+      `末线=${last648?.x.toFixed(2)} 目标=${target.toFixed(2)}`)
+  }
+  // 未撑满行（小节数 < align_min_bars）：sBeat = 0 ⇒ 与既有口径逐值一致
+  {
+    const shortSrc = `V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: ${bar648} |\nQ2: ${bar648} |\nQ3: ${bar648} |\n`
+    const shortPage = layoutScore(parseJps(shortSrc), cfg648).pages[0]
+    const shortV1 = shortPage.notes.filter((n) => n.token.kind === 'note' && n.id.voice === 1)
+    const two2 = shortV1.find(
+      (n, i) => i > 0 && Math.abs(n.beatPos - shortV1[i - 1].beatPos - 0.5) < 1e-6,
+    )
+    const pb = shortV1[0]?.segments?.[0]?.perBeat ?? 0
+    // 未撑满行首拍是 3 个音符 ⇒ 拍宽应**正好**等于 3 个数字槽（没有一点富余分摊）
+    check('adj648 未撑满行不受影响（sBeat=0 ⇒ 拍宽仍是本体宽，拍内位置与以前逐值一致）',
+      Math.abs(pb - 3 * slot648) < 0.02 && !!two2,
+      `未撑满行首拍 perBeat=${pb.toFixed(3)}（3×槽宽 ${(3 * slot648).toFixed(2)}）`)
+  }
+}
 // 数字左缘 = 音符块段左缘（无 -6 偏移）→ 音符块在段内居中，附点三段留空相等
 check('space 附点音符数字左缘=音符块段左缘', Math.abs((spDotNote?.x ?? 0) - (spNoteSeg?.x ?? 0)) < 0.6, JSON.stringify({ nx: spDotNote?.x, segX: spNoteSeg?.x }))
 
@@ -3652,6 +3962,12 @@ const mbdNotes = mbdLay.pages[0].notes
  * （accW = 7.62×字号），于是变音音之后的音符整体右移一个 accW。
  * 旧断言拿 `x > 段起点` 去判"右移"，但段起点本来就等于本体左缘 ⇒ 永远近似相等。
  * 现按**可观测后果**断言：与"去掉变音"的对照谱逐音比较，变音音之后的音右移 ≈ accW。
+ *
+ * adj640（2026-09-30，用户报「多声部 + 空间优先：升降符没占宽，压到相邻音符」，截图 `2 3# 4`）：
+ * 上面这条"口径"其实**只对了一半**——`note.x` 此前确实是**段起点**（本体框左缘），
+ * 而角标画在数字左侧 `7×s` 处 ⇒ 角标直接溢出到**前一个时值段**里压住相邻音符（默认布局就是空间优先，
+ * 所以用户一写 `3#` 就撞上）。现与单声部同一口径：`note.x` = **数字左缘** = 段起点 + 左伸墨迹
+ * （角标 / 前倚音组 / 滑音），墨迹吃自己段内的预留，不再越界。
  */
 const mbdPlainCfg = { ...DUR_CFG, noteSpaceLayout: 'space' as const }
 const mbdPlainLay = layoutScore(parseJps(mbdSrc.replace(/#/g, '')), mbdPlainCfg)
@@ -3661,14 +3977,15 @@ const shifted = mbdNotes.filter((n, i) => n.token.kind === 'note' && !n.token.ac
 check('多声部空间优先 变音音符本体宽含角标预留（其后音符整体右移 ≈ 一个角标宽）',
   mbdNotes.some((n) => n.token.kind === 'note' && n.token.accidental) && shifted.length >= 1,
   `accW=${accW} 右移项=${shifted.map((n) => Math.round((n.x - mbdPlainNotes[mbdNotes.indexOf(n)].x) * 10) / 10).join(',')}`)
-// 角标画在数字左侧、且在自己的**本体预留**之内（renderNote：x − 7×s，s = noteSize/18）
+// 角标画在数字左侧、且在自己的**本体预留**之内（adj645 起：`accidentalPenDx` 让墨迹右缘离数字固定净距）
 // 与上一个音符：不出它的本体框（容差 0.6px——本体宽按字形 advance 计，实际墨迹略窄）
 {
   const sharpIdx = mbdNotes.findIndex((n) => n.token.kind === 'note' && n.token.accidental)
   const sharpNote = mbdNotes[sharpIdx]
   const prevNote = mbdNotes[sharpIdx - 1]
-  const s18 = defaultPageConfig.note_size / 18 // 渲染端缩放基准（noteScaleOf）
-  const accX = sharpNote ? sharpNote.x - 7 * s18 : NaN
+  const accX = sharpNote && sharpNote.token.kind === 'note' && sharpNote.token.accidental
+    ? sharpNote.x + accidentalInkLeftDx(defaultPageConfig.note_size, sharpNote.token.accidental)
+    : NaN
   check('多声部空间优先 变音角标画在数字左侧且在本体预留内、不出前一个音符的本体框',
     !!sharpNote && !!prevNote && accX < sharpNote.x && accX >= sharpNote.x - accW - 0.5 && accX >= prevNote.x + prevNote.width - 0.6,
     `accX=${accX} noteX=${sharpNote?.x} reserve=${sharpNote ? sharpNote.x - accW : NaN} prevRight=${prevNote ? prevNote.x + prevNote.width : NaN}`)
@@ -3681,6 +3998,235 @@ const mbdMaxR = Math.max(...mbdNotes.map((n) => n.x + n.width))
 const mbdDur = layoutScore(mbdRes, DUR_CFG)
 const mbdDurMaxR = Math.max(...mbdDur.pages[0].notes.map((n) => n.x + n.width))
 check('多声部空间优先 变音/附点溢出 ≤ 时值优先', mbdMaxR <= mbdDurMaxR + 0.5, JSON.stringify({ space: Math.round(mbdMaxR * 10) / 10, dur: Math.round(mbdDurMaxR * 10) / 10 }))
+/**
+ * adj640（用户报"多声部 + 空间优先：升降符没占宽、压到相邻音符"，截图 `2 3# 4`）的**用户可见不变量**：
+ * 有左伸墨迹（变音角标 / 前倚音组 / 滑音记号）的音符，其墨迹左缘不得越出前一个音符的墨迹右缘。
+ * （空间优先下 `rightX` 即本体右缘；墨迹左缘 = `x − 左伸量`，`x` 已是数字左缘。）
+ */
+{
+  const src640 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 2 3# 4 5# |\nQ2: 5 6 7 1 |\n'
+  const accW640 = accidentalBodyW(defaultPageConfig.note_size)
+  const voice0 = (lay: ReturnType<typeof layoutScore>) =>
+    [...lay.pages[0].notes].filter((n) => n.id.voice === 1).sort((a, b) => a.x - b.x)
+  const sp640 = voice0(layoutScore(parseJps(src640), { ...DUR_CFG, noteSpaceLayout: 'space' }))
+  const sharp640 = sp640.filter((n) => n.token.kind === 'note' && n.token.accidental)
+  // ① 数字右移量 = 角标占宽（此前钉在段起点 ⇒ 右移量 0，角标整块溢出到前一个音）
+  const dx640 = sharp640.map((n) => (n.segments?.[0]?.x ?? n.x) + accW640 - n.x)
+  check('adj640 多声部空间优先：变音音符的数字右移 = 角标占宽（不再钉在段起点）',
+    sharp640.length === 2 && dx640.every((d) => Math.abs(d) < 0.15),
+    `dx=${dx640.map((d) => d.toFixed(2)).join(',')} accW=${accW640}`)
+  // ② 角标墨迹不压前一个音符
+  const clashes640 = sp640.filter(
+    (n, i) => i > 0 && n.token.kind === 'note' && n.token.accidental && n.x - accW640 < sp640[i - 1].rightX - 0.01,
+  )
+  check('adj640 多声部空间优先：变音角标不与前一个音符重叠（墨迹左缘 ≥ 前音右缘）',
+    clashes640.length === 0,
+    JSON.stringify(clashes640.map((n) => ({ x: n.x, prevRight: sp640[sp640.indexOf(n) - 1].rightX }))))
+  // ③ 前倚音组（同样是"左伸墨迹"）不得压前一个音
+  {
+    const gl = voice0(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 2 3[2/] 4 5 |\nQ2: 5 6 7 1 |\n'), { ...DUR_CFG, noteSpaceLayout: 'space' }))
+    const gi = gl.findIndex((n) => n.token.kind === 'note' && !!n.token.gracenotes && !n.token.gracenotes.after)
+    const tok = gi > 0 ? gl[gi].token : null
+    const gW = tok && tok.kind === 'note' && tok.gracenotes ? graceSlotLayout(tok.gracenotes.notes, defaultPageConfig.note_size).width + 4 : NaN
+    check('adj640 多声部空间优先：前倚音组的数字同样右移（左伸墨迹不压前一个音）',
+      gi > 0 && gl[gi].x - gW >= gl[gi - 1].rightX - 0.01,
+      `i=${gi} x=${gl[gi]?.x} 左伸=${gW} 前右=${gl[gi - 1]?.rightX}`)
+  }
+  // ④ 时值优先：数字居中，但"居中不够靠右"时要钳到左伸量（否则角标同样会压住前一个音）
+  const dur640 = voice0(layoutScore(parseJps(src640), { ...DUR_CFG, noteSpaceLayout: 'duration' }))
+  const dSharp = dur640.filter((n) => n.token.kind === 'note' && n.token.accidental)
+  check('adj640 时值优先：变音音符的数字至少让开角标占宽（x − 段首 ≥ 角标宽，容差 0.15）',
+    dSharp.length === 2 && dSharp.every((n) => n.x - (n.segments?.[0]?.x ?? n.x) >= accW640 - 0.15),
+    JSON.stringify(dSharp.map((n) => Number((n.x - (n.segments?.[0]?.x ?? n.x)).toFixed(2)))))
+  // ⑤ 无左伸墨迹的音符**位置零变化**（本次修复不得改动既有谱面）：与"去掉变音"的对照谱比，`#` 之前的音一致
+  {
+    const plain640 = voice0(layoutScore(parseJps(src640.replace(/#/g, '')), { ...DUR_CFG, noteSpaceLayout: 'space' }))
+    const first640 = sp640.filter((n) => n.token.kind === 'note').slice(0, 1)
+    check('adj640 修复无副作用：`#` 之前的音符位置与对照谱一致',
+      first640.length === 1 && Math.abs(first640[0].x - plain640[0].x) < 0.01,
+      JSON.stringify({ with: first640[0]?.x, plain: plain640[0]?.x }))
+  }
+  /**
+   * ⑥ 为什么右移量取**块级**（各声部取最大）而不是各音符自己的量：
+   * 多声部同拍数字必须纵向对齐（adj314）。若各声部各挪各的，只有带角标的那一声部会单独右移 ⇒ 同拍错位。
+   */
+  {
+    const lay2 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 2 3# 4 5 |\nQ2: 5 6 7 1 |\n'), {
+      ...DUR_CFG,
+      noteSpaceLayout: 'space',
+    })
+    const v1 = lay2.pages[0].notes.filter((n) => n.id.voice === 1)
+    const v2 = lay2.pages[0].notes.filter((n) => n.id.voice === 2)
+    const dx2 = v1.map((n) => {
+      const m = v2.find((b) => b.barIndex === n.barIndex && Math.abs(b.beatPos - n.beatPos) < 1e-3)
+      return m ? Math.abs(m.x - n.x) : NaN
+    })
+    check('adj640 块级让位：只有一声部带角标时，两声部同拍数字仍纵向对齐',
+      dx2.length > 0 && dx2.every((d) => Number.isFinite(d) && d < 0.6),
+      JSON.stringify(dx2.map((d) => Number(d.toFixed(2)))))
+  }
+}
+
+/**
+ * adj643（2026-09-30，用户报「多声部里升降符的占宽可能没有考虑到，在音符较密的情况下与前一音符重叠了」）：
+ * adj640 的块级让位量发给了**本拍所有**音符 —— 拍宽里只加了一份 max，落位却人人白拿一份，
+ * 而拍内游标只按各自本体宽推进 ⇒ 一拍内起步多个音符（密集的八分/十六分）时，
+ * 后一个音符的角标（画在数字左侧 `x − 7s`）压到前一个音符的数字上。
+ * 本组断言就是这条用户可见不变量的回归防线：
+ *  ① 密集拍里角标墨迹左缘不得越过前一个音符的**本体右缘**（`rightX`，adj643 起含借来的让位量）；
+ *  ② 拍内**只有本拍第一个起步的音符**拿块级让位量（后续音符 `x − 段起点` = 自己的左伸量）；
+ *  ③ 相邻音符本体不重叠（`prev.rightX ≤ next.x`）；
+ *  ④ 借位音符的 `rightX` 不短一个"借来量"（否则播放色块宽度趋近 0、上面①的判据也失效）。
+ */
+console.log('[63a-2] multi-voice accidentals in dense beats (adj643)')
+{
+  const ns643 = defaultPageConfig.note_size
+  const accW643 = accidentalBodyW(ns643)
+  const dig643 = digitSlotW(ns643)
+  /** 角标墨迹左缘（adj645 起与渲染锚点同源：`accidentalInkLeftDx`） */
+  const accInkLeft643 = (n: { x: number; token: { kind: string; accidental?: '#' | '$' | '=' | null } }) =>
+    n.token.kind === 'note' && n.token.accidental ? n.x + accidentalInkLeftDx(ns643, n.token.accidental) : null
+  const v0of = (src: string) =>
+    [...layoutScore(parseJps(src), mspCfg).pages[0].notes]
+      .filter((n) => n.id.voice === 1)
+      .sort((a, b) => a.x - b.x)
+
+  // 一拍 4 个十六分音符、其中第 2 个带升号（用户截图 `2 3# 4` 的最密形态）
+  const dense643 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 2/// 3#/// 4/// 5/// | 2/// 3/// 4/// 5/// |\nQ2: 1/// 2/// 3/// 4/// | 1/// 2/// 3/// 4/// |\n'
+  {
+    const ns = v0of(dense643)
+    const bad = ns.filter((n, i) => {
+      const ink = accInkLeft643(n)
+      return ink !== null && i > 0 && ink < ns[i - 1].rightX - 0.01
+    })
+    check('adj643 密集拍（4×十六分）变音角标不压前一个音符（墨迹左缘 ≥ 前音本体右缘）',
+      ns.some((n) => accInkLeft643(n) !== null) && bad.length === 0,
+      JSON.stringify(bad.map((n) => ({ x: n.x, inkL: accInkLeft643(n), prevRight: ns[ns.indexOf(n) - 1].rightX }))))
+    // ③ 相邻本体不重叠
+    const overlap = ns.filter((n, i) => i > 0 && n.x < ns[i - 1].rightX - 0.01)
+    check('adj643 密集拍相邻音符本体不重叠（prev.rightX ≤ next.x）',
+      overlap.length === 0,
+      JSON.stringify(overlap.map((n) => ({ x: n.x, prevRight: ns[ns.indexOf(n) - 1].rightX }))))
+    // ② 拍内只有第一个起步的音符拿块级让位量：第 2 个音符（带角标）右移 = 自己的角标宽；
+    //    第 3、4 个音符（本拍后续）右移 = 0（自己的左伸量为 0）
+    const dx643 = ns.map((n) => Number((n.x - (n.segments?.[0]?.x ?? n.x)).toFixed(2)))
+    check('adj643 拍内只有第一个起步的音符拿块级让位量（后续音符不白拿一份）',
+      ns.length >= 4 && Math.abs(dx643[0] - accW643) < 0.15 && Math.abs(dx643[1] - accW643) < 0.15 &&
+        dx643.slice(2, 4).every((d) => Math.abs(d) < 0.15),
+      `dx=${dx643.join(',')} accW=${accW643}`)
+    // ④ 借位音符（第 1 个，无角标）的 rightX = x + 数字槽宽；若不补借来量会短一个 accW
+    const borrowed643 = ns[0]
+    check('adj643 借位音符的 rightX 含借来的让位量（不再短一个角标宽）',
+      Math.abs(borrowed643.rightX - (borrowed643.x + dig643)) < 0.15,
+      JSON.stringify({ right: borrowed643.rightX, x: borrowed643.x, 期望: borrowed643.x + dig643 }))
+  }
+  // 一拍 2 个八分音符、第 2 个带升号（较常见密度）
+  {
+    const ns = v0of('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 2/ 3#/ 4/ 5/ 6/ 7/ 1/ 2/ |\nQ2: 1/ 2/ 3/ 4/ 5/ 6/ 7/ 1/ |\n')
+    const bad = ns.filter((n, i) => {
+      const ink = accInkLeft643(n)
+      return ink !== null && i > 0 && ink < ns[i - 1].rightX - 0.01
+    })
+    check('adj643 八分密度下变音角标同样不压前一个音符', bad.length === 0,
+      JSON.stringify(bad.map((n) => ({ x: n.x, inkL: accInkLeft643(n) }))))
+  }
+  // 一拍 1 个四分音符（adj640 的老场景）：回归——角标不压前音、块级让位仍让同拍两声部对齐
+  {
+    const lay = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 2 3# 4 5 |\nQ2: 5 6 7 1 |\n'), mspCfg)
+    const v1 = lay.pages[0].notes.filter((n) => n.id.voice === 1).sort((a, b) => a.x - b.x)
+    const v2 = lay.pages[0].notes.filter((n) => n.id.voice === 2).sort((a, b) => a.x - b.x)
+    const bad = v1.filter((n, i) => {
+      const ink = accInkLeft643(n)
+      return ink !== null && i > 0 && ink < v1[i - 1].rightX - 0.01
+    })
+    check('adj643 四分密度（每拍一个音）仍无重叠', bad.length === 0, JSON.stringify(bad.map((n) => n.x)))
+    check('adj643 四分密度同拍纵向对齐未被破坏',
+      v1.length === v2.length && v1.every((n, i) => Math.abs(n.x - v2[i].x) < 0.6),
+      JSON.stringify(v1.map((n, i) => Number((n.x - v2[i].x).toFixed(2)))))
+  }
+}
+
+/**
+ * adj644（2026-09-30，用户报「多声部的大括号与首个音符之间间距较大」+「小节线与前/后音符紧贴」）：
+ * 三条用户可见不变量：
+ *  ① 大括号墨迹右缘 → 内容左端 = `BRACE_CONTENT_GAP`（0.5×字号）——**只挪括号、音符不动**
+ *     （音符位置由 `blockPad` 决定，而它是 adj601 跨块小节线对齐的基准，动它会与上一组错开）；
+ *  ② 小节线两侧净距 = `barlinePad`（= 0.25×字号），与单声部同一口径
+ *     （旧实现整段间距只按一份 `barlinePad` 算、线又放在中点 ⇒ 两侧各只剩 ≈1.1px）；
+ *  ③ 拍内不等长（附点八分 + 十六分）时，末拍"时值位置 + 本体宽"的溢出由
+ *     `barSpillPad` 补在小节末尾 ⇒ 末音符本体右缘离小节线仍有 `barlinePad`。
+ */
+console.log('[63a-3] multi-voice brace gap & barline clearance (adj644)')
+{
+  const ns644 = defaultPageConfig.note_size
+  const bp644 = barlinePad(ns644)
+  const barHalf = (t: '|') => barlineTotalW(t) / 2
+  const HEAD644 = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  // ① 大括号贴合：三声部、八分均匀（块首**不**带序号 ⇒ 括号应贴到音符一侧）
+  {
+    const lay = layoutScore(
+      parseJps(
+        HEAD644 +
+          'Q1: 6[5,6]/ 3/ 3/ 2/ 3/ 2/ 6/ 6/ | 1/ 7/ 6/ 5/ 4/ 3/ 2/ 1/ |\n' +
+          'Q2: 6[5,1]/ 1/ 6/ 5/ 5/ 3/ 3/ 1/ | 5/ 3/ 2/ 1/ 1/ 2/ 3/ 5/ |\n' +
+          'Q3: 6[5,6]/ 3/ 3/ 2/ 3/ 2/ 6/ 6/ | 1/ 7/ 6/ 5/ 4/ 3/ 2/ 1/ |\n',
+      ),
+      mspCfg,
+    )
+    const page = lay.pages[0]
+    const vb = page.voiceBlocks[0]
+    const first = page.notes.filter((n) => n.id.voice === 1).sort((a, b) => a.x - b.x)[0]
+    const contentStart = Number(first?.segments?.[0]?.x)
+    const braceInk = vb.x + braceInkRightOffset(vb.yTop, vb.yBottom, ns644)
+    const gap = contentStart - braceInk
+    check('adj644 大括号墨迹右缘离内容左端 = 0.5×字号（不再留一条大空隙）',
+      !!vb && Math.abs(gap - ns644 * 0.5) < 0.7, `gap=${gap.toFixed(2)} 期望=${(ns644 * 0.5).toFixed(2)} brace=${vb?.x}`)
+    check('adj644 括号仍在大括号左侧、不外扩（括号墨迹右缘 < 内容左端）',
+      !!vb && braceInk < contentStart - 0.5, `braceInk=${braceInk.toFixed(2)} content=${contentStart.toFixed(2)}`)
+  }
+  // ②③ 小节线净距：附点八分 + 十六分（拍内不等长）+ 内小节线，多声部
+  {
+    const src =
+      HEAD644 +
+      'Q1: 2./ 3// 4./ 5// 6./ 7// 1./ 2// | 2./ 3// 4./ 5// 6./ 7// 1./ 2// |\n' +
+      'Q2: 5/ 5/ 3/ 3/ 1/ 1/ 5/ 5/ | 5/ 5/ 3/ 3/ 1/ 1/ 5/ 5/ |\n'
+    const page = layoutScore(parseJps(src), mspCfg).pages[0]
+    const notes = page.notes.filter((n) => n.id.voice === 1).sort((a, b) => a.x - b.x)
+    const bars = page.barlines.filter((b) => b.id.voice === 1).sort((a, b) => a.x - b.x)
+    const inner = bars[0]
+    const leftEdge = inner.x - barHalf(inner.type as '|')
+    const rightEdge = inner.x + barHalf(inner.type as '|')
+    const prev = [...notes].reverse().find((n) => n.rightX <= leftEdge + 0.05)
+    const next = notes.find((n) => n.x > rightEdge)
+    check('adj644 内小节线左侧净距 = barlinePad（末音符本体不压线）',
+      !!prev && leftEdge - prev.rightX >= bp644 - 0.3, `线左缘=${leftEdge.toFixed(2)} 前音右缘=${prev?.rightX?.toFixed(2)} 期望≥${(bp644 - 0.3).toFixed(2)}`)
+    check('adj644 内小节线右侧净距 = barlinePad（下一音符不贴线）',
+      !!next && next.x - rightEdge >= bp644 - 0.3, `线右缘=${rightEdge.toFixed(2)} 后音=${next?.x?.toFixed(2)} 期望≥${(bp644 - 0.3).toFixed(2)}`)
+    // 末小节线（本行最后一根）同样要有净距
+    const last = bars[bars.length - 1]
+    const lastLeft = last.x - barHalf(last.type as '|')
+    const prevLast = [...notes].reverse().find((n) => n.rightX <= lastLeft + 0.05)
+    check('adj644 末小节线左侧净距 = barlinePad（末拍溢出已补在小节末尾）',
+      !!prevLast && lastLeft - prevLast.rightX >= bp644 - 0.3, `末线左缘=${lastLeft.toFixed(2)} 前音右缘=${prevLast?.rightX?.toFixed(2)}`)
+  }
+  // ④ 多声部与单声部"小节线净距"同一口径（同音乐逐根比）
+  {
+    const body = 'Q1: 6[5,6]/ 3/ 3/ 2/ 3/ 2/ 6/ 6/ | 1/ 7/ 6/ 5/ 4/ 3/ 2/ 1/ |\n'
+    const mv = layoutScore(parseJps(HEAD644 + body + 'Q2: 1/ 2/ 3/ 4/ 5/ 6/ 7/ 1/ | 1/ 2/ 3/ 4/ 5/ 6/ 7/ 1/ |\n'), mspCfg).pages[0]
+    const sv = layoutScore(parseJps(HEAD644 + body), mspCfg).pages[0]
+    const gapOf = (page: typeof mv) => {
+      const ns2 = page.notes.filter((n) => n.id.voice === 1).sort((a, b) => a.x - b.x)
+      const bar = page.barlines.filter((b) => b.id.voice === 1).sort((a, b) => a.x - b.x)[0]
+      const le = bar.x - barHalf(bar.type as '|')
+      const prev = [...ns2].reverse().find((n) => n.rightX <= le + 0.05)
+      return prev ? le - prev.rightX : NaN
+    }
+    const gMv = gapOf(mv)
+    const gSv = gapOf(sv)
+    check('adj644 多声部与单声部的小节线净距同一口径（差 < 0.3px）',
+      Math.abs(gMv - gSv) < 0.3, `多声部=${gMv.toFixed(2)} 单声部=${gSv.toFixed(2)}`)
+  }
+}
 
 // ---- 63b. 多声部：无时值「占宽元素」插位（adj479） ----
 // 用户报：多声部里 `&hx` 不显示、`&shy`/`&xhy` 与音符重叠。根因两条：
@@ -8097,6 +8643,25 @@ console.log('[109] score self-containment: no local page-config layer (adj480)')
     check('adj480 谱面值与生效值不一致 → 计入 missing', gap2.missing.some((m) => m.key === 'margin_left'), JSON.stringify(gap2.missing))
     // 与默认一致的项永远不算缺口（对方也用同一个默认值）
     check('adj480 等于默认值的项不算缺口', !configCarryover(body, { ...defaultPageConfig }).missing.some((m) => m.key === 'margin_left'))
+    /**
+     * adj639（用户要求"插件的默认值体系与应用保持一致，应用里正常的谱面在插件里不要提示"）：
+     * 宿主可传 `baseline` = **本库默认层**（代码默认 ← 插件设置，不含笔记 frontmatter）——
+     * 与它一致的值**不算"未随谱携带"**（它们在用户眼里等价于应用里的代码默认值），
+     * 于是提示只剩"这篇笔记特有"的差异（典型来源 = frontmatter）。
+     */
+    const vaultBase = mergeJpsConfig('', { note_size: 15, align_min_bars: 3, showInstrument: true } as never)
+    const effVault = { ...vaultBase, margin_left: 66 } // 插件设置 + frontmatter 的合并结果
+    const withBase = configCarryover(body, effVault, vaultBase)
+    check('adj639 传入 baseline 后：插件设置那几项不算缺口（只剩 frontmatter 带来的 margin_left）',
+      !withBase.ok && withBase.missing.length === 1 && withBase.missing[0].key === 'margin_left',
+      JSON.stringify(withBase.missing))
+    check('adj639 baseline 与生效值完全一致时零提示（应用里正常的谱在插件里不提示）',
+      configCarryover(body, vaultBase, vaultBase).ok, JSON.stringify(configCarryover(body, vaultBase, vaultBase).missing))
+    check('adj639 不传 baseline 时口径不变（旧调用方 = 只按代码默认判定）',
+      !configCarryover(body, effVault).ok && configCarryover(body, effVault).missing.length >= 3)
+    check('adj639 baseline 不掩盖"谱面写了别的值"：谱面写了 40、基线 60 → 仍算缺口',
+      configCarryover(writeJpsConfig(body, { ...defaultPageConfig, margin_left: 40 }), { ...vaultBase, margin_left: 60 }, vaultBase)
+        .missing.some((m) => m.key === 'margin_left'))
   }
   // ② 应用：不再读写「本机页面设置」缓存，且生效配置 = 默认 ← 谱面
   {
@@ -8951,9 +9516,11 @@ async function runAdj540WorkspaceTests() {
     /\| 'workspace'/.test(ui) && // DockPanelKey
       !/\| 'workspace'/.test(ui.split('export type DockPanelKey')[0]) && // 不再出现在 ModalKind 里
       // 顺序：PANELS 的前两项是 workspace → import（adj562：导入紧跟工作区，用户要求）
-      /\{ key: 'workspace', render: WorkspacePanel \},\s*\{ key: 'import', render: ImportPanel \},\s*\{ key: 'problems'/.test(dockSrc) &&
+      // adj641：查找替换（find）插在导入与告警之间 ⇒ 这里只锁「前两项是 workspace → import」这一相对顺序，
+      // 不再要求第三项必须是 problems（否则每加一个页签都要改这条老断言）。
+      /\{ key: 'workspace', render: WorkspacePanel \},\s*\{ key: 'import', render: ImportPanel \},/.test(dockSrc) &&
       // 顺序：TABS 的前两项同上（adj617：两页签各带 `kbd` 快捷键提示）
-      /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace', kbd: KBD\.workspace \},\s*[\s\S]{0,200}?\{ key: 'import', label: dockCopy\.tabImport, icon: 'import', kbd: KBD\.import \}/.test(dockSrc) &&
+      /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace', kbd: KBD\.workspace \},\s*[\s\S]{0,260}?\{ key: 'import', label: dockCopy\.tabImport, icon: 'import', kbd: KBD\.import \}/.test(dockSrc) &&
       /\{ key: 'workspace', label: dockCopy\.tabWorkspace, icon: 'workspace', kbd: KBD\.workspace \}/.test(dockSrc) &&
       /workspace: '工作区'/.test(String(readFileSync('src/ui/toolIcons.ts', 'utf8'))) &&
       // adj587：三个同高页签由同一条分支给出（工作区 / 全局 / 导入）；adj603：再加「谱面」
@@ -9691,9 +10258,14 @@ async function runAdj540WorkspaceTests() {
         String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8')),
       ),
     '')
-  check('adj562/adj587/adj603 「导入」与「全局 / 谱面」**不进 AUTO_FIT**，改用与工作区同一个建议高度',
+  check('adj562/adj587/adj603/adj641 「导入」与「全局 / 谱面」**不进 AUTO_FIT**（改用与工作区同一个建议高度）；查找替换进',
     /if \(key === 'workspace' \|\| key === 'settings' \|\| key === 'score' \|\| key === 'import'\)/.test(dockSrc) &&
-      /const AUTO_FIT: readonly DockPanelKey\[\] = \['problems', 'tryout', 'export', 'about'\]/.test(dockSrc) &&
+      // adj641：AUTO_FIT 现在还会含 'find'（查找替换按内容自然高定高）⇒
+      // 改成「这几项必须在、那三项必须不在」的语义判断，不再比对整条字面量（否则每加一个面板就误伤）。
+      (['problems', 'tryout', 'export', 'about', 'find'] as const).every((k) =>
+        new RegExp(`AUTO_FIT: readonly DockPanelKey\\[\\] = \\[[^\\]]*'${k}'`).test(dockSrc),
+      ) &&
+      !/AUTO_FIT: readonly DockPanelKey\[\] = \[[^\]]*'(import|settings|score)'/.test(dockSrc) &&
       !/IMPORT_DEFAULT_CONTENT_H/.test(dockSrc.replace(/\/\*[\s\S]*?\*\//g, '')),
     '')
   check('adj562 `.pane-import` 走"填满 dock"链路（pane/modal-inline/import-body 层层 flex + 粘贴框吃剩余高）',
@@ -10799,11 +11371,12 @@ function runAdj615Tests() {
     '',
   )
   check(
-    'adj615 打印页与导出同一口径：引擎现算布局 + 渲染，**有语法错误就返回空**（不打半张谱）',
+    'adj615/adj647 打印页与导出同一口径：引擎现算布局 + 渲染（adj647 起带上宿主实测），**有语法错误就返回空**（不打半张谱）',
     /function currentPrintPages\(s: DocState\): string\[\] \{[\s\S]{0,400}?errors\.some\(\(e\) => e\.severity === 'error'\)\) return \[\]/.test(
       storeSrc,
     ) &&
-      /renderScoreToSvg\(layoutScore\(s\.parseResult, s\.pageConfig, instrumentRef\)\)/.test(storeSrc) &&
+      /measureFontMeta\(s\.pageConfig\)/.test(storeSrc) &&
+      /renderScoreToSvg\(layoutScore\(s\.parseResult, s\.pageConfig, instrumentRef, fm\.layout\), fm\.render\)/.test(storeSrc) &&
       /showNotice\(exportCopy\.blockedByError, 'warn'\)/.test(storeSrc),
     '',
   )
@@ -11377,7 +11950,9 @@ function runAdj601BlockBarAlignTests() {
   }
   // ② 例外（用户原话"除非第二组的小节宽度比上一级对应小节宽"）：本组某小节自然更宽 ⇒ 用它自己的宽度
   {
-    const dense = HEAD + 'Q1: 1 1 7 6 | 5 6 1 - | 0 0 0 0 | 0 (4 3) - |\nQ2: 6, 3 2 1 | 7, 2 1 - | 6, 1 1 7, | 1 - - - |\nQ1: 1/2/3/4/5/6/7/1/ 2 3 4 | 1 - - - ||\nQ2: 1 2 3 4 | 1 - - - ||\n'
+    // adj648：第一组（4 小节）是**撑满行**，富余宽现在摊进拍宽 ⇒ 首小节变宽（不再"首小节少一个空档"），
+    // 与本组自然宽的差被压缩；这里把本组首小节加密，让它**明显**更宽，例外才验得扎实。
+    const dense = HEAD + 'Q1: 1 1 7 6 | 5 6 1 - | 0 0 0 0 | 0 (4 3) - |\nQ2: 6, 3 2 1 | 7, 2 1 - | 6, 1 1 7, | 1 - - - |\nQ1: 1/2/3/4/5/6/7/1/1/2/3/4/5/6/7/1/ 2 3 4 | 1 - - - ||\nQ2: 1 2 3 4 | 1 - - - ||\n'
     const { m, maxRight } = barsOf(dense)
     const first = m.get(0) ?? []
     const second = m.get(2) ?? []
@@ -11450,7 +12025,10 @@ function runAdj603Tests() {
       /title=\{t\.title \?\? t\.label\}/.test(topSrc),
     '',
   )
-  check('adj603 `DockPanelKey` 增加 score（面板集合与类型同步）', /\| 'settings' \| 'score' \| 'about'/.test(storeSrc), '')
+  // adj641：`DockPanelKey` 改成多行联合类型后，"单行接续"的写法不再匹配 ⇒ 逐个成员判断（只锁语义）
+  check('adj603/adj641 `DockPanelKey` 含 settings / score / about / find（面板集合与类型同步）',
+    (["'settings'", "'score'", "'about'", "'find'"] as const).every((k) => new RegExp(`\\|\\s*${k}`).test(storeSrc)),
+    '')
 }
 
 function runAdj606Tests() {
@@ -12491,7 +13069,11 @@ console.log('[116] settings 6 rows, About in dock, divider touch hit-area (adj49
     '')
 
   // adj492：关于面板进 dock
-  check('adj492/adj603 DockPanelKey 含 about 与 score（设置拆成 全局 settings + 谱面 score）', /\| 'settings' \| 'score' \| 'about'/.test(storeSrc), '')
+  // adj641：`DockPanelKey` 改成多行联合类型后，原先"单行反斜杠接续"的写法不再匹配 ⇒ 改判"每个成员各自出现"。
+  // 只锁**语义**（这几个 key 都在联合类型里），不再让换行/格式进入断言——否则每次加页签都会误伤一条老断言。
+  check('adj492/adj603/adj641 DockPanelKey 含 settings / score / about / find（设置拆两个 + 本轮查找替换）',
+    (["'settings'", "'score'", "'about'", "'find'"] as const).every((k) => new RegExp(`\\|\\s*${k}`).test(storeSrc)),
+    '')
   check('adj492 dock 面板与页签均含 about（5 个）',
     /\{ key: 'about', render: AboutPanel \}/.test(dockSrc) && /\{ key: 'about', label: dockCopy\.tabAbout/.test(dockSrc),
     '')
@@ -12509,8 +13091,11 @@ console.log('[116] settings 6 rows, About in dock, divider touch hit-area (adj49
     '')
   // adj494：关于面板打开时按"能显示全内容的最小高度"（走 AUTO_FIT 实测，与试听/导出同一机制）
   // adj510：告警也纳入 AUTO_FIT（"能装下内容的最小高度"，但 cap 在最多 2 条可见）
-  check('adj494 关于面板纳入 AUTO_FIT（打开即完整显示内容）；adj510 告警亦纳入 AUTO_FIT',
-    /const AUTO_FIT: readonly DockPanelKey\[\] = \['problems', 'tryout', 'export', 'about'\]/.test(dockSrc),
+  // adj641：查找替换（`find`）同样纳入；断言改为"必须**包含**这几个 key"，后续再加面板不必改这条。
+  check('adj494/adj510/adj641 AUTO_FIT 覆盖 告警 / 试听 / 导出 / 关于 / 查找替换',
+    (['problems', 'tryout', 'export', 'about', 'find'] as const).every((k) =>
+      new RegExp(`AUTO_FIT: readonly DockPanelKey\\[\\] = \\[[^\\]]*'${k}'`).test(dockSrc),
+    ),
     '')
   // adj555（v0.28.2）：告警"建议档"最多显示 5 行（adj510: 2 行 → adj524: 4 行 → adj555: 5 行）。
   // 放宽的依据是底栏有了高度档位按钮——"默认多给一点"不再挤占编辑区（嫌高按一下到最小、
@@ -15290,3 +15875,139 @@ console.log('[adj634] preview click → caret at end of the note block (before t
 }
 
 
+
+// ---- 121. 查找替换（adj641，用户要求：底栏「查找替换」页签，把查找与替换整合）----
+console.log('[121] find & replace (adj641)')
+{
+  // ① 纯逻辑：字面匹配 / 大小写 / 不重叠 / 空查询
+  const code641 = 'Q: 1 2 3# 4 |\nC: 你好 世界\nQ2: 1# 2# 3\n'
+  check('adj641 字面匹配：`#` 这类语法字符直接查（不必转义）',
+    findMatches(code641, '#').length === 3, String(findMatches(code641, '#').length))
+  check('adj641 命中项给出位置与原文（面板据此跳转/替换）',
+    JSON.stringify(findMatches('abcabc', 'bc')) === JSON.stringify([{ start: 1, end: 3, text: 'bc' }, { start: 4, end: 6, text: 'bc' }]),
+    JSON.stringify(findMatches('abcabc', 'bc')))
+  check('adj641 不重叠：`aaa` 查 `aa` 得 1 处（不是 2 处，替换时才不会互相破坏）',
+    findMatches('aaa', 'aa').length === 1, String(findMatches('aaa', 'aa').length))
+  check('adj641 空查询不匹配任何东西（面板显示"输入要查找的内容"）', findMatches(code641, '').length === 0)
+  check('adj641 区分大小写默认开（`Q` 与 `q` 不同：谱面源码里大小写有语义）',
+    findMatches('Qq', 'q').length === 1 && findMatches('Qq', 'q', { caseSensitive: false }).length === 2)
+  check('adj641 不区分大小写时逐字符比较、位置不漂移（整体 toLowerCase 会错位）',
+    JSON.stringify(findMatches('A b A', 'a', { caseSensitive: false }).map((m) => m.start)) === JSON.stringify([0, 4]),
+    String(findMatches('A b A', 'a', { caseSensitive: false }).map((m) => m.start)))
+
+  // ② 当前项 / 前后跳转（循环）
+  const ms641 = findMatches('a b a b a', 'a') // [0, 4, 8]
+  check('adj641 "当前项"由选区判定：选区正好是命中项才算它（连按查找可前进）',
+    currentMatchIndex(ms641, { start: 4, end: 5 }) === 1 && currentMatchIndex(ms641, { start: 3, end: 3 }) === -1)
+  check('adj641 下一个 = 光标处/之后第一项（光标正好停在项起点也算它）',
+    targetMatchIndex(ms641, { start: 0, end: 0 }, 1) === 0 && targetMatchIndex(ms641, { start: 1, end: 1 }, 1) === 1)
+  check('adj641 上一个 = 光标之前最后一项；两端循环到另一头',
+    targetMatchIndex(ms641, { start: 5, end: 5 }, -1) === 1 &&
+      targetMatchIndex(ms641, { start: 0, end: 0 }, -1) === 2 &&
+      targetMatchIndex(ms641, { start: 4, end: 5 }, 1) === 2 &&
+      targetMatchIndex(ms641, { start: 8, end: 9 }, 1) === 0)
+  check('adj641 没有匹配时下一个/上一个都返回 -1（按钮禁用）',
+    targetMatchIndex([], { start: 0, end: 0 }, 1) === -1 && targetMatchIndex([], { start: 0, end: 0 }, -1) === -1)
+
+  // ③ 替换
+  const one641 = replaceOne('1 2 3', { start: 2, end: 3, text: '2' }, '5')
+  check('adj641 替换一处：新代码 + 光标落到替换串末尾（连点即继续往下替换）',
+    one641.code === '1 5 3' && one641.caret === 3, JSON.stringify(one641))
+  check('adj641 替换串可以是空串（= 删除匹配到的内容）',
+    replaceOne('1 2 3', { start: 2, end: 3, text: '2' }, '').code === '1  3')
+  const all641 = replaceAllMatches('a b a b a', findMatches('a b a b a', 'a'), 'X')
+  check('adj641 全部替换：一次成型、处数正确、前面的下标不漂移（倒序拼接）',
+    all641.code === 'X b X b X' && all641.count === 3 && all641.firstStart === 0, JSON.stringify(all641))
+  check('adj641 全部替换：替换串比原文长时也不串位（倒序拼接的意义）',
+    replaceAllMatches('a b a', findMatches('a b a', 'a'), 'LONG').code === 'LONG b LONG')
+  check('adj641 替换目标：选区不是命中项时用光标之后第一项（没有则回到第一项）',
+    replaceTargetIndex(findMatches('a b a', 'a'), 1) === 1 && replaceTargetIndex(findMatches('a b a', 'a'), 99) === 0)
+
+  // ④ 接线：页签 / 面板 / 快捷键 / 图标（"用户点得到"的结构性保证）
+  const uiSrc641 = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+  const dockSrc641 = String(readFileSync('src/ui/ToolDock.tsx', 'utf8'))
+  const appSrc641 = String(readFileSync('src/App.tsx', 'utf8'))
+  const findSrc641 = String(readFileSync('src/ui/dock/FindPanel.tsx', 'utf8'))
+  check('adj641 uiStore：DockPanelKey 含 find + requestFind（Ctrl+F 的落点，非开关语义）',
+    /\|\s*'find'/.test(uiSrc641) && /requestFind:[\s\S]{0,160}dockPanel: 'find'/.test(uiSrc641),
+    '')
+  check('adj641 ToolDock：面板与页签都登记了 find，并走 AUTO_FIT（按内容自然高）',
+    /\{ key: 'find', render: FindPanel \}/.test(dockSrc641) &&
+      /\{ key: 'find', label: dockCopy\.tabFind, icon: 'find', kbd: KBD\.find \}/.test(dockSrc641) &&
+      /AUTO_FIT: readonly DockPanelKey\[\] = \[[^\]]*'find'/.test(dockSrc641),
+    '')
+  check('adj641 App：Ctrl+F 被接管（preventDefault 挡掉浏览器原生查找）并走 requestFind',
+    /e\.key\.toLowerCase\(\) === 'f'[\s\S]{0,500}ui\.requestFind\(\)/.test(appSrc641) &&
+      /e\.key\.toLowerCase\(\) === 'f'[\s\S]{0,140}preventDefault/.test(appSrc641),
+    '')
+  check('adj641 面板：两个输入框 + 查找统计 + 查找/替换按钮（用户规格逐条落地）',
+    /findCopy\.findLabel/.test(findSrc641) && /findCopy\.replaceLabel/.test(findSrc641) &&
+      /find-stats/.test(findSrc641) && /findCopy\.prev/.test(findSrc641) && /findCopy\.next/.test(findSrc641) &&
+      /findCopy\.replaceOne\b/.test(findSrc641) && /findCopy\.replaceAll\b/.test(findSrc641) &&
+      /区分大小写/.test(String(readFileSync('src/brand/copy.ts', 'utf8'))),
+    '')
+  check('adj641 面板把结果写回 store（setSelection + jumpCursor + setCode），不自己另存一份"当前项"',
+    /setSelection\(m\.start, m\.end\)/.test(findSrc641) &&
+      /jumpCursor\(m\.start, m\.end\)/.test(findSrc641) &&
+      /setCode\(r\.code\)/.test(findSrc641),
+    '')
+  check('adj641 快捷键表：Ctrl+F 只出现在 KBD.find（不与既有键位撞车）',
+    KBD.find === 'Ctrl+F' && Object.entries(KBD).filter(([, v]) => v === 'Ctrl+F').length === 1,
+    String(KBD.find))
+  check('adj641 速查对话框列出查找替换',
+    /KBD\.find/.test(String(readFileSync('src/dialogs/ShortcutsDialog.tsx', 'utf8'))), '')
+  check('adj641 图标：查找到 icon 名 → 查找.png（页签一律设计图标，不用字符兜底）',
+    ICON_FILES.find === '查找' && existsSync(join(root, 'public', ICON_DIR, '查找.png')), String(ICON_FILES.find))
+}
+// ---- 122. Ctrl+F 选区预填 + 编辑区查找高亮（adj642，用户要求）----
+console.log('[122] find seed + editor highlight (adj642)')
+{
+  // ① 预填：选区文本 → 查找内容（纯函数，见 editor/findReplace.ts）
+  const code642 = 'Q: 1 2 3# 4 |\nQ2: 5 6 7 1 |\n'
+  const at642 = (sub: string) => {
+    const i = code642.indexOf(sub)
+    return { start: i, end: i + sub.length }
+  }
+  check('adj642 有选区时：选中文本成为查找内容', seedQueryFromSelection(code642, at642('3#')) === '3#',
+    String(seedQueryFromSelection(code642, at642('3#'))))
+  check('adj642 选中文本首尾空白裁掉（谱面里空格是分隔符，带空格基本找不到）',
+    seedQueryFromSelection('a 3 b', { start: 1, end: 4 }) === '3')
+  check('adj642 空选区（只是光标）⇒ null（不动用户刚查的内容）',
+    seedQueryFromSelection(code642, { start: 3, end: 3 }) === null)
+  check('adj642 跨行选区 ⇒ null（查找框是单行输入，塞进去永远 0 处）',
+    seedQueryFromSelection(code642, { start: 2, end: 20 }) === null)
+  check('adj642 选区全是空白 ⇒ null', seedQueryFromSelection('a  b', { start: 1, end: 3 }) === null)
+  check('adj642 越界选区被钳制（不抛异常）', seedQueryFromSelection('ab', { start: -5, end: 99 }) === 'ab')
+
+  // ② 高亮层：每个视觉行标 data-line / data-col —— 查找高亮把源码偏移换算到 DOM 位置唯一依据
+  const hl642 = highlightCodeWrapped(code642, undefined, null, [[], []])
+  check('adj642 视觉行带 data-line / data-col',
+    /<div class="hl-line" data-line="1" data-col="0">/.test(hl642) && /data-line="2" data-col="0"/.test(hl642),
+    hl642.slice(0, 120))
+  check('adj642 折行后第二段 data-col = 折行点（段内偏移 = 列 − data-col）',
+    /data-col="8"/.test(highlightCodeWrapped('Q: 1 2 3 4 5 6 7 1 |', undefined, null, [[8]])), '')
+
+  // ③ 接线：高亮走**浏览器自己的机制**（CSS Custom Highlight API），名字两端一致
+  const hlSrc642 = String(readFileSync('src/editor/findHighlight.ts', 'utf8'))
+  const css642 = String(readFileSync('src/index.css', 'utf8'))
+  const paneSrc642 = String(readFileSync('src/editor/EditorPane.tsx', 'utf8'))
+  const uiSrc642 = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+  const findSrc642 = String(readFileSync('src/ui/dock/FindPanel.tsx', 'utf8'))
+  const appSrc642 = String(readFileSync('src/App.tsx', 'utf8'))
+  check('adj642 高亮用 CSS.highlights + new Highlight（与浏览器页内查找同一套）',
+    /CSS\.highlights\.set/.test(hlSrc642) && /new Highlight\(/.test(hlSrc642) &&
+      /FIND_HL = 'ijipu-find'/.test(hlSrc642) && /FIND_HL_CURRENT = 'ijipu-find-current'/.test(hlSrc642),
+    '')
+  check('adj642 CSS 里 ::highlight 的两个名字与常量一致（字面量不许漂移）',
+    /::highlight\(ijipu-find\)/.test(css642) && /::highlight\(ijipu-find-current\)/.test(css642), '')
+  check('adj642 编辑区把命中注册到语法高亮层（ref + layoutEffect），当前项由选区判定',
+    /ref=\{findHtmlRef\}/.test(paneSrc642) && /applyFindHighlights\(findHtmlRef\.current/.test(paneSrc642) &&
+      /currentMatchIndex\(findMatchesNow, findSel\)/.test(paneSrc642),
+    '')
+  check('adj642 查找内容 / 大小写开关放 store（面板与编辑区高亮共用同一份，不许两份真相）',
+    /findQuery: string/.test(uiSrc642) && /findCaseSensitive: boolean/.test(uiSrc642) &&
+      /useUiStore\(\(s\) => s\.findQuery\)/.test(findSrc642),
+    '')
+  check('adj642 Ctrl+F 带选区预填（App 里算好再交给 requestFind，不跨 store 读）',
+    /ui\.requestFind\(seedQueryFromSelection\(st\.code, st\.sel\)\)/.test(appSrc642), '')
+}

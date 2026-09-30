@@ -25,6 +25,8 @@ import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../play
 import { SpessaSynthBackend, getHqLibrary, hasBuiltinBank, GM_VOICE_OPTIONS, firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
 // adj409：暂停/续播的剩余事件平移（纯函数）
 import { shiftEventsFrom } from '../playback/playbackTimeline'
+// adj647：宿主字体实测（与预览同一份 ⇒ 色块位置一致；见 preview/fontMeta.ts）
+import { measureFontMeta } from '../preview/fontMeta'
 import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, gmVoiceRef, countScoreInstrumentSwitches } from '@ijipu/engine'
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
@@ -364,7 +366,9 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       // 构建序列（含反复展开；adj88：双击谱面音符定位试听起点）
       // adj310：声音/色块统一的准备延迟（毫秒）——按下播放后延迟才出第一声，色块同步
       const PLAY_FIRST_DELAY_MS = 200
-      const layout = layoutScore(parseResult, pageConfig, defaultInstrumentRef)
+      // adj647：与预览共用同一份宿主字体实测 ⇒ 色块位置与预览逐像素一致
+      const fm = measureFontMeta(pageConfig)
+      const layout = layoutScore(parseResult, pageConfig, defaultInstrumentRef, fm.layout)
       // adj455：选定具体音色 → **全篇统一音色**（含伴奏/第二声部与曲内 `@乐器名@`）；
       // 「自动」时传 undefined，完全按谱面路由。音色名 ref 由 GM 表逆映射得到（与 setVoice 的 program 同源）
       const seq = buildPlaySequence(parseResult, layout, bpm, playbackStartId, defaultInstrumentRef, voiceOverrideRef)

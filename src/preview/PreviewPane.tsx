@@ -17,6 +17,7 @@ import type { ScorePage, PageConfig } from '@ijipu/engine'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides'
 import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '@ijipu/engine/layout/metaAnchors'
 import { firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
+import { measureFontMeta } from './fontMeta'
 import { brand, ui as uiColors } from '../brand/tokens'
 
 /**
@@ -40,37 +41,6 @@ function applyNoteHighlight(el: Element, on: boolean): void {
   if (orig === '') el.removeAttribute('fill')
   else el.setAttribute('fill', orig)
   el.removeAttribute('data-hl-fill')
-}
-
-/** adj199：用 canvas.measureText 实测指定字体/字号下文本宽度（按字体实际宽度摆放角标，消除中英文宽度差异） */
-function measureFont(text: string, fontSize: number, fontFamily: string): number | undefined {
-  try {
-    const ctx = document.createElement('canvas').getContext('2d')
-    if (!ctx) return undefined
-    ctx.font = `${fontSize}px ${fontFamily}`
-    return ctx.measureText(text).width
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * adj638（用户报"`D: C#` 的升降符与字母还重叠 / 又过宽"）：量**墨迹右缘**。
- *
- * ♯/♭ 在简谱字体栈里是**全角字形**——占宽 1em 里只有 0.62em 有墨、**右侧留白 1.75px**（9.75px 字号实测）。
- * 内联排版时这段留白会把视觉间距撑开（用户看到的"缝"），所以把它实测出来交给引擎**补偿掉**
- * ⇒ 墨迹净距严格等于 0.2px（见 `render/index.ts` 的 `drawKeyName`）。
- */
-function measureInkRight(text: string, fontSize: number, fontFamily: string): number | undefined {
-  try {
-    const ctx = document.createElement('canvas').getContext('2d')
-    if (!ctx) return undefined
-    ctx.font = `${fontSize}px ${fontFamily}`
-    const right = ctx.measureText(text).actualBoundingBoxRight
-    return Number.isFinite(right) ? right : undefined
-  } catch {
-    return undefined
-  }
 }
 
 /**
@@ -125,27 +95,17 @@ export function PreviewPane() {
     // adj208：不因语法错误清空预览——layout/render 对错误输入安全（错误行已在
     // 解析阶段跳过：引号未闭合吞剩余内容、歌词缺曲行不挂载、未知符号降级为装饰），
     // 始终渲染可解析部分，避免预览在正常显示与错误提示之间闪动
-    const lay = layoutScore(parseResult, pageConfig, defaultInstrumentRef)
-    // adj199：按字体实际宽度摆放角标——实测 "1 = " 宽传入渲染，消除中英文字体宽度差异
-    // adj638：♯/♭ 与字母**内联**排版（字体推进量决定位置），另把它的**右侧留白**实测出来交给引擎补偿
-    // ⇒ 墨迹净距严格 = 0.2px（不补偿的话，全角 ♯ 自带的 1.75px 留白就是用户看到的"缝"）
-    const cfg = lay.config
-    const w1eq = measureFont('1 = ', cfg.miaoshu_size, cfg.miaoshu_font)
-    const wAcc = measureFont('♯', cfg.miaoshu_size * (3 / 4), cfg.miaoshu_font)
-    const accInkRight = measureInkRight('♯', cfg.miaoshu_size * (3 / 4), cfg.miaoshu_font)
-    // adj629v：描述头 D 行「1 = B」与 J 行「♩= 62」的 = 号要对齐 ⇒ 按实测「1 」/「♩」宽摆节拍行
-    // （估算宽在真实字体下可能差几 px）
-    const w1sp = measureFont('1 ', cfg.miaoshu_size, cfg.miaoshu_font)
-    const wTempo = measureFont('♩', cfg.miaoshu_size, cfg.miaoshu_font)
+    // adj199/adj629v/adj638/adj647：宿主实测的字体度量（布局侧 + 渲染侧一次量好，预览/导出/打印同一份）
+    //  · 渲染侧：`1 = ` / ♯ 占宽 / ♯ 墨迹右缘（内联排版 + 右侧留白补偿 ⇒ 墨迹净距 0.2px，adj638）
+    //            与 `1 ` / `♩` 宽（D 行与 J 行的 = 对齐，adj629v）
+    //  · 布局侧：变音角标 #/b/♮ 的墨迹宽与左偏（adj647）——**必须在 layoutScore 之前**测好
+    const cfg = pageConfig
+    const fm = measureFontMeta(cfg)
+    const lay = layoutScore(parseResult, pageConfig, defaultInstrumentRef, fm.layout)
+    // adj199/adj629v/adj638/adj647：宿主实测的字体度量（渲染侧）——见 preview/fontMeta.ts
     return {
       layout: lay,
-      pagesHtml: renderScoreToSvg(lay, {
-        w1eq,
-        wAcc,
-        accInkRight,
-        w1sp,
-        wTempo,
-      }),
+      pagesHtml: renderScoreToSvg(lay, fm.render),
       summary: sum,
     }
   }, [parseResult, pageConfig, defaultInstrumentRef])

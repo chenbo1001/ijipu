@@ -23,6 +23,8 @@ import { renderToAudioBuffer, audioBufferToWav, audioBufferToMp3 } from '../../e
 import { exportSvg, exportPng, exportJpg, exportPdf } from '../../export/export'
 import { createHqCache, resolveHqBank } from '../../playback/spessaCache'
 import { getHqLibrary, firstEnabledInstrumentRef } from '../../playback/spessaSynthBackend'
+// adj647：宿主字体实测（导出与预览共用同一份；见 preview/fontMeta.ts）
+import { measureFontMeta } from '../../preview/fontMeta'
 
 type ExportKey = 'svg' | 'png' | 'jpg' | 'pdf' | 'pdfImg' | 'midi' | 'wav' | 'mp3' | 'jps'
 
@@ -81,8 +83,10 @@ export function ExportPanel() {
 
   const getPages = (): string[] => {
     if (hasError) throw new Error(exportCopy.blockedByError)
-    const layout = layoutScore(parseResult, pageConfig, defaultInstrumentRef)
-    return renderScoreToSvg(layout)
+    // adj647：导出与预览共用同一份宿主字体实测（否则导出的 PDF/SVG 与预览版面不一致）
+    const fm = measureFontMeta(pageConfig)
+    const layout = layoutScore(parseResult, pageConfig, defaultInstrumentRef, fm.layout)
+    return renderScoreToSvg(layout, fm.render)
   }
 
   const downloadJps = () => {

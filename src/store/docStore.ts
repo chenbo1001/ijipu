@@ -6,6 +6,8 @@ import './localStorageMigration'
 import { create } from 'zustand'
 import { parseJps, defaultPageConfig, applyFontOverride, mergeJpsConfig, mergeConfigEdits, writeJpsConfig, layoutScore, renderScoreToSvg } from '@ijipu/engine'
 import type { PageConfig, ParseResult } from '@ijipu/engine'
+// adj647：宿主字体实测（打印与预览共用同一份；见 preview/fontMeta.ts）
+import { measureFontMeta } from '../preview/fontMeta'
 import { SAMPLES, defaultSample } from '../samples'
 import {
   recordEdit,
@@ -74,7 +76,9 @@ export type ViewType = 'code' | 'split' | 'splitH' | 'splitHE' | 'preview'
 function currentPrintPages(s: DocState): string[] {
   if (s.parseResult.errors.some((e) => e.severity === 'error')) return []
   const instrumentRef = firstEnabledInstrumentRef(useUiStore.getState().playbackHqEnabled)
-  return renderScoreToSvg(layoutScore(s.parseResult, s.pageConfig, instrumentRef))
+  // adj647：打印与预览共用同一份宿主实测（否则打印出来的角标间距/占宽与预览不一致）
+  const fm = measureFontMeta(s.pageConfig)
+  return renderScoreToSvg(layoutScore(s.parseResult, s.pageConfig, instrumentRef, fm.layout), fm.render)
 }
 
 /**
