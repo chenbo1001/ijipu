@@ -16176,4 +16176,62 @@ function runAdj651Tests() {
   check('adj651 文档示例逐字可跑：三条线共用同一个起音（`(5 |["1." 5) … |]["2." 5) … |]["结束句" 5)`）',
     dSl.length === 3 && new Set(dSl.map((s) => s.x1)).size === 1,
     JSON.stringify(dSl.map((s) => [s.x1, s.x2])))
+
+  /**
+   * ⑥ adj651b（**用户真实原谱**，3 行）：房子 1 的跨线连音在**第 1 个视觉行**，
+   * 房子 2 / 结束句的首音在**第 3 个视觉行**——中间还隔着整行音符。
+   *
+   * 旧实现把跨行连线限制在「相邻两行」（`rowB === rowA + 1`，隔多行按"误输入"不渲染）
+   * ⇒ 用户这条谱子上**两条延续线一条都没画**（用户："我并不能看到这两条一半的连音线"）。
+   * 延续线的语义本来就是"从前面接过来"，不需要两行紧邻 ⇒ 允许跨任意行，只在终点行画右半弧。
+   */
+  const REAL651 =
+    H651 +
+    "Q: 1'. 3'/ 3'/ 1'/ 1'/ (5/ |[++\"1.\" 5/) (6/ 6)- &zkh 6,/ 7,/ | 1- 0 0/ 6,/ |]/ 7,- 5,- | 6,-- 0/ 1/ |\n" +
+    'Q: 3-- 0/ 7/ | 6 5/ 1\'/ 7 1\'/ 2\'/ | 1\' 7 6 0/ 7// 1\'// | 1\' 7/ 6/ 7 5 |\n' +
+    'Q: 6-- &ykh 0/ 2/ :|[+++"2." 5/) (6/ 6)- 3/ 5/ ||/&ds][+++"结束句" 5/) (6/ 6)- &hx 6/ 7/ | ' +
+    "1'. 3'/ 3'/ 1'/ 1'/ 5/ | 6--- ||]\n"
+  const pReal = layoutScore(parseJps(REAL651), defaultPageConfig).pages[0]
+  const rowsReal = [...new Set(pReal.notes.map((n) => n.y))].sort((a, b) => a - b)
+  const rowYOfBar = (bar: { yTop: number } | undefined) =>
+    bar === undefined ? undefined : rowsReal.find((y) => Math.abs(bar.yTop - (y - BAR_TOP)) < 1)
+  const bar651 = (comment: string) => pReal.barlines.find((b) => b.voltaStart?.comment === comment)
+  const v1r = bar651('1.')
+  const v2r = bar651('2.')
+  const v3r = bar651('结束句')
+  const rowOfBar = (bar: typeof v1r) => {
+    const y = rowYOfBar(bar)
+    return y === undefined ? -1 : rowsReal.indexOf(y)
+  }
+  const firstNoteAfter = (bar: typeof v1r) => {
+    const y = rowYOfBar(bar)
+    if (y === undefined || bar === undefined) return undefined
+    return pReal.notes.filter((n) => Math.abs(n.y - y) < 0.01 && n.x > bar.x).sort((a, b) => a.x - b.x)[0]
+  }
+  const srcReal =
+    v1r && rowYOfBar(v1r) !== undefined
+      ? pReal.notes.filter((n) => Math.abs(n.y - rowYOfBar(v1r)!) < 0.01 && n.x < v1r.x).sort((a, b) => b.x - a.x)[0]
+      : undefined
+  check('adj651b 用例成立：原谱 3 个视觉行，跨线连音的起音在第 1 行、两个房子首音在第 3 行（**中间隔整行**）',
+    rowsReal.length === 3 && rowOfBar(v1r) === 0 && rowOfBar(v2r) === 2 && rowOfBar(v3r) === 2 &&
+      srcReal !== undefined && srcReal.token.kind === 'note' && String(srcReal.token.pitch) === '5',
+    JSON.stringify({ rows: rowsReal.length, v1: rowOfBar(v1r), v2: rowOfBar(v2r), v3: rowOfBar(v3r) }))
+  const halvesReal = pReal.slurs.filter((s) => s.half === 'r')
+  const contReal = (bar: typeof v1r, note: typeof srcReal) =>
+    pReal.slurs.find(
+      (s) => s.half === 'r' && Math.abs(s.x1 - (bar?.x ?? 0)) < 0.6 &&
+        Math.abs(s.x2 - ((note?.x ?? 0) + halfDig - NS_S)) < 0.6,
+    )
+  const h2r = firstNoteAfter(v2r)
+  const h3r = firstNoteAfter(v3r)
+  check('adj651b **隔多行也照画**：房子 2 首音从 `:|` 接进来、结束句首音从 `||/` 接进来（各半条平顶弧）',
+    halvesReal.length === 2 && contReal(v2r, h2r) !== undefined && contReal(v3r, h3r) !== undefined,
+    JSON.stringify(pReal.slurs.map((s) => [s.x1, s.x2, s.half])))
+  check('adj651b 两条延续线都落在**终点那一行**（y = 第 3 行的连音线基准，不在起点行）',
+    halvesReal.length === 2 && halvesReal.every((s) => s.y > rowsReal[1]),
+    JSON.stringify(halvesReal.map((s) => s.y)))
+  check('adj651b 起点行**不多画**任何半条弧（左半部仍不画，第 1 行保持干净）',
+    pReal.slurs.filter((s) => s.half === 'l').length === 0 &&
+      pReal.slurs.filter((s) => Math.abs(s.y - (rowsReal[0] - 12.1)) < 3).length === 2,
+    JSON.stringify(pReal.slurs.map((s) => [s.y, s.half])))
 }
