@@ -13875,6 +13875,12 @@ runAdj363SaveTests()
       failed++
       console.error('  ✗ adj629 替谱段用例抛异常', e)
     }
+    try {
+      runAdj651Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj651 连音线跨跳房子用例抛异常', e)
+    }
   })
   .then(() => {
     console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
@@ -14720,6 +14726,69 @@ function runAdj629Tests() {
   check('adj629b 带低八度点的段层：数字/减时线/低八度点同在**一个层组**里，且线高已补偿（不会压在一起）',
     beamGroup.includes('<rect') && /<rect [^>]*height="1\.2"/.test(beamGroup) && beamGroup.includes('<circle'),
     JSON.stringify({ hasRect: beamGroup.includes('<rect'), hasDot: beamGroup.includes('<circle') }))
+
+  /**
+   * adj650（用户反馈"伴奏里的这个段 `7,7,` 的低八度点没有按主音符的规则再等比率压缩整体高度，
+   * 现在的显示低八度点离音符太远"）：段层的**低八度点**改为随整层等比压扁。
+   *
+   * `adj629b` 当年把"基线以下那一块"（减时线 + 低八度点）在存储坐标里 ÷k 以保持原尺寸——
+   * 对**减时线**是必须的（`BEAM_H` 0.8px × 2/3 ≈ 0.53px 就看不见了），但对**低八度点**是错的：
+   * 整层压到 2/3、点却还挂在"原尺寸"的距离上 ⇒ 看上去离数字明显偏远。
+   * 现在低八度点与**高八度点同口径**：位置用 `lowDotY()` 原值、半径也随层压扁（`<g>` 统一缩放）；
+   * **减时线那一块的原尺寸补偿保持不变**（下列第 3 条锁住它）。
+   */
+  {
+    /** 自足用例：主旋律两个低八度点 + `{bz}` 层两个低八度点（都无减时线） */
+    const src650 = HEAD + 'Q: 5, {bz 7, 7,} 3, 4 |\n'
+    const page650 = layoutScore(parseJps(src650), defaultPageConfig).pages[0]
+    const svg650 = renderScoreToSvg(layoutScore(parseJps(src650), defaultPageConfig))[0]
+    const g650 = /<g transform="translate\(0 ([\d.-]+)\) scale\(1 ([\d.]+)\)">([\s\S]*?)<\/g>/.exec(svg650)
+    const tr650 = Number(g650?.[1])
+    const k650 = Number(g650?.[2])
+    const inner650 = g650?.[3] ?? ''
+    const dotsOf = (s: string) =>
+      [...s.matchAll(/<circle cx="([\d.]+)" cy="([\d.]+)" r="([\d.]+)"/g)].map((m) => ({
+        cx: Number(m[1]),
+        cy: Number(m[2]),
+        r: Number(m[3]),
+      }))
+    const layerDots = dotsOf(inner650)
+    const mainDots = dotsOf(svg650).filter(
+      (c) => !layerDots.some((b) => Math.abs(b.cx - c.cx) < 0.01 && Math.abs(b.cy - c.cy) < 0.01),
+    )
+    const mainLow = page650.notes.find((n) => !n.segment && n.token.kind === 'note' && n.token.octaveShift < 0)
+    const bzLow = page650.notes.find((n) => n.segment?.type === 'bz')
+    const mainDist = mainLow ? lowDotY(mainLow.y, 0, 0, ns6) - mainLow.y : NaN
+    const layerDist = layerDots.length > 0 ? tr650 + k650 * layerDots[0].cy - (bzLow?.y ?? 0) : NaN
+    check('adj650 段层低八度点**随整层等比压扁**（渲染后离基线 = k × 主旋律同款距离，不再"原尺寸偏远"）',
+      layerDots.length === 2 && mainDots.length === 2 && Number.isFinite(mainDist) && Number.isFinite(layerDist) &&
+        Math.abs(layerDist - k650 * mainDist) < 0.12,
+      JSON.stringify({ 层内离基线: Math.round(layerDist * 100) / 100, 主旋律离基线: Math.round(mainDist * 100) / 100, k: k650, 层内点: layerDots.length, 主旋律点: mainDots.length }))
+    check('adj650 段层低八度点的**半径也随层压扁**（与主旋律同源，不再是"÷k 保原尺寸"）',
+      layerDots.length > 0 && mainDots.length > 0 && Math.abs(layerDots[0].r - mainDots[0].r) < 0.01 &&
+        Math.abs(layerDots[0].r - (DOT_R * noteScaleOf(ns6)) / k650) > 0.1,
+      JSON.stringify({ 层内r: layerDots[0]?.r, 主旋律r: mainDots[0]?.r, 旧口径: Math.round((DOT_R * noteScaleOf(ns6)) / k650 * 100) / 100 }))
+    // 带减时线 + 低八度点：线高仍做原尺寸补偿（adj629b），点仍在**减时线下方**（不撞线）
+    {
+      const srcBeam = HEAD + 'Q: 5 {bz 7,/ 7,/} 3 |\n'
+      const svgBeam650 = renderScoreToSvg(layoutScore(parseJps(srcBeam), defaultPageConfig))[0]
+      const gb = /<g transform="translate\(0 ([\d.-]+)\) scale\(1 ([\d.]+)\)">([\s\S]*?)<\/g>/.exec(svgBeam650)
+      const trb = Number(gb?.[1])
+      const kb = Number(gb?.[2])
+      const innerb = gb?.[3] ?? ''
+      check('adj650 减时线那一块的**原尺寸补偿不受影响**（线高仍是 1.2 = 0.8 ÷ k，压扁后仍可见）',
+        /<rect [^>]*height="1\.2"/.test(innerb),
+        JSON.stringify({ hasRect12: /<rect [^>]*height="1\.2"/.test(innerb) }))
+      /** 减时线（rect）底 + 低八度点（circle）顶，都折到渲染坐标比较 */
+      const rect = /<rect[^>]*y="([\d.-]+)"[^>]*height="([\d.]+)"/.exec(innerb)
+      const circle = /<circle[^>]*cy="([\d.-]+)"[^>]*r="([\d.]+)"/.exec(innerb)
+      const beamBottom = rect ? trb + kb * (Number(rect[1]) + Number(rect[2])) : NaN
+      const dotTop = circle ? trb + kb * (Number(circle[1]) - Number(circle[2])) : NaN
+      check('adj650 带减时线的段层：低八度点仍在减时线**下方**（压扁后不撞线）',
+        Number.isFinite(beamBottom) && Number.isFinite(dotTop) && dotTop > beamBottom,
+        JSON.stringify({ 减时线底: Math.round(beamBottom * 100) / 100, 点顶: Math.round(dotTop * 100) / 100 }))
+    }
+  }
 
   // ---- ⑨ adj629d：点谱面跳脚本 / 点脚本回谱面 / 试听"点替谱音符跳过去" ----
   const codeLines = CODE.split('\n')
@@ -16010,4 +16079,101 @@ console.log('[122] find seed + editor highlight (adj642)')
     '')
   check('adj642 Ctrl+F 带选区预填（App 里算好再交给 requestFind，不跨 store 读）',
     /ui\.requestFind\(seedQueryFromSelection\(st\.code, st\.sel\)\)/.test(appSrc642), '')
+}
+
+/**
+ * adj651（用户要求）：**连音线跨跳房子**。
+ *
+ * 用户口径：`(5/ |["1." 5/)` 这条"起点在跳房子 1 小节线之前、终点是房子 1 首音"的连音线，
+ * 在后面的房子里用**孤立 `)`**（前面没有未闭合的 `(`）延续——三条线共用**同一个起音**
+ * （用户原话：「跳房子 2、结束句和跳房子 1 的第一个 5 都是与跳房子 1 的小节线前面的 5 连音」）。
+ * 渲染上延续线只画「房子起始小节线 → 首音」这半条右弧（上半条由房子 1 的显式连线表达）。
+ */
+function runAdj651Tests() {
+  console.log('[152] 连音线跨跳房子（adj651）')
+  const H651 = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  /** 用户原谱：两行——房子 1 与跨线连音在上一行，房子 2 / 结束句在下一行 */
+  const USER651 =
+    H651 +
+    "Q: 1'. 3'/ 3'/ 1'/ 1'/ (5/ |[++\"1.\" 5/) (6/ 6)-\n" +
+    'Q: 0/ 2/ :|["2." 5) (6/ 6)- 3/ 5/ ||/&ds]["结束句" 5/) (6/ 6)\n'
+  const lay651 = layoutScore(parseJps(USER651), defaultPageConfig)
+  const p651 = lay651.pages[0]
+  const rowYs = [...new Set(p651.notes.map((n) => n.y))].sort((a, b) => a - b)
+  check('adj651 用例成立：两行谱（房子 1 在上一行、房子 2 / 结束句在下一行）',
+    rowYs.length === 2, JSON.stringify(rowYs))
+  const [rowA651, rowB651] = rowYs
+  const barOn651 = (y: number, comment: string) =>
+    p651.barlines.find((b) => Math.abs(b.yTop - (y - BAR_TOP)) < 1 && b.voltaStart?.comment === comment)
+  const v1 = barOn651(rowA651, '1.')
+  const v2 = barOn651(rowB651, '2.')
+  const v3 = barOn651(rowB651, '结束句')
+  check('adj651 用例成立：三根房子起始小节线都在（`|` 1. / `:|` 2. / `||/` 结束句）',
+    v1 !== undefined && v2 !== undefined && v3 !== undefined,
+    JSON.stringify([v1?.x, v2?.x, v3?.x]))
+  const notesOn = (y: number) => p651.notes.filter((n) => Math.abs(n.y - y) < 0.01).sort((a, b) => a.x - b.x)
+  const src5 = notesOn(rowA651).filter((n) => n.x < (v1?.x ?? 0)).pop() // 房子 1 小节线**前面**的 5
+  const h1 = notesOn(rowA651).find((n) => n.x > (v1?.x ?? 0)) // 房子 1 首音
+  const h2 = notesOn(rowB651).find((n) => n.x > (v2?.x ?? 0)) // 房子 2 首音
+  const h3 = notesOn(rowB651).find((n) => n.x > (v3?.x ?? 0)) // 结束句首音
+  check('adj651 用例成立：三个房子首音都是 `5`、跨线连音的起音也是 `5`',
+    [src5, h1, h2, h3].every((n) => n?.token.kind === 'note' && String(n.token.pitch) === '5'),
+    JSON.stringify([src5, h1, h2, h3].map((n) => (n && n.token.kind === 'note' ? n.token.pitch : null))))
+
+  // ① 三条连音线（房子 1 的显式连线 + 房子 2 / 结束句的延续线）与两条 `(6/ 6)` 共 6 条
+  check('adj651 连音线总数 = 6（`(5 |[1. 5)` + `(6 6)` ×3 各房子 + 房子 2 / 结束句两条延续线）',
+    p651.slurs.length === 6, JSON.stringify(p651.slurs.map((s) => [s.x1, s.x2, s.half])))
+  const halfL = p651.slurs.filter((s) => s.half === 'l')
+  check('adj651 **不画左半部**：上一行不因延续线多出一截短线（房子 1 那条弧保持干净）',
+    halfL.length === 0 && p651.slurs.filter((s) => Math.abs(s.y - (rowA651 - 12.1)) < 2).length === 2,
+    JSON.stringify(halfL.map((s) => [s.x1, s.x2])))
+  const contOf = (bar: typeof v1, note: typeof h2) =>
+    p651.slurs.find(
+      (s) => s.half === 'r' && Math.abs(s.x1 - (bar?.x ?? 0)) < 0.6 &&
+        Math.abs(s.x2 - ((note?.x ?? 0) + halfDig - NS_S)) < 0.6,
+    )
+  const cont2 = contOf(v2, h2)
+  const cont3 = contOf(v3, h3)
+  check('adj651 房子 2 首音：延续线从**该房子的起始小节线**（`:|`）接进来、落在首音上',
+    cont2 !== undefined, JSON.stringify(p651.slurs.map((s) => [s.x1, s.x2, s.half])))
+  check('adj651 结束句首音：延续线从**该房子的起始小节线**（`||/`）接进来、落在首音上',
+    cont3 !== undefined, JSON.stringify(p651.slurs.map((s) => [s.x1, s.x2, s.half])))
+  check('adj651 延续线是**平顶半弧**（跨行连线统一平顶，与既有跨行口径一致）',
+    cont2?.style === 'flat' && cont3?.style === 'flat', JSON.stringify([cont2?.style, cont3?.style]))
+  check('adj651 房子 2 / 结束句两条延续线**锚点不同**（各自的房子线），但同为右半弧',
+    cont2 !== undefined && cont3 !== undefined && Math.abs(cont2.x1 - cont3.x1) > 100, '')
+
+  // ② 起音归属：单行用例里延续线与显式连线 **x1 完全相等** ⇒ 同一条连音线的同一起音
+  const SAME651 = H651 + 'Q: 1 2 (5 |["1." 5) 6 7 |]["2." 5) 1 2 ||\n'
+  const laySame = layoutScore(parseJps(SAME651), defaultPageConfig)
+  const pSame = laySame.pages[0]
+  const expl = pSame.slurs[0]
+  const cont = pSame.slurs[1]
+  check('adj651 同起音：延续线的起点与显式连线**逐像素相同**（连回的是同一条连音线的起音，不是"最近闭合的那条"）',
+    pSame.slurs.length === 2 && expl !== undefined && cont !== undefined && Math.abs(expl.x1 - cont.x1) < 0.01 &&
+      cont.x2 > expl.x2 + 50,
+    JSON.stringify(pSame.slurs.map((s) => [s.x1, s.x2, s.style])))
+
+  // ③ 不误伤：没有跨跳房子连音线时，孤立 `)` 照旧什么都不画
+  const noTie = layoutScore(parseJps(H651 + 'Q: 1 2 5 |["1." 5) 6 7 |]["2." 5) 1 2 ||\n'), defaultPageConfig)
+  check('adj651 没有跨跳房子连音线时，孤立 `)` 不产生任何连线（老谱面零影响）',
+    noTie.pages[0].slurs.length === 0, JSON.stringify(noTie.pages[0].slurs))
+
+  // ④ 不误伤：普通跨行连音线仍是"左半 + 右半"两截（右半起点仍按行首小节线/左边距，未被房子锚点改掉）
+  const plain = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 ( 3 4 | 5 6 1 2 |\nQ: 3 4 ) 5 6 | 7 1 2 3 |\n'), DUR_CFG)
+  const pl = plain.pages[0].slurs.find((s) => s.half === 'l')
+  const pr = plain.pages[0].slurs.find((s) => s.half === 'r')
+  check('adj651 普通跨行连音线：左半照画、右半仍从左边距起（锚点改动只对"落在房子首音"的连线生效）',
+    pl !== undefined && pr !== undefined && Math.abs(pr.x1 - ML) < 0.5,
+    JSON.stringify({ l: pl?.x2, r: pr?.x1, ml: ML }))
+
+  // ⑤ 文档示例（`docs/SYNTAX.md` §2.7）逐字可跑：三根房子三条线共用同一个起音
+  const doc651 = layoutScore(
+    parseJps(H651 + 'Q: 1 2 (5 |["1." 5) 6 |]["2." 5) 7 |]["结束句" 5) 1 ||\n'),
+    defaultPageConfig,
+  )
+  const dSl = doc651.pages[0].slurs
+  check('adj651 文档示例逐字可跑：三条线共用同一个起音（`(5 |["1." 5) … |]["2." 5) … |]["结束句" 5)`）',
+    dSl.length === 3 && new Set(dSl.map((s) => s.x1)).size === 1,
+    JSON.stringify(dSl.map((s) => [s.x1, s.x2])))
 }
