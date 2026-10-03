@@ -1,3 +1,50 @@
+## [0.44.0] — 2026-10-04（**谱面文本里的链接自动可点**；MINOR 级）
+
+> 主题：用户要求"允许将预览页面里的链接文本自动转换为链接，点击即可打开链接"。
+> `S:` 谱尾说明里那句「本乐谱使用「爱记谱 https://ijipu.pages.dev」编制」此前只是一串普通文字、点不动；
+> 现在**谱面里的 URL 自动变成链接**：预览里带下划线 + 手型光标，点一下用**系统浏览器**打开。
+> 本轮 MINOR 级：1 项（`adj652`）、1 条排错（`E-2026-342`），**涉及引擎**
+> （引擎包 0.25.2 → 0.26.0；已同步 `obsidian-ijipu/vendor/engine`，插件发 0.25.1）。
+
+### 新增
+
+- **谱面文本里的 URL 自动变链接**（`adj652`，用户要求）——引擎在**自由文本**处（`S:` 谱尾说明、
+  标题 / 副标题 / 作者 / 乐器名、音符注释、小节线备注）把 URL 包成
+  `<a class="jp-link" href data-href target="_blank" rel="noopener noreferrer">`：
+  - 识别 `http(s)://` / `ftp://` / `mailto:`；`www.` 开头**只给 `href` 补 `https://`**（显示文本保持原样）；
+  - **句末标点 / 中文括号不算 URL 的一部分**（`见 https://x.com。` 的「。」、`「爱记谱 https://x」编制` 的「」）；
+  - 引擎**只产出标记**，点击交给宿主（引擎零 DOM，不碰 `window.open`）：
+    应用预览层 `src/preview/openUrl.ts`（桌面壳走 Tauri `plugin:opener|open_url`＝系统默认浏览器，
+    浏览器 / PWA 走 `window.open`）；插件 `src/openExternal.ts` 的 `openUrlExternally()`
+    （桌面走 `electron.shell.openExternal`，移动端 `window.open`）。
+- **折行时 URL 不再被拆开**（`adj652`）——`wrapNotesLine` 把 URL 当**整块 token**：这一行放不下就整体挪到
+  下一行（只有它比一整行还宽时才退回逐字符拆）。否则会渲染成两个半截链接，点哪个都不对。
+- **桌面壳接入 `tauri-plugin-opener`**（`adj652`）——`Cargo.toml` + `tauri_plugin_opener::init()` +
+  能力 `opener:allow-open-url`。为什么必须加见 `E-2026-342`：WebView2 下 `target="_blank"` / `window.open`
+  并不保证打开系统浏览器（Tauri 默认既不建新窗口、也不交给系统）⇒ 不加就是"点了没反应"。
+
+### 变更
+
+- **新建模板的谱尾说明带官网链接**（`src/samples/未命名.jps`，用户改的）：
+  `S: 本乐谱使用「爱记谱 https://ijipu.pages.dev」编制`——配合本轮的链接化，
+  新建出来的空白谱里那句话点一下就能打开官网（导出/打印出来的 PDF 里同样可点）。
+
+### 验证
+
+- 应用：`npx tsc -b` 0 错 / `npm run lint` 0 error（**28 warnings == 基线**）/ `npm run build` ✔ /
+  **`npm run smoke` ALL SMOKE TESTS PASSED ✅（0 失败）**。
+- 新增断言：`adj652` **十四条**——URL 识别（裸 URL / 句末标点 / 中文书名号 / `www.` 补协议 / `mailto` /
+  一行多个 / 无 URL 时零锚点且照旧转义）、标记形状（class + 绝对 `href` + `data-href` + `target` + `rel`）、
+  前后文字原样保留、`S:` 行渲染出链接、**长行折行时 URL 完整落在一行**（不是两个半截），
+  以及宿主接线（预览层拦截、Tauri opener 与 `window.open` 兜底、CSS 手型+下划线、Cargo/能力注册）。
+- 真机：`http://localhost:5173` 以新建模板为草稿渲染，`S:` 那行 URL 已带下划线（4× 放大目视）；
+  **桌面壳 `npx tauri build` 编译通过**（`tauri-plugin-opener v2.7.0` 编入、安装包产出正常）。
+
+### 升级
+
+- **无需改任何谱面**：不写 URL 的谱面渲染结果逐字不变（`linkifyText` 在无 URL 时就是原来的 `xmlEsc`）。
+- 写法照旧：URL 直接写在 `S:` / `Z:` / `B:` / 音符注释 / 小节线备注里即可，**不需要任何新记号**。
+
 ## [0.43.2] — 2026-10-03（**连音线跨跳房子：演奏也并成一个长音**；PATCH 级）
 
 > 主题：接着 0.43.0 / 0.43.1 把这条连音线补完——**谱面**对了，**演奏**还不对。
