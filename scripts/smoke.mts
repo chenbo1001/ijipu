@@ -16234,4 +16234,42 @@ function runAdj651Tests() {
     pReal.slurs.filter((s) => s.half === 'l').length === 0 &&
       pReal.slurs.filter((s) => Math.abs(s.y - (rowsReal[0] - 12.1)) < 3).length === 2,
     JSON.stringify(pReal.slurs.map((s) => [s.y, s.half])))
+
+  /**
+   * ⑦ adj651c（用户报「`(5/|5/)` 只演奏一次音符 5、时值相加 1 拍，而不是两个半拍；
+   * 跳房子 1 因为谱子连在一起所以是对的，但**跳房子 2 和结束句**因为跨了小节或行，却是按两个半拍演奏」）：
+   *
+   * 排版端把**延续类连音线**（孤立 `)` 那条）随 `ScoreLayout.continuationTies` 交给播放端；
+   * 播放端据此把"演奏顺序相邻、源码顺序隔很远"的两端并成**一个长音**（只起奏一次）。
+   */
+  const rReal651 = parseJps(REAL651)
+  const lReal651 = layoutScore(rReal651, defaultPageConfig)
+  const seqReal651 = buildPlaySequence(rReal651, lReal651, 60)
+  const contTies651 = lReal651.continuationTies ?? []
+  check('adj651c 排版端带出延续类连音线清单（两条：同一起音 → 房子 2 / 结束句首音）',
+    contTies651.length === 2 && contTies651[0].start === contTies651[1].start &&
+      contTies651[0].end !== contTies651[1].end,
+    JSON.stringify(contTies651))
+  const srcEv651 = seqReal651.events.filter(
+    (e) => e.pitched !== false && e.placed.id.index === contTies651[0]?.start,
+  )
+  check('adj651c 演奏：**三遍**都把「起音 + 房子首音」并成一个 **1 拍长音**（只起奏一次；此前房子 2/结束句各半拍）',
+    srcEv651.length === 3 && srcEv651.every((e) => Math.round(e.durationMs) === 1000) &&
+      srcEv651.every((e) => (e.playheadSegs ?? []).reduce((a, s) => a + s.beats, 0) === 1),
+    JSON.stringify(srcEv651.map((e) => [e.atMs, Math.round(e.durationMs), (e.playheadSegs ?? []).length])))
+  check('adj651c 演奏：被并进来的两个房子首音**不再单独发声**（事件列表里没有它们）',
+    contTies651.length === 2 &&
+      seqReal651.events.every(
+        (e) => e.placed.id.index !== contTies651[0].end && e.placed.id.index !== contTies651[1].end,
+      ),
+    JSON.stringify(seqReal651.events.filter((e) => e.placed.id.index === contTies651[1]?.end).map((e) => e.atMs)))
+  check('adj651c 起音仍按**普通口径**与房子 1 合并（每遍都是 2 个拍段 = 起音 + 房子 1 首音，时值不叠加变长）',
+    srcEv651.length === 3 && srcEv651.every((e) => (e.playheadSegs ?? []).length === 2),
+    JSON.stringify(srcEv651.map((e) => (e.playheadSegs ?? []).map((s) => s.beats))))
+  // 护栏：延续线**不进** `slurOf`（那套按源码区间铺满）——否则区间内相邻同音会被误判成连线而合并。
+  const guardCode = H651 + 'Q: 1 (5 |["1." 5) 6 6 |]["2." 5) 7 ||\n'
+  const guardSeq = buildPlaySequence(parseJps(guardCode), layoutScore(parseJps(guardCode), defaultPageConfig), 60)
+  const a4 = guardSeq.events.filter((e) => e.pitched !== false && (e.pitch ?? e.placed.audioPitch) === 'A4')
+  check('adj651c 护栏：延续线区间内的**相邻同音**（非连线）照旧不合并（两个 `6` 各自发声）',
+    a4.length === 2, JSON.stringify(a4.map((e) => [e.atMs, Math.round(e.durationMs)])))
 }
