@@ -30,3 +30,10 @@ tauri-plugin-single-instance = "2"
 # **磁盘路径**，再用 Rust 侧 fs 操作即可；顺带消除"重开要重新授权"。
 # 同样只作 Rust 依赖（自定义 command 调用），无需 npm 包与 ACL 权限。
 tauri-plugin-dialog = "2"
+# adj652：**用系统浏览器打开外部链接**（谱面文本里的 URL，如 S: 谱尾说明里的官网）。
+# 为什么必须加它：桌面壳是 WebView2，`window.open` / `target="_blank"` 会走 NewWindowRequested，
+# 而 Tauri 默认**不建新窗口也不交给系统**（wry 只在宿主注册了 handler 时才拦截，否则行为不确定）
+# ⇒ 预览里点链接会"没反应"。opener 插件的 `open_url` 直接调系统默认浏览器。
+# 前端走 `window.__TAURI__.core.invoke('plugin:opener|open_url', { url })`（无需 npm 包），
+# ACL 权限写在 `capabilities/default.json` 的 `opener:allow-open-url`。
+tauri-plugin-opener = "2"

@@ -10,6 +10,7 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 // adj529：预览页基准宽（与顶栏"双击比率按宽度适配"的反算算式同源）
 import { PREVIEW_BASE_W } from './zoomFit'
+import { openExternalUrl } from './openUrl'
 import { beginDrag } from '../ui/dragGesture'
 import { tempoLabel } from '@ijipu/engine/parser/parser'
 import { layoutScore, renderScoreToSvg, noteIdToCodePos, buildIndexToPage, SEGMENT_ROW_GAP_DEFAULT, notesRowBaseline } from '@ijipu/engine'
@@ -211,7 +212,16 @@ export function PreviewPane() {
 
   // 点击谱面音符/歌词 → 编辑器光标跳转（M3）
   // adj284：试听可达时单击音符 → 从该音符开始/重播（跳转到该处演奏）
+  // adj652：点**谱面文本里的链接**（引擎把 URL 包成了 `a.jp-link`，如 S: 谱尾说明里的官网）
+  //   → 用系统浏览器打开，不走"音符跳转"那条路。
   const onClick = (e: React.MouseEvent) => {
+    const link = (e.target as Element).closest('a.jp-link')
+    if (link) {
+      e.preventDefault()
+      e.stopPropagation()
+      void openExternalUrl(link.getAttribute('data-href') ?? link.getAttribute('href') ?? '')
+      return
+    }
     const target = (e.target as Element).closest('[data-notepos], [data-cipos]')
     if (!target) return
     const id = target.getAttribute('data-notepos') ?? target.getAttribute('data-cipos')

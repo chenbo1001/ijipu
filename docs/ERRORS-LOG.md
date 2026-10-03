@@ -5213,6 +5213,28 @@
 
 | v0.43.2 | 2026-10-03 | 发布 v0.43.2（**连音线跨跳房子：演奏也并成一个长音**，PATCH 级，1 项 `adj651c`、1 条排错 `E-2026-341`，**涉及引擎**）：用户口径"对于连音线 `(5/\|5/)` 我们只演奏一次音符 5、时值相加演奏 1 拍……跳房子 1 因为谱子连在一起所以是对的，但**跳房子 2 和结束句**因为跨了小节或行，却是**按两个半拍演奏**"。**复现**（用户原谱 `bpm 60`）：第 1 遍 `G4 at=3500 dur=1000`（已合并 ✓）；第 2 遍 `at=43500 dur=500` + `at=44000 dur=500`；第 3 遍同样各半拍 ✗。**根因**：播放端同音连音合并的判据是「**源码索引相邻**（`curNoteIdx === lastEventNoteIdx + 1`）**且同属一条连音弧**」，而房子 2 / 结束句的首音在源码顺序里与起音隔着一整段旋律（索引 5 → 43 / 48），在**演奏顺序**里却紧挨着（第 2 遍跳过房子 1 之后紧跟起音）；且播放端**根本没有**"孤立 `)`"这条连线（只按 `(`/`)` 配对，落单的 `)` 直接丢弃）。**解决**：① 排版端把延续类连音线随 `ScoreLayout.continuationTies`（`{start,end}[]`）**交给播放端**——两处各写一份"跳房子连线"配对规则迟早漂；② 播放端合并判据加一条「本音符是某条延续线的终点、且**上一个已发事件正好是它的起点**」⇒ 与普通口径一样并成长音（只起奏一次、时值相加）。**护栏**：延续线**不并入** `slurRanges`/`slurOf`——那套按源码区间**铺满**，一条跨 40 个音符的延续线铺进去会让区间内的**相邻同音**（非连线）被误判成连线而合并（如 `1 (5 \|["1." 5) 6 6 \|]["2." 5) 7` 的两个 `6`）。**验证**：新增 `adj651c` **五条**（① 排版端带出两条延续线；② 三遍都并成 1 拍长音、色块两个拍段；③ 被并进来的两个首音不再单独发声；④ 起音仍按普通口径与房子 1 合并；⑤ 护栏：延续线区间内的相邻同音照旧不合并）；`tsc -b` 0 错 / `npm run lint` 0 error（28 warnings == 基线）/ `npm run build` ✔ / **`npm run smoke` ALL SMOKE TESTS PASSED ✅（0 失败）**；实测播放事件数 68 → **66**、总时长不变（64000ms）。`docs/SYNTAX.md` §2.7 补「演奏与普通同音连线同一口径」。引擎 3 文件改动 → 已同步 `obsidian-ijipu/vendor/engine`（36/36、0 差异），插件 `tsc` 0 错、`smoke` 259 passed / 0 failed ⇒ **插件 0.24.1 → 0.25.0**（含新增功能）。 |
 
+| v0.44.0 | 2026-10-04 | 发布 v0.44.0（**谱面文本里的链接自动可点**，MINOR 级，1 项 `adj652`、1 条排错 `E-2026-342`，**涉及引擎 + 桌面壳**）：用户要求"允许将预览页面里的链接文本自动转换为链接，点击即可打开链接"——`S:` 谱尾说明里那句「本乐谱使用「爱记谱 https://ijipu.pages.dev」编制」此前只是普通文字、点不动。**解决**：① **引擎只产出标记**（`findUrls()`/`linkifyText()`，零 DOM）：在**自由文本**处（`S:` 谱尾说明、标题/副标题/作者/乐器名、音符注释、小节线备注）把 URL 包成 `<a class="jp-link" href data-href target="_blank" rel="noopener noreferrer">`，`data-href` 是补全协议后的绝对地址；识别 `http(s)/ftp/mailto`，`www.` 开头**只给 `href` 补 `https://`**（显示文本不变），**句末标点与中文括号不算 URL 的一部分**；② **折行不拆 URL**——`wrapNotesLine` 把 URL 当整块 token（放不下整体挪下一行，只有比一整行还宽才逐字符拆），否则会渲染成两个半截链接；③ **点击交给宿主**（`E-2026-342`）：应用预览层 `src/preview/openUrl.ts` 先 `preventDefault` 再自己打开——**桌面壳走新增的 `tauri-plugin-opener`**（`Cargo.toml` + `tauri_plugin_opener::init()` + 能力 `opener:allow-open-url`，`core.invoke('plugin:opener\|open_url')` ⇒ 系统默认浏览器），浏览器/PWA 走 `window.open`；插件 `src/openExternal.ts` 的 `openUrlExternally()` 走 `electron.shell.openExternal`；④ 预览 CSS 给 `a.jp-link` 加手型 + 下划线（插件 `styles.css` 同步）。**另一处**：新建模板 `src/samples/未命名.jps`（用户自行修改）的 `S:` 行改为带官网链接，配合本轮链接化。**验证**：`tsc -b` 0 错 / `npm run lint` 0 error（28 warnings == 基线）/ `npm run build` ✔ / **`npm run smoke` ALL SMOKE TESTS PASSED ✅（0 失败）**；新增 `adj652` **十四条**（URL 识别边界 / 标记形状 / 前后文字保留 / `S:` 行渲染出链接 / 长行折行 URL 完整 / 宿主与 Tauri 接线）；**桌面壳 `npx tauri build` 真机编译通过**（`tauri-plugin-opener v2.7.0` 编入、安装包产出正常）；dev 预览 4× 放大目视 `S:` 行 URL 带下划线。引擎 1 文件改动 → 已同步 `obsidian-ijipu/vendor/engine`（36/36、0 差异），插件 `tsc` 0 错、`smoke` 265 passed / 0 failed ⇒ **插件 0.25.0 → 0.25.1**。 |
+
+### E-2026-342 桌面壳里 `target="_blank"` / `window.open` **不保证打开系统浏览器**——不做处理就是"点了没反应"（adj652）
+
+- **场景**（用户要求）："允许将预览页面里的链接文本自动转换为链接，点击即可打开链接"。
+- **风险**：把 `S:` 里的 URL 包成 `<a href="…" target="_blank">` 后，**浏览器里**能开新页签；
+  但**桌面壳（Tauri v2 / WebView2）**里点击会走 WebView2 的 `NewWindowRequested`，而 Tauri 只在应用
+  显式 `on_new_window` 时才装 handler（`tauri-runtime-wry` 里是 `if let Some(new_window_handler) = …`；
+  `new_window_handler` 默认为 `None`）⇒ 默认既不建新窗口、也不交给系统，"看着能点、点了没反应"。
+  Obsidian（Electron）同理：`target="_blank"` 的行为取决于宿主的 `setWindowOpenHandler`，不能指望。
+- **解决**（adj652）：**先 `preventDefault` 再自己打开**，并且逐壳给显式实现：
+  - 应用桌面壳：新增 `tauri-plugin-opener`（`Cargo.toml` + `tauri_plugin_opener::init()` + 能力
+    `opener:allow-open-url`），前端 `core.invoke('plugin:opener|open_url', { url })` ⇒ **系统默认浏览器**；
+    浏览器 / PWA 走 `window.open`（两条都不成时控制台留 error，不静默）。
+  - 插件：`electron.shell.openExternal(url)`（桌面）/ `window.open`（移动端），失败弹 `Notice`。
+- **验证**：`adj652` 十四条（含宿主接线与 Tauri 侧注册断言）；**桌面壳 `npx tauri build` 真机编译通过**
+  （`tauri-plugin-opener v2.7.0` 编入、安装包产出正常）。
+- **预防**：**"宿主环境里的默认行为"必须逐壳确认**——网页里成立的行为（开新窗口、下载、剪贴板、
+  文件选择器）在 Tauri / Electron 里经常被宿主接管成"什么都不做"。
+  凡是跨壳能力，**先问一句"这一壳里谁负责"**，再给显式实现 + 兜底；
+  特别地，**"点了没反应" 这类问题最容易在浏览器自测里漏过**（本轮就是：网页里一切正常）。
+
 ### E-2026-341 连音线跨跳房子：谱面画对了，**演奏**却在房子 2 / 结束句各起奏半拍（adj651c）
 
 - **场景**（用户原话）："对于连音线 `(5/|5/)` 我们只演奏一次音符 5，并且时值相加演奏 1 拍，

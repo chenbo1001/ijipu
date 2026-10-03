@@ -1034,6 +1034,16 @@ body {
 .preview-svg > svg > rect:first-child {
   fill: transparent;
 }
+/* adj652（用户要求）：谱面文本里的**链接**（引擎把 URL 包成 `a.jp-link`，如 S: 谱尾说明里的官网）——
+   手型光标 + 下划线，一眼看出能点；点击由 PreviewPane 接管（系统浏览器打开），不靠 SVG 自身的跳转。 */
+.preview-svg a.jp-link {
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.preview-svg a.jp-link:hover {
+  fill: var(--jp-accent);
+}
 .guide-line {
   position: absolute;
   border: 1px dashed var(--jp-accent);

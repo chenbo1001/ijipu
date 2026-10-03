@@ -47,6 +47,8 @@ import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/l
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
 import type { BarlineType } from '@ijipu/engine/types.ts'
 import { computeBeamsForTest } from '@ijipu/engine/render/index.ts'
+// adj652：谱面文本里的 URL → 链接（纯函数 + 渲染产物）
+import { findUrls, linkifyText } from '@ijipu/engine/render/index.ts'
 // adj458：波音/滑音/延长记号的矢量修饰符（生成常量 + 墨迹宽高比；摆放口径经渲染端到端断言）
 import { MODIFIER_GLYPHS, glyphInkAspect } from '@ijipu/engine/render/modifierGlyphs.ts'
 // adj644：大括号墨迹右缘（布局用它把括号贴到音符一侧；与渲染同一份几何）
@@ -13881,6 +13883,12 @@ runAdj363SaveTests()
       failed++
       console.error('  ✗ adj651 连音线跨跳房子用例抛异常', e)
     }
+    try {
+      runAdj652Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj652 谱面链接用例抛异常', e)
+    }
   })
   .then(() => {
     console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
@@ -16272,4 +16280,81 @@ function runAdj651Tests() {
   const a4 = guardSeq.events.filter((e) => e.pitched !== false && (e.pitch ?? e.placed.audioPitch) === 'A4')
   check('adj651c 护栏：延续线区间内的**相邻同音**（非连线）照旧不合并（两个 `6` 各自发声）',
     a4.length === 2, JSON.stringify(a4.map((e) => [e.atMs, Math.round(e.durationMs)])))
+}
+
+/**
+ * adj652（用户要求）："允许将预览页面里的链接文本自动转换为链接，点击即可打开链接"。
+ *
+ * 引擎只产出标记（`<a class="jp-link" data-href="…" target="_blank">`），点击交给宿主
+ * （应用 `src/preview/openUrl.ts` / 插件 `src/openExternal.ts`）；这里断言**标记**这一半，
+ * 宿主接线另外用源码断言钉住。
+ */
+function runAdj652Tests() {
+  console.log('[153] 谱面文本里的链接（adj652）')
+  const U = 'https://ijipu.pages.dev'
+  // ① URL 识别
+  check('adj652 识别裸 URL', JSON.stringify(findUrls(U)) === JSON.stringify([{ start: 0, end: 23, url: U, href: U }]),
+    JSON.stringify(findUrls(U)))
+  check('adj652 句末标点不算 URL 的一部分（`见 https://x.com。`）',
+    findUrls('见 https://ijipu.pages.dev。')[0]?.url === U, JSON.stringify(findUrls('见 https://ijipu.pages.dev。')))
+  check('adj652 中文书名号/引号包着也能认出（`「爱记谱 https://x」编制`）',
+    findUrls('本乐谱使用「爱记谱 https://ijipu.pages.dev」编制')[0]?.url === U, '')
+  check('adj652 `www.` 开头自动补 `https://`（只补 `href`，显示文本保持原样）',
+    JSON.stringify(findUrls('访问 www.example.com 看看')) ===
+      JSON.stringify([{ start: 3, end: 18, url: 'www.example.com', href: 'https://www.example.com' }]),
+    JSON.stringify(findUrls('访问 www.example.com 看看')))
+  check('adj652 `mailto:` 也认；一行多个 URL 都能抓到',
+    findUrls('联系 mailto:me@x.com')[0]?.href === 'mailto:me@x.com' &&
+      findUrls('a http://a.com b https://b.cn/c?d=1#e , END').length === 2,
+    JSON.stringify(findUrls('a http://a.com b https://b.cn/c?d=1#e , END')))
+  check('adj652 没有 URL 时不产生任何锚点（普通文本照旧 XML 转义）',
+    findUrls('普通说明').length === 0 && linkifyText('a<b>&"c"') === 'a&lt;b&gt;&amp;&quot;c&quot;',
+    linkifyText('a<b>&"c"'))
+  // ② 标记形状：class / 绝对 href / data-href / 新窗口 / noopener
+  const html = linkifyText('本乐谱使用「爱记谱 ' + U + '」编制')
+  check('adj652 产出 `<a class="jp-link" href data-href target="_blank" rel="noopener noreferrer">`',
+    /<a class="jp-link" href="https:\/\/ijipu\.pages\.dev" data-href="https:\/\/ijipu\.pages\.dev" target="_blank" rel="noopener noreferrer">/.test(
+      html,
+    ),
+    html)
+  check('adj652 前后文字原样保留（`本乐谱使用「爱记谱 ` / `」编制`）',
+    html.startsWith('本乐谱使用「爱记谱 <a class="jp-link"') && html.endsWith('</a>」编制'), html)
+  // ③ 渲染产物：S: 谱尾说明里那串 URL 就是链接
+  const code652 = `V: 1.0\nB: 测试\nD: C\nP: 4/4\nS: 本乐谱使用「爱记谱 ${U}」编制\nQ: 1 2 3 4 |\nC: 这 是 歌 词\n`
+  const svg652 = renderScoreToSvg(layoutScore(parseJps(code652), defaultPageConfig))[0]
+  const notes652 = /<text data-meta="notes_0"[^>]*>([\s\S]*?)<\/text>/.exec(svg652)
+  check('adj652 `S:` 谱尾说明渲染成带链接的 `<text>`（默认模板那行 URL 可直接点）',
+    notes652 !== null && /<a class="jp-link" href="https:\/\/ijipu\.pages\.dev"/.test(notes652[1]),
+    notes652 ? notes652[1].slice(0, 120) : '(未找到 notes_0)')
+  // ④ **不把 URL 拆到两行**：拆了就是两个半截链接，点哪个都不对
+  const longLine = `S: ${'前'.repeat(48)} ${U} ${'后'.repeat(12)}\n`
+  const svgWrap652 = renderScoreToSvg(
+    layoutScore(parseJps(`V: 1.0\nB: 测试\nD: C\nP: 4/4\n${longLine}Q: 1 2 3 4 |\nC: 这 是 歌 词\n`), defaultPageConfig),
+  )[0]
+  const subLines652 = [...svgWrap652.matchAll(/<text data-meta="notes_0"[^>]*>([\s\S]*?)<\/text>/g)].map((m) => m[1])
+  const anchors652 = [...svgWrap652.matchAll(/<a class="jp-link"[^>]*>([\s\S]*?)<\/a>/g)].map((m) => m[1])
+  check('adj652 长行折行时 URL **整体挪到一行**（不是两个半截链接）',
+    subLines652.length >= 2 && anchors652.length === 1 && anchors652[0] === U,
+    JSON.stringify({ rows: subLines652.length, anchors: anchors652 }))
+  // ⑤ 宿主接线：预览层点链接 → 系统浏览器（应用）/ electron.shell（插件）
+  const paneSrc652 = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
+  const openUrlSrc652 = String(readFileSync('src/preview/openUrl.ts', 'utf8'))
+  const css652 = String(readFileSync('src/index.css', 'utf8'))
+  check('adj652 预览层拦截 `a.jp-link` 点击（preventDefault + 自己打开，不让 SVG 自己跳）',
+    /closest\('a\.jp-link'\)/.test(paneSrc652) && /void openExternalUrl\(/.test(paneSrc652) &&
+      paneSrc652.indexOf("closest('a.jp-link')") < paneSrc652.indexOf("closest('[data-notepos]"),
+    '')
+  check('adj652 桌面壳走 Tauri opener（`plugin:opener|open_url`），浏览器/PWA 退回 `window.open`',
+    /plugin:opener\|open_url/.test(openUrlSrc652) && /window\.open\(target, '_blank'/.test(openUrlSrc652) &&
+      /__TAURI__/.test(openUrlSrc652),
+    '')
+  check('adj652 链接样式：可点（手型）+ 下划线（预览 CSS）',
+    /\.preview-svg a\.jp-link\s*\{[^}]*cursor:\s*pointer/.test(css652) &&
+      /\.preview-svg a\.jp-link\s*\{[^}]*text-decoration:\s*underline/.test(css652),
+    '')
+  check('adj652 Tauri 侧：`tauri-plugin-opener` 已注册 + 能力里给了 `opener:allow-open-url`',
+    /tauri-plugin-opener/.test(String(readFileSync('src-tauri/Cargo.toml', 'utf8'))) &&
+      /tauri_plugin_opener::init\(\)/.test(String(readFileSync('src-tauri/src/lib.rs', 'utf8'))) &&
+      /opener:allow-open-url/.test(String(readFileSync('src-tauri/capabilities/default.json', 'utf8'))),
+    '')
 }

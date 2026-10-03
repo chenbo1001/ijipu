@@ -424,6 +424,9 @@ pub fn run() {
         // adj568：原生文件夹选择器（工作区）。同单实例插件：**只作 Rust 依赖**，
         // 我们用自己的 command 调它，故不需要 npm 包，也不需要补 ACL 权限。
         .plugin(tauri_plugin_dialog::init())
+        // adj652：外部链接（预览里点了 `a.jp-link`）→ 交给系统默认浏览器。
+        // 前端用 `core.invoke('plugin:opener|open_url', { url })` 调它（见 src/preview/openUrl.ts）。
+        .plugin(tauri_plugin_opener::init())
         .manage(PendingOpen::default())
         .setup(|app| {
             // 冷启动：双击 `.jps` 时路径就在本进程的命令行参数里（NSIS 写的是 `"ijipu.exe" "%1"`）。
