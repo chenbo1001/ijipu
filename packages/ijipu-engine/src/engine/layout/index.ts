@@ -29,7 +29,7 @@ import type {
   ScorePageMeta,
   VoiceBlock,
 } from '../types'
-import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, octaveDotY, BRACKET_PAD, H_GAP, noteScaleOf, VOLTA_BAR_GAP, VOLTA_RAISE, DYN_HALF_H, barlinePad, barlineTotalW, DOT_AFTER_DIGIT_GAP, DOT_R, SEGMENT_ROW_GAP_DEFAULT, SEGMENT_LAYER_YSCALE, SEGMENT_LAYER_CLEARANCE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, NOTE_BASELINE_RATIO, DIGIT_BOTTOM, beamBottomY, lowDotY, TP_BRACKET_GAP, barNumberGapNeed, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, type AccidentalInkMetrics } from './spacing'
+import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, octaveDotY, BRACKET_PAD, H_GAP, noteScaleOf, VOLTA_BAR_GAP, VOLTA_RAISE, DYN_HALF_H, barlinePad, barlineTotalW, DOT_AFTER_DIGIT_GAP, DOT_R, SEGMENT_ROW_GAP_DEFAULT, SEGMENT_LAYER_YSCALE, SEGMENT_LAYER_CLEARANCE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, NOTE_BASELINE_RATIO, digitBottomY, beamBottomY, lowDotY, TP_BRACKET_GAP, barNumberGapNeed, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, type AccidentalInkMetrics } from './spacing'
 // adj284：空间优先布局的度量（本体宽 / 时值拆分 / 非时值元素间距）
 import { splitNoteDur, noteBodyW, augBodyW, dotBodyW, accidentalBodyW, accidentalGeometry, markBodyW, digitSlotW, hxBodyW, graceAtTail, graceSlotLayout, nonDurGap, slideExtraW, braceInkRightOffset, BRACE_LINE_DX } from './spaceLayout'
 import { hairpinEvents, resolveHairpins, type DynEvent, type NoteAnchors } from './hairpins'
@@ -5126,7 +5126,17 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       const lowerBaseline = row.y + dy / 2
       const bracePadY = ns * 0.35
       let inkT = yUpper - ns * DIGIT_HEIGHT_RATIO
-      let inkB = lowerBaseline + ns * DIGIT_BOTTOM
+      /**
+       * adj691（用户报「大括号高度应从第一声部上沿到最后一声部下沿止」）：
+       * 下端初值 = **下层声部数字的墨迹底**，必须与全项目其它地方**同一把尺子**
+       * （`digitBottomY` = 基线 + `DIGIT_BOTTOM × s`）。
+       *
+       * ⚠️ 这里踩过一个坑：原先写的是 `lowerBaseline + ns × DIGIT_BOTTOM`，
+       * 而 `DIGIT_BOTTOM = 2` 是**像素常量**（`digitBottomY` 里是 `2 × s`，s = ns/18）。
+       * 两者相差 `ns × 2 × (1 − 1/18) ≈ 1.89 × ns`（13 号字 ≈ 24.6px）
+       * ⇒ 括号下端比"最后一个声部的下沿"多探出十几像素、一直伸到歌词行里。
+       */
+      let inkB = digitBottomY(lowerBaseline, ns)
       for (const t of seg.tokens) {
         if (!isDurational(t)) continue
         const oct = t.kind === 'note' ? t.octaveShift : 0
@@ -5136,7 +5146,8 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         if (!isDurational(e)) continue
         const dc = e.kind === 'note' ? (e.diminishCount ?? 0) : 0
         const oct = e.kind === 'note' ? e.octaveShift : 0
-        let bot = dc > 0 ? beamBottomY(lowerBaseline, dc, ns) : lowerBaseline + ns * DIGIT_BOTTOM
+        // 同上：数字底一律用 `digitBottomY`（`DIGIT_BOTTOM` 是像素常量，不能乘 ns）
+        let bot = dc > 0 ? beamBottomY(lowerBaseline, dc, ns) : digitBottomY(lowerBaseline, ns)
         if (oct < 0) bot = Math.max(bot, lowDotY(lowerBaseline, -oct - 1, dc, ns) + DOT_R * noteScaleOf(ns))
         inkB = Math.max(inkB, bot)
       }

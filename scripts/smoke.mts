@@ -16942,6 +16942,34 @@ function runAdj689bTests() {
   const plainLay = layoutScore(parseJps(plain), defaultPageConfig)
   check('adj689b 护栏：不含 `{dsb}` 的谱面不产生任何行下移（连音线零位移）',
     (plainLay.pages[0].rowSlides?.size ?? 0) === 0, JSON.stringify([...(plainLay.pages[0].rowSlides ?? new Map())]))
+  /**
+   * adj691（用户口径）：「临时多声部大括号的高度**从第一声部上沿到最后一声部下沿止**」。
+   *
+   * 判据：括号下端 = **最后一个声部（下层）的数字墨迹底 + `0.35×字号` 留白**，
+   * 即 `digitBottomY(下层基线) + ns×0.35`，容差 1px。
+   *
+   * ⚠️ 历史坑：下端曾写 `lowerBaseline + ns × DIGIT_BOTTOM`，而 `DIGIT_BOTTOM = 2` 是**像素常量**
+   * （正确用法是 `digitBottomY` = 基线 + `2×s`，s = ns/18），相差 `1.89×ns`
+   * （13 号字 ≈ 24.6px）⇒ 括号下端一路伸进歌词行（用户截图）。本断言专门守住这个单位口径。
+   */
+  {
+    const brace = p.segmentBrackets?.find(
+      (b) => b.type === 'dsb' && b.braceTop !== undefined && b.braceBottom !== undefined,
+    )
+    // 本用例的 `{dsb}` 下层声部：包络内的主旋律（带 `parentY`）里 y 最大者
+    const lowerNotes = p.notes.filter((n) => n.parentY !== undefined)
+    const lowY = lowerNotes.length > 0 ? Math.max(...lowerNotes.map((n) => n.y)) : NaN
+    const ns2 = defaultPageConfig.note_size
+    /** 下端 = `max(数字墨迹底, 减时线层底) + 0.35×字号`；无减时线的音就落在数字墨迹底 */
+    const digitBottom = lowY + 2 * noteScaleOf(ns2)
+    const expectBottom = digitBottom + ns2 * 0.35
+    check('adj691 大括号下端 = 最后一个声部的**墨迹底 + 0.35×字号**（单位口径正确，不伸进歌词）',
+      brace !== undefined &&
+        Number.isFinite(lowY) &&
+        (brace.braceBottom as number) >= expectBottom - 1 &&
+        (brace.braceBottom as number) <= expectBottom + 8,
+      JSON.stringify({ braceBottom: brace?.braceBottom, expectBottom, lowY }))
+  }
 }
 
 /**
