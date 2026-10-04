@@ -3748,9 +3748,9 @@ export function layoutScore(
    * adj689：`hi`/`symCount` 一律按**整行**给出（见 `rowSlurY`）——"线要避开其下所有音符的
    * 高八度点/修饰符"这条口径从"本条覆盖的区间"扩到"整行"。
    */
-  const slurYFor = (note: PlacedToken, hi: number, symCount: number, raise: number) => {
+  const slurYFor = (y: number, hi: number, symCount: number, raise: number) => {
     const s = noteScaleOf(m.noteSize)
-    const topY = hi > 0 ? octaveTopY(note.y, hi, m.noteSize) : note.y - m.noteSize * DIGIT_HEIGHT_RATIO
+    const topY = hi > 0 ? octaveTopY(y, hi, m.noteSize) : y - m.noteSize * DIGIT_HEIGHT_RATIO
     let base = topY - LAYER_GAP * s - (SLUR_W * s) / 2
     // 每层修饰符：符号字号 10×s + 层距 LAYER_GAP×s（与 render 上方符号堆叠一致）
     base -= symCount * (10 * s + LAYER_GAP * s)
@@ -3781,7 +3781,7 @@ export function layoutScore(
   }
   /** 某行连音线的基准 y（不含该条自己的嵌套抬升 / `(+` `(-` 升降） */
   const rowSlurY = (rowIdx: number, anchor: PlacedToken, raise: number): number =>
-    slurYFor(anchor, maxHiOfRow(rowIdx), maxSymOfRow(rowIdx), raise)
+    slurYFor(anchor.y, maxHiOfRow(rowIdx), maxSymOfRow(rowIdx), raise)
   /** 行内跳房子线最低 y + 2s（adj134：连音线不得高于跳房子线，避免与其重叠） */
   const voltaFloorY = (rowIdx: number): number | null => {
     const r = rows[rowIdx]
@@ -3874,8 +3874,9 @@ export function layoutScore(
         style,
         // 仅平均连音组 (y...) 标数字（普通连音线 (…) 不加，adj43）
         tupletCount: sp.tuplet ? noteCount : undefined,
-        // adj689：带上归属行号——`{dsb}` 下移包络内主旋律时据此筛选，避免误伤其它行
+        // adj689/adj689b：带上归属行号与行顶——段层下移、行基准统一落地都要用
         row: rowA,
+        rowTop: r1(rows[rowA].y),
       })
     } else if (rowB === rowA + 1 || sp.houseTie) {
       // 相邻行：上一行左半部（开始 → 行末小节线）、下一行右半部（边距 → 结束）；
@@ -3908,6 +3909,7 @@ export function layoutScore(
           tupletCount: sp.tuplet ? noteCount : undefined,
           half: 'l', // 左半部：从最低处到行末最高点，右侧开口
           row: rowA, // adj689：归属行（下移筛选用）
+          rowTop: r1(rows[rowA].y), // adj689b：行基准统一落地用
         })
       }
       pages[rows[rowB].page].slurs.push({
@@ -3919,6 +3921,7 @@ export function layoutScore(
         tupletCount: sp.tuplet ? noteCount : undefined,
         half: 'r', // 右半部：从行首最高点到最低处，左侧开口
         row: rowB, // adj689：右半部画在终点行
+        rowTop: r1(rows[rowB].y), // adj689b
       })
     }
   }
@@ -4002,9 +4005,60 @@ export function layoutScore(
    */
   avoidLyricComments(pages, config)
 
+  /**
+   * adj689b：把**同一视觉行的连音线**统一落到"行顶 + 整行下移量"算出的那一条基准线上。
+   *
+   * 为什么还要这一步：`{dsb}` 是叠加后处理，同一行里可能有多段、**各段下移量不同**
+   * （本轮实测 15.77 / 16.74 / 15.77）。连音线只按本段位移搬的话，同行的线就停在
+   * 各自段落的位移上（实测同属第 3 行的两条差 0.9px）。
+   */
+  alignRowSlurBaselines(pages)
+
   const configKey = JSON.stringify(config)
   // adj651c：延续类连音线（跳房子孤立 `)`）随排版结果交给播放端——演奏上要并成一个长音
   return { pages, config, configKey, continuationTies }
+}
+
+/**
+ * adj689b（用户报「连音线错位问题」仍未完全解决）：把**同一视觉行的连音线**统一落到
+ * "行顶 + 整行下移量"算出的那一条基准线上。
+ *
+ * ## 现象与根因
+ * 同一行里可能有**多段 `{dsb}`**，各段下移量由"该段内容有多密"决定，实测
+ * **15.77 / 16.74 / 15.77** 三种。连音线在段层叠加时只按"本段是否覆盖它"搬各自的量，
+ * 于是同属一行的线停在不同的高度上——用户原谱第 3 行里
+ * `(1'// 7// 6//)`（落在下移 16.74 的段里）y=352.1，
+ * `(3// 2// 1//) (1// 1/)` 与 `(6// 6/)`（落在下移 15.77 的段里）y=353.0，差 0.9px。
+ *
+ * ## 口径（一行一个下移量）
+ * `下移量 = 整行最低声部 − 行顶`（与该行被 `{dsb}` 下移的量同源），
+ * 行内**所有**连音线（不管落哪一段、甚至落包络外）都落到
+ * `行顶 + 下移量` 算出的那一条基准线上 ⇒ 一行之内绝对齐平。
+ *
+ * 只在"该行最低声部确实低于行顶"（即真的被 `{dsb}` 下移过）时才动；
+ * 没有 `{dsb}` 的行位移为 0，一字不动。
+ */
+function alignRowSlurBaselines(pages: ScorePage[]): void {
+  for (const p of pages) {
+    const slides = p.rowSlides
+    if (!slides || slides.size === 0) continue
+    for (const [rowTop] of slides) {
+      /**
+       * 本行的连音线（主旋律线，含跨行半弧；段层自己的弧线不管）。
+       *
+       * 基准 = 该行连线里**最靠上的那一条的 y**：布局期每行的基准已经是
+       * "整行最高的元素顶 − 层距"（`rowSlurY`），而段层下移后**只有落在下移量最大的
+       * 那一段里的线**还在正确高度上 ⇒ 取最小值即为该行应有的基准。
+       * 其余条按**同一位移**平移 ⇒ 嵌套抬升 / `(+` `(-` / 跨行半弧端点差一字不变。
+       */
+      const list = p.slurs.filter(
+        (sl) => sl.layerBase === undefined && sl.rowTop !== undefined && Math.abs(sl.rowTop - rowTop) < 0.5,
+      )
+      if (list.length === 0) continue
+      const target = Math.min(...list.map((x) => x.y))
+      for (const sl of list) sl.y = r1(target)
+    }
+  }
 }
 
 /**
@@ -5384,6 +5438,17 @@ function shiftEnvelopeDown(
     xMax = Math.max(xMax, p.note.rightX ?? p.note.x + p.note.width)
   }
   if (movedIds.size === 0) return
+  /**
+   * adj689b：记下"本行的段层下移量"。同一行可能有多段 `{dsb}`、各段下移量不同
+   * （由"该段内容多密"决定），而连音线基准 y 是**行级**的 ⇒ 必须**一行只认一个下移量**，
+   * 否则同行的线会停在各自的段位移上（实测差 0.9px）。取该行出现过的最大值。
+   */
+  for (const p of pages) {
+    if (p.index !== row.page) continue
+    const m = p.rowSlides ?? new Map<number, number>()
+    m.set(r1(row.y), Math.max(m.get(r1(row.y)) ?? 0, dy))
+    p.rowSlides = m
+  }
   for (const p of pages) {
     /**
      * adj684（用户口径「**同一个 C 行的歌词应显示在同一水平线上**，即使是临时多声部也是一样的处理」）：

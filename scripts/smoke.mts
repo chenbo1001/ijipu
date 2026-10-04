@@ -14408,6 +14408,12 @@ runAdj363SaveTests()
       console.error('  ✗ adj651 连音线跨跳房子用例抛异常', e)
     }
     try {
+      runAdj689bTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj689b 同行连音线齐平用例抛异常', e)
+    }
+    try {
       runAdj652Tests()
     } catch (e) {
       failed++
@@ -16864,6 +16870,78 @@ function runAdj651Tests() {
   const a4 = guardSeq.events.filter((e) => e.pitched !== false && (e.pitch ?? e.placed.audioPitch) === 'A4')
   check('adj651c 护栏：延续线区间内的**相邻同音**（非连线）照旧不合并（两个 `6` 各自发声）',
     a4.length === 2, JSON.stringify(a4.map((e) => [e.atMs, Math.round(e.durationMs)])))
+}
+
+/**
+ * adj689b（用户报「连音线错位问题」仍未完全解决）：**同一视觉行内所有连音线必须齐平**。
+ *
+ * 两个根因（都在本用例里被钉住）：
+ *  ① 基准 y 曾按"本条覆盖的区间"取 `max(高八度点数)`——同一行里含高八度点的区间与不含的
+ *     会一高一低（`(1'// 7// 6//)` vs `(6// 6/)`）；
+ *  ② 同一行可能有**多段 `{dsb}`**、各段下移量由"该段内容多密"决定而**互不相同**
+ *     （实测 15.77 / 16.74 / 15.77），连音线按各自段落下移 ⇒ 行内又岔开。
+ * 现在：基准按**整行**取，且**一行只认一个下移量**（`alignRowSlurBaselines`）。
+ */
+function runAdj689bTests() {
+  console.log('[154] 同一行连音线齐平（adj689b）')
+  const H = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  /**
+   * 用户原谱的第 3 行：一行里**三段 `{dsb}`，密度各不相同**（第 3 段最疏），
+   * 外加两处包络**之外**的连线 ⇒ 三个下移量并存。
+   */
+  const CODE =
+    H +
+    "Q: |/[-" +
+    '"3." {dsb (3// 2// 1//) (1// 1/) 7,/ 1- } (1\'// 7// 6//) (6// 6/) 5/ 6- |"p:2/4" 0 0/ 3\'/ ' +
+    '|]/"p:4/4" 6 0/ 3/ 7, {dsb 0/ 1// 2// } 0/ 6// 7// |"p:2/4" {dsb (3// 2// 1//) 1// } (1\'// 7// 6//) 6// 0/ 5/ |"p:4/4" 6--- ||\n' +
+    'C: 绿@@肥@@红瘦@@"男."知否\n'
+  const lay = layoutScore(parseJps(CODE), defaultPageConfig)
+  const p = lay.pages[0]
+  /**
+   * 行顶 = 未被 `{dsb}` 下移的主旋律音符的 y（带 `parentY` 的是下层声部）。
+   * 这里用**段层音符的 `parentY`** 收行顶集合（段层是叠加层，它的 `parentY` 就是行顶）。
+   */
+  const rowTops = [...new Set(p.notes.map((n) => n.parentY).filter((v): v is number => v !== undefined))]
+  check('adj689b 用例成立：本行存在多个互不相同的段层下移量',
+    (p.rowSlides?.size ?? 0) >= 1 && rowTops.length >= 1,
+    JSON.stringify({ rowSlides: [...(p.rowSlides ?? new Map()).entries()], rowTops }))
+  /** 同一行（`rowTop` 相同）的主旋律连线：y 必须只有**一个值** */
+  const bad: string[] = []
+  for (const rt of rowTops) {
+    const ys = [...new Set(p.slurs.filter((s) => s.layerBase === undefined && s.rowTop === rt).map((s) => s.y))]
+    if (ys.length > 1) bad.push(`行顶=${rt} y=[${ys.join(',')}]`)
+  }
+  check('adj689b **同一视觉行内所有连音线齐平**（行内 y 只有一个值）', bad.length === 0, bad.join(' | '))
+  /**
+   * 且齐平之后仍在"该行最高的元素顶"之上：取该行最低声部处的连线为基准——
+   * 行内连线 y 必须**高于**该行最低声部的数字顶（否则线会横穿音符）。
+   */
+  const rowTop0 = rowTops[0]
+  const slurs0 = p.slurs.filter((s) => s.layerBase === undefined && s.rowTop === rowTop0)
+  let lowVoice = rowTop0
+  for (const n of p.notes) {
+    if (n.parentY !== undefined && Math.abs(n.parentY - rowTop0) < 0.5) lowVoice = Math.max(lowVoice, n.y)
+  }
+  check('adj689b 齐平后的连线仍**高于**该行所有音符（不与数字/减时线交叉）',
+    slurs0.length > 0 && slurs0.every((s) => s.y < lowVoice - defaultPageConfig.note_size * 0.8),
+    JSON.stringify({ y: slurs0.map((s) => s.y), lowVoice }))
+  /**
+   * 两条布局路径都要覆盖（AGENTS 铁律 5）：时值优先（`duration`）下同样齐平。
+   */
+  const durLay = layoutScore(parseJps(CODE), { ...defaultPageConfig, noteSpaceLayout: 'duration' })
+  const dbad: string[] = []
+  for (const rt of [...new Set(durLay.pages[0].notes.map((n) => n.parentY).filter((v): v is number => v !== undefined))]) {
+    const ys = [...new Set(durLay.pages[0].slurs.filter((s) => s.layerBase === undefined && s.rowTop === rt).map((s) => s.y))]
+    if (ys.length > 1) dbad.push(`行顶=${rt} y=[${ys.join(',')}]`)
+  }
+  check('adj689b 时值优先（`noteSpaceLayout: duration`）路径同样齐平', dbad.length === 0, dbad.join(' | '))
+  /**
+   * 护栏：**没有 `{dsb}` 的谱面零位移**（老谱面连音线位置一字不动）。
+   */
+  const plain = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 (3 4) 5 6 | 1 2 3 4 |\n'
+  const plainLay = layoutScore(parseJps(plain), defaultPageConfig)
+  check('adj689b 护栏：不含 `{dsb}` 的谱面不产生任何行下移（连音线零位移）',
+    (plainLay.pages[0].rowSlides?.size ?? 0) === 0, JSON.stringify([...(plainLay.pages[0].rowSlides ?? new Map())]))
 }
 
 /**
