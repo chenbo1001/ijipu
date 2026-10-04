@@ -3738,40 +3738,15 @@ export function layoutScore(
   const highOf = (n: PlacedToken) =>
     n.token.kind === 'note' && n.token.octaveShift > 0 ? n.token.octaveShift : 0
   /**
-   * 连音符覆盖范围内所有音符的最大高音点数（adj44：线需避开其下全部音符的
-   * 高八度点，而不只端点；否则中间音符的高音点会与线交叉）。
-   */
-  const maxHiInRange = (fromIdx: number, toIdx: number): number => {
-    let m = 0
-    for (let i = fromIdx; i <= toIdx; i++) {
-      const n = notesByIndex.get(i)
-      if (n) m = Math.max(m, highOf(n))
-    }
-    return m
-  }
-  /**
-   * 连音符覆盖范围内所有音符的最大上方修饰符层数（adj132：波音/颤音/顿音等
-   * & 修饰符画在数字上方，连音线需在其上；括号 zkh/ykh 与右侧的 hx 不占上方层）。
-   */
-  const maxSymInRange = (fromIdx: number, toIdx: number): number => {
-    let m = 0
-    for (let i = fromIdx; i <= toIdx; i++) {
-      const n = notesByIndex.get(i)
-      if (n && n.token.kind === 'note') {
-        // adj294：括号 zkh/ykh 已独立为 bracket token（不入修饰符层），hx 在右侧不占上方层
-        const cnt = n.token.symbols.filter((s) => s !== 'hx').length
-        m = Math.max(m, cnt)
-      }
-    }
-    return m
-  }
-  /**
    * 该行连音线基准 y（adj60 层级化）：线底距「数字顶（无高八度）或最高高八度点顶（有）」LAYER_GAP=2；
    * 线为 stroke（中心 y，宽 SLUR_W）→ 中心 = 元素顶 - LAYER_GAP - SLUR_W/2。
    * 高八度点层顶 = 基线 - 0.8×noteSize - LAYER_GAP - 2r - (hi-1)×INNER_GAP（octaveTopY）。
    * adj132：再上移 修饰符层数 ×（符号高 + 层距）；adj135：取消倚音自动避让
    * （影响所有连音线），改用 (+ 手动抬升。
    * 嵌套错开：外层线上移 raise（仅当确实包含内层线时，adj44）。
+   *
+   * adj689：`hi`/`symCount` 一律按**整行**给出（见 `rowSlurY`）——"线要避开其下所有音符的
+   * 高八度点/修饰符"这条口径从"本条覆盖的区间"扩到"整行"。
    */
   const slurYFor = (note: PlacedToken, hi: number, symCount: number, raise: number) => {
     const s = noteScaleOf(m.noteSize)
@@ -3781,6 +3756,32 @@ export function layoutScore(
     base -= symCount * (10 * s + LAYER_GAP * s)
     return base - raise
   }
+  /**
+   * adj689（用户报「同一行连音线垂直错位，不有多处」）：**同一视觉行内所有连音线共用一条基准 y**。
+   *
+   * 原口径是"每条线按**自己覆盖的音符区间**取 `max(高八度点数)` 与 `max(修饰符层数)`"，
+   * 于是同一行里两条**本应齐平**的连线会一高一低——用户原谱 `(1'// 7// 6//) (6// 6/)`：
+   * 前者区间含 `1'` ⇒ 抬过一个高八度点（y=278.1），后者区间只含 `6// 6/` ⇒ 不抬（y=281.7），
+   * 同一小节里差 **3.6px**；其它行里还有差到十几 px 的。
+   *
+   * 记谱惯例也是"同一行连音线同高"。所以改成按**整行**求"该行最高的元素顶"，
+   * 行内共用；`raise`（嵌套错开 / `(+` `(-` 手动升降）仍在基准之上逐条叠加——那才是该错开的部分。
+   */
+  const maxHiOfRow = (rowIdx: number): number => {
+    let hi = 0
+    for (const n of rows[rowIdx]?.notes ?? []) hi = Math.max(hi, highOf(n))
+    return hi
+  }
+  const maxSymOfRow = (rowIdx: number): number => {
+    let sym = 0
+    for (const n of rows[rowIdx]?.notes ?? []) {
+      if (n.token.kind === 'note') sym = Math.max(sym, n.token.symbols.filter((x) => x !== 'hx').length)
+    }
+    return sym
+  }
+  /** 某行连音线的基准 y（不含该条自己的嵌套抬升 / `(+` `(-` 升降） */
+  const rowSlurY = (rowIdx: number, anchor: PlacedToken, raise: number): number =>
+    slurYFor(anchor, maxHiOfRow(rowIdx), maxSymOfRow(rowIdx), raise)
   /** 行内跳房子线最低 y + 2s（adj134：连音线不得高于跳房子线，避免与其重叠） */
   const voltaFloorY = (rowIdx: number): number | null => {
     const r = rows[rowIdx]
@@ -3867,16 +3868,14 @@ export function layoutScore(
         // 起点=开始音符数字槽中心右 1px×s、终点=结束音符数字槽中心左 1px×s
         x1: r1(a.x + halfDig + sSlur),
         x2: r1(b.x + halfDig - sSlur),
-        y: r1(
-          Math.max(
-            slurYFor(a, maxHiInRange(sp.start, sp.end), maxSymInRange(sp.start, sp.end), raise),
-            voltaFloorY(rowA) ?? -Infinity,
-          ),
-        ),
+        // adj689：基准 y 取**整行**的（不再取本条覆盖区间的）⇒ 同行连音线齐平
+        y: r1(Math.max(rowSlurY(rowA, a, raise), voltaFloorY(rowA) ?? -Infinity)),
         depth: sp.depth,
         style,
         // 仅平均连音组 (y...) 标数字（普通连音线 (…) 不加，adj43）
         tupletCount: sp.tuplet ? noteCount : undefined,
+        // adj689：带上归属行号——`{dsb}` 下移包络内主旋律时据此筛选，避免误伤其它行
+        row: rowA,
       })
     } else if (rowB === rowA + 1 || sp.houseTie) {
       // 相邻行：上一行左半部（开始 → 行末小节线）、下一行右半部（边距 → 结束）；
@@ -3887,7 +3886,6 @@ export function layoutScore(
       // 延续线的语义本来就是"前面接过来了"，本来也不需要那一行紧邻 ⇒ 允许跨任意行，
       // 只在**终点所在行**画「该房子起始小节线 → 首音」那半条弧。
       const rA = rows[rowA]
-      const lastA = rA.notes[rA.notes.length - 1]
       // adj143：撑满行左半横线延伸到**页面右边距**（原连到行末小节线，效果不理想）；
       // adj199：自然宽行（未撑满，≤3 小节/最后一行）左半到行末小节线即可，不延伸到右边距
       const rowAEndBar = rowEndBarX(rowA)
@@ -3904,32 +3902,23 @@ export function layoutScore(
         pages[rA.page].slurs.push({
           x1: r1(a.x + halfDig + sSlur),
           x2: r1(xEndA),
-          y: r1(
-            Math.max(
-              slurYFor(a, maxHiInRange(sp.start, lastA.id.index), maxSymInRange(sp.start, lastA.id.index), raise),
-              voltaFloorY(rowA) ?? -Infinity,
-            ),
-          ),
+          y: r1(Math.max(rowSlurY(rowA, a, raise), voltaFloorY(rowA) ?? -Infinity)),
           depth: sp.depth,
           style: crossRowStyle,
           tupletCount: sp.tuplet ? noteCount : undefined,
           half: 'l', // 左半部：从最低处到行末最高点，右侧开口
+          row: rowA, // adj689：归属行（下移筛选用）
         })
       }
-      const firstB = rows[rowB].notes[0]
       pages[rows[rowB].page].slurs.push({
         x1: r1(xStartB),
         x2: r1(b.x + halfDig - sSlur),
-        y: r1(
-          Math.max(
-            slurYFor(b, maxHiInRange(firstB.id.index, sp.end), maxSymInRange(firstB.id.index, sp.end), raise),
-            voltaFloorY(rowB) ?? -Infinity,
-          ),
-        ),
+        y: r1(Math.max(rowSlurY(rowB, b, raise), voltaFloorY(rowB) ?? -Infinity)),
         depth: sp.depth,
         style: crossRowStyle,
         tupletCount: sp.tuplet ? noteCount : undefined,
         half: 'r', // 右半部：从行首最高点到最低处，左侧开口
+        row: rowB, // adj689：右半部画在终点行
       })
     }
   }
@@ -3993,6 +3982,14 @@ export function layoutScore(
   placeSegmentOverlays(pages, result, config, keySemitone)
 
   /**
+   * adj689（用户口径）：**同组词部与曲部的间距，以上面曲部最低的那个声部的位置为曲部的基线**。
+   *
+   * 放在段层叠加**之后**：`{dsb}` 把包络内的主旋律下移 `dy/2`（下层 = 最低的那个声部），
+   * 这个位移只有叠加完才知道；而歌词是按本行行顶那个音符排的，于是会落在已下移的声部里面。
+   */
+  alignLyricsToLowestVoice(pages, config)
+
+  /**
    * adj673（用户要求）：「`"p:4/4" 6--- ||` 小节线后面的空白过大」——把"独占小节的多拍长音"的
    * 块撑到小节内容右界（只改块宽/段位，不动 x）。放在段层叠加**之后**：此时小节线已全部就位。
    */
@@ -4008,6 +4005,95 @@ export function layoutScore(
   const configKey = JSON.stringify(config)
   // adj651c：延续类连音线（跳房子孤立 `)`）随排版结果交给播放端——演奏上要并成一个长音
   return { pages, config, configKey, continuationTies }
+}
+
+/**
+ * adj689（用户口径）：**同组词部与曲部的间距，以上面曲部最低的那个声部的位置为曲部的基线**。
+ *
+ * ## 是什么问题
+ * `{dsb}` 会把包络内的主旋律下移 `dy/2` —— 它就是"最低的那个声部"。而歌词行原本挂在
+ * **行顶那个音符**之下（`lyricRowY` ≈ 行顶 + `1.7×字号` + quci）；行顶那个音符**不一定在包络里**，
+ * 于是歌词停在"未下移"的位置，被已下移的声部（数字底 / 双层减时线底 / 连音线）压住。
+ *
+ * ## 做法（只一条规则，不动行高、不动小节线、不动段层）
+ *  · 逐行（视觉行）求出该行的**最低声部位置** `low`：行内所有音符的最大 `y`
+ *    （段层音符按 `parentY` 归到它所属的行；被下移的下层声部因此被算进来）；
+ *  · 该行的歌词目标基线 = `low + 1.7×字号 + quci`（与 `lyricRowY` **同一套常数**）；
+ *  · 把该行的**每一条歌词行**整体挪 `目标基线 − 实际基线`——行内所有字同量 ⇒ 仍同一水平线（adj684），
+ *    行间相对间距不变（多条 `C:` 行时不会挤在一起）。
+ *
+ * 没有 `{dsb}` 的行 `low` 就是行顶本身 ⇒ 目标位置 = 原位置，**位移恒为 0**（老谱面一字不动）。
+ */
+function alignLyricsToLowestVoice(pages: ScorePage[], config: PageConfig): void {
+  const ns = config.note_size
+  for (const p of pages) {
+    /**
+     * 每行的**行顶** = 该行**未带 `parentY` 的主旋律音符**的 `y`
+     * （带 `parentY` = 已被 `{dsb}` 下移的下层声部，它是"最低声部"、不是行顶）。
+     */
+    const rowTops = [...new Set(p.notes.filter((n) => !n.segment && n.parentY === undefined).map((n) => n.y))].sort(
+      (a, b) => a - b,
+    )
+    if (rowTops.length === 0) continue
+    /** 每行的最低声部位置（初值 = 行顶）；以及该行有没有 `{dsb}` */
+    const lowOfRow = new Map<number, number>()
+    const dsbOfRow = new Map<number, boolean>()
+    for (const rowTop of rowTops) {
+      lowOfRow.set(rowTop, rowTop)
+      dsbOfRow.set(rowTop, false)
+    }
+    for (const n of p.notes) {
+      // 只有"带 parentY"的音符（下层声部 / 段层）才参与"最低声部"计算
+      if (n.parentY === undefined) continue
+      const rowTop = rowTops.find((v) => Math.abs(v - n.parentY!) < 0.5)
+      if (rowTop === undefined) continue
+      lowOfRow.set(rowTop, Math.max(lowOfRow.get(rowTop) as number, n.y))
+      // 只有 `{dsb}`（临时多声部）才有"上下两声部"；`{bz}` / `{tp}` 不改变最低声部
+      if (n.segment?.type === 'dsb') dsbOfRow.set(rowTop, true)
+    }
+    /**
+     * **本谱的曲词间距**：由"第一行的行顶 → 该行第一条歌词"的**实测**距离反推
+     * （`lyricRowY` = 行顶 + `noteSize×1.7` + `quci`；`quci` 是谱面级设置，
+     * 这里不重复它的取值逻辑、直接量出来 ⇒ 任何 set 值都自适应）。
+     */
+    const firstLyricY = p.lyrics.length > 0 ? Math.min(...p.lyrics.map((l) => l.y)) : Number.NaN
+    const firstRowTop = rowTops[0]
+    const baseGap = Number.isFinite(firstLyricY) ? firstLyricY - firstRowTop : ns * 2.15
+    /** 末行行顶——歌词归属判据用（歌词必在所属行**最低声部之下**、下一行行顶之上） */
+    /** 逐条歌词行：先归行，再按"最低声部为基线"定目标 */
+    const lines = new Map<number, PlacedLyric[]>()
+    for (const l of p.lyrics) {
+      const key = Math.round(l.y * 10) / 10
+      const arr = lines.get(key)
+      if (arr) arr.push(l)
+      else lines.set(key, [l])
+    }
+    for (const arr of lines.values()) {
+      const y0 = arr[0].y
+      /**
+       * 归行：歌词必在所属行**全部声部之下** ⇒ 取"最后一个行顶不高于它的行"。
+       * （不能用节层/段层的 y 当行顶候选：那些已被下移，会把归属判错。）
+       */
+      let rowTop = rowTops[0]
+      for (const rt of rowTops) {
+        if (y0 >= rt - 1e-6) rowTop = rt
+      }
+      // 本行没有临时多声部（`{dsb}`） ⇒ 最低声部就是行顶，目标位置 = 原位置（零位移）
+      if (!dsbOfRow.get(rowTop)) continue
+      /**
+       * 用户口径：「临时多声部的曲部与词部间距，应用与（普通）声部曲部与词部**相同的间距**大小」
+       * ⇒ 目标基线 = **最低声部**的位置 + **本谱实测的那个间距**。
+       */
+      const target = r1((lowOfRow.get(rowTop) as number) + baseGap)
+      const dy = r1(target - y0)
+      if (dy === 0) continue
+      for (const l of arr) {
+        l.y = r1(l.y + dy)
+        // 歌词注释与本字同基线（adj677/adj678）——一起搬
+        if (l.noteY !== undefined) l.noteY = r1(l.noteY + dy)
+      }
+    }
+  }
 }
 
 /**
@@ -4058,6 +4144,16 @@ function buildLyricMaps(lyrics: LyricLine[]): Map<number, LyricChar>[] {
 }
 
 function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: PageConfig, keySemitone: number): void {
+  /**
+   * adj689：**视觉行号索引**（`页|y` → 行号）——与 `layoutScore` 给连音线编号的 `rows` 分组
+   * **同一口径**（页内按 y 去重升序），供 `shiftEnvelopeDown` 精确筛选"本行的连音线"
+   * （group+voice 不足以区分同组同声部的多行）。
+   */
+  const rowIdxOfPageY = new Map<string, number>()
+  for (const p of pages) {
+    const ys = [...new Set(p.notes.map((n) => n.y))].sort((a, b) => a - b)
+    ys.forEach((y, i) => rowIdxOfPageY.set(`${p.index}|${Math.round(y * 10)}`, i))
+  }
   for (let gi = 0; gi < result.groups.length; gi++) {
     const group = result.groups[gi]
     const tokens = group.music.tokens
@@ -4220,7 +4316,7 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
      * `|note.y − row.y| ≤ 0.5` 对谁都不成立 ⇒ **整段静默失效**（两层完全重合，E-2026-352）。
      * 同时 y 取**原始快照** `origY`，不再读可能已被改过的 `note.y`。
      */
-    const rowOf = (beat: number): { y: number; right: number; page: number } => {
+    const rowOf = (beat: number): { y: number; right: number; page: number; row: number } => {
       let idx = cnt - 1
       for (let k = 0; k < cnt; k++) {
         if (beat < spans[k].startBeat + spans[k].beats - 1e-9) {
@@ -4234,7 +4330,9 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         const q = placed[m]
         if (q.page === p.page && Math.abs(origY[m] - origY[idx]) < 0.5) right = Math.max(right, q.note.x + q.note.width)
       }
-      return { y: origY[idx], right, page: p.page }
+      // adj689：视觉行序号（与连音线带的 `row` 同一套编号）——段层下移时据此精确筛选
+      const row = rowIdxOfPageY.get(`${p.page}|${Math.round(origY[idx] * 10)}`) ?? -1
+      return { y: origY[idx], right, page: p.page, row }
     }
 
     /**
@@ -4749,6 +4847,8 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
             : null,
           playable: isPlayableNote(t),
           segment: { type: seg.type, layer: 'upper', ...(seg.pass !== undefined ? { pass: seg.pass } : {}) },
+          // adj689：记下所属视觉行的行顶——段层是"叠加后处理"，按行对齐歌词/推移都要靠它反查
+          parentY: r1(row.y),
           // bz：段内容 = 伴奏声部；dsb：段内容 = 主声部（音色与主旋律一致）；
           // adj629 tp：替谱段 = **该遍的主旋律本体**（音色/力度与主旋律一致，色块同色）
           playVoice: isDsb || isTp ? 'main' : 'accomp',
@@ -5262,7 +5362,7 @@ function shiftEnvelopeDown(
   cnt: number,
   envStart: number,
   envEnd: number,
-  row: { y: number; page: number },
+  row: { y: number; page: number; row: number },
   dy: number,
 ): void {
   const movedIds = new Set<number>()
@@ -5277,6 +5377,8 @@ function shiftEnvelopeDown(
     // adj427：dsb 重叠区的下层主旋律 = **第二声部**（用第 2 可用音色 + 0.75 力度，
     // 色块也随之换色）——上层（段内容）仍为主声部，音色与色块不变。
     p.note.playVoice = 'second'
+    // adj689：记下所属视觉行的行顶（段层叠加后"这段属于哪一行"要靠它反查）
+    p.note.parentY = r1(row.y)
     movedIds.add(p.note.id.index)
     xMin = Math.min(xMin, p.note.x)
     xMax = Math.max(xMax, p.note.rightX ?? p.note.x + p.note.width)
@@ -5305,10 +5407,17 @@ function shiftEnvelopeDown(
      * （`layerBase` 有值 = 段层弧线，它们本来就在段层坐标系里，不能再被搬）、
      * 且 x 落在包络内的连音线。adj670 起**不再把下层连音线翻到下方**——两层放不下的问题
      * 由 `segmentMinGap` **撑开层间距**解决（用户口径：「连音线是在下面的**反转的**」）。
+     *
+     * adj689（**同一现象再次复发**）：group+voice **不足以**区分——同一组同一声部的**每一行**
+     * 都可能各有一个 `{dsb}`，而"包络的 x 区间"在页面上**跨行天然重叠**。本轮用户原谱里
+     * 第 1 行的 `(1'// 7// 6//)` 就被第 2、3 行的包络各下移一次（合计 32.5px，正确值 16.7px）。
+     * 现在以**行号**为准（`PlacedSlur.row`，由配对时的视觉行分组带出）；行号缺失时退回旧判据。
      */
     for (const s of p.slurs) {
       if (s.layerBase !== undefined) continue
-      if (s.group !== undefined && (s.group !== gi || s.voice !== voice)) continue
+      if (s.row !== undefined) {
+        if (s.row !== row.row) continue
+      } else if (s.group !== undefined && (s.group !== gi || s.voice !== voice)) continue
       if (!(s.x1 >= xMin - 1e-6 && s.x1 <= xMax + 1e-6)) continue
       s.y = r1(s.y + dy)
     }

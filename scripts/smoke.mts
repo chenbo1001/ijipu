@@ -16700,9 +16700,21 @@ function runAdj651Tests() {
   check('adj651 连音线总数 = 6（`(5 |[1. 5)` + `(6 6)` ×3 各房子 + 房子 2 / 结束句两条延续线）',
     p651.slurs.length === 6, JSON.stringify(p651.slurs.map((s) => [s.x1, s.x2, s.half])))
   const halfL = p651.slurs.filter((s) => s.half === 'l')
+  /**
+   * adj689 口径变更：连音线基准 y 从"**本条覆盖的区间**的最大高八度点/修饰符层"
+   * 改为"**整行**的最大值"（同一视觉行内所有连音线齐平，用户报「同一行连音线垂直错位」）。
+   *
+   * 本用例第 1 行里：房子 1 的 `(5/ … 5/)` 区间含高八度 `5'/` ⇒ 抬过 1 个高八度点；
+   * `(6/ 6)` 不含 ⇒ 按行基准也一起被抬到同一高度。于是"这一行有连线"的判据不再依赖
+   * 写死的 `rowA651 − 12.1`，改为"行内连线**同高**且位于该行音符之上"。
+   */
+  const row1Slurs = p651.slurs.filter((s) => s.y < rowA651)
   check('adj651 **不画左半部**：上一行不因延续线多出一截短线（房子 1 那条弧保持干净）',
-    halfL.length === 0 && p651.slurs.filter((s) => Math.abs(s.y - (rowA651 - 12.1)) < 2).length === 2,
-    JSON.stringify(halfL.map((s) => [s.x1, s.x2])))
+    halfL.length === 0 &&
+      row1Slurs.length === 2 &&
+      row1Slurs.every((s) => s.y === row1Slurs[0].y) &&
+      row1Slurs[0].y < rowA651 - defaultPageConfig.note_size,
+    JSON.stringify({ halfL: halfL.map((s) => [s.x1, s.x2]), row1: row1Slurs.map((s) => s.y) }))
   const contOf = (bar: typeof v1, note: typeof h2) =>
     p651.slurs.find(
       (s) => s.half === 'r' && Math.abs(s.x1 - (bar?.x ?? 0)) < 0.6 &&
@@ -16808,7 +16820,11 @@ function runAdj651Tests() {
     JSON.stringify(halvesReal.map((s) => s.y)))
   check('adj651b 起点行**不多画**任何半条弧（左半部仍不画，第 1 行保持干净）',
     pReal.slurs.filter((s) => s.half === 'l').length === 0 &&
-      pReal.slurs.filter((s) => Math.abs(s.y - (rowsReal[0] - 12.1)) < 3).length === 2,
+      /** adj689：起点行的连线按**整行基准**齐平（不再依赖写死的 `rowsReal[0] − 12.1`） */
+      (() => {
+        const row1 = pReal.slurs.filter((s) => s.y < rowsReal[1] - 40)
+        return row1.length === 2 && row1.every((s) => s.y === row1[0].y) && row1[0].y < rowsReal[0] - defaultPageConfig.note_size
+      })(),
     JSON.stringify(pReal.slurs.map((s) => [s.y, s.half])))
 
   /**
