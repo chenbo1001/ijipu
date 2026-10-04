@@ -157,6 +157,31 @@ export const VOLTA_COMMENT_FONT_RATIO = 0.4
 // ---- 注释 ----
 /** 歌词注释字号与歌词字号的比值（0.8×18≈14） */
 export const COMMENT_FONT_RATIO = 0.8
+
+/**
+ * adj672：**歌词注释**（`C: 一"副歌" 二` 里那个 `"副歌"`）的字号。
+ *
+ * 渲染与布局避让必须用同一把尺子（布局要按它估宽、才能判断"放不放得下"）。
+ */
+export const lyricCommentFontSize = (geciSize: number) => Math.max(9, Math.round(geciSize * COMMENT_FONT_RATIO))
+
+/**
+ * adj672：歌词注释的**墨迹宽估算**——汉字按 1 字宽、拉丁/数字按 0.55 字宽。
+ *
+ * 注释是宿主字体渲染的自由文本，`getBBox` 在布局阶段拿不到；这里用"足够准的估算"即可：
+ * 避让只需要知道"大概多宽"，宁可按上限估（估宽 → 更早触发上下错开，不会压字）。
+ */
+export const lyricCommentWidth = (text: string, fontSize: number) =>
+  [...text].reduce((acc, ch) => acc + (/\p{Script=Han}/u.test(ch) ? fontSize : fontSize * 0.55), 0)
+
+/**
+ * adj672（用户要求）：「歌词的注释，也以**不与歌词重叠**为宜，否则**前后两歌词之间**调整注释的位置
+ * 到不重叠，如果无法不重叠，则再**上下调整**」。
+ *
+ * 这是歌词注释与**所属歌词字左缘**之间的默认净距（注释右缘 → 该字左缘）。
+ * 也是"在前后两字之间的空档里右对齐"时贴住本字的间距。
+ */
+export const LYRIC_COMMENT_GAP = 3
 /** 音符注释字号与音符字号的比值（adj62：音符字体高度的一半，0.5×18=9） */
 export const NOTE_COMMENT_FONT_RATIO = 0.3
 /**
@@ -418,6 +443,60 @@ export const TP_LAYER_TOP_GAP_DEFAULT = 7
  * （曲行之下、歌词行之上），括号往左越出小节线也不会压到别的东西，所以单给一个更大的间距。
  */
 export const TP_BRACKET_GAP = (noteSize: number) => noteSize * 0.75
+
+// ---- 临时多声部段（adj667：{dsb … } 的大括号横向几何）----
+/**
+ * adj667（用户口径「元素布局时不得重叠，除非明确要重叠」）：`{dsb … }` 大括号的**理想横向宽高比**。
+ *
+ * 大括号用填充图形（`public/icons/大括号.svg`）：它是**填充**字形，粗细与形状是同一个轮廓，
+ * 等比铺满段高会越看越像一坨黑；要"细"只能**横向收**。`0.1 × 段高` 是唯一旋钮——
+ * 调大更饱满、调小更细（用户 adj671 口径：由 0.12 调到 **0.1**）。
+ *
+ * ⚠️ 这只是**理想值**：真实宽度由布局按"两侧邻居的墨迹边界"钳制（见 `layout/index.ts`
+ * 的 `placeSegmentOverlays`），空间不足时变窄，**绝不允许越出去压到相邻音符**。
+ * 布局与渲染共用本常量（渲染不再自己按高度算）。
+ */
+export const SEGMENT_BRACE_ASPECT = 0.1
+
+/** adj667：大括号墨迹的**最小宽度**（再窄就看不出来了；此时宁可略微靠近但绝不越界） */
+export const SEGMENT_BRACE_MIN_W = 1.6
+
+/**
+ * adj668：**行内"行顶 → 音符基线"的比例**（行顶 = 基线 − 该比例 × 字号）。
+ *
+ * 数值与布局既有写法一致（`m.noteSize * 1.1`，见 `placeMusicRow*` 的 `barNoteY`）。
+ * 抽出来是因为"临时段的纵向余量"必须按**同一把尺子**判断"是否伸出了行顶/行底"，
+ * 两处各写一个 1.1 早晚会漂。
+ */
+export const NOTE_BASELINE_RATIO = 1.1
+
+/** adj668：**行内"音符基线 → 曲部下沿"的比例**（= 曲部行高 `1.7×字号` − 行顶偏移） */
+export const NOTE_BOTTOM_RATIO = 0.6
+
+/**
+ * adj667：大括号墨迹与相邻元素墨迹之间的**净距上限**（px）。
+ * 空间富余时按此留白；空间紧张时**先让净距、再压括号宽度**（保证不重叠优先）。
+ */
+export const SEGMENT_BRACE_INK_GAP = 0.5
+
+/**
+ * adj670（用户口径：「(1'// 7// 6//) (6// 6/) 这部分的连音线是在下面的**反转的**」）：
+ * `{dsb}` 上下两层之间**必须容纳**的内容 = 上层声部的**减时线层底** + 下层声部连音线的**弧顶**。
+ * 于是布局要按需把 `segmentRowGap.dsb` **撑到这个下限**（否则连音线只能翻到下方，用户不接受）。
+ *
+ * 本常量是"上层墨迹底 与 下层弧顶"之间还要留的净距。
+ */
+export const SEGMENT_LAYER_CLEARANCE = 2
+
+/** 连音线垂度（弧高）的**下限**：极窄连音线不至于细成一条看不见的线（adj649） */
+export const SLUR_SAG_MIN = 2.5
+/**
+ * 连音线垂度（弧高）的**上限**：`垂度 = clamp(跨度 × 0.28, SLUR_SAG_MIN, SLUR_SAG_MAX)`（adj649）。
+ *
+ * adj670：布局算"`{dsb}` 两层最小间距"时拿它当**保守上界**——那时还不知道连音线的实际跨度
+ * （x 方向要等放置完），只能按最大垂度预留，宁可略松也不让弧顶压到上层减时线。
+ */
+export const SLUR_SAG_MAX = 9
 
 // ============================================================
 // 位置计算（纯函数，供 render / layout 共用）

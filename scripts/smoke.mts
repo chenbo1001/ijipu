@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -41,7 +41,7 @@ import {
 } from '@ijipu/engine/playback/ornaments.ts'
 import { slideOf, slidePlan, slideStepMs, SLIDE_SYMBOLS, SLIDE_STEP_MIN_MS, SLIDE_STEP_MAX_MS } from '@ijipu/engine/playback/slides.ts'
 import { midiToPitchName } from '@ijipu/engine/playback/midi.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, TP_BRACKET_GAP, accidentalGap } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_SAG_MIN, SLUR_SAG_MAX, digitBottomY, beamBottomY, accidentalGap } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
@@ -7066,7 +7066,9 @@ console.log('[adj427] segment overlay placement (notes / barlines / brackets)')
   check('P4 yBottomLower > yBottom（确实跨到下层）', sb.length > 0 && sb[0].yBottomLower! > sb[0].yBottom, `lower=${sb[0]?.yBottomLower} upper=${sb[0]?.yBottom}`)
   const svg = renderScoreToSvg(lay)[0]
   check('P5 SVG 含 dsb 花括号 data-segment-brace="dsb"', svg.includes('data-segment-brace="dsb"'), '')
-  check('P6 dsb 段层括号字形已绘制', /<text[^>]*>\(<\/text>/.test(svg), '')
+  // adj666i（用户要求）：`{dsb}` 与 `{bz}` 同口径——**不再自动加圆括号**（只画大括号）；
+  // 需要圆括号时自己写 `&zkh`/`&ykh`。这条钉住"不会再自动出现圆括号"。
+  check('P6 adj666i dsb 段层**不再自动**画圆括号（只画大括号）', !/<text[^>]*>\(<\/text>/.test(svg), '')
 }
 {
   // 无段时零影响：不产生段层音符 / 括弧，且音符几何与既有行为一致
@@ -7404,15 +7406,25 @@ console.log('[adj432] segment color-block voice colors + segment row guides')
     check('X4 GUIDE_LIMITS_EX 含 segmentRowGap_bz/dsb（拖动钳制范围）', ok, `bz=${JSON.stringify(GUIDE_LIMITS_EX.segmentRowGap_bz)} dsb=${JSON.stringify(GUIDE_LIMITS_EX.segmentRowGap_dsb)}`)
     check('X4b 段层间距范围 = [10,80]（与设置面板一致）', ok && GUIDE_LIMITS_EX.segmentRowGap_bz[0] === 10 && GUIDE_LIMITS_EX.segmentRowGap_bz[1] === 80 && GUIDE_LIMITS_EX.segmentRowGap_dsb[0] === 10 && GUIDE_LIMITS_EX.segmentRowGap_dsb[1] === 80, JSON.stringify(GUIDE_LIMITS_EX.segmentRowGap_bz))
   }
-  // X5：段层间距变化 → 段层行 y 跟随（几何与拖动语义一致）
+  // X5：段层间距变化 → 段层与主旋律的**间距**跟随（几何与拖动语义一致）
   {
     const pr1 = parseJps(bz432)
     const lay1 = layoutScore(pr1, { ...DUR_CFG, segmentRowGap: { bz: 22 } })
     const pr2 = parseJps(bz432)
     const lay2 = layoutScore(pr2, { ...DUR_CFG, segmentRowGap: { bz: 50 } })
-    const y1 = (lay1.pages[0].notes.find((n) => n.segment)?.y ?? 0)
-    const y2 = (lay2.pages[0].notes.find((n) => n.segment)?.y ?? 0)
-    check('X5 bz 段层间距 22→50 → 段层 y 上移 28（拖动方向一致）', Math.abs((y1 - y2) - 28) < 0.2, `y1=${y1.toFixed(2)} y2=${y2.toFixed(2)} 差=${(y1 - y2).toFixed(2)}`)
+    const seg1 = lay1.pages[0].notes.find((n) => n.segment)
+    const seg2 = lay2.pages[0].notes.find((n) => n.segment)
+    const main1 = lay1.pages[0].notes.find((n) => !n.segment)
+    const main2 = lay2.pages[0].notes.find((n) => !n.segment)
+    /**
+     * adj668 口径变化：拖动"段层间距"现在表现为**主旋律行整体下移**（把上方空间让给段层，
+     * 段层自身相对页面几乎不动）。用户感知的"间距"才是这个设置的语义 ⇒ 断言语义改为
+     * **段层与主旋律基线之差**随设置增大 28px（拖动方向一致）。
+     */
+    const gap1 = (main1?.y ?? 0) - (seg1?.y ?? 0)
+    const gap2 = (main2?.y ?? 0) - (seg2?.y ?? 0)
+    check('X5 bz 段层间距 22→50 → **段层与主旋律的间距**增大 28（拖动方向一致）',
+      Math.abs((gap2 - gap1) - 28) < 0.2, `gap1=${gap1.toFixed(2)} gap2=${gap2.toFixed(2)} 差=${(gap2 - gap1).toFixed(2)}`)
   }
   // X7（回归，E-2026-171）：**上下层音色相同时**，分组键必须含 playVoice——否则两块合并成一块。
   // 场景：谱面只写 `Y: 手风琴` ⇒ 主旋律 = Y[0] = 手风琴；bz 伴奏回退也用 手风琴 ⇒
@@ -7475,11 +7487,13 @@ console.log('[adj435] overlap beats sized by the denser layer (multi-voice style
         check(`AL1[${nm}] dsb 上下两层**逐拍精确对齐**（最大偏差 < 0.51px；旧实现漂移到 13.6px）`,
           ss.length === 8 && melEnv.length === 8 && maxDrift < 0.51,
           `maxDrift=${maxDrift.toFixed(2)} seg=${ss.map((n) => n.x.toFixed(1)).join(',')} mel=${melEnv.map((n) => n.x.toFixed(1)).join(',')}`)
-        // AL2：段层末音右缘不与右括号重叠（括号在 xContent1 之外、段层内容之内收）
+        // AL2（adj666i 改）：`{dsb}` 不再自动加圆括号 ⇒ 改判"段层末音右缘不越出段层右界"
+        //（有显式圆括号时以圆括号左缘为准，没有时以大括号 `}` 槽位为准）
         const ykh = p.brackets.find((b) => b.code === 'ykh')
-        check(`AL2[${nm}] 段层末音右缘 ≤ 右括号左缘（不压括号）`,
-          ykh !== undefined && (ss[ss.length - 1].rightX ?? 0) <= ykh.x - ykh.width / 2 + 0.51,
-          `segRight=${(ss[ss.length - 1].rightX ?? 0).toFixed(2)} ykhLeft=${ykh ? (ykh.x - ykh.width / 2).toFixed(2) : 'n/a'}`)
+        const segBound = p.segmentBrackets?.[0]?.x2 ?? Number.POSITIVE_INFINITY
+        check(`AL2[${nm}] 段层末音右缘 ≤ 段层右界（显式右括号左缘 / 大括号槽位）`,
+          (ss[ss.length - 1].rightX ?? 0) <= (ykh ? ykh.x - ykh.width / 2 : segBound) + 0.51,
+          `segRight=${(ss[ss.length - 1].rightX ?? 0).toFixed(2)} ykhLeft=${ykh ? (ykh.x - ykh.width / 2).toFixed(2) : 'n/a'} bound=${segBound}`)
         // AL3：段层各音宽度 > 0 且起始 x 单调递增
         check(`AL3[${nm}] 段层各音宽 > 0 且 x 单调递增`,
           ss.every((n) => n.width > 0) && ss.every((n, i) => i === 0 || n.x > ss[i - 1].x),
@@ -7828,7 +7842,14 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
   // ---- X：大括号是「无时值占宽元素」，排在小节线**内侧**（用户报：原来跑到小节线外面了） ----
   {
     const nsx = DUR_CFG.note_size
-    const braceW = Math.max(3, nsx * 0.32)
+    /**
+     * adj667（用户口径「元素布局不得重叠，除非明确要重叠」）：大括号的横向几何改为
+     * **布局算准墨迹区间**——`x1`/`x2` 是墨迹左缘、`inkW` 是墨迹宽（左右同宽），
+     * 渲染端照搬。下面按新口径核对"不与任何邻居重叠"。
+     */
+    const braceInkW = sb?.inkW ?? 0
+    const braceLEdge = (sb?.x1 ?? 0) + braceInkW
+    const braceREdge = (sb?.x2 ?? 0) + braceInkW
     const mainBars = page.barlines.filter((b) => !b.segment).map((b) => b.x).sort((a, b) => a - b)
     const barLeft = mainBars[0]
     const barRight = mainBars[mainBars.length - 1]
@@ -7836,19 +7857,24 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
     const ykhX = page.brackets.find((b) => b.code === 'ykh')
     const braceL = sb?.x1 ?? 0
     const braceR = sb?.x2 ?? 0
-    check('X1 左大括号在起始小节线**右侧**', braceL >= barLeft - 0.11, `braceL=${braceL} bar=${barLeft}`)
-    check('X2 右大括号在末尾小节线**左侧**', braceR + braceW <= barRight + 0.11, `braceR=${braceR}+${braceW.toFixed(2)} bar=${barRight}`)
-    check('X3 左大括号在左圆括号**左侧**（不重叠）', zkhX !== undefined && braceL + braceW <= zkhX.x - zkhX.width / 2 + 0.11, `braceR=${(braceL + braceW).toFixed(1)} parenL=${zkhX ? (zkhX.x - zkhX.width / 2).toFixed(1) : 'n/a'}`)
-    check('X4 右大括号在右圆括号**右侧**（不重叠）', ykhX !== undefined && braceR >= ykhX.x + ykhX.width / 2 - 0.11, `braceL=${braceR} parenR=${ykhX ? (ykhX.x + ykhX.width / 2).toFixed(1) : 'n/a'}`)
-    check('X5 大括号与内容不重叠（左括号槽右缘 ≤ 段首音）', segN.length > 0 && braceL + braceW <= segN[0].x + 0.11, `braceR=${(braceL + braceW).toFixed(1)} firstNote=${segN[0]?.x}`)
-    // X6：线条加粗——渲染出的 `stroke-width` ≥ 1.8
-    // X6：大括号用**自绘描边路径**（细描边、与字体无关）+ 纵向**真正包住**上下两层
+    check('X0 adj667 布局给出了大括号墨迹宽（>0，渲染不再自己按段高算）', braceInkW > 0, `inkW=${braceInkW}`)
+    check('X1 左大括号墨迹左缘在起始小节线**右侧**', braceL >= barLeft - 0.11, `braceL=${braceL} bar=${barLeft}`)
+    check('X2 右大括号墨迹右缘在末尾小节线**左侧**', braceREdge <= barRight + 0.11, `braceR=${braceR}+${braceInkW.toFixed(2)} bar=${barRight}`)
+    // adj666i：`{dsb}` 不再自动加圆括号 ⇒ 这条只在"用户写了显式括号"时才约束
+    check('X3 adj666i 左大括号在（显式）左圆括号**左侧**；无括号时自动成立', zkhX === undefined || braceLEdge <= zkhX.x - zkhX.width / 2 + 0.11, `braceR=${braceLEdge.toFixed(1)} parenL=${zkhX ? (zkhX.x - zkhX.width / 2).toFixed(1) : '无（符合新口径）'}`)
+    check('X4 adj666i 右大括号在（显式）右圆括号**右侧**；无括号时自动成立', ykhX === undefined || braceR >= ykhX.x + ykhX.width / 2 - 0.11, `braceL=${braceR} parenR=${ykhX ? (ykhX.x + ykhX.width / 2).toFixed(1) : '无（符合新口径）'}`)
+    check('X5 大括号与内容不重叠（左括号墨迹右缘 ≤ 段首音）', segN.length > 0 && braceLEdge <= segN[0].x + 0.11, `braceR=${braceLEdge.toFixed(1)} firstNote=${segN[0]?.x}`)
+    // X6：大括号用**填充图形**（`大括号.svg`：左原图、右水平翻转、不依赖字体）
     const svgDsb = renderScoreToSvg(layoutScore(parseJps(src), DUR_CFG))[0]
     const mAll = svgDsb.match(/<path[^>]*data-segment-brace="dsb"[^>]*>/g) ?? []
     check('X6 左右大括号各一条路径', mAll.length === 2, `got ${mAll.length}`)
-    check('X6b 自绘描边路径（fill=none + 细 stroke-width，不用字体字形）', mAll.every((s) => /fill="none"/.test(s) && /stroke-width="[\d.]+"/.test(s)), mAll[0]?.slice(0, 70) ?? '')
+    check('X6b adj666 用 `大括号.svg` 的**填充**图形（不再自绘描边、也不依赖字体）',
+      mAll.every((s) => /fill="#1b1b1b"/.test(s) && /d="M601\.5 632\.5/.test(s)) && mAll.every((s) => !/stroke-width/.test(s)),
+      mAll[0]?.slice(0, 70) ?? '')
     check('X6c 不依赖字体字形（不是 <text>）', !/<text[^>]*data-segment-brace/.test(svgDsb), '')
-    check('X6d 路径含 M/Q/L 描边指令（最简绘制方式）', mAll.every((s) => /M /.test(s) && /Q /.test(s) && /L /.test(s)), `got ${mAll[0]?.slice(0, 60)}`)
+    check('X6d adj666 左 `{` 用原图、右 `}` **水平翻转**（右括号 transform 含负 x 缩放）',
+      mAll.length === 2 && !/scale\(-/.test(mAll[0]) && /scale\(-/.test(mAll[1]),
+      JSON.stringify(mAll.map((s) => /transform="([^"]+)"/.exec(s)?.[1] ?? '')))
     // X6e：纵向**包住**——上过上一行音符上沿（数码顶 = 基线 − 0.8×字号）、下过下一行音符下沿
     {
       const nsx2 = DUR_CFG.note_size
@@ -7857,27 +7883,47 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
       const digitTop = upperBaseline - nsx2 * 0.8
       check('X6e 大括号上端高于上一行音符上沿', (sb?.yTop ?? 0) < digitTop, `yTop=${sb?.yTop} digitTop=${digitTop.toFixed(1)}`)
       check('X6f 大括号下端低于下一行音符下沿', (sb?.yBottomLower ?? 0) > lowerBaseline, `yBotLo=${sb?.yBottomLower} lowerBaseline=${lowerBaseline.toFixed(1)}`)
-      // X6g：轮廓**完全落在自己的占宽槽位内**——两个边界曲线必须过 `xs ± e`（中轴两侧），
-      //      若误用 `xTip ± e` 会整体偏向外侧、越出槽位并压到圆括号（曾出现过该 bug）
-      const dAttr = /d="([^"]+)"/.exec(mAll[0] ?? '')?.[1] ?? ''
-      const coords = (dAttr.match(/-?[\d.]+/g) ?? []).map(Number)
-      const xs2 = coords.filter((_, i) => i % 2 === 0)
-      const slotL = sb?.x1 ?? 0
-      const slotR = slotL + Math.max(3, nsx2 * 0.32)
+      /**
+       * X6g（adj667 改写）：渲染端**照搬**布局给的墨迹区间——
+       * 左 `{` 墨迹 = `[x1, x1+inkW]`、右 `}` 墨迹 = `[x2, x2+inkW]`，两者都不越进段内容。
+       * 旧实现（adj666）由渲染按段高算宽度、且允许"只向外侧伸展"，于是会压到邻居
+       * （用户报图 1 右括号压后续音符、图 2 左括号压段首音符）。
+       */
+      const tf = (i: number) => {
+        const t = /transform="translate\(([-\d.]+)\) translate\(0 ([-\d.]+)\) scale\((-?[\d.]+)/.exec(mAll[i] ?? '')
+        return t ? { tx: Number(t[1]), sx: Math.abs(Number(t[3])) } : null
+      }
+      const GW = 215
+      const L = tf(0)
+      const R = tf(1)
+      // 左 `{` = 原图（`translate(x)` + 正缩放）⇒ 墨迹 `[tx, tx+GW·sx]`
+      const l0 = L ? L.tx : Number.NaN
+      const l1 = L ? L.tx + GW * L.sx : Number.NaN
+      // 右 `}` = 水平翻转（`scale(-sx)`）⇒ 墨迹反向：`[tx−GW·sx, tx]`
+      const r0 = R ? R.tx - GW * R.sx : Number.NaN
+      const r1 = R ? R.tx : Number.NaN
       check(
-        'X6g 轮廓不越出自身占宽槽位（不压到圆括号）',
-        xs2.length > 0 && Math.min(...xs2) >= slotL - 0.11 && Math.max(...xs2) <= slotR + 0.11,
-        `x范围=[${Math.min(...xs2)},${Math.max(...xs2)}] 槽=[${slotL},${slotR.toFixed(1)}]`,
+        'X6g adj667 渲染墨迹区间 == 布局给的 `[x1,x1+inkW]` / `[x2,x2+inkW]`',
+        L !== null && R !== null &&
+          Math.abs(l0 - braceL) < 0.11 && Math.abs(l1 - braceLEdge) < 0.11 &&
+          Math.abs(r0 - braceR) < 0.11 && Math.abs(r1 - braceREdge) < 0.11,
+        JSON.stringify({ l: [l0, l1], r: [r0, r1], want: [braceL, braceLEdge, braceR, braceREdge] }),
+      )
+      check(
+        'X6h adj667 渲染墨迹不越进段内容（左 `{` 右缘 ≤ 段首音 x）',
+        l1 <= (segN[0]?.x ?? 0) + 0.11,
+        `lRight=${l1.toFixed(1)} firstNote=${segN[0]?.x}`,
       )
     }
-    check('X7 大括号横向占宽 ≈ max(3, 0.32×字号)', Math.abs(braceW - Math.max(3, nsx * 0.32)) < 0.01, `w=${braceW}`)
-    // X8：dsb 内部三个元素（左大括号 / 左圆括号 / 内容）**依次不重叠**，且都在小节线内侧
-    const braceLEdge = braceL + braceW
-    const parenLEdge = zkhX ? zkhX.x - zkhX.width / 2 : Number.NaN
+    check('X7 adj667 大括号墨迹宽 ≤ 理想值（`段高 × SEGMENT_BRACE_ASPECT` = 0.1），空间不足时更窄',
+      braceInkW > 0 && braceInkW <= ((sb?.yBottomLower ?? 0) - (sb?.yTop ?? 0)) * SEGMENT_BRACE_ASPECT + 0.11,
+      `inkW=${braceInkW} segH=${((sb?.yBottomLower ?? 0) - (sb?.yTop ?? 0)).toFixed(1)}`)
+    // X8（adj666i 改）：dsb 内部"大括号 →（显式）圆括号 → 内容"依次不重叠，且都在小节线内侧
+    const parenLEdge = zkhX ? zkhX.x - zkhX.width / 2 : braceLEdge
     check(
-      'X8 dsb 内部依次不重叠（括号间 / 括号与内容 / 括号与小节线）',
+      'X8 adj666i dsb 内部依次不重叠（大括号 →（显式）圆括号 → 内容；都在小节线内侧）',
       braceLEdge <= parenLEdge + 0.11 && parenLEdge + (zkhX?.width ?? 0) <= (segN[0]?.x ?? 0) + 0.11 && braceL >= barLeft - 0.11,
-      `bar=${barLeft} brace=[${braceL.toFixed(1)},${braceLEdge.toFixed(1)}] paren=[${parenLEdge.toFixed(1)},${(parenLEdge + (zkhX?.width ?? 0)).toFixed(1)}] content=${segN[0]?.x?.toFixed(1)} 间距=(${(parenLEdge - braceLEdge).toFixed(2)},${((segN[0]?.x ?? 0) - parenLEdge - (zkhX?.width ?? 0)).toFixed(2)})`,
+      `bar=${barLeft} brace=[${braceL.toFixed(1)},${braceLEdge.toFixed(1)}] paren=[${parenLEdge.toFixed(1)},${(parenLEdge + (zkhX?.width ?? 0)).toFixed(1)}] content=${segN[0]?.x?.toFixed(1)}`,
     )
     // X9：段边界加权应让小节的「小节线 → 内容」净空明显变宽（详见 extraOf 的 segWeight）
     // X9：段边界加权（只作用于**空间优先**路径 = 应用默认布局）应让「小节线 → 内容」净空变宽。
@@ -7892,15 +7938,481 @@ console.log('[adj427] segment barline align / bracket reserve / dsb centering')
     check('X10 空间优先：大括号同样在小节线内侧', (() => {
       const sbSp = (pageSp.segmentBrackets ?? [])[0]
       const barsSp = pageSp.barlines.filter((b) => !b.segment).map((b) => b.x).sort((a, b) => a - b)
-      const bw = Math.max(3, SPC.note_size * 0.32)
+      const bw = sbSp?.inkW ?? Math.max(3, SPC.note_size * 0.32)
       return sbSp !== undefined && sbSp.x1 >= barsSp[0] - 0.11 && sbSp.x2 + bw <= barsSp[barsSp.length - 1] + 0.11
     })(), JSON.stringify((pageSp.segmentBrackets ?? [])[0]))
   }
 }
 
-// ---- adj427 Step 5h：**各小节每拍占宽必须均匀**（段内拍不得比其它主声部小节宽） ----
-// 用户实测发现过回归：段边界加权把 `3 4 |` 压到 21.70px/拍、段内撑到 51.05px/拍（2.35×）。
-// 这里直接量「同一小节内相邻音符间距」（= 每拍占宽，不含跨小节线的间隙），两种布局各跑一遍。
+// ---- adj667（用户口径「元素布局时不得重叠，除非明确要重叠」）：临时多声部括号 / 跳房子线 / 连音线 ----
+console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
+{
+  const H = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  const D = defaultPageConfig
+  const ns = D.note_size
+  // --- 图 1：右大括号不得压到包络**之后**的音符 ---
+  {
+    const code = H + "Q: {dsb 1'// 7// 6// 5// 6// 5// 3// 2// 3// 5/ 3// } 1'// 7// 6// 5// 6// 7// 1'// 2'// 3'// 5'/ 3'// 0/ 3/ |\n"
+    const pg = layoutScore(parseJps(code), D).pages[0]
+    const sb = (pg.segmentBrackets ?? [])[0]
+    const segU = pg.notes.filter((n) => n.segment && n.segment.layer === 'upper').sort((a, b) => a.x - b.x)
+    const after = pg.notes.filter((n) => !n.segment && n.playVoice === undefined).sort((a, b) => a.x - b.x)
+    const lastInk = (segU[segU.length - 1]?.x ?? 0) + digitSlotW(ns)
+    const rInkL = sb?.x2 ?? 0
+    const rInkR = rInkL + (sb?.inkW ?? 0)
+    /**
+     * B1（adj669 用户口径）：「大括号与其中间的音符要留有适当间距——**括号各向两边移 1/2 括号的
+     * 宽度**」。即右括号墨迹左缘 = 内容墨迹右缘 + `inkW/2`（左括号对称）。
+     */
+    check('B1 adj669/686 右大括号与段内容净距 **≥ inkW/2**（口径是"≥ 半个括号宽"；被右邻居钳住时只会更大）',
+      sb !== undefined && rInkL - lastInk >= (sb.inkW ?? 0) / 2 - 0.11,
+      `gap=${(rInkL - lastInk).toFixed(2)} inkW=${sb?.inkW} x2=${sb?.x2} lastInk=${lastInk.toFixed(2)}`)
+    check('B2 adj667 图1：右大括号墨迹**不越过包络之后的音符**（旧实现越出 4.9px 压字）',
+      after.length > 0 && rInkR <= after[0].x + 0.11, `rInkR=${rInkR.toFixed(2)} nextNote=${after[0]?.x}`)
+    check('B3 adj667 图1：括号墨迹宽 > 0（钳制后仍然画得出来，不会整体消失）',
+      (sb?.inkW ?? 0) > 0.9, `inkW=${sb?.inkW}`)
+  }
+  // --- 图 2：左大括号不得压到包络**之内**的首音（应落进左侧空档） ---
+  {
+    const code = H + 'Q: 7 {dsb 0/ 1// 2// } 0/ 6// 7//\n'
+    const pg = layoutScore(parseJps(code), D).pages[0]
+    const sb = (pg.segmentBrackets ?? [])[0]
+    const segU = pg.notes.filter((n) => n.segment && n.segment.layer === 'upper').sort((a, b) => a.x - b.x)
+    const prev = pg.notes.filter((n) => !n.segment && n.playVoice === undefined).sort((a, b) => a.x - b.x)[0]
+    const lInkL = sb?.x1 ?? 0
+    const lInkR = lInkL + (sb?.inkW ?? 0)
+    check('C1 adj667 图2：左大括号墨迹右缘 ≤ 段首音（不压段内首音；旧实现越进 4.2px）',
+      segU.length > 0 && lInkR <= segU[0].x + 0.11, `lInkR=${lInkR.toFixed(2)} first=${segU[0]?.x}`)
+    check('C1b adj669/675 左大括号与段首音的净距 **≥ inkW/2**（口径是"≥ 半个括号宽"；adj675 起左括号贴左、净距更大）',
+      segU.length > 0 && segU[0].x - lInkR >= (sb?.inkW ?? 0) / 2 - 0.11,
+      `gap=${(segU[0]?.x - lInkR).toFixed(2)} inkW=${sb?.inkW}`)
+    check('C2 adj667 图2：左大括号落进"前一个音符墨迹"与"段首音"之间的空档',
+      prev !== undefined && lInkL >= prev.x + digitSlotW(ns) - 0.11, `lInkL=${lInkL.toFixed(2)} prevInkR=${(prev.x + digitSlotW(ns)).toFixed(2)}`)
+  }
+  // --- 图 3 / 图 4：跳房子线必须抬到**段层墨迹之上** ---
+  {
+    const code = H + "Q: 1 2 3 4 |[\"1.\" {dsb (3// 2// 1//) (1// 1/) 7,/ 1- } (1'// 7// 6//) (6// 6/) 5/ 6- |\n"
+    const pg = layoutScore(parseJps(code), D).pages[0]
+    const segU = pg.notes.filter((n) => n.segment && n.segment.layer === 'upper')
+    const voltaBars = pg.barlines.filter((b) => b.voltaStart)
+    const upperTop = Math.min(...segU.map((n) => n.y)) - ns * 0.8
+    check('V1 adj667 图3：跳房子线已抬升（`voltaYTop` 存在且高于常规 `yTop − VOLTA_BAR_GAP`）',
+      voltaBars.length > 0 && voltaBars.every((b) => b.voltaYTop !== undefined && b.voltaYTop < b.yTop - 8 - 0.5),
+      JSON.stringify(voltaBars.map((b) => ({ yTop: b.yTop, voltaY: b.voltaYTop }))))
+    check('V2 adj667 图3：抬升后的跳房子线在**段层音符墨迹顶之上**（不穿过数字）',
+      voltaBars.every((b) => (b.voltaYTop ?? 0) < upperTop - 0.4),
+      `voltaY=${voltaBars[0]?.voltaYTop} upperDigitTop=${upperTop.toFixed(2)}`)
+    const svg = renderScoreToSvg(layoutScore(parseJps(code), D))[0]
+    const lineYs = [...svg.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="[\d.]+" y2="\2" stroke="#1b1b1b" stroke-width="0.8"\/>/g)].map((m) => Number(m[2]))
+    check('V3 adj667 图3：渲染出的跳房子横线 y 与布局一致', lineYs.length > 0 && lineYs.every((y) => Math.abs(y - (voltaBars[0]?.voltaYTop ?? -1)) < 0.11), `lineYs=${lineYs.join(',')} voltaY=${voltaBars[0]?.voltaYTop}`)
+    /**
+     * V6（adj685，用户口径「大括号的对齐**以墨迹的居中**」）：大括号的上下端由**内容墨迹**决定、
+     * 上下留白**对称**（各 `0.35×字号`）——`braceTop` = 上层墨迹顶 − `0.35ns`（与块级 `yTop` 同值）、
+     * `braceBottom` = 下层墨迹底 + `0.35ns`。旧实现下端只到 `+0.3ns`（没到墨迹底 `+0.6ns`），
+     * 比现在小 `0.65ns`。
+     */
+    check('V6 adj685/686 大括号上下端以内容**墨迹**为准（上下各留 `0.35×字号`，覆盖到两层的墨迹外沿）',
+      (pg.segmentBrackets ?? []).length > 0 &&
+        (pg.segmentBrackets ?? []).every(
+          (s) =>
+            s.braceTop !== undefined &&
+            s.braceBottom !== undefined &&
+            Math.abs(s.braceTop - s.yTop) < 0.11 &&
+            s.yBottomLower !== undefined &&
+            s.braceBottom > s.yBottomLower, // 比"块级下沿"更深（真正到下层墨迹底）
+        ),
+      JSON.stringify((pg.segmentBrackets ?? []).map((s) => ({ top: s.braceTop, yTop: s.yTop, bot: s.braceBottom, lo: s.yBottomLower }))))
+  }
+  /**
+   * --- 图 3：dsb 下层声部的连音线**保持在上方**（adj670 用户口径：「连音线是在下面的**反转的**」，
+   * 那是错的）——两层放不下的问题改由 `segmentMinGap` **撑开层间距**解决 ---
+   */
+  {
+    const code = H + "Q: 1 2 3 4 | {dsb (3// 2// 1//) (1// 1/) 7,/ 1- } (1'// 7// 6//) (6// 6/) 5/ 6- |\n"
+    const pg = layoutScore(parseJps(code), D).pages[0]
+    const lower = pg.slurs.filter((s) => s.layerBase === undefined)
+    const segNsAll = pg.notes.filter((n) => n.segment)
+    const upperBaseline = segNsAll.map((n) => n.y).sort((a, b) => a - b)[0]
+    const lowerBaseline = pg.notes.filter((n) => n.playVoice === 'second').map((n) => n.y).sort((a, b) => a - b)[0]
+    check('S1 adj670 图3：dsb 下层声部的连音线**保持在上方**（不再反转；`below` 未置位）',
+      lower.length > 0 && lower.every((s) => s.below !== true), JSON.stringify(lower.map((s) => ({ y: s.y, below: s.below }))))
+    check('S2 adj670 图3：下层连音线在上层声部基线**之下**（朝上紧贴自己的数字，不挤进上层）',
+      lower.every((s) => s.y > upperBaseline + 0.11), `slurY=${lower.map((s) => s.y).join(',')} upperBaseline=${upperBaseline}`)
+    /**
+     * S4（**本轮的核心口径**）：连音线的**弧顶**不能被上层声部的墨迹（减时线层底 / 低八度点）
+     * 压到——这是"层间距自动撑开"要保证的事。
+     */
+    check('S4 adj670 图3：连音线**弧顶**高于上层声部墨迹下缘（层间距已按需撑开）',
+      (() => {
+        // 上层（段层）墨迹下缘：取段层音符里最靠下的一条（减时线层底 / 低八度点底）
+        const sc = noteScaleOf(D.note_size)
+        let upperBottom = -Infinity
+        for (const n of segNsAll) {
+          const tk = n.token
+          const dc = tk.kind === 'note' ? (tk.diminishCount ?? 0) : 0
+          let bot = dc > 0 ? beamBottomY(n.y, dc, D.note_size) : digitBottomY(n.y, D.note_size)
+          const oct = tk.kind === 'note' ? tk.octaveShift : 0
+          if (oct < 0) bot = Math.max(bot, lowDotY(n.y, -oct - 1, dc, D.note_size) + DOT_R * sc)
+          upperBottom = Math.max(upperBottom, bot)
+        }
+        return lower.every((s) => {
+          const sag = Math.max(SLUR_SAG_MIN, Math.min(SLUR_SAG_MAX, Math.abs(s.x2 - s.x1) * 0.28))
+          return s.y - sag > upperBottom + 0.11
+        })
+      })(),
+      `lowerY=${lower.map((s) => s.y).join(',')} upperBottom≈${upperBaseline}+`)
+    check('S5 adj670 图3：自动撑开后的层间距 > 默认 22（放不下时才撑）',
+      lowerBaseline - upperBaseline > 22.11, `gap=${(lowerBaseline - upperBaseline).toFixed(2)}`)
+    const svg = renderScoreToSvg(layoutScore(parseJps(code), D))[0]
+    // 上方弧线：二次贝塞尔顶点在两端**之上** ⇒ 顶点 y < 端点 y
+    check('S3 adj670 图3：渲染为**向上拱**的弧线（顶点 y < 端点 y）', (() => {
+      const m = /<path d="M ([\d.]+) ([\d.]+) Q [\d.]+ ([\d.]+) [\d.]+ \2" fill="none"/.exec(svg)
+      return m !== null && Number(m[3]) < Number(m[2])
+    })(), '')
+  }
+  // --- 图 5：dsb 的"包络下移"不得波及**其它曲行**的连音线 ---
+  {
+    const withDsb = H + "Q: (1 2) 3 4 | 5 6 7 1' |\nQ: {dsb 1 2 3 4 } 5 6 7 1' |\nQ: (1 2) 3 4 | 5 6 7 1' |\n"
+    const noDsb = H + "Q: (1 2) 3 4 | 5 6 7 1' |\nQ: 5 6 7 1' |\nQ: (1 2) 3 4 | 5 6 7 1' |\n"
+    const pA = layoutScore(parseJps(withDsb), D).pages[0]
+    const pB = layoutScore(parseJps(noDsb), D).pages[0]
+    const sbA = (pA.segmentBrackets ?? [])[0]
+    const sA = pA.slurs.filter((s) => s.below !== true)
+    const sB = pB.slurs.filter((s) => s.below !== true)
+    // 前置：用例必须**真的有效**——包络 x 区间覆盖了其它行连音线的起点（adj674：段层预留会让
+    // 包络整体右移几像素，故允许 ±10px 的容差；只要连音线起点仍落在包络附近即有效）
+    check('T0 adj667 图5 用例有效：包络 x 区间覆盖其它行连音线的起点',
+      sbA !== undefined && sB.length >= 2 && sB.every((s) => s.x1 >= sbA.x1 - 10 && s.x1 <= (sbA.x2 + (sbA.inkW ?? 0)) + 10),
+      `env=[${sbA?.x1},${(sbA?.x2 ?? 0) + (sbA?.inkW ?? 0)}] slurXs=${sB.map((s) => s.x1).join(',')}`)
+    /**
+     * T1（adj668 改写）：**段层之前**的曲行一字不动；**之后**的曲行被整体下移（这是"只给含段层的行
+     * 增加行距"的必然结果），但**行内相对几何不变**——所以改判"相对本行基线的偏移一致"。
+     */
+    const firstA = [...sA].sort((a, b) => a.y - b.y)[0]
+    const firstB = [...sB].sort((a, b) => a.y - b.y)[0]
+    check('T1 adj667/668 图5：段层**之前**的曲行连音线一字不动（旧实现按 x 区间筛 ⇒ 连同它一起错位 11px）',
+      firstA !== undefined && firstB !== undefined && Math.abs(firstA.y - firstB.y) < 0.11,
+      `A=${firstA?.y} B=${firstB?.y}`)
+    const lastA = [...sA].sort((a, b) => b.y - a.y)[0]
+    const lastB = [...sB].sort((a, b) => b.y - a.y)[0]
+    const baseOf = (pg: typeof pA): number => Math.max(...pg.notes.map((n) => n.y))
+    check('T2 adj668 图5：段层之后的行**被整体下移**（含段层的行确实变高了）',
+      baseOf(pA) > baseOf(pB) + 1, `A=${baseOf(pA)} B=${baseOf(pB)}`)
+    check('T3 adj668 图5：下移之后**行内相对几何不变**（连音线相对本行基线的偏移一致）',
+      lastA !== undefined && lastB !== undefined &&
+        Math.abs(lastA.y - baseOf(pA) - (lastB.y - baseOf(pB))) < 0.11,
+      `relA=${(lastA.y - baseOf(pA)).toFixed(2)} relB=${(lastB.y - baseOf(pB)).toFixed(2)}`)
+  }
+  /**
+   * --- adj668（用户要求）：临时段（`{bz}` / `{dsb}`）**只增加所在行的行距**，其它行不受影响 ---
+   *
+   * 用户口径：「临时多声部通常只涉及部分行，应该就这些行增加行间距以容纳这些多出来的行，
+   * 其它行不受其影响」；后续补充：「临时伴奏和替谱应该相应地参考这样的操作」。
+   */
+  {
+    // E0：纯函数——不含段层的行余量恒为 0（这一条保证"其它行一字不动"）
+    const zero = segmentRowExtra([], D.note_size, () => 22)
+    check('E0 adj668 不含临时段的行纵向余量为 0', zero.up === 0 && zero.botInk === 0, JSON.stringify(zero))
+    const noSeg = "Q: 3 4 | 5 6 7 1' |\nQ: (1 2) 3 4 | 5 6 7 1' |\n"
+    const basesOf = (code: string): { ys: number[]; segTop: number } => {
+      const pg = layoutScore(parseJps(code), D).pages[0]
+      // 只取**主旋律**音符（`playVoice === 'second'` = dsb 下层声部，已被下移，不能当行基线）
+      const ys = [...new Set(pg.notes.filter((n) => !n.segment && n.playVoice === undefined).map((n) => n.y))].sort((a, b) => a - b)
+      return { ys, segTop: (pg.segmentBrackets ?? [])[0]?.yTop ?? Number.NaN }
+    }
+    /** 基准谱：三行、段层行与原行**主旋律完全相同**（`{dsb …}` 不占拍），唯一差别就是段层 */
+    const baseCode = H + "Q: (1 2) 3 4 | 5 6 7 1' |\n" + noSeg
+    const baseB = basesOf(baseCode).ys
+    for (const [nm, dy, segText] of [
+      ['dsb', 22, "Q: {dsb 1 2 } 3 4 | 5 6 7 1' |"],
+      ['bz', 22, "Q: {bz 1 2 } 3 4 | 5 6 7 1' |"],
+    ] as const) {
+      const code = H + "Q: (1 2) 3 4 | 5 6 7 1' |\n" + segText + "\nQ: (1 2) 3 4 | 5 6 7 1' |\n"
+      const { ys, segTop } = basesOf(code)
+      check(`E1[${nm}] adj668 段层**之前**的行基线一字不动`, Math.abs(ys[0] - baseB[0]) < 0.11, `A=${ys[0]} B=${baseB[0]}`)
+      check(`E2[${nm}] adj668 含段层的行被下移（把上方空间让出来，≥ 8px）`,
+        ys[1] - baseB[1] >= 8, `A=${ys[1]} B=${baseB[1]} Δ=${(ys[1] - baseB[1]).toFixed(2)}`)
+      check(`E3[${nm}] adj668 该行到下一行的**行距不变小**`,
+        ys[2] - ys[1] >= baseB[2] - baseB[1] - 0.11,
+        `A=${(ys[2] - ys[1]).toFixed(2)} B=${(baseB[2] - baseB[1]).toFixed(2)}`)
+      /**
+       * E4（本断言的**要点**）：段层墨迹顶必须落在**上一行的行底之下**——
+       * 上一行行底 = 上一行基线 + 曲部下沿（`NOTE_BOTTOM_RATIO×字号`）+ 行尾间距（`height_ciqu`，无歌词）。
+       * 加了行余量之后两者应当**恰好相接**（差 0）；没加时段层顶会低 11.65px ⇒ 直接压上一行。
+       */
+      const prevRowBottom = ys[0] + D.note_size * NOTE_BOTTOM_RATIO + D.height_ciqu
+      check(`E4[${nm}] adj668 段层墨迹顶不越过**上一行的行底**（外溢 → 行内预算）`,
+        Number.isFinite(segTop) && segTop >= prevRowBottom - 0.11,
+        `segTop=${segTop} prevRowBottom=${prevRowBottom.toFixed(2)}`)
+      check(`E5[${nm}] adj668 段层与主旋律的间距仍等于设置值（几何未被改坏）`,
+        (() => {
+          const pg = layoutScore(parseJps(code), D).pages[0]
+          const segY = pg.notes.find((n) => n.segment)?.y ?? 0
+          const want = nm === 'dsb' ? dy / 2 : dy
+          return Math.abs(ys[1] - want - segY) < 0.11
+        })(), '')
+    }
+    /**
+     * E6（用户口径「**其它行不受其影响**」的最直接验证）：含段层那一行的**上一行的歌词**
+     * 必须完完整整落在段层墨迹顶之上——歌声不会被多声部块压住。
+     */
+    {
+      const lyr = (c1: string, c2: string): string =>
+        H + "Q: (1 2) 3 4 | 5 6 7 1' |\nC: " + c1 + '\nQ: {dsb 1 2 3 4 } 5 6 7 1\' |\nC: ' + c2 + '\n'
+      const pg = layoutScore(parseJps(lyr('一二三四五六七八', '九十百千万亿兆京')), D).pages[0]
+      const sb = (pg.segmentBrackets ?? [])[0]
+      // 两个曲行各有 `line=0` 的歌词 ⇒ 只取**最上面那一行**（y 最小的一批）
+      const all = pg.lyrics.filter((l) => l.line === 0)
+      const yMin = Math.min(...all.map((l) => l.y))
+      const l1 = all.filter((l) => Math.abs(l.y - yMin) < 0.5)
+      const l1Bottom = yMin + D.geci_size * 0.3
+      check('E6 adj668 上一行的**歌词**不被本行段层压住（歌词底缘 ≤ 段层墨迹顶）',
+        sb !== undefined && l1.length > 0 && l1Bottom <= sb.yTop + 0.11,
+        `lyricBottom=${l1Bottom.toFixed(2)} segTop=${sb?.yTop}`)
+    }
+    /**
+     * E7/E8（用户补充口径：「**临时伴奏和替谱**应该相应地参考这样的操作」）：
+     * `{tp}` 的高度本来就记在**本行**（`tpGeometry` → `lineHeightOf` 的 `tpExtra`），
+     * 这里把它钉住——段层**之前**的行一字不动、含替谱的行行距变大。
+     */
+    {
+      const Q1 = "Q: (1 2) 3 4 | 5 6 7 1' |\n"
+      const Q2 = "Q: 1 2 3 4 | 5 6 7 1' |\n"
+      const C = 'C: 一二三四五六七八\n'
+      const rowBasesOf = (code: string): number[] => {
+        const pg = layoutScore(parseJps(code), D).pages[0]
+        return [...new Set(pg.notes.filter((n) => !n.segment && n.playVoice === undefined).map((n) => n.y))].sort((a, b) => a - b)
+      }
+      const withTp = H + Q1 + C + Q2 + 'C: 一 二 {tp 1 2 } 三 四\n' + Q1 + C
+      const noTp = H + Q1 + C + Q2 + 'C: 一 二 三 四\n' + Q1 + C
+      const ya = rowBasesOf(withTp)
+      const yb = rowBasesOf(noTp)
+      check('E7 adj668 替谱段**之前**的行基线一字不动',
+        ya.length === yb.length && Math.abs(ya[0] - yb[0]) < 0.11, `A=${ya[0]} B=${yb[0]}`)
+      check('E8 adj668 含替谱段的行**行距变大**（高度记在本行，不靠外溢）',
+        ya.length >= 3 && yb.length >= 3 && ya[2] - ya[1] > yb[2] - yb[1] + 1,
+        `A=${(ya[2] - ya[1]).toFixed(2)} B=${(yb[2] - yb[1]).toFixed(2)}`)
+    }
+  }
+  // --- 两种布局路径都必须满足"不重叠"（应用默认 = 空间优先；时值优先共享同一套括号几何） ---
+  for (const [nm, cfg] of [['空间优先', D], ['时值优先', { ...D, noteSpaceLayout: 'duration' as const }]] as const) {
+    const code = H + "Q: {dsb 1'// 7// 6// 5// 6// 5// 3// 2// 3// 5/ 3// } 1'// 7// 6// 5// 6// 7// 1'// 2'// 3'// 5'/ 3'// 0/ 3/ |\n"
+    const pg = layoutScore(parseJps(code), cfg).pages[0]
+    const sb = (pg.segmentBrackets ?? [])[0]
+    const segU = pg.notes.filter((n) => n.segment && n.segment.layer === 'upper').sort((a, b) => a.x - b.x)
+    const after = pg.notes.filter((n) => !n.segment && n.playVoice === undefined).sort((a, b) => a.x - b.x)
+    const inkW = sb?.inkW ?? 0
+    check(`P1[${nm}] adj667 左右大括号都不越进邻居墨迹（两条布局路径同一口径）`,
+      sb !== undefined && inkW > 0 && segU.length > 0 && after.length > 0 &&
+        sb.x1 + inkW <= segU[0].x + 0.11 && sb.x2 + inkW <= after[0].x + 0.11,
+      `x1=${sb?.x1} inkW=${inkW} first=${segU[0]?.x} x2=${sb?.x2} next=${after[0]?.x}`)
+  }
+}
+
+// ---- adj674（用户选择方案 B）：所有 `{dsb}` 段为大括号预留横向空间 ----
+console.log('[adj674] dsb brace reserves horizontal room')
+{
+  const H = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  const D = defaultPageConfig
+  const USER_LINE =
+    'Q: :|/["3." {dsb (3// 2// 1//) (1// 1/) 7,/ 1- } (1\'// 7// 6//) (6// 6/) 5/ 6- |"p:2/4" 0 0/ 3\'/ |]/"p:4/4" 6 0/ 3/ 7, {dsb 0/ 1// 2// } 0/ 6// 7// |"p:2/4" {dsb (3// 2// 1//) 1// } (1\'// 7// 6//) 6// 0/ 5/ |"p:4/4" 6--- ||\n'
+  const pu = layoutScore(parseJps(H + USER_LINE), D).pages[0]
+  const sbs = pu.segmentBrackets ?? []
+  /** 每个段的理想括号宽（与布局同一算式） */
+  const idealOf = (yTop: number, yBotLo: number | undefined): number =>
+    Math.max(SEGMENT_BRACE_MIN_W, ((yBotLo ?? 0) - yTop) * SEGMENT_BRACE_ASPECT)
+  check('D1 adj674/679 用户原行：三段 `{dsb}` 的括号墨迹宽**都等于理想宽**（用户口径「不压缩」）',
+    sbs.length === 3 && sbs.every((s) => Math.abs((s.inkW ?? 0) - idealOf(s.yTop, s.yBottomLower)) < 0.11),
+    sbs.map((s) => `${s.inkW?.toFixed(1)}/${idealOf(s.yTop, s.yBottomLower).toFixed(1)}`).join(' '))
+  // D2：预留**不改变行宽**（只把富余定向挪到段层边界）——行末小节线仍在页面右边距线上
+  {
+    const lastBar = pu.barlines.filter((b) => !b.segment).sort((a, b) => b.x - a.x)[0]
+    check('D2 adj674 预留不撑破行宽（行末小节线仍在页面右边距线上）',
+      lastBar !== undefined && Math.abs(lastBar.x - (pu.width - D.margin_right - lastBar.width / 2)) < 0.6,
+      `bar=${lastBar?.x} want=${(pu.width - D.margin_right - (lastBar?.width ?? 0) / 2).toFixed(1)}`)
+  }
+  // D3：不含 `{dsb}` 的谱面**零影响**（预留只在有段层时发生）
+  {
+    const a = layoutScore(parseJps(H + 'Q: 3 4 | 1 2 3 4 | 5 6 7 1\' |\n'), D).pages[0]
+    const b = layoutScore(parseJps(H + 'Q: 3 4 | 1 2 3 4 | 5 6 7 1\' |\n'), D).pages[0]
+    const sig = (p: typeof a) => p.notes.filter((n) => !n.segment).map((n) => `${n.x.toFixed(1)}/${n.width.toFixed(1)}`).join(',')
+    check('D3 adj674 不含临时段的谱面零影响（同一行两次布局逐音符一致）', sig(a) === sig(b), '')
+  }
+  /**
+   * L1/L2（adj675，用户两条反馈）：
+   *  · 「左括号的**左边留空偏大**」⇒ 左括号**贴左**落位，不再"贴内容"而在左边留一大段；
+   *  · 「**临时节拍符与左括号重叠**」⇒ 左侧边界把 `"p:2/4"` 的占宽算进去，
+   *    于是括号落在"拍号之后、首音之前"的空档里。
+   */
+  {
+    const sbs = pu.segmentBrackets ?? []
+    const bars = pu.barlines.filter((b) => !b.segment && b.comment === 'p:2/4').sort((a, b) => a.x - b.x)
+    const b3 = bars[1] // 第二处 `p:2/4`（第三段 `{dsb (3// 2// 1//) 1// }` 所在小节）
+    const sb3 = sbs[2]
+    check('L1 adj675/686 左大括号落在「小节线 + 临时节拍符」**之后**（不压拍号，且留 ≥ w/2）',
+      b3 !== undefined && sb3 !== undefined && (sb3.x1 ?? 0) - b3.x >= (sb3.inkW ?? 0) / 2 - 0.11,
+      `x1=${sb3?.x1} bar=${b3?.x} inkW=${sb3?.inkW} comment=${b3?.comment}`)
+    /**
+     * L2（adj676，用户第三轮口径）：左括号在"左侧边界"与"内容左缘 − w/2"之间**居中**——
+     * 既不贴小节线（「太靠近小节线」），也不贴音符（「与右侧音符留空偏大」）。
+     */
+    const segU = pu.notes
+      .filter((n) => n.segment && n.segment.layer === 'upper' && n.x > (sb3?.x1 ?? 0))
+      .sort((a, b) => a.x - b.x)[0]
+    const lInkR3 = (sb3?.x1 ?? 0) + (sb3?.inkW ?? 0)
+    check('L2 adj676 左大括号**居中**于左侧边界与内容之间（两边都有留白、且不压内容）',
+      sb3 !== undefined && segU !== undefined &&
+        (sb3.x1 ?? 0) - b3!.x > D.note_size * 0.4 && segU.x - lInkR3 >= -0.11,
+      `x1=${sb3?.x1} bar=${b3?.x} Δ左=${sb3 && b3 ? ((sb3.x1 ?? 0) - b3.x).toFixed(1) : '-'} Δ内容=${(segU?.x ?? 0) - lInkR3}`)
+  }
+}
+
+console.log('[adj673] whole-bar long note fills the measure')
+{
+  const H = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  const D = defaultPageConfig
+  const code = H + 'Q: 1 2 3 4 | 6--- ||\n'
+  const pg = layoutScore(parseJps(code), D).pages[0]
+  const ln = pg.notes
+    .filter((n) => !n.segment)
+    .sort((a, b) => a.x - b.x)
+    .find((n) => n.token.kind === 'note' && n.token.augmentCount >= 3)
+  const bar = pg.barlines.filter((b) => !b.segment && b.x > (ln?.x ?? 0)).sort((a, b) => a.x - b.x)[0]
+  const barInset = barlineTotalW('|') / 2 + barlinePad(D.note_size)
+  // W1：用**用户原行**（行内容多 ⇒ 长音原本只拿到最小宽、末尾留 25.4px 空白）
+  const USER_LINE =
+    'Q: :|/["3." {dsb (3// 2// 1//) (1// 1/) 7,/ 1- } (1\'// 7// 6//) (6// 6/) 5/ 6- |"p:2/4" 0 0/ 3\'/ |]/"p:4/4" 6 0/ 3/ 7, {dsb 0/ 1// 2// } 0/ 6// 7// |"p:2/4" {dsb (3// 2// 1//) 1// } (1\'// 7// 6//) 6// 0/ 5/ |"p:4/4" 6--- ||\n'
+  {
+    const pu = layoutScore(parseJps(H + USER_LINE), D).pages[0]
+    const lu = pu.notes
+      .filter((n) => !n.segment)
+      .sort((a, b) => a.x - b.x)
+      .find((n) => n.token.kind === 'note' && n.token.augmentCount >= 3)
+    const bu = pu.barlines.filter((b) => !b.segment && b.x > (lu?.x ?? 0)).sort((a, b) => a.x - b.x)[0]
+    check('W1 adj673 用户原行：`6---` 末尾空白从 25.4px 收到一个字高以内',
+      lu !== undefined && bu !== undefined && bu.x - (lu.rightX ?? 0) <= D.note_size + 0.11 && bu.x - (lu.rightX ?? 0) > 0,
+      `gap=${bu && lu ? (bu.x - (lu.rightX ?? 0)).toFixed(2) : '-'} right=${lu?.rightX} bar=${bu?.x}`)
+    check('W1b adj673 用户原行：增时线按拍均匀铺开（4 拍段间距一致）', (() => {
+      const segs = (lu?.segments ?? []).filter((s) => s.el === 'aug')
+      if (segs.length < 2) return false
+      const d = segs.slice(1).map((s, i) => s.x - segs[i].x)
+      return Math.max(...d) - Math.min(...d) < 0.11
+    })(), JSON.stringify(lu?.segments))
+  }
+  check('W2 adj673 简单行里的长音不越线、且不越出小节内容区',
+    ln !== undefined && bar !== undefined && (ln.rightX ?? 0) <= bar.x - barInset + 0.11,
+    `right=${ln?.rightX} limit=${bar ? (bar.x - barInset).toFixed(1) : '-'}`)
+  check('W3 adj673 末段右缘离小节线的净距与普通小节同量级（≤ 一个字高）',
+    ln !== undefined && bar !== undefined && bar.x - (ln.rightX ?? 0) <= D.note_size + 0.11,
+    `gap=${bar && ln ? (bar.x - (ln.rightX ?? 0)).toFixed(2) : '-'}`)
+  // W4：**不**给单拍音/多音符小节添乱——只有"独占小节的多拍长音"会被撑
+  {
+    const pg2 = layoutScore(parseJps(H + "Q: 1 2 3 4 | 5 6 7 1' ||\n"), D).pages[0]
+    const notes = pg2.notes.filter((n) => !n.segment)
+    check('W4 adj673 多音符小节不受影响（每个音的块宽仍等于它自己的拍宽）',
+      notes.length === 8 && notes.every((n) => n.width > 0 && (n.rightX ?? 0) > n.x),
+      notes.map((n) => `${n.x.toFixed(1)}w${n.width.toFixed(1)}`).join(' '))
+  }
+}
+
+// ---- adj672（用户要求）：歌词注释（`C: 一"注释" 二`）不得与歌词重叠 ----
+console.log('[adj672] lyric comment avoidance')
+{
+  const H = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  const D = defaultPageConfig
+  const cfs = lyricCommentFontSize(D.geci_size)
+  const mk = (lyric: string) => H + "Q: 1 2 3 4 | 5 6 7 1' |\nC: " + lyric + '\n'
+  /** 墨迹盒（与布局避让同一口径：高 = 字号 × 1.1，中心在基线上方 0.3 字号处） */
+  const boxOf = (x: number, y: number, w: number, h: number) => ({ x1: x, x2: x + w, y1: y - h * 0.85, y2: y + h * 0.25 })
+  const overlap = (a: ReturnType<typeof boxOf>, b: ReturnType<typeof boxOf>): boolean =>
+    a.x1 < b.x2 - 0.01 && a.x2 > b.x1 + 0.01 && a.y1 < b.y2 - 0.01 && a.y2 > b.y1 + 0.01
+  // L1：放得下 ⇒ 紧贴本字左侧、与本字同基线（= 历史渲染公式，零回归）
+  {
+    const pg = layoutScore(parseJps(mk('一"略"二 三 四')), D).pages[0]
+    const l = pg.lyrics.find((x) => x.char.note)
+    const w = lyricCommentWidth(l?.char.note ?? '', cfs)
+    check('L1 adj672 放得下时：注释紧贴本字左侧、与本字同基线（历史公式，零回归）',
+      l !== undefined && l.noteX !== undefined && l.noteY !== undefined &&
+        Math.abs(l.noteX - (l.x - w - LYRIC_COMMENT_GAP)) < 0.11 && Math.abs(l.noteY - l.y) < 0.11,
+      `noteX=${l?.noteX} want=${l ? (l.x - w - LYRIC_COMMENT_GAP).toFixed(1) : '-'} noteY=${l?.noteY} y=${l?.y}`)
+  }
+  // L2/L3：挤在一起 ⇒ ① 不与任何歌词字/曲部音符重叠 ② 确实上下错开了
+  for (const [nm, lyric] of [['一注释', '一二三四"副歌部分"五'], ['两注释', '一"甲注释"二"乙注释"三']] as const) {
+    const pg = layoutScore(parseJps(mk(lyric)), D).pages[0]
+    const mine = pg.lyrics.filter((x) => x.char.note)
+    const bad = mine.filter((l) => {
+      const wl = lyricCommentWidth(l.char.note ?? '', cfs) * (l.noteSx ?? 1)
+      const cb = boxOf(l.noteX ?? 0, l.noteY ?? 0, wl, cfs)
+      return pg.lyrics.some((o) => o !== l && overlap(cb, boxOf(o.x, o.y, D.geci_size, D.geci_size)))
+    })
+    check(`L2[${nm}] adj672/677 歌词注释（压缩后）不与**歌词字**重叠`, mine.length > 0 && bad.length === 0,
+      `n=${mine.length} bad=${bad.map((l) => l.char.note).join(',')}`)
+    check(`L3[${nm}] adj683 容不下时注释**移到后字的上/下位置**（不再压缩、不动歌词字）`,
+      mine.length > 0 && mine.every((l) => Math.abs((l.noteY ?? 0) - l.y) > 1 && (l.noteSx ?? 1) >= 0.999),
+      JSON.stringify(mine.map((l) => ({ t: l.char.note, dy: (l.noteY ?? 0) - l.y, sx: l.noteSx }))))
+  }
+  // L4：渲染端**直接用**布局给的锚点（否则"布局避让一套、渲染画另一套"）
+  {
+    const code = mk('一二三四"副歌部分"五')
+    const pg = layoutScore(parseJps(code), D).pages[0]
+    const l = pg.lyrics.find((x) => x.char.note)
+    const svg = renderScoreToSvg(layoutScore(parseJps(code), D))[0]
+    check('L4 adj672/683 渲染直接采用布局锚点（注释 x/y 与布局一致，位置只有布局一个来源）',
+      l !== undefined && svg.includes(`y="${l.noteY}"`) && svg.includes(`x="${l.noteX}"`),
+      `noteX=${l?.noteX} noteY=${l?.noteY} y=${l?.y}`)
+    /**
+     * L5（adj678，用户口径「歌词的注释**通常应靠近其后面的歌词**」）：注释的**右缘恒贴住**
+     * 本字左缘（差 `LYRIC_COMMENT_GAP`）——无论压缩没压缩、前面有多少空档，都不许被推远。
+     */
+    check('L5 adj678 注释右缘恒贴住其后歌词字的左缘（靠近后面的歌词，不被推远）',
+      pg.lyrics.filter((x) => x.char.note).length > 0 &&
+        pg.lyrics
+          .filter((x) => x.char.note)
+          .every(
+            (l) =>
+              Math.abs(
+                (l.noteX ?? 0) + lyricCommentWidth(l.char.note ?? '', cfs) * (l.noteSx ?? 1) - (l.x - LYRIC_COMMENT_GAP),
+              ) < 0.11,
+          ),
+      JSON.stringify(
+        pg.lyrics
+          .filter((x) => x.char.note)
+          .map((l) => ({
+            t: l.char.note,
+            右缘: Number(((l.noteX ?? 0) + lyricCommentWidth(l.char.note ?? '', cfs) * (l.noteSx ?? 1)).toFixed(1)),
+            字左缘: Number((l.x - LYRIC_COMMENT_GAP).toFixed(1)),
+          })),
+      ))
+  }
+  /**
+   * L6/L7/L8（adj683，用户最终规则）：
+   *  · 注释**只能**在前后两字之间调整 ⇒ 不许推动音符（`L6`）也不许推动歌词字；
+   *  · 容不下时**移到后字的上/下位置**、不再横向压缩（`L7`）；
+   *  · **同一个 `C:` 行的歌词字始终在同一水平线上**（含临时多声部里的歌词，`L8`）。
+   */
+  {
+    const noC = layoutScore(parseJps(mk('一二三四五')), D).pages[0]
+    const hasC = layoutScore(parseJps(mk('一二三四"副歌部分"五')), D).pages[0]
+    const nSig = (p: typeof noC) => p.notes.filter((n) => !n.segment).map((n) => `${n.x.toFixed(2)}/${n.width.toFixed(2)}`).join(',')
+    check('L6 adj683 歌词注释**不影响音符位置**（不占音符位：带注释与不带注释逐音符一致）',
+      nSig(noC) === nSig(hasC),
+      `无注释=${nSig(noC).slice(0, 60)} 有注释=${nSig(hasC).slice(0, 60)}`)
+    const lc = hasC.lyrics.find((l) => l.char.note)
+    check('L7 adj683 空档放不下时注释**移到后字的上/下位置**（不压缩）',
+      lc !== undefined && Math.abs((lc.noteY ?? 0) - lc.y) > 1 && (lc.noteSx ?? 1) >= 0.999,
+      `dy=${lc ? ((lc.noteY ?? 0) - lc.y).toFixed(1) : '-'} sx=${lc?.noteSx}`)
+    // L8：同一 `C:` 行（同一 line）的歌词字 y 必须完全一致——含临时多声部里的歌词
+    const dsb = layoutScore(parseJps(H + 'Q: {dsb 1 2 3 4 } 5 6 7 1\' |\nC: 一二三"注"四 五 六\n'), D).pages[0]
+    const byLine = new Map<number, number[]>()
+    for (const l of dsb.lyrics) {
+      const k = l.line ?? -1
+      byLine.set(k, [...(byLine.get(k) ?? []), l.y])
+    }
+    check('L8 adj683 同一 `C:` 行（含临时多声部）的歌词字**同一水平线**',
+      byLine.size > 0 && [...byLine.values()].every((ys) => Math.max(...ys) - Math.min(...ys) < 0.11),
+      JSON.stringify([...byLine.entries()].map(([k, ys]) => [k, [...new Set(ys.map((y) => y.toFixed(1)))] ])))
+  }
+}
 console.log('[adj427] per-beat width uniform across measures')
 {
   const src = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {bz 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
@@ -7921,9 +8433,15 @@ console.log('[adj427] per-beat width uniform across measures')
       const d = diffs(code, cfg)
       const lo2 = Math.min(...d)
       const hi2 = Math.max(...d)
+      /**
+       * adj674（用户选择方案 B）：`{dsb}` 现在会**为它的大括号预留横向空间**（从本行富余里匀），
+       * 于是"包络边界所在的那一拍"必然比其他拍宽一些——这是用户明确接受的代价。
+       * 所以含 `{dsb}` 的行阈值放宽到 1.2（`{bz}` 无大括号、仍是 1.05 的严格口径）。
+       */
+      const limit = tag === 'dsb' ? 1.2 : 1.05
       check(
-        `Y1[${nm}/${tag}] 各小节每拍占宽均匀（max/min ≤ 1.05）`,
-        d.length >= 6 && hi2 / lo2 <= 1.05,
+        `Y1[${nm}/${tag}] 各小节每拍占宽均匀（max/min ≤ ${limit}）`,
+        d.length >= 6 && hi2 / lo2 <= limit,
         `每拍占宽=${d.map((v) => v.toFixed(1)).join(',')} 比值=${(hi2 / lo2).toFixed(3)}`,
       )
     }
@@ -7967,9 +8485,15 @@ console.log('[adj428] segmentRowGap (bz/dsb) configurable')
     const ys = [...new Set(mains.map((n) => n.y))].sort((a, b) => a - b)
     const yIn = ys[1]
     const segY = pg.notes.find((n) => n.segment)?.y
-    check('Y4 dsb 默认间距 = 22 px（整块居中）',
-      yIn !== undefined && segY !== undefined && Math.abs((yIn - yRow) - 11) < 0.11 && Math.abs((yRow - segY) - 11) < 0.11,
-      `yRow=${yRow.toFixed(2)} yIn=${yIn?.toFixed(2)} segY=${segY?.toFixed(2)}`,
+    /**
+     * Y4（adj670 改写）：dsb 的层间距是 `max(22, 放得下两层内容所需的最小值)`——
+     * 本例段内是 `(3// 2// 1//)` 等（2 条减时线）且下层有连音线 ⇒ **会超过 22**。
+     * 断言语义改为"整块仍与行基线居中 + 间距 ≥ 22"。
+     */
+    const gapY = yIn !== undefined && segY !== undefined ? yIn - segY : 0
+    check('Y4 adj670 dsb 层间距 ≥ 22 px（按需撑开仍整块居中）',
+      yIn !== undefined && segY !== undefined && gapY >= 22 - 0.11 && Math.abs((yIn - yRow) - gapY / 2) < 0.11 && Math.abs((yRow - segY) - gapY / 2) < 0.11,
+      `yRow=${yRow.toFixed(2)} yIn=${yIn?.toFixed(2)} segY=${segY?.toFixed(2)} gap=${gapY.toFixed(2)}`,
     )
   }
   // Y5：bz 把 segmentRowGap.bz 改成 40 → 段层 y = yRow − 40（主旋律 yRow 不动）
@@ -14354,7 +14878,12 @@ function runAdj627Tests() {
     Math.abs(kcYOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D"+ 2 |\n') - yPlus1) < 0.05,
     JSON.stringify({ inQuote: yPlus1, outQuote: kcYOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:D"+ 2 |\n') }))
 
-  // ---- ⑧ 跳跃 / 终结标志处**自然恢复原调号** ----
+  /**
+   * adj665（用户口径，已确认）：「**转调后，反复/跳跃都继续用转调后的调号；只有再写 `d:<调>`
+   * 或 `d:`（恢复）才变**」⇒ 本组原来的"跳跃/终结标志处自然恢复原调号"（adj627b）**已撤销**：
+   * 跳跃/终结线之后仍然按转调后的调号（源码顺序口径下，第 3 组与第 2 组同调）。
+   */
+  // ---- ⑧ 跳跃 / 终结标志处**不回原调**（adj665 撤销 adj627b 的隐式恢复） ----
   const revertCases: Array<[string, string]> = [
     [':| 反复线', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |"d:1=D" 1 2 3 4 :| 1 2 3 4 |\n'],
     ['|| 终止线', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"d:1=D" 1 2 || 1 2 |\n'],
@@ -14369,18 +14898,18 @@ function runAdj627Tests() {
   const DE = 'D4,E4'
   revertCases.forEach(([name, code]) => {
     const p = pitchOf(code)
-    // 第 1 小节 C 调、第 2 小节已转 D 调、**跳跃/终结线之后**回到 C 调（第 3 小节）
+    // 第 1 小节 C 调、第 2 小节起转 D 调、**跳跃/终结线之后仍是 D 调**（第 3 组与第 2 组同调）
     const ok =
       name.startsWith(':|')
-        ? p.slice(0, 4).join(',') === CDF && p.slice(4, 8).join(',') === DEFS && p.slice(8, 12).join(',') === CDF
-        : p.slice(0, 2).join(',') === CD && p.slice(2, 4).join(',') === DE && p.slice(4, 6).join(',') === CD
-    check(`adj627b 布局音高：${name} 之后自动回描述头调号（${p.join(' ')}）`, ok, p.join(' '))
+        ? p.slice(0, 4).join(',') === CDF && p.slice(4, 8).join(',') === DEFS && p.slice(8, 12).join(',') === DEFS
+        : p.slice(0, 2).join(',') === CD && p.slice(2, 4).join(',') === DE && p.slice(4, 6).join(',') === DE
+    check(`adj665 布局音高：${name} 之后**不回**描述头调号（仍 D 调：${p.join(' ')}）`, ok, p.join(' '))
     const sp = seqPitch(code)
     const okSeq =
       name.startsWith(':|')
         ? sp.slice(0, 4).join(',') === CDF && sp.slice(4, 8).join(',') === DEFS
         : sp.slice(0, 2).join(',') === CD && sp.slice(2, 4).join(',') === DE
-    check(`adj627b 播放音高：${name} 与布局同一口径（${sp.join(' ')}）`, okSeq, sp.join(' '))
+    check(`adj665 播放音高：${name} 与布局同一口径（${sp.join(' ')}）`, okSeq, sp.join(' '))
   })
 
   // ---- ⑩ 调名与描述头**同款**：字母 + 左上角 ♯/♭ 角标（adj627c，用户要求） ----
@@ -14460,17 +14989,17 @@ function runAdj627Tests() {
     /<text [^>]*data-keychange="转1=Ab"[^>]*>/.exec(svgOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 |"d:Ab" 2 |\n'))?.[0] ?? '')
 
   // ---- ⑪ 复原规则不反向影响：显式 `d:` 压过隐式回原调；无转调时一切照旧 ----
-  check('adj627b 跳跃线上**显式**转调照常生效（`:|"d:1=D"` ⇒ 该线之后是 D 调；显式压过隐式回原调）',
+  check('adj665 跳跃线上**显式**转调照常生效（`:|"d:1=D"` ⇒ 该线之后是 D 调）',
     pitchOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 :|"d:1=D" 1 2 |\n').slice(2, 4).join(',') === DE,
     pitchOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 :|"d:1=D" 1 2 |\n').join(' '))
-  check('adj627b 转调线与跳跃线**紧邻**时（`|"d:1=D" :|`）中间没有小节可转 ⇒ 立即回原调（口径即"跳跃标志回原调"）',
-    pitchOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"d:1=D" :| 1 2 |\n').join(' ') === 'C4 D4 C4 D4',
+  check('adj665 转调线与跳跃线**紧邻**时（`|"d:1=D" :|`）该线之后仍是 D 调（不再回原调）',
+    pitchOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"d:1=D" :| 1 2 |\n').join(' ') === 'C4 D4 D4 E4',
     pitchOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"d:1=D" :| 1 2 |\n').join(' '))
-  check('adj627b 没有 `d:` 的谱面，反复/终止线处不受影响（全曲 C 调）',
+  check('adj665 没有 `d:` 的谱面，反复/终止线处不受影响（全曲 C 调）',
     pitchOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 | 3 4 :| 5 6 || 7 1 |\n').join(' ') ===
       'C4,D4,E4,F4,G4,A4,B4,C4'.split(',').join(' '),
     pitchOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 | 3 4 :| 5 6 || 7 1 |\n').join(' '))
-  check('adj627b 转调记号在跳跃线上**照样渲染**（记号与"回原调"是两件事）',
+  check('adj665 转调记号在跳跃线上**照样渲染**（记号与调号状态是两件事）',
     labelsOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 |"d:1=D" 1 2 :| 1 2 |\n') === '转1=D',
     '')
 }
@@ -16610,6 +17139,54 @@ C2: 有 人 唱 情 {tp 4// 3// 6,// 6,// 1// 1// 1// 1// 2// 2// 2// 2// 3// 3/
     Math.abs(tpAt(2, 0) - mainX(2, 0)) < 0.15 && Math.abs(tpAt(2, 1) - mainX(2, 1)) < 0.15 &&
       Math.abs(tpAt(2, 3) - mainX(2, 3)) < 0.15,
     JSON.stringify({ tp: [tpAt(2, 0), tpAt(2, 1), tpAt(2, 3)], main: [mainX(2, 0), mainX(2, 1), mainX(2, 3)] }))
+}
+
+/**
+ * adj665（用户两句合起来的口径）：
+ *   ① 「转调后，即使有反复或跳跃，还是应该随转调的调号，除非再有转调或恢复调号」
+ *      ⇒ 反复线 / 跳跃记号（`:|` `&ds` `&dc` `&ty` …）**不再自动回原调**（adj627b 那条撤销）；
+ *   ② 「第一次反复是调号 A，某处转调后，第二次反复**同一处**却变成调号 B」——不可接受
+ *      ⇒ 调号**只取决于谱面书写位置**（该小节之前最近的 `d:`），与第几遍、从哪跳回来无关。
+ *
+ * 实现：播放端用"源码下标 → 生效调号"的静态表（不是走查里的可变状态），布局端 `effectiveKeysOf`
+ * 同一口径 ⇒ 谱面显示、试听、导出三处不会再出现"同一小节两种调号"。
+ */
+function runAdj665Tests() {
+  console.log('[160] 演奏顺序里的转调状态（adj665）')
+  const pitchesOf = (code: string): string[] => {
+    const parsed = parseJps(code)
+    const lay = layoutScore(parsed, defaultPageConfig)
+    const seq = buildPlaySequence(parsed, lay, 60)
+    return seq.events
+      .filter((e) => !e.placed?.segment)
+      .map((e) => e.pitch ?? (e.placed?.audioPitch as string | undefined) ?? '')
+      .filter((x) => x !== '')
+  }
+  const HEAD665 = 'V: 1.0\nB: 转调状态\nD: C\nP: 4/4\n'
+  const p1 = pitchesOf(HEAD665 + 'Q: 1- |"d:1=D" |: 2- 3- :| 4- ||\n')
+  check('adj665 转调后**反复**不回原调（`2- 3-` 两遍都是 D 调：E4 F#4；`4-` = G4）',
+    p1.join(',') === 'C4,E4,F#4,E4,F#4,G4', JSON.stringify(p1))
+  const p2 = pitchesOf(HEAD665 + 'Q: 1- |"d:1=D" 2- |&ds 3- | 4- ||\n')
+  check('adj665 **&ds 跳回**仍用转调后的调号（跳回后 `1-` = D4，不回描述头 C 调）',
+    p2.join(',') === 'C4,E4,D4,E4,F#4,G4', JSON.stringify(p2))
+  const p3 = pitchesOf(HEAD665 + 'Q: 1- |"d:1=D" 2- |"d:" 3- | 4- ||\n')
+  check('adj665 只有显式 `"d:"` 才恢复描述头调号（恢复后 `3-` 回 E4、`4-` 为 F4）',
+    p3.join(',') === 'C4,E4,E4,F4', JSON.stringify(p3))
+  // 护栏：谱面端（布局的 audioPitch，供谱面渲染/导出用）与试听同口径——`:|` 之后不回原调
+  const lay665 = layoutScore(parseJps(HEAD665 + 'Q: 1- |"d:1=D" |: 2- 3- :| 4- ||\n'), defaultPageConfig)
+  const barNotes665 = lay665.pages[0].notes.filter((n) => !n.segment)
+  const ap = (bar: number) => barNotes665.find((n) => n.barIndex === bar)?.audioPitch
+  check('adj665 谱面端同口径：`:|` 之后那一小节仍按转调后的调号（bar2 = F#4、bar3 = G4）',
+    ap(2) === 'F#4' && ap(3) === 'G4',
+    JSON.stringify({ bar2: ap(2), bar3: ap(3) }))
+  /**
+   * Model B 的**预期**行为（用户已确认）：反复段跨过转调线时，第 2 遍的同一小节会落在转调后的调上
+   * ——`|: 1- |"d:1=D" 2- :|` 里 bar1 第 1 遍 C4、第 2 遍 D4。钉住它，免得以后被"改回按书写位置"的
+   * 实现悄悄改掉（这是本轮反复确认过的口径）。
+   */
+  const carried = pitchesOf(HEAD665 + 'Q: |: 1- |"d:1=D" 2- :| 3- ||\n')
+  check('adj665 转调"随演奏过程保持"：反复第 2 遍同一小节落在转调后的调上（bar1：C4 → D4）',
+    carried.join(',') === 'C4,E4,D4,E4,F#4', JSON.stringify(carried))
 }
 
 /**

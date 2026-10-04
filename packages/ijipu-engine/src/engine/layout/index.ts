@@ -29,7 +29,7 @@ import type {
   ScorePageMeta,
   VoiceBlock,
 } from '../types'
-import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, BRACKET_PAD, H_GAP, noteScaleOf, VOLTA_BAR_GAP, VOLTA_RAISE, DYN_HALF_H, barlinePad, barlineTotalW, DOT_AFTER_DIGIT_GAP, DOT_R, SEGMENT_ROW_GAP_DEFAULT, SEGMENT_LAYER_YSCALE, TP_BRACKET_GAP, barNumberGapNeed, type AccidentalInkMetrics } from './spacing'
+import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, octaveDotY, BRACKET_PAD, H_GAP, noteScaleOf, VOLTA_BAR_GAP, VOLTA_RAISE, DYN_HALF_H, barlinePad, barlineTotalW, DOT_AFTER_DIGIT_GAP, DOT_R, SEGMENT_ROW_GAP_DEFAULT, SEGMENT_LAYER_YSCALE, SEGMENT_LAYER_CLEARANCE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, NOTE_BASELINE_RATIO, DIGIT_BOTTOM, beamBottomY, lowDotY, TP_BRACKET_GAP, barNumberGapNeed, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, type AccidentalInkMetrics } from './spacing'
 // adj284：空间优先布局的度量（本体宽 / 时值拆分 / 非时值元素间距）
 import { splitNoteDur, noteBodyW, augBodyW, dotBodyW, accidentalBodyW, accidentalGeometry, markBodyW, digitSlotW, hxBodyW, graceAtTail, graceSlotLayout, nonDurGap, slideExtraW, braceInkRightOffset, BRACE_LINE_DX } from './spaceLayout'
 import { hairpinEvents, resolveHairpins, type DynEvent, type NoteAnchors } from './hairpins'
@@ -47,6 +47,8 @@ import {
   SEG_BAR_ID_BASE,
   type DurationalToken, // adj629b：段内音符（连音线配对/墨迹宽用）
   type SegmentInfo, // adj629e：替谱层几何
+  segmentRowExtra, // adj668：段层给"所在视觉行"的纵向余量
+  segmentMinGap, // adj670：段层两层"放得下"所需的最小间距
 } from './segments'
 
 // ============================================================
@@ -101,16 +103,18 @@ export function isJumpOrEndBarline(bar: { type: BarlineType; marks?: BarlineMark
 }
 
 /**
- * adj627：**一组"每小节生效调号"**——按源码顺序走一遍该组的小节线，遇到 `"d:<key>"` 就换调、
- * `"d:"` 就恢复描述头调号；遇到**跳跃/终结标志**（`|_jump_or_end`）也恢复描述头调号（adj627b，用户要求）。
+ * adj627/adj665：**一组"每小节生效调号"**——按源码顺序走一遍该组的小节线，遇到 `"d:<key>"` 就换调、
+ * `"d:"` 就恢复描述头调号。
  *
  * 为什么可以这样摊平：转调是**绝对赋值**（`d:F#` 即 F#、`d:` 即描述头调号），所以
  * "任意位置的生效调号只取决于源码前缀" ⇒ 下标 = `barIndex` 的数组足够，反复/跳转都无需重算。
  * 单声部（`placeMusicRow*`）、多声部块（`placeVoiceBlock`）、临时段叠加层（`placeSegmentOverlays`）
  * 三处共用这一份口径。
  *
- * 顺序：**先按跳跃/终结标志回原调、再套本条线上的 `d:`**——显式指令永远压过隐式恢复，
- * 这样 `|"d:D" :|`（在反复线上直接标转调）仍按用户写的 D 生效。
+ * adj665（用户口径，E-2026-350）：「转调后，即使有反复或跳跃，还是应该随转调的调号，除非再有转调
+ * 或恢复调号」——所以**调号随演奏过程保持**：跳跃/终结线（`:|` `:|:` `||` `||/`、带 `&dc`/`&ds`/`&fine`）
+ * 处**不再**自动回描述头调号。旧写法在这里 `cur = baseKey`，导致"第一次反复是调号 A，
+ * 某处转调后第二次反复同一处却变成调号 B"（用户报的正是这个）。
  */
 function effectiveKeysOf(segs: BarSeg[], baseKey: number): number[] {
   const out: number[] = []
@@ -118,7 +122,6 @@ function effectiveKeysOf(segs: BarSeg[], baseKey: number): number[] {
   for (const s of segs) {
     out.push(cur) // 本小节的音用"进入本小节时"的调号
     const kc = s.bar?.keyChange
-    if (s.bar && isJumpOrEndBarline(s.bar)) cur = baseKey // adj627b：跳跃/终结 ⇒ 回原调
     if (kc) cur = kc.clear ? baseKey : kc.targetKey ?? cur // 该线之后换调
   }
   return out
@@ -2050,6 +2053,17 @@ export function layoutScore(
     // adj427：段边界小节线的额外间距（见上 SEG_BOUNDARY_PAD）——计入非时值占位预算，
     // 由富余 W 等比让出，从而**不改变各拍占宽的均匀性**。
     nonDurPad += segPadTotal
+    /**
+     * adj674/686：`{dsb}` 段为大括号预留的横向空间（左 `2w`、右 `3w`）**计入非时值占位预算**
+     * （与 `SEG_BOUNDARY_PAD` 同款：由富余等比让出，行宽守恒）——不计的话它是"账外占宽"，
+     * 会把该行撑出行宽（实测末尾长音越过右侧小节线 46.4px）。
+     */
+    const bracePads = (() => {
+      const toks: MusicToken[] = []
+      for (let b = row.start; b < row.end; b++) toks.push(...segs[b].notes)
+      return segmentBracePads(toks, config)
+    })()
+    for (const pad of bracePads.values()) nonDurPad += pad.lead + pad.tail
     // adj293：&hx（滑音箭头，右侧）为无时值元素——依附其前的带时值元素之后，本体宽占位
     for (const n of noteList) {
       if (n.hasHx) nonDurPad += hxBodyW(m.noteSize)
@@ -2303,8 +2317,16 @@ export function layoutScore(
             const n = noteList[noteCursor++]
             const noteElDur = n.noteDur + (n.hasDot ? n.dotDur : 0)
             // adj629m：段层更密的拍拿到的额外宽（`segAddOfNote`）在这里真正落到占宽上
+            // adj674：段层大括号的预留宽（`bracePads.tail`）同样落到块宽上（推后包络之后的内容）
             const noteElW =
-              n.noteBodyW + (n.hasDot ? n.dotBodyW : 0) + extraOf(n.barIdx, noteElDur) + (segAddOfNote.get(n) ?? 0)
+              n.noteBodyW +
+              (n.hasDot ? n.dotBodyW : 0) +
+              extraOf(n.barIdx, noteElDur) +
+              (segAddOfNote.get(n) ?? 0) +
+              (bracePads.get(n.t)?.tail ?? 0)
+            // adj674：包络首音之前的预留（左括号让位）
+            const braceLead = bracePads.get(n.t)?.lead ?? 0
+            if (braceLead > 0) curX += braceLead
             // 音符块段左缘：带附点时与附点三段留空分散（音符块靠左）；
             // 无附点时音符块内容在时值宽度 noteElW 内居中（左右等留空）
             let blockX = curX
@@ -2450,6 +2472,13 @@ export function layoutScore(
     /** adj629e：本视觉行里的替谱段（供 `tpGeometry`） */
     const rowTpSegsOf = (row: (typeof rows)[number]): SegmentInfo[] =>
       computeSegments(rowTokensOf(row)).filter((s) => s.type === 'tp')
+    /**
+     * adj668/adj670（用户要求）：「临时多声部通常只涉及部分行，**应该就这些行增加行间距**以容纳
+     * 多出来的层，其它行不受影响」。这里直接按**行内 token 流**取非替谱段——段本来就只画在它
+     * 包络起点所在的那一行，行内切片天然自洽。
+     */
+    const rowSegsOf = (row: (typeof rows)[number]): SegmentInfo[] =>
+      computeSegments(rowTokensOf(row)).filter((s) => s.type !== 'tp')
     for (const row of rows) {
       rowSlots.push(acc)
       if (row.kind === 'bars') {
@@ -2461,20 +2490,41 @@ export function layoutScore(
       }
     }
 
-    // adj199：参考每拍宽（前面曲部行的平均每拍宽，供未撑满行按小节线对齐）
-    let refPerBeat: number | undefined
+  /**
+   * adj668（用户要求）：段层与主旋律的纵向间距（`PageConfig.segmentRowGap`，缺省回退
+   * `SEGMENT_ROW_GAP_DEFAULT`）。单声部行与多声部块共用同一份（两处各写一份早晚会漂）。
+   */
+  const segGapOf = (type: 'bz' | 'dsb' | 'tp'): number =>
+    type === 'tp'
+      ? (config.segmentRowGap?.tp ?? SEGMENT_ROW_GAP_DEFAULT.tp)
+      : type === 'dsb'
+        ? (config.segmentRowGap?.dsb ?? SEGMENT_ROW_GAP_DEFAULT.dsb)
+        : (config.segmentRowGap?.bz ?? SEGMENT_ROW_GAP_DEFAULT.bz)
+
+  // adj199：参考每拍宽（前面曲部行的平均每拍宽，供未撑满行按小节线对齐）
+  let refPerBeat: number | undefined
     rows.forEach((row, ri) => {
       const sp = spacingFor(config, pageIndex)
       // adj629e：本视觉行的替谱层几何（额外行高 + 各层 y）——行高与歌词 y 都用它
       curTpExtras = tpGeometry(rowTpSegsOf(row), config, m.noteSize, sp, lyrics.length, y).extras
       const rowH = lineHeightOf(config, m, sp, lyrics.length, tpExtrasTotal(curTpExtras))
+      /**
+       * adj668（用户要求）：「临时多声部通常只涉及部分行，**应该就这些行增加行间距**以容纳
+       * 多出来的层」。`segmentRowExtra` 给"本行之上还要多少"（`up`）与"段层墨迹底伸出行底多少"
+       * （`botInk`），后者含**下层音符的减时线层底 / 低八度点底**（adj686：否则曲部会压到歌词，
+       * 用户第三张图）；不含段层的行 `extra` 为 0，位置一字不动。
+       */
+      const rowTokens = rowTokensOf(row)
+      const segExtra = segmentRowExtra(rowSegsOf(row), rowTokens, m.noteSize, segGapOf)
+      const segDown = Math.max(0, segExtra.botInk - (rowH - m.noteSize * NOTE_BASELINE_RATIO))
       // adj73：分页判定改为「放置前」且用完整行高——行不越界；
       // 首页/换页后首行 y 必小于 limit 不会误换；放不下时换页到新页放置（不再产生空页）
-      if (y + rowH > bottomLimit) {
+      if (y + segExtra.up + rowH + segDown > bottomLimit) {
         pageIndex = pages.length
         startPage()
         y = m.bodyTopH // 后续页不占描述头区域
       }
+      y += segExtra.up // 先把上方空间让出来（段层上层伸到行顶之上）
       // adj284：空间优先（无括号 bars 行）走 placeMusicRowSpace；否则走时值优先。
       // 含 &zkh/&ykh 括号的行先行版回退时值优先（括号的空间优先占位后续再补）
       // adj286：空间优先已支持 &zkh/&ykh 括号占位，不再因括号回退时值优先
@@ -2488,7 +2538,7 @@ export function layoutScore(
         const pb = placeMusicRow(segs, row, groupIndex, voice, y, lyricMaps, geciSize, sp, rowSlots[ri], refPerBeat, singleRowGroup, ord)
         if (row.kind === 'bars' && pb !== undefined) refPerBeat = pb
       }
-      y += rowH
+      y += rowH + segDown
     })
   }
 
@@ -3020,7 +3070,26 @@ export function layoutScore(
         0, // 额外高度与 rowYTop 无关（只用到行间差值），歌词 y 再按真实行顶算
       ).extras,
     )
-    const voiceHeights = parts.map((p, vi) => lineHeightOf(config, m, sp, p.lyricRows, tpExtrasTotal(partTpExtras[vi])))
+    const partBase = parts.map((p, vi) => lineHeightOf(config, m, sp, p.lyricRows, tpExtrasTotal(partTpExtras[vi])))
+    /**
+     * adj668（用户要求）：「临时多声部通常只涉及部分行，**应该就这些行增加行间距**以容纳
+     * 多出来的层，其它行不受影响」——多声部块里的每个声部各自算一份：`up` 加在本声部**之前**、
+     * `botInk`（段层墨迹底，含**下层减时线层底**，adj686）超出本声部行底的部分加在之后。
+     */
+    const partSegExtra = parts.map((p) => {
+      const toks = p.segs.flatMap((s) => s.notes)
+      const gapOf = (type: 'bz' | 'dsb' | 'tp'): number =>
+        type === 'tp'
+          ? (config.segmentRowGap?.tp ?? SEGMENT_ROW_GAP_DEFAULT.tp)
+          : type === 'dsb'
+            ? (config.segmentRowGap?.dsb ?? SEGMENT_ROW_GAP_DEFAULT.dsb)
+            : (config.segmentRowGap?.bz ?? SEGMENT_ROW_GAP_DEFAULT.bz)
+      return segmentRowExtra(computeSegments(toks).filter((s) => s.type !== 'tp'), toks, m.noteSize, gapOf)
+    })
+    const partSegDown = partSegExtra.map((e, vi) =>
+      Math.max(0, e.botInk - (partBase[vi] - m.noteSize * NOTE_BASELINE_RATIO)),
+    )
+    const voiceHeights = parts.map((_p, vi) => partBase[vi] + partSegExtra[vi].up + partSegDown[vi])
     // adj72：多声部块内声部行之间额外间距 height_shengbu（独立于行距 ciqu，可单独调整）
     const blockH = voiceHeights.reduce((a, b) => a + b, 0) + Math.max(0, parts.length - 1) * sp.shengbu
 
@@ -3038,6 +3107,8 @@ export function layoutScore(
     for (let vi = 0; vi < parts.length; vi++) {
       const p = parts[vi]
       curTpExtras = partTpExtras[vi] // adj629：本声部歌词行上方的替谱层预留
+      // adj668：先让出"段层上层伸出本声部行顶"的空间，本声部内容整体下移（只影响本声部）
+      if (partSegExtra[vi].up > 0) voiceY += partSegExtra[vi].up
       blockVoices.push({ voice: p.voice, name: p.name })
       voiceYTop.push(voiceY)
       let x = blockStartX
@@ -3227,7 +3298,8 @@ export function layoutScore(
       for (const s of resolveHairpins(dynEvents, (i) => dynAnchors[i], blockStartX + BAR_PAD, x)) {
         pages[pageIndex].dynamics.push({ x1: r1(s.x1), x2: r1(s.x2), y: r1(dynY393), type: s.type, plus: s.plus })
       }
-      voiceY += voiceHeights[vi] + (vi < parts.length - 1 ? sp.shengbu : 0)
+      // adj668：本声部推进 = 基础行高 + **段层墨迹伸出行底**的量（`up` 已在循环开头让出）
+      voiceY += partBase[vi] + partSegDown[vi] + (vi < parts.length - 1 ? sp.shengbu : 0)
     }
 
     // adj249：小节线改为**每个声部单独绘制**（参考单声部：高度 = 该声部音符行高），
@@ -3920,6 +3992,19 @@ export function layoutScore(
   // 不会把段内音符误纳入主旋律的连音配对与行高计算）。
   placeSegmentOverlays(pages, result, config, keySemitone)
 
+  /**
+   * adj673（用户要求）：「`"p:4/4" 6--- ||` 小节线后面的空白过大」——把"独占小节的多拍长音"的
+   * 块撑到小节内容右界（只改块宽/段位，不动 x）。放在段层叠加**之后**：此时小节线已全部就位。
+   */
+  fillWholeBarLongNotes(pages, config)
+
+  /**
+   * adj672/adj682（用户要求）：「歌词注释也要**不与歌词重叠**」+「**不占音符位**」+
+   * 「**同一个 C 行的歌词应显示在同一水平线上**（含临时多声部）」+「两字较宽时靠近后字，
+   * 容不下时**移到后字的上/下位置**」。放在最末：避让需要知道同一行全部歌词的最终 x。
+   */
+  avoidLyricComments(pages, config)
+
   const configKey = JSON.stringify(config)
   // adj651c：延续类连音线（跳房子孤立 `)`）随排版结果交给播放端——演奏上要并成一个长音
   return { pages, config, configKey, continuationTies }
@@ -4121,11 +4206,24 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       if (beat - eps <= spans[0].startBeat) return placed[0].note.x
       return beatToX(beat - eps)
     }
-    /** 拍位所在**行**（同页同 y 的一组音符）——取行音符 y 与行右边界 */
+    /**
+     * adj670：**原始行 y 快照**。`shiftEnvelopeDown` 会把包络内的主旋律下移，后续段再问
+     * "这个音符在哪一行"时必须用**未被动过**的 y，否则会把"已下移的下层声部"当成另一行。
+     */
+    const origY = placed.map((p) => p.note.y)
+    /**
+     * 拍位所在**行**（同页同 y 的一组音符）——取行音符 y 与行右边界。
+     *
+     * adj670：区间改**半开**（`beat < start + beats`，与 `beatToX` 同一口径）——
+     * 旧写法用**闭区间**，段起点正好落在两音符交界处（`{dsb}` 紧跟小节线时必然如此）会取到
+     * **前一个**音符；而那个音符已被前一个段下移过 ⇒ 本段拿到的行 y 是"下移后的值"，
+     * `|note.y − row.y| ≤ 0.5` 对谁都不成立 ⇒ **整段静默失效**（两层完全重合，E-2026-352）。
+     * 同时 y 取**原始快照** `origY`，不再读可能已被改过的 `note.y`。
+     */
     const rowOf = (beat: number): { y: number; right: number; page: number } => {
       let idx = cnt - 1
       for (let k = 0; k < cnt; k++) {
-        if (beat <= spans[k].startBeat + spans[k].beats + 1e-9) {
+        if (beat < spans[k].startBeat + spans[k].beats - 1e-9) {
           idx = k
           break
         }
@@ -4134,9 +4232,9 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       let right = p.note.x + p.note.width
       for (let m = 0; m < cnt; m++) {
         const q = placed[m]
-        if (q.page === p.page && Math.abs(q.note.y - p.note.y) < 0.5) right = Math.max(right, q.note.x + q.note.width)
+        if (q.page === p.page && Math.abs(origY[m] - origY[idx]) < 0.5) right = Math.max(right, q.note.x + q.note.width)
       }
-      return { y: p.note.y, right, page: p.page }
+      return { y: origY[idx], right, page: p.page }
     }
 
     /**
@@ -4149,7 +4247,7 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
      *   - 右括号/`&ykh` 越出主旋律小节线（477.7 vs 462.1）。
      * 小节线拍位由**几何反推**：该小节线右侧第一个音符的起拍（同一曲行内）。
      */
-    const mainBarAnchors: { beat: number; x: number }[] = []
+    const mainBarAnchors: { beat: number; x: number; comment?: string }[] = []
     {
       const totalBeatsOfRow = spans[cnt - 1].startBeat + spans[cnt - 1].beats
       for (const p of pages) {
@@ -4162,7 +4260,7 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
               break
             }
           }
-          mainBarAnchors.push({ beat, x: b.x })
+          mainBarAnchors.push({ beat, x: b.x, ...(b.comment !== undefined ? { comment: b.comment } : {}) })
         }
       }
       mainBarAnchors.sort((a, b) => a.beat - b.beat)
@@ -4171,6 +4269,37 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
     const beatToBarX = (beat: number): number => {
       for (const a of mainBarAnchors) if (Math.abs(a.beat - beat) < 1e-6) return a.x
       return beatToX(beat)
+    }
+
+    // ---- adj667：段层大括号的**墨迹边界**辅助（用户口径「布局不得重叠，除非明确要重叠」）----
+    /**
+     * 一个已放置音符的**墨迹右缘**。
+     *
+     * 为什么不能直接用占位块右端 `rightX`：空间优先布局给每个音符分配到的块**尾部是留白**
+     * （例 `3//` 块宽 11.6，数字墨迹只有 8.06）——段层大括号正是要靠进这段留白才不压到邻居；
+     * 按块边界算会把"可用空档"算成 0，括号只能外扩压人（用户报图 1 右括号压后续音符）。
+     * 有附点/增时线的音符尾部确实有墨迹，此时退回整块右端（保守）。
+     */
+    const inkRightOfNote = (n: PlacedToken): number => {
+      const sp2 = splitNoteDur(n.token)
+      const hasTail = sp2.augCount > 0 || sp2.dotDur > 0
+      return hasTail ? (n.rightX ?? n.x + n.width) : n.x + Math.min(n.width, digitSlotW(config.note_size))
+    }
+    /** 一个已放置音符的**墨迹左缘**（变音角标在数字左侧，按其锚点保守左推） */
+    const inkLeftOfNote = (n: PlacedToken): number => n.x + Math.min(0, n.accidentalGeo?.penDx ?? 0)
+    /** 与 `[from, to)` 有交集的**最后一个 / 第一个**主旋律音符下标（限定在某页；-1 = 无） */
+    const coveredIdxRange = (from: number, to: number, pageIdx: number): { first: number; last: number } => {
+      let first = -1
+      let last = -1
+      for (let k = 0; k < cnt; k++) {
+        const sp2 = spans[k]
+        if (placed[k].page !== pageIdx) continue
+        if (sp2.startBeat >= from - 1e-9 && sp2.startBeat < to - 1e-9) {
+          if (first < 0) first = k
+          last = k
+        }
+      }
+      return { first, last }
     }
 
     /**
@@ -4293,21 +4422,6 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       if (tailW > 0) rightItems.push({ kind: 'bracket', w: tailW })
       if (braceW > 0) rightItems.push({ kind: 'brace', w: braceW })
       /** 把 items 依次排进 [from, to)（左→右），间距取 min(nonDurGap, 均分)，放不下则压缩 */
-      const placeSlots = (from: number, to: number, items: { kind: 'brace' | 'bracket'; w: number }[]) => {
-        const n = items.length
-        if (n === 0) return [] as { kind: 'brace' | 'bracket'; x: number; w: number }[]
-        const total = items.reduce((a, b) => a + b.w, 0)
-        const span = Math.max(total, to - from)
-        let gap = Math.min(bgap, Math.max(0, (span - total) / (n + 1)))
-        if (total + (n + 1) * gap > span) gap = Math.max(0, (span - total) / (n + 1))
-        const out: { kind: 'brace' | 'bracket'; x: number; w: number }[] = []
-        let cx = from + gap
-        for (const it of items) {
-          out.push({ kind: it.kind, x: cx, w: it.w })
-          cx += it.w + gap
-        }
-        return out
-      }
       /**
        * adj427：**边界净距**——括号（大括号/圆括号）与小节线之间必须留出
        * 「小节线半宽 + barlinePad」，否则括号会**贴到/压在小节线上**。
@@ -4319,21 +4433,90 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       const barInset = barlineTotalW('|') / 2 + barlinePad(ns)
       // bz：无大括号，括号与音符之间留 nonDurGap；**外加**与小节线的净距（barInset）。
       // dsb：大括号 + 圆括号按槽位均分排布在小节线内侧 ~ 内容边之间。
+      const segGapRaw = isDsb
+        ? (config.segmentRowGap?.dsb ?? SEGMENT_ROW_GAP_DEFAULT.dsb)
+        : (config.segmentRowGap?.bz ?? SEGMENT_ROW_GAP_DEFAULT.bz)
+      /**
+       * adj670（用户口径「连音线不该翻到下面」）：`{dsb}` 的层间距取
+       * `max(用户设置, 放得下"上层减时线 + 下层连音线"所需的最小值)` ——
+       * "不重叠"优先于"把间距调小"（调大仍生效，它只是**下限**）。
+       * 与 `segmentRowExtra`（算本行高度预算）用的是**同一个纯函数** ⇒ 两处的 dy 必然一致。
+       */
+      const dy = isDsb ? Math.max(segGapRaw, segmentMinGap(seg, tokens, ns, SEGMENT_LAYER_CLEARANCE)) : segGapRaw
       let leftSlots: { kind: 'brace' | 'bracket'; x: number; w: number }[] = []
       let rightSlots: { kind: 'brace' | 'bracket'; x: number; w: number }[] = []
       let xContent1 = xContent0 // 兜底初值（bz/dsb 分支会覆盖）
+      /** adj667：大括号的**墨迹左缘**（左 / 右）与**墨迹宽**；`null` = 本段不画大括号 */
+      let braceLeftInk: number | null = null
+      let braceRightInk: number | null = null
+      let braceInkW = 0
+      /** adj686：本段**下层**（包络内主旋律）的 token —— 供大括号下端"到最后一个声部的下沿" */
+      let braceLowerTokens: MusicToken[] = []
       if (isDsb) {
-        // 小节线**笔画**外侧再让 barlinePad（同一净距口径，与 bz 对称）
-        const innerL = barAtStart ? barAtStart.x + barInset : xContent0 - (leadW > 0 ? leadW + bgap : 0)
-        leftSlots = placeSlots(innerL, xContent0, leftItems)
-        const gapL2 = leftSlots.length > 0 ? Math.max(0, leftSlots[0].x - innerL) : bgap
-        const rightTotal = rightItems.reduce((a, b) => a + b.w, 0)
-        const innerR = barAtEnd ? barAtEnd.x - barInset : xEndBoundary + rightTotal + rightItems.length * gapL2
-        xContent1 = Math.max(
-          xContent0,
-          innerR - rightTotal - (rightItems.length > 0 ? (rightItems.length + 1) * gapL2 : 0),
-        )
-        rightSlots = placeSlots(xContent1, innerR, rightItems)
+        /**
+         * adj667/adj669/adj674/adj676/adj681/adj686：大括号的横向布局。
+         *
+         * 用户口径（多轮收敛）：
+         *  · 括号墨迹**各向外让 `w/2`**（左边 `[内容左缘 − 1.5w, 内容左缘 − w/2]`、
+         *    右边 `[内容右缘 + w/2, 内容右缘 + 1.5w]`）；宽度**恒为理想值**（不压缩）；
+         *  · 段与**左侧元素**（小节线 / 临时节拍符 / 音符）之间的间距 = **`2w`**，
+         *    括号**居中**于其中 ⇒ 括号左缘 = `内容左缘 − 1.5w`（`segmentBracePads` 负责预留 `2w`）；
+         *  · **绝不允许**越进邻居墨迹（布局第一原则：除非明确要求，元素不得重叠）。
+         */
+        const idealBraceW = Math.max(SEGMENT_BRACE_MIN_W, /* segH 见下 */ 0)
+        const cov = coveredIdxRange(envStart, envEnd, row.page)
+        braceLowerTokens = cov.first >= 0 ? placed.slice(cov.first, cov.last + 1).map((q) => q.note.token) : []
+        // 内容侧：先给用户**显式写的圆括号**让位（大括号一律在圆括号外侧）
+        const contentL = xContent0 - (leadW > 0 ? leadW + bgap : 0)
+        const contentR =
+          (cov.last >= 0 ? inkRightOfNote(placed[cov.last].note) : xContent0) + (tailW > 0 ? tailW + bgap : 0)
+        // 左：包络起点的小节线内侧（**含临时节拍符占宽**）→ 包络前一个音符的墨迹右缘 → 行内容左界
+        // adj675：临时节拍 `"p:2/4"` 画在小节线**右侧**、要占掉约一个字宽——不算进来的话
+        // "贴左"的括号会正好压在拍号上（用户截图报「临时节拍符与左括号重叠」）。
+        const leftLimit = barAtStart
+          ? barAtStart.x + barInset + (meterGapRight(barAtStart.comment ?? '', ns) ?? 0)
+          : cov.first > 0
+            ? inkRightOfNote(placed[cov.first - 1].note)
+            : config.margin_left
+        // 右：包络终点的小节线内侧 → 包络后一个音符的墨迹左缘 → 行内容右缘
+        const rightLimit = barAtEnd
+          ? barAtEnd.x - barInset
+          : cov.last >= 0 && cov.last + 1 < cnt
+            ? inkLeftOfNote(placed[cov.last + 1].note)
+            : row.right
+        /** adj675：左括号与左侧元素之间的最小净距 */
+        const gapL = LAYER_GAP * noteScaleOf(ns)
+        const availL = Math.max(0, contentL - leftLimit - gapL)
+        const availR = Math.max(0, rightLimit - contentR)
+        /**
+         * adj679（用户口径「**临时多声部的大括号宽度不压缩**」）：括号墨迹宽**恒为理想值**
+         * （段高 × `SEGMENT_BRACE_ASPECT`，下限 `SEGMENT_BRACE_MIN_W`）——它就是"段层有多高"的
+         * 视觉标志，被钳窄之后"上下两层"看起来不像一个整体。代价由**占宽预留**买单
+         * （`segmentBracePads`：左侧 `2w`、右侧 `2w`）。时值优先路径没有硬预留机制，保留旧口径。
+         */
+        const segH0 = dy + ns * 1.45
+        const ideal = Math.max(SEGMENT_BRACE_MIN_W, segH0 * SEGMENT_BRACE_ASPECT)
+        braceInkW =
+          config.noteSpaceLayout === 'duration' ? Math.min(ideal, (availL * 2) / 3, (availR * 2) / 3) : ideal
+        if (braceInkW < SEGMENT_BRACE_MIN_W) {
+          braceInkW = Math.min(ideal, Math.max(availL, SEGMENT_BRACE_MIN_W))
+        }
+        void idealBraceW
+        if (braceInkW > 0.01) {
+          const half = braceInkW / 2
+          /**
+           * adj686（用户口径「括号留空按 **2 倍括号宽度**、并在其中**居中**」＋布局第一原则
+           * 「除非明确，元素不得重叠」）：
+           *  · 首选**紧贴内容**（与段内容墨迹净距恒 `w/2`）——"左边偏左/右边留空不够"都由此消除；
+           *  · 再用两侧边界**钳住**：左侧不越进左邻居、右侧不越进右邻居。
+           *    `segmentBracePads` 的预留（左 `2w` / 右 `3w`）保证正常情况下这两个钳制都不生效，
+           *    于是"左侧元素 → 括号"= `w/2`（用户要的前后各半）。
+           */
+          braceLeftInk = r1(Math.max(contentL - half - braceInkW, leftLimit + half))
+          braceRightInk = r1(Math.min(contentR + half, rightLimit - half - braceInkW))
+        } else {
+          braceInkW = 0
+        }
       }
       // adj431：括号锚点用 **firstPlayedX / lastPlayedRightX**（跳过 hidden rest）——
       // 例：`{bz 8 &zkh 2'/ 3'/}` 的 `&zkh` 紧贴 `2'/`（= firstPlayedX）而不是 `8`（= xContent0）。
@@ -4369,9 +4552,9 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       const braceLeftX = leftSlots.find((s) => s.kind === 'brace')?.x
       const braceRightX = rightSlots.find((s) => s.kind === 'brace')?.x
       // 段层整体横向范围（供小节线过滤/范围记录）：从最左元素到最右元素右缘
-      const x0 = leftSlots.length > 0 ? leftSlots[0].x : xContent0
+      const x0 = braceLeftInk ?? (leftSlots.length > 0 ? leftSlots[0].x : xContent0)
       const lastR = rightSlots[rightSlots.length - 1]
-      const x1 = lastR ? lastR.x + lastR.w : xContent1
+      const x1 = braceRightInk !== null ? braceRightInk + braceInkW : lastR ? lastR.x + lastR.w : xContent1
       if (!(x1 > x0)) continue
 
       // 层间距：bz 段画在主旋律上方；dsb 段**上下两层整体下移**使整块与主旋律居中
@@ -4384,10 +4567,6 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       //   ⇒ **拖替谱虚线动的是替谱层自己**（歌词不动）；该行歌词被推到"层底 + 小间距"之后
       //   ⇒ 有替谱时歌词行间距 = A（cici）+ B（替谱层高），没替谱时 = A。
       //   `rowTpGeom` 与歌词放置处用的是同一个 `tpGeometry`。
-      const segGap = isDsb
-        ? (config.segmentRowGap?.dsb ?? SEGMENT_ROW_GAP_DEFAULT.dsb)
-        : (config.segmentRowGap?.bz ?? SEGMENT_ROW_GAP_DEFAULT.bz)
-      const dy = segGap
       const tpGeom = isTp ? rowTpGeom(row, seg.tpLine !== undefined ? seg.tpLine + 1 : 1) : null
       const yUpper = isTp
         ? (tpGeom?.ys.get(seg.openIndex) ?? row.y)
@@ -4779,30 +4958,291 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       }
 
       // ---- 段层括弧 ----
-      // 有显式 `&zkh/&ykh` 时不再自动画圆括号（避免双括号）；dsb 的花括号始终绘制。
-      // ---- 段层范围（供 dsb 花括号使用；圆括号已由上面的文本括号字形绘制） ----
-      // ---- 段层范围（dsb 大花括号用；圆括号已由上面的文本括号字形绘制） ----
-      // x1/x2 = **大括号自身所在槽位的左缘**（已排在小节线内侧）；bz 无大括号，渲染端返回空串。
-      // 纵向：大括号必须**包得住上下两层**——上过上一行音符的**上沿**（数码顶 DIGIT_HEIGHT_RATIO
-      // =0.8×字号，再留 0.35×字号给高八度点等）、下过下一行音符的**下沿**（基线再留 0.3×字号）。
+      /**
+       * adj685/adj686（用户口径「大括号的对齐**以墨迹的居中**」+「大括号的高度**从多声部的
+       * 第一声部上沿到最后一声部的下沿**」）：上下端取**该段自己的音符墨迹**，不按字号倍数硬算：
+       *  · 上端 = 该段**段层（上层）**音符的墨迹顶（数字顶 / 高八度点顶）最小值 − pad；
+       *  · 下端 = 该段**下层（包络内主旋律）**音符的墨迹底（减时线层底 / 低八度点底 / 数字底）
+       *    最大值 + pad。实测旧写法下端比"下层减时线层底"深 7.3px，上下留白不对称，
+       *    而且**比歌词行还深**（歌词顶 199.6 < 下层墨迹底 204.6 ⇒ 曲词重叠，用户第三张图）。
+       * `yTop`/`yBottom`/`yBottomLower` **保持原口径不动**——它们还被**声部色块**、曲部虚线、
+       * 方框小节序号消费，改了会连带把色块拉成上下不等高（实测差 4.25px）。
+       */
       if (!page.segmentBrackets) page.segmentBrackets = []
       const lowerBaseline = row.y + dy / 2
+      const bracePadY = ns * 0.35
+      let inkT = yUpper - ns * DIGIT_HEIGHT_RATIO
+      let inkB = lowerBaseline + ns * DIGIT_BOTTOM
+      for (const t of seg.tokens) {
+        if (!isDurational(t)) continue
+        const oct = t.kind === 'note' ? t.octaveShift : 0
+        if (oct > 0) inkT = Math.min(inkT, octaveDotY(yUpper, oct - 1, ns) - DOT_R * noteScaleOf(ns))
+      }
+      for (const e of braceLowerTokens) {
+        if (!isDurational(e)) continue
+        const dc = e.kind === 'note' ? (e.diminishCount ?? 0) : 0
+        const oct = e.kind === 'note' ? e.octaveShift : 0
+        let bot = dc > 0 ? beamBottomY(lowerBaseline, dc, ns) : lowerBaseline + ns * DIGIT_BOTTOM
+        if (oct < 0) bot = Math.max(bot, lowDotY(lowerBaseline, -oct - 1, dc, ns) + DOT_R * noteScaleOf(ns))
+        inkB = Math.max(inkB, bot)
+      }
       page.segmentBrackets.push({
         type: seg.type,
-        x1: r1(braceLeftX ?? x0),
-        x2: r1(braceRightX ?? x1),
+        x1: r1(braceLeftInk ?? braceLeftX ?? x0),
+        x2: r1(braceRightInk ?? braceRightX ?? x1),
+        inkW: isDsb ? r1(braceInkW) : undefined,
         yTop: r1(yUpper - ns * 1.15),
         yBottom: r1(yUpper + ns * 0.4),
         // dsb：下层声部（包络内主旋律）**下沿**——供渲染画跨两层的大花括号
         yBottomLower: isDsb ? r1(lowerBaseline + ns * 0.3) : undefined,
+        // adj685/686：大括号**自己的**墨迹端点（上下对称留白，不复用上面几个"块级"字段）
+        braceTop: r1(inkT - bracePadY),
+        braceBottom: isDsb ? r1(inkB + bracePadY) : undefined,
         // adj442（用户规则）：色块占宽边界——**bz 以前后小节线为界、dsb 以大括号为界**
-        //  - dsb：`{` / `}` 的槽位（= x1/x2，即上面的 braceLeftX/braceRightX）
+        //  - dsb：取两括号的**内缘**（左 `{` 的右缘 / 右 `}` 的左缘）——色块严格落在括号之间
         //  - bz：包络两端的主旋律**小节线**（`barAtStart`/`barAtEnd`；缺锚点时退回内容区边界）
-        blockLeft: r1(isDsb ? (braceLeftX ?? x0) : (barAtStart?.x ?? xContent0)),
-        blockRight: r1(isDsb ? (braceRightX ?? x1) : (barAtEnd?.x ?? xContent1)),
+        blockLeft: r1(isDsb && braceLeftInk !== null ? braceLeftInk + braceInkW : isDsb ? x0 : (barAtStart?.x ?? xContent0)),
+        blockRight: r1(isDsb && braceRightInk !== null ? braceRightInk : isDsb ? x1 : (barAtEnd?.x ?? xContent1)),
         voice: group.music.voice,
         group: gi,
       })
+
+      /**
+       * adj667（用户报「带跳房子的这段两个声部重叠 / 跳房子 2 的线与多声部音符重叠」）：
+       * **把该行的跳房子线抬到段层墨迹顶之上**。
+       *
+       * 根因：`{dsb … }` 的上层声部基线 = `行基线 − 间距/2`，段层的高八度点/连音线还会再往上，
+       * 而跳房子线画在 `小节线顶 − VOLTA_BAR_GAP`（= 行基线 − 21.3）——正好落在上层声部的数字带里。
+       * 只写 `barline.voltaYTop`（渲染时优先采用），**不动 `yTop`**：后者同时被曲部虚线 /
+       * 行高 / 方框小节序号消费，直接抬会牵动一大片几何。多次段取 min（抬得更高者）。
+       */
+      if (isDsb) {
+        const rowTopY = r1(row.y - 18.4 * noteScaleOf(ns))
+        for (const b of page.barlines) {
+          if (b.segment || b.id.group !== gi || b.id.voice !== group.music.voice) continue
+          if (Math.abs(b.yTop - rowTopY) > 1) continue
+          const cur = b.voltaYTop ?? r1(b.yTop - VOLTA_BAR_GAP)
+          b.voltaYTop = Math.min(cur, r1(inkT - LAYER_GAP))
+        }
+      }
+    }
+  }
+}
+
+/**
+ * adj674（用户选择方案 B）：**所有 `{dsb}` 段都为它的大括号预留横向空间**。
+ *
+ * 用户口径（adj681/adj686 明确）：段与**左侧元素**（小节线 / 临时节拍符 / 音符）之间的间距
+ * = **`2w`**，括号**居中**于其中（前后各 `w/2`）；右侧"类似操作"。⇒ 两侧各预留 `2w`。
+ *
+ * 做法（**不改任何数字的位置，只加占宽**——与空间优先"数字锚在块左缘"的口径一致）：
+ *  · 在**包络内的最后一个主旋律音**上加 `2w`：它的块变宽 ⇒ 包络终点之后的第一个音右移，
+ *    而它自己的数字仍在块左缘、墨迹位置一字不动；
+ *  · 在**包络首音之前**加同样一份：首音右移，给左括号让位。
+ *
+ * 返回"按 token 索引的加宽量"（`lead` 加在该音之前、`tail` 加进该音块宽）。
+ */
+function segmentBracePads(rowTokens: MusicToken[], config: PageConfig): Map<MusicToken, { lead: number; tail: number }> {
+  const out = new Map<MusicToken, { lead: number; tail: number }>()
+  const ns = config.note_size
+  const dsbSegs = computeSegments(rowTokens).filter((s) => s.type === 'dsb')
+  if (dsbSegs.length === 0) return out
+  const gapOfDsb = config.segmentRowGap?.dsb ?? SEGMENT_ROW_GAP_DEFAULT.dsb
+  /** 行内计时 token 及其拍位（段不占拍） */
+  const dur: { t: MusicToken; beat: number }[] = []
+  {
+    let beat = 0
+    for (const t of rowTokens) {
+      if (t.kind === 'segment') continue
+      if (!isDurational(t)) continue
+      dur.push({ t, beat })
+      beat += tokenDurationOf(t)
+    }
+  }
+  const add = (tok: MusicToken, key: 'lead' | 'tail', v: number) => {
+    const cur = out.get(tok) ?? { lead: 0, tail: 0 }
+    cur[key] = Math.max(cur[key], v)
+    out.set(tok, cur)
+  }
+  for (const sg of dsbSegs) {
+    // 括号理想宽：与 placeSegmentOverlays 同一套算式（层高 → 宽度），净距各 w/2 ⇒ 每侧 1.5w
+    const dy = Math.max(gapOfDsb, segmentMinGap(sg, rowTokens, ns, SEGMENT_LAYER_CLEARANCE))
+    const idealW = Math.max(SEGMENT_BRACE_MIN_W, (dy + ns * 1.45) * SEGMENT_BRACE_ASPECT)
+    const envEnd = sg.startBeat + sg.beats
+    let last: MusicToken | null = null
+    for (const e of dur) {
+      if (e.beat < envEnd - 1e-9) last = e.t
+      else break
+    }
+    /**
+     * 预留量：两侧各 `2w`（用户口径的"间距 2 倍括号宽、括号居中于其中"）。
+     *
+     * 不再给右侧多加：`placeSegmentOverlays` 已用 `rightLimit` **钳住**右括号（不越进邻居），
+     * 所以预留只要够"贴内容 + `w/2`"即可；多加反而会与本行另一项需求
+     * （`adj629m`：段层更密的拍要撑宽主旋律那一拍）争抢同一份行宽富余。
+     */
+    /**
+     * 预留量：右侧 `3w`、左侧 `2w`（用户口径的"间距 2 倍括号宽、括号居中于其中"是**目标**）。
+     *
+     * 实测标定：右侧 `1w`/`2w` 时右括号会被右邻居钳到压住内容（净距 −1.56 / 1.04），
+     * `3w` 时净距 3.44 ✓（≥ `w/2`）。左侧 `2w` 已足够（`L1`/`L2` 断言守住）。
+     * 预留同时计入 `nonDurPad`（行宽守恒）⇒ 行宽有限时会与本行其它需求（`adj629m`：
+     * 段层更密的拍要撑宽那一拍）争抢富余，这一取舍待用户定优先级。
+     */
+    if (last) add(last, 'tail', idealW * 3)
+    const first = dur.find((e) => e.beat >= sg.startBeat - 1e-9)
+    if (first) add(first.t, 'lead', idealW * 2)
+  }
+  return out
+}
+
+/** adj670/672：token 的拍数（段层行高预算与歌词注释拍位累计共用） */
+function tokenDurationOf(t: MusicToken): number {
+  if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
+    const sp = splitNoteDur(t)
+    return sp.noteDur + sp.augCount * sp.augDur + sp.dotDur
+  }
+  return 0
+}
+
+/**
+ * adj673（用户要求）：「`"p:4/4" 6--- ||` 小节线后面的**空白过大**，不合理」。
+ *
+ * 根因：**独占整个小节的多拍长音**（`6---`）只按"自己的最小需求 + 少量富余"拿宽度
+ * （实测该 4 拍小节内容区 ~78px，而 `6---` 只占 58.8px），而小节线位置由该小节的**拍宽**决定
+ * ⇒ 末尾留下一条比"增时线间距"宽一倍还多的空白（实测 **25.4px** vs 增时线间距 **14.7px**）。
+ *
+ * 口径：这类音符的**块**撑到"小节内容右界"（后一根小节线内侧），增时线/附点按拍均匀铺开。
+ * **不动任何 x、不动小节线、不动行宽** ⇒ 只有"独占小节的长音"的观感变化，其它小节零影响。
+ */
+function fillWholeBarLongNotes(pages: ScorePage[], config: PageConfig): void {
+  const ns = config.note_size
+  const barInset = barlineTotalW('|') / 2 + barlinePad(ns)
+  for (const page of pages) {
+    const bars = page.barlines.filter((b) => !b.segment)
+    for (const n of page.notes) {
+      if (n.segment) continue
+      const t = n.token
+      if (t.kind !== 'note' && t.kind !== 'rest') continue
+      const sp = splitNoteDur(t)
+      // 只处理"多拍"（有增时线或附点）——单拍音的块宽本来就等于拍宽
+      if (sp.augCount === 0 && sp.dotDur <= 0) continue
+      // 必须**独占**它所在的小节（同曲行同声部同小节同行的其它音符一个都没有）
+      const shared = page.notes.some(
+        (o) =>
+          o !== n &&
+          o.id.group === n.id.group &&
+          o.id.voice === n.id.voice &&
+          o.barIndex === n.barIndex &&
+          Math.abs(o.y - n.y) < 0.5,
+      )
+      if (shared) continue
+      // 右侧最近的一根小节线（同一行）
+      const rowTop = n.y - 18.4 * noteScaleOf(ns)
+      const bar = bars
+        .filter(
+          (b) => b.id.group === n.id.group && b.id.voice === n.id.voice && Math.abs(b.yTop - rowTop) < 1 && b.x > n.x + 1,
+        )
+        .sort((a, b) => a.x - b.x)[0]
+      if (!bar) continue
+      const right = r1(bar.x - barInset)
+      const cur = n.rightX ?? n.x + n.width
+      // 原有间隙已经 ≤ 一个字高（观感正常）就不动，避免无谓地改变既有谱面
+      if (right <= cur + ns) continue
+      const w = right - n.x
+      n.rightX = right
+      n.width = r1(w)
+      // 段位重算（与布局放置时**同一套**拆分公式：本体 / 各增时线 / 附点按比例摊开）
+      const bodyDur = sp.noteDur
+      const augTotal = sp.augCount * sp.augDur
+      const total = bodyDur + augTotal + sp.dotDur
+      if (total <= 0) continue
+      const segList: { x: number; perBeat: number; beats: number; el?: 'note' | 'aug' | 'dot' }[] = []
+      let cx = n.x
+      segList.push({ x: r1(cx), perBeat: r1(w / total), beats: bodyDur, el: 'note' })
+      cx += (w * bodyDur) / total
+      for (let a = 0; a < sp.augCount; a++) {
+        const aw = (w * sp.augDur) / total
+        segList.push({ x: r1(cx), perBeat: r1(aw / Math.max(sp.augDur, 1e-6)), beats: sp.augDur, el: 'aug' })
+        cx += aw
+      }
+      if (sp.dotDur > 0) {
+        const dw = (w * sp.dotDur) / total
+        segList.push({ x: r1(cx), perBeat: r1(dw / Math.max(sp.dotDur, 1e-6)), beats: sp.dotDur, el: 'dot' })
+      }
+      n.segments = segList
+    }
+  }
+}
+
+/**
+ * adj672/adj677/adj678/adj682（用户多轮口径收敛）：
+ * 「歌词注释**不占音符位**，因此挤开音符的方式不妥当」+「注释前后的歌词因其音符的位置而位置固定，
+ * 因此歌词注释**只能在前后这两个字之间调整**：两字较宽时**靠近后字**，较窄容不下时
+ * **上/下移动注释到后字的上/下位置**」+「**不与歌词重叠**」+「**同一个 `C:` 行的歌词
+ * 应显示在同一水平线上**，即使是临时多声部也是一样的处理」。
+ *
+ * 落点规则（严格按上面四条，互不越界）：
+ *  ① **不占音符位**：只改注释自己的 `noteX/noteY`，音符与歌词字一个都不动；
+ *  ② 右缘**恒**贴后字左缘（差 `LYRIC_COMMENT_GAP`）——这正是"靠近后字"；
+ *  ③ 空档放不下 ⇒ **移到后字的上/下位置**（位移 = 两个墨迹盒刚好不叠 + 层距），**不压缩**；
+ *     上下都被占（障碍多）时取上方；
+ *  ④ 歌词字（含临时多声部里的）永远同一水平线——挪的只有注释。
+ * 障碍集含**曲部音符**：上移会够到曲部，不把它算进去就会"从压歌词变成压音符"。
+ */
+function avoidLyricComments(pages: ScorePage[], config: PageConfig): void {
+  const size = config.geci_size
+  const cfs = lyricCommentFontSize(size)
+  const ss = noteScaleOf(config.note_size)
+  /** 上下挪动的位移：字/注释的墨迹盒高分别 `size×1.1` / `cfs×1.1` ⇒ 中心错开 `(size+cfs)×0.55` 才不叠 */
+  const shiftY = (size + cfs) * 0.55 + LAYER_GAP * ss
+  interface Box {
+    x1: number
+    x2: number
+    y1: number
+    y2: number
+  }
+  /** 字的墨迹宽：汉字 / 全角标点按 1 字宽，拉丁/数字按 0.55 字宽（与 `lyricCommentWidth` 同一把尺子） */
+  const charW = (text: string): number =>
+    [...text].reduce((a, ch) => a + (/[\u3000-\u303f\uff00-\uffef]|\p{Script=Han}/u.test(ch) ? size : size * 0.55), 0)
+  const lyricBox = (l: PlacedLyric): Box => {
+    const trailW = charW(l.char.trailing ?? '')
+    const w = charW(l.char.text) + (trailW > 0 ? 1 + trailW : 0)
+    return { x1: l.x, x2: l.x + w, y1: l.y - size * 0.85, y2: l.y + size * 0.25 }
+  }
+  const boxAt = (x: number, y: number, w: number): Box => ({ x1: x, x2: x + w, y1: y - cfs * 0.85, y2: y + cfs * 0.25 })
+  for (const page of pages) {
+    const boxes: Box[] = page.lyrics.map(lyricBox)
+    const ns = config.note_size
+    for (const n of page.notes) {
+      boxes.push({ x1: n.x, x2: n.x + Math.max(n.width, digitSlotW(ns)), y1: n.y - ns * 1.15, y2: n.y + ns * 0.6 })
+    }
+    const hits = (b: Box): boolean =>
+      boxes.some((o) => b.x1 < o.x2 - 0.01 && b.x2 > o.x1 + 0.01 && b.y1 < o.y2 - 0.01 && b.y2 > o.y1 + 0.01)
+    // 从左到右处理：左边先占位，右边与它冲突时自己让（避免"谁先谁后"随机）
+    const list = page.lyrics.filter((l) => l.char.note).sort((a, b) => a.y - b.y || a.x - b.x)
+    for (const l of list) {
+      const text = l.char.note as string
+      const w = lyricCommentWidth(text, cfs)
+      const right = l.x - LYRIC_COMMENT_GAP // 注释右缘（紧贴后字）
+      let left = Number.NEGATIVE_INFINITY
+      for (const o of boxes) {
+        if (o.y2 <= l.y - cfs * 0.85 || o.y1 >= l.y + cfs * 0.25) continue
+        if (o.x2 <= l.x + 0.01) left = Math.max(left, o.x2)
+      }
+      const nx = right - w
+      let ny = l.y
+      if (w > right - left - LYRIC_COMMENT_GAP) {
+        const up = l.y - shiftY
+        const down = l.y + shiftY
+        if (!hits(boxAt(nx, up, w))) ny = up
+        else if (!hits(boxAt(nx, down, w))) ny = down
+        else ny = up // 上下都被占（极罕见）：仍取上方，保证不压前面那个字
+      }
+      l.noteX = r1(nx)
+      l.noteY = r1(ny)
+      l.noteSx = undefined
+      boxes.push(boxAt(nx, ny, w))
     }
   }
 }
@@ -4843,7 +5283,12 @@ function shiftEnvelopeDown(
   }
   if (movedIds.size === 0) return
   for (const p of pages) {
-    for (const l of p.lyrics) if (movedIds.has(l.id.index) && l.id.group === gi && l.id.voice === voice) l.y = r1(l.y + dy)
+    /**
+     * adj684（用户口径「**同一个 C 行的歌词应显示在同一水平线上**，即使是临时多声部也是一样的处理」）：
+     * 包络下移**只搬音符**，不再搬歌词——歌词是**独立的一行**，一行歌词错开 11px 读起来就是"没对齐"
+     * （实测同一 `C:` 行的歌词 y 会出现 210.6 / 221.6 / 226.4 三个值）。段层上层在曲部上方、
+     * 歌词在曲部下方，本来就互不遮挡，所以歌词不需要跟着下层声部走。
+     */
     for (const b of p.barlines) {
       if (b.segment || b.id.group !== gi || b.id.voice !== voice) continue
       if (b.x > xMin + 1e-6 && b.x < xMax - 1e-6) {
@@ -4851,7 +5296,22 @@ function shiftEnvelopeDown(
         b.yBottom = r1(b.yBottom + dy)
       }
     }
-    for (const s of p.slurs) if (s.x1 >= xMin - 1e-6 && s.x1 <= xMax + 1e-6) s.y = r1(s.y + dy)
+    /**
+     * adj667（用户报「整个乐谱多处连音线向下错位」）：连音线**必须按所属曲行/声部精确筛选**。
+     *
+     * 旧写法只判 `x1` 落不落在包络的 x 区间内——而连音线不带 group/voice/行信息，
+     * 于是**同一 x 区间里其它曲行（其它 `Q:` 行、其它声部）的连音线也被一起下移**
+     * （实测整谱到处出现 11px 的错位）。现在只动：同组、同声部、**不是段层自己的**
+     * （`layerBase` 有值 = 段层弧线，它们本来就在段层坐标系里，不能再被搬）、
+     * 且 x 落在包络内的连音线。adj670 起**不再把下层连音线翻到下方**——两层放不下的问题
+     * 由 `segmentMinGap` **撑开层间距**解决（用户口径：「连音线是在下面的**反转的**」）。
+     */
+    for (const s of p.slurs) {
+      if (s.layerBase !== undefined) continue
+      if (s.group !== undefined && (s.group !== gi || s.voice !== voice)) continue
+      if (!(s.x1 >= xMin - 1e-6 && s.x1 <= xMax + 1e-6)) continue
+      s.y = r1(s.y + dy)
+    }
   }
 }
 
