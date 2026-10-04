@@ -13889,6 +13889,42 @@ runAdj363SaveTests()
       failed++
       console.error('  ✗ adj652 谱面链接用例抛异常', e)
     }
+    try {
+      runAdj653Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj653 重叠跳房子用例抛异常', e)
+    }
+    try {
+      runAdj654Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj654 替谱歌词对齐用例抛异常', e)
+    }
+    try {
+      runAdj655Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj655 同行多替谱段用例抛异常', e)
+    }
+    try {
+      runAdj656Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj656 替谱占宽用例抛异常', e)
+    }
+    try {
+      runAdj657Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj657 替谱括号/歌词用例抛异常', e)
+    }
+    try {
+      runAdj658Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj658 一行三替谱用例抛异常', e)
+    }
   })
   .then(() => {
     console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
@@ -14701,9 +14737,10 @@ function runAdj629Tests() {
     JSON.stringify({ hasRect: layerGroup.includes('<rect'), comp: /<rect [^>]*height="1\.2"/.test(layerGroup) }))
   const ykhTp = tpBracketBand.find((b) => b.code === 'ykh')
   // 括号中心 = 末音 x + 墨迹宽 + nonDurGap + 括号半宽 ⇒ 距末音 x 约 1.2~1.5×字号；
-  // 关键是"贴着内容"而不是"贴着小节线"（下面第二条：距小节线还有明显余量）
-  check('adj629b **右括号贴最后一个音的墨迹**（不再飘到小节线附近；与末音留出适度间距）',
-    ykhTp !== undefined && ykhTp.x > tpLast.x && ykhTp.x - tpLast.x < ns6 * 1.5 && bar3End - ykhTp.x > 5,
+  // adj657：关键是"贴着内容"——末音顶到小节线时**允许略微越出小节线**（旧规则要求留 5px 余量，
+  // 结果就是把右括号压进末音里，用户报「&ykh 与音符间距过小」）。
+  check('adj629b/adj657 **右括号贴最后一个音的墨迹**（与末音留出间距；为让开末音可略微越出小节线）',
+    ykhTp !== undefined && ykhTp.x > tpLast.x && ykhTp.x - tpLast.x < ns6 * 2 && ykhTp.x - bar3End < ns6 * 0.6,
     JSON.stringify({ ykh: ykhTp?.x, lastNoteX: tpLast.x, bar3End, ns: ns6 }))
 
   // 段内连音线：`{tp ( 4 3 6 6 )}`（括号前后留空格 = 连音线，与 `(1)` 虚音符区分）
@@ -14899,8 +14936,10 @@ function runAdj629Tests() {
   const kYkh = kBz.find((b) => b.code === 'ykh')
   const kGapL = kZkh ? kTp[0].x - (kZkh.x + kZkh.width / 2) : Number.NaN
   const kGapR = kYkh ? kYkh.x - kYkh.width / 2 - (kTp[4].x + Math.min(0.62 * defaultPageConfig.note_size, kTp[4].width)) : Number.NaN
-  check('adj629k 替谱两端的括号与音符**留出间距**（左端不再压住首音：旧实现为 −1.7px）',
-    kGapL >= TP_BRACKET_GAP(defaultPageConfig.note_size) - 4 && kGapR >= TP_BRACKET_GAP(defaultPageConfig.note_size) - 1,
+  // adj664（用户要求「`(` 间距还可以再缩小」）：左括号取**半个间距** —— 它的基准是"音符块左缘"，
+  // 数字墨迹还往右缩一段（块内居中留白），取满间距时视觉上比右侧松。
+  check('adj629k/adj664 替谱两端的括号与音符**留出间距**（左端不再压住首音；左端为半个间距）',
+    kGapL >= TP_BRACKET_GAP(defaultPageConfig.note_size) / 2 - 4 && kGapR >= TP_BRACKET_GAP(defaultPageConfig.note_size) - 1,
     JSON.stringify({ gapL: kGapL, gapR: kGapR, want: TP_BRACKET_GAP(defaultPageConfig.note_size) }))
   // 歌词：落在替谱覆盖区里的字跟着**替谱层的音**走（用户要求）
   const kLy = kl.pages[0].lyrics.filter((l) => l.line === 1)
@@ -14908,11 +14947,11 @@ function runAdj629Tests() {
     n ? kLy.find((l) => l.id.index === n.id.index && l.id.group === n.id.group) : undefined
   const kFirstMain = kMain.find((n) => n.barIndex === 3 && n.beatPos === 0)
   const kOff = (kLyOf(kFirstMain)?.x ?? 0) - kMainX(3, 0)
-  const kLastMain = kMain.find((n) => n.barIndex === 3 && n.beatPos === 1.5)
+  const kLastMain = kMain.find((n) => n.barIndex === 3 && n.beatPos === 1)
   const kLastLy = kLyOf(kLastMain)
-  check('adj629k 歌词：替谱覆盖区里的字对齐**替谱层的音**（末字跟到替谱最后一个音，而不是停在主旋律音上）',
-    kLastLy !== undefined && kLastMain !== undefined && Math.abs(kLastLy.x - kOff - kTp[4].x) < 0.15,
-    JSON.stringify({ ly: kLastLy?.x, off: kOff, tp: kTp[4].x, main: kMainX(3, 1.5) }))
+  check('adj629k/adj657 歌词：替谱块之后的字按**槽位**对到替谱音上（第 4 槽 → 第 4 音，`@` 跳空才算跳）',
+    kLastLy !== undefined && kLastMain !== undefined && Math.abs(kLastLy.x - kOff - kTp[3].x) < 0.2,
+    JSON.stringify({ ly: kLastLy?.x, off: kOff, tp3: kTp[3].x, tp5: kTp[4].x, main: kMainX(3, 1) }))
 
   // ---- ⑬ adj629m（用户要求）：临时伴奏 / 临时多声部 / 替谱 **三种段层**都按"多声部规则"
   //      参与**相应曲部**的占宽计算 ⇒ 段层更密的拍把主旋律那一拍一并撑宽（行总宽不变），
@@ -16357,4 +16396,357 @@ function runAdj652Tests() {
       /tauri_plugin_opener::init\(\)/.test(String(readFileSync('src-tauri/src/lib.rs', 'utf8'))) &&
       /opener:allow-open-url/.test(String(readFileSync('src-tauri/capabilities/default.json', 'utf8'))),
     '')
+}
+
+/**
+ * adj653（用户要求）：**重叠跳房子** `["2.3."` —— 第 2、3 遍**共用**同一段房子；
+ * 并随之修掉「同一根线上 `:|` 与 `&ds` 并存时谁优先」（见 `E-2026-343`）。
+ *
+ * 用户原谱与口径（逐字）：
+ *   第一遍：第 1 行 → 第 3 行 `:|` → 回第 1 行 `|:`
+ *   第二遍：`|:` → 跳过房子 1（第 2~3 行）→ 第 4 行 `["2.3."` → `:|` → 回 `|:`
+ *   第三遍：同第二遍，到 `:|&ds` 跳回第 1 行 `&hs`
+ *   第四遍：跳过房子 1 与 `["2.3."` → 奏 `["4."` → `||`
+ */
+function runAdj653Tests() {
+  console.log('[154] 重叠跳房子 ["2.3."]（adj653）')
+  const code = `V: 1.0
+B: 重 叠 房 子
+D: C
+P: 4/4
+J: 96
+
+Q: 1- 0 1/ 6,/ |:&hs 5 5/ 1/ 2 5,/ 6,/ | 3 3/ 5,/ (2/ 1/) 0/ 6,/ | 6, 5/ 3/ 5/ 3/ 2/ 5/ |
+Q: |/["1." 1- 0 &zkh 3/ 5/ | 6. 1'/ 5- |]/ 3/ 2/ 3/ 5/ 6- | 6,/ 5,/ 6,/ 3/ 2/ 3 6,/ | 1-- &ykh 6,/ 1/ |
+Q: 5/ 6/ 6/ 1/ 2 1/ 7,/ | 5,/ 6,/ 1/ 2/ 3- | 2/ 3/ 5/ 3/ 2/ 1/ 6,/ (2/ | 1/) 1. 0 1/ 6,/ :|
+Q: |/["2.3." 1- 0 1/ 6,/ :|&ds]["4." 1- 0 0/ 5,/ | 6, 6,/ 3/ 2/ 3/ 2/ 6,/ &hx | 1- 0 0 ||]
+`
+  const parsed = parseJps(code)
+  check('adj653 用户原谱可解析且无错误', parsed.errors.length === 0, JSON.stringify(parsed.errors.map((e) => e.message)))
+  const seq = buildPlaySequence(parsed, layoutScore(parsed, defaultPageConfig), 60)
+  const idx = seq.events.filter((e) => !e.placed.segment).map((e) => e.placed.id.index)
+  const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, k) => a + k)
+  const expect = [
+    ...range(0, 70), // 第 1 遍：第 1 行 → 房子 1（`|]/` 未封闭 ⇒ 延伸到第 3 行 `:|`）
+    ...range(4, 23), ...range(71, 74), // 第 2 遍：跳过房子 1 → 房子 ["2.3."
+    ...range(4, 23), ...range(71, 74), // 第 3 遍：重叠，再奏一次 ["2.3." → 到 :|&ds 跳 &hs
+    ...range(4, 23), ...range(75, 88), // 第 4 遍：跳过房子 1 / 2.3 → 房子 ["4."
+  ]
+  check('adj653 四遍演奏顺序**逐音符**符合用户口径（153 个事件一一对上）',
+    JSON.stringify(idx) === JSON.stringify(expect),
+    `实际 ${idx.length} 个事件；期望 ${expect.length} 个`)
+  check('adj653 总时长 = 4 遍（108000ms @bpm60）；旧实现第 2 遍就跳花 S ⇒ 只有 3 遍 / 80000ms',
+    seq.totalMs === 108000, String(seq.totalMs))
+  const times = (v: number) => idx.filter((x) => x === v).length
+  check('adj653 房子 1 只在第 1 遍奏（第 2~4 遍都跳过）', times(24) === 1, `首音出现 ${times(24)} 次`)
+  check('adj653 `["2.3."` 在第 2、3 两遍**各奏一次**（重叠房子，这是本次新增的规则）',
+    times(71) === 2 && times(74) === 2, `首音 ${times(71)} 次 / 末音 ${times(74)} 次`)
+  check('adj653 `["4."` 只在第 4 遍奏一次（`&ds` 之后那遍）', times(75) === 1, `首音出现 ${times(75)} 次`)
+  // 布局：番号原样显示（`2.3.` 不被当成单号截断/改写）
+  const svg653 = renderScoreToSvg(layoutScore(parsed, defaultPageConfig))
+  check('adj653 谱面上番号原样显示 `2.3.`（不被截成 `2.`）',
+    svg653.some((s) => s.includes('>2.3.</text>')), '')
+  /**
+   * 同一根线上 `:|` 与 `&ds` 并存：**反复优先**。
+   * 最小例：`1- |:&hs 2- 3- :|&ds 4- ||]`——该段 1 个 `:|` ⇒ 2 遍；第 2 遍走到 `:|&ds` 才跳 `&hs`。
+   * 期望音符序（源码索引）：0,1,2,1,2,1,2,3（第 1 遍 + 第 2 遍 + D.S. 之后那遍再奏一次）。
+   */
+  const mini = parseJps('V: 1.0\nB: 小\nD: C\nP: 4/4\nQ: 1- |:&hs 2- 3- :|&ds 4- ||]\n')
+  const miniSeq = buildPlaySequence(mini, layoutScore(mini, defaultPageConfig), 60)
+  const miniIdx = miniSeq.events.filter((e) => !e.placed.segment).map((e) => e.placed.id.index)
+  check('adj653 同一根线上 `:|` 与 `&ds` 并存时**反复优先**（走完 2 遍才跳花 S，旧实现第 1 遍就跳）',
+    JSON.stringify(miniIdx) === JSON.stringify([0, 1, 2, 1, 2, 1, 2, 3]),
+    JSON.stringify(miniIdx))
+  // 护栏：单号房子行为不变（`["1."` 只第 1 遍、`["2."` 只第 2 遍）——用同一份谱去掉重叠写法对照
+  const single = code.replace('["2.3."', '["2."')
+  const singleSeq = buildPlaySequence(parseJps(single), layoutScore(parseJps(single), defaultPageConfig), 60)
+  const singleIdx = singleSeq.events.filter((e) => !e.placed.segment).map((e) => e.placed.id.index)
+  const singleTimes = (v: number) => singleIdx.filter((x) => x === v).length
+  check('adj653 护栏：`["2."`（单号）仍然**只在第 2 遍**奏一次，第 3 遍起跳过',
+    singleTimes(71) === 1 && singleIdx.length === idx.length - 4, JSON.stringify({ a: singleTimes(71), n: singleIdx.length }))
+}
+
+/**
+ * adj654（用户报「这段里的 `{tp}` 替谱段对应的歌词显示的乱的」）：
+ * 替谱覆盖区里的歌词字要**按先后顺序逐个**对到替谱层的音上。
+ *
+ * 旧实现按"**拍位覆盖**"配对（还要求 `barIndex` 相同），而替谱层的小节/拍位**是它自己那套坐标系**
+ * ——与主旋律同名 `barIndex` 只是数值巧合 ⇒ 配对随机错位（用户谱面实测：`看` 被甩到最右 515px、
+ * `一` 被甩到最左 239px，字序被打乱成"一你…"）。
+ */
+function runAdj654Tests() {
+  console.log('[155] 替谱段 {tp} 的歌词对齐（adj654）')
+  const code = `V: 1.0
+B: 测 试
+D: C
+P: 4/4
+
+Q: |: 1 0/ 1// 7,// 1 0// 6,// 6,// 7,// | 1/ 7,/ 6,/ (5,/ 5,) &hx 1/ 2/ | 3 1/ 7,/ 6,/ 7,// (1// 1/) 3/ | 2 7,/ 6,/ 5,/# 5/ 3/ 7,/ :|
+C1: 沫，@某一刻@你的光照亮了我。@如果说你是遥远的@星河，耀眼得让人想
+C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/. | 3 1/ 7,/ 6,/ 7,/ 1// 3/. | 2 7,/ 6,// (5,//# 5,/) 4/ 3/ 7,/ 1//} 你看我多么渺小一个我，因为你有梦可做，
+`
+  const parsed = parseJps(code)
+  check('adj654 用户谱例可解析且无告警', parsed.errors.length === 0,
+    JSON.stringify(parsed.errors.map((e) => `${e.severity}:${e.message}`)))
+  const layout = layoutScore(parsed, defaultPageConfig)
+  const page = layout.pages[0]
+  const tpNotes = page.notes.filter((n) => n.segment?.type === 'tp').sort((a, b) => a.x - b.x)
+  const mainNotes = page.notes.filter((n) => !n.segment)
+  check('adj654 替谱层 18 个音（3 小节）、C2 那行 28 个字', tpNotes.length === 18 && page.lyrics.filter((c) => c.line === 1).length === 28,
+    JSON.stringify({ tp: tpNotes.length, c2: page.lyrics.filter((c) => c.line === 1).length }))
+  // 字序：page.lyrics 的存放顺序 = 源码字序（旧实现的乱序是 x 乱，不是数组乱）
+  const c2 = page.lyrics.filter((c) => c.line === 1)
+  check('adj654 C2 的字面顺序 = 源码字序（歌那么我是想要画你的手你看我多么渺小一个我因为你有梦可做）',
+    c2.map((c) => c.char.text).join('') === '歌那么我是想要画你的手你看我多么渺小一个我因为你有梦可做',
+    c2.map((c) => c.char.text).join(''))
+  const xs = c2.map((c) => c.x)
+  check('adj654 **字序 x 单调递增**（旧实现 `看`@515 / `一`@239 会把顺序打乱）',
+    xs.every((v, i) => i === 0 || v > xs[i - 1] + 0.5), JSON.stringify(xs.map((v) => Math.round(v))))
+  // 逐字落在替谱音上：C2 末尾那 17 个字（替谱覆盖区）依次对上前 17 个替谱音
+  const tail = c2.slice(c2.length - 17)
+  const diff = tail.map((c, i) => Math.abs(Math.round(c.x) - Math.round(tpNotes[i].x)))
+  check('adj654 替谱覆盖区的 17 个字**逐个落在替谱音符上**（|字心 − 音心| ≤ 2px，与主旋律同口径）',
+    diff.every((d) => d <= 2), JSON.stringify(diff))
+  check('adj654 字与替谱音**一一对应**（第 1 个字配第 1 个音，不是"拍位覆盖"乱配）',
+    tail[0].char.text === '你' && Math.abs(tail[0].x - tpNotes[0].x) <= 2 &&
+      tail[16].char.text === '做' && Math.abs(tail[16].x - tpNotes[16].x) <= 2,
+    JSON.stringify(tail.map((c) => c.char.text).join('')))
+  // 护栏：别的歌词行（主旋律那行）不受替谱影响，仍与**主旋律音**对齐
+  const c1 = page.lyrics.filter((c) => c.line === 0)
+  const c1diff = c1.map((c) => {
+    const n = mainNotes.find((m) => m.id.index === c.id.index)
+    return n ? Math.abs(Math.round(c.x) - Math.round(n.x)) : 999
+  })
+  check('adj654 护栏：`C1:` 那行歌词**不受替谱影响**（仍逐字对齐主旋律音）',
+    c1diff.every((d) => d <= 2), JSON.stringify(c1diff))
+  const noTp = parseJps(code.replace(/\{tp[^}]*\}/, ''))
+  const noTpNotes = layoutScore(noTp, defaultPageConfig).pages[0].notes.filter((n) => !n.segment)
+  const sig = (n: (typeof mainNotes)[number]) => `${n.id.index}:${n.pitch}:${n.duration}:${n.barIndex}:${n.beatPos}`
+  check('adj654 护栏：加替谱**不改动主旋律的音符与节奏**（与去掉 `{tp}` 的那份逐音符同签名）',
+    mainNotes.length === 31 && noTpNotes.length === mainNotes.length &&
+      mainNotes.map(sig).join('|') === noTpNotes.map(sig).join('|'),
+    JSON.stringify({ n: mainNotes.length, noTp: noTpNotes.length }))
+}
+
+/**
+ * adj655（用户要求）：「当同一行歌词里有多个替谱段 `{tp}` 时，应该在**同一条水平线**上显示，
+ * 通常谱不会重叠」。
+ *
+ * 旧实现"一个段占一层"（`extras[r] += band`），所以同一行写两个不重叠的 `{tp}` 也会各占一条线、
+ * 白多留一份行高。现在按**拍位区间贪心分层**：不重叠共用一层，真重叠才往上叠。
+ */
+function runAdj655Tests() {
+  console.log('[156] 同一歌词行的多个替谱段（adj655）')
+  const head = `V: 1.0
+B: 测 试
+D: C
+P: 4/4
+
+Q: |: 1 2 3 4 | 5 6 7 1' | 2 3 4 5 | 6 7 1' 2' :|
+C1: 有 人 唱 情 歌 有 人 听 晚 钟 借 一 丝 懵 懂 惊 一 片 翻 涌
+`
+  const layOf = (c2: string) => layoutScore(parseJps(head + c2), defaultPageConfig).pages[0]
+  /** 替谱层用到的 y 值（自下而上），层数 = 元素个数 */
+  const layersOf = (page: ReturnType<typeof layOf>): number[] =>
+    [...new Set(page.notes.filter((n) => n.segment?.type === 'tp').map((n) => Math.round(n.y * 100) / 100))].sort(
+      (a, b) => b - a,
+    )
+  const lyricYOf = (page: ReturnType<typeof layOf>): number =>
+    Math.round(page.lyrics.filter((c) => c.line === 1)[0]?.y ?? 0)
+  const one = layOf('C2: 有 人 唱 情 歌 有 人 听 晚 钟 {tp 4/ 3/ 6,/ 6,/ 1/ 1/ 1} 借 一 丝 懵 懂 惊 一 片 翻 涌\n')
+  const twoApart = layOf('C2: 有 人 唱 {tp 4/ 3/ 6,/} 情 歌 有 人 听 晚 钟 {tp 1/ 1/ 1} 借 一 丝 懵 懂 惊 一 片 翻 涌\n')
+  const twoSame = layOf('C2: 有 人 唱 情 歌 有 人 听 晚 钟 {tp 1/ 2/} {tp 3/ 4/} 借 一 丝 懵 懂 惊 一 片 翻 涌\n')
+  check('adj655 对照：单个 `{tp}` 只有一层（基线 y 唯一）', layersOf(one).length === 1, JSON.stringify(layersOf(one)))
+  check('adj655 **两个不重叠的 `{tp}` 排在同一条水平线上**（层数 = 1，y 完全相同）',
+    layersOf(twoApart).length === 1 && layersOf(twoApart)[0] === layersOf(one)[0],
+    JSON.stringify({ apart: layersOf(twoApart), one: layersOf(one) }))
+  check('adj655 不重叠时整行只多留**一个** B：歌词行基线与"只有一个 `{tp}`"时**完全相同**',
+    lyricYOf(twoApart) === lyricYOf(one), JSON.stringify({ apart: lyricYOf(twoApart), one: lyricYOf(one) }))
+  check('adj655 真的重叠（连写两个 `{tp}`、锚点同拍）才往上叠一层（层数 = 2，间隔 = 一个层高）',
+    layersOf(twoSame).length === 2 && layersOf(twoSame)[0] - layersOf(twoSame)[1] > 8 &&
+      layersOf(twoSame)[1] === layersOf(one)[0],
+    JSON.stringify(layersOf(twoSame)))
+  check('adj655 重叠时歌词行被推下去（行高 = A + 2B），不与替谱层挤在一起',
+    lyricYOf(twoSame) > lyricYOf(one), JSON.stringify({ same: lyricYOf(twoSame), one: lyricYOf(one) }))
+  // 两个段的音符各自落在**自己那一层**上（不是"一半在一层一半在另一层"）
+  const tps = twoApart.notes.filter((n) => n.segment?.type === 'tp').sort((a, b) => a.x - b.x)
+  check('adj655 同层两段各自成组：6 个替谱音全部落在同一个 y 上（并排、不错行）',
+    tps.length === 6 && new Set(tps.map((n) => Math.round(n.y * 100) / 100)).size === 1,
+    JSON.stringify(tps.map((n) => [Math.round(n.x), Math.round(n.y)])))
+}
+
+/**
+ * adj656（用户报「替谱里按主音符行的占宽进行排列，导致替谱中有些音符过密导致重叠」）：
+ * 替谱层不能用"主旋律音符到音符"的线性映射——那会让替谱音**继承主旋律各音的宽窄**
+ * （主旋律音窄的地方，替谱同一拍里的 16 分被挤到一起）。改为"锚点 + 拍格内均匀"：
+ * 拍起点有主旋律音就用它（保住 adj629k 的「同拍同位」），否则在**本拍格内均匀分布**。
+ */
+function runAdj656Tests() {
+  console.log('[157] 替谱密拍的占宽（adj656）')
+  const code = `V: 1.0
+B: 测 试
+D: C
+P: 4/4
+Q: |: 1 2 3 4 | 5 6 7 1' | 2 3 4 5 | 6 7 1' 2' :|
+C1: 有 人 唱 情 歌 有 人 听 晚 钟 借 一 丝 懵 懂 惊 一 片 翻 涌
+C2: 有 人 唱 情 {tp 4// 3// 6,// 6,// 1// 1// 1// 1// 2// 2// 2// 2// 3// 3// 3// 3//} 歌 有 人 听 晚 钟 借 一 丝 懵 懂 惊 一 片 翻 涌
+`
+  const parsed = parseJps(code)
+  const page = layoutScore(parsed, defaultPageConfig).pages[0]
+  const tp = page.notes.filter((n) => n.segment?.type === 'tp').sort((a, b) => a.x - b.x)
+  check('adj656 谱例：替谱 16 个十六分（主旋律该小节只有 4 个四分）', tp.length === 16, String(tp.length))
+  const gaps = tp.slice(1).map((n, i) => n.x - tp[i].x)
+  check('adj656 替谱 16 分**不再被挤到重叠**：最小间距 ≥ 9px（旧实现末尾 4 个只有 6.5px）',
+    Math.min(...gaps) >= 9, JSON.stringify(gaps.map((g) => Math.round(g * 10) / 10)))
+  check('adj656 替谱 16 分**均匀分布**（间距极差 ≤ 1.5px；旧实现首尾差 2.8px）',
+    Math.max(...gaps) - Math.min(...gaps) <= 1.5, JSON.stringify({ min: Math.min(...gaps), max: Math.max(...gaps) }))
+  // 护栏：拍起点有主旋律音时，替谱仍**严格同拍同位**（adj629k 的口径不能被本改动破坏）
+  const main = page.notes.filter((n) => !n.segment)
+  const mainX = (bar: number, beat: number) =>
+    main.find((n) => n.barIndex === bar && Math.abs(n.beatPos - beat) < 1e-6)?.x ?? Number.NaN
+  const tpAt = (bar: number, beat: number) =>
+    tp.find((n) => n.barIndex === bar && Math.abs(n.beatPos - beat) < 1e-6)?.x ?? Number.NaN
+  check('adj656 护栏：拍起点有主旋律音时替谱仍**严格同拍同位**（Δ = 0）',
+    Math.abs(tpAt(2, 0) - mainX(2, 0)) < 0.15 && Math.abs(tpAt(2, 1) - mainX(2, 1)) < 0.15 &&
+      Math.abs(tpAt(2, 3) - mainX(2, 3)) < 0.15,
+    JSON.stringify({ tp: [tpAt(2, 0), tpAt(2, 1), tpAt(2, 3)], main: [mainX(2, 0), mainX(2, 1), mainX(2, 3)] }))
+}
+
+/**
+ * adj657（用户报两条）：
+ *  ①「替谱的 `&zkh` 与音符间距过大，而 `&ykh` 与音符的间距过小」——右括号被"小节线内侧"钳进末音
+ *    （实测 −6.2px 重叠），左括号却按"音符块左缘"算 ⇒ 两侧不对称；
+ *  ②「`{tp …}` 后面那几句歌词与替谱音符对齐不正确」——取字用的是"包络拍位区间内的字"，
+ *    而替谱的音符个数与区间内的主旋律音个数**可以不同** ⇒ 后半句的字留在原地（截图里飘着）。
+ *    另外"连音线内同音（保持音）"的后一个音不该再占一个字。
+ */
+function runAdj657Tests() {
+  console.log('[158] 替谱括号间距 + 歌词配对（adj657）')
+  const code = `V: 1.0
+B: 测 试
+D: C
+P: 4/4
+Q: |: 1 2 3 4 | 5 6 7 1' | 2 3 4 5 | 6 7 1' 2' :|
+C1: 有 人 唱 情 歌 有 人 听 晚 钟 借 一 丝 懵 懂 惊 一 片 翻 涌
+C2: 有 人 唱 情 歌 {tp 7,/ 6,// (5,// 5,/) 6/ 7,// 2/.} 孩子们@为你唱 借 一 丝 懵 懂 惊 一 片 翻 涌
+C3: 有 人 唱 {tp 7,/ 6,// (5,//# 5,/) 4/ 3/ 7,// 1//} 情 歌 有 人 听 晚 钟 借 一 丝 懵 懂
+`
+  const parsed = parseJps(code)
+  check('adj657 用户谱例可解析', parsed.errors.filter((e) => e.severity === 'error').length === 0,
+    JSON.stringify(parsed.errors.map((e) => e.message)))
+  const page = layoutScore(parsed, defaultPageConfig).pages[0]
+  const tp = page.notes.filter((n) => n.segment?.type === 'tp').sort((a, b) => a.x - b.x)
+  // 两个替谱层（C2 的 7 个音、C3 的 8 个音）——括号按层（y）取
+  const brs = page.brackets.filter((b) => b.layerScale !== undefined)
+  const perLayer = [0, 1].map((i) => {
+    const ys = [...new Set(tp.map((n) => Math.round(n.y)))].sort((a, b) => a - b)
+    const y = ys[i]
+    const notes = tp.filter((n) => Math.round(n.y) === y).sort((a, b) => a.x - b.x)
+    const zkh = brs.find((b) => b.code === 'zkh' && Math.abs(b.layerBase - y) < 12)
+    const ykh = brs.find((b) => b.code === 'ykh' && Math.abs(b.layerBase - y) < 12)
+    const gapL = zkh ? notes[0].x - (zkh.x + zkh.width / 2) : Number.NaN
+    const last = notes[notes.length - 1]
+    const gapR = ykh ? ykh.x - ykh.width / 2 - (last.x + last.width) : Number.NaN
+    return { y, n: notes.length, gapL, gapR, notes }
+  })
+  check('adj657 两层替谱都在（C2 的 7 音 / C3 的 8 音）', perLayer[0].n === 7 && perLayer[1].n === 8,
+    JSON.stringify(perLayer.map((l) => l.n)))
+  check('adj657 ① 右括号**不再压进末音**（旧实现实测 −6.2px = 与音符重叠）',
+    perLayer.every((l) => l.gapR > 0), JSON.stringify(perLayer.map((l) => [Math.round(l.gapL), Math.round(l.gapR)])))
+  check('adj657 ① 左右括号间距**基本对称**（|左 − 右| ≤ 10px；旧实现差 18px；右括号贴近行右缘时会被行宽兜底）',
+    perLayer.every((l) => Math.abs(l.gapL - l.gapR) <= 10),
+    JSON.stringify(perLayer.map((l) => [Math.round(l.gapL), Math.round(l.gapR)])))
+  // ② 歌词：`孩子们@为你唱` = **3 字 + 跳 1 个音 + 3 字**（共 7 槽 ↔ 替谱 7 个音）
+  const ly2 = page.lyrics.filter((c) => c.line === 1).sort((a, b) => a.x - b.x)
+  const kids = ly2.filter((c) => c.x >= perLayer[0].notes[0].x - 5).slice(0, 6)
+  check('adj657 ② 替谱块之后的字按**槽位**落位（`@` = 跳过一个音：3 字 + 跳 1 + 3 字 ↔ 7 个音）',
+    kids.length === 6 &&
+      [0, 1, 2, 4, 5, 6].every((ni, i) => Math.abs(kids[i].x - perLayer[0].notes[ni].x) <= 2),
+    JSON.stringify({ kids: kids.map((c) => [c.char.text, Math.round(c.x)]), notes: perLayer[0].notes.map((n) => Math.round(n.x)) }))
+  check('adj657 ② `@` **跳过的那个替谱音不带字**（第 4 个音上没有字）',
+    !ly2.some((c) => Math.abs(c.x - perLayer[0].notes[3].x) < 1.5),
+    JSON.stringify({ skipNoteX: Math.round(perLayer[0].notes[3].x), ly: ly2.map((c) => Math.round(c.x)) }))
+}
+
+/**
+ * adj658（用户报「`{tp …}因为你@有梦可做，` 的 `可做，` **没有显示**」）：用户原谱那一行有
+ * **三个** `{tp}`，且该行的字（28 字 + 2 个 `@` 跳空 = 30 槽）比主旋律该行的音符多 ⇒
+ * 末尾的字在**放置阶段就被丢掉**（根本没进 `page.lyrics`），靠"事后挪字"救不回来。
+ *
+ * 现在：替谱层的歌词直接按**歌词槽位表**落到替谱音上——已放下的搬过来、没放下的**新建**。
+ */
+function runAdj658Tests() {
+  console.log('[159] 一行三个替谱段 + 超长歌词行（adj658）')
+  const code = `V: 1.0
+B: 你是遥远的星河
+Z: 佚名 词曲
+D: C
+P: 4/4
+
+Q: 1 0/ 1// 7,// 1 0// 6,// 6,// 7,// | 1/ 7,/ 6,/ (5,/ 5,) &hx 1/ 2/ | 3 1/ 7,/ 6,/ 7,// (1// 1/) 3/ | 2 7,/ 6,/ 5,/# 5/ 3/ 7,// |
+C1: 沫，@某一刻@你的光照亮了我。@如果说你是遥远的@星河，耀眼得让人想
+C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 6,/ 7,/ 1// 3/.} 渺小一个@我， {tp 7,/ 6,// (5,//# 5,/) 4/ 3/ 7,// 1//} 因为你@有梦可做，
+`
+  const parsed = parseJps(code)
+  const page = layoutScore(parsed, defaultPageConfig).pages[0]
+  const tp = page.notes.filter((n) => n.segment?.type === 'tp').sort((a, b) => a.x - b.x)
+  check('adj658 一行三个 `{tp}` 共 14 个替谱音（2 + 4 + 8）', tp.length === 14, String(tp.length))
+  const ly2 = page.lyrics.filter((c) => c.line === 1)
+  const texts = ly2.map((c) => c.char.text).join('')
+  check('adj658 该行 28 个字**全部放下**（含末尾 `可做`——旧实现被丢掉，用户报「没有显示」）',
+    ly2.length === 28 && texts.endsWith('可做') && texts.includes('因为你'),
+    JSON.stringify({ n: ly2.length, tail: texts.slice(-6) }))
+  /** 与替谱音对齐的字（|字心 − 音心| ≤ 2.5px） */
+  const onTp = (ch: string) => {
+    const c = ly2.find((x) => x.char.text === ch && tp.some((t) => Math.abs(t.x - x.x) <= 2.5))
+    return c ? tp.filter((t) => Math.abs(t.x - c.x) <= 2.5)[0] : undefined
+  }
+  const tpOf = (ch: string) => {
+    const n = onTp(ch)
+    return n ? n.id.index : -1
+  }
+  check('adj658 三段的字各就各位：`你看`→tp1（2 音）、`渺小一个`→tp2（4 音）、`因为你…可做`→tp3（8 音）',
+    onTp('你') !== undefined && onTp('看') !== undefined && onTp('渺') !== undefined && onTp('小') !== undefined &&
+      onTp('一') !== undefined && onTp('个') !== undefined && onTp('因') !== undefined && onTp('为') !== undefined &&
+      onTp('有') !== undefined && onTp('梦') !== undefined && onTp('可') !== undefined && onTp('做') !== undefined,
+    JSON.stringify(['你看渺小一个因有为梦可做'.split('').map((ch) => `${ch}${onTp(ch) ? '✓' : '✗'}`).join('')]))
+  // tp3 的第 4 个音 = `@` 跳空 ⇒ 不带字；`可`/`做` 落在 tp3 的第 7、8 个音上
+  const tp3 = tp.slice(6)
+  const c7 = ly2.find((c) => c.char.text === '可')
+  const c8 = ly2.find((c) => c.char.text === '做')
+  check('adj658 tp3：第 4 个音（`@` 跳空）不带字，`可`/`做` 正好落在最后两个音 `7,//` / `1//` 上',
+    tp3.length === 8 && !ly2.some((c) => Math.abs(c.x - tp3[3].x) < 1.5) &&
+      c7 !== undefined && c8 !== undefined && Math.abs(c7.x - tp3[6].x) <= 2.5 && Math.abs(c8.x - tp3[7].x) <= 2.5,
+    JSON.stringify({ tp3x: tp3.map((n) => Math.round(n.x)), 可: c7 ? Math.round(c7.x) : null, 做: c8 ? Math.round(c8.x) : null }))
+  check('adj658 新建的歌词条目挂在**替谱音**上（id 用替谱的命名空间，便于点谱面跳脚本）',
+    tpOf('可') >= 0 && tpOf('做') >= 0 && tpOf('可') !== tpOf('做'),
+    JSON.stringify({ 可: tpOf('可'), 做: tpOf('做') }))
+  /**
+   * adj661（用户报「特别是最后一个 `&ykh`」）：三段的两端括号都要与**音符墨迹**留出间距。
+   * 上一版右括号用 `row.right − 括号宽` 兜底，而替谱行常排到行右缘 ⇒ 末段的 `)` 被压到只剩 0.2px。
+   */
+  const brsT = page.brackets.filter((b) => b.layerScale !== undefined).sort((a, b) => a.x - b.x)
+  const opensT = brsT.filter((b) => b.code === 'zkh')
+  const closesT = brsT.filter((b) => b.code === 'ykh')
+  const gapsT = opensT.map((z, i) => {
+    const y = closesT[i]
+    const zx = z.x + z.width / 2
+    const yx = y.x - y.width / 2
+    const seg = tp.filter((n) => n.x >= zx - 2 && n.x <= yx)
+    const first = seg[0]
+    const last = seg[seg.length - 1]
+    // 墨迹宽近似：取"槽宽"与一个数字宽（8px）的较小者
+    const inkOf = (n: (typeof tp)[number]) => Math.min(n.width ?? 0, 8)
+    // adj662：右括号右缘**不得越过页面边距线**（用户口径：可扩到小节线，但不能超出边距）
+    const marginRightX = page.width - defaultPageConfig.margin_right
+    return {
+      n: seg.length,
+      L: first ? first.x - zx : Number.NaN,
+      R: last ? yx - (last.x + inkOf(last)) : Number.NaN,
+      marginOver: yx + (y.width ?? 0) - marginRightX,
+    }
+  })
+  check('adj661/adj662 三段替谱的两端括号都与音符**墨迹**留间距，且右括号**不越过页面边距线**',
+    gapsT.length === 3 && gapsT.every((g) => g.L >= 2 && g.R >= 0 && g.marginOver <= 0.01),
+    JSON.stringify(gapsT.map((g) => [g.n, Math.round(g.L), g.R.toFixed(1), g.marginOver.toFixed(1)])))
 }
