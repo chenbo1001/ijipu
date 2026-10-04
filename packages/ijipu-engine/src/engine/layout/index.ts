@@ -4618,10 +4618,31 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         const idealBraceW = Math.max(SEGMENT_BRACE_MIN_W, /* segH 见下 */ 0)
         const cov = coveredIdxRange(envStart, envEnd, row.page)
         braceLowerTokens = cov.first >= 0 ? placed.slice(cov.first, cov.last + 1).map((q) => q.note.token) : []
-        // 内容侧：先给用户**显式写的圆括号**让位（大括号一律在圆括号外侧）
-        const contentL = xContent0 - (leadW > 0 ? leadW + bgap : 0)
+        /**
+         * adj692（用户口径「两端各留 **2 倍大括号宽度的墨迹留白**，大括号**在留白中居中**」）：
+         * 让位区间的两端必须用**段内内容的实际墨迹边界**来量，而不是包络的拍位映射端点。
+         *
+         * 为什么：`xContent0` 是"包络起点的拍位映射 x"，而段内首音因为拍内相位/槽宽，
+         * 常常还要**再偏右二十多像素**（本轮实测 `xContent0 = 212.5` 而首音墨迹左缘 `238.0`）。
+         * 用包络端点当"内容左缘"，可用区间就被算小三四十像素 ⇒ 括号被顶到贴着拍号/小节线
+         * （实测左留白被钳到只剩 2.7px），"居中于留白"根本无从谈起。
+         *
+         * 这里按"段内音符（上层）+ 包络内主旋律（下层）"两类音符的墨迹外沿取内容边界；
+         * 段内还没放置音符时回退到包络端点。
+         */
+        /**
+         * 段内**上层**音符此刻还没放置（本函数是"段层音符循环"之后的独立循环），
+         * 而上下两层**同一拍位逐音符对齐**（每拍同一 x）⇒ 用**下层**（包络内的主旋律，
+         * 已放置的 `placed`）的墨迹边界代表内容边界，与上层等价。
+         */
+        const segLowerInk = cov.first >= 0 ? placed.slice(cov.first, cov.last + 1).map((q) => [q.note.x, inkRightOfNote(q.note)] as const) : []
+        const contentL = (segLowerInk.length > 0 ? Math.min(...segLowerInk.map(([l]) => l)) : xContent0) - (leadW > 0 ? leadW + bgap : 0)
         const contentR =
-          (cov.last >= 0 ? inkRightOfNote(placed[cov.last].note) : xContent0) + (tailW > 0 ? tailW + bgap : 0)
+          (segLowerInk.length > 0
+            ? Math.max(...segLowerInk.map(([, r]) => r))
+            : cov.last >= 0
+              ? inkRightOfNote(placed[cov.last].note)
+              : xContent0) + (tailW > 0 ? tailW + bgap : 0)
         // 左：包络起点的小节线内侧（**含临时节拍符占宽**）→ 包络前一个音符的墨迹右缘 → 行内容左界
         // adj675：临时节拍 `"p:2/4"` 画在小节线**右侧**、要占掉约一个字宽——不算进来的话
         // "贴左"的括号会正好压在拍号上（用户截图报「临时节拍符与左括号重叠」）。
@@ -4655,17 +4676,29 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         }
         void idealBraceW
         if (braceInkW > 0.01) {
-          const half = braceInkW / 2
+          const w = braceInkW
+          const halfGap = w / 2
           /**
-           * adj686（用户口径「括号留空按 **2 倍括号宽度**、并在其中**居中**」＋布局第一原则
-           * 「除非明确，元素不得重叠」）：
-           *  · 首选**紧贴内容**（与段内容墨迹净距恒 `w/2`）——"左边偏左/右边留空不够"都由此消除；
-           *  · 再用两侧边界**钳住**：左侧不越进左邻居、右侧不越进右邻居。
-           *    `segmentBracePads` 的预留（左 `2w` / 右 `3w`）保证正常情况下这两个钳制都不生效，
-           *    于是"左侧元素 → 括号"= `w/2`（用户要的前后各半）。
+           * adj692（用户口径）：「临时多声部块**两端各留 2 倍大括号宽度的墨迹留白**
+           * （即与两端的小节线 / 临时节拍符 / 音符等元素的墨迹间距），大括号**在留白中居中**」。
+           *
+           * 几何（以左端为例）：让位区间 = `[左邻居, 段内容左缘]`，括号居中于其中，
+           * 于是两侧净距各 `(可用宽 − w)/2`；`segmentBracePads` 预留 `2w` 时正好各 `w/2`：
+           * ```
+           *   [左邻居]  ←w/2→  [ { ]  ←w/2→  [段内容]
+           *    leftLimit        braceLeftInk        contentL
+           * ```
+           *
+           * **硬下限**（布局第一原则「除非明确，元素不得重叠」）：括号与段内容的净距 ≥ `w/2`，
+           * 与两侧邻居的净距也 ≥ `w/2`。空间不足时**先保"贴内容那侧半个括号宽"**
+           * （宁可离邻居更近，也绝不压音符），再按可用宽居中。
            */
-          braceLeftInk = r1(Math.max(contentL - half - braceInkW, leftLimit + half))
-          braceRightInk = r1(Math.min(contentR + half, rightLimit - half - braceInkW))
+          const wantL = contentL - halfGap - w
+          const floorL = leftLimit + halfGap // 硬下限：不压左邻居
+          braceLeftInk = r1(Math.max(floorL, Math.min(wantL, contentL - halfGap - w)))
+          const wantR = contentR + halfGap
+          const ceilR = rightLimit - halfGap - w // 硬上限：不压右邻居
+          braceRightInk = r1(Math.min(ceilR, Math.max(wantR, contentR + halfGap)))
         } else {
           braceInkW = 0
         }
@@ -5240,23 +5273,19 @@ function segmentBracePads(rowTokens: MusicToken[], config: PageConfig): Map<Musi
       else break
     }
     /**
-     * 预留量：两侧各 `2w`（用户口径的"间距 2 倍括号宽、括号居中于其中"）。
+     * 预留量：**两侧各 `3w`**（= 用户口径的让位区间 `2w` + 括号自身 `w`）。
      *
-     * 不再给右侧多加：`placeSegmentOverlays` 已用 `rightLimit` **钳住**右括号（不越进邻居），
-     * 所以预留只要够"贴内容 + `w/2`"即可；多加反而会与本行另一项需求
-     * （`adj629m`：段层更密的拍要撑宽主旋律那一拍）争抢同一份行宽富余。
-     */
-    /**
-     * 预留量：右侧 `3w`、左侧 `2w`（用户口径的"间距 2 倍括号宽、括号居中于其中"是**目标**）。
-     *
-     * 实测标定：右侧 `1w`/`2w` 时右括号会被右邻居钳到压住内容（净距 −1.56 / 1.04），
-     * `3w` 时净距 3.44 ✓（≥ `w/2`）。左侧 `2w` 已足够（`L1`/`L2` 断言守住）。
-     * 预留同时计入 `nonDurPad`（行宽守恒）⇒ 行宽有限时会与本行其它需求（`adj629m`：
-     * 段层更密的拍要撑宽那一拍）争抢富余，这一取舍待用户定优先级。
+     * 为什么不是 `2w`：让位区间指"**括号与邻居之间的墨迹空白**"，括号本身还要占 `w`；
+     * 预留 `2w` 时右邻居正好贴在 `rightLimit` 上，右括号的**外侧**只剩下 `~0`，
+     * 与"外侧至少半个括号宽"的硬下限冲突（实测 B1：gap 只剩 1.04、外缘几乎贴住后一个音）。
+     * 预留 `3w` 后，括号两侧各得 `w/2`（用户要的"居中于 2w 留白中"）；
+     * 公式本身对空间不足的情形有硬下限兜底，因此预留偏大只会更宽松、不会压字。
+     * 预留计入 `nonDurPad`（行宽守恒）⇒ 会与本行其它需求（`adj629m`：段层更密的拍要撑宽那一拍）
+     * 争抢富余，这一取舍待用户定优先级。
      */
     if (last) add(last, 'tail', idealW * 3)
     const first = dur.find((e) => e.beat >= sg.startBeat - 1e-9)
-    if (first) add(first.t, 'lead', idealW * 2)
+    if (first) add(first.t, 'lead', idealW * 3)
   }
   return out
 }

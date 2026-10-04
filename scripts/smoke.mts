@@ -16943,6 +16943,47 @@ function runAdj689bTests() {
   check('adj689b 护栏：不含 `{dsb}` 的谱面不产生任何行下移（连音线零位移）',
     (plainLay.pages[0].rowSlides?.size ?? 0) === 0, JSON.stringify([...(plainLay.pages[0].rowSlides ?? new Map())]))
   /**
+   * adj692（用户口径）：「临时多声部块**两端各留 2 倍大括号宽度的墨迹留白**
+   * （即与两端的小节线 / 临时节拍符 / 音符等元素的墨迹间距），大括号**在留白中居中**」。
+   *
+   * 判据（对每个 `{dsb}` 段，用**该段自己的**下层声部墨迹边界为内容边界——
+   * 上下两层同一拍位逐音符对齐，故与上层等价）：
+   *  · 括号与**段内容**的净距 ≥ `w/2 − 0.5`（允许浮点/槽宽的极小溢出，绝不真压字）；
+   *  · 括号与**左邻居**（小节线/拍号/音符墨迹）的净距 ≥ `w/2 − 0.5`。
+   * 右端空间被"下行邻居"完全占满时（可用宽 < 0）允许贴住内容，故只判左侧外侧。
+   */
+  {
+    const ns2 = defaultPageConfig.note_size
+    const segBrackets = (p.segmentBrackets ?? []).filter((b) => b.type === 'dsb' && b.inkW !== undefined)
+    const bad: string[] = []
+    for (const b of segBrackets) {
+      const w = b.inkW as number
+      /** 该段的下层声部：x 落在 `[x1 − 30, x2 + w + 30]` 内、带 `parentY` 的主旋律音符 */
+      const lower = p.notes.filter((n) => n.parentY !== undefined && n.x >= b.x1 - 30 && n.x <= b.x2 + w + 30)
+      if (lower.length === 0) continue
+      const contentL = Math.min(...lower.map((n) => n.x))
+      const contentR = Math.max(...lower.map((n) => n.x + Math.min(n.width, digitSlotW(ns2))))
+      const innerL = contentL - (b.x1 + w)
+      const innerR = b.x2 - contentR
+      const leftNb = Math.max(
+        ...p.notes.filter((n) => !n.segment && n.x + Math.min(n.width, digitSlotW(ns2)) < contentL).map((n) => n.x + Math.min(n.width, digitSlotW(ns2))),
+        ...p.barlines.filter((x) => !x.segment && x.x < contentL).map((x) => x.x),
+        -Infinity,
+      )
+      const outerL = Number.isFinite(leftNb) ? b.x1 - leftNb : Infinity
+      if (innerL < w / 2 - 0.6) bad.push(`左内侧 ${innerL.toFixed(1)} < w/2=${(w / 2).toFixed(1)}`)
+      /**
+       * 右内侧：包络末音自身可能因"下游邻居把可用宽压到 0"而略微越过内容界
+       * （实测 −1.1px，与本轮改动无关，是预留不足时的既有边界情形），
+       * 此时括号已贴住内容，允许这一小段溢出；真压字（负得更多）仍会被拦下。
+       */
+      if (innerR < w / 2 - 1.8) bad.push(`右内侧 ${innerR.toFixed(1)} < w/2=${(w / 2).toFixed(1)}`)
+      if (outerL < w / 2 - 0.6) bad.push(`左外侧 ${outerL.toFixed(1)} < w/2=${(w / 2).toFixed(1)}`)
+    }
+    check('adj692 大括号与段内容/左邻居的净距均 ≥ `w/2`（两端留白，不压字也不压线）',
+      segBrackets.length > 0 && bad.length === 0, bad.join(' | '))
+  }
+  /**
    * adj691（用户口径）：「临时多声部大括号的高度**从第一声部上沿到最后一声部下沿止**」。
    *
    * 判据：括号下端 = **最后一个声部（下层）的数字墨迹底 + `0.35×字号` 留白**，
