@@ -1147,8 +1147,19 @@ export function layoutScore(
         for (const t of s.tokens) {
           if (t.kind !== 'note' && t.kind !== 'rest' && t.kind !== 'rhythm') continue
           const d = tokenDuration(t)
-          // 段层包络的拍位是**曲行全局**的（段自身不占主旋律拍位）→ 直接以 startBeat 为基
-          const b = s.startBeat + (Math.abs(beat - Math.round(beat)) < 1e-3 ? Math.round(beat) : Math.floor(beat + 1e-9))
+          /**
+           * adj702（用户选方案 B：「临时多声部内的宽度分配要与主音符的宽度分布**综合考虑**，
+           * 避免一个松一个紧」）：`{dsb}` 的拍位必须用**绝对拍位**（`s.startBeat + beat`），
+           * 与主旋律的 `spans[].startBeat` 同一坐标系，两边才能合并成"同一拍取更密需求"。
+           *
+           * 旧写法把相对拍位**四舍五入到整拍**：`{dsb … (3// 2// 1//) …}` 首音落在 `4.5` 拍时
+           * 会算成第 `5` 拍 ⇒ 与主旋律第 4~/5 拍的需求**错位**，段层更密的拍拿不到额外宽度，
+           * 只能把自己的音符挤成最小占宽（实测末几个音只剩 2px）。
+           *
+           * `bz` / `tp` 保留旧的"贴到整拍"口径：`bz` 是正上方叠层、`tp` 是另起一遍，
+           * 两者与主旋律不是"同一拍位上下叠"的关系，改基准会牵动既有全部几何。
+           */
+          const b = s.type === 'dsb' ? s.startBeat + beat : s.startBeat + (Math.abs(beat - Math.round(beat)) < 1e-3 ? Math.round(beat) : Math.floor(beat + 1e-9))
           const e = out.get(b) ?? { minDur: Infinity, extra: 0 }
           e.minDur = Math.min(e.minDur, d)
           if (t.kind === 'note') e.extra = Math.max(e.extra, noteExtraW(t, m.noteSize, accInk))
@@ -5530,6 +5541,8 @@ function avoidLyricComments(pages: ScorePage[], config: PageConfig): void {
       let left = Number.NEGATIVE_INFINITY
       for (const o of boxes) {
         if (o.y2 <= l.y - cfs * 0.85 || o.y1 >= l.y + cfs * 0.25) continue
+        // 注释画在**本字之前**，不能被"本字自己的盒"挡住——它正是"注释右缘要贴上去"的那条边
+        if (Math.abs(o.x1 - l.x) < 0.01 && Math.abs(o.y2 - l.y - size * 0.25) < 0.01) continue
         if (o.x2 <= l.x + 0.01) left = Math.max(left, o.x2)
       }
       /**
@@ -5561,7 +5574,7 @@ function avoidLyricComments(pages: ScorePage[], config: PageConfig): void {
        * 这里把"落在锚点左侧、但**本体在左侧且带后缀**"的那些字的标点起点也算成障碍。
        */
       for (const o of page.lyrics) {
-        if (Math.abs(o.y - l.y) > 0.5) continue
+        if (Math.abs(o.y - l.y) > 0.5 || o === l) continue
         const ox2 = lyricBox(o).x2
         if (ox2 > left && ox2 <= l.x + 0.01) {
           left = ox2
@@ -5580,24 +5593,45 @@ function avoidLyricComments(pages: ScorePage[], config: PageConfig): void {
        *  ④ 同上但上/下错开；
        *  ⑤ 都不行才退回"用字形横向压缩塞进左边空档"（adj677 的旧兜底口径）。
        *
-       * 原来的做法是"放不下就压 x 到 `left`"，会把注释推到**压住前一字后缀标点**的位置
-       * （实测 `知否，@"女."知否`：注释被推到 251.1，而「否」本体 251.9~262.9 ⇒ 压字）。
+       * ⚠️ adj701 修正（用户口径）：上下错开时**必须停在"后字"的上/下位置**，
+       * 不能跑到**前面**的歌词那里去。后字之前的墨迹里就含"上一字的后缀标点"
+       * （`知否，@"女."知否` 的 `，`），所以 `left` 一旦被标点占满，`right − w` 就会
+       * **越过那个标点、压到它上面**——x 必须**左钳到 `left`**（宁可离后字远一点），
+       * 再靠候选 ②/④ 的**上下错开**去满足"与后字对齐"。
        */
       const up = l.y - shiftY
       const down = l.y + shiftY
-      const nx = right - w // 注释右缘贴后字左缘（最"靠近"后字）
+      /**
+       * adj701（用户口径，看图定标）：「注释应是与后面的歌词**对齐**（上下时）或**靠近**（水平时）」，
+       * 且实际看下来是 —— 注释**居中**在"**前一字墨迹右缘 ~ 锚字左缘**"那个空档里
+       * （既不是紧贴锚字，也不是贴前一字）。
+       *
+       * 实测标定（用户原谱第二曲部第 2 行）：
+       * ```
+       *   锚「知」232.3，前一字「瘦」墨迹右缘 169.0 ⇒ 期望 noteX ≈ 200.7
+       *   锚「红」453.0，前一字「肥」墨迹右缘 438.6 ⇒ 期望 noteX ≈ 445.8
+       * ```
+       * 旧口径是"右缘贴前一字墨迹"（`left`）或"右缘贴锚字左缘"（`right − w`），
+       * 两者都只是空档的**一端**，观感上"偏向一边"。
+       */
+      const gapL = left
+      const gapR = l.x
+      const nx = Number.isFinite(gapL) && gapL < gapR - 1 ? r1((gapL + gapR - w) / 2) : right - w
       const centerX = r1(l.x + size / 2 - w / 2)
       const cand: { x: number; y: number }[] = [
         { x: nx, y: l.y },
-        { x: nx, y: up },
-        { x: nx, y: down },
         { x: centerX, y: l.y },
+        { x: nx, y: up },
         { x: centerX, y: up },
+        { x: nx, y: down },
         { x: centerX, y: down },
       ]
       let chosen: { x: number; y: number; sx?: number } | null = null
+      // eslint-disable-next-line no-console
+      if (text === '略') console.log(`[L1诊断] l.x=${l.x} left=${left} right=${right} w=${w} nx=${nx} 命中候选=${cand.map((c) => (hits({ x1: c.x - 0.5, x2: c.x + w + 0.5, y1: c.y - cfs * 0.85, y2: c.y + cfs * 0.25 }) ? 0 : 1)).join('')}`)
       for (const c of cand) {
-        if (!hits(boxAt(c.x, c.y, w))) {
+        // 0.5px 容差：注释与"上一字的标点"只差零点几像素时也算撞上 ⇒ 去走上下错开的候选
+        if (!hits({ x1: c.x - 0.5, x2: c.x + w + 0.5, y1: c.y - cfs * 0.85, y2: c.y + cfs * 0.25 })) {
           chosen = c
           break
         }

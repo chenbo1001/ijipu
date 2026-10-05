@@ -8360,15 +8360,25 @@ console.log('[adj672] lyric comment avoidance')
   const boxOf = (x: number, y: number, w: number, h: number) => ({ x1: x, x2: x + w, y1: y - h * 0.85, y2: y + h * 0.25 })
   const overlap = (a: ReturnType<typeof boxOf>, b: ReturnType<typeof boxOf>): boolean =>
     a.x1 < b.x2 - 0.01 && a.x2 > b.x1 + 0.01 && a.y1 < b.y2 - 0.01 && a.y2 > b.y1 + 0.01
-  // L1：放得下 ⇒ 紧贴本字左侧、与本字同基线（= 历史渲染公式，零回归）
+  /**
+   * L1（adj672 历史口径 + **adj701 修订**）：注释水平位置**恒为"右缘贴锚字左缘"**
+   * （`l.x − w − LYRIC_COMMENT_GAP`，即"靠近后面的歌词"）；
+   * 竖直方向：该水平线放得下就同基线，**放不下（压到字/标点/曲部音符）就上/下错开**，
+   * 且**不允许靠横向挪开**去躲——那会变成"离后面的歌词很远"（用户口径明确否掉）。
+   */
   {
     const pg = layoutScore(parseJps(mk('一"略"二 三 四')), D).pages[0]
     const l = pg.lyrics.find((x) => x.char.note)
     const w = lyricCommentWidth(l?.char.note ?? '', cfs)
-    check('L1 adj672 放得下时：注释紧贴本字左侧、与本字同基线（历史公式，零回归）',
-      l !== undefined && l.noteX !== undefined && l.noteY !== undefined &&
-        Math.abs(l.noteX - (l.x - w - LYRIC_COMMENT_GAP)) < 0.11 && Math.abs(l.noteY - l.y) < 0.11,
-      `noteX=${l?.noteX} want=${l ? (l.x - w - LYRIC_COMMENT_GAP).toFixed(1) : '-'} noteY=${l?.noteY} y=${l?.y}`)
+    check('L1 adj672/701 注释水平**居中于"前一字墨迹 ~ 锚字左缘"的空档**',
+      l !== undefined && l.noteX !== undefined && Math.abs(l.noteX - 74.6) < 1.2,
+      `noteX=${l?.noteX} 期望≈74.6`)
+    const cb = boxOf(l?.noteX ?? 0, l?.noteY ?? 0, w, cfs)
+    const hit =
+      pg.lyrics.some((o) => o !== l && overlap(cb, boxOf(o.x, o.y, D.geci_size, D.geci_size))) ||
+      pg.notes.some((n) => overlap(cb, boxOf(n.x, n.y - D.note_size * 0.8, D.note_size, D.note_size * 1.5)))
+    check('L1b adj701 注释竖直方向**不压任何墨迹**（本用例被第 2 个音符占位 ⇒ 正确地上/下错开）',
+      l !== undefined && !hit, `noteX=${l?.noteX} noteY=${l?.noteY} y=${l?.y} hit=${hit}`)
   }
   // L2/L3：挤在一起 ⇒ ① 不与任何歌词字/曲部音符重叠 ② 确实上下错开了
   for (const [nm, lyric] of [['一注释', '一二三四"副歌部分"五'], ['两注释', '一"甲注释"二"乙注释"三']] as const) {
@@ -8419,27 +8429,36 @@ console.log('[adj672] lyric comment avoidance')
       l !== undefined && svg.includes(`y="${l.noteY}"`) && svg.includes(`x="${l.noteX}"`),
       `noteX=${l?.noteX} noteY=${l?.noteY} y=${l?.y}`)
     /**
-     * L5（adj678，用户口径「歌词的注释**通常应靠近其后面的歌词**」）：注释的**右缘恒贴住**
-     * 本字左缘（差 `LYRIC_COMMENT_GAP`）——无论压缩没压缩、前面有多少空档，都不许被推远。
+     * L5（**adj701 修订**，用户看图定标）：注释**居中于"前一字墨迹右缘 ~ 锚字左缘"**这个空档，
+     * 而不是"右缘恒贴锚字左缘"（那是空档的一端，观感偏一边）。
+     *
+     * 实测标定（用户原谱第二曲部第 2 行）：锚「知」232.3、前一字「瘦」墨迹右缘 169.0 ⇒ 期望 ≈200.7；
+     * 锚「红」453.0、前一字「肥」墨迹右缘 438.6 ⇒ 期望 ≈445.8。
      */
-    check('L5 adj678 注释右缘恒贴住其后歌词字的左缘（靠近后面的歌词，不被推远）',
+    check('L5 adj701 注释**居中于"前一字墨迹 ~ 锚字左缘"**的空档（不偏向任何一端）',
       pg.lyrics.filter((x) => x.char.note).length > 0 &&
         pg.lyrics
           .filter((x) => x.char.note)
-          .every(
-            (l) =>
-              Math.abs(
-                (l.noteX ?? 0) + lyricCommentWidth(l.char.note ?? '', cfs) * (l.noteSx ?? 1) - (l.x - LYRIC_COMMENT_GAP),
-              ) < 0.11,
-          ),
+          .every((l) => {
+            // 空档左端 = 同行、锚字左侧最近的墨迹右缘（含后缀标点）；右端 = 锚字左缘
+            const size = D.geci_size
+            const bodyW = (t: string) =>
+              [...t].reduce((a, ch) => a + (/[\u3000-\u303f\uff00-\uffef]|\p{Script=Han}/u.test(ch) ? size : size * 0.55), 0)
+            const gapL = Math.max(
+              ...pg.lyrics
+                .filter((o) => o !== l && Math.abs(o.y - l.y) < 0.5 && o.x < l.x - 0.01)
+                .map((o) => o.x + bodyW(o.char.text) + bodyW(o.char.trailing ?? '')),
+              -Infinity,
+            )
+            if (!Number.isFinite(gapL) || gapL > l.x - 1) return true
+            const w = lyricCommentWidth(l.char.note ?? '', cfs) * (l.noteSx ?? 1)
+            const want = (gapL + l.x - w) / 2
+            return Math.abs((l.noteX ?? 0) - want) < 0.11
+          }),
       JSON.stringify(
         pg.lyrics
           .filter((x) => x.char.note)
-          .map((l) => ({
-            t: l.char.note,
-            右缘: Number(((l.noteX ?? 0) + lyricCommentWidth(l.char.note ?? '', cfs) * (l.noteSx ?? 1)).toFixed(1)),
-            字左缘: Number((l.x - LYRIC_COMMENT_GAP).toFixed(1)),
-          })),
+          .map((l) => ({ t: l.char.note, noteX: l.noteX, 锚x: l.x })),
       ))
   }
   /**
