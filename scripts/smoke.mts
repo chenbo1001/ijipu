@@ -41,7 +41,7 @@ import {
 } from '@ijipu/engine/playback/ornaments.ts'
 import { slideOf, slidePlan, slideStepMs, SLIDE_SYMBOLS, SLIDE_STEP_MIN_MS, SLIDE_STEP_MAX_MS } from '@ijipu/engine/playback/slides.ts'
 import { midiToPitchName } from '@ijipu/engine/playback/midi.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_SAG_MIN, SLUR_SAG_MAX, VOLTA_INK_GAP, digitBottomY, beamBottomY, digitInkW, accidentalGap } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_SAG_MIN, SLUR_SAG_MAX, VOLTA_INK_GAP, digitBottomY, beamBottomY, digitInkW, digitTopY, slurSagOf, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
@@ -17092,6 +17092,59 @@ function runAdj689bTests() {
   const plainLay = layoutScore(parseJps(plain), defaultPageConfig)
   check('adj689b 护栏：不含 `{dsb}` 的谱面不产生任何行下移（连音线零位移）',
     (plainLay.pages[0].rowSlides?.size ?? 0) === 0, JSON.stringify([...(plainLay.pages[0].rowSlides ?? new Map())]))
+  /**
+   * adj714（用户主规则，见 `AGENTS.md` 五·10）：**修饰符层级栈的机器闸门**。
+   *
+   * 层级（由音符往上）：`① 高八度点 → ② 本音符修饰符（波音/顿音/颤音/注释）→
+   * ③ 跨音符修饰符（连音线、渐强渐弱）→ ④ 跨小节修饰符（跳房子）`；
+   * 由音符往下：`① 减时线 → ② 低八度点 → ③ 其它`。
+   * 判据：**上一层墨迹底 ≥ 下一层墨迹顶 + `LAYER_GAP`**（按墨迹，弧线用**弧顶**）。
+   *
+   * 这两条断言把"层级顺序 + 净空"钉住——它是**跨元素**的正确性，
+   * 靠人眼看图极易漏（本轮连音线垂度就是这么漏掉的：只按弦留 `LAYER_GAP`，
+   * 弧顶却随跨度上拱，实际净空从 4.2px 涨到 12.7px）。
+   */
+  {
+    const src714 = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1' 2 3) 4 - | 6,// 5,// 4,// 3,// 2, - |\n"
+    const lay714 = layoutScore(parseJps(src714), defaultPageConfig)
+    const pg714 = lay714.pages[0]
+    const ns714 = defaultPageConfig.note_size
+    const s714 = noteScaleOf(ns714)
+    const gap714 = LAYER_GAP * s714
+    const octN = pg714.notes.find((n) => (n.token as { octaveShift?: number }).octaveShift === 1 && !n.segment)
+    check('adj714 ① 高八度点层在数字顶之上（点底 ≤ 数字顶 − LAYER_GAP）',
+      octN !== undefined &&
+        octaveDotY(octN.y, 0, ns714) + DOT_R * s714 <= digitTopY(octN.y, ns714) - gap714 + 0.01,
+      octN ? `点底=${(octaveDotY(octN.y, 0, ns714) + DOT_R * s714).toFixed(2)} 数字顶=${digitTopY(octN.y, ns714).toFixed(2)}` : '缺高八度音符')
+    /**
+     * ③ 跨音符修饰符（连音线）必须在 ① 高八度点层之上：
+     * 用**弦 − 垂度**（= 弧顶）比，不能再拿弦 `y` 比（那正是本轮的 bug）。
+     */
+    {
+      const sl714 = pg714.slurs[0]
+      const span714 = Math.abs(sl714.x2 - sl714.x1)
+      const apex714 = sl714.y - slurSagOf(span714) / 2
+      const covered714 = pg714.notes.filter((n) => n.x >= sl714.x1 - 2 && n.x <= sl714.x2 + 2 && !n.segment)
+      const top714 = Math.min(...covered714.map((n) => {
+        const oct = (n.token as { octaveShift?: number }).octaveShift ?? 0
+        return oct > 0 ? octaveTopY(n.y, oct, ns714) : digitTopY(n.y, ns714)
+      }))
+      check('adj714 ③ 连音线弧顶在 ① 高八度点层之上（弧顶 ≤ 层顶 − LAYER_GAP）',
+        Number.isFinite(top714) && apex714 <= top714 - gap714 + 0.01,
+        `弧顶=${apex714.toFixed(2)} 层顶=${top714.toFixed(2)} 跨度=${span714.toFixed(1)}`)
+    }
+    /** 往下：① 减时线 → ② 低八度点（先减时线、后低八度点，顺序硬性） */
+    {
+      const dcN = pg714.notes.find((n) => ((n.token as { diminishCount?: number }).diminishCount ?? 0) >= 1 && !n.segment)
+      check('adj714 ① 减时线在数字底之下（线顶 ≥ 数字底 + LAYER_GAP）',
+        dcN !== undefined && beamY(dcN.y, 1, ns714) >= digitBottomY(dcN.y, ns714) + gap714 - 0.01,
+        dcN ? `线顶=${beamY(dcN.y, 1, ns714).toFixed(2)} 数字底=${digitBottomY(dcN.y, ns714).toFixed(2)}` : '缺减时线音符')
+    }
+    check('adj714 层级顺序表与「往下」顺序固定（`AGENTS.md` 五·10 的唯一表述）',
+      MODIFIER_LAYERS_ABOVE.join('>') === 'octave>noteMark>spanMark>section' &&
+        MODIFIER_LAYERS_BELOW.join('>') === 'beam>lowDot>belowMark',
+      `${MODIFIER_LAYERS_ABOVE.join('>')} / ${MODIFIER_LAYERS_BELOW.join('>')}`)
+  }
   /**
    * adj692（用户口径）：「临时多声部块**两端各留 2 倍大括号宽度的墨迹留白**
    * （即与两端的小节线 / 临时节拍符 / 音符等元素的墨迹间距），大括号**在留白中居中**」。

@@ -1,11 +1,21 @@
 /**
  * engine/layout/spacing.ts — 音符修饰符层级与间距常量（adj60 集中管理）
  *
- * 层级规则（间距统一 LAYER_GAP，层内元素间距 INNER_GAP）：
- *  - 音符下方：数字 → 减时线层 → 低八度点层（先减时线、后低八度点，固定顺序）
- *  - 音符上方：数字 → 高八度点层 → 装饰符号/注释/连音线（高八度点最优先；
- *    其余按修饰符书写顺序从下往上依次排，未说明的顺序默认如此，后续可再调整）
- *  - 同层内多个元素（多个八度点 / 多条减时线）中心距 INNER_GAP
+ * **层级规则（adj714 用户主规则，见 `AGENTS.md` 五·10）**：修饰符从音符往上/往下各有固定层级，
+ * 叠加时以**「音符与修饰符的墨迹不重叠」为主要原则**，层级之间留 `LAYER_GAP`、层内 `INNER_GAP`。
+ *
+ * ```
+ *   音符往上（由低到高）              音符往下（由近到远）
+ *   ① 高八度点                      ① 减时线
+ *   ② 本音符修饰符（波音/顿音/颤音/注释）
+ *   ③ 跨音符修饰符（连音线、渐强渐弱）
+ *   ④ 跨小节/章节修饰符（跳房子、反复）  ② 低八度点 → ③ 其它
+ * ```
+ *
+ * - 层级顺序的唯一表述 = `MODIFIER_LAYERS_ABOVE` / `MODIFIER_LAYERS_BELOW`；
+ * - 每层的纵向落点 = `octaveDotY`/`octaveTopY`（①）、`beamY`/`beamBottomY`（下方①）、
+ *   `lowDotY`（下方②）、`slurApexY`（③，**按弧顶**不是弦）；渲染与布局**共用同一函数**；
+ * - 净空判断用 `layerSeparationViolation`（机器闸门，smoke 里有成对断言）。
  *
  * 修改间距只需改本文件常量，全部渲染/布局自动生效。
  */
@@ -505,6 +515,21 @@ export const SLUR_SAG_MIN = 2.5
  */
 export const SLUR_SAG_MAX = 9
 
+/**
+ * adj713/adj714：**连音线垂度** `sag = clamp(跨度 × 0.28, SLUR_SAG_MIN, SLUR_SAG_MAX)`。
+ *
+ * 为什么必须是公共纯函数（`AGENTS` 六之二·4「数值口径必须同源」）：
+ *  · 渲染端 `renderSlur` 用它算贝塞尔控制点（`M x1 y Q mid (y − sag) x2 y`）；
+ *  · 布局端要按**弧顶**（= `y − sag/2`，二次贝塞尔 `t = 0.5`）算"与下一层的净空"——
+ *    用户口径（`AGENTS` 五·10）要求**跨音符修饰符层**让开高八度点与本音符修饰符。
+ * 两处若各写一份公式，"净空够不够"就会两边算出不同答案（本项目已复发多次）。
+ */
+export const slurSagOf = (span: number): number =>
+  Math.max(SLUR_SAG_MIN, Math.min(SLUR_SAG_MAX, span * 0.28))
+
+/** adj714：连音线**弧顶** y（二次贝塞尔 `t = 0.5` ⇒ `y − sag/2`）——层级净空判断只用它 */
+export const slurApexY = (y: number, x1: number, x2: number): number => y - slurSagOf(Math.abs(x2 - x1)) / 2
+
 // ============================================================
 // 位置计算（纯函数，供 render / layout 共用）
 // ============================================================
@@ -547,12 +572,85 @@ export const beamBottomY = (y: number, dc: number, noteSize: number) => {
   return y + (DIGIT_BOTTOM + LAYER_GAP) * s + (dc - 1) * (BEAM_H + INNER_GAP) * s + BEAM_H * s
 }
 
-/** 低八度点：第 i 个点 cy（点顶距数字底或减时线层底 LAYER_GAP×scale；dc=0 表示无减时线） */
+/**
+ * 低八度点：第 i 个点 cy（点顶距数字底或减时线层底 LAYER_GAP×scale；dc=0 表示无减时线）
+ */
 export const lowDotY = (y: number, i: number, dc: number, noteSize: number) => {
   const s = noteScaleOf(noteSize)
   const top =
     dc > 0 ? beamBottomY(y, dc, noteSize) + LAYER_GAP * s : digitBottomY(y, noteSize) + LAYER_GAP * s
   return top + DOT_R * s + i * (DOT_R * 2 + INNER_GAP) * s
+}
+
+// ============================================================
+// 修饰符「层级栈」（adj714，用户口径；见 AGENTS 五·10）
+// ============================================================
+
+/**
+ * adj714（用户 2026-10 给出的**主规则**，见 `AGENTS.md` 五·10）：
+ * 音符的修饰符从音符往上/往下各有**固定层级**，叠加时以
+ * **「音符与修饰符的墨迹不重叠（不覆盖）」为主要原则**，层级之间适当留白（`LAYER_GAP`）。
+ *
+ * ```
+ *   音符往上（由低到高）        音符往下（由近到远）
+ *   ① octave    高八度点        ① beam      减时线
+ *   ② noteMark  本音符修饰符    ② lowDot    低八度点
+ *   ③ spanMark  跨音符修饰符    ③ belowMark 其它下方修饰符
+ *   ④ section   跨小节/章节修饰符
+ * ```
+ *
+ * 本常量是**层级顺序的唯一表述**（AGENTS 六之二·4「数值口径必须同源」）：
+ * 布局端与渲染端都从这里取顺序，不许各自现排。
+ */
+export const MODIFIER_LAYERS_ABOVE = ['octave', 'noteMark', 'spanMark', 'section'] as const
+export const MODIFIER_LAYERS_BELOW = ['beam', 'lowDot', 'belowMark'] as const
+export type ModifierLayerAbove = (typeof MODIFIER_LAYERS_ABOVE)[number]
+export type ModifierLayerBelow = (typeof MODIFIER_LAYERS_BELOW)[number]
+
+/** 某音符上方各修饰层的**墨迹顶** y（由低到高；`null` = 该层没有元素） */
+export interface NoteModifierGeometry {
+  /** 该音符的画音基线 y */
+  y: number
+  /** 高八度点个数（0 = 无） */
+  octaves: number
+  /** 本音符修饰符（波音/顿音/颤音/注释…）的**墨迹高**（0 = 无，按 `LAYER_GAP` 直接叠） */
+  noteMarkInkH: number
+  /** 跨音符修饰符（连音线弧顶 / 渐强渐弱的**墨迹高**） */
+  spanMarkInkH: number
+  /** 跨小节修饰符（跳房子线）的**墨迹高** */
+  sectionInkH: number
+}
+
+/**
+ * 按层级栈自下而上算出**每层墨迹顶**的 y（adj714）。
+ *
+ * 语义：第 ① 层紧贴音符；其后每层的**底**都在上一层**顶**之上 `LAYER_GAP`。
+ * 返回的 `top` 是"该层最高元素的墨迹顶"，供再上一层与"行顶预算"使用。
+ */
+export function modifierLayerTops(g: NoteModifierGeometry, noteSize: number): Record<ModifierLayerAbove, number | null> {
+  const s = noteScaleOf(noteSize)
+  const gap = LAYER_GAP * s
+  let cursor = octaveTopY(g.y, Math.max(1, g.octaves), noteSize)
+  const octave = g.octaves > 0 ? cursor : null
+  if (g.octaves > 0) cursor -= gap
+  else cursor = digitTopY(g.y, noteSize) - gap
+  const noteMark = g.noteMarkInkH > 0 ? cursor : null
+  if (g.noteMarkInkH > 0) cursor -= g.noteMarkInkH + gap
+  const spanMark = g.spanMarkInkH > 0 ? cursor : null
+  if (g.spanMarkInkH > 0) cursor -= g.spanMarkInkH + gap
+  const section = g.sectionInkH > 0 ? cursor : null
+  return { octave, noteMark, spanMark, section }
+}
+
+/**
+ * adj714：层级顺序的**机器闸门**——校验"上一层墨迹底 ≥ 下一层墨迹顶 + `LAYER_GAP`"。
+ *
+ * 供 smoke 断言直接调用：传入实测的相邻两层边界，返回违反量（≤ 0 = 合规）。
+ * 之所以做成纯函数：层级的正确性是**跨元素**的（漏一层就整段错位），
+ * 靠人眼看图很容易漏（连音线垂度那次就是这么漏掉的）。
+ */
+export function layerSeparationViolation(lowerInkTop: number, upperInkBottom: number, noteSize: number): number {
+  return upperInkBottom - (lowerInkTop - LAYER_GAP * noteScaleOf(noteSize))
 }
 
 // ============================================================
