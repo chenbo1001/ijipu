@@ -4815,25 +4815,34 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
            * 行首（`|["1." {dsb … }`）的"左邻居"就是那根小节线（`barAtStart`）。
            */
           /**
-           * adj709b（用户口径：「图1图2 的左大括号**右侧留白明显较大**，图3 则不会 ⇒ 可以适当减少这个留白」）：
+           * adj711/adj712（用户口径演进）：
+           * adj709b「图1图2 的左大括号**右侧留白明显较大** ⇒ 适当减少」→
+           * adj711「左括号从 `2w` 降到 `w` 试试」→ adj712「**但这时左留白变大了**」。
            *
-           * 让位区间够宽时（`availL ≥ 2w`）**优先贴住内容**；区间收窄时按"两侧相等"居中；
-           * 再窄就保"贴内容那侧 `w/2`"（硬下限：不压内容）。
+           * ⇒ 结论：不能只把括号往右推（左留白会被顶大），也不能一味居中
+           * （右半边那 `(availL−w)/2` 又太大）。取**按比例分**：
+           * 括号**靠内容侧**（右侧留白取 `(availL−w) × 0.38`，钳到 `[w/2, 2w]`），
+           * 剩下的自然归左侧 ⇒ 左侧不会被顶大、右侧也不至于太大。
            *
-           * 为什么不一味居中：行首那根小节线的**视觉重量很小**（一条细竖线），
-           * 把大括号"居中"在"小节线 ~ 内容"之间时，右半边那 `(availL−w)/2` 会显得是一大块空白
-           * （实测 availL=27.2、w=5.2 ⇒ 居中时左右各约 11px，而用户要的是贴近内容）。
-           *
-           * ⚠️ adj711（用户要求「左括号从 `2w` 降到 `w` 试试效果」）：左侧留白由 `2w` 收到 **`w`**
-           * ⇒ `preferL = contentL − 2w`（括号整体右移一个括号宽），右侧仍是 `w/2`。
+           * 硬下限：不压左邻居（`leftLimit + w/2`）、不压段内容（`contentL − w/2 − w`）。
            */
           const availL2 = Math.max(0, contentL - leftLimit)
+          const floorL = leftLimit + halfGap
           const capL = contentL - halfGap - w
-          const centeredL = leftLimit + (availL2 - w) / 2
-          const preferL = contentL - 2 * w
-          braceLeftInk = r1(
-            Math.max(leftLimit + halfGap, Math.min(availL2 >= 2 * w ? preferL : centeredL, capL)),
-          )
+          /**
+           * adj712（用户口径：「**左留白变大了**」）＋ adj713（「**可以减少整体留白宽度**」）：
+           * 两侧留白是**此消彼长**的（区间固定 `availL`、括号宽固定 `w`），所以
+           * ① 不能只把括号往右推（左留白会被顶大）；② 也不能一味"居中"（右侧又太大）。
+           *
+           * 现在的口径 = **整体收紧 + 按比例分给两侧**：
+           *  · 两侧留白**之和**目标 `1.5w`（原口径是各 `w/2`、和为 `2w`；`2w`→`w`→`1.5w` 的收敛）；
+           *  · 其中**内容侧占 60%**、邻居侧占 40%（括号略靠内容，但不偏向极端）；
+           *  · 区间更窄时按实际可用宽等比缩，硬下限仍是两侧各 `w/2`（不压邻居、不压内容）。
+           */
+          const totalGap = Math.min(availL2 - w, 1.5 * w)
+          const rightGap = Math.max(halfGap, totalGap * 0.6)
+          const wantL = availL2 - w >= 0 ? contentL - rightGap - w : leftLimit + (availL2 - w) / 2
+          braceLeftInk = r1(Math.max(floorL, Math.min(wantL, capL)))
           /**
            * adj704 右侧同口径：括号居中于 `[段内容墨迹右缘, 右邻居墨迹左缘]` 之间。
            * 只给右邻居留 `w/2` 的硬下限（不压它），不再额外扣一份让位宽。
