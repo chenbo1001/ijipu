@@ -4419,8 +4419,16 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
     }
     /** 拍位 → x：该拍位**有主旋律小节线**时用小节线自身 x（精确对齐）；否则回落音符锚点 */
     const beatToBarX = (beat: number): number => {
-      for (const a of mainBarAnchors) if (Math.abs(a.beat - beat) < 1e-6) return a.x
-      return beatToX(beat)
+      let best: number | null = null
+      for (const a of mainBarAnchors) {
+        if (Math.abs(a.beat - beat) > 1e-6) continue
+        // adj694：同一拍位可能有**多根**小节线（"该线之后本行已无音符"时都回退成行末拍位）。
+        // 取**最靠右**的一根——段层的包络右界在行内总是靠后，取最左会把内容区压成 0 宽
+        // （实测 `xContent1` 被钳到等于 `xContent0`，段内每个音块只剩最小占宽 2px，
+        // 末音 `1-` 的增时线因此挤在数字边上）。
+        if (best === null || a.x > best) best = a.x
+      }
+      return best ?? beatToX(beat)
     }
 
     // ---- adj667：段层大括号的**墨迹边界**辅助（用户口径「布局不得重叠，除非明确要重叠」）----
@@ -4595,7 +4603,24 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       // bz：无大括号，括号与音符之间留 nonDurGap；**外加**与小节线的净距（barInset）。
       // dsb：大括号 + 圆括号按槽位均分排布在小节线内侧 ~ 内容边之间。
       const segGapRaw = isDsb
-        ? (config.segmentRowGap?.dsb ?? SEGMENT_ROW_GAP_DEFAULT.dsb)
+        ? /**
+           * adj695（用户口径）：「临时多声部**也应按多声部的布局排列**」——
+           * 横向仍**逐拍与主旋律同 x**（用户确认保留），纵向间距改用**常规多声部
+           * （`V:` 多行曲部）那一套**。
+           *
+           * 常规多声部的层间距（`placeVoiceBlock`：`voiceY += partBase[vi] + partSegDown[vi] + sp.shengbu`）
+           * = **上一个声部的自然行高 + `height_shengbu`**；这里的"上一个声部"就是包络内的主旋律
+           * （下层）。无歌词的曲部行自然高 = 音符基线上下各 `noteSize × 1.1` ⇒ 取 `2 × noteSize × 1.1`。
+           *
+           * **谱面显式设了 `segmentRowGap.dsb` 时以它为准**（那是用户自己定的间距，
+           * 不能被"多声部口径"盖掉——E4/E5 两条断言守的就是这个）；
+           * 用默认值时回落到"多声部那套"，再与"两层放得下"的最小值取 max（adj670 的保护不丢）。
+           */
+          (() => {
+            const userGap = config.segmentRowGap?.dsb
+            if (userGap !== undefined) return userGap
+            return ns * 1.1 * 2 + (config.height_shengbu ?? 0)
+          })()
         : (config.segmentRowGap?.bz ?? SEGMENT_ROW_GAP_DEFAULT.bz)
       /**
        * adj670（用户口径「连音线不该翻到下面」）：`{dsb}` 的层间距取
@@ -4742,6 +4767,25 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         rightSlots = tailW > 0
           ? [{ kind: 'bracket', x: Math.min(lastPlayedRightX + gapB, innerR2 - tailW), w: tailW }]
           : []
+      }
+      /**
+       * adj694：**`{dsb}` 的内容右界必须显式赋值**——它没有"两侧圆括号"要预留，
+       * 所以不走上面 `bz` 分支的那段；而 `xContent1` 的兜底初值是 `xContent0`，
+       * 不赋值就会让"段内容宽度 = 0"：段内每个音的块被下面的最小占宽兜底压成 2px，
+       * 长音（`1-`）的增时线因此紧贴在数字边上、完全看不出时值（用户报「`1-` 显示不对」）。
+       *
+       * 右界取"包络终点的主旋律小节线内侧"，与 `bz` 口径一致（只是不扣圆括号的预留）。
+       */
+      if (isDsb) {
+        /**
+         * adj694：`{dsb}` 的内容右界必须显式赋值（`bz` 分支的 `xContent1` 只走 bz）。
+         *
+         * 它同时是**段内容的右钳制**与**大括号的排布上界**，所以取 `xEndBoundary − barInset`
+         * （包络终点小节线内侧）**再扣掉右括号的让位区**（`3w`，见 `segmentBracePads`）——
+         * 否则段内容会一直排到小节线、把右括号挤进内容里（实测 462.1 > 450.8）。
+         */
+        const dsbTailW = Math.max(SEGMENT_BRACE_MIN_W, (dy + ns * 1.45) * SEGMENT_BRACE_ASPECT)
+        xContent1 = Math.max(xContent0, xEndBoundary - barInset - (dsbTailW * 3 + ns))
       }
       const braceLeftX = leftSlots.find((s) => s.kind === 'brace')?.x
       const braceRightX = rightSlots.find((s) => s.kind === 'brace')?.x
@@ -5166,7 +5210,13 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
        */
       if (!page.segmentBrackets) page.segmentBrackets = []
       const lowerBaseline = row.y + dy / 2
-      const bracePadY = ns * 0.35
+      /**
+       * adj695（用户口径）：「大括号的高度范围，**上至第一声部音符上沿，下至最后声部音符的下沿**」。
+       *
+       * 所以留白取 **0**——括号的墨迹端点**正好落在**两声部的墨迹上下沿上，
+       * 不再各留 `0.35×字号`（那是上一轮的口径，实测上下各多出 3~8px、用户否掉）。
+       */
+      const bracePadY = 0
       let inkT = yUpper - ns * DIGIT_HEIGHT_RATIO
       /**
        * adj691（用户报「大括号高度应从第一声部上沿到最后一声部下沿止」）：

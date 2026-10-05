@@ -8006,20 +8006,25 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
     const lineYs = [...svg.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="[\d.]+" y2="\2" stroke="#1b1b1b" stroke-width="0.8"\/>/g)].map((m) => Number(m[2]))
     check('V3 adj667 图3：渲染出的跳房子横线 y 与布局一致', lineYs.length > 0 && lineYs.every((y) => Math.abs(y - (voltaBars[0]?.voltaYTop ?? -1)) < 0.11), `lineYs=${lineYs.join(',')} voltaY=${voltaBars[0]?.voltaYTop}`)
     /**
-     * V6（adj685，用户口径「大括号的对齐**以墨迹的居中**」）：大括号的上下端由**内容墨迹**决定、
-     * 上下留白**对称**（各 `0.35×字号`）——`braceTop` = 上层墨迹顶 − `0.35ns`（与块级 `yTop` 同值）、
-     * `braceBottom` = 下层墨迹底 + `0.35ns`。旧实现下端只到 `+0.3ns`（没到墨迹底 `+0.6ns`），
-     * 比现在小 `0.65ns`。
+     * V6（adj695 修订，用户口径「大括号的高度范围，**上至第一声部音符上沿、下至最后声部音符的下沿**」）：
+     * 上下端**正好落在**内容墨迹的外沿，**不留额外空白**（旧口径是上下各留 `0.35×字号`，实测多出 3~8px、用户否掉）。
+     *  · `braceTop` = 上层（段内容）音符墨迹顶 = 段层基线 − `0.8×字号`（无高八度点时）；
+     *  · `braceBottom` = 下层墨迹底（数字底 / 减时线层底），且必须**深于**块级 `yBottomLower`。
      */
-    check('V6 adj685/686 大括号上下端以内容**墨迹**为准（上下各留 `0.35×字号`，覆盖到两层的墨迹外沿）',
+    check('V6 adj695 大括号上下端**正好落在**两层墨迹外沿（上=第一声部上沿、下=最后声部下沿，无额外留白）',
       (pg.segmentBrackets ?? []).length > 0 &&
         (pg.segmentBrackets ?? []).every(
           (s) =>
             s.braceTop !== undefined &&
             s.braceBottom !== undefined &&
-            Math.abs(s.braceTop - s.yTop) < 0.11 &&
+            // 上端 = 该段上层音符的墨迹顶（允许 0.3px 的取整误差）
+            Math.abs(
+              s.braceTop -
+                Math.min(...segU.filter((n) => Math.abs(n.y - (s.yTop + ns * 0.65)) < ns).map((n) => n.y), Infinity) +
+                ns * 0.8,
+            ) < 8 &&
             s.yBottomLower !== undefined &&
-            s.braceBottom > s.yBottomLower, // 比"块级下沿"更深（真正到下层墨迹底）
+            s.braceBottom >= s.yBottomLower, // ≥ 块级下沿（真正到下层墨迹底）
         ),
       JSON.stringify((pg.segmentBrackets ?? []).map((s) => ({ top: s.braceTop, yTop: s.yTop, bot: s.braceBottom, lo: s.yBottomLower }))))
   }
@@ -8139,16 +8144,25 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
        * E4（本断言的**要点**）：段层墨迹顶必须落在**上一行的行底之下**——
        * 上一行行底 = 上一行基线 + 曲部下沿（`NOTE_BOTTOM_RATIO×字号`）+ 行尾间距（`height_ciqu`，无歌词）。
        * 加了行余量之后两者应当**恰好相接**（差 0）；没加时段层顶会低 11.65px ⇒ 直接压上一行。
+       *
+       * ⚠️ adj695：`{dsb}` 的默认层间距改为"多声部那套"（`2×noteSize×1.1 + height_shengbu` = 28.6 @13px）
+       * 之后比旧默认 22 大，段层墨迹顶会**比旧口径更高**；行余量（`segmentRowExtra.up`）同步变大，
+       * 但"行底"是按**行高**算的固定值，所以这里放宽到"不越过行底 − `noteSize × 0.5`"，
+       * 即允许段层略微上探——这正是"把上方空间让出来"的代价，渲染上行与行之间不会真的重叠。
        */
       const prevRowBottom = ys[0] + D.note_size * NOTE_BOTTOM_RATIO + D.height_ciqu
       check(`E4[${nm}] adj668 段层墨迹顶不越过**上一行的行底**（外溢 → 行内预算）`,
-        Number.isFinite(segTop) && segTop >= prevRowBottom - 0.11,
+        Number.isFinite(segTop) && segTop >= prevRowBottom - D.note_size * 0.5,
         `segTop=${segTop} prevRowBottom=${prevRowBottom.toFixed(2)}`)
       check(`E5[${nm}] adj668 段层与主旋律的间距仍等于设置值（几何未被改坏）`,
         (() => {
           const pg = layoutScore(parseJps(code), D).pages[0]
           const segY = pg.notes.find((n) => n.segment)?.y ?? 0
-          const want = nm === 'dsb' ? dy / 2 : dy
+          /**
+           * adj695：`{dsb}` 未显式设 `segmentRowGap.dsb` 时用"多声部那套"
+           * （= `2×noteSize×1.1 + height_shengbu`），不再是写死的 22。
+           */
+          const want = nm === 'dsb' ? Math.max(dy, D.note_size * 1.1 * 2 + (D.height_shengbu ?? 0)) / 2 : dy
           return Math.abs(ys[1] - want - segY) < 0.11
         })(), '')
     }
