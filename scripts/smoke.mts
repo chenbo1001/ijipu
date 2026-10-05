@@ -8507,6 +8507,32 @@ console.log('[adj672] lyric comment avoidance')
       JSON.stringify(
         pg.lyrics.filter((x) => x.char.note).map((l) => ({ t: l.char.note, noteX: l.noteX, noteY: l.noteY, y: l.y, 锚x: l.x })),
       ))
+    /**
+     * L9（**adj711**，用户看图定标）：「同水平放不下时，注释应放在**后面**歌词的正上/下方，
+     * 而不是**前面**歌词的正上/下方」。
+     *
+     * 判据：凡**已上/下错开**的注释，横向**必须中心对齐锚字**
+     * （`noteX + w/2 === 锚x + geci_size/2`，容差 0.6px）——
+     * 旧候选顺序把"靠右 + 错开"排在"锚字中心 + 错开"之前，错开后横向仍贴右边，
+     * 于是飘到**前一字**正上方（用户截图：`女.` 在「否」上面而不是「知」上面）。
+     */
+    check('L9 adj711 上/下错开的注释**中心对齐其后字**（不飘到前一字上方）',
+      pg.lyrics.filter((x) => x.char.note).length > 0 &&
+        pg.lyrics
+          .filter((x) => x.char.note)
+          .every((l) => {
+            if (Math.abs((l.noteY ?? 0) - l.y) < 0.11) return true // 同水平的不在此断言范围
+            const wl = lyricCommentWidth(l.char.note ?? '', cfs) * (l.noteSx ?? 1)
+            return Math.abs((l.noteX ?? 0) + wl / 2 - (l.x + D.geci_size / 2)) < 0.6
+          }),
+      JSON.stringify(
+        pg.lyrics
+          .filter((x) => x.char.note)
+          .map((l) => {
+            const wl = lyricCommentWidth(l.char.note ?? '', cfs) * (l.noteSx ?? 1)
+            return { t: l.char.note, 注中心: Number(((l.noteX ?? 0) + wl / 2).toFixed(1)), 锚中心: Number((l.x + D.geci_size / 2).toFixed(1)), dy: Number(((l.noteY ?? 0) - l.y).toFixed(2)) }
+          }),
+      ))
   }
   /**
    * L6/L7/L8（adj683，用户最终规则）：
