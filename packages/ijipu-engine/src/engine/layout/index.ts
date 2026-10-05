@@ -4733,17 +4733,22 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         // adj675：临时节拍 `"p:2/4"` 画在小节线**右侧**、要占掉约一个字宽——不算进来的话
         // "贴左"的括号会正好压在拍号上（用户截图报「临时节拍符与左括号重叠」）。
         /**
-         * adj704（用户口径）：「小节线 / 临时节拍 / 跳房子起点在左，然后临时多声部的左括号，
-         * 再来才是临时多声部主体；左右两段以**墨迹**算，中间留 **2 倍左括号宽度**，
-         * 左括号在这个宽度里**居中**」。
+         * adj716~adj718（用户看图定标）：
+         * 「左大括号左侧的留白区 `a`、右侧的留白区 `b`，整体占宽 `a+b`」→
+         * 「缩小 `a`，按 6:6」→「整体 `a+b` 进一步减少，然后等分」→「**`a+b` 调为 15**」。
          *
-         * 行首（`|["1." {dsb … }`）时 `barAtStart` 已经是那根小节线
-         * （小节线由 `mainBarAnchors` 提供，见其构造注释）⇒ 左邻居就是它；
-         * 旧实现只在"包络前还有一个音符"时才认邻居，行首会退回行左界、让位区间被算得很宽
-         * （实测左括号墨迹 [62.0, 67.2]、离段首音 14.2px）。
+         * 关键：`a` 的基准必须与用户所见**同源**——用户的红线画在**小节线中心**，
+         * 所以这里**不加 `barInset`**（它是"线中心 → 线内侧"的 3.75px）。
+         * 之前保留 `barInset` 时，引擎算出的 `a+b` 比观感小 3.75px
+         * （实测引擎 15.7 而观感 19.4、引擎 25.7 而观感 29.5，一直对不上）。
+         * 不加之后 `a` 就是"从红线量到括号左缘"，`a+b` 与用户读数一致。
+         *
+         * 仍然保留"临时节拍符占宽"（`meterGapRight`）：否则"贴左"的括号会压在拍号上（adj675）；
+         * 并且**不会压到小节线墨迹**——由下面的硬下限 `leftLimit + w/2` 保证（本次实测该下限未触发，
+         * 因为 `a` 目标远大于 `w/2`）。
          */
         const leftLimit = barAtStart
-          ? barAtStart.x + barInset + (meterGapRight(barAtStart.comment ?? '', ns) ?? 0)
+          ? barAtStart.x + (meterGapRight(barAtStart.comment ?? '', ns) ?? 0)
           : cov.first > 0
             ? inkRightOfNote(placed[cov.first - 1].note)
             : config.margin_left
@@ -4827,24 +4832,24 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
            * 硬下限：不压左邻居（`leftLimit + w/2`）、不压段内容（`contentL − w/2 − w`）。
            */
           const availL2 = Math.max(0, contentL - leftLimit)
-          const floorL = leftLimit + halfGap
           const capL = contentL - halfGap - w
           /**
-           * adj709b（用户看过几档后的定稿口径）：
-           * 「`adj709b` 那个**比率**（内容侧 : 邻居侧 = **6 : 4**）可能更合适，但**留白减到一半**」。
+           * adj716/adj717（用户口径，看图定标，最终）：
+           * 「左大括号左侧的留白 `a`、右侧的留白 `b`，整体 `a+b`……
+           *  希望**缩小 `a`**，按 **6:6**」→「希望**整体留白 `a+b` 进一步减少**，然后**等分**」。
            *
-           * · 比例沿用 `adj709b` 的 **6:4**（括号略靠内容，两侧都不偏极端）；
-           * · 基准总量取 `2w`（`adj709b` 那档的"两侧之和"量级），整体**乘以 `0.7`** 收紧
-           *   ⇒ 宽的区间上两侧之和 ≈ `1.4w`（`adj709b` 实测 25.7px ⇒ 本档 ≈ 18px）；
-           * · 区间更窄时**按实际可用宽等比缩**（`availL2 − w` 就是上限），
-           *   硬下限仍是两侧各 `w/2`（AGENTS 第一原则：不压邻居、不压内容）。
+           * `a` 与 `b` **相等**（6:6 = 等分），且**总额受封顶**——宽区间里这两条只有靠封顶才能同时成立：
+           * 区间很宽时若一味"居中"，`a` 会随区间一起变大（实测 12.8 / 12.9、合计 25.7，用户仍嫌大）。
            *
-           * 收敛序列：`2w`(各 w/2) → `w`(5:5) → `1.5w`(6:4) → **`1.4w`(6:4)**。
+           * ```
+           *   half = min( (availL2 − w) / 2 , 1.5w )     ← 封顶：两侧各最多 1.5w（合计 ≤ 3w）
+           *   a = b = half
+           * ```
+           * 目标：`a = b` 且 `a + b ≈ 15px`（用户点名）⇒ `half ≈ 7.5`，本档 `1.5w = 7.85` 正好落在这里。
+           * 窄区间自然变小时不封顶、仍等分；硬下限两侧各 `w/2`（不压邻居、不压内容）。
            */
-          const totalGap = Math.min(availL2 - w, (2 * w) * 0.7)
-          const rightGap = Math.max(halfGap, totalGap * 0.6)
-          const wantL = availL2 - w >= 0 ? contentL - rightGap - w : leftLimit + (availL2 - w) / 2
-          braceLeftInk = r1(Math.max(floorL, Math.min(wantL, capL)))
+          const half = Math.max(halfGap, Math.min((availL2 - w) / 2, 1.5 * w))
+          braceLeftInk = r1(Math.max(leftLimit + halfGap, Math.min(contentL - half - w, capL)))
           /**
            * adj704 右侧同口径：括号居中于 `[段内容墨迹右缘, 右邻居墨迹左缘]` 之间。
            * 只给右邻居留 `w/2` 的硬下限（不压它），不再额外扣一份让位宽。
