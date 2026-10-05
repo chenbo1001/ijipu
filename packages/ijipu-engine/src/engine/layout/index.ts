@@ -4830,19 +4830,19 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
           const floorL = leftLimit + halfGap
           const capL = contentL - halfGap - w
           /**
-           * adj712（用户口径：「**左留白变大了**」）＋ adj713（「**可以减少整体留白宽度**」）
-           * ＋ adj714（「两侧留白之和从 `2w` 收到 **`w`**，按 **5:5** 分给两侧再试试」）：
+           * adj709b（用户看过几档后的定稿口径）：
+           * 「`adj709b` 那个**比率**（内容侧 : 邻居侧 = **6 : 4**）可能更合适，但**留白减到一半**」。
            *
-           * 两侧留白**此消彼长**（区间固定 `availL`、括号宽固定 `w`），所以
-           * ① 不能只把括号往右推（左留白会被顶大）；② 也不能一味"居中"（右侧又太大）。
+           * · 比例沿用 `adj709b` 的 **6:4**（括号略靠内容，两侧都不偏极端）；
+           * · 基准总量取 `2w`（`adj709b` 那档的"两侧之和"量级），整体**乘以 `0.7`** 收紧
+           *   ⇒ 宽的区间上两侧之和 ≈ `1.4w`（`adj709b` 实测 25.7px ⇒ 本档 ≈ 18px）；
+           * · 区间更窄时**按实际可用宽等比缩**（`availL2 − w` 就是上限），
+           *   硬下限仍是两侧各 `w/2`（AGENTS 第一原则：不压邻居、不压内容）。
            *
-           * 现在的口径 = **整体收到最小 + 两侧对分**：
-           *  · 两侧留白**之和** = `w`（收敛序列 `2w`(各 w/2) → `1.5w`(6:4) → **`w`(5:5)**）；
-           *  · **5:5** 对分 ⇒ 两侧各 `w/2`，这也是 AGENTS 硬下限（不压邻居、不压内容）；
-           *  · 区间更窄时按实际可用宽等比缩，仍保两侧各 `w/2`。
+           * 收敛序列：`2w`(各 w/2) → `w`(5:5) → `1.5w`(6:4) → **`1.4w`(6:4)**。
            */
-          const totalGap = Math.min(availL2 - w, w)
-          const rightGap = Math.max(halfGap, totalGap * 0.5)
+          const totalGap = Math.min(availL2 - w, (2 * w) * 0.7)
+          const rightGap = Math.max(halfGap, totalGap * 0.6)
           const wantL = availL2 - w >= 0 ? contentL - rightGap - w : leftLimit + (availL2 - w) / 2
           braceLeftInk = r1(Math.max(floorL, Math.min(wantL, capL)))
           /**
