@@ -4475,9 +4475,18 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       const page = pages[row.page]
       if (!page) continue
       const ns = config.note_size
-      // adj629b（用户要求）：段层**字号不变**，只把整层**纵向压扁到 2/3**（`SEGMENT_LAYER_YSCALE`）——
-      // 布局照常算"未压扁"的坐标，渲染端用 `<g transform="… scale(1, 2/3)">` 以层基线为基准压扁。
-      const segYScale = SEGMENT_LAYER_YSCALE
+      /**
+       * adj693（用户口径）：「临时多声部的**第一声部高度不再压缩，显示为正常高度**」。
+       *
+       * `{bz}`（临时伴奏）/ `{tp}`（替谱）仍是"另一层 / 另一遍"，继续压扁到 2/3
+       * （`SEGMENT_LAYER_YSCALE`，adj629b 的既有口径，渲染端用 `<g scale(1,k)>` 以层基线为基准压）；
+       * **`{dsb}` 的第一声部按正常高度渲染**——它是"两个声部上下叠"，压扁会让第一声部
+       * 看着比下面的声部矮一头、也看不出声部分层（`docs/SYNTAX.md` §2.12「层高」已同步该口径）。
+       *
+       * 布局照常算"未压扁"的坐标：`k = 1` 时渲染端不加 `<g>` 包装（见 `segmentYScaleWrap`），
+       * 所以这里只需把 `{dsb}` 的 `k` 置 1，其余几何一字不动。
+       */
+      const segYScale = seg.type === 'dsb' ? 1 : SEGMENT_LAYER_YSCALE
       // ---- 段层括号（`&zkh` / `&ykh`）：占宽 = 本体宽 + **非时值元素标准间距** ----
       // 段内写了就用用户写的；没写则**合成一对**。两种情况都走与全项目一致的
       // `renderBracket`（真实文本括号字形）——不用手绘弧线，保证与数字**同高、基线对齐**。

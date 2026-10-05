@@ -16984,6 +16984,23 @@ function runAdj689bTests() {
       segBrackets.length > 0 && bad.length === 0, bad.join(' | '))
   }
   /**
+   * adj693（用户口径）：「临时多声部的**第一声部高度不再压缩，显示为正常高度**」。
+   *
+   * `{dsb}` 的上层不再压扁（`layerScale = 1` ⇒ 渲染端不加 `<g scale(1,k)>` 包装）；
+   * `{bz}` / `{tp}` 仍按"另一层 / 另一遍"压扁到 `SEGMENT_LAYER_YSCALE`（2/3）。
+   */
+  {
+    const upper = p.notes.filter((n) => n.segment?.type === 'dsb')
+    check('adj693 `{dsb}` 第一声部**不压扁**（layerScale = 1 ⇒ 正常高度）',
+      upper.length > 0 && upper.every((n) => n.layerScale === 1),
+      JSON.stringify([...new Set(upper.map((n) => n.layerScale))]))
+    const bzSrc = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 {bz 1 2 3 4 } 5 6 |\n'
+    const bzUpper = layoutScore(parseJps(bzSrc), defaultPageConfig).pages[0].notes.filter((n) => n.segment?.type === 'bz')
+    check('adj693 对照：`{bz}` 仍压扁到 2/3（既有口径未被牵连）',
+      bzUpper.length > 0 && bzUpper.every((n) => Math.abs((n.layerScale ?? 1) - SEGMENT_LAYER_YSCALE) < 1e-9),
+      JSON.stringify([...new Set(bzUpper.map((n) => n.layerScale))]))
+  }
+  /**
    * adj691（用户口径）：「临时多声部大括号的高度**从第一声部上沿到最后一声部下沿止**」。
    *
    * 判据：括号下端 = **最后一个声部（下层）的数字墨迹底 + `0.35×字号` 留白**，
