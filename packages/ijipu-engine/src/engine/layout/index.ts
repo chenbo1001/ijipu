@@ -5712,17 +5712,33 @@ function avoidLyricComments(pages: ScorePage[], config: PageConfig): void {
       const gapR = l.x
       const nx = Number.isFinite(gapL) && gapL < gapR - 1 ? r1((gapL + gapR - w) / 2) : right - w
       const centerX = r1(l.x + size / 2 - w / 2)
+      /**
+       * adj708（用户口径，本轮纠正）：
+       * 「注释**不与歌词重叠**；水平方向放得下就**靠近注释后面的歌词**；放不下则放在后面歌词的**上/下**位置」。
+       *
+       * 所以候选顺序必须是 **①②③④**（同基线放不下 ⇒ 先上/下错开，全部不行才退到"以锚字居中"）：
+       * ```
+       *   ① right − w  同基线    ← 贴住后字（最"靠近"）
+       *   ② right − w  上/下     ← 紧跟后字上下
+       *   ③ 空档中点   同基线    ← 空档够宽时才用
+       *   ④ 空档中点   上/下
+       *   ⑤ 以锚字居中 同基线/上/下（兜底；此时横向会压在锚字身上，仅当上面全被占）
+       * ```
+       * ⚠️ 旧顺序把"以锚字居中 + 同基线"排在第 2 位，于是它**只要能塞下就被选中**，
+       * 而它横向正压在锚字身上（用户截图：`女.` 压在「知」、`男.` 压在「肥」）。
+       */
       const cand: { x: number; y: number }[] = [
+        { x: right - w, y: l.y },
+        { x: right - w, y: up },
+        { x: right - w, y: down },
         { x: nx, y: l.y },
-        { x: centerX, y: l.y },
         { x: nx, y: up },
-        { x: centerX, y: up },
         { x: nx, y: down },
+        { x: centerX, y: l.y },
+        { x: centerX, y: up },
         { x: centerX, y: down },
       ]
       let chosen: { x: number; y: number; sx?: number } | null = null
-      // eslint-disable-next-line no-console
-      if (text === '略') console.log(`[L1诊断] l.x=${l.x} left=${left} right=${right} w=${w} nx=${nx} 命中候选=${cand.map((c) => (hits({ x1: c.x - 0.5, x2: c.x + w + 0.5, y1: c.y - cfs * 0.85, y2: c.y + cfs * 0.25 }) ? 0 : 1)).join('')}`)
       for (const c of cand) {
         // 0.5px 容差：注释与"上一字的标点"只差零点几像素时也算撞上 ⇒ 去走上下错开的候选
         if (!hits({ x1: c.x - 0.5, x2: c.x + w + 0.5, y1: c.y - cfs * 0.85, y2: c.y + cfs * 0.25 })) {

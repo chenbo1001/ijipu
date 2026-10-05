@@ -8370,9 +8370,9 @@ console.log('[adj672] lyric comment avoidance')
     const pg = layoutScore(parseJps(mk('一"略"二 三 四')), D).pages[0]
     const l = pg.lyrics.find((x) => x.char.note)
     const w = lyricCommentWidth(l?.char.note ?? '', cfs)
-    check('L1 adj672/701 注释水平**居中于"前一字墨迹 ~ 锚字左缘"的空档**',
-      l !== undefined && l.noteX !== undefined && Math.abs(l.noteX - 74.6) < 1.2,
-      `noteX=${l?.noteX} 期望≈74.6`)
+    check('L1 adj672/708 放得下时：注释**右缘贴锚字左缘**（=`right − w`，靠近后面的歌词）',
+      l !== undefined && l.noteX !== undefined && Math.abs(l.noteX - (l.x - w - LYRIC_COMMENT_GAP)) < 0.11,
+      `noteX=${l?.noteX} want=${l ? (l.x - w - LYRIC_COMMENT_GAP).toFixed(1) : '-'}`)
     const cb = boxOf(l?.noteX ?? 0, l?.noteY ?? 0, w, cfs)
     const hit =
       pg.lyrics.some((o) => o !== l && overlap(cb, boxOf(o.x, o.y, D.geci_size, D.geci_size))) ||
@@ -8429,36 +8429,26 @@ console.log('[adj672] lyric comment avoidance')
       l !== undefined && svg.includes(`y="${l.noteY}"`) && svg.includes(`x="${l.noteX}"`),
       `noteX=${l?.noteX} noteY=${l?.noteY} y=${l?.y}`)
     /**
-     * L5（**adj701 修订**，用户看图定标）：注释**居中于"前一字墨迹右缘 ~ 锚字左缘"**这个空档，
-     * 而不是"右缘恒贴锚字左缘"（那是空档的一端，观感偏一边）。
+     * L5（**adj708 修订**，用户口径）：「注释**不与歌词重叠**；水平方向放得下就**靠近后面的歌词**；
+     * 放不下则放在后面歌词的**上/下**位置」。
      *
-     * 实测标定（用户原谱第二曲部第 2 行）：锚「知」232.3、前一字「瘦」墨迹右缘 169.0 ⇒ 期望 ≈200.7；
-     * 锚「红」453.0、前一字「肥」墨迹右缘 438.6 ⇒ 期望 ≈445.8。
+     * 判据（适用于所有用例）：每个注释要么
+     *  · 与锚字**同基线**且右缘贴锚字左缘（`l.x − LYRIC_COMMENT_GAP`，= 最靠近后字）；要么
+     *  · 已**上/下错开**（同基线的位置放不下，按规范退到后字的上/下）。
+     * 两种都合规；**不允许**出现"停在同基线、却被挤到撞上别的字"的落点。
      */
-    check('L5 adj701 注释**居中于"前一字墨迹 ~ 锚字左缘"**的空档（不偏向任何一端）',
+    check('L5 adj708 注释：同基线则**右缘贴锚字左缘**，否则**上/下错开**（不与歌词重叠）',
       pg.lyrics.filter((x) => x.char.note).length > 0 &&
         pg.lyrics
           .filter((x) => x.char.note)
           .every((l) => {
-            // 空档左端 = 同行、锚字左侧最近的墨迹右缘（含后缀标点）；右端 = 锚字左缘
-            const size = D.geci_size
-            const bodyW = (t: string) =>
-              [...t].reduce((a, ch) => a + (/[\u3000-\u303f\uff00-\uffef]|\p{Script=Han}/u.test(ch) ? size : size * 0.55), 0)
-            const gapL = Math.max(
-              ...pg.lyrics
-                .filter((o) => o !== l && Math.abs(o.y - l.y) < 0.5 && o.x < l.x - 0.01)
-                .map((o) => o.x + bodyW(o.char.text) + bodyW(o.char.trailing ?? '')),
-              -Infinity,
-            )
-            if (!Number.isFinite(gapL) || gapL > l.x - 1) return true
-            const w = lyricCommentWidth(l.char.note ?? '', cfs) * (l.noteSx ?? 1)
-            const want = (gapL + l.x - w) / 2
-            return Math.abs((l.noteX ?? 0) - want) < 0.11
+            const wl = lyricCommentWidth(l.char.note ?? '', cfs) * (l.noteSx ?? 1)
+            const sameLine = Math.abs((l.noteY ?? 0) - l.y) < 0.11
+            if (!sameLine) return true // 已按规范上/下错开
+            return Math.abs((l.noteX ?? 0) + wl - (l.x - LYRIC_COMMENT_GAP)) < 0.11
           }),
       JSON.stringify(
-        pg.lyrics
-          .filter((x) => x.char.note)
-          .map((l) => ({ t: l.char.note, noteX: l.noteX, 锚x: l.x })),
+        pg.lyrics.filter((x) => x.char.note).map((l) => ({ t: l.char.note, noteX: l.noteX, noteY: l.noteY, y: l.y, 锚x: l.x })),
       ))
   }
   /**
