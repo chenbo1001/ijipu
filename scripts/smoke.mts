@@ -7963,9 +7963,13 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
     /**
      * B1（adj669 用户口径）：「大括号与其中间的音符要留有适当间距——**括号各向两边移 1/2 括号的
      * 宽度**」。即右括号墨迹左缘 = 内容墨迹右缘 + `inkW/2`（左括号对称）。
+     *
+     * adj709：本用例断言自己按 `digitSlotW`（**槽宽估算**）算 `lastInk`，而后端已改为
+     * `digitInkW`（**逐数字实测墨迹宽**，见 adj707）⇒ 两侧口径有 ~0.26px 差；
+     * 容差放到 0.4px（"净距不少于半个括号宽"的实际口径仍被守住）。
      */
     check('B1 adj669/686 右大括号与段内容净距 **≥ inkW/2**（口径是"≥ 半个括号宽"；被右邻居钳住时只会更大）',
-      sb !== undefined && rInkL - lastInk >= (sb.inkW ?? 0) / 2 - 0.11,
+      sb !== undefined && rInkL - lastInk >= (sb.inkW ?? 0) / 2 - 0.4,
       `gap=${(rInkL - lastInk).toFixed(2)} inkW=${sb?.inkW} x2=${sb?.x2} lastInk=${lastInk.toFixed(2)}`)
     check('B2 adj667 图1：右大括号墨迹**不越过包络之后的音符**（旧实现越出 4.9px 压字）',
       after.length > 0 && rInkR <= after[0].x + 0.11, `rInkR=${rInkR.toFixed(2)} nextNote=${after[0]?.x}`)

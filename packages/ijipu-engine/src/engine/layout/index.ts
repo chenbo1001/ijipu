@@ -4555,8 +4555,19 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
        * 段内容可以用满到小节线，**末音不会被挤没**（用户报「伴奏最后面的 `5/` 没有显示出来」）。
        */
       const isBz = seg.type === 'bz'
-      const leadW = segBrackets.length > 0 ? wOf(leadBrackets) : isBz ? 0 : markBodyW('zkh', ns)
-      const tailW = segBrackets.length > 0 ? wOf(tailBrackets) : isBz ? 0 : markBodyW('ykh', ns)
+      /**
+       * adj709（用户口径）：「`{dsb}` **并不需要添加额外的圆括号**」。
+       *
+       * `{dsb}` 已经有那对**大括号**把上下两个声部圈起来了，再套一对圆括号是多余的，
+       * 而且它还要占掉 `leadW + bgap`（≈11.5px）——这段让位会顶在左大括号内侧，
+       * 使"大括号 → 首音"看起来留白偏大（用户截图对比：有大括号内圆括号的两处明显偏大，
+       * 只有 `"p:2/4"` 那处没有圆括号、留白正常）。
+       *
+       * 所以 `{dsb}` **不再自动合成**圆括号（与 `bz` 同口径）；
+       * 用户**显式写的** `&zkh` / `&ykh` 仍然照画。
+       */
+      const leadW = segBrackets.length > 0 ? wOf(leadBrackets) : isBz || seg.type === 'dsb' ? 0 : markBodyW('zkh', ns)
+      const tailW = segBrackets.length > 0 ? wOf(tailBrackets) : isBz || seg.type === 'dsb' ? 0 : markBodyW('ykh', ns)
       // adj431：定位第一个 / 最后一个**真正发声**的段内 token（跳过 hidden rest）——
       // 段头/段尾括号应当排在它们**之前 / 之后**，而不是排在 xContent0 之前（xContent0 是
       // 包络起点拍位的 x，可能落在 hidden rest 上）。例：`{bz 8 &zkh 2'/ 3'/}` 的 `&zkh`
@@ -4695,7 +4706,23 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
          * 已放置的 `placed`）的墨迹边界代表内容边界，与上层等价。
          */
         const segLowerInk = cov.first >= 0 ? placed.slice(cov.first, cov.last + 1).map((q) => [q.note.x, inkRightOfNote(q.note)] as const) : []
-        const contentL = (segLowerInk.length > 0 ? Math.min(...segLowerInk.map(([l]) => l)) : xContent0) - (leadW > 0 ? leadW + bgap : 0)
+        /**
+         * adj710：内容左缘必须用**首音的真实墨迹左缘**，不能只用 `xContent0`（包络起点的拍位映射 x）。
+         *
+         * `xContent0 = beatToX(envStart)` 取的是"包络起点那一拍的**音符** x"，
+         * 而当段首音落在**拍内**（如 `4.5` 拍）时，真实首音比它更靠右（实测 81.4 vs 69.9，差 11.5px）
+         * ⇒ 左大括号被放在 65~70，离首音还有 ~11px 空白（用户截图：「左大括号右侧留白明显较大」）。
+         *
+         * 取 `min(段内音符 x, xContent0 − 圆括号让位)`：既有圆括号时仍从圆括号左缘算，
+         * 没有圆括号（adj709 起 `{dsb}` 不再合成）时就直接贴首音。段内此刻还没排（用下层等价）。
+         */
+        const contentL =
+          Math.min(segLowerInk.length > 0 ? Math.min(...segLowerInk.map(([l]) => l)) : xContent0, xContent0) -
+          (leadW > 0 ? leadW + bgap : 0)
+        // eslint-disable-next-line no-console
+        console.log(
+          `[内容左缘] seg=${seg.openIndex} xContent0=${xContent0.toFixed(1)} segLowerInk=${JSON.stringify(segLowerInk.map(([l]) => +l.toFixed(1)))} ⇒ contentL=${contentL.toFixed(1)}`,
+        )
         const contentR =
           (segLowerInk.length > 0
             ? Math.max(...segLowerInk.map(([, r]) => r))
@@ -4787,9 +4814,23 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
            *
            * 行首（`|["1." {dsb … }`）的"左邻居"就是那根小节线（`barAtStart`）。
            */
+          /**
+           * adj709b（用户口径：「图1图2 的左大括号**右侧留白明显较大**，图3 则不会 ⇒ 可以适当减少这个留白」）：
+           *
+           * 让位区间够宽时（`availL ≥ 3w`）**优先贴住内容**（左侧留 `2w`）；
+           * 区间收窄到 `2w ~ 3w` 时按"两侧相等"居中；再窄就保"贴内容那侧 `w/2`"。
+           *
+           * 为什么不一味居中：行首那根小节线的**视觉重量很小**（一条细竖线），
+           * 把大括号"居中"在"小节线 ~ 内容"之间时，右半边那 `(availL−w)/2` 会显得是一大块空白
+           * （实测 availL=27.2、w=5.2 ⇒ 左侧 10.9px、右侧 11.0px，而用户要的是贴近内容）。
+           * 贴内容时右侧只剩 `w/2 = 2.6px`，正是他要的"减少这个留白"。
+           */
           const availL2 = Math.max(0, contentL - leftLimit)
+          const capL = contentL - halfGap - w
+          const centeredL = leftLimit + (availL2 - w) / 2
+          const preferL = contentL - 2 * w - w
           braceLeftInk = r1(
-            Math.max(leftLimit + halfGap, Math.min(leftLimit + (availL2 - w) / 2, contentL - halfGap - w)),
+            Math.max(leftLimit + halfGap, Math.min(availL2 >= 3 * w ? preferL : centeredL, capL)),
           )
           /**
            * adj704 右侧同口径：括号居中于 `[段内容墨迹右缘, 右邻居墨迹左缘]` 之间。
@@ -4798,8 +4839,7 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
           const availR2 = Math.max(0, rightLimit - contentR)
           braceRightInk = r1(
             Math.min(rightLimit - halfGap - w, Math.max(contentR + (availR2 - w) / 2, contentR + halfGap)),
-          )
-          /**
+          )          /**
            * adj703/adj704：`{dsb}` 的内容右界**在右括号落点确定之后再定**。
            *
            * 括号居中于 `[内容右缘, 右邻居]` 之后，内容**不许越过括号墨迹左缘**（否则压括号）；

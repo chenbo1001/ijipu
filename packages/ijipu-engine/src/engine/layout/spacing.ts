@@ -486,7 +486,6 @@ export const SEGMENT_BRACE_INK_GAP = 0.5
  * 与字号无关（固定像素），故不乘 `noteScaleOf`。
  */
 export const VOLTA_INK_GAP = 2
-
 /**
  * adj670（用户口径：「(1'// 7// 6//) (6// 6/) 这部分的连音线是在下面的**反转的**」）：
  * `{dsb}` 上下两层之间**必须容纳**的内容 = 上层声部的**减时线层底** + 下层声部连音线的**弧顶**。
