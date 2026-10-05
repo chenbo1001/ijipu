@@ -4691,6 +4691,16 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         // 左：包络起点的小节线内侧（**含临时节拍符占宽**）→ 包络前一个音符的墨迹右缘 → 行内容左界
         // adj675：临时节拍 `"p:2/4"` 画在小节线**右侧**、要占掉约一个字宽——不算进来的话
         // "贴左"的括号会正好压在拍号上（用户截图报「临时节拍符与左括号重叠」）。
+        /**
+         * adj704（用户口径）：「小节线 / 临时节拍 / 跳房子起点在左，然后临时多声部的左括号，
+         * 再来才是临时多声部主体；左右两段以**墨迹**算，中间留 **2 倍左括号宽度**，
+         * 左括号在这个宽度里**居中**」。
+         *
+         * 行首（`|["1." {dsb … }`）时 `barAtStart` 已经是那根小节线
+         * （小节线由 `mainBarAnchors` 提供，见其构造注释）⇒ 左邻居就是它；
+         * 旧实现只在"包络前还有一个音符"时才认邻居，行首会退回行左界、让位区间被算得很宽
+         * （实测左括号墨迹 [62.0, 67.2]、离段首音 14.2px）。
+         */
         const leftLimit = barAtStart
           ? barAtStart.x + barInset + (meterGapRight(barAtStart.comment ?? '', ns) ?? 0)
           : cov.first > 0
@@ -4750,21 +4760,32 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
            * 与两侧邻居的净距也 ≥ `w/2`。空间不足时**先保"贴内容那侧半个括号宽"**
            * （宁可离邻居更近，也绝不压音符），再按可用宽居中。
            */
-          const wantL = contentL - halfGap - w
-          const floorL = leftLimit + halfGap // 硬下限：不压左邻居
-          braceLeftInk = r1(Math.max(floorL, Math.min(wantL, contentL - halfGap - w)))
-          const wantR = contentR + halfGap
-          const ceilR = rightLimit - halfGap - w // 硬上限：不压右邻居
-          braceRightInk = r1(Math.min(ceilR, Math.max(wantR, contentR + halfGap)))
           /**
-           * adj703：`{dsb}` 的内容右界**在右括号落点确定之后再定**——
-           * 取"内容自然终点"，但**不越过右括号墨迹左缘 + 半个括号宽的净距**。
+           * adj704（用户口径）：「小节线 / 临时节拍 / 跳房子起点在左，然后临时多声部的左括号，
+           * 再来才是临时多声部主体；左右两段以**墨迹**算，中间留 **2 倍左括号宽度**，
+           * 左括号在这个宽度里**居中**」。
            *
-           * 为什么要放在这里：`xContent1` 既是段内容的右钳制、又是括号排布的上界，
-           * 而括号的落点依赖 `contentR`（内容墨迹右缘）⇒ 先算太早会与括号打架。
-           * ⚠️ 旧写法固定扣 `barInset + (3w + ns)`（≈30px）⇒ 跨拍末音被钳成 `8.6px`
-           * （同拍位主旋律 `6-` 是 `37.8px`），增时线挤在数字边上
-           * （用户报「`6-` 占宽比单声部大」「`1-` 的增时线没和 `6-` 对齐」）。
+           * 即：让位区间 = `[左邻居墨迹右缘, 段内容墨迹左缘]`，括号**居中于其中**
+           * ⇒ 两侧净距各 `(可用宽 − w) / 2`；可用宽够 `2w` 时正好各 `w/2`。
+           * 硬下限：不压左邻居、不压段内容。
+           *
+           * 行首（`|["1." {dsb … }`）的"左邻居"就是那根小节线（`barAtStart`）。
+           */
+          const availL2 = Math.max(0, contentL - leftLimit)
+          braceLeftInk = r1(Math.max(leftLimit + halfGap, Math.min(leftLimit + (availL2 - w) / 2, contentL - halfGap - w)))
+          /**
+           * adj704 右侧同口径：括号居中于 `[段内容墨迹右缘, 右邻居墨迹左缘]` 之间。
+           * 只给右邻居留 `w/2` 的硬下限（不压它），不再额外扣一份让位宽。
+           */
+          const availR2 = Math.max(0, rightLimit - contentR)
+          braceRightInk = r1(
+            Math.min(rightLimit - halfGap - w, Math.max(contentR + (availR2 - w) / 2, contentR + halfGap)),
+          )
+          /**
+           * adj703/adj704：`{dsb}` 的内容右界**在右括号落点确定之后再定**。
+           *
+           * 括号居中于 `[内容右缘, 右邻居]` 之后，内容**不许越过括号墨迹左缘**（否则压括号）；
+           * 再与"内容自然终点"取小。
            */
           xContent1 = Math.max(xContent0, Math.min(beatToXEndOf(envEnd), braceRightInk - halfGap))
         } else {
@@ -4938,6 +4959,34 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         // adj433：末音的右缘取"覆盖到的最后那个音的**结束**"（`beatToXEndOf`），与包络终点同口径
         const naturalX1 = isTp ? mapXEnd(envStart + beatAt + dur) : isLastInSeg ? beatToXEndOf(envStart + beatAt + dur) : beatToX(envStart + beatAt + dur)
         let bx1 = xContent0 + (naturalX1 - segNaturalXStart) * segScale
+        /**
+         * adj705（用户报「`1-` 的增时线没有和 `6-` 的增时线对齐」，并确认"做"）：
+         * **段内末音**的拍内相位复用主旋律那一段的拍段骨架，让两层的增时线落在同一列。
+         *
+         * 根因：段内按"本音块宽均分"摊拍（`1-` 覆盖 2 拍 ⇒ 每拍 13.4px），
+         * 而主旋律按**它自己的**拍段摊（本体 8.1 / 增时段 8.1）⇒ 两层增时线各在各的位置
+         * （实测 `-` 画在 169.3 vs 174.4）。
+         *
+         * 只改**末音**：普通音的拍宽必须坚持"按段内自己的时值分"（`AJ2/AJ3/AK3` 守的就是这条），
+         * 一旦全改会让段内子拍宽脱离自身时值比例。
+         */
+        if (!isTp && isLastInSeg) {
+          let mel: { startBeat: number; beats: number } | null = null
+          for (let k = 0; k < cnt; k++) {
+            const st = spans[k].startBeat
+            if (envStart + beatAt >= st - 1e-9 && envStart + beatAt < st + spans[k].beats - 1e-9) {
+              mel = { startBeat: st, beats: spans[k].beats }
+              break
+            }
+          }
+          if (mel && mel.beats > 1e-6) {
+            /** 末音起点在"主旋律那一段"里的相位；末音终点相位按主旋律该段的结束（= 增时线列起点） */
+            const ph0 = (envStart + beatAt - mel.startBeat) / mel.beats
+            const spanW = (naturalX1 - segNaturalXStart) * segScale
+            const bodyW05 = Math.max(2, spanW * Math.min(1 - ph0, dur / mel.beats))
+            bx1 = bx0 + bodyW05
+          }
+        }
         // 右缘钳制（替谱层钳到**小节线**，不与尾括号挤）
         bx1 = Math.min(bx1, noteClampRight)
         beat += dur
