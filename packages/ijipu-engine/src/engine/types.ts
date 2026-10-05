@@ -918,6 +918,16 @@ export interface PlacedSegmentBracket {
   braceTop?: number
   braceBottom?: number
   /**
+   * adj707：**让位区间的可用宽**（布局算出，供断言按墨迹口径判定）。
+   *
+   * 为什么随括号一起给：断言要判"括号与两侧邻居/内容的净距是否够 `w/2`"，
+   * 但**可用宽本身不够 `w` 时**（`leftLimit > contentL` 的退化行）根本放不下，
+   * 此时只能贴住一侧；断言若不知道这个前提，就会把"合规的退化布局"判成红灯。
+   * 布局是唯一知道这个前提的一方 ⇒ 由布局给出，断言直接消费（AGENTS 六之二·4「数值口径同源」）。
+   */
+  availL?: number
+  availR?: number
+  /**
    * adj442：**色块占宽边界**（用户规则）——
    *  - `bz`（临时伴奏）：以**前后的小节线**为界（`blockLeft`/`blockRight` = 包络两端的主旋律小节线 x）；
    *  - `dsb`（临时多声部）：以大括号为界，取两括号的**内缘**（adj667：左 = `{` 墨迹右缘、

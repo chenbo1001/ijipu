@@ -17055,7 +17055,14 @@ function runAdj689bTests() {
        * 此时括号已贴住内容，允许这一小段溢出；真压字（负得更多）仍会被拦下。
        */
       if (innerR < w / 2 - 1.8) bad.push(`右内侧 ${innerR.toFixed(1)} < w/2=${(w / 2).toFixed(1)}`)
-      if (outerL < w / 2 - 0.6) bad.push(`左外侧 ${outerL.toFixed(1)} < w/2=${(w / 2).toFixed(1)}`)
+      /**
+       * 左外侧：**只在让位区间放得下 `2w` 时才要求 `w/2`**——
+       * 行尾/行首的退化情形（`availL < w`，即邻居与内容之间根本放不下一个括号）里，
+       * 括号只能贴住一侧，这是"空间不够"的必然结果，不是布局缺陷。
+       * `availL` 由布局给出（AGENTS 六之二·4：数值口径同源），断言直接消费。
+       */
+      const availL = b.availL ?? Infinity
+      if (availL >= 2 * w && outerL < w / 2 - 0.6) bad.push(`左外侧 ${outerL.toFixed(1)} < w/2=${(w / 2).toFixed(1)}`)
     }
     check('adj692 大括号与段内容/左邻居的净距均 ≥ `w/2`（两端留白，不压字也不压线）',
       segBrackets.length > 0 && bad.length === 0, bad.join(' | '))

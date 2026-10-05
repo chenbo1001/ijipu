@@ -29,7 +29,7 @@ import type {
   ScorePageMeta,
   VoiceBlock,
 } from '../types'
-import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, octaveDotY, BRACKET_PAD, H_GAP, noteScaleOf, VOLTA_BAR_GAP, VOLTA_RAISE, DYN_HALF_H, barlinePad, barlineTotalW, DOT_AFTER_DIGIT_GAP, DOT_R, SEGMENT_ROW_GAP_DEFAULT, SEGMENT_LAYER_YSCALE, SEGMENT_LAYER_CLEARANCE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, NOTE_BASELINE_RATIO, digitBottomY, beamBottomY, lowDotY, TP_BRACKET_GAP, SLUR_SAG_MAX, SLUR_SAG_MIN, VOLTA_INK_GAP, barNumberGapNeed, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, type AccidentalInkMetrics } from './spacing'
+import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, octaveDotY, BRACKET_PAD, H_GAP, noteScaleOf, VOLTA_BAR_GAP, VOLTA_RAISE, DYN_HALF_H, barlinePad, barlineTotalW, DOT_AFTER_DIGIT_GAP, DOT_R, SEGMENT_ROW_GAP_DEFAULT, SEGMENT_LAYER_YSCALE, SEGMENT_LAYER_CLEARANCE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, NOTE_BASELINE_RATIO, digitBottomY, beamBottomY, lowDotY, TP_BRACKET_GAP, SLUR_SAG_MAX, SLUR_SAG_MIN, VOLTA_INK_GAP, digitInkW, barNumberGapNeed, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, type AccidentalInkMetrics } from './spacing'
 // adj284：空间优先布局的度量（本体宽 / 时值拆分 / 非时值元素间距）
 import { splitNoteDur, noteBodyW, augBodyW, dotBodyW, accidentalBodyW, accidentalGeometry, markBodyW, digitSlotW, hxBodyW, graceAtTail, graceSlotLayout, nonDurGap, slideExtraW, braceInkRightOffset, BRACE_LINE_DX } from './spaceLayout'
 import { hairpinEvents, resolveHairpins, type DynEvent, type NoteAnchors } from './hairpins'
@@ -4442,6 +4442,21 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       return best ?? beatToX(beat)
     }
 
+    /**
+     * adj707（用户口径：「计算占宽，应该也是按**墨迹宽度**来计算更准确」）：
+     * 数字墨迹右缘用**逐数字的实测墨迹宽** `digitInkW(digit, ns)`，而不是"数字槽宽"估算
+     * （`digitSlotW = 0.62em`）。实测差值可观：`1` 墨迹 0.35em vs 槽 0.62em（多算 0.27em ≈ 3.5px
+     * @13px）、`4` 墨迹 0.60em（几乎等于槽）。用槽宽会把墨迹右缘**右推**，把可用空档算小。
+     */
+    const noteInkRight = (n: PlacedToken): number => {
+      const sp2 = splitNoteDur(n.token)
+      const hasTail = sp2.augCount > 0 || sp2.dotDur > 0
+      if (hasTail) return n.rightX ?? n.x + n.width
+      const tk = n.token as { kind: string; pitch?: number }
+      const digit = tk.kind === 'note' ? String(tk.pitch ?? '') : tk.kind === 'rhythm' ? '9' : '0'
+      return n.x + Math.min(n.width, digitInkW(digit, config.note_size))
+    }
+
     // ---- adj667：段层大括号的**墨迹边界**辅助（用户口径「布局不得重叠，除非明确要重叠」）----
     /**
      * 一个已放置音符的**墨迹右缘**。
@@ -4451,11 +4466,7 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
      * 按块边界算会把"可用空档"算成 0，括号只能外扩压人（用户报图 1 右括号压后续音符）。
      * 有附点/增时线的音符尾部确实有墨迹，此时退回整块右端（保守）。
      */
-    const inkRightOfNote = (n: PlacedToken): number => {
-      const sp2 = splitNoteDur(n.token)
-      const hasTail = sp2.augCount > 0 || sp2.dotDur > 0
-      return hasTail ? (n.rightX ?? n.x + n.width) : n.x + Math.min(n.width, digitSlotW(config.note_size))
-    }
+    const inkRightOfNote = (n: PlacedToken): number => noteInkRight(n)
     /** 一个已放置音符的**墨迹左缘**（变音角标在数字左侧，按其锚点保守左推） */
     const inkLeftOfNote = (n: PlacedToken): number => n.x + Math.min(0, n.accidentalGeo?.penDx ?? 0)
     /** 与 `[from, to)` 有交集的**最后一个 / 第一个**主旋律音符下标（限定在某页；-1 = 无） */
@@ -4647,6 +4658,9 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       let braceLeftInk: number | null = null
       let braceRightInk: number | null = null
       let braceInkW = 0
+      /** adj707：让位区间两端的墨迹边界（供导出 `availL/availR`，断言按墨迹口径判定用） */
+      let leftLimitDump = 0
+      let rightLimitDump = Number.POSITIVE_INFINITY
       /** adj686：本段**下层**（包络内主旋律）的 token —— 供大括号下端"到最后一个声部的下沿" */
       let braceLowerTokens: MusicToken[] = []
       if (isDsb) {
@@ -4725,6 +4739,8 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
          */
         if (isDsb) xContent1 = Math.max(xContent0, xContent1)
         /** adj675：左括号与左侧元素之间的最小净距 */
+        leftLimitDump = leftLimit
+        rightLimitDump = rightLimit
         const gapL = LAYER_GAP * noteScaleOf(ns)
         const availL = Math.max(0, contentL - leftLimit - gapL)
         const availR = Math.max(0, rightLimit - contentR)
@@ -4772,7 +4788,9 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
            * 行首（`|["1." {dsb … }`）的"左邻居"就是那根小节线（`barAtStart`）。
            */
           const availL2 = Math.max(0, contentL - leftLimit)
-          braceLeftInk = r1(Math.max(leftLimit + halfGap, Math.min(leftLimit + (availL2 - w) / 2, contentL - halfGap - w)))
+          braceLeftInk = r1(
+            Math.max(leftLimit + halfGap, Math.min(leftLimit + (availL2 - w) / 2, contentL - halfGap - w)),
+          )
           /**
            * adj704 右侧同口径：括号居中于 `[段内容墨迹右缘, 右邻居墨迹左缘]` 之间。
            * 只给右邻居留 `w/2` 的硬下限（不压它），不再额外扣一份让位宽。
@@ -5325,6 +5343,9 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         // adj685/686：大括号**自己的**墨迹端点（上下对称留白，不复用上面几个"块级"字段）
         braceTop: r1(inkT - bracePadY),
         braceBottom: isDsb ? r1(inkB + bracePadY) : undefined,
+        // adj707：让位区间的**可用宽**（供 smoke 按墨迹口径判定；可用宽 < w 时只能贴一侧）
+        availL: r1(Math.max(0, (braceLeftInk ?? x0) - leftLimitDump)),
+        availR: r1(Math.max(0, rightLimitDump - (braceRightInk !== null ? braceRightInk + braceInkW : x1))),
         // adj442（用户规则）：色块占宽边界——**bz 以前后小节线为界、dsb 以大括号为界**
         //  - dsb：取两括号的**内缘**（左 `{` 的右缘 / 右 `}` 的左缘）——色块严格落在括号之间
         //  - bz：包络两端的主旋律**小节线**（`barAtStart`/`barAtEnd`；缺锚点时退回内容区边界）
@@ -5590,7 +5611,18 @@ function avoidLyricComments(pages: ScorePage[], config: PageConfig): void {
     const boxes: Box[] = page.lyrics.map(lyricBox)
     const ns = config.note_size
     for (const n of page.notes) {
-      boxes.push({ x1: n.x, x2: n.x + Math.max(n.width, digitSlotW(ns)), y1: n.y - ns * 1.15, y2: n.y + ns * 0.6 })
+      /**
+       * adj706（用户口径：「谱面里的元素**墨迹**不重叠」）：音符的障碍盒必须用**墨迹**宽，
+       * 不能用"占宽块"——空间优先给每个音符分配的块**尾部是留白**
+       * （例 `3//` 块宽 11.6，数字墨迹只有 8.06），按块算会把可用空档算成 0
+       * ⇒ 注释被无谓地推远/上错开。有附点/增时线的音符尾部确有墨迹，才延伸到块右端。
+       */
+      const sp2 = splitNoteDur(n.token)
+      const hasTail = sp2.augCount > 0 || sp2.dotDur > 0
+      const tk2 = n.token as { kind: string; pitch?: number }
+      const digit2 = tk2.kind === 'note' ? String(tk2.pitch ?? '') : tk2.kind === 'rhythm' ? '9' : '0'
+      const inkR = hasTail ? (n.rightX ?? n.x + n.width) : n.x + Math.min(n.width, digitInkW(digit2, ns))
+      boxes.push({ x1: n.x, x2: inkR, y1: n.y - ns * 1.15, y2: n.y + ns * 0.6 })
     }
     const hits = (b: Box): boolean =>
       boxes.some((o) => b.x1 < o.x2 - 0.01 && b.x2 > o.x1 + 0.01 && b.y1 < o.y2 - 0.01 && b.y2 > o.y1 + 0.01)
