@@ -7251,6 +7251,36 @@ console.log('[adj427] segment playback (voices / instruments / gain)')
     instrumentToProgram('手风琴') === 21 && instrumentToProgram('大钢琴') === 0 && matchInstrument('手风琴') !== matchInstrument('大钢琴'),
     `手风琴=${instrumentToProgram('手风琴')}/${matchInstrument('手风琴')} 大钢琴=${instrumentToProgram('大钢琴')}/${matchInstrument('大钢琴')}`,
   )
+  /**
+   * Z21（adj710，用户报「`{dsb}` 的**前两拍没有按双声部演奏**」）：
+   * **`{dsb}` 的每个段层音符都必须有起奏事件**——`{dsb}` 是"两个声部逐音一一对应"，
+   * 连音合并一旦吞掉某个音的起奏点，两层音符数就不再对应、听感不再是双声部。
+   *
+   * 实测（用户原谱 `(3// 2// 1//) (1// 1/) 7,/ 1-`）：上层 `(1// 1/)` 同音高同连音线
+   * 被合成 `0.643s` 一个音 ⇒ 31 个上层音里 3 个丢起奏点。本断言按"逐音都在事件里"守它。
+   */
+  {
+    const srcDsb =
+      'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 6, 0/ 3\'/ 7 {dsb 0/ 1// 2// } 0/ 6// 7// |["1." {dsb (3// 2// 1//) (1// 1/) 7,/ 1- } (1\'// 7// 6//) (6// 6/) 5/ 6- |\n'
+    /** ⚠️ **只解析一次**：布局与播放必须消费同一份解析结果，否则段层 token 是两份不同对象、
+     *  下面按"对象身份"比对会永远失败（自己踩过一次）。 */
+    const parsedDsb = parseJps(srcDsb)
+    const layDsb = layoutScore(parsedDsb, defaultPageConfig)
+    const seqDsb = buildPlaySequence(parsedDsb, layDsb, 96)
+    /**
+     * ⚠️ 比对必须用**对象身份**（`e.placed === 布局音符`）——`events[].placed.id.index` 与
+     * 布局音符的 `id.index` 不是同一套编号（段层音符的 index 是 `1000000004000` 这种命名空间值，
+     * 而事件里存的是解码后的序号）⇒ 按 index 比对会把"全都有事件"误判成"全都没有"。
+     */
+    const evSet = new Set(seqDsb.events.map((e) => e.placed))
+    const upper = layDsb.pages[0].notes.filter((n) => n.segment?.layer === 'upper' && n.segment.type === 'dsb')
+    const lower = layDsb.pages[0].notes.filter((n) => !n.segment && n.playVoice === 'second')
+    const missUpper = upper.filter((n) => !evSet.has(n)).map((n) => (n.token as { raw?: string }).raw)
+    const missLower = lower.filter((n) => !evSet.has(n)).map((n) => (n.token as { raw?: string }).raw)
+    check('Z21 adj710 `{dsb}` 上下两层**每个音都有起奏事件**（连音合并不吞起奏点）',
+      upper.length > 0 && lower.length === upper.length && missUpper.length === 0 && missLower.length === 0,
+      `上层 ${upper.length} / 下层 ${lower.length}；缺事件：上=${missUpper.join(',') || '无'} 下=${missLower.join(',') || '无'}`)
+  }
 }
 
 // ---- adj429：色块按曲行几何动态定界（多声部/临时段不再互相覆盖、不压歌词）----

@@ -1192,9 +1192,27 @@ export function buildPlaySequence(
       const prevSlurs = lastSegTokIdx > 0 ? segSlurOf.get(lastSegTokIdx) : undefined
       const sameSlur =
         prevSlurs !== undefined && curSlurs !== undefined && [...prevSlurs].some((r) => curSlurs.has(r))
+      /**
+       * adj710（用户报「`{dsb}` 的**前两拍没有按双声部演奏**」）：
+       * **`{dsb}` 段内的连音合并一律关闭。**
+       *
+       * 根因：合并（`prevEv.durationMs += dur2`）的本意是"连音线内同音高连奏"，
+       * 但它把**后一个音的事件整个吞掉**、那个音的**起奏点就没了**。实测
+       * `{dsb (3// 2// 1//) (1// 1/) 7,/ 1- }`：
+       *  · 上层 `(1// 1/)` 同音高、同连音线 ⇒ 合并成 `0.643s` 一个音（`1/` 的事件数 **0**）；
+       *  · 下层 `(6// 6/)` 音高不同 ⇒ 不合并；
+       * ⇒ **两层音符数不再一一对应**，听感上就不是"一个音对一个音的双声部"了
+       * （整曲 31 个上层音里 3 个这样丢起奏点）。
+       *
+       * 为什么只关 `{dsb}`：单声部/多声部块的连音合并是**既有且用户认可**的演奏口径
+       * （`(2 - | 2/)` 连成 2.5 拍）；`{bz}`（临时伴奏）是"上方叠层"、不要求逐音对应。
+       * 只有 `{dsb}` 的语义是"两个声部上下同拍位**逐音对齐**"。
+       */
+      const isDsbSegment = seg.type === 'dsb'
       if (
         prevEv !== undefined &&
         ci === lastEmittedDurIdx + 1 && // 紧邻（中间没有别的时值 token）
+        !isDsbSegment && // adj710：`{dsb}` 内不合并（合并会让两层音符数不再一一对应）
         !lastSegHadGraceOrOrnament &&
         !hasGraceOrOrnament &&
         sameSlur &&
@@ -1641,6 +1659,9 @@ export function buildPlaySequence(
         if (
           lastEventNoteIdx >= 0 &&
           sameVoiceAsPrev &&
+          // adj710：`{dsb}` 的下层（`second`）不合并——与段层同理，
+          // 合并会让"上下两声部逐音一一对应"失效（用户报「没有按双声部演奏」）
+          playRole !== 'second' &&
           (continuesFromPrev || (curNoteIdx === lastEventNoteIdx + 1 && shareSlur)) &&
           !hasFrontGrace &&
           ornKind === null &&
