@@ -8385,6 +8385,30 @@ console.log('[adj672] lyric comment avoidance')
       mine.length > 0 && mine.every((l) => Math.abs((l.noteY ?? 0) - l.y) > 1 && (l.noteSx ?? 1) >= 0.999),
       JSON.stringify(mine.map((l) => ({ t: l.char.note, dy: (l.noteY ?? 0) - l.y, sx: l.noteSx }))))
   }
+  /**
+   * L7（adj700，用户报「`知否，@"女."知否` 里的 `女.` 与前面的歌词重叠」）：
+   * 障碍集必须含**后缀标点**（`，。` 等不占音符位、由渲染端紧跟本字独立画出，但**是墨迹**）。
+   *
+   * 原实现只量到邻居**字本体**右缘，于是"空档"看起来放得下 ⇒ 注释就地画下去、正好压在后缀标点上
+   * （实测「否」本体 251.9~262.9、`，` 263.9~274.9，注释右缘 264.6 压在 `，` 上）。
+   */
+  {
+    const pg = layoutScore(parseJps(mk('否，@"男."知否，@应是绿@@肥@红瘦')), D).pages[0]
+    /** 字 + 其后缀标点 的墨迹盒 */
+    const withTrail = (o: (typeof pg.lyrics)[number]) => {
+      const trail = o.char.trailing ?? ''
+      const w = D.geci_size + (trail ? D.geci_size : 0)
+      return boxOf(o.x, o.y, w, D.geci_size)
+    }
+    const mine = pg.lyrics.filter((x) => x.char.note)
+    const bad = mine.filter((l) => {
+      const wl = lyricCommentWidth(l.char.note ?? '', cfs) * (l.noteSx ?? 1)
+      const cb = boxOf(l.noteX ?? 0, l.noteY ?? 0, wl, cfs)
+      return pg.lyrics.some((o) => o !== l && overlap(cb, withTrail(o)))
+    })
+    check('L7 adj700 歌词注释不与"歌词字 + 其后缀标点"重叠（`知否，@"女."知否`）',
+      mine.length > 0 && bad.length === 0, `n=${mine.length} bad=${bad.map((l) => l.char.note).join(',')}`)
+  }
   // L4：渲染端**直接用**布局给的锚点（否则"布局避让一套、渲染画另一套"）
   {
     const code = mk('一二三四"副歌部分"五')

@@ -5496,11 +5496,22 @@ function avoidLyricComments(pages: ScorePage[], config: PageConfig): void {
   /** 字的墨迹宽：汉字 / 全角标点按 1 字宽，拉丁/数字按 0.55 字宽（与 `lyricCommentWidth` 同一把尺子） */
   const charW = (text: string): number =>
     [...text].reduce((a, ch) => a + (/[\u3000-\u303f\uff00-\uffef]|\p{Script=Han}/u.test(ch) ? size : size * 0.55), 0)
+  /**
+   * 字的墨迹盒：`x1` = 字本体左缘；`x2` 含**后缀标点**（`，。` 等不占音符位、紧跟本字独立渲染，
+   * 但**是墨迹**，与注释相撞同样是重叠）。
+   *
+   * ⚠️ adj700（用户报「`知否，@"女."知否` 里的 `女.` 与前面的歌词重叠」）：
+   * 判断"注释左边还有多少空档"时**不能**带上后缀标点——注释只要不压**字本体**即可，
+   * 这也正是"注释右缘贴后字左缘"这条既有口径的解。所以碰撞盒含后缀、`left` 单独扣掉后缀。
+   */
   const lyricBox = (l: PlacedLyric): Box => {
     const trailW = charW(l.char.trailing ?? '')
-    const w = charW(l.char.text) + (trailW > 0 ? 1 + trailW : 0)
+    // 后缀标点由渲染端画在 `x + size + 1`（见 render 的 `lyric.char.trailing` 分支），故不再额外 +1
+    const w = charW(l.char.text) + trailW
     return { x1: l.x, x2: l.x + w, y1: l.y - size * 0.85, y2: l.y + size * 0.25 }
   }
+  /** adj700：字**本体**右缘（不含后缀标点） */
+  const bodyRight = (l: PlacedLyric): number => l.x + charW(l.char.text)
   const boxAt = (x: number, y: number, w: number): Box => ({ x1: x, x2: x + w, y1: y - cfs * 0.85, y2: y + cfs * 0.25 })
   for (const page of pages) {
     const boxes: Box[] = page.lyrics.map(lyricBox)
@@ -5521,19 +5532,85 @@ function avoidLyricComments(pages: ScorePage[], config: PageConfig): void {
         if (o.y2 <= l.y - cfs * 0.85 || o.y1 >= l.y + cfs * 0.25) continue
         if (o.x2 <= l.x + 0.01) left = Math.max(left, o.x2)
       }
-      const nx = right - w
-      let ny = l.y
-      if (w > right - left - LYRIC_COMMENT_GAP) {
-        const up = l.y - shiftY
-        const down = l.y + shiftY
-        if (!hits(boxAt(nx, up, w))) ny = up
-        else if (!hits(boxAt(nx, down, w))) ny = down
-        else ny = up // 上下都被占（极罕见）：仍取上方，保证不压前面那个字
+      /**
+       * adj700：左界若落在"某个歌词字的**后缀标点**"上，退回到该字本体右缘。
+       *
+       * 片段里**没写 `@`** 时（如 `知否，@"女."知否` 只有 `@` 在 `女.` 前），
+       * 注释只能挪到**上一字墨迹之后**；而"上一字墨迹"若把后缀标点算进去，
+       * 注释就会被推到压住标点的位置（实测注释右缘 264.6 vs 标点左缘 263.9）。
+       * 标点是独立渲染的窄墨迹，注释压在它上面同样是重叠（布局第一原则）。
+       */
+      const trailBox = page.lyrics.find((o) => Math.abs(o.y - l.y) < 0.5 && Math.abs(bodyRight(o) - left) < 0.5 && (o.char.trailing ?? '') !== '')
+      if (trailBox) left = bodyRight(trailBox)
+      /**
+       * adj700：`left` 必须>= "**夹在障碍与注释锚点之间的任何墨迹**"——
+       * 尤其是**上一字的后缀标点**（`，。` 等不占音符位、紧跟本字独立渲染）。
+       *
+       * 用户报「`知否，@"女."知否` 里的 `女.` 与前面的歌词重叠」：片段里 `@` 在 `女.` 之前，
+       * 注释只能挤在"上一字右缘 ~ 本字左缘"之间；而 `left` 只量到邻居**字本体**右缘
+       * （实测 236.6，而「否」的墨迹右缘其实是 273.9——中间那 30px 全是「，」），
+       * 于是"空档 25.4"看起来放得下 ⇒ 注释原地画下去，正好压在「，」上。
+       */
+      /**
+       * adj700：`left` = 锚点左侧**最近的墨迹**右缘，但**不得越过"被跳过的后缀标点"的起点**。
+       *
+       * 用户报「`知否，@"女."知否` 里的 `女.` 与前面的歌词重叠」：`@` 在 `女.` 前面，
+       * 注释只能挤在"上一字右缘 ~ 本字左缘"之间。上一字「否」的墨迹含后缀「，」
+       * （本体 251.9~262.9、标点 263.9~274.9），而 `left` 只量到邻居字本体 ⇒
+       * "空档 25.4"看起来放得下，注释就地画下去、正好压在「，」上。
+       * 这里把"落在锚点左侧、但**本体在左侧且带后缀**"的那些字的标点起点也算成障碍。
+       */
+      for (const o of page.lyrics) {
+        if (Math.abs(o.y - l.y) > 0.5) continue
+        const ox2 = lyricBox(o).x2
+        if (ox2 > left && ox2 <= l.x + 0.01) {
+          left = ox2
+          continue
+        }
+        // 本体在左侧、但墨迹（含后缀标点）越过了锚点 ⇒ 真正的障碍是它的本体右缘
+        if ((o.char.trailing ?? '') !== '' && bodyRight(o) > left && bodyRight(o) <= l.x + 0.01) left = bodyRight(o)
       }
-      l.noteX = r1(nx)
-      l.noteY = r1(ny)
-      l.noteSx = undefined
-      boxes.push(boxAt(nx, ny, w))
+      /**
+       * adj700/adj701（用户口径）：「注释应是**与后面的歌词对齐（上下时）**或**靠近（水平时）**」。
+       *
+       * 落点候选按优先级依次试，取第一个**不压任何墨迹（含后缀标点）**的：
+       *  ① `right − w`（注释右缘贴后字左缘，最"靠近"后字）、基线 = 后字基线；
+       *  ② 同上 x，但**上/下错开**——注释跟着后字走，仍然横向贴近；
+       *  ③ **以"后字字身"为中心**（`l.x + 字号/2 − w/2`），基线 = 后字基线；
+       *  ④ 同上但上/下错开；
+       *  ⑤ 都不行才退回"用字形横向压缩塞进左边空档"（adj677 的旧兜底口径）。
+       *
+       * 原来的做法是"放不下就压 x 到 `left`"，会把注释推到**压住前一字后缀标点**的位置
+       * （实测 `知否，@"女."知否`：注释被推到 251.1，而「否」本体 251.9~262.9 ⇒ 压字）。
+       */
+      const up = l.y - shiftY
+      const down = l.y + shiftY
+      const nx = right - w // 注释右缘贴后字左缘（最"靠近"后字）
+      const centerX = r1(l.x + size / 2 - w / 2)
+      const cand: { x: number; y: number }[] = [
+        { x: nx, y: l.y },
+        { x: nx, y: up },
+        { x: nx, y: down },
+        { x: centerX, y: l.y },
+        { x: centerX, y: up },
+        { x: centerX, y: down },
+      ]
+      let chosen: { x: number; y: number; sx?: number } | null = null
+      for (const c of cand) {
+        if (!hits(boxAt(c.x, c.y, w))) {
+          chosen = c
+          break
+        }
+      }
+      if (!chosen) {
+        // ⑤ 兜底：横向压缩塞进左边空档（旧口径；仍以"不压字"为目标）
+        const room = Math.max(1, right - left - LYRIC_COMMENT_GAP)
+        chosen = { x: right - w, y: l.y, sx: Math.min(1, room / w) }
+      }
+      l.noteX = r1(chosen.x)
+      l.noteY = r1(chosen.y)
+      l.noteSx = chosen.sx !== undefined && chosen.sx < 0.999 ? r1(chosen.sx) : undefined
+      boxes.push(boxAt(chosen.x, chosen.y, w * (chosen.sx ?? 1)))
     }
   }
 }
