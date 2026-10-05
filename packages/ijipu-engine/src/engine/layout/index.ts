@@ -4817,20 +4817,22 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
           /**
            * adj709b（用户口径：「图1图2 的左大括号**右侧留白明显较大**，图3 则不会 ⇒ 可以适当减少这个留白」）：
            *
-           * 让位区间够宽时（`availL ≥ 3w`）**优先贴住内容**（左侧留 `2w`）；
-           * 区间收窄到 `2w ~ 3w` 时按"两侧相等"居中；再窄就保"贴内容那侧 `w/2`"。
+           * 让位区间够宽时（`availL ≥ 2w`）**优先贴住内容**；区间收窄时按"两侧相等"居中；
+           * 再窄就保"贴内容那侧 `w/2`"（硬下限：不压内容）。
            *
            * 为什么不一味居中：行首那根小节线的**视觉重量很小**（一条细竖线），
            * 把大括号"居中"在"小节线 ~ 内容"之间时，右半边那 `(availL−w)/2` 会显得是一大块空白
-           * （实测 availL=27.2、w=5.2 ⇒ 左侧 10.9px、右侧 11.0px，而用户要的是贴近内容）。
-           * 贴内容时右侧只剩 `w/2 = 2.6px`，正是他要的"减少这个留白"。
+           * （实测 availL=27.2、w=5.2 ⇒ 居中时左右各约 11px，而用户要的是贴近内容）。
+           *
+           * ⚠️ adj711（用户要求「左括号从 `2w` 降到 `w` 试试效果」）：左侧留白由 `2w` 收到 **`w`**
+           * ⇒ `preferL = contentL − 2w`（括号整体右移一个括号宽），右侧仍是 `w/2`。
            */
           const availL2 = Math.max(0, contentL - leftLimit)
           const capL = contentL - halfGap - w
           const centeredL = leftLimit + (availL2 - w) / 2
-          const preferL = contentL - 2 * w - w
+          const preferL = contentL - 2 * w
           braceLeftInk = r1(
-            Math.max(leftLimit + halfGap, Math.min(availL2 >= 3 * w ? preferL : centeredL, capL)),
+            Math.max(leftLimit + halfGap, Math.min(availL2 >= 2 * w ? preferL : centeredL, capL)),
           )
           /**
            * adj704 右侧同口径：括号居中于 `[段内容墨迹右缘, 右邻居墨迹左缘]` 之间。
