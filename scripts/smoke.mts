@@ -41,7 +41,7 @@ import {
 } from '@ijipu/engine/playback/ornaments.ts'
 import { slideOf, slidePlan, slideStepMs, SLIDE_SYMBOLS, SLIDE_STEP_MIN_MS, SLIDE_STEP_MAX_MS } from '@ijipu/engine/playback/slides.ts'
 import { midiToPitchName } from '@ijipu/engine/playback/midi.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_SAG_MIN, SLUR_SAG_MAX, VOLTA_INK_GAP, digitBottomY, beamBottomY, accidentalGap } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_SAG_MIN, SLUR_SAG_MAX, VOLTA_INK_GAP, digitBottomY, beamBottomY, digitInkW, accidentalGap } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
@@ -3604,6 +3604,29 @@ check('slideBodyW(13)=8.06', Math.abs(slideBodyW(13) - 8.06) < 1e-6, String(slid
 check('bracketBodyW()=5', bracketBodyW() === 5)
 check('noteBodyW(13,3)=digitSlotW+3', Math.abs(noteBodyW(13, 3) - (digitSlotW(13) + 3)) < 1e-6, String(noteBodyW(13, 3)))
 check('nonDurGap(13)=6.5', Math.abs(nonDurGap(13) - 6.5) < 1e-6, String(nonDurGap(13)))
+/**
+ * adj709（AGENTS 六之二·4「数值口径必须同源」）：**已放置音符的墨迹右缘（绝对 x）**——
+ * 与引擎 `noteInkRight` 同一口径：有附点/增时线时尾部确有墨迹 ⇒ 用块右端 `rightX`；
+ * 否则用**逐数字实测墨迹宽** `digitInkW`（不是 `digitSlotW` 槽宽估算）。
+ *
+ * ⚠️ 返回的是**绝对坐标**（与引擎一致）；早前一版误让它返回"宽度"，
+ * 调用处再 `x + 返回值` ⇒ 对`有附点/增时线`的音符把 `rightX` 又加了一遍
+ * （实测 `6-` 算出 325.7，实际只有 206.1）。
+ *
+ * 为什么断言必须用它：`digitSlotW = 0.62em` 而 `1` 的实际墨迹只有 `0.35em`，
+ * 两者差 `0.27em ≈ 3.5px @13px` ⇒ 断言按槽宽算就会与布局各算一套。
+ */
+const inkRightOfPlaced = (
+  n: { token: unknown; x: number; width: number; rightX?: number } | undefined,
+  noteSize: number,
+): number => {
+  if (!n) return 0
+  const t = n.token as { kind: string; pitch?: number; augmentCount?: number; dots?: number }
+  const sp = splitNoteDur(t as never)
+  if (sp.augCount > 0 || sp.dotDur > 0) return n.rightX ?? n.x + n.width
+  const digit = t.kind === 'note' ? String(t.pitch ?? '') : t.kind === 'rhythm' ? '9' : '0'
+  return n.x + Math.min(n.width, digitInkW(digit, noteSize))
+}
 
 // ---- 59. 空间优先布局 P2：元素级分配 + 附点/增时线独立段（adj284） ----
 console.log('[59] space-first layout P2 (adj284)')
@@ -7957,19 +7980,18 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
     const sb = (pg.segmentBrackets ?? [])[0]
     const segU = pg.notes.filter((n) => n.segment && n.segment.layer === 'upper').sort((a, b) => a.x - b.x)
     const after = pg.notes.filter((n) => !n.segment && n.playVoice === undefined).sort((a, b) => a.x - b.x)
-    const lastInk = (segU[segU.length - 1]?.x ?? 0) + digitSlotW(ns)
+    const lastInk = segU.length > 0 ? inkRightOfPlaced(segU[segU.length - 1], ns) : 0
     const rInkL = sb?.x2 ?? 0
     const rInkR = rInkL + (sb?.inkW ?? 0)
     /**
      * B1（adj669 用户口径）：「大括号与其中间的音符要留有适当间距——**括号各向两边移 1/2 括号的
      * 宽度**」。即右括号墨迹左缘 = 内容墨迹右缘 + `inkW/2`（左括号对称）。
      *
-     * adj709：本用例断言自己按 `digitSlotW`（**槽宽估算**）算 `lastInk`，而后端已改为
-     * `digitInkW`（**逐数字实测墨迹宽**，见 adj707）⇒ 两侧口径有 ~0.26px 差；
-     * 容差放到 0.4px（"净距不少于半个括号宽"的实际口径仍被守住）。
+     * adj709：本用例断言已与后端**同源**（都用 `digitInkW` 逐数字实测墨迹宽，
+     * 见 `inkRightOfPlaced`）⇒ 容差收回到 0.11px。
      */
     check('B1 adj669/686 右大括号与段内容净距 **≥ inkW/2**（口径是"≥ 半个括号宽"；被右邻居钳住时只会更大）',
-      sb !== undefined && rInkL - lastInk >= (sb.inkW ?? 0) / 2 - 0.4,
+      sb !== undefined && rInkL - lastInk >= (sb.inkW ?? 0) / 2 - 0.11,
       `gap=${(rInkL - lastInk).toFixed(2)} inkW=${sb?.inkW} x2=${sb?.x2} lastInk=${lastInk.toFixed(2)}`)
     check('B2 adj667 图1：右大括号墨迹**不越过包络之后的音符**（旧实现越出 4.9px 压字）',
       after.length > 0 && rInkR <= after[0].x + 0.11, `rInkR=${rInkR.toFixed(2)} nextNote=${after[0]?.x}`)
@@ -7991,7 +8013,8 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
       segU.length > 0 && segU[0].x - lInkR >= (sb?.inkW ?? 0) / 2 - 0.11,
       `gap=${(segU[0]?.x - lInkR).toFixed(2)} inkW=${sb?.inkW}`)
     check('C2 adj667 图2：左大括号落进"前一个音符墨迹"与"段首音"之间的空档',
-      prev !== undefined && lInkL >= prev.x + digitSlotW(ns) - 0.11, `lInkL=${lInkL.toFixed(2)} prevInkR=${(prev.x + digitSlotW(ns)).toFixed(2)}`)
+      prev !== undefined && lInkL >= inkRightOfPlaced(prev, ns) - 0.11,
+      `lInkL=${lInkL.toFixed(2)} prevInkR=${prev ? (inkRightOfPlaced(prev, ns)).toFixed(2) : '-'}`)
   }
   // --- 图 3 / 图 4：跳房子线必须抬到**段层墨迹之上** ---
   {
@@ -17026,18 +17049,29 @@ function runAdj689bTests() {
   {
     const ns2 = defaultPageConfig.note_size
     const segBrackets = (p.segmentBrackets ?? []).filter((b) => b.type === 'dsb' && b.inkW !== undefined)
+    /** 按 `blockLeft` 排序 ⇒ 相邻两段的 `blockLeft` 之间就是本段内容（精确切分，不靠固定窗口） */
+    const sortedB = [...segBrackets].sort((a, c) => (a.blockLeft ?? a.x1) - (c.blockLeft ?? c.x1))
     const bad: string[] = []
-    for (const b of segBrackets) {
+    for (const [bi, b] of sortedB.entries()) {
       const w = b.inkW as number
-      /** 该段的下层声部：x 落在 `[x1 − 30, x2 + w + 30]` 内、带 `parentY` 的主旋律音符 */
-      const lower = p.notes.filter((n) => n.parentY !== undefined && n.x >= b.x1 - 30 && n.x <= b.x2 + w + 30)
+      /**
+       * 该段的下层声部（包络内的主旋律）。
+       *
+       * ⚠️ adj709：**不能靠固定 x 窗口猜"哪一段"**——两段括号挨得近时窗口会罩住邻段
+       * （实测 `contentR` 取到 318.7 的邻段音符、"右内侧"算出 −145 的假红灯）。
+       * 括号记录自己带 `blockLeft`（= 段内容左界）⇒ 本段内容 = `[blockLeft, 下一段 blockLeft)`。
+       */
+      const lo = (b.blockLeft ?? b.x1) - 1
+      const hi = (sortedB[bi + 1]?.blockLeft ?? Number.POSITIVE_INFINITY) - 1
+      const lower = p.notes.filter((n) => n.parentY !== undefined && n.x >= lo && n.x < hi)
       if (lower.length === 0) continue
       const contentL = Math.min(...lower.map((n) => n.x))
-      const contentR = Math.max(...lower.map((n) => n.x + Math.min(n.width, digitSlotW(ns2))))
+      /** adj709：内容墨迹右缘 = `x + 逐数字实测墨迹宽`（与引擎 `noteInkRight` 同一口径） */
+      const contentR = Math.max(...lower.map((n) => inkRightOfPlaced(n, ns2)))
       const innerL = contentL - (b.x1 + w)
       const innerR = b.x2 - contentR
       const leftNb = Math.max(
-        ...p.notes.filter((n) => !n.segment && n.x + Math.min(n.width, digitSlotW(ns2)) < contentL).map((n) => n.x + Math.min(n.width, digitSlotW(ns2))),
+        ...p.notes.filter((n) => !n.segment && inkRightOfPlaced(n, ns2) < contentL).map((n) => inkRightOfPlaced(n, ns2)),
         ...p.barlines.filter((x) => !x.segment && x.x < contentL).map((x) => x.x),
         -Infinity,
       )
