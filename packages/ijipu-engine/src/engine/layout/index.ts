@@ -4702,6 +4702,18 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
           : cov.last >= 0 && cov.last + 1 < cnt
             ? inkLeftOfNote(placed[cov.last + 1].note)
             : row.right
+        /**
+         * adj694/adj703：`{dsb}` 的内容右界（`xContent1`）——**必须显式赋值**
+         * （`bz` 分支的 `xContent1` 只走 bz，不赋值会让段内容宽度 = 0）。
+         *
+         * 取"本段内容的**自然终点**"（`beatToXEndOf(envEnd)`，与主旋律同源），
+         * 但**给右括号留出它的槽位**——自然终点若越过右括号墨迹左缘就钳回该处。
+         *
+         * ⚠️ 旧写法固定扣 `barInset + (3w + ns)`（≈30px）⇒ 跨拍的末音被钳成 `8.6px`
+         * （同拍位主旋律 `6-` 是 `37.8px`）、增时线挤在数字边上
+         * （用户报「`6-` 占宽比单声部大」「`1-` 的增时线没和 `6-` 对齐」）。
+         */
+        if (isDsb) xContent1 = Math.max(xContent0, xContent1)
         /** adj675：左括号与左侧元素之间的最小净距 */
         const gapL = LAYER_GAP * noteScaleOf(ns)
         const availL = Math.max(0, contentL - leftLimit - gapL)
@@ -4744,6 +4756,17 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
           const wantR = contentR + halfGap
           const ceilR = rightLimit - halfGap - w // 硬上限：不压右邻居
           braceRightInk = r1(Math.min(ceilR, Math.max(wantR, contentR + halfGap)))
+          /**
+           * adj703：`{dsb}` 的内容右界**在右括号落点确定之后再定**——
+           * 取"内容自然终点"，但**不越过右括号墨迹左缘 + 半个括号宽的净距**。
+           *
+           * 为什么要放在这里：`xContent1` 既是段内容的右钳制、又是括号排布的上界，
+           * 而括号的落点依赖 `contentR`（内容墨迹右缘）⇒ 先算太早会与括号打架。
+           * ⚠️ 旧写法固定扣 `barInset + (3w + ns)`（≈30px）⇒ 跨拍末音被钳成 `8.6px`
+           * （同拍位主旋律 `6-` 是 `37.8px`），增时线挤在数字边上
+           * （用户报「`6-` 占宽比单声部大」「`1-` 的增时线没和 `6-` 对齐」）。
+           */
+          xContent1 = Math.max(xContent0, Math.min(beatToXEndOf(envEnd), braceRightInk - halfGap))
         } else {
           braceInkW = 0
         }
@@ -4754,8 +4777,9 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
       let firstPlayedX = firstPlayedBeatAbs >= 0 ? beatToX(firstPlayedBeatAbs) : xContent0
       let lastPlayedRightX = lastPlayedEndBeatAbs >= 0 ? beatToX(lastPlayedEndBeatAbs) : xContent1
       if (isDsb) {
+        // `xContent1` 已在上面（算 `rightLimit` 之后）赋好；此处不再重复。
         // dsb 大括号/括号使用上面的 leftSlots/rightSlots（仍以 xContent0/xContent1 为锚点），
-        // 跳过此处的 firstPlayedX 覆盖逻辑（dsb 的"内容左缘"=xContent0 是包络的拍位映射起点，对应 dsb 下层主旋律）。
+        // 跳过 `else` 里的 firstPlayedX 覆盖逻辑（dsb 的"内容左缘"= xContent0 是包络的拍位映射起点）。
       } else {
         // bz 路径：用 firstPlayedX/lastPlayedRightX 重写 leftSlots/rightSlots（让括号紧贴发声音而不是 hidden rest）
         const innerL2 = barAtStart ? barAtStart.x + barInset : Number.NEGATIVE_INFINITY
@@ -4786,19 +4810,8 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
        * 长音（`1-`）的增时线因此紧贴在数字边上、完全看不出时值（用户报「`1-` 显示不对」）。
        *
        * 右界取"包络终点的主旋律小节线内侧"，与 `bz` 口径一致（只是不扣圆括号的预留）。
+       * （`{dsb}` 的 `xContent1` 已在上面算 `rightLimit` 之后赋好，此处不重复。）
        */
-      if (isDsb) {
-        /**
-         * adj694：`{dsb}` 的内容右界必须显式赋值（`bz` 分支的 `xContent1` 只走 bz）。
-         *
-         * 它同时是**段内容的右钳制**与**大括号的排布上界**，所以取 `xEndBoundary − barInset`
-         * （包络终点小节线内侧）**再扣掉右括号的让位区**（`3w`，见 `segmentBracePads`）——
-         * 否则段内容会一直排到小节线、把右括号挤进内容里（实测 462.1 > 450.8）。
-         */
-        const dsbTailW = Math.max(SEGMENT_BRACE_MIN_W, (dy + ns * 1.45) * SEGMENT_BRACE_ASPECT)
-        xContent1 = Math.max(xContent0, xEndBoundary - barInset - (dsbTailW * 3 + ns))
-        void dsbTailW
-      }
       const braceLeftX = leftSlots.find((s) => s.kind === 'brace')?.x
       const braceRightX = rightSlots.find((s) => s.kind === 'brace')?.x
       // 段层整体横向范围（供小节线过滤/范围记录）：从最左元素到最右元素右缘
