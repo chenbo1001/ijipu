@@ -41,7 +41,7 @@ import {
 } from '@ijipu/engine/playback/ornaments.ts'
 import { slideOf, slidePlan, slideStepMs, SLIDE_SYMBOLS, SLIDE_STEP_MIN_MS, SLIDE_STEP_MAX_MS } from '@ijipu/engine/playback/slides.ts'
 import { midiToPitchName } from '@ijipu/engine/playback/midi.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_SAG_MIN, SLUR_SAG_MAX, digitBottomY, beamBottomY, accidentalGap } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_SAG_MIN, SLUR_SAG_MAX, VOLTA_INK_GAP, digitBottomY, beamBottomY, accidentalGap } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
@@ -8002,6 +8002,26 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
     check('V2 adj667 图3：抬升后的跳房子线在**段层音符墨迹顶之上**（不穿过数字）',
       voltaBars.every((b) => (b.voltaYTop ?? 0) < upperTop - 0.4),
       `voltaY=${voltaBars[0]?.voltaYTop} upperDigitTop=${upperTop.toFixed(2)}`)
+    /**
+     * V7（adj699，用户口径「跳房子线与连音线的顶端、高八度点等其它修饰符的**墨迹顶端**间距 2px 为宜」）：
+     * `voltaYTop` = 该行最高墨迹顶（段层数字顶 / 高八度点顶 / 段层连音线**实际弧顶**取最上者）− `VOLTA_INK_GAP`(2)。
+     * 弧顶用渲染端同一公式 `clamp(跨度 × 0.28, SLUR_SAG_MIN, SLUR_SAG_MAX)`，不再用垂度上限估。
+     */
+    {
+      const upNotes = pg.notes.filter((n) => n.segment?.layer === 'upper')
+      const upperBase = upNotes.length > 0 ? Math.min(...upNotes.map((n) => n.y)) : Number.NaN
+      const digitTop = Number.isFinite(upperBase) ? upperBase - ns * 0.8 : Number.NaN
+      let minTop = digitTop
+      for (const sl of pg.slurs) {
+        if (sl.layerBase === undefined || sl.below) continue
+        if (Math.abs(sl.layerBase - upperBase) > 1) continue
+        const sag = Math.max(SLUR_SAG_MIN, Math.min(SLUR_SAG_MAX, Math.abs(sl.x2 - sl.x1) * 0.28))
+        minTop = Math.min(minTop, sl.y - sag)
+      }
+      check('V7 adj699 跳房子线 = 该行最高墨迹顶 − `VOLTA_INK_GAP`(2px)（连音线按实际弧顶算）',
+        voltaBars.length > 0 && Number.isFinite(minTop) && voltaBars.every((b) => Math.abs((b.voltaYTop ?? Number.NaN) - (minTop - VOLTA_INK_GAP)) < 0.6),
+        `voltaY=${voltaBars[0]?.voltaYTop} minTop=${minTop.toFixed(2)} want=${(minTop - VOLTA_INK_GAP).toFixed(2)}`)
+    }
     const svg = renderScoreToSvg(layoutScore(parseJps(code), D))[0]
     const lineYs = [...svg.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="[\d.]+" y2="\2" stroke="#1b1b1b" stroke-width="0.8"\/>/g)].map((m) => Number(m[2]))
     check('V3 adj667 图3：渲染出的跳房子横线 y 与布局一致', lineYs.length > 0 && lineYs.every((y) => Math.abs(y - (voltaBars[0]?.voltaYTop ?? -1)) < 0.11), `lineYs=${lineYs.join(',')} voltaY=${voltaBars[0]?.voltaYTop}`)

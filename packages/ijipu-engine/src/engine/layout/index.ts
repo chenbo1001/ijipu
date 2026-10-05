@@ -29,7 +29,7 @@ import type {
   ScorePageMeta,
   VoiceBlock,
 } from '../types'
-import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, octaveDotY, BRACKET_PAD, H_GAP, noteScaleOf, VOLTA_BAR_GAP, VOLTA_RAISE, DYN_HALF_H, barlinePad, barlineTotalW, DOT_AFTER_DIGIT_GAP, DOT_R, SEGMENT_ROW_GAP_DEFAULT, SEGMENT_LAYER_YSCALE, SEGMENT_LAYER_CLEARANCE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, NOTE_BASELINE_RATIO, digitBottomY, beamBottomY, lowDotY, TP_BRACKET_GAP, barNumberGapNeed, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, type AccidentalInkMetrics } from './spacing'
+import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, octaveDotY, BRACKET_PAD, H_GAP, noteScaleOf, VOLTA_BAR_GAP, VOLTA_RAISE, DYN_HALF_H, barlinePad, barlineTotalW, DOT_AFTER_DIGIT_GAP, DOT_R, SEGMENT_ROW_GAP_DEFAULT, SEGMENT_LAYER_YSCALE, SEGMENT_LAYER_CLEARANCE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, NOTE_BASELINE_RATIO, digitBottomY, beamBottomY, lowDotY, TP_BRACKET_GAP, SLUR_SAG_MAX, SLUR_SAG_MIN, VOLTA_INK_GAP, barNumberGapNeed, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, type AccidentalInkMetrics } from './spacing'
 // adj284：空间优先布局的度量（本体宽 / 时值拆分 / 非时值元素间距）
 import { splitNoteDur, noteBodyW, augBodyW, dotBodyW, accidentalBodyW, accidentalGeometry, markBodyW, digitSlotW, hxBodyW, graceAtTail, graceSlotLayout, nonDurGap, slideExtraW, braceInkRightOffset, BRACE_LINE_DX } from './spaceLayout'
 import { hairpinEvents, resolveHairpins, type DynEvent, type NoteAnchors } from './hairpins'
@@ -4786,6 +4786,7 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
          */
         const dsbTailW = Math.max(SEGMENT_BRACE_MIN_W, (dy + ns * 1.45) * SEGMENT_BRACE_ASPECT)
         xContent1 = Math.max(xContent0, xEndBoundary - barInset - (dsbTailW * 3 + ns))
+        void dsbTailW
       }
       const braceLeftX = leftSlots.find((s) => s.kind === 'brace')?.x
       const braceRightX = rightSlots.find((s) => s.kind === 'brace')?.x
@@ -4911,11 +4912,7 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         const mapXEnd = isTp ? beatToXTp : beatToXEndOf
         let bx0 = xContent0 + (mapX(envStart + beatAt) - segNaturalXStart) * segScale
         // adj433：末音的右缘取"覆盖到的最后那个音的**结束**"（`beatToXEndOf`），与包络终点同口径
-        const naturalX1 = isTp
-          ? mapXEnd(envStart + beatAt + dur)
-          : isLastInSeg
-            ? beatToXEndOf(envStart + beatAt + dur)
-            : beatToX(envStart + beatAt + dur)
+        const naturalX1 = isTp ? mapXEnd(envStart + beatAt + dur) : isLastInSeg ? beatToXEndOf(envStart + beatAt + dur) : beatToX(envStart + beatAt + dur)
         let bx1 = xContent0 + (naturalX1 - segNaturalXStart) * segScale
         // 右缘钳制（替谱层钳到**小节线**，不与尾括号挤）
         bx1 = Math.min(bx1, noteClampRight)
@@ -5275,11 +5272,52 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
        */
       if (isDsb) {
         const rowTopY = r1(row.y - 18.4 * noteScaleOf(ns))
+        /**
+         * adj696（用户口径）：「跳房子线还不够高，应能**自动避开连音线、高八度音等修饰符**」。
+         *
+         * `inkT` 已含段层的**数字顶 / 高八度点顶**，但段层的**连音线**（`(3// 2// 1//)` 这类）
+         * 画在数字上方、弧顶还要再高一个垂度——只按 `inkT` 抬线会让线从弧线里穿过去。
+         * 这里把"该段范围内段层连音线的**弧顶**"也算进抬升依据（取整行最靠上者）。
+         *
+         * 弧顶估算取 `SLUR_SAG_MAX`（垂度上限）：保守宁可多抬一点，也不会压到弧线。
+         */
+        let inkTWithSlurs = inkT
+        for (const sl of page.slurs) {
+          if (sl.layerBase === undefined) continue // 只算段层自己的连音线
+          /**
+           * adj698（用户报「跳房子 3 的线跳到**上一个曲部**了」）：必须按**层基线**筛掉别的行/曲部的段层连音线。
+           *
+           * 根因：`page.slurs` 是**整页**的段层连音线（多行、多个曲部都在里面），
+           * 只按 x 区间判"与本段横向重叠"是不够的——不同曲部的同一列 x 完全相同
+           * （实测第二曲部的段 31 段 x=[390.4, 450.2]，把**第一曲部**同样 x 区间的段层连音线
+           * `layerBase=166.1`、`y=154.0` 算了进来）⇒ `inkTWithSlurs` 被拉到 144.2，
+           * 于是第二曲部的 `voltaYTop` 被写成 142.2（= 上一曲部的行高），线就"跳"上去了。
+           *
+           * 层基线 = 本段上层声部的基线 `yUpper`；只认 `|layerBase − yUpper| < 1` 的连音线。
+           */
+          if (Math.abs(sl.layerBase - yUpper) > 1) continue
+          if (sl.x2 < x0 - 1 || sl.x1 > x1 + 1) continue // 与本段横向不重叠
+          if (sl.below) continue // 画在音符下方的连音线不影响上沿
+          /**
+           * 用**实际弧顶**（不是垂度上限）：
+           * 渲染端 `renderSlur` 的 `垂度 = clamp(跨度 × 0.28, SLUR_SAG_MIN, SLUR_SAG_MAX)`，
+           * 弧顶 = `y − 垂度`（布局与渲染同源，见 AGENTS 六之二·4「数值口径必须同源」）。
+           */
+          const sag = Math.max(SLUR_SAG_MIN, Math.min(SLUR_SAG_MAX, Math.abs(sl.x2 - sl.x1) * 0.28))
+          inkTWithSlurs = Math.min(inkTWithSlurs, sl.y - sag)
+        }
         for (const b of page.barlines) {
           if (b.segment || b.id.group !== gi || b.id.voice !== group.music.voice) continue
           if (Math.abs(b.yTop - rowTopY) > 1) continue
           const cur = b.voltaYTop ?? r1(b.yTop - VOLTA_BAR_GAP)
-          b.voltaYTop = Math.min(cur, r1(inkT - LAYER_GAP))
+          /**
+           * adj699（用户口径）：「跳房子线与**连音线的顶端、高八度点等其它修饰符的墨迹顶端**
+           * 间距 **2px** 为宜」——`inkTWithSlurs` 已经是这一行（含段层）最高的墨迹顶
+           * （数字顶 / 高八度点顶 / 段层连音线弧顶取最上者），再留固定的 `VOLTA_INK_GAP = 2px`。
+           * 旧口径用 `LAYER_GAP × noteScale`（13 号字 ≈ 1.44）且连音线按垂度**上限**估，
+           * 既偏紧又可能穿弧线。
+           */
+          b.voltaYTop = Math.min(cur, r1(inkTWithSlurs - VOLTA_INK_GAP))
         }
       }
     }
