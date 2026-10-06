@@ -7338,6 +7338,56 @@ console.log('[adj427] segment playback (voices / instruments / gain)')
     void pg722
   }
   /**
+   * Z8g（**adj723f**，用户报「点 `{dsb}` **下声部**只演奏该声部，点第一声部才是多声部演奏」）：
+   * **点上下任何一排的音符，从该处起播都必须是"多声部"（两声部事件都在）。**
+   *
+   * 根因：`{dsb}` 里"一个音"在事件流里是**一对**（段内容 = 副声部 + 包络外主旋律 = 主声部），
+   * 两条事件 `atMs` 相同，但在**事件数组里不相邻**（交错排列）。旧实现 `events.slice(from)` 的
+   * `from` 直接落在被点的那一条上 ⇒ 点**下排**时，位于它之前的**整段段内容事件全被切掉**
+   * ⇒ 只剩主声部（实测：点下排首个原为 **7** 个事件，修后 **14** 个）。
+   *
+   * 修法：`from` 回退到"**所有与之同刻的事件中最小的下标**"（不能用相邻比较——
+   * 实测 `atMs` 序列是 `0,214,…,1714` 再 `0,214,…,1714` 的**两遍/交错**，
+   * 相邻比较会在前一条恰好是更长音时提前停下）。
+   */
+  {
+    const pr8g = parseJps(
+      "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: [\"1.\" {dsb (3// 2// 1//) (1// 1/) 7,/ 1- } (1'// 7// 6//) (6// 6/) 5/ 6- |]\n",
+    )
+    const lay8g = layoutScore(pr8g, defaultPageConfig)
+    const bpm8g = 120
+    const full8g = buildPlaySequence(pr8g, lay8g, bpm8g)
+    const pg8g = lay8g.pages[0]
+    const cnt = (e: { placed: { segment?: unknown } }) => (e.placed.segment ? 'seg' : 'main')
+    const segCnt = (seq: { events: unknown[] }) => seq.events.filter((e) => cnt(e as { placed: { segment?: unknown } }) === 'seg').length
+    const mainCnt = (seq: { events: unknown[] }) => seq.events.filter((e) => cnt(e as { placed: { segment?: unknown } }) === 'main').length
+    const content8g = pg8g.notes.filter((n) => n.segment?.type === 'dsb' && n.segment.layer === 'upper')
+    const outside8g = pg8g.notes.filter((n) => !n.segment && n.parentY !== undefined)
+    check('Z8g 用例成立：`{dsb}` 上下两排都取到音符、全曲两层事件数相等',
+      content8g.length === 7 && outside8g.length === 7 && segCnt(full8g) === 7 && mainCnt(full8g) === 7,
+      `内容=${content8g.length} 包络外=${outside8g.length} seg=${segCnt(full8g)} main=${mainCnt(full8g)}`)
+    // 点**下排**首个音符：必须与"从头播"一致（两层都在）
+    const fromOut8g = buildPlaySequence(pr8g, lay8g, bpm8g, String(outside8g[0].id.index))
+    check('Z8g 点下排（主声部）音符 ⇒ 仍是**多声部**起播（段内容事件不能被切掉）',
+      segCnt(fromOut8g) === 7 && mainCnt(fromOut8g) === 7,
+      `seg=${segCnt(fromOut8g)} main=${mainCnt(fromOut8g)} 共=${fromOut8g.events.length}`)
+    // 点**上排**首个音符：同样两层都在
+    const fromIn8g = buildPlaySequence(pr8g, lay8g, bpm8g, String(content8g[0].id.index))
+    check('Z8g 点上排（副声部）音符 ⇒ 同样是多声部起播',
+      segCnt(fromIn8g) === 7 && mainCnt(fromIn8g) === 7,
+      `seg=${segCnt(fromIn8g)} main=${mainCnt(fromIn8g)} 共=${fromIn8g.events.length}`)
+    // 点下排**中间**那个音（第 3 个）：从该拍起，两层都从同一刻开始
+    const fromMid8g = buildPlaySequence(pr8g, lay8g, bpm8g, String(outside8g[2].id.index))
+    const firstMs8g = fromMid8g.events[0]?.atMs ?? -1
+    check('Z8g 点下排中间音符 ⇒ 段内容与主声部**都从该刻开始**（无"第一拍只有单声部"）',
+      segCnt(fromMid8g) > 0 &&
+        mainCnt(fromMid8g) > 0 &&
+        firstMs8g === 0 &&
+        // 起播那一刻必须同时存在两条（上下各一）
+        fromMid8g.events.filter((e) => e.atMs === 0).length >= 2,
+      `seg=${segCnt(fromMid8g)} main=${mainCnt(fromMid8g)} 首刻事件数=${fromMid8g.events.filter((e) => e.atMs === 0).length}`)
+  }
+  /**
    * Z8f（**adj722b**，用户报「`(1'// 7// 6//) (6// 6/)` 这部分没有色块显示」）：
    * **任何可发声事件的色块段宽必须 > 0**——宽度为 0 等于"这块根本画不出来"。
    *
