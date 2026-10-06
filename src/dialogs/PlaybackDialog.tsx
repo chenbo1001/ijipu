@@ -27,6 +27,8 @@ import { SpessaSynthBackend, getHqLibrary, hasBuiltinBank, GM_VOICE_OPTIONS, fir
 import { shiftEventsFrom } from '../playback/playbackTimeline'
 // adj647：宿主字体实测（与预览同一份 ⇒ 色块位置一致；见 preview/fontMeta.ts）
 import { measureFontMeta } from '../preview/fontMeta'
+// adj722：`mm:ss` 进度读数（纯函数，便于 smoke 断言）
+import { fmtClock } from './playbackClock'
 import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, gmVoiceRef, countScoreInstrumentSwitches } from '@ijipu/engine'
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
@@ -77,6 +79,13 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   const [starting, setStarting] = useState(false)
   const [samplerState, setSamplerState] = useState<string>('idle')
   const [totalMs, setTotalMs] = useState(0)
+  /**
+   * adj722：`mm:ss` 进度读数用的**本地**时钟（不订阅 docStore 的 `currentMs`）。
+   *
+   * 为什么不直接读 `currentMs`：它由 RAF **每帧**写入，组件订阅它就会 60fps 重渲染；
+   * 读数只需到秒 ⇒ 搭在已有的 **50ms 高亮定时器**上更新即可（那个定时器本来就在跑）。
+   */
+  const [clockMs, setClockMs] = useState(0)
   // adj347/348：音源下载中（首次打开自动后台下载；前台仅文字提示，不阻塞其它交互）
   const [downloading, setDownloading] = useState(false)
   // adj416：音源随安装包内置（安装目录 generaluser_gs.sf2）→ 直接读文件，不显示下载提示
@@ -230,6 +239,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
     setVoiceBlocks([])
     setPlayheadTrack([])
     setCurrentMs(0)
+    setClockMs(0)
   }
 
   /**
@@ -252,6 +262,8 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
         }
       }
       setActiveNoteIds(ids)
+      // adj722：进度读数与色块/高亮**同一时间轴**（`curMs()`），50ms 刷新足够（显示到秒）
+      setClockMs(cur)
       // adj285：播放跟随滚动——设当前活动音符 id（首个），使色块/高亮区域保持在视口内
       if (ids.length > 0) setActiveNoteId(ids[0])
     }
@@ -578,7 +590,18 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
             {builtinBank && !downloading && <span className="dock-muted">{playbackCopy.builtinBankHint}</span>}
             {/* adj293：播放异常提示（不再静默失败） */}
             {playError && <span className="dock-error-inline">✗ 播放失败：{playError}</span>}
-            {totalMs > 0 && !playing && <span className="dock-muted">总时长 {(totalMs / 1000).toFixed(1)}s</span>}
+            {/*
+              adj722（用户要求）：**`mm:ss / mm:ss` 进度读数**——播放中显示"已播 / 总长"，
+              暂停时停在暂停位置，未播放时显示 `00:00 / 总长`（与旧口径的"总时长 xx.xs"同一位置）。
+
+              `currentMs` 来自 docStore（`adj282` 起由 RAF 每帧刷新，色块与高亮共用它）
+              ⇒ 读数与色块/高亮**同一时间轴**，不会出现"读数与色块不同步"。
+            */}
+            {totalMs > 0 && (
+              <span className="dock-muted" title="播放进度 / 总时长">
+                {fmtClock(Math.min(clockMs, totalMs))} / {fmtClock(totalMs)}
+              </span>
+            )}
           </div>
         )}
       </div>

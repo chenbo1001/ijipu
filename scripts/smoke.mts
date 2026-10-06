@@ -72,6 +72,8 @@ import { highlightCodeWrapped } from '../src/editor/highlight.ts'
 import { HEADER_HINTS, filterHeaderHints, BARLINE_MODIFIER_HINTS, NOTE_MODIFIER_HINTS, GRACE_MODIFIER_HINTS, isBarlineModifierContext, isGraceModifierContext, filterModifierHints } from '../src/editor/completions.ts'
 // adj629x：设置面板「恢复默认」的草稿语义（整份替换；浅合并会把可选字段留下）
 import { draftAfterReset } from '../src/dialogs/pageConfigReset.ts'
+// adj722：播放进度读数 `mm:ss`
+import { fmtClock } from '../src/dialogs/playbackClock.ts'
 import {
   createHistoryState,
   recordEdit,
@@ -7054,6 +7056,22 @@ console.log('[adj427] segment overlay placement (notes / barlines / brackets)')
   const segNotes = page.notes.filter((n) => n.segment)
   const mainNotes = page.notes.filter((n) => !n.segment).sort((a, b) => a.y - b.y || a.x - b.x)
   check('O1 bz 段产出 8 个段层音符', segNotes.length === 8, `got ${segNotes.length}`)
+  /**
+   * adj722（用户要求「播放对话框加 `mm:ss / mm:ss` 进度读数」）：
+   * 读数格式与边界——**向下取整**（只增不减地跨秒）、非法值归零、补零到两位。
+   */
+  check('adj722 `fmtClock` 格式与边界（mm:ss，向下取整、非法值归零）',
+    fmtClock(0) === '00:00' &&
+      fmtClock(999) === '00:00' &&
+      fmtClock(1000) === '00:01' &&
+      fmtClock(59_600) === '00:59' &&
+      fmtClock(60_000) === '01:00' &&
+      fmtClock(3_599_000) === '59:59' &&
+      fmtClock(3_600_000) === '60:00' &&
+      fmtClock(-5) === '00:00' &&
+      fmtClock(Number.NaN) === '00:00' &&
+      fmtClock(Number.POSITIVE_INFINITY) === '00:00',
+    [0, 999, 1000, 59_600, 60_000, 3_600_000].map((v) => `${v}→${fmtClock(v)}`).join(' '))
   check('O2 段层音符标记 type=bz / layer=upper', segNotes.every((n) => n.segment?.type === 'bz' && n.segment?.layer === 'upper'), JSON.stringify(segNotes[0]?.segment))
   check('O3 段层音符在主旋律**上方**（y 更小）', segNotes.length > 0 && mainNotes.length > 0 && segNotes[0].y < mainNotes[0].y, `segY=${segNotes[0]?.y} mainY=${mainNotes[0]?.y}`)
   // 同一拍位垂直对齐：段首音（包络起点 = 拍位 2）x 应等于主旋律拍位 2 的音符 x
