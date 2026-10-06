@@ -981,7 +981,17 @@ export function ToolDock() {
       ui.setDockPanel(req.panel)
       return
     }
-    ui.toggleDock(req.panel)
+    /**
+     * adj723d（用户要求「Ctrl+点音符不要另起播放，同一谱子只能有一个试听态」）：
+     * **这里必须是"打开并聚焦"，不能是"开关"**。
+     *
+     * 原实现落地为 `toggleDock`（开关语义）：试听**已经开着**时再 `Ctrl+点音符`，
+     * 会把底栏**收起来**（试听面板 `lazy` 卸载、卸载副作用里 `dispose()` 掉音频后端并清空色块轨道），
+     * 而调用方紧接着又 `bumpPlaybackTick()` 要求播放 ⇒ 表现就是"另起一个播放态"、
+     * 现场的高亮/色块被打断重建。`requestDockPanel` 的语义本就是"**打开并聚焦**"
+     * （见 `uiStore` 里该 action 的注释），旧的开关落地与它矛盾。
+     */
+    ui.setDockPanel(req.panel)
   }, [dockPanelNonce])
 
   // adj487：拖拽改用 Pointer Events（鼠标 + 触屏 + 触控笔）——此前只监听 mousemove/mouseup，

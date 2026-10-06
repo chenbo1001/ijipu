@@ -74,6 +74,8 @@ import { HEADER_HINTS, filterHeaderHints, BARLINE_MODIFIER_HINTS, NOTE_MODIFIER_
 import { draftAfterReset } from '../src/dialogs/pageConfigReset.ts'
 // adj722：播放进度读数 `mm:ss`
 import { fmtClock } from '../src/dialogs/playbackClock.ts'
+// adj723d：试听单实例保证（代次守卫）
+import { createPlaybackGeneration } from '../src/dialogs/playbackSession.ts'
 // adj723：预览区音符点击的动作判定（单击 / Ctrl+单击）
 import { noteClickAction, noteClickKind } from '../src/preview/noteClickAction.ts'
 
@@ -7117,6 +7119,33 @@ console.log('[adj427] segment overlay placement (notes / barlines / brackets)')
       !cmd.openTryout && cmd.jumpCursor && noteClickKind({ metaKey: true, ctrlKey: false }) === 'single',
       `meta→${noteClickKind({ metaKey: true })}`)
   }
+  /**
+   * adj723d（用户要求「`Ctrl+点音符` 不要启动另一播放进程，**同一谱子只能有一个试听态**」）：
+   *
+   * 判据（代次守卫，见 `dialogs/playbackSession.ts`）：
+   *  · `begin()` 一次 = 一次播放尝试，返回**唯一**代次；
+   *  · 再 `begin()`（用户又 Ctrl+点了一次）⇒ **旧代次立刻过期**（`isStale` 为真）——
+   *    旧的那次即使还卡在"下载音源"的 `await` 里，恢复后也会发现自己过期而**不落地**；
+   *  · `invalidate()`（停止 / 关对话框）⇒ **所有**在途尝试过期。
+   *
+   * 没有这条时：`play()` 开头的 `stop()` 只能取消**已调度**的 job，卡在 `await` 里的那一次
+   * 随后仍会 `schedulePlay(...)` ⇒ 两个播放进程同时发声（用户报的现象）。
+   */
+  {
+    const g1 = createPlaybackGeneration()
+    const a = g1.begin()
+    const b = g1.begin()
+    check('adj723d 再次 begin ⇒ 旧代次立即过期、新代次有效（同一谱子只有一个试听态）',
+      a !== b && g1.isStale(a) && !g1.isStale(b),
+      `a=${a} b=${b} staleA=${g1.isStale(a)} staleB=${g1.isStale(b)}`)
+    g1.invalidate()
+    check('adj723d invalidate（停止/关闭）⇒ 所有在途尝试都过期', g1.isStale(b), `staleB=${g1.isStale(b)}`)
+    const g2 = createPlaybackGeneration()
+    const c = g2.begin()
+    check('adj723d 同一代次在多次核对中稳定（未被打断的播放不会被误杀）',
+      !g2.isStale(c) && !g2.isStale(c) && g2.begin() !== c && g2.isStale(c),
+      `c=${c}`)
+  }
   check('O2 段层音符标记 type=bz / layer=upper', segNotes.every((n) => n.segment?.type === 'bz' && n.segment?.layer === 'upper'), JSON.stringify(segNotes[0]?.segment))
   check('O3 段层音符在主旋律**上方**（y 更小）', segNotes.length > 0 && mainNotes.length > 0 && segNotes[0].y < mainNotes[0].y, `segY=${segNotes[0]?.y} mainY=${mainNotes[0]?.y}`)
   // 同一拍位垂直对齐：段首音（包络起点 = 拍位 2）x 应等于主旋律拍位 2 的音符 x
@@ -12555,11 +12584,27 @@ function runAdj619Tests() {
       ),
     '',
   )
+  /**
+   * adj723d：这条断言原本守的是"**否则保持开关语义**"（非最小化时 `ui.toggleDock(req.panel)`）。
+   * 用户要求"`Ctrl+点音符` 不要另起播放、**同一谱子只能有一个试听态**"后，**开关语义本身就是缺陷**：
+   * 试听已经开着时再请求 == 把底栏收起来 ⇒ 试听面板（`lazy`）卸载、卸载副作用里 `dispose()`
+   * 掉音频后端并清空色块轨道，而调用方紧接着又要播放。
+   * 现在两条分支都落到"**打开并聚焦**"（`ui.setDockPanel(req.panel)`），断言随之改为守住这一点。
+   */
   check(
-    'adj619 ToolDock 消费请求：**最小化 ⇒ 退出最小化 + 切页签**（= 展开到建议高度），否则保持开关语义',
-    /if \(minimizedRef\.current\) \{\s*\n\s*exitMinimizedRef\.current\(\)\s*\n\s*ui\.setDockPanel\(req\.panel\)\s*\n\s*return\s*\n\s*\}\s*\n\s*ui\.toggleDock\(req\.panel\)/.test(
-      dockSrc,
-    ),
+    'adj723d ToolDock 消费请求：最小化 ⇒ 退出最小化 + 切页签；否则也**直接打开该页签**（不再 toggle 收起）',
+    (() => {
+      // ⚠️ 只断言**语义**，不断言"两句相邻"的排版——中间允许有注释（本条第一次落地时
+      // 因为要求紧邻而假红）。同时不限行尾（LF/CRLF 都要过）。
+      const body = dockSrc.slice(dockSrc.indexOf('if (minimizedRef.current)'))
+      const head = body.slice(0, body.indexOf('}, [dockPanelNonce])'))
+      const opensMinimized = /if \(minimizedRef\.current\) \{\s*exitMinimizedRef\.current\(\)\s*ui\.setDockPanel\(req\.panel\)\s*return\s*\}/.test(
+        head,
+      )
+      // 打开动作出现两次：最小化分支一次、正常分支一次
+      const openCalls = (head.match(/ui\.setDockPanel\(req\.panel\)/g) ?? []).length
+      return opensMinimized && openCalls === 2 && !/ui\.toggleDock\(req\.panel\)/.test(dockSrc)
+    })(),
     '',
   )
   check(

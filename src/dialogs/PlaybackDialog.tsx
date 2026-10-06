@@ -29,6 +29,8 @@ import { shiftEventsFrom } from '../playback/playbackTimeline'
 import { measureFontMeta } from '../preview/fontMeta'
 // adj722：`mm:ss` 进度读数（纯函数，便于 smoke 断言）
 import { fmtClock } from './playbackClock'
+// adj723d：试听**单实例**保证（代次守卫，纯模块便于 smoke 断言）
+import { createPlaybackGeneration } from './playbackSession'
 import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, gmVoiceRef, countScoreInstrumentSwitches } from '@ijipu/engine'
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
@@ -128,6 +130,12 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   const highlightTimerRef = useRef<number | null>(null)
   // adj282：RAF 驱动 currentMs（色块平滑滑动）
   const rafRef = useRef<number | null>(null)
+  /**
+   * adj723d（用户报「Ctrl+点音符不要启动另一播放进程，同一谱子只能有一个试听态」）：
+   * **播放代次守卫**——规则与理由见 `playbackSession.ts`（抽成纯模块供 smoke 断言）。
+   * 任何异步等待之后都要 `isStale(gen)` 核对自己是否还是最新一次，过期就放弃且不落地。
+   */
+  const playGenRef = useRef(createPlaybackGeneration())
   // adj409：播放/暂停按钮——点击后把焦点留在这里，空格即可暂停/继续
   const playBtnRef = useRef<HTMLButtonElement>(null)
 
@@ -282,6 +290,8 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   }
 
   const stop = () => {
+    // adj723d：作废一切在途的 `play()`（含还卡在音源 await 里的那些）
+    playGenRef.current.invalidate()
     cancelRef.current?.()
     cancelRef.current = null
     clearTimers()
@@ -346,6 +356,10 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
 
   const play = async () => {
     stop()
+    // adj723d：本代次（`stop()` 已作废旧的，这里取本次播放的身份）
+    const gen = playGenRef.current.begin()
+    /** 本次播放是否已被更新的一次（或"停止"）取代——**任何 await 之后都要问** */
+    const stale = (): boolean => playGenRef.current.isStale(gen)
     // adj409：准备期置位——按钮暂时置灰，避免连点重入（音源加载 + 序列构建要几百毫秒）
     setStarting(true)
     // adj293：整个播放流程包 try/catch——异常不再静默（此前 async 抛错 → 无声无色块）
@@ -374,7 +388,10 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
         backendRef.current = backend
         try {
           await (backend as unknown as { ready?: () => Promise<void> }).ready?.()
+          // adj723d：等待期间可能已有更新的一次播放（或用户点了停止）⇒ 作废本次
+          if (stale()) return
           await new Promise((r) => setTimeout(r, 200))
+          if (stale()) return
           backendReady = true
         } catch (e) {
           backendReady = false
@@ -387,9 +404,13 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
           const hqLib = getHqLibrary()
           // adj347：先确保音源就绪（初次自动下载/缓存；已缓存直接读）；点播放不再重复下载
           await ensureBank()
+          // adj723d：音源这一步最慢（可能下载 30MB）——等待期间用户完全可能再次 Ctrl+点音符或按停止
+          if (stale()) return
           // adj416：取音源字节——缓存优先，其次**安装目录内置 SF2**（桌面直接读文件），最后才是联网下载
           const { bank } = await resolveHqBank(hqLib, hqCache)
+          if (stale()) return
           await backend.load(bank)
+          if (stale()) return
           backend.setVoice(playbackHqVoice)
           setSamplerState('ready')
         } catch (e) {
@@ -400,6 +421,8 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       } else {
         setSamplerState('failed')
       }
+      // adj723d：音源就绪（或已确认不可得）后再核对一次代次——**只有最新一次播放能落地**
+      if (stale()) return
       if (!backendReady) {
         // 音源不可得：**保留视觉**（色块 + 高亮 + 进度读数照常），只是没有声音
         showNotice(`音源加载失败，本次试听**无声**（色块与播放位置照常显示）：${bankError}`, 'error')
@@ -461,6 +484,9 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       // adj344：高保真音色由 setVoice(GM program) 决定，无需全局乐器覆盖参数（globalInstrument）
       // adj285：不再用 onNote 同步设置 activeNoteId（循环内逐事件 set → 批处理后为最后一事件）
       // adj309：按下播放后延迟 200ms 才出第一声——给听者准备时间 + 让 ctx resume 完成
+      // adj723d：**最后一票否决**——就在调度发声之前。多等一步就可能有过期的那次跑完全程，
+      // 与最新一次同时 `schedulePlay` ⇒ 用户听到"两个播放进程"（本条规则的由来）。
+      if (stale()) return
       // adj723c：音源不可得时**不调度发声**，但仍启动视觉定时器（用 seq 构造一个"空调度" job）——
       // `startTimers` 只依赖 `job.totalMs`（收尾复位），色块/高亮/进度读数因此照常走完。
       const job =

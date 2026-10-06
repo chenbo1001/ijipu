@@ -70,8 +70,8 @@ export function PreviewPane() {
   const dockPanel = useUiStore((s) => s.dockPanel)
   const setPlaybackStart = useUiStore((s) => s.setPlaybackStart)
   const bumpPlaybackTick = useUiStore((s) => s.bumpPlaybackTick)
-  // adj723：`Ctrl+单击音符` 要**立即打开试听** ⇒ 走 `requestDockPanel('tryout')`
-  //（它是"打开并聚焦"的语义；`dockOpen && dockPanel==='tryout'` 只是"当前可达"）
+  // adj723d：`Ctrl+单击音符` 要**打开并聚焦试听**（`requestDockPanel` 在 ToolDock 里落地为
+  // "打开并聚焦"；不能是"开关"，否则试听已开着时会被收起来）
   const requestDockPanel = useUiStore((s) => s.requestDockPanel)
   // adj354：@@ 显示默认音色名——无 Y 时用试听音色列表第一个启用音色（与播放端一致）
   const playbackHqEnabled = useUiStore((s) => s.playbackHqEnabled)
