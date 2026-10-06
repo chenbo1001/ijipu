@@ -74,6 +74,20 @@ import { HEADER_HINTS, filterHeaderHints, BARLINE_MODIFIER_HINTS, NOTE_MODIFIER_
 import { draftAfterReset } from '../src/dialogs/pageConfigReset.ts'
 // adj722：播放进度读数 `mm:ss`
 import { fmtClock } from '../src/dialogs/playbackClock.ts'
+
+/**
+ * adj722：`{dsb}` 两层的**唯一判定口径**（供本文件多处断言共用）。
+ *
+ * 翻转（`adj722`）把"谁是主声部/副声部"对调了，但**视觉分层没变**：
+ *  · **段内容**（写在 `{dsb … }` 里）＝视觉**上排** —— 判据 `segment.layer === 'upper'`
+ *  · **包络外主旋律** ＝视觉**下排** —— 判据 `parentY !== undefined`（`shiftEnvelopeDown` 只写在它身上）
+ *
+ * ⚠️ 不要再用 `playVoice === 'second'` 认"下排"：翻转后 `'second'` 落在**段内容**（上排）身上。
+ */
+const isDsbContent = (n: { segment?: { type?: string; layer?: string } }): boolean =>
+  n.segment?.type === 'dsb' && n.segment.layer === 'upper'
+const isDsbOutside = (n: { segment?: unknown; parentY?: number }): boolean =>
+  n.segment === undefined && n.parentY !== undefined
 import {
   createHistoryState,
   recordEdit,
@@ -7186,11 +7200,90 @@ console.log('[adj427] segment playback (voices / instruments / gain)')
   check('Z5 bz 段层用**第 2 可用音色**（无 Y: 时回退手风琴）', bzSeg.every((e) => e.instrument === '手风琴'), `inst=${bzSeg[0]?.instrument}`)
   check('Z6 bz 段层力度 = 0.75', bzSeg.every((e) => e.gain === 0.75), `gain=${bzSeg[0]?.gain}`)
   check('Z7 bz 下层主旋律力度 = 1、音色 = 主声部（大钢琴）', evs(sBz).filter((e) => !e.placed.segment).every((e) => e.gain === 1 && e.instrument === '大钢琴'), `inst=${evs(sBz).find((e) => !e.placed.segment)?.instrument} gain=${evs(sBz).find((e) => !e.placed.segment)?.gain}`)
-  check('Z8 dsb 段层（上层）用**主声部音色**、力度 1', dsbSeg.every((e) => e.instrument === '大钢琴' && e.gain === 1), `inst=${dsbSeg[0]?.instrument} gain=${dsbSeg[0]?.gain}`)
+  check('Z8 adj722 dsb 段层（上排）= 副声部：第二音色 + 力度 0.75', dsbSeg.every((e) => e.instrument === '手风琴' && e.gain === 0.75), `inst=${dsbSeg[0]?.instrument} gain=${dsbSeg[0]?.gain}`)
+  /**
+   * Z8b/Z8c（**adj722**，用户口径）：**主副声部对换后，显示不变、演奏与色块对调**。
+   *
+   * 判据（同一条 `{dsb}` 上）：
+   *  · **包络外主旋律 = 主声部** —— 视觉在**下排**（y 更大），音色 = 主音色、力度 1、
+   *    色块 `playVoice` 未设（⇒ 预览层按音色取色 = **与单声部同色**）；
+   *  · **段内容 = 副声部** —— 视觉在**上排**，音色 = 第二音色、力度 0.75、色块 `playVoice === 'second'`。
+   *  · **显示不变**：两层 y 差 = `dy`、色块分界相接（上一块底 == 下一块顶）。
+   */
   {
-    const lower = evs(sDsb).filter((e) => !e.placed.segment && e.placed.playVoice === 'second')
-    check('Z9 dsb 重叠区主旋律（下层）改第二声部音色 + 力度 0.75', lower.length === 8 && lower.every((e) => e.instrument === '手风琴' && e.gain === 0.75), `n=${lower.length} inst=${lower[0]?.instrument} gain=${lower[0]?.gain}`)
-    const others = evs(sDsb).filter((e) => !e.placed.segment && e.placed.playVoice !== 'second')
+    const pr722 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {dsb 1 2 3 4 } 5 6 7 1\' |\n')
+    const lay722 = layoutScore(pr722, defaultPageConfig)
+    const pg722 = lay722.pages[0]
+    const seq722 = buildPlaySequence(pr722, lay722, 120)
+    const content = seq722.events.find((e) => e.placed.segment?.layer === 'upper' && e.placed.segment.type === 'dsb')
+    const outside = seq722.events.find((e) => isDsbOutside(e.placed))
+    const cb = (content?.playheadSegs ?? [])[0]
+    const ob = (outside?.playheadSegs ?? [])[0]
+    check('Z8b adj722 段内容（上排）= 副声部：第二音色 + 力度 0.75 + 色块 playVoice=second',
+      content !== undefined && content.instrument === '手风琴' && content.gain === 0.75 && cb?.playVoice === 'second',
+      `inst=${content?.instrument} gain=${content?.gain} blockRole=${cb?.playVoice}`)
+    /**
+     * 主声部的 `instrument` 在本用例里是**空串**（谱面无 `Y:` ⇒ 路由到音色库第一音色 = 钢琴），
+     * 而不是 `'大钢琴'`——`'大钢琴'` 只在**显式指定**时才出现（见 `Z7` 的用例带 `Y:`）。
+     */
+    check('Z8c adj722 包络外主旋律（下排）= 主声部：主音色（空=库第一音色）+ 力度 1 + 色块不设角色（⇒ 与单声部同色）',
+      outside !== undefined &&
+        (outside.instrument === '' || outside.instrument === '大钢琴') &&
+        outside.gain === 1 &&
+        ob?.playVoice === undefined &&
+        (outside.placed as unknown as { y: number }).y > (content!.placed as unknown as { y: number }).y,
+      `inst=${outside?.instrument} gain=${outside?.gain} blockRole=${ob?.playVoice ?? '(未设)'} ` +
+        `outsideY=${(outside?.placed as unknown as { y: number })?.y} contentY=${(content?.placed as unknown as { y: number })?.y}`)
+    check('Z8d adj722 显示不变：两块上下相接（上块底 == 下块顶）',
+      cb?.yBottomMax !== undefined && ob?.yTopMin !== undefined && Math.abs(cb.yBottomMax - ob.yTopMin) < 0.01,
+      `contentBot=${cb?.yBottomMax} outsideTop=${ob?.yTopMin}`)
+    void pg722
+  }
+  /**
+   * Z8e（**adj722**，用户复报「下面声部色块不正确（跑到后面音符上）」）：
+   * **`{dsb}` 包络外主旋律的色块，右缘不得超过自己音符的槽右缘**。
+   *
+   * 根因：色块右界曾取 `max(edge, 自己右缘)`，其中 `edge` = **下一个音符的块左缘**——
+   * 它含"槽尾留白"与"布置网格的间隙"（实测下层 `5/` 墨迹到 `140.7`、下一个 `6-` 从 `151.5` 起，
+   * 空 **9.7px**）⇒ 色块宽 19.8px、比自己的音符宽出 **10.8px**、盖到后面那个音符上。
+   * 现改为以**本音符墨迹**为准（`AGENTS` 五·9「区间一律用墨迹算」）。
+   *
+   * 容差 1.2px：「数字槽右缘」比"数字墨迹右缘"天然宽约 1px（`rightX` 的既有口径）。
+   */
+  {
+    const pr8e = parseJps("V: 1.0\nB: t\nD: C\nP: 4/4\nQ: [\"1.\" {dsb (3// 2// 1//) (1// 1/) 7,/ 1- } (1'// 7// 6//) (6// 6/) 5/ 6- |]\n")
+    const lay8e = layoutScore(pr8e, defaultPageConfig)
+    const seq8e = buildPlaySequence(pr8e, lay8e, 120)
+    const bad8e: string[] = []
+    for (const e of seq8e.events) {
+      if (!isDsbOutside(e.placed)) continue
+      const segs8e = e.playheadSegs ?? []
+      if (segs8e.length === 0) continue
+      const p8e = e.placed as unknown as { x: number; width: number; rightX?: number; token: { raw?: string } }
+      const blockR8e = segs8e[segs8e.length - 1].x + segs8e[segs8e.length - 1].width
+      const cellR8e = Math.max(p8e.rightX ?? 0, p8e.x + p8e.width)
+      if (blockR8e > cellR8e + 1.2) {
+        bad8e.push(`${JSON.stringify(p8e.token.raw)}: 块右 ${blockR8e.toFixed(1)} > 槽右 ${cellR8e.toFixed(1)}（+${(blockR8e - cellR8e).toFixed(1)}）`)
+      }
+    }
+    check('Z8e adj722 下层色块不越出自己音符的槽（曾经多算网格间隙 ⇒ 盖到后一个音符）',
+      bad8e.length === 0, `越出 ${bad8e.length} 处：${bad8e.slice(0, 5).join(' | ')}`)
+  }
+  {
+    const lower = evs(sDsb).filter((e) => isDsbOutside(e.placed))
+    /**
+     * adj722（用户口径翻转）：**包络外主旋律 = 主声部**（主音色「大钢琴」+ 力度 1），
+     * **段内容 = 副声部**（第二音色「手风琴」+ 力度 0.75）。
+     * 这两条断言原先写反了（旧口径：段内容=主声部、包络外=第二声部）。
+     */
+    check('Z9 adj722 dsb 重叠区**包络外主旋律 = 主声部**（主音色 + 力度 1）',
+      lower.length === 8 && lower.every((e) => e.instrument === '大钢琴' && e.gain === 1),
+      `n=${lower.length} inst=${lower[0]?.instrument} gain=${lower[0]?.gain}`)
+    const dsbContent = evs(sDsb).filter((e) => e.placed.segment?.layer === 'upper' && e.placed.segment.type === 'dsb')
+    check('Z9b adj722 dsb **段内容 = 第二声部**（第二音色 + 力度 0.75）',
+      dsbContent.length === 8 && dsbContent.every((e) => e.instrument === '手风琴' && e.gain === 0.75),
+      `n=${dsbContent.length} inst=${dsbContent[0]?.instrument} gain=${dsbContent[0]?.gain}`)
+    const others = evs(sDsb).filter((e) => !e.placed.segment && e.placed.parentY === undefined)
     check('Z10 dsb 重叠区外的主旋律仍为主声部（音色/力度不变）', others.length === 4 && others.every((e) => e.instrument === '大钢琴' && e.gain === 1), `n=${others.length}`)
   }
   check('Z11 段层色块轨道已生成且带 instrument（手风琴）', bzSeg.every((e) => (e.playheadSegs?.length ?? 0) > 0 && e.playheadSegs!.every((s) => s.instrument === '手风琴')), '')
@@ -7292,7 +7385,7 @@ console.log('[adj427] segment playback (voices / instruments / gain)')
      */
     const evSet = new Set(seqDsb.events.map((e) => e.placed))
     const upper = layDsb.pages[0].notes.filter((n) => n.segment?.layer === 'upper' && n.segment.type === 'dsb')
-    const lower = layDsb.pages[0].notes.filter((n) => !n.segment && n.playVoice === 'second')
+    const lower = layDsb.pages[0].notes.filter((n) => isDsbOutside(n))
     const missUpper = upper.filter((n) => !evSet.has(n)).map((n) => (n.token as { raw?: string }).raw)
     const missLower = lower.filter((n) => !evSet.has(n)).map((n) => (n.token as { raw?: string }).raw)
     check('Z21 adj710 `{dsb}` 上下两层**每个音都有起奏事件**（连音合并不吞起奏点）',
@@ -7324,7 +7417,7 @@ console.log('[adj427] segment playback (voices / instruments / gain)')
     /** 只取**真正发声**的事件（休止符 `playable=false` 不参与） */
     const sound = seq719.events.filter((e) => e.placed.playable && soundOf(e))
     const upperEv = sound.filter((e) => e.placed.segment?.layer === 'upper' && e.placed.segment.type === 'dsb')
-    const lowerEv = sound.filter((e) => !e.placed.segment && e.placed.playVoice === 'second')
+    const lowerEv = sound.filter((e) => isDsbOutside(e.placed))
     /** 同刻（`atMs` 相同）两层并发且音高不同 */
     const pair = (a: (typeof sound)[number], b: (typeof sound)[number]) =>
       Math.abs(a.atMs - b.atMs) < 1e-6 && soundOf(a) !== soundOf(b)
@@ -7372,7 +7465,7 @@ console.log('[adj427] segment playback (voices / instruments / gain)')
      */
     {
       const seg = seq719.events.filter((e) => e.placed.segment?.layer === 'upper' && e.placed.segment.type === 'dsb')
-      const low = seq719.events.filter((e) => !e.placed.segment && e.placed.playVoice === 'second')
+      const low = seq719.events.filter((e) => isDsbOutside(e.placed))
       const noSeg = (arr: typeof seg) => arr.filter((e) => (e.playheadSegs ?? []).length === 0)
       /**
        * `{dsb}` 两层的色块**必须带动态定界**（`adj429`：上层 `[y−1.1ns, midEqual]`、
@@ -7455,7 +7548,7 @@ console.log('[adj429] playheadSegs color-block bounds (no overlap, no lyric pres
     const lay = layoutScore(parseResult, DUR_CFG)
     const seq = buildPlaySequence(parseResult, lay, 120, undefined, '大钢琴')
     const upperSeg = seq.events.find((e) => e.placed.segment?.type === 'dsb' && e.placed.segment?.layer === 'upper')?.playheadSegs?.[0]
-    const lowerSeg = seq.events.find((e) => e.placed.playVoice === 'second')?.playheadSegs?.[0]
+    const lowerSeg = seq.events.find((e) => isDsbOutside(e.placed))?.playheadSegs?.[0]
     check('V3 dsb upper 带 yTopMin/yBottomMax', upperSeg?.yTopMin !== undefined && upperSeg?.yBottomMax !== undefined, `up=${JSON.stringify(upperSeg)}`)
     check('V3 dsb lower 带 yTopMin/yBottomMax', lowerSeg?.yTopMin !== undefined && lowerSeg?.yBottomMax !== undefined, `lo=${JSON.stringify(lowerSeg)}`)
     const upH = (upperSeg?.yBottomMax ?? 0) - (upperSeg?.yTopMin ?? 0)
@@ -7494,7 +7587,7 @@ console.log('[adj429] playheadSegs color-block bounds (no overlap, no lyric pres
     const lay = layoutScore(parseResult, cfg)
     const seq = buildPlaySequence(parseResult, lay, 120, undefined, '大钢琴')
     const upperSeg = seq.events.find((e) => e.placed.segment?.type === 'dsb' && e.placed.segment?.layer === 'upper')?.playheadSegs?.[0]
-    const lowerSeg = seq.events.find((e) => e.placed.playVoice === 'second')?.playheadSegs?.[0]
+    const lowerSeg = seq.events.find((e) => isDsbOutside(e.placed))?.playheadSegs?.[0]
     const upH = (upperSeg?.yBottomMax ?? 0) - (upperSeg?.yTopMin ?? 0)
     const loH = (lowerSeg?.yBottomMax ?? 0) - (lowerSeg?.yTopMin ?? 0)
     // adj429b：dsb 上下色块**严格等高**（不依赖 dy 大小）——用户建议，视觉更均衡
@@ -7563,7 +7656,7 @@ console.log('[adj432] segment color-block voice colors + segment row guides')
     const pr = parseJps(dsb432)
     const seq = buildPlaySequence(pr, layoutScore(pr, DUR_CFG), 120, undefined, '大钢琴')
     const segs = seq.events.flatMap((e) => e.playheadSegs ?? [])
-    check('X2 dsb upper playheadSegs.playVoice = main', segs.some((s) => s.playVoice === 'main'), `roles=${[...new Set(segs.map((s) => s.playVoice ?? '-'))].join(',')}`)
+    check('X2 adj722 dsb 段内容（上排）= 副声部 → playheadSegs.playVoice = second', segs.some((s) => s.playVoice === 'second'), `roles=${[...new Set(segs.map((s) => s.playVoice ?? '-'))].join(',')}`)
     check('X2b dsb lower playheadSegs.playVoice = second', segs.some((s) => s.playVoice === 'second'), `roles=${[...new Set(segs.map((s) => s.playVoice ?? '-'))].join(',')}`)
   }
   // X3：computeRowGuides 给段层行打 segType/segLayer 标记（bz 1 个上层；dsb 上下各 1）
@@ -8139,7 +8232,9 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
     const pg = layoutScore(parseJps(code), D).pages[0]
     const sb = (pg.segmentBrackets ?? [])[0]
     const segU = pg.notes.filter((n) => n.segment && n.segment.layer === 'upper').sort((a, b) => a.x - b.x)
-    const after = pg.notes.filter((n) => !n.segment && n.playVoice === undefined).sort((a, b) => a.x - b.x)
+    // adj722：`after` 要的是**段右界之后**的主旋律音——按 x 筛
+    // （翻转后 `playVoice === undefined` 同时命中"段之前的包络外音"，会取到 65.8 造成假红灯）
+    const after = pg.notes.filter((n) => !n.segment && n.x > (sb?.x2 ?? 0) + (sb?.inkW ?? 0) - 0.01).sort((a, b) => a.x - b.x)
     const lastInk = segU.length > 0 ? inkRightOfPlaced(segU[segU.length - 1], ns) : 0
     const rInkL = sb?.x2 ?? 0
     const rInkR = rInkL + (sb?.inkW ?? 0)
@@ -8164,7 +8259,11 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
     const pg = layoutScore(parseJps(code), D).pages[0]
     const sb = (pg.segmentBrackets ?? [])[0]
     const segU = pg.notes.filter((n) => n.segment && n.segment.layer === 'upper').sort((a, b) => a.x - b.x)
-    const prev = pg.notes.filter((n) => !n.segment && n.playVoice === undefined).sort((a, b) => a.x - b.x)[0]
+    // adj722：包络外主旋律现在 `playVoice` 为 undefined（段内容是 'second'）；
+    // 这里的 `prev` 要的是**段之前**那个音 ⇒ 用 x 过滤，不用 playVoice
+    const prev = pg.notes
+      .filter((n) => !n.segment && n.x < (sb?.x1 ?? 0) - 0.01)
+      .sort((a, b) => a.x - b.x)[0]
     const lInkL = sb?.x1 ?? 0
     const lInkR = lInkL + (sb?.inkW ?? 0)
     check('C1 adj667 图2：左大括号墨迹右缘 ≤ 段首音（不压段内首音；旧实现越进 4.2px）',
@@ -8245,7 +8344,8 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
     const lower = pg.slurs.filter((s) => s.layerBase === undefined)
     const segNsAll = pg.notes.filter((n) => n.segment)
     const upperBaseline = segNsAll.map((n) => n.y).sort((a, b) => a - b)[0]
-    const lowerBaseline = pg.notes.filter((n) => n.playVoice === 'second').map((n) => n.y).sort((a, b) => a - b)[0]
+    // adj722：包络外主旋律（视觉下排）= 主声部、`playVoice` 未设 ⇒ 按 `parentY` 认它
+    const lowerBaseline = pg.notes.filter((n) => isDsbOutside(n)).map((n) => n.y).sort((a, b) => a - b)[0]
     check('S1 adj670 图3：dsb 下层声部的连音线**保持在上方**（不再反转；`below` 未置位）',
       lower.length > 0 && lower.every((s) => s.below !== true), JSON.stringify(lower.map((s) => ({ y: s.y, below: s.below }))))
     check('S2 adj670 图3：下层连音线在上层声部基线**之下**（朝上紧贴自己的数字，不挤进上层）',
@@ -8328,8 +8428,9 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
     const noSeg = "Q: 3 4 | 5 6 7 1' |\nQ: (1 2) 3 4 | 5 6 7 1' |\n"
     const basesOf = (code: string): { ys: number[]; segTop: number } => {
       const pg = layoutScore(parseJps(code), D).pages[0]
-      // 只取**主旋律**音符（`playVoice === 'second'` = dsb 下层声部，已被下移，不能当行基线）
-      const ys = [...new Set(pg.notes.filter((n) => !n.segment && n.playVoice === undefined).map((n) => n.y))].sort((a, b) => a - b)
+      // adj722：行基线取"**不在任何 `{dsb}` 包络内**的主旋律音" ⇒ 排除段内容（`segment`）
+      // 与包络外主旋律（`parentY` 有值，它已被下移 `dy/2`，不能当行基线）
+      const ys = [...new Set(pg.notes.filter((n) => !n.segment && n.parentY === undefined).map((n) => n.y))].sort((a, b) => a - b)
       return { ys, segTop: (pg.segmentBrackets ?? [])[0]?.yTop ?? Number.NaN }
     }
     /** 基准谱：三行、段层行与原行**主旋律完全相同**（`{dsb …}` 不占拍），唯一差别就是段层 */
@@ -8421,7 +8522,9 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
     const pg = layoutScore(parseJps(code), cfg).pages[0]
     const sb = (pg.segmentBrackets ?? [])[0]
     const segU = pg.notes.filter((n) => n.segment && n.segment.layer === 'upper').sort((a, b) => a.x - b.x)
-    const after = pg.notes.filter((n) => !n.segment && n.playVoice === undefined).sort((a, b) => a.x - b.x)
+    // adj722：`after` 必须是**段右界之后**那个主旋律音（按 x 筛；
+    // `playVoice === undefined` 在翻转后不再等价于"包络外"）
+    const after = pg.notes.filter((n) => !n.segment && n.x > sb.x2 + sb.inkW - 0.01).sort((a, b) => a.x - b.x)
     const inkW = sb?.inkW ?? 0
     check(`P1[${nm}] adj667 左右大括号都不越进邻居墨迹（两条布局路径同一口径）`,
       sb !== undefined && inkW > 0 && segU.length > 0 && after.length > 0 &&
