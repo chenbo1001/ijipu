@@ -206,8 +206,8 @@ function computeColorBounds(
     return { yTopMin, yBottomMax }
   }
   if (isDsbUpper) {
-    // dsb upper：对侧 = 下层 baseline（row.y + dy/2）
-    const lowerY = pageVoiceBaselineForSegmentLower(page, plc.id.group, plc.id.voice, noteSize)
+    // dsb upper：对侧 = **本段**的下层 baseline（`adj720`：按本音符所属段取，不用"该页第一段"）
+    const lowerY = pageVoiceBaselineForSegmentLower(noteSize, dsbSegmentOf(page, plc))
     if (lowerY === null) return null
     // adj429：上下色块**严格等高**——把"对称中线" midEqual 从 row.y 上移 `0.25×ns`，
     // 让 upper 用 TOP_EXT(1.1ns)、lower 用 BOT_EXT(0.6ns) 各自延伸后，两块高度相等。
@@ -223,9 +223,9 @@ function computeColorBounds(
     return { yTopMin, yBottomMax }
   }
   if (isDsbLower) {
-    // dsb 包络内的主旋律音（下层 = 第二声部）：对侧 = 上层 baseline
+    // dsb 包络内的主旋律音（下层 = 第二声部）：对侧 = **本段**的上层 baseline（`adj720`）
     // adj429：与 upper 共享 midEqual（中线不在 row.y，往上偏 0.25×ns），保证上下严格等高。
-    const upperY = pageVoiceBaselineForSegmentUpper(page, plc.id.group, plc.id.voice)
+    const upperY = pageVoiceBaselineForSegmentUpper(page, plc, dsbSegmentOf(page, plc))
     if (upperY === null) return null
     const offset = (TOP_EXT - BOT_EXT) / 2
     const midEqual = (y + upperY) / 2 - offset
@@ -283,38 +283,62 @@ function pageVoiceBaselineOutsideSegment(
 }
 
 /**
- * adj429：取该页该 group 的 dsb 段**下层基线 y**（= row.y + dy/2）。
+ * adj429/adj720：取**本音符所属** `{dsb}` 段的下层基线 y（= 该段的 `row.y + dy/2`）。
  *
- * 通过 `segmentBrackets` 间接得到：`PlacedSegmentBracket.yBottomLower` = 下层基线 + 0.3×字号，
- * 故反推下层基线 = `yBottomLower − noteSize × 0.3`。
+ * ⚠️ adj720（用户报「图2 里下层绿色块没有/位置不对」）：**必须按"本音符落在哪一段"取**，
+ * 不能取"该页第一段"。同一视觉行可以有**多段 `{dsb}`、各段下移量不同**
+ * （实测第 2 行：段1 `yBottomLower=257.2` ⇒ 下层基线 253.3、段2 `yBottomLower=254.8` ⇒ 250.9，
+ * 差 **2.4px**）；取第一段会让落在段2 里的音**色块高度边界错 2.4px** ⇒ 上下两块露出缝/错位。
+ * （这与 `adj689b` 修的"连音线基准"是同一类问题：**一行之内不允许出现两个下移量**。）
+ *
+ * 段的判定：`x` 落在括号内且 `barIndex` 落在该段的小节区间内（同 x 不同行的段用 group 区分）。
  */
+function dsbSegmentOf(page: ScorePage, plc: PlacedToken): { x1: number; x2: number; yBottomLower?: number } | undefined {
+  const bars = page.segmentBrackets ?? []
+  const cands = bars.filter(
+    (s) => s.type === 'dsb' && s.group === plc.id.group && s.voice === plc.id.voice && s.yBottomLower !== undefined,
+  )
+  if (cands.length === 0) return undefined
+  // 先按 x 命中；多段同 x（跨行叠放）时再按"该段的小节区间"选最近的
+  const inX = cands.filter((s) => plc.x >= s.x1 - 2 && plc.x <= s.x2 + 2)
+  if (inX.length === 0) return cands[0]
+  if (inX.length === 1) return inX[0]
+  // 多段都命中 x（同一行里 `{dsb}` 的 x 区间可能很宽）→ 取**中心离本音符最近**的一段
+  return inX.reduce((best, s) =>
+    Math.abs((s.x1 + s.x2) / 2 - plc.x) < Math.abs((best.x1 + best.x2) / 2 - plc.x) ? s : best,
+  )
+}
 function pageVoiceBaselineForSegmentLower(
-  page: ScorePage,
-  group: number,
-  voice: number,
   noteSize: number,
+  /** adj720：本音符所在的 `{dsb}` 段（同一行可能有多段、各段下移量不同） */
+  seg: { yBottomLower?: number } | undefined,
 ): number | null {
-  const sb = page.segmentBrackets?.find((s: { group: number; voice: number; type: string }) => s.group === group && s.voice === voice && s.type === 'dsb')
-  if (!sb || sb.yBottomLower === undefined) return null
-  return sb.yBottomLower - noteSize * 0.3 // 把 "+0.3×字号" 减回去，得到下层基线
+  return seg?.yBottomLower !== undefined ? seg.yBottomLower - noteSize * 0.3 : null
 }
 
 /**
- * adj429：取该页该 group 的 dsb 段**上层基线 y**（= row.y − dy/2）。
+ * adj429/adj720：取该页该 group 的 dsb 段**上层基线 y**（= row.y − dy/2）。
  *
- * 段层音符（layer='upper'）的 y 本身就是上层基线。直接取第一个 dsb upper 音符的 y 即可。
+ * `adj720`：与下层同理——**按本音符所属那一段**取（同一行多段下移量不同）。
+ * 判据：该段 x 区间内**已有**的段层上层音符的 y；没有时退回"任意 dsb 上层音的 y"。
  */
 function pageVoiceBaselineForSegmentUpper(
   page: ScorePage,
-  group: number,
-  voice: number,
-): number | null {
-  for (const n of page.notes) {
-    if (n.id.group === group && n.id.voice === voice && n.segment?.type === 'dsb' && n.segment.layer === 'upper') {
-      return n.y
-    }
+  plc: PlacedToken,
+  seg: { x1: number; x2: number } | undefined,
+): number | null {  const ups = page.notes.filter(
+    (n) =>
+      n.segment?.type === 'dsb' &&
+      n.segment.layer === 'upper' &&
+      n.id.group === plc.id.group &&
+      n.id.voice === plc.id.voice,
+  )
+  if (ups.length === 0) return null
+  if (seg) {
+    const inSeg = ups.filter((n) => n.x >= seg.x1 - 2 && n.x <= seg.x2 + 2)
+    if (inSeg.length > 0) return Math.min(...inSeg.map((n) => n.y))
   }
-  return null
+  return Math.min(...ups.map((n) => n.y))
 }
 
 /** adj320：构建一个音符的播放拍段——按「时值元素」分块：

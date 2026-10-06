@@ -7341,6 +7341,57 @@ console.log('[adj427] segment playback (voices / instruments / gain)')
         nTracks === combos.size + 1,
         `轨数=${nTracks} 组合数=${combos.size}（期望 ${combos.size + 1}）；组合=${[...combos].join(',')}`)
     }
+    /**
+     * Z24（**adj720**，用户看图报「图2 里下层没有绿色块」）：**两层色块必须都存在且垂直不重叠**。
+     *
+     * 色块由 `playheadSegs` 携带：上层（`main`）取 `[y−1.1ns, midEqual]`、
+     * 下层（`second`）取 `[midEqual, y+0.6ns]`（`adj429` 的"严格等高"口径）。
+     * 判据（用**用户原谱逐字**，含反复/跳房子）：
+     *  · 每个 `{dsb}` 的**上层音与下层音都必须有至少一个色块**（无色块 = 用户看到"缺一块"）；
+     *  · 每个色块的 `yTopMin < yBottomMax`（定界有效、高度为正，否则渲染端会隐藏）；
+     *  · 同拍上下两块的**分界必须吻合**（上层 `yBottomMax` == 下层 `yTopMin`，误差 < 0.01）
+     *    ——不吻合就会出现缝或重叠。
+     */
+    {
+      const seg = seq719.events.filter((e) => e.placed.segment?.layer === 'upper' && e.placed.segment.type === 'dsb')
+      const low = seq719.events.filter((e) => !e.placed.segment && e.placed.playVoice === 'second')
+      const noSeg = (arr: typeof seg) => arr.filter((e) => (e.playheadSegs ?? []).length === 0)
+      /**
+       * `{dsb}` 两层的色块**必须带动态定界**（`adj429`：上层 `[y−1.1ns, midEqual]`、
+       * 下层 `[midEqual, y+0.6ns]`）——没有定界时渲染端走"单声部默认"，两块会**互相压住**。
+       * 只查 `{dsb}` 的上下层（别的层走默认是合规的）。
+       */
+      const badSeg = seg.filter((e) =>
+        (e.playheadSegs ?? []).some((s) => !(s.yTopMin !== undefined && s.yBottomMax !== undefined && s.yTopMin < s.yBottomMax)),
+      )
+      const badLow = low.filter((e) =>
+        (e.playheadSegs ?? []).some((s) => !(s.yTopMin !== undefined && s.yBottomMax !== undefined && s.yTopMin < s.yBottomMax)),
+      )
+      /** 同拍上下分界吻合：同刻配对后，上层 `yBottomMax` == 下层 `yTopMin` */
+      const mid = (e: (typeof seg)[number]) => (e.playheadSegs ?? [])[0]
+      let mismatch = 0
+      let paired = 0
+      for (const u of seg) {
+        const l = low.find((x) => Math.abs(x.atMs - u.atMs) < 1e-6)
+        const mu = mid(u)
+        const ml = l ? mid(l) : undefined
+        if (mu && ml) {
+          paired++
+          if (Math.abs((mu.yBottomMax ?? 0) - (ml.yTopMin ?? -1)) > 0.01) mismatch++
+        }
+      }
+      check('Z24 adj720 用户原谱：`{dsb}` 上下两层**都有色块**、定界有效、同拍分界吻合',
+        seg.length > 0 &&
+          low.length > 0 &&
+          noSeg(seg).length === 0 &&
+          noSeg(low).length === 0 &&
+          badSeg.length === 0 &&
+          badLow.length === 0 &&
+          paired > 0 &&
+          mismatch === 0,
+        `上层无色块 ${noSeg(seg).length} / 下层无色块 ${noSeg(low).length} / ` +
+          `上层定界无效 ${badSeg.length} / 下层定界无效 ${badLow.length} / 配成 ${paired} 对、分界不吻合 ${mismatch}`)
+    }
   }
 }
 
