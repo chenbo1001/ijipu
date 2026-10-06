@@ -74,8 +74,8 @@ import { HEADER_HINTS, filterHeaderHints, BARLINE_MODIFIER_HINTS, NOTE_MODIFIER_
 import { draftAfterReset } from '../src/dialogs/pageConfigReset.ts'
 // adj722：播放进度读数 `mm:ss`
 import { fmtClock } from '../src/dialogs/playbackClock.ts'
-// adj723d：试听单实例保证（代次守卫）
-import { createPlaybackGeneration } from '../src/dialogs/playbackSession.ts'
+// adj723d：试听单实例保证（代次守卫）+ adj723e：自动播放判定
+import { createPlaybackGeneration, shouldAutoPlay } from '../src/dialogs/playbackSession.ts'
 // adj723：预览区音符点击的动作判定（单击 / Ctrl+单击）
 import { noteClickAction, noteClickKind } from '../src/preview/noteClickAction.ts'
 
@@ -7145,6 +7145,44 @@ console.log('[adj427] segment overlay placement (notes / barlines / brackets)')
     check('adj723d 同一代次在多次核对中稳定（未被打断的播放不会被误杀）',
       !g2.isStale(c) && !g2.isStale(c) && g2.begin() !== c && g2.isStale(c),
       `c=${c}`)
+    /**
+     * adj723e（用户报「`Ctrl+点击符` 在**底栏未打开**时只打开了试听对话框，没有从该音符播放」）：
+     *
+     * "打开底栏 + 播放"是**同一次 React 渲染**里完成的 ⇒ 试听面板**挂载时 tick 已是新值**；
+     * 旧判定只比"tick 相对挂载时是否变化" ⇒ 判成"没有新变化"、直接返回 ⇒ 只打开、不播放。
+     *
+     * 新判定 `shouldAutoPlay(挂载时 tick, 当前 tick, 待播起点)` 的三类情形：
+     *  · 挂载时已有待播起点（`Ctrl+点击符`/双击音符打开底栏）⇒ **播**；
+     *  · 挂载后 tick 变化（底栏已开着时点音符、单击重播）⇒ **播**；
+     *  · 手动打开试听（tick 未变、无起点）⇒ **不播**（打开 ≠ 播放）。
+     */
+    check('adj723e 挂载时已有待播起点 ⇒ 自动播放（底栏原本没开时 Ctrl+点击也能播）',
+      shouldAutoPlay(1, 1, '0_1_0_3') === true,
+      `mount=1 tick=1 start=0_1_0_3 → ${shouldAutoPlay(1, 1, '0_1_0_3')}`)
+    check('adj723e 手动打开试听（tick 未变、无起点）⇒ 不自动播放',
+      shouldAutoPlay(0, 0, null) === false && shouldAutoPlay(5, 5, null) === false,
+      `mount=0 tick=0 start=null → ${shouldAutoPlay(0, 0, null)}`)
+    check('adj723e 挂载后 tick 变化 ⇒ 自动播放（底栏已开着时点音符/单击重播）',
+      shouldAutoPlay(2, 3, null) === true && shouldAutoPlay(0, 1, null) === true,
+      `2→3=${shouldAutoPlay(2, 3, null)} 0→1=${shouldAutoPlay(0, 1, null)}`)
+    check('adj723e 挂载时为初始 tick=0 且无起点 ⇒ 不播放（冷启动不能自己响）',
+      shouldAutoPlay(0, 0, null) === false && shouldAutoPlay(0, 1, null) === true,
+      '')
+    /**
+     * adj723e 补充：**同一个播放请求只消费一次**。
+     *
+     * React 在开发模式（StrictMode）下会**刻意把 effect 跑两遍**（挂载→卸载→再挂载），
+     * 实测连续两条 `autoplay=true` ⇒ `play()` 被调两次，第二次把第一次作废（代次守卫）
+     * ⇒ 观感是"打开试听但半天不播"（实际起了两次、第二次要重新加载音源）。
+     * 修法是记住"已为哪个请求播过"（`tick|起点` 二元组）。这里断言该键的构造与去重语义。
+     */
+    const reqKey = (tick: number, startId: string | null) => `${tick}|${startId ?? ''}`
+    check('adj723e 同一播放请求（tick|起点）只消费一次；换音符号 tick 变 ⇒ 仍会重播',
+      reqKey(1, '0_1_0_10') === reqKey(1, '0_1_0_10') && // 同一请求 ⇒ 键相同 ⇒ 跳过第二次
+        reqKey(2, '0_1_0_10') !== reqKey(1, '0_1_0_10') && // 再点同一音符 ⇒ tick 变 ⇒ 重播
+        reqKey(1, '0_1_0_10') !== reqKey(1, null) && // 起点被消费后不等于原请求
+        shouldAutoPlay(1, 1, '0_1_0_10') === true,
+      `k1=${reqKey(1, '0_1_0_10')} k2=${reqKey(2, '0_1_0_10')}`)
   }
   check('O2 段层音符标记 type=bz / layer=upper', segNotes.every((n) => n.segment?.type === 'bz' && n.segment?.layer === 'upper'), JSON.stringify(segNotes[0]?.segment))
   check('O3 段层音符在主旋律**上方**（y 更小）', segNotes.length > 0 && mainNotes.length > 0 && segNotes[0].y < mainNotes[0].y, `segY=${segNotes[0]?.y} mainY=${mainNotes[0]?.y}`)
@@ -13973,8 +14011,16 @@ console.log('[114] playback reachable: clicking preview note while dock tryout i
     /isPlaybackOpen = dockOpen && dockPanel === 'tryout'/.test(prevNoComment) &&
       !/modal === 'playback'/.test(prevNoComment),
     '')
-  check('adj490 PreviewPane.onDoubleClick：同样接受 dock 试听（adj158 播放中双击快速跳跃）',
-    /if \(!isPlaybackOpen\) return[\s\S]{0,200}setPlaybackStart\(id\)[\s\S]{0,80}bumpPlaybackTick\(\)/.test(prevSrc),
+  /**
+   * adj723e（用户要求「**双击音符执行与 `Ctrl+点击音符` 同样的操作**」）：
+   * 双击改为走共用的「从这里试听」动作（打开/保持底栏试听 + 置起点 + 递增 tick），
+   * **不再要求"试听已可达"**（旧口径 `adj88`/`adj166`：未打开试听时双击不弹窗，现已按要求放开）。
+   *
+   * 判据：`onDoubleClick` 里出现 `tryoutFromNote(id)`，且**不再**有 `if (!isPlaybackOpen) return`。
+   */
+  check('adj723e PreviewPane.onDoubleClick 与 Ctrl+点击同一条路（走 tryoutFromNote，不再要求试听已可达）',
+    /onDoubleClick[\s\S]{0,700}tryoutFromNote\(id\)/.test(prevSrc) &&
+      !/if \(!isPlaybackOpen\) return/.test(prevSrc),
     '')
   check('adj490 PreviewPane 已从 uiStore 订阅 dockOpen / dockPanel', /dockOpen = useUiStore\(\(s\) => s\.dockOpen\)/.test(prevSrc) && /dockPanel = useUiStore\(\(s\) => s\.dockPanel\)/.test(prevSrc), '')
 }

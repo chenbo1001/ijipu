@@ -40,3 +40,26 @@ export function createPlaybackGeneration(): PlaybackGeneration {
     isStale: (gen: number) => gen !== current,
   }
 }
+
+/**
+ * adj723e：**试听面板"该不该自动播放"** 的判定（纯函数，便于 `smoke` 断言）。
+ *
+ * 背景（用户报「`Ctrl+点击符` 在**底栏未打开**时只打开了试听对话框，没有从该音符播放」）：
+ * "打开底栏 + 播放"是**同一次 React 渲染**里完成的（`setDockPanel('tryout')` 与
+ * `bumpPlaybackTick()` 同一批）⇒ 试听面板**挂载时 `playbackTick` 已经是新值**，
+ * 而旧判定只比"tick 是否相对挂载时变了" ⇒ 认为"没有新变化"、直接返回 ⇒ 只剩打开、不播放。
+ *
+ * @param mountTick   面板**挂载时**记录的 `playbackTick` 基准
+ * @param currentTick 当前 `playbackTick`
+ * @param startId     当前 `playbackStartId`（非空 = 有"待播起点"）
+ * @returns `true` = 本次应当自动播放
+ *
+ * 三类情形：
+ *  · **挂载时已有待播起点**（`Ctrl+点击符` / 双击音符打开底栏）⇒ 播；
+ *  · **挂载后 tick 变化**（底栏已开着时点音符、或单击重播）⇒ 播；
+ *  · 用户**手动**打开试听（tick 未变、起点为空）⇒ **不播**（保持原设计：打开不等于播放）。
+ */
+export function shouldAutoPlay(mountTick: number, currentTick: number, startId: string | null): boolean {
+  if (currentTick === mountTick) return startId !== null
+  return currentTick > 0 || startId !== null
+}

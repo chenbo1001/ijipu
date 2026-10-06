@@ -30,7 +30,7 @@ import { measureFontMeta } from '../preview/fontMeta'
 // adj722：`mm:ss` 进度读数（纯函数，便于 smoke 断言）
 import { fmtClock } from './playbackClock'
 // adj723d：试听**单实例**保证（代次守卫，纯模块便于 smoke 断言）
-import { createPlaybackGeneration } from './playbackSession'
+import { createPlaybackGeneration, shouldAutoPlay } from './playbackSession'
 import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, gmVoiceRef, countScoreInstrumentSwitches } from '@ijipu/engine'
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
@@ -509,23 +509,63 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
     }
   }
 
-  // adj158：单击谱面音符 → 从该音符（重）播放（PreviewPane 递增 playbackTick）。
-  // adj284：无论是否正在播放都响应——试听对话框打开时单击音符即从该处开始演奏；
-  // 首次打开对话框（tick 未变化）不误自动播放
+  /**
+   * adj723e（用户报「`Ctrl+点击符` 在**底栏未打开**时只打开了试听对话框，没有从该音符播放」）：
+   *
+   * **根因**：`firstTick` 在**挂载时**就把当前 `playbackTick` 记为基准，而"打开底栏 + 播放"是
+   * **同一次 React 渲染**里完成的（`setDockPanel('tryout')` 与 `bumpPlaybackTick()` 同一批），
+   * 所以试听面板**挂载时 tick 已经是新值** ⇒ 这个 effect 认为"没有新变化"、直接返回
+   * ⇒ 只剩"打开对话框"，不播放。
+   *
+   * **修法**：把"**挂载时就存在待播起点**（`playbackStartId` 非空）"也当成本次待播。
+   * 这样两类情形都正确：
+   *  · `Ctrl+点击符`（未开底栏）⇒ 起点已置 ⇒ **挂载即从该音符播放**；
+   *  · 用户从顶栏/快捷键**手动打开**试听 ⇒ 起点为空 ⇒ **不自动播放**（保持原设计）。
+   * `bumpPlaybackTick` 那条路（底栏已开、或单击/双击音符）照旧。
+   */
   const firstTick = useRef(playbackTick)
+  /**
+   * adj723e：**同一个播放请求只消费一次**。
+   *
+   * 为什么需要：React 在开发模式（StrictMode）下会**刻意把 effect 跑两遍**（挂载→卸载→再挂载），
+   * 实测日志 `[adj723e-debug] … autoplay=true` 连续两条 ⇒ `play()` 被调用两次；
+   * 第二次会把第一次作废（代次守卫 `adj723d`）⇒ 用户观感是"打开试听但半天不播"
+   * （实际是起了两次、第二次要重新加载音源）。
+   *
+   * 修法：记住"已经为哪个请求播过了"（`tick`+`起点` 二元组），同一个请求再来就直接跳过。
+   * 用**起点也进键**：连续两次点**同一个音符**时 `tick` 会变，仍应重播。
+   */
+  const lastAutoPlayRef = useRef<string | null>(null)
   useEffect(() => {
-    if (playbackTick === firstTick.current) return
+    if (!shouldAutoPlay(firstTick.current, playbackTick, playbackStartId)) return
+    const key = `${playbackTick}|${playbackStartId ?? ''}`
+    if (lastAutoPlayRef.current === key) return
+    lastAutoPlayRef.current = key
     firstTick.current = playbackTick
-    if (playbackTick > 0) void play()
+    void play()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playbackTick])
+  }, [playbackTick, playbackStartId])
 
-  // adj409：播放/暂停后把焦点留在播放按钮上——按钮获得焦点后，**空格/回车**即等于再点一次，
-  // 于是「按一下空格」就能暂停或恢复，不必去点按钮（用户要求）。仅在会话进行中出现状态变化时聚焦，
-  // 打开对话框时不抢焦点（避免影响谱面/编辑器操作）。
+  /**
+   * adj409/adj723e：播放/暂停后把焦点留在播放按钮上——按钮获得焦点后**空格/回车**即等于再点一次，
+   * 于是「按一下空格」就能暂停或恢复，不必去点按钮（用户要求）。
+   *
+   * adj723e（用户要求「`Ctrl+点击符` / 双击音符 ⇒ 焦点移到播放按钮上」）：**准备期结束后再抢一次**。
+   * 为什么需要这一手：一次**双击**必然先触发两轮 `click`（走 `single` 分支的 `jumpCursor`）
+   * ⇒ 焦点先落到编辑器 textarea；紧接着自动播放进入"准备中"，若只在 `starting` 置位那一刻聚焦，
+   * 会被后面的编辑器聚焦盖掉。改为在 `starting` **由真转假**（准备结束）时再聚焦一次，
+   * 保证无论前面发生过多少次抢焦点，最终都停在播放按钮上。
+   *
+   * 打开对话框本身**不抢焦点**（避免影响谱面/编辑器操作）——这条只在"本次确实开始播放"后生效。
+   */
   useEffect(() => {
     if (playing || starting) playBtnRef.current?.focus()
   }, [playing, paused, starting])
+  const wasStarting = useRef(false)
+  useEffect(() => {
+    if (wasStarting.current && !starting) playBtnRef.current?.focus()
+    wasStarting.current = starting
+  }, [starting])
 
   return (
     // adj87：试听时保持看谱——背景不遮罩（maskDim=0）、点击遮罩不关闭（仅 ✕ / Esc）

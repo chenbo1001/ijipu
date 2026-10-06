@@ -215,6 +215,23 @@ export function PreviewPane() {
   // ModalKind 里也不再有 'playback'）⇒ 删掉死支，只留真正生效的底栏判据。
   const isPlaybackOpen = dockOpen && dockPanel === 'tryout'
 
+  /**
+   * adj723e（用户要求）：**从这里试听**——抽成一个动作，供 `Ctrl+单击` 与（新增的）**双击**共用。
+   *
+   * 语义（与 `noteClickAction` 的 `ctrl-tryout` 一致）：
+   *  · 把该音符设为试听起点；
+   *  · **打开并聚焦**试听页签（`requestDockPanel` 在 `ToolDock` 里是"打开并聚焦"，
+   *    已开着则**保持**，不会把底栏收起来）；
+   *  · 递增 `playbackTick` 让 `PlaybackDialog` 从该音符播放
+   *    （底栏**原本没开**时由对话框挂载后的"待播起点"逻辑接手，见 `adj723e`）。
+   */
+  const tryoutFromNote = (id: string) => {
+    setActiveNoteId(id)
+    setPlaybackStart(id)
+    requestDockPanel('tryout')
+    bumpPlaybackTick()
+  }
+
   // 点击谱面音符/歌词 → 编辑器光标跳转（M3）
   // adj284：试听可达时单击音符 → 从该音符开始/重播（跳转到该处演奏）
   // adj652：点**谱面文本里的链接**（引擎把 URL 包成了 `a.jp-link`，如 S: 谱尾说明里的官网）
@@ -234,24 +251,16 @@ export function PreviewPane() {
     /**
      * adj723（用户要求）：**`Ctrl + 鼠标左键` 点音符 ⇒ 立即打开试听对话框，并从该音符开始播放**。
      *
-     * 与已有两条路的区别（判定收敛在纯模块 `noteClickAction.ts`，便于 smoke 断言）：
+     * 与另外两条路的区别（判定收敛在纯模块 `noteClickAction.ts`，便于 smoke 断言）：
      *  · **单击**（`adj284`）= 光标跳转；试听**已经可达时**顺带从该音重播；
-     *  · **双击**（`adj88`）= 同上，且**必须试听已可达**才动作（未打开时不弹窗，避免误触）；
-     *  · **`Ctrl+单击`（本条）= 显式"从这里试听"**：不管试听是否开着，
-     *    都先 `requestDockPanel('tryout')` 把底栏试听页签**打开并聚焦**，
-     *    再置起点 + 递增 `playbackTick`。`PlaybackDialog` 监听 `playbackTick`，
-     *    首次挂载时 tick 已变化 ⇒ 会**自动从起点播放**（与双击走的同一条机制）。
-     *
-     * 为什么用 `requestDockPanel` 而不是 `toggleDock`：前者是"打开并聚焦"（最小化时也能展开、
-     * 异页签时不会把内容区留成 0 高），语义与本条完全对应（见 `uiStore` 里该 action 的说明）。
+     *  · **双击**（`adj723e` 起）= **与 `Ctrl+单击` 完全相同**（用户要求）；
+     *  · **`Ctrl+单击`（`adj723`）= 显式"从这里试听"**：不管试听是否开着都打开并从此处播放
+     *    （**不跳光标**——用户按的是"听"不是"改"）。
      */
     const action = noteClickAction(noteClickKind(e))
     if (action.openTryout) {
       e.preventDefault()
-      setActiveNoteId(id)
-      setPlaybackStart(id)
-      requestDockPanel('tryout')
-      bumpPlaybackTick()
+      tryoutFromNote(id)
       return
     }
     setActiveNoteId(id)
@@ -265,20 +274,25 @@ export function PreviewPane() {
     }
   }
 
-  // adj88：双击谱面音符 → 定位试听起点并打开试听对话框（从该音符开始播放）
-  // adj158：播放中双击 → 递增 playbackTick 让对话框从该音符重新播放（快速跳跃）
-  // adj166：仅在试听**可达**时双击才跳到该处开始播放；未打开试听时双击不弹窗（避免误触）
-  // adj284：试听可达时单击已触发跳转播放；双击单独点不同音符时仍触发（快速跳跃）
+  /**
+   * adj723e（用户要求）：「**双击音符执行与 Ctrl+点击音符同样的操作**」——
+   * 即"打开试听（有则保持）+ 从该音符播放 + 焦点落到播放按钮"。
+   *
+   * 与旧口径（`adj88`/`adj166`）的差别：旧口径**只在试听已经可达时**才动作，
+   * 未打开试听时双击**不弹窗**（当年是为防误触）。现在用户明确要求双击等同于 `Ctrl+单击`，
+   * 故去掉"必须已可达"这条前置。
+   *
+   * 注：一次双击必然先触发两轮 `click`（`noteClickAction` 的 `single` 分支：光标跳转），
+   * 然后才是本回调——起点/`playbackTick` 因此会被置两次，但 `PlaybackDialog` 里的
+   * **代次守卫**（`adj723d`）保证只有最后一次落地，不会同时跑两个播放进程。
+   */
   const onDoubleClick = (e: React.MouseEvent) => {
     const target = (e.target as Element).closest('[data-notepos]')
     if (!target) return
     const id = target.getAttribute('data-notepos')
     if (!id) return
-    setActiveNoteId(id)
-    if (!isPlaybackOpen) return
-    // adj158：在已播放过程中双击别的音符 → 快速跳到那里重新播放
-    setPlaybackStart(id)
-    bumpPlaybackTick()
+    e.preventDefault()
+    tryoutFromNote(id)
   }
 
   // ---- 描述头元素拖拽（adj9） ----
