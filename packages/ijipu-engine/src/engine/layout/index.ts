@@ -5400,6 +5400,9 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
         yBottom: r1(yUpper + ns * 0.4),
         // dsb：下层声部（包络内主旋律）**下沿**——供渲染画跨两层的大花括号
         yBottomLower: isDsb ? r1(lowerBaseline + ns * 0.3) : undefined,
+        // adj722：段内容层（视觉上排）**基线**——色块上下界要按"两排真实中线"切，
+        // 由 `rowSlides`/`parentY` 反推会偏 3.3px（见 `PlacedSegmentBracket.yUpper` 的说明）
+        yUpper: isDsb ? r1(yUpper) : undefined,
         // adj685/686：大括号**自己的**墨迹端点（上下对称留白，不复用上面几个"块级"字段）
         braceTop: r1(inkT - bracePadY),
         braceBottom: isDsb ? r1(inkB + bracePadY) : undefined,

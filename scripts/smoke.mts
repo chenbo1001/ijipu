@@ -74,6 +74,8 @@ import { HEADER_HINTS, filterHeaderHints, BARLINE_MODIFIER_HINTS, NOTE_MODIFIER_
 import { draftAfterReset } from '../src/dialogs/pageConfigReset.ts'
 // adj722：播放进度读数 `mm:ss`
 import { fmtClock } from '../src/dialogs/playbackClock.ts'
+// adj723：预览区音符点击的动作判定（单击 / Ctrl+单击）
+import { noteClickAction, noteClickKind } from '../src/preview/noteClickAction.ts'
 
 /**
  * adj722：`{dsb}` 两层的**唯一判定口径**（供本文件多处断言共用）。
@@ -7086,6 +7088,35 @@ console.log('[adj427] segment overlay placement (notes / barlines / brackets)')
       fmtClock(Number.NaN) === '00:00' &&
       fmtClock(Number.POSITIVE_INFINITY) === '00:00',
     [0, 999, 1000, 59_600, 60_000, 3_600_000].map((v) => `${v}→${fmtClock(v)}`).join(' '))
+  /**
+   * adj723（用户要求「`Ctrl+鼠标左键` 点预览区音符 ⇒ 立即打开试听对话框并从该音符开始播放」）：
+   * 判定收敛在纯模块 `preview/noteClickAction.ts`，这里断言**动作集合**——
+   *  · `Ctrl+单击`：置起点 + **打开试听** + 递增 tick（**不跳光标**：用户是按"听"不是"改"）；
+   *  · 普通单击：**只跳光标**（不动试听，避免误触 —— 双击那条路仍要求试听已开着）。
+   * 只认 `ctrlKey`（`Cmd`/`Shift`/`Alt` 不参与判定）。
+   */
+  {
+    const ctrl = noteClickAction(noteClickKind({ ctrlKey: true }))
+    const plain = noteClickAction(noteClickKind({}))
+    const cmd = noteClickAction(noteClickKind({ metaKey: true }))
+    check('adj723 `Ctrl+单击`音符 = 打开试听 + 从此处播放（不跳光标）',
+      noteClickKind({ ctrlKey: true }) === 'ctrl-tryout' &&
+        ctrl.openTryout &&
+        ctrl.setPlaybackStart &&
+        ctrl.bumpTick &&
+        !ctrl.jumpCursor,
+      JSON.stringify(ctrl))
+    check('adj723 普通单击 = 只跳光标（试听/起点/tick 都不动）',
+      noteClickKind({}) === 'single' &&
+        plain.jumpCursor &&
+        !plain.openTryout &&
+        !plain.setPlaybackStart &&
+        !plain.bumpTick,
+      JSON.stringify(plain))
+    check('adj723 只认 Ctrl（Meta/Shift/Alt 都按普通单击处理）',
+      !cmd.openTryout && cmd.jumpCursor && noteClickKind({ metaKey: true, ctrlKey: false }) === 'single',
+      `meta→${noteClickKind({ metaKey: true })}`)
+  }
   check('O2 段层音符标记 type=bz / layer=upper', segNotes.every((n) => n.segment?.type === 'bz' && n.segment?.layer === 'upper'), JSON.stringify(segNotes[0]?.segment))
   check('O3 段层音符在主旋律**上方**（y 更小）', segNotes.length > 0 && mainNotes.length > 0 && segNotes[0].y < mainNotes[0].y, `segY=${segNotes[0]?.y} mainY=${mainNotes[0]?.y}`)
   // 同一拍位垂直对齐：段首音（包络起点 = 拍位 2）x 应等于主旋律拍位 2 的音符 x

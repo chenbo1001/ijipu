@@ -22,6 +22,8 @@ const SHORTCUTS: [string, string][] = [
   // adj619b：`Ctrl+Y` 让给「导出」后，重做改用跨平台惯例 `Ctrl+Shift+Z`
   [KBD.redo, '重做'],
   [KBD.tryout, '试听播放'],
+  // adj723（用户要求）：Ctrl+点音符 = 立即打开试听并从此处播放（与单击/双击的差别见 KBD 注释）
+  [KBD.tryoutFromNote, '预览区**点音符**：立即试听并从该音符播放'],
   ['Tab', '编码 / 预览 切换'],
   ['1 / 2 / 3', '视图：编码 / 拆分 / 预览'],
   ['q / c', '行首插入曲行 Q: / 词行 C:'],

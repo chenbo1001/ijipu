@@ -12,6 +12,8 @@ import { useUiStore } from '../store/uiStore'
 import { PREVIEW_BASE_W } from './zoomFit'
 import { openExternalUrl } from './openUrl'
 import { beginDrag } from '../ui/dragGesture'
+// adj723：音符点击（单击 / Ctrl+单击）的动作判定（纯模块，便于 smoke 断言）
+import { noteClickAction, noteClickKind } from './noteClickAction'
 import { tempoLabel } from '@ijipu/engine/parser/parser'
 import { layoutScore, renderScoreToSvg, noteIdToCodePos, buildIndexToPage, SEGMENT_ROW_GAP_DEFAULT, notesRowBaseline } from '@ijipu/engine'
 import type { ScorePage, PageConfig } from '@ijipu/engine'
@@ -68,6 +70,9 @@ export function PreviewPane() {
   const dockPanel = useUiStore((s) => s.dockPanel)
   const setPlaybackStart = useUiStore((s) => s.setPlaybackStart)
   const bumpPlaybackTick = useUiStore((s) => s.bumpPlaybackTick)
+  // adj723：`Ctrl+单击音符` 要**立即打开试听** ⇒ 走 `requestDockPanel('tryout')`
+  //（它是"打开并聚焦"的语义；`dockOpen && dockPanel==='tryout'` 只是"当前可达"）
+  const requestDockPanel = useUiStore((s) => s.requestDockPanel)
   // adj354：@@ 显示默认音色名——无 Y 时用试听音色列表第一个启用音色（与播放端一致）
   const playbackHqEnabled = useUiStore((s) => s.playbackHqEnabled)
   const defaultInstrumentRef = useMemo(() => firstEnabledInstrumentRef(playbackHqEnabled), [playbackHqEnabled])
@@ -226,11 +231,34 @@ export function PreviewPane() {
     if (!target) return
     const id = target.getAttribute('data-notepos') ?? target.getAttribute('data-cipos')
     if (!id) return
+    /**
+     * adj723（用户要求）：**`Ctrl + 鼠标左键` 点音符 ⇒ 立即打开试听对话框，并从该音符开始播放**。
+     *
+     * 与已有两条路的区别（判定收敛在纯模块 `noteClickAction.ts`，便于 smoke 断言）：
+     *  · **单击**（`adj284`）= 光标跳转；试听**已经可达时**顺带从该音重播；
+     *  · **双击**（`adj88`）= 同上，且**必须试听已可达**才动作（未打开时不弹窗，避免误触）；
+     *  · **`Ctrl+单击`（本条）= 显式"从这里试听"**：不管试听是否开着，
+     *    都先 `requestDockPanel('tryout')` 把底栏试听页签**打开并聚焦**，
+     *    再置起点 + 递增 `playbackTick`。`PlaybackDialog` 监听 `playbackTick`，
+     *    首次挂载时 tick 已变化 ⇒ 会**自动从起点播放**（与双击走的同一条机制）。
+     *
+     * 为什么用 `requestDockPanel` 而不是 `toggleDock`：前者是"打开并聚焦"（最小化时也能展开、
+     * 异页签时不会把内容区留成 0 高），语义与本条完全对应（见 `uiStore` 里该 action 的说明）。
+     */
+    const action = noteClickAction(noteClickKind(e))
+    if (action.openTryout) {
+      e.preventDefault()
+      setActiveNoteId(id)
+      setPlaybackStart(id)
+      requestDockPanel('tryout')
+      bumpPlaybackTick()
+      return
+    }
     setActiveNoteId(id)
     // adj634（用户要求）：光标落在**音符块末尾**（与后一块之间的空格之前），而不是块首——
     // 修饰符（& 编码、注释、倚音括号）都跟在主音符后面，落在块末就可以直接接着写。
     const pos = noteIdToCodePos(code, id, 'end')
-    if (pos !== null) jumpCursor(pos)
+    if (pos !== null && action.jumpCursor) jumpCursor(pos)
     if (isPlaybackOpen) {
       setPlaybackStart(id)
       bumpPlaybackTick()
