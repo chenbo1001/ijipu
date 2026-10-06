@@ -350,30 +350,59 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
     setStarting(true)
     // adj293：整个播放流程包 try/catch——异常不再静默（此前 async 抛错 → 无声无色块）
     try {
+      /**
+       * adj723c（用户报「播放时 `{dsb}` 那两行完全没有色块」）：
+       *
+       * **把「序列 / 色块 / 高亮」与「音源」解耦**——原顺序是「先取音源、加载成功才建序列」，
+       * 而音源那条链有**三个环境依赖**（IndexedDB 缓存 / 安装目录内置 SF2 / 联网下载）。
+       * 任一步失败就 `return` ⇒ `setPlayheadTrack` **永不执行** ⇒ 谱面上一个色块都不出现、
+       * 播放位置高亮也全无，用户看到的只是"点了播放但什么都没动"。
+       * 实测（Chrome DevTools Protocol 驱动 dev 页面）：`track=0 段 currentMs=0`，而按钮已切到播放态。
+       *
+       * 现在：**先建序列 → 写字形轨道/高亮 → 再取音源 → 最后调度发声**。
+       * 音源失败只降级为「**无声**」：色块与高亮照常走完。
+       * （与 `AGENTS` 九/十条同精神：视觉反馈不应成为音频环境的附属。）
+       */
+      let bankError = ''
+      // ---- ① 音源后端实例（不加载音色库）----
       // adj344：固定 SpessaSynth 高保真后端（不再提供合成/midi-js 切换）
       let backend = backendRef.current
-      if (!backend || !backend.hq) {
+      let backendReady = backend !== null && backend.hq
+      if (!backendReady) {
         backendRef.current?.dispose()
         backend = new SpessaSynthBackend()
         backendRef.current = backend
-        await (backend as unknown as { ready?: () => Promise<void> }).ready?.()
-        await new Promise((r) => setTimeout(r, 200))
+        try {
+          await (backend as unknown as { ready?: () => Promise<void> }).ready?.()
+          await new Promise((r) => setTimeout(r, 200))
+          backendReady = true
+        } catch (e) {
+          backendReady = false
+          bankError = e instanceof Error ? e.message : String(e)
+        }
       }
-      try {
-        const hqLib = getHqLibrary()
-        // adj347：先确保音源就绪（初次自动下载/缓存；已缓存直接读）；点播放不再重复下载
-        await ensureBank()
-        // adj416：取音源字节——缓存优先，其次**安装目录内置 SF2**（桌面直接读文件），最后才是联网下载
-        const { bank } = await resolveHqBank(hqLib, hqCache)
-        await backend.load(bank)
-        backend.setVoice(playbackHqVoice)
-        setSamplerState('ready')
-      } catch (e) {
+      // ---- ② 音源字节（失败只置错误文本，**不再 return**）----
+      if (backendReady && backend !== null) {
+        try {
+          const hqLib = getHqLibrary()
+          // adj347：先确保音源就绪（初次自动下载/缓存；已缓存直接读）；点播放不再重复下载
+          await ensureBank()
+          // adj416：取音源字节——缓存优先，其次**安装目录内置 SF2**（桌面直接读文件），最后才是联网下载
+          const { bank } = await resolveHqBank(hqLib, hqCache)
+          await backend.load(bank)
+          backend.setVoice(playbackHqVoice)
+          setSamplerState('ready')
+        } catch (e) {
+          backendReady = false
+          bankError = e instanceof Error ? e.message : String(e)
+          setSamplerState('failed')
+        }
+      } else {
         setSamplerState('failed')
-        backendRef.current?.dispose()
-        // adj344：固定高保真后不再回退合成（合成试听已移除），直接明确报错
-        showNotice(`音源加载失败，无法试听：${e instanceof Error ? e.message : String(e)}`, 'error')
-        return
+      }
+      if (!backendReady) {
+        // 音源不可得：**保留视觉**（色块 + 高亮 + 进度读数照常），只是没有声音
+        showNotice(`音源加载失败，本次试听**无声**（色块与播放位置照常显示）：${bankError}`, 'error')
       }
       // 构建序列（含反复展开；adj88：双击谱面音符定位试听起点）
       // adj310：声音/色块统一的准备延迟（毫秒）——按下播放后延迟才出第一声，色块同步
@@ -432,7 +461,12 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       // adj344：高保真音色由 setVoice(GM program) 决定，无需全局乐器覆盖参数（globalInstrument）
       // adj285：不再用 onNote 同步设置 activeNoteId（循环内逐事件 set → 批处理后为最后一事件）
       // adj309：按下播放后延迟 200ms 才出第一声——给听者准备时间 + 让 ctx resume 完成
-      const job = schedulePlay(seq, backend, undefined, undefined, PLAY_FIRST_DELAY_MS)
+      // adj723c：音源不可得时**不调度发声**，但仍启动视觉定时器（用 seq 构造一个"空调度" job）——
+      // `startTimers` 只依赖 `job.totalMs`（收尾复位），色块/高亮/进度读数因此照常走完。
+      const job =
+        backendReady && backend !== null
+          ? schedulePlay(seq, backend, undefined, undefined, PLAY_FIRST_DELAY_MS)
+          : { totalMs: seq.totalMs, cancel: () => {} }
       cancelRef.current = job.cancel
       setPlaying(true)
       setPaused(false)

@@ -524,6 +524,8 @@ export function PreviewPane() {
                 />
                 {/* adj282：播放进度跟随色块（接近透明，随播放时钟滑动；未播放时自身不渲染） */}
                 <PlayheadLayer page={page} noteSize={pageConfig.note_size} />
+                {/* adj723b：**只读自检**（见 `PlayheadDiag` 说明；不参与渲染） */}
+                <PlayheadDiag pageIndex={page.index} noteSize={pageConfig.note_size} />
                 {showGuides && (
                   <div
                     className="guide-layer"
@@ -855,6 +857,53 @@ function playheadBaseOf(
   if (pos.playVoice) return segVoiceColor(pos.playVoice)
   const idx = map.get(pos.instrument ?? '') ?? (pos.voice - 1) % PLAYHEAD_COLORS.length
   return PLAYHEAD_COLORS[idx]
+}
+
+/**
+ * adj723b：色块链路的**只读自检**。
+ *
+ * 背景：用户报「播放时 `{dsb}` 那两行没有任何色块」，但引擎侧审计（`_r1` 临时脚本，用其原谱逐字）
+ * 显示"**可发声事件 0 个缺色块、全曲 69 个采样点 0 次无块**"——即问题只在"引擎 → 屏幕"这一段，
+ * 而远程无法看到用户浏览器里的真实状态。这里把**链路上每一步的实况**挂到 `window.__ijipuPlayhead()`，
+ * 用户在控制台一句话就能取回：数据到了吗 / 定位算出来了吗 / DOM 里画出来了吗 / 画在哪。
+ *
+ * 为什么不在 `PlayheadLayer` 里做：那一层在"未播放"时会 `return null`（不渲染），
+ * 挂不上任何东西；本组件**恒渲染**（`null` 输出），因此任何时刻都能被调用。
+ *
+ * 生产构建同样保留（只读、无副作用、仅一个函数引用），因为下次再出这类"只有用户环境复现"
+ * 的问题时它是唯一能取证的手段；体积代价是一个闭包。
+ */
+function PlayheadDiag({ pageIndex, noteSize }: { pageIndex: number; noteSize: number }) {
+  const currentMs = useDocStore((s) => s.currentMs)
+  const track = useDocStore((s) => s.playheadTrack)
+  useEffect(() => {
+    const dump = (): string => {
+      const groups = trackKeysOf(track)
+      const mine = [...groups].filter(([k]) => k.startsWith(`${pageIndex}|`))
+      const lines: string[] = [
+        `track=${track.length} 段  currentMs=${currentMs.toFixed(1)}`,
+        `本页组数=${mine.length}（全部 ${groups.size}）  noteSize=${noteSize}`,
+      ]
+      for (const [k, segs] of mine) {
+        const pos = playheadPosIn(segs, currentMs, pageIndex, noteSize)
+        lines.push(
+          `  ${k}  段=${segs.length}  ${pos ? `★可见 x=${pos.x.toFixed(1)} y=[${pos.yTop.toFixed(1)}, ${pos.yBottom.toFixed(1)}] w=${pos.width.toFixed(1)}` : '（当前不可见）'}`,
+        )
+      }
+      const dom = document.querySelectorAll('.playhead-marker')
+      lines.push(`DOM 里 .playhead-marker = ${dom.length} 个`)
+      dom.forEach((el, i) => {
+        const st = (el as HTMLElement).style
+        lines.push(
+          `  #${i} left=${st.left} top=${st.top} w=${st.width} h=${st.height} bg=${st.background} box=${st.boxShadow}`,
+        )
+      })
+      lines.push(`轨道前 3 项：${track.slice(0, 3).map((t) => `${t.group}/${t.instrument ?? ''}/${t.playVoice ?? ''}@${t.atMs.toFixed(0)}ms yTopMin=${t.yTopMin ?? '-'}`).join(' | ')}`)
+      return lines.join('\n')
+    }
+    ;(window as unknown as { __ijipuPlayhead?: () => string }).__ijipuPlayhead = dump
+  }, [track, currentMs, pageIndex, noteSize])
+  return null
 }
 
 /**

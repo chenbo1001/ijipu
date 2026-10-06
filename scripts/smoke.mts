@@ -7271,6 +7271,42 @@ console.log('[adj427] segment playback (voices / instruments / gain)')
     void pg722
   }
   /**
+   * Z8f（**adj722b**，用户报「`(1'// 7// 6//) (6// 6/)` 这部分没有色块显示」）：
+   * **任何可发声事件的色块段宽必须 > 0**——宽度为 0 等于"这块根本画不出来"。
+   *
+   * 根因：段层右界钳制（`adj439`）取的是 `(页|组|声部)` 下**所有段右界的最小值**，
+   * 本意"别越出任何一段"，实际成了"别越出**最窄**那段"。实测该行三段 `{dsb}` 的
+   * `blockRight` = `151.5 / 303.5 / 530.1` ⇒ 取 min = **151.5**，
+   * 而第 2、3 段包络外的主旋律 x 已在 `197.6` 之后 ⇒ `width = max(0, 151.5 − 197.6) = **0**`，
+   * 实测 **21 个段宽度为 0**（用户截图里"这一段没有色块"就是这个）。
+   * 现改为按**本音符所属段**取 `blockRight`（`dsbSegmentOf`，与 `adj720` 同一口径）。
+   *
+   * 用例：用户原谱第 1 行（三段 `{dsb}`，右界差别很大）——旧实现必红。
+   */
+  {
+    const pr8f = parseJps(
+      'V: 1.0\nB: t\nD: C\nP: 4/4\n' +
+        'Q: 6, 0/ 3\'/ 7 {dsb 0/ 1// 2// } 0/ 6// 7// |["1." {dsb (3// 2// 1//) (1// 1/) 7,/ 1- } (1\'// 7// 6//) (6// 6/) 5/ 6- | 0 0 0 1/ 2/ :|]\n',
+    )
+    const lay8f = layoutScore(pr8f, defaultPageConfig)
+    const seq8f = buildPlaySequence(pr8f, lay8f, 120)
+    const zero8f: string[] = []
+    let total8f = 0
+    for (const e of seq8f.events) {
+      const p8f = e.placed as unknown as { playable?: boolean; token: { raw?: string } }
+      if (!p8f.playable) continue
+      for (const s8f of e.playheadSegs ?? []) {
+        total8f++
+        if (s8f.width <= 0.01) {
+          zero8f.push(`${JSON.stringify(p8f.token.raw)}@${(e.atMs / 1000).toFixed(2)}s(x=${s8f.x.toFixed(1)})`)
+        }
+      }
+    }
+    check('Z8f adj722b 可发声事件的色块段宽都 > 0（旧实现被"最窄那段"钳成 0 宽）',
+      total8f > 0 && zero8f.length === 0,
+      `总段=${total8f} 零宽=${zero8f.length}：${zero8f.slice(0, 6).join(' | ')}`)
+  }
+  /**
    * Z8e（**adj722**，用户复报「下面声部色块不正确（跑到后面音符上）」）：
    * **`{dsb}` 包络外主旋律的色块，右缘不得超过自己音符的槽右缘**。
    *

@@ -569,11 +569,26 @@ export function buildPlaySequence(
          * （adj667 起 = 右大括号**墨迹左缘**；旧数据无该字段时退回 `x2`）。
          */
         /**
-         * adj722：需要钳制的是 **`{dsb}` 视觉下排**（包络外主旋律）——它右侧可能紧跟包络外的音符。
-         * 判据从 `playVoice === 'second'` 改为 **`parentY !== undefined`**：
-         * 翻转后 `'second'` 落在**段内容**（上排）身上，而它的右界本来就收在段内容区内。
+         * adj722b（用户报「`(1'// 7// 6//) (6// 6/)` 这部分没有色块显示」）：
+         * **钳制必须按"本音符所属那一段"取**，不能取"该组所有段的 `min`"。
+         *
+         * 根因：`segRightByGroupVoice` 对 `(页|组|声部)` 取**所有段的最小右界**
+         * （本意是"别越出任何一段"，实际成了"别越出最窄那段"）。实测第 1 行三段 `{dsb}` 的
+         * `blockRight` = `151.5 / 303.5 / 530.1`，取 min ⇒ **151.5**，
+         * 于是第 2、3 段包络外的主旋律全被钳到 `151.5`，而它们本身 x 已在 `197.6` 之后
+         * ⇒ `width = max(0, 151.5 − 197.6) = 0` ⇒ **色块宽度为 0、完全画不出来**
+         * （实测 21 个段宽度为 0，正是用户截图里"这一段没有色块"）。
+         *
+         * 改为用 `dsbSegmentOf` 取**本音符所属段**的 `blockRight`（`adj720` 的同一口径）。
+         * 取不到（音符在段内容区间之外、又不在任何段的 x 范围内）时退回组级 min——
+         * 那正是"包络之后的主旋律"以外的边界情形，保守钳制不会造成 0 宽（它 x 本来就靠左）。
          */
-        const segRight = n.parentY !== undefined ? segRightByGroupVoice.get(`${n.id.page}|${n.id.group}|${n.id.voice}`) : undefined
+        const ownPage = pageByNoteIdx.get(n.id.index)
+        const ownSeg = ownPage ? dsbSegmentOf(ownPage, n) : undefined
+        const segRight =
+          n.parentY !== undefined
+            ? (ownSeg?.blockRight ?? segRightByGroupVoice.get(`${n.id.page}|${n.id.group}|${n.id.voice}`))
+            : undefined
         rightEdgeByNoteIdx.set(n.id.index, segRight !== undefined ? Math.min(base, segRight) : base)
       })
     }
