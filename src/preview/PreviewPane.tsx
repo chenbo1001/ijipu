@@ -65,9 +65,11 @@ export function PreviewPane() {
   const jumpCursor = useDocStore((s) => s.jumpCursor)
   const showGuides = useUiStore((s) => s.showGuides)
   const previewZoom = useUiStore((s) => s.previewZoom)
-  // adj563：原先这里还订阅了 `modal`（用于 `modal === 'playback'`），试听只剩底栏一条路后已不需要
-  const dockOpen = useUiStore((s) => s.dockOpen)
-  const dockPanel = useUiStore((s) => s.dockPanel)
+  /**
+   * adj723g：`dockOpen` / `dockPanel` 的订阅**已删除**——原先只服务于 `isPlaybackOpen`
+   * （"试听开着时单击音符就重播"），而用户要求单击**只定位光标** ⇒ 该判据没有使用者了。
+   * 少两个 store 订阅也顺带少两次无谓重渲染。
+   */
   const setPlaybackStart = useUiStore((s) => s.setPlaybackStart)
   const bumpPlaybackTick = useUiStore((s) => s.bumpPlaybackTick)
   // adj723d：`Ctrl+单击音符` 要**打开并聚焦试听**（`requestDockPanel` 在 ToolDock 里落地为
@@ -208,12 +210,15 @@ export function PreviewPane() {
     }
   }, [activeNoteId, pagesHtml])
 
-  // adj490：试听「可达」= 底栏 dock 当前在试听页签（`dockOpen && dockPanel==='tryout'`）。
-  // 历史：此前只判 `modal==='playback'`——底栏 dock 的试听页签（adj462 引入）打开时**不会**设 modal
-  // （顶栏按钮只 toggleDock('tryout') 不 openModal），导致「暂停/停止时点预览音符跳到该处重播」失效（用户报）。
-  // adj563：`modal === 'playback'` 那一半**已经永远为假**（试听在 adj462 之后只剩底栏这一条路，
-  // ModalKind 里也不再有 'playback'）⇒ 删掉死支，只留真正生效的底栏判据。
-  const isPlaybackOpen = dockOpen && dockPanel === 'tryout'
+  /**
+   * adj723g（用户要求）：**"试听是否开着"不再参与预览区点击的判定**。
+   *
+   * 历史：`adj490` 引入 `isPlaybackOpen = dockOpen && dockPanel === 'tryout'`，
+   * 用途是"试听开着时**单击**音符就从该处重播"；用户现在要求
+   * 「点击**只保留**定位编辑器到该音符位置，播放只在**双击**时发生」⇒ 该判据已无使用者，删除。
+   * （`adj490` 的另一半价值——"底栏试听页签也要算可达"——由双击/`Ctrl+单击` 的 `tryoutFromNote`
+   *   全盘接管：它根本不再需要"是否已开"这个前提。）
+   */
 
   /**
    * adj723e（用户要求）：**从这里试听**——抽成一个动作，供 `Ctrl+单击` 与（新增的）**双击**共用。
@@ -266,12 +271,16 @@ export function PreviewPane() {
     setActiveNoteId(id)
     // adj634（用户要求）：光标落在**音符块末尾**（与后一块之间的空格之前），而不是块首——
     // 修饰符（& 编码、注释、倚音括号）都跟在主音符后面，落在块末就可以直接接着写。
+    /**
+     * adj723g（用户要求）：「试听对话框打开的情况下，**取消**"点击音符从该音符播放"的操作，
+     * 只在**双击**时播放；点击**只保留**定位编辑器到该音符位置的操作」。
+     *
+     * 故这里**不再**有 `if (isPlaybackOpen) { setPlaybackStart(id); bumpPlaybackTick() }` 那段——
+     * 单击一律只干两件事：把该音符设为高亮 + 光标跳到源码里该音符处。
+     * 想"从这里听"请用**双击**或 **`Ctrl+单击`**（两者都走 `tryoutFromNote`）。
+     */
     const pos = noteIdToCodePos(code, id, 'end')
     if (pos !== null && action.jumpCursor) jumpCursor(pos)
-    if (isPlaybackOpen) {
-      setPlaybackStart(id)
-      bumpPlaybackTick()
-    }
   }
 
   /**

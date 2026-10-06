@@ -7115,6 +7115,32 @@ console.log('[adj427] segment overlay placement (notes / barlines / brackets)')
         !plain.setPlaybackStart &&
         !plain.bumpTick,
       JSON.stringify(plain))
+    /**
+     * adj723g（用户要求）：「试听对话框打开的情况下，**取消**"点击音符从该音符播放"，
+     * 只在**双击**时播放；点击**只保留**定位编辑器到该音符位置的操作」。
+     *
+     * 两层保证：
+     *  ① 动作集层面——`single` 分支**不含**任何播放动作（上面那条已断言）；
+     *  ② **组件层面**——`PreviewPane.onClick` 的单击路径里**不得再出现**
+     *     `setPlaybackStart` / `bumpPlaybackTick`（历史 `adj284` 曾写"试听开着时单击就重播"）。
+     *     断言"从 `const action = noteClickAction(...)` 到函数结束之间不含这两个调用"。
+     */
+    {
+      const src = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
+      // 取 `onClick` 的函数体，并**先剥注释**（注释里会引用旧写法——同 E-2026-237 的坑）
+      const s0 = src.indexOf('const onClick = ')
+      const s1 = src.indexOf('const onDoubleClick', s0)
+      const raw = s0 >= 0 && s1 > s0 ? src.slice(s0, s1) : ''
+      const body = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+      // 单击分支 = `setActiveNoteId(id)` 之后那一段（`Ctrl+单击` 走的是上面的 openTryout 分支）
+      const afterActive = body.slice(body.indexOf('setActiveNoteId(id)'))
+      check('adj723g 单击路径（onClick 的非 Ctrl 分支）里没有 setPlaybackStart / bumpPlaybackTick',
+        body.length > 0 &&
+          !/setPlaybackStart\(/.test(afterActive) &&
+          !/bumpPlaybackTick\(/.test(afterActive) &&
+          /jumpCursor\(pos\)/.test(afterActive),
+        `片段长度=${body.length} 含 start=${/setPlaybackStart\(/.test(afterActive)} 含 tick=${/bumpPlaybackTick\(/.test(afterActive)}`)
+    }
     check('adj723 只认 Ctrl（Meta/Shift/Alt 都按普通单击处理）',
       !cmd.openTryout && cmd.jumpCursor && noteClickKind({ metaKey: true, ctrlKey: false }) === 'single',
       `meta→${noteClickKind({ metaKey: true })}`)
@@ -14047,19 +14073,24 @@ console.log('[113] touch-friendly drag handles (adj487)')
     '')
 }
 
-// ---- 114. 试听可达：底栏 dock 试听页签下，点预览音符也能从该处开始播放（adj490）----
-console.log('[114] playback reachable: clicking preview note while dock tryout is open (adj490)')
+// ---- 114. 预览区点击语义：单击只定位光标；播放只由双击 / Ctrl+单击触发（adj490 → adj723g 收敛）----
+console.log('[114] preview click semantics: single = cursor only; play on double-click / Ctrl+click (adj723g)')
 {
   const prevSrc = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
-  // adj490：之前 onClick / onDoubleClick 只判 `modal === 'playback'`，底栏 dock 试听页签打开时
-  //（顶栏按钮只 toggleDock('tryout') 不 openModal）点击预览音符无效。改为同时接受 dock 试听状态。
-  // adj563：`modal === 'playback'` 那一半已**永远为假**（试听只剩底栏一条路，ModalKind 里已无 'playback'）
-  // ⇒ 断言随之改为"只认底栏试听页签"，并反向断言不再引用已下线的 modal 判据。
-  // ⚠ 反向断言前**先剥注释**：上面两行注释里故意引用了旧写法（同 E-2026-237 的坑）。
+  /**
+   * adj723g（用户要求）：「试听对话框打开的情况下，**取消**"点击音符从该音符播放"的操作，
+   * 只在**双击**时播放；点击**只保留**定位编辑器到该音符位置的操作」。
+   *
+   * 于是本节的历史断言全部作废并**反向**：
+   *  · `adj490`/`adj563` 曾要求 `isPlaybackOpen = dockOpen && dockPanel === 'tryout'`
+   *    存在（"试听开着时单击也重播"）——**现在必须不存在**；
+   *  · `dockOpen`/`dockPanel` 两个 store 订阅也随之无用，应当一并删掉（少两次无谓重渲染）。
+   *
+   * ⚠ 反向断言前**先剥注释**：源码注释里会引用旧写法（同 E-2026-237 的坑）。
+   */
   const prevNoComment = prevSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
-  check('adj490/adj563 PreviewPane：试听可达 = **底栏试听页签**（不再引用已下线的 `modal === \'playback\'`）',
-    /isPlaybackOpen = dockOpen && dockPanel === 'tryout'/.test(prevNoComment) &&
-      !/modal === 'playback'/.test(prevNoComment),
+  check('adj723g PreviewPane：**没有** `isPlaybackOpen` 判据（单击不再因"试听开着"而播放）',
+    !/isPlaybackOpen/.test(prevNoComment) && !/modal === 'playback'/.test(prevNoComment),
     '')
   /**
    * adj723e（用户要求「**双击音符执行与 `Ctrl+点击音符` 同样的操作**」）：
@@ -14072,7 +14103,14 @@ console.log('[114] playback reachable: clicking preview note while dock tryout i
     /onDoubleClick[\s\S]{0,700}tryoutFromNote\(id\)/.test(prevSrc) &&
       !/if \(!isPlaybackOpen\) return/.test(prevSrc),
     '')
-  check('adj490 PreviewPane 已从 uiStore 订阅 dockOpen / dockPanel', /dockOpen = useUiStore\(\(s\) => s\.dockOpen\)/.test(prevSrc) && /dockPanel = useUiStore\(\(s\) => s\.dockPanel\)/.test(prevSrc), '')
+  /**
+   * adj723g：`dockOpen` / `dockPanel` 两个订阅**必须删除**——它们原先只服务于 `isPlaybackOpen`
+   * （"试听开着时单击重播"）。留着就是两个没有使用者的 store 订阅（多余重渲染）。
+   */
+  check('adj723g PreviewPane **不再**订阅 dockOpen / dockPanel（该判据已随单击语义取消而删除）',
+    !/dockOpen = useUiStore\(\(s\) => s\.dockOpen\)/.test(prevSrc) &&
+      !/dockPanel = useUiStore\(\(s\) => s\.dockPanel\)/.test(prevSrc),
+    '')
 }
 
 // ---- 115. dock 关闭：`!dockOpen` 早退守卫 + 关闭按钮必须留在可视区（adj491）----
