@@ -7281,6 +7281,67 @@ console.log('[adj427] segment playback (voices / instruments / gain)')
       upper.length > 0 && lower.length === upper.length && missUpper.length === 0 && missLower.length === 0,
       `上层 ${upper.length} / 下层 ${lower.length}；缺事件：上=${missUpper.join(',') || '无'} 下=${missLower.join(',') || '无'}`)
   }
+  /**
+   * Z22（**adj719**，用户复报「这几处 `{dsb}` 还是没能实现多声部演奏」）：
+   * **两层必须"同刻成对且音高不同"**——这才是"听起来是双声部"的充分条件。
+   *
+   * 为什么单看"每个音都有事件"不够（`Z21` 的口径）：两层若被合并到同一刻且**同音高**，
+   * 听感仍是一个音（同度叠音）。本断言逐时刻核对：
+   *  · 每个上层音的起点时刻，**必须**存在同刻的下层音；反之亦然；
+   *  · 该时刻两层的**实际发声音高必须不同**。
+   *
+   * 用**用户原谱的完整两行**（含 `["1."`/`["2."`/`["3."` 反复与跳房子 `&ds`）——
+   * 早前的排查正是"只在单行无反复的最小用例里正常"，所以断言必须覆盖反复/跳转走查。
+   */
+  {
+    const src719 =
+      'V: 1.0\nB: t\nD: C\nP: 4/4\n' +
+      "Q: 6, 0/ 3'/ 7 {dsb 0/ 1// 2// } 0/ 6// 7// |[\"1.\" {dsb (3// 2// 1//) (1// 1/) 7,/ 1- } (1'// 7// 6//) (6// 6/) 5/ 6- | 0\"间奏略\" 0 0 1/ 2/ :|][\"2.\" {dsb (3// 2// 1//) (1// 1/) 7,/ 1- } (1'// 7// 6//) (6// 6/) 5/ 6- ||/]&ds\n" +
+      'Q :|/["3." {dsb (3// 2// 1//) (1// 1/) 7,/ 1- } (1\'// 7// 6//) (6// 6/) 5/ 6- |"p:2/4" 0 0/ 3\'/ |]/"p:4/4" 6 0/ 3/ 7, {dsb 0/ 1// 2// } 0/ 6// 7// |"p:2/4" {dsb (3// 2// 1//) 1// } (1\'// 7// 6//) 6// 0/ 5/ |"p:4/4" 6--- ||\n'
+    const parsed719 = parseJps(src719)
+    const lay719 = layoutScore(parsed719, defaultPageConfig)
+    const seq719 = buildPlaySequence(parsed719, lay719, inferBpm(parsed719))
+    const soundOf = (e: (typeof seq719.events)[number]): string | null =>
+      e.pitch ?? ((e.placed as unknown as { audioPitch?: string | null }).audioPitch ?? null)
+    /** 只取**真正发声**的事件（休止符 `playable=false` 不参与） */
+    const sound = seq719.events.filter((e) => e.placed.playable && soundOf(e))
+    const upperEv = sound.filter((e) => e.placed.segment?.layer === 'upper' && e.placed.segment.type === 'dsb')
+    const lowerEv = sound.filter((e) => !e.placed.segment && e.placed.playVoice === 'second')
+    /** 同刻（`atMs` 相同）两层并发且音高不同 */
+    const pair = (a: (typeof sound)[number], b: (typeof sound)[number]) =>
+      Math.abs(a.atMs - b.atMs) < 1e-6 && soundOf(a) !== soundOf(b)
+    const upperPaired = upperEv.filter((u) => lowerEv.some((l) => pair(u, l)))
+    const lowerPaired = lowerEv.filter((l) => upperEv.some((u) => pair(l, u)))
+    check('Z22 adj719 用户原谱（含反复/跳房子）`{dsb}` 两层**同刻成对且音高不同**',
+      upperEv.length > 0 &&
+        lowerEv.length > 0 &&
+        upperPaired.length === upperEv.length &&
+        lowerPaired.length === lowerEv.length,
+      `上层 ${upperPaired.length}/${upperEv.length}、下层 ${lowerPaired.length}/${lowerEv.length} 成对；` +
+        `未配对上层=${upperEv.filter((u) => !upperPaired.includes(u)).map((u) => `${JSON.stringify((u.placed.token as { raw?: string }).raw)}@${u.atMs}`).join(',') || '无'}`)
+    /**
+     * Z23（**adj719**）：**导出的 MIDI 里 `{dsb}` 两层必须各占一条轨/一个通道**。
+     *
+     * 根因：`eventsToMidi` 原先只按 `id.voice` 分轨，而 `{dsb}` 上下两层**共用同一个声部号**
+     * （靠 `playVoice` 区分）⇒ 两层被塞进同一条轨、同一个 MIDI 通道，而该轨只在音色变化处
+     * 发一次 Program Change ⇒ 后一个音色覆盖前一个，**导出的 MIDI/音频听起来只有一个声部**
+     * （实时试听走 `schedulePlay` + `GmChannelAllocator`，所以"试听正常、导出不对"）。
+     *
+     * 判据：轨数 = `声部号 × 声部角色` 的**不同组合数**；且每轨首个 Program Change 与
+     * 该层音色一致（上层钢琴 0、下层手风琴 21）。
+     */
+    {
+      const midi = eventsToMidi(seq719.events, { bpm: inferBpm(parsed719), title: 't' })
+      /** 解析 MThd：nTracks 在 0x0A~0x0B */
+      const nTracks = (midi[10] << 8) | midi[11]
+      const combos = new Set(
+        seq719.events.filter((e) => e.placed.playable).map((e) => `${e.placed.id.voice}|${e.playVoice ?? 'main'}`),
+      )
+      check('Z23 adj719 导出的 MIDI：`{dsb}` 两层各占一条轨（轨数 = 声部×角色组合数 + 1 元数据轨）',
+        nTracks === combos.size + 1,
+        `轨数=${nTracks} 组合数=${combos.size}（期望 ${combos.size + 1}）；组合=${[...combos].join(',')}`)
+    }
+  }
 }
 
 // ---- adj429：色块按曲行几何动态定界（多声部/临时段不再互相覆盖、不压歌词）----
