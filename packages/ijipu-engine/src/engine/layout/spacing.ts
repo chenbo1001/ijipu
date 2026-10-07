@@ -187,23 +187,31 @@ export const TY_FONT_SIZE = (noteSize: number): number => {
 export const TY_WIDTH_SCALE = 1
 
 /**
- * `&ty` 的**纵向**缩放：`1.25` = 高度为原（`adj182`）的 1.25 倍（用户口径）。
+ * `&ty` 的**纵向**缩放：高度为原（`adj182`）的多少倍（用户口径）。
+ *
+ * 沿革：`adj723h` 定为 **1.25**（用户："&ty 高度调整 1.25 倍"）；
+ * 期间曾按"还要高些"试过 1.5，用户随即澄清「**还要上移一点，不是要高度增加**」⇒ **回到 1.25**，
+ * "上移"改由 `TY_BAR_GAP`（间距）实现。
  *
  * 渲染端以**基线**为不动点纵向拉伸（记号长在基线上方），于是：
- *  · 记号**高度** ×1.25；
+ *  · 记号**高度** ×本值；
  *  · **宽度不变**；
- *  · **墨迹下端仍贴着小节线上端**（见 `TY_BAR_GAP = 0`）——拉伸不动下端。
+ *  · **墨迹下端**由 `TY_BAR_GAP` 决定（拉伸不动下端，见 `tyBaselineY`）。
  */
 export const TY_HEIGHT_SCALE = 1.25
 
 /**
  * `&ty` **墨迹下端到小节线上端（`yTop`）的间距**（px）。
  *
- * 沿革：旧写法 `y = yTop + 0.35×fs`，而文字基线到"记号下端"约 `0.15×fs`（`adj182` 原话）。
- * `adj723h` 先后提过"+2px"、"1px"，**最终口径 = `0`**（用户：「墨迹间距 0」）
- * ⇒ 记号**墨迹下端与小节线上端齐平**。
+ * 沿革：旧写法 `y = yTop + 0.35×fs`（按"记号下端 ≈ `y + 0.15×fs`"反推）。
+ * `adj723h` 先后试过"+2px"、"1px"、"0"，用户最终口径：
+ * 「**&ty 还要上移一点**，……与小节线的墨迹间距 **0.5px** 试试」
+ * ⇒ 记号**墨迹下端落在小节线上端之上 0.5px**（= `yTop − 0.5`）。
+ *
+ * ⚠ 这里刻意选用**绝对 px** 而非按字号缩放：用户是按"看起来的间隙"给的数，
+ * 与字号无关（与 `VOLTA_BAR_GAP` 等同类常量一致）。
  */
-export const TY_BAR_GAP = 0
+export const TY_BAR_GAP = 0.5
 
 /**
  * `&ty` **基线 → 墨迹下端**的偏移（em 的倍数；**正 = 墨迹下端在基线之下**）。
@@ -231,14 +239,19 @@ export const TY_INK_BOTTOM_EM = 0.352
 /**
  * `&ty` 记号的**文字基线 y**（渲染端 `y=` 属性）。
  *
- * `y = yTop + TY_BAR_GAP + TY_INK_BOTTOM_EM × fs × ky` ⇒ 墨迹下端落在 `yTop + TY_BAR_GAP`
- * （常量已按"最终缩放后的墨迹位移"实测标定，故**不要再单独乘一次 `ky`**）。
+ * `y = yTop − TY_BAR_GAP + TY_INK_BOTTOM_EM × fs × ky`
+ * ⇒ 墨迹下端落在 `yTop − TY_BAR_GAP`（**在线上端之上** `TY_BAR_GAP`）。
+ *
+ * ⚠ 符号方向：SVG 的 **y 越小越靠上**，故"上移"是**减** `TY_BAR_GAP`。
+ * 本轮一开始写成 `+`，那会让记号反而**下调**（与"上移"相反）。
+ *
+ * 常量 `TY_INK_BOTTOM_EM` 已按"最终缩放后的墨迹位移"实测标定，故**不要再单独乘一次 `ky`**。
  *
  * 抽成函数而非在渲染端内联：**渲染端与断言消费同一个式子**（`六之二·4`「数值口径必须同源」）——
- * 本轮连续两次对不上（一次把 `ky` 乘重、一次符号写反），根因就是"渲染端一份、断言各写一份"。
+ * 本轮连续多次对不上（把 `ky` 乘重、符号写反），根因就是"渲染端一份、断言各写一份"。
  */
 export const tyBaselineY = (yTop: number, noteSize: number): number =>
-  yTop + TY_BAR_GAP + TY_INK_BOTTOM_EM * TY_FONT_SIZE(noteSize) * TY_HEIGHT_SCALE
+  yTop - TY_BAR_GAP + TY_INK_BOTTOM_EM * TY_FONT_SIZE(noteSize) * TY_HEIGHT_SCALE
 
 /** `&hs`（花 S `𝄋`）字号（px；`adj129` 引入、`adj182` 定为 `12×s`） */
 export const HS_FONT_SIZE = (noteSize: number): number => Math.max(10, Math.round(12 * noteScaleOf(noteSize)))
