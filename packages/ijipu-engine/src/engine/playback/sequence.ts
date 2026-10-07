@@ -848,8 +848,13 @@ export function buildPlaySequence(
    */
   const isStrictCloserBar = (it: SeqItem): boolean =>
     it.kind === 'bar' && !!it.bar && isVoltaCloserBarline(it.bar, false)
+  /** 仅反复线（`:|`/`:|:`）——未封闭房子末尾线的**首选** */
+  const isRepeatBar = (it: SeqItem): boolean =>
+    it.kind === 'bar' && !!it.bar && (it.bar.type === ':|' || it.bar.type === ':|:')
+  /** 含 `&fine` 的末尾线（跳跃后备用） */
   const isFineOrStrictCloserBar = (it: SeqItem): boolean =>
     it.kind === 'bar' && !!it.bar && isVoltaCloserBarline(it.bar, true)
+  const voltaAfterRepeat = new Map<number, number>()
   const voltaAfterStrict = new Map<number, number>()
   const voltaAfterWithFine = new Map<number, number>()
   const pendingStarts: number[] = []
@@ -860,13 +865,16 @@ export function buildPlaySequence(
     if (item.bar?.voltaEnd && pendingStarts.length > 0) {
       const start = pendingStarts.pop()!
       if (item.bar.voltaEndSlash) {
-        // 未封闭房子（`|]/`）：往后找最近的末尾线
+        // 未封闭房子（`|]/`）：末尾线**优先取 `:|`/`:|:`**，其次跳跃线
+        const rep = seq.findIndex((it, k) => k > si && isRepeatBar(it))
         const strict = seq.findIndex((it, k) => k > si && isStrictCloserBar(it))
         const withFine = seq.findIndex((it, k) => k > si && isFineOrStrictCloserBar(it))
+        voltaAfterRepeat.set(start, rep >= 0 ? rep : si)
         voltaAfterStrict.set(start, strict >= 0 ? strict : si)
         voltaAfterWithFine.set(start, withFine >= 0 ? withFine : si)
       } else {
-        // 已封闭房子（`|]`）：就以该末尾小节线为界（两张表一致）
+        // 已封闭房子（`|]`）：就以该末尾小节线为界（各表一致）
+        voltaAfterRepeat.set(start, si)
         voltaAfterStrict.set(start, si)
         voltaAfterWithFine.set(start, si)
       }
@@ -1939,21 +1947,18 @@ export function buildPlaySequence(
         return false
       }
       /**
-       * adj723aa（用户口径）：**未封闭房子**的末尾线怎么取，取决于"**是否已经过 `&dc`/`&ds` 跳跃**"：
-       *  · **已跳过** ⇒ 若本房子区间里有 `&fine`，就**以该 `&fine` 为末尾**（`&fine` 是"大反复后的终点"）；
-       *  · **未跳过** ⇒ `&fine` **不算末尾**，取**其后面最近的"非 `&fine` 的反复或跳跃"**
-       *    （`:|` / `:|:` / `&dc` / `&ds`）——因为没有大反复时 `&fine` 不具备终点语义。
+       * adj723aa（用户口径）：**未封闭房子的末尾线优先取 `:|`/`:|:`**，其次才是跳跃线
+       * （`&dc`/`&ds`/`&fine`）。**不含** `||`/`||/`。
        *
-       * 用户原话：「经过 `&dc`/`&ds` 跳跃后，再进入跳房子，如果这个跳房子里有 `&fine` 则以此作为
-       * 跳房子的末尾，否则以其后面的非 `&fine` 的反复或跳跃做为末尾」。
+       * 用户给的谱 `… |["1." 3 3 3 3 |]/ 4 4 4 4 |&fine 5 5 5 5 :| 6 6 6 6 ||` 明确说
+       * 「**这里的跳房子为 3-5 小节，还有 `:|`**」⇒ 房子末尾就是那根 `:|`，
+       * **`&fine` 落在房子内部**（房子把 `4 4 4 4`、`5 5 5 5` 都含进去）。
+       * ⇒ 末尾线的选择次序：先找**其后最近的 `:|`/`:|:`**；没有再退到最近的跳跃线。
        */
       const allowFine = bigRepeatDone
-      const strictTarget = voltaAfterStrict.get(i)
-      const fineTarget = allowFine ? voltaAfterWithFine.get(i) : undefined
-      const after =
-        fineTarget !== undefined && strictTarget !== undefined
-          ? Math.min(fineTarget, strictTarget) // 区间里有 &fine 就取最近的末尾；没有则 fineTarget 会等于 strictTarget
-          : (fineTarget ?? strictTarget)
+      const repeatTarget = voltaAfterRepeat.get(i)
+      const jumpTarget = allowFine ? voltaAfterWithFine.get(i) : voltaAfterStrict.get(i)
+      const after = repeatTarget ?? jumpTarget
       const target = after === undefined || after <= i ? i + 1 : after
       landedByVoltaSkip = target
       i = target
@@ -1966,10 +1971,12 @@ export function buildPlaySequence(
      */
     if (insideVolta >= 0) {
       /**
-       * 走完本房子的末尾线才算用掉一次。末尾线取哪张表与"跳过时"保持一致：
-       * 已发生大反复（`bigRepeatDone`）⇒ 用含 `&fine` 的表；否则用不含 `&fine` 的表。
+       * 走完本房子的末尾线才算用掉一次。末尾线与"跳过时"取**同一优先次序**：
+       * 先 `:|`/`:|:`，没有再退到跳跃线（含 `&fine` 与否取决于是否已过大反复）。
        */
-      const end = bigRepeatDone ? voltaAfterWithFine.get(insideVolta) : voltaAfterStrict.get(insideVolta)
+      const end =
+        voltaAfterRepeat.get(insideVolta) ??
+        (bigRepeatDone ? voltaAfterWithFine.get(insideVolta) : voltaAfterStrict.get(insideVolta))
       if (i === (end ?? insideVolta + 1)) {
         const left = voltaLeft.get(insideVolta) ?? 0
         if (left > 0) voltaLeft.set(insideVolta, left - 1)
@@ -2016,16 +2023,20 @@ export function buildPlaySequence(
       (bar.type === ':|' || bar.type === ':|:') && pass < (repeatCountAt.get(i) ?? 2)
     if (bar.marks?.length && !repeatPending) {
       /**
-       * adj126/adj359（既有口径）：`&fine` 的终止条件——
-       *  · **没有**大反复（无 `&dc`/生效的 `&ds`）⇒ Fine **本身**就是曲终（`adj126` 断言）；
-       *  · **有**大反复 ⇒ 第一遍经过 Fine **不停**（要继续走到 D.C./D.S.），
-       *    等大反复回来后再经过 Fine 才终止（`adj359` 口径）。
+       * adj723aa（用户口径，2026-10）：**`&fine` 只有在"生效的大反复确实发生过"之后才终止**。
        *
-       * ⚠ 用户 2026-10 提出过"单独一个 Fine 不能作为结束（须有 D.C./D.S. 才停）"，
-       * 但那会**打红 `adj126`**（用户此前明确的"`&fine` 曲终截断"口径）——**两说冲突，待用户定夺**，
-       * 故本处**暂不改**，保持既有行为。
+       * 用户给的谱 `Q: 1 1 1 1 |&ds 2 2 2 2 |["1." 3 3 3 3 |]/ 4 4 4 4 |&fine 5 5 5 5 :| 6 6 6 6 ||`
+       * 明确说「**实际上 `&ds` 和 `&fine` 都不会生效**」，其演奏顺序为 `1 2 3 4 5 1 2 6`——
+       * 即：`:|` 把 `1 2 3 4 5` 走完 → 回跳 → 第 2 遍 `1 2`（房子已用完、跳过 `3 4 5`）→ `6`。
+       *
+       * 为什么本谱 `&ds` 不生效：**前面没有对应的花 S（`&hs`）**（见 `dsEffective`）；
+       * 既然从未发生大反复，`&fine` 也就**没有"反复后终点"的语义** ⇒ 不终止。
+       *
+       * ⚠ 旧判据是 `!hasBigRepeat || bigRepeatDone`：当谱里有 `&ds` 但其不生效时
+       * `hasBigRepeat` 为 false ⇒ `!hasBigRepeat` 为真 ⇒ **第一遍就停**（实测本谱只奏 16 音
+       * `1 1 1 1 · 2 2 2 2 · 3 3 3 3 · 4 4 4 4`）。改为只看"是否真的发生过"。
        */
-      if (bar.marks.includes('fine') && (!hasBigRepeat || bigRepeatDone)) {
+      if (bar.marks.includes('fine') && bigRepeatDone) {
         i = seq.length // 曲终：播放到此结束
         continue
       }

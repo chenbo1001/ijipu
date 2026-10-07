@@ -1738,7 +1738,21 @@ check('adj182 花S 记号下端与 yTop 齐平（y = yTop - 0.15×fs；字号走
 // 播放跳转：fine 截断 / ds 跳 hs / ty 跳下一 ty / dc 从头反复
 const mk126 = (q: string) => buildPlaySequence(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), layoutScore(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), DUR_CFG), 120)
 const pits126 = (seq: ReturnType<typeof mk126>) => seq.events.filter((e) => e.placed.audioPitch).map((e) => e.placed.audioPitch)
-check('adj126 播放：&fine 曲终截断（只播前 4 音）', pits126(mk126('1 2 3 4 |&fine 5 6 7 1 |')).join(',') === 'C4,D4,E4,F4', pits126(mk126('1 2 3 4 |&fine 5 6 7 1 |')).join(','))
+/**
+ * adj723aa（用户口径，2026-10）：**`&fine` 只有在"生效的大反复确实发生过"之后才终止**。
+ *
+ * 用户给的谱与说明：「`Q: 1 1 1 1 |&ds 2 2 2 2 |["1." 3 3 3 3 |]/ 4 4 4 4 |&fine 5 5 5 5 :|
+ * 6 6 6 6 ||`，实际上 **`&ds` 和 `&fine` 都不会生效**，演奏顺序为 `1 2 3 4 5 1 2 6`」——
+ * 本谱 `&ds` 前面**没有 `&hs`** 故不生效 ⇒ 从未发生大反复 ⇒ `&fine` 也没有"反复后终点"的语义。
+ *
+ * ⚠ 旧断言是 `只播前 4 音`（Fine 单独出现即曲终）——那是旧口径，按用户新说明**重写**：
+ * 只有 `&fine`、没有 D.C./D.S. 时，`&fine` **不终止**，整曲照奏（8 音）。
+ */
+check(
+  'adj723aa 只有 `&fine`（无 D.C./D.S.）⇒ **不终止**，整曲照奏 8 音',
+  pits126(mk126('1 2 3 4 |&fine 5 6 7 1 |')).join(',') === 'C4,D4,E4,F4,G4,A4,B4,C4',
+  pits126(mk126('1 2 3 4 |&fine 5 6 7 1 |')).join(','),
+)
 check('adj126 播放：&ds 跳到 &hs 位置（5 6 7 1 跳过）', pits126(mk126('1 2 3 4 |&ds 5 6 7 1 |&hs 2 3 4 5 |')).join(',') === 'C4,D4,E4,F4,D4,E4,F4,G4', pits126(mk126('1 2 3 4 |&ds 5 6 7 1 |&hs 2 3 4 5 |')).join(','))
 // adj359：&ty 第一次遇到忽略（无大反复则不跳越，全部演奏）；有大反复时第二次跳越两 ty 之间
 check('adj359 播放：&ty 无大反复时忽略（不跳越）', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |')).join(',') === 'C4,D4,E4,F4,G4,A4,B4,C4,D4,E4,F4,G4', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |')).join(','))
@@ -12097,8 +12111,14 @@ function runAdj598UnclosedVoltaScopeTests() {
     const events = [...seq.events].sort((a, b) => a.atMs - b.atMs)
     return { totalMs: seq.totalMs, n: events.length, pitch: events.map((e) => e.pitch ?? e.placed.audioPitch ?? '') }
   }
-  // ① 未封闭房子后面**第一根「跳跃/结束」线**是 `|&fine`：落到它时它自己的「曲终」要生效
-  //   （旧口径只认 `:|`/`||`，会把房子一路吞到更远的 `:|`，于是 `&fine` 形同没写）
+  /**
+   * ① 未封闭房子（`|]/`）的末尾线 = **其后最近的 `:|`/`:|:`**（其次才是跳跃线）。
+   *
+   * adj723aa（用户口径，2026-10）：该例里 `&ds` **前面没有 `&hs`** ⇒ `&ds` 不生效 ⇒
+   * 从未发生大反复 ⇒ `&fine` **也不生效**。于是只剩 `:|` 反复：第 1 遍 `1 2 3 4 5`、
+   * 回跳后第 2 遍 `1 2`（房子已用完 ⇒ 跳过 `3 4 5`）→ `6`，即 **`1 2 3 4 5 1 2 6`**
+   * （用户给的正是这个顺序）。逐音展开 = 32 音 / 16000ms。
+   */
   {
     const p = play(
       HEAD +
@@ -12109,13 +12129,14 @@ function runAdj598UnclosedVoltaScopeTests() {
         'Q: 6 6 6 6 ||\n',
     )
     check(
-      'adj598 未封闭房子 → 下一根 `|&fine`：跳过房子后落到该线即**曲终**（3 小节 / 12 音 / 6000ms）',
-      p.totalMs === 6000 && p.n === 12,
+      'adj723aa 未封闭房子 + `&ds` 无 `&hs`（`&ds`/`&fine` 都不生效）⇒ `1 2 3 4 5 · 1 2 6`（32 音 / 16000ms）',
+      p.totalMs === 16000 && p.n === 32,
       JSON.stringify({ totalMs: p.totalMs, n: p.n, pitch: p.pitch.join(',') }),
     )
     check(
-      'adj598 上例只奏 `1 1 1 1`（大反复前）+ `1 1 1 1` + `2 2 2 2`；`4 4 4 4`/`5 5 5 5`/`6 6 6 6` 都不奏',
-      p.pitch.join(',') === 'C4,C4,C4,C4,C4,C4,C4,C4,D4,D4,D4,D4',
+      'adj723aa 上例音序 = `1 2 3 4 5 · 1 2 6` 的逐音展开（含 `5 5 5 5` 与末尾 `6 6 6 6`）',
+      p.pitch.join(',') ===
+        'C4,C4,C4,C4,D4,D4,D4,D4,E4,E4,E4,E4,F4,F4,F4,F4,G4,G4,G4,G4,C4,C4,C4,C4,D4,D4,D4,D4,A4,A4,A4,A4',
       p.pitch.join(','),
     )
   }
