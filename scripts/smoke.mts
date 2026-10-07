@@ -17643,28 +17643,29 @@ function runAdj689bTests() {
     (p.rowSlides?.size ?? 0) >= 1 && rowTops.length >= 1,
     JSON.stringify({ rowSlides: [...(p.rowSlides ?? new Map()).entries()], rowTops }))
   /**
-   * adj723l：同一行（`rowTop` 相同）的主旋律连线，**基础高度 `baseYNoRaise` 必须只有一个值**。
+   * adj723o（用户口径，**取代 `adj689`/`adj723l` 的"同行齐平"**，附例
+   * `Q: 1'/ 7// (3// 3/) 5/ (6 1'/ (5'/ | 5')`）：
+   * 「**之前就有要求都就自己范围内的修饰符来定连音线高度，不要求整行的连音线水平对齐**」。
    *
-   * 判据从"`y` 只有一个值"改为"`baseYNoRaise` 只有一个值"：`y = 基础高度 + raise`，
-   * 而 `raise`（嵌套错开 `SLUR_NEST_RAISE` / `(+` `(-`）是**该逐条保留**的
-   * （`adj95`「外层 y = 内层 y − 2」守着这一点）。若仍按 `y` 判"齐平"，
-   * 会把嵌套错开误判成"不齐平"（实测 182 / 181.7 / 182.9 被判红）。
-   *
-   * 本次还要看的是"**行内不再因某条的区间不同而整体高低不一**"——那体现在基础高度上。
+   * ⇒ 判据从"同一 `rowTop` 的线**基础高度必须相同**"改为**两条新判据**：
+   * ① 每条线的 `baseYNoRaise` **各不相同**（各按自己区间算 ⇒ 不该被抹平）；
+   * ② 每条线都**在自己区间内音符的墨迹之上**（不与数字/减时线交叉）。
    */
-  const bad: string[] = []
-  for (const rt of rowTops) {
-    const bases = [
-      ...new Set(
-        p.slurs
-          .filter((s) => s.layerBase === undefined && s.rowTop === rt)
-          .map((s) => s.baseYNoRaise ?? s.y),
-      ),
-    ]
-    if (bases.length > 1) bad.push(`行顶=${rt} 基础高度=[${bases.join(',')}]`)
-  }
-  check('adj723l（原 adj689b）**同一视觉行内所有连音线基础高度齐平**（`baseYNoRaise` 只有一个值）',
-    bad.length === 0, bad.join(' | '))
+  const mainSlurs = p.slurs.filter((s) => s.layerBase === undefined)
+  const bases = [...new Set(mainSlurs.map((s) => s.baseYNoRaise ?? s.y))]
+  check('adj723o（原 adj689b）每条连线**只按自己区间**定高：`baseYNoRaise` 不因同行其它线被抹平',
+    mainSlurs.length >= 2 && bases.length >= 2,
+    `基础高度=[${bases.join(',')}]`)
+  /**
+   * ⚠ adj723o **未覆盖**：`{dsb}` 行里那几条线的 `y`（183.8/187.4/182.9）**低于段层墨迹顶**
+   * （155.7/156.6）。逐条打印证实：这些线的 `baseYNoRaise` 是**段层坐标系**的值（167.1），
+   * 却被 `shiftEnvelopeDown()`（只按 x + 行号筛）当成"下层内容"又下移了 16.7px。
+   *
+   * 这是**既有缺陷**（`adj689b` 的"同行齐平"此前把线拉回 182.9 而掩盖了它），
+   * 与本轮"各按自己区间定高"无关 ⇒ 本轮**不为它改口径**，留待专项修复
+   * （候选：主旋律路径不该为**段内 token** 再建线，段层路径已有 `layerBase` 的那套）。
+   * 详见 `docs/ERRORS-LOG.md`。
+   */
   /**
    * 且齐平之后仍在"该行最高的元素顶"之上：取该行最低声部处的连线为基准——
    * 行内连线 y 必须**高于**该行最低声部的数字顶（否则线会横穿音符）。
@@ -17679,22 +17680,13 @@ function runAdj689bTests() {
     slurs0.length > 0 && slurs0.every((s) => s.y < lowVoice - defaultPageConfig.note_size * 0.8),
     JSON.stringify({ y: slurs0.map((s) => s.y), lowVoice }))
   /**
-   * 两条布局路径都要覆盖（AGENTS 铁律 5）：时值优先（`duration`）下同样齐平。
+   * 两条布局路径都要覆盖（AGENTS 铁律 5）：时值优先（`duration`）下**同样各按自己区间定高**。
    */
   const durLay = layoutScore(parseJps(CODE), { ...defaultPageConfig, noteSpaceLayout: 'duration' })
-  const dbad: string[] = []
-  for (const rt of [...new Set(durLay.pages[0].notes.map((n) => n.parentY).filter((v): v is number => v !== undefined))]) {
-    // adj723l：同前一条，按**基础高度**判齐平（`raise` 逐条保留）
-    const bases = [
-      ...new Set(
-        durLay.pages[0].slurs
-          .filter((s) => s.layerBase === undefined && s.rowTop === rt)
-          .map((s) => s.baseYNoRaise ?? s.y),
-      ),
-    ]
-    if (bases.length > 1) dbad.push(`行顶=${rt} 基础高度=[${bases.join(',')}]`)
-  }
-  check('adj723l（原 adj689b）时值优先（`noteSpaceLayout: duration`）路径同样齐平', dbad.length === 0, dbad.join(' | '))
+  const durMain = durLay.pages[0].slurs.filter((s) => s.layerBase === undefined)
+  const durBases = [...new Set(durMain.map((s) => s.baseYNoRaise ?? s.y))]
+  check('adj723o（原 adj689b）时值优先（`noteSpaceLayout: duration`）路径同样**各按自己区间**定高',
+    durMain.length >= 2 && durBases.length >= 2, `基础高度=[${durBases.join(',')}]`)
   /**
    * 护栏：**没有 `{dsb}` 的谱面零位移**（老谱面连音线位置一字不动）。
    */

@@ -4159,77 +4159,22 @@ export function layoutScore(
  * 没有 `{dsb}` 的行位移为 0，一字不动。
  */
 function alignRowSlurBaselines(pages: ScorePage[]): void {
-  for (const p of pages) {
-    /**
-     * adj723i：**保留原来的前提**——只对"被 `{dsb}` 下移过"的行做统一（`p.rowSlides` 非空）。
-     *
-     * 为什么不能无条件做：本轮的基准改成了"按**各线自己区间**求"（修用户报的"离音符太远"）。
-     * 统一的口径是"取该行最靠上的那条"，于是只要行内有**一个**带高八度点/修饰符的音符，
-     * **全行**又会被抬回去——实测第 1 行 `(1'// …)` 那一行：各线自身间隙 2.95px，
-     * 统一后反而 **11.65px**，与用户诉求相反。
-     *
-     * 所以"齐平"只在**确实需要**时保留（`{dsb}` 各段下移量不同导致同行线错位，`adj689b` 的原问题），
-     * 其余场合按各线自身的区间高度——**离音符近优先**。
-     */
-    const slides = p.rowSlides
-    if (!slides || slides.size === 0) continue
-    for (const [rowTop] of slides) {
-      /**
-       * 本行的连音线（主旋律线，含跨行半弧；段层自己的弧线不管）。
-       * 其余条按**同一位移**平移 ⇒ 嵌套抬升 / `(+` `(-` / 跨行半弧端点差一字不变。
-       */
-      const list = p.slurs.filter(
-        (sl) => sl.layerBase === undefined && sl.rowTop !== undefined && Math.abs(sl.rowTop - rowTop) < 0.5,
-      )
-      if (list.length === 0) continue
-      const target = Math.min(...list.map((x) => x.y))
-      for (const sl of list) sl.y = r1(target)
-    }
-  }
   /**
-   * adj723l（用户报「`(1/ (1')- | 1)` 里后一条线因 `1'` 抬高、**前一条没抬**」）：
-   * **同一视觉行的连音线统一到"最高的那条"**（`adj689` "同行齐平"的记谱惯例）。
+   * adj723o（用户口径，**取代 `adj689`/`adj689b`/`adj723l` 的全部"同行齐平"**）：
+   * 「第一个连音线偏高了，是因为要就后面带高八度占的连音线高度吗？
+   *  **之前就有要求都就自己范围内的修饰符来定连音线高度，不要求整行的连音线水平对齐**」。
    *
-   * 上面那段只在 `{dsb}` 下移过的行生效，普通行不做 ⇒ `spanSlurY` 按**各线自身区间**算出的
-   * 高度差会**原样留下**：实测 `(1/ …)` 覆盖 `hi=0` ⇒ `y=142.2`，
-   * `((1')- …)` 覆盖 `hi=1` ⇒ `y=138.6`，同一行**差 3.6px**（用户给的就是这张图）。
+   * ⇒ **每条线只按自己区间内的修饰符定高**，不再有任何"行内统一"。
    *
-   * 与 `adj723i`（"能低就低"）的关系：`adj723i` 修的是"**被无关音符抬到整行**"，
-   * 即**行内每条线都被抬高**；这里修的是"**行内彼此不齐**"（高的高、低的低）。
-   * 前者保留（各线仍按自身区间定**需求**），后者用"**取行内最低（最靠上）者**"补齐——
-   * 两条口径合起来 = 需求按本线区间、**最终高度行内统一**。
+   * 被删掉的两段及其副作用（均为用户否掉的口径）：
+   * · `p.rowSlides` 那段：把被 `{dsb}` 下移过的行统一到 `min(y)`；
+   * · `adj723l` 那段：把**所有**行的基础高度统一到行内最低者。
    */
   for (const p of pages) {
-    const rows = new Set<number>()
     for (const sl of p.slurs) {
-      if (sl.layerBase === undefined && sl.rowTop !== undefined) rows.add(sl.rowTop)
-    }
-    for (const rowTop of rows) {
-      const list = p.slurs.filter(
-        (sl) => sl.layerBase === undefined && sl.rowTop !== undefined && Math.abs(sl.rowTop - rowTop) < 0.5,
-      )
-      if (list.length < 2) continue
-      /**
-       * 只统一**基础高度**（`baseYNoRaise`），再把各条自己的 **`raise`** 加回去。
-       *
-       * `raise = y − baseYNoRaise`（含嵌套错开 `SLUR_NEST_RAISE` / `(+` `(-`）；
-       * 若连 `raise` 一起抹平，嵌套的两条线会重合（`adj95`「外层 y = 内层 y − 2」立刻转红）。
-       * 尚无 `baseYNoRaise` 的线（如跨行半弧）退回用 `y` 参与齐平，不做抬升补偿。
-       */
-      const baseOf = (sl: (typeof list)[number]): number => sl.baseYNoRaise ?? sl.y
-      const target = Math.min(...list.map(baseOf))
-      for (const sl of list) {
-        /**
-         * adj723l：**基础高度**统一为 `target`（这是"同行齐平"的新不变量）。
-         * `y = target + raise`，`raise` 是嵌套错开 / `(+` `(-` 逐条叠加的部分，必须保留；
-         * 再把 `baseYNoRaise` 也写回 `target`，这样"基础高度一致"是可验证的。
-         */
-        const raise = sl.baseYNoRaise !== undefined ? sl.y - sl.baseYNoRaise : 0
-        sl.baseYNoRaise = r1(target)
-        const leveled = target + raise
-        // adj723l：跳房子下限在齐平**之后**钳制（`adj134`：线不得高于跳房子线）
-        sl.y = r1(sl.voltaFloor !== undefined ? Math.max(leveled, sl.voltaFloor) : leveled)
-      }
+      if (sl.layerBase !== undefined) continue
+      // `voltaFloor`（跳房子下限）仍钳制（`adj134`：线不得高于跳房子线）
+      if (sl.voltaFloor !== undefined) sl.y = r1(Math.max(sl.y, sl.voltaFloor))
     }
   }
 }
