@@ -2119,17 +2119,15 @@ const layFf = layoutScore(rFf, DUR_CFG)
 const seqFf = buildPlaySequence(rFf, layFf, 120)
 /**
  * adj723aa（用户口径 2026-10）：跳房子按**自己的计数器**判定奏/路过，`"1."`/`"2."` **只是注释**。
- * 示例谱 `fanfu-tiaofangzi` 两个房子（`"1."`/`"2."`）各**计数 1** ⇒ 第 1 遍奏房子 1、第 2 遍奏房子 2，
- * 共 **19** 个事件（旧口径按"番号==遍次"只在第 2 遍奏房子 2，反而漏掉中间那遍的房子 1）。
- *
- * ⚠ 谱面注释里作者写的 `# 播放：1 2 3 4 4 5 | 1 2 3 5 4 3 | 2 1 7 1`（16 音）是**旧引擎**的
- * 愿望值，与"按计数走"的新口径不一致；新口径下两个房子都要走一次。
+ * 示例谱 `fanfu-tiaofangzi`（用户按新规则重写后）：`|: 1 2 3 |["1." 4 4 5 :|]["2." 5 4 3 | 2 1 7 | 1 - - ||]`
+ * 两房子各计数 1 ⇒ 第 1 遍奏房子 1（`4 4 5`）、第 2 遍奏房子 2（`5 4 3 2 1 7 1`），共 **16** 音：
+ * `1 2 3 4 4 5 | 1 2 3 5 4 3 2 1 | 7 1`（按小节 = 作者注释里的 `1 2 | 1 3 4 5 6` 各遍展开）。
  */
-check('跳房子播放序列 19 音符（两房子各按计数走一次）', seqFf.events.length === 19, `got ${seqFf.events.length}`)
+check('跳房子播放序列 16 音符（两房子各计数 1）', seqFf.events.length === 16, `got ${seqFf.events.length}`)
 check('序列首音 1=F4（F 调）', seqFf.events[0].placed.audioPitch === 'F4', String(seqFf.events[0].placed.audioPitch))
 check('第一遍含 [ 段尾 5=C5', seqFf.events[5].placed.audioPitch === 'C5', String(seqFf.events[5].placed.audioPitch))
 check('第二遍跳回 1=F4', seqFf.events[6].placed.audioPitch === 'F4', String(seqFf.events[6].placed.audioPitch))
-check('第二遍奏房子 2 段尾（第 12 音为 5=C5）', seqFf.events[11].placed.audioPitch === 'C5', String(seqFf.events[11].placed.audioPitch))
+check('第二遍奏房子 2（第 10 音为 5=C5）', seqFf.events[9].placed.audioPitch === 'C5', String(seqFf.events[9].placed.audioPitch))
 check('跳房子渲染含番号', renderScoreToSvg(layFf)[0].includes('1.'))
 // 连音线与装饰
 const rLx = loadSample('lianyinxian-zhuangshi')
