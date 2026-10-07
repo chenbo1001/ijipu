@@ -168,27 +168,31 @@ export const VOLTA_RAISE = 2
  * `adj182` 定为 `16×s×1.2`（"高度 120%"），且**记号下端与小节线上端（`yTop`）齐平**；
  * `adj183`/`adj184` 又按"自身高度百分比"微调纵向落点（净 +10% ⇒ `y = yTop + 0.35×fs`）。
  *
- * `adj723h`（用户要求）：「`&ty` 的高度调整为现在 1.25 倍」⇒ `16×s×1.2×1.25 = 24×s`。
- * 同时把"按自身百分比微调"改成**显式间距常量**（见 `TY_BAR_GAP`），
+ * `adj723h`（用户要求，**先 1.25 倍后修正为 1.5 倍**）：
+ * 「`&ty` 高度由原来的 1.25（倍）调整为 **1.5（倍）**」
+ * ⇒ `16×s×1.2×1.5 = 28.8×s`。
+ * 同时把"按自身百分比微调落点"改成**显式间距常量**（见 `TY_BAR_GAP`），
  * 否则字号一变，落点的绝对偏移会跟着变（百分比口径与"间距"口径混在一起，
  * 这正是 `六之二·4`「数值口径必须同源」警告的那类写法）。
  */
 export const TY_FONT_SIZE = (noteSize: number): number => {
   const s = noteScaleOf(noteSize)
-  return Math.max(14, Math.round(24 * s))
+  return Math.max(14, Math.round(28.8 * s))
 }
 
 /**
  * `&ty` **墨迹下端到小节线上端（`yTop`）的间距**（px）。
  *
- * 口径换算：旧写法 `y = yTop + 0.35×fs`，而文字基线到"记号下端"约 `0.15×fs`
- * （`adj182` 的原话）⇒ 旧间距 ≈ `0.35−0.15 = 0.20×fs`。
- * `adj723h`（用户要求）：「与小节线的间距增加 2px」⇒ 新间距 = `0.20×fs_旧 + 2`
- * （`fs_旧 = 19.2×s`）≈ `3.84×s + 2`。
+ * 沿革：旧写法 `y = yTop + 0.35×fs`，而文字基线到"记号下端"约 `0.15×fs`
+ * （`adj182` 原话）⇒ 旧净距 ≈ `0.35−0.15 = 0.20×fs_旧 ≈ 3.84×s`。
+ * `adj723h` 第一次要求"间距增加 2px"（⇒ `3.84×s + 2`）；
+ * **随即修正为**：「`&ty` 的墨迹下端与小节线间距**调整为 1px**」——
+ * 这是**绝对值**（不是"再 +1px"），故此处直接取常量 `1`。
  *
- * 渲染端据此反推基线：`y = yTop + TY_BAR_GAP + 0.15×fs`（`0.15×fs` 仍是"基线→记号下端"的固有比例）。
+ * 渲染端据此反推基线：`y = yTop + TY_BAR_GAP + 0.15×fs`（`0.15×fs` 仍是"基线→记号下端"的固有比例）
+ * ⇒ 记号**墨迹下端正好落在 `yTop + 1`**。
  */
-export const TY_BAR_GAP = (noteSize: number): number => 3.84 * noteScaleOf(noteSize) + 2
+export const TY_BAR_GAP = 1
 
 /** `&hs`（花 S `𝄋`）字号（px；`adj129` 引入、`adj182` 定为 `12×s`） */
 export const HS_FONT_SIZE = (noteSize: number): number => Math.max(10, Math.round(12 * noteScaleOf(noteSize)))

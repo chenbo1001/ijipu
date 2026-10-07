@@ -1203,8 +1203,8 @@ function renderBarline(bar: PlacedBarline, noteSize = 18, noteFontFamily = FONT_
          * 记号下端与小节线上端（`yTop`）齐平；`adj183`/`adj184` 按"自身高度百分比"微调落点
          * （净 +10% ⇒ `y = yTop + 0.35×fs`）。
          *
-         * **`adj723h`（用户要求）**：① 高度 = 现在的 **1.25 倍**（⇒ `16s×1.2×1.25 = 24s`）；
-         * ② 与小节线的**间距 +2px**。
+         * **`adj723h`（用户要求）**：① 高度 = 原来的 **1.5 倍**（⇒ `16s×1.2×1.5 = 28.8s`）；
+         * ② **墨迹下端与小节线的间距 = `1px`**（绝对值，替换先后提过的"+2px"）。
          * 两处口径都改由 `spacing.ts` 的 `TY_FONT_SIZE` / `TY_BAR_GAP` 给出
          * （渲染端只消费、不再自己写百分比——`六之二·4`「数值口径必须同源」）。
          *
@@ -1213,7 +1213,7 @@ function renderBarline(bar: PlacedBarline, noteSize = 18, noteFontFamily = FONT_
          * ⇒ 记号下端正好落在 `yTop + TY_BAR_GAP`。
          */
         const fs = TY_FONT_SIZE(noteSize)
-        const tyY = yTop + TY_BAR_GAP(noteSize) + 0.15 * fs
+        const tyY = yTop + TY_BAR_GAP + 0.15 * fs
         parts.push(
           `<text x="${ux.toFixed(1)}" y="${tyY.toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄌</text>`,
         )

@@ -1651,17 +1651,17 @@ check('adj126 渲染 Fine/D.C./D.S. 文本', svg126.includes('>Fine<') && svg126
 check('adj130 渲染大跳跃记号（Unicode U+1D10C 𝄌）', svg126.includes('𝄌'), '')
 check('adj129 渲染花 S 记号（Unicode U+1D10B 𝄋）', svg126.includes('𝄋'), '')
 /**
- * adj723h（用户要求）：「`&ty` 修饰符高度调整为现在 **1.25 倍**」「`&ty` 与小节线的**间距增加 2px**」。
+ * adj723h（用户要求，**两轮口径**）：
+ * 第一轮「`&ty` 高度 1.25 倍、与小节线间距 +2px」→ **第二轮修正**为
+ * 「`&ty` 高度由原来的 1.25 调整为 **1.5 倍**」「`&ty` 的墨迹下端与小节线间距**调整为 1px**」。
  *
- * 两条都从渲染出的 `<text>` 上取实际值来判（**不用**去比常量自己，那样改错了也发现不了）：
- *  · **高度**：`font-size` 应为旧值 `16×s×1.2` 的 `1.25` 倍 = `24×s`（本用例 `s` 由 noteSize 定）；
- *  · **间距**：记号**墨迹下端**到小节线上端 `yTop` 的距离 = `y − 0.15×fs − yTop`
- *    应等于旧值 `0.20×fs_旧` 再 **+2px**（`fs_旧 = 16×s×1.2`）。
+ * 故现行口径：字号 = `16×s×1.2×1.5 = 28.8×s`；净距 = **`1px`（绝对值）**。
+ * 两条都从渲染出的 `<text>` 上取实际值来判（**不用**去比常量自己，那样改错了也发现不了）。
  */
 {
   const noteSizeH = DUR_CFG.note_size
   const sH = noteScaleOf(noteSizeH)
-  const fsOld = Math.max(14, Math.round(16 * sH * 1.2))
+  const fsOld = Math.max(14, Math.round(16 * sH * 1.2)) // adj182 的旧字号（19.2×s）
   // 从渲染结果里取 `&ty` 那个 text（靠字形 𝄌 定位）
   const mTy = svg126.match(/<text x="([-\d.]+)" y="([-\d.]+)"[^>]*font-size="(\d+)"[^>]*>𝄌<\/text>/)
   // 小节线上端：取该小节线的 yTop（用例里 `|&ty` 那根）
@@ -1669,12 +1669,12 @@ check('adj129 渲染花 S 记号（Unicode U+1D10B 𝄋）', svg126.includes('�
   const fsTy = mTy ? Number(mTy[3]) : -1
   const inkBottomTy = mTy ? Number(mTy[2]) - 0.15 * fsTy : Number.NaN
   const gapTy = mTy && barTy ? inkBottomTy - barTy.yTop : Number.NaN
-  check('adj723h `&ty` 高度 = 旧的 1.25 倍（19.2s → 24s）',
-    mTy !== null && fsTy === Math.max(14, Math.round(sH * 24)),
-    `fs=${fsTy} 期望=${Math.max(14, Math.round(sH * 24))} 旧=${fsOld}`)
-  check('adj723h `&ty` 与小节线（yTop）间距 = 旧值 + 2px',
-    mTy !== null && barTy !== undefined && Math.abs(gapTy - (0.2 * fsOld + 2)) < 0.35,
-    `gap=${gapTy.toFixed(2)} 期望=${(0.2 * fsOld + 2).toFixed(2)}（旧 0.2×fs_旧=${(0.2 * fsOld).toFixed(2)}）`)
+  check('adj723h `&ty` 高度 = 原来的 1.5 倍（19.2s → 28.8s）',
+    mTy !== null && fsTy === Math.max(14, Math.round(28.8 * sH)),
+    `fs=${fsTy} 期望=${Math.max(14, Math.round(28.8 * sH))} 原=${fsOld}`)
+  check('adj723h `&ty` 墨迹下端与小节线（yTop）间距 = 1px（绝对值）',
+    mTy !== null && barTy !== undefined && Math.abs(gapTy - 1) < 0.35,
+    `gap=${gapTy.toFixed(2)} 期望=1.00（旧 0.2×fs_原=${(0.2 * fsOld).toFixed(2)}）`)
 }
 // adj：&ds/&dc/&fine 一律粗体 + 斜体，位置下移 0.1 音符高度（1.8×s）
 const svg207 = renderScoreToSvg(layoutScore(r206, DUR_CFG))[0]
@@ -1699,15 +1699,13 @@ const ty182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="(
 const hs182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="([\d.]+)"[^>]*>𝄋<\/text>/.exec(svg126)
 const tyBar182 = placed126.find((b) => b.marks?.includes('ty'))
 const hsBar182 = placed126.find((b) => b.marks?.includes('hs'))
-check('adj723h（原 adj182）大跳跃字号 = 24×s（硬编码期望，**不比函数自己**——那样改错了也发现不了）',
-  ty182 !== null && Number(ty182[3]) === Math.max(14, Math.round(24 * NS_S)),
-  `fs=${ty182?.[3]} 期望=${Math.max(14, Math.round(24 * NS_S))}`)
-check('adj723h（原 adj184）大跳跃记号 y = yTop + gap + 0.15×fs，gap = 3.84×s + 2（硬编码期望）',
+check('adj723h（原 adj182）大跳跃字号 = 28.8×s（硬编码期望，**不比函数自己**——那样改错了也发现不了）',
+  ty182 !== null && Number(ty182[3]) === Math.max(14, Math.round(28.8 * NS_S)),
+  `fs=${ty182?.[3]} 期望=${Math.max(14, Math.round(28.8 * NS_S))}`)
+check('adj723h（原 adj184）大跳跃记号 y = yTop + 1 + 0.15×fs（间距 = 1px 绝对值，硬编码期望）',
   ty182 !== null &&
     tyBar182 !== undefined &&
-    Math.abs(
-      Number(ty182[2]) - (tyBar182.yTop + (3.84 * NS_S + 2) + 0.15 * Number(ty182[3])),
-    ) < 0.35,
+    Math.abs(Number(ty182[2]) - (tyBar182.yTop + 1 + 0.15 * Number(ty182[3]))) < 0.35,
   `y=${ty182?.[2]} fs=${ty182?.[3]} yTop=${tyBar182?.yTop}`)
 check('adj182 花S 记号下端与 yTop 齐平（y = yTop - 0.15×fs；字号走 HS_FONT_SIZE）',
   hs182 !== null &&
