@@ -29,14 +29,12 @@ import type {
   ScorePageMeta,
   VoiceBlock,
 } from '../types'
-import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, octaveDotY, BRACKET_PAD, H_GAP, noteScaleOf, VOLTA_BAR_GAP, VOLTA_RAISE, DYN_HALF_H, barlinePad, barlineTotalW, DOT_AFTER_DIGIT_GAP, DOT_R, SEGMENT_ROW_GAP_DEFAULT, SEGMENT_LAYER_YSCALE, SEGMENT_LAYER_CLEARANCE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, NOTE_BASELINE_RATIO, digitBottomY, beamBottomY, lowDotY, TP_BRACKET_GAP, SLUR_SAG_MAX, SLUR_SAG_MIN, VOLTA_INK_GAP, digitInkW, barNumberGapNeed, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, type AccidentalInkMetrics } from './spacing'
+import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, octaveDotY, BRACKET_PAD, H_GAP, noteScaleOf, VOLTA_BAR_GAP, VOLTA_RAISE, DYN_HALF_H, barlinePad, barlineTotalW, DOT_AFTER_DIGIT_GAP, DOT_R, SEGMENT_ROW_GAP_DEFAULT, SEGMENT_LAYER_YSCALE, SEGMENT_LAYER_CLEARANCE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, NOTE_BASELINE_RATIO, digitBottomY, beamBottomY, lowDotY, TP_BRACKET_GAP, SLUR_SAG_MAX, SLUR_SAG_MIN, VOLTA_INK_GAP, digitInkW, barNumberGapNeed, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, MARK_STACK_RATIO, type AccidentalInkMetrics } from './spacing'
 // adj284：空间优先布局的度量（本体宽 / 时值拆分 / 非时值元素间距）
 import { splitNoteDur, noteBodyW, augBodyW, dotBodyW, accidentalBodyW, accidentalGeometry, markBodyW, digitSlotW, hxBodyW, graceAtTail, graceSlotLayout, nonDurGap, slideExtraW, braceInkRightOffset, BRACE_LINE_DX } from './spaceLayout'
 import { hairpinEvents, resolveHairpins, type DynEvent, type NoteAnchors } from './hairpins'
 // adj303：乐器名标注需要用 parseInstrumentRef / 库名（@乐器名 / @@ 后下一个音符）
 import { parseInstrumentRef, INSTRUMENT_LIB_NAMES } from '../playback/instruments'
-// adj723j：波音码集合（`&sby`/`&xby`/`&sby+`/`&xby+`）——它们画在**连音线下方**，不计入避让高度
-import { MORDENT_SYMBOLS } from '../playback/ornaments'
 // adj427：临时段（{bz … } / {dsb … }）叠加层的拍位包络与主旋律跨度（纯函数）
 import {
   computeSegments,
@@ -3765,8 +3763,15 @@ export function layoutScore(
     const s = noteScaleOf(m.noteSize)
     const topY = hi > 0 ? octaveTopY(y, hi, m.noteSize) : y - m.noteSize * DIGIT_HEIGHT_RATIO
     let base = topY - LAYER_GAP * s - (SLUR_W * s) / 2
-    // 每层修饰符：符号字号 10×s + 层距 LAYER_GAP×s（与 render 上方符号堆叠一致）
-    base -= symCount * (10 * s + LAYER_GAP * s)
+    /**
+     * adj723m/n（用户报「波音与连音线明显重叠、**没有间距**」，附例 `(1/ (1&sby)- | 1)`）：
+     * 每个"本音符修饰符"的让位高度用 `MARK_STACK_RATIO × s`（**按渲染出的墨迹标定**），
+     * 不再用整层 `10×s + LAYER_GAP×s`（`10×s` 是**符号字号**、不是墨迹高）。
+     *
+     * 波音与高八度点、其它上方修饰符**同等对待**（用户明确）。
+     * 定值与推导见 `spacing.ts` 的 `MARK_STACK_RATIO`。
+     */
+    base -= symCount * MARK_STACK_RATIO * s
     return base - raise
   }
   /**
@@ -3861,18 +3866,18 @@ export function layoutScore(
         hi = Math.max(hi, highOf(n))
         if (n.token.kind === 'note') {
           /**
-           * adj723j（用户澄清）：「**波音在连音线下方**」。
+           * adj723m（用户**更正**口径，附例 `(1/ (1&sby)- | 1)`）：
+           * 「波音与连音线**明显会重叠**，不符合元素墨迹不重叠不覆盖原则，
+           *  这里的前后连音**都应该抬高**，**与高八度点或其它修饰符一样**」。
            *
-           * 故波音类记号（`&sby`/`&xby`/`&sby+`/`&xby+`）**不参与**连音线的避让高度——
-           * 它们画在 `symY − 2s`（在连音线**之下**），连音线只需在它们上方通过；
-           * 若把整层 `10×s + LAYER_GAP×s ≈ 8.67px` 计入，就与波音自身占的高度**重复留白**
-           * （实测含 `&sby` 的线间隙 11.65px，而同批其它线仅 3~5px）。
+           * ⚠ 本轮早前我按"波音在连音线**下方**"把波音类记号排除在避让高度之外，
+           * 那是**理解错了**（那个说法原本指的是"波音应当被连音线让开"，不是"不用让"）。
+           * 实测 `(1&sby)` 的波音墨迹顶与相邻连音线弧顶**相交**，必须计入。
            *
-           * 其余上方修饰符（颤音 `&cy`、延长 `&yc` 等）仍按层计入——它们确实在连音线上方。
+           * 故这里恢复"**所有上方修饰符都让位**"（只排除不占纵向的 `hx`）——
+           * 与高八度点（`hi`）同等对待。
            */
-          const above = n.token.symbols.filter(
-            (x) => x !== 'hx' && !(MORDENT_SYMBOLS as readonly string[]).includes(x),
-          )
+          const above = n.token.symbols.filter((x) => x !== 'hx')
           sym = Math.max(sym, above.length)
         }
       }

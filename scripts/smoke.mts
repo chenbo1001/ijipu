@@ -45,6 +45,7 @@ import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, V
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
+import { MARK_STACK_RATIO } from '@ijipu/engine/layout/spacing.ts'
 import type { BarlineType } from '@ijipu/engine/types.ts'
 import { computeBeamsForTest } from '@ijipu/engine/render/index.ts'
 // adj652：谱面文本里的 URL → 链接（纯函数 + 渲染产物）
@@ -1739,20 +1740,36 @@ check('adj126 播放：&ds 跳到 &hs 位置（5 6 7 1 跳过）', pits126(mk126
 check('adj359 播放：&ty 无大反复时忽略（不跳越）', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |')).join(',') === 'C4,D4,E4,F4,G4,A4,B4,C4,D4,E4,F4,G4', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |')).join(','))
 check('adj359 播放：&dc 后 &ty 跳越两 ty 之间', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |&dc |')).join(',') === 'C4,D4,E4,F4,G4,A4,B4,C4,D4,E4,F4,G4,C4,D4,E4,F4,D4,E4,F4,G4', pits126(mk126('1 2 3 4 |&ty 5 6 7 1 |&ty 2 3 4 5 |&dc |')).join(','))
 check('adj126 播放：&dc 从头反复（首 4 音重复出现）', (() => { const p = pits126(mk126('1 2 3 4 |&dc 5 6 7 1 |')); return p.length > 4 && p[0] === p[4] && p[1] === p[5] && p[2] === p[6] && p[3] === p[7] })(), pits126(mk126('1 2 3 4 |&dc 5 6 7 1 |')).join(','))
+/** 无修饰符基线（颤音 / 波音两条断言共用） */
+const slPlain132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1 2) 3 |\n'), DUR_CFG).pages[0].slurs[0].y
 /**
- * adj132 → **adj723j 更新**：连音线为"上方修饰符"让位。
+ * adj132 → **adj723m 更新**：连音线为"上方修饰符"让位。
  *
- * 用户澄清「**波音在连音线下方**」（`&sby`/`&xby`/`&sby+`/`&xby+`）⇒ 波音**不再**抬连音线；
- * 其余上方修饰符（颤音 `&cy` 等）仍然让位。故用例改用 `&cy` 作"上方修饰符"的代表。
+ * 用户（附例 `(1/ (1&sby)- | 1)`）：「波音与连音线明显会重叠……前面的连音**都应该抬高**，
+ * **与高八度点或其它修饰符一样**」；同时「**注意不重叠和间距适度**，现在的连音线明显抬得过高了」。
+ *
+ * ⇒ 断言从"上移 ≥ 5×s（旧口径整层 `10×s`）"改为**适度区间**：
+ * ① 必须**真的抬高**（`> 0`，让开修饰符墨迹）；
+ * ② 但**不得超过 `MARK_STACK_RATIO × s + 1px`**（否则就是又抬到整层那个高度去了）。
+ * 让位量按**墨迹**标定：`MARK_STACK_RATIO × s ≈ 2.0px`（旧口径是 8.67px）。
  */
 const slSym132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1&cy 2&cy) 3 |\n'), DUR_CFG).pages[0].slurs[0].y
-const slPlain132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1 2) 3 |\n'), DUR_CFG).pages[0].slurs[0].y
-check('adj723j（原 adj132）连音线为**上方**修饰符（颤音）让位（y 上移明显）',
-  slSym132 < slPlain132 - 5 * NS_S, `sym=${slSym132} plain=${slPlain132}`)
-/** adj723j：**波音不抬连音线**（用户：「波音在连音线下方」）——含 `&sby` 的线与无修饰符的线同高 */
+const symLift = slPlain132 - slSym132
+check('adj723m（原 adj132）连音线为**上方**修饰符（颤音）让位，且**间距适度**',
+  symLift > 0.5 && symLift <= MARK_STACK_RATIO * NS_S + 1,
+  `sym=${slSym132} plain=${slPlain132} 让位=${symLift.toFixed(2)}px 上限=${(MARK_STACK_RATIO * NS_S + 1).toFixed(2)}px`)
+/**
+ * adj723m（用户**更正**口径，附例 `(1/ (1&sby)- | 1)`）：
+ * 「波音与连音线明显会重叠……前面的连音**都应该抬高**，**与高八度点或其它修饰符一样**」。
+ *
+ * ⚠ 本轮早前我按"波音在连音线下方"把波音排除在避让高度之外，是**理解错了**：
+ * 波音墨迹确实会与该行的连音线弧顶相交，必须计入避让，且与高八度点/其它修饰符**同等**。
+ */
 const slMord132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1&sby 2) 3 |\n'), DUR_CFG).pages[0].slurs[0].y
-check('adj723j 波音（`&sby`）不再抬连音线（与无修饰符同高）',
-  Math.abs(slMord132 - slPlain132) < 0.5, `mord=${slMord132} plain=${slPlain132}`)
+const mordLift = slPlain132 - slMord132
+check('adj723m（更正 adj723j）波音（`&sby`）**同样抬连音线**（与高八度点/其它修饰符同等、间距适度）',
+  Math.abs(mordLift - symLift) < 0.6,
+  `mord=${slMord132} plain=${slPlain132} 让位=${mordLift.toFixed(2)}px 颤音让位=${symLift.toFixed(2)}px`)
 // adj135：取消倚音自动避让（连音线不再因倚音抬高）；改用 (+ 手动抬升（每 + 2px）
 const slGrace134 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1[3] 2) 3 |\n'), DUR_CFG).pages[0].slurs[0].y
 check('adj135 倚音不抬高连音线（与无倚音相同）', Math.abs(slGrace134 - slPlain132) < 0.5, `grace=${slGrace134} plain=${slPlain132}`)
