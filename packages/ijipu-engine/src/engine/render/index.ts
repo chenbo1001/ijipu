@@ -67,7 +67,9 @@ import {
   LYRIC_COMMENT_GAP,
   // adj723h：小节线修饰符记号（`&ty` 大跳跃 / `&hs` 花 S）的字号与"距小节线上端间距"
   TY_FONT_SIZE,
-  TY_BAR_GAP,
+  TY_WIDTH_SCALE,
+  TY_HEIGHT_SCALE,
+  tyBaselineY,
   HS_FONT_SIZE,
 } from '../layout/spacing'
 import { tempoLabel } from '../parser/parser'
@@ -1203,19 +1205,31 @@ function renderBarline(bar: PlacedBarline, noteSize = 18, noteFontFamily = FONT_
          * 记号下端与小节线上端（`yTop`）齐平；`adj183`/`adj184` 按"自身高度百分比"微调落点
          * （净 +10% ⇒ `y = yTop + 0.35×fs`）。
          *
-         * **`adj723h`（用户要求）**：① 高度 = 原来的 **1.5 倍**（⇒ `16s×1.2×1.5 = 28.8s`）；
-         * ② **墨迹下端与小节线的间距 = `1px`**（绝对值，替换先后提过的"+2px"）。
-         * 两处口径都改由 `spacing.ts` 的 `TY_FONT_SIZE` / `TY_BAR_GAP` 给出
-         * （渲染端只消费、不再自己写百分比——`六之二·4`「数值口径必须同源」）。
+         * **`adj723h`（用户三轮口径，最终）**：
+         * ① **只把高度放大 1.5 倍、宽度保持原样**（`font-size` 一刀切会连宽度一起变大
+         *   —— 上一版就是这样，用户说"效果不对"）；
+         * ② **墨迹间距 = 0**（记号墨迹下端与小节线上端齐平）。
          *
-         * 落点换算：文字**基线**到"记号墨迹下端"约 `0.15×fs`（`adj182` 原话）
-         * ⇒ 基线 `y = yTop + TY_BAR_GAP + 0.15×fs`
-         * ⇒ 记号下端正好落在 `yTop + TY_BAR_GAP`。
+         * 实现：`font-size` 回到 `adj182` 原值，另用
+         * `transform="translate(0 tyY) scale(kx ky) translate(0 -tyY)"` **以记号自身基线为不动点**
+         * 纵向拉伸 `TY_HEIGHT_SCALE`（横向 `TY_WIDTH_SCALE = 1`）。
+         *
+         * ⚠ 必须**显式把不动点移到基线上**：SVG `transform` 的默认原点是**用户坐标系原点**，
+         * 直接写 `scale(1 1.5)` 会把基线本身也放大 1.5 倍（实测 `y=143.1` 被拉到
+         * `1.5×143.1 = 214.65`，记号飞出老远）。以基线为不动点后：
+         * 文字定位 `y` 仍就是**最终坐标系**里的基线，`0.15×fs` 的换算才成立。
+         *
+         * 两处口径都由 `spacing.ts` 给出（`六之二·4`「数值口径必须同源」）。
+         *
+         * 落点：直接消费 `tyBaselineY()`——**与断言同一个式子**，避免"渲染端一份、断言各写一份"
+         * 而对不上（本轮连续两次：一次把 `ky` 乘重、一次符号写反）。
+         * ⇒ 记号墨迹下端落在 `yTop + TY_BAR_GAP`（= 0，即与小节线上端齐平）。
          */
         const fs = TY_FONT_SIZE(noteSize)
-        const tyY = yTop + TY_BAR_GAP + 0.15 * fs
+        const tyY = tyBaselineY(yTop, noteSize)
+        const tyTf = `translate(0 ${tyY}) scale(${TY_WIDTH_SCALE} ${TY_HEIGHT_SCALE}) translate(0 ${-tyY})`
         parts.push(
-          `<text x="${ux.toFixed(1)}" y="${tyY.toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄌</text>`,
+          `<text x="${ux.toFixed(1)}" y="${tyY.toFixed(1)}" text-anchor="middle" font-size="${fs}" transform="${tyTf}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄌</text>`,
         )
       } else {
         // 花 S 记号 `𝄋`（Unicode `U+1D10B`）：`adj129` 引入、`adj131` 调小与大跳跃匹配 + 下移靠近小节线、

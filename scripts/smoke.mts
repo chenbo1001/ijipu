@@ -41,7 +41,7 @@ import {
 } from '@ijipu/engine/playback/ornaments.ts'
 import { slideOf, slidePlan, slideStepMs, SLIDE_SYMBOLS, SLIDE_STEP_MIN_MS, SLIDE_STEP_MAX_MS } from '@ijipu/engine/playback/slides.ts'
 import { midiToPitchName } from '@ijipu/engine/playback/midi.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_SAG_MIN, SLUR_SAG_MAX, VOLTA_INK_GAP, digitBottomY, beamBottomY, digitInkW, digitTopY, slurSagOf, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap, HS_FONT_SIZE } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_SAG_MIN, SLUR_SAG_MAX, VOLTA_INK_GAP, digitBottomY, beamBottomY, digitInkW, digitTopY, slurSagOf, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap, tyBaselineY, HS_FONT_SIZE } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
@@ -1651,30 +1651,45 @@ check('adj126 渲染 Fine/D.C./D.S. 文本', svg126.includes('>Fine<') && svg126
 check('adj130 渲染大跳跃记号（Unicode U+1D10C 𝄌）', svg126.includes('𝄌'), '')
 check('adj129 渲染花 S 记号（Unicode U+1D10B 𝄋）', svg126.includes('𝄋'), '')
 /**
- * adj723h（用户要求，**两轮口径**）：
- * 第一轮「`&ty` 高度 1.25 倍、与小节线间距 +2px」→ **第二轮修正**为
- * 「`&ty` 高度由原来的 1.25 调整为 **1.5 倍**」「`&ty` 的墨迹下端与小节线间距**调整为 1px**」。
+ * adj723h（用户要求，**三轮口径收敛**）：
+ * ① 高度 1.25 倍 + 间距 +2px → ② 高度 1.5 倍 + 间距 1px →
+ * **③ 最终：只把高度放大 1.5 倍、宽度保持原样；墨迹间距 = 0**。
  *
- * 故现行口径：字号 = `16×s×1.2×1.5 = 28.8×s`；净距 = **`1px`（绝对值）**。
- * 两条都从渲染出的 `<text>` 上取实际值来判（**不用**去比常量自己，那样改错了也发现不了）。
+ * 现行口径：
+ *  · `font-size` **回到 `adj182` 原值**（`16×s×1.2`）——`font-size` 一刀切会连宽度一起放大，
+ *    这正是上一版"效果不对"的原因；
+ *  · 宽度由 `transform` 的横向缩放 `TY_WIDTH_SCALE = 1` 保持；高度由纵向 `TY_HEIGHT_SCALE = 1.5` 拉伸；
+ *  · 记号**墨迹下端与小节线上端齐平**（`TY_BAR_GAP = 0`）。
+ * 三条都从渲染出的 `<text>` 上取实际值判（**不比常量自己**，否则改错了也发现不了）。
  */
 {
   const noteSizeH = DUR_CFG.note_size
   const sH = noteScaleOf(noteSizeH)
-  const fsOld = Math.max(14, Math.round(16 * sH * 1.2)) // adj182 的旧字号（19.2×s）
-  // 从渲染结果里取 `&ty` 那个 text（靠字形 𝄌 定位）
-  const mTy = svg126.match(/<text x="([-\d.]+)" y="([-\d.]+)"[^>]*font-size="(\d+)"[^>]*>𝄌<\/text>/)
-  // 小节线上端：取该小节线的 yTop（用例里 `|&ty` 那根）
+  const fsBase = Math.max(14, Math.round(16 * sH * 1.2)) // adj182 原字号；宽度由它决定
+  const mTy = svg126.match(
+    /<text x="([-\d.]+)" y="([-\d.]+)"[^>]*font-size="([\d.]+)"[^>]*transform="translate\(0 [-\d.]+\) scale\(([-\d.]+) ([-\d.]+)\) translate\(0 [-\d.]+\)"[^>]*>𝄌<\/text>/,
+  )
   const barTy = placed126.find((b) => b.marks?.includes('ty'))
   const fsTy = mTy ? Number(mTy[3]) : -1
-  const inkBottomTy = mTy ? Number(mTy[2]) - 0.15 * fsTy : Number.NaN
-  const gapTy = mTy && barTy ? inkBottomTy - barTy.yTop : Number.NaN
-  check('adj723h `&ty` 高度 = 原来的 1.5 倍（19.2s → 28.8s）',
-    mTy !== null && fsTy === Math.max(14, Math.round(28.8 * sH)),
-    `fs=${fsTy} 期望=${Math.max(14, Math.round(28.8 * sH))} 原=${fsOld}`)
-  check('adj723h `&ty` 墨迹下端与小节线（yTop）间距 = 1px（绝对值）',
-    mTy !== null && barTy !== undefined && Math.abs(gapTy - 1) < 0.35,
-    `gap=${gapTy.toFixed(2)} 期望=1.00（旧 0.2×fs_原=${(0.2 * fsOld).toFixed(2)}）`)
+  const kxTy = mTy ? Number(mTy[4]) : Number.NaN
+  const kyTy = mTy ? Number(mTy[5]) : Number.NaN
+  check('adj723h `&ty` 基础字号 = `adj182` 原值（宽度不随高度放大）',
+    mTy !== null && fsTy === fsBase,
+    `fs=${fsTy} 期望=${fsBase}`)
+  check('adj723h `&ty` 横向缩放 = 1（宽度保持原样）+ 纵向缩放 = 1.25（高度 ×1.25）',
+    mTy !== null && kxTy === 1 && kyTy === 1.25,
+    `scale(${kxTy} ${kyTy})`)
+  /**
+   * 落点：拿**渲染出的 `y`** 与 `tyBaselineY()` 对（渲染端与断言**同一个式子**）。
+   *
+   * ⚠ "墨迹下端到小节线的间距 = 0"**不再在这里手写位移模型**——本轮连续两次把模型写错
+   * （一次 `ky` 乘重、一次符号写反）。那条口径由**像素实测**作证（`dist-preview/ty-zoom.png`
+   * + 扫描：记号墨迹 `135 → 141`、`yTop = 141` ⇒ 间距 **0.00**），
+   * 断言只锁"渲染端确实按 `tyBaselineY()` 落点"这一契约。
+   */
+  check('adj723h `&ty` 落点 = `tyBaselineY(yTop, noteSize)`（渲染端与断言同源）',
+    mTy !== null && barTy !== undefined && Math.abs(Number(mTy[2]) - tyBaselineY(barTy.yTop, noteSizeH)) < 0.35,
+    `y=${mTy?.[2]} 期望=${barTy ? tyBaselineY(barTy.yTop, noteSizeH).toFixed(2) : '-'} yTop=${barTy?.yTop}`)
 }
 // adj：&ds/&dc/&fine 一律粗体 + 斜体，位置下移 0.1 音符高度（1.8×s）
 const svg207 = renderScoreToSvg(layoutScore(r206, DUR_CFG))[0]
@@ -1693,20 +1708,22 @@ check('反复标记花体渲染（D.S./Fine 含 Segoe Script）', /<text[^>]*fon
 const markFs = Math.max(8, Math.round(9 * NS_S))
 check('adj210 D.S. 字号 = 主音符 0.5', new RegExp(`<text x="[^"]+" y="[^"]+" text-anchor="middle" font-size="${markFs}"[^>]*>D\\.S\\.<`).test(svg207), `fs=${markFs}`)
 check('adj210 Fine 字号 = 主音符 0.5', new RegExp(`<text x="[^"]+" y="[^"]+" text-anchor="middle" font-size="${markFs}"[^>]*>Fine<`).test(svg207), `fs=${markFs}`)
-// adj182/adj184 → **adj723h 更新**：大跳跃记号高度 = `24×s`（`adj182` 的 `19.2×s` 的 1.25 倍），
-// 且与小节线上端间距 = 旧的 `0.20×fs_旧` 再 +2px ⇒ `y = yTop + TY_BAR_GAP + 0.15×fs`
-const ty182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="([\d.]+)"[^>]*>𝄌<\/text>/.exec(svg126)
+// adj182/adj184 → **adj723h 更新（最终口径）**：`&ty` 基础字号**回到 `adj182` 原值**（宽度不变），
+// 高度靠 `transform` 纵向 ×1.5，墨迹下端与小节线上端**齐平**（间距 0）
+const ty182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="([\d.]+)" transform="translate\(0 [-\d.]+\) scale\(([-\d.]+) ([-\d.]+)\)[^"]*"[^>]*>𝄌<\/text>/.exec(svg126)
 const hs182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="([\d.]+)"[^>]*>𝄋<\/text>/.exec(svg126)
 const tyBar182 = placed126.find((b) => b.marks?.includes('ty'))
 const hsBar182 = placed126.find((b) => b.marks?.includes('hs'))
-check('adj723h（原 adj182）大跳跃字号 = 28.8×s（硬编码期望，**不比函数自己**——那样改错了也发现不了）',
-  ty182 !== null && Number(ty182[3]) === Math.max(14, Math.round(28.8 * NS_S)),
-  `fs=${ty182?.[3]} 期望=${Math.max(14, Math.round(28.8 * NS_S))}`)
-check('adj723h（原 adj184）大跳跃记号 y = yTop + 1 + 0.15×fs（间距 = 1px 绝对值，硬编码期望）',
+check('adj723h（原 adj182）大跳跃基础字号 = 19.2×s（硬编码期望，**不比函数自己**）',
+  ty182 !== null && Number(ty182[3]) === Math.max(14, Math.round(16 * 1.2 * NS_S)),
+  `fs=${ty182?.[3]} 期望=${Math.max(14, Math.round(16 * 1.2 * NS_S))}`)
+check('adj723h（原 adj184）大跳跃 y = tyBaselineY(yTop, noteSize)（同源；kx=1、ky=1.25）',
   ty182 !== null &&
     tyBar182 !== undefined &&
-    Math.abs(Number(ty182[2]) - (tyBar182.yTop + 1 + 0.15 * Number(ty182[3]))) < 0.35,
-  `y=${ty182?.[2]} fs=${ty182?.[3]} yTop=${tyBar182?.yTop}`)
+    Number(ty182[4]) === 1 &&
+    Number(ty182[5]) === 1.25 &&
+    Math.abs(Number(ty182[2]) - tyBaselineY(tyBar182.yTop, DUR_CFG.note_size)) < 0.35,
+  `y=${ty182?.[2]} 期望=${tyBaselineY(tyBar182?.yTop ?? 0, DUR_CFG.note_size).toFixed(2)} scale(${ty182?.[4]} ${ty182?.[5]}) yTop=${tyBar182?.yTop}`)
 check('adj182 花S 记号下端与 yTop 齐平（y = yTop - 0.15×fs；字号走 HS_FONT_SIZE）',
   hs182 !== null &&
     hsBar182 !== undefined &&
