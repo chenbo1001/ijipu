@@ -35,6 +35,8 @@ import { splitNoteDur, noteBodyW, augBodyW, dotBodyW, accidentalBodyW, accidenta
 import { hairpinEvents, resolveHairpins, type DynEvent, type NoteAnchors } from './hairpins'
 // adj303：乐器名标注需要用 parseInstrumentRef / 库名（@乐器名 / @@ 后下一个音符）
 import { parseInstrumentRef, INSTRUMENT_LIB_NAMES } from '../playback/instruments'
+// adj723j：波音码集合（`&sby`/`&xby`/`&sby+`/`&xby+`）——它们画在**连音线下方**，不计入避让高度
+import { MORDENT_SYMBOLS } from '../playback/ornaments'
 // adj427：临时段（{bz … } / {dsb … }）叠加层的拍位包络与主旋律跨度（纯函数）
 import {
   computeSegments,
@@ -3838,7 +3840,22 @@ export function layoutScore(
         const c = n.x + n.width / 2
         if (c < cLo || c > cHi) continue
         hi = Math.max(hi, highOf(n))
-        if (n.token.kind === 'note') sym = Math.max(sym, n.token.symbols.filter((x) => x !== 'hx').length)
+        if (n.token.kind === 'note') {
+          /**
+           * adj723j（用户澄清）：「**波音在连音线下方**」。
+           *
+           * 故波音类记号（`&sby`/`&xby`/`&sby+`/`&xby+`）**不参与**连音线的避让高度——
+           * 它们画在 `symY − 2s`（在连音线**之下**），连音线只需在它们上方通过；
+           * 若把整层 `10×s + LAYER_GAP×s ≈ 8.67px` 计入，就与波音自身占的高度**重复留白**
+           * （实测含 `&sby` 的线间隙 11.65px，而同批其它线仅 3~5px）。
+           *
+           * 其余上方修饰符（颤音 `&cy`、延长 `&yc` 等）仍按层计入——它们确实在连音线上方。
+           */
+          const above = n.token.symbols.filter(
+            (x) => x !== 'hx' && !(MORDENT_SYMBOLS as readonly string[]).includes(x),
+          )
+          sym = Math.max(sym, above.length)
+        }
       }
     }
     return slurYFor(baseY, hi, sym, raise)
