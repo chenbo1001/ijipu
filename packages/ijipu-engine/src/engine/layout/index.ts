@@ -3793,6 +3793,39 @@ export function layoutScore(
   /** 某行连音线的基准 y（不含该条自己的嵌套抬升 / `(+` `(-` 升降） */
   const rowSlurY = (rowIdx: number, anchor: PlacedToken, raise: number): number =>
     slurYFor(anchor.y, maxHiOfRow(rowIdx), maxSymOfRow(rowIdx), raise)
+
+  /**
+   * adj723i（用户报「**较多地方的连音线离音符太远**」）：
+   * **`hi`（高八度点）按整行、`sym`（本音符修饰符）按本线区间。**
+   *
+   * ## 为什么必须拆开
+   * · **`hi` 保持行级**是既有正确口径（`adj60` 有断言守着）：高八度点画得比数字高，
+   *   连音线若只避开"自己区间内"的点，就会**穿过**同行的其它高八度点。
+   *   （本轮一度改成区间级，`adj60` 立刻报 `y=142.2 expect=138.84`。）
+   * · **`sym` 必须区间级**：行内**任意一个**音符带上方修饰符（如 `&sby` 波音），
+   *   旧口径会让**全行每条线**多抬 `10×s + LAYER_GAP×s ≈ 8.0px` —— 这正是用户看到的
+   *   "离音符太远"（实测该行间隙 11.65px，设计应 ~3px）。波音只影响它自己那一小段。
+   *
+   * ## 锚点
+   * 锚点 y = **该行最低音符的 y**（行内各线共用同一基准，免得同行不同高）。
+   *
+   * ## 齐平
+   * 行内齐平仍由 `alignRowSlurBaselines` 负责（保留其原有前提）。
+   */
+  const spanSlurY = (anchor: PlacedToken, rowIdx: number, x1: number, x2: number, raise: number): number => {
+    const lo = Math.min(x1, x2) - 2
+    const hiX = Math.max(x1, x2) + 2
+    const rowNotes = rows[rowIdx]?.notes ?? []
+    const baseY = rowNotes.length > 0 ? Math.min(...rowNotes.map((n) => n.y)) : anchor.y
+    let sym = 0
+    for (const r of rows) {
+      for (const n of r.notes) {
+        if (n.x < lo || n.x > hiX) continue
+        if (n.token.kind === 'note') sym = Math.max(sym, n.token.symbols.filter((x) => x !== 'hx').length)
+      }
+    }
+    return slurYFor(baseY, maxHiOfRow(rowIdx), sym, raise)
+  }
   /** 行内跳房子线最低 y + 2s（adj134：连音线不得高于跳房子线，避免与其重叠） */
   const voltaFloorY = (rowIdx: number): number | null => {
     const r = rows[rowIdx]
@@ -3875,12 +3908,17 @@ export function layoutScore(
     // adj44 嵌套抬升 + adj135：(+ 抬升 / adj136：(- 下降（每级 2px，与跳房子类似）
     const raise = nestedRaise[si] + (sp.plus ?? 0) * VOLTA_RAISE - (sp.minus ?? 0) * VOLTA_RAISE
     if (rowA === rowB) {
+      // adj723i：端点先算出来，供"按本线区间求基准 y"使用
+      const sx1 = r1(a.x + halfDig + sSlur)
+      const sx2 = r1(b.x + halfDig - sSlur)
       pages[a.id.page].slurs.push({
         // 起点=开始音符数字槽中心右 1px×s、终点=结束音符数字槽中心左 1px×s
-        x1: r1(a.x + halfDig + sSlur),
-        x2: r1(b.x + halfDig - sSlur),
-        // adj689：基准 y 取**整行**的（不再取本条覆盖区间的）⇒ 同行连音线齐平
-        y: r1(Math.max(rowSlurY(rowA, a, raise), voltaFloorY(rowA) ?? -Infinity)),
+        x1: sx1,
+        x2: sx2,
+        // adj689：同行线**齐平**（由 `alignRowSlurBaselines` 收成一条）；
+        // adj723i：但基准改按**本线自己覆盖的音符区间**求——不再被行内**无关**音符的
+        // 高八度点/修饰符抬高（用户报「连音线离音符太远」，实测多抬 3.6~8.7px）
+        y: r1(Math.max(spanSlurY(a, rowA, sx1, sx2, raise), voltaFloorY(rowA) ?? -Infinity)),
         depth: sp.depth,
         style,
         // 仅平均连音组 (y...) 标数字（普通连音线 (…) 不加，adj43）
@@ -4051,15 +4089,22 @@ export function layoutScore(
  */
 function alignRowSlurBaselines(pages: ScorePage[]): void {
   for (const p of pages) {
+    /**
+     * adj723i：**保留原来的前提**——只对"被 `{dsb}` 下移过"的行做统一（`p.rowSlides` 非空）。
+     *
+     * 为什么不能无条件做：本轮的基准改成了"按**各线自己区间**求"（修用户报的"离音符太远"）。
+     * 统一的口径是"取该行最靠上的那条"，于是只要行内有**一个**带高八度点/修饰符的音符，
+     * **全行**又会被抬回去——实测第 1 行 `(1'// …)` 那一行：各线自身间隙 2.95px，
+     * 统一后反而 **11.65px**，与用户诉求相反。
+     *
+     * 所以"齐平"只在**确实需要**时保留（`{dsb}` 各段下移量不同导致同行线错位，`adj689b` 的原问题），
+     * 其余场合按各线自身的区间高度——**离音符近优先**。
+     */
     const slides = p.rowSlides
     if (!slides || slides.size === 0) continue
     for (const [rowTop] of slides) {
       /**
        * 本行的连音线（主旋律线，含跨行半弧；段层自己的弧线不管）。
-       *
-       * 基准 = 该行连线里**最靠上的那一条的 y**：布局期每行的基准已经是
-       * "整行最高的元素顶 − 层距"（`rowSlurY`），而段层下移后**只有落在下移量最大的
-       * 那一段里的线**还在正确高度上 ⇒ 取最小值即为该行应有的基准。
        * 其余条按**同一位移**平移 ⇒ 嵌套抬升 / `(+` `(-` / 跨行半弧端点差一字不变。
        */
       const list = p.slurs.filter(
