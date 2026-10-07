@@ -18061,6 +18061,40 @@ Q: |/["2.3." 1- 0 1/ 6,/ :|&ds]["4." 1- 0 0/ 5,/ | 6, 6,/ 3/ 2/ 3/ 2/ 6,/ &hx | 
   check('adj653 同一根线上 `:|` 与 `&ds` 并存时**反复优先**（走完 2 遍才跳花 S，旧实现第 1 遍就跳）',
     JSON.stringify(miniIdx) === JSON.stringify([0, 1, 2, 1, 2, 1, 2, 3]),
     JSON.stringify(miniIdx))
+  /**
+   * adj723u（用户报「什么时候又把播放的反复、跳跃顺序弄乱了」）：
+   * **`seq.events` 的 `atMs` 必须单调不减**——这是两处下游逻辑的**共同前提**：
+   *  · `adj723f` 的起播回退（"向前扫描取同刻最小下标"）要求**同刻事件在数组里连续**；
+   *  · 预览色块 `playheadPosIn()` 用**二分**找"最后一个 `atMs <= currentMs`"的段
+   *    （应用侧注释亦写"`atMs` 单调、含反复展开"）。
+   *
+   * 根因：段层（`{dsb}`/`{bz}`）事件是"跑到主旋律音符时补发"、整段 push 在数组**前面**
+   * ⇒ 含 `{dsb}` 时 `atMs` 形如 `0,2000,0,2000,4000…`（**非单调**）⇒ 二分错位 ⇒ 色块来回跳。
+   * 修法：`buildPlaySequence` 返回前按 `atMs` **稳定排序**。
+   *
+   * 用例覆盖两类段型（`dsb`）+ 反复 + 跳跃（AGENTS 六之二·5）。
+   */
+  for (const [tag, body] of [
+    ['{dsb}+反复', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {dsb 1- 2- } 3- 4- |: 5- 6- :| 7- 1\'- ||\n'],
+    ['{bz}+D.C.', 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {bz 1,- 2,- } 3- 4- |&dc 5- 6- ||\n'],
+    ['{dsb}+重叠房子+:|&ds', `V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {dsb 1- 2- } 3- 4- |:&hs 5- 6- :|&ds 7- 1'- ||\n`],
+  ] as const) {
+    const lay = layoutScore(parseJps(body), defaultPageConfig)
+    const sq = buildPlaySequence(parseJps(body), lay, 60)
+    const at = sq.events.map((e) => e.atMs)
+    let firstDrop = -1
+    for (let i = 1; i < at.length; i++) {
+      if (at[i] < at[i - 1] - 1e-6) {
+        firstDrop = i
+        break
+      }
+    }
+    check(`adj723u ${tag}：\`events\` 的 \`atMs\` **单调不减**（色块二分定位的前提）`,
+      sq.events.length > 0 && firstDrop < 0,
+      firstDrop < 0
+        ? `${sq.events.length} 个事件`
+        : `首个下降 @${firstDrop}: ${at[firstDrop - 1]} → ${at[firstDrop]}`)
+  }
   // 护栏：单号房子行为不变（`["1."` 只第 1 遍、`["2."` 只第 2 遍）——用同一份谱去掉重叠写法对照
   const single = code.replace('["2.3."', '["2."')
   const singleSeq = buildPlaySequence(parseJps(single), layoutScore(parseJps(single), defaultPageConfig), 60)
