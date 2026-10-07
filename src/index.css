@@ -772,6 +772,39 @@ body {
   font-size: 11px;
 }
 
+/* adj723z：二级菜单（「文件 → 最近…」）——**内联展开**，不做绝对定位飞出。
+   原因：`.menu-dropdown` 自己是 `overflow-y: auto` 的滚动容器（矮视口要能滚，
+   见 TopBar 的 clampDropdowns），绝对定位的子浮层会被这层滚动容器裁掉。
+   内联展开与它天然相容，也顺带对触屏友好（不必 hover）。 */
+.menu-dropdown .menu-entry.has-sub .menu-sub-caret {
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.menu-dropdown .menu-entry.has-sub.expanded {
+  background: var(--jp-bg-panel-hover);
+}
+
+.menu-dropdown .menu-sub {
+  /* 缩进 + 左侧竖线：一眼看出是上一项的次级列表 */
+  margin: 2px 0 4px 10px;
+  padding-left: 6px;
+  border-left: 1px solid var(--jp-border);
+}
+
+.menu-dropdown .menu-entry.menu-sub-entry {
+  padding: 5px 8px;
+  font-size: 12.5px;
+  /* 文件名可能很长（如「绿肥红瘦-知否」）：单行省略，完整名放 title 悬浮可见 */
+  gap: 12px;
+}
+
+.menu-dropdown .menu-entry.menu-sub-entry > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .menu-dropdown .menu-entry.disabled {
   opacity: 0.45;
   cursor: default;

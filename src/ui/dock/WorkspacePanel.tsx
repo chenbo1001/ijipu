@@ -34,6 +34,8 @@ import { resolvePendingBinding, useDocStore } from '../../store/docStore'
 import { useUiStore } from '../../store/uiStore'
 import { workspaceCopy } from '../../brand/copy'
 import { fileBaseName } from '../../store/saveSupport'
+// adj723z：「最近…」二级菜单的登记（文件菜单里那一项的数据源）
+import { recordRecentFile } from '../../store/recentFiles'
 import type { WorkspaceRecord } from '../../store/fileHandleDb'
 import { ToolIcon } from '../ToolIcon'
 // adj585（用户要求）：长说明收进可点击展开的 `?` 徽标（触屏也能看），不再常驻占高度
@@ -879,7 +881,20 @@ export function WorkspacePanel() {
     setBusyLabel(workspaceCopy.openingFile(entry.name))
     try {
       const ok = await openWorkspaceFile([...path, entry.name])
-      if (ok) closeDock()
+      if (ok) {
+        /**
+         * adj723z：**登记到「最近…」**（文件菜单的二级菜单，最多 10 条、最近在前）。
+         * 身份 = 工作区 id + 相对路径（与 `docStore.binding` 同源），故换机器/换工作区也能对上号。
+         * 登记失败不影响打开（`recordRecentFile` 内部已静默降级）。
+         */
+        void recordRecentFile({
+          wsId: ws.id,
+          wsName: ws.name,
+          segs: [...path, entry.name],
+          name: fileBaseName(entry.name),
+        })
+        closeDock()
+      }
     } finally {
       setBusy(false)
       setBusyLabel(null)
@@ -1370,8 +1385,13 @@ export function WorkspacePanel() {
                     className="ws-row-open ws-row-open-2l"
                     onClick={() => {
                       void (async () => {
-                        const ok = await openWorkspaceFile([...h.dirSegs, h.name])
-                        if (ok) closeDock()
+                        const segs = [...h.dirSegs, h.name]
+                        const ok = await openWorkspaceFile(segs)
+                        if (ok) {
+                          // adj723z：搜索命中里打开的也要进「最近…」（与目录列表同一条规则）
+                          if (ws) void recordRecentFile({ wsId: ws.id, wsName: ws.name, segs, name: fileBaseName(h.name) })
+                          closeDock()
+                        }
                       })()
                     }}
                     disabled={busy}

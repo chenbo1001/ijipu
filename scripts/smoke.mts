@@ -167,6 +167,9 @@ import {
   clampPreviewZoom,
   isFullyVisibleIn,
 } from '../src/preview/zoomFit.ts'
+// adj723z：「文件 → 最近…」二级菜单的数据口径（纯列表操作，Node 里可断言）
+import { applyOpenToRecent, sameRecentFile, type RecentJpsFile } from '../src/store/recentFiles.ts'
+import { RECENT_FILES_MAX } from '../src/store/fileHandleDb.ts'
 // adj530：顶栏"放不下就收进更多"的折叠判定（纯算式）——按可见优先级从最低的一位开始折叠
 import { foldKeys, TOPBAR_DONATE_KEY, TOPBAR_FIXED_KIDS } from '../src/ui/topbarFold.ts'
 // adj538：桌面壳「外部打开」——多文件取舍是纯逻辑，可在 Node 里直接断言（模块不碰 window 顶层）
@@ -10197,6 +10200,8 @@ function runAdj529PreviewFitTests() {
   const topSrc529 = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
   const previewSrc = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
   const scrubSrc = String(readFileSync('src/ui/ScrubValue.tsx', 'utf8'))
+// adj723z：「最近…」的登记点在「工作区」面板（从工作区打开文件时登记）
+const paneSrcWk = String(readFileSync('src/ui/dock/WorkspacePanel.tsx', 'utf8'))
   check('adj529 双击比率值 → 现量 .preview-pane 宽度 → 写进已有的 previewZoom（一次到位）',
     /onDoubleClick=\{applyFitZoom\}/.test(topSrc529) &&
       /document\.querySelector<HTMLElement>\('\.preview-pane'\)/.test(topSrc529) &&
@@ -10239,6 +10244,60 @@ function runAdj529PreviewFitTests() {
   check('adj723y PreviewPane 用该纯函数作前置（不再现算四边比较）',
     /if \(isFullyVisibleIn\(elRect0, scRect\)\) return/.test(previewSrc) &&
       !/elRect0\.top >= scRect\.top/.test(previewSrc),
+    '')
+  /**
+   * adj723z（用户要求）：「在菜单文件组中增加一个打开历史二级菜单，二级菜单下为最近 10 个
+   * 打开过的 jps 文件，**按从最近到最早的顺序排列**」。
+   *
+   * 断言直接打列表口径（纯函数 `applyOpenToRecent`）：最近在前、同一条只留一份并提到最前、
+   * 超过 10 条丢最旧。另确认菜单接线在（「最近…」项 + 二级菜单渲染 + 打开时登记）。
+   */
+  {
+    const mk = (n: string, wsId = 'ws1', segs?: string[]): Omit<RecentJpsFile, 'at'> => ({
+      wsId,
+      wsName: 'W',
+      segs: segs ?? [`${n}.jps`],
+      name: n,
+    })
+    let list: RecentJpsFile[] = []
+    // 依次打开 f1..f12 ⇒ 只剩最近 10 条、最近在前、f1/f2 被挤掉
+    for (let i = 1; i <= 12; i++) list = applyOpenToRecent(list, mk(`f${i}`), i)
+    check('adj723z 「最近…」最多 10 条、且**最近在前**（丢最旧）',
+      list.length === RECENT_FILES_MAX &&
+        RECENT_FILES_MAX === 10 &&
+        list[0].name === 'f12' &&
+        list[9].name === 'f3' &&
+        !list.some((r) => r.name === 'f1' || r.name === 'f2'),
+      `${list.length} 条：${list.map((r) => r.name).join(',')}`)
+    // 重新打开中间那条 ⇒ 提到最前，且**不新增副本**
+    list = applyOpenToRecent(list, mk('f7'), 99)
+    check('adj723z 再次打开同一条 ⇒ 提到最前且不重复（仍 10 条）',
+      list.length === 10 && list[0].name === 'f7' && list[0].at === 99 && list.filter((r) => r.name === 'f7').length === 1,
+      `${list.map((r) => r.name).join(',')}`)
+    // 同一文件名但**不同工作区** ⇒ 是两条不同记录（身份含 wsId）
+    const other = applyOpenToRecent(list, mk('f7', 'ws2'), 100)
+    check('adj723z 同名文件但不同工作区 ⇒ 视为两条（身份 = 工作区 id + 相对路径）',
+      other.length === 10 && other[0].wsId === 'ws2' && other.filter((r) => r.name === 'f7').length === 2,
+      JSON.stringify(other.slice(0, 2).map((r) => `${r.wsId}:${r.name}`)))
+    // 同工作区但不同子目录 ⇒ 也是两条
+    const deep = applyOpenToRecent(list, mk('f7', 'ws1', ['sub', 'f7.jps']), 101)
+    check('adj723z 同工作区不同子目录 ⇒ 视为两条',
+      deep.filter((r) => r.name === 'f7').length === 2, JSON.stringify(deep.filter((r) => r.name === 'f7').map((r) => r.segs.join('/'))))
+    check('adj723z `sameRecentFile` 判据只认「工作区 + 完整相对路径」',
+      sameRecentFile(list[0], { wsId: list[0].wsId, segs: [...list[0].segs] }) &&
+        !sameRecentFile(list[0], { wsId: 'other', segs: [...list[0].segs] }) &&
+        !sameRecentFile(list[0], { wsId: list[0].wsId, segs: ['sub', ...list[0].segs] }),
+      '')
+    // 上限为 0 的极端（不该崩）
+    check('adj723z 上限 0 ⇒ 空列表（不崩）', applyOpenToRecent([], mk('a'), 1, 0).length === 0, '')
+  }
+  check('adj723z 菜单接线：「文件」组里有「最近…」二级菜单，且打开文件时登记',
+    /const entryRecent: MenuEntry = \{ label: '最近…'/.test(topSrc529) &&
+      /submenu: recentSub/.test(topSrc529) &&
+      /submenu\?: \(MenuEntry \| 'sep'\)\[\]/.test(topSrc529) &&
+      /className="menu-sub"/.test(topSrc529) &&
+      /recordRecentFile\(/.test(paneSrcWk) &&
+      /openRecentJpsFile\(r\)/.test(topSrc529),
     '')
   check('adj529 ScrubValue 支持双击回调（其余调用方不传即无行为）',
     /onDoubleClick\?: \(\) => void/.test(scrubSrc) && /onDoubleClick=\{onDoubleClick\}/.test(scrubSrc),
@@ -10945,7 +11004,8 @@ async function runAdj540WorkspaceTests() {
   check('adj540 入口接线：**窄屏以工作区为主入口**（菜单里工作区排第一，只留平台无关项）',
     // 窄屏分支：工作区在最前，且**不含**系统选择器/新建/保存/另存为那些项（都在面板里或只在 PC 上成立）
     // adj615：末尾多了平台无关的「打印」
-    /const fileEntries: \(MenuEntry \| 'sep'\)\[\] = isNarrow\s*\?\s*\[entryWorkspace, entrySamples, entryPaste, entryTryout, entryExport, entryPrint\]/.test(
+    // adj723z：中间多了「最近…」（打开历史二级菜单，窄屏同样可用——它只依赖工作区）
+    /const fileEntries: \(MenuEntry \| 'sep'\)\[\] = isNarrow\s*\?\s*\[entryWorkspace, entrySamples, entryPaste, entryRecent, entryTryout, entryExport, entryPrint\]/.test(
       topSrc,
     ) &&
       /\{ label: workspaceCopy\.openSystemLabel, onPick: runOpen \}/.test(topSrc) &&

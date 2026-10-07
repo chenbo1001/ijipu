@@ -11,9 +11,16 @@
  * 回退到另存为对话框重新授权（浏览器会弹出权限询问）。
  */
 const DB_NAME = 'ijipu'
-const STORE = 'fileHandle'
+/** `fileHandle` 仓：句柄/工作区/最近工作区列表/最近打开文件列表**共用**（键区分用途） */
+export const STORE = 'fileHandle'
 
-function openDb(): Promise<IDBDatabase> {
+/** 最近打开文件列表在仓里的键（`recentFiles.ts` 用） */
+export const RECENT_FILES_KEY = 'recentJpsFiles'
+
+/** 最近打开文件列表上限（用户口径：菜单「最近…」下为最近 **10** 个） */
+export const RECENT_FILES_MAX = 10
+
+export function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 1)
     req.onupgradeneeded = () => {

@@ -23,6 +23,12 @@ import { KBD, withKbd } from '../brand/shortcuts'
 // adj540：「打开/另存为」要按平台分流（**手机端以工作区优先**）并判断"是否已设工作区"
 import { isCoarsePointerDevice } from '../store/saveSupport'
 import { getWorkspace, isWorkspaceAvailable } from '../store/workspace'
+import {
+  clearRecentFiles,
+  loadRecentFiles,
+  openRecentJpsFile,
+  type RecentJpsFile,
+} from '../store/recentFiles'
 import { ToolIcon } from './ToolIcon'
 // adj526：可"按住上下拖"的数值显示（预览比率 / 编辑器字号）
 import { ScrubValue } from './ScrubValue'
@@ -59,6 +65,15 @@ interface MenuEntry {
   hotkey?: string
   onPick: () => void
   disabled?: boolean
+  /**
+   * adj723z（用户要求）：**二级菜单**（如「文件 → 最近…」）。
+   *
+   * 为什么做成**内联展开**而不是悬浮飞出：`.menu-dropdown` 自身是
+   * `overflow-y: auto` 的滚动容器（矮视口要能滚，见 `clampDropdowns`），
+   * 绝对定位的子浮层会被这层滚动容器**裁掉**。内联展开与它天然相容，
+   * 也顺带对触屏友好（不必 hover）。展开由 `MenuPanel` 自己管状态。
+   */
+  submenu?: (MenuEntry | 'sep')[]
 }
 
 function MenuPanel({
@@ -68,24 +83,61 @@ function MenuPanel({
   entries: (MenuEntry | 'sep')[]
   onClose: () => void
 }) {
+  /** 当前展开的二级菜单下标（一次只开一个；-1 = 都没开） */
+  const [openSub, setOpenSub] = useState(-1)
   return (
     <>
       {entries.map((e, i) => {
         if (e === 'sep') return <div key={`sep-${i}`} className="menu-sep" />
         const disabled = !!e.disabled
+        const hasSub = !!e.submenu
+        const expanded = hasSub && openSub === i
         return (
-          <div
-            key={`${e.hotkey ?? 'x'}-${i}`}
-            className={`menu-entry${disabled ? ' disabled' : ''}`}
-            data-hotkey={e.hotkey}
-            onClick={() => {
-              if (disabled) return
-              e.onPick()
-              onClose()
-            }}
-          >
-            <Hotkey text={e.label} />
-            {e.kbd && <span className="kbd">{e.kbd}</span>}
+          <div key={`${e.hotkey ?? 'x'}-${i}`}>
+            <div
+              className={`menu-entry${disabled ? ' disabled' : ''}${hasSub ? ' has-sub' : ''}${expanded ? ' expanded' : ''}`}
+              data-hotkey={e.hotkey}
+              onClick={() => {
+                if (disabled) return
+                // 有二级菜单 ⇒ 只切换展开，**不执行 onPick、也不关菜单**
+                if (hasSub) {
+                  setOpenSub(expanded ? -1 : i)
+                  return
+                }
+                e.onPick()
+                onClose()
+              }}
+            >
+              <Hotkey text={e.label} />
+              {hasSub ? (
+                <span className="kbd menu-sub-caret">{expanded ? '▾' : '▸'}</span>
+              ) : (
+                e.kbd && <span className="kbd">{e.kbd}</span>
+              )}
+            </div>
+            {expanded && (
+              <div className="menu-sub">
+                {e.submenu!.map((s, j) => {
+                  if (s === 'sep') return <div key={`sub-sep-${j}`} className="menu-sep" />
+                  const subDisabled = !!s.disabled
+                  return (
+                    <div
+                      key={`sub-${j}`}
+                      className={`menu-entry menu-sub-entry${subDisabled ? ' disabled' : ''}`}
+                      title={s.label}
+                      onClick={() => {
+                        if (subDisabled) return
+                        s.onPick()
+                        onClose()
+                      }}
+                    >
+                      <Hotkey text={s.label} />
+                      {s.kbd && <span className="kbd">{s.kbd}</span>}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )
       })}
@@ -271,6 +323,20 @@ export function TopBar() {
   const viewRef = useRef<HTMLDivElement>(null)
   // 顶栏根 ref：用于 click-outside 检测（汉堡 / 更多 / 视图下拉都收在 topbar 内，点击外部关闭）
   const topbarRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * adj723z：**「最近…」二级菜单的数据**。
+   *
+   * 进菜单时读一次（`loadRecentFiles`），打开/清除后再读一次——列表最多 10 条、读取很轻，
+   * 不值得为它引入订阅；这样也天然避免"菜单关着时反复读库"。
+   */
+  const [recentFiles, setRecentFiles] = useState<RecentJpsFile[]>([])
+  const refreshRecentFiles = useCallback(async () => {
+    setRecentFiles(await loadRecentFiles())
+  }, [])
+  useEffect(() => {
+    if (menuOpen) void refreshRecentFiles()
+  }, [menuOpen, refreshRecentFiles])
 
   const closeMenu = () => setMenuOpen(false)
   const closeOverflow = () => setOverflowOpen(false)
@@ -1150,14 +1216,44 @@ export function TopBar() {
   const entryExport: MenuEntry = { label: '导出(&X)…', kbd: KBD.export, hotkey: 'x', onPick: () => toggleDock('export') }
   /** adj615（用户要求）：菜单里**紧跟在「导出」下面**加「打印」（打开打印对话框打印当前谱面） */
   const entryPrint: MenuEntry = { label: '打印(&D)…', kbd: KBD.print, hotkey: 'd', onPick: () => useDocStore.getState().printScore() }
+  /**
+   * adj723z（用户要求）：「在菜单文件组中增加一个打开历史二级菜单，二级菜单下为最近 10 个
+   * 打开过的 jps 文件，按从最近到最早的顺序排列」；二级菜单名定为「**最近…**」。
+   *
+   * 数据来自 `recentFiles`（IndexedDB，最多 10 条、最近在前）；条目随每次打开自动登记。
+   * 列表为空时该项**置灰**（告诉用户"这里确实没有记录"，而不是点了没反应）；
+   * 有记录时在二级菜单末尾给一条「清除最近记录」。
+   */
+  const recentSub: (MenuEntry | 'sep')[] =
+    recentFiles.length === 0
+      ? [{ label: '（暂无记录）', disabled: true, onPick: () => {} }]
+      : [
+          ...recentFiles.map((r) => ({
+            label: r.name,
+            onPick: () => {
+              void openRecentJpsFile(r).then((ok) => {
+                if (ok) void refreshRecentFiles()
+              })
+            },
+          })),
+          'sep' as const,
+          {
+            label: '清除最近记录',
+            onPick: () => {
+              void clearRecentFiles().then(() => refreshRecentFiles())
+            },
+          },
+        ]
+  const entryRecent: MenuEntry = { label: '最近…', hotkey: 'r', onPick: () => {}, submenu: recentSub }
   const fileEntries: (MenuEntry | 'sep')[] = isNarrow
-    ? [entryWorkspace, entrySamples, entryPaste, entryTryout, entryExport, entryPrint]
+    ? [entryWorkspace, entrySamples, entryPaste, entryRecent, entryTryout, entryExport, entryPrint]
     : [
         entryNew,
         entryOpen,
         entryOpenSystem,
         entrySamples,
         entryPaste,
+        entryRecent,
         entrySave,
         entrySaveAs,
         entryWorkspace,
