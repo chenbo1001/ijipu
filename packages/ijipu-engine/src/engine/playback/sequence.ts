@@ -940,12 +940,25 @@ export function buildPlaySequence(
   for (let k = 0; k < seq.length; k++) {
     const it = seq[k]
     if (it.kind !== 'bar' || !it.bar?.voltaStart) continue
-    // 本线自己的注释优先；没有则回看上一根小节线的注释（旧式写法把番号写在那里）
-    let raw = (it.bar.voltaStart.comment ?? '').trim()
-    if (raw === '') {
-      const prev = seq[k - 1]
-      if (prev?.kind === 'bar') raw = (prev.bar?.comment ?? '').trim()
-    }
+    /**
+     * 注释只从**本线的 `voltaStart`** 取；本线没有时才回看上一根小节线自己的 `comment`
+     * （旧式 `|"1." [ …` 把番号写在 `[` 之前那根 `|` 上）。
+     *
+     * ⚠ **不能无条件回看**：`|["1." 3 3 |]/` 这种把注释写在**房子起点之前那根 `|`** 上的写法，
+     * 走查是在那根 `|` 处**平移到下一个房子**（`voltaAfter` 指向 `[` 所在线）——若在 `[` 线上
+     * 回看 `|` 的注释，就会把**同一个番号**再当成一个房子，于是房子计数永不扣减、
+     * 大反复后重复奏（实测 `adj598` 从 12 音变 20 音）。
+     */
+    const own = (it.bar.voltaStart.comment ?? '').trim()
+    const prev = seq[k - 1]
+    const prevBar = prev?.kind === 'bar' ? prev.bar : undefined
+    const raw =
+      own !== ''
+        ? own
+        : // 旧式回看：仅当前一根**不是**房子起点时才认它（否则那根自己就是一个房子，见上）
+          prevBar && !prevBar.voltaStart
+          ? (prevBar.comment ?? '').trim()
+          : ''
     voltaLimit.set(k, raw === '' ? 1 : Math.max(1, raw.split('.').filter((s) => s.trim() !== '').length))
   }
   /** 各房子"还能走几次"——走过它的内容后减一，为 0 即路过 */
@@ -1911,7 +1924,13 @@ export function buildPlaySequence(
         insideVolta = i // 进入本房子范围（走过末尾线时才 count-1）
         return false
       }
-      const target = voltaAfter.get(i) ?? i + 1
+      /**
+       * adj723aa：落点 `voltaAfter.get(i)` 可能是**本线自己**（`|["1." … |]/` 这种把房子起点
+       * 与未封闭末尾合在一条线上的写法）——那样 `i = target` 等于原地不动 ⇒ 死循环。
+       * 故落点等于自身时退一位。
+       */
+      const after = voltaAfter.get(i)
+      const target = after === undefined || after <= i ? i + 1 : after
       landedByVoltaSkip = target
       i = target
       pendingJumpMs = lastEndMs // adj361：被跳过的房子不占时，从当前播放时刻无缝接上
