@@ -1003,6 +1003,8 @@ export function buildPlaySequence(
   let pass = 1 // 当前反复遍次（1 起；决定演奏哪个 volta）
   let repeatStart = 0 // 反复起点（无 |: 时默认从头反复）
   let bigRepeatDone = false // adj359：&dc/&ds 是否已发生过（大反复；之后 &fine 生效、&ty 跳越、dc/ds 不再重复跳）
+  /** adj723w：已扫过的 `&ty` 小节线下标（每根只扫一次，避免 `&dc` 回跳后重复跳越） */
+  const tyFiredAt = new Set<number>()
   let landedByVoltaSkip = -1 // adj359：因跳过某 volta 而落在的小节线索引（该线上不再触发 :| 回跳，只处理其 volta 番号）
   let i = 0
   let guard = 0
@@ -1942,9 +1944,14 @@ export function buildPlaySequence(
         continue
       }
       if (bar.marks.includes('ty')) {
-        if (bigRepeatDone) {
+        /**
+         * adj723w：`&ty` 只在**已经跳过一次之后**的那一遍里生效（见 `jumpedOnce` 说明）。
+         * 且**每根 `&ty` 只扫一次**（`tyFiredAt`）——否则 `&dc` 回跳后再走到同一根又会跳一次。
+         */
+        if (bigRepeatDone && !tyFiredAt.has(i)) {
           const nextTy = seq.findIndex((it, k) => k > i && it.kind === 'bar' && it.bar?.marks?.includes('ty'))
           if (nextTy >= 0) {
+            tyFiredAt.add(i)
             i = nextTy + 1 // 跳到下一个 &ty 之后（两 ty 之间不演奏）
             pendingJumpMs = lastEndMs // adj361：跳越段不占时，从当前播放时刻无缝接上
             continue
