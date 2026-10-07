@@ -17398,12 +17398,20 @@ function runAdj651Tests() {
    * 写死的 `rowA651 − 12.1`，改为"行内连线**同高**且位于该行音符之上"。
    */
   const row1Slurs = p651.slurs.filter((s) => s.y < rowA651)
-  check('adj651 **不画左半部**：上一行不因延续线多出一截短线（房子 1 那条弧保持干净）',
+  /**
+   * adj723i（用户口径）：「**以元素墨迹不重叠、不覆盖为原则，让层级间保持适当间距即可**」
+   * ⇒ 连音线只需避开**自己下方**的元素、**能低就低**。
+   *
+   * 故 `adj689` 的"同一行内所有连音线**必须同高**"已被取代：本用例第 1 行里
+   * `(5/ … 5/)` 区间含高八度 `5'/` ⇒ 抬一个高音点层；`(6/ 6)` 区间不含 ⇒ **可以更低**
+   * （正是用户要的"离音符近"）。断言改为"两条都在该行之上、且高度差不超过一个高音点层"。
+   */
+  check('adj723i（原 adj651）**不画左半部**：上一行不因延续线多出一截短线（房子 1 那条弧保持干净）',
     halfL.length === 0 &&
       row1Slurs.length === 2 &&
-      row1Slurs.every((s) => s.y === row1Slurs[0].y) &&
-      row1Slurs[0].y < rowA651 - defaultPageConfig.note_size,
-    JSON.stringify({ halfL: halfL.map((s) => [s.x1, s.x2]), row1: row1Slurs.map((s) => s.y) }))
+      row1Slurs.every((s) => s.y < rowA651) &&
+      Math.abs(row1Slurs[0].y - row1Slurs[1].y) <= 3.7, // 至多差一个高八度点层
+    JSON.stringify({ halfL: halfL.map((s) => [s.x1, s.x2]), row1: row1Slurs.map((s) => s.y), rowA: rowA651 }))
   const contOf = (bar: typeof v1, note: typeof h2) =>
     p651.slurs.find(
       (s) => s.half === 'r' && Math.abs(s.x1 - (bar?.x ?? 0)) < 0.6 &&
@@ -17507,12 +17515,19 @@ function runAdj651Tests() {
   check('adj651b 两条延续线都落在**终点那一行**（y = 第 3 行的连音线基准，不在起点行）',
     halvesReal.length === 2 && halvesReal.every((s) => s.y > rowsReal[1]),
     JSON.stringify(halvesReal.map((s) => s.y)))
-  check('adj651b 起点行**不多画**任何半条弧（左半部仍不画，第 1 行保持干净）',
+  check('adj723i（原 adj651b）起点行**不多画**任何半条弧（左半部仍不画，第 1 行保持干净）',
     pReal.slurs.filter((s) => s.half === 'l').length === 0 &&
-      /** adj689：起点行的连线按**整行基准**齐平（不再依赖写死的 `rowsReal[0] − 12.1`） */
+      /**
+       * adj723i：起点行的连线**各按自己区间**取高度（不再强制同高，见上一条说明）
+       * ⇒ 判据改为"两条都在该行之上、且高度差不超过一个高八度点层"。
+       */
       (() => {
         const row1 = pReal.slurs.filter((s) => s.y < rowsReal[1] - 40)
-        return row1.length === 2 && row1.every((s) => s.y === row1[0].y) && row1[0].y < rowsReal[0] - defaultPageConfig.note_size
+        return (
+          row1.length === 2 &&
+          row1.every((s) => s.y < rowsReal[0]) &&
+          Math.abs(row1[0].y - row1[1].y) <= 3.7
+        )
       })(),
     JSON.stringify(pReal.slurs.map((s) => [s.y, s.half])))
 

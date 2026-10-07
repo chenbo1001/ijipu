@@ -3795,36 +3795,53 @@ export function layoutScore(
     slurYFor(anchor.y, maxHiOfRow(rowIdx), maxSymOfRow(rowIdx), raise)
 
   /**
-   * adj723i（用户报「**较多地方的连音线离音符太远**」）：
-   * **`hi`（高八度点）按整行、`sym`（本音符修饰符）按本线区间。**
+   * adj723i（用户口径）：「**以元素墨迹不重叠、不覆盖为原则，让层级间保持适当间距即可**」
+   * ⇒ 连音线只需避开**自己下方**的元素，**能低就低**；不为了"整行齐平"而让全行都被无关音符抬高。
    *
-   * ## 为什么必须拆开
-   * · **`hi` 保持行级**是既有正确口径（`adj60` 有断言守着）：高八度点画得比数字高，
-   *   连音线若只避开"自己区间内"的点，就会**穿过**同行的其它高八度点。
-   *   （本轮一度改成区间级，`adj60` 立刻报 `y=142.2 expect=138.84`。）
-   * · **`sym` 必须区间级**：行内**任意一个**音符带上方修饰符（如 `&sby` 波音），
-   *   旧口径会让**全行每条线**多抬 `10×s + LAYER_GAP×s ≈ 8.0px` —— 这正是用户看到的
-   *   "离音符太远"（实测该行间隙 11.65px，设计应 ~3px）。波音只影响它自己那一小段。
+   * ## 根因（实测）
+   * `adj689` 为了让同行线齐平，把 `hi`（高八度点数）与 `sym`（上方修饰符层数）**都**扩到整行。
+   * 于是行内**任意一个**音符带高八度点/修饰符，**全行每条线**都多抬：
+   * ```
+   * 一行里只有一个 `1'/` ⇒ 全行线多抬 1×3.6px
+   * 一行里只有一个 `3//&sby` ⇒ 全行线多抬 10×s + LAYER_GAP×s ≈ 8.0px
+   * ```
+   * 实测（用户先后给的两批原谱，弧顶到数字墨迹顶的间隙）：
+   * 修前中位 **8.42px / 最大 15.25px**；按本线区间后有 18/21 条落到 **2.95~4px**。
    *
-   * ## 锚点
-   * 锚点 y = **该行最低音符的 y**（行内各线共用同一基准，免得同行不同高）。
+   * ## 现行口径
+   * · `hi` / `sym` **都按"本线覆盖的音符区间"**求（判据 `x ∈ [x1−2, x2+2]`，与旧实现同源）；
+   * · 锚点 y 取**该行最低音符的 y**（行内各线共用基准，避免同行不同高）；
+   * · **行内齐平**只保留 `alignRowSlurBaselines` 那一条路径（`{dsb}` 多段下移量不同时才需要）。
    *
-   * ## 齐平
-   * 行内齐平仍由 `alignRowSlurBaselines` 负责（保留其原有前提）。
+   * ⚠ 权衡：行内若有**别的**音符带高八度点，而本线区间内没有，则本线可以更低（可能与那条点同高）。
+   * 这是用户明确选择的方向（"不重叠即可、能低就低"）——`adj60` 那条"避让高八度点"的断言
+   * 仍然成立，因为它用的用例里高八度点**就在本线区间内**。
    */
   const spanSlurY = (anchor: PlacedToken, rowIdx: number, x1: number, x2: number, raise: number): number => {
-    const lo = Math.min(x1, x2) - 2
-    const hiX = Math.max(x1, x2) + 2
+    /**
+     * 区间判据：**音符槽中心**落在 `[x1−半槽, x2+半槽]`。
+     *
+     * 为什么用"中心 ± 半槽"而不是直接比 `n.x`：连音线端点相对音符中心是**内缩**的
+     * （`x1 = 中心 + halfDig + s`、`x2 = 中心 − halfDig − s` ⇒ 每端内缩约 `halfDig + s ≈ 7.2px`）。
+     * 直接比 `n.x` 会把**被点的那个音符本身**漏掉——实测 `1 ( 2' 3 ) 4` 里 `2'`（高八度点）
+     * 就被漏掉，线不再避让高音点（`adj60` 断言 `y=142.2 expect=138.84`）。
+     */
+    const halfSlot = 4.5
+    const cLo = Math.min(x1, x2) - halfSlot
+    const cHi = Math.max(x1, x2) + halfSlot
     const rowNotes = rows[rowIdx]?.notes ?? []
     const baseY = rowNotes.length > 0 ? Math.min(...rowNotes.map((n) => n.y)) : anchor.y
+    let hi = 0
     let sym = 0
     for (const r of rows) {
       for (const n of r.notes) {
-        if (n.x < lo || n.x > hiX) continue
+        const c = n.x + n.width / 2
+        if (c < cLo || c > cHi) continue
+        hi = Math.max(hi, highOf(n))
         if (n.token.kind === 'note') sym = Math.max(sym, n.token.symbols.filter((x) => x !== 'hx').length)
       }
     }
-    return slurYFor(baseY, maxHiOfRow(rowIdx), sym, raise)
+    return slurYFor(baseY, hi, sym, raise)
   }
   /** 行内跳房子线最低 y + 2s（adj134：连音线不得高于跳房子线，避免与其重叠） */
   const voltaFloorY = (rowIdx: number): number | null => {
