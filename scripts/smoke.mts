@@ -41,7 +41,7 @@ import {
 } from '@ijipu/engine/playback/ornaments.ts'
 import { slideOf, slidePlan, slideStepMs, SLIDE_SYMBOLS, SLIDE_STEP_MIN_MS, SLIDE_STEP_MAX_MS } from '@ijipu/engine/playback/slides.ts'
 import { midiToPitchName } from '@ijipu/engine/playback/midi.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_SAG_MIN, SLUR_SAG_MAX, VOLTA_INK_GAP, digitBottomY, beamBottomY, digitInkW, digitTopY, slurSagOf, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_SAG_MIN, SLUR_SAG_MAX, VOLTA_INK_GAP, digitBottomY, beamBottomY, digitInkW, digitTopY, slurSagOf, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap, HS_FONT_SIZE } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
@@ -1650,6 +1650,32 @@ check('adj126 渲染 Fine/D.C./D.S. 文本', svg126.includes('>Fine<') && svg126
 }
 check('adj130 渲染大跳跃记号（Unicode U+1D10C 𝄌）', svg126.includes('𝄌'), '')
 check('adj129 渲染花 S 记号（Unicode U+1D10B 𝄋）', svg126.includes('𝄋'), '')
+/**
+ * adj723h（用户要求）：「`&ty` 修饰符高度调整为现在 **1.25 倍**」「`&ty` 与小节线的**间距增加 2px**」。
+ *
+ * 两条都从渲染出的 `<text>` 上取实际值来判（**不用**去比常量自己，那样改错了也发现不了）：
+ *  · **高度**：`font-size` 应为旧值 `16×s×1.2` 的 `1.25` 倍 = `24×s`（本用例 `s` 由 noteSize 定）；
+ *  · **间距**：记号**墨迹下端**到小节线上端 `yTop` 的距离 = `y − 0.15×fs − yTop`
+ *    应等于旧值 `0.20×fs_旧` 再 **+2px**（`fs_旧 = 16×s×1.2`）。
+ */
+{
+  const noteSizeH = DUR_CFG.note_size
+  const sH = noteScaleOf(noteSizeH)
+  const fsOld = Math.max(14, Math.round(16 * sH * 1.2))
+  // 从渲染结果里取 `&ty` 那个 text（靠字形 𝄌 定位）
+  const mTy = svg126.match(/<text x="([-\d.]+)" y="([-\d.]+)"[^>]*font-size="(\d+)"[^>]*>𝄌<\/text>/)
+  // 小节线上端：取该小节线的 yTop（用例里 `|&ty` 那根）
+  const barTy = placed126.find((b) => b.marks?.includes('ty'))
+  const fsTy = mTy ? Number(mTy[3]) : -1
+  const inkBottomTy = mTy ? Number(mTy[2]) - 0.15 * fsTy : Number.NaN
+  const gapTy = mTy && barTy ? inkBottomTy - barTy.yTop : Number.NaN
+  check('adj723h `&ty` 高度 = 旧的 1.25 倍（19.2s → 24s）',
+    mTy !== null && fsTy === Math.max(14, Math.round(sH * 24)),
+    `fs=${fsTy} 期望=${Math.max(14, Math.round(sH * 24))} 旧=${fsOld}`)
+  check('adj723h `&ty` 与小节线（yTop）间距 = 旧值 + 2px',
+    mTy !== null && barTy !== undefined && Math.abs(gapTy - (0.2 * fsOld + 2)) < 0.35,
+    `gap=${gapTy.toFixed(2)} 期望=${(0.2 * fsOld + 2).toFixed(2)}（旧 0.2×fs_旧=${(0.2 * fsOld).toFixed(2)}）`)
+}
 // adj：&ds/&dc/&fine 一律粗体 + 斜体，位置下移 0.1 音符高度（1.8×s）
 const svg207 = renderScoreToSvg(layoutScore(r206, DUR_CFG))[0]
 check('adj207 叠加渲染：&ty&ds 同时显示 ⊕ 与 D.S.，&fine&hs 同时显示 Fine 与 花S', (svg207.match(/𝄌/g) ?? []).length >= 1 && svg207.includes('>D.S.<') && svg207.includes('>Fine<') && svg207.includes('𝄋'), '')
@@ -1667,15 +1693,28 @@ check('反复标记花体渲染（D.S./Fine 含 Segoe Script）', /<text[^>]*fon
 const markFs = Math.max(8, Math.round(9 * NS_S))
 check('adj210 D.S. 字号 = 主音符 0.5', new RegExp(`<text x="[^"]+" y="[^"]+" text-anchor="middle" font-size="${markFs}"[^>]*>D\\.S\\.<`).test(svg207), `fs=${markFs}`)
 check('adj210 Fine 字号 = 主音符 0.5', new RegExp(`<text x="[^"]+" y="[^"]+" text-anchor="middle" font-size="${markFs}"[^>]*>Fine<`).test(svg207), `fs=${markFs}`)
-// adj182：大跳跃记号高度 120%（fs = 19.2×s）；两记号下端与小节线上端（yTop）齐平
+// adj182/adj184 → **adj723h 更新**：大跳跃记号高度 = `24×s`（`adj182` 的 `19.2×s` 的 1.25 倍），
+// 且与小节线上端间距 = 旧的 `0.20×fs_旧` 再 +2px ⇒ `y = yTop + TY_BAR_GAP + 0.15×fs`
 const ty182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="([\d.]+)"[^>]*>𝄌<\/text>/.exec(svg126)
 const hs182 = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="([\d.]+)"[^>]*>𝄋<\/text>/.exec(svg126)
-check('adj182 大跳跃字号 = 19.2×s（120%）', ty182 !== null && Number(ty182[3]) === Math.max(14, Math.round(16 * 1.2 * NS_S)), `fs=${ty182?.[3]}`)
-// y = yTop - 0.15×fs → 记号下端（y + 0.15×fs）≈ yTop；adj183 再下移 60%、adj184 再上移 10% → y = yTop + 0.35×fs
 const tyBar182 = placed126.find((b) => b.marks?.includes('ty'))
 const hsBar182 = placed126.find((b) => b.marks?.includes('hs'))
-check('adj184 大跳跃记号 y = yTop + 0.35×fs（下移60%再上移10%）', ty182 !== null && tyBar182 !== undefined && Math.abs(Number(ty182[2]) - (tyBar182.yTop + 0.35 * Number(ty182[3]))) < 1, `y=${ty182?.[2]} fs=${ty182?.[3]} yTop=${tyBar182?.yTop}`)
-check('adj182 花S 记号下端与 yTop 齐平（y = yTop - 0.15×fs）', hs182 !== null && hsBar182 !== undefined && Math.abs(Number(hs182[2]) + 0.15 * Number(hs182[3]) - hsBar182.yTop) < 1, `y=${hs182?.[2]} fs=${hs182?.[3]} yTop=${hsBar182?.yTop}`)
+check('adj723h（原 adj182）大跳跃字号 = 24×s（硬编码期望，**不比函数自己**——那样改错了也发现不了）',
+  ty182 !== null && Number(ty182[3]) === Math.max(14, Math.round(24 * NS_S)),
+  `fs=${ty182?.[3]} 期望=${Math.max(14, Math.round(24 * NS_S))}`)
+check('adj723h（原 adj184）大跳跃记号 y = yTop + gap + 0.15×fs，gap = 3.84×s + 2（硬编码期望）',
+  ty182 !== null &&
+    tyBar182 !== undefined &&
+    Math.abs(
+      Number(ty182[2]) - (tyBar182.yTop + (3.84 * NS_S + 2) + 0.15 * Number(ty182[3])),
+    ) < 0.35,
+  `y=${ty182?.[2]} fs=${ty182?.[3]} yTop=${tyBar182?.yTop}`)
+check('adj182 花S 记号下端与 yTop 齐平（y = yTop - 0.15×fs；字号走 HS_FONT_SIZE）',
+  hs182 !== null &&
+    hsBar182 !== undefined &&
+    Number(hs182[3]) === HS_FONT_SIZE(DUR_CFG.note_size) &&
+    Math.abs(Number(hs182[2]) + 0.15 * Number(hs182[3]) - hsBar182.yTop) < 1,
+  `y=${hs182?.[2]} fs=${hs182?.[3]} yTop=${hsBar182?.yTop}`)
 // 播放跳转：fine 截断 / ds 跳 hs / ty 跳下一 ty / dc 从头反复
 const mk126 = (q: string) => buildPlaySequence(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), layoutScore(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${q}\n`), DUR_CFG), 120)
 const pits126 = (seq: ReturnType<typeof mk126>) => seq.events.filter((e) => e.placed.audioPitch).map((e) => e.placed.audioPitch)

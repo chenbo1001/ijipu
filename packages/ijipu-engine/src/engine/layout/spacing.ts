@@ -159,6 +159,39 @@ export const barlinePad = (noteSize: number): number => noteSize / 4
 export const VOLTA_BAR_GAP = 8
 /** 跳房子 + 修饰（抬高）每级间距（px） */
 export const VOLTA_RAISE = 2
+
+// ---- 小节线修饰符记号（`&ty` 大跳跃 / `&hs` 花 S；画在小节线正上方）----
+/**
+ * `&ty`（大跳跃 `𝄌`）**字号**（px；渲染端 `font-size`）。
+ *
+ * 历史：`adj130` 引入 Unicode `U+1D10C`；`adj131` 调大并下移靠近小节线；
+ * `adj182` 定为 `16×s×1.2`（"高度 120%"），且**记号下端与小节线上端（`yTop`）齐平**；
+ * `adj183`/`adj184` 又按"自身高度百分比"微调纵向落点（净 +10% ⇒ `y = yTop + 0.35×fs`）。
+ *
+ * `adj723h`（用户要求）：「`&ty` 的高度调整为现在 1.25 倍」⇒ `16×s×1.2×1.25 = 24×s`。
+ * 同时把"按自身百分比微调"改成**显式间距常量**（见 `TY_BAR_GAP`），
+ * 否则字号一变，落点的绝对偏移会跟着变（百分比口径与"间距"口径混在一起，
+ * 这正是 `六之二·4`「数值口径必须同源」警告的那类写法）。
+ */
+export const TY_FONT_SIZE = (noteSize: number): number => {
+  const s = noteScaleOf(noteSize)
+  return Math.max(14, Math.round(24 * s))
+}
+
+/**
+ * `&ty` **墨迹下端到小节线上端（`yTop`）的间距**（px）。
+ *
+ * 口径换算：旧写法 `y = yTop + 0.35×fs`，而文字基线到"记号下端"约 `0.15×fs`
+ * （`adj182` 的原话）⇒ 旧间距 ≈ `0.35−0.15 = 0.20×fs`。
+ * `adj723h`（用户要求）：「与小节线的间距增加 2px」⇒ 新间距 = `0.20×fs_旧 + 2`
+ * （`fs_旧 = 19.2×s`）≈ `3.84×s + 2`。
+ *
+ * 渲染端据此反推基线：`y = yTop + TY_BAR_GAP + 0.15×fs`（`0.15×fs` 仍是"基线→记号下端"的固有比例）。
+ */
+export const TY_BAR_GAP = (noteSize: number): number => 3.84 * noteScaleOf(noteSize) + 2
+
+/** `&hs`（花 S `𝄋`）字号（px；`adj129` 引入、`adj182` 定为 `12×s`） */
+export const HS_FONT_SIZE = (noteSize: number): number => Math.max(10, Math.round(12 * noteScaleOf(noteSize)))
 /** 渐强渐弱 hairpin（尖括号）上下张开半高（px，与连音线弧高近似；实际 ×s 随音符字号） */
 export const DYN_HALF_H = 4
 /** 跳房子注释（番号）字号与音符字号的比值（adj71：音符高度的 0.4） */

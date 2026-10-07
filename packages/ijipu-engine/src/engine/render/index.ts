@@ -65,6 +65,10 @@ import {
   lyricCommentFontSize,
   lyricCommentWidth,
   LYRIC_COMMENT_GAP,
+  // adj723h：小节线修饰符记号（`&ty` 大跳跃 / `&hs` 花 S）的字号与"距小节线上端间距"
+  TY_FONT_SIZE,
+  TY_BAR_GAP,
+  HS_FONT_SIZE,
 } from '../layout/spacing'
 import { tempoLabel } from '../parser/parser'
 import { parseInstrumentRef } from '../playback/instruments'
@@ -1192,19 +1196,31 @@ function renderBarline(bar: PlacedBarline, noteSize = 18, noteFontFamily = FONT_
     upMarks.forEach((m, idx) => {
       const ux = mx + (idx - (upMarks.length - 1) / 2) * 9 * s
       if (m === 'ty') {
-        // 大跳跃记号（adj130）：官方 Unicode U+1D10C（𝄌）；adj131：调大 + 下移靠近小节线；
-        // adj182：高度 120%（16s→19.2s）、记号下端与小节线上端（yTop）齐平
-        // （text y 为基线，记号下端 ≈ y + 0.15×fs）；
-        // adj183：再向下移动 60% 自身高度（y → yTop + 0.45×fs）；
-        // adj184：再上移 10% 自身高度（y → yTop + 0.35×fs）
-        const fs = Math.max(14, Math.round(16 * s * 1.2))
+        /**
+         * 大跳跃记号 `𝄌`（Unicode `U+1D10C`）。
+         *
+         * 沿革：`adj130` 引入；`adj131` 调大 + 下移靠近小节线；`adj182` 高度 120%（`16s→19.2s`）、
+         * 记号下端与小节线上端（`yTop`）齐平；`adj183`/`adj184` 按"自身高度百分比"微调落点
+         * （净 +10% ⇒ `y = yTop + 0.35×fs`）。
+         *
+         * **`adj723h`（用户要求）**：① 高度 = 现在的 **1.25 倍**（⇒ `16s×1.2×1.25 = 24s`）；
+         * ② 与小节线的**间距 +2px**。
+         * 两处口径都改由 `spacing.ts` 的 `TY_FONT_SIZE` / `TY_BAR_GAP` 给出
+         * （渲染端只消费、不再自己写百分比——`六之二·4`「数值口径必须同源」）。
+         *
+         * 落点换算：文字**基线**到"记号墨迹下端"约 `0.15×fs`（`adj182` 原话）
+         * ⇒ 基线 `y = yTop + TY_BAR_GAP + 0.15×fs`
+         * ⇒ 记号下端正好落在 `yTop + TY_BAR_GAP`。
+         */
+        const fs = TY_FONT_SIZE(noteSize)
+        const tyY = yTop + TY_BAR_GAP(noteSize) + 0.15 * fs
         parts.push(
-          `<text x="${ux.toFixed(1)}" y="${(yTop + 0.35 * fs).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄌</text>`,
+          `<text x="${ux.toFixed(1)}" y="${tyY.toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄌</text>`,
         )
       } else {
-        // 花 S 记号（adj129）：官方 Unicode U+1D10B（𝄋）；adj131：调小与大跳跃匹配 + 下移靠近小节线；
-        // adj182：记号下端与小节线上端（yTop）齐平
-        const fs = Math.max(10, Math.round(12 * s))
+        // 花 S 记号 `𝄋`（Unicode `U+1D10B`）：`adj129` 引入、`adj131` 调小与大跳跃匹配 + 下移靠近小节线、
+        // `adj182` 记号下端与小节线上端（`yTop`）齐平；`adj723h` 起字号统一走 `HS_FONT_SIZE`
+        const fs = HS_FONT_SIZE(noteSize)
         parts.push(
           `<text x="${ux.toFixed(1)}" y="${(yTop - 0.15 * fs).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-family="'Bravura','Finale Maestro','Noto Music','Segoe UI Symbol',sans-serif" fill="#1b1b1b">𝄋</text>`,
         )
