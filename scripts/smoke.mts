@@ -45,7 +45,7 @@ import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, V
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
-import { MARK_STACK_RATIO } from '@ijipu/engine/layout/spacing.ts'
+import { markReserveRatio, MARK_INK_H_RATIO } from '@ijipu/engine/layout/spacing.ts'
 import type { BarlineType } from '@ijipu/engine/types.ts'
 import { computeBeamsForTest } from '@ijipu/engine/render/index.ts'
 // adj652：谱面文本里的 URL → 链接（纯函数 + 渲染产物）
@@ -1750,14 +1750,15 @@ const slPlain132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1 2) 3 
  *
  * ⇒ 断言从"上移 ≥ 5×s（旧口径整层 `10×s`）"改为**适度区间**：
  * ① 必须**真的抬高**（`> 0`，让开修饰符墨迹）；
- * ② 但**不得超过 `MARK_STACK_RATIO × s + 1px`**（否则就是又抬到整层那个高度去了）。
- * 让位量按**墨迹**标定：`MARK_STACK_RATIO × s ≈ 2.0px`（旧口径是 8.67px）。
+ * ② 但**不得超过该符号的让位量 + 1px**（否则就是又抬到整层那个高度去了）。
+ * `adj723p` 起让位量**按符号查表**（`markReserveRatio(sym)` = 墨迹高 + `LAYER_GAP`）。
  */
 const slSym132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1&cy 2&cy) 3 |\n'), DUR_CFG).pages[0].slurs[0].y
 const symLift = slPlain132 - slSym132
-check('adj723m（原 adj132）连音线为**上方**修饰符（颤音）让位，且**间距适度**',
-  symLift > 0.5 && symLift <= MARK_STACK_RATIO * NS_S + 1,
-  `sym=${slSym132} plain=${slPlain132} 让位=${symLift.toFixed(2)}px 上限=${(MARK_STACK_RATIO * NS_S + 1).toFixed(2)}px`)
+const cyReserve = markReserveRatio('cy') * NS_S
+check('adj723p（原 adj132）连音线为**上方**修饰符（颤音）让位，且**间距适度（按符号查表）**',
+  symLift > 0.5 && symLift <= cyReserve + 1,
+  `sym=${slSym132} plain=${slPlain132} 让位=${symLift.toFixed(2)}px 上限=${(cyReserve + 1).toFixed(2)}px`)
 /**
  * adj723m（用户**更正**口径，附例 `(1/ (1&sby)- | 1)`）：
  * 「波音与连音线明显会重叠……前面的连音**都应该抬高**，**与高八度点或其它修饰符一样**」。
@@ -1767,9 +1768,37 @@ check('adj723m（原 adj132）连音线为**上方**修饰符（颤音）让位�
  */
 const slMord132 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1&sby 2) 3 |\n'), DUR_CFG).pages[0].slurs[0].y
 const mordLift = slPlain132 - slMord132
-check('adj723m（更正 adj723j）波音（`&sby`）**同样抬连音线**（与高八度点/其它修饰符同等、间距适度）',
-  Math.abs(mordLift - symLift) < 0.6,
-  `mord=${slMord132} plain=${slPlain132} 让位=${mordLift.toFixed(2)}px 颤音让位=${symLift.toFixed(2)}px`)
+/**
+ * `adj723p`：让位量**按符号查表** ⇒ 波音与颤音的让位量**不必相等**（两者墨迹高不同：
+ * `sby` 的图形墨迹只有 `3.31×s`，而文字记号 `cy` 按字身比是 `7.2×s`）。
+ * 故判据改为"各自都按**自己的**表值让位"。
+ */
+const sbyReserve = markReserveRatio('sby') * NS_S
+check('adj723p（更正 adj723m）波音（`&sby`）**同样抬连音线**，且按**自己符号**的墨迹高让位',
+  mordLift > 0.5 && mordLift <= sbyReserve + 1,
+  `mord=${slMord132} plain=${slPlain132} 让位=${mordLift.toFixed(2)}px 上限=${(sbyReserve + 1).toFixed(2)}px`)
+/**
+ * `adj723p` 同源闸门：让位表 `MARK_INK_H_RATIO` 必须与**图形数据** `MODIFIER_GLYPHS[].box` 一致。
+ *
+ * 表值 = `box.h × 目标宽 / box.w`（`glyphMarkup` 按紧包围盒等比缩放，故目标框高 = 墨迹高）。
+ * 目标宽来自 `mordentInkW`（`9` / 后缀 `+` 为 `13.5`，单位 ×`s`）。
+ * 改了图形或宽度算式而忘了改表 ⇒ 这条转红。
+ */
+{
+  const bad: string[] = []
+  for (const [key, ratio] of Object.entries(MARK_INK_H_RATIO)) {
+    const g = (MODIFIER_GLYPHS as Record<string, { box: { w: number; h: number } }>)[key]
+    if (!g) {
+      bad.push(`${key}: 图形表里没有`)
+      continue
+    }
+    const targetW = key.endsWith('+') ? 13.5 : 9
+    const expect = (g.box.h * targetW) / g.box.w
+    if (Math.abs(ratio - expect) > 1e-6) bad.push(`${key}: 表=${ratio} 现算=${expect}`)
+  }
+  check('adj723p 让位表与 `MODIFIER_GLYPHS[].box` **同源**（按紧包围盒现算一致）',
+    bad.length === 0, bad.join(' | '))
+}
 // adj135：取消倚音自动避让（连音线不再因倚音抬高）；改用 (+ 手动抬升（每 + 2px）
 const slGrace134 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: (1[3] 2) 3 |\n'), DUR_CFG).pages[0].slurs[0].y
 check('adj135 倚音不抬高连音线（与无倚音相同）', Math.abs(slGrace134 - slPlain132) < 0.5, `grace=${slGrace134} plain=${slPlain132}`)

@@ -29,7 +29,7 @@ import type {
   ScorePageMeta,
   VoiceBlock,
 } from '../types'
-import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, octaveDotY, BRACKET_PAD, H_GAP, noteScaleOf, VOLTA_BAR_GAP, VOLTA_RAISE, DYN_HALF_H, barlinePad, barlineTotalW, DOT_AFTER_DIGIT_GAP, DOT_R, SEGMENT_ROW_GAP_DEFAULT, SEGMENT_LAYER_YSCALE, SEGMENT_LAYER_CLEARANCE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, NOTE_BASELINE_RATIO, digitBottomY, beamBottomY, lowDotY, TP_BRACKET_GAP, SLUR_SAG_MAX, SLUR_SAG_MIN, VOLTA_INK_GAP, digitInkW, barNumberGapNeed, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, MARK_STACK_RATIO, type AccidentalInkMetrics } from './spacing'
+import { DIGIT_HEIGHT_RATIO, LAYER_GAP, SLUR_W, octaveTopY, octaveDotY, BRACKET_PAD, H_GAP, noteScaleOf, VOLTA_BAR_GAP, VOLTA_RAISE, DYN_HALF_H, barlinePad, barlineTotalW, DOT_AFTER_DIGIT_GAP, DOT_R, SEGMENT_ROW_GAP_DEFAULT, SEGMENT_LAYER_YSCALE, SEGMENT_LAYER_CLEARANCE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, NOTE_BASELINE_RATIO, digitBottomY, beamBottomY, lowDotY, TP_BRACKET_GAP, SLUR_SAG_MAX, SLUR_SAG_MIN, VOLTA_INK_GAP, digitInkW, barNumberGapNeed, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, markReserveRatio, type AccidentalInkMetrics } from './spacing'
 // adj284：空间优先布局的度量（本体宽 / 时值拆分 / 非时值元素间距）
 import { splitNoteDur, noteBodyW, augBodyW, dotBodyW, accidentalBodyW, accidentalGeometry, markBodyW, digitSlotW, hxBodyW, graceAtTail, graceSlotLayout, nonDurGap, slideExtraW, braceInkRightOffset, BRACE_LINE_DX } from './spaceLayout'
 import { hairpinEvents, resolveHairpins, type DynEvent, type NoteAnchors } from './hairpins'
@@ -3759,19 +3759,20 @@ export function layoutScore(
    * adj689：`hi`/`symCount` 一律按**整行**给出（见 `rowSlurY`）——"线要避开其下所有音符的
    * 高八度点/修饰符"这条口径从"本条覆盖的区间"扩到"整行"。
    */
-  const slurYFor = (y: number, hi: number, symCount: number, raise: number) => {
+  const slurYFor = (y: number, hi: number, syms: readonly string[], raise: number) => {
     const s = noteScaleOf(m.noteSize)
     const topY = hi > 0 ? octaveTopY(y, hi, m.noteSize) : y - m.noteSize * DIGIT_HEIGHT_RATIO
     let base = topY - LAYER_GAP * s - (SLUR_W * s) / 2
     /**
-     * adj723m/n（用户报「波音与连音线明显重叠、**没有间距**」，附例 `(1/ (1&sby)- | 1)`）：
-     * 每个"本音符修饰符"的让位高度用 `MARK_STACK_RATIO × s`（**按渲染出的墨迹标定**），
-     * 不再用整层 `10×s + LAYER_GAP×s`（`10×s` 是**符号字号**、不是墨迹高）。
+     * adj723p（用户要求"把查表做了"）：每个"本音符修饰符"的让位高度**按符号查表**
+     * （`markReserveRatio(sym) × s`），不再用整层 `10×s + LAYER_GAP×s`（`10×s` 是**符号字号**），
+     * 也不用单值近似 `MARK_STACK_RATIO`——各符号的**墨迹高**差别很大
+     * （实测 `sby` 3.31×s 而 `xhy` 8.84×s）。
      *
      * 波音与高八度点、其它上方修饰符**同等对待**（用户明确）。
-     * 定值与推导见 `spacing.ts` 的 `MARK_STACK_RATIO`。
+     * 表面值由 `MODIFIER_GLYPHS[].box` 推导，同源；见 `spacing.ts` 的 `MARK_INK_H_RATIO`。
      */
-    base -= symCount * MARK_STACK_RATIO * s
+    for (const sym of syms) base -= markReserveRatio(sym) * s
     return base - raise
   }
   /**
@@ -3790,16 +3791,23 @@ export function layoutScore(
     for (const n of rows[rowIdx]?.notes ?? []) hi = Math.max(hi, highOf(n))
     return hi
   }
-  const maxSymOfRow = (rowIdx: number): number => {
-    let sym = 0
+  /**
+   * 某行的**修饰符清单**（`adj723p`：让位量已改为"按符号查表"，故需要符号本身而非只数个数）。
+   *
+   * 取"层数最多"的那个音符的清单——与 `maxSymOfRow` 同源，只是保留符号名。
+   */
+  const maxSymListOfRow = (rowIdx: number): string[] => {
+    let best: string[] = []
     for (const n of rows[rowIdx]?.notes ?? []) {
-      if (n.token.kind === 'note') sym = Math.max(sym, n.token.symbols.filter((x) => x !== 'hx').length)
+      if (n.token.kind !== 'note') continue
+      const list = n.token.symbols.filter((x) => x !== 'hx')
+      if (list.length > best.length) best = [...list]
     }
-    return sym
+    return best
   }
   /** 某行连音线的基准 y（不含该条自己的嵌套抬升 / `(+` `(-` 升降） */
   const rowSlurY = (rowIdx: number, anchor: PlacedToken, raise: number): number =>
-    slurYFor(anchor.y, maxHiOfRow(rowIdx), maxSymOfRow(rowIdx), raise)
+    slurYFor(anchor.y, maxHiOfRow(rowIdx), maxSymListOfRow(rowIdx), raise)
 
   /**
    * adj723i（用户口径）：「**以元素墨迹不重叠、不覆盖为原则，让层级间保持适当间距即可**」
@@ -3838,7 +3846,8 @@ export function layoutScore(
     const cHi = Math.max(x1, x2) + halfSlot
     const rowNotes = rows[rowIdx]?.notes ?? []
     let hi = 0
-    let sym = 0
+    /** adj723p：让位量按符号查表 ⇒ 收集**本线区间内**的修饰符清单（取层数最多者） */
+    let symList: string[] = []
     /**
      * 锚点 y：取**本线区间内**音符的最低 y（**不是**整行的最低）。
      *
@@ -3878,12 +3887,12 @@ export function layoutScore(
            * 与高八度点（`hi`）同等对待。
            */
           const above = n.token.symbols.filter((x) => x !== 'hx')
-          sym = Math.max(sym, above.length)
+          if (above.length > symList.length) symList = [...above]
         }
       }
     }
     if (Number.isNaN(baseY)) baseY = rowNotes.length > 0 ? Math.min(...rowNotes.map((n) => n.y)) : anchor.y
-    return slurYFor(baseY, hi, sym, raise)
+    return slurYFor(baseY, hi, symList, raise)
   }
   /**
    * adj723l：同上，但**不含 `raise`**（= 该线"基础高度"）——供"同行齐平"只统一基础高度用。
