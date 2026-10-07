@@ -12144,10 +12144,13 @@ function runAdj598UnclosedVoltaScopeTests() {
     const src = String(readFileSync('packages/ijipu-engine/src/engine/playback/sequence.ts', 'utf8'))
     const laySrc = String(readFileSync('packages/ijipu-engine/src/engine/layout/index.ts', 'utf8'))
     check(
-      'adj723aa 未封闭房子末尾线判据含 `&ds`/`&dc`/`&fine`、**不含** `||`（布局端定义、播放端复用同一份）',
-      /isJumpOrEndBar/.test(src) &&
-        /isVoltaCloserBarline\(it\.bar\)/.test(src) &&
-        /export function isVoltaCloserBarline[\s\S]{0,400}m\.includes\('dc'\)[\s\S]{0,160}m\.includes\('ds'\)[\s\S]{0,160}m\.includes\('fine'\)/.test(
+      'adj723aa 未封闭房子末尾线判据含 `&ds`/`&dc`/`&fine`、**不含** `||`；`&fine` 按"是否已过大反复"分两张表',
+      /voltaAfterStrict/.test(src) &&
+        /voltaAfterWithFine/.test(src) &&
+        /isVoltaCloserBarline\(it\.bar, false\)/.test(src) &&
+        /isVoltaCloserBarline\(it\.bar, true\)/.test(src) &&
+        /const allowFine = bigRepeatDone/.test(src) &&
+        /export function isVoltaCloserBarline\([\s\S]{0,200}allowFine = true[\s\S]{0,400}m\.includes\('dc'\)[\s\S]{0,160}m\.includes\('ds'\)[\s\S]{0,160}allowFine && m\.includes\('fine'\)/.test(
           laySrc,
         ) &&
         !/isVoltaCloserBarline[\s\S]{0,400}'\\\|\\\|'/.test(laySrc),

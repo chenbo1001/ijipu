@@ -839,11 +839,19 @@ export function buildPlaySequence(
   // 在跳过 volta1 后仍能处理该线上的 volta2 番号
   /**
    * adj723aa（用户口径）：未封闭房子（`|]/`）的末尾线 = **其后最近的 `:|` / `:|:` / `&dc` / `&ds` / `&fine`**
-   * （**不含** `||`/`||/`）——见 `layout/index.ts` 的 `isVoltaCloserBarline`。
+   * （**不含** `||`/`||/`）——判据本体在 `layout/index.ts` 的 `isVoltaCloserBarline`。
+   *
+   * `&fine` 分两张表（用户口径：「经过 `&dc`/`&ds` 跳跃后，再进入跳房子，如果这个跳房子里有
+   * `&fine` 则以此作为末尾，否则以其后面的**非 `&fine`** 的反复或跳跃作为末尾」）：
+   *  · `voltaAfterStrict`：**不含 `&fine`**（跳跃前用）；
+   *  · `voltaAfterWithFine`：**含 `&fine`**（跳跃后用）。
    */
-  const isJumpOrEndBar = (it: SeqItem): boolean =>
-    it.kind === 'bar' && !!it.bar && isVoltaCloserBarline(it.bar)
-  const voltaAfter = new Map<number, number>()
+  const isStrictCloserBar = (it: SeqItem): boolean =>
+    it.kind === 'bar' && !!it.bar && isVoltaCloserBarline(it.bar, false)
+  const isFineOrStrictCloserBar = (it: SeqItem): boolean =>
+    it.kind === 'bar' && !!it.bar && isVoltaCloserBarline(it.bar, true)
+  const voltaAfterStrict = new Map<number, number>()
+  const voltaAfterWithFine = new Map<number, number>()
   const pendingStarts: number[] = []
   seq.forEach((item, si) => {
     if (item.kind !== 'bar') return
@@ -851,17 +859,16 @@ export function buildPlaySequence(
     // 同时有 voltaEnd（结束上一房子）与 voltaStart（开始下一房子）时，若先入栈会把自身配成自己的末尾（死循环）
     if (item.bar?.voltaEnd && pendingStarts.length > 0) {
       const start = pendingStarts.pop()!
-      // adj360：未封闭房子（|]/）延续到其后第一个「跳跃小节线 :|/：|:」或「结束小节线 ||/||/」处；
-      // 已封闭房子（|]）就以该末尾小节线为界
-      // adj598（用户口径，更严格）：未封闭房子是"**演奏到下一个跳跃或结束**"——
-      // 除 `:|`/`:|:`/`||`/`||/` 外，**带 `&ds`/`&dc`/`&fine` 修饰的小节线同样算**（见 `isJumpOrEndBar`）。
-      // 落到那根线时，它自己的"跳跃/结束"动作照常执行（走查里已按此处理。
-      // 旧口径只认反复/结束线型 ⇒ 房子会一路吞到更远的 `:|`，把本不该跳的音乐也吞掉。
       if (item.bar.voltaEndSlash) {
-        const ext = seq.findIndex((it, k) => k > si && isJumpOrEndBar(it))
-        voltaAfter.set(start, ext >= 0 ? ext : si)
+        // 未封闭房子（`|]/`）：往后找最近的末尾线
+        const strict = seq.findIndex((it, k) => k > si && isStrictCloserBar(it))
+        const withFine = seq.findIndex((it, k) => k > si && isFineOrStrictCloserBar(it))
+        voltaAfterStrict.set(start, strict >= 0 ? strict : si)
+        voltaAfterWithFine.set(start, withFine >= 0 ? withFine : si)
       } else {
-        voltaAfter.set(start, si)
+        // 已封闭房子（`|]`）：就以该末尾小节线为界（两张表一致）
+        voltaAfterStrict.set(start, si)
+        voltaAfterWithFine.set(start, si)
       }
     }
     if (item.bar?.voltaStart) pendingStarts.push(si)
@@ -1932,11 +1939,21 @@ export function buildPlaySequence(
         return false
       }
       /**
-       * adj723aa：落点 `voltaAfter.get(i)` 可能是**本线自己**（`|["1." … |]/` 这种把房子起点
-       * 与未封闭末尾合在一条线上的写法）——那样 `i = target` 等于原地不动 ⇒ 死循环。
-       * 故落点等于自身时退一位。
+       * adj723aa（用户口径）：**未封闭房子**的末尾线怎么取，取决于"**是否已经过 `&dc`/`&ds` 跳跃**"：
+       *  · **已跳过** ⇒ 若本房子区间里有 `&fine`，就**以该 `&fine` 为末尾**（`&fine` 是"大反复后的终点"）；
+       *  · **未跳过** ⇒ `&fine` **不算末尾**，取**其后面最近的"非 `&fine` 的反复或跳跃"**
+       *    （`:|` / `:|:` / `&dc` / `&ds`）——因为没有大反复时 `&fine` 不具备终点语义。
+       *
+       * 用户原话：「经过 `&dc`/`&ds` 跳跃后，再进入跳房子，如果这个跳房子里有 `&fine` 则以此作为
+       * 跳房子的末尾，否则以其后面的非 `&fine` 的反复或跳跃做为末尾」。
        */
-      const after = voltaAfter.get(i)
+      const allowFine = bigRepeatDone
+      const strictTarget = voltaAfterStrict.get(i)
+      const fineTarget = allowFine ? voltaAfterWithFine.get(i) : undefined
+      const after =
+        fineTarget !== undefined && strictTarget !== undefined
+          ? Math.min(fineTarget, strictTarget) // 区间里有 &fine 就取最近的末尾；没有则 fineTarget 会等于 strictTarget
+          : (fineTarget ?? strictTarget)
       const target = after === undefined || after <= i ? i + 1 : after
       landedByVoltaSkip = target
       i = target
@@ -1947,10 +1964,17 @@ export function buildPlaySequence(
      * adj723aa：**走过房子末尾线 ⇒ 该房子用掉一次**（`count-1`），退出房子范围。
      * 用户口径「进入跳房子范围后才计数减 1」——故减一在这里，而不是在起点线"看到就减"。
      */
-    if (insideVolta >= 0 && i === (voltaAfter.get(insideVolta) ?? insideVolta + 1)) {
-      const left = voltaLeft.get(insideVolta) ?? 0
-      if (left > 0) voltaLeft.set(insideVolta, left - 1)
-      insideVolta = -1
+    if (insideVolta >= 0) {
+      /**
+       * 走完本房子的末尾线才算用掉一次。末尾线取哪张表与"跳过时"保持一致：
+       * 已发生大反复（`bigRepeatDone`）⇒ 用含 `&fine` 的表；否则用不含 `&fine` 的表。
+       */
+      const end = bigRepeatDone ? voltaAfterWithFine.get(insideVolta) : voltaAfterStrict.get(insideVolta)
+      if (i === (end ?? insideVolta + 1)) {
+        const left = voltaLeft.get(insideVolta) ?? 0
+        if (left > 0) voltaLeft.set(insideVolta, left - 1)
+        insideVolta = -1
+      }
     }
     /**
      * 因跳过 volta 而落在的小节线：**不再触发该线的 `:|` 回跳**（该反复已在跳过时越过）。

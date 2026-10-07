@@ -85,7 +85,15 @@ const keyNameOf = (semitone: number): string => KEY_NAMES[((Math.round(semitone)
  * adj723aa（用户口径，2026-10）：**未封闭跳房子（`|]/`）的末尾线**判据。
  *
  * 用户原话：「未封闭房子末尾线（`|]/`）**不是**跳房子是末尾，而是其**后面最近的一个 `:|`
- * 或 `:|:` 或 `&dc` 或 `&ds` 或 `&fine`**」。故这里**只认这五种**，**不含** `||`/`||/`。
+ * 或 `:|:` 或 `&dc` 或 `&ds` 或 `&fine`**」；随后进一步限定 `&fine`：
+ * 「**`&fine` 有个前提：应该是经过 `&ds` 或 `&dc` 再进入的跳房子才以 `&fine` 作为末尾，
+ * 否则选再后面的反复或跳跃**」。
+ *
+ * 于是判据分两种：
+ *  · `allowFine = true`（该房子**之前**已出现过 `&ds`/`&dc`）⇒ 末尾线含 `&fine`；
+ *  · `allowFine = false` ⇒ **`&fine` 不算末尾线**，要继续往后找**反复线（`:|`/`:|:`）
+ *    或跳跃线（`&dc`/`&ds`）**。
+ * **两种都不含** `||`/`||/`。
  *
  * 为什么不再与"转调复原"共用：**用户 2026-10 修正了转调规则**——
  * 「转调遇到反复、跳跃等**不恢复调号**，除非有明确的再转调 `"d:X"` 或恢复调号 `"d:"`」。
@@ -93,9 +101,18 @@ const keyNameOf = (semitone: number): string => KEY_NAMES[((Math.round(semitone)
  * 都已是这个口径，两处同源），**不再需要在"跳跃/结束线"处做任何调号复原** ⇒
  * 原先为两者共用的 `isJumpOrEndBarline`（且含 `||`/`||/`）已无必要，删除。
  */
-export function isVoltaCloserBarline(bar: { type: BarlineType; marks?: BarlineMark[] }): boolean {
+export function isVoltaCloserBarline(
+  bar: { type: BarlineType; marks?: BarlineMark[] },
+  allowFine = true,
+): boolean {
   const m = bar.marks ?? []
-  return bar.type === ':|' || bar.type === ':|:' || m.includes('dc') || m.includes('ds') || m.includes('fine')
+  return (
+    bar.type === ':|' ||
+    bar.type === ':|:' ||
+    m.includes('dc') ||
+    m.includes('ds') ||
+    (allowFine && m.includes('fine'))
+  )
 }
 
 /**
