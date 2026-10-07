@@ -8695,8 +8695,15 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
     const lowerBaseline = pg.notes.filter((n) => isDsbOutside(n)).map((n) => n.y).sort((a, b) => a - b)[0]
     check('adj723q（原 S1）段内连音线**只有一份**（段层路径那份；不再有重复的、被误下移的主旋律线）',
       lower.length > 0 && lower.every((s) => s.below !== true), JSON.stringify(lower.map((s) => ({ y: s.y, below: s.below }))))
-    check('adj723q（原 S2）段内连音线**不在段层音符下方**（不被 `shiftEnvelopeDown` 误下移压到音符上）',
-      lower.every((s) => s.y < upperBaseline - 5), `slurY=${lower.map((s) => s.y).join(',')} upperBaseline=${upperBaseline}`)
+    /**
+     * adj723s：`S2`/`S4` 只针对**段层自己的线**（`layerBase` 有值）。
+     * 段内 x 区间里**也**有主旋律线（如 `(1'// 7// 6//)`——二者 x 重合、是**两条不同的线**，
+     * `adj723s` 起不再被误删）⇒ 断言必须按来源区分，否则会把主旋律线一起判进来。
+     */
+    const segOnly = lower.filter((s) => s.layerBase !== undefined)
+    check('adj723q（原 S2）段层连音线**不在段层音符下方**（不被 `shiftEnvelopeDown` 误下移压到音符上）',
+      segOnly.length > 0 && segOnly.every((s) => s.y < upperBaseline - 5),
+      `segY=${segOnly.map((s) => s.y).join(',')} upperBaseline=${upperBaseline}`)
     /**
      * S4（**本轮的核心口径**）：连音线的**弧顶**不能被上层声部的墨迹（减时线层底 / 低八度点）
      * 压到——这是"层间距自动撑开"要保证的事。
@@ -8705,12 +8712,12 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
       (() => {
         // 段层音符的**墨迹顶**（数字顶；段层音符都在线**下方**）
         const inkTop = Math.min(...segNsAll.map((n) => n.y - noteScaleOf(1) * 0 - D.note_size * 0.8))
-        return lower.every((s) => {
+        return segOnly.every((s) => {
           const sag = Math.max(SLUR_SAG_MIN, Math.min(SLUR_SAG_MAX, Math.abs(s.x2 - s.x1) * 0.28))
           return s.y - sag < inkTop + 0.11
         })
       })(),
-      `lowerY=${lower.map((s) => s.y).join(',')} segInkTop≈${(upperBaseline - D.note_size * 0.8).toFixed(1)}`)
+      `segY=${segOnly.map((s) => s.y).join(',')} segInkTop≈${(upperBaseline - D.note_size * 0.8).toFixed(1)}`)
     check('S5 adj670 图3：自动撑开后的层间距 > 默认 22（放不下时才撑）',
       lowerBaseline - upperBaseline > 22.11, `gap=${(lowerBaseline - upperBaseline).toFixed(2)}`)
     const svg = renderScoreToSvg(layoutScore(parseJps(code), D))[0]
