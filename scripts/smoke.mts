@@ -8687,15 +8687,19 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
     /**
      * T3（adj723k 更新）：下移之后**行内相对几何不变**。
      *
-     * 参照点改用**行内最低音符的 y**：`adj723k`（用户口径 b「各线按自己区间定位、能低就低」）
-     * 把连音线锚点从"整行最低音符"收窄到"**本线区间内**最低音符"，
-     * 于是"相对**行内最低音符**的偏移"才是随行整体平移的不变量。
+     * 参照点 = **本行基线 `rowTop`**（`adj689b` 起每条连音线都带该字段，与"行整体下移量"同源）。
+     * 实测：含 `{dsb}` 的组合 `y=240.3 / rowTop=252.4`，不含的组合 `y=226.4 / rowTop=238.5`
+     * ⇒ 相对偏移都是 **−12.1**，行整体平移 13.9px 而**行内几何一字不变**。
+     *
+     * ⚠ 不能用"行内最低音符"或"本线区间最低音符"当参照：`adj723k` 后锚点是**线自己区间**的，
+     * 同类谱里两条线区间不同、参照就不同（实测 −110.20 vs −96.30，那是误报）。
+     * `rowTop` 才是与实现同源的"行整体位置"。
      */
-    const slurBaseOf = (pg: typeof pA): number => Math.min(...pg.notes.map((n) => n.y))
-    check('T3 adj723k（原 adj668 图5）：下移之后**行内相对几何不变**（连音线相对行内最低音符的偏移一致）',
+    check('T3 adj723k（原 adj668 图5）：下移之后**行内相对几何不变**（连音线相对本行基线的偏移一致）',
       lastA !== undefined && lastB !== undefined &&
-        Math.abs(lastA.y - slurBaseOf(pA) - (lastB.y - slurBaseOf(pB))) < 0.11,
-      `relA=${(lastA.y - slurBaseOf(pA)).toFixed(2)} relB=${(lastB.y - slurBaseOf(pB)).toFixed(2)}`)
+        lastA.rowTop !== undefined && lastB.rowTop !== undefined &&
+        Math.abs((lastA.y - lastA.rowTop) - (lastB.y - lastB.rowTop)) < 0.11,
+      `relA=${(lastA.y - (lastA.rowTop ?? 0)).toFixed(2)} relB=${(lastB.y - (lastB.rowTop ?? 0)).toFixed(2)}`)
   }
   /**
    * --- adj668（用户要求）：临时段（`{bz}` / `{dsb}`）**只增加所在行的行距**，其它行不受影响 ---

@@ -3844,7 +3844,16 @@ export function layoutScore(
      * 本线只该避开**自己下方**的音符（与"层级④跳房子在③连音线之上"配套）。
      */
     let baseY = Number.NaN
-    for (const r of rows) {
+    /**
+     * ⚠ 必须**限定在本行内**（`rowIdx`）！
+     *
+     * `rows` 是**整页/整组的所有行**，只按 x 过滤会把**别的行**同列的音符算进来——
+     * 各行的行首 x 相同，于是本行的线会拿到第 1 行的 y，**整条线跳到第一行去**
+     * （用户报「连音线没有在当前行，都跳到第一行了」）。
+     * 上一版用 `rows[rowIdx].notes` 求行内最低 y，天然只在本行；改成"本线区间"时
+     * 遍历了全部 `rows` 却漏了行过滤，这是那次改动的回归。
+     */
+    for (const r of [rows[rowIdx]].filter(Boolean)) {
       for (const n of r.notes) {
         const c = n.x + n.width / 2
         if (c < cLo || c > cHi) continue
