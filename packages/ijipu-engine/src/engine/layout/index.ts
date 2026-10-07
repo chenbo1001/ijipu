@@ -3880,6 +3880,12 @@ export function layoutScore(
     if (Number.isNaN(baseY)) baseY = rowNotes.length > 0 ? Math.min(...rowNotes.map((n) => n.y)) : anchor.y
     return slurYFor(baseY, hi, sym, raise)
   }
+  /**
+   * adj723l：同上，但**不含 `raise`**（= 该线"基础高度"）——供"同行齐平"只统一基础高度用。
+   * 齐平后再把各条自己的 `raise` 加回去，嵌套错开（`adj95`）才不被抹平。
+   */
+  const spanSlurBaseY = (anchor: PlacedToken, rowIdx: number, x1: number, x2: number): number =>
+    spanSlurY(anchor, rowIdx, x1, x2, 0)
   /** 行内跳房子线最低 y + 2s（adj134：连音线不得高于跳房子线，避免与其重叠） */
   const voltaFloorY = (rowIdx: number): number | null => {
     const r = rows[rowIdx]
@@ -3972,7 +3978,13 @@ export function layoutScore(
         // adj689：同行线**齐平**（由 `alignRowSlurBaselines` 收成一条）；
         // adj723i：但基准改按**本线自己覆盖的音符区间**求——不再被行内**无关**音符的
         // 高八度点/修饰符抬高（用户报「连音线离音符太远」，实测多抬 3.6~8.7px）
-        y: r1(Math.max(spanSlurY(a, rowA, sx1, sx2, raise), voltaFloorY(rowA) ?? -Infinity)),
+        // adj723l：`y` 只按**本线自身区间**算（不含跳房子下限钳制——那一步在齐平之后做，
+        // 否则 `baseYNoRaise`/`raise` 会被钳制量污染，齐平就算错了）
+        y: r1(spanSlurY(a, rowA, sx1, sx2, raise)),
+        // adj723l：基础高度（不含 `raise`）——"同行齐平"只统一它，之后再各自加回 `raise`
+        baseYNoRaise: r1(spanSlurBaseY(a, rowA, sx1, sx2)),
+        // adj723l：本行的跳房子下限（`voltaFloorY`）——齐平之后再统一钳制（见 `alignRowSlurBaselines`）
+        voltaFloor: voltaFloorY(rowA) ?? undefined,
         depth: sp.depth,
         style,
         // 仅平均连音组 (y...) 标数字（普通连音线 (…) 不加，adj43）
@@ -4167,6 +4179,52 @@ function alignRowSlurBaselines(pages: ScorePage[]): void {
       if (list.length === 0) continue
       const target = Math.min(...list.map((x) => x.y))
       for (const sl of list) sl.y = r1(target)
+    }
+  }
+  /**
+   * adj723l（用户报「`(1/ (1')- | 1)` 里后一条线因 `1'` 抬高、**前一条没抬**」）：
+   * **同一视觉行的连音线统一到"最高的那条"**（`adj689` "同行齐平"的记谱惯例）。
+   *
+   * 上面那段只在 `{dsb}` 下移过的行生效，普通行不做 ⇒ `spanSlurY` 按**各线自身区间**算出的
+   * 高度差会**原样留下**：实测 `(1/ …)` 覆盖 `hi=0` ⇒ `y=142.2`，
+   * `((1')- …)` 覆盖 `hi=1` ⇒ `y=138.6`，同一行**差 3.6px**（用户给的就是这张图）。
+   *
+   * 与 `adj723i`（"能低就低"）的关系：`adj723i` 修的是"**被无关音符抬到整行**"，
+   * 即**行内每条线都被抬高**；这里修的是"**行内彼此不齐**"（高的高、低的低）。
+   * 前者保留（各线仍按自身区间定**需求**），后者用"**取行内最低（最靠上）者**"补齐——
+   * 两条口径合起来 = 需求按本线区间、**最终高度行内统一**。
+   */
+  for (const p of pages) {
+    const rows = new Set<number>()
+    for (const sl of p.slurs) {
+      if (sl.layerBase === undefined && sl.rowTop !== undefined) rows.add(sl.rowTop)
+    }
+    for (const rowTop of rows) {
+      const list = p.slurs.filter(
+        (sl) => sl.layerBase === undefined && sl.rowTop !== undefined && Math.abs(sl.rowTop - rowTop) < 0.5,
+      )
+      if (list.length < 2) continue
+      /**
+       * 只统一**基础高度**（`baseYNoRaise`），再把各条自己的 **`raise`** 加回去。
+       *
+       * `raise = y − baseYNoRaise`（含嵌套错开 `SLUR_NEST_RAISE` / `(+` `(-`）；
+       * 若连 `raise` 一起抹平，嵌套的两条线会重合（`adj95`「外层 y = 内层 y − 2」立刻转红）。
+       * 尚无 `baseYNoRaise` 的线（如跨行半弧）退回用 `y` 参与齐平，不做抬升补偿。
+       */
+      const baseOf = (sl: (typeof list)[number]): number => sl.baseYNoRaise ?? sl.y
+      const target = Math.min(...list.map(baseOf))
+      for (const sl of list) {
+        /**
+         * adj723l：**基础高度**统一为 `target`（这是"同行齐平"的新不变量）。
+         * `y = target + raise`，`raise` 是嵌套错开 / `(+` `(-` 逐条叠加的部分，必须保留；
+         * 再把 `baseYNoRaise` 也写回 `target`，这样"基础高度一致"是可验证的。
+         */
+        const raise = sl.baseYNoRaise !== undefined ? sl.y - sl.baseYNoRaise : 0
+        sl.baseYNoRaise = r1(target)
+        const leveled = target + raise
+        // adj723l：跳房子下限在齐平**之后**钳制（`adj134`：线不得高于跳房子线）
+        sl.y = r1(sl.voltaFloor !== undefined ? Math.max(leveled, sl.voltaFloor) : leveled)
+      }
     }
   }
 }
@@ -6026,6 +6084,13 @@ function shiftEnvelopeDown(
       } else if (s.group !== undefined && (s.group !== gi || s.voice !== voice)) continue
       if (!(s.x1 >= xMin - 1e-6 && s.x1 <= xMax + 1e-6)) continue
       s.y = r1(s.y + dy)
+      /**
+       * adj723l：`baseYNoRaise` 必须**跟着一起搬**——它是"不含 `raise` 的基础高度"，
+       * 若只搬 `y`，后续"同行齐平"推导 `raise = y − baseYNoRaise` 时会把**下移量当成 raise**
+       * （实测被算成 15.80 / 8.60，齐平随即算错、`adj689b` 转红）。
+       */
+      if (s.baseYNoRaise !== undefined) s.baseYNoRaise = r1(s.baseYNoRaise + dy)
+      if (s.voltaFloor !== undefined) s.voltaFloor = r1(s.voltaFloor + dy)
     }
   }
 }

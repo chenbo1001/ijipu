@@ -17625,13 +17625,29 @@ function runAdj689bTests() {
   check('adj689b 用例成立：本行存在多个互不相同的段层下移量',
     (p.rowSlides?.size ?? 0) >= 1 && rowTops.length >= 1,
     JSON.stringify({ rowSlides: [...(p.rowSlides ?? new Map()).entries()], rowTops }))
-  /** 同一行（`rowTop` 相同）的主旋律连线：y 必须只有**一个值** */
+  /**
+   * adj723l：同一行（`rowTop` 相同）的主旋律连线，**基础高度 `baseYNoRaise` 必须只有一个值**。
+   *
+   * 判据从"`y` 只有一个值"改为"`baseYNoRaise` 只有一个值"：`y = 基础高度 + raise`，
+   * 而 `raise`（嵌套错开 `SLUR_NEST_RAISE` / `(+` `(-`）是**该逐条保留**的
+   * （`adj95`「外层 y = 内层 y − 2」守着这一点）。若仍按 `y` 判"齐平"，
+   * 会把嵌套错开误判成"不齐平"（实测 182 / 181.7 / 182.9 被判红）。
+   *
+   * 本次还要看的是"**行内不再因某条的区间不同而整体高低不一**"——那体现在基础高度上。
+   */
   const bad: string[] = []
   for (const rt of rowTops) {
-    const ys = [...new Set(p.slurs.filter((s) => s.layerBase === undefined && s.rowTop === rt).map((s) => s.y))]
-    if (ys.length > 1) bad.push(`行顶=${rt} y=[${ys.join(',')}]`)
+    const bases = [
+      ...new Set(
+        p.slurs
+          .filter((s) => s.layerBase === undefined && s.rowTop === rt)
+          .map((s) => s.baseYNoRaise ?? s.y),
+      ),
+    ]
+    if (bases.length > 1) bad.push(`行顶=${rt} 基础高度=[${bases.join(',')}]`)
   }
-  check('adj689b **同一视觉行内所有连音线齐平**（行内 y 只有一个值）', bad.length === 0, bad.join(' | '))
+  check('adj723l（原 adj689b）**同一视觉行内所有连音线基础高度齐平**（`baseYNoRaise` 只有一个值）',
+    bad.length === 0, bad.join(' | '))
   /**
    * 且齐平之后仍在"该行最高的元素顶"之上：取该行最低声部处的连线为基准——
    * 行内连线 y 必须**高于**该行最低声部的数字顶（否则线会横穿音符）。
@@ -17651,10 +17667,17 @@ function runAdj689bTests() {
   const durLay = layoutScore(parseJps(CODE), { ...defaultPageConfig, noteSpaceLayout: 'duration' })
   const dbad: string[] = []
   for (const rt of [...new Set(durLay.pages[0].notes.map((n) => n.parentY).filter((v): v is number => v !== undefined))]) {
-    const ys = [...new Set(durLay.pages[0].slurs.filter((s) => s.layerBase === undefined && s.rowTop === rt).map((s) => s.y))]
-    if (ys.length > 1) dbad.push(`行顶=${rt} y=[${ys.join(',')}]`)
+    // adj723l：同前一条，按**基础高度**判齐平（`raise` 逐条保留）
+    const bases = [
+      ...new Set(
+        durLay.pages[0].slurs
+          .filter((s) => s.layerBase === undefined && s.rowTop === rt)
+          .map((s) => s.baseYNoRaise ?? s.y),
+      ),
+    ]
+    if (bases.length > 1) dbad.push(`行顶=${rt} 基础高度=[${bases.join(',')}]`)
   }
-  check('adj689b 时值优先（`noteSpaceLayout: duration`）路径同样齐平', dbad.length === 0, dbad.join(' | '))
+  check('adj723l（原 adj689b）时值优先（`noteSpaceLayout: duration`）路径同样齐平', dbad.length === 0, dbad.join(' | '))
   /**
    * 护栏：**没有 `{dsb}` 的谱面零位移**（老谱面连音线位置一字不动）。
    */
