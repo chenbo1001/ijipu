@@ -3523,6 +3523,24 @@ export function layoutScore(
   const notesByIndex = new Map<number, PlacedToken>()
   for (const p of pages) for (const n of p.notes) notesByIndex.set(n.id.index, n)
 
+  /**
+   * adj723q（用户报「`{dsb}` 行的连音线压在段层音符上」的**根因**）：
+   * **段层音符的 `(y, 行)`** —— 主旋律连音线路径**不该**为段落`( … )`建线。
+   *
+   * 段层路径（`placeSegmentOverlays`）已经为段内 `( … )` 建了自己的线
+   * （带 `layerBase`，按**段层**基线定位）。若主旋律路径**再建一份**，那一份是按
+   * **行基线**定位的、随后又被 `shiftEnvelopeDown()` 当作"下层内容"再下移 `dy/2`
+   * ⇒ 线段压到段层音符上（实测 `y=183.8` 而段层墨迹顶 `155.7`，两条线并存）。
+   *
+   * 判据：连音线两端音符的 `y` **都不等于所在行的基线**（段层音符被抬/降到别的 y）⇒ 段内线。
+   * （主旋律音符恒等于行基线 `rows[rowA].y`。）
+   */
+  const segNoteKeys = new Set<string>()
+  for (const n of pages.flatMap((p) => p.notes)) {
+    if (n.parentY === undefined) continue // 段层/包络内音符都带 `parentY`
+    segNoteKeys.add(`${n.y.toFixed(1)}`)
+  }
+
   const slurPairs: {
     start: number
     end: number
@@ -3726,6 +3744,11 @@ export function layoutScore(
       const rowA = a ? rowOfNote.get(s0) : undefined
       const rowB = b ? rowOfNote.get(s1) : undefined
       if (!a || !b || rowA === undefined || rowB === undefined) continue
+      /**
+       * adj723q：**段内连音线交给段层路径**（`placeSegmentOverlays` 会为它建带 `layerBase` 的线）。
+       * 端点都落在段层音符上 ⇒ 主旋律路径不建，避免"两份、其中一份被误下移"。
+       */
+      if (segNoteKeys.has(a.y.toFixed(1)) && segNoteKeys.has(b.y.toFixed(1))) continue
       slurInfos.push({ sp, a, b, rowA, rowB, segs: [[s0, s1]] })
     }
   }
@@ -4112,6 +4135,40 @@ export function layoutScore(
   // 完全不触碰前面 2500 行的放置逻辑，把扰动面压到最小（连音线/跳房子等后处理已跑完，
   // 不会把段内音符误纳入主旋律的连音配对与行高计算）。
   placeSegmentOverlays(pages, result, config, keySemitone)
+
+  /**
+   * adj723q（用户报「`{dsb}` 行的连音线压在段层音符上」）：
+   * **删掉主旋律路径为"段内连音线"重复建的那一份。**
+   *
+   * ## 现象与根因
+   * 段层路径（`placeSegmentOverlays`）已为段内 `( … )` 建了**带 `layerBase`** 的线
+   * （按段层基线定位，位置正确）。但主旋律路径（更早跑）**也**为同一段 token 建了一份
+   * 不带 `layerBase` 的线——那份按**行基线**定位，随后被 `shiftEnvelopeDown()`
+   * 当作"下层内容"又下移 `dy/2` ⇒ **线段压到段层音符上**
+   * （实测 `y=183.8` 而段层墨迹顶 `155.7`；两条线同时存在）。
+   *
+   * ## 判据（"同 x 区间 + 段层线存在"）
+   * 主旋律线若与某条**段层线**（`layerBase !== undefined`）的 x 区间实质重合
+   * （两端各容差 `2px`）⇒ 它就是那一条的重复，删除。
+   *
+   * 为什么不在建线时就跳过：`slurInfos` 在**段层叠加之前**就建好了，那时
+   * `pages[].notes` 里还没有段层音符，"端点是否属段层"判不出来（实测该判据不生效）。
+   */
+  for (const p of pages) {
+    const segSlurs = p.slurs.filter((s) => s.layerBase !== undefined)
+    if (segSlurs.length === 0) continue
+    p.slurs = p.slurs.filter((s) => {
+      if (s.layerBase !== undefined) return true
+      /**
+       * 判据用**端点 x 完全一致**：实测主路径与段层路径为**同一段 token** 建的线，
+       * 端点 x **逐位相同**（如两边都是 `[85.0, 103.2]`）。
+       *
+       * ⚠ 不要放宽成"区间包含"——那会把**正确的**主旋律线也删掉
+       * （实测 `adj689b` 里一处主旋律线的区间被别的段层线包住而被误删，四条断言转红）。
+       */
+      return !segSlurs.some((g) => Math.abs(g.x1 - s.x1) <= 0.5 && Math.abs(g.x2 - s.x2) <= 0.5)
+    })
+  }
 
   /**
    * adj689（用户口径）：**同组词部与曲部的间距，以上面曲部最低的那个声部的位置为曲部的基线**。

@@ -8661,38 +8661,36 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
   {
     const code = H + "Q: 1 2 3 4 | {dsb (3// 2// 1//) (1// 1/) 7,/ 1- } (1'// 7// 6//) (6// 6/) 5/ 6- |\n"
     const pg = layoutScore(parseJps(code), D).pages[0]
-    const lower = pg.slurs.filter((s) => s.layerBase === undefined)
+    /**
+     * adj723q：**不再按 `layerBase` 区分来源**——段内连音线现在**只由段层路径**建
+     * （主旋律路径那份是重复的、且会被 `shiftEnvelopeDown` 误下移压到段层音符上，已删除）。
+     * 故这里取"**该段范围内**的线"即可（段层线的 x 落在段层音符区间内）。
+     */
     const segNsAll = pg.notes.filter((n) => n.segment)
+    const segX0 = Math.min(...segNsAll.map((n) => n.x))
+    const segX1 = Math.max(...segNsAll.map((n) => n.x + n.width))
+    const lower = pg.slurs.filter((s) => Math.min(s.x1, s.x2) >= segX0 - 5 && Math.max(s.x1, s.x2) <= segX1 + 5)
     const upperBaseline = segNsAll.map((n) => n.y).sort((a, b) => a - b)[0]
     // adj722：包络外主旋律（视觉下排）= 主声部、`playVoice` 未设 ⇒ 按 `parentY` 认它
     const lowerBaseline = pg.notes.filter((n) => isDsbOutside(n)).map((n) => n.y).sort((a, b) => a - b)[0]
-    check('S1 adj670 图3：dsb 下层声部的连音线**保持在上方**（不再反转；`below` 未置位）',
+    check('adj723q（原 S1）段内连音线**只有一份**（段层路径那份；不再有重复的、被误下移的主旋律线）',
       lower.length > 0 && lower.every((s) => s.below !== true), JSON.stringify(lower.map((s) => ({ y: s.y, below: s.below }))))
-    check('S2 adj670 图3：下层连音线在上层声部基线**之下**（朝上紧贴自己的数字，不挤进上层）',
-      lower.every((s) => s.y > upperBaseline + 0.11), `slurY=${lower.map((s) => s.y).join(',')} upperBaseline=${upperBaseline}`)
+    check('adj723q（原 S2）段内连音线**不在段层音符下方**（不被 `shiftEnvelopeDown` 误下移压到音符上）',
+      lower.every((s) => s.y < upperBaseline - 5), `slurY=${lower.map((s) => s.y).join(',')} upperBaseline=${upperBaseline}`)
     /**
      * S4（**本轮的核心口径**）：连音线的**弧顶**不能被上层声部的墨迹（减时线层底 / 低八度点）
      * 压到——这是"层间距自动撑开"要保证的事。
      */
-    check('S4 adj670 图3：连音线**弧顶**高于上层声部墨迹下缘（层间距已按需撑开）',
+    check('adj723q（原 S4）段内连音线**弧顶在段层音符墨迹之上**（不与数字/减时线交叉）',
       (() => {
-        // 上层（段层）墨迹下缘：取段层音符里最靠下的一条（减时线层底 / 低八度点底）
-        const sc = noteScaleOf(D.note_size)
-        let upperBottom = -Infinity
-        for (const n of segNsAll) {
-          const tk = n.token
-          const dc = tk.kind === 'note' ? (tk.diminishCount ?? 0) : 0
-          let bot = dc > 0 ? beamBottomY(n.y, dc, D.note_size) : digitBottomY(n.y, D.note_size)
-          const oct = tk.kind === 'note' ? tk.octaveShift : 0
-          if (oct < 0) bot = Math.max(bot, lowDotY(n.y, -oct - 1, dc, D.note_size) + DOT_R * sc)
-          upperBottom = Math.max(upperBottom, bot)
-        }
+        // 段层音符的**墨迹顶**（数字顶；段层音符都在线**下方**）
+        const inkTop = Math.min(...segNsAll.map((n) => n.y - noteScaleOf(1) * 0 - D.note_size * 0.8))
         return lower.every((s) => {
           const sag = Math.max(SLUR_SAG_MIN, Math.min(SLUR_SAG_MAX, Math.abs(s.x2 - s.x1) * 0.28))
-          return s.y - sag > upperBottom + 0.11
+          return s.y - sag < inkTop + 0.11
         })
       })(),
-      `lowerY=${lower.map((s) => s.y).join(',')} upperBottom≈${upperBaseline}+`)
+      `lowerY=${lower.map((s) => s.y).join(',')} segInkTop≈${(upperBaseline - D.note_size * 0.8).toFixed(1)}`)
     check('S5 adj670 图3：自动撑开后的层间距 > 默认 22（放不下时才撑）',
       lowerBaseline - upperBaseline > 22.11, `gap=${(lowerBaseline - upperBaseline).toFixed(2)}`)
     const svg = renderScoreToSvg(layoutScore(parseJps(code), D))[0]
@@ -17672,15 +17670,17 @@ function runAdj689bTests() {
     (p.rowSlides?.size ?? 0) >= 1 && rowTops.length >= 1,
     JSON.stringify({ rowSlides: [...(p.rowSlides ?? new Map()).entries()], rowTops }))
   /**
-   * adj723o（用户口径，**取代 `adj689`/`adj723l` 的"同行齐平"**，附例
-   * `Q: 1'/ 7// (3// 3/) 5/ (6 1'/ (5'/ | 5')`）：
-   * 「**之前就有要求都就自己范围内的修饰符来定连音线高度，不要求整行的连音线水平对齐**」。
-   *
-   * ⇒ 判据从"同一 `rowTop` 的线**基础高度必须相同**"改为**两条新判据**：
-   * ① 每条线的 `baseYNoRaise` **各不相同**（各按自己区间算 ⇒ 不该被抹平）；
-   * ② 每条线都**在自己区间内音符的墨迹之上**（不与数字/减时线交叉）。
+   * adj723o/adj723q：按**区间**认"主旋律线"（不再用 `layerBase` 区分来源——
+   * 段内连音线现在只由段层路径建，主路径不再重复建线）。
    */
-  const mainSlurs = p.slurs.filter((s) => s.layerBase === undefined)
+  const segSpans = []
+  for (const n of p.notes) {
+    if (n.segment === undefined) continue
+    segSpans.push([n.x, n.x + n.width])
+  }
+  const inSeg = (s: (typeof p.slurs)[number], pad = 3): boolean =>
+    segSpans.some(([a, b]) => Math.min(s.x1, s.x2) >= a - pad && Math.max(s.x1, s.x2) <= b + pad)
+  const mainSlurs = p.slurs.filter((s) => !inSeg(s))
   const bases = [...new Set(mainSlurs.map((s) => s.baseYNoRaise ?? s.y))]
   check('adj723o（原 adj689b）每条连线**只按自己区间**定高：`baseYNoRaise` 不因同行其它线被抹平',
     mainSlurs.length >= 2 && bases.length >= 2,
@@ -17700,7 +17700,14 @@ function runAdj689bTests() {
    * 行内连线 y 必须**高于**该行最低声部的数字顶（否则线会横穿音符）。
    */
   const rowTop0 = rowTops[0]
-  const slurs0 = p.slurs.filter((s) => s.layerBase === undefined && s.rowTop === rowTop0)
+  /** adj723q：该行的**全部**线（含段内线——它们现在也是唯一的那份） */
+  const slurs0 = p.slurs.filter((s) => {
+    const xa = Math.min(s.x1, s.x2)
+    const xb = Math.max(s.x1, s.x2)
+    return p.notes.some(
+      (n) => n.parentY !== undefined && Math.abs(n.parentY - rowTop0) < 0.5 && n.x + n.width >= xa - 5 && n.x <= xb + 5,
+    )
+  })
   let lowVoice = rowTop0
   for (const n of p.notes) {
     if (n.parentY !== undefined && Math.abs(n.parentY - rowTop0) < 0.5) lowVoice = Math.max(lowVoice, n.y)
@@ -17712,7 +17719,16 @@ function runAdj689bTests() {
    * 两条布局路径都要覆盖（AGENTS 铁律 5）：时值优先（`duration`）下**同样各按自己区间定高**。
    */
   const durLay = layoutScore(parseJps(CODE), { ...defaultPageConfig, noteSpaceLayout: 'duration' })
-  const durMain = durLay.pages[0].slurs.filter((s) => s.layerBase === undefined)
+  const durPage = durLay.pages[0]
+  const durSegSpans: [number, number][] = []
+  for (const n of durPage.notes) {
+    if (n.segment === undefined) continue
+    durSegSpans.push([n.x, n.x + n.width])
+  }
+  const durMain = durPage.slurs.filter(
+    (s) =>
+      !durSegSpans.some(([a, b]) => Math.min(s.x1, s.x2) >= a - 3 && Math.max(s.x1, s.x2) <= b + 3),
+  )
   const durBases = [...new Set(durMain.map((s) => s.baseYNoRaise ?? s.y))]
   check('adj723o（原 adj689b）时值优先（`noteSpaceLayout: duration`）路径同样**各按自己区间**定高',
     durMain.length >= 2 && durBases.length >= 2, `基础高度=[${durBases.join(',')}]`)
