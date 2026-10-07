@@ -12136,15 +12136,21 @@ function runAdj598UnclosedVoltaScopeTests() {
     )
   }
   // ③ 源码级：判据必须把三种"跳跃/结束"修饰符都算进去（防止后续"简化"漏掉某个）
-  // adj627b：判据已抽到布局端 `isJumpOrEndBarline`（转调复原与房子终点必须同一口径），播放端改为复用
+  // adj723aa（用户口径修正）：判据改名 `isVoltaCloserBarline` 并**只服务未封闭房子的末尾线**——
+  //   「末尾线是其后最近的一个 `:|` 或 `:|:` 或 `&dc` 或 `&ds` 或 `&fine`」（**不含** `||`/`||/`）；
+  //   同时**转调规则也被修正**：「转调遇到反复、跳跃等**不恢复调号**，除非有明确的 `"d:X"` 或 `"d:"`」
+  //   ⇒ 调号只由各线自己的 `keyChange` 决定，「跳跃线复原调号」这份旧口径已删除。
   {
     const src = String(readFileSync('packages/ijipu-engine/src/engine/playback/sequence.ts', 'utf8'))
     const laySrc = String(readFileSync('packages/ijipu-engine/src/engine/layout/index.ts', 'utf8'))
     check(
-      'adj598/adj627b 「下一处跳跃或结束」判据含 `&ds`/`&dc`/`&fine`（判据集中在布局端，播放端复用同一份）',
+      'adj723aa 未封闭房子末尾线判据含 `&ds`/`&dc`/`&fine`、**不含** `||`（布局端定义、播放端复用同一份）',
       /isJumpOrEndBar/.test(src) &&
-        /isJumpOrEndBarline\(it\.bar\)/.test(src) &&
-        /export function isJumpOrEndBarline[\s\S]{0,500}m\.includes\('ds'\)[\s\S]{0,160}m\.includes\('dc'\)[\s\S]{0,160}m\.includes\('fine'\)/.test(laySrc),
+        /isVoltaCloserBarline\(it\.bar\)/.test(src) &&
+        /export function isVoltaCloserBarline[\s\S]{0,400}m\.includes\('dc'\)[\s\S]{0,160}m\.includes\('ds'\)[\s\S]{0,160}m\.includes\('fine'\)/.test(
+          laySrc,
+        ) &&
+        !/isVoltaCloserBarline[\s\S]{0,400}'\\\|\\\|'/.test(laySrc),
       '',
     )
   }

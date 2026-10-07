@@ -82,24 +82,20 @@ const KEY_NAMES = ['C', '#C', 'D', '$E', 'E', 'F', '#F', 'G', '#G', 'A', '$B', '
 const keyNameOf = (semitone: number): string => KEY_NAMES[((Math.round(semitone) % 12) + 12) % 12]
 
 /**
- * adj627b（用户要求）：**"跳跃标志 / 终结标志"小节线**判据——临时转调遇到它们时**自然恢复原调号**。
+ * adj723aa（用户口径，2026-10）：**未封闭跳房子（`|]/`）的末尾线**判据。
  *
- * 口径（与 adj598 的"下一处跳跃或结束"同一套）：反复线 `:|` / `:|:`、结束线 `||` / `||/`，
- * 以及带 `&ds`（跳花 S）/ `&dc`（从头反复）/ `&fine`（曲终）修饰的线。
- * 抽成模块级纯函数是因为**布局端（`effectiveKeysOf`）与播放端（`keyAtSeq`）必须同一口径**，
- * 否则会出现"谱面显示已回原调、试听却还在转调"的割裂。
+ * 用户原话：「未封闭房子末尾线（`|]/`）**不是**跳房子是末尾，而是其**后面最近的一个 `:|`
+ * 或 `:|:` 或 `&dc` 或 `&ds` 或 `&fine`**」。故这里**只认这五种**，**不含** `||`/`||/`。
+ *
+ * 为什么不再与"转调复原"共用：**用户 2026-10 修正了转调规则**——
+ * 「转调遇到反复、跳跃等**不恢复调号**，除非有明确的再转调 `"d:X"` 或恢复调号 `"d:"`」。
+ * 于是调号只由小节线自己的 `keyChange` 决定（`layout` 的 `effectiveKeysOf` 与走查里的 `curKey`
+ * 都已是这个口径，两处同源），**不再需要在"跳跃/结束线"处做任何调号复原** ⇒
+ * 原先为两者共用的 `isJumpOrEndBarline`（且含 `||`/`||/`）已无必要，删除。
  */
-export function isJumpOrEndBarline(bar: { type: BarlineType; marks?: BarlineMark[] }): boolean {
+export function isVoltaCloserBarline(bar: { type: BarlineType; marks?: BarlineMark[] }): boolean {
   const m = bar.marks ?? []
-  return (
-    bar.type === ':|' ||
-    bar.type === ':|:' ||
-    bar.type === '||' ||
-    bar.type === '||/' ||
-    m.includes('ds') ||
-    m.includes('dc') ||
-    m.includes('fine')
-  )
+  return bar.type === ':|' || bar.type === ':|:' || m.includes('dc') || m.includes('ds') || m.includes('fine')
 }
 
 /**

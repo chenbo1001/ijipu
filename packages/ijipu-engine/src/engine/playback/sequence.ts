@@ -21,7 +21,7 @@ import type {
   VoiceBlock,
 } from '../types'
 import { tokenDuration } from '../duration'
-import { parseKey, pitchToName, isJumpOrEndBarline } from '../layout/index'
+import { parseKey, pitchToName, isVoltaCloserBarline } from '../layout/index'
 import { graceGroupBeats, gracePerNoteBeats } from '../layout/spaceLayout'
 // adj629d：段层/替谱音符 id 判定（试听"点音符跳过去"要按 id 精确命中事件）
 import { decodeSegmentNoteId, decodeTpNoteId } from '../layout/segments'
@@ -838,14 +838,11 @@ export function buildPlaySequence(
   // adj359：指向 voltaEnd「本小节线」而非其后一位——使 `:|]["2."`（共用一根线：volta1 结束 + volta2 开始）
   // 在跳过 volta1 后仍能处理该线上的 volta2 番号
   /**
-   * adj598（用户口径）：**"下一处跳跃或结束"**的小节线判据——
-   * 反复线 `:|`/`:|:`、结束线 `||`/`||/`，以及带 `&ds`（跳花 S）/`&dc`（从头反复）/`&fine`（曲终）修饰的线。
-   * 未封闭房子 `|["n." … |]/` 的终点就取**其后第一根**这样的线（见下）。
-   * adj627b：判据本身抽到了布局端 `isJumpOrEndBarline`——**转调复原（走查里的 `curKey`）与本处房子终点
-   * 必须同一口径**，两处各写一份迟早会漂。
+   * adj723aa（用户口径）：未封闭房子（`|]/`）的末尾线 = **其后最近的 `:|` / `:|:` / `&dc` / `&ds` / `&fine`**
+   * （**不含** `||`/`||/`）——见 `layout/index.ts` 的 `isVoltaCloserBarline`。
    */
   const isJumpOrEndBar = (it: SeqItem): boolean =>
-    it.kind === 'bar' && !!it.bar && isJumpOrEndBarline(it.bar)
+    it.kind === 'bar' && !!it.bar && isVoltaCloserBarline(it.bar)
   const voltaAfter = new Map<number, number>()
   const pendingStarts: number[] = []
   seq.forEach((item, si) => {
