@@ -3809,28 +3809,11 @@ export function layoutScore(
    * 记谱惯例也是"同一行连音线同高"。所以改成按**整行**求"该行最高的元素顶"，
    * 行内共用；`raise`（嵌套错开 / `(+` `(-` 手动升降）仍在基准之上逐条叠加——那才是该错开的部分。
    */
-  const maxHiOfRow = (rowIdx: number): number => {
-    let hi = 0
-    for (const n of rows[rowIdx]?.notes ?? []) hi = Math.max(hi, highOf(n))
-    return hi
-  }
   /**
-   * 某行的**修饰符清单**（`adj723p`：让位量已改为"按符号查表"，故需要符号本身而非只数个数）。
-   *
-   * 取"层数最多"的那个音符的清单——与 `maxSymOfRow` 同源，只是保留符号名。
+   * ⚠ `adj723r`：`maxHiOfRow` / `maxSymListOfRow` / `rowSlurY` **已删除**——
+   * 用户口径「**都就自己范围内的修饰符来定连音线高度，不要求整行的连音线水平对齐**」
+   * 明确否掉了"行级取最大"。连音线一律走 `spanSlurY()`（按本线区间），跨行两半也一样。
    */
-  const maxSymListOfRow = (rowIdx: number): string[] => {
-    let best: string[] = []
-    for (const n of rows[rowIdx]?.notes ?? []) {
-      if (n.token.kind !== 'note') continue
-      const list = n.token.symbols.filter((x) => x !== 'hx')
-      if (list.length > best.length) best = [...list]
-    }
-    return best
-  }
-  /** 某行连音线的基准 y（不含该条自己的嵌套抬升 / `(+` `(-` 升降） */
-  const rowSlurY = (rowIdx: number, anchor: PlacedToken, raise: number): number =>
-    slurYFor(anchor.y, maxHiOfRow(rowIdx), maxSymListOfRow(rowIdx), raise)
 
   /**
    * adj723i（用户口径）：「**以元素墨迹不重叠、不覆盖为原则，让层级间保持适当间距即可**」
@@ -4052,10 +4035,19 @@ export function layoutScore(
       // adj651：跨跳房子的延续线只画右半部——左半部若照画，会从上一行的 5 拉出一小截短线，
       // 与「房子 1 的显式连线」叠在一起（用户参考图里上行是干净的一条弧）
       if (!sp.houseTie) {
+        /**
+         * adj723r（用户报「最后一个跨行连音线抬得过高」）：**左半部也按自己区间定高**。
+         *
+         * 原用 `rowSlurY(rowA, a, raise)`——**行级** `maxHiOfRow`/`maxSymListOfRow`，
+         * 于是同行的**任一**音符带高八度点/修饰符，这条跨行线就被抬上去（与用户
+         * 「都就自己范围内的修饰符来定连音线高度」相悖）。
+         * 其"区间" = `a.x` → 行末（`xEndA`），故按该区间求 `hi`/`sym`。
+         */
+        const sx1 = r1(a.x + halfDig + sSlur)
         pages[rA.page].slurs.push({
-          x1: r1(a.x + halfDig + sSlur),
+          x1: sx1,
           x2: r1(xEndA),
-          y: r1(Math.max(rowSlurY(rowA, a, raise), voltaFloorY(rowA) ?? -Infinity)),
+          y: r1(Math.max(spanSlurY(a, rowA, sx1, xEndA, raise), voltaFloorY(rowA) ?? -Infinity)),
           depth: sp.depth,
           style: crossRowStyle,
           tupletCount: sp.tuplet ? noteCount : undefined,
@@ -4064,10 +4056,14 @@ export function layoutScore(
           rowTop: r1(rows[rowA].y), // adj689b：行基准统一落地用
         })
       }
+      /**
+       * adj723r：右半部同理——"区间" = 行首（`xStartB`）→ `b.x`。
+       */
+      const sx2 = r1(b.x + halfDig - sSlur)
       pages[rows[rowB].page].slurs.push({
         x1: r1(xStartB),
-        x2: r1(b.x + halfDig - sSlur),
-        y: r1(Math.max(rowSlurY(rowB, b, raise), voltaFloorY(rowB) ?? -Infinity)),
+        x2: sx2,
+        y: r1(Math.max(spanSlurY(b, rowB, xStartB, sx2, raise), voltaFloorY(rowB) ?? -Infinity)),
         depth: sp.depth,
         style: crossRowStyle,
         tupletCount: sp.tuplet ? noteCount : undefined,

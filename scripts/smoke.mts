@@ -41,7 +41,7 @@ import {
 } from '@ijipu/engine/playback/ornaments.ts'
 import { slideOf, slidePlan, slideStepMs, SLIDE_SYMBOLS, SLIDE_STEP_MIN_MS, SLIDE_STEP_MAX_MS } from '@ijipu/engine/playback/slides.ts'
 import { midiToPitchName } from '@ijipu/engine/playback/midi.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_SAG_MIN, SLUR_SAG_MAX, VOLTA_INK_GAP, digitBottomY, beamBottomY, digitInkW, digitTopY, slurSagOf, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap, tyBaselineY, HS_FONT_SIZE } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_SAG_MIN, SLUR_SAG_MAX, VOLTA_INK_GAP, digitBottomY, digitInkW, digitTopY, slurSagOf, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap, tyBaselineY, HS_FONT_SIZE } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
@@ -3419,6 +3419,26 @@ const s53r = s53.find((s) => s.half === 'r')
 check('adj199 跨行左半（4→行末小节线）', s53l !== undefined && Math.abs(s53l.x1 - (n53[3].x + halfDig + NS_S)) < 0.5 && Math.abs(s53l.x2 - (rowEnd53[rowEnd53.length - 1]?.x ?? 0)) < 1, `x1=${s53l?.x1} x2=${s53l?.x2} bar=${rowEnd53[rowEnd53.length - 1]?.x}`)
 check('adj321 跨行右半（边距 → 行2 1）', s53r !== undefined && Math.abs(s53r.x1 - ML) < 0.5 && Math.abs(s53r.x2 - (n53[4].x + halfDig - NS_S)) < 0.5, `x1=${s53r?.x1} x2=${s53r?.x2}`)
 check('跨行两半 y 不同（跨行）', s53l !== undefined && s53r !== undefined && Math.abs(s53l.y - s53r.y) > 1, `${s53l?.y} vs ${s53r?.y}`)
+/**
+ * adj723r（用户报「最后一个跨行连音线抬得过高」）：跨行两半**也按自己区间定高**。
+ *
+ * 原用 `rowSlurY()`（**行级** `maxHiOfRow` / `maxSymListOfRow`）——同行**任一**音符带高八度点
+ * 就会把这条跨行线抬上去，与用户口径「都就自己范围内的修饰符来定连音线高度」相悖。
+ * 现在两半都走 `spanSlurY()`（左半区间 `a.x→行末`、右半 `行首→b.x`）。
+ *
+ * 判据：两半的 `y` 分别等于"按自己区间"算出的值（此处用**该行基线减去**已验证过的
+ * 区间让位量来间接核对：两半都不得高于"本行基线 − 数字墨迹高 − `LAYER_GAP`"）。
+ */
+{
+  const nsr = DUR_CFG.note_size
+  const sc = noteScaleOf(nsr)
+  // 左半在起点行（n53[3] 那一行）、右半在终点行（n53[4] 那一行）
+  const baseL = n53[3].y - nsr * 0.8 - LAYER_GAP * sc
+  const baseR = n53[4].y - nsr * 0.8 - LAYER_GAP * sc
+  check('adj723r 跨行两半**各按自己区间**定高（不被同行无关音符抬高）',
+    s53l !== undefined && s53r !== undefined && s53l.y >= baseL - 0.6 && s53r.y >= baseR - 0.6,
+    `yL=${s53l?.y} 下限=${baseL.toFixed(2)} | yR=${s53r?.y} 下限=${baseR.toFixed(2)}`)
+}
 // adj140：跨行连音线统一平顶
 check('adj140 跨行连音符平顶', s53l?.style === 'flat' && s53r?.style === 'flat', `${s53l?.style}/${s53r?.style}`)
 const svg53 = renderScoreToSvg(lay53)[0]
