@@ -3832,13 +3832,23 @@ export function layoutScore(
     const cLo = Math.min(x1, x2) - halfSlot
     const cHi = Math.max(x1, x2) + halfSlot
     const rowNotes = rows[rowIdx]?.notes ?? []
-    const baseY = rowNotes.length > 0 ? Math.min(...rowNotes.map((n) => n.y)) : anchor.y
     let hi = 0
     let sym = 0
+    /**
+     * 锚点 y：取**本线区间内**音符的最低 y（**不是**整行的最低）。
+     *
+     * adj723k（用户口径 b）：「**各线按自己区间定位、能低就低**」。
+     * 原口径用"整行最低音符的 y"，于是行内只要有一个**低八度**音符（如 `6,/`），
+     * 全行连线都被顶到那个低位置之上——实测用户原谱
+     * `Q :|/["结束句" 2/ 1/ 2/ (1/ 1)- …]` 三条线全骑在 `y=142.2`，看着"整行偏高"。
+     * 本线只该避开**自己下方**的音符（与"层级④跳房子在③连音线之上"配套）。
+     */
+    let baseY = Number.NaN
     for (const r of rows) {
       for (const n of r.notes) {
         const c = n.x + n.width / 2
         if (c < cLo || c > cHi) continue
+        if (Number.isNaN(baseY) || n.y < baseY) baseY = n.y
         hi = Math.max(hi, highOf(n))
         if (n.token.kind === 'note') {
           /**
@@ -3858,12 +3868,13 @@ export function layoutScore(
         }
       }
     }
+    if (Number.isNaN(baseY)) baseY = rowNotes.length > 0 ? Math.min(...rowNotes.map((n) => n.y)) : anchor.y
     return slurYFor(baseY, hi, sym, raise)
   }
   /** 行内跳房子线最低 y + 2s（adj134：连音线不得高于跳房子线，避免与其重叠） */
   const voltaFloorY = (rowIdx: number): number | null => {
     const r = rows[rowIdx]
-    const barY = r.y - 18.4 // 小节线上端 = 音符基线 - 18.4（adj50）
+    const barY = r.y - 18.4 * noteScaleOf(m.noteSize)
     let floor: number | null = null
     for (const b of pages[r.page].barlines) {
       if (Math.abs(b.yTop - barY) < 1 && b.voltaStart) {

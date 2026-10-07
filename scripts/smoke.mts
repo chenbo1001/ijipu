@@ -8684,10 +8684,18 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
     const baseOf = (pg: typeof pA): number => Math.max(...pg.notes.map((n) => n.y))
     check('T2 adj668 图5：段层之后的行**被整体下移**（含段层的行确实变高了）',
       baseOf(pA) > baseOf(pB) + 1, `A=${baseOf(pA)} B=${baseOf(pB)}`)
-    check('T3 adj668 图5：下移之后**行内相对几何不变**（连音线相对本行基线的偏移一致）',
+    /**
+     * T3（adj723k 更新）：下移之后**行内相对几何不变**。
+     *
+     * 参照点改用**行内最低音符的 y**：`adj723k`（用户口径 b「各线按自己区间定位、能低就低」）
+     * 把连音线锚点从"整行最低音符"收窄到"**本线区间内**最低音符"，
+     * 于是"相对**行内最低音符**的偏移"才是随行整体平移的不变量。
+     */
+    const slurBaseOf = (pg: typeof pA): number => Math.min(...pg.notes.map((n) => n.y))
+    check('T3 adj723k（原 adj668 图5）：下移之后**行内相对几何不变**（连音线相对行内最低音符的偏移一致）',
       lastA !== undefined && lastB !== undefined &&
-        Math.abs(lastA.y - baseOf(pA) - (lastB.y - baseOf(pB))) < 0.11,
-      `relA=${(lastA.y - baseOf(pA)).toFixed(2)} relB=${(lastB.y - baseOf(pB)).toFixed(2)}`)
+        Math.abs(lastA.y - slurBaseOf(pA) - (lastB.y - slurBaseOf(pB))) < 0.11,
+      `relA=${(lastA.y - slurBaseOf(pA)).toFixed(2)} relB=${(lastB.y - slurBaseOf(pB)).toFixed(2)}`)
   }
   /**
    * --- adj668（用户要求）：临时段（`{bz}` / `{dsb}`）**只增加所在行的行距**，其它行不受影响 ---
