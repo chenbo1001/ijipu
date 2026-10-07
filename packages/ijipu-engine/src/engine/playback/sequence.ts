@@ -873,8 +873,18 @@ export function buildPlaySequence(
   // - 每个 :| 的反复遍数 = 「本段内到该线为止出现的 :| 个数 + 1」
   //   （`|: A :|` 2 遍；`|: A |[1. B :|][2. C :|] D` 该段两个 :| → 3 遍，末遍两 volta 皆跳过）
   const segnoIdx = seq.findIndex((it) => it.kind === 'bar' && it.bar?.marks?.includes('hs'))
+  /**
+   * adj723aa（用户口径，2026-10）：**`&ds` 要有对应的花 S（`&hs`）才生效**。
+   *
+   * 用户原话：「**`&ds` 前面没有对应的 `&hs`，因此 `&ds` 应该要不起作用**」——`&ds`（D.S.）的语义是
+   * "跳回花 S"，没有花 S 就没有落点，**不能退回"跳到曲首"**（那是 `&dc` 的语义）。
+   * 旧实现在 `segnoIdx < 0` 时 `i = 0`，等于把 `&ds` 当成了 `&dc`（实测 `adj598` 因此多奏一遍）。
+   */
+  const dsEffective = segnoIdx >= 0
   const hasBigRepeat = seq.some(
-    (it) => it.kind === 'bar' && (it.bar?.marks?.includes('dc') || it.bar?.marks?.includes('ds')),
+    (it) =>
+      it.kind === 'bar' &&
+      (it.bar?.marks?.includes('dc') === true || (dsEffective && it.bar?.marks?.includes('ds') === true)),
   )
   const repeatCountAt = new Map<number, number>()
   {
@@ -1962,7 +1972,7 @@ export function buildPlaySequence(
       const jumpFires =
         (bar.marks?.includes('fine') === true && (!hasBigRepeat || bigRepeatDone)) ||
         (bar.marks?.includes('dc') === true && !bigRepeatDone) ||
-        (bar.marks?.includes('ds') === true && !bigRepeatDone) ||
+        (bar.marks?.includes('ds') === true && dsEffective && !bigRepeatDone) ||
         (bar.marks?.includes('ty') === true && bigRepeatDone)
       if (!jumpFires && trySkipVolta()) continue
     }
@@ -1998,8 +2008,13 @@ export function buildPlaySequence(
         continue
       }
       if (bar.marks.includes('ds')) {
+        // adj723aa：没有花 S（`&hs`）时 `&ds` 不生效——继续往下走，不跳、也不置 `bigRepeatDone`
+        if (!dsEffective) {
+          i++
+          continue
+        }
         if (!bigRepeatDone) {
-          i = segnoIdx >= 0 ? segnoIdx + 1 : 0 // 跳到花 S 之后（hs 通常写在 ds 之前）
+          i = segnoIdx + 1 // 跳到花 S 之后（hs 通常写在 ds 之前）
           bigRepeatDone = true
           // adj362：D.S. 后进入「下一遍」（pass 递增，不重置为 1）——房子番号按遍次选择，
           // 于是跳过前面已奏过的房子、进入下一号房子；repeatStart 保持不变（仍在同一反复段内，
