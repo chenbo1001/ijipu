@@ -41,3 +41,21 @@ export function fitZoomFor(paneClientW: number, range: readonly [number, number]
   if (!Number.isFinite(avail) || avail <= 0) return 0
   return clampPreviewZoom((avail / PREVIEW_BASE_W) * 100, range)
 }
+
+/** 一个元素的视口矩形（只取判可见性要用的四边，避免依赖 DOM 类型） */
+export type Rect4 = { top: number; bottom: number; left: number; right: number }
+
+/**
+ * adj723y：**目标元素是否已完整落在滚动容器视口内**——预览"高亮滚动"的前置判据。
+ *
+ * 背景（用户报「双击音符从当前音符播放又失效了」）：单击音符会触发预览的"居中滚动"，
+ * 把音符挪走（实测 `scrollLeft/Top` `0 → 24`、音符屏幕坐标偏 24px）；而**双击要求两次点击
+ * 落在同一位置**，第二击因音符已移走而落到空白处 ⇒ 浏览器**不派发 `dblclick`**
+ * ⇒ 用户观感"双击播放失效"。
+ *
+ * 故：**已完整可见 ⇒ 不滚动**（原地不动）；只有真的看不到时才滚。
+ * 这里只放判据（零 DOM），`PreviewPane` 现量矩形后调用。
+ */
+export function isFullyVisibleIn(el: Rect4, scroller: Rect4): boolean {
+  return el.top >= scroller.top && el.bottom <= scroller.bottom && el.left >= scroller.left && el.right <= scroller.right
+}

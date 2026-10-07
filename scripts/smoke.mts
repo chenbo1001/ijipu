@@ -165,6 +165,7 @@ import {
   PREVIEW_PANE_PAD_X,
   fitZoomFor,
   clampPreviewZoom,
+  isFullyVisibleIn,
 } from '../src/preview/zoomFit.ts'
 // adj530：顶栏"放不下就收进更多"的折叠判定（纯算式）——按可见优先级从最低的一位开始折叠
 import { foldKeys, TOPBAR_DONATE_KEY, TOPBAR_FIXED_KIDS } from '../src/ui/topbarFold.ts'
@@ -10216,6 +10217,28 @@ function runAdj529PreviewFitTests() {
       !/ijipu\.previewZoomFit/.test(storeSrc529) &&
       !/previewZoomFit|previewFitZoom/.test(topSrc529) &&
       !/previewZoomFit|previewFitZoom/.test(previewSrc),
+    '')
+  /**
+   * adj723y（用户报「双击音符从当前音符播放又失效了」）：
+   * 预览"高亮滚动"只应在**音符不完整可见**时发生。
+   *
+   * 根因：单击会触发居中滚动把音符挪走（实测 `scrollLeft/Top` `0 → 24`），
+   * 而双击要求**两次点击落在同一位置** ⇒ 第二击落到空白、浏览器不派发 `dblclick`
+   * （实测 `e.target = DIV.preview-zoom-scale`、`closest('[data-notepos]') === null`）。
+   */
+  check('adj723y 「已完整可见就不滚动」判据正确（含四边各自的越界）',
+    isFullyVisibleIn({ top: 10, bottom: 20, left: 10, right: 20 }, { top: 0, bottom: 30, left: 0, right: 30 }) &&
+      // 四边各自越界都要判"不可见"
+      !isFullyVisibleIn({ top: -1, bottom: 20, left: 10, right: 20 }, { top: 0, bottom: 30, left: 0, right: 30 }) &&
+      !isFullyVisibleIn({ top: 10, bottom: 31, left: 10, right: 20 }, { top: 0, bottom: 30, left: 0, right: 30 }) &&
+      !isFullyVisibleIn({ top: 10, bottom: 20, left: -1, right: 20 }, { top: 0, bottom: 30, left: 0, right: 30 }) &&
+      !isFullyVisibleIn({ top: 10, bottom: 20, left: 10, right: 31 }, { top: 0, bottom: 30, left: 0, right: 30 }) &&
+      // 恰好贴边算可见（不等于越界）
+      isFullyVisibleIn({ top: 0, bottom: 30, left: 0, right: 30 }, { top: 0, bottom: 30, left: 0, right: 30 }),
+    '')
+  check('adj723y PreviewPane 用该纯函数作前置（不再现算四边比较）',
+    /if \(isFullyVisibleIn\(elRect0, scRect\)\) return/.test(previewSrc) &&
+      !/elRect0\.top >= scRect\.top/.test(previewSrc),
     '')
   check('adj529 ScrubValue 支持双击回调（其余调用方不传即无行为）',
     /onDoubleClick\?: \(\) => void/.test(scrubSrc) && /onDoubleClick=\{onDoubleClick\}/.test(scrubSrc),

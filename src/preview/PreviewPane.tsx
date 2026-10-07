@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 // adj529：预览页基准宽（与顶栏"双击比率按宽度适配"的反算算式同源）
-import { PREVIEW_BASE_W } from './zoomFit'
+import { PREVIEW_BASE_W, isFullyVisibleIn } from './zoomFit'
 import { openExternalUrl } from './openUrl'
 import { beginDrag } from '../ui/dragGesture'
 // adj723：音符点击（单击 / Ctrl+单击）的动作判定（纯模块，便于 smoke 断言）
@@ -172,6 +172,20 @@ export function PreviewPane() {
       const scroller = root.parentElement // 滚动容器（.preview-pane）
       if (scroller) {
         const scRect = scroller.getBoundingClientRect()
+        /**
+         * adj723y（用户报「双击音符从当前音符播放又失效了」）：**音符已完整可见时不要滚动**。
+         *
+         * 原因：单击音符会触发本 effect 的"居中滚动"，把音符挪走（实测 `scrollLeft/Top`
+         * `0 → 24`，音符屏幕坐标随之偏 24px）。而**双击的两次点击落在同一位置**是浏览器的
+         * 判定条件，第二次点击因音符已移走而落到 `.preview-zoom-scale`（空处）
+         * ⇒ **浏览器不派发 `dblclick`**（实测 `e.target = DIV.preview-zoom-scale`、
+         * 音符祖先查不到即 `null`）⇒ 用户观感"双击播放失效"。
+         *
+         * 修法：**已完整可见 ⇒ 原地不动**（这才是"把目标音符带进视野"的本意；
+         * 只有真的看不到时才需要滚）。既保住居中能力的初衷，又让双击的第二击仍落在音符上。
+         */
+        const elRect0 = el.getBoundingClientRect()
+        if (isFullyVisibleIn(elRect0, scRect)) return
         // 垂直
         const viewH = scroller.clientHeight
         const noteY = el.getBoundingClientRect().top - scRect.top + scroller.scrollTop
