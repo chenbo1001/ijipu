@@ -887,10 +887,28 @@ export function buildPlaySequence(
     let endCount = 0
     seq.forEach((it, k) => {
       if (it.kind !== 'bar') return
+      /**
+       * adj723x（用户报 `Q: 11:|: 12:| 13|: 14 :|` 里 `12` 被奏 **3** 遍）：
+       * **段起点要认两类线**——`|:` **与 `:|:`**。
+       *
+       * `:|:` 的语义是"结束当前反复段、并开始下一段"（既是终点又是起点）。原实现
+       * 只在 `|:` 上复位 `endCount`，于是 `:|:` 之后那根 `:|` 会被算成
+       * "**上一段的第几个**"⇒ 遍数偏大、该段多奏一遍
+       * （实测 `11:|: 12:| 13|: 14 :|`：`12` 段的 `:|` 被算成 count=3 ⇒ 奏 3 遍）。
+       * 两侧（`repeatCountAt` 的统计 与 走查里的 `repeatStart`）**必须同一口径**，
+       * 否则计数与回跳点对不上。
+       */
       if (it.bar?.type === '|:' || it.bar?.type === '||:') endCount = 0
       if (it.bar?.type === ':|' || it.bar?.type === ':|:') {
         endCount++
         repeatCountAt.set(k, endCount + 1)
+        /**
+         * adj723x：`:|:` **自身既是本段终点、又是下一段起点** ⇒ 记完它自己的遍数后，
+         * 段内计数必须**归零**，否则紧随其后的 `:|` 会被算成"本段第 2 个"、
+         * 遍数偏大而多奏一遍（实测 `Q: 11:|: 12:| 13|: 14 :|`：`12` 段的 `:|`
+         * 被算成 count=3 ⇒ `12` 奏 3 遍；归零后 count=2 ⇒ 正好 2 遍）。
+         */
+        if (it.bar?.type === ':|:') endCount = 0
       }
     })
   }
@@ -1993,8 +2011,23 @@ export function buildPlaySequence(
     if (!landedByVolta && (bar.type === ':|' || bar.type === ':|:')) {
       const count = repeatCountAt.get(i) ?? 2 // 本段内到该线的第几个 :|（+1 = 总遍数）
       if (pass < count) {
+        /**
+         * adj723x（用户报 `Q: 11:|: 12:| 13|: 14 :|` 里 `12` 被奏 **3** 遍）：
+         *
+         * `:|:` 的语义是"**结束当前反复段、并开始下一段**"。它的**最后一次回跳**必须
+         * 顺手把 `repeatStart` 推进到**它自己**（`i`）——紧接着那一段就从这根本身起算。
+         * 原实现只在"遍次走满、不再回跳"的分支里改 `repeatStart`（见下方 `if`），
+         * 而那一步**已经太晚**：紧随其后的 `:|` 早已带着**旧段落起点**（乐曲开头）去回跳，
+         * 把中间内容整整多奏一遍 ⇒ 用户所见 `12` 三遍（实测 `11 11 12 12 12 13 14 14`）。
+         *
+         * 判定"这是最后一次回跳"：`pass + 1 >= count`（本跳之后本段正好走满）。
+         * 修后同例实测 `11 11 12 12 13 14 14` ✔
+         */
+        const lastJump = pass + 1 >= count
+        const from = i
         i = repeatStart
         pass++
+        if (lastJump && bar.type === ':|:') repeatStart = from
         pendingJumpMs = lastEndMs // adj361：反复回跳→从当前播放时刻无缝接上（新遍）
         continue
       }
