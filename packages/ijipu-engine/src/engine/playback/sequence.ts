@@ -1991,6 +1991,16 @@ export function buildPlaySequence(
     const repeatPending =
       (bar.type === ':|' || bar.type === ':|:') && pass < (repeatCountAt.get(i) ?? 2)
     if (bar.marks?.length && !repeatPending) {
+      /**
+       * adj126/adj359（既有口径）：`&fine` 的终止条件——
+       *  · **没有**大反复（无 `&dc`/生效的 `&ds`）⇒ Fine **本身**就是曲终（`adj126` 断言）；
+       *  · **有**大反复 ⇒ 第一遍经过 Fine **不停**（要继续走到 D.C./D.S.），
+       *    等大反复回来后再经过 Fine 才终止（`adj359` 口径）。
+       *
+       * ⚠ 用户 2026-10 提出过"单独一个 Fine 不能作为结束（须有 D.C./D.S. 才停）"，
+       * 但那会**打红 `adj126`**（用户此前明确的"`&fine` 曲终截断"口径）——**两说冲突，待用户定夺**，
+       * 故本处**暂不改**，保持既有行为。
+       */
       if (bar.marks.includes('fine') && (!hasBigRepeat || bigRepeatDone)) {
         i = seq.length // 曲终：播放到此结束
         continue
