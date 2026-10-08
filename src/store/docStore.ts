@@ -30,7 +30,8 @@ import {
   type SavePhaseLog,
 } from './saveSupport'
 import { useUiStore } from './uiStore'
-import { isHostEmbedded } from './hostBridge'
+// adj724b：`shouldYieldBindingRestore` 用于"给宿主的 openFile 让路"（见文件末尾）
+import { isHostEmbedded, shouldYieldBindingRestore } from './hostBridge'
 import { loadFontOverride, migrateLegacyEditorPrefs } from './editorPrefs'
 import { normalizePastedSource } from './importSource'
 // adj538：桌面壳的「外部打开」（双击 .jps）——纯网页下这些函数一律惰性/空转，见该模块注释
@@ -1554,8 +1555,18 @@ void loadFileHandle().then((h) => {
 // 校验（工作区身份一致 + 权限已授予 + 文件仍在）通过后才真正绑定，之后「保存」才能写回原文件。
 // 权限通常在重启后是 prompt ⇒ 这一步会"什么都不做"，等用户在面板里点一次授权后由
 // `resolvePendingBinding()` 再试一次（申请权限必须在用户手势内，不能在这里硬要）。
+//
+// adj724b（用户实测）：**嵌入版里要给宿主的 `openFile` 让路**。
+// 宿主推来的文件是异步到的，而这里是模块加载时立刻跑的 ⇒ 两边都会设置"当前文件"，
+// 谁后到谁赢，表现为「我点了 A，界面显示的是上一次那份 B」。
 void getWorkspace()
-  .then(() => resolvePendingBinding())
+  .then(() => {
+    if (shouldYieldBindingRestore()) {
+      console.info('[iJipu] 嵌入版：宿主将推来文件 ⇒ 跳过启动时的"恢复上次绑定"')
+      return false
+    }
+    return resolvePendingBinding()
+  })
   .catch(() => {
     /* 无工作区/读库失败：保持未绑定，保存走另存 */
   })

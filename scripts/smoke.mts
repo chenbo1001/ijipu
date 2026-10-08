@@ -120,6 +120,8 @@ import { createSubdir, readDirEntries } from '../src/store/workspace.ts'
 // adj373：作者署名（品牌 tokens + 关于对话框文案）
 import { brand } from '../src/brand/tokens.ts'
 import { aboutCopy } from '../src/brand/copy.ts'
+// adj724b：嵌入版"启动自动恢复绑定要给宿主的 openFile 让路"——纯逻辑直接跑
+import { shouldYieldBindingRestore } from '../src/store/hostBridge.ts'
 import { uiCopy } from '../src/brand/copy.ts'
 import { appHeightPx } from '../src/pwa/appHeight.ts'
 import { normalizePastedSource } from '../src/store/importSource.ts'
@@ -5542,6 +5544,30 @@ console.log('[82] author credit (adj373)')
       aboutCopy.links.every((l) => l.label.trim() !== '' && /^https:\/\//.test(l.url)),
     aboutCopy.links.map((l) => `${l.label}=${l.url}`).join(' '),
   )
+  /**
+   * adj724b（用户实测）：**嵌入版要让宿主推来的 `openFile` 赢过"启动时自动恢复上次绑定"**。
+   *
+   * 现象：用户点库里的 A，界面却显示上一次那份 B —— 因为 `docStore` 的
+   * `resolvePendingBinding()` 是**模块加载时**就开跑的，而宿主推来的文件是**异步后到**的，
+   * 两者都会设置"当前文件"，谁后到谁赢。
+   *
+   * 断言口径：`docStore` 在跑那条自动恢复**之前**必须问 `shouldYieldBindingRestore()`；
+   * 宿主侧在推文件**之前**必须 `notifyHostWillOpenFile()`。
+   */
+  {
+    const docSrc = String(readFileSync('src/store/docStore.ts', 'utf8'))
+    const mainTsx = String(readFileSync('src/main.tsx', 'utf8'))
+    const bridgeSrc = String(readFileSync('src/store/hostBridge.ts', 'utf8'))
+    check('adj724b 嵌入版里"启动自动恢复绑定"给宿主的 openFile 让路（否则点 A 显示 B）',
+      // ① 纯逻辑：窗口内为真、窗口外为假
+      typeof shouldYieldBindingRestore() === 'boolean' &&
+        // ② 自动恢复前先问（顺序：先 shouldYield… 再 resolvePendingBinding）
+        /shouldYieldBindingRestore\(\)[\s\S]{0,260}?return resolvePendingBinding\(\)/.test(docSrc) &&
+        // ③ 宿主推文件前先立标记
+        /notifyHostWillOpenFile\(\)/.test(mainTsx) &&
+        // ④ 标记有自动过期（否则会永久阻断正常的绑定恢复）
+        /Date\.now\(\) - hostWillOpenAt < \d+/.test(bridgeSrc))
+  }
 }
 
 // ---- 83. 试听高亮/色块覆盖增时线（adj374）----
@@ -13790,12 +13816,15 @@ async function runAdj541DockToggleTests() {
       /boundToOtherWorkspace: \(boundWs: string, currentWs: string, path: string\)/.test(copySrc2) &&
       /sourceMissing: \(path: string\)/.test(copySrc2),
     '')
-  check('adj544 启动/授权后**恢复绑定**（三个条件全满足才升级成正式绑定，否则保持待校验）',
+  check('adj544/adj724b 启动/授权后**恢复绑定**（三条件全满足才升级；且嵌入版里给宿主的 openFile 让路）',
     /export async function resolvePendingBinding\(\): Promise<boolean>/.test(store) &&
       /if \(ws\.id !== pending\.wsId\)/.test(store) &&
       /await queryWorkspacePermission\(ws\)/.test(store) &&
       /await hasEntry\(ws, segs\.slice\(0, -1\), segs\[segs\.length - 1\]\)/.test(store) &&
-      /void getWorkspace\(\)\s*\n\s*\.then\(\(\) => resolvePendingBinding\(\)\)/.test(store) &&
+      // adj724b：模块加载时那条自动恢复**先问"要不要让路"**（宿主即将推文件 ⇒ 跳过，避免点 A 显示 B）
+      /void getWorkspace\(\)\s*\n\s*\.then\(\(\) => \{[\s\S]{0,400}?shouldYieldBindingRestore\(\)[\s\S]{0,400}?resolvePendingBinding\(\)/.test(
+        store,
+      ) &&
       // 面板：授权成功后、以及每次打开面板都会尝试恢复
       /await resolvePendingBinding\(\)/.test(wsPanelSrc) &&
       /bindingRestored/.test(copySrc2),

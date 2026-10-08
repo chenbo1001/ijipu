@@ -92,10 +92,24 @@ void (async () => {
        */
       openFile: (path) => {
         void (async () => {
+          /**
+           * adj724b（用户实测）：**先立"宿主即将推文件"的标记，再打开**。
+           *
+           * 不立标记的话，`docStore` 那条"启动时自动恢复上次绑定"（模块加载时就开始跑）
+           * 会与这次打开**竞争**——谁后到谁赢，表现为「我点了 A，界面显示的是上一次那份 B」。
+           */
+          const { notifyHostWillOpenFile } = await import('./store/hostBridge')
+          const release = notifyHostWillOpenFile()
           const { useDocStore } = await import('./store/docStore')
           const segs = path.split('/').filter((s) => s !== '')
-          if (segs.length === 0) return
-          await useDocStore.getState().openWorkspaceFile(segs)
+          if (segs.length === 0) {
+            release()
+            return
+          }
+          console.info(`[iJipu] 宿主推来文件，开始打开：${path}`)
+          const ok = await useDocStore.getState().openWorkspaceFile(segs)
+          console.info(`[iJipu] 宿主推来的文件打开${ok ? '成功' : '失败'}：${path}`)
+          release()
         })()
       },
       /**

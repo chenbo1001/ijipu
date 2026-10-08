@@ -67,6 +67,35 @@ export function isHostEmbedded(): boolean {
   return bridge !== null
 }
 
+/**
+ * adj724b：**宿主即将推一个文件过来**（用户点了库里的 `.jps`）。
+ *
+ * ## 为什么需要这个开关（用户实测）
+ *
+ * `docStore` 在**模块加载时**就会自动恢复"上一份草稿的来源绑定"
+ * （`resolvePendingBinding()`，见文件末尾），而宿主推来的 `openFile` 是**异步后到**的。
+ * 两者都会设置"当前文件"，**谁后到谁赢** ⇒ 用户看到的现象是
+ * 「我点了 A，界面却显示 B（上一次那份）」。
+ *
+ * 于是：宿主推文件**之前**先调这里立个标记，让那条自动恢复**让路**——
+ * 由宿主推来的文件来建立绑定关系（它本来就会建立，见 `openWorkspaceFile`）。
+ * 之后（`RELEASE_MS` 后）标记自动清除，回到正常语义。
+ */
+let hostWillOpenAt = 0
+
+/** 标记"宿主马上会推一个文件"，并返回一个释放函数 */
+export function notifyHostWillOpenFile(): () => void {
+  hostWillOpenAt = Date.now()
+  return () => {
+    hostWillOpenAt = 0
+  }
+}
+
+/** 自动恢复绑定是否该**让路**给宿主的 openFile（`RELEASE_MS` 窗口内为真） */
+export function shouldYieldBindingRestore(): boolean {
+  return hostWillOpenAt !== 0 && Date.now() - hostWillOpenAt < 2000
+}
+
 /** 从 `location.pathname` 里取一次性 token（URL 形如 `/<token>/`） */
 export function tokenFromLocation(): string {
   const parts = window.location.pathname.split('/').filter((s) => s !== '')
