@@ -9,6 +9,36 @@ import { installAppHeight } from './pwa/appHeight'
 installAppHeight()
 
 /**
+ * adj724b（用户实测）：「嵌入版 iJipu 深浅主题设置没有记住」。
+ *
+ * 根因：这里原先**无条件**调 `setThemeMode(宿主主题)`——
+ *  · 用户自己选过深/浅，每次启动都被盖掉；
+ *  · 更糟的是 `setThemeMode` 会**写进存储** ⇒ 这个覆盖值被当成"用户的选择"持久化。
+ *
+ * 正确做法：**不碰用户的 `themeMode`**，而是把 Obsidian 的深浅当成"系统深浅"喂给
+ * `setSystemLight()` —— 应用本来就有这个语义（`effectiveMode = themeMode === 'auto' ? systemLight : themeMode`）。
+ * 于是：
+ *  · 用户选「跟随系统（auto）」 ⇒ 跟随 Obsidian 的深浅（这正是"跟随 Obsidian 主题"该有的行为）；
+ *  · 用户**显式**选了浅/深 ⇒ 那是他的选择，宿主不再覆盖它。
+ *
+ * 插件设置里关掉「跟随 Obsidian 主题」时（`followTheme === false`）**完全不动**应用的深浅相关状态。
+ */
+function applyHostTheme(
+  ui: {
+    getState: () => {
+      setSystemLight?: (b: boolean) => void
+      setThemeMode?: (m: 'dark' | 'light') => void
+    }
+  },
+  bridge: { welcome: { theme: 'dark' | 'light'; followTheme?: boolean } },
+  mode?: 'dark' | 'light',
+): void {
+  if (bridge.welcome.followTheme === false) return
+  const dark = (mode ?? bridge.welcome.theme) === 'dark'
+  ui.getState().setSystemLight?.(!dark)
+}
+
+/**
  * adj724b：**首屏前先完成"嵌入版握手 + 偏好预载"**。
  *
  * 为什么必须串行、且必须在**求值 store 模块之前**：
@@ -50,10 +80,10 @@ void (async () => {
     // 已有同源工作区且是 vault 后端 ⇒ 不重复设置（避免刷掉用户当前所在目录）
     const cur = await getWorkspace()
     if (!(cur && isVaultWorkspace(cur))) await setWorkspace(rec)
-    // 跟随 Obsidian 主题
-    useUiStore.getState().setThemeMode?.(bridge.welcome.theme)
+    // 跟随 Obsidian 主题 ⇒ 把它的深浅喂给应用的 `systemLight`（走应用自己的 auto 语义）
+    applyHostTheme(useUiStore, bridge)
     bridge.on({
-      theme: (mode) => useUiStore.getState().setThemeMode?.(mode),
+      theme: (mode) => applyHostTheme(useUiStore, bridge, mode),
       /**
        * 宿主推来"要打开的文件"（双击 `.jps` 时）。
        *
@@ -144,6 +174,10 @@ void (async () => {
         root: bridge.welcome.root,
         calls: bridge.callCount,
         lastOps: bridge.recentOps.slice(-8),
+        // adj724b：深浅相关的现场（排错"设置没记住"时必须能看到）
+        themeMode: localStorage.getItem('ijipu.themeMode'),
+        hostTheme: bridge.welcome.theme,
+        followTheme: bridge.welcome.followTheme,
       })
   } catch (e) {
     // 忽略：不是嵌入环境（或宿主不可用）时，走原有的 fsa/path 后端。

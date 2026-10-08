@@ -31,6 +31,8 @@ const REQUEST_TIMEOUT_MS = 15000
 export interface HostWelcome {
   vaultName: string
   theme: 'dark' | 'light'
+  /** adj724b：宿主是否希望"跟随宿主主题"（对应插件设置里的「跟随 Obsidian 主题」） */
+  followTheme?: boolean
   /** 工作区根（vault 相对路径；`''` = 文库根） */
   root: string
   capabilities: { write: boolean; rename: boolean; remove: boolean; trash: boolean }
@@ -194,6 +196,7 @@ export async function initHostBridge(): Promise<HostBridge | null> {
       resolve({
         vaultName: String(d.vaultName ?? ''),
         theme: d.theme === 'light' ? 'light' : 'dark',
+        followTheme: d.followTheme !== false,
         root: String(d.root ?? ''),
         capabilities: (d.capabilities as HostWelcome['capabilities']) ?? {
           write: true,

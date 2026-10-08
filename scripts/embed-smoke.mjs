@@ -14,8 +14,8 @@
  */
 import { createServer } from 'node:http'
 import { readFile, mkdtemp, rm } from 'node:fs/promises'
+import { readFileSync, existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -45,6 +45,50 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
  */
 const IGNORABLE = ['The script does not have a MIME type']
 const isNoise = (s) => IGNORABLE.some((k) => s.includes(k))
+
+/**
+ * **自检：模板字符串内部不得出现反引号。**
+ *
+ * 这个坑本轮连犯 4 次（在注入脚本 / 探针表达式的**注释**里写了 Markdown 反引号），
+ * 每次报错都是 `SyntaxError: Unexpected identifier …` 并指向注释中间，很难一眼看出原因。
+ * 与其继续靠人记住，不如让脚本**自己先查**并给出人话提示。
+ *
+ * 判据（精确）：从 `` source: ` `` / `` expression: ` `` 起，逐个统计反引号——
+ * **开引号算 1，之后每遇到一个就计数**；计数为**奇数**的那个才是真正的结束引号。
+ * 若"开引号"与"结束引号"之间还有反引号 ⇒ 一定是注释里混进了反引号（模板被提前截断）。
+ */
+function assertNoBackticksInTemplates() {
+  const src = readFileSync(fileURLToPath(import.meta.url), 'utf8')
+  const tick = String.fromCharCode(96)
+  for (const key of ['source', 'expression']) {
+    const marker = key + ': ' + tick
+    let from = 0
+    for (;;) {
+      const start = src.indexOf(marker, from)
+      if (start < 0) break
+      const bodyStart = start + marker.length
+      let i = bodyStart
+      let count = 1 // 开引号
+      while (i < src.length && count % 2 === 1) {
+        if (src[i] === tick) count++
+        i++
+      }
+      const end = i - 1 // 结束引号位置
+      const body = src.slice(bodyStart, end)
+      if (body.includes(tick)) {
+        const line = src.slice(0, bodyStart).split('\n').length
+        const at = body.slice(0, body.indexOf(tick)).split('\n').length
+        throw new Error(
+          `[embed-smoke] 自检失败：${key} 的模板字符串里出现了反引号` +
+            `（大约第 ${line + at} 行）——会截断模板。请改成中文引号「」。`,
+        )
+      }
+      from = end + 1
+    }
+  }
+}
+
+assertNoBackticksInTemplates()
 
 /** 极简 CDP over WebSocket（Node 22 内置 WebSocket） */
 function cdp(wsUrl) {
@@ -246,7 +290,7 @@ async function main() {
          * 这是"ob 重启后设置回到默认"那个 bug 的**回归探针**。
          * ⚠ 这段是**模板字符串里的注入脚本**：注释与字符串里都不许出现反引号，否则会截断模板。
          */
-        window.__ijipuKv = { 'ijipu.splitPct': '37' };
+        window.__ijipuKv = { 'ijipu.splitPct': '37', 'ijipu.themeMode': 'dark' };
         // 注入的脚本在外层页面运行，拿不到脚本作用域里的变量 ⇒ token 由**注入时**填进来
         const TOKEN = ${JSON.stringify(TOKEN)};
         const HOST_ROOT = '乐谱';
@@ -256,7 +300,11 @@ async function main() {
           if (d.type === 'hello') {
             ev.source.postMessage({
               ch: 'ijipu', type: 'welcome',
-              vaultName: '测试文库', theme: 'dark', root: HOST_ROOT,
+              /**
+               * adj724b：宿主主题**故意发 'light'**（而宿主预置的用户选择是 'dark'）——
+               * 这样"被无条件覆盖"的回归一定会表现为 themeMode 变成 'light'，不会被同值掩盖。
+               */
+              vaultName: '测试文库', theme: 'light', followTheme: true, root: HOST_ROOT,
               capabilities: { write: true, rename: true, remove: true, trash: true },
             }, '*');
             return;
@@ -374,6 +422,21 @@ async function main() {
             try {
               const LS = app && app.contentWindow && app.contentWindow.localStorage;
               return LS ? LS.getItem('ijipu.splitPct') : 'NO-LS';
+            } catch (err) {
+              return 'ERR:' + String(err && err.message);
+            }
+          })(),
+          /**
+           * adj724b（用户实测）：「嵌入版 iJipu 深浅主题设置没有记住」。
+           *
+           * 宿主预置 ijipu.themeMode = 'dark'（模拟"用户自己选过深色"）。
+           * 应用**不得**把它改成宿主当前主题——为免同值掩盖，桩里把主题发成 'light'，
+           * 这样"被覆盖"就一定会表现为 themeMode 变成 'light'。
+           */
+          themeModeBack: (() => {
+            try {
+              const LS = app && app.contentWindow && app.contentWindow.localStorage;
+              return LS ? LS.getItem('ijipu.themeMode') : 'NO-LS';
             } catch (err) {
               return 'ERR:' + String(err && err.message);
             }
@@ -503,6 +566,18 @@ async function main() {
   }
   console.log(`[embed-smoke] ✅ 宿主推 openFile ⇒ 应用真的打开了：read ${JSON.stringify(info.readPaths)}，界面已显示该谱`)
   console.log(`[embed-smoke] ✅ 设置持久化走宿主：预载 ${JSON.stringify(info.kvCalls)}，读回 ijipu.splitPct=${info.readBack}`)
+  /**
+   * adj724b（用户实测）：「深浅主题设置没有记住」。
+   *
+   * 判据：宿主预置的用户选择 `ijipu.themeMode = 'dark'` **必须原样保留**——
+   * 宿主本次发的主题是 `light`，若应用又去无条件 `setThemeMode`，这里就会变成 'light'。
+   */
+  if (info.themeModeBack !== 'dark') {
+    return fail(
+      `用户自己选的深浅模式被覆盖了：ijipu.themeMode = ${JSON.stringify(info.themeModeBack)}，应仍为 "dark"（宿主发的主题是 light）`,
+    )
+  }
+  console.log(`[embed-smoke] ✅ 深浅模式尊重用户选择：宿主发 light，用户的 ijipu.themeMode 仍为 ${info.themeModeBack}`)
   console.log(`[embed-smoke] ✅ 单文件产物启动成功、无运行时报错`)
   console.log(
     `[embed-smoke] ✅ 桥端到端通过：应用 hello→ready、发出 ${info.callCount} 次桥调用（${info.calls.slice(0, 3).join(' | ')}）、宿主应答后无报错`,
