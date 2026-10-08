@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from './pwa/swUpdate'
+import { APP_VERSION_FULL } from './brand/version'
 import { installAppHeight } from './pwa/appHeight'
 
 // adj404：应用高度跟随可视视口——软键盘弹出时（浏览器/PWA/自建外壳）编辑区自动让位，
@@ -50,6 +51,17 @@ function applyHostTheme(
  *    回环的两次往返（毫秒级）；非嵌入（`window.parent === window`）时握手直接返回 `null`，零开销。
  */
 void (async () => {
+  /**
+   * adj724b：**启动横幅**。
+   *
+   * 为什么需要：多轮"改了没生效"里，我**无法排除"测的是旧产物"**这个可能——
+   * 日志里没有任何版本指纹。加上这行后，一眼就能确认跑的是哪一版嵌入版
+   * （`BUILD_STAMP` 是构建期生成的时间戳+commit，见 `src/gen/buildInfo.ts`）。
+   */
+  console.info(
+    `[iJipu] 嵌入版启动 ${APP_VERSION_FULL}` +
+      `${window.parent !== window ? '（宿主内）' : '（独立页）'}`,
+  )
   let bridge: Awaited<ReturnType<typeof import('./store/hostBridge').initHostBridge>> = null
   try {
     const { initHostBridge } = await import('./store/hostBridge')
