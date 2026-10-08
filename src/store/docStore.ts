@@ -856,6 +856,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
       ui.showNotice(workspaceCopy.noWorkspace, 'warn')
       return false
     }
+    // adj724b：给底层 catch 用（失败时要回滚这次"同步认领"）
+    const prevBinding = useDocStore.getState().binding
+    const prevPending = useDocStore.getState().pendingBinding
     try {
       const code = await readWorkspaceText(ws, segs)
       const name = fileBaseName(segs[segs.length - 1])
@@ -865,8 +868,25 @@ export const useDocStore = create<DocState>()((set, get) => ({
       } catch {
         /* 存储不可用时静默 */
       }
-      // adj544：绑定带**工作区身份**（保存前要拿它跟"当前工作区"比对），并随草稿持久化
+      /**
+       * adj724b（用户实测，**本轮真正的根因**）：**先把绑定"认领"下来，再往下走**。
+       *
+       * 现象（日志顺序确凿）：
+       * ```
+       * [iJipu] 宿主推来的文件打开成功：…痴情冢.jps
+       * [iJipu] 已恢复工作区绑定：…茶花开了.jps      ← 又被改回去
+       * ```
+       *
+       * 根因是**并发 + 认领太晚**：`resolvePendingBinding()` 开头有 `if (st.binding) return false`，
+       * 但它跑的时候绑定**还是空的**，因为本函数此前是在**末尾**才 `set({ binding: bind })`，
+       * 而 `await readWorkspaceText(...)` 在它之前 ⇒ 恢复路径先通过守卫、后完成，把结果覆盖掉。
+       *
+       * ⇒ 这里在**第一个 await 之前**就把绑定与"待恢复"一并定下来（同步认领）：
+       * 之后任何 `resolvePendingBinding()` 都会在开头那道 `st.binding` 判断上直接返回。
+       * 后面成功时再写一遍 `binding: bind`（幂等），失败时**回滚**这两项。
+       */
       const bind: WorkspaceBinding = { wsId: ws.id, wsName: ws.name, segs }
+      set({ binding: bind, pendingBinding: null })
       saveDraftSrc(bind)
       // 数据源是工作区 ⇒ 断开磁盘句柄（三者互斥），避免"保存写到了上一个文件"
       disconnectFileHandle()
@@ -895,6 +915,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
       ui.showNotice(workspaceCopy.opened(joinPath(segs)), 'ok')
       return true
     } catch (e) {
+      // adj724b：读取失败 ⇒ **回滚**上面那次"同步认领"，别把绑定停在一份没打开的文件上
+      set({ binding: prevBinding, pendingBinding: prevPending })
       const reason = e instanceof Error ? `${e.name}${e.message ? `: ${e.message}` : ''}` : String(e)
       console.warn('[iJipu] 从工作区打开失败', e)
       ui.showNotice(workspaceCopy.openFailed(joinPath(segs), reason), 'error')

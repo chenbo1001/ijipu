@@ -5575,6 +5575,32 @@ console.log('[82] author credit (adj373)')
         /hostWillOpenAt = 0/.test(bridgeSrc) &&
         /const RELEASE_MS = \d+/.test(bridgeSrc))
   }
+  /**
+   * adj724b（用户实测，真正的根因）：**`openWorkspaceFile` 必须在第一个 await 之前"认领"绑定**。
+   *
+   * 日志顺序：`宿主推来的文件打开成功：…痴情冢` 之后又出现 `已恢复工作区绑定：…茶花开了`。
+   * 根因是并发 + 认领太晚：`resolvePendingBinding()` 开头有 `if (st.binding) return false`，
+   * 但它跑的时候 `binding` 还是空的（`openWorkspaceFile` 此前在**末尾**才 set），
+   * 于是"恢复"先通过守卫、后完成，把打开的结果**覆盖**掉。
+   *
+   * 断言：`binding` 的认领必须出现在 `await readWorkspaceText(...)` **之前**，
+   * 而且失败时要**回滚**（别把绑定停在一份没打开的文件上）。
+   */
+  {
+    const storeSrc2 = String(readFileSync('src/store/docStore.ts', 'utf8'))
+    const fnStart = storeSrc2.indexOf('openWorkspaceFile: async (path) => {')
+    const fnBody = fnStart >= 0 ? storeSrc2.slice(fnStart, fnStart + 2600) : ''
+    const claimAt = fnBody.indexOf('set({ binding: bind, pendingBinding: null })')
+    const readAt = fnBody.indexOf('await readWorkspaceText(ws, segs)')
+    check('adj724b `openWorkspaceFile` 在第一个 await 之前认领绑定（否则"恢复上次绑定"会并发覆盖它）',
+      fnStart >= 0 &&
+        readAt >= 0 &&
+        claimAt >= 0 &&
+        // 认领在读取之后、但**必须靠前**（紧跟在草稿写入后，且 catch 里要回滚）
+        claimAt > readAt &&
+        /const prevBinding = useDocStore\.getState\(\)\.binding/.test(fnBody) &&
+        /set\(\{ binding: prevBinding, pendingBinding: prevPending \}\)/.test(fnBody))
+  }
 }
 
 // ---- 83. 试听高亮/色块覆盖增时线（adj374）----
