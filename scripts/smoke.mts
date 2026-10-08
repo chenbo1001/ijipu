@@ -17825,8 +17825,17 @@ function runAdj651Tests() {
    *
    * 排版端把**延续类连音线**（孤立 `)` 那条）随 `ScoreLayout.continuationTies` 交给播放端；
    * 播放端据此把"演奏顺序相邻、源码顺序隔很远"的两端并成**一个长音**（只起奏一次）。
+   *
+   * adj723aa（2026-10，**用户调整后的最终谱**）：用户把行首补上 `|/&hs`、并去掉了非必要的一行，
+   * 「现在测试三个跳房子都正常了」。**本条用这份谱**——它让三个房子的延续线**都**落在
+   * 「起音之后紧邻该房子首音」的走查顺序上（起音事件三遍各一次、各 1 拍）。
+   * 上面那份三行原谱仍保留给 `adj651b`/`adj723i` 的**跨行视觉**断言（那两条测的是"隔整行也照画"）。
    */
-  const rReal651 = parseJps(REAL651)
+  const REAL651C =
+    H651 +
+    "Q: |/&hs 1'. 3'/ 3'/ 1'/ 1'/ (5/ |[++\"1.\" 5/) (6/ 6)- &zkh 6,/ 7,/ | 1- 0 0/ 6,/ |]/ 7,- 5,- | 6,-- 0/ 1/ |\n" +
+    'Q: 6-- &ykh 0/ 2/ :|[+++"2." 5/) (6/ 6)- 3/ 5/ ||/]&ds[+++"结束句" 5/) (6/ 6)- &hx 6/ 7/ | 1\'. 3\'/ 3\'/ 1\'/ 1\'/ 5/ | 6--- ||]\n'
+  const rReal651 = parseJps(REAL651C)
   const lReal651 = layoutScore(rReal651, defaultPageConfig)
   const seqReal651 = buildPlaySequence(rReal651, lReal651, 60)
   const contTies651 = lReal651.continuationTies ?? []
