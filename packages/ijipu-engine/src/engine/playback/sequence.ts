@@ -1038,12 +1038,48 @@ export function buildPlaySequence(
    * adj723aa（用户口径，2026-10）：「**不同注释本就属于不同遍次的呀，这是规则里的要求**」。
    */
   const voltaGroupOf = new Map<string, number>()
+  /**
+   * 注释所**覆盖的遍次集合**（用户口径 2026-10）。
+   *
+   * 用户原话：「跳房子里注释里的 `1.2.3.` 只是**注释给人看的**，关键信息在于这段跳房子
+   * **要演奏几遍**，因此规定了用 `.` 来分隔遍次信息以得到**计数值**」；
+   * 并明确 `["2.3."` 表示"**第 2、3 两遍各奏一次**"、`["4."` 表示"**只在第 4 遍奏**"。
+   * ⇒ **注释里 `.` 分隔出的编号就是它所属的遍次**：
+   *  · `"1."` ⇒ 第 1 遍；`"2.3."` ⇒ 第 2、3 遍；`"4."` ⇒ 第 4 遍；
+   *  · 无数字（如 `"结束句"`）⇒ 不指定，退回"按出现顺序"取一个遍次。
+   */
+  const voltaPassesOf = new Map<string, Set<number>>()
   {
-    let g = 0
+    // 第一轮：先登记**带数字**的注释（它们的遍次是明确的）
     for (let k = 0; k < seq.length; k++) {
       const c = voltaCommentAt.get(k) ?? ''
       if (c === '' || voltaGroupOf.has(c)) continue
-      voltaGroupOf.set(c, ++g)
+      const nums = c
+        .split('.')
+        .map((s) => s.trim())
+        .filter((s) => /^\d+$/.test(s))
+        .map((s) => Number(s))
+      if (nums.length > 0) {
+        voltaPassesOf.set(c, new Set<number>(nums))
+        voltaGroupOf.set(c, Math.min(...nums))
+      }
+    }
+    // 第二轮：无数字注释（`"结束句"` 等）取**未被占用**的遍次
+    for (let k = 0; k < seq.length; k++) {
+      const c = voltaCommentAt.get(k) ?? ''
+      if (c === '' || voltaGroupOf.has(c)) continue
+      /**
+       * 用户口径「按演奏顺序，**第一次遇到的跳房子为第 1 遍**」——这类注释没有数字，
+       * 只能取"下一个还没被占用的遍次"。**不能**直接用"第几个出现的注释"当遍次，
+       * 否则会与数字组撞在同一遍（实测 `adj368`：`["1."`(第 1 遍) 与 `["结束句"` 撞车
+       * ⇒ 结束句在第 1 遍就被奏、第 3 遍反而跳过）。
+       */
+      const used = new Set<number>()
+      for (const set of voltaPassesOf.values()) for (const v of set) used.add(v)
+      let p = 1
+      while (used.has(p)) p++
+      voltaGroupOf.set(c, p)
+      voltaPassesOf.set(c, new Set([p]))
     }
   }
   /**
@@ -2038,7 +2074,14 @@ export function buildPlaySequence(
        *    只要演奏顺序能够走到那处"）；
        *  · 计数为 0 ⇒ 跳过（该组的遍次任务已用完）。计数在**进入下一遍时**扣（见 `settlePassVolta`）。
        */
-      const groupOk = c === '' || (voltaGroupOf.get(c) ?? 0) === pass
+      /**
+       * 判据（用户口径 2026-10）：**注释 `.` 分隔出的编号就是它所属的遍次**——
+       * 本遍号在它的遍次集合里 ⇒ 才奏；否则跳过（留到它自己那几遍）。
+       * 无数字注释（`"结束句"` 等）按"出现顺序"取一个遍次。
+       * 另需 `voltaLeftOf > 0`（计数在**进入下一遍时**扣，见 `settlePassVolta`）。
+       */
+      const passes = voltaPassesOf.get(c)
+      const groupOk = c === '' || passes === undefined || passes.has(pass)
       if (groupOk && voltaLeftOf(i) > 0) {
         insideVolta = i // 进入本房子范围（计数改为**进入下一遍时**扣）
         if (c !== '') passVoltaTouched.add(c)
