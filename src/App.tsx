@@ -11,6 +11,7 @@ import { EditorFootBar } from './ui/EditorFootBar'
 import { ToolDock } from './ui/ToolDock'
 import { beginDrag } from './ui/dragGesture'
 import { Toast } from './ui/Toast'
+import { ConfirmBar } from './ui/ConfirmBar'
 import { UpdatePrompt } from './ui/UpdatePrompt'
 import { EditorPane } from './editor/EditorPane'
 // adj642（用户要求）：Ctrl+F 用编辑区选中文本预填查找框（纯函数，冒烟有断言）
@@ -495,6 +496,8 @@ function App() {
       {!isSplitHView && <ToolDock />}
       <EditorFootBar />
       <Toast />
+      {/* adj724b：需要用户二选一的确认条（嵌入版"文件已被外部修改"） */}
+      <ConfirmBar />
       {/* adj379：检测到 SW 新版本时的「点击刷新」提示 */}
       <UpdatePrompt />
 

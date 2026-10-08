@@ -54,6 +54,52 @@ void (async () => {
           await useDocStore.getState().openWorkspaceFile(segs)
         })()
       },
+      /**
+       * adj724b（用户口径 2026-10）：**检测 `.jps` 被外部修改**，并让用户选「重新载入 / 保留我的修改」。
+       *
+       * 关键点：**我们自己即时保存时 Obsidian 也会触发 modify**。所以这里必须**比对内容**——
+       * 只有当"宿主读到的内容"与"应用手里的内容"不一致时，才是真的外部改动，才提示。
+       * （每次自动保存后会多一次 `read` 往返，本地回环、毫秒级，可接受。）
+       */
+      fileChanged: (path) => {
+        void (async () => {
+          const segs = path.split('/').filter((s) => s !== '')
+          if (segs.length === 0) return
+          const { useDocStore } = await import('./store/docStore')
+          const { readWorkspaceText, getWorkspace } = await import('./store/workspace')
+          const { useUiStore } = await import('./store/uiStore')
+          const st = useDocStore.getState()
+          // 只关心"当前正在编辑的这个文件"
+          const bind = st.binding
+          if (!bind || bind.segs.join('/') !== segs.join('/')) return
+          const ws = await getWorkspace()
+          if (!ws) return
+          let disk: string
+          try {
+            disk = await readWorkspaceText(ws, segs)
+          } catch {
+            return // 读不到（刚被删等）交给其它路径处理，这里不打扰
+          }
+          if (disk === st.code) {
+            // 内容一致 ⇒ 是我们自己刚写的（或外部改动恰好相同）⇒ 不打扰
+            return
+          }
+          const name = segs[segs.length - 1]
+          useUiStore.getState().showAsk({
+            text: `「${name}」已在 Obsidian 中被修改，是否重新载入？（重新载入会丢弃本地未保存的编辑）`,
+            confirmLabel: '重新载入',
+            cancelLabel: '保留我的修改',
+            onConfirm: () => {
+              // 用磁盘内容覆盖当前文档（仍走 store 的打开逻辑，历史会记一步，可撤销）
+              void useDocStore.getState().openWorkspaceFile(segs)
+            },
+            onCancel: () => {
+              // 保留本地：什么都不做。用户下次保存会用本地内容覆盖外部改动（提示里已说明）
+              console.info('[iJipu] 保留本地修改，忽略外部改动')
+            },
+          })
+        })()
+      },
     })
     // 监听已就绪 ⇒ 告诉宿主可以下发"本页签要打开的文件"了
     bridge.signalReady()

@@ -321,6 +321,28 @@ interface UiState {
   setUpdateReady: (b: boolean) => void
   showNotice: (text: string, kind?: NoticeKind) => void
   clearNotice: () => void
+  /**
+   * adj724b：**确认条**（顶部横幅，两个动作）。
+   *
+   * 用途：嵌入版检测到"当前 `.jps` 被 Obsidian 外部修改"时，问用户
+   * 「重新载入 / 保留我的修改」。这是应用里第一个需要**用户二选一**的提示——
+   * 既有的 `notice` 只是自动消失的提示，不能承担这个语义。
+   * 同一时刻只允许一条（后者覆盖前者），确认后必须 `clearAsk()`。
+   */
+  ask: AskState | null
+  showAsk: (ask: AskState) => void
+  clearAsk: () => void
+}
+
+/** 确认条的内容与动作（adj724b） */
+export interface AskState {
+  text: string
+  /** 主按钮（强调色） */
+  confirmLabel: string
+  onConfirm: () => void
+  /** 次按钮（普通样式） */
+  cancelLabel: string
+  onCancel: () => void
 }
 
 export const useUiStore = create<UiState>()((set) => ({
@@ -510,9 +532,12 @@ export const useUiStore = create<UiState>()((set) => ({
     set({ playbackHqEnabled: next })
   },
   notice: null,
-  showNotice: (text, kind = 'ok') =>
-    set((s) => ({ notice: { text, kind, nonce: (s.notice?.nonce ?? 0) + 1 } })),
+  showNotice: (text, kind = 'ok') => set((s) => ({ notice: { text, kind, nonce: (s.notice?.nonce ?? 0) + 1 } })),
   clearNotice: () => set({ notice: null }),
+  // adj724b：确认条（嵌入版"文件被外部修改"等需要用户二选一的场景）
+  ask: null,
+  showAsk: (ask) => set({ ask }),
+  clearAsk: () => set({ ask: null }),
   // adj379：SW 新版本提示状态（部署新版后页面仍跑旧 bundle 时置 true）
   updateReady: false,
   setUpdateReady: (b) => set({ updateReady: b }),

@@ -4761,3 +4761,50 @@ span.ws-check {
     height: auto;
   }
 }
+
+/* adj724b：确认条（顶部横幅，用于"文件已被外部修改"这类需要二选一的提示）。
+   与 .toast 同一套 token，但它**必须**停在顶部并且可点——自动消失的提示承担不了这个语义。 */
+.confirm-bar {
+  position: fixed;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(720px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--jp-border);
+  background: var(--jp-bg-panel);
+  color: var(--jp-text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+}
+
+.confirm-bar-text {
+  flex: 1 1 auto;
+}
+
+.confirm-bar-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+}
+
+.confirm-bar-btn {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--jp-border);
+  background: var(--jp-bg-hover);
+  color: var(--jp-text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.confirm-bar-btn.is-primary {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+}

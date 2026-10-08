@@ -42,6 +42,13 @@ export interface HostEvents {
   openFile?: (path: string) => void
   /** 主题变化（跟随 Obsidian） */
   theme?: (mode: 'dark' | 'light') => void
+  /**
+   * adj724b：宿主告知**某个 `.jps` 在 Obsidian 那边被改了**（外部编辑、同步、其它插件…）。
+   *
+   * 应用据此比对自己手里的内容，不一致才提示"是否重新载入"——
+   * 我们自己每次即时保存也会让 Obsidian 触发 modify，那种情况内容必然一致、不该打扰用户。
+   */
+  fileChanged?: (path: string) => void
 }
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number }
@@ -134,6 +141,7 @@ export class HostBridge {
     }
     // 事件型
     if (data.type === 'openFile' && typeof data.path === 'string') this.listeners.openFile?.(data.path)
+    if (data.type === 'fileChanged' && typeof data.path === 'string') this.listeners.fileChanged?.(data.path)
     if (data.type === 'theme' && (data.mode === 'dark' || data.mode === 'light')) this.listeners.theme?.(data.mode)
   }
 }

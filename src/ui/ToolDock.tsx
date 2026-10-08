@@ -29,6 +29,8 @@ import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { ComponentType } from 'react'
 import { useUiStore, type DockPanelKey } from '../store/uiStore'
 import { useDocStore } from '../store/docStore'
+// adj724b：嵌入版里隐藏「工作区」页签（文件操作交给 Obsidian）
+import { isHostEmbedded } from '../store/hostBridge'
 import { dockCopy } from '../brand/copy'
 import { ToolIcon } from './ToolIcon'
 import type { ToolIconName } from './toolIcons'
@@ -265,6 +267,10 @@ const clampH = (v: number, chromeH: number) => {
 const TABS: { key: DockPanelKey; label: string; icon: ToolIconName; kbd?: string }[] = [
   // adj540：工作区排第一（手机端文件操作主入口，用户要求）；图标用 `public/icons/工作区.png`
   // adj617（用户要求）：页签的提示文本后面带上快捷键（键名来自 `brand/shortcuts.ts` 一处定义）
+  //
+  // adj724b（用户实测反馈 #2）：**嵌入版里不显示"工作区"页签**。
+  // 理由（用户原话）：「工作区已没有存在的意义，除了保存，所有与文件相关的操作都可以由 ob 代劳」。
+  // 实现：`visibleTabs` 过滤掉它（见下方），其它形态（网页版 / 桌面版）保持原样。
   { key: 'workspace', label: dockCopy.tabWorkspace, icon: 'workspace', kbd: KBD.workspace },
   // adj562：导入紧跟工作区（用户要求）；adj564：图标用设计图 `public/icons/导入.png`
   { key: 'import', label: dockCopy.tabImport, icon: 'import', kbd: KBD.import },
@@ -1030,8 +1036,15 @@ export function ToolDock() {
   // 凡是"按状态决定渲染与否"的早退守卫，重构它前后的代码块时必须单独核对有没有被一起删掉。
   if (!dockOpen) return null
 
-  return (
-    <section
+  /**
+   * adj724b（用户实测反馈 #2）：**嵌入版里隐藏「工作区」页签**。
+   *
+   * 用户原话：「嵌入版 iJipu 工作区已没有存在的意义，除了保存，所有与文件相关的操作都可以由 ob 代劳，
+   * 因此工作区可以取消」。范围经用户确认为**仅嵌入版**——网页版 / 桌面版仍以工作区做文件管理。
+   */
+  const visibleTabs = isHostEmbedded() ? TABS.filter((t) => t.key !== 'workspace') : TABS
+
+  return (    <section
       ref={dockRef}
       className={`tool-dock${dockPanel === 'settings' || dockPanel === 'score' ? ' dock-settings' : ''}`}
       // adj476：高度用内联 px 落到 `.tool-dock`。设置面板的"各栏独立滚动"改由 CSS grid 的
@@ -1140,7 +1153,7 @@ export function ToolDock() {
           </button>
         )}
         <div className="tool-dock-tabstrip" role="tablist" ref={tabstripRef}>
-          {TABS.map((t) => (
+          {visibleTabs.map((t) => (
             <button
               key={t.key}
               type="button"

@@ -12917,11 +12917,12 @@ function runAdj617Tests() {
   const scSrc = String(readFileSync('src/dialogs/ShortcutsDialog.tsx', 'utf8'))
 
   check(
-    'adj617 菜单项 kbd 角标改引 `KBD.*`（新建/保存/导入/工作区/试听/导出/打印）',
+    'adj617/adj724b 菜单项 kbd 角标改引 `KBD.*`（新建/保存/导入/工作区/试听/导出/打印）',
     /entryNew: MenuEntry = \{ label: '新建\(&N\)', kbd: KBD\.newDoc/.test(topSrc) &&
       /entrySave: MenuEntry = \{ label: '保存\(&S\)', kbd: KBD\.save/.test(topSrc) &&
       /entryPaste: MenuEntry = \{ label: pasteImportCopy\.menuLabel, kbd: KBD\.import/.test(topSrc) &&
-      /entryWorkspace: MenuEntry = \{ label: workspaceCopy\.menuLabel, kbd: KBD\.workspace/.test(topSrc) &&
+      // adj724b：`entryWorkspace` 改为多行（新增 `hidden: isHostEmbedded()`）⇒ 判据放宽为"多行内的该字段"
+      /entryWorkspace: MenuEntry = \{[\s\S]{0,120}?kbd: KBD\.workspace/.test(topSrc) &&
       /entryTryout: MenuEntry = \{ label: '试听播放\(&P\)', kbd: KBD\.tryout/.test(topSrc) &&
       /entryExport: MenuEntry = \{ label: '导出\(&X\)…', kbd: KBD\.export/.test(topSrc) &&
       /entryPrint: MenuEntry = \{ label: '打印\(&D\)…', kbd: KBD\.print/.test(topSrc),
@@ -14497,9 +14498,10 @@ console.log('[115] dock close: early-return guard & close button inside dock (ad
   const sizeIdx = dockSrc.indexOf('className="tool-dock-size-btn"')
   const closeIdx = dockSrc.indexOf('className="tool-dock-close"')
   const stripBlock = stripIdx >= 0 ? dockSrc.slice(stripIdx, dockSrc.indexOf('</div>', stripIdx)) : ''
-  check('adj525/adj531 页签区（可滚）里只有页签，两个按钮都在它之外',
+  check('adj525/adj531/adj724b 页签区（可滚）里只有页签，两个按钮都在它之外',
     stripIdx >= 0 && sizeIdx >= 0 && closeIdx >= 0 &&
-      stripBlock.includes('TABS.map') &&
+      // adj724b：映射对象由 `TABS.map` 改为 `visibleTabs.map`（嵌入版过滤掉「工作区」页签）
+      (stripBlock.includes('visibleTabs.map') || stripBlock.includes('TABS.map')) &&
       !stripBlock.includes('tool-dock-size-btn') &&
       !stripBlock.includes('tool-dock-close'),
     `strip=${stripIdx} size=${sizeIdx} close=${closeIdx}`)
@@ -14507,10 +14509,12 @@ console.log('[115] dock close: early-return guard & close button inside dock (ad
   check('adj531 档位按钮在页签区**左侧**、✕ 在最右端（顺序：档位 → 页签 → ✕）',
     sizeIdx < stripIdx && stripIdx < closeIdx,
     `size=${sizeIdx} strip=${stripIdx} close=${closeIdx}`)
+  // adj724b：页签映射对象由 `TABS` 改为 `visibleTabs`（嵌入版隐藏「工作区」页签）⇒ 判据同步
+  const tabsMapRe = /visibleTabs\.map|TABS\.map/
   check('adj531 档位按钮与 ✕ 之间隔着整条页签区（不再相邻 ⇒ 够档位按钮时不会误触关闭）',
     dockSrc.slice(sizeIdx, stripIdx).includes('tool-dock-size-btn') &&
       !dockSrc.slice(sizeIdx, stripIdx).includes('tool-dock-close') &&
-      dockSrc.slice(stripIdx, closeIdx).includes('TABS.map'),
+      tabsMapRe.test(dockSrc.slice(stripIdx, closeIdx)),
     '')
   check('adj531 两个常驻按钮的"不压缩"口径不变（adj525 原样）',
     /\.tool-dock-size-btn \{[\s\S]{0,400}?flex: 0 0 auto;/.test(css) &&

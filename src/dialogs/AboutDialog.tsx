@@ -22,7 +22,8 @@ export function AboutDialog({ inline = false }: { inline?: boolean } = {}) {
         <div className="about-brand">
           <img
             className="about-logo"
-            src="/icons/Jianpu.png"
+            /* adj724b：同上——绝对路径在嵌入版（`/<token>/` 下）会 404，必须走 `BASE_URL` */
+            src={`${import.meta.env.BASE_URL}icons/Jianpu.png`}
             alt="爱记谱 iJipu Logo"
             width={inline ? 40 : 64}
             height={inline ? 40 : 64}

@@ -30,6 +30,7 @@ import {
   type SavePhaseLog,
 } from './saveSupport'
 import { useUiStore } from './uiStore'
+import { isHostEmbedded } from './hostBridge'
 import { loadFontOverride, migrateLegacyEditorPrefs } from './editorPrefs'
 import { normalizePastedSource } from './importSource'
 // adj538：桌面壳的「外部打开」（双击 .jps）——纯网页下这些函数一律惰性/空转，见该模块注释
@@ -369,6 +370,81 @@ function resolveConfig(code: string): PageConfig {
 migrateLegacyPageConfig()
 const draft = loadDraft()
 
+/**
+ * adj724b：**嵌入版「即时保存」**。
+ *
+ * 用户口径（实测反馈 #5）：「嵌入版的保存即时保存到 jps 文件中，**不使用缓存保存方式**，
+ * 但**修改历史还要有**」。
+ *
+ * 于是分成两件事，各归其位：
+ *  · **撤销/重做历史** —— 仍由 `history.ts` 的 `recordEdit` 维护（`setCode` 里那段），完全不动；
+ *  · **落盘** —— 编辑后直接把内容写回**文库里的那个 `.jps`**，与 `saveFile()` 走**同一个原语**
+ *    （`writeWorkspaceText`，宿主侧写完**回读校验**，不一致会报错，不谎报已保存）。
+ *
+ * 两点取舍（都写在注释里，免得后人"优化"掉）：
+ *  ① **仍然保留 localStorage 草稿**：它只用于"重新打开应用时恢复"，不参与嵌入版的正确性；
+ *  ② **做了一个 400ms 的合并窗口**：嵌入版每次按键都过 `postMessage` 往返宿主，
+ *     逐键写文件既浪费又会让宿主的 `vault` 频繁触发 modify 事件（每个事件都会让
+ *     Obsidian 的其它视图跟着重渲染）。合并窗口只影响"写盘节奏"，不影响历史。
+ */
+const EMBED_AUTOSAVE_DEBOUNCE_MS = 400
+let embedAutosaveTimer = 0
+/** 正在进行的自动保存（避免与用户手动 Ctrl+S 同时写同一个文件） */
+let embedAutosaveInFlight: Promise<void> | null = null
+
+/** 是否处于"嵌入版 + 已绑定工作区文件"（= 应当即时保存）的状态 */
+function embedInstantSaveReady(): boolean {
+  if (!isHostEmbedded()) return false
+  const bind = useDocStore.getState().binding
+  return !!bind && bind.segs.length > 0
+}
+
+/**
+ * 排一次即时保存（合并窗口内多次编辑只写一次）。
+ * 只做写入；失败**不弹窗**（编辑过程中弹窗太吵），只在控制台留痕。
+ */
+function scheduleEmbedAutosave(): void {
+  if (!embedInstantSaveReady()) return
+  if (embedAutosaveTimer !== 0) window.clearTimeout(embedAutosaveTimer)
+  embedAutosaveTimer = window.setTimeout(() => {
+    embedAutosaveTimer = 0
+    void runEmbedAutosave()
+  }, EMBED_AUTOSAVE_DEBOUNCE_MS)
+}
+
+async function runEmbedAutosave(): Promise<void> {
+  if (!embedInstantSaveReady()) return
+  // 上一次还没写完 ⇒ 等它写完再排一次（不丢最后一次编辑）
+  if (embedAutosaveInFlight) {
+    await embedAutosaveInFlight
+    scheduleEmbedAutosave()
+    return
+  }
+  const task = (async () => {
+    const bind = useDocStore.getState().binding
+    if (!bind || bind.segs.length === 0) return
+    const ws = await getWorkspace()
+    if (!ws) return
+    // adj544 的同一道校验：绑定里的工作区身份必须与当前工作区一致，否则绝不写盘
+    if (ws.id !== bind.wsId) return
+    const code = useDocStore.getState().code
+    try {
+      await writeWorkspaceText(ws, bind.segs, code)
+      // 写入期间用户可能继续输入 ⇒ 内容变了就保留未保存标记
+      useDocStore.setState({ dirty: useDocStore.getState().code !== code })
+    } catch (e) {
+      console.warn('[iJipu] 嵌入版即时保存失败', e)
+      useDocStore.setState({ dirty: true })
+    }
+  })()
+  embedAutosaveInFlight = task
+  try {
+    await task
+  } finally {
+    embedAutosaveInFlight = null
+  }
+}
+
 /** 撤销/重做：将历史快照恢复到文档（code/解析/脏标记/选区/光标跳转） */
 function restoreEntry(
   entry: HistoryEntry,
@@ -395,6 +471,8 @@ function restoreEntry(
     ...historyNext,
     cursorJump: { start: selStart, end: selEnd, nonce: (s.cursorJump?.nonce ?? 0) + 1 },
   })
+  // adj724b：撤销/重做同样要即时落盘（嵌入版口径：内容始终与文件一致）
+  scheduleEmbedAutosave()
 }
 
 export const useDocStore = create<DocState>()((set, get) => ({
@@ -444,6 +522,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
       dirty: true,
       ...next,
     })
+    // adj724b：嵌入版 ⇒ 即时落盘到文库里的那个 .jps（撤销/重做历史仍由上面的 recordEdit 维护）
+    scheduleEmbedAutosave()
   },
   setViewType: (v) => {
     // adj315：视图持久化——记住顶栏上次设置，重启恢复

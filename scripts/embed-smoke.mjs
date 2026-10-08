@@ -335,6 +335,18 @@ async function main() {
           rootChildren: document.getElementById('root')?.children.length ?? -1,
           textareas: document.querySelectorAll('textarea').length,
           hasError: document.body.innerText.includes('Cannot find module') || document.body.innerText.includes('ChunkLoadError'),
+          /**
+           * adj724b：**实测图标有没有真的显示**。
+           *
+           * 「服务器有没有把图标发出去」和「图标有没有画出来」是两件事——
+           * 204 时 img 不会报错、控制台也不会响，但图标就是空的。
+           * 判据用 naturalWidth > 0（真正解码出图片才有宽度），并顺带看 img 总数。
+           */
+          imgs: doc ? doc.querySelectorAll('img').length : -1,
+          imgsLoaded: doc
+            ? Array.from(doc.querySelectorAll('img')).filter((i) => i.naturalWidth > 0).length
+            : -1,
+          maskIcons: doc ? doc.querySelectorAll('[class*="tool-icon"], [class*="ijipu-icon"]').length : -1,
         });
       })()`,
       returnByValue: true,

@@ -1230,7 +1230,14 @@ export function TopBar() {
   const entryPaste: MenuEntry = { label: pasteImportCopy.menuLabel, kbd: KBD.import, hotkey: 'v', onPick: () => toggleDock('import') }
   const entrySave: MenuEntry = { label: '保存(&S)', kbd: KBD.save, hotkey: 's', onPick: runSaveSmart }
   const entrySaveAs: MenuEntry = { label: '另存为(&A)…', hotkey: 'a', onPick: runSaveAsSmart }
-  const entryWorkspace: MenuEntry = { label: workspaceCopy.menuLabel, kbd: KBD.workspace, hotkey: 'w', onPick: () => toggleDock('workspace') }
+  const entryWorkspace: MenuEntry = {
+    label: workspaceCopy.menuLabel,
+    kbd: KBD.workspace,
+    hotkey: 'w',
+    onPick: () => toggleDock('workspace'),
+    // adj724b：嵌入版里没有"工作区"这个概念（文件操作交给 Obsidian）⇒ 菜单项不显示
+    hidden: isHostEmbedded(),
+  }
   const entryTryout: MenuEntry = { label: '试听播放(&P)', kbd: KBD.tryout, hotkey: 'p', onPick: () => toggleDock('tryout') }
   /**
    * adj615（用户要求）：`Ctrl+O` 从「打开文件」改挂**导出开关**（用户口径"让 Ctrl+O 响应导出开关操作"）
@@ -1312,7 +1319,15 @@ export function TopBar() {
     <div className="topbar" ref={topbarRef}>
       {/* Logo */}
       <div className="topbar-brand">
-        <img className="logo-mark" src="/icons/Jianpu.png" alt="爱记谱 iJipu" draggable={false} />
+        {/* adj724b：Logo 路径**不能写绝对路径**——嵌入版页面挂在 `/<token>/` 下，
+            绝对路径 `/icons/Jianpu.png` 会解析到站点根（无 token 段）而被服务 404，
+            表现为"顶栏左侧爱记谱图标不显示"（用户实测）。用 `BASE_URL` 走相对路径。 */}
+        <img
+          className="logo-mark"
+          src={`${import.meta.env.BASE_URL}icons/Jianpu.png`}
+          alt="爱记谱 iJipu"
+          draggable={false}
+        />
         <span className="topbar-brand-text">
           <span className="brand-zh">爱记谱</span>
           <span className="brand-en">iJipu</span>
