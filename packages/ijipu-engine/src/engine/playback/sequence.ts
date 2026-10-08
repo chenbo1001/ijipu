@@ -958,7 +958,22 @@ export function buildPlaySequence(
    *    `|` 小节线自己的 `comment` 上**，`voltaStart` 落在随后的 `[` 线上。
    *    只认前者会让旧式房子**建不出计数器** ⇒ 第 2 遍不跳过（示例谱 16 音符变 19）。
    */
-  const voltaLimit = new Map<number, number>()
+  /**
+   * adj723aa（用户口径，2026-10）：**注释相同的跳房子是"同一个房子"**。
+   *
+   * 用户原话：「不同位置的跳房子，**如果注释相同，视为相同跳房子，在同一反复中演奏**；
+   * 注释不同，视为不同的跳房子，在不同的反复中演奏。按演奏顺序，**第一次遇到的跳房子为第 1 次
+   * 反复中演奏，而后面相同注释的跳房子也都在第 1 次反复中演奏**。跳房子注释只关系到：
+   * a、注释是否相同；b、演奏计数。」
+   *
+   * 故计数器**按注释分组**（`voltaLeftByComment`），而不是按小节线位置：
+   * 同一注释的所有房子**共用一份计数**，走到其中任何一个都从那份额度里扣。
+   * 无注释的房子退回按位置各记一份（计数 1）。
+   */
+  const voltaLimitByComment = new Map<string, number>()
+  const voltaLimitByIndex = new Map<number, number>()
+  /** 每根房子起点线的注释（规范化后；空串 = 无注释） */
+  const voltaCommentAt = new Map<number, string>()
   for (let k = 0; k < seq.length; k++) {
     const it = seq[k]
     if (it.kind !== 'bar' || !it.bar?.voltaStart) continue
@@ -967,9 +982,9 @@ export function buildPlaySequence(
      * （旧式 `|"1." [ …` 把番号写在 `[` 之前那根 `|` 上）。
      *
      * ⚠ **不能无条件回看**：`|["1." 3 3 |]/` 这种把注释写在**房子起点之前那根 `|`** 上的写法，
-     * 走查是在那根 `|` 处**平移到下一个房子**（`voltaAfter` 指向 `[` 所在线）——若在 `[` 线上
-     * 回看 `|` 的注释，就会把**同一个番号**再当成一个房子，于是房子计数永不扣减、
-     * 大反复后重复奏（实测 `adj598` 从 12 音变 20 音）。
+     * 走查是在那根 `|` 处**平移到下一个房子**——若在 `[` 线上回看 `|` 的注释，
+     * 就会把**同一个番号**再当成一个房子，于是房子计数永不扣减、大反复后重复奏
+     * （实测 `adj598` 从 12 音变 20 音）。
      */
     const own = (it.bar.voltaStart.comment ?? '').trim()
     const prev = seq[k - 1]
@@ -981,12 +996,32 @@ export function buildPlaySequence(
           prevBar && !prevBar.voltaStart
           ? (prevBar.comment ?? '').trim()
           : ''
-    voltaLimit.set(k, raw === '' ? 1 : Math.max(1, raw.split('.').filter((s) => s.trim() !== '').length))
+    const count = raw === '' ? 1 : Math.max(1, raw.split('.').filter((s) => s.trim() !== '').length)
+    voltaCommentAt.set(k, raw)
+    if (raw === '') voltaLimitByIndex.set(k, count)
+    else if (!voltaLimitByComment.has(raw)) voltaLimitByComment.set(raw, count)
   }
-  /** 各房子"还能走几次"——走过它的内容后减一，为 0 即路过 */
-  const voltaLeft = new Map(voltaLimit)
+  /** 各注释组"还能走几次"——走过组内任一房子后减一，为 0 即路过 */
+  const voltaLeftByComment = new Map(voltaLimitByComment)
+  const voltaLeftByIndex = new Map(voltaLimitByIndex)
   /** 正在走的那个房子（走过它末尾线时减一）；-1 = 当前不在房子里 */
   let insideVolta = -1
+  /** 取某根房子起点线"所在注释组"的剩余次数（按注释分组；无注释则按位置） */
+  const voltaLeftOf = (k: number): number => {
+    const c = voltaCommentAt.get(k) ?? ''
+    return c === '' ? (voltaLeftByIndex.get(k) ?? 0) : (voltaLeftByComment.get(c) ?? 0)
+  }
+  /** 用掉一次（按同一分组口径扣减） */
+  const consumeVolta = (k: number): void => {
+    const c = voltaCommentAt.get(k) ?? ''
+    if (c === '') {
+      const left = voltaLeftByIndex.get(k) ?? 0
+      if (left > 0) voltaLeftByIndex.set(k, left - 1)
+    } else {
+      const left = voltaLeftByComment.get(c) ?? 0
+      if (left > 0) voltaLeftByComment.set(c, left - 1)
+    }
+  }
 
   // 4. 展开反复（支持两层：反复内嵌跳房子）
   // adj258：按 voiceBlocks 分块——多声部块内 group 共享 blockStartMs（同一组 Q1/Q2 同时播放），
@@ -1942,7 +1977,11 @@ export function buildPlaySequence(
     // adj723aa：判据由「番号 == 本遍」改为**房子自己的计数器**（计数 = 注释里 `.` 分隔段数，≥1）
     const trySkipVolta = (): boolean => {
       if (!bar.voltaStart) return false
-      if ((voltaLeft.get(i) ?? 0) > 0) {
+      /**
+       * adj723aa（用户口径）：**注释相同的房子是"同一个房子"** ⇒ 剩余次数按**注释分组**查
+       * （`voltaLeftOf`），而不是按这根线的位置。
+       */
+      if (voltaLeftOf(i) > 0) {
         insideVolta = i // 进入本房子范围（走过末尾线时才 count-1）
         return false
       }
@@ -1978,8 +2017,7 @@ export function buildPlaySequence(
         voltaAfterRepeat.get(insideVolta) ??
         (bigRepeatDone ? voltaAfterWithFine.get(insideVolta) : voltaAfterStrict.get(insideVolta))
       if (i === (end ?? insideVolta + 1)) {
-        const left = voltaLeft.get(insideVolta) ?? 0
-        if (left > 0) voltaLeft.set(insideVolta, left - 1)
+        consumeVolta(insideVolta) // 按**注释分组**扣减（同注释的房子共用一份计数）
         insideVolta = -1
       }
     }
