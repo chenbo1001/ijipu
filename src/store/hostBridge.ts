@@ -83,6 +83,16 @@ export class HostBridge {
   }
 
   /**
+   * 告诉宿主"我已装好监听，可以推事件了"。
+   *
+   * 必须在 `on({ openFile })` **之后**调用——否则宿主推来的 `openFile` 会丢
+   * （应用还没装监听）。宿主收到 `ready` 才下发"本页签要打开的文件"。
+   */
+  signalReady(): void {
+    window.parent.postMessage({ ch: CHANNEL, type: 'ready' }, '*')
+  }
+
+  /**
    * 执行一个宿主操作。
    * 失败时**抛错**（调用方按既有错误路径处理，例如"保存失败"提示）。
    */
