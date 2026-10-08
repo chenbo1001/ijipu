@@ -1,35 +1,49 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import App from './App.tsx'
 import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from './pwa/swUpdate'
 import { installAppHeight } from './pwa/appHeight'
-import { useUiStore } from './store/uiStore'
 
 // adj404：应用高度跟随可视视口——软键盘弹出时（浏览器/PWA/自建外壳）编辑区自动让位，
 // 不再被键盘盖住（`.app { height: var(--app-h, 100dvh) }`，见 index.css）
 installAppHeight()
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
-
 /**
- * adj724b：**嵌入版启动**——先试握手（`http://127.0.0.1` 的宿主桥）。
+ * adj724b：**首屏前先完成"嵌入版握手 + 偏好预载"**。
  *
- * 成功 ⇒ 以 Obsidian **文库为工作区**：不弹"选文件夹"、不需要文件系统授权，
- * 文件树的根就是文库（或设置里的子目录）。
- * 失败（普通浏览器/桌面壳/独立页签，3 秒超时）⇒ 什么都不做，一切照旧。
- *
- * 放在 `createRoot` **之后**、且不 `await`：握手失败也不该拖慢首屏。
+ * 为什么必须串行、且必须在**求值 store 模块之前**：
+ *  · `uiStore` / `editorPrefs` 在**模块求值阶段**就读 `localStorage`
+ *    （主题、缩放、拆分比例、音色库选择…）；而 store 模块由 `App.tsx` 的 import 链带进来
+ *    ——只要 `App` 还是静态 import，就会在我们拿到宿主数据之前先跑一遍，
+ *    于是那份"空快照"会被当成用户设置、还可能把默认值回写覆盖掉真值（用户实测 bug 的放大版）。
+ *  · 所以：握手 → 预载 → **再**动态 import store 与 App → 渲染。真正嵌入时这只是本机
+ *    回环的两次往返（毫秒级）；非嵌入（`window.parent === window`）时握手直接返回 `null`，零开销。
  */
 void (async () => {
+  let bridge: Awaited<ReturnType<typeof import('./store/hostBridge').initHostBridge>> = null
   try {
     const { initHostBridge } = await import('./store/hostBridge')
-    const bridge = await initHostBridge()
-    if (!bridge) return
+    bridge = await initHostBridge()
+    if (bridge) {
+      const { preloadEmbedStorage } = await import('./store/embedStorage')
+      await preloadEmbedStorage()
+    }
+  } catch (e) {
+    // 不是嵌入环境、或宿主不可用：照旧走 fsa/path 后端
+    console.warn('[iJipu] 宿主桥初始化失败：', e)
+  }
+
+  // 存储就绪后才求值 store 模块（见上面的说明）
+  await import('./store/uiStore')
+  const { default: App } = await import('./App.tsx')
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
+
+  if (!bridge) return
+  try {
     const { setWorkspace, makeVaultWorkspaceRecord, isVaultWorkspace, getWorkspace } = await import('./store/workspace')
     const { useUiStore } = await import('./store/uiStore')
     const rec = makeVaultWorkspaceRecord(bridge.welcome.vaultName, bridge.welcome.root)
@@ -132,10 +146,10 @@ void (async () => {
         lastOps: bridge.recentOps.slice(-8),
       })
   } catch (e) {
-    /* 忽略：不是嵌入环境（或宿主不可用）时，走原有的 fsa/path 后端 */
+    // 忽略：不是嵌入环境（或宿主不可用）时，走原有的 fsa/path 后端。
     // 但**要留痕**：嵌入版初始化失败会表现为"打开了但显示的不是文库"，
     // 静默吞掉会让排错无从下手（冒烟脚本也靠这条日志定位）。
-    console.warn('[iJipu] 宿主桥初始化失败：', e)
+    console.warn('[iJipu] 嵌入版初始化失败：', e)
   }
 })()
 
@@ -212,7 +226,13 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator && !isEmbeddedFrame()) 
       .register('/sw.js', { updateViaCache: 'none' })
       .then((reg) => {
         navigator.serviceWorker.addEventListener('controllerchange', () => {
-          if (shouldPromptUpdate(hadController)) useUiStore.getState().setUpdateReady(true)
+          if (!shouldPromptUpdate(hadController)) return
+          /**
+           * adj724b：**动态**导入而不是顶部静态导入——
+           * 静态导入会让 `uiStore` 在"嵌入版偏好预载完成之前"就求值（读到空设置）。
+           * 这条路径只在**网页版**触发，动态导入的额外一步可忽略。
+           */
+          void import('./store/uiStore').then((m) => m.useUiStore.getState().setUpdateReady(true))
         })
         // SPA/PWA 可能长期不重载：定期 + 每次窗口重新获焦时主动检查是否有新版
         const check = () => {

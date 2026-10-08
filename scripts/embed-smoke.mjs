@@ -240,6 +240,13 @@ async function main() {
       window.__ijipuHostStub = !window.frameElement;
       if (window.__ijipuHostStub) {
         window.__ijipuCalls = [];
+        /**
+         * adj724b：**宿主侧的设置存储**（模拟插件把 embedKv 落在 data.json 里）。
+         * 预置一个键，用来验证"应用启动时确实把宿主里的设置读进去了"——
+         * 这是"ob 重启后设置回到默认"那个 bug 的**回归探针**。
+         * ⚠ 这段是**模板字符串里的注入脚本**：注释与字符串里都不许出现反引号，否则会截断模板。
+         */
+        window.__ijipuKv = { 'ijipu.splitPct': '37' };
         // 注入的脚本在外层页面运行，拿不到脚本作用域里的变量 ⇒ token 由**注入时**填进来
         const TOKEN = ${JSON.stringify(TOKEN)};
         const HOST_ROOT = '乐谱';
@@ -261,6 +268,10 @@ async function main() {
             if (d.op === 'list') result = { dirs: [{ name: '子目录', mtime: 0 }], files: [{ name: '测试谱.jps', mtime: 0 }] };
             else if (d.op === 'read') result = { text: "Q: 1 2 3 4 |\\n" };
             else if (d.op === 'exists') result = { exists: true };
+            // adj724b：**嵌入版的设置存储**（应用把 localStorage 换成经桥读写宿主）
+            else if (d.op === 'kvAll') result = window.__ijipuKv;
+            else if (d.op === 'kvSet') { window.__ijipuKv[d.args.key] = d.args.value; }
+            else if (d.op === 'kvRemove') { delete window.__ijipuKv[d.args.key]; }
             ev.source.postMessage({ ch: 'ijipu', id: d.id, ok: true, result }, '*');
           }
         });
@@ -326,6 +337,22 @@ async function main() {
             try {
               const fn = app && app.contentWindow && app.contentWindow.__ijipuDebug;
               return typeof fn === 'function' ? fn() : '（无探针：说明没走到嵌入版初始化）';
+            } catch (err) {
+              return 'ERR:' + String(err && err.message);
+            }
+          })(),
+          /**
+           * adj724b：**设置持久化是否走宿主**。
+           *  · kvCalls：应用为此发起的桥调用（kvAll 预载 + 若干 kvSet）
+           *  · kvStored：宿主侧最终存下来的键（应含预置的 ijipu.splitPct，且被应用回写过）
+           *  · readBack：应用读到的值（应等于宿主预置的 37，而不是默认值）
+           */
+          kvCalls: (window.__ijipuCalls || []).filter((c) => c.startsWith('kv')).slice(0, 6),
+          kvStored: window.__ijipuKv,
+          readBack: (() => {
+            try {
+              const LS = app && app.contentWindow && app.contentWindow.localStorage;
+              return LS ? LS.getItem('ijipu.splitPct') : 'NO-LS';
             } catch (err) {
               return 'ERR:' + String(err && err.message);
             }
@@ -429,6 +456,19 @@ async function main() {
    * 应用侧会在 `readDirEntries` 里抛错并被 CDP 捕获）。
    */
   const dist = (info.innerDebug ?? '').slice(0, 200)
+  /**
+   * adj724b：**设置持久化回归探针**（用户实测 bug：「嵌入版本的全局设置没有保存，
+   * ob 重启后恢复为默认」）。
+   *
+   * 判据：宿主预置了 `ijipu.splitPct = 37` ⇒
+   *  ① 应用必须发 `kvAll` 预载；
+   *  ② 应用读到的该键必须**就是 37**（说明它用的是宿主存储，而不是 origin 隔离的浏览器 localStorage）。
+   */
+  if (info.kvCalls.length === 0) return fail('应用没有向宿主请求设置（kvAll/kvSet 都没发）⇒ 设置仍只存在浏览器里')
+  if (info.readBack !== '37') {
+    return fail(`应用读到的 ijipu.splitPct = ${JSON.stringify(info.readBack)}，应为宿主预置的 "37"（设置没走宿主存储）`)
+  }
+  console.log(`[embed-smoke] ✅ 设置持久化走宿主：预载 ${JSON.stringify(info.kvCalls)}，读回 ijipu.splitPct=${info.readBack}`)
   console.log(`[embed-smoke] ✅ 单文件产物启动成功、无运行时报错`)
   console.log(
     `[embed-smoke] ✅ 桥端到端通过：应用 hello→ready、发出 ${info.callCount} 次桥调用（${info.calls.slice(0, 3).join(' | ')}）、宿主应答后无报错`,

@@ -103,6 +103,27 @@ export class HostBridge {
     window.parent.postMessage({ ch: CHANNEL, type: 'ready' }, '*')
   }
 
+  // ───────────────────────── adj724b：键值存储（替代 localStorage） ─────────────────────────
+
+  /** 读全部（启动时一次性预载） */
+  kvAll(): Promise<Record<string, string>> {
+    return this.call<Record<string, string>>('kvAll')
+  }
+
+  /** 写一条（宿主侧防抖落盘；应用不等待结果） */
+  kvSet(key: string, value: string): void {
+    void this.call('kvSet', { key, value }).catch(() => {
+      /* 宿主不可用时不阻塞 UI（设置会在下次启动时回落默认） */
+    })
+  }
+
+  /** 删一条 */
+  kvRemove(key: string): void {
+    void this.call('kvRemove', { key }).catch(() => {
+      /* 同上 */
+    })
+  }
+
   /**
    * 执行一个宿主操作。
    * 失败时**抛错**（调用方按既有错误路径处理，例如"保存失败"提示）。
