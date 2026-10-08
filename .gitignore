@@ -57,5 +57,3 @@ dist-video/
 # 提交信息临时文件（git commit -F 用；**严禁入库**——git add -A 会把它一起加进来，已发生过两次）
 .ui-c*.txt
 .tmp-*.mjs
-
-# 提交信息临时文件（git commit -F 用）——与 ijipu 同一口径，防 git a
