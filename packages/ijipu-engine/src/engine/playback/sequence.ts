@@ -1029,28 +1029,43 @@ export function buildPlaySequence(
     if (raw === '') voltaLimitByIndex.set(k, count)
     else if (!voltaLimitByComment.has(raw)) voltaLimitByComment.set(raw, count)
   }
-  /** 各注释组"还能走几次"——走过组内任一房子后减一，为 0 即路过 */
+  /** 各注释组"还能走几次"——**进入下一遍次时**扣一次（见 `settlePassVolta`） */
   const voltaLeftByComment = new Map(voltaLimitByComment)
   const voltaLeftByIndex = new Map(voltaLimitByIndex)
-  /** 正在走的那个房子（走过它末尾线时减一）；-1 = 当前不在房子里 */
+  /**
+   * 各注释组的**遍次号**（1 起）——**按出现顺序**编号（顺序是逻辑；注释里的数字仍是给人看的）。
+   *
+   * adj723aa（用户口径，2026-10）：「**不同注释本就属于不同遍次的呀，这是规则里的要求**」。
+   */
+  const voltaGroupOf = new Map<string, number>()
+  {
+    let g = 0
+    for (let k = 0; k < seq.length; k++) {
+      const c = voltaCommentAt.get(k) ?? ''
+      if (c === '' || voltaGroupOf.has(c)) continue
+      voltaGroupOf.set(c, ++g)
+    }
+  }
+  /**
+   * 本遍已进入过的注释组——**进入下一遍次时**对每组扣 1（用户口径：
+   * 「这个注释的跳房子**在进入下一遍次时计数减 1**，不管这个注释的跳房子有没有都走完」）。
+   */
+  const passVoltaTouched = new Set<string>()
+  /** 正在走的那个房子（走过它末尾线时退出范围）；-1 = 当前不在房子里 */
   let insideVolta = -1
+  /** 本遍收尾：对"本遍进入过的注释组"各扣 1（无注释的房子不参与分组） */
+  const settlePassVolta = (): void => {
+    for (const c of passVoltaTouched) {
+      const left = voltaLeftByComment.get(c) ?? 0
+      if (left > 0) voltaLeftByComment.set(c, left - 1)
+    }
+    passVoltaTouched.clear()
+  }
   /** 取某根房子起点线"所在注释组"的剩余次数（按注释分组；无注释则按位置） */
   const voltaLeftOf = (k: number): number => {
     const c = voltaCommentAt.get(k) ?? ''
     return c === '' ? (voltaLeftByIndex.get(k) ?? 0) : (voltaLeftByComment.get(c) ?? 0)
   }
-  /** 用掉一次（按同一分组口径扣减） */
-  const consumeVolta = (k: number): void => {
-    const c = voltaCommentAt.get(k) ?? ''
-    if (c === '') {
-      const left = voltaLeftByIndex.get(k) ?? 0
-      if (left > 0) voltaLeftByIndex.set(k, left - 1)
-    } else {
-      const left = voltaLeftByComment.get(c) ?? 0
-      if (left > 0) voltaLeftByComment.set(c, left - 1)
-    }
-  }
-
   // 4. 展开反复（支持两层：反复内嵌跳房子）
   // adj258：按 voiceBlocks 分块——多声部块内 group 共享 blockStartMs（同一组 Q1/Q2 同时播放），
   // 跨块顺序累加。单声部 group 不在任何 voiceBlock 内，自成块（blockStartMs = 累加）。
@@ -2015,8 +2030,18 @@ export function buildPlaySequence(
        *  · `= 0` ⇒ 路过（跳到末尾线）。
        * 计数按注释分组共用（注释相同 = 同一个房子），无注释的按位置各记 1。
        */
-      if (voltaLeftOf(i) > 0) {
-        insideVolta = i // 进入本房子范围（走过末尾线时才 count-1）
+      const c = voltaCommentAt.get(i) ?? ''
+      /**
+       * adj723aa（用户口径，2026-10）：
+       *  · **不同注释属于不同遍次** ⇒ 该组不是本遍那一组就跳过（留到它自己那一遍）；
+       *  · 是本遍那一组 ⇒ **同注释的房子走到哪处都能进**（"在它们所属的那一遍里都可以进入，
+       *    只要演奏顺序能够走到那处"）；
+       *  · 计数为 0 ⇒ 跳过（该组的遍次任务已用完）。计数在**进入下一遍时**扣（见 `settlePassVolta`）。
+       */
+      const groupOk = c === '' || (voltaGroupOf.get(c) ?? 0) === pass
+      if (groupOk && voltaLeftOf(i) > 0) {
+        insideVolta = i // 进入本房子范围（计数改为**进入下一遍时**扣）
+        if (c !== '') passVoltaTouched.add(c)
         return false
       }
       /**
@@ -2050,10 +2075,7 @@ export function buildPlaySequence(
       const end =
         voltaAfterRepeat.get(insideVolta) ??
         (bigRepeatDone ? voltaAfterWithFine.get(insideVolta) : voltaAfterStrict.get(insideVolta))
-      if (i === (end ?? insideVolta + 1)) {
-        consumeVolta(insideVolta) // 按**注释分组**扣减（同注释的房子共用一份计数）
-        insideVolta = -1
-      }
+      if (i === (end ?? insideVolta + 1)) insideVolta = -1
     }
     /**
      * 因跳过 volta 而落在的小节线：**不再触发该线的 `:|` 回跳**（该反复已在跳过时越过）。
@@ -2198,6 +2220,8 @@ export function buildPlaySequence(
          */
         const lastJump = pass + 1 >= count
         const from = i
+        /** adj723aa：**进入下一遍次时**把本遍进入过的注释组各扣 1（不管该组有没有都走完） */
+        settlePassVolta()
         i = repeatStart
         pass++
         if (lastJump && bar.type === ':|:') repeatStart = from
