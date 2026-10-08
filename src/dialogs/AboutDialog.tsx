@@ -9,6 +9,8 @@
 import { Modal } from '../ui/Modal'
 import { aboutCopy, uiCopy, donate } from '../brand/copy'
 import { APP_VERSION_FULL } from '../brand/version'
+// adj724b：外链统一走这处（桌面壳需要 Tauri opener，`window.open` 不可靠）
+import { openExternalUrl } from '../preview/openUrl'
 import { useUiStore } from '../store/uiStore'
 
 export function AboutDialog({ inline = false }: { inline?: boolean } = {}) {
@@ -44,6 +46,28 @@ export function AboutDialog({ inline = false }: { inline?: boolean } = {}) {
             <strong>{aboutCopy.author}</strong>
             {aboutCopy.contact && <span className="about-contact">{aboutCopy.contact}</span>}
           </p>
+          {/**
+           * adj724b（用户要求）：官方网址与 Obsidian 插件仓库。
+           *
+           * 用 `<button>` + `openExternalUrl` 而不是 `<a href target="_blank"`：
+           * 桌面壳（Tauri v2 / WebView2）里 `window.open`/`_blank` **不保证**打开系统浏览器
+           * （见 `preview/openUrl.ts` 的文件头说明）——那里已经把"Tauri opener → window.open"
+           * 的兜底做好了，直接复用同一处，不另写一套。
+           */}
+          <div className="about-links">
+            {aboutCopy.links.map((l) => (
+              <button
+                key={l.url}
+                type="button"
+                className="about-link"
+                title={`${l.hint}：${l.url}`}
+                onClick={() => void openExternalUrl(l.url)}
+              >
+                <span className="about-link-label">{l.label}</span>
+                <span className="about-link-url">{l.url}</span>
+              </button>
+            ))}
+          </div>
           <div className="about-meta">{APP_VERSION_FULL}</div>
           <p className="about-footer">{aboutCopy.footer}</p>
           {/* adj419：脚本兼容说明 / 致谢 / 谱师 / 命令行工作流四段移到「操作手册」（docs/USER-GUIDE.md §九），

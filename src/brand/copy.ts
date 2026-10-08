@@ -23,6 +23,17 @@ export const aboutCopy = {
   /** 开源协议说明（捐赠入口未配置时显示在关于对话框底部；
    *  adj422：原来的「致敬」短句已移到操作手册 §九，关于对话框不再重复） */
   license: '本项目基于 GNU Affero General Public License v3.0（AGPL-3.0）发布，欢迎学习、修改与再分发。',
+  /**
+   * adj724b（用户要求）：关于对话框里的**可点链接**。
+   *
+   * 用户原话：「在 ijipu 的关于里，添加 https://ijipu.pages.dev 和
+   * https://github.com/snailhome/obsidian-ijipu 的链接」。
+   * 地址本身在 `brand/tokens.ts`（品牌信息一处定义），这里只放**显示名**。
+   */
+  links: [
+    { label: '官方网站', url: brand.siteUrl, hint: '在线版 · 示例 · 语法说明' },
+    { label: 'Obsidian 插件', url: brand.obsidianRepoUrl, hint: '在 Obsidian 里渲染与试听 .jps' },
+  ],
 } as const
 
 /** 捐赠/支持作者（Q-10）。donateImage 为微信赞赏码图片路径（public/ 下）；为空则不显示捐赠入口。

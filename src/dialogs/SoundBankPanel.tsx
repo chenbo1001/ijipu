@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useUiStore } from '../store/uiStore'
 import { playbackCopy } from '../brand/copy'
-import { HQ_LIBRARIES, GM_VOICE_OPTIONS, getHqLibrary, hasBuiltinBank } from '../playback/spessaSynthBackend'
+import { HQ_LIBRARIES, GM_VOICE_OPTIONS, getHqLibrary, hasBuiltinBank, hqBankFailureText } from '../playback/spessaSynthBackend'
 import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../playback/spessaCache'
 
 const HIGHLIGHT = 'var(--jp-text-muted)'
@@ -37,6 +37,8 @@ export function SoundBankPanel() {
   // adj347/348：打开音色库管理即自动后台下载音源（初次体验）；仅文字提示，不阻塞其它交互
   // adj416：桌面端随安装包内置（安装目录 generaluser_gs.sf2）→ 直接可用，显示「已内置」而非下载提示
   const [hqDl, setHqDl] = useState<'idle' | 'loading' | 'done' | 'builtin' | 'error'>('idle')
+  /** adj724b：失败原因（用于给用户"该怎么做"的提示，而不是笼统的"请检查网络"） */
+  const [hqDlError, setHqDlError] = useState<unknown>(null)
   const enabled = useUiStore((s) => s.playbackHqEnabled)
   const hqLibrary = useUiStore((s) => s.playbackHqLibrary)
   const hqVoice = useUiStore((s) => s.playbackHqVoice)
@@ -62,7 +64,9 @@ export function SoundBankPanel() {
           setHqDl('loading')
           await prefetchHqLibraryProgress(lib, hqCache.current)
           setHqDl('done')
-        } catch {
+        } catch (e) {
+          // adj724b：把原因留下来，提示里要说清"是地址不可达、可以手动导入"
+          setHqDlError(e)
           setHqDl('error')
         }
       })()
@@ -167,8 +171,14 @@ export function SoundBankPanel() {
           </div>
         )}
         {hqDl === 'error' && (
-          <div style={{ color: 'var(--jp-danger)', fontSize: 11, marginTop: 4 }}>
-            ✗ 音色库下载失败——请检查网络，或点击「导入音色文件」手动导入 SF2。
+          /**
+           * adj724b：失败提示改成**能照着做**的（见 `hqBankFailureText`）。
+           * 旧的"请检查网络"会让人一直以为是自己网络差，而实测最常见的失败是
+           * **该下载地址在用户所在网络不可达**（raw.githubusercontent.com 连不上、
+           * jsDelivr 又因 32.3 MB 超过其 20 MB 单文件上限而直接 403）。
+           */
+          <div style={{ color: 'var(--jp-danger)', fontSize: 11, marginTop: 4, whiteSpace: 'pre-wrap' }}>
+            {hqBankFailureText(currentHqLib, hqDlError)}
           </div>
         )}
       </section>

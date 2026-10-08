@@ -5530,6 +5530,18 @@ console.log('[82] author credit (adj373)')
     brand.authorEmail === '' || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(brand.authorEmail),
     brand.authorEmail,
   )
+  check(
+    'adj724b 关于页有两个外链（官网 + Obsidian 插件仓库），地址取自 brand tokens（不硬编码在组件里）',
+    // 用户要求：「在 ijipu 的关于里，添加 https://ijipu.pages.dev 和
+    // https://github.com/snailhome/obsidian-ijipu 的链接」
+    aboutCopy.links.length === 2 &&
+      aboutCopy.links[0].url === brand.siteUrl &&
+      aboutCopy.links[1].url === brand.obsidianRepoUrl &&
+      brand.siteUrl === 'https://ijipu.pages.dev' &&
+      brand.obsidianRepoUrl === 'https://github.com/snailhome/obsidian-ijipu' &&
+      aboutCopy.links.every((l) => l.label.trim() !== '' && /^https:\/\//.test(l.url)),
+    aboutCopy.links.map((l) => `${l.label}=${l.url}`).join(' '),
+  )
 }
 
 // ---- 83. 试听高亮/色块覆盖增时线（adj374）----

@@ -125,23 +125,70 @@ export async function loadBuiltinBank(lib: HqSampleLibrary): Promise<ArrayBuffer
   }
 }
 
-/** 加载音源库（SF2/SF3/DLS）为 ArrayBuffer（adj346/adj416）：桌面优先读**安装目录内置资源**
- *  （离线、直接使用）；否则 Web/Tauri 均从远端 source 下载，失败回退 fallbackSource。 */
+/**
+ * 加载音源库（SF2/SF3/DLS）为 ArrayBuffer（adj346/adj416）：桌面优先读**安装目录内置资源**
+ *  （离线、直接使用）；否则 Web/Tauri 均从远端 source 下载，失败回退 fallbackSource。
+ *
+ * adj724b：失败时把**具体是哪个环节失败**记进错误（见 `hqBankFailureText`），
+ * 否则界面上只能笼统说一句"请检查网络"——而实测里最常见的失败根本不是"用户网络差"，
+ * 而是**这个 URL 在用户所在网络不可达**（见下面的诊断口径）。
+ */
 export async function loadHqBank(lib: HqSampleLibrary): Promise<ArrayBuffer> {
   const builtin = await loadBuiltinBank(lib)
   if (builtin) return builtin
+  /** 各候选源的失败原因（用于给用户一句能照着做的提示） */
+  const tried: string[] = []
   try {
     const res = await fetch(lib.source)
     if (res.ok) return await res.arrayBuffer()
-  } catch {
-    /* 下载失败 → 走 fallback */
+    tried.push(`HTTP ${res.status}`)
+  } catch (e) {
+    tried.push(netErrText(e))
   }
   if (lib.fallbackSource) {
-    const res = await fetch(lib.fallbackSource)
-    if (res.ok) return await res.arrayBuffer()
+    try {
+      const res = await fetch(lib.fallbackSource)
+      if (res.ok) return await res.arrayBuffer()
+      tried.push(`备用源 HTTP ${res.status}`)
+    } catch (e) {
+      tried.push(`备用源 ${netErrText(e)}`)
+    }
   }
-  throw new Error(`音源「${lib.name}」加载失败`)
+  throw new Error(`音源「${lib.name}」加载失败（${tried.join('；')}）`)
 }
+
+/** 网络错误的简短文案（`fetch` 失败时往往是 `TypeError: Failed to fetch`，真正原因在 `cause`） */
+function netErrText(e: unknown): string {
+  const cause = (e as { cause?: { code?: string; message?: string } })?.cause
+  if (cause?.code) return String(cause.code)
+  if (cause?.message) return String(cause.message)
+  return e instanceof Error ? e.message : String(e)
+}
+
+/**
+ * adj724b：把"音源取不到"翻译成**用户能照着做**的提示。
+ *
+ * 为什么单独抽出来：实测（2026-10）默认音源 `GeneralUser-GS.sf2`（32.3 MB）在
+ * `raw.githubusercontent.com` 上**连不上**（ECONNRESET）、jsDelivr 因**单文件 20 MB 上限**
+ * 直接 403 ⇒ 自动下载在部分网络下**必然失败**，而旧提示只说"请检查网络"，
+ * 用户会一直以为是自己网络问题（实测反馈"音色库下载失败"）。
+ *
+ * 现在明确告诉用户：**下载不是必须的**，可以手动导入一次、之后一直用缓存。
+ *
+ * @param lib 目标音源库
+ * @param err 失败原因（可为空）
+ */
+export function hqBankFailureText(lib: HqSampleLibrary, err?: unknown): string {
+  const why = err instanceof Error ? err.message : ''
+  return (
+    `音源「${lib.name}」自动下载失败（约 ${(lib.sizeBytes / 1_000_000).toFixed(1)} MB）。` +
+    `这通常是**该下载地址在你所在网络不可达**，而不是你网络差——` +
+    `可以手动导入一次（**导入后会持久缓存，之后不再联网**）：` +
+    `在「设置 → 音色库」点「导入音色文件…」选择本地的 .sf2 文件即可。` +
+    (why ? `\n技术细节：${why}` : '')
+  )
+}
+
 
 /**
  * adj354：@@ 恢复默认音色的「第一音色」——试听/导出音色列表第一个启用音色的 GM 音色名。

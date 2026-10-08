@@ -33,6 +33,14 @@ export const brand = {
     run: 'jps run',
     compile: 'jps compile',
   },
+  /**
+   * adj724b（用户要求）：**官方网址**（关于对话框里给可点链接）。
+   * 放在 tokens 里而不是硬编码在组件中——品牌相关的对外地址属于品牌信息，
+   * 换域名/换仓库时只改这一处。
+   */
+  siteUrl: 'https://ijipu.pages.dev',
+  /** Obsidian 插件仓库（同一位作者，用户在 Obsidian 里用得上） */
+  obsidianRepoUrl: 'https://github.com/snailhome/obsidian-ijipu',
 } as const
 
 /** 品牌色板 */

@@ -22,7 +22,7 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { playbackCopy } from '../brand/copy'
 import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../playback/spessaCache'
-import { SpessaSynthBackend, getHqLibrary, hasBuiltinBank, GM_VOICE_OPTIONS, firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
+import { SpessaSynthBackend, getHqLibrary, hasBuiltinBank, GM_VOICE_OPTIONS, firstEnabledInstrumentRef, HQ_LIBRARIES, hqBankFailureText } from '../playback/spessaSynthBackend'
 // adj409：暂停/续播的剩余事件平移（纯函数）
 import { shiftEventsFrom } from '../playback/playbackTimeline'
 // adj647：宿主字体实测（与预览同一份 ⇒ 色块位置一致；见 preview/fontMeta.ts）
@@ -191,7 +191,8 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   useEffect(() => {
     const t = window.setTimeout(() => {
       void ensureBank().catch((e) => {
-        showNotice(`音色库下载失败：${e instanceof Error ? e.message : String(e)}`, 'error')
+        // adj724b：提示要说清"地址不可达、可手动导入一次（之后走缓存）"，见 `hqBankFailureText`
+        showNotice(hqBankFailureText(HQ_LIBRARIES[0], e), 'error')
       })
     }, 60)
     return () => window.clearTimeout(t)
