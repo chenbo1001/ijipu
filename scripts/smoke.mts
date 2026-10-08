@@ -5558,14 +5558,20 @@ console.log('[82] author credit (adj373)')
     const docSrc = String(readFileSync('src/store/docStore.ts', 'utf8'))
     const mainTsx = String(readFileSync('src/main.tsx', 'utf8'))
     const bridgeSrc = String(readFileSync('src/store/hostBridge.ts', 'utf8'))
-    check('adj724b 嵌入版里"启动自动恢复绑定"给宿主的 openFile 让路（否则点 A 显示 B）',
+    check('adj724b 嵌入版里"恢复上次绑定"给宿主的 openFile 让路（守卫在**函数内部**，覆盖全部调用者）',
       // ① 纯逻辑：窗口内为真、窗口外为假
       typeof shouldYieldBindingRestore() === 'boolean' &&
-        // ② 自动恢复前先问（顺序：先 shouldYield… 再 resolvePendingBinding）
-        /shouldYieldBindingRestore\(\)[\s\S]{0,260}?return resolvePendingBinding\(\)/.test(docSrc) &&
-        // ③ 宿主推文件前先立标记
+        // ② **关键**：守卫必须在 `resolvePendingBinding()` **函数体内**——
+        //    上一轮只加在模块级调用处，而该函数还有别的调用者（工作区面板）会绕过它：
+        //    用户日志里"宿主推来的文件打开成功"之后又出现"已恢复工作区绑定：<上一次那份>"。
+        /export async function resolvePendingBinding\(\): Promise<boolean> \{[\s\S]{0,1200}?if \(shouldYieldBindingRestore\(\)\)/.test(
+          docSrc,
+        ) &&
+        // ③ 模块级那条启动路径同样要问（双保险，且它是"最先跑"的那条）
+        /void getWorkspace\(\)[\s\S]{0,400}?shouldYieldBindingRestore\(\)/.test(docSrc) &&
+        // ④ 宿主推文件前先立标记
         /notifyHostWillOpenFile\(\)/.test(mainTsx) &&
-        // ④ 标记有自动过期（否则会永久阻断正常的绑定恢复）
+        // ⑤ 标记有自动过期（否则会永久阻断正常的绑定恢复）
         /Date\.now\(\) - hostWillOpenAt < \d+/.test(bridgeSrc))
   }
 }

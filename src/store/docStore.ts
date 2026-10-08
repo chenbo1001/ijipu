@@ -1583,6 +1583,28 @@ export async function resolvePendingBinding(): Promise<boolean> {
   const pending = st.pendingBinding
   if (!pending) return false
   if (st.binding) return false
+  /**
+   * adj724b（用户实测，本轮真正的修复点）：**嵌入版里给宿主的 `openFile` 让路**。
+   *
+   * 用户日志（顺序确凿）：
+   * ```
+   * [iJipu] 宿主推来的文件打开成功：…茶花开了.jps
+   * [iJipu] 已恢复工作区绑定：…敕勒歌.jps      ← 又被恢复覆盖（界面回到上一次那份）
+   * ```
+   *
+   * ⚠ 上一轮我把守卫加在**模块级的启动调用处**——那**拦不住**这条路径：
+   * 本函数还有别的调用者（工作区面板"每次打开面板都会尝试恢复"等），
+   * 它们都会绕过那个守卫。⇒ 守卫必须放在**函数内部**（一处口径，覆盖全部调用者）。
+   *
+   * 让路的语义是安全的：宿主刚推来一份文件 ⇒ 那份文件才是用户要看的，
+   * "恢复上一次的绑定"天然就该放弃（它本来只是**兜底**，不是用户操作）。
+   */
+  if (shouldYieldBindingRestore()) {
+    console.info(
+      `[iJipu] 跳过"恢复上次绑定"（宿主刚推来文件，给 openFile 让路）：${pending.segs.join('/')}`,
+    )
+    return false
+  }
   const ws = await getWorkspace()
   if (!ws) {
     console.info('[iJipu] 未恢复工作区绑定：当前没有工作区')
