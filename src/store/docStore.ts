@@ -1604,19 +1604,24 @@ export async function resolvePendingBinding(): Promise<boolean> {
   const st = useDocStore.getState()
   const pending = st.pendingBinding
   if (!pending) return false
-  if (st.binding) return false
   /**
-   * adj724b（用户实测，已定位）：**这里的让路守卫是多余的，已撤掉**。
+   * adj724b（用户实测，**最终定位**）：**判断必须用"写之前"的实时状态，不能用开头那份快照。**
    *
-   * 曾经的判断是"启动时的恢复会与宿主的 openFile 竞争"，于是加了这个守卫。
-   * 但日志证明：恢复之所以能覆盖打开结果，根因是 **`openWorkspaceFile()` 认领绑定太晚**
-   * （它在函数末尾才 `set({ binding })`，而 `await readWorkspaceText` 在它之前）
-   * ⇒ 恢复路径先通过上面那道 `if (st.binding)` 守卫、后完成，把结果覆盖。
+   * 这段函数在 `await getWorkspace()` / `await queryWorkspacePermission()` / `await hasEntry()`
+   * 之间会**让出主线程**，而宿主的 `openWorkspaceFile()`（用户点了库里的 `.jps`）正是在这些
+   * 间隙里认领了绑定。此前本函数用的是**函数开头取的那份快照** `st`：
    *
-   * 那个根因已在 `openWorkspaceFile()` 里修掉（**第一个 await 之前**同步认领 + 失败回滚）。
-   * 这里再加时间窗口判断反而有害：它会在用户**正常**重新打开应用时误伤"恢复上次绑定"。
-   * ⇒ 撤掉，恢复原语义（依赖那道数据流守卫即可，它现在一定能拦住）。
+   * | 时刻 | 本函数 | `openWorkspaceFile()`（宿主推来） |
+   * |---|---|---|
+   * | t1 | 读快照 `st`（binding 空）⇒ 通过守卫 | — |
+   * | t2 | `await getWorkspace()` 挂起 | 认领 `binding = 痴情冢` |
+   * | t3 | 恢复仍用**旧快照**判断 ⇒ 覆盖成茶花开了 | 已结束 |
+   *
+   * ⇒ 用户看到"点了 A 显示 B"。修法：在**落笔之前**重新读一次实时状态；
+   * 只要此刻已经有绑定了（通常是宿主的 openFile 刚认领的），就放弃恢复。
+   * 下面那次 `st.binding` 检查保留（早退，省掉后面的异步开销）。
    */
+  if (st.binding) return false
   const ws = await getWorkspace()
   if (!ws) {
     console.info('[iJipu] 未恢复工作区绑定：当前没有工作区')
@@ -1652,6 +1657,22 @@ export async function resolvePendingBinding(): Promise<boolean> {
   }
   if (!(await hasEntry(ws, segs.slice(0, -1), segs[segs.length - 1]))) {
     console.info(`[iJipu] 未恢复工作区绑定：${joinPath(segs)} 已不在工作区里`)
+    return false
+  }
+  /**
+   * adj724b：**落笔前再读一次实时状态**（关键，见函数开头的说明）。
+   *
+   * 上面的 `await` 期间，宿主的 `openWorkspaceFile()` 可能刚刚认领了绑定
+   * （用户点了库里的另一份 `.jps`）——那时**它才是用户要的**，恢复必须让路。
+   * 否则会把刚打开的那份覆盖成"上一次的那份"（用户实测：「点 A 显示 B」）。
+   */
+  const now = useDocStore.getState()
+  if (now.binding) {
+    console.info(
+      `[iJipu] 放弃恢复绑定：${joinPath(segs)}（期间已有更新的绑定：${joinPath(now.binding.segs)}）`,
+    )
+    // 清掉过期的待恢复项，避免它下次又冒出来覆盖
+    useDocStore.setState({ pendingBinding: null })
     return false
   }
   useDocStore.setState({ binding: pending, pendingBinding: null })

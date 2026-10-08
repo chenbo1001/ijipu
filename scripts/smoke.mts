@@ -5589,6 +5589,27 @@ console.log('[82] author credit (adj373)')
         /const prevBinding = useDocStore\.getState\(\)\.binding/.test(fnBody) &&
         /set\(\{ binding: prevBinding, pendingBinding: prevPending \}\)/.test(fnBody))
   }
+  /**
+   * adj724b（用户实测，**最终定位**）：并发覆盖的**真正机制**是"判断用了陈旧快照"。
+   *
+   * `resolvePendingBinding()` 在多个 `await` 之间会让出主线程，而宿主的 `openWorkspaceFile()`
+   * 正是在这些间隙里认领了绑定。此前它用的是**函数开头取的那份快照** `st`：
+   * t1 读快照（binding 空）⇒ 通过守卫；t2 挂起期间宿主认领；t3 恢复仍按旧快照判断 ⇒ **覆盖**。
+   *
+   * 断言（口径）：**落笔之前必须重新读实时状态**——`useDocStore.getState()` 要出现在
+   * 最后一次 `await hasEntry(...)` 与 `setState({ binding: pending … })` **之间**。
+   */
+  {
+    const storeSrc3 = String(readFileSync('src/store/docStore.ts', 'utf8'))
+    const fnStart = storeSrc3.indexOf('export async function resolvePendingBinding()')
+    const fnBody = fnStart >= 0 ? storeSrc3.slice(fnStart, fnStart + 3200) : ''
+    const hasEntryAt = fnBody.indexOf('await hasEntry(')
+    const recheckAt = fnBody.indexOf('const now = useDocStore.getState()')
+    const writeAt = fnBody.indexOf('setState({ binding: pending, pendingBinding: null })')
+    check('adj724b `resolvePendingBinding` 落笔前重新读实时状态（陈旧快照 + await 间隙 = 覆盖刚打开的文件）',
+      fnStart >= 0 && hasEntryAt >= 0 && recheckAt > hasEntryAt && writeAt > recheckAt &&
+        /if \(now\.binding\) \{[\s\S]{0,300}?return false/.test(fnBody))
+  }
 }
 
 // ---- 83. 试听高亮/色块覆盖增时线（adj374）----
