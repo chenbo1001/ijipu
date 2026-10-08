@@ -1843,6 +1843,8 @@ export function layoutScore(
             voltaEndSlash: bar.voltaEndSlash,
             voltaOnly: bar.voltaOnly,
             comment: bar.comment,
+            // adj723aa：源码原文透传（跳房子配对按 `[`/`]` 出现顺序判定；不改画法）
+            raw: bar.raw,
             // adj627：临时转调（`"d:..."`）
             keyChange: bar.keyChange,
             ...(bar.keyChange ? keyChangeFields(bar.keyChange) : {}),

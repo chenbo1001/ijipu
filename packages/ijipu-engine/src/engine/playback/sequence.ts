@@ -161,6 +161,11 @@ interface SeqItem {
     keyChange?: PlacedBarline['keyChange']
     /** adj723aa：小节线自己的引号备注（旧式跳房子的番号写在这里，如 `|"1." [ …`） */
     comment?: string
+    /**
+     * adj723aa：小节线的**源码原文**——跳房子配对要按 `raw` 里 `[`/`]` 的**出现顺序**判定
+     * （同一根线上可能既有 `]` 又有 `[`，如 `|]["2."`；「`]` 写在 `[` 前面」）。
+     */
+    raw?: string
   }
 }
 
@@ -708,6 +713,8 @@ export function buildPlaySequence(
              * `voltaStart` 却落在随后的 `[` 线上——不带上它，那种房子就建不出计数器。
              */
             comment: token.comment,
+            // adj723aa：源码原文（跳房子配对按 raw 里 `[`/`]` 的出现顺序判定）
+            raw: token.raw,
           },
         }
         ls.bars.push({ items: [], bar: null })
@@ -750,8 +757,9 @@ export function buildPlaySequence(
     let voltaEndSlash: boolean | undefined
     // adj627：多声部同一根线上的转调指令（各声部写法一致 ⇒ 取首个非空）
     let keyChange: PlacedBarline['keyChange']
-    // adj723aa：小节线引号备注（旧式跳房子番号）——同样取首个非空
+    // adj723aa：小节线引号备注（旧式跳房子番号）——同样取首个非空；`raw` 取**首个非空**（配对要看 `[`/`]` 顺序）
     let comment: string | undefined
+    let raw: string | undefined
     for (const it of bars) {
       const b = it.bar as PlacedBarline
       for (const m of b.marks ?? []) marks.add(m)
@@ -760,11 +768,12 @@ export function buildPlaySequence(
       if (voltaEndSlash === undefined) voltaEndSlash = b.voltaEndSlash
       if (keyChange === undefined) keyChange = b.keyChange
       if (comment === undefined) comment = b.comment
+      if (raw === undefined && (b.raw ?? '') !== '') raw = b.raw
     }
     const first = bars[0].bar as PlacedBarline
     return {
       kind: 'bar',
-      bar: { type: first.type, marks: [...marks], voltaStart, voltaEnd, voltaEndSlash, keyChange, comment },
+      bar: { type: first.type, marks: [...marks], voltaStart, voltaEnd, voltaEndSlash, keyChange, comment, raw },
     }
   }
   // 组装成 `seq`：单元 = 连续曲行（声部号在本单元内重复即另起单元，与排版同一规则；分页标记也断单元）
@@ -857,30 +866,49 @@ export function buildPlaySequence(
   const voltaAfterRepeat = new Map<number, number>()
   const voltaAfterStrict = new Map<number, number>()
   const voltaAfterWithFine = new Map<number, number>()
+  /**
+   * adj723aa（用户口径，2026-10）：**按 `raw` 里 `[` / `]` 的"出现顺序"配对**。
+   *
+   * 用户原话：「同小节线后有结束符 `]` 有开始符 `[` 时，**结束符 `]` 写在开始符 `[` 前面**，
+   * 但需要注意小节线、`]`、`[` 之间可能会有穿插其它修饰符」。
+   *
+   * 为什么不能只看 `voltaEnd`/`voltaStart` 两个布尔量：同一根 token 上可能**既有 `]` 又有 `[`**
+   * （`|]["2."`，画法上就是同一根竖线），而两者的**先后**决定了谁关谁开——
+   * 合并成一个 token 会让上一个房子**找不到自己的末尾线**。此处按 `raw` 的出现顺序用栈配对，
+   * **不改解析模型、不改画法**。
+   */
   const pendingStarts: number[] = []
-  seq.forEach((item, si) => {
-    if (item.kind !== 'bar') return
-    // 先收尾（voltaEnd 出栈配对）再开新（voltaStart 入栈）——`:|]["2."` 同一根线上
-    // 同时有 voltaEnd（结束上一房子）与 voltaStart（开始下一房子）时，若先入栈会把自身配成自己的末尾（死循环）
-    if (item.bar?.voltaEnd && pendingStarts.length > 0) {
-      const start = pendingStarts.pop()!
-      if (item.bar.voltaEndSlash) {
-        // 未封闭房子（`|]/`）：末尾线**优先取 `:|`/`:|:`**，其次跳跃线
-        const rep = seq.findIndex((it, k) => k > si && isRepeatBar(it))
-        const strict = seq.findIndex((it, k) => k > si && isStrictCloserBar(it))
-        const withFine = seq.findIndex((it, k) => k > si && isFineOrStrictCloserBar(it))
-        voltaAfterRepeat.set(start, rep >= 0 ? rep : si)
-        voltaAfterStrict.set(start, strict >= 0 ? strict : si)
-        voltaAfterWithFine.set(start, withFine >= 0 ? withFine : si)
-      } else {
-        // 已封闭房子（`|]`）：就以该末尾小节线为界（各表一致）
-        voltaAfterRepeat.set(start, si)
-        voltaAfterStrict.set(start, si)
-        voltaAfterWithFine.set(start, si)
+  /** 按出现顺序处理每根线的 `[`/`]`：`[` 入栈、`]` 关掉最近一个未闭合的 `[` */
+  for (let si = 0; si < seq.length; si++) {
+    const item = seq[si]
+    if (item.kind !== 'bar' || !item.bar) continue
+    const raw = String((item.bar as { raw?: string }).raw ?? '')
+    const order: string[] = [...raw].filter((c) => c === '[' || c === ']')
+    // 兜底：`raw` 缺失时退回布尔量（老数据/段层合成项）
+    const seq2 = order.length > 0 ? order : [...(item.bar.voltaStart ? ['['] : []), ...(item.bar.voltaEnd ? [']'] : [])]
+    if (seq2.length === 0) continue
+    for (const ch of seq2) {
+      if (ch === '[') {
+        pendingStarts.push(si)
+      } else if (pendingStarts.length > 0) {
+        const start = pendingStarts.pop()!
+        if (item.bar.voltaEndSlash) {
+          // 未封闭房子（`|]/`）：末尾线优先取 `:|`/`:|:`，其次跳跃线
+          const rep = seq.findIndex((it, k) => k > si && isRepeatBar(it))
+          const strict = seq.findIndex((it, k) => k > si && isStrictCloserBar(it))
+          const withFine = seq.findIndex((it, k) => k > si && isFineOrStrictCloserBar(it))
+          voltaAfterRepeat.set(start, rep >= 0 ? rep : si)
+          voltaAfterStrict.set(start, strict >= 0 ? strict : si)
+          voltaAfterWithFine.set(start, withFine >= 0 ? withFine : si)
+        } else {
+          // 已封闭房子（`|]`）：就以该末尾小节线为界（各表一致）
+          voltaAfterRepeat.set(start, si)
+          voltaAfterStrict.set(start, si)
+          voltaAfterWithFine.set(start, si)
+        }
       }
     }
-    if (item.bar?.voltaStart) pendingStarts.push(si)
-  })
+  }
 
   // 3b. adj359：跳跃展开的预计算
   // - 花 S（&hs）位置：&ds 跳到「全曲第一个 hs」之后（hs 通常写在 ds 之前）
