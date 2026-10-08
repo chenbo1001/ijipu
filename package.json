@@ -15,6 +15,8 @@
     "preview": "vite preview",
     "smoke": "npm run check:encoding && vite build --config vite.smoke.config.ts && node dist-smoke/smoke.cjs",
     "release:body": "node scripts/release-body.mjs",
+    "build:embed": "npm run gen:info && node scripts/embed-assets.mjs && tsc -b && vite build --config vite.config.embed.mjs",
+    "smoke:embed": "node scripts/embed-smoke.mjs",
     "preview:render": "vite build --config vite.smoke.config.ts && node dist-smoke/preview.cjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
