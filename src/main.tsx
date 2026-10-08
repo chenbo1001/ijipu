@@ -17,6 +17,50 @@ createRoot(document.getElementById('root')!).render(
 )
 
 /**
+ * adj724b：**嵌入版启动**——先试握手（`http://127.0.0.1` 的宿主桥）。
+ *
+ * 成功 ⇒ 以 Obsidian **文库为工作区**：不弹"选文件夹"、不需要文件系统授权，
+ * 文件树的根就是文库（或设置里的子目录）。
+ * 失败（普通浏览器/桌面壳/独立页签，3 秒超时）⇒ 什么都不做，一切照旧。
+ *
+ * 放在 `createRoot` **之后**、且不 `await`：握手失败也不该拖慢首屏。
+ */
+void (async () => {
+  try {
+    const { initHostBridge } = await import('./store/hostBridge')
+    const bridge = await initHostBridge()
+    if (!bridge) return
+    const { setWorkspace, makeVaultWorkspaceRecord, isVaultWorkspace, getWorkspace } = await import('./store/workspace')
+    const { useUiStore } = await import('./store/uiStore')
+    const rec = makeVaultWorkspaceRecord(bridge.welcome.vaultName, bridge.welcome.root)
+    // 已有同源工作区且是 vault 后端 ⇒ 不重复设置（避免刷掉用户当前所在目录）
+    const cur = await getWorkspace()
+    if (!(cur && isVaultWorkspace(cur))) await setWorkspace(rec)
+    // 跟随 Obsidian 主题
+    useUiStore.getState().setThemeMode?.(bridge.welcome.theme)
+    bridge.on({
+      theme: (mode) => useUiStore.getState().setThemeMode?.(mode),
+      /**
+       * 宿主推来"要打开的文件"（双击 `.jps` 时）。
+       *
+       * 传的是**工作区相对路径**（宿主已按工作区根换算好）⇒ 直接切段交给
+       * `openWorkspaceFile`（它收 `string[]`，相对当前工作区根）。
+       */
+      openFile: (path) => {
+        void (async () => {
+          const { useDocStore } = await import('./store/docStore')
+          const segs = path.split('/').filter((s) => s !== '')
+          if (segs.length === 0) return
+          await useDocStore.getState().openWorkspaceFile(segs)
+        })()
+      },
+    })
+  } catch {
+    /* 忽略：不是嵌入环境（或宿主不可用）时，走原有的 fsa/path 后端 */
+  }
+})()
+
+/**
  * adj443：是否运行在 **Tauri 桌面端**（`window.__TAURI__` 由 `withGlobalTauri` 注入）。
  * 与 `playback/samplerCache.ts` 的判定同源。
  */
@@ -43,7 +87,23 @@ function isTauriDesktop(): boolean {
  * 处理：① 桌面端**不注册**；② 若此前版本已注册过（老用户），**主动 unregister + 清空
  * cacheStorage + 重载一次**，把被污染的缓存一次性摘掉（否则老用户仍然看到旧界面）。
  */
-if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+/**
+ * adj724b：是否运行在**宿主 iframe** 里（Obsidian 嵌入版 / 其它宿主嵌入）。
+ *
+ * 用途：iframe 里**不注册 Service Worker**——SW 的作用域是 origin（嵌入版是
+ * `http://127.0.0.1:<port>`），而那个服务只为本次会话提供单文件页面，
+ * 完全没有 `/sw.js`；更糟的是 SW 会跨会话存活，可能在下次打开时把页面搞坏。
+ * PWA 的离线能力只对**独立网页版**有意义。
+ */
+function isEmbeddedFrame(): boolean {
+  try {
+    return window.parent !== window
+  } catch {
+    return true // 跨源访问 parent 抛错 ⇒ 一定在 iframe 里
+  }
+}
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator && !isEmbeddedFrame()) {
   if (isTauriDesktop()) {
     // 老版本可能已注册过 SW：注销 + 清缓存 + 重载一次（仅在确有注册/缓存时重载，避免每次启动都刷新）
     void (async () => {

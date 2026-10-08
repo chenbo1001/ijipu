@@ -10928,15 +10928,16 @@ async function runAdj540WorkspaceTests() {
       /openWorkspaceFile: async \(path\) =>/.test(store) &&
       /saveToWorkspace: async \(path\) =>/.test(store),
     '')
-  // adj568：工作区模块自包含 + **两套后端**（`fsa` 句柄 / `path` 磁盘路径）共用同一组 IO 原语。
-  check('adj540/adj568 工作区模块自包含：权限复用 saveSupport（不另写一套）、路径只存根句柄/根路径 + 相对段，且 IO 收敛到原语',
+  // adj568：工作区模块自包含 + 后端分派（`fsa` 句柄 / `path` 磁盘路径 / adj724b `vault` 宿主桥）
+  // 共用同一组 IO 原语。
+  check('adj540/adj568/adj724b 工作区模块自包含：权限复用 saveSupport（不另写一套）、路径只存根句柄/根路径/宿主桥 + 相对段，且 IO 收敛到原语',
     /from '\.\/saveSupport'/.test(wsSrc) &&
       /async function resolveFileHandle/.test(wsSrc) &&
       /export interface WorkspaceRecord/.test(String(readFileSync('src/store/fileHandleDb.ts', 'utf8'))) &&
-      // 两套后端：`backendOf` 分流 + 原语层（列目录/读/写/判空）
-      /export function backendOf\(rec: \{ handle\?: FileSystemDirectoryHandle; dir\?: string \} \| null\): WorkspaceBackend \| null/.test(
-        wsSrc,
-      ) &&
+      // 后端分派：`backendOf` 认得三种记录形态（`bridge` / `dir` / `handle`）
+      /export function backendOf\(rec: \{/.test(wsSrc) &&
+      /if \(rec\.bridge\) return 'vault'/.test(wsSrc) &&
+      /export type WorkspaceBackend = 'fsa' \| 'path' \| 'vault'/.test(wsSrc) &&
       /async function listRaw\(/.test(wsSrc) &&
       /async function readTextRaw\(/.test(wsSrc) &&
       /async function writeTextRaw\(/.test(wsSrc) &&
@@ -13798,17 +13799,18 @@ async function runAdj541DockToggleTests() {
       rustCode.indexOf('fn ws_remove_empty_dir'),
       rustCode.indexOf('fn ws_pick_dir'),
     )
-    check('adj568 桌面端走 `path` 后端：有桌面壳时**先**用原生选择器，绝不退回 `showDirectoryPicker`',
-      /export function backendOf\(rec: \{ handle\?: FileSystemDirectoryHandle; dir\?: string \} \| null\): WorkspaceBackend \| null/.test(
+    check('adj568/adj724b 桌面端走 `path` 后端：有桌面壳时**先**用原生选择器，绝不退回 `showDirectoryPicker`；`vault`（宿主桥）排在最前',
+      /export function backendOf\(rec: \{/.test(
         wsSrc,
       ) &&
+        /if \(rec\.bridge\) return 'vault'/.test(wsSrc) &&
         /if \(typeof rec\.dir === 'string' && rec\.dir\) return 'path'/.test(wsSrc) &&
         /export function supportsPathWorkspace\(\): boolean \{[\s\S]{0,120}?return shellInvoke\(\) !== null/.test(wsSrc) &&
         // 选目录：**壳里那条 return 必须先于 FSA 那条**（否则桌面端又会被黑名单挡住）
         /export async function pickWorkspaceDir\(\): Promise<WorkspaceRecord \| null> \{[\s\S]{0,200}?if \(shellInvoke\(\)\) \{[\s\S]{0,200}?ws_pick_dir[\s\S]{0,160}?makePathWorkspaceRecord\(dir\)/.test(
           wsSrc,
         ) &&
-        /export function isWorkspaceAvailable\(\): boolean \{[\s\S]{0,140}?return supportsPathWorkspace\(\) \|\| isWorkspaceSupported\(\)/.test(
+        /export function isWorkspaceAvailable\(\): boolean \{[\s\S]{0,160}?return supportsVaultWorkspace\(\) \|\| supportsPathWorkspace\(\) \|\| isWorkspaceSupported\(\)/.test(
           wsSrc,
         ),
       '')

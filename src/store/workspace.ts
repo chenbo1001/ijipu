@@ -35,6 +35,24 @@ import {
   type WorkspaceRecord,
 } from './fileHandleDb'
 import { ensureWritePermission } from './saveSupport'
+import {
+  hostBridge,
+  isHostEmbedded,
+  hostPathOf,
+  type HostBridge,
+} from './hostBridge'
+
+/**
+ * adj724b：宿主桥调用的统一入口。
+ *
+ * `hasHostBridge` 用在各 IO 原语里做"这条记录是不是走桥"的判断；
+ * 返回 `null` 表示"当前不是嵌入环境"（调用方应继续走 fsa/path）。
+ */
+function vaultCall<T>(op: string, args: Record<string, unknown>): Promise<T> | null {
+  const b: HostBridge | null = hostBridge()
+  if (!b) return null
+  return b.call<T>(op, args)
+}
 
 /** 目录里的一项（只列子目录与 .jps 文件——工作区是"谱夹"，不该把别的文件混进来） */
 export interface DirEntry {
@@ -53,15 +71,25 @@ export function isWorkspaceSupported(): boolean {
   }
 }
 
-/** 工作区后端（adj568）：`fsa` = 网页版句柄；`path` = 桌面壳磁盘路径 */
-export type WorkspaceBackend = 'fsa' | 'path'
+/** 工作区后端（adj568）：`fsa` = 网页版句柄；`path` = 桌面壳磁盘路径；`vault` = 宿主桥（Obsidian 嵌入版，adj724b） */
+export type WorkspaceBackend = 'fsa' | 'path' | 'vault'
 
-/** 该记录走哪套后端（`dir` 优先：桌面端新选的工作区一律是路径后端）；两样都没有 ⇒ null */
-export function backendOf(rec: { handle?: FileSystemDirectoryHandle; dir?: string } | null): WorkspaceBackend | null {
+/** 该记录走哪套后端（`bridge` 优先：嵌入版由宿主提供，不带句柄；`dir` 次之；`handle` 最后） */
+export function backendOf(rec: {
+  handle?: FileSystemDirectoryHandle
+  dir?: string
+  bridge?: unknown
+} | null): WorkspaceBackend | null {
   if (!rec) return null
+  if (rec.bridge) return 'vault'
   if (typeof rec.dir === 'string' && rec.dir) return 'path'
   if (rec.handle) return 'fsa'
   return null
+}
+
+/** 是否是**宿主桥**后端（Obsidian 嵌入版：文库即工作区，无需授权） */
+export function isVaultWorkspace(rec: { bridge?: unknown } | null): boolean {
+  return backendOf(rec) === 'vault'
 }
 
 /** 是否是桌面端的**路径后端**（UI 据此显示真实磁盘路径、隐藏"授权"按钮） */
@@ -79,8 +107,19 @@ export function supportsPathWorkspace(): boolean {
  * adj568：桌面壳里 `showDirectoryPicker` 其实也存在（WebView2 也有 FSA），
  * 但那条路会被敏感目录黑名单挡住，所以桌面端一律走 `path`——判定必须**先看壳**。
  */
+/** 是否走**宿主桥**后端（Obsidian 嵌入版：由宿主提供文库工作区，无需选文件夹/授权） */
+export function supportsVaultWorkspace(): boolean {
+  return isHostEmbedded()
+}
+
+/**
+ * 工作区功能是否**可用**：宿主桥（嵌入版）/ 桌面壳（原生选目录 + 路径读写）/ 浏览器 FSA 选目录。
+ *
+ * adj724b：`vault` 必须**排在最前**——嵌入版里 `showDirectoryPicker` 也许存在，
+ * 但那个"选文件夹"的交互正是我们要避免的。
+ */
 export function isWorkspaceAvailable(): boolean {
-  return supportsPathWorkspace() || isWorkspaceSupported()
+  return supportsVaultWorkspace() || supportsPathWorkspace() || isWorkspaceSupported()
 }
 
 /**
@@ -555,6 +594,18 @@ async function listRaw(
   needMtime = true,
 ): Promise<RawEntry[]> {
   const root = rec.handle
+  /** adj724b：嵌入版（宿主桥）——文库即工作区，不需要句柄 */
+  const viaBridge = vaultCall<{ dirs: { name: string; mtime: number }[]; files: { name: string; mtime: number }[] }>(
+    'list',
+    { path: hostPathOf(segs) },
+  )
+  if (viaBridge) {
+    const r = await viaBridge
+    return [
+      ...r.dirs.map((e) => ({ name: e.name, kind: 'dir' as const, mtime: e.mtime })),
+      ...r.files.map((e) => ({ name: e.name, kind: 'file' as const, mtime: e.mtime })),
+    ]
+  }
   if (backendOf(rec) !== 'fsa' || !root) {
     const list = await invokeWs<{ name: string; dir: boolean; mtime: number }[]>('ws_list_dir', {
       root: rec.dir,
@@ -600,6 +651,14 @@ async function listRaw(
 /** 目录是否存在（工作区根被外部删掉/移动时，UI 据此**如实提示**而不是给一个空列表） */
 async function dirExistsRaw(rec: WorkspaceRecord, segs: readonly string[]): Promise<boolean> {
   const root = rec.handle
+  const viaBridge = vaultCall<{ exists: boolean }>('exists', { path: hostPathOf(segs) })
+  if (viaBridge) {
+    try {
+      return (await viaBridge).exists
+    } catch {
+      return false
+    }
+  }
   if (backendOf(rec) !== 'fsa' || !root) {
     try {
       return await invokeWs<boolean>('ws_dir_exists', { root: rec.dir, segs: normalizeRelPath(segs) })
@@ -618,6 +677,11 @@ async function dirExistsRaw(rec: WorkspaceRecord, segs: readonly string[]): Prom
 /** 目录是否**完全为空**（列**所有**条目，不只看 `.jps`——删目录前必须确认真空） */
 async function isDirEmptyRaw(rec: WorkspaceRecord, segs: readonly string[]): Promise<boolean> {
   const root = rec.handle
+  const viaBridge = vaultCall<{ dirs: unknown[]; files: unknown[] }>('list', { path: hostPathOf(segs) })
+  if (viaBridge) {
+    const r = await viaBridge
+    return r.dirs.length === 0 && r.files.length === 0
+  }
   if (backendOf(rec) !== 'fsa' || !root) {
     return invokeWs<boolean>('ws_is_dir_empty', { root: rec.dir, segs: normalizeRelPath(segs) })
   }
@@ -629,6 +693,8 @@ async function isDirEmptyRaw(rec: WorkspaceRecord, segs: readonly string[]): Pro
 /** 读文本 */
 async function readTextRaw(rec: WorkspaceRecord, segs: readonly string[]): Promise<string> {
   const root = rec.handle
+  const viaBridge = vaultCall<{ text: string }>('read', { path: hostPathOf(segs) })
+  if (viaBridge) return (await viaBridge).text
   if (backendOf(rec) !== 'fsa' || !root) {
     return invokeWs<string>('ws_read_text', { root: rec.dir, segs: normalizeRelPath(segs) })
   }
@@ -643,6 +709,12 @@ async function readTextRaw(rec: WorkspaceRecord, segs: readonly string[]): Promi
  */
 async function writeTextRaw(rec: WorkspaceRecord, segs: readonly string[], text: string): Promise<void> {
   const root = rec.handle
+  const viaBridge = vaultCall<Record<string, never>>('write', { path: hostPathOf(segs), text })
+  if (viaBridge) {
+    // 宿主侧已做"写完回读校验"，这里只等结果
+    await viaBridge
+    return
+  }
   if (backendOf(rec) !== 'fsa' || !root) {
     await invokeWs<null>('ws_write_text', { root: rec.dir, segs: normalizeRelPath(segs), text })
     return
@@ -660,6 +732,11 @@ async function writeTextRaw(rec: WorkspaceRecord, segs: readonly string[], text:
 /** 新建目录（同名已存在 ⇒ `EXISTS`，交给调用方提示；不静默复用） */
 async function makeDirRaw(rec: WorkspaceRecord, segs: readonly string[]): Promise<void> {
   const root = rec.handle
+  const viaBridge = vaultCall<Record<string, never>>('mkdir', { path: hostPathOf(segs) })
+  if (viaBridge) {
+    await viaBridge
+    return
+  }
   if (backendOf(rec) !== 'fsa' || !root) {
     await invokeWs<null>('ws_create_dir', { root: rec.dir, segs: normalizeRelPath(segs) })
     return
@@ -675,6 +752,11 @@ async function removeRaw(rec: WorkspaceRecord, segs: readonly string[], isDir: b
   const root = rec.handle
   const s = normalizeRelPath(segs)
   if (s.length === 0) throw new Error('empty path')
+  const viaBridge = vaultCall<Record<string, never>>(isDir ? 'rmdirIfEmpty' : 'remove', { path: hostPathOf(s) })
+  if (viaBridge) {
+    await viaBridge
+    return
+  }
   if (backendOf(rec) !== 'fsa' || !root) {
     await invokeWs<null>(isDir ? 'ws_remove_empty_dir' : 'ws_remove_file', { root: rec.dir, segs: s })
     return
@@ -822,8 +904,25 @@ function trimTrailingSep(dir: string): string {
  * **反复选同一个文件夹仍是同一个工作区**（FSA 拿不到路径，只能每次发新 id，
  * 于是"重新选一遍"与"从最近列表切回"是两件事）。Windows 路径大小写不敏感，故统一小写。
  */
-export function makePathWorkspaceRecord(dir: string, path: readonly string[] = []): WorkspaceRecord {
-  const norm = trimTrailingSep(dir)
+/**
+ * adj724b：建一个**宿主桥**工作区记录（Obsidian 嵌入版）。
+ *
+ * 与 `fsa`/`path` 两种记录的差别：既没有句柄也没有磁盘路径，只有一个 `bridge` 标记——
+ * 文件一律经宿主（`store/hostBridge.ts` → 插件的 `vault.adapter`）读写。
+ * `root` 是**工作区内的初始子目录**（`''` = 文库根）。
+ */
+export function makeVaultWorkspaceRecord(vaultName: string, subdir: string = ''): WorkspaceRecord {
+  const rel = subdir.replace(/^\/+|\/+$/g, '')
+  const id = `vault:${vaultName}:${rel}`
+  return {
+    id,
+    name: rel === '' ? vaultName : `${vaultName}/${rel}`,
+    bridge: { vaultName },
+    path: [],
+  }
+}
+
+export function makePathWorkspaceRecord(dir: string, path: readonly string[] = []): WorkspaceRecord {  const norm = trimTrailingSep(dir)
   const name = norm.split(/[\\/]/).filter(Boolean).pop() ?? norm
   return { id: `path:${norm.toLowerCase()}`, name, dir: norm, path: normalizeRelPath(path) }
 }

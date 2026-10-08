@@ -106,6 +106,14 @@ export interface WorkspaceRecord {
    * 也顺带省掉"重开应用要重新授权目录"这一步。
    */
   dir?: string
+  /**
+   * adj724b：**宿主桥**工作区（Obsidian 嵌入版）。
+   *
+   * 有它就表示"这个工作区由宿主提供"（文库即工作区）：不带句柄也不带磁盘路径，
+   * 读写一律经 `store/hostBridge.ts` 转发给宿主。
+   * 只记展示信息（文库名），**不持久化任何句柄**——宿主每次启动自带。
+   */
+  bridge?: { vaultName: string }
   /** 上次所在的子目录（相对根；`[]` = 根目录本身） */
   path: string[]
 }
