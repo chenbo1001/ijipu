@@ -912,13 +912,21 @@ function trimTrailingSep(dir: string): string {
  * `root` 是**工作区内的初始子目录**（`''` = 文库根）。
  */
 export function makeVaultWorkspaceRecord(vaultName: string, subdir: string = ''): WorkspaceRecord {
-  const rel = subdir.replace(/^\/+|\/+$/g, '')
+  const segs = subdir.replace(/^\/+|\/+$/g, '').split('/').filter((s) => s !== '')
+  const rel = segs.join('/')
   const id = `vault:${vaultName}:${rel}`
   return {
     id,
     name: rel === '' ? vaultName : `${vaultName}/${rel}`,
     bridge: { vaultName },
-    path: [],
+    /**
+     * `path` = **进入工作区后所在的初始目录**。
+     *
+     * 注意：这里存的是**相对文库根**的路径（不是相对子目录），
+     * 因为宿主桥的 `root` 一律是 `''`（宿主按**文库相对路径**读写），
+     * 两者必须同口径——否则「设置里填了子目录」会变成"文件树从文库根开始"（设置失效）。
+     */
+    path: segs,
   }
 }
 
