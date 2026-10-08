@@ -120,8 +120,6 @@ import { createSubdir, readDirEntries } from '../src/store/workspace.ts'
 // adj373：作者署名（品牌 tokens + 关于对话框文案）
 import { brand } from '../src/brand/tokens.ts'
 import { aboutCopy } from '../src/brand/copy.ts'
-// adj724b：嵌入版"启动自动恢复绑定要给宿主的 openFile 让路"——纯逻辑直接跑
-import { shouldYieldBindingRestore } from '../src/store/hostBridge.ts'
 import { uiCopy } from '../src/brand/copy.ts'
 import { appHeightPx } from '../src/pwa/appHeight.ts'
 import { normalizePastedSource } from '../src/store/importSource.ts'
@@ -5557,23 +5555,13 @@ console.log('[82] author credit (adj373)')
   {
     const docSrc = String(readFileSync('src/store/docStore.ts', 'utf8'))
     const mainTsx = String(readFileSync('src/main.tsx', 'utf8'))
-    const bridgeSrc = String(readFileSync('src/store/hostBridge.ts', 'utf8'))
-    check('adj724b 嵌入版里"恢复上次绑定"给宿主的 openFile 让路（守卫在**函数内部**，覆盖全部调用者）',
-      // ① 纯逻辑：窗口内为真、窗口外为假
-      typeof shouldYieldBindingRestore() === 'boolean' &&
-        // ② **关键**：守卫必须在 `resolvePendingBinding()` **函数体内**——
-        //    上一轮只加在模块级调用处，而该函数还有别的调用者（工作区面板）会绕过它：
-        //    用户日志里"宿主推来的文件打开成功"之后又出现"已恢复工作区绑定：<上一次那份>"。
-        /export async function resolvePendingBinding\(\): Promise<boolean> \{[\s\S]{0,1200}?if \(shouldYieldBindingRestore\(\)\)/.test(
-          docSrc,
-        ) &&
-        // ③ 模块级那条启动路径同样要问（双保险，且它是"最先跑"的那条）
-        /void getWorkspace\(\)[\s\S]{0,400}?shouldYieldBindingRestore\(\)/.test(docSrc) &&
-        // ④ 宿主推文件前先立标记
+    check('adj724b 嵌入版里"打开 A 被恢复成 B"的根因修法在 `openWorkspaceFile`（**不是**用时间窗口去挡）',
+      // ① `resolvePendingBinding()` 里**不该**再有"让路守卫"——那是治标，且会误伤正常重开应用时的恢复
+      !/export async function resolvePendingBinding[\s\S]{0,1200}?shouldYieldBindingRestore\(\)/.test(docSrc) &&
+        // ② 宿主推文件前仍记录一条时序信号（排错用）
         /notifyHostWillOpenFile\(\)/.test(mainTsx) &&
-        // ⑤ 标记有自动过期（否则会永久阻断正常的绑定恢复）
-        /hostWillOpenAt = 0/.test(bridgeSrc) &&
-        /const RELEASE_MS = \d+/.test(bridgeSrc))
+        // ③ 真正管用的仍是那道数据流守卫（`st.binding` 非空即不恢复）
+        /if \(st\.binding\) return false/.test(docSrc))
   }
   /**
    * adj724b（用户实测，真正的根因）：**`openWorkspaceFile` 必须在第一个 await 之前"认领"绑定**。
@@ -13849,13 +13837,14 @@ async function runAdj541DockToggleTests() {
       /boundToOtherWorkspace: \(boundWs: string, currentWs: string, path: string\)/.test(copySrc2) &&
       /sourceMissing: \(path: string\)/.test(copySrc2),
     '')
-  check('adj544/adj724b 启动/授权后**恢复绑定**（三条件全满足才升级；且嵌入版里给宿主的 openFile 让路）',
+  check('adj544/adj724b 启动/授权后**恢复绑定**（三条件全满足才升级）',
     /export async function resolvePendingBinding\(\): Promise<boolean>/.test(store) &&
       /if \(ws\.id !== pending\.wsId\)/.test(store) &&
       /await queryWorkspacePermission\(ws\)/.test(store) &&
       /await hasEntry\(ws, segs\.slice\(0, -1\), segs\[segs\.length - 1\]\)/.test(store) &&
-      // adj724b：模块加载时那条自动恢复**先问"要不要让路"**（宿主即将推文件 ⇒ 跳过，避免点 A 显示 B）
-      /void getWorkspace\(\)\s*\n\s*\.then\(\(\) => \{[\s\S]{0,400}?shouldYieldBindingRestore\(\)[\s\S]{0,400}?resolvePendingBinding\(\)/.test(
+      // adj724b：模块加载时那条自动恢复**不再**用时间窗口"让路"（治标）——
+      // 真正的根因修法在 `openWorkspaceFile`：**第一个 await 之前**同步认领绑定
+      /void getWorkspace\(\)\s*\n\s*\.then\(\(\) => \{[\s\S]{0,400}?resolvePendingBinding\(\)/.test(
         store,
       ) &&
       // 面板：授权成功后、以及每次打开面板都会尝试恢复

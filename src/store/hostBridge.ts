@@ -81,31 +81,33 @@ export function isHostEmbedded(): boolean {
  * 由宿主推来的文件来建立绑定关系（它本来就会建立，见 `openWorkspaceFile`）。
  * 之后（`RELEASE_MS` 后）标记自动清除，回到正常语义。
  */
+/**
+ * adj724b：**宿主即将推一个文件**（用户点了库里的 `.jps`）——当前**不再用于**绑定恢复的让路。
+ *
+ * 保留它是因为它同时是一份**时序信号**：嵌入版里"宿主推文件"与"应用自身的启动恢复"
+ * 是两条并发链，排错时能直接从日志看出先后（`main.tsx` 在推文件前会记一条）。
+ *
+ * ⚠ 那个"让路守卫"已撤：真正的根因是 `openWorkspaceFile()` **认领绑定太晚**
+ * （见 `docStore.ts` 的注释），已在那边用"第一个 await 之前同步认领"修掉。
+ * 拿时间窗口去挡是治标，而且会误伤用户**正常**重开应用时的"恢复上次绑定"。
+ */
 let hostWillOpenAt = 0
 
-/**
- * 标记"宿主马上会推一个文件"，并返回一个**释放函数**。
- *
- * 释放前 `shouldYieldBindingRestore()` 一直为真（另有 `RELEASE_MS` 兜底过期，
- * 防止宿主那条链路出错时永久阻断正常的绑定恢复）。
- */
+/** 标记"宿主马上会推一个文件"；释放即清除（另有 `RELEASE_MS` 兜底） */
 export function notifyHostWillOpenFile(): () => void {
   hostWillOpenAt = Date.now()
   return () => {
-    // 再加一段小尾巴：`openWorkspaceFile` 内部还有 await（读文件/写草稿），
-    // 期间别的恢复路径可能刚好被排到 ⇒ 释放后仍留一点窗口，避免"刚好卡在缝里"。
-    hostWillOpenAt = Date.now() + RELEASE_MS
+    hostWillOpenAt = 0
   }
 }
 
-/** 兜底窗口：标记最长生效果这么久（正常由释放函数提前结束） */
+/** 兜底窗口（避免宿主链路出错时标记长期滞留） */
 const RELEASE_MS = 5000
 
-/** 自动恢复绑定是否该**让路**给宿主的 openFile */
+/** 最近一次"宿主即将推文件"是否仍在窗口内（仅用于诊断/日志，不参与正确性判断） */
 export function shouldYieldBindingRestore(): boolean {
   if (hostWillOpenAt === 0) return false
-  if (Date.now() < hostWillOpenAt) return true
-  // 过期：清掉标记，回到正常语义（浏览器 / 桌面端不受影响）
+  if (Date.now() - hostWillOpenAt < RELEASE_MS) return true
   hostWillOpenAt = 0
   return false
 }

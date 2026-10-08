@@ -1606,27 +1606,17 @@ export async function resolvePendingBinding(): Promise<boolean> {
   if (!pending) return false
   if (st.binding) return false
   /**
-   * adj724b（用户实测，本轮真正的修复点）：**嵌入版里给宿主的 `openFile` 让路**。
+   * adj724b（用户实测，已定位）：**这里的让路守卫是多余的，已撤掉**。
    *
-   * 用户日志（顺序确凿）：
-   * ```
-   * [iJipu] 宿主推来的文件打开成功：…茶花开了.jps
-   * [iJipu] 已恢复工作区绑定：…敕勒歌.jps      ← 又被恢复覆盖（界面回到上一次那份）
-   * ```
+   * 曾经的判断是"启动时的恢复会与宿主的 openFile 竞争"，于是加了这个守卫。
+   * 但日志证明：恢复之所以能覆盖打开结果，根因是 **`openWorkspaceFile()` 认领绑定太晚**
+   * （它在函数末尾才 `set({ binding })`，而 `await readWorkspaceText` 在它之前）
+   * ⇒ 恢复路径先通过上面那道 `if (st.binding)` 守卫、后完成，把结果覆盖。
    *
-   * ⚠ 上一轮我把守卫加在**模块级的启动调用处**——那**拦不住**这条路径：
-   * 本函数还有别的调用者（工作区面板"每次打开面板都会尝试恢复"等），
-   * 它们都会绕过那个守卫。⇒ 守卫必须放在**函数内部**（一处口径，覆盖全部调用者）。
-   *
-   * 让路的语义是安全的：宿主刚推来一份文件 ⇒ 那份文件才是用户要看的，
-   * "恢复上一次的绑定"天然就该放弃（它本来只是**兜底**，不是用户操作）。
+   * 那个根因已在 `openWorkspaceFile()` 里修掉（**第一个 await 之前**同步认领 + 失败回滚）。
+   * 这里再加时间窗口判断反而有害：它会在用户**正常**重新打开应用时误伤"恢复上次绑定"。
+   * ⇒ 撤掉，恢复原语义（依赖那道数据流守卫即可，它现在一定能拦住）。
    */
-  if (shouldYieldBindingRestore()) {
-    console.info(
-      `[iJipu] 跳过"恢复上次绑定"（宿主刚推来文件，给 openFile 让路）：${pending.segs.join('/')}`,
-    )
-    return false
-  }
   const ws = await getWorkspace()
   if (!ws) {
     console.info('[iJipu] 未恢复工作区绑定：当前没有工作区')
