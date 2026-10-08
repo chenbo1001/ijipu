@@ -83,17 +83,31 @@ export function isHostEmbedded(): boolean {
  */
 let hostWillOpenAt = 0
 
-/** 标记"宿主马上会推一个文件"，并返回一个释放函数 */
+/**
+ * 标记"宿主马上会推一个文件"，并返回一个**释放函数**。
+ *
+ * 释放前 `shouldYieldBindingRestore()` 一直为真（另有 `RELEASE_MS` 兜底过期，
+ * 防止宿主那条链路出错时永久阻断正常的绑定恢复）。
+ */
 export function notifyHostWillOpenFile(): () => void {
   hostWillOpenAt = Date.now()
   return () => {
-    hostWillOpenAt = 0
+    // 再加一段小尾巴：`openWorkspaceFile` 内部还有 await（读文件/写草稿），
+    // 期间别的恢复路径可能刚好被排到 ⇒ 释放后仍留一点窗口，避免"刚好卡在缝里"。
+    hostWillOpenAt = Date.now() + RELEASE_MS
   }
 }
 
-/** 自动恢复绑定是否该**让路**给宿主的 openFile（`RELEASE_MS` 窗口内为真） */
+/** 兜底窗口：标记最长生效果这么久（正常由释放函数提前结束） */
+const RELEASE_MS = 5000
+
+/** 自动恢复绑定是否该**让路**给宿主的 openFile */
 export function shouldYieldBindingRestore(): boolean {
-  return hostWillOpenAt !== 0 && Date.now() - hostWillOpenAt < 2000
+  if (hostWillOpenAt === 0) return false
+  if (Date.now() < hostWillOpenAt) return true
+  // 过期：清掉标记，回到正常语义（浏览器 / 桌面端不受影响）
+  hostWillOpenAt = 0
+  return false
 }
 
 /** 从 `location.pathname` 里取一次性 token（URL 形如 `/<token>/`） */

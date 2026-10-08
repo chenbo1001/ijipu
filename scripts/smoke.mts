@@ -5572,7 +5572,8 @@ console.log('[82] author credit (adj373)')
         // ④ 宿主推文件前先立标记
         /notifyHostWillOpenFile\(\)/.test(mainTsx) &&
         // ⑤ 标记有自动过期（否则会永久阻断正常的绑定恢复）
-        /Date\.now\(\) - hostWillOpenAt < \d+/.test(bridgeSrc))
+        /hostWillOpenAt = 0/.test(bridgeSrc) &&
+        /const RELEASE_MS = \d+/.test(bridgeSrc))
   }
 }
 
