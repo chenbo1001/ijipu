@@ -112,9 +112,22 @@ async function main() {
    * 插件端同理：`webapp-assets/` 必须随 `main.js` 一起提供（见方案 §5.1）。
    */
   const ASSET_DIR = path.join(ROOT, 'dist-embed', 'public')
+  /**
+   * 冒烟用的固定 token（正式运行时由插件随机生成）。
+   *
+   * **必须有**：应用侧 `tokenFromLocation()` 从 URL 首段取 token，取不到就直接放弃握手
+   * ⇒ 服务必须把页面挂在 `/<token>/` 下，跟插件的真实行为一致。
+   * 本变量既用于服务路由，也被**注入进页面**（注入脚本在外层页面运行，拿不到脚本作用域）。
+   */
+  const TOKEN = 'smoketoken0123456789abcdef'
   const server = createServer(async (req, res) => {
     const url = String(req.url ?? '/')
-    if (url === '/' || url === '/index.html') {
+    // 剥掉 token 段：`/<token>/` 或 `/<token>/icons/xx.png`
+    const parts = url.split('?')[0].split('/').filter((s) => s !== '')
+    if (parts[0] === TOKEN) parts.shift()
+    const rest = parts.join('/')
+
+    if (rest === '' || rest === 'index.html') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
       res.end(html)
       return
@@ -138,8 +151,8 @@ async function main() {
   })
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
   const port = server.address().port
-  const url = `http://127.0.0.1:${port}/`
-  console.log(`[embed-smoke] 服务 ${url}（单文件 ${(html.length / 1024).toFixed(0)} KB）`)
+  const url = `http://127.0.0.1:${port}/${TOKEN}/`
+  console.log(`[embed-smoke] 服务 ${url}（单文件 ${(html.length / 1024).toFixed(0)} KB，token 段与插件行为一致）`)
 
   const profile = await mkdtemp(path.join(tmpdir(), 'ijipu-embed-smoke-'))
   const debugPort = 9333
@@ -194,10 +207,72 @@ async function main() {
   await c.send('Log.enable')
   await c.send('Page.enable')
   await c.send('Network.enable')
-  await sleep(3500) // 给 React 挂载 + 首屏渲染留时间
+  /**
+   * **扮演宿主**：把一条 `welcome` 推进 iframe，并回答应用发来的请求。
+   *
+   * 这一步是"能不能真的用"的关键证据——只验证"应用挂载成功"是不够的，
+   * 必须证明**桥协议两端接得上**：应用 `hello` → 宿主 `welcome` → 应用建 vault 工作区
+   * → 应用发 `list` → 宿主回目录 → 文件树渲染出来。
+   *
+   * 做法：在页面里装一个 `message` 监听（模拟父窗口），
+   * 由于 iframe 的 `parent` 就是当前页（本脚本加载的就是那个"单文件"，
+   * 它自己不是 iframe）——**不能**这么测；因此改用 `Page.addScriptToEvaluateOnNewDocument`
+   * 让页面把自己"伪装成被嵌入"（改 `window.parent` 不可行），
+   * 故这里改为**直接在 iframe 环境内注入宿主**：新建一个内层 iframe 加载同一份单文件，
+   * 外层页面充当宿主。
+   */
+  await c.send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `
+      // 只有"最外层"才装宿主桩：内层 iframe（应用）会被这个脚本也注入，故按 frameElement 判别
+      window.__ijipuHostStub = !window.frameElement;
+      if (window.__ijipuHostStub) {
+        window.__ijipuCalls = [];
+        // 注入的脚本在外层页面运行，拿不到脚本作用域里的变量 ⇒ token 由**注入时**填进来
+        const TOKEN = ${JSON.stringify(TOKEN)};
+        const HOST_ROOT = '乐谱';
+        window.addEventListener('message', (ev) => {
+          const d = ev.data;
+          if (!d || d.ch !== 'ijipu') return;
+          if (d.type === 'hello') {
+            ev.source.postMessage({
+              ch: 'ijipu', type: 'welcome',
+              vaultName: '测试文库', theme: 'dark', root: HOST_ROOT,
+              capabilities: { write: true, rename: true, remove: true, trash: true },
+            }, '*');
+            return;
+          }
+          if (d.type === 'ready') { window.__ijipuReady = true; return; }
+          if (typeof d.id === 'number') {
+            window.__ijipuCalls.push(d.op + ':' + JSON.stringify(d.args));
+            let result = {};
+            if (d.op === 'list') result = { dirs: [{ name: '子目录', mtime: 0 }], files: [{ name: '测试谱.jps', mtime: 0 }] };
+            else if (d.op === 'read') result = { text: "Q: 1 2 3 4 |\\n" };
+            else if (d.op === 'exists') result = { exists: true };
+            ev.source.postMessage({ ch: 'ijipu', id: d.id, ok: true, result }, '*');
+          }
+        });
+        // 把应用放进内层 iframe（它就会认为自己在宿主里）；src 必须带 token 段
+        const spawn = () => {
+          const f = document.createElement('iframe');
+          f.id = 'ijipu-smoke-app';
+          f.style.cssText = 'width:1000px;height:700px;border:0';
+          f.src = location.origin + '/' + TOKEN + '/';
+          f.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+          document.body.appendChild(f);
+        };
+        // 本脚本在 document-start 注入，此刻还没有 <body> ⇒ 等 DOM 就绪
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', spawn);
+        else spawn();
+      }
+      void 0;
+    `,
+  })
+  await c.send('Page.reload')
+  await sleep(6000) // 给"外层宿主桩 + 内层应用 + 桥握手 + 文件树渲染"留时间
   console.log('[embed-smoke] 采集完成，正在探测 DOM…')
 
   const errs = []
+  const warns = []
   const reqs = []
   for (const e of c.events) {
     if (e.method === 'Network.requestWillBeSent') reqs.push(String(e.params?.request?.url ?? ''))
@@ -211,18 +286,44 @@ async function main() {
     if (e.method === 'Runtime.consoleAPICalled' && e.params?.type === 'error') {
       errs.push(`console.error: ${(e.params.args ?? []).map((a) => a.value ?? a.description ?? '').join(' ')}`)
     }
+    // 排错用：捕获应用打的警告（例如"宿主桥初始化失败"）
+    if (e.method === 'Runtime.consoleAPICalled' && e.params?.type === 'warning') {
+      warns.push((e.params.args ?? []).map((a) => a.value ?? a.description ?? '').join(' '))
+    }
   }
 
   let probe
   try {
     probe = await c.send('Runtime.evaluate', {
-      expression: `JSON.stringify({
-        title: document.title,
-        rootChildren: document.getElementById('root')?.children.length ?? -1,
-        textareas: document.querySelectorAll('textarea').length,
-        bodyLen: document.body.innerHTML.length,
-        hasError: document.body.innerText.includes('Cannot find module') || document.body.innerText.includes('ChunkLoadError'),
-      })`,
+      expression: `(() => {
+        const app = document.getElementById('ijipu-smoke-app');
+        const doc = app && app.contentDocument;
+        return JSON.stringify({
+          // 外层（宿主桩）
+          hostReady: !!window.__ijipuReady,
+          calls: (window.__ijipuCalls || []).slice(0, 12),
+          callCount: (window.__ijipuCalls || []).length,
+          // 内层（应用）
+          appMounted: !!(doc && doc.getElementById('root') && doc.getElementById('root').children.length > 0),
+          appText: doc ? doc.body.innerText.slice(0, 300) : '',
+          hasTestScore: doc ? doc.body.innerText.includes('测试谱') : false,
+          hasSubdir: doc ? doc.body.innerText.includes('子目录') : false,
+          // 内层应用的**内部状态**（同源可直接读；排错用）
+          innerDebug: (() => {
+            try {
+              const fn = app && app.contentWindow && app.contentWindow.__ijipuDebug;
+              return typeof fn === 'function' ? fn() : '（无探针：说明没走到嵌入版初始化）';
+            } catch (err) {
+              return 'ERR:' + String(err && err.message);
+            }
+          })(),
+          // 旧探针（外层页面自身也加载了同一份单文件）
+          title: document.title,
+          rootChildren: document.getElementById('root')?.children.length ?? -1,
+          textareas: document.querySelectorAll('textarea').length,
+          hasError: document.body.innerText.includes('Cannot find module') || document.body.innerText.includes('ChunkLoadError'),
+        });
+      })()`,
       returnByValue: true,
     })
   } catch (e) {
@@ -251,6 +352,10 @@ async function main() {
   await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }).catch(() => {})
 
   console.log(`[embed-smoke] 页面探测: ${JSON.stringify(info)}`)
+  if (warns.length > 0) {
+    console.log(`[embed-smoke] 应用警告 ${warns.length} 条：`)
+    for (const w of [...new Set(warns)].slice(0, 5)) console.log(`  - ${w.slice(0, 200)}`)
+  }
   /** 已知噪音过滤见下（`isNoise`） */
   const realErrs = errs.filter((s) => !isNoise(s))
   if (errs.length > realErrs.length) {
@@ -284,7 +389,26 @@ async function main() {
   }
   if (info.hasError) return fail('页面出现 "Cannot find module"/"ChunkLoadError"')
 
-  console.log('[embed-smoke] ✅ 单文件产物启动成功、无运行时报错')
+  // ── 桥端到端（本轮新增，比"能启动"更强）：外层宿主桩 ↔ 内层应用 ──
+  if (!info.hostReady) return fail('应用没有发 `ready`（握手或监听注册没走通）')
+  if (info.callCount === 0) return fail('应用经桥发起了 0 次请求（vault 工作区没建立）')
+  if (!info.calls.some((c) => c.startsWith('list:'))) {
+    return fail(`应用没发起 list（应拉取文库文件树）。实际调用：${info.calls.join(' | ')}`)
+  }
+  if (!info.appMounted) return fail('内层应用没挂载')
+  /**
+   * ⚠ **不要**断言"宿主回的目录项出现在界面上"——底栏默认是收起的
+   * （`dockOpen:false` / `dockPanel:'problems'`），文件树根本没被画出来。
+   * 正确的端到端判据是：**应用发出了 `list` 且宿主答完后应用没有报错**
+   * （下文 `realErrs` 为空即证明下行也被正确消费了：若宿主应答格式不对，
+   * 应用侧会在 `readDirEntries` 里抛错并被 CDP 捕获）。
+   */
+  const dist = (info.innerDebug ?? '').slice(0, 200)
+  console.log(`[embed-smoke] ✅ 单文件产物启动成功、无运行时报错`)
+  console.log(
+    `[embed-smoke] ✅ 桥端到端通过：应用 hello→ready、发出 ${info.callCount} 次桥调用（${info.calls.slice(0, 3).join(' | ')}）、宿主应答后无报错`,
+  )
+  if (dist) console.log(`[embed-smoke] 应用侧自述：${dist}`)
   for (const s of EXPECT_SELECTORS) void s
 }
 

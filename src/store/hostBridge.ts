@@ -70,6 +70,10 @@ export class HostBridge {
   private readonly listeners: HostEvents = {}
   /** 宿主回传的环境信息（文库名/主题/工作区根/能力） */
   readonly welcome: HostWelcome
+  /** 已发起的请求总数（排错探针用） */
+  callCount = 0
+  /** 最近若干次 `op`（排错探针用；只留很短一截） */
+  readonly recentOps: string[] = []
 
   constructor(welcome: HostWelcome) {
     // 注意：项目开了 `erasableSyntaxOnly`，**不能用构造函数参数属性**（`constructor(readonly x)`）
@@ -98,6 +102,9 @@ export class HostBridge {
    */
   async call<T>(op: string, args: Record<string, unknown> = {}): Promise<T> {
     const id = ++this.seq
+    this.callCount++
+    this.recentOps.push(op)
+    if (this.recentOps.length > 32) this.recentOps.shift()
     return new Promise<T>((resolve, reject) => {
       const timer = window.setTimeout(() => {
         this.pending.delete(id)

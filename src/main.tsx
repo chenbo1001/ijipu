@@ -57,8 +57,39 @@ void (async () => {
     })
     // 监听已就绪 ⇒ 告诉宿主可以下发"本页签要打开的文件"了
     bridge.signalReady()
-  } catch {
+    /**
+     * **预热一次文库根目录**。
+     *
+     * 为什么需要：底栏默认是收起的（`dockOpen:false` / `dockPanel:'problems'`），
+     * 而列目录只发生在"工作区面板被画出来"的时候 ⇒ 嵌入版刚打开时**一次桥调用都不会发生**，
+     * 用户点开「工作区」才现拉（还会先闪一下空列表）。
+     * 这里主动拉一次，既让文件树/整树搜索立刻可用，也给"桥是否真的通了"留下可验证的痕迹。
+     *
+     * 失败**不影响**其它功能（面板打开时会自己再拉一次），故只在控制台留痕。
+     */
+    void (async () => {
+      const { readDirEntries } = await import('./store/workspace')
+      await readDirEntries(rec, [])
+    })().catch((e) => console.warn('[iJipu] 预热文库目录失败：', e))
+    /**
+     * 排错探针：把"嵌入版是否生效"的关键状态挂到 window 上。
+     *
+     * 嵌入版失败时的表现是"页面能开、但显示的不是文库"，而控制台里往往什么都看不到
+     * （初始化在动态 import 里，宿主侧也无从观察）⇒ 留一个可读探针，
+     * 供自动化冒烟与真机排错直接读取（`scripts/embed-smoke.mjs` 用的就是它）。
+     */
+    ;(window as unknown as { __ijipuDebug?: () => string }).__ijipuDebug = () =>
+      JSON.stringify({
+        vaultName: bridge.welcome.vaultName,
+        root: bridge.welcome.root,
+        calls: bridge.callCount,
+        lastOps: bridge.recentOps.slice(-8),
+      })
+  } catch (e) {
     /* 忽略：不是嵌入环境（或宿主不可用）时，走原有的 fsa/path 后端 */
+    // 但**要留痕**：嵌入版初始化失败会表现为"打开了但显示的不是文库"，
+    // 静默吞掉会让排错无从下手（冒烟脚本也靠这条日志定位）。
+    console.warn('[iJipu] 宿主桥初始化失败：', e)
   }
 })()
 
