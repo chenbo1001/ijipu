@@ -69,6 +69,7 @@ import {
   type SearchHit,
   type SearchResult,
 } from '../../store/workspace'
+import { isHostEmbedded } from '../../store/hostBridge'
 import { loadWorkspaceIndex, saveWorkspaceIndex } from '../../store/fileHandleDb'
 import { INDEX_STALE_MS, getInflightWarmScan, markWorkspaceDataChanged } from '../../store/workspaceIndexWarm'
 
@@ -1201,23 +1202,31 @@ export function WorkspacePanel() {
           </div>
           {/* 右侧操作区：与文件列表那一屏同一个 `.ws-side`（固定宽度，保证"清单"拿到剩余宽度） */}
           <div className="ws-side ws-choose-side">
-            {/* adj577：原「打开其它目录」⇒「**新工作区**」，并且从底部大按钮移到右侧操作区。
-                adj578（用户要求）：用法说明收进这个按钮的**悬浮提示**，把高度让给清单。
-                adj582（用户要求）：**样式与其它按钮一致**——去掉 `primary`（那是"强调色描边"样式，
-                在本栏里和「操作▾」/清单行那些**浅底填充**的按钮观感不一致；
-                真机对照：`primary` = 透明底 + 强调色边框/文字，普通 `.btn` = 浅底 + 常规文字色）。
-                adj586（用户要求）：原来叠在它上面的「继续访问（需授权）」**取消**（点当前项即可授权）。 */}
-            <button
-              type="button"
-              className="btn ws-side-btn"
-              onClick={() => void onPick()}
-              disabled={busy}
-              title={workspaceCopy.chooseHint}
-            >
-              {workspaceCopy.openOther}
-            </button>
-            {/* adj585（用户要求）：内核要求这句短提示**只**留在「新工作区」按钮下方 */}
-            {!supportsPathWorkspace() && <div className="ws-side-hint">{workspaceCopy.chromiumOnly}</div>}
+            {isHostEmbedded() ? (
+              /**
+               * adj724b（用户实测 #5）：**嵌入版（Obsidian iframe）里不能出现"选文件夹"**。
+               *
+               * 浏览器禁止**跨源子框架**弹文件选择器：
+               * `SecurityError: Failed to execute 'showDirectoryPicker' on 'Window':
+               *  Cross origin sub frames aren't allowed to show a file picker.`
+               * 而且嵌入版的语义本来就是"**文库即工作区**"，压根不需要选 ⇒ 直接换成一句说明。
+               */
+              <div className="ws-side-hint">{workspaceCopy.embeddedUsesVault}</div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="btn ws-side-btn"
+                  onClick={() => void onPick()}
+                  disabled={busy}
+                  title={workspaceCopy.chooseHint}
+                >
+                  {workspaceCopy.openOther}
+                </button>
+                {/* adj585（用户要求）：内核要求这句短提示**只**留在「新工作区」按钮下方 */}
+                {!supportsPathWorkspace() && <div className="ws-side-hint">{workspaceCopy.chromiumOnly}</div>}
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -1236,16 +1245,18 @@ export function WorkspacePanel() {
             adj569（用户要求）：图标从 `工作区.png` 换成专用的 `切换工作区.png`——
             同一个"工作区"概念下两处语义不同：底栏**页签**是"打开工作区面板"，
             这个**按钮**是"换一个目录当工作区"，用同一张图会让人以为它也是开关面板。 */}
-        <button
-          type="button"
-          className="ws-workspace-btn"
-          onClick={() => void (moving ? refreshMovingTarget([]) : setChoose(true))}
-          title={workspaceCopy.workspaceBtnTitle}
-          aria-label={workspaceCopy.workspaceBtnTitle}
-          disabled={busy}
-        >
-          <ToolIcon name="switchWorkspace" />
-        </button>
+        {!isHostEmbedded() && (
+          <button
+            type="button"
+            className="ws-workspace-btn"
+            onClick={() => void (moving ? refreshMovingTarget([]) : setChoose(true))}
+            title={workspaceCopy.workspaceBtnTitle}
+            aria-label={workspaceCopy.workspaceBtnTitle}
+            disabled={busy}
+          >
+            <ToolIcon name="switchWorkspace" />
+          </button>
+        )}
         <div className="ws-crumb" title={wsPathText}>
           {/* 根目录名 = 普通面包屑段（"回到工作区根目录"或"移动模式下选工作区根作目标"） */}
           <button

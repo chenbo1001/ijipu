@@ -125,7 +125,20 @@ async function main() {
     // 剥掉 token 段：`/<token>/` 或 `/<token>/icons/xx.png`
     const parts = url.split('?')[0].split('/').filter((s) => s !== '')
     if (parts[0] === TOKEN) parts.shift()
-    const rest = parts.join('/')
+    /**
+     * ⚠ **必须 `decodeURIComponent`**：资产里有中文文件名（`icons/菜单.png`），
+     * 浏览器会把它百分号编码（`%E8%8F%9C...`）。用原始串查表 ⇒ 永远查不到，
+     * 图标全 204 —— 这正是先前"图标请求 0 个"那次误判的来源。
+     */
+    const rest = parts
+      .map((s) => {
+        try {
+          return decodeURIComponent(s)
+        } catch {
+          return s
+        }
+      })
+      .join('/')
 
     if (rest === '' || rest === 'index.html') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })

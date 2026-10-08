@@ -11049,16 +11049,19 @@ async function runAdj540WorkspaceTests() {
     /const fileEntries: \(MenuEntry \| 'sep'\)\[\] = isNarrow\s*\?\s*\[entryWorkspace, entrySamples, entryPaste, entryRecent, entryTryout, entryExport, entryPrint\]/.test(
       topSrc,
     ) &&
-      /\{ label: workspaceCopy\.openSystemLabel, onPick: runOpen \}/.test(topSrc) &&
+      // adj724b：嵌入版里该菜单项带 `hidden`（跨源子框架不能弹系统选择器 ⇒ 直接不显示）
+      /\{ label: workspaceCopy\.openSystemLabel, onPick: runOpen, hidden: isHostEmbedded\(\) \}/.test(topSrc) &&
       /\| 'workspace'/.test(ui),
     '')
-  check('adj540 手机端「保存」未绑定任何文件时自动引导到工作区另存（手机上不走 showSaveFilePicker）',
-    /const runSaveSmart = async \(\) => \{[\s\S]{0,260}?isCoarsePointerDevice\(\) && isWorkspaceAvailable\(\) && !useDocStore\.getState\(\)\.binding[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)/.test(
+  check('adj540/adj724b 「保存」未绑定任何文件时自动引导到工作区另存（手机端与嵌入版都不走 showSaveFilePicker）',
+    // adj724b：判据从"仅粗指针"扩为"**粗指针 或 嵌入版**"——嵌入版在跨源 iframe 里
+    // 弹 `showSaveFilePicker` 会被浏览器拒（用户实测 #5 的 SecurityError）。
+    /const runSaveSmart = async \(\) => \{[\s\S]{0,320}?\(isCoarsePointerDevice\(\) \|\| isHostEmbedded\(\)\) && isWorkspaceAvailable\(\) && !useDocStore\.getState\(\)\.binding[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)/.test(
       topSrc,
     ) && /entrySave: MenuEntry = \{ label: '保存\(&S\)', kbd: KBD\.save, hotkey: 's', onPick: runSaveSmart \}/.test(topSrc),
     '')
-  check('adj540 手机端「另存为」也走工作区（开面板 + 展开文件名输入），桌面端仍用系统另存为',
-    /const runSaveAsSmart = async \(\) => \{[\s\S]{0,240}?isCoarsePointerDevice\(\) && isWorkspaceAvailable\(\)[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)[\s\S]{0,80}?await saveFileAs\(\)/.test(
+  check('adj540/adj724b 「另存为」在手机端与嵌入版都走工作区（开面板 + 展开文件名输入），桌面端仍用系统另存为',
+    /const runSaveAsSmart = async \(\) => \{[\s\S]{0,300}?\(isCoarsePointerDevice\(\) \|\| isHostEmbedded\(\)\) && isWorkspaceAvailable\(\)[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)[\s\S]{0,80}?await saveFileAs\(\)/.test(
       topSrc,
     ) &&
       /另存为\(&A\)…', hotkey: 'a', onPick: runSaveAsSmart/.test(topSrc) &&

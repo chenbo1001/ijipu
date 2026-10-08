@@ -207,6 +207,13 @@ export const workspaceCopy = {
   onlyListed: '只列出文件夹与 .jps 文件',
   unsupported: '当前浏览器不支持选择文件夹（需要 Chrome / Edge 等 Chromium 内核浏览器）；请改用「文件 → 导出」保存',
   noWorkspace: '还没有设工作区：请先在「文件 → 工作区…」里选一个文件夹',
+  /**
+   * adj724b：嵌入版（Obsidian）里**没有"选文件夹"这一步**——文库就是工作区。
+   * 用户实测：原来的「新工作区」按钮会弹
+   * `SecurityError: … Cross origin sub frames aren't allowed to show a file picker.`
+   * （浏览器禁止跨源子框架弹文件选择器）⇒ 整块换成这句说明。
+   */
+  embeddedUsesVault: '当前工作区为 Obsidian 文库（嵌入版无需选择文件夹）',
   picked: (name: string): string => `工作区已设为「${name}」`,
   loadFailed: (reason: string): string => `读工作区失败：${reason}`,
   opened: (p: string): string => `已从工作区打开 ${p}`,

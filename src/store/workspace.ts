@@ -944,15 +944,22 @@ function normalizeRecord(rec: WorkspaceRecord | null): WorkspaceRecord | null {
   if (!rec) return null
   const dir = typeof rec.dir === 'string' && rec.dir ? trimTrailingSep(rec.dir) : undefined
   const handle = rec.handle
-  if (!dir && !handle) return null
+  /**
+   * adj724b：**宿主桥记录既没有 `dir` 也没有 `handle`**（文库即工作区），
+   * 必须在这里就放行——否则它会被当"损坏记录"丢掉，`setWorkspace()` 静默失败，
+   * 表现为"打开 `.jps` 却提示『还没有设工作区』、文件树永远是空的"（用户实测 #4）。
+   */
+  const bridge = rec.bridge && typeof rec.bridge.vaultName === 'string' ? rec.bridge : undefined
+  if (!dir && !handle && !bridge) return null
   const fallbackId = dir ? `path:${dir.toLowerCase()}` : ''
   const id = typeof rec.id === 'string' && rec.id ? rec.id : fallbackId || newWorkspaceId()
-  const name = typeof rec.name === 'string' && rec.name ? rec.name : (handle?.name ?? '')
+  const name = typeof rec.name === 'string' && rec.name ? rec.name : (handle?.name ?? bridge?.vaultName ?? '')
   return {
     id,
     name,
     ...(handle ? { handle } : {}),
     ...(dir ? { dir } : {}),
+    ...(bridge ? { bridge } : {}),
     // adj586：`path` 必须**是数组**才交给 `normalizeRelPath`——库里存着损坏记录（比如 `path: ''`）时
     // 它会 `segs.filter is not a function` 抛错，而调用方（`listWorkspaces()`）在 async effect 里
     // 一抛就**整份清单静默变空**（真机调试时踩到：面板显示"还没有打开过的工作区"，但 IndexedDB

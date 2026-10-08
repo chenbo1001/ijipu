@@ -23,6 +23,7 @@ import { KBD, withKbd } from '../brand/shortcuts'
 // adj540：「打开/另存为」要按平台分流（**手机端以工作区优先**）并判断"是否已设工作区"
 import { isCoarsePointerDevice } from '../store/saveSupport'
 import { getWorkspace, isWorkspaceAvailable } from '../store/workspace'
+import { isHostEmbedded } from '../store/hostBridge'
 import {
   clearRecentFiles,
   loadRecentFiles,
@@ -66,6 +67,14 @@ interface MenuEntry {
   onPick: () => void
   disabled?: boolean
   /**
+   * adj724b：**不显示**该菜单项。
+   *
+   * 用途：嵌入版（Obsidian iframe）里浏览器**禁止跨源子框架弹文件选择器**，
+   * 「打开（系统文件选择器）」这类入口点了必报 `SecurityError` ⇒ 直接不显示，
+   * 而不是让用户点了才看到一句报错。
+   */
+  hidden?: boolean
+  /**
    * adj723z（用户要求）：**二级菜单**（如「文件 → 最近…」）。
    *
    * 为什么做成**内联展开**而不是悬浮飞出：`.menu-dropdown` 自身是
@@ -89,6 +98,8 @@ function MenuPanel({
     <>
       {entries.map((e, i) => {
         if (e === 'sep') return <div key={`sep-${i}`} className="menu-sep" />
+        // adj724b：`hidden` 的项**不渲染**（嵌入版里系统选择器类入口，点了必报 SecurityError）
+        if (e.hidden) return null
         const disabled = !!e.disabled
         const hasSub = !!e.submenu
         const expanded = hasSub && openSub === i
@@ -1157,8 +1168,13 @@ export function TopBar() {
    *  · 已经设过工作区 ⇒ 同样开面板（桌面端也遵循"工作区优先"）；
    *  · 其余（桌面端未设工作区 / iOS 等不支持选文件夹的浏览器）⇒ 保持原样走系统选择器 / input 降级。
    * 系统选择器另留一个菜单项（runOpenSystem），不做成"必须先设工作区才能打开"。
+   *  · **adj724b 嵌入版**：浏览器禁止**跨源子框架**弹选择器 ⇒ 一律进工作区面板（文库即工作区）。
    */
   const runOpenSmart = async () => {
+    if (isHostEmbedded() && isWorkspaceAvailable()) {
+      toggleDock('workspace')
+      return
+    }
     if ((isCoarsePointerDevice() && isWorkspaceAvailable()) || (await getWorkspace())) {
       toggleDock('workspace')
       return
@@ -1171,22 +1187,28 @@ export function TopBar() {
    * 已经绑定（工作区文件 / 桌面外部文件 / 浏览器句柄）的情况仍走 `saveFile()` 直接写回。
    */
   const runSaveSmart = async () => {
-    if (isCoarsePointerDevice() && isWorkspaceAvailable() && !useDocStore.getState().binding) {
+    /**
+     * adj724b：**嵌入版（Obsidian iframe）里没有"文件句柄"这条路**——
+     * 浏览器禁止跨源子框架弹文件选择器（用户实测 #5 的 `SecurityError`）。
+     * ⇒ 未绑定文件时一律引导到**工作区另存**（文库写作），不再尝试 `showSaveFilePicker`。
+     */
+    if ((isCoarsePointerDevice() || isHostEmbedded()) && isWorkspaceAvailable() && !useDocStore.getState().binding) {
       requestWorkspaceSave()
       toggleDock('workspace')
       return
     }
     await saveFile()
   }
-  /** adj540：手机端「另存为」= 开工作区面板并直接展开文件名输入（`showSaveFilePicker` 在移动端不可靠） */
+  /** adj540：手机端「另存为」= 开工作区面板并直接展开文件名输入（`showSaveFilePicker` 在移动端不可靠）；adj724b 嵌入版同理 */
   const runSaveAsSmart = async () => {
-    if (isCoarsePointerDevice() && isWorkspaceAvailable()) {
+    if ((isCoarsePointerDevice() || isHostEmbedded()) && isWorkspaceAvailable()) {
       requestWorkspaceSave()
       toggleDock('workspace')
       return
     }
     await saveFileAs()
   }
+  // adj724b：嵌入版的「打开」分流已合并进上面的 `runOpenSmart`（跨源子框架不能弹选择器）
 
   // adj424：菜单分组重排——「试听播放」「导出」从各自的播放/设置组挪到「文件」分组底部，
   // 与文件操作连成一组；「设置」单独成组（与顶栏按钮布局对齐）。原「播放」分组随之取消（仅试听一项）。
@@ -1202,7 +1224,8 @@ export function TopBar() {
   //    工作区 / 打开示例 / 粘贴源码导入 / 试听播放 / 导出。
   const entryNew: MenuEntry = { label: '新建(&N)', kbd: KBD.newDoc, hotkey: 'n', onPick: newDoc }
   const entryOpen: MenuEntry = { label: '打开(&O)…', kbd: KBD.openDoc, hotkey: 'o', onPick: runOpenSmart }
-  const entryOpenSystem: MenuEntry = { label: workspaceCopy.openSystemLabel, onPick: runOpen }
+  // adj724b：嵌入版里系统选择器会被浏览器拒绝（跨源子框架）⇒ 该菜单项不出现
+  const entryOpenSystem: MenuEntry = { label: workspaceCopy.openSystemLabel, onPick: runOpen, hidden: isHostEmbedded() }
   const entrySamples: MenuEntry = { label: '打开示例(&E)…', hotkey: 'e', onPick: () => openModal('samples') }
   const entryPaste: MenuEntry = { label: pasteImportCopy.menuLabel, kbd: KBD.import, hotkey: 'v', onPick: () => toggleDock('import') }
   const entrySave: MenuEntry = { label: '保存(&S)', kbd: KBD.save, hotkey: 's', onPick: runSaveSmart }
