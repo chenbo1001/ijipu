@@ -261,12 +261,25 @@ async function main() {
             }, '*');
             return;
           }
-          if (d.type === 'ready') { window.__ijipuReady = true; return; }
+          if (d.type === 'ready') {
+            window.__ijipuReady = true;
+            /**
+             * adj724b（用户实测 ①②）：**宿主在应用就绪后推 openFile** ——
+             * 这正是"点库里的 .jps / 点预览的编辑"要走的那条路。
+             * 这里主动推一次，用来验证"应用真的会去打开这份谱"（而不是只展开了右栏）。
+             */
+            ev.source.postMessage({ ch: 'ijipu', type: 'openFile', path: '测试谱.jps' }, '*');
+            return;
+          }
           if (typeof d.id === 'number') {
             window.__ijipuCalls.push(d.op + ':' + JSON.stringify(d.args));
             let result = {};
             if (d.op === 'list') result = { dirs: [{ name: '子目录', mtime: 0 }], files: [{ name: '测试谱.jps', mtime: 0 }] };
-            else if (d.op === 'read') result = { text: "Q: 1 2 3 4 |\\n" };
+            else if (d.op === 'read') {
+              // adj724b：这份内容要**看得见**才算"打开成功"（断言用它验证界面确实换了谱）
+              result = { text: '# 由宿主推来的测试谱\\nQ: 5 6 7 |\\n' };
+              window.__ijipuReadPaths = (window.__ijipuReadPaths || []).concat([d.args && d.args.path]);
+            }
             else if (d.op === 'exists') result = { exists: true };
             // adj724b：**嵌入版的设置存储**（应用把 localStorage 换成经桥读写宿主）
             else if (d.op === 'kvAll') result = window.__ijipuKv;
@@ -349,6 +362,14 @@ async function main() {
            */
           kvCalls: (window.__ijipuCalls || []).filter((c) => c.startsWith('kv')).slice(0, 6),
           kvStored: window.__ijipuKv,
+          /** adj724b：应用读取过的路径（openFile 生效的硬证据；⚠ 本表达式是模板字符串，注释里不许用反引号） */
+          readPaths: window.__ijipuReadPaths || [],
+          /** 界面上是否出现了宿主推来的那份谱（文件名与 B: 标题） */
+          openedScore: (() => {
+            if (!doc) return false;
+            const t = doc.body.innerText;
+            return t.includes('测试谱') || t.includes('由宿主推来的测试谱');
+          })(),
           readBack: (() => {
             try {
               const LS = app && app.contentWindow && app.contentWindow.localStorage;
@@ -468,6 +489,19 @@ async function main() {
   if (info.readBack !== '37') {
     return fail(`应用读到的 ijipu.splitPct = ${JSON.stringify(info.readBack)}，应为宿主预置的 "37"（设置没走宿主存储）`)
   }
+  /**
+   * adj724b：**"宿主推 openFile ⇒ 应用真的打开那份谱"的端到端断言**（用户实测 ①②）。
+   *
+   * 只断言"发出/收到了 openFile"不够——那正是先前误判的地方（消息发了、文件没开）。
+   * 判据落在**应用的实际行为**上：它必须去 `read` 那个路径，且界面上出现该谱的内容。
+   */
+  if (!info.readPaths.includes('测试谱.jps')) {
+    return fail(`应用没有读取宿主推来的文件（read 过的路径：${JSON.stringify(info.readPaths)}）⇒ openFile 没生效`)
+  }
+  if (!info.openedScore) {
+    return fail(`应用读取了文件，但界面上没出现它的内容（打开未完成）。界面片段：${JSON.stringify((info.appText || '').slice(0, 160))}`)
+  }
+  console.log(`[embed-smoke] ✅ 宿主推 openFile ⇒ 应用真的打开了：read ${JSON.stringify(info.readPaths)}，界面已显示该谱`)
   console.log(`[embed-smoke] ✅ 设置持久化走宿主：预载 ${JSON.stringify(info.kvCalls)}，读回 ijipu.splitPct=${info.readBack}`)
   console.log(`[embed-smoke] ✅ 单文件产物启动成功、无运行时报错`)
   console.log(
