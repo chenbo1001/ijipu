@@ -1032,6 +1032,28 @@ export function buildPlaySequence(
   /** 各注释组"还能走几次"——走过组内任一房子后减一，为 0 即路过 */
   const voltaLeftByComment = new Map(voltaLimitByComment)
   const voltaLeftByIndex = new Map(voltaLimitByIndex)
+  /**
+   * 各注释组的**出现顺序号**（1 起）——"这个注释属于第几遍"。
+   *
+   * adj723aa（用户口径，2026-10）：「两个跳房子**注释不一样，它们是分属不同遍次演奏的**：
+   * 第 1 次重复先遇到跳房子1 就先演奏、计数减 1；到跳房子2 时因注释不同、**在不同遍次**，跳过；
+   * 第 2 反复时跳房子1 计数为 0 **且遍次已变更** ⇒ 跳过，顺序到跳房子2、**新遍次**且还有计数 ⇒ 进入。」
+   */
+  const voltaGroupOf = new Map<string, number>()
+  /**
+   * **已经进入过**的注释组——用户口径：「对于**已进入的**跳房子，后面遍次的判断**只考虑计数，
+   * 不考虑遍次**，这是为了 `["2.3."` 这种**多次进入**的跳房子考虑的」。
+   * ⇒ 遍次只在该组"**第一次进入**"时把关；此后一律只按计数。
+   */
+  const voltaEntered = new Set<string>()
+  {
+    let g = 0
+    for (let k = 0; k < seq.length; k++) {
+      const c = voltaCommentAt.get(k) ?? ''
+      if (c === '' || voltaGroupOf.has(c)) continue
+      voltaGroupOf.set(c, ++g)
+    }
+  }
   /** 正在走的那个房子（走过它末尾线时减一）；-1 = 当前不在房子里 */
   let insideVolta = -1
   /** 取某根房子起点线"所在注释组"的剩余次数（按注释分组；无注释则按位置） */
@@ -2006,11 +2028,19 @@ export function buildPlaySequence(
     const trySkipVolta = (): boolean => {
       if (!bar.voltaStart) return false
       /**
-       * adj723aa（用户口径）：**注释相同的房子是"同一个房子"** ⇒ 剩余次数按**注释分组**查
-       * （`voltaLeftOf`），而不是按这根线的位置。
+       * adj723aa（用户口径，2026-10）：
+       *  · 该注释组**从未进入过** ⇒ 先按**遍次**把关：不是本遍对应的那一组就跳过
+       *    （「注释不同 ⇒ 分属不同遍次 ⇒ 跳过」）；
+       *  · **已进入过** ⇒ **只看计数、不看遍次**（「对于已进入的跳房子，后面遍次的判断只考虑计数，
+       *    不考虑遍次，这是为了 `["2.3."` 这种多次进入的跳房子考虑的」）；
+       *  · 计数为 0 ⇒ 跳过（路过）。计数按**注释分组**共用（注释相同 = 同一个房子）。
        */
-      if (voltaLeftOf(i) > 0) {
+      const c = voltaCommentAt.get(i) ?? ''
+      const alreadyEntered = c !== '' && voltaEntered.has(c)
+      const groupOk = c === '' || alreadyEntered || (voltaGroupOf.get(c) ?? 0) === pass
+      if (groupOk && voltaLeftOf(i) > 0) {
         insideVolta = i // 进入本房子范围（走过末尾线时才 count-1）
+        if (c !== '') voltaEntered.add(c)
         return false
       }
       /**
