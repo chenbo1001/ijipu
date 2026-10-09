@@ -74,10 +74,19 @@ gh release create v<x.y.z> --title "…" --notes-file release-body-<x.y.z>.md `
 
 ### CHAIN-B：引擎联动（仅当 `packages/ijipu-engine/src/engine/**` 有改动）
 
+> **OP-12b【顺序铁律，E-2026-374】嵌入版产物必须在"应用版本号 / 引擎改动"定稿之后生成。**
+> 插件里的**嵌入版 iJipu** 是把应用构建产物提交进插件仓库的（`obsidian-ijipu/src/gen/webappAssets.ts`），
+> 它的引擎与版本号**冻结在生成那一刻**。顺序反了 ⇒ 插件里的嵌入版**落后一版**（用户实测：
+> 「插件 0.31.0，嵌入版还 0.49.0」），更糟的是**嵌入版里的引擎是旧的**（本轮"色块右界"修复就是这样漏掉的：
+> 插件自己的 ` ```jps ` 预览走 `vendor/engine` 已修、嵌入版走旧 bundle 没修 ⇒ 用户看到"应用正常、插件还有覆盖"）。
+> **闸门**：插件 `npm run smoke` 的 `adj733`（断言 `WEBAPP_META.appVersion` == 应用 `APP_VERSION`）。
+
 ```powershell
-cd D:\Coding\JianpuScript\obsidian-ijipu
+cd D:\Coding\JianpuScript\ijipu
+npm run build:embed; node scripts/embed-emit.mjs      # OP-12b：应用版本/引擎定稿后再生成嵌入产物
+cd ..\obsidian-ijipu
 # OP-12：hash 对比 → 复制 → 复核（PowerShell 片段见第 3 节"安全写法"）
-npx tsc -noEmit -skipLibCheck; npm run smoke            # OP-13
+npx tsc -noEmit -skipLibCheck; npm run smoke            # OP-13（含 adj733 嵌入版版本闸门）
 # OP-14：bump manifest.json / package.json / versions.json / package-lock.json；
 #        RELEASE-NOTES.md 只留当版，上一版移入 RELEASE-NOTES-ARCHIVE.md
 node scripts/release-body.mjs                          # 命中当版即正确
@@ -162,6 +171,8 @@ Get-ChildItem $src -Recurse -File | ForEach-Object {
 - [ ] OP-11 Release 已建、附件已挂、用**带鉴权** gh 核对
 
 **CHAIN-B（涉引擎时）**
+- [ ] **OP-12b 嵌入版产物是"应用版本/引擎定稿之后"重新生成的**（`npm run build:embed && node scripts/embed-emit.mjs`），
+      插件 `smoke` 的 `adj733` 绿（嵌入产物版本 == 应用 `APP_VERSION`）——**E-2026-374 的顺序铁律**
 - [ ] OP-12 `vendor/engine` 与应用引擎**逐文件哈希一致**（含新增/删除）
 - [ ] OP-13 插件 `tsc` + `smoke` 全绿
 - [ ] OP-14 四处版本号 + `versions.json` 新增行；RELEASE-NOTES 只留当版、上一版已归档
