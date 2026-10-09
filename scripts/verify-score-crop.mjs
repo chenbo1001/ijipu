@@ -450,17 +450,22 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
   console.log('  嵌入工具栏       =', JSON.stringify(probe.embedToolbar))
 
   /**
-   * adj726（用户要求）：**有「编辑」时不再出现「打开谱面文件」链接**（嵌入形态）。
-   * 两支对照：给了 `onEdit` ⇒ 只有「编辑」；没给 ⇒ 链接照旧（不能顺手把链接彻底删掉）。
+   * adj726/727（用户要求）：**有「编辑」时收掉「打开谱面文件」链接**，但**仅当「编辑」留在 Obsidian 内**；
+   * 若「编辑」会把文件交给系统默认应用（离开 Obsidian），那枚链接是站内打开 `.jps` 视图的唯一入口 ⇒ 保留。
+   * 三支对照（有编辑+站内 / 有编辑+默认应用 / 没有编辑）。
    */
-  if (probe.embedToolbar && !probe.embedToolbar.withEdit?.error) {
-    const w = probe.embedToolbar.withEdit
-    const o = probe.embedToolbar.withoutEdit
-    ok(w.edit && w.editLabel === '编辑', 'adj726 有 onEdit ⇒ 出现「编辑」按钮', JSON.stringify(w))
-    ok(w.link === false, 'adj726 有「编辑」⇒ **不再**出现「打开谱面文件」链接', JSON.stringify(w))
-    ok(o.edit === false && o.link === true, 'adj726 对照：没有「编辑」时链接仍在（不是把链接删掉）', JSON.stringify(o))
+  if (probe.embedToolbar && !probe.embedToolbar.inApp?.error) {
+    const a = probe.embedToolbar.inApp
+    const b = probe.embedToolbar.external
+    const c = probe.embedToolbar.withoutEdit
+    ok(a.edit && a.editLabel === '编辑', 'adj726 有 onEdit ⇒ 出现「编辑」按钮', JSON.stringify(a))
+    ok(a.link === false, 'adj726 有「编辑」且它留在站内 ⇒ **不再**出现「打开谱面文件」链接', JSON.stringify(a))
+    ok(b.edit && b.link === true,
+      'adj727 有「编辑」但它**会离开 Obsidian**（打开方式=默认应用）⇒ 链接**保留**（站内入口不能丢）',
+      JSON.stringify(b))
+    ok(c.edit === false && c.link === true, 'adj726 对照：没有「编辑」时链接仍在（不是把链接删掉）', JSON.stringify(c))
   } else {
-    ok(false, 'adj726 能测嵌入工具栏的按钮组合', JSON.stringify(probe.embedToolbar))
+    ok(false, 'adj726/727 能测嵌入工具栏的按钮组合', JSON.stringify(probe.embedToolbar))
   }
 
   /**

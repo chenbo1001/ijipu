@@ -446,13 +446,17 @@ window.__ijipuProbeBody = async function () {
   })();
 
   /**
-   * adj726（用户要求）：**有了「编辑」按钮之后，就不再需要「打开谱面文件」的链接**。
+   * adj726/727（用户要求）：**有了「编辑」按钮之后就收掉「打开谱面文件」链接**；
+   * adj727 细化：**仅当「编辑」留在 Obsidian 内时收掉** —— 若「编辑」会把文件交给系统默认应用
+   * （离开 Obsidian），那枚链接是"在站内打开 `.jps` 视图"的唯一入口 ⇒ 保留。
    *
-   * 嵌入形态（`![[x.jps]]`）的工具栏右端原本是那枚链接；「编辑」直接进完整编辑器、是更强的入口
-   * ⇒ 有「编辑」时不建链接。这里做**两支对照**（给 / 不给 `onEdit`），避免"顺手把链接彻底删掉"。
+   * 三支对照（防止后人把判据改坏）：
+   *  ① 有编辑 + 站内（`editLeavesObsidian` 未给/false）⇒ 链接**不在**；
+   *  ② 有编辑 + 默认应用（`editLeavesObsidian: true`）  ⇒ 链接**在**；
+   *  ③ 没有编辑（宿主没给 `onEdit`）              ⇒ 链接**在**（回退路径不许删）。
    */
   out.embedToolbar = await (async () => {
-    const mountOne = async (id, withEdit) => {
+    const mountOne = async (id, opts) => {
       const el = document.createElement('div')
       el.id = id
       el.style.width = '820px'
@@ -467,7 +471,8 @@ window.__ijipuProbeBody = async function () {
         onOpenFile: () => {},
         filePath: '曲谱集/茶花开了.jps',
       }
-      if (withEdit) host.onEdit = () => {}
+      if (opts.withEdit) host.onEdit = () => {}
+      if (opts.leavesObsidian) host.editLeavesObsidian = true
       let h
       try {
         h = IJipuPane.mountScorePane(host)
@@ -478,6 +483,7 @@ window.__ijipuProbeBody = async function () {
       await sleep(40)
       const btn = el.querySelector('.ijipu-app-open-btn')
       const res = {
+        case: opts.name,
         edit: !!btn,
         editLabel: btn ? (btn.querySelector('.ijipu-btn-label') || {}).textContent || null : null,
         link: !!el.querySelector('.ijipu-embed-link'),
@@ -487,7 +493,11 @@ window.__ijipuProbeBody = async function () {
       el.remove()
       return res
     }
-    return { withEdit: await mountOne('wrap6', true), withoutEdit: await mountOne('wrap7', false) }
+    return {
+      inApp: await mountOne('wrap6', { name: '有编辑+站内', withEdit: true }),
+      external: await mountOne('wrap7', { name: '有编辑+默认应用', withEdit: true, leavesObsidian: true }),
+      withoutEdit: await mountOne('wrap8', { name: '没有编辑', withEdit: false }),
+    }
   })();
 
   // 工具条那段显隐/几何验证是异步的（要等过渡跑完才能读到终值）⇒ **先 await 再赋值**，
