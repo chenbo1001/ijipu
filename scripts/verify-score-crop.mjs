@@ -322,6 +322,25 @@ async function main() {
       };
     };
     record('score');            // 默认就是「谱面」
+    /**
+     * adj724b（用户要求）：**工具条默认隐藏、鼠标移到谱面上才显示**（避免导出笔记时被一起导出）。
+     * 这里在真实浏览器里验证"语义"（真实 styles.css + 真实 scorePane）：
+     *  ① 默认 display:none（真正不渲染 ⇒ 不会进导出结果；只降透明度是不够的）；
+     *  ② 容器上派发 pointermove 后变可见（JS 加 is-revealed 类）；
+     *  ③ 派发 pointerleave 后回到隐藏。
+     */
+    out.toolbar = (() => {
+      const tb = document.querySelector('#wrap .ijipu-score-toolbar');
+      if (!tb) return { error: '没找到 .ijipu-score-toolbar' };
+      const disp = () => getComputedStyle(tb).display;
+      const initial = disp();
+      const c = document.getElementById('wrap');
+      c.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' }));
+      const afterMove = disp();
+      c.dispatchEvent(new PointerEvent('pointerleave', { bubbles: false, pointerType: 'mouse' }));
+      const afterLeave = disp();
+      return { initial, afterMove, afterLeave };
+    })();
     // 用户诉求的**直接量法**：SVG 撑满容器宽度后，元素盒子是否与内容同比例、有没有多余高度
     out.css = (() => {
       const svg = curSvg();
@@ -361,6 +380,14 @@ async function main() {
   console.log('  「谱面」viewBox  =', JSON.stringify(ms.viewBox))
   console.log('  「谱面」元素盒子  =', JSON.stringify(ms.rect), ' 父容器 =', JSON.stringify(ms.parentRect))
   console.log('  CSS 实况         =', JSON.stringify(probe.css))
+  console.log('  工具条显隐       =', JSON.stringify(probe.toolbar))
+  if (probe.toolbar && !probe.toolbar.error) {
+    ok(probe.toolbar.initial === 'none', '工具条默认隐藏（display:none，导出时不会出现）', probe.toolbar.initial)
+    ok(probe.toolbar.afterMove !== 'none', '鼠标移到谱面上后工具条出现', probe.toolbar.afterMove)
+    ok(probe.toolbar.afterLeave === 'none', '鼠标离开后工具条收起', probe.toolbar.afterLeave)
+  } else {
+    ok(false, '能取到工具条并测显隐', probe.toolbar?.error ?? '')
+  }
   if (ms.viewBox && ms.rect) {
     const vbRatio = ms.viewBox[2] / ms.viewBox[3]
     const elRatio = ms.rect.w / ms.rect.h
