@@ -498,6 +498,18 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
     } else {
       ok(false, 'adj725 能量到 `</>` 的位置')
     }
+    /**
+     * adj725c（用户报「鼠标移上去也看不见 `</>`」）：**对比度必须够**。
+     * 按钮压在恒为白色的谱面纸张上、底色半透明 ⇒ 按"字色 vs 底色合成到白纸"实算 WCAG 对比度。
+     * 修前是"跟主题取色"（深色主题下浅灰压白纸，≈1.1:1）⇒ 这里钉住 ≥3:1（图形类最低线）。
+     */
+    if (e.contrast) {
+      console.log('  `</>` 对比度      =', JSON.stringify(e.contrast))
+      ok(e.contrast.ratio >= 3,
+        'adj725c `</>` 与纸张背景的对比度 ≥3:1（不会"看不见"）', JSON.stringify(e.contrast))
+    } else {
+      ok(false, 'adj725c 能量到 `</>` 的字色/底色（对比度）')
+    }
   } else {
     ok(false, 'adj725 能测「编辑源码」入口', probe.editSource?.error ?? '')
   }

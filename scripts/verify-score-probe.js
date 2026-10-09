@@ -253,6 +253,38 @@ window.__ijipuProbeBody = async function () {
       shown,
       calls: window.__ijipuEditCalls || 0,
       clickErr: window.__ijipuEditErr || null,
+      /**
+       * adj725c（用户报「`</>` 看不见」）：**按合成后的颜色实算对比度**。
+       *
+       * 按钮压在**恒为白色**的谱面纸张上，而它的底色是半透明的 ⇒ 真实观感取决于
+       * "字色 vs （底色合成到白纸）"。这里把两个颜色取出来、按 alpha 合成到白底上，
+       * 用 WCAG 的相对亮度公式算对比度，交给 verify 脚本断言（≥3:1 是图形类的最低线）。
+       */
+      contrast: (() => {
+        if (!btn) return null
+        const cs = getComputedStyle(btn)
+        const nums = (s) => (s.match(/[\d.]+/g) || []).map(Number)
+        const lum = (r, g, b) => {
+          const f = (c) => {
+            const v = c / 255
+            return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+          }
+          return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+        }
+        const fg = nums(cs.color)
+        const bg = nums(cs.backgroundColor)
+        if (fg.length < 3 || bg.length < 3) return null
+        const a = bg.length > 3 ? bg[3] : 1
+        const comp = [0, 1, 2].map((i) => bg[i] * a + 255 * (1 - a)) // 纸张恒为白
+        const l1 = lum(fg[0], fg[1], fg[2])
+        const l2 = lum(comp[0], comp[1], comp[2])
+        return {
+          fg: cs.color,
+          bg: cs.backgroundColor,
+          compositedOnPaper: comp.map((v) => Math.round(v)),
+          ratio: +(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)).toFixed(2)),
+        }
+      })(),
       /** 右上角：与容器右缘/顶边的净距（应各 ~4px，即 `--size-2-2`） */
       gaps: btnRect
         ? { right: +(box2.right - btnRect.right).toFixed(1), top: +(btnRect.top - box2.top).toFixed(1) }
