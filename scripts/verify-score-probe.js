@@ -445,6 +445,51 @@ window.__ijipuProbeBody = async function () {
     return res
   })();
 
+  /**
+   * adj726（用户要求）：**有了「编辑」按钮之后，就不再需要「打开谱面文件」的链接**。
+   *
+   * 嵌入形态（`![[x.jps]]`）的工具栏右端原本是那枚链接；「编辑」直接进完整编辑器、是更强的入口
+   * ⇒ 有「编辑」时不建链接。这里做**两支对照**（给 / 不给 `onEdit`），避免"顺手把链接彻底删掉"。
+   */
+  out.embedToolbar = await (async () => {
+    const mountOne = async (id, withEdit) => {
+      const el = document.createElement('div')
+      el.id = id
+      el.style.width = '820px'
+      document.body.appendChild(el)
+      const host = {
+        plugin: makePlugin(el),
+        container: el,
+        embedded: true,
+        embedTitle: '茶花开了',
+        getSource: () => window.__jpsCode,
+        getFrontmatter: () => null,
+        onOpenFile: () => {},
+        filePath: '曲谱集/茶花开了.jps',
+      }
+      if (withEdit) host.onEdit = () => {}
+      let h
+      try {
+        h = IJipuPane.mountScorePane(host)
+      } catch (e) {
+        el.remove()
+        return { error: 'mount 抛出：' + String(e && e.message) }
+      }
+      await sleep(40)
+      const btn = el.querySelector('.ijipu-app-open-btn')
+      const res = {
+        edit: !!btn,
+        editLabel: btn ? (btn.querySelector('.ijipu-btn-label') || {}).textContent || null : null,
+        link: !!el.querySelector('.ijipu-embed-link'),
+        linkLabel: (el.querySelector('.ijipu-embed-link-text') || {}).textContent || null,
+      }
+      h?.destroy?.()
+      el.remove()
+      return res
+    }
+    return { withEdit: await mountOne('wrap6', true), withoutEdit: await mountOne('wrap7', false) }
+  })();
+
   // 工具条那段显隐/几何验证是异步的（要等过渡跑完才能读到终值）⇒ **先 await 再赋值**，
   // 否则 out.toolbar 是个 Promise，JSON.stringify 会变成 {}
   out.toolbar = await out.toolbar;

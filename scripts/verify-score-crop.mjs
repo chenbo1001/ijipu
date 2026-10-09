@@ -447,6 +447,21 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
   console.log('  实时预览那一支   =', JSON.stringify(probe.lp))
   console.log('  游离容器挂载     =', JSON.stringify(probe.detached))
   console.log('  小节序号居中     =', JSON.stringify(probe.barNumber))
+  console.log('  嵌入工具栏       =', JSON.stringify(probe.embedToolbar))
+
+  /**
+   * adj726（用户要求）：**有「编辑」时不再出现「打开谱面文件」链接**（嵌入形态）。
+   * 两支对照：给了 `onEdit` ⇒ 只有「编辑」；没给 ⇒ 链接照旧（不能顺手把链接彻底删掉）。
+   */
+  if (probe.embedToolbar && !probe.embedToolbar.withEdit?.error) {
+    const w = probe.embedToolbar.withEdit
+    const o = probe.embedToolbar.withoutEdit
+    ok(w.edit && w.editLabel === '编辑', 'adj726 有 onEdit ⇒ 出现「编辑」按钮', JSON.stringify(w))
+    ok(w.link === false, 'adj726 有「编辑」⇒ **不再**出现「打开谱面文件」链接', JSON.stringify(w))
+    ok(o.edit === false && o.link === true, 'adj726 对照：没有「编辑」时链接仍在（不是把链接删掉）', JSON.stringify(o))
+  } else {
+    ok(false, 'adj726 能测嵌入工具栏的按钮组合', JSON.stringify(probe.embedToolbar))
+  }
 
   /**
    * adj725d（用户报「小节序号数字偏上，未在方框正中」）：**框内数字必须上下居中**。
