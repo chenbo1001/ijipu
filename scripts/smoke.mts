@@ -15521,6 +15521,36 @@ runAdj363SaveTests()
     }
   })
   .then(() => {
+    /**
+     * adj731（用户报「插件里『支持』里的微信赞赏码不见了」+ 破图截图）：**嵌入版里按路径取的资源必须走 `BASE_URL`**。
+     *
+     * 根因：`DonateDialog` 用 `donate.image = '/icons/good.png'`（根绝对路径），
+     * 嵌入版 iframe 跑在 `http://127.0.0.1:<port>/<token>/` 下 ⇒ 它解析成**不带 token** 的地址
+     * ⇒ 插件的本地服务对 token 不匹配一律 404 ⇒ 赞赏码变破图（alt 文字还在，看着像"图没了"）。
+     * 同类问题 adj724b 已在 AboutDialog / TopBar 的 logo 上修过，那张图漏了。
+     *
+     * 判据（这类"根绝对路径"就该机器拦住，别再靠人记）：
+     *  ① `DonateDialog` 必须拼 `import.meta.env.BASE_URL`；
+     *  ② 全仓不得再有 `<img src="/…">` 形式的**字面**根绝对路径。
+     */
+    {
+      const srcRoot = join(process.cwd(), 'src')
+      const walk = (dir: string, out: string[] = []): string[] => {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          const p = join(dir, e.name)
+          if (e.isDirectory()) walk(p, out)
+          else if (/\.tsx?$/.test(e.name)) out.push(p)
+        }
+        return out
+      }
+      const files = walk(srcRoot)
+      const donateSrc = readFileSync(join(srcRoot, 'dialogs', 'DonateDialog.tsx'), 'utf8')
+      check('adj731 赞赏码走 BASE_URL（嵌入版 `/<token>/` 下才取得到）',
+        /import\.meta\.env\.BASE_URL/.test(donateSrc) && !/src=\{donate\.image\}/.test(donateSrc))
+      const bad = files.filter((f) => /src=\{`?['"]\/[a-z]/i.test(readFileSync(f, 'utf8')))
+      check('adj731 全仓没有 `<img src="/…">` 字面根绝对路径（嵌入版会 404）',
+        bad.length === 0, bad.map((f) => f.replace(process.cwd(), '')).join('、'))
+    }
     console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
     process.exit(failed === 0 ? 0 : 1)
   })

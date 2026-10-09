@@ -5,6 +5,20 @@
 import { Modal } from '../ui/Modal'
 import { donate } from '../brand/copy'
 
+/**
+ * adj731（用户报「插件里『支持』里的微信赞赏码不见了」，附破图截图）：
+ * `donate.image` 是**根绝对路径** `/icons/good.png` —— 在**嵌入版**里会解析成
+ * `http://127.0.0.1:<port>/icons/good.png`（**没有 `<token>` 段**），而插件的本地服务对
+ * token 不匹配的请求一律 404 ⇒ 赞赏码变成破图（alt 文字还显示，看着像"图不见了"）。
+ *
+ * 同类问题 adj724b 已在 AboutDialog / TopBar 的 logo 上修过（那两处改成 `${BASE_URL}…`），
+ * **这张图当时漏了**。这里统一按同一口径拼：`BASE_URL`（网页版 `'/'`、嵌入版 `'./'`）
+ * + 去掉 `donate.image` 开头的斜杠（避免拼出 `//icons/...`）。
+ */
+function donateImageSrc(): string {
+  return `${import.meta.env.BASE_URL}${donate.image.replace(/^\/+/, '')}`
+}
+
 export function DonateDialog() {
   return (
     <Modal title="支持作者">
@@ -20,7 +34,7 @@ export function DonateDialog() {
           爱记谱 iJipu
         </div>
         <img
-          src={donate.image}
+          src={donateImageSrc()}
           alt="微信赞赏码"
           width={260}
           height={260}
