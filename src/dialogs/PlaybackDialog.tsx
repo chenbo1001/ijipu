@@ -20,6 +20,8 @@ import { Modal } from '../ui/Modal'
 import { ToolIcon } from '../ui/ToolIcon'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
+// adj729：嵌入版里音源优先取**插件目录**那份（宿主给的 URL；随文库一起走）
+import { hostBankUrl } from '../store/hostBridge'
 import { playbackCopy } from '../brand/copy'
 import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../playback/spessaCache'
 import { SpessaSynthBackend, getHqLibrary, hasBuiltinBank, GM_VOICE_OPTIONS, firstEnabledInstrumentRef, HQ_LIBRARIES, hqBankFailureText } from '../playback/spessaSynthBackend'
@@ -412,7 +414,8 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
           // adj723d：音源这一步最慢（可能下载 30MB）——等待期间用户完全可能再次 Ctrl+点音符或按停止
           if (stale()) return
           // adj416：取音源字节——缓存优先，其次**安装目录内置 SF2**（桌面直接读文件），最后才是联网下载
-          const { bank } = await resolveHqBank(hqLib, hqCache)
+          // adj729：嵌入版里最优先取**插件目录**那份（宿主给的 URL；随文库一起走）
+          const { bank } = await resolveHqBank(hqLib, hqCache, hostBankUrl(hqLib.id))
           if (stale()) return
           await backend.load(bank)
           if (stale()) return

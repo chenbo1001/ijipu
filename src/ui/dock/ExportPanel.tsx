@@ -23,6 +23,8 @@ import { renderToAudioBuffer, audioBufferToWav, audioBufferToMp3 } from '../../e
 import { exportSvg, exportPng, exportJpg, exportPdf } from '../../export/export'
 import { createHqCache, resolveHqBank } from '../../playback/spessaCache'
 import { getHqLibrary, firstEnabledInstrumentRef } from '../../playback/spessaSynthBackend'
+// adj729：嵌入版里音源优先取**插件目录**那份（宿主给的 URL；随文库一起走）
+import { hostBankUrl } from '../../store/hostBridge'
 // adj647：宿主字体实测（导出与预览共用同一份；见 preview/fontMeta.ts）
 import { measureFontMeta } from '../../preview/fontMeta'
 
@@ -74,10 +76,11 @@ export function ExportPanel() {
   const baseName = (fileName || '未命名').replace(/\.(jps|md|txt)$/i, '')
   const hasError = parseResult.errors.some((e) => e.severity === 'error')
 
-  /** 取高保真音源 ArrayBuffer（adj416：缓存 → 桌面安装目录内置 SF2 → 联网下载并写回缓存） */
+  /** 取高保真音源 ArrayBuffer（adj416：缓存 → 桌面安装目录内置 SF2 → 联网下载并写回缓存；
+   *  adj729：嵌入版里最优先取**插件目录**那份 —— 宿主给 URL，随文库一起走） */
   const ensureHqBank = async (): Promise<ArrayBuffer> => {
     const lib = getHqLibrary()
-    const { bank } = await resolveHqBank(lib, hqCacheRef.current)
+    const { bank } = await resolveHqBank(lib, hqCacheRef.current, hostBankUrl(lib.id))
     return bank
   }
 

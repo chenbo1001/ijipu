@@ -16,6 +16,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { useUiStore } from '../store/uiStore'
+import { hostBankUrl, hostBridge, isHostEmbedded } from '../store/hostBridge'
 import { playbackCopy } from '../brand/copy'
 import { HQ_LIBRARIES, GM_VOICE_OPTIONS, getHqLibrary, hasBuiltinBank, hqBankFailureText } from '../playback/spessaSynthBackend'
 import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../playback/spessaCache'
@@ -120,10 +121,38 @@ export function SoundBankPanel() {
     }
     reader.readAsArrayBuffer(file)
   }
+  /**
+   * adj729（用户要求）：**嵌入版里由插件来导入**，文件直接写进**插件目录**
+   * （`<配置目录>/plugins/<插件 id>/soundfonts/<id>.sf2`）⇒ 随文库一起走。
+   *
+   * 走宿主而不是这里读文件再发过去：SF2 有 32 MB，`postMessage` 传要 base64（≈43 MB），
+   * 慢且吃内存；插件在 Obsidian 窗口里自己弹选择器、自己写盘，一个字节都不用跨窗口搬。
+   */
+  const importViaHost = async (): Promise<void> => {
+    const bridge = hostBridge()
+    if (!bridge) return
+    setNotice('请在系统文件选择器里选 .sf2 文件…')
+    try {
+      const r = await bridge.importSoundbank(currentHqLib.id)
+      if (r.canceled) {
+        setNotice('已取消导入')
+        return
+      }
+      if (!r.ok) {
+        setNotice(`导入失败：${r.error ?? '未知原因'}`)
+        return
+      }
+      setHqDl('done')
+      setNotice(`✓ 已导入音色数据 → ${currentHqLib.name}（已存到插件目录，随文库一起走）`)
+    } catch (e) {
+      setNotice(`导入失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
   const exportDataFile = async () => {
     try {
       // adj416：缓存 → 安装目录内置 SF2 → 联网（内置音源也能直接导出，不再报「未缓存」）
-      const { bank: ab } = await resolveHqBank(currentHqLib, hqCache.current)
+      // adj729：嵌入版里优先取**插件目录**那份（`resolveHqBank` 的第一个参数就是宿主地址）
+      const { bank: ab } = await resolveHqBank(currentHqLib, hqCache.current, hostBankUrl(currentHqLib.id))
       const blob = new Blob([ab], { type: 'application/octet-stream' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -245,7 +274,7 @@ export function SoundBankPanel() {
               打开下载页
             </button>
           )}
-          <button className="btn" style={{ ...BTN, color: 'var(--jp-accent)' }} onClick={() => fileSf2Ref.current?.click()}>导入音色文件</button>
+          <button className="btn" style={{ ...BTN, color: 'var(--jp-accent)' }} onClick={() => { if (isHostEmbedded()) void importViaHost(); else fileSf2Ref.current?.click() }}>导入音色文件</button>
           <button className="btn" style={{ ...BTN, color: 'var(--jp-accent)' }} onClick={() => void exportDataFile()}>导出音色文件</button>
           <input ref={fileRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importConfig(f); e.target.value = '' }} />
           <input ref={fileSf2Ref} type="file" accept=".sf2,.sf3" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importDataFile(f); e.target.value = '' }} />

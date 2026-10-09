@@ -36,6 +36,14 @@ export interface HostWelcome {
   /** 工作区根（vault 相对路径；`''` = 文库根） */
   root: string
   capabilities: { write: boolean; rename: boolean; remove: boolean; trash: boolean }
+  /**
+   * adj729（用户要求）：**音色库文件的取用地址**（`{ <库 id>: url }`）。
+   *
+   * 插件把下载/导入的音源放在**自己的目录**里（`<配置目录>/plugins/<插件 id>/soundfonts/<id>.sf2`），
+   * 并在这个字段里给出它的 URL ⇒ 应用直接取用，**不再自己下载、也不再各存一份**，
+   * 于是"音源随文库一起走"对两端同时成立。
+   */
+  bankUrls?: Record<string, string>
 }
 
 /** 宿主推来的事件回调 */
@@ -72,6 +80,16 @@ export function hostBridge(): HostBridge | null {
 /** 是否处于嵌入环境（握手成功过） */
 export function isHostEmbedded(): boolean {
   return bridge !== null
+}
+
+/**
+ * adj729：**该音源在插件目录里的取用地址**（不在嵌入环境 / 宿主还没这份文件时返回 `undefined`）。
+ *
+ * 用户口径：「音色库下载或导入后，建议放在插件目录中，以便能随文库一起走」——
+ * 应用各处取音源时先问它（`resolveHqBank(lib, cache, hostBankUrl(lib.id))`）。
+ */
+export function hostBankUrl(id: string): string | undefined {
+  return bridge?.bankUrl(id)
 }
 
 /**
@@ -178,6 +196,24 @@ export class HostBridge {
     })
   }
 
+  // ─────────────────── adj729：音色库（落在**插件目录**，随文库一起走） ───────────────────
+
+  /**
+   * 该音源在**宿主（插件目录）**里的取用地址；没有就返回 `undefined`。
+   *
+   * 用户口径：「音色库下载或导入后，建议放在插件目录中，以便能随文库一起走」——
+   * 于是嵌入版应用不再自己下 32 MB、也不再各存一份：直接取宿主给的这个地址。
+   */
+  bankUrl(id: string): string | undefined {
+    const url = this.welcome.bankUrls?.[id]
+    return url && url.length > 0 ? url : undefined
+  }
+
+  /** 让**宿主**弹文件选择器把音源导入插件目录（嵌入环境专用；32 MB 不跨窗口搬） */
+  importSoundbank(id: string): Promise<{ ok: boolean; canceled?: boolean; error?: string }> {
+    return this.call<{ ok: boolean; canceled?: boolean; error?: string }>('importSoundbank', { id })
+  }
+
   /**
    * 执行一个宿主操作。
    * 失败时**抛错**（调用方按既有错误路径处理，例如"保存失败"提示）。
@@ -258,6 +294,8 @@ export async function initHostBridge(): Promise<HostBridge | null> {
           remove: true,
           trash: true,
         },
+        // adj729：音色库文件的取用地址（插件目录里那份；见 HostWelcome.bankUrls）
+        bankUrls: (d.bankUrls as Record<string, string> | undefined) ?? {},
       })
     }
     window.addEventListener('message', onMsg)

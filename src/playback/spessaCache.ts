@@ -71,12 +71,30 @@ export class HqCache {
   }
 }
 
-/** 取音源字节 + 来源（adj416）：IndexedDB 缓存 → 桌面安装目录内置 → 联网下载。
- *  只有**下载**的结果才写缓存（内置文件已在安装目录，再存一份 30MB 纯属浪费；缓存优先则保留用户导入的音色）。 */
+/** 取音源字节 + 来源（adj416，adj729 增补宿主来源）：
+ *  **宿主（插件目录文件）→ IndexedDB 缓存 → 桌面安装目录内置 → 联网下载**。
+ *  只有**下载**的结果才写缓存（内置文件已在安装目录，再存一份 30MB 纯属浪费；缓存优先则保留用户导入的音色）。
+ *
+ *  adj729（用户要求）：嵌入版里宿主会把"插件目录里的音源文件"以 URL 形式给出来
+ *  （`hostBridge().bankUrl(id)`）——那是**唯一权威副本**（下载/导入后都放那儿，随文库一起走），
+ *  所以放在第一位；取不到（宿主还没这份文件）再走应用自己的老路径。 */
 export async function resolveHqBank(
   lib: HqSampleLibrary,
   cache: HqCache,
-): Promise<{ bank: ArrayBuffer; source: HqBankSource }> {
+  hostUrl?: string,
+): Promise<{ bank: ArrayBuffer; source: HqBankSource | 'host' }> {
+  if (hostUrl) {
+    try {
+      const res = await fetch(hostUrl)
+      if (res.ok) {
+        const bank = await res.arrayBuffer()
+        if (bank.byteLength > 0) return { bank, source: 'host' }
+      }
+      // 404 / 空文件 ⇒ 宿主还没这份音源，继续走下面的老路径
+    } catch {
+      /* 宿主不可达 ⇒ 同样继续 */
+    }
+  }
   const cached = await cache.load(lib.id)
   if (cached) return { bank: cached, source: 'cache' }
   const builtin = await loadBuiltinBank(lib)
