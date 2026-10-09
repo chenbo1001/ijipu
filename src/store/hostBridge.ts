@@ -45,6 +45,13 @@ export interface HostEvents {
   /** 主题变化（跟随 Obsidian） */
   theme?: (mode: 'dark' | 'light') => void
   /**
+   * adj728（用户要求）：**宿主让应用打开「设置 → 音色库」**。
+   *
+   * 用于插件侧"试听失败"提示上的按钮：自动下载音源在部分网络不可达，
+   * 用户需要被送到能**手动导入**的地方（设置 → 音色库 → 导入音色文件）。
+   */
+  openSoundbankSettings?: () => void
+  /**
    * adj724b：宿主告知**某个 `.jps` 在 Obsidian 那边被改了**（外部编辑、同步、其它插件…）。
    *
    * 应用据此比对自己手里的内容，不一致才提示"是否重新载入"——
@@ -211,6 +218,8 @@ export class HostBridge {
     if (data.type === 'openFile' && typeof data.path === 'string') this.listeners.openFile?.(data.path)
     if (data.type === 'fileChanged' && typeof data.path === 'string') this.listeners.fileChanged?.(data.path)
     if (data.type === 'theme' && (data.mode === 'dark' || data.mode === 'light')) this.listeners.theme?.(data.mode)
+    // adj728：宿主让应用打开「设置 → 音色库」（插件那条试听失败提示的按钮）
+    if (data.type === 'openSoundbankSettings') this.listeners.openSoundbankSettings?.()
   }
 }
 

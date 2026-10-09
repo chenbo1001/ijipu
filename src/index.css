@@ -3675,6 +3675,25 @@ body {
 .toast-error {
   border-left: 3px solid var(--jp-danger);
 }
+/* adj728：带**动作按钮**的提示（用户要求：失败提示要能一键打开「设置 → 音色库」）——
+   ① 横向排布：文字左、按钮右；② `pointer-events` 放开（基础 .toast 是 none，点了会穿过去）；
+   ③ 这种提示**不自动消失**（见 Toast.tsx），所以留一行"关闭"语义由用户点按钮完成。 */
+.toast-has-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 460px;
+  pointer-events: auto;
+}
+.toast-has-action .toast-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+}
+.toast-has-action .toast-action {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 @keyframes toast-in {
   from {
     opacity: 0;

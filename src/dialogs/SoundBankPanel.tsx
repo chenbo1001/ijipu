@@ -233,11 +233,37 @@ export function SoundBankPanel() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn" style={BTN} onClick={exportConfig}>导出收藏</button>
           <button className="btn" style={BTN} onClick={() => fileRef.current?.click()}>导入收藏</button>
+          {/* adj728（用户要求）：**自动下载失败时的唯一出路** —— 自己下、再导入。
+              所以这里除了「导入音色文件」还必须有「打开下载页」，并把三步写清楚（见下面的引导块）。 */}
+          {currentHqLib.downloadPage && (
+            <button
+              className="btn"
+              style={BTN}
+              title={currentHqLib.downloadPage}
+              onClick={() => window.open(currentHqLib.downloadPage, '_blank', 'noopener,noreferrer')}
+            >
+              打开下载页
+            </button>
+          )}
           <button className="btn" style={{ ...BTN, color: 'var(--jp-accent)' }} onClick={() => fileSf2Ref.current?.click()}>导入音色文件</button>
           <button className="btn" style={{ ...BTN, color: 'var(--jp-accent)' }} onClick={() => void exportDataFile()}>导出音色文件</button>
           <input ref={fileRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importConfig(f); e.target.value = '' }} />
           <input ref={fileSf2Ref} type="file" accept=".sf2,.sf3" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importDataFile(f); e.target.value = '' }} />
         </div>
+        {/* adj728（用户要求）：**手动下载 + 导入的引导说明**。
+            为什么必须写在这里：自动下载在部分网络下必然失败（见 hqBankFailureText 的说明），
+            此时用户需要的是"去哪儿拿文件、拿到后点哪个按钮"，而不是一句"请检查网络"。 */}
+        {currentHqLib.downloadPage && (
+          <div style={{ color: HIGHLIGHT, fontSize: 11, marginTop: 6, lineHeight: 1.6 }}>
+            自动下载失败（常见于该地址在你所在网络不可达）时，可以**手动装一次**，之后一直用本地缓存、不再联网：
+            <br />① 点「打开下载页」在浏览器里下载 <code>{`${currentHqLib.id}.sf2`}</code>
+            {' '}（约 {(currentHqLib.sizeBytes / 1_000_000).toFixed(1)} MB）；
+            <br />② 回到这里点「导入音色文件」，选刚下载的那个文件；
+            <br />③ 提示「✓ 已导入音色数据」即可试听（下次打开也不用再导入）。
+            <br />
+            下载页：<span style={{ userSelect: 'text' }}>{currentHqLib.downloadPage}</span>
+          </div>
+        )}
       </section>
 
       {/* —— 4. 操作结果提示 —— */}

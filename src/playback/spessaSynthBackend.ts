@@ -28,6 +28,16 @@ export interface HqSampleLibrary {
   fallbackSource?: string
   sizeBytes: number
   format: 'sf2' | 'sf3' | 'dls'
+  /**
+   * adj728（用户要求）：**让用户自己去拿这个文件的落地页**（浏览器里打开的那个页面）。
+   *
+   * 为什么单列一个"页面"而不是只给 `source` 直链：实测（2026-10）默认音源的直链
+   * `raw.githubusercontent.com/…/GeneralUser-GS.sf2`（32.3 MB）在部分网络**连不上**，
+   * jsDelivr 又因单文件 20 MB 上限直接 403 ⇒ 自动下载必然失败。这时唯一可行的路子是
+   * 用户自己在浏览器里（或换网络）把文件下载下来，再回「设置 → 音色库」点「导入音色文件」——
+   * 所以界面上要给一个"打开下载页"的按钮 + 一段照着做的引导，而不是只丢一句"请检查网络"。
+   */
+  downloadPage?: string
 }
 /** adj330/341/346：可切换的高质量音源库列表。默认库已内置（桌面打包资源 / Web 远端加载）。
  *  加库只需追加一条元数据。 */
@@ -42,6 +52,8 @@ export const HQ_LIBRARIES: HqSampleLibrary[] = [
     fallbackSource: '',
     sizeBytes: 32_319_396,
     format: 'sf2',
+    // adj728：用户手动下载的落地页（仓库页；页面里能直接下到 GeneralUser-GS.sf2）
+    downloadPage: 'https://github.com/mrbumpy409/GeneralUser-GS',
   },
 ]
 /** 按 id 查音源库（找不到回退默认第一个） */
@@ -184,7 +196,8 @@ export function hqBankFailureText(lib: HqSampleLibrary, err?: unknown): string {
     `音源「${lib.name}」自动下载失败（约 ${(lib.sizeBytes / 1_000_000).toFixed(1)} MB）。` +
     `这通常是**该下载地址在你所在网络不可达**，而不是你网络差——` +
     `可以手动导入一次（**导入后会持久缓存，之后不再联网**）：` +
-    `在「设置 → 音色库」点「导入音色文件…」选择本地的 .sf2 文件即可。` +
+    `在「设置 → 音色库」点「导入音色文件…」选择本地的 .sf2 文件即可` +
+    (lib.downloadPage ? `；还没有这个文件的话，先点那里的「打开下载页」自己下一个。` : `。`) +
     (why ? `\n技术细节：${why}` : '')
   )
 }

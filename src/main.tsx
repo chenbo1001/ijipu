@@ -125,6 +125,18 @@ void (async () => {
         })()
       },
       /**
+       * adj728（用户要求）：**宿主让应用直接打开「设置 → 音色库」**。
+       *
+       * 用于插件侧那条"试听失败"的提示——它的按钮要能把用户送到能**手动导入音源**的地方
+       * （自动下载在部分网络下不可达，唯一出路就是自己下、再导入）。
+       */
+      openSoundbankSettings: () => {
+        void (async () => {
+          const { useUiStore } = await import('./store/uiStore')
+          useUiStore.getState().openSettings('soundbank')
+        })()
+      },
+      /**
        * adj724b（用户口径 2026-10）：**检测 `.jps` 被外部修改**，并让用户选「重新载入 / 保留我的修改」。
        *
        * 关键点：**我们自己即时保存时 Obsidian 也会触发 modify**。所以这里必须**比对内容**——

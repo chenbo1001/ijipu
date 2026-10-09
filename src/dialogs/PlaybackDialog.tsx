@@ -192,7 +192,11 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
     const t = window.setTimeout(() => {
       void ensureBank().catch((e) => {
         // adj724b：提示要说清"地址不可达、可手动导入一次（之后走缓存）"，见 `hqBankFailureText`
-        showNotice(hqBankFailureText(HQ_LIBRARIES[0], e), 'error')
+        // adj728：并**带一个按钮**直接跳到「设置 → 音色库」（该提示因此不自动消失）
+        showNotice(hqBankFailureText(HQ_LIBRARIES[0], e), 'error', {
+          label: '打开音色库',
+          run: () => useUiStore.getState().openSettings('soundbank'),
+        })
       })
     }, 60)
     return () => window.clearTimeout(t)
@@ -425,8 +429,17 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       // adj723d：音源就绪（或已确认不可得）后再核对一次代次——**只有最新一次播放能落地**
       if (stale()) return
       if (!backendReady) {
-        // 音源不可得：**保留视觉**（色块 + 高亮 + 进度读数照常），只是没有声音
-        showNotice(`音源加载失败，本次试听**无声**（色块与播放位置照常显示）：${bankError}`, 'error')
+        /**
+         * 音源不可得：**保留视觉**（色块 + 高亮 + 进度读数照常），只是没有声音。
+         *
+         * adj728（用户要求）：「无法下载音色库的提示显示时间不长，应有个按钮链接用户打开全局的音色库」
+         * ⇒ 这条提示**带一个动作按钮**（跳到「设置 → 音色库」去手动导入）。
+         * 带按钮的提示在 `ui/Toast.tsx` 里**不自动消失**（几秒读完做不到），用户点按钮后收起。
+         */
+        showNotice(`音源加载失败，本次试听**无声**（色块与播放位置照常显示）：${bankError}`, 'error', {
+          label: '打开音色库',
+          run: () => useUiStore.getState().openSettings('soundbank'),
+        })
       }
       // 构建序列（含反复展开；adj88：双击谱面音符定位试听起点）
       // adj310：声音/色块统一的准备延迟（毫秒）——按下播放后延迟才出第一声，色块同步

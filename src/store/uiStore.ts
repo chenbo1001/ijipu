@@ -45,11 +45,29 @@ export type DockPanelKey =
 
 /** 轻量浮动提示（toast）：kind 决定配色；nonce 用于同文案重复触发时重置隐藏计时 */
 export type NoticeKind = 'ok' | 'warn' | 'error'
+/**
+ * adj728（用户要求）：提示上的**一个动作按钮**。
+ *
+ * 场景（用户原话）：「无法下载音色库的提示显示时间不长，应有个按钮链接用户打开全局的音色库」——
+ * 这类"要用户去别处做一件事"的提示，光有文字、几秒就消失是不够的：
+ * **有动作按钮的提示不自动隐藏**（见 `ui/Toast.tsx`），用户点它或点别处才消失。
+ */
+export interface NoticeAction {
+  /** 按钮文字（短，≤6 字为宜） */
+  label: string
+  /** 点击后执行（例如打开「设置 → 音色库」） */
+  run: () => void
+}
 export interface Notice {
   text: string
   kind: NoticeKind
   nonce: number
+  /** adj728：可选动作按钮（有它时提示**不自动消失**） */
+  action?: NoticeAction
 }
+
+/** adj728：设置对话框的页签 id（`PageConfigDialog` 与 uiStore 共用一份，避免两处漂移） */
+export type SettingsTabId = 'global' | 'theme' | 'soundbank' | 'score' | 'font'
 
 const THEME_KEY = 'ijipu.theme'
 const THEME_MODE_KEY = 'ijipu.themeMode'
@@ -288,6 +306,16 @@ interface UiState {
   openModal: (m: ModalKind) => void
   closeModal: () => void
   /**
+   * adj728（用户要求）：**打开「设置」并直接落在指定页签**（一次性的"意图"标记）。
+   *
+   * 用它的入口目前是"音色库自动下载失败"那条提示上的按钮（跳到「设置 → 音色库」去手动导入）；
+   * 与 `workspaceSaveIntent` 同一套路：`PageConfigDialog` 在挂载时消费掉它再清空，
+   * 不做持久化（它描述的是"这一次动作"，不是设置本身）。
+   */
+  settingsTab: SettingsTabId | null
+  openSettings: (tab: SettingsTabId) => void
+  consumeSettingsTab: () => void
+  /**
    * adj540：**手机端「另存为」= 打开工作区面板并把文件名输入框直接展开**（少点一步）。
    * 一次性的"意图"标记：面板在激活时消费掉它再清空（不做持久化——它描述的是"这一次动作"）。
    */
@@ -319,7 +347,8 @@ interface UiState {
   setPlaybackHqEnabled: (programs: number[]) => void
   /** adj379：设置「检测到新版本」状态（PWA 更新提示） */
   setUpdateReady: (b: boolean) => void
-  showNotice: (text: string, kind?: NoticeKind) => void
+  /** adj728：`action` 非空时提示带一个按钮，且**不自动消失**（见 `NoticeAction`） */
+  showNotice: (text: string, kind?: NoticeKind, action?: NoticeAction) => void
   clearNotice: () => void
   /**
    * adj724b：**确认条**（顶部横幅，两个动作）。
@@ -406,6 +435,20 @@ export const useUiStore = create<UiState>()((set) => ({
     }
   })(),
   openModal: (m) => set({ modal: m }),
+  // adj728：一次性"跳到某个设置页签"的意图（见接口处说明；由 PageConfigDialog 消费）
+  settingsTab: null,
+  /**
+   * adj728：**打开「设置」并落在指定页签**（`PageConfigDialog` 消费 `settingsTab`）。
+   * 设置面板住在底栏 dock 里，所以这里同时把 dock 展开到对应那一份面板：
+   * 版面/主题/音色库 → 「全局」面板；布局/字体 → 「谱面」面板。
+   */
+  openSettings: (tab) =>
+    set({
+      dockOpen: true,
+      dockPanel: tab === 'score' || tab === 'font' ? 'score' : 'settings',
+      settingsTab: tab,
+    }),
+  consumeSettingsTab: () => set({ settingsTab: null }),
   workspaceSaveIntent: false,
   requestWorkspaceSave: () => set({ workspaceSaveIntent: true }),
   clearWorkspaceSaveIntent: () => set({ workspaceSaveIntent: false }),
@@ -532,7 +575,12 @@ export const useUiStore = create<UiState>()((set) => ({
     set({ playbackHqEnabled: next })
   },
   notice: null,
-  showNotice: (text, kind = 'ok') => set((s) => ({ notice: { text, kind, nonce: (s.notice?.nonce ?? 0) + 1 } })),
+  /**
+   * adj728：可带**动作按钮**（`action`）——有按钮的提示**不自动消失**，
+   * 因为它是"要你去别处做一件事"（如"打开音色库手动导入"），几秒读完做不到。
+   */
+  showNotice: (text, kind = 'ok', action) =>
+    set((s) => ({ notice: { text, kind, nonce: (s.notice?.nonce ?? 0) + 1, ...(action ? { action } : {}) } })),
   clearNotice: () => set({ notice: null }),
   // adj724b：确认条（嵌入版"文件被外部修改"等需要用户二选一的场景）
   ask: null,

@@ -144,6 +144,23 @@ export function PageConfigDialog({
   const [draft, setDraft] = useState<PageConfig>({ ...pageConfig })
   // adj603：默认子页签取本 section 的第一个（全局 → 版面、谱面 → 布局）
   const [tab, setTab] = useState<TabId>(() => ALL_TABS.find((t) => t.section === section)?.id ?? 'global')
+  /**
+   * adj728（用户要求）：**"跳到某个页签"的一次性意图**（`uiStore.openSettings(tab)`）。
+   *
+   * 起因：「无法下载音色库」那条提示需要一个按钮，点了直接落到「设置 → 音色库」。
+   * ⚠ 本面板是**常驻挂载**在底栏 dock 里的（不是每次打开都重新挂载）⇒ 不能在 `useState`
+   * 初值里读它（只有首次挂载会跑），必须在它变化时**响应**一次；
+   * 而且**只有负责该页签的这份实例**才消费它（另一个 section 的实例读了会把它清掉，
+   * 面板顺序在前的那个先跑，就会把意图吃掉 ⇒ 另一个实例永远等不到）。
+   */
+  const settingsTabRequest = useUiStore((s) => s.settingsTab)
+  const consumeSettingsTab = useUiStore((s) => s.consumeSettingsTab)
+  useEffect(() => {
+    if (!settingsTabRequest) return
+    if (!ALL_TABS.some((t) => t.id === settingsTabRequest && t.section === section)) return
+    setTab(settingsTabRequest)
+    consumeSettingsTab()
+  }, [settingsTabRequest, section, consumeSettingsTab])
   // adj315：页面设置"即刻预览 + 保存持久化 + X 恢复"——
   // 打开时快照原值，调整时临时应用（预览非持久化），保存才写 .jps；关闭未保存则恢复快照。
   const snapRef = useRef<PageConfig>({ ...pageConfig })
