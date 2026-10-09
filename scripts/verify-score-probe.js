@@ -309,6 +309,57 @@ window.__ijipuProbeBody = async function () {
     };
   })();
 
+  /**
+   * adj725b：**复现宿主的真实挂载顺序** —— Obsidian 的代码块/widget 是"**先建 DOM、再挂进文档**"
+   * （实时预览 `initDOM` 建的是游离节点；阅读模式同理）。
+   *
+   * 挂载那一刻元素不在渲染树里 ⇒ `getBBox()` 一律返回 0 ⇒ 量不到内容盒 ⇒ 只能退回"按边距裁"，
+   * 现象正是用户报的「谱面模式上面/下面还留一大片空白」。
+   * 本仓库此前的验证页把面板挂在**已连接**的容器里，所以怎么测都是好的 —— 这一支专门补上。
+   *
+   * 判据：挂载瞬间 `isConnected === false` 且 viewBox 还是"页面级"；
+   * 挂进文档后（等重试窗口跑完：rAF / 60ms / 300ms）viewBox 必须变成**紧贴内容**。
+   */
+  out.detached = await (async () => {
+    const boxEl = document.createElement('div')
+    boxEl.id = 'wrap4'
+    boxEl.style.width = '820px'
+    const plugin4 = makePlugin(boxEl)
+    let h4
+    try {
+      h4 = IJipuPane.mountScorePane({
+        plugin: plugin4,
+        container: boxEl,
+        getSource: () => window.__jpsCode,
+        getFrontmatter: () => null,
+      })
+    } catch (e) {
+      return { error: 'mount4 抛出：' + String(e && e.message) }
+    }
+    const svgAtMount = boxEl.querySelector('svg')
+    const atMount = {
+      svg: !!svgAtMount,
+      connected: !!(svgAtMount && svgAtMount.isConnected),
+      contentBox: svgAtMount ? (svgAtMount.dataset.contentBox || null) : null,
+      viewBox: svgAtMount ? (svgAtMount.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number) : null,
+      info: plugin4.lastCropInfo || null,
+    }
+    // 「宿主把这块挂进笔记」——此后元素才进渲染树
+    document.body.appendChild(boxEl)
+    await sleep(500) // 重试窗口：rAF / +60ms / +300ms
+    const svg = boxEl.querySelector('svg')
+    const after = {
+      connected: !!(svg && svg.isConnected),
+      contentBox: svg ? (svg.dataset.contentBox || null) : null,
+      viewBox: svg ? (svg.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number) : null,
+      measured: svg ? measure(svg) : null,
+      info: plugin4.lastCropInfo || null,
+    }
+    h4?.destroy?.()
+    boxEl.remove()
+    return { atMount, after }
+  })();
+
   // 工具条那段显隐/几何验证是异步的（要等过渡跑完才能读到终值）⇒ **先 await 再赋值**，
   // 否则 out.toolbar 是个 Promise，JSON.stringify 会变成 {}
   out.toolbar = await out.toolbar;

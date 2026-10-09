@@ -135,11 +135,18 @@ async function main() {
   const sampleDir = path.join(ROOT, 'samples')
   const samples = readdirSync(sampleDir).filter((f) => f.endsWith('.jps'))
   const wantName = process.argv[2]
-  const pick = wantName
-    ? samples.find((f) => f === `${wantName}.jps` || f === wantName) ?? samples[0]
-    : samples.sort((a, b) => readFileSync(path.join(sampleDir, b)).length - readFileSync(path.join(sampleDir, a)).length)[0]
-  const code = readFileSync(path.join(sampleDir, pick), 'utf8')
-  console.log(`[verify] 示例谱：${pick}（${code.length} 字节）`)
+  /**
+   * adj725b：**也可以直接喂一份源码文件**（`node scripts/verify-score-crop.mjs <路径>.jps`）——
+   * 复现用户报的那一份谱时不必先塞进 `samples/`（那个目录会随产品发布，不该放临时谱）。
+   */
+  const asFile = wantName && existsSync(wantName) ? wantName : null
+  const pick = asFile
+    ? asFile
+    : wantName
+      ? samples.find((f) => f === `${wantName}.jps` || f === wantName) ?? samples[0]
+      : samples.sort((a, b) => readFileSync(path.join(sampleDir, b)).length - readFileSync(path.join(sampleDir, a)).length)[0]
+  const code = readFileSync(asFile ?? path.join(sampleDir, pick), 'utf8')
+  console.log(`[verify] 谱面：${pick}（${code.length} 字节）`)
 
   // 真实样式表也带上（裁剪后的**渲染高度**取决于 `.ijipu-mode-score … svg { width:100%; height:auto }`，
   // 不加载它量到的就不是真实布局）
@@ -424,6 +431,37 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
   console.log('  工具条显隐/几何  =', JSON.stringify(probe.toolbar))
   console.log('  编辑源码入口     =', JSON.stringify(probe.editSource))
   console.log('  实时预览那一支   =', JSON.stringify(probe.lp))
+  console.log('  游离容器挂载     =', JSON.stringify(probe.detached))
+
+  /**
+   * adj725b：**"先建 DOM、再挂进文档"时的裁剪**（用户报"上面还留一大片空白"的真根因）。
+   *
+   * 挂载瞬间元素不在渲染树 ⇒ `getBBox()` 全 0 ⇒ 量不到内容盒 ⇒ 退回边距兜底（空白依旧）。
+   * 修法是"下一帧再量一次、量到就补裁剪"。这一支把宿主那条顺序原样搬进验证页：
+   *  · 挂载瞬间：`isConnected === false`、viewBox 还是页面级、诊断写"没量到"；
+   *  · 挂进文档后（等重试窗口）：viewBox 必须**紧贴内容**（与实测并集一致），诊断写"裁剪 …"。
+   */
+  if (probe.detached && !probe.detached.error) {
+    const d = probe.detached
+    console.log('  挂载瞬间         =', JSON.stringify(d.atMount))
+    ok(d.atMount.svg && d.atMount.connected === false,
+      'adj725b 复现宿主顺序：挂载瞬间 svg 还不在渲染树里（isConnected=false）', JSON.stringify(d.atMount))
+    ok(d.atMount.contentBox === null && /没量到|退回边距兜底/.test(String(d.atMount.info)),
+      'adj725b 挂载瞬间确实量不到内容盒（此前的根因）', `${d.atMount.contentBox} / ${d.atMount.info}`)
+    const av = d.after.viewBox
+    const am = d.after.measured
+    if (am && Array.isArray(av) && av.length === 4) {
+      const near = (a, b) => Math.abs(a - b) <= 1.5
+      ok(near(av[0], am.x) && near(av[1], am.y) && near(av[2], am.w) && near(av[3], am.h),
+        'adj725b 挂进文档后**下一帧补量到了**并裁到内容（viewBox ≈ 实测并集）',
+        `viewBox=${av} measured=${JSON.stringify(am)}`)
+      ok(/→ 裁剪/.test(String(d.after.info)), 'adj725b 裁剪实况诊断显示"裁剪 …"（不再是边距兜底）', String(d.after.info))
+    } else {
+      ok(false, 'adj725b 挂进文档后能读到裁剪后的 viewBox / 实测并集', JSON.stringify(d.after))
+    }
+  } else {
+    ok(false, 'adj725b 能测"游离容器挂载"那一支', probe.detached?.error ?? '')
+  }
 
   /**
    * adj725（用户要求）：**谱面块四周只留 2px 留白**。
