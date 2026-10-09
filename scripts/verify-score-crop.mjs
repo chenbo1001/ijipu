@@ -206,7 +206,7 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
 <div id="lpView" class="markdown-source-view mod-cm6">
   <div id="lpEmbed" class="cm-preview-code-block cm-embed-block markdown-rendered cm-lang-jps">
     <div id="wrap3" class="block-language-jps"></div>
-    <div class="embed-actions"><button class="edit-block-button" type="button">e</button></div>
+    <div class="embed-actions"><div class="embed-action edit-block-button" role="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 18l6-6-6-6"></path><path d="M8 6l-6 6 6 6"></path></svg></div></div>
   </div>
 </div>
 <script src="obsidian-stub.js?v=${cacheBust}"></script>
@@ -612,9 +612,32 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
         const doc = await c.send('DOM.getDocument', { depth: -1 })
         const node = await c.send('DOM.querySelector', { nodeId: doc.root.nodeId, selector: '#lpEmbed' })
         await c.send('CSS.forcePseudoState', { nodeId: node.nodeId, forcedPseudoClasses: ['hover'] })
+        /**
+         * ⚠ adj725e：**先把视口调高**再做命中测试 —— `elementFromPoint` 对视口外的点返回 null。
+         * 第三个挂载点（实时预览那一支）在 y≈1050+，而默认视口只有 ~1049 高，
+         * 于是"命中测试"全是 null、看着像"点不到"（本轮为此白查了一轮）。
+         * 宽度不变 ⇒ 布局不变；只是把更多内容放进视口。
+         */
+        await c.send('Emulation.setDeviceMetricsOverride', { width: 900, height: 1600, deviceScaleFactor: 1, mobile: false })
+        await sleep(200)
         const withClass = await evalJson('window.__ijipuLpHoverProbe("withClass")')
+        /**
+         * 视觉证据：**宿主那枚 `</>`（实时预览里用户实际看到的那枚）** 的特写。
+         * 悬停态还强制着（下面才清），所以 `</>` 是显形的。
+         */
+        {
+          const hr = withClass.hostRect ?? { x: 700, y: 900, w: 28, h: 24 }
+          const s = await c.send('Page.captureScreenshot', {
+            format: 'png',
+            clip: { x: Math.max(0, hr.x - 130), y: Math.max(0, hr.y - 70), width: 220, height: 120, scale: 3 },
+          })
+          writeFileSync(path.join(OUT, 'crop-lp-editbtn.png'), Buffer.from(s.data, 'base64'))
+          console.log(`  截图：${path.relative(ROOT, path.join(OUT, 'crop-lp-editbtn.png'))}（宿主那枚 </> 的特写）`)
+        }
         const noClass = await evalJson('window.__ijipuLpHoverProbe("noClass")')
         await c.send('CSS.forcePseudoState', { nodeId: node.nodeId, forcedPseudoClasses: [] })
+        await c.send('Emulation.clearDeviceMetricsOverride')
+        await sleep(150)
         console.log('  悬停（保留我们的类）=', JSON.stringify(withClass))
         console.log('  悬停（负对照：摘掉类）=', JSON.stringify(noClass))
         ok(withClass.overflow === 'visible' && withClass.hitCenter === 'toolbar',
@@ -623,6 +646,27 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
         ok(noClass.overflow === 'hidden' && noClass.hitCenter !== 'toolbar',
           'adj725 负对照：摘掉 .ijipu-cm-host ⇒ 宿主确实会裁掉工具条（证明这条修法是承重的）',
           JSON.stringify(noClass))
+        /**
+         * adj725e（用户第二轮截图：深色主题下宿主那枚 `</>` 一片白、看不见）：
+         * 实时预览里我们那枚会撤掉、**用户看到的是宿主自己那枚**（`.edit-block-button`），
+         * 它默认只跟主题取色 ⇒ 压在白纸上深色主题看不见。这条量它的对比度：
+         *  · 保留 `.ijipu-cm-host`：对比度 ≥3:1（我们给它补的"深底 + 白字"生效）；
+         *  · 负对照（摘掉该类）：底色透明 ⇒ 对比度掉到 ~1:1（正是用户看到的"看不见"）。
+         */
+        console.log('  宿主 `</>`（保留类）=', JSON.stringify(withClass.hostContrast), 'hit=', withClass.hostHit)
+        console.log('  宿主 `</>`（负对照）  =', JSON.stringify(noClass.hostContrast), 'hit=', noClass.hostHit)
+        if (withClass.hostContrast && noClass.hostContrast) {
+          ok(withClass.hostContrast.ratio >= 3,
+            'adj725e 宿主那枚 `</>` 在**本插件的块里**也看得见（与白纸的对比度 ≥3:1）',
+            JSON.stringify(withClass.hostContrast))
+          ok(withClass.hostHit === 'hostBtn',
+            'adj725e 它也确实压在块右上角、能被点中', `hit=${withClass.hostHit} rect=${JSON.stringify(withClass.hostRect)}`)
+          ok(noClass.hostContrast.ratio < 1.6,
+            'adj725e 负对照：摘掉 .ijipu-cm-host ⇒ 宿主那枚退回"跟主题取色"（白纸上≈看不见）',
+            JSON.stringify(noClass.hostContrast))
+        } else {
+          ok(false, 'adj725e 能量到宿主 `</>` 的字色/底色', JSON.stringify({ with: withClass.hostContrast, no: noClass.hostContrast }))
+        }
       } else {
         skip('adj725 实时预览悬停时的裁剪（命中测试）',
           obsidianCss ? '环境不满足 (hover: hover)' : '拿不到 Obsidian app.css')

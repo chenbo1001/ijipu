@@ -14,6 +14,39 @@
  *
  * ⚠ 模板字符串里**禁止出现反引号**；本文件由 verify 脚本原样落盘后由页面引入。
  */
+/**
+ * adj725c/725e：按"字色 vs 底色（合成到**白纸**）"实算 WCAG 对比度。
+ *
+ * 为什么按白纸合成：谱面纸张恒为白色（`.ijipu-svgs .ijipu-page-svg > svg { background: #ffffff }`），
+ * 而块右上角那两枚 `</>`（本插件的一枚 + 宿主自己的一枚）就压在白纸上；
+ * 底色是半透明的 ⇒ 真实观感 = 字色 vs 底色合成到白之后的结果。
+ */
+window.__ijipuContrastOnPaper = function (el) {
+  if (!el) return null
+  const cs = getComputedStyle(el)
+  const nums = (s) => (s.match(/[\d.]+/g) || []).map(Number)
+  const lum = (r, g, b) => {
+    const f = (c) => {
+      const v = c / 255
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+    }
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+  }
+  const fg = nums(cs.color)
+  const bg = nums(cs.backgroundColor)
+  if (fg.length < 3 || bg.length < 3) return null
+  const a = bg.length > 3 ? bg[3] : 1
+  const comp = [0, 1, 2].map((i) => bg[i] * a + 255 * (1 - a))
+  const l1 = lum(fg[0], fg[1], fg[2])
+  const l2 = lum(comp[0], comp[1], comp[2])
+  return {
+    fg: cs.color,
+    bg: cs.backgroundColor,
+    compositedOnPaper: comp.map((v) => Math.round(v)),
+    ratio: +(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)).toFixed(2)),
+  }
+};
+
 window.__ijipuProbe = async function () {
   try {
     return await __ijipuProbeBody();
@@ -253,38 +286,7 @@ window.__ijipuProbeBody = async function () {
       shown,
       calls: window.__ijipuEditCalls || 0,
       clickErr: window.__ijipuEditErr || null,
-      /**
-       * adj725c（用户报「`</>` 看不见」）：**按合成后的颜色实算对比度**。
-       *
-       * 按钮压在**恒为白色**的谱面纸张上，而它的底色是半透明的 ⇒ 真实观感取决于
-       * "字色 vs （底色合成到白纸）"。这里把两个颜色取出来、按 alpha 合成到白底上，
-       * 用 WCAG 的相对亮度公式算对比度，交给 verify 脚本断言（≥3:1 是图形类的最低线）。
-       */
-      contrast: (() => {
-        if (!btn) return null
-        const cs = getComputedStyle(btn)
-        const nums = (s) => (s.match(/[\d.]+/g) || []).map(Number)
-        const lum = (r, g, b) => {
-          const f = (c) => {
-            const v = c / 255
-            return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
-          }
-          return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
-        }
-        const fg = nums(cs.color)
-        const bg = nums(cs.backgroundColor)
-        if (fg.length < 3 || bg.length < 3) return null
-        const a = bg.length > 3 ? bg[3] : 1
-        const comp = [0, 1, 2].map((i) => bg[i] * a + 255 * (1 - a)) // 纸张恒为白
-        const l1 = lum(fg[0], fg[1], fg[2])
-        const l2 = lum(comp[0], comp[1], comp[2])
-        return {
-          fg: cs.color,
-          bg: cs.backgroundColor,
-          compositedOnPaper: comp.map((v) => Math.round(v)),
-          ratio: +(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)).toFixed(2)),
-        }
-      })(),
+      contrast: window.__ijipuContrastOnPaper(btn),
       /** 右上角：与容器右缘/顶边的净距（应各 ~4px，即 `--size-2-2`） */
       gaps: btnRect
         ? { right: +(box2.right - btnRect.right).toFixed(1), top: +(btnRect.top - box2.top).toFixed(1) }
@@ -465,13 +467,39 @@ window.__ijipuLpHoverProbe = function (mode) {
   if (mode === 'noClass') embed.classList.remove('ijipu-cm-host');
   const tb = container3.querySelector('.ijipu-score-toolbar');
   if (!tb) return JSON.stringify({ error: '没有工具条' });
+  /**
+   * ⚠ 必须先**滚进视口**再量：`elementFromPoint` 对视口外的点返回 null
+   * （实测第三次挂载点的 `</>` 在 y≈1062、视口只有 1049 ⇒ 命中测试全是 null，看着像"点不到"）。
+   * 量完滚回顶部，免得把后面几张截图的内容带跑偏。
+   */
+  embed.scrollIntoView({ block: 'center' });
   const r = tb.getBoundingClientRect();
   const el = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
-  return JSON.stringify({
+  /**
+   * adj725e：**宿主自己那枚 `</>`**（`.embed-actions .edit-block-button`）也一起量 ——
+   * 实时预览里我们那枚会撤掉，用户看到/点到的是宿主这枚，它默认只跟主题取色，
+   * 压在白纸上深色主题下看不见。这里量它的字色/底色（合成到白纸后的对比度）与命中点。
+   */
+  const hostBtn = embed.querySelector('.embed-actions .edit-block-button, .embed-actions .embed-action');
+  let hostHit = null;
+  let hostRect = null;
+  if (hostBtn) {
+    const hr = hostBtn.getBoundingClientRect();
+    hostRect = { x: Math.round(hr.left), y: Math.round(hr.top), w: Math.round(hr.width), h: Math.round(hr.height) };
+    const hel = document.elementFromPoint(Math.round(hr.left + hr.width / 2), Math.round(hr.top + hr.height / 2));
+    hostHit = hel ? (hel.closest('.edit-block-button, .embed-action') ? 'hostBtn' : (hel.id || hel.className || hel.tagName)) : null;
+  }
+  const out = {
     mode,
     hasClass: embed.classList.contains('ijipu-cm-host'),
     overflow: getComputedStyle(embed).overflow,
     toolbarRect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
     hitCenter: el ? (el.closest('.ijipu-score-toolbar') ? 'toolbar' : (el.id || el.className || el.tagName)) : null,
-  });
+    hostRect,
+    hostHit,
+    hostContrast: hostBtn ? window.__ijipuContrastOnPaper(hostBtn) : null,
+    hostOpacity: hostBtn ? getComputedStyle(hostBtn).opacity : null,
+  };
+  window.scrollTo(0, 0); // 截图用：滚回顶部（上面的命中测试已经量完）
+  return JSON.stringify(out);
 };
