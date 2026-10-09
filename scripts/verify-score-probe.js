@@ -392,6 +392,57 @@ window.__ijipuProbeBody = async function () {
     return { atMount, after }
   })();
 
+  /**
+   * adj725d：**小节序号（框内数字）必须上下居中**。
+   *
+   * 复现的正是宿主那条：Obsidian 的 `sanitizeHTMLToDom`（DOMPurify）会**剥掉 `dominant-baseline`**
+   * （见 verify 脚本里那个仿照它的替身）⇒ 数字退回字母基线、整体偏上。
+   * 这里挂一个小谱（`showBarCount: true`），逐个方框量：
+   *  · 文本上还有没有 `dominant-baseline="central"`（属性有没有被剥掉）；
+   *  · 文本包围盒中心 vs 方框中心（`central` 生效时两者应当重合）。
+   */
+  out.barNumber = await (async () => {
+    /** 12 小节（序号默认每 4 小节一个 ⇒ 应有 4/8/12 三个方框，够做"逐个居中"的判断） */
+    const BAR = '1 2 3 4 | 5 6 7 1\' | 2\' 1\' 7 6 | 5 - - - |'
+    const BAR12 = BAR + ' ' + BAR + ' ' + BAR
+    const boxEl = document.createElement('div')
+    boxEl.id = 'wrap5'
+    boxEl.style.width = '820px'
+    document.body.appendChild(boxEl)
+    const src = '# jps-config:{"showBarCount":true}\nB: 序号居中\nD: C\nP: 4/4\nJ: 60\nQ: ' + BAR12 + '\n'
+    const plugin5 = makePlugin(boxEl)
+    let h5
+    try {
+      h5 = IJipuPane.mountScorePane({
+        plugin: plugin5,
+        container: boxEl,
+        getSource: () => src,
+        getFrontmatter: () => null,
+      })
+    } catch (e) {
+      return { error: 'mount5 抛出：' + String(e && e.message) }
+    }
+    await sleep(80)
+    const groups = Array.prototype.slice.call(boxEl.querySelectorAll('[data-barnumber]'))
+    const items = groups.map((g) => {
+      const rect = g.querySelector('rect')
+      const text = g.querySelector('text')
+      const rb = rect ? rect.getBBox() : null
+      const tb = text ? text.getBBox() : null
+      return {
+        n: g.getAttribute('data-barnumber'),
+        baseline: text ? text.getAttribute('dominant-baseline') : null,
+        boxCenterY: rb ? +(rb.y + rb.height / 2).toFixed(3) : null,
+        textCenterY: tb ? +(tb.y + tb.height / 2).toFixed(3) : null,
+        fs: text ? +Number(text.getAttribute('font-size')).toFixed(2) : null,
+      }
+    })
+    const res = { count: items.length, svgParse: plugin5.lastSvgParse || null, items }
+    h5?.destroy?.()
+    boxEl.remove()
+    return res
+  })();
+
   // 工具条那段显隐/几何验证是异步的（要等过渡跑完才能读到终值）⇒ **先 await 再赋值**，
   // 否则 out.toolbar 是个 Promise，JSON.stringify 会变成 {}
   out.toolbar = await out.toolbar;

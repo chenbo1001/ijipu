@@ -249,9 +249,23 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
   window.createEl = function (tag, o) { return apply(o, document.createElement(tag)); };
   window.createDiv = function (o) { return apply(o, document.createElement('div')); };
   window.createSpan = function (o) { return apply(o, document.createElement('span')); };
+  window.createFragment = function () { return document.createDocumentFragment(); };
+  /**
+   * ⚠ adj725d：这个替身**故意模仿 Obsidian 的 sanitizeHTMLToDom（底层 DOMPurify）**。
+   *
+   * 已在本机 obsidian.asar 的 app.js 里核实：DOMPurify 的 SVG 属性白名单**不含** dominant-baseline
+   * （白名单里有 alignment-baseline / baseline-shift / text-anchor / writing-mode…，
+   *  全文只有 HTML→SVG 的属性名映射表里出现过它）⇒ 该属性会被**剥掉**，
+   * 于是小节序号等"字符中心对齐"的文本整体偏上（用户 2026-10 报的那条）。
+   *
+   * 验证页照抄这条行为：若插件的 svgToDom() 被人改回 sanitizeHTMLToDom，
+   * 「小节序号居中」那条断言会立刻红灯 —— 这才算把用户报的问题钉住了。
+   * （本模板字符串里**禁止出现反引号**，所以属性名不加反引号包裹。） */
   window.sanitizeHTMLToDom = function (html) {
     var t = document.createElement('template');
     t.innerHTML = html;
+    var stripped = t.content.querySelectorAll('[dominant-baseline]');
+    for (var i = 0; i < stripped.length; i++) stripped[i].removeAttribute('dominant-baseline');
     return t.content;
   };
   function def(name, value) {
@@ -432,6 +446,41 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
   console.log('  编辑源码入口     =', JSON.stringify(probe.editSource))
   console.log('  实时预览那一支   =', JSON.stringify(probe.lp))
   console.log('  游离容器挂载     =', JSON.stringify(probe.detached))
+  console.log('  小节序号居中     =', JSON.stringify(probe.barNumber))
+
+  /**
+   * adj725d（用户报「小节序号数字偏上，未在方框正中」）：**框内数字必须上下居中**。
+   *
+   * 根因：Obsidian 的 `sanitizeHTMLToDom` = DOMPurify 会剥掉 `dominant-baseline`
+   * （本机 obsidian.asar 的 app.js 白名单里没有它）⇒ 数字退回字母基线、整体偏上。
+   * 验证页的替身**故意照抄这条剥离行为**，所以这里同时钉两件事：
+   *  · 属性还在（说明插件改走 DOMParser 了）；
+   *  · 文本包围盒中心 ≈ 方框中心（`central` 真的生效）。
+   */
+  if (probe.barNumber && !probe.barNumber.error) {
+    const bn = probe.barNumber
+    console.log('  小节序号明细     =', JSON.stringify(bn.items))
+    /**
+     * 闸门自检：验证页那个仿 Obsidian 的替身**确实会剥掉** `dominant-baseline`。
+     * 少了这条，上面的"属性还在"就可能是**假绿灯**（替身没剥 ⇒ 怎么实现都过）。
+     */
+    const san = await evalJson(
+      'JSON.stringify((function(){var d=window.sanitizeHTMLToDom("<svg xmlns=\\"http://www.w3.org/2000/svg\\"><text dominant-baseline=\\"central\\">1</text></svg>");return {stillThere:!!d.querySelector("[dominant-baseline]")}})())',
+    )
+    ok(san.stillThere === false,
+      'adj725d 闸门自检：验证页的 sanitizeHTMLToDom 替身确实会剥掉 dominant-baseline（仿 Obsidian/DOMPurify）',
+      JSON.stringify(san))
+    ok(bn.count >= 3, 'adj725d 量到多个小节序号方框', `count=${bn.count}`)
+    ok(bn.svgParse === 'xml', 'adj725d SVG 走的是 XML 解析（不是被剥属性的 HTML 兜底）', String(bn.svgParse))
+    const lost = bn.items.filter((it) => it.baseline !== 'central')
+    ok(lost.length === 0, 'adj725d 每个序号的 `dominant-baseline="central"` 都还在（没被宿主剥掉）',
+      JSON.stringify(lost))
+    const off = bn.items.filter((it) => it.boxCenterY === null || it.textCenterY === null ||
+      Math.abs(it.textCenterY - it.boxCenterY) > 0.2 * (it.fs || 1))
+    ok(off.length === 0, 'adj725d 序号数字在方框内**上下居中**（文本中心 ≈ 方框中心）', JSON.stringify(off))
+  } else {
+    ok(false, 'adj725d 能测「小节序号居中」', probe.barNumber?.error ?? '')
+  }
 
   /**
    * adj725b：**"先建 DOM、再挂进文档"时的裁剪**（用户报"上面还留一大片空白"的真根因）。
