@@ -90,10 +90,14 @@ async function main() {
     process.exit(0)
   }
 
-  // 取一份示例谱（用最长的那个，内容分布最能暴露裁剪问题）
+  // 取示例谱：命令行可指定（`node scripts/verify-score-crop.mjs 单行片段`），
+  // 否则取**最长**的那个（内容分布最能暴露裁剪问题）
   const sampleDir = path.join(ROOT, 'samples')
   const samples = readdirSync(sampleDir).filter((f) => f.endsWith('.jps'))
-  const pick = samples.sort((a, b) => readFileSync(path.join(sampleDir, b)).length - readFileSync(path.join(sampleDir, a)).length)[0]
+  const wantName = process.argv[2]
+  const pick = wantName
+    ? samples.find((f) => f === `${wantName}.jps` || f === wantName) ?? samples[0]
+    : samples.sort((a, b) => readFileSync(path.join(sampleDir, b)).length - readFileSync(path.join(sampleDir, a)).length)[0]
   const code = readFileSync(path.join(sampleDir, pick), 'utf8')
   console.log(`[verify] 示例谱：${pick}（${code.length} 字节）`)
 
