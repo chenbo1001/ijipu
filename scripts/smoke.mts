@@ -15551,6 +15551,173 @@ runAdj363SaveTests()
       check('adj731 全仓没有 `<img src="/…">` 字面根绝对路径（嵌入版会 404）',
         bad.length === 0, bad.map((f) => f.replace(process.cwd(), '')).join('、'))
     }
+    /**
+     * ---- adj732：试听色块右界 —— 用户给的**原则** ----
+     *
+     * 用户口径（原话）：「色块右界**不超小节线左界，不超下一音符(包括倚音)、滑音等属于下个音符的
+     * 元素和 `&zkh`/`&ykh`/`&hx` 等独立修饰符**」。
+     *
+     * 起因：用户报「试听时的色块范围又定位不准了，色块右边界经常覆盖到下一音符的位置」（应用与插件都有，附截图）。
+     * 根因：`sequence.ts` 里色块右界把**步进右端**（`n.x + n.width`）当成了墨迹右端 ——
+     * 等距音符时它恰好等于下一个音的 `x`（看着"还挺准"），一旦下一个音排得更近
+     * （如附点音：第 2 音 `x=133.2 w=58.2 ⇒ 191.4`，而附点音 `x=177.2`）就压过去 14.2px。
+     *
+     * 这里按**原则**写成断言（每条都对着一个真实元素）：对每一页/声部，逐个色块检查
+     *  ① 右缘 ≤ 下一个同声部音符的**最左墨迹**（`inkLeftX ?? x`，含倚音/变音角标/滑音）；
+     *  ② 右缘 ≤ 本音右侧最近的 `&zkh`/`&ykh`/`&hx` 等独立修饰符左界（`page.brackets`）；
+     *  ③ 右缘 ≤ 本音右侧最近的小节线左界（`page.barlines[].x`）；
+     *  ④ 仍要盖住**本音自己的墨迹**（否则色块会缩到看不见）。
+     * 用例覆盖：截图那一句、倚音、独立修饰符、滑音、两句真实谱例、以及段层（`{bz}`）。
+     */
+    {
+      const EPS = 1e-3
+      /**
+       * 跑一例：返回违例详情（空 = 合规）。
+       * ⚠ 边界必须**同层**取：段层（`{bz}`/`{dsb}`）与主旋律是两条并行内容（y 不同、横带不同），
+       * 拿主旋律的 x 去夹段层色块（或反过来）会造出假违例（第一版就栽在这）。
+       */
+      const audit = (code: string): {
+        n: number
+        cover: number
+        minGap: number
+        bad: string[]
+        err?: string
+      } => {
+        const parsed2 = parseJps(code)
+        const layout2 = layoutScore(parsed2, defaultPageConfig)
+        const seq2 = buildPlaySequence(parsed2, layout2, inferBpm(parsed2))
+        const segs2 = seq2.events.flatMap((e) => e.playheadSegs ?? [])
+        const notes2 = layout2.pages.flatMap((p) => p.notes)
+        const bars2 = layout2.pages.flatMap((p) => p.barlines.filter((b) => !b.segment).map((b) => ({ page: p.index, b })))
+        const brackets2 = layout2.pages.flatMap((p) => (p.brackets ?? []).map((b) => ({ page: p.index, b })))
+        /** 该音符属于哪一层（段层按段型分开；主旋律 = 'main'） */
+        const layerOf = (n: (typeof notes2)[number]): string => (n.segment ? `seg:${n.segment}` : 'main')
+        let violations = 0
+        let coverFails = 0
+        let minGap = Number.POSITIVE_INFINITY
+        const bad: string[] = []
+        for (const s of segs2) {
+          // ⚠ 必须按 (page, **group**, voice) 取同层：`group` 是"声部线/层"（示例谱里 4 条 `Q:` 各是一组，
+          //   它们的 x 几乎重合），只按 voice 会把别的层当成"下一个元素"（实测送别首拍 4 组 x 相差 0.1px）。
+          const all = notes2.filter((n) => n.id.page === s.pageIndex && n.id.group === s.group && n.id.voice === s.voice)
+          // ⚠ 认领要按**最左墨迹**（`inkLeftX ?? x`）取"x 最大的合格者"：带倚音/角标的音符，
+          //   色块从它的左伸墨迹就开始，按 `x` 认领会算到前一个音头上；而多声部里同拍几个音的 x 很接近，
+          //   "取迭代顺序里最后一个"会随数组顺序漂移（第一版 76/76 全假违例就是这么来的）。
+          let own2 = all[0]
+          let bestLeft = Number.NEGATIVE_INFINITY
+          for (const n of all) {
+            const left = n.inkLeftX ?? n.x
+            if (left <= s.x + EPS && left > bestLeft) {
+              bestLeft = left
+              own2 = n
+            }
+          }
+          if (!own2) continue
+          /**
+           * 本断言只审**主旋律层**（`segment` 为空的音符）——用户报的正是这一层。
+           * 段层（`{bz}`/`{dsb}`）的色块走的是另一套已断言的规则（adj439/440/442：以段括号为界，
+           * 且段内还分上/下子层，横带不同），这里不混进来判（否则会把合规的段层当违例）。
+           */
+          if (own2.segment) continue
+          const layer = layerOf(own2)
+          const same = all.filter((n) => layerOf(n) === layer).sort((a, b) => a.x - b.x)
+          const right = s.x + s.width
+          /** "下一个"按**时间**取（和弦音同拍、x 只差零点几像素，不能算"下一个"，见引擎里的说明） */
+          const laterThanOwn = (m: (typeof same)[number]): boolean =>
+            m.barIndex > own2.barIndex || (m.barIndex === own2.barIndex && m.beatPos > own2.beatPos + 1e-6)
+          let limit = Number.POSITIVE_INFINITY
+          let why = '∞'
+          for (const n of same) {
+            const left = n.inkLeftX ?? n.x
+            if (!laterThanOwn(n)) continue
+            if (left > own2.x + EPS && left < limit) {
+              limit = left
+              why = `下一音符(${String(n.token.raw ?? '')})`
+            }
+          }
+          for (const { page, b } of brackets2) {
+            if (page !== s.pageIndex || b.voice !== s.voice) continue
+            const left = b.x - b.width / 2
+            if (left > own2.x + EPS && left < limit) {
+              limit = left
+              why = `独立修饰符 &${b.code}`
+            }
+          }
+          for (const { page, b } of bars2) {
+            if (page !== s.pageIndex || b.id.group !== own2.id.group) continue
+            const left = b.x - (b.width ?? 0) / 2
+            if (left > own2.x + EPS && left < limit) {
+              limit = left
+              why = '小节线'
+            }
+          }
+          if (right > limit + 0.01) {
+            violations++
+            if (bad.length < 4) {
+              bad.push(`越界 ${why}: 块 ${s.x.toFixed(1)}..${right.toFixed(1)} > 限 ${limit.toFixed(1)}（超 ${(right - limit).toFixed(1)}）`)
+            }
+          }
+          minGap = Math.min(minGap, limit - right)
+        }
+        for (const n of notes2) {
+          if (n.segment) continue
+          const mine = segs2.filter(
+            (s) =>
+              s.pageIndex === n.id.page &&
+              s.voice === n.id.voice &&
+              s.x >= n.x - EPS &&
+              s.x < (n.rightX ?? n.x + n.width) + 60,
+          )
+          if (mine.length === 0) continue
+          const inkRight = Math.max(n.rightX ?? 0, ...(n.segments ?? []).map((g) => g.x + g.perBeat * g.beats))
+          const maxRight = Math.max(...mine.map((s) => s.x + s.width))
+          if (inkRight > 0 && maxRight < inkRight - 0.5) {
+            coverFails++
+            if (bad.length < 6) bad.push(`未盖住本音墨迹: ${String(n.token.raw ?? '')} 块右 ${maxRight.toFixed(1)} < 墨迹右 ${inkRight.toFixed(1)}`)
+          }
+        }
+        return { n: segs2.length, cover: coverFails + violations, minGap, bad }
+      }
+
+      const cases: [string, string][] = [
+        ['截图那一句', `D: C\nP: 4/4\nQ: ( 2 3 | 5. 2 3 5. 6 6 5 | 3 0 3 5 )\n`],
+        ['带倚音', `D: C\nP: 4/4\nQ: 1 [3]5 2 3 |\n`],
+        ['独立括号', `D: C\nP: 4/4\nQ: 1 2 &zkh 3 4 &ykh 5 6 |\n`],
+        ['滑音 &hx', `D: C\nP: 4/4\nQ: 1 &hx 2 3 4 |\n`],
+        ['示例：送别', readFileSync(join(process.cwd(), 'public/samples/送别.jps'), 'utf8')],
+        ['示例：茉莉花', readFileSync(join(process.cwd(), 'public/samples/茉莉花.jps'), 'utf8')],
+      ]
+      /**
+       * ⚠ 断言口径与**已知边界**（写清楚，免得后人以为漏了）：
+       *  · 这里审的是**主旋律层**（`segment` 为空的音符）——用户报的正是这一层；
+       *  · "下一个"按**时间**（`(barIndex, beatPos)`）取，**和弦音（同拍多音）不算"下一个"**——
+       *    它们 x 只差零点几像素、纵向并排，是同一个"下一个"位置（引擎里已按此实现）；
+       *  · 段层（`{bz}`/`{dsb}`）色块走 adj439/440/442 那套"以段括号为界"的规则（另有断言），
+       *    且段内还分上/下子层，本断言不把它们混进来判（否则会把合规的段层判成违例）。
+       */
+      const results = cases.map(([label, code]) => {
+        try {
+          return { label, ...audit(code) }
+        } catch (e) {
+          return { label, n: -1, cover: -1, minGap: Number.NaN, bad: [] as string[], err: e instanceof Error ? e.message : String(e) }
+        }
+      })
+      const badCases = results.filter((r) => r.n < 0 || r.cover !== 0 || !(r.minGap >= -0.01))
+      check('adj732 色块右界遵守"不超小节线/下一音符(含倚音)/独立修饰符"，且仍盖住自己的墨迹',
+        badCases.length === 0,
+        JSON.stringify(results.map((r) => `${r.label}: segs=${r.n} 违例=${r.cover} 最小余量=${Number.isFinite(r.minGap) ? r.minGap.toFixed(1) : '∞'}${r.err ? ' 异常=' + r.err : ''}${r.bad.length ? ' → ' + r.bad.join('；') : ''}`)))
+      // 负对照：截图那一句里，"步进右端"确实越过了下一个音的 x（否则这条用例测不到缺陷）
+      {
+        const parsed3 = parseJps(cases[0][1])
+        const layout3 = layoutScore(parsed3, defaultPageConfig)
+        const vn3 = layout3.pages.flatMap((p) => p.notes).filter((n) => !n.segment).sort((a, b) => a.x - b.x)
+        const second = vn3[1]
+        const third = vn3[2]
+        check('adj732 负对照：用例里第 2 音的"步进右端"确实越过下一个音的 x（说明这条用例真的能测到缺陷）',
+          second.x + second.width > third.x + 0.01 && (second.rightX ?? 0) < third.x,
+          `步进右端=${(second.x + second.width).toFixed(1)} 下一音 x=${third.x.toFixed(1)} 墨迹右缘=${(second.rightX ?? 0).toFixed(1)}`)
+      }
+    }
     console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
     process.exit(failed === 0 ? 0 : 1)
   })

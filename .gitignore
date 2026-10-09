@@ -57,3 +57,7 @@ dist-video/
 # 提交信息临时文件（git commit -F 用；**严禁入库**——git add -A 会把它一起加进来，已发生过两次）
 .ui-c*.txt
 .tmp-*.mjs
+
+# 一次性排错脚本（AGENTS 六：`scripts/_tmp_*` 用后必删、**禁提交**）——
+# 写进这里当闸门：真忘了删也不会被 `git add -A` 顺手带进仓库（插件仓库同样有这条）。
+scripts/_tmp_*
