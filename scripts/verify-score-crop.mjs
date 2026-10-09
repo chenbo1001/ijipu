@@ -15,7 +15,7 @@
  */
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, writeFileSync, rmSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -39,6 +39,46 @@ const ok = (cond, name, extra = '') => {
   } else {
     fail++
     console.error(`  ✗ ${name}${extra ? ` — ${extra}` : ''}`)
+  }
+}
+/** 跳过（不算失败）：例如宿主 CSS 拿不到、或环境不具备 `(hover: hover)` */
+const skip = (name, why) => console.log(`  –（跳过）${name} —— ${why}`)
+
+/**
+ * adj725：取**本机安装的 Obsidian 的真实 `app.css`**（asar 里是明文）。
+ *
+ * 为什么非它不可：本轮要验证的"工具条浮到块外会不会被宿主裁掉"完全由宿主那条
+ * `@media (hover:hover) { .markdown-source-view.mod-cm6 .cm-embed-block:hover { overflow: hidden } }`
+ * 决定 —— 不加载它，"验证"就退化成读我们自己写的那行 CSS（等于没测）。
+ * 顺序也要照抄宿主：core 的 `app.css` 先、插件 `styles.css` 后（同特异性时靠这个分胜负）。
+ *
+ * asar 头：`[…] [headerLen] …` 之后是 JSON 头，文件数据紧跟在 JSON 头之后，
+ * 每个文件的 offset 相对该起点。取不到就返回 null（调用方跳过相关断言，不假装通过）。
+ */
+function extractObsidianAppCss() {
+  const ASAR = 'C:/Program Files/Obsidian/resources/obsidian.asar'
+  if (!existsSync(ASAR)) return null
+  const fd = openSync(ASAR, 'r')
+  try {
+    const head = Buffer.alloc(64)
+    readSync(fd, head, 0, 64, null)
+    const jsonStart = head.indexOf('{"files"', 0, 'utf8')
+    if (jsonStart < 0) return null
+    const headerLen = head.readUInt32LE(jsonStart - 4)
+    const jsonBuf = Buffer.alloc(headerLen)
+    readSync(fd, jsonBuf, 0, headerLen, jsonStart)
+    const header = JSON.parse(jsonBuf.toString('utf8'))
+    let dataStart = jsonStart + headerLen
+    if (dataStart % 4) dataStart += 4 - (dataStart % 4)
+    const entry = header.files?.['app.css']
+    if (!entry) return null
+    const buf = Buffer.alloc(entry.size)
+    readSync(fd, buf, 0, entry.size, dataStart + Number(entry.offset))
+    return buf.toString('utf8')
+  } catch {
+    return null
+  } finally {
+    closeSync(fd)
   }
 }
 
@@ -113,18 +153,55 @@ async function main() {
   writeFileSync(path.join(OUT, 'plugin.css'), pluginCss, 'utf8')
 
   /**
+   * adj725：**连宿主的 app.css 一起加载**（顺序与真实宿主一致：core 先、插件后）——
+   * 否则"工具条浮到块外会不会被 `.cm-embed-block:hover { overflow: hidden }` 裁掉"这条
+   * 根本无法在页面里复现。取不到（没装 Obsidian）就退化为"只加载插件样式"，
+   * 相关断言会**跳过**并打印原因，不会假装通过。
+   */
+  const obsidianCss = extractObsidianAppCss()
+  if (obsidianCss) writeFileSync(path.join(OUT, 'obsidian-app.css'), obsidianCss, 'utf8')
+  else console.log('[verify] 未找到 Obsidian app.css ⇒ 跳过"宿主裁剪"相关断言')
+
+  /**
    * 加**版本号查询串**（adj724b）：静态资源必须每次都是新的 ——
    * 实测仅靠 `Network.setCacheDisabled` 不足以让已加载过的 `probe.js` 更新，
    * 会出现"改了探针、输出却一模一样"的假象（本轮被骗过一次）。
    * 变量名用 `cacheBust`（不能用 `v`：下面读 viewBox 的那个 `v` 会撞名）。
    */
   const cacheBust = String(Date.now())
+  /**
+   * adj725：页面结构与真实宿主对齐 —— 三个挂载点：
+   *  · `#wrap`  = **阅读模式**的 `div.block-language-jps`（处理器拿到的 `el` 就是它）
+   *  · `#wrap2` = 「编辑源码」按钮那一支
+   *  · `#wrap3` = **实时预览**：`div.cm-preview-code-block.cm-embed-block.markdown-rendered.cm-lang-jps`
+   *               > `div.block-language-jps`（DOM 结构与类名逐字取自 Obsidian 的 app.js），
+   *               里面还**预置了宿主的 `.embed-actions`**（真实宿主会给代码块挂「编辑此块」按钮）
+   *               —— 用来验证"我们不重复挂 `</>`"与"工具条浮到块外不会被宿主裁掉"。
+   * `#wrap3` 外面留 140px 空白：工具条浮在块上方，必须有地方放（否则量到视口外）。
+   *
+   * ⚠ `body` 必须带**主题类**（这里用 `theme-dark`，与用户截图同一主题）：宿主的颜色变量
+   * （`--text-normal` / `--background-secondary` / `--embed-action-color` …）只在
+   * `.theme-dark` / `.theme-light` 下成立。不带它时 `</>` 的 `color` 会落到宿主的深色默认值纯白，
+   * 于是"截图里看不见"且量到的颜色不是真实取值 —— 本轮先被这个假象骗过一次。
+   *
+   * ⚠ 这个模板字符串里**绝不能出现反引号**：写 HTML 注释时手滑用了反引号包住变量名，
+   * 直接把模板终结掉，报出 `SyntaxError: Invalid left-hand side expression in postfix operation`
+   * （报错行还落在别处）。说明一律写在模板**外面**，见文件头。
+   */
   const indexHtml = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>crop verify</title>
+${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">` : ''}
 <link rel="stylesheet" href="plugin.css?v=${cacheBust}">
 <style>body{margin:0;background:#eef;font:12px system-ui}#wrap{width:820px;margin:8px auto}
-.ijipu-page-svg{background:#fff;border:1px solid #c00}</style></head>
-<body><div id="wrap"></div>
+.ijipu-page-svg{background:#fff;border:1px solid #c00}
+#lpView{width:820px;margin:140px auto 8px}#wrap3{padding:0}</style></head>
+<body class="theme-dark"><div id="wrap"></div>
 <div id="wrap2" style="width:820px;margin:8px auto"></div>
+<div id="lpView" class="markdown-source-view mod-cm6">
+  <div id="lpEmbed" class="cm-preview-code-block cm-embed-block markdown-rendered cm-lang-jps">
+    <div id="wrap3" class="block-language-jps"></div>
+    <div class="embed-actions"><button class="edit-block-button" type="button">e</button></div>
+  </div>
+</div>
 <script src="obsidian-stub.js?v=${cacheBust}"></script>
 <script src="probe.js?v=${cacheBust}"></script>
 <script src="ijipu-pane.js?v=${cacheBust}"></script>
@@ -138,33 +215,7 @@ async function main() {
   window.addEventListener('unhandledrejection', function (e) { window.__ijipuErrs.push('rej: ' + String(e && e.reason)); });
   // 把示例源码交给页面，供评测表达式读取
   window.__jpsCode = ${JSON.stringify(code)};
-  /**
-   * adj724b：「源码」模式验证要用的宿主桩与记录位。
-   * 插件对象放在 window 上（两个挂载点共用），另需 containerEl 供事件注册。
-   */
   window.__ijipuSrc = window.__jpsCode;
-  window.__ijipuWritten = [];
-  (function () {
-    const listeners = new Map();
-    const events = {
-      on: function (n, cb) { listeners.set(n, cb); return { name: n, cb: cb }; },
-      offref: function (r) { if (r && r.name) listeners.delete(r.name); },
-    };
-    window.__ijipuPlugin = {
-      settings: {},
-      showGuides: false,
-      containerEl: document.getElementById('wrap'),
-      registerSettingsRefresh: function () {},
-      events: events,
-      registerEvent: function () {},
-      register: function () {},
-      getWorkletUrl: function () { return ''; },
-      registerPlay: function () {},
-      unregisterPlay: function () {},
-      toggleGuides: function () { return false; },
-      app: { workspace: { on: function () { return {}; } }, vault: { on: function () { return {}; } } },
-    };
-  })();
 </script>
 </body></html>`
   writeFileSync(path.join(OUT, 'crop-verify.html'), indexHtml, 'utf8')
@@ -220,6 +271,14 @@ async function main() {
   def('createSpan', function (o) { var s = apply(o, document.createElement('span')); this.appendChild(s); return s; });
 })();`
   writeFileSync(path.join(OUT, 'obsidian-stub.js'), stub, 'utf8')
+
+  /**
+   * 页面内探针放在**外部文件**里（见 scripts/verify-score-probe.js 的说明）：
+   * 逻辑写在模板字符串里时，反引号与转义会互相干扰，反复产出难以定位的 SyntaxError。
+   * ⚠ adj725：**必须在启动 Chrome 之前**落盘 —— 之前放在 reload 之后，
+   *   首次页面加载时该文件还不存在（404）⇒ 探针"语法没问题却不存在"。
+   */
+  writeFileSync(path.join(OUT, 'probe.js'), readFileSync(path.join(ROOT, 'scripts', 'verify-score-probe.js'), 'utf8'), 'utf8')
 
   const server = createServer((req, res) => {
     const rel = decodeURIComponent(String(req.url ?? '/').split('?')[0].replace(/^\/+/, '')) || 'crop-verify.html'
@@ -292,16 +351,50 @@ async function main() {
   await c.send('Page.reload', { ignoreCache: true })
   await sleep(600)
 
+  /**
+   * 在页面里求值并把 JSON 解析回来（多处要用）。
+   * ⚠ 表达式**必须不含反引号** —— 这里已是普通字符串，但上游常把它写成模板字符串，
+   *   一旦出现反引号就会提前终结模板（本项目为此排查过很久，见文件头说明）。
+   */
+  const evalJson = async (expression) => {
+    const r = await c.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
+    if (r.exceptionDetails) throw new Error(`页面内表达式抛错：${JSON.stringify(r.exceptionDetails).slice(0, 300)}`)
+    return JSON.parse(r.result.value)
+  }
+
   // —— 在页面里驱动**真实源码**：挂载面板 → 读「谱面」模式的 viewBox ——
   // ⚠ 本模板字符串里**禁止出现反引号**（会提前终结模板）；DOM/宿主替身一律放在外部 js 文件里。
-  /**
-   * 页面内探针放在**外部文件**里（见 scripts/verify-score-probe.js 的说明）：
-   * 逻辑写在模板字符串里时，反引号与转义会互相干扰，反复产出难以定位的 SyntaxError。
-   * 这里只负责把它落盘、由页面引入，然后调一行。
-   */
-  const probeSrc = readFileSync(path.join(ROOT, 'scripts', 'verify-score-probe.js'), 'utf8')
-  writeFileSync(path.join(OUT, 'probe.js'), probeSrc, 'utf8')
   const expr = 'window.__ijipuProbe()'
+
+  /**
+   * ⚠ adj725：**先等页面把脚本都跑起来**再调探针。
+   *
+   * 此前是固定 `sleep(600)` —— 本轮加了"连宿主 app.css 一起加载"（668KB）后，
+   * 600ms 不再够用，探针会在 `window.__ijipuProbe` 还是 undefined 时被调用，
+   * 报出 `TypeError: window.__ijipuProbe is not a function`（看着像探针语法错，
+   * 其实是**页面还没加载完**——最容易误判的一类）。
+   */
+  let pageReady = false
+  for (let i = 0; i < 40; i++) {
+    const r = await c.send('Runtime.evaluate', {
+      expression: 'typeof window.__ijipuProbe + "/" + typeof window.IJipuPane',
+      returnByValue: true,
+    })
+    if (r.result.value === 'function/object') {
+      pageReady = true
+      break
+    }
+    await sleep(250)
+  }
+  if (!pageReady) {
+    const diag = await c.send('Runtime.evaluate', {
+      expression:
+        'JSON.stringify({scripts: Array.from(document.scripts).map(function(s){return s.src.split("/").pop()}), errs: window.__ijipuErrs || null, ready: document.readyState})',
+      returnByValue: true,
+    })
+    console.error('[verify] 页面脚本没跑起来：', diag.result.value)
+    await done(1)
+  }
 
   let probe
   try {
@@ -327,18 +420,50 @@ async function main() {
   console.log('  「谱面」viewBox  =', JSON.stringify(ms.viewBox))
   console.log('  「谱面」元素盒子  =', JSON.stringify(ms.rect), ' 父容器 =', JSON.stringify(ms.parentRect))
   console.log('  CSS 实况         =', JSON.stringify(probe.css))
-  console.log('  工具条显隐       =', JSON.stringify(probe.toolbar))
-  console.log('  源码模式         =', JSON.stringify(probe.sourceMode))
-  if (probe.sourceMode && !probe.sourceMode.error) {
-    const sm = probe.sourceMode
-    ok(sm.hasBtn, '工具栏出现「源码」按钮（宿主可写回时）')
-    ok(sm.hasScoreBefore, '进入前显示的是谱面')
-    ok(sm.textareaShown && sm.scoreGone, '点「源码」后：谱面换成 textarea', JSON.stringify(sm))
-    ok(sm.writtenOk, '在源码态输入后内容被写回宿主', String(sm.writtenOk))
-    ok(sm.backToScore, '再点一下回到看谱（谱面恢复）')
+  console.log('  块四周留白       =', JSON.stringify(probe.padding))
+  console.log('  工具条显隐/几何  =', JSON.stringify(probe.toolbar))
+  console.log('  编辑源码入口     =', JSON.stringify(probe.editSource))
+  console.log('  实时预览那一支   =', JSON.stringify(probe.lp))
+
+  /**
+   * adj725（用户要求）：**谱面块四周只留 2px 留白**。
+   * 量的口径 = 容器（`.ijipu-score`）外缘 → 谱面纸张（`.ijipu-svgs`）的净距。
+   * 允许 1px 误差（边框/子像素取整）；关键是"绝不是原来的 6.4px（0.4em）那种厚边距"。
+   */
+  if (probe.padding && !probe.padding.error) {
+    const p = probe.padding
+    const near2 = (x) => Math.abs(x - 2) <= 1.2
+    ok(near2(p.left) && near2(p.right) && near2(p.top) && near2(p.bottom),
+      'adj725 谱面块四周只留 2px 留白（左右上下各自量）', JSON.stringify(p))
   } else {
-    ok(false, '能测「源码」模式', probe.sourceMode?.error ?? '')
+    ok(false, 'adj725 能量到谱面块四周的留白', JSON.stringify(probe.padding))
   }
+
+  /**
+   * adj725（用户要求）：**「编辑源码」= 块右上角的 `</>`**（点它切回笔记源码）。
+   *  · 有 `onEditSource` 才出现（代码块）；谱面**不被换掉**、**不出现 textarea**；
+   *  · 默认不可见 → 悬停显形（与工具条同一套）；
+   *  · 位置在块右上角（与容器右缘/顶边各差几像素）；
+   *  · 点击**恰好调一次**宿主落点。
+   */
+  if (probe.editSource && !probe.editSource.error) {
+    const e = probe.editSource
+    ok(e.hasBtn, 'adj725 出现块右上角的 `</>`（宿主给了 onEditSource）')
+    ok(e.hidden === 'hidden' && e.shown === 'visible', 'adj725 `</>` 默认不可见、悬停显形（与工具条同套）',
+      `初始=${e.hidden} 悬停=${e.shown}`)
+    ok(e.noTextarea && e.scoreKept, 'adj725 不再出现 textarea，谱面也保持渲染（源码切回笔记）',
+      `noTextarea=${e.noTextarea} scoreKept=${e.scoreKept}`)
+    ok(e.calls === 1, 'adj725 点一下 = 调一次宿主落点（切回笔记源码）', `calls=${e.calls} err=${e.clickErr}`)
+    if (e.gaps) {
+      ok(e.gaps.right >= 0 && e.gaps.right <= 12 && e.gaps.top >= 0 && e.gaps.top <= 12,
+        'adj725 `</>` 落在块的**右上角**（与右缘/顶边各内缩几像素）', JSON.stringify(e.gaps))
+    } else {
+      ok(false, 'adj725 能量到 `</>` 的位置')
+    }
+  } else {
+    ok(false, 'adj725 能测「编辑源码」入口', probe.editSource?.error ?? '')
+  }
+
   if (probe.toolbar && !probe.toolbar.error) {
     const t = probe.toolbar
     ok(t.initial.visibility === 'hidden', '工具条默认不可见（visibility:hidden ⇒ 导出不会出现、也不占 Tab 焦点）', t.initial.visibility)
@@ -349,8 +474,61 @@ async function main() {
     ok(s.before === s.afterReveal && s.before === s.afterLeave,
       '**谱面不因工具条显隐而位移**（SVG top 前后一致）',
       `before=${s.before} 显示后=${s.afterReveal} 收起后=${s.afterLeave}`)
+    /** adj725：工具条整条落在**块外**正上方、左缘与块对齐（用户要求：不要盖在预览区内部） */
+    const g = t.geometry
+    if (g) {
+      ok(g.outsideContainer && g.leftAligned,
+        'adj725 工具条整条在谱面块**外侧**正上方、左缘对齐（不压谱面）',
+        JSON.stringify(g))
+      ok(Math.abs(g.gap - 2) <= 1.2, 'adj725 工具条与块顶边留 2px 缝（与块内 2px 同一口径）', `gap=${g.gap}`)
+    } else {
+      ok(false, 'adj725 能量到工具条与块的相对位置')
+    }
   } else {
     ok(false, '能取到工具条并测显隐', probe.toolbar?.error ?? '')
+  }
+
+  /**
+   * adj725：**实时预览里工具条会不会被宿主裁掉** —— 本轮最容易"本地看着好、用户那儿没按钮"的一条。
+   *
+   * 宿主 app.css：`@media (hover:hover) { .cm-embed-block:hover { overflow: hidden } }`，
+   * 而工具条**正是悬停才显示、且落在块外** ⇒ 不处理就整条被裁（连点都点不到）。
+   * 这里用 CDP 强制 `:hover`（派发 pointermove 是造不出 CSS 伪类的），量两件事：
+   *  · `overflow` 的计算值（我们的 `.ijipu-cm-host` 规则有没有赢过宿主）；
+   *  · **命中测试**：工具条中心处 `elementFromPoint` 是否真的命中工具条（被裁掉时命不中）。
+   * 再做**负对照**：把我们的类摘掉 ⇒ 必须变回 `hidden` 且命不中 —— 证明这条修法是**承重的**，
+   * 而不是"反正没它也行"（没有负对照的验证等于没验证）。
+   */
+  {
+    const lp = probe.lp
+    if (!lp || lp.error) {
+      ok(false, 'adj725 能挂载"实时预览"那一支', lp?.error ?? '')
+    } else {
+      ok(lp.hostClass.includes('ijipu-cm-host'), 'adj725 挂载时给宿主 widget 容器加了 .ijipu-cm-host', lp.hostClass)
+      ok(lp.hostActions && !lp.ourEditBtn, 'adj725 宿主已挂同款「编辑此块」时不再重复挂 `</>`',
+        `宿主按钮=${lp.hostActions} 我们的=${lp.ourEditBtn}`)
+      if (obsidianCss && lp.hoverMedia) {
+        await c.send('DOM.enable')
+        await c.send('CSS.enable')
+        const doc = await c.send('DOM.getDocument', { depth: -1 })
+        const node = await c.send('DOM.querySelector', { nodeId: doc.root.nodeId, selector: '#lpEmbed' })
+        await c.send('CSS.forcePseudoState', { nodeId: node.nodeId, forcedPseudoClasses: ['hover'] })
+        const withClass = await evalJson('window.__ijipuLpHoverProbe("withClass")')
+        const noClass = await evalJson('window.__ijipuLpHoverProbe("noClass")')
+        await c.send('CSS.forcePseudoState', { nodeId: node.nodeId, forcedPseudoClasses: [] })
+        console.log('  悬停（保留我们的类）=', JSON.stringify(withClass))
+        console.log('  悬停（负对照：摘掉类）=', JSON.stringify(noClass))
+        ok(withClass.overflow === 'visible' && withClass.hitCenter === 'toolbar',
+          'adj725 实时预览悬停时：宿主的 overflow:hidden 被放开，工具条**点得到**',
+          JSON.stringify(withClass))
+        ok(noClass.overflow === 'hidden' && noClass.hitCenter !== 'toolbar',
+          'adj725 负对照：摘掉 .ijipu-cm-host ⇒ 宿主确实会裁掉工具条（证明这条修法是承重的）',
+          JSON.stringify(noClass))
+      } else {
+        skip('adj725 实时预览悬停时的裁剪（命中测试）',
+          obsidianCss ? '环境不满足 (hover: hover)' : '拿不到 Obsidian app.css')
+      }
+    }
   }
   if (ms.viewBox && ms.rect) {
     const vbRatio = ms.viewBox[2] / ms.viewBox[3]
@@ -362,8 +540,8 @@ async function main() {
 
   const cb = (probe.box || '').split(/\s+/).map(Number)
   const m = probe.measured
-  // ⚠ 用**源码模式测试之前**快照的 viewBox：那个测试会把 #wrap 的 DOM 换成源码编辑区，
-  //   之后再读 SVG 只会得到空（实测 viewBox=NaN）—— 这是测试顺序的坑，不是产品问题。
+  // ⚠ 用**进入"编辑源码"测试之前**快照的 viewBox：那个测试会挂第二个面板（历史上还换过 #wrap 的 DOM），
+  //   之后再读 SVG 可能读到空（实测 viewBox=NaN）—— 这是测试顺序的坑，不是产品问题。
   const v = probe.vbBeforeSource ?? probe.modes.score?.viewBox
 
   ok(Array.isArray(cb) && cb.length === 4 && cb[2] > 0 && cb[3] > 0, '挂载时记录了内容包围盒（data-content-box）')
@@ -385,6 +563,12 @@ async function main() {
   }
 
   // —— 截图（视觉证据；三种模式各一张）——
+  /** 截图前的**实况**（人眼核对用：三个挂载点各自的位置 / 工具条与 `</>` 的显隐） */
+  const visuals = await evalJson(
+    `JSON.stringify(['wrap','wrap2','wrap3'].map(function(id){var c=document.getElementById(id);var tb=c&&c.querySelector('.ijipu-score-toolbar');var eb=c&&c.querySelector('.ijipu-edit-source-btn');var r=c?c.getBoundingClientRect():null;var er=eb?eb.getBoundingClientRect():null;var ecs=eb?getComputedStyle(eb):null;var svg=eb?eb.querySelector('svg'):null;return {id:id,top:r?Math.round(r.top):null,left:r?Math.round(r.left):null,toolbar:tb?getComputedStyle(tb).visibility:null,editBtn:eb?ecs.visibility:null,hasEditBtn:!!eb,btnRect:er?{x:Math.round(er.left),y:Math.round(er.top),w:Math.round(er.width),h:Math.round(er.height)}:null,btnColor:ecs?ecs.color:null,btnOpacity:ecs?ecs.opacity:null,iconStroke:svg?getComputedStyle(svg).stroke:null,iconBox:svg?Math.round(svg.getBoundingClientRect().width):null};}))`,
+  )
+  console.log('  三个挂载点实况 =', JSON.stringify(visuals))
+
   const shot = async (name) => {
     const s = await c.send('Page.captureScreenshot', { format: 'png' })
     const file = path.join(OUT, `crop-${name}.png`)
@@ -393,19 +577,32 @@ async function main() {
   }
   await shot('score')
   /**
-   * 再取一张**悬停中**的图：工具条是"浮在谱面左上角 + 淡入"，只有悬停态才看得出外观
-   * （左侧边界、有没有盖住标题等）。这里单独派发 pointermove 并等过渡结束再截。
+   * 再取一张**悬停中**的图：工具条是"浮在块**外侧**上方 + 淡入"、`</>` 是"块的右上角 + 淡入"，
+   * 只有悬停态才看得出外观（在不在块外、有没有盖住谱面、`</>` 落点对不对）。
+   * 两个挂载点都派发 pointermove（`#wrap` 有工具条、`#wrap2` 有 `</>`），等过渡结束再截。
    */
   await c.send('Runtime.evaluate', {
     expression: `(() => {
-      const c = document.getElementById('wrap');
-      c.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' }));
+      for (const id of ['wrap', 'wrap2', 'wrap3']) {
+        const el = document.getElementById(id);
+        if (el) el.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' }));
+      }
       return true;
     })()`,
     returnByValue: true,
   })
   await sleep(300)
   await shot('toolbar-hover')
+  /**
+   * adj725：**两种主题各留一张** —— `</>` 压在**恒为白色**的谱面纸张上，
+   * 深色主题下若只跟主题取字色就会"白纸上看不见"（本轮踩过）。
+   * 这里切到 `theme-light` 再截一张，人眼可直接比对两边的对比度。
+   */
+  await evalJson(`(function(){document.body.className='theme-light';return '1';})()`)
+  await sleep(200)
+  await shot('toolbar-hover-light')
+  await evalJson(`(function(){document.body.className='theme-dark';return '1';})()`)
+  await sleep(200)
   // 顺手把内容盒左上角附近的放大图也留一张，便于人眼核对"有没有多留白"
   await c.send('Emulation.setDeviceMetricsOverride', { width: 900, height: 1200, deviceScaleFactor: 2, mobile: false })
   await shot('score-2x')
