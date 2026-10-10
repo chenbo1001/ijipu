@@ -1,3 +1,29 @@
+## [0.51.1] — 2026-10-10（修 Obsidian 社区审核未通过项：**移除 lookbehind** + 构建戳改 UTC；PATCH 级）
+
+> 主题：Obsidian 社区审核判 **Failed**，一条 **Error**（`Lookbehinds are not supported on iOS versions
+> before 16.4.`，指向插件里被内联的应用产物）加一条 **Build verification 警告**（Release 产物与从源码
+> 构建不一致）。两条都查到根因并修掉：前者是本应用里一处 `split(/(?<!\\)\|/)`，
+> 后者是构建戳取**本地时区**导致同提交跨时区不可复现。PATCH 级：行为对外不变，只修兼容性与可复现性，
+> **涉及引擎**（引擎包 `0.33.0 → 0.33.1`：时钟的宿主全局改 member 表达式写法）。
+
+### 修复
+
+- **移除 lookbehind（阻塞项）**：`src/dialogs/DocDialog.tsx` 的表格单元格切分改为**手写扫描**
+  （语义逐字等价：紧跟反斜杠的 `|` 不切）。lookbehind 在 **iOS 16.4 之前**的 WebKit 不支持，
+  而本应用会被打包进 Obsidian 插件的嵌入版供手机端使用 ⇒ 审核按源码文本直接判 Error。
+  重新生成嵌入产物后，`main.js` 与 `webappAssets.ts` **各 0 处** lookbehind。
+- **构建戳改 UTC（可复现构建）**：`scripts/gen-build-info.mjs` 原用本地时区取日期，
+  同一提交在两台机器（本地 CST / CI UTC）会得到不同 `BUILD_DATE` ⇒ 产物字节不同。
+  逐字节比对确认"本地与 CI 产物只差这一个字符串"；改 UTC 后 `TZ=UTC` 与 `TZ=Asia/Shanghai`
+  两次构建**哈希相同**，且等于 CI 产物。
+- **引擎时钟的宿主全局写法**（`engine/playback/clock.ts`）：改为 `typeof window !== 'undefined' ? window : globalThis`
+  取宿主对象、再以 `host.requestAnimationFrame?.()` 这类**成员表达式**调用 —— 满足审核对
+  `window.` 前缀的要求（多窗口/弹窗兼容），同时引擎仍可在 Node 中运行（假时钟断言照旧全绿）。
+
+### 排错记录
+
+- `E-2026-382`（lookbehind ⇒ 审核 Error）、`E-2026-383`（构建戳本地时区 ⇒ 跨时区不可复现）。
+
 ## [0.51.0] — 2026-10-10（**共性能力下沉引擎**：色块 / 问题提示 / 音源顺序 / 高亮模型 / 色板 / 时钟 / 模板 / 分层判定；MINOR 级）
 
 > 主题：用户要求「预览渲染、播放及色块显示、源码格式化、源代码高亮、错误信息显示提示等**共性的功能
