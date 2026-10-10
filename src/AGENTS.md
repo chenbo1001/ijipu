@@ -8,7 +8,7 @@
 
 | 目录 | 职责 | 约束 |
 |------|------|------|
-| `engine/` | 简谱引擎：解析（parser/tokenizer）、格式化（format）、排版（layout）、渲染（render）、播放（playback）、光标映射（cursorMap）、时值（duration）、类型（types） | **纯 TS，零 React/DOM/浏览器 API 依赖**，可在 Node 中单测；数据流单向 `source → parse → layout → render/playback`，禁止反向依赖；入口统一 `engine/index.ts` |
+| `engine/` | 简谱引擎：解析（parser/tokenizer）、格式化（format）、排版（layout）、渲染（render）、播放（playback）、光标映射（cursorMap）、时值（duration）、类型（types）；**adj758–adj766 新增共性层**：`highlight/`（分词 `jpsHighlight` ／ 错误→块 `jpsProblems` ／ 逐行模型 `model` ／ 色板 `palette`）、`diagnostics/`（问题分级与展示行 `problems`）、`playback/`（色块 `playhead` ／ 音源清单与顺序 `soundbanks` ／ 时钟 `clock`）、`samples/template`（新建模板）、`settings/layers`（分层判定规则） | **纯 TS，零 React/DOM/浏览器 API 依赖**（宿主全局只允许 `typeof` 守卫下的用法，有闸门 `adj770`），可在 Node 中单测；数据流单向 `source → parse → layout → render/playback`，禁止反向依赖；入口统一 `engine/index.ts`；**两端（应用 / Obsidian 插件）共用的规则一律先落这里**，插件经 `vendor/engine` 逐字节同步（闸门 `adj770`） |
 | `editor/` | 代码编辑器：EditorPane（textarea+高亮层）、highlight、history（撤销/重做）、shortcuts（行首命令快捷键） | 只做编辑交互；解析/格式化调用 engine，不复制引擎逻辑 |
 | `preview/` | 乐谱预览：PreviewPane（SVG 渲染消费 + 光标联动 + 排版辅助虚线拖拽） | 渲染消费 engine 输出，虚线位置计算调用 `engine/layout/guides.ts` 纯函数，不重算几何 |
 | `store/` | Zustand 状态：docStore（代码/解析结果/页面配置/历史）、uiStore（模态框/主题/缩放/字号） | 唯一状态源；localStorage 键集中定义在文件顶部常量（`ijipu.` 前缀），禁止组件内散落硬编码键名 |
@@ -29,7 +29,7 @@
 2. **入口收敛**：对外 API 统一从 `engine/index.ts` 导出（parseJps、layoutScore、renderScoreToSvg、buildPlaySequence 等）；内部模块按需导入，禁止跨层绕过
 3. **数据流单向**：`source(.jps) → parseResult → layout(ScoreLayout) → render(SVG) / playback(sequence)`；layout 不得反向读取 render 产物
 4. **数值集中**：默认排版数值（边距/字号/行距/间距）定义在 `engine/types.ts` 的 `defaultPageConfig`，布局计算引用 `engine/layout/index.ts`；调整用 `adjNN` 编号标注
-5. **可测性**：引擎关键行为（解析/时值/布局/虚线/播放序列）必须在 `scripts/smoke.mts` 有断言（npm run smoke，147 项）；新增行为先写断言再实现
+5. **可测性**：引擎关键行为（解析/时值/布局/虚线/播放序列/两点共用的共性层）必须在 `scripts/smoke.mts` 有断言（`npm run smoke`，具体条数以输出为准，**不要在文档里写死数字**——写死就会过期）；新增行为先写断言再实现。凡是"两端都要用的规则"，断言还要覆盖"两端不再各自实现"（见 `adj767`/`adj770` 两道收口闸门）
 6. **排版辅助虚线**：位置计算收敛在 `engine/layout/guides.ts`（computeRowTops/computeRowGuides/quciGuideY/dragDelta/clamp）；quci 虚线钳制在「曲部内容下沿」与「歌词文字上沿」之间、cici 虚线不越过歌词下沿（adj53），预览层只消费
 
 ## 三、store 状态管理
