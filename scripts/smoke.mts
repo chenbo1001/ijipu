@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -723,6 +723,30 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
     '')
   check('adj762 模型块区间与渲染命中一致（错误块包 hl-err-block）',
     highlightCodeWrapped(src, undefined, null, [], groupBlocksByLine(m2.blockMarks)).includes('hl-err-block'))
+}
+
+/**
+ * adj763（清单 B5：用户要求「源码高亮、错误信息显示提示等共性的功能都可以独立到引擎层面」）：
+ * 配色的**唯一来源**在引擎（`engine/highlight/palette.ts`）。应用侧这套色值写在
+ * `src/styles/theme.css` 的 `--jp-hl-*` / `--jp-hl-plain`（深色在基础块、浅色在 `.theme-light` 块），
+ * 这里用断言把 CSS 与引擎常量**钉在一起** ⇒ 以后改配色只改引擎常量，两边 CSS 谁没跟上就红灯。
+ */
+{
+  const css = readFileSync('src/styles/theme.css', 'utf8')
+  const themes = ['dark', 'light'] as const
+  const missing: string[] = []
+  for (const mode of themes) {
+    for (const [cls, color] of Object.entries(JPS_HIGHLIGHT_COLORS[mode])) {
+      const v = JPS_HL_CSS_VAR[cls as keyof typeof JPS_HL_CSS_VAR]
+      if (!css.includes(`${v}: ${color};`)) missing.push(`${mode}:${v}=${color}`)
+    }
+    if (!css.includes(`--jp-hl-plain: ${JPS_PLAIN_COLORS[mode]};`)) missing.push(`${mode}:--jp-hl-plain`)
+  }
+  check('adj763 theme.css 的高亮配色与引擎色板逐项一致（深/浅两套 + plain）',
+    missing.length === 0, `不一致：${missing.join(' / ')}`)
+  check('adj763 浅色一套确实在浅色作用域里（`[data-mode=\'light\']`，不是覆盖了深色）',
+    /\[data-mode='light'\][\s\S]{0,1400}?--jp-hl-line-header:/.test(css) &&
+      css.indexOf('--jp-hl-note: #ffb86c') < css.indexOf('--jp-hl-note: #b35900'))
 }
 
 // adj246：空 rest 的 Q:/C: 行也要渲染行头（否则显示层成空行）
