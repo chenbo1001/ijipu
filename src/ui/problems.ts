@@ -1,83 +1,38 @@
 /**
- * ui/problems.ts — 编辑区「问题提示」的纯逻辑（adj394）
+ * ui/problems.ts — 编辑区「问题提示」的**转发层**（实现已下沉引擎）
  *
- * 背景：解析出的错误/告警此前只在**行号栏着色**（`gutter-err`/`gutter-warn`）与悬停 tooltip 里体现，
- * 编辑区内没有可读的文字提示——用户写了不符合语法的内容（如渐强/渐弱缺 `!`、引号未闭合）时
- * 只看到"谱面没变化"，不知道哪里不对。本模块把 ParseError 汇总成可直接渲染的行，
- * 并提供「行列 → 源码偏移」的跳转换算（组件只做渲染与事件）。
+ * adj759（用户要求：「错误信息显示提示等共性的功能都可以独立到引擎层面」，且"应用端也应同样处理"）：
+ * 分级/排序/计数/展示行/行列→偏移 全部搬到引擎 `engine/diagnostics/problems.ts`
+ * —— Obsidian 插件用同一份（此前两端措辞还不同：应用 `错误[第3行 第5列] …`、插件 `第3行 第5列 …`）。
  *
- * 纯函数、零 React/DOM 依赖，断言在 scripts/smoke.mts。
+ * 本文件只负责**把应用的品牌文案（`brand/copy.ts` 的 `problemCopy`）传进去**，
+ * 其余导出保持原样 ⇒ 组件调用点一行都不用改。
  */
-import type { ParseError } from '@ijipu/engine/types.ts'
+import { problemCopy } from '../brand/copy'
+import {
+  DEFAULT_PROBLEM_LABELS,
+  summarizeProblems as summarize,
+  offsetOf,
+  type ProblemLabels,
+  type ProblemRow,
+  type ProblemSummary,
+} from '@ijipu/engine'
 
-/** 单条问题的展示行 */
-export interface ProblemRow {
-  severity: 'error' | 'warning'
-  /** 中文分级标签（错误/警告） */
-  label: string
-  line: number
-  /** 列（1-based，供展示；源码内为 0-based） */
-  col: number
-  message: string
-  /** adj394：正确语法规则（引擎给出，含最小示例）——端侧在消息下方以「正确写法」呈现 */
-  hint?: string
-  /** 展示用全文，如「错误[第3行 第5列] 引号注释未闭合」 */
-  text: string
-}
+export type { ProblemRow, ProblemSummary }
 
-/** 问题汇总（供提示条与状态栏共用） */
-export interface ProblemSummary {
-  errorCount: number
-  warnCount: number
-  total: number
-  /** 按（行、列）排序后的展示行 */
-  rows: ProblemRow[]
-  /** 最严重级别：有 error 则 error，否则（有 warning）warning，否则 null */
-  worst: 'error' | 'warning' | null
-}
-
-/** 问题分级的中文标签 + 排序权重（error 在前） */
-const SEVERITY_LABEL: Record<ParseError['severity'], string> = { error: '错误', warning: '警告' }
-const SEVERITY_ORDER: Record<ParseError['severity'], number> = { error: 0, warning: 1 }
-
-/**
- * 汇总解析问题：**错误在前、同类按行列出**，并给出各级数量与最严重级别。
- * `max` 可限制行数（提示条默认只列前几条，其余用「还有 N 条」概括）。
- */
-export function summarizeProblems(errors: readonly ParseError[], max?: number): ProblemSummary {
-  const sorted = [...errors].sort(
-    (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || a.line - b.line || a.col - b.col,
-  )
-  const errorCount = sorted.filter((e) => e.severity === 'error').length
-  const warnCount = sorted.length - errorCount
-  const rows: ProblemRow[] = sorted.map((e) => ({
-    severity: e.severity,
-    label: SEVERITY_LABEL[e.severity],
-    line: e.line,
-    col: e.col + 1,
-    message: e.message,
-    hint: e.hint,
-    text: `${SEVERITY_LABEL[e.severity]}[第${e.line}行 第${e.col + 1}列] ${e.message}`,
-  }))
-  const shown = typeof max === 'number' && max >= 0 ? rows.slice(0, max) : rows
-  return {
-    errorCount,
-    warnCount,
-    total: rows.length,
-    rows: shown,
-    worst: errorCount > 0 ? 'error' : warnCount > 0 ? 'warning' : null,
-  }
+/** 应用自己的分级标签（与 `problemCopy` 同源，避免两处措辞分叉） */
+export const APP_PROBLEM_LABELS: ProblemLabels = {
+  error: problemCopy.error,
+  warning: problemCopy.warning,
+  correctPrefix: problemCopy.correctPrefix,
 }
 
 /**
- * 「行/列」→ 源码字符偏移（供 `jumpCursor` 定位；行/列越界自动钳制）。
- * 行、列均按 1-based 传入（列的 1 表示行首）。
+ * 汇总解析问题（错误在前、同类按行列出，附各级数量与最严重级别）。
+ * `max` 可限制返回行数；统计数字始终是**全部**问题的。
  */
-export function offsetOf(code: string, line: number, col: number): number {
-  const lines = code.split('\n')
-  const li = Math.min(Math.max(1, line), lines.length) - 1
-  let offset = 0
-  for (let i = 0; i < li; i++) offset += lines[i].length + 1
-  const ci = Math.min(Math.max(0, col - 1), lines[li].length)
-  return offset + ci
+export function summarizeProblems(errors: Parameters<typeof summarize>[0], max?: number): ProblemSummary {
+  return summarize(errors, { max, labels: APP_PROBLEM_LABELS })
 }
+
+export { offsetOf, DEFAULT_PROBLEM_LABELS }
