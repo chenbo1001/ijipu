@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, trackKeysOf, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -598,18 +598,21 @@ const hlCur4 = highlightCode('V: 1.0\nB: t\nQ: 1 2 3 4 |\n', undefined, { line: 
 check('adj204 光标在行尾紧邻 → 高亮最后一块（|）', hlCur4.includes('hl-current-block') && hlCur4.includes('hl-barline">|<'), '')
 const hlCur5 = highlightCode('V: 1.0\nB: t\nQ: 1 2 3  4 |\n', undefined, { line: 3, col: 9 })
 check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !hlCur5.includes('hl-current-block'), '')
-// adj243：高亮层按折行点分行，错误/告警块以单线外框包裹（col 相对该行内容）
+// adj243/762：高亮层按折行点分行，错误/告警块以单线外框包裹
+//   adj762 起，第五个参数改为**引擎模型的块区间**（`JpsBlockMark`，相对整行原文）——
+//   与应用里 `EditorPane` 的传参完全一致（`groupBlocksByLine(highlightModel(...).blockMarks)`）
 {
   const src243 = 'V: 1.0\nB: t\nQ: 1 2 3 4 |\n'
-  // content = "1 2 3 4 |"，col 8 = '|'（小节线块）；col 2 = '2'（音符块）
-  const hlErr243 = highlightCodeWrapped(src243, undefined, null, [], new Map([[3, { err: [8], warn: [] }]]))
+  // 行 3 = `Q: 1 2 3 4 |`：`|` 块 = [11,12)、`2` 块 = [5,6)
+  const blk = (from: number, to: number, severity: 'error' | 'warning'): JpsBlockMark => ({ line: 3, from, to, severity })
+  const hlErr243 = highlightCodeWrapped(src243, undefined, null, [], new Map([[3, [blk(11, 12, 'error')]]]))
   check('adj243 错误块（小节线）包 hl-err-block', hlErr243.includes('hl-err-block') && hlErr243.includes('hl-barline'), '')
-  const hlWarn243 = highlightCodeWrapped(src243, undefined, null, [], new Map([[3, { err: [], warn: [2] }]]))
+  const hlWarn243 = highlightCodeWrapped(src243, undefined, null, [], new Map([[3, [blk(5, 6, 'warning')]]]))
   check('adj243 告警块（音符）包 hl-warn-block', hlWarn243.includes('hl-warn-block') && hlWarn243.includes('hl-note'), '')
   const hlNone243 = highlightCodeWrapped(src243, undefined, null, [])
   check('adj243 无错误/告警时不加外框', !hlNone243.includes('hl-err-block') && !hlNone243.includes('hl-warn-block'), '')
-  // col 8 同时为错误块时优先红框（不叠加橙框）
-  const hlBoth243 = highlightCodeWrapped(src243, undefined, null, [], new Map([[3, { err: [8], warn: [8] }]]))
+  // 同一块既有错误又有告警时优先红框（不叠加橙框）
+  const hlBoth243 = highlightCodeWrapped(src243, undefined, null, [], new Map([[3, [blk(11, 12, 'error'), blk(11, 12, 'warning')]]]))
   check('adj243 同块错误优先红框', hlBoth243.includes('hl-err-block') && !hlBoth243.includes('hl-warn-block'), '')
 }
 
@@ -689,6 +692,39 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
       playheadPosIn(plainSeg, 1, 9, 16) === null &&
       playheadPosIn(plainSeg, 0, 0, 16) === null)
 }
+
+/**
+ * adj762（清单 B4：用户要求「预览渲染、**源码高亮**、错误信息显示提示等共性的功能都可以独立到引擎层面」，
+ * 且"应用端也应同样处理"）：**整篇/逐行高亮模型** —— token + 行头 + 错误块 + 行级级别一次算好，
+ * 应用（`EditorPane`/`highlight.ts`）与 Obsidian 插件都只做"模型 → 渲染"的映射。
+ */
+{
+  const src = 'V: 1.0\nB: t\nQ: 1 2 3 4 |\n'
+  const model = highlightModel(src)
+  check('adj762 highlightModel：逐行 token 覆盖整行（拼接 === 原文）',
+    model.lines.every((l) => l.tokens.map((t) => t.text).join('') === l.text) && model.lines[2].text === 'Q: 1 2 3 4 |',
+    `行数=${model.lines.length}`)
+  check('adj762 highlightLineModel：行头识别（Q → cmd 与 headLen；注释行无行头）',
+    highlightLineModel('Q: 1 2 3', 3).header?.cmd === 'Q' && highlightLineModel('Q: 1 2 3', 3).header?.headLen === 2 &&
+      highlightLineModel('# 注释', 1).header === null)
+  check('adj762 lineLevelOf：错误优先、无问题为 null',
+    lineLevelOf([{ line: 1, from: 0, to: 1, severity: 'warning' }, { line: 1, from: 2, to: 3, severity: 'error' }]) === 'error' &&
+      lineLevelOf([{ line: 1, from: 0, to: 1, severity: 'warning' }]) === 'warning' &&
+      lineLevelOf([]) === null)
+  const issues = [{ line: 3, col: 8, message: 'e', severity: 'error' as const, hint: 'h' }]
+  const m2 = highlightModel(src, issues)
+  check('adj762 highlightModel：块/行集合齐备（blockMarks + errorLines/problemLines + 行级级别）',
+    m2.blockMarks.length === 1 && m2.blockMarks[0].from === 11 && m2.blockMarks[0].to === 12 &&
+      m2.errorLines.has(3) && m2.problemLines.has(3) && !m2.warningLines.has(3) &&
+      m2.lines[2].level === 'error' && m2.lines[2].blocks.length === 1,
+    JSON.stringify(m2.blockMarks))
+  check('adj762 groupBlocksByLine：按行分组（逐行渲染入口）',
+    groupBlocksByLine([{ line: 1, from: 0, to: 1, severity: 'error' }, { line: 3, from: 2, to: 3, severity: 'warning' }]).get(3)?.length === 1,
+    '')
+  check('adj762 模型块区间与渲染命中一致（错误块包 hl-err-block）',
+    highlightCodeWrapped(src, undefined, null, [], groupBlocksByLine(m2.blockMarks)).includes('hl-err-block'))
+}
+
 // adj246：空 rest 的 Q:/C: 行也要渲染行头（否则显示层成空行）
 {
   const h246 = highlightCodeWrapped('V: 1.0\nQ:\nC:\n', undefined, null, [])

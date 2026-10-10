@@ -12,11 +12,10 @@ import { flushSync } from 'react-dom'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { highlightCodeWrapped } from './highlight'
-import type { BlockMarks } from './highlight'
 // adj642（用户要求）：查找命中在编辑区的**高亮**——走浏览器自己的机制（CSS Custom Highlight API）
 import { applyFindHighlights, clearFindHighlights } from './findHighlight'
 import { currentMatchIndex, findMatches } from './findReplace'
-import { formatLine, codePosToNoteId } from '@ijipu/engine'
+import { formatLine, codePosToNoteId, highlightModel, groupBlocksByLine } from '@ijipu/engine'
 import { insertLineHeader, isLineHeaderKey, lineColOf } from './shortcuts'
 import { isBarlineModifierContext, isGraceModifierContext, filterModifierHints } from './completions'
 import { ScriptToolbar } from './ScriptToolbar'
@@ -818,22 +817,15 @@ export function EditorPane() {
   }, [])
 
   // adj243：行内错误/告警块标记（col 相对该行内容）——命中块加红/橙单线外框
-  const blockMarks = useMemo(() => {
-    const m = new Map<number, BlockMarks>()
-    for (const [line, arr] of errByLine) {
-      const err: number[] = []
-      const warn: number[] = []
-      for (const e of arr) {
-        if (e.severity === 'error') err.push(e.col)
-        else if (e.severity === 'warning') warn.push(e.col)
-      }
-      if (err.length || warn.length) m.set(line, { err, warn })
-    }
-    return m
-  }, [errByLine])
+  /**
+   * adj762（清单 B4：用户要求「源码高亮、错误信息显示提示等共性的功能都可以独立到引擎层面」，
+   * 且"应用端也应同样处理"）：错误/告警块与"哪几行有问题"改由引擎的**整篇高亮模型**统一给出
+   * （`highlightModel`）—— 此前这里是"自己按 col 攒块、自己造行号集合"，与插件那套是两份口径。
+   */
+  const hlModel = useMemo(() => highlightModel(code, parseResult.errors), [code, parseResult.errors])
 
   // adj227：按实际层折行点分视觉行高亮（每视觉行一个 .hl-line，white-space: pre）
-  const html = highlightCodeWrapped(code, new Set(errByLine.keys()), cursor, wrapPoints, blockMarks)
+  const html = highlightCodeWrapped(code, hlModel.problemLines, cursor, wrapPoints, groupBlocksByLine(hlModel.blockMarks))
   /**
    * adj642（用户要求："按下 Ctrl+F 时编辑区选中的文本自动成为查找框的内容，并完成查找，
    * 同时高亮编辑区里已找到的内容"）：把查找命中注册成**浏览器自己的高亮**。
