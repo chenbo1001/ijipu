@@ -873,13 +873,19 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
   ]
   const bannedGlobals: [string, RegExp][] = [
     ['document', /\bdocument\b/],
-    ['window', /\bwindow\b/],
     ['localStorage', /\blocalStorage\b/],
     ['HTMLElement', /\bHTMLElement\b/],
     ['querySelector', /\bquerySelector\b/],
     ['createElement', /\bcreateElement\b/],
   ]
+  /**
+   * 这些**允许**，但必须带 `typeof` 守卫（守卫可同行或上两行内）：
+   *  · `window`：adj772 起用于"宿主全局走 member 表达式"（`host.requestAnimationFrame?.()`，
+   *    审核要求 `window.` 前缀；Node 里回退 `globalThis`）；
+   *  · rAF / `performance`：`clock.ts` 的 `now`/`raf` 注入缺省值。
+   */
   const needGuard: [string, RegExp][] = [
+    ['window', /\bwindow\b/],
     ['requestAnimationFrame', /\brequestAnimationFrame\b/],
     ['cancelAnimationFrame', /\bcancelAnimationFrame\b/],
     ['performance', /\bperformance\b/],
@@ -891,10 +897,22 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
     for (const [name, re] of bannedImports) if (re.test(code)) bad.push(`${f}: 禁止导入 ${name}`)
     for (const [name, re] of bannedGlobals) if (re.test(code)) bad.push(`${f}: 触碰宿主全局 ${name}`)
     code.split('\n').forEach((line, i) => {
-      // 守卫可以写在同一处，也可以写在上两行内（如 `typeof rAF !== 'undefined' ?\n  (cb) => rAF(cb)\n  : …`）
-      const near = [code.split('\n')[i - 2] ?? '', code.split('\n')[i - 1] ?? '', line].join('\n')
+      // 守卫可以写在同一处，也可以写在上两行内（如 `typeof window !== 'undefined' ?\n … \n : globalThis`）
+      const lines = code.split('\n')
+      const near = [lines[i - 2] ?? '', lines[i - 1] ?? '', line].join('\n')
       for (const [name, re] of needGuard) {
-        if (re.test(line) && !/typeof/.test(near)) bad.push(`${f}:${i + 1}: ${name} 未用 typeof 守卫`)
+        if (!re.test(line)) continue
+        /**
+         * adj772：只判**裸标识符**是否带守卫。
+         * `host.requestAnimationFrame(cb)` 这种**成员表达式**不算"触碰宿主全局"——
+         * 它正是审核要求的写法（`window.` 前缀 / 取宿主对象后调用），而且引擎里那份 host
+         * 本身就是在 `typeof window !== 'undefined'` 守卫下取的。
+         * ⚠ 这里也不用 lookbehind（全仓口径：任何地方都不引入 lookbehind 依赖）。
+         */
+        const bareHits = [...line.matchAll(new RegExp(`${name}\\b`, 'g'))].some(
+          (m) => !/[.\w]/.test(line[(m.index ?? 0) - 1] ?? ''),
+        )
+        if (bareHits && !/typeof/.test(near)) bad.push(`${f}:${i + 1}: ${name} 未用 typeof 守卫`)
       }
     })
   }
@@ -7456,14 +7474,25 @@ console.log('[104] runnable examples in docs parse clean (adj419/adj422)')
   check('adj422 语法说明里的可运行示例 ≥10 段（入门递进 + 组合示例集）', total >= 10, `${total}`)
   // adj423：文档表格**列数一致性**——表格里的竖线要写成 `\|` 转义，写漏了会把整张表切碎
   // （「小节线与反复」表就踩过：`| \| | 单小节线 |` 被切成了三列，表格错位，见 E-2026-153）
+  // adj772：这里的切分逻辑与 `DocDialog.tsx` 的 `cellsOf` **保持同一口径**（手写扫描，不用 lookbehind ——
+  //   审核按源码文本扫描，lookbehind 在 iOS 16.4 之前不可用，见社区审核 Error）。
   {
-    const cells = (s: string): string[] =>
-      s
-        .trim()
-        .replace(/^\|/, '')
-        .replace(/\|$/, '')
-        .split(/(?<!\\)\|/)
-        .map((c) => c.trim().replace(/\\\|/g, '|'))
+    const cells = (s: string): string[] => {
+      const body = s.trim().replace(/^\|/, '').replace(/\|$/, '')
+      const parts: string[] = []
+      let cur = ''
+      for (let i = 0; i < body.length; i++) {
+        const ch = body[i]
+        if (ch === '|' && body[i - 1] !== '\\') {
+          parts.push(cur)
+          cur = ''
+        } else {
+          cur += ch
+        }
+      }
+      parts.push(cur)
+      return parts.map((c) => c.trim().replace(/\\\|/g, '|'))
+    }
     const isRow = (s: string) => /^\s*\|.*\|\s*$/.test(s)
     const isSep = (s: string) => /^\s*\|[\s:|-]+\|\s*$/.test(s)
     for (const f of ['docs/SYNTAX.md', 'docs/USER-GUIDE.md']) {

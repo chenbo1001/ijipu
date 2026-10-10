@@ -62,14 +62,29 @@ function mdToHtml(md: string): string {
   /**
    * adj423：单元格切分——**只在未转义的 `|` 处切**（`\|` 是转义后的竖线，用于语法表里写 `|`、`||`、`:|:`）。
    * 此前用 `split('|')` 直接切，导致「小节线与反复」这类表格被切碎（E-2026-153）。
+   *
+   * adj772（**Obsidian 社区审核 Error**）：这里原来用**后行断言（lookbehind）**切分 ——
+   * 该语法在 **iOS 16.4 之前不支持**，而本应用会被打包进 Obsidian 插件（嵌入版）供手机端使用
+   * ⇒ 审核直接判 Error（`Lookbehinds are not supported on iOS versions before 16.4.`）。
+   * 改为**手写扫描**（不用任何 lookbehind，语义与原来逐字等价：紧跟反斜杠的 `|` 不切）。
+   * ⚠ 注释里也**不复述**那个正则 —— 审核是按**源码文本**扫描的（`webappAssets.ts` 就是这样被点到的）。
    */
-  const cellsOf = (s: string) =>
-    s
-      .trim()
-      .replace(/^\|/, '')
-      .replace(/\|$/, '')
-      .split(/(?<!\\)\|/)
-      .map((c) => c.trim().replace(/\\\|/g, '|'))
+  const cellsOf = (s: string) => {
+    const body = s.trim().replace(/^\|/, '').replace(/\|$/, '')
+    const parts: string[] = []
+    let cur = ''
+    for (let i = 0; i < body.length; i++) {
+      const ch = body[i]
+      if (ch === '|' && body[i - 1] !== '\\') {
+        parts.push(cur)
+        cur = ''
+      } else {
+        cur += ch
+      }
+    }
+    parts.push(cur)
+    return parts.map((c) => c.trim().replace(/\\\|/g, '|'))
+  }
 
   const closeAllLists = () => {
     while (listStack.length) {
