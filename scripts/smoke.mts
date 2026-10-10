@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -819,6 +819,26 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
     clock.seek(60)
     check('adj764 时钟：seek 跳到指定位置（钳制在 [0, totalMs]）', clock.ms() === 60 && clock.ms() <= clock.totalMs)
   }
+}
+
+/**
+ * adj765（清单 B7：用户要求共性的功能都独立到引擎）：
+ * **新建空白谱的模板**真源在引擎（`DEFAULT_NEW_JPS_TEMPLATE`）。
+ * 应用侧保留 `src/samples/未命名.jps` 这份**文件**（adj481 文件驱动约定：改文件即改模板），
+ * 但必须与引擎常量**逐字节一致** —— 这条断言就是那把锁。
+ */
+{
+  const file = readFileSync('src/samples/未命名.jps', 'utf8')
+  check('adj765 应用新建模板文件 === 引擎 `DEFAULT_NEW_JPS_TEMPLATE`（逐字节）',
+    file === DEFAULT_NEW_JPS_TEMPLATE,
+    file === DEFAULT_NEW_JPS_TEMPLATE
+      ? ''
+      : `文件=${JSON.stringify(file).slice(0, 60)}… 引擎=${JSON.stringify(DEFAULT_NEW_JPS_TEMPLATE).slice(0, 60)}…`)
+  check('adj765 模板可解析且带页面设置行（新建出来的空白谱是合法谱面）',
+    parseJps(DEFAULT_NEW_JPS_TEMPLATE).errors.length === 0 &&
+      DEFAULT_NEW_JPS_TEMPLATE.includes('# jps-config:{}') &&
+      DEFAULT_NEW_JPS_TEMPLATE.endsWith('\n'),
+    `errors=${parseJps(DEFAULT_NEW_JPS_TEMPLATE).errors.length}`)
 }
 
 // adj246：空 rest 的 Q:/C: 行也要渲染行头（否则显示层成空行）
