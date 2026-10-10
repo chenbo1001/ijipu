@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -611,6 +611,37 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
   // col 8 同时为错误块时优先红框（不叠加橙框）
   const hlBoth243 = highlightCodeWrapped(src243, undefined, null, [], new Map([[3, { err: [8], warn: [8] }]]))
   check('adj243 同块错误优先红框', hlBoth243.includes('hl-err-block') && !hlBoth243.includes('hl-warn-block'), '')
+}
+
+/**
+ * adj757（用户要求：「预览渲染、播放、源码格式化、源码高亮、**错误信息显示提示**等共性的功能
+ * 都可以独立到引擎层面」，且"应用端也应同样处理"）：
+ * 「把错误的 `col` 归到它所在的**音符块**」这套换算已抽到引擎（`jpsBlockSpan` / `jpsBlockMarks`），
+ * 应用编辑器与 Obsidian 插件共用同一份口径。这里把它的语义钉住。
+ */
+{
+  const q = 'Q: 1 2 3 4 |'
+  /**
+   * ⚠ 坐标口径（与 `ParseError.col` / 应用 `BlockMarks` 一致）：col 相对**行头之后的那段内容**，
+   * 即 `Q: 1 2 3 4 |` 里 `1` 是 col 0（行头 `Q:` 与其后的空白都由引擎在内部抵消）。
+   */
+  check('adj757 jpsBlockSpan：命中首个音符（content col=0 → `1`）',
+    JSON.stringify(jpsBlockSpan(q, 0)) === JSON.stringify([3, 4]), JSON.stringify(jpsBlockSpan(q, 0)))
+  check('adj757 jpsBlockSpan：命中中间音符（content col=4 → `3`）',
+    JSON.stringify(jpsBlockSpan(q, 4)) === JSON.stringify([7, 8]), JSON.stringify(jpsBlockSpan(q, 4)))
+  check('adj757 jpsBlockSpan：命中末尾块（content col=8 → `|`）',
+    JSON.stringify(jpsBlockSpan(q, 8)) === JSON.stringify([11, 12]), JSON.stringify(jpsBlockSpan(q, 8)))
+  // ⚠ 负对照：落在**空白**上不属于任何块（与应用 `c >= bs && c < be` 的判据逐字等价）
+  check('adj757 jpsBlockSpan：落在空白/越界 → null（不吸附到相邻块）',
+    jpsBlockSpan(q, 1) === null && jpsBlockSpan(q, 999) === null && jpsBlockSpan('   ', 0) === null)
+  const issues = [
+    { line: 3, col: 8, message: 'e1', severity: 'error' as const },
+    { line: 3, col: 8, message: 'w1', severity: 'warning' as const },
+  ]
+  const marks = jpsBlockMarks('V: 1.0\nB: t\nQ: 1 2 3 4 |\n', issues)
+  check('adj757 jpsBlockMarks：同块错误优先、重复块只留一条',
+    marks.length === 1 && marks[0].line === 3 && marks[0].severity === 'error',
+    JSON.stringify(marks))
 }
 // adj246：空 rest 的 Q:/C: 行也要渲染行头（否则显示层成空行）
 {

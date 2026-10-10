@@ -17,7 +17,7 @@
  * 不会出现"应用一种颜色、插件另一种颜色"的漂移。
  * 下面这些函数保持原签名与原来的 `hl-*` 类名（应用 CSS 与冒烟断言都不受影响）。
  */
-import { tokenizeJpsMusic, tokenizeJpsLyric, jpsHeaderOf, type JpsToken } from '@ijipu/engine'
+import { tokenizeJpsMusic, tokenizeJpsLyric, jpsHeaderOf, jpsBlockSpan, type JpsToken } from '@ijipu/engine'
 
 // adj186/adj752：行头判定改用引擎的 jpsHeaderOf（规则与应用/插件共用的那一份）
 
@@ -261,8 +261,22 @@ export function highlightCodeWrapped(
           // adj243：错误/告警块的 rest 坐标（col 相对该行内容，需补前导空白偏移 restLead）
           const marks = markByLine?.get(lineNo)
           const restLead = rest.length - rest.trimStart().length
-          const errCols = marks ? marks.err.map((c) => c + restLead) : []
-          const warnCols = marks ? marks.warn.map((c) => c + restLead) : []
+          /**
+           * adj757（用户要求：「预览渲染、播放、源码格式化、源码高亮、**错误信息显示提示**等共性的功能
+           * 都可以独立到引擎层面」，且"应用端也应同样处理"）：
+           * 「把 col 归到它所在的**音符块**」原来在这里内联实现，现在改走引擎 `jpsBlockSpan`
+           * —— 与 Obsidian 插件共用**同一份口径**。
+           *
+           * ⚠ 坐标口径：引擎收**整行原文** + "相对行头之后内容"的 col（与 `ParseError.col` 一致）；
+           * 本函数里的块循环用的是 `rest` 坐标 ⇒ 比较时减去 `headLen`（`rest` 起点相对 `raw` 的偏移）。
+           */
+          const spanOf = (c: number): [number, number] | null => jpsBlockSpan(raw, c)
+          const errSpans = marks ? marks.err.map(spanOf).filter((s): s is [number, number] => s !== null) : []
+          const warnSpans = marks ? marks.warn.map(spanOf).filter((s): s is [number, number] => s !== null) : []
+          /** rest 坐标 → raw 坐标的差值（`rest = trimmed.slice(headLen)`，再加 raw 的前导空白） */
+          const restBase = raw.length - trimmed.length + headLen
+          const hitsSpan = (spans: [number, number][], bs: number): boolean =>
+            spans.some(([f]) => f - restBase === bs)
           // 逐块渲染（保留块间空格，textContent 与 textarea 逐字符对齐）
           let out = ''
           let i = rs
@@ -279,9 +293,10 @@ export function highlightCodeWrapped(
             while (i < re && rest[i] !== ' ' && rest[i] !== '\t') i++
             const be = i
             let blk = highlightMusicContent(rest.slice(bs, be))
-            // 错误块优先于告警块（红 > 橙）
-            if (errCols.some((c) => c >= bs && c < be)) blk = `<span class="hl-err-block">${blk}</span>`
-            else if (warnCols.some((c) => c >= bs && c < be)) blk = `<span class="hl-warn-block">${blk}</span>`
+            // 错误块优先于告警块（红 > 橙）—— 判据是引擎给出的块区间（`jpsBlockSpan`）：
+            // 同一"块"的起点必然一致（两边都用"空格分隔"这一定义），比起点即可。
+            if (hitsSpan(errSpans, bs)) blk = `<span class="hl-err-block">${blk}</span>`
+            else if (hitsSpan(warnSpans, bs)) blk = `<span class="hl-warn-block">${blk}</span>`
             if (curSeg && bs === curSeg[0]) blk = `<span class="hl-current-block">${blk}</span>`
             out += blk
           }
