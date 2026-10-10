@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -321,6 +321,27 @@ check('附点八分(1/.) = 0.75 拍', Math.abs(tokenDuration({ augmentCount: 0, 
 
 // ---- 5. 格式化 ----
 console.log('[5] formatJps')
+/**
+ * adj752（用户要求「给手机端的源码使用应用里的源码高亮方案」）：着色**规则**已抽到引擎
+ * （`engine/highlight/jpsHighlight.ts`），应用与 Obsidian 插件共用 ⇒ 这里把它的口径钉住。
+ * 最关键的一条是**覆盖整行**：插件用 CM6 decoration，偏移靠"行首 + token 累加"，
+ * 少算一个字符整行就错位（应用渲染 HTML 反而看不出来）。
+ */
+{
+  const line = 'Q: 1 2 3 | 4 - 5 C: 词 {tp 1 | 2} &hx <'
+  const toks = tokenizeJpsLine(line)
+  check('adj752 tokenizeJpsLine 覆盖整行（拼接 === 原行）', toks.map((t) => t.text).join('') === line)
+  const cls = (s: string): string[] => tokenizeJpsLine(s).map((t) => t.cls)
+  check('adj752 各类别都能认出（行头/音符/小节线/歌词/装饰/注释/分页）',
+    cls('Q: 1 2 3 |')[0] === 'line-header' && cls('Q: 1 2 3 |').includes('note') &&
+      cls('Q: 1 2 3 |').includes('barline') && cls('C: 词 {tp 1 | 2}').includes('lyric') &&
+      cls('Q: 1&hx 2').includes('decoration') && cls('# 注释')[0] === 'comment' && cls('[fenye]')[0] === 'pagebreak')
+  check('adj752 前导空白也被覆盖（CM6 偏移不能跳过它）',
+    tokenizeJpsLine('   Q: 1 2 3 |').map((t) => t.text).join('') === '   Q: 1 2 3 |')
+  const sampleLines = readFileSync(join(root, 'public', 'samples', readdirSync(join(root, 'public', 'samples')).find((f) => f.endsWith('.jps'))!), 'utf8').split('\n')
+  check('adj752 示例谱每一行都能整行覆盖（含歌词行里的 {tp … } 段）',
+    sampleLines.every((l) => tokenizeJpsLine(l).map((t) => t.text).join('') === l))
+}
 const fmt = formatJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ:1 2 3 4|\nC: 词')
 check('Q 行格式化后带空格', fmt.includes('Q: 1 2 3 4 |'), JSON.stringify(fmt.split('\n').find((l) => l.startsWith('Q'))))
 check('描述头行不变', fmt.includes('B: t'))

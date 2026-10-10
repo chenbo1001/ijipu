@@ -9,11 +9,17 @@
  *  - adj629h：歌词行里的 `{tp … }` **替谱段** → 段内按**曲部颜色**着色（音符/小节线等），
  *    段头 `{tp` 与 `}` 用行头色标出（它本质是曲部内容，不该整段显示成歌词绿）
  */
-// adj629h：`{tp … }` 段头/段尾识别（与 parser 同一套规则，避免两处口径漂移）
-import { matchSegmentHead, findSegmentEnd } from '@ijipu/engine'
+/**
+ * adj752（用户要求：「给手机端的源码使用**应用里的源码高亮方案**」）：
+ * **着色规则抽到了引擎**（`engine/highlight/jpsHighlight.ts`），本文件现在只负责**渲染成 HTML**。
+ * 为什么要抽走：Obsidian 的编辑器是 CodeMirror 6（只吃"按区间打标记"），吃不了 HTML 字符串；
+ * 规则放在引擎里，应用渲染 `<span class="hl-*">`、插件渲染 CM6 decoration ⇒ **口径只有一处**，
+ * 不会出现"应用一种颜色、插件另一种颜色"的漂移。
+ * 下面这些函数保持原签名与原来的 `hl-*` 类名（应用 CSS 与冒烟断言都不受影响）。
+ */
+import { tokenizeJpsMusic, tokenizeJpsLyric, jpsHeaderOf, type JpsToken } from '@ijipu/engine'
 
-// adj186：Y/S 描述头与其它行头同色（与 parser HEADER_KEYS 一致：V/B/Z/D/P/J/Y/S）
-const HEADER_KEYS = 'QCBZD PJVYS'.replace(/\s/g, '')
+// adj186/adj752：行头判定改用引擎的 jpsHeaderOf（规则与应用/插件共用的那一份）
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -23,70 +29,31 @@ function span(cls: string, text: string): string {
   return `<span class="${cls}">${esc(text)}</span>`
 }
 
-/** 高亮 Q 行内容 */
-function highlightMusicContent(content: string): string {
-  let out = ''
-  let i = 0
-  let buf = ''
-  const flush = (cls: string | null) => {
-    if (buf === '') return
-    out += cls ? span(cls, buf) : esc(buf)
-    buf = ''
-  }
-  let lastCls: string | null = null
-  const push = (cls: string | null, c: string) => {
-    if (cls !== lastCls) {
-      flush(lastCls)
-      lastCls = cls
-    }
-    buf += c
-  }
+/** 分词类别 → 本文件的 `hl-*` 类名（与应用既有 CSS 对应） */
+const CLS: Record<string, string> = {
+  'line-header': 'hl-line-header',
+  note: 'hl-note',
+  barline: 'hl-barline',
+  lyric: 'hl-lyric',
+  comment: 'hl-comment',
+  pagebreak: 'hl-pagebreak',
+  decoration: 'hl-decoration',
+  plain: '',
+}
 
-  let inQuote = false
-  while (i < content.length) {
-    const c = content[i]
-    if (c === '"') {
-      inQuote = !inQuote
-      push('hl-lyric', c)
-      i++
-      continue
-    }
-    if (inQuote) {
-      push('hl-lyric', c)
-      i++
-      continue
-    }
-    if ('0123456789'.includes(c) || c === '-') {
-      push('hl-note', c)
-    } else if (c === '|' || c === ':' || c === '[' || c === ']') {
-      push('hl-barline', c)
-    } else if (c === '&') {
-      // 装饰编码：& 后连续字母数字
-      let j = i + 1
-      while (j < content.length && /[a-zA-Z0-9]/.test(content[j])) j++
-      const code = content.slice(i, j)
-      push('hl-decoration', code)
-      i = j
-      continue
-    } else if (c === '<' || c === '>' || c === '!') {
-      push('hl-decoration', c)
-    } else if (c === '(') {
-      // adj395：`(` 连同其后的修饰前缀（+/- 抬降级数、y 平均连音组标志）一起高亮，
-      // 否则 `(y` 的 y 会落成普通字符色，看不出它是连音组
-      let j = i + 1
-      while (j < content.length && (content[j] === '+' || content[j] === '-' || content[j] === 'y' || content[j] === 'Y')) j++
-      push('hl-barline', content.slice(i, j))
-      i = j
-      continue
-    } else if (c === ')' || c === '{' || c === '}') {
-      push('hl-barline', c)
-    } else {
-      push(null, c)
-    }
-    i++
+/** 把引擎给出的 token 渲染成 HTML（`plain` 不着色，只转义） */
+function renderTokens(tokens: JpsToken[]): string {
+  let out = ''
+  for (const t of tokens) {
+    const cls = CLS[t.cls] ?? ''
+    out += cls === '' ? esc(t.text) : span(cls, t.text)
   }
-  flush(lastCls)
   return out
+}
+
+/** 高亮 Q 行内容（adj752：规则来自引擎 `tokenizeJpsMusic`） */
+function highlightMusicContent(content: string): string {
+  return renderTokens(tokenizeJpsMusic(content))
 }
 
 /**
@@ -95,32 +62,25 @@ function highlightMusicContent(content: string): string {
  * adj629h（用户问）：歌词行里的 `{tp … }` 是**替谱段**——段内是曲部内容，按**曲部规则着色**
  * （音符 `hl-note`、小节线 `hl-barline` 等，与 Q 行同一套颜色）；歌词文字仍是 `hl-lyric`；
  * 段头 `{tp` 与收尾 `}` 用行头色标出来，一眼能看出"这里进了替谱段"。
+ *
+ * adj752：规则来自引擎 `tokenizeJpsLyric`；本函数只负责**按 [rs, re) 切片渲染**
+ * （折行变体按视觉行切片调用）。
  */
 function highlightLyricContent(content: string, rs = 0, re = content.length): string {
-  const parts: string[] = []
-  /** 只输出 [rs, re) 这一段（折行变体按视觉行切片调用）；段内音乐片段按需重新着色 */
-  const push = (cls: string | null, from: number, to: number): void => {
+  let pos = 0
+  let out = ''
+  for (const t of tokenizeJpsLyric(content)) {
+    const from = pos
+    const to = pos + t.text.length
+    pos = to
     const a = Math.max(from, rs)
     const b = Math.min(to, re)
-    if (b <= a) return
-    parts.push(cls === null ? highlightMusicContent(content.slice(a, b)) : span(cls, content.slice(a, b)))
+    if (b <= a) continue
+    const cls = CLS[t.cls] ?? ''
+    const piece = t.text.slice(a - from, b - from)
+    out += cls === '' ? esc(piece) : span(cls, piece)
   }
-  let i = 0
-  while (i < content.length) {
-    const at = content.indexOf('{', i)
-    if (at < 0 || matchSegmentHead(content, at) !== 'tp') break
-    let k = at + 3
-    while (k < content.length && (content[k] === ' ' || content[k] === '\t')) k++
-    const end = findSegmentEnd(content, k)
-    if (end < 0) break
-    push('hl-lyric', i, at)
-    push('hl-line-header', at, k) // `{tp` + 其后的空白
-    push(null, k, end) // 段内 = 曲部着色
-    push('hl-line-header', end, end + 1) // `}`
-    i = end + 1
-  }
-  push('hl-lyric', i, content.length)
-  return parts.join('')
+  return out
 }
 
 /** 整份代码高亮为 HTML；errLines 中的行号（1-based）整行红底标记；
@@ -155,7 +115,7 @@ export function highlightCode(
     }
     // 行头命令：^[A-Z][0-9]*("...")?:
     const m = /^([A-Z])(\d*)(?:"[^"]*")?\s*:/.exec(trimmed)
-    if (m && HEADER_KEYS.includes(m[1])) {
+    if (m && jpsHeaderOf(trimmed) !== null) {
       const headLen = m[0].length
       const head = trimmed.slice(0, headLen)
       const rest = trimmed.slice(headLen)
@@ -276,7 +236,7 @@ export function highlightCodeWrapped(
       continue
     }
     const m = /^([A-Z])(\d*)(?:"[^"]*")?\s*:/.exec(trimmed)
-    if (m && HEADER_KEYS.includes(m[1])) {
+    if (m && jpsHeaderOf(trimmed) !== null) {
       const headLen = m[0].length
       const head = trimmed.slice(0, headLen)
       const rest = trimmed.slice(headLen)
