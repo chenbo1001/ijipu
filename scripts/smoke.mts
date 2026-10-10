@@ -324,6 +324,29 @@ console.log('[5] formatJps')
 const fmt = formatJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ:1 2 3 4|\nC: 词')
 check('Q 行格式化后带空格', fmt.includes('Q: 1 2 3 4 |'), JSON.stringify(fmt.split('\n').find((l) => l.startsWith('Q'))))
 check('描述头行不变', fmt.includes('B: t'))
+/**
+ * adj747（在插件里发现的真 bug，回填到引擎）：
+ * `formatJps` 原来对"已以换行结尾"的源会**再补一个换行** ⇒ 每格式化一次文件就多一行空行，
+ * 即 `formatJps(formatJps(x)) !== formatJps(x)`（不幂等）。而这件事直接决定
+ * "按应用规范格式化"这个动作可不可用：宿主/插件都是**看它改没改**来决定要不要写盘的。
+ * 断言三层：① 幂等；② 末尾恰好一个换行；③ **应用自带示例谱都是不动点**（= "规范"的可执行定义）。
+ */
+{
+  const messy = 'V:1.0\nB:  测试\nQ:1 2  3  4|\nC:  词 {tp 1  2| 3}\n\n\n'
+  const once = formatJps(messy)
+  check('adj747 formatJps 幂等（格式化两次 == 一次）', formatJps(once) === once, JSON.stringify(once))
+  check('adj747 末尾恰好一个换行（不制造空行、也不吞掉最后一行）',
+    once.endsWith('\n') && !once.endsWith('\n\n'), JSON.stringify(once.slice(-6)))
+  check('adj747 空源返回空串（不生成"只有一个换行"的文件）', formatJps('') === '' && formatJps('\n\n') === '')
+  const sampleDir = join(root, 'public', 'samples')
+  const samples = readdirSync(sampleDir).filter((f) => f.endsWith('.jps'))
+  const notFixed = samples.filter((f) => {
+    const src = readFileSync(join(sampleDir, f), 'utf8')
+    return formatJps(src) !== src
+  })
+  check(`adj747 应用自带示例谱（${samples.length} 份）在 formatJps 下都是**不动点**`,
+    samples.length > 0 && notFixed.length === 0, `被改动：${notFixed.join(',')}`)
+}
 // adj110：formatLine 单行格式化（编辑器光标离开行时按行格式化，其余行原样）
 check('formatLine 格式化单行 Q 行', formatLine('Q: 1 2 3|4') === 'Q: 1 2 3 | 4', formatLine('Q: 1 2 3|4'))
 check('formatLine 不改非 Q 行（歌词原样）', formatLine('C: 一 二 三') === 'C: 一 二 三', '')
