@@ -207,7 +207,7 @@ export function SoundBankPanel() {
            * jsDelivr 又因 32.3 MB 超过其 20 MB 单文件上限而直接 403）。
            */
           <div style={{ color: 'var(--jp-danger)', fontSize: 11, marginTop: 4, whiteSpace: 'pre-wrap' }}>
-            {hqBankFailureText(currentHqLib, hqDlError)}
+            {hqBankFailureText(currentHqLib, hqDlError instanceof Error ? hqDlError.message : String(hqDlError ?? "") )}
           </div>
         )}
       </section>

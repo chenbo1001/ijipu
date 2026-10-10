@@ -12,6 +12,10 @@
  * 说明：本模块属浏览器层（AudioWorklet/WebAudio），不放入零 DOM 的 engine。
  */
 import type { AudioBackend } from '@ijipu/engine'
+// adj760（清单 B3）：音源库**清单与取用顺序**来自引擎（两端共用；IO 各做各的）
+export { HQ_LIBRARIES, getHqLibrary, planHqBankLoad, hqBankFailureText } from '@ijipu/engine'
+export type { HqSampleLibrary, HqBankSource } from '@ijipu/engine'
+import type { HqSampleLibrary } from '@ijipu/engine'
 import { pitchToMidiNote, instrumentToProgram, GmChannelAllocator, GM_VOICES, gmVoiceRef } from '@ijipu/engine'
 import type { GmVoice } from '@ijipu/engine'
 import type { WorkletSynthesizer } from 'spessasynth_lib'
@@ -19,51 +23,9 @@ import type { WorkletSynthesizer } from 'spessasynth_lib'
 /** worklet processor 文件（已拷贝到 public/spessasynth/，经 BASE_URL 定位） */
 const WORKLET_URL = `${import.meta.env.BASE_URL}spessasynth/spessasynth_processor.min.js`
 
-/** 高质量采样音源库（SpessaSynth 用 SF2/SF3/DLS，GM 编曲覆盖多种乐器） */
-export interface HqSampleLibrary {
-  id: string
-  name: string
-  source: string
-  /** fallbackSource：本地内置缺失时回退的联网直链（可选） */
-  fallbackSource?: string
-  sizeBytes: number
-  format: 'sf2' | 'sf3' | 'dls'
-  /**
-   * adj728（用户要求）：**让用户自己去拿这个文件的落地页**（浏览器里打开的那个页面）。
-   *
-   * 为什么单列一个"页面"而不是只给 `source` 直链：实测（2026-10）默认音源的直链
-   * `raw.githubusercontent.com/…/GeneralUser-GS.sf2`（32.3 MB）在部分网络**连不上**，
-   * jsDelivr 又因单文件 20 MB 上限直接 403 ⇒ 自动下载必然失败。这时唯一可行的路子是
-   * 用户自己在浏览器里（或换网络）把文件下载下来，再回「设置 → 音色库」点「导入音色文件」——
-   * 所以界面上要给一个"打开下载页"的按钮 + 一段照着做的引导，而不是只丢一句"请检查网络"。
-   */
-  downloadPage?: string
-}
 /** adj330/341/346：可切换的高质量音源库列表。默认库已内置（桌面打包资源 / Web 远端加载）。
  *  加库只需追加一条元数据。 */
-export const HQ_LIBRARIES: HqSampleLibrary[] = [
-  {
-    id: 'generaluser_gs',
-    name: '通用音源（GeneralUser GS）',
-    // adj346：SF2 不打包进 Web 产物（规避 Cloudflare Pages 单文件 25MB 限制），改为远端加载：
-    //   Web 源用 GitHub raw；有 Cloudflare R2 公开桶时把 `source` 换成 R2 公开 URL（更快更稳）。
-    //   桌面（Tauri）离线由 loadHqBank 读内置打包资源，不走此 source。
-    source: 'https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/GeneralUser-GS.sf2',
-    fallbackSource: '',
-    sizeBytes: 32_319_396,
-    format: 'sf2',
-    // adj728：用户手动下载的落地页（仓库页；页面里能直接下到 GeneralUser-GS.sf2）
-    downloadPage: 'https://github.com/mrbumpy409/GeneralUser-GS',
-  },
-]
 /** 按 id 查音源库（找不到回退默认第一个） */
-export function getHqLibrary(id?: string | null): HqSampleLibrary {
-  if (id) {
-    const f = HQ_LIBRARIES.find((l) => l.id === id)
-    if (f) return f
-  }
-  return HQ_LIBRARIES[0]
-}
 
 /**
  * GM 音色全集（program 0-127，中文名）——SpessaSynth 模式可全局指定音色（adj330/adj332）。
@@ -190,17 +152,6 @@ function netErrText(e: unknown): string {
  * @param lib 目标音源库
  * @param err 失败原因（可为空）
  */
-export function hqBankFailureText(lib: HqSampleLibrary, err?: unknown): string {
-  const why = err instanceof Error ? err.message : ''
-  return (
-    `音源「${lib.name}」自动下载失败（约 ${(lib.sizeBytes / 1_000_000).toFixed(1)} MB）。` +
-    `这通常是**该下载地址在你所在网络不可达**，而不是你网络差——` +
-    `可以手动导入一次（**导入后会持久缓存，之后不再联网**）：` +
-    `在「设置 → 音色库」点「导入音色文件…」选择本地的 .sf2 文件即可` +
-    (lib.downloadPage ? `；还没有这个文件的话，先点那里的「打开下载页」自己下一个。` : `。`) +
-    (why ? `\n技术细节：${why}` : '')
-  )
-}
 
 
 /**

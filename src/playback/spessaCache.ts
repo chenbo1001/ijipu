@@ -7,6 +7,7 @@
  * 不写 IndexedDB（不重复占 30MB），也不显示「正在下载」提示；Web 端仍走远端下载 + 缓存。
  */
 import { loadHqBank, loadBuiltinBank, hasBuiltinBank } from './spessaSynthBackend'
+import { planHqBankLoad } from '@ijipu/engine'
 import type { HqSampleLibrary } from './spessaSynthBackend'
 
 /** 音源来源（adj416）：builtin=安装目录随包内置（桌面直读）；cache=IndexedDB 缓存；remote=联网下载 */
@@ -95,10 +96,16 @@ export async function resolveHqBank(
       /* 宿主不可达 ⇒ 同样继续 */
     }
   }
+  /**
+   * adj760（清单 B3）：**顺序由引擎 `planHqBankLoad` 统一决定** ——
+   * 应用这边"用户导入的音源"落在 **IndexedDB 缓存**里（`cache`），随包内置的那份是 `builtin`
+   * ⇒ 传 `{cache, builtin}` 得到的正是既有行为（缓存 → 内置 → 下载）。
+   */
   const cached = await cache.load(lib.id)
-  if (cached) return { bank: cached, source: 'cache' }
-  const builtin = await loadBuiltinBank(lib)
-  if (builtin) return { bank: builtin, source: 'builtin' }
+  const builtin = cached ? null : await loadBuiltinBank(lib)
+  const plan = planHqBankLoad({ cache: !!cached, builtin: !!builtin })
+  if (plan === 'cache' && cached) return { bank: cached, source: 'cache' }
+  if (plan === 'builtin' && builtin) return { bank: builtin, source: 'builtin' }
   const bank = await loadHqBank(lib)
   await cache.save(lib.id, bank)
   return { bank, source: 'remote' }
