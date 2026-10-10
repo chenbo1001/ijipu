@@ -15,7 +15,19 @@ import { beginDrag } from '../ui/dragGesture'
 // adj723：音符点击（单击 / Ctrl+单击）的动作判定（纯模块，便于 smoke 断言）
 import { noteClickAction, noteClickKind } from './noteClickAction'
 import { tempoLabel } from '@ijipu/engine/parser/parser'
-import { layoutScore, renderScoreToSvg, noteIdToCodePos, buildIndexToPage, SEGMENT_ROW_GAP_DEFAULT, notesRowBaseline } from '@ijipu/engine'
+// adj758（清单 B1）：色块的**分组/定位/配色**都来自引擎 —— 应用与 Obsidian 插件共用一份实现
+import {
+  layoutScore,
+  renderScoreToSvg,
+  noteIdToCodePos,
+  buildIndexToPage,
+  SEGMENT_ROW_GAP_DEFAULT,
+  notesRowBaseline,
+  trackKeysOf,
+  playheadPosIn,
+  instrumentColorMap,
+  playheadBaseOf,
+} from '@ijipu/engine'
 import type { ScorePage, PageConfig } from '@ijipu/engine'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides'
 import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '@ijipu/engine/layout/metaAnchors'
@@ -734,24 +746,6 @@ export function PreviewPane() {
   )
 }
 
-/** 色块轨道的一项（= docStore.playheadTrack 的元素） */
-type PlayheadTrackItem = {
-  atMs: number
-  durationMs: number
-  pageIndex: number
-  x: number
-  y: number
-  width: number
-  voice: number
-  group: number
-  instrument?: string
-  /** adj429：色块按曲行几何动态定界的上边界（多声部/临时段自动避开重叠、不压歌词） */
-  yTopMin?: number
-  /** adj429：色块按曲行几何动态定界的下边界 */
-  yBottomMax?: number
-  /** adj432：段内声部角色（bz upper = 'accomp' / dsb upper = 'main' / dsb lower = 'second'）→ 颜色区分 */
-  playVoice?: 'accomp' | 'main' | 'second'
-}
 
 /**
  * adj427：把播放轨道按「**页 + 曲行 + 声部 + 音色**」分组，供每组建一个色块。
@@ -764,137 +758,8 @@ type PlayheadTrackItem = {
  *
  * 结果按 track 引用缓存（track 每次开播才换新对象），避免逐帧重建分组。
  */
-let pathKeyCache: unknown = null
-let pathGroupCache = new Map<string, PlayheadTrackItem[]>()
-function trackKeysOf(track: PlayheadTrackItem[]): Map<string, PlayheadTrackItem[]> {
-  if (pathKeyCache === track) return pathGroupCache
-  const m = new Map<string, PlayheadTrackItem[]>()
-  for (const t of track) {
-    // adj432（E-2026-171）：键**必须含 playVoice**——上下两层音色相同时
-    // （如谱面只写 `Y: 手风琴` ⇒ 主旋律 = Y[0] = 手风琴、bz 伴奏回退也 = 手风琴）
-    // 旧键 `(page,group,voice,instrument)` 完全相同 ⇒ 两层被并成一组 ⇒ **只画一个色块**。
-    const k = `${t.pageIndex}|${t.group}|${t.voice}|${t.instrument ?? ''}|${t.playVoice ?? ''}`
-    const arr = m.get(k)
-    if (arr) arr.push(t)
-    else m.set(k, [t])
-  }
-  for (const arr of m.values()) arr.sort((a, b) => a.atMs - b.atMs)
-  pathKeyCache = track
-  pathGroupCache = m
-  return m
-}
 
-/**
- * adj282：在**同一组**（同页/同曲行/同声部/同音色）的拍段序列里定位当前色块。
- * adj299：按「拍段」定位（每段 ≤1 拍）；色块高度由音符基线推：
- * 行顶 基线-1.1×音符高、行底 基线+0.6×音符高，各加延伸 0.5×音符高。
- * adj429：若 track 项带 `yTopMin`/`yBottomMax`（由引擎按曲行几何动态定界），用它替代默认硬编码。
- * 返回 null = 未播放/不在本页/该组当前段已播完/动态定界算不出可见高度。
- */
-function playheadPosIn(
-  segs: PlayheadTrackItem[],
-  currentMs: number,
-  pageIndex: number,
-  noteSize: number,
-): { x: number; yTop: number; yBottom: number; width: number; voice: number; instrument?: string; playVoice?: 'accomp' | 'main' | 'second' } | null {
-  if (segs.length === 0 || currentMs <= 0) return null
-  // 二分：最后一个 atMs <= currentMs 的段
-  let lo = 0
-  let hi = segs.length
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1
-    if (segs[mid].atMs <= currentMs) lo = mid + 1
-    else hi = mid
-  }
-  const i = lo - 1
-  if (i < 0 || i >= segs.length) return null
-  const a = segs[i]
-  // adj313：色块只在该拍段「正在发声」期间显示。旧逻辑仅在「本曲行最后一段」
-  // 结束时才隐藏（i === 最后段），遇到反复/跳房子跳跃产生的段间空隙（当前段已结束、
-  // 下一段还未开始）时，会把旧行色块冻结驻留在原处——用户观感即「色块已走到新行，
-  // 上一行色块还残留在行末」。改为：只要当前段已结束（该处已无声）就隐藏，
-  // 各组按各自发声时间出现/消失，旧行不再残留。
-  if (currentMs >= a.atMs + a.durationMs) return null
-  if (a.pageIndex !== pageIndex) return null
-  // adj429：色块按曲行几何动态定界（多声部/临时叠加段不互相覆盖、不压歌词）。
-  // 仅当 a.yTopMin/a.yBottomMax 都有才走动态（避免单独传一个造成异常）；
-  // 否则回退到原硬编码 `[y−1.6×字号, y+0.6×字号]`。
-  let yTop: number
-  let yBottom: number
-  if (a.yTopMin !== undefined && a.yBottomMax !== undefined) {
-    yTop = a.yTopMin
-    yBottom = a.yBottomMax
-  } else {
-    const ext = noteSize * 0.5
-    yTop = a.y - noteSize * 1.1 - ext
-    yBottom = a.y - noteSize * 1.1 + noteSize * 1.7 + ext
-  }
-  return { x: a.x, yTop, yBottom, width: a.width, voice: a.voice, instrument: a.instrument, playVoice: a.playVoice }
-}
 
-/** adj299：播放色块调色板（半透明基色，使用时拼透明度） */
-const PLAYHEAD_COLORS = [
-  'rgba(255, 93, 108,', // 红（第 1 个音色——延续 adj285/adj299 的单声部红块与 Q1 红）
-  'rgba(87, 170, 255,', // 蓝
-  'rgba(63, 122, 46,', // 绿（声部 3）
-  'rgba(255, 200, 87,', // 橙（声部 4）
-  'rgba(138, 95, 184,', // 紫（声部 5）
-  'rgba(0, 188, 178,', // 青
-  'rgba(226, 118, 176,', // 粉
-  'rgba(150, 150, 90,', // 橄榄
-]
-
-/** adj432：段内声部角色对应的固定色（覆盖 instrumentColorMap 推断）
- *  - 'accomp'（bz upper）= 蓝——伴奏声部
- *  - 'second'（dsb lower）= 绿——第二声部
- *  - 'main'（dsb upper）= 红——与主旋律同色
- *  - 普通主旋律音（playVoice 为空）走原来的 instrumentColorMap
- */
-function segVoiceColor(role: 'accomp' | 'main' | 'second'): string {
-  if (role === 'accomp') return 'rgba(87, 170, 255,'  // 蓝
-  if (role === 'second') return 'rgba(63, 122, 46,'  // 绿
-  return 'rgba(255, 93, 108,'                          // 红（'main'）
-}
-
-/**
- * adj427：色块改为**按音色（instrument）着色**——不同音色不同颜色，
- * 播放中 `@乐器名` 切换音色时色块颜色随之变化（用户要求）。
- *
- * 分配规则（保证既有观感不回退）：
- *  ① 先把 **voice 1 的音色**排到第 1 位（⇒ 单声部仍是红块、多声部 Q1 仍是红、Q2 仍是蓝）；
- *  ② 其余音色按**在播放轨道中出现的先后**依次取调色板后续颜色；
- *  ③ 同一音色在任何遍次/任何曲行都是**同一颜色**（map 按音色名，不随位置变）。
- */
-let colorMapTrack: unknown = null
-let colorMapCache = new Map<string, number>()
-function instrumentColorMap(
-  track: { voice: number; instrument?: string }[],
-): Map<string, number> {
-  if (colorMapTrack === track) return colorMapCache
-  const order: string[] = []
-  const push = (inst: string | undefined): void => {
-    const k = inst ?? ''
-    if (!order.includes(k)) order.push(k)
-  }
-  for (const t of track) if (t.voice === 1) push(t.instrument)
-  for (const t of track) push(t.instrument)
-  const map = new Map<string, number>()
-  order.forEach((inst, i) => map.set(inst, i % PLAYHEAD_COLORS.length))
-  colorMapTrack = track
-  colorMapCache = map
-  return map
-}
-
-/** 取某事件色块的半透明基色（adj432：段内声部角色优先，否则按音色） */
-function playheadBaseOf(
-  pos: { voice: number; instrument?: string; playVoice?: 'accomp' | 'main' | 'second' },
-  map: Map<string, number>,
-): string {
-  // adj432：临时段内声部角色有**固定色**（不依赖 instrument 推断，避免和主旋律撞色）
-  if (pos.playVoice) return segVoiceColor(pos.playVoice)
-  const idx = map.get(pos.instrument ?? '') ?? (pos.voice - 1) % PLAYHEAD_COLORS.length
-  return PLAYHEAD_COLORS[idx]
-}
 
 /**
  * adj723b：色块链路的**只读自检**。

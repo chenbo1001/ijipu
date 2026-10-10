@@ -258,9 +258,8 @@ export function highlightCodeWrapped(
         if (re <= rs) return s.start < headLen ? span('hl-line-header', head) : ''
         let inner: string
         if (m[1] === 'Q') {
-          // adj243：错误/告警块的 rest 坐标（col 相对该行内容，需补前导空白偏移 restLead）
+          // adj243：错误/告警块的 rest 坐标（col 相对该行内容；换算由引擎 jpsBlockSpan 负责）
           const marks = markByLine?.get(lineNo)
-          const restLead = rest.length - rest.trimStart().length
           /**
            * adj757（用户要求：「预览渲染、播放、源码格式化、源码高亮、**错误信息显示提示**等共性的功能
            * 都可以独立到引擎层面」，且"应用端也应同样处理"）：

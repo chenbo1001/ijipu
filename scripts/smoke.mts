@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, trackKeysOf, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -642,6 +642,52 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
   check('adj757 jpsBlockMarks：同块错误优先、重复块只留一条',
     marks.length === 1 && marks[0].line === 3 && marks[0].severity === 'error',
     JSON.stringify(marks))
+}
+/**
+ * adj758（清单 B1：用户要求「播放及色块显示……共性的功能都可以独立到引擎层面」，且"应用端也应同样处理"）：
+ * 色块的**分组 / 定位 / 配色**已在引擎（`engine/playback/playhead.ts`）—— 应用与 Obsidian 插件共用，
+ * 两端只做"把块画出来"。这里把口径钉在引擎侧（此前这些断言只存在于插件仓库）。
+ */
+{
+  const seg = (over: Record<string, unknown>): Record<string, unknown> => ({
+    atMs: 0,
+    durationMs: 500,
+    pageIndex: 0,
+    x: 10,
+    y: 100,
+    width: 20,
+    voice: 1,
+    group: 1,
+    ...over,
+  })
+  // ① 分组键必须含 playVoice —— 否则重叠区上下两层（音色相同）会被并成一组、只画一个色块（E-2026-171）
+  const track = [
+    seg({ instrument: '手风琴', playVoice: undefined }),
+    seg({ instrument: '手风琴', playVoice: 'accomp', atMs: 0 }),
+  ] as never
+  check('adj758 trackKeysOf 的分组键含 playVoice（音色相同的两层也各成一组）',
+    trackKeysOf(track).size === 2, `组数=${trackKeysOf(track).size}`)
+  check('adj758 trackKeysOf 按 track 引用缓存（同引用不重建）', trackKeysOf(track) === trackKeysOf(track))
+  // ② 配色：先给 voice 1 的音色排第 1 位（单声部仍是红块）；声部角色有固定色
+  const cmap = instrumentColorMap(track)
+  check('adj758 instrumentColorMap：voice 1 的音色拿第 1 个色（红）', cmap.get('手风琴') === 0, String(cmap.get('手风琴')))
+  check('adj758 playheadBaseOf：声部角色固定色优先于音色推断',
+    playheadBaseOf({ voice: 1, instrument: '手风琴', playVoice: 'accomp' }, cmap) === 'rgba(87, 170, 255,' &&
+      playheadBaseOf({ voice: 1, instrument: '手风琴', playVoice: 'second' }, cmap) === 'rgba(63, 122, 46,' &&
+      playheadBaseOf({ voice: 1, instrument: '手风琴', playVoice: 'main' }, cmap) === 'rgba(255, 93, 108,')
+  // ③ 定位：动态边界优先；段间空隙不残留；不是本页不显示
+  const withBounds = [seg({ atMs: 0, yTopMin: 80, yBottomMax: 120 })] as never
+  const p1 = playheadPosIn(withBounds, 1, 0, 16)
+  check('adj758 playheadPosIn：有 yTopMin/yBottomMax 时按引擎定界', p1 !== null && p1.yTop === 80 && p1.yBottom === 120)
+  const plainSeg = [seg({ atMs: 0 })] as never
+  const p2 = playheadPosIn(plainSeg, 1, 0, 16)
+  check('adj758 playheadPosIn：无定界时回退 [y−1.6n, y+1.1n]（上下各留 0.5 字号延伸）',
+    p2 !== null && Math.abs(p2.yTop - (100 - 16 * 1.6)) < 1e-9 && Math.abs(p2.yBottom - (100 + 16 * 1.1)) < 1e-9,
+    p2 ? `${p2.yTop}/${p2.yBottom}` : 'null')
+  check('adj758 playheadPosIn：段间空隙 / 非本页 / 未播放 → null',
+    playheadPosIn(plainSeg, 501, 0, 16) === null &&
+      playheadPosIn(plainSeg, 1, 9, 16) === null &&
+      playheadPosIn(plainSeg, 0, 0, 16) === null)
 }
 // adj246：空 rest 的 Q:/C: 行也要渲染行头（否则显示层成空行）
 {
