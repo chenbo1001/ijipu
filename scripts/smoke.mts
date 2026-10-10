@@ -865,6 +865,54 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
       JSON.stringify(changedConfigKeys({ a: { x: 1 } }, { a: { x: 1 } })) === '[]')
 }
 
+/**
+ * adj767（清单 B 的收口闸门）：B1–B8 的落地要求里有一条是「**删除各自的重复实现**」——
+ * 光删一次不够，得让它**不能被悄悄加回来**。这里逐文件核对"应用侧不再自带这些实现、
+ * 而是从引擎导入"。断言按"代码"判（注释里提到函数名是正常的，先剥离块注释）。
+ */
+{
+  const code = (p: string) => readFileSync(p, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const preview = code('src/preview/PreviewPane.tsx')
+  check('adj767 应用不再自带色块分组/定位/配色（B1）——只从引擎导入',
+    !/const PLAYHEAD_COLORS/.test(preview) && !/function trackKeysOf/.test(preview) &&
+      !/function playheadPosIn/.test(preview) && !/function instrumentColorMap/.test(preview) &&
+      !/function playheadBaseOf/.test(preview) && !/function segVoiceColor/.test(preview) &&
+      /trackKeysOf,/.test(preview) && /playheadPosIn,/.test(preview) && /instrumentColorMap,/.test(preview) &&
+      /playheadBaseOf,/.test(preview),
+    'PreviewPane 仍有本地实现')
+  const editor = code('src/editor/EditorPane.tsx')
+  const hl = code('src/editor/highlight.ts')
+  check('adj767 应用不再自己攒"错误块/问题行集合"（B4）——改用引擎高亮模型',
+    /highlightModel\(code, parseResult\.errors\)/.test(editor) &&
+      /groupBlocksByLine\(hlModel\.blockMarks\)/.test(editor) &&
+      !/const blockMarks = useMemo/.test(editor) &&
+      /highlightLineModel\(raw, lineNo, markByLine\?\.get\(lineNo\) \?\? \[\]\)/.test(hl) &&
+      // 块区间的换算已在模型内部，渲染层不再自己调 jpsBlockSpan
+      !/jpsBlockSpan/.test(hl))
+  const problems = code('src/ui/problems.ts')
+  check('adj767 `ui/problems.ts` 保持**转发层**（分级/排序/文案都在引擎，B2）',
+    /summarizeProblems as summarize/.test(problems) && /APP_PROBLEM_LABELS/.test(problems) &&
+      !/SEVERITY_ORDER/.test(problems) && !/\.sort\(/.test(problems) &&
+      problems.split('\n').length <= 60,
+    `行数=${problems.split('\n').length}`)
+  const backend = code('src/playback/spessaSynthBackend.ts')
+  const cache = code('src/playback/spessaCache.ts')
+  check('adj767 应用不再自带音源库清单/失败文案（B3）——从引擎导入并走 planHqBankLoad',
+    !/const HQ_LIBRARIES/.test(backend) && !/function hqBankFailureText/.test(backend) &&
+      !/function getHqLibrary/.test(backend) &&
+      /export \{ HQ_LIBRARIES, getHqLibrary, planHqBankLoad, hqBankFailureText \} from '@ijipu\/engine'/.test(backend) &&
+      /planHqBankLoad\(\{ cache: !!cached, builtin: !!builtin \}\)/.test(cache))
+  const dlg = code('src/dialogs/PlaybackDialog.tsx')
+  check('adj767 应用不再自带时钟（B6）——只用引擎 createPlaybackClock',
+    !/timeBaseRef/.test(dlg) && !/startTimeRef/.test(dlg) && !/rafLoop/.test(dlg) &&
+      /createPlaybackClock\(\{ onTick/.test(dlg))
+  const theme = readFileSync('src/styles/theme.css', 'utf8')
+  check('adj767 模板/色板的真源在引擎（B5/B7）',
+    readFileSync('src/samples/未命名.jps', 'utf8') === DEFAULT_NEW_JPS_TEMPLATE &&
+      theme.includes(`--jp-hl-note: ${JPS_HIGHLIGHT_COLORS.dark.note};`) &&
+      theme.includes(`--jp-hl-note: ${JPS_HIGHLIGHT_COLORS.light.note};`))
+}
+
 // adj246：空 rest 的 Q:/C: 行也要渲染行头（否则显示层成空行）
 {
   const h246 = highlightCodeWrapped('V: 1.0\nQ:\nC:\n', undefined, null, [])
