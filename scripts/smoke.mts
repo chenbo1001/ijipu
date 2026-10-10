@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -830,7 +830,7 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
 {
   const file = readFileSync('src/samples/未命名.jps', 'utf8')
   check('adj765 应用新建模板文件 === 引擎 `DEFAULT_NEW_JPS_TEMPLATE`（逐字节）',
-    file === DEFAULT_NEW_JPS_TEMPLATE,
+    file === DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys,
     file === DEFAULT_NEW_JPS_TEMPLATE
       ? ''
       : `文件=${JSON.stringify(file).slice(0, 60)}… 引擎=${JSON.stringify(DEFAULT_NEW_JPS_TEMPLATE).slice(0, 60)}…`)
@@ -839,6 +839,30 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
       DEFAULT_NEW_JPS_TEMPLATE.includes('# jps-config:{}') &&
       DEFAULT_NEW_JPS_TEMPLATE.endsWith('\n'),
     `errors=${parseJps(DEFAULT_NEW_JPS_TEMPLATE).errors.length}`)
+}
+
+/**
+ * adj766（清单 B8）：设置分层的**判定规则**在引擎（`configValuesEqual` / `isDefaultConfigValue` /
+ * `changedConfigKeys`）。分层优先本身早就共用 `mergeJpsConfig`（L0 < L1 < L2）；
+ * 这里钉住"是否等于默认 / 改了哪些键"的规则 —— 应用与 Obsidian 插件都调这几个函数。
+ */
+{
+  check('adj766 configValuesEqual：标量严格相等、对象按结构比较、跨 null/undefined 不等',
+    configValuesEqual(1, 1) && configValuesEqual('a', 'a') &&
+      configValuesEqual({ a: 1 }, { a: 1 }) && configValuesEqual([1, 2], [1, 2]) &&
+      !configValuesEqual({ a: 1 }, { a: 2 }) && !configValuesEqual(null, undefined) &&
+      !configValuesEqual(0, false))
+  // 可选字段约定（E-2026-294）：默认"未设置"时 undefined 与 false 都算默认
+  check('adj766 isDefaultConfigValue：可选字段默认"未设置"时 undefined/false 都算默认',
+    isDefaultConfigValue(undefined, undefined) && isDefaultConfigValue(undefined, false) &&
+      !isDefaultConfigValue(undefined, true) &&
+      isDefaultConfigValue(4, 4) && !isDefaultConfigValue(4, 5) &&
+      // 有默认值时 value=undefined 不算默认（"没设置"≠"等于默认"，要显式写回）
+      !isDefaultConfigValue(4, undefined))
+  check('adj766 changedConfigKeys：只报真正变了的键（含新增）',
+    JSON.stringify(changedConfigKeys({ a: 1, b: 2 }, { a: 1, b: 3, c: 4 })) === '["b","c"]' &&
+      JSON.stringify(changedConfigKeys({ a: 1 }, { a: 1 })) === '[]' &&
+      JSON.stringify(changedConfigKeys({ a: { x: 1 } }, { a: { x: 1 } })) === '[]')
 }
 
 // adj246：空 rest 的 Q:/C: 行也要渲染行头（否则显示层成空行）
