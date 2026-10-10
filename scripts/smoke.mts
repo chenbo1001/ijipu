@@ -842,6 +842,75 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
 }
 
 /**
+ * adj770（清单 B 的收口闸门之二）：**引擎零 DOM / 零 React** 从"注释里的承诺"变成机器闸门。
+ *
+ * 为什么需要它：B1–B8 往引擎里新增了 9 个模块（色块/问题/音源/模型/色板/时钟/模板/分层…），
+ * 而"引擎纯 TS、零 React/DOM"此前**只写在 `src/AGENTS.md` 与文件头注释里**，
+ * 一旦有人（包括我）在引擎里写下 `document.`，要到某个宿主炸掉才会发现。
+ *
+ * 口径：剥离块注释与整行 `//` 注释后判定；
+ *  · 禁止 `import … from 'react' | 'react-dom'`；
+ *  · 禁止触碰宿主全局（`document`/`window`/`localStorage`/`HTMLElement`/`querySelector`/`createElement`）；
+ *  · `requestAnimationFrame`/`cancelAnimationFrame`/`performance` **允许**，但必须与 `typeof` 守卫同行
+ *    （`clock.ts` 就是这样把 `now`/`raf` 做成"宿主可注入、缺省回退"的 —— 引擎仍可在 Node 里跑）。
+ */
+{
+  const engineRoot = 'packages/ijipu-engine/src/engine'
+  const walk = (dir: string): string[] =>
+    readdirSync(dir).flatMap((n) => {
+      const p = `${dir}/${n}`
+      return statSync(p).isDirectory() ? walk(p) : p.endsWith('.ts') ? [p] : []
+    })
+  const strip = (s: string) =>
+    s
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('//'))
+      .join('\n')
+  const bannedImports: [string, RegExp][] = [
+    ["'react'", /from\s+['"]react['"]/],
+    ["'react-dom'", /from\s+['"]react-dom['"]/],
+  ]
+  const bannedGlobals: [string, RegExp][] = [
+    ['document', /\bdocument\b/],
+    ['window', /\bwindow\b/],
+    ['localStorage', /\blocalStorage\b/],
+    ['HTMLElement', /\bHTMLElement\b/],
+    ['querySelector', /\bquerySelector\b/],
+    ['createElement', /\bcreateElement\b/],
+  ]
+  const needGuard: [string, RegExp][] = [
+    ['requestAnimationFrame', /\brequestAnimationFrame\b/],
+    ['cancelAnimationFrame', /\bcancelAnimationFrame\b/],
+    ['performance', /\bperformance\b/],
+  ]
+  const files = walk(engineRoot)
+  const bad: string[] = []
+  for (const f of files) {
+    const code = strip(readFileSync(f, 'utf8'))
+    for (const [name, re] of bannedImports) if (re.test(code)) bad.push(`${f}: 禁止导入 ${name}`)
+    for (const [name, re] of bannedGlobals) if (re.test(code)) bad.push(`${f}: 触碰宿主全局 ${name}`)
+    code.split('\n').forEach((line, i) => {
+      // 守卫可以写在同一处，也可以写在上两行内（如 `typeof rAF !== 'undefined' ?\n  (cb) => rAF(cb)\n  : …`）
+      const near = [code.split('\n')[i - 2] ?? '', code.split('\n')[i - 1] ?? '', line].join('\n')
+      for (const [name, re] of needGuard) {
+        if (re.test(line) && !/typeof/.test(near)) bad.push(`${f}:${i + 1}: ${name} 未用 typeof 守卫`)
+      }
+    })
+  }
+  check('adj770 引擎零 DOM / 零 React（新增 9 个模块后仍成立；宿主全局只允许 typeof 守卫下的用法）',
+    bad.length === 0 && files.length > 20,
+    bad.length === 0 ? `扫描 ${files.length} 个文件` : `违规 ${bad.length} 处：${bad.slice(0, 6).join(' | ')}`)
+  // 负对照：把一段"违反规则"的假源码喂给同一套规则，必须判违规（证明闸门真的在判）
+  {
+    const probe = strip("import { useState } from 'react'\nconst el = document.createElement('div')\nconst t = performance.now()\n")
+    const hit = bannedImports.some(([, re]) => re.test(probe)) && bannedGlobals.some(([, re]) => re.test(probe)) &&
+      needGuard.some(([, re]) => re.test(probe) && !/typeof/.test(probe))
+    check('adj770 引擎纯净性闸门负对照：违规样本会被判出', hit)
+  }
+}
+
+/**
  * adj766（清单 B8）：设置分层的**判定规则**在引擎（`configValuesEqual` / `isDefaultConfigValue` /
  * `changedConfigKeys`）。分层优先本身早就共用 `mergeJpsConfig`（L0 < L1 < L2）；
  * 这里钉住"是否等于默认 / 改了哪些键"的规则 —— 应用与 Obsidian 插件都调这几个函数。
