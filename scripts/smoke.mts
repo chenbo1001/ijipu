@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -747,6 +747,78 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
   check('adj763 浅色一套确实在浅色作用域里（`[data-mode=\'light\']`，不是覆盖了深色）',
     /\[data-mode='light'\][\s\S]{0,1400}?--jp-hl-line-header:/.test(css) &&
       css.indexOf('--jp-hl-note: #ffb86c') < css.indexOf('--jp-hl-note: #b35900'))
+}
+
+/**
+ * adj764（清单 B6：用户要求「播放及色块显示等共性的功能都可以独立到引擎层面」，且"应用端也应同样处理"）：
+ * **试听时钟**的语义用**假时钟**钉死 —— 推进 / 暂停续播 / 取消后不再回调 / 到点恰好一次。
+ * 两端（应用 `PlaybackDialog`、插件 `scorePane`）都用这一份。
+ */
+{
+  const mk = (totalMs = 100) => {
+    let t = 0
+    const queued: ((t: number) => void)[] = []
+    const ticks: number[] = []
+    let ends = 0
+    const clock = createPlaybackClock({
+      totalMs,
+      now: () => t,
+      raf: (cb) => {
+        queued.push(cb)
+        return queued.length
+      },
+      cancelRaf: () => undefined,
+      onTick: (ms) => ticks.push(ms),
+      onEnd: () => {
+        ends += 1
+      },
+    })
+    /** 走一帧：把时间推到 `at`，执行最近一次排队的帧回调 */
+    const frame = (at: number) => {
+      t = at
+      const cb = queued.shift()
+      if (cb) cb(t)
+    }
+    return { clock, ticks, frame, endCount: () => ends, pending: () => queued.length }
+  }
+  {
+    const { clock, ticks, frame, endCount, pending } = mk()
+    clock.start()
+    check('adj764 时钟：start 后 playing=true 且排了一帧', clock.playing && pending() === 1)
+    frame(30)
+    check('adj764 时钟：帧回调带时间轴位置，并自动续排下一帧',
+      JSON.stringify(ticks) === '[30]' && pending() === 1, JSON.stringify(ticks))
+    // 暂停：返回暂停点，且时间流逝不再回调
+    const paused = clock.pause()
+    frame(90)
+    check('adj764 时钟：pause 返回暂停点、之后不再回调', paused === 30 && !clock.playing && ticks.length === 1,
+      `paused=${paused} ticks=${JSON.stringify(ticks)}`)
+    // 续播：从暂停点继续（40 = 30 + (100-90)）
+    clock.resume()
+    frame(100)
+    check('adj764 时钟：resume 从暂停点续算（不是从 0、也不丢失已播时间）',
+      JSON.stringify(ticks) === '[30,40]', JSON.stringify(ticks))
+    // 到点：onTick(totalMs) + onEnd 恰好一次，且不再续排
+    frame(200)
+    check('adj764 时钟：到点触发 onTick(totalMs) 与 onEnd（恰好一次），并停止排帧',
+      JSON.stringify(ticks) === `[30,40,${100}]` && endCount() === 1 && pending() === 0 && !clock.playing,
+      `${JSON.stringify(ticks)} ends=${endCount()} pending=${pending()}`)
+    frame(260)
+    check('adj764 时钟：到点之后再来帧也不会重复触发 onEnd', endCount() === 1, String(endCount()))
+  }
+  {
+    // 取消：置回 0、不再回调（含 onEnd）；seek 可跳位
+    const { clock, ticks, frame, endCount } = mk()
+    clock.start()
+    frame(20)
+    clock.cancel()
+    frame(90)
+    check('adj764 时钟：cancel 后 ms=0 且不再回调、不触发 onEnd',
+      clock.ms() === 0 && !clock.playing && ticks.length === 1 && endCount() === 0,
+      `ms=${clock.ms()} ticks=${JSON.stringify(ticks)} ends=${endCount()}`)
+    clock.seek(60)
+    check('adj764 时钟：seek 跳到指定位置（钳制在 [0, totalMs]）', clock.ms() === 60 && clock.ms() <= clock.totalMs)
+  }
 }
 
 // adj246：空 rest 的 Q:/C: 行也要渲染行头（否则显示层成空行）

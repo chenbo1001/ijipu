@@ -33,7 +33,8 @@ import { measureFontMeta } from '../preview/fontMeta'
 import { fmtClock } from './playbackClock'
 // adj723d：试听**单实例**保证（代次守卫，纯模块便于 smoke 断言）
 import { createPlaybackGeneration, shouldAutoPlay } from './playbackSession'
-import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, gmVoiceRef, countScoreInstrumentSwitches } from '@ijipu/engine'
+// adj764（清单 B6）：试听时钟来自引擎 —— 与 Obsidian 插件共用"推进/暂停续播/取消/到点一次"的语义
+import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, gmVoiceRef, countScoreInstrumentSwitches, createPlaybackClock, type PlaybackClock } from '@ijipu/engine'
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
 
@@ -118,20 +119,9 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   const doneTimerRef = useRef<number | null>(null)
   // adj258：播放序列 + 启动时间（本地计时），高亮定时器按当前 atMs 设 activeNoteIds
   const seqRef = useRef<ReturnType<typeof buildPlaySequence> | null>(null)
-  const startTimeRef = useRef<number>(0)
-  /**
-   * adj409：把「时间轴」与「音频调度」拆成两个时钟，暂停/续播才不用改高亮与色块轨道：
-   *  · `startTimeRef` = 本次音频调度起点的 `performance.now()`
-   *  · `timeBaseRef`  = 该起点对应的**原时间轴**毫秒（首次播放 0；续播 = 暂停时的位置）
-   *  于是 `curMs() = timeBase + (now - startTime)` 恒为**原时间轴**位置——
-   *  高亮比对与 `playheadTrack`（都在原时间轴）无需任何偏移；音频侧则把剩余事件整体平移到 0 重排。
-   */
-  const timeBaseRef = useRef<number>(0)
   /** adj409：暂停时已播到的位置（原时间轴毫秒）= 续播起点 */
   const pausedAtRef = useRef<number>(0)
   const highlightTimerRef = useRef<number | null>(null)
-  // adj282：RAF 驱动 currentMs（色块平滑滑动）
-  const rafRef = useRef<number | null>(null)
   /**
    * adj723d（用户报「Ctrl+点音符不要启动另一播放进程，同一谱子只能有一个试听态」）：
    * **播放代次守卫**——规则与理由见 `playbackSession.ts`（抽成纯模块供 smoke 断言）。
@@ -216,7 +206,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       cancelRef.current?.()
       if (doneTimerRef.current !== null) window.clearTimeout(doneTimerRef.current)
       if (highlightTimerRef.current !== null) window.clearInterval(highlightTimerRef.current)
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+      clockRef.current?.cancel()
       backendRef.current?.dispose()
       setActiveNoteId(null)
       setActiveNoteIds([])
@@ -228,8 +218,20 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
 
   // ---- adj409：播放驱动（RAF 色块 + 50ms 高亮 + 收尾复位）统一在这里启停，暂停/续播复用同一套 ----
 
+  /**
+   * adj764（清单 B6：用户要求「播放及色块显示等共性的功能都可以独立到引擎层面」，且"应用端也应同样处理"）：
+   * 时间轴推进改用**引擎时钟** `createPlaybackClock` —— 与 Obsidian 插件共用同一套
+   * "推进 / 暂停续播 / 取消后不再回调 / 到点恰好一次"的语义。
+   *
+   * 原来这里用 `timeBaseRef + (performance.now() - startTimeRef)` 自己算（adj409 的三 ref 方案），
+   * 语义与引擎时钟**完全一致**，只是各写一份 ⇒ 现在只留 `clockRef` 一个来源。
+   * `curMs()` 保留为薄封装（调用点不动）：它就是时钟的当前时间轴位置。
+   */
+  const clockRef = useRef<PlaybackClock | null>(null)
+  const clock = (): PlaybackClock =>
+    (clockRef.current ??= createPlaybackClock({ onTick: (ms) => setCurrentMs(ms) }))
   /** 当前（**原时间轴**）播放位置，毫秒 */
-  const curMs = () => timeBaseRef.current + (performance.now() - startTimeRef.current)
+  const curMs = () => clock().ms()
 
   /** 清掉三个驱动定时器（收尾 / 高亮 / RAF） */
   const clearTimers = () => {
@@ -240,10 +242,6 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
     if (highlightTimerRef.current !== null) {
       window.clearInterval(highlightTimerRef.current)
       highlightTimerRef.current = null
-    }
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current)
-      rafRef.current = null
     }
   }
 
@@ -258,16 +256,18 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   }
 
   /**
-   * 启动驱动：RAF 每帧刷新 `currentMs`（色块滑动）、50ms 比对高亮、到点（job.totalMs + 100）自动复位。
+   * 启动驱动：**引擎时钟每帧**回调刷新 `currentMs`（色块滑动）、50ms 比对高亮、
+   * 到点（job.totalMs + 100）自动复位。
    * 暂停后重排的序列是"相对现在"的，故收尾时间直接用 job.totalMs —— 与首次播放同一套语义。
    */
   const startTimers = (job: { totalMs: number }) => {
     clearTimers()
-    const rafLoop = () => {
-      setCurrentMs(curMs())
-      rafRef.current = requestAnimationFrame(rafLoop)
-    }
-    rafRef.current = requestAnimationFrame(rafLoop)
+    /**
+     * adj764：位置推进交给引擎时钟 —— `onTick` 里 `setCurrentMs(ms)`（色块平滑滑动），
+     * 原来的 `rafLoop` 递归已删除（那是"自己实现的时钟"）。首次播放 `base = 0`；
+     * 续播前会先 `seek(from)` ⇒ `start()` 从暂停点继续。
+     */
+    clock().start()
     const computeActive = () => {
       const cur = curMs()
       const ids: string[] = []
@@ -288,10 +288,10 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
     doneTimerRef.current = window.setTimeout(() => {
       doneTimerRef.current = null
       clearTimers()
+      clock().cancel()
       setPlaying(false)
       setPaused(false)
       pausedAtRef.current = 0
-      timeBaseRef.current = 0
       clearPlaybackUi()
     }, job.totalMs + 100)
   }
@@ -306,7 +306,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
     setPlaying(false)
     setPaused(false)
     pausedAtRef.current = 0
-    timeBaseRef.current = 0
+    clock().cancel()
     clearPlaybackUi()
   }
 
@@ -317,7 +317,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
    */
   const pause = () => {
     if (!playing || paused) return
-    pausedAtRef.current = Math.max(0, curMs())
+    pausedAtRef.current = Math.max(0, clock().pause())
     cancelRef.current?.()
     cancelRef.current = null
     clearTimers()
@@ -344,8 +344,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
     }
     const job = schedulePlay({ events }, backend, undefined, undefined, 0)
     cancelRef.current = job.cancel
-    timeBaseRef.current = from
-    startTimeRef.current = performance.now()
+    clock().seek(from)
     setPaused(false)
     startTimers(job)
   }
@@ -492,12 +491,12 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
           })),
         ),
       )
-      // adj258：保存序列 + 本地启动时间，启动高亮定时器按当前 atMs 设 activeNoteIds
-      // adj409：首次播放的时间轴基点 = 0（续播时由 resume() 设为暂停位置）
+      // adj258：保存序列 + 启动位置，启动高亮定时器按当前 atMs 设 activeNoteIds
+      // adj764：位置一律由引擎时钟管 —— 首次播放从 0 起（`cancel()` 会把时钟置回 0），
+      // 起播延迟由下面的音频调度与 `startTimers` 共同体现（旧写法是把 startTime 往后推 200ms）
       seqRef.current = seq
-      timeBaseRef.current = 0
+      clock().cancel()
       pausedAtRef.current = 0
-      startTimeRef.current = performance.now() + PLAY_FIRST_DELAY_MS
       // adj344：高保真音色由 setVoice(GM program) 决定，无需全局乐器覆盖参数（globalInstrument）
       // adj285：不再用 onNote 同步设置 activeNoteId（循环内逐事件 set → 批处理后为最后一事件）
       // adj309：按下播放后延迟 200ms 才出第一声——给听者准备时间 + 让 ctx resume 完成
