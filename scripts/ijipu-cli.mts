@@ -9,6 +9,7 @@
  *    再把同一份 `runCli` 接上（P3；届时复用本文件的 IO 实现 ✓，不另写一套 ✗）。
  */
 import { readFile, writeFile, readdir, access, mkdir } from 'node:fs/promises'
+import { watch } from 'node:fs'
 import { dirname } from 'node:path'
 const enc = new TextEncoder()
 /**
@@ -60,6 +61,14 @@ const io: CliIo = {
     } catch {
       return false
     }
+  },
+  /**
+   * adj814（A·P4 尾项）：`--watch` 的文件监视能力（宿主注入 ✓）——
+   * 用 `fs.watch` 监听目标文件；返回取消函数 ✓。目录不存在等异常如实抛出 ✓。
+   */
+  watchFile: (path, onChange) => {
+    const watcher = watch(path, () => onChange())
+    return () => watcher.close()
   },
   out: (text) => process.stdout.write(text),
   err: (text) => process.stderr.write(`${text}\n`),

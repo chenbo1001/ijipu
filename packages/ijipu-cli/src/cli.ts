@@ -44,6 +44,13 @@ export type CliIo = {
    * adj803（A·P3）**可选能力**：MIDI → WAV（需要 AudioContext + 音色库 ⇒ 同理由宿主注入）。
    */
   synthesize?: (midi: Uint8Array) => Promise<Uint8Array>
+  /**
+   * adj814（A·P4 尾项）**可选能力**：监视文件变化（`--watch` 用）。
+   * 与 `rasterize`/`synthesize` 同一口径：**宿主注入** ✓（node 入口用 `fs.watch` ✓；测试注入假实现 ✓）；
+   * 未注入时 `--watch` **明确报错**（退出码 1）而不是"静默不监视" ✗。
+   * @returns 取消监视的函数
+   */
+  watchFile?: (path: string, onChange: () => void) => () => void
   out(text: string): void
   err(text: string): void
 }
@@ -106,6 +113,8 @@ type Parsed = {
   check: boolean
   inPlace: boolean
   diff: boolean
+  /** adj814：`--watch`（监视文件变化后重跑检查 ✓） */
+  watch: boolean
   format: 'text' | 'json' | 'gh' | null
   sets: string[]
   configPath: string | null
@@ -127,6 +136,7 @@ function parseArgs(argv: string[]): Parsed {
     check: false,
     inPlace: false,
     diff: false,
+    watch: false,
     format: null,
     sets: [],
     configPath: null,
@@ -152,6 +162,7 @@ function parseArgs(argv: string[]): Parsed {
     else if (a === '--check') p.check = true
     else if (a === '--in-place') p.inPlace = true
     else if (a === '--diff') p.diff = true
+    else if (a === '--watch') p.watch = true
     else if (a === '-i' || a === '--input' || a === '--in') {
       /**
        * adj806：`--in` 是 `-i` 的别名 —— `docs/CLI.md` 里 `batch` 一直写的是 `--in <目录>`，
@@ -619,10 +630,53 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     return { code: EXIT.ok, json: info }
   }
 
-  // ── lint ────────────────────────────────────────────────
+  // ── lint（P1；adj814 起支持 --watch）──────────────────────
   if (p.command === 'lint') {
-    const parsed = parseJps(source)
-    const { errors, warnings } = splitParseIssues(parsed)
+    /** 单次检查 → 文本 + 结论（watch 复用同一份逻辑，避免两份口径 ✗） */
+    const runOnce = (): { errors: ParseIssue[]; warnings: ParseIssue[]; ok: boolean } => {
+      const parsed = parseJps(source)
+      const { errors, warnings } = splitParseIssues(parsed)
+      return { errors, warnings, ok: errors.length === 0 }
+    }
+    if (p.watch) {
+      /**
+       * adj814：`--watch` —— 文件变化就重跑一次检查（CI/写谱时的即时反馈 ✓）。
+       * 能力由宿主注入；没有该能力就明确报错 ✓。**永不静默不监视** ✗。
+       */
+      if (io.watchFile === undefined) {
+        io.err('--watch 需要宿主的文件监视能力（node 入口提供；独立环境不可用）')
+        return { code: EXIT.usage }
+      }
+      if (fromStdin) {
+        io.err('--watch 不能用于 stdin（要监视具体文件）')
+        return { code: EXIT.usage }
+      }
+      const target = String(p.inputs[0])
+      let first = true
+      const pass = (): void => {
+        const r = runOnce()
+        line(io, `${first ? '首次' : '变更后'}检查：错误 ${r.errors.length} 个、告警 ${r.warnings.length} 个${r.ok ? ' ✓' : ''}`)
+        for (const e of r.errors.slice(0, 5)) line(io, issueLine(e as { line?: number; message?: string; text?: string }, false).replace('%FILE%', target))
+        first = false
+      }
+      pass()
+      await new Promise<void>((resolve) => {
+        const stop = io.watchFile?.(target, () => {
+          // 重新读盘（外部可能已改过文件 ✓）
+          void io
+            .readFile(target)
+            .then((t) => {
+              source = t
+              pass()
+            })
+            .catch((e) => io.err(`读文件失败：${String(e)}`))
+        })
+        // 宿主没给 stop（异常情况）⇒ 立刻结束，不留悬挂 Promise ✓
+        if (stop === undefined) resolve()
+      })
+      return { code: EXIT.ok, json: { schema: 1, watched: target } }
+    }
+    const { errors, warnings } = runOnce()
     const gh = p.format === 'gh'
     const file = fromStdin ? '(stdin)' : String(p.inputs[0])
     const payload = {
