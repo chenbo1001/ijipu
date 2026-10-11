@@ -179,6 +179,36 @@ docs/CLI.md          ← 新增    命令参考 + CI 示例（GitHub Actions / p
 
 ---
 
+## 九、后续任务登记（2026-10，本方案实施到 P1–P4 主体后）
+
+> 这两件**不是本环境能完成/验证的**，因此**登记为独立任务**（不混进"已交付"里 ✗），
+> 各自写明**前置条件**与**验收方式** ✓。
+
+### T-1 A·P3 桌面端「隐藏窗口渲染」实现（**需桌面构建 + 图形环境**）
+- **现状**：CLI 侧**已就绪** ✓（`CliIo.rasterize` / `CliIo.synthesize` 可选能力 + 无能力时退出码 4 ✓，
+  断言覆盖 ✓）；**落地方案与 8 项验证清单**见 `docs/CLI.md` §七之二 ✓。
+- **待做**：`src-tauri` 入口识别"带子命令"⇒ 不进 GUI ✓；位图/音频类建**不可见窗口** ⇒ 复用
+  `src/export/export.ts`（`renderScoreToSvg` → `svgToCanvas` → `toDataURL` ✓；PDF 走既有分页 ✓；
+  WAV 走既有离线合成 ✓）⇒ 字节回传 ⇒ 落盘 ✓。
+- **前置**：桌面构建环境（`tauri build` ✓）与可用的图形会话 ✓。
+- **验收（硬指标）**：`ijipu render -t png` 与应用「导出 PNG」**逐像素一致** ✓；
+  双击 `.jps` **仍开 GUI** ✓；无窗口能力时**退出码 4 + 原因** ✓。
+
+### T-2 「播放无头化」重构（`playback.*` 的前置条件）
+- **现状**：协议白名单里**保留**方法名 ✓（冻结后只增不改 ✓），但 `capabilities.audio = false` ✓、
+  应用侧回 `-32000` + 原因 ✓ —— **不谎报** ✓。
+- **为什么不能"直接接线"**（已核实 ✓）：应用侧播放由 **`src/dialogs/PlaybackDialog.tsx`（React 对话框）** 持有，
+  并依赖 `src/playback/playbackSession.ts`（**已调度 job 的单例管理** ✓）、
+  `src/playback/spessaSynthBackend.ts`（音色库/后端就绪状态 ✓）、`docStore`（`playbackMs`/播放轨道 ✓）
+  ⇒ 经 RPC 驱动它 = **驱动一个 UI 对话框** ✗。
+- **待做**：抽出无头播放模块（`play(src, opts) → handle{ stop() }` ✓，不依赖 React ✓，复用同一套
+  `buildPlaySequence`/`schedulePlay`/音色库 ✓），然后 `PlaybackDialog` 与 RPC **都消费它** ✓（一处实现 ✓）。
+- **验收**：`playback.play`/`playback.stop` 经 RPC 可播可停 ✓；`PlaybackDialog` 行为不变 ✓；
+  断言：RPC 侧白名单/参数校验 ✓ + 应用侧 `capabilities.audio = true` 只在就绪时为真 ✓。
+
+> **顺序建议**：T-2 可先在**本环境**做"模块抽取 + 断言"（不需 GUI ✓），T-1 必须等桌面验证 ✓。
+
+
 ## 八、已裁决（用户 2026-10-11 决定）
 
 | # | 事项 | 决定 | 对方案的影响 |
