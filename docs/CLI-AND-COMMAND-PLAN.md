@@ -197,14 +197,24 @@ docs/CLI.md          ← 新增    命令参考 + CI 示例（GitHub Actions / p
 ### T-2 「播放无头化」重构（`playback.*` 的前置条件）
 - **现状**：协议白名单里**保留**方法名 ✓（冻结后只增不改 ✓），但 `capabilities.audio = false` ✓、
   应用侧回 `-32000` + 原因 ✓ —— **不谎报** ✓。
-- **为什么不能"直接接线"**（已核实 ✓）：应用侧播放由 **`src/dialogs/PlaybackDialog.tsx`（React 对话框）** 持有，
-  并依赖 `src/playback/playbackSession.ts`（**已调度 job 的单例管理** ✓）、
-  `src/playback/spessaSynthBackend.ts`（音色库/后端就绪状态 ✓）、`docStore`（`playbackMs`/播放轨道 ✓）
-  ⇒ 经 RPC 驱动它 = **驱动一个 UI 对话框** ✗。
-- **待做**：抽出无头播放模块（`play(src, opts) → handle{ stop() }` ✓，不依赖 React ✓，复用同一套
-  `buildPlaySequence`/`schedulePlay`/音色库 ✓），然后 `PlaybackDialog` 与 RPC **都消费它** ✓（一处实现 ✓）。
-- **验收**：`playback.play`/`playback.stop` 经 RPC 可播可停 ✓；`PlaybackDialog` 行为不变 ✓；
-  断言：RPC 侧白名单/参数校验 ✓ + 应用侧 `capabilities.audio = true` 只在就绪时为真 ✓。
+- **已核实的文件地图**（2026-10 实测 ✓，用来判断工作量）：
+  | 文件 | 体积 | 角色 |
+  |---|---|---|
+  | `src/dialogs/PlaybackDialog.tsx` | **41 KB** ✗ | 播放**逻辑与 UI 混在一起**：`buildPlaySequence`/`schedulePlay`/后端就绪判定/进度条/播放态都在这里 |
+  | `src/dialogs/playbackSession.ts` | 3.3 KB ✓ | **已调度 job 的单例管理**（文件头注明："已经调度的 job；还卡在 await 里的那一次随后照样执行 schedulePlay"） |
+  | `src/dialogs/playbackClock.ts` | 0.9 KB ✓ | 播放时钟（与插件共用 `createPlaybackClock` ✓） |
+  | `src/playback/playbackTimeline.ts` | 2.5 KB ✓ | 时间轴/进度推进 |
+  | `src/playback/samplerCache.ts` | 4.8 KB ✓ | 音色库离线缓存（实现引擎 `SamplerCache` ✓） |
+  ⇒ 结论：**耦合主要在 41 KB 的那个对话框里** ✗ ⇒ 这不是"接一根线"，而是**从 UI 组件里把播放剥出来** ✓。
+- **分三步做（每步独立提交、可回滚 ✓）**：
+  1. **抽模块**：新建 `src/playback/headless.ts` —— `play(src, opts) → { stop(), totalMs }` ✓，
+     内部**复用**现有 `buildPlaySequence`/`schedulePlay`/音色库 ✓，**先不改 `PlaybackDialog`** ✗；
+     断言：该文件**不 import react** ✓、不读 `document`/`window`（除必要的 AudioContext 守卫 ✓）；
+  2. **切消费方**：把 `PlaybackDialog` 改成调用 `headless.ts`（UI 行为**不得变化** ✓）；
+  3. **开 RPC**：`obsidianBridge` 接 `playback.play`/`playback.stop` ✓，并把 `capabilities.audio` 改为
+     **只在音色库就绪时为 true** ✓（否则保持 false ✓）。
+- **验收**：RPC 可播可停 ✓；`PlaybackDialog` 行为不变 ✓；`capabilities.audio` 如实 ✓；
+  断言：RPC 侧白名单/参数校验 ✓ + `headless.ts` 的"零 React"闸门 ✓。
 
 > **顺序建议**：T-2 可先在**本环境**做"模块抽取 + 断言"（不需 GUI ✓），T-1 必须等桌面验证 ✓。
 
