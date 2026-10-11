@@ -14,6 +14,8 @@
  * 运行：`npm run smoke`（已串在后面）；也可单独 `node dist-smoke/cli-assert.cjs`。
  */
 import { runCli, EXIT, type CliIo } from '../packages/ijipu-cli/src/cli'
+// adj873：`--crop` 断言要读渲染产物的 viewBox 来核对画布盒
+import { readViewBoxOf } from '@ijipu/engine/index.ts'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -130,6 +132,80 @@ console.log('\n— 命令行（A·P1–P4）—')
   const magic = bytes ? String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) : ''
   check('adj806 render -t midi ⇒ 0 且文件头是 MThd', m.code === EXIT.ok && magic === 'MThd', `magic=${magic}`)
   check('adj806 MIDI 不能用 stdout（二进制）', (await runCli(['render', '-i', '-', '-t', 'midi'], makeIo({ '(stdin)': GOOD }).io)).code === EXIT.usage)
+}
+
+// ③b adj873（T-3 补落点）：`render --crop page|score [--pad N] [--ink x,y,w,h]`
+{
+  /** `page`：**缺省**与显式 `--crop page` 都必须与"不加 --crop"**逐字节一致** ✓ */
+  const base = makeIo({ '(stdin)': GOOD })
+  await runCli(['render', '-i', '-', '-t', 'svg', '-o', 'out.svg'], base.io)
+  const raw = String(base.files['out.svg'] ?? '')
+  const explicit = makeIo({ '(stdin)': GOOD })
+  await runCli(['render', '-i', '-', '-t', 'svg', '-o', 'out.svg', '--crop', 'page'], explicit.io)
+  const pageSvg = String(explicit.files['out.svg'] ?? '')
+  check(
+    'adj873 `--crop page` 与不加 --crop **逐字节一致**（现状行为不变）',
+    raw.length > 0 && pageSvg === raw,
+    `len ${raw.length} vs ${pageSvg.length}`,
+  )
+  /** `score`：墨迹 + 每边 `--pad`（默认 2），且**不是**整页盒 */
+  const scoreIo = makeIo({ '(stdin)': GOOD })
+  const rs = await runCli(['render', '-i', '-', '-t', 'svg', '-o', 'out.svg', '--crop', 'score'], scoreIo.io)
+  const scoreSvg = String(scoreIo.files['out.svg'] ?? '')
+  const vbScore = readViewBoxOf(scoreSvg)
+  const vbPage = readViewBoxOf(pageSvg)
+  check(
+    'adj873 `--crop score` ⇒ 0；画布换成**墨迹盒 + 每边 2px**（≠ 整页盒）；内容一字不动',
+    rs.code === EXIT.ok && vbScore !== null && vbPage !== null &&
+      !(vbScore[2] === vbPage[2] && vbScore[3] === vbPage[3]) &&
+      vbScore[2] < vbPage[2] && vbScore[3] < vbPage[3] &&
+      scoreSvg.slice(scoreSvg.indexOf('>')) === pageSvg.slice(pageSvg.indexOf('>')),
+    `page=${JSON.stringify(vbPage)} score=${JSON.stringify(vbScore)} code=${rs.code} err=${scoreIo.errs.join('｜')}`,
+  )
+  /** `--pad 0` ⇒ 紧贴墨迹；`--pad 999` ⇒ 钳到 64（每边） */
+  const p0Io = makeIo({ '(stdin)': GOOD })
+  await runCli(['render', '-i', '-', '-t', 'svg', '-o', 'out.svg', '--crop', 'score', '--pad', '0'], p0Io.io)
+  const vb0 = readViewBoxOf(String(p0Io.files['out.svg'] ?? ''))
+  const p64Io = makeIo({ '(stdin)': GOOD })
+  await runCli(['render', '-i', '-', '-t', 'svg', '-o', 'out.svg', '--crop', 'score', '--pad', '999'], p64Io.io)
+  const vb64 = readViewBoxOf(String(p64Io.files['out.svg'] ?? ''))
+  check(
+    'adj873 `--pad`：0 ⇒ 紧贴墨迹（=不含留白的墨迹宽）；999 ⇒ 每边钳到 64（宽 +128）',
+    vbScore !== null && vb0 !== null && vb64 !== null &&
+      vb0[2] === vbScore[2] - 4 && vb0[3] === vbScore[3] - 4 &&
+      vb64[2] === vbScore[2] - 4 + 128 && vb64[3] === vbScore[3] - 4 + 128,
+    `pad2=${JSON.stringify(vbScore)} pad0=${JSON.stringify(vb0)} pad64=${JSON.stringify(vb64)}`,
+  )
+  /** `--ink x,y,w,h`：显式盒覆盖估算（有 DOM 的宿主把实测值喂进来） */
+  const inkIo = makeIo({ '(stdin)': GOOD })
+  const ri = await runCli(['render', '-i', '-', '-t', 'svg', '-o', 'out.svg', '--crop', 'score', '--ink', '100,50,300,200', '--pad', '0'], inkIo.io)
+  const vbInk = readViewBoxOf(String(inkIo.files['out.svg'] ?? ''))
+  check(
+    'adj873 `--ink x,y,w,h` 覆盖估算：盒 = 传入值（pad 0 ⇒ 300×200 @100,50）',
+    ri.code === EXIT.ok && vbInk !== null && vbInk[0] === 100 && vbInk[1] === 50 && vbInk[2] === 300 && vbInk[3] === 200,
+    JSON.stringify(vbInk),
+  )
+  /**
+   * 负对照：`--ink` 给一个**退化盒**（比一个音符还小）⇒ 引擎的退化闸必须拦下，
+   * **退出码非 0 且不写任何文件**（宁可报错，也不产出一条 27px 的横带 ✗）。
+   */
+  const badIo = makeIo({ '(stdin)': GOOD })
+  const rb = await runCli(['render', '-i', '-', '-t', 'svg', '-o', 'out.svg', '--crop', 'score', '--ink', '10,10,489,1'], badIo.io)
+  check(
+    'adj873 负对照：退化墨迹盒（489×1）⇒ 退出码 4 且**不写文件**（不静默退回整页）',
+    rb.code === EXIT.render && Object.keys(badIo.files).length === 0 && badIo.errs.some((e) => e.includes('--crop score')),
+    `code=${rb.code} files=${Object.keys(badIo.files).join(',')} err=${badIo.errs.join('｜')}`,
+  )
+  /** 非法取值 ⇒ 用法错误（不猜、不忽略 ✗） */
+  const badCrop = makeIo({ '(stdin)': GOOD })
+  const rbc = await runCli(['render', '-i', '-', '-t', 'svg', '-o', 'out.svg', '--crop', 'nope'], badCrop.io)
+  const badPad = makeIo({ '(stdin)': GOOD })
+  const rbp = await runCli(['render', '-i', '-', '-t', 'svg', '-o', 'out.svg', '--crop', 'score', '--pad', 'abc'], badPad.io)
+  check(
+    'adj873 `--crop nope` / `--pad abc` ⇒ 退出码 1（用法错误），不悄悄回默认',
+    rbc.code === EXIT.usage && rbp.code === EXIT.usage && Object.keys(badCrop.files).length === 0 && Object.keys(badPad.files).length === 0,
+    `crop=${rbc.code} pad=${rbp.code}`,
+  )
 }
 
 // ④ batch：目录列举 + 输出目录自动创建（由 IO 的 writeFile 负责 mkdir ✓）

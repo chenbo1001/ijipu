@@ -11,7 +11,7 @@
  * 本阶段（P1）实现：`format` / `lint` / `info` + 全局选项 + `--json`。
  * `render` / `play` / `batch` / `settings` / `config` / `doctor` 属 P2–P4，**未实现时明确报错**（不假装成功 ✗）。
  */
-import { formatJps, parseJps, splitParseIssues, layoutScore, renderScoreToSvg, buildPlaySequence, eventsToMidi, defaultPageConfig, mergeJpsConfig, extractJpsConfig, OPTIONAL_CONFIG_FIELDS, type PageConfig } from '@ijipu/engine'
+import { formatJps, parseJps, splitParseIssues, layoutScore, renderScoreToSvg, buildPlaySequence, eventsToMidi, defaultPageConfig, mergeJpsConfig, extractJpsConfig, OPTIONAL_CONFIG_FIELDS, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, inkBoxesOfLayout, type PageConfig, type ScoreLayout, type RangeBox, type ExportRange } from '@ijipu/engine'
 
 /** 退出码：**对外承诺**，只增不改（脚本/CI 依赖它） */
 export const EXIT = {
@@ -82,6 +82,7 @@ const HELP = `iJipu 命令行（爱记谱）
   lint     -i <文件|-> [--format text|json|gh]                          语法检查（有错 ⇒ 退出码 3）
   info     -i <文件|-> [-t text|json]                                   谱面概况（行数/分组/问题数）
   render   -i <文件|-> -t svg|midi|png|jpg|pdf -o <输出>                渲染/导出（位图需桌面端通道）
+           [--crop page|score] [--pad N] [--ink x,y,w,h]               画布范围（缺省 page = 整页）
   play     -i <文件|-> -t midi|wav -o <输出>                            导出音频（WAV 需桌面端通道）
   batch    --in <目录> -o <目录> [-t svg|midi|fmt]                      目录批量转换
 
@@ -119,6 +120,15 @@ type Parsed = {
   sets: string[]
   configPath: string | null
   unknown: string[]
+  /**
+   * adj873（T-3 补落点）：`render` 的画布范围。`null` = 用户没写 ⇒ **按现状（整页）** ✓
+   * （缺省绝不静默改成"谱面" ✗）。取值在 `render` 里校验：只认 `page` / `score`。
+   */
+  crop: string | null
+  /** adj873：`--crop score` 的每边留白（px；缺省 2，钳制 0–64，由引擎 `normalizeRangePad` 统一） */
+  pad: string | null
+  /** adj873：`--ink x,y,w,h` 显式墨迹盒（覆盖布局级估算；有 DOM 的宿主量到后可喂进来） */
+  ink: string | null
 }
 
 /** 手写参数解析（**不引依赖** —— AGENTS §一"新增依赖必须先询问"，这里完全用不着） */
@@ -141,8 +151,11 @@ function parseArgs(argv: string[]): Parsed {
     sets: [],
     configPath: null,
     unknown: [],
+    crop: null,
+    pad: null,
+    ink: null,
   }
-  const takesValue = new Set(['-i', '--input', '-o', '--output', '-t', '--type', '-s', '--set', '--config', '--format'])
+  const takesValue = new Set(['-i', '--input', '-o', '--output', '-t', '--type', '-s', '--set', '--config', '--format', '--crop', '--pad', '--ink'])
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i]
     const next = (): string => {
@@ -182,6 +195,15 @@ function parseArgs(argv: string[]): Parsed {
     } else if (a === '--config') {
       const v = next()
       if (v !== '') p.configPath = v
+    } else if (a === '--crop') {
+      const v = next()
+      if (v !== '') p.crop = v
+    } else if (a === '--pad') {
+      const v = next()
+      if (v !== '') p.pad = v
+    } else if (a === '--ink') {
+      const v = next()
+      if (v !== '') p.ink = v
     } else if (a === '--format') {
       const v = next()
       if (v === 'text' || v === 'json' || v === 'gh') p.format = v
@@ -228,6 +250,67 @@ function issueLine(issue: { line?: number; message?: string; text?: string }, gh
   const ln = issue.line ?? 0
   const msg = String(issue.message ?? issue.text ?? '').trim()
   return gh ? `::error file=%FILE%,line=${ln}::${msg}` : `第 ${ln} 行：${msg}`
+}
+
+/**
+ * adj873（T-3 补落点）：解析 `render --crop`。
+ * **缺省 = `page`（整页）** —— 与本次改动前的行为逐字节一致 ✓（不静默改成"谱面" ✗）。
+ * @returns `null` = 取值非法（调用方报用法错误）
+ */
+function normalizeCrop(v: string | null): ExportRange | null {
+  if (v === null) return 'page'
+  const s = v.toLowerCase()
+  return s === 'page' || s === 'score' ? s : null
+}
+
+/** adj873：解析 `--ink x,y,w,h`（显式实测墨迹盒）；格式不对 ⇒ `null` */
+function parseInkArg(v: string | null): RangeBox | null {
+  if (v === null) return null
+  const parts = v.trim().split(/[\s,]+/).map(Number)
+  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null
+  const [x, y, w, h] = parts
+  return w > 0 && h > 0 ? { x, y, w, h } : null
+}
+
+/**
+ * adj873：按 `--crop` 把渲染产物的画布口径裁到所选范围。
+ *
+ * · `page` ⇒ **原样返回**（一个字都不动 ⇒ 与改动前逐字节一致 ✓）；
+ * · `score` ⇒ 墨迹盒 + 每边 `pad` px。墨迹按优先级取：
+ *   ① `--ink x,y,w,h`（宿主实测值）；② 引擎 `inkBoxOfLayout()` 的**布局级估算**（Node 无 DOM）。
+ *   **两道可信度闸（退化 / 近整页）由引擎 `rangeBox()` 判**；不过 ⇒ 返回 `error`，
+ *   由调用方**明确报错退出**（退出码 4），**绝不静默退回整页** ✗。
+ *
+ * 几何只有一份：这里只传参 + 消费引擎结论（`rangeBox` 算盒、`applyRangeToSvg` 改外框）✓。
+ */
+function cropSvgs(
+  svgs: string[],
+  layout: ScoreLayout,
+  crop: ExportRange,
+  pad: number | undefined,
+  inkArg: RangeBox | null,
+): { svgs: string[]; error?: string } {
+  if (crop === 'page') return { svgs }
+  const inks = inkBoxesOfLayout(layout)
+  const out: string[] = []
+  for (let i = 0; i < svgs.length; i += 1) {
+    const page = layout.pages[i]
+    const vb = readViewBoxOf(svgs[i])
+    const pageW = vb?.[2] ?? page?.width ?? 0
+    const pageH = vb?.[3] ?? page?.height ?? 0
+    const r = rangeBox({ range: 'score', pageW, pageH, ink: inkArg ?? inks[i] ?? null, pad })
+    if (!r.ok) {
+      return {
+        svgs,
+        error:
+          `--crop score 量不到可信的墨迹盒（第 ${i + 1} 页）：${r.reason ?? '未知原因'}\n` +
+          `  · 有 DOM 的宿主可把实测盒喂进来：--ink x,y,w,h（如 --ink 50,80,495,600）；\n` +
+          `  · 或改用 --crop page（整页，与不加 --crop 一致）。`,
+      }
+    }
+    out.push(applyRangeToSvg(svgs[i], r.box))
+  }
+  return { svgs: out }
 }
 
 /**
@@ -454,6 +537,29 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     }
     const cfg: PageConfig = mergeJpsConfig(src, defaultPageConfig)
     const parsed = parseJps(src)
+    /**
+     * adj873（T-3 补落点）：`--crop page|score [--pad N] [--ink x,y,w,h]` 的参数校验。
+     * **缺省 `page`**（= 改动前的整页行为，逐字节一致）✓；非法值一律报用法错误（不猜、不静默 ✗）。
+     */
+    const crop = normalizeCrop(p.crop)
+    if (crop === null) {
+      io.err(`--crop 支持 page | score（收到 “${String(p.crop)}”）`)
+      return { code: EXIT.usage }
+    }
+    let pad: number | undefined
+    if (p.pad !== null) {
+      const n = Number(p.pad)
+      if (!Number.isFinite(n)) {
+        io.err(`--pad 需要数字（每边留白 px，0–64；收到 “${p.pad}”）`)
+        return { code: EXIT.usage }
+      }
+      pad = normalizeRangePad(n)
+    }
+    const inkArg = parseInkArg(p.ink)
+    if (p.ink !== null && inkArg === null) {
+      io.err(`--ink 需要 x,y,w,h 四个正数（如 --ink 50,80,495,600；收到 “${p.ink}”）`)
+      return { code: EXIT.usage }
+    }
     if (type === 'midi') {
       const layout = layoutScore(parsed, cfg)
       const seq = buildPlaySequence(parsed, layout, typeof cfg === 'object' ? 60 : 60)
@@ -485,7 +591,13 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
         return { code: EXIT.render }
       }
       const layoutP = layoutScore(parsed, cfg)
-      const svgsP = renderScoreToSvg(layoutP)
+      // adj873：位图/PDF 与矢量走**同一套**范围口径（同一份墨迹盒、同一个 `applyRangeToSvg`）
+      const croppedP = cropSvgs(renderScoreToSvg(layoutP), layoutP, crop, pad, inkArg)
+      if (croppedP.error !== undefined) {
+        io.err(croppedP.error)
+        return { code: EXIT.render }
+      }
+      const svgsP = croppedP.svgs
       const title = (parsed.header as unknown as Record<string, unknown>)['title']
       const files = await io.rasterize({
         svgs: svgsP,
@@ -508,10 +620,16 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       return { code: EXIT.ok, json: { schema: 1, type, pages: files.length, outputs: made } }
     }
     const layout = layoutScore(parsed, cfg)
-    const svgs = renderScoreToSvg(layout)
+    // adj873：`--crop score` 在这里落地（`page` 原样返回 ⇒ 与改动前逐字节一致）
+    const cropped = cropSvgs(renderScoreToSvg(layout), layout, crop, pad, inkArg)
+    if (cropped.error !== undefined) {
+      io.err(cropped.error)
+      return { code: EXIT.render }
+    }
+    const svgs = cropped.svgs
     if (p.output === null || p.output === '-') {
       line(io, svgs.join('\n<!-- 分页 -->\n'))
-      return { code: EXIT.ok, json: { schema: 1, type: 'svg', pages: svgs.length } }
+      return { code: EXIT.ok, json: { schema: 1, type: 'svg', pages: svgs.length, crop } }
     }
     const base = p.output.replace(/\.svg$/i, '')
     const made: string[] = []
@@ -521,7 +639,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       made.push(path)
     }
     if (!p.quiet) line(io, `已写入 ${made.join('、')}`)
-    return { code: EXIT.ok, json: { schema: 1, type: 'svg', pages: svgs.length, outputs: made } }
+    return { code: EXIT.ok, json: { schema: 1, type: 'svg', pages: svgs.length, outputs: made, crop } }
   }
 
   // ── batch（P2）：目录批量转换 ────────────────────────────

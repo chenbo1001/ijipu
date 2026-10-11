@@ -578,6 +578,16 @@ export const exportCopy = {
   jpsLabel: 'iJipu 源文件',
   scaleLabel: '图片清晰度',
   scaleHint: '适用于 PNG / JPG / PDF 图片',
+  /**
+   * adj873（T-3）：**导出范围**——「页面」= 整页 + 四周留白（默认，保持既有行为）；
+   * 「谱面」= 墨迹包围盒 + 每边 2px（与插件同一个口径，几何只走引擎 `render/range.ts`）。
+   */
+  rangeLabel: '导出范围',
+  rangePageOption: '页面（整页 + 留白）',
+  rangeScoreOption: '谱面（墨迹 + 每边 2px）',
+  rangeHint: '适用于 SVG / PNG / JPG / PDF 图片；「谱面」用预览区实测墨迹，需先在预览里显示过一次',
+  /** 「谱面」量不到墨迹时的**明确报错**前缀（后面接引擎给的原因；绝不静默给整页图 ✗） */
+  rangeNoInk: '导出谱面失败：量不到墨迹盒。请先让这份谱在预览区显示一次，或把「导出范围」改回「页面」。原因：',
   busy: '导出中…',
   /** 有语法错误时图片/PDF 导出的拦截提示 */
   blockedByError: '存在语法错误，无法导出。请先修正脚本。',

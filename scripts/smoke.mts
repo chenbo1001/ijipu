@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO, insertPngPhys, readPngPhys, crc32, isPng, dpiForScale, pixelsPerMeterFor } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO, inkBoxOfLayout, inkBoxesOfLayout, INK_ESTIMATE_SLACK, insertPngPhys, readPngPhys, crc32, isPng, dpiForScale, pixelsPerMeterFor } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -19475,6 +19475,140 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   const headOnly863 = onlyViewBox863.slice(0, onlyViewBox863.indexOf('>'))
   check('adj863 负对照：只改 viewBox（不改 width/height）时 width 仍是整页宽 —— 所以外框必须一处改全',
     !/ width="304"/.test(headOnly863) && new RegExp(` width="${before863?.[2]}"`).test(headOnly863))
+}
+
+/**
+ * ---- adj873（T-3 补落点）：应用导出对话框的「导出范围」 + CLI `render --crop` ----
+ *
+ * 这一节钉三件事：
+ * ① **引擎只多一个"量"的入口**：`inkBoxOfLayout()`（布局级估算 —— Node CLI 没有 DOM，
+ *    `getBBox()` 无从谈起）⇒ 盒必须**包住每个音符的墨迹**（AGENTS §五.9 口径）、**落在页面内**，
+ *    且能通过 `rangeBox` 的两道可信度闸（否则调用方就该明确报错）；
+ * ② **应用导出路径**确实调引擎的 `rangeBox` / `applyRangeToSvg`（不在对话框里另算一套），
+ *    默认值是「页面」，有「谱面」选项，量不到墨迹走**明确报错**分支；
+ * ③ **CLI `render --crop`**：`page` 缺省（= 原样返回 ⇒ 逐字节一致）、`score` 走引擎盒。
+ *
+ * ②③ 是**跨文件契约**（一个在 TSX 组件里、一个在 CLI 包里），smoke 里没有可 import 的运行期对象
+ * ⇒ 按**源码文本**判（与 `adj767`/`adj770` 同一手法）。每条都配**负对照**：把同一套判据喂给
+ * 一段"故意挖掉那一句"的源码，必须判**不通过** —— 否则闸门可能只是"永远为真"。
+ */
+{
+  /** ① 引擎：由布局推墨迹盒 */
+  const parsed873 = parseJps(
+    'B: 测试\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 5 6 6 |\nC: 一 二 三 四\nS: 说明文字\n',
+  )
+  const lay873 = layoutScore(parsed873, defaultPageConfig)
+  const pg873 = lay873.pages[0]
+  const ink873 = inkBoxOfLayout(lay873)
+  check(
+    'adj873 inkBoxOfLayout：给出盒、**落在页面内**、且明显小于整页（说明真的在"推墨迹"而不是回整页）',
+    ink873 !== null && ink873.w > 0 && ink873.h > 0 &&
+      ink873.x >= 0 && ink873.y >= 0 &&
+      ink873.x + ink873.w <= pg873.width + 0.01 && ink873.y + ink873.h <= pg873.height + 0.01 &&
+      ink873.w < pg873.width && ink873.h < pg873.height,
+    JSON.stringify({ ink: ink873, page: [pg873.width, pg873.height] }),
+  )
+  /**
+   * 盒必须包住**每个音符的数字墨迹**：左缘 = `inkLeftX ?? x`、右缘 = `x + min(占宽, digitSlotW)`
+   * （有附点/增时线才到块右端）、纵向 = 数字顶（`y − 0.8×字号`）..基线。
+   */
+  const ns873 = defaultPageConfig.note_size
+  const inkSpan873 = (n: (typeof pg873.notes)[number]): { l: number; r: number; t: number; b: number } => {
+    const hasTail = n.token.dots > 0 || n.token.augmentCount > 0
+    return {
+      l: n.inkLeftX ?? n.x,
+      r: hasTail ? n.x + n.width : n.x + Math.min(n.width, digitSlotW(ns873)),
+      t: n.y - ns873 * 0.8,
+      b: n.y,
+    }
+  }
+  const covers873 = (box: { x: number; y: number; w: number; h: number }): boolean =>
+    pg873.notes.every((n) => {
+      const k = inkSpan873(n)
+      return box.x <= k.l + 0.01 && box.x + box.w >= k.r - 0.01 && box.y <= k.t + 0.01 && box.y + box.h >= k.b - 0.01
+    })
+  check(
+    'adj873 估算盒包住**每个音符的墨迹**（左缘 `inkLeftX ?? x`、右缘 `x + min(占宽, 数字槽宽)`、纵向数字顶..基线）',
+    ink873 !== null && covers873(ink873),
+    JSON.stringify(ink873),
+  )
+  check(
+    'adj873 负对照：把估算盒缩到 1px 宽就漏掉音符墨迹 ⇒ 上面那条判据是**承重**的（不是恒真）',
+    ink873 !== null && !covers873({ ...ink873, w: 1 }),
+  )
+  /** 估算盒要能过引擎的两道闸（否则 CLI 的 `--crop score` 只能报错） */
+  const okBox873 = ink873 === null ? { ok: false } : rangeBox({ range: 'score', pageW: pg873.width, pageH: pg873.height, ink: ink873 })
+  const pageAsInk873 = rangeBox({ range: 'score', pageW: pg873.width, pageH: pg873.height, ink: { x: 0, y: 0, w: pg873.width, h: pg873.height } })
+  check(
+    'adj873 估算盒过得了两道可信度闸（退化 / 近整页）；负对照：拿整页当"墨迹"必被近整页闸拦下',
+    okBox873.ok && !pageAsInk873.ok,
+    `ok=${okBox873.ok} pageAsInk=${pageAsInk873.reason ?? ''}`,
+  )
+  /** 空谱 / 量不到 ⇒ `null`（调用方必须**明确报错**，不许当整页用 ✗） */
+  const empty873 = inkBoxOfLayout(layoutScore(parseJps(''), defaultPageConfig))
+  const unseen873 = rangeBox({ range: 'score', pageW: 595, pageH: 842, ink: empty873 })
+  check(
+    'adj873 空谱 ⇒ inkBoxOfLayout 返回 null；配 rangeBox 时**判失败**（调用方据此明确报错，而不是静默出整页图）',
+    empty873 === null && !unseen873.ok,
+    JSON.stringify({ empty: empty873, reason: unseen873.reason }),
+  )
+  check(
+    'adj873 `inkBoxesOfLayout` 逐页给出（页数一致；每一页要么有盒、要么明确 null）',
+    inkBoxesOfLayout(lay873).length === lay873.pages.length &&
+      inkBoxesOfLayout(lay873).every((b) => b === null || (b.w > 0 && b.h > 0)),
+  )
+
+  /** ② 应用导出对话框（源码级闸门 + 负对照） */
+  const strip873 = (p: string): string => readFileSync(p, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const panel873 = strip873('src/ui/dock/ExportPanel.tsx')
+  const glue873 = strip873('src/export/exportRange.ts')
+  const copy873 = strip873('src/brand/copy.ts')
+  const appGate873 = (panel: string, glue: string, copy: string): boolean =>
+    // 几何只走引擎那一份：调 rangeBox 算盒 + applyRangeToSvg 改外框（缺一不可）
+    /rangeBox\(\{ range: 'score'/.test(panel) && /applyRangeToSvg\(/.test(panel) &&
+    // 页面尺寸从渲染产物自己的 viewBox 读（不另算）
+    /readViewBoxOf\(/.test(panel) &&
+    // 默认值是「页面」（不许静默改成谱面）
+    /useState<ExportRange>\('page'\)/.test(panel) &&
+    // 有「谱面」选项
+    /<option value="score">/.test(panel) && /rangeScoreOption/.test(panel) &&
+    // 量不到墨迹 ⇒ 明确报错（throw），不静默退回整页
+    /if \(!r\.ok\) throw new Error/.test(panel) && /exportCopy\.rangeNoInk/.test(panel) &&
+    // 墨迹来自"预览区实测"（排除整页白底、逐元素 getBBox 求并集）
+    /measureInkFromPreview/.test(panel) && /data-page-bg/.test(glue) && /getBBox\(\)/.test(glue) &&
+    // 报错文案要告诉用户"先显示一次"
+    /rangeNoInk: '[^']*显示一次/.test(copy)
+  check(
+    'adj873 应用导出路径确实调引擎 `rangeBox`/`applyRangeToSvg`；默认「页面」；有「谱面」选项；量不到 ⇒ 明确报错',
+    appGate873(panel873, glue873, copy873),
+  )
+  check(
+    'adj873 负对照：挖掉"调 rangeBox 算盒" / "throw 报错" / "默认 page" 任一处，同一套判据都判**不通过**',
+    !appGate873(panel873.replace(/rangeBox\(\{ range: 'score'/, 'rangeBoxXXX('), glue873, copy873) &&
+      !appGate873(panel873.replace(/if \(!r\.ok\) throw new Error/, 'if (!r.ok) {} else throw'), glue873, copy873) &&
+      !appGate873(panel873.replace("useState<ExportRange>('page')", "useState<ExportRange>('score')"), glue873, copy873) &&
+      !appGate873(panel873, glue873.replace(/data-page-bg/, 'pageBg'), copy873),
+  )
+
+  /** ③ CLI `--crop`（源码级闸门 + 负对照） */
+  const cli873 = strip873('packages/ijipu-cli/src/cli.ts')
+  const cliGate873 = (src: string): boolean =>
+    /'--crop'/.test(src) && /'--pad'/.test(src) && /'--ink'/.test(src) &&
+    /rangeBox\(\{ range: 'score'/.test(src) && /applyRangeToSvg\(/.test(src) &&
+    // 缺省 = page（缺省分支**原样返回**，一个字都不动 ⇒ 逐字节一致）
+    /return s === 'page' \|\| s === 'score' \? s : null/.test(src) &&
+    /if \(crop === 'page'\) return \{ svgs \}/.test(src) &&
+    // 量不到 ⇒ 报错退出（不静默退回整页）
+    /cropSvgs[\s\S]{0,2000}?error:/.test(src) && /if \(cropped\.error !== undefined\)/.test(src)
+  check(
+    'adj873 CLI `render --crop page|score`：缺省 page（原样返回 ⇒ 逐字节一致）、score 走引擎盒、量不到 ⇒ 明确报错退出',
+    cliGate873(cli873),
+  )
+  check(
+    'adj873 CLI 负对照：把"page 原样返回"那行改掉（或去掉 rangeBox 调用），同一套判据判**不通过**',
+    !cliGate873(cli873.replace("if (crop === 'page') return { svgs }", "if (crop === 'page') return { svgs: svgs.map((s) => s) }")) &&
+      !cliGate873(cli873.replace(/rangeBox\(\{ range: 'score'/, 'rangeBoxXXX({ range: 1')),
+  )
 }
 
 /**

@@ -18,9 +18,12 @@ import { useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../../store/docStore'
 import { useUiStore } from '../../store/uiStore'
 import { exportCopy } from '../../brand/copy'
-import { layoutScore, renderScoreToSvg, buildPlaySequence, inferBpm, eventsToMidi } from '@ijipu/engine'
+import { layoutScore, renderScoreToSvg, buildPlaySequence, inferBpm, eventsToMidi, rangeBox, applyRangeToSvg, readViewBoxOf } from '@ijipu/engine'
+import type { ExportRange } from '@ijipu/engine'
 import { renderToAudioBuffer, audioBufferToWav, audioBufferToMp3 } from '../../export/audio'
 import { exportSvg, exportPng, exportJpg, exportPdf } from '../../export/export'
+// adj873（T-3）：导出范围要"预览区实测墨迹盒" ⇒ 从这里量（只量，几何仍在引擎）
+import { measureInkFromPreview } from '../../export/exportRange'
 import { createHqCache, resolveHqBank } from '../../playback/spessaCache'
 import { getHqLibrary, firstEnabledInstrumentRef } from '../../playback/spessaSynthBackend'
 // adj729：嵌入版里音源优先取**插件目录**那份（宿主给的 URL；随文库一起走）
@@ -70,6 +73,11 @@ export function ExportPanel() {
   const [error, setError] = useState<string | null>(null)
   // adj294：图片清晰度（PNG/JPG 共用倍率，2x 标准 / 4x 高清 / 6x 超清）；adj412：PDF 同档
   const [imgScale, setImgScale] = useState<number>(2)
+  /**
+   * adj873（T-3）：「导出范围」。**默认 `page`**（整页 + 留白）—— 与改动前逐字一致 ✓，
+   * 不静默改成"谱面" ✗。选「谱面」时几何**只走引擎**（`rangeBox` + `applyRangeToSvg`）。
+   */
+  const [exportRange, setExportRange] = useState<ExportRange>('page')
   const hqCacheRef = useRef(createHqCache())
 
   // adj352：导出基名剥掉残留的 .jps/.md/.txt（手机端常把 .jps 识别为 .md/.txt → xxx.md.jpg）
@@ -84,12 +92,32 @@ export function ExportPanel() {
     return bank
   }
 
+  /**
+   * adj873（T-3）：按「导出范围」把渲染好的页面裁到所选画布口径。
+   *
+   * · `page`（默认）⇒ **原样返回**（保持既有行为，一个字都不动 ✓）；
+   * · `score` ⇒ 用**预览区已渲染的 SVG 实测墨迹盒**（`measureInkFromPreview`，排除白底、逐元素 `getBBox` 求并集），
+   *   再调引擎 `rangeBox({ range:'score' })` 算盒 + `applyRangeToSvg()` 改外框 ——
+   *   **几何只走引擎那一份**，这里绝不自算留白/包围盒 ✗（AGENTS §六之二·4）。
+   *   量不到墨迹（预览没渲染过）⇒ **明确报错**并提示"先显示一次谱面"，**不许静默给整页图** ✗。
+   */
+  const applyRange = (pages: string[]): string[] => {
+    if (exportRange === 'page') return pages
+    const inks = measureInkFromPreview()
+    return pages.map((svg, i) => {
+      const vb = readViewBoxOf(svg)
+      const r = rangeBox({ range: 'score', pageW: vb?.[2] ?? 0, pageH: vb?.[3] ?? 0, ink: inks[i] ?? null })
+      if (!r.ok) throw new Error(`${exportCopy.rangeNoInk}${r.reason ?? '未知原因'}`)
+      return applyRangeToSvg(svg, r.box)
+    })
+  }
+
   const getPages = (): string[] => {
     if (hasError) throw new Error(exportCopy.blockedByError)
     // adj647：导出与预览共用同一份宿主字体实测（否则导出的 PDF/SVG 与预览版面不一致）
     const fm = measureFontMeta(pageConfig)
     const layout = layoutScore(parseResult, pageConfig, defaultInstrumentRef, fm.layout)
-    return renderScoreToSvg(layout, fm.render)
+    return applyRange(renderScoreToSvg(layout, fm.render))
   }
 
   const downloadJps = () => {
@@ -200,7 +228,20 @@ export function ExportPanel() {
             <option value={6}>6x 超清</option>
           </select>
         </label>
+        {/* adj873（T-3）：导出范围——默认「页面」，保持既有行为；「谱面」= 墨迹 + 每边 2px */}
+        <label className="dock-field">
+          <span className="dock-field-label">{exportCopy.rangeLabel}</span>
+          <select
+            className="dock-select"
+            value={exportRange}
+            onChange={(e) => setExportRange(e.target.value === 'score' ? 'score' : 'page')}
+          >
+            <option value="page">{exportCopy.rangePageOption}</option>
+            <option value="score">{exportCopy.rangeScoreOption}</option>
+          </select>
+        </label>
         <span className="dock-muted">{exportCopy.scaleHint}</span>
+        <span className="dock-muted">{exportCopy.rangeHint}</span>
       </div>
       <div className="dock-actions export-actions">
         {items.map((it) => (
