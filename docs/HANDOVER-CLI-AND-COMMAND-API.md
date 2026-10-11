@@ -246,9 +246,23 @@ try { window.parent?.postMessage({ __ijipuAppHello: 1, href: location.href }, '*
 
 ## 三、发布建议（等用户一句「更新提交」）
 
+**本轮（2026-10-11，adj862–adj866）已就绪的版本**：
 
-- **插件**：`0.34.2 → 0.35.0`（新增公开 API/RPC/命令 ⇒ **MINOR** ✓）；
-- **应用**：`0.51.2 → 0.52.0`（新增 CLI 与 IPC ⇒ **MINOR** ✓）；
+- **应用**：`0.52.1 → 0.53.0`（引擎「范围」+ PNG pHYs + 嵌入版 `params.crop` ⇒ **MINOR**）；
+- **插件**：`0.35.2 → 0.36.0`（工具条 5 位 + 唯一菜单 + 导出范围 + 复制为图片 + 代码块 `z` ⇒ **MINOR**）；
+- 版本号已多处同步、CHANGELOG / RELEASE-NOTES 已按当版写好、**嵌入产物已按顺序铁律重生成**（内嵌 = v0.53.0，
+  插件冒烟 `adj733` 核对一致）—— **本地提交完毕，未打 tag、未 push**（等「更新提交」）。
+
+**发布前检查项（务必都跑；`E-2026-388` 的由来）**：
+
+| 门禁 | 命令 | 期望 |
+|---|---|---|
+| 应用 | `npm run smoke` | `ALL SMOKE TESTS PASSED` + CLI 22 项 |
+| 应用 | `node node_modules/typescript/bin/tsc -b` / `npm run build` | 0 错 / 构建通过 |
+| 应用 | **真机验证**：`node node_modules/vite/bin/vite.js build --config vite.verify.config.ts && node scripts/verify-score-crop.mjs` | **48 passed, 0 failed**（覆盖工具条 5 位、菜单与路由、右键同菜单、`z` 三种情形、裁剪几何） |
+| 插件 | `npm run smoke` | 全绿（含 `adj733` 内嵌版本核对） |
+| 插件 | `npm run build` | 生产包通过 |
+
 - 走既定链路：版本号多处同步 → RELEASE-NOTES（只留当版 + 归档上一版）→ 两库门禁 → tag → 推送 →
   CI 产物与本地重建**逐字节比对** → 装进用户库 → `gh attestation verify` ✓。
 
