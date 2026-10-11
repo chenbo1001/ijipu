@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO, insertPngPhys, readPngPhys, crc32, isPng, dpiForScale, pixelsPerMeterFor } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -19475,4 +19475,65 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   const headOnly863 = onlyViewBox863.slice(0, onlyViewBox863.indexOf('>'))
   check('adj863 负对照：只改 viewBox（不改 width/height）时 width 仍是整页宽 —— 所以外框必须一处改全',
     !/ width="304"/.test(headOnly863) && new RegExp(` width="${before863?.[2]}"`).test(headOnly863))
+}
+
+/**
+ * ---- adj864：「复制/导出为图片」的 **pHYs（DPI）** 字节级工具（`engine/png.ts`）----
+ *
+ * 为什么必须写 pHYs：剪贴板/导出的 PNG 若没有物理密度声明，Word / 微信 / 飞书 会按 96 DPI 兜底，
+ * 把 2× 渲染的 A4 谱（1190×1684）当成 12.4 英寸宽的巨图插进文档 ✗。
+ * 口径：页面基准 **72 DPI**（PDF/SVG 的 1 单位 = 1/72 英寸）⇒ **DPI = 72 × scale**。
+ *
+ * 用一张**真实的 1×1 PNG 字节**（67 字节，标准最小图）做输入，钉四件事：
+ * ① CRC32（已知向量 `123456789 → 0xCBF43926`）；② 插入位置（IHDR 之后、IDAT 之前）；
+ * ③ **替换而不是叠加**（连插两次只有一个 pHYs）；④ 非 PNG 原样返回（不猜、不破坏）。
+ */
+{
+  /** 标准最小 PNG：1×1、8bit、RGBA、无 pHYs（67 字节） */
+  const png1x1Hex =
+    '89504e470d0a1a0a' +
+    '0000000d49484452000000010000000108060000001f15c489' +
+    '0000000a49444154789c63000100000500010d0a2db4' +
+    '0000000049454e44ae426082'
+  const png1x1 = Uint8Array.from((png1x1Hex.match(/../g) ?? []).map((h) => Number.parseInt(h, 16)))
+  check('adj864 测试用的 1×1 PNG 是合法 PNG（签名 + IHDR + IEND）',
+    png1x1.length === 67 && isPng(png1x1) && !isPng(Uint8Array.from([1, 2, 3])) && readPngPhys(png1x1) === null,
+    `len=${png1x1.length}`)
+
+  check('adj864 CRC32 = PNG 用的 IEEE 变体（已知向量 123456789 → 0xCBF43926）',
+    crc32(new TextEncoder().encode('123456789')) === 0xcbf43926 &&
+      crc32(new Uint8Array(0)) === 0 &&
+      crc32(Uint8Array.from([0, 0, 0, 0])) === 0x2144df1c,
+    `crc32('123456789')=0x${crc32(new TextEncoder().encode('123456789')).toString(16)}`)
+
+  check('adj864 DPI 口径：页面基准 72 ⇒ `dpiForScale(2) = 144`、`4 ⇒ 288`；`pixelsPerMeter(144) = 5669`',
+    dpiForScale(1) === 72 && dpiForScale(2) === 144 && dpiForScale(4) === 288 &&
+      dpiForScale(0) === 72 && dpiForScale(Number.NaN) === 72 &&
+      pixelsPerMeterFor(144) === 5669 && pixelsPerMeterFor(72) === 2835,
+    `144→${pixelsPerMeterFor(144)}ppm`)
+
+  const withPhys = insertPngPhys(png1x1, 144)
+  const ihdrEnd = 8 + 8 + 13 + 4
+  check('adj864 插入 pHYs：位于 IHDR 之后、IDAT 之前，读写一致（144 DPI）',
+    withPhys.length === png1x1.length + 21 &&
+      String.fromCharCode(...withPhys.subarray(ihdrEnd + 4, ihdrEnd + 8)) === 'pHYs' &&
+      readPngPhys(withPhys) === 144 &&
+      // 其余字节**逐字未动**：签名 + IHDR 原样，尾巴（IDAT+IEND）原样
+      withPhys.subarray(0, ihdrEnd).every((b, i) => b === png1x1[i]) &&
+      withPhys.subarray(ihdrEnd + 21).every((b, i) => b === png1x1[ihdrEnd + i]),
+    `len=${withPhys.length} dpi=${readPngPhys(withPhys)}`)
+
+  const twice = insertPngPhys(withPhys, 144)
+  const replaced = insertPngPhys(insertPngPhys(png1x1, 72), 288)
+  check('adj864 幂等 + **替换而不是叠加**：连插两次仍然只有一个 pHYs，且以最后一次为准',
+    twice.length === withPhys.length && twice.every((b, i) => b === withPhys[i]) &&
+      replaced.length === png1x1.length + 21 && readPngPhys(replaced) === 288,
+    `twice=${twice.length} replaced=${replaced.length}/${readPngPhys(replaced)}`)
+
+  check('adj864 非 PNG（或截断的 PNG）**原样返回**：不猜、不破坏（调用方照旧有图）',
+    insertPngPhys(Uint8Array.from([1, 2, 3]), 144).every((b, i) => b === [1, 2, 3][i]) &&
+      insertPngPhys(png1x1.subarray(0, 20), 144).length === 20)
+
+  check('adj864 负对照：不插 pHYs 时读出来就是 null（说明这张图在文档里会被按 96 DPI 兜底 ⇒ 巨图）',
+    readPngPhys(png1x1) === null && readPngPhys(withPhys) === 144)
 }
