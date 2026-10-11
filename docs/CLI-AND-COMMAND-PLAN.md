@@ -207,11 +207,21 @@ docs/CLI.md          ← 新增    命令参考 + CI 示例（GitHub Actions / p
   | `src/playback/samplerCache.ts` | 4.8 KB ✓ | 音色库离线缓存（实现引擎 `SamplerCache` ✓） |
   ⇒ 结论：**耦合主要在 41 KB 的那个对话框里** ✗ ⇒ 这不是"接一根线"，而是**从 UI 组件里把播放剥出来** ✓。
 - **分三步做（每步独立提交、可回滚 ✓）**：
-  1. **抽模块**：新建 `src/playback/headless.ts` —— `play(src, opts) → { stop(), totalMs }` ✓，
-     内部**复用**现有 `buildPlaySequence`/`schedulePlay`/音色库 ✓，**先不改 `PlaybackDialog`** ✗；
-     断言：该文件**不 import react** ✓、不读 `document`/`window`（除必要的 AudioContext 守卫 ✓）；
-  2. **切消费方**：把 `PlaybackDialog` 改成调用 `headless.ts`（UI 行为**不得变化** ✓）；
-  3. **开 RPC**：`obsidianBridge` 接 `playback.play`/`playback.stop` ✓，并把 `capabilities.audio` 改为
+  **第①步的"抽取面"已定点核实**（2026-10，`src/dialogs/PlaybackDialog.tsx` 实测行号 ✓）——
+  要搬进 `src/playback/headless.ts` 的是**这一组**，其余（进度条/播放头/UI 状态）留在组件里 ✓：
+  | 位置 | 符号 | 说明 |
+  |---|---|---|
+  | L112 | `backendRef = useRef<SpessaSynthBackend \| null>(null)` | 合成器后端生命周期（创建/`dispose`：L389–394、L210） |
+  | L121 | `seqRef = useRef<ReturnType<typeof buildPlaySequence> \| null>(null)` | 当前播放序列（L497 赋值、L274 读事件） |
+  | L263 | `startTimers(job: { totalMs: number })` | 播放计时（按 `seqRef.current.events` 推进 ✓） |
+  | L299 | `stop()` | 停止（内部 `backendRef.current?.stop()` ✓） |
+  | L330–345 | 播放路径 | `buildPlaySequence` → `schedulePlay({ events }, backend, …, 0)`（L510 是"从这里开始播放"的分支） |
+  ⇒ 目标签名：`playHeadless(src, { bpm, startNoteId, instrumentRef, onTick }) → { stop(), totalMs }` ✓
+  （`onTick` 供组件更新进度条 ✓ —— **UI 仍归组件** ✓，这是"零 React"闸门能过的关键 ✓）。
+  1. **抽模块**：新建 `src/playback/headless.ts`（上面那组 ✓），**先不改 `PlaybackDialog`** ✗；
+     断言：该文件**不 import react** ✓、不读 `document`（`AudioContext` 需 `typeof` 守卫 ✓）；
+  2. **切消费方**：`PlaybackDialog` 改为调用 `headless.ts`（**UI 行为不得变化** ✓）；
+  3. **开 RPC**：`obsidianBridge` 接 `playback.play`/`playback.stop` ✓，`capabilities.audio` 改为
      **只在音色库就绪时为 true** ✓（否则保持 false ✓）。
 - **验收**：RPC 可播可停 ✓；`PlaybackDialog` 行为不变 ✓；`capabilities.audio` 如实 ✓；
   断言：RPC 侧白名单/参数校验 ✓ + `headless.ts` 的"零 React"闸门 ✓。
