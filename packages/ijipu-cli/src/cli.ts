@@ -152,7 +152,11 @@ function parseArgs(argv: string[]): Parsed {
     else if (a === '--check') p.check = true
     else if (a === '--in-place') p.inPlace = true
     else if (a === '--diff') p.diff = true
-    else if (a === '-i' || a === '--input') {
+    else if (a === '-i' || a === '--input' || a === '--in') {
+      /**
+       * adj806：`--in` 是 `-i` 的别名 —— `docs/CLI.md` 里 `batch` 一直写的是 `--in <目录>`，
+       * 但第一版解析器没认它 ✗（断言当场抓出来 ✓）。别名与文档保持一致。
+       */
       const v = next()
       if (v !== '') p.inputs.push(v)
     } else if (a === '-o' || a === '--output') {

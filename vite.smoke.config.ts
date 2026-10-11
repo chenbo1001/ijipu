@@ -31,6 +31,8 @@ export default defineConfig({
         preview: 'scripts/render-preview.mts',
         // adj801（A·P1）：命令行入口 ⇒ `dist-smoke/cli.cjs`（`npm run cli -- …`）
         cli: 'scripts/ijipu-cli.mts',
+        // adj806（A·P1–P4 的机器闸门）：命令行断言套件 ⇒ `dist-smoke/cli-assert.cjs`
+        'cli-assert': 'scripts/cli-assert.mts',
       },
       formats: ['cjs'],
       fileName: (_format, entryName) => `${entryName}.cjs`,
