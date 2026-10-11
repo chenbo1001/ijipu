@@ -159,7 +159,7 @@
 | `ijipu.playbackHqLibrary` | ''(默认库) | 音源库 id | 用户个性 | → 插件设置（已实现） |
 | `ijipu.playbackHqVoice` | ~~null=自动~~ | ~~默认音色（GM program）~~ | **adj448：改为会话级（L3），不再落盘**（adj450：**本次运行内记住**，重启回到「自动」） | 选定音色会**覆盖谱面 `Y:` 乐器**，被持久化会让用户误判「谱面 Y: 不生效」⇒ 不落盘 + 选定即提示；旧键仅用于清理残留。Obsidian 插件侧同口径（设置项说明写明覆盖关系） |
 | `ijipu.playbackHqEnabled` | 常用 7 种 | 收藏音色集合 | 用户个性 | → 插件设置（已实现） |
-| Obsidian 插件设置 `exportRange` | `page` | **导出范围**：`page`（整页 + 留白）/ `score`（墨迹 + 每边 2px）/ `view`（跟随视图） | **L1 用户个性**（adj863/adj864） | 与具体谱无关、**不随谱走** ⇒ 只存插件 `data.json`，**不进** `defs.ts` 的 `DEFS`（那是跟谱走的 L2）、不写进谱面源码。设置页与「⋯ 更多 → 导出范围」是**同一个值**；几何一律走引擎 `rangeBox()`（唯一口径） |
+| Obsidian 插件设置 `exportRange` | `view` | **导出范围**：`view`（跟随视图，**默认**，用户 2026-10-11 定稿）/ `page`（整页 + 留白）/ `score`（墨迹 + 每边 2px） | **L1 用户个性**（adj863/adj864；adj873 改默认值） | 与具体谱无关、**不随谱走** ⇒ 只存插件 `data.json`，**不进** `defs.ts` 的 `DEFS`（那是跟谱走的 L2）、不写进谱面源码。设置页与「⋯ 更多 → 导出范围」是**同一个值**，缺省值只在插件 `src/types.ts` 的 `DEFAULT_EXPORT_RANGE` 一处定义；几何一律走引擎 `rangeBox()`（唯一口径） |
 | Obsidian 插件设置 `embedChannel` | `false` | **嵌入版通道**总开关（原「开发者：允许嵌入版调用插件能力」，adj868 改名） | **L1 用户个性 / 安全开关** | 管两条 postMessage 通道：**插件 → 应用**（`render.png` / `export.midi` / `playback.*` ⇒ 导出 PNG / MIDI / 复制为图片必经）与**应用 → 插件**（能力探测/渲染，目前无调用方）。adj868 起**持久化**（原来仅本会话有效）；默认关=安全优先；打开后仍受来源校验 + 方法白名单 + 参数校验约束 |
 | `ijipu.draft` | — | **未保存草稿正文** | 独立应用专用 | **嵌入时必须禁用**（vault 才是唯一真源） |
 | `ijipu.draftName` | — | 草稿文件名 | 独立应用专用 | 同上 |
