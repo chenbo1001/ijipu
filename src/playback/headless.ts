@@ -12,8 +12,17 @@
  *  3. **复用既有链路**：`buildPlaySequence` / `schedulePlay` / `SpessaSynthBackend` 一律引用现成实现 ✓，
  *     不复制播放算法 ✗（AGENTS 六之二·4"数值口径同源"）。
  */
-import { buildPlaySequence, parseJps, layoutScore, schedulePlay, createPlaybackClock, mergeJpsConfig, defaultPageConfig, type PageConfig } from '@ijipu/engine'
+import { buildPlaySequence, parseJps, layoutScore, schedulePlay, createPlaybackClock, mergeJpsConfig, defaultPageConfig, type PageConfig, type ParseResult, type ScoreLayout } from '@ijipu/engine'
 import { SpessaSynthBackend } from './spessaSynthBackend'
+
+/**
+ * 入参：**源码字符串** 或 **已解析的 `{ parsed, layout }`** ✓。
+ *
+ * 为什么要支持后者（adj828，第②步开工前的接口修正 ✓）：`PlaybackDialog` 手上**已经有**
+ * `parseResult` 与 `layout`（来自 `docStore` ✓）⇒ 若只收源码，切过去时会**再解析+再排版一遍** ✗
+ * （多余开销，也违背"数值口径同源"的精神 ✓）。传对象时**直接 `buildPlaySequence`** ✓。
+ */
+export type HeadlessInput = string | { parsed: ParseResult; layout: ScoreLayout }
 
 export type HeadlessPlayOptions = {
   /** 速度（默认 60，与对话框现状一致 ✓） */
@@ -45,13 +54,28 @@ export type HeadlessFailure = { ok: false; error: string }
  * @returns 成功给句柄（含 `stop` ✓）；失败给原因（不抛异常给调用方 ✓）。
  */
 export async function playHeadless(
-  source: string,
+  input: HeadlessInput,
   opts: HeadlessPlayOptions = {},
 ): Promise<{ ok: true; handle: HeadlessHandle } | HeadlessFailure> {
-  const parsed = parseJps(source)
-  if (parsed.errors.length > 0) return { ok: false, error: `${parsed.errors.length} 个语法错误（先修好再播放）` }
-  const cfg = mergeJpsConfig(source, { ...defaultPageConfig, ...(opts.pageConfig ?? {}) } as PageConfig)
-  const layout = layoutScore(parsed, cfg)
+  /**
+   * 传对象时**不解析、不排版** ✓（对象来自调用方已有的结果 ⇒ 零重复计算 ✓）；
+   * 传字符串时才走 `parseJps → layoutScore` ✓（CLI/插件那条"给源码就出声"的路径 ✓）。
+   */
+  let parsed: ParseResult
+  let layout: ScoreLayout
+  if (typeof input === 'string') {
+    parsed = parseJps(input)
+    if (parsed.errors.length > 0) return { ok: false, error: `${parsed.errors.length} 个语法错误（先修好再播放）` }
+    const cfg = mergeJpsConfig(input, { ...defaultPageConfig, ...(opts.pageConfig ?? {}) } as PageConfig)
+    layout = layoutScore(parsed, cfg)
+  } else {
+    parsed = input.parsed
+    layout = input.layout
+    if (typeof opts.pageConfig !== 'undefined') {
+      // 传对象时页面配置已被排版消费过 ⇒ 忽略并如实说明（避免"改了配置却没生效"的困惑 ✗）
+      return { ok: false, error: '传入 { parsed, layout } 时不能再指定 pageConfig（配置已在排版阶段生效）' }
+    }
+  }
   const seq = buildPlaySequence(parsed, layout, opts.bpm ?? 60, opts.startNoteId ?? null, undefined, opts.instrumentOverride)
 
   const backend = new SpessaSynthBackend()
