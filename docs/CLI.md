@@ -30,8 +30,20 @@ ijipu <命令> [选项]
 | `render` | 源码 → **SVG**（每页一段）／**MIDI**／**PNG·JPG·PDF**（需桌面端通道） | `-i` `-t svg\|midi\|png\|jpg\|pdf` `-o` |
 | `play` | 导出音频：**MIDI**（任意环境）／**WAV**（需桌面端通道） | `-i` `-t midi\|wav` `-o` |
 | `batch` | **目录批量**转换（SVG / MIDI / 规范化源码）；输出目录会自动创建 | `--in <目录>` `-o <目录>` `-t svg\|midi\|fmt` |
+| `settings` | 看**某一个设置项**的值与**来源**（位置参数 = 键名） | `-i <谱>` `<键名>` `-s k=v`（临时覆盖） |
+| `config` | 打印**生效设置全表 + 每项来源** | `-i <谱>` `-t effective` |
+| `doctor` | 环境自检（可设置项数量、各项能力是否可用） | `--json` |
+| `completions` | 输出 shell 补全脚本 | `completions bash\|zsh\|powershell` |
 
-未实现（**会报错**）：`settings` `config` `doctor` `completions`。
+未实现（**会报错**）：`--watch`（后续）。`settings` 的键名直接当**位置参数**给，例如：
+
+```powershell
+npm run cli -- settings -i 我的谱.jps pageMode          # pageMode = "score"   [来自：源内 # jps-config]
+npm run cli -- settings -i 我的谱.jps margin_top -s margin_top=33
+#   margin_top = "33"   [来自：命令行 -s]
+npm run cli -- config -i 我的谱.jps -t effective --quiet # 只看"非默认"的项（精简视图）
+npm run cli -- doctor                                    # 能力自检：位图/音频在独立 Node 里为 ✗（需桌面端通道）
+```
 
 ### P3：位图/音频为什么在独立 Node 里"报错"而不是"硬做"
 `png/jpg/pdf` 需要 **canvas + 字体 + 分页**，`wav` 需要 **AudioContext + 音色库** ——

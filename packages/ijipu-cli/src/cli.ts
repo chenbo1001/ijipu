@@ -11,7 +11,7 @@
  * 本阶段（P1）实现：`format` / `lint` / `info` + 全局选项 + `--json`。
  * `render` / `play` / `batch` / `settings` / `config` / `doctor` 属 P2–P4，**未实现时明确报错**（不假装成功 ✗）。
  */
-import { formatJps, parseJps, splitParseIssues, layoutScore, renderScoreToSvg, buildPlaySequence, eventsToMidi, defaultPageConfig, mergeJpsConfig, type PageConfig } from '@ijipu/engine'
+import { formatJps, parseJps, splitParseIssues, layoutScore, renderScoreToSvg, buildPlaySequence, eventsToMidi, defaultPageConfig, mergeJpsConfig, extractJpsConfig, OPTIONAL_CONFIG_FIELDS, type PageConfig } from '@ijipu/engine'
 
 /** 退出码：**对外承诺**，只增不改（脚本/CI 依赖它） */
 export const EXIT = {
@@ -222,6 +222,11 @@ function issueLine(issue: { line?: number; message?: string; text?: string }, gh
 export async function runCli(argv: string[], io: CliIo, meta?: { version?: string }): Promise<CliResult> {
   const p = parseArgs(argv)
   const version = meta?.version ?? '0.0.0'
+  /**
+   * ⚠ 提前声明：`doctor` / `settings` / `config` 等命令在**读输入之前**就要用它 ✗
+   * （第一版把它放在读输入之后 ⇒ `ReferenceError: Cannot access 'wantJson' before initialization`）。
+   */
+  const wantJson = p.json || p.format === 'json'
 
   if (p.help) {
     line(io, HELP)
@@ -254,10 +259,54 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
    * ⚠ SVG 走引擎**估算**角标墨迹（Node 里没有 canvas 实测 ⇒ 与应用的实测版会有亚像素差异，
    *    这是"CLI 无 DOM"的必然取舍，已在 docs/CLI.md 写明口径）。
    */
-  const known = new Set(['format', 'lint', 'info', 'render', 'play', 'batch'])
+  const known = new Set(['format', 'lint', 'info', 'render', 'play', 'batch', 'settings', 'config', 'doctor', 'completions'])
   if (!known.has(p.command)) {
-    io.err(`命令 “${p.command}” 属于 P4，尚未实现（用 --help 看已实现命令）。已实现：format / lint / info / render / play / batch`)
+    io.err(`命令 “${p.command}” 尚未实现（用 --help 看已实现命令）`)
     return { code: EXIT.usage }
+  }
+
+  // ── completions（P4）：输出补全脚本（纯静态文本，零依赖）────
+  if (p.command === 'completions') {
+    const shell = (p.inputs[0] ?? p.type ?? 'bash').toLowerCase()
+    const COMMANDS = 'format lint info render play batch settings config doctor completions'
+    const scripts: Record<string, string> = {
+      bash: `# iJipu bash 补全：source <(ijipu completions bash)\n_ijipu() {\n  local cur="\${COMP_WORDS[COMP_CWORD]}"\n  if [ "\$COMP_CWORD" -eq 1 ]; then COMPREPLY=( \$(compgen -W "${COMMANDS}" -- "\$cur") ); return; fi\n  COMPREPLY=( \$(compgen -f -- "\$cur") )\n}\ncomplete -F _ijipu ijipu\n`,
+      zsh: `# iJipu zsh 补全：ijipu completions zsh > "\${fpath[1]}/_ijipu"\n#compdef ijipu\n_ijipu() { _arguments '1:command:(${COMMANDS})' '*:file:_files' }\n_ijipu "\$@"\n`,
+      powershell: `# iJipu PowerShell 补全：ijipu completions powershell | Out-String | Invoke-Expression\nRegister-ArgumentCompleter -Native -CommandName ijipu -ScriptBlock {\n  param(\$wordToComplete, \$commandAst, \$cursorPosition)\n  @('${COMMANDS.split(' ').join("','")}') | Where-Object { \$_ -like "\$wordToComplete*" } | ForEach-Object {\n    [System.Management.Automation.CompletionResult]::new(\$_, \$_, 'ParameterValue', \$_)\n  }\n}\n`,
+    }
+    const text = scripts[shell]
+    if (text === undefined) {
+      io.err(`completions 支持 bash | zsh | powershell（收到 “${shell}”）`)
+      return { code: EXIT.usage }
+    }
+    line(io, text)
+    return { code: EXIT.ok, json: { schema: 1, shell } }
+  }
+
+  // ── doctor（P4）：环境自检（**如实报告能力有无**，不粉饰）────
+  if (p.command === 'doctor') {
+    const caps = {
+      svg: true,
+      midi: true,
+      raster: io.rasterize !== undefined,
+      audio: io.synthesize !== undefined,
+    }
+    const report = {
+      schema: 1,
+      generator: `ijipu ${version}`,
+      engine: 'ijipu-engine',
+      configKeys: Object.keys(defaultPageConfig).length + OPTIONAL_CONFIG_FIELDS.length,
+      capabilities: caps,
+      platform: 'cli',
+    }
+    if (wantJson) line(io, JSON.stringify(report, null, 2))
+    else {
+      line(io, `iJipu CLI doctor`)
+      line(io, `  可设置项：${report.configKeys} 个（含可选字段 ${OPTIONAL_CONFIG_FIELDS.length} 个）`)
+      line(io, `  能力：svg ✓｜midi ✓｜位图(png/jpg/pdf) ${caps.raster ? '✓（桌面端通道已就绪）' : '✗（需桌面端隐藏窗口渲染）'}｜音频(wav) ${caps.audio ? '✓' : '✗（需音色库合成）'}`)
+      line(io, `  提示：位图/音频在桌面端 exe 内可用；独立 Node 环境只能用 svg/midi ✓`)
+    }
+    return { code: EXIT.ok, json: report }
   }
 
   // ── play（P3）：源码 → 音频（MIDI 任意环境；WAV 需宿主合成）────
@@ -316,7 +365,60 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     return { code: EXIT.usage }
   }
 
-  // ── render（P2）：源码 → SVG / MIDI ──────────────────────
+  // ── settings / config（P4）：设置分层可解释 ──────────────
+  if (p.command === 'settings' || p.command === 'config') {
+    let src = ''
+    if (p.inputs.length > 0 && p.inputs[0] !== '-') {
+      try {
+        src = await io.readFile(p.inputs[0])
+      } catch (e) {
+        io.err(`读输入失败：${String(e)}`)
+        return { code: EXIT.noInput }
+      }
+    }
+    /** 三层来源（当前 CLI 支持的两层 + 命令行覆盖） */
+    const srcCfg = (extractJpsConfig(src) ?? {}) as Record<string, unknown>
+    const merged = mergeJpsConfig(src, defaultPageConfig) as unknown as Record<string, unknown>
+    const overrides: Record<string, string> = {}
+    for (const kv of p.sets) {
+      const i = kv.indexOf('=')
+      if (i <= 0) {
+        io.err(`-s 需要 k=v 形式（收到 “${kv}”）`)
+        return { code: EXIT.config }
+      }
+      overrides[kv.slice(0, i)] = kv.slice(i + 1)
+    }
+    const keys = [...Object.keys(defaultPageConfig), ...OPTIONAL_CONFIG_FIELDS]
+    const where = (k: string): string => {
+      if (k in overrides) return '命令行 -s'
+      if (k in srcCfg) return '源内 # jps-config'
+      return '代码默认'
+    }
+    const valueOf = (k: string): unknown => (k in overrides ? overrides[k] : merged[k])
+    const wantList = p.command === 'config' || p.inPlace /* --print-effective 走 -t effective 亦可 */
+    if (p.type === 'effective' || wantList) {
+      const rows = keys.map((k) => ({ key: k, value: valueOf(k), source: where(k) }))
+      if (wantJson) line(io, JSON.stringify({ schema: 1, rows }, null, 2))
+      else {
+        line(io, `生效设置（来源：命令行 > 源内 # jps-config > 代码默认）`)
+        for (const r of rows) {
+          if (r.source === '代码默认' && p.quiet) continue
+          line(io, `  ${r.key} = ${JSON.stringify(r.value)}   [${r.source}]`)
+        }
+      }
+      return { code: EXIT.ok, json: { schema: 1, rows } }
+    }
+    const key = p.inputs[1] ?? p.inputs[0]
+    if (key === undefined || !keys.includes(key)) {
+      io.err(`settings 需要 --get <键>（可用键 ${keys.length} 个：用 "settings -t effective" 全量列出）`)
+      return { code: EXIT.usage }
+    }
+    const payload = { schema: 1, key, value: valueOf(key), source: where(key) }
+    if (wantJson) line(io, JSON.stringify(payload, null, 2))
+    else line(io, `${key} = ${JSON.stringify(payload.value)}   [来自：${payload.source}]`)
+    return { code: EXIT.ok, json: payload }
+  }
+
   if (p.command === 'render') {
     let src = ''
     try {
@@ -476,8 +578,6 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
   }
   /** 输入是否是"真的给了"（用于 format 的默认行为判断） */
   const inputGiven = p.inputs.length > 0
-
-  const wantJson = p.json || p.format === 'json'
 
   // ── info ────────────────────────────────────────────────
   if (p.command === 'info') {
