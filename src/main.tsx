@@ -307,24 +307,35 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator && !isEmbeddedFrame()) 
     })()
   } else {
     // 网页版 / PWA：注册 SW 以获得离线能力 + 新版接管提示
-    window.addEventListener('load', () => {
-  // adj810（B3）：装上 Obsidian 入站 RPC（独立浏览器里它是空转 ✓，不产生任何副作用 ✓）
-  installObsidianBridge({
-    renderSvg: (source, pageConfig) => {
-      const { errors } = splitParseIssues(parseJps(source))
-      if (errors.length > 0) return { ok: false, svgs: [], error: `${errors.length} 个语法错误（先修好再渲染）` }
-      const cfg = mergeJpsConfig(source, { ...defaultPageConfig, ...(pageConfig as Partial<PageConfig> | undefined) })
-      return { ok: true, svgs: renderScoreToSvg(layoutScore(parseJps(source), cfg)) }
-    },
-    exportMidi: (source) => {
-      const { errors } = splitParseIssues(parseJps(source))
-      if (errors.length > 0) return { ok: false, error: `${errors.length} 个语法错误（先修好再导出）` }
-      const parsed = parseJps(source)
-      const layout = layoutScore(parsed, mergeJpsConfig(source, defaultPageConfig))
-      const bytes = eventsToMidi(buildPlaySequence(parsed, layout, 60).events, { bpm: 60, title: 'iJipu' })
-      return { ok: true, bytes }
-    },
-  })
+    /**
+ * adj846（用户实测决定性证据：`render.svg 探针也不通` ⇒ 应用侧桥**根本没在应答** ✗）：
+ *
+ * 真因：`installObsidianBridge(...)` 原来挂在 **`window.load` 事件回调里** ✗ ——
+ * 而嵌入版是**单文件内联 HTML**（`embed-emit` 产物 ✓），其模块可能在 `load` **之后**才执行 ⇒
+ * 回调再也不会被调用 ⇒ 桥**永远装不上** ✓（于是所有请求都超时 ✓）。
+ *
+ * 修法：**在模块顶层直接安装** ✓ —— 它自带"只在被嵌入时生效"的守卫
+ * （`window.parent !== window` ✓），且只做"挂一个 message 监听" ✓，无需等待任何资源 ✓。
+ * ⚠ 不要再移回 `load` 回调里 ✗（这正是本 bug 的由来）。
+ */
+installObsidianBridge({
+  renderSvg: (source, pageConfig) => {
+    const { errors } = splitParseIssues(parseJps(source))
+    if (errors.length > 0) return { ok: false, svgs: [], error: `${errors.length} 个语法错误（先修好再渲染）` }
+    const cfg = mergeJpsConfig(source, { ...defaultPageConfig, ...(pageConfig as Partial<PageConfig> | undefined) })
+    return { ok: true, svgs: renderScoreToSvg(layoutScore(parseJps(source), cfg)) }
+  },
+  exportMidi: (source) => {
+    const { errors } = splitParseIssues(parseJps(source))
+    if (errors.length > 0) return { ok: false, error: `${errors.length} 个语法错误（先修好再导出）` }
+    const parsed = parseJps(source)
+    const layout = layoutScore(parsed, mergeJpsConfig(source, defaultPageConfig))
+    const bytes = eventsToMidi(buildPlaySequence(parsed, layout, 60).events, { bpm: 60, title: 'iJipu' })
+    return { ok: true, bytes }
+  },
+})
+
+window.addEventListener('load', () => {
     // 快照：注册前页面是否已有 SW 控制者（决定这次接管是不是"更新"）
     const hadController = !!navigator.serviceWorker.controller
     navigator.serviceWorker
