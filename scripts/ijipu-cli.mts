@@ -8,7 +8,8 @@
  *  · 决策①要求"同一个 exe 带子命令"：桌面端最终由 `src-tauri` 的入口判断"带子命令就不进 GUI"，
  *    再把同一份 `runCli` 接上（P3；届时复用本文件的 IO 实现 ✓，不另写一套 ✗）。
  */
-import { readFile, writeFile, access } from 'node:fs/promises'
+import { readFile, writeFile, readdir, access } from 'node:fs/promises'
+const enc = new TextEncoder()
 /**
  * ⚠ 不要 `import process from 'node:process'` ✗ —— 本文件以 node target 打成 CJS 时，
  * 未列入 `external` 的 `node:*` 会被换成一个浏览器外部包 stub ⇒ 运行期 `process` 是 undefined ✗
@@ -33,8 +34,16 @@ const io: CliIo = {
     return Buffer.concat(chunks).toString('utf8')
   },
   readFile: (p) => readFile(p, 'utf8'),
-  writeFile: (p, text) => writeFile(p, text, 'utf8'),
-  async exists(p) {
+  /** 文本或二进制：`Uint8Array` 直接落盘（MIDI，adj802） */
+  writeFile: (p, data) => (typeof data === 'string' ? writeFile(p, data, 'utf8') : writeFile(p, data)),
+  async listDir(dir) {
+    // 供 `batch` 用；只回文件名（不含路径），排序保证可复现
+    const names = await readdir(dir)
+    return names.sort()
+  },
+  // `enc` 预留给后续"二进制从 stdin 读"的场景（当前 MIDI 只写出，不读入）
+  exists: async (p) => {
+    void enc
     try {
       await access(p)
       return true

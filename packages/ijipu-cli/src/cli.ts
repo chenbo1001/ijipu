@@ -11,7 +11,7 @@
  * 本阶段（P1）实现：`format` / `lint` / `info` + 全局选项 + `--json`。
  * `render` / `play` / `batch` / `settings` / `config` / `doctor` 属 P2–P4，**未实现时明确报错**（不假装成功 ✗）。
  */
-import { formatJps, parseJps, splitParseIssues } from '@ijipu/engine'
+import { formatJps, parseJps, splitParseIssues, layoutScore, renderScoreToSvg, buildPlaySequence, eventsToMidi, defaultPageConfig, mergeJpsConfig, type PageConfig } from '@ijipu/engine'
 
 /** 退出码：**对外承诺**，只增不改（脚本/CI 依赖它） */
 export const EXIT = {
@@ -27,8 +27,11 @@ export const EXIT = {
 export type CliIo = {
   readStdin(): Promise<string>
   readFile(path: string): Promise<string>
-  writeFile(path: string, text: string): Promise<void>
+  /** 文本或**二进制**（MIDI 等；adj802 起支持 `Uint8Array`） */
+  writeFile(path: string, data: string | Uint8Array): Promise<void>
   exists(path: string): Promise<boolean>
+  /** 列目录里的文件（`batch` 用；只返回文件名，不含路径） */
+  listDir(dir: string): Promise<string[]>
   out(text: string): void
   err(text: string): void
 }
@@ -230,13 +233,127 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     return { code: EXIT.config }
   }
 
-  const known = new Set(['format', 'lint', 'info'])
+  /**
+   * adj802（A·P2）：已实现命令集合。
+   * `render`：源码 → SVG（每页一段）或 MIDI；`batch`：目录批量转换。
+   * ⚠ SVG 走引擎**估算**角标墨迹（Node 里没有 canvas 实测 ⇒ 与应用的实测版会有亚像素差异，
+   *    这是"CLI 无 DOM"的必然取舍，已在 docs/CLI.md 写明口径）。
+   */
+  const known = new Set(['format', 'lint', 'info', 'render', 'batch'])
   if (!known.has(p.command)) {
-    io.err(
-      `命令 “${p.command}” 属于 P2–P4，尚未实现（用 --help 看已实现命令）。` +
-        `已实现：format / lint / info`,
-    )
+    io.err(`命令 “${p.command}” 属于 P3–P4，尚未实现（用 --help 看已实现命令）。已实现：format / lint / info / render / batch`)
     return { code: EXIT.usage }
+  }
+
+  // ── render（P2）：源码 → SVG / MIDI ──────────────────────
+  if (p.command === 'render') {
+    let src = ''
+    try {
+      src = (await readInput(p.inputs[0], io)).text
+    } catch (e) {
+      io.err(`读输入失败：${String(e)}`)
+      return { code: EXIT.noInput }
+    }
+    const type = inferType(p)
+    const { errors } = splitParseIssues(parseJps(src))
+    if (errors.length > 0) {
+      io.err(`源码有 ${errors.length} 个错误，先修好再渲染（用 lint 看细节）`)
+      return { code: EXIT.syntax }
+    }
+    const cfg: PageConfig = mergeJpsConfig(src, defaultPageConfig)
+    const parsed = parseJps(src)
+    if (type === 'midi') {
+      const layout = layoutScore(parsed, cfg)
+      const seq = buildPlaySequence(parsed, layout, typeof cfg === 'object' ? 60 : 60)
+      const bytes = eventsToMidi(seq.events, { bpm: 60, title: 'iJipu' })
+      const target = p.output
+      if (target === null || target === '-') {
+        io.err('MIDI 是二进制，必须用 -o 指定文件（不能用 stdout）')
+        return { code: EXIT.usage }
+      }
+      await io.writeFile(target, bytes)
+      if (!p.quiet) line(io, `已写入 ${target}（MIDI，${bytes.length} 字节）`)
+      return { code: EXIT.ok, json: { schema: 1, type: 'midi', output: target, bytes: bytes.length } }
+    }
+    if (type !== 'svg' && type !== 'text') {
+      io.err(`render 的 -t 目前支持 svg | midi（收到 “${type}”；png/jpg/pdf/wav 属 P3，走隐藏窗口渲染）`)
+      return { code: EXIT.usage }
+    }
+    const layout = layoutScore(parsed, cfg)
+    const svgs = renderScoreToSvg(layout)
+    if (p.output === null || p.output === '-') {
+      line(io, svgs.join('\n<!-- 分页 -->\n'))
+      return { code: EXIT.ok, json: { schema: 1, type: 'svg', pages: svgs.length } }
+    }
+    const base = p.output.replace(/\.svg$/i, '')
+    const made: string[] = []
+    for (let i = 0; i < svgs.length; i += 1) {
+      const path = svgs.length > 1 ? `${base}-${i + 1}.svg` : `${base}.svg`
+      await io.writeFile(path, svgs[i])
+      made.push(path)
+    }
+    if (!p.quiet) line(io, `已写入 ${made.join('、')}`)
+    return { code: EXIT.ok, json: { schema: 1, type: 'svg', pages: svgs.length, outputs: made } }
+  }
+
+  // ── batch（P2）：目录批量转换 ────────────────────────────
+  if (p.command === 'batch') {
+    const inDir = p.inputs[0]
+    const outDir = p.output
+    if (inDir === undefined || inDir === '-') {
+      io.err('batch 需要 --in <目录>（stdin 不适用）')
+      return { code: EXIT.usage }
+    }
+    if (outDir === null || outDir === '-') {
+      io.err('batch 需要 -o <目录>')
+      return { code: EXIT.usage }
+    }
+    let names: string[]
+    try {
+      names = (await io.listDir(inDir)).filter((n) => n.toLowerCase().endsWith('.jps'))
+    } catch (e) {
+      io.err(`读目录失败：${String(e)}`)
+      return { code: EXIT.noInput }
+    }
+    const to = (p.type ?? 'svg').toLowerCase()
+    let okCount = 0
+    const failed: string[] = []
+    for (const name of names) {
+      const stem = name.replace(/\.jps$/i, '')
+      try {
+        const src = await io.readFile(`${inDir}/${name}`)
+        const { errors } = splitParseIssues(parseJps(src))
+        if (errors.length > 0) {
+          failed.push(`${name}（${errors.length} 个语法错误）`)
+          continue
+        }
+        if (to === 'midi') {
+          const parsed = parseJps(src)
+          const layout = layoutScore(parsed, mergeJpsConfig(src, defaultPageConfig))
+          const bytes = eventsToMidi(buildPlaySequence(parsed, layout, 60).events, { bpm: 60, title: stem })
+          await io.writeFile(`${outDir}/${stem}.mid`, bytes)
+        } else if (to === 'fmt' || to === 'format' || to === 'jps') {
+          await io.writeFile(`${outDir}/${stem}.jps`, formatJps(src))
+        } else {
+          const parsed = parseJps(src)
+          const layout = layoutScore(parsed, mergeJpsConfig(src, defaultPageConfig))
+          const svgs = renderScoreToSvg(layout)
+          for (let i = 0; i < svgs.length; i += 1) {
+            const path = svgs.length > 1 ? `${outDir}/${stem}-${i + 1}.svg` : `${outDir}/${stem}.svg`
+            await io.writeFile(path, svgs[i])
+          }
+        }
+        okCount += 1
+      } catch (e) {
+        failed.push(`${name}（${String(e)}）`)
+      }
+    }
+    line(io, `批处理完成：成功 ${okCount} 个、失败 ${failed.length} 个（输出到 ${outDir}，类型 ${to}）`)
+    for (const f of failed) line(io, `  ✗ ${f}`)
+    return {
+      code: failed.length === 0 ? EXIT.ok : EXIT.syntax,
+      json: { schema: 1, ok: okCount, failed },
+    }
   }
 
   // 读输入（`-` = stdin）

@@ -2,7 +2,7 @@
 
 > 方案与决策见 `docs/CLI-AND-COMMAND-PLAN.md`（**① 同一个 exe 带子命令 ② 位图/音频走隐藏窗口渲染
 > ③ 嵌入版 RPC 默认关闭 + 仅 vault 内路径**）。
-> 阶段状态：**P1 已实现**（`format` / `lint` / `info`）；P2（`render`/`play`/`batch`）、
+> 阶段状态：**P1 + P2 已实现**（`format` / `lint` / `info` / `render` / `batch`）；
 > P3（隐藏窗口渲染 `png/jpg/pdf/wav`）、P4（`settings`/`config`/`doctor`/补全）**未实现**，
 > 调用时会**明确报错并给出退出码 1**（不假装成功 ✗）。
 
@@ -27,8 +27,14 @@ ijipu <命令> [选项]
 | `format` | 按应用规范**规范化源码**（与应用编辑器/插件格式化同一实现） | `-i` `-o` `--check` `--in-place` `--diff` |
 | `lint` | 语法检查（错误/告警） | `-i` `--format text\|json\|gh` |
 | `info` | 谱面概况（标题/调号/行数/分组/问题数） | `-i` `-t text\|json` |
+| `render` | 源码 → **SVG**（每页一段）或 **MIDI** | `-i` `-t svg\|midi` `-o` |
+| `batch` | **目录批量**转换（SVG / MIDI / 规范化源码） | `--in <目录>` `-o <目录>` `-t svg\|midi\|fmt` |
 
-未实现（**会报错**）：`render` `play` `batch` `settings` `config` `doctor` `completions`。
+未实现（**会报错**）：`play` `settings` `config` `doctor` `completions`；`render -t png|jpg|pdf|wav` 属 **P3**。
+
+> **render 的 SVG 口径（重要）**：CLI 在 Node 里**没有 canvas 实测角标墨迹** ⇒ 引擎按**估算宽**排版，
+> 与应用（实测版）可能有**亚像素差异**；版式、音符位置与页数一致 ✓。
+> 需要像素级一致时用应用导出（P3 的"隐藏窗口渲染"就是为此 ✓）。
 
 ## 三、全局选项
 
@@ -87,11 +93,14 @@ npm run cli -- format -i 我的谱.jps --check
 # 8) 看差异（- 旧 / + 新，逐行）
 npm run cli -- format -i 乱.jps --diff
 
-# 9) 一次性批量（P2 之前用 PowerShell 循环兜住）
-Get-ChildItem *.jps | ForEach-Object {
-  npm run cli -- format -i $_.FullName --check --quiet
-  if ($LASTEXITCODE -ne 0) { Write-Host "需格式化：$($_.Name)" }
-}
+# 9) 一次性批量（P2 起用 batch；P1 时代用 PowerShell 循环兜）
+npm run cli -- batch --in samples -o dist-out -t svg     # 每个谱 → 一/多个 SVG（多页加 -1/-2）
+npm run cli -- batch --in samples -o dist-out -t midi    # 每个谱 → 一个 .mid
+npm run cli -- batch --in samples -o dist-out -t fmt     # 每个谱 → 规范化后的 .jps
+
+# 10) 导出矢量图 / MIDI
+npm run cli -- render -i 我的谱.jps -t svg -o 我的谱.svg
+npm run cli -- render -i 我的谱.jps -t midi -o 我的谱.mid
 ```
 
 ## 六、CI 集成
