@@ -267,36 +267,24 @@ window.__ijipuProbeBody = async function () {
     try { h2 = IJipuPane.mountScorePane(host2); }
     catch (e) { return { error: 'mount2 抛出：' + String(e && e.message) }; }
     const q = (sel) => document.querySelector('#wrap2 ' + sel);
-    const btn = q('.ijipu-edit-source-btn');
-    const box2 = document.getElementById('wrap2').getBoundingClientRect();
-    const btnRect = btn ? btn.getBoundingClientRect() : null;
-    const hidden = btn ? getComputedStyle(btn).visibility : null;
-    document.getElementById('wrap2').dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' }));
-    await sleep(260);
-    const shown = btn ? getComputedStyle(btn).visibility : null;
+    /**
+     * adj773/adj866：编辑入口**已统一成工具条上那枚**（`.ijipu-edit-btn`）——
+     * 块右上角的 `.ijipu-edit-source-btn` 是用户要求删掉的旧形态（老探针还在找它 ⇒ 一直被当成"没出现"✗）。
+     */
+    const btn = q('.ijipu-edit-btn');
+    const btnCls = btn ? btn.className : null;
     window.__ijipuEditCalls = 0;
     try { btn?.click(); } catch (e) { window.__ijipuEditErr = String(e && e.message); }
     await sleep(40);
-    const res = {
+    return {
       hasBtn: !!btn,
+      btnCls,
       hasScore: !!q('svg'),
       noTextarea: !q('textarea') && !q('.ijipu-block-source-editor'),
       scoreKept: !!q('.ijipu-svgs'),
-      hidden,
-      shown,
       calls: window.__ijipuEditCalls || 0,
       clickErr: window.__ijipuEditErr || null,
-      contrast: window.__ijipuContrastOnPaper(btn),
-      /** 右上角：与容器右缘/顶边的净距（应各 ~4px，即 `--size-2-2`） */
-      gaps: btnRect
-        ? { right: +(box2.right - btnRect.right).toFixed(1), top: +(btnRect.top - box2.top).toFixed(1) }
-        : null,
     };
-    /**
-     * ⚠ **刻意不 destroy**：这一支要继续留在页面上，供外层截"悬停中的界面"那张图
-     * （要人眼确认 `</>` 真的落在块右上角、工具条真的在块外）—— 验证页是一次性的。
-     */
-    return res;
   })();
 
   /**
@@ -481,13 +469,25 @@ window.__ijipuProbeBody = async function () {
         return { error: 'mount 抛出：' + String(e && e.message) }
       }
       await sleep(40)
-      const btn = el.querySelector('.ijipu-app-open-btn')
+      /**
+       * adj863/adj866：**「打开谱面文件」已从工具条移进「⋯ 更多」菜单**（工具条定稿 5 位），
+       * 所以这里改成"开一次菜单、看里面有没有那一项" —— 老探针查 `.ijipu-embed-link` 元素，
+       * 从 adj863 起必然落空（那是"入口搬家"造成的假红灯，不是行为变了）。
+       * 工具条上现在只有统一的那枚「编辑」（`.ijipu-edit-btn`）。
+       */
+      globalThis.__ijipuMenus = []
+      const more = el.querySelector('.ijipu-more-btn')
+      if (more) more.click()
+      await sleep(20)
+      const items = ((globalThis.__ijipuMenus || [])[0] || []).filter((it) => !it.isLabel).map((it) => it.title)
+      const editBtn = el.querySelector('.ijipu-edit-btn')
       const res = {
         case: opts.name,
-        edit: !!btn,
-        editLabel: btn ? (btn.querySelector('.ijipu-btn-label') || {}).textContent || null : null,
-        link: !!el.querySelector('.ijipu-embed-link'),
-        linkLabel: (el.querySelector('.ijipu-embed-link-text') || {}).textContent || null,
+        edit: !!editBtn,
+        editLabel: (el.querySelector('.ijipu-edit-btn .ijipu-btn-label') || {}).textContent || null,
+        menuItems: items,
+        link: items.some((t) => t.indexOf('打开谱面文件') === 0),
+        linkLabel: (items.find((t) => t.indexOf('打开谱面文件') === 0) || null),
       }
       h?.destroy?.()
       el.remove()
@@ -520,8 +520,22 @@ window.__ijipuLpHoverProbe = function (mode) {
   const container3 = document.getElementById('wrap3');
   if (!embed || !container3) return JSON.stringify({ error: '没有 #lpEmbed / #wrap3' });
   if (mode === 'noClass') embed.classList.remove('ijipu-cm-host');
-  const tb = container3.querySelector('.ijipu-score-toolbar');
+  /**
+   * ⚠ adj866：工具条**显形后会被搬到 `document.body`**（`adj793c` 的外侧落位）⇒
+   * 容器查询会落空。所以：**先**在容器里取到它（此刻还挂着）→ 点击显形 → 之后一律用**同一个元素引用**；
+   * 第二次调用（负对照）靠 `window.__ijipuLpTb` 复用引用。
+   */
+  let tb = container3.querySelector('.ijipu-score-toolbar') || window.__ijipuLpTb;
+  if (tb) window.__ijipuLpTb = tb;
   if (!tb) return JSON.stringify({ error: '没有工具条' });
+  /**
+   * adj785：显隐是**点击预览区**切换（悬停那套已按用户要求取消）⇒ 这里点一下把它显出来，
+   * 否则下面的命中测试必然落在别的元素上（老流程靠"悬停显形"，从 adj785 起就一直红灯）。
+   */
+  const revealed = (() => {
+    container3.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    return getComputedStyle(tb).visibility;
+  })();
   /**
    * ⚠ 必须先**滚进视口**再量：`elementFromPoint` 对视口外的点返回 null
    * （实测第三次挂载点的 `</>` 在 y≈1062、视口只有 1049 ⇒ 命中测试全是 null，看着像"点不到"）。
@@ -546,6 +560,7 @@ window.__ijipuLpHoverProbe = function (mode) {
   }
   const out = {
     mode,
+    revealed,
     hasClass: embed.classList.contains('ijipu-cm-host'),
     overflow: getComputedStyle(embed).overflow,
     toolbarRect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
@@ -556,5 +571,193 @@ window.__ijipuLpHoverProbe = function (mode) {
     hostOpacity: hostBtn ? getComputedStyle(hostBtn).opacity : null,
   };
   window.scrollTo(0, 0); // 截图用：滚回顶部（上面的命中测试已经量完）
+  return JSON.stringify(out);
+};
+
+/**
+ * adj866（T-5 五条口径的**真机验证**）：工具条是不是**恰好 5 位**、「⋯ 更多」弹出来的菜单里有什么、
+ * 点了菜单项**真的调到**插件方法没有、桌面右键是不是**同一份菜单**、块级缩放 `z` 是不是"自然尺寸"。
+ *
+ * 为什么值得单开一个探针：这几件事全是**真实 DOM + 真实事件**才成立的性质
+ * （按钮个数、类名顺序、菜单项、`contextmenu` 的 `defaultPrevented`、`calc()` 后的实际宽度），
+ * Node 里的 smoke 只能核对源码文本 —— 文本对不等于行为对。
+ *
+ * 宿主替身要点：
+ *  · `plugin` 上挂**记录型**方法（`copyScoreImage` / `copyScoreSvg` / `copyScoreSource` / `setExportRange`），
+ *    调用参数原样记下 ⇒ "菜单项 → 插件方法"这条路由是被**执行**验证的；
+ *  · `Menu` 由 `scripts/verify-stubs/obsidian.ts` 记录进 `globalThis.__ijipuMenus`（真实宿主里是弹出菜单）。
+ */
+window.__ijipuT5Probe = async function () {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const calls = { copyScoreImage: [], copyScoreSvg: [], copyScoreSource: [], setExportRange: [] };
+  /** 所有替身**共用同一份设置对象**（真实插件也只有一份）——菜单里的"当前范围打勾"读的就是它 */
+  const settings = { exportRange: 'page' };
+  const mkWrap = (id, widthPx) => {
+    let d = document.getElementById(id);
+    if (!d) {
+      d = document.createElement('div');
+      d.id = id;
+      d.style.width = widthPx + 'px';
+      document.body.appendChild(d);
+    }
+    d.empty?.();
+    return d;
+  };
+  const makeHost = (container, extra = {}) => ({
+    plugin: {
+      settings,
+      showGuides: false,
+      events: { on: () => ({ name: 'x' }), offref: () => {}, trigger: () => {} },
+      register: () => {},
+      registerEvent: () => {},
+      getWorkletUrl: () => '',
+      registerPlay: () => {},
+      unregisterPlay: () => {},
+      toggleGuides: () => false,
+      app: { workspace: { on: () => ({}) }, vault: { on: () => ({}) } },
+      copyScoreImage: (...a) => calls.copyScoreImage.push(a.map((x) => (x && typeof x === 'object' ? { box: x.box, mode: x.mode } : x))),
+      copyScoreSvg: (...a) => calls.copyScoreSvg.push(a.map((x) => (x && typeof x === 'object' ? { box: x.box, mode: x.mode } : x))),
+      copyScoreSource: (...a) => calls.copyScoreSource.push(a),
+      setExportRange: (...a) => {
+        calls.setExportRange.push(a);
+        /**
+         * ⚠ 假替身也要**像真插件那样把设置写进去** —— 否则"切完之后再开菜单，✓ 应该移过去"这条断言
+         * 永远失败（探针自己的锅，不是产品的）。真实 `IJipuPlugin.setExportRange` 就是写设置 + 存盘。
+         */
+        if (a[0] === 'view' || a[0] === 'page' || a[0] === 'score') settings.exportRange = a[0];
+      },
+    },
+    container,
+    getSource: () => window.__jpsCode,
+    getFrontmatter: () => null,
+    writeSource: () => {},
+    onEditSource: () => {},
+    ...extra,
+  });
+
+  const out = { error: null, slots: null, menu: null, routed: null, contextMenu: null, zoom: {}, errs: null };
+  try {
+    // —— ① 工具条槽位（真机上数按钮 + 读 dataset.slot，不看源码）——
+    const wrap = mkWrap('wrapT5', 820);
+    const h = IJipuPane.mountScorePane(makeHost(wrap));
+    await sleep(60);
+    const tb = wrap.querySelector('.ijipu-score-toolbar');
+    if (!tb) throw new Error('没有工具条');
+    const btns = Array.from(tb.querySelectorAll('button'));
+    out.slots = {
+      count: btns.length,
+      order: btns.map((b) => b.dataset.slot || '(无 slot)'),
+      labels: btns.map((b) => (b.textContent || '').trim()),
+      /** 每个按钮的**墨迹盒**（中心命中测试用；手机尺寸那条另在 CDP 里量） */
+      rects: btns.map((b) => {
+        const r = b.getBoundingClientRect();
+        return { w: Math.round(r.width), h: Math.round(r.height) };
+      }),
+    };
+
+    // —— ② 「⋯ 更多」弹出来的菜单（Menu 记录在 globalThis.__ijipuMenus）——
+    const more = tb.querySelector('.ijipu-more-btn');
+    if (!more) throw new Error('没有 ⋯ 更多 按钮');
+    globalThis.__ijipuMenus = [];
+    more.click();
+    await sleep(30);
+    const first = (globalThis.__ijipuMenus || [])[0] || [];
+    const items = first.filter((it) => !it.isLabel).map((it) => it.title);
+    const labels = first.filter((it) => it.isLabel).map((it) => it.title);
+    const checkedFirst = first.filter((it) => it.checked === true).map((it) => it.title);
+    out.menu = { sections: labels, items, checked: checkedFirst };
+
+    // —— ③ 路由：点「复制为图片（1×）」→ 必须调到 plugin.copyScoreImage(source, 1, {box, mode}) ——
+    const item1x = first.find((it) => it.title.indexOf('复制为图片（1×）') === 0);
+    if (item1x && item1x.onClick) item1x.onClick();
+    await sleep(20);
+    // —— ④ 路由：切「导出谱面」→ setExportRange('score')；再开菜单应看到 ✓ 移到谱面那一项 ——
+    globalThis.__ijipuMenus = [];
+    more.click();
+    await sleep(20);
+    const second = (globalThis.__ijipuMenus || [])[0] || [];
+    const scoreItem = second.find((it) => it.title.indexOf('谱面（墨迹 + 每边 2px）') === 0);
+    if (scoreItem && scoreItem.onClick) scoreItem.onClick();
+    globalThis.__ijipuMenus = [];
+    more.click();
+    await sleep(20);
+    const third = (globalThis.__ijipuMenus || [])[0] || [];
+    out.routed = {
+      copyImage1x: calls.copyScoreImage,
+      setRange: calls.setExportRange,
+      checkedAfterSwitch: third.filter((it) => it.checked === true).map((it) => it.title),
+      copySourceItem: third.some((it) => it.title.indexOf('复制谱面源码') === 0),
+      svgItem: third.some((it) => it.title.indexOf('复制 SVG 文本') === 0),
+    };
+
+    // —— ⑤ 桌面右键：与「⋯ 更多」**同一份菜单**（且要 preventDefault）——
+    globalThis.__ijipuMenus = [];
+    const r = wrap.querySelector('.ijipu-svgs').getBoundingClientRect();
+    const ev = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: Math.round(r.left + 20),
+      clientY: Math.round(r.top + 20),
+    });
+    const notCancelled = wrap.dispatchEvent(ev);
+    await sleep(20);
+    const ctx = (globalThis.__ijipuMenus || [])[0] || [];
+    out.contextMenu = {
+      recorded: globalThis.__ijipuMenus.length,
+      defaultPrevented: ev.defaultPrevented,
+      dispatchReturned: notCancelled,
+      items: ctx.filter((it) => !it.isLabel).map((it) => it.title),
+    };
+    h.destroy();
+
+    // —— ⑥ 块级缩放 `z`：**固定 100% = 自然尺寸**（= viewBox 宽），`z=*` = 铺满容器 ——
+    //   ⚠ 必须用 `.ijipu-svgs .ijipu-page-svg > svg` 精确定位**谱面**那份 ——
+    //     容器里还有工具条的图标 `<svg>`（15×15），`querySelector('svg')` 会先抓到它（本轮踩过）。
+    const zWrap = mkWrap('wrapZoom', 820);
+    const zPane = IJipuPane.mountScorePane(makeHost(zWrap, { zoom: 100 }));
+    await sleep(80);
+    const zSvg = zWrap.querySelector('.ijipu-svgs .ijipu-page-svg > svg');
+    const zVb = (zSvg.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+    const zRect = zSvg.getBoundingClientRect();
+    out.zoom.fixed = {
+      zoom: 100,
+      viewBoxW: +zVb[2].toFixed(2),
+      renderedW: +zRect.width.toFixed(2),
+      /** 比宽度要对**谱面容器**（`.ijipu-svgs`）比，不能对最外层 div（那里面有 2px padding 等） */
+      svgsW: +zWrap.querySelector('.ijipu-svgs').getBoundingClientRect().width.toFixed(2),
+      containerW: +zWrap.getBoundingClientRect().width.toFixed(2),
+      cls: zWrap.querySelector('.ijipu-svgs').className,
+      cssVar: getComputedStyle(zWrap.querySelector('.ijipu-page-svg')).getPropertyValue('--ijipu-zoom-w').trim(),
+    };
+    zPane.destroy();
+    const aWrap = mkWrap('wrapZoomAuto', 820);
+    const aPane = IJipuPane.mountScorePane(makeHost(aWrap, { zoom: 'auto' }));
+    await sleep(80);
+    const aSvg = aWrap.querySelector('.ijipu-svgs .ijipu-page-svg > svg');
+    out.zoom.auto = {
+      zoom: 'auto',
+      renderedW: +aSvg.getBoundingClientRect().width.toFixed(2),
+      svgsW: +aWrap.querySelector('.ijipu-svgs').getBoundingClientRect().width.toFixed(2),
+      containerW: +aWrap.getBoundingClientRect().width.toFixed(2),
+      cls: aWrap.querySelector('.ijipu-svgs').className,
+    };
+    aPane.destroy();
+
+    // —— ⑦ 不带 zoom 的宿主（文件视图/嵌入）必须**既无 zoom 类也无缩放变量**（作用域负对照）——
+    const nWrap = mkWrap('wrapNoZoom', 820);
+    const nPane = IJipuPane.mountScorePane(makeHost(nWrap));
+    await sleep(80);
+    const nSvg = nWrap.querySelector('.ijipu-svgs .ijipu-page-svg > svg');
+    out.zoom.none = {
+      cls: nWrap.querySelector('.ijipu-svgs').className,
+      renderedW: +nSvg.getBoundingClientRect().width.toFixed(2),
+      svgsW: +nWrap.querySelector('.ijipu-svgs').getBoundingClientRect().width.toFixed(2),
+      containerW: +nWrap.getBoundingClientRect().width.toFixed(2),
+    };
+    nPane.destroy();
+    out.errs = (window.__ijipuErrs || []).slice(-5);
+  } catch (e) {
+    out.error = String((e && e.message) || e);
+  }
   return JSON.stringify(out);
 };

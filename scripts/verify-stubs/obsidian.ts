@@ -12,16 +12,54 @@ export class Notice {
   }
 }
 
+/**
+ * adj866：**记录型 `Menu`** —— 真实宿主里由 Obsidian 弹出；验证页里没有宿主 UI，
+ * 于是把"菜单被打开了、里面有哪些项、每项打没打勾"记进 `globalThis.__ijipuMenus`，
+ * 供探针断言（只记录，不渲染）。这样"⋯ 更多 到底弹了什么"能在真实浏览器里被验证，
+ * 而不是只靠源码正则。
+ */
+type RecordedMenuItem = { title: string; checked: boolean | null; isLabel: boolean; onClick: (() => void) | null }
+
 export class Menu {
-  addItem(): this {
+  private items: RecordedMenuItem[] = []
+  addItem(cb: (item: MenuItem) => unknown): this {
+    const it = new MenuItem()
+    cb(it)
+    this.items.push({ title: it.title, checked: it.checked, isLabel: it.isLabel, onClick: it.onClickCb })
     return this
   }
   addSeparator(): this {
+    this.items.push({ title: '———', checked: null, isLabel: true, onClick: null })
     return this
   }
-  showAtMouseEvent(): void {
-    /* 验证时不需要真菜单 */
+  private push(): void {
+    const g = globalThis as unknown as { __ijipuMenus?: RecordedMenuItem[][] }
+    if (!Array.isArray(g.__ijipuMenus)) g.__ijipuMenus = []
+    g.__ijipuMenus.push(this.items)
   }
+  showAtPosition(): this {
+    this.push()
+    return this
+  }
+  showAtMouseEvent(): this {
+    this.push()
+    return this
+  }
+}
+
+/** 菜单项（与 Obsidian 的 `MenuItem` 同名同形；验证只关心这几样） */
+export class MenuItem {
+  title = ''
+  checked: boolean | null = null
+  isLabel = false
+  onClickCb: (() => void) | null = null
+  setTitle(t: string): this { this.title = t; return this }
+  setIcon(): this { return this }
+  setIsLabel(v: boolean): this { this.isLabel = v; return this }
+  setChecked(v: boolean | null): this { this.checked = v; return this }
+  setDisabled(): this { return this }
+  setSection(): this { return this }
+  onClick(cb: () => void): this { this.onClickCb = cb; return this }
 }
 
 export class Setting {

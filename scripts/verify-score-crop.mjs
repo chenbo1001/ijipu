@@ -458,12 +458,12 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
     const a = probe.embedToolbar.inApp
     const b = probe.embedToolbar.external
     const c = probe.embedToolbar.withoutEdit
-    ok(a.edit && a.editLabel === '编辑', 'adj726 有 onEdit ⇒ 出现「编辑」按钮', JSON.stringify(a))
-    ok(a.link === false, 'adj726 有「编辑」且它留在站内 ⇒ **不再**出现「打开谱面文件」链接', JSON.stringify(a))
+    ok(a.edit && a.editLabel === '编辑', 'adj726/adj866 有 onEdit ⇒ 工具条出现「编辑」', JSON.stringify(a))
+    ok(a.link === false, 'adj726/adj866 有「编辑」且它留在站内 ⇒ 菜单里**不再**出现「打开谱面文件」', JSON.stringify(a))
     ok(b.edit && b.link === true,
-      'adj727 有「编辑」但它**会离开 Obsidian**（打开方式=默认应用）⇒ 链接**保留**（站内入口不能丢）',
+      'adj727/adj866 有「编辑」但它**会离开 Obsidian**（打开方式=默认应用）⇒ 菜单里**保留**链接（站内入口不能丢）',
       JSON.stringify(b))
-    ok(c.edit === false && c.link === true, 'adj726 对照：没有「编辑」时链接仍在（不是把链接删掉）', JSON.stringify(c))
+    ok(c.edit === false && c.link === true, 'adj726/adj866 对照：没有「编辑」时链接仍在（不是把链接删掉）', JSON.stringify(c))
   } else {
     ok(false, 'adj726/727 能测嵌入工具栏的按钮组合', JSON.stringify(probe.embedToolbar))
   }
@@ -515,16 +515,22 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
     console.log('  挂载瞬间         =', JSON.stringify(d.atMount))
     ok(d.atMount.svg && d.atMount.connected === false,
       'adj725b 复现宿主顺序：挂载瞬间 svg 还不在渲染树里（isConnected=false）', JSON.stringify(d.atMount))
-    ok(d.atMount.contentBox === null && /没量到|退回边距兜底/.test(String(d.atMount.info)),
+    ok(d.atMount.contentBox === null && /没量到|退回按边距裁剪/.test(String(d.atMount.info)),
       'adj725b 挂载瞬间确实量不到内容盒（此前的根因）', `${d.atMount.contentBox} / ${d.atMount.info}`)
     const av = d.after.viewBox
     const am = d.after.measured
     if (am && Array.isArray(av) && av.length === 4) {
-      const near = (a, b) => Math.abs(a - b) <= 1.5
-      ok(near(av[0], am.x) && near(av[1], am.y) && near(av[2], am.w) && near(av[3], am.h),
-        'adj725b 挂进文档后**下一帧补量到了**并裁到内容（viewBox ≈ 实测并集）',
+      /**
+       * ⚠ adj786/adj866：谱面视图的 viewBox 早已不是"紧贴墨迹"，而是**四边各外扩 2px**
+       * （用户要求"谱面四周留 2px 白"；`adj863` 起由引擎 `rangeBox()` 统一给出）。
+       * 老断言按"误差 ≤1.5px 等于实测并集"写 ⇒ 从 adj786 起就一直红灯（本轮实测才发现）。
+       * 现在的口径：`viewBox = 实测并集 ± 每边 2px`，容差 0.8px。
+       */
+      const near2 = (a, b) => Math.abs(a - b) <= 0.8
+      ok(near2(av[0], am.x - 2) && near2(av[1], am.y - 2) && near2(av[2], am.w + 4) && near2(av[3], am.h + 4),
+        'adj725b 挂进文档后**下一帧补量到了**并裁到内容（viewBox = 实测并集 ± 每边 2px）',
         `viewBox=${av} measured=${JSON.stringify(am)}`)
-      ok(/→ 裁剪/.test(String(d.after.info)), 'adj725b 裁剪实况诊断显示"裁剪 …"（不再是边距兜底）', String(d.after.info))
+      ok(/按墨迹裁剪/.test(String(d.after.info)), 'adj725b 裁剪实况诊断显示"按墨迹裁剪 …"（不再是边距兜底）', String(d.after.info))
     } else {
       ok(false, 'adj725b 挂进文档后能读到裁剪后的 viewBox / 实测并集', JSON.stringify(d.after))
     }
@@ -547,48 +553,39 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
   }
 
   /**
-   * adj725（用户要求）：**「编辑源码」= 块右上角的 `</>`**（点它切回笔记源码）。
-   *  · 有 `onEditSource` 才出现（代码块）；谱面**不被换掉**、**不出现 textarea**；
-   *  · 默认不可见 → 悬停显形（与工具条同一套）；
-   *  · 位置在块右上角（与容器右缘/顶边各差几像素）；
-   *  · 点击**恰好调一次**宿主落点。
+   * adj773/adj866：「编辑」入口 —— **用户要求把块右上角的 `</>` 统一成工具条上的那枚**（adj773），
+   * 所以这里量的是工具条里的 `.ijipu-edit-btn`（不是已删除的 `.ijipu-edit-source-btn`）。
+   * 老断言（默认不可见→悬停显形、右上角净距、压白纸的对比度）随 `</>` 一起作废：
+   *  · 工具条显隐现在由**点击预览区**切换（adj785），不再靠悬停；
+   *  · 那枚按钮已在工具条里、跟着工具条主题走，不再压在白色纸张上。
+   * 仍要守的性质：**有 onEditSource 才出现**、点它**恰好调一次**宿主落点、**不出现 textarea**、谱面不被换掉。
    */
   if (probe.editSource && !probe.editSource.error) {
     const e = probe.editSource
-    ok(e.hasBtn, 'adj725 出现块右上角的 `</>`（宿主给了 onEditSource）')
-    ok(e.hidden === 'hidden' && e.shown === 'visible', 'adj725 `</>` 默认不可见、悬停显形（与工具条同套）',
-      `初始=${e.hidden} 悬停=${e.shown}`)
-    ok(e.noTextarea && e.scoreKept, 'adj725 不再出现 textarea，谱面也保持渲染（源码切回笔记）',
+    ok(e.hasBtn, 'adj773/adj866 工具条上的「编辑」出现（宿主给了 onEditSource）', JSON.stringify({ btn: e.btnCls }))
+    ok(e.noTextarea && e.scoreKept, 'adj866 点它不出现 textarea，谱面也保持渲染（源码切回笔记）',
       `noTextarea=${e.noTextarea} scoreKept=${e.scoreKept}`)
-    ok(e.calls === 1, 'adj725 点一下 = 调一次宿主落点（切回笔记源码）', `calls=${e.calls} err=${e.clickErr}`)
-    if (e.gaps) {
-      ok(e.gaps.right >= 0 && e.gaps.right <= 12 && e.gaps.top >= 0 && e.gaps.top <= 12,
-        'adj725 `</>` 落在块的**右上角**（与右缘/顶边各内缩几像素）', JSON.stringify(e.gaps))
-    } else {
-      ok(false, 'adj725 能量到 `</>` 的位置')
-    }
-    /**
-     * adj725c（用户报「鼠标移上去也看不见 `</>`」）：**对比度必须够**。
-     * 按钮压在恒为白色的谱面纸张上、底色半透明 ⇒ 按"字色 vs 底色合成到白纸"实算 WCAG 对比度。
-     * 修前是"跟主题取色"（深色主题下浅灰压白纸，≈1.1:1）⇒ 这里钉住 ≥3:1（图形类最低线）。
-     */
-    if (e.contrast) {
-      console.log('  `</>` 对比度      =', JSON.stringify(e.contrast))
-      ok(e.contrast.ratio >= 3,
-        'adj725c `</>` 与纸张背景的对比度 ≥3:1（不会"看不见"）', JSON.stringify(e.contrast))
-    } else {
-      ok(false, 'adj725c 能量到 `</>` 的字色/底色（对比度）')
-    }
+    ok(e.calls === 1, 'adj866 点一下 = 调一次宿主落点（切回笔记源码）', `calls=${e.calls} err=${e.clickErr}`)
   } else {
-    ok(false, 'adj725 能测「编辑源码」入口', probe.editSource?.error ?? '')
+    ok(false, 'adj866 能测工具条上的「编辑」入口', probe.editSource?.error ?? '')
   }
 
   if (probe.toolbar && !probe.toolbar.error) {
     const t = probe.toolbar
     ok(t.initial.visibility === 'hidden', '工具条默认不可见（visibility:hidden ⇒ 导出不会出现、也不占 Tab 焦点）', t.initial.visibility)
     ok(t.initial.position === 'absolute', '工具条绝对定位（不参与布局）', t.initial.position)
-    ok(t.afterMove.visibility === 'visible', '鼠标移到谱面上后工具条可见', t.afterMove.visibility)
-    ok(t.afterLeave.visibility === 'hidden', '鼠标离开后工具条收起', t.afterLeave.visibility)
+    /**
+     * ⚠ adj785/adj866：**悬停不再驱动显隐**（用户原话：「PC 端鼠标移动时马上显示工具条的操作也不要有，
+     * 就通过点击预览区显/隐工具条」）⇒ 老断言"移到谱面上可见 / 离开后收起"从那时起就一直红灯。
+     * 现在守的是**点击切换**：点一次显示、再点一次收起（并且整条工具条的显隐都不让谱面位移）。
+     */
+    ok(t.afterMove.visibility === 'hidden',
+      'adj785 鼠标移动**不再**显示工具条（悬停那套已按用户要求取消）', t.afterMove.visibility)
+    const toggle = await evalJson(
+      '(function(){var w=document.getElementById("wrap");var tb=w.querySelector(".ijipu-score-toolbar");var s=function(){return getComputedStyle(tb).visibility};var before=s();w.dispatchEvent(new MouseEvent("click",{bubbles:true}));var afterFirst=s();w.dispatchEvent(new MouseEvent("click",{bubbles:true}));return JSON.stringify({before:before,afterFirst:afterFirst,afterSecond:s()})})()',
+    )
+    ok(toggle.before === 'hidden' && toggle.afterFirst === 'visible' && toggle.afterSecond === 'hidden',
+      'adj785/adj866 点击预览区 ⇒ 显示；再点 ⇒ 收起（唯一的手动开关）', JSON.stringify(toggle))
     const s = t.shift
     ok(s.before === s.afterReveal && s.before === s.afterLeave,
       '**谱面不因工具条显隐而位移**（SVG top 前后一致）',
@@ -640,6 +637,11 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
          */
         await c.send('Emulation.setDeviceMetricsOverride', { width: 900, height: 1600, deviceScaleFactor: 1, mobile: false })
         await sleep(200)
+        /**
+         * ⚠ adj866：**点击显形这件事挪进探针内部**（在它还查得到工具条之前点，然后继续用同一个元素引用）——
+         * 因为 `adj793c` 起"外侧落位"会把工具条**搬到 `document.body`**，一旦显形，
+         * `container.querySelector('.ijipu-score-toolbar')` 就查不到了（老流程正是这么断的）。
+         */
         const withClass = await evalJson('window.__ijipuLpHoverProbe("withClass")')
         /**
          * 视觉证据：**宿主那枚 `</>`（实时预览里用户实际看到的那枚）** 的特写。
@@ -661,8 +663,8 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
         console.log('  悬停（保留我们的类）=', JSON.stringify(withClass))
         console.log('  悬停（负对照：摘掉类）=', JSON.stringify(noClass))
         ok(withClass.overflow === 'visible' && withClass.hitCenter === 'toolbar',
-          'adj725 实时预览悬停时：宿主的 overflow:hidden 被放开，工具条**点得到**',
-          JSON.stringify(withClass))
+          'adj725/adj866 实时预览悬停时：宿主的 overflow:hidden 被放开，工具条（点击显形后）**点得到**',
+          JSON.stringify({ hit: withClass.hitCenter, overflow: withClass.overflow, revealed: withClass.revealed }))
         ok(noClass.overflow === 'hidden' && noClass.hitCenter !== 'toolbar',
           'adj725 负对照：摘掉 .ijipu-cm-host ⇒ 宿主确实会裁掉工具条（证明这条修法是承重的）',
           JSON.stringify(noClass))
@@ -710,9 +712,10 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
   ok(Array.isArray(cb) && cb.length === 4 && cb[2] > 0 && cb[3] > 0, '挂载时记录了内容包围盒（data-content-box）')
   ok(!!m, '能在页面上重算出内容并集')
   if (m && Array.isArray(v) && v.length === 4) {
-    const near = (a, b) => Math.abs(a - b) <= 1
-    ok(near(v[0], m.x) && near(v[1], m.y) && near(v[2], m.w) && near(v[3], m.h),
-      '「谱面」viewBox 紧贴内容（与实测并集一致，误差 ≤1px）',
+    // adj786/adj866：口径是**墨迹 ± 每边 2px**（不是"紧贴墨迹"）—— 老断言从 adj786 起就一直是假红灯
+    const near = (a, b) => Math.abs(a - b) <= 0.8
+    ok(near(v[0], m.x - 2) && near(v[1], m.y - 2) && near(v[2], m.w + 4) && near(v[3], m.h + 4),
+      '「谱面」viewBox = 实测墨迹并集 ± **每边 2px**（用户要的四周 2px 留白）',
       `viewBox=${v} measured=${JSON.stringify(m)}`)
     // 旧口径（削四边距）= 整页大小；新口径必须更紧
     const orig = (probe.modes.score?.measured ? null : null)
@@ -723,6 +726,70 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
     ok(inside, '没有裁掉内容（内容并集落在 viewBox 内）')
   } else {
     ok(false, '能读到「谱面」viewBox')
+  }
+
+  /**
+   * ---- adj866（T-5 五条口径的**真机验证**）----
+   *
+   * 前面那些断言是"裁剪几何"的；这一节验的是**本轮新做的交互**（源码正则验不了的"行为"）：
+   *  ① 工具条**恰好 5 位**、顺序与槽位契约一致（真机上数按钮，不看源码）；
+   *  ② 「⋯ 更多」弹出的菜单里**有设置 / 复制三项 / 范围三项**，且范围组**单选打勾**；
+   *  ③ 点菜单项**真的调到**插件方法（`copyScoreImage(source, 1, {box, mode})`、`setExportRange('score')`）；
+   *  ④ 桌面**右键**开的是**同一份菜单**，并且 `preventDefault`（不弹宿主原生菜单）；
+   *  ⑤ 块级缩放 `z`：`z=100` ⇒ **自然尺寸**（渲染宽 == viewBox 宽），`z=*` ⇒ 铺满容器，
+   *     不给 `zoom` 的宿主（文件视图/嵌入）⇒ **既无 zoom 类、宽度照旧铺满**（作用域负对照）。
+   */
+  {
+    const t5 = await evalJson('window.__ijipuT5Probe()')
+    console.log('  T-5 探针          =', JSON.stringify(t5?.slots), JSON.stringify(t5?.menu?.items))
+    if (t5 && t5.error === null) {
+      ok(t5.slots.count === 5 && t5.slots.order.join(',') === 'play,guides,mode,edit,more',
+        'adj866 工具条**恰好 5 位**，槽位顺序 = play,guides,mode,edit,more（真机数按钮）',
+        `count=${t5.slots.count} order=${t5.slots.order.join(',')}`)
+      const labels = (t5.slots.labels || []).join('|')
+      ok(/试听/.test(labels) && /排版/.test(labels) && /编辑/.test(labels) && /更多/.test(labels),
+        'adj866 5 个按钮的文案是 试听/排版/谱面·页面/编辑/更多', labels)
+      ok((t5.menu.items || []).some((s) => s === '设置') &&
+        (t5.menu.items || []).some((s) => s.indexOf('复制为图片（2×，默认）') === 0) &&
+        (t5.menu.items || []).some((s) => s.indexOf('复制为图片（1×）') === 0) &&
+        (t5.menu.items || []).some((s) => s.indexOf('复制为图片（4×）') === 0) &&
+        (t5.menu.items || []).some((s) => s.indexOf('复制 SVG 文本') === 0) &&
+        (t5.menu.items || []).some((s) => s.indexOf('复制谱面源码') === 0),
+        'adj866 「⋯ 更多」菜单含 设置 + 复制组（图片 2×/1×/4× + SVG 文本 + 源码）',
+        JSON.stringify(t5.menu.items))
+      ok((t5.menu.checked || []).length === 1 && (t5.menu.checked[0] || '').indexOf('页面') === 0,
+        'adj866 「导出范围」是单选：默认设置下只有「页面」那一项打勾', JSON.stringify(t5.menu.checked))
+      ok((t5.routed.copyImage1x || []).length === 1 &&
+        t5.routed.copyImage1x[0][1] === 1 &&
+        t5.routed.copyImage1x[0][2] && t5.routed.copyImage1x[0][2].mode === 'score' &&
+        t5.routed.copyImage1x[0][2].box !== null,
+        'adj866 点「复制为图片（1×）」⇒ 调到 `copyScoreImage(source, 1, {box, mode:"谱面"})`（面板自己的实测盒）',
+        JSON.stringify(t5.routed.copyImage1x))
+      ok((t5.routed.setRange || []).length === 1 && t5.routed.setRange[0][0] === 'score',
+        'adj866 点「谱面（墨迹 + 每边 2px）」⇒ 调到 `setExportRange("score")`', JSON.stringify(t5.routed.setRange))
+      ok((t5.routed.checkedAfterSwitch || []).length === 1 && (t5.routed.checkedAfterSwitch[0] || '').indexOf('谱面') === 0,
+        'adj866 切完之后再开菜单 ⇒ ✓ 移到「谱面」那一项（单选状态真的跟着走）',
+        JSON.stringify(t5.routed.checkedAfterSwitch))
+      ok(t5.contextMenu.recorded === 1 && t5.contextMenu.defaultPrevented === true &&
+        (t5.contextMenu.items || []).length === (t5.menu.items || []).length,
+        'adj866 桌面**右键预览区** ⇒ 开的是**同一份菜单**（项数一致）且 `preventDefault`（不弹宿主原生菜单）',
+        JSON.stringify(t5.contextMenu))
+      const zf = t5.zoom.fixed
+      const za = t5.zoom.auto
+      const zn = t5.zoom.none
+      ok(Math.abs(zf.renderedW - zf.viewBoxW) <= 1.5 && zf.renderedW < zf.svgsW - 20 &&
+        /ijipu-zoom-fixed/.test(zf.cls),
+        'adj866 `z=100` ⇒ SVG 按**自然尺寸**渲染（渲染宽 == viewBox 宽，**不拉伸**到容器宽）',
+        JSON.stringify(zf))
+      ok(Math.abs(za.renderedW - za.svgsW) <= 2 && /ijipu-zoom-fit/.test(za.cls),
+        'adj866 `z=*` ⇒ 铺满容器宽（旧行为）', JSON.stringify(za))
+      ok(!/ijipu-zoom/.test(zn.cls) && Math.abs(zn.renderedW - zn.svgsW) <= 2,
+        'adj866 负对照：不给 `zoom` 的宿主（文件视图/嵌入）既**没有** zoom 类、也照旧铺满容器（作用域没外溢）',
+        JSON.stringify(zn))
+      if ((t5.errs || []).length > 0) console.log('  页面错误          =', JSON.stringify(t5.errs))
+    } else {
+      ok(false, 'adj866 T-5 探针能跑完（工具条/菜单/右键/缩放）', JSON.stringify(t5))
+    }
   }
 
   // —— 截图（视觉证据；三种模式各一张）——
