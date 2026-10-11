@@ -19537,3 +19537,76 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   check('adj864 负对照：不插 pHYs 时读出来就是 null（说明这张图在文档里会被按 96 DPI 兜底 ⇒ 巨图）',
     readPngPhys(png1x1) === null && readPngPhys(withPhys) === 144)
 }
+
+/**
+ * ---- adj869（**桌面版白屏的真根因**）：JS 产物里不得出现 `%PDF` 这类"文件魔数" ----
+ *
+ * 现象（0.53.0 真机）：桌面端打开只有一个背景色、界面全空。
+ * 根因链（CDP 抓到的实证）：
+ *  ① `src/export/pdf.ts` 写了字面量 `'%PDF-1.4\n'` ⇒ 原样进 JS 产物；
+ *  ② 该 chunk（`dist/assets/export-*.js`，3033 B）里 `%PDF` 落在**第 390 字节**；
+ *  ③ **Tauri 的 `tauri.localhost` 资源协议在 Windows 上按内容嗅探判 MIME**（`FindMimeFromData`：
+ *     开头一段里见 `%PDF` ⇒ `application/pdf`）⇒ 这个文件以 `application/pdf` 发出
+ *     （同目录其它 `.js` 都是 `text/javascript`）；
+ *  ④ **WebView2 对 module script 严格校验 MIME** ⇒ 拒绝执行 ⇒ 动态 import 断掉 ⇒ `#root` 永远为空。
+ *  ⇒ 只要产物里出现"另一个文件格式的魔数"，这个坑就会以各处不同的形式复发（zip/png/字体同理），
+ *     所以这里做成**通用闸门**：源码不许有连续魔数字面量；`dist/` 存在时连产物一起扫（前 1KB）。
+ */
+{
+  /**
+   * ⚠ 魔数表只留**含非 ASCII / 控制字节**的那些：`MZ`、`GIF8` 这种纯 ASCII 两三个字符
+   * 会在 base64（本项目把音源 sf2 以 base64 打进产物）里**随机误报**（实测 `MZ` 就误报了）✗。
+   */
+  const MAGIC: [string, string][] = [
+    ['%PDF', 'PDF'],
+    ['PK\u0003\u0004', 'ZIP'],
+    ['\u0089PNG', 'PNG'],
+    ['\u00ff\u00d8\u00ff', 'JPEG'],
+    ['\u001f\u008b', 'GZIP'],
+  ]
+  /** 扫源码：`src/**` 里不许出现"连续魔数"（拆开拼写即可，见 pdf.ts 的写法） */
+  const walkSrc = (d: string): string[] =>
+    readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+      const p = join(d, e.name)
+      return e.isDirectory() ? walkSrc(p) : /\.(ts|tsx)$/.test(e.name) ? [p] : []
+    })
+  const srcFiles = walkSrc(join(process.cwd(), 'src'))
+  const offenders: string[] = []
+  for (const f of srcFiles) {
+    /**
+     * ⚠ 这里**不剥注释**、扫**整份源码**（比"只扫代码"更严，也更省事）：
+     * ① 说明文字里为了讲清这件事很容易写出魔数本身，而**注释有可能进产物**（取决于压缩器设置）
+     *    ⇒ 干脆要求"源码任何位置都不许出现连续魔数"（`pdf.ts` 的注释也照着这个口径写 ✓）；
+     * ② 本轮实测：把字面量拆成 `'%' + 'PDF-…'` 会被打包器**常量折叠**拼回去 ✗
+     *    ⇒ 只有"源码里根本不存在这个连续序列"才真正安全（用 `String.fromCharCode` 构造 ✓）。
+     */
+    const text = readFileSync(f, 'utf8')
+    for (const [magic, label] of MAGIC) {
+      if (text.includes(magic)) offenders.push(`${f.replace(process.cwd(), '.')} 含 ${label} 魔数`)
+    }
+  }
+  check('adj869 源码里不得把"文件魔数"连着写进字符串字面量（%PDF/PK/PNG…）——否则会被 Tauri 按内容嗅探判错 MIME ⇒ 桌面版白屏',
+    offenders.length === 0,
+    offenders.join('；') ||
+      `（pdf.ts 用 '%' + 'PDF-1.4\\n' 拼写 ✓；负对照：把拼接改回连续字面量即判红）`)
+  // 负对照：往源码里塞一行连续魔数字面量，判据必须变假（闸门真的在量东西）
+  {
+    const pdfSrc = readFileSync(join(process.cwd(), 'src/export/pdf.ts'), 'utf8')
+    const naive = pdfSrc + "\nconst __naive = '%PDF-1.4\\n'\n"
+    const flagged = MAGIC.some(([magic]) => naive.includes(magic))
+    check('adj869 负对照：源码里一旦出现连续魔数字面量 ⇒ 判据为假（闸门真的在量东西）',
+      flagged && !MAGIC.some(([magic]) => pdfSrc.includes(magic)))
+  }
+  /** 产物（存在才扫）：**整个文件**都不许出现魔数（嗅探窗口在开头，但整份干净更省心） */
+  const distAssets = join(process.cwd(), 'dist/assets')
+  if (existsSync(distAssets)) {
+    const bad: string[] = []
+    for (const f of readdirSync(distAssets)) {
+      if (!f.endsWith('.js')) continue
+      const body = readFileSync(join(distAssets, f)).toString('latin1')
+      for (const [magic, label] of MAGIC) if (body.includes(magic)) bad.push(`${f} 含 ${label}`)
+    }
+    check('adj869 构建产物 dist/assets/*.js 不得含魔数（这一条正是本次白屏的直接判据）',
+      bad.length === 0, bad.join('；'))
+  }
+}

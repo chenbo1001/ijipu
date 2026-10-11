@@ -81,7 +81,28 @@ export function buildPdf(pages: PdfImagePage[], pageW = A4_W_PT, pageH = A4_H_PT
   }
   const endStreamObj = () => put('\nendstream\n')
 
-  put('%PDF-1.4\n')
+  /**
+   * ⚠⚠ 2026-10-11（**桌面版白屏的真根因，别再写回字面量** ✗）：
+   *
+   * 这里**绝不能**让"百分号 + PDF"以连续字面量形式进 JS 产物 ✗ —— 而
+   * **Tauri 的 `tauri.localhost` 资源协议在 Windows 上按内容嗅探判 MIME**（`FindMimeFromData`：
+   * 开头一段里看到那个魔数就判 `application/pdf`）⇒ 那个 chunk 被以 `application/pdf` 发出 ⇒
+   * **WebView2 对 module script 严格校验 MIME** ⇒
+   * `Failed to load module script: … MIME type of "application/pdf"` ⇒ 动态 import 断掉 ⇒
+   * **整个桌面端白屏（只剩背景色）** ✗。
+   *
+   * 实证（0.53.0 真机 + CDP）：`dist/assets/export-*.js`（3033 B）里魔数落在**第 390 字节**，
+   * 该文件响应的 `Content-Type` 正是 `application/pdf`（同目录其它 `.js` 都是 `text/javascript`）；
+   * 这个 chunk 一挂，模块图就断在这里，`#root` 始终为空。
+   *
+   * ⚠ 修法**不能**只把字面量拆成 `'%' + 'PDF-1.4\n'`、也不能用 `String.fromCharCode(0x25)`
+   * —— 打包器会**常量折叠**再拼回去或直接算出字面量 ✗（两种写法实测都又出现在第 390 字节）。
+   * 唯一稳妥的是**分两次写入**：两个字符串字面量在产物里**永远相邻不了** ✓，
+   * 而写进 PDF 的字节与原来**完全一致**（`%` + `PDF-1.4\n`）✓。
+   * 机器闸门：应用冒烟 `adj869`（源码任意位置 + 构建产物全文件都不许含该魔数，含负对照）。
+   */
+  put('%')
+  put('PDF-1.4\n')
   // 二进制注释行：声明本文件含二进制数据（阅读器据此按二进制处理）
   putBytes(new Uint8Array([0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a]))
 
