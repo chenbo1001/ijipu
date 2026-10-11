@@ -8,7 +8,8 @@
  *  · 决策①要求"同一个 exe 带子命令"：桌面端最终由 `src-tauri` 的入口判断"带子命令就不进 GUI"，
  *    再把同一份 `runCli` 接上（P3；届时复用本文件的 IO 实现 ✓，不另写一套 ✗）。
  */
-import { readFile, writeFile, readdir, access } from 'node:fs/promises'
+import { readFile, writeFile, readdir, access, mkdir } from 'node:fs/promises'
+import { dirname } from 'node:path'
 const enc = new TextEncoder()
 /**
  * ⚠ 不要 `import process from 'node:process'` ✗ —— 本文件以 node target 打成 CJS 时，
@@ -34,8 +35,17 @@ const io: CliIo = {
     return Buffer.concat(chunks).toString('utf8')
   },
   readFile: (p) => readFile(p, 'utf8'),
-  /** 文本或二进制：`Uint8Array` 直接落盘（MIDI，adj802） */
-  writeFile: (p, data) => (typeof data === 'string' ? writeFile(p, data, 'utf8') : writeFile(p, data)),
+  /**
+   * 文本或二进制：`Uint8Array` 直接落盘（MIDI，adj802）。
+   * adj803：写之前**补齐父目录** —— `batch`/`render -o 子目录/x.svg` 在目录不存在时
+   * 原来会直接 ENOENT 失败 ✗（实测踩到），这里统一 mkdir -p（父目录为空则跳过）。
+   */
+  writeFile: async (p, data) => {
+    const dir = dirname(p)
+    if (dir !== '' && dir !== '.' && dir !== p) await mkdir(dir, { recursive: true })
+    if (typeof data === 'string') await writeFile(p, data, 'utf8')
+    else await writeFile(p, data)
+  },
   async listDir(dir) {
     // 供 `batch` 用；只回文件名（不含路径），排序保证可复现
     const names = await readdir(dir)

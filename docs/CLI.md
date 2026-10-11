@@ -27,10 +27,19 @@ ijipu <命令> [选项]
 | `format` | 按应用规范**规范化源码**（与应用编辑器/插件格式化同一实现） | `-i` `-o` `--check` `--in-place` `--diff` |
 | `lint` | 语法检查（错误/告警） | `-i` `--format text\|json\|gh` |
 | `info` | 谱面概况（标题/调号/行数/分组/问题数） | `-i` `-t text\|json` |
-| `render` | 源码 → **SVG**（每页一段）或 **MIDI** | `-i` `-t svg\|midi` `-o` |
-| `batch` | **目录批量**转换（SVG / MIDI / 规范化源码） | `--in <目录>` `-o <目录>` `-t svg\|midi\|fmt` |
+| `render` | 源码 → **SVG**（每页一段）／**MIDI**／**PNG·JPG·PDF**（需桌面端通道） | `-i` `-t svg\|midi\|png\|jpg\|pdf` `-o` |
+| `play` | 导出音频：**MIDI**（任意环境）／**WAV**（需桌面端通道） | `-i` `-t midi\|wav` `-o` |
+| `batch` | **目录批量**转换（SVG / MIDI / 规范化源码）；输出目录会自动创建 | `--in <目录>` `-o <目录>` `-t svg\|midi\|fmt` |
 
-未实现（**会报错**）：`play` `settings` `config` `doctor` `completions`；`render -t png|jpg|pdf|wav` 属 **P3**。
+未实现（**会报错**）：`settings` `config` `doctor` `completions`。
+
+### P3：位图/音频为什么在独立 Node 里"报错"而不是"硬做"
+`png/jpg/pdf` 需要 **canvas + 字体 + 分页**，`wav` 需要 **AudioContext + 音色库** ——
+这些能力**只在应用侧存在**（决策②：走**隐藏窗口渲染**，复用 `src/export/*` 与应用音色库 ⇒ 与 GUI 导出像素级一致 ✓）。
+所以本 CLI 把它们做成**由宿主注入的可选能力**：
+- 在**桌面端 exe** 里（同一 exe 的子命令，决策①）由宿主注入 ⇒ 正常产出 ✓；
+- 在**独立 Node** 环境里 ⇒ **明确报错 + 退出码 4**（"需要隐藏窗口渲染通道"），并给出可用的替代（`-t svg` / `-t midi`）✓
+  —— **不产出半成品、不假装成功** ✓。
 
 > **render 的 SVG 口径（重要）**：CLI 在 Node 里**没有 canvas 实测角标墨迹** ⇒ 引擎按**估算宽**排版，
 > 与应用（实测版）可能有**亚像素差异**；版式、音符位置与页数一致 ✓。

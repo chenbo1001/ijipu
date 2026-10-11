@@ -32,6 +32,18 @@ export type CliIo = {
   exists(path: string): Promise<boolean>
   /** 列目录里的文件（`batch` 用；只返回文件名，不含路径） */
   listDir(dir: string): Promise<string[]>
+  /**
+   * adj803（A·P3）**可选能力**：把 SVG 页栅格化成 png/jpg/pdf。
+   *
+   * 为什么是"可选能力"而不是实现细节：位图渲染需要 **canvas/字体/分页**（应用侧已有 ✓），
+   * 纯 Node 环境下**不可能**凭空给出 ✗ ⇒ 由**宿主**（桌面端 exe 的隐藏窗口渲染通道）注入 ✓。
+   * 未注入时 CLI **明确报错**（退出码 4）而不是假装成功 ✓。
+   */
+  rasterize?: (req: { svgs: string[]; type: 'png' | 'jpg' | 'pdf'; scale: number; title: string }) => Promise<Uint8Array[]>
+  /**
+   * adj803（A·P3）**可选能力**：MIDI → WAV（需要 AudioContext + 音色库 ⇒ 同理由宿主注入）。
+   */
+  synthesize?: (midi: Uint8Array) => Promise<Uint8Array>
   out(text: string): void
   err(text: string): void
 }
@@ -58,10 +70,13 @@ const HELP = `iJipu 命令行（爱记谱）
 
 用法：ijipu [全局选项] <命令> [命令选项]
 
-命令（P1 已实现）：
+命令（P1–P3 已实现）：
   format   -i <文件|-> [-o <文件|->] [--check] [--in-place] [--diff]   按应用规范规范化源码
   lint     -i <文件|-> [--format text|json|gh]                          语法检查（有错 ⇒ 退出码 3）
   info     -i <文件|-> [-t text|json]                                   谱面概况（行数/分组/问题数）
+  render   -i <文件|-> -t svg|midi|png|jpg|pdf -o <输出>                渲染/导出（位图需桌面端通道）
+  play     -i <文件|-> -t midi|wav -o <输出>                            导出音频（WAV 需桌面端通道）
+  batch    --in <目录> -o <目录> [-t svg|midi|fmt]                      目录批量转换
 
 全局选项：
   --json            机器可读输出（带 schema 版本）
@@ -239,9 +254,65 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
    * ⚠ SVG 走引擎**估算**角标墨迹（Node 里没有 canvas 实测 ⇒ 与应用的实测版会有亚像素差异，
    *    这是"CLI 无 DOM"的必然取舍，已在 docs/CLI.md 写明口径）。
    */
-  const known = new Set(['format', 'lint', 'info', 'render', 'batch'])
+  const known = new Set(['format', 'lint', 'info', 'render', 'play', 'batch'])
   if (!known.has(p.command)) {
-    io.err(`命令 “${p.command}” 属于 P3–P4，尚未实现（用 --help 看已实现命令）。已实现：format / lint / info / render / batch`)
+    io.err(`命令 “${p.command}” 属于 P4，尚未实现（用 --help 看已实现命令）。已实现：format / lint / info / render / play / batch`)
+    return { code: EXIT.usage }
+  }
+
+  // ── play（P3）：源码 → 音频（MIDI 任意环境；WAV 需宿主合成）────
+  if (p.command === 'play') {
+    let src = ''
+    try {
+      src = (await readInput(p.inputs[0], io)).text
+    } catch (e) {
+      io.err(`读输入失败：${String(e)}`)
+      return { code: EXIT.noInput }
+    }
+    const type = (p.type ?? (p.output?.toLowerCase().endsWith('.wav') ? 'wav' : 'midi')).toLowerCase()
+    const { errors } = splitParseIssues(parseJps(src))
+    if (errors.length > 0) {
+      io.err(`源码有 ${errors.length} 个错误，先修好再导出（用 lint 看细节）`)
+      return { code: EXIT.syntax }
+    }
+    const parsed = parseJps(src)
+    const layout = layoutScore(parsed, mergeJpsConfig(src, defaultPageConfig))
+    const title = (parsed.header as unknown as Record<string, unknown>)['title']
+    const bytes = eventsToMidi(buildPlaySequence(parsed, layout, 60).events, {
+      bpm: 60,
+      title: typeof title === 'string' ? title : 'iJipu',
+    })
+    if (type === 'midi') {
+      if (p.output === null || p.output === '-') {
+        io.err('MIDI 是二进制，必须用 -o 指定文件（不能用 stdout）')
+        return { code: EXIT.usage }
+      }
+      await io.writeFile(p.output, bytes)
+      if (!p.quiet) line(io, `已写入 ${p.output}（MIDI，${bytes.length} 字节）`)
+      return { code: EXIT.ok, json: { schema: 1, type: 'midi', output: p.output, bytes: bytes.length } }
+    }
+    if (type === 'wav') {
+      /**
+       * adj803（A·P3）：WAV 需要"采样合成"（AudioContext + 音色库 ⇒ 应用侧已有 ✓）；
+       * 由宿主注入 `synthesize`（桌面端隐藏窗口/后台合成）✓；无此能力 ⇒ 明确报错 ✓。
+       */
+      if (io.synthesize === undefined) {
+        io.err(
+          'WAV 需要采样合成（音色库 + AudioContext），当前环境没有该能力。\n' +
+            '  可用：-t midi（任意环境）｜或改用桌面端：ijipu play -i <谱> -t wav -o <输出.wav>',
+        )
+        return { code: EXIT.render }
+      }
+      if (p.output === null || p.output === '-') {
+        io.err('WAV 是二进制，必须用 -o 指定文件（不能用 stdout）')
+        return { code: EXIT.usage }
+      }
+      const wav = await io.synthesize(bytes)
+      await io.writeFile(p.output, wav)
+      if (!p.quiet) line(io, `已写入 ${p.output}（WAV，${wav.length} 字节）`)
+      return { code: EXIT.ok, json: { schema: 1, type: 'wav', output: p.output, bytes: wav.length } }
+    }
+    io.err(`play 的 -t 支持 midi | wav（收到 “${type}”）`)
     return { code: EXIT.usage }
   }
 
@@ -275,9 +346,45 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       if (!p.quiet) line(io, `已写入 ${target}（MIDI，${bytes.length} 字节）`)
       return { code: EXIT.ok, json: { schema: 1, type: 'midi', output: target, bytes: bytes.length } }
     }
-    if (type !== 'svg' && type !== 'text') {
-      io.err(`render 的 -t 目前支持 svg | midi（收到 “${type}”；png/jpg/pdf/wav 属 P3，走隐藏窗口渲染）`)
+    if (type !== 'svg' && type !== 'text' && type !== 'png' && type !== 'jpg' && type !== 'pdf') {
+      io.err(`render 的 -t 支持 svg | midi | png | jpg | pdf（收到 “${type}”；wav 请用 play -t wav）`)
       return { code: EXIT.usage }
+    }
+    if (type === 'png' || type === 'jpg' || type === 'pdf') {
+      /**
+       * adj803（A·P3）：位图/PDF 需要 canvas/字体/分页 ⇒ 由**宿主**注入 `rasterize`
+       * （桌面端 = 隐藏窗口渲染，决策②；复用应用 `src/export/*` ⇒ 与 GUI 导出像素级一致 ✓）。
+       * 独立 Node 环境下**明确报错**（退出码 4 = 渲染失败），不产出半成品 ✗。
+       */
+      if (io.rasterize === undefined) {
+        io.err(
+          `-t ${type} 需要"隐藏窗口渲染"通道（桌面端 exe 内置）；当前环境没有该能力。\n` +
+            `  可用：-t svg（矢量，任意环境）｜或改用桌面端：ijipu render -i <谱> -t ${type} -o <输出>`,
+        )
+        return { code: EXIT.render }
+      }
+      const layoutP = layoutScore(parsed, cfg)
+      const svgsP = renderScoreToSvg(layoutP)
+      const title = (parsed.header as unknown as Record<string, unknown>)['title']
+      const files = await io.rasterize({
+        svgs: svgsP,
+        type,
+        scale: 2,
+        title: typeof title === 'string' ? title : 'iJipu',
+      })
+      if (p.output === null || p.output === '-') {
+        io.err(`${type.toUpperCase()} 是二进制，必须用 -o 指定文件（不能用 stdout）`)
+        return { code: EXIT.usage }
+      }
+      const base = p.output.replace(new RegExp(`\\.${type}$`, 'i'), '')
+      const made: string[] = []
+      for (let i = 0; i < files.length; i += 1) {
+        const path = files.length > 1 ? `${base}-${i + 1}.${type}` : `${base}.${type}`
+        await io.writeFile(path, files[i])
+        made.push(path)
+      }
+      if (!p.quiet) line(io, `已写入 ${made.join('、')}`)
+      return { code: EXIT.ok, json: { schema: 1, type, pages: files.length, outputs: made } }
     }
     const layout = layoutScore(parsed, cfg)
     const svgs = renderScoreToSvg(layout)
