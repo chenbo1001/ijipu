@@ -1,0 +1,233 @@
+/**
+ * docs/docs.css — 官网文档页（`/manual/`、`/syntax/`）样式（adj876）
+ *
+ * 只被 `src/docs/render.ts` 引入（两个文档页共用），**不进应用 bundle、也不进首页**。
+ * 色值一律走 `--site-*` 变量（由 `brand/siteVars.ts` 注入），主题与应用一致：深色。
+ *
+ * 正文的 HTML 结构由 `help/markdown.ts` 产出（h1–h6 / p / ul·ol / pre / table.doc-md-table /
+ * blockquote / code / a），所以下面的正文样式是**按那份产出**写的，两边改动要一起看。
+ */
+
+:root {
+  --site-max: 1180px;
+  --site-toc-w: 258px;
+  --site-topbar-h: 56px;
+}
+
+* { box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  /* 锚点跳转时给吸顶栏留出空间（否则标题会被顶栏盖住） */
+  scroll-padding-top: calc(var(--site-topbar-h) + 16px);
+}
+
+body {
+  margin: 0;
+  background: var(--site-bg);
+  color: var(--site-text);
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  line-height: 1.75;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--site-accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---------- 顶栏 ---------- */
+.doc-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  height: var(--site-topbar-h);
+  background: rgba(15, 21, 38, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--site-border);
+}
+.doc-topbar-inner {
+  max-width: var(--site-max);
+  height: 100%;
+  margin: 0 auto;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.doc-brand { display: flex; align-items: center; gap: 8px; color: var(--site-text); font-size: 15px; }
+.doc-brand:hover { text-decoration: none; }
+.doc-brand b { color: var(--site-accent); }
+.doc-switch { display: flex; gap: 6px; margin-left: auto; }
+.doc-switch a {
+  padding: 5px 12px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  color: var(--site-text-2);
+  font-size: 14px;
+}
+.doc-switch a:hover { color: var(--site-text); background: var(--site-panel-hover); text-decoration: none; }
+.doc-switch a.active { color: var(--site-text); background: var(--site-panel); border-color: var(--site-border); }
+.doc-topbar .doc-open {
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: var(--site-accent);
+  color: #06222a;
+  font-size: 14px;
+  font-weight: 600;
+}
+.doc-topbar .doc-open:hover { background: #6ff5ff; text-decoration: none; }
+
+/* 窄屏才出现的目录按钮 */
+.toc-toggle {
+  display: none;
+  background: none;
+  border: 1px solid var(--site-border);
+  border-radius: 8px;
+  color: var(--site-text);
+  font-size: 14px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+
+/* ---------- 布局 ---------- */
+.doc-layout {
+  max-width: var(--site-max);
+  margin: 0 auto;
+  padding: 26px 20px 80px;
+  display: grid;
+  grid-template-columns: var(--site-toc-w) minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+
+/* ---------- 目录 ---------- */
+.doc-toc {
+  position: sticky;
+  top: calc(var(--site-topbar-h) + 20px);
+  max-height: calc(100vh - var(--site-topbar-h) - 44px);
+  overflow-y: auto;
+  font-size: 13.5px;
+  padding-right: 6px;
+}
+.toc-group {
+  margin: 16px 0 6px;
+  color: var(--site-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.toc-group:first-child { margin-top: 0; }
+.toc-item {
+  display: block;
+  padding: 4px 9px;
+  border-left: 2px solid transparent;
+  border-radius: 0 6px 6px 0;
+  color: var(--site-text-2);
+}
+.toc-item:hover { color: var(--site-text); background: var(--site-panel-hover); text-decoration: none; }
+.toc-item.active { color: var(--site-accent); border-left-color: var(--site-accent); background: var(--site-panel); }
+
+/* ---------- 正文（对应 help/markdown.ts 的产出） ---------- */
+.doc-body { min-width: 0; font-size: 15.5px; }
+.doc-body h1 { font-size: 24px; margin: 42px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--site-border); }
+.doc-body h1:first-child { margin-top: 0; }
+.doc-body h2 { font-size: 19.5px; margin: 32px 0 12px; }
+.doc-body h3 { font-size: 16.5px; margin: 24px 0 10px; color: var(--site-text); }
+.doc-body h4 { font-size: 15.5px; margin: 20px 0 8px; color: var(--site-text-2); }
+.doc-body p { margin: 12px 0; color: var(--site-text-2); }
+.doc-body li { margin: 5px 0; color: var(--site-text-2); }
+.doc-body ul, .doc-body ol { padding-left: 24px; margin: 12px 0; }
+.doc-body strong { color: var(--site-text); }
+.doc-body hr { border: none; border-top: 1px solid var(--site-border); margin: 28px 0; }
+
+/* 行内代码 */
+.doc-body code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
+  font-size: 0.9em;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--site-border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: #ffd8a8;
+}
+
+/* 代码块：谱面示例都在这儿，横向可滚、不换行 */
+.doc-body pre {
+  background: #0b1020;
+  border: 1px solid var(--site-border);
+  border-radius: 9px;
+  padding: 14px 16px;
+  margin: 14px 0;
+  overflow-x: auto;
+  line-height: 1.7;
+}
+.doc-body pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--site-text);
+  font-size: 13.5px;
+}
+
+/* 表格：语法参考大量使用；窄屏让它自己横滚，而不是把整页撑宽 */
+.doc-body table.doc-md-table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 14px 0;
+  font-size: 14px;
+}
+.doc-md-table th, .doc-md-table td {
+  border: 1px solid var(--site-border);
+  padding: 7px 11px;
+  text-align: left;
+  vertical-align: top;
+}
+.doc-md-table th { background: var(--site-panel); color: var(--site-text); white-space: nowrap; }
+.doc-md-table td { color: var(--site-text-2); }
+
+/* 引用块（两份文档开头都用它写"怎么读这份文档"） */
+.doc-body blockquote {
+  margin: 14px 0;
+  padding: 10px 16px;
+  border-left: 3px solid var(--site-accent);
+  background: var(--site-panel);
+  border-radius: 0 8px 8px 0;
+}
+.doc-body blockquote p { margin: 4px 0; }
+
+/* 加载占位（正文由 JS 注入，注入前显示） */
+#doc-body:empty::before {
+  content: "正在载入文档…";
+  color: var(--site-muted);
+  font-size: 14px;
+}
+
+/* 脚注式返回（页脚） */
+.doc-foot {
+  max-width: var(--site-max);
+  margin: 0 auto;
+  padding: 20px;
+  border-top: 1px solid var(--site-border);
+  color: var(--site-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ---------- 窄屏 ---------- */
+@media (max-width: 860px) {
+  .doc-layout { grid-template-columns: 1fr; gap: 18px; padding-top: 16px; }
+  .toc-toggle { display: block; }
+  .doc-switch { display: none; }
+  .doc-toc {
+    position: static;
+    max-height: none;
+    display: none;
+    background: var(--site-panel);
+    border: 1px solid var(--site-border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .doc-toc.open { display: block; }
+}

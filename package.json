@@ -1,7 +1,7 @@
 {
   "name": "ijipu",
   "private": true,
-  "version": "0.54.0",
+  "version": "0.55.0",
   "license": "AGPL-3.0",
   "author": "蜗牛🐌 <snail.zh@qq.com>",
   "description": "iJipu（爱记谱）—— 下一代代码式简谱制谱引擎。码即成，谱自现。",
@@ -13,6 +13,7 @@
     "lint": "oxlint",
     "check:encoding": "node scripts/check-encoding.mjs",
     "preview": "vite preview",
+    "verify:site": "node scripts/verify-site.mjs",
     "smoke": "npm run check:encoding && npm run cli:typecheck && npm run cli:build && vite build --config vite.smoke.config.ts && node dist-smoke/smoke.cjs && node dist-smoke/cli-assert.cjs",
     "release:body": "node scripts/release-body.mjs",
     "build:embed": "npm run gen:info && node scripts/embed-assets.mjs && tsc -b && vite build --config vite.config.embed.mjs",

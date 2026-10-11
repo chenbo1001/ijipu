@@ -41,6 +41,17 @@ export const brand = {
   siteUrl: 'https://ijipu.pages.dev',
   /** Obsidian 插件仓库（同一位作者，用户在 Obsidian 里用得上） */
   obsidianRepoUrl: 'https://github.com/snailhome/obsidian-ijipu',
+  /**
+   * adj876（官网改版）：应用的 GitHub 仓库与桌面端下载地址。
+   *
+   * 放在品牌层而不是写死在首页 HTML 里——首页、文档页、以后的控制台都在用这些地址，
+   * 换仓库/换下载策略时只改这一处（写死在 HTML 里就会各改各的、漏一处）。
+   * `releases/latest` 而不是 `releases/tag/vX.Y.Z`：**永远指向最新版**，不用跟着发版改。
+   */
+  repoUrl: 'https://github.com/snailhome/ijipu',
+  desktopDownloadUrl: 'https://github.com/snailhome/ijipu/releases/latest',
+  /** Obsidian 社区插件市场页（插件 id 见 obsidian-ijipu/manifest.json 的 `id`） */
+  obsidianMarketUrl: 'https://obsidian.md/plugins?id=ijipu',
 } as const
 
 /** 品牌色板 */

@@ -1,19 +1,20 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "iJipu",
-  "version": "0.54.0",
+  "version": "0.55.0",
   "identifier": "com.ijipu.app",
   "build": {
     "frontendDist": "../dist",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "devUrl": "http://localhost:5173"
+    "devUrl": "http://localhost:5173/app/"
   },
   "app": {
     "withGlobalTauri": true,
     "windows": [
       {
         "title": "爱记谱 iJipu",
+        "url": "app/index.html",
         "width": 1280,
         "height": 800,
         "minWidth": 480,

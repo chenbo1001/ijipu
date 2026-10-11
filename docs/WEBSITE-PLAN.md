@@ -433,7 +433,31 @@ build: {
 
 ---
 
-## 十、附：我实际查证过的命令与输出
+## 十、附：P0 落地结果与**与方案的偏差**（adj876，v0.55.0）
+
+P0 已实现并跑通（`lint` 0 错 / `tsc` 0 错 / `build` ✔ / `smoke` 全绿 / `verify:site` 38 条全绿）。
+以下是执行中与本文档原方案**不一致**的地方，以代码为准：
+
+| # | 方案里写的 | 实际做成 | 为什么改 |
+|---|---|---|---|
+| 1 | `src/docs/main.ts` 一个入口 | 拆成 `render.ts`（共用）+ `manual.ts` / `syntax.ts`（各导自己那份 md） | 合并的话 `/manual/` 会把 80KB 的语法说明一起下下来 |
+| 2 | 新增 `src/brand/landing.ts` 放首页文案 | **不建**。首页正文写在 `index.html` 里；只新增 `brand/siteVars.ts`（品牌色注入）与 `brand/siteLinks.ts`（外链填充），地址放 `brand/tokens.ts` | SEO（中文场景百度不执行 JS）+ 首屏不闪；代价是首页文案不在 brand 层，已在 `index.html` 头部注释写明取舍 |
+| 3 | SW 升 v4 时**迁移 `/fonts/*` 缓存**（担心重下 30MB） | **不需要迁移** | 实测 `/fonts/*.otf` 早在 adj194 就随"改用系统字体栈"移除了，全仓已无引用 —— 那段分支是死代码，本次删掉。**换缓存名因此是零代价的** |
+| 4 | 图清单含 `desktop.webp` / `obsidian.webp` / `mobile.webp` / `playback.webp` | 只做 7 张：`hero` / `demo-score` / `view-code` / `view-split` / `view-preview` / `voice-multi` / **`export`** | 前两张需要桌面端与 Obsidian 运行环境（本机没有）；`mobile` 非必需；**`playback` 改 `export`** —— 截图环境离网，点「试听」拍到的是"音源下载失败"提示（见 `E-2026-395`） |
+| 5 | 方案未提 favicon | 新增 `public/favicon.ico`（4.8KB，从 Logo 生成） | 浏览器会主动请求根 `/favicon.ico`，不加就有一条 404（首页断言当场抓到） |
+| 6 | 文档页页头另放 `h1` + 一句说明 | **页头不放标题**，大标题由正文自己的第一个 `h1` 承担 | 否则同一个文档名出现两遍，目录还要跟着特判 |
+| 7 | "必须同步改的 6 处" | 确实是 6 处，全部改完 | —— |
+| 8 | 方案里的 smoke 断言清单（9 条） | 实际 **28 条**（另 `verify:site` 38 条） | 写的时候把"真实文档的目录锚点 vs 正文标题 id 逐个相同"等更强的判据也加了进去 —— 正是它抓到了 `extractToc` 不跳代码块这个真缺陷 |
+
+**新增的长期资产**：`npm run verify:site`（`scripts/verify-site.mjs`）—— 改完站点跑一次，
+它会起本地服务 + 无头 Chrome 验证四个页面，并重新生成首页素材图。
+
+**P1 / P2 尚未做**：真实多端截图（桌面端、Obsidian、手机）、404 页、`robots.txt` / `sitemap.xml`、
+文档页代码块"复制"按钮、以及 P2 的**首页内嵌真引擎 live demo**。
+
+---
+
+## 十一、附：我实际查证过的命令与输出
 
 ```
 $ git -C ijipu remote -v

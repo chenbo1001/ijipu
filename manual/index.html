@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/x-icon" href="/icons/Jianpu.ico" />
+    <link rel="icon" type="image/png" href="/icons/Jianpu.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>操作手册 - 爱记谱 iJipu</title>
+    <meta
+      name="description"
+      content="爱记谱 iJipu 操作手册：界面概览、五分钟上手、编写乐谱、预览、试听、设置、导出、文件与保存、快捷键、常见问题。"
+    />
+    <meta name="theme-color" content="#0F1526" />
+    <!--
+      adj876（官网分层）：`/manual/` 是「操作手册」的**网页版**。
+      正文与应用内「帮助 → 操作手册」读的是**同一份** `docs/USER-GUIDE.md`，
+      经同一个渲染器（`src/help/markdown.ts`）转 HTML ⇒ 改一处两边同时生效。
+      正文由 `src/docs/manual.ts` 在运行时注入（#doc-body），这里只留骨架。
+      防白闪：在样式表到位前先把底色定住。
+    -->
+    <style>
+      html { background: #0f1526; color-scheme: dark; }
+      body { margin: 0; color: #e8ecf8; font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    </style>
+  </head>
+  <body>
+    <header class="doc-topbar">
+      <div class="doc-topbar-inner">
+        <a class="doc-brand" href="/">
+          <img src="/icons/Jianpu.png" alt="爱记谱 iJipu" width="24" height="24" />
+          <span>爱记谱 <b>iJipu</b></span>
+        </a>
+        <button class="toc-toggle" id="toc-toggle" type="button" aria-expanded="false">目录</button>
+        <nav class="doc-switch">
+          <a href="/manual/">操作手册</a>
+          <a href="/syntax/">脚本语法说明</a>
+        </nav>
+        <a class="doc-open" href="/app/">打开应用 →</a>
+      </div>
+    </header>
+
+    <div class="doc-layout">
+      <!-- 目录由 JS 从正文标题生成（extractToc），与正文标题 id 同源 -->
+      <nav class="doc-toc" id="doc-toc" aria-label="目录"></nav>
+      <main class="doc-main">
+        <article class="doc-body" id="doc-body"></article>
+      </main>
+    </div>
+
+    <footer class="doc-foot">
+      <a href="/">返回首页</a> · <a href="/app/">打开应用</a> ·
+      <a href="/syntax/">脚本语法说明</a> ·
+      <a data-l="repoUrl" href="https://github.com/snailhome/ijipu" rel="noreferrer">发现问题 / 提建议</a>
+    </footer>
+
+    <script type="module" src="/src/docs/manual.ts"></script>
+  </body>
+</html>

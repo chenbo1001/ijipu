@@ -182,7 +182,19 @@ export function embedInlinePlugin(opts) {
       for (const f of cssFiles) styles += `<style>${(await readIf(f)).toString('utf8')}</style>\n`
 
       // ---- 3. HTML：摘掉外链、按 /assets/xxx 内联其余资产、插入 style/script ----
-      let html = (await readIf('index.html')).toString('utf8')
+      /**
+       * adj876（官网分层）：应用外壳搬到了 `app/index.html`（根 `index.html` 现在是介绍首页）。
+       * Vite 会保留入口相对 root 的目录 ⇒ 这里的源路径是 `app/index.html`。
+       * 最终的单文件产物**仍然写在 outDir 根**（下面的 `writeFile`），所以
+       * `embed-emit.mjs` / `embed-smoke.mjs` 读 `dist-embed-app/index.html` 的路径不用改。
+       */
+      const shell = await readIf('app/index.html')
+      if (!shell) {
+        throw new Error(
+          '[embed-inline] 产物里找不到 app/index.html —— 请核对 vite.config.embed.mjs 的 rollupOptions.input',
+        )
+      }
+      let html = shell.toString('utf8')
 
       html = html.replace(/<script[^>]*\bsrc="[^"]*"[^>]*><\/script>/g, '')
       html = html.replace(/<link[^>]+rel="stylesheet"[^>]*>/g, '')
@@ -217,6 +229,9 @@ export function embedInlinePlugin(opts) {
         console.log(`[debug] 保留 assets/ 以便核对：${cssFiles.join(', ')}`)
       } else {
         await rm(path.join(outDir, 'assets'), { recursive: true, force: true })
+        // adj876：应用外壳原本落在产物根，现在 Vite 把它放在 `app/` 下（保留入口目录层级）。
+        // 单文件产物已经写到根 index.html，这个中间目录一并清掉。
+        await rm(path.join(outDir, 'app'), { recursive: true, force: true })
       }
 
       const size = (await stat(path.join(outDir, 'index.html'))).size

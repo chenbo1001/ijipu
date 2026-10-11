@@ -1,3 +1,70 @@
+## [0.55.0] — 2026-10-12（**官网分层**：`/` 介绍首页 + `/app/` 应用 + `/manual/` `/syntax/` 文档页；MINOR）
+
+> 主题：`ijipu.pages.dev` 的根路径从"直接是应用"改成**介绍性首页**，应用与两份文档各占一个子路径。
+> 新用户先看到"这是什么、能干什么"，老用户与老书签仍然一步进应用。
+> 涉及**桌面端入口、Obsidian 嵌入版入口、Service Worker、PWA manifest** 四处联动（见下）。
+
+### 新增：站点分层与介绍首页（adj876）
+
+- **URL 结构**：`/`（介绍首页）、`/app/`（应用，即原来的根 `index.html`）、`/manual/`（操作手册）、
+  `/syntax/`（脚本语法说明）。构建改为 **Vite 多页面**（`vite.config.ts` 的 `build.rollupOptions.input` 列 4 个入口），
+  Cloudflare Pages 不用改任何配置。
+- **首页**：Hero（Slogan + 双按钮 + 版本号）、"一屏看懂"（左 `.jps` 源码 / 右渲染出的谱面）、
+  **8 张功能卡**、三视图与复杂谱两段图文、**一排 6 个入口**（应用/手册/语法/桌面端/插件/赞赏）、
+  6 条 FAQ、页脚；另含**微信赞赏弹层**（复用 `/icons/good.png`）与
+  **「你以前用过 → 直接进应用」回访提示条**（只在 localStorage 有应用写入的 `ijipu.*` 键时出现，可永久关闭）。
+- **首页刻意做得极轻**：正文写在 HTML 里（SEO 与首屏），JS 只做四件小事
+  （注入品牌色、填外部链接、填版本号、少量交互）⇒ 首页 JS 约 **4KB**，**不含 React、不含引擎**，
+  有 smoke 断言守着。
+- **文档页**：`/manual/`、`/syntax/` 与应用内「帮助」**同源** —— 同一份 `docs/*.md`、
+  同一个渲染器，左侧目录（滚动高亮）与正文标题 id 由同一套 slug 函数产出。
+- **外部地址单一来源**：GitHub / 下载 / 插件地址集中在 `brand/tokens.ts`，
+  页面里只写 `data-l="<键名>"`，由 `brand/siteLinks.ts` 填（换仓库只改一处）。
+
+### 重构：Markdown 渲染器抽出为纯模块（adj876）
+
+- `mdToHtml` / `inlineMd` / `esc` 从 `dialogs/DocDialog.tsx`（组件文件、且未导出）移到
+  **`src/help/markdown.ts`**，并新增 `extractToc()` 与标题 id 生成。
+  两个消费方（应用内帮助、官网文档页）因此**不可能各写一份**。
+- 修一个真实缺陷：`extractToc` 原先**不跳过代码块**，而 `.jps` 的注释行就长成 `# 注释行…`
+  ⇒ 目录里会混进一堆点不动的条目。现与正文用同一个围栏判据。
+- 新增 smoke 段 `[160]`（**28 条**）：覆盖四份 HTML 的角色、首页体积、manifest、
+  Tauri/嵌入版入口、SW 回退分派（抠 `sw.js` 原文执行 + 负对照）、
+  以及**两份真实文档**的"目录锚点与正文标题 id 逐个相同 / 无重复 / 未混入代码块注释"。
+
+### 修复/加固：四处联动（adj876）
+
+- **桌面壳（Tauri）**：`app.windows[0].url` 指到 `app/index.html`、`devUrl` 改 `http://localhost:5173/app/`
+  —— 不改的话双击图标打开的是介绍首页；
+- **Obsidian 嵌入版**：`vite.config.embed.mjs` 的入口改 `app/index.html`，
+  `embed-inline-plugin.mjs` 跟着改读 `app/index.html`（单文件产物仍写在 `dist-embed-app/index.html`，
+  故 `embed-emit` / `embed-smoke` 的路径不变），并清理中间目录 `app/`；
+- **Service Worker 升 `jps-shell-v4`**：
+  ① **导航回退按路径分派**（`fallbackFor()`）—— 此前任何导航离线都回退 `/index.html`，
+  分层后会把 `/app/` 喂成首页 HTML ⇒ **离线白屏**；② 写缓存改用"页面自己的键"；
+  ③ 预缓存换成 PWA 启动页 `/app/index.html` + 首页 `/index.html`（`/manual/`、`/syntax/` 不预缓存：
+  它们靠 JS 渲染，只缓存空骨架没意义）；④ 删除**已经死掉的** `/fonts/*.otf` 分支
+  （字体早在 adj194 改为系统字体栈，全仓已无该路径引用）⇒ 换缓存名是**零代价**的，没有 30MB 要重下；
+- **PWA manifest**：`start_url` 改 `/app/`（点桌面/主屏图标直接进应用），`scope` 保持 `/`
+  （PWA 窗口里点首页/手册不会跳去浏览器）。
+
+### 新增：官网实机验证 + 素材生成脚本（adj876）
+
+- `npm run verify:site`（`scripts/verify-site.mjs`）：起只读静态服务托管 `dist/`（按 Pages 口径路由）
+  + 无头 Chrome（CDP）逐页验证，**38 条断言全绿**（首页 DOM/图片/链接、应用挂载与草稿恢复、
+  两份文档的正文/目录/表格/**点目录真的会跳**、无控制台错误与本站 4xx）+ 3 条负对照；
+  支持 `--no-shots` / `--shots-only`。
+- 同一脚本顺带产出首页素材：`public/site/{hero,demo-score,view-code,view-split,view-preview,voice-multi,export}.webp`
+  与 `og.png`（分享卡片），外加 `public/favicon.ico`（4.8KB，从 Logo 生成，消掉浏览器对 `/favicon.ico` 的 404）。
+- `dist-site-shots/`（仅供人工检查的整页图）进 `.gitignore`。
+
+### 版本
+
+- `APP_VERSION` / `package.json` / `tauri.conf.json` 三处 0.54.0 → **0.55.0**，
+  并按 adj874 的闸门口径同步 **CLI 包** `packages/ijipu-cli/package.json`。
+- **不涉及引擎改动**（`packages/ijipu-engine/src/engine/**` 未改）⇒ `obsidian-ijipu/vendor/engine` 不同步。
+  但嵌入版的**应用外壳入口**变了，下次发插件前需照常重跑 `build:embed` + `embed-emit`。
+
 ## [0.54.0] — 2026-10-12（**命令行独立成 Node 包 `@ijipu/cli`** + 应用侧「能力宿主」命名管道；MINOR）
 
 > 主题：把命令行从"在本仓库跑脚本"变成**能装的工具**（`ijipu --help` / `--version` 真的可用），

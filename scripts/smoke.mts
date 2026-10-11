@@ -6,6 +6,8 @@
  */
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+// adj876：官网文档页与应用内帮助共用同一个 Markdown 渲染器（纯函数，可在 Node 里直接断言）
+import { mdToHtml, extractToc } from '../src/help/markdown'
 import { inflateSync } from 'node:zlib'
 import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO, inkBoxOfLayout, inkBoxesOfLayout, INK_ESTIMATE_SLACK, insertPngPhys, readPngPhys, crc32, isPng, dpiForScale, pixelsPerMeterFor } from '@ijipu/engine/index.ts'
 /**
@@ -6908,7 +6910,9 @@ console.log('[95] PWA update mechanism & mobile open hint (adj400/adj401)')
   check('adj400 scripts/stamp-sw.mjs 存在', existsSync(join(root, 'scripts', 'stamp-sw.mjs')))
   check('adj400 SW 注册带 updateViaCache:none（绕开 HTTP 缓存，update() 真能拿到新版）', readFileSync(join(root, 'src', 'main.tsx'), 'utf8').includes("updateViaCache: 'none'"))
   check('adj401 手机端打开指引覆盖「保存到手机 / 下载目录 / 改扩展名」', uiCopy.openPickHint.includes('保存到手机') && uiCopy.openPickHint.includes('下载') && uiCopy.openPickHint.includes('.md'), uiCopy.openPickHint.slice(0, 24) + '…')
-  check('adj403 viewport 带 interactive-widget=resizes-content（PWA 键盘弹出收缩内容区）', readFileSync(join(root, 'index.html'), 'utf8').includes('interactive-widget=resizes-content'))
+  // adj876：**应用外壳从 `index.html` 搬到了 `app/index.html`**（根 `index.html` 现在是介绍首页）
+  // ⇒ 这条断言的守护对象随之改指 app 壳；首页不需要 interactive-widget（它没有输入框）。
+  check('adj403 viewport 带 interactive-widget=resizes-content（PWA 键盘弹出收缩内容区）', readFileSync(join(root, 'app', 'index.html'), 'utf8').includes('interactive-widget=resizes-content'))
   // adj404：键盘弹出时应用高度跟随**可视视口**（不依赖宿主是否缩布局视口 / 是否会重复扣减）
   check('adj404 appHeightPx：缩放为 1 时取可视视口高', appHeightPx({ height: 420, scale: 1 }, 800) === 420)
   check('adj404 appHeightPx：视口未缩（vv 高于窗口内高）时取窗口内高', appHeightPx({ height: 900, scale: 1 }, 800) === 800)
@@ -7413,8 +7417,15 @@ console.log('[103] icons live in public/icons and only the used ones (adj417)')
     noAlpha.length === 0,
     noAlpha.map((i) => `${i.name}(ct=${i.colorType})`).join(','),
   )
-  const rootImages = readdirSync(join(root, 'public')).filter((f) => /\.(png|ico)$/i.test(f))
-  check('adj417 public 根目录不再有散落的 png/ico', rootImages.length === 0, rootImages.join(','))
+  /**
+   * adj417：图标集中在 `public/icons/`，根目录不许再散落 png/ico。
+   *
+   * adj876 的**唯一豁免**：`favicon.ico`。浏览器对任何页面都会主动请求**根路径**的 `/favicon.ico`
+   * （不看 HTML 里写了什么 link）——它按规范就必须放在根目录，没法"集中"。
+   * 不放的话每次访问都多一条 404（`npm run verify:site` 的首页断言当场抓到过）。
+   */
+  const rootImages = readdirSync(join(root, 'public')).filter((f) => /\.(png|ico)$/i.test(f) && f !== 'favicon.ico')
+  check('adj417 public 根目录不再有散落的 png/ico（`favicon.ico` 按浏览器规范必须留在根，豁免）', rootImages.length === 0, rootImages.join(','))
   const swJs = readFileSync(join(root, 'public', 'sw.js'), 'utf8')
   const swIcons = (/const ICON_FILES = \[([^\]]*)\]/.exec(swJs)?.[1] ?? '')
     .split(',')
@@ -7427,9 +7438,17 @@ console.log('[103] icons live in public/icons and only the used ones (adj417)')
   const manifest = JSON.parse(readFileSync(join(root, 'public', 'manifest.webmanifest'), 'utf8')) as { icons: { src: string }[] }
   const manIcons = manifest.icons.map((i) => i.src)
   check('adj417 manifest 图标指向 /icons/ 且文件存在', manIcons.every((s) => s.startsWith('/icons/') && existsSync(join(root, 'public', s.slice(1)))), manIcons.join(','))
-  const html = readFileSync(join(root, 'index.html'), 'utf8')
-  const htmlIcons = [...html.matchAll(/href="(\/icons\/[^"]+)"/g)].map((m) => m[1])
-  check('adj417 index.html 的 favicon / apple-touch-icon 指向 /icons/ 且文件存在', htmlIcons.length >= 3 && htmlIcons.every((p) => existsSync(join(root, 'public', p.slice(1)))), htmlIcons.join(','))
+  // adj876：站点分成四页后，favicon 要**每一页都有**——浏览器标签页不看你是从哪个入口进来的。
+  // （应用外壳在 `app/index.html`；首页的图标列表还多一个 apple-touch-icon，故阈值取 2。）
+  for (const rel of ['index.html', 'app/index.html', 'manual/index.html', 'syntax/index.html']) {
+    const html = readFileSync(join(root, rel), 'utf8')
+    const htmlIcons = [...html.matchAll(/href="(\/icons\/[^"]+)"/g)].map((m) => m[1])
+    check(
+      `adj417 ${rel} 的 favicon / apple-touch-icon 指向 /icons/ 且文件存在`,
+      htmlIcons.length >= 2 && htmlIcons.every((p) => existsSync(join(root, 'public', p.slice(1)))),
+      `${htmlIcons.length} 个：${htmlIcons.join(',')}`,
+    )
+  }
   // 赞赏码与 Logo 路径同样走 /icons/（brand/copy.ts 与组件里不得再出现根目录路径）
   const rootRefs = [...readdirSync(join(root, 'src'), { recursive: true }) as string[]]
     .filter((f) => /\.tsx?$/.test(f))
@@ -13647,7 +13666,9 @@ function runAdj620Tests() {
  * 覆盖浏览器页签 / PWA 页签 / Tauri 桌面窗口标题三处（便于 OS 任务栏、Alt+Tab、浏览器页签一眼看出当前版本）。
  *
  * 设计：单一来源 `brand/version.ts` 的 `APP_TITLE_FULL`。
- *   ① `index.html` <title>：静态前缀 `爱记谱 iJipu`（无版本后缀，避免每次 commit 产生无意义 diff）；
+ *   ① `app/index.html` <title>：静态前缀 `爱记谱 iJipu`（无版本后缀，避免每次 commit 产生无意义 diff）；
+ *      （adj876：应用外壳从根 `index.html` 搬到 `app/index.html`——根 `index.html` 现在是介绍首页，
+ *       它有自己的 SEO 标题，不受"应用标题"这条口径管）
  *   ② `App.tsx` mount 后 `document.title = APP_TITLE_FULL`（覆盖浏览器页签 + PWA 页签）；
  *   ③ `App.tsx` mount 后 `__TAURI__.window.getCurrentWindow().setTitle(APP_TITLE_FULL)`（覆盖桌面窗口标题栏/任务栏）；
  *   ④ capability `core:window:allow-set-title` 必须声明，否则桌面端 `setTitle` 会被 IPC 拒绝。
@@ -13656,7 +13677,7 @@ function runAdj621Tests() {
   console.log('[146] 应用标题统一来源：页签 + 桌面窗口标题（adj621）')
   const versionSrc = String(readFileSync('src/brand/version.ts', 'utf8'))
   const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
-  const indexSrc = String(readFileSync('index.html', 'utf8'))
+  const indexSrc = String(readFileSync(join(root, 'app', 'index.html'), 'utf8'))
   const capSrc = String(readFileSync('src-tauri/capabilities/default.json', 'utf8'))
 
   // ① brand/version.ts 提供单一来源 `APP_TITLE_PREFIX` + `APP_TITLE_FULL`
@@ -13691,9 +13712,9 @@ function runAdj621Tests() {
     '',
   )
 
-  // ③ index.html <title> 静态前缀是「爱记谱 iJipu」（不带版本后缀），避免每次 GIT_COMMIT 变化产生 diff
+  // ③ app/index.html <title> 静态前缀是「爱记谱 iJipu」（不带版本后缀），避免每次 GIT_COMMIT 变化产生 diff
   check(
-    'adj621 `index.html` 静态 <title> 用不带版本的前缀 `爱记谱 iJipu`，由运行时 `APP_TITLE_FULL` 覆盖完整形式',
+    'adj621 `app/index.html` 静态 <title> 用不带版本的前缀 `爱记谱 iJipu`，由运行时 `APP_TITLE_FULL` 覆盖完整形式',
     /<title>爱记谱 iJipu<\/title>/.test(indexSrc) && !/v\d+\.\d+\.\d+/.test(indexSrc.match(/<title>[^<]*<\/title>/)?.[0] ?? ''),
     '',
   )
@@ -19742,5 +19763,138 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     }
     check('adj869 构建产物 dist/assets/*.js 不得含魔数（这一条正是本次白屏的直接判据）',
       bad.length === 0, bad.join('；'))
+  }
+}
+
+/**
+ * adj876（官网分层）：`/` 介绍首页 + `/app/` 应用 + `/manual/` 操作手册 + `/syntax/` 脚本语法说明。
+ *
+ * 这批断言守的是"分层不被改回去、不悄悄坏掉"。它们的失败模式都很隐蔽：
+ *  · 应用入口被首页挤掉 ⇒ **桌面端与 Obsidian 嵌入版打开是介绍页**（用户报障时很难联想到入口）；
+ *  · SW 导航回退没按路径分类 ⇒ **离线白屏**（在网上测永远测不出来）；
+ *  · manifest 的 `start_url` 忘了改 ⇒ 手机上点图标进的是介绍页；
+ *  · 四份 HTML 的 `<title>` 复制粘贴成一样 ⇒ 页签分不清、SEO 也乱；
+ *  · 文档页的目录锚点与正文标题 id 对不上 ⇒ 目录点不动（中文 slug 两遍算容易差一个字符）。
+ *
+ * 全部尽量做成**源码级**断言（不依赖 `dist/` 是否构建过）——`npm run smoke` 并不跑 build。
+ * 唯一需要产物的地方（如果有）也照 adj869 的既有做法用 `existsSync` 兜住。
+ */
+{
+  console.log('[160] 官网分层：首页 / 应用 / 文档页（adj876）')
+  const readSrc = (rel: string) => String(readFileSync(join(root, rel), 'utf8'))
+
+  // ---- ① 四份 HTML 都在，且各自角色正确 ----
+  const rel = ['index.html', 'app/index.html', 'manual/index.html', 'syntax/index.html']
+  check('adj876 四份 HTML 入口都存在（首页 / 应用 / 手册 / 语法）',
+    rel.every((p) => existsSync(join(root, p))), rel.join(', '))
+
+  const homeHtml = readSrc('index.html')
+  const shellHtml = readSrc('app/index.html')
+  const manualHtml = readSrc('manual/index.html')
+  const syntaxHtml = readSrc('syntax/index.html')
+
+  check('adj876 `app/index.html` 挂的是应用入口 `/src/main.tsx` 且带 `#root`（它是应用外壳的唯一来源）',
+    shellHtml.includes('src="/src/main.tsx"') && shellHtml.includes('id="root"'))
+  check('adj876 首页**不**挂应用入口（挂了就等于首页要把整个应用下下来）',
+    !homeHtml.includes('/src/main.tsx') && homeHtml.includes('src="/src/landing/main.ts"'))
+  check('adj876 两个文档页各挂自己的入口（各自只带自己那份 md）',
+    manualHtml.includes('src="/src/docs/manual.ts"') && syntaxHtml.includes('src="/src/docs/syntax.ts"'))
+
+  const titles = [homeHtml, shellHtml, manualHtml, syntaxHtml].map((h) => h.match(/<title>([^<]*)<\/title>/)?.[1] ?? '')
+  check('adj876 四份 HTML 的 <title> 各不相同', new Set(titles).size === 4, titles.join(' | '))
+  check('adj876 首页 title 含 Slogan「码即成，谱自现」', titles[0].includes('码即成，谱自现'), titles[0])
+
+  // ---- ② 首页必须够轻：不引 React、不引引擎（否则"介绍页"要白下几百 KB） ----
+  const landingSrc = readSrc('src/landing/main.ts')
+  check('adj876 首页脚本不 import react / @ijipu/engine',
+    !/from ['"]react['"]|from ['"]@ijipu\/engine/.test(landingSrc))
+
+  // ---- ③ manifest：点图标应当**直接进应用**；但站内导航仍要留在 PWA 窗口里 ----
+  const manifest = JSON.parse(readSrc('public/manifest.webmanifest')) as { start_url?: string; scope?: string }
+  check('adj876 manifest.start_url = `/app/`（装到桌面/手机后点图标进应用，不是介绍页）',
+    manifest.start_url === '/app/', String(manifest.start_url))
+  check('adj876 manifest.scope 仍是 `/`（PWA 窗口里点首页/手册不会跳去浏览器）',
+    manifest.scope === '/', String(manifest.scope))
+
+  // ---- ④ 桌面壳与嵌入版都必须指向**应用**入口 ----
+  const tauri = JSON.parse(readSrc('src-tauri/tauri.conf.json')) as {
+    build?: { devUrl?: string }
+    app?: { windows?: { url?: string }[] }
+  }
+  check('adj876 Tauri 桌面壳窗口 url 指向应用入口 `app/index.html`（否则桌面端打开是介绍页）',
+    tauri.app?.windows?.[0]?.url === 'app/index.html', String(tauri.app?.windows?.[0]?.url))
+  check('adj876 Tauri devUrl 指到 `/app/`（`npm run tauri:dev` 打开的应当是应用）',
+    (tauri.build?.devUrl ?? '').endsWith('/app/'), String(tauri.build?.devUrl))
+
+  const embedCfg = readSrc('vite.config.embed.mjs')
+  check('adj876 嵌入版（Obsidian）入口也是 `app/index.html`（否则笔记里渲染出的是介绍页）',
+    /input:\s*fileURLToPath\(new URL\(['"]\.\/app\/index\.html['"]/.test(embedCfg))
+  check('adj876 嵌入版入口与网页版应用入口是**同一个文件**（都指 app/index.html ⇒ 不会各改各的）',
+    embedCfg.includes('./app/index.html') && readSrc('vite.config.ts').includes("entry('./app/index.html')"))
+
+  // ---- ⑤ SW 导航回退：把 sw.js 里的 fallbackFor **原文**抠出来直接跑 ----
+  // 为什么不"抄一份逻辑到测试里"：抄一份测的是测试自己。而这段代码的失败模式（离线白屏）
+  // 又只在断网时出现，靠人工基本测不到 ⇒ 必须让断言跑的就是线上那份源码。
+  const swSrc = readSrc('public/sw.js')
+  const region = swSrc.match(/\/\/ #region fallbackFor\r?\n([\s\S]*?)\/\/ #endregion/)
+  check('adj876 sw.js 的 fallbackFor 带 `#region` / `#endregion` 标记（断言要靠它抠原文）', !!region)
+  if (region) {
+    const fallbackFor = new Function(`${region[1]}\nreturn fallbackFor`)() as (p: string) => string
+    const cases: [string, string][] = [
+      ['/', '/index.html'],
+      ['/index.html', '/index.html'],
+      ['/app', '/app/index.html'],
+      ['/app/', '/app/index.html'],
+      ['/app/index.html', '/app/index.html'],
+      ['/manual/', '/manual/index.html'],
+      ['/syntax/', '/syntax/index.html'],
+      ['/whatever', '/index.html'],
+    ]
+    const bad = cases
+      .filter(([input, want]) => fallbackFor(input) !== want)
+      .map(([input, want]) => `${input} → ${fallbackFor(input)}（应为 ${want}）`)
+    check('adj876 SW 导航回退按路径分派（`/app/` 不再被喂成首页 HTML ⇒ 离线不白屏）',
+      bad.length === 0, bad.join('；'))
+    // 负对照：证明这条判据真的在量东西——退化成"一律回首页"必须判红
+    const naive = () => '/index.html'
+    check('adj876 负对照：回退逻辑若退化成"一律 /index.html" ⇒ 判据为假',
+      cases.some(([input, want]) => naive() !== want))
+  }
+  check('adj876 SW 缓存名升到 v4（`/index.html` 这个键的含义变了，必须换名清掉旧应用缓存）',
+    swSrc.includes("'jps-shell-v4'"))
+  check('adj876 SW 预缓存含 PWA 启动页 `/app/index.html`（离线打开要能用）',
+    swSrc.includes("'/app/index.html'"))
+
+  // ---- ⑥ 文档页与应用内帮助同源：渲染器抽成了纯模块，且目录锚点与标题 id 逐个一致 ----
+  const mdSrc = readSrc('src/help/markdown.ts')
+  check('adj876 渲染器已从组件文件抽出（`src/help/markdown.ts` 导出 mdToHtml / extractToc）',
+    mdSrc.includes('export function mdToHtml') && mdSrc.includes('export function extractToc'))
+  check('adj876 DocDialog 不再自带渲染器（改为 import help/markdown ⇒ 不会再各写一份）',
+    readSrc('src/dialogs/DocDialog.tsx').includes("from '../help/markdown'") &&
+      !readSrc('src/dialogs/DocDialog.tsx').includes('function mdToHtml'))
+
+  // 玩具用例：中文 + 标点 + 重复标题
+  const toyMd = '# 一级标题\n\n正文\n\n## 1.1 带标点的标题（含括号）\n\n再正文\n\n## 1.1 带标点的标题（含括号）\n'
+  const toyToc = extractToc(toyMd)
+  const toyHtml = mdToHtml(toyMd)
+  check('adj876 玩具用例：extractToc 只认标题行、且中文 slug 去掉了标点',
+    toyToc.length === 3 && toyToc[1].id === '1-1-带标点的标题-含括号',
+    toyToc.map((t) => `${t.level}:${t.id}`).join(' | '))
+  check('adj876 玩具用例：重名标题自动去重（第二个加 `-2`，否则后一个锚点点不动）',
+    toyToc[2].id === '1-1-带标点的标题-含括号-2', toyToc[2].id)
+
+  // 真实文档：这才是要紧的——两份 .md 的**目录锚点与正文标题 id 必须逐个相同**
+  for (const doc of ['docs/USER-GUIDE.md', 'docs/SYNTAX.md']) {
+    const realMd = readSrc(doc)
+    const realToc = extractToc(realMd)
+    const realHtml = mdToHtml(realMd)
+    const htmlIds = [...realHtml.matchAll(/<h[1-6] id="([^"]+)"/g)].map((m) => m[1])
+    check(`adj876 ${doc}：目录锚点与正文标题 id 逐个相同（目录才点得动）`,
+      realToc.length > 0 && JSON.stringify(realToc.map((t) => t.id)) === JSON.stringify(htmlIds),
+      `目录 ${realToc.length} 条 / 正文 ${htmlIds.length} 个：${realToc.map((t) => t.id).slice(0, 3).join(',')}…`)
+    check(`adj876 ${doc}：标题 id 无重复`, new Set(realToc.map((t) => t.id)).size === realToc.length)
+    // 代码块里的 `# 注释行…` **不是**标题（`.jps` 注释就长这样，语法说明里到处都是）
+    check(`adj876 ${doc}：目录里没有混进代码块内的 \`#\` 注释行`,
+      !realToc.some((t) => t.text.startsWith('注释行')), realToc.filter((t) => t.text.startsWith('注释行')).map((t) => t.text).join('；'))
   }
 }

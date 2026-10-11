@@ -1,14 +1,35 @@
 /* iJipu PWA Service Worker（adj155：可安装为浏览器应用）
  * 策略：
- *  - 导航请求（HTML）：network-first，离线回退缓存首页（保证拿到最新构建）
+ *  - 导航请求（HTML）：network-first，离线回退**该页面自己的缓存**
  *  - 静态资源（/assets/* 带 hash）：cache-first，后台刷新缓存
- *  - 大体积字体（/fonts/*.otf，累计 ~33MB）：cache-first，命中缓存直接返回，
- *    避免每次浏览都重新下载字体（adj192：字体按需加载后常驻缓存）
  *  - manifest / 图标 / favicon：cache-first
  * 版本号变化时 activate 清理旧缓存（adj192：升 v3，强制清掉旧 CSS/字体缓存）。
  * adj417：图标集中在 `/icons/`（`public/icons/`），dist 根目录不再散落几十个 png。
+ *
+ * ## adj876（官网分层）改了四处
+ *
+ * 站点从"根路径就是应用"变成四页：`/`（介绍首页）、`/app/`（应用）、
+ * `/manual/`（手册）、`/syntax/`（语法）。对 SW 的影响：
+ *
+ * ① **缓存名 v3 → v4**：`/index.html` 这个键的含义变了（以前是应用、现在是首页），
+ *    不换名会让老用户一直命中缓存的旧应用 HTML，而它引用的 hash 资源在新构建里已经不存在
+ *    ⇒ 白屏。换名顺手清掉旧缓存。
+ *    ⚠ 原计划"迁移 `/fonts/*` 缓存以免重下 30MB 字体"——**实测不需要**：
+ *      `/fonts/*.otf` 早在 adj194 就移除了（改用系统字体栈，见 `engine/fonts.ts`），
+ *      全仓库已无该路径的引用，那段分支是死代码（本次一并删除）。所以换缓存名是**零代价**的。
+ * ② **导航回退按路径分类**：以前所有导航离线都回退 `/index.html`，
+ *    分层后那会把 `/app/` 的请求喂成首页 HTML ⇒ 白屏。现在走 `fallbackFor()`。
+ * ③ **写缓存用各自的键**：以前一律写成 `/index.html` 键，会把应用页的 HTML 存成首页的键。
+ * ④ **PRECACHE 换口径**：预缓存的是"离线时打开也应当可用的页面"——
+ *    `/app/index.html`（PWA 的 `start_url` 是 `/app/`，必须离线可用）与 `/index.html`
+ *    （首页正文写在 HTML 里，即使 JS/CSS 没进缓存也读得成）。
+ *    `/manual/`、`/syntax/` **不预缓存**：它们的正文靠 JS 渲染，只预缓存一个空骨架没有意义
+ *    （访问过之后自然会进缓存，离线再看就能用）。
+ *
+ * 注意：`/assets/*` 带 hash，**不做预缓存清单**（清单得在构建期注入才有意义）；
+ * 沿用既有口径"访问过就离线可用"。
  */
-const CACHE = 'jps-shell-v3'
+const CACHE = 'jps-shell-v4'
 /**
  * adj539：**桌面壳里绝不用 SW**（Tauri 在 Windows 用 `http(s)://tauri.localhost`，是安全上下文、
  * SW 本可注册，但资源随二进制内嵌，SW 只会带来陈旧缓存）。历史版本注册过的 SW 曾在壳里造成**白屏**：
@@ -19,7 +40,34 @@ const CACHE = 'jps-shell-v3'
  * （Rust 侧 `purge_stale_service_worker` 会在启动前直接删掉它的存储，这里是第二道防线。）
  */
 const IN_DESKTOP_SHELL = self.location.hostname === 'tauri.localhost'
-const PRECACHE = ['/', '/index.html', '/manifest.webmanifest', '/icons/Jianpu.ico', '/icons/Jianpu.png', '/icons/pwa-192.png', '/icons/pwa-512.png', '/icons/good.png']
+
+/**
+ * 导航离线时该回退到哪个缓存键。
+ *
+ * ⚠ `scripts/smoke.mts` 会把 `#region fallbackFor` 到 `#endregion` 之间的**原文**抠出来
+ * 直接执行并断言 —— 这样断言的就是线上跑的同一段代码，而不是"抄一份逻辑到测试里"
+ * （抄一份的结果是：改了这边忘了那边，测试全绿线上白屏）。
+ * ⇒ **保留这对标记**，也别在这个区间里引用外部变量。
+ */
+// #region fallbackFor
+function fallbackFor(pathname) {
+  if (pathname === '/app' || pathname.startsWith('/app/')) return '/app/index.html'
+  if (pathname === '/manual' || pathname.startsWith('/manual/')) return '/manual/index.html'
+  if (pathname === '/syntax' || pathname.startsWith('/syntax/')) return '/syntax/index.html'
+  return '/index.html'
+}
+// #endregion
+
+const PRECACHE = [
+  '/app/index.html', // PWA 启动页（manifest 的 start_url = /app/）——离线必须打得开
+  '/index.html', // 首页：正文在 HTML 里，CSS/JS 没缓存也能读
+  '/manifest.webmanifest',
+  '/icons/Jianpu.ico',
+  '/icons/Jianpu.png',
+  '/icons/pwa-192.png',
+  '/icons/pwa-512.png',
+  '/icons/good.png',
+]
 /* adj408：按钮 PNG 图标（`public/icons/*.png`，约 60KB）——首屏渲染就会用到，离线时必须命中缓存。
    单独**逐个**预热而**不并进 PRECACHE**：`addAll` 是"任一失败则整体失败"，图标文件名是中文，
    万一编码/改名对不上就会让整个 install 失败 → 更新提示再也弹不出来（E-2026-140），
@@ -96,35 +144,20 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url)
   if (url.origin !== self.location.origin) return // 仅同源（不缓存跨域请求）
 
-  // 导航请求：网络优先，离线回退缓存
+  // 导航请求：网络优先，离线回退**该页面自己的缓存**（adj876：按路径分类，别一律回首页）
   if (req.mode === 'navigate') {
+    const key = fallbackFor(url.pathname)
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone()
-          caches.open(CACHE).then((c) => c.put('/index.html', copy))
+          // 只缓存成功响应；且按"页面自己的键"存（adj876：以前一律存成 /index.html）
+          if (res && res.ok) {
+            const copy = res.clone()
+            caches.open(CACHE).then((c) => c.put(key, copy))
+          }
           return res
         })
-        .catch(() => caches.match('/index.html')),
-    )
-    return
-  }
-
-  // 大体积字体（/fonts/*.otf）：cache-first，命中即回——字体按需只下载一次，节省流量
-  if (url.pathname.startsWith('/fonts/')) {
-    event.respondWith(
-      caches.match(req).then((hit) => {
-        if (hit) return hit
-        return fetch(req)
-          .then((res) => {
-            if (res && res.ok) {
-              const copy = res.clone()
-              caches.open(CACHE).then((c) => c.put(req, copy))
-            }
-            return res
-          })
-          .catch(() => hit)
-      }),
+        .catch(() => caches.match(key)),
     )
     return
   }

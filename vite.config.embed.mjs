@@ -40,7 +40,18 @@ export default defineConfig({
     // 单文件产物：不要 sourcemap（会白占体积）
     sourcemap: false,
     rollupOptions: {
-      input: fileURLToPath(new URL('./index.html', import.meta.url)),
+      /**
+       * adj876（官网分层）：入口从根 `index.html` 改成 **`app/index.html`**。
+       *
+       * 根 `index.html` 现在是"介绍首页"，嵌入版要的是**应用**——`app/index.html` 才是
+       * 应用外壳的唯一来源（网页版 `/app/`、桌面壳也都用它）。不改这一处的话，
+       * Obsidian 笔记里渲染出来的会是介绍首页 ✗。
+       *
+       * ⚠ 产物路径随之变成 `dist-embed-app/app/index.html`（Vite 保留入口相对 root 的目录），
+       *   所以下面这三个脚本里的路径要一起改，缺一处嵌入版就断：
+       *   `scripts/embed-inline-plugin.mjs`、`scripts/embed-emit.mjs`、`scripts/embed-smoke.mjs`。
+       */
+      input: fileURLToPath(new URL('./app/index.html', import.meta.url)),
       /**
        * **关键**：让 rollup 自己把动态 `import()` 内联成"promise 化的内联模块"。
        *

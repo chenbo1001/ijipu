@@ -4,29 +4,279 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/x-icon" href="/icons/Jianpu.ico" />
     <link rel="icon" type="image/png" href="/icons/Jianpu.png" />
-    <!-- adj403：interactive-widget=resizes-content —— 让**已安装的 PWA** 在软键盘弹出时
-         与浏览器一样收缩内容区（Chrome 108+）。默认 PWA 只缩"视觉视口"、布局视口不变，
-         于是键盘会盖住编辑区底部（用户反馈"用 PWA 时窗口不随输入法缩小，只能用浏览器"）。 -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
-    <meta name="description" content="爱记谱 iJipu —— 码即成，谱自现。代码式简谱制谱引擎，脚本规则高度兼容「番茄简谱」。" />
-    <!-- adj373：作者署名（页面元数据） -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>爱记谱 iJipu —— 码即成，谱自现 | 代码式简谱制谱引擎</title>
+    <meta
+      name="description"
+      content="用 .jps 文本写简谱：左边敲代码、右边立刻出谱，实时试听、一键导出 PDF/PNG/SVG。免安装、免注册、免费开源，兼容「番茄简谱」脚本。另有 Windows 桌面版与 Obsidian 插件。"
+    />
     <meta name="author" content="蜗牛🐌" />
-    <!-- adj621：浏览器页签标题。静态部分 = JS 挂载前的占位（几十毫秒），
-         React mount 后会用 `brand/version.ts` 的 `APP_TITLE_FULL` 覆盖为完整形式
-         `爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)`，与 PWA 页签 / Tauri 桌面窗口标题一致。
-         此处只写不带版本的前缀，避免每次 `GIT_COMMIT` 变化让 index.html 出现无意义 diff。 -->
-    <title>爱记谱 iJipu</title>
-    <!-- adj155：PWA 可安装为浏览器应用 -->
+    <meta name="keywords" content="简谱,打谱,制谱,爱记谱,iJipu,jps,番茄简谱,代码制谱,乐谱制作" />
+    <meta name="theme-color" content="#0F1526" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#1E2A5E" />
-    <meta name="apple-touch-icon" href="/icons/pwa-192.png" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="i记谱" />
+    <link rel="apple-touch-icon" href="/icons/pwa-192.png" />
+
+    <!--
+      adj876（官网改版）：本文件是**介绍首页**，应用在 `/app/`。
+      为什么首页正文直接写在 HTML 里、而不是由 JS 渲染：
+        · 搜索引擎（尤其中文场景的百度）对不执行 JS 的抓取更友好；
+        · 首屏不依赖 JS，也就没有"先白屏再出内容"的闪烁。
+      JS（`src/landing/main.ts`）只做四件小事：注入品牌色、补外部链接地址、填版本号、交互（赞赏弹层/菜单/提示条）。
+      外部地址（GitHub、下载、插件）**不写死在这里** —— 它们来自 `src/brand/tokens.ts`，
+      由 JS 填进下面那些 `data-l` 元素，避免换仓库时改漏。
+    -->
+
+    <!-- 分享卡片（微信/QQ 转发靠这几个 meta）；og.png 由 scripts/gen-site-og.mjs 生成 -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="爱记谱 iJipu" />
+    <meta property="og:title" content="爱记谱 iJipu —— 码即成，谱自现" />
+    <meta
+      property="og:description"
+      content="用 .jps 文本写简谱：左边敲代码、右边立刻出谱，实时试听、一键导出。免安装、免注册、免费开源。"
+    />
+    <meta property="og:image" content="/site/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!--
+      防白闪：landing.css 由 JS 加载（Vite 的 CSS chunk），在它到位之前先用这几行把
+      底色与文字色定住，避免"白底黑字闪一下再变深色"。值必须与 brand/tokens.ts 一致。
+    -->
+    <style>
+      html { background: #0f1526; color-scheme: dark; }
+      body { margin: 0; color: #e8ecf8; font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <!-- 顶栏：滚动后加背景（JS 加 .scrolled）；「打开应用」是常驻主按钮 -->
+    <header class="topbar" id="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="/">
+          <img src="/icons/Jianpu.png" alt="爱记谱 iJipu" width="28" height="28" />
+          <span>爱记谱 <b>iJipu</b></span>
+        </a>
+        <nav class="nav" id="nav">
+          <a href="#features">功能</a>
+          <a href="/manual/">使用手册</a>
+          <a href="/syntax/">脚本语法</a>
+          <a data-l="desktopDownloadUrl" href="#" rel="noreferrer">下载桌面端</a>
+          <a data-l="obsidianRepoUrl" href="#" rel="noreferrer">Obsidian 插件</a>
+          <a data-l="repoUrl" href="#" rel="noreferrer">GitHub</a>
+        </nav>
+        <a class="btn btn-primary topbar-cta" href="/app/">打开应用 →</a>
+        <button class="topbar-burger" id="burger" type="button" aria-label="展开菜单" aria-expanded="false">☰</button>
+      </div>
+    </header>
+
+    <main>
+      <!-- Hero -->
+      <section class="hero">
+        <div class="hero-text">
+          <p class="hero-kicker">代码式简谱制谱引擎</p>
+          <h1>码即成，谱自现</h1>
+          <p class="hero-sub">
+            用 <code>.jps</code> 文本写简谱——左边敲代码，右边立刻出谱。<br />
+            实时试听、一键导出，免安装、免注册、免费开源。
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary btn-lg" href="/app/">立即使用（免安装）</a>
+            <a class="btn btn-ghost btn-lg" data-l="desktopDownloadUrl" href="#" rel="noreferrer">下载桌面版</a>
+          </div>
+          <p class="hero-meta">
+            最新版 <b data-app-version>·</b> · 手机 / 平板 / 电脑通用 · 支持 PWA 离线 · AGPL-3.0 开源
+          </p>
+        </div>
+        <figure class="hero-shot">
+          <!-- 主视觉是首屏唯一的图，明确 eager + 高优先级；其余插图一律 lazy（见各 img） -->
+          <img fetchpriority="high" decoding="async" src="/site/hero.webp" alt="爱记谱 iJipu 拆分视图：左侧 .jps 代码，右侧实时渲染的简谱" />
+          <figcaption>左边写代码，右边同步出谱</figcaption>
+        </figure>
+      </section>
+
+      <!-- 一屏看懂：同样一段谱，左边源码右边成品（P2 会换成真引擎实时渲染） -->
+      <section class="demo">
+        <h2>一行文本，就是一段旋律</h2>
+        <div class="demo-pair">
+          <pre class="demo-code"><code>B: 小星星
+Q: 1 1 5 5 | 6 6 5 - | 4 4 3 3 | 2 2 1 - |
+C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
+          <div class="demo-score">
+            <img loading="lazy" decoding="async" src="/site/demo-score.webp" alt="上面那段 .jps 源码渲染出来的简谱" />
+          </div>
+        </div>
+        <p class="demo-note">
+          高低音点 <code>'</code> <code>,</code>、时值线 <code>-</code> <code>/</code>、附点 <code>.</code>、
+          连音线 <code>( )</code>——改一个音符，就是改一个字符。
+        </p>
+      </section>
+
+      <!-- 功能块（8 张卡） -->
+      <section class="features" id="features">
+        <h2>它凭什么好用</h2>
+        <div class="cards">
+          <article class="card">
+            <p class="card-ico">⌨️</p>
+            <h3>文本即乐谱</h3>
+            <p>像写代码一样写谱。语法高亮、自动格式化、行首命令快捷键，改谱就是改字符，还能用 git 管版本。</p>
+          </article>
+          <article class="card">
+            <p class="card-ico">👁️</p>
+            <h3>实时预览</h3>
+            <p>编码 / 左右拆分 / 预览三种视图。点谱面上的音符，光标自动跳到编辑器对应位置，反向也能跳。</p>
+          </article>
+          <article class="card">
+            <p class="card-ico">🔊</p>
+            <h3>实时试听</h3>
+            <p>Web Audio 现场合成，128 种音色随谱指定；多声部同时出声，反复记号与跳房子自动跳转。</p>
+          </article>
+          <article class="card">
+            <p class="card-ico">🖨️</p>
+            <h3>一键导出</h3>
+            <p>PDF（矢量打印 / 位图两路）、PNG、JPG、SVG、MIDI。打印、发微信、进课件、贴进教案都行。</p>
+          </article>
+          <article class="card">
+            <p class="card-ico">🎼</p>
+            <h3>多声部与临时段</h3>
+            <p>临时伴奏 <code>{bz}</code>、临时多声部 <code>{dsb}</code>、替谱段 <code>{tp}</code>、跳房子、倚音与各类装饰记号。</p>
+          </article>
+          <article class="card">
+            <p class="card-ico">🔁</p>
+            <h3>兼容番茄简谱</h3>
+            <p>沿用 <code>.jps</code> 后缀与脚本语法。原网站导出的谱子，直接粘贴进来就能用，老谱无缝迁移。</p>
+          </article>
+          <article class="card">
+            <p class="card-ico">📱</p>
+            <h3>手机电脑都能用</h3>
+            <p>网页版免安装，手机上能"添加到主屏幕"当 App 使，一次打开、断网也能用。</p>
+          </article>
+          <article class="card">
+            <p class="card-ico">🔓</p>
+            <h3>免费开源</h3>
+            <p>无需注册登录，谱子存在你自己的浏览器或文件夹里。核心引擎纯 TypeScript 实现，AGPL-3.0 协议。</p>
+          </article>
+        </div>
+      </section>
+
+      <!-- 深度介绍：三视图 + 写给谁 -->
+      <section class="deep">
+        <div class="deep-row">
+          <div class="deep-text">
+            <h2>写谱像写代码一样爽</h2>
+            <p>
+              三种视图随时切换：<b>编码</b>只专注谱面，<b>拆分</b>左右对照改一处看一处，
+              <b>预览</b>只看成品、专心打磨排版。
+            </p>
+            <p>语法有错时，编辑器里直接写明「哪里错 + 正确写法」，点一下跳到出错位置。</p>
+          </div>
+          <div class="deep-shots">
+            <figure><img loading="lazy" decoding="async" src="/site/view-code.webp" alt="编码视图" /><figcaption>编码</figcaption></figure>
+            <figure><img loading="lazy" decoding="async" src="/site/view-split.webp" alt="左右拆分视图" /><figcaption>左右拆分</figcaption></figure>
+            <figure><img loading="lazy" decoding="async" src="/site/view-preview.webp" alt="预览视图" /><figcaption>预览</figcaption></figure>
+          </div>
+        </div>
+
+        <div class="deep-row reverse">
+          <div class="deep-text">
+            <h2>复杂谱子也扛得住</h2>
+            <p>
+              多声部、临时伴奏、反复与跳房子、倚音与波音滑音……简谱里那些"难打的"，
+              都有对应的写法；排版自己算，试听时音符与色块跟着走。
+            </p>
+            <p>排好就能一键导出：PDF（矢量打印 / 位图两路）、PNG、JPG、SVG，以及 MIDI。打印、发微信、进课件都行。</p>
+          </div>
+          <div class="deep-shots">
+            <figure><img loading="lazy" decoding="async" src="/site/voice-multi.webp" alt="多声部与临时段的简谱排版" /><figcaption>多声部 / 临时段</figcaption></figure>
+            <figure><img loading="lazy" decoding="async" src="/site/export.webp" alt="导出面板：PDF、图片、音频多档格式" /><figcaption>一键导出</figcaption></figure>
+          </div>
+        </div>
+
+        <div class="who">
+          <h2>写给谁</h2>
+          <ul>
+            <li><b>音乐老师 / 学生</b>：做讲义、出曲谱超快，导出高清图直接进课件。</li>
+            <li><b>词曲爱好者</b>：灵感来了写一小段，立刻试听验证旋律。</li>
+            <li><b>程序员 / 极客</b>：文本化、可版本管理、命令行风格，一切熟悉的配方。</li>
+            <li><b>普通用户</b>：给孩子抄首儿歌、给家人记段旋律，几分钟搞定。</li>
+          </ul>
+          <p class="who-note">用爱记谱写简谱的人，我们称为「<b>谱师</b>」（Score Smith）。</p>
+        </div>
+      </section>
+
+      <!-- 一排入口链接（与顶栏互为双保险） -->
+      <section class="links" id="links">
+        <h2>从哪儿开始</h2>
+        <div class="link-grid">
+          <a class="link-card" href="/app/">
+            <span class="link-ico">🚀</span>
+            <b>打开应用</b>
+            <span>免安装，浏览器直接写谱</span>
+          </a>
+          <a class="link-card" href="/manual/">
+            <span class="link-ico">📖</span>
+            <b>使用手册</b>
+            <span>界面、保存、导出、快捷键、常见问题</span>
+          </a>
+          <a class="link-card" href="/syntax/">
+            <span class="link-ico">📐</span>
+            <b>脚本语法说明</b>
+            <span>.jps 全部语法与组合示例，可当参考书查</span>
+          </a>
+          <a class="link-card" data-l="desktopDownloadUrl" href="#" rel="noreferrer">
+            <span class="link-ico">💾</span>
+            <b>下载桌面端</b>
+            <span>Windows 安装包，带 .jps 文件关联</span>
+          </a>
+          <a class="link-card" data-l="obsidianRepoUrl" href="#" rel="noreferrer">
+            <span class="link-ico">🧩</span>
+            <b>Obsidian 插件</b>
+            <span>在笔记里写谱、渲染、试听</span>
+          </a>
+          <a class="link-card" id="donate-open" href="#donate">
+            <span class="link-ico">☕</span>
+            <b>支持赞赏</b>
+            <span>不打赏也能全功能用，纯自愿</span>
+          </a>
+        </div>
+      </section>
+
+      <!-- 常见问题 -->
+      <section class="faq">
+        <h2>常见问题</h2>
+        <details><summary>要装软件吗？收费吗？</summary><p>不用装。打开网页就能写（<a href="/app/">/app/</a>），手机、平板、电脑通吃，完全免费、无需注册。想要双击 <code>.jps</code> 直接打开，可以再装 Windows 桌面版。</p></details>
+        <details><summary>我的谱子存在哪里？会传到服务器吗？</summary><p>存在你自己的设备上——浏览器本地存储，或你指定的文件夹（工作区）。这是个纯前端工具，谱子不上传、不经我们的服务器。</p></details>
+        <details><summary>和「番茄简谱」是什么关系？</summary><p>爱记谱沿用 <code>.jps</code> 后缀与脚本语法，兼容它的写法，原网站导出的谱子粘贴进来即可用。我们致敬「番茄简谱」原作者与社区。</p></details>
+        <details><summary>手机上能用吗？没网呢？</summary><p>能。手机浏览器打开即可写谱，还可以"添加到主屏幕"当 App 用。网页版支持 PWA，打开过一次之后断网也能继续用。</p></details>
+        <details><summary>桌面版和网页版有什么区别？</summary><p>功能一致。桌面版多了系统集成：双击 <code>.jps</code> 文件直接打开、可以放进右键"打开方式"。网页版则免安装、跨平台。</p></details>
+        <details><summary>Obsidian 插件怎么装？</summary><p>在 Obsidian 的「设置 → 第三方插件 → 浏览」，搜索 <b>iJipu</b> 安装；或从 <a data-l="obsidianRepoUrl" href="#" rel="noreferrer">GitHub 仓库</a>手动安装。装好后在笔记里写 <code>```jps</code> 代码块就能渲染。</p></details>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p class="footer-slogan">用代码的严谨，谱写指尖的浪漫</p>
+      <p class="footer-meta">
+        爱记谱 iJipu · 作者 蜗牛🐌 · <span data-app-version>·</span> · AGPL-3.0 开源 ·
+        <a data-l="repoUrl" href="#" rel="noreferrer">GitHub</a> ·
+        <a href="/manual/">手册</a> ·
+        <a href="/syntax/">语法</a>
+      </p>
+      <p class="footer-thanks">特别致谢「番茄简谱」原作者与社区 —— 本项目在脚本语法与谱面解析上大量参考原站实现。</p>
+    </footer>
+
+    <!-- 「以前用过」提示条：只在本地有 ijipu.* 历史键时显示（JS 判定），默认隐藏 -->
+    <div class="tip" id="tip" hidden>
+      <span>你以前用过爱记谱 ——</span>
+      <a href="/app/">直接进入应用 →</a>
+      <button type="button" id="tip-close" aria-label="关闭提示">✕</button>
+    </div>
+
+    <!-- 赞赏弹层：复用应用里的微信赞赏码（/icons/good.png）。不放任何第三方收款平台。 -->
+    <dialog class="donate" id="donate">
+      <h2>谢谢你的支持</h2>
+      <p>爱记谱完全免费、没有广告、数据也不上传。如果它帮到了你，可以请作者喝杯咖啡 —— 不打赏也照样用全部功能。</p>
+      <img src="/icons/good.png" alt="微信赞赏码" />
+      <p class="donate-hint">用微信扫码即可</p>
+      <form method="dialog"><button class="btn btn-ghost" type="submit">关闭</button></form>
+    </dialog>
+
+    <script type="module" src="/src/landing/main.ts"></script>
   </body>
 </html>
