@@ -737,7 +737,10 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
    *  ③ 点菜单项**真的调到**插件方法（`copyScoreImage(source, 1, {box, mode})`、`setExportRange('score')`）；
    *  ④ 桌面**右键**开的是**同一份菜单**，并且 `preventDefault`（不弹宿主原生菜单）；
    *  ⑤ 块级缩放 `z`：`z=100` ⇒ **自然尺寸**（渲染宽 == viewBox 宽），`z=*` ⇒ 铺满容器，
-   *     不给 `zoom` 的宿主（文件视图/嵌入）⇒ **既无 zoom 类、宽度照旧铺满**（作用域负对照）。
+   *     不给 `zoom` 的宿主（文件视图/嵌入）⇒ adj872 起**显式**按 `z=*` 处理（`ijipu-zoom-fit`），宽度照旧铺满。
+   *  ⑥ adj872：三种模式的**实际渲染宽高**（`t5.geo`）—— 页面 / 满宽+`z=*` / 满宽+`z=100` 各量一次
+   *     SVG 的 `getBoundingClientRect()`（照 ⑤ 的坑，用 `.ijipu-svgs .ijipu-page-svg > svg` 精确定位），
+   *     外加两条负对照（"整页铺满"应为假；把容器摆到视口底部 ⇒ "渲染高 ≤ 可见高"应为假）。
    */
   {
     const t5 = await evalJson('window.__ijipuT5Probe()')
@@ -783,9 +786,53 @@ ${obsidianCss ? `<link rel="stylesheet" href="obsidian-app.css?v=${cacheBust}">`
         JSON.stringify(zf))
       ok(Math.abs(za.renderedW - za.svgsW) <= 2 && /ijipu-zoom-fit/.test(za.cls),
         'adj866 `z=*` ⇒ 铺满容器宽（旧行为）', JSON.stringify(za))
-      ok(!/ijipu-zoom/.test(zn.cls) && Math.abs(zn.renderedW - zn.svgsW) <= 2,
-        'adj866 负对照：不给 `zoom` 的宿主（文件视图/嵌入）既**没有** zoom 类、也照旧铺满容器（作用域没外溢）',
+      /**
+       * ⚠ adj872：这一条**改了口径**（原来是"既无 zoom 类"）—— 那是"三层巧合"的写法：
+       * 不传 `zoom` 时两个分支都不进 ⇒ 不加类 ⇒ 靠 styles.css 的 `width: 100%` 兜底。
+       * 现在面板把 `undefined` **显式**折成 `'auto'` ⇒ 一定有 `ijipu-zoom-fit`，
+       * 宽度仍然铺满（视觉结果不变 ✓），但**不再依赖 CSS 兜底**（谁改 CSS 都不会静默改掉它）。
+       */
+      ok(/ijipu-zoom-fit/.test(zn.cls) && Math.abs(zn.renderedW - zn.svgsW) <= 2,
+        'adj872 不给 `zoom` 的宿主（文件视图 / 嵌入）⇒ **显式**按 `z=*` 处理（`ijipu-zoom-fit`），宽度照旧铺满（不再靠 CSS 兜底）',
         JSON.stringify(zn))
+
+      /**
+       * ---- adj872：三种模式的**实际渲染宽高**（真机量 SVG 盒子）----
+       *
+       * 容差按口径：长度 2px、比例 1%。`visibleH` 与面板 `publishPageFit` 用的是**同一个式子**
+       * （`window.innerHeight − 容器顶边 − 24`）⇒ 断言里不另算一份，免得两边口径漂。
+       */
+      const g = t5.geo
+      if (!g) {
+        ok(false, 'adj872 三模式几何探针有输出（`t5.geo`）', '探针第 ⑧ 节没跑完')
+      } else {
+        const geoNear2 = (a, b) => Math.abs(a - b) <= 2
+        const geoRatio = (a, b) => Math.abs(a - b) <= 0.01 * Math.max(Math.abs(a), Math.abs(b))
+        console.log('  三模式实际宽高    =', JSON.stringify(g.page), JSON.stringify(g.fullAuto))
+        console.log('  满宽 z=100 / 负对照 =', JSON.stringify(g.full100), JSON.stringify(g.negVisible))
+        ok(g.page.renderedH <= g.page.visibleH + 2,
+          'adj872 整页（`m=p` + `z=*`）：渲染高 ≤ 可见高（= innerHeight − 容器顶边 − 24）—— **整页进视界**的实证',
+          JSON.stringify(g.page))
+        ok(geoRatio(g.page.renderedW / g.page.renderedH, g.page.pageW / g.page.pageH),
+          'adj872 整页：渲染宽高比 ≈ 页面框比例（该模式 SVG 的 viewBox 第 3/4 个数）⇒ 按 contain 等比缩放',
+          `渲染=${(g.page.renderedW / g.page.renderedH).toFixed(3)} 页面=${(g.page.pageW / g.page.pageH).toFixed(3)}`)
+        ok(g.page.renderedW < g.page.svgsW - 2,
+          'adj872 整页：渲染宽 **<** 容器内宽（说明真的缩小了，不是撑满）',
+          `渲染宽=${g.page.renderedW} 容器内宽=${g.page.svgsW}`)
+        ok(!geoNear2(g.page.renderedW, g.page.svgsW),
+          'adj872 负对照：整页"渲染宽 == 容器内宽"**应为假** —— 证明上面那条判据真的在量"缩小"这件事',
+          `渲染宽=${g.page.renderedW} 容器内宽=${g.page.svgsW}`)
+        ok(geoNear2(g.fullAuto.renderedW, g.fullAuto.svgsW) && /ijipu-zoom-fit/.test(g.fullAuto.cls),
+          'adj872 满宽 + `z=*`：渲染宽 == 容器内宽（`.ijipu-svgs` 的宽，容差 2px）',
+          JSON.stringify(g.fullAuto))
+        ok(geoNear2(g.full100.renderedW, g.full100.vbW) && !geoNear2(g.full100.renderedW, g.full100.svgsW) &&
+          /ijipu-zoom-fixed/.test(g.full100.cls),
+          'adj872 满宽 + `z=100`：渲染宽 == 自然尺寸（viewBox 宽）**且 ≠ 容器宽** ⇒ "未写/100 不铺满"的口径成立',
+          JSON.stringify(g.full100))
+        ok(g.negVisible.renderedH > g.negVisible.visibleH,
+          'adj872 负对照（量法敏感性）：容器摆在视口最下方（原始可见高 < 下限 200）⇒ "渲染高 ≤ 可见高"**为假**',
+          JSON.stringify(g.negVisible))
+      }
       if ((t5.errs || []).length > 0) console.log('  页面错误          =', JSON.stringify(t5.errs))
     } else {
       ok(false, 'adj866 T-5 探针能跑完（工具条/菜单/右键/缩放）', JSON.stringify(t5))

@@ -586,6 +586,9 @@ window.__ijipuLpHoverProbe = function (mode) {
  *  · `plugin` 上挂**记录型**方法（`copyScoreImage` / `copyScoreSvg` / `copyScoreSource` / `setExportRange`），
  *    调用参数原样记下 ⇒ "菜单项 → 插件方法"这条路由是被**执行**验证的；
  *  · `Menu` 由 `scripts/verify-stubs/obsidian.ts` 记录进 `globalThis.__ijipuMenus`（真实宿主里是弹出菜单）。
+ *
+ * adj872 追加第 ⑧ 节：三种显示模式的**实际渲染宽高**（`out.geo`）—— adj871 的三模式几何此前
+ * 只有源码级断言，没量过真实尺寸；见那一节的注释（含"可见高度"为什么要靠 `position: fixed` 定住）。
  */
 window.__ijipuT5Probe = async function () {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -635,7 +638,7 @@ window.__ijipuT5Probe = async function () {
     ...extra,
   });
 
-  const out = { error: null, slots: null, menu: null, routed: null, contextMenu: null, zoom: {}, errs: null };
+  const out = { error: null, slots: null, menu: null, routed: null, contextMenu: null, zoom: {}, geo: null, errs: null };
   try {
     // —— ① 工具条槽位（真机上数按钮 + 读 dataset.slot，不看源码）——
     const wrap = mkWrap('wrapT5', 820);
@@ -743,7 +746,8 @@ window.__ijipuT5Probe = async function () {
     };
     aPane.destroy();
 
-    // —— ⑦ 不带 zoom 的宿主（文件视图/嵌入）必须**既无 zoom 类也无缩放变量**（作用域负对照）——
+    // —— ⑦ 不带 zoom 的宿主（文件视图/嵌入）—— adj872 起**显式**按 `z=*` 处理（加 `ijipu-zoom-fit`），
+    //      不再靠 styles.css 的 `width: 100%` 兜底（那是"三层巧合"）；宽度仍照旧铺满容器 ✓ ——
     const nWrap = mkWrap('wrapNoZoom', 820);
     const nPane = IJipuPane.mountScorePane(makeHost(nWrap));
     await sleep(80);
@@ -755,6 +759,77 @@ window.__ijipuT5Probe = async function () {
       containerW: +nWrap.getBoundingClientRect().width.toFixed(2),
     };
     nPane.destroy();
+
+    /**
+     * ---- ⑧ adj872：三种显示模式的**实际渲染宽高**（真机上量 SVG 的 getBoundingClientRect）----
+     *
+     * 为什么非量不可：adj871 的三模式几何此前**只有源码级断言**（smoke 里量公式、量类名、量 CSS），
+     * 从没量过"真实渲染出来到底多大" ⇒ 「整页真的进视界了吗」「满宽 + z=100 真的没铺满吗」
+     * 这些**结果**性的话没人守。这里用**已知宽度（820）的容器**挂三次：
+     * `{mode:'page', zoom:'auto'}` / `{mode:'full', zoom:'auto'}` / `{mode:'full', zoom:100}`，
+     * 照 ⑥ 的风格量 `.ijipu-svgs .ijipu-page-svg > svg`（**不能**用 querySelector('svg') ——
+     * 容器里还有工具条的图标 svg 15×15，那个坑已经踩过一次）。
+     *
+     * ⚠ 整页拟合的"可见高度" = `window.innerHeight − 容器顶边 − 24`（下限 200，见 publishPageFit），
+     * 所以容器**摆在哪**决定量到什么。这里把它 `position: fixed` 摆在视口内一个已知位置
+     * （top ≈ innerHeight − 650 ⇒ 可见高 ≈ 624），**刻意让高度成为限制方向** ——
+     * 只有高度受限时，"渲染宽 < 容器宽"才能证明"真的按 contain 缩小了"（而不是恰好没撑到边）。
+     * 量到的四个数（innerHeight / svgsTop / 可见高 / 渲染宽高）全部原样带回去，便于人核对；
+     * 若 `window.innerHeight` 与真实窗口不一致，这几个数就是判据的现场证据。
+     */
+    const gWrap = document.createElement('div');
+    gWrap.id = 'wrapGeo';
+    gWrap.style.width = '820px';
+    gWrap.style.position = 'fixed';
+    gWrap.style.left = '0px';
+    document.body.appendChild(gWrap);
+    const geoTop = Math.max(0, window.innerHeight - 650);
+    const geoMeasure = async (label, extra, topPx) => {
+      gWrap.style.top = (topPx === undefined ? geoTop : topPx) + 'px';
+      const pane = IJipuPane.mountScorePane(makeHost(gWrap, extra));
+      await sleep(140);
+      const svgs = gWrap.querySelector('.ijipu-svgs');
+      const svg = gWrap.querySelector('.ijipu-svgs .ijipu-page-svg > svg');
+      const r = svg.getBoundingClientRect();
+      const sr = svgs.getBoundingClientRect();
+      /** 页面框（含页边距）= 该 SVG 的**原始** viewBox 的第 3/4 个数（`data-orig-vb`） */
+      const orig = (svg.dataset.origVb || svg.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+      /** 当前 viewBox（整页/满宽 = 页面框；谱面 = 墨迹盒）—— 满宽 + z=100 的"自然尺寸"就是它 */
+      const cur = (svg.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+      const rec = {
+        label,
+        mode: extra.mode || '(缺省=score)',
+        zoom: String(extra.zoom),
+        pageW: +orig[2].toFixed(2),
+        pageH: +orig[3].toFixed(2),
+        vbW: +cur[2].toFixed(2),
+        vbH: +cur[3].toFixed(2),
+        renderedW: +r.width.toFixed(2),
+        renderedH: +r.height.toFixed(2),
+        svgsW: +sr.width.toFixed(2),
+        svgsTop: +sr.top.toFixed(2),
+        innerH: window.innerHeight,
+        /** 与 `publishPageFit` **同一个式子**（未钳到下限 200 之前的原值） */
+        visibleH: +(window.innerHeight - sr.top - 24).toFixed(2),
+        cls: svgs.className,
+      };
+      pane.destroy();
+      return rec;
+    };
+    out.geo = {
+      note: '容器 #wrapGeo = 820px 定宽 + position:fixed（已知的视口位置）；量的是 .ijipu-svgs .ijipu-page-svg > svg',
+      page: await geoMeasure('page', { mode: 'page', zoom: 'auto' }),
+      fullAuto: await geoMeasure('fullAuto', { mode: 'full', zoom: 'auto' }),
+      full100: await geoMeasure('full100', { mode: 'full', zoom: 100 }),
+      /**
+       * 负对照（量法敏感性）：把容器摆到**视口最下方** ⇒ 原始可见高只剩 ~174px（< 下限 200）
+       * ⇒ 拟合系数被下限顶到 200 ⇒ 「渲染高 ≤ 可见高」这条判据在这里**应当为假**。
+       * 它证明第 1 条判据真的在按"可见高"判，而不是恒真（恒真的断言等于没写）。
+       */
+      negVisible: await geoMeasure('negVisible', { mode: 'page', zoom: 'auto' }, Math.max(0, window.innerHeight - 200)),
+    };
+    /** 量完就摘掉：它是 `position: fixed`，留着会盖在后面的截图（视觉证据）上 */
+    gWrap.remove();
     out.errs = (window.__ijipuErrs || []).slice(-5);
   } catch (e) {
     out.error = String((e && e.message) || e);
