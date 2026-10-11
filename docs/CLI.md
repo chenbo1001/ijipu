@@ -2,9 +2,10 @@
 
 > 方案与决策见 `docs/CLI-AND-COMMAND-PLAN.md`（**① 同一个 exe 带子命令 ② 位图/音频走隐藏窗口渲染
 > ③ 嵌入版 RPC 默认关闭 + 仅 vault 内路径**）。
-> 阶段状态：**P1 + P2 已实现**（`format` / `lint` / `info` / `render` / `batch`）；
-> P3（隐藏窗口渲染 `png/jpg/pdf/wav`）、P4（`settings`/`config`/`doctor`/补全）**未实现**，
-> 调用时会**明确报错并给出退出码 1**（不假装成功 ✗）。
+> 阶段状态：**P1–P4 全部实现**（`format` / `lint` / `info` / `render` / `play` / `batch` /
+> `settings` / `config` / `doctor` / `completions` / `lint --watch`）；
+> 其中**位图与音频**（`png/jpg/pdf/wav`）需要"隐藏窗口渲染"通道：在桌面端 exe 内可用 ✓，
+> 独立 Node 环境会**明确报错（退出码 4）**并给出替代（`-t svg` / `-t midi`）✓ —— 不假装成功 ✗。
 
 ## 一、怎么运行
 
@@ -25,7 +26,7 @@ ijipu <命令> [选项]
 | 命令 | 作用 | 关键选项 |
 |---|---|---|
 | `format` | 按应用规范**规范化源码**（与应用编辑器/插件格式化同一实现） | `-i` `-o` `--check` `--in-place` `--diff` |
-| `lint` | 语法检查（错误/告警） | `-i` `--format text\|json\|gh` |
+| `lint` | 语法检查（错误/告警）；`--watch` 监视文件变化后**即时重检** | `-i` `--format text\|json\|gh` `--watch` |
 | `info` | 谱面概况（标题/调号/行数/分组/问题数） | `-i` `-t text\|json` |
 | `render` | 源码 → **SVG**（每页一段）／**MIDI**／**PNG·JPG·PDF**（需桌面端通道） | `-i` `-t svg\|midi\|png\|jpg\|pdf` `-o` |
 | `play` | 导出音频：**MIDI**（任意环境）／**WAV**（需桌面端通道） | `-i` `-t midi\|wav` `-o` |
@@ -124,6 +125,11 @@ npm run cli -- batch --in samples -o dist-out -t fmt     # 每个谱 → 规范�
 # 10) 导出矢量图 / MIDI
 npm run cli -- render -i 我的谱.jps -t svg -o 我的谱.svg
 npm run cli -- render -i 我的谱.jps -t midi -o 我的谱.mid
+
+# 11) 写谱时的即时反馈：监视文件，改一次查一次（Ctrl+C 结束）
+npm run cli -- lint -i 我的谱.jps --watch
+#   首次检查：错误 0 个、告警 0 个 ✓
+#   变更后检查：错误 0 个、告警 1 个 ✓
 ```
 
 ## 六、CI 集成
