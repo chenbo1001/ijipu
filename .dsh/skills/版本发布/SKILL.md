@@ -1,6 +1,6 @@
 ---
 name: 版本发布
-description: JianpuScript / iJipu「更新提交」的固化流程：把一次改动落地为正式发布——判定版本递增（SemVer）、同步文档（CHANGELOG 当版条目 + ERRORS-LOG 排错条目与变更记录表 + SYNTAX/SETTINGS-AUDIT/VERSIONING）、同步 6 处版本号（version.ts / package.json / tauri.conf.json / package-lock.json×2 / 引擎包）、过验证门（tsc -b + lint + build + smoke 必须 0 失败）、Conventional 提交（中文信息经 UTF-8 文件传入）、打 tag 与推送、桌面打包与 check:installer、生成只含当版的 release-body、建/核对 GitHub Release（gh 需已登录）、涉及引擎改动时同步 obsidian-ijipu/vendor/engine 并按插件自身更新量发插件版本。当用户说"更新提交""发布版本""递增版本号""准备发布""打新版本"，或功能/修复开发完成需要落地时使用。
+description: JianpuScript / iJipu「更新提交」的固化流程：把一次改动落地为正式发布——判定版本递增（SemVer）、同步文档（CHANGELOG 当版条目 + ERRORS-LOG 排错条目与变更记录表 + SYNTAX/SETTINGS-AUDIT/VERSIONING）、同步 7 处版本号（version.ts / package.json / tauri.conf.json / package-lock.json×2 / CLI 包 packages/ijipu-cli/package.json / 引擎包）、过验证门（tsc -b + lint + build + smoke 必须 0 失败）、Conventional 提交（中文信息经 UTF-8 文件传入）、打 tag 与推送、桌面打包与 check:installer、生成只含当版的 release-body、建/核对 GitHub Release（gh 需已登录）、涉及引擎改动时同步 obsidian-ijipu/vendor/engine 并按插件自身更新量发插件版本。当用户说"更新提交""发布版本""递增版本号""准备发布""打新版本"，或功能/修复开发完成需要落地时使用。
 whenToUse: 仅当一次改动需要走完整发布链（判版本 → 文档 → 版本号 → 验证 → 提交/tag/推送 → 打包 → Release，涉引擎再加插件同步链）时使用。只改代码不发布→直接改；只打包→「编译应用」技能；只跑测试→「环境运行与测试」技能；只同步语法文档→「语法规范同步」技能。
 ---
 
@@ -37,7 +37,7 @@ whenToUse: 仅当一次改动需要走完整发布链（判版本 → 文档 →
 | **OP-01** | 冻结改动 | `git status --short`（**含未跟踪**）；逐项确认归属：自己的 / 用户自带的（如 `public/samples/*.jps`、`copy2ob.bat`） | 没有"不知道哪来的"改动；未跟踪文件明确"提交/不提交" |
 | **OP-02** | 判定版本 | 看内容大小定 MAJOR/MINOR/PATCH（拿不准偏 MINOR）；**三处独立判**：应用版本、引擎包版本、插件版本 | 版本号写进后续所有文件前先定死 |
 | **OP-03** | 同步文档 | ① `CHANGELOG.md` 顶部当版条目（新增/变更/修复/清理，带 `adjNN`）；② `docs/ERRORS-LOG.md` 排错条目 `E-年份-序号`（现象/根因/解决/验证/预防）+ **末尾「变更记录」表追加一行**；③ 语法/口径变更 → `docs/SYNTAX.md`；④ 设置分层 → `docs/SETTINGS-AUDIT.md`；⑤ 流程规则 → `docs/VERSIONING.md` | 条目编号连续；表行与 CHANGELOG 口径一致 |
-| **OP-04** | 同步版本号 | **应用 5 处**：`src/brand/version.ts`（`APP_VERSION`）、`package.json`、`src-tauri/tauri.conf.json`、`package-lock.json`（顶层 + `packages[""]`）；**引擎 1 处**：`packages/ijipu-engine/package.json` | `Select-String` 一次性列出全部命中，确认无遗漏、无旧值残留 |
+| **OP-04** | 同步版本号 | **应用 5 处**：`src/brand/version.ts`（`APP_VERSION`）、`package.json`、`src-tauri/tauri.conf.json`、`package-lock.json`（顶层 + `packages[""]`）；**CLI 1 处**：`packages/ijipu-cli/package.json`（adj874 起：CLI 是独立发布的 Node 包，版本与应用一致；漏改会被 `cli-assert` 的 `adj874` 闸门拦住 ✓）；**引擎 1 处**：`packages/ijipu-engine/package.json` | `Select-String` 一次性列出全部命中，确认无遗漏、无旧值残留 |
 | **OP-05** | 验证门 | `npx tsc -b` → `npm run lint`（0 error）→ `npm run build` → `npm run smoke` | **smoke 必须 `ALL SMOKE TESTS PASSED`**；lint warning 数 == 基线（新增 warning 要处理） |
 | **OP-06** | 提交 | 分**两个**提交（推荐）：① 改动批量 `fix(adjNNN-adjMMM): …`（代码+图标+相关文档）② `chore(release): x.y.z（…）`（版本号 + CHANGELOG + ERRORS-LOG）。信息先 `write` 到仓库外文件（如 `.ui-preview/commit1.txt`），再 `git commit -F <file>` | `git log --oneline -2`；`git show --stat` 核对文件集 |
 | **OP-07** | tag + 推送 | `git tag v<x.y.z>` → `git push origin main` → `git push origin v<x.y.z>` | `git rev-parse HEAD == origin/main`；`git ls-remote --tags origin \| grep v<x.y.z>` |
@@ -162,7 +162,7 @@ Get-ChildItem $src -Recurse -File | ForEach-Object {
 - [ ] OP-01 改动逐项确认归属（用户自带的未跟踪文件不代提交）
 - [ ] OP-02 版本幅度符合 SemVer；引擎包/插件版本**各自独立**判定
 - [ ] OP-03 CHANGELOG 当版条目 + ERRORS-LOG 条目与**变更记录表行**齐备；口径类改动同步 SYNTAX/SETTINGS-AUDIT/VERSIONING
-- [ ] OP-04 应用 5 处 + 引擎 1 处版本号全部命中、无旧值残留
+- [ ] OP-04 应用 5 处 + **CLI 1 处** + 引擎 1 处版本号全部命中、无旧值残留（`cli-assert` 的 `adj874` 会兜底拦一次 ✓）
 - [ ] OP-05 `tsc -b` / `lint` 0 error / `build` / **`smoke` 0 失败** 全绿
 - [ ] OP-06 提交信息 Conventional + `adjNN`；中文经 UTF-8 文件传入
 - [ ] OP-07 tag 打在发布提交上；分支与 tag 均已推送
@@ -186,7 +186,8 @@ Get-ChildItem $src -Recurse -File | ForEach-Object {
 | 现象 | 原因 | 处理 |
 |---|---|---|
 | 应用内版本显示 `dev` | 构建信息未注入 | 重跑 `npm run gen:info`（dev/build 会自动跑） |
-| 安装包版本与应用不一致 | 6 处版本号漏改 | OP-04 用 `Select-String` 全量核对（含 `package-lock.json` 两处） |
+| 安装包版本与应用不一致 | 7 处版本号漏改 | OP-04 用 `Select-String` 全量核对（含 `package-lock.json` 两处 + `packages/ijipu-cli/package.json`） |
+| CLI `--version` 与应用版本不一致 | `packages/ijipu-cli/package.json` 漏改 | `cli-assert` 的 `adj874`（包版本 == `APP_VERSION`）会红灯；改完 `npm run cli:build` 重出产物 |
 | Release 正文把历史版本都带上了 | 直接贴了 `CHANGELOG.md` 全文 | 必须用 `npm run release:body` 产物（`E-2026-130` 同类教训） |
 | 匿名 `api.github.com` 查到 404/旧内容 | CDN 缓存 | 改用**带鉴权** `gh release view`（`E-2026-130`） |
 | `gh` 未登录（`You are not logged into any GitHub hosts`） | 沙箱/环境无凭证 | **不要**把 token 写进仓库；把 OP-11 的命令交给用户手工执行，或请其先 `gh auth login` |

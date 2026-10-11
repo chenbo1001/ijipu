@@ -9,7 +9,9 @@
  *  · **位图/音频在无宿主时明确报错**（4，而不是假装成功 ✗）；
  *  · **`batch` 输出目录自动创建**（写文件前 mkdir ✓）；
  *  · **`settings` 的"值 + 来源"分层正确**（命令行 -s > 源内 `# jps-config` > 代码默认 ✓）；
- *  · **`doctor` 如实报告能力**（没有的能力必须 false ✓）。
+ *  · **`doctor` 如实报告能力**（没有的能力必须 false ✓）；
+ *  · adj874：**`@ijipu/cli` 包的对外契约** —— `--help` 必须与实现一致（含负对照）、`-v/--version`
+ *    等价、包版本 == `APP_VERSION`、`bin`/`files` 与产物对得上，并把产物**真跑一次** ✓。
  *
  * 运行：`npm run smoke`（已串在后面）；也可单独 `node dist-smoke/cli-assert.cjs`。
  */
@@ -17,6 +19,7 @@ import { runCli, EXIT, type CliIo } from '../packages/ijipu-cli/src/cli'
 // adj873：`--crop` 断言要读渲染产物的 viewBox 来核对画布盒
 import { readViewBoxOf } from '@ijipu/engine/index.ts'
 import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 
 let passed = 0
@@ -265,6 +268,83 @@ console.log('\n— 命令行（A·P1–P4）—')
   io.io.watchFile = () => () => {}
   const r2 = await runCli(['lint', '-i', '-', '--watch'], io.io)
   check('adj814 --watch 不能用于 stdin（要监视具体文件）', r2.code === EXIT.usage, `code=${r2.code}`)
+}
+
+// ⑧ `@ijipu/cli` 包（adj874）：`--help` / `--version` 的**对外契约** + 包元数据 + 产物真跑
+{
+  const io = makeIo({})
+  const r = await runCli(['--help'], io.io, { version: '9.9.9' })
+  const help = String(io.logs.join(''))
+  check('adj874 --help 退出码 0、写 stdout、不写 stderr', r.code === EXIT.ok && help.length > 0 && io.errs.length === 0, `code=${r.code}`)
+  const CMDS = ['format', 'lint', 'info', 'render', 'play', 'batch', 'settings', 'config', 'doctor', 'completions']
+  const missing = CMDS.filter((c) => !help.includes(c))
+  check('adj874 --help 列全 10 个已实现命令', missing.length === 0, `缺：${missing.join(' ')}`)
+  /**
+   * **负对照**：旧文案把 render / play / batch / settings / config / doctor 写成
+   * 「未实现（P2–P4，会明确报错）」—— 而那 6 个命令**当时早已实现**（E-2026-390）。
+   * 这条钉死"不许再把已实现的写成未实现" ✓。
+   */
+  check('adj874 --help 不再把已实现命令写成"未实现（P2–P4）"（负对照）', !help.includes('未实现（P2–P4'))
+  check('adj874 --help 覆盖后加的选项（--crop/--pad/--ink/--watch）', ['--crop', '--pad', '--ink', '--watch'].every((o) => help.includes(o)))
+
+  const ioV = makeIo({})
+  const ioV2 = makeIo({})
+  const rv = await runCli(['-v'], ioV.io, { version: '9.9.9' })
+  const rv2 = await runCli(['--version'], ioV2.io, { version: '9.9.9' })
+  check(
+    'adj874 -v 与 --version 等价（退出码 0 + 版本行）',
+    rv.code === EXIT.ok && rv2.code === EXIT.ok && String(ioV.logs.join('')) === 'iJipu 9.9.9\n' && String(ioV2.logs.join('')) === 'iJipu 9.9.9\n',
+    `-v=${JSON.stringify(String(ioV.logs.join('')))} --version=${JSON.stringify(String(ioV2.logs.join('')))}`,
+  )
+
+  // 包元数据：`@ijipu/cli` 的版本是**第 4 处**版本号 ⇒ 必须与 APP_VERSION 锁在一起 ✓
+  const pkg = JSON.parse(readFileSync('packages/ijipu-cli/package.json', 'utf8')) as {
+    name: string
+    version: string
+    bin: Record<string, string>
+    files: string[]
+    dependencies?: Record<string, string>
+  }
+  const appVer = String(readFileSync('src/brand/version.ts', 'utf8')).match(/APP_VERSION = '([^']+)'/)?.[1] ?? ''
+  /**
+   * 包名**带 scope**（用户 2026-10-11 定：与引擎包 `@ijipu/engine` 对齐）⇒ 钉住，
+   * 免得被"顺手改成无 scope 的 ijipu-cli" ✗。
+   */
+  check('adj874 包名 = @ijipu/cli（与引擎包 @ijipu/engine 同一 scope）', pkg.name === '@ijipu/cli', `实际=${pkg.name}`)
+  check('adj874 CLI 包版本 == APP_VERSION（版本号不漂移）', pkg.version === appVer && appVer !== '', `包=${pkg.version} 应用=${appVer}`)
+  check(
+    'adj874 包 bin 指向构建产物、files 含 dist、运行期零依赖',
+    pkg.bin.ijipu === 'dist/ijipu.cjs' && pkg.files.includes('dist') && pkg.dependencies === undefined,
+    JSON.stringify({ bin: pkg.bin, files: pkg.files, deps: pkg.dependencies }),
+  )
+
+  /**
+   * 产物核对。**为什么静态读文本 + 一次 spawn，而不是只 spawn**：
+   *  · 静态部分（shebang / 版本注入）能在"产物没构建"时给出**明确原因**而不是堆栈 ✗；
+   *  · spawn 部分才是"运行时真的跑到了"的证据（E-2026-264 的教训：源码文本断言证明不了运行期 ✓）——
+   *    但 DSH 沙箱下 `spawn` + 管道 stdio 会 EPERM，这时**如实标记跳过**（不冒充通过 ✗）。
+   */
+  let bundle: string | null = null
+  try {
+    bundle = readFileSync('packages/ijipu-cli/dist/ijipu.cjs', 'utf8')
+  } catch {
+    check('adj874 CLI 产物存在（packages/ijipu-cli/dist/ijipu.cjs）', false, '先跑 `npm run cli:build`')
+  }
+  if (bundle !== null) {
+    check('adj874 产物以 shebang 开头（bin 可直接执行）', bundle.startsWith('#!/usr/bin/env node'))
+    check('adj874 产物注入了真实版本（不是 dev 兜底）', bundle.includes(pkg.version))
+    try {
+      const out = execFileSync(process.execPath, ['packages/ijipu-cli/dist/ijipu.cjs', '--version'], { encoding: 'utf8' })
+      check('adj874 产物端到端可跑：node dist/ijipu.cjs --version', out.trim() === `iJipu ${pkg.version}`, `实际=${JSON.stringify(out.trim())}`)
+    } catch (e) {
+      const msg = String(e)
+      if (msg.includes('EPERM')) {
+        console.log('  · adj874 端到端**跳过**（沙箱不允许 spawn + 管道 stdio：EPERM）—— 请在普通终端手跑：node packages/ijipu-cli/dist/ijipu.cjs --version')
+      } else {
+        check('adj874 产物端到端可跑：node dist/ijipu.cjs --version', false, msg)
+      }
+    }
+  }
 }
 
 console.log(failed === 0 ? `\nCLI 断言全部通过 ✅（${passed} 项）` : `\nCLI 断言失败 ${failed} 项 ❌`)

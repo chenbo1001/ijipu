@@ -9,17 +9,26 @@
 
 ## 一、怎么运行
 
+CLI 是一个**独立的 Node 包**（`packages/ijipu-cli`，包名 `@ijipu/cli`，命令名 `ijipu`），
+**不经过 `ijipu.exe`**：引擎源码已打进单文件产物，运行期**零依赖** ✓。
+
 ```powershell
-# 开发/CI（本仓库内，Node 环境）：
-npm run cli -- <命令> [选项]         # 等价于 vite build --config vite.smoke.config.ts && node dist-smoke/cli.cjs …
+# ① 开发/CI（本仓库内，改完源码立刻跑）：
+npm run cli -- <命令> [选项]         # = npm run cli:build && node packages/ijipu-cli/dist/ijipu.cjs …
 
-# 直接用已构建产物：
-node dist-smoke/cli.cjs <命令> [选项]
+# ② 直接跑已构建产物：
+node packages/ijipu-cli/dist/ijipu.cjs <命令> [选项]
 
-# 桌面端（P3 起，决策①）：同一个 exe，带子命令就不进 GUI
-ijipu <命令> [选项]
+# ③ 当成普通命令行工具装（给用户的方式）：
+npm run cli:build                     # 先出产物
+npm i -g ./packages/ijipu-cli         # 装好后命令名就是 ijipu
+ijipu --help
 ```
-> 现在**没有参数**仍是打开 GUI（现状不变 ✓）；只有带**已知子命令**才走 CLI。
+
+> **口径（adj874 起）**：`ijipu.exe` 是**纯 GUI 程序** —— 双击打开界面，`ijipu.exe --help`
+> **不会**打帮助（GUI 子系统程序也不连控制台）；命令行一律走上面的 `ijipu`（Node 包）✓。
+> 需要 canvas / 音频的两类输出（`render -t png|jpg|pdf`、`play -t wav`）要由**桌面端应用**提供能力，
+> 这条通道的落地见 §七之二（**尚未接线**：现在独立环境会如实报退出码 4 ✓）。
 
 ## 二、命令一览（P1）
 
@@ -176,25 +185,61 @@ ijipu.exe render -i 谱.jps -t png -o out.png
 4. **产物确定性**：`--deterministic` 下不写时间戳；PNG/PDF 的字体与缩放固定（scale 默认 2 ✓）。
 
 ### 请你在桌面端按这个清单验证（我在此环境无法跑 GUI ✗）
-| # | 命令（在安装目录或 `npx tauri build` 产物旁） | 期望 |
+| # | 命令 | 期望 |
 |---|---|---|
-| 1 | `ijipu.exe --help` | 打印 CLI 用法（**不弹 GUI** ✓） |
-| 2 | `ijipu.exe lint -i 我的谱.jps` | 与独立 Node 结果一致 ✓ |
-| 3 | `ijipu.exe render -i 我的谱.jps -t svg -o a.svg` | 生成 SVG ✓ |
-| 4 | `ijipu.exe render -i 我的谱.jps -t png -o a.png` | **生成 PNG ✓**；与应用「导出 PNG」**逐像素一致**（同 scale 下可对哈希 ✓） |
-| 5 | `ijipu.exe render -i 我的谱.jps -t pdf -o a.pdf` | 生成 PDF，页数与 GUI 导出一致 ✓ |
-| 6 | `ijipu.exe play -i 我的谱.jps -t wav -o a.wav` | 生成 WAV（需音色库就绪 ✓；缺音色库应**明确报错** ✗ 而不是静默出空文件 ✓） |
-| 7 | 双击一个 `.jps`（**无子命令**） | **照旧打开 GUI** ✓（决策①不得破坏"双击打开" ✓） |
-| 8 | 断开窗口能力（如无头/远程会话） | 第 4–6 条应报退出码 4 + 原因 ✓（**不假装成功** ✗） |
+| 1 | `ijipu --help`（Node 包，非 exe） | 打印 CLI 用法 ✓；`ijipu.exe --help` 则**照旧弹 GUI**（口径见 §一） |
+| 2 | `ijipu lint -i 我的谱.jps` | 与独立 Node 结果一致 ✓（**不需要宿主**） |
+| 3 | `ijipu render -i 我的谱.jps -t svg -o a.svg` | 生成 SVG ✓（不需要宿主） |
+| 4 | 应用在跑（见 §七之三 的开启方式）时 `ijipu render -i 我的谱.jps -t png -o a.png` | **生成 PNG ✓**；与应用「导出 PNG」**逐像素一致**（同 scale 下可对哈希 ✓） |
+| 5 | 同上 `-t pdf` | 生成 PDF，页数与 GUI 导出一致 ✓ |
+| 6 | 同上 `play -i 我的谱.jps -t wav -o a.wav` | 生成 WAV（需音色库就绪 ✓；缺音色库应**明确报错** ✗ 而不是静默出空文件 ✓） |
+| 7 | 双击一个 `.jps`（**无子命令**） | **照旧打开 GUI** ✓（exe 保持纯 UI ✓） |
+| 8 | 应用**没在跑**时 `-t png` | 现在应报退出码 4 + 原因 ✓；**一次性子进程通道**落地后应能自动起宿主 ✓ |
 
 > 第 4 条的"逐像素一致"是这条通道**唯一**的验收硬指标 ✓ —— 若不一致，说明前端走的不是 `src/export/*` 那条链路 ✓（先查这里，别调算法 ✗）。
+
+## 七之三、能力通道**当前状态**与协议（adj875 起）
+
+**两条通道**（用户 2026-10-11 裁决：**都做**）：
+
+| 通道 | 何时用 | 现状 |
+|---|---|---|
+| ① **命名管道**（应用在跑） | 应用已开着 ⇒ CLI 连上去要能力 | **管道与协议已落 ✓**（Rust 单测：真建管道、真连、真收发 JSON）；**能力转交前端待下一批** ✗ |
+| ② **一次性子进程**（应用没跑） | CLI 自己起一个隐藏窗口的宿主，拿完字节即退 | 未落 ✗ |
+
+**管道名（单一口径，两端必须一致）**：`\\.\pipe\ijipu-cli-<USERNAME>`（取不到 `USERNAME` 时用 `default`）。
+> 为什么要写死这一条：Obsidian 的 CLI 就有过"管道名按显示名/账户名不一致 ⇒ 客户端永远连不上"的案例，
+> 所以这里**只允许一处规则**（Rust 侧 `cli_host::pipe_name()` 是唯一定义，CLI 侧照抄）。
+
+**协议**：**一行一个 JSON**（UTF-8），`id` 原样回传便于配对：
+```jsonc
+→ {"id":1,"method":"ping"}
+← {"id":1,"ok":true,"result":{"pong":true,"proto":1}}
+← {"id":1,"ok":false,"error":"…"}          // 失败一律如实报错，绝不假装成功 ✗
+```
+**方法白名单**：`ping`（探活，CLI 用它判断"应用在不在跑"）、`capabilities`（能力自检，**如实**）、
+`rasterize`、`synthesize`。未知方法一律拒绝。
+
+**怎么开启（默认关，沿用方案 B 的安全口径）**：
+```powershell
+$env:IJIPU_CLI_HOST = "1"; .\ijipu.exe      # 或：.\ijipu.exe --cli-host
+```
+管道用**默认安全描述符**（创建者 + SYSTEM/Administrators）⇒ 只允许**同一用户**连接；
+设置项接入后会改成"设置里显式开"（`adj876+`）。
+
+> ⚠ **现在别指望 `-t png` 能通**：`capabilities` 会如实回 `raster/audio = false` 并给原因
+> （"渲染转交前端的接线尚未落地"）⇒ CLI 仍然报退出码 4 + 原因 ✓。这是**刻意的**：宁可报"还没接"，
+> 也不给"看起来成功了"的假象 ✗。
 
 ## 八、实现约定（给后续维护者，来自项目铁律）
 
 1. **纯逻辑 + 注入式 IO**：核心是 `packages/ijipu-cli/src/cli.ts` 的 `runCli(argv, io)` ——
-   不碰 `process`/`console` ⇒ 可被 ① node 可执行 ② 桌面端 exe 子命令（决策①）③ 测试直接调用，
-   **三处共用一份逻辑** ✓；
+   不碰 `process`/`console` ⇒ 可被 ① **Node 包的 bin**（`src/nodeEntry.ts`；`npm run cli:build` 产出
+   `packages/ijipu-cli/dist/ijipu.cjs`）② 测试（`scripts/cli-assert.mts`）③ 将来的**能力宿主**通道，
+   **三处共用一份逻辑** ✓（adj874：**不再**走「同一个 exe 带子命令」，exe 保持纯 GUI —— 口径见 §一 ✓）；
 2. **不重写引擎**：解析/格式化只调 `@ijipu/engine`（AGENTS §六之二·4"数值口径必须同源"）；
-3. **不引依赖**：参数解析手写（§一"新增依赖必须先询问"）；
+3. **不引依赖**：参数解析手写（§一"新增依赖必须先询问"）—— 包 `package.json` 里**没有 `dependencies`**
+   （引擎已打进单文件产物），断言 `adj874` 守着这一条 ✓；
 4. **未实现就报错**：不给"看起来成功了"的假象 ✗（退出码 1 + 明确提示 ✓）；
-5. **凡新增命令**：同步更新本文件 + `--help` 快照断言 + 冒烟用例（§六之二·5）。
+5. **凡新增命令**：同步更新本文件 + `--help` + 冒烟用例；`--help` 与命令集合的**一致性有闸门**
+   （`adj874`：列全命令 + 负对照"不许把已实现的写成未实现"）✓。

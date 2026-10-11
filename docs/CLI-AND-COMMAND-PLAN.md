@@ -1,6 +1,9 @@
 # 方案：iJipu 命令行（桌面端 CLI）与「嵌入版供 Obsidian 调用」命令 API
 
-> 状态：**待用户裁决**（2026-10-11）。本文只做设计，不含实现。
+> 状态：**设计方案（历史记录）+ 裁决台账**。**当前口径看 §八「已裁决」**（含 2026-10-11 **二次裁决**：
+> CLI = 独立 Node 包 `@ijipu/cli`，`ijipu.exe` 保持**纯 GUI**、不做子命令）。⚠ 本文里 A2/A3 等章节是
+> **方案设计**，不等于现状 —— 曾经因为把这里的设计当成现状写进 `docs/CLI.md`，导致用户实测
+> `ijipu.exe --help` 弹 UI（见 `docs/ERRORS-LOG.md` 的 `E-2026-390`）✗。
 > 两套方案各自独立，可分别决定"做/不做/先做哪一段"。
 > 已按项目既有铁律校准：**引擎纯 TS 零 DOM**（§一）、**数值口径同源**（§六之二·4）、
 > **设置分层 L0/L1/L1.5/L2**（§七）、**新增依赖必须先询问**（§一）、**adj 编号 + 断言**（§三·2、§六之二·5）。
@@ -187,7 +190,7 @@ docs/CLI.md          ← 新增    命令参考 + CI 示例（GitHub Actions / p
 ### T-1 A·P3 桌面端「隐藏窗口渲染」实现（**需桌面构建 + 图形环境**）
 - **现状**：CLI 侧**已就绪** ✓（`CliIo.rasterize` / `CliIo.synthesize` 可选能力 + 无能力时退出码 4 ✓，
   断言覆盖 ✓）；**落地方案与 8 项验证清单**见 `docs/CLI.md` §七之二 ✓。
-- **待做**：`src-tauri` 入口识别"带子命令"⇒ 不进 GUI ✓；位图/音频类建**不可见窗口** ⇒ 复用
+- **待做**：`src-tauri` 入口识别"带子命令"⇒ 不进 GUI ✗（**二次裁决已推翻**：exe 保持**纯 GUI**，改为只当「能力宿主」）；位图/音频类建**不可见窗口** ⇒ 复用
   `src/export/export.ts`（`renderScoreToSvg` → `svgToCanvas` → `toDataURL` ✓；PDF 走既有分页 ✓；
   WAV 走既有离线合成 ✓）⇒ 字节回传 ⇒ 落盘 ✓。
 - **前置**：桌面构建环境（`tauri build` ✓）与可用的图形会话 ✓。
@@ -253,7 +256,7 @@ docs/CLI.md          ← 新增    命令参考 + CI 示例（GitHub Actions / p
 
 | # | 事项 | 决定 | 对方案的影响 |
 |---|---|---|---|
-| ① | CLI 形态 | **同一个 exe 带子命令**（`ijipu <命令> [参数]`；无参数=GUI） | 主干按 A2·①；**不再做**独立 `ijipu-cli`；npm 包（③）**暂不做**（保留为后续可选项）；`src-tauri` 里加"带子命令⇒不进 GUI"的分流 |
+| ① | CLI 形态 | **同一个 exe 带子命令**（`ijipu <命令> [参数]`；无参数=GUI） | 主干按 A2·①；**不再做**独立 `ijipu-cli`；npm 包（③）**暂不做**（保留为后续可选项）—— ⚠ **本条已被 2026-10-11 二次裁决推翻**，见下方「二次裁决」✗；`src-tauri` 里加"带子命令⇒不进 GUI"的分流 |
 | ② | 位图/音频（PNG/JPG/PDF/WAV） | **接受「隐藏窗口渲染」**（复用 `src/export/*` 与音色库，**不引新依赖**） | A 的 P3 按"off-screen 窗口"实现；`--deterministic` 需要与窗口渲染配合（字体/尺寸固定） |
 | ③ | B 的 RPC 安全边界 | **可以**：总开关**默认关闭** + **只允许 vault 内相对路径** | B2 起按此写死；另加：方法白名单、`event.source` 校验、参数校验、超时/并发上限、大动作 `Notice` 确认 |
 
@@ -264,3 +267,28 @@ docs/CLI.md          ← 新增    命令参考 + CI 示例（GitHub Actions / p
 4. **A·P4 + B4**：`settings/config/doctor`、补全、协议冻结与文档。
 
 > **命令行操作口径见 `docs/CLI.md`**（本方案 A 的对外说明书，同时充当实现口径与验收标准）。
+
+---
+
+## 九、二次裁决（2026-10-11，用户口径；`adj874` 起生效）
+
+| # | 事项 | 决定 | 影响 |
+|---|---|---|---|
+| ①′ | **CLI 形态** | **独立 Node 包 `@ijipu/cli`**（命令名 `ijipu`，即 A2 的形态③） | **推翻上面的 ①**：`ijipu.exe` **不做**子命令分流、**也不打印 `--help`**，保持**纯 GUI**（双击即界面）；CLI 走 Node 分发，引擎打进单文件产物（**运行期零依赖** ✓）。包名**带 scope**（用户 2026-10-11 定：与引擎包 `@ijipu/engine` 对齐；代价是首次发布前要在 npm 上拥有 `ijipu` 这个 scope） |
+| ②′ | **位图/音频能力** | **两条通道都做**：应用在跑 ⇒ **命名管道**（`\\.\pipe\ijipu-cli-<用户>`，仿 Obsidian CLI 的 `Obsidian.com` + `\\.\pipe\obsidian-cli-*`）；没跑 ⇒ **一次性子进程**（起一个隐藏窗口当渲染宿主，拿完字节即退） | 应用只暴露**能力**（`rasterize` / `synthesize`）而不是「命令」；总开关**默认关**（沿用上表 ③ 的安全口径） |
+| ③′ | **文本类落点** | `format` / `lint` / `info` / `settings` / `config` / `doctor` / `completions` / `render -t svg\|midi` / `play -t midi` **完全不碰 exe**，直接调引擎 ✓ | A2·③「纯文本类零窗口」成立 ✓ |
+
+**实施顺序（二次裁决后）**：
+1. **CLI 包化** —— `packages/ijipu-cli` 成为可安装包（`bin` / `--help` / `--version` / tsconfig 类型闸门 /
+   产物零依赖），`-t png|pdf|wav` 无宿主时**如实退 4** ✓ **（已完成 `adj874`）**；
+2. **CLI 侧宿主客户端** —— 找 `ijipu.exe`（注册表 `HKCU\...\Uninstall\iJipu` 的 `InstallLocation`，
+   注意该值**带引号**；且 Chrome/豆包的 PWA 卸载项同名「爱记谱 iJipu」，**只能按 key 名精确取** ✗ 按 DisplayName 匹配）
+   + 两条通道 + 能力缺失时的退出码 4（**待做**）；
+3. **应用侧能力宿主** —— 命名管道服务端（**已落 `adj875`**：`src-tauri/src/cli_host.rs`，管道名
+   `\\.\pipe\ijipu-cli-<USERNAME>`、一行一个 JSON、方法白名单 `ping`/`capabilities`/`rasterize`/`synthesize`；
+   默认**关**，用 `IJIPU_CLI_HOST=1` 或内部开关 `--cli-host` 开启；Rust 单测真连真收发 ✓）
+   + **把请求转交前端**、由前端复用 `src/export` 渲染后回传（**待做**）；一次性子进程的隐藏窗口模式（**待做**）；
+4. **安装器** —— exe 路径发现与（可选的）PATH/`App Paths` 注册（**待做**）。
+
+> 仍适用的硬指标（来自 §七之二）：`ijipu render -t png` 与应用的「导出 PNG」**逐像素一致**；
+> 无窗口能力时**退出码 4 + 原因**、绝不产半成品 ✗；**不重写渲染**（一律复用 `src/export/*` 与音色库）。

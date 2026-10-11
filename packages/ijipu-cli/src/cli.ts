@@ -11,7 +11,7 @@
  * 本阶段（P1）实现：`format` / `lint` / `info` + 全局选项 + `--json`。
  * `render` / `play` / `batch` / `settings` / `config` / `doctor` 属 P2–P4，**未实现时明确报错**（不假装成功 ✗）。
  */
-import { formatJps, parseJps, splitParseIssues, layoutScore, renderScoreToSvg, buildPlaySequence, eventsToMidi, defaultPageConfig, mergeJpsConfig, extractJpsConfig, OPTIONAL_CONFIG_FIELDS, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, inkBoxesOfLayout, type PageConfig, type ScoreLayout, type RangeBox, type ExportRange } from '@ijipu/engine'
+import { formatJps, parseJps, splitParseIssues, layoutScore, renderScoreToSvg, buildPlaySequence, eventsToMidi, defaultPageConfig, mergeJpsConfig, extractJpsConfig, OPTIONAL_CONFIG_FIELDS, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, inkBoxesOfLayout, type PageConfig, type ScoreLayout, type RangeBox, type ExportRange, type ProblemRow } from '@ijipu/engine'
 
 /** 退出码：**对外承诺**，只增不改（脚本/CI 依赖它） */
 export const EXIT = {
@@ -77,26 +77,34 @@ const HELP = `iJipu 命令行（爱记谱）
 
 用法：ijipu [全局选项] <命令> [命令选项]
 
-命令（P1–P3 已实现）：
-  format   -i <文件|-> [-o <文件|->] [--check] [--in-place] [--diff]   按应用规范规范化源码
-  lint     -i <文件|-> [--format text|json|gh]                          语法检查（有错 ⇒ 退出码 3）
-  info     -i <文件|-> [-t text|json]                                   谱面概况（行数/分组/问题数）
-  render   -i <文件|-> -t svg|midi|png|jpg|pdf -o <输出>                渲染/导出（位图需桌面端通道）
-           [--crop page|score] [--pad N] [--ink x,y,w,h]               画布范围（缺省 page = 整页）
-  play     -i <文件|-> -t midi|wav -o <输出>                            导出音频（WAV 需桌面端通道）
-  batch    --in <目录> -o <目录> [-t svg|midi|fmt]                      目录批量转换
+命令：
+  format        -i <文件|-> [-o <文件|->] [--check] [--in-place] [--diff]     按应用规范规范化源码
+  lint          -i <文件|-> [--format text|json|gh] [--watch]                 语法检查（有错 ⇒ 退出码 3）
+  info          -i <文件|-> [-t text|json]                                    谱面概况（行数/分组/问题数）
+  render        -i <文件|-> -t svg|midi|png|jpg|pdf -o <输出>                 渲染/导出
+                [--crop page|score] [--pad N] [--ink x,y,w,h]                画布范围（缺省 page = 整页）
+  play          -i <文件|-> -t midi|wav -o <输出>                             导出音频
+  batch         --in <目录> -o <目录> [-t svg|midi|fmt]                       目录批量转换
+  settings      -i <谱> <键名> [-s k=v]                                       看某个设置项的值与来源
+  config        -i <谱> [-t effective] [--quiet]                              打印生效设置全表 + 每项来源
+  doctor        [--json]                                                      环境自检（如实报告能力有无）
+  completions   bash|zsh|powershell                                           输出 shell 补全脚本
 
 全局选项：
-  --json            机器可读输出（带 schema 版本）
-  --quiet           不输出非必要信息
-  --deterministic   输出不含时间戳（便于 CI 逐字节比对）
-  -s <k=v>          临时设置（可重复；优先级最高，**不落盘**）
-  --config <文件>   CLI 配置文件（P4；现在给了会提示未实现）
-  -h, --help        帮助
-  -v, --version     版本
+  -i, --input <文件|->      输入文件（- = stdin；省略时也读 stdin）；--in 是别名
+  -o, --output <文件|->     输出文件（- 或省略 = stdout）
+  -t, --type <类型>         输出类型（省略时按 -o 后缀推断）
+  --json                    机器可读输出（带 schema 版本）
+  --quiet                   不输出非必要信息
+  --deterministic           输出不含时间戳（CI 逐字节比对用）
+  -s <k=v>                  临时设置（可重复；优先级最高，**不落盘**）
+  --config <文件>           CLI 配置文件（**尚未实现**；给了 ⇒ 退出码 5）
+  -h, --help                帮助
+  -v, --version             版本
 
-未实现（P2–P4，会明确报错而不是假装成功）：
-  render / play / batch / settings / config / doctor
+需要桌面端能力的两类输出：render -t png|jpg|pdf（canvas/字体/分页）、play -t wav（AudioContext + 音色库）。
+  有宿主能力 ⇒ 正常产出；没有（独立 Node 环境）⇒ **退出码 4 + 原因** 并给出替代（-t svg / -t midi），
+  不产出半成品、不假装成功。
 
 退出码：0 成功 ｜ 1 用法错误 ｜ 2 输入不存在 ｜ 3 语法错误 ｜ 4 渲染失败 ｜ 5 设置非法
 `
@@ -751,7 +759,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
   // ── lint（P1；adj814 起支持 --watch）──────────────────────
   if (p.command === 'lint') {
     /** 单次检查 → 文本 + 结论（watch 复用同一份逻辑，避免两份口径 ✗） */
-    const runOnce = (): { errors: ParseIssue[]; warnings: ParseIssue[]; ok: boolean } => {
+    const runOnce = (): { errors: ProblemRow[]; warnings: ProblemRow[]; ok: boolean } => {
       const parsed = parseJps(source)
       const { errors, warnings } = splitParseIssues(parsed)
       return { errors, warnings, ok: errors.length === 0 }

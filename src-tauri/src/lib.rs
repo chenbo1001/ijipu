@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 
+/// adj875：命令行（`@ijipu/cli`）的**能力宿主**模块（Windows 命名管道；默认不开启）。
+mod cli_host;
+
 /// adj538：待打开的 `.jps` 路径队列（去重前的原始路径，前端取走即清空）。
 ///
 /// 为什么用队列 + 拉取，而不是直接把内容 emit 给前端：**冷启动存在竞态**——
@@ -432,6 +435,9 @@ pub fn run() {
             // 冷启动：双击 `.jps` 时路径就在本进程的命令行参数里（NSIS 写的是 `"ijipu.exe" "%1"`）。
             // v2 的 `Env` 默认已 manage（内容即 `std::env::args_os()`），用它避免非 UTF-8 参数 panic。
             queue_open_paths(app.handle(), jps_paths_from_os_args(app.env().args_os.clone()));
+            // adj875：命令行能力宿主（命名管道）。**默认不开** —— 只有显式给了
+            // `IJIPU_CLI_HOST=1` 或内部开关 `--cli-host` 才起 ⇒ 双击打开的现状行为一字不变 ✓。
+            cli_host::start_if_enabled(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

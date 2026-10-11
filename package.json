@@ -13,7 +13,7 @@
     "lint": "oxlint",
     "check:encoding": "node scripts/check-encoding.mjs",
     "preview": "vite preview",
-    "smoke": "npm run check:encoding && vite build --config vite.smoke.config.ts && node dist-smoke/smoke.cjs && node dist-smoke/cli-assert.cjs",
+    "smoke": "npm run check:encoding && npm run cli:typecheck && npm run cli:build && vite build --config vite.smoke.config.ts && node dist-smoke/smoke.cjs && node dist-smoke/cli-assert.cjs",
     "release:body": "node scripts/release-body.mjs",
     "build:embed": "npm run gen:info && node scripts/embed-assets.mjs && tsc -b && vite build --config vite.config.embed.mjs",
     "smoke:embed": "node scripts/embed-smoke.mjs",
@@ -23,7 +23,10 @@
     "tauri:build": "tauri build",
     "check:installer": "node scripts/check-installer.mjs",
     "postinstall": "node scripts/patch-vite.js",
-    "cli": "vite build --config vite.smoke.config.ts && node dist-smoke/cli.cjs",
+    "cli": "npm run cli:build && node packages/ijipu-cli/dist/ijipu.cjs",
+    "cli:build": "vite build --config packages/ijipu-cli/vite.config.ts",
+    "cli:typecheck": "tsc -p packages/ijipu-cli/tsconfig.json",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "smoke:cli": "vite build --config vite.smoke.config.ts && node dist-smoke/cli-assert.cjs"
   },
   "dependencies": {

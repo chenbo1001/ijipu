@@ -9,6 +9,13 @@ import { fileURLToPath, URL } from 'node:url'
  * Obsidian / 外部宿主可 import '@ijipu/engine' 使用 parseJps/layoutScore/renderScoreToSvg 等。
  */
 export default defineConfig({
+  /**
+   * ⚠ 必须关掉（**顶层**选项，不在 build 里）：vite 的 root 是项目根、`publicDir` 默认 = `<root>/public`，
+   * 而 `public/` 里是应用的图标/示例谱/音色库 —— 输出目录落在包内的 lib 构建会把它们**整个拷进**
+   * `packages/ijipu-engine/dist/`（实测本该只有 `dist/engine/`，却混着 `good.png`/`Jianpu.ico`/
+   * `manifest.webmanifest`/`sw.js`，`npm pack` 会一起打包 ✗）。同族缺陷见 `E-2026-391`（CLI 包）。
+   */
+  publicDir: false,
   build: {
     lib: {
       entry: fileURLToPath(new URL('./src/engine/index.ts', import.meta.url)),

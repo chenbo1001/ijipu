@@ -60,6 +60,8 @@ npm run tauri:build  # 复用 npm run build（前端 dist），版本随 package
 3. **递增版本号（同步多份）**：
    - `src/brand/version.ts`（`APP_VERSION`）、`package.json`、`src-tauri/tauri.conf.json`
    - `package-lock.json`（顶层 + packages[""] 两处）
+   - **`packages/ijipu-cli/package.json`**（adj874 起：CLI 是独立发布的 Node 包，版本号应与应用一致；
+     不一致会被 `cli-assert` 的 `adj874` 闸门当场拦下 ✓）
    - 引擎改动涉及包版本时同步 `packages/ijipu-engine/package.json`、`packages/ijipu-engine/src/engine/...` 相关
 4. **验证**：`tsc -b` + `npm run build` 通过；`npm run smoke` **必须 0 失败**（adj456 起旧的"18 条预存失败基线"已逐条清理归零——不再接受"== 基线"的说法；若确有无法立刻修的失败，必须在断言里写明原因与跟踪项，并在提交信息里点名，而不是只写个数）。
 5. **git 提交 + 打 tag**：

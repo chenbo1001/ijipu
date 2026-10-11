@@ -7605,6 +7605,66 @@
   刻意不含 `MZ`/`GIF8` —— base64 音源里会随机误报）；**教训**：`npm run smoke` 只能验 Node 侧逻辑，
   **"能不能在宿主里跑起来"必须真机验收**（本次是靠 WebView2 调试口才拿到那句决定性报错）。
 
+### E-2026-390 `--help` 把**已实现**的命令写成「未实现」，文档又把**计划**当现状（用户实测 `ijipu.exe --help` 弹 UI 才暴露；adj874）
+
+- **现象**：`node dist-smoke/cli.cjs --help` 的输出里两处与事实相反：
+  ① 命令标题写「命令（P1–P3 已实现）」，而 `settings` / `config` / `doctor` / `completions` 是 `adj804`（P4）就已实现；
+  ② 末尾列「未实现（P2–P4，会明确报错而不是假装成功）：render / play / batch / settings / config / doctor」——
+  这 6 个**当时全部可用**（`adj802`/`adj803`/`adj804`）⇒ 用户照帮助用会以为不能用。
+  同期 `docs/CLI.md` 第 19–21 行写「桌面端（P3 起，决策①）：同一个 exe，带子命令就不进 GUI」、
+  §七之二 验证清单第 1 条写「`ijipu.exe --help` ⇒ 打印 CLI 用法（**不弹 GUI** ✓）」，
+  而 `docs/CLI-AND-COMMAND-PLAN.md` 第 190 行的 T-1 自己写的却是「**待做**：`src-tauri` 入口识别『带子命令』」
+  —— **同一件事在两份文档里，一个是现状、一个是待做**；用户实测 `ijipu.exe --help` 弹出 UI，才把它翻出来。
+- **根因**：① `HELP` 是一段**手写常量**，没有任何闸门核对它与解析器实际的命令集合（`known` 那个 Set）；
+  `docs/CLI.md` §八·5 早就写了「凡新增命令：同步更新本文件 + **`--help` 快照断言**」，但这条约定**从未落地**
+  —— 又是一条「只写在文档里 = 无效约束」（AGENTS §六之三·3）。
+  ② 决策①（同一个 exe 带子命令）当时只落了 **CLI 逻辑层**，**exe 侧从未接线**：`src-tauri/src/lib.rs` 对参数
+  只认 `.jps` 后缀，别的静默丢掉；而 `CLI.md` 按「计划」写成了现状 ⇒ 文档超前于代码。
+- **解决**：① 重写 `HELP`：列全 10 个命令 + 后加的 `--crop`/`--pad`/`--ink`/`--watch`，并把
+  「需要桌面端能力的两类输出」单独成段、如实写「退出码 4 + 原因」；
+  ② `cli-assert` 补 4 条闸门（列全命令 / **负对照**：不许再出现「未实现（P2–P4）」/ `-v` 与 `--version` 等价 /
+  覆盖后加选项）；③ `CLI.md`、`CLI-AND-COMMAND-PLAN.md`、`HANDOVER-CLI-AND-COMMAND-API.md` 三处口径按**现状**改写
+  （exe 保持纯 GUI；CLI 是独立 Node 包 `@ijipu/cli`）。
+- **预防**：`--help` 与退出码一样属于**对外承诺**。凡新增命令/选项，必须**同一提交**内三处同改：
+  ① 改 `HELP` ② 加/改断言（**带负对照**）③ 改 `docs/CLI.md`；文档里「计划」与「现状」必须分栏写，
+  不许把「待做」写成「已有」。
+
+### E-2026-391 CLI 源码**从未被任何 tsc 覆盖**（类型错误潜伏至今）+ lib 构建把应用 `public/` 拷进了包目录（adj874）
+
+- **现象**：给 `@ijipu/cli` 补 `tsconfig.json` 后一跑 typecheck 就报
+  `packages/ijipu-cli/src/cli.ts(754,35): error TS2304: Cannot find name 'ParseIssue'`（两处）——
+  那个名字在引擎里**根本不存在**（`splitParseIssues` 返回的是 `ProblemRow[]`）。
+  同时 CLI 包**首版构建**把应用的 `public/`（全部图标、示例谱、`spessasynth_processor.min.js` 402KB）
+  **整个拷进了 `packages/ijipu-cli/dist/`**，`npm pack` 一起打进 tarball：**55 个文件 / 1.3MB**。
+- **根因**：① `tsconfig.app.json` 只 `include: ["src"]`、`tsconfig.node.json` 只 `include: ["vite.config.ts"]`
+  ⇒ `packages/**` 里**没有任何 tsconfig 覆盖**（引擎包自带一套是它自己的；CLI 包当时连 `package.json` 都没有）；
+  而 `vite build` 只用 esbuild/rolldown **转译、不做类型检查** ⇒ 产物一直是好的 ✓，错误只在类型层潜伏
+  —— 与 AGENTS §六之二 的「闸门要机器化」同族：**没有闸门的地方不会有任何提示**。
+  ② vite 的 `root` 是项目根、`publicDir` 默认 = `<root>/public` ⇒ **输出目录落在包内**的 lib 构建会把 `public/`
+  一并拷贝；而 `publicDir` 是**顶层**选项，第一版错写在 `build: {}` 里，等于没关 ✗（第二次构建才发现残留）。
+- **解决**：① CLI 包补 `tsconfig.json` + `typecheck`，并把 `cli:typecheck` **串进 `npm run smoke`**（先闸门后构建）；
+  ② 构建配置改成**顶层** `publicDir: false`（注释写明原因）⇒ `dist/` 只剩 `ijipu.cjs`，
+  `npm pack` = **2 个文件 / 219.6KB**；③ `ParseIssue` → 从引擎 `import type { ProblemRow }`；
+  ④ 断言补「包 `bin`/`files`/运行期零依赖 + 产物 shebang + 版本注入 + **端到端真跑一次产物**」。
+- **预防**：**新包必须自带 `tsconfig.json` 并进 `npm run smoke`**；lib/库构建（产物落在包目录内）
+  **一律显式顶层 `publicDir: false`**；加包时跑一次 `npm pack --dry-run` 核对清单（本次正是靠它发现的）。
+  ⚠ **同一缺陷引擎包也存在**（`packages/ijipu-engine/dist` 里混着 `good.png`/`Jianpu.ico`/`manifest.webmanifest`），
+  本轮未动，待单独修（改法同上：顶层 `publicDir: false`）。
+
+### E-2026-392 Rust 块注释**可嵌套**：注释里写路径通配（`src/ipc` 后跟 `/*`）会把后面整段代码吞掉（adj875）
+
+- **现象**：给 `cli_host.rs` 的 `match` 分支写了一段 `/** … */` 说明，正文里提到 `src/ipc/*` 与 `src/export/*`
+  ⇒ `cargo check` 报 `E0758 unterminated block doc-comment`，而报错行号指向**文件末尾**（277 行），
+  看起来像"文件没写完"，实际是注释把中间近 200 行代码全吃掉了。
+- **根因**：Rust 的 `/* */` 注释**支持嵌套**（与 C/JS 不同）⇒ 注释体里每个 `/*` 都必须有配对的 `*/`；
+  而路径里 `*` 紧跟 `/` 就构成了 `/*`。本项目注释/文档**大量**使用 `src/xxx/*`、`**/*.ts` 这类写法 ⇒ 迟早踩。
+- **解决**：该处改成 `//` 行注释，正文去掉 `/*`（写成 `src/ipc` 与 `src/export`）。
+  顺带一个**闸门正常工作的例子**：能力断言写的是"尚未接线"、实现写的是"尚未落地" ⇒ 断言当场红灯 ✓
+  （这正是我们要的：文案漂移立刻被抓住）；修法是让断言只依赖语义词（`尚未`），而不是整句文案。
+- **预防**：**Rust 文件的注释里不写 `/*`** —— 路径写成不带尾部通配的形式（`src/ipc`、`src/export`），
+  或一律用 `//` 行注释。与"含中文文件只用编辑工具改"同族：属**动作层约束**（写的时候就避开）✓。
+
+| v0.53.1+ | 2026-10-11 | 追加 E-2026-390（`--help` 把已实现命令写成「未实现」+ 文档把计划当现状 ⇒ 用户实测 `ijipu.exe --help` 弹 UI；重写 HELP + 4 条闸门含负对照 + 三处文档纠偏；adj874）、E-2026-391（CLI 源码从未被 tsc 覆盖 ⇒ `ParseIssue` 类型错误潜伏；lib 构建把应用 `public/` 拷进包目录 ⇒ `npm pack` 55 文件/1.3MB；补 tsconfig + `cli:typecheck` 进 smoke + 顶层 `publicDir:false`；adj874）、E-2026-392（Rust 块注释**可嵌套** ⇒ 注释里写路径通配 `src/ipc` + `/*` 会把后面近 200 行代码吞掉，报错却指向文件末尾；注释不改用块注释写通配；adj875） |
 | v0.52.1+ | 2026-10-11 | 追加 E-2026-385（对通篇中文的引擎文件用 shell 正则替换改名 —— 违反 §六之二·1，本次侥幸未损；改用编辑工具 + 编码复核；adj863）、E-2026-386（范围几何取整 1 位小数 ⇒ "整页范围恒等变换"红灯；改 2 位与渲染同档；adj863）、E-2026-387（注释声称"见冒烟 adj839"但套件里没有那一节 = 幽灵闸门；补齐解析断言并自检口径；adj865）、E-2026-388（真机验证脚本长期 14 条假红灯 ⇒ 无闸门效果；修断言 + 新增 T-5 真机断言，并抓到 `setMode` 覆盖 class 抹掉 `z` 的真 bug；adj866）、E-2026-389（桌面版白屏：JS 产物里的 PDF 魔数被 Tauri 按内容嗅探判成 MIME ⇒ 模块被拒；分两次写入 + 闸门 adj869；0.53.1） |
 | v0.51.2 | 2026-10-10 | 追加 E-2026-384（CI 打包克隆读不到松散对象 ⇒ 构建戳回退成"构建时刻"；改用 `git log -1 --format=%ct` 兜底 + 绝不用当前时间；adj772） |
 | v0.51.1 | 2026-10-10 | 追加 E-2026-383（构建戳本地时区 ⇒ 跨时区不可复现；两端 gen-build-info 改 UTC）、E-2026-382（lookbehind ⇒ Obsidian 审核 Error；手写扫描替代 + 产物复扫；adj772） |

@@ -19,7 +19,7 @@
 | — | T-2 第①步 | `src/playback/headless.ts`（无头播放，**零 React/DOM**）+ 入参 `string \| { parsed, layout }` | `adj826/828` ✓（`tsc -b` ✓） |
 
 **质量门（最近一次运行 ✓）**：应用 `check:encoding` ✓、`tsc -b` ✓、引擎冒烟 **ALL PASSED** ✅、
-CLI 断言 **22/22** ✅、`doctor` 能力如实 ✓；插件 `tsc` ✓、冒烟 **387 passed / 0 failed** ✅。
+CLI 断言 **39/39** ✅（adj874 起：`@ijipu/cli` 包化后从 22 条增至 39 条）、`doctor` 能力如实 ✓；插件 `tsc` ✓、冒烟 **387 passed / 0 failed** ✅。
 **用户库**：插件 **0.34.2**，`main.js` 与本地构建**哈希一致** ✓（含 B1/B2/B3 全部插件侧功能 ✓）。
 
 ## 二、剩余工作（逐处已量化 ✓）
@@ -46,6 +46,11 @@ CLI 断言 **22/22** ✅、`doctor` 能力如实 ✓；插件 `tsc` ✓、冒烟
 - 方案与 **8 项验证清单**：`docs/CLI.md` §七之二 ✓；
 - 要点：`src-tauri` 识别"带子命令 ⇒ 不进 GUI" ✓ → 建**不可见窗口** → 复用 `src/export/export.ts`
   （`renderScoreToSvg` → `svgToCanvas` → `toDataURL`；PDF 走既有分页；WAV 走既有离线合成）→ 字节回传 → CLI 落盘 ✓；
+- ⚠ **adj874 更新（二次裁决）**：exe **不做**「带子命令 ⇒ 不进 GUI」的分流（保持**纯 GUI** ✗），
+  改为只当**能力宿主** —— 两条通道：应用在跑走**命名管道**（`\\.\pipe\ijipu-cli-<用户>`）、
+  没跑就起**一次性子进程**（隐藏窗口）；对外只暴露 `rasterize` / `synthesize` 两个**能力**（不是命令）。
+  CLI 侧已是**独立 Node 包 `@ijipu/cli`**（`adj874` ✓，文本类命令完全不碰 exe ✓）；
+  完整口径见 `docs/CLI-AND-COMMAND-PLAN.md` §九 ✓；
 - **硬指标**：`ijipu render -t png` 与应用「导出 PNG」**逐像素一致** ✓；双击 `.jps` 仍开 GUI ✓；
   无窗口能力 ⇒ 退出码 4 + 原因 ✓。
 

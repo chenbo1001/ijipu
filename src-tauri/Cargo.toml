@@ -37,3 +37,12 @@ tauri-plugin-dialog = "2"
 # 前端走 `window.__TAURI__.core.invoke('plugin:opener|open_url', { url })`（无需 npm 包），
 # ACL 权限写在 `capabilities/default.json` 的 `opener:allow-open-url`。
 tauri-plugin-opener = "2"
+
+# adj875：命令行（`@ijipu/cli`）的**能力宿主** —— Windows 命名管道服务端（见 `src/cli_host.rs`）。
+# 为什么需要：`render -t png|jpg|pdf`（canvas/字体/分页）与 `play -t wav`（AudioContext + 音色库）
+# 只在应用里有 ⇒ 应用对外只暴露**能力**（rasterize/synthesize），CLI 要时连管道来取。
+# ⚠ 选 `windows-sys` 的依据：① 微软官方 Win32 绑定，纯 `extern "system"` 声明（编译期零成本、不引 DLL）；
+# ② tauri/tao/wry **已经把它带进依赖树**（Cargo.lock 里已有 0.61.2）⇒ 加为直接依赖**不新增任何 crate** ✓；
+# ③ 走 `[target.'cfg(windows)']` ⇒ 非 Windows 目标（Android 等）根本不编译它 ✓。
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Pipes", "Win32_Storage_FileSystem"] }

@@ -1,0 +1,25 @@
+{
+  "name": "@ijipu/cli",
+  "version": "0.53.1",
+  "description": "iJipu（爱记谱）命令行：.jps 源码的格式化 / 校验 / 渲染 / 导出（纯 Node，运行期零依赖）",
+  "license": "AGPL-3.0",
+  "author": "蜗牛🐌 <snail.zh@qq.com>",
+  "type": "module",
+  "bin": {
+    "ijipu": "dist/ijipu.cjs"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "vite build --config vite.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
