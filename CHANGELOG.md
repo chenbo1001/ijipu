@@ -1,3 +1,48 @@
+## [0.54.0] — 2026-10-12（**命令行独立成 Node 包 `@ijipu/cli`** + 应用侧「能力宿主」命名管道；MINOR）
+
+> 主题：把命令行从"在本仓库跑脚本"变成**能装的工具**（`ijipu --help` / `--version` 真的可用），
+> 并把"只有应用才有的能力"（canvas / 音频）做成一条**只传能力、不传命令**的通道。
+> `ijipu.exe` 保持**纯 GUI**：双击打开界面，`--help` 不会打帮助，也不做子命令分流。
+
+### 新增：`@ijipu/cli` 独立 Node 包（adj874）
+
+- `packages/ijipu-cli` 成为可安装包（`bin: ijipu`；`npm i -g ./packages/ijipu-cli` 即装即用）；
+  产物 `dist/ijipu.cjs` **自包含**（引擎打进包内 ⇒ 运行期**零依赖**）；
+- **`--version` 之前一直打 `iJipu dev`**（版本号从未注入）⇒ 现在打真实版本号；
+- **`--help` 与实现对齐**：旧文案把 `render` / `play` / `batch` / `settings` / `config` / `doctor`
+  写成「未实现（P2–P4）」，而这 6 个当时**早已可用**；现列全 10 个命令与 `--crop` / `--pad` / `--ink` / `--watch`；
+- 需要 canvas/音频的两类输出（`-t png|jpg|pdf`、`play -t wav`）在没有宿主时
+  **如实报退出码 4 + 原因**（不产出半成品、不假装成功）。
+
+### 修复：打包与类型闸门的两个缺口（adj874，见 `E-2026-391`）
+
+- **CLI 源码从未被任何 tsc 覆盖**（`tsconfig.app.json` 只含 `src`）⇒ `cli.ts` 里 `ParseIssue`
+  （引擎中**不存在**该名字，正确是 `ProblemRow`）的类型错误潜伏至今；现补 `tsconfig.json` + `cli:typecheck`，
+  并**串进 `npm run smoke`**；
+- **lib 构建把应用 `public/` 整个拷进包目录**（CLI 包与引擎包**都有**这个缺陷）⇒ `npm pack` 55 文件 / 1.3MB；
+  关掉顶层 `publicDir` 后 = **2 文件 / 219.6KB**，引擎 `dist/` 也只剩 `engine/`。
+
+### 新增：应用侧「能力宿主」（Windows 命名管道，**默认关**）（adj875）
+
+- `src-tauri/src/cli_host.rs`：管道名 `\\.\pipe\ijipu-cli-<USERNAME>`（**单一口径**，两端必须一致）、
+  一行一个 JSON、方法白名单 `ping` / `capabilities` / `rasterize` / `synthesize`；
+- **默认不开**：需 `IJIPU_CLI_HOST=1` 或内部开关 `--cli-host` ⇒ 双击打开的现状行为**一字不变**；
+  管道用默认安全描述符 ⇒ 仅**同一用户**可连；
+- `capabilities` **如实报 `false`**：把请求转交前端渲染的接线是**下一批** ⇒ `ijipu render -t png`
+  目前仍报**退出码 4 + 原因**（宁可说"还没接"，也不给假象）。
+
+### 验证
+
+- `npm run smoke` → **ALL SMOKE TESTS PASSED** + CLI 断言 **39/39**
+  （含 `--help` 列全命令与**负对照**、`-v/--version` 等价、包名/版本一致、产物 shebang 与**端到端真跑**）；
+- `npm run test:rust` → **3 passed / 0 failed**（含 `pipe_round_trip`：**真建管道、真连、真收发 JSON**）；
+- `npm pack` → `@ijipu/cli` 3 文件 / ≈220KB。
+
+### 既有功能与数据
+
+`.jps` 语法、谱面几何、导出结果**完全不变**；`ijipu.exe` 行为不变（只多了一个**默认关闭**的内部开关）；
+设置与文稿**无迁移**。
+
 ## [0.53.1] — 2026-10-11（**修桌面版白屏**：JS 产物里的 PDF 魔数被 Tauri 当成 MIME 判据 ⇒ 模块被拒 ⇒ 界面全空；PATCH）
 
 > 主题：**修 0.53.0 的桌面版"打开只有一个背景色、界面全空"**。根因不在渲染逻辑，而在**产物里出现了
