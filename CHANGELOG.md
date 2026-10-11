@@ -31,7 +31,12 @@
 
 ### 文档
 - `docs/HANDOVER-CLI-AND-COMMAND-API.md`：T-3 两类导出的**落点状态表**（引擎/插件已落，CLI 与导出对话框待落）
-  与 `z`（块级缩放）三处实施状态；`docs/ERRORS-LOG.md`：`E-2026-385/386/387`。
+  与 `z`（块级缩放）三处实施状态；`docs/ERRORS-LOG.md`：`E-2026-385/386/387/388`。
+
+### 版本号
+- 应用 **0.53.0**：`src/brand/version.ts` / `package.json` / `package-lock.json`×2 / `src-tauri/tauri.conf.json`；
+- 引擎包 **`@ijipu/engine` 0.34.0**（独立版本序列：本版新增 `render/range.ts` 与 `png.ts` 两个模块 ⇒ MINOR）；
+- 新增 L1 设置项 `exportRange`（Obsidian 插件侧）已登记进 `docs/SETTINGS-AUDIT.md` 的 `ijipu.*` 表。
 
 ## [0.52.1] — 2026-10-11（修：Obsidian 嵌入版 IPC 桥**未被安装**（挂在 `load` 回调里 ⇒ 单文件内联产物可能错过）＋ 桥装好即向父窗口报到；PATCH 级）
 
