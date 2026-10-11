@@ -68,6 +68,14 @@ function applyHostTheme(
  *  · 所以：握手 → 预载 → **再**动态 import store 与 App → 渲染。真正嵌入时这只是本机
  *    回环的两次往返（毫秒级）；非嵌入（`window.parent === window`）时握手直接返回 `null`，零开销。
  */
+/**
+ * ⚠⚠ adj857（**真正的修法** ✓，别再往下移 ✗）：
+ * 上一版我以为放在"模块顶层"就够了 ✗ —— 但从下面这行 `void (async () => {` 起到文件末尾是
+ * **一整段 async IIFE**，启动日志与我的安装调用**都在这段 IIFE 里面** ✗ ⇒
+ * 安装仍排在 `await initHostBridge()` / `await preloadEmbedStorage()` 等**await 之后** ✓
+ * ⇒ 链上有一步不返回/时序不对，安装就永远轮不到 ✗（现象：启动日志有 ✓、`bridge-installed` 没有 ✗）。
+ * ⇒ **必须在进入 async IIFE 之前调用** ✓（就是这一行 ✓）。
+ */
 void (async () => {
   /**
    * adj724b：**启动横幅**。
@@ -286,6 +294,49 @@ function isEmbeddedFrame(): boolean {
   }
 }
 
+/**
+ * ⚠⚠ adj859（**真正的根因与修法** ✓，别再改动这个位置 ✗）：
+ * 我前几轮以为"放在模块顶层"就够了 ✗ —— 实际上那段 `installBridgeOnce` 被我插进了**下面的
+ * Service Worker IIFE 里面** ✗，而那段 IIFE 的守卫是
+ * `import.meta.env.PROD && 'serviceWorker' in navigator && !isEmbeddedFrame()` ✓
+ * ⇒ **在嵌入版（iframe）里 `isEmbeddedFrame() === true` ⇒ 整段永不执行** ✗✓✓
+ * ⇒ 这正好解释了两个铁证：① 服务端发的**确实是含桥的新产物**（插件侧 ② 自检 = 是 ✓）；
+ * ② 嵌入版 Console 里**从来没有** `bridge-installed` 日志 ✗（那段代码根本不跑 ✓）。
+ *
+ * ⇒ 本函数与它的调用**必须在模块作用域**（SW 块之外 ✓、任何 IIFE 之外 ✓）。
+ * 判断方法（本次教训 ✓）：改前先 `grep -n '^void (async\|^})()' src/main.tsx` 打印作用域地图 ✓，
+ * 别靠目测 ✗（我因此白改了两次，均被 `tsc` 拦下 ✓）。
+ */
+// adj859：幂等标记（必须在**模块作用域** ✓）
+let obsidianBridgeInstalled = false
+
+function installBridgeOnce(): void {
+  if (obsidianBridgeInstalled) return
+  obsidianBridgeInstalled = true
+  installObsidianBridge({
+    renderSvg: (source, pageConfig) => {
+      const { errors } = splitParseIssues(parseJps(source))
+      if (errors.length > 0) return { ok: false, svgs: [], error: `${errors.length} 个语法错误（先修好再渲染）` }
+      const cfg = mergeJpsConfig(source, { ...defaultPageConfig, ...(pageConfig as Partial<PageConfig> | undefined) })
+      return { ok: true, svgs: renderScoreToSvg(layoutScore(parseJps(source), cfg)) }
+    },
+    exportMidi: (source) => {
+      const { errors } = splitParseIssues(parseJps(source))
+      if (errors.length > 0) return { ok: false, error: `${errors.length} 个语法错误（先修好再导出）` }
+      const parsed = parseJps(source)
+      const layout = layoutScore(parsed, mergeJpsConfig(source, defaultPageConfig))
+      const bytes = eventsToMidi(buildPlaySequence(parsed, layout, 60).events, { bpm: 60, title: 'iJipu' })
+      return { ok: true, bytes }
+    },
+  })
+  // adj854：ASCII 标记（中文会被打包转义 ⇒ 检索不到 ✗）
+  console.info(`[iJipu] bridge-installed host=${window.parent !== window ? 'yes' : 'no'}`)
+  console.info(`[iJipu] Obsidian 桥已安装${window.parent !== window ? '（宿主内 ✓）' : '（独立页：按设计空转 ✓）'}`)
+}
+
+// ⚠ 模块作用域调用 ✓（在 SW 块之外 ✓、在任何 async IIFE 之外 ✓）—— 这就是本 bug 的修法 ✓
+installBridgeOnce()
+
 if (import.meta.env.PROD && 'serviceWorker' in navigator && !isEmbeddedFrame()) {
   if (isTauriDesktop()) {
     // 老版本可能已注册过 SW：注销 + 清缓存 + 重载一次（仅在确有注册/缓存时重载，避免每次启动都刷新）
@@ -334,6 +385,47 @@ installObsidianBridge({
     return { ok: true, bytes }
   },
 })
+
+/** adj852：幂等标记 —— 安装只做一次（下面顶部与旧位置各留一个调用点也不重复挂监听 ✓） */
+let obsidianBridgeInstalled = false
+
+/**
+ * adj852（**真正的根因** ✓，用户 Console 证据）：
+ * 「嵌入版启动 v0.52.1（宿主内）」这行日志**打印了** ✓，但它后面紧跟着**一大段顶层 `await` 链**
+ * （`initHostBridge()` / `preloadEmbedStorage()` … ✓），而 `installObsidianBridge(...)` 原来排在
+ * 那条链**之后** ✗ ⇒ 只要链上有一步不返回/抛错/时序不对 ✓，安装就**永远轮不到** ✗
+ * ⇒ 于是"自动 hello 从未到达"✓（而手动从 iframe 里发的 hello 能到达 ✓ ⇒ 通道本身没问题 ✓）。
+ *
+ * 修法：**在最前面安装** ✓（早于任何 await ✓），并打一行可见日志 ✓
+ * ⇒ 从此 Console 里能直接看到"桥已安装"✓ / "没装"✗，不再靠推断 ✓。
+ */
+function installBridgeOnce(): void {
+  if (obsidianBridgeInstalled) return
+  obsidianBridgeInstalled = true
+  installObsidianBridge({
+    renderSvg: (source, pageConfig) => {
+      const { errors } = splitParseIssues(parseJps(source))
+      if (errors.length > 0) return { ok: false, svgs: [], error: `${errors.length} 个语法错误（先修好再渲染）` }
+      const cfg = mergeJpsConfig(source, { ...defaultPageConfig, ...(pageConfig as Partial<PageConfig> | undefined) })
+      return { ok: true, svgs: renderScoreToSvg(layoutScore(parseJps(source), cfg)) }
+    },
+    exportMidi: (source) => {
+      const { errors } = splitParseIssues(parseJps(source))
+      if (errors.length > 0) return { ok: false, error: `${errors.length} 个语法错误（先修好再导出）` }
+      const parsed = parseJps(source)
+      const layout = layoutScore(parsed, mergeJpsConfig(source, defaultPageConfig))
+      const bytes = eventsToMidi(buildPlaySequence(parsed, layout, 60).events, { bpm: 60, title: 'iJipu' })
+      return { ok: true, bytes }
+    },
+  })
+  // ⚠ adj854：这行日志刻意用**纯 ASCII** 写成 `bridge-installed` —— 中文串在打包时会被转义成 `\uXXXX`，
+  //    导致"在产物里 grep 中文"永远失败 ✗（本轮就因此误判过一次 ✓）。ASCII 标记能被可靠检索 ✓。
+  console.info(`[iJipu] bridge-installed host=${window.parent !== window ? 'yes' : 'no'}`)
+  console.info(`[iJipu] 嵌入版启动日志：Obsidian 桥已安装${window.parent !== window ? '（宿主内 ✓）' : '（独立页：按设计空转 ✓）'}`)
+}
+
+// ⚠ 必须在**任何 await 之前**调用 ✓（这条就是本 bug 的修法，别往下移 ✗）
+installBridgeOnce()
 
 window.addEventListener('load', () => {
     // 快照：注册前页面是否已有 SW 控制者（决定这次接管是不是"更新"）
