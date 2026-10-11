@@ -175,6 +175,22 @@ console.log('\n— 命令行（A·P1–P4）—')
   )
 }
 
+// ⑦ `--watch` 的两条**可断言契约**（长驻进程本身不在这里跑 —— 那会悬挂测试 ✗，
+//    真实行为由端到端冒烟覆盖：改文件后打印「变更后检查：…」✓）
+{
+  const noCap = makeIo({ 'a.jps': GOOD })
+  const r1 = await runCli(['lint', '-i', 'a.jps', '--watch'], noCap.io)
+  check(
+    'adj814 --watch 在宿主没有文件监视能力时**明确报错**（退出码 1，不静默不监视 ✗）',
+    r1.code === EXIT.usage && noCap.errs.some((e) => e.includes('--watch')),
+    `code=${r1.code} err=${noCap.errs.join('｜')}`,
+  )
+  const io = makeIo({ '(stdin)': GOOD })
+  io.io.watchFile = () => () => {}
+  const r2 = await runCli(['lint', '-i', '-', '--watch'], io.io)
+  check('adj814 --watch 不能用于 stdin（要监视具体文件）', r2.code === EXIT.usage, `code=${r2.code}`)
+}
+
 console.log(failed === 0 ? `\nCLI 断言全部通过 ✅（${passed} 项）` : `\nCLI 断言失败 ${failed} 项 ❌`)
 process.exit(failed === 0 ? 0 : 1)
 }
