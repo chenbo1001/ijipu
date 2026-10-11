@@ -207,6 +207,26 @@ docs/CLI.md          ← 新增    命令参考 + CI 示例（GitHub Actions / p
   | `src/playback/samplerCache.ts` | 4.8 KB ✓ | 音色库离线缓存（实现引擎 `SamplerCache` ✓） |
   ⇒ 结论：**耦合主要在 41 KB 的那个对话框里** ✗ ⇒ 这不是"接一根线"，而是**从 UI 组件里把播放剥出来** ✓。
 - **分三步做（每步独立提交、可回滚 ✓）**：
+- **第②步的接口修正与精确改动清单**（2026-10 核实后追加，**第②步开工前必须先做这一步** ✓）：
+  **发现的问题**：`headless.ts` 现在的入参是**源码字符串**（`playHeadless(source, opts)` ✓），
+  但 `PlaybackDialog` 手上已经有 `parseResult` 与 `layout`（来自 `docStore` ✓）⇒ 若直接切过去，
+  会**重复解析+重复排版**一次 ✗（开销 + 与"数值口径同源"精神相悖 ✗）。
+  ⇒ **先改接口**：`playHeadless(input: string | { parsed: ParseResult; layout: ScoreLayout }, opts)` ✓
+  （传对象时**不再 parse/layout** ✓，直接 `buildPlaySequence` ✓）—— 这一步**只改 headless.ts** ✓，风险极低 ✓，
+  可独立提交与断言（"传对象时不调用 parseJps" ✓ 用计数桩断言即可 ✓）。
+  **然后**按已核实的抽取面改 `PlaybackDialog.tsx`（**逐处用编辑工具 ✓**，含中文 ✗ 不许用 shell ✓）：
+  | 改动 | 说明 |
+  |---|---|
+  | 新增 `handleRef = useRef<HeadlessHandle \| null>(null)` | 持有无头句柄 ✓ |
+  | L330–345 + L497 + L510 播放路径 | 换成 `handleRef.current = (await playHeadless({ parsed, layout }, { bpm, startNoteId, instrumentOverride, onTick })).handle` ✓ |
+  | L299 `stop()` | 换成 `handleRef.current?.stop()`（**保留**组件内的 UI 复位逻辑 ✓） |
+  | L112 `backendRef` / L121 `seqRef` | **降级或删除**（仅当确认无其它用途 ✓ —— 进度/播放头若曾读 `seqRef.events`，改由 `onTick` + `totalMs` 提供 ✓） |
+  | L263 `startTimers` | **删除**（计时交 `headless.ts` 的时钟 ✓，进度走 `onTick` ✓） |
+  | `docStore` 的 `playbackMs`/播放轨道写入 | **保留在组件里** ✓（UI 状态仍归 UI ✓ —— headless 只回调 ✓） |
+  **验证**：`tsc -b` ✓、冒烟 ✓、**手工**打开对话框播放/停止/从某音符播/切歌（行为与改动前一致 ✓）；
+  再加一条闸门：`src/playback/headless.ts` 内**不得**出现 `from 'react'` / `document.` / `window.`（已自查 ✓，
+  下一步把它写成脚本断言 ✓）。
+
   **第①步的"抽取面"已定点核实**（2026-10，`src/dialogs/PlaybackDialog.tsx` 实测行号 ✓）——
   要搬进 `src/playback/headless.ts` 的是**这一组**，其余（进度条/播放头/UI 状态）留在组件里 ✓：
   | 位置 | 符号 | 说明 |
