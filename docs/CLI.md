@@ -149,6 +149,46 @@ npm run cli -- lint -i 我的谱.jps --watch
 - `lint --format gh` 的问题行格式：`::error file=<文件>,line=<行>::<消息>`；
 - `format --diff`：`- 旧行` / `+ 新行`，只列**有变化**的行 ✓。
 
+## 七之二、P3：桌面端「隐藏窗口渲染」怎么落（**需桌面环境验证**）
+
+CLI 侧**已就绪** ✓：`render -t png|jpg|pdf`、`play -t wav` 需要宿主注入两个**可选能力**
+（`CliIo.rasterize` / `CliIo.synthesize` ✓），没有就**明确报错 + 退出码 4** ✓。
+
+**要接的是"谁提供这两个能力"** —— 决策②：用**隐藏窗口**（离屏 webview）复用应用既有渲染：
+
+```
+ijipu.exe render -i 谱.jps -t png -o out.png
+  └─ src-tauri 入口解析到「带子命令」⇒ 不进 GUI（决策①）
+      ├─ 纯文本类（format/lint/info/render -t svg|midi/batch/settings/config/doctor）：**无需窗口** ✓
+      └─ 位图/音频类（png/jpg/pdf/wav）：
+          ① 建一个**不可见窗口**（或复用主窗口但先隐藏 / offscreen ✓），加载应用页面（同一套前端 ✓）
+          ② 通过既有 IPC 把「要渲染的 .jps + pageConfig」交给前端
+          ③ 前端调用**已有的** `src/export/export.ts`：
+             `renderScoreToSvg` → `svgToCanvas` → `toDataURL('image/png')`
+             （PDF 同理走既有 `exportPdf` 的分页逻辑 ✓；WAV 走既有播放/离线合成链路 ✓）
+          ④ 把字节回传 Rust ⇒ CLI 落盘 ⇒ 退出
+```
+
+**关键约束（照抄项目铁律）**：
+1. **不重写渲染** ✓：一律复用 `src/export/*` 与音色库 ⇒ 与 GUI 导出**像素级一致** ✓；
+2. **失败要诚实** ✓：窗口建不起来 / 前端超时 ⇒ 退出码 4 + 原因（**绝不产半成品** ✗）；
+3. **不引新依赖** ✓（决策②）：不用 resvg/sharp 之类第三方渲染器 ✓；
+4. **产物确定性**：`--deterministic` 下不写时间戳；PNG/PDF 的字体与缩放固定（scale 默认 2 ✓）。
+
+### 请你在桌面端按这个清单验证（我在此环境无法跑 GUI ✗）
+| # | 命令（在安装目录或 `npx tauri build` 产物旁） | 期望 |
+|---|---|---|
+| 1 | `ijipu.exe --help` | 打印 CLI 用法（**不弹 GUI** ✓） |
+| 2 | `ijipu.exe lint -i 我的谱.jps` | 与独立 Node 结果一致 ✓ |
+| 3 | `ijipu.exe render -i 我的谱.jps -t svg -o a.svg` | 生成 SVG ✓ |
+| 4 | `ijipu.exe render -i 我的谱.jps -t png -o a.png` | **生成 PNG ✓**；与应用「导出 PNG」**逐像素一致**（同 scale 下可对哈希 ✓） |
+| 5 | `ijipu.exe render -i 我的谱.jps -t pdf -o a.pdf` | 生成 PDF，页数与 GUI 导出一致 ✓ |
+| 6 | `ijipu.exe play -i 我的谱.jps -t wav -o a.wav` | 生成 WAV（需音色库就绪 ✓；缺音色库应**明确报错** ✗ 而不是静默出空文件 ✓） |
+| 7 | 双击一个 `.jps`（**无子命令**） | **照旧打开 GUI** ✓（决策①不得破坏"双击打开" ✓） |
+| 8 | 断开窗口能力（如无头/远程会话） | 第 4–6 条应报退出码 4 + 原因 ✓（**不假装成功** ✗） |
+
+> 第 4 条的"逐像素一致"是这条通道**唯一**的验收硬指标 ✓ —— 若不一致，说明前端走的不是 `src/export/*` 那条链路 ✓（先查这里，别调算法 ✗）。
+
 ## 八、实现约定（给后续维护者，来自项目铁律）
 
 1. **纯逻辑 + 注入式 IO**：核心是 `packages/ijipu-cli/src/cli.ts` 的 `runCli(argv, io)` ——
