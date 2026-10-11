@@ -121,5 +121,15 @@ export function installObsidianBridge(deps: {
   }
 
   window.addEventListener('message', onMessage)
+  /**
+   * adj850（用户实测已排除"产物没更新/窗口选错/开关没开" ✓，只剩"桥是否执行到安装"✗）：
+   * **装好就向父窗口报到一次** ✓ —— 跨源也能发 ✓，父窗口（插件）收到后记进诊断 ✓。
+   * 这一行让"桥到底有没有运行"从"靠推断"变成"看得见" ✓。
+   */
+  try {
+    window.parent?.postMessage({ __ijipuAppHello: 1, href: location.href }, '*')
+  } catch {
+    /* 报不到也不影响安装本身 ✓ */
+  }
   return () => window.removeEventListener('message', onMessage)
 }
