@@ -248,8 +248,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     io.err('--config 属 P4，尚未实现（当前只支持命令行 -s）')
     return { code: EXIT.config }
   }
-  if (p.sets.length > 0 && p.command !== 'info') {
-    io.err('-s 目前仅 info 接受（设置写入谱面属 P4）')
+  if (p.sets.length > 0 && p.command !== 'info' && p.command !== 'settings' && p.command !== 'config' && p.command !== 'render' && p.command !== 'play' && p.command !== 'batch') {
+    io.err('-s 目前接受于 info / settings / config / render / play / batch（写回谱面属后续）')
     return { code: EXIT.config }
   }
 
@@ -410,7 +410,11 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     }
     const key = p.inputs[1] ?? p.inputs[0]
     if (key === undefined || !keys.includes(key)) {
-      io.err(`settings 需要 --get <键>（可用键 ${keys.length} 个：用 "settings -t effective" 全量列出）`)
+      io.err(
+        `settings 需要键名（位置参数），例如：settings -i <谱> margin_right\n` +
+          `  可用键 ${keys.length} 个：settings -i <谱> -t effective 可全量列出；` +
+          `可选字段：${OPTIONAL_CONFIG_FIELDS.join('、')}`,
+      )
       return { code: EXIT.usage }
     }
     const payload = { schema: 1, key, value: valueOf(key), source: where(key) }

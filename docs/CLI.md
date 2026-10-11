@@ -38,12 +38,14 @@ ijipu <命令> [选项]
 未实现（**会报错**）：`--watch`（后续）。`settings` 的键名直接当**位置参数**给，例如：
 
 ```powershell
-npm run cli -- settings -i 我的谱.jps pageMode          # pageMode = "score"   [来自：源内 # jps-config]
-npm run cli -- settings -i 我的谱.jps margin_top -s margin_top=33
-#   margin_top = "33"   [来自：命令行 -s]
+npm run cli -- settings -i 我的谱.jps margin_right     # 例：margin_right = 40   [来自：代码默认]
+npm run cli -- settings -i 我的谱.jps margin_right -s margin_right=33
+#   margin_right = "33"   [来自：命令行 -s]
 npm run cli -- config -i 我的谱.jps -t effective --quiet # 只看"非默认"的项（精简视图）
 npm run cli -- doctor                                    # 能力自检：位图/音频在独立 Node 里为 ✗（需桌面端通道）
 ```
+> `-s k=v` 目前可用于 `info` / `settings` / `config` / `render` / `play` / `batch`（**临时覆盖，不落盘** ✓）；
+> 把设置**写回谱面**（`# jps-config` 差量写入）属后续阶段 ✓。
 
 ### P3：位图/音频为什么在独立 Node 里"报错"而不是"硬做"
 `png/jpg/pdf` 需要 **canvas + 字体 + 分页**，`wav` 需要 **AudioContext + 音色库** ——
