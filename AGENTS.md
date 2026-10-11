@@ -151,6 +151,44 @@
    实证：**只写在 ERRORS-LOG 的"预防"里 = 无效**——E-2026-159（adj427）与 E-2026-355（adj686）
    是同一个坑，中间隔了几百个 adj，文字一字不差却照样复发。
 
+## 六之四、【高频复发】Obsidian 插件审核（社区审核）Error 级规则（用户 2026-10 指示写成规范）
+
+> **由来**：用户把插件 0.34.1 的社区审核结果贴回来 —— 判定 **Failed**，**唯一 Error** 是我新写的
+> `src/scorePane.ts:790/793/794` 直接给元素写内联样式（`el.style.setProperty('position'|'left'|'top'…)`）✗。
+> 用户原话：「**这个问题多次出现，请写进 AGENTS，作为一条规则进行规范**」。
+> 同类问题此前也出现过（`!important`、`innerHTML`、`console.*`），都是"审核规则 → 必须机器化"的同一族。
+
+1. **禁止直接写内联样式**（`el.style.xxx = …`、`el.style.setProperty(…)`、`style.cssText = …`）。
+   审核规则 `obsidianmd/no-static-styles-assignment` 是 **Error** 级 ⇒ 出现即**当次审核 Failed** ✗。
+   **唯一允许的三条出路**（审核原文给的）：
+   - **CSS 类**（首选）：把"定位/层级/布局"写进 `styles.css`；
+   - **`el.setCssProps({...})`**：动态值（坐标、尺寸）用 CSS 自定义属性传，配一条类规则消费它们
+     （范例：`.ijipu-score-toolbar.ijipu-ported { position: fixed; left: var(--ijipu-port-x) }` + `setCssProps`）；
+   - **`el.setCssStyles({...})`**：确有需要一次性写多条内联样式时的官方 API。
+   ⚠ `removeProperty`（摘属性）未被判 ✗，但**赋值**一律禁止；
+   ⚠ 例外只有"循环里的动态键"（`for (const [k, v] of Object.entries(style)) el.style.setProperty(k, v)`，
+   键是变量、规则判不了"静态"），**新增此类写法必须在注释里写明理由**。
+   → **闸门**：插件 `npm run smoke` 的 `adj799` —— 扫描 `src/**/*.ts`（排除 `src/gen/**` 生成物与 `vendor/**`），
+   任何"内联样式赋值"即红灯，并在失败信息里列出**文件:行号**；带负对照。
+
+2. **同类 Error/Warning 一览（写插件代码前先过一遍）**：
+   | 审核项 | 级别 | 我们的闸门 |
+   |---|---|---|
+   | `no-static-styles-assignment`（内联样式） | **Error** | 插件 `adj799`（全源码扫描） |
+   | `!important` | Error | 插件 `adj772`（**0 处**，硬阈值） |
+   | `innerHTML`（须 `createEl`/`createSvg`/`sanitizeHTMLToDom`） | Error | 评审笔记 + 代码约定 |
+   | `console.*`（插件源码） | Warning | 现有约定（0 处） |
+   | `import 'node:*'` | Warning | **静态导入是刻意的**（见 §五.8 的 `E-2026-*`：CJS + external 下动态 `import('node:http')` 在渲染进程会变成模块 fetch 而失败 ✗）；由**调用方**保证仅桌面端加载 |
+   | `fetch`（应 `requestUrl`） | Warning | 已知豁免：音色库下载与嵌入版本地服务 |
+   | 未实现 `getSettingDefinitions()` | Warning | 已知（声明式设置 API 待评估） |
+   | Build verification（产物一致性） | Warning | 本地按同一提交重建 + 与 CI 产物**逐字节比对**（`FA4E68F2…` 式核对） |
+
+3. **【发布前预检】"审核预检"三步**（任何一次要交审核的版本都要跑）：
+   ① `npm run smoke` **全绿**（含上面的闸门）；
+   ② 人工过一遍第 2 条表格里的 Error 行（`grep` 自查 `style.` 赋值 / `!important` / `innerHTML` / `console.`）；
+   ③ 记录当次审核结果到 `docs/ERRORS-LOG.md`（现象 / 根因 / 解决 / 预防），
+      并把"能自动化的那条"落成闸门（本文件 §六之三·3 的元规则）。
+
 ## 七、设置分层原则（新增/调整任何设置项必须先定层）
 
 > 完整清单与逐项归属见 `docs/SETTINGS-AUDIT.md`。**新增属性或调整属性时，先按下表定层、再写代码**；
