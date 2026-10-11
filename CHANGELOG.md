@@ -1,3 +1,38 @@
+## [0.53.0] — 2026-10-11（新增引擎「范围」（导出页面 / 导出谱面）与 **PNG 物理密度（pHYs/DPI）** 工具；嵌入版 IPC 支持范围盒；MINOR 级）
+
+> 主题：把**导出/复制图片**需要的两件底层能力做进引擎，并让**嵌入版**能按宿主给的范围盒出图 ——
+> 于是插件侧才能有「导出范围（页面 / 谱面）」「复制为图片（含 DPI）」这两组入口（见插件仓库 0.36.0）。
+> 本版**不改** `.jps` 语法与谱面几何 ⇒ 既有谱面显示不变；应用自身 UI 无变化（新能力由插件/CLI 消费）。
+> **涉及嵌入版产物**：本版之后必须按 AGENTS §五.8.1 执行
+> `npm run build:embed && node scripts/embed-emit.mjs` 再发插件（否则插件内嵌的应用**不认 `params.crop`** ✗，
+> 用户选了「导出谱面」却拿到整页图 —— 又是一次"静默错误结果"）。
+
+### 新增：引擎「范围」唯一实现（`engine/render/range.ts`）
+- `rangeBox()`：`page` = 整页盒；`score` = **墨迹包围盒 + 每边 N px**（缺省 2，钳制 0–64）。
+- 两道**可信度闸**（判失败时给原因，让调用方**明确报错**而不是产出报废图）：
+  **退化**（墨迹盒小于"一个音符的墨迹高"，阈值公式 `minInkFor()`，取不到音符 ⇒ 兜底 6；这是 `adj843` 的
+  数据驱动口径，替代了此前写死的 40px 魔数）+ **近整页**（墨迹盒 ≥ 整页 98% ⇒ 多半把整页白底量进来了）。
+- `applyRangeToSvg()`：**唯一**改写 SVG 外框的地方（`width`/`height`/`viewBox` 一起改；整页范围对渲染产物
+  是**逐字恒等变换**，有断言守着）；`readViewBoxOf()` / `normalizeRangePad()` / `normalizeMinInk()` 辅助。
+- 断言 `adj863`（12 条）：两种口径 / `--pad N` / 无墨迹 / 退化+边界 / 数据驱动阈值 / 近整页 /
+  `applyRangeToSvg` 正负对照·幂等·整页恒等。
+
+### 新增：PNG 物理密度（`engine/png.ts`）
+- `insertPngPhys(bytes, dpi)` / `readPngPhys` / `crc32`（PNG 用的 IEEE 变体）/ `dpiForScale`（页面基准 72
+  ⇒ 2× = 144 DPI）/ `pixelsPerMeterFor`；只跳过旧 pHYs 并在 IHDR 后插入（等价替换），非 PNG **原样返回**。
+- 为什么：复制/导出的 PNG 没有 pHYs 时，Word / 微信 / 飞书按 **96 DPI 兜底**，把 2× 渲染的 A4 谱
+  （1190×1684）插成 12 英寸巨图 ✗。
+- 断言 `adj864`（7 条）：用**真实 1×1 PNG 字节**跑 CRC32 已知向量、插入位置、**替换而不是叠加**、幂等、
+  非 PNG 原样返回、负对照（不插 pHYs ⇒ 读出 null）。
+
+### 新增：嵌入版 IPC 支持范围盒（`src/ipc/obsidianBridge.ts`）
+- `render.svg` / `render.png` 接受 `params.crop = {x,y,w,h}`：**只校验 + `applyRangeToSvg`**，
+  **不重算几何**（几何只有引擎那一份）；非法 crop ⇒ `-32602` 明确报错，不静默当整页 ✗。
+
+### 文档
+- `docs/HANDOVER-CLI-AND-COMMAND-API.md`：T-3 两类导出的**落点状态表**（引擎/插件已落，CLI 与导出对话框待落）
+  与 `z`（块级缩放）三处实施状态；`docs/ERRORS-LOG.md`：`E-2026-385/386/387`。
+
 ## [0.52.1] — 2026-10-11（修：Obsidian 嵌入版 IPC 桥**未被安装**（挂在 `load` 回调里 ⇒ 单文件内联产物可能错过）＋ 桥装好即向父窗口报到；PATCH 级）
 
 > 主题：修 0.52.0 的一个真 bug —— 插件侧的 PNG/MIDI 导出全部超时「未在 N 秒内应答」✗。
