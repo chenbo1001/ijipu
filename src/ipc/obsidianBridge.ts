@@ -11,13 +11,34 @@
  *  1. **来源校验**：只接受 `event.source === window.parent`（嵌入我们的那一层 ✓）；
  *  2. **方法白名单**：`render.png` / `render.svg` / `export.midi`（`playback.*` 待 B3 后段 ✓）；
  *  3. **参数校验**：`svg` 必须是字符串且长度有上限；`scale` 限定 1–4 ✓；
+ *     `crop`（adj863：范围）必须是四个有限数、且宽高为正 ✓；
  *  4. **诚实降级**：做不到的能力回 `-32601`/`-32000` 并写清原因，**不假装成功** ✗；
  *  5. **不写盘、不下载**：只把结果**回传**给插件（是否落盘由插件决定 ✓）。
  */
+import { applyRangeToSvg, type RangeBox } from '@ijipu/engine'
 import { svgToCanvas } from '../export/export'
 
 /** 与插件侧 `APP_METHODS` 对应的**可实现子集**（做不到的先不列，避免"列了却返回未实现" ✗） */
 export const APP_BRIDGE_METHODS = ['render.svg', 'render.png', 'export.midi'] as const
+
+/**
+ * adj863（T-3 定稿）：解析宿主传来的**范围盒** `params.crop`（`{x,y,w,h}`）。
+ *
+ * 为什么"盒"由宿主算好再传：墨迹只能用真实 DOM 的 `getBBox()` 量（`obsidian-ijipu` 的面板里量过 ✓），
+ * 而**规则**（±每边 N px、退化/近整页判失败）只有引擎那一份 ✓ ⇒ 这里**只做校验与应用**，不重算几何 ✗。
+ * 返回 `null` = 没传或非法（非法**必须报错**，不能静默当整页 ✓）；返回 `undefined` = 没传（合法地不裁剪）。
+ */
+function parseCrop(raw: unknown): RangeBox | null | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const nums = [o.x, o.y, o.w, o.h]
+  if (!nums.every((n) => typeof n === 'number' && Number.isFinite(n))) return null
+  const [x, y, w, h] = nums as number[]
+  if (w <= 0 || h <= 0 || w > 100_000 || h > 100_000) return null
+  if (Math.abs(x) > 100_000 || Math.abs(y) > 100_000) return null
+  return { x, y, w, h }
+}
 
 type Request = { __ijipuAppRequest: 1; id: number; method: string; params?: Record<string, unknown> }
 /**
@@ -103,15 +124,22 @@ export function installObsidianBridge(deps: {
           fail(CODE.internal, r.error ?? '渲染失败')
           return
         }
+        // adj863：**范围**（`params.crop`）—— 宿主量好墨迹盒后按引擎口径传盒，这里只校验 + 应用
+        const crop = parseCrop(params.crop)
+        if (crop === null) {
+          fail(CODE.invalidParams, 'params.crop 必须是 {x,y,w,h} 四个有限数，且 w/h > 0')
+          return
+        }
+        const svgs = crop === undefined ? r.svgs : r.svgs.map((s) => applyRangeToSvg(s, crop))
         if (method === 'render.svg') {
-          reply({ ok: true, result: { svgs: r.svgs } })
+          reply({ ok: true, result: { svgs } })
           return
         }
         // render.png：逐页转 dataURL（与 GUI 导出**同一套** `svgToCanvas` ✓）
         const scaleRaw = params.scale
         const scale = typeof scaleRaw === 'number' && scaleRaw >= 1 && scaleRaw <= 4 ? scaleRaw : 2
         const pngs: string[] = []
-        for (const svg of r.svgs) pngs.push(await svgToPngDataUrl(svg, scale))
+        for (const svg of svgs) pngs.push(await svgToPngDataUrl(svg, scale))
         reply({ ok: true, result: { pngs, pages: pngs.length } })
       } catch (e) {
         // ④ 诚实降级：回错误码 + 原因，绝不假装成功 ✗

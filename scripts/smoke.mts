@@ -7,7 +7,7 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO } from '@ijipu/engine/index.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -19372,4 +19372,107 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   check('adj661/adj662 三段替谱的两端括号都与音符**墨迹**留间距，且右括号**不越过页面边距线**',
     gapsT.length === 3 && gapsT.every((g) => g.L >= 2 && g.R >= 0 && g.marginOver <= 0.01),
     JSON.stringify(gapsT.map((g) => [g.n, Math.round(g.L), g.R.toFixed(1), g.marginOver.toFixed(1)])))
+}
+
+/**
+ * ---- adj863（T-3 定稿）：「范围」参数的**唯一实现** ----
+ *
+ * 用户口径：**导出页面** = 整页 + 四周留白；**导出谱面** = **墨迹包围盒 + 每边 2px**（不保留页宽）。
+ * 本模块（`engine/render/range.ts`）是这两句话的**唯一**落点：插件预览 / 插件导出 / 应用导出 / CLI
+ * 都只传参、不重算（AGENTS §六之二·4）。墨迹盒与门槛值由有 DOM 的宿主量好传进来（引擎零 DOM）。
+ *
+ * 这一节钉四件事：① 两种口径的盒；② `--pad N`；③ 两道可信度闸（退化 / 近整页）+ 数据驱动阈值；
+ * ④ `applyRangeToSvg` 是唯一改写 SVG 外框的地方（用**真实渲染产物**跑，含幂等与"非本引擎产物"）。
+ */
+{
+  /** ① page：恒为整页盒 */
+  const page = rangeBox({ range: 'page', pageW: 595, pageH: 842 })
+  check('adj863 page 范围 = 整页盒（595×842 @0,0），不看墨迹、不回退',
+    page.ok && !page.fellBack && page.box.x === 0 && page.box.y === 0 && page.box.w === 595 && page.box.h === 842,
+    JSON.stringify(page))
+
+  /** ② score：墨迹 + **每边** 2px（默认） */
+  const ink = { x: 100, y: 50, w: 300, h: 200 }
+  const score = rangeBox({ range: 'score', pageW: 595, pageH: 842, ink })
+  check('adj863 score 范围 = 墨迹盒**每边** +2px（300×200 → 304×204 @98,48）',
+    score.ok && !score.fellBack && score.box.x === 98 && score.box.y === 48 && score.box.w === 304 && score.box.h === 204,
+    JSON.stringify(score))
+
+  /** ③ `--pad N`：0 / 10 / 越界钳制 / 非法值回默认 */
+  const p0 = rangeBox({ range: 'score', pageW: 595, pageH: 842, ink, pad: 0 })
+  const p10 = rangeBox({ range: 'score', pageW: 595, pageH: 842, ink, pad: 10 })
+  const pBig = rangeBox({ range: 'score', pageW: 595, pageH: 842, ink, pad: 999 })
+  const pNan = rangeBox({ range: 'score', pageW: 595, pageH: 842, ink, pad: Number.NaN })
+  check('adj863 `--pad N`：0 ⇒ 紧贴墨迹；10 ⇒ 每边 10；越界钳到 64；非法值回默认 2',
+    p0.box.w === 300 && p0.box.h === 200 && p10.box.w === 320 && p10.box.h === 220 &&
+      pBig.box.w === ink.w + 128 && pNan.box.w === 304 && normalizeRangePad(Number.NaN) === 2,
+    JSON.stringify({ p0: p0.box, p10: p10.box, pBig: pBig.box, pNan: pNan.box }))
+
+  /** ④ 没量到墨迹 ⇒ 判失败（不猜一个盒出来），盒退回整页 */
+  const noInk = rangeBox({ range: 'score', pageW: 595, pageH: 842, ink: null })
+  const badInk = rangeBox({ range: 'score', pageW: 595, pageH: 842, ink: { x: 0, y: 0, w: Number.NaN, h: 10 } })
+  check('adj863 没有墨迹盒（或数值非法）⇒ **判失败**（ok:false + 原因 + 退回整页），不猜一个盒出来',
+    !noInk.ok && noInk.fellBack && noInk.box.w === 595 && /没有量到墨迹盒/.test(noInk.reason ?? '') &&
+      !badInk.ok && /没有量到墨迹盒/.test(badInk.reason ?? ''),
+    JSON.stringify({ noInk: noInk.reason, badInk: badInk.reason }))
+
+  /** ⑤ 退化闸：阈值是**入参**（宿主按"一个音符的墨迹高"算，见 `minInkFor`），不是写死的魔数 */
+  const degenerate = rangeBox({ range: 'score', pageW: 595, pageH: 842, ink: { x: 10, y: 10, w: 489, h: 27 }, minInk: 40 })
+  const boundary39 = rangeBox({ range: 'score', pageW: 595, pageH: 842, ink, minInk: 201 })
+  const boundary200 = rangeBox({ range: 'score', pageW: 595, pageH: 842, ink, minInk: 200 })
+  check('adj863 退化闸：489×27 配 40px 阈值被判失败（原因含尺寸与阈值）；边界 minInk-1 失败 / minInk 通过',
+    !degenerate.ok && degenerate.fellBack && /退化/.test(degenerate.reason ?? '') &&
+      !boundary39.ok && boundary200.ok,
+    JSON.stringify({ degenerate: degenerate.reason, b39: boundary39.ok, b200: boundary200.ok }))
+
+  /** ⑤b 数据驱动阈值：`minInkFor(音符墨迹高)`，取不到音符 ⇒ 兜底极小值（不误杀单行短谱） */
+  check('adj863 `minInkFor`：音符墨迹高 20 ⇒ 18；11 ⇒ 10；取不到（0/NaN）⇒ 兜底 6（`adj843` 的口径）',
+    minInkFor(20) === 18 && minInkFor(11) === 10 && minInkFor(0) === MIN_INK_FALLBACK && minInkFor(Number.NaN) === MIN_INK_FALLBACK &&
+      minInkFor(2) === MIN_INK_FALLBACK,
+    `20→${minInkFor(20)} 11→${minInkFor(11)} 2→${minInkFor(2)}`)
+  const shortOk = rangeBox({ range: 'score', pageW: 595, pageH: 842, ink: { x: 10, y: 10, w: 200, h: 27 }, minInk: minInkFor(20) })
+  check('adj863 短谱不误杀：27px 高的墨迹盒配"音符墨迹高 20 ⇒ 阈值 18"通过（这正是 40px 魔数被换掉的原因）',
+    shortOk.ok && shortOk.box.h === 31, JSON.stringify(shortOk.box))
+
+  /** ⑥ 近整页闸：墨迹盒 ≥ 整页 98% ⇒ 多半把整页白底量进来了（等于没裁） */
+  const nearPage = rangeBox({ range: 'score', pageW: 599, pageH: 842, ink: { x: 0, y: 0, w: 595, h: 842 } })
+  const notNear = rangeBox({ range: 'score', pageW: 595, pageH: 842, ink: { x: 0, y: 0, w: 500, h: 700 } })
+  check(`adj863 近整页闸：墨迹盒 ≥ 整页 ${Math.round(NEAR_PAGE_RATIO * 100)}% ⇒ 判失败并说明"多半把白底量进来了"；小于则通过`,
+    !nearPage.ok && /整页/.test(nearPage.reason ?? '') && notNear.ok,
+    JSON.stringify({ nearPage: nearPage.reason, notNear: notNear.box }))
+
+  /** ⑦ 负对照：若放过退化盒，画布只有 31px 高 —— 正是"导出变成一条横带"的由来 */
+  check('adj863 负对照：放过退化盒会得到一条 31px 高的画布（说明这道闸是承重的，不是摆设）',
+    degenerate.box.h === 842 && 27 + 4 < 40 && degenerate.box.h > (27 + 4) * 10)
+
+  /** ⑧ `applyRangeToSvg`：唯一改写外框的地方（拿**真实渲染产物**跑） */
+  const parsed863 = parseJps(`D: C\nP: 4/4\nQ: 1 2 3 4 | 5 5 6 6 |\n`)
+  const layout863 = layoutScore(parsed863, defaultPageConfig)
+  const pg863 = layout863.pages[0]
+  const svg863 = renderScoreToSvg(layout863, undefined)[0]
+  const before863 = readViewBoxOf(svg863)
+  const cropped863 = applyRangeToSvg(svg863, score.box)
+  const after863 = readViewBoxOf(cropped863)
+  const head863 = cropped863.slice(0, cropped863.indexOf('>'))
+  check('adj863 applyRangeToSvg：外层 width/height/viewBox **一起**改成范围盒，内容一字不动',
+    !!before863 && !!after863 &&
+      after863[0] === score.box.x && after863[1] === score.box.y && after863[2] === score.box.w && after863[3] === score.box.h &&
+      / width="304"/.test(head863) && / height="204"/.test(head863) &&
+      cropped863.slice(cropped863.indexOf('>')) === svg863.slice(svg863.indexOf('>')),
+    `before=${JSON.stringify(before863)} after=${JSON.stringify(after863)} head=${head863.slice(0, 120)}`)
+
+  /** ⑨ 幂等 + 非本引擎产物原样返回（不猜、不破坏）；整页范围对产物是恒等变换 */
+  const twice863 = applyRangeToSvg(cropped863, score.box)
+  const foreign863 = '<div>不是 svg</div>'
+  const samePage863 = applyRangeToSvg(svg863, rangeBox({ range: 'page', pageW: pg863.width, pageH: pg863.height }).box)
+  check('adj863 applyRangeToSvg 幂等；非本引擎产物原样返回；整页范围（用**真实页面尺寸**）= 逐字恒等变换',
+    twice863 === cropped863 && applyRangeToSvg(foreign863, score.box) === foreign863 &&
+      samePage863 === svg863,
+    `before=${JSON.stringify(before863)} samePage=${JSON.stringify(readViewBoxOf(samePage863))} page=${pg863.width}×${pg863.height} 恒等=${samePage863 === svg863}`)
+
+  /** ⑩ 负对照：只改 viewBox 不改 width/height ⇒ 导出尺寸仍是整页（这条正是要防的"预览一套、导出一套"） */
+  const onlyViewBox863 = svg863.replace(/\sviewBox="[^"]*"/, ` viewBox="${score.box.x} ${score.box.y} ${score.box.w} ${score.box.h}"`)
+  const headOnly863 = onlyViewBox863.slice(0, onlyViewBox863.indexOf('>'))
+  check('adj863 负对照：只改 viewBox（不改 width/height）时 width 仍是整页宽 —— 所以外框必须一处改全',
+    !/ width="304"/.test(headOnly863) && new RegExp(` width="${before863?.[2]}"`).test(headOnly863))
 }
