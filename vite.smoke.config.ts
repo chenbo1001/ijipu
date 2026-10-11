@@ -1,7 +1,14 @@
 /**
- * vite.smoke.config.ts 閳?瀵洘鎼稿ù瀣槸/妫板嫯顫嶉幍鎾冲瘶闁板秶鐤? * 鐏?scripts/*.mts 閹垫挸瀵樻稉?Node 閸欘垳娲块幒銉ㄧ箥鐞涘瞼娈?CJS閿涘牏鏁ゆ禍搴㈢煓缁犺京骞嗘晶鍐獓瀵洘鎼稿ù瀣槸閿涘鈧? * 閻劍纭堕敍姝穒te build --config vite.smoke.config.ts
- *   node dist-smoke/smoke.cjs    閳?閸愭帞鍎ù瀣槸
- *   node dist-smoke/preview.cjs  閳?閻㈢喐鍨氱粈杞扮伐鐠嬭鲸瑕嗛弻?SVG
+ * vite.smoke.config.ts — 把 `scripts/*.mts` 打包成 **Node 可跑的 CJS**（冒烟测试 / 渲染预览 / 命令行）。
+ *
+ * 用法：
+ *   vite build --config vite.smoke.config.ts
+ *   node dist-smoke/smoke.cjs    → 引擎冒烟测试
+ *   node dist-smoke/preview.cjs  → 生成样例谱的 SVG
+ *   node dist-smoke/cli.cjs …    → iJipu 命令行（`npm run cli -- <命令>`）
+ *
+ * ⚠ 本文件头部注释此前被"用 shell 改含中文文件"弄成了乱码（AGENTS §六之二·1 记过的那种损害）；
+ *    这里按实际用途重写为准确描述 —— 之后**只用编辑工具**改本文件。
  */
 import { defineConfig } from 'vite'
 import { fileURLToPath, URL } from 'node:url'
@@ -22,13 +29,16 @@ export default defineConfig({
       entry: {
         smoke: 'scripts/smoke.mts',
         preview: 'scripts/render-preview.mts',
+        // adj801（A·P1）：命令行入口 ⇒ `dist-smoke/cli.cjs`（`npm run cli -- …`）
+        cli: 'scripts/ijipu-cli.mts',
       },
       formats: ['cjs'],
       fileName: (_format, entryName) => `${entryName}.cjs`,
     },
     rollupOptions: {
       // adj458：加重建内置模块 `node:zlib`（smoke 里解 PNG 的 IDAT，核对按钮图标的像素口径）
-      external: ['node:fs', 'node:url', 'node:path', 'node:zlib', 'fs', 'url', 'path', 'zlib'],
+      // adj801：命令行入口用 `node:fs/promises`
+      external: ['node:fs', 'node:fs/promises', 'node:url', 'node:path', 'node:zlib', 'fs', 'url', 'path', 'zlib'],
     },
   },
 })

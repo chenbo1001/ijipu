@@ -22,7 +22,8 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "check:installer": "node scripts/check-installer.mjs",
-    "postinstall": "node scripts/patch-vite.js"
+    "postinstall": "node scripts/patch-vite.js",
+    "cli": "vite build --config vite.smoke.config.ts && node dist-smoke/cli.cjs"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
