@@ -132,6 +132,45 @@ CLI 断言 **22/22** ✅、`doctor` 能力如实 ✓；插件 `tsc` ✓、冒烟
 3. 插件升 `0.35.0 → 0.35.1`（PATCH ✓：只换内嵌产物 + 本批修复 ✓）→ 门禁（`adj733` 转绿 ✓）→ 发布 ✓。
 > 这条也回答了"为什么必须按顺序"：**光有代码不行，嵌入版是"冻结的产物"** ✓ —— 不重新 embed，用户测到的永远是旧应用 ✗。
 
+## 二之六、` ```jps ` 代码块参数怎么写：生态写法 + 三种方案（用户 2026-10-11 问）
+
+> 用户诉求：单行曲部在「谱面」视图被放大 ✗ ⇒ 想**默认 100% 缩放**，并把缩放做成代码块参数，形如
+> ` ```jps z=100 ` ✓；同时问「**其它插件大多怎么写**，列几个参考」✓。
+
+### A. 生态里的常见写法（附来源 ✓）
+
+| # | 写法 | 例子 | 谁在用 | 说明 |
+|---|---|---|---|---|
+| 1 | **info string 追加 `k=v`** | ` ```js title="a.js" ` | 通用 Markdown / [Docusaurus](https://nova.cbnventures.io/docs/facades/docusaurus-preset/authoring/code-blocks/) / [Mintlify](https://mintlify.wiki/Mintlify/docs/create/code) | CommonMark 允许 info string 里**空格分隔附加词** ✓；不破坏高亮 ✓ |
+| 2 | **info string 花括号/方括号** | ` ```js{1,3}`、` ```js [title] ` | VitePress / Shiki 系 | 高亮行、标题等 ✓（解析器自定义 ✓） |
+| 3 | **参数放块体**（查询/JSON/YAML/Markdown） | ` ```dataviewjs` + 查询语句 ✓；` ```chart` + JSON ✓；` ```kanban` + 看板 Markdown ✓ | [Dataview](https://deepwiki.com/blacksmithgu/obsidian-dataview/4.2-dataviewjs) / Charts / Kanban | **Obsidian 生态里最主流** ✓：块体本身就是"载荷" ✓ |
+| 4 | **专门工具读 info string** | — | [obsidian-dev-utils 的 Code Block Processing](https://deepwiki.com/mnaoumov/obsidian-dev-utils/4.4-code-block-processing) | 说明"从 info string 取参数"是**有共识的做法** ✓ |
+| 5 | **项目既有：源内 `# jps-config:{…}`** | `# jps-config:{"margin_right":44}` | **本项目** ✓（AGENTS §七 L2 谱面级 ✓） | 已经支持**任意设置项** ✓、跟谱走 ✓、插件/应用/CLI 三端同源 ✓ |
+
+### B. ⚠ 一条**决定性坑**（必须知道 ✗）
+Obsidian 对**"语言名之后的参数"存在缓存/忽略行为** ✗：
+改 `z=100 → z=150` 时，后处理器**可能不被重新调用** ✗ ⇒ 用户会觉得"参数不生效、要改点别的才刷新" ✓。
+来源：[Pass parameters to codeblock](https://forum.obsidian.md/t/pass-parameters-to-codeblock/37990) ✓、
+[Postprocessor does not process changes after codeblock language](https://forum.obsidian.md/t/postprocessor-does-not-process-changes-after-codeblock-language/61010) ✓。
+（另：本项目读代码块是走 **CM6 装饰 + 自己解析源码** ✓，不是 markdown post-processor ✓，所以**未必**踩同样的坑 ✓ ——
+但"info string 变了要不要重渲染"这件事，**必须实测**再说 ✓，不能假设 ✓。）
+
+### C. 三种可选方案（请用户裁决 ✓）
+
+| 方案 | 写法 | 优点 | 缺点 |
+|---|---|---|---|
+| **① info string `k=v`**（用户的初想 ✓） | ` ```jps z=100 ` | 直观、与生态写法 1/2 一致 ✓；一行看全 ✓ | **缓存/重渲染风险** ✗（见 B ✓）；与"语言名"混在一起，`jpsBlockRanges` 要扩解析 ✓；**同一块可写多参数**时要定分隔/转义规则 ✓ |
+| **② 源内 `# jps-config`**（**我推荐** ✓） | ` ```jps` + 首行 `# jps-config:{"zoom":150}` | 与项目**既有 L2 通道**同源 ✓（三端已支持 ✓）；**跟谱走** ✓（复制给别人效果一致 ✓）；解析/校验/差量写入**都已存在** ✓；重渲染由我们自己的解析驱动 ✓（不依赖宿主缓存 ✓） | 直观性差一点（要写一行 JSON ✓）；对"只想调个缩放"的用户略重 ✓ |
+| **③ 两者都支持** | ` ```jps z=100 ` **或** `# jps-config` | 灵活 ✓ | **两份口径** ✗（冲突时谁赢？⇒ 必须定优先级 ✓）⇒ 我可实现为"info string 覆盖 config" ✓，但要接受复杂度 ✓ |
+
+**我的建议** ✓：**选 ②**（`# jps-config`）—— 理由：**这个项目已经为"谱面级设置"建好了完整通道** ✓
+（引擎 `extractJpsConfig`/`mergeJpsConfig`/`writeJpsConfig(diff)` ✓、应用图形化改设置后**自动写回** ✓、
+插件与 CLI 都认 ✓）⇒ 缩放只是**再加一个字段** ✓，而走 ① 等于**再建一套参数体系** ✗（还要单独处理转义/多参数/缓存 ✗）。
+若你更看重"一眼可见" ✓，可选 **③** 并定优先级为 **info string > `# jps-config`** ✓（我实现时会把这条写进断言 ✓）。
+
+**无论选哪个 ✓，缩放口径都按你说的** ✓：**默认 100%（自然尺寸，等于页面视图下的 1px 基准 ✓）** ✓；
+`z`/`zoom` **只影响屏幕显示** ✓，**不影响「导出谱面」（仍= 墨迹 + 每边 2px ✓）** ✓。
+
 ## 三、发布建议（等用户一句「更新提交」）
 
 - **插件**：`0.34.2 → 0.35.0`（新增公开 API/RPC/命令 ⇒ **MINOR** ✓）；
