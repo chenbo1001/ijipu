@@ -1,6 +1,24 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+/**
+ * adj810（方案 B / B3）：**嵌入版侧的入站 RPC** —— 只被 Obsidian 嵌入时生效（`window.parent !== window` ✓）。
+ * 依赖用引擎**直算**（`renderSvg` = parse→layout→SVG ✓；`exportMidi` = 播放序列→MIDI ✓）：
+ * 这样不必依赖 store，且在"还没有打开任何谱"时也能应答 ✓。
+ * ⚠ 与 GUI 导出的差别：这里没走 canvas 实测角标墨迹 ⇒ 与 CLI 同口径（**估算宽**，亚像素差异 ✓）。
+ */
+import { installObsidianBridge } from './ipc/obsidianBridge'
+import {
+  parseJps,
+  splitParseIssues,
+  layoutScore,
+  renderScoreToSvg,
+  buildPlaySequence,
+  eventsToMidi,
+  mergeJpsConfig,
+  defaultPageConfig,
+  type PageConfig,
+} from '@ijipu/engine'
 import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from './pwa/swUpdate'
 import { APP_VERSION_FULL } from './brand/version'
 import { installAppHeight } from './pwa/appHeight'
@@ -290,6 +308,23 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator && !isEmbeddedFrame()) 
   } else {
     // 网页版 / PWA：注册 SW 以获得离线能力 + 新版接管提示
     window.addEventListener('load', () => {
+  // adj810（B3）：装上 Obsidian 入站 RPC（独立浏览器里它是空转 ✓，不产生任何副作用 ✓）
+  installObsidianBridge({
+    renderSvg: (source, pageConfig) => {
+      const { errors } = splitParseIssues(parseJps(source))
+      if (errors.length > 0) return { ok: false, svgs: [], error: `${errors.length} 个语法错误（先修好再渲染）` }
+      const cfg = mergeJpsConfig(source, { ...defaultPageConfig, ...(pageConfig as Partial<PageConfig> | undefined) })
+      return { ok: true, svgs: renderScoreToSvg(layoutScore(parseJps(source), cfg)) }
+    },
+    exportMidi: (source) => {
+      const { errors } = splitParseIssues(parseJps(source))
+      if (errors.length > 0) return { ok: false, error: `${errors.length} 个语法错误（先修好再导出）` }
+      const parsed = parseJps(source)
+      const layout = layoutScore(parsed, mergeJpsConfig(source, defaultPageConfig))
+      const bytes = eventsToMidi(buildPlaySequence(parsed, layout, 60).events, { bpm: 60, title: 'iJipu' })
+      return { ok: true, bytes }
+    },
+  })
     // 快照：注册前页面是否已有 SW 控制者（决定这次接管是不是"更新"）
     const hadController = !!navigator.serviceWorker.controller
     navigator.serviceWorker
