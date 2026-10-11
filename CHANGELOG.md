@@ -1,3 +1,40 @@
+## [0.52.0] — 2026-10-11（新增**命令行 `ijipu`** 与 **Obsidian 嵌入版 IPC 桥**；MINOR 级）
+
+> 主题：把"引擎能力"从 GUI 里解放出来，做成**可脚本化**与**可被宿主调用**的两条通道。
+> 本版**不改** `.jps` 语法与谱面几何 ⇒ 既有谱面显示不变 ✓。
+> **涉及嵌入版产物**：本版之后必须按 AGENTS §五.8.1 执行
+> `npm run build:embed && node scripts/embed-emit.mjs` 再发插件（否则插件内嵌的应用里没有下面的 IPC 桥 ✗，
+> 用户会看到「嵌入版无响应」✓——这条正是本轮实测抓到的）。
+
+### 新增：命令行 `ijipu`（方案 A）
+- **P1**：`format` / `lint` / `info`，`--json`（`schema: 1`）、稳定**退出码**（0/1/2/3/4/5）、stdin/stdout 管道友好；
+- **P2**：`render -t svg|midi`（SVG 每页一段；MIDI 走 `buildPlaySequence` + `eventsToMidi`）、
+  `batch`（目录批量：`svg` / `midi` / `fmt`，输出目录自动创建）；
+- **P4**：`settings`（看某键的**值与来源**：命令行 `-s` > 源内 `# jps-config` > 代码默认 ✓）、
+  `config -t effective`（全表 + 每项来源 ✓）、`doctor`（能力自检，**未实现就报 false** ✓）、
+  `completions bash|zsh|powershell`、**`lint --watch`**（改一次查一次 ✓）；
+- **P3 位图/音频**：CLI 侧**已就绪**（宿主注入 `rasterize`/`synthesize` ✓；独立 Node 环境**明确报错退出码 4** +
+  给替代方案 ✓，不产半成品 ✗）；桌面端「隐藏窗口渲染」通道待实现（方案与 8 项验证清单见 `docs/CLI.md` §七之二）；
+- 手册 `docs/CLI.md`；机器闸门 `scripts/cli-assert.mts`（**22 项**，接进 `npm run smoke`）。
+
+### 新增：Obsidian 嵌入版 IPC 桥（方案 B / B3）
+- `src/ipc/obsidianBridge.ts`：**入站 RPC**（应用 ← 插件）——`render.svg` / `render.png` / `export.midi` ✓；
+  · 只在**被嵌入**时注册（独立浏览器空转 ✓）；只认 `event.source === window.parent` ✓；
+    白名单 + 参数校验（`source` 长度、`scale` 1–4 ✓）；**诚实降级**（错误码 + 原因，不假装成功 ✗）；
+  · PNG 复用**既有** `svgToCanvas` ⇒ 与 GUI 导出**同一套渲染** ✓（不另写一份 ✗）；
+- `src/main.tsx` 接线（依赖用引擎直算：`parseJps→layoutScore→renderScoreToSvg` / `buildPlaySequence→eventsToMidi`）。
+
+### 新增：播放无头化第一步（T-2 第①步）
+- `src/playback/headless.ts`：`playHeadless(input, opts) → { totalMs, stop() }` ✓
+  · **零 React / 零 DOM** ✓（进度只走 `onTick` 回调，不写 store ✓）；
+  · 入参 `string | { parsed, layout }` ✓（传对象时**零重复解析/排版** ✓）；
+  · 复用现成链路（`buildPlaySequence` / `schedulePlay` / `SpessaSynthBackend` ✓），不复制算法 ✗。
+
+### 验证
+- `npm run check:encoding` ✓（289 文件）、`tsc -b` ✓ 0 错、`npm run smoke` **ALL PASSED** ✅、
+  CLI 断言 **22/22** ✅；
+- 发布后：按 §五.8.1 重新生成嵌入版产物并发布插件 **0.35.1** ✓。
+
 ## [0.51.2] — 2026-10-10（构建戳改取**提交时间**并在 CI 侧兜底 ⇒ 真正跨环境可复现；PATCH 级）
 
 > 主题：`0.51.1` 把构建戳改成 UTC 后，**本地跨时区**已可复现，但与 **CI 产物**仍差 1 分钟。
