@@ -43,5 +43,9 @@
 ## 相关文件
 
 - `LICENSE-GeneralUserGS.txt` —— 许可**原文**（逐字保留，不要改写）
-- 打包配置：`src-tauri/tauri.conf.json` 的 `bundle.resources` —— 音色库与许可**一起**进安装包
+- 打包配置：`src-tauri/tauri.conf.json` 的 `bundle.resources` ——
+  音色库与许可 / 本说明**一起**放进安装目录的 `soundfonts/` 子目录（adj894，用户要求"和 LICENSE 放一起"）
+- 安装后的查找顺序：`<安装目录>/generaluser_gs.sf2` **优先**，其次 `<安装目录>/soundfonts/generaluser_gs.sf2`
+  （见 `src-tauri/src/lib.rs` 的 `builtin_soundfont_candidates`）⇒
+  想用**自备音色**覆盖内置那份，把 sf2 放到**安装目录根**即可；放 `soundfonts/` 里的这份是随包内置的
 - 音色库的加载与顺序：`packages/ijipu-engine/src/engine/playback/soundbanks.ts`

@@ -157,10 +157,15 @@ fn sf_cache_remove(app: tauri::AppHandle, lib_id: String) -> Result<(), String> 
     Ok(())
 }
 
-/// adj416：内置音源候选文件（按优先级）——安装目录根的 `<lib_id>.sf2` 优先（发布程序把
-/// generaluser_gs.sf2 直接放在安装目录，用户看得见、可自行替换），其次兼容旧的
-/// `soundfonts/<lib_id>.sf2` 子目录布局（便携版/旧发布）。
+/// adj416：内置音源候选文件（按优先级）——安装目录根的 `<lib_id>.sf2` 优先，其次
+/// `soundfonts/<lib_id>.sf2` 子目录。
 /// Windows 下 resource_dir() == exe 所在目录，故“安装目录”与“exe 旁”是同一处。
+///
+/// adj894（用户要求「把内置的 generaluser_gs.sf2 也放在 soundfonts 里，和 LICENSE 放一起」）：
+/// **随包布局改为 `soundfonts/`**（见 `tauri.conf.json` 的 `bundle.resources`），于是它与
+/// `LICENSE-GeneralUserGS.txt` / `README.md` 同目录、一眼能看出是哪来的。
+/// 两个候选都保留 ⇒ ① 旧的便携版布局照常可用；② 用户仍可把自备 sf2 放**安装目录根**来**覆盖**内置那份
+/// （根目录**优先**于 soundfonts/，这正是把"可替换"这条路留在这里的原因）。
 fn builtin_soundfont_candidates(app: &tauri::AppHandle, lib_id: &str) -> Result<Vec<PathBuf>, String> {
     let dir = app.path().resource_dir().map_err(|e| e.to_string())?;
     let file = format!("{}.sf2", lib_id);

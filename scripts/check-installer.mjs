@@ -13,6 +13,10 @@
  * adj416 增补：内置音源 `generaluser_gs.sf2` 必须随安装包落到安装目录（GNU/任意工具链都一样）——
  * 桌面端试听/导出直接读它（Rust `sf_soundfont_builtin_path`），漏了就会退回联网下载（国内直链不可达）。
  *
+ * adj894：随包布局改为 **`soundfonts/`**（用户要求"和 LICENSE 放一起"）⇒ 判定里接受
+ * `soundfonts\` 前缀；并**新增一条**：音色库的**许可文件**也必须进安装包 ——
+ * 那是分发第三方作品的义务（见 `resources/soundfonts/README.md`），值得机器守住而不是靠自觉。
+ *
  * 用法：npm run check:installer（建议紧跟 `npx tauri build` 之后跑）
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
@@ -21,7 +25,16 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 const REQUIRED = [
   ['主程序 ijipu.exe', /!define\s+MAINBINARYSRCPATH\s+"[^"]*ijipu\.exe"/],
   ['WebView2Loader.dll（GNU 工具链下为动态依赖）', /File\s+\/a\s+"\/oname=WebView2Loader\.dll"/],
-  ['内置音源 generaluser_gs.sf2（桌面离线试听/导出）', /File\s+\/a\s+"\/oname=generaluser_gs\.sf2"/],
+  // adj894：落点由"安装目录根"改为 `soundfonts/` ⇒ 前缀可选（两种布局都算过）
+  [
+    '内置音源 generaluser_gs.sf2（桌面离线试听/导出）',
+    /File\s+\/a\s+"\/oname=(?:soundfonts[\\/])?generaluser_gs\.sf2"/,
+  ],
+  // adj894：第三方音色库的许可必须随包分发（与音源同目录）
+  [
+    '音色库许可 LICENSE-GeneralUserGS.txt（分发第三方作品的义务）',
+    /File\s+\/a\s+"\/oname=soundfonts[\\/]LICENSE-GeneralUserGS\.txt"/,
+  ],
 ]
 
 /** 打包源文件：[展示名, 路径, 最小字节数]——源缺失/是占位符时安装包里也就没有真音源 */
@@ -107,7 +120,8 @@ if (failed > 0) {
     `\n[check-installer] ${failed} 项缺失：安装后会缺文件、离线试听不可用。\n` +
       '  修复：确认 src-tauri/tauri.conf.json 的 bundle.resources 含\n' +
       '  { "target/release/WebView2Loader.dll": "WebView2Loader.dll" }（GNU 工具链时必需）\n' +
-      '  { "../resources/soundfonts/generaluser_gs.sf2": "generaluser_gs.sf2" }（内置音源，adj416）',
+      '  { "../resources/soundfonts/generaluser_gs.sf2": "soundfonts/generaluser_gs.sf2" }（内置音源，adj894 起落在 soundfonts/）\n' +
+      '  { "../resources/soundfonts/LICENSE-GeneralUserGS.txt": "soundfonts/LICENSE-GeneralUserGS.txt" }（许可，必须随包）',
   )
   process.exit(1)
 }

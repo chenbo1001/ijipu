@@ -1,11 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "iJipu 默认能力",
+  "description": "iJipu 默认能力。⚠ opener 用 `opener:default`（= allow-open-url + allow-reveal-item-in-dir + allow-default-urls）：opener 的 `open_url` 除了要允许命令，还要 URL 落在 **scope** 里；只写 `opener:allow-open-url` 会因「命令允许但 scope 为空」被拒，且前端是静默兜底 ⇒ 表现为「点链接没反应」（adj894 实测修）。",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:allow-set-title",
-    "opener:allow-open-url"
+    "opener:default"
   ]
 }

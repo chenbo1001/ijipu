@@ -55,7 +55,7 @@
     ],
     "resources": {
       "target/release/WebView2Loader.dll": "WebView2Loader.dll",
-      "../resources/soundfonts/generaluser_gs.sf2": "generaluser_gs.sf2",
+      "../resources/soundfonts/generaluser_gs.sf2": "soundfonts/generaluser_gs.sf2",
       "../resources/soundfonts/LICENSE-GeneralUserGS.txt": "soundfonts/LICENSE-GeneralUserGS.txt",
       "../resources/soundfonts/README.md": "soundfonts/README.md"
     }
