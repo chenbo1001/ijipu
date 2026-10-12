@@ -11,6 +11,8 @@ import { join } from 'node:path'
 import { mdToHtml, extractToc, parseJpsInfo } from '../src/help/markdown'
 // adj883：首页示例精简（去掉 `# jps-config:{…}` 与装饰线，但必须保住正文）
 import { BRAND_SAMPLES, simplifyJps } from '../src/landing/samples'
+// adj895：播放跟随滚动的「安全区」（纯函数 ⇒ 可在 Node 里直接断言）
+import { FOLLOW_SAFE_HIGH, FOLLOW_SAFE_LOW, followScrollTargetX } from '../src/preview/followScroll'
 import { inflateSync } from 'node:zlib'
 import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO, inkBoxOfLayout, inkBoxesOfLayout, INK_ESTIMATE_SLACK, insertPngPhys, readPngPhys, crc32, isPng, dpiForScale, pixelsPerMeterFor } from '@ijipu/engine/index.ts'
 /**
@@ -7139,10 +7141,13 @@ console.log('[100] px values are always integers (adj413)')
   check('adj413 默认配置本身全为整数（无浮点默认值）', Object.entries(defaultPageConfig).every(([, v]) => typeof v !== 'number' || Number.isInteger(v)))
 }
 
-// ---- 101. 桌面内置音源（随安装包分发）打包不变量（adj416） ----
-// PC 发布程序必须把 resources/soundfonts/generaluser_gs.sf2 映射到**安装目录根**的
-// generaluser_gs.sf2：装完 `<安装目录>\generaluser_gs.sf2` 即存在，运行时 Rust 直接读该文件
+// ---- 101. 桌面内置音源（随安装包分发）打包不变量（adj416；adj894 起落点改为 soundfonts/） ----
+// PC 发布程序必须把 resources/soundfonts/generaluser_gs.sf2 打进安装包，与它的许可同目录：
+// 装完 `<安装目录>\soundfonts\generaluser_gs.sf2` 即存在，运行时 Rust 直接读该文件
 // （sf_soundfont_builtin_path 探测 → 前端跳过下载提示），不再依赖国内不可达的 GitHub raw。
+// adj894（用户要求"把内置的 sf2 也放在 soundfonts 里，和 LICENSE 放一起"）：落点由
+// **安装目录根**改为 **soundfonts/** ⇒ 本段的判定一律**接受可选前缀**（两种布局都算过）。
+// Rust 侧两个候选都保留 ⇒ "用户把自备 sf2 放安装目录根来覆盖内置那份"这条路仍然有效（根目录优先）。
 // 打包配置/源文件在这里兜底——漏了安装包会「静默」退回联网下载（用户以为没反应）。
 console.log('[101] desktop bundled soundfont packaging (adj416)')
 {
@@ -7150,8 +7155,10 @@ console.log('[101] desktop bundled soundfont packaging (adj416)')
     bundle?: { resources?: Record<string, string> }
   }
   const resources = conf.bundle?.resources ?? {}
-  const entry = Object.entries(resources).find(([, dest]) => dest === 'generaluser_gs.sf2')
-  check('adj416 bundle.resources 含映射到安装目录根的 generaluser_gs.sf2', entry !== undefined, JSON.stringify(resources))
+  // adj894：目标路径可能是 `generaluser_gs.sf2`（安装目录根）或 `soundfonts/generaluser_gs.sf2`
+  const entry = Object.entries(resources).find(([, dest]) => /(^|[\\/])generaluser_gs\.sf2$/.test(dest))
+  check('adj416/adj894 bundle.resources 含 generaluser_gs.sf2（落点 soundfonts/ 或安装目录根都算）',
+    entry !== undefined, JSON.stringify(resources))
   check('adj416 映射源为 resources/soundfonts/generaluser_gs.sf2（config 相对 src-tauri）', (entry?.[0] ?? '').replace(/\\/g, '/') === '../resources/soundfonts/generaluser_gs.sf2', entry?.[0] ?? '')
   // 源文件：真实完整 SF2（RIFF 容器 + sfbk 类型标识），不是占位符
   const sf2 = join(root, 'resources', 'soundfonts', 'generaluser_gs.sf2')
@@ -7175,7 +7182,10 @@ console.log('[101] desktop bundled soundfont packaging (adj416)')
   check('adj416 Rust 以 raw body 返回音源字节（tauri::ipc::Response）', libRs.includes('tauri::ipc::Response::new(bytes)'))
   // 检查脚本：安装包清单必需项 + 打包源体积兜底
   const chk = readFileSync(join(root, 'scripts', 'check-installer.mjs'), 'utf8')
-  check('adj416 check:installer 把 generaluser_gs.sf2 列为安装包必需文件', chk.includes('oname=generaluser_gs\\.sf2'))
+  check('adj416/adj894 check:installer 把 generaluser_gs.sf2 列为安装包必需文件（接受 soundfonts/ 前缀）',
+    chk.includes('generaluser_gs') && chk.includes('oname='), '')
+  check('adj894 check:installer 把音色库**许可**也列为必需文件（分发第三方作品的义务）',
+    chk.includes('LICENSE-GeneralUserGS'), '')
   check('adj416 check:installer 校验打包源体积（≥20MB）', chk.includes('resources/soundfonts/generaluser_gs.sf2'))
   // 便携/调试目录：prepare 脚本把音源放到 exe 旁（与安装目录同布局），dev 也能走内置
   const prep = readFileSync(join(root, 'scripts', 'prepare-tauri-soundfont.mjs'), 'utf8')
@@ -19987,6 +19997,43 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   check('adj893 负对照：两份**真源**里确实有 `S:`（说明上面判据真的在量"被过滤掉"这件事）',
     rawNoS.every((t) => /^\s*S\s*:/m.test(t)),
     rawNoS.map((t) => (/^\s*S\s*:.*/.exec(t) ?? ['(无)'])[0]).join(' | '))
+}
+
+/**
+ * adj895（用户要求）：播放跟随滚动的「安全区」——**提前量** + **顺滑**。
+ *
+ * 用户口径：「试听时如果页面宽于预览视界，色块总是走到视界后再调整页面位置，这是不对的，
+ * 要留有余量，在接近右视界时就应调整……另外调整时页面的移动要顺滑些，不要一跳一跳」。
+ *
+ * 纯函数 `followScrollTargetX` ⇒ 直接在 Node 里断言（不碰 DOM）。
+ * 安全带 = 视口宽的 `[25%, 75%]`：带内不动（顺滑的前提）、越界才拉回带内。
+ */
+{
+  console.log('[163] playhead follow-scroll safe zone (adj895)')
+  const viewW = 1000
+  const base = { viewW, scrollW: 4000, scrollLeft: 0 }
+  check('adj895 色块在安全带内 ⇒ **不滚**（返回 null）—— 这是"顺滑"的前提（绝大多数帧走这里）',
+    followScrollTargetX({ ...base, xInView: 250 }) === null &&
+      followScrollTargetX({ ...base, xInView: 500 }) === null &&
+      followScrollTargetX({ ...base, xInView: 750 }) === null)
+  check('adj895 色块**越出右界即提前**拉到带内左端（右前方因此空出 3/4 视口的谱）',
+    followScrollTargetX({ ...base, xInView: 900 }) === 650, // 0 + (900 − 250)
+    String(followScrollTargetX({ ...base, xInView: 900 })))
+  check('adj895 越出左界 ⇒ 对称拉回带内右端',
+    followScrollTargetX({ ...base, scrollLeft: 650, xInView: 100 }) === 0, // 650 + (100 − 750)
+    String(followScrollTargetX({ ...base, scrollLeft: 650, xInView: 100 })))
+  check('adj895 内容不比视口宽 ⇒ 永不横滚（越到天边也不滚）',
+    followScrollTargetX({ ...base, scrollW: 900, xInView: 2000 }) === null &&
+      followScrollTargetX({ xInView: 2000, viewW: 0, scrollW: 4000, scrollLeft: 0 }) === null)
+  check('adj895 目标钳在可滚上限内（scrollWidth − clientWidth）',
+    followScrollTargetX({ viewW: 1000, scrollW: 4000, scrollLeft: 2990, xInView: 999 }) === 3000, '')
+  /**
+   * 负对照：**提前量的存在性**由安全带右沿是否小于视口宽决定 ——
+   * 若 `FOLLOW_SAFE_HIGH === 1`（贴到最右边才触发），上面"越出右界即提前"那条就退化成原行为。
+   */
+  check('adj895 负对照：安全带右沿 < 视口宽（< 1 才有提前量；= 1 就回到"贴边才动"的老行为）',
+    FOLLOW_SAFE_HIGH < 1 && FOLLOW_SAFE_LOW > 0 && FOLLOW_SAFE_LOW < FOLLOW_SAFE_HIGH,
+    `low=${FOLLOW_SAFE_LOW} high=${FOLLOW_SAFE_HIGH}`)
 }
 
 /**

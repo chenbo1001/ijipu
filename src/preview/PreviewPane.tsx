@@ -10,6 +10,8 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 // adj529：预览页基准宽（与顶栏"双击比率按宽度适配"的反算算式同源）
 import { PREVIEW_BASE_W, isFullyVisibleIn } from './zoomFit'
+// adj895：播放跟随滚动的「安全区」判定（纯函数，见该文件的口径说明）
+import { followScrollTargetX } from './followScroll'
 import { openExternalUrl } from './openUrl'
 import { beginDrag } from '../ui/dragGesture'
 // adj723：音符点击（单击 / Ctrl+单击）的动作判定（纯模块，便于 smoke 断言）
@@ -816,6 +818,40 @@ function PlayheadDiag({ pageIndex, noteSize }: { pageIndex: number; noteSize: nu
 function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }) {
   const currentMs = useDocStore((s) => s.currentMs)
   const track = useDocStore((s) => s.playheadTrack)
+
+  /**
+   * adj895（用户要求）：**播放跟随滚动**——把色块保持在"安全区"内，而不是等它贴到视界边上。
+   *
+   * 为什么单独放在这里、而不是改 `PreviewPane` 里原来那条滚动 effect：
+   *   那条 effect 是**单击音符居中**用的，且被 `adj723y` 加过一道"已完整可见就不滚"的保护
+   *   （为了修"双击播放失效"）。两者诉求相反：单击要"别乱动"，播放要"提前跟着走"。
+   *   合在一起改必然伤到另一边 ⇒ **各管各的**。
+   *
+   * 为什么放在本组件：主组件订阅 `currentMs` 会让整层 SVG 逐帧重建（`adj282` 明确避免），
+   * 而本组件本来就每帧渲染 ⇒ 多一条 effect 不扩大重渲染面。
+   *
+   * ⚠ hook 必须在下面那两个 `return null` **之前**（条件调用 hooks 会破坏顺序）。
+   */
+  useEffect(() => {
+    if (track.length === 0 || currentMs <= 0) return
+    // 色块由本层渲染 ⇒ 直接量它在屏幕上的位置最省事（不用把 SVG 坐标换算回视口坐标）
+    const marker = document.querySelector('.playhead-marker')
+    const scroller = marker?.closest('.preview-pane')
+    if (!(marker instanceof HTMLElement) || !(scroller instanceof HTMLElement)) return
+    const scRect = scroller.getBoundingClientRect()
+    const target = followScrollTargetX({
+      xInView: marker.getBoundingClientRect().left - scRect.left,
+      viewW: scroller.clientWidth,
+      scrollW: scroller.scrollWidth,
+      scrollLeft: scroller.scrollLeft,
+    })
+    // `null` = 还在安全区里 ⇒ 什么都不做（这正是"顺滑"的来源：极少真的调滚动）
+    if (target === null) return
+    // 目标几乎没变就不打扰 —— 免得连续两次 `smooth` 互相打断（那才会看出"一跳一跳"）
+    if (Math.abs(target - scroller.scrollLeft) < 1) return
+    scroller.scrollTo({ left: target, behavior: 'smooth' })
+  }, [currentMs, track])
+
   if (track.length === 0 || currentMs <= 0) return null
   // adj427：按「本页 + 曲行 + 声部 + 音色」**逐组**定位——重叠区（bz 伴奏 / dsb 第二声部）
   // 与主旋律**同曲行同时发声**，故各有自己的色块、同步移动（与多声部同理）；
