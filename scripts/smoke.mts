@@ -16360,6 +16360,91 @@ runAdj363SaveTests()
           `步进右端=${(second.x + second.width).toFixed(1)} 下一音 x=${third.x.toFixed(1)} 墨迹右缘=${(second.rightX ?? 0).toFixed(1)}`)
       }
     }
+    /**
+     * ---- adj906（**用户定稿口径**）：小节序号的落位 ----
+     *
+     * 用户原话：「规则：小节序号方块应放在**小节线正下方**，**方框上沿距小节线下端 1px**；
+     * 如果序号遇到**临时多声部**等与单声部旋律**不在同一水平线**的，**标注在主声部的小节线下**」。
+     *
+     * 两件事分开守：
+     *  · 纵向**间隙**（1px）：常量 + **渲染产物**两端核对（布局与渲染必须同源，不许各算一份）；
+     *  · **挂在哪条线**上：序号 y 必须等于「它自己那根小节线」的底缘 —— `{dsb}` 会把**主声部**
+     *    （adj722 起下排的主旋律）整体下移，序号必须跟着走（否则方框停在上一行的高度）；
+     *    而"主声部"要按 `voice === 1` 认，不能按"排在最上面"（源码可以把 `Q2:` 写在 `Q1:` 前面）。
+     */
+    {
+      console.log('[167] 小节序号落位：上沿距线底 1px + 临时多声部挂主声部线下（adj906）')
+      const A906 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 |\n'
+      const CFG906: PageConfig = { ...defaultPageConfig, showBarCount: true, barCountInterval: 1 }
+      const lay906 = (src: string) => layoutScore(parseJps(src), CFG906)
+      /** 取"离 x 最近的一根**非段层**小节线"（序号正是按它定位的） */
+      const nearBar = (bars: { x: number; yBottom: number }[], x: number): { x: number; yBottom: number } =>
+        bars.reduce((best, b) => (Math.abs(b.x - x) < Math.abs(best.x - x) ? b : best), bars[0])
+
+      // ---- ① 间隙 = 1px（常量 + 渲染产物实测） ----
+      check('adj906 定位间隙 = 1px（「方框上沿距小节线下端 1px」）',
+        BAR_NUMBER_BOTTOM_GAP === 1, `${BAR_NUMBER_BOTTOM_GAP}`)
+      {
+        const L = lay906(A906)
+        const page = L.pages[0]
+        const svg = renderScoreToSvg(L)[0] ?? ''
+        const bn4 = page.barNumbers.find((b) => b.n === 4)
+        const bar4 = bn4 ? nearBar(page.barlines.filter((b) => !b.segment), bn4.x) : undefined
+        const rectY = (() => {
+          const g = /<g data-barnumber="4">([\s\S]{0,400}?)<\/g>/.exec(svg)
+          const m = g ? /<rect x="[\d.-]+" y="([\d.-]+)"/.exec(g[1]) : null
+          return m ? Number(m[1]) : Number.NaN
+        })()
+        check('adj906 渲染出的方框上沿 = 该小节线底缘 + 1px（布局与渲染同源）',
+          !!bn4 && !!bar4 && Number.isFinite(rectY) && Math.abs(rectY - (bar4.yBottom + 1)) < 0.06,
+          `框顶=${rectY} 线底=${bar4?.yBottom} 差=${(rectY - (bar4?.yBottom ?? Number.NaN)).toFixed(3)}`)
+        check('adj906 负对照：若按旧的 1.5px 算 ⇒ 上面那条为假（判据真的在量这 1px）',
+          Number.isFinite(rectY) && !!bar4 && Math.abs(rectY - (bar4.yBottom + 1.5)) > 0.2)
+      }
+
+      // ---- ② 临时多声部 `{dsb}`：序号跟着**主声部**（被下移的下排）那条小节线走 ----
+      {
+        const DSB = "V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+        const page = lay906(DSB).pages[0]
+        const bars = page.barlines.filter((b) => !b.segment)
+        const nums = page.barNumbers
+        const ys = [...new Set(nums.map((bn) => Math.round(bn.yBarBottom * 10) / 10))].sort((a, b) => a - b)
+        const bad = nums.filter((bn) => Math.abs(bn.yBarBottom - nearBar(bars, bn.x).yBottom) > 0.5)
+        check('adj906 `{dsb}` 段内序号的 y = **它那根小节线**（已下移的主声部线）底缘，不是行基线',
+          nums.length >= 3 && bad.length === 0,
+          nums.map((bn) => `#${bn.n}@${bn.yBarBottom}(线${nearBar(bars, bn.x).yBottom})`).join(' '))
+        check('adj906 该例确实有两种高度（下移量 > 1px ⇒ 上一条不是空跑）',
+          ys.length >= 2 && ys[ys.length - 1] - ys[0] > 1, `y=${ys.join('/')}`)
+        check('adj906 段内序号**低于**段外序号（跟着主声部下移 = 用户要的"挂在主声部小节线下"）',
+          nums.some((bn) => bn.yBarBottom > ys[0] + 1), `最低=${ys[ys.length - 1]} 行基线=${ys[0]}`)
+        check('adj906 负对照：把下移过的序号退回行基线高度（模拟"没跟着 {dsb} 下移"）⇒ 判据为假',
+          (() => {
+            const baseY = ys[0]
+            const patched = nums.map((bn) => (bn.yBarBottom > baseY + 0.5 ? { ...bn, yBarBottom: baseY } : bn))
+            return patched.some((bn) => Math.abs(bn.yBarBottom - nearBar(bars, bn.x).yBottom) > 0.5)
+          })())
+        /** 主声部那一排 = `parentY` 有值的音符（`shiftEnvelopeDown` 只写它们）；确认段内确有下移 */
+        const outside = page.notes.filter((n) => isDsbOutside(n)).map((n) => n.y)
+        check('adj906 段内确有"被下移的主声部"音符（`parentY` 判据），序号与它同一水平线',
+          outside.length > 0 && nums.some((bn) => Math.abs(bn.yBarBottom - (Math.max(...outside) + 4.5 * noteScaleOf(defaultPageConfig.note_size))) < 3),
+          `主声部音符 y=${[...new Set(outside)].join('/')} 序号 y=${ys.join('/')}`)
+      }
+
+      // ---- ③ "主声部"按 `voice === 1` 认：源码可以把 `Q2:` 写在 `Q1:` 前面 ----
+      {
+        const MV2 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ2: 1, 2, 3, 4 | 5, 6, 7, 1 |\nQ1: 1 2 3 4 | 5 6 7 1 |\n'
+        const page = lay906(MV2).pages[0]
+        const bn1 = page.barNumbers.find((b) => b.n === 1)
+        const main = bn1 ? nearBar(page.barlines.filter((b) => !b.segment && b.id.voice === 1), bn1.x) : undefined
+        const other = bn1 ? nearBar(page.barlines.filter((b) => !b.segment && b.id.voice === 2), bn1.x) : undefined
+        check('adj906 主声部按 `voice===1` 认（`Q2:` 写在前面时，序号仍挂 Q1 那条线）',
+          !!bn1 && !!main && Math.abs(bn1.yBarBottom - main.yBottom) < 0.5,
+          `序号y=${bn1?.yBarBottom} Q1线底=${main?.yBottom} Q2线底=${other?.yBottom}`)
+        check('adj906 负对照：该例两排线确实不在同一水平线（差 > 1px ⇒ 上一条不是空跑）',
+          !!main && !!other && Math.abs(other.yBottom - main.yBottom) > 1,
+          `Q1=${main?.yBottom} Q2=${other?.yBottom}`)
+      }
+    }
     console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
     process.exit(failed === 0 ? 0 : 1)
   })
@@ -16429,9 +16514,9 @@ function runAdj625Tests() {
   check('adj625 多声部块首序号在**大括号与音符之间**',
     !!vb && !!bn1 && bn1.x > vb.x && bn1.x < firstNoteX,
     `brace=${vb?.x} 序号=${bn1?.x} 音符=${firstNoteX}`)
-  check('adj625 多声部块首序号高度 = **最上面声部**的小节线底缘',
+  check('adj625 多声部块首序号高度 = **主声部**的小节线底缘（adj906 起按 `voice===1` 认主声部）',
     !!bn1 && Math.abs(bn1.yBarBottom - topBar.yBottom) < 0.6,
-    `序号y=${bn1?.yBarBottom} 顶部线底=${topBar.yBottom}`)
+    `序号y=${bn1?.yBarBottom} 主声部线底=${topBar.yBottom}`)
   // 空隙原本固定 12px，放不下方框（≈10px）⇒ 打开该选项且块首带序号时自动撑开，方框不压括号双线
   check('adj625 多声部块首序号不压大括号（方框左缘 > 括号右细线）+ 不压音符',
     !!vb && !!bn1 &&
