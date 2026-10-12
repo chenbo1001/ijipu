@@ -35,13 +35,10 @@ const DIST = path.join(ROOT, 'dist')
 const SITE_ASSETS = path.join(ROOT, 'public', 'site') // 提交进仓库的素材
 const DIST_SHOTS = path.join(ROOT, 'dist-site-shots') // 仅供人工检查（不入库）
 /**
- * adj889（用户口径"ijipu 保持私有，走方案 A"）：**源码仓库 `snailhome/ijipu` 是私有的** ⇒
- * 匿名访客打开它（含 `releases/latest`、含 release 资产的直链）一律 **404**。
- * 所以对外一律用公开的**发布仓库** `ijipu-releases`（只管 Release 与下载，不放源码）。
- * 私有地址仍然留在这里 —— 用来在断言里**扫出它**（页面上一个都不许出现）。
+ * adj890（用户决定）：仓库**整体开源** ⇒ 对外链接全部指主仓库（不再用单独的发布仓库）。
+ * `adj889` 那套"源码私有 ⇒ 指向 `ijipu-releases`"已撤销。
  */
-const SITE_PRIVATE_REPO = 'https://github.com/snailhome/ijipu'
-const SITE_RELEASES = 'https://github.com/snailhome/ijipu-releases'
+const SITE_REPO = 'https://github.com/snailhome/ijipu'
 const SITE_PLUGIN = 'https://github.com/snailhome/obsidian-ijipu'
 
 const ARGS = new Set(process.argv.slice(2))
@@ -825,29 +822,20 @@ async function main() {
       check('首页所有图片都真的加载出来了（无破图）', brokenImgs.length === 0, brokenImgs.join(', '))
       // ⚠ 首页**没有** `feedbackUrl`（那是文档页页脚的键）⇒ 这里只查首页真正用到的三个
       check('首页外部链接都由 brand/tokens.ts 填好（不是 `#`）',
-        home.links.releasesRepoUrl === SITE_RELEASES &&
-          home.links.desktopDownloadUrl === `${SITE_RELEASES}/releases/latest` &&
+        home.links.repoUrl === SITE_REPO &&
+          home.links.desktopDownloadUrl === `${SITE_REPO}/releases/latest` &&
           home.links.obsidianRepoUrl === SITE_PLUGIN,
         JSON.stringify(home.links))
       /**
-       * adj889：源码仓库私有 ⇒ 页面上**一个私有地址都不许有**（否则访客点开就是 404）。
-       * 这条机器守住"手滑写回私库"，比等有人反馈"链接点不开"早得多。
+       * 负对照（**保留 adj889 的修正**）：原来那条是 `'#'.startsWith(SITE_REPO) === false`，
+       * 而 `'#'` 不以任何地址开头 ⇒ **恒为真、证不了任何事**。换成真正有风险的那件事：
+       * 下载地址必须是"主仓库 + `/releases/latest`"这个确定形态，且**不能被插件仓库的地址匹配上**
+       * —— 判据写错前缀（少个 `/` 之类）在这里就会露出来。
        */
-      const privateHits = await evalJs(
-        c,
-        `[...document.querySelectorAll('a[href]')].map((a) => a.href).filter((h) => h === ${JSON.stringify(SITE_PRIVATE_REPO)} || h.startsWith(${JSON.stringify(`${SITE_PRIVATE_REPO}/`)}))`,
-      )
-      check('首页没有任何链接指向私有的源码仓库（否则访客一律 404）',
-        privateHits.length === 0, privateHits.slice(0, 4).join(' | '))
-      /**
-       * 负对照（**换掉了原来那条假的**）：原判据是 `'#'.startsWith(SITE_REPO) === false`，
-       * 而 `'#'` 不以任何地址开头 ⇒ **恒为真、证不了任何事**。
-       * 这里换成真正有风险的那件事：`ijipu-releases` **以 `ijipu` 开头** ⇒
-       * 必须确认"私有地址 + `/`"这个判据**不会**把它误判成私有仓库（否则上面那条会假红）。
-       */
-      check('首页链接负对照：私有仓库判据能区分 `ijipu` 与 `ijipu-releases`（判据真的在量东西）',
-        SITE_PRIVATE_REPO !== SITE_RELEASES &&
-          !`${SITE_RELEASES}/releases/latest`.startsWith(`${SITE_PRIVATE_REPO}/`))
+      check('首页链接负对照：`repoUrl` 与 `desktopDownloadUrl` 的判据能区分开（判据真的在量东西）',
+        `${SITE_REPO}/releases/latest` !== SITE_REPO &&
+          `${SITE_REPO}/releases/latest`.startsWith(`${SITE_REPO}/`) &&
+          !`${SITE_PLUGIN}/releases/latest`.startsWith(`${SITE_REPO}/`))
       check('首页赞赏弹层用微信赞赏码 `/icons/good.png`', home.hasDialog && home.donateImg === '/icons/good.png', home.donateImg)
       check('首页 FAQ 至少 4 条', home.faq >= 4, String(home.faq))
       check('首页有 Obsidian 插件专区（功能清单 ≥ 6 条）', home.obPoints >= 6, String(home.obPoints))
@@ -1195,19 +1183,13 @@ async function main() {
           docClicked && docSvg > 0, `svg=${docSvg}`)
 
         /**
-         * adj889：文档页页脚的「发现问题 / 提建议」原指私有源码仓库 ⇒ 访客点开是 404、也提不了 Issue。
-         * 现在改指**公开发布仓库**的 Issues ⇒ 这里同时钉住"填对了"与"没有残留私有地址"。
+         * adj890：文档页页脚的「发现问题 / 提建议」指向源码仓库 —— 仓库已开源 ⇒ 访客点得开、也提得了 Issue。
          */
         const docFeedback = await evalJs(
           c,
-          `(() => { const a = document.querySelector('.doc-foot a[data-l="feedbackUrl"]'); return a ? a.href : '' })()`,
+          `(() => { const a = document.querySelector('.doc-foot a[data-l="repoUrl"]'); return a ? a.href : '' })()`,
         )
-        check(`${label}：页脚反馈链接指向公开发布仓库的 Issues`, docFeedback === `${SITE_RELEASES}/issues`, docFeedback)
-        const docPrivate = await evalJs(
-          c,
-          `[...document.querySelectorAll('a[href]')].map((a) => a.href).filter((h) => h === ${JSON.stringify(SITE_PRIVATE_REPO)} || h.startsWith(${JSON.stringify(`${SITE_PRIVATE_REPO}/`)}))`,
-        )
-        check(`${label}：页面上没有指向私有源码仓库的链接`, docPrivate.length === 0, docPrivate.slice(0, 3).join(' | '))
+        check(`${label}：页脚反馈链接指向公开的源码仓库`, docFeedback === SITE_REPO, docFeedback)
 
         const docErrs = collectErrors(mark)
         check(`${label}：无控制台错误 / 无本站 4xx`, docErrs.length === 0, docErrs.slice(0, 4).join(' | '))
