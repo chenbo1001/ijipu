@@ -20696,79 +20696,143 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       /**
        * adj905o（用户：「上面说到的几个原则应该记录下来，**做的判定的冒烟的依据**」）：
        * 原则「**时值格 ⊇ 墨迹**」——`格左缘 x ≤ 墨迹左缘 x`、`格右缘 x ≥ 墨迹右缘 x`。
+       * 口径来源：`docs/ALIGNMENT-PRINCIPLES.md` §二 / `AGENTS.md` 五·11。
+       * 这是"色块左缘 = 时值格左缘"能成立的前提：若墨迹跑到格外，说明"格"和"字形"用的不是同一套几何。
        *
-       * 口径来源：`docs/ALIGNMENT-PRINCIPLES.md` §二。这是"色块左缘 = 时值格左缘"能成立的前提：
-       * 若墨迹跑到格外，说明"格"和"字形"用的不是同一套几何。
+       * ## adj906b：**从"只打印"改成真断言**，同时修掉探针自己的口径错
+       *
+       * 它以前报 **16 处**不合规、被当成"已知真缺陷"挂在那里。逐条量过之后：**16 处全是探针算错**。
+       *  · （15 处）**格右缘不能按"名义时值宽"算**：`末段.x + perBeat×beats` 漏掉了格与格之间的 ≈4px
+       *    间隙（`NOTE_GAP`）⇒ 名义宽比真实边界短 2~3px，看着就像越格。按 五·11 的口径应当取
+       *    **`min(同一行同一声部的下一个时值格左缘, 小节线左缘)`**（= 真实网格的下一条边界），
+       *    实测那 15 处的墨迹右缘离真实边界还有 1.6~6.7px 富余 ✓；
+       *  · （1 处）末段是**附点**时，墨迹右缘**不是 `rightX`**（那是**步进/占位**右端，含音符间距）：
+       *    附点段的 `x` 存的是**附点圆心**（`layout/index.ts` 的 `x: first.x + noteBodyW + dotGap +
+       *    dotBodyW/2`）、宽是 `dotBodyW` ⇒ 真实墨迹右缘 = `末段.x + DOT_R×s`。拿 `rightX` 当墨迹会
+       *    高估 `dotBodyW/2`（≈1.5px）⇒ 假红；
+       *  · 旧探针"末段是附点就跳过右缘"的例外判的是 `el === 'dot'`，而**时值优先路径根本不写 `el`**
+       *    （只有空间优先路径带 `el`）⇒ 那个例外一次都没触发。现在按"格宽 ≈ `dotBodyW` 且不足 1 拍"认，
+       *    两条路径都能认出附点。
+       *
+       * ⚠ 这一条判据上我**连续四次**犯同一类错：**把"占位/步进量"当成"墨迹"**
+       * （拿 `rightX` 当墨迹右缘误报 164 处；把 3.2px 归因为取整；上一条 15 处；附点那 1 处）。
+       * 以后写同类判据前先问一句：**我手里这个量是"墨迹"，还是"步进/占位"？**
        */
-      const cellIssues: string[] = []
-      for (const sample of BRAND_SAMPLES) {
-        const r = parseJps(sample.src)
-        const lay = layoutScore(r, DUR_CFG)
-        for (const n of lay.pages.flatMap((p) => p.notes)) {
-          const sg = n.segments ?? []
-          if (sg.length === 0) continue
-          const cellL = sg[0].x
-          const lastSg = sg[sg.length - 1]
-          const cellR = lastSg.x + lastSg.perBeat * lastSg.beats
-          const inkL = n.x
-          /**
-           * ⚠ **墨迹右缘**按 `AGENTS.md` 五·9 的口径，**不是 `rightX`**：
-           * `rightX` 是**步进/占位右端**（含音符间距），拿它当墨迹会把合规布局判红
-           * —— 我第一版就是这么写的，误报 164 处（实测格与墨迹"同宽、只差 6.4 平移"）。
-           * 正确口径：**无附点/增时线** ⇒ `x + min(占宽, digitSlotW)`；**有**才延伸到块右端。
-           */
-          const hasExt =
-            sg.some((s) => s.el === 'aug' || s.el === 'dot') || (sg[0].el === undefined && sg.length > 1)
-          const inkR = hasExt ? (n.rightX ?? n.x + n.width) : n.x + Math.min(n.width, digitSlotW)
-          /**
-           * ⚠ **这里故意只打印、不断言**（保持 smoke 绿），但**它是真缺陷、不是取整**：
-           *
-           * 实测「茉莉花（完整）」bar2 有 **2 处墨迹右缘越出时值格 ~3.2px**
-           * （`格[366.5,423.5]` vs `墨迹[373.8,426.7]`）。
-           * 我一度把它归因为"`perBeat` 一位小数取整"——**这个解释是错的**：
-           * 取整误差界是 `0.05 × beats ≤ 0.2px`，解释不了 3.2px。
-           * ⇒ 属**真实的"墨迹越格"**，与原则二冲突，**待单独修**（记在
-           * `docs/ALIGNMENT-PRINCIPLES.md` 的缺口表）。
-           *
-           * 待修好后把下面这段换成 `check`（阈值 0.6，左右都严格）。
-           */
-          /**
-           * ⚠ **末段是"附点"时跳过右缘检查 —— 这是口径问题，不是放水**：
-           * 附点元素的 `x = dotCX`、宽 = `dotBodyW`，而附点是按"三段留空"居中的
-           * （`layout/index.ts:2377` 的 `g` 两侧各一份）⇒ `dotCX + dotBodyW` **本来就比 `rightX` 少**
-           * `0.5 × dotBodyW + g`（实测 ≈3px）。
-           * 也就是说：**附点那一段的 `x`/宽是"它的墨迹盒"，不是"时值格"** ——
-           * 拿 `rightX`（步进右端）去比必然短一截。
-           *
-           * 而这正是我在这条断言上**第三次**犯"把占位/步进量当墨迹"的错
-           * （前两次：拿 `rightX` 当墨迹右缘误报 164 处；把 3.2px 归因为取整）。
-           * 左缘检查对所有情形都成立（附点不影响左缘），故**只跳右缘**。
-           */
-          const lastIsDot = lastSg.el === 'dot'
-          if (cellL > inkL + 0.6 || (!lastIsDot && cellR < inkR - 0.6)) {
-            if (cellIssues.length < 3) {
-              console.log(
-                `      [诊断] 段=${sg.map((s) => `${s.el ?? 'noel'}(x=${s.x.toFixed(1)},pb=${s.perBeat.toFixed(2)},b=${s.beats})`).join(' ')} | n.x=${n.x.toFixed(1)} w=${n.width.toFixed(1)} rightX=${(n.rightX ?? -1).toFixed(1)} dur=${n.duration}`,
-              )
+      /** 实测**最小余量**（`真实右界 − 墨迹右缘`）——负对照按它来缩，才既精确又不会"缩了也不越界" */
+      let minMargin = Number.POSITIVE_INFINITY
+      /** **量不出来**的音符数（余量算出 `NaN`）——必须为 0，否则比较恒为假 ⇒ 会静默漏检 ✗ */
+      const unmeasured: string[] = []
+      /**
+       * **没有下一条边界**的音符数：段层末小节常常**没有收尾小节线**（`adj905p` 那一条的另一面）
+       * ⇒ 该层压根没有"格右缘"可言 ⇒ 无从越界，**不算缺陷**（单独计数，不混进 `unmeasured`）。
+       */
+      let unbounded = 0
+      const cellViolationsOf = (shrink: number): string[] => {
+        const out: string[] = []
+        for (const [tag, cfg] of [
+          ['空间优先', { ...defaultPageConfig, noteSpaceLayout: 'space' as const }],
+          ['时值优先', DUR_CFG],
+        ] as const) {
+          for (const sample of BRAND_SAMPLES) {
+            const lay = layoutScore(parseJps(sample.src), cfg)
+            const ns = cfg.note_size
+            for (const p of lay.pages) {
+              const all = p.notes
+              for (const n of all) {
+                const sg = n.segments ?? []
+                if (sg.length === 0) continue
+                const cellL = sg[0].x
+                const lastSg = sg[sg.length - 1]
+                const cellW = lastSg.perBeat * lastSg.beats
+                /** 末段是不是**附点**（两条路径都能认：空间优先看 `el`，时值优先按格宽认） */
+                const lastIsDot =
+                  lastSg.el === 'dot' || (lastSg.beats < 1 && Math.abs(cellW - dotBodyW(ns)) < 0.6)
+                const lastIsAug = lastSg.el === 'aug' || sg.some((s) => s.el === 'aug')
+                /**
+                 * **墨迹**右缘（不是步进/占位右端，也不是"格右缘"）：
+                 *  · 附点：`末段.x + DOT_R×s`（末段 `x` 存的是**附点圆心**）；
+                 *  · 增时线：`末段.x + inCellOff + digitSlotW` —— 与渲染端**同源**：
+                 *    `render/index.ts:955-967` 的 `lx = seg.x + inCellOff`、字符 `text-anchor=middle`
+                 *    居中于 `digitW` 占位内 ⇒ 每条 `-` 的墨迹都在 `[lx, lx + digitW]` 里。
+                 *    （拿"格右缘"当增时线墨迹会高估 —— 段层的增时线格可以宽到 40px，
+                 *     而 `-` 只占一个数字槽；实测「送别」段层 bar0 因此假红 12px ✗）
+                 *  · 其余：`x + min(占宽, digitSlotW)`（数字槽墨迹）。
+                 */
+                const inCellOff = n.x - cellL
+                /**
+                 * ⚠ `width` 在个别音符上**缺失**（实测「小星星」空间优先路径 ⇒ `inkR = NaN`，
+                 * 而 `NaN` 参与比较**恒为假** ⇒ 会静默漏检 ✗）。缺了就退回一个数字槽（保守取值），
+                 * 并把这类"取不到宽"的情况计进 `unmeasured` 一起断言 —— 不许悄悄放过。
+                 */
+                const widthOrSlot = Number.isFinite(n.width) ? n.width : digitSlotW(ns)
+                const inkR = lastIsDot
+                  ? lastSg.x + DOT_R * noteScaleOf(ns)
+                  : lastIsAug
+                    ? lastSg.x + inCellOff + digitSlotW(ns)
+                    : n.x + Math.min(widthOrSlot, digitSlotW(ns))
+                /**
+                 * 真实下一条边界：**同一行、同一声部、同一层**——
+                 *  · 跨声部取会取到别行的格（我第一版就错在这）；
+                 *  · 跨层取会拿**主旋律的小节线**去约束**段层**的音（实测「送别」段层 bar0 因此假红 14px：
+                 *    段层有自己的格与小节线，两层的小节线本来就不在同一个 x 上）。
+                 */
+                const sameLayer = (m: { segment?: { type?: string } }) =>
+                  n.segment ? m.segment?.type === n.segment.type : !m.segment
+                const sameRow = (m: typeof n) =>
+                  m.id.voice === n.id.voice && Math.abs(m.y - n.y) < 1 && sameLayer(m)
+                const nextCellX =
+                  all
+                    .filter((m) => m !== n && sameRow(m) && (m.segments ?? []).length > 0)
+                    .map((m) => (m.segments ?? [])[0].x)
+                    .filter((x) => x > lastSg.x + 0.6)
+                    .sort((a, b) => a - b)[0] ?? Number.POSITIVE_INFINITY
+                const barLeft =
+                  p.barlines
+                    .filter(
+                      (b) =>
+                        b.id.voice === n.id.voice &&
+                        sameLayer(b) &&
+                        b.x - b.width / 2 > lastSg.x + 0.6,
+                    )
+                    .map((b) => b.x - b.width / 2)
+                    .sort((a, b) => a - b)[0] ?? Number.POSITIVE_INFINITY
+                /** `shrink` 只用于负对照：把"真实右界"缩小若干 px，模拟"墨迹真的越格" */
+                const realR = Math.min(nextCellX, barLeft) - shrink
+                if (shrink === 0) {
+                  if (Number.isFinite(realR) && Number.isFinite(inkR)) {
+                    minMargin = Math.min(minMargin, realR - inkR)
+                  } else if (!Number.isFinite(realR)) {
+                    unbounded++
+                  } else {
+                    unmeasured.push(
+                      `「${tag}·${sample.label}」${n.segment ? 'seg' : 'mel'}(bar${n.barIndex}) 墨右=${inkR} 右界=${realR}`,
+                    )
+                  }
+                }
+                if (cellL > n.x + 0.6 || inkR > realR + 0.6) {
+                  out.push(
+                    `「${tag}·${sample.label}」${n.segment ? 'seg' : 'mel'}(bar${n.barIndex}) ` +
+                      `格左=${cellL.toFixed(1)} 墨左=${n.x.toFixed(1)} 墨右=${inkR.toFixed(1)} ` +
+                      `真实右界=${Number.isFinite(realR) ? realR.toFixed(1) : '∞'}` +
+                      `（下一格=${Number.isFinite(nextCellX) ? nextCellX.toFixed(1) : '∞'} 线左=${Number.isFinite(barLeft) ? barLeft.toFixed(1) : '∞'}）` +
+                      `${lastIsDot ? '（附点音）' : lastIsAug ? '（带增时线）' : ''} ` +
+                      `w=${n.width.toFixed(1)} rightX=${(n.rightX ?? -1).toFixed(1)} dur=${n.duration} ` +
+                      `段=${sg.map((s) => `${s.el ?? 'noel'}(${s.x.toFixed(1)}/${s.perBeat.toFixed(2)}/${s.beats})`).join(' ')}`,
+                  )
+                }
+              }
             }
-            cellIssues.push(
-              `「${sample.label}」${n.segment ? 'seg' : 'mel'}(bar${n.barIndex}) 格[${cellL.toFixed(1)},${cellR.toFixed(1)}] vs 墨迹[${inkL.toFixed(1)},${inkR.toFixed(1)}]`,
-            )
           }
         }
+        return out
       }
-      console.log(`    【全部示例】时值格 ⊇ 墨迹检查：不合规 ${cellIssues.length} 处（**待修的真缺陷**，暂不断言）`)
-      for (const p of cellIssues.slice(0, 6)) console.log(`      · ${p}`)
-      /**
-       * adj905o 暂**不**用 `check`：它现在报的是**真实缺陷**（见上方注释：茉莉花 bar2 越格 ~3.2px），
-       * 直接用断言会让 `smoke` 长期红灯。**修好后把它换成 `check`（阈值 0.6，左右都严格）**——
-       * 这一步不许忘，已登记在 `docs/ALIGNMENT-PRINCIPLES.md` 的缺口表里。
-       */
-      if (cellIssues.length > 0) {
-        console.log(
-          `    ⚠ 时值格 ⊇ 墨迹 不合规 ${cellIssues.length} 处 —— 已知真缺陷，待修后转成 check`,
-        )
-      }
+      const cellIssues = cellViolationsOf(0)
+      check('adj905o 全部示例 × 两条布局路径：**时值格 ⊇ 墨迹**（格左缘 ≤ 墨迹左缘、真实格右界 ≥ 墨迹右缘）',
+        cellIssues.length === 0 && unmeasured.length === 0,
+        [...cellIssues, ...unmeasured].slice(0, 6).join(' ｜ '))
+      check('adj905o 负对照：把"真实右界"按**实测最小余量再多缩 2px**（模拟墨迹真的越格）⇒ 上面那条立刻为假',
+        Number.isFinite(minMargin) && cellViolationsOf(Math.ceil(minMargin) + 2).length > 0,
+        `实测最小余量=${Number.isFinite(minMargin) ? minMargin.toFixed(2) : '∞'}px`)
 
       /**
        * adj905p（用户：「**段层末小节无小节线的末尾与主旋律的小节一对齐**，主旋律一定是要有的」）：
