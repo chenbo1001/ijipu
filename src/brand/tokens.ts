@@ -53,6 +53,15 @@ export const brand = {
    */
   repoUrl: 'https://github.com/snailhome/ijipu',
   desktopDownloadUrl: 'https://github.com/snailhome/ijipu/releases/latest',
+  /**
+   * adj896（用户反馈「官网首页少挂了个更新记录」）：**全部发布**页面。
+   *
+   * 与 `desktopDownloadUrl` 的区别：那个是 `releases/latest`（直接拿最新安装包），
+   * 这个是 `releases`（看**历次版本 + 每版改了什么**）。
+   * 首页顶栏与页脚各挂一个 —— `adj890` 把指向主仓库的链接统一成「GitHub」那一次，
+   * 顺手把原来那个「更新记录」入口弄丢了，这里补回来。
+   */
+  releasesUrl: 'https://github.com/snailhome/ijipu/releases',
   /** Obsidian 社区插件市场页（插件 id 见 obsidian-ijipu/manifest.json 的 `id`） */
   obsidianMarketUrl: 'https://obsidian.md/plugins?id=ijipu',
 } as const

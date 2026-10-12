@@ -15,6 +15,8 @@ const LINKS: Record<string, string> = {
   siteUrl: brand.siteUrl,
   repoUrl: brand.repoUrl,
   desktopDownloadUrl: brand.desktopDownloadUrl,
+  // adj896：全部发布页（「更新记录」入口；与 desktopDownloadUrl 的 latest 不同）
+  releasesUrl: brand.releasesUrl,
   obsidianRepoUrl: brand.obsidianRepoUrl,
   obsidianMarketUrl: brand.obsidianMarketUrl,
 }

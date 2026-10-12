@@ -1,3 +1,66 @@
+## [0.55.1] — 2026-10-12（**修桌面版「点官网首页没反应」**（opener 权限缺 URL scope）＋ 内置音源移到 `soundfonts/` 与许可同目录 ＋ 播放跟随滚动改「安全区」；PATCH）
+
+> 三组修复都由用户实测 / 要求驱动。**前两组只影响桌面壳**（权限与打包布局），网页版不受影响。
+
+### 修复：桌面版点「官网首页」/ 菜单「爱记谱官网」没反应（adj894）
+
+- **根因**：Tauri 的权限是**两层**。`capabilities/default.json` 原来只有 `opener:allow-open-url`，
+  而它的描述原文是 *"Enables the open_url command **without any pre-configured scope**"* ——
+  只**允许调用命令**；该命令**还要**校验 URL 是否落在 **scope** 内，而 URL 的默认 scope
+  由**另一个**权限 `allow-default-urls` 提供。
+  ⇒ `https://ijipu.pages.dev` 不在 scope 里 ⇒ 命令被拒 ⇒ `openUrl.ts` 里那个**空 catch** 把它吞了
+  ⇒ 落到 `window.open` ⇒ WebView2 默认不建新窗口、返回 `null` ⇒ **用户看到的就是"点了没反应"**。
+- **改法**：能力清单改用 `opener:default`（= `allow-open-url` + `allow-reveal-item-in-dir` +
+  `allow-default-urls`）；并把 `openUrl.ts` 的**空 catch 换成 `console.error`**（打出 URL 与错误对象）
+  —— 那条静默正是这个 bug 能藏一整个版本的原因。
+
+### 变更：内置音源 `generaluser_gs.sf2` 移到 `soundfonts/`，与它的许可同目录（adj894，用户建议）
+
+- `tauri.conf.json` 的 `bundle.resources`：目标改为 `soundfonts/generaluser_gs.sf2`
+  （原来落安装目录根，而许可在 `soundfonts/` —— 确实不一致）；
+- Rust 侧 `builtin_soundfont_candidates` **两个候选都保留** ⇒
+  ① 旧便携版布局照常可用；② **用户仍可把自备音色放安装目录根来覆盖内置那份**（根目录优先）；
+- `check-installer.mjs` 同步：判定接受 `soundfonts\` 前缀，并**新增一条**"许可必须随包"
+  （分发第三方作品的义务，机器守住而不是靠自觉）。
+
+### 变更：播放跟随滚动改用「安全区」（adj895，用户要求）
+
+- 用户口径：「试听时如果页面宽于预览视界，色块总是走到视界后再调整页面位置，这是不对的，
+  要留有余量，在接近右视界时就应调整……另外调整时页面的移动要顺滑些，不要一跳一跳。」
+- **根因**：跟随滚动原来**借用单击音符那条居中逻辑**，而那条被 `adj723y` 加过一道保护
+  （"音符已完整可见就不滚"，为修双击播放失效）⇒ 必然**贴到边上才触发**；
+  且触发时是 `scrollLeft = target` **直接赋值** ⇒ 瞬移。
+- **改法**：把播放跟随**独立出来**（放在 `PlayheadLayer`，不影响 `adj723y`），
+  用纯函数 `preview/followScroll.ts` 的「安全区」模型：视口 `[25%, 75%]` 带内**不滚**
+  （低频调用 = 顺滑的前提）、越出右界**提前**拉回带内左端（右前方留出 3/4 视口的余量）、
+  越左对称、目标钳在 `scrollWidth − clientWidth`；滚动用 `behavior: 'smooth'`
+  并"目标几乎没变就不打扰"（避免连续 smooth 互相打断）。
+- 纵向**未动**（用户明确"纵向不加余量"）。
+
+### 修复：首页示例的两处口径（adj892 / adj893，用户反馈）
+
+- **adj892**：茉莉花示例**保留 `align_min_bars: 3`** —— `adj883` 把整行 `# jps-config` 删掉是过头了：
+  该字段直接决定"每行会不会两端对齐"，删掉后退回默认 **4**，那些 3 小节的行便不再撑满。
+  改为**白名单保留**（`KEEP_CONFIG_KEYS = ['align_min_bars']`），其余仍剥掉。
+- **adj893**：去掉示例里的描述头 `S:`（两份原文都写着"本乐谱使用「爱记谱」编制"，示例里是自述冗余）。
+
+### 补充：首页加回「更新记录」入口（adj896，用户反馈）
+
+- 用户：「官网首页少挂了个更新记录」。`adj890` 把指向主仓库的链接统一成「GitHub」时，
+  顺手把 `adj889` 那个「更新记录」入口弄丢了。
+- 本次在**顶栏与页脚**各加一个，指向 `…/releases`（**全部发布**：历次版本 + 每版改了什么），
+  与 `desktopDownloadUrl` 的 `releases/latest`（直接拿最新安装包）区分开 ——
+  两者都要有：一个用来"看更新"，一个用来"直接下载"。
+
+### 验证
+
+- `npm run smoke`：**ALL SMOKE TESTS PASSED** ✅（新增 `adj895` 6 条；`adj416` 组按新布局同步）
+- `npm run lint`：0 error（warning == 基线）；`npx tsc -b` exit 0；`npm run build` ✔
+- `npm run verify:site`：74 条全绿
+- 桌面：`npx tauri build` + `npm run check:installer` **全部通过**（含新增的"许可随包"那条）
+- **权限修复的机器证据**：打包后 `target/release/build/…/out/capabilities.json`
+  同时含 `allow-open-url` 与 `allow-default-urls`
+
 ## [0.55.0] — 2026-10-12（**官网分层**：`/` 介绍首页 + `/app/` 应用 + `/manual/` `/syntax/` 文档页；MINOR）
 
 > 主题：`ijipu.pages.dev` 的根路径从"直接是应用"改成**介绍性首页**，应用与两份文档各占一个子路径。

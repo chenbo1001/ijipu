@@ -7832,6 +7832,66 @@
   但如果只盯"最后生成了 exe + `check:installer` 通过"，就会把它漏掉 ——
   **"产物成功"不等于"没有可疑之处"**。看到不认识的链接器 / 资源警告，先记下来再判断。
 
+### E-2026-403 桌面版点外部链接「没反应」—— opener 权限只给了一半（adj894）
+
+- **现象**：用户实测桌面版：点状态栏「官网首页」与菜单「爱记谱官网」都**没反应**（网页版正常）。
+  这正是 `adj877/879` 刚统一过的那两个入口。
+- **根因**：Tauri 的权限是**两层**，我们只配了第一层。
+  `capabilities/default.json` 里写的是 `opener:allow-open-url`，而它的权限描述原文是
+  *"Enables the open_url command **without any pre-configured scope**"* ——
+  它只**允许调用 `open_url` 命令**；该命令**还要**校验目标 URL 是否落在 **scope** 里，
+  而 URL 的默认 scope 由**另一个**权限 `allow-default-urls` 提供。
+  ⇒ `https://ijipu.pages.dev` 不在 scope ⇒ 命令被拒。
+  更糟的是 `preview/openUrl.ts` 当时是**空 catch**：错误被吞掉、静默落到 `window.open`，
+  而 WebView2 默认不建新窗口 ⇒ 返回 `null` ⇒ 用户看到"没反应"，**而我们一条日志都没有**。
+- **定位过程（可复用）**：本地 `target/release/build/<pkg>-<hash>/out/acl-manifests.json`
+  是 Tauri 生成的**权限清单**，直接读它就能看到每个权限到底给不给 scope：
+  `opener:default = ["allow-open-url", "allow-reveal-item-in-dir", "allow-default-urls"]`。
+- **解决**：能力清单改用 **`opener:default`**；`openUrl.ts` 的空 catch 改成 `console.error`
+  （打出 URL 与错误对象），并在注释里写明"两层权限"这件事。
+  **机器证据**：重新打包后 `target/release/build/…/out/capabilities.json`
+  同时含 `allow-open-url` 与 `allow-default-urls`。
+- **预防**：① **用官方聚合权限（`<plugin>:default`）而不是单个 `allow-*`** ——
+  单个命令权限常常**不含 scope**，装了等于半通；② **外部调用的失败一律别静默**，
+  尤其那些"兜底路径其实必然失败"的地方（这里 `window.open` 就是必失败的兜底）。
+
+### E-2026-404 改了打包布局，只跑一半闸门 ⇒ 红了整整一轮才发现（adj894）
+
+- **现象**：把内置音源从"安装目录根"移到 `soundfonts/` 后，我改了 `scripts/check-installer.mjs`
+  并跑了 `npm run check:installer`（通过），但**没跑 `npm run smoke`**。
+  下一轮跑 smoke 时冒出 3 条红：smoke 里还有一组 `adj416` 断言，
+  它按"映射到**安装目录根**"查找 `bundle.resources` 的条目、并按字面量匹配
+  `check-installer.mjs` 的源码片段 ⇒ 全都不再成立。
+- **根因**：**同一条约束被两个闸门各自表达了一遍**，而我只更新了其中一个。
+  这不算"重复"的坏事（两层防护有价值），但**改口径时必须两个都想到**。
+- **解决**：`entry` 改为按目标路径**结尾**匹配（接受可选 `soundfonts/` 前缀）、段注释同步；
+  并顺势**新增**一条"许可必须随包"的断言（分发第三方作品的义务）。
+- **预防**：**"改了打包 / 布局 / 路径"这类跨面改动，闸门要成套跑**：
+  `npm run smoke`（源码级不变量）**＋** `npm run check:installer`（产物级清单）**＋**
+  必要时 `npx tauri build`。只跑其中一个 ＝ 只验了一半。
+
+### E-2026-405 播放跟随滚动"贴到边上才动、而且一跳一跳"（adj895）
+
+- **现象**：用户实测：「试听时如果页面宽于预览视界，试听色块总是走到视界后再调整页面位置，
+  这是不对的，要留有余量……另外调整时页面的移动要顺滑些，不要一跳一跳。」
+- **根因**：两个症状**同一个来源** —— 跟随滚动**借用了单击音符那条居中逻辑**
+  （`PreviewPane` 里同一个 effect），而那条逻辑被 `adj723y` 加过一道保护：
+  **"音符已完整可见就不滚"**（为修"双击播放失效"：单击会把音符挪走 ⇒ 第二次点击落空
+  ⇒ 浏览器不派发 `dblclick`）。于是
+  ① 判"完全可见" ⇒ 必然**贴到视界边上**才触发（滞后）；
+  ② 触发时是 `scroller.scrollLeft = target` **直接赋值** ⇒ 瞬移（跳）。
+- **解决**：**把播放跟随独立出来**（放在本来就每帧渲染的 `PlayheadLayer`，
+  而不是"订阅 `currentMs` 会重建整层 SVG"的主组件），用纯函数
+  `preview/followScroll.ts` 的「**安全区**」模型：视口 `[25%, 75%]` 带内**不滚**、
+  越出右界**提前**拉回带内左端（右前方留出 3/4 视口的余量）、越左对称；
+  滚动用 `scrollTo({ behavior: 'smooth' })`，且"目标几乎没变就不打扰"。
+  **刻意不动**原来那条 effect ⇒ `adj723y` 的双击修复不受影响。
+- **预防**：① **两条诉求相反的交互不要共用一段滚动逻辑**
+  （"用户点了要别乱动" vs "播放要提前跟着走"），合在一起改必然伤到一边、只能取折中；
+  ② **"顺滑"往往不是加动画，而是减少调用次数** —— 安全区模型让绝大多数帧都是"什么都不做"，
+  浏览器的平滑滚动才不会被逐帧打断。
+
+| v0.55.1 | 2026-10-12 | 追加 E-2026-403（**桌面版点链接"没反应"** —— Tauri 权限两层，`opener:allow-open-url` **不含 scope** 还要 `allow-default-urls`；前端空 catch 又把错误吞了 ⇒ 改用 `opener:default` + 失败不再静默；adj894）、E-2026-404（改了打包布局**只跑了 `check:installer`、漏跑 `smoke`** ⇒ `adj416` 那组断言红了整整一轮；跨面改动闸门要成套跑；adj894）、E-2026-405（播放跟随滚动"贴边才动 + 瞬移"—— 与单击居中**共用**了一段逻辑；独立出来 + 「安全区」模型；adj895） |
 | v0.55.0+ | 2026-10-12 | 追加 E-2026-399（**匿名查 GitHub API 命中 CDN 缓存** ⇒ 据 404 判定"仓库私有 + 0 个 Release"，整个方案都建立在错结论上；真相是仓库早已公开、有 30 个带安装包的 Release —— `E-2026-130` 复发，`VERSIONING.md` 早就写了要带鉴权查；adj889）、E-2026-400（Chrome 启动期当前页是 `about:blank` ⇒ 在那里读 localStorage 抛 `SecurityError`；写 localStorage 前必须先 `Page.navigate`；adj882）、E-2026-401（改名连带"读源码正则"的三条断言 ⇒ 改名要同一次改断言；adj887）、E-2026-402（打包警告 `ld.exe: .rsrc merge failure: multiple non-default manifests` —— binutils 对 PE 的 `RT_MANIFEST` 只允许一个非 0 语言清单，`tauri-build` 的 `resource.rc` 与工具链默认那个相撞；**产物正常、但"最终保留哪个"未确认**，已写明三种验证方法，不写成"已排除"；v0.55.0 打包）、E-2026-396（模板字符串注释里的反引号**第 2、3 次复发** ⇒ 长注释移出模板 + `node --check` 前置闸门；adj877/adj878）、E-2026-397（验证脚本三类「等待」陷阱：一步滚动不触发懒加载 / `reload` 重载的是卡片页 / 断言继承了前一步的 viewType；adj877）、E-2026-398（空脚本渲染出一张**空白页** —— 断言红灯暴露的是**实现**问题，不是断言该放宽；adj877） |
 | v0.55.0 | 2026-10-12 | 追加 E-2026-393（模板字符串里的**注释**含反引号 ⇒ 提前终止字符串、报错位置误导；说明移到模板外；adj876）、E-2026-394（官网验证脚本五条判据自己写错把合规实现判红：数字开头 id 不能进 CSS 选择器 / `location.hash` 是百分号编码 / 裁墨迹把纸张背景 rect 算进去 / 辅助虚线是 HTML 覆盖层筛不掉 / `img.complete` ≠ 已解码（懒加载图在整页截图里是空框）；改 getElementById + decodeURIComponent + 面积过滤 + 关 `showGuides` + 等 `decode()`；adj876）、E-2026-395（宣传图直接截真实交互 ⇒ 离网点「试听」拍到"音源下载失败"；改截不依赖网络的导出面板；adj876） |
 | v0.54.0 | 2026-10-12 | 追加 E-2026-390（`--help` 把已实现命令写成「未实现」+ 文档把计划当现状 ⇒ 用户实测 `ijipu.exe --help` 弹 UI；重写 HELP + 4 条闸门含负对照 + 三处文档纠偏；adj874）、E-2026-391（CLI 源码从未被 tsc 覆盖 ⇒ `ParseIssue` 类型错误潜伏；lib 构建把应用 `public/` 拷进包目录 ⇒ `npm pack` 55 文件/1.3MB；补 tsconfig + `cli:typecheck` 进 smoke + 顶层 `publicDir:false`；adj874）、E-2026-392（Rust 块注释**可嵌套** ⇒ 注释里写路径通配 `src/ipc` + `/*` 会把后面近 200 行代码吞掉，报错却指向文件末尾；注释不改用块注释写通配；adj875） |

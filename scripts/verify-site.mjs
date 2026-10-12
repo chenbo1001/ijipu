@@ -827,6 +827,18 @@ async function main() {
           home.links.obsidianRepoUrl === SITE_PLUGIN,
         JSON.stringify(home.links))
       /**
+       * adj896（用户反馈「官网首页少挂了个更新记录」）：顶栏与页脚都要有「更新记录」，
+       * 且指向 **全部发布** 页（`…/releases`）—— 与 `desktopDownloadUrl` 的 `releases/latest`
+       * （直接拿最新安装包）是两件事，别写成同一个。
+       */
+      const releasesLinks = await evalJs(
+        c,
+        `[...document.querySelectorAll('a[data-l="releasesUrl"]')].map((a) => a.href)`,
+      )
+      check('adj896 首页有「更新记录」入口（顶栏 + 页脚），指向**全部发布**页而非 latest',
+        releasesLinks.length >= 2 && releasesLinks.every((h) => h === `${SITE_REPO}/releases`),
+        JSON.stringify(releasesLinks))
+      /**
        * 负对照（**保留 adj889 的修正**）：原来那条是 `'#'.startsWith(SITE_REPO) === false`，
        * 而 `'#'` 不以任何地址开头 ⇒ **恒为真、证不了任何事**。换成真正有风险的那件事：
        * 下载地址必须是"主仓库 + `/releases/latest`"这个确定形态，且**不能被插件仓库的地址匹配上**
