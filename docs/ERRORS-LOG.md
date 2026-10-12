@@ -7801,7 +7801,38 @@
   新增这类断言时要在注释里写明"钉的是哪一行、改名时要一起改"。
   它们不是坏断言（能钉住口径不被悄悄改掉），但**有维护代价**，要知道代价在哪。
 
-| v0.55.0+ | 2026-10-12 | 追加 E-2026-399（**匿名查 GitHub API 命中 CDN 缓存** ⇒ 据 404 判定"仓库私有 + 0 个 Release"，整个方案都建立在错结论上；真相是仓库早已公开、有 30 个带安装包的 Release —— `E-2026-130` 复发，`VERSIONING.md` 早就写了要带鉴权查；adj889）、E-2026-400（Chrome 启动期当前页是 `about:blank` ⇒ 在那里读 localStorage 抛 `SecurityError`；写 localStorage 前必须先 `Page.navigate`；adj882）、E-2026-401（改名连带"读源码正则"的三条断言 ⇒ 改名要同一次改断言；adj887）、E-2026-396（模板字符串注释里的反引号**第 2、3 次复发** ⇒ 长注释移出模板 + `node --check` 前置闸门；adj877/adj878）、E-2026-397（验证脚本三类「等待」陷阱：一步滚动不触发懒加载 / `reload` 重载的是卡片页 / 断言继承了前一步的 viewType；adj877）、E-2026-398（空脚本渲染出一张**空白页** —— 断言红灯暴露的是**实现**问题，不是断言该放宽；adj877） |
+### E-2026-402 打包警告：`ld.exe: .rsrc merge failure: multiple non-default manifests`（v0.55.0 打包时发现）
+
+- **现象**：`npx tauri build`（GNU 工具链）**成功产出**安装包，但编译期有一条链接器警告：
+  ```
+  warning: linker stderr: …/ld.exe: .rsrc merge failure: multiple non-default manifests
+  ```
+  同一轮还有一条 `STATIC_VCRUNTIME is deprecated; use build.windows.staticVCRuntime …` 的提示。
+- **根因（已确认部分）**：binutils 对 PE 的 `RT_MANIFEST` 有一条硬规则 ——
+  **非 0 语言的 manifest 只允许一个，多于一个就报这个错**
+  （binutils 源码注释原文：*"There should only ever be one non-zero lang manifest"*）。
+  本项目的 `tauri-build` 会生成 `resource.rc`，里面有**一个** `1 24 { … }` 资源
+  （内容只有 `Microsoft.Windows.Common-Controls` 6.0 依赖，即"现代控件外观"）；
+  而 GNU 工具链自身也会带一个默认 manifest ⇒ 两者进同一个 `.rsrc` 时触发。
+- **实际影响：⚠️ 尚未确认**。需要确认最终 exe 里**保留的是哪一个**：
+  若保留的不是 Tauri 那个，会**丢失 Common-Controls 6.0 视觉样式**（按钮 / 对话框退回老式外观）。
+  目前**没有**收到任何 UI 异常反馈，但**不能据此断定无影响**（从未专门验证过）。
+  ⚠️ 这条特意不写成"已排除"——**不知道的就是不知道**。
+- **验证方法（可执行，择一即可）**：
+  ① **最直观**：在 Windows 上打开应用，看按钮 / 菜单 / 对话框是**现代**外观还是 **Win95 老式**外观；
+  ② **精确**：用 `ResourceHacker` 或 `mt.exe -input:<exe> -validate_manifest` 读 exe 的 manifest 资源，
+     确认**只有一个**且内容是 Common-Controls 6.0；
+  ③ **交叉**：`objdump -x <exe>`（GNU）或 `dumpbin /headers`（MSVC）看 `.rsrc` 节里的资源目录。
+- **可选消除办法**：
+  ① 换 **MSVC 工具链**（`rustup default stable-x86_64-pc-windows-msvc`）—— 要重配环境；
+  ② 在 `build.rs` 里用 `tauri_build::WindowsAttributes` 显式接管 manifest —— 治标；
+  ③ **先验证再决定**：确认产物正常（①式目视）后可以先不管 ——
+     但它**不是"已排除风险"**，所以记在这里，别当噪音忽略。
+- **预防**：**打包输出里的 warning 要读**。这条 warning 早在编译期就出现了，
+  但如果只盯"最后生成了 exe + `check:installer` 通过"，就会把它漏掉 ——
+  **"产物成功"不等于"没有可疑之处"**。看到不认识的链接器 / 资源警告，先记下来再判断。
+
+| v0.55.0+ | 2026-10-12 | 追加 E-2026-399（**匿名查 GitHub API 命中 CDN 缓存** ⇒ 据 404 判定"仓库私有 + 0 个 Release"，整个方案都建立在错结论上；真相是仓库早已公开、有 30 个带安装包的 Release —— `E-2026-130` 复发，`VERSIONING.md` 早就写了要带鉴权查；adj889）、E-2026-400（Chrome 启动期当前页是 `about:blank` ⇒ 在那里读 localStorage 抛 `SecurityError`；写 localStorage 前必须先 `Page.navigate`；adj882）、E-2026-401（改名连带"读源码正则"的三条断言 ⇒ 改名要同一次改断言；adj887）、E-2026-402（打包警告 `ld.exe: .rsrc merge failure: multiple non-default manifests` —— binutils 对 PE 的 `RT_MANIFEST` 只允许一个非 0 语言清单，`tauri-build` 的 `resource.rc` 与工具链默认那个相撞；**产物正常、但"最终保留哪个"未确认**，已写明三种验证方法，不写成"已排除"；v0.55.0 打包）、E-2026-396（模板字符串注释里的反引号**第 2、3 次复发** ⇒ 长注释移出模板 + `node --check` 前置闸门；adj877/adj878）、E-2026-397（验证脚本三类「等待」陷阱：一步滚动不触发懒加载 / `reload` 重载的是卡片页 / 断言继承了前一步的 viewType；adj877）、E-2026-398（空脚本渲染出一张**空白页** —— 断言红灯暴露的是**实现**问题，不是断言该放宽；adj877） |
 | v0.55.0 | 2026-10-12 | 追加 E-2026-393（模板字符串里的**注释**含反引号 ⇒ 提前终止字符串、报错位置误导；说明移到模板外；adj876）、E-2026-394（官网验证脚本五条判据自己写错把合规实现判红：数字开头 id 不能进 CSS 选择器 / `location.hash` 是百分号编码 / 裁墨迹把纸张背景 rect 算进去 / 辅助虚线是 HTML 覆盖层筛不掉 / `img.complete` ≠ 已解码（懒加载图在整页截图里是空框）；改 getElementById + decodeURIComponent + 面积过滤 + 关 `showGuides` + 等 `decode()`；adj876）、E-2026-395（宣传图直接截真实交互 ⇒ 离网点「试听」拍到"音源下载失败"；改截不依赖网络的导出面板；adj876） |
 | v0.54.0 | 2026-10-12 | 追加 E-2026-390（`--help` 把已实现命令写成「未实现」+ 文档把计划当现状 ⇒ 用户实测 `ijipu.exe --help` 弹 UI；重写 HELP + 4 条闸门含负对照 + 三处文档纠偏；adj874）、E-2026-391（CLI 源码从未被 tsc 覆盖 ⇒ `ParseIssue` 类型错误潜伏；lib 构建把应用 `public/` 拷进包目录 ⇒ `npm pack` 55 文件/1.3MB；补 tsconfig + `cli:typecheck` 进 smoke + 顶层 `publicDir:false`；adj874）、E-2026-392（Rust 块注释**可嵌套** ⇒ 注释里写路径通配 `src/ipc` + `/*` 会把后面近 200 行代码吞掉，报错却指向文件末尾；注释不改用块注释写通配；adj875） |
 | v0.52.1+ | 2026-10-11 | 追加 E-2026-385（对通篇中文的引擎文件用 shell 正则替换改名 —— 违反 §六之二·1，本次侥幸未损；改用编辑工具 + 编码复核；adj863）、E-2026-386（范围几何取整 1 位小数 ⇒ "整页范围恒等变换"红灯；改 2 位与渲染同档；adj863）、E-2026-387（注释声称"见冒烟 adj839"但套件里没有那一节 = 幽灵闸门；补齐解析断言并自检口径；adj865）、E-2026-388（真机验证脚本长期 14 条假红灯 ⇒ 无闸门效果；修断言 + 新增 T-5 真机断言，并抓到 `setMode` 覆盖 class 抹掉 `z` 的真 bug；adj866）、E-2026-389（桌面版白屏：JS 产物里的 PDF 魔数被 Tauri 按内容嗅探判成 MIME ⇒ 模块被拒；分两次写入 + 闸门 adj869；0.53.1） |
