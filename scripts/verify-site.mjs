@@ -199,29 +199,50 @@ const SONG_TIGER =
  * 但**谱面部分是把引擎真实渲染出的 SVG 内联进来的**——不是画的、也不是贴图。
  * 这样既不用假装有真截图，又能保证"插件里长什么样"这件事是可信的。
  */
-function obsidianCardHtml(scoreSvg) {
+function obsidianCardHtml(scoreSvg, theme) {
   /** 代码块围栏：`String.fromCharCode(96)` 拼出来，避免在本文件的模板字符串里写出反引号字面量 */
   const FENCE = String.fromCharCode(96).repeat(3)
+  /**
+   * 两套配色（adj881）。
+   * 跟的是 **Obsidian 自己的深浅主题**，不是 iJipu 官网的主题——但这张图要贴在官网首页上，
+   * 官网切浅色时留一张深色截图会很跳，所以两套都出一份、由 `applyShots()` 跟着换。
+   * 写成 CSS 变量注入到 `<body style>`：样式表里只留 `var(--ob-*)`，加/改配色不必动 CSS。
+   */
+  const palette =
+    theme === 'light'
+      ? {
+          bg: '#ffffff', side: '#f6f6f6', border: '#e3e5e8', text: '#2e3338', dim: '#8b8f95',
+          file: '#4b5058', cur: '#e8e9eb', curText: '#1a1a1a', h1: '#1a1a1a',
+          code: '#f5f6f7', codeBorder: '#e3e5e8', codeText: '#3c4149', fence: '#7c3aed',
+        }
+      : {
+          bg: '#1e1e1e', side: '#262626', border: '#333333', text: '#dcddde', dim: '#8a8a8a',
+          file: '#b9b9b9', cur: '#333333', curText: '#ffffff', h1: '#e8e8e8',
+          code: '#1a1a1a', codeBorder: '#2f2f2f', codeText: '#cfcfcf', fence: '#a882ff',
+        }
+  const vars = Object.entries(palette)
+    .map(([k, v]) => `--ob-${k}:${v}`)
+    .join(';')
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
   *{box-sizing:border-box;margin:0}
-  body{width:1200px;height:780px;overflow:hidden;background:#1e1e1e;color:#dcddde;
+  body{width:1200px;height:780px;overflow:hidden;background:var(--ob-bg);color:var(--ob-text);
        font-family:system-ui,"Microsoft YaHei",sans-serif;font-size:14px}
   .win{display:flex;height:100%}
-  .side{width:196px;flex:0 0 196px;background:#262626;border-right:1px solid #333;padding:14px 10px}
-  .side .vault{font-size:12px;color:#8a8a8a;padding:0 6px 12px;letter-spacing:.04em}
-  .side .f{padding:5px 8px;border-radius:5px;color:#b9b9b9;font-size:13px}
-  .side .f.on{background:#333;color:#fff}
+  .side{width:196px;flex:0 0 196px;background:var(--ob-side);border-right:1px solid var(--ob-border);padding:14px 10px}
+  .side .vault{font-size:12px;color:var(--ob-dim);padding:0 6px 12px;letter-spacing:.04em}
+  .side .f{padding:5px 8px;border-radius:5px;color:var(--ob-file);font-size:13px}
+  .side .f.on{background:var(--ob-cur);color:var(--ob-curText)}
   .main{flex:1;min-width:0;padding:30px 44px;overflow:hidden}
-  .main h1{font-size:25px;color:#e8e8e8;margin-bottom:12px}
-  .main p{color:#b9b9b9;line-height:1.8;margin-bottom:12px}
-  .cb{background:#1a1a1a;border:1px solid #2f2f2f;border-radius:7px;padding:11px 14px;margin:12px 0;
-      font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.8;color:#cfcfcf;white-space:pre}
-  .cb .k{color:#a882ff}
+  .main h1{font-size:25px;color:var(--ob-h1);margin-bottom:12px}
+  .main p{color:var(--ob-file);line-height:1.8;margin-bottom:12px}
+  .cb{background:var(--ob-code);border:1px solid var(--ob-codeBorder);border-radius:7px;padding:11px 14px;margin:12px 0;
+      font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.8;color:var(--ob-codeText);white-space:pre}
+  .cb .k{color:var(--ob-fence)}
   .score{background:#fff;border-radius:7px;padding:10px 12px;position:relative}
   .score svg{width:100%;height:auto;display:block}
   .play{position:absolute;right:10px;top:10px;background:rgba(0,0,0,.05);border:1px solid rgba(0,0,0,.14);
         border-radius:6px;padding:3px 9px;font-size:12px;color:#333}
-  </style></head><body><div class="win">
+  </style></head><body style="${vars}"><div class="win">
     <div class="side">
       <div class="vault">我的音乐笔记</div>
       <div class="f">乐理笔记.md</div>
@@ -489,63 +510,88 @@ async function main() {
     if (DO_SHOTS) {
       console.log('[verify-site] 生成素材图…')
 
-      // ---- /app/ 拆分视图 = 首页 Hero（最大的一张，2 倍图） ----
-      await viewport(1440, 880, 2)
-      await c.send('Page.navigate', { url: `${origin}/app/` })
-      await sleep(1800)
-      await saveAsset('hero.webp', await shoot('webp', { quality: 82 }))
-
-      // ---- 三个视图的小图（1.4 倍够用，省体积） ----
-      for (const [file, view] of [
-        ['view-code.webp', 'code'],
-        ['view-split.webp', 'split'],
-        ['view-preview.webp', 'preview'],
-      ]) {
-        await setView(view)
-        await reload()
-        await sleep(700)
-        await saveAsset(file, await shoot('webp', { quality: 76 }))
-      }
-      // 上面的循环结束在 preview 视图，接着用它截多声部示例
-      await viewport(1440, 880, 1.6)
-      await evalJs(
-        c,
-        `localStorage.setItem('ijipu.draft', ${JSON.stringify(SONG_DSB)});
-         localStorage.setItem('ijipu.draftName', '临时多声部');
-         localStorage.setItem('ijipu.viewType', 'preview')`,
-      )
-      await reload()
-      await sleep(900)
-      await saveAsset('voice-multi.webp', await shoot('webp', { quality: 78 }))
-      // 状态栏里若带告警，宣传图上会出现一个「⚠」——把原文打出来，好回去修示例谱
-      console.log(`    · 状态栏：${await evalJs(c, `(document.querySelector('footer, [class*="status"]')?.textContent ?? '').trim().slice(0, 80)`)}`)
-
       /**
-       * ---- 导出面板 ----
-       * ⚠ 这里**不要**去点「试听」：截图环境离网，应用会尝试下载 30MB 音色库，
-       *   拍出来的是「正在后台下载音色库…」+ 一条下载失败提示（本轮实测踩过）。
-       *   导出面板不依赖网络，展示的信息（PDF/图片/音频各档格式）也更有用。
+       * ---- 应用界面截图：**深色 / 浅色各截一套**（adj881，用户要求）----
+       * 为什么要两套：官网切到浅色主题时插图也要跟着换——图展示的是"应用长什么样"，
+       * 应用已经换成浅色主题了、图却还是深色的，就自相矛盾了。
+       * 命名约定（与 `landing/main.ts` 的 `applyShots()` 一一对应，改一处要改两处）：
+       *   `<名字>.webp`（深色） / `<名字>-light.webp`（浅色）
+       * ⚠ 每轮开始**必须**先设 `ijipu.themeMode`——否则两套图会一模一样，
+       *   而"两套图长得一样"恰恰是最难一眼看出来的缺陷。
        */
-      await evalJs(c, `localStorage.setItem('ijipu.draft', ${JSON.stringify(SONG_SONG)})`)
-      await reload()
-      await sleep(800)
-      const opened = await evalJs(
-        c,
-        `(() => {
-          const btns = [...document.querySelectorAll('button, a')]
-          const b = btns.find((el) => /导出/.test((el.textContent || '') + (el.title || '') + (el.getAttribute('aria-label') || '')))
-          if (!b) return false
-          b.click()
-          return true
-        })()`,
-      )
-      if (opened) {
-        await sleep(1000)
-        await evalJs(c, `document.querySelectorAll('.toast').forEach((el) => el.remove())`)
-        await sleep(300)
-        await saveAsset('export.webp', await shoot('webp', { quality: 78 }))
-      } else {
-        console.log('    · 跳过 export.webp（没找到「导出」按钮）')
+      for (const theme of ['dark', 'light']) {
+        const sfx = theme === 'light' ? '-light' : ''
+        /**
+         * ⚠ 顺序要紧：**先 navigate 再动 localStorage**。
+         * Chrome 刚起来时当前页是 `about:blank`，在那里读 localStorage 会抛
+         * `SecurityError: Access is denied for this document`（本轮实测踩到）。
+         */
+        await c.send('Page.navigate', { url: `${origin}/app/` })
+        await sleep(1300)
+        await evalJs(c, `localStorage.setItem('ijipu.themeMode', ${JSON.stringify(theme)})`)
+        await reload()
+        await sleep(1300)
+
+        // ---- /app/ 拆分视图 = 首页 Hero（最大的一张，2 倍图） ----
+        await viewport(1440, 880, 2)
+        await saveAsset(`hero${sfx}.webp`, await shoot('webp', { quality: 82 }))
+
+        // ---- 三个视图的小图（1.6 倍够用，省体积） ----
+        for (const [file, view] of [
+          ['view-code', 'code'],
+          ['view-split', 'split'],
+          ['view-preview', 'preview'],
+        ]) {
+          await setView(view)
+          await reload()
+          await sleep(700)
+          await saveAsset(`${file}${sfx}.webp`, await shoot('webp', { quality: 76 }))
+        }
+        // 上面的循环结束在 preview 视图，接着用它截多声部示例
+        await viewport(1440, 880, 1.6)
+        await evalJs(
+          c,
+          `localStorage.setItem('ijipu.draft', ${JSON.stringify(SONG_DSB)});
+           localStorage.setItem('ijipu.draftName', '临时多声部');
+           localStorage.setItem('ijipu.viewType', 'preview')`,
+        )
+        await reload()
+        await sleep(900)
+        await saveAsset(`voice-multi${sfx}.webp`, await shoot('webp', { quality: 78 }))
+        // 状态栏里若带告警，宣传图上会出现一个「⚠」——把原文打出来，好回去修示例谱
+        console.log(`    · [${theme}] 状态栏：${await evalJs(c, `(document.querySelector('footer, [class*="status"]')?.textContent ?? '').trim().slice(0, 80)`)}`)
+
+        /**
+         * ---- 导出面板 ----
+         * ⚠ 这里**不要**去点「试听」：截图环境离网，应用会尝试下载 30MB 音色库，
+         *   拍出来的是「正在后台下载音色库…」+ 一条下载失败提示（本轮实测踩过）。
+         *   导出面板不依赖网络，展示的信息（PDF/图片/音频各档格式）也更有用。
+         * ⚠ 必须先 `Page.navigate` 回 `/app/`：`reload` 重载的是**当前页**，
+         *   上一轮循环结束时停在别处就会拍错页面（见 `E-2026-397`）。
+         */
+        await c.send('Page.navigate', { url: `${origin}/app/` })
+        await sleep(900)
+        await evalJs(c, `localStorage.setItem('ijipu.draft', ${JSON.stringify(SONG_SONG)})`)
+        await reload()
+        await sleep(800)
+        const opened = await evalJs(
+          c,
+          `(() => {
+            const btns = [...document.querySelectorAll('button, a')]
+            const b = btns.find((el) => /导出/.test((el.textContent || '') + (el.title || '') + (el.getAttribute('aria-label') || '')))
+            if (!b) return false
+            b.click()
+            return true
+          })()`,
+        )
+        if (opened) {
+          await sleep(1000)
+          await evalJs(c, `document.querySelectorAll('.toast').forEach((el) => el.remove())`)
+          await sleep(300)
+          await saveAsset(`export${sfx}.webp`, await shoot('webp', { quality: 78 }))
+        } else {
+          console.log(`    · 跳过 export${sfx}.webp（没找到「导出」按钮）`)
+        }
       }
 
       /**
@@ -637,51 +683,55 @@ async function main() {
       await saveAsset('og.png', await shoot('png'))
 
       /**
-       * ---- Obsidian 插件示意图（adj877）----
+       * ---- Obsidian 插件示意图（adj877，adj881 起出深浅两套）----
        * 谱面从 `/app/` 里**取引擎真实渲染出的 SVG**（`outerHTML`），再内联进"仿笔记"卡片里截图。
        * 于是：窗口是我画的、**乐谱是真的**——比"贴一张来路不明的截图"诚实，也不用假装有 Obsidian。
+       * 谱面本身是白底黑字，所以两套图**共用同一份 SVG**，只有卡片外壳的配色不同。
        */
-      await viewport(1440, 900, 1.6)
-      await evalJs(
-        c,
-        `localStorage.setItem('ijipu.draft', ${JSON.stringify(SONG_TIGER)});
-         localStorage.setItem('ijipu.draftName', '两只老虎');
-         localStorage.setItem('ijipu.viewType', 'preview');
-         localStorage.setItem('ijipu.themeMode', 'dark')`,
-      )
-      /**
-       * ⚠ 这里必须是 `Page.navigate` 回 `/app/`，**不能** `reload()`：
-       * 上一步（og 卡片）已经把页面导航到 `/__og` 了，而 `reload` 重载的是**当前页**
-       * ⇒ 会把卡片页再加载一遍，应用一个元素都没有（本轮实测：`svgs:0, text:""`，图被跳过）。
-       * localStorage 是同源的，所以"在卡片页上写设置"没问题，问题只在"回哪一页"。
-       */
-      await c.send('Page.navigate', { url: `${origin}/app/` })
-      await sleep(1200)
-      /** 轮询等谱面渲染出来（不要只 sleep 一次就取——本轮第一版就是这么"取不到"的） */
-      let scoreSvg = ''
-      for (let i = 0; i < 20 && !scoreSvg; i++) {
-        await sleep(300)
-        scoreSvg = await evalJs(
+      for (const theme of ['dark', 'light']) {
+        const sfx = theme === 'light' ? '-light' : ''
+        await viewport(1440, 900, 1.6)
+        await evalJs(
           c,
-          `(() => {
-            const svgs = [...document.querySelectorAll('#root svg')]
-            if (svgs.length === 0) return ''
-            return svgs.sort((a, b) => b.querySelectorAll('text').length - a.querySelectorAll('text').length)[0].outerHTML
-          })()`,
+          `localStorage.setItem('ijipu.draft', ${JSON.stringify(SONG_TIGER)});
+           localStorage.setItem('ijipu.draftName', '两只老虎');
+           localStorage.setItem('ijipu.viewType', 'preview');
+           localStorage.setItem('ijipu.themeMode', ${JSON.stringify(theme)})`,
         )
-      }
-      if (scoreSvg && scoreSvg.length > 500) {
-        obsidianHtml = obsidianCardHtml(scoreSvg)
-        await viewport(1200, 780, 1.6)
-        await c.send('Page.navigate', { url: `${origin}/__obsidian` })
-        await sleep(900)
-        await saveAsset('obsidian.webp', await shoot('webp', { quality: 84 }))
-      } else {
-        const diag = await evalJs(
-          c,
-          `JSON.stringify({ svgs: document.querySelectorAll('#root svg').length, len: ${JSON.stringify(scoreSvg.length)}, text: (document.querySelector('#root')?.textContent ?? '').slice(0, 160) })`,
-        )
-        console.log(`    · 跳过 obsidian.webp（取不到谱面 SVG）：${diag}`)
+        /**
+         * ⚠ 这里必须是 `Page.navigate` 回 `/app/`，**不能** `reload()`：
+         * 上一轮已经把页面导航到卡片页（`/__og` 或 `/__obsidian`）了，而 `reload` 重载的是**当前页**
+         * ⇒ 会把卡片页再加载一遍，应用一个元素都没有（本轮实测：`svgs:0, text:""`，图被跳过）。
+         * localStorage 是同源的，所以"在卡片页上写设置"没问题，问题只在"回哪一页"。
+         */
+        await c.send('Page.navigate', { url: `${origin}/app/` })
+        await sleep(1200)
+        /** 轮询等谱面渲染出来（不要只 sleep 一次就取——本轮第一版就是这么"取不到"的） */
+        let scoreSvg = ''
+        for (let i = 0; i < 20 && !scoreSvg; i++) {
+          await sleep(300)
+          scoreSvg = await evalJs(
+            c,
+            `(() => {
+              const svgs = [...document.querySelectorAll('#root svg')]
+              if (svgs.length === 0) return ''
+              return svgs.sort((a, b) => b.querySelectorAll('text').length - a.querySelectorAll('text').length)[0].outerHTML
+            })()`,
+          )
+        }
+        if (scoreSvg && scoreSvg.length > 500) {
+          obsidianHtml = obsidianCardHtml(scoreSvg, theme)
+          await viewport(1200, 780, 1.6)
+          await c.send('Page.navigate', { url: `${origin}/__obsidian` })
+          await sleep(900)
+          await saveAsset(`obsidian${sfx}.webp`, await shoot('webp', { quality: 84 }))
+        } else {
+          const diag = await evalJs(
+            c,
+            `JSON.stringify({ svgs: document.querySelectorAll('#root svg').length, len: ${JSON.stringify(scoreSvg.length)}, text: (document.querySelector('#root')?.textContent ?? '').slice(0, 160) })`,
+          )
+          console.log(`    · 跳过 obsidian${sfx}.webp（取不到谱面 SVG）：${diag}`)
+        }
       }
 
       // ---- 仅供检查：四个页面的整页图 ----
@@ -811,6 +861,29 @@ async function main() {
       const themeBack = await evalJs(c, `document.documentElement.dataset.siteMode ?? ''`)
       check('再点一下能切回原模式（开关是双向的）', themeBack === themeBefore, `${themeBack} vs ${themeBefore}`)
 
+      // ---- adj881（用户要求）：插图也要跟着主题换 ----
+      const shotsDark = await evalJs(c, `[...document.querySelectorAll('img[data-shot]')].map((i) => i.getAttribute('src'))`)
+      check('首页插图带 data-shot 标记，且默认是深色那套',
+        shotsDark.length >= 6 && shotsDark.every((s) => s && !s.includes('-light.')), shotsDark.join(', '))
+      await evalJs(c, `document.getElementById('theme-toggle')?.click()`)
+      await sleep(400)
+      const shotsLight = await evalJs(c, `[...document.querySelectorAll('img[data-shot]')].map((i) => i.getAttribute('src'))`)
+      check('切到浅色后插图**全部**换成浅色那套（`-light.webp`）',
+        shotsLight.length === shotsDark.length && shotsLight.every((s) => s.includes('-light.')),
+        shotsLight.join(', '))
+      // 换完还要真的能加载（截图阶段没生成浅色图的话，这里就是破图）
+      await primeLazyImages()
+      const lightBroken = await evalJs(
+        c,
+        `[...document.images].filter((x) => x.getAttribute('data-shot') && !(x.naturalWidth > 0)).map((x) => x.getAttribute('src'))`,
+      )
+      check('浅色那套插图都能加载（没有因为缺文件而破图）', lightBroken.length === 0, lightBroken.join(', '))
+      await evalJs(c, `document.getElementById('theme-toggle')?.click()`)
+      await sleep(400)
+      const shotsBack = await evalJs(c, `[...document.querySelectorAll('img[data-shot]')].map((i) => i.getAttribute('src'))`)
+      check('切回深色后插图还原（可逆）',
+        JSON.stringify(shotsBack) === JSON.stringify(shotsDark), shotsBack.join(', '))
+
       // ---- playground：真的点一下「预览」，等引擎加载并渲染出 SVG ----
       // 这条是"引擎能否在首页跑"的**唯一硬证据**（源码级断言做不到）。
       const pgClicked = await evalJs(
@@ -851,6 +924,51 @@ async function main() {
       )
       check('playground 对空脚本给出提示（不静默、不崩）',
         typeof pgEmpty === 'string' && pgEmpty.length > 0, `实际：${String(pgEmpty).slice(0, 80)}`)
+
+      // ---- adj880（用户要求）：三档显示范围，默认「谱面」以免预览区过大 ----
+      /**
+       * ⚠ 上一条断言为了测"空脚本"把源码清空了 ⇒ 这里**必须先恢复源码**再量几何，
+       * 否则读到的是空输出（本轮实测：viewBox 读到 `null`）。
+       * 与 `E-2026-397` 第 ③ 类同源：断言不能继承上一步的状态。
+       */
+      await evalJs(
+        c,
+        `(() => {
+          const ta = document.getElementById('pg-src')
+          if (ta) ta.value = ${JSON.stringify("Q: 1 2 3 4 | 5 6 7 1' |\n")}
+          document.querySelector('[data-pg-view="score"]')?.click()
+          document.querySelector('#pg-rerender')?.click()
+        })()`,
+      )
+      await sleep(1600)
+      const pgViews = await evalJs(
+        c,
+        `[...document.querySelectorAll('[data-pg-view]')].map((b) => ({ v: b.dataset.pgView, on: b.classList.contains('active') }))`,
+      )
+      check('playground 有「谱面 / 满宽 / 整页」三档，且默认停在「谱面」',
+        pgViews.length === 3 && pgViews.find((x) => x.on)?.v === 'score', JSON.stringify(pgViews))
+      const vbOf = () =>
+        evalJs(
+          c,
+          `(() => {
+            const svg = document.querySelector('#pg-out svg')
+            if (!svg) return null
+            const vb = svg.viewBox.baseVal
+            return { w: Math.round(vb.width), h: Math.round(vb.height) }
+          })()`,
+        )
+      // 「谱面」必须**真的裁过**：判据是 viewBox 高度明显小于整页（A4 比例约 842）
+      const vbScore = await vbOf()
+      check('默认「谱面」视图确实裁过（viewBox 高度远小于整页）',
+        !!vbScore && vbScore.h > 0 && vbScore.h < 500, JSON.stringify(vbScore))
+      await evalJs(c, `document.querySelector('[data-pg-view="page"]')?.click()`)
+      await sleep(1300)
+      const vbPage = await vbOf()
+      check('切「整页」后 viewBox 变回整页高度（确实没裁）',
+        !!vbPage && !!vbScore && vbPage.h > vbScore.h + 100, `${JSON.stringify(vbScore)} → ${JSON.stringify(vbPage)}`)
+      // 切回「谱面」：别把状态留给后面的断言
+      await evalJs(c, `document.querySelector('[data-pg-view="score"]')?.click()`)
+      await sleep(900)
       const pgErrs = collectErrors(mark)
       check('首页（含 playground 交互与引擎加载）无控制台错误 / 无本站 4xx',
         pgErrs.length === 0, pgErrs.slice(0, 4).join(' | '))

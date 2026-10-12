@@ -111,7 +111,7 @@
         </div>
         <figure class="hero-shot">
           <!-- 主视觉是首屏唯一的图，明确 eager + 高优先级；其余插图一律 lazy（见各 img） -->
-          <img fetchpriority="high" decoding="async" src="/site/hero.webp" alt="爱记谱 iJipu 拆分视图：左侧实时渲染的简谱，右侧 .jps 代码" />
+          <img fetchpriority="high" decoding="async" data-shot="hero" src="/site/hero.webp" alt="爱记谱 iJipu 拆分视图：左侧实时渲染的简谱，右侧 .jps 代码" />
           <figcaption>右边写代码，左边同步出谱（应用默认方向，可对调）</figcaption>
         </figure>
       </section>
@@ -161,6 +161,16 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
           <div class="pg-pane pg-pane-preview" data-pg-pane="preview" hidden>
             <div class="pg-out" id="pg-out"></div>
             <div class="pg-bar">
+              <!--
+                adj880：显示范围三档，口径与 Obsidian 插件的「整页 / 满宽 / 谱面」一致
+                （都用引擎的 rangeBox + applyRangeToSvg 裁，不是各自写一套）。
+                默认「谱面」= 只显示有墨迹的部分——不然只有一行音符的谱会带着一整页空白，预览区极高。
+              -->
+              <div class="pg-views" role="group" aria-label="显示范围">
+                <button type="button" class="active" data-pg-view="score">谱面</button>
+                <button type="button" data-pg-view="width">满宽</button>
+                <button type="button" data-pg-view="page">整页</button>
+              </div>
               <span class="pg-msg" id="pg-msg"></span>
               <button type="button" id="pg-rerender">↻ 重新渲染</button>
             </div>
@@ -232,9 +242,9 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
             <p>语法有错时，编辑器里直接写明「哪里错 + 正确写法」，点一下跳到出错位置。</p>
           </div>
           <div class="deep-shots">
-            <figure><img loading="lazy" decoding="async" src="/site/view-code.webp" alt="编码视图" /><figcaption>编码</figcaption></figure>
-            <figure><img loading="lazy" decoding="async" src="/site/view-split.webp" alt="左右拆分视图" /><figcaption>左右拆分</figcaption></figure>
-            <figure><img loading="lazy" decoding="async" src="/site/view-preview.webp" alt="预览视图" /><figcaption>预览</figcaption></figure>
+            <figure><img loading="lazy" decoding="async" data-shot="view-code" src="/site/view-code.webp" alt="编码视图" /><figcaption>编码</figcaption></figure>
+            <figure><img loading="lazy" decoding="async" data-shot="view-split" src="/site/view-split.webp" alt="左右拆分视图" /><figcaption>左右拆分</figcaption></figure>
+            <figure><img loading="lazy" decoding="async" data-shot="view-preview" src="/site/view-preview.webp" alt="预览视图" /><figcaption>预览</figcaption></figure>
           </div>
         </div>
 
@@ -248,8 +258,8 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
             <p>排好就能一键导出：PDF（矢量打印 / 位图两路）、PNG、JPG、SVG，以及 MIDI。打印、发微信、进课件都行。</p>
           </div>
           <div class="deep-shots">
-            <figure><img loading="lazy" decoding="async" src="/site/voice-multi.webp" alt="多声部与临时段的简谱排版" /><figcaption>多声部 / 临时段</figcaption></figure>
-            <figure><img loading="lazy" decoding="async" src="/site/export.webp" alt="导出面板：PDF、图片、音频多档格式" /><figcaption>一键导出</figcaption></figure>
+            <figure><img loading="lazy" decoding="async" data-shot="voice-multi" src="/site/voice-multi.webp" alt="多声部与临时段的简谱排版" /><figcaption>多声部 / 临时段</figcaption></figure>
+            <figure><img loading="lazy" decoding="async" data-shot="export" src="/site/export.webp" alt="导出面板：PDF、图片、音频多档格式" /><figcaption>一键导出</figcaption></figure>
           </div>
         </div>
 
@@ -298,7 +308,7 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
           </p>
         </div>
         <figure class="ob-shot">
-          <img loading="lazy" decoding="async" src="/site/obsidian.webp" alt="在 Obsidian 笔记里用 iJipu 插件渲染简谱：笔记正文中的 jps 代码块下方直接显示乐谱" />
+          <img loading="lazy" decoding="async" data-shot="obsidian" src="/site/obsidian.webp" alt="在 Obsidian 笔记里用 iJipu 插件渲染简谱：笔记正文中的 jps 代码块下方直接显示乐谱" />
           <figcaption>笔记里的 <code>```jps</code> 代码块 → 简谱 + ▶ 试听</figcaption>
         </figure>
       </section>

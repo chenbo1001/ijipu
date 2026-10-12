@@ -108,7 +108,9 @@ code {
 }
 
 /* ---------- 版心 ---------- */
-.hero, .demo, .features, .deep, .links, .faq, .footer {
+/* ⚠ 新增区块时**必须**加进这个列表：漏了就等于没有 max-width / 居中 / 左右留白，
+   区块会撑满整屏（adj880 修的就是 `.playground` 与 `.obsidian` 漏进来这件事）。 */
+.hero, .demo, .playground, .features, .deep, .obsidian, .links, .faq, .footer {
   max-width: var(--site-max);
   margin: 0 auto;
   padding: 0 20px;
@@ -455,6 +457,25 @@ code {
   content: "点「预览」看看效果（第一次会先加载渲染引擎，约 68KB）";
   color: var(--site-muted);
   font-size: 14px;
+}
+
+/* adj880：显示范围三档（谱面 / 满宽 / 整页，口径与 Obsidian 插件一致） */
+.pg-views { display: flex; gap: 4px; flex: 0 0 auto; }
+.pg-views button {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--site-border);
+  border-radius: 7px;
+  color: var(--site-text-2);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 5px 11px;
+}
+.pg-views button:hover { border-color: var(--site-accent); color: var(--site-text); }
+.pg-views button.active {
+  background: var(--site-panel-hover);
+  border-color: var(--site-accent);
+  color: var(--site-accent);
 }
 
 .pg-bar { display: flex; align-items: center; gap: 12px; margin-top: 12px; }

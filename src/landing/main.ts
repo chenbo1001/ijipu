@@ -75,6 +75,28 @@ function bindDonate(): void {
 }
 
 /**
+ * adj881（用户要求）：**插图跟随深浅主题**——切到浅色时换成浅色主题下截的那套图。
+ *
+ * 为什么不用 `<picture>` + `media="(prefers-color-scheme: light)"`：
+ * 那个媒体查询只反映**系统**偏好，而官网的主题是**用户点出来的**（存在 `ijipu.site.theme`），
+ * 两者完全可以不一致（系统深色 + 用户选了浅色）⇒ 只能用 JS 换 `src`。
+ *
+ * 命名约定（与 `scripts/verify-site.mjs` 的截图输出一一对应，改一处要改两处）：
+ *   `<名字>.webp`（深色） / `<名字>-light.webp`（浅色）
+ * 参与切换的都是**应用界面截图**——只有应用也切成浅色主题时它们才该换。
+ * 不参与的：`demo-score`（谱面本身白底黑字，两套一样）与分享卡 `og.png`。
+ */
+function applyShots(mode: SiteMode): void {
+  document.querySelectorAll<HTMLImageElement>('img[data-shot]').forEach((img) => {
+    const name = img.dataset.shot
+    if (!name) return
+    const next = mode === 'light' ? `/site/${name}-light.webp` : `/site/${name}.webp`
+    // `img.src` 是绝对地址，用 endsWith 比；相同就别写，免得触发多余的加载判断
+    if (!img.src.endsWith(next)) img.src = next
+  })
+}
+
+/**
  * adj878（用户要求）：右上角的深浅主题开关。
  *
  * 两个图标由 CSS 按 `data-site-mode` 显示（**无 JS 时也显示正确的那个**），
@@ -88,6 +110,8 @@ function bindThemeToggle(): void {
     const next: SiteMode = currentSiteMode() === 'light' ? 'dark' : 'light'
     injectSiteColors(next)
     saveSiteMode(next)
+    // adj881：配色与插图一起换（用户口径"切浅色时插图也换成浅色的"）
+    applyShots(next)
   })
 }
 
@@ -130,6 +154,8 @@ function bindReturningTip(): void {
 
 // 主题：`<head>` 的内联脚本已经把模式定在 `<html>` 上（防闪烁），这里注入完整配色并接上开关
 injectSiteColors(currentSiteMode())
+// adj881：插图也要与主题一致（首屏就得对，不能等用户点一下才换）
+applyShots(currentSiteMode())
 bindThemeToggle()
 fillExternalLinks()
 fillVersion()

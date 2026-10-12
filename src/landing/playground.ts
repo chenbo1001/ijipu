@@ -43,18 +43,43 @@ function formatProblems(rows: readonly { line: number; message: string; hint?: s
   })
 }
 
+/** 显示范围三档 —— 口径与 Obsidian 插件的「整页 / 满宽 / 谱面」一致 */
+type PgView = 'score' | 'width' | 'page'
+
 /**
  * 渲染一段 `.jps`。
  * 有**错误级**问题就**不渲染**（与应用一致：错误阻断渲染，告警只提示）；
  * 告警仍然渲染，但把告警行一并返回，让用户知道"能看，但这里可能不是你要的"。
+ *
+ * adj880：按 `view` 裁画布——**用引擎自己的裁切能力**（`inkBoxOfLayout` + `rangeBox` +
+ * `applyRangeToSvg`），与 Obsidian 插件、应用导出**同源**，不在这里另写一套几何：
+ *   · `page`（整页）：原样，含页边距；
+ *   · `width`（满宽）：只裁掉**左右**页边距（上下保留整页高度），内容横向更大；
+ *   · `score`（谱面，默认）：裁到墨迹 ± 2px —— 只有一行音符的谱不会带一整页空白
+ *     （用户要求："默认还是谱面视图，这样避免预览区显示过大"）。
+ *   `rangeBox` 自带三重兜底（量不到墨迹 / 墨迹退化 / 墨迹几乎等于整页 ⇒ 退回整页），
+ *   所以这里不必自己判"该不该裁"。
  */
-async function renderJps(src: string): Promise<RenderResult> {
+async function renderJps(src: string, view: PgView): Promise<RenderResult> {
   const e = await loadEngine()
   const parsed = e.parseJps(src)
   const { errors, warnings } = e.splitParseIssues(parsed)
   if (errors.length > 0) return { svgs: [], problems: formatProblems(errors, 3) }
   const cfg = e.mergeJpsConfig(src, e.defaultPageConfig)
-  const svgs = e.renderScoreToSvg(e.layoutScore(parsed, cfg))
+  const layout = e.layoutScore(parsed, cfg)
+  const raw = e.renderScoreToSvg(layout)
+  const svgs = raw.map((svg, i) => {
+    if (view === 'page') return svg
+    const page = layout.pages[i]
+    if (!page) return svg
+    const ink = e.inkBoxOfLayout(layout, i)
+    if (view === 'width') {
+      if (!ink) return svg
+      return e.applyRangeToSvg(svg, { x: ink.x, y: 0, w: ink.w, h: page.height })
+    }
+    const out = e.rangeBox({ range: 'score', pageW: page.width, pageH: page.height, ink: ink ?? undefined })
+    return e.applyRangeToSvg(svg, out.box)
+  })
   return { svgs, problems: formatProblems(warnings, 2) }
 }
 
@@ -90,8 +115,10 @@ export function mountPlayground(): void {
   if (!dom) return
   const { root, source, out, msg, tabs, panes } = dom
 
-  let renderedFor = ''
+  let renderedKey = ''
   let busy = false
+  /** 当前显示范围（默认「谱面」——只有一行音符的谱不该带一整页空白） */
+  let view: PgView = 'score'
 
   /** 切标签：`code` 显示可编辑源码，`preview` 显示渲染结果 */
   const showTab = (tab: string) => {
@@ -104,10 +131,11 @@ export function mountPlayground(): void {
     if (tab === 'preview') void refresh()
   }
 
-  /** 渲染当前源码（同一份源码不重复渲染；切来切去不会反复跑引擎） */
+  /** 渲染当前源码（同一份源码 + 同一个显示范围不重复渲染；切来切去不会反复跑引擎） */
   const refresh = async (force = false) => {
     const src = source.value
-    if (!force && src === renderedFor) return
+    const key = `${view}\n${src}`
+    if (!force && key === renderedKey) return
     if (busy) return
     /**
      * 空脚本要**明确提示**，不能交给引擎渲染：
@@ -116,7 +144,7 @@ export function mountPlayground(): void {
      */
     if (src.trim() === '') {
       out.innerHTML = ''
-      renderedFor = src
+      renderedKey = key
       msg.textContent = "还没有内容——在上面写一行谱吧，比如：Q: 1 2 3 4 | 5 6 7 1' |"
       msg.dataset.kind = 'info'
       return
@@ -125,9 +153,9 @@ export function mountPlayground(): void {
     msg.textContent = '正在渲染…'
     msg.dataset.kind = 'info'
     try {
-      const { svgs, problems } = await renderJps(src)
+      const { svgs, problems } = await renderJps(src, view)
       out.innerHTML = svgs.join('\n')
-      renderedFor = src
+      renderedKey = key
       if (problems.length > 0) {
         msg.textContent = `⚠ ${problems.join('　')}`
         msg.dataset.kind = 'warn'
@@ -162,6 +190,20 @@ export function mountPlayground(): void {
   })
 
   root.querySelector<HTMLButtonElement>('#pg-rerender')?.addEventListener('click', () => void refresh(true))
+
+  /**
+   * adj880：显示范围三档切换（谱面 / 满宽 / 整页）。
+   * 切档即按新范围重渲染——同一份源码、不同裁法，所以走 `force` 绕过"源码没变就不渲染"的短路。
+   */
+  root.querySelectorAll<HTMLButtonElement>('[data-pg-view]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const next = b.dataset.pgView as PgView | undefined
+      if (!next || next === view) return
+      view = next
+      root.querySelectorAll<HTMLButtonElement>('[data-pg-view]').forEach((x) => x.classList.toggle('active', x === b))
+      void refresh(true)
+    })
+  })
 
   // 默认停在「脚本」标签：预览要下引擎，不该在首屏就发生（见文件头说明）
   showTab('code')
