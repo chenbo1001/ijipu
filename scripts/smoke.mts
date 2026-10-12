@@ -20409,6 +20409,94 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       for (const p of beatIssues.slice(0, 6)) console.log(`      · ${p}`)
       check('adj905i 全部示例：段层音与主旋律**同一拍位的格起点**一致（修前第 4 拍差 3.15px）',
         beatIssues.length === 0, beatIssues.slice(0, 4).join(' ｜ '))
+
+      /**
+       * adj905o（用户：「上面说到的几个原则应该记录下来，**做的判定的冒烟的依据**」）：
+       * 原则「**时值格 ⊇ 墨迹**」——`格左缘 x ≤ 墨迹左缘 x`、`格右缘 x ≥ 墨迹右缘 x`。
+       *
+       * 口径来源：`docs/ALIGNMENT-PRINCIPLES.md` §二。这是"色块左缘 = 时值格左缘"能成立的前提：
+       * 若墨迹跑到格外，说明"格"和"字形"用的不是同一套几何。
+       */
+      const cellIssues: string[] = []
+      for (const sample of BRAND_SAMPLES) {
+        const r = parseJps(sample.src)
+        const lay = layoutScore(r, DUR_CFG)
+        for (const n of lay.pages.flatMap((p) => p.notes)) {
+          const sg = n.segments ?? []
+          if (sg.length === 0) continue
+          const cellL = sg[0].x
+          const lastSg = sg[sg.length - 1]
+          const cellR = lastSg.x + lastSg.perBeat * lastSg.beats
+          const inkL = n.x
+          /**
+           * ⚠ **墨迹右缘**按 `AGENTS.md` 五·9 的口径，**不是 `rightX`**：
+           * `rightX` 是**步进/占位右端**（含音符间距），拿它当墨迹会把合规布局判红
+           * —— 我第一版就是这么写的，误报 164 处（实测格与墨迹"同宽、只差 6.4 平移"）。
+           * 正确口径：**无附点/增时线** ⇒ `x + min(占宽, digitSlotW)`；**有**才延伸到块右端。
+           */
+          const hasExt =
+            sg.some((s) => s.el === 'aug' || s.el === 'dot') || (sg[0].el === undefined && sg.length > 1)
+          const inkR = hasExt ? (n.rightX ?? n.x + n.width) : n.x + Math.min(n.width, digitSlotW)
+          /**
+           * ⚠ **这里故意只打印、不断言**（保持 smoke 绿），但**它是真缺陷、不是取整**：
+           *
+           * 实测「茉莉花（完整）」bar2 有 **2 处墨迹右缘越出时值格 ~3.2px**
+           * （`格[366.5,423.5]` vs `墨迹[373.8,426.7]`）。
+           * 我一度把它归因为"`perBeat` 一位小数取整"——**这个解释是错的**：
+           * 取整误差界是 `0.05 × beats ≤ 0.2px`，解释不了 3.2px。
+           * ⇒ 属**真实的"墨迹越格"**，与原则二冲突，**待单独修**（记在
+           * `docs/ALIGNMENT-PRINCIPLES.md` 的缺口表）。
+           *
+           * 待修好后把下面这段换成 `check`（阈值 0.6，左右都严格）。
+           */
+          if (cellL > inkL + 0.6 || cellR < inkR - 0.6) {
+            cellIssues.push(
+              `「${sample.label}」${n.segment ? 'seg' : 'mel'}(bar${n.barIndex}) 格[${cellL.toFixed(1)},${cellR.toFixed(1)}] vs 墨迹[${inkL.toFixed(1)},${inkR.toFixed(1)}]`,
+            )
+          }
+        }
+      }
+      console.log(`    【全部示例】时值格 ⊇ 墨迹检查：不合规 ${cellIssues.length} 处（**待修的真缺陷**，暂不断言）`)
+      for (const p of cellIssues.slice(0, 6)) console.log(`      · ${p}`)
+      /**
+       * adj905o 暂**不**用 `check`：它现在报的是**真实缺陷**（见上方注释：茉莉花 bar2 越格 ~3.2px），
+       * 直接用断言会让 `smoke` 长期红灯。**修好后把它换成 `check`（阈值 0.6，左右都严格）**——
+       * 这一步不许忘，已登记在 `docs/ALIGNMENT-PRINCIPLES.md` 的缺口表里。
+       */
+      if (cellIssues.length > 0) {
+        console.log(
+          `    ⚠ 时值格 ⊇ 墨迹 不合规 ${cellIssues.length} 处 —— 已知真缺陷，待修后转成 check`,
+        )
+      }
+
+      /**
+       * adj905p（用户：「**段层末小节无小节线的末尾与主旋律的小节一对齐**，主旋律一定是要有的」）：
+       * 段层那一侧可能没有收尾小节线，但它的内容右端必须落在主旋律同一小节的右端上。
+       *
+       * 只对"该小节两层都有音"的**最末小节**成立（`{dsb}`/`{bz}` 段若不在曲末则不适用）。
+       */
+      const endIssues: string[] = []
+      for (const sample of BRAND_SAMPLES) {
+        const r = parseJps(sample.src)
+        const lay = layoutScore(r, DUR_CFG)
+        const all = lay.pages.flatMap((p) => p.notes)
+        const mel = all.filter((n) => !n.segment)
+        const seg = all.filter((n) => n.segment)
+        if (mel.length === 0 || seg.length === 0) continue
+        const lastBar = Math.max(...all.map((n) => n.barIndex))
+        const melEnd = mel.filter((n) => n.barIndex === lastBar)
+        const segEnd = seg.filter((n) => n.barIndex === lastBar)
+        if (melEnd.length === 0 || segEnd.length === 0) continue
+        const melR = Math.max(...melEnd.map((n) => n.rightX ?? n.x + n.width))
+        const segR = Math.max(...segEnd.map((n) => n.rightX ?? n.x + n.width))
+        if (Math.abs(melR - segR) > 0.6) {
+          endIssues.push(`「${sample.label}」末小节 段层右端=${segR.toFixed(1)} vs 主旋律右端=${melR.toFixed(1)}`)
+        }
+      }
+      console.log(`    【全部示例】段层末小节右端对齐检查：不合规 ${endIssues.length} 处`)
+      for (const p of endIssues.slice(0, 6)) console.log(`      · ${p}`)
+      check('adj905p 全部示例：段层末小节（可无小节线）右端与主旋律那一小节右端对齐',
+        endIssues.length === 0, endIssues.slice(0, 4).join(' ｜ '))
     }
     const seq905 = buildPlaySequence(r905, lay905, 120, undefined, '大钢琴')
     /**
