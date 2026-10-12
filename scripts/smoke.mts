@@ -20567,6 +20567,38 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
           boundsQ.length > 0 && specQ.length === 0, `不合规 ${specQ.length} 条`)
         check('adj905q 负对照：没有音符时不产出任何边界（默认不画）',
           computeDebugBounds([], 13).length === 0)
+        /**
+         * adj905t（用户给截图、我读数）：**用调试几何直接定量** —— 把这几个最小对照谱的
+         * 「主旋律每拍格列（`beat`）」与「段层音符列（`segment`）」的**步进**打印出来。
+         * 步进不同 ⇒ 逐拍累积错开（就是截图里"越往后越偏"的读数）。
+         */
+        const probesT: [string, string][] = [
+          ['例1 段层4音 vs 增时线', 'Q: {bz 1, 3, 5, 3,} 3 - - - ||'],
+          ['例2 对照（两边同构）', 'Q: {bz 1 - - -, } 3 - - - ||'],
+          ['例3 多声部 Q1/Q2', 'Q1: | 1 2 3 4 ||\nQ2: | 1 - - - ||'],
+          ['例4 附点 vs 等分', "Q: {bz 1, 3, 5, 3,} 3. 5 1' 2' ||"],
+          ['例5 两拍最小', 'Q: {bz 1, 3,} 3 - ||'],
+          ['例6 弱起', 'Q: {bz 5, | 1, 3, 5, 3,} 5 | 3 - - - ||'],
+        ]
+        for (const [labelT, qT] of probesT) {
+          const rT = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\n${qT}\n`)
+          const layT = layoutScore(rT, DUR_CFG)
+          const bT = computeDebugBounds(layT.pages.flatMap((p) => p.notes), 13)
+          /** adj905t：**按层分组**（`isSeg`）—— 否则两层的线混在一起，读数会出现"成对的列" */
+          const stepsT = (kind: 'beat' | 'segment', seg: boolean) => {
+            const xs = bT
+              .filter((v) => v.kind === kind && v.side === 'L' && v.isSeg === seg)
+              .map((v) => v.x)
+            const uniq = [...new Set(xs.map((v) => Math.round(v * 10) / 10))].sort((a, b) => a - b)
+            const ds = uniq.slice(1).map((v, i) => Math.round((v - uniq[i]) * 10) / 10)
+            return `列=${uniq.slice(0, 6).join(',')} 步进=${ds.slice(0, 5).join(',')}`
+          }
+          console.log(`    [${labelT}]`)
+          console.log(`      主旋律拍列(beat/main)  : ${stepsT('beat', false)}`)
+          console.log(`      主旋律音符列(note/main): ${stepsT('note', false)}`)
+          console.log(`      段层音符列(segment)    : ${stepsT('segment', true)}`)
+          console.log(`      段层拍列(beat/seg)     : ${stepsT('beat', true)}`)
+        }
       }
     }
     const seq905 = buildPlaySequence(r905, lay905, 120, undefined, '大钢琴')

@@ -337,6 +337,12 @@ export interface DebugBound {
   yBottom: number
   /** 相邻音符交替颜色用（音符在本 track 里的序号奇偶） */
   colorIndex: number
+  /**
+   * adj905t：**是否段层音符**（`{bz}`/`{dsb}`/`{tp}`）。
+   * 供消费方按层分组统计 —— 否则"主旋律的拍子线"与"段层的拍子线"会被混在一起，
+   * 读数出现"成对的列"（实测例 1 打印出 `56` 与 `62.5` 相邻，正是两层的同一拍各画了一条）。
+   */
+  isSeg: boolean
 }
 
 export function computeDebugBounds(
@@ -356,7 +362,7 @@ export function computeDebugBounds(
     const yBottom = n.y + 4
     const yMid = (yTop + yBottom) / 2
     const push = (x: number, side: 'L' | 'R', kind: DebugBound['kind']): void => {
-      out.push({ x, side, kind, yTop, yMid, yBottom, colorIndex: i % 2 })
+      out.push({ x, side, kind, yTop, yMid, yBottom, colorIndex: i % 2, isSeg: n.segment !== undefined })
     }
     // ① **本体（墨迹）边界**：无附点/增时线时只到数字槽宽（见 `AGENTS.md` 五·9 的墨迹口径）
     const hasExt = sg.some((s) => s.el === 'aug' || s.el === 'dot')
