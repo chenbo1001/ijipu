@@ -56,6 +56,16 @@
   box-shadow: none;
   background: transparent;
   padding: 12px 16px;
+  /**
+   * adj899（用户反馈「示例的脚本块没有允许自动换行，应开启自动换行，不然脚本看不全」）：
+   * 原来没写 `white-space`，于是继承 `pre` 的默认 `pre` ⇒ **长曲行不折行、右侧被截掉**。
+   * 改 `pre-wrap`：保留源码的换行与缩进，同时允许自动折行。
+   * `overflow-wrap: anywhere` 兜住"单个超长 token"（音符之间虽有空格，
+   * 但 `{dsb 1 2 3 4 | 5 6 7 1'}` 这类段标记、`|["1."` 这类组合仍可能整块超宽）。
+   */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: visible;
 }
 
 .jps-block-preview {

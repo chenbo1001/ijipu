@@ -825,6 +825,7 @@ async function main() {
       const cardDesktop = await measureCard()
       check('adj897 桌面视口下同样成立（两类卡都是图标与标题一行，不是只在手机上改的）',
         cardsOk(cardDesktop), JSON.stringify(cardDesktop))
+      // ⚠ adj899 的换行测试放在下面"切示例"那组**之后**（它要点击示例，会改变初始状态）
       check('首页入口链接 6 个（应用/手册/语法/桌面/插件/赞赏）', home.entries === 6, String(home.entries))
       check('首页顶栏导航 ≥ 6 条', home.navLinks >= 6, String(home.navLinks))
       check('首页主按钮指向 `/app/`', home.cta === '/app/', home.cta)
@@ -1011,6 +1012,36 @@ async function main() {
         !!swap && swap.after > 0 && swap.after !== swap.before && swap.active === true, JSON.stringify(swap))
       await evalJs(c, `document.querySelectorAll('[data-pg-sample]')[0]?.click()`)
       await sleep(900)
+
+      /**
+       * adj899（用户反馈「示例的脚本块没有允许自动换行，应开启自动换行，不然脚本看不全」）：
+       * 量**真实溢出**而不是只看 CSS 属性 —— 切到曲行最长的「茉莉花（完整）」，
+       * 若脚本块不折行，它的 `scrollWidth` 必然远大于 `clientWidth`。
+       *
+       * ⚠ 这段必须待在"切示例"那组**之后**：它自身要点击示例，会把块的初始状态改掉。
+       * 跑完**切回索引 0**，不给后面的断言留副作用。
+       */
+      await evalJs(c, `document.querySelectorAll('[data-pg-sample]')[1]?.click()`)
+      await sleep(500)
+      const codeBox = await evalJs(
+        c,
+        `(() => {
+          const pre = document.querySelector('#pg-block .jps-block-code')
+          if (!pre) return null
+          return {
+            ws: getComputedStyle(pre).whiteSpace,
+            wrap: getComputedStyle(pre).overflowWrap,
+            scrollW: pre.scrollWidth,
+            clientW: pre.clientWidth,
+          }
+        })()`,
+      )
+      check('adj899 示例脚本块会**自动换行**（`pre-wrap`，长曲行不再被横向截掉）',
+        codeBox?.ws === 'pre-wrap', JSON.stringify(codeBox))
+      check('adj899 长曲行（茉莉花）不再横向溢出：`scrollWidth ≤ clientWidth`（用户要求"不然看不全"）',
+        !!codeBox && codeBox.scrollW <= codeBox.clientW + 2, JSON.stringify(codeBox))
+      await evalJs(c, `document.querySelectorAll('[data-pg-sample]')[0]?.click()`)
+      await sleep(500)
 
       const pgErrs = collectErrors(mark)
       check('首页（含示例切换与引擎加载）无控制台错误 / 无本站 4xx',

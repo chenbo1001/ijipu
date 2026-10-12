@@ -20076,7 +20076,12 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       .split('\n')
       .filter((l) => /^\s*Q\d*\s*:/.test(l))
       .pop() ?? ''
-  const noEnd = BRAND_SAMPLES.filter((s) => !/\|\|\s*$/.test(lastMusicLine(s.src).trim())).map((s) => s.label)
+  /**
+   * ⚠ 允许终止线后面再跟一个**房子收尾** `]`（`… ||]`）——
+   * 那是"终止线 + 跳房子结束括号"的合法写法（引擎对它**零告警**），
+   * 不能因为它最后一个字符不是 `|` 就判成"没收尾"。
+   */
+  const noEnd = BRAND_SAMPLES.filter((s) => !/\|\|\]?\s*$/.test(lastMusicLine(s.src).trim())).map((s) => s.label)
   check('adj898 每个示例的**最后一行乐谱**都以 `||` 收尾（用户明确要求）',
     noEnd.length === 0, noEnd.length > 0 ? `未收尾：${noEnd.join('、')}` : '')
 
