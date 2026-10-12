@@ -598,16 +598,21 @@ export function PreviewPane() {
                     画法按用户口径：**左边界只画上半部、右边界只画下半部**，
                     长度、分界与配色由引擎的 `computeDebugBounds` 给出（此处只消费）。 */}
                 {dbgOfPage.map((b, bi) => {
+                  /**
+                   * adj905q 配色修正（用户看第一版图后暴露的问题）：原来"拍子=暖橙 `#e0533d`"与
+                   * "增时线=金橙 `#c9922b`"**太接近**，图上分不出哪条是哪条 —— 调试线的首要要求是
+                   * **一眼可辨**。改成高对比：拍子=红、增时线=青。
+                   */
                   const palette =
                     b.kind === 'beat'
-                      ? ['#e0533d', '#f08a4b'] // 拍子边界：暖色
+                      ? ['#d92b2b', '#f26060'] // 拍子边界：红
                       : b.kind === 'aug'
-                        ? ['#c9922b', '#e0b45c'] // 增时线边界：金橙
+                        ? ['#0f9aa8', '#48c4d0'] // 增时线边界：青
                         : b.kind === 'note'
-                          ? ['#8e5bd0', '#b28ae0'] // 音符时值边界：紫色
+                          ? ['#8e5bd0', '#b28ae0'] // 音符时值边界：紫
                           : b.kind === 'ink'
-                            ? ['#2f7fd0', '#5aa9e6'] // 本体（墨迹）边界：蓝色
-                            : ['#3f9e5a', '#7fc98f'] // 段层：绿色
+                            ? ['#2f7fd0', '#5aa9e6'] // 本体（墨迹）边界：蓝
+                            : ['#3f9e5a', '#7fc98f'] // 段层：绿
                   const stroke = palette[b.colorIndex % palette.length]
                   const top = b.side === 'L' ? b.yTop : b.yMid
                   const bottom = b.side === 'L' ? b.yMid : b.yBottom
