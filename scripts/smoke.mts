@@ -20335,6 +20335,49 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
           `    主旋律 width: ${melNotesG.slice(0, 6).map((n) => n.width.toFixed(1)).join(', ')}`,
         )
       }
+
+      /**
+       * **adj905i（锁住本轮修复）**：段层/多声部在**同一拍位**的 `x`，必须等于
+       * 「**主旋律那一拍的格起点**」= `主旋律音的 x + j × (width / 该音时值)`。
+       *
+       * 为什么需要它（`adj905d` 抓不到）：`adj905d` 只比较**两层都有音**的拍位；
+       * 而本例第 4 拍主旋律**没有数字**（是增时线）⇒ `adj905d` 看不见。
+       * 这条按"格起点"推算，所以能覆盖"该拍没有主旋律数字"的情况。
+       *
+       * 修前实测：段层第 4 拍落在 `147.8`，格起点应为 `144.65` ⇒ 差 3.15px（会被本断言抓住）；
+       * 修后 `144.7` == 格起点 ✅
+       */
+      const beatIssues: string[] = []
+      for (const sample of BRAND_SAMPLES) {
+        const r = parseJps(sample.src)
+        const lay = layoutScore(r, DUR_CFG)
+        const all = lay.pages.flatMap((p) => p.notes)
+        const mel = all.filter((n) => !n.segment)
+        const lower = all.filter((n) => n.segment)
+        for (const m of mel) {
+          const D = m.duration ?? 0
+          if (D <= 0) continue
+          for (let j = 0; j < Math.round(D); j++) {
+            const expect = m.x + (j * m.width) / D
+            const bp = (m.beatPos ?? 0) + j
+            const peer = lower.find(
+              (n) =>
+                n.id.group === m.id.group &&
+                n.barIndex === m.barIndex &&
+                Math.abs((n.beatPos ?? 0) - bp) < 1e-6,
+            )
+            if (peer && Math.abs(peer.x - expect) > 0.6) {
+              beatIssues.push(
+                `「${sample.label}」小节${m.barIndex} 第${j + 1}拍: 段层 x=${peer.x.toFixed(1)} vs 格起点 ${expect.toFixed(1)}`,
+              )
+            }
+          }
+        }
+      }
+      console.log(`    【全部示例】段层同拍位格起点检查：不合规 ${beatIssues.length} 处`)
+      for (const p of beatIssues.slice(0, 6)) console.log(`      · ${p}`)
+      check('adj905i 全部示例：段层音与主旋律**同一拍位的格起点**一致（修前第 4 拍差 3.15px）',
+        beatIssues.length === 0, beatIssues.slice(0, 4).join(' ｜ '))
     }
     const seq905 = buildPlaySequence(r905, lay905, 120, undefined, '大钢琴')
     /**
