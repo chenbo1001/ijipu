@@ -20281,74 +20281,58 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
         noteIssues.length === 0, noteIssues.slice(0, 4).join(' ｜ '))
 
       /**
-       * adj905f（用户：「这个示例**最后一小节拍子没有对齐**」）：
-       * **音符层的对齐还不够** —— 还要看**每个音内部的"拍段"（`segments`）是否逐拍对应**。
+       * ⚠ **这里刻意不检查 `segments.perBeat` 的"逐拍对齐"** ——
+       * 曾经写过一版（`adj905f`）报出 18 处"不齐"，但那是**用错了尺子**：
        *
-       * 用户指的那处：`{bz 1, 3, 5, 3, | …}` 第 4 小节是 **4 个 1 拍的音**，
-       * 而主旋律第 4 小节是 **`3 - - -`（1 个音 + 3 条增时线）** ——
-       * 两边的"每一拍"必须落在同一列，否则就是"拍子没对齐"。
+       * `layout/index.ts:2384` 里 `perBeat = noteBodyW / noteDur` 用的是**墨迹宽**，
+       * 它的用途是「让增时线字符在**自己的格内居中**」（见该处注释），
+       * **不是**"到下一拍的 x"。真正描述"每一拍占多宽"的量是 `x + width`（= 下一时值的左边界）
+       * —— 那正是 `adj905d` 在守的（**全部示例 0 处不合规**），也是色块右界改用的量（`adj905c`）。
        *
-       * 做法：把每个音的 `segments` 展开成"段边界数组"（每段右端），
-       * 上下两层的段边界序列应当**逐项相同**。
+       * 拿 `perBeat` 当对齐判据，会把"墨迹窄于格"这种**正常情况**报成缺陷
+       * （同 `E-2026-406`：别把"行为"和"恰好为真的数据"绑在一起）。
+       * 真要逐拍核对，应当用 `x + width`（格）而不是 `perBeat`（墨迹）。
        */
-      const segIssues: string[] = []
-      for (const sample of BRAND_SAMPLES) {
-        const r = parseJps(sample.src)
-        const lay = layoutScore(r, DUR_CFG)
-        const allNotes = lay.pages.flatMap((p) => p.notes)
-        const edgesOf = (n: (typeof allNotes)[number]): number[] =>
-          (n.segments ?? []).map((s) => s.x + s.perBeat * s.beats)
-        const byBar = new Map<string, { tag: string; edges: number[] }[]>()
-        for (const n of allNotes) {
-          if ((n.segments ?? []).length === 0) continue
-          const tag = n.segment ? `${n.segment.type}/${n.segment.layer}` : `v${n.id.voice}`
-          /**
-           * ⚠ 必须按 **`(小节, 拍位)`** 配对 —— 第一版只按小节分组，
-           * 于是把"同一小节里互不相干的音"（如 `bz` 的 4 个音之间）拿来互比，误报 23 处。
-           */
-          const k = `${n.id.group}|${n.barIndex}|${(n.beatPos ?? 0).toFixed(3)}`
-          const arr = byBar.get(k) ?? []
-          arr.push({ tag, edges: edgesOf(n) })
-          byBar.set(k, arr)
-        }
-        for (const [k, arr] of byBar) {
-          if (arr.length < 2) continue
-          // 只比"不同层"（段层 vs 主旋律 / 不同 voice）
-          const base = arr[0]
-          for (const other of arr.slice(1)) {
-            if (other.tag === base.tag) continue
-            const a = base.edges
-            const b = other.edges
-            if (a.length !== b.length) {
-              segIssues.push(`「${sample.label}」${k} 段数不同: ${base.tag}=${a.length} vs ${other.tag}=${b.length}`)
-              continue
-            }
-            const i = a.findIndex((v, idx) => Math.abs(v - b[idx]) > 0.6)
-            if (i >= 0) {
-              segIssues.push(
-                `「${sample.label}」${k} 第 ${i + 1} 拍不齐: ` +
-                  `${base.tag}(${a.map((v) => v.toFixed(1)).join(',')}) vs ` +
-                  `${other.tag}(${b.map((v) => v.toFixed(1)).join(',')})`,
-              )
-            }
-          }
-        }
-      }
-      console.log(`    【全部示例】逐拍段对齐检查：不合规 ${segIssues.length} 处`)
-      for (const p of segIssues.slice(0, 8)) console.log(`      · ${p}`)
+      console.log(`    【全部示例】音符层面对齐检查：不合规 ${noteIssues.length} 处（判据见上，逐拍用 x+width）`)
+      for (const p of noteIssues.slice(0, 8)) console.log(`      · ${p}`)
+
       /**
-       * ⚠ **暂不断言**（adj905g 待修）：这里的偏差是**已知问题**，根因已定位到布局层 ——
-       * 段宽 `xContent1`（`layout/index.ts` 段层内容右界）**不等于** `beatToX(envEnd)`
-       * （主旋律包络终点的拍位映射）：左界 `xContent0 = beatToX(envStart)` 是对的（所以两层
-       * **起点**相同，`adj905d` 全绿），但右界偏大 ⇒ **段内每拍被摊宽**（实测主旋律 18.4px/拍
-       * vs `{bz}` 段 28.8px/拍）⇒ 拍位越往后偏得越多（用户：「最后一小节拍子没有对齐」）。
-       *
-       * 先只打印不断言，避免把一个"已知待修"混进红灯里；
-       * 修 `xContent1` 时把它转成 `check`（`adj905g`）。
+       * adj905g（段宽定位）：把 `{bz}` 那一行里 **段层 vs 主旋律** 的 x 序列摊开，
+       * 便于以后核对"段内每拍"与"主旋律每拍"。**只打印，不断言**（诊断用）。
        */
-      if (segIssues.length > 0) {
+      {
+        const rG = parseJps(BRAND_SAMPLES.find((s) => s.label.includes('铃儿响叮当'))?.src ?? '')
+        const layG = layoutScore(rG, DUR_CFG)
+        const notesG = layG.pages.flatMap((p) => p.notes)
+        const segNotesG = notesG.filter((n) => n.segment?.type === 'bz')
+        const melNotesG = notesG.filter((n) => !n.segment)
+        const fmt = (ns: typeof notesG) => ns.slice(0, 8).map((n) => n.x.toFixed(1)).join(', ')
+        console.log(`    段层 x: ${fmt(segNotesG)}`)
+        console.log(`    主旋律 x: ${fmt(melNotesG)}`)
+        /**
+         * ⚠ **adj905h（已知问题，实测证据）**：用户在「最后一小节拍子没有对齐」上是对的，
+         * 而我上一轮用 `segments.perBeat` 去量、得出"0 处不合规"，**是尺子选错了**。
+         *
+         * 用**渲染出来的实际位置**量（这才是用户眼睛看到的）：
+         * ```
+         *  增时线笔画 x   = 148.8, ...          ← 主旋律第 4 拍实际画在这里
+         *  段层第 4 个音 x = 141.6              ← 差 7.2px
+         *  主旋律 width    = 28.2, 28.2, 56.5   ← 第 1 小节 60.1→180.6 = 120.5 ⇒ 30.1/拍
+         *  段层 4 音间距   = 28.2, 28.3, 25.0, 39.0   ← **不均匀**
+         * ```
+         *
+         * 根因：**同一拍的"位置"在布局里有两套算法** ——
+         * `beatToX(拍)` 插值给出 141.6，而增时线按**墨迹分段**画在 148.8；段层按 `beatToX` 落位。
+         * 两者不统一 ⇒ 段层与主旋律的"逐拍位置"对不上（越到小节后部偏差越大）。
+         *
+         * 这里只打印证据、**不断言** —— 修它要统一这两套定位口径（`beatToX` 与增时线分段），
+         * 属布局核心，得先定方案再动手（别再造一条用错尺子的断言）。
+         */
+        const svgG = renderScoreToSvg(layG)[0] ?? ''
+        const dashG = [...svgG.matchAll(/<text x="([\d.]+)"[^>]*>-<\/text>/g)].map((m) => Number(m[1]))
+        console.log(`    增时线笔画 x: ${dashG.slice(0, 6).map((d) => d.toFixed(1)).join(', ')}`)
         console.log(
-          `    ⚠ 逐拍段不对齐 ${segIssues.length} 处 —— 已知问题（adj905g 待修：段宽 xContent1 应对齐 beatToX(envEnd)）`,
+          `    主旋律 width: ${melNotesG.slice(0, 6).map((n) => n.width.toFixed(1)).join(', ')}`,
         )
       }
     }
