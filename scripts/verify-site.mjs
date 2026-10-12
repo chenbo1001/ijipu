@@ -985,7 +985,7 @@ async function main() {
           return { href: href.slice(0, 60), decoded, text: (a.textContent ?? '').trim() }
         })()`,
       )
-      check('adj900 示例区有「在应用里试听这段」入口，链接指向 `/app/?jps=…`',
+      check('adj900 示例区有「在应用里试听」入口，链接指向 `/app/?jps=…`',
         !!handoff && handoff.href.startsWith('/app/?jps='), JSON.stringify(handoff))
       check('adj900 链接里带的是**当前示例（小星星）的完整源码**（含标题行与收尾 `||`）',
         !!handoff && handoff.decoded.includes('B: 小星星') && handoff.decoded.includes('||'),
@@ -998,8 +998,8 @@ async function main() {
       const pgOpenText = await evalJs(c, `document.querySelector('.pg-open')?.textContent ?? ''`)
       check('adj900b 首页试听入口**不提**音色库 / 30MB / 下载（该提示的地方是应用）',
         !/30\s*MB|音色库|下载|音源/i.test(pgOpenText), JSON.stringify(pgOpenText))
-      check('adj900b 那个入口就是一个按钮，文案逐字是「在应用里试听这段」',
-        pgOpenText.trim() === '在应用里试听这段', JSON.stringify(pgOpenText))
+      check('adj900b 那个入口就是一个按钮，文案逐字是「在应用里试听」',
+        pgOpenText.trim() === '在应用里试听', JSON.stringify(pgOpenText))
       check('首屏停在「脚本」标签（预览要按需下引擎，不该在首屏发生）',
         pgInitial?.codeHidden === false && pgInitial?.prevHidden === true, JSON.stringify(pgInitial))
       check('首页这个块声明了显示范围与缩放（`v=` / `z=`，与插件同口径）',
