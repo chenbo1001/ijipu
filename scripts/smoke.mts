@@ -19996,6 +19996,24 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
         /<nav class="doc-switch">[\s\S]*?href="\/manual\/"[\s\S]*?href="\/syntax\/"[\s\S]*?href="\/plugin\/"[\s\S]*?<\/nav>/.test(h),
     ))
 
+  /**
+   * adj905x（**用户口径**）：「**`.jps` 文件和 `.jps` 代码块的曲谱编制方式是不一样的** ——
+   * 至少代码块必须以 ` ```jps ` 围起来、还有参数可以调整，这些要分开介绍；
+   * `.jps` 文件可以使用嵌入版 iJipu 独立编辑，这些也要区分，独立介绍」。
+   *
+   * 这两条守的是**结构**（不是文案）：两种编制方式**各有一节**，且**三处关键差异**都写到 ——
+   * 光有正文、没有这个结构，读者会把"两种写法"当成同一回事（用户正是这么反馈的）。
+   * ⚠ 若这条红了：先确认"用户是否还要求分开介绍"，再改断言；别为了让红灯变绿去删正文章节。
+   */
+  const pluginGuideMd = readSrc('docs/PLUGIN-GUIDE.md')
+  check('adj905x 插件手册把「代码块」与「`.jps` 文件」**分开成两节**独立介绍',
+    /## 四、写法 A：/.test(pluginGuideMd) && /## 五、写法 B：/.test(pluginGuideMd) &&
+      /## 三、两种编制方式/.test(pluginGuideMd))
+  check('adj905x 插件手册写到两者的关键差异（围栏必须 | 只有代码块能调 v=/z= | 文件可用嵌入版 iJipu 独立编辑）',
+    pluginGuideMd.includes('必须用围栏围起来') &&
+      pluginGuideMd.includes('只有代码块有参数') &&
+      pluginGuideMd.includes('用嵌入版 iJipu 独立编辑'))
+
   // ---- ② 首页必须够轻：不引 React、不引引擎（否则"介绍页"要白下几百 KB） ----
   const landingSrc = readSrc('src/landing/main.ts')
   check('adj876 首页脚本不 import react / @ijipu/engine',
