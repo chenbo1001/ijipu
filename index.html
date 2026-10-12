@@ -8,7 +8,7 @@
     <title>爱记谱 iJipu —— 码即成，谱自现 | 代码式简谱制谱引擎</title>
     <meta
       name="description"
-      content="用 .jps 文本写简谱：左边敲代码、右边立刻出谱，实时试听、一键导出 PDF/PNG/SVG。免安装、免注册、免费开源，兼容「番茄简谱」脚本。另有 Windows 桌面版与 Obsidian 插件。"
+      content="用 .jps 文本写简谱：右边敲代码、左边立刻出谱，实时试听、一键导出 PDF/PNG/SVG。免安装、免注册、免费开源，兼容「番茄简谱」脚本。另有 Windows 桌面版与 Obsidian 插件。"
     />
     <meta name="author" content="蜗牛🐌" />
     <meta name="keywords" content="简谱,打谱,制谱,爱记谱,iJipu,jps,番茄简谱,代码制谱,乐谱制作" />
@@ -32,18 +32,33 @@
     <meta property="og:title" content="爱记谱 iJipu —— 码即成，谱自现" />
     <meta
       property="og:description"
-      content="用 .jps 文本写简谱：左边敲代码、右边立刻出谱，实时试听、一键导出。免安装、免注册、免费开源。"
+      content="用 .jps 文本写简谱：右边敲代码、左边立刻出谱，实时试听、一键导出。免安装、免注册、免费开源。"
     />
     <meta property="og:image" content="/site/og.png" />
     <meta name="twitter:card" content="summary_large_image" />
 
     <!--
-      防白闪：landing.css 由 JS 加载（Vite 的 CSS chunk），在它到位之前先用这几行把
-      底色与文字色定住，避免"白底黑字闪一下再变深色"。值必须与 brand/tokens.ts 一致。
+      防闪烁（adj876 / adj878）：`--site-*` 变量由 JS 注入、`landing.css` 也要等 JS 才加载，
+      所以这里先用一段**内联脚本**把主题模式定到 <html> 上，再用属性选择器给出兜底底色——
+      否则选了浅色的人会先看到一帧深色。
+      ⚠ 判定逻辑与 `brand/siteVars.ts` 的 `initialSiteMode()` 必须一致（改一处要改两处）；
+      ⚠ 两个兜底底色与 `SITE_BG` 也必须一致。
     -->
+    <script>
+      (function () {
+        var m
+        try { m = localStorage.getItem('ijipu.site.theme') } catch (e) {}
+        if (m !== 'light' && m !== 'dark') {
+          try { m = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark' } catch (e) { m = 'dark' }
+        }
+        document.documentElement.dataset.siteMode = m
+      })()
+    </script>
     <style>
       html { background: #0f1526; color-scheme: dark; }
+      html[data-site-mode='light'] { background: #f2f5fb; color-scheme: light; }
       body { margin: 0; color: #e8ecf8; font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+      html[data-site-mode='light'] body { color: #1c2540; }
     </style>
   </head>
   <body>
@@ -62,6 +77,15 @@
           <a data-l="obsidianRepoUrl" href="#" rel="noreferrer">Obsidian 插件</a>
           <a data-l="repoUrl" href="#" rel="noreferrer">GitHub</a>
         </nav>
+        <!--
+          adj878（用户要求）：右上角的深浅主题开关。
+          两个图标**都由 CSS 按 `data-site-mode` 显示**——于是无 JS 时它也能显示正确的那个，
+          JS 只负责"点一下切过去 + 记住"。放在主按钮左边，让「打开应用」始终占据最右侧。
+        -->
+        <button class="theme-toggle" id="theme-toggle" type="button" title="切换深浅主题" aria-label="切换深浅主题">
+          <span class="ico-sun" aria-hidden="true">🌞</span>
+          <span class="ico-moon" aria-hidden="true">🌙</span>
+        </button>
         <a class="btn btn-primary topbar-cta" href="/app/">打开应用 →</a>
         <button class="topbar-burger" id="burger" type="button" aria-label="展开菜单" aria-expanded="false">☰</button>
       </div>
@@ -74,7 +98,7 @@
           <p class="hero-kicker">代码式简谱制谱引擎</p>
           <h1>码即成，谱自现</h1>
           <p class="hero-sub">
-            用 <code>.jps</code> 文本写简谱——左边敲代码，右边立刻出谱。<br />
+            用 <code>.jps</code> 文本写简谱——右边敲代码，左边立刻出谱。<br />
             实时试听、一键导出，免安装、免注册、免费开源。
           </p>
           <div class="hero-actions">
@@ -87,8 +111,8 @@
         </div>
         <figure class="hero-shot">
           <!-- 主视觉是首屏唯一的图，明确 eager + 高优先级；其余插图一律 lazy（见各 img） -->
-          <img fetchpriority="high" decoding="async" src="/site/hero.webp" alt="爱记谱 iJipu 拆分视图：左侧 .jps 代码，右侧实时渲染的简谱" />
-          <figcaption>左边写代码，右边同步出谱</figcaption>
+          <img fetchpriority="high" decoding="async" src="/site/hero.webp" alt="爱记谱 iJipu 拆分视图：左侧实时渲染的简谱，右侧 .jps 代码" />
+          <figcaption>右边写代码，左边同步出谱（应用默认方向，可对调）</figcaption>
         </figure>
       </section>
 
@@ -106,6 +130,46 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
         <p class="demo-note">
           高低音点 <code>'</code> <code>,</code>、时值线 <code>-</code> <code>/</code>、附点 <code>.</code>、
           连音线 <code>( )</code>——改一个音符，就是改一个字符。
+        </p>
+      </section>
+
+      <!--
+        现场试一段（adj877，用户要求）：两个标签「脚本 / 预览」，点预览就用**应用自己的引擎**渲染。
+        ⚠ 默认停在「脚本」标签是刻意的：预览要先下载引擎 chunk（约 68KB gzip），
+          而首页的定位是"够轻的介绍页"（几 KB JS）⇒ 只有真的想试的人才付这份钱。
+          行为见 `src/landing/playground.ts`（那里有详细的取舍说明）。
+      -->
+      <section class="playground" id="playground">
+        <h2>自己改一段试试</h2>
+        <p class="pg-lead">
+          下面这段谱面可以直接改。点「预览」，用的是<strong>与应用里同一个引擎</strong>，渲染结果一致。
+        </p>
+        <div class="pg-tabs" role="tablist" aria-label="脚本与预览">
+          <button type="button" role="tab" class="active" aria-selected="true" data-pg-tab="code">脚本</button>
+          <button type="button" role="tab" aria-selected="false" data-pg-tab="preview">预览</button>
+        </div>
+        <div class="pg-body">
+          <div class="pg-pane" data-pg-pane="code">
+            <textarea id="pg-src" rows="7" spellcheck="false" aria-label=".jps 谱面脚本">Q: 1 2 3 4 | 5 6 7 1' |</textarea>
+            <div class="pg-samples">
+              <span>试试这些：</span>
+              <button type="button" data-pg-sample="0">最小示例</button>
+              <button type="button" data-pg-sample="1">茉莉花</button>
+              <button type="button" data-pg-sample="2">送别（双行歌词）</button>
+            </div>
+          </div>
+          <div class="pg-pane pg-pane-preview" data-pg-pane="preview" hidden>
+            <div class="pg-out" id="pg-out"></div>
+            <div class="pg-bar">
+              <span class="pg-msg" id="pg-msg"></span>
+              <button type="button" id="pg-rerender">↻ 重新渲染</button>
+            </div>
+          </div>
+        </div>
+        <p class="pg-hint">
+          每行以命令字开头：<code>Q:</code> 曲、<code>C:</code> 词、<code>B:</code> 标题、<code>V:</code> 版本……
+          完整写法看<a href="/syntax/">脚本语法说明</a>。
+          另外：网页端拿不到精确的字形度量，预览用的是估算宽度，可能与编辑器里差一两个像素——正式出谱请到<a href="/app/">应用</a>里看。
         </p>
       </section>
 
@@ -162,8 +226,8 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
           <div class="deep-text">
             <h2>写谱像写代码一样爽</h2>
             <p>
-              三种视图随时切换：<b>编码</b>只专注谱面，<b>拆分</b>左右对照改一处看一处，
-              <b>预览</b>只看成品、专心打磨排版。
+              三种视图随时切换：<b>编码</b>只专注谱面，<b>拆分</b>左右对照改一处看一处
+              （默认左谱面、右代码，两个方向可对调），<b>预览</b>只看成品、专心打磨排版。
             </p>
             <p>语法有错时，编辑器里直接写明「哪里错 + 正确写法」，点一下跳到出错位置。</p>
           </div>
@@ -199,6 +263,44 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
           </ul>
           <p class="who-note">用爱记谱写简谱的人，我们称为「<b>谱师</b>」（Score Smith）。</p>
         </div>
+      </section>
+
+      <!--
+        Obsidian 插件（adj877，用户要求"加大插件的介绍"）：独立成一整块，含功能清单、安装入口与示意图。
+        图 `obsidian.webp` 是"仿笔记"示意图——**谱面部分是引擎真实渲染出来的**（由 verify-site 生成），
+        只是外面套了一个模仿 Obsidian 笔记窗口的壳（本机没有 Obsidian 环境，不假装是真截图）。
+      -->
+      <section class="obsidian" id="obsidian">
+        <div class="ob-text">
+          <p class="ob-kicker">Obsidian 插件</p>
+          <h2>在笔记里直接写谱</h2>
+          <p>
+            装好插件后，在任意笔记里写一个 <code>```jps</code> 代码块，它就会渲染成简谱——就是右边这样
+            （渲染区右上角还有 <b>▶ 试听</b>）。几句谱直接写在笔记里，不必为它单独建一个文件。
+          </p>
+          <ul class="ob-points">
+            <li><b>代码块即乐谱</b>：<code>```jps</code> 渲染成 SVG，多页自动分页；语法错了只提示、不打断笔记正文</li>
+            <li><b>也能管 .jps 文件</b>：链接或内联嵌入进笔记，双击用插件打开</li>
+            <li><b>桌面端带完整编辑器</b>：点左侧栏图标打开内嵌的 iJipu（手机端用 Obsidian 自己的编辑器 + 语法着色与错误提示，点「看谱」回到预览）</li>
+            <li><b>试听</b>：Web Audio 现场合成，不需要任何音频文件</li>
+            <li><b>排版能拖</b>：显示辅助虚线后直接拖，松手写回该谱源码的 <code># jps-config</code>（与应用的设置一脉相承）</li>
+            <li><b>默认裁到墨迹</b>：谱面视图只显示有内容的部分，整页白边不占地方；也可切「整页 / 满宽」</li>
+            <li><b>电脑手机都支持</b>：Windows / macOS / Linux / Android / iOS</li>
+          </ul>
+          <div class="ob-actions">
+            <a class="btn btn-primary" data-l="obsidianMarketUrl" href="#">在 Obsidian 里安装</a>
+            <a class="btn btn-ghost" data-l="obsidianRepoUrl" href="#" rel="noreferrer">看源码 / 手动安装</a>
+          </div>
+          <p class="ob-note">
+            安装：Obsidian →「设置 → 第三方插件 → 浏览」→ 搜 <b>iJipu</b> → 安装并启用。
+            手动安装则把 <code>main.js</code> / <code>manifest.json</code> / <code>styles.css</code>
+            放进 <code>&lt;你的库&gt;/.obsidian/plugins/ijipu/</code>。
+          </p>
+        </div>
+        <figure class="ob-shot">
+          <img loading="lazy" decoding="async" src="/site/obsidian.webp" alt="在 Obsidian 笔记里用 iJipu 插件渲染简谱：笔记正文中的 jps 代码块下方直接显示乐谱" />
+          <figcaption>笔记里的 <code>```jps</code> 代码块 → 简谱 + ▶ 试听</figcaption>
+        </figure>
       </section>
 
       <!-- 一排入口链接（与顶栏互为双保险） -->

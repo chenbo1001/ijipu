@@ -18,9 +18,22 @@
       正文由 `src/docs/manual.ts` 在运行时注入（#doc-body），这里只留骨架。
       防白闪：在样式表到位前先把底色定住。
     -->
+    <!-- adj878：主题必须在样式生效前定下来（`--site-*` 变量由 JS 注入），否则浅色用户会先看到一帧深色 -->
+    <script>
+      (function () {
+        var m
+        try { m = localStorage.getItem('ijipu.site.theme') } catch (e) {}
+        if (m !== 'light' && m !== 'dark') {
+          try { m = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark' } catch (e) { m = 'dark' }
+        }
+        document.documentElement.dataset.siteMode = m
+      })()
+    </script>
     <style>
       html { background: #0f1526; color-scheme: dark; }
+      html[data-site-mode='light'] { background: #f2f5fb; color-scheme: light; }
       body { margin: 0; color: #e8ecf8; font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+      html[data-site-mode='light'] body { color: #1c2540; }
     </style>
   </head>
   <body>
@@ -35,6 +48,13 @@
           <a href="/manual/">操作手册</a>
           <a href="/syntax/">脚本语法说明</a>
         </nav>
+        <!-- adj878：文档页也给同一个深浅开关（与首页同一套 `--site-*` 变量，图标由 CSS 按模式显示） -->
+        <button class="theme-toggle" id="theme-toggle" type="button" title="切换深浅主题" aria-label="切换深浅主题">
+          <span class="ico-sun" aria-hidden="true">🌞</span>
+          <span class="ico-moon" aria-hidden="true">🌙</span>
+        </button>
+        <!-- adj877（用户要求）：顶栏给一个明确的「首页」链接（logo 与页脚也都能回，但都容易被忽略） -->
+        <a class="doc-home" href="/">← 首页</a>
         <a class="doc-open" href="/app/">打开应用 →</a>
       </div>
     </header>

@@ -2607,6 +2607,22 @@ body {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
+/**
+ * adj877（用户要求「要有返回首页的链接点」）：状态栏右侧的「官网首页」。
+ * 说明：网页版点它跳 `/`（回官网介绍页）；桌面壳里改为用系统浏览器打开官网
+ * （壳里没有地址栏也没有后退，跳过去会困在介绍页）——行为见 `ui/EditorFootBar.tsx`。
+ */
+.footer-site {
+  color: var(--jp-text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.footer-site:hover {
+  color: var(--jp-accent);
+  text-decoration: underline;
+}
 .footer-export:hover {
   text-decoration: underline;
 }

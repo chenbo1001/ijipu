@@ -6,6 +6,10 @@
  * adj394：新增语法状态小圆点（绿=通过 / 橙=仅告警 / 红=有错误），悬停显示问题条数与说明。
  * adj462：告警文本**同时是底部 dock「告警面板」的开关**（点击展开/收起——入口保持原位）；
  *         并在右侧给出**导出进行中的动态指示**（切走/关掉 dock 也看得到，点击可跳回导出面板）。
+ * adj877（用户要求「要有返回首页的链接点」）：右侧加「官网首页」——
+ *         从首页点「打开应用」进来之后，应用自己的界面里原本**没有任何回官网的路**。
+ *         网页版/PWA 直接跳 `/`；桌面壳里没有"首页"这回事（窗口无地址栏、无后退），
+ *         跳过去会把人困在介绍页 ⇒ 那里改成**用系统浏览器打开官网**。
  */
 import { useMemo } from 'react'
 import { useDocStore } from '../store/docStore'
@@ -16,6 +20,8 @@ import { summarizeProblems } from './problems'
 import { KBD, withKbd } from '../brand/shortcuts'
 // adj622（用户要求）：状态栏文件名改成「工作区/路径/文件名」格式
 import { formatDocLocation } from './docLocation'
+// adj877：回官网首页的入口 + adj879：与菜单里那个入口**共用同一实现**（用户要求表现一致）
+import { goSiteHome } from '../brand/siteHome'
 
 export function EditorFootBar() {
   const code = useDocStore((s) => s.code)
@@ -92,6 +98,21 @@ export function EditorFootBar() {
       </button>
 
       <div className="footer-spacer" />
+
+      {/* adj877（用户要求）：回官网首页的入口；adj879：与菜单里的那个共用 `goSiteHome()` */}
+      <a
+        className="footer-site"
+        href="/"
+        title="回到爱记谱官网首页"
+        onClick={(e) => {
+          // 保留 `href`（无 JS 也能用、中键可以开新标签），点击时统一走共用实现：
+          // 网页版 = 本窗口返回；桌面壳 = 交系统浏览器（见 brand/siteHome.ts）
+          e.preventDefault()
+          goSiteHome()
+        }}
+      >
+        官网首页 ↗
+      </a>
 
       {/* adj462：导出进行中的动态指示（无任务时不渲染）；点击跳回导出面板 */}
       {exportJob !== null && (

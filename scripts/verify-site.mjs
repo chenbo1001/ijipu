@@ -188,6 +188,62 @@ const SONG_SONG = String(readFileSync(path.join(ROOT, 'public', 'samples', '送�
 const SONG_STARS = 'B: 小星星\nQ: 1 1 5 5 | 6 6 5 - | 4 4 3 3 | 2 2 1 - |\nC: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星\n'
 /** 多声部/临时段（取自 docs/SYNTAX.md §2.12 的示例，smoke 有"文档示例零错误"的断言） */
 const SONG_DSB = "V: 1.0\nB: 临时多声部\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
+/** Obsidian 示意图里的谱（取自 obsidian-ijipu 的 README 示例，短、歌词好认） */
+const SONG_TIGER =
+  'V: 1.0\nB: 两只老虎\nZ: 法国童谣 词曲\nD: C\nP: 4/4\nJ: 120\nQ: 1 2 3 1 | 1 2 3 1 | 3 4 5 - | 3 4 5 - |\nC: 两 只 老 虎 两 只 老 虎 跑 得 快 跑 得 快\n'
+
+/**
+ * Obsidian 插件示意图（adj877）。
+ *
+ * **诚实说明**：本机没有 Obsidian，所以窗口外壳（侧栏、笔记正文、代码块）是我用 HTML/CSS 画的；
+ * 但**谱面部分是把引擎真实渲染出的 SVG 内联进来的**——不是画的、也不是贴图。
+ * 这样既不用假装有真截图，又能保证"插件里长什么样"这件事是可信的。
+ */
+function obsidianCardHtml(scoreSvg) {
+  /** 代码块围栏：`String.fromCharCode(96)` 拼出来，避免在本文件的模板字符串里写出反引号字面量 */
+  const FENCE = String.fromCharCode(96).repeat(3)
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
+  *{box-sizing:border-box;margin:0}
+  body{width:1200px;height:780px;overflow:hidden;background:#1e1e1e;color:#dcddde;
+       font-family:system-ui,"Microsoft YaHei",sans-serif;font-size:14px}
+  .win{display:flex;height:100%}
+  .side{width:196px;flex:0 0 196px;background:#262626;border-right:1px solid #333;padding:14px 10px}
+  .side .vault{font-size:12px;color:#8a8a8a;padding:0 6px 12px;letter-spacing:.04em}
+  .side .f{padding:5px 8px;border-radius:5px;color:#b9b9b9;font-size:13px}
+  .side .f.on{background:#333;color:#fff}
+  .main{flex:1;min-width:0;padding:30px 44px;overflow:hidden}
+  .main h1{font-size:25px;color:#e8e8e8;margin-bottom:12px}
+  .main p{color:#b9b9b9;line-height:1.8;margin-bottom:12px}
+  .cb{background:#1a1a1a;border:1px solid #2f2f2f;border-radius:7px;padding:11px 14px;margin:12px 0;
+      font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.8;color:#cfcfcf;white-space:pre}
+  .cb .k{color:#a882ff}
+  .score{background:#fff;border-radius:7px;padding:10px 12px;position:relative}
+  .score svg{width:100%;height:auto;display:block}
+  .play{position:absolute;right:10px;top:10px;background:rgba(0,0,0,.05);border:1px solid rgba(0,0,0,.14);
+        border-radius:6px;padding:3px 9px;font-size:12px;color:#333}
+  </style></head><body><div class="win">
+    <div class="side">
+      <div class="vault">我的音乐笔记</div>
+      <div class="f">乐理笔记.md</div>
+      <div class="f on">儿歌练习.md</div>
+      <div class="f">两只老虎.jps</div>
+      <div class="f">送别.jps</div>
+    </div>
+    <div class="main">
+      <h1>儿歌练习</h1>
+      <p>记几首简单的儿歌，方便带孩子唱。下面这个代码块由 iJipu 插件渲染成简谱：</p>
+      <div class="cb"><span class="k">${FENCE}jps</span>
+V: 1.0
+B: 两只老虎
+D: C
+P: 4/4
+Q: 1 2 3 1 | 1 2 3 1 | 3 4 5 - | 3 4 5 - |
+C: 两只老虎 两只老虎 跑得快 跑得快
+<span class="k">${FENCE}</span></div>
+      <div class="score"><span class="play">▶ 试听</span>${scoreSvg}</div>
+    </div>
+  </div></body></html>`
+}
 
 async function main() {
   if (!existsSync(DIST)) {
@@ -204,11 +260,14 @@ async function main() {
   mkdirSync(path.join(DIST, 'site'), { recursive: true })
 
   let ogHtml = null
+  let obsidianHtml = null
   const server = createServer((req, res) => {
     const urlPath = String(req.url ?? '/')
-    if (urlPath === '/__og') {
+    // 两张"卡片页"（分享卡 / Obsidian 示意图）由本脚本现拼 HTML，不走 dist
+    if (urlPath === '/__og' || urlPath === '/__obsidian') {
+      const html = urlPath === '/__og' ? ogHtml : obsidianHtml
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
-      res.end(ogHtml ?? '<!doctype html><body>og</body>')
+      res.end(html ?? '<!doctype html><html><body></body></html>')
       return
     }
     const file = resolveDistFile(urlPath)
@@ -374,16 +433,40 @@ async function main() {
    *   位图解码是异步的，没解完就截图 ⇒ 截出来是一排**空框**（本轮实测踩到，图上像是"图都没了"）。
    */
   const primeLazyImages = async () => {
-    await evalJs(c, `window.scrollTo(0, document.body.scrollHeight)`)
+    /**
+     * ⚠ 必须**分段**滚到底，不能一步 `scrollTo(0, scrollHeight)`：
+     * 一步跳过去时中间那些区块**从未进入视口**，`loading="lazy"` 的图压根不会开始下载
+     * （本轮实测：一步滚动之后 voice-multi / export 两张图始终是破图）。
+     */
     await evalJs(
       c,
       `(async () => {
+        const h = document.body.scrollHeight
+        for (let y = 0; y <= h; y += 500) {
+          window.scrollTo(0, y)
+          await new Promise((r) => setTimeout(r, 70))
+        }
+        window.scrollTo(0, h)
+      })()`,
+    )
+    await evalJs(
+      c,
+      `(async () => {
+        /**
+         * ⚠ 每一步等待都要**自带上限**：
+         *   ① 轮询「complete」最多 8 秒；
+         *   ② 「decode()」必须包一层超时——实测它在个别情况下**永不 resolve**
+         *      （已解码过的图 / 懒加载边界），会让整次「Runtime.evaluate」一直挂着，
+         *      直到 CDP 自己的 30 秒超时才报错（本轮就是这么炸的）。
+         *   ⚠ 本段是**模板字符串**：里面（注释里也算）不能出现反引号，一律用「」。
+         */
+        const race = (p, ms) => Promise.race([p.catch(() => {}), new Promise((r) => setTimeout(r, ms))])
         const t0 = Date.now()
         while (Date.now() - t0 < 8000) {
           if ([...document.images].every((i) => i.complete)) break
           await new Promise((r) => setTimeout(r, 150))
         }
-        await Promise.all([...document.images].map((i) => i.decode().catch(() => {})))
+        await Promise.all([...document.images].map((i) => race(i.decode(), 2500)))
         return document.images.length
       })()`,
     )
@@ -553,12 +636,71 @@ async function main() {
       await sleep(800)
       await saveAsset('og.png', await shoot('png'))
 
+      /**
+       * ---- Obsidian 插件示意图（adj877）----
+       * 谱面从 `/app/` 里**取引擎真实渲染出的 SVG**（`outerHTML`），再内联进"仿笔记"卡片里截图。
+       * 于是：窗口是我画的、**乐谱是真的**——比"贴一张来路不明的截图"诚实，也不用假装有 Obsidian。
+       */
+      await viewport(1440, 900, 1.6)
+      await evalJs(
+        c,
+        `localStorage.setItem('ijipu.draft', ${JSON.stringify(SONG_TIGER)});
+         localStorage.setItem('ijipu.draftName', '两只老虎');
+         localStorage.setItem('ijipu.viewType', 'preview');
+         localStorage.setItem('ijipu.themeMode', 'dark')`,
+      )
+      /**
+       * ⚠ 这里必须是 `Page.navigate` 回 `/app/`，**不能** `reload()`：
+       * 上一步（og 卡片）已经把页面导航到 `/__og` 了，而 `reload` 重载的是**当前页**
+       * ⇒ 会把卡片页再加载一遍，应用一个元素都没有（本轮实测：`svgs:0, text:""`，图被跳过）。
+       * localStorage 是同源的，所以"在卡片页上写设置"没问题，问题只在"回哪一页"。
+       */
+      await c.send('Page.navigate', { url: `${origin}/app/` })
+      await sleep(1200)
+      /** 轮询等谱面渲染出来（不要只 sleep 一次就取——本轮第一版就是这么"取不到"的） */
+      let scoreSvg = ''
+      for (let i = 0; i < 20 && !scoreSvg; i++) {
+        await sleep(300)
+        scoreSvg = await evalJs(
+          c,
+          `(() => {
+            const svgs = [...document.querySelectorAll('#root svg')]
+            if (svgs.length === 0) return ''
+            return svgs.sort((a, b) => b.querySelectorAll('text').length - a.querySelectorAll('text').length)[0].outerHTML
+          })()`,
+        )
+      }
+      if (scoreSvg && scoreSvg.length > 500) {
+        obsidianHtml = obsidianCardHtml(scoreSvg)
+        await viewport(1200, 780, 1.6)
+        await c.send('Page.navigate', { url: `${origin}/__obsidian` })
+        await sleep(900)
+        await saveAsset('obsidian.webp', await shoot('webp', { quality: 84 }))
+      } else {
+        const diag = await evalJs(
+          c,
+          `JSON.stringify({ svgs: document.querySelectorAll('#root svg').length, len: ${JSON.stringify(scoreSvg.length)}, text: (document.querySelector('#root')?.textContent ?? '').slice(0, 160) })`,
+        )
+        console.log(`    · 跳过 obsidian.webp（取不到谱面 SVG）：${diag}`)
+      }
+
       // ---- 仅供检查：四个页面的整页图 ----
       await viewport(1440, 900, 1)
       await c.send('Page.navigate', { url: `${origin}/` })
       await sleep(900)
       await primeLazyImages()
       await saveShot('home.png', await shoot('png', { captureBeyondViewport: true }))
+
+      /**
+       * 浅色版首页（**仅供人工检查**）：浅色下最容易出问题的是"对比度"与"深色截图贴在浅底上"，
+       * 这两样都不是断言能判的，只能看图。用完把用户选择清掉，别把状态留给后面的断言。
+       */
+      await evalJs(c, `localStorage.setItem('ijipu.site.theme', 'light')`)
+      await c.send('Page.navigate', { url: `${origin}/` })
+      await sleep(900)
+      await primeLazyImages()
+      await saveShot('home-light.png', await shoot('png', { captureBeyondViewport: true }))
+      await evalJs(c, `localStorage.removeItem('ijipu.site.theme')`)
       await c.send('Page.navigate', { url: `${origin}/manual/` })
       await sleep(900)
       await saveShot('manual.png', await shoot('png', { captureBeyondViewport: true }))
@@ -602,6 +744,14 @@ async function main() {
             hasDialog: !!q('dialog#donate'),
             donateImg: q('dialog#donate img')?.getAttribute('src') ?? '',
             faq: qa('.faq details').length,
+            /* adj877：Obsidian 插件专区 与 playground */
+            obPoints: qa('.ob-points li').length,
+            obMarket: q('.ob-actions a[data-l="obsidianMarketUrl"]')?.getAttribute('href') ?? '',
+            obRepo: q('.ob-actions a[data-l="obsidianRepoUrl"]')?.getAttribute('href') ?? '',
+            pgTabs: qa('[data-pg-tab]').length,
+            pgHiddenPanes: qa('[data-pg-pane][hidden]').length,
+            /* adj878：右上角的深浅主题开关 */
+            hasTheme: !!q('#theme-toggle'),
           }
         })()`,
       )
@@ -622,11 +772,101 @@ async function main() {
       check('首页链接负对照：`#` 与真实地址确实不同（判据在量东西）', '#'.startsWith(SITE_REPO) === false)
       check('首页赞赏弹层用微信赞赏码 `/icons/good.png`', home.hasDialog && home.donateImg === '/icons/good.png', home.donateImg)
       check('首页 FAQ 至少 4 条', home.faq >= 4, String(home.faq))
+      check('首页有 Obsidian 插件专区（功能清单 ≥ 6 条）', home.obPoints >= 6, String(home.obPoints))
+      check('插件专区两个按钮地址正确（社区市场 / GitHub 仓库）',
+        home.obMarket === 'https://obsidian.md/plugins?id=ijipu' && home.obRepo === SITE_PLUGIN,
+        `${home.obMarket} | ${home.obRepo}`)
+      check('首页 playground 有「脚本 / 预览」两个标签', home.pgTabs === 2, String(home.pgTabs))
+      check('playground 初始停在「脚本」标签（预览要按需下引擎，不该在首屏发生）',
+        home.pgHiddenPanes === 1, String(home.pgHiddenPanes))
+
+      // ---- adj878：右上角的深浅主题开关（点一下要真的换掉配色，不只是改个属性） ----
+      check('首页右上角有深浅主题开关', home.hasTheme)
+      const themeBefore = await evalJs(c, `document.documentElement.dataset.siteMode ?? ''`)
+      const themeAfter = await evalJs(
+        c,
+        `(() => {
+          document.getElementById('theme-toggle')?.click()
+          return document.documentElement.dataset.siteMode ?? ''
+        })()`,
+      )
+      const themeVars = await evalJs(
+        c,
+        `(() => {
+          const cs = getComputedStyle(document.documentElement)
+          return { bg: cs.getPropertyValue('--site-bg').trim(), accent: cs.getPropertyValue('--site-accent').trim() }
+        })()`,
+      )
+      check('点主题开关后模式翻转（深 ⇄ 浅）',
+        (themeBefore === 'dark' || themeBefore === 'light') && themeAfter !== themeBefore,
+        `${themeBefore} → ${themeAfter}`)
+      // 判据取"强调色"：深色是霓虹青 #00f0ff、浅色必须换成 #0891a6（亮青压浅底根本看不见）
+      check('切换后配色真的换了（浅色下强调色不再是霓虹青）',
+        themeAfter === 'light'
+          ? themeVars.accent.toLowerCase() === '#0891a6' && themeVars.bg.toLowerCase() === '#f2f5fb'
+          : themeVars.accent.toLowerCase() === '#00f0ff',
+        JSON.stringify(themeVars))
+      // 点回去：后面的检查与截图都按深色预期，别留下副作用
+      await evalJs(c, `document.getElementById('theme-toggle')?.click()`)
+      const themeBack = await evalJs(c, `document.documentElement.dataset.siteMode ?? ''`)
+      check('再点一下能切回原模式（开关是双向的）', themeBack === themeBefore, `${themeBack} vs ${themeBefore}`)
+
+      // ---- playground：真的点一下「预览」，等引擎加载并渲染出 SVG ----
+      // 这条是"引擎能否在首页跑"的**唯一硬证据**（源码级断言做不到）。
+      const pgClicked = await evalJs(
+        c,
+        `(() => {
+          const b = [...document.querySelectorAll('[data-pg-tab]')].find((el) => el.dataset.pgTab === 'preview')
+          if (!b) return false
+          b.click()
+          return true
+        })()`,
+      )
+      let pgSvg = 0
+      for (let i = 0; i < 30 && pgSvg === 0; i++) {
+        await sleep(300)
+        pgSvg = await evalJs(c, `document.querySelectorAll('#pg-out svg').length`)
+      }
+      const pgMsg = await evalJs(c, `document.getElementById('pg-msg')?.textContent ?? ''`)
+      check('点「预览」后 playground 真的渲染出谱面（引擎在首页加载并跑通了）',
+        pgClicked && pgSvg > 0, `svg=${pgSvg} msg=${pgMsg}`)
+      check('playground 渲染结果无错误/告警提示', pgMsg === '', pgMsg.slice(0, 120))
+
+      // 空脚本：应当给出「没有可渲染的内容」而不是崩掉或白屏。
+      // 渲染是异步的、且与上一次渲染有 `busy` 竞争 ⇒ 这里**轮询等提示出现**，不靠固定 sleep。
+      const pgEmpty = await evalJs(
+        c,
+        `(async () => {
+          const ta = document.getElementById('pg-src')
+          if (!ta) return 'no-textarea'
+          ta.value = ''
+          document.querySelector('#pg-rerender')?.click()
+          for (let i = 0; i < 20; i++) {
+            await new Promise((r) => setTimeout(r, 150))
+            const t = document.getElementById('pg-msg')?.textContent ?? ''
+            if (t) return t
+          }
+          return ''
+        })()`,
+      )
+      check('playground 对空脚本给出提示（不静默、不崩）',
+        typeof pgEmpty === 'string' && pgEmpty.length > 0, `实际：${String(pgEmpty).slice(0, 80)}`)
+      const pgErrs = collectErrors(mark)
+      check('首页（含 playground 交互与引擎加载）无控制台错误 / 无本站 4xx',
+        pgErrs.length === 0, pgErrs.slice(0, 4).join(' | '))
+
       const homeErrs = collectErrors(mark)
       check('首页无控制台错误 / 无本站 4xx（含图片与脚本）', homeErrs.length === 0, homeErrs.slice(0, 4).join(' | '))
 
       // ---------------- 应用页 ----------------
       console.log('[verify-site] 验证 `/app/`（应用）…')
+      /**
+       * 截图阶段把 `viewType` 留在 `preview`（demo 图与 Obsidian 图要它）——
+       * 验证前**显式设回**应用默认的「左右拆分」：断言不该依赖"上一步碰巧留下的状态"，
+       * 否则截图顺序一改，这里就会莫名其妙地红（本轮实测就是这个）。
+       */
+      await evalJs(c, `localStorage.setItem('ijipu.viewType', 'split')`)
+      pageErrors = []
       mark = noteEvents()
       await c.send('Page.navigate', { url: `${origin}/app/` })
       await sleep(2200)
@@ -640,6 +880,9 @@ async function main() {
             hasEditor: !!q('textarea'),
             svgCount: document.querySelectorAll('#root svg').length,
             draftLen: (localStorage.getItem('ijipu.draft') || '').length,
+            /* adj877（用户要求）：应用里回官网的路 */
+            siteHref: q('.footer-site')?.getAttribute('href') ?? '',
+            siteText: (q('.footer-site')?.textContent ?? '').trim(),
           }
         })()`,
       )
@@ -648,6 +891,9 @@ async function main() {
       check('应用编辑器在位（textarea 存在）', app.hasEditor)
       check('应用谱面渲染出来了（有 svg）', app.svgCount > 0, String(app.svgCount))
       check('应用读到了注入的谱面草稿（说明 localStorage 草稿链路正常）', app.draftLen > 0, String(app.draftLen))
+      // adj877（用户要求「要有返回首页的链接点」）：应用自己的界面里原本没有任何回官网的路
+      check('应用状态栏有「官网首页」链接（网页版 href = `/`）',
+        app.siteHref === '/' && app.siteText.includes('官网'), `${app.siteHref} / ${app.siteText}`)
       const appErrs = collectErrors(mark).filter((e) => !/音色|soundfont|sampler|sf2|midi-js/i.test(e))
       check('应用无本站资源错误（音色库等跨域资源失败不计）', appErrs.length === 0, appErrs.slice(0, 4).join(' | '))
 
@@ -687,10 +933,16 @@ async function main() {
               codes: qa('#doc-body pre').length,
               firstHead: q('#doc-body h1')?.textContent ?? '',
               bodyHasContent: (q('#doc-body')?.textContent ?? '').trim().length > 300,
+              /* adj877（用户要求）：顶栏的返回首页链接 */
+              docHome: q('.doc-home')?.getAttribute('href') ?? '',
+              /* adj878：顶栏的深浅主题开关 */
+              hasTheme: !!q('.theme-toggle'),
             }
           })()`,
         )
         check(`${label}：title 正确`, doc.title.includes(label), doc.title)
+        check(`${label}：顶栏有「返回首页」链接（adj877 用户要求）`, doc.docHome === '/', doc.docHome)
+        check(`${label}：顶栏有深浅主题开关（adj878，与首页同一套）`, doc.hasTheme)
         check(`${label}：正文渲染出来了（子节点 ≥ ${minKids}）`, doc.kids >= minKids, String(doc.kids))
         check(`${label}：正文有实质内容`, doc.bodyHasContent)
         check(`${label}：左侧目录条目 ≥ ${minToc}`, doc.tocCount >= minToc, String(doc.tocCount))

@@ -37,6 +37,10 @@ import { ScrubValue } from './ScrubValue'
 import { fitZoomFor } from '../preview/zoomFit'
 // adj530：顶栏「放不下就收进更多」的折叠判定（纯算式，便于 smoke 直接断言）
 import { foldKeys } from './topbarFold'
+// adj877（用户要求「要有返回首页的链接点」）：帮助菜单里的官网入口。
+// adj879（用户实测）：它与状态栏那个入口**必须表现一致**（原先一个开新窗口、一个本窗口返回）
+// ⇒ 两者共用 `brand/siteHome.ts` 的 `goSiteHome()`：网页版本窗口返回、桌面壳交系统浏览器。
+import { goSiteHome } from '../brand/siteHome'
 
 /** Alt+字母 → 菜单分组（adj185）
  *  adj383：主题组已移入「页面设置」对话框的「主题」标签，Alt+T 菜单分组随之取消 */
@@ -1313,6 +1317,11 @@ export function TopBar() {
     { label: '脚本语法说明(&S)', hotkey: 's', onPick: () => openModal('syntax') },
     // adj492：「关于」从弹窗迁入底栏 dock（与原「试听/导出/设置」同一套路：入口保持原位、改为开关）
     { label: '关于(&A)', hotkey: 'a', onPick: () => toggleDock('about') },
+    // adj877（用户要求）：回官网的入口。adj879：与状态栏那个入口共用 `goSiteHome()`，
+    // 两者表现一致（网页版本窗口返回、桌面壳交系统浏览器）；
+    // 后面加一条分隔线，把"回官网"这类外向动作与上面的文档/关于区分开。
+    'sep',
+    { label: '爱记谱官网(&W)', onPick: () => goSiteHome() },
   ]
 
   return (

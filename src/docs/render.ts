@@ -16,7 +16,7 @@
  *   本文件只收 `md` 参数、不自己 import —— 否则 `/manual/` 会连带下载整份语法说明。
  */
 import { extractToc, mdToHtml } from '../help/markdown'
-import { injectSiteColors } from '../brand/siteVars'
+import { injectSiteColors, currentSiteMode, saveSiteMode, type SiteMode } from '../brand/siteVars'
 import { fillExternalLinks } from '../brand/siteLinks'
 import './docs.css'
 
@@ -96,14 +96,30 @@ function bindTocToggle(): void {
 }
 
 /**
+ * adj878（用户要求）：右上角的深浅主题开关。
+ * 与首页同一套变量、同一套行为：图标由 CSS 按 `data-site-mode` 显示，这里只切换并记住。
+ */
+function bindThemeToggle(): void {
+  const btn = document.getElementById('theme-toggle')
+  if (!btn) return
+  btn.addEventListener('click', () => {
+    const next: SiteMode = currentSiteMode() === 'light' ? 'dark' : 'light'
+    injectSiteColors(next)
+    saveSiteMode(next)
+  })
+}
+
+/**
  * 入口：把文档渲染进骨架（骨架在各自的 index.html 里）。
  *
  * 页内大标题由**正文自己的第一个 h1** 承担（两份 md 的第一行就是文档名），
  * 页头不再另放一个标题——否则同一个名字会出现两遍，而且目录也要跟着特判。
  */
 export function renderDoc(page: DocPage): void {
-  // 品牌色先注入：否则样式表里的 var(--site-*) 全是空值，会先闪一下无色版式
-  injectSiteColors()
+  // 主题：`<head>` 的内联脚本已经把模式定在 `<html>` 上（防闪烁），
+  // 这里注入完整配色（否则 var(--site-*) 全是空值，会先闪一下无色版式）并接上右上角开关
+  injectSiteColors(currentSiteMode())
+  bindThemeToggle()
   // 页脚那几个外部链接（"提建议"等）：地址来自 brand/tokens.ts
   fillExternalLinks()
   document.title = `${page.title} - 爱记谱 iJipu`

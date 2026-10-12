@@ -36,7 +36,7 @@ h2 { font-size: 26px; }
 code {
   font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
   font-size: 0.92em;
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--site-inline-bg);
   border: 1px solid var(--site-border);
   border-radius: 5px;
   padding: 1px 5px;
@@ -58,8 +58,8 @@ code {
   text-decoration: none;
 }
 .btn:hover { text-decoration: none; transform: translateY(-1px); }
-.btn-primary { background: var(--site-accent); color: #06222a; }
-.btn-primary:hover { background: #6ff5ff; }
+.btn-primary { background: var(--site-accent); color: var(--site-on-accent); }
+.btn-primary:hover { background: var(--site-accent-hover); }
 .btn-ghost { background: transparent; border-color: var(--site-border); color: var(--site-text); }
 .btn-ghost:hover { background: var(--site-panel-hover); }
 .btn-lg { padding: 13px 26px; font-size: 16px; }
@@ -74,7 +74,7 @@ code {
   transition: background 0.2s, border-color 0.2s;
 }
 .topbar.scrolled {
-  background: rgba(15, 21, 38, 0.88);
+  background: var(--site-topbar-bg);
   backdrop-filter: blur(10px);
   border-bottom-color: var(--site-border);
 }
@@ -178,6 +178,7 @@ code {
   margin: 0;
   padding: 20px 22px;
   border-right: 1px solid var(--site-border);
+  background: var(--site-code-bg);
   font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
   font-size: 14px;
   line-height: 1.9;
@@ -365,4 +366,207 @@ code {
   }
   .nav.open { display: flex; }
   .nav a { padding: 11px 2px; border-bottom: 1px solid var(--site-border); font-size: 15px; }
+}
+
+/* ==========================================================================
+   adj877：现场试一段（playground）与 Obsidian 插件区块
+   ========================================================================== */
+
+/* ---------- 现场试一段 ---------- */
+.playground { padding-bottom: 72px; }
+.playground h2 { text-align: center; margin-bottom: 12px; }
+.pg-lead { text-align: center; color: var(--site-text-2); font-size: 15px; margin: 0 0 22px; }
+
+.pg-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--site-border);
+  margin-bottom: 0;
+}
+.pg-tabs button {
+  appearance: none;
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 9px 9px 0 0;
+  color: var(--site-text-2);
+  cursor: pointer;
+  font-size: 14.5px;
+  font-weight: 600;
+  padding: 9px 20px;
+  /* 让按钮的底边盖住容器那条线，做出"选中项与内容连成一体"的效果 */
+  margin-bottom: -1px;
+}
+.pg-tabs button:hover { color: var(--site-text); }
+.pg-tabs button.active {
+  background: var(--site-panel);
+  border-color: var(--site-border);
+  color: var(--site-accent);
+}
+
+.pg-body {
+  background: var(--site-panel);
+  border: 1px solid var(--site-border);
+  border-top: none;
+  border-radius: 0 0 var(--site-radius) var(--site-radius);
+  padding: 16px;
+}
+.pg-pane[hidden] { display: none; }
+
+#pg-src {
+  width: 100%;
+  min-height: 160px;
+  resize: vertical;
+  background: var(--site-code-bg);
+  border: 1px solid var(--site-border);
+  border-radius: 9px;
+  color: var(--site-text);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
+  font-size: 14px;
+  line-height: 1.75;
+  padding: 13px 15px;
+  tab-size: 2;
+}
+#pg-src:focus { outline: 1px solid var(--site-accent); outline-offset: 0; }
+
+.pg-samples { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; font-size: 13.5px; color: var(--site-muted); }
+.pg-samples button {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--site-border);
+  border-radius: 999px;
+  color: var(--site-text-2);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 12px;
+}
+.pg-samples button:hover { border-color: var(--site-accent); color: var(--site-text); }
+
+/* 渲染结果：引擎产出的 SVG 是自包含白底黑字，这里只负责让它自适应宽度 */
+.pg-out { min-height: 120px; display: flex; flex-direction: column; gap: 14px; }
+.pg-out svg {
+  width: 100%;
+  height: auto;
+  background: #fff;
+  border-radius: 9px;
+  display: block;
+}
+.pg-out:empty::before {
+  content: "点「预览」看看效果（第一次会先加载渲染引擎，约 68KB）";
+  color: var(--site-muted);
+  font-size: 14px;
+}
+
+.pg-bar { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.pg-msg { flex: 1; min-width: 0; font-size: 13.5px; color: var(--site-muted); }
+.pg-msg[data-kind='warn'] { color: var(--site-warn); }
+.pg-bar button {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--site-border);
+  border-radius: 8px;
+  color: var(--site-text-2);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 6px 14px;
+}
+.pg-bar button:hover { border-color: var(--site-accent); color: var(--site-text); }
+.pg-hint { color: var(--site-muted); font-size: 13px; margin: 14px 0 0; line-height: 1.85; }
+
+/* ---------- Obsidian 插件区块 ---------- */
+.obsidian {
+  display: grid;
+  grid-template-columns: 1fr 1.05fr;
+  gap: 40px;
+  align-items: center;
+  padding-bottom: 72px;
+}
+.ob-kicker {
+  display: inline-block;
+  margin: 0 0 12px;
+  padding: 3px 11px;
+  border: 1px solid var(--site-border);
+  border-radius: 999px;
+  color: var(--site-accent);
+  font-size: 13px;
+}
+.ob-text h2 { font-size: 26px; margin-bottom: 14px; }
+.ob-text > p { color: var(--site-text-2); font-size: 15px; }
+.ob-points { list-style: none; padding: 0; margin: 18px 0 22px; }
+.ob-points li {
+  position: relative;
+  padding-left: 20px;
+  margin-bottom: 9px;
+  font-size: 14.5px;
+  color: var(--site-text-2);
+}
+.ob-points li::before {
+  content: "▸";
+  position: absolute;
+  left: 2px;
+  color: var(--site-accent);
+}
+.ob-points b { color: var(--site-text); }
+.ob-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.ob-note { color: var(--site-muted) !important; font-size: 13px !important; margin-top: 16px; line-height: 1.85; }
+.ob-shot { margin: 0; }
+.ob-shot img {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--site-border);
+  border-radius: var(--site-radius);
+  background: var(--site-panel);
+  display: block;
+}
+.ob-shot figcaption { margin-top: 10px; font-size: 13px; color: var(--site-muted); text-align: center; }
+
+@media (max-width: 900px) {
+  .obsidian { grid-template-columns: 1fr; gap: 24px; }
+  .ob-text h2 { font-size: 22px; }
+  .pg-tabs button { padding: 9px 16px; }
+}
+
+/* ==========================================================================
+   adj878：深浅主题切换按钮 + 浅色模式下的少量专属覆盖
+   ========================================================================== */
+
+/* 切换按钮：两个图标**都由 CSS 按 data-site-mode 决定显示哪个** ⇒ 无 JS 时也显示正确的那个 */
+.theme-toggle {
+  appearance: none;
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid var(--site-border);
+  border-radius: 9px;
+  color: var(--site-text-2);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 6px 9px;
+}
+.theme-toggle:hover { border-color: var(--site-accent); background: var(--site-panel-hover); }
+.theme-toggle .ico-moon { display: none; }
+html[data-site-mode='light'] .theme-toggle .ico-sun { display: none; }
+html[data-site-mode='light'] .theme-toggle .ico-moon { display: inline; }
+
+/* 浅色下的专属覆盖。集中放一处，免得散落满地找不齐 */
+html[data-site-mode='light'] .hero h1 {
+  /* 主标题的渐变在深色下是"白 → 霓虹青"；浅色底上白色看不见，换成"深墨 → 强调色" */
+  background: linear-gradient(96deg, #1c2540 20%, var(--site-accent) 105%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+html[data-site-mode='light'] .card:hover,
+html[data-site-mode='light'] .link-card:hover { box-shadow: 0 6px 20px var(--site-shadow); }
+/* 应用截图本身是深色的（应用默认深色主题）：浅色页面上给它一点投影，读起来像"一张图"而不是"一块黑" */
+html[data-site-mode='light'] .hero-shot img,
+html[data-site-mode='light'] .deep-shots img,
+html[data-site-mode='light'] .ob-shot img { box-shadow: 0 8px 26px var(--site-shadow); }
+/* 谱面是白纸黑字：浅色页面上靠边框把它"框住" */
+html[data-site-mode='light'] .demo-score img,
+html[data-site-mode='light'] .pg-out svg { border: 1px solid var(--site-border); }
+
+@media (max-width: 900px) {
+  /* 窄屏下 `.nav` 脱离文档流，靠 `margin-left:auto` 把主题按钮与汉堡一起顶到右上角 */
+  .theme-toggle { margin-left: auto; }
+  .topbar-burger { margin-left: 10px; }
 }

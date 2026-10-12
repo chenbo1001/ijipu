@@ -12,10 +12,12 @@
  *     ⑤ 「你以前用过 → 直接进应用」提示条。
  *   首页**没有**引入 React 或引擎，JS 体积保持在一个很小的量级。
  */
-import { injectSiteColors } from '../brand/siteVars'
+import { injectSiteColors, currentSiteMode, saveSiteMode, type SiteMode } from '../brand/siteVars'
 import { fillExternalLinks } from '../brand/siteLinks'
 import { APP_VERSION } from '../brand/version'
 import './landing.css'
+// adj877：首页「自己改一段试试」区块（引擎按需加载，见该文件头说明）
+import { mountPlayground } from './playground'
 
 /**
  * 首页自己的存储键前缀。
@@ -73,6 +75,23 @@ function bindDonate(): void {
 }
 
 /**
+ * adj878（用户要求）：右上角的深浅主题开关。
+ *
+ * 两个图标由 CSS 按 `data-site-mode` 显示（**无 JS 时也显示正确的那个**），
+ * 这里只做"点一下切过去 + 记住"。
+ * 初始模式由 `<head>` 里那段内联脚本定好（防闪烁），这里读它并注入完整配色。
+ */
+function bindThemeToggle(): void {
+  const btn = document.getElementById('theme-toggle')
+  if (!btn) return
+  btn.addEventListener('click', () => {
+    const next: SiteMode = currentSiteMode() === 'light' ? 'dark' : 'light'
+    injectSiteColors(next)
+    saveSiteMode(next)
+  })
+}
+
+/**
  * 「以前用过 → 直接进应用」提示条。
  *
  * 判据：localStorage 里有**应用**写入的 `ijipu.*` 键（草稿、主题、缩放…都是它写的），
@@ -109,10 +128,13 @@ function bindReturningTip(): void {
   })
 }
 
-injectSiteColors()
+// 主题：`<head>` 的内联脚本已经把模式定在 `<html>` 上（防闪烁），这里注入完整配色并接上开关
+injectSiteColors(currentSiteMode())
+bindThemeToggle()
 fillExternalLinks()
 fillVersion()
 bindTopbar()
 bindBurger()
 bindDonate()
 bindReturningTip()
+mountPlayground()
