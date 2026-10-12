@@ -19951,9 +19951,42 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   check('adj883 simplifyJps：**保留**描述头与曲行（不许把正文一起删了）',
     slim.includes('V: 1.0') && slim.includes('B: 试') && slim.includes('Q: 1 2 |'), JSON.stringify(slim))
   for (const s of BRAND_SAMPLES) {
-    check(`adj883 首页示例「${s.label}」：无 jps-config 且含曲行`,
-      !s.src.includes('jps-config') && s.src.includes('Q:'), s.src.slice(0, 50).replace(/\n/g, '⏎'))
+    check(`adj883/adj892 首页示例「${s.label}」：含曲行，且配置里**只留白名单项**`,
+      s.src.includes('Q:') &&
+        // 冗长项必须剥掉（否则就不叫"精简"了）
+        !s.src.includes('geci_font') && !s.src.includes('metaPos') && !s.src.includes('margin_') &&
+        // 除可能保留的那一行 jps-config 外，不许再有别的配置行
+        (s.src.match(/# jps-config:/g) ?? []).length <= 1,
+      s.src.slice(0, 60).replace(/\n/g, '⏎'))
   }
+  /**
+   * adj892（用户反馈）：「首页示例的茉莉花应加个 **两端对齐最小小节:3** 的配置，
+   * 否则显示不会两边对齐」—— 这条**纠正了 adj883"整行删掉 `# jps-config`"的做法**：
+   * `align_min_bars` 直接决定每行会不会两端对齐，删了就退回默认 4，
+   * 茉莉花里那些 3 小节的行便不撑满。
+   */
+  const molySample = BRAND_SAMPLES.find((s) => s.label === '茉莉花')
+  check('adj892 首页示例「茉莉花」：保留了 `align_min_bars`（删了就不会两端对齐）',
+    molySample?.src.includes('"align_min_bars":3') === true,
+    molySample?.src.match(/# jps-config:.*/)?.[0] ?? '（没有配置行）')
+  check('adj892 保留的是**真源里的真值**（不是我们编的）：茉莉花.jps 原文含 "align_min_bars":3',
+    String(readFileSync(join(root, 'public', 'samples', '茉莉花.jps'), 'utf8')).includes('"align_min_bars":3'))
+  /**
+   * adj893（用户要求）：示例里的描述头 `S:` 去掉 ——
+   * 两份原文都写着 `S: 本乐谱使用「爱记谱」编制`，放在示例谱面上是自述冗余。
+   * ⚠ 负对照：**真源里仍然有** `S:`（我们只精简展示副本，没有动 `public/samples/*.jps`）——
+   * 否则"示例里没有 S: "可能只是因为真源本来就没有，判据就没在量东西。
+   */
+  for (const s of BRAND_SAMPLES) {
+    check(`adj893 首页示例「${s.label}」：不带描述头 \`S:\``, !/^\s*S\s*:/m.test(s.src),
+      s.src.split('\n').filter((l) => /^\s*S\s*:/.test(l)).join(' / ') || '（无）')
+  }
+  const rawNoS = ['茉莉花', '送别'].map((n) =>
+    String(readFileSync(join(root, 'public', 'samples', `${n}.jps`), 'utf8')),
+  )
+  check('adj893 负对照：两份**真源**里确实有 `S:`（说明上面判据真的在量"被过滤掉"这件事）',
+    rawNoS.every((t) => /^\s*S\s*:/m.test(t)),
+    rawNoS.map((t) => (/^\s*S\s*:.*/.exec(t) ?? ['(无)'])[0]).join(' | '))
 }
 
 /**
