@@ -54,8 +54,8 @@
 1. 开发测试默认用 `npm run dev`（Vite 开发服务器，http://localhost:5173，纯 Web 即可验证 UI/引擎）；仅调试桌面壳时才用 `npx tauri dev`
 2. **DSH 沙箱下 npm/npx 必须显式带缓存参数**（环境变量 `npm_config_cache` 优先级高于项目 .npmrc，命令行参数最高优先级）：
 ```bash
-npm install --cache "D:/Coding/JianpuScript/.npm-cache"
-npx tsc -b --cache "D:/Coding/JianpuScript/.npm-cache"   # 或其它 npm 命令同理
+npm install --cache "<工作区>/.npm-cache"
+npx tsc -b --cache "<工作区>/.npm-cache"   # 或其它 npm 命令同理
 ```
    （`.npmrc` 保留作为无环境变量环境下的兜底；涉及 npm 配置先 `npm config list` 查实际生效值）
 3. 常用命令：

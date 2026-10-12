@@ -204,7 +204,7 @@
 
 ### 6.3 开发环境适配（DSH 沙箱）✅
 
-- npm 命令统一加 `--cache "D:/Coding/JPCoder/.npm-cache"`
+- npm 命令统一加 `--cache "<工作区>/.npm-cache"`
 - `scripts/patch-vite.js` 适配 Vite 的 `net use` 探测 spawn 限制
 - 冒烟测试通过 vite 打包 CJS 后 node 运行（`npm run smoke`）
 

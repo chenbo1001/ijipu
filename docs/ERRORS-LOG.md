@@ -15,17 +15,17 @@
 
 ### E-2026-001 npm 写入缓存 EPERM（npm create vite 失败）
 - **场景**：初始化项目脚手架
-- **现象**：`npm error EPERM ... path: C:\Users\snail\AppData\Local\npm-cache\_cacache\tmp\...`，操作被拒绝
-- **根因**：DSH 文件沙箱（workspace-write）只允许写工作区 `D:\Coding\JPCoder` 与平台临时区；npm 默认缓存位于用户目录，写入被拒
-- **解决**：npm 缓存重定向到工作区内 `D:\Coding\JPCoder\.npm-cache`
-- **预防**：所有 npm 命令统一加 `--cache "D:/Coding/JPCoder/.npm-cache"`
+- **现象**：`npm error EPERM ... path: C:\Users\<用户名>\AppData\Local\npm-cache\_cacache\tmp\...`，操作被拒绝
+- **根因**：DSH 文件沙箱（workspace-write）只允许写工作区与平台临时区；npm 默认缓存位于用户目录，写入被拒
+- **解决**：npm 缓存重定向到工作区内 `<工作区>/.npm-cache`
+- **预防**：所有 npm 命令统一加 `--cache "<工作区>/.npm-cache"`
 
 ### E-2026-002 项目 .npmrc 的 cache 配置不生效
 - **场景**：npm install
-- **现象**：项目 `.npmrc` 已写 `cache=D:/Coding/JPCoder/.npm-cache`，但 `npm config get cache` 仍指向用户目录；install 仍 EPERM
+- **现象**：项目 `.npmrc` 已写 `cache=<工作区>/.npm-cache`，但 `npm config get cache` 仍指向用户目录；install 仍 EPERM
 - **根因**：DSH 注入环境变量 `npm_config_cache`（优先级高于项目 .npmrc）。npm 配置优先级：命令行 > 环境变量 > 项目 .npmrc > 用户 .npmrc
 - **解决**：不依赖 .npmrc，命令行参数 `--cache`（最高优先级）强制生效；`.npmrc` 保留作为无环境变量环境下的兜底
-- **预防**：任何 npm 命令都显式带 `--cache "D:/Coding/JPCoder/.npm-cache"`；涉及 npm 配置时先 `npm config list` 查实际生效值
+- **预防**：任何 npm 命令都显式带 `--cache "<工作区>/.npm-cache"`；涉及 npm 配置时先 `npm config list` 查实际生效值
 
 ### E-2026-003 Vite build/dev 崩溃：spawn EPERM（`net use` 探测）
 - **场景**：`npm run build`（Vite 8 / rolldown）
@@ -5021,7 +5021,7 @@
 
 ## 五、预防清单（Checklist，提交/交付前自检）
 
-- [ ] 所有 npm 命令带 `--cache "D:/Coding/JPCoder/.npm-cache"`
+- [ ] 所有 npm 命令带 `--cache "<工作区>/.npm-cache"`
 - [ ] 抓取网页带浏览器 UA；解码前确认真实编码
 - [ ] 新增/修改代码后：`npm run build`（tsc strict）+ `npm run lint`（oxlint）+ `npm run smoke` 全绿
 - [ ] import 全部在文件顶部；无未使用变量（strict 会自动拦）

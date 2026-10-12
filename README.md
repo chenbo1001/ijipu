@@ -43,23 +43,26 @@ npm install          # 依赖安装（自动执行 scripts/patch-vite.js 沙箱�
 npm run dev          # 本地开发 http://localhost:5173
 npm run build        # 类型检查 + 产物构建
 npm run lint         # oxlint 代码检查
-npm run smoke        # 引擎冒烟测试（748 项断言，覆盖解析/时值/布局/渲染/播放/多声部空间优先）
+npm run smoke        # 引擎冒烟测试（覆盖解析/时值/布局/渲染/播放/多声部空间优先等，条数以实际输出为准）
 ```
 
 ## 桌面端（Tauri v2，Windows）
 
-环境已建好（Rust GNU 工具链 + MinGW + Tauri CLI，安装器可产出）：
+环境准备：安装 [Rust](https://rustup.rs/)（Windows 上 MSVC 或 GNU 工具链均可）与
+[Tauri CLI](https://tauri.app/)，系统依赖见 [Tauri 官方前置条件](https://tauri.app/start/prerequisites/)。
+装好后：
 
 ```bash
-. .\scripts\tauri-env.ps1   # 设置 Rust 环境变量（CARGO_HOME/RUSTUP_HOME 在工作区）
+. .\scripts\tauri-env.ps1   # 可选：有工作区工具链时用它，否则沿用你自己的 rustup/cargo
 npx tauri build             # 打包 → src-tauri/target/release/bundle/nsis/*-setup.exe
 ```
 
 > **DSH 沙箱注意事项**：cargo/tauri 构建与 GUI 运行需完整权限（沙箱隔离了证书存储与 WebView2 初始化）；详见 docs/ERRORS-LOG.md E-2026-031/032。
 
-> **注意（DSH 环境）**：npm 命令需要显式指定缓存目录，因为沙箱只允许写工作区：
-> `npm install --cache "D:/Coding/JianpuScript/.npm-cache"`
-> 项目 `.npmrc` 已配置 cache 路径，但 DSH 注入的 `npm_config_cache` 环境变量优先级更高，会覆盖它，因此命令行参数 `--cache` 是最终生效手段。
+> **仅 DSH 沙箱环境需要**：npm 命令要显式指定缓存目录（沙箱只允许写工作区）：
+> `npm install --cache "<工作区>/.npm-cache"`
+> 项目 `.npmrc` 已配置 cache 路径，但 DSH 注入的 `npm_config_cache` 环境变量优先级更高会覆盖它，
+> 因此命令行参数 `--cache` 是最终生效手段。**普通开发环境不需要这一步。**
 
 ## 开源协议
 
@@ -71,6 +74,16 @@ npx tauri build             # 打包 → src-tauri/target/release/bundle/nsis/*-
 - **遵循方式**：修改本项目衍生作品时，须同样以 AGPL-3.0 发布，并保留版权声明。
 
 > 本项目在 `.jps` 语法上高度兼容「番茄简谱」（闭源免费软件），但所有引擎代码均为独立实现（clean-room 重写），不含原站代码/素材/商标。向「番茄简谱」原作者与社区致敬。
+
+## 第三方资源
+
+- **GeneralUser GS v1.471**（作者 S. Christian Collins，[主页](http://www.schristiancollins.com)）——
+  内置音色库 `resources/soundfonts/generaluser_gs.sf2`，按 **GeneralUser GS License v2.0** 随安装包分发。
+  许可原文见 `resources/soundfonts/LICENSE-GeneralUserGS.txt`；来源、署名，以及一处**使用者必须知道的保留说明**
+  （原作者声明部分采样来源无法 100% 追证）见 [`resources/soundfonts/README.md`](resources/soundfonts/README.md)。
+
+  该许可**明确允许**用在软件项目与按需调整打包方式，并要求"不要直链作者的下载文件、改为提供本地副本"——
+  我们随安装包分发本地副本，正是这条要求的做法。
 
 ## 目录结构
 
@@ -85,13 +98,14 @@ ijipu/
 │   ├── dialogs/         功能对话框（页面设置 / 试听 / 导出 / 关于 / 示例）
 │   ├── export/          导出模块（PDF/JPG/SVG/PNG/MIDI/WAV/MP3）
 │   ├── styles/          主题样式（品牌 token CSS 变量）
-│   └── samples/         示例谱登记（当前 SAMPLES 已清空，defaultSample 返回新建模板）
+│   └── samples/         示例谱登记（构建期用 `import.meta.glob` 自动发现 `public/samples/*.jps`）
 ├── packages/ijipu-engine/  简谱引擎（纯 TS，零 React/DOM 依赖，可单测）
 │   └── src/engine/      types / parser / format / layout / render / playback / cursorMap
 ├── src-tauri/          Tauri 桌面端配置
-├── samples/            .jps 示例谱（供引擎冒烟测试引用；应用内示例登记 SAMPLES 已清空）
-├── docs/               文档（语法规范 / 操作手册 / 需求 / 路线图 / 错误日志）
-└── scripts/            工具脚本（patch-vite.js / gen-build-info.mjs / smoke.mts）
+├── public/samples/     .jps 示例谱（应用「打开示例」、首页示例、冒烟测试共用）
+├── resources/soundfonts/  内置音色库与它的许可/来源说明（第三方作品，见「第三方资源」）
+├── docs/               文档（语法说明 / 操作手册 / 需求 / 路线图 / 错误日志）
+└── scripts/            工具脚本（patch-vite.js / gen-build-info.mjs / smoke.mts / verify-site.mjs 等）
 ```
 
 > 引擎数据流单向：`source(.jps) → parse → layout → render / playback`，可从 `@ijipu/engine` 独立引入。
@@ -105,5 +119,5 @@ ijipu/
 - [需求说明书](docs/REQUIREMENTS.md)（含待补充需求清单，供需求方补充）
 - [分期需求分解（迭代路线图）](docs/ROADMAP.md)（M0 已完成，M1 为下一期）
 - [错误日志与经验教训](docs/ERRORS-LOG.md)（每次出错必记录，避免重犯）
-- [.jps 语法规范 V1.0](docs/JPS-SPEC.md)（逆向自原站官方手册）
+- [脚本语法说明](docs/SYNTAX.md)（**`.jps` 语法的唯一对外口径**：入门手册 + 语法参考书 + 组合示例）
 - [品牌手册](docs/BRAND.md)
