@@ -990,6 +990,16 @@ async function main() {
       check('adj900 链接里带的是**当前示例（小星星）的完整源码**（含标题行与收尾 `||`）',
         !!handoff && handoff.decoded.includes('B: 小星星') && handoff.decoded.includes('||'),
         JSON.stringify(handoff?.decoded?.slice(0, 70)))
+      /**
+       * adj900b（用户要求）：首页那个入口**不许**出现"要下载音色库 / 30MB"这类说明 ——
+       * 「要提示也是到应用后，在试听里没有音色库时再提示」。
+       * 钉成**负向断言**：以后谁"好心"把它加回来，这里会红。
+       */
+      const pgOpenText = await evalJs(c, `document.querySelector('.pg-open')?.textContent ?? ''`)
+      check('adj900b 首页试听入口**不提**音色库 / 30MB / 下载（该提示的地方是应用）',
+        !/30\s*MB|音色库|下载|音源/i.test(pgOpenText), JSON.stringify(pgOpenText))
+      check('adj900b 那个入口就是一个按钮，文案逐字是「在应用里试听这段」',
+        pgOpenText.trim() === '在应用里试听这段', JSON.stringify(pgOpenText))
       check('首屏停在「脚本」标签（预览要按需下引擎，不该在首屏发生）',
         pgInitial?.codeHidden === false && pgInitial?.prevHidden === true, JSON.stringify(pgInitial))
       check('首页这个块声明了显示范围与缩放（`v=` / `z=`，与插件同口径）',

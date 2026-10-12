@@ -172,21 +172,12 @@ code {
 
 /**
  * adj900（用户决定）：「在应用里试听这段」那一行。
- * 按钮本身复用 `.btn`；旁边那行说明是**必要条件**而非装饰 ——
- * 试听要用到约 30MB 音色库，先说清楚比让用户点了才发现"要下载"要好。
+ *
+ * ⚠ 只看得到按钮，**没有**"要下载 30MB 音色库"之类的说明 ——
+ * 用户明确要求去掉：那种话只会劝退访客，而且**该提示的地方是应用**
+ * （试听时若没有音色库，应用自己会弹「正在后台下载音色库（约 30MB，仅首次）」）。
  */
-.pg-open {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  margin-top: 20px;
-}
-.pg-open-note {
-  font-size: 13.5px;
-  line-height: 1.7;
-  color: var(--site-muted);
-}
+.pg-open { margin-top: 20px; }
 
 /* ---------- 功能卡 ---------- */
 .features { padding-bottom: 72px; }
