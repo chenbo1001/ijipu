@@ -599,11 +599,15 @@ export function PreviewPane() {
                     长度、分界与配色由引擎的 `computeDebugBounds` 给出（此处只消费）。 */}
                 {dbgOfPage.map((b, bi) => {
                   const palette =
-                    b.kind === 'cell'
-                      ? ['#e0533d', '#f08a4b'] // 时值格：暖色
-                      : b.kind === 'ink'
-                        ? ['#2f7fd0', '#5aa9e6'] // 墨迹：蓝色
-                        : ['#3f9e5a', '#7fc98f'] // 段层：绿色
+                    b.kind === 'beat'
+                      ? ['#e0533d', '#f08a4b'] // 拍子边界：暖色
+                      : b.kind === 'aug'
+                        ? ['#c9922b', '#e0b45c'] // 增时线边界：金橙
+                        : b.kind === 'note'
+                          ? ['#8e5bd0', '#b28ae0'] // 音符时值边界：紫色
+                          : b.kind === 'ink'
+                            ? ['#2f7fd0', '#5aa9e6'] // 本体（墨迹）边界：蓝色
+                            : ['#3f9e5a', '#7fc98f'] // 段层：绿色
                   const stroke = palette[b.colorIndex % palette.length]
                   const top = b.side === 'L' ? b.yTop : b.yMid
                   const bottom = b.side === 'L' ? b.yMid : b.yBottom

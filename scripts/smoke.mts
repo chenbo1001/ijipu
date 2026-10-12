@@ -20531,14 +20531,24 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
         const layQ = layoutScore(rQ, DUR_CFG)
         const notesQ = layQ.pages.flatMap((p) => p.notes)
         const boundsQ = computeDebugBounds(notesQ, 13)
-        const cellL = boundsQ.filter((b) => b.kind === 'cell' && b.side === 'L')
+        const cellL = boundsQ.filter((b) => b.kind === 'note' && b.side === 'L')
         const mismQ = cellL.filter((b, i) => {
           const sg = notesQ[i]?.segments ?? []
           return sg.length === 0 || Math.abs(b.x - sg[0].x) > 0.05
         })
-        check('adj905q 调试边界：`cell` 左缘逐项等于 `segments[0].x`（与布局同源）',
+        check('adj905q 调试边界：`note`（音符时值）左缘逐项等于 `segments[0].x`（与布局同源）',
           cellL.length === notesQ.length && mismQ.length === 0,
           `cellL=${cellL.length} notes=${notesQ.length} 不齐=${mismQ.length}`)
+        /**
+         * 用户追加：「**增时线也要标出边界**」⇒ 每条 `-` 的左右缘都要有边界。
+         * 用「末小节 `3 - - -`」核对：该音符 4 段，除首段（数字本体）外 3 段都是增时线
+         * ⇒ `aug` 类至少 3 条 L + 3 条 R。
+         */
+        const augL = boundsQ.filter((b) => b.kind === 'aug' && b.side === 'L')
+        const augR = boundsQ.filter((b) => b.kind === 'aug' && b.side === 'R')
+        check('adj905q 调试边界：**增时线边界**（每条 `-` 的左右缘都标出）',
+          augL.length > 0 && augL.length === augR.length,
+          `L=${augL.length} R=${augR.length}`)
         check('adj905q 调试边界：左右边界各画半高（`yTop < yMid < yBottom`）',
           boundsQ.length > 0 && boundsQ.every((b) => b.yTop < b.yMid && b.yMid < b.yBottom),
           JSON.stringify(boundsQ[0] ?? null))
