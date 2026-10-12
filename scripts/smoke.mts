@@ -2804,23 +2804,52 @@ check('末音符段终点不溢出', segEndOv <= RIGHT_EDGE + 1, `end=${segEndOv
 
 // ---- 27. 增时线占一拍（adj6） ----
 console.log('[27] augment line = 1 beat (adj6)')
-// 1- 2 3 4 | 单行均分：数字 1 居中于第 1 拍，增时线占第 2 拍
+// 1- 2 3 4 | 单行均分：数字 1 在第 1 拍、增时线占第 2 拍
 const au27 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1- 2 3 4 |\n')
 const layAu = layoutScore(au27, DUR_CFG)
 const nAu = layAu.pages[0].notes[0]
 const perBeatAu = nAu.width / nAu.duration
 check('数字居中于第 1 拍（非整段）', Math.abs(nAu.x + 6 - (ML + 6 + perBeatAu / 2)) < 0.5, `center=${nAu.x + 6}`)
-const svgAu = renderScoreToSvg(layAu)[0]
-const segStartAu = nAu.x + 6 - perBeatAu / 2
-// adj75：段间有拍间距（NOTE_GAP=4，layout/index.ts 常量，未导出故硬编码）
-const beatStartAu = segStartAu + perBeatAu + 4
-const expectLX = beatStartAu + (perBeatAu - DIGIT_W) / 2 // 占位 DIGIT_W 居中于第 2 拍段
-const augTexts = [...svgAu.matchAll(/<text x="([\d.]+)" y="[\d.]+" text-anchor="middle"[^>]*font-size="([\d.]+)"[^>]*>-<\/text>/g)]
-check('增时线 1 条', augTexts.length === 1, `got ${augTexts.length}`)
-const rAu = augTexts[0]
-// 增时线应在第 2 拍段（数字槽右缘之后 + 拍间距），x > 数字右缘
-check('增时线居中于第 2 拍段', rAu !== undefined && Number(rAu[1]) > nAu.x + DIGIT_W + NS_S * 4, `x=${rAu?.[1]}`)
-check('增时线字号 = 音符字号（18，随字号缩放）', rAu !== undefined && Math.abs(Number(rAu[2]) - defaultPageConfig.note_size) < 0.5, `fs=${rAu?.[2]}`)
+/**
+ * adj905w（**用户口径，看图定标**）：「**增时线在格里也左对齐，与音符一致**」。
+ *
+ * 由来：用户开「预览可视调试」看 `{bz 1, 3, 5, 3,} 3 - - - ||` —— 段层数字落在**格左缘 + off**，
+ * 而增时线画在**拍段居中** ⇒ 两层看着错开（越靠后的拍越明显）。
+ *
+ * 期望值**直接取自布局的格**（不另算一套）：画点 = `该拍格左缘 + off + 半槽宽`
+ * （`off = 数字 x − 本音符第 0 格左缘`；`text-anchor=middle` 画在占位框中点）。
+ *
+ * ⚠ 两条布局路径的结果**不同**，必须都断言（`六之二·5`）：
+ *  · **时值优先**：`off ≈ (格宽 − 槽宽)/2`（数字在拍槽内居中）⇒ 与旧的"拍段居中"**几乎重合**
+ *    （所以这条路径上看不出变化，别误以为"改了没生效"）；
+ *  · **空间优先**（应用默认）：格 = **元素盒**、`off = 0` ⇒ 增时线左缘 = 格左缘 = 段层数字所在列
+ *    （旧式居中差约 6px —— 正是用户截图里那处错开）。
+ */
+for (const [nm, cfg] of [['时值优先', DUR_CFG], ['空间优先', { ...DUR_CFG, noteSpaceLayout: 'space' as const }]] as const) {
+  const lay = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1- 2 3 4 |\n'), cfg)
+  const n = lay.pages[0].notes[0]
+  const svg = renderScoreToSvg(lay)[0]
+  const texts = [
+    ...svg.matchAll(/<text x="([\d.]+)" y="[\d.]+" text-anchor="middle"[^>]*font-size="([\d.]+)"[^>]*>-<\/text>/g),
+  ]
+  const r = texts[0]
+  const cells = n.segments ?? []
+  const off = cells.length > 0 ? n.x - cells[0].x : 0
+  const cell1 = cells[1]
+  const slotW = defaultPageConfig.note_size * 0.62
+  const expectNew = cell1 ? cell1.x + off + slotW / 2 : NaN
+  const expectOld = cell1 ? cell1.x + (cell1.perBeat * cell1.beats) / 2 : NaN
+  check(`adj905w[${nm}] 增时线在格里**左对齐**（画点 = 该拍格左缘 + 数字的格内偏移 off + 半槽宽）`,
+    texts.length === 1 && Number.isFinite(expectNew) && Math.abs(Number(r[1]) - expectNew) < 0.05,
+    `x=${r?.[1]} 期望=${Number.isFinite(expectNew) ? expectNew.toFixed(2) : 'n/a'} 格1=${cell1?.x} off=${off.toFixed(2)}`)
+  check(`adj905w[${nm}] 相对旧口径（拍段居中）**只会更靠左**：${nm === '空间优先' ? '默认路径上左移 > 1px（= 用户截图里那处错开）' : '时值优先路径上位移很小（数字本就近似居中，实测 ≈2px）'}`,
+    Number.isFinite(expectOld) &&
+      expectNew <= expectOld + 0.05 &&
+      (nm === '空间优先' ? expectOld - expectNew > 1 : Math.abs(expectOld - expectNew) < 3),
+    `新=${Number.isFinite(expectNew) ? expectNew.toFixed(2) : 'n/a'} 旧居中=${Number.isFinite(expectOld) ? expectOld.toFixed(2) : 'n/a'} 左移=${Number.isFinite(expectOld) ? (expectOld - expectNew).toFixed(2) : 'n/a'}`)
+  check(`增时线字号 = 音符字号（18，随字号缩放）[${nm}]`,
+    r !== undefined && Math.abs(Number(r[2]) - defaultPageConfig.note_size) < 0.5, `fs=${r?.[2]}`)
+}
 
 // ---- 28. 排版辅助虚线（adj7） ----
 console.log('[28] layout guides (adj7)')
@@ -6830,16 +6859,39 @@ console.log('[92] grace note timing & position (adj396)')
     const svgPlain = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3[h5/] 1 2 3 |\n'), cfg92))[0]
     const gxPlain = graceXs92(svgPlain)[0]
     check(`adj396 ${tag92}：无增时线/附点 → 后倚音紧靠数字右缘（+1px×s）`, Math.abs(gxPlain - (digitX92(svgPlain, '3') + DIGIT_W + NS_S)) < 0.3, `grace=${gxPlain} digit=${digitX92(svgPlain, '3')}`)
-    const svgAug = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 -[h5/] 1 |\n'), cfg92))[0]
+    const layAug92 = layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3 -[h5/] 1 |\n'), cfg92)
+    const svgAug = renderScoreToSvg(layAug92)[0]
     const gxAug = graceXs92(svgAug)[0]
     const augCx = augCx92(svgAug)
-    // adj421：单行曲部按槽预分占宽后，音符的时值元素（数字/增时线/附点）在槽内摊开——
-    // 「紧靠」的语义随之变为「排在增时线之后、仍在本音符跨度内」，不再要求 1.5×s+6 的贴身距离
-    // （实测槽内摊开后距增时线中心 ≈ 4 + 11~15px；对照上面「无增时线」用例仍严格贴身）
+    /**
+     * adj905w：**基准量换成布局的"增时线格右缘"**（`render/index.ts` 算 `augRight` 用的就是它）。
+     *
+     * 原来拿"渲染出的增时线字符 x（居中）"当基准 —— 字符一改成**格内左对齐**，那个窗口就跟着失效
+     * （假红；实测 `空间优先`：字符 x `104.2 → 90.1`）。这正是 `六之二·4`「数值口径必须同源」那条。
+     * 末半条是新口径的直接推论：**增时线字符必须落在后倚音左侧**（不重叠）。
+     *
+     * adj421：单行曲部按槽预分占宽后，时值元素（数字/增时线/附点）在槽内摊开 ——
+     * 「紧靠」的语义随之变为「排在增时线**格**之后、仍在本音符跨度内」，不再要求 `1.5×s+6` 的贴身距离
+     * （对照上面「无增时线」用例仍严格贴身）。
+     */
+    const nAug92 = layAug92.pages[0].notes.find((n) => !n.segment)
+    const tokAug92 = (nAug92?.token ?? {}) as { augmentCount?: number }
+    const augSegs92 = (nAug92?.segments ?? []).filter((s) => s.el === 'aug')
+    /**
+     * ⚠ 与 `render/index.ts` 的 `lastAug` **同一套取法**（否则又是两处口径）：
+     * 空间优先路径的段带 `el: 'aug'`；**时值优先路径的段不带 `el`**（见
+     * `docs/PREVIEW-DEBUG-BOUNDARIES.md` §六），按段序取第 `augmentCount` 段。
+     */
+    const lastAug92 =
+      augSegs92.length > 0 ? augSegs92[augSegs92.length - 1] : (nAug92?.segments ?? [])[tokAug92.augmentCount ?? 0]
+    const augCellRight92 = lastAug92 ? lastAug92.x + lastAug92.perBeat * lastAug92.beats : NaN
     check(
-      `adj396 ${tag92}：有增时线 → 后倚音排在增时线之后（同音符跨度内，槽内摊开）`,
-      gxAug > augCx + DIGIT_W / 2 && gxAug < augCx + DIGIT_W / 2 + 2.5 * NS_S + 14,
-      `grace=${gxAug} augCx=${augCx}`,
+      `adj396 ${tag92}：有增时线 → 后倚音排在**增时线格右缘**之后（同音符跨度内，槽内摊开）`,
+      Number.isFinite(augCellRight92) &&
+        gxAug > augCellRight92 - 0.01 &&
+        gxAug < augCellRight92 + 2.5 * NS_S + 14 &&
+        augCx + DIGIT_W / 2 < gxAug,
+      `grace=${gxAug.toFixed(2)} aug格右缘=${Number.isFinite(augCellRight92) ? augCellRight92.toFixed(2) : 'n/a'} aug字符右缘=${(augCx + DIGIT_W / 2).toFixed(2)}`,
     )
     const svgDot = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 3.[h5/] 1 2 |\n'), cfg92))[0]
     const gxDot = graceXs92(svgDot)[0]
@@ -20339,7 +20391,8 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
        * 曾经写过一版（`adj905f`）报出 18 处"不齐"，但那是**用错了尺子**：
        *
        * `layout/index.ts:2384` 里 `perBeat = noteBodyW / noteDur` 用的是**墨迹宽**，
-       * 它的用途是「让增时线字符在**自己的格内居中**」（见该处注释），
+       * 它的用途是「让增时线的**格** = 该元素自身占宽」（`adj905w` 之后字符本身按"格左缘 + off"
+       * 左对齐，不再在格内居中 —— 见 `render/index.ts` 的 `adj905w` 注释），
        * **不是**"到下一拍的 x"。真正描述"每一拍占多宽"的量是 `x + width`（= 下一时值的左边界）
        * —— 那正是 `adj905d` 在守的（**全部示例 0 处不合规**），也是色块右界改用的量（`adj905c`）。
        *
