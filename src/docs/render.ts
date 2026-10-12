@@ -22,8 +22,8 @@ import { fillExternalLinks } from '../brand/siteLinks'
 import './docs.css'
 
 export interface DocPage {
-  /** 文档标识：与两份 md 一一对应 */
-  kind: 'manual' | 'syntax'
+  /** 文档标识：与三份 md 一一对应（`plugin` 只在官网有，不进应用内帮助） */
+  kind: 'manual' | 'syntax' | 'plugin'
   /** 浏览器页签后缀（形如「操作手册 - 爱记谱 iJipu」） */
   title: string
   /** Markdown 原文 */
@@ -86,20 +86,34 @@ function bindScrollSpy(): void {
   )
 }
 
-/** 窄屏目录抽屉 */
+/**
+ * 窄屏目录抽屉。
+ *
+ * adj905x（用户实测）：窄屏下目录改成了**贴在吸顶页眉之下的浮层**（见 `docs.css`）——
+ * 于是必须能"随手关掉"：点条目（已有）、点面板外、按 ESC 三条路都关。
+ * 不关的话浮层会盖住正文，用户只能再点一次「目录」，体验反而更差。
+ */
 function bindTocToggle(): void {
   const btn = document.getElementById('toc-toggle')
   const toc = document.getElementById('doc-toc')
   if (!btn || !toc) return
-  btn.addEventListener('click', () => {
-    const open = toc.classList.toggle('open')
+  const setOpen = (open: boolean): void => {
+    toc.classList.toggle('open', open)
     btn.setAttribute('aria-expanded', open ? 'true' : 'false')
-  })
+  }
+  btn.addEventListener('click', () => setOpen(!toc.classList.contains('open')))
   toc.addEventListener('click', (e) => {
-    if ((e.target as HTMLElement).closest('a')) {
-      toc.classList.remove('open')
-      btn.setAttribute('aria-expanded', 'false')
-    }
+    if ((e.target as HTMLElement).closest('a')) setOpen(false)
+  })
+  /** 点面板与按钮之外的地方 ⇒ 关（`closest` 覆盖按钮里的图标/文字节点） */
+  document.addEventListener('click', (e) => {
+    if (!toc.classList.contains('open')) return
+    const t = e.target as HTMLElement
+    if (t.closest('#doc-toc') || t.closest('#toc-toggle')) return
+    setOpen(false)
+  })
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && toc.classList.contains('open')) setOpen(false)
   })
 }
 
@@ -138,7 +152,7 @@ export function renderDoc(page: DocPage): void {
     //（引擎按需加载——不点「预览」就不会去下那 68KB，见 help/jpsPreview.ts）
     mountJpsBlocks(body)
   }
-  // 当前是哪一份文档：给另一份的切换链接加高亮
+  // 当前是哪一份文档：给顶栏切换链接加高亮（`docs.css` 用 `body[data-doc=…]` 选择器消费）
   document.body.dataset.doc = page.kind
   renderToc(page)
   bindScrollSpy()

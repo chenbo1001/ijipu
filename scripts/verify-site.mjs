@@ -721,6 +721,10 @@ async function main() {
       await c.send('Page.navigate', { url: `${origin}/syntax/` })
       await sleep(1200)
       await saveShot('syntax.png', await shoot('png', { captureBeyondViewport: true }))
+      /* adj905x：插件手册（新增页）的整页图 */
+      await c.send('Page.navigate', { url: `${origin}/plugin/` })
+      await sleep(1200)
+      await saveShot('plugin.png', await shoot('png', { captureBeyondViewport: true }))
     }
 
     // =====================================================================
@@ -767,6 +771,8 @@ async function main() {
             pgBlocks: qa('#playground .jps-block').length,
             /* adj878：右上角的深浅主题开关 */
             hasTheme: !!q('#theme-toggle'),
+            /* adj905x（用户要求）：顶栏那一排的「插件手册」入口 */
+            navPlugin: qa('.nav a').find((a) => (a.textContent || '').trim() === '插件手册')?.getAttribute('href') ?? '',
           }
         })()`,
       )
@@ -828,6 +834,8 @@ async function main() {
       // ⚠ adj899 的换行测试放在下面"切示例"那组**之后**（它要点击示例，会改变初始状态）
       check('首页入口链接 6 个（应用/手册/语法/桌面/插件/赞赏）', home.entries === 6, String(home.entries))
       check('首页顶栏导航 ≥ 6 条', home.navLinks >= 6, String(home.navLinks))
+      check('adj905x 首页顶栏有「插件手册」入口（指向 `/plugin/`，用户要求）',
+        home.navPlugin === '/plugin/', home.navPlugin)
       check('首页主按钮指向 `/app/`', home.cta === '/app/', home.cta)
       check('首页版本号占位全部填成 vX.Y.Z（没有漏成「·」）',
         home.verTotal > 0 && home.verCount === home.verTotal, `${home.verCount}/${home.verTotal}：${home.ver}`)
@@ -1148,10 +1156,12 @@ async function main() {
       const appErrs = collectErrors(mark).filter((e) => !/音色|soundfont|sampler|sf2|midi-js/i.test(e))
       check('应用无本站资源错误（音色库等跨域资源失败不计）', appErrs.length === 0, appErrs.slice(0, 4).join(' | '))
 
-      // ---------------- 文档页（两份都要：正文 + 目录 + 锚点） ----------------
+      // ---------------- 文档页（三份都要：正文 + 目录 + 锚点） ----------------
       for (const [label, url, minToc, minKids, needTable] of [
         ['操作手册', '/manual/', 5, 20, false],
         ['脚本语法说明', '/syntax/', 8, 40, true],
+        /* adj905x（用户要求）：插件功能介绍 + 使用手册 */
+        ['插件手册', '/plugin/', 8, 30, true],
       ]) {
         console.log(`[verify-site] 验证 \`${url}\`（${label}）…`)
         mark = noteEvents()
@@ -1259,6 +1269,40 @@ async function main() {
           `目标 ${hit} → ${JSON.stringify(jumped)}`)
 
         /**
+         * adj905x（用户要求）：「**操作手册 / 脚本语法说明 的页眉要浮动固定在顶部**，不随内容上滚，
+         * 这样随时可以点目录、跳到需要的标题 —— 类似首页的显示方式」。
+         *
+         * 判据用**实测矩形**，不看 CSS 里写了什么（"写了 sticky 却没生效"正是这类问题的形态：
+         * 祖先有 overflow、被 transform/filter 生成包含块、或 sticky 的容器高度不对，都会静默失效）。
+         * 此刻页面已经被上面那步滚过了（`jumped.y > 0`）⇒ 正好是量它的时机。
+         * 顺带量"目录是否仍在视口内" —— 用户要的是"随时可以点目录"。
+         */
+        const sticky = await evalJs(
+          c,
+          `(() => {
+            const tb = document.querySelector('.doc-topbar')
+            const toc = document.querySelector('.doc-toc')
+            const tr = tb ? tb.getBoundingClientRect() : null
+            const cr = toc ? toc.getBoundingClientRect() : null
+            return {
+              y: Math.round(window.scrollY),
+              vh: window.innerHeight,
+              pos: tb ? getComputedStyle(tb).position : '',
+              top: tr ? Math.round(tr.top) : null,
+              bottom: tr ? Math.round(tr.bottom) : null,
+              tocTop: cr ? Math.round(cr.top) : null,
+              tocInView: !!cr && cr.bottom > 0 && cr.top < window.innerHeight,
+            }
+          })()`,
+        )
+        check(`${label}：滚到 ${sticky?.y ?? 0}px 后页眉**仍固定在顶部**（不随内容上滚）`,
+          !!sticky && sticky.y > 0 && sticky.top === 0 && sticky.bottom > 0 &&
+            (sticky.pos === 'sticky' || sticky.pos === 'fixed'),
+          JSON.stringify(sticky))
+        check(`${label}：滚动中目录仍在视口内（"随时可以点目录"）`,
+          !!sticky && sticky.tocInView, JSON.stringify(sticky))
+
+        /**
          * ---- adj882（用户要求）：文档里的 ` ```jps ` 示例要变成「脚本 / 预览」块 ----
          * 这是这个功能的**核心验收**：语法说明里几十个示例，页面上都该是可切换的。
          */
@@ -1309,6 +1353,98 @@ async function main() {
         const docErrs = collectErrors(mark)
         check(`${label}：无控制台错误 / 无本站 4xx`, docErrs.length === 0, docErrs.slice(0, 4).join(' | '))
       }
+
+      /**
+       * ---------------- 窄屏（手机视口）的目录抽屉 ----------------
+       *
+       * adj905x（**用户实测反馈**）：「手机上点『目录』，面板开在离我很远的上方 —— 点了没反应」。
+       *
+       * 根因：窄屏下目录是抽屉，而它是 `position: static` 的普通块、DOM 排序在正文**之前** ⇒
+       * 你滚到第 5 节再点「目录」，面板其实是展开在**文档最顶部**，视口里什么都没发生。
+       * 现在它是**贴在吸顶页眉之下的浮层**（`position: fixed` + `top: var(--site-topbar-h)`），
+       * 与首页手机菜单同一手法。
+       *
+       * 判据都在 390×844 的手机视口下**实测**（不看 CSS 写了什么）：
+       *  ① 滚过之后页眉仍吸顶；
+       *  ② **滚到中部**点「目录」⇒ 面板必须出现在**视口内**（用户报的就是这一条）；
+       *  ③ 点面板里的一条 ⇒ 跳到该标题 + 面板自动收起。
+       */
+      console.log('[verify-site] 验证窄屏（手机视口）的目录抽屉…')
+      await viewport(390, 844, 2)
+      for (const [label, url] of [['操作手册', '/manual/'], ['脚本语法说明', '/syntax/']]) {
+        mark = noteEvents()
+        await c.send('Page.navigate', { url: `${origin}${url}` })
+        await sleep(1400)
+        // 注意：`html` 上有 `scroll-behavior: smooth` ⇒ 必须显式 instant，否则量到的是动画中间态
+        await evalJs(c, `window.scrollTo({ top: 1500, behavior: 'instant' })`)
+        await sleep(400)
+        const scrolled = await evalJs(
+          c,
+          `(() => {
+            const tb = document.querySelector('.doc-topbar')
+            return {
+              y: Math.round(window.scrollY),
+              top: tb ? Math.round(tb.getBoundingClientRect().top) : null,
+              btnVisible: !!document.getElementById('toc-toggle'),
+            }
+          })()`,
+        )
+        check(`窄屏 ${label}：页眉仍吸顶（滚到 ${scrolled?.y ?? 0}px、top=${scrolled?.top ?? 'n/a'}），且「目录」按钮在手边`,
+          !!scrolled && scrolled.y > 0 && scrolled.top === 0 && scrolled.btnVisible, JSON.stringify(scrolled))
+        const opened = await evalJs(
+          c,
+          `(() => {
+            const btn = document.getElementById('toc-toggle')
+            const toc = document.getElementById('doc-toc')
+            if (!btn || !toc) return null
+            btn.click()
+            const r = toc.getBoundingClientRect()
+            return {
+              open: toc.classList.contains('open'),
+              pos: getComputedStyle(toc).position,
+              top: Math.round(r.top),
+              bottom: Math.round(r.bottom),
+              vh: window.innerHeight,
+              inView: r.bottom > 0 && r.top < window.innerHeight,
+              links: toc.querySelectorAll('a').length,
+            }
+          })()`,
+        )
+        check(`窄屏 ${label}：滚到中部点「目录」⇒ 面板出现在**视口内**（修前它开在文档顶部，看着像点不动）`,
+          !!opened && opened.open && opened.inView && opened.links > 0,
+          JSON.stringify(opened))
+        const tapped = await evalJs(
+          c,
+          `(() => {
+            const a = document.querySelectorAll('#doc-toc a.toc-item')[2]
+            if (!a) return null
+            const href = a.getAttribute('href')
+            a.click()
+            return href
+          })()`,
+        )
+        await sleep(1000)
+        const afterTap = await evalJs(
+          c,
+          `(() => {
+            const toc = document.getElementById('doc-toc')
+            const id = decodeURIComponent(location.hash.slice(1))
+            const el = document.getElementById(id)
+            return {
+              id,
+              open: toc ? toc.classList.contains('open') : false,
+              y: Math.round(window.scrollY),
+              top: el ? Math.round(el.getBoundingClientRect().top) : null,
+            }
+          })()`,
+        )
+        check(`窄屏 ${label}：点面板里的条目会跳过去、并且面板自动收起`,
+          !!tapped && afterTap.id === tapped.slice(1) && afterTap.y > 0 && !afterTap.open,
+          `${tapped} → ${JSON.stringify(afterTap)}`)
+        const narrowErrs = collectErrors(mark)
+        check(`窄屏 ${label}：无控制台错误 / 无本站 4xx`, narrowErrs.length === 0, narrowErrs.slice(0, 3).join(' | '))
+      }
+      await viewport(1440, 900, 1)
 
       // ---------------- 负对照：确认"验证器真的在量东西" ----------------
       console.log('[verify-site] 负对照…')

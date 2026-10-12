@@ -108,6 +108,7 @@
 | `/app/` | **iJipu 应用** | `app/index.html` + `src/main.tsx` | 现在的应用，一行代码不改功能 |
 | `/manual/` | **操作手册** | `manual/index.html` + `src/docs/manual.ts` | `docs/USER-GUIDE.md` |
 | `/syntax/` | **脚本语法说明** | `syntax/index.html` + `src/docs/syntax.ts` | `docs/SYNTAX.md` |
+| `/plugin/` | **插件手册**（adj905x） | `plugin/index.html` + `src/docs/plugin.ts` | `docs/PLUGIN-GUIDE.md`：Obsidian 插件的功能介绍 + 使用手册 |
 | （外链） | 桌面端下载 | → `https://github.com/snailhome/ijipu/releases/latest` | 永远拿最新版，不写死版本号 |
 | （外链） | Obsidian 插件 | → `https://github.com/snailhome/obsidian-ijipu` | 另附社区市场页 `https://obsidian.md/plugins?id=ijipu` |
 | （首页区块） | 支持赞赏 | 首页弹层，展示 `/icons/good.png` | 不放外部收款平台，直接用现成的微信赞赏码 |
@@ -134,7 +135,7 @@
 ### 4.2 顶栏（吸顶）
 
 ```
-[Logo] 爱记谱 iJipu   功能  使用手册  脚本语法  下载桌面端  插件  GitHub        [打开应用 →]
+[Logo] 爱记谱 iJipu   功能  使用手册  脚本语法  插件手册  下载桌面端  插件  GitHub   [打开应用 →]
 ```
 - 窄屏收成汉堡菜单；「打开应用」按钮**始终可见**（主 CTA）。
 - 滚动过 Hero 后顶栏加背景与细边框（不透明，避免内容透出）。

@@ -7535,9 +7535,10 @@ console.log('[103] icons live in public/icons and only the used ones (adj417)')
   const manifest = JSON.parse(readFileSync(join(root, 'public', 'manifest.webmanifest'), 'utf8')) as { icons: { src: string }[] }
   const manIcons = manifest.icons.map((i) => i.src)
   check('adj417 manifest 图标指向 /icons/ 且文件存在', manIcons.every((s) => s.startsWith('/icons/') && existsSync(join(root, 'public', s.slice(1)))), manIcons.join(','))
-  // adj876：站点分成四页后，favicon 要**每一页都有**——浏览器标签页不看你是从哪个入口进来的。
+  // adj876：站点分成多页后，favicon 要**每一页都有**——浏览器标签页不看你是从哪个入口进来的。
   // （应用外壳在 `app/index.html`；首页的图标列表还多一个 apple-touch-icon，故阈值取 2。）
-  for (const rel of ['index.html', 'app/index.html', 'manual/index.html', 'syntax/index.html']) {
+  // adj905x：新增 `/plugin/`（插件手册）后同样要在这一串里，否则"新页面忘了 favicon"没人守。
+  for (const rel of ['index.html', 'app/index.html', 'manual/index.html', 'syntax/index.html', 'plugin/index.html']) {
     const html = readFileSync(join(root, rel), 'utf8')
     const htmlIcons = [...html.matchAll(/href="(\/icons\/[^"]+)"/g)].map((m) => m[1])
     check(
@@ -19960,26 +19961,40 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   console.log('[160] 官网分层：首页 / 应用 / 文档页（adj876）')
   const readSrc = (rel: string) => String(readFileSync(join(root, rel), 'utf8'))
 
-  // ---- ① 四份 HTML 都在，且各自角色正确 ----
-  const rel = ['index.html', 'app/index.html', 'manual/index.html', 'syntax/index.html']
-  check('adj876 四份 HTML 入口都存在（首页 / 应用 / 手册 / 语法）',
+  // ---- ① 五份 HTML 都在，且各自角色正确 ----
+  const rel = ['index.html', 'app/index.html', 'manual/index.html', 'syntax/index.html', 'plugin/index.html']
+  check('adj876 五份 HTML 入口都存在（首页 / 应用 / 手册 / 语法 / 插件）',
     rel.every((p) => existsSync(join(root, p))), rel.join(', '))
 
   const homeHtml = readSrc('index.html')
   const shellHtml = readSrc('app/index.html')
   const manualHtml = readSrc('manual/index.html')
   const syntaxHtml = readSrc('syntax/index.html')
+  const pluginHtml = readSrc('plugin/index.html')
 
   check('adj876 `app/index.html` 挂的是应用入口 `/src/main.tsx` 且带 `#root`（它是应用外壳的唯一来源）',
     shellHtml.includes('src="/src/main.tsx"') && shellHtml.includes('id="root"'))
   check('adj876 首页**不**挂应用入口（挂了就等于首页要把整个应用下下来）',
     !homeHtml.includes('/src/main.tsx') && homeHtml.includes('src="/src/landing/main.ts"'))
-  check('adj876 两个文档页各挂自己的入口（各自只带自己那份 md）',
-    manualHtml.includes('src="/src/docs/manual.ts"') && syntaxHtml.includes('src="/src/docs/syntax.ts"'))
+  check('adj876 三个文档页各挂自己的入口（各自只带自己那份 md）',
+    manualHtml.includes('src="/src/docs/manual.ts"') &&
+      syntaxHtml.includes('src="/src/docs/syntax.ts"') &&
+      pluginHtml.includes('src="/src/docs/plugin.ts"'))
 
-  const titles = [homeHtml, shellHtml, manualHtml, syntaxHtml].map((h) => h.match(/<title>([^<]*)<\/title>/)?.[1] ?? '')
-  check('adj876 四份 HTML 的 <title> 各不相同', new Set(titles).size === 4, titles.join(' | '))
+  const titles = [homeHtml, shellHtml, manualHtml, syntaxHtml, pluginHtml].map((h) => h.match(/<title>([^<]*)<\/title>/)?.[1] ?? '')
+  check('adj876 五份 HTML 的 <title> 各不相同', new Set(titles).size === 5, titles.join(' | '))
   check('adj876 首页 title 含 Slogan「码即成，谱自现」', titles[0].includes('码即成，谱自现'), titles[0])
+  /**
+   * adj905x（用户要求）：「**在首页上面一排增加一个链接，链接到插件这个手册**」。
+   * 判据盯的是"首页顶栏那一排"（`.nav`）里真的有这一条 —— 光有页面、首页没入口，用户找不着。
+   */
+  check('adj905x 首页顶栏有「插件手册」入口（指向 `/plugin/`）',
+    /<nav class="nav"[\s\S]*?<a href="\/plugin\/">插件手册<\/a>[\s\S]*?<\/nav>/.test(homeHtml))
+  check('adj905x 三个文档页顶栏互相可切换（`.doc-switch` 里三份都在）',
+    [manualHtml, syntaxHtml, pluginHtml].every(
+      (h) =>
+        /<nav class="doc-switch">[\s\S]*?href="\/manual\/"[\s\S]*?href="\/syntax\/"[\s\S]*?href="\/plugin\/"[\s\S]*?<\/nav>/.test(h),
+    ))
 
   // ---- ② 首页必须够轻：不引 React、不引引擎（否则"介绍页"要白下几百 KB） ----
   const landingSrc = readSrc('src/landing/main.ts')
@@ -20025,6 +20040,8 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       ['/app/index.html', '/app/index.html'],
       ['/manual/', '/manual/index.html'],
       ['/syntax/', '/syntax/index.html'],
+      ['/plugin/', '/plugin/index.html'],
+      ['/plugin', '/plugin/index.html'],
       ['/whatever', '/index.html'],
     ]
     const bad = cases

@@ -66,6 +66,18 @@ a:hover { text-decoration: underline; }
 }
 .doc-switch a:hover { color: var(--site-text); background: var(--site-panel-hover); text-decoration: none; }
 .doc-switch a.active { color: var(--site-text); background: var(--site-panel); border-color: var(--site-border); }
+/**
+ * adj905x：**"当前是哪一份文档"的高亮，之前一直是死的** —— `.doc-switch a.active` 这条规则
+ * 从来没人给它加过 `active`（前三份页面靠"看得出自己在哪一页"，加第三份之后就更容易混了）。
+ * 现在由 `render.ts` 写在 `body[data-doc]` 上，用属性选择器消费：**零 JS、也不会漏加类**。
+ */
+body[data-doc='manual'] .doc-switch a[href='/manual/'],
+body[data-doc='syntax'] .doc-switch a[href='/syntax/'],
+body[data-doc='plugin'] .doc-switch a[href='/plugin/'] {
+  color: var(--site-text);
+  background: var(--site-panel);
+  border-color: var(--site-border);
+}
 /* adj877（用户要求）：顶栏的「返回首页」——logo 与页脚虽然也能回，但都不够显眼 */
 .doc-home {
   padding: 5px 10px;
@@ -267,14 +279,33 @@ html[data-site-mode='light'] .doc-body pre { box-shadow: 0 4px 16px var(--site-s
   /* 小屏一行塞不下这么多：首页链接收起来（logo 也能回首页），主题按钮靠右留在手上 */
   .doc-home { display: none; }
   .theme-toggle { margin-left: auto; }
+  /**
+   * adj905x（**用户实测反馈**）：「手机上点『目录』，面板开在离我很远的上方 —— 点了没反应」。
+   *
+   * 根因：窄屏下目录是**抽屉**，而它是 `position: static` 的普通块、DOM 里排在正文**之前** ⇒
+   * 你滚到第 5 节再点「目录」，面板其实是展开在**文档最顶部**，视口里什么都没发生。
+   *
+   * 改法：做成**挂在视口顶部、紧贴吸顶页眉之下**的浮层 —— 与首页手机菜单同一手法
+   * （`landing.css` 里 `.nav { position: absolute; top: var(--site-topbar-h) }` 挂在 sticky 顶栏里）。
+   * 于是滚到哪儿点「目录」，面板就出现在哪儿 ⇒ 用户要的「随时可以点目录、跳到需要的标题」成立。
+   * `z-index` 低于顶栏(20) ⇒ 面板从页眉底下展开；点面板外 / 按 ESC / 点条目都会关（见 render.ts）。
+   */
   .doc-toc {
-    position: static;
-    max-height: none;
+    position: fixed;
+    top: var(--site-topbar-h);
+    left: 0;
+    right: 0;
+    z-index: 15;
+    max-height: min(70vh, calc(100vh - var(--site-topbar-h) - 12px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
     display: none;
-    background: var(--site-panel);
+    background: var(--site-bg);
     border: 1px solid var(--site-border);
-    border-radius: 10px;
-    padding: 12px 14px;
+    border-top: none;
+    border-radius: 0 0 12px 12px;
+    padding: 12px 18px 16px;
+    box-shadow: 0 14px 34px var(--site-shadow);
   }
   .doc-toc.open { display: block; }
 }
