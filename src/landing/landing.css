@@ -374,64 +374,13 @@ code {
    adj877：现场试一段（playground）与 Obsidian 插件区块
    ========================================================================== */
 
-/* ---------- 现场试一段 ---------- */
+/* ---------- adj882：看看它长什么样（示例切换 + ```jps 块） ---------- */
 .playground { padding-bottom: 72px; }
 .playground h2 { text-align: center; margin-bottom: 12px; }
-.pg-lead { text-align: center; color: var(--site-text-2); font-size: 15px; margin: 0 0 22px; }
+.pg-lead { text-align: center; color: var(--site-text-2); font-size: 15px; margin: 0 0 18px; }
 
-.pg-tabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--site-border);
-  margin-bottom: 0;
-}
-.pg-tabs button {
-  appearance: none;
-  background: none;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 9px 9px 0 0;
-  color: var(--site-text-2);
-  cursor: pointer;
-  font-size: 14.5px;
-  font-weight: 600;
-  padding: 9px 20px;
-  /* 让按钮的底边盖住容器那条线，做出"选中项与内容连成一体"的效果 */
-  margin-bottom: -1px;
-}
-.pg-tabs button:hover { color: var(--site-text); }
-.pg-tabs button.active {
-  background: var(--site-panel);
-  border-color: var(--site-border);
-  color: var(--site-accent);
-}
-
-.pg-body {
-  background: var(--site-panel);
-  border: 1px solid var(--site-border);
-  border-top: none;
-  border-radius: 0 0 var(--site-radius) var(--site-radius);
-  padding: 16px;
-}
-.pg-pane[hidden] { display: none; }
-
-#pg-src {
-  width: 100%;
-  min-height: 160px;
-  resize: vertical;
-  background: var(--site-code-bg);
-  border: 1px solid var(--site-border);
-  border-radius: 9px;
-  color: var(--site-text);
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
-  font-size: 14px;
-  line-height: 1.75;
-  padding: 13px 15px;
-  tab-size: 2;
-}
-#pg-src:focus { outline: 1px solid var(--site-accent); outline-offset: 0; }
-
-.pg-samples { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; font-size: 13.5px; color: var(--site-muted); }
+/* 示例按钮（一排，居中） */
+.pg-samples { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-bottom: 18px; }
 .pg-samples button {
   appearance: none;
   background: transparent;
@@ -439,59 +388,22 @@ code {
   border-radius: 999px;
   color: var(--site-text-2);
   cursor: pointer;
-  font-size: 13px;
-  padding: 4px 12px;
+  font-size: 14px;
+  padding: 6px 16px;
 }
 .pg-samples button:hover { border-color: var(--site-accent); color: var(--site-text); }
-
-/* 渲染结果：引擎产出的 SVG 是自包含白底黑字，这里只负责让它自适应宽度 */
-.pg-out { min-height: 120px; display: flex; flex-direction: column; gap: 14px; }
-.pg-out svg {
-  width: 100%;
-  height: auto;
-  background: #fff;
-  border-radius: 9px;
-  display: block;
-}
-.pg-out:empty::before {
-  content: "点「预览」看看效果（第一次会先加载渲染引擎，约 68KB）";
-  color: var(--site-muted);
-  font-size: 14px;
-}
-
-/* adj880：显示范围三档（谱面 / 满宽 / 整页，口径与 Obsidian 插件一致） */
-.pg-views { display: flex; gap: 4px; flex: 0 0 auto; }
-.pg-views button {
-  appearance: none;
-  background: transparent;
-  border: 1px solid var(--site-border);
-  border-radius: 7px;
-  color: var(--site-text-2);
-  cursor: pointer;
-  font-size: 13px;
-  padding: 5px 11px;
-}
-.pg-views button:hover { border-color: var(--site-accent); color: var(--site-text); }
-.pg-views button.active {
+.pg-samples button.active {
   background: var(--site-panel-hover);
   border-color: var(--site-accent);
   color: var(--site-accent);
 }
 
-.pg-bar { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
-.pg-msg { flex: 1; min-width: 0; font-size: 13.5px; color: var(--site-muted); }
-.pg-msg[data-kind='warn'] { color: var(--site-warn); }
-.pg-bar button {
-  appearance: none;
-  background: transparent;
-  border: 1px solid var(--site-border);
-  border-radius: 8px;
-  color: var(--site-text-2);
-  cursor: pointer;
-  font-size: 13px;
-  padding: 6px 14px;
-}
-.pg-bar button:hover { border-color: var(--site-accent); color: var(--site-text); }
+/*
+  `.jps-block`（「脚本 / 预览」组件）的样式见 `help/jpsPreview.css`——
+  由 `help/jpsPreview.ts` 引入，三处共用（官网文档页 / 官网首页 / 应用内帮助）。
+  这里只留首页**独有**的部分。
+*/
+
 .pg-hint { color: var(--site-muted); font-size: 13px; margin: 14px 0 0; line-height: 1.85; }
 
 /* ---------- Obsidian 插件区块 ---------- */
@@ -544,7 +456,7 @@ code {
 @media (max-width: 900px) {
   .obsidian { grid-template-columns: 1fr; gap: 24px; }
   .ob-text h2 { font-size: 22px; }
-  .pg-tabs button { padding: 9px 16px; }
+  .pg-samples button { padding: 6px 13px; font-size: 13px; }
 }
 
 /* ==========================================================================
@@ -584,7 +496,7 @@ html[data-site-mode='light'] .deep-shots img,
 html[data-site-mode='light'] .ob-shot img { box-shadow: 0 8px 26px var(--site-shadow); }
 /* 谱面是白纸黑字：浅色页面上靠边框把它"框住" */
 html[data-site-mode='light'] .demo-score img,
-html[data-site-mode='light'] .pg-out svg { border: 1px solid var(--site-border); }
+html[data-site-mode='light'] .jps-block-preview svg { border: 1px solid var(--site-border); }
 
 @media (max-width: 900px) {
   /* 窄屏下 `.nav` 脱离文档流，靠 `margin-left:auto` 把主题按钮与汉堡一起顶到右上角 */

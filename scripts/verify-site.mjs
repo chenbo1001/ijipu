@@ -798,8 +798,9 @@ async function main() {
             obPoints: qa('.ob-points li').length,
             obMarket: q('.ob-actions a[data-l="obsidianMarketUrl"]')?.getAttribute('href') ?? '',
             obRepo: q('.ob-actions a[data-l="obsidianRepoUrl"]')?.getAttribute('href') ?? '',
-            pgTabs: qa('[data-pg-tab]').length,
-            pgHiddenPanes: qa('[data-pg-pane][hidden]').length,
+            /* adj882：首页「看看它长什么样」—— 示例按钮 + 一个 jps 块 */
+            pgSamples: qa('[data-pg-sample]').length,
+            pgBlocks: qa('#playground .jps-block').length,
             /* adj878：右上角的深浅主题开关 */
             hasTheme: !!q('#theme-toggle'),
           }
@@ -826,9 +827,8 @@ async function main() {
       check('插件专区两个按钮地址正确（社区市场 / GitHub 仓库）',
         home.obMarket === 'https://obsidian.md/plugins?id=ijipu' && home.obRepo === SITE_PLUGIN,
         `${home.obMarket} | ${home.obRepo}`)
-      check('首页 playground 有「脚本 / 预览」两个标签', home.pgTabs === 2, String(home.pgTabs))
-      check('playground 初始停在「脚本」标签（预览要按需下引擎，不该在首屏发生）',
-        home.pgHiddenPanes === 1, String(home.pgHiddenPanes))
+      check('首页有示例可切（≥ 3 个）+ 一个 ```jps 块',
+        home.pgSamples >= 3 && home.pgBlocks === 1, `${home.pgSamples} 个示例 / ${home.pgBlocks} 个块`)
 
       // ---- adj878：右上角的深浅主题开关（点一下要真的换掉配色，不只是改个属性） ----
       check('首页右上角有深浅主题开关', home.hasTheme)
@@ -884,12 +884,45 @@ async function main() {
       check('切回深色后插图还原（可逆）',
         JSON.stringify(shotsBack) === JSON.stringify(shotsDark), shotsBack.join(', '))
 
-      // ---- playground：真的点一下「预览」，等引擎加载并渲染出 SVG ----
-      // 这条是"引擎能否在首页跑"的**唯一硬证据**（源码级断言做不到）。
+      /**
+       * ---- adj882：首页「看看它长什么样」——一排示例 + 一个 ` ```jps ` 块 ----
+       * 用户口径：首页不该让使用者自己改代码（那还不如直接进应用），
+       * 而是给几个例子让他切着看 —— 所以这里**没有 textarea**。
+       * 下面这条"真的点一下「预览」"是"引擎能在首页跑"的**唯一硬证据**（源码级断言做不到）。
+       */
+      const pgTabsOk = await evalJs(
+        c,
+        `(() => {
+          const block = document.getElementById('pg-block')
+          if (!block) return -1
+          return block.querySelectorAll('[data-jps-tab]').length
+        })()`,
+      )
+      check('首页有这个 ```jps 块，且带「脚本 / 预览」两个标签', pgTabsOk === 2, String(pgTabsOk))
+      const pgInitial = await evalJs(
+        c,
+        `(() => {
+          const b = document.getElementById('pg-block')
+          if (!b) return null
+          return {
+            codeHidden: b.querySelector('.jps-block-code')?.hidden ?? null,
+            prevHidden: b.querySelector('.jps-block-preview')?.hidden ?? null,
+            mode: b.dataset.jpsMode ?? '',
+            zoom: b.dataset.jpsZoom ?? '',
+            samples: [...document.querySelectorAll('[data-pg-sample]')].length,
+          }
+        })()`,
+      )
+      check('首页有多个示例可切（≥ 3 个）', (pgInitial?.samples ?? 0) >= 3, JSON.stringify(pgInitial))
+      check('首屏停在「脚本」标签（预览要按需下引擎，不该在首屏发生）',
+        pgInitial?.codeHidden === false && pgInitial?.prevHidden === true, JSON.stringify(pgInitial))
+      check('首页这个块声明了显示范围与缩放（`m=` / `z=`，与插件同口径）',
+        pgInitial?.mode === 's' && pgInitial?.zoom === '*', JSON.stringify(pgInitial))
+
       const pgClicked = await evalJs(
         c,
         `(() => {
-          const b = [...document.querySelectorAll('[data-pg-tab]')].find((el) => el.dataset.pgTab === 'preview')
+          const b = document.querySelector('#pg-block [data-jps-tab="preview"]')
           if (!b) return false
           b.click()
           return true
@@ -898,79 +931,36 @@ async function main() {
       let pgSvg = 0
       for (let i = 0; i < 30 && pgSvg === 0; i++) {
         await sleep(300)
-        pgSvg = await evalJs(c, `document.querySelectorAll('#pg-out svg').length`)
+        pgSvg = await evalJs(c, `document.querySelectorAll('#pg-block .jps-block-preview svg').length`)
       }
-      const pgMsg = await evalJs(c, `document.getElementById('pg-msg')?.textContent ?? ''`)
-      check('点「预览」后 playground 真的渲染出谱面（引擎在首页加载并跑通了）',
+      const pgMsg = await evalJs(c, `document.querySelector('#pg-block .jps-block-msg')?.textContent ?? ''`)
+      check('点「预览」后首页的块真的渲染出谱面（引擎在首页加载并跑通了）',
         pgClicked && pgSvg > 0, `svg=${pgSvg} msg=${pgMsg}`)
-      check('playground 渲染结果无错误/告警提示', pgMsg === '', pgMsg.slice(0, 120))
+      check('首页块的渲染结果无错误/告警提示', pgMsg === '', pgMsg.slice(0, 120))
 
-      // 空脚本：应当给出「没有可渲染的内容」而不是崩掉或白屏。
-      // 渲染是异步的、且与上一次渲染有 `busy` 竞争 ⇒ 这里**轮询等提示出现**，不靠固定 sleep。
-      const pgEmpty = await evalJs(
+      // ---- 切示例：源码与预览都要跟着换（这是这个区块的核心用途） ----
+      const swap = await evalJs(
         c,
         `(async () => {
-          const ta = document.getElementById('pg-src')
-          if (!ta) return 'no-textarea'
-          ta.value = ''
-          document.querySelector('#pg-rerender')?.click()
+          const btns = [...document.querySelectorAll('[data-pg-sample]')]
+          const code = document.querySelector('#pg-block .jps-block-code code')
+          if (btns.length < 2 || !code) return null
+          const before = code.textContent
+          btns[1].click()
           for (let i = 0; i < 20; i++) {
-            await new Promise((r) => setTimeout(r, 150))
-            const t = document.getElementById('pg-msg')?.textContent ?? ''
-            if (t) return t
+            await new Promise((r) => setTimeout(r, 200))
+            if (code.textContent !== before && document.querySelectorAll('#pg-block .jps-block-preview svg').length > 0) break
           }
-          return ''
+          return { before: before.length, after: code.textContent.length, active: btns[1].classList.contains('active') }
         })()`,
       )
-      check('playground 对空脚本给出提示（不静默、不崩）',
-        typeof pgEmpty === 'string' && pgEmpty.length > 0, `实际：${String(pgEmpty).slice(0, 80)}`)
-
-      // ---- adj880（用户要求）：三档显示范围，默认「谱面」以免预览区过大 ----
-      /**
-       * ⚠ 上一条断言为了测"空脚本"把源码清空了 ⇒ 这里**必须先恢复源码**再量几何，
-       * 否则读到的是空输出（本轮实测：viewBox 读到 `null`）。
-       * 与 `E-2026-397` 第 ③ 类同源：断言不能继承上一步的状态。
-       */
-      await evalJs(
-        c,
-        `(() => {
-          const ta = document.getElementById('pg-src')
-          if (ta) ta.value = ${JSON.stringify("Q: 1 2 3 4 | 5 6 7 1' |\n")}
-          document.querySelector('[data-pg-view="score"]')?.click()
-          document.querySelector('#pg-rerender')?.click()
-        })()`,
-      )
-      await sleep(1600)
-      const pgViews = await evalJs(
-        c,
-        `[...document.querySelectorAll('[data-pg-view]')].map((b) => ({ v: b.dataset.pgView, on: b.classList.contains('active') }))`,
-      )
-      check('playground 有「谱面 / 满宽 / 整页」三档，且默认停在「谱面」',
-        pgViews.length === 3 && pgViews.find((x) => x.on)?.v === 'score', JSON.stringify(pgViews))
-      const vbOf = () =>
-        evalJs(
-          c,
-          `(() => {
-            const svg = document.querySelector('#pg-out svg')
-            if (!svg) return null
-            const vb = svg.viewBox.baseVal
-            return { w: Math.round(vb.width), h: Math.round(vb.height) }
-          })()`,
-        )
-      // 「谱面」必须**真的裁过**：判据是 viewBox 高度明显小于整页（A4 比例约 842）
-      const vbScore = await vbOf()
-      check('默认「谱面」视图确实裁过（viewBox 高度远小于整页）',
-        !!vbScore && vbScore.h > 0 && vbScore.h < 500, JSON.stringify(vbScore))
-      await evalJs(c, `document.querySelector('[data-pg-view="page"]')?.click()`)
-      await sleep(1300)
-      const vbPage = await vbOf()
-      check('切「整页」后 viewBox 变回整页高度（确实没裁）',
-        !!vbPage && !!vbScore && vbPage.h > vbScore.h + 100, `${JSON.stringify(vbScore)} → ${JSON.stringify(vbPage)}`)
-      // 切回「谱面」：别把状态留给后面的断言
-      await evalJs(c, `document.querySelector('[data-pg-view="score"]')?.click()`)
+      check('点另一个示例后：源码换了、预览重渲染了、按钮高亮跟着走',
+        !!swap && swap.after > 0 && swap.after !== swap.before && swap.active === true, JSON.stringify(swap))
+      await evalJs(c, `document.querySelectorAll('[data-pg-sample]')[0]?.click()`)
       await sleep(900)
+
       const pgErrs = collectErrors(mark)
-      check('首页（含 playground 交互与引擎加载）无控制台错误 / 无本站 4xx',
+      check('首页（含示例切换与引擎加载）无控制台错误 / 无本站 4xx',
         pgErrs.length === 0, pgErrs.slice(0, 4).join(' | '))
 
       const homeErrs = collectErrors(mark)
@@ -1104,6 +1094,46 @@ async function main() {
         check(`${label}：点目录真的会跳（hash 指向该标题 + 滚到目标标题附近）`,
           !!hit && jumped.id === hit && jumped.y > 0 && jumped.top !== null && jumped.top >= -20 && jumped.top < 240,
           `目标 ${hit} → ${JSON.stringify(jumped)}`)
+
+        /**
+         * ---- adj882（用户要求）：文档里的 ` ```jps ` 示例要变成「脚本 / 预览」块 ----
+         * 这是这个功能的**核心验收**：语法说明里几十个示例，页面上都该是可切换的。
+         */
+        const jpsBlocks = await evalJs(c, `document.querySelectorAll('#doc-body .jps-block').length`)
+        check(`${label}：正文里的 \`\`\`jps 示例都变成了「脚本 / 预览」块（共 ${jpsBlocks} 个）`,
+          jpsBlocks > 0, String(jpsBlocks))
+        const jpsInit = await evalJs(
+          c,
+          `(() => {
+            const b = document.querySelector('#doc-body .jps-block')
+            if (!b) return null
+            return {
+              codeHidden: b.querySelector('.jps-block-code')?.hidden ?? null,
+              prevHidden: b.querySelector('.jps-block-preview')?.hidden ?? null,
+              mode: b.dataset.jpsMode ?? '',
+              zoom: b.dataset.jpsZoom ?? '',
+            }
+          })()`,
+        )
+        check(`${label}：jps 块默认停在「脚本」（预览要按需加载引擎，不该在打开文档时就下）`,
+          jpsInit?.codeHidden === false && jpsInit?.prevHidden === true, JSON.stringify(jpsInit))
+        const docClicked = await evalJs(
+          c,
+          `(() => {
+            const b = document.querySelector('#doc-body .jps-block [data-jps-tab="preview"]')
+            if (!b) return false
+            b.click()
+            return true
+          })()`,
+        )
+        let docSvg = 0
+        for (let i = 0; i < 30 && docSvg === 0; i++) {
+          await sleep(300)
+          docSvg = await evalJs(c, `document.querySelectorAll('#doc-body .jps-block .jps-block-preview svg').length`)
+        }
+        check(`${label}：点示例块的「预览」真的渲染出谱面（引擎按需加载跑通）`,
+          docClicked && docSvg > 0, `svg=${docSvg}`)
+
         const docErrs = collectErrors(mark)
         check(`${label}：无控制台错误 / 无本站 4xx`, docErrs.length === 0, docErrs.slice(0, 4).join(' | '))
       }

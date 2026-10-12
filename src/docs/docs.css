@@ -248,6 +248,9 @@ html[data-site-mode='light'] .doc-body blockquote { background: var(--site-panel
 /* 正文里的谱面/截图类内容是白底或深色截图：浅色页面上给代码块一点投影，层次才分得开 */
 html[data-site-mode='light'] .doc-body pre { box-shadow: 0 4px 16px var(--site-shadow); }
 
+/* ` ```jps ` 块（「脚本 / 预览」组件）的样式在 `help/jpsPreview.css`——
+   三处共用：官网文档页 / 官网首页 / 应用内帮助。这里不再复写一份，免得漂。 */
+
 /* ---------- 窄屏 ---------- */
 @media (max-width: 860px) {
   .doc-layout { grid-template-columns: 1fr; gap: 18px; padding-top: 16px; }

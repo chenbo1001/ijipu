@@ -7,7 +7,10 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 // adj876：官网文档页与应用内帮助共用同一个 Markdown 渲染器（纯函数，可在 Node 里直接断言）
-import { mdToHtml, extractToc } from '../src/help/markdown'
+// adj882：` ```jps ` 块的显示参数解析（`m=` / `z=`，口径沿用 Obsidian 插件）
+import { mdToHtml, extractToc, parseJpsInfo } from '../src/help/markdown'
+// adj883：首页示例精简（去掉 `# jps-config:{…}` 与装饰线，但必须保住正文）
+import { BRAND_SAMPLES, simplifyJps } from '../src/landing/samples'
 import { inflateSync } from 'node:zlib'
 import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO, inkBoxOfLayout, inkBoxesOfLayout, INK_ESTIMATE_SLACK, insertPngPhys, readPngPhys, crc32, isPng, dpiForScale, pixelsPerMeterFor } from '@ijipu/engine/index.ts'
 /**
@@ -19896,5 +19899,52 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     // 代码块里的 `# 注释行…` **不是**标题（`.jps` 注释就长这样，语法说明里到处都是）
     check(`adj876 ${doc}：目录里没有混进代码块内的 \`#\` 注释行`,
       !realToc.some((t) => t.text.startsWith('注释行')), realToc.filter((t) => t.text.startsWith('注释行')).map((t) => t.text).join('；'))
+  }
+}
+
+/**
+ * adj882 / adj883：` ```jps ` 块的显示参数（`m=` / `z=`，口径沿用 Obsidian 插件）
+ * 与首页示例的精简（去掉 `# jps-config:{…}` 与装饰线）。
+ */
+{
+  console.log('[161] ```jps 块的显示参数 + 首页示例精简（adj882/adj883）')
+  // ---- 参数解析 ----
+  check('adj882 parseJpsInfo：只认 jps 围栏，其它语言一律 null（当普通代码块）',
+    parseJpsInfo('') === null && parseJpsInfo('js') === null && parseJpsInfo('bash z=150') === null &&
+      parseJpsInfo('jps') !== null && parseJpsInfo('jpsx z=150') === null)
+  check('adj882 parseJpsInfo：缺省 ⇒ 谱面 + 100（与插件口径一致）',
+    JSON.stringify(parseJpsInfo('jps')) === JSON.stringify({ mode: 's', zoom: 100 }), JSON.stringify(parseJpsInfo('jps')))
+  check('adj882 parseJpsInfo：`m=` 三档 + `z=` 数字/星号',
+    parseJpsInfo('jps m=w')?.mode === 'w' && parseJpsInfo('jps m=p')?.mode === 'p' &&
+      parseJpsInfo('jps z=*')?.zoom === '*' && parseJpsInfo('jps z=150')?.zoom === 150)
+  check('adj882 parseJpsInfo：`p=` 是 `m=` 的别名（用户口径）、空格/逗号/分号/竖线分隔都认',
+    parseJpsInfo('jps p=s')?.mode === 's' && parseJpsInfo('jps m=p,z=150')?.zoom === 150 &&
+      parseJpsInfo('jps m=w;z=50')?.mode === 'w' && parseJpsInfo('jps z=80|m=p')?.mode === 'p')
+  check('adj882 parseJpsInfo：越界 / 认不出 / 连写一律回缺省（不许静默变成别的模式）',
+    parseJpsInfo('jps z=0')?.zoom === 100 && parseJpsInfo('jps z=1001')?.zoom === 100 &&
+      parseJpsInfo('jps z=abc')?.zoom === 100 && parseJpsInfo('jps m=x')?.mode === 's' &&
+      parseJpsInfo('jps z=150m=p')?.zoom === 100 && parseJpsInfo('jps z=150m=p')?.mode === 's')
+
+  // ---- 渲染产物：真的产出了「脚本 / 预览」结构（无 JS 时就是普通代码块） ----
+  const jpsHtml = mdToHtml('```jps z=150 m=w\nQ: 1 2 |\n```\n')
+  check('adj882 mdToHtml：```jps 产出 .jps-block（两个标签 + 源码留在 pre>code 里）',
+    jpsHtml.includes('class="jps-block"') && jpsHtml.includes('data-jps-mode="w"') &&
+      jpsHtml.includes('data-jps-zoom="150"') && jpsHtml.includes('data-jps-tab="code"') &&
+      jpsHtml.includes('data-jps-tab="preview"') && jpsHtml.includes('<pre class="jps-block-code"><code>'))
+  check('adj882 非 jps 的围栏仍然是普通 <pre>（没被带跑）',
+    mdToHtml('```js\nlet a = 1\n```\n').includes('<pre>') && !mdToHtml('```js\nlet a = 1\n```\n').includes('jps-block'))
+  check('adj882 负对照：`jpsx` 这种前缀相似的不算 jps 块（判据在量语言名本身）',
+    !mdToHtml('```jpsx\nQ: 1 2 |\n```\n').includes('jps-block'))
+
+  // ---- adj883：首页示例精简 ----
+  const raw = '#===== 描述头定义 =====\nV: 1.0\nB: 试\nQ: 1 2 |\n# jps-config:{"note_size":15}\n'
+  const slim = simplifyJps(raw)
+  check('adj883 simplifyJps：删掉 `# jps-config:{…}`（新手第一眼最劝退的那行）', !slim.includes('jps-config'))
+  check('adj883 simplifyJps：删掉装饰性分隔注释', !slim.includes('====='))
+  check('adj883 simplifyJps：**保留**描述头与曲行（不许把正文一起删了）',
+    slim.includes('V: 1.0') && slim.includes('B: 试') && slim.includes('Q: 1 2 |'), JSON.stringify(slim))
+  for (const s of BRAND_SAMPLES) {
+    check(`adj883 首页示例「${s.label}」：无 jps-config 且含曲行`,
+      !s.src.includes('jps-config') && s.src.includes('Q:'), s.src.slice(0, 50).replace(/\n/g, '⏎'))
   }
 }

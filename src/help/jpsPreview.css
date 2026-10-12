@@ -1,0 +1,81 @@
+/**
+ * help/jpsPreview.css — ` ```jps ` 块「脚本 / 预览」组件的**唯一一份样式**（adj882）
+ *
+ * 为什么必须共用一份：同一个组件出现在**三个**地方——
+ *   ① 官网文档页（`/manual/`、`/syntax/`）
+ *   ② 官网首页「看看它长什么样」
+ *   ③ **应用内帮助**（对话框里渲染的是同一份 Markdown，`dialogs/DocDialog.tsx`）
+ * 各写一份必然会漂（而且 ③ 很容易被忘掉，表现为"帮助里有一排点不动的按钮"）。
+ *
+ * ⚠ 变量用**兜底链**：官网那两页注入的是 `--site-*`，应用里用的是 `--jp-*`，
+ *   所以这里一律写成 `var(--site-x, var(--jp-x, 兜底值))` —— 一份 CSS 三处都能用。
+ */
+.jps-block {
+  --jb-border: var(--site-border, var(--jp-border, #24315e));
+  --jb-panel: var(--site-panel, var(--jp-bg-panel, #161d3a));
+  --jb-code: var(--site-code-bg, var(--jp-editor-bg, #0b1020));
+  --jb-text: var(--site-text, var(--jp-text-primary, #e8ecf8));
+  --jb-text2: var(--site-text-2, var(--jp-text-secondary, #93a0c8));
+  --jb-muted: var(--site-muted, var(--jp-text-muted, #5a6a99));
+  --jb-accent: var(--site-accent, var(--jp-accent, #00f0ff));
+  --jb-warn: var(--site-warn, var(--jp-warning, #ffc857));
+
+  border: 1px solid var(--jb-border);
+  border-radius: var(--site-radius, 9px);
+  margin: 14px 0;
+  overflow: hidden;
+  background: var(--jb-panel);
+}
+
+.jps-block-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--jb-border);
+  background: var(--jb-code);
+}
+.jps-block-tabs button {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--jb-text2);
+  cursor: pointer;
+  font-size: 13.5px;
+  padding: 9px 18px;
+}
+.jps-block-tabs button:hover { color: var(--jb-text); }
+.jps-block-tabs button.active { color: var(--jb-accent); border-bottom-color: var(--jb-accent); }
+
+/* 源码区：清掉宿主给 `pre` 加的外框（文档页的 `.doc-body pre` 那套），
+   用更具体的选择器而不是 `!important` */
+.jps-block .jps-block-code,
+.doc-body .jps-block .jps-block-code {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 12px 16px;
+}
+
+.jps-block-preview {
+  padding: 14px;
+  /* `z=`：数字 ⇒ 钉住像素宽（自然宽 × z/100，由 JS 写进 `--jps-w`）；`*` / 未写 ⇒ 铺满 */
+  width: min(100%, var(--jps-w, 100%));
+}
+.jps-block-preview[hidden] { display: none; }
+.jps-block-preview svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #fff;
+  border-radius: 6px;
+}
+
+.jps-block-msg {
+  padding: 0 16px 12px;
+  font-size: 13px;
+  color: var(--jb-muted);
+}
+.jps-block-msg[hidden] { display: none; }
+.jps-block-msg[data-kind='warn'] { color: var(--jb-warn); }

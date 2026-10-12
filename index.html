@@ -140,46 +140,33 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
           行为见 `src/landing/playground.ts`（那里有详细的取舍说明）。
       -->
       <section class="playground" id="playground">
-        <h2>自己改一段试试</h2>
+        <h2>看看它长什么样</h2>
         <p class="pg-lead">
-          下面这段谱面可以直接改。点「预览」，用的是<strong>与应用里同一个引擎</strong>，渲染结果一致。
+          点下面几个例子，切「脚本 / 预览」看效果——预览用的是<strong>与应用里同一个引擎</strong>，渲染结果一致。
         </p>
-        <div class="pg-tabs" role="tablist" aria-label="脚本与预览">
-          <button type="button" role="tab" class="active" aria-selected="true" data-pg-tab="code">脚本</button>
-          <button type="button" role="tab" aria-selected="false" data-pg-tab="preview">预览</button>
+        <div class="pg-samples" role="tablist" aria-label="示例">
+          <button type="button" role="tab" class="active" aria-selected="true" data-pg-sample="0">最小示例</button>
+          <button type="button" role="tab" aria-selected="false" data-pg-sample="1">茉莉花</button>
+          <button type="button" role="tab" aria-selected="false" data-pg-sample="2">送别（双行歌词）</button>
         </div>
-        <div class="pg-body">
-          <div class="pg-pane" data-pg-pane="code">
-            <textarea id="pg-src" rows="7" spellcheck="false" aria-label=".jps 谱面脚本">Q: 1 2 3 4 | 5 6 7 1' |</textarea>
-            <div class="pg-samples">
-              <span>试试这些：</span>
-              <button type="button" data-pg-sample="0">最小示例</button>
-              <button type="button" data-pg-sample="1">茉莉花</button>
-              <button type="button" data-pg-sample="2">送别（双行歌词）</button>
-            </div>
+        <!--
+          这个块与**文档页里的每个 ```jps 块是同一套 DOM 结构**（行为在 src/help/jpsPreview.ts），
+          区别只是：这里的源码由上面的示例按钮决定，而文档页的源码写在 Markdown 里。
+          `data-jps-zoom="*"` = 铺满容器宽（首页版心 1120px，谱面自然宽 595px 会偏窄）。
+        -->
+        <div class="jps-block" id="pg-block" data-jps-mode="s" data-jps-zoom="*">
+          <div class="jps-block-tabs" role="tablist">
+            <button type="button" role="tab" class="active" data-jps-tab="code">脚本</button>
+            <button type="button" role="tab" data-jps-tab="preview">预览</button>
           </div>
-          <div class="pg-pane pg-pane-preview" data-pg-pane="preview" hidden>
-            <div class="pg-out" id="pg-out"></div>
-            <div class="pg-bar">
-              <!--
-                adj880：显示范围三档，口径与 Obsidian 插件的「整页 / 满宽 / 谱面」一致
-                （都用引擎的 rangeBox + applyRangeToSvg 裁，不是各自写一套）。
-                默认「谱面」= 只显示有墨迹的部分——不然只有一行音符的谱会带着一整页空白，预览区极高。
-              -->
-              <div class="pg-views" role="group" aria-label="显示范围">
-                <button type="button" class="active" data-pg-view="score">谱面</button>
-                <button type="button" data-pg-view="width">满宽</button>
-                <button type="button" data-pg-view="page">整页</button>
-              </div>
-              <span class="pg-msg" id="pg-msg"></span>
-              <button type="button" id="pg-rerender">↻ 重新渲染</button>
-            </div>
-          </div>
+          <pre class="jps-block-code"><code>Q: 1 2 3 4 | 5 6 7 1' |</code></pre>
+          <div class="jps-block-preview" hidden></div>
         </div>
         <p class="pg-hint">
           每行以命令字开头：<code>Q:</code> 曲、<code>C:</code> 词、<code>B:</code> 标题、<code>V:</code> 版本……
-          完整写法看<a href="/syntax/">脚本语法说明</a>。
-          另外：网页端拿不到精确的字形度量，预览用的是估算宽度，可能与编辑器里差一两个像素——正式出谱请到<a href="/app/">应用</a>里看。
+          完整写法看<a href="/syntax/">脚本语法说明</a>（那里每个示例也是这种可切换的块，
+          块上还能写 <code>m=</code>（谱面/满宽/整页）与 <code>z=</code>（缩放））。
+          另外：网页端拿不到精确的字形度量，预览用的是估算宽度，可能与编辑器里差一两个像素。
         </p>
       </section>
 
@@ -231,6 +218,44 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
       </section>
 
       <!-- 深度介绍：三视图 + 写给谁 -->
+      <!--
+        Obsidian 插件（adj877 建，adj884 用户要求**与「写给谁」对调位置**）。
+        图 `obsidian.webp` 是"仿笔记"示意图——**谱面部分是引擎真实渲染出来的**（由 verify-site 生成），
+        只是外面套了一个模仿 Obsidian 笔记窗口的壳（本机没有 Obsidian 环境，不假装是真截图）。
+      -->
+      <section class="obsidian" id="obsidian">
+        <div class="ob-text">
+          <p class="ob-kicker">Obsidian 插件</p>
+          <h2>在笔记里直接写谱</h2>
+          <p>
+            装好插件后，在任意笔记里写一个 <code>```jps</code> 代码块，它就会渲染成简谱——就是右边这样
+            （渲染区右上角还有 <b>▶ 试听</b>）。几句谱直接写在笔记里，不必为它单独建一个文件。
+          </p>
+          <ul class="ob-points">
+            <li><b>代码块即乐谱</b>：<code>```jps</code> 渲染成 SVG，多页自动分页；语法错了只提示、不打断笔记正文</li>
+            <li><b>也能管 .jps 文件</b>：链接或内联嵌入进笔记，双击用插件打开</li>
+            <li><b>桌面端带完整编辑器</b>：点左侧栏图标打开内嵌的 iJipu（手机端用 Obsidian 自己的编辑器 + 语法着色与错误提示，点「看谱」回到预览）</li>
+            <li><b>试听</b>：Web Audio 现场合成，不需要任何音频文件</li>
+            <li><b>排版能拖</b>：显示辅助虚线后直接拖，松手写回该谱源码的 <code># jps-config</code>（与应用的设置一脉相承）</li>
+            <li><b>默认裁到墨迹</b>：谱面视图只显示有内容的部分，整页白边不占地方；也可切「整页 / 满宽」</li>
+            <li><b>电脑手机都支持</b>：Windows / macOS / Linux / Android / iOS</li>
+          </ul>
+          <div class="ob-actions">
+            <a class="btn btn-primary" data-l="obsidianMarketUrl" href="#">在 Obsidian 里安装</a>
+            <a class="btn btn-ghost" data-l="obsidianRepoUrl" href="#" rel="noreferrer">看源码 / 手动安装</a>
+          </div>
+          <p class="ob-note">
+            安装：Obsidian →「设置 → 第三方插件 → 浏览」→ 搜 <b>iJipu</b> → 安装并启用。
+            手动安装则把 <code>main.js</code> / <code>manifest.json</code> / <code>styles.css</code>
+            放进 <code>&lt;你的库&gt;/.obsidian/plugins/ijipu/</code>。
+          </p>
+        </div>
+        <figure class="ob-shot">
+          <img loading="lazy" decoding="async" data-shot="obsidian" src="/site/obsidian.webp" alt="在 Obsidian 笔记里用 iJipu 插件渲染简谱：笔记正文中的 jps 代码块下方直接显示乐谱" />
+          <figcaption>笔记里的 <code>```jps</code> 代码块 → 简谱 + ▶ 试听</figcaption>
+        </figure>
+      </section>
+
       <section class="deep">
         <div class="deep-row">
           <div class="deep-text">
@@ -273,44 +298,6 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
           </ul>
           <p class="who-note">用爱记谱写简谱的人，我们称为「<b>谱师</b>」（Score Smith）。</p>
         </div>
-      </section>
-
-      <!--
-        Obsidian 插件（adj877，用户要求"加大插件的介绍"）：独立成一整块，含功能清单、安装入口与示意图。
-        图 `obsidian.webp` 是"仿笔记"示意图——**谱面部分是引擎真实渲染出来的**（由 verify-site 生成），
-        只是外面套了一个模仿 Obsidian 笔记窗口的壳（本机没有 Obsidian 环境，不假装是真截图）。
-      -->
-      <section class="obsidian" id="obsidian">
-        <div class="ob-text">
-          <p class="ob-kicker">Obsidian 插件</p>
-          <h2>在笔记里直接写谱</h2>
-          <p>
-            装好插件后，在任意笔记里写一个 <code>```jps</code> 代码块，它就会渲染成简谱——就是右边这样
-            （渲染区右上角还有 <b>▶ 试听</b>）。几句谱直接写在笔记里，不必为它单独建一个文件。
-          </p>
-          <ul class="ob-points">
-            <li><b>代码块即乐谱</b>：<code>```jps</code> 渲染成 SVG，多页自动分页；语法错了只提示、不打断笔记正文</li>
-            <li><b>也能管 .jps 文件</b>：链接或内联嵌入进笔记，双击用插件打开</li>
-            <li><b>桌面端带完整编辑器</b>：点左侧栏图标打开内嵌的 iJipu（手机端用 Obsidian 自己的编辑器 + 语法着色与错误提示，点「看谱」回到预览）</li>
-            <li><b>试听</b>：Web Audio 现场合成，不需要任何音频文件</li>
-            <li><b>排版能拖</b>：显示辅助虚线后直接拖，松手写回该谱源码的 <code># jps-config</code>（与应用的设置一脉相承）</li>
-            <li><b>默认裁到墨迹</b>：谱面视图只显示有内容的部分，整页白边不占地方；也可切「整页 / 满宽」</li>
-            <li><b>电脑手机都支持</b>：Windows / macOS / Linux / Android / iOS</li>
-          </ul>
-          <div class="ob-actions">
-            <a class="btn btn-primary" data-l="obsidianMarketUrl" href="#">在 Obsidian 里安装</a>
-            <a class="btn btn-ghost" data-l="obsidianRepoUrl" href="#" rel="noreferrer">看源码 / 手动安装</a>
-          </div>
-          <p class="ob-note">
-            安装：Obsidian →「设置 → 第三方插件 → 浏览」→ 搜 <b>iJipu</b> → 安装并启用。
-            手动安装则把 <code>main.js</code> / <code>manifest.json</code> / <code>styles.css</code>
-            放进 <code>&lt;你的库&gt;/.obsidian/plugins/ijipu/</code>。
-          </p>
-        </div>
-        <figure class="ob-shot">
-          <img loading="lazy" decoding="async" data-shot="obsidian" src="/site/obsidian.webp" alt="在 Obsidian 笔记里用 iJipu 插件渲染简谱：笔记正文中的 jps 代码块下方直接显示乐谱" />
-          <figcaption>笔记里的 <code>```jps</code> 代码块 → 简谱 + ▶ 试听</figcaption>
-        </figure>
       </section>
 
       <!-- 一排入口链接（与顶栏互为双保险） -->

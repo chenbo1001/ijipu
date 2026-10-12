@@ -16,6 +16,7 @@
  *   本文件只收 `md` 参数、不自己 import —— 否则 `/manual/` 会连带下载整份语法说明。
  */
 import { extractToc, mdToHtml } from '../help/markdown'
+import { mountJpsBlocks } from '../help/jpsPreview'
 import { injectSiteColors, currentSiteMode, saveSiteMode, type SiteMode } from '../brand/siteVars'
 import { fillExternalLinks } from '../brand/siteLinks'
 import './docs.css'
@@ -124,7 +125,12 @@ export function renderDoc(page: DocPage): void {
   fillExternalLinks()
   document.title = `${page.title} - 爱记谱 iJipu`
   const body = document.getElementById('doc-body')
-  if (body) body.innerHTML = mdToHtml(page.md)
+  if (body) {
+    body.innerHTML = mdToHtml(page.md)
+    // adj882：正文里的每个 ```jps 块都变成「脚本 / 预览」小组件
+    //（引擎按需加载——不点「预览」就不会去下那 68KB，见 help/jpsPreview.ts）
+    mountJpsBlocks(body)
+  }
   // 当前是哪一份文档：给另一份的切换链接加高亮
   document.body.dataset.doc = page.kind
   renderToc(page)

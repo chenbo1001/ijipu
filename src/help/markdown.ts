@@ -75,6 +75,69 @@ export function createHeadingIds(): (text: string) => string {
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
+/**
+ * ` ```jps ` 代码块的**显示参数**（adj882）。
+ *
+ * 口径**沿用 Obsidian 插件的代码块参数**（`obsidian-ijipu/src/jpsBlocks.ts`），
+ * 这样在插件笔记里写的 ` ```jps z=150 m=p ` 搬到网页文档里意思完全一样：
+ *   · `m=<s|w|p>` —— 显示范围：`s` 谱面（裁到墨迹，**默认**）/ `w` 满宽 / `p` 整页；
+ *     `p=s` 也认（用户口径的别名，成本极低）。
+ *   · `z=<数字>` —— 缩放百分比（1–1000）；`z=*` = 自适应容器宽；未写 ⇒ 100（自然尺寸）。
+ * 分隔符：空格为主，`,` `;` `|` 也认（有人习惯 `m=p,z=150`）；
+ * **认不出的键值一律忽略**、**连写不算参数**（`z=150m=p` 两个都不认）—— 与插件同款容错。
+ */
+export interface JpsBlockParams {
+  mode: 's' | 'w' | 'p'
+  zoom: number | '*'
+}
+
+/**
+ * 解析围栏后面的 info string。**不是 `jps` 就返回 `null`**（当普通代码块处理）。
+ * 纯函数，便于 smoke 直接断言（文档里的示例一旦解析错，网页上就是一排不渲染的块）。
+ */
+export function parseJpsInfo(info: string): JpsBlockParams | null {
+  const parts = info.split(/[\s,;|]+/).filter((s) => s !== '')
+  if (parts.length === 0 || parts[0].toLowerCase() !== 'jps') return null
+  let mode: JpsBlockParams['mode'] = 's'
+  let zoom: number | '*' = 100
+  for (const part of parts.slice(1)) {
+    const m = /^(?:m|p)=([swp])$/i.exec(part)
+    if (m) {
+      mode = m[1].toLowerCase() as JpsBlockParams['mode']
+      continue
+    }
+    const z = /^z=(\*|\d{1,4})$/i.exec(part)
+    if (z) {
+      if (z[1] === '*') zoom = '*'
+      else {
+        const n = Number(z[1])
+        if (n >= 1 && n <= 1000) zoom = n
+      }
+    }
+  }
+  return { mode, zoom }
+}
+
+/**
+ * ` ```jps ` 块 → 「脚本 / 预览」小组件。
+ *
+ * 结构上刻意把**源码留在 `<pre><code>` 里**（而不是塞进 data 属性）：
+ * 没跑 JS 时它就是一段普通的、可复制的代码块 —— **降级是正确的**；
+ * JS 到位后由 `help/jpsPreview.ts` 把它当"源码"读走并挂上渲染。
+ */
+function jpsBlockHtml(src: string, p: JpsBlockParams): string {
+  return (
+    `<div class="jps-block" data-jps-mode="${p.mode}" data-jps-zoom="${p.zoom}">` +
+    `<div class="jps-block-tabs" role="tablist">` +
+    `<button type="button" role="tab" class="active" data-jps-tab="code">脚本</button>` +
+    `<button type="button" role="tab" data-jps-tab="preview">预览</button>` +
+    `</div>` +
+    `<pre class="jps-block-code"><code>${esc(src)}</code></pre>` +
+    `<div class="jps-block-preview" hidden></div>` +
+    `</div>`
+  )
+}
+
 /** 行内 Markdown：`code`、**bold**、*italic*、[text](url)。普通文本 HTML 转义，语法片段包裹标签。 */
 export function inlineMd(raw: string): string {
   const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[[^\]]+\]\([^)]+\))/g
@@ -210,23 +273,35 @@ export function mdToHtml(md: string): string {
     }
   }
 
+  /** 当前代码块若是 ```jps，用它装内容行（结束时产出 `.jps-block`）；其它语言保持 `null` */
+  let jpsParams: JpsBlockParams | null = null
+  let jpsLines: string[] = []
+
   for (const rawLine of md.split('\n')) {
     const line = rawLine.trimEnd()
     if (line.trimStart().startsWith(fence)) {
       flushTable()
       closeQuote()
       if (inCode) {
-        out.push('</pre>')
+        // 收尾：jps 块产出「脚本 / 预览」组件，其它块就是普通的 </pre>
+        if (jpsParams) out.push(jpsBlockHtml(jpsLines.join('\n'), jpsParams))
+        else out.push('</pre>')
         inCode = false
+        jpsParams = null
+        jpsLines = []
       } else {
         closeAllLists()
-        out.push('<pre>')
+        // adj882：```jps 走「脚本 / 预览」组件；其余语言照旧当代码块（`jps` 之外的 info 一律忽略）
+        jpsParams = parseJpsInfo(line.trimStart().slice(fence.length).trim())
+        if (jpsParams) jpsLines = []
+        else out.push('<pre>')
         inCode = true
       }
       continue
     }
     if (inCode) {
-      out.push(esc(line))
+      if (jpsParams) jpsLines.push(line)
+      else out.push(esc(line))
       continue
     }
     const t = line.trimEnd()
@@ -308,6 +383,10 @@ export function mdToHtml(md: string): string {
   closeAllLists()
   flushTable()
   closeQuote()
-  if (inCode) out.push('</pre>')
+  // 文件末尾还没闭合的围栏（写文档时漏了收尾）：jps 块照常产出组件，其余按代码块收尾
+  if (inCode) {
+    if (jpsParams) out.push(jpsBlockHtml(jpsLines.join('\n'), jpsParams))
+    else out.push('</pre>')
+  }
   return out.join('\n')
 }
