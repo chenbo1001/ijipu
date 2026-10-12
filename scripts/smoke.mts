@@ -11,6 +11,15 @@ import { join } from 'node:path'
 import { mdToHtml, extractToc, parseJpsInfo } from '../src/help/markdown'
 // adj883：首页示例精简（去掉 `# jps-config:{…}` 与装饰线，但必须保住正文）
 import { BRAND_SAMPLES, simplifyJps } from '../src/landing/samples'
+/**
+ * adj905：调色板常量 —— 断言"主旋律拿回红色"要用它（**不硬编码色值**）。
+ *
+ * ⚠ 这里踩过一个坑：我补这行 import 时 `old_string` 没匹配上、**没补成功就跑了**，
+ * 而 `tsc -b` 是**增量构建**（`.tsbuildinfo` 缓存）⇒ 没报出"未定义"；
+ * `smoke` 又走 esbuild 打包、**不做类型检查** ⇒ 直到运行时才炸出 `ReferenceError`。
+ * 教训：**改了 import 之后，别信增量 tsc** —— 看 smoke 的实际执行结果，或 `tsc --force`。
+ */
+import { PLAYHEAD_COLORS } from '@ijipu/engine/index.ts'
 // adj895：播放跟随滚动的「安全区」（纯函数 ⇒ 可在 Node 里直接断言）
 import { FOLLOW_SAFE_HIGH, FOLLOW_SAFE_LOW, followScrollTargetX } from '../src/preview/followScroll'
 // adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
@@ -20136,7 +20145,80 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     readJpsFromSearch('?jps=' + 'x'.repeat(JPS_PARAM_MAX_LEN)) !== null &&
       readJpsFromSearch('?jps=' + 'x'.repeat(JPS_PARAM_MAX_LEN + 1)) === null)
   check('adj900 用完把 `jps` 抹掉，别的参数原样保留',
-    withoutJpsParam('?jps=abc') === '' && withoutJpsParam('?jps=abc&x=1') === '?x=1')
+    withoutJpsParam('?jps=abc') === '' && withoutJpsParam('?jps=abc&&x=1') === '?x=1')
+}
+
+/**
+ * adj905（用户实测报的问题）：首页「铃儿响叮当（临时伴奏）」预览时，
+ * **伴奏行与主旋律行的色块宽度不一致**（上行宽、下行窄），
+ * 而且**两块颜色一样**（都是浅蓝）—— 但**听**得出是两个音色。
+ *
+ * 排查思路：引擎侧的 `playVoice` 透传与配色**其实已有断言**守着
+ * （`X1`/`X1b`/`Z19`/`X7`：bz 段层 = `accomp`、主旋律 = 无 `playVoice` 走音色）。
+ * 所以光读代码看不出毛病 —— 这里**直接把首页那段原文跑一遍**，把色块数据摊开看。
+ * 这是项目里那条规矩：同一个问题查不明白时，**先打印"估算值 vs 实际值"，别继续补分支**。
+ */
+{
+  console.log('[166] 首页临时伴奏示例的色块数据（adj905）')
+  const bzSample = BRAND_SAMPLES.find((s) => s.label.includes('铃儿响叮当'))
+  if (!bzSample) {
+    check('adj905 找得到首页那段「铃儿响叮当」示例', false, '没找到')
+  } else {
+    const r905 = parseJps(bzSample.src)
+    const seq905 = buildPlaySequence(r905, layoutScore(r905, DUR_CFG), 120, undefined, '大钢琴')
+    const rows = seq905.events
+      .filter((e) => e.pitched !== false)
+      .map((e) => ({
+        role: e.playVoice ?? '(无)',
+        seg: e.placed.segment?.type ?? '-',
+        layer: e.placed.segment?.layer ?? '-',
+        inst: e.instrument ?? '',
+        beats: (e.playheadSegs ?? []).reduce((a, s) => a + s.beats, 0),
+        nSeg: (e.playheadSegs ?? []).length,
+        ws: (e.playheadSegs ?? []).map((s) => s.width.toFixed(1)).join(','),
+        pv: (e.playheadSegs ?? []).map((s) => s.playVoice ?? '-').join(','),
+      }))
+    console.log('    角色 | 段 | 层 | 音色 | 总拍 | 段数 | 各段宽 | 各段playVoice')
+    for (const x of rows.slice(0, 14)) {
+      console.log(`    ${x.role} | ${x.seg} | ${x.layer} | ${x.inst} | ${x.beats} | ${x.nSeg} | ${x.ws} | ${x.pv}`)
+    }
+    const bzRows = rows.filter((x) => x.seg === 'bz')
+    const melRows = rows.filter((x) => x.seg === '-')
+    check('adj905 bz 段层的色块都带 playVoice=accomp（配蓝）',
+      bzRows.length > 0 && bzRows.every((x) => x.pv.split(',').every((p) => p === 'accomp')),
+      JSON.stringify(bzRows.slice(0, 3)))
+    check('adj905 主旋律的色块都不带 playVoice（走音色着色 = 红）',
+      melRows.length > 0 && melRows.every((x) => x.pv.split(',').every((p) => p === '-')),
+      JSON.stringify(melRows.slice(0, 3)))
+    /**
+     * ⚠ 宽度：色块按「拍段」拆，**每段 ≤ 1 拍**（`adj299/300`）——
+     * 所以一个 N 拍的音**至少**有 N 段。段数少于拍数 ⇒ 多拍并成了一段 ⇒ 色块被拉宽。
+     *
+     * ⚠ 我第一版把判据写成 `nSeg < beats × 2`（误把"半拍数"当段数下限），
+     * 结果 `beats=1, nSeg=1` 这种正常情况被判红 —— **是断言错了，不是数据错了**。
+     */
+    const tooFew = rows.filter((x) => x.nSeg < Math.ceil(x.beats - 1e-9))
+    check('adj905 每个音的色块都按拍段拆开（每段 ≤1 拍，不会一行宽一行窄）',
+      tooFew.length === 0, JSON.stringify(tooFew.slice(0, 3)))
+
+    /**
+     * **核心断言（adj905）**：伴奏块的固定色不能与主旋律块按音色取到的颜色**撞色**。
+     *
+     * 这正是用户报的"颜色没有区分"：`{bz}` 段的伴奏音符 **`voice` 也是 1**，
+     * 而 `instrumentColorMap` 原来把"voice 1 的音色"优先排到第 0 位（红）——
+     * 首页这段里伴奏音色（手风琴）**先出现**，于是它抢走红色、把主旋律的大钢琴挤到蓝色，
+     * 而伴奏块本身靠 `playVoice === 'accomp'` 取固定蓝 ⇒ **两块同色**。
+     */
+    const track905 = seq905.events.flatMap((e) => e.playheadSegs ?? [])
+    const cmap905 = instrumentColorMap(track905)
+    const bzColor905 = playheadBaseOf({ voice: 1, instrument: '手风琴', playVoice: 'accomp' }, cmap905)
+    const melColor905 = playheadBaseOf({ voice: 1, instrument: '大钢琴' }, cmap905)
+    check('adj905 伴奏块与主旋律块**不同色**（段内声部不该占用调色板，主旋律要拿回红色）',
+      bzColor905 !== melColor905,
+      `bz=${bzColor905} mel=${melColor905} map=${JSON.stringify([...cmap905])}`)
+    check('adj905 主旋律块是**红**（第 1 音色 = 调色板第 0 位）',
+      melColor905 === PLAYHEAD_COLORS[0], `mel=${melColor905}`)
+  }
 }
 
 /**
