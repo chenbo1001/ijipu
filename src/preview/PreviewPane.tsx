@@ -32,6 +32,8 @@ import {
 } from '@ijipu/engine'
 import type { ScorePage, PageConfig } from '@ijipu/engine'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides'
+// adj905q：预览可视调试的边界虚线几何（时值格 / 墨迹 / 段层）——几何在引擎侧算好，这里只消费
+import { computeDebugBounds } from '@ijipu/engine/layout/guides'
 import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '@ijipu/engine/layout/metaAnchors'
 import { firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
 import { measureFontMeta } from './fontMeta'
@@ -78,6 +80,8 @@ export function PreviewPane() {
   const activeNoteIds = useDocStore((s) => s.activeNoteIds)
   const jumpCursor = useDocStore((s) => s.jumpCursor)
   const showGuides = useUiStore((s) => s.showGuides)
+  // adj905q：预览可视调试开关（L3 会话级，不落盘；关着时不计算几何）
+  const debugBounds = useUiStore((s) => s.debugBounds)
   const previewZoom = useUiStore((s) => s.previewZoom)
   /**
    * adj723g：`dockOpen` / `dockPanel` 的订阅**已删除**——原先只服务于 `isPlaybackOpen`
@@ -149,6 +153,16 @@ export function PreviewPane() {
         : [],
     [layout, pageConfig.height_quci, pageConfig.geci_size, pageConfig.note_size],
   )
+  /**
+   * adj905q（用户规格见 `docs/PREVIEW-DEBUG-BOUNDARIES.md`）：**预览可视调试**的边界虚线几何。
+   * 按页给出「时值格 / 墨迹 / 段层」三套边界；**几何全部来自引擎**（`computeDebugBounds`），
+   * 这里**只消费、不重算**（`AGENTS.md` 五·3 / 六之二·4 的"数值口径同源"）。
+   * 开关是 **L3 会话级**（`uiStore.debugBounds`，不落盘），关着时不计算。
+   */
+  const debugBoundsByPage = useMemo(() => {
+    if (!layout || !debugBounds) return []
+    return layout.pages.map((p) => computeDebugBounds(p.notes, pageConfig.note_size))
+  }, [layout, debugBounds, pageConfig.note_size])
 
 
   // adj258：批量高亮播放中同时演奏的音符（多声部同步演奏——同一组多声部同 atMs 音符同时高亮）
@@ -535,6 +549,7 @@ export function PreviewPane() {
           const pctY = (v: number) => `${((v / page.height) * 100).toFixed(2)}%`
           const rowTopsOfPage = rowTops[i] ?? []
           const rowGuidesOfPage = rowGuides[i] ?? []
+          const dbgOfPage = debugBoundsByPage[i] ?? []
           void rowTopsOfPage
           return (
             // adj286：去掉 maxWidth:100%——放大后该限制把 score-page 白底裁到视口宽，
@@ -637,6 +652,34 @@ export function PreviewPane() {
                       }}
                       title="描述头区域中线（标注）"
                     />
+                    {/* adj905q 预览可视调试：三套边界虚线（时值格 / 墨迹 / 段层）。
+                        画法按用户口径：**左边界只画上半部**（到音符中线 yMid）、**右边界只画下半部**、
+                        **相邻音符交替颜色**（colorIndex）。三类边界各用一个色系，便于区分。 */}
+                    {dbgOfPage.map((b, bi) => {
+                      const palette =
+                        b.kind === 'cell'
+                          ? ['#e0533d', '#f08a4b'] // 时值格：暖色
+                          : b.kind === 'ink'
+                            ? ['#2f7fd0', '#5aa9e6'] // 墨迹：蓝色
+                            : ['#3f9e5a', '#7fc98f'] // 段层：绿色
+                      const stroke = palette[b.colorIndex % palette.length]
+                      const top = b.side === 'L' ? b.yTop : b.yMid
+                      const bottom = b.side === 'L' ? b.yMid : b.yBottom
+                      return (
+                        <div
+                          key={bi}
+                          style={{
+                            position: 'absolute',
+                            left: pct(b.x),
+                            top: pctY(top),
+                            width: 0,
+                            height: pctY(bottom - top),
+                            borderLeft: `1px dashed ${stroke}`,
+                            pointerEvents: 'none',
+                          }}
+                        />
+                      )
+                    })}
                     {/* 行结构虚线：曲部行虚线（数字中心）/ 曲词间距 / 词曲间距 / 词部行虚线 */}
                     {rowGuidesOfPage.map((rg, ri) => (
                       <div key={ri} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>

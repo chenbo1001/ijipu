@@ -128,6 +128,9 @@ export function PageConfigDialog({
   const setAutoWrap = useUiStore((s) => s.setAutoWrap)
   const showGuides = useUiStore((s) => s.showGuides)
   const setShowGuides = useUiStore((s) => s.setShowGuides)
+  // adj905q：预览可视调试开关（L3 会话级，不落盘）
+  const debugBounds = useUiStore((s) => s.debugBounds)
+  const setDebugBounds = useUiStore((s) => s.setDebugBounds)
   const editorFontSize = useUiStore((s) => s.editorFontSize)
   const setEditorFontSize = useUiStore((s) => s.setEditorFontSize)
   const editorFont = useUiStore((s) => s.editorFont)
@@ -335,6 +338,19 @@ export function PageConfigDialog({
               <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <input type="checkbox" checked={showGuides} onChange={(e) => setShowGuides(e.target.checked)} />
                 <span style={{ fontSize: 12 }}>预览排版辅助虚线</span>
+              </label>
+            </Row>
+            {/**
+              * adj905q（用户规格见 `docs/PREVIEW-DEBUG-BOUNDARIES.md`）：**预览可视调试** ——
+              * 在预览里叠加「时值格 / 墨迹 / 段层」三套边界虚线，用来判断"实际画在哪"。
+              *
+              * ⚠ 它是 **L3 会话级**：默认关、**只在一个运行期里有效**、**下次运行恢复默认关**
+              * （`uiStore.debugBounds` 刻意不落盘，见那里的注释）——故此处**不显示"记住"字样**。
+              */}
+            <Row label="调试">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input type="checkbox" checked={debugBounds} onChange={(e) => setDebugBounds(e.target.checked)} />
+                <span style={{ fontSize: 12 }}>预览可视调试：边界虚线（时值格 / 墨迹 / 段层）</span>
               </label>
             </Row>
             <Row label="编辑器字号">
