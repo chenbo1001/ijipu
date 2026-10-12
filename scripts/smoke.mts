@@ -20180,8 +20180,51 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       }))
     console.log('    角色 | 段 | 层 | 音色 | 总拍 | 段数 | 各段宽 | 各段playVoice')
     for (const x of rows.slice(0, 14)) {
-      console.log(`    ${x.role} | ${x.seg} | ${x.layer} | ${x.inst} | ${x.beats} | ${x.nSeg} | ${x.ws} | ${x.pv}`)
+      console.log(
+        `    ${x.role} | ${x.seg} | ${x.layer} | ${x.inst} | ${x.beats} | ${x.nSeg} | ${x.ws} | ${x.pv}`,
+      )
     }
+    /**
+     * adj905b（用户追问「色块宽度还不一致」）：把**同一拍位**两层的 x / width 都摊开。
+     * 口径见 `docs/SYNTAX.md` §2.12：「`{bz … }` 段内是伴奏声部，画在主旋律**上方**，
+     * 与主旋律**同一拍位垂直对齐**」—— 所以同拍位的两块**本该等宽且同 x**。
+     */
+    const xy = seq905.events
+      .filter((e) => e.pitched !== false && (e.playheadSegs ?? []).length > 0)
+      .map((e) => ({
+        role: e.playVoice ?? 'mel',
+        beat: e.placed.id.index,
+        x: (e.playheadSegs ?? []).map((s) => s.x.toFixed(1)).join(','),
+        w: (e.playheadSegs ?? []).map((s) => s.width.toFixed(1)).join(','),
+      }))
+    console.log('    角色 | 音序 | x | width')
+    for (const x of xy.slice(0, 12)) console.log(`    ${x.role} | ${x.beat} | ${x.x} | ${x.w}`)
+    /**
+     * adj905b（用户口径）：「**小于 1 拍的**（现在含 1 拍），如果上下的时值一样，
+     * **右边界最小的那个对齐**，这个就不会压到下一音符的左边界」。
+     * ⇒ 断言的是**右边界一致**（不是"同 x 同宽"—— 左边界按用户口径不动）。
+     *
+     * ⚠ 配对必须按 **`(绝对时间, 段内拍位)`**，不能按数组下标 ——
+     * 主旋律那边有"一拍拆两段"的音，下标一早错位（我第一版正是这样误报的）。
+     */
+    const keyOf = (ms: number, beat: number, beats: number) => `${Math.round(ms)}|${beat}|${beats}`
+    const byBeat = new Map<string, { right: number[]; roles: Set<string> }>()
+    for (const e of seq905.events) {
+      for (const s of e.playheadSegs ?? []) {
+        if (!(typeof s.beats === 'number' && s.beats > 0 && s.beats <= 1)) continue
+        const k = keyOf(e.atMs, s.beat ?? 0, s.beats)
+        const g = byBeat.get(k) ?? { right: [], roles: new Set<string>() }
+        g.right.push(s.x + s.width)
+        g.roles.add(s.playVoice ?? 'main')
+        byBeat.set(k, g)
+      }
+    }
+    const twoLayer = [...byBeat.values()].filter((g) => g.roles.size >= 2)
+    const stillOff = twoLayer.filter((g) => Math.max(...g.right) - Math.min(...g.right) > 0.6)
+    check('adj905b 同拍位的「伴奏层 / 主旋律层」色块**右边界对齐**（用户口径：取最小的那个）',
+      twoLayer.length > 0 && stillOff.length === 0,
+      `两层的拍位共 ${twoLayer.length} 组，未对齐 ${stillOff.length} 组：` +
+        stillOff.slice(0, 4).map((g) => g.right.map((r) => r.toFixed(1)).join('/')).join(' ｜ '))
     const bzRows = rows.filter((x) => x.seg === 'bz')
     const melRows = rows.filter((x) => x.seg === '-')
     check('adj905 bz 段层的色块都带 playVoice=accomp（配蓝）',
