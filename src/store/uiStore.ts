@@ -193,6 +193,15 @@ interface UiState {
   playbackTick: number
   /** 预览页排版辅助虚线开关 */
   showGuides: boolean
+  /**
+   * adj905q（用户规格见 `docs/PREVIEW-DEBUG-BOUNDARIES.md`）：**预览可视调试**开关。
+   * 开启后在预览里叠加「时值格 / 墨迹 / 段层」三套边界虚线（几何来自引擎
+   * `engine/layout/guides.ts` 的 `computeDebugBounds`，预览层只消费不重算）。
+   *
+   * ⚠ **L3 会话级**（`AGENTS.md` §七）：默认关、**只在一个运行期里有效**、
+   * **下次运行恢复默认关** ⇒ **内存态、不写 localStorage**（不要用 `loadBool`）。
+   */
+  debugBounds: boolean
   /** 中国色主题 id */
   theme: string
   /** 深浅色模式：auto=跟随系统 prefers-color-scheme（adj48） */
@@ -325,6 +334,8 @@ interface UiState {
   setPlaybackStart: (id: string | null) => void
   bumpPlaybackTick: () => void
   setShowGuides: (b: boolean) => void
+  /** adj905q：预览可视调试开关（L3 会话级，不持久化） */
+  setDebugBounds: (b: boolean) => void
   setTheme: (id: string) => void
   setThemeMode: (m: ThemeMode) => void
   setSystemLight: (b: boolean) => void
@@ -379,6 +390,8 @@ export const useUiStore = create<UiState>()((set) => ({
   playbackStartId: null,
   playbackTick: 0,
   showGuides: loadBool(SHOW_GUIDES_KEY, true),
+  // adj905q：预览可视调试 —— **L3 会话级**，刻意不读 localStorage（重开即恢复默认关）
+  debugBounds: false,
   theme: loadTheme(),
   themeMode: loadThemeMode(),
   systemLight: detectSystemLight(),
@@ -455,6 +468,8 @@ export const useUiStore = create<UiState>()((set) => ({
   closeModal: () => set({ modal: null, playbackStartId: null }),
   setPlaybackStart: (id) => set({ playbackStartId: id }),
   bumpPlaybackTick: () => set((s) => ({ playbackTick: s.playbackTick + 1 })),
+  // adj905q：预览可视调试开关（L3 会话级）——**不落盘**，重开应用即回到默认关
+  setDebugBounds: (b) => set({ debugBounds: b }),
   setShowGuides: (b) => {
     try {
       localStorage.setItem(SHOW_GUIDES_KEY, b ? '1' : '0')
