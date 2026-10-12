@@ -215,6 +215,9 @@ code {
 
 /* ---------- 深度分块 ---------- */
 .deep { padding-bottom: 72px; }
+/* adj884：`.deep` 拆成两段（为把「Obsidian 插件」插在中间）⇒ 前一段去掉 padding-bottom，
+   否则两段之间的间距会翻倍 */
+.deep-tight { padding-bottom: 0; }
 .deep-row {
   display: grid;
   grid-template-columns: 1fr 1.25fr;

@@ -219,7 +219,30 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
 
       <!-- 深度介绍：三视图 + 写给谁 -->
       <!--
-        Obsidian 插件（adj877 建，adj884 用户要求**与「写给谁」对调位置**）。
+        adj884（用户口径）：「Obsidian 插件」这一整块要放在「写谱像写代码一样爽」**之后**。
+        为此把原来的 `.deep` 拆成两个 section，好让它插在两段之间；
+        前一段用 `.deep-tight` 去掉 padding-bottom——否则两段之间的间距会翻倍。
+      -->
+      <section class="deep deep-tight">
+        <div class="deep-row">
+          <div class="deep-text">
+            <h2>写谱像写代码一样爽</h2>
+            <p>
+              三种视图随时切换：<b>编码</b>只专注谱面，<b>拆分</b>左右对照改一处看一处
+              （默认左谱面、右代码，两个方向可对调），<b>预览</b>只看成品、专心打磨排版。
+            </p>
+            <p>语法有错时，编辑器里直接写明「哪里错 + 正确写法」，点一下跳到出错位置。</p>
+          </div>
+          <div class="deep-shots">
+            <figure><img loading="lazy" decoding="async" data-shot="view-code" src="/site/view-code.webp" alt="编码视图" /><figcaption>编码</figcaption></figure>
+            <figure><img loading="lazy" decoding="async" data-shot="view-split" src="/site/view-split.webp" alt="左右拆分视图" /><figcaption>左右拆分</figcaption></figure>
+            <figure><img loading="lazy" decoding="async" data-shot="view-preview" src="/site/view-preview.webp" alt="预览视图" /><figcaption>预览</figcaption></figure>
+          </div>
+        </div>
+      </section>
+
+      <!--
+        Obsidian 插件（adj877 建；adj884 用户要求放在「写谱像写代码一样爽」**之后**）。
         图 `obsidian.webp` 是"仿笔记"示意图——**谱面部分是引擎真实渲染出来的**（由 verify-site 生成），
         只是外面套了一个模仿 Obsidian 笔记窗口的壳（本机没有 Obsidian 环境，不假装是真截图）。
       -->
@@ -257,22 +280,6 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
       </section>
 
       <section class="deep">
-        <div class="deep-row">
-          <div class="deep-text">
-            <h2>写谱像写代码一样爽</h2>
-            <p>
-              三种视图随时切换：<b>编码</b>只专注谱面，<b>拆分</b>左右对照改一处看一处
-              （默认左谱面、右代码，两个方向可对调），<b>预览</b>只看成品、专心打磨排版。
-            </p>
-            <p>语法有错时，编辑器里直接写明「哪里错 + 正确写法」，点一下跳到出错位置。</p>
-          </div>
-          <div class="deep-shots">
-            <figure><img loading="lazy" decoding="async" data-shot="view-code" src="/site/view-code.webp" alt="编码视图" /><figcaption>编码</figcaption></figure>
-            <figure><img loading="lazy" decoding="async" data-shot="view-split" src="/site/view-split.webp" alt="左右拆分视图" /><figcaption>左右拆分</figcaption></figure>
-            <figure><img loading="lazy" decoding="async" data-shot="view-preview" src="/site/view-preview.webp" alt="预览视图" /><figcaption>预览</figcaption></figure>
-          </div>
-        </div>
-
         <div class="deep-row reverse">
           <div class="deep-text">
             <h2>复杂谱子也扛得住</h2>
