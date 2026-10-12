@@ -20334,18 +20334,36 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
         console.log(
           `    主旋律 width: ${melNotesG.slice(0, 6).map((n) => n.width.toFixed(1)).join(', ')}`,
         )
-        /** 末小节（`3 - - -`）主旋律音符的元素列 —— 看清"第一步为什么是 47.8" */
+        /** 末小节（`3 - - -`）主旋律音符的元素列 —— 看清"格列"与"小节线"的关系 */
         {
           const last = melNotesG[melNotesG.length - 1]
           if (last) {
             const sg = (last.segments ?? [])
-              .map((s) => `${s.el}(x=${s.x.toFixed(1)},cellX=${(s.cellX ?? -1).toFixed(1)},beats=${s.beats})`)
+              .map((s) => `x=${s.x.toFixed(1)}/beats=${s.beats}`)
               .join(' ')
             console.log(
               `    末小节主旋律音符: x=${last.x.toFixed(1)} w=${last.width.toFixed(1)} rightX=${(last.rightX ?? -1).toFixed(1)} dur=${last.duration}`,
             )
-            console.log(`      元素列: ${sg}`)
+            console.log(`      时值格列: ${sg}`)
           }
+          /**
+           * 用户判据：「**段层末小节（无小节线）的末尾与主旋律的小节一对齐**，主旋律一定是要有的」
+           * ⇒ 量：主旋律末小节的小节线 x、最后一个时值格的右缘、段层内容右缘。
+           */
+          const barsG = layG.pages.flatMap((p) => p.bars ?? [])
+          const lastBar = barsG.length > 0 ? barsG[barsG.length - 1] : undefined
+          const lastCellRight =
+            last && (last.segments ?? []).length > 0
+              ? (() => {
+                  const arr = last.segments ?? []
+                  const s2 = arr[arr.length - 1]
+                  return s2.x + s2.perBeat * s2.beats
+                })()
+              : NaN
+          const segLast = segNotesG[segNotesG.length - 1]
+          console.log(
+            `    末小节: 小节线x=${lastBar ? lastBar.x.toFixed(1) : 'n/a'} 末格右缘=${lastCellRight.toFixed(1)} 段层末音x=${segLast ? segLast.x.toFixed(1) : 'n/a'} 段层末音右缘=${segLast ? (segLast.x + segLast.width).toFixed(1) : 'n/a'}`,
+          )
         }
       }
 
