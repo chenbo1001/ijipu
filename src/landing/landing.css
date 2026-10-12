@@ -110,7 +110,7 @@ code {
 /* ---------- 版心 ---------- */
 /* ⚠ 新增区块时**必须**加进这个列表：漏了就等于没有 max-width / 居中 / 左右留白，
    区块会撑满整屏（adj880 修的就是 `.playground` 与 `.obsidian` 漏进来这件事）。 */
-.hero, .demo, .playground, .features, .deep, .obsidian, .links, .faq, .footer {
+.hero, .playground, .features, .deep, .obsidian, .links, .faq, .footer {
   max-width: var(--site-max);
   margin: 0 auto;
   padding: 0 20px;
@@ -164,34 +164,11 @@ code {
   text-align: center;
 }
 
-/* ---------- 一屏看懂 ---------- */
-.demo { padding-bottom: 72px; }
-.demo h2 { text-align: center; margin-bottom: 26px; }
-.demo-pair {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0;
-  border: 1px solid var(--site-border);
-  border-radius: var(--site-radius);
-  overflow: hidden;
-  background: var(--site-panel);
-}
-.demo-code {
-  margin: 0;
-  padding: 20px 22px;
-  border-right: 1px solid var(--site-border);
-  background: var(--site-code-bg);
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
-  font-size: 14px;
-  line-height: 1.9;
-  color: var(--site-text);
-  overflow-x: auto;
-  white-space: pre;
-}
-.demo-code code { background: none; border: none; padding: 0; }
-.demo-score { display: flex; align-items: center; justify-content: center; padding: 16px; }
-.demo-score img { max-width: 100%; height: auto; border-radius: 6px; background: #fff; }
-.demo-note { text-align: center; margin-top: 18px; color: var(--site-text-2); font-size: 14.5px; }
+/* ---------- 一屏看懂 ----------
+   adj898（用户要求把两个区块整合成一个）：原来这里还有一整套 `.demo-*` ——
+   「左边源码 + 右边静态截图」的双栏样式。示例区改成**现场用引擎渲染**之后，
+   静态截图与这套样式都不再需要（`demo-score.webp` 与它的生成逻辑一并删除）。
+   现在只保留 `.playground` 一套样式。 */
 
 /* ---------- 功能卡 ---------- */
 .features { padding-bottom: 72px; }
@@ -379,8 +356,6 @@ code {
 @media (max-width: 900px) {
   .hero { grid-template-columns: 1fr; gap: 30px; padding-top: 30px; padding-bottom: 48px; }
   .hero h1 { font-size: 38px; }
-  .demo-pair { grid-template-columns: 1fr; }
-  .demo-code { border-right: none; border-bottom: 1px solid var(--site-border); }
   .deep-row, .deep-row.reverse { grid-template-columns: 1fr; gap: 20px; }
   .deep-row.reverse .deep-text { order: 0; }
 
@@ -528,8 +503,7 @@ html[data-site-mode='light'] .link-card:hover { box-shadow: 0 6px 20px var(--sit
 html[data-site-mode='light'] .hero-shot img,
 html[data-site-mode='light'] .deep-shots img,
 html[data-site-mode='light'] .ob-shot img { box-shadow: 0 8px 26px var(--site-shadow); }
-/* 谱面是白纸黑字：浅色页面上靠边框把它"框住" */
-html[data-site-mode='light'] .demo-score img,
+/* 谱面是白纸黑字：浅色页面上靠边框把它"框住"（adj898：`.demo-score img` 那条随静态图一并删除） */
 html[data-site-mode='light'] .jps-block-preview svg { border: 1px solid var(--site-border); }
 
 @media (max-width: 900px) {

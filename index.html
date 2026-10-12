@@ -118,53 +118,54 @@
         </figure>
       </section>
 
-      <!-- 一屏看懂：同样一段谱，左边源码右边成品（P2 会换成真引擎实时渲染） -->
-      <section class="demo">
-        <h2>一行文本，就是一段旋律</h2>
-        <div class="demo-pair">
-          <pre class="demo-code"><code>B: 小星星
-Q: 1 1 5 5 | 6 6 5 - | 4 4 3 3 | 2 2 1 - |
-C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
-          <div class="demo-score">
-            <img loading="lazy" decoding="async" src="/site/demo-score.webp" alt="上面那段 .jps 源码渲染出来的简谱" />
-          </div>
-        </div>
-        <p class="demo-note">
-          高低音点 <code>'</code> <code>,</code>、时值线 <code>-</code> <code>/</code>、附点 <code>.</code>、
-          连音线 <code>( )</code>——改一个音符，就是改一个字符。
-        </p>
-      </section>
-
       <!--
-        现场试一段（adj877，用户要求）：两个标签「脚本 / 预览」，点预览就用**应用自己的引擎**渲染。
+        示例区（adj898，用户要求把原来两个区块**整合成一个**）：
+        原本「一行文本，就是一段旋律」（静态源码 + 截图）与「看看它长什么样」（可交互示例）各占一段，
+        讲的是同一件事（文本 → 谱面），分成两段反而重复。现在合成一段，标题保留前者（更有感染力），
+        交互能力用后者（现场渲染）。**静态截图 `demo-score.webp` 随之不再需要** ——
+        小星星现在直接由引擎现场渲染，比一张固定的图更有说服力。
+
         ⚠ 默认停在「脚本」标签是刻意的：预览要先下载引擎 chunk（约 68KB gzip），
           而首页的定位是"够轻的介绍页"（几 KB JS）⇒ 只有真的想试的人才付这份钱。
           行为见 `src/landing/playground.ts`（那里有详细的取舍说明）。
       -->
       <section class="playground" id="playground">
-        <h2>看看它长什么样</h2>
+        <h2>一行文本，就是一段旋律</h2>
         <p class="pg-lead">
-          点下面几个例子，切「脚本 / 预览」看效果——预览用的是<strong>与应用里同一个引擎</strong>，渲染结果一致。
+          下面每段都是**完整的 .jps 脚本**，点一下切换，再切「脚本 / 预览」看效果 ——
+          预览用的是<strong>与应用里同一个引擎</strong>，渲染结果一致。
+          从最小的「小星星」开始，一路看到反复、跳房子、临时伴奏与多声部。
         </p>
         <div class="pg-samples" role="tablist" aria-label="示例">
-          <button type="button" role="tab" class="active" aria-selected="true" data-pg-sample="0">最小示例</button>
-          <button type="button" role="tab" aria-selected="false" data-pg-sample="1">茉莉花</button>
-          <button type="button" role="tab" aria-selected="false" data-pg-sample="2">送别（双行歌词）</button>
+          <button type="button" role="tab" class="active" aria-selected="true" data-pg-sample="0">小星星</button>
+          <button type="button" role="tab" aria-selected="false" data-pg-sample="1">茉莉花（完整）</button>
+          <button type="button" role="tab" aria-selected="false" data-pg-sample="2">倚音与连音</button>
+          <button type="button" role="tab" aria-selected="false" data-pg-sample="3">跳房子与反复</button>
+          <button type="button" role="tab" aria-selected="false" data-pg-sample="4">临时伴奏 {bz}</button>
+          <button type="button" role="tab" aria-selected="false" data-pg-sample="5">临时多声部 {dsb}</button>
+          <button type="button" role="tab" aria-selected="false" data-pg-sample="6">多声部</button>
         </div>
         <!--
           这个块与**文档页里的每个 ```jps 块是同一套 DOM 结构**（行为在 src/help/jpsPreview.ts），
           区别只是：这里的源码由上面的示例按钮决定，而文档页的源码写在 Markdown 里。
           `data-jps-zoom="*"` = 铺满容器宽（首页版心 1120px，谱面自然宽 595px 会偏窄）。
+          ⚠ 预置源码必须与 `src/landing/samples.ts` 的 `BRAND_SAMPLES[0]`（小星星）**逐字一致**。
         -->
         <div class="jps-block" id="pg-block" data-jps-mode="s" data-jps-zoom="*">
           <div class="jps-block-tabs" role="tablist">
             <button type="button" role="tab" class="active" data-jps-tab="code">脚本</button>
             <button type="button" role="tab" data-jps-tab="preview">预览</button>
           </div>
-          <pre class="jps-block-code"><code>Q: 1 2 3 4 | 5 6 7 1' |</code></pre>
+          <pre class="jps-block-code"><code>B: 小星星
+D: C
+P: 4/4
+Q: 1 1 5 5 | 6 6 5 - | 4 4 3 3 | 2 2 1 - ||
+C: 一 闪 一 闪 亮 晶 晶 满 天 都 是 小 星 星</code></pre>
           <div class="jps-block-preview" hidden></div>
         </div>
         <p class="pg-hint">
+          高低音点 <code>'</code> <code>,</code>、时值线 <code>-</code> <code>/</code>、附点 <code>.</code>、
+          连音线 <code>( )</code>——<strong>改一个音符，就是改一个字符</strong>。
           每行以命令字开头：<code>Q:</code> 曲、<code>C:</code> 词、<code>B:</code> 标题、<code>V:</code> 版本……
           完整写法看<a href="/syntax/">脚本语法说明</a>（那里每个示例也是这种可切换的块，
           块上还能写 <code>v=</code>（视图：谱面 / 满宽 / 整页）与 <code>z=</code>（缩放））。

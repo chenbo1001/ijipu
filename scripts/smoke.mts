@@ -19962,7 +19962,8 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     slim.includes('V: 1.0') && slim.includes('B: 试') && slim.includes('Q: 1 2 |'), JSON.stringify(slim))
   for (const s of BRAND_SAMPLES) {
     check(`adj883/adj892 首页示例「${s.label}」：含曲行，且配置里**只留白名单项**`,
-      s.src.includes('Q:') &&
+      // 曲行判据要认 `Q:` 与 `Q1:` / `Q2:`（多声部示例用的是带编号的形式）
+      /^Q\d*\s*:/m.test(s.src) &&
         // 冗长项必须剥掉（否则就不叫"精简"了）
         !s.src.includes('geci_font') && !s.src.includes('metaPos') && !s.src.includes('margin_') &&
         // 除可能保留的那一行 jps-config 外，不许再有别的配置行
@@ -19975,7 +19976,7 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
    * `align_min_bars` 直接决定每行会不会两端对齐，删了就退回默认 4，
    * 茉莉花里那些 3 小节的行便不撑满。
    */
-  const molySample = BRAND_SAMPLES.find((s) => s.label === '茉莉花')
+  const molySample = BRAND_SAMPLES.find((s) => s.label.startsWith('茉莉花'))
   check('adj892 首页示例「茉莉花」：保留了 `align_min_bars`（删了就不会两端对齐）',
     molySample?.src.includes('"align_min_bars":3') === true,
     molySample?.src.match(/# jps-config:.*/)?.[0] ?? '（没有配置行）')
@@ -20037,6 +20038,63 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   check('adj895 负对照：安全带右沿 < 视口宽（< 1 才有提前量；= 1 就回到"贴边才动"的老行为）',
     FOLLOW_SAFE_HIGH < 1 && FOLLOW_SAFE_LOW > 0 && FOLLOW_SAFE_LOW < FOLLOW_SAFE_HIGH,
     `low=${FOLLOW_SAFE_LOW} high=${FOLLOW_SAFE_HIGH}`)
+}
+
+/**
+ * adj898（用户要求）：首页每个示例谱都必须**规范** ——
+ * 用户原话「完整的示例谱要规范，如以 `||` 结束，拍子要对，不能有告警」。
+ *
+ * 用引擎**逐段解析**（与应用里同一条路）⇒ 有任何 error/warning 就点名是哪一段、哪一条。
+ * 这条闸门是"写示例"这件事的**唯一可靠办法**：3 拍还是 4 拍，靠眼睛看不出来。
+ */
+{
+  console.log('[164] 首页示例谱必须零错误零告警（adj898）')
+  const bad: string[] = []
+  for (const s of BRAND_SAMPLES) {
+    const r = parseJpsRaw(s.src)
+    if (r.errors.length > 0) {
+      bad.push(`「${s.label}」→ ${r.errors.map((e) => e.message).join('；')}`)
+    }
+  }
+  check('adj898 首页每个示例谱都零错误零告警（拍数对得上、没有其它告警）',
+    bad.length === 0, bad.slice(0, 6).join(' ｜ '))
+  /**
+   * 负对照：故意写一段拍数不对的 ⇒ 判据必须能抓出来。
+   * ⚠ 必须让**第 2 小节**不合拍号：本引擎对**首小节**只要求"整数拍"（弱起豁免），
+   * 所以 `Q: 1 2 3 |` 那种是**抓不到**的（我第一版就栽在这儿）。
+   */
+  const badCraft = 'B: 坏例子\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 |\n'
+  check('adj898 负对照：拍数不对的示例确实会被抓出来',
+    parseJpsRaw(badCraft).errors.length > 0,
+    JSON.stringify(parseJpsRaw(badCraft).errors.slice(0, 1).map((e) => e.message)))
+  /**
+   * ⚠ 要看**最后一个曲行（`Q…:` 开头）**，不是"最后一个非注释行" ——
+   * 小星星末尾是歌词行（`C: …`）、茉莉花末尾是 `# jps-config`，都会把"未收尾"误判出来。
+   */
+  const lastMusicLine = (src: string): string =>
+    src
+      .split('\n')
+      .filter((l) => /^\s*Q\d*\s*:/.test(l))
+      .pop() ?? ''
+  const noEnd = BRAND_SAMPLES.filter((s) => !/\|\|\s*$/.test(lastMusicLine(s.src).trim())).map((s) => s.label)
+  check('adj898 每个示例的**最后一行乐谱**都以 `||` 收尾（用户明确要求）',
+    noEnd.length === 0, noEnd.length > 0 ? `未收尾：${noEnd.join('、')}` : '')
+
+  /**
+   * adj898：首页 `index.html` 里**预置的源码**必须与 `BRAND_SAMPLES[0]` 逐字一致 ——
+   * 用户第一眼看到的、和点第一个示例按钮得到的，应当是同一段。
+   * 这两处都是手写的（HTML 为 SEO / 首屏而写在文档里、示例表写在 TS 里），
+   * 最容易改一边忘一边；verify 是独立脚本读不了 TS 模块，所以闸门放在这里。
+   */
+  const homeHtml = readFileSync(join(root, 'index.html'), 'utf8')
+  const firstSample = BRAND_SAMPLES[0]
+  const presetSrc = (firstSample?.src ?? '').replace(/\n$/, '')
+  check('adj898 首页预置的示例源码 == BRAND_SAMPLES[0]（小星星），两处逐字一致',
+    presetSrc !== '' && homeHtml.includes(presetSrc),
+    presetSrc !== '' && homeHtml.includes(presetSrc) ? '' : `HTML 里找不到：${JSON.stringify(presetSrc)}`)
+  // 负对照：把预置那段改一个字 ⇒ 上面这条判据就该判假（说明它真的在逐字比对）
+  check('adj898 负对照：预置源码改一个字就不再匹配',
+    presetSrc !== '' && !homeHtml.includes(presetSrc.replace('小星星', '小星星X')), '')
 }
 
 /**

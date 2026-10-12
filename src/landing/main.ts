@@ -84,7 +84,8 @@ function bindDonate(): void {
  * 命名约定（与 `scripts/verify-site.mjs` 的截图输出一一对应，改一处要改两处）：
  *   `<名字>.webp`（深色） / `<名字>-light.webp`（浅色）
  * 参与切换的都是**应用界面截图**——只有应用也切成浅色主题时它们才该换。
- * 不参与的：`demo-score`（谱面本身白底黑字，两套一样）与分享卡 `og.png`。
+ * 不参与的：分享卡 `og.png`，以及**没有任何 `data-shot`** 的图（示例区的谱面现在由引擎现场渲染，
+ * 已经没有静态谱面图了 —— `demo-score.webp` 在 adj898 随两个区块的整合一并删除）。
  */
 function applyShots(mode: SiteMode): void {
   document.querySelectorAll<HTMLImageElement>('img[data-shot]').forEach((img) => {

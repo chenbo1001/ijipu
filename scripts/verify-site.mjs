@@ -19,7 +19,8 @@
  *   加 `--shots-only` 只截图不验证
  *
  * 产物：
- *   · 提交进仓库的素材：`public/site/{hero,demo-score,view-*,voice-multi,playback}.webp`、`public/site/og.png`
+ *   · 提交进仓库的素材：`public/site/{hero,view-*,voice-multi,playback}.webp`、`public/site/og.png`
+ *     （`demo-score.webp` 在 adj898 删除 —— 示例区改成现场渲染后它就是多余的了）
  *   · 仅供人工检查的整页图：`dist-site-shots/*.webp`（**不入库**，见 .gitignore）
  */
 import { createServer } from 'node:http'
@@ -188,8 +189,20 @@ async function evalJs(c, expression) {
 // 截图用的谱面（都用仓库里**已经有断言守着**的示例——避免截图里出现语法错误提示）
 // ---------------------------------------------------------------------------
 const SONG_SONG = String(readFileSync(path.join(ROOT, 'public', 'samples', '送别.jps'), 'utf8'))
-/** 首页 demo 区那段（与 index.html 里写的是同一段） */
-const SONG_STARS = 'B: 小星星\nQ: 1 1 5 5 | 6 6 5 - | 4 4 3 3 | 2 2 1 - |\nC: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星\n'
+/**
+ * 首页示例区的**预置源码**（adj898 起就是《小星星》，原来的"最小示例"一行谱已被替换）。
+ *
+ * ⚠ 必须与 `src/landing/samples.ts` 的 `BRAND_SAMPLES[0]` **逐字一致** ——
+ * 用户第一眼看到的、和点第一个示例按钮得到的，应当是同一段。
+ * 那条一致性由 smoke 的 `[164]` 段守着（verify 是独立脚本，读不了 TS 模块）。
+ */
+const HOME_SAMPLE_STARS = [
+  'B: 小星星',
+  'D: C',
+  'P: 4/4',
+  "Q: 1 1 5 5 | 6 6 5 - | 4 4 3 3 | 2 2 1 - ||",
+  'C: 一 闪 一 闪 亮 晶 晶 满 天 都 是 小 星 星',
+].join('\n') + '\n'
 /** 多声部/临时段（取自 docs/SYNTAX.md §2.12 的示例，smoke 有"文档示例零错误"的断言） */
 const SONG_DSB = "V: 1.0\nB: 临时多声部\nD: C\nP: 4/4\nQ: 3 4 | {dsb 1 2 3 4 | 5 6 7 1'} 5 6 7 1' | 1' 7 6 5 | 5 5\n"
 /** Obsidian 示意图里的谱（取自 obsidian-ijipu 的 README 示例，短、歌词好认） */
@@ -599,73 +612,20 @@ async function main() {
       }
 
       /**
-       * ---- 首页 demo 区那张谱面 ----
-       * 两个讲究：
-       * ① **用浅色主题**：首页整体是深色，而示意的谱面如果也是深色，
-       *    与左边的代码块糊成一片、看不出"这是渲染出来的乐谱"。
-       *    浅色主题下预览区是白纸黑字，跟深色代码块并排，一眼就是"代码 → 谱"。
-       * ② **只截有墨迹的范围**：预览区 SVG 是整页尺寸，而《小星星》只有一行音符
-       *    ⇒ 直接截 svg 会得到一张 2/3 是空白的图（本轮第一版就是这样，实测发现了）。
-       *    这里遍历 svg 子元素求墨迹并集，并按两条规则剔除"不是墨迹"的东西：
-       *      · 只认 `text` 与 `path`（音符/歌词/标题是 text，连线是 path）；
-       *      · 面积超过整页 40% 的也丢掉——纸张背景就是一个铺满整页的 `<rect>`，
-       *        带上它等于没裁（本轮第二版实测：裁出来仍有 1075px 高，就是它在作祟）；
-       *      · 带 `stroke-dasharray` 的同样是辅助线，不算墨迹。
+       * ---- 首页 demo 区那张静态谱面图：**adj898 起不再生成** ----
+       *
+       * 由来：原来首页有一段「一行文本，就是一段旋律」，是"左边源码 + 右边一张截图"。
+       * 那张截图（`public/site/demo-score.webp`）是用下面这套办法裁出来的：
+       * 临时把《小星星》写进 `ijipu.draft`、切浅色主题、reload，再遍历谱面 SVG 的
+       * `text` / `path` 求墨迹并集，剔掉铺满整页的纸张背景与 `stroke-dasharray` 辅助线。
+       *
+       * adj898（用户要求把两个区块**整合成一个**）：示例区改成**现场用引擎渲染**，
+       * 静态图没有存在意义了（而且它只能表现《小星星》这一段，新的 7 个示例它一个都覆盖不了）
+       * ⇒ 整套裁图逻辑连同那张图一起删掉。
+       *
+       * ⚠ 浅色主题那一步不再需要：后面的 og 图直接用首页截图，而首页默认就是深色。
        */
-      await evalJs(
-        c,
-        `localStorage.setItem('ijipu.draft', ${JSON.stringify(SONG_STARS)});
-         localStorage.setItem('ijipu.draftName', '小星星');
-         localStorage.setItem('ijipu.viewType', 'preview');
-         localStorage.setItem('ijipu.themeMode', 'light')`,
-      )
-      await reload()
-      await sleep(1000)
-      const rect = await evalJs(
-        c,
-        `(() => {
-          const svgs = [...document.querySelectorAll('#root svg')]
-          if (svgs.length === 0) return null
-          // 谱面那个 SVG 的 <text> 一定最多（图标类 SVG 没有文字）
-          const svg = svgs.sort((a, b) => b.querySelectorAll('text').length - a.querySelectorAll('text').length)[0]
-          const vb = svg.viewBox.baseVal
-          const pageArea = (vb.width || 0) * (vb.height || 0)
-          let box = null
-          for (const el of svg.querySelectorAll('text, path')) {
-            if (el.getAttribute('stroke-dasharray')) continue // 辅助虚线
-            let b
-            try { b = el.getBBox() } catch { continue }
-            if (!b || (b.width === 0 && b.height === 0)) continue
-            // 铺满整页的背景块（纸张）不是墨迹：面积超过四成页面的整块直接忽略
-            if (pageArea > 0 && b.width * b.height > pageArea * 0.4) continue
-            box = box
-              ? { x: Math.min(box.x, b.x), y: Math.min(box.y, b.y), x2: Math.max(box.x2, b.x + b.width), y2: Math.max(box.y2, b.y + b.height) }
-              : { x: b.x, y: b.y, x2: b.x + b.width, y2: b.y + b.height }
-          }
-          if (!box) return null
-          const r = svg.getBoundingClientRect()
-          const sx = r.width / (vb.width || r.width)
-          const sy = r.height / (vb.height || r.height)
-          return {
-            x: r.x + (box.x - vb.x) * sx,
-            y: r.y + (box.y - vb.y) * sy,
-            width: (box.x2 - box.x) * sx,
-            height: (box.y2 - box.y) * sy,
-          }
-        })()`,
-      )
-      if (rect && rect.width > 100 && rect.height > 40) {
-        const pad = 14
-        const x = Math.max(0, rect.x - pad)
-        const y = Math.max(0, rect.y - pad)
-        await saveAsset('demo-score.webp', await shoot('webp', {
-          quality: 88,
-          clip: { x, y, width: rect.width + pad * 2, height: rect.height + pad * 2, scale: 2 },
-        }))
-        console.log(`    · （demo 图裁到墨迹：${Math.round(rect.width)}×${Math.round(rect.height)} CSS px）`)
-      } else {
-        console.log('    · 跳过 demo-score.webp（没找到谱面 svg 或量不出墨迹）')
-      }
+
       // 后面的 og 缩略图回到深色主题（与应用默认一致）
       await evalJs(c, `localStorage.setItem('ijipu.themeMode', 'dark')`)
 
@@ -814,6 +774,15 @@ async function main() {
       check('首页 H1 = 码即成，谱自现', home.h1 === '码即成，谱自现', home.h1)
       check('首页特性卡 8 张', home.cards === 8, String(home.cards))
       /**
+       * adj898：首页示例区**预置的源码**必须是《小星星》。
+       * 用户第一眼看到的那段，就是"一行文本，就是一段旋律"这句话的证据 ——
+       * 它要是还停在过去那行 `Q: 1 2 3 4 | 5 6 7 1' |`，整段文案就说不通了。
+       */
+      const pgCode = await evalJs(c, `document.querySelector('#pg-block .jps-block-code code')?.textContent ?? ''`)
+      check('adj898 首页示例区预置的源码就是《小星星》（含 `D:` / `P:` 与收尾 `||`）',
+        pgCode.replace(/\s+$/, '') === HOME_SAMPLE_STARS.replace(/\s+$/, ''),
+        JSON.stringify(pgCode.slice(0, 80)))
+      /**
        * adj897（用户反馈）：功能卡的**图标与标题必须在同一行**。
        * 原来图标 / 标题 / 内容各占一行，手机上卡片窄 ⇒ 三行显得很散。
        * 这条**在手机视口下量真实几何**（用户说的正是那个场景），桌面也量一遍（是统一改的）。
@@ -910,8 +879,8 @@ async function main() {
       check('插件专区两个按钮地址正确（社区市场 / GitHub 仓库）',
         home.obMarket === 'https://obsidian.md/plugins?id=ijipu' && home.obRepo === SITE_PLUGIN,
         `${home.obMarket} | ${home.obRepo}`)
-      check('首页有示例可切（≥ 3 个）+ 一个 ```jps 块',
-        home.pgSamples >= 3 && home.pgBlocks === 1, `${home.pgSamples} 个示例 / ${home.pgBlocks} 个块`)
+      check('首页示例区：7 个示例按钮 + 恰好一个 ```jps 块',
+        home.pgSamples === 7 && home.pgBlocks === 1, `${home.pgSamples} 个示例 / ${home.pgBlocks} 个块`)
 
       // ---- adj878：右上角的深浅主题开关（点一下要真的换掉配色，不只是改个属性） ----
       check('首页右上角有深浅主题开关', home.hasTheme)
@@ -996,10 +965,11 @@ async function main() {
           }
         })()`,
       )
-      check('首页有多个示例可切（≥ 3 个）', (pgInitial?.samples ?? 0) >= 3, JSON.stringify(pgInitial))
+      check('首页示例按钮 7 个（小星星 / 茉莉花 / 倚音与连音 / 跳房子与反复 / 临时伴奏 / 临时多声部 / 多声部）',
+        pgInitial?.samples === 7, JSON.stringify(pgInitial))
       check('首屏停在「脚本」标签（预览要按需下引擎，不该在首屏发生）',
         pgInitial?.codeHidden === false && pgInitial?.prevHidden === true, JSON.stringify(pgInitial))
-      check('首页这个块声明了显示范围与缩放（`m=` / `z=`，与插件同口径）',
+      check('首页这个块声明了显示范围与缩放（`v=` / `z=`，与插件同口径）',
         pgInitial?.mode === 's' && pgInitial?.zoom === '*', JSON.stringify(pgInitial))
 
       const pgClicked = await evalJs(
