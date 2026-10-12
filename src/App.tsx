@@ -21,6 +21,8 @@ import { useDocStore } from './store/docStore'
 import { useUiStore } from './store/uiStore'
 // adj538：桌面壳「外部打开」（双击 .jps）——拉取待打开队列 + 监听后续打开请求
 import { drainExternalFiles, hasShell, onExternalOpen } from './store/externalOpen'
+// adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
+import { readJpsFromSearch, withoutJpsParam } from './store/urlImport'
 import { startWorkspaceIndexWarmup } from './store/workspaceIndexWarm'
 // adj610：Ctrl+D / Ctrl+H 的"有告警先看告警"判据与「展开底栏」按钮同一份（`ui/problems.ts`）
 import { summarizeProblems } from './ui/problems'
@@ -57,6 +59,32 @@ function App() {
   // adj315：左右拆分排列方向（全局设置——预览/编辑在 splitH 时的左右方位）
   const splitHDir = useUiStore((s) => s.splitHDir)
   const mainRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * adj900（用户决定「用文本串导入功能」）：**从 URL 文本串导入源码**。
+   *
+   * 官网首页示例区的「在应用里试听这段」把用户正在看的那段 `.jps` 挂在
+   * `?jps=<encodeURIComponent(源码)>` 上带进来 —— 于是首页不需要下载 30MB 音色库，
+   * 用户又能在应用里直接看到（并试听）自己刚才看的那段。
+   *
+   * **载入动作复用现成的 `importSource`**（adj406「粘贴源码导入」）：清洗内容、清磁盘句柄、
+   * **清来源绑定**、与工作区解绑、标记 dirty —— 这些它都做过了，不另写一套。
+   * （自己写 localStorage 的话，漏清 `ijipu.draftSrc` 就会让应用以为这份草稿绑着
+   * 用户上次打开的文件，之后 Ctrl+S 可能把示例写进他自己的谱里。）
+   *
+   * ⚠ 优先次序：**URL 参数（用户刚点的，最明确）> 外部打开的文件 > 本地草稿**。
+   * 所以这段放在下面 `drainExternalFiles` 的 effect **之前**（React 按声明顺序执行）。
+   *
+   * ⚠ 导入后**立刻把参数从地址栏抹掉**：不清的话用户一刷新就又被打回示例，
+   * 他在应用里改的那几笔全白改 —— 而且会以为"链接参数根本没生效"。
+   */
+  useEffect(() => {
+    const incoming = readJpsFromSearch(window.location.search)
+    if (incoming === null) return
+    useDocStore.getState().importSource(incoming)
+    const rest = withoutJpsParam(window.location.search)
+    window.history.replaceState(null, '', `${window.location.pathname}${rest}${window.location.hash}`)
+  }, [])
 
   /**
    * adj538：桌面壳「外部打开」（双击 `.jps` / 文件关联）接线。

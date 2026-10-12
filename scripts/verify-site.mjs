@@ -968,6 +968,28 @@ async function main() {
       )
       check('首页示例按钮 7 个（小星星 / 茉莉花 / 倚音与连音 / 跳房子与反复 / 临时伴奏 / 临时多声部 / 多声部）',
         pgInitial?.samples === 7, JSON.stringify(pgInitial))
+      /**
+       * adj900（用户决定「用文本串导入功能」）：示例区那个「在应用里试听这段」
+       * 把**当前示例的完整源码**挂在 `?jps=` 上带进应用 ——
+       * 于是首页不用下 30MB 音色库，用户又能在应用里看到（并试听）自己刚看的那段。
+       * ⚠ 这条要在"切示例"那组**之前**量：那时 href 里装的才是首屏的小星星。
+       */
+      const handoff = await evalJs(
+        c,
+        `(() => {
+          const a = document.getElementById('pg-open-app')
+          if (!a) return null
+          const href = a.getAttribute('href') ?? ''
+          let decoded = ''
+          try { decoded = decodeURIComponent(href.replace('/app/?jps=', '')) } catch { decoded = '' }
+          return { href: href.slice(0, 60), decoded, text: (a.textContent ?? '').trim() }
+        })()`,
+      )
+      check('adj900 示例区有「在应用里试听这段」入口，链接指向 `/app/?jps=…`',
+        !!handoff && handoff.href.startsWith('/app/?jps='), JSON.stringify(handoff))
+      check('adj900 链接里带的是**当前示例（小星星）的完整源码**（含标题行与收尾 `||`）',
+        !!handoff && handoff.decoded.includes('B: 小星星') && handoff.decoded.includes('||'),
+        JSON.stringify(handoff?.decoded?.slice(0, 70)))
       check('首屏停在「脚本」标签（预览要按需下引擎，不该在首屏发生）',
         pgInitial?.codeHidden === false && pgInitial?.prevHidden === true, JSON.stringify(pgInitial))
       check('首页这个块声明了显示范围与缩放（`v=` / `z=`，与插件同口径）',
@@ -1058,6 +1080,33 @@ async function main() {
        * 否则截图顺序一改，这里就会莫名其妙地红（本轮实测就是这个）。
        */
       await evalJs(c, `localStorage.setItem('ijipu.viewType', 'split')`)
+      /**
+       * adj900（用户决定「用文本串导入功能」）：**端到端**验一次 ——
+       * 首页那个链接带过来的 `?jps=` 到底有没有被应用载入。
+       *
+       * 不能只靠纯函数断言：`App.tsx` 里那个 effect 有没有跑、
+       * 会不会被 docStore 启动时读的本地草稿盖掉，**只有真打开一次才知道**。
+       */
+      await c.send('Page.navigate', { url: `${origin}/app/?jps=${encodeURIComponent(HOME_SAMPLE_STARS)}` })
+      await sleep(2200)
+      const urlImport = await evalJs(
+        c,
+        `(() => {
+          const ta = document.querySelector('textarea')
+          const val = ta ? ta.value : ''
+          return {
+            loaded: val.includes('B: 小星星') && val.includes('||'),
+            len: val.length,
+            // 地址栏里的 jps 参数应当已被抹掉（否则一刷新又被打回示例）
+            search: location.search,
+          }
+        })()`,
+      )
+      check('adj900 打开 `/app/?jps=…` 后编辑器里**确实载入了那段示例**（端到端）',
+        urlImport?.loaded === true, JSON.stringify(urlImport))
+      check('adj900 载入后地址栏参数被抹掉（不然用户一刷新又被打回示例）',
+        urlImport?.search === '', JSON.stringify(urlImport))
+
       pageErrors = []
       mark = noteEvents()
       await c.send('Page.navigate', { url: `${origin}/app/` })

@@ -170,6 +170,24 @@ code {
    静态截图与这套样式都不再需要（`demo-score.webp` 与它的生成逻辑一并删除）。
    现在只保留 `.playground` 一套样式。 */
 
+/**
+ * adj900（用户决定）：「在应用里试听这段」那一行。
+ * 按钮本身复用 `.btn`；旁边那行说明是**必要条件**而非装饰 ——
+ * 试听要用到约 30MB 音色库，先说清楚比让用户点了才发现"要下载"要好。
+ */
+.pg-open {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+.pg-open-note {
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--site-muted);
+}
+
 /* ---------- 功能卡 ---------- */
 .features { padding-bottom: 72px; }
 .features h2 { text-align: center; margin-bottom: 26px; }

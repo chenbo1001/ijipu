@@ -13,6 +13,8 @@ import { mdToHtml, extractToc, parseJpsInfo } from '../src/help/markdown'
 import { BRAND_SAMPLES, simplifyJps } from '../src/landing/samples'
 // adj895：播放跟随滚动的「安全区」（纯函数 ⇒ 可在 Node 里直接断言）
 import { FOLLOW_SAFE_HIGH, FOLLOW_SAFE_LOW, followScrollTargetX } from '../src/preview/followScroll'
+// adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
+import { JPS_PARAM_MAX_LEN, readJpsFromSearch, withoutJpsParam } from '../src/store/urlImport'
 import { inflateSync } from 'node:zlib'
 import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO, inkBoxOfLayout, inkBoxesOfLayout, INK_ESTIMATE_SLACK, insertPngPhys, readPngPhys, crc32, isPng, dpiForScale, pixelsPerMeterFor } from '@ijipu/engine/index.ts'
 /**
@@ -20100,6 +20102,38 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   // 负对照：把预置那段改一个字 ⇒ 上面这条判据就该判假（说明它真的在逐字比对）
   check('adj898 负对照：预置源码改一个字就不再匹配',
     presetSrc !== '' && !homeHtml.includes(presetSrc.replace('小星星', '小星星X')), '')
+}
+
+/**
+ * adj900（用户决定「用文本串导入功能」）：官网首页把当前示例挂在 `?jps=` 上带进应用。
+ *
+ * 两个纯函数在 Node 里直接断言 —— 真跑到浏览器里验"应用有没有载入"代价太大，
+ * 而真正容易错的恰恰是"取参数 / 抹参数"这两步。
+ */
+{
+  console.log('[165] URL 文本串导入源码（adj900）')
+  const src = 'B: 试\nQ: 1 2 |\n'
+  check('adj900 `?jps=` 能取回源码（中文与换行都在；首尾空白按设计**有意**去掉）',
+    readJpsFromSearch('?jps=' + encodeURIComponent(src)) === src.trim() &&
+      readJpsFromSearch('?jps=' + encodeURIComponent(src))?.includes('B: 试') === true,
+    JSON.stringify(readJpsFromSearch('?jps=' + encodeURIComponent(src))))
+  check('adj900 没有 `jps` 参数 ⇒ null（走正常启动，不碰用户草稿）',
+    readJpsFromSearch('') === null && readJpsFromSearch('?a=1') === null)
+  check('adj900 空串 / 纯空白也当"没有"（不让应用打开一张空谱）',
+    readJpsFromSearch('?jps=') === null && readJpsFromSearch('?jps=%20%20') === null)
+  /**
+   * 超长不导入：被代理 / CDN 截断后的**半段源码**比"不导入"更糟 ——
+   * 用户会拿到一段坏谱，还以为是自己的问题。
+   */
+  check('adj900 超长（> 上限）不导入，恰好等于上限则照常导入',
+    readJpsFromSearch('?jps=' + 'x'.repeat(JPS_PARAM_MAX_LEN + 1)) === null &&
+      readJpsFromSearch('?jps=' + 'x'.repeat(JPS_PARAM_MAX_LEN))?.length === JPS_PARAM_MAX_LEN,
+    `上限=${JPS_PARAM_MAX_LEN}`)
+  check('adj900 负对照：把边界往下挪一位就该判假（说明判据真在量长度，不是恒真）',
+    readJpsFromSearch('?jps=' + 'x'.repeat(JPS_PARAM_MAX_LEN)) !== null &&
+      readJpsFromSearch('?jps=' + 'x'.repeat(JPS_PARAM_MAX_LEN + 1)) === null)
+  check('adj900 用完把 `jps` 抹掉，别的参数原样保留',
+    withoutJpsParam('?jps=abc') === '' && withoutJpsParam('?jps=abc&x=1') === '?x=1')
 }
 
 /**

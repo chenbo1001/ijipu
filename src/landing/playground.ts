@@ -26,6 +26,7 @@ export function mountPlayground(): void {
   mountJpsBlocks(root)
 
   const buttons = [...root.querySelectorAll<HTMLButtonElement>('[data-pg-sample]')]
+  const openApp = document.getElementById('pg-open-app') as HTMLAnchorElement | null
 
   /**
    * 换示例。
@@ -37,7 +38,21 @@ export function mountPlayground(): void {
     const sample = BRAND_SAMPLES[idx]
     if (!sample) return
     codeEl.textContent = sample.src
+    // ⚠ 这一行不能丢：点了示例按钮就要立刻给看效果
     if (jumpToPreview) previewJpsBlock(block)
+    /**
+     * adj900（用户决定）：**把当前示例源码挂到「在应用里试听这段」的链接上**。
+     *
+     * 这样点它就是一次**普通跳转**（`<a href>`），JS 不需要参与跳转本身 ⇒
+     * ① 没有 JS 时 `href="/app/"` 仍然能进应用（渐进增强）；
+     * ② 链接自带谱，**可以分享给别人**（打开就是同一段）。
+     *
+     * 为什么不在首页做试听：音色库约 30MB，且音源站国内可能不可达 ——
+     * 挡在介绍页门口，访客第一眼看到的就是"点了、转圈、最后失败"。
+     * 首页负责"看见"，应用负责"听见"：源码递过去，下载提示 / 进度 /
+     * 桌面端内置音源跳过下载这些完整 UX 都由应用承接。
+     */
+    if (openApp) openApp.href = `/app/?jps=${encodeURIComponent(sample.src)}`
   }
 
   for (const b of buttons) {
