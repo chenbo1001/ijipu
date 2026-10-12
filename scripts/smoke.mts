@@ -20334,6 +20334,19 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
         console.log(
           `    主旋律 width: ${melNotesG.slice(0, 6).map((n) => n.width.toFixed(1)).join(', ')}`,
         )
+        /** 末小节（`3 - - -`）主旋律音符的元素列 —— 看清"第一步为什么是 47.8" */
+        {
+          const last = melNotesG[melNotesG.length - 1]
+          if (last) {
+            const sg = (last.segments ?? [])
+              .map((s) => `${s.el}(x=${s.x.toFixed(1)},cellX=${(s.cellX ?? -1).toFixed(1)},beats=${s.beats})`)
+              .join(' ')
+            console.log(
+              `    末小节主旋律音符: x=${last.x.toFixed(1)} w=${last.width.toFixed(1)} rightX=${(last.rightX ?? -1).toFixed(1)} dur=${last.duration}`,
+            )
+            console.log(`      元素列: ${sg}`)
+          }
+        }
       }
 
       /**
