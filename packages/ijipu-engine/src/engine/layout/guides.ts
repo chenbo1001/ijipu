@@ -389,9 +389,20 @@ export function computeDebugBounds(
       push(s.x + s.perBeat * s.beats, 'R', 'aug')
     })
     // ④ **段层边界**（仅段层音符）
+    /**
+     * adj905u（用户报"调试线读数可疑"，我定量核实后确认是**我做工具的缺陷**）：
+     * 原来这里用 `n.x` / `rightX`，而 `n.x` 是**层落位锚点（数字位）**；
+     * 而主旋律那两组用的是 `segments[].x`（**格**）—— 两者相差实测 **6.4px**
+     * ⇒ 图上"绿线 vs 紫线"的偏移里，有 6.4 是**口径差（固定）**、不是真错位，读数会偏。
+     *
+     * 现改为**与 `note` 同一口径（格）**：左缘 `segments[0].x`、右缘末段右端。
+     * ⇒ 「主旋律的格 vs 段层的格」才是**同口径可比**的。
+     * ⚠ 层落位锚点（`n.x`）**刻意不再单画一条** —— 它就是要与主旋律**数字位**相等
+     * （`adj435`/`AL1`/`O4` 守着的），混在同一张图上比会再次制造假错位。
+     */
     if (n.segment) {
-      push(n.x, 'L', 'segment')
-      push(n.rightX ?? n.x + n.width, 'R', 'segment')
+      push(noteL, 'L', 'segment')
+      push(noteR, 'R', 'segment')
     }
   })
   return out
