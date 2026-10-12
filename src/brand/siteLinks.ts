@@ -13,8 +13,14 @@ import { brand } from './tokens'
 /** `data-l` 的键 → 实际地址（值全部来自品牌 token） */
 const LINKS: Record<string, string> = {
   siteUrl: brand.siteUrl,
-  repoUrl: brand.repoUrl,
+  /**
+   * ⚠ adj889：**故意不映射 `repoUrl`** —— 源码仓库是私有的，匿名访客打开就是 404。
+   * 页面上一律用 `releasesRepoUrl`（公开的发布仓库）/ `feedbackUrl`（它的 Issues）。
+   * 将来源码公开了，把 `repoUrl: brand.repoUrl` 加回来、再把 HTML 里的键换回来即可。
+   */
+  releasesRepoUrl: brand.releasesRepoUrl,
   desktopDownloadUrl: brand.desktopDownloadUrl,
+  feedbackUrl: brand.feedbackUrl,
   obsidianRepoUrl: brand.obsidianRepoUrl,
   obsidianMarketUrl: brand.obsidianMarketUrl,
 }

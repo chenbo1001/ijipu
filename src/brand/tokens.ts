@@ -42,14 +42,29 @@ export const brand = {
   /** Obsidian 插件仓库（同一位作者，用户在 Obsidian 里用得上） */
   obsidianRepoUrl: 'https://github.com/snailhome/obsidian-ijipu',
   /**
-   * adj876（官网改版）：应用的 GitHub 仓库与桌面端下载地址。
+   * adj876（官网改版）：应用的地址与桌面端下载地址。
    *
    * 放在品牌层而不是写死在首页 HTML 里——首页、文档页、以后的控制台都在用这些地址，
    * 换仓库/换下载策略时只改这一处（写死在 HTML 里就会各改各的、漏一处）。
-   * `releases/latest` 而不是 `releases/tag/vX.Y.Z`：**永远指向最新版**，不用跟着发版改。
+   *
+   * ⚠ **adj889（用户口径"ijipu 保持私有，走方案 A"）：`repoUrl` 指向的源码仓库是私有的** ——
+   * 匿名访客打开它一律 **404**（私有仓库连 release 资产的直链也要认证）
+   * ⇒ **页面上任何地方都不要用它**。保留这个常量只为将来真开源时一行切回来。
+   * 对外一律用下面的 `releasesRepoUrl` / `desktopDownloadUrl` / `feedbackUrl`。
    */
   repoUrl: 'https://github.com/snailhome/ijipu',
-  desktopDownloadUrl: 'https://github.com/snailhome/ijipu/releases/latest',
+  /**
+   * adj889：**对外公开的发布仓库**（只管 Release 与下载，不放源码）。
+   * 源码私有 ⇒ 下载、更新记录、反馈都走它；已确认它是公开的、且 Issues 已开启。
+   */
+  releasesRepoUrl: 'https://github.com/snailhome/ijipu-releases',
+  /**
+   * 桌面端下载：`releases/latest` 而不是 `releases/tag/vX.Y.Z`（**永远指向最新版**，不用跟着发版改）。
+   * ⚠ 目标仓库里**必须真的发过 Release**，否则访客点进去是"暂无发布"。
+   */
+  desktopDownloadUrl: 'https://github.com/snailhome/ijipu-releases/releases/latest',
+  /** 反馈入口：公开发布仓库的 Issues（源码仓库私有，访客提不了 Issue） */
+  feedbackUrl: 'https://github.com/snailhome/ijipu-releases/issues',
   /** Obsidian 社区插件市场页（插件 id 见 obsidian-ijipu/manifest.json 的 `id`） */
   obsidianMarketUrl: 'https://obsidian.md/plugins?id=ijipu',
 } as const
