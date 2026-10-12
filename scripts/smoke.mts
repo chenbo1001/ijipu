@@ -19914,14 +19914,18 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       parseJpsInfo('jps') !== null && parseJpsInfo('jpsx z=150') === null)
   check('adj882 parseJpsInfo：缺省 ⇒ 谱面 + 100（与插件口径一致）',
     JSON.stringify(parseJpsInfo('jps')) === JSON.stringify({ mode: 's', zoom: 100 }), JSON.stringify(parseJpsInfo('jps')))
-  check('adj882 parseJpsInfo：`m=` 三档 + `z=` 数字/星号',
-    parseJpsInfo('jps m=w')?.mode === 'w' && parseJpsInfo('jps m=p')?.mode === 'p' &&
+  check('adj882 parseJpsInfo：`v=` 三档 + `z=` 数字/星号',
+    parseJpsInfo('jps v=w')?.mode === 'w' && parseJpsInfo('jps v=p')?.mode === 'p' &&
       parseJpsInfo('jps z=*')?.zoom === '*' && parseJpsInfo('jps z=150')?.zoom === 150)
-  check('adj882 parseJpsInfo：只认 `m=`、空格/逗号/分号/竖线分隔都认',
-    parseJpsInfo('jps m=p,z=150')?.zoom === 150 && parseJpsInfo('jps m=w;z=50')?.mode === 'w' &&
-      parseJpsInfo('jps z=80|m=p')?.mode === 'p')
-  // 用户确认过：他一度按 `p=s` 提需求，那是**笔误**（插件里就是 `m=s`）⇒ 不留别名
-  check('adj882 负对照：`p=w` 这种不存在的键被忽略（回缺省，而不是被当成 m 的别名）',
+  check('adj882 parseJpsInfo：空格/逗号/分号/竖线分隔都认、顺序任意',
+    parseJpsInfo('jps v=p,z=150')?.zoom === 150 && parseJpsInfo('jps v=w;z=50')?.mode === 'w' &&
+      parseJpsInfo('jps z=80|v=p')?.mode === 'p')
+  // adj887：视图参数的键名定为 `v=`（`m=` 是短暂用过的旧名，用户确认"刚设置的、可以直接改"
+  // ⇒ **直接废弃、不保留兼容**：少一套分支与迁移提示，两端口径更干净）
+  check('adj887 parseJpsInfo：视图参数用 `v=`；旧名 `m=` 已废弃、**不再被识别**',
+    parseJpsInfo('jps v=p')?.mode === 'p' && parseJpsInfo('jps m=p')?.mode === 's' &&
+      parseJpsInfo('jps v=w')?.mode === 'w' && parseJpsInfo('jps v=s')?.mode === 's')
+  check('adj882 负对照：`p=w` 这种不存在的键被忽略（回缺省，不静默变成别的视图）',
     parseJpsInfo('jps p=w')?.mode === 's')
   check('adj882 parseJpsInfo：越界 / 认不出 / 连写一律回缺省（不许静默变成别的模式）',
     parseJpsInfo('jps z=0')?.zoom === 100 && parseJpsInfo('jps z=1001')?.zoom === 100 &&
@@ -19929,7 +19933,7 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       parseJpsInfo('jps z=150m=p')?.zoom === 100 && parseJpsInfo('jps z=150m=p')?.mode === 's')
 
   // ---- 渲染产物：真的产出了「脚本 / 预览」结构（无 JS 时就是普通代码块） ----
-  const jpsHtml = mdToHtml('```jps z=150 m=w\nQ: 1 2 |\n```\n')
+  const jpsHtml = mdToHtml('```jps z=150 v=w\nQ: 1 2 |\n```\n')
   check('adj882 mdToHtml：```jps 产出 .jps-block（两个标签 + 源码留在 pre>code 里）',
     jpsHtml.includes('class="jps-block"') && jpsHtml.includes('data-jps-mode="w"') &&
       jpsHtml.includes('data-jps-zoom="150"') && jpsHtml.includes('data-jps-tab="code"') &&

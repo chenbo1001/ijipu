@@ -67,7 +67,8 @@ export async function renderJps(src: string, params: JpsBlockParams): Promise<Jp
     const out = e.rangeBox({ range: 'score', pageW: page.width, pageH: page.height, ink: ink ?? undefined })
     return e.applyRangeToSvg(svg, out.box)
   })
-  return { svgs, problems: formatProblems(warnings, 2) }
+  const problems = formatProblems(warnings, 2)
+  return { svgs, problems }
 }
 
 /** 读块上的参数（`data-jps-mode` / `data-jps-zoom`，由 Markdown 渲染器写上去） */
