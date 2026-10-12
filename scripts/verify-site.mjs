@@ -824,6 +824,19 @@ async function main() {
       check('首页赞赏弹层用微信赞赏码 `/icons/good.png`', home.hasDialog && home.donateImg === '/icons/good.png', home.donateImg)
       check('首页 FAQ 至少 4 条', home.faq >= 4, String(home.faq))
       check('首页有 Obsidian 插件专区（功能清单 ≥ 6 条）', home.obPoints >= 6, String(home.obPoints))
+      /**
+       * adj888（用户口径「**原则上先应用的功能介绍，再插件介绍**」）：
+       * 这条顺序被用户调过两次（adj884 先放到最前、adj884b 退回一个位置、adj888 再对调一次），
+       * 所以钉成断言 —— 以后谁打乱它，这里会红，而不是等用户再说一遍。
+       */
+      const deepOrder = await evalJs(
+        c,
+        `[...document.querySelectorAll('.deep h2, .obsidian h2')].map((h) => h.textContent.trim())`,
+      )
+      check('首页「先应用功能、再插件介绍」：Obsidian 段排在两个应用功能段**之后**',
+        JSON.stringify(deepOrder) ===
+          JSON.stringify(['写谱像写代码一样爽', '复杂谱子也扛得住', '在笔记里直接写谱', '写给谁']),
+        JSON.stringify(deepOrder))
       check('插件专区两个按钮地址正确（社区市场 / GitHub 仓库）',
         home.obMarket === 'https://obsidian.md/plugins?id=ijipu' && home.obRepo === SITE_PLUGIN,
         `${home.obMarket} | ${home.obRepo}`)

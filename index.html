@@ -219,9 +219,10 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
 
       <!-- 深度介绍：三视图 + 写给谁 -->
       <!--
-        adj884（用户口径）：「Obsidian 插件」这一整块要放在「写谱像写代码一样爽」**之后**。
-        为此把原来的 `.deep` 拆成两个 section，好让它插在两段之间；
-        前一段用 `.deep-tight` 去掉 padding-bottom——否则两段之间的间距会翻倍。
+        adj884/adj888（用户口径）：**先讲应用的功能，再讲插件** ——
+        所以「Obsidian 插件」这一整块放在两个应用功能段（写谱像写代码 / 复杂谱子也扛得住）**之后**。
+        为此把 `.deep` 拆成两段：前一段装两个功能行、后一段只剩「写给谁」；
+        前一段用 `.deep-tight` 去掉 padding-bottom —— 否则与后面 `.obsidian` 的间距会翻倍。
       -->
       <section class="deep deep-tight">
         <div class="deep-row">
@@ -239,10 +240,26 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
             <figure><img loading="lazy" decoding="async" data-shot="view-preview" src="/site/view-preview.webp" alt="预览视图" /><figcaption>预览</figcaption></figure>
           </div>
         </div>
+
+        <!-- adj888：这个功能段从「写给谁」那一段挪上来 —— 先应用功能、再插件介绍 -->
+        <div class="deep-row reverse">
+          <div class="deep-text">
+            <h2>复杂谱子也扛得住</h2>
+            <p>
+              多声部、临时伴奏、反复与跳房子、倚音与波音滑音……简谱里那些"难打的"，
+              都有对应的写法；排版自己算，试听时音符与色块跟着走。
+            </p>
+            <p>排好就能一键导出：PDF（矢量打印 / 位图两路）、PNG、JPG、SVG，以及 MIDI。打印、发微信、进课件都行。</p>
+          </div>
+          <div class="deep-shots">
+            <figure><img loading="lazy" decoding="async" data-shot="voice-multi" src="/site/voice-multi.webp" alt="多声部与临时段的简谱排版" /><figcaption>多声部 / 临时段</figcaption></figure>
+            <figure><img loading="lazy" decoding="async" data-shot="export" src="/site/export.webp" alt="导出面板：PDF、图片、音频多档格式" /><figcaption>一键导出</figcaption></figure>
+          </div>
+        </div>
       </section>
 
       <!--
-        Obsidian 插件（adj877 建；adj884 用户要求放在「写谱像写代码一样爽」**之后**）。
+        Obsidian 插件（adj877 建；adj884/adj888 用户要求"**先应用功能、再插件介绍**"）。
         图 `obsidian.webp` 是"仿笔记"示意图——**谱面部分是引擎真实渲染出来的**（由 verify-site 生成），
         只是外面套了一个模仿 Obsidian 笔记窗口的壳（本机没有 Obsidian 环境，不假装是真截图）。
       -->
@@ -280,21 +297,6 @@ C: 一 闪 一 闪 亮 晶 晶，满 天 都 是 小 星 星</code></pre>
       </section>
 
       <section class="deep">
-        <div class="deep-row reverse">
-          <div class="deep-text">
-            <h2>复杂谱子也扛得住</h2>
-            <p>
-              多声部、临时伴奏、反复与跳房子、倚音与波音滑音……简谱里那些"难打的"，
-              都有对应的写法；排版自己算，试听时音符与色块跟着走。
-            </p>
-            <p>排好就能一键导出：PDF（矢量打印 / 位图两路）、PNG、JPG、SVG，以及 MIDI。打印、发微信、进课件都行。</p>
-          </div>
-          <div class="deep-shots">
-            <figure><img loading="lazy" decoding="async" data-shot="voice-multi" src="/site/voice-multi.webp" alt="多声部与临时段的简谱排版" /><figcaption>多声部 / 临时段</figcaption></figure>
-            <figure><img loading="lazy" decoding="async" data-shot="export" src="/site/export.webp" alt="导出面板：PDF、图片、音频多档格式" /><figcaption>一键导出</figcaption></figure>
-          </div>
-        </div>
-
         <div class="who">
           <h2>写给谁</h2>
           <ul>
