@@ -135,13 +135,21 @@ html[data-site-mode='light'] .theme-toggle .ico-moon { display: inline; }
   font-size: 13.5px;
   padding-right: 6px;
 }
+/* adj886（用户反馈"左侧栏一级菜单无链接、不可点击"）：一级标题也做成链接。
+   视觉上仍与二级区分（更小、更淡、更粗），但**可点、可高亮**。 */
 .toc-group {
+  display: block;
   margin: 16px 0 6px;
+  padding: 2px 9px;
+  border-radius: 6px;
   color: var(--site-muted);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
+  text-decoration: none;
 }
+.toc-group:hover { color: var(--site-text); background: var(--site-panel-hover); text-decoration: none; }
+.toc-group.active { color: var(--site-accent); }
 .toc-group:first-child { margin-top: 0; }
 .toc-item {
   display: block;

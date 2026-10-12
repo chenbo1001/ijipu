@@ -80,8 +80,9 @@ const esc = (s: string) =>
  *
  * 口径**沿用 Obsidian 插件的代码块参数**（`obsidian-ijipu/src/jpsBlocks.ts`），
  * 这样在插件笔记里写的 ` ```jps z=150 m=p ` 搬到网页文档里意思完全一样：
- *   · `m=<s|w|p>` —— 显示范围：`s` 谱面（裁到墨迹，**默认**）/ `w` 满宽 / `p` 整页；
- *     `p=s` 也认（用户口径的别名，成本极低）。
+ *   · `m=<s|w|p>` —— 显示范围：`s` 谱面（裁到墨迹，**默认**）/ `w` 满宽 / `p` 整页。
+ *     **只认 `m=`**：用户一度按 `p=s` 提过需求，事后确认那是笔误（插件里就是 `m=s`）
+ *     ⇒ 不留别名，免得"两套写法并存"成为下一个漂移源。
  *   · `z=<数字>` —— 缩放百分比（1–1000）；`z=*` = 自适应容器宽；未写 ⇒ 100（自然尺寸）。
  * 分隔符：空格为主，`,` `;` `|` 也认（有人习惯 `m=p,z=150`）；
  * **认不出的键值一律忽略**、**连写不算参数**（`z=150m=p` 两个都不认）—— 与插件同款容错。
@@ -101,7 +102,7 @@ export function parseJpsInfo(info: string): JpsBlockParams | null {
   let mode: JpsBlockParams['mode'] = 's'
   let zoom: number | '*' = 100
   for (const part of parts.slice(1)) {
-    const m = /^(?:m|p)=([swp])$/i.exec(part)
+    const m = /^m=([swp])$/i.exec(part)
     if (m) {
       mode = m[1].toLowerCase() as JpsBlockParams['mode']
       continue

@@ -40,7 +40,13 @@ function renderToc(page: DocPage): void {
   const list = firstH1 >= 0 ? items.slice(firstH1 + 1) : items
   const html: string[] = []
   for (const it of list) {
-    if (it.level === 1) html.push(`<p class="toc-group">${it.text}</p>`)
+    /**
+     * adj886（用户反馈「左侧栏一级菜单无链接、不可点击」）：
+     * 一级标题原先渲染成不可点的 `<p class="toc-group">`（只当分组标签用），
+     * 但那也是正文章节（"第一部分 五分钟上手"这种），用户会本能地想去点它 ⇒ 改成链接。
+     * 于是**目录里每一行都可点**，与滚动高亮的口径也统一了（见 `bindScrollSpy`）。
+     */
+    if (it.level === 1) html.push(`<a class="toc-group" href="#${it.id}">${it.text}</a>`)
     else if (it.level === 2) html.push(`<a class="toc-item" href="#${it.id}">${it.text}</a>`)
     // 三级及以下不进目录：这两份文档的 h3 太碎，全列出来反而找不到东西
   }
@@ -63,7 +69,8 @@ function bindScrollSpy(): void {
       else break
     }
     const id = current?.id ?? ''
-    toc.querySelectorAll('a.toc-item').forEach((a) => {
+    // adj886：一级（`.toc-group`）现在也是链接 ⇒ 高亮要一起管，否则"一级点得动却不亮"
+    toc.querySelectorAll('a.toc-item, a.toc-group').forEach((a) => {
       a.classList.toggle('active', a.getAttribute('href') === `#${id}`)
     })
   }

@@ -1055,6 +1055,26 @@ async function main() {
         check(`${label}：正文有实质内容`, doc.bodyHasContent)
         check(`${label}：左侧目录条目 ≥ ${minToc}`, doc.tocCount >= minToc, String(doc.tocCount))
         check(`${label}：目录锚点**全部**能在正文里找到（不会点不动）`, doc.dead.length === 0, doc.dead.join(', '))
+        /**
+         * adj886（用户反馈「左侧栏一级菜单无链接、不可点击」）：
+         * 目录里**每一行**都必须是能跳的链接（`dead === 0`）。
+         * ⚠ 不要求"一定有一级"：**操作手册本来就没有一级标题**（它用「一、二、三」当二级），
+         *   只有语法说明才有 `# 第一部分` 这类一级 —— 所以"有没有一级"单独对语法说明断言。
+         */
+        const tocAll = await evalJs(
+          c,
+          `(() => {
+            const links = [...document.querySelectorAll('#doc-toc a')]
+            const dead = links.filter((a) => !document.getElementById((a.getAttribute('href') || '').slice(1)))
+            return { total: links.length, groups: document.querySelectorAll('#doc-toc a.toc-group').length, dead: dead.length }
+          })()`,
+        )
+        check(`${label}：目录里每一行都是可点链接（共 ${tocAll?.total ?? 0} 行，其中一级 ${tocAll?.groups ?? 0} 个）`,
+          !!tocAll && tocAll.dead === 0 && tocAll.total > 0, JSON.stringify(tocAll))
+        if (label === '脚本语法说明') {
+          check('语法说明的目录里，一级标题也是链接（用户反馈过"一级不可点"）',
+            (tocAll?.groups ?? 0) > 0, JSON.stringify(tocAll))
+        }
         check(`${label}：代码块渲染成 <pre>`, doc.codes > 0, String(doc.codes))
         if (needTable) check(`${label}：表格渲染成真 <table>`, doc.tables > 0, String(doc.tables))
 

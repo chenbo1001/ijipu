@@ -19917,9 +19917,12 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   check('adj882 parseJpsInfo：`m=` 三档 + `z=` 数字/星号',
     parseJpsInfo('jps m=w')?.mode === 'w' && parseJpsInfo('jps m=p')?.mode === 'p' &&
       parseJpsInfo('jps z=*')?.zoom === '*' && parseJpsInfo('jps z=150')?.zoom === 150)
-  check('adj882 parseJpsInfo：`p=` 是 `m=` 的别名（用户口径）、空格/逗号/分号/竖线分隔都认',
-    parseJpsInfo('jps p=s')?.mode === 's' && parseJpsInfo('jps m=p,z=150')?.zoom === 150 &&
-      parseJpsInfo('jps m=w;z=50')?.mode === 'w' && parseJpsInfo('jps z=80|m=p')?.mode === 'p')
+  check('adj882 parseJpsInfo：只认 `m=`、空格/逗号/分号/竖线分隔都认',
+    parseJpsInfo('jps m=p,z=150')?.zoom === 150 && parseJpsInfo('jps m=w;z=50')?.mode === 'w' &&
+      parseJpsInfo('jps z=80|m=p')?.mode === 'p')
+  // 用户确认过：他一度按 `p=s` 提需求，那是**笔误**（插件里就是 `m=s`）⇒ 不留别名
+  check('adj882 负对照：`p=w` 这种不存在的键被忽略（回缺省，而不是被当成 m 的别名）',
+    parseJpsInfo('jps p=w')?.mode === 's')
   check('adj882 parseJpsInfo：越界 / 认不出 / 连写一律回缺省（不许静默变成别的模式）',
     parseJpsInfo('jps z=0')?.zoom === 100 && parseJpsInfo('jps z=1001')?.zoom === 100 &&
       parseJpsInfo('jps z=abc')?.zoom === 100 && parseJpsInfo('jps m=x')?.mode === 's' &&
