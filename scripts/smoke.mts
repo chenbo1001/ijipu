@@ -19984,19 +19984,22 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   /**
    * adj893（用户要求）：示例里的描述头 `S:` 去掉 ——
    * 两份原文都写着 `S: 本乐谱使用「爱记谱」编制`，放在示例谱面上是自述冗余。
-   * ⚠ 负对照：**真源里仍然有** `S:`（我们只精简展示副本，没有动 `public/samples/*.jps`）——
-   * 否则"示例里没有 S: "可能只是因为真源本来就没有，判据就没在量东西。
+   * （用户已明确：`public/samples/*.jps` 的 `S:` 由他自己决定留不留，本轮口径是"不去掉"。）
+   *
+   * ⚠ 验证"过滤行为本身"用**构造输入**，**刻意不依赖真源内容**：
+   * 原来那版负对照写的是"两份真源里确实有 `S:`"——那是把两件不相干的事绑在一起，
+   * 哪天用户把真源那行去掉，这条判据就会莫名其妙地红。
    */
   for (const s of BRAND_SAMPLES) {
     check(`adj893 首页示例「${s.label}」：不带描述头 \`S:\``, !/^\s*S\s*:/m.test(s.src),
       s.src.split('\n').filter((l) => /^\s*S\s*:/.test(l)).join(' / ') || '（无）')
   }
-  const rawNoS = ['茉莉花', '送别'].map((n) =>
-    String(readFileSync(join(root, 'public', 'samples', `${n}.jps`), 'utf8')),
-  )
-  check('adj893 负对照：两份**真源**里确实有 `S:`（说明上面判据真的在量"被过滤掉"这件事）',
-    rawNoS.every((t) => /^\s*S\s*:/m.test(t)),
-    rawNoS.map((t) => (/^\s*S\s*:.*/.exec(t) ?? ['(无)'])[0]).join(' | '))
+  const crafted893 = 'V: 1.0\nB: 试\nS: 本乐谱使用「爱记谱」编制\nQ: 1 2 |\n'
+  const craftedOut893 = simplifyJps(crafted893)
+  check('adj893 负对照：`simplifyJps` 对**构造输入**确实会滤掉 `S:`（判据在量"过滤"这件事本身）',
+    /^\s*S\s*:/m.test(crafted893) && !/^\s*S\s*:/m.test(craftedOut893) &&
+      craftedOut893.includes('B: 试') && craftedOut893.includes('Q: 1 2 |'),
+    JSON.stringify(craftedOut893))
 }
 
 /**
