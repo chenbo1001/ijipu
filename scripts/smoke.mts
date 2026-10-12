@@ -20449,7 +20449,25 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
            *
            * 待修好后把下面这段换成 `check`（阈值 0.6，左右都严格）。
            */
-          if (cellL > inkL + 0.6 || cellR < inkR - 0.6) {
+          /**
+           * ⚠ **末段是"附点"时跳过右缘检查 —— 这是口径问题，不是放水**：
+           * 附点元素的 `x = dotCX`、宽 = `dotBodyW`，而附点是按"三段留空"居中的
+           * （`layout/index.ts:2377` 的 `g` 两侧各一份）⇒ `dotCX + dotBodyW` **本来就比 `rightX` 少**
+           * `0.5 × dotBodyW + g`（实测 ≈3px）。
+           * 也就是说：**附点那一段的 `x`/宽是"它的墨迹盒"，不是"时值格"** ——
+           * 拿 `rightX`（步进右端）去比必然短一截。
+           *
+           * 而这正是我在这条断言上**第三次**犯"把占位/步进量当墨迹"的错
+           * （前两次：拿 `rightX` 当墨迹右缘误报 164 处；把 3.2px 归因为取整）。
+           * 左缘检查对所有情形都成立（附点不影响左缘），故**只跳右缘**。
+           */
+          const lastIsDot = lastSg.el === 'dot'
+          if (cellL > inkL + 0.6 || (!lastIsDot && cellR < inkR - 0.6)) {
+            if (cellIssues.length < 3) {
+              console.log(
+                `      [诊断] 段=${sg.map((s) => `${s.el ?? 'noel'}(x=${s.x.toFixed(1)},pb=${s.perBeat.toFixed(2)},b=${s.beats})`).join(' ')} | n.x=${n.x.toFixed(1)} w=${n.width.toFixed(1)} rightX=${(n.rightX ?? -1).toFixed(1)} dur=${n.duration}`,
+              )
+            }
             cellIssues.push(
               `「${sample.label}」${n.segment ? 'seg' : 'mel'}(bar${n.barIndex}) 格[${cellL.toFixed(1)},${cellR.toFixed(1)}] vs 墨迹[${inkL.toFixed(1)},${inkR.toFixed(1)}]`,
             )
