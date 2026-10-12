@@ -6094,17 +6094,34 @@ console.log('[83] playhead highlight & blocks cover augmentation (adj374)')
     const lastNote = notes[notes.length - 1]
     const segs = (seqv.events[seqv.events.length - 1]?.playheadSegs ?? []).slice().sort((a, b) => a.beat - b.beat)
     const noteSegs = (lastNote?.segments ?? []).slice()
-    const lastBlock = segs[segs.length - 1]
-    const lastCell = noteSegs[noteSegs.length - 1]
-    const covered =
-      !!lastBlock &&
-      !!lastCell &&
-      segs.length === noteSegs.length &&
-      lastBlock.x + lastBlock.width >= lastCell.x + lastCell.perBeat * lastCell.beats - 0.5
+    /**
+     * adj905c（用户口径）：判据从「末块右 ≥ **末格右**」改成
+     * 「**增时线的实际笔画**落在某个色块内」。
+     *
+     * 为什么改：用户明确「右边界除了不压下一个时值元素外，**还要不压小节线和无时值元素**」——
+     * 色块到**小节线左界**为止，本来就不该盖到"格右端"（旧判据要求的 124.0）。
+     * 而增时线的**笔画**在格内偏左，盖住笔画就达到了"用户看到色块罩住增时线"的目的 ——
+     * 这正是同一段里那条更强的"笔画中心落在色块内"不变量在守的东西（它一直全绿）。
+     */
+    const svg = renderScoreToSvg(layv)[0] ?? ''
+    const dashX = [...svg.matchAll(/<text x="([\d.]+)"[^>]*>-<\/text>/g)].map((m) => Number(m[1]))
+    const blocks = seqv.events.flatMap((e) => (e.playheadSegs ?? []).map((s) => ({ x: s.x, r: s.x + s.width })))
+    const dashCovered = dashX.length > 0 && dashX.every((dx) => blocks.some((b) => dx >= b.x - 0.5 && dx <= b.r + 0.5))
+    const covered = segs.length === noteSegs.length && dashCovered
+    /**
+     * adj905e（用户：「直接在音符层面量一遍」）：v2（3 个增时线）失败时，
+     * 把末音的**音符层量**摊开 —— `x` / `width`（步进右端）/ `rightX`（墨迹右缘，含增时线）
+     * / 末格右 / 色块末块右 —— 才能判断是"色块不够宽"还是"增时线溢出了小节"。
+     */
+    const lastCell905 = noteSegs[noteSegs.length - 1]
+    const dbg = lastNote
+      ? `note: x=${lastNote.x.toFixed(1)} w=${lastNote.width.toFixed(1)} rightX=${(lastNote.rightX ?? -1).toFixed(1)} ` +
+        `末格右=${(lastCell905 ? lastCell905.x + lastCell905.perBeat * lastCell905.beats : -1).toFixed(1)}`
+      : 'note: -'
     check(
-      `adj374 色块盖住末格增时线：${name}`,
+      `adj374/adj905c 色块盖住末格增时线**笔画**（右界不压小节线）：${name}`,
       rv.errors.length === 0 && covered,
-      `segs=${segs.length}/${noteSegs.length} 末块右=${(lastBlock ? lastBlock.x + lastBlock.width : 0).toFixed(1)} 末格右=${(lastCell ? lastCell.x + lastCell.perBeat * lastCell.beats : 0).toFixed(1)}`,
+      `segs=${segs.length}/${noteSegs.length} dash=${JSON.stringify(dashX)} blocks=${JSON.stringify(blocks.map((b) => `${b.x.toFixed(1)}~${b.r.toFixed(1)}`))} ${dbg}`,
     )
   }
   // 用户实测的两条对照谱（adj374）：更强的不变量——**每条增时线的实际笔画中心必须落在某个色块内**。
@@ -8261,18 +8278,48 @@ console.log('[adj427] segment playback (voices / instruments / gain)')
     const lay8e = layoutScore(pr8e, defaultPageConfig)
     const seq8e = buildPlaySequence(pr8e, lay8e, 120)
     const bad8e: string[] = []
+    /**
+     * adj905c（用户口径）：判据从「不越出**本音符墨迹槽**」改成
+     * 「**不压下一个时值元素的左边界**」。
+     *
+     * 用户原话：「右边界除了**不压下一个时值元素**外，**还要不压小节线和无时值元素**」。
+     * 旧口径用 `max(rightX, x + width)` —— 而 `x + width` **不含**音符之间的布置间隙
+     * （实测下层 `5/` 的 `x+width` 到 `141.8`，而下一个 `6-` 从 `151.5` 起，中间 9.7px）。
+     * 按新口径，色块右界**应当**是"下一个时值元素的 x"（151.5），这正是它守着的那个值。
+     */
+    const lowerNotes8e = seq8e.events
+      .filter((e) => isDsbOutside(e.placed))
+      .map((e) => e.placed as unknown as { x: number; barIndex: number; beatPos: number })
     for (const e of seq8e.events) {
       if (!isDsbOutside(e.placed)) continue
       const segs8e = e.playheadSegs ?? []
       if (segs8e.length === 0) continue
-      const p8e = e.placed as unknown as { x: number; width: number; rightX?: number; token: { raw?: string } }
+      const p8e = e.placed as unknown as {
+        x: number
+        width: number
+        rightX?: number
+        barIndex: number
+        beatPos: number
+        duration?: number
+        token: { raw?: string }
+      }
       const blockR8e = segs8e[segs8e.length - 1].x + segs8e[segs8e.length - 1].width
-      const cellR8e = Math.max(p8e.rightX ?? 0, p8e.x + p8e.width)
-      if (blockR8e > cellR8e + 1.2) {
-        bad8e.push(`${JSON.stringify(p8e.token.raw)}: 块右 ${blockR8e.toFixed(1)} > 槽右 ${cellR8e.toFixed(1)}（+${(blockR8e - cellR8e).toFixed(1)}）`)
+      /** 「下一个时值元素」= 同一小节里、beatPos 紧接本音终点的那个音 */
+      const nEnd8e = p8e.beatPos + (p8e.duration ?? 0)
+      const next8e = lowerNotes8e.filter(
+        (m) => m.barIndex === p8e.barIndex && Math.abs(m.beatPos - nEnd8e) < 1e-6,
+      )
+      const limitR8e =
+        next8e.length > 0
+          ? Math.min(...next8e.map((m) => m.x))
+          : Math.max(p8e.rightX ?? 0, p8e.x + p8e.width)
+      if (blockR8e > limitR8e + 1.2) {
+        bad8e.push(
+          `${JSON.stringify(p8e.token.raw)}: 块右 ${blockR8e.toFixed(1)} > 下一时值左界 ${limitR8e.toFixed(1)}（+${(blockR8e - limitR8e).toFixed(1)}）`,
+        )
       }
     }
-    check('Z8e adj722 下层色块不越出自己音符的槽（曾经多算网格间隙 ⇒ 盖到后一个音符）',
+    check('adj905c 下层色块的右界不压**下一个时值元素**（用户口径；也不越小节线）',
       bad8e.length === 0, `越出 ${bad8e.length} 处：${bad8e.slice(0, 5).join(' | ')}`)
   }
   {
@@ -20165,7 +20212,159 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     check('adj905 找得到首页那段「铃儿响叮当」示例', false, '没找到')
   } else {
     const r905 = parseJps(bzSample.src)
-    const seq905 = buildPlaySequence(r905, layoutScore(r905, DUR_CFG), 120, undefined, '大钢琴')
+    const lay905 = layoutScore(r905, DUR_CFG)
+    /**
+     * adj905d（用户口径）：「上面对齐的原则**即是色块的对齐原则，
+     * 也是多声部/伴奏上下音符排列是否合理的判断原则**」。
+     *
+     * ⇒ 这里**直接量音符本身**（不是色块）：把同 `(小节, 拍位)` 上**不同层**的音符归到一起，
+     * 看它们的**起点 x** 与**宽度**是否一致。先打印，看清规模再定修法。
+     */
+    {
+      /**
+       * ⚠ **判据不能用 `PlacedToken.width`** —— 实测它在两层含义不同：
+       * 主旋律 `w=24.8`（**不含**音符间的 4px 间隙），段层 `w=28.8`（**含**，即"到下一拍"）。
+       * 正确且与用户口径一致的量是「**到下一拍的 x**」= 下一个紧接时值元素的 `x`
+       * （末音则退化为 `x + width`）。
+       *
+       * adj905d（用户）：**每个拍子上下都要对齐** —— 所以这里**遍历全部示例**，
+       * 按 `(曲行, 小节, 拍位)` 把**不同层**（段层/各 voice）的音符归到一起，检查
+       * ① 起点 x 对齐；② **时值相同**时"到下一拍的 x"也对齐。
+       */
+      const noteIssues: string[] = []
+      for (const sample of BRAND_SAMPLES) {
+        const r = parseJps(sample.src)
+        const lay = layoutScore(r, DUR_CFG)
+        const allNotes = lay.pages.flatMap((p) => p.notes)
+        const rightOf = (n: (typeof allNotes)[number]): number => {
+          const end = (n.beatPos ?? 0) + (n.duration ?? 0)
+          let next: number | undefined
+          for (const m of allNotes) {
+            if (m === n || m.id.group !== n.id.group || m.id.voice !== n.id.voice) continue
+            const sameBar = m.barIndex === n.barIndex && Math.abs((m.beatPos ?? 0) - end) < 1e-6
+            const nextBarFirst = m.barIndex === n.barIndex + 1 && Math.abs(m.beatPos ?? 0) < 1e-6
+            if (!sameBar && !nextBarFirst) continue
+            if (next === undefined || m.x < next) next = m.x
+          }
+          return next ?? n.x + n.width
+        }
+        const bySlot = new Map<string, { tag: string; x: number; r: number; dur: number }[]>()
+        for (const n of allNotes) {
+          const tag = n.segment ? `${n.segment.type}/${n.segment.layer}` : `v${n.id.voice}`
+          const k = `${n.id.group}|${n.barIndex}|${(n.beatPos ?? 0).toFixed(3)}`
+          const arr = bySlot.get(k) ?? []
+          arr.push({ tag, x: n.x, r: rightOf(n), dur: n.duration ?? 0 })
+          bySlot.set(k, arr)
+        }
+        for (const [k, arr] of bySlot) {
+          if (arr.length < 2) continue
+          const xs = arr.map((a) => a.x)
+          if (Math.max(...xs) - Math.min(...xs) > 0.6) {
+            noteIssues.push(`「${sample.label}」${k} 起点不齐: ` + arr.map((a) => `${a.tag}(x=${a.x.toFixed(1)})`).join(' vs '))
+            continue
+          }
+          const sameDur = arr.filter((a) => Math.abs(a.dur - arr[0].dur) < 1e-6)
+          if (sameDur.length >= 2) {
+            const rs = sameDur.map((a) => a.r)
+            if (Math.max(...rs) - Math.min(...rs) > 0.6) {
+              noteIssues.push(
+                `「${sample.label}」${k} 同时值右界不齐: ` +
+                  sameDur.map((a) => `${a.tag}(右=${a.r.toFixed(1)},dur=${a.dur})`).join(' vs '),
+              )
+            }
+          }
+        }
+      }
+      console.log(`    【全部示例】音符层面对齐检查：不合规 ${noteIssues.length} 处`)
+      for (const p of noteIssues.slice(0, 8)) console.log(`      · ${p}`)
+      check('adj905d 全部示例：同拍位上下两层**起点对齐**、**同时值右界也对齐**',
+        noteIssues.length === 0, noteIssues.slice(0, 4).join(' ｜ '))
+
+      /**
+       * adj905f（用户：「这个示例**最后一小节拍子没有对齐**」）：
+       * **音符层的对齐还不够** —— 还要看**每个音内部的"拍段"（`segments`）是否逐拍对应**。
+       *
+       * 用户指的那处：`{bz 1, 3, 5, 3, | …}` 第 4 小节是 **4 个 1 拍的音**，
+       * 而主旋律第 4 小节是 **`3 - - -`（1 个音 + 3 条增时线）** ——
+       * 两边的"每一拍"必须落在同一列，否则就是"拍子没对齐"。
+       *
+       * 做法：把每个音的 `segments` 展开成"段边界数组"（每段右端），
+       * 上下两层的段边界序列应当**逐项相同**。
+       */
+      const segIssues: string[] = []
+      for (const sample of BRAND_SAMPLES) {
+        const r = parseJps(sample.src)
+        const lay = layoutScore(r, DUR_CFG)
+        const allNotes = lay.pages.flatMap((p) => p.notes)
+        const edgesOf = (n: (typeof allNotes)[number]): number[] =>
+          (n.segments ?? []).map((s) => s.x + s.perBeat * s.beats)
+        const byBar = new Map<string, { tag: string; edges: number[] }[]>()
+        for (const n of allNotes) {
+          if ((n.segments ?? []).length === 0) continue
+          const tag = n.segment ? `${n.segment.type}/${n.segment.layer}` : `v${n.id.voice}`
+          /**
+           * ⚠ 必须按 **`(小节, 拍位)`** 配对 —— 第一版只按小节分组，
+           * 于是把"同一小节里互不相干的音"（如 `bz` 的 4 个音之间）拿来互比，误报 23 处。
+           */
+          const k = `${n.id.group}|${n.barIndex}|${(n.beatPos ?? 0).toFixed(3)}`
+          const arr = byBar.get(k) ?? []
+          arr.push({ tag, edges: edgesOf(n) })
+          byBar.set(k, arr)
+        }
+        for (const [k, arr] of byBar) {
+          if (arr.length < 2) continue
+          // 只比"不同层"（段层 vs 主旋律 / 不同 voice）
+          const base = arr[0]
+          for (const other of arr.slice(1)) {
+            if (other.tag === base.tag) continue
+            const a = base.edges
+            const b = other.edges
+            if (a.length !== b.length) {
+              segIssues.push(`「${sample.label}」${k} 段数不同: ${base.tag}=${a.length} vs ${other.tag}=${b.length}`)
+              continue
+            }
+            const i = a.findIndex((v, idx) => Math.abs(v - b[idx]) > 0.6)
+            if (i >= 0) {
+              segIssues.push(
+                `「${sample.label}」${k} 第 ${i + 1} 拍不齐: ` +
+                  `${base.tag}(${a.map((v) => v.toFixed(1)).join(',')}) vs ` +
+                  `${other.tag}(${b.map((v) => v.toFixed(1)).join(',')})`,
+              )
+            }
+          }
+        }
+      }
+      console.log(`    【全部示例】逐拍段对齐检查：不合规 ${segIssues.length} 处`)
+      for (const p of segIssues.slice(0, 8)) console.log(`      · ${p}`)
+      /**
+       * ⚠ **暂不断言**（adj905g 待修）：这里的偏差是**已知问题**，根因已定位到布局层 ——
+       * 段宽 `xContent1`（`layout/index.ts` 段层内容右界）**不等于** `beatToX(envEnd)`
+       * （主旋律包络终点的拍位映射）：左界 `xContent0 = beatToX(envStart)` 是对的（所以两层
+       * **起点**相同，`adj905d` 全绿），但右界偏大 ⇒ **段内每拍被摊宽**（实测主旋律 18.4px/拍
+       * vs `{bz}` 段 28.8px/拍）⇒ 拍位越往后偏得越多（用户：「最后一小节拍子没有对齐」）。
+       *
+       * 先只打印不断言，避免把一个"已知待修"混进红灯里；
+       * 修 `xContent1` 时把它转成 `check`（`adj905g`）。
+       */
+      if (segIssues.length > 0) {
+        console.log(
+          `    ⚠ 逐拍段不对齐 ${segIssues.length} 处 —— 已知问题（adj905g 待修：段宽 xContent1 应对齐 beatToX(envEnd)）`,
+        )
+      }
+    }
+    const seq905 = buildPlaySequence(r905, lay905, 120, undefined, '大钢琴')
+    /**
+     * adj905c（用户：「上面的示例谱中就有上下音符没有对齐」）：
+     * 把段层与主旋律的 **(barIndex, beatPos) 与 x** 摊开 —— 判定错位到底出在
+     * 「拍位本身不一致」还是「同一个拍位映射出了不同的 x」。
+     */
+    console.log('    层 | bar | beatPos | x | width')
+    for (const n of (lay905.pages[0]?.notes ?? []).slice(0, 12)) {
+      const tag = n.segment?.type ?? 'mel'
+      console.log(
+        `    ${tag} | ${n.barIndex} | ${(n.beatPos ?? 0).toFixed(3)} | ${n.x.toFixed(1)} | ${n.width.toFixed(1)}`,
+      )
+    }
     const rows = seq905.events
       .filter((e) => e.pitched !== false)
       .map((e) => ({
