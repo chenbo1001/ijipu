@@ -19948,3 +19948,51 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       !s.src.includes('jps-config') && s.src.includes('Q:'), s.src.slice(0, 50).replace(/\n/g, '⏎'))
   }
 }
+
+/**
+ * adj885（用户反馈）：「脚本语法说明」里的示例**必须零错误零告警**。
+ *
+ * 由来：用户实测「脚本语法说明 文档里有多个示例有警告，基本都是拍数不对」——
+ * 那些示例现在在网页上是可切换的 jps 块，点「预览」会带着一条 ⚠ 显示出来；
+ * 对着一份**语法参考书**显示告警，读者会以为是自己写错了。所以这条要机器守住。
+ *
+ * ⚠ 只检查**前三部分**（五分钟上手 / 语法参考 / 组合示例集）：
+ * 第四部分「报错与排查」里的示例是**故意写错**的，本来就该报错。
+ */
+{
+  console.log('[162] 语法说明里的示例必须零错误零告警（adj885）')
+  const synLines = String(readFileSync(join(root, 'docs', 'SYNTAX.md'), 'utf8')).split('\n')
+  /** 「第四部分」所在行：它之后的示例是"故意写错"的，不参与本断言 */
+  const errPartAt = synLines.findIndex((l) => l.startsWith('# 第四部分'))
+  /** 抽出所有 ```jps 块（记录开头行号，报错时好定位） */
+  const blocks: { at: number; src: string }[] = []
+  let inBlock = false
+  let startAt = 0
+  let buf: string[] = []
+  synLines.forEach((l, i) => {
+    if (!inBlock && /^```jps/.test(l)) {
+      inBlock = true
+      startAt = i + 2 // 1-based、且指向首行内容
+      buf = []
+      return
+    }
+    if (inBlock && /^```\s*$/.test(l)) {
+      inBlock = false
+      blocks.push({ at: startAt, src: buf.join('\n') })
+      return
+    }
+    if (inBlock) buf.push(l)
+  })
+  check('adj885 能从 SYNTAX.md 抽出 jps 示例块（≥ 10 段）', blocks.length >= 10, String(blocks.length))
+  const offenders: string[] = []
+  for (const b of blocks) {
+    if (errPartAt >= 0 && b.at - 1 > errPartAt) continue // 「报错与排查」那部分是故意写错的
+    const r = parseJpsRaw(b.src)
+    if (r.errors.length > 0) {
+      // 列**全部**问题（不是只列前两条）：修文档时要一次看全，否则会来回跑
+      offenders.push(`第 ${b.at} 行起 → ${r.errors.map((e) => e.message).join('；')}`)
+    }
+  }
+  check('adj885 前三部分的每个 jps 示例都零错误零告警（读者照抄不该看到 ⚠）',
+    offenders.length === 0, offenders.slice(0, 8).join(' ｜ '))
+}
