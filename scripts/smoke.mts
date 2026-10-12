@@ -20014,6 +20014,21 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       pluginGuideMd.includes('只有代码块有参数') &&
       pluginGuideMd.includes('用嵌入版 iJipu 独立编辑'))
 
+  /**
+   * adj905x（**用户实测纠正**）：手机端点「✎ 编辑」是**借用 Obsidian 自己的编辑器**打开 `.jps` 源码
+   * （`setViewState({type:'markdown', state:{mode:'source', source:true}})`）——那时**插件的文件栏不在前台**，
+   * 所以它上面那个「📖 看谱」按钮**根本看不到**；回谱面的办法是把页签切 **阅读视图**。
+   *
+   * ⚠ 我第一版手册与首页都写成了「点『看谱』回到预览」（照抄了更早的首页文案），用户照着手册操作才发现不对。
+   * 这条守的就是"**别把平台路径写错**"：讲手机端回谱面时必须出现「阅读视图」，
+   * 且不许再出现「点『看谱』回…」这种只有桌面源码态才成立的指令。
+   */
+  check('adj905x 手册与首页讲"手机端怎么回到谱面"时写的是**阅读视图**（不是插件那个「📖 看谱」按钮）',
+    pluginGuideMd.includes('阅读视图') &&
+      homeHtml.includes('阅读视图') &&
+      !/点「看谱」回/.test(pluginGuideMd) &&
+      !/点「看谱」回到预览/.test(homeHtml))
+
   // ---- ② 首页必须够轻：不引 React、不引引擎（否则"介绍页"要白下几百 KB） ----
   const landingSrc = readSrc('src/landing/main.ts')
   check('adj876 首页脚本不 import react / @ijipu/engine',
