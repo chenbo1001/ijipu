@@ -20,6 +20,10 @@ import { BRAND_SAMPLES, simplifyJps } from '../src/landing/samples'
  * 教训：**改了 import 之后，别信增量 tsc** —— 看 smoke 的实际执行结果，或 `tsc --force`。
  */
 import { PLAYHEAD_COLORS } from '@ijipu/engine/index.ts'
+// adj905q：预览可视调试的边界虚线几何（时值格 / 墨迹 / 段层）——
+// ⚠ 这次踩的坑同 `PLAYHEAD_COLORS`：**import 编辑失败后我没核对就跑，运行时 ReferenceError**。
+// 纪律：改完 import 必须看 `smoke` 的真实执行结果（`tsc` 增量可能漏掉、esbuild 不做类型检查）。
+import { computeDebugBounds } from '@ijipu/engine/index.ts'
 // adj895：播放跟随滚动的「安全区」（纯函数 ⇒ 可在 Node 里直接断言）
 import { FOLLOW_SAFE_HIGH, FOLLOW_SAFE_LOW, followScrollTargetX } from '../src/preview/followScroll'
 // adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
@@ -20515,6 +20519,32 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       for (const p of endIssues.slice(0, 6)) console.log(`      · ${p}`)
       check('adj905p 全部示例：段层末小节（可无小节线）右端与主旋律那一小节右端对齐',
         endIssues.length === 0, endIssues.slice(0, 4).join(' ｜ '))
+
+      /**
+       * adj905q（用户提议的调试开关）：`computeDebugBounds` 的几何必须**与布局同源** ——
+       * 它算出的 `cell` 边界必须**逐个等于** `segments` 给出的值（不是"接近"）；
+       * 且"左边界画上半部 / 右边界画下半部"的半高区间必须有效（`yTop < yMid < yBottom`）。
+       * 负对照：不传音符时输出为空（默认不画任何东西）。
+       */
+      {
+        const rQ = parseJps(BRAND_SAMPLES.find((s) => s.label.includes('铃儿响叮当'))?.src ?? '')
+        const layQ = layoutScore(rQ, DUR_CFG)
+        const notesQ = layQ.pages.flatMap((p) => p.notes)
+        const boundsQ = computeDebugBounds(notesQ, 13)
+        const cellL = boundsQ.filter((b) => b.kind === 'cell' && b.side === 'L')
+        const mismQ = cellL.filter((b, i) => {
+          const sg = notesQ[i]?.segments ?? []
+          return sg.length === 0 || Math.abs(b.x - sg[0].x) > 0.05
+        })
+        check('adj905q 调试边界：`cell` 左缘逐项等于 `segments[0].x`（与布局同源）',
+          cellL.length === notesQ.length && mismQ.length === 0,
+          `cellL=${cellL.length} notes=${notesQ.length} 不齐=${mismQ.length}`)
+        check('adj905q 调试边界：左右边界各画半高（`yTop < yMid < yBottom`）',
+          boundsQ.length > 0 && boundsQ.every((b) => b.yTop < b.yMid && b.yMid < b.yBottom),
+          JSON.stringify(boundsQ[0] ?? null))
+        check('adj905q 负对照：没有音符时不产出任何边界（默认不画）',
+          computeDebugBounds([], 13).length === 0)
+      }
     }
     const seq905 = buildPlaySequence(r905, lay905, 120, undefined, '大钢琴')
     /**
