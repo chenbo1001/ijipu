@@ -20542,6 +20542,19 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
         check('adj905q 调试边界：左右边界各画半高（`yTop < yMid < yBottom`）',
           boundsQ.length > 0 && boundsQ.every((b) => b.yTop < b.yMid && b.yMid < b.yBottom),
           JSON.stringify(boundsQ[0] ?? null))
+        /**
+         * adj905q 修正（用户看图后报「长度长了些，且左右虚线没有以音符中间为分界线」）：
+         * **虚线只到音符本体上下各 4px**，且 **`yMid` 落在本体竖向的中点**。
+         * ⚠ 只用边界自身的量验（`yBottom − yTop = noteSize + 8`、`yMid` 为中点）——
+         * 我第一版按 `indexOf(b)/2` 回查音符，**错**：一个音符产出 2~4 条边界，不是恒定 2 条。
+         */
+        const specQ = boundsQ.filter(
+          (b) =>
+            Math.abs(b.yBottom - b.yTop - (13 + 8)) > 0.05 ||
+            Math.abs(b.yMid - (b.yTop + b.yBottom) / 2) > 0.05,
+        )
+        check('adj905q 调试边界：长度 = 音符本体上下各 4px、分界在本体竖向中点',
+          boundsQ.length > 0 && specQ.length === 0, `不合规 ${specQ.length} 条`)
         check('adj905q 负对照：没有音符时不产出任何边界（默认不画）',
           computeDebugBounds([], 13).length === 0)
       }

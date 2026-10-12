@@ -592,6 +592,36 @@ export function PreviewPane() {
                 <PlayheadLayer page={page} noteSize={pageConfig.note_size} />
                 {/* adj723b：**只读自检**（见 `PlayheadDiag` 说明；不参与渲染） */}
                 <PlayheadDiag pageIndex={page.index} noteSize={pageConfig.note_size} />
+                {/* adj905q 预览可视调试：三套边界虚线（时值格 / 墨迹 / 段层）。
+                    ⚠ **刻意放在"排版辅助虚线"开关之外** —— 用户实测：只开调试开关时看不到线，
+                    会以为调试开关无效（渲染块原本被 `showGuides &&` 包住了）。
+                    画法按用户口径：**左边界只画上半部、右边界只画下半部**，
+                    长度、分界与配色由引擎的 `computeDebugBounds` 给出（此处只消费）。 */}
+                {dbgOfPage.map((b, bi) => {
+                  const palette =
+                    b.kind === 'cell'
+                      ? ['#e0533d', '#f08a4b'] // 时值格：暖色
+                      : b.kind === 'ink'
+                        ? ['#2f7fd0', '#5aa9e6'] // 墨迹：蓝色
+                        : ['#3f9e5a', '#7fc98f'] // 段层：绿色
+                  const stroke = palette[b.colorIndex % palette.length]
+                  const top = b.side === 'L' ? b.yTop : b.yMid
+                  const bottom = b.side === 'L' ? b.yMid : b.yBottom
+                  return (
+                    <div
+                      key={`dbg${bi}`}
+                      style={{
+                        position: 'absolute',
+                        left: pct(b.x),
+                        top: pctY(top),
+                        width: 0,
+                        height: pctY(bottom - top),
+                        borderLeft: `1px dashed ${stroke}`,
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  )
+                })}
                 {showGuides && (
                   <div
                     className="guide-layer"
@@ -652,34 +682,6 @@ export function PreviewPane() {
                       }}
                       title="描述头区域中线（标注）"
                     />
-                    {/* adj905q 预览可视调试：三套边界虚线（时值格 / 墨迹 / 段层）。
-                        画法按用户口径：**左边界只画上半部**（到音符中线 yMid）、**右边界只画下半部**、
-                        **相邻音符交替颜色**（colorIndex）。三类边界各用一个色系，便于区分。 */}
-                    {dbgOfPage.map((b, bi) => {
-                      const palette =
-                        b.kind === 'cell'
-                          ? ['#e0533d', '#f08a4b'] // 时值格：暖色
-                          : b.kind === 'ink'
-                            ? ['#2f7fd0', '#5aa9e6'] // 墨迹：蓝色
-                            : ['#3f9e5a', '#7fc98f'] // 段层：绿色
-                      const stroke = palette[b.colorIndex % palette.length]
-                      const top = b.side === 'L' ? b.yTop : b.yMid
-                      const bottom = b.side === 'L' ? b.yMid : b.yBottom
-                      return (
-                        <div
-                          key={bi}
-                          style={{
-                            position: 'absolute',
-                            left: pct(b.x),
-                            top: pctY(top),
-                            width: 0,
-                            height: pctY(bottom - top),
-                            borderLeft: `1px dashed ${stroke}`,
-                            pointerEvents: 'none',
-                          }}
-                        />
-                      )
-                    })}
                     {/* 行结构虚线：曲部行虚线（数字中心）/ 曲词间距 / 词曲间距 / 词部行虚线 */}
                     {rowGuidesOfPage.map((rg, ri) => (
                       <div key={ri} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
