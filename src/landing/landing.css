@@ -201,17 +201,39 @@ code {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 16px;
 }
+/**
+ * adj897（用户反馈）：**图标与标题放到同一行**。
+ *
+ * 原来三者是三个块级元素、各占一行（图标 / 标题 / 内容）——在手机上卡片本来就窄，
+ * 三行把垂直空间吃得很散（用户原话"明显过于分散"）。
+ *
+ * 用 **grid 两列**把图标与标题排在同一行、内容跨两列落到下一行：
+ * 不需要给 HTML 加包裹层（8 张卡一张都不用改），也不动任何语义。
+ */
 .card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 10px;
+  row-gap: 9px;
+  /* 第一行（图标 + 标题）垂直居中；内容段用 align-self: start 顶对齐 */
+  align-items: center;
   background: var(--site-panel);
   border: 1px solid var(--site-border);
   border-radius: var(--site-radius);
-  padding: 20px;
+  padding: 18px 20px;
   transition: border-color 0.15s, transform 0.15s;
 }
 .card:hover { border-color: var(--site-accent); transform: translateY(-2px); }
-.card-ico { font-size: 24px; margin: 0 0 8px; line-height: 1; }
-.card h3 { font-size: 16.5px; margin-bottom: 8px; }
-.card p { margin: 0; font-size: 14px; color: var(--site-text-2); }
+.card-ico { font-size: 22px; margin: 0; line-height: 1; }
+.card h3 { font-size: 16.5px; margin: 0; }
+/* ⚠ 用 `:not(.card-ico)` 排除图标本身（它也是 `p`），并把内容段放到第二行、跨两列 */
+.card > p:not(.card-ico) {
+  grid-column: 1 / -1;
+  align-self: start;
+  margin: 0;
+  font-size: 14px;
+  color: var(--site-text-2);
+}
 
 /* ---------- 深度分块 ---------- */
 .deep { padding-bottom: 72px; }
@@ -258,11 +280,15 @@ code {
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 14px;
 }
+/* adj897（用户反馈）：与功能卡同一个问题 —— 图标 / 标题 / 描述各占一行，手机上太散。
+   同样用 grid 两列把**图标与标题并到一行**，描述跨两列落到下一行。 */
 .link-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 18px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 9px;
+  row-gap: 5px;
+  align-items: center;
+  padding: 16px 18px;
   background: var(--site-panel);
   border: 1px solid var(--site-border);
   border-radius: var(--site-radius);
@@ -272,7 +298,12 @@ code {
 .link-card:hover { text-decoration: none; border-color: var(--site-accent); transform: translateY(-2px); }
 .link-ico { font-size: 20px; line-height: 1; }
 .link-card b { font-size: 15.5px; }
-.link-card span:last-child { font-size: 13.5px; color: var(--site-muted); }
+.link-card > span:last-child {
+  grid-column: 1 / -1;
+  align-self: start;
+  font-size: 13.5px;
+  color: var(--site-muted);
+}
 
 /* ---------- FAQ ---------- */
 .faq { padding-bottom: 72px; }

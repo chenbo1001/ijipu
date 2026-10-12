@@ -813,6 +813,49 @@ async function main() {
       check('首页 title 含 Slogan「码即成，谱自现」', home.title.includes('码即成，谱自现'), home.title)
       check('首页 H1 = 码即成，谱自现', home.h1 === '码即成，谱自现', home.h1)
       check('首页特性卡 8 张', home.cards === 8, String(home.cards))
+      /**
+       * adj897（用户反馈）：功能卡的**图标与标题必须在同一行**。
+       * 原来图标 / 标题 / 内容各占一行，手机上卡片窄 ⇒ 三行显得很散。
+       * 这条**在手机视口下量真实几何**（用户说的正是那个场景），桌面也量一遍（是统一改的）。
+       */
+      const measureCard = () =>
+        evalJs(
+          c,
+          `(() => {
+            const out = []
+            // adj897：**两类卡都要量** —— 功能卡（.features .card）与入口卡（.links .link-card）
+            for (const sel of ['.features .card', '.links .link-card']) {
+              const root = document.querySelector(sel)
+              if (!root) { out.push({ sel, missing: true }); continue }
+              const ico = root.querySelector('[class$="-ico"]')            // .card-ico / .link-ico
+              const title = root.querySelector('h3, b')                    // 功能卡是 h3、入口卡是 b
+              const body =
+                root.querySelector('p:not(.card-ico)') ?? root.querySelector('span:last-child')
+              if (!ico || !title || !body) { out.push({ sel, missing: true }); continue }
+              const a = ico.getBoundingClientRect(), b = title.getBoundingClientRect(), d = body.getBoundingClientRect()
+              out.push({
+                sel,
+                sameRow: Math.abs(a.top - b.top) <= 12,
+                icoLeftOfTitle: b.left >= a.right - 2,
+                bodyBelow: d.top >= Math.max(a.bottom, b.bottom) - 2,
+                icoTop: Math.round(a.top), titleTop: Math.round(b.top), bodyTop: Math.round(d.top),
+              })
+            }
+            return out
+          })()`,
+        )
+      const cardsOk = (r) =>
+        Array.isArray(r) && r.length === 2 && r.every((x) => !x.missing && x.sameRow && x.icoLeftOfTitle && x.bodyBelow)
+      await viewport(390, 844, 2)
+      await sleep(350)
+      const cardMobile = await measureCard()
+      check('adj897 手机视口（390px）下：**功能卡与入口卡**的图标、标题都在同一行，内容落在下一行',
+        cardsOk(cardMobile), JSON.stringify(cardMobile))
+      await viewport(1440, 900, 1)
+      await sleep(350)
+      const cardDesktop = await measureCard()
+      check('adj897 桌面视口下同样成立（两类卡都是图标与标题一行，不是只在手机上改的）',
+        cardsOk(cardDesktop), JSON.stringify(cardDesktop))
       check('首页入口链接 6 个（应用/手册/语法/桌面/插件/赞赏）', home.entries === 6, String(home.entries))
       check('首页顶栏导航 ≥ 6 条', home.navLinks >= 6, String(home.navLinks))
       check('首页主按钮指向 `/app/`', home.cta === '/app/', home.cta)
