@@ -1169,6 +1169,106 @@ check('连音合并 1 单个事件且 6 拍（120bpm=3000ms）', evAdjC.length =
 check('连音合并事件 playheadSegs 总拍数 = 6（覆盖被合并音符）', (evAdjC[0]?.playheadSegs ?? []).reduce((a, s) => a + s.beats, 0) === 6, String((evAdjC[0]?.playheadSegs ?? []).reduce((a, s) => a + s.beats, 0)))
 const evAdjR = seqAdj.events.filter((e) => e.placed.token.kind === 'rest')
 check('休止 0 0 单独事件（2 个）', evAdjR.length === 2, String(evAdjR.length))
+/**
+ * adj907（用户报「连音线音符会演奏两个音，如 `(5---|5)---|`，正确应该是一个 8 拍的 5」）：
+ * **连音合并必须按声部隔离**。
+ *
+ * 根因：多声部单元的 `seq` 是**按小节交替**拼的（`Q1` 第 k 小节 → `Q2` 第 k 小节 → 小节线），
+ * 而旧实现的合并判据读的是**全局**「上一个已发事件」（`lastEventNoteIdx`/`lastMainEvIdx`/…）
+ * ⇒ 一跨小节线它就成了**另一个声部**的音 ⇒ `sameVoiceAsPrev` 与「索引相邻」双双不成立 ⇒ 连音不合并。
+ * 实测（真谱 `花又期二重奏.jps` 末句）F4 起奏 3 次；同小节内（`(1 1)`）却正常。
+ *
+ * 新口径：每个声部各记一份「上一已发事件」（键 = `placed.id.voice`）；
+ * 判据里的索引/音高/事件下标一律取**本声部**的值。`sameVoiceAsPrev` 保留为守卫（守住 adj596 原意）。
+ */
+{
+  /** 整份源码（可含多声部 Q1/Q2 行）建序列——`mkSeq` 只支持单行 `Q:` */
+  const mkSeqSrc = (src: string, bpm = 120) => {
+    const r = parseJps(src)
+    return buildPlaySequence(r, layoutScore(r, DUR_CFG), bpm)
+  }
+  const voiceEvs = (seq: ReturnType<typeof buildPlaySequence>, v: number) =>
+    seq.events.filter((e) => e.placed.id.voice === v)
+  // 正：多声部跨小节连音合并成 1 个 8 拍事件（4000ms @120bpm）
+  const seq907a = mkSeqSrc('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: (5---|5)---|\nQ2: 3--- 3---|\n')
+  const v1a = voiceEvs(seq907a, 1)
+  const g4a = v1a.filter((e) => e.placed.audioPitch === 'G4')
+  check(
+    'adj907 多声部连音合并：Q1 (5---|5)--- ⇒ 恰好 1 个 4000ms 事件',
+    g4a.length === 1 && Math.abs(g4a[0].durationMs - 4000) < 1,
+    `事件数 ${g4a.length}：${g4a.map((e) => `${Math.round(e.atMs)}/${e.durationMs}`).join(',')}`,
+  )
+  check(
+    'adj907 多声部连音合并：playheadSegs 拍数和 = 8（色块覆盖全时值）',
+    (g4a[0]?.playheadSegs ?? []).reduce((a, s) => a + s.beats, 0) === 8,
+    String((g4a[0]?.playheadSegs ?? []).reduce((a, s) => a + s.beats, 0)),
+  )
+  // 负对照 A：合并后第 5 拍（atMs≈2000）处**不得**再起奏一次
+  check(
+    'adj907 负对照 A：Q1 在 atMs≈2000 处不再有起奏',
+    !v1a.some((e) => Math.abs(e.atMs - 2000) < 100),
+    v1a.map((e) => `${e.placed.audioPitch}@${Math.round(e.atMs)}/${e.durationMs}`).join(' '),
+  )
+  // 正：同声部隔离不误伤别人（Q1 自己合并、Q2 的 4 个短音各奏各的）
+  const seq907b = mkSeqSrc('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: (1 | 1)- 2 3|\nQ2: 5 5 5 5|\n')
+  const c4b = voiceEvs(seq907b, 1).filter((e) => e.placed.audioPitch === 'C4')
+  const g4b = voiceEvs(seq907b, 2).filter((e) => e.placed.audioPitch === 'G4')
+  check(
+    'adj907 声部隔离不误伤别人：Q1 的 C4 = 1 个 1500ms，Q2 的 4 个 G4 各 500ms',
+    c4b.length === 1 &&
+      Math.abs(c4b[0].durationMs - 1500) < 1 &&
+      g4b.length === 4 &&
+      g4b.every((e) => Math.abs(e.durationMs - 500) < 1),
+    `v1 C4=${c4b.length}(${c4b.map((e) => e.durationMs).join(',')}) v2 G4=${g4b.length}(${g4b.map((e) => e.durationMs).join(',')})`,
+  )
+  // 负对照 C（守住 adj596）：两声部各自合并，且都并到**自己**那边（两个事件都从 atMs=0 起）
+  const seq907c = mkSeqSrc('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: (1---|1)---|\nQ2: (3---|3)---|\n')
+  const c4c = voiceEvs(seq907c, 1)
+  const a4c = voiceEvs(seq907c, 2)
+  check(
+    'adj907 负对照 C：两个声部各自合并成 1 个 4000ms、都在 atMs=0（不跨声部误并）',
+    c4c.length === 1 &&
+      a4c.length === 1 &&
+      Math.abs(c4c[0].durationMs - 4000) < 1 &&
+      Math.abs(a4c[0].durationMs - 4000) < 1 &&
+      c4c[0].atMs === 0 &&
+      a4c[0].atMs === 0,
+    `v1=${c4c.length}@${c4c[0]?.atMs}/${c4c[0]?.durationMs} v2=${a4c.length}@${a4c[0]?.atMs}/${a4c[0]?.durationMs}`,
+  )
+  // 反向守护：单声部不许被改坏（docs/SYNTAX.md:530 的例子）
+  const a4d = mkSeq('(6- | 6)-').events.filter((e) => e.placed.audioPitch === 'A4')
+  check(
+    'adj907 反向守护：单声部 (6- | 6)- ⇒ 1 个事件 4 拍（2000ms）',
+    a4d.length === 1 && Math.abs(a4d[0].durationMs - 2000) < 1,
+    `${a4d.length}:${a4d.map((e) => e.durationMs).join(',')}`,
+  )
+  /**
+   * 真谱缩略回归：`花又期二重奏.jps` 末两行（`D: F` / `J: 66` / Q1 + Q2 各一行）**内联**在这里——
+   * 不依赖仓库外那份 .jps。修前 F4 起奏 3 次（[909, 3636, 1818]ms，合计 6363ms）；
+   * 修后 = 1 次 7 拍。
+   */
+  const seq907r = mkSeqSrc(
+    'V: 1.0\nB: t\nD: F\nP: 4/4\nJ: 66\nQ1: 3,/ 5, 6,/ 2 3 | (5, 6,)- (1 | (1)--- | 1)- 0 0 ||\nQ2: 3/ 5 6/ 5- | 4-- (3 | (3)--- | 3)- 0 0 ||\n',
+    66,
+  )
+  const f4r = seq907r.events.filter((e) => e.placed.audioPitch === 'F4')
+  /**
+   * ⚠ 口径说明：Q2 那一行**开头**还有一个半拍的 `3/`（也是 A4，`atMs=0`、454.5ms）——
+   * 它不属这条连音线，因此"A4 起奏恰好 1 次"只能针对**末句**（第 2 小节起，`atMs > 1000`）。
+   * 不加这个限定就不是"更严"，而是**假红灯**（修好了也永远红）。
+   */
+  const a4r = voiceEvs(seq907r, 2).filter((e) => e.placed.audioPitch === 'A4' && e.atMs > 1000)
+  check(
+    'adj907 真谱缩略：Q1 的 F4 起奏 1 次、时值 6363ms（7 拍 @J:66）',
+    f4r.length === 1 && Math.abs(f4r[0].durationMs - 6363) <= 2,
+    `${f4r.length}:${f4r.map((e) => `${Math.round(e.atMs)}/${e.durationMs.toFixed(1)}`).join(',')}`,
+  )
+  check(
+    'adj907 真谱缩略：Q2 末句的 A4 起奏 1 次、时值 6363ms（7 拍 @J:66）',
+    a4r.length === 1 && Math.abs(a4r[0].durationMs - 6363) <= 2,
+    `${a4r.length}:${a4r.map((e) => `${Math.round(e.atMs)}/${e.durationMs.toFixed(1)}`).join(',')}`,
+  )
+}
 // adj301：乐器指定——Y 默认乐器 / @乐器名 切换 / @@ 回默认
 check('resolveInstrument：长笛→flute、小提琴→默认钢琴', resolveInstrument('长笛') === 'flute' && resolveInstrument('小提琴') === 'piano' && resolveInstrument('弦乐') === 'strings', `longdi=${resolveInstrument('长笛')} violin=${resolveInstrument('小提琴')}`)
 const rInst = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 长笛\nQ: 1 2 @弦乐 3 4 @@ 5 6 |\n')
@@ -1195,9 +1295,23 @@ const vY2 = seqYv.events.filter((e) => e.placed.id.voice === 2)[0]
 // adj456：口径同上一组——序列带**乐器名 ref**（非合成预设 id）；多声部按 Y 行顺序对应
 check('多声部 Q1→Y[0] 钢琴、Q2→Y[1] 弦乐', vY1?.instrument === '钢琴' && vY2?.instrument === '弦乐', `${vY1?.instrument},${vY2?.instrument}`)
 const rYv3 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 钢琴\nY: 弦乐\nQ1: 1 2 3 4 |\nQ2: 5 6 5 3 |\nQ3: 1 3 5 1 |\n')
-const seqYv3 = buildPlaySequence(rYv3, layoutScore(rYv3, DUR_CFG), 120)
+/**
+ * adj908（**新口径**，用户 2026-10 确认方向「各声部音色要不同」）：`Y:` 行数不够时，
+ * 多出的声部**不再回落"默认乐器（`Y[0]`）"**，而是取调用方传入的**启用音色列表**第 `(voice-1)` 项
+ * （新参数 `enabledInstrumentRefs`，见 `buildPlaySequence` 的 JSDoc）。
+ *
+ * 为什么要改：旧口径让 Q2/Q3 与 Q1 拿到**同一个音色**，而色块颜色是**按音色去重**分配的
+ * （`playhead.ts` 的 `instrumentColorMap`）⇒ 两声部同色。用户原话：「未设置音色的情况下，
+ * 声部之间没有用不同的音色区分开，色块也没有区分」。
+ *
+ * 断言仍要守住"Q3 与 Q1/Q2 都不同"，故这里显式给一份 3 项启用列表（Q3 ⇒ 第 3 项「长笛」）。
+ */
+const seqYv3 = buildPlaySequence(rYv3, layoutScore(rYv3, DUR_CFG), 120, undefined, '钢琴', undefined, ['钢琴', '弦乐', '长笛'])
 const vY3 = seqYv3.events.filter((e) => e.placed.id.voice === 3)[0]
-check('多声部 Q3（无对应 Y）用默认乐器（= Y[0] 钢琴）', vY3?.instrument === '钢琴', String(vY3?.instrument))
+check('adj908 多声部 Q3（无对应 Y）取启用音色列表第 3 项（长笛），不再回落 Y[0]', vY3?.instrument === '长笛', String(vY3?.instrument))
+// 负对照：**不传**启用列表（CLI / 导出等旧调用方）⇒ 仍是旧口径（回落 defaultInstrument = Y[0] 钢琴）
+const vY3NoRefs = buildPlaySequence(rYv3, layoutScore(rYv3, DUR_CFG), 120).events.filter((e) => e.placed.id.voice === 3)[0]
+check('adj908 未传启用音色列表时保持旧口径（Q3 回落 defaultInstrument = Y[0] 钢琴）', vY3NoRefs?.instrument === '钢琴', String(vY3NoRefs?.instrument))
 const rYone = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 钢琴 弦乐\nQ: 1 2 3 4 |\n')
 check('Y 行多乐器只取第一个（一个 Y 行一种）', rYone.header.instruments.length === 1 && rYone.header.instruments[0] === '钢琴', JSON.stringify(rYone.header.instruments))
 // adj351：多声部声部乐器独立延续——第一组各声部 @ 乐器，第二组同声部延续（不再回归为最后一个声部音色）
@@ -1211,6 +1325,124 @@ const mvFirst = { q1: q1Mv[0]?.instrument, q2: q2Mv[0]?.instrument, q3: q3Mv[0]?
 const mvNext = { q1: q1Mv.find((e) => e.placed.id.group !== gMv1)?.instrument, q2: q2Mv.find((e) => e.placed.id.group !== gMv1)?.instrument, q3: q3Mv.find((e) => e.placed.id.group !== gMv1)?.instrument }
 check('adj351 多声部第一组音色：Q1=大钢琴 Q2=打击风琴 Q3=大提琴', mvFirst.q1 === '大钢琴' && mvFirst.q2 === '打击风琴' && mvFirst.q3 === '大提琴', `${mvFirst.q1},${mvFirst.q2},${mvFirst.q3}`)
 check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q3=大提琴', mvNext.q1 === '大钢琴' && mvNext.q2 === '打击风琴' && mvNext.q3 === '大提琴', `${mvNext.q1},${mvNext.q2},${mvNext.q3}`)
+/**
+ * ---- adj908（用户口径 2026-10）：**未设置音色时，声部之间必须用不同音色区分** ----
+ *
+ * 用户原话：「未设置音色的情况下，声部之间没有用不同的音色区分开，色块也没有区分」。
+ * 根因：`buildPlaySequence` 的 `voiceDefaultOf(voice)` 在 `Y:` 行数不够时返回**同一个**
+ * `defaultInstrument`（= `Y[0]`）⇒ 两声部音色相同 ⇒ `playhead.ts` 的 `instrumentColorMap`
+ * **按音色名去重**分配颜色 ⇒ 两个色块同色。
+ *
+ * 新口径（本块断言）：
+ *  ① `Y:` 显式写了 ⇒ 仍按 `yInstruments[voice-1]`（**以谱面为准**，不被启用列表改写）；
+ *  ② 没写（或行数不够）⇒ voice 1 = 第 1 个可用音色；voice ≥ 2 = 启用音色列表第 `(voice-1) % refs.length` 项；
+ *  ③ **不传**启用列表（CLI / 导出等旧调用方）⇒ 保持旧口径；传了**空**列表 ⇒ 回落 `accompInstrument()`。
+ * 另：色块链路走的是**同一批 `playheadSegs`**（`trackKeysOf` → `instrumentColorMap` →
+ * `playheadPosIn` → `playheadBaseOf`），与 `PreviewPane` 的消费端完全同路。
+ */
+{
+  const H908 = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  /**
+   * 应用侧「启用音色列表」的默认值 = `src/store/uiStore.ts` 的
+   * `DEFAULT_HQ_ENABLED = [0, 10, 40, 48, 56, 71, 73]`，经 `gmVoiceRef` 还原成音色名 ref
+   * —— 应用侧新增的 `enabledInstrumentRefs()` 就是这条口径（`firstEnabledInstrumentRef` 的整份列表版）。
+   */
+  const REFS8 = [0, 10, 40, 48, 56, 71, 73].map((p) => gmVoiceRef(p) as string)
+  const r908 = parseJps(`${H908}Q1: 1 2 3 4 |\nQ2: 5 6 5 3 |\n`)
+  const l908 = layoutScore(r908, DUR_CFG)
+  const seq908 = buildPlaySequence(r908, l908, 120, undefined, REFS8[0], undefined, REFS8)
+  const inst908 = (v: number) => seq908.events.find((e) => e.placed.id.voice === v)?.instrument
+  check('adj908 无 `Y:` 的两声部音色不同（voice1 = 启用列表第 1 项、voice2 = 第 2 项）',
+    inst908(1) === REFS8[0] && inst908(2) === REFS8[1] && REFS8[0] !== REFS8[1],
+    `v1=${inst908(1)} v2=${inst908(2)} refs=${REFS8.join('/')}`)
+  check('adj908 无 `Y:` 的两声部事件音色集合 size=2',
+    new Set(seq908.events.map((e) => e.instrument)).size === 2,
+    `集合=${[...new Set(seq908.events.map((e) => e.instrument))].join('/')}`)
+  /**
+   * 与 `PreviewPane` 同一条色块链路：**先按 `PlaybackDialog` 的口径把事件的拍段摊成轨道项**
+   * （`atMs = 事件起点 + 段内拍偏移`，`src/dialogs/PlaybackDialog.tsx` 的 `setPlayheadTrack`），
+   * 再 `trackKeysOf` → `instrumentColorMap` → `playheadPosIn` → `playheadBaseOf`。
+   * ⚠ `event.playheadSegs` 里**没有** `atMs`/`durationMs`（所以不能直接建 track —— 第一版就栽在这）。
+   */
+  const trackOf908 = (seq: ReturnType<typeof buildPlaySequence>, bpm = 120) =>
+    seq.events.flatMap((e) =>
+      (e.playheadSegs ?? []).map((s) => ({
+        atMs: e.atMs + s.beat * (60000 / bpm),
+        durationMs: s.beats * (60000 / bpm),
+        pageIndex: s.pageIndex,
+        x: s.x,
+        y: s.y,
+        width: s.width,
+        voice: s.voice,
+        group: s.group,
+        instrument: s.instrument,
+        ...(s.playVoice !== undefined ? { playVoice: s.playVoice } : {}),
+      })),
+    )
+  const colorsOf908 = (seq: ReturnType<typeof buildPlaySequence>) => {
+    const trk = trackOf908(seq)
+    const cm = instrumentColorMap(trk)
+    const out = new Map<number, string>()
+    for (const [k, segs] of trackKeysOf(trk)) {
+      // 100ms ∈ 第一个拍段（120bpm 下 1 拍 = 500ms）⇒ 两个声部此时都在发声
+      const pos = playheadPosIn(segs, 100, Number(k.split('|')[0]), DUR_CFG.note_size)
+      if (!pos || pos.playVoice !== undefined) continue
+      out.set(pos.voice, playheadBaseOf(pos, cm))
+    }
+    return out
+  }
+  const col908 = colorsOf908(seq908)
+  check('adj908 色块：Q1/Q2 两块颜色不同，且主声部仍是 PLAYHEAD_COLORS[0]',
+    col908.get(1) !== undefined && col908.get(2) !== undefined && col908.get(1) !== col908.get(2) && col908.get(1) === PLAYHEAD_COLORS[0],
+    `v1=${col908.get(1)} v2=${col908.get(2)} map=${JSON.stringify([...instrumentColorMap(trackOf908(seq908))])}`)
+  // 负对照：显式把两声部写成同一音色 ⇒ 音色与色块都该"同"（证明上一条不是恒真）
+  const rNeg908 = parseJps(`${H908}Y: 大钢琴\nY: 大钢琴\nQ1: 1 2 3 4 |\nQ2: 5 6 5 3 |\n`)
+  const seqNeg908 = buildPlaySequence(rNeg908, layoutScore(rNeg908, DUR_CFG), 120, undefined, REFS8[0], undefined, REFS8)
+  const colNeg908 = colorsOf908(seqNeg908)
+  check('adj908 负对照：显式 `Y: 大钢琴`×2 ⇒ 音色集合 size=1',
+    new Set(seqNeg908.events.map((e) => e.instrument)).size === 1,
+    `集合=${[...new Set(seqNeg908.events.map((e) => e.instrument))].join('/')}`)
+  check('adj908 负对照：两声部色块**同色**（色集 size=1 ⇒ 上一条断言不是恒真）',
+    colNeg908.get(1) !== undefined && colNeg908.get(1) === colNeg908.get(2),
+    `v1=${colNeg908.get(1)} v2=${colNeg908.get(2)}`)
+  // ② 显式 `Y:` 以谱面为准（不被启用列表改写）
+  const rFx908 = parseJps(`${H908}Y: 钢琴\nY: 弦乐\nQ1: 1 2 3 4 |\nQ2: 5 6 5 3 |\n`)
+  const seqFx908 = buildPlaySequence(rFx908, layoutScore(rFx908, DUR_CFG), 120, undefined, REFS8[0], undefined, REFS8)
+  const instFx908 = (v: number) => seqFx908.events.find((e) => e.placed.id.voice === v)?.instrument
+  check('adj908 显式 `Y:` 以谱面为准（Q1=钢琴、Q2=弦乐，不被启用列表改写）',
+    instFx908(1) === '钢琴' && instFx908(2) === '弦乐',
+    `v1=${instFx908(1)} v2=${instFx908(2)}`)
+  // 三声部（无 `Y:`）⇒ 三个声部两两不同 = 启用列表前 3 项
+  const r3v908 = parseJps(`${H908}Q1: 1 2 3 4 |\nQ2: 5 6 5 3 |\nQ3: 1 3 5 1 |\n`)
+  const seq3v908 = buildPlaySequence(r3v908, layoutScore(r3v908, DUR_CFG), 120, undefined, REFS8[0], undefined, REFS8)
+  const inst3v908 = (v: number) => seq3v908.events.find((e) => e.placed.id.voice === v)?.instrument
+  check('adj908 三声部（无 `Y:`）两两不同 = 启用列表前 3 项',
+    new Set(seq3v908.events.map((e) => e.instrument)).size === 3 &&
+      inst3v908(1) === REFS8[0] && inst3v908(2) === REFS8[1] && inst3v908(3) === REFS8[2],
+    `${inst3v908(1)}/${inst3v908(2)}/${inst3v908(3)} refs=${REFS8.slice(0, 3).join('/')}`)
+  // 不破坏 adj455「选定试听音色 ⇒ 全篇统一」（新参数不得抢在覆盖之前生效）
+  const ovSet908 = [...new Set(buildPlaySequence(r908, l908, 120, undefined, REFS8[0], '小提琴', REFS8).events.map((e) => e.instrument))]
+  check('adj908 不破坏"选定音色 ⇒ 全篇统一"：多声部 + 覆盖「小提琴」⇒ 全部事件同一音色',
+    ovSet908.length === 1 && ovSet908[0] === '小提琴', `集合=${ovSet908.join('/')}`)
+  /**
+   * 边界（**保持现状**，已在 `voiceDefaultOf` 注释里写明）：启用列表只有 1 项时**无法区分**声部，
+   * voice2 只能与 voice1 同音色、同色块。这条断言把这个边界钉住，免得以后被误当成 bug 反复"修"。
+   */
+  const oneSet908 = [...new Set(buildPlaySequence(r908, l908, 120, undefined, REFS8[0], undefined, [REFS8[0]]).events.map((e) => e.instrument))]
+  check('adj908 边界：启用列表只有 1 项时 voice2 与 voice1 同音色（无法区分，保持现状）',
+    oneSet908.length === 1, `集合=${oneSet908.join('/')}`)
+  /**
+   * 同一口径的**第二份实现**（`layout/index.ts` 的 `showInstrument` 默认乐器名）必须同步：
+   * 否则会出现"标注的音色 ≠ 实际演奏的音色"。两条都取自同一个纯函数 `voiceDefaultInstrumentRef`。
+   */
+  const rLbl908 = parseJps(`${H908}Q1: 1 2 @@ 3 4 |\nQ2: 5 6 @@ 5 3 |\n`)
+  const lLbl908 = layoutScore(rLbl908, { ...DUR_CFG, showInstrument: true }, REFS8[0], undefined, REFS8)
+  const lbl908 = (v: number) =>
+    lLbl908.pages[0].notes.find((n) => n.id.voice === v && n.instrumentLabel !== undefined)?.instrumentLabel
+  check('adj908 `showInstrument` 标注的默认音色 = 实际演奏音色（@@ 后 Q1/Q2 分别 = 启用列表前 2 项）',
+    lbl908(1) === REFS8[0] && lbl908(2) === REFS8[1],
+    `v1=${lbl908(1)} v2=${lbl908(2)} refs=${REFS8.slice(0, 2).join('/')}`)
+}
 // adj303：显示乐器名——@乐器名 / @@ 后第一个音符正上方标注
 const rIns = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 弦乐\nQ: 1 2 @钢琴 3 4 @@ 5 6 |\n')
 const layIns = layoutScore(rIns, { ...DUR_CFG, showInstrument: true })
@@ -9098,7 +9330,8 @@ console.log('[adj433] segment beats align with melody beats (within-note interpo
       '')
     const dlg455 = String(readFileSync('src/dialogs/PlaybackDialog.tsx', 'utf8'))
     check('AY9 应用侧把「音色」选择作为全篇覆盖传入 buildPlaySequence',
-      /buildPlaySequence\(parseResult, layout, bpm, playbackStartId, defaultInstrumentRef, voiceOverrideRef\)/.test(dlg455) &&
+      // adj908：末位多了「整份启用音色列表」（enabledInstRefs）——仍然要求把试听音色作为覆盖传入
+      /buildPlaySequence\(parseResult, layout, bpm, playbackStartId, defaultInstrumentRef, voiceOverrideRef, enabledInstRefs\)/.test(dlg455) &&
         dlg455.includes('gmVoiceRef(playbackHqVoice)'),
       '')
     /**

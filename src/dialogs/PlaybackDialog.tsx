@@ -24,7 +24,7 @@ import { useUiStore } from '../store/uiStore'
 import { hostBankUrl } from '../store/hostBridge'
 import { playbackCopy } from '../brand/copy'
 import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../playback/spessaCache'
-import { SpessaSynthBackend, getHqLibrary, hasBuiltinBank, GM_VOICE_OPTIONS, firstEnabledInstrumentRef, HQ_LIBRARIES, hqBankFailureText } from '../playback/spessaSynthBackend'
+import { SpessaSynthBackend, getHqLibrary, hasBuiltinBank, GM_VOICE_OPTIONS, firstEnabledInstrumentRef, enabledInstrumentRefs, HQ_LIBRARIES, hqBankFailureText } from '../playback/spessaSynthBackend'
 // adj409：暂停/续播的剩余事件平移（纯函数）
 import { shiftEventsFrom } from '../playback/playbackTimeline'
 // adj647：宿主字体实测（与预览同一份 ⇒ 色块位置一致；见 preview/fontMeta.ts）
@@ -59,6 +59,13 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   const setPlaybackHqVoice = useUiStore((s) => s.setPlaybackHqVoice)
   // adj354：@@ 恢复默认音色=第一音色——无描述头 Y 时取试听音色列表第一个启用音色（GM program 名）
   const defaultInstrumentRef = useMemo(() => firstEnabledInstrumentRef(playbackHqEnabled), [playbackHqEnabled])
+  /**
+   * adj908（用户报「未设置音色的情况下，声部之间没有用不同的音色区分开，色块也没有区分」）：
+   * 把**整份**启用音色列表传进引擎——描述头没写 `Y:`（或行数不够）时，第 n 声部取第 n 个启用音色，
+   * 使声部之间音色不同（色块颜色按音色去重分配，随之区分开）。
+   * 「自动」模式下才需要它；选定具体音色时由 `voiceOverrideRef` 全篇统一（优先级更高，见引擎注释）。
+   */
+  const enabledInstRefs = useMemo(() => enabledInstrumentRefs(playbackHqEnabled), [playbackHqEnabled])
   /**
    * adj455：选定具体音色时传给 `buildPlaySequence` 的**全篇乐器覆盖**（音色名 ref）——
    * 「自动」（null）时为 undefined，引擎完全不介入、按谱面路由。
@@ -448,10 +455,11 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       const PLAY_FIRST_DELAY_MS = 200
       // adj647：与预览共用同一份宿主字体实测 ⇒ 色块位置与预览逐像素一致
       const fm = measureFontMeta(pageConfig)
-      const layout = layoutScore(parseResult, pageConfig, defaultInstrumentRef, fm.layout)
+      const layout = layoutScore(parseResult, pageConfig, defaultInstrumentRef, fm.layout, enabledInstRefs)
       // adj455：选定具体音色 → **全篇统一音色**（含伴奏/第二声部与曲内 `@乐器名@`）；
       // 「自动」时传 undefined，完全按谱面路由。音色名 ref 由 GM 表逆映射得到（与 setVoice 的 program 同源）
-      const seq = buildPlaySequence(parseResult, layout, bpm, playbackStartId, defaultInstrumentRef, voiceOverrideRef)
+      // adj908：末位 = 整份启用音色列表 —— 没写 `Y:` 的声部按序取（各声部音色/色块不再相同）
+      const seq = buildPlaySequence(parseResult, layout, bpm, playbackStartId, defaultInstrumentRef, voiceOverrideRef, enabledInstRefs)
       setTotalMs(seq.totalMs)
       // adj262：layout 后写入 voiceBlocks（纯曲部 yTop/yBottom）供预览色框覆盖整列
       setVoiceBlocks(

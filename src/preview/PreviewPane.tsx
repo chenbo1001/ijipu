@@ -35,7 +35,7 @@ import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LI
 // adj905q：预览可视调试的边界虚线几何（时值格 / 墨迹 / 段层）——几何在引擎侧算好，这里只消费
 import { computeDebugBounds } from '@ijipu/engine/layout/guides'
 import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '@ijipu/engine/layout/metaAnchors'
-import { firstEnabledInstrumentRef } from '../playback/spessaSynthBackend'
+import { firstEnabledInstrumentRef, enabledInstrumentRefs } from '../playback/spessaSynthBackend'
 import { measureFontMeta } from './fontMeta'
 import { brand, ui as uiColors } from '../brand/tokens'
 
@@ -96,6 +96,9 @@ export function PreviewPane() {
   // adj354：@@ 显示默认音色名——无 Y 时用试听音色列表第一个启用音色（与播放端一致）
   const playbackHqEnabled = useUiStore((s) => s.playbackHqEnabled)
   const defaultInstrumentRef = useMemo(() => firstEnabledInstrumentRef(playbackHqEnabled), [playbackHqEnabled])
+  // adj908：整份启用音色列表（与试听同一个来源）——没写 `Y:` 的声部按序取音色，
+  // 使 `showInstrument` 标注的默认乐器名与实际演奏的音色一致（两处共用引擎的同一个纯函数）
+  const enabledInstRefs = useMemo(() => enabledInstrumentRefs(playbackHqEnabled), [playbackHqEnabled])
 
   const containerRef = useRef<HTMLDivElement>(null)
   const pageConfigRef = useRef(pageConfig)
@@ -127,14 +130,14 @@ export function PreviewPane() {
     //  · 布局侧：变音角标 #/b/♮ 的墨迹宽与左偏（adj647）——**必须在 layoutScore 之前**测好
     const cfg = pageConfig
     const fm = measureFontMeta(cfg)
-    const lay = layoutScore(parseResult, pageConfig, defaultInstrumentRef, fm.layout)
+    const lay = layoutScore(parseResult, pageConfig, defaultInstrumentRef, fm.layout, enabledInstRefs)
     // adj199/adj629v/adj638/adj647：宿主实测的字体度量（渲染侧）——见 preview/fontMeta.ts
     return {
       layout: lay,
       pagesHtml: renderScoreToSvg(lay, fm.render),
       summary: sum,
     }
-  }, [parseResult, pageConfig, defaultInstrumentRef])
+  }, [parseResult, pageConfig, defaultInstrumentRef, enabledInstRefs])
 
   // adj291：布局后把「音符 index → 物理页」映射回填 store，供编辑器光标联动对齐音符 id.page（自动分页一致）
   useEffect(() => {

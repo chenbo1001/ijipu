@@ -155,15 +155,32 @@ function netErrText(e: unknown): string {
 
 
 /**
+ * adj908：**整份**启用音色列表 → 音色名 ref 列表（按 program 升序、去重）。
+ *
+ * 用途：传给引擎的 `buildPlaySequence` / `layoutScore` 的 `enabledInstrumentRefs`——
+ * 描述头没写 `Y:`（或行数不够）时，第 n 声部取第 n 个启用音色，
+ * 使**声部之间音色不同**（用户口径「未设置音色时要区分开」，色块颜色随之不同）。
+ *
+ * 与 `firstEnabledInstrumentRef` 同源：列表第 1 项就是"第 1 个可用音色（默认音色）"。
+ */
+export function enabledInstrumentRefs(enabled: number[]): string[] {
+  const refs: string[] = []
+  for (const p of [...new Set(enabled)].sort((a, b) => a - b)) {
+    const ref = gmVoiceRef(p)
+    if (ref !== undefined) refs.push(ref)
+  }
+  return refs
+}
+
+/**
  * adj354：@@ 恢复默认音色的「第一音色」——试听/导出音色列表第一个启用音色的 GM 音色名。
  * 由启用集合（playbackHqEnabled，program 列表）取最小 program，经引擎 `gmVoiceRef` 还原成音色名 ref
  * （剥掉显示编号），作为 buildPlaySequence / layoutScore 的 defaultInstrumentRef；
  * 启用集合为空返回 undefined（引擎回退第一音色库第一音色）。
+ * adj908：实现收敛为「启用列表第 1 项」（与上一条同一口径，不再各算一次 `Math.min`）。
  */
 export function firstEnabledInstrumentRef(enabled: number[]): string | undefined {
-  if (enabled.length === 0) return undefined
-  // adj455：program → 音色名 ref 的逆映射收敛在引擎（gmVoiceRef），此处不再自己拼 label
-  return gmVoiceRef(Math.min(...enabled))
+  return enabledInstrumentRefs(enabled)[0]
 }
 
 /**
