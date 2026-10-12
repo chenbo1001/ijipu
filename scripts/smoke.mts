@@ -8875,13 +8875,25 @@ console.log('[adj435] overlap beats sized by the denser layer (multi-voice style
       `seg0.x=${segN[0].x.toFixed(2)} mel.x=${coveredBeatNote.x.toFixed(2)}`)
     // AJ5：段层各音 bx0 单调递增（无倒序/重叠）
     check(`AJ5[${nm}] 段层各音 bx0 单调递增`, segN.every((n, i) => i === 0 || n.x >= segN[i - 1].x - 1e-6), `x=${segN.map((n) => n.x.toFixed(1)).join(',')}`)
+    /**
+     * AJ1/AJ2/AJ3（**adj905v 之后仍然成立** —— 不是"漏改"，这里写明为什么）。
+     *
+     * 用户裁定 ①「逐拍对齐主旋律的格」把段层落位改成"**逐拍落到主旋律的格**"，
+     * 但本谱例的包络是主旋律 `5`（**1 拍 = 恰好 1 个格**）：格内仍按时间线性 ⇒
+     *  · 三个子拍（0.5 / 0.25 / 0.25）的宽仍是 `2:1:1`（`AJ2`）；
+     *  · 该格右缘 = 本音收尾（下一个音的**数字位**）⇒ 子拍宽之和 = 旧的"字距跨度"（`AJ3`）；
+     *  · 因此"不重叠"（`AJ1`）同样成立。
+     * ⚠ 只有当包络音**跨多个格**时，新口径才与"按自己时值比例"分道扬镳 ——
+     * 实测见 `AK3`：主旋律 `6, -` 的两个格跨度 `69.3 / 47.2`，旧口径的 2:1:1 **数学上不成立**。
+     * 负对照在 `AK3c`（同一份数据上旧口径必红）。
+     */
     // adj441：两种布局都跑下面的宽度断言（空间优先此前未生效，见 E-2026-175）
     const minGlyph = cfg.note_size * 0.5 // 数字约半个字号的净宽（小于它必然视觉重叠）
     check(`AJ1[${nm}] 段层同拍的 3 个子拍音宽均 ≥ 数字净宽（不重叠）`,
       head3.length === 3 && head3.every((n) => n.width >= minGlyph),
       `w=${head3.map((n) => n.width.toFixed(2)).join(',')} 阈值=${minGlyph}`)
-    // AJ2：三个子拍宽度比 ≈ 2:1:1（对应 0.5 : 0.25 : 0.25）
-    check(`AJ2[${nm}] 段层子拍宽比 ≈ 2:1:1（时值比例正确、无跳变）`,
+    // AJ2：三个子拍宽度比 ≈ 2:1:1（对应 0.5 : 0.25 : 0.25）——单格内按时间线性（见上）
+    check(`AJ2[${nm}] 段层子拍宽比 ≈ 2:1:1（**单格内**按时间线性、无跳变）`,
       head3.length === 3 && Math.abs(head3[0].width / head3[1].width - 2) < 0.15 && Math.abs(head3[1].width / head3[2].width - 1) < 0.15,
       `比值=${(head3[0].width / head3[1].width).toFixed(3)} / ${(head3[1].width / head3[2].width).toFixed(3)}`)
     // AJ3（adj441，用户要求「多声部同一拍的总占宽要一致」）：段层子拍宽**之和**
@@ -8921,11 +8933,19 @@ console.log('[adj433] segment beats align with melody beats (within-note interpo
   const mel6 = melEnv
   // Y3：段层总宽 = 主旋律 `6,-` 的占位宽（**不被压缩、也不溢出**）——这是"拍子对齐"的量化判据
   const segTotalW = (segNs[2].rightX ?? 0) - segNs[0].x
-  // adj441：包络终点 = 主旋律包络音**之后的小节线**（`6,-` 的槽与包络都到小节线为止）——
-  // 段内容应铺满整段包络（含末音到小节线之间的那部分），故不再用"主旋律音的 rightX"作期望。
+  /**
+   * adj905v（**用户裁定 ① 之后的口径**）：段层占宽 = **各拍格宽之和** ——
+   * 逐拍对齐主旋律的格之后，段层的总跨度**自然**等于主旋律包络的跨度。
+   * 与旧口径的差别不在这个"和"本身，而在**怎么得到**它：旧的是"按本音块宽把总宽等比摊到各拍"，
+   * 新的是"逐拍落到主旋律的格上"（于是"段层内部按自己时值比例"不再成立，见 `AK3`）。
+   * ⚠ 本轮还撤销了 `adj705` 的"末音相位夹紧"—— 它会把末音切短 ⇒ 总宽少 `9.8px`（实测 `95.6 vs 105.4`）。
+   *
+   * adj441：包络终点 = 主旋律包络音**之后的小节线**（`6,-` 的槽与包络都到小节线为止）——
+   * 段内容应铺满整段包络（含末音到小节线之间的那部分），故不再用"主旋律音的 rightX"作期望。
+   */
   const barAfterMel = page.barlines.filter((b) => !b.segment).map((b) => b.x).find((x) => x > (mel6?.rightX ?? 0)) ?? (mel6?.rightX ?? 0)
   const envSpan = barAfterMel - (mel6?.x ?? 0)
-  check('Y3 段层占宽 ≈ 包络跨度（主旋律包络音 → 其后小节线，未被压缩）',
+  check('Y3 段层占宽 = 各拍格宽之和（逐拍落格后自然与包络跨度一致）',
     envSpan > 0 && Math.abs(segTotalW - envSpan) < 1.5,
     `segW=${segTotalW.toFixed(2)} envSpan=${envSpan.toFixed(2)}`)
   // Y4：段层每个音的 x 必须落在主旋律 `6,-` 的 x 范围内（不跨到后面的小节）
@@ -10010,10 +10030,40 @@ console.log('[adj443] desktop must not register a service worker')
         sg.length === 3, `got ${sg.length}: ${sg.map((n) => (n.token as { pitch?: number }).pitch ?? 'r').join(',')}`)
       check(`AK2[${nm}] 段层末音 3'/ 有正宽度（未被钳成 0 而丢弃）`,
         sg.length === 3 && sg[2].width > 1, `w=${sg.map((n) => n.width.toFixed(1)).join(',')}`)
-      // AK3：每拍宽均匀——8(1 拍) / 2'(0.5) / 3'(0.5) 的宽度比应为 2:1:1
-      check(`AK3[${nm}] 段层每拍宽均匀（8 : 2'/ : 3'/ = 2:1:1）`,
-        sg.length === 3 && Math.abs(sg[0].width / sg[1].width - 2) < 0.15 && Math.abs(sg[1].width / sg[2].width - 1) < 0.15,
-        `比值=${(sg[0]?.width / sg[1]?.width).toFixed(3)} / ${(sg[1]?.width / sg[2]?.width).toFixed(3)}`)
+      /**
+       * AK3（**adj905v 重写**：口径见 `docs/ALIGNMENT-PRINCIPLES.md` §五之四 对照表）。
+       *
+       * 旧口径「段层每拍宽均匀（`8 : 2'/ : 3'/` = 2:1:1）」是"段层**内部**按自己的时值比例"推出来的；
+       * 用户裁定 ① 改为「**逐拍对齐主旋律的格 + 拍宽按最大本体宽度为基准**」
+       * ⇒ 段层每拍的宽由**主旋律同拍的格宽**决定，**不再**与"自己的时值比例"等价。
+       *
+       * 本谱例包络 = 主旋律 `6, -`（2 拍 = **2 个格**）：
+       *  · `8`（1 拍，落在包络第 0 拍）⇒ 宽 = **格 0 的跨度** = `cells[1].x − cells[0].x`；
+       *  · `2'/`、`3'/`（各 0.5 拍，同落在包络第 1 拍**那一个格**里）⇒ 两者**等宽**（各占该格一半）。
+       * 实测两格跨度 `69.3 / 47.2`（时值优先）⇒ 旧口径的 2:1:1 本就**数学上不成立**
+       * （`AK3c` 即负对照：证明这不是"放宽断言"，而是口径换了）。
+       */
+      const cellCols: { bar: number; beat: number; x: number }[] = []
+      for (const m of pgP.notes.filter((n) => !n.segment && n.id.group === sg[0].id.group)) {
+        let acc = m.beatPos ?? 0
+        for (const c of m.segments ?? []) {
+          cellCols.push({ bar: m.barIndex, beat: acc, x: c.x })
+          acc += c.beats
+        }
+      }
+      const cellXOf = (bar: number, beat: number): number | null =>
+        cellCols.find((c) => c.bar === bar && Math.abs(c.beat - beat) < 1e-6)?.x ?? null
+      const c0 = cellXOf(sg[0].barIndex, sg[0].beatPos ?? 0)
+      const c1 = cellXOf(sg[0].barIndex, (sg[0].beatPos ?? 0) + 1)
+      check(`AK3[${nm}] 段层首音宽 = 主旋律**第 0 格的跨度**（比照格宽，不再按自己的时值比例）`,
+        sg.length === 3 && c0 !== null && c1 !== null && Math.abs(sg[0].width - (c1 - c0)) < 0.6,
+        `w0=${sg[0]?.width.toFixed(2)} 格0跨度=${c0 !== null && c1 !== null ? (c1 - c0).toFixed(2) : 'n/a'}`)
+      check(`AK3b[${nm}] 同落在**一格**里的 2'/ 与 3'/ 等宽（各占该格一半）`,
+        sg.length === 3 && Math.abs(sg[1].width - sg[2].width) < 0.6,
+        `w=${sg.map((n) => n.width.toFixed(2)).join(',')}`)
+      check(`AK3c[${nm}] 负对照：旧口径（8 : 2'/ = 2:1:1）在本谱例**不成立**（说明口径确实换了）`,
+        sg.length === 3 && Math.abs(sg[0].width / sg[1].width - 2) > 0.3,
+        `比值=${(sg[0]?.width / sg[1]?.width).toFixed(3)}`)
     }
   }
   check('AJ8b 桌面端分支：注销旧 SW + 清 CacheStorage（老用户一次性摘掉污染缓存）',
@@ -20382,37 +20432,78 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
        * 修前实测：段层第 4 拍落在 `147.8`，格起点应为 `144.65` ⇒ 差 3.15px（会被本断言抓住）；
        * 修后 `144.7` == 格起点 ✅
        */
+      /**
+       * **adj905i（adj905v 按【用户裁定 ①】重写）**：段层在**同一拍位**的 `x`，必须等于
+       * 「**主旋律那一拍的格**」= `m.segments[j].x + off`，`off = m.x − m.segments[0].x`
+       * （"数字在格内的偏移"，两套布局路径一致）。
+       *
+       * 为什么需要它（`adj905d` 抓不到）：`adj905d` 只比较**两层都有音**的拍位；
+       * 而"该拍主旋律是增时线、没有数字"时 `adj905d` 看不见 —— 本条按**格列**推算，能覆盖。
+       *
+       * ⚠ **旧版期望本身是错的**：它用 `m.x + j × (m.width / D)`（**线性等分**，"用实现反推期望"），
+       * 与裁定 ① 的"格列"口径**不同源**。实测首页「铃儿响叮当」的 `3`（2 拍，`cells=[113.5, 142.3]`）：
+       *   旧期望 `119.9 + 49.5/2 = 144.7`，真格列 `142.3 + off 6.4 = 148.7`（差 `4.0px`）。
+       * 下面第 2 条即**负对照**：两种期望必须在用例上确实不同，否则这条断言测不到口径。
+       */
       const beatIssues: string[] = []
-      for (const sample of BRAND_SAMPLES) {
-        const r = parseJps(sample.src)
-        const lay = layoutScore(r, DUR_CFG)
-        const all = lay.pages.flatMap((p) => p.notes)
-        const mel = all.filter((n) => !n.segment)
-        const lower = all.filter((n) => n.segment)
-        for (const m of mel) {
-          const D = m.duration ?? 0
-          if (D <= 0) continue
-          for (let j = 0; j < Math.round(D); j++) {
-            const expect = m.x + (j * m.width) / D
-            const bp = (m.beatPos ?? 0) + j
-            const peer = lower.find(
-              (n) =>
-                n.id.group === m.id.group &&
-                n.barIndex === m.barIndex &&
-                Math.abs((n.beatPos ?? 0) - bp) < 1e-6,
-            )
-            if (peer && Math.abs(peer.x - expect) > 0.6) {
-              beatIssues.push(
-                `「${sample.label}」小节${m.barIndex} 第${j + 1}拍: 段层 x=${peer.x.toFixed(1)} vs 格起点 ${expect.toFixed(1)}`,
+      let cellCases = 0
+      let linearDiff = 0
+      for (const [pnm, pcfg] of [
+        ['时值优先', DUR_CFG],
+        ['空间优先', { ...DUR_CFG, noteSpaceLayout: 'space' as const }],
+      ] as const) {
+        for (const sample of BRAND_SAMPLES) {
+          const r = parseJps(sample.src)
+          const lay = layoutScore(r, pcfg)
+          const all = lay.pages.flatMap((p) => p.notes)
+          const mel = all.filter((n) => !n.segment)
+          const lower = all.filter((n) => n.segment)
+          for (const m of mel) {
+            const D = m.duration ?? 0
+            const cells = m.segments ?? []
+            if (D <= 0 || cells.length === 0) continue
+            const off = m.x - cells[0].x
+            for (let j = 0; j < Math.round(D); j++) {
+              // 拍 j 落在哪一格（边界归**后**一格 —— 与 `beatToX` 同口径）
+              let acc = 0
+              let cell = cells[cells.length - 1]
+              let atStart = false
+              for (const c of cells) {
+                const end = acc + c.beats
+                if (j < end - 1e-9 || c === cells[cells.length - 1]) {
+                  cell = c
+                  atStart = Math.abs(j - acc) < 1e-6
+                  break
+                }
+                acc = end
+              }
+              if (!atStart) continue // 该格跨多拍：本判据只看"拍起点正好落在格起点"的情形
+              cellCases++
+              const expect = cell.x + off
+              const bp = (m.beatPos ?? 0) + j
+              const peer = lower.find(
+                (n) =>
+                  n.id.group === m.id.group &&
+                  n.barIndex === m.barIndex &&
+                  Math.abs((n.beatPos ?? 0) - bp) < 1e-6,
               )
+              if (!peer) continue
+              if (Math.abs(peer.x - expect) > 0.6) {
+                beatIssues.push(
+                  `[${pnm}]「${sample.label}」小节${m.barIndex} 第${j + 1}拍: 段层 x=${peer.x.toFixed(1)} vs 格起点+off ${expect.toFixed(1)}`,
+                )
+              }
+              if (Math.abs(expect - (m.x + (j * m.width) / D)) > 1) linearDiff++
             }
           }
         }
       }
-      console.log(`    【全部示例】段层同拍位格起点检查：不合规 ${beatIssues.length} 处`)
+      console.log(`    【全部示例】段层同拍位格列检查：不合规 ${beatIssues.length} 处（比对 ${cellCases} 个拍位）`)
       for (const p of beatIssues.slice(0, 6)) console.log(`      · ${p}`)
-      check('adj905i 全部示例：段层音与主旋律**同一拍位的格起点**一致（修前第 4 拍差 3.15px）',
-        beatIssues.length === 0, beatIssues.slice(0, 4).join(' ｜ '))
+      check('adj905i 全部示例 × 两条布局路径：段层音 = 主旋律**同一拍位的格起点 + 数字在格内的偏移**',
+        cellCases > 0 && beatIssues.length === 0, beatIssues.slice(0, 4).join(' ｜ '))
+      check('adj905i 负对照：新口径（格列 + off）与旧口径（线性等分）在用例上**确实不同**',
+        linearDiff > 0, `两种期望不同的拍位 ${linearDiff} 个 / 共 ${cellCases}`)
 
       /**
        * adj905o（用户：「上面说到的几个原则应该记录下来，**做的判定的冒烟的依据**」）：
@@ -20598,6 +20689,108 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
           console.log(`      主旋律音符列(note/main): ${stepsT('note', false)}`)
           console.log(`      段层音符列(segment)    : ${stepsT('segment', true)}`)
           console.log(`      段层拍列(beat/seg)     : ${stepsT('beat', true)}`)
+        }
+        /**
+         * **adj905v（【用户裁定 ①】的验收闸门）** —— `docs/ALIGNMENT-PRINCIPLES.md` §五之四 的验收方式：
+         * 「**主旋律拍列步进 == 段层拍列步进**」。做成两条可执行判据：
+         *
+         * ① **逐拍落格**：对「给用户截图的 6 个最小对照谱」× **两条布局路径**，逐个段层音符检查
+         *    `段层 x == 覆盖该拍位的主旋律音的格起点 + off`（`off = m.x − m.segments[0].x`）；
+         * ② **步进相等（例 1 = 用户截图里"越往后越偏"的那条）**：段层拍列步进必须等于主旋律拍列步进
+         *    （修前实测 `25` vs `29`）。
+         * 两条都带**负对照**：同一份数据在旧口径（`[n.x, zoneEnd]` 内按本音时值线性摊）下
+         * 给出的位置与"格 + off"**必然不同**（否则这两条测不到口径）。
+         */
+        const v5Issues: string[] = []
+        let v5Exact = 0
+        let v5Mid = 0
+        let v5LinearDiff = 0
+        for (const [label5, q5] of probesT) {
+          for (const [cfgNm5, cfg5] of [
+            ['时值优先', DUR_CFG],
+            ['空间优先', { ...DUR_CFG, noteSpaceLayout: 'space' as const }],
+          ] as const) {
+            const lay5 = layoutScore(parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\n${q5}\n`), cfg5)
+            const all5 = lay5.pages.flatMap((p) => p.notes)
+            const mel5 = all5.filter((n) => !n.segment)
+            for (const sn of all5.filter((n) => n.segment)) {
+              const sb = sn.beatPos ?? 0
+              const m = mel5.find(
+                (n) =>
+                  n.id.group === sn.id.group &&
+                  n.barIndex === sn.barIndex &&
+                  sb >= (n.beatPos ?? 0) - 1e-6 &&
+                  sb < (n.beatPos ?? 0) + (n.duration ?? 0) - 1e-9,
+              )
+              const cells = m?.segments ?? []
+              if (!m || cells.length === 0) continue
+              const off = m.x - cells[0].x
+              let acc = m.beatPos ?? 0
+              let ci = cells.length - 1
+              let atStart = false
+              for (let k = 0; k < cells.length; k++) {
+                const end = acc + cells[k].beats
+                if (sb < end - 1e-9 || k === cells.length - 1) {
+                  ci = k
+                  atStart = Math.abs(sb - acc) < 1e-6
+                  break
+                }
+                acc = end
+              }
+              const cell = cells[ci]
+              const expect = cell.x + off
+              /**
+               * 段层音**正好落在格起点** ⇒ 必须**精确**等于"格起点 + off"（这是裁定 ① 的本体）；
+               * 落在格**内部**（如半拍上，主旋律那一拍只有一个格）⇒ 由格内线性插值决定，
+               * 只要求落在 **格的区间内**（右缘 = 下一格左缘；末格取本音步进右端 `x + width`）。
+               */
+              if (atStart) {
+                v5Exact++
+                if (Math.abs(sn.x - expect) > 0.6) {
+                  v5Issues.push(`[${cfgNm5}]「${label5}」段层 x=${sn.x.toFixed(1)} vs 格+off ${expect.toFixed(1)}`)
+                }
+              } else {
+                v5Mid++
+                const rightGrid = ci + 1 < cells.length ? cells[ci + 1].x : m.x + m.width - off
+                if (sn.x < expect - 0.6 || sn.x > rightGrid + off + 0.6) {
+                  v5Issues.push(
+                    `[${cfgNm5}]「${label5}」段层 x=${sn.x.toFixed(1)} 越出该格 [${expect.toFixed(1)}, ${(rightGrid + off).toFixed(1)}]`,
+                  )
+                }
+              }
+              /** 负对照：旧口径给出的位置（把包络总宽按本音时值线性摊到各拍） */
+              const lin = m.x + ((sb - (m.beatPos ?? 0)) / Math.max(m.duration ?? 1, 1e-6)) * m.width
+              if (Math.abs(expect - lin) > 1) v5LinearDiff++
+            }
+          }
+        }
+        console.log(
+          `    【adj905v】6 个最小对照谱 × 两条路径逐拍落格：不合规 ${v5Issues.length} 处` +
+            `（格起点精确比对 ${v5Exact} 个 / 格内区间比对 ${v5Mid} 个）`,
+        )
+        for (const p of v5Issues.slice(0, 6)) console.log(`      · ${p}`)
+        check('adj905v 逐拍落格：段层每个音 = 主旋律该拍的**格起点 + off**（6 个最小对照谱 × 时值/空间两条路径）',
+          v5Exact > 0 && v5Issues.length === 0, v5Issues.slice(0, 4).join(' ｜ '))
+        check('adj905v 负对照：旧口径（按本音块宽线性摊）在本轮用例上**确实**给出不同的位置',
+          v5LinearDiff > 0, `与"格 + off"不同的段层音 ${v5LinearDiff} 个 / 共 ${v5Exact + v5Mid}`)
+        {
+          /** ② 步进相等（例 1）：取调试几何的两层列，逐段比步进 */
+          const r1 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: {bz 1, 3, 5, 3,} 3 - - - ||\n')
+          const b1 = computeDebugBounds(layoutScore(r1, DUR_CFG).pages.flatMap((p) => p.notes), 13)
+          const colsOf = (kind: 'beat' | 'segment', seg: boolean) =>
+            [
+              ...new Set(
+                b1
+                  .filter((v) => v.kind === kind && v.side === 'L' && v.isSeg === seg)
+                  .map((v) => Math.round(v.x * 10) / 10),
+              ),
+            ].sort((a, b) => a - b)
+          const stepOf = (xs: number[]) => xs.slice(1).map((v, i) => Math.round((v - xs[i]) * 10) / 10)
+          const melStep = stepOf(colsOf('beat', false))
+          const segStep = stepOf(colsOf('segment', true))
+          check('adj905v 例 1：段层拍列**步进 == 主旋律拍列步进**（修前 `25` vs `29` ⇒ 越往后越偏）',
+            melStep.length > 0 && segStep.length === melStep.length && melStep.every((v, i) => Math.abs(v - segStep[i]) < 0.2),
+            `mel=${melStep.join(',')} seg=${segStep.join(',')}`)
         }
       }
     }
