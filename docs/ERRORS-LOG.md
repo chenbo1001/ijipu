@@ -8422,6 +8422,16 @@
   （a）打包链里的构建步骤、（b）`build.rs` 的占位兜底，并各配闸门（smoke `[169]` 九对负对照 +
   `check:installer` 内嵌 CLI 三条）；③ 内嵌 JS 引擎的**栈**要当显式配置项（`CLI_THREAD_STACK` /
   `QUICKJS_STACK_LIMIT` 两个常量 + 注释写清来历），别吃默认值。
+- ⚠ **未解决（如实记，别当成已修）**：本轮收尾时发现 `npm run test:rust`（`cargo test --lib`）的**测试宿主
+  exe 加载失败** —— `0xC0000139` / `STATUS_ENTRYPOINT_NOT_FOUND`（`gdb` 只回 "During startup program
+  exited"，`objdump` 也指不出是哪个入口点）。**已证明与本轮改动无关**：把 `cli_embed` 用 `#[cfg(any())]`
+  从**所有**构建里剔除（连 staticlib 都不含 QuickJS）后，同一测试宿主**照样**加载失败；而它能编、
+  导入符号集合与**能正常运行的 debug bin 完全相同**、`WebView2Loader.dll` 两个版本都换过、
+  `cargo clean -p ijipu`（清掉 3.6GB）后重建仍然失败。可对照的两点：① **同一套 rquickjs 在一个独立
+  探针 crate 里的测试宿主加载正常**（`1 passed`）；② 本轮中途它**通过过一次**（`3 passed`），随后
+  同配置再无一次通过 ⇒ 更像是**本机 MinGW/测试宿主/目标目录状态**的问题，不是产物问题
+  （发布产物 `ijipu.exe` 与安装包都已实测可用 ✓）。⇒ 本轮**不动**它，交给桌面端复核；
+  内嵌 CLI 的参数分流判据另有**源码级**闸门（smoke `[169]` 与 `cli-assert` 的真跑），不依赖这条。
 
 
 | v0.57.0+ | 2026-10-13 | 追加 E-2026-424（**官网页 FOUC** —— 外链 CSS 到位前先画一版「没有格式的文字」、再闪一下（用户报「先显示没有格式的文字版，再闪一下」，文档页还先画一版空骨架）；解决：`<head>` 内联**启动层**（背景 + 转圈，深浅两套且与 `html`/`body` 同色）＋ `brand/siteBoot.ts` 等「样式表全部 loaded + `fonts.ready` +（文档页）正文注入」后**只淡出透明度**揭示，2.5s 超时 / 资源失败照样揭示并 `console.warn`，无 JS 走 `<noscript>`、模块没跑起来走内联 8s 硬兜底；闸门：smoke `[168]` 含 4 条负对照 + verify-site `adj930` 含 2 条负对照；预防：一份色值抄四页必须配闸门（`SITE_BG` 此前只有注释）；adj930） |
