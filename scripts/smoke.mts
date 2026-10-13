@@ -278,6 +278,9 @@ import { VIEW_CYCLE, nextViewType, normViewType } from '../src/ui/viewCycle.ts'
 import { THEME_MODE_CYCLE, nextThemeMode } from '../src/brand/themes.ts'
 // （GUIDE_LIMITS_EX 见本文件顶部从 layout/guides 的导入；这里补 GUIDE_LIMITS 与字号范围）
 import { GUIDE_LIMITS, EDITOR_FONT_SIZE_RANGE } from '@ijipu/engine/index.ts'
+// adj945：git 目录解析（普通克隆 / `git worktree` 链接工作树两种形态）—— 构建信息靠它，
+// 而构建信息会被**冻进插件的嵌入产物**（见下面 [171] 段的断言与 `scripts/git-dir.mjs` 文件头）
+import { resolveGitDirs } from './git-dir.mjs'
 
 // adj213：布局断言常量——从 defaultPageConfig 派生，避免硬编码边距/右边界/
 // 描述头区域高等魔数（默认值调整时断言自动适配）
@@ -24473,4 +24476,81 @@ function runAdj945CliManualTests() {
         /aboutCopy\s*=\s*\{[\s\S]{0,2000}?url:\s*brand\.repoUrl/.test(copyTs)
     })(),
   )
+
+  /**
+   * ---- ⑧ 构建信息在**链接工作树**里也要读得到（`scripts/git-dir.mjs`，adj945）----
+   *
+   * 为什么要钉：本轮"结尾那一步"要求**在干净 HEAD 的 `git worktree` 里**重生成嵌入产物，
+   * 而嵌入产物会把**当时的构建信息（日期 + commit）一起冻进插件仓库**。
+   * 链接工作树里 `.git` 是**文件**（`gitdir:` 指向主仓库的 `.git/worktrees/<名>`，
+   * 对象库由 `commondir` 指过去）—— 旧写法把它当目录读 ⇒ 抛异常 ⇒ 写成 `dev` / `未知日期`，
+   * 而且**永久留在插件里**（`E-2026-374` 同族）。
+   * 这里用**假文件系统**把两种形态都断言掉（冒烟要保持纯的，不真去建工作树）。
+   */
+  {
+    const W = join('D:/probe-repo')
+    const DOT = join(W, '.git')
+    const WT = join(DOT, 'worktrees', 'embed')
+    const SHA = 'a'.repeat(40)
+    /** 假 fs：`files` 里的是文件、`dirs` 里的是目录，其它一律"不存在" */
+    const fakeFs = (files: Record<string, string>, dirs: string[]) => ({
+      readFileSync: (p: string): string => {
+        if (p in files) return files[p]
+        throw new Error(`ENOENT ${p}`)
+      },
+      existsSync: (p: string): boolean => p in files || dirs.includes(p),
+      statSync: (p: string): { isDirectory: () => boolean } => {
+        if (dirs.includes(p)) return { isDirectory: () => true }
+        throw new Error(`ENOENT ${p}`)
+      },
+    })
+    const normalFs = fakeFs(
+      { [join(DOT, 'HEAD')]: 'ref: refs/heads/main\n', [join(DOT, 'refs', 'heads', 'main')]: `${SHA}\n` },
+      [DOT],
+    )
+    const wtFs = fakeFs(
+      { [DOT]: `gitdir: ${WT}\n`, [join(WT, 'HEAD')]: `${SHA}\n`, [join(WT, 'commondir')]: '../..\n' },
+      [],
+    )
+
+    const normal = resolveGitDirs(W, normalFs)
+    check(
+      'adj945 构建信息：**普通克隆**（`.git` 是目录）⇒ gitDir 与对象库都在 `.git` 下，HEAD 读得到',
+      normal !== null && normal.gitDir === DOT && normal.commonDir === DOT &&
+        normalFs.readFileSync(join(normal.gitDir, 'HEAD'), 'utf8').trim().startsWith('ref:'),
+    )
+    const wt = resolveGitDirs(W, wtFs)
+    check(
+      'adj945 构建信息：**链接工作树**（`.git` 是文件 + `commondir`）⇒ HEAD 读 gitdir、**对象库读 commondir**',
+      wt !== null && wt.gitDir === WT && wt.commonDir === DOT &&
+        wtFs.readFileSync(join(wt.gitDir, 'HEAD'), 'utf8').trim() === SHA,
+    )
+    /** 旧写法：把 `.git` 当目录读 HEAD（`ref:` 时再读 ref 文件） */
+    const legacySha = (fs: ReturnType<typeof fakeFs>): string | null => {
+      try {
+        const head = fs.readFileSync(join(W, '.git', 'HEAD'), 'utf8').trim()
+        if (head.startsWith('ref:')) return fs.readFileSync(join(W, '.git', head.split(' ')[1].trim()), 'utf8').trim()
+        return head
+      } catch {
+        return null
+      }
+    }
+    check(
+      'adj945 负对照⑫：旧写法在**普通克隆**里拿得到 sha、在**工作树**里直接抛 ⇒ 判红（证明这条修法是必需的）',
+      legacySha(normalFs) === SHA && legacySha(wtFs) === null,
+    )
+    /** 负对照：不读 `commondir` 的写法 ⇒ 对象库会指成 `<gitdir>` 自己（工作树里那儿没有 objects/） */
+    const naiveCommon = (root: string, fs: ReturnType<typeof fakeFs>): string | null => {
+      try {
+        const m = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(join(root, '.git'), 'utf8'))
+        return m === null ? null : m[1].trim()
+      } catch {
+        return null
+      }
+    }
+    check(
+      'adj945 负对照⑬：不读 `commondir` 的写法把对象库指成 `<gitdir>` 自己 ⇒ 与正确值不同（判红）',
+      naiveCommon(W, wtFs) === WT && wt !== null && wt.commonDir === DOT && naiveCommon(W, wtFs) !== wt.commonDir,
+    )
+  }
 }
