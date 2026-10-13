@@ -3335,25 +3335,76 @@ const maxRight2s = Math.max(
   ...layoutScore(rj2b, { ...DUR_CFG, align_min_bars: 2 }).pages[0].notes.map(segEnd),
 )
 check('adj297 配置 2：2 小节两端对齐（≥2）', maxRight2s > RIGHT_EDGE - 10, `right=${maxRight2s}`)
-// adj211：曲部最后一行以 ||（终止线）结束且 ≤3 小节时按自然宽排布
-// ——终止线行音乐已结束，不参与前面行的小节线对齐（refPerBeat）
+/**
+ * adj211（**已改口径**，用户裁定 —— 原文保留在 `git log` 里）：
+ * 旧口径是「行末以 `||`（终止线）结束且 ≤3 小节 ⇒ **不参与**前面行的小节线对齐、按自然宽排布」，
+ * 理由写的是"终止线行音乐已结束、不必纵向对齐"。用户看到"末行没对上"里就有一条是这个豁免造的
+ * （实测 `||` 那行自然宽末音符右端 `195.1 + ML_SHIFT`，而按上一行对齐只有 ≈`184.85`，差 20px）。
+ *
+ * 新口径（`adj940`）：**对齐是默认行为，与行末是什么线无关** —— 自然宽行一律"按小节序号对齐
+ * 上一行的小节线实位"（见 `[68f]` 那组断言）。所以下面两种结尾**都要**与上一行逐根重合。
+ */
 {
-  // 8 小节 + ||：断成 2 行，最后一行 3 小节 + ||（≤3）→ 自然宽（195.1），
-  // 而非按前面行对齐（对照同谱 | 结尾为 180.4）
-  const r211 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 5 6 7 1 ||\n')
-  const lay211 = layoutScore(r211, DUR_CFG)
-  const rows211 = [...new Set(lay211.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
-  const lastRow211 = lay211.pages[0].notes.filter((n) => n.y === rows211[rows211.length - 1])
-  const lastRight211 = Math.max(...lastRow211.map(segEnd))
-  check('adj211 最后一行 || 终止（3 小节）→ 自然宽', Math.abs(lastRight211 - (195.1 + ML_SHIFT)) < 1, `right=${lastRight211}`)
-  // 对照：同谱 | 结尾，最后一行 3 小节仍按前面行对齐（180.4）
-  const r211b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 5 6 7 1 |\n')
-  const lay211b = layoutScore(r211b, DUR_CFG)
-  const rows211b = [...new Set(lay211b.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
-  const lastRow211b = lay211b.pages[0].notes.filter((n) => n.y === rows211b[rows211b.length - 1])
-  const lastRight211b = Math.max(...lastRow211b.map(segEnd))
-  // adj418：这一行是"按前面行对齐"（每拍宽来自参考行），随可用宽变化 → 重钉为实测 184.85
-  check('adj211 对照：| 结尾最后一行仍按前面行对齐', Math.abs(lastRight211b - 184.85) < 1, `right=${lastRight211b}`)
+  const mk211 = (end: string): string =>
+    'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ' +
+    Array.from({ length: 8 }, () => '1 2 3 4').join(' | ') +
+    ` | 5 6 7 1 ${end}\n`
+  /** 逐行（按 yTop 分组，升序）的小节线 x 列表 */
+  const linesByRow211 = (lay: ReturnType<typeof layoutScore>): number[][] => {
+    const m = new Map<number, number[]>()
+    for (const b of lay.pages[0].barlines) {
+      const k = Math.round(b.yTop * 10) / 10
+      m.set(k, [...(m.get(k) ?? []), b.x])
+    }
+    return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([, xs]) => [...new Set(xs)].sort((a, b) => a - b))
+  }
+  /** adj940 判据（正负对照**共用这一条**）：末行线位与"上一行前 k 根"逐根重合（≤0.05px） */
+  const aligned211 = (xs: number[], ref: number[]): boolean =>
+    xs.length >= 1 && ref.length >= xs.length && xs.every((x, i) => Math.abs(x - ref[i]) <= 0.05)
+  const lastAndPrev211 = (end: string): { last: number[]; prev: number[]; right211: number } => {
+    const lay = layoutScore(parseJps(mk211(end)), DUR_CFG)
+    const rows = linesByRow211(lay)
+    const ys = [...new Set(lay.pages[0].notes.map((n) => n.y))].sort((a, b) => a - b)
+    const lastNotes = lay.pages[0].notes.filter((n) => n.y === ys[ys.length - 1])
+    return {
+      last: rows[rows.length - 1] ?? [],
+      prev: rows[rows.length - 2] ?? [],
+      right211: Math.max(...lastNotes.map(segEnd)),
+    }
+  }
+  const bar211 = lastAndPrev211('||')
+  const pipe211 = lastAndPrev211('|')
+  console.log(
+    `    · adj211：上一行线位=${JSON.stringify(bar211.prev)}；末行(||)=${JSON.stringify(bar211.last)} 末音符右端=${bar211.right211.toFixed(2)}；` +
+      `末行(|)=${JSON.stringify(pipe211.last)} 末音符右端=${pipe211.right211.toFixed(2)}`,
+  )
+  check(
+    'adj211 `||` 终止（≤3 小节）**照样**按小节序号对齐上一行（逐根 ≤0.05px）——豁免已删除',
+    aligned211(bar211.last, bar211.prev),
+    `末行=${JSON.stringify(bar211.last)} 上一行=${JSON.stringify(bar211.prev)}`,
+  )
+  check(
+    'adj211 对照 `|` 结尾：同样逐根对齐上一行（两种结尾**行为一致**，与终止线无关）',
+    aligned211(pipe211.last, pipe211.prev) &&
+      Math.abs(pipe211.right211 - bar211.right211) < 3,
+    `末行=${JSON.stringify(pipe211.last)} 上一行=${JSON.stringify(pipe211.prev)} 末端=[${bar211.right211.toFixed(2)}, ${pipe211.right211.toFixed(2)}]`,
+  )
+  /**
+   * 负对照：同一段末行内容**拿不到单声部上一行**时的线位（前面放一个多声部块——多声部那一侧
+   * 不喂 `prevRowLineX`，所以本行退回自然宽）＝ 旧口径 `||` 那一档的实际表现。
+   */
+  const noRef211 = layoutScore(
+    parseJps(
+      'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 4 | 1 2 3 4 |\nQ2: 1 2 3 4 | 1 2 3 4 |\nQ: 1 2 3 4 | 5 6 7 1 ||\n',
+    ),
+    DUR_CFG,
+  )
+  const noRefLines211 = linesByRow211(noRef211).pop() ?? []
+  check(
+    'adj211 负对照：把"拿不到上一行"时的自然宽线位喂进同一判据 ⇒ 判假（证明这条判据不是恒真）',
+    !aligned211(noRefLines211, bar211.prev) && aligned211(bar211.last, bar211.prev),
+    `无基准=${JSON.stringify(noRefLines211)} 上一行=${JSON.stringify(bar211.prev)}`,
+  )
 }
 
 // ---- 23. 细节修复（adj2） ----
@@ -5919,6 +5970,264 @@ Q: 1 2/ 3/ 5 6, | 1- 0 0 &ykh ||`
   const q2b1 = spanOf68e(1, 1)
   check('adj355 跨组：Q2 第1小节宽接近 Q1 第1小节（不窄）', q2b0 >= q1b0 * 0.9, `q1b0=${q1b0.toFixed(1)} q2b0=${q2b0.toFixed(1)}`)
   check('adj355 跨组：Q2 第2小节宽接近 Q1 第2小节（不窄）', q2b1 >= q1b1 * 0.9, `q1b1=${q1b1.toFixed(1)} q2b1=${q2b1.toFixed(1)}`)
+  /**
+   * adj940（复核这两条 1~2px 容差断言）：`adj355` 的"内容宽接近"口径已换成 **adj940 的"线位"口径**
+   * —— 所以这里补两条**更强**的判据（不是放宽）：
+   *  ① Q2 前 k−1 根小节线与 Q1 对应线**精确重合**（≤0.05px）；
+   *  ② 逐小节宽（= 相邻小节线间距）**≥** Q1 对应小节（末根容半个线宽差）。
+   * 上面那两条"墨迹跨度 ≥ 0.9×"照旧保留：它们量的是"小节里画出来的墨迹"，
+   * Q2 第 2 小节末尾是 `&ykh` 括号（占位到内容右端、但墨迹不到）⇒ 比值天然略小于 1。
+   */
+  const lines68e = (gid: number): number[] => [
+    ...new Set(
+      lay68e.pages[0].barlines.filter((b) => b.id.group === gid).map((b) => b.x),
+    ),
+  ].sort((a, b) => a - b)
+  const l1 = lines68e(0)
+  const l2 = lines68e(1)
+  const widths68e = (xs: number[]): number[] => xs.map((x, i) => x - (i === 0 ? cfg68e.margin_left : xs[i - 1]))
+  const tolLast68e = (barlineTotalW('||') - barlineTotalW('|')) / 2 + 0.1
+  check(
+    'adj940 跨组：Q2 前 k−1 根小节线与 Q1 对应线**精确重合**（≤0.05px；取代"内容宽接近"的口径）',
+    l2.length >= 2 && l1.length >= l2.length && l2.slice(0, -1).every((x, i) => Math.abs(x - l1[i]) <= 0.05),
+    `Q1=${JSON.stringify(l1)} Q2=${JSON.stringify(l2)}`,
+  )
+  check(
+    'adj940 跨组：Q2 逐小节宽 ≥ Q1 对应小节（按小节线间距量；末根容半个线宽差）',
+    l2.length >= 2 && widths68e(l2).every((w, i) => w >= (widths68e(l1)[i] ?? 0) - (i === l2.length - 1 ? tolLast68e : 0.05)),
+    `Q2 逐小节宽=${JSON.stringify(widths68e(l2).map((v) => +v.toFixed(2)))} Q1=${JSON.stringify(widths68e(l1).map((v) => +v.toFixed(2)))}`,
+  )
+  // 负对照：把 Q2 第 1 根线 +5px 喂进"精确重合"判据 ⇒ 判假（证明这条判据真在比对）
+  check(
+    'adj940 跨组负对照：把 Q2 第 1 根实测线位 +5px 喂进同一判据 ⇒ 判假',
+    !(l2.length >= 2 && [l2[0] + 5, ...l2.slice(1, -1)].every((x, i) => Math.abs(x - l1[i]) <= 0.05)),
+    `Q2=${JSON.stringify(l2)}`,
+  )
+}
+
+/**
+ * ---- 68f. adj940：末行「自然对齐」的基准 = **上一行小节线实位** ----
+ *
+ * 用户裁定（2026-10）：`adj355` 原来按"上一行小节**内容宽**"对齐 ⇒ 即使逐小节都加宽到位，
+ * 小节线仍会因为**线组占位差**而错开（诊断实测残差 3.3 / −3.4 / −5.2px：末行末小节是 `:|`、
+ * 上一行对应的是 `|`，两者"内容右端→线中心"的偏移不同）。`adj644` 在多声部那一侧早就改成
+ * "**记下实际线位偏移**"（不按 `barlinePad/2` 假设）——单声部这一侧现在照抄同一办法。
+ *
+ * 新口径（三条一起成立才算对齐）：
+ *  ① **前 k−1 根小节线精确重合**（≤0.05px，同一行内容起点、同一张纸）；
+ *  ② **末根线贴右内容界**（末根线组更宽时按**半个线宽差**让位，实测 1.52px —— 这是"不强求同 x"
+ *     的代价，换来的是**不越界**）；
+ *  ③ **逐小节宽 ≥ 上一行对应小节**（末根同样容②那半个线宽差）。
+ *
+ * 对齐是**默认行为**：不依赖任何 `# jps-config` 键（本夹具就是空配置）。越界闸门（`adj925`）
+ * 保留：真放不下时仍整体放弃对齐、退回自然宽。
+ */
+console.log('[68f] adj940 natural last row aligns to previous row barline positions')
+{
+  /**
+   * 固定夹具 = **用户给过的两行真实源码**（`D:\蜗居笔记\悟乐居杂记\2.曲谱集\壁上观\壁上观.jps`
+   * 的那两行 `Q:`；用固定夹具而不是读用户库里那份文件 —— 库里的文件会被用户继续编辑）。
+   * 前面只补最小的描述头（`V/B/D/P`），**不写 `# jps-config`** ⇒ 全是默认值。
+   */
+  const HEAD940 = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  const L1_940 = 'Q: 6, 0/ 3/ 2/ 1// (7,// 7,/) 5,/ | 3,/. (5,// 5,//) (1// 2/) 6, &hx 6,/ 7,/ |["1." 1 3 2. (5/ |\n'
+  const L2_940 = 'Q: 5/) (6,/ 6,)-- :|]["2." 1 3 2. (5/ | 5/) (6,/ 6,)-- ||]\n'
+  const FIX940 = HEAD940 + L1_940 + L2_940
+  /** 用户给出的验收基线（第 1 行的 3 根小节线 / 逐小节宽，实测自空配置） */
+  const BASE_LINE_940 = [218.5, 398.6, 544.8]
+  const BASE_W_940 = [168.5, 180.1, 146.2]
+  /** 组 → 该组小节线 x（升序去重；x 已 r1 到 0.1） + 页内容右界 */
+  const geom940 = (src: string, cfg: PageConfig, g: number): { xs: number[]; rightEdge: number } => {
+    const lay = layoutScore(parseJps(src), cfg)
+    const page = lay.pages[0]
+    return {
+      xs: [...new Set(page.barlines.filter((b) => b.id.group === g).map((b) => b.x))].sort((a, b) => a - b),
+      rightEdge: page.width - cfg.margin_right,
+    }
+  }
+  /** 逐小节宽 = 相邻小节线间距；第 1 根从**行内容起点**（= 左边距）算起（与诊断口径一致） */
+  const widths940 = (xs: number[], x0: number): number[] => xs.map((x, i) => x - (i === 0 ? x0 : xs[i - 1]))
+  /**
+   * adj940 判据 —— **正负对照共用这一条**（不许各写一套判据）：
+   *  ① 前 k−1 根与上一行精确重合（≤0.05px）；② 末根不越右界；
+   *  ③ 末根与上一行末线之差 ≤ `tolLast`；④ 逐小节宽 ≥ 上一行对应小节（末根容 `tolLast`）。
+   */
+  const alignedOk940 = (xs: number[], ref: number[], x0: number, rightEdge: number, tolLast: number): boolean => {
+    if (xs.length !== ref.length || xs.length < 2) return false
+    for (let i = 0; i < xs.length - 1; i++) if (Math.abs(xs[i] - ref[i]) > 0.05) return false
+    if (xs[xs.length - 1] > rightEdge + 0.05) return false
+    if (Math.abs(xs[xs.length - 1] - ref[ref.length - 1]) > tolLast) return false
+    const w = widths940(xs, x0)
+    const rw = widths940(ref, x0)
+    for (let i = 0; i < w.length; i++) if (w[i] < rw[i] - (i === w.length - 1 ? tolLast : 0.05)) return false
+    return true
+  }
+  const f940 = (v: number): string => v.toFixed(2)
+  const fmtXs940 = (xs: number[]): string => `[${xs.map(f940).join(', ')}]`
+
+  // ① 空配置（默认 = 空间优先）：末行 3 小节 < `align_min_bars` 4 ⇒ 自然宽 + 对齐上一行
+  {
+    const ref = geom940(FIX940, defaultPageConfig, 0)
+    const last = geom940(FIX940, defaultPageConfig, 1)
+    const x0 = defaultPageConfig.margin_left
+    /** 末根"半个线宽差"：本行末线 `||`(4) 对上一行末线 `|`(1) ⇒ (4−1)/2 = 1.5，再给 0.1 取整余量 */
+    const tolLast = (barlineTotalW('||') - barlineTotalW('|')) / 2 + 0.1
+    console.log(
+      `    · adj940（空间优先 / 空配置）：上一行线位=${fmtXs940(ref.xs)}；末行线位=${fmtXs940(last.xs)}；` +
+        `页内容右界=${f940(last.rightEdge)}；逐小节宽=${fmtXs940(widths940(last.xs, x0))}（上一行 ${fmtXs940(widths940(ref.xs, x0))}）`,
+    )
+    check(
+      'adj940 空间优先：末行前 k−1 根小节线 ≈ 218.50 / 398.60（逐根 ≤2px）',
+      last.xs.length === 3 &&
+        Math.abs(last.xs[0] - BASE_LINE_940[0]) <= 2 &&
+        Math.abs(last.xs[1] - BASE_LINE_940[1]) <= 2,
+      `末行=${fmtXs940(last.xs)}`,
+    )
+    check(
+      `adj940 空间优先：末根线贴右内容界（≤ 右界 ${f940(last.rightEdge)}）且 ≈ 544.80（≤2px）`,
+      last.xs.length === 3 && last.xs[2] <= last.rightEdge + 0.05 && Math.abs(last.xs[2] - BASE_LINE_940[2]) <= 2,
+      `末根=${f940(last.xs[2] ?? NaN)} 右界=${f940(last.rightEdge)}`,
+    )
+    check(
+      `adj940 空间优先：前 k−1 根与上一行**精确重合**（≤0.05px）——这是"基准换成线位"的直接证据`,
+      last.xs.length === 3 && Math.abs(last.xs[0] - ref.xs[0]) <= 0.05 && Math.abs(last.xs[1] - ref.xs[1]) <= 0.05,
+      `末行=${fmtXs940(last.xs)} 上一行=${fmtXs940(ref.xs)}`,
+    )
+    check(
+      `adj940 空间优先：逐小节宽 ≥ 168.50 / 180.10 / 146.20（末根容半个线宽差 ${f940(tolLast)}px）`,
+      widths940(last.xs, x0).every((w, i) => w >= BASE_W_940[i] - (i === 2 ? tolLast : 0.05)),
+      `逐小节宽=${fmtXs940(widths940(last.xs, x0))}`,
+    )
+    check(
+      `adj940 空间优先：越界闸门（adj925）**通过** —— 对齐真的生效（前两根与上一行重合就是"没退回自然宽"的证据）`,
+      last.xs.length === 3 && Math.abs(last.xs[0] - ref.xs[0]) <= 0.05 && Math.abs(last.xs[1] - ref.xs[1]) <= 0.05,
+      `末行=${fmtXs940(last.xs)}`,
+    )
+    // 负对照①：旧口径（末行自然宽、未参与对齐）的**实测值**喂进同一判据 ⇒ 必须判假
+    const OLD_NATURAL_940 = [97.4, 143.3, 192.6]
+    check(
+      'adj940 负对照①：旧口径实测末行线位 97.40/143.30/192.60 喂进同一判据 ⇒ 判假（证明判据真在比对，不是恒真）',
+      !alignedOk940(OLD_NATURAL_940, ref.xs, x0, last.rightEdge, tolLast) &&
+        alignedOk940(last.xs, ref.xs, x0, last.rightEdge, tolLast),
+      `旧值=${fmtXs940(OLD_NATURAL_940)}`,
+    )
+    // 负对照②：诊断里"只对内容宽、闸门放行"的反事实实测值（线组占位差残差）⇒ 必须判假
+    const OLD_ALIGNED_940 = [220.1, 396.9, 539.6]
+    check(
+      'adj940 负对照②：旧口径"对齐生效但只对内容宽"的反事实实测 220.10/396.90/539.60 ⇒ 判假（证明只看内容宽不够）',
+      !alignedOk940(OLD_ALIGNED_940, ref.xs, x0, last.rightEdge, tolLast),
+      `反事实=${fmtXs940(OLD_ALIGNED_940)} 上一行=${fmtXs940(ref.xs)}`,
+    )
+  }
+
+  // ② 时值优先（只改 `noteSpaceLayout` 这一个键）：同一口径 —— 按小节序号对齐上一行
+  {
+    const cfgDur940: PageConfig = { ...defaultPageConfig, noteSpaceLayout: 'duration' }
+    const ref = geom940(FIX940, cfgDur940, 0)
+    const last = geom940(FIX940, cfgDur940, 1)
+    const x0 = cfgDur940.margin_left
+    const tolLast = (barlineTotalW('||') - barlineTotalW('|')) / 2 + 0.1
+    console.log(
+      `    · adj940（时值优先）：上一行线位=${fmtXs940(ref.xs)}；末行线位=${fmtXs940(last.xs)}；` +
+        `页内容右界=${f940(last.rightEdge)}；逐小节宽=${fmtXs940(widths940(last.xs, x0))}（上一行 ${fmtXs940(widths940(ref.xs, x0))}）`,
+    )
+    check(
+      'adj940 时值优先：末行前 k−1 根小节线与上一行**精确重合**（≤0.05px）',
+      last.xs.length === 3 && Math.abs(last.xs[0] - ref.xs[0]) <= 0.05 && Math.abs(last.xs[1] - ref.xs[1]) <= 0.05,
+      `末行=${fmtXs940(last.xs)} 上一行=${fmtXs940(ref.xs)}`,
+    )
+    check(
+      `adj940 时值优先：末根线贴右内容界（≤ ${f940(last.rightEdge)}）且与上一行末线差 ≤${f940(tolLast)}px`,
+      last.xs.length === 3 &&
+        last.xs[2] <= last.rightEdge + 0.05 &&
+        Math.abs(last.xs[2] - ref.xs[2]) <= tolLast,
+      `末根=${f940(last.xs[2] ?? NaN)} 上一行末根=${f940(ref.xs[2] ?? NaN)}`,
+    )
+    check(
+      'adj940 时值优先：逐小节宽 ≥ 上一行对应小节（末根容半个线宽差）',
+      widths940(last.xs, x0).every((w, i) => w >= widths940(ref.xs, x0)[i] - (i === 2 ? tolLast : 0.05)),
+      `逐小节宽=${fmtXs940(widths940(last.xs, x0))} 上一行=${fmtXs940(widths940(ref.xs, x0))}`,
+    )
+    // 负对照：旧口径（`adj211` 的 `endsByTerminal` 豁免 + "按参考每拍宽"都够不着）实测值 ⇒ 必须判假
+    const OLD_DUR_940 = [141.9, 232.3, 321.0]
+    check(
+      'adj940 负对照（时值优先）：旧口径实测末行线位 141.90/232.30/321.00 喂进同一判据 ⇒ 判假',
+      !alignedOk940(OLD_DUR_940, ref.xs, x0, last.rightEdge, tolLast) &&
+        alignedOk940(last.xs, ref.xs, x0, last.rightEdge, tolLast),
+      `旧值=${fmtXs940(OLD_DUR_940)} 上一行=${fmtXs940(ref.xs)}`,
+    )
+  }
+
+  // ③ 多声部（adj601/adj644 那一侧）：本轮**口径未改** ⇒ 照旧"末块前 2 根与上一块逐根重合 ≤1px"
+  {
+    const MV940 =
+      HEAD940 +
+      'Q1: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |\nQ2: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |\n' +
+      'Q1: 1 2 3 4 | 1 2 3 4 ||\nQ2: 1 2 3 4 | 1 2 3 4 ||\n'
+    const page = layoutScore(parseJps(MV940), defaultPageConfig).pages[0]
+    const xsOf = (gs: number[]): number[] =>
+      [...new Set(page.barlines.filter((b) => gs.includes(b.id.group)).map((b) => b.x))].sort((a, b) => a - b)
+    const b1 = xsOf([0, 1])
+    const b2 = xsOf([2, 3])
+    const mvOk = (second: number[]): boolean =>
+      b1.length >= 4 && second.length >= 2 && Math.abs(second[0] - b1[0]) < 1 && Math.abs(second[1] - b1[1]) < 1
+    console.log(`    · adj940（多声部）：上一块线位=${fmtXs940(b1)}；末块线位=${fmtXs940(b2)}`)
+    check(
+      'adj940 多声部一侧不受影响（adj601 口径照旧）：末块前 2 根小节线与上一块逐根重合 ≤1px',
+      mvOk(b2),
+      `上一块=${fmtXs940(b1)} 末块=${fmtXs940(b2)}`,
+    )
+    check(
+      'adj940 多声部负对照：把末块第 2 根线 +5px 喂进同一判据 ⇒ 判假（照旧的那条判据也真在比对）',
+      !mvOk([b2[0] ?? 0, (b2[1] ?? 0) + 5]) && mvOk(b2),
+      `末块=${fmtXs940(b2)}`,
+    )
+  }
+
+  // ④ 跨页：`prevRowLineX` **跨页不清空** ⇒ 新页第一行仍拿上一页最后一行的线位当基准
+  {
+    /**
+     * 新页首行第 1 小节以 `:|` 收尾（线组宽 7.6），上一页末行第 1 小节是 `|`（线组宽 1）
+     * —— 这样"按内容宽"的旧口径必然错开 3.3px（线组占位差），只有"按线位"的新口径才对得上。
+     */
+    const PG940 =
+      HEAD940 +
+      'Q: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |\n[fenye]\nQ: 5/ 5/ 5/ 5/ :| 5/ 5/ 5/ 5/ | 5/ 5/ 5/ 5/ ||\n'
+    const lay = layoutScore(parseJps(PG940), defaultPageConfig)
+    const xsOfPage = (pi: number): number[] =>
+      [...new Set((lay.pages[pi]?.barlines ?? []).map((b) => b.x))].sort((a, b) => a - b)
+    const p1 = xsOfPage(0)
+    const p2 = xsOfPage(1)
+    const rightEdge = lay.pages[1] ? lay.pages[1].width - defaultPageConfig.margin_right : 0
+    const x0 = defaultPageConfig.margin_left
+    const tolLast = (barlineTotalW('||') - barlineTotalW('|')) / 2 + 0.1
+    // 负对照①：旧口径（adj940 之前）在本夹具上的**实测值**——越界闸门放弃 ⇒ 整行退回自然宽
+    const OLD_PAGE2_940 = [89.3, 132.3, 173.6]
+    console.log(
+      `    · adj940（跨页）：第 1 页末行线位=${fmtXs940(p1)}；第 2 页首行线位=${fmtXs940(p2)}；页内容右界=${f940(rightEdge)}`,
+    )
+    check(
+      'adj940 跨页：新页第一行仍拿"上一页最后一行"的线位当基准（前 k−1 根精确重合）',
+      lay.pages.length >= 2 &&
+        p1.length === 3 &&
+        p2.length === 3 &&
+        Math.abs(p2[0] - p1[0]) <= 0.05 &&
+        Math.abs(p2[1] - p1[1]) <= 0.05 &&
+        p2[2] <= rightEdge + 0.05 &&
+        Math.abs(p2[2] - p1[2]) <= tolLast,
+      `第1页=${fmtXs940(p1)} 第2页=${fmtXs940(p2)} 右界=${f940(rightEdge)}`,
+    )
+    check(
+      'adj940 跨页负对照①：旧口径实测第 2 页首行线位 89.30/132.30/173.60 喂进同一判据 ⇒ 判假（证明"跨页拿到基准"不是恒真）',
+      !alignedOk940(OLD_PAGE2_940, p1, x0, rightEdge, tolLast) && alignedOk940(p2, p1, x0, rightEdge, tolLast),
+      `旧值=${fmtXs940(OLD_PAGE2_940)} 基准=${fmtXs940(p1)}`,
+    )
+    check(
+      'adj940 跨页负对照②：把第 2 页首行第 1 根实测线位 +5px 喂进同一判据 ⇒ 判假',
+      !alignedOk940([(p2[0] ?? 0) + 5, p2[1] ?? 0, p2[2] ?? 0], p1, x0, rightEdge, tolLast),
+      `第2页=${fmtXs940(p2)}`,
+    )
+  }
 }
 
 // ---- 69. 多声部 rightX 含附点+增时线（adj319，色块按段不消失 + 显示占宽） ----
@@ -17507,30 +17816,60 @@ runAdj927ExternalChangeTests()
         )
       }
 
-      // ② 整份谱的**最后一行**：小节数 < 阈值 ⇒ 自然（行尾留白）；≥ 阈值 ⇒ 撑满。
+      // ② 整份谱的**最后一行**：小节数 < 阈值 ⇒ 自然（**对齐上一行的小节线实位**）；≥ 阈值 ⇒ 撑满。
       //    用例 = 两段谱，末段 3 小节（< 4，`||` 收尾）/ 末段 4 小节（≥ 4）。两条判据成对 + 互换输入负对照。
+      //  ⚠ adj940（用户裁定）改了"自然"的**判据**：`adj940` 起"自然宽行"不再是"行尾留白"，
+      //    而是"**按小节序号对齐上一行的小节线**"（末线贴右内容界只是它的一种收敛结果）。
+      //    所以这里从"留白 > 8px"改成"前两根与上一行逐根重合（≤0.05px）"，撑满那一档判"**不**重合"。
+      /** 逐行（按 yTop 分组，升序）的小节线 x 列表 */
+      const linesByRow935 = (lay: ReturnType<typeof layoutScore>): number[][] => {
+        const m = new Map<number, number[]>()
+        for (const b of lay.pages[0].barlines) {
+          const k = Math.round(b.yTop * 10) / 10
+          m.set(k, [...(m.get(k) ?? []), b.x])
+        }
+        return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([, xs]) => [...new Set(xs)].sort((a, b) => a - b))
+      }
+      /** 末行是否"按上一行小节线对齐"（前两根逐根重合 ≤0.05px）；正负对照共用 */
+      const alignedPrev935 = (xs: number[], prev: number[]): boolean =>
+        xs.length >= 2 && prev.length >= 2 && Math.abs(xs[0] - prev[0]) <= 0.05 && Math.abs(xs[1] - prev[1]) <= 0.05
+      /** 末行是否"按行宽均分撑满"（与上一行首根线明显不同 + 末线贴右）；正负对照共用 */
+      const stretched935 = (xs: number[], prev: number[], right: number): boolean =>
+        xs.length >= 1 && prev.length >= 1 && Math.abs(xs[0] - prev[0]) > 8 && stuck935(xs[xs.length - 1] ?? 0, right)
       for (const [tag, cfg] of CFGS935) {
         const s = rows935(HEAD935 + q935(TWELVE935) + q935(THREE935, '||'), cfg)
         const f = rows935(HEAD935 + q935(TWELVE935) + q935([...THREE935, '6 7 1 2'], '||'), cfg)
+        const sRows = linesByRow935(layoutScore(parseJps(HEAD935 + q935(TWELVE935) + q935(THREE935, '||')), cfg))
+        const fRows = linesByRow935(layoutScore(parseJps(HEAD935 + q935(TWELVE935) + q935([...THREE935, '6 7 1 2'], '||')), cfg))
+        const sLast = sRows[sRows.length - 1] ?? []
+        const sPrev = sRows[sRows.length - 2] ?? []
+        const fLast = fRows[fRows.length - 1] ?? []
+        const fPrev = fRows[fRows.length - 2] ?? []
         const sX = s.xs[s.xs.length - 1] ?? 0
         const fX = f.xs[f.xs.length - 1] ?? 0
         console.log(
-          `    · adj935 ②（${tag}）：末行 3 小节（< 4）末线 x=${fmt935(sX)}（留白 ${fmt935(s.rightEdge - sX)}，共 ${s.xs.length} 行）/ 末行 4 小节（≥ 4）末线 x=${fmt935(fX)}（留白 ${fmt935(f.rightEdge - fX)}，共 ${f.xs.length} 行）/ 页内容右界 ${fmt935(s.rightEdge)}`,
+          `    · adj935 ②（${tag}）：末行 3 小节（< 4）线位=${JSON.stringify(sLast.map(fmt935))}（上一行 ${JSON.stringify(sPrev.map(fmt935))}，末线留白 ${fmt935(s.rightEdge - sX)}）/ 末行 4 小节（≥ 4）线位=${JSON.stringify(fLast.map(fmt935))}（上一行 ${JSON.stringify(fPrev.map(fmt935))}，末线留白 ${fmt935(f.rightEdge - fX)}）/ 页内容右界 ${fmt935(s.rightEdge)}`,
         )
         check(
-          `adj935 ② 整份谱最后一行 3 小节 < 阈值 4 ⇒ 自然（行尾留白 > 8px）（${tag}）`,
-          s.xs.length >= 2 && (s.bars[s.bars.length - 1] ?? 0) === 3 && natural935(sX, s.rightEdge),
-          `末行小节数=${s.bars[s.bars.length - 1]} 留白=${fmt935(s.rightEdge - sX)}`,
+          `adj935 ② 整份谱最后一行 3 小节 < 阈值 4 ⇒ **自然（按小节序号对齐上一行）**（${tag}）`,
+          s.xs.length >= 2 &&
+            (s.bars[s.bars.length - 1] ?? 0) === 3 &&
+            alignedPrev935(sLast, sPrev) &&
+            sX <= s.rightEdge + 0.05,
+          `末行线位=${JSON.stringify(sLast)} 上一行=${JSON.stringify(sPrev)}`,
         )
         check(
-          `adj935 ② 整份谱最后一行 4 小节 ≥ 阈值 4 ⇒ 撑满贴右（${tag}）`,
-          f.xs.length >= 2 && (f.bars[f.bars.length - 1] ?? 0) === 4 && stuck935(fX, f.rightEdge),
-          `末行小节数=${f.bars[f.bars.length - 1]} 留白=${fmt935(f.rightEdge - fX)}`,
+          `adj935 ② 整份谱最后一行 4 小节 ≥ 阈值 4 ⇒ 撑满贴右（且**不**与上一行逐根重合）（${tag}）`,
+          f.xs.length >= 2 && (f.bars[f.bars.length - 1] ?? 0) === 4 && stretched935(fLast, fPrev, f.rightEdge),
+          `末行线位=${JSON.stringify(fLast)} 上一行=${JSON.stringify(fPrev)} 留白=${fmt935(f.rightEdge - fX)}`,
         )
         check(
-          `adj935 ② 负对照（${tag}）：两条判据**互换输入**（短谱用"撑满"、满谱用"自然留白"）⇒ 都判假`,
-          !stuck935(sX, s.rightEdge) && !natural935(fX, f.rightEdge) && stuck935(fX, f.rightEdge) && natural935(sX, s.rightEdge),
-          `短谱留白=${fmt935(s.rightEdge - sX)} 满谱留白=${fmt935(f.rightEdge - fX)}`,
+          `adj935 ② 负对照（${tag}）：两条判据**互换输入**（3 小节那行用"撑满"、4 小节那行用"对齐"）⇒ 都判假`,
+          !stretched935(sLast, sPrev, s.rightEdge) &&
+            !alignedPrev935(fLast, fPrev) &&
+            alignedPrev935(sLast, sPrev) &&
+            stretched935(fLast, fPrev, f.rightEdge),
+          `3小节行=${JSON.stringify(sLast)} 4小节行=${JSON.stringify(fLast)}`,
         )
       }
 
@@ -20261,6 +20600,8 @@ function runAdj689bTests() {
     const NS929 = defaultPageConfig.note_size
     const S929 = noteScaleOf(NS929)
     const GAP929 = LAYER_GAP * S929
+    /** adj940：判据②的极差容差（原来 1px；本轮实测降到 0.01px ⇒ 收紧到 0.5px，见判据②处的说明） */
+    const GAP_TOL929 = 0.5
     /** 判据：一组数的极差——"是否与跨度无关"的正负对照**共用同一个函数** */
     const spreadOf = (a: number[]): number => (a.length === 0 ? Number.NaN : Math.max(...a) - Math.min(...a))
     /** 旧口径弧顶高度（`clamp(跨度 × 0.28, 2.5, 9) ÷ 2`）——只作负对照 */
@@ -20319,31 +20660,52 @@ function runAdj689bTests() {
       const spans = arcs.map((s) => Math.abs(s.x2 - s.x1))
       /** 判据①（**端到端**）：从**渲染产物**读出的弧顶高度必须逐条 = `SLUR_APEX_H`、极差 ≤ 1px */
       const realApexH = arcs.map((s) => s.y - renderedApexYOf(s))
+      /** 判据①的**谓词**（正负对照共用同一份） */
+      const apexOk929 = (h: number[]): boolean =>
+        h.length > 0 && h.every((v) => Math.abs(v - SLUR_APEX_H) < 1e-6) && spreadOf(h) <= 1
       check(
         `adj929 ${pathName}：**不同跨度的连音线弧顶高度相同**（±1px；逐条 = \`SLUR_APEX_H\`=${SLUR_APEX_H}）`,
-        arcs.length >= 3 && spreadOf(spans) >= 5 && realApexH.every((h) => Math.abs(h - SLUR_APEX_H) < 1e-6) && spreadOf(realApexH) <= 1,
+        arcs.length >= 3 && spreadOf(spans) >= 5 && apexOk929(realApexH),
         `弧度数=${arcs.length} 跨度=[${spans.map((v) => v.toFixed(1)).join(',')}] 实弧顶高=[${realApexH.map((v) => v.toFixed(2)).join(',')}] 极差=${spreadOf(realApexH).toFixed(2)}`,
       )
       /** 负对照：把**旧口径**（随跨度）的弧顶高度喂进**同一个判据** ⇒ 必须判假 */
       const legacyApexHOf = arcs.map((s) => legacyApexH(Math.abs(s.x2 - s.x1)))
+      /**
+       * ⚠ adj940：本夹具的末行（`{dsb}` 那一行、1 小节）现在也参与"按上一行小节线对齐"，
+       * 小节变宽 ⇒ 连音线跨度整体变长，旧口径的弧顶高度**只有一条**还没顶到上限（极差 0.83px）。
+       * 所以负对照从"极差 > 1px"改成**直接喂进判据①**（判据①要求逐条**精确等于** `SLUR_APEX_H`，
+       * 旧口径那条 3.67 立刻判假）—— 比原来更严，不是放宽。
+       */
       check(
-        `adj929 ${pathName} 负对照：旧的"弧顶随跨度"口径在同一判据下**判假**`,
-        spreadOf(legacyApexHOf) > 1 && legacyApexHOf.some((h) => Math.abs(h - SLUR_APEX_H) > 1e-6),
+        `adj929 ${pathName} 负对照：旧的"弧顶随跨度"口径喂进**判据①** ⇒ 判假`,
+        !apexOk929(legacyApexHOf) && apexOk929(realApexH),
         `旧弧顶高=[${legacyApexHOf.map((v) => v.toFixed(2)).join(',')}] 极差=${spreadOf(legacyApexHOf).toFixed(2)}`,
       )
       /** 判据②：**弧顶**（渲染产物）到下方音符墨迹顶的间距 ≥ `LAYER_GAP`，且与跨度无关（≤ 1px） */
       const gaps = gapsOf(pg, arcs, renderedApexYOf)
+      /** 判据②的**谓词**（正负对照共用同一份实现；容差见下） */
+      const gapOk929 = (g: number[]): boolean =>
+        g.length > 0 && g.every((v) => Number.isFinite(v) && v >= GAP929 - 0.01) && spreadOf(g) <= GAP_TOL929
+      /**
+       * adj940：本夹具的末行（1 小节）现在也参与"按上一行小节线对齐"、小节变宽 ⇒ 各弧跨度整体变长，
+       * 实测"弧顶→音符"的极差从原来的 1px 级降到 **0.01px**（弧顶是常量、墨迹顶也几乎相同）
+       * ⇒ 判据②的极差容差从 1px **收紧**到 0.5px（收紧不是放宽）：旧口径那条 0.83px 因此重新判假。
+       */
       check(
-        `adj929 ${pathName}：连音线**弧顶**到下方音符墨迹顶 ≥ \`LAYER_GAP\`(${GAP929.toFixed(2)}px)，且各跨度同值（±1px）`,
-        gaps.length > 0 && gaps.every((g) => Number.isFinite(g) && g >= GAP929 - 0.01) && spreadOf(gaps) <= 1,
+        `adj929 ${pathName}：连音线**弧顶**到下方音符墨迹顶 ≥ \`LAYER_GAP\`(${GAP929.toFixed(2)}px)，且各跨度同值（±${GAP_TOL929}px）`,
+        gapOk929(gaps),
         `弧顶→音符=[${gaps.map((g) => g.toFixed(2)).join(',')}] 极差=${spreadOf(gaps).toFixed(2)} 下限=${GAP929.toFixed(2)}`,
       )
-      /** 负对照 A：旧口径（弧顶随跨度）⇒ 同一批间距极差 > 1px、最短那条明显更小 ⇒ 判假 */
+      /**
+       * 负对照 A：旧口径（弧顶随跨度）⇒ 喂进**判据②**必须判假。
+       * ⚠ adj940：末行变宽后旧口径的极差只剩 0.83px（< 1），但它有一条间距 5.37px **低于**
+       * `LAYER_GAP` ⇒ 判据②照样判假（改成共用谓词后判的是"同一件事实"，不是放宽）。
+       */
       const legacyGaps = gapsOf(pg, arcs, (s) => s.y - legacyApexH(Math.abs(s.x2 - s.x1)))
       check(
-        `adj929 ${pathName} 负对照：旧口径的弧顶间距在同一判据下**判假**（极差 > 1px）`,
-        spreadOf(legacyGaps) > 1,
-        `旧弧顶→音符=[${legacyGaps.map((g) => g.toFixed(2)).join(',')}] 极差=${spreadOf(legacyGaps).toFixed(2)}`,
+        `adj929 ${pathName} 负对照：旧口径的弧顶间距喂进**判据②** ⇒ 判假`,
+        !gapOk929(legacyGaps) && gapOk929(gaps),
+        `旧弧顶→音符=[${legacyGaps.map((g) => g.toFixed(2)).join(',')}] 极差=${spreadOf(legacyGaps).toFixed(2)} 下限=${GAP929.toFixed(2)}`,
       )
       /**
        * 负对照 B：若弧顶只拱到**弦下方 1px**（等于不拱、弧线朝下）⇒ 弧顶离数字只剩约 0.7px
