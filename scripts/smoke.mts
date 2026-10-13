@@ -7,12 +7,24 @@
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 // adj927：「要不要提示外部改动」的纯判据 + 带 IO 的编排（用注入的假 IO 守"mtime 相同就不读文件"）
-import { probeFileChange, probeExternalChange, getBaseline, baselineKeyOf } from '../src/store/externalChange'
+// adj943：外加"写盘在途"的登记（写盘落地与基准刷新之间的窗口，见该文件头说明）
+import {
+  probeFileChange,
+  probeExternalChange,
+  getBaseline,
+  setBaseline,
+  markWriteInFlight,
+  getWriteInFlight,
+  baselineKeyOf,
+} from '../src/store/externalChange'
 // adj927/adj928：归一化 + 内容指纹；两栏差异（行级 LCS + 行内字符级高亮）
 // ⚠ 别名：`saveSupport.ts` 里已经有一个 `sameContent`（另一个语义），不许重名
+// adj943：`hasContentChange` = **弹条与差异框共用的那一条内容判据**（单一实现、两处调用）
 import {
   contentFingerprint,
   sameContent as sameTextContent,
+  hasContentChange,
+  normalizeForDiff,
   diffTexts,
   collapseDiffRows,
   type DiffRow,
@@ -493,7 +505,7 @@ async function runAdj927ExternalChangeTests() {
   let reads1 = 0
   const r1 = await probeExternalChange({
     key,
-    fallbackText: '（有基准时不该用到它）',
+    localText: () => '（有基准时不该用到它）',
     baseline: fakeBaseline,
     mtimeOf: async () => 1000, // 文件根本没被写过
     readText: async () => {
@@ -507,7 +519,7 @@ async function runAdj927ExternalChangeTests() {
   let reads2 = 0
   const r2 = await probeExternalChange({
     key,
-    fallbackText: '（有基准时不该用到它）',
+    localText: () => '（有基准时不该用到它）',
     baseline: fakeBaseline,
     mtimeOf: async () => 2000, // 我们自己的随输随存 ⇒ mtime 变了、内容一样
     readText: async () => {
@@ -524,7 +536,7 @@ async function runAdj927ExternalChangeTests() {
   const EXT = 'Q: 1 2 |\nQ: 9 9 |\n'
   const r3 = await probeExternalChange({
     key,
-    fallbackText: '（有基准时不该用到它）',
+    localText: () => '（有基准时不该用到它）',
     baseline: getBaseline(),
     mtimeOf: async () => 3000,
     readText: async () => EXT,
@@ -537,7 +549,7 @@ async function runAdj927ExternalChangeTests() {
   let reads4 = 0
   const r4 = await probeExternalChange({
     key,
-    fallbackText: BASE, // 没有基准 ⇒ 拿"事件那一刻编辑器里的内容"兜底（旧口径）
+    localText: () => BASE, // 没有基准 ⇒ 拿"本地此刻的内容"兜底（旧口径；adj943 起与差异框同源）
     baseline: null,
     mtimeOf: async () => 4000,
     readText: async () => {
@@ -547,6 +559,204 @@ async function runAdj927ExternalChangeTests() {
   })
   check('adj927 编排⑤：没有基准时兜底比"编辑器里的内容"，且**只认归一化后的内容**（CRLF 差异不算改动）',
     r4.kind === 'unchanged' && reads4 === 1, `kind=${r4.kind} reads=${reads4}`)
+}
+
+/**
+ * ---- adj943：**弹条与差异框必须共用同一套内容判据**（用户实报："本地 17 行 · 外部 17 行 · 改动 0 处"
+ * 却仍然弹「文件内容已在其它地方被改动」）----
+ *
+ * 复现与根因（临时脚本 `scripts/_tmp_adj943_repro.mts` 的真实输出）：
+ *  · 只把 CRLF / 行尾空白 / 末尾换行动一下 ⇒ 弹条判据一直是 `unchanged`（**归一化本来就在**；
+ *    也就是说"弹条那一路没做归一化"这个猜测是错的）；
+ *  · 真正能复现矛盾的是"**文件已落地、基准没跟上**"：弹条比的是「基准 vs 文件」，
+ *    差异框比的是「本地缓冲区 vs 文件」——两个参照物不同 ⇒ 一个说变、一个说 0 处。
+ *
+ * 本段守住四件事（每条都配负对照）：
+ *  ① 两侧逐字相同 ⇒ 不弹；
+ *  ② 只有 CRLF/LF、行尾空白、末尾换行不同 ⇒ 不弹（负对照：真改一个字 ⇒ 弹）；
+ *  ③ **真外部改动 ⇒ 必须弹**（单独一条，不许被顺手削弱）；
+ *  ④ 修复前那条矛盾（弹条说变 / 差异框说 0 处）**不可能再发生**（夹具矩阵上直接断言）。
+ */
+async function runAdj943SharedCriterionTests() {
+  console.log('[adj943] 弹条与差异框共用一套内容判据（写入在途 / 本地缓冲区 / 0 处矛盾不可能）')
+  /**
+   * 用户那份谱的夹具：17 行（与截图「本地 17 行 · 外部 17 行」对齐）。
+   * 只在本文件里内联构造 —— **不碰** `public/samples/*.jps`，也不碰仓库外的茉莉花文件。
+   */
+  const LINES = [
+    '#=========== 描述头定义 ===========',
+    'V: 1.0',
+    'B: 茉莉花',
+    'Z: 江苏民歌',
+    'D: C',
+    'P: 4/4',
+    '#========== 以下为简谱主体 ==========',
+    'Q: 3 3 5 6 | 1\' 1\' 6 5 | 5 6 5 3 | 2 3 2 1 |',
+    'C1: 好一@朵美@丽的茉@莉花',
+    'Q: 3 3 5 6 | 1\' 1\' 6 5 | 5 6 5 3 | 2 3 2 1 |',
+    'C1: 好一@朵美@丽的茉@莉花',
+    'Q: 3 3 5 6 | 1\' 1\' 6 5 | 5 6 5 3 | 2 3 2 1 |',
+    'C1: 好一@朵美@丽的茉@莉花',
+    'Q: 3 3 5 6 | 1\' 1\' 6 5 | 5 6 5 3 | 2 3 2 1 ||',
+    'C1: 好一@朵美@丽的茉@莉花',
+    '#====== 以下为页面设置，请勿手动修改 ======',
+    '# jps-config:{"note_size":15}',
+  ]
+  /** 本地（编辑器缓冲区）内容 */
+  const LOCAL = LINES.join('\n') + '\n'
+  /** 上一版（基准停在这里） */
+  const PREV = LOCAL.replace('2 3 2 1 ||', '2 3 2 1 |')
+  /** 真外部改动（末小节最后一个音 1 → 5） */
+  const EXT = LOCAL.replace('5 6 5 3 | 2 3 2 1 ||', '5 6 5 3 | 2 3 2 5 ||')
+  /** 弹条判据的简写：**只喂"基准 vs 文件"**（mtime 两边都没有 = 嵌入版实际走的那条） */
+  const byBaseline = (baselineText: string, fileText: string): string =>
+    probeFileChange({
+      baselineMtime: null,
+      actualMtime: null,
+      baselineFingerprint: contentFingerprint(baselineText),
+      actualFingerprint: contentFingerprint(fileText),
+    })
+  /** 差异框判据的简写（`FileDiffDialog` 消费的就是 `changeCount`） */
+  const changesOf = (localText: string, externalText: string): number =>
+    diffTexts(localText, externalText).changeCount
+
+  // ① 两侧内容逐字相同（含末尾换行/CRLF 这些噪声）⇒ 不弹；负对照：真改一个字 ⇒ 弹
+  check('adj943 ①两侧逐字相同 ⇒ 判 unchanged（不弹）',
+    byBaseline(LOCAL, LOCAL) === 'unchanged')
+  check('adj943 ①负对照：同一条判据在"真改了一个音"的样本上判 external（不是恒判"没变"）',
+    byBaseline(LOCAL, EXT) === 'external')
+
+  // ② 只有 CRLF/LF、行尾空白、末尾换行不同 ⇒ 不弹（**这三条就是弹条那一路的归一化在起作用**）
+  check('adj943 ②仅 CRLF↔LF 不同 ⇒ 不弹',
+    byBaseline(LOCAL, LOCAL.replace(/\n/g, '\r\n')) === 'unchanged')
+  check('adj943 ②仅行尾空白不同 ⇒ 不弹',
+    byBaseline(LOCAL, LOCAL.replace('2 3 2 1 ||\n', '2 3 2 1 ||   \n')) === 'unchanged')
+  check('adj943 ②仅末尾换行不同（多一个/少一个）⇒ 不弹',
+    byBaseline(LOCAL, `${LOCAL}\n`) === 'unchanged' && byBaseline(LOCAL, LOCAL.replace(/\n$/, '')) === 'unchanged')
+  check('adj943 ②负对照：把 `||` 改成 `||5`（真改内容）⇒ 弹（证明上面三条不是"什么都判没变"）',
+    byBaseline(LOCAL, LOCAL.replace('2 3 2 1 ||', '2 3 2 1 ||5')) === 'external')
+
+  // ③ 真外部改动 ⇒ **必须弹**（单独一条；三份参照物都不一样）
+  check('adj943 ③真外部改动（外部内容与基准、在途写、本地缓冲区都不同）⇒ **必须弹**',
+    probeFileChange({
+      baselineMtime: null,
+      actualMtime: null,
+      baselineFingerprint: contentFingerprint(PREV),
+      actualFingerprint: contentFingerprint(EXT),
+      inFlightFingerprint: contentFingerprint(LOCAL),
+      localFingerprint: contentFingerprint(LOCAL),
+    }) === 'external')
+  check('adj943 ③负对照：同一条判据、只把"外部内容"换成与本地一样 ⇒ 判 unchanged（③ 不是恒弹）',
+    probeFileChange({
+      baselineMtime: null,
+      actualMtime: null,
+      baselineFingerprint: contentFingerprint(PREV),
+      actualFingerprint: contentFingerprint(LOCAL),
+      inFlightFingerprint: null,
+      localFingerprint: contentFingerprint(LOCAL),
+    }) === 'unchanged')
+
+  // ④ **修复前那条矛盾不可能再发生**：夹具矩阵上穷举，"弹条说变"与"差异框说 0 处"不得同时成立
+  {
+    const variants: { name: string; local: string; file: string; baseline: string; inFlight: string | null }[] = [
+      { name: '全部相同', local: LOCAL, file: LOCAL, baseline: LOCAL, inFlight: null },
+      { name: '仅 CRLF', local: LOCAL, file: LOCAL.replace(/\n/g, '\r\n'), baseline: LOCAL, inFlight: null },
+      { name: '仅末尾换行', local: LOCAL, file: `${LOCAL}\n\n`, baseline: LOCAL, inFlight: null },
+      { name: '仅行尾空白', local: LOCAL, file: LOCAL.replace('1 ||\n', '1 ||  \n'), baseline: LOCAL, inFlight: null },
+      // 用户实报那条路径：写盘已落地（文件 = 刚写下去的那份）、基准停在上一版、缓冲区就是刚写的那份
+      { name: '基准落后（写盘已落地 / 回读校验报错跳过 setBaseline）', local: LOCAL, file: `${LOCAL}\n`, baseline: PREV, inFlight: null },
+      { name: '基准落后 + CRLF 风格', local: LOCAL, file: LOCAL.replace(/\n/g, '\r\n'), baseline: PREV, inFlight: null },
+      // 写盘在途的窗口：文件是我们**马上要写出去**的那份，缓冲区已经又敲了几个字
+      { name: '写盘在途（缓冲区已前进）', local: EXT, file: LOCAL, baseline: PREV, inFlight: LOCAL },
+      { name: '真外部改动', local: LOCAL, file: EXT, baseline: PREV, inFlight: null },
+    ]
+    let contradictory = 0
+    let fired = 0
+    const detail: string[] = []
+    for (const v of variants) {
+      const said = probeFileChange({
+        baselineMtime: null,
+        actualMtime: null,
+        baselineFingerprint: contentFingerprint(v.baseline),
+        actualFingerprint: contentFingerprint(v.file),
+        inFlightFingerprint: v.inFlight === null ? null : contentFingerprint(v.inFlight),
+        localFingerprint: contentFingerprint(v.local),
+      })
+      const changes = changesOf(v.local, v.file)
+      if (said === 'external') fired++
+      if (said === 'external' && changes === 0) contradictory++
+      detail.push(`${v.name}: 弹条=${said} 差异框改动=${changes}处`)
+    }
+    check('adj943 ④夹具矩阵上"弹条说要问"与"差异框 0 处"**从不同时成立**（= 用户截图那个场景不可能再出现）',
+      contradictory === 0, detail.join(' | '))
+    check('adj943 ④负对照：矩阵里确实**有**判 external 的样本（不是"全判没变"把矛盾蒙过去）',
+      fired === 1, `${fired} 条 external：${detail.join(' | ')}`)
+    check('adj943 ④同一批夹具上"差异框 0 处" ⟺ `hasContentChange` 为假（**弹条与差异框共用同一条判据**）',
+      variants.every((v) => (changesOf(v.local, v.file) === 0) === !hasContentChange(v.local, v.file)))
+    check('adj943 ④归一化只有一处实现：`hasContentChange` 与"指纹相同"、"diffTexts 0 处"三者口径一致',
+      variants.every(
+        (v) =>
+          hasContentChange(v.local, v.file) ===
+          (contentFingerprint(v.local) !== contentFingerprint(v.file)) &&
+          (normalizeForDiff(v.local) === normalizeForDiff(v.file)) === !hasContentChange(v.local, v.file),
+      ))
+  }
+
+  // ⑤ 编排级：用户那条路径（写盘落地、`setBaseline` 被跳过）+ 本地缓冲区拿的是**同一处内容** ⇒ 不弹且静默刷新基准
+  {
+    const key = baselineKeyOf('vault:我的文库', ['谱', '茉莉花.jps'])
+    let reads = 0
+    const verdict = await probeExternalChange({
+      key,
+      localText: () => LOCAL, // 与差异框 diff.localText 同一个来源（useDocStore.code）
+      baseline: { key, fingerprint: contentFingerprint(PREV), mtime: null },
+      mtimeOf: null, // 嵌入版：宿主只推 path
+      readText: async () => {
+        reads++
+        return `${LOCAL}\n` // 文件里是"刚写下去的内容 + 一个末尾换行"
+      },
+    })
+    check('adj943 ⑤用户实报路径（基准落后一版、文件=刚写下去的那份）⇒ 判 unchanged（**不再弹条**）',
+      verdict.kind === 'unchanged' && reads === 1, `kind=${verdict.kind} reads=${reads}`)
+    check('adj943 ⑤判"没变"时**静默刷新基准**（基准指纹跟到文件那一份）',
+      getBaseline()?.fingerprint === contentFingerprint(`${LOCAL}\n`), JSON.stringify(getBaseline()))
+    check('adj943 ⑤负对照：同一路径、只把"本地缓冲区"换成上一版（= 本地与外部真的不同）⇒ 判 external',
+      (
+        await probeExternalChange({
+          key,
+          localText: () => PREV,
+          baseline: { key, fingerprint: contentFingerprint(PREV), mtime: null },
+          mtimeOf: null,
+          readText: async () => EXT,
+        })
+      ).kind === 'external')
+  }
+
+  // ⑥ 写盘在途：宿主在 `adapter.write` 落地时就广播事件，事件读到的正是我们自己刚写下去的那份
+  {
+    const key = baselineKeyOf('vault:我的文库', ['谱', '茉莉花.jps'])
+    /** 缓冲区已经又敲了几个字（与"刚写下去的那份"不同）——**只有"在途写"这一条能救它** */
+    const probeInFlight = async (mark: boolean): Promise<string> => {
+      if (mark) markWriteInFlight(key, LOCAL)
+      const r = await probeExternalChange({
+        key,
+        localText: () => EXT, // 缓冲区已前进
+        baseline: { key, fingerprint: contentFingerprint(PREV), mtime: null }, // 基准还没结算
+        mtimeOf: null,
+        readText: async () => LOCAL, // 文件 = 我们刚写下去的那份
+      })
+      return r.kind
+    }
+    check('adj943 ⑥负对照：没有"在途写"登记时，同一场景会被当成外部改动（说明这条不是恒豁免）',
+      (await probeInFlight(false)) === 'external' && getWriteInFlight() === null)
+    check('adj943 ⑥登记了"在途写"（写盘发出前）⇒ 文件正是我们自己写的那份 ⇒ 判 unchanged（不弹）',
+      (await probeInFlight(true)) === 'unchanged')
+    check('adj943 ⑥在途写被消费后要清掉（基准接管或事件结算后不留残影）',
+      getWriteInFlight() === null)
+    markWriteInFlight(key, LOCAL)
+    setBaseline(key, LOCAL, null)
+    check('adj943 ⑥`setBaseline`（写盘结算）会顺手清掉在途写', getWriteInFlight() === null)
+  }
 }
 
 // ---- 1. 解析示例谱（小星星） ----
@@ -16806,6 +17016,12 @@ runAdj927ExternalChangeTests()
   .catch((e) => {
     failed++
     console.error('  ✗ adj927 外部改动判据的 IO 编排用例抛异常', e)
+  })
+  // adj943：弹条与差异框共用同一套判据（含"弹条说变 / 差异框 0 处"不可能发生）
+  .then(() => runAdj943SharedCriterionTests())
+  .catch((e) => {
+    failed++
+    console.error('  ✗ adj943 内容判据（弹条 vs 差异框）用例抛异常', e)
   })
   .then(() => runAdj363SaveTests())
   .catch((e) => {

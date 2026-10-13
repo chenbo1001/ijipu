@@ -61,7 +61,8 @@ import {
 let fileStateTouched = false
 import { uiCopy, savePhaseCopy, pasteImportCopy, externalOpenCopy, workspaceCopy, exportCopy } from '../brand/copy'
 // adj927：外部改动的**基准**（我们最后一次写出去/读进来的内容指纹 + mtime）——见 externalChange.ts
-import { baselineKeyOf, setBaseline } from './externalChange'
+// adj943：写盘**发出前**还要登记"在途写"（写盘落地与基准刷新之间有窗口，见该文件头说明）
+import { baselineKeyOf, setBaseline, markWriteInFlight } from './externalChange'
 // adj615：打印（菜单「打印」/ Ctrl+P）——浏览器侧原语在 export/print.ts，页面在这里现算
 import { installPrintHooks, printPages } from '../export/print'
 import { printFileNameOfResult } from '../export/printName'
@@ -432,6 +433,10 @@ async function runEmbedAutosave(): Promise<void> {
     if (ws.id !== bind.wsId) return
     const code = useDocStore.getState().code
     try {
+      // adj943：**写盘发出前**先登记"在途写"——宿主在 `adapter.write` 落地时就广播 `fileChanged`，
+      // 事件可能早于下面这次 await 的结算；不登记的话，事件读到的正是我们刚写下去的内容，
+      // 而基准还是上一版 ⇒ 会弹"文件内容已在其它地方被改动"（用户实报的假提示，E-2026-428）。
+      markWriteInFlight(baselineKeyOf(ws.id, bind.segs), code)
       await writeWorkspaceText(ws, bind.segs, code)
       // adj927：**自己写完立刻刷新基准**（内容指纹）——否则宿主推回我们自己这次写盘的
       // `modify` 时，基准还停在上一版内容上，会被当成"外部改动"（这正是用户报的假提示）。
@@ -951,6 +956,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
         ui.showNotice(workspaceCopy.exists(segs[segs.length - 1]), 'warn')
         return false
       }
+      // adj943：写盘发出前登记"在途写"（与随输随存同一口径；见 externalChange.ts 文件头）
+      markWriteInFlight(baselineKeyOf(ws.id, segs), code)
       await writeWorkspaceText(ws, segs, code)
       // adj927：自己写完立刻刷新基准（另存到工作区同样是"我们写下去的那份"）
       setBaseline(baselineKeyOf(ws.id, segs), code, null)
@@ -1355,6 +1362,8 @@ async function doSaveFile(): Promise<boolean> {
         return false
       }
       const code = useDocStore.getState().code
+      // adj943：写盘发出前登记"在途写"（Ctrl+S 写回工作区同样在我们的窗口里）
+      markWriteInFlight(baselineKeyOf(ws.id, wsPath), code)
       await writeWorkspaceText(ws, wsPath, code)
       // adj927：Ctrl+S 写回工作区后同样刷新基准
       setBaseline(baselineKeyOf(ws.id, wsPath), code, null)

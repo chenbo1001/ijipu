@@ -190,6 +190,15 @@ void (async () => {
        * ⚠ 嵌入版宿主目前只在事件里带 `path`（不带 mtime，见 `hostBridge.ts` 的 `HostEvents`），
        * 所以这里 `mtimeOf: null` ⇒ 实际走第②段（一次本地回环读，短谱毫秒级）。
        * 将来宿主把 mtime 一起推来，把 `mtimeOf` 换成"取宿主给的 mtime"即可自动启用快筛。
+       *
+       * ## adj943（用户实报：弹条说"变了"、差异框说"改动 0 处"）
+       *
+       * adj927 的基准只在"写盘**成功结算之后**"刷新，而宿主在 `adapter.write` 落地时就广播
+       * `fileChanged` ⇒ "文件已落地、基准还没跟上"这段窗口里，事件读到的正是**我们自己刚写下去
+       * 的那份**，于是弹了条；而差异框比的是「本地缓冲区 vs 文件」⇒ 两边逐字相同 ⇒ "改动 0 处"。
+       * ⇒ 口径改成：与**我们手里的内容**（基准 / 在途写 / **本地缓冲区**）归一化后任一同，
+       * 就静默刷新基准、永不弹条（详见 `store/externalChange.ts` 文件头）。
+       * `localText` 与差异框的 `diff.localText` **是同一个来源**（都是为了"两处同一套判据"）。
        */
       fileChanged: (path) => {
         void (async () => {
@@ -204,16 +213,15 @@ void (async () => {
           if (!bind || bind.segs.join('/') !== segs.join('/')) return
           const ws = await getWorkspace()
           if (!ws) return
-          /**
-           * 事件那一刻的缓冲区内容：只在"没有基准"（首次/刚换文件）时当兜底参照用；
-           * 有基准时**一律以基准为准**（缓冲区的后续编辑不该被当成"外部改动"）。
-           */
-          const atEvent = st.code
           let verdict: Awaited<ReturnType<typeof probeExternalChange>>
           try {
             verdict = await probeExternalChange({
               key: baselineKeyOf(ws.id, segs),
-              fallbackText: atEvent,
+              /**
+               * 本地内容**按取值函数传**（不是事件那一刻的快照）：事件与判定之间用户可能还在敲字，
+               * 判定要用此刻的内容；且与差异框（`diff.localText`）取的是**同一处**。
+               */
+              localText: () => useDocStore.getState().code,
               mtimeOf: null, // 宿主不回传 mtime ⇒ 走内容判据（见上面的说明）
               readText: () => readWorkspaceText(ws, segs),
             })

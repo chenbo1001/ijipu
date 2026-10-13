@@ -66,6 +66,20 @@ export function sameContent(a: string, b: string): boolean {
   return contentFingerprint(a) === contentFingerprint(b)
 }
 
+/**
+ * **"内容真的不一样吗"的唯一判据**（adj943）：`sameContent` 的反面，单独给个名字是为了让
+ * **两处调用点共用同一个语义**，而不是各写一套 `!==`：
+ *  · 弹条那一路（`store/externalChange.ts` 的 `probeFileChange`）：文件内容 vs 基准/在途写的/本地当前内容；
+ *  · 差异框那一路（`dialogs/FileDiffDialog.tsx` → `diffTexts`）：本地 vs 外部。
+ *
+ * 两路的实现都归到本文件的 `normalizeForDiff` ⇒ **"差异框 0 处" 与 "弹条说要问"不可能同时成立**
+ * （前者 = 本地与外部归一化后相同，后者要求外部与本地归一化后不同，同一把尺子量出两个结果才矛盾）。
+ * smoke 的 adj943 段用夹具矩阵把这条"不可能"钉住。
+ */
+export function hasContentChange(a: string, b: string): boolean {
+  return !sameContent(a, b)
+}
+
 /** 归一化后按行拆分（比较与展示共用同一份口径；空文本 = 0 行） */
 export function splitDiffLines(text: string): string[] {
   const n = normalizeForDiff(text)
