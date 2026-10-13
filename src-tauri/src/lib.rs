@@ -19,6 +19,11 @@ use tauri::{Emitter, Manager};
 /// adj875：命令行（`@ijipu/cli`）的**能力宿主**模块（Windows 命名管道；默认不开启）。
 mod cli_host;
 
+/// adj944（用户需求「全局设置里加注册 iJipu CLI 的按钮」）：把**安装目录注册进当前用户 PATH** ——
+/// 读写注册表 / 写前备份 / 回读校验 / 广播 `WM_SETTINGCHANGE` 都在这里；
+/// **字符串口径与编排在 TS**（`packages/ijipu-cli/src/envPath.ts`），应用界面与命令行共用那一份 ✓。
+mod cli_path;
+
 /// adj942：**内嵌 CLI** —— `ijipu.exe cli …` 时用它跑编进 exe 的那段 JS（QuickJS），
 /// **先于窗口**分流（见 `main.rs`）。只挂在 Windows 下：本轮交付物就是 `ijipu.exe` ✓。
 #[cfg(windows)]
@@ -468,6 +473,10 @@ pub fn run() {
             ws_create_dir,
             ws_remove_file,
             ws_remove_empty_dir,
+            // adj944：注册/解除 iJipu CLI（把安装目录写进/摘出当前用户 PATH）
+            cli_path::cli_path_status,
+            cli_path::cli_path_register,
+            cli_path::cli_path_unregister,
         ])
         .build(context)
         .expect("error while building tauri application")

@@ -38,6 +38,33 @@ export type EmbedHost = {
   listDir(dir: string): string[]
   /** 文件/目录是否存在 */
   exists(path: string): boolean
+  /**
+   * adj944（用户需求「只有注册后，打开终端就能 `ijipu cli`」）：**注册/解除 PATH** 的宿主能力。
+   *
+   * 为什么由宿主提供：它要读写 `HKCU\Environment\Path`（还有 App Paths）—— 那是 **Rust 侧**的事
+   * （`src-tauri/src/cli_path.rs`：写前备份 + 写入 + **回读校验** + 广播 `WM_SETTINGCHANGE`）；
+   * 字符串口径与编排在 `envPath.ts`（与应用界面那个按钮**共用一份** ✓）。
+   * 旧宿主（没注入这个对象）⇒ CLI 如实报错（退出码 6），不假装成功 ✗。
+   *
+   * ⚠ 全部**同步 + 字符串进出**（与本类型其它成员同口径）；`write` 用返回值而不是抛异常报错
+   *   —— 失败原因要一路传到用户眼前，抛异常会被包成"接线异常（70）"，那是另一回事 ✗。
+   */
+  cliPath?: {
+    /** `ijipu.exe` 所在目录（写进 PATH 的条目） */
+    installDir(): string
+    /** `ijipu.exe` 完整路径（App Paths 用） */
+    exePath(): string
+    /** 读 `HKCU\Environment\Path`（没有该值 ⇒ null） */
+    readPath(): string | null
+    /** 写 PATH（宿主负责备份 / 回读校验 / 广播）；失败用 `ok:false` 回，**不抛** ✓ */
+    writePath(value: string): { ok: boolean; error: string | null }
+    /** 读 App Paths 的默认值（没有 ⇒ null） */
+    readAppPaths(): string | null
+    /** 写 App Paths 指向我们的 exe */
+    writeAppPaths(exePath: string): void
+    /** 删我们自己写的 App Paths 条目（不是我们写的不动 ✓） */
+    removeAppPaths(): void
+  }
   /** 写 stdout（原样，不补换行 —— CLI 自己补，见 `cli.ts` 的 `line()`） */
   out(text: string): void
   /** 写 stderr（CLI 传进来时已带换行；宿主**不要**再补） */
@@ -119,6 +146,7 @@ function installTextEncoderPolyfill(): void {
 
 /** 把宿主能力接成 `runCli` 要的 `CliIo`（**唯一一处**接线，测试与宿主共用 ✓） */
 function ioOf(host: EmbedHost): CliIo {
+  const cliPath = host.cliPath
   return {
     async readStdin() {
       return host.readStdin()
@@ -137,6 +165,39 @@ function ioOf(host: EmbedHost): CliIo {
     async listDir(dir) {
       return host.listDir(dir)
     },
+    /**
+     * adj944：注册/解除 PATH 的宿主能力（**有才接** —— 旧宿主没有这个对象时，
+     * `register`/`unregister`/`status` 会如实报"环境能力缺失"，退出码 6 ✓）。
+     * 这里只做**同步↔异步**的桥接：字符串口径与编排全在 `envPath.ts`（与应用界面共用一份 ✓）。
+     */
+    pathHost:
+      cliPath === undefined
+        ? undefined
+        : {
+            async installDir() {
+              return cliPath.installDir()
+            },
+            async exePath() {
+              return cliPath.exePath()
+            },
+            async readPath() {
+              return cliPath.readPath()
+            },
+            async writePath(value) {
+              const r = cliPath.writePath(value)
+              // 宿主用 `{ok:false,error}` 回失败原因 ⇒ 在这里变成异常，由 `envPath.ts` 统一收成 `{kind:'io'}`
+              if (!r.ok) throw new Error(r.error ?? '写注册表失败（宿主没有给出原因）')
+            },
+            async readAppPaths() {
+              return cliPath.readAppPaths()
+            },
+            async writeAppPaths(exePath) {
+              cliPath.writeAppPaths(exePath)
+            },
+            async removeAppPaths() {
+              cliPath.removeAppPaths()
+            },
+          },
     /**
      * ⚠ `rasterize` / `synthesize` / `watchFile` **刻意不注入** ✗ ——
      * 位图/音频要应用当能力宿主（命名管道，`docs/CLI.md` §七之三），`--watch` 要长驻监视；

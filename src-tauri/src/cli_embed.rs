@@ -10,6 +10,9 @@
  *    是 CLI 形态就只跑 CLI，`std::process::exit(退出码)`，绝不建窗口 ✓。
  * 2. **不硬造 `node:fs`**：JS 侧只做接线（`packages/ijipu-cli/src/embedEntry.ts`），
  *    文件读写/stdout 全由本模块注入（`__ijipuHost`）⇒ 少造一层假模块 ✓。
+ *    adj944 起还多注入一组 `cliPath`（安装目录 / 读写 `HKCU\Environment\Path` / App Paths）——
+ *    那是"注册 iJipu CLI"要用的系统能力，逻辑（分号切分、长度上限、幂等）在
+ *    `packages/ijipu-cli/src/envPath.ts`，与全局设置里那个按钮**共用一份** ✓。
  * 3. **与"双击 `.jps` 打开 GUI"不冲突**：只认**明确子命令** `cli`（`ijipu.exe cli lint 谱.jps`）。
  *    `.jps` 路径作为第一个参数时**照旧进 GUI** ✓（判据是 `split_cli_args`，有单测钉着）。
  *
@@ -362,6 +365,12 @@ fn build_host<'js>(ctx: &Ctx<'js>, argv: &[String]) -> rquickjs::Result<Object<'
             Path::new(&path).exists()
         }),
     )?;
+    // adj944：注册/解除 PATH 的宿主能力（用户需求「只有注册后，打开终端就能 ijipu cli」）。
+    // ⚠ 只注入**系统能力**（读写注册表 / 安装目录 / App Paths）；"怎么算新 PATH"（分号切分、
+    //   大小写无关比较、长度上限、幂等）在 `packages/ijipu-cli/src/envPath.ts` —— 与应用界面
+    //   那个按钮**共用同一份** ✓。**失败不抛异常**：`writePath` 用 `{ok,error}` 回，
+    //   否则会被上层当成"接线异常（70）"，而这是"注册表写不进去"这个正常失败 ✓。
+    host.set("cliPath", build_cli_path_host(ctx)?)?;
     host.set(
         "out",
         Function::new(ctx.clone(), |text: String| {
@@ -381,6 +390,81 @@ fn build_host<'js>(ctx: &Ctx<'js>, argv: &[String]) -> rquickjs::Result<Object<'
         }),
     )?;
     Ok(host)
+}
+
+/// adj944：把 `src/cli_path.rs` 的那组函数接成 JS 侧的 `__ijipuHost.cliPath`
+/// （字段口径见 `packages/ijipu-cli/src/embedEntry.ts` 的 `EmbedHost.cliPath`）
+fn build_cli_path_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
+    let obj = Object::new(ctx.clone())?;
+    obj.set(
+        "installDir",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>| -> rquickjs::Result<String> {
+            crate::cli_path::install_dir_string().map_err(|e| Exception::throw_message(&ctx, &e))
+        }),
+    )?;
+    obj.set(
+        "exePath",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>| -> rquickjs::Result<String> {
+            crate::cli_path::exe_path_string().map_err(|e| Exception::throw_message(&ctx, &e))
+        }),
+    )?;
+    obj.set(
+        "readPath",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>| -> rquickjs::Result<Option<String>> {
+            crate::cli_path::read_env_path().map_err(|e| Exception::throw_message(&ctx, &e))
+        }),
+    )?;
+    // 写：**回结果对象而不是抛异常**（失败原因要原样传到用户眼前，见上面的说明）
+    obj.set(
+        "writePath",
+        Function::new(
+            ctx.clone(),
+            |ctx: Ctx<'js>, value: String| -> rquickjs::Result<Object<'js>> {
+                let out = Object::new(ctx.clone())?;
+                match crate::cli_path::write_env_path(&value) {
+                    Ok(()) => {
+                        out.set("ok", true)?;
+                        out.set("error", Option::<String>::None)?;
+                    }
+                    Err(e) => {
+                        out.set("ok", false)?;
+                        out.set("error", e)?;
+                    }
+                }
+                Ok(out)
+            },
+        ),
+    )?;
+    obj.set(
+        "readAppPaths",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>| -> rquickjs::Result<Option<String>> {
+            crate::cli_path::read_app_paths().map_err(|e| Exception::throw_message(&ctx, &e))
+        }),
+    )?;
+    // App Paths 是**可选便利**：失败只记不报（PATH 才是契约；与 `lib.rs` 的命令同口径 ✓）
+    obj.set(
+        "writeAppPaths",
+        Function::new(ctx.clone(), |exe: String| {
+            if let Err(e) = crate::cli_path::write_app_paths(&exe) {
+                #[cfg(windows)]
+                con::write_err(&format!("[iJipu] 写 App Paths 失败（不影响 PATH 注册）：{e}\n"));
+                #[cfg(not(windows))]
+                eprintln!("[iJipu] 写 App Paths 失败（不影响 PATH 注册）：{e}");
+            }
+        }),
+    )?;
+    obj.set(
+        "removeAppPaths",
+        Function::new(ctx.clone(), || {
+            if let Err(e) = crate::cli_path::remove_app_paths() {
+                #[cfg(windows)]
+                con::write_err(&format!("[iJipu] 清 App Paths 失败（不影响 PATH 解除）：{e}\n"));
+                #[cfg(not(windows))]
+                eprintln!("[iJipu] 清 App Paths 失败（不影响 PATH 解除）：{e}");
+            }
+        }),
+    )?;
+    Ok(obj)
 }
 
 /// 读失败的文案：保留 Node 那句 `ENOENT: …` 的形状（脚本里报错看着一致 ✓）

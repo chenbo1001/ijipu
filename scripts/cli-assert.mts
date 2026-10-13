@@ -103,6 +103,12 @@ console.log('\n— 命令行（A·P1–P4）—')
   check('adj806 无合成通道时 WAV ⇒ 4', (await runCli(['play', '-i', '-', '-t', 'wav', '-o', 'x.wav'], f.io)).code === EXIT.render)
   const g = makeIo({ '(stdin)': GOOD })
   check('adj806 --config 未实现 ⇒ 5（设置非法）', (await runCli(['info', '-i', '-', '--config', 'x.toml'], g.io)).code === EXIT.config)
+  /**
+   * adj944：注册类命令要读写当前用户的注册表 —— 只有桌面端 `ijipu.exe`（内嵌 CLI）有这个能力，
+   * 独立 Node 环境没有 ⇒ **退出码 6**（刻意与"用法错误 1""渲染能力缺失 4"分开，脚本据此换环境 ✓）。
+   */
+  const h = makeIo({ '(stdin)': GOOD })
+  check('adj944 无宿主时注册类命令 ⇒ 6（环境能力缺失）', (await runCli(['status'], h.io)).code === EXIT.env && EXIT.env === 6)
   // 负对照：把"位图需要通道"的判断去掉 ⇒ 判据为假（证明这条真的在起作用）
   const noCapIo = makeIo({ '(stdin)': GOOD })
   check(
@@ -278,9 +284,9 @@ console.log('\n— 命令行（A·P1–P4）—')
   const r = await runCli(['--help'], io.io, { version: '9.9.9' })
   const help = String(io.logs.join(''))
   check('adj874 --help 退出码 0、写 stdout、不写 stderr', r.code === EXIT.ok && help.length > 0 && io.errs.length === 0, `code=${r.code}`)
-  const CMDS = ['format', 'lint', 'info', 'render', 'play', 'batch', 'settings', 'config', 'doctor', 'completions']
+  const CMDS = ['format', 'lint', 'info', 'render', 'play', 'batch', 'settings', 'config', 'doctor', 'completions', 'register', 'unregister', 'status']
   const missing = CMDS.filter((c) => !help.includes(c))
-  check('adj874 --help 列全 10 个已实现命令', missing.length === 0, `缺：${missing.join(' ')}`)
+  check('adj874/adj944 --help 列全 13 个已实现命令（含 adj944 的 register/unregister/status）', missing.length === 0, `缺：${missing.join(' ')}`)
   /**
    * **负对照**：旧文案把 render / play / batch / settings / config / doctor 写成
    * 「未实现（P2–P4，会明确报错）」—— 而那 6 个命令**当时早已实现**（E-2026-390）。
@@ -469,6 +475,140 @@ console.log('\n— 命令行（A·P1–P4）—')
     } finally {
       g.TextEncoder = savedTe
     }
+  }
+}
+
+// ⑩ adj944（用户需求）：「注册 iJipu CLI 到当前用户 PATH」的三个子命令 —— 接线、退出码、幂等
+{
+  /**
+   * 假宿主：`io.pathHost`（真宿主在 Rust 侧 `src-tauri/src/cli_path.rs`，真机实测另做）。
+   * ⚠ 这里**不碰真实注册表**：把"系统"放在内存里 ⇒ 断言能精确到"到底写了几次、写的是什么" ✓。
+   */
+  const makePathHost = (initial: string | null, installDir = 'C:\\Apps\\iJipu') => {
+    let value = initial
+    let appPaths: string | null = null
+    const writes: string[] = []
+    const host = {
+      async installDir() {
+        return installDir
+      },
+      async exePath() {
+        return `${installDir}\\ijipu.exe`
+      },
+      async readPath() {
+        return value
+      },
+      async writePath(next: string) {
+        writes.push(next)
+        value = next
+      },
+      async readAppPaths() {
+        return appPaths
+      },
+      async writeAppPaths(exe: string) {
+        appPaths = exe
+      },
+      async removeAppPaths() {
+        appPaths = null
+      },
+    }
+    return { host, writes, value: () => value, appPaths: () => appPaths }
+  }
+
+  // ① 没有宿主能力（独立 Node 环境）⇒ 如实报 6，且不假装成功
+  {
+    const noHost = makeIo({})
+    const r = await runCli(['status'], noHost.io)
+    check(
+      'adj944 无宿主（独立 Node 环境）⇒ `status` 退出码 6 且说明"要用桌面端"（不假装成功 ✗）',
+      r.code === EXIT.env && noHost.errs.some((e) => e.includes('桌面端')) && noHost.logs.length === 0,
+      `code=${r.code} err=${noHost.errs.join('｜')}`,
+    )
+    const noHost2 = makeIo({})
+    check(
+      'adj944 无宿主 ⇒ `register` 同样是 6（三个子命令一条口径）',
+      (await runCli(['register'], noHost2.io)).code === EXIT.env,
+    )
+    const noHost3 = makeIo({})
+    check(
+      'adj944 无宿主 ⇒ `unregister` 同样是 6',
+      (await runCli(['unregister'], noHost3.io)).code === EXIT.env,
+    )
+  }
+
+  // ② 有宿主：status / register / unregister 的实况与幂等
+  {
+    const a = makePathHost(null)
+    const st = makeIo({})
+    st.io.pathHost = a.host
+    const r0 = await runCli(['status', '--json'], st.io)
+    const s0 = JSON.parse(String(st.logs.join('')))
+    check(
+      'adj944 `status --json`：未注册时如实报 registered=false + 安装目录 + PATH 长度',
+      r0.code === EXIT.ok && s0.registered === false && s0.installDir === 'C:\\Apps\\iJipu' &&
+        s0.pathLength === 0 && s0.pathLimit === 2047,
+      JSON.stringify(s0),
+    )
+
+    const reg = makeIo({})
+    reg.io.pathHost = a.host
+    const r1 = await runCli(['register'], reg.io)
+    check(
+      'adj944 `register` ⇒ 0、只写一次、写的就是安装目录，并提示"新开一个终端"',
+      r1.code === EXIT.ok && a.writes.length === 1 && a.writes[0] === 'C:\\Apps\\iJipu' &&
+        reg.logs.join('').includes('新开一个终端'),
+      `writes=${JSON.stringify(a.writes)}`,
+    )
+    const reg2 = makeIo({})
+    reg2.io.pathHost = a.host
+    const r2 = await runCli(['register'], reg2.io)
+    check(
+      'adj944 再 `register` 一次 ⇒ **一个字都不写**（幂等；已注册时不重复追加）',
+      r2.code === EXIT.ok && a.writes.length === 1 && reg2.logs.join('').includes('未重复写入'),
+      `writes=${a.writes.length} out=${JSON.stringify(reg2.logs.join(''))}`,
+    )
+    const un = makeIo({})
+    un.io.pathHost = a.host
+    const r3 = await runCli(['unregister'], un.io)
+    check(
+      'adj944 `unregister` ⇒ 0、把 PATH 写成空、App Paths 也清掉',
+      r3.code === EXIT.ok && a.value() === '' && a.appPaths() === null && a.writes.length === 2 &&
+        un.logs.join('').includes('逐字未动'),
+      `value=${JSON.stringify(a.value())}`,
+    )
+    const un2 = makeIo({})
+    un2.io.pathHost = a.host
+    const r4 = await runCli(['unregister'], un2.io)
+    check('adj944 再 `unregister` 一次 ⇒ 不改动（幂等）', r4.code === EXIT.ok && a.writes.length === 2)
+  }
+
+  // ③ 别人的条目一个字都不许动 + 超长拒绝写入（负对照）
+  {
+    const b = makePathHost('C:\\Windows;C:\\Apps\\iJipu;C:\\Other')
+    const un = makeIo({})
+    un.io.pathHost = b.host
+    await runCli(['unregister'], un.io)
+    check(
+      'adj944 `unregister` 只摘自己那一条，别人的两条**逐字未动**',
+      b.value() === 'C:\\Windows;C:\\Other' && b.writes.length === 1,
+      `value=${JSON.stringify(b.value())}`,
+    )
+
+    const long = makePathHost('z'.repeat(2047))
+    const reg = makeIo({})
+    reg.io.pathHost = long.host
+    const r = await runCli(['register'], reg.io)
+    check(
+      'adj944 超长 ⇒ 退出码 6、**不写**（writes=0），并把上限与建议讲清楚',
+      r.code === EXIT.env && long.writes.length === 0 && reg.errs.join('').includes('2047') &&
+        reg.errs.join('').includes('未写入'),
+      `code=${r.code} writes=${long.writes.length} err=${reg.errs.join('｜').slice(0, 120)}`,
+    )
+    /** 负对照：把"不判长度"的写法当判据 ⇒ 它会照写（writes 就不是 0）⇒ 判假 ✓ */
+    check(
+      'adj944 负对照：超长却照样写的情形与上面的"零写入"互斥',
+      long.writes.length === 0 && r.code === EXIT.env,
+    )
   }
 }
 

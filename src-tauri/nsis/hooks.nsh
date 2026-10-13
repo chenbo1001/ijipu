@@ -58,6 +58,18 @@
 !define IJIPU_AUMI "com.ijipu.app"
 
 /**
+ * adj944（用户需求「全局设置里注册 iJipu CLI」）：卸载时把安装目录从**当前用户 PATH** 里摘掉。
+ *
+ * 放在这里（而不是整份逻辑写进本文件）：那是纯字符串活 + 几处注册表清理，单独一个文件
+ * **可以拿 makensis 单独跑小测试**（本仓库的 Rust 单测在本机跑不起来，见 E-2026-427 ⇒
+ * "能单独验证"这件事很值钱 ✓）。它用到 `${IJIPU_EXE}`，故**必须定义在下面这些常量之后**。
+ *
+ * ⚠ 路径拼接要自己补分隔符：`${__FILEDIR__}` **不带**末尾反斜杠（实测写成 `"${__FILEDIR__}cli-path.nsh"`
+ *   会变成 `…\nsiscli-path.nsh`，makensis 报 "could not find" ✗）。
+ */
+!include "${__FILEDIR__}\cli-path.nsh"
+
+/**
  * 给快捷方式写 AppUserModelID。
  *
  * 为什么不直接 `!insertmacro SetLnkAppUserModelId`（Tauri 模板 utils.nsh 里那个）：它的宏体里写的是
@@ -210,5 +222,15 @@ FunctionEnd
   DeleteRegKey HKCU "Software\Classes\.${IJIPU_JPS_EXT}"
 
   ijipu_uninstall_done:
+  /**
+   * adj944：**把安装目录从当前用户 PATH 里摘掉**（用户需求："卸载会自动解除"）。
+   *
+   * 为什么整段受 `$UpdateMode` 保护：更新流程会先跑一次卸载器 —— 那时把 PATH 摘了、
+   * 而更新路径不会重新注册，用户就"更新一次丢一次注册" ✗（与上面删快捷方式同一条理由）。
+   * 本宏**幂等**：PATH 里没有我们那条 ⇒ 连注册表都不写一个字 ✓（见 `cli-path.nsh`）。
+   */
+  ${If} $UpdateMode <> 1
+    !insertmacro IJIPU_PATH_UNREGISTER
+  ${EndIf}
   !insertmacro IJIPU_NOTIFY_SHELL
 !macroend

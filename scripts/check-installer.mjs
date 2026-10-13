@@ -157,6 +157,41 @@ console.log('[check-installer] 内嵌 CLI（adj942：命令行编进 exe）自�
   console.log(`  · exe ${Math.round(exeSize / 1024)}KB ／ 内嵌产物 ${Math.round(embedSize / 1024)}KB`)
 }
 
+/**
+ * adj944（用户需求「只有注册后，打开终端就能 ijipu cli」）：**卸载时自动解除 PATH 注册**的接线自检。
+ *
+ * 为什么值得机器守住：这段只出现在**卸载器**里，装机时完全看不出来 —— 漏了要等用户卸载完
+ * 才发现"PATH 里留了一条指向空目录的项"（而且那时已经不好查了）。三条一起看：
+ *   ① 钩子文件 `cli-path.nsh` 真的存在、含两个 `un.` 函数（卸载段里只能 `Call un.` 开头的 ✗ 否则编译不过）；
+ *   ② `hooks.nsh` 既 `!include` 了它、又在卸载钩子里 `!insertmacro IJIPU_PATH_UNREGISTER`；
+ *   ③ **`nsis/*.nsh` 都带 UTF-8 BOM** —— 这两个文件含中文，makensis 对"无 BOM 又含非 ASCII 字节"
+ *      的脚本直接报 `Bad text encoding` 拒绝编译（实测踩到过），所以它是个硬前提 ✓。
+ */
+console.log('[check-installer] 卸载自动解除 PATH 注册（adj944）自检：')
+{
+  const CLI_PATH_NSH = 'src-tauri/nsis/cli-path.nsh'
+  const cliPath = existsSync(CLI_PATH_NSH) ? readFileSync(CLI_PATH_NSH, 'utf8') : ''
+  const hasBom = (p) => existsSync(p) && readFileSync(p).subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf]))
+  const checks = [
+    [`钩子文件存在且含卸载用的两个函数（${CLI_PATH_NSH}）`,
+      cliPath.includes('Function un.IJIPU_PathDropDir') && cliPath.includes('Function un.IJIPU_EnvValueType')],
+    ['摘除逻辑按原值类型写回（`%USERPROFILE%` 这类变量不会被写坏）', cliPath.includes('WriteRegExpandStr')],
+    ['App Paths 只删指向我们的那条（不是我们写的不动）', cliPath.includes('IJIPU_APP_PATHS_KEY') && cliPath.includes('DeleteRegValue')],
+    ['`hooks.nsh` 已 include 该文件', hooks.includes('cli-path.nsh')],
+    ['`hooks.nsh` 的卸载钩子里插了 `IJIPU_PATH_UNREGISTER`',
+      hooks.includes('!insertmacro IJIPU_PATH_UNREGISTER') &&
+        (hooks.match(/macro NSIS_HOOK_POSTUNINSTALL/g) ?? []).length === 1],
+    ['更新流程不摘 PATH（受 `$UpdateMode <> 1` 保护，否则"更新一次丢一次注册"）',
+      /\$\{If\}\s+\$UpdateMode\s+<>\s+1[\s\S]{0,400}!insertmacro IJIPU_PATH_UNREGISTER/.test(hooks)],
+    [`${CLI_PATH_NSH} 带 UTF-8 BOM（makensis 对含中文的脚本硬要求）`, hasBom(CLI_PATH_NSH)],
+    ['`hooks.nsh` 带 UTF-8 BOM', hasBom(HOOKS)],
+  ]
+  for (const [label, ok] of checks) {
+    console.log(`  ${ok ? '✓' : '✗'} ${label}`)
+    if (!ok) failed++
+  }
+}
+
 if (existsSync(SETUP_DIR)) {
   const files = readdirSync(SETUP_DIR).filter((f) => f.endsWith('.exe'))
   if (files.length === 0) {

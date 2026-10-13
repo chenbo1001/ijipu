@@ -238,6 +238,20 @@ import { RECENT_FILES_MAX } from '../src/store/fileHandleDb.ts'
 import { foldKeys, TOPBAR_DONATE_KEY, TOPBAR_FIXED_KIDS } from '../src/ui/topbarFold.ts'
 // adj538：桌面壳「外部打开」——多文件取舍是纯逻辑，可在 Node 里直接断言（模块不碰 window 顶层）
 import { pickPrimary, hasShell, type ExternalFile } from '../src/store/externalOpen.ts'
+// adj944（用户需求「全局设置里注册 iJipu CLI」）：PATH 增删的**纯函数 + 编排** ——
+// 应用界面（全局设置那个按钮）与命令行（`ijipu cli register|unregister|status`）**共用这一份** ✓
+import {
+  addDirToPath,
+  cliPathRegister,
+  cliPathStatus,
+  cliPathUnregister,
+  normalizePathEntry,
+  pathHasDir,
+  removeDirFromPath,
+  splitPathEntries,
+  PATH_MAX_CHARS,
+  type PathHostIo,
+} from '../packages/ijipu-cli/src/envPath'
 // adj540：工作区（Android/移动端"文件夹当工作区"）——纯逻辑部分在 Node 里直接断言
 import {
   isHiddenName,
@@ -18193,8 +18207,11 @@ runAdj927ExternalChangeTests()
       }
     }
     runAdj942EmbedCliTests()
-    console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
-    process.exit(failed === 0 ? 0 : 1)
+    // adj944：本段要读注入的假宿主（异步）⇒ 与收尾那行**排成一条链**（否则会在断言跑完前就打印通过 ✗）
+    void runAdj944CliPathTests().then(() => {
+      console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
+      process.exit(failed === 0 ? 0 : 1)
+    })
   })
 
 
@@ -24006,4 +24023,199 @@ function runAdj942EmbedCliTests() {
     'adj942 负对照⑨：把 import 路径换成 Node 入口（`nodeEntry`）⇒ 判据为假',
     !importsEmbedEntry(cliAssertSrc.replace('src/embedEntry', 'src/nodeEntry')) && importsEmbedEntry(cliAssertSrc),
   )
+}
+
+/**
+ * [170] 注册 iJipu CLI 到**当前用户 PATH**（adj944，用户需求）。
+ *
+ * 为什么这一段必须有：这条链路上"悄悄坏掉"的方式都很隐蔽，而且**每一条都直接动用户的 PATH** ✗：
+ *   · 追加不幂等 ⇒ 用户点两次「注册」PATH 里就多两条（时间一长把它撑爆）；
+ *   · 比较用"逐字相等" ⇒ 用户手改过大小写/末尾反斜杠就认不出来，又追加一条；
+ *   · 解除顺手 trim/去重 ⇒ **改了别人的条目**（"其余逐字不动"当场破掉）；
+ *   · 超长不拦 ⇒ 写进去之后某些老程序读不全，症状极难查；
+ *   · Rust 侧的上限常量与 TS 对不上 ⇒ 前端说"没超"、后端说"超了"（两处判据打架）。
+ * 所以这里**每条都有成对断言 + 负对照**（把判据喂给"故意写坏的一份"必须为假 ✓）。
+ *
+ * ⚠ 本段只测**纯函数与编排**（假宿主 = 内存里的"系统"）；
+ *   **真注册表读写**由真机实测做（见 `docs/CLI.md` 的"注册/解除"一节），不在这里碰用户的 PATH ✗。
+ */
+async function runAdj944CliPathTests() {
+  console.log('[170] 注册 iJipu CLI 到当前用户 PATH（adj944）')
+  const D = 'C:\\Apps\\iJipu'
+  const readOrEmpty = (rel: string): string => (existsSync(join(root, rel)) ? readFileSync(join(root, rel), 'utf8') : '')
+
+  // ---- ① 纯函数：切分 / 判定 ----
+  {
+    check('adj944 切分保留空条目（`A;;B` 不许被"顺手清理"）',
+      splitPathEntries('A;;B').length === 3 && splitPathEntries('A;;B')[1] === '')
+    check('adj944 归一化：大小写 / 包裹引号 / 末尾斜杠都不算差异',
+      normalizePathEntry('"C:\\Apps\\iJipu\\"') === normalizePathEntry(D) &&
+        normalizePathEntry(' c:\\apps\\ijipu ') === normalizePathEntry(D))
+    check('adj944 `pathHasDir`：空 PATH ⇒ 假', pathHasDir('', D) === false)
+    check('adj944 `pathHasDir`：别人手动加的同一目录（引号 + 末尾反斜杠 + 小写）也算已注册',
+      pathHasDir('C:\\Windows;"c:\\apps\\ijipu\\";C:\\Other', D) === true)
+    /** 负对照：判据若是"逐字相等"（只认我们自己写过的样子），这份 PATH 就会被判成"未注册" ⇒ 假 ✓ */
+    const ownFormatOnly = (value: string, dir: string): boolean => splitPathEntries(value).includes(dir)
+    check('adj944 负对照①：把判据换成"逐字相等"（只认我方格式）⇒ 同一份 PATH 判假',
+      !ownFormatOnly('C:\\Windows;"c:\\apps\\ijipu\\"', D) &&
+        pathHasDir('C:\\Windows;"c:\\apps\\ijipu\\"', D) === true)
+  }
+
+  // ---- ② 追加：空 PATH / 末尾分号 / 重复分号 / 幂等 / 大小写 ----
+  {
+    const empty = addDirToPath('', D)
+    check('adj944 空 PATH ⇒ 直接就是安装目录', empty.ok === true && empty.value === D && empty.changed === true)
+    const noSemi = addDirToPath('C:\\Windows', D)
+    check('adj944 末尾不带分号 ⇒ 补一个 `;` 再接上', noSemi.ok === true && noSemi.value === `C:\\Windows;${D}`)
+    const semi = addDirToPath('C:\\Windows;', D)
+    check('adj944 末尾已带分号 ⇒ 不再补一个（不制造 `;;`）', semi.ok === true && semi.value === `C:\\Windows;${D}`)
+    const doubleSemi = addDirToPath('C:\\Windows;;', D)
+    check('adj944 末尾重复分号（空条目）⇒ 别人的空条目**逐字保留**，只接上我们的目录',
+      doubleSemi.ok === true && doubleSemi.value === `C:\\Windows;;${D}`)
+    /** 负对照："先把末尾分号清理干净再拼"的写法会把别人的空条目吃掉，结果与正确值不同 ⇒ 判假 ✓ */
+    const naiveTrimTail = (value: string, dir: string): string => `${value.replace(/;+$/, '')};${dir}`
+    check('adj944 负对照②：把"清理末尾分号"的写法当判据 ⇒ 与正确值不同（吃掉了别人的空条目）',
+      naiveTrimTail('C:\\Windows;;', D) !== doubleSemi.value &&
+        naiveTrimTail('C:\\Windows;', D) === semi.value)
+    const twice = addDirToPath(noSemi.ok ? noSemi.value : '', D)
+    check('adj944 幂等：连着追加两次 == 追加一次（第二次一个字都没写）',
+      twice.ok === true && twice.changed === false && noSemi.ok === true && twice.value === noSemi.value)
+    /** 负对照：无条件追加（不判"已存在"）⇒ 会写出重复条目 ⇒ 判假 ✓ */
+    const naiveAppend = (value: string, dir: string): string => (value === '' ? dir : `${value};${dir}`)
+    check('adj944 负对照③：无条件追加会写出重复条目 ⇒ 与正确值不同',
+      noSemi.ok === true && naiveAppend(noSemi.value, D) !== noSemi.value && twice.changed === false)
+    const caseOnly = addDirToPath('C:\\Windows;c:\\apps\\IJIPU', D)
+    check('adj944 大小写不同 ⇒ 认成已注册、不重复写',
+      caseOnly.ok === true && caseOnly.changed === false && caseOnly.value === 'C:\\Windows;c:\\apps\\IJIPU')
+  }
+
+  // ---- ③ 移除：只摘自己那一条，其余逐字不动 ----
+  {
+    const mid = `C:\\Windows;${D};C:\\Other`
+    check('adj944 移除中间那一条 ⇒ 前后条目逐字保留', removeDirFromPath(mid, D) === 'C:\\Windows;C:\\Other')
+    check('adj944 移除首条 / 末条 / 唯一一条',
+      removeDirFromPath(`${D};C:\\Other`, D) === 'C:\\Other' &&
+        removeDirFromPath(`C:\\Other;${D}`, D) === 'C:\\Other' && removeDirFromPath(D, D) === '')
+    const weird = `A; ;${D};B`
+    check('adj944 别人的"空条目 / 只有空格的条目"逐字不动（不 trim、不去重）',
+      removeDirFromPath(weird, D) === 'A; ;B')
+    /** 负对照：顺手 trim + 去空的写法会把 " " 这条别人的条目吃掉 ⇒ 判假 ✓ */
+    const naiveClean = (value: string, dir: string): string =>
+      splitPathEntries(value)
+        .map((e) => e.trim())
+        .filter((e) => e !== '' && e !== dir)
+        .join(';')
+    check('adj944 负对照④：顺手 trim/去空的写法会改到别人的条目 ⇒ 与正确值不同',
+      naiveClean(weird, D) === 'A;B' && removeDirFromPath(weird, D) === 'A; ;B')
+    check('adj944 移除幂等：目录不在里面 ⇒ 原值逐字返回',
+      removeDirFromPath('C:\\Windows;C:\\Other', D) === 'C:\\Windows;C:\\Other' &&
+        removeDirFromPath(removeDirFromPath(mid, D), D) === removeDirFromPath(mid, D))
+  }
+
+  // ---- ④ 长度上限：超长 ⇒ 拒绝写入（不是"写了再说"） ----
+  {
+    const fit = 'a'.repeat(PATH_MAX_CHARS - 1 - D.length)
+    const ok = addDirToPath(fit, D)
+    check(`adj944 正好 ${PATH_MAX_CHARS} 字符 ⇒ 放行`,
+      ok.ok === true && ok.value.length === PATH_MAX_CHARS)
+    const over = 'b'.repeat(PATH_MAX_CHARS - 1 - D.length + 1)
+    const bad = addDirToPath(over, D)
+    check(`adj944 超一个字符（${PATH_MAX_CHARS + 1}）⇒ 拒绝写入并报出真实长度`,
+      bad.ok === false && bad.reason === 'too-long' && bad.length === PATH_MAX_CHARS + 1 &&
+        bad.limit === PATH_MAX_CHARS)
+    /** 负对照：不判长度的写法会照样拼出来（长度就是超限值）⇒ 与"拒绝写入"互斥 ✓ */
+    const naiveNoLimit = (value: string, dir: string): string => `${value};${dir}`
+    check('adj944 负对照⑤：不判长度就会拼出超限值 ⇒ 与"拒绝写入"的结论不同',
+      naiveNoLimit(over, D).length === PATH_MAX_CHARS + 1 && bad.ok === false)
+  }
+
+  // ---- ⑤ 编排：读实况 → 算新值 → 写 → **再读实况**回来（假宿主 = 内存里的系统） ----
+  {
+    const makeHost = (pathValue: string | null, installDir = D) => {
+      let value = pathValue
+      let appPaths: string | null = null
+      const writes: string[] = []
+      const host: PathHostIo = {
+        async installDir() {
+          return installDir
+        },
+        async exePath() {
+          return `${installDir}\\ijipu.exe`
+        },
+        async readPath() {
+          return value
+        },
+        async writePath(next) {
+          writes.push(next)
+          value = next
+        },
+        async readAppPaths() {
+          return appPaths
+        },
+        async writeAppPaths(exe) {
+          appPaths = exe
+        },
+        async removeAppPaths() {
+          appPaths = null
+        },
+      }
+      return { host, writes, value: () => value, appPaths: () => appPaths }
+    }
+
+    const a = makeHost(null)
+    const st0 = await cliPathStatus(a.host)
+    check('adj944 编排：没注册时 status 如实报"未注册"（空 PATH ⇒ 空串）',
+      st0.registered === false && st0.pathValue === '' && st0.installDir === D)
+    const r1 = await cliPathRegister(a.host)
+    check('adj944 编排：注册只写一次、**写后现读**即为"已注册"',
+      r1.ok === true && r1.changed === true && a.writes.length === 1 && a.writes[0] === D &&
+        r1.status.registered === true)
+    check('adj944 编排：注册顺带写 App Paths（"运行"对话框/资源管理器地址栏也能敲 ijipu）',
+      a.appPaths() === `${D}\\ijipu.exe`)
+    const r2 = await cliPathRegister(a.host)
+    check('adj944 编排：再点一次「注册」⇒ 一个字都不写（幂等）',
+      r2.ok === true && r2.changed === false && a.writes.length === 1)
+    const r3 = await cliPathUnregister(a.host)
+    check('adj944 编排：解除后 PATH 里没有我们那条、App Paths 也清掉',
+      r3.ok === true && r3.changed === true && a.value() === '' && a.appPaths() === null && a.writes.length === 2)
+    const r4 = await cliPathUnregister(a.host)
+    check('adj944 编排：再点一次「解除」⇒ 不改动（幂等）', r4.ok === true && r4.changed === false && a.writes.length === 2)
+    const b = makeHost(`C:\\Windows;${D};C:\\Other`)
+    const r5 = await cliPathUnregister(b.host)
+    check('adj944 编排：解除只摘自己那条，别人的两条**逐字未动**',
+      r5.ok === true && b.value() === 'C:\\Windows;C:\\Other' && b.writes.length === 1)
+    const c = makeHost('c:\\apps\\ijipu\\')
+    const r6 = await cliPathRegister(c.host)
+    check('adj944 编排：别人手写的同一目录 ⇒ 认成已注册、不重复写（负对照：写了就会多一条）',
+      r6.ok === true && r6.changed === false && c.writes.length === 0)
+    const long = makeHost('z'.repeat(PATH_MAX_CHARS))
+    const r7 = await cliPathRegister(long.host)
+    check('adj944 编排：超长 ⇒ 明确失败、带上真实长度、且**一个字都没写**（负对照：写了就不是 0 次）',
+      r7.ok === false && r7.error.kind === 'too-long' && long.writes.length === 0)
+  }
+
+  // ---- ⑥ 闸门：Rust 侧上限常量 / 界面接线 / NSIS 卸载钩子 ----
+  {
+    const rust = readOrEmpty('src-tauri/src/cli_path.rs')
+    const needle = `pub const PATH_MAX_CHARS: usize = ${PATH_MAX_CHARS};`
+    check(`adj944 Rust 侧防御性上限与 TS 同值（跨语言没法共用常量 ⇒ 机器核对）`,
+      rust.includes(needle), needle)
+    check('adj944 负对照⑦：把 Rust 那个数字 +1（两处判据打架的写法）⇒ 判据为假',
+      !rust.includes(`pub const PATH_MAX_CHARS: usize = ${PATH_MAX_CHARS + 1};`) && rust.includes(needle))
+
+    const ui = readOrEmpty('src/dialogs/PageConfigDialog.tsx')
+    check('adj944 界面：「全局」下确有「命令行」子页签，且文案/按钮都取 `cliPathCopy`',
+      ui.includes("case 'cli':") && ui.includes('cliPathCopy.') && ui.includes('onCliPathAction'))
+    /** 负对照：文案必须来自 copy.ts —— 组件里不许出现硬编码的按钮字面量 ✓ */
+    const hardcoded = ["'注册'", "'解除'", "'已注册'", "'未注册'"].filter((s) => ui.includes(s))
+    check('adj944 负对照⑧：组件里没有硬编码的「注册/解除/已注册/未注册」字面量（文案只在 copy.ts）',
+      hardcoded.length === 0, hardcoded.join(' '))
+
+    const hooks = readOrEmpty('src-tauri/nsis/hooks.nsh')
+    check('adj944 NSIS 卸载段接了「解除 PATH」钩子（幂等只删自己那一条）',
+      hooks.includes('!insertmacro IJIPU_PATH_UNREGISTER') && hooks.includes('cli-path.nsh'))
+    check('adj944 负对照⑨：把钩子调用从卸载段里删掉 ⇒ 判据为假',
+      !hooks.replace('!insertmacro IJIPU_PATH_UNREGISTER', '').includes('!insertmacro IJIPU_PATH_UNREGISTER') &&
+        hooks.includes('!insertmacro IJIPU_PATH_UNREGISTER'))
+  }
 }

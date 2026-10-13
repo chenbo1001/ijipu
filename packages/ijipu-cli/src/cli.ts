@@ -12,6 +12,14 @@
  * `render` / `play` / `batch` / `settings` / `config` / `doctor` 属 P2–P4，**未实现时明确报错**（不假装成功 ✗）。
  */
 import { formatJps, parseJps, splitParseIssues, layoutScore, renderScoreToSvg, buildPlaySequence, eventsToMidi, defaultPageConfig, mergeJpsConfig, extractJpsConfig, OPTIONAL_CONFIG_FIELDS, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, inkBoxesOfLayout, type PageConfig, type ScoreLayout, type RangeBox, type ExportRange, type ProblemRow } from '@ijipu/engine'
+// adj944：注册/解除 PATH 的**纯逻辑与编排**（与全局设置里那个按钮**共用同一份** ✓）
+import {
+  cliPathRegister,
+  cliPathStatus,
+  cliPathUnregister,
+  PATH_MAX_CHARS,
+  type PathHostIo,
+} from './envPath'
 
 /** 退出码：**对外承诺**，只增不改（脚本/CI 依赖它） */
 export const EXIT = {
@@ -21,6 +29,12 @@ export const EXIT = {
   syntax: 3,
   render: 4,
   config: 5,
+  /**
+   * adj944：**环境能力缺失** —— 例如"注册/解除 PATH"要读写当前用户的注册表，
+   * 这个能力只有桌面端 `ijipu.exe`（内嵌 CLI）有；独立 Node 环境没有 ⇒ 如实报 6，
+   * 与"用法错误(1)""渲染能力缺失(4)"都分开（脚本据此就能判断"换个环境再跑"✓）。
+   */
+  env: 6,
 } as const
 
 /** 注入式 IO（便于测试与"同 exe 子命令"复用） */
@@ -51,6 +65,16 @@ export type CliIo = {
    * @returns 取消监视的函数
    */
   watchFile?: (path: string, onChange: () => void) => () => void
+  /**
+   * adj944（用户需求「只有注册后，打开终端就能 `ijipu cli`」）**可选能力**：注入本机
+   * "注册/解除 PATH"所需的 IO（安装目录 / 读写 `HKCU\Environment\Path` / App Paths）。
+   *
+   * 与 `rasterize`/`synthesize`/`watchFile` **同一口径**：由宿主注入 ✓ ——
+   * 桌面端 exe（内嵌 CLI）注入 Rust 实现；独立 Node 入口**不注入** ⇒
+   * `register`/`unregister`/`status` **明确报错（退出码 6）**，不假装成功 ✗。
+   * 逻辑本身（字符串口径 + 编排）在 `envPath.ts`，与全局设置里那个按钮**共用一份** ✓。
+   */
+  pathHost?: PathHostIo
   out(text: string): void
   err(text: string): void
 }
@@ -89,6 +113,9 @@ const HELP = `iJipu 命令行（爱记谱）
   config        -i <谱> [-t effective] [--quiet]                              打印生效设置全表 + 每项来源
   doctor        [--json]                                                      环境自检（如实报告能力有无）
   completions   bash|zsh|powershell                                           输出 shell 补全脚本
+  register      [--json]                                                      把安装目录注册进当前用户 PATH
+  unregister    [--json]                                                      从当前用户 PATH 里解除注册
+  status        [--json]                                                      看是否已注册（**读系统实况**）
 
 全局选项：
   -i, --input <文件|->      输入文件（- = stdin；省略时也读 stdin）；--in 是别名
@@ -106,7 +133,11 @@ const HELP = `iJipu 命令行（爱记谱）
   有宿主能力 ⇒ 正常产出；没有（独立 Node 环境）⇒ **退出码 4 + 原因** 并给出替代（-t svg / -t midi），
   不产出半成品、不假装成功。
 
-退出码：0 成功 ｜ 1 用法错误 ｜ 2 输入不存在 ｜ 3 语法错误 ｜ 4 渲染失败 ｜ 5 设置非法
+注册类命令（register / unregister / status）**只在内嵌版可用**（ijipu.exe cli register）：
+  它要读写当前用户的 PATH / App Paths，这个能力由桌面端注入；独立 Node 环境 ⇒ 退出码 6 + 原因。
+  注册后**要新开一个终端**才生效（已开着的终端看不到新 PATH）；只对**当前用户**生效、不需要管理员。
+
+退出码：0 成功 ｜ 1 用法错误 ｜ 2 输入不存在 ｜ 3 语法错误 ｜ 4 渲染失败 ｜ 5 设置非法 ｜ 6 环境能力缺失
 `
 
 type Parsed = {
@@ -365,7 +396,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
    * ⚠ SVG 走引擎**估算**角标墨迹（Node 里没有 canvas 实测 ⇒ 与应用的实测版会有亚像素差异，
    *    这是"CLI 无 DOM"的必然取舍，已在 docs/CLI.md 写明口径）。
    */
-  const known = new Set(['format', 'lint', 'info', 'render', 'play', 'batch', 'settings', 'config', 'doctor', 'completions'])
+  const known = new Set(['format', 'lint', 'info', 'render', 'play', 'batch', 'settings', 'config', 'doctor', 'completions', 'register', 'unregister', 'status'])
   if (!known.has(p.command)) {
     io.err(`命令 “${p.command}” 尚未实现（用 --help 看已实现命令）`)
     return { code: EXIT.usage }
@@ -374,7 +405,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
   // ── completions（P4）：输出补全脚本（纯静态文本，零依赖）────
   if (p.command === 'completions') {
     const shell = (p.inputs[0] ?? p.type ?? 'bash').toLowerCase()
-    const COMMANDS = 'format lint info render play batch settings config doctor completions'
+    const COMMANDS = 'format lint info render play batch settings config doctor completions register unregister status'
     const scripts: Record<string, string> = {
       bash: `# iJipu bash 补全：source <(ijipu completions bash)\n_ijipu() {\n  local cur="\${COMP_WORDS[COMP_CWORD]}"\n  if [ "\$COMP_CWORD" -eq 1 ]; then COMPREPLY=( \$(compgen -W "${COMMANDS}" -- "\$cur") ); return; fi\n  COMPREPLY=( \$(compgen -f -- "\$cur") )\n}\ncomplete -F _ijipu ijipu\n`,
       zsh: `# iJipu zsh 补全：ijipu completions zsh > "\${fpath[1]}/_ijipu"\n#compdef ijipu\n_ijipu() { _arguments '1:command:(${COMMANDS})' '*:file:_files' }\n_ijipu "\$@"\n`,
@@ -413,6 +444,92 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       line(io, `  提示：位图/音频在桌面端 exe 内可用；独立 Node 环境只能用 svg/midi ✓`)
     }
     return { code: EXIT.ok, json: report }
+  }
+
+  /**
+   * ── register / unregister / status（adj944）：把 iJipu 注册进**当前用户 PATH** ──────
+   *
+   * 用户需求：「只有注册后，才能在打开终端时就能 `ijipu cli`」。
+   * 口令全部复用 `envPath.ts`（**与应用界面那个按钮同一份实现** ✓），这里只做"接线 + 文案 + 退出码"。
+   *
+   * ⚠ 读写 PATH/App Paths 的能力由**宿主注入**（`io.pathHost`）：内嵌版 `ijipu.exe cli …` 有 ✓，
+   *   独立 Node 环境没有 ⇒ **如实报退出码 6**（不假装成功 ✗）。
+   */
+  if (p.command === 'register' || p.command === 'unregister' || p.command === 'status') {
+    const host = io.pathHost
+    if (host === undefined) {
+      io.err(
+        `“${p.command}”需要读写当前用户的 PATH/注册表，这个能力由**桌面端**注入（内嵌 CLI）。\n` +
+          `  请改用：ijipu.exe cli ${p.command}（独立 Node 环境没有该能力 ⇒ 退出码 6）`,
+      )
+      return { code: EXIT.env }
+    }
+    if (p.command === 'status') {
+      const st = await cliPathStatus(host)
+      const payload = {
+        schema: 1,
+        registered: st.registered,
+        installDir: st.installDir,
+        pathLength: st.pathLength,
+        pathLimit: PATH_MAX_CHARS,
+        pathValue: st.pathValue,
+        appPaths: st.appPaths,
+      }
+      if (wantJson) line(io, JSON.stringify(payload, null, 2))
+      else {
+        line(io, `iJipu CLI 注册状态：${st.registered ? '已注册 ✓（终端里可以直接敲 ijipu）' : '未注册 ✗（终端里还敲不了 ijipu）'}`)
+        line(io, `  安装目录：${st.installDir}`)
+        line(io, `  当前用户 PATH：${st.pathLength} / ${PATH_MAX_CHARS} 字符`)
+        line(io, `  App Paths：${st.appPaths ?? '（未注册）'}`)
+        if (!st.registered) {
+          line(io, '  注册：ijipu cli register（注册后**新开一个终端**才生效；只对当前用户生效、不需要管理员）')
+        }
+      }
+      return { code: EXIT.ok, json: payload }
+    }
+    const action = p.command === 'register' ? await cliPathRegister(host) : await cliPathUnregister(host)
+    if (!action.ok) {
+      if (action.error.kind === 'too-long') {
+        io.err(
+          `注册后当前用户 PATH 会有 ${action.error.length} 字符，超过上限 ${action.error.limit} ⇒ **未写入**（PATH 一个字都没改）。\n` +
+            '  建议：① 先在「系统属性 → 环境变量」里删掉 PATH 中已经不存在的目录（反复装卸的软件常留一堆）；\n' +
+            '        ② 或把 iJipu 装到更短的路径（例如 C:\\iJipu）后再注册；\n' +
+            '        ③ 也可以不动 PATH，直接用完整路径调用：<安装目录>\\ijipu.exe cli lint 我的谱.jps',
+        )
+      } else {
+        io.err(
+          `“${p.command}”失败：${action.error.detail}\n` +
+            '  可能原因：注册表写入被安全软件拦截，或当前用户无权写 HKCU\\Environment。',
+        )
+      }
+      return { code: EXIT.env }
+    }
+    const st = action.status
+    const payload = {
+      schema: 1,
+      changed: action.changed,
+      registered: st.registered,
+      installDir: st.installDir,
+      pathLength: st.pathLength,
+      pathValue: st.pathValue,
+      appPaths: st.appPaths,
+    }
+    if (wantJson) line(io, JSON.stringify(payload, null, 2))
+    else if (p.command === 'register') {
+      line(
+        io,
+        `${action.changed ? '已注册 ✓ 安装目录已加入当前用户 PATH' : '已是注册状态 ✓（PATH 里本来就有这一条，未重复写入）'}：${st.installDir}`,
+      )
+      line(io, '  · 请**新开一个终端**，之后就能直接敲：ijipu cli lint 我的谱.jps')
+      line(io, '  · 只对当前用户生效，不需要管理员权限')
+    } else {
+      line(
+        io,
+        `${action.changed ? '已解除 ✓ 已从当前用户 PATH 里摘掉' : '本就未注册 ✓（PATH 里没有这一条，未改动 PATH）'}：${st.installDir}`,
+      )
+      line(io, '  · 其余 PATH 条目**逐字未动**；新开的终端里就不再能直接敲 ijipu 了')
+    }
+    return { code: EXIT.ok, json: payload }
   }
 
   // ── play（P3）：源码 → 音频（MIDI 任意环境；WAV 需宿主合成）────

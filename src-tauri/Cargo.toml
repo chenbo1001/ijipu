@@ -44,8 +44,13 @@ tauri-plugin-opener = "2"
 # ⚠ 选 `windows-sys` 的依据：① 微软官方 Win32 绑定，纯 `extern "system"` 声明（编译期零成本、不引 DLL）；
 # ② tauri/tao/wry **已经把它带进依赖树**（Cargo.lock 里已有 0.61.2）⇒ 加为直接依赖**不新增任何 crate** ✓；
 # ③ 走 `[target.'cfg(windows)']` ⇒ 非 Windows 目标（Android 等）根本不编译它 ✓。
+# ⚠ adj944 再追加两个 feature（**仍是同一个 crate、没有新增任何依赖** ✓，见 `src/cli_path.rs`）：
+#   · `Win32_System_Registry` —— 注册 iJipu CLI 要读写 `HKCU\Environment\Path`（写前备份 + 回读校验）
+#     与 App Paths；用官方绑定比自己拼 `reg.exe` 命令行稳（转义/编码/回读都要自己造 ✗）；
+#   · `Win32_UI_WindowsAndMessaging` —— 写完广播 `WM_SETTINGCHANGE`（`SendMessageTimeoutW`），
+#     让**新起的进程**看到新 PATH（已开着的终端看不到，见 `docs/CLI.md` 的说明）。
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_System_Console"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging"] }
 
 # adj942（用户裁定「直接落，修」·路线②）：把**命令行内嵌进 `ijipu.exe`** —— 用嵌入的小 JS 引擎
 # 跑 `packages/ijipu-cli` 那段纯逻辑（`runCli(argv, io)`），用户**不必装 Node**。

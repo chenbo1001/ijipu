@@ -10,6 +10,10 @@
  *         ③底部三个按钮**固定在对话框底部**（只有中间的页签内容区滚动），永远不用滚动去找。
  *
  * 标签页顺序：全局 → 主题 → 音色库 → 谱面 → 字体。
+ *
+ * adj944（用户需求）：「全局」下新增子页签**「命令行」**——把 iJipu 注册进当前用户 PATH，
+ * 之后在**新开的终端**里就能直接 `ijipu cli …`（未注册显示「注册」、已注册显示「解除」；
+ * 状态**每次现读系统实况**，不记在我们自己的配置里 ✓）。文案在 `brand/copy.ts` 的 `cliPathCopy`。
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
@@ -19,7 +23,12 @@ import { clampEditorFontSize, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE, nonDe
 // adj629x：恢复默认的草稿**整份替换**（纯函数，见该文件头的踩坑说明）
 import { draftAfterReset } from './pageConfigReset'
 import { THEMES, type ThemeMode } from '../brand/themes'
-import { uiCopy, numCopy } from '../brand/copy'
+import { uiCopy, numCopy, cliPathCopy } from '../brand/copy'
+// adj944：桌面版判定（网页版没有读写 PATH 的能力 ⇒ 界面如实禁用并说明）
+import { isDesktopShell } from '../brand/platform'
+// adj944：注册/解除 iJipu CLI（IO 接线在 store/cliPath.ts；**纯逻辑与命令行共用一份** ✓）
+import { applyCliPath, readCliPathStatus } from '../store/cliPath'
+import { PATH_MAX_CHARS, type CliPathStatus } from '../../packages/ijipu-cli/src/envPath'
 import { SoundBankPanel } from './SoundBankPanel'
 import type { PageConfig } from '@ijipu/engine'
 // adj426：主题按钮用 ToolIcon（与顶栏三状态按钮共用图标：自动主题/浅色主题/深色主题）
@@ -29,7 +38,7 @@ import { useNumberScrub, useHoldRepeat } from '../ui/numberScrubGesture'
 // adj526：谱面数值字段的 [min,max] 单一来源（逐项引用引擎 GUIDE_LIMITS / GUIDE_LIMITS_EX）
 import { PAGE_NUM_RANGES as RANGE, coarseFor } from '../ui/numFieldRanges'
 
-type TabId = 'global' | 'theme' | 'soundbank' | 'score' | 'font'
+type TabId = 'global' | 'theme' | 'soundbank' | 'cli' | 'score' | 'font'
 
 /**
  * adj603（用户要求）：设置**拆成两个底栏页签**——
@@ -47,14 +56,18 @@ const ALL_TABS: { id: TabId; label: string; icon: string; section: SettingsSecti
   { id: 'theme', label: '主题', icon: '◐', section: 'global' },
   // adj384：音色库从顶栏按钮移入设置，紧跟「主题」之后
   { id: 'soundbank', label: '音色库', icon: '♪', section: 'global' },
+  // adj944（用户需求）：**注册 iJipu CLI** —— 把安装目录加进当前用户 PATH，
+  // 之后新开的终端里就能直接 `ijipu cli …`。文案走 copy.ts（标签也走，别再硬编码 ✓）。
+  { id: 'cli', label: cliPathCopy.tabLabel, icon: '>_', section: 'global' },
   // adj418：原「页面 / 音符布局 / 间距 / 连音线」四个标签合并为「布局」（都是"这份谱长什么样"）
   { id: 'score', label: '布局', icon: '▤', section: 'score' },
   { id: 'font', label: '字体', icon: 'Aa', section: 'score' },
 ]
 
 /** adj482：内容是「字段行」的子页签——dock 里套 `.pcfg-fields` 网格，按当页最长标签对齐；
- *  主题（主题色块列表）与音色库（自带面板）不套该层，保持各自布局 */
-const FIELDS_TABS: TabId[] = ['global', 'score', 'font']
+ *  主题（主题色块列表）与音色库（自带面板）不套该层，保持各自布局
+ *  adj944：「命令行」也是字段行（状态行 + 两个按钮）⇒ 参与网格 ✓ */
+const FIELDS_TABS: TabId[] = ['global', 'cli', 'score', 'font']
 
 /** adj482：字段网格的三个常量——标签与控件之间的间隙（与 CSS 的 row `gap` 一致）、
  *  一格至少给控件留的宽度、格与格之间的列间距（与 CSS 的 `column-gap` 一致，用于算跨格数） */
@@ -164,6 +177,68 @@ export function PageConfigDialog({
     setTab(settingsTabRequest)
     consumeSettingsTab()
   }, [settingsTabRequest, section, consumeSettingsTab])
+
+  /**
+   * adj944：**注册 iJipu CLI** 的状态与动作。
+   *
+   * 关键口径（用户要求）：
+   *  · 状态**读系统实况**（`cli_path_status` 现读 `HKCU\Environment\Path`）——
+   *    **不记在我们自己的配置里** ✗，用户手动改过 PATH 也如实反映 ✓；
+   *  · 切到本页签时（以及点「重新读取」时）重新读一次：用户完全可能刚在
+   *    「环境变量」对话框里手改过 ✓；
+   *  · 操作期间禁用按钮 + 给忙碌文案；失败把**原因原文**显示出来（不写"失败了" ✗）。
+   */
+  const cliDesktop = isDesktopShell()
+  const [cliStatus, setCliStatus] = useState<CliPathStatus | null>(null)
+  const [cliBusy, setCliBusy] = useState(false)
+  const [cliNote, setCliNote] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const refreshCliStatus = async () => {
+    const r = await readCliPathStatus()
+    if (r.ok) {
+      setCliStatus(r.status)
+      return
+    }
+    // 网页版：如实说"不支持"（不冒充"未注册" ✗）；桌面版读失败：把原因显示出来
+    setCliStatus(null)
+    if (r.reason !== 'web') setCliNote({ kind: 'err', text: cliPathCopy.failed(r.reason) })
+  }
+  useEffect(() => {
+    if (tab !== 'cli' || !cliDesktop) return
+    void refreshCliStatus()
+    // 只在"切到本页签"时读一次；`cliStatus` 不进依赖（否则写完会立刻被旧值盖回去）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, cliDesktop])
+
+  /** 点「注册」或「解除」：动作名按**当前实况**决定（已注册 ⇒ 解除） */
+  const onCliPathAction = async () => {
+    if (cliBusy) return
+    const mode = cliStatus?.registered === true ? 'unregister' : 'register'
+    setCliBusy(true)
+    setCliNote(null)
+    try {
+      const r = await applyCliPath(mode)
+      if (!r.ok) {
+        setCliNote({
+          kind: 'err',
+          text:
+            r.error.kind === 'too-long'
+              ? cliPathCopy.tooLong(r.error.length, r.error.limit)
+              : cliPathCopy.failed(r.error.detail),
+        })
+        return
+      }
+      setCliStatus(r.status)
+      setCliNote({
+        kind: 'ok',
+        text:
+          mode === 'register'
+            ? cliPathCopy.okRegistered(r.status.installDir, r.changed)
+            : cliPathCopy.okUnregistered(r.status.installDir, r.changed),
+      })
+    } finally {
+      setCliBusy(false)
+    }
+  }
   // adj315：页面设置"即刻预览 + 保存持久化 + X 恢复"——
   // 打开时快照原值，调整时临时应用（预览非持久化），保存才写 .jps；关闭未保存则恢复快照。
   const snapRef = useRef<PageConfig>({ ...pageConfig })
@@ -472,6 +547,64 @@ export function PageConfigDialog({
             <div className="ijipu-form-hint">
               音源库/试听音色属本机偏好（L1），不随谱保存；试听对话框只列这里勾选的音色。
             </div>
+          </>
+        )
+      case 'cli':
+        // adj944（用户需求）：**注册 iJipu CLI** —— 未注册显示「注册」、已注册显示「解除」。
+        // 状态从 `cliStatus` 来（`cli_path_status` **现读系统实况**，不读我们自己的配置 ✓）；
+        // 文案全部走 `cliPathCopy`（组件里不写字面量 ✓）。
+        return (
+          <>
+            <div className="pcfg-group-title">{cliPathCopy.groupTitle}</div>
+            <div className="pcfg-note">{cliPathCopy.intro}</div>
+            <Row label={cliPathCopy.statusLabel}>
+              <span className="cli-path-state">
+                {!cliDesktop
+                  ? cliPathCopy.statusWebOnly
+                  : cliStatus === null
+                    ? cliPathCopy.statusLoading
+                    : cliStatus.registered
+                      ? cliPathCopy.statusRegistered
+                      : cliPathCopy.statusNotRegistered}
+              </span>
+              <button
+                className={`btn${cliStatus?.registered === true ? '' : ' primary'}`}
+                // 网页版没有这个能力 / 首次状态还没读回来 / 正在操作 ⇒ 禁用（并给忙碌文案 ✓）
+                disabled={!cliDesktop || cliBusy || cliStatus === null}
+                onClick={() => void onCliPathAction()}
+              >
+                {cliBusy
+                  ? cliStatus?.registered === true
+                    ? cliPathCopy.busyUnregister
+                    : cliPathCopy.busyRegister
+                  : cliStatus?.registered === true
+                    ? cliPathCopy.unregisterButton
+                    : cliPathCopy.registerButton}
+              </button>
+              <button className="btn" disabled={!cliDesktop || cliBusy} onClick={() => void refreshCliStatus()}>
+                {cliPathCopy.refresh}
+              </button>
+            </Row>
+            {cliDesktop && cliStatus !== null && (
+              // 状态明细：安装目录 / PATH 用量（离 2047 上限还有多少）/ App Paths（可选便利）
+              <div className="pcfg-note">
+                {cliPathCopy.installDirLabel}：{cliStatus.installDir}
+                <br />
+                {cliPathCopy.pathUsage(cliStatus.pathLength, PATH_MAX_CHARS)}
+                <br />
+                {cliPathCopy.appPathsLabel}：{cliStatus.appPaths ?? cliPathCopy.appPathsNone}
+              </div>
+            )}
+            <div className="pcfg-note">
+              ⚠ {cliPathCopy.hintNewTerminal}
+              <br />
+              {cliPathCopy.hintCurrentUser}
+            </div>
+            {cliNote && (
+              <div className={`pcfg-note cli-path-note ${cliNote.kind}`} role="status">
+                {cliNote.text}
+              </div>
+            )}
           </>
         )
       case 'score':

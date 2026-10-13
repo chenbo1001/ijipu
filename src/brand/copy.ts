@@ -703,3 +703,74 @@ export const externalChangeCopy = {
   /** 关闭差异框，回到原来的确认条 */
   closeDiff: '关闭',
 } as const
+
+/**
+ * adj944（用户需求，2026-10 原话）：「需要在全局设置里添加一个注册 iJipu CLI 的提示和按钮，
+ * 未注册时显示「注册」，已注册时显示「解除」；**只有注册后，才能在打开终端时就能 `ijipu cli`**」。
+ *
+ * 口径（用户要求逐条落在这里）：
+ *  · 「注册」= 把**安装目录本身**写进**当前用户**的 PATH（不建 bin 垫片 ✓）；
+ *  · 状态**读系统实况**（现读 `HKCU\Environment\Path`）⇒ 用户手动改过 PATH 也如实反映 ✓；
+ *  · 两条提示必须写清：① **注册后要新开一个终端**才生效（老终端看不到）；
+ *    ② **仅对当前用户生效、不需要管理员** ✓；
+ *  · 失败要把**原因**显示出来（不是笼统"失败了" ✗）。
+ */
+export const cliPathCopy = {
+  /** 底栏「全局」里的子页签名（与「版面/主题/音色库」并列） */
+  tabLabel: '命令行',
+  /** 组标题 */
+  groupTitle: '注册到命令行',
+  /** 一行说明：注册之后到底能得到什么 */
+  intro:
+    '把 iJipu 的安装目录加进「当前用户」的 PATH，之后在终端里就能直接敲 ijipu cli …' +
+    '（例如 ijipu cli lint 我的谱.jps），不必再写一长串完整路径。',
+  /** 提示①（用户指定必须写清）：新终端才生效 */
+  hintNewTerminal: '注册后要「新开一个终端」才生效 —— 已经开着的终端里看不到新的 PATH。',
+  /** 提示②（用户指定必须写清）：只对当前用户生效、不用管理员 */
+  hintCurrentUser: '仅对「当前用户」生效，不需要管理员权限（不写系统级 PATH、不动别的用户）。',
+  /** 注册状态：已注册 */
+  statusRegistered: '已注册',
+  /** 注册状态：未注册 */
+  statusNotRegistered: '未注册',
+  /** 注册状态：还没读到（首次进入页签） */
+  statusLoading: '读取中…',
+  /** 注册状态：网页版没有这个能力（如实说明，不假装可用） */
+  statusWebOnly: '网页版不支持（要读写当前用户的 PATH，只有桌面版能做）',
+  /** 状态行标签 */
+  statusLabel: '当前状态',
+  /** 安装目录标签 */
+  installDirLabel: '安装目录',
+  /** PATH 用量（离上限还有多远） */
+  pathUsage: (n: number, limit: number) => `当前用户 PATH：${n} / ${limit} 字符`,
+  /** App Paths（可选便利）标签 */
+  appPathsLabel: 'App Paths',
+  /** App Paths 未注册 */
+  appPathsNone: '（未注册）',
+  /** 按钮：注册（未注册时） */
+  registerButton: '注册',
+  /** 按钮：解除（已注册时） */
+  unregisterButton: '解除',
+  /** 按钮忙碌态 */
+  busyRegister: '注册中…',
+  busyUnregister: '解除中…',
+  /** 重新读一次系统实况（用户可能刚在"环境变量"里手改过 ⇒ 要有这条出路） */
+  refresh: '重新读取',
+  /** 操作成功：注册（`changed=false` = 本来就有） */
+  okRegistered: (dir: string, changed: boolean) =>
+    changed
+      ? `已注册 ✓ 安装目录已加入当前用户 PATH：${dir}`
+      : `本来就是已注册状态 ✓（PATH 里已有这一条，未重复写入）：${dir}`,
+  /** 操作成功：解除（`changed=false` = 本来就没有） */
+  okUnregistered: (dir: string, changed: boolean) =>
+    changed
+      ? `已解除 ✓ 已从当前用户 PATH 里摘掉：${dir}（其余条目逐字未动）`
+      : `本来就是未注册状态 ✓（PATH 里没有这一条，未改动）：${dir}`,
+  /** 失败前缀（后面接**原因原文**） */
+  failed: (reason: string) => `操作失败：${reason}`,
+  /** PATH 超长的可执行建议（用户要求：超长 ⇒ 不写、明确报错、给出可执行建议 ✓） */
+  tooLong: (length: number, limit: number) =>
+    `注册后当前用户 PATH 会有 ${length} 字符，超过上限 ${limit} ⇒ 未写入（PATH 一个字都没改）。` +
+    '建议：① 先在「系统属性 → 环境变量」里删掉 PATH 中已经不存在的目录（反复装卸的软件常留一堆）；' +
+    '② 或把 iJipu 装到更短的路径（例如 C:\\iJipu）后再注册；' +
+    '③ 也可以不动 PATH，直接用完整路径调用：<安装目录>\\ijipu.exe cli lint 我的谱.jps',
+} as const

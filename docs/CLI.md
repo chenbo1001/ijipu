@@ -4,6 +4,8 @@
 > ③ 嵌入版 RPC 默认关闭 + 仅 vault 内路径**）。
 > 阶段状态：**P1–P4 全部实现**（`format` / `lint` / `info` / `render` / `play` / `batch` /
 > `settings` / `config` / `doctor` / `completions` / `lint --watch`）；
+> adj944 起另有 **`register` / `unregister` / `status`**（把安装目录注册进当前用户 PATH ⇒
+> 终端里直接敲 `ijipu`，见 §二之二）。
 > 其中**位图与音频**（`png/jpg/pdf/wav`）需要"隐藏窗口渲染"通道：在桌面端 exe 内可用 ✓，
 > 独立 Node 环境会**明确报错（退出码 4）**并给出替代（`-t svg` / `-t midi`）✓ —— 不假装成功 ✗。
 
@@ -128,6 +130,9 @@ ijipu --help
 | `config` | 打印**生效设置全表 + 每项来源** | `-i <谱>` `-t effective` |
 | `doctor` | 环境自检（可设置项数量、各项能力是否可用） | `--json` |
 | `completions` | 输出 shell 补全脚本 | `completions bash\|zsh\|powershell` |
+| `register` | 把**安装目录**写进当前用户 PATH（装了应用就能直接敲 `ijipu`） | `--json` |
+| `unregister` | 从当前用户 PATH 里**摘掉自己那一条**（其余逐字不动） | `--json` |
+| `status` | 看现在注册了没有（**读系统实况**，不读配置） | `--json` |
 
 未实现（**会报错**）：`--watch`（后续）。`settings` 的键名直接当**位置参数**给，例如：
 
@@ -153,6 +158,62 @@ npm run cli -- doctor                                    # 能力自检：位图
 > 与应用（实测版）可能有**亚像素差异**；版式、音符位置与页数一致 ✓。
 > 需要像素级一致时用应用导出（P3 的"隐藏窗口渲染"就是为此 ✓）。
 
+## 二之二、注册 / 解除：让终端里能直接敲 `ijipu`（adj944）
+
+**要解决的事**：装了应用之后，`ijipu.exe` 躺在安装目录里（`%LOCALAPPDATA%\iJipu`），
+终端里**不能**直接敲 `ijipu`（PATH 里没有它）。`register` 就是把这个目录加进**当前用户**的 PATH。
+
+```powershell
+ijipu.exe cli status        # 现在注册了没有（读系统实况）
+ijipu.exe cli register      # 注册：把安装目录写进当前用户 PATH
+ijipu.exe cli unregister    # 解除：只摘掉自己那一条，其余逐字不动
+```
+
+实测（本机，2026-10）：
+
+```text
+> ijipu.exe cli status
+iJipu CLI 注册状态：未注册 ✗（终端里还敲不了 ijipu）
+  安装目录：C:\Users\<你>\AppData\Local\iJipu
+  当前用户 PATH：1387 / 2047 字符
+  App Paths：（未注册）
+  注册：ijipu cli register（注册后**新开一个终端**才生效；只对当前用户生效、不需要管理员）
+
+> ijipu.exe cli register
+已注册 ✓ 安装目录已加入当前用户 PATH：C:\Users\<你>\AppData\Local\iJipu
+  · 请**新开一个终端**，之后就能直接敲：ijipu cli lint 我的谱.jps
+  · 只对当前用户生效，不需要管理员权限
+```
+
+**四条必须知道的口径**：
+
+| 事项 | 口径 |
+|---|---|
+| **注册后要不要重开终端** | **要**。已经开着的终端里环境块在进程创建时就固定了，**看不到**新的 PATH；`register` 会广播 `WM_SETTINGCHANGE`，那只帮到**之后新起**的进程 ✓ |
+| **权限** | 只写 `HKCU\Environment\Path`（**当前用户**），**不需要管理员**、不动系统级 PATH、不动别的用户 ✓（安装模式本来就是 currentUser） |
+| **只动自己那一条** | 解除时其余条目**逐字保留**（含连续分号留下的空条目）；已存在（大小写/末尾斜杠/引号不同也算）就**不重复追加**（幂等）✓ |
+| **卸载会自动解除** | 卸载器（`nsis/hooks.nsh` → `nsis/cli-path.nsh`）会把这一条摘掉，并把值的类型按原样写回；**更新流程不摘**（`$UpdateMode` 保护，免得"更新一次丢一次注册"）✓ |
+
+**上限**：PATH 值超过 **2047 字符**就**不写**（明确报错 + 给三条可执行建议：先清理失效目录 / 把应用装到更短的路径 / 直接用完整路径调用）。
+理由是"写了之后某些老程序读不全"这类症状最难查 —— 宁可不写 ✓。
+
+**顺带的便利（可选，不影响终端）**：注册时还会写
+`HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths\ijipu.exe`（指向我们的 exe），
+于是「运行」对话框 / 资源管理器地址栏敲 `ijipu` 也能起来；解除时**只删指向我们的那一条** ✓。
+
+**能力从哪来**：这三个子命令要读写当前用户的注册表 ⇒ 由**桌面端**注入（内嵌 CLI ✓）。
+独立 Node 包（乙）里没有这个能力，跑了会**如实报退出码 6**（"环境能力缺失"），
+并提示改用 `ijipu.exe cli register` ✓ —— 不假装成功 ✗。
+
+> 实现同源：字符串口径（分号切分 / 大小写无关比较 / 长度上限 / 幂等）只在
+> `packages/ijipu-cli/src/envPath.ts` 一处；**全局设置里那个「注册」按钮调用的是同一份函数** ✓
+> （纯函数与编排有 `npm run smoke` 的成对断言 + 负对照守着）。
+>
+> **写前备份**：每次写 PATH 之前，原值（连同它的类型 `REG_SZ`/`REG_EXPAND_SZ`）会备份到
+> `HKCU\Software\iJipu\CliPath`（`PathBackup` / `PathBackupKind`）；写完**回读校验**，
+> 不一致就**立刻用备份还原**再报错 ✓（卸载器会把这个键删掉）。
+> 值的类型**跟着原值走** —— PATH 里常有 `%USERPROFILE%` 这类变量，写成 `REG_SZ` 会让它们**不再展开** ✗。
+
 ## 三、全局选项
 
 | 选项 | 含义 |
@@ -177,6 +238,7 @@ npm run cli -- doctor                                    # 能力自检：位图
 | `3` | **语法错误**（`lint` 命中；`format --check` 发现"需要格式化"） |
 | `4` | 渲染失败（P2 起） |
 | `5` | 设置非法（`--config`/`-s` 相关） |
+| `6` | **环境能力缺失**（adj944）：注册类命令（`register`/`unregister`/`status`）要读写当前用户的注册表，只有桌面端 `ijipu.exe`（内嵌 CLI）有；独立 Node 环境、PATH 超长、注册表写不进去都走这里 ✓ |
 | `70` | **接线层自身出错**（只在内嵌版：内嵌 JS 加载失败 / 入口异常 / 产物缺失）—— 刻意与 0–5 分开，脚本**不要**把它当成"用法错误" ✓ |
 
 ## 五、示例
