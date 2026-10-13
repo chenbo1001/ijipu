@@ -43,6 +43,38 @@ const SOURCES = [
 ]
 
 /**
+ * adj945（用户需求）**必须随包进安装目录的三份文档**：
+ * `[展示名, installer.nsi 里应出现的片段, bundle.resources 的源, bundle.resources 的目标]`。
+ *
+ * 为什么值得机器守住：
+ *  · `LICENSE`（AGPL-3.0 全文）—— 分发本体的义务，**安装目录里必须有**（用户 2026-10 反馈"安装目录好像也没有 LICENSE"）；
+ *  · `docs/iJipu-CLI-手册.md` —— 用户要求「CLI 的命令集和使用示例手册，**在安装目录也存一份 MD**」，
+ *    应用里那个「查看 CLI 手册」按钮打开的就是它 ⇒ 漏了按钮就报"没找到"；
+ *  · `THIRD-PARTY.md` —— 第三方组件（音色库 / WebView2 / Tauri / QuickJS…）的署名与许可说明。
+ * 三者都是**资源映射**（`bundle.resources`）⇒ 判定要**两边一起看**：
+ *  ① 打包配置里有这条映射（源 → 目标）；② 生成的 `installer.nsi` 里真有那行 `File /oname=…`。
+ * 每条都带**负对照**：把映射从 conf 删掉 / 把 nsi 里那行删掉 ⇒ 同一判据必须**判红** ✓
+ * （证明它真的在读配置与清单，而不是恒真 ✗）。
+ */
+const DOCS_REQUIRED = [
+  ['LICENSE（AGPL-3.0 全文，落在安装目录根）', /File\s+\/a\s+"\/oname=LICENSE"/, '../LICENSE', 'LICENSE'],
+  [
+    'CLI 使用手册（落在安装目录 docs/）',
+    /File\s+\/a\s+"\/oname=docs[\\/]iJipu-CLI-手册\.md"/,
+    '../docs/CLI-手册.md',
+    'docs/iJipu-CLI-手册.md',
+  ],
+  ['THIRD-PARTY.md（第三方组件与许可，落在安装目录根）', /File\s+\/a\s+"\/oname=THIRD-PARTY\.md"/, '../THIRD-PARTY.md', 'THIRD-PARTY.md'],
+]
+
+/** 这三份文档的**仓库源文件**也要在（源没了安装包里自然也没有） */
+const DOC_SOURCES = [
+  ['LICENSE（仓库根，AGPL-3.0 全文）', 'LICENSE', 30_000],
+  ['THIRD-PARTY.md（仓库根）', 'THIRD-PARTY.md', 2_000],
+  ['docs/CLI-手册.md（仓库里那份＝**单一真源**，直接映射进安装包，不复制）', 'docs/CLI-手册.md', 8_000],
+]
+
+/**
  * adj551（用户要求"快捷方式名与备注要记住、下次发布继续保持"）：把这**两条品牌设置**钉成发布前硬校验。
  *
  * 为什么必须钉：桌面/开始菜单快捷方式的**中文名**与**备注**只能由 `nsis/hooks.nsh` 里的
@@ -101,6 +133,59 @@ for (const [label, path, minBytes] of SOURCES) {
   const ok = existsSync(path) && statSync(path).size >= minBytes
   console.log(`  ${ok ? '✓' : '✗'} ${label}${ok ? `  ${Math.round(statSync(path).size / 1024)}KB` : '（缺失或体积不足）'}`)
   if (!ok) failed++
+}
+
+/**
+ * adj945：**随包进安装目录的三份文档** + 每条判据的**负对照**（见上方 `DOCS_REQUIRED` 的说明）。
+ */
+console.log('[check-installer] 随包文档（adj945：LICENSE / CLI 手册 / THIRD-PARTY.md）自检：')
+{
+  const confPath = 'src-tauri/tauri.conf.json'
+  const conf = JSON.parse(readFileSync(confPath, 'utf8'))
+  const res = conf.bundle?.resources ?? {}
+  /** 反斜杠统一成 `/`：conf 里写 `../docs/CLI-手册.md`、nsi 里写 `docs\…`，比较时不能各算一套 */
+  const norm = (p) => String(p).split('\\').join('/')
+  const confHas = (map, source, target) =>
+    Object.entries(map).some(([s, t]) => norm(s).endsWith(source) && norm(t) === norm(target))
+  /** 判据的**可判假性**：把清单里所有命中的行删掉后，同一个正则必须**不再命中** ✓ */
+  const falsifiable = (text, re) => {
+    const stripped = text
+      .split('\n')
+      .filter((l) => !re.test(l))
+      .join('\n')
+    return stripped !== text && !re.test(stripped)
+  }
+  for (const [label, re, source, target] of DOCS_REQUIRED) {
+    const inNsi = re.test(nsi)
+    const inConf = confHas(res, source, target)
+    console.log(`  ${inNsi && inConf ? '✓' : '✗'} ${label}`)
+    console.log(
+      `      · 打包配置 ${confPath}：${inConf ? `有映射 ${source} → ${target}` : `**缺映射** ${source} → ${target}`}` +
+        `｜安装清单 installer.nsi：${inNsi ? '有对应的 File /oname=' : '**缺** File /oname='}`,
+    )
+    if (!(inNsi && inConf)) failed++
+    const confCut = Object.fromEntries(Object.entries(res).filter(([, t]) => norm(t) !== norm(target)))
+    const negConf = !confHas(confCut, source, target)
+    const negNsi = falsifiable(nsi, re)
+    console.log(
+      `      · 负对照：把这**条映射从 conf 删掉** ⇒ ${negConf ? '判红 ✓' : '仍为真 ✗（判据无效）'}` +
+        `｜把**清单里那行删掉** ⇒ ${negNsi ? '判红 ✓' : '仍为真 ✗（判据无效）'}`,
+    )
+    if (!(negConf && negNsi)) failed++
+  }
+  console.log('[check-installer] 三份文档的仓库源文件自检：')
+  for (const [label, path, minBytes] of DOC_SOURCES) {
+    const ok = existsSync(path) && statSync(path).size >= minBytes
+    console.log(`  ${ok ? '✓' : '✗'} ${label}${ok ? `  ${Math.round(statSync(path).size / 1024)}KB` : '（缺失或体积不足）'}`)
+    if (!ok) failed++
+  }
+  // 上一条判据的**负对照**：同一个判据喂一个不存在的路径必须为假（证明它真在读文件）
+  const existsOk = (p, min) => existsSync(p) && statSync(p).size >= min
+  console.log(
+    `  · 负对照（源文件判据）：不存在的路径 ⇒ ${!existsOk('docs/__NEVER_EXISTS__.md', 1) ? '判红 ✓' : '仍为真 ✗'}` +
+      `｜已存在的路径 ⇒ ${existsOk('LICENSE', 30_000) ? '判真 ✓' : '判红 ✗（说明判据失效）'}`,
+  )
+  if (existsOk('docs/__NEVER_EXISTS__.md', 1) || !existsOk('LICENSE', 30_000)) failed++
 }
 
 /**

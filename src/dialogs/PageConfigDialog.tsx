@@ -27,7 +27,7 @@ import { uiCopy, numCopy, cliPathCopy } from '../brand/copy'
 // adj944：桌面版判定（网页版没有读写 PATH 的能力 ⇒ 界面如实禁用并说明）
 import { isDesktopShell } from '../brand/platform'
 // adj944：注册/解除 iJipu CLI（IO 接线在 store/cliPath.ts；**纯逻辑与命令行共用一份** ✓）
-import { applyCliPath, readCliPathStatus } from '../store/cliPath'
+import { applyCliPath, openCliManual, readCliPathStatus } from '../store/cliPath'
 import { PATH_MAX_CHARS, type CliPathStatus } from '../../packages/ijipu-cli/src/envPath'
 import { SoundBankPanel } from './SoundBankPanel'
 import type { PageConfig } from '@ijipu/engine'
@@ -237,6 +237,29 @@ export function PageConfigDialog({
       })
     } finally {
       setCliBusy(false)
+    }
+  }
+  /**
+   * adj945（用户需求）：**「查看 CLI 手册」** —— 用系统默认程序打开安装目录里那份手册。
+   *
+   * 为什么单独一个忙碌态：打开动作是"交给系统"，可能被杀软/关联程序卡住 ⇒ 按钮要有忙碌文案，
+   * 免得用户以为没点上、连点多开几个窗口。
+   */
+  const [cliManualBusy, setCliManualBusy] = useState(false)
+  const onOpenCliManual = async () => {
+    if (cliManualBusy) return
+    setCliManualBusy(true)
+    setCliNote(null)
+    try {
+      const r = await openCliManual()
+      setCliNote(
+        r.ok
+          ? { kind: 'ok', text: cliPathCopy.manualOpened(r.path) }
+          : // 网页版如实说"不支持"；桌面版把**原因原文**显示出来（Rust 侧已带上找过的路径）
+            { kind: 'err', text: r.reason === 'web' ? cliPathCopy.manualWebOnly : cliPathCopy.manualFailed(r.reason) },
+      )
+    } finally {
+      setCliManualBusy(false)
     }
   }
   // adj315：页面设置"即刻预览 + 保存持久化 + X 恢复"——
@@ -600,6 +623,18 @@ export function PageConfigDialog({
               <br />
               {cliPathCopy.hintCurrentUser}
             </div>
+            {/* adj945（用户需求）：手册就随安装包放在安装目录里（`docs/iJipu-CLI-手册.md`），
+                这里给一个按钮用系统默认程序打开 —— 文案走 `cliPathCopy`，组件里不写字面量 ✓ */}
+            <Row label={cliPathCopy.manualLabel}>
+              <button
+                className="btn"
+                title={cliPathCopy.manualTip}
+                disabled={!cliDesktop || cliManualBusy}
+                onClick={() => void onOpenCliManual()}
+              >
+                {cliManualBusy ? cliPathCopy.manualBusy : cliPathCopy.manualButton}
+              </button>
+            </Row>
             {cliNote && (
               <div className={`pcfg-note cli-path-note ${cliNote.kind}`} role="status">
                 {cliNote.text}

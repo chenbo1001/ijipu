@@ -111,3 +111,24 @@ export async function applyCliPath(mode: CliPathMode): Promise<CliPathAction> {
     return { ok: false, error: { kind: 'io', detail: e instanceof Error ? e.message : String(e) } }
   }
 }
+
+/**
+ * adj945（用户需求）：**用系统默认程序打开安装目录里的 CLI 使用手册**。
+ *
+ * 为什么走我们自己的 Rust 命令（`cli_manual_open`）、而不是前端直接调 opener 的 `open_path`：
+ * 见 `src-tauri/src/cli_manual.rs` 文件头 —— opener 的 `open_path` 除了"允许调用命令"还要
+ * "路径落在 scope 里"，前端直接调会因"scope 为空"被拒，而前端那层是静默兜底 ⇒
+ * 用户看到的是"点了没反应"（`adj894` 的官网链接就这么藏了一整个版本 ✗）。
+ * Rust 侧调 opener **不经 ACL**，且路径由它按 `resource_dir()` 自己算 ✓。
+ *
+ * 失败一律带**可读原因**（文件不在 / 系统打不开），界面把它显示出来 —— **不静默失败** ✗。
+ */
+export async function openCliManual(): Promise<{ ok: true; path: string } | { ok: false; reason: string }> {
+  const invoke = shellInvoke()
+  if (invoke === null) return { ok: false, reason: 'web' }
+  try {
+    return { ok: true, path: (await invoke('cli_manual_open')) as string }
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) }
+  }
+}

@@ -29,6 +29,10 @@ mod cli_path;
 #[cfg(windows)]
 pub mod cli_embed;
 
+/// adj945（用户需求「设置里加一个『查看 CLI 手册』按钮」）：用**系统默认程序**打开安装目录里的
+/// 那份命令行手册 —— 走 Rust 侧调 opener（不经 ACL，路径由 `resource_dir()` 算），见该文件头说明。
+mod cli_manual;
+
 /// adj538：待打开的 `.jps` 路径队列（去重前的原始路径，前端取走即清空）。
 ///
 /// 为什么用队列 + 拉取，而不是直接把内容 emit 给前端：**冷启动存在竞态**——
@@ -477,6 +481,8 @@ pub fn run() {
             cli_path::cli_path_status,
             cli_path::cli_path_register,
             cli_path::cli_path_unregister,
+            // adj945：用系统默认程序打开安装目录里的 CLI 使用手册
+            cli_manual::cli_manual_open,
         ])
         .build(context)
         .expect("error while building tauri application")

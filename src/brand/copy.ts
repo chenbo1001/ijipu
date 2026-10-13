@@ -33,6 +33,14 @@ export const aboutCopy = {
   links: [
     { label: '官方网站', url: brand.siteUrl, hint: '在线版 · 示例 · 语法说明' },
     { label: 'Obsidian 插件', url: brand.obsidianRepoUrl, hint: '在 Obsidian 里渲染与试听 .jps' },
+    /**
+     * adj945（用户要求"该加的加"）：**源码地址** —— AGPL-3.0 的网络条款那层。
+     *
+     * 为什么必须有：AGPL 第 13 条要求"通过网络与用户交互"的程序**向这些用户提供对应源码**。
+     * 官网/在线版就是这种交互，所以「关于」里必须有一个能直接点到源码的入口（只有 LICENSE 全文不够）。
+     * 地址取 `brand.repoUrl`（品牌对外地址一处定义），这里只放显示名 ✓。
+     */
+    { label: '源码仓库', url: brand.repoUrl, hint: 'AGPL-3.0 源码 · 欢迎学习、修改与再分发' },
   ],
 } as const
 
@@ -755,6 +763,23 @@ export const cliPathCopy = {
   busyUnregister: '解除中…',
   /** 重新读一次系统实况（用户可能刚在"环境变量"里手改过 ⇒ 要有这条出路） */
   refresh: '重新读取',
+  /**
+   * adj945（用户需求）：「查看 CLI 手册」—— 用**系统默认程序**打开安装目录里那份手册
+   * （随包资源 `<安装目录>/docs/iJipu-CLI-手册.md`）。
+   *
+   * 用户原话：「在全局设置那个「命令行」子页签里，再加一个「查看 CLI 手册」按钮
+   * ⇒ 用系统默认程序打开安装目录里那份 MD」「路径取不到时给明确提示，别静默失败」。
+   */
+  manualLabel: '使用手册',
+  manualButton: '查看 CLI 手册',
+  manualBusy: '正在打开…',
+  manualTip: '用系统默认程序打开安装目录里的《iJipu 命令行使用手册》（Markdown）。',
+  /** 打开成功：把**完整路径**显示出来（用户知道文件在哪，下次能自己找） */
+  manualOpened: (path: string) => `已用系统默认程序打开 CLI 手册：${path}`,
+  /** 网页版没有这个能力（与注册按钮同口径：如实说明，不假装可用） */
+  manualWebOnly: '网页版没有这个能力（要打开本机文件，只有桌面版能做）',
+  /** 打开失败：接**原因原文**（Rust 侧已带上"找过的路径 / 系统报的错"） */
+  manualFailed: (reason: string) => `打不开 CLI 手册：${reason}`,
   /** 操作成功：注册（`changed=false` = 本来就有） */
   okRegistered: (dir: string, changed: boolean) =>
     changed

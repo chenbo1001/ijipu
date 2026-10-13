@@ -7195,17 +7195,36 @@ console.log('[82] author credit (adj373)')
     brand.authorEmail === '' || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(brand.authorEmail),
     brand.authorEmail,
   )
+  /**
+   * ⚠ **adj945 改口径（必须写清"新口径是什么、为什么"）**：这条原来是
+   * 「关于页有**两个**外链（官网 + Obsidian 插件仓库）」。
+   *
+   * 本轮按用户要求「该加的加」补了**第三条：源码仓库**，依据是 **AGPL-3.0 第 13 条**
+   * （"通过网络与用户交互"的程序必须**向这些用户提供对应源码**）：官网/在线版就是这种交互，
+   * 所以「关于」里必须有能直接点到源码的入口 —— 只随包放一份 `LICENSE` 全文**不够**。
+   * 地址仍**一律取自 `brand.tokens`**（组件里不硬编码 ✓）；并配一条负对照：
+   * 把源码那条去掉 ⇒ 判据判红（证明它真的在"数并核对"，不是恒真 ✗）。
+   */
+  const aboutLinksOk = (links: readonly { label: string; url: string }[]): boolean =>
+    links.length === 3 &&
+    links[0].url === brand.siteUrl &&
+    links[1].url === brand.obsidianRepoUrl &&
+    links[2].url === brand.repoUrl &&
+    links.every((l) => l.label.trim() !== '' && /^https:\/\//.test(l.url))
   check(
-    'adj724b 关于页有两个外链（官网 + Obsidian 插件仓库），地址取自 brand tokens（不硬编码在组件里）',
-    // 用户要求：「在 ijipu 的关于里，添加 https://ijipu.pages.dev 和
-    // https://github.com/snailhome/obsidian-ijipu 的链接」
-    aboutCopy.links.length === 2 &&
-      aboutCopy.links[0].url === brand.siteUrl &&
-      aboutCopy.links[1].url === brand.obsidianRepoUrl &&
+    'adj724b/adj945 关于页有三个外链（官网 + Obsidian 插件仓库 + **源码仓库**），地址取自 brand tokens（不硬编码在组件里）',
+    // 用户要求（adj724b）：「在 ijipu 的关于里，添加 https://ijipu.pages.dev 和
+    // https://github.com/snailhome/obsidian-ijipu 的链接」；
+    // adj945 追加第三条源码仓库（AGPL-3.0 §13 那层）。
+    aboutLinksOk(aboutCopy.links) &&
       brand.siteUrl === 'https://ijipu.pages.dev' &&
       brand.obsidianRepoUrl === 'https://github.com/snailhome/obsidian-ijipu' &&
-      aboutCopy.links.every((l) => l.label.trim() !== '' && /^https:\/\//.test(l.url)),
+      brand.repoUrl === 'https://github.com/snailhome/ijipu',
     aboutCopy.links.map((l) => `${l.label}=${l.url}`).join(' '),
+  )
+  check(
+    'adj945 负对照：把"源码仓库"那条外链去掉（＝AGPL 网络条款那层没有入口）⇒ 判据判红',
+    !aboutLinksOk(aboutCopy.links.slice(0, 2)) && aboutLinksOk(aboutCopy.links),
   )
   /**
    * adj724b（用户实测）：**嵌入版要让宿主推来的 `openFile` 赢过"启动时自动恢复上次绑定"**。
@@ -18208,10 +18227,13 @@ runAdj927ExternalChangeTests()
     }
     runAdj942EmbedCliTests()
     // adj944：本段要读注入的假宿主（异步）⇒ 与收尾那行**排成一条链**（否则会在断言跑完前就打印通过 ✗）
-    void runAdj944CliPathTests().then(() => {
-      console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
-      process.exit(failed === 0 ? 0 : 1)
-    })
+    // adj945：手册/随包分发那组也是文件驱动的同步断言，接在同一条链上 ✓
+    void runAdj944CliPathTests()
+      .then(() => runAdj945CliManualTests())
+      .then(() => {
+        console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
+        process.exit(failed === 0 ? 0 : 1)
+      })
   })
 
 
@@ -24218,4 +24240,237 @@ async function runAdj944CliPathTests() {
       !hooks.replace('!insertmacro IJIPU_PATH_UNREGISTER', '').includes('!insertmacro IJIPU_PATH_UNREGISTER') &&
         hooks.includes('!insertmacro IJIPU_PATH_UNREGISTER'))
   }
+}
+
+/**
+ * [171] CLI 使用手册 + 随包分发（adj945，用户需求）。
+ *
+ * 用户原话：「要增加一个 **CLI 的命令集和使用示例手册**，**在安装目录也存一份 MD 的文件**」。
+ *
+ * 为什么要有这一段：手册最容易"悄悄过期"，而它又是**用户唯一的对外口径**：
+ *   · 新增/改名一个子命令，手册忘了跟着改 ⇒ 用户照着敲得到"命令尚未实现"；
+ *   · 退出码在代码里改了、手册还是旧码 ⇒ 脚本按旧码判断，CI 假绿/假红；
+ *   · 手册从 `bundle.resources` 掉了 ⇒ 安装包里根本没这份文件（"安装目录也存一份"落空）；
+ *   · Rust 侧打开手册的相对路径与打包目标不一致 ⇒ 设置里那个按钮点了报"没找到"。
+ * 所以这里**从源码驱动**（子命令集合取自 `cli.ts` 的 `known` 与 `--help` 文本、退出码取自 `EXIT` 常量），
+ * 逐条钉住，并且**每条都配负对照**（把判据喂给"故意改坏的一份"必须为假 ✓）。
+ */
+function runAdj945CliManualTests() {
+  console.log('[171] CLI 使用手册 + 随包分发（adj945）')
+  const readOrEmpty = (rel: string): string => (existsSync(join(root, rel)) ? readFileSync(join(root, rel), 'utf8') : '')
+
+  const MANUAL = 'docs/CLI-手册.md'
+  const MANUAL_TARGET = 'docs/iJipu-CLI-手册.md'
+  const manual = readOrEmpty(MANUAL)
+  check(`adj945 手册存在且像一份手册（${MANUAL}）`, manual.length >= 3000, `${manual.length} 字符`)
+
+  // ---- ① 命令表：**从源码驱动**（`cli.ts` 的 known 集合 + `--help` 文本）----
+  const cliSrc = readOrEmpty('packages/ijipu-cli/src/cli.ts')
+  /** 已实现子命令集合 = `const known = new Set([...])`（源码里唯一那处名单） */
+  const knownSet = (src: string): Set<string> => {
+    const m = src.match(/const known = new Set\(\[([^\]]*)\]\)/)
+    if (m === null) return new Set()
+    return new Set(Array.from(m[1].matchAll(/'([^']+)'/g)).map((x) => x[1]))
+  }
+  /** `--help` 文本里列出的命令（另一处名单 —— 两处必须一致，否则用户看到的帮助就缺东西） */
+  const helpCommands = (src: string): Set<string> => {
+    const i = src.indexOf('const HELP = `')
+    const j = src.indexOf('全局选项：', i)
+    if (i < 0 || j < 0) return new Set()
+    const out = new Set<string>()
+    for (const line of src.slice(i, j).split('\n')) {
+      const m = line.match(/^ {2}([a-z][a-z-]*)\s{2,}/)
+      if (m !== null) out.add(m[1])
+    }
+    return out
+  }
+  const known = knownSet(cliSrc)
+  const inHelp = helpCommands(cliSrc)
+  const sameSet = (a: Set<string>, b: Set<string>): boolean => a.size > 0 && a.size === b.size && Array.from(a).every((x) => b.has(x))
+  check(
+    `adj945 子命令名单从源码里读到了，且 \`known\` 与 \`--help\` 两处一致（${Array.from(known).join(' ')}）`,
+    known.size >= 10 && sameSet(known, inHelp),
+    `known=${Array.from(known).sort().join(',')} ｜ help=${Array.from(inHelp).sort().join(',')}`,
+  )
+
+  /** 手册里必须找得到 `` `命令` ``（反引号包住 ⇒ 不会被 `--format` 这类选项名误命中） */
+  const missingIn = (text: string): string[] => Array.from(known).filter((c) => !text.includes('`' + c + '`'))
+  const missing = missingIn(manual)
+  check('adj945 手册覆盖全部子命令（逐个在手册里找得到 `` `命令` ``）', missing.length === 0, missing.join(' '))
+  const dropOne = manual.split('`status`').join('status')
+  check(
+    'adj945 负对照①：把手册里的 `status` 去掉反引号（＝那个命令没写进手册）⇒ 判据判红',
+    dropOne !== manual && missingIn(dropOne).length === 1 && missingIn(dropOne)[0] === 'status',
+  )
+  const fakeSource = cliSrc.replace("'status']", "'status', 'frobnicate']")
+  check(
+    'adj945 负对照②：源码里多一个手册没写的命令（frobnicate）⇒ 判据判红（证明是**从源码驱动**、不是写死名单）',
+    fakeSource !== cliSrc && knownSet(fakeSource).has('frobnicate') && missing.length === 0 &&
+      Array.from(knownSet(fakeSource)).some((c) => !manual.includes('`' + c + '`')),
+  )
+
+  // ---- ② 输出类型必须写全（用户点名：`render` 含 `-t svg|midi|png|jpg|pdf`）----
+  const RENDER_TYPES = '-t svg|midi|png|jpg|pdf'
+  const PLAY_TYPES = '-t midi|wav'
+  const typesOk = (t: string): boolean => t.includes(RENDER_TYPES) && t.includes(PLAY_TYPES)
+  check('adj945 手册写全 render 的输出类型（含 `-t svg|midi|png|jpg|pdf`）与 play 的（`-t midi|wav`）', typesOk(manual))
+  check(
+    'adj945 负对照③：把手册里的 `-t svg|midi|png|jpg|pdf` **全部**抹成 `-t svg` ⇒ 判据判红',
+    (() => {
+      const cut = manual.split(RENDER_TYPES).join('-t svg')
+      return cut !== manual && !typesOk(cut) && typesOk(manual)
+    })(),
+  )
+
+  // ---- ③ 退出码表：手册里的码必须与 `cli.ts` 的 `EXIT` 常量**逐个对得上** ----
+  const exitCodes = (() => {
+    const i = cliSrc.indexOf('export const EXIT = {')
+    const j = cliSrc.indexOf('} as const', i)
+    if (i < 0 || j < 0) return [] as number[]
+    return Array.from(cliSrc.slice(i, j).matchAll(/(\w+):\s*(\d+)/g)).map((m) => Number(m[2]))
+  })()
+  const exitTable = (() => {
+    const i = manual.indexOf('## 四、退出码表')
+    const j = manual.indexOf('## 五、许可与源码', i)
+    return i >= 0 && j > i ? manual.slice(i, j) : ''
+  })()
+  /** 退出码表里的一行长得像 `` | `0` | 成功 | ... | `` ⇒ 只认这种形态（别处的数字不算） */
+  const tableHasCode = (text: string, code: number): boolean => new RegExp('\\| `' + code + '` \\|').test(text)
+  const missingCodes = exitCodes.filter((c) => !tableHasCode(exitTable, c))
+  check(
+    `adj945 手册的退出码表与代码里的 \`EXIT\` 常量一致（${exitCodes.join(' / ')}）`,
+    exitCodes.length >= 7 && exitTable !== '' && missingCodes.length === 0,
+    missingCodes.length > 0 ? `表里缺 ${missingCodes.join('/')}` : '表为空',
+  )
+  const codeChanged = exitTable.split('| `4` |').join('| `9` |')
+  check(
+    'adj945 负对照④：把退出码表里 4 那一格改成 9（＝代码改了、手册没改）⇒ 判据判红',
+    codeChanged !== exitTable && exitCodes.includes(4) && !tableHasCode(codeChanged, 4) && tableHasCode(exitTable, 4),
+  )
+
+  // ---- ④ 随包分发：三份文件必须在 `bundle.resources` 里，且与 Rust 侧打开的路径一致 ----
+  const conf = JSON.parse(readOrEmpty('src-tauri/tauri.conf.json')) as { bundle: { resources: Record<string, string> } }
+  const res = conf.bundle.resources
+  const resHas = (source: string, target: string): boolean =>
+    Object.entries(res).some(([s, t]) => s.split('\\').join('/').endsWith(source) && t === target)
+  check('adj945 conf：`../LICENSE` → 安装目录根 `LICENSE`（AGPL-3.0 全文随包）', resHas('../LICENSE', 'LICENSE'))
+  check('adj945 conf：`../THIRD-PARTY.md` → 安装目录根 `THIRD-PARTY.md`', resHas('../THIRD-PARTY.md', 'THIRD-PARTY.md'))
+  check(
+    `adj945 conf：\`../docs/CLI-手册.md\` → \`${MANUAL_TARGET}\`（**直接映射仓库里那份，不复制、不两处维护**）`,
+    resHas('../docs/CLI-手册.md', MANUAL_TARGET),
+  )
+  const resNoManual = Object.fromEntries(Object.entries(res).filter(([, t]) => t !== MANUAL_TARGET))
+  check(
+    'adj945 负对照⑤：把 conf 里手册那条映射删掉（＝安装包里没这份文件）⇒ 判据判红',
+    Object.keys(resNoManual).length === Object.keys(res).length - 1 &&
+      !Object.values(resNoManual).includes(MANUAL_TARGET) && resHas('../docs/CLI-手册.md', MANUAL_TARGET),
+  )
+  const rustManual = readOrEmpty('src-tauri/src/cli_manual.rs')
+  const rustRel = rustManual.match(/pub const CLI_MANUAL_REL: &str = "([^"]+)"/)?.[1] ?? ''
+  check(
+    `adj945 Rust 侧打开手册的相对路径与打包目标**逐字**一致（${rustRel}）`,
+    rustRel !== '' && rustRel === MANUAL_TARGET,
+  )
+  check(
+    'adj945 负对照⑥：把 Rust 那个常量改成别的路径（＝两处不一致，按钮会报"没找到"）⇒ 判据判红',
+    (() => {
+      const fake = rustManual.split(rustRel).join('docs/CLI-manual.md')
+      const fakeRel = fake.match(/pub const CLI_MANUAL_REL: &str = "([^"]+)"/)?.[1] ?? ''
+      return rustManual.includes('CLI_MANUAL_REL') && fake !== rustManual && fakeRel !== MANUAL_TARGET && rustRel === MANUAL_TARGET
+    })(),
+  )
+  const libRs = readOrEmpty('src-tauri/src/lib.rs')
+  check(
+    'adj945 Rust 命令已接线（`mod cli_manual;` + `invoke_handler` 里有 `cli_manual::cli_manual_open`）',
+    libRs.includes('mod cli_manual;') && libRs.includes('cli_manual::cli_manual_open'),
+  )
+  check(
+    'adj945 负对照⑦：把 `cli_manual::cli_manual_open` 从 invoke_handler 删掉（＝前端永远调不到）⇒ 判据判红',
+    (() => {
+      const cut = libRs.split('cli_manual::cli_manual_open').join('')
+      return cut !== libRs && !cut.includes('cli_manual::cli_manual_open')
+    })(),
+  )
+
+  // ---- ⑤ THIRD-PARTY.md：随包分发的第三方内容与署名必须真的写到 ----
+  const third = readOrEmpty('THIRD-PARTY.md')
+  const thirdPoints: Array<[string, string]> = [
+    ['内置音色库 GeneralUser GS 的作者署名', 'S. Christian Collins'],
+    ['音色库许可文件的随包落点', 'soundfonts/LICENSE-GeneralUserGS.txt'],
+    ['WebView2（微软运行时）', 'WebView2'],
+    ['QuickJS（随 exe 内嵌）', 'QuickJS'],
+    ['Tauri', 'Tauri'],
+  ]
+  const missThird = thirdPoints.filter(([, needle]) => !third.includes(needle)).map(([label]) => label)
+  check('adj945 THIRD-PARTY.md 写到了音色库署名/许可、WebView2、QuickJS、Tauri', missThird.length === 0, missThird.join('；'))
+  check(
+    'adj945 负对照⑧：把作者署名从 THIRD-PARTY.md 抹掉 ⇒ 判据判红',
+    (() => {
+      const cut = third.split('S. Christian Collins').join('')
+      return cut !== third && !cut.includes('S. Christian Collins') && missThird.length === 0
+    })(),
+  )
+
+  // ---- ⑥ 面向使用者的必备内容（用户逐条点名的那几段）----
+  const mustHave: Array<[string, string]> = [
+    ['调用形态 `ijipu.exe cli <命令>`', 'ijipu.exe cli'],
+    ['注册后可直接敲 `ijipu cli …`，并说明"要新开终端才生效"', '新开一个终端'],
+    ['只对当前用户生效、不需要管理员', '不需要管理员'],
+    ['Windows 控制台注意事项：`Start-Process -Wait -PassThru -NoNewWindow`', 'Start-Process'],
+    ['PowerShell `>` 会写出 0 字节文件', '0 字节'],
+    ['退出码 6 = 环境能力缺失（独立 Node 环境没有注册表能力）', '环境能力缺失'],
+    ['许可与源码地址（AGPL-3.0 + GitHub）', 'AGPL-3.0'],
+    ['源码仓库地址', 'github.com/snailhome/ijipu'],
+  ]
+  const missContent = mustHave.filter(([, needle]) => !manual.includes(needle)).map(([label]) => label)
+  check('adj945 手册写到了用户点名的必备内容（调用形态/注册说明/控制台注意/退出码 6/许可与源码）',
+    missContent.length === 0, missContent.join('；'))
+  check(
+    'adj945 负对照⑨：把"新开一个终端"那句从手册抹掉 ⇒ 判据判红',
+    (() => {
+      const cut = manual.split('新开一个终端').join('')
+      return cut !== manual && !cut.includes('新开一个终端') &&
+        mustHave.filter(([, needle]) => !cut.includes(needle)).length === 1
+    })(),
+  )
+
+  // ---- ⑦ 界面接线：设置里的「查看 CLI 手册」按钮 + 关于里的**源码地址** ----
+  const dialog = readOrEmpty('src/dialogs/PageConfigDialog.tsx')
+  const store = readOrEmpty('src/store/cliPath.ts')
+  const copyTs = readOrEmpty('src/brand/copy.ts')
+  check(
+    'adj945 设置「命令行」页签有「查看 CLI 手册」按钮（文案取 `cliPathCopy.manualButton`、动作走 `onOpenCliManual`）',
+    dialog.includes("case 'cli':") && dialog.includes('cliPathCopy.manualButton') && dialog.includes('onOpenCliManual'),
+  )
+  /**
+   * 只用于"组件里有没有硬编码文案"这条判据：**先把注释去掉** ——
+   * 注释里提一句按钮名不算硬编码（判据要盯的是**会被渲染出来的字面量** ✓）。
+   */
+  const stripTsComments = (src: string): string => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  const hardcodedManual = (src: string): boolean => stripTsComments(src).includes('查看 CLI 手册')
+  check(
+    'adj945 界面文案不硬编码：组件正文里没有「查看 CLI 手册」这个字面量（只在 `brand/copy.ts`）',
+    !hardcodedManual(dialog) && copyTs.includes("manualButton: '查看 CLI 手册'"),
+  )
+  check(
+    'adj945 负对照⑩：把该文案写进组件（`const cliManualLabel = \'查看 CLI 手册\'`）⇒ 判据判红（证明它真的在查组件）',
+    hardcodedManual(`${dialog}\nconst cliManualLabel = '查看 CLI 手册'\n`) && !hardcodedManual(dialog),
+  )
+  check(
+    'adj945 打开动作走我们自己的 Rust 命令（`cli_manual_open`），**不是**前端直调 opener 的 `open_path`（会被 scope 拒且静默）',
+    store.includes("invoke('cli_manual_open')") && !store.includes('plugin:opener|open_path'),
+  )
+  check(
+    'adj945 关于对话框补了**源码地址**（AGPL-3.0 网络条款那层；地址取 `brand.repoUrl`，不硬编码）',
+    /aboutCopy\s*=\s*\{[\s\S]{0,2000}?url:\s*brand\.repoUrl/.test(copyTs),
+  )
+  check(
+    'adj945 负对照⑪：把关于里那条 `url: brand.repoUrl` 换成别的地址（＝没有源码入口）⇒ 判据判红',
+    (() => {
+      const cut = copyTs.split('url: brand.repoUrl').join('url: brand.siteUrl')
+      return cut !== copyTs &&
+        !/aboutCopy\s*=\s*\{[\s\S]{0,2000}?url:\s*brand\.repoUrl/.test(cut) &&
+        /aboutCopy\s*=\s*\{[\s\S]{0,2000}?url:\s*brand\.repoUrl/.test(copyTs)
+    })(),
+  )
 }

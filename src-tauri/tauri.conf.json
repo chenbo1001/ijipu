@@ -57,7 +57,10 @@
       "target/release/WebView2Loader.dll": "WebView2Loader.dll",
       "../resources/soundfonts/generaluser_gs.sf2": "soundfonts/generaluser_gs.sf2",
       "../resources/soundfonts/LICENSE-GeneralUserGS.txt": "soundfonts/LICENSE-GeneralUserGS.txt",
-      "../resources/soundfonts/README.md": "soundfonts/README.md"
+      "../resources/soundfonts/README.md": "soundfonts/README.md",
+      "../LICENSE": "LICENSE",
+      "../THIRD-PARTY.md": "THIRD-PARTY.md",
+      "../docs/CLI-手册.md": "docs/iJipu-CLI-手册.md"
     }
   }
 }
