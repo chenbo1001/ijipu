@@ -853,7 +853,7 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
 {
   const file = readFileSync('src/samples/未命名.jps', 'utf8')
   check('adj765 应用新建模板文件 === 引擎 `DEFAULT_NEW_JPS_TEMPLATE`（逐字节）',
-    file === DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys,
+    file === DEFAULT_NEW_JPS_TEMPLATE,
     file === DEFAULT_NEW_JPS_TEMPLATE
       ? ''
       : `文件=${JSON.stringify(file).slice(0, 60)}… 引擎=${JSON.stringify(DEFAULT_NEW_JPS_TEMPLATE).slice(0, 60)}…`)
@@ -862,6 +862,75 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
       DEFAULT_NEW_JPS_TEMPLATE.includes('# jps-config:{}') &&
       DEFAULT_NEW_JPS_TEMPLATE.endsWith('\n'),
     `errors=${parseJps(DEFAULT_NEW_JPS_TEMPLATE).errors.length}`)
+}
+
+/**
+ * adj919（**用户要求**）：**别在谱面上自带"本乐谱使用…编制"这类自述说明** ——
+ * 「模板文件中去掉描述头 `S:` 这行」，用户确认后**一并去掉**两份样例谱（茉莉花 / 送别）里的同类行。
+ *
+ * ### 改动前的真实红灯与原因（**跑出来的，不是猜**）
+ * 把 `S:` 行从 `src/samples/未命名.jps` 删掉后，`npm run smoke` 报 **2 条**失败，
+ * 原文与原因**同源**：
+ *  · `✗ adj765 应用新建模板文件 === 引擎 \`DEFAULT_NEW_JPS_TEMPLATE\`（逐字节）` ——
+ *    **"样本没了"**：这条不是测 `S:` 的渲染，而是测"模板**文件**与引擎**常量**是同一份"。
+ *    文件把 `S:` 行删了、引擎 `engine/samples/template.ts` 的常量里那行还在 ⇒ 逐字节必然不等。
+ *  · `✗ adj767 模板/色板的真源在引擎（B5/B7）` —— **同一个根因的连带**：
+ *    这条把"模板逐字节等于引擎常量"和"色板数字等于引擎 `JPS_HIGHLIGHT_COLORS`"**挤在一条**里，
+ *    前半句红就整条红（色板那半句本来是绿的）。
+ *  ⇒ 两条都**不是"口径变了"**，而是"只改了一边"。收尾做法是**把引擎常量（真源）也改掉**，
+ *  而不是放宽比对。
+ *
+ * ### 新口径（为什么）
+ * 「新建」空白谱与**内置示例谱**都只带**最小描述头**（版本/标题/署名/调号/拍号），
+ * **不再自带"本乐谱使用…编制"的自述说明**；用户想在谱尾写说明，自己加 `S:` 即可。
+ * 依据是用户早先对**首页示例**的同类裁定（`src/landing/samples.ts` 的 adj893：
+ * 「去掉描述头 `S:`（示例里那句"本乐谱使用「爱记谱」编制"是自述冗余）」）——
+ * 首页展示副本当年靠 `simplifyJps()` **运行时**过滤掉了，这两份**原文**当时只是漏改。
+ *
+ * ⚠ **这不是删功能**：`S:` 谱尾说明的**文字链接化**是另一个功能
+ * （`engine/render/links.ts` 的 `findUrls`/`linkifyText`，落在 adj652），它**照旧**被测 ——
+ * 只是样本从"默认模板那行"换成 adj652 断言里**就地构造的最小源码**
+ * （模板不再含 `S:` 行，再拿模板当样本就测不到这个功能了）。
+ * 两条合起来算：**"不该自带 S: 行"由本条锁住，"S: 行里的 URL 可点"由 adj652 锁住**，
+ * 互不牵连、也没有哪一条被弱化。
+ *
+ * 判据写成 `(s: string) => boolean` 的纯谓词，是为了能拿它去判**注入 `S:` 行的对照样本**
+ * （负对照在下面，判据必须为真**且**真源上必须为假）。
+ */
+{
+  const hasSLine = (s: string) => /^\s*S\s*:/m.test(s)
+  /** 被判的三份真源：模板（应用文件 + 引擎常量）与两份内置样例谱 */
+  const sources919: [string, string, string][] = [
+    ['新建模板原文', 'src/samples/未命名.jps', readFileSync('src/samples/未命名.jps', 'utf8')],
+    ['引擎真源常量（新建模板 = DEFAULT_NEW_JPS_TEMPLATE）', '(engine/samples/template.ts)', DEFAULT_NEW_JPS_TEMPLATE],
+    ['示例谱原文', 'public/samples/茉莉花.jps', readFileSync('public/samples/茉莉花.jps', 'utf8')],
+    ['示例谱原文', 'public/samples/送别.jps', readFileSync('public/samples/送别.jps', 'utf8')],
+  ]
+  /**
+   * 负对照样本：在**引擎常量**的 `P: 4/4` 之后塞回模板原来那行 `S:`
+   * （只在**字符串**上注入，不碰任何文件），用来证明 `hasSLine` 这个名字里说的"判 S 行"
+   * 是真的在判它，而不是一条恒假的空断言。
+   */
+  const withSLine = DEFAULT_NEW_JPS_TEMPLATE.replace(
+    'P: 4/4\n',
+    'P: 4/4\nS: 本乐谱使用「爱记谱 https://ijipu.pages.dev」编制\n',
+  )
+  check('adj919 判据自身可信：负对照样本确实比模板多了一行 `S:`（否则下面的负对照是空跑）',
+    withSLine !== DEFAULT_NEW_JPS_TEMPLATE && (withSLine.match(/^\s*S\s*:/gm) ?? []).length === 1 &&
+      /^S: /m.test(withSLine))
+  check('adj919 负对照：把 `S:` 行塞回模板 ⇒ 判据为**真**（所以下面几条的"为假"是真的在判这行）',
+    hasSLine(withSLine) === true)
+  // 每条真源都单独成一条断言：哪份文件被塞回 `S:` 行，失败信息里直接点名
+  for (const [what, file, src] of sources919) {
+    check(`adj919 ${what} \`${file}\` **不含**描述头 \`S:\`（用户要求）`, !hasSLine(src),
+      src.split('\n').filter((l) => /^\s*S\s*:/.test(l)).join(' / ') || '（无 S: 行）')
+  }
+  /** 明写"这三份文件真的被读到了"（读空串 / 路径写错也会"不含 S: 行" ⇒ 必须排除这种假绿） */
+  const nonEmpty = sources919.every(([, , src]) => src.trim().length > 60)
+  const musicLines = sources919.every(([, , src]) => /^\s*Q\s*:/m.test(src))
+  check('adj919 上面 4 条不是"读空文件"式的假绿：每份真源都非空且带曲行 `Q:`',
+    nonEmpty && musicLines,
+    sources919.map(([what, file, src]) => `${what}${file}=${src.length}字符${/^\s*Q\s*:/m.test(src) ? '' : '(无 Q: 行!)'}`).join(' | '))
 }
 
 /**
@@ -1017,10 +1086,45 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
     !/timeBaseRef/.test(dlg) && !/startTimeRef/.test(dlg) && !/rafLoop/.test(dlg) &&
       /createPlaybackClock\(\{ onTick/.test(dlg))
   const theme = readFileSync('src/styles/theme.css', 'utf8')
-  check('adj767 模板/色板的真源在引擎（B5/B7）',
-    readFileSync('src/samples/未命名.jps', 'utf8') === DEFAULT_NEW_JPS_TEMPLATE &&
-      theme.includes(`--jp-hl-note: ${JPS_HIGHLIGHT_COLORS.dark.note};`) &&
-      theme.includes(`--jp-hl-note: ${JPS_HIGHLIGHT_COLORS.light.note};`))
+  /**
+   * adj919：**口径拆分**（原来的写法把两件事挤在一条 `check` 里）。
+   *
+   * 原样是：
+   *   `check('adj767 模板/色板的真源在引擎（B5/B7）', 模板文件 === 引擎常量 && 色板两处命中)`
+   * ⇒ 前半句一红整条就红，**看不出到底是模板漂移还是色板漂移**。
+   * adj919 去掉模板里的 `S:` 行时，这条就是这么红的（真正的红灯是 adj765，这条是连带）。
+   * 现在拆成三条：模板一条（**与 adj765 同一个判据**，是刻意重复的冗余闸门 ——
+   * 它是"应用文件 vs 引擎真源"的跨文件十字锁，adj765 那份将来若被改动/挪走，
+   * 这里仍能拦住漂移）、色板两条（深色 / 浅色各一条，失败信息里直接写清是谁不对）。
+   */
+  check('adj767 应用不另带一份新建模板（B5）——`src/samples/未命名.jps` 逐字节 === 引擎 `DEFAULT_NEW_JPS_TEMPLATE`',
+    readFileSync('src/samples/未命名.jps', 'utf8') === DEFAULT_NEW_JPS_TEMPLATE,
+    readFileSync('src/samples/未命名.jps', 'utf8') === DEFAULT_NEW_JPS_TEMPLATE
+      ? ''
+      : `文件与引擎常量不等（长度 ${readFileSync('src/samples/未命名.jps', 'utf8').length} vs ${DEFAULT_NEW_JPS_TEMPLATE.length}）`)
+  /**
+   * adj919：顺手把"色板数字对得上"从 `theme.includes(...)` 的**子串命中**升级为
+   * **按模式块**判定。原因：深浅两处**变量名相同**（都叫 `--jp-hl-note`），
+   * 子串命中**无法区分是哪一块**——只要文件里任何地方出现过这两个色值就通过，
+   * 浅色块被写成深色值也照样绿（= 一条形同虚设的断言）。
+   * 现在把 `:root`（品牌默认 = 深色）与 `…[data-mode='light']` 的规则体各自切出来，
+   * 在**各自的块里**要求命中 `JPS_HIGHLIGHT_COLORS` 对应模式的值。
+   */
+  const blockOf = (css: string, selectorRe: RegExp): string => {
+    // 从选择器开始吃到该规则的 `{ … }`（括号不嵌套，`[^}]*` 足够），只取第一个匹配
+    const m = new RegExp(`${selectorRe.source}\\s*\\{[^}]*\\}`).exec(css)
+    return m ? m[0] : ''
+  }
+  const darkBlock = blockOf(theme, /:root/)
+  const lightBlock = blockOf(theme, /\[data-mode='light'\]/)
+  const darkHit = darkBlock.includes(`--jp-hl-note: ${JPS_HIGHLIGHT_COLORS.dark.note};`)
+  const lightHit = lightBlock.includes(`--jp-hl-note: ${JPS_HIGHLIGHT_COLORS.light.note};`)
+  check('adj767 色板真源在引擎（B7）：**深色**块 `:root` 的 `--jp-hl-note` === 引擎 `JPS_HIGHLIGHT_COLORS.dark.note`',
+    darkBlock.length > 0 && darkHit,
+    darkBlock.length === 0 ? '（没切到 `:root { … }` 规则体 —— 选择器换写法了？）' : `期望 ${JPS_HIGHLIGHT_COLORS.dark.note}；块内=${(darkBlock.match(/--jp-hl-note:[^;]*;/) ?? ['(无)'])[0]}`)
+  check('adj767 色板真源在引擎（B7）：**浅色**块 `[data-mode=\'light\']` 的 `--jp-hl-note` === 引擎 `JPS_HIGHLIGHT_COLORS.light.note`',
+    lightBlock.length > 0 && lightHit,
+    lightBlock.length === 0 ? "（没切到 `[data-mode='light'] { … }` 规则体 —— 选择器换写法了？）" : `期望 ${JPS_HIGHLIGHT_COLORS.light.note}；块内=${(lightBlock.match(/--jp-hl-note:[^;]*;/) ?? ['(无)'])[0]}`)
 }
 
 // adj246：空 rest 的 Q:/C: 行也要渲染行头（否则显示层成空行）
@@ -19386,6 +19490,13 @@ function runAdj689bTests() {
  * 引擎只产出标记（`<a class="jp-link" data-href="…" target="_blank">`），点击交给宿主
  * （应用 `src/preview/openUrl.ts` / 插件 `src/openExternal.ts`）；这里断言**标记**这一半，
  * 宿主接线另外用源码断言钉住。
+ *
+ * adj919（用户要求去掉模板与示例谱里的 `S:` 行）：★**样本口径变更**★ ——
+ * 原来第 ③ 条渲染断言是拿"**默认新建模板**里那行 `S:`"当样本的（断言名和注释都这么写）。
+ * 模板不再含 `S:` 行后，拿模板当样本就**测不到"`S:` 谱尾说明会渲染成可点链接"这个功能**了。
+ * ⇒ 按"**换样本、别删功能**"处理：样本改成**本函数里就地构造的最小源码**（`code652`，
+ * 自带 `S:` 行 + 官网 URL，与真源文件无关），被测的功能、判据、严格程度一字未改。
+ * 好处还多一条：这条从此**不依赖任何真源文件**，谁去改模板/示例谱都不会再莫名其妙地红。
  */
 function runAdj652Tests() {
   console.log('[153] 谱面文本里的链接（adj652）')
@@ -19418,10 +19529,12 @@ function runAdj652Tests() {
   check('adj652 前后文字原样保留（`本乐谱使用「爱记谱 ` / `」编制`）',
     html.startsWith('本乐谱使用「爱记谱 <a class="jp-link"') && html.endsWith('</a>」编制'), html)
   // ③ 渲染产物：S: 谱尾说明里那串 URL 就是链接
+  //    adj919：样本是**就地构造**的最小源码（自带 `S:` 行），**不读默认模板**——
+  //    模板的 `S:` 行按用户要求去掉了，这个功能（`S:` → 可点链接）仍然必须被测。
   const code652 = `V: 1.0\nB: 测试\nD: C\nP: 4/4\nS: 本乐谱使用「爱记谱 ${U}」编制\nQ: 1 2 3 4 |\nC: 这 是 歌 词\n`
   const svg652 = renderScoreToSvg(layoutScore(parseJps(code652), defaultPageConfig))[0]
   const notes652 = /<text data-meta="notes_0"[^>]*>([\s\S]*?)<\/text>/.exec(svg652)
-  check('adj652 `S:` 谱尾说明渲染成带链接的 `<text>`（默认模板那行 URL 可直接点）',
+  check('adj652 `S:` 谱尾说明渲染成带链接的 `<text>`（构造的最小源码，那行 URL 可直接点）',
     notes652 !== null && /<a class="jp-link" href="https:\/\/ijipu\.pages\.dev"/.test(notes652[1]),
     notes652 ? notes652[1].slice(0, 120) : '(未找到 notes_0)')
   // ④ **不把 URL 拆到两行**：拆了就是两个半截链接，点哪个都不对
@@ -20735,11 +20848,15 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   /**
    * adj893（用户要求）：示例里的描述头 `S:` 去掉 ——
    * 两份原文都写着 `S: 本乐谱使用「爱记谱」编制`，放在示例谱面上是自述冗余。
-   * （用户已明确：`public/samples/*.jps` 的 `S:` 由他自己决定留不留，本轮口径是"不去掉"。）
+   * （当时用户口径：`public/samples/*.jps` 原文的 `S:` 由他自己决定留不留，本轮"只精简首页副本"。）
+   * ⚠ **adj919 起口径更新**：用户确认"一并去掉"，那两份**原文**（茉莉花 / 送别）的 `S:` 行
+   * **已经删掉**了 —— "新建模板 + 两份样例谱都不含描述头 `S:`"由 `adj919` 的组断言统一守着。
+   * 本条判据仍然有意义：`simplifyJps` 是**通用过滤器**，日后有人往 `public/samples/*.jps`
+   * 里新加一份带 `S:` 的谱时，首页副本仍必须被它滤掉。
    *
    * ⚠ 验证"过滤行为本身"用**构造输入**，**刻意不依赖真源内容**：
    * 原来那版负对照写的是"两份真源里确实有 `S:`"——那是把两件不相干的事绑在一起，
-   * 哪天用户把真源那行去掉，这条判据就会莫名其妙地红。
+   * 真源那行一被去掉，这条判据就会莫名其妙地红（adj919 这轮正好印证了这个判断）。
    */
   for (const s of BRAND_SAMPLES) {
     check(`adj893 首页示例「${s.label}」：不带描述头 \`S:\``, !/^\s*S\s*:/m.test(s.src),
