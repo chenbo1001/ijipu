@@ -1860,6 +1860,52 @@ async function main() {
       const pgControlsFit = (m) => !!m && m.vw > 0 && m.ctrlW <= m.vw + 1 && m.pageScrollW <= m.vw + 1
       const pgPreviewFit = (m) => !!m && m.vw > 0 && m.maxSvgW <= m.vw + 1 && m.pageScrollW <= m.vw + 1
       const pgBrief = (m) => (m ? JSON.stringify({ mode: m.mode, zoom: m.zoom, vb: m.vb, svgW: m.svgW, ctrlW: m.ctrlW, vw: m.vw }) : 'null')
+      /**
+       * ---------------- adj916（用户反馈）：可调示例的谱子要**够长** ----------------
+       *
+       * 用户原话：「插件手册的 代码块参数（`v=` 视图 / `z=` 缩放）这个可测试的示例用一个比较长的示例会更好，
+       * 如好茉莉花」。两小节 / 四小节的片段（`Q: 5 5 6 6 | 5 - - - ||`）三档视图几乎一样、缩放也看不出取舍。
+       *
+       * 量的是**实测几何**：`v=s`（裁到墨迹）下 SVG 视框的**高度** `vb[3]` ——
+       * 它单位是谱面像素、**与 `z=` 无关**（缩放只改显示宽度）⇒ 判据不会随控件状态漂。
+       * 实测基线（本轮）：两小节片段 **133.6** / 四小节片段 **141.3**；整首《茉莉花》**408.7**。
+       * 阈值取 **300**：旧片段连一半都不到（判据真的在量"长度"），新示例留约 1/4 余量
+       * （将来排版微调不至于误报，但真要缩回短片必定红灯）。
+       */
+      const PG_MIN_VB_H = 300
+      const pgLongEnough = (m) => !!m && m.mode === 's' && m.vb.length === 4 && m.vb[3] >= PG_MIN_VB_H
+      /** 等实测几何满足 pred（重排是异步的，靠固定 sleep 会偶发假红） */
+      const pgWaitFor = async (rootSel, pred, tries = 20) => {
+        let m = await pgMeasure(rootSel)
+        for (let i = 0; i < tries && !pred(m); i++) {
+          await sleep(300)
+          m = await pgMeasure(rootSel)
+        }
+        return m
+      }
+      /**
+       * 把 playground 的**源码**在 DOM 里换成另一段（**不改文件**），并触发一次重排；返回换之前的源码。
+       * ⚠ 只发**一次** `change`：`applyControls → previewJpsBlock → refreshBlock` 的渲染是异步的，
+       *   连发两次会让两份渲染赛跑，先回来的可能是旧参数那一份。
+       */
+      const pgSwapSource = (text) =>
+        evalJs(
+          c,
+          `(() => {
+            const root = document.querySelector(${JSON.stringify(PG_ROOT)})
+            if (!root) return null
+            const code = root.querySelector('.jps-block-code')
+            const sel = root.querySelector('select[data-jps-view]')
+            if (!code || !sel) return null
+            const before = code.textContent
+            code.textContent = ${JSON.stringify(text)}
+            sel.value = 's'
+            sel.dispatchEvent(new Event('change', { bubbles: true }))
+            return before
+          })()`,
+        )
+      /** 负对照用的"旧片段"：adj914 时文档里那两小节 */
+      const PG_SHORT_SRC = 'V: 1.0\nB: 参数示例\nD: C\nP: 4/4\nQ: 5 5 6 6 | 5 - - - ||\n'
       /** 滚到 playground 并等它渲染出来（首次渲染是"进视口才下引擎"） */
       const pgReveal = async () => {
         const scrolled = await evalJs(
@@ -1991,8 +2037,37 @@ async function main() {
           pgBrief(afterReset))
         const pgErrs = collectErrors(mark)
         check(`${label}：控件区无控制台错误 / 无本站 4xx`, pgErrs.length === 0, pgErrs.slice(0, 3).join(' | '))
+        /**
+         * ⑧ adj916：示例**够长**（整首《茉莉花》）+ 负对照。
+         * 负对照是**真的在浏览器里换源码**（只动 DOM、不改文件）：把示例换成 adj914 那两小节片段 ⇒
+         * 同一条判据必须为假；再换回原文 ⇒ 必须又为真（这才证明它量的是**渲染结果**，
+         * 而不是"页面上有没有 playground"）。
+         */
+        const longScore = await pgWaitFor(PG_ROOT, pgLongEnough)
+        check(
+          `${label}：adj916 可调示例的谱子**够长**（v=s 实测 SVG 视框高度 ≥ ${PG_MIN_VB_H} —— 两小节片段实测只有 134/141，看不出三档视图与缩放的差别）`,
+          pgLongEnough(longScore),
+          `实测视框高 ${longScore?.vb?.[3]}（阈值 ${PG_MIN_VB_H}）vb=${JSON.stringify(longScore?.vb)}`,
+        )
+        const origSrc = await pgSwapSource(PG_SHORT_SRC)
+        const shortScore = await pgWaitFor(PG_ROOT, (m) => !pgLongEnough(m))
+        console.log(`    · 负对照（浏览器里把示例换成两小节片段）实测视框高：${longScore?.vb?.[3]} → ${shortScore?.vb?.[3]}`)
+        const restoredSrc = origSrc ? await pgSwapSource(origSrc) : null
+        const backScore = await pgWaitFor(PG_ROOT, pgLongEnough)
+        check(
+          `${label}：adj916 负对照 —— 在浏览器里把示例换成两小节片段（**不改文件**）⇒ 判据为假；换回原文 ⇒ 又为真`,
+          !!origSrc && origSrc.includes('茉莉花') && !!shortScore && !pgLongEnough(shortScore) &&
+            restoredSrc === PG_SHORT_SRC && pgLongEnough(backScore),
+          `原文 ${longScore?.vb?.[3]} → 片段 ${shortScore?.vb?.[3]} → 换回 ${backScore?.vb?.[3]}`,
+        )
         if (DO_SHOTS && url === '/plugin/') {
-          await evalJs(c, `window.scrollBy({ top: -80, behavior: 'instant' })`)
+          /**
+           * adj916：谱子变长 ⇒ 截图前把可调示例**顶到视口上沿**（原来 `block:'center'` 会上下都切掉），
+           * 上沿留 90px 让读者还能看到这一节的说明文字。
+           */
+          await evalJs(c, `document.querySelector(${JSON.stringify(PG_ROOT)})?.scrollIntoView({ block: 'start', behavior: 'instant' })`)
+          await sleep(300)
+          await evalJs(c, `window.scrollBy({ top: -90, behavior: 'instant' })`)
           await sleep(300)
           await saveShot('plugin-playground.png', await shoot('png'))
         }

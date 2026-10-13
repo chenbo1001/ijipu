@@ -20656,6 +20656,53 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
         pgHtml.includes('jps-playground') && pgHtml.includes('data-jps-view'))
   }
 
+  /**
+   * ---- adj916（**用户反馈**）：可调示例的谱子要**够长**，`v=` 三档与 `z=` 缩放的差别才看得出来 ----
+   *
+   * 用户原话：「插件手册的 代码块参数（v= 视图 / z= 缩放）这个可测试的示例用一个比较长的示例会更好，
+   * 如好茉莉花」。原来两处文档用的是两小节 / 四小节的片段（`Q: 5 5 6 6 | 5 - - - ||`）——
+   * 谱子太短 ⇒ 三档视图几乎一模一样、缩放也只是"同一小块变大变小"，取舍看不出来。
+   * adj916 起两处统一换成整首《茉莉花》（曲词与 `public/samples/茉莉花.jps` 一致，只少了页面设置行）。
+   *
+   * 判据写成**纯函数**（入参 = 从 md 里抽出来的那段 playground 源码），负对照才能复用**同一份**判据：
+   *   ① 小节数 ≥ 8（`||` 只算一条线）；② 曲行（`Q:` / `Q1:` …）≥ 2 —— 至少两行才看得出"满宽 / 整页"的差别；
+   *   **负对照**：把示例正文换成 adj914 那两小节片段（**只在这个字符串上替换，不改文件**）⇒ 判据必须为假。
+   * 真浏览器里量的是**实测几何**（`v=s` 下 SVG 视框高度 ≥ 300），见 `scripts/verify-site.mjs` 的同名断言。
+   */
+  const PG_DOCS = ['docs/PLUGIN-GUIDE.md', 'docs/SYNTAX.md']
+  /** 读源码（本块自带一份：上面那个 `{}` 里的 `readSrc` 是它的局部函数，作用域不跨块） */
+  const pgRead = (rel: string): string => String(readFileSync(join(root, rel), 'utf8'))
+  /** 三个反引号（同理自带一份：`TICKS3` 也只在上面那个块里）——不写字面反引号，免得把模板串截断 */
+  const pgFence = String.fromCharCode(96).repeat(3)
+  /** 抽出「带 `playground` 关键字的 ```jps 块」的正文（两处文档各一段） */
+  const pgBodyOf = (md: string): string => /```jps[^\n]*playground[^\n]*\n([\s\S]*?)```/.exec(md)?.[1] ?? ''
+  /** 小节数 = 小节线个数；`||` 只算一条（第二个 `|` 与它前一个同属一条线） */
+  const pgBars = (src: string): number => (src.match(/\|(?!\|)/g) ?? []).length
+  /** 曲行数（`Q:` / `Q1:` / `Q2:` … 都算一行曲） */
+  const pgRows = (src: string): number => (src.match(/^Q\d*\s*:/gm) ?? []).length
+  /** 判据：够长（≥ 8 小节 + ≥ 2 行曲）—— 两小节的片段恒为假 */
+  const pgLongEnough = (src: string): boolean => pgBars(src) >= 8 && pgRows(src) >= 2
+  /** 负对照用的"旧片段"：就是 adj914 时 `PLUGIN-GUIDE.md` 里那两小节（只替换进字符串，不碰文件） */
+  const PG_SHORT = 'V: 1.0\nB: 参数示例\nD: C\nP: 4/4\nQ: 5 5 6 6 | 5 - - - ||\n'
+  for (const f of PG_DOCS) {
+    const md = pgRead(f)
+    const body = pgBodyOf(md)
+    check(`adj916 ${f}：可调示例的谱子**够长**（小节 ≥ 8 且曲行 ≥ 2 —— 两小节的片段看不出三档视图与缩放的差别）`,
+      pgLongEnough(body), `小节 ${pgBars(body)} / 曲行 ${pgRows(body)}`)
+    // 把实测数字打出来：判据"过"与负对照"为假"都要能被人在日志里看到（不只靠一个 ✓）
+    console.log(`    · ${f} 实测：小节 ${pgBars(body)} / 曲行 ${pgRows(body)}；负对照（两小节片段）小节 ${pgBars(PG_SHORT)} / 曲行 ${pgRows(PG_SHORT)}`)
+    check(`adj916 ${f}：可调示例换成《茉莉花》（用户点名），且**写法与初值一个字不改**（playground 关键字 + v=s z=150）`,
+      body.includes('B: 茉莉花') && body.includes('Z: 中国民歌') && md.includes(pgFence + 'jps v=s z=150 playground'),
+      (body.split('\n')[1] ?? '(没抽到 playground 块)'))
+    /** 负对照：换成两小节片段 ⇒ 判据为假（先确认替换真的落到了字符串上） */
+    const reverted = md.replace(body, PG_SHORT)
+    const revertedBody = pgBodyOf(reverted)
+    check(`adj916 负对照 ${f}：把示例换回两小节片段（**只在字符串上替换，不改文件**）⇒ 判据为假`,
+      body !== PG_SHORT && reverted !== md && revertedBody === PG_SHORT &&
+        !pgLongEnough(revertedBody) && pgLongEnough(body),
+      `替换后 小节 ${pgBars(revertedBody)} / 曲行 ${pgRows(revertedBody)}`)
+  }
+
   // ---- adj883：首页示例精简 ----
   const raw = '#===== 描述头定义 =====\nV: 1.0\nB: 试\nQ: 1 2 |\n# jps-config:{"note_size":15}\n'
   const slim = simplifyJps(raw)

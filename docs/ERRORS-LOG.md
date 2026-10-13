@@ -8242,6 +8242,24 @@
   `DOC_PAGE_MD`（页面 → md 文件）自动发现样本，`smoke` 扫三份文档里所有含转义的行 ——
   将来 `/manual/` 或新文档页用了转义写法，**不用回来改断言**就自动被守住。
 
+### E-2026-421 `scripts/smoke.mts` 是**分块 `{}`** 的 —— 新块里引用上一块的局部函数 ⇒ 运行期 `ReferenceError`，而 `tsc`/`lint` 全绿（adj916）
+
+- **现象**：为 adj916 在冒烟套件 `[161]` 那一段里新增一组断言，其中用了上面那个块里的 `readSrc()`
+  与 `TICKS3`。`npx tsc -b` **0 错**、`npm run lint` **0 error**，但 `npm run smoke` 跑到最后一段时
+  `ReferenceError: readSrc is not defined`（`dist-smoke/smoke.cjs:17831`）⇒ **整轮冒烟中断**，
+  前面几千条 ✓ 全部作废、只能重跑（一轮约 4 分钟）。
+- **根因**：`scripts/smoke.mts` 用若干**顶层 `{}` 块**分段（一段一个主题），
+  `readSrc` / `TICKS3` 这类都是**某一块里的局部 `const`**（作用域不跨块）；
+  而 `scripts/**` **不在 `tsc -b` 的项目里**（由 vite 打包，esbuild 只转译不做类型检查），
+  `oxlint` 也不查"作用域外的标识符" ⇒ 这一层是**静态检查的盲区**，只有真跑才会炸。
+- **解决**：新块**自带**要用的小工具 —— `const pgRead = (rel) => String(readFileSync(join(root, rel), 'utf8'))`
+  与 `const pgFence = String.fromCharCode(96).repeat(3)`（`root` / `readFileSync` / `join` 是**模块级**的，可直接用）。
+- **预防**：① 往 `scripts/smoke.mts` 加断言时，**先确认要用的标识符在哪一层**（`const` 只在它所在的 `{}` 内有效）；
+  ② 改完**必须真跑一次** `npm run smoke` —— 别把"`tsc -b` 过了"当成"能跑"；
+  ③ 与 `E-2026-391`（CLI 源码从未被 `tsc` 覆盖）同族：**"没有任何闸门覆盖的代码面"要单独当心**，
+  这类面的错误只在运行期现形。
+
+| v0.55.2+ | 2026-10-13 | 追加 E-2026-421（**`scripts/smoke.mts` 分块作用域** —— 新块里引用上一块的局部 `readSrc`/`TICKS3` ⇒ 运行期 `ReferenceError` 中断整轮冒烟，而 `tsc -b` / `lint` 全绿（`scripts/**` 不进 tsc 项目、oxlint 不查作用域）；预防：新块自带小工具 + 改完必真跑一次；adj916） |
 | v0.55.2+ | 2026-10-13 | 追加 E-2026-420（**站点文档渲染器不认反引号转义** —— Obsidian 正常、网页里把「反斜杠+反引号」原样显示出来并跟一个代码片；根因是应用内帮助/官网共用的 `src/help/markdown.ts` 的 `inlineMd` 只认"反引号配对"、不做转义；解决：先占位后还原（只认 `\`` 与 `\\` 两种）；闸门：`verify-site` 两页各 5 条端到端 + `smoke` 9 条，均含负对照；adj913。同日 adj914 把这两组判据改成"凡源码里出现 `\`` 的文档页都要查"，并给「代码块参数」加 `v=`/`z=` 交互预览） |
 | v0.55.2+ | 2026-10-13 | 追加 E-2026-419（**手机端文档页整页被撑宽**（用户报「脚本/预览块很宽」）—— 窄屏列定义写成裸 `1fr`（桌面是 `minmax(0,1fr)`），自动下限 = 内容 min-content，被表格顶到 4327px，宽度 100% 的 ` ```jps ` 块跟着变宽；改回 `minmax(0, 1fr)` + 窄屏行内代码放开断行；`verify-site` 6 条手机视口实测（含负对照）+ `smoke` 两条源码级（含负对照）；adj911） |
 | v0.55.2+ | 2026-10-12 | 追加 E-2026-418（**谱面模式下虚线的盒与 SVG 视框不同源** —— 虚线层用 `cropRectFor` 的"整页裁四边距"盒（x=50），SVG 用 `rangeBox` 的墨迹盒（x=42）⇒ 虚线错位；改为直接读 `viewBox` 并补闸门 `adj910`；adj910） |
