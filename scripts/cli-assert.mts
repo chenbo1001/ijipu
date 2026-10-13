@@ -16,6 +16,8 @@
  * 运行：`npm run smoke`（已串在后面）；也可单独 `node dist-smoke/cli-assert.cjs`。
  */
 import { runCli, EXIT, type CliIo } from '../packages/ijipu-cli/src/cli'
+// adj942：**内嵌入口**（`ijipu.exe` 里跑的就是这一份）——这里真跑一遍它的接线 ✓
+import { runEmbeddedCli, type EmbedHost } from '../packages/ijipu-cli/src/embedEntry'
 // adj873：`--crop` 断言要读渲染产物的 viewBox 来核对画布盒
 import { readViewBoxOf } from '@ijipu/engine/index.ts'
 import { readFileSync } from 'node:fs'
@@ -347,8 +349,130 @@ console.log('\n— 命令行（A·P1–P4）—')
   }
 }
 
+// ⑨ adj942（用户裁定「直接落，修」·路线②）：**内嵌 CLI** 的接线 —— `ijipu.exe` 里跑的就是这一份
+{
+  /** 假宿主：宿主（Rust）注入的那组能力，全部内存化（字段口径见 `embedEntry.ts` 的 `EmbedHost`） */
+  const makeHost = (
+    files: Record<string, string> = {},
+    failRead = false,
+  ): { host: EmbedHost; out: string[]; errs: string[]; text: Record<string, string>; bin: Record<string, string> } => {
+    const out: string[] = []
+    const errs: string[] = []
+    const text: Record<string, string> = {}
+    const bin: Record<string, string> = {}
+    const host: EmbedHost = {
+      argv: [],
+      readStdin: () => files['(stdin)'] ?? '',
+      readFile: (p) => {
+        if (failRead || !(p in files)) throw new Error(`ENOENT: 读不到文件 ${p}`)
+        return files[p]
+      },
+      writeFile: (p, t) => void (text[p] = t),
+      writeFileBinary: (p, b64) => void (bin[p] = b64),
+      listDir: () => [],
+      exists: (p) => p in files || p in text || p in bin,
+      out: (t) => void out.push(t),
+      err: (t) => void errs.push(t),
+    }
+    return { host, out, errs, text, bin }
+  }
+
+  /**
+   * ⚠ 要**错误**（不是告警）得用「`{tp … }` 只能写在歌词行」——`Q: x` 那类"无法识别的符号"
+   * 在引擎里是**告警**（本文件第 ① 组早就踩过这个坑 ✗），拿它当"语法错误"会得到退出码 0。
+   */
+  const EMBED_BAD = 'V: 1.0\nB: 错\nD: C\nP: 4/4\nQ: 1 2 3 4 | {tp 5 6 7 1} |\n'
+  const embedPkgVersion = readFileSync('packages/ijipu-cli/package.json', 'utf8').match(/"version":\s*"([^"]+)"/)?.[1] ?? ''
+
+  const v = makeHost()
+  v.host.argv = ['--version']
+  const rv = await runEmbeddedCli(v.host)
+  check(
+    'adj942 内嵌入口 `--version` 走通（退出码 0 + `iJipu <版本>`，与 Node 版同一个版本宏）',
+    rv.code === EXIT.ok && embedPkgVersion !== '' && String(v.out.join('')) === `iJipu ${embedPkgVersion}\n`,
+    `code=${rv.code} out=${JSON.stringify(String(v.out.join('')))} 期望=${embedPkgVersion}`,
+  )
+
+  const good = makeHost({ '(stdin)': GOOD })
+  good.host.argv = ['lint', '-i', '-']
+  const rg = await runEmbeddedCli(good.host)
+  check(
+    'adj942 内嵌入口 `lint`（好谱）⇒ 0 且**不写任何文件**（只读这条也要在内嵌路径上成立）',
+    rg.code === EXIT.ok && Object.keys(good.text).length === 0 && Object.keys(good.bin).length === 0,
+    `code=${rg.code}`,
+  )
+
+  const bad = makeHost({ '(stdin)': EMBED_BAD })
+  bad.host.argv = ['lint', '-i', '-']
+  const rb = await runEmbeddedCli(bad.host)
+  check('adj942 内嵌入口 `lint`（错误谱）⇒ 3（退出码契约与 Node 版同一套）', rb.code === EXIT.syntax, `code=${rb.code}`)
+  const fixed = makeHost({ '(stdin)': EMBED_BAD.replace('{tp 5 6 7 1}', '5 6 7 1') })
+  fixed.host.argv = ['lint', '-i', '-']
+  check(
+    'adj942 负对照①：同一份谱**把错处修好**后 ⇒ 0（证明上面那条 3 是谱的问题、不是内嵌接线在乱报）',
+    (await runEmbeddedCli(fixed.host)).code === EXIT.ok,
+  )
+
+  const mid = makeHost({ '(stdin)': GOOD })
+  mid.host.argv = ['render', '-i', '-', '-t', 'midi', '-o', 'out.mid']
+  const rm = await runEmbeddedCli(mid.host)
+  const midiBytes = mid.bin['out.mid'] !== undefined ? Buffer.from(mid.bin['out.mid'], 'base64') : Buffer.alloc(0)
+  check(
+    'adj942 内嵌入口**二进制通道**（base64）走通：`render -t midi` ⇒ 0 且宿主拿到的字节以 MThd 开头',
+    rm.code === EXIT.ok && midiBytes.subarray(0, 4).toString('latin1') === 'MThd',
+    `code=${rm.code} bytes=${midiBytes.length} head=${midiBytes.subarray(0, 4).toString('latin1')}`,
+  )
+
+  const png = makeHost({ '(stdin)': GOOD })
+  png.host.argv = ['render', '-i', '-', '-t', 'png', '-o', 'out.png']
+  const rp = await runEmbeddedCli(png.host)
+  check(
+    'adj942 内嵌入口**不谎报能力**：没注入 rasterize ⇒ `-t png` 退出码 4 且不写文件（与独立 Node 环境同口径）',
+    rp.code === EXIT.render && Object.keys(png.bin).length === 0 && png.errs.some((e) => e.includes('隐藏窗口渲染')),
+    `code=${rp.code} err=${png.errs.join('｜')}`,
+  )
+
+  const missing = makeHost({}, true)
+  missing.host.argv = ['lint', '-i', '不存在.jps']
+  check('adj942 内嵌入口：宿主读文件失败 ⇒ 2（"输入不存在"的对外承诺不变 ✓）', (await runEmbeddedCli(missing.host)).code === EXIT.noInput)
+
+  /**
+   * `TextEncoder` 补丁：**QuickJS 没有 TextEncoder**，而引擎的 MIDI 产出要用它
+   * （`engine/playback/midi.ts` 的 `utf8()`）⇒ 内嵌入口自己补了一个。
+   * 这里把 Node 的全局**删掉**来模拟 QuickJS：① 内嵌入口仍出 MIDI ✓；
+   * ② **负对照**：CLI 核心（不装补丁）在同一环境下**必然失败** ✓ —— 证明补丁真的在起作用。
+   */
+  const g = globalThis as unknown as { TextEncoder?: unknown }
+  const savedTe = g.TextEncoder
+  const removedTe = delete g.TextEncoder
+  if (!removedTe) {
+    console.log('  · adj942 TextEncoder 补丁那两条**跳过**（本环境不允许删全局 TextEncoder）')
+  } else {
+    try {
+      let coreFailed = false
+      try {
+        const core = makeIo({ '(stdin)': GOOD })
+        await runCli(['render', '-i', '-', '-t', 'midi', '-o', 'out.mid'], core.io)
+      } catch {
+        coreFailed = true
+      }
+      const noTe = makeHost({ '(stdin)': GOOD })
+      noTe.host.argv = ['render', '-i', '-', '-t', 'midi', '-o', 'out.mid']
+      const rNoTe = await runEmbeddedCli(noTe.host)
+      const teHead = noTe.bin['out.mid'] !== undefined ? Buffer.from(noTe.bin['out.mid'], 'base64').subarray(0, 4).toString('latin1') : ''
+      check(
+        'adj942 内嵌入口自带 `TextEncoder` 补丁（模拟"没有 TextEncoder"的环境）⇒ `-t midi` 仍出 MThd 且补上了全局',
+        rNoTe.code === EXIT.ok && teHead === 'MThd' && typeof g.TextEncoder === 'function',
+        `code=${rNoTe.code} head=${teHead}`,
+      )
+      check('adj942 负对照②：同环境下**不装补丁的 CLI 核心**必然失败（证明那条补丁不是摆设）', coreFailed)
+    } finally {
+      g.TextEncoder = savedTe
+    }
+  }
+}
+
 console.log(failed === 0 ? `\nCLI 断言全部通过 ✅（${passed} 项）` : `\nCLI 断言失败 ${failed} 项 ❌`)
 process.exit(failed === 0 ? 0 : 1)
 }
-
 void main()

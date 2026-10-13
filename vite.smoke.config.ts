@@ -13,8 +13,21 @@
  */
 import { defineConfig } from 'vite'
 import { fileURLToPath, URL } from 'node:url'
+import { readFileSync } from 'node:fs'
+
+/**
+ * adj942：`cli-assert` 现在也**真跑一遍内嵌入口**（`packages/ijipu-cli/src/embedEntry.ts`），
+ * 而内嵌入口的版本来自构建期 `define` 注入的宏（Node 版与内嵌版的 vite 配置各有一份）——
+ * 这里补同一个宏，好让冒烟里 `--version` 报的是**真实版本**而不是兜底的 `'dev'` ✓。
+ */
+const cliPkg = JSON.parse(
+  readFileSync(fileURLToPath(new URL('./packages/ijipu-cli/package.json', import.meta.url)), 'utf8'),
+) as { version: string }
 
 export default defineConfig({
+  define: {
+    __IJIPU_CLI_VERSION__: JSON.stringify(cliPkg.version),
+  },
   resolve: {
     alias: [
       { find: /^@ijipu\/engine$/, replacement: fileURLToPath(new URL('./packages/ijipu-engine/src/engine/index.ts', import.meta.url)) },

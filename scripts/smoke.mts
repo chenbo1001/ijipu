@@ -17976,6 +17976,7 @@ runAdj927ExternalChangeTests()
         }
       }
     }
+    runAdj942EmbedCliTests()
     console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
     process.exit(failed === 0 ? 0 : 1)
   })
@@ -23628,4 +23629,149 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   check('adj930 负对照④：主题 token 换成别的值 ⇒ 判据②为假（以后改主题忘了改启动层，这里会红）',
     !bootTokenOk(homeHtml, '#123456', lightToken) && bootTokenOk(homeHtml, darkToken, lightToken) &&
       normCss(darkToken) === normCss(SITE_BOOT_COLORS.dark.bg) && normCss(lightToken) === normCss(SITE_BOOT_COLORS.light.bg))
+}
+
+/**
+ * [169] 内嵌 CLI（adj942）：命令行**编进 `ijipu.exe`**（用户裁定「直接落，修」·路线②）。
+ *
+ * 为什么要有这一段：这条链路上能"悄悄坏掉"的地方很多，而它们**都不是类型系统能拦住的**：
+ *   · `embedEntry.ts` 里偷偷 `import 'node:fs'`（QuickJS 里没有 ⇒ 运行期才炸 ✗）；
+ *   · `main.rs` 的分流**排在 `ijipu_lib::run()` 之后**（等于没分流：窗口先开出来）；
+ *   · 内嵌入口"假装有能力"（注入 rasterize/synthesize ⇒ 位图/音频谎报成功 ✗）；
+ *   · `npm run build` 忘了串 `cli:embed` ⇒ 干净克隆打包时 `include_bytes!` **直接编不过** ✗；
+ *   · `build.rs` 少了"缺产物就写占位"的兜底 ⇒ 裸 `cargo build`/`cargo test` 编不过 ✗；
+ *   · 产物没重生成（exe 里冻着旧 CLI）。
+ * 所以这里按**源码/产物文本**逐条钉住 —— **每条都配负对照**（把判据喂给"故意改坏的一份"必须为假 ✓）。
+ */
+function runAdj942EmbedCliTests() {
+  console.log('[169] 内嵌 CLI：命令行编进 ijipu.exe（adj942）')
+  const readText = (rel: string): string => readFileSync(join(root, rel), 'utf8')
+  const exists = (rel: string): boolean => existsSync(join(root, rel))
+  const readOrEmpty = (rel: string): string => (exists(rel) ? readText(rel) : '')
+
+  // ---- ① 内嵌入口：只做接线，**不碰 `node:*`**（IO 全部由 Rust 注入）----
+  const ENTRY = 'packages/ijipu-cli/src/embedEntry.ts'
+  const entry = readOrEmpty(ENTRY)
+  const noNodeImport = (src: string): boolean => !/from\s+'node:|require\('node:/.test(src)
+  check(
+    'adj942 内嵌入口存在，且导出 runEmbeddedCli / EmbedHost（宿主与测试共用同一份接线）',
+    entry.includes('export async function runEmbeddedCli') && entry.includes('export type EmbedHost') && entry.includes("from './cli'"),
+    entry.length === 0 ? `缺 ${ENTRY}` : `${entry.length} 字符`,
+  )
+  check(
+    'adj942 内嵌入口**不碰 `node:*`**（口径：IO 交给 Rust，不在 QuickJS 里硬造 `node:fs`）',
+    entry.length > 0 && noNodeImport(entry),
+  )
+  check(
+    'adj942 负对照①：同一判据喂 `import fs from \'node:fs\'` ⇒ 为假（证明它真的在看 import）',
+    !noNodeImport("import fs from 'node:fs'") && noNodeImport(entry),
+  )
+
+  // ---- ② 内嵌入口**不许谎报能力**（本地没有的能力就不注入）----
+  const noCapabilityLie = (src: string): boolean =>
+    !/rasterize\s*:/.test(src) && !/synthesize\s*:/.test(src) && !/watchFile\s*:/.test(src)
+  check(
+    'adj942 内嵌入口**不注入** rasterize / synthesize / watchFile（位图/音频/监视在 CLI 形态下如实报"没这能力"）',
+    entry.length > 0 && noCapabilityLie(entry),
+  )
+  check(
+    'adj942 负对照②：加一条 `rasterize: async () => []` ⇒ 判据为假（"假装有渲染通道"会被抓住）',
+    !noCapabilityLie('const io = { rasterize: async () => [] }') && noCapabilityLie(entry),
+  )
+
+  // ---- ③ main.rs：分流在**开窗口之前**，并按退出码退出 ----
+  const mainRs = readOrEmpty('src-tauri/src/main.rs')
+  const dispatchBeforeGui = (src: string): boolean => {
+    const i = src.indexOf('cli_embed::try_run_from_env')
+    const j = src.indexOf('ijipu_lib::run()')
+    return i >= 0 && j >= 0 && i < j && src.includes('std::process::exit')
+  }
+  check(
+    'adj942 main.rs：CLI 分流在 `ijipu_lib::run()` **之前** + `std::process::exit(退出码)`（CLI 形态一个窗口都不开）',
+    dispatchBeforeGui(mainRs),
+  )
+  check(
+    'adj942 负对照③：在 `fn main() {` 之后先插一句 `ijipu_lib::run();`（= 先开窗口）⇒ 判据为假',
+    !dispatchBeforeGui(mainRs.replace('fn main() {', 'fn main() { ijipu_lib::run();')) && dispatchBeforeGui(mainRs),
+  )
+
+  // ---- ④ lib.rs：模块声明挂在 `cfg(windows)`（不把 QuickJS 带进 Android 等目标）----
+  const libRs = readOrEmpty('src-tauri/src/lib.rs')
+  const modWindowsOnly = (src: string): boolean => /#\[cfg\(windows\)\]\s*pub mod cli_embed;/.test(src)
+  check('adj942 lib.rs：`pub mod cli_embed` 挂在 `#[cfg(windows)]` 下', modWindowsOnly(libRs))
+  check(
+    'adj942 负对照④：写成 `#[cfg(not(windows))]` ⇒ 判据为假',
+    !modWindowsOnly('#[cfg(not(windows))]\npub mod cli_embed;') && modWindowsOnly(libRs),
+  )
+  check(
+    'adj942 Cargo.toml：`rquickjs` 只挂在 `[target.\'cfg(windows)\'.dependencies]` 段里（本轮唯一新增依赖）',
+    (() => {
+      const toml = readOrEmpty('src-tauri/Cargo.toml')
+      const header = toml.indexOf("target.'cfg(windows)'.dependencies")
+      const dep = toml.indexOf('rquickjs = ')
+      return header >= 0 && dep > header
+    })(),
+  )
+  check(
+    'adj942 负对照⑤：把 `rquickjs` 挪到普通 `[dependencies]`（段落在后）⇒ 判据为假',
+    !(() => {
+      const fake = "rquickjs = { version = \"0.14\" }\n[target.'cfg(windows)'.dependencies]\nwindows-sys = {}"
+      const header = fake.indexOf("target.'cfg(windows)'.dependencies")
+      const dep = fake.indexOf('rquickjs = ')
+      return header >= 0 && dep > header
+    })(),
+  )
+
+  // ---- ⑤ build.rs：缺产物时写**占位**（干净克隆裸 `cargo build`/`cargo test` 也不能编不过）----
+  const buildRs = readOrEmpty('src-tauri/build.rs')
+  const hasPlaceholder = (src: string): boolean =>
+    src.includes('ijipu-embed.js') && /if\s*!\s*embed\.exists\(\)/.test(src) && src.includes('cargo:warning')
+  check(
+    'adj942 build.rs：产物不存在时写**占位**并 `cargo:warning`（`include_bytes!` 要求编译时文件已在 ✗ 靠这层兜住）',
+    hasPlaceholder(buildRs),
+  )
+  check(
+    'adj942 负对照⑥：把"缺文件就写占位"的判断改成 `if false` ⇒ 判据为假',
+    !hasPlaceholder(buildRs.replace('if !embed.exists()', 'if false')) && hasPlaceholder(buildRs),
+  )
+
+  // ---- ⑥ 打包链：beforeBuildCommand → `npm run build` → `npm run cli:embed` ----
+  const pkgJson = JSON.parse(readText('package.json')) as { scripts: Record<string, string> }
+  const tauriConf = JSON.parse(readText('src-tauri/tauri.conf.json')) as { build: { beforeBuildCommand: string } }
+  const buildScript = pkgJson.scripts.build ?? ''
+  const beforeBuild = tauriConf.build.beforeBuildCommand
+  const chainOk = (build: string, before: string): boolean => before.includes('npm run build') && /cli:embed/.test(build)
+  check(
+    `adj942 打包链：beforeBuildCommand "${beforeBuild}" 里串了 \`npm run cli:embed\`（否则干净克隆打包时 include_bytes! 缺文件 ⇒ 编不过）`,
+    chainOk(buildScript, beforeBuild),
+  )
+  check(
+    'adj942 负对照⑦：把 build 里的 `npm run cli:embed` 去掉 ⇒ 判据为假',
+    !chainOk(buildScript.replace('npm run cli:embed', ''), beforeBuild) && chainOk(buildScript, beforeBuild),
+  )
+
+  // ---- ⑦ 产物本身：已构建、无 `node:*`/`require(`、注入了真实版本 ----
+  const EMBED = 'packages/ijipu-cli/dist/ijipu-embed.js'
+  const appVer = readOrEmpty('src/brand/version.ts').match(/APP_VERSION = '([^']+)'/)?.[1] ?? ''
+  const bundle = exists(EMBED) ? readText(EMBED) : null
+  const bundleOk = (text: string | null): boolean =>
+    text !== null && noNodeImport(text) && !text.includes('require(') && text.includes('__ijipuCliMain') && appVer !== '' && text.includes(appVer)
+  check(
+    `adj942 内嵌产物 ${EMBED} 已构建：含 __ijipuCliMain、无 node:*/require(、注入了真实版本（${appVer}）`,
+    bundleOk(bundle),
+    bundle === null ? '先跑 `npm run cli:embed`' : `${bundle.length} 字符`,
+  )
+  check(
+    'adj942 负对照⑧：同一判据喂 **Node 版产物**（`dist/ijipu.cjs`，带 `require("node:fs")`）⇒ 为假（证明判据真在区分两种产物）',
+    !bundleOk(exists('packages/ijipu-cli/dist/ijipu.cjs') ? readText('packages/ijipu-cli/dist/ijipu.cjs') : null) && bundleOk(bundle),
+  )
+
+  // ---- ⑧ 行为闸门落在 cli-assert（真跑一遍接线，不是只看文本）----
+  const cliAssertSrc = readOrEmpty('scripts/cli-assert.mts')
+  const importsEmbedEntry = (src: string): boolean => src.includes("from '../packages/ijipu-cli/src/embedEntry'")
+  check('adj942 cli-assert 直接 import 内嵌入口（真跑一遍 `runEmbeddedCli`）', importsEmbedEntry(cliAssertSrc))
+  check(
+    'adj942 负对照⑨：把 import 路径换成 Node 入口（`nodeEntry`）⇒ 判据为假',
+    !importsEmbedEntry(cliAssertSrc.replace('src/embedEntry', 'src/nodeEntry')) && importsEmbedEntry(cliAssertSrc),
+  )
 }

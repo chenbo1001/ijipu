@@ -45,4 +45,20 @@ tauri-plugin-opener = "2"
 # ② tauri/tao/wry **已经把它带进依赖树**（Cargo.lock 里已有 0.61.2）⇒ 加为直接依赖**不新增任何 crate** ✓；
 # ③ 走 `[target.'cfg(windows)']` ⇒ 非 Windows 目标（Android 等）根本不编译它 ✓。
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Pipes", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_System_Console"] }
+
+# adj942（用户裁定「直接落，修」·路线②）：把**命令行内嵌进 `ijipu.exe`** —— 用嵌入的小 JS 引擎
+# 跑 `packages/ijipu-cli` 那段纯逻辑（`runCli(argv, io)`），用户**不必装 Node**。
+#
+# ⚠ 选 `rquickjs`（而不是 boa / quickjs-rs / deno_core / v8）的依据：
+#   ① **体积**：QuickJS 是"一个 C 文件级"的小引擎（编译后静态库约 1MB 级），本仓库要的是
+#      "安装包增量 0.5~1MB 量级"；V8/deno_core 光运行时就几十 MB ✗；
+#   ② **维护活跃 + 跨平台可编**：rquickjs 是 QuickJS-ng 的官方 Rust 绑定（0.14.0 / 2026-09），
+#      自带 `rquickjs-sys` 里 vendored 的 quickjs-ng 源码，构建走 `cc` crate ⇒ 本仓库的
+#      **x86_64-pc-windows-gnu（MinGW gcc）** 能直接编（MSVC 亦可）；
+#   ③ **API 够用**：宿主函数注入（`Function::new`）+ 微任务队列（`execute_pending_job`）
+#      ⇒ 把 `io` 全部交给 Rust 提供，**不在 JS 里硬造 `node:fs`** ✓（口径见 `docs/CLI.md` §一之二）。
+# ⚠ 只挂在 `cfg(windows)` 下：本轮交付物是 `ijipu.exe`；非 Windows 目标（Android 等）**不编译它** ✓。
+#   同时给 `windows-sys` 开 `Win32_System_Console`（AttachConsole/AllocConsole/GetConsoleMode/
+#   WriteConsoleW）—— 这是**已有依赖加 feature**，不新增任何 crate ✓。
+rquickjs = { version = "0.14", default-features = false, features = ["std"] }

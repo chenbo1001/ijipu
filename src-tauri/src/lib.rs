@@ -19,6 +19,11 @@ use tauri::{Emitter, Manager};
 /// adj875：命令行（`@ijipu/cli`）的**能力宿主**模块（Windows 命名管道；默认不开启）。
 mod cli_host;
 
+/// adj942：**内嵌 CLI** —— `ijipu.exe cli …` 时用它跑编进 exe 的那段 JS（QuickJS），
+/// **先于窗口**分流（见 `main.rs`）。只挂在 Windows 下：本轮交付物就是 `ijipu.exe` ✓。
+#[cfg(windows)]
+pub mod cli_embed;
+
 /// adj538：待打开的 `.jps` 路径队列（去重前的原始路径，前端取走即清空）。
 ///
 /// 为什么用队列 + 拉取，而不是直接把内容 emit 给前端：**冷启动存在竞态**——

@@ -103,6 +103,48 @@ for (const [label, path, minBytes] of SOURCES) {
   if (!ok) failed++
 }
 
+/**
+ * adj942（用户裁定「直接落，修」·路线②）：**`ijipu.exe` 内置了 CLI** ——
+ * 这就是"用户不必装 Node 也能用命令行"的交付物本身，所以值得机器守住。
+ *
+ * 怎么核对（**不需要跑 exe** ✓）：`include_bytes!` 是把产物**逐字节**放进 exe 的 ⇒
+ * 在 exe 里一定找得到产物里的标志串。三条一起看才可信：
+ *   ① 内嵌产物存在且**像真产物**（体积下限 —— `build.rs` 的占位只有几百字节 ✗ 会被拦下）；
+ *   ② exe 里找得到 `__ijipuCliMain`（内嵌入口）与 `__ijipuHost`（宿主接口）；
+ *   ③ exe 的 mtime **不早于**产物 ⇒ 打包前**重生成过**产物
+ *      （防"先打包、后重生成产物"，与 `E-2026-374` 同族：产物会冻在生成那一刻）。
+ * 另配两条负对照：同一个搜索找"一定不存在的标志"必须为假、Node 版产物里不该有这个标志
+ * （证明它真在区分"两种产物/有没有内嵌"，而不是恒真 ✗）。
+ */
+const EMBED_JS = 'packages/ijipu-cli/dist/ijipu-embed.js'
+const RELEASE_EXE = 'src-tauri/target/release/ijipu.exe'
+const NODE_BUNDLE = 'packages/ijipu-cli/dist/ijipu.cjs'
+const EMBED_MIN_BYTES = 50 * 1024
+
+console.log('[check-installer] 内嵌 CLI（adj942：命令行编进 exe）自检：')
+{
+  const contains = (path, needle) => {
+    if (!existsSync(path)) return false
+    return readFileSync(path).includes(Buffer.from(needle, 'utf8'))
+  }
+  const embedSize = existsSync(EMBED_JS) ? statSync(EMBED_JS).size : 0
+  const exeSize = existsSync(RELEASE_EXE) ? statSync(RELEASE_EXE).size : 0
+  const fresh = embedSize > 0 && exeSize > 0 && statSync(RELEASE_EXE).mtimeMs >= statSync(EMBED_JS).mtimeMs
+  const checks = [
+    [`内嵌 CLI 产物存在且不是占位（${EMBED_JS} ≥ ${Math.round(EMBED_MIN_BYTES / 1024)}KB）`, embedSize >= EMBED_MIN_BYTES],
+    [`exe 里带着内嵌 CLI 入口（找得到 __ijipuCliMain）`, contains(RELEASE_EXE, '__ijipuCliMain')],
+    [`exe 里带着宿主接口（找得到 __ijipuHost）`, contains(RELEASE_EXE, '__ijipuHost')],
+    [`exe 不比内嵌产物旧（打包前重生成过产物）`, fresh],
+    ['负对照①：同一个搜索找"一定不存在"的标志必须为假', !contains(RELEASE_EXE, '__ijipuCliMain_NEVER_EXISTS__')],
+    ['负对照②：Node 版产物（dist/ijipu.cjs）里**不该**有这个标志（两种产物分得开）', contains(NODE_BUNDLE, '#!') && !contains(NODE_BUNDLE, '__ijipuCliMain')],
+  ]
+  for (const [label, ok] of checks) {
+    console.log(`  ${ok ? '✓' : '✗'} ${label}`)
+    if (!ok) failed++
+  }
+  console.log(`  · exe ${Math.round(exeSize / 1024)}KB ／ 内嵌产物 ${Math.round(embedSize / 1024)}KB`)
+}
+
 if (existsSync(SETUP_DIR)) {
   const files = readdirSync(SETUP_DIR).filter((f) => f.endsWith('.exe'))
   if (files.length === 0) {
