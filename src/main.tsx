@@ -21,6 +21,13 @@ import {
 } from '@ijipu/engine'
 import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from './pwa/swUpdate'
 import { APP_VERSION_FULL } from './brand/version'
+// adj927/adj928：外部改动提示与差异框的文案（不再笼统说"外部变更"）
+import { externalChangeCopy } from './brand/copy'
+// adj927：外部改动的判据与基准（纯模块：无 DOM/存储依赖）
+//  · `getBaseline` 给下面的排错探针用（排"又提示外部变更"时必须一眼看到"应用手里的基准"）；
+//  · `probeExternalChange` / `baselineKeyOf` 给 `fileChanged` 用。
+// 一律**静态**引入（既静态又动态 import 会让打包器报 INEFFECTIVE_DYNAMIC_IMPORT）。
+import { getBaseline, probeExternalChange, baselineKeyOf } from './store/externalChange'
 import { installAppHeight } from './pwa/appHeight'
 
 // adj404：应用高度跟随可视视口——软键盘弹出时（浏览器/PWA/自建外壳）编辑区自动让位，
@@ -163,11 +170,26 @@ void (async () => {
         })()
       },
       /**
-       * adj724b（用户口径 2026-10）：**检测 `.jps` 被外部修改**，并让用户选「重新载入 / 保留我的修改」。
+       * adj724b/adj927（用户口径 2026-10）：**检测 `.jps` 的内容被别处改了**，
+       * 并让用户选「载入外部 / 保留本地」。
        *
-       * 关键点：**我们自己即时保存时 Obsidian 也会触发 modify**。所以这里必须**比对内容**——
-       * 只有当"宿主读到的内容"与"应用手里的内容"不一致时，才是真的外部改动，才提示。
-       * （每次自动保存后会多一次 `read` 往返，本地回环、毫秒级，可接受。）
+       * ## 为什么不能拿"磁盘内容 vs 当前缓冲区"比（旧写法的假提示根因）
+       *
+       * 嵌入版是**随输随存**：编辑 400ms 后写回文库（`docStore.scheduleEmbedAutosave`），
+       * 这次写盘也会让 Obsidian 触发 `modify` ⇒ 插件把 `fileChanged` 推回来。旧写法在这里拿
+       * `disk === st.code`（`st.code` = **当前编辑器缓冲区**）判断"是不是我们自己写的"，
+       * 可缓冲区**每敲一个字都在变**，而宿主推来的事件不是零延迟 ⇒ 事件一到，
+       * 缓冲区早就不是我们刚写下去的那份了 ⇒ **假提示**（用户报的"经常提示外部变更"）。
+       *
+       * ## 新口径（adj927）
+       *
+       * 参照物换成**基准**（`store/externalChange.ts`：我们最后一次写出去/读进来的内容指纹 + mtime）：
+       *  ① mtime 一模一样 ⇒ 直接判"没变"（不读文件）；
+       *  ② mtime 不同（或拿不到）⇒ 读一次内容比指纹 ⇒ **内容真变了才提示**；一样就静默刷新基准。
+       *
+       * ⚠ 嵌入版宿主目前只在事件里带 `path`（不带 mtime，见 `hostBridge.ts` 的 `HostEvents`），
+       * 所以这里 `mtimeOf: null` ⇒ 实际走第②段（一次本地回环读，短谱毫秒级）。
+       * 将来宿主把 mtime 一起推来，把 `mtimeOf` 换成"取宿主给的 mtime"即可自动启用快筛。
        */
       fileChanged: (path) => {
         void (async () => {
@@ -182,28 +204,41 @@ void (async () => {
           if (!bind || bind.segs.join('/') !== segs.join('/')) return
           const ws = await getWorkspace()
           if (!ws) return
-          let disk: string
+          /**
+           * 事件那一刻的缓冲区内容：只在"没有基准"（首次/刚换文件）时当兜底参照用；
+           * 有基准时**一律以基准为准**（缓冲区的后续编辑不该被当成"外部改动"）。
+           */
+          const atEvent = st.code
+          let verdict: Awaited<ReturnType<typeof probeExternalChange>>
           try {
-            disk = await readWorkspaceText(ws, segs)
+            verdict = await probeExternalChange({
+              key: baselineKeyOf(ws.id, segs),
+              fallbackText: atEvent,
+              mtimeOf: null, // 宿主不回传 mtime ⇒ 走内容判据（见上面的说明）
+              readText: () => readWorkspaceText(ws, segs),
+            })
           } catch {
-            return // 读不到（刚被删等）交给其它路径处理，这里不打扰
+            return // 读不到（刚被删/被移走等）交给其它路径处理，这里不打扰
           }
-          if (disk === st.code) {
-            // 内容一致 ⇒ 是我们自己刚写的（或外部改动恰好相同）⇒ 不打扰
-            return
-          }
+          if (verdict.kind !== 'external') return
           const name = segs[segs.length - 1]
           useUiStore.getState().showAsk({
-            text: `「${name}」已在 Obsidian 中被修改，是否重新载入？（重新载入会丢弃本地未保存的编辑）`,
-            confirmLabel: '重新载入',
-            cancelLabel: '保留我的修改',
+            text: externalChangeCopy.askText(name),
+            confirmLabel: externalChangeCopy.loadExternal,
+            cancelLabel: externalChangeCopy.keepLocal,
             onConfirm: () => {
-              // 用磁盘内容覆盖当前文档（仍走 store 的打开逻辑，历史会记一步，可撤销）
+              // 用文件里的内容替换当前文档（仍走 store 的打开逻辑，历史会记一步，可撤销）
               void useDocStore.getState().openWorkspaceFile(segs)
             },
             onCancel: () => {
               // 保留本地：什么都不做。用户下次保存会用本地内容覆盖外部改动（提示里已说明）
               console.info('[iJipu] 保留本地修改，忽略外部改动')
+            },
+            // adj928：多一个「查看差异」——本地内容**点开时再取**（用户可能还在编辑）
+            diff: {
+              name,
+              localText: () => useDocStore.getState().code,
+              externalText: verdict.externalText,
             },
           })
         })()
@@ -242,6 +277,13 @@ void (async () => {
         themeMode: localStorage.getItem('ijipu.themeMode'),
         hostTheme: bridge.welcome.theme,
         followTheme: bridge.welcome.followTheme,
+        /**
+         * adj927：**外部改动的基准**（内容指纹 + mtime）。
+         *
+         * 排"又提示外部变更了"这种问题时，必须能一眼看到"应用手里的基准"和"文件实际内容"
+         * 到底谁对不上——只靠事件日志看不出是判据错了还是文件真变了。
+         */
+        baseline: getBaseline(),
       })
   } catch (e) {
     // 忽略：不是嵌入环境（或宿主不可用）时，走原有的 fsa/path 后端。

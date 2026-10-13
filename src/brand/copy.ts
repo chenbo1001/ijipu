@@ -662,3 +662,44 @@ export const externalOpenCopy = {
   /** 写回失败（Rust 侧回读校验不过/无权限/文件被移走）——提示另存为，绝不谎报已保存 */
   saveToSourceFailed: (name: string, reason: string) => `保存到 ${name}.jps 失败：${reason}（可改用「另存为」）`,
 } as const
+
+/**
+ * adj927/adj928：**"文件内容已在别处被改动"**的提示与差异框文案。
+ *
+ * 用户口径（2026-10）：
+ *  · 判据改成"**内容真的变了才提示**"（时间戳不再单独作数，见 `store/externalChange.ts`）；
+ *  · 文案**不许**再笼统说"外部变更"——要说明可能是 Obsidian 里编辑，也可能是 Sync 同步，
+ *    并把两个选择的后果写清（保留本地 / 载入外部）；
+ *  · 提示里能点开一个**两栏源码差异框**（左 = 本地、右 = 外部），自己看差异再决定。
+ */
+export const externalChangeCopy = {
+  /** 顶部确认条正文（adj927 改写：说清"内容"与两个选择的后果） */
+  askText: (name: string) =>
+    `「${name}」的文件内容已在其它地方被改动（可能是 Obsidian 里编辑，也可能是 Sync 同步进来的）。` +
+    '选「载入外部」会用文件里的新内容替换当前编辑；选「保留本地」则保留你正在编辑的这份，下次保存会写回文件。',
+  /** 主按钮：用磁盘（外部）内容替换当前编辑 */
+  loadExternal: '载入外部',
+  /** 次按钮：保留当前编辑 */
+  keepLocal: '保留本地',
+  /** 第三个按钮：打开两栏差异框（不替用户做决定） */
+  viewDiff: '查看差异',
+  /** 差异框标题（拼上文件名） */
+  diffTitle: (name: string) => `文件内容差异 — ${name}`,
+  /** 左栏：本地（正在编辑的这份） */
+  leftTitle: '本地（正在编辑的这份）',
+  /** 右栏：外部（文件里现在的内容） */
+  rightTitle: '外部（文件里的新内容）',
+  /** 顶部摘要：行数 + 改动处数 */
+  summary: (localLines: number, externalLines: number, changes: number) =>
+    `本地 ${localLines} 行 · 外部 ${externalLines} 行 · 改动 ${changes} 处`,
+  /** 超长输入退化为"只标改动区块"时的提示 */
+  degradedHint: '内容较长：只标出改动区块，未做行内字符级高亮',
+  /** 折叠行提示 */
+  collapsed: (n: number) => `… 折叠 ${n} 行相同内容 …`,
+  /** 展开全部 */
+  expandAll: '展开全部',
+  /** 只看改动（收起） */
+  collapseToChanges: '只看改动',
+  /** 关闭差异框，回到原来的确认条 */
+  closeDiff: '关闭',
+} as const

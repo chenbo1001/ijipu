@@ -11,9 +11,10 @@
 | `engine/` | 简谱引擎：解析（parser/tokenizer）、格式化（format）、排版（layout）、渲染（render）、播放（playback）、光标映射（cursorMap）、时值（duration）、类型（types）；**adj758–adj766 新增共性层**：`highlight/`（分词 `jpsHighlight` ／ 错误→块 `jpsProblems` ／ 逐行模型 `model` ／ 色板 `palette`）、`diagnostics/`（问题分级与展示行 `problems`）、`playback/`（色块 `playhead` ／ 音源清单与顺序 `soundbanks` ／ 时钟 `clock`）、`samples/template`（新建模板）、`settings/layers`（分层判定规则） | **纯 TS，零 React/DOM/浏览器 API 依赖**（宿主全局只允许 `typeof` 守卫下的用法，有闸门 `adj770`），可在 Node 中单测；数据流单向 `source → parse → layout → render/playback`，禁止反向依赖；入口统一 `engine/index.ts`；**两端（应用 / Obsidian 插件）共用的规则一律先落这里**，插件经 `vendor/engine` 逐字节同步（闸门 `adj770`） |
 | `editor/` | 代码编辑器：EditorPane（textarea+高亮层）、highlight、history（撤销/重做）、shortcuts（行首命令快捷键） | 只做编辑交互；解析/格式化调用 engine，不复制引擎逻辑 |
 | `preview/` | 乐谱预览：PreviewPane（SVG 渲染消费 + 光标联动 + 排版辅助虚线拖拽） | 渲染消费 engine 输出，虚线位置计算调用 `engine/layout/guides.ts` 纯函数，不重算几何 |
-| `store/` | Zustand 状态：docStore（代码/解析结果/页面配置/历史）、uiStore（模态框/主题/缩放/字号） | 唯一状态源；localStorage 键集中定义在文件顶部常量（`ijipu.` 前缀），禁止组件内散落硬编码键名 |
-| `ui/` | 通用组件：MenuBar、Toolbar、Modal、StatusBar | 无业务状态，只消费 store；图标/按钮样式走 CSS 变量 |
-| `dialogs/` | 功能对话框：PageConfig、Playback、Export、Samples、Shortcuts、About | 每个对话框一个文件，统一用 `ui/Modal`；打开/关闭走 uiStore.modal |
+| `store/` | Zustand 状态：docStore（代码/解析结果/页面配置/历史）、uiStore（模态框/主题/缩放/字号）、**externalChange（外部改动判据与基准，adj927：纯判据 + 注入 IO 的编排，可在 Node 里断言）** | 唯一状态源；localStorage 键集中定义在文件顶部常量（`ijipu.` 前缀），禁止组件内散落硬编码键名 |
+| `ui/` | 通用组件：MenuBar、Toolbar、Modal、StatusBar、**ConfirmBar（顶部确认条，adj724b/adj928：多一个「查看差异」）** | 无业务状态，只消费 store；图标/按钮样式走 CSS 变量 |
+| `dialogs/` | 功能对话框：PageConfig、Playback、Export、Samples、Shortcuts、About、**FileDiffDialog（两栏源码差异框，adj928）** | 每个对话框一个文件，统一用 `ui/Modal`；打开/关闭走 uiStore.modal（FileDiffDialog 例外：走 `uiStore.fileDiff`，因为它叠在确认条之上） |
+| `diff/` | **源码差异计算**（`textDiff.ts`，adj927/adj928）：归一化（CRLF/行尾空白/末尾换行不算改动）、内容指纹（FNV-1a+长度）、行级 LCS 对齐 + **行内字符级高亮**、默认折叠口径 | **纯函数、零依赖、零 DOM**，可在 Node 里直接断言；只算差异，界面在 `dialogs/FileDiffDialog.tsx`；**归一化只用于比较与展示，绝不回写用户内容**；超长输入必须退化而不卡死（`degraded`） |
 | `export/` | 导出模块：PDF/JPG/SVG/PNG（export.ts） | 纯函数 + 浏览器下载，仅在用户主动触发时执行 |
 | `playback/` | 播放辅助：采样音色库离线缓存（浏览器 IndexedDB / Tauri 文件系统，samplerCache.ts，adj323） | 实现 engine 的 `SamplerCache` 接口；只做缓存读写与预缓存编排，音频播放仍走 engine |
 | `brand/` | 品牌层：tokens（色板/字体/口号/**官网地址**）、copy（面向用户文案）、themes（中国色主题）、version（版本号）、siteVars/siteLinks（**官网页面**的品牌色注入与外部链接填充，adj876）、siteBoot（**官网首屏启动层**：色值/元素 id 的唯一口径 + 揭示时机，adj930） | 所有品牌字面量集中于此，禁止在其它代码硬编码文案/色值/版本号；官网的**外部地址**（GitHub / 下载 / 插件）也放这里，HTML 里只写 `data-l="<键名>"` 由 `siteLinks.ts` 填；**启动层那段内联 CSS 必须留在各页 `<head>` 里**（外链样式表来不及防闪烁），色值只改 `siteBoot.ts` + 四页（smoke `[168]` 逐字核对） |

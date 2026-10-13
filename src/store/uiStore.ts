@@ -372,6 +372,36 @@ interface UiState {
   ask: AskState | null
   showAsk: (ask: AskState) => void
   clearAsk: () => void
+  /**
+   * adj928（用户要求）：**两栏源码差异框**的数据（`null` = 不显示）。
+   *
+   * 从确认条的「查看差异」按钮打开，用来"看清差异再决定接受哪一边"——
+   * 所以它带着两个动作（保留本地 / 载入外部），在差异框里也能直接做决定；
+   * 只关掉差异框则回到原来的确认条（`ask` 不动）。
+   */
+  fileDiff: FileDiffState | null
+  showFileDiff: (d: FileDiffState) => void
+  closeFileDiff: () => void
+}
+
+/** adj928：确认条上「查看差异」的数据来源（"本地"内容**延迟取**：用户可能还在编辑） */
+export interface AskDiffSource {
+  name: string
+  /** 点开差异框那一刻的本地内容（当前编辑器里的） */
+  localText: () => string
+  /** 文件里现在的内容（外部那侧；原始文本，未归一化） */
+  externalText: string
+}
+
+/** adj928：差异框要显示的内容与两个决定 */
+export interface FileDiffState {
+  name: string
+  /** 左栏：本地（正在编辑的这份） */
+  local: string
+  /** 右栏：外部（文件里的新内容） */
+  external: string
+  onKeepLocal: () => void
+  onLoadExternal: () => void
 }
 
 /** 确认条的内容与动作（adj724b） */
@@ -383,6 +413,8 @@ export interface AskState {
   /** 次按钮（普通样式） */
   cancelLabel: string
   onCancel: () => void
+  /** adj928：非空则确认条上多一个「查看差异」按钮（打开两栏差异框） */
+  diff?: AskDiffSource
 }
 
 export const useUiStore = create<UiState>()((set) => ({
@@ -601,6 +633,10 @@ export const useUiStore = create<UiState>()((set) => ({
   ask: null,
   showAsk: (ask) => set({ ask }),
   clearAsk: () => set({ ask: null }),
+  // adj928：两栏源码差异框（从确认条的「查看差异」打开；只关它不会动确认条）
+  fileDiff: null,
+  showFileDiff: (d) => set({ fileDiff: d }),
+  closeFileDiff: () => set({ fileDiff: null }),
   // adj379：SW 新版本提示状态（部署新版后页面仍跑旧 bundle 时置 true）
   updateReady: false,
   setUpdateReady: (b) => set({ updateReady: b }),

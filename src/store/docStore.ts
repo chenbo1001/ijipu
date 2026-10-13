@@ -60,6 +60,8 @@ import {
  *  fileHandle / fileName 覆盖回旧文件（旧值 A）。 */
 let fileStateTouched = false
 import { uiCopy, savePhaseCopy, pasteImportCopy, externalOpenCopy, workspaceCopy, exportCopy } from '../brand/copy'
+// adj927：外部改动的**基准**（我们最后一次写出去/读进来的内容指纹 + mtime）——见 externalChange.ts
+import { baselineKeyOf, setBaseline } from './externalChange'
 // adj615：打印（菜单「打印」/ Ctrl+P）——浏览器侧原语在 export/print.ts，页面在这里现算
 import { installPrintHooks, printPages } from '../export/print'
 import { printFileNameOfResult } from '../export/printName'
@@ -431,6 +433,9 @@ async function runEmbedAutosave(): Promise<void> {
     const code = useDocStore.getState().code
     try {
       await writeWorkspaceText(ws, bind.segs, code)
+      // adj927：**自己写完立刻刷新基准**（内容指纹）——否则宿主推回我们自己这次写盘的
+      // `modify` 时，基准还停在上一版内容上，会被当成"外部改动"（这正是用户报的假提示）。
+      setBaseline(baselineKeyOf(ws.id, bind.segs), code, null)
       // 写入期间用户可能继续输入 ⇒ 内容变了就保留未保存标记
       useDocStore.setState({ dirty: useDocStore.getState().code !== code })
     } catch (e) {
@@ -861,6 +866,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
     const prevPending = useDocStore.getState().pendingBinding
     try {
       const code = await readWorkspaceText(ws, segs)
+      // adj927：读进来就是当前基准（外部改动的判据拿它当参照；「载入外部」也走这条路 ⇒ 自动对齐）
+      setBaseline(baselineKeyOf(ws.id, segs), code, null)
       const name = fileBaseName(segs[segs.length - 1])
       try {
         localStorage.setItem(DRAFT_KEY, code)
@@ -945,6 +952,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
         return false
       }
       await writeWorkspaceText(ws, segs, code)
+      // adj927：自己写完立刻刷新基准（另存到工作区同样是"我们写下去的那份"）
+      setBaseline(baselineKeyOf(ws.id, segs), code, null)
       const name = fileBaseName(segs[segs.length - 1])
       const bind: WorkspaceBinding = { wsId: ws.id, wsName: ws.name, segs }
       saveDraftSrc(bind)
@@ -1347,6 +1356,8 @@ async function doSaveFile(): Promise<boolean> {
       }
       const code = useDocStore.getState().code
       await writeWorkspaceText(ws, wsPath, code)
+      // adj927：Ctrl+S 写回工作区后同样刷新基准
+      setBaseline(baselineKeyOf(ws.id, wsPath), code, null)
       useDocStore.setState({ dirty: useDocStore.getState().code !== code })
       console.info(`[iJipu] 保存到工作区：${joinPath(wsPath)}（${Math.round(performance.now() - t0)}ms）`)
       ui.showNotice(workspaceCopy.saved(joinPath(wsPath)), 'ok')

@@ -43,10 +43,14 @@ const DonateDialog = lazy(() => import('./dialogs/DonateDialog').then((m) => ({ 
 // adj562：「粘贴源码导入」已迁入底栏（ToolDock 的「导入」页签）⇒ 不再从 App 作为模态渲染
 // adj509：试听音色选择对话框（从音色库面板的「指定音色」按钮触发）
 const VoicePickerDialog = lazy(() => import('./dialogs/VoicePickerDialog').then((m) => ({ default: m.VoicePickerDialog })))
+// adj928：两栏源码差异框（确认条的「查看差异」打开；数据在 uiStore.fileDiff）
+const FileDiffDialog = lazy(() => import('./dialogs/FileDiffDialog').then((m) => ({ default: m.FileDiffDialog })))
 
 function App() {
   const viewType = useDocStore((s) => s.viewType)
   const modal = useUiStore((s) => s.modal)
+  // adj928：两栏源码差异框（与 `modal` 分开：它是在确认条之上叠一层，关掉它确认条还在）
+  const fileDiff = useUiStore((s) => s.fileDiff)
   const theme = useUiStore((s) => s.theme)
   const themeMode = useUiStore((s) => s.themeMode)
   const systemLight = useUiStore((s) => s.systemLight)
@@ -537,6 +541,8 @@ function App() {
       {/* adj562：「粘贴源码导入」已迁入底栏「导入」页签（原 adj406 的弹窗入口下线） */}
       {/* adj509：试听音色选择对话框（音色库「指定音色」按钮触发） */}
       {modal === 'voicePicker' && <Suspense fallback={null}><VoicePickerDialog /></Suspense>}
+      {/* adj928：两栏源码差异框（确认条 → 「查看差异」；左本地 / 右外部，可直接做决定） */}
+      {fileDiff && <Suspense fallback={null}><FileDiffDialog /></Suspense>}
     </div>
   )
 }

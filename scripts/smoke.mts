@@ -6,6 +6,19 @@
  */
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+// adj927：「要不要提示外部改动」的纯判据 + 带 IO 的编排（用注入的假 IO 守"mtime 相同就不读文件"）
+import { probeFileChange, probeExternalChange, getBaseline, baselineKeyOf } from '../src/store/externalChange'
+// adj927/adj928：归一化 + 内容指纹；两栏差异（行级 LCS + 行内字符级高亮）
+// ⚠ 别名：`saveSupport.ts` 里已经有一个 `sameContent`（另一个语义），不许重名
+import {
+  contentFingerprint,
+  sameContent as sameTextContent,
+  diffTexts,
+  collapseDiffRows,
+  type DiffRow,
+} from '../src/diff/textDiff'
+// adj927：提示文案（不再笼统说"外部变更"）
+import { externalChangeCopy } from '../src/brand/copy'
 // adj876：官网文档页与应用内帮助共用同一个 Markdown 渲染器（纯函数，可在 Node 里直接断言）
 // adj882：` ```jps ` 块的显示参数解析（`m=` / `z=`，口径沿用 Obsidian 插件）
 // adj913：行内解析的**反引号转义**（`inlineMd` 也导出，好直接断言行为）
@@ -285,6 +298,255 @@ function check(name: string, cond: boolean, detail?: string) {
     failed++
     console.error(`  ✗ ${name} ${detail ?? ''}`)
   }
+}
+
+/**
+ * ---- adj927：**"要不要提示外部改动"的判据**（用户口径：从"时间戳不同就提示"改成"内容真的变了才提示"）----
+ *
+ * 真因不是"时间戳判得不准"，而是**判据的参照物错了**：旧写法是拿"磁盘内容 vs **当前编辑器缓冲区**"
+ * 比（`main.tsx` 的 `fileChanged` 里 `disk === st.code`），而嵌入版是**随输随存**、缓冲区每敲一个字
+ * 都在变 ⇒ 宿主推来的 modify 事件只要不是零延迟，事件一到缓冲区就已经不是"我们刚写下去的那份"
+ * ⇒ 假提示。新口径的参照物是**基准**（我们最后一次写出去/读进来的内容指纹 + 当时的 mtime）。
+ *
+ * 判据一律走纯函数 `probeFileChange`（无 IO）；带 IO 的编排 `probeExternalChange` 用**注入的假 IO**
+ * 守"mtime 相同 ⇒ 一次内容都不读"这条性能口径。改判据必须一起改这些断言（并写明新口径）。
+ */
+{
+  const SAME = 'V: 1.0\nB: 小星星\nQ: 1 2 3 4 |\n'
+  const OTHER = 'V: 1.0\nB: 小星星\nQ: 1 2 3 5 |\n'
+  const fpSame = contentFingerprint(SAME)
+  const fpOther = contentFingerprint(OTHER)
+  /** 判据只回答"要不要提示" ⇒ 用同一个谓词表达，正负对照共用（不许各写一套） */
+  const prompts = (p: Parameters<typeof probeFileChange>[0]): boolean => probeFileChange(p) === 'external'
+  /** 旧写法：只看时间戳（`baselineMtime !== actualMtime` 就提示）——只作**负对照** */
+  const legacyPrompts = (b: number | null, a: number | null): boolean => b !== null && a !== null && b !== a
+
+  // ① 同内容 + mtime 不同（= 自己随输随存刚写完 / 被 touch / Sync 只换了换行符）
+  check('adj927 同内容不同 mtime ⇒ **不提示**（基准指纹一致 ⇒ 判 unchanged）',
+    !prompts({ baselineMtime: 1000, actualMtime: 2000, baselineFingerprint: fpSame, actualFingerprint: fpSame }))
+  check('adj927 负对照：旧写法（时间戳不同就提示）在同一份"同内容"样本上判**要提示** ⇒ 上面那条是新判据挣来的，不是恒真',
+    legacyPrompts(1000, 2000) &&
+      !prompts({ baselineMtime: 1000, actualMtime: 2000, baselineFingerprint: fpSame, actualFingerprint: fpSame }))
+
+  // ② 真外部改动（Sync / 别的编辑器写了不同内容）**必须仍然提示**——单独一条守住，不许被顺手削弱
+  check('adj927 真外部改动（内容不同）⇒ **必须提示**',
+    prompts({ baselineMtime: 1000, actualMtime: 2000, baselineFingerprint: fpSame, actualFingerprint: fpOther }))
+  check('adj927 负对照：把"外部内容"换成与我们写下去的一样 ⇒ 同一条判据判**不提示**（不是恒提示）',
+    !prompts({ baselineMtime: 1000, actualMtime: 2000, baselineFingerprint: fpSame, actualFingerprint: fpSame }))
+  check('adj927 拿不到 mtime（两边都 null）时照样判得出外部改动（= 嵌入版走的就是这条路：宿主只推 path，不带 mtime）',
+    probeFileChange({ baselineMtime: null, actualMtime: null, baselineFingerprint: fpSame, actualFingerprint: fpOther }) === 'external' &&
+      probeFileChange({ baselineMtime: null, actualMtime: null, baselineFingerprint: fpSame, actualFingerprint: fpSame }) === 'unchanged')
+
+  // ③ 还没读过内容 ⇒ 判"要读一次"，**不许**直接当外部改动弹提示
+  check('adj927 还没读内容（actualFingerprint=null）⇒ 判 `need-read`（读一次再定，不是直接提示）',
+    probeFileChange({ baselineMtime: 1000, actualMtime: 2000, baselineFingerprint: fpSame, actualFingerprint: null }) === 'need-read')
+
+  // ④ mtime 一模一样 ⇒ 第①段快筛直接判"没变"（常见情形，**不读文件**）
+  check('adj927 mtime 一模一样 ⇒ 快筛判 `unchanged`（不必读内容）',
+    probeFileChange({ baselineMtime: 2000, actualMtime: 2000, baselineFingerprint: fpSame, actualFingerprint: null }) === 'unchanged')
+  check('adj927 负对照：mtime 差 1ms ⇒ 快筛判 `need-read`（证明上面那条真的在看 mtime，不是恒判"没变"）',
+    probeFileChange({ baselineMtime: 2000, actualMtime: 2001, baselineFingerprint: fpSame, actualFingerprint: null }) === 'need-read')
+
+  // ⑤ 噪声归一化口径（只用于比较）：CRLF / 行尾空白 / 末尾有没有换行 **都不算改动**
+  check('adj927 仅 CRLF↔LF 不同 ⇒ 同一个指纹（不提示）',
+    contentFingerprint(SAME.replace(/\n/g, '\r\n')) === fpSame && sameTextContent(SAME, SAME.replace(/\n/g, '\r\n')))
+  check('adj927 仅行尾空白不同 ⇒ 同一个指纹（不提示）',
+    sameTextContent(SAME, SAME.replace('|', '|   ')))
+  check('adj927 仅末尾有没有换行不同 ⇒ 同一个指纹（不提示）',
+    sameTextContent(SAME, SAME.replace(/\n$/, '')) && sameTextContent(SAME, `${SAME}\n\n`))
+  check('adj927 负对照：真改了内容（`4`→`5`）⇒ 指纹不同（上面那些"同指纹"不是恒真）',
+    contentFingerprint(OTHER) !== fpSame)
+
+  // ⑥ 文案：不再笼统说"外部变更"，且把两个选择说清（保留本地 / 载入外部）
+  const askText = externalChangeCopy.askText('测试.jps')
+  check('adj927 提示文案写明"文件内容已在其它地方被改动"（不再笼统说"外部变更"）',
+    askText.includes('测试.jps') && askText.includes('文件内容已在其它地方被改动'), askText)
+  check('adj927 提示文案把两个选择与其后果说清（保留本地 / 载入外部 都出现）',
+    askText.includes(externalChangeCopy.keepLocal) && askText.includes(externalChangeCopy.loadExternal))
+  check('adj927 提示文案点出"可能是 Obsidian 里编辑，也可能是 Sync 同步"（用户口径：真外部改动也要提示）',
+    askText.includes('Obsidian') && askText.includes('Sync'))
+}
+
+/**
+ * ---- adj928：**两栏源码差异计算**（纯函数）----
+ *
+ * 行级 LCS 对齐（新增/删除/修改）+ **行内字符级高亮**（"改动的行里到底改了哪几个字"）；
+ * 噪声（CRLF / 行尾空白 / 末尾换行）先归一化 ⇒ 不算改动。归一化**只用于比较与展示**，
+ * "载入外部"用的始终是**原始文本**（`probeExternalChange` 返回的 `externalText`）。
+ */
+{
+  // ① 完全相同 ⇒ 0 处
+  const SRC = 'Q: 1 2 3 4 |\nC: 一 二 三 四\n'
+  {
+    const r = diffTexts(SRC, SRC)
+    check('adj928 完全相同 ⇒ 改动 0 处、全部行 kind=same',
+      r.changeCount === 0 && r.rows.every((x) => x.kind === 'same') && r.rows.length === 2 && !r.degraded)
+    check('adj928 行数统计 = 实际行数（本地 2 行 / 外部 2 行）', r.leftLines === 2 && r.rightLines === 2)
+  }
+
+  // ② 改一行 ⇒ 1 处，且**行内**只标出真正改了的那几个字
+  {
+    const L = 'Q: 1 2 3 4 |'
+    const E = 'Q: 1 2 3 5 |'
+    const r = diffTexts(L, E)
+    const row = r.rows[0]
+    /** 判据：**改动行**且左右都给了行内高亮，且高亮**不覆盖整行**（= 真的定位到"哪几个字"） */
+    const inkIsPartial = (x: DiffRow): boolean =>
+      x.kind === 'change' &&
+      x.leftInk.length > 0 &&
+      x.rightInk.length > 0 &&
+      x.leftInk.every((s) => s.end - s.start < (x.leftText ?? '').length) &&
+      x.rightInk.every((s) => s.end - s.start < (x.rightText ?? '').length)
+    check('adj928 改一行 ⇒ 改动 1 处，kind=change，且行内高亮只盖住改动的字（左 `4` / 右 `5`）',
+      r.changeCount === 1 && inkIsPartial(row) &&
+        row.leftInk[0].start === 9 && row.leftInk[0].end === 10 &&
+        row.rightInk[0].start === 9 && row.rightInk[0].end === 10,
+      JSON.stringify(row))
+    check('adj928 负对照：把"整行都算改动"的形态喂进同一条判据 ⇒ 判假（证明行内高亮不是恒真）',
+      !inkIsPartial({ ...row, leftInk: [{ start: 0, end: L.length }] }))
+    check('adj928 行号没变（改的是第 1 行，左右都是 1 号行）', row.leftNo === 1 && row.rightNo === 1)
+  }
+
+  // ③ 新增 / 删除
+  {
+    const L = 'Q: 1 2 |\nQ: 3 4 |'
+    const E = 'Q: 1 2 |\nQ: 5 6 |\nQ: 3 4 |'
+    const r = diffTexts(L, E)
+    const add = r.rows.find((x) => x.kind === 'add')
+    const tail = r.rows[r.rows.length - 1]
+    check('adj928 新增一行 ⇒ 改动 1 处、该行 kind=add、左栏没有行号（右栏 2 号行）',
+      r.changeCount === 1 && !!add && add.leftNo === null && add.rightNo === 2 && add.rightText === 'Q: 5 6 |')
+    check('adj928 新增后续行号对齐（末行：左 2 / 右 3）', tail.kind === 'same' && tail.leftNo === 2 && tail.rightNo === 3)
+    const r2 = diffTexts(E, L)
+    const del = r2.rows.find((x) => x.kind === 'del')
+    check('adj928 删除一行 ⇒ 该行 kind=del、右栏没有行号（左栏 2 号行），且是同一个算法（反着比）',
+      r2.changeCount === 1 && !!del && del.rightNo === null && del.leftNo === 2 && del.leftText === 'Q: 5 6 |')
+  }
+
+  // ④ 噪声：CRLF / 行尾空白 / 末尾换行 ⇒ 0 处（Sync 换行符风格最容易造出假差异）
+  {
+    const L = 'Q: 1 2 |\nQ: 3 4 |\n'
+    check('adj928 仅 CRLF↔LF ⇒ 0 处改动', diffTexts(L, L.replace(/\n/g, '\r\n')).changeCount === 0)
+    check('adj928 仅行尾空白（每行末尾多个空格/Tab）⇒ 0 处改动',
+      diffTexts(L, 'Q: 1 2 |   \nQ: 3 4 |\t\n').changeCount === 0)
+    check('adj928 仅末尾有没有换行 ⇒ 0 处改动',
+      diffTexts(L, L.replace(/\n$/, '')).changeCount === 0 && diffTexts(L, `${L}\n\n`).changeCount === 0)
+    /** 负对照：**不归一化**（按 `\n` 硬拆、连 `\r` 一起比）⇒ CRLF 会被算成"整行都改了" */
+    const rawSplit = (t: string): string[] => t.split('\n')
+    const rawSame = JSON.stringify(rawSplit(L)) === JSON.stringify(rawSplit(L.replace(/\n/g, '\r\n')))
+    check('adj928 负对照：不归一化时同一对样本会被判"有差异" ⇒ 上面那条 0 处是归一化挣来的',
+      rawSame === false && diffTexts(L, L.replace(/\n/g, '\r\n')).changeCount === 0)
+  }
+
+  // ⑤ 边界：空文件 ↔ 单行文件（0 行不算"1 行空行"，也不许抛）
+  {
+    const r = diffTexts('', 'Q: 1 |\n')
+    check('adj928 空文件 vs 单行文件 ⇒ 1 处新增、本地 0 行 / 外部 1 行',
+      r.changeCount === 1 && r.leftLines === 0 && r.rightLines === 1 && r.rows.length === 1 && r.rows[0].kind === 'add')
+    const r0 = diffTexts('', '')
+    check('adj928 两边都是空文件 ⇒ 0 处、0 行', r0.changeCount === 0 && r0.rows.length === 0 && r0.leftLines === 0)
+    const r1 = diffTexts('Q: 1 |\n', '')
+    check('adj928 单行文件 vs 空文件 ⇒ 1 处删除（与上面对称）',
+      r1.changeCount === 1 && r1.rows[0].kind === 'del' && r1.rows[0].leftNo === 1 && r1.rows[0].rightNo === null)
+  }
+
+  // ⑥ 性能兜底：超长/极端输入 ⇒ 退化（只标改动区块，不做行内高亮），但不抛、不卡死
+  {
+    const big = (tag: string): string => Array.from({ length: 1200 }, (_, i) => `${tag}${i}`).join('\n')
+    const r = diffTexts(big('a'), big('b'))
+    check('adj928 超长输入（1200 行全不同）⇒ 标 degraded、仍给出 1 处改动、逐行配成 1200 个"修改"行（不卡死、不抛）',
+      r.degraded === true && r.changeCount === 1 && r.rows.length === 1200 &&
+        r.rows.every((x) => x.kind === 'change' && x.leftInk.length === 0 && x.rightInk.length === 0))
+    check('adj928 反向守护：常规短谱**不**退化（2 行差异仍走完整 LCS + 行内高亮）',
+      diffTexts('Q: 1 |\nQ: 2 |', 'Q: 1 |\nQ: 3 |').degraded === false)
+  }
+
+  // ⑦ 可读性口径：默认只显示"改动处上下各 3 行"，其余折叠成一个 gap（「展开全部」由界面切换）
+  {
+    const lines = Array.from({ length: 20 }, (_, i) => `Q: ${i} |`)
+    const r = diffTexts(lines.join('\n'), lines.map((l, i) => (i === 9 ? 'Q: 改了 |' : l)).join('\n'))
+    const blocks = collapseDiffRows(r.rows, 3)
+    const shown = blocks.filter((b) => b.kind === 'rows').reduce((n, b) => n + (b.to - b.from + 1), 0)
+    check('adj928 长谱改 1 处 ⇒ 默认只留改动处上下各 3 行（共 7 行），其余折成 gap 块',
+      r.changeCount === 1 && blocks.length === 3 && shown === 7 &&
+        blocks[0].kind === 'gap' && blocks[1].kind === 'rows' && blocks[2].kind === 'gap',
+      JSON.stringify(blocks))
+    check('adj928 折叠不丢行：gap 块的行数 + 显示行数 = 总行数',
+      blocks.reduce((n, b) => n + (b.to - b.from + 1), 0) === r.rows.length)
+    check('adj928 负对照：把 context 当 0 喂进同一口径 ⇒ 只显示 1 行（证明"上下各 3 行"真的在算）',
+      collapseDiffRows(r.rows, 0).filter((b) => b.kind === 'rows').reduce((n, b) => n + (b.to - b.from + 1), 0) === 1)
+  }
+}
+
+/**
+ * adj927：**带 IO 的编排**（`probeExternalChange`）——用注入的假 IO 断言两件事：
+ * ① mtime 相同 ⇒ **一次内容都不读**（第①段快筛真的省掉了那次读，不是"读了再判"）；
+ * ② 内容一致时要**静默刷新基准**（指纹 + mtime），内容不同才算外部改动（且基准不刷新）。
+ */
+async function runAdj927ExternalChangeTests() {
+  console.log('[adj927] 外部改动判据的 IO 编排（注入假 IO，断言"mtime 相同就不读文件"）')
+  const BASE = 'Q: 1 2 |\n'
+  const fpBase = contentFingerprint(BASE)
+  const key = baselineKeyOf('ws-1', ['夹子', 'a.jps'])
+  const fakeBaseline = { key, fingerprint: fpBase, mtime: 1000 }
+
+  let reads1 = 0
+  const r1 = await probeExternalChange({
+    key,
+    fallbackText: '（有基准时不该用到它）',
+    baseline: fakeBaseline,
+    mtimeOf: async () => 1000, // 文件根本没被写过
+    readText: async () => {
+      reads1++
+      return BASE
+    },
+  })
+  check('adj927 编排①：mtime 相同 ⇒ 判 unchanged 且**一次内容都没读**',
+    r1.kind === 'unchanged' && reads1 === 0, `kind=${r1.kind} reads=${reads1}`)
+
+  let reads2 = 0
+  const r2 = await probeExternalChange({
+    key,
+    fallbackText: '（有基准时不该用到它）',
+    baseline: fakeBaseline,
+    mtimeOf: async () => 2000, // 我们自己的随输随存 ⇒ mtime 变了、内容一样
+    readText: async () => {
+      reads2++
+      return BASE
+    },
+  })
+  check('adj927 编排③：mtime 变了 ⇒ 读一次内容；内容与基准一致（自己随输随存）⇒ 判 unchanged、不提示',
+    r2.kind === 'unchanged' && reads2 === 1, `kind=${r2.kind} reads=${reads2}`)
+  check('adj927 编排③：判定"没变"时**静默刷新基准**（mtime 跟到 2000，指纹仍是这份内容）',
+    getBaseline()?.key === key && getBaseline()?.mtime === 2000 && getBaseline()?.fingerprint === fpBase,
+    JSON.stringify(getBaseline()))
+
+  const EXT = 'Q: 1 2 |\nQ: 9 9 |\n'
+  const r3 = await probeExternalChange({
+    key,
+    fallbackText: '（有基准时不该用到它）',
+    baseline: getBaseline(),
+    mtimeOf: async () => 3000,
+    readText: async () => EXT,
+  })
+  check('adj927 编排④：真外部改动 ⇒ 判 external，并把**原始文本**（含 CRLF/行尾空白，未归一化）带出来',
+    r3.kind === 'external' && r3.externalText === EXT, JSON.stringify(r3))
+  check('adj927 编排④：判 external 时**不刷新基准**（否则"保留本地"后再来同样的外部内容就不提示了）',
+    getBaseline()?.fingerprint === fpBase && getBaseline()?.mtime === 2000)
+
+  let reads4 = 0
+  const r4 = await probeExternalChange({
+    key,
+    fallbackText: BASE, // 没有基准 ⇒ 拿"事件那一刻编辑器里的内容"兜底（旧口径）
+    baseline: null,
+    mtimeOf: async () => 4000,
+    readText: async () => {
+      reads4++
+      return BASE.replace(/\n/g, '\r\n') // 内容一样、只是换行符风格不同
+    },
+  })
+  check('adj927 编排⑤：没有基准时兜底比"编辑器里的内容"，且**只认归一化后的内容**（CRLF 差异不算改动）',
+    r4.kind === 'unchanged' && reads4 === 1, `kind=${r4.kind} reads=${reads4}`)
 }
 
 // ---- 1. 解析示例谱（小星星） ----
@@ -16217,7 +16479,12 @@ console.log('[119] mordent playback timing (adj502)')
   }
 }
 
-runAdj363SaveTests()
+runAdj927ExternalChangeTests()
+  .catch((e) => {
+    failed++
+    console.error('  ✗ adj927 外部改动判据的 IO 编排用例抛异常', e)
+  })
+  .then(() => runAdj363SaveTests())
   .catch((e) => {
     failed++
     console.error('  ✗ adj363 保存可靠性用例抛异常', e)

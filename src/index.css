@@ -4843,6 +4843,181 @@ span.ws-check {
   border-color: var(--jp-accent);
   color: var(--jp-accent);
 }
+
+/* ---- adj928（用户要求）：两栏源码差异框（左 = 本地、右 = 外部）----
+   配色只消费主题变量：改动用 color-mix 调出半透明底，行内高亮再用更浓一档的同一色。 */
+.file-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  height: 100%;
+}
+
+.file-diff-summary {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--jp-text-secondary);
+}
+
+.file-diff-warn {
+  color: var(--jp-warning);
+}
+
+.file-diff-toggle {
+  margin-left: auto;
+  padding: 2px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--jp-border);
+  background: var(--jp-bg-panel-hover);
+  color: var(--jp-text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.file-diff-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 两栏并排；窄屏（手机）改成上下两栏（用户口径："手机端上下两栏"） */
+.file-diff-panes {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 8px;
+  min-height: 0;
+}
+
+.file-diff-pane {
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--jp-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--jp-editor-bg);
+}
+
+.file-diff-pane-head {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--jp-text-secondary);
+  background: var(--jp-bg-panel-hover);
+  border-bottom: 1px solid var(--jp-border);
+}
+
+/* 正文：**不折行**（一行就是一行 ⇒ 两栏逐行对齐、同步滚动才对得上），横向滚动交给它自己 */
+.file-diff-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  font-family: var(--jp-font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.diff-line {
+  display: flex;
+  white-space: pre;
+}
+
+.diff-line.is-gap {
+  color: var(--jp-text-muted);
+  background: var(--jp-bg-panel-hover);
+  font-size: 11px;
+}
+
+.diff-no {
+  flex: 0 0 auto;
+  width: 3.2em;
+  padding-right: 6px;
+  text-align: right;
+  color: var(--jp-text-muted);
+  user-select: none;
+}
+
+.diff-code {
+  flex: 1 1 auto;
+  padding-right: 10px;
+}
+
+/* 三色：删除（红）/ 新增（绿）/ 修改（黄）——都取主题语义色 */
+.diff-line[data-kind='del'] {
+  background: color-mix(in srgb, var(--jp-danger) 16%, transparent);
+}
+
+.diff-line[data-kind='add'] {
+  background: color-mix(in srgb, var(--jp-success) 16%, transparent);
+}
+
+.diff-line[data-kind='change'] {
+  background: color-mix(in srgb, var(--jp-warning) 16%, transparent);
+}
+
+/* 行内字符级高亮：同一行里"到底改了哪几个字" */
+.diff-ink {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--jp-warning) 45%, transparent);
+  color: inherit;
+}
+
+.diff-line[data-kind='del'] .diff-ink {
+  background: color-mix(in srgb, var(--jp-danger) 45%, transparent);
+}
+
+.diff-line[data-kind='add'] .diff-ink {
+  background: color-mix(in srgb, var(--jp-success) 45%, transparent);
+}
+
+.file-diff-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-diff-foot-gap {
+  flex: 1 1 auto;
+}
+
+@media (max-width: 720px) {
+  .file-diff-panes {
+    flex-direction: column;
+  }
+
+  .file-diff-pane {
+    flex: 1 1 50%;
+  }
+}
+
+/* adj928：确认条现在有**三个按钮**（查看差异 / 载入外部 / 保留本地）**加上**更长的说明文案 ——
+   窄屏上若还按一行排，正文会被按钮挤成一列（实测 400px 宽时正文被压成一字一行）。
+   窄屏改成"正文独占一行、按钮另起一行靠右"。 */
+@media (max-width: 560px) {
+  /* ⚠ 必须同时把 `left:50% + translateX(-50%)` 换成"左右各留 8px"：定宽 `position:fixed`
+     元素的可用宽度只有 `视口宽 − left`（= 一半屏），不换的话整条只有半屏宽、按钮会被挤成竖排。 */
+  .confirm-bar {
+    left: 8px;
+    right: 8px;
+    max-width: none;
+    transform: none;
+    flex-wrap: wrap;
+  }
+
+  .confirm-bar-text {
+    flex: 1 1 100%;
+  }
+
+  .confirm-bar-actions {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+  }
+}
+
 /* adj724b（用户要求）：关于页的官方链接（官网 + Obsidian 插件仓库）。
    用按钮而非 <a>：外链统一走 openExternalUrl（桌面壳需要 Tauri opener）。 */
 .about-links {
