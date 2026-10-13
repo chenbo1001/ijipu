@@ -119,10 +119,19 @@ function rawEscapedLines(relPath) {
     .map((l) => l.trim())
     .filter((l) => l.includes(BSLASH_TICK))
 }
-const RAW_ESCAPED_LINES = {
-  '/plugin/': rawEscapedLines('docs/PLUGIN-GUIDE.md'),
-  '/syntax/': rawEscapedLines('docs/SYNTAX.md'),
+/**
+ * 文档页 → 它的 md 源文件。**这是唯一一张表**（adj914 起）：下面的转义断言与负对照
+ * 都从这里**自动发现**要查哪些页 —— 不再"按页写死 `if (url === '/plugin/' || …)`"。
+ * 于是将来 `/manual/` 或新文档页用了转义写法，**不用回来改断言就自动被守住**。
+ */
+const DOC_PAGE_MD = {
+  '/manual/': 'docs/USER-GUIDE.md',
+  '/syntax/': 'docs/SYNTAX.md',
+  '/plugin/': 'docs/PLUGIN-GUIDE.md',
 }
+const RAW_ESCAPED_LINES = Object.fromEntries(
+  Object.entries(DOC_PAGE_MD).map(([url, rel]) => [url, rawEscapedLines(rel)]),
+)
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -1323,13 +1332,19 @@ async function main() {
          * 根因是站点渲染器的行内解析没处理反引号转义（应用内帮助与站点共用同一个渲染器，
          * 所以这一修两处都跟着好）。
          *
-         * 判据（只对真有这种写法的两页断言：`/plugin/` 4 处、`/syntax/` 2 处；`/manual/` 没有）：
-         *   ① 正文里出现**字面**的三个反引号 + jps；
+         * 判据：
+         *   ① 正文里出现**字面的**三个反引号 + jps；
          *   ② 正文里**不得**残留「反斜杠 + 反引号」；
          *   ③ 回归：普通行内代码（`.jps`）仍要渲染成 `<code>`（转义逻辑不许误伤行内代码）。
          * 三条都配负对照，证明判据不是形同虚设。
+         *
+         * adj914（顺带收紧）：判据的**适用范围**由"按页写死"改成
+         * **"凡源码里出现「反斜杠 + 反引号」的文档页都要查"** ——
+         * 样本从 `DOC_PAGE_MD` 那张表自动发现（现在命中 `/plugin/`、`/syntax/`；
+         * 将来 `/manual/` 或新页面用了转义写法，**不用回来改断言**就自动被守住）。
          */
-        if (url === '/plugin/' || url === '/syntax/') {
+        const escapedSampleLines = RAW_ESCAPED_LINES[url] ?? []
+        if (escapedSampleLines.length > 0) {
           const docText = await evalJs(
             c,
             `(() => {
@@ -1366,7 +1381,7 @@ async function main() {
            * 负对照 ①：**在断言里模拟"渲染器没做转义处理"**（不动实现文件）——
            * 把文档原文里含「反斜杠 + 反引号」的那几行喂给同一条判据；那正是修之前页面上的文本。
            */
-          const negLines = RAW_ESCAPED_LINES[url] ?? []
+          const negLines = escapedSampleLines
           check(
             label + '：负对照 —— 去掉转义处理（文档原文 ＝ 修前页面文本）时判据①为假',
             negLines.length > 0 && negLines.every((l) => !hasLiteralFenceJps(l)),
@@ -1387,7 +1402,8 @@ async function main() {
            * （整页图 `plugin.png` / `syntax.png` 太长，这一句在图上很难找）。
            */
           if (DO_SHOTS) {
-            const shotName = url === '/plugin/' ? 'plugin-escape.png' : 'syntax-escape.png'
+            // adj914：文件名由**页面路径**推出来（不按页写死名字 ⇒ 新增页面也自动有图）
+            const shotName = `${url.replace(/^\/|\/$/g, '').replace(/\//g, '-')}-escape.png`
             const found = await evalJs(
               c,
               `(() => {
@@ -1753,6 +1769,255 @@ async function main() {
       await evalJs(c, `document.getElementById('__negJps')?.remove()`)
       check('adj911 负对照：把那两条"放开"（列退回裸 `1fr` + 行内代码不折行）⇒ 同一判据为假（证明它真的在守）',
         !narrowJpsFits(negMeasured), JSON.stringify(negMeasured))
+      await viewport(1440, 900, 1)
+
+      /**
+       * ---------------- adj914（用户要求）：插件手册 / 语法说明的「代码块参数」要能**调着看** ----------------
+       *
+       * 用户原话：「**插件手册中，代码块参数（`v=` 视图 / `z=` 缩放）这块最好能有调整设置项直观看到
+       * 预览效果的设置**」。于是文档里多了一种写法 —— ```jps … playground：
+       * 渲染成「控件 + 实时预览」，控件初值取同一行写的 `v=` / `z=`，点「重置」回到它。
+       *
+       * 这一组量的是**绑定与几何**（不看实现里写了什么）：
+       *   ① 控件齐全：三档视图下拉 + 缩放滑块 + 数字输入 + 自适应（`z=*`）勾选 + 重置；
+       *   ② 控件初值来自那一行 info string（本例 `v=w z=150`）；
+       *   ③ 滚到它就看得见谱面（引擎仍是"进视口才下"）；
+       *   ④ 切「满宽」⇒ 实测 SVG 视框**高度**明显变大（满宽保留整页高，谱面裁到墨迹）；
+       *   ⑤ 切「整页」⇒ 实测 SVG 视框**宽度**明显变大（整页含左右页边距，满宽把左右裁掉）；
+       *   ⑥ 改 `z=` ⇒ 预览的**显示宽度**（实测像素）随之变化；
+       *   ⑦ 「重置」把控件与块参数一起拨回初值；
+       *   ⑧ **负对照**：把控件与预览的绑定去掉（在断言里 `cloneNode` 一份 —— 克隆不带事件监听，
+       *      不是真改文件），同样的"切视图 / 改缩放"动作 ⇒ ④⑤⑥ 的判据必须**全为假**。
+       *   另有**手机视口（390）**两条：控件不横向溢出、预览不横向溢出（照 adj911 的写法）。
+       *
+       * ⚠ 判据一律写成**纯函数**（入参是"实测到的状态"）—— 负对照才能复用同一份判据，
+       *   这正是"证明判据真的在量绑定、而不是页面里有没有控件"。
+       */
+      console.log('[verify-site] 验证 ```jps playground（控件 + 实时预览，adj914）…')
+      const PG_ROOT = '#doc-body .jps-playground'
+      const PG_NEG = '#doc-body .jps-playground.jps-pg-neg'
+      /** 驱动一个控件：`input` 与 `change` 都发（下拉 / 滑块 / 数字 / 勾选四条路都覆盖） */
+      const pgDrive = (rootSel, ctrl, value) =>
+        evalJs(
+          c,
+          `(() => {
+            const root = document.querySelector(${JSON.stringify(rootSel)})
+            const el = root ? root.querySelector(${JSON.stringify(ctrl)}) : null
+            if (!el) return null
+            if (el.type === 'checkbox') el.checked = ${value ? 'true' : 'false'}
+            else el.value = ${JSON.stringify(String(value))}
+            for (const t of ['input', 'change']) el.dispatchEvent(new Event(t, { bubbles: true }))
+            return el.type === 'checkbox' ? String(el.checked) : el.value
+          })()`,
+        )
+      /** 量一份 playground 的当前状态（控件值 + 块参数 + 预览的实测几何） */
+      const pgMeasure = (rootSel) =>
+        evalJs(
+          c,
+          `(() => {
+            const root = document.querySelector(${JSON.stringify(rootSel)})
+            if (!root) return null
+            const q = (s) => root.querySelector(s)
+            const block = q('.jps-block')
+            const svg = q('.jps-block-preview svg')
+            const ctl = q('.jps-playground-controls')
+            const sel = q('select[data-jps-view]')
+            const rng = q('input[type=range][data-jps-zoom-range]')
+            const num = q('input[type=number][data-jps-zoom-num]')
+            /* viewBox = [x, y, w, h]：④⑤ 两条判据就量它（视框 = 屏幕上真正显示的那块） */
+            const vb = (svg ? svg.getAttribute('viewBox') || '' : '').trim().split(/[\\s,]+/).map(Number)
+            return {
+              hasSelect: !!sel,
+              views: sel ? [...sel.options].map((o) => o.value) : [],
+              selView: sel ? sel.value : '',
+              hasRange: !!rng,
+              hasNum: !!num,
+              hasAuto: !!q('input[type=checkbox][data-jps-auto]'),
+              hasReset: !!q('button[data-jps-reset]'),
+              rangeVal: rng ? Number(rng.value) : null,
+              numVal: num ? Number(num.value) : null,
+              mode: block ? block.dataset.jpsMode : '',
+              zoom: block ? block.dataset.jpsZoom : '',
+              previewHidden: block ? !!block.querySelector('.jps-block-preview').hidden : null,
+              blockCount: root.querySelectorAll('.jps-block').length,
+              svgCount: root.querySelectorAll('.jps-block-preview svg').length,
+              vb: vb.length === 4 && vb.every((n) => Number.isFinite(n)) ? vb : [],
+              svgW: Math.round(svg ? svg.getBoundingClientRect().width : 0),
+              ctrlW: ctl ? Math.round(ctl.getBoundingClientRect().width) : 0,
+              maxSvgW: Math.max(0, ...[...root.querySelectorAll('.jps-block-preview svg')].map((s) => Math.round(s.getBoundingClientRect().width))),
+              pageScrollW: document.documentElement.scrollWidth,
+              vw: window.innerWidth,
+            }
+          })()`,
+        )
+      /* 纯判据（桌面）：④ 满宽 = 高度明显变大；⑤ 整页 = 宽度明显变大；⑥ 缩放 = 显示宽度真的变了 */
+      const pgFullWidthOk = (base, cur) =>
+        !!base && !!cur && cur.mode === 'w' && cur.vb.length === 4 && base.vb.length === 4 && cur.vb[3] > base.vb[3] + 20
+      const pgPageOk = (base, cur) =>
+        !!base && !!cur && cur.mode === 'p' && cur.vb.length === 4 && base.vb.length === 4 && cur.vb[2] > base.vb[2] + 20
+      const pgZoomOk = (before, after) => !!before && !!after && after.svgW > before.svgW + 20
+      /* 纯判据（窄屏）：控件与预览都不许横向溢出视口 */
+      const pgControlsFit = (m) => !!m && m.vw > 0 && m.ctrlW <= m.vw + 1 && m.pageScrollW <= m.vw + 1
+      const pgPreviewFit = (m) => !!m && m.vw > 0 && m.maxSvgW <= m.vw + 1 && m.pageScrollW <= m.vw + 1
+      const pgBrief = (m) => (m ? JSON.stringify({ mode: m.mode, zoom: m.zoom, vb: m.vb, svgW: m.svgW, ctrlW: m.ctrlW, vw: m.vw }) : 'null')
+      /** 滚到 playground 并等它渲染出来（首次渲染是"进视口才下引擎"） */
+      const pgReveal = async () => {
+        const scrolled = await evalJs(
+          c,
+          `(() => {
+            const root = document.querySelector(${JSON.stringify(PG_ROOT)})
+            if (!root) return false
+            root.scrollIntoView({ block: 'center', behavior: 'instant' })
+            return true
+          })()`,
+        )
+        let seen = 0
+        for (let i = 0; i < 30 && seen === 0; i++) {
+          await sleep(300)
+          // ⚠ 选择器整串交给 JSON.stringify（别写成 `${…} .x'` —— 双引号开、单引号收 = 语法错）
+          seen = await evalJs(c, `document.querySelectorAll(${JSON.stringify(PG_ROOT + ' .jps-block-preview svg')}).length`)
+        }
+        return { scrolled, seen }
+      }
+      const PG_PAGES = [
+        ['插件手册', '/plugin/'],
+        ['脚本语法说明', '/syntax/'],
+      ]
+
+      // ---- 桌面：控件 + 初值 + 三档视图 + 缩放 + 重置 + 负对照 ----
+      await viewport(1440, 900, 1)
+      for (const [label, url] of PG_PAGES) {
+        mark = noteEvents()
+        await c.send('Page.navigate', { url: `${origin}${url}` })
+        await sleep(1600)
+        const reveal = await pgReveal()
+        const init = await pgMeasure(PG_ROOT)
+        check(
+          `${label}：` + TICKS3 + `jps playground 里有「可调」控件（三档视图下拉 + 缩放滑块 + 数字输入 + 自适应勾选 + 重置）`,
+          !!init && init.hasSelect && JSON.stringify(init.views) === JSON.stringify(['s', 'w', 'p']) &&
+            init.hasRange && init.hasNum && init.hasAuto && init.hasReset && init.blockCount === 1,
+          pgBrief(init) + ' views=' + JSON.stringify(init?.views),
+        )
+        check(`${label}：控件初值取自这一行的 info string（v=s z=150 ⇒ 下拉 s、滑块与数字 150）`,
+          !!init && init.selView === 's' && init.rangeVal === 150 && init.numVal === 150 &&
+            init.mode === 's' && init.zoom === '150',
+          pgBrief(init))
+        check(`${label}：滚到它就直接看得见谱面（预览已渲染、且默认切在「预览」标签）`,
+          !!reveal.scrolled && reveal.seen > 0 && !!init && init.svgCount > 0 && init.previewHidden === false,
+          `svg=${reveal.seen} hidden=${init?.previewHidden}`)
+        /**
+         * 负对照（**必须为假**）：克隆一份 playground —— `cloneNode(true)` 只复制 DOM、
+         * **不带事件监听**，等价于"把控件与预览的绑定去掉"（不改文件、也不动原控件）。
+         * 在克隆上做与下面**完全一样**的两个动作（切「整页」+ 缩放改 200），
+         * 然后 **同一对判据**必须都为假。
+         */
+        const cloned = await evalJs(
+          c,
+          `(() => {
+            const root = document.querySelector(${JSON.stringify(PG_ROOT)})
+            if (!root) return false
+            const copy = root.cloneNode(true)
+            copy.classList.add('jps-pg-neg')
+            root.after(copy)
+            return true
+          })()`,
+        )
+        const negBefore = await pgMeasure(PG_NEG)
+        await pgDrive(PG_NEG, 'select[data-jps-view]', 'p')
+        await pgDrive(PG_NEG, 'input[data-jps-zoom-num]', '200')
+        await sleep(400)
+        const negAfter = await pgMeasure(PG_NEG)
+        // 把实测值打出来：负对照"确实为假"要能被人看到（不只靠一个 ✓）
+        console.log(`    · 负对照（克隆一份 ⇒ 去掉绑定）实测：${pgBrief(negBefore)} → ${pgBrief(negAfter)}`)
+        check(`${label}：负对照 —— 去掉绑定（克隆一份、不带监听）后同样的动作 ⇒ 「整页 / 缩放」两条判据都为假`,
+          cloned && !!negBefore && !!negAfter && !pgPageOk(init, negAfter) && !pgZoomOk(negBefore, negAfter),
+          `克隆前 ${pgBrief(negBefore)} → 克隆后 ${pgBrief(negAfter)}`)
+        await evalJs(c, `document.querySelector(${JSON.stringify(PG_NEG)})?.remove()`)
+
+        // ④ 谱面 ⇒ 满宽（视框高度明显变大）
+        await pgDrive(PG_ROOT, 'select[data-jps-view]', 's')
+        await sleep(450)
+        const scoreView = await pgMeasure(PG_ROOT)
+        await pgDrive(PG_ROOT, 'select[data-jps-view]', 'w')
+        await sleep(450)
+        const fullView = await pgMeasure(PG_ROOT)
+        check(`${label}：切「满宽」⇒ 预览真的换成满宽口径（实测 SVG 视框高度明显变大：谱面裁到墨迹、满宽保留整页高）`,
+          pgFullWidthOk(scoreView, fullView),
+          `谱面 ${pgBrief(scoreView)} → 满宽 ${pgBrief(fullView)}`)
+        // ⑤ 满宽 ⇒ 整页（视框宽度明显变大）
+        await pgDrive(PG_ROOT, 'select[data-jps-view]', 'p')
+        await sleep(450)
+        const pageView = await pgMeasure(PG_ROOT)
+        check(`${label}：切「整页」⇒ 预览真的换成整页口径（实测 SVG 视框宽度变大：整页含左右页边距，满宽把左右裁掉）`,
+          pgPageOk(fullView, pageView),
+          `满宽 ${pgBrief(fullView)} → 整页 ${pgBrief(pageView)}`)
+        // ⑥ 改 z= ⇒ 显示宽度随之变化（实测像素）
+        await pgDrive(PG_ROOT, 'select[data-jps-view]', 'w')
+        await sleep(400)
+        await pgDrive(PG_ROOT, 'input[data-jps-zoom-num]', '40')
+        await sleep(450)
+        const zSmall = await pgMeasure(PG_ROOT)
+        await pgDrive(PG_ROOT, 'input[data-jps-zoom-num]', '200')
+        await sleep(450)
+        const zBig = await pgMeasure(PG_ROOT)
+        check(`${label}：改 z= ⇒ 预览的**显示宽度**随之变化（实测像素：z=40 与 z=200 不同）`,
+          pgZoomOk(zSmall, zBig),
+          `z=40 ${pgBrief(zSmall)} → z=200 ${pgBrief(zBig)}`)
+        check(`${label}：改 z= 时滑块与数字框**同步**（两个控件是同一个值，不是各写各的）`,
+          !!zSmall && !!zBig && zSmall.numVal === 40 && zSmall.rangeVal === 40 && zBig.numVal === 200 && zBig.rangeVal === 200,
+          `z=40 range=${zSmall?.rangeVal}/num=${zSmall?.numVal}；z=200 range=${zBig?.rangeVal}/num=${zBig?.numVal}`)
+        // ⑦ 「重置」把控件与块参数一起拨回初值
+        await pgDrive(PG_ROOT, 'select[data-jps-view]', 'p')
+        await sleep(300)
+        const resetClicked = await evalJs(
+          c,
+          `(() => {
+            const b = document.querySelector(${JSON.stringify(PG_ROOT)} + ' button[data-jps-reset]')
+            if (!b) return false
+            b.click()
+            return true
+          })()`,
+        )
+        await sleep(450)
+        const afterReset = await pgMeasure(PG_ROOT)
+        // 三档视图与缩放的**实测几何**（视框 = [x,y,w,h]）——"真的变了"看得见，不必只信 ✓
+        console.log(
+          `    · 实测几何：谱面 vb=${JSON.stringify(scoreView?.vb)} → 满宽 vb=${JSON.stringify(fullView?.vb)}` +
+            ` → 整页 vb=${JSON.stringify(pageView?.vb)}；z=40 ${zSmall?.svgW}px → z=200 ${zBig?.svgW}px`,
+        )
+        check(`${label}：「重置」把控件与块参数一起拨回这一行写的初值（v=s z=150）`,
+          resetClicked && !!afterReset && afterReset.mode === 's' && afterReset.zoom === '150' &&
+            afterReset.selView === 's' && afterReset.numVal === 150 && afterReset.rangeVal === 150,
+          pgBrief(afterReset))
+        const pgErrs = collectErrors(mark)
+        check(`${label}：控件区无控制台错误 / 无本站 4xx`, pgErrs.length === 0, pgErrs.slice(0, 3).join(' | '))
+        if (DO_SHOTS && url === '/plugin/') {
+          await evalJs(c, `window.scrollBy({ top: -80, behavior: 'instant' })`)
+          await sleep(300)
+          await saveShot('plugin-playground.png', await shoot('png'))
+        }
+      }
+
+      // ---- 手机视口（390）：控件不溢出、预览不溢出 ----
+      await viewport(390, 844, 2)
+      for (const [label, url] of PG_PAGES) {
+        mark = noteEvents()
+        await c.send('Page.navigate', { url: `${origin}${url}` })
+        await sleep(1600)
+        const reveal = await pgReveal()
+        const narrow = await pgMeasure(PG_ROOT)
+        check(`窄屏 ${label}：可调示例的**控件不横向溢出**（实测控件条宽与页面 scrollWidth 都 ≤ 视口宽）`,
+          !!reveal.scrolled && pgControlsFit(narrow),
+          `控件条 ${narrow?.ctrlW}px / 页面 ${narrow?.pageScrollW}px / 视口 ${narrow?.vw}px`)
+        check(`窄屏 ${label}：可调示例的**预览不横向溢出**（实测谱面 SVG 宽 ≤ 视口宽，页面不溢出）`,
+          reveal.seen > 0 && pgPreviewFit(narrow),
+          `谱面 ${narrow?.maxSvgW}px / 页面 ${narrow?.pageScrollW}px / 视口 ${narrow?.vw}px`)
+        if (DO_SHOTS && url === '/plugin/') {
+          await evalJs(c, `window.scrollBy({ top: -60, behavior: 'instant' })`)
+          await sleep(300)
+          await saveShot('plugin-playground-mobile.png', await shoot('png'))
+        }
+      }
       await viewport(1440, 900, 1)
 
       // ---------------- 负对照：确认"验证器真的在量东西" ----------------

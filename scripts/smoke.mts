@@ -20493,11 +20493,15 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   const BSLASH_TICK = '\\' + TICK
   /** 判据①：渲染结果里有**字面**的三个反引号 + jps，且没有「反斜杠 + 反引号」残留 */
   const literalFenceJps = (html: string) => html.includes(TICKS3 + 'jps') && !html.includes(BSLASH_TICK)
-  // 真实文档里那两行（原文 ＝ 修之前页面上显示的文本）
-  const pluginFenceLine =
-    readSrc('docs/PLUGIN-GUIDE.md').split('\n').find((l) => l.includes('代码块就渲染成简谱')) ?? ''
-  const syntaxFenceLine =
-    readSrc('docs/SYNTAX.md').split('\n').find((l) => l.includes('可以整段粘进编辑器')) ?? ''
+  /**
+   * adj914（顺带收紧）：**不按页写死** —— 三份文档里凡源码含「反斜杠 + 反引号」的**行**全部纳入判据
+   * （原来是 `find('代码块就渲染成简谱')` / `find('可以整段粘进编辑器')` 两行写死）。
+   * 将来 `/manual/`（`docs/USER-GUIDE.md`）或新文档用了转义写法，**不用回来改断言**就自动被守住。
+   */
+  const DOC_MD = ['docs/USER-GUIDE.md', 'docs/SYNTAX.md', 'docs/PLUGIN-GUIDE.md']
+  const escapedTickLines = DOC_MD.flatMap((f) => readSrc(f).split('\n').filter((l) => l.includes(BSLASH_TICK)))
+  /** 其中**真的写了字面围栏**的那些（转义写法是"每个反引号前各有一个反斜杠"）：渲染后必须出现字面围栏 */
+  const fenceLines = escapedTickLines.filter((l) => l.includes(BSLASH_TICK.repeat(3)))
 
   check('adj913 渲染器里有转义保护（`\\`` / `\\\\` 各一个占位符常量，先占位后还原）',
     mdSrc.includes('ESCAPED_TICK') && mdSrc.includes('ESCAPED_BSLASH') &&
@@ -20508,10 +20512,12 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   check('adj913 inlineMd：`\\\\` 还原成**字面反斜杠**（顺带，别漏）',
     inlineMd('反斜杠：\\\\ 结束') === '反斜杠：\\ 结束',
     JSON.stringify(inlineMd('反斜杠：\\\\ 结束')))
-  check('adj913 inlineMd：**真实文档**那两行渲染后都有字面围栏、且无「反斜杠+反引号」残留',
-    pluginFenceLine !== '' && syntaxFenceLine !== '' &&
-      literalFenceJps(inlineMd(pluginFenceLine)) && literalFenceJps(inlineMd(syntaxFenceLine)),
-    `${JSON.stringify(inlineMd(pluginFenceLine).slice(0, 60))} / ${JSON.stringify(inlineMd(syntaxFenceLine).slice(0, 60))}`)
+  check('adj913 inlineMd：**真实文档**里凡含「反斜杠+反引号」的行（自动发现，不按页写死）渲染后都不残留',
+    escapedTickLines.length >= 6 && escapedTickLines.every((l) => !inlineMd(l).includes(BSLASH_TICK)),
+    `${escapedTickLines.length} 行；仍有残留的 ${escapedTickLines.filter((l) => inlineMd(l).includes(BSLASH_TICK)).length} 行`)
+  check('adj913 inlineMd：其中写了**字面围栏**（三个反引号 + jps）的那几行，渲染后都真的出现字面围栏',
+    fenceLines.length >= 6 && fenceLines.every((l) => literalFenceJps(inlineMd(l))),
+    `${fenceLines.length} 行；样本 ${JSON.stringify(inlineMd(fenceLines[0] ?? '').slice(0, 60))}`)
   /**
    * 保守性（用户口径）：**只**处理 `\`` 与 `\\`，不许把反斜杠的转义扩散到所有字符 ——
    * 否则别人的 `\n`、`\d`、`C:\new` 这类**真实文本**会被吃掉。
@@ -20543,7 +20549,7 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     }
     return out + raw.slice(last)
   }
-  const naiveOut = naiveInlineMd(pluginFenceLine)
+  const naiveOut = naiveInlineMd(fenceLines[0] ?? '')
   check('adj913 负对照：去掉转义保护 ⇒ 判据①为假，且输出里出现「反斜杠+反引号」（＝用户报的现象）',
     naiveOut !== '' && !literalFenceJps(naiveOut) && naiveOut.includes(BSLASH_TICK),
     JSON.stringify(naiveOut.slice(0, 90)))
@@ -20595,6 +20601,60 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     mdToHtml('```js\nlet a = 1\n```\n').includes('<pre>') && !mdToHtml('```js\nlet a = 1\n```\n').includes('jps-block'))
   check('adj882 负对照：`jpsx` 这种前缀相似的不算 jps 块（判据在量语言名本身）',
     !mdToHtml('```jpsx\nQ: 1 2 |\n```\n').includes('jps-block'))
+
+  /**
+   * ---- adj914（**用户要求**）：`v=` / `z=` 这一节要有「可调控件 + 实时预览」 ----
+   *
+   * 用户原话：「插件手册中，代码块参数（`v=` 视图 / `z=` 缩放）这块最好能有调整设置项直观看到预览效果的设置」。
+   * 写法是在 info string 里多写一个 `playground` 关键字（` ```jps v=w z=150 playground `）：
+   *   · **文档侧**（`help/markdown.ts`）只出标记与初值 —— 三档视图下拉 / 缩放滑块 / 数字输入 /
+   *     自适应（`z=*`）勾选 / 重置按钮，加上**唯一一份** `.jps-block`；
+   *   · **交互侧**（`help/jpsPreview.ts`）把控件写回 `data-jps-mode` / `data-jps-zoom`，
+   *     复用同一个 `refreshBlock` 重排 —— **不新增第二份渲染器**（下面有一条专门守这件事）。
+   *
+   * ⚠ `playground` 只在**网页文档/应用内帮助**这个渲染器里认；Obsidian 插件对"认不出的参数"一律忽略
+   * ⇒ 同一份 .md 在笔记里仍是一个普通代码块（这也是选"多一个关键字"而不是"新造一种围栏"的原因）。
+   * 真浏览器里的绑定与几何（切视图 / 改缩放真的重排、负对照）由 `scripts/verify-site.mjs` 的同名断言守。
+   */
+  const pgHtml = mdToHtml('```jps v=w z=150 playground\nQ: 1 2 |\n```\n')
+  check('adj914 parseJpsInfo：认 `playground` 关键字；**普通块不带这个字段**（既有"缺省 = 谱面 + 100"口径一字不变）',
+    parseJpsInfo('jps v=w z=150 playground')?.playground === true &&
+      parseJpsInfo('jps playground')?.mode === 's' && parseJpsInfo('jps playground')?.zoom === 100 &&
+      parseJpsInfo('jps PlayGround')?.playground === true &&
+      parseJpsInfo('jps v=w z=150')?.playground === undefined)
+  check('adj914 mdToHtml：playground 块产出「控件 + 预览」（三档视图 / 滑块 + 数字 / 自适应 / 重置 都在）',
+    pgHtml.includes('class="jps-playground"') && pgHtml.includes('data-jps-view') &&
+      pgHtml.includes('value="s"') && pgHtml.includes('value="w" selected') && pgHtml.includes('value="p"') &&
+      pgHtml.includes('data-jps-zoom-range') && pgHtml.includes('data-jps-zoom-num') &&
+      pgHtml.includes('data-jps-auto') && pgHtml.includes('data-jps-reset'))
+  check('adj914 控件初值 = 同一行写的 `v=` / `z=`（v=w z=150 ⇒ 下拉选中 w、滑块与数字都是 150）',
+    pgHtml.includes('data-jps-mode="w"') && pgHtml.includes('data-jps-zoom="150"') &&
+      pgHtml.includes('type="range" data-jps-zoom-range min="25" max="300" step="5" value="150"') &&
+      pgHtml.includes('type="number" data-jps-zoom-num min="1" max="1000" step="5" value="150"'))
+  check('adj914 预览仍是**唯一一份** `.jps-block`（控件不另造第二个预览器）',
+    (pgHtml.match(/class="jps-block"/g) ?? []).length === 1 &&
+      pgHtml.includes('class="jps-playground"') && pgHtml.includes('class="jps-block"'))
+  {
+    /**
+     * **没有第二份渲染器**（与 `adj876` 的"渲染器只有一份"同族）：
+     * `help/markdown.ts` 是纯函数渲染器，**不许**自己引引擎去拼 SVG（那样两处几何迟早漂）；
+     * 控件也只允许在 `help/jpsPreview.ts` 里挂一份。
+     */
+    const mdSrc2 = String(readFileSync(join(root, 'src/help/markdown.ts'), 'utf8'))
+    const pgSrc = String(readFileSync(join(root, 'src/help/jpsPreview.ts'), 'utf8'))
+    const mountCount = (pgSrc.match(/function mountJpsPlayground/g) ?? []).length
+    check('adj914 没有第二份渲染器：`markdown.ts` 只出标记、不引引擎（几何只在 `jpsPreview.ts` 一处）',
+      !mdSrc2.includes('@ijipu/engine') && !mdSrc2.includes('renderScoreToSvg') && !mdSrc2.includes('applyRangeToSvg') &&
+        mountCount === 1 && pgSrc.includes('renderJps(src, params)'))
+    /**
+     * 负对照：把"认 playground"这件事去掉（用**不带关键字**的同一段 md 模拟）⇒ 判据必须为假。
+     * 证明上面那条量的是**标记本身**，而不是"页面里随便有没有控件"。
+     */
+    const plainHtml = mdToHtml('```jps v=w z=150\nQ: 1 2 |\n```\n')
+    check('adj914 负对照：不带 `playground` 的同一段 md 不产出控件（判据在量标记，不是"有没有控件"）',
+      !plainHtml.includes('jps-playground') && !plainHtml.includes('data-jps-view') &&
+        pgHtml.includes('jps-playground') && pgHtml.includes('data-jps-view'))
+  }
 
   // ---- adj883：首页示例精简 ----
   const raw = '#===== 描述头定义 =====\nV: 1.0\nB: 试\nQ: 1 2 |\n# jps-config:{"note_size":15}\n'

@@ -10,7 +10,12 @@
  * ⚠ 变量用**兜底链**：官网那两页注入的是 `--site-*`，应用里用的是 `--jp-*`，
  *   所以这里一律写成 `var(--site-x, var(--jp-x, 兜底值))` —— 一份 CSS 三处都能用。
  */
-.jps-block {
+/**
+ * adj914：`playground` 可调示例（写作 ` ```jps … playground `）的**控件条**样式。
+ * 配色变量只声明**一处**（选择器列表把外层容器一起带上 ⇒ 下面的块直接继承，不复制第二套配色）。
+ */
+.jps-block,
+.jps-playground {
   --jb-border: var(--site-border, var(--jp-border, #24315e));
   --jb-panel: var(--site-panel, var(--jp-bg-panel, #161d3a));
   --jb-code: var(--site-code-bg, var(--jp-editor-bg, #0b1020));
@@ -19,12 +24,80 @@
   --jb-muted: var(--site-muted, var(--jp-text-muted, #5a6a99));
   --jb-accent: var(--site-accent, var(--jp-accent, #00f0ff));
   --jb-warn: var(--site-warn, var(--jp-warning, #ffc857));
+}
 
+.jps-block {
   border: 1px solid var(--jb-border);
   border-radius: var(--site-radius, 9px);
   margin: 14px 0;
   overflow: hidden;
   background: var(--jb-panel);
+}
+
+.jps-playground {
+  margin: 14px 0;
+}
+/* 控件条与下面的块**拼成一张卡**：外框只留一圈（上圆角在控件条、下圆角在块上） */
+.jps-playground-controls {
+  display: flex;
+  flex-wrap: wrap; /* 手机：一行放不下就换行 —— 这是"控件不横向溢出"的第一道保障 */
+  align-items: center;
+  gap: 8px 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--jb-border);
+  border-bottom: none;
+  border-radius: var(--site-radius, 9px) var(--site-radius, 9px) 0 0;
+  background: var(--jb-panel);
+  color: var(--jb-text2);
+  font-size: 13.5px;
+}
+.jps-playground > .jps-block {
+  margin: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.jps-pg-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* 每个字段都能被压缩：没有这条，flex 项的自动下限（内容宽）会顶破窄屏 */
+  min-width: 0;
+}
+.jps-playground-controls select,
+.jps-playground-controls input[type='number'] {
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--jb-border);
+  border-radius: 6px;
+  background: var(--jb-code);
+  color: var(--jb-text);
+  font: inherit;
+}
+.jps-playground-controls input[type='number'] { width: 68px; }
+/* 滑块可伸缩（窄屏跟着字段缩，不会把控件条顶宽） */
+.jps-playground-controls input[type='range'] {
+  flex: 1 1 110px;
+  min-width: 60px;
+  max-width: 100%;
+  accent-color: var(--jb-accent);
+}
+.jps-playground-controls input:disabled { opacity: 0.45; }
+.jps-pg-unit { color: var(--jb-muted); }
+.jps-pg-reset {
+  appearance: none;
+  margin-left: auto; /* 靠右；窄屏换行后自成一行，也不难看 */
+  padding: 4px 12px;
+  border: 1px solid var(--jb-border);
+  border-radius: 6px;
+  background: none;
+  color: var(--jb-text2);
+  font: inherit;
+  cursor: pointer;
+}
+.jps-pg-reset:hover {
+  border-color: var(--jb-accent);
+  color: var(--jb-text);
 }
 
 .jps-block-tabs {
@@ -89,3 +162,16 @@
 }
 .jps-block-msg[hidden] { display: none; }
 .jps-block-msg[data-kind='warn'] { color: var(--jb-warn); }
+
+/**
+ * adj914：窄屏（手机）下的控件条。
+ * 结构上已经"放不下就换行"（`flex-wrap`）+ 每个字段 `min-width: 0`，这里只是把内边距与间距收紧，
+ * 让 390px 宽的手机上控件不至于占掉半屏高。**不改任何宽度口径**，所以宽屏外观零变化。
+ */
+@media (max-width: 600px) {
+  .jps-playground-controls {
+    gap: 6px 10px;
+    padding: 9px 10px;
+    font-size: 13px;
+  }
+}

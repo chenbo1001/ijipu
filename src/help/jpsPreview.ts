@@ -15,6 +15,12 @@
  * `m=` 显示范围、`z=` 缩放（口径见 `markdown.ts` 的 `parseJpsInfo`），
  * 裁切用引擎自己的 `inkBoxOfLayout` + `rangeBox` + `applyRangeToSvg` ——
  * 与 Obsidian 插件、应用导出**同源**，不在这里另写几何。
+ *
+ * ## adj914：`playground` 可调示例也挂在这里
+ *
+ * 「代码块参数」那一节要有"调一下就看变化"的控件（用户要求）。控件只是**把选择写回块参数**
+ * 再走同一个重排路径（`previewJpsBlock`）——没有第二份渲染器、也没有第二套几何 ⇒
+ * 文档里写 ` ```jps v=w z=150 playground ` 就是可调示例，其它块完全不受影响。
  */
 import type { JpsBlockParams } from './markdown'
 // 组件样式只有这一份：官网文档页、官网首页、**应用内帮助**三处共用（见该文件的说明）
@@ -173,9 +179,104 @@ function mountBlock(block: HTMLElement): void {
   showTab(block, 'code')
 }
 
-/** 给 root 下所有还没挂过的 `.jps-block` 挂上交互（文档页正文渲染完后调一次） */
+/**
+ * adj914：给「可调示例」（` ```jps … playground `，见 `markdown.ts` 的 `jpsPlaygroundHtml`）挂控件。
+ *
+ * 控件的**唯一职责**是把选择写回内层 `.jps-block` 的 `data-jps-mode` / `data-jps-zoom`，
+ * 然后走**同一个** `previewJpsBlock()` 重排 —— 不在这里算任何几何、也不另造预览节点
+ * （那会变成第二份渲染器，两端迟早漂）。
+ *
+ * 三个消费方（官网文档页 / 官网首页 / 应用内帮助）共用这一份挂载逻辑。
+ */
+function mountJpsPlayground(root: HTMLElement): void {
+  if (root.dataset.jpsPgMounted === '1') return
+  const block = root.querySelector<HTMLElement>('.jps-block')
+  const view = root.querySelector<HTMLSelectElement>('[data-jps-view]')
+  const range = root.querySelector<HTMLInputElement>('[data-jps-zoom-range]')
+  const num = root.querySelector<HTMLInputElement>('[data-jps-zoom-num]')
+  const auto = root.querySelector<HTMLInputElement>('[data-jps-auto]')
+  const reset = root.querySelector<HTMLButtonElement>('[data-jps-reset]')
+  // 结构不全（老产物 / 别人手写的 DOM）⇒ 一个都不挂，绝不留"点不动的控件"
+  if (!block || !view || !range || !num || !auto || !reset) return
+  root.dataset.jpsPgMounted = '1'
+  /** 初值 = 文档那一行写的 `v=` / `z=`（`markdown.ts` 已经写在块上）——「重置」回到它 */
+  const init = paramsOf(block)
+  const sliderBounds = { min: Number(range.min) || 25, max: Number(range.max) || 300 }
+
+  /** 把滑块/数字两个控件对齐到同一个值（滑块只覆盖常用段，越界只影响滑块外观） */
+  const syncZoomWidgets = (z: number): void => {
+    num.value = String(z)
+    range.value = String(Math.min(sliderBounds.max, Math.max(sliderBounds.min, z)))
+  }
+
+  /**
+   * 控件 → 块参数（**唯一**一处写这两个 `dataset` 的地方，两个入口共用 ⇒ 永不打架）。
+   * 参数一变 `refreshBlock` 的缓存 key 就变了 ⇒ 真的重排（不是"看起来变了"）。
+   */
+  const applyControls = (): void => {
+    const mode: JpsBlockParams['mode'] = view.value === 'w' || view.value === 'p' ? view.value : 's'
+    const isAuto = auto.checked
+    if (!isAuto) {
+      const n = Number(num.value)
+      syncZoomWidgets(Number.isFinite(n) ? Math.min(1000, Math.max(1, Math.round(n))) : 100)
+    }
+    range.disabled = isAuto
+    num.disabled = isAuto
+    block.dataset.jpsMode = mode
+    block.dataset.jpsZoom = isAuto ? '*' : num.value
+    previewJpsBlock(block)
+  }
+
+  view.addEventListener('change', applyControls)
+  // 滑块 + 数字框：改任一个就把它同步给另一个，再重排（用户要的是"拉一下就看变化"）
+  range.addEventListener('input', () => {
+    num.value = range.value
+    auto.checked = false
+    applyControls()
+  })
+  // 数字框：清空重打时先不动（否则会抢着回写成 100，输入体验很糟）
+  num.addEventListener('input', () => {
+    if (num.value.trim() !== '') applyControls()
+  })
+  auto.addEventListener('change', applyControls)
+  reset.addEventListener('click', () => {
+    view.value = init.mode
+    auto.checked = init.zoom === '*'
+    if (init.zoom !== '*') syncZoomWidgets(init.zoom)
+    applyControls()
+  })
+
+  /**
+   * 首次渲染：**滚进视口才下引擎**（与"不点预览就不下那 68KB"同一条口径）——
+   * 文档页上可能有好几处可调示例，不该在打开页面时全部加载。
+   * 没抛 `IntersectionObserver` 的老浏览器直接渲染（功能优先，代价只是一次下载）。
+   */
+  const reveal = (): void => previewJpsBlock(block)
+  if (typeof IntersectionObserver === 'function') {
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return
+        io.disconnect()
+        reveal()
+      },
+      // 提前 160px 就开始渲染：用户滚到时已经出图，不会看到"空的等"
+      { rootMargin: '160px' },
+    )
+    io.observe(root)
+  } else {
+    reveal()
+  }
+}
+
+/**
+ * 给 root 下所有还没挂过的 `.jps-block` / `.jps-playground` 挂上交互（正文渲染完后调一次）。
+ *
+ * ⚠ **顺序有意义**：先挂块本身（它会把初始标签切到「脚本」），再挂控件
+ * （控件要把可调示例切到「预览」）—— 反过来的话，块的 `showTab(…, 'code')` 会把预览盖掉。
+ */
 export function mountJpsBlocks(root: ParentNode = document): void {
   root.querySelectorAll<HTMLElement>('.jps-block').forEach(mountBlock)
+  root.querySelectorAll<HTMLElement>('.jps-playground').forEach(mountJpsPlayground)
 }
 
 /** 单块刷新（首页换示例后调用：源码变了，需要强制重渲染） */

@@ -14,6 +14,7 @@
  *
  * 支持：标题 `#` / 多级列表 / 代码块围栏 / **表格** / **引用块** / 行内 `` `code` ``、**粗体**、*斜体*、[链接](url)
  *      / **反引号转义**（`\`` ⇒ 字面反引号、`\\` ⇒ 字面反斜杠，adj913；只有这两种，别的反斜杠原样保留）。
+ *      / ` ```jps ` 块的显示参数（`v=` / `z=`，adj882）与 **`playground` 可调示例**（adj914，见 `jpsPlaygroundHtml`）。
  *
  * adj876 新增：标题补稳定 `id`（文档页左侧目录的锚点要用）+ 导出 `extractToc()`。
  * ⚠ **标题的 id 与目录的链接必须由同一套函数产出**（`createHeadingIds()` + `isHeading()`）——
@@ -88,10 +89,22 @@ const esc = (s: string) =>
  *   · `z=<数字>` —— 缩放百分比（1–1000）；`z=*` = 自适应容器宽；未写 ⇒ 100（自然尺寸）。
  * 分隔符：空格为主，`,` `;` `|` 也认（有人习惯 `v=p,z=150`）；
  * **认不出的键值一律忽略**、**连写不算参数**（`z=150v=p` 两个都不认）—— 与插件同款容错。
+ * 另有一个**网页文档专有**的关键字 `playground`（adj914，见 `JpsBlockParams.playground`）：
+ * 插件那边它是一个"认不出的词"、被忽略 ⇒ 同一份 .md 在笔记里仍是一个普通代码块。
  */
 export interface JpsBlockParams {
   mode: 's' | 'w' | 'p'
   zoom: number | '*'
+  /**
+   * adj914：**可调控件 + 实时预览**（info string 里多写一个 `playground` 关键字，
+   * 形如 ` ```jps v=w z=150 playground `）。接口与裁切口径一个字不变 ——
+   * 只是在这个块外面多一层控件（交互在 `help/jpsPreview.ts`，与「脚本 / 预览」同一份实现）。
+   *
+   * ⚠ **只在写了关键字时才出现这个字段**（不写成恒有的布尔）：既有的
+   * "缺省 ⇒ 谱面 + 100"断言是逐字比对象字符串的，多一个恒假字段就会把它判红 ——
+   * 而且那种红是"断言口径变了"，不是真有缺陷。
+   */
+  playground?: boolean
 }
 
 /**
@@ -103,7 +116,13 @@ export function parseJpsInfo(info: string): JpsBlockParams | null {
   if (parts.length === 0 || parts[0].toLowerCase() !== 'jps') return null
   let mode: JpsBlockParams['mode'] = 's'
   let zoom: number | '*' = 100
+  let playground = false
   for (const part of parts.slice(1)) {
+    // adj914：`playground` ⇒ 这一块渲染成「控件 + 实时预览」（网页文档/应用内帮助专有）
+    if (/^playground$/i.test(part)) {
+      playground = true
+      continue
+    }
     const v = /^v=([swp])$/i.exec(part)
     if (v) {
       mode = v[1].toLowerCase() as JpsBlockParams['mode']
@@ -118,7 +137,9 @@ export function parseJpsInfo(info: string): JpsBlockParams | null {
       }
     }
   }
-  return { mode, zoom }
+  const out: JpsBlockParams = { mode, zoom }
+  if (playground) out.playground = true
+  return out
 }
 
 /**
@@ -129,7 +150,7 @@ export function parseJpsInfo(info: string): JpsBlockParams | null {
  * JS 到位后由 `help/jpsPreview.ts` 把它当"源码"读走并挂上渲染。
  */
 function jpsBlockHtml(src: string, p: JpsBlockParams): string {
-  return (
+  const block =
     `<div class="jps-block" data-jps-mode="${p.mode}" data-jps-zoom="${p.zoom}">` +
     `<div class="jps-block-tabs" role="tablist">` +
     `<button type="button" role="tab" class="active" data-jps-tab="code">脚本</button>` +
@@ -137,6 +158,58 @@ function jpsBlockHtml(src: string, p: JpsBlockParams): string {
     `</div>` +
     `<pre class="jps-block-code"><code>${esc(src)}</code></pre>` +
     `<div class="jps-block-preview" hidden></div>` +
+    `</div>`
+  // adj914：写了 `playground` 的块，外面再套一层控件（交互在 help/jpsPreview.ts）
+  return p.playground ? jpsPlaygroundHtml(block, p) : block
+}
+
+/** 缩放的滑块手感范围（数字框仍按文档口径 1–1000，滑块只取最常用的一段） */
+const PG_SLIDER_MIN = 25
+const PG_SLIDER_MAX = 300
+
+/**
+ * adj914（**用户要求**）：「代码块参数（`v=` 视图 / `z=` 缩放）这块最好能有调整设置项直观看到预览效果」。
+ *
+ * 做法：文档里多写一个关键字 `playground`（` ```jps v=w z=150 playground `），
+ * 这一块就渲染成「控件 + 实时预览」：
+ *   · **控件**：三档视图下拉（谱面 / 满宽 / 整页）+ 缩放滑块 + 数字输入（1–1000，照文档口径）
+ *     + 「自适应（`z=*`）」勾选 + 「重置」；
+ *   · 控件初值 = **同一行写的 `v=` / `z=`**，「重置」回到它；
+ *   · 预览就是下面那个 `.jps-block`（与文档里其它示例**同一个组件**，不自造第二个）。
+ *
+ * 这里**只出标记与初值**（纯字符串，零依赖，可在 Node 里断言）；控件怎么驱动、怎么重排全在
+ * `help/jpsPreview.ts` —— 那里也是**唯一**一处挂载点（三个消费方共用同一个模块）。
+ *
+ * ⚠ 文案直接写在这里（不搬 `brand/copy.ts`）：本模块是**纯函数、零依赖**且会被打进 Obsidian 嵌入版，
+ *   同族的「脚本 / 预览」「正在渲染…」也都写在组件内 —— 保持一致，不为几个标签多引一层依赖。
+ */
+function jpsPlaygroundHtml(block: string, p: JpsBlockParams): string {
+  /** `z=*` 时滑块/数字框给「取消自适应之后回到」的那个值（100 = 自然尺寸，与文档口径一致） */
+  const auto = p.zoom === '*'
+  // ⚠ 这里必须再判一次 `p.zoom`（TS 不能顺着 `auto` 这个变量收窄联合类型）
+  const num = p.zoom === '*' ? 100 : p.zoom
+  const slider = Math.min(PG_SLIDER_MAX, Math.max(PG_SLIDER_MIN, num))
+  const option = (value: JpsBlockParams['mode'], text: string): string =>
+    `<option value="${value}"${p.mode === value ? ' selected' : ''}>${text}</option>`
+  return (
+    `<div class="jps-playground" data-jps-playground="1">` +
+    `<div class="jps-playground-controls">` +
+    `<label class="jps-pg-field">视图` +
+    `<select data-jps-view aria-label="视图（v=）">` +
+    option('s', '谱面（裁到墨迹）') +
+    option('w', '满宽') +
+    option('p', '整页') +
+    `</select></label>` +
+    `<label class="jps-pg-field">缩放` +
+    `<input type="range" data-jps-zoom-range min="${PG_SLIDER_MIN}" max="${PG_SLIDER_MAX}" step="5" value="${slider}" aria-label="缩放百分比（滑块）">` +
+    `<input type="number" data-jps-zoom-num min="1" max="1000" step="5" value="${num}" aria-label="缩放百分比（1–1000）">` +
+    `<span class="jps-pg-unit">%</span></label>` +
+    `<label class="jps-pg-field jps-pg-auto">` +
+    `<input type="checkbox" data-jps-auto${auto ? ' checked' : ''}> 自适应（z=*）` +
+    `</label>` +
+    `<button type="button" class="jps-pg-reset" data-jps-reset>重置</button>` +
+    `</div>` +
+    block +
     `</div>`
   )
 }
