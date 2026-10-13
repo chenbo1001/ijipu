@@ -10185,8 +10185,22 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
   }
   // --- 图 5：dsb 的"包络下移"不得波及**其它曲行**的连音线 ---
   {
-    const withDsb = H + "Q: (1 2) 3 4 | 5 6 7 1' |\nQ: {dsb 1 2 3 4 } 5 6 7 1' |\nQ: (1 2) 3 4 | 5 6 7 1' |\n"
-    const noDsb = H + "Q: (1 2) 3 4 | 5 6 7 1' |\nQ: 5 6 7 1' |\nQ: (1 2) 3 4 | 5 6 7 1' |\n"
+    /**
+     * ⚠ **adj935 重写用例（不是放宽）**：`(1 2)` 挪到第 2 小节 → `5 (6 7) 1'`。
+     *
+     * 为什么：T0 的前提是"包络 x 区间覆盖其它行连音线的**起点**"（这样"按 x 区间筛连音线"的旧实现
+     * 才会被这个用例抓住）。`adj935` 让**非末行一律撑满**之后，三个曲行的宽度与旧口径完全不同：
+     *  · 第 1 行（非末行）撑满 ⇒ 起点从 `65.3` 移到 `388.5`；
+     *  · 第 3 行（**末行**、2 小节 < 4）改走"自然宽 + 对齐上一行"（旧口径是 `adj421` 预分槽）
+     *    ⇒ 起点从 `65.3` 移到 `102.6`；
+     *  · 包络（`{dsb}` 大括号）也从 `[62.2, 190.6]` 变成 `[103.9, 505.3]`（实测，见 `docs/SPACE-LAYOUT.md`）。
+     * 旧写法 `(1 2) 3 4 | …` 的两个起点（`80.8` / `54.8`）都落在包络**左端之外** ⇒ 用例**失去敏感性**
+     * （旧实现按 x 区间筛也不会误伤它）⇒ 前置断言 T0 必然为假。
+     * 把连音线挪到第 2 小节后，两个起点（`388.5` / `102.6`）**都落回包络区间内** ⇒ 前提恢复，
+     * 且被判据原样守住（T0 的 `every(...)` 一个字没改）。
+     */
+    const withDsb = H + "Q: 1 2 3 4 | 5 (6 7) 1' |\nQ: {dsb 1 2 3 4 } 5 6 7 1' |\nQ: 1 2 3 4 | 5 (6 7) 1' |\n"
+    const noDsb = H + "Q: 1 2 3 4 | 5 (6 7) 1' |\nQ: 5 6 7 1' |\nQ: 1 2 3 4 | 5 (6 7) 1' |\n"
     const pA = layoutScore(parseJps(withDsb), D).pages[0]
     const pB = layoutScore(parseJps(noDsb), D).pages[0]
     const sbA = (pA.segmentBrackets ?? [])[0]
@@ -17405,6 +17419,224 @@ runAdj927ExternalChangeTests()
         }
       }
     }
+    /**
+     * ---- adj935（**用户裁定**）：末行口径收窄成「**整份谱的最后一行**」 ----
+     *
+     * 用户原话：「**除了整份谱的最后一行，其它行一律撑满（两端对齐）**」；并确认既有规则照旧：
+     * 末行小节数不足阈值时仍按「自然对齐、且不窄于上一行对应小节」（`adj199` 时值优先 /
+     * `adj355` 空间优先）、多声部自然对齐时仍与上一组小节线对齐（`adj601`）。
+     *
+     * 与 `adj925` 的差别**只有两处**（都在 `packages/ijipu-engine/src/engine/layout/index.ts`）：
+     *   ① `isFinalRow = isLastRowOfScore || singleRowGroup` ⇒ 去掉 `|| singleRowGroup`（两处：
+     *      `placeMusicRow` 时值优先 / `placeMusicRowSpace` 空间优先）。理由：整份谱只有一行时那一行
+     *      **天然就是最后一行**（`isLastRowOfScore` 已为真）⇒ 这一条多余；而它在"**多行谱里某段
+     *      只有一行**"时会把那一行**误判成末行**（小节数 < 阈值就不撑满）—— 用户要的是撑满。
+     *   ② `adj421`（"单行曲部按 `align_min_bars` 预分槽"）的生效范围收窄成「**整份谱只有一行**」：
+     *      它的门是 `singleRowGroup && !stretch`，①改完后 `!stretch` 在"多行谱里某段只有一行"时恒为假
+     *      ⇒ 门自动关掉；喂给它的 `singleRowGroup` 的含义同时收窄（`rows.length === 1`
+     *      ⇒ `rows.length === 1` **且整份谱只有一个排版单元**），`adj421` 那段代码一个字没改。
+     *      多声部那处（`placeVoiceBlock` 的 `stretchBars = !isLastBlock || numBars >= align_min_bars`）
+     *      **本来就没有** `singleRowGroup` 这一条（多声部"一块即一行"，不存在"块内只有一行"）⇒ 本轮
+     *      **核过、未改**（下面 ④ 的实测值与 `adj925` ③ 逐值一致：空间优先 544.80 / 时值优先 539.50）。
+     *
+     * 断言口径与 `adj925` 同源（逐行最右小节线 x 与页内容右界之差）：
+     *   · 撑满 ⇒ 差 < 8px（单声部两条路径实测 0.48px）；自然 ⇒ 差 > 8px（本组用例实测 ≥ 200px）。
+     * 判决类断言**每条都配负对照**（把另一种口径的**实测值**喂进同一条判据 ⇒ 必须判假）。
+     */
+    {
+      /** 逐行几何（与 `adj925` 的 `rowsOf` 同口径：行 = 一组 `yTop` 相同的小节线） */
+      const rows935 = (src: string, cfg: PageConfig) => {
+        const page = layoutScore(parseJps(src), cfg).pages[0]
+        const right = new Map<number, number>()
+        const cnt = new Map<number, number>()
+        for (const b of page.barlines) {
+          const k = Math.round(b.yTop + BAR_TOP)
+          right.set(k, Math.max(right.get(k) ?? 0, b.x))
+          cnt.set(k, (cnt.get(k) ?? 0) + 1)
+        }
+        const keys = [...right.keys()].sort((a, b) => a - b)
+        return {
+          xs: keys.map((k) => right.get(k) as number),
+          bars: keys.map((k) => cnt.get(k) as number),
+          rightEdge: page.width - cfg.margin_right,
+        }
+      }
+      const stuck935 = (x: number, right: number): boolean => right - x < 8
+      const natural935 = (x: number, right: number): boolean => right - x > 8
+      const fmt935 = (v: number): string => v.toFixed(2)
+      const HEAD935 = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+      /** 一段单声部曲部（`Q:` 行）；两段**同声部** ⇒ 解析成两个排版单元（不是多声部块） */
+      const q935 = (bars: string[], end = '|'): string => `Q: ${bars.join(' | ')} ${end}\n`
+      /** 3 小节 < 阈值 4 —— "只有一行的曲部" */
+      const THREE935 = ['1 2 3 4', '5 6 7 1', '2 3 4 5']
+      /** 12 小节 —— 必然断成多行，用来把"整份谱"撑成多行 */
+      const TWELVE935 = Array.from({ length: 12 }, () => '1 2 3 4')
+      const PATHS935: [string, PageConfig['noteSpaceLayout']][] = [
+        ['空间优先', 'space'],
+        ['时值优先', 'duration'],
+      ]
+      const CFGS935 = PATHS935.map(
+        ([tag, mode]) => [tag, { ...defaultPageConfig, noteSpaceLayout: mode, align_min_bars: 4 } as PageConfig] as const,
+      )
+
+      // ① 非末行一律撑满 —— 本轮新行为就在"**多行谱里只有一行的曲部**"这一档：
+      //    两段谱 = 第一段 3 小节（< 阈值 4、只有一行）+ 第二段 12 小节（必然断成多行）
+      //    ⇒ 整份谱是多行，第一段那一行**不是**整份谱的最后一行 ⇒ 必须撑满。
+      //    ⚠ `adj925` 口径下它**不撑满**（`singleRowGroup` 把那一行当末行、走 adj421 预分槽）。
+      for (const [tag, cfg] of CFGS935) {
+        const g = rows935(HEAD935 + q935(THREE935) + q935(TWELVE935), cfg)
+        // 反事实值 = **实测的** adj421 预分槽落点（同一段谱、整份谱只有一行时，见 ③）
+        const slotX = rows935(HEAD935 + q935(THREE935), cfg).xs[0] ?? 0
+        console.log(
+          `    · adj935 ①（${tag}）：两段谱 / 每行小节数 [${g.bars.join(', ')}] / 每行末线 x = [${g.xs.map(fmt935).join(', ')}] / 页内容右界 ${fmt935(g.rightEdge)}；同一段谱"整份谱只有一行"时的预分槽末线 x = ${fmt935(slotX)}`,
+        )
+        check(
+          `adj935 ① 多行谱里"只有一行的曲部"（3 小节 < 阈值 4）是**非末行** ⇒ 一律撑满（${tag}）`,
+          g.xs.length >= 2 && g.bars[0] === 3 && stuck935(g.xs[0] ?? 0, g.rightEdge),
+          `首行小节数=${g.bars[0]} 首行末线=${fmt935(g.xs[0] ?? 0)} 右界=${fmt935(g.rightEdge)} 留白=${fmt935(g.rightEdge - (g.xs[0] ?? 0))}`,
+        )
+        check(
+          `adj935 ① 它**不再**走 adj421 预分槽（实测预分槽落点 ${fmt935(slotX)}，本行末线离它 > 50px）（${tag}）`,
+          Math.abs((g.xs[0] ?? 0) - slotX) > 50,
+          `首行末线=${fmt935(g.xs[0] ?? 0)} 预分槽=${fmt935(slotX)}`,
+        )
+        check(
+          `adj935 ① 负对照（${tag}）：把**实测的**预分槽末线 ${fmt935(slotX)} 喂进"撑满"判据 ⇒ 判假`,
+          !stuck935(slotX, g.rightEdge) && stuck935(g.xs[0] ?? 0, g.rightEdge),
+          `预分槽那一行的留白=${fmt935(g.rightEdge - slotX)}`,
+        )
+      }
+
+      // ② 整份谱的**最后一行**：小节数 < 阈值 ⇒ 自然（行尾留白）；≥ 阈值 ⇒ 撑满。
+      //    用例 = 两段谱，末段 3 小节（< 4，`||` 收尾）/ 末段 4 小节（≥ 4）。两条判据成对 + 互换输入负对照。
+      for (const [tag, cfg] of CFGS935) {
+        const s = rows935(HEAD935 + q935(TWELVE935) + q935(THREE935, '||'), cfg)
+        const f = rows935(HEAD935 + q935(TWELVE935) + q935([...THREE935, '6 7 1 2'], '||'), cfg)
+        const sX = s.xs[s.xs.length - 1] ?? 0
+        const fX = f.xs[f.xs.length - 1] ?? 0
+        console.log(
+          `    · adj935 ②（${tag}）：末行 3 小节（< 4）末线 x=${fmt935(sX)}（留白 ${fmt935(s.rightEdge - sX)}，共 ${s.xs.length} 行）/ 末行 4 小节（≥ 4）末线 x=${fmt935(fX)}（留白 ${fmt935(f.rightEdge - fX)}，共 ${f.xs.length} 行）/ 页内容右界 ${fmt935(s.rightEdge)}`,
+        )
+        check(
+          `adj935 ② 整份谱最后一行 3 小节 < 阈值 4 ⇒ 自然（行尾留白 > 8px）（${tag}）`,
+          s.xs.length >= 2 && (s.bars[s.bars.length - 1] ?? 0) === 3 && natural935(sX, s.rightEdge),
+          `末行小节数=${s.bars[s.bars.length - 1]} 留白=${fmt935(s.rightEdge - sX)}`,
+        )
+        check(
+          `adj935 ② 整份谱最后一行 4 小节 ≥ 阈值 4 ⇒ 撑满贴右（${tag}）`,
+          f.xs.length >= 2 && (f.bars[f.bars.length - 1] ?? 0) === 4 && stuck935(fX, f.rightEdge),
+          `末行小节数=${f.bars[f.bars.length - 1]} 留白=${fmt935(f.rightEdge - fX)}`,
+        )
+        check(
+          `adj935 ② 负对照（${tag}）：两条判据**互换输入**（短谱用"撑满"、满谱用"自然留白"）⇒ 都判假`,
+          !stuck935(sX, s.rightEdge) && !natural935(fX, f.rightEdge) && stuck935(fX, f.rightEdge) && natural935(sX, s.rightEdge),
+          `短谱留白=${fmt935(s.rightEdge - sX)} 满谱留白=${fmt935(f.rightEdge - fX)}`,
+        )
+      }
+
+      // ③ 整份谱**只有一行**：仍走 adj421 预分槽（`align_min_bars` 在本轮之后**仍然保留**的作用之一）
+      //    负对照 = 把"撑满"的实测末线（同一段谱 4 小节那档）喂进预分槽判据 ⇒ 判假
+      for (const [tag, cfg] of CFGS935) {
+        const slot = (PAGE_W - cfg.margin_left - cfg.margin_right) / cfg.align_min_bars
+        const one3 = rows935(HEAD935 + q935(THREE935), cfg)
+        const one4 = rows935(HEAD935 + q935([...THREE935, '6 7 1 2']), cfg)
+        const x3 = one3.xs[0] ?? 0
+        const x4 = one4.xs[0] ?? 0
+        const isSlotted = (x: number): boolean => Math.abs(x - (cfg.margin_left + 3 * slot)) < 12
+        console.log(
+          `    · adj935 ③（${tag}）：整份谱单行 3 小节 ⇒ 末线 x=${fmt935(x3)}（左边距 ${cfg.margin_left} + 3 槽 = ${fmt935(cfg.margin_left + 3 * slot)}，行尾留 ${fmt935(one3.rightEdge - x3)}）；整份谱单行 4 小节 ⇒ 末线 x=${fmt935(x4)}（撑满，留白 ${fmt935(one4.rightEdge - x4)}）`,
+        )
+        check(
+          `adj935 ③ 整份谱只有一行且 3 小节 < 阈值 4 ⇒ 走 adj421 预分槽（末线 ≈ 左边距 + 3 槽宽）（${tag}）`,
+          one3.xs.length === 1 && isSlotted(x3),
+          `末线=${fmt935(x3)} 3 槽=${fmt935(cfg.margin_left + 3 * slot)}`,
+        )
+        check(
+          `adj935 ③ 整份谱只有一行但 4 小节 ≥ 阈值 4 ⇒ 撑满（阈值照旧生效）（${tag}）`,
+          one4.xs.length === 1 && stuck935(x4, one4.rightEdge),
+          `末线=${fmt935(x4)} 留白=${fmt935(one4.rightEdge - x4)}`,
+        )
+        check(
+          `adj935 ③ 负对照（${tag}）：把"撑满"的实测末线 ${fmt935(x4)} 当成单行 3 小节的结果 ⇒ 预分槽判据判假（"整份谱只有一行就该撑满"是错的）`,
+          !isSlotted(x4) && isSlotted(x3),
+          `撑满值=${fmt935(x4)} 喂进预分槽判据=${isSlotted(x4)}`,
+        )
+      }
+
+      // ④ 多声部（**一块即一行**）：非末块一律撑满；末块小节数 < 阈值 ⇒ 空间优先走自然宽 + adj601
+      //    对齐上一组；时值优先那一支是**既有缺口**（adj318 起该分支就没读这个阈值，adj925 ⑤ 已钉住，
+      //    本轮**未改**，如实记录在下面）。
+      {
+        const DENSE935 = `1// 2// 3// 4// 5// 6// 7// 1'// 2// 3// 4// 5// 6// 7// 1'// 2//`
+        const SP935: PageConfig = { ...defaultPageConfig, noteSpaceLayout: 'space', align_min_bars: 4 }
+        const DU935: PageConfig = { ...defaultPageConfig, noteSpaceLayout: 'duration', align_min_bars: 4 }
+        /** 多声部块（2 小节）+ 后面一行单声部（1 小节）⇒ 块**不是**整份谱最后一行 */
+        const MV_NOT_LAST = HEAD935 + `Q1: ${DENSE935} | ${DENSE935} |\nQ2: ${DENSE935} | ${DENSE935} |\n` + q935(['1 2 3 4'])
+        /** 两个多声部块：第一块 4 小节（≥ 阈值、非末块）、第二块 2 小节（< 阈值、**末块**） */
+        const MV_TWO =
+          HEAD935 +
+          `Q1: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |\nQ2: 1 2 3 4 | 1 2 3 4 | 1 2 3 4 | 1 2 3 4 |\n` +
+          `Q1: 1 2 3 4 | 1 2 3 4 ||\nQ2: 1 2 3 4 | 1 2 3 4 ||\n`
+        for (const [tag, cfg] of [['空间优先', SP935], ['时值优先', DU935]] as const) {
+          const page = layoutScore(parseJps(MV_NOT_LAST), cfg).pages[0]
+          const rightEdge = page.width - cfg.margin_right
+          const blockX = Math.max(...page.barlines.filter((b) => b.id.group <= 1).map((b) => b.x), 0)
+          const lastX = Math.max(...page.barlines.filter((b) => b.id.group === 2).map((b) => b.x), 0)
+          console.log(
+            `    · adj935 ④（${tag}）：多声部块（2 小节）在**非末行** ⇒ 末线 x=${fmt935(blockX)}（留白 ${fmt935(rightEdge - blockX)}）；它后面那行单声部（末行，1 小节 < 4）末线 x=${fmt935(lastX)}（留白 ${fmt935(rightEdge - lastX)}）`,
+          )
+          check(
+            `adj935 ④ 多声部块不是整份谱最后一行（2 小节 < 阈值 4）⇒ 撑满贴右（${tag}）`,
+            stuck935(blockX, rightEdge) && natural935(lastX, rightEdge),
+            `块留白=${fmt935(rightEdge - blockX)} 末行留白=${fmt935(rightEdge - lastX)}`,
+          )
+          check(
+            `adj935 ④ 负对照（${tag}）：把末行那行单声部的自然宽末线 ${fmt935(lastX)} 喂进"块撑满"判据 ⇒ 判假`,
+            !stuck935(lastX, rightEdge) && stuck935(blockX, rightEdge),
+            `块留白=${fmt935(rightEdge - blockX)}`,
+          )
+        }
+        {
+          const page = layoutScore(parseJps(MV_TWO), SP935).pages[0]
+          const rightEdge = page.width - SP935.margin_right
+          const xsOf = (gs: number[]): number[] =>
+            [...new Set(page.barlines.filter((b) => gs.includes(b.id.group)).map((b) => b.x))].sort((a, b) => a - b)
+          const b1 = xsOf([0, 1])
+          const b2 = xsOf([2, 3])
+          console.log(
+            `    · adj935 ④（空间优先）末块：第一块（4 小节，非末块）小节线 x = [${b1.map(fmt935).join(', ')}]；第二块（2 小节，**末块** < 阈值）小节线 x = [${b2.map(fmt935).join(', ')}] / 页内容右界 ${fmt935(rightEdge)}`,
+          )
+          check(
+            'adj935 ④ 末块（2 小节 < 阈值 4）⇒ 自然宽（行尾留白 > 8px，不被阈值逼着撑满）',
+            b2.length >= 2 && natural935(b2[b2.length - 1] ?? 0, rightEdge),
+            `末块末线=${fmt935(b2[b2.length - 1] ?? 0)} 留白=${fmt935(rightEdge - (b2[b2.length - 1] ?? 0))}`,
+          )
+          check(
+            'adj935 ④ 末块仍按 adj601「自然对齐时与上一组小节线对齐、且不窄于上一组对应小节」（前两根与上一块逐根对齐 ≤ 1px）',
+            b1.length >= 4 && b2.length >= 2 && Math.abs(b2[0] - b1[0]) < 1 && Math.abs(b2[1] - b1[1]) < 1,
+            `第一块=[${b1.map(fmt935).join(',')}] 第二块=[${b2.map(fmt935).join(',')}]`,
+          )
+          check(
+            `adj935 ④ 负对照（空间优先）：把第一块（撑满）的末线 ${fmt935(b1[b1.length - 1] ?? 0)} 喂进"末块自然"判据 ⇒ 判假`,
+            !natural935(b1[b1.length - 1] ?? 0, rightEdge) && natural935(b2[b2.length - 1] ?? 0, rightEdge),
+            `第一块留白=${fmt935(rightEdge - (b1[b1.length - 1] ?? 0))}`,
+          )
+        }
+        {
+          const page = layoutScore(parseJps(MV_TWO), DU935).pages[0]
+          const rightEdge = page.width - DU935.margin_right
+          const lastBlockX = Math.max(...page.barlines.filter((b) => b.id.group >= 2).map((b) => b.x), 0)
+          console.log(
+            `    · adj935 ④ 既有缺口（时值优先）：末块 2 小节 < 阈值 4 仍**撑满**，末线 x=${fmt935(lastBlockX)}（留白 ${fmt935(rightEdge - lastBlockX)}）`,
+          )
+          check(
+            'adj935 ④ 复核（时值优先）：末块 2 小节 < 阈值仍撑满 —— **既有缺口**（adj318 起该分支就不读 align_min_bars，adj925 ⑤ 已钉住，本轮**未改**）',
+            rightEdge - lastBlockX < 8,
+            `留白=${fmt935(rightEdge - lastBlockX)}`,
+          )
+        }
+      }
+    }
     console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
     process.exit(failed === 0 ? 0 : 1)
   })
@@ -19690,8 +19922,21 @@ function runAdj651Tests() {
     cont3 !== undefined, JSON.stringify(p651.slurs.map((s) => [s.x1, s.x2, s.half])))
   check('adj651 延续线是**平顶半弧**（跨行连线统一平顶，与既有跨行口径一致）',
     cont2?.style === 'flat' && cont3?.style === 'flat', JSON.stringify([cont2?.style, cont3?.style]))
+  /**
+   * ⚠ **adj935 改判据（不是放宽）**：原来是 `Math.abs(cont2.x1 - cont3.x1) > 100` —— 那个 `100`
+   * 是**按旧口径的槽宽钉的魔数**：`adj935` 之前，这一行（2 小节 / 3 小节 < 阈值 4）走 `adj421`
+   * 预分槽，槽宽 = 行内容宽 / 4 ≈ `123.8` ⇒ 两根房子小节线相距 `123.8`，于是"不同锚点"用 `>100` 代判。
+   * `adj935` 起末行改成"自然宽 + 对齐上一行"（多行谱里只有整份谱最后一行看阈值，且不再预分槽）⇒
+   * 实测两根房子小节线相距 **60.1**（`x=73.2` / `x=133.3`）⇒ `>100` 恒假。
+   * 现在**直接判本意**（比魔数更强）：两条延续线**各自锚在自己那根房子小节线上**、且**两根线不同**。
+   */
   check('adj651 房子 2 / 结束句两条延续线**锚点不同**（各自的房子线），但同为右半弧',
-    cont2 !== undefined && cont3 !== undefined && Math.abs(cont2.x1 - cont3.x1) > 100, '')
+    cont2 !== undefined && cont3 !== undefined && cont2 !== cont3 &&
+      v2 !== undefined && v3 !== undefined &&
+      Math.abs(cont2.x1 - v2.x) < 0.6 && Math.abs(cont3.x1 - v3.x) < 0.6 &&
+      Math.abs(v2.x - v3.x) > 1,
+    `v2.x=${v2?.x} v3.x=${v3?.x}（相距 ${Math.abs((v2?.x ?? 0) - (v3?.x ?? 0)).toFixed(1)}）` +
+      ` cont2.x1=${cont2?.x1} cont3.x1=${cont3?.x1} 同一条=${cont2 === cont3}`)
 
   // ② 起音归属：单行用例里延续线与显式连线 **x1 完全相等** ⇒ 同一条连音线的同一起音
   const SAME651 = H651 + 'Q: 1 2 (5 |["1." 5) 6 7 |]["2." 5) 1 2 ||\n'
@@ -21711,22 +21956,42 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     const parsed921 = parseJps(body)
     check(`adj921/adj925 ${f}：这段示例**解析零错误零告警**（含设置行自身的校验：顶格 + JSON 对象 + 键名认得）`,
       parsed921.errors.length === 0, JSON.stringify(parsed921.errors.slice(0, 3)))
-    /** 行为层：带上 / 去掉这一行，各排一次版 —— 贴右的行数必须**变多** */
+    /**
+     * 行为层：带上 / 去掉这一行，各排一次版 —— "贴右（两端对齐）的行数"必须**变多**。
+     *
+     * ⚠ **adj935 改口径（不是放宽）**：这一条原来比较的是 `adj921StuckRows`（**0.6px** 口径），
+     * `adj935` 之前：`align_min_bars` 由"逐行各判一次"改成"只对末行生效"（`adj925`）+ "末行 = 整份谱
+     * 最后一行"（`adj935`）之后，**这段示例的前 4 行本来就会撑满**（它们都是非末行）⇒ 带与不带这一行
+     * 在 0.6px 口径下都是 **4 行**（带：`544.80 ×4 + 543.30`；不带：`544.80 ×4 + 388.70`）⇒ 判据恒假。
+     * 这个键**仍然在起作用**，只是作用范围收窄到**末行**（这正是用户的结论：「非末行两端对齐完成后，
+     * 就不再需要它」）——所以判据改成**按末行看**：
+     *   ① `3px` 口径（`||` 终止线的钳制落点本来就离右界 1.98px，0.6px 口径看不见它）下行数变多；
+     *   ② 更直接：**末行末线** 带上它 ⇒ `543.30`（贴右）、去掉 ⇒ `388.70`（自然留白）。
+     * 两条都写进判据，仍然要求"带这一行"真的改变结果。
+     */
     const geomWith = adj921Geom(body)
     const geomWithout = adj921Geom(noLine)
     const stuckWith = adj921StuckRows(geomWith)
     const stuckWithout = adj921StuckRows(geomWithout)
+    /** `3px` 口径的"贴右行数"（与下面 `nearRight` 同一口径：容得下 `||` 终止线的落点） */
+    const nearRightOf = (g: { rights: number[]; rightEdge: number }): number =>
+      g.rights.filter((x) => g.rightEdge - x < 3).length
+    const nearWith = nearRightOf(geomWith)
+    const nearWithout = nearRightOf(geomWithout)
+    const lastWith = geomWith.rights[geomWith.rights.length - 1] ?? 0
+    const lastWithout = geomWithout.rights[geomWithout.rights.length - 1] ?? 0
     // 把**每行末线 x** 打出来：判据"过"与"留白多少"都要能被人看到，不只靠一个 ✓
-    console.log(`    · ${f} 实测（页右界 ${geomWith.rightEdge.toFixed(2)}）：带这一行 ⇒ 贴右 ${stuckWith}/${geomWith.rights.length} 行，每行末线 x = [${geomWith.rights.map((x) => x.toFixed(2)).join(', ')}]`)
-    console.log(`    · ${f} 去掉这一行（退回默认 4）⇒ 贴右 ${stuckWithout}/${geomWithout.rights.length} 行，每行末线 x = [${geomWithout.rights.map((x) => x.toFixed(2)).join(', ')}]`)
-    check(`adj921/adj925 ${f}：这一行**真的在起作用**（带上它后末线贴右的行数增多，不是"写了等于没写"）`,
-      stuckWith > stuckWithout, `带 ${stuckWith} 行 / 不带 ${stuckWithout} 行`)
+    console.log(`    · ${f} 实测（页右界 ${geomWith.rightEdge.toFixed(2)}）：带这一行 ⇒ 贴右 ${stuckWith}/${geomWith.rights.length} 行（3px 口径 ${nearWith}）行，末行末线 x = ${lastWith.toFixed(2)}，每行末线 x = [${geomWith.rights.map((x) => x.toFixed(2)).join(', ')}]`)
+    console.log(`    · ${f} 去掉这一行（退回默认 4）⇒ 贴右 ${stuckWithout}/${geomWithout.rights.length} 行（3px 口径 ${nearWithout}）行，末行末线 x = ${lastWithout.toFixed(2)}，每行末线 x = [${geomWithout.rights.map((x) => x.toFixed(2)).join(', ')}]`)
+    check(`adj921/adj925 ${f}：这一行**真的在起作用**（adj935 起作用范围收窄到**末行**：带上它末行贴右 543.30、去掉它末行自然 388.70，贴右行数也变多）`,
+      nearWith > nearWithout && geomWith.rightEdge - lastWith < 3 && geomWithout.rightEdge - lastWithout > 8,
+      `3px 口径：带 ${nearWith} 行 / 不带 ${nearWithout} 行；末行末线：带 ${lastWith.toFixed(2)} / 不带 ${lastWithout.toFixed(2)}`)
     /**
      * adj925 追加：**末行也贴右**（这正是把 3 改成 2 的目的）——5 行全部 ≥ 2 ⇒ 5 行全贴右。
      * 容差 3px（**不能沿用上面 `adj921StuckRows` 的 0.6px**）：末行是 `||` 终止线，
      * 半宽 1.1（`|` 只有 0.55）⇒ 它的钳制落点本来就离右界更远，实测末线 543.30（离右界 1.98px）。
      */
-    const nearRight = geomWith.rights.filter((x) => geomWith.rightEdge - x < 3).length
+    const nearRight = nearWith
     check(`adj921/adj925 ${f}：新值 2 下**每一行都贴右（含只有 2 小节的末行）**—— 这就是 3 → 2 的目的`,
       geomWith.rights.length >= 5 && nearRight === geomWith.rights.length,
       `贴右 ${nearRight}/${geomWith.rights.length}（末线 x = [${geomWith.rights.map((x) => x.toFixed(2)).join(', ')}]）`)
@@ -22275,7 +22540,20 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
                  *  · 跨声部取会取到别行的格（我第一版就错在这）；
                  *  · 跨层取会拿**主旋律的小节线**去约束**段层**的音（实测「送别」段层 bar0 因此假红 14px：
                  *    段层有自己的格与小节线，两层的小节线本来就不在同一个 x 上）。
+                 *
+                 * ⚠ **adj935 补第三条：小节线也必须限"同一行"**（`sameRowBar`）。
+                 * 此前 `barLeft` 只筛了声部与层，**没筛行** ⇒ 会把**别行**的小节线当成"下一条边界"。
+                 * 这一条一直存在，只是 `adj935` 之前每一行都偏窄（非末行按 `align_bars` 逐行判、多数字典
+                 * 里是 `adj421` 预分槽的自然宽），别行的小节线恰好都落在"本格左缘"左侧 ⇒ 没暴露；
+                 * `adj935` 让**非末行一律撑满**之后各行都铺到右界，别行小节线就落进了本行音符的墨迹右边，
+                 * 于是 11 处**假红**（实测每处都被"限行"口径判为合规；例：「茉莉花（完整）」空间优先
+                 * `g1 bar1` 那条，现状口径取到 **row0** 的小节线 `x=371.1` ⇒ 右界 369.0 < 墨右 370.6，
+                 * 而**本行**最近的小节线在 `381.8` ⇒ 右界 379.7 > 墨右 370.6 ✓）。
+                 * 这一条与"墨迹不得越出自己那一行的网格"无关——别行的小节线在不同的 y 上，
+                 * 墨迹跨过它的 x 坐标并不构成重叠（AGENTS 五·9 的判据是**墨迹矩形相交**）。
                  */
+                const sameRowBar = (b: { yTop: number; id: { voice: number } }) =>
+                  b.id.voice === n.id.voice && Math.abs(b.yTop + BAR_TOP - n.y) < 1
                 const sameLayer = (m: { segment?: { type?: string } }) =>
                   n.segment ? m.segment?.type === n.segment.type : !m.segment
                 const sameRow = (m: typeof n) =>
@@ -22288,12 +22566,7 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
                     .sort((a, b) => a - b)[0] ?? Number.POSITIVE_INFINITY
                 const barLeft =
                   p.barlines
-                    .filter(
-                      (b) =>
-                        b.id.voice === n.id.voice &&
-                        sameLayer(b) &&
-                        b.x - b.width / 2 > lastSg.x + 0.6,
-                    )
+                    .filter((b) => sameRowBar(b) && b.x - b.width / 2 > lastSg.x + 0.6)
                     .map((b) => b.x - b.width / 2)
                     .sort((a, b) => a - b)[0] ?? Number.POSITIVE_INFINITY
                 /** `shrink` 只用于负对照：把"真实右界"缩小若干 px，模拟"墨迹真的越格" */
