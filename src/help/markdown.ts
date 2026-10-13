@@ -13,7 +13,7 @@
  * 另一层原因：oxlint 的 `react/only-export-components` 不允许组件文件导出非组件函数。
  *
  * 支持：标题 `#` / 多级列表 / 代码块围栏 / **表格** / **引用块** / 行内 `` `code` ``、**粗体**、*斜体*、[链接](url)
- *      / **反引号转义**（`\`` ⇒ 字面反引号、`\\` ⇒ 字面反斜杠，adj912；只有这两种，别的反斜杠原样保留）。
+ *      / **反引号转义**（`\`` ⇒ 字面反引号、`\\` ⇒ 字面反斜杠，adj913；只有这两种，别的反斜杠原样保留）。
  *
  * adj876 新增：标题补稳定 `id`（文档页左侧目录的锚点要用）+ 导出 `extractToc()`。
  * ⚠ **标题的 id 与目录的链接必须由同一套函数产出**（`createHeadingIds()` + `isHeading()`）——
@@ -142,7 +142,7 @@ function jpsBlockHtml(src: string, p: JpsBlockParams): string {
 }
 
 /**
- * adj912（**用户实测**）：**反引号转义**的两个占位符。
+ * adj913（**用户实测**）：**反引号转义**的两个占位符。
  *
  * 文档里要"在**句子中间**显示字面的三个反引号"（例如「笔记里写一个 \`\`\`jps 代码块」），
  * 只能用转义写法写：源码里是「反斜杠 + 反引号」（`docs/PLUGIN-GUIDE.md` 4 处 / `docs/SYNTAX.md` 2 处）。
@@ -196,7 +196,7 @@ function showInlineEscapes(html: string): string {
 /**
  * 行内 Markdown：`code`、**bold**、*italic*、[text](url)。普通文本 HTML 转义，语法片段包裹标签。
  *
- * adj912：进来先 `hideInlineEscapes()`（`\`` / `\\` 占位）、出去再 `showInlineEscapes()` 还原 ——
+ * adj913：进来先 `hideInlineEscapes()`（`\`` / `\\` 占位）、出去再 `showInlineEscapes()` 还原 ——
  * 于是"句子中间的字面反引号"与"行内代码配对"两件事互不干扰。
  */
 export function inlineMd(raw: string): string {

@@ -8,7 +8,7 @@ import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, read
 import { join } from 'node:path'
 // adj876：官网文档页与应用内帮助共用同一个 Markdown 渲染器（纯函数，可在 Node 里直接断言）
 // adj882：` ```jps ` 块的显示参数解析（`m=` / `z=`，口径沿用 Obsidian 插件）
-// adj912：行内解析的**反引号转义**（`inlineMd` 也导出，好直接断言行为）
+// adj913：行内解析的**反引号转义**（`inlineMd` 也导出，好直接断言行为）
 import { mdToHtml, extractToc, parseJpsInfo, inlineMd } from '../src/help/markdown'
 // adj883：首页示例精简（去掉 `# jps-config:{…}` 与装饰线，但必须保住正文）
 import { BRAND_SAMPLES, simplifyJps } from '../src/landing/samples'
@@ -20476,7 +20476,7 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       revertedWrap !== docsCss && !narrowDocsOk(revertedWrap))
 
   /**
-   * ---- adj912（**用户实测**）：行内解析必须处理「反引号转义」 ----
+   * ---- adj913（**用户实测**）：行内解析必须处理「反引号转义」 ----
    *
    * 由来：文档里要"在**句子中间**显示字面的三个反引号"，只能用转义写法
    * （源码里就是「反斜杠 + 反引号」，`docs/PLUGIN-GUIDE.md` 4 处 / `docs/SYNTAX.md` 2 处）。
@@ -20499,16 +20499,16 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   const syntaxFenceLine =
     readSrc('docs/SYNTAX.md').split('\n').find((l) => l.includes('可以整段粘进编辑器')) ?? ''
 
-  check('adj912 渲染器里有转义保护（`\\`` / `\\\\` 各一个占位符常量，先占位后还原）',
+  check('adj913 渲染器里有转义保护（`\\`` / `\\\\` 各一个占位符常量，先占位后还原）',
     mdSrc.includes('ESCAPED_TICK') && mdSrc.includes('ESCAPED_BSLASH') &&
       mdSrc.includes('hideInlineEscapes') && mdSrc.includes('showInlineEscapes'))
-  check('adj912 inlineMd：`\\`` 还原成**字面反引号**（句子中间写三个 ⇒ 三个都还原）',
+  check('adj913 inlineMd：`\\`` 还原成**字面反引号**（句子中间写三个 ⇒ 三个都还原）',
     inlineMd('写一个 \\`\\`\\`jps 代码块') === '写一个 ' + TICKS3 + 'jps 代码块',
     JSON.stringify(inlineMd('写一个 \\`\\`\\`jps 代码块')))
-  check('adj912 inlineMd：`\\\\` 还原成**字面反斜杠**（顺带，别漏）',
+  check('adj913 inlineMd：`\\\\` 还原成**字面反斜杠**（顺带，别漏）',
     inlineMd('反斜杠：\\\\ 结束') === '反斜杠：\\ 结束',
     JSON.stringify(inlineMd('反斜杠：\\\\ 结束')))
-  check('adj912 inlineMd：**真实文档**那两行渲染后都有字面围栏、且无「反斜杠+反引号」残留',
+  check('adj913 inlineMd：**真实文档**那两行渲染后都有字面围栏、且无「反斜杠+反引号」残留',
     pluginFenceLine !== '' && syntaxFenceLine !== '' &&
       literalFenceJps(inlineMd(pluginFenceLine)) && literalFenceJps(inlineMd(syntaxFenceLine)),
     `${JSON.stringify(inlineMd(pluginFenceLine).slice(0, 60))} / ${JSON.stringify(inlineMd(syntaxFenceLine).slice(0, 60))}`)
@@ -20516,15 +20516,15 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
    * 保守性（用户口径）：**只**处理 `\`` 与 `\\`，不许把反斜杠的转义扩散到所有字符 ——
    * 否则别人的 `\n`、`\d`、`C:\new` 这类**真实文本**会被吃掉。
    */
-  check('adj912 inlineMd：其它反斜杠原样保留（`\\n` / `\\d` / `C:\\new` 不许被吃）',
+  check('adj913 inlineMd：其它反斜杠原样保留（`\\n` / `\\d` / `C:\\new` 不许被吃）',
     inlineMd('换行符 \\n 与正则 \\d+ 与路径 C:\\new\\dir') === '换行符 \\n 与正则 \\d+ 与路径 C:\\new\\dir',
     JSON.stringify(inlineMd('换行符 \\n 与正则 \\d+ 与路径 C:\\new\\dir')))
   /** 回归（很重要）：转义保护**不许**影响原有行内代码 */
-  check('adj912 回归：普通行内代码 `` `code` `` 仍渲染成 <code>（转义保护不许误伤行内代码配对）',
+  check('adj913 回归：普通行内代码 `` `code` `` 仍渲染成 <code>（转义保护不许误伤行内代码配对）',
     inlineMd('行内 `code` 与 `' + '.jps' + '` 都要成片') ===
       '行内 <code>code</code> 与 <code>.jps</code> 都要成片',
     inlineMd('行内 `code` 与 `' + '.jps' + '` 都要成片'))
-  check('adj912 回归：`\\`` 与真反引号混在一行时，行内代码配对仍然正确',
+  check('adj913 回归：`\\`` 与真反引号混在一行时，行内代码配对仍然正确',
     inlineMd('转义 \\` 与真 `code` 同现') === '转义 ' + TICK + ' 与真 <code>code</code> 同现',
     JSON.stringify(inlineMd('转义 \\` 与真 `code` 同现')))
   /**
@@ -20544,14 +20544,14 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     return out + raw.slice(last)
   }
   const naiveOut = naiveInlineMd(pluginFenceLine)
-  check('adj912 负对照：去掉转义保护 ⇒ 判据①为假，且输出里出现「反斜杠+反引号」（＝用户报的现象）',
+  check('adj913 负对照：去掉转义保护 ⇒ 判据①为假，且输出里出现「反斜杠+反引号」（＝用户报的现象）',
     naiveOut !== '' && !literalFenceJps(naiveOut) && naiveOut.includes(BSLASH_TICK),
     JSON.stringify(naiveOut.slice(0, 90)))
   /**
    * 负对照 ②：判据必须**具体到"三个反引号紧跟 jps"**——若放宽成"正文里有 jps 这三个字母"，
    * **旧输出**（用户看到的那一版）也满足 ⇒ 那种判据量不出"修好没有"，是形同虚设的。
    */
-  check('adj912 负对照：判据放宽成"正文里有 jps"在旧输出上也成立 ⇒ 判据必须具体到字面围栏 + 排除残留',
+  check('adj913 负对照：判据放宽成"正文里有 jps"在旧输出上也成立 ⇒ 判据必须具体到字面围栏 + 排除残留',
     naiveOut.includes('jps') === true && !literalFenceJps(naiveOut) && naiveOut.includes(BSLASH_TICK))
 }
 
