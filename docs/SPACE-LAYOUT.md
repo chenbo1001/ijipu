@@ -34,6 +34,11 @@ perPerBeatW = noteElDur>0 ? noteElW/noteElDur : 0      # 拍宽（供小节线�
 > 场景：曲部**只有一行**（新建文件、示例谱那种一行就写完的曲子）。此前这类行按「自然宽」排布，
 > 内容挤在左侧、行尾一大片空白（1 小节的 `Q: 1 2 3 4 |` 只占约 1/4 行宽里的一小段）。
 > 用户规则：**小节数 < `align_min_bars`（默认 4）时，把整行占宽按 `align_min_bars` 个小节预分**。
+>
+> ⚠ **adj925 起的关系（别把两条口径混了）**：`align_min_bars` 现在**只对末行生效**
+> （非末行一律两端对齐撑满）。而按用户追加裁定「**单行曲部本身就是末行**」，
+> 单行曲部**照旧**受这个阈值判 ⇒ 本条规则与新口径**自洽**，代码未改；
+> 本条的开关是 `singleRowGroup && !stretch`，而 `!stretch` 现在蕴含"这一行就是末行"。
 
 ```
 slotOuter = availW / align_min_bars                     # 一个小节槽宽（默认 = 行内容宽 / 4）
@@ -43,7 +48,8 @@ slotOuter = availW / align_min_bars                     # 一个小节槽宽（�
 ```
 
 - **适用条件**：本曲部只有这一行（`rows.length === 1`）且 `barCount < align_min_bars`；行首空小节
-  （多声部填充）不参与。**多行曲部不适用**——末行仍按 adj199/adj355「对齐前面行」的规则。
+  （多声部填充）不参与。**多行曲部不适用**——末行仍按 adj199/adj355「对齐前面行」的规则；
+  adj925 起：**多行曲部里除末行以外的行一律撑满**（`align_min_bars` 只对末行生效）。
 - **效果**：N(<4) 小节的单行曲部，每小节占 `1/align_min_bars` 行宽、行尾留 `(align_min_bars − N)` 个槽的空白；
   单行 1 小节的每小节几何与「4 小节铺满行」里的一个小节**完全一致**（槽宽相同）。
 - **时值优先路径**（`placeMusicRow`）同规则：按小节把该小节的 `perBeats` 整体等比放大到槽内容宽
@@ -146,7 +152,9 @@ for each 声部 p:
 baseBarSum = Σ_b [Σ_k beatBodyW[b][k] + (barBeats[b]>0 ? (barBeats[b]−1)·NOTE_GAP : 0)]
 totalSlots = totalBeats + numBars − 1
 # ★ adj318：numBars < config.align_min_bars → 自然宽（不撑满、不钳制）
-stretchBars = numBars >= config.align_min_bars
+# ★ adj925（用户裁定）：**只有末行才看阈值** —— 非末行一律撑满；
+#   isLastBlock = 本块就是整份谱最后一行（多声部一块即一行，块内不折行）
+stretchBars = !isLastBlock || numBars >= config.align_min_bars
 # ★ adj317c：末线钳制到 rightLimit − halfBarW（与单声部 atEnd 一致）
 sumGapSpaces = gapSpaces.reduce((a, s) => a + s, 0)
 halfBarW    = barlineTotalW('|') / 2
@@ -235,7 +243,7 @@ xBar += mspBarRelW[b] + (b<numBars−1 ? gapSpaces[b] : 0)
 | 附点段 | `dotCX = curX + g + noteBodyW + g + dotBodyW/2`（动态 g） | `first.x + noteBodyW + dotGap + dotBodyW/2`（adj317 修复） |
 | 行末线 | `atEnd && stretch` 钳制 `pageW − margin_right − halfW`；否则自然（adj354，stretch=false 行尾留白） | lineX0 自然值（依赖 mspBarRelW）；stretchBars=true 时末线贴右 |
 | 段间隙 | 拍后 `(noteElDur/totalDur)·W`（按 W 自然均分） | 拍后 `NOTE_GAP + s`（固定 + 均匀拉伸） |
-| 行内撑满阈值 | `barCount >= config.align_min_bars`（adj297 时值优先 / adj354 空间优先，默认 4；`W = stretch ? 剩余宽 : 0`） | `numBars >= config.align_min_bars`（adj318，`avStretch` 分叉） |
+| 行内撑满阈值 | adj925 起：**非末行恒撑满**；末行（含单行曲部）`barCount >= config.align_min_bars`（默认 4）才撑满（`W = stretch ? 剩余宽 : 0`） | adj925 起：**非末行（非最后一块）恒撑满**；末块 `numBars >= config.align_min_bars` 才撑满（`avStretch` 分叉） |
 
 ---
 
@@ -317,7 +325,7 @@ perBeatMax = [max(8.06, halfW1), max(9.06, halfW2), 8.06]   ≈ [8.06, 9.06, 8.0
 **不实施断行的原因**（2026 决策）：多声部行是「多声部同步编排」（同一拍多声部对齐），**一旦换行，第二声部看上去像「新一组二声部块」，破坏多声部视觉与语义**。这是编排层面的事——**超宽是谱师需要平衡的（删内容/缩字号/改行/调时值）**，不是引擎自动能解决的事。
 
 **当前行为**：
-- `ΣbaseBarSum ≤ blockAvailW − nonDurPad`：自然宽或撑满（按 `align_min_bars` 判定），末线按 `adj317c`/`adj318` 钳制
+- `ΣbaseBarSum ≤ blockAvailW − nonDurPad`：自然宽或撑满（adj925 起：**非最后一块恒撑满**，末块才按 `align_min_bars` 判定），末线按 `adj317c`/`adj318` 钳制
 - `ΣbaseBarSum > blockAvailW − nonDurPad`（**内容物理已超**）：
   - `stretchBars=true`：末线钳到 `rightLimit − halfW`，但**音符仍溢出右 margin**（5.7 详述）
   - `stretchBars=false`：`s=0`、`lineX末 = blockStartX + baseBarSum + sumGapSpaces + BAR`，**可能超出右 margin**
@@ -327,7 +335,9 @@ perBeatMax = [max(8.06, halfW1), max(9.06, halfW2), 8.06]   ≈ [8.06, 9.06, 8.0
 
 ### 5.4 `[撤销/不实施]` `align_min_bars` 不触发多声部断行
 
-配合 5.3（**不实施断行**），`align_min_bars` 只在 `s`/`avStretch` 分叉处生效——**不**触发块级断行。`align_min_bars=100` 等极端值只让多声部行永远不撑满，**不会让超宽内容自动换行**。
+配合 5.3（**不实施断行**），`align_min_bars` 只在 `s`/`avStretch` 分叉处生效——**不**触发块级断行。
+adj925 起该阈值**只对末块生效**（非末块恒撑满）；`align_min_bars=100` 等极端值只让**末块**永远不撑满，
+**不会让超宽内容自动换行**。
 
 ### 5.5 `[设计]` `mspSegX` 数组索引范围正确（不是"末拍+ 实际未用"）
 
@@ -400,4 +410,5 @@ export const DOT_AFTER_DIGIT_GAP = (noteSize: number) => 0.2 * noteScaleOf(noteS
 | adj395 | **等时值连音组 `(y…)` 的时值与占宽**：`splitNoteDur` 认 `tupletDur`——组内音符总时值 = `tupletDur`，按原始构型（`/` 条数、`-` 条数、`.`）等比缩放，故空间优先下「元素可支配宽 = 元素时值 ÷ 行总时值 × W」自动按 1/3 拍分摊（组拿到 1 拍份额，不再按各自写的 `/` 时值算成 1.5 拍 → 越出小节）。同时 token 增 `tupletGroup`（解析期给出的稳定组号），`computeBeams` 分组键改为「有组号按组号、无组号按拍」→ 组内减时线连成一条（跨拍不断开）。**注：其"连音组不与同拍内组外音符共线"一句已被 adj397 取代** |
 | adj397 | **减时线与同拍内的连音组相连**：`computeBeams` 的分组由「单键分桶」改为**相邻逐对判定** `linked(a,b)`——同组 → 相连（跨拍不断，保留 adj395）；**否则同拍 → 相连**。故 4/4 的 `2/. 3// 5/ (y5// 6// 5//) …` 里 `5/`（拍 2 起点）与组内三音（拍 2 内）共用第 1 条减时线，第 2 条仍只覆盖带 `//` 的组内三音；跨拍组仍整组一条且不并入相邻拍音符 |
 | adj398 | **临时拍号分数计入行宽预算**：新增 `meterGapRight(comment, noteSize)`（分数整宽 + 起始 2×s + 末距 2px），空间优先的 `nonDurPad` 由 `lineW + barlinePad×2` 改为 `lineW + barlinePad + max(barlinePad, meterGapRight)`（**无分数时与原式等价**），放置处 `gapR` 复用同一函数 → 预算与放置同源；行末小节线右钳制再让出 `meterGapRight`（空间优先 pin 与时值优先 `Math.min` 各一处）。修复「带 `\|"p:2/4"` 的行内容整体右溢」（每个分数约 10.7px，用户谱越界 19.2px）与「行末小节线的分数越出右边距 12px」 |
-| adj601 | **下一组多声部块以上一组的"小节宽"为下限**（用户要求："第二组多声部，当自然对齐时，应尽量与上一组的小节线对齐，除非第二组的小节宽度比上一级对应小节宽"）。只对**未撑满**的块（`numBars < align_min_bars`）生效：`W_b = max(自然宽, 上一组同序小节宽)`，多出的部分**均摊到该小节各拍**（`alignAdd`），故小节线逐根对齐（实测用户谱第二组 2 小节对上第一组前 2 根：`176.5 / 299.8`）。三个细节：① 上一组**末小节**没有"后间距/2"、内小节有 ⇒ 本块末小节对齐到上一组内小节时补 `barlinePad/2`（否则短 1.6px）；② 试算 `Σ max(自然宽, 下限)` 超 `blockAvailW` 就**整体放弃对齐**（对齐是"尽量"、越界是硬约束）；③ 换页清空、中间夹单声部行不清（"上一组"= 上一个多声部块），撑满的块（已按行宽拉伸）不参与 |
+| adj601 | **下一组多声部块以上一组的"小节宽"为下限**（用户要求："第二组多声部，当自然对齐时，应尽量与上一组的小节线对齐，除非第二组的小节宽度比上一级对应小节宽"）。只对**未撑满**的块（adj925 起 = **末块且** `numBars < align_min_bars`）生效：`W_b = max(自然宽, 上一组同序小节宽)`，多出的部分**均摊到该小节各拍**（`alignAdd`），故小节线逐根对齐（实测用户谱第二组 2 小节对上第一组前 2 根：`176.5 / 299.8`）。三个细节：① 上一组**末小节**没有"后间距/2"、内小节有 ⇒ 本块末小节对齐到上一组内小节时补 `barlinePad/2`（否则短 1.6px）；② 试算 `Σ max(自然宽, 下限)` 超 `blockAvailW` 就**整体放弃对齐**（对齐是"尽量"、越界是硬约束）；③ 换页清空、中间夹单声部行不清（"上一组"= 上一个多声部块），撑满的块（已按行宽拉伸）不参与 |
+| adj925 | **`align_min_bars` 只对末行生效**（用户裁定「只针对末行有效，上面的其它还都还是两边分散对齐」）：非末行一律两端对齐撑满；末行才 `barCount >= align_min_bars`。末行 = 整份谱最后一个排版单元的最后一行，**或**本曲部只有一行（用户追加裁定「单行曲部本身也是末行呀」）⇒ `adj421` 的预分槽照旧生效。三处生效点：`placeMusicRow` / `placeMusicRowSpace` 的 `stretch`、`placeVoiceBlock` 的 `stretchBars`（⚠ 多声部的**时值优先**分支本来就没有这道门，恒摊满 ⇒ 那一支"末行 < 阈值也撑满"是既有缺口，本轮未改）。连带改动：① 单声部两条"对齐上一行"（`adj199` 时值优先 / `adj355` 空间优先）按 `adj601` 的先例补了**越界闸门**（试算超可用宽就整体放弃对齐、退回自然宽）—— 否则上一行被撑满后，下一行的逐小节对齐会把内容推出纸外（实测越界 132.72px）；② 文档示例值 3 → 2 |
