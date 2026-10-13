@@ -20816,6 +20816,83 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       `替换后 小节 ${pgBars(revertedBody)} / 曲行 ${pgRows(revertedBody)}`)
   }
 
+  /**
+   * ---- adj921（**用户要求**）：文档可调示例自带「两端对齐最小小节数 = 3」----
+   *
+   * 用户原话：「插件手册里的示例茉莉花应加个谱面设置：`"align_min_bars":3`，
+   * 不然显示不好看，没两端对齐」。两处文档（`docs/PLUGIN-GUIDE.md` §四「代码块参数」、
+   * `docs/SYNTAX.md`「附：代码块参数」）里那个 ` ```jps v=s z=150 playground ` 示例**都要**写这一行。
+   *
+   * **为什么是 3**（引擎原文，**不是照抄用户给的字符串**）：
+   *   · 键名与语义：`packages/ijipu-engine/src/engine/types.ts:1074`
+   *     「adj297：两端对齐最小小节数——行小节数 < 该值做自然对齐（行尾留白），≥ 该值撑满两端对齐；默认 4」；
+   *   · 默认值：同文件 `:1154` 的 `defaultPageConfig.align_min_bars = 4`；
+   *   · 生效处：`layout/index.ts:1566`（时值优先单声部 `stretch = barCount >= config.align_min_bars`）、
+   *     `:2122`（空间优先单声部）、`:2945`（多声部 `stretchBars`）；
+   *   · 属 **L2 谱面级**（AGENTS §七）⇒ 写进 `.jps` 的 `# jps-config` 才会跟谱走。
+   *   《茉莉花》前四行各 **3 小节** ⇒ 默认 4 时这四行全部"自然宽、行尾留白"（就是用户说的"没两端对齐"）；
+   *   写 **3** 后它们 ≥ 3、撑满两端对齐。值与真源 `public/samples/茉莉花.jps` **同键同值**（不另编一个）。
+   *
+   * 判据分两层（**先写断言再实现**这条规矩下，"两层"才守得住这条改动不被人当垃圾清掉）：
+   *   ① **源码层**：两处文档里那一行**逐字**在；负对照 = 把这一行从**字符串**里去掉 ⇒ 判据必须为假；
+   *   ② **行为层**：把示例正文真的过一遍引擎排版——"末线贴右的行数"必须比**没有这一行**时多
+   *      （证明这一行不是装饰，defaultPageConfig 的 4 与它真的分叉）；
+   *   ③ 顺带守"示例解析零错误零告警"（设置行本身的语法校验也走这条路）。
+   *
+   * ⚠ **实测口径（别把它读成"整首都贴右了"）**：这一段共 5 行，前四行各 3 小节、**第五行（末行）只有 2 小节**。
+   * 写 3 后前四行撑满（实测"末线贴右"**4** 条），第五行 2 < 3 ⇒ 仍按自然宽、行尾留白；
+   * 要连末行也贴右得写 **≤2**。当前写 **3** 是照用户给的值 + 真源 `茉莉花.jps` 同值（两边一致优先），
+   * 若用户要的是"字面意义的末行也两端对齐"，改的应是**那一行的值**（不是删断言）——见本轮报告。
+   */
+  const ADJ921_LINE = '# jps-config:{"align_min_bars":3}'
+  /** 那一行**逐字**在（整行相等：多一个空格、写错键名都不算） */
+  const adj921HasLine = (src: string): boolean => src.split('\n').some((l) => l === ADJ921_LINE)
+  /** 示例正文的排版实测：**每行**最右小节线 x（按行顶 yTop 分组）+ 页右界 */
+  const adj921Geom = (src: string): { rights: number[]; rightEdge: number } => {
+    const lay = layoutScore(parseJps(src), mergeJpsConfig(src, defaultPageConfig))
+    const page = lay.pages[0]
+    if (!page) return { rights: [], rightEdge: 0 }
+    const byRow = new Map<number, number>()
+    for (const b of page.barlines) {
+      const k = Math.round(b.yTop)
+      byRow.set(k, Math.max(byRow.get(k) ?? 0, b.x))
+    }
+    return {
+      rights: [...byRow.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]),
+      rightEdge: page.width - defaultPageConfig.margin_right,
+    }
+  }
+  /** 「末线贴右（撑满两端对齐）的行数」——容差 0.6px 与 adj317c 同口径（右界再扣小节线半宽 0.55） */
+  const adj921StuckRows = (g: { rights: number[]; rightEdge: number }): number =>
+    g.rights.filter((x) => Math.abs(x - (g.rightEdge - 0.55)) < 0.6).length
+  check('adj921 与真源同键同值：public/samples/茉莉花.jps 里也是 `"align_min_bars":3`（不是我们另编的值）',
+    /"align_min_bars"\s*:\s*3/.test(pgRead('public/samples/茉莉花.jps')),
+    pgRead('public/samples/茉莉花.jps').match(/# jps-config:.*/)?.[0] ?? '（真源里没有设置行）')
+  for (const f of PG_DOCS) {
+    const md = pgRead(f)
+    const body = pgBodyOf(md)
+    check(`adj921 ${f}：可调示例自带 ${ADJ921_LINE}（用户要求：不加这行则前四行行尾留白、看不过去）`,
+      adj921HasLine(body), body.split('\n').filter((l) => l.startsWith('# jps-config')).join(' / ') || '（没有设置行）')
+    /** 负对照：只在**字符串**上删掉这一行（不碰文件）⇒ 同一条判据必须为假 */
+    const noLine = body.split('\n').filter((l) => l !== ADJ921_LINE).join('\n')
+    check(`adj921 负对照 ${f}：把这一行从字符串里去掉 ⇒ 判据为假（说明它真的在判这一行，不是恒真）`,
+      body !== noLine && !adj921HasLine(noLine) && adj921HasLine(body),
+      `去掉后仍含这几行：${noLine.split('\n').filter((l) => l.startsWith('# jps-config')).join(' / ') || '（无）'}`)
+    const parsed921 = parseJps(body)
+    check(`adj921 ${f}：这段示例**解析零错误零告警**（含设置行自身的校验：顶格 + JSON 对象 + 键名认得）`,
+      parsed921.errors.length === 0, JSON.stringify(parsed921.errors.slice(0, 3)))
+    /** 行为层：带上 / 去掉这一行，各排一次版 —— 贴右的行数必须**变多** */
+    const geomWith = adj921Geom(body)
+    const geomWithout = adj921Geom(noLine)
+    const stuckWith = adj921StuckRows(geomWith)
+    const stuckWithout = adj921StuckRows(geomWithout)
+    // 把**每行末线 x** 打出来：判据"过"与"留白多少"都要能被人看到，不只靠一个 ✓
+    console.log(`    · ${f} 实测（页右界 ${geomWith.rightEdge.toFixed(2)}）：带这一行 ⇒ 贴右 ${stuckWith}/${geomWith.rights.length} 行，每行末线 x = [${geomWith.rights.map((x) => x.toFixed(2)).join(', ')}]`)
+    console.log(`    · ${f} 去掉这一行（退回默认 4）⇒ 贴右 ${stuckWithout}/${geomWithout.rights.length} 行，每行末线 x = [${geomWithout.rights.map((x) => x.toFixed(2)).join(', ')}]`)
+    check(`adj921 ${f}：这一行**真的在起作用**（带上它后末线贴右的行数增多，不是"写了等于没写"）`,
+      stuckWith > stuckWithout, `带 ${stuckWith} 行 / 不带 ${stuckWithout} 行`)
+  }
+
   // ---- adj883：首页示例精简 ----
   const raw = '#===== 描述头定义 =====\nV: 1.0\nB: 试\nQ: 1 2 |\n# jps-config:{"note_size":15}\n'
   const slim = simplifyJps(raw)
