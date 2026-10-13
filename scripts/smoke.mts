@@ -22265,7 +22265,10 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
    *   · 写 **3**：前四行 3 ≥ 3 撑满，但**末行 2 < 3 ⇒ 行尾留白** ——
    *     这正是用户当初抱怨的"没两端对齐"（adj921 的注释里就写着"要连末行也贴右得写 ≤2"）。
    *   · 写 **2**：五行全都 ≥ 2 ⇒ **五行全贴右**（实测 5/5），"末行也贴右"。
-   *   · 值与真源 `public/samples/茉莉花.jps` **不再同值**：真源里现在是 `3`，而那是**用户手上未提交的
+   *   · ⚠ **adj941（用户 2026-10-13 决定）起真源那个键已被去掉**（见下面 `adj941` 段）⇒
+   *     现在**只有文档示例**还带它（那是"演示这个设置怎么配"的样本，用户只要求动示例谱 ⇒ 本轮不动）。
+   *     下面两行是 adj925 当轮的**历史原话**：值与真源 `public/samples/茉莉花.jps` 不再同值，
+   *     真源里当时是 `3`，而那是**用户手上未提交的
    *     改动**（本轮按规定不碰）⇒ 文档示例按"末行也贴右"的诉求写 `2`，真源保持 `3`。
    *     下一条断言把这件事**明写出来**（同键、不同值、各自的原因），免得以后有人以为哪边写错了。
    *
@@ -22297,14 +22300,109 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   const adj921StuckRows = (g: { rights: number[]; rightEdge: number }): number =>
     g.rights.filter((x) => Math.abs(x - (g.rightEdge - 0.55)) < 0.6).length
   /**
-   * adj925：真源与文档示例**同键、不同值**——这条改成明写这件事，而不是"两边必须同值"。
-   * 真源（`public/samples/茉莉花.jps`）里写着 `3`，那是**用户手上未提交的改动**（本轮不碰）；
-   * 文档示例按"末行 2 小节也要贴右"改成 `2`。判据：真源**确实写了这个键**（说明这个设置真的在谱里用着）
-   * ＋ 文档示例逐字是 `2`。
+   * adj925（**下面是历史记录，`adj941` 起真源那半句已作废**）：真源与文档示例**同键、不同值**——
+   * 这条改成明写这件事，而不是"两边必须同值"。真源（`public/samples/茉莉花.jps`）里**当时**写着 `3`
+   * （那是**用户手上未提交的改动**，当轮不碰）；文档示例按"末行 2 小节也要贴右"改成 `2`。
+   * 当轮的判据：真源**确实写了这个键**（说明这个设置真的在谱里用着）＋ 文档示例逐字是 `2`。
+   *
+   * ⚠ **adj941（用户 2026-10-13 决定）：示例谱里去掉了这个键** ⇒ 真源那半句**按新真值改写**为
+   * "真源**只去掉了这一个键**、其余 17 个键与值逐字保留"（见下面 `adj941` 段，判据没删、只改真值）。
+   * 文档那半句**保持不变**：文档里的 `# jps-config:{"align_min_bars":2}` 是"演示这个设置怎么配"
+   * 的示例，用户只要求动**示例谱（`.jps` 文件）**，两处文档**本轮不动**。
    */
-  check('adj921/adj925 真源《茉莉花》确实自带 `align_min_bars`（键在、真源值 3 —— 用户未提交的改动，本轮不动）',
-    /"align_min_bars"\s*:\s*3/.test(pgRead('public/samples/茉莉花.jps')),
-    pgRead('public/samples/茉莉花.jps').match(/# jps-config:.*/)?.[0] ?? '（真源里没有设置行）')
+  /**
+   * ---- adj941（**用户决定，2026-10-13**）：**示例谱里不再需要 `align_min_bars`** ----
+   *
+   * 用户原话：「现在可以把**所有示例谱**里的 `align_min_bars` 设置**去掉**了」。
+   *
+   * **为什么现在可以去掉**（不是"随手删一个设置项"）：
+   *   · `adj940` 之后，「非末行一律两端对齐」与「末行按小节序号对齐上一行」都已是**默认行为**
+   *     （不读任何 `# jps-config` 键）⇒ 这个键只剩「**末行要不要撑满**」这一个作用；
+   *   · 用户既有的排版总原则（`AGENTS.md` 五·12）：「不做配置（默认配置）的情况下，出的谱应该是
+   *     正规的、正确的谱，其它的设置应该是锦上添花和个性设置」—— 既然只剩"锦上添花"，
+   *     示例谱就不该自带它。
+   *
+   * ⚠ **只去掉这一个键**（用户明说"其余所有键与值原样保留"）：`# jps-config:{…}` 其余键与值
+   *   **逐字保留**，**不是**清空、**不是**改成 `{}`（用户自己那版实验把整条换成了 `{}`，
+   *   已由上一个任务 stash 保存，本轮按"只去一个键"重新生成）。本段用三条判据把这件事钉住：
+   *     ① 全部示例谱（`public/samples/*.jps`）里**没有**这个键；
+   *     ② 真源《茉莉花》那份 `# jps-config` 仍是**非空对象**，且**其余 17 个键逐个还在**
+   *        （既防"顺手删整行"，也防"清成 `{}`"）；
+   *     ③ 去掉后**渲染逐值不变** —— 末行只有 2 小节，在旧阈值 `3` 与新默认 `4` 下走的
+   *        都是同一条分支（`末行 < 阈值 ⇒ 自然宽 + 对齐上一行`）⇒ **尺寸 / 视框高 / 行数类
+   *        断言不受影响**（下面把实测几何与墨迹盒高打出来，不只是"我看没问题"）。
+   */
+  const MOLY_JPS = 'public/samples/茉莉花.jps'
+  const molyRaw = pgRead(MOLY_JPS)
+  /** 真源配置行的原文，以及它的 JSON 正文 */
+  const molyCfgLine = molyRaw.split('\n').find((l) => /^\s*#\s*jps-config\s*:/.test(l)) ?? ''
+  const molyCfgJson = molyCfgLine.slice(molyCfgLine.indexOf('{'))
+  const molyCfg = (molyCfgJson ? JSON.parse(molyCfgJson) : {}) as Record<string, unknown>
+  /**
+   * 去掉该键**之前**真源里写着的全部键（顺序 = JSON 里的书写顺序）。
+   * ⚠ 这份清单是"改动前的键集合快照"，只用来核对"其余键一个都没少"——
+   * **不**当作配置行的期望内容（各键的值仍以文件为准，用户手改别的键不归本条管）。
+   */
+  const MOLY_KEYS_BEFORE_941 = [
+    'margin_bottom', 'margin_left', 'margin_right', 'body_margin_top', 'descAreaH', 'miaoshu_size',
+    'geci_font', 'geci_size', 'note_size', 'height_quci', 'height_cici', 'height_ciqu',
+    'height_ciqu_lyric', 'align_min_bars', 'metaPos', 'lyricShrink', 'showInstrument', 'segmentRowGap',
+  ] as const
+  /** 判据②：这份配置"只少了 `align_min_bars`"—— 键数 = 18 − 1、其余 17 个逐个在、该键不在 */
+  const onlyKeyRemoved941 = (cfg: Record<string, unknown>): boolean =>
+    !('align_min_bars' in cfg) &&
+    Object.keys(cfg).length === MOLY_KEYS_BEFORE_941.length - 1 &&
+    MOLY_KEYS_BEFORE_941.filter((k) => k !== 'align_min_bars').every((k) => k in cfg)
+  check('adj941 真源《茉莉花》的 `# jps-config` **只去掉了 `align_min_bars`**（其余 17 个键逐个保留；既没清空、也没改成 `{}`）',
+    /^\s*#\s*jps-config\s*:/.test(molyCfgLine) && onlyKeyRemoved941(molyCfg),
+    `键 ${Object.keys(molyCfg).length} 个：${Object.keys(molyCfg).join(', ')}`)
+  /** 负对照（两个方向）：把该键塞回去 ⇒ 假；清成 `{}` ⇒ 假 —— 证明上面那条不是恒真 */
+  const molyCfgWithKey941 = JSON.parse(molyCfgJson.replace('"metaPos"', '"align_min_bars":3,"metaPos"')) as Record<string, unknown>
+  check('adj941 负对照：把 `align_min_bars` 塞回配置 ⇒ 判据为假；清成 `{}` ⇒ 也判假（"只少一个键"真的在判键集合）',
+    onlyKeyRemoved941(molyCfg) && !onlyKeyRemoved941(molyCfgWithKey941) && !onlyKeyRemoved941({}) &&
+      Object.keys(molyCfgWithKey941).length === MOLY_KEYS_BEFORE_941.length,
+    `塞回后 ${Object.keys(molyCfgWithKey941).length} 键 / 清空 0 键`)
+  /** 判据①：**全部**示例谱（`public/samples/*.jps`，构建期自动发现的那一份目录）都不含这个键 */
+  const SAMPLE_FILES_941 = readdirSync(join(root, 'public/samples')).filter((f) => f.endsWith('.jps'))
+  const sampleHasKey941 = (s: string): boolean => /"align_min_bars"\s*:/.test(s)
+  const withKeyOffenders = SAMPLE_FILES_941.filter((f) => sampleHasKey941(pgRead(join('public/samples', f))))
+  check(`adj941 全部示例谱（${SAMPLE_FILES_941.join(' / ')}）都不含 \`align_min_bars\`（用户 2026-10-13 决定）`,
+    SAMPLE_FILES_941.length >= 2 && withKeyOffenders.length === 0,
+    withKeyOffenders.length ? `仍带该键：${withKeyOffenders.join(' / ')}` : `${SAMPLE_FILES_941.length} 份，全部不含`)
+  /** 负对照：把该键塞回**字符串**（不碰文件）⇒ 同一条判据为假 */
+  check('adj941 负对照：把 `"align_min_bars":3` 塞回真源字符串 ⇒ 判据为假（说明它真的在判这个键）',
+    !sampleHasKey941(molyRaw) && sampleHasKey941(molyRaw.replace('"metaPos"', '"align_min_bars":3,"metaPos"')))
+  /**
+   * 判据③：去掉该键后**渲染逐值不变**（这就是"要不要跟着改尺寸类断言"的答案）。
+   * 三个输入：现在的真源（无该键）/ 塞回**旧值 3** / 塞回 **2**
+   * （负对照：末行 2 小节 ≥ 2 ⇒ 会被撑满，几何**必变** ⇒ 证明上面的"相同"是量出来的）。
+   */
+  const molyInk3 = '# jps-config:{"align_min_bars":3,'
+  const molyInk2 = '# jps-config:{"align_min_bars":2,'
+  const gNew941 = adj921Geom(molyRaw)
+  const gOld3941 = adj921Geom(molyRaw.replace('# jps-config:{', molyInk3))
+  const gOld2941 = adj921Geom(molyRaw.replace('# jps-config:{', molyInk2))
+  const sameGeom941 = (a: typeof gNew941, b: typeof gNew941): boolean =>
+    a.rights.length === b.rights.length && Math.abs(a.rightEdge - b.rightEdge) < 1e-9 &&
+    a.rights.every((x, i) => Math.abs(x - b.rights[i]) < 1e-9)
+  console.log(`    · adj941 真源《茉莉花》实测（页右界 ${gNew941.rightEdge.toFixed(2)}）：去掉该键 ⇒ 每行末线 x = [${gNew941.rights.map((x) => x.toFixed(2)).join(', ')}]`)
+  console.log(`    · adj941 同上、把旧值 3 塞回 ⇒ [${gOld3941.rights.map((x) => x.toFixed(2)).join(', ')}]（应逐值相同）`)
+  console.log(`    · adj941 负对照、塞回 2（末行 2 小节 ≥ 2 ⇒ 撑满）⇒ [${gOld2941.rights.map((x) => x.toFixed(2)).join(', ')}]（应不同）`)
+  check('adj941 去掉该键后真源《茉莉花》**渲染逐值不变**（末行 2 小节在旧阈值 3 与新默认 4 下都走"末行 < 阈值 ⇒ 自然宽 + 对齐上一行"同一条分支）',
+    sameGeom941(gNew941, gOld3941) && gNew941.rights.length >= 5,
+    `去掉 [${gNew941.rights.map((x) => x.toFixed(2)).join(', ')}] vs 旧值 3 [${gOld3941.rights.map((x) => x.toFixed(2)).join(', ')}]`)
+  check('adj941 负对照：把旧值改成 2 ⇒ 几何**确实会变**（末行被撑满）—— 证明上面那条的"逐值相同"不是恒真',
+    !sameGeom941(gNew941, gOld2941),
+    `去掉 [${gNew941.rights.map((x) => x.toFixed(2)).join(', ')}] vs 值 2 [${gOld2941.rights.map((x) => x.toFixed(2)).join(', ')}]`)
+  /** 墨迹盒高度同样不变（"尺寸类断言要不要改"直接看这个量；`adj916` 那条浏览器断言量的是**文档**示例，与本键无关） */
+  const h941 = (src: string): number => {
+    const box = inkBoxOfLayout(layoutScore(parseJps(src), mergeJpsConfig(src, defaultPageConfig)))
+    return box ? box.h : 0
+  }
+  check('adj941 去掉该键不改变真源《茉莉花》的**墨迹盒高度**（行数 / 行高不动 ⇒ 尺寸类断言的阈值无需调整）',
+    h941(molyRaw) > 0 &&
+      Math.abs(h941(molyRaw) - h941(molyRaw.replace('# jps-config:{', molyInk3))) < 1e-9,
+    `${h941(molyRaw).toFixed(4)}pt vs 旧值 3 ${h941(molyRaw.replace('# jps-config:{', molyInk3)).toFixed(4)}pt`)
   for (const f of PG_DOCS) {
     const md = pgRead(f)
     const body = pgBodyOf(md)
@@ -22395,15 +22493,32 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
    * 否则显示不会两边对齐」—— 这条**纠正了 adj883"整行删掉 `# jps-config`"的做法**：
    * `align_min_bars` 决定**末行**会不会两端对齐（adj925 起：非末行恒撑满），删了就退回默认 4，
    * 而首页示例的茉莉花每行各自是一个 `Q:` 组（都是"单行曲部"= 末行）⇒ 那些 3 小节的行会按 4 判、不撑满。
-   * ⚠ 首页示例的值来自**真源** `public/samples/茉莉花.jps`（`KEEP_CONFIG_KEYS` 白名单保留）——
-   * 真源现在是用户手上**未提交**的 `3`，本轮**不碰**；文档可调示例那一份按 adj925 改成了 `2`（见上）。
+   * ⚠ 首页示例的值来自**真源** `public/samples/茉莉花.jps`（`KEEP_CONFIG_KEYS` 白名单保留）。
+   *
+   * ⚠ **adj941（用户 2026-10-13 决定）：这一条的口径反过来了 —— 按新真值改写，不是删掉、也没放宽**。
+   * 用户决定「示例谱里不再需要 `align_min_bars`」：`adj940` 之后「末行按小节序号对齐上一行」
+   * 已是**默认行为**（不读任何 `# jps-config` 键），该键只剩"末行撑不撑满"这一个作用、属"锦上添花"。
+   * 真源既然没有这个键，`simplifyJps` 的白名单（`KEEP_CONFIG_KEYS`，里面本来**只有这一个**键）
+   * 就挑不出任何东西 ⇒ **首页副本连配置行一起丢掉**（这是白名单机制的自然结果，
+   * **不是**"另外把首页示例的配置行删了"）。于是首页示例回到"默认配置就出正规的谱"（`AGENTS.md` 五·12）。
+   * 新判据（负对照仍在，没被弱化）：
+   *   ① 首页示例「茉莉花」的源码里**没有任何 `# jps-config` 行**、也不含这个键；
+   *   ② 负对照：把 `# jps-config:{"align_min_bars":3}` 塞回**字符串**（不碰文件）⇒ 同一条判据为假；
+   *   ③ 真源"**只**少了这一个键、其余键与值逐字保留"由上面 `adj941` 那组判据单独守着
+   *      （本条不再重复钉某个值，免得日后用户手改别的键时两条一起红）。
    */
   const molySample = BRAND_SAMPLES.find((s) => s.label.startsWith('茉莉花'))
-  check('adj892 首页示例「茉莉花」：保留了 `align_min_bars`（删了就不会两端对齐）',
-    molySample?.src.includes('"align_min_bars":3') === true,
-    molySample?.src.match(/# jps-config:.*/)?.[0] ?? '（没有配置行）')
-  check('adj892 保留的是**真源里的真值**（不是我们编的）：茉莉花.jps 原文含 "align_min_bars":3',
-    String(readFileSync(join(root, 'public', 'samples', '茉莉花.jps'), 'utf8')).includes('"align_min_bars":3'))
+  /** 判据：这份源码里**没有任何配置行**（`# jps-config:` 整行不在 + 该键也不在） */
+  const noConfigLine941 = (src: string): boolean =>
+    !/^\s*#\s*jps-config\s*:/m.test(src) && !/"align_min_bars"\s*:/.test(src)
+  /** 负对照塞回去的那一行（就是去掉该键**之前**首页副本保留的那一行） */
+  const MOLY_OLD_CFG_LINE_941 = '# jps-config:{"align_min_bars":3}'
+  check('adj892/adj941 首页示例「茉莉花」不再带 `# jps-config`（真源已去掉该键 ⇒ 白名单挑不出东西 ⇒ 整行丢掉）',
+    !!molySample && noConfigLine941(molySample.src),
+    molySample?.src.split('\n').filter((l) => l.includes('jps-config')).join(' / ') || '（没有配置行）')
+  check('adj892/adj941 负对照：把 `# jps-config:{"align_min_bars":3}` 塞回首页示例字符串 ⇒ 判据为假（不是恒真）',
+    !!molySample && !noConfigLine941(`${molySample.src}\n${MOLY_OLD_CFG_LINE_941}\n`) && noConfigLine941(molySample.src),
+    `塞回的那一行：${MOLY_OLD_CFG_LINE_941}`)
   /**
    * adj893（用户要求）：示例里的描述头 `S:` 去掉 ——
    * 两份原文都写着 `S: 本乐谱使用「爱记谱」编制`，放在示例谱面上是自述冗余。
