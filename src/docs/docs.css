@@ -273,7 +273,29 @@ html[data-site-mode='light'] .doc-body pre { box-shadow: 0 4px 16px var(--site-s
 
 /* ---------- 窄屏 ---------- */
 @media (max-width: 860px) {
-  .doc-layout { grid-template-columns: 1fr; gap: 18px; padding-top: 16px; }
+  /**
+   * adj911（**用户反馈**）：「在手机端，网站使用手册的脚本/预览块会变得很宽，这个应限制在窄屏的宽度上」。
+   *
+   * 现象（390×844 手机视口实测）：`/syntax/` 页面宽 **4347px**、里面的 ` ```jps ` 块 **4327px**，
+   * 横向溢出 3972px；`/manual/` 是 1822px / 1802px。
+   *
+   * 根因**不在** ` ```jps ` 组件（`help/jpsPreview.css`）：把 `.jps-block` 整块 `display:none`
+   * 页面宽度一个字都不变（4347 → 4347）—— 它是**受害者**，宽度只是 100% 跟随了被撑宽的列。
+   * 真正的源头就是下面这一行：桌面那行写的是 `minmax(0, 1fr)`（**下限 0**），
+   * 窄屏这行当初退成了裸 `1fr` = `minmax(auto, 1fr)` —— 自动下限 = **内容的 min-content**，
+   * 于是网格列被"最宽的内容"顶宽。顶它的是**表格**（`.doc-md-table` 的表头 `white-space: nowrap` 等）：
+   * 实测把表格整块 `display:none` 后 4347 → 878。列宽一旦变成 4327，里面的 ` ```jps ` 块自然跟着变宽。
+   *
+   * 改法：窄屏的列定义与桌面**同口径**，写回 `minmax(0, 1fr)`（表格仍照原设计自己横滚）。
+   * 另一条是残余：长串行内代码（`title`/`subtitle_i`/`author_i`/`tempo`/`notes_i` 这种用 `/`
+   * 串起来、中间没有空格的写法）本身没有断行机会，会顶出 100px 左右 ⇒ 一并在窄屏放开断行。
+   *
+   * 两条都**只在窄屏生效** ⇒ 宽屏外观零变化。守它们的是：
+   *   · `scripts/verify-site.mjs`：手机视口**实测**（页面不溢出 + 每个 ` ```jps ` 块 ≤ 视口宽，带负对照）；
+   *   · `scripts/smoke.mts`：源码级（这两条必须写在 860px 的媒体查询里，退回裸 `1fr` 就红灯）。
+   */
+  .doc-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; padding-top: 16px; }
+  .doc-body code { overflow-wrap: anywhere; }
   .toc-toggle { display: block; }
   .doc-switch { display: none; }
   /* 小屏一行塞不下这么多：首页链接收起来（logo 也能回首页），主题按钮靠右留在手上 */

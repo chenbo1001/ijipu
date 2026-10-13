@@ -725,6 +725,31 @@ async function main() {
       await c.send('Page.navigate', { url: `${origin}/plugin/` })
       await sleep(1200)
       await saveShot('plugin.png', await shoot('png', { captureBeyondViewport: true }))
+      /**
+       * adj911（用户反馈「手机端脚本/预览块会变得很宽」）：**手机视口**下的文档页整页图。
+       * 修前这张图长这样：页面宽 4347px、` ```jps ` 块 4327px，一屏只看得到左边一小条。
+       * 现在它是"窄屏下脚本/预览块被限制在视口内"的直观证据（顺手点开「预览」让谱面也在图里）。
+       */
+      await viewport(390, 844, 2)
+      await c.send('Page.navigate', { url: `${origin}/syntax/` })
+      await sleep(1400)
+      /**
+       * ⚠ 别用整页图（`captureBeyondViewport`）：390×844 @2x 的整页 PNG 有 **15MB**，
+       * 拿来看"块有没有被限制在视口内"也没法看。改成把第一个 ` ```jps ` 块滚到视口中间、
+       * 各拍一张 390×844 的**视口图**（脚本 / 预览各一张），体积小、一眼能看清。
+       */
+      await evalJs(
+        c,
+        `document.querySelector('#doc-body .jps-block')?.scrollIntoView({ block: 'center', behavior: 'instant' })`,
+      )
+      await sleep(400)
+      await saveShot('syntax-mobile-code.png', await shoot('png'))
+      await evalJs(
+        c,
+        `document.querySelector('#doc-body .jps-block [data-jps-tab="preview"]')?.click()`,
+      )
+      await sleep(1800)
+      await saveShot('syntax-mobile-preview.png', await shoot('png'))
     }
 
     // =====================================================================
@@ -1444,6 +1469,141 @@ async function main() {
         const narrowErrs = collectErrors(mark)
         check(`窄屏 ${label}：无控制台错误 / 无本站 4xx`, narrowErrs.length === 0, narrowErrs.slice(0, 3).join(' | '))
       }
+
+      /**
+       * ---------------- adj911（**用户反馈**）：手机端 ` ```jps ` 块被撑得很宽 ----------------
+       *
+       * 用户原话：「在手机端，网站使用手册的脚本/预览块会变得很宽，这个应限制在窄屏的宽度上」。
+       *
+       * 这条量的是**真实几何**（不看 CSS 里写了什么）。修前实测（390×844 手机视口，
+       * 与上面那组目录抽屉检查同一尺寸）：
+       *   `/syntax/`：页面宽 **4347px**、` ```jps ` 块 **4327px** —— 溢出视口 3972px ✗；
+       *   `/manual/`：1822px / 1802px。
+       *
+       * 根因**不在** ` ```jps ` 组件（`help/jpsPreview.css`）：把 `.jps-block` 整块 `display:none`
+       * 页面宽度一个字都不变（4347 → 4347）⇒ 它是**受害者**，宽度只是 100% 跟随了被撑宽的列。
+       * 源头在 `docs/docs.css` 的**窄屏列定义**（裸 `1fr` 的自动下限 = 内容 min-content），
+       * 详见那里 adj911 的注释。所以下面只断言**几何结果**，不锁 CSS 写法。
+       *
+       * 判据：
+       *  ① 页面无横向溢出：`documentElement.scrollWidth ≤ innerWidth + 1`；
+       *  ② 页面上**每一个** ` ```jps ` 块的宽度 ≤ 视口宽（取最大值判）；
+       *  ③ 「脚本」「预览」**两个标签都量** —— 预览标签会插入引擎渲染的 SVG，是另一条路径。
+       */
+      console.log('[verify-site] 验证窄屏（手机视口）下 ```jps 块不撑宽页面…')
+      await viewport(390, 844, 2)
+      /** 量当前页的溢出与所有 ` ```jps ` 块的宽度（`offenders` 只报**未被滚动容器裁掉**的那些） */
+      const measureNarrowJps = () =>
+        evalJs(
+          c,
+          `(() => {
+            const vw = window.innerWidth
+            const cw = document.documentElement.clientWidth
+            const blocks = [...document.querySelectorAll('#doc-body .jps-block')]
+            const widths = blocks.map((b) => Math.round(b.getBoundingClientRect().width))
+            const svgs = blocks.map((b) => Math.round(b.querySelector('.jps-block-preview svg')?.getBoundingClientRect().width ?? 0))
+            // 滚动容器（表格、代码块）内部超宽是**设计如此**（自己横滚），不算页面溢出
+            const clipped = (el) => {
+              for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+                if (getComputedStyle(p).overflowX !== 'visible') return true
+              }
+              return false
+            }
+            const over = []
+            for (const el of document.querySelectorAll('#doc-body *')) {
+              const r = el.getBoundingClientRect()
+              if (r.width > 0 && r.right > cw + 1 && !clipped(el)) {
+                over.push(el.tagName.toLowerCase() + '.' + String(el.className).slice(0, 24) + '@' + Math.round(r.right))
+              }
+            }
+            return {
+              vw, cw,
+              scrollW: document.documentElement.scrollWidth,
+              blocks: widths.length,
+              maxBlockW: widths.length ? Math.max(...widths) : null,
+              maxSvgW: svgs.length ? Math.max(...svgs) : null,
+              svgCount: blocks.filter((b) => b.querySelector('.jps-block-preview svg')).length,
+              overCount: over.length,
+              offenders: over.slice(0, 4),
+            }
+          })()`,
+        )
+      const narrowJpsFits = (m) => !!m && m.scrollW <= m.vw + 1 && m.maxBlockW !== null && m.maxBlockW <= m.vw + 1
+      for (const [label, url] of [['操作手册', '/manual/'], ['脚本语法说明', '/syntax/']]) {
+        mark = noteEvents()
+        await c.send('Page.navigate', { url: `${origin}${url}` })
+        await sleep(1600)
+        const codeTab = await measureNarrowJps()
+        check(`窄屏 ${label}：手机视口（390px）下**没有横向溢出**（判据 scrollWidth ≤ innerWidth + 1）`,
+          !!codeTab && codeTab.scrollW <= codeTab.vw + 1,
+          `scrollWidth=${codeTab?.scrollW} / 视口=${codeTab?.vw} / 客户端宽=${codeTab?.cw} / 未被裁掉的溢出元素 ${codeTab?.overCount} 个 ${JSON.stringify(codeTab?.offenders)}`)
+        check(`窄屏 ${label}：「脚本」标签下**每个** \`\`\`jps 块宽度 ≤ 视口宽（修前 /syntax/ 是 4327px）`,
+          !!codeTab && codeTab.blocks > 0 && codeTab.maxBlockW <= codeTab.vw + 1,
+          `共 ${codeTab?.blocks} 块，最宽 ${codeTab?.maxBlockW}px / 视口 ${codeTab?.vw}px`)
+        const previewClicked = await evalJs(
+          c,
+          `(() => {
+            const b = document.querySelector('#doc-body .jps-block [data-jps-tab="preview"]')
+            if (!b) return false
+            b.click()
+            return true
+          })()`,
+        )
+        let previewSvg = 0
+        for (let i = 0; i < 30 && previewSvg === 0; i++) {
+          await sleep(300)
+          previewSvg = await evalJs(c, `document.querySelectorAll('#doc-body .jps-block .jps-block-preview svg').length`)
+        }
+        const prevTab = await measureNarrowJps()
+        check(`窄屏 ${label}：点「预览」渲染出谱面后**仍然**不溢出（谱面 SVG 也 ≤ 视口宽）`,
+          previewClicked && previewSvg > 0 && narrowJpsFits(prevTab) && (prevTab?.maxSvgW ?? 0) <= (prevTab?.vw ?? 0) + 1,
+          `svg=${previewSvg} scrollWidth=${prevTab?.scrollW} / 视口=${prevTab?.vw} / 最宽块=${prevTab?.maxBlockW}px / 最宽谱面=${prevTab?.maxSvgW}px`)
+      }
+      /**
+       * 负对照（**必须为假**）：把守这件事的那两条规则"人为放开"（列退回裸 `1fr`、行内代码不折行），
+       * 同一判据必须重新变成假 —— 否则说明上面那几条是恒真的空断言。
+       */
+      const negRules = await evalJs(
+        c,
+        `(() => {
+          const found = []
+          const walk = (parent, inNarrow) => {
+            const list = parent.cssRules
+            if (!list) return
+            for (const r of list) {
+              /**
+               * ⚠ 断点写法要认**两种**：源码里写的是 max-width: 860px，
+               * 而构建时 esbuild 会把它压成 width<=860px —— 只认前者，这条在产物上就是**恒假**（本轮实测踩到）。
+               */
+              if (typeof r.conditionText === 'string') {
+                walk(r, inNarrow || /max-width:\\s*860px|width\\s*<=\\s*860px/.test(r.conditionText))
+                continue
+              }
+              if (inNarrow && r.selectorText && /^\\.doc-layout$|^\\.doc-body code$/.test(r.selectorText.trim())) found.push(r.selectorText)
+            }
+          }
+          for (const sheet of document.styleSheets) {
+            try { walk(sheet, false) } catch (e) {}
+          }
+          return found
+        })()`,
+      )
+      check('adj911 守这件事的两条规则确实躺在 **860px 的媒体查询**里（CSSOM 里查得到，没写到桌面规则上）',
+        Array.isArray(negRules) && negRules.length >= 2, JSON.stringify(negRules))
+      await evalJs(
+        c,
+        `(() => {
+          const s = document.createElement('style')
+          s.id = '__negJps'
+          s.textContent = '.doc-layout{grid-template-columns:1fr !important}#doc-body code{overflow-wrap:normal !important}'
+          document.head.append(s)
+        })()`,
+      )
+      await sleep(250)
+      const negMeasured = await measureNarrowJps()
+      await evalJs(c, `document.getElementById('__negJps')?.remove()`)
+      check('adj911 负对照：把那两条"放开"（列退回裸 `1fr` + 行内代码不折行）⇒ 同一判据为假（证明它真的在守）',
+        !narrowJpsFits(negMeasured), JSON.stringify(negMeasured))
       await viewport(1440, 900, 1)
 
       // ---------------- 负对照：确认"验证器真的在量东西" ----------------

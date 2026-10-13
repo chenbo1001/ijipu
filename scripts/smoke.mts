@@ -20442,6 +20442,37 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     check(`adj876 ${doc}：目录里没有混进代码块内的 \`#\` 注释行`,
       !realToc.some((t) => t.text.startsWith('注释行')), realToc.filter((t) => t.text.startsWith('注释行')).map((t) => t.text).join('；'))
   }
+
+  /**
+   * ---- adj911（**用户反馈**）：手机端 ` ```jps ` 块被撑得很宽 ----
+   *
+   * 守的是**根因那两行**，不是 ` ```jps ` 组件本身：实测把 `.jps-block` 整块 `display:none`，
+   * 页面宽度一个字都不变（4347 → 4347）⇒ 组件是**受害者**，宽度只是 100% 跟随了被撑宽的列。
+   * 真凶是窄屏列定义退成了裸 `1fr`（自动下限 = 内容 min-content，被表格顶宽，实测 4327px）。
+   * 手机视口的**实测**数字与判定归 `scripts/verify-site.mjs` 的同名断言（同样的负对照也在那边）。
+   *
+   * 为什么源码级还要再守一遍：这类"少写一个 `0`"的改动**在桌面上完全看不出来**
+   * （桌面的列本来就是 `minmax(0, 1fr)`、有 `0` 下限），而 `npm run smoke` 不跑浏览器
+   * ⇒ 至少把"这俩还在不在 860px 的媒体查询里"钉住，别等用户拿手机来报。
+   */
+  const docsCss = readSrc('src/docs/docs.css')
+  /** 窄屏（860px）那一段里，"列有 0 下限" + "行内代码可断行" 是否都在 */
+  const narrowDocsOk = (src: string) => {
+    const block = /@media \(max-width: 860px\) \{[\s\S]*?\n\}/.exec(src)?.[0] ?? ''
+    return (
+      /\.doc-layout \{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/.test(block) &&
+      /\.doc-body code \{[^}]*overflow-wrap:\s*anywhere;/.test(block)
+    )
+  }
+  check('adj911 窄屏（860px）列定义是 `minmax(0, 1fr)` 且行内代码放开断行（裸 `1fr` 的自动下限会被表格 min-content 顶宽页面）',
+    narrowDocsOk(docsCss),
+    (docsCss.match(/@media \(max-width: 860px\) \{[\s\S]*?\n\}/)?.[0] ?? '(找不到窄屏媒体查询)').slice(0, 110).replace(/\n/g, '⏎'))
+  // 负对照：判据必须真的在量这两条 —— 各自被改回去时都得判红（且先确认改动真的落到了文本上）
+  const revertedCol = docsCss.replace(/grid-template-columns:\s*minmax\(0,\s*1fr\);/, 'grid-template-columns: 1fr;')
+  const revertedWrap = docsCss.replace(/overflow-wrap:\s*anywhere;/, 'overflow-wrap: normal;')
+  check('adj911 负对照：列改回裸 `1fr` ⇒ 判据为假；断行那条去掉 ⇒ 也为假（证明它真的在量这两条，而不是"文件里随便有没有"）',
+    revertedCol !== docsCss && !narrowDocsOk(revertedCol) &&
+      revertedWrap !== docsCss && !narrowDocsOk(revertedWrap))
 }
 
 /**
