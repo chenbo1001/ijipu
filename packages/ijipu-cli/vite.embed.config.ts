@@ -12,9 +12,10 @@
  *      QuickJS 的语法档位）**、**是否压缩（压，进 exe 的体积要省）** 三条都与 Node 版不同。
  *
  * 用法（项目根）：`npm run cli:embed`
- * ⚠ 顺序：本配置 `emptyOutDir: false` —— 反过来 `cli:build`（`emptyOutDir: true`）会清目录，
- *   所以**先 `cli:build` 再 `cli:embed`**（`npm run smoke` 与 `tauri.conf.json` 的
- *   `beforeBuildCommand` 都按这个顺序串好了 ✓）。
+ * ⚠ 顺序：本配置 `emptyOutDir: false` —— 反过来 `cli:build`（`emptyOutDir: true`）会清目录。
+ *   实测踩过：先 `tauri build`（只出内嵌产物）再单独跑 `npm run cli:build` ⇒ **内嵌产物被清掉**、
+ *   `check:installer` 当场红灯 ✓（闸门有用，但没必要让人踩）⇒ 现在 **`cli:build` 末尾自己串了
+ *   `npm run cli:embed`**，两件产物**总是同时存在** ✓。
  */
 import { defineConfig } from 'vite'
 import { fileURLToPath, URL } from 'node:url'

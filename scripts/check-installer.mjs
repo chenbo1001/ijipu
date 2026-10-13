@@ -136,8 +136,20 @@ console.log('[check-installer] 内嵌 CLI（adj942：命令行编进 exe）自�
     [`exe 里带着宿主接口（找得到 __ijipuHost）`, contains(RELEASE_EXE, '__ijipuHost')],
     [`exe 不比内嵌产物旧（打包前重生成过产物）`, fresh],
     ['负对照①：同一个搜索找"一定不存在"的标志必须为假', !contains(RELEASE_EXE, '__ijipuCliMain_NEVER_EXISTS__')],
-    ['负对照②：Node 版产物（dist/ijipu.cjs）里**不该**有这个标志（两种产物分得开）', contains(NODE_BUNDLE, '#!') && !contains(NODE_BUNDLE, '__ijipuCliMain')],
   ]
+  /**
+   * ⚠ 负对照②依赖 **Node 版产物**（`dist/ijipu.cjs`），而它**只有 `npm run cli:build` 才产出**——
+   * `tauri build` 只跑 `cli:embed`（内嵌版）⇒ **干净克隆直接打包时它并不存在**（实测踩到：
+   * 这条把"全部通过"判成了 ✗）。所以：**有才做这条**，没有就如实说明"跳过"（不当成通过 ✓ 也不误判 ✗）。
+   */
+  if (existsSync(NODE_BUNDLE)) {
+    checks.push([
+      '负对照②：Node 版产物（dist/ijipu.cjs）里**不该**有这个标志（两种产物分得开）',
+      contains(NODE_BUNDLE, '#!') && !contains(NODE_BUNDLE, '__ijipuCliMain'),
+    ])
+  } else {
+    console.log('  · 负对照②**跳过**：没有 dist/ijipu.cjs（`tauri build` 不产它；跑过 `npm run cli:build`/`smoke` 才有）')
+  }
   for (const [label, ok] of checks) {
     console.log(`  ${ok ? '✓' : '✗'} ${label}`)
     if (!ok) failed++

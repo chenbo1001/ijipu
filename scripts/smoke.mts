@@ -23749,6 +23749,22 @@ function runAdj942EmbedCliTests() {
     'adj942 负对照⑦：把 build 里的 `npm run cli:embed` 去掉 ⇒ 判据为假',
     !chainOk(buildScript.replace('npm run cli:embed', ''), beforeBuild) && chainOk(buildScript, beforeBuild),
   )
+  /**
+   * **踩过的坑（实测）**：`cli:build` 的 `emptyOutDir: true` 会**清掉** `dist/ijipu-embed.js`
+   * ⇒ "先 `tauri build` 再单独跑 `npm run cli:build`" 会把内嵌产物删掉（`check:installer` 当场红灯）。
+   * 所以 `cli:build` 末尾**必须自己串** `cli:embed`：两件产物总是同时存在 ✓。
+   */
+  const cliBuildScript = pkgJson.scripts['cli:build'] ?? ''
+  const cliBuildKeepsEmbed = (src: string): boolean => /cli:embed/.test(src)
+  check(
+    'adj942 `npm run cli:build` 末尾串了 `cli:embed`（它的 `emptyOutDir: true` 会清掉内嵌产物 ⇒ 必须自己补回来）',
+    cliBuildKeepsEmbed(cliBuildScript),
+    cliBuildScript,
+  )
+  check(
+    'adj942 负对照⑩：把 `cli:build` 里的 `cli:embed` 去掉（= 会清掉内嵌产物的旧写法）⇒ 判据为假',
+    !cliBuildKeepsEmbed(cliBuildScript.replace('npm run cli:embed', '')) && cliBuildKeepsEmbed(cliBuildScript),
+  )
 
   // ---- ⑦ 产物本身：已构建、无 `node:*`/`require(`、注入了真实版本 ----
   const EMBED = 'packages/ijipu-cli/dist/ijipu-embed.js'
