@@ -66,6 +66,64 @@ function check(name, ok, detail = '') {
   console.log(`  ${ok ? '✓' : '✗'} ${name}${ok ? '' : `  ← ${detail}`}`)
 }
 
+// ---------------------------------------------------------------------------
+// adj912：文档里「字面反引号」的判据
+//
+// 由来（用户实测）：文档要"在句子中间显示字面的三个反引号"时只能用**转义写法**
+// （`docs/PLUGIN-GUIDE.md` 4 处 / `docs/SYNTAX.md` 2 处，源码里就是「反斜杠 + 反引号」）。
+// Obsidian 认这个转义，而站点渲染器**原来不认** ⇒ 网页上把反斜杠原样显示出来、后面还跟着一个代码片。
+//
+// 判据写成**纯函数**：负对照可以直接把"修之前的渲染结果"（＝文档原文那一行）喂进来，
+// 证明判据真的在量东西，而不是形同虚设。
+//
+// ⚠ 三个反引号用 charCode 拼：本文件里注入页面的 JS 片段是**模板字符串**，
+//   模板字符串里（**注释里也不行**）出现反引号会提前终止字符串（E-2026-393/396）。
+// ---------------------------------------------------------------------------
+const TICK = String.fromCharCode(96)
+const TICKS3 = TICK.repeat(3)
+/** 「反斜杠 + 反引号」——渲染器没做转义处理时，页面正文里就是它 */
+const BSLASH_TICK = '\\' + TICK
+
+/** 判据①：正文文本里有**字面**的 ```jps，且没有「反斜杠 + 反引号」残留 */
+function hasLiteralFenceJps(text) {
+  if (typeof text !== 'string') return false
+  return text.includes(TICKS3 + 'jps') && !text.includes(BSLASH_TICK)
+}
+
+/** 判据②：页面上有**行内**代码片（`<code>` 且不在 `<pre>` 里）、文本逐字是 `.jps` */
+function hasInlineCodeJps(codes) {
+  return Array.isArray(codes) && codes.some((c) => !c.inPre && c.text === '.jps')
+}
+
+/** 判据②的**放宽版**（只给负对照用）：只要有 `<code>` 就算 */
+function hasAnyCode(codes) {
+  return Array.isArray(codes) && codes.length > 0
+}
+
+/** 红灯时说明"到底坏在哪"：给出残留位置，或"整页都没有字面围栏" */
+function fenceDetail(text) {
+  const s = typeof text === 'string' ? text : ''
+  const i = s.indexOf(BSLASH_TICK)
+  if (i >= 0) return `残留「反斜杠+反引号」@${i}：…${s.slice(Math.max(0, i - 24), i + 24)}…`
+  return `没有字面的 ${TICKS3}jps`
+}
+
+/**
+ * 负对照用的样本：**文档原文**里含「反斜杠 + 反引号」的那几行。
+ * 它们就是"渲染器不做转义处理"时页面正文里会出现的文本
+ * （`esc()` 只动 `& < >`，反斜杠原样输出）⇒ 判据①必须为**假**。
+ */
+function rawEscapedLines(relPath) {
+  return readFileSync(path.join(ROOT, relPath), 'utf8')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.includes(BSLASH_TICK))
+}
+const RAW_ESCAPED_LINES = {
+  '/plugin/': rawEscapedLines('docs/PLUGIN-GUIDE.md'),
+  '/syntax/': rawEscapedLines('docs/SYNTAX.md'),
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // ---------------------------------------------------------------------------
@@ -1255,6 +1313,97 @@ async function main() {
         }
         check(`${label}：代码块渲染成 <pre>`, doc.codes > 0, String(doc.codes))
         if (needTable) check(`${label}：表格渲染成真 <table>`, doc.tables > 0, String(doc.tables))
+
+        /**
+         * ---- adj912（用户实测）：文档里的**反引号转义**必须被渲染器还原 ----
+         *
+         * 现象：文档里"句子中间显示字面三个反引号"的地方改用了**转义写法**（源码里是
+         * 「反斜杠 + 反引号」）—— Obsidian 里正常显示成字面围栏，
+         * **网页这边却把反斜杠原样显示出来**、后面再跟一个代码片。
+         * 根因是站点渲染器的行内解析没处理反引号转义（应用内帮助与站点共用同一个渲染器，
+         * 所以这一修两处都跟着好）。
+         *
+         * 判据（只对真有这种写法的两页断言：`/plugin/` 4 处、`/syntax/` 2 处；`/manual/` 没有）：
+         *   ① 正文里出现**字面**的三个反引号 + jps；
+         *   ② 正文里**不得**残留「反斜杠 + 反引号」；
+         *   ③ 回归：普通行内代码（`.jps`）仍要渲染成 `<code>`（转义逻辑不许误伤行内代码）。
+         * 三条都配负对照，证明判据不是形同虚设。
+         */
+        if (url === '/plugin/' || url === '/syntax/') {
+          const docText = await evalJs(
+            c,
+            `(() => {
+              const body = document.getElementById('doc-body')
+              const codes = [...document.querySelectorAll('#doc-body code')].map((el) => ({
+                text: (el.textContent || '').trim(),
+                inPre: !!el.closest('pre'),
+              }))
+              /* 正文块：段落 / 列表项 / 表格单元格 / 引用 —— 示例块里的 .jps 源码不算"正文文本" */
+              const blocks = [...document.querySelectorAll('#doc-body p, #doc-body li, #doc-body td, #doc-body th, #doc-body blockquote')]
+              return {
+                body: body ? body.textContent : '',
+                blocks: blocks.map((el) => el.textContent).join('\\n'),
+                codes,
+              }
+            })()`,
+          )
+          check(
+            label + '：正文里出现**字面**的 ' + TICKS3 + 'jps（转义写法被渲染器还原；用户报的就是这条）',
+            hasLiteralFenceJps(docText?.body),
+            fenceDetail(docText?.body),
+          )
+          check(
+            label + '：正文里没有「反斜杠 + 反引号」残留（正文块文本，避开示例块里的源码）',
+            !(docText?.blocks ?? '').includes(BSLASH_TICK),
+            fenceDetail(docText?.blocks),
+          )
+          check(
+            label + '：回归 —— 普通行内代码 .jps 仍渲染成 <code>（没被转义逻辑吃掉）',
+            hasInlineCodeJps(docText?.codes),
+            JSON.stringify((docText?.codes ?? []).slice(0, 5)),
+          )
+          /**
+           * 负对照 ①：**在断言里模拟"渲染器没做转义处理"**（不动实现文件）——
+           * 把文档原文里含「反斜杠 + 反引号」的那几行喂给同一条判据；那正是修之前页面上的文本。
+           */
+          const negLines = RAW_ESCAPED_LINES[url] ?? []
+          check(
+            label + '：负对照 —— 去掉转义处理（文档原文 ＝ 修前页面文本）时判据①为假',
+            negLines.length > 0 && negLines.every((l) => !hasLiteralFenceJps(l)),
+            `${negLines.length} 行样本：${(negLines[0] ?? '').slice(0, 40)}…`,
+          )
+          /**
+           * 负对照 ②：判据③若**放宽成"任何 <code> 都算"**，在"只有代码块（pre > code）"的样本上
+           * 照样为真 ⇒ 它量不出"行内代码有没有被吃掉"（同一份样本上严格版为假 ⇒ 严格版能红）。
+           */
+          const preOnly = [{ text: 'V: 1.0', inPre: true }, { text: 'C: 1 2 3', inPre: true }]
+          check(
+            label + '：负对照 —— 判据③放宽成「任何 <code> 都算」在"只有代码块"样本上仍为真（故不许放宽）',
+            hasInlineCodeJps(preOnly) === false && hasAnyCode(preOnly) === true,
+            JSON.stringify(preOnly),
+          )
+          /**
+           * 人工看图用：把"句子中间那段字面围栏"滚到视口中间，拍一张 1440×900 的桌面图
+           * （整页图 `plugin.png` / `syntax.png` 太长，这一句在图上很难找）。
+           */
+          if (DO_SHOTS) {
+            const shotName = url === '/plugin/' ? 'plugin-escape.png' : 'syntax-escape.png'
+            const found = await evalJs(
+              c,
+              `(() => {
+                const hit = [...document.querySelectorAll('#doc-body p, #doc-body li, #doc-body td, #doc-body th, #doc-body blockquote')]
+                  .find((el) => (el.textContent || '').includes(String.fromCharCode(96).repeat(3) + 'jps'))
+                if (!hit) return false
+                hit.scrollIntoView({ block: 'center', behavior: 'instant' })
+                return true
+              })()`,
+            )
+            if (found) {
+              await sleep(350)
+              await saveShot(shotName, await shoot('png'))
+            }
+          }
+        }
 
         /**
          * 真点一下目录（第 3 条）：断言 hash 变了、页面滚动了、且目标标题就落在视口上方附近。

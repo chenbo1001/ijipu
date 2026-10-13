@@ -12,7 +12,8 @@
  *   · 官网 `/manual/` `/syntax/`              → `docs/main.ts`
  * 另一层原因：oxlint 的 `react/only-export-components` 不允许组件文件导出非组件函数。
  *
- * 支持：标题 `#` / 多级列表 / 代码块围栏 / **表格** / **引用块** / 行内 `` `code` ``、**粗体**、*斜体*、[链接](url)。
+ * 支持：标题 `#` / 多级列表 / 代码块围栏 / **表格** / **引用块** / 行内 `` `code` ``、**粗体**、*斜体*、[链接](url)
+ *      / **反引号转义**（`\`` ⇒ 字面反引号、`\\` ⇒ 字面反斜杠，adj912；只有这两种，别的反斜杠原样保留）。
  *
  * adj876 新增：标题补稳定 `id`（文档页左侧目录的锚点要用）+ 导出 `extractToc()`。
  * ⚠ **标题的 id 与目录的链接必须由同一套函数产出**（`createHeadingIds()` + `isHeading()`）——
@@ -140,14 +141,72 @@ function jpsBlockHtml(src: string, p: JpsBlockParams): string {
   )
 }
 
-/** 行内 Markdown：`code`、**bold**、*italic*、[text](url)。普通文本 HTML 转义，语法片段包裹标签。 */
+/**
+ * adj912（**用户实测**）：**反引号转义**的两个占位符。
+ *
+ * 文档里要"在**句子中间**显示字面的三个反引号"（例如「笔记里写一个 \`\`\`jps 代码块」），
+ * 只能用转义写法写：源码里是「反斜杠 + 反引号」（`docs/PLUGIN-GUIDE.md` 4 处 / `docs/SYNTAX.md` 2 处）。
+ * Obsidian 自己的渲染器认这个转义，**本渲染器原来不认** ⇒ 网页上把反斜杠原样显示出来、
+ * 后面再跟一个代码片（同一个写法在 Obsidian 里正常、在官网文档页里不对）。
+ *
+ * 做法（保守，**只碰这两种序列**）：
+ *   ① 先把 `\`` 与 `\\` 换成下面两个**私有区占位符**（正文里不可能出现），
+ *      这样它们不会参与"反引号配对成行内代码"的匹配（否则会和行内代码逻辑打架）；
+ *   ② 行内代码 / 粗体 / 斜体 / 链接都处理完、HTML 转义也做完之后，再把占位符还原成字面字符。
+ *
+ * ⚠ **只认这两种**：`\n`、`\d`、`C:\path` 这类**真实文本**里的反斜杠必须原样保留 ——
+ *   本渲染器不是完整 Markdown（没有通用转义表），把反斜杠一律当转义符会吃掉别人的正文。
+ * ⚠ 已知代价：占位是做在"配对行内代码"**之前**的（这正是为了不与反引号配对打架，见下），
+ *   于是**行内代码片内部**的 `\`` 与 `\\` 也会被折叠 —— 而 CommonMark 里代码片内容是字面量。
+ *   三份站点文档（USER-GUIDE / SYNTAX / PLUGIN-GUIDE）里**没有**这种写法（已逐份 grep 核对），
+ *   真要写"代码里的反斜杠反引号"时用更长的反引号串包起来即可。
+ * ⚠ 不用后行断言（lookbehind）：本模块会被打包进 Obsidian 插件（含 iOS 16.4 之前），
+ *   审核规则明令禁止（见 `mdToHtml` 里 adj772 那段说明）。
+ */
+const ESCAPED_TICK = '\uE000'
+const ESCAPED_BSLASH = '\uE001'
+
+/**
+ * 把 `\`` 与 `\\` 换成占位符。
+ * **单趟从左到右扫描**（不用 lookbehind）⇒ 与 Markdown 的转义语义一致：
+ * 例如 `\\\``（两个反斜杠 + 一个反引号）⇒ 「字面反斜杠 + 字面反引号」。
+ */
+function hideInlineEscapes(raw: string): string {
+  let out = ''
+  for (let i = 0; i < raw.length; i++) {
+    const next = raw[i + 1]
+    if (raw[i] === '\\' && next === '`') {
+      out += ESCAPED_TICK
+      i++
+    } else if (raw[i] === '\\' && next === '\\') {
+      out += ESCAPED_BSLASH
+      i++
+    } else {
+      out += raw[i]
+    }
+  }
+  return out
+}
+
+/** 占位符还原成字面字符。⚠ 必须在 HTML 转义**之后**做（反引号与反斜杠都不需要转义） */
+function showInlineEscapes(html: string): string {
+  return html.split(ESCAPED_TICK).join('`').split(ESCAPED_BSLASH).join('\\')
+}
+
+/**
+ * 行内 Markdown：`code`、**bold**、*italic*、[text](url)。普通文本 HTML 转义，语法片段包裹标签。
+ *
+ * adj912：进来先 `hideInlineEscapes()`（`\`` / `\\` 占位）、出去再 `showInlineEscapes()` 还原 ——
+ * 于是"句子中间的字面反引号"与"行内代码配对"两件事互不干扰。
+ */
 export function inlineMd(raw: string): string {
+  const src = hideInlineEscapes(raw)
   const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[[^\]]+\]\([^)]+\))/g
   let out = ''
   let last = 0
   let m: RegExpExecArray | null
-  while ((m = re.exec(raw))) {
-    out += esc(raw.slice(last, m.index))
+  while ((m = re.exec(src))) {
+    out += esc(src.slice(last, m.index))
     const tok = m[0]
     if (tok[0] === '`') {
       out += `<code>${esc(tok.slice(1, -1))}</code>`
@@ -163,8 +222,8 @@ export function inlineMd(raw: string): string {
     }
     last = re.lastIndex
   }
-  out += esc(raw.slice(last))
-  return out
+  out += esc(src.slice(last))
+  return showInlineEscapes(out)
 }
 
 /**
