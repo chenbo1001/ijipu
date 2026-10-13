@@ -64,12 +64,12 @@ import {
 } from '@ijipu/engine/playback/ornaments.ts'
 import { slideOf, slidePlan, slideStepMs, SLIDE_SYMBOLS, SLIDE_STEP_MIN_MS, SLIDE_STEP_MAX_MS } from '@ijipu/engine/playback/slides.ts'
 import { midiToPitchName } from '@ijipu/engine/playback/midi.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_SAG_MIN, SLUR_SAG_MAX, VOLTA_INK_GAP, digitBottomY, digitInkW, digitTopY, slurSagOf, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap, tyBaselineY, HS_FONT_SIZE } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_APEX_H, SLUR_SAG, slurApexY, VOLTA_INK_GAP, digitBottomY, digitInkW, digitTopY, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap, tyBaselineY, HS_FONT_SIZE } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
 import { markReserveRatio, MARK_INK_H_RATIO } from '@ijipu/engine/layout/spacing.ts'
-import type { BarlineType } from '@ijipu/engine/types.ts'
+import type { BarlineType, ScorePage } from '@ijipu/engine/types.ts'
 import { computeBeamsForTest } from '@ijipu/engine/render/index.ts'
 // adj652：谱面文本里的 URL → 链接（纯函数 + 渲染产物）
 import { findUrls, linkifyText } from '@ijipu/engine/render/index.ts'
@@ -2382,12 +2382,20 @@ check(
   `R=${slurArcR('r', 5)}`,
 )
 /**
- * adj649（用户反馈多声部拍内 `(5 5/)` / `(7 7/)` 的连音线"跑偏"）：**圆弧垂度随跨度自适应**。
+ * adj649（用户反馈多声部拍内 `(5 5/)` / `(7 7/)` 的连音线"跑偏"）：**圆弧垂度随跨度自适应** —— ⚠️ **本条已被 adj929 取代**（弧顶高度改为**常量**）。
  *
  * 原为固定 9px：两音符连音线的跨度只有 8~25px（多声部拍内相邻音符，adj648 起随拍宽摊开），
  * 弧高≈跨度 ⇒ 立成半圆、两端很陡，看着像悬在两个音符之间而不是连着它们。
- * 新口径 `垂度 = clamp(跨度 × 0.28, 2.5, 9)`：跨度 ≥ 32px 时仍是原来的 9px（长连音线一字不变），
- * 常见的 18~22px 跨度 ⇒ 5~6.2px（浅弧、两端贴住数字）。
+ * 旧口径 `垂度 = clamp(跨度 × 0.28, 2.5, 9)`：跨度 ≥ 32px 时仍是 9px，常见 18~22px 跨度 ⇒ 5~6.2px。
+ *
+ * ⚠ **adj929（用户 2026-10 新口径）已取代本条的"随跨度自适应"**：
+ * 「弧线的连音线的曲度不管长短，曲度是不是一样的？对于短的连音线，会导致弧顶不够高，感觉很塌，
+ * 不美观，可以考虑一弧线形的连音线的弧顶高度一样，这样就是会导致长连音的曲度小、短连音的曲度大，
+ * 这是必然的，可以接受」。⇒ **弧顶高度改为常量 `SLUR_APEX_H`**（`E-2026-337` 的顾虑由用户自己拍板接受）。
+ *
+ * 判据（**只看渲染出来的控制点**，不另算一份公式）：`M x1 y Q midX ctrlY x2 y` 的
+ * 顶点 `B(0.5) = 弦/2 + ctrlY/2` ⇒ `弧顶高度 = (y − ctrlY)/2`，对**任意跨度**都必须等于
+ * `SLUR_APEX_H`（±0.01）。负对照：把旧公式的弧顶喂进同一个判据 ⇒ 判假。
  */
 {
   const arcCtrlY = (span: number): number => {
@@ -2398,23 +2406,49 @@ check(
     const m = /Q [\d.]+ ([\d.]+)/.exec(d)
     return m ? Number(m[1]) : NaN
   }
-  const sagOf = (span: number): number => 142.2 - arcCtrlY(span)
+  /** 判据：**弧顶高度**（弦 → 顶点）——正负对照共用同一个函数（不许各写一套） */
+  const apexOfSpan = (span: number): number => 142.2 - (142.2 + arcCtrlY(span)) / 2
+  /** 旧口径（`垂度 = clamp(跨度 × 0.28, 2.5, 9)` ⇒ 弧顶 = 垂度/2）——只作**负对照** */
+  const legacyApexOfSpan = (span: number): number => Math.max(2.5, Math.min(9, span * 0.28)) / 2
+  const SPANS929 = [5, 12, 20, 32, 60, 151]
+  const apexes929 = SPANS929.map(apexOfSpan)
+  const legacyApexes929 = SPANS929.map(legacyApexOfSpan)
+  const spreadOf = (a: number[]): number => Math.max(...a) - Math.min(...a)
   check(
-    'adj649 圆弧垂度随跨度自适应（≥32px 仍是老口径 9px；常见 20px ⇒ 5.6px；极窄下限 2.5px）',
-    Math.abs(sagOf(60) - 9) < 1e-6 &&
-      Math.abs(sagOf(32) - 8.96) < 0.02 &&
-      Math.abs(sagOf(20) - 5.6) < 1e-6 &&
-      Math.abs(sagOf(12) - 3.36) < 1e-6 &&
-      Math.abs(sagOf(5) - 2.5) < 1e-6,
-    [60, 32, 20, 12, 5].map((s) => `跨度${s}→垂度${sagOf(s).toFixed(2)}`).join(' '),
+    'adj929 弧顶高度 = 常量（跨度 5/12/20/32/60/151 全部等于 `SLUR_APEX_H`，极差 ≤ 1px）',
+    apexes929.every((a) => a === SLUR_APEX_H) && spreadOf(apexes929) <= 1,
+    `${SPANS929.map((s, i) => `跨度${s}→弧顶${apexes929[i].toFixed(2)}`).join(' ')} 极差=${spreadOf(apexes929).toFixed(2)}`,
   )
-  // 两端仍落在同一条基线上（y 不变），只有顶点高度随跨度变
+  /**
+   * 负对照：旧公式在同一判据下**必须判假**（弧顶 1.25→4.50，极差 3.25 > 1）。
+   * 若这条也成立，说明上面的断言根本没有在判"与跨度无关"。
+   */
   check(
-    'adj649 只改顶点高度：两端 y 不变（弧线仍从两个音符上方起落）',
+    'adj929 负对照：旧口径（垂度随跨度）在同一判据下**判假**',
+    spreadOf(legacyApexes929) > 1 && legacyApexes929.some((a) => a !== SLUR_APEX_H),
+    `${SPANS929.map((s, i) => `跨度${s}→弧顶${legacyApexes929[i].toFixed(2)}`).join(' ')} 极差=${spreadOf(legacyApexes929).toFixed(2)}`,
+  )
+  /** 短弧不再塌：跨度 5px（比多声部拍内 `(5 5/)` 的 6.6px 还短）也必须拱到常量高度 */
+  check(
+    'adj929 短弧不再塌：跨度 5px 的弧顶 = `SLUR_APEX_H`（旧口径只有 1.25px，差 > 1px）',
+    apexOfSpan(5) === SLUR_APEX_H && legacyApexOfSpan(5) < SLUR_APEX_H - 1,
+    `新=${apexOfSpan(5).toFixed(2)} 旧=${legacyApexOfSpan(5).toFixed(2)} 常量=${SLUR_APEX_H}`,
+  )
+  // 两端仍落在同一条基线上（y 不变），只有顶点高度是常量
+  check(
+    'adj929 只改顶点高度：两端 y 不变（弧线仍从两个音符上方起落）',
     /^<path d="M 100 142\.2 Q [\d.]+ [\d.]+ 110 142\.2"/.test(
       renderSlurForTest({ x1: 100, x2: 110, y: 142.2, depth: 0, style: 'arc', half: undefined, tupletCount: undefined }, 18),
     ),
     '',
+  )
+  /** 一处口径：渲染控制点偏移 = `SLUR_SAG` = 2×弧顶高，且**不随跨度变**（段层纵向预留消费同一常量） */
+  check(
+    'adj929 一处口径：`SLUR_SAG = 2 × SLUR_APEX_H`（渲染控制点与段层纵向预留同源）',
+    SLUR_SAG === SLUR_APEX_H * 2 &&
+      Math.abs(142.2 - arcCtrlY(60) - SLUR_SAG) < 1e-6 &&
+      Math.abs(142.2 - arcCtrlY(12) - SLUR_SAG) < 1e-6,
+    `SAG=${SLUR_SAG} 跨度60控制点=${(142.2 - arcCtrlY(60)).toFixed(2)} 跨度12控制点=${(142.2 - arcCtrlY(12)).toFixed(2)}`,
   )
 }
 // adj180：&hx 呼吸记号不加粗（stroke 0.8）、横向宽度 80%（半宽 2.8×s）
@@ -9759,7 +9793,9 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
     /**
      * V7（adj699，用户口径「跳房子线与连音线的顶端、高八度点等其它修饰符的**墨迹顶端**间距 2px 为宜」）：
      * `voltaYTop` = 该行最高墨迹顶（段层数字顶 / 高八度点顶 / 段层连音线**实际弧顶**取最上者）− `VOLTA_INK_GAP`(2)。
-     * 弧顶用渲染端同一公式 `clamp(跨度 × 0.28, SLUR_SAG_MIN, SLUR_SAG_MAX)`，不再用垂度上限估。
+     *
+     * adj929：弧顶 = `slurApexY(y)`（弦 − **常量** `SLUR_APEX_H`，与渲染端同源）——
+     * 旧写法 `sl.y − 垂度` 把**控制点偏移**当成了弧顶（多算一倍，实测多抬 4.5px），已纠正。
      */
     {
       const upNotes = pg.notes.filter((n) => n.segment?.layer === 'upper')
@@ -9769,9 +9805,23 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
       for (const sl of pg.slurs) {
         if (sl.layerBase === undefined || sl.below) continue
         if (Math.abs(sl.layerBase - upperBase) > 1) continue
-        const sag = Math.max(SLUR_SAG_MIN, Math.min(SLUR_SAG_MAX, Math.abs(sl.x2 - sl.x1) * 0.28))
-        minTop = Math.min(minTop, sl.y - sag)
+        minTop = Math.min(minTop, slurApexY(sl.y))
       }
+      /** ③↔④ 的净空（判据按墨迹：弧顶到跳房子线）——必须 ≥ `VOLTA_INK_GAP`，且**与跨度无关** */
+      const gaps1 = pg.slurs
+        .filter((sl) => sl.layerBase !== undefined && !sl.below && Math.abs(sl.layerBase - upperBase) <= 1)
+        .map((sl) => slurApexY(sl.y) - (voltaBars[0]?.voltaYTop ?? Number.NaN))
+      check(
+        'adj929 ③↔④ 净空：段层连音线**弧顶**到跳房子线 ≥ `VOLTA_INK_GAP`(2px)，且各跨度同值（同一常量弧顶）',
+        gaps1.length >= 2 && gaps1.every((g) => g >= VOLTA_INK_GAP - 0.01) && Math.max(...gaps1) - Math.min(...gaps1) <= 0.11,
+        `弧顶−跳房子线=[${gaps1.map((g) => g.toFixed(2)).join(',')}]`,
+      )
+      /** 负对照：把弧顶当成"弦 − 垂度"（旧写法，多算 `SLUR_APEX_H`）⇒ 上面那条判据判假 */
+      check(
+        'adj929 负对照：用旧写法（弦 − 垂度）当弧顶 ⇒ 同一判据**判假**（净空虚高 4.5px）',
+        gaps1.length > 0 && gaps1.some((g) => Math.abs(g + SLUR_APEX_H - VOLTA_INK_GAP) > 0.5),
+        `旧写法净空=[${gaps1.map((g) => (g + SLUR_APEX_H).toFixed(2)).join(',')}] 期望 2px`,
+      )
       check('V7 adj699 跳房子线 = 该行最高墨迹顶 − `VOLTA_INK_GAP`(2px)（连音线按实际弧顶算）',
         voltaBars.length > 0 && Number.isFinite(minTop) && voltaBars.every((b) => Math.abs((b.voltaYTop ?? Number.NaN) - (minTop - VOLTA_INK_GAP)) < 0.6),
         `voltaY=${voltaBars[0]?.voltaYTop} minTop=${minTop.toFixed(2)} want=${(minTop - VOLTA_INK_GAP).toFixed(2)}`)
@@ -9835,17 +9885,17 @@ console.log('[adj667] dsb brace vs neighbours / volta lift / slur band')
     /**
      * S4（**本轮的核心口径**）：连音线的**弧顶**不能被上层声部的墨迹（减时线层底 / 低八度点）
      * 压到——这是"层间距自动撑开"要保证的事。
+     *
+     * adj929：弧顶口径 = `slurApexY(y)`（弦 − **常量** `SLUR_APEX_H`），与渲染端同源
+     * （旧写法 `弦 − 垂度` 多算一倍，属"两端口径各算一套"）。
      */
     check('adj723q（原 S4）段内连音线**弧顶在段层音符墨迹之上**（不与数字/减时线交叉）',
       (() => {
         // 段层音符的**墨迹顶**（数字顶；段层音符都在线**下方**）
         const inkTop = Math.min(...segNsAll.map((n) => n.y - noteScaleOf(1) * 0 - D.note_size * 0.8))
-        return segOnly.every((s) => {
-          const sag = Math.max(SLUR_SAG_MIN, Math.min(SLUR_SAG_MAX, Math.abs(s.x2 - s.x1) * 0.28))
-          return s.y - sag < inkTop + 0.11
-        })
+        return segOnly.every((s) => slurApexY(s.y) < inkTop + 0.11)
       })(),
-      `segY=${segOnly.map((s) => s.y).join(',')} segInkTop≈${(upperBaseline - D.note_size * 0.8).toFixed(1)}`)
+      `segApex=${segOnly.map((s) => slurApexY(s.y).toFixed(1)).join(',')} segInkTop≈${(upperBaseline - D.note_size * 0.8).toFixed(1)}`)
     check('S5 adj670 图3：自动撑开后的层间距 > 默认 22（放不下时才撑）',
       lowerBaseline - upperBaseline > 22.11, `gap=${(lowerBaseline - upperBaseline).toFixed(2)}`)
     const svg = renderScoreToSvg(layoutScore(parseJps(code), D))[0]
@@ -19640,12 +19690,12 @@ function runAdj689bTests() {
       octN ? `点底=${(octaveDotY(octN.y, 0, ns714) + DOT_R * s714).toFixed(2)} 数字顶=${digitTopY(octN.y, ns714).toFixed(2)}` : '缺高八度音符')
     /**
      * ③ 跨音符修饰符（连音线）必须在 ① 高八度点层之上：
-     * 用**弦 − 垂度**（= 弧顶）比，不能再拿弦 `y` 比（那正是本轮的 bug）。
+     * 用**弧顶**（`slurApexY` = 弦 − 常量弧顶高，adj929）比，不能再拿弦 `y` 比（那正是本轮的 bug）。
      */
     {
       const sl714 = pg714.slurs[0]
       const span714 = Math.abs(sl714.x2 - sl714.x1)
-      const apex714 = sl714.y - slurSagOf(span714) / 2
+      const apex714 = slurApexY(sl714.y)
       const covered714 = pg714.notes.filter((n) => n.x >= sl714.x1 - 2 && n.x <= sl714.x2 + 2 && !n.segment)
       const top714 = Math.min(...covered714.map((n) => {
         const oct = (n.token as { octaveShift?: number }).octaveShift ?? 0
@@ -19666,6 +19716,174 @@ function runAdj689bTests() {
       MODIFIER_LAYERS_ABOVE.join('>') === 'octave>noteMark>spanMark>section' &&
         MODIFIER_LAYERS_BELOW.join('>') === 'beam>lowDot>belowMark',
       `${MODIFIER_LAYERS_ABOVE.join('>')} / ${MODIFIER_LAYERS_BELOW.join('>')}`)
+  }
+  /**
+   * ============================================================
+   * adj929（用户口径）：**连音线弧顶 = 常量**（短弧不塌、长弧曲度小）
+   * ============================================================
+   *
+   * 覆盖要求（`AGENTS` 六之二·5）：
+   *  · **两条布局路径**（`noteSpaceLayout: 'space'` / `'duration'`）；
+   *  · **多声部**（含 `{dsb}` 段层——它的连音线走**另一套构造代码**）。
+   *
+   * 判据全部按**墨迹**（`AGENTS` 五·9）：连音线的墨迹顶 = **弧顶** `slurApexY(y)`。
+   * 每条都带**负对照**（把旧的"随跨度"口径喂进同一个判据 ⇒ 必须判假）。
+   */
+  {
+    const NS929 = defaultPageConfig.note_size
+    const S929 = noteScaleOf(NS929)
+    const GAP929 = LAYER_GAP * S929
+    /** 判据：一组数的极差——"是否与跨度无关"的正负对照**共用同一个函数** */
+    const spreadOf = (a: number[]): number => (a.length === 0 ? Number.NaN : Math.max(...a) - Math.min(...a))
+    /** 旧口径弧顶高度（`clamp(跨度 × 0.28, 2.5, 9) ÷ 2`）——只作负对照 */
+    const legacyApexH = (span: number): number => Math.max(2.5, Math.min(9, span * 0.28)) / 2
+    /** 点的**墨迹顶**（高八度点层顶 / 数字顶取最上者） */
+    const inkTopOf = (n: { y: number; token: unknown }): number => {
+      const oct = (n.token as { octaveShift?: number }).octaveShift ?? 0
+      return oct > 0 ? octaveTopY(n.y, oct, NS929) : digitTopY(n.y, NS929)
+    }
+    /**
+     * 该线"自己区间内"音符的**墨迹顶**：
+     *  · x 判据与布局 `spanSlurY` 同源（槽中心落在 `[x1−4.5, x2+4.5]`）；
+     *  · **只要弦 y 下方的音符**（`n.y > sl.y + 1`）——多声部 `{dsb}` 里上层的段层音符
+     *    在同一 x 区间里、但不在本线下方，混进来会把"下方墨迹顶"算成别人的层（实测会得负间距）。
+     */
+    const coveredInkTop = (pg: ScorePage, sl: { x1: number; x2: number; y: number }): number => {
+      const lo = Math.min(sl.x1, sl.x2) - 4.5
+      const hi = Math.max(sl.x1, sl.x2) + 4.5
+      const tops = pg.notes
+        .filter((n) => n.x + n.width / 2 >= lo && n.x + n.width / 2 <= hi && n.y > sl.y + 1)
+        .map(inkTopOf)
+      return tops.length > 0 ? Math.min(...tops) : Number.NaN
+    }
+    /**
+     * **从渲染端真实产物**里读出该线的弧顶 y（不信任任何布局侧公式）：
+     * `M x1 y Q midX ctrlY x2 y` 的顶点 `B(0.5) = (y + ctrlY) / 2`。
+     */
+    const renderedApexYOf = (sl: ScorePage['slurs'][number]): number => {
+      const d = renderSlurForTest(sl, NS929)
+      const m = /Q [\d.]+ ([\d.]+)/.exec(d)
+      return m === null ? Number.NaN : (sl.y + Number(m[1])) / 2
+    }
+    const CODE929 =
+      "V: 1.0\nB: t\nD: C\nP: 4/4\n" +
+      "Q: 1/ (2/ 3/) 4/ 5 - |\n" +
+      "Q: 6// 7// (1'// 7// 6//) 5/ 6- |\n" +
+      "Q: {dsb (3// 2// 1//) (1// 1/) 7,/ 1- } (2// 4// (3/. 3)) 5/ 6- |\n"
+    const CFGS929: [string, typeof defaultPageConfig][] = [
+      ['时值优先（duration）', { ...defaultPageConfig, noteSpaceLayout: 'duration' as const }],
+      ['空间优先（space）', { ...defaultPageConfig, noteSpaceLayout: 'space' as const }],
+    ]
+    /** 弧顶到下方音符墨迹顶的间距；`apexYOf` 供负对照换成旧口径 */
+    const gapsOf = (
+      pg: ScorePage,
+      arcs: ScorePage['slurs'],
+      apexYOf: (sl: ScorePage['slurs'][number]) => number,
+    ): number[] =>
+      arcs.map((s) => {
+        const top = coveredInkTop(pg, s)
+        return Number.isFinite(top) ? top - apexYOf(s) : Number.NaN
+      })
+    for (const [pathName, cfg] of CFGS929) {
+      const pg = layoutScore(parseJps(CODE929), cfg).pages[0]
+      /** 只看**圆弧**（平顶线没有弧顶）且**没有跨行半条**（半条弧顶点另有硬编码，不属本口径） */
+      const arcs = pg.slurs.filter((s) => s.style === 'arc' && s.half === undefined && s.below !== true)
+      const spans = arcs.map((s) => Math.abs(s.x2 - s.x1))
+      /** 判据①（**端到端**）：从**渲染产物**读出的弧顶高度必须逐条 = `SLUR_APEX_H`、极差 ≤ 1px */
+      const realApexH = arcs.map((s) => s.y - renderedApexYOf(s))
+      check(
+        `adj929 ${pathName}：**不同跨度的连音线弧顶高度相同**（±1px；逐条 = \`SLUR_APEX_H\`=${SLUR_APEX_H}）`,
+        arcs.length >= 3 && spreadOf(spans) >= 5 && realApexH.every((h) => Math.abs(h - SLUR_APEX_H) < 1e-6) && spreadOf(realApexH) <= 1,
+        `弧度数=${arcs.length} 跨度=[${spans.map((v) => v.toFixed(1)).join(',')}] 实弧顶高=[${realApexH.map((v) => v.toFixed(2)).join(',')}] 极差=${spreadOf(realApexH).toFixed(2)}`,
+      )
+      /** 负对照：把**旧口径**（随跨度）的弧顶高度喂进**同一个判据** ⇒ 必须判假 */
+      const legacyApexHOf = arcs.map((s) => legacyApexH(Math.abs(s.x2 - s.x1)))
+      check(
+        `adj929 ${pathName} 负对照：旧的"弧顶随跨度"口径在同一判据下**判假**`,
+        spreadOf(legacyApexHOf) > 1 && legacyApexHOf.some((h) => Math.abs(h - SLUR_APEX_H) > 1e-6),
+        `旧弧顶高=[${legacyApexHOf.map((v) => v.toFixed(2)).join(',')}] 极差=${spreadOf(legacyApexHOf).toFixed(2)}`,
+      )
+      /** 判据②：**弧顶**（渲染产物）到下方音符墨迹顶的间距 ≥ `LAYER_GAP`，且与跨度无关（≤ 1px） */
+      const gaps = gapsOf(pg, arcs, renderedApexYOf)
+      check(
+        `adj929 ${pathName}：连音线**弧顶**到下方音符墨迹顶 ≥ \`LAYER_GAP\`(${GAP929.toFixed(2)}px)，且各跨度同值（±1px）`,
+        gaps.length > 0 && gaps.every((g) => Number.isFinite(g) && g >= GAP929 - 0.01) && spreadOf(gaps) <= 1,
+        `弧顶→音符=[${gaps.map((g) => g.toFixed(2)).join(',')}] 极差=${spreadOf(gaps).toFixed(2)} 下限=${GAP929.toFixed(2)}`,
+      )
+      /** 负对照 A：旧口径（弧顶随跨度）⇒ 同一批间距极差 > 1px、最短那条明显更小 ⇒ 判假 */
+      const legacyGaps = gapsOf(pg, arcs, (s) => s.y - legacyApexH(Math.abs(s.x2 - s.x1)))
+      check(
+        `adj929 ${pathName} 负对照：旧口径的弧顶间距在同一判据下**判假**（极差 > 1px）`,
+        spreadOf(legacyGaps) > 1,
+        `旧弧顶→音符=[${legacyGaps.map((g) => g.toFixed(2)).join(',')}] 极差=${spreadOf(legacyGaps).toFixed(2)}`,
+      )
+      /**
+       * 负对照 B：若弧顶只拱到**弦下方 1px**（等于不拱、弧线朝下）⇒ 弧顶离数字只剩约 0.7px
+       * `< LAYER_GAP` ⇒ 同一判据**判假**（证明这条判据真的在量"弧顶"而不是空跑）。
+       */
+      const sunkGaps = gapsOf(pg, arcs, (s) => s.y + 1)
+      check(
+        `adj929 ${pathName} 负对照：弧顶若低于弦（不拱）⇒ 同一判据**判假**（弧顶离数字 < \`LAYER_GAP\`）`,
+        sunkGaps.some((g) => Number.isFinite(g) && g < GAP929 - 0.01) && gaps.some((g) => g >= GAP929 - 0.01),
+        `不拱时=[${sunkGaps.map((g) => g.toFixed(2)).join(',')}] 实际=[${gaps.map((g) => g.toFixed(2)).join(',')}] 下限=${GAP929.toFixed(2)}`,
+      )
+      /**
+       * 判据③：**极短弧不再塌**——最短那条（两个八分音符）的弧顶也必须比其音符墨迹顶
+       * 高出 ≥ `SLUR_APEX_H`；旧口径下它明显更矮（负对照）。
+       */
+      const iShort = spans.indexOf(Math.min(...spans))
+      check(
+        `adj929 ${pathName}：**极短弧不塌**（最短跨度 ${spans[iShort].toFixed(1)}px 的弧顶→音符 = ${gaps[iShort].toFixed(2)}px ≥ ${SLUR_APEX_H}；旧口径只有 ${legacyGaps[iShort].toFixed(2)}px）`,
+        gaps[iShort] >= SLUR_APEX_H - 0.01 && legacyGaps[iShort] < gaps[iShort] - 0.5,
+        `新=${gaps[iShort].toFixed(2)} 旧=${legacyGaps[iShort].toFixed(2)} 跨度=${spans[iShort].toFixed(1)}`,
+      )
+    }
+    /**
+     * 多声部 / `{dsb}` 段层（**另一套构造代码**）：段层自己的连音线也必须是常量弧顶，
+     * 且按**整层纵向压缩比**折算出**视觉**弧顶（`{dsb}` 段层 `layerScale = 1`；
+     * `{bz}`/`{tp}` 整层压扁到 `SEGMENT_LAYER_YSCALE`）——两套代码不许各算一套。
+     */
+    {
+      const pg = layoutScore(parseJps(CODE929), CFGS929[0][1]).pages[0]
+      const segSlurs = pg.slurs.filter((s) => s.layerBase !== undefined && s.style === 'arc' && s.below !== true)
+      const segSpans = segSlurs.map((s) => Math.abs(s.x2 - s.x1))
+      const segRealH = segSlurs.map((s) => s.y - renderedApexYOf(s))
+      const segVisualH = segSlurs.map((s, i) => segRealH[i] * (s.layerScale ?? 1))
+      check(
+        'adj929 多声部（`{dsb}` 段层路径）：段层连音线的实弧顶也是同一常量、与跨度无关（±1px）',
+        segSlurs.length >= 2 && spreadOf(segSpans) >= 1 && segRealH.every((h) => Math.abs(h - SLUR_APEX_H) < 1e-6) && spreadOf(segVisualH) <= 1,
+        `段层弧度数=${segSlurs.length} 跨度=[${segSpans.map((v) => v.toFixed(1)).join(',')}] 实弧顶=[${segRealH.map((v) => v.toFixed(2)).join(',')}] 视觉弧顶=[${segVisualH.map((v) => v.toFixed(2)).join(',')}]`,
+      )
+      /** 负对照：旧"随跨度"口径在同一判据下**判假** */
+      const segLegacyH = segSpans.map(legacyApexH)
+      check(
+        'adj929 多声部（`{dsb}` 段层路径）负对照：旧的"随跨度"口径在该判据下**判假**',
+        spreadOf(segLegacyH) > 0.5,
+        `旧弧顶高=[${segLegacyH.map((v) => v.toFixed(2)).join(',')}] 极差=${spreadOf(segLegacyH).toFixed(2)}`,
+      )
+      /** 两套构造代码**同源**：主旋律与段层的弧顶都用渲染端同一个函数算出来（都是常量） */
+      const mainSlurs = pg.slurs.filter((s) => s.layerBase === undefined && s.style === 'arc' && s.below !== true)
+      check(
+        'adj929 两套路径同源：主旋律与 `{dsb}` 段层的弧顶都 = `弦 − SLUR_APEX_H`（不各算一套）',
+        mainSlurs.length > 0 &&
+          segSlurs.length > 0 &&
+          [...mainSlurs, ...segSlurs].every((s) => Math.abs(s.y - renderedApexYOf(s) - SLUR_APEX_H) < 1e-6),
+        `主旋律=${mainSlurs.length} 段层=${segSlurs.length}`,
+      )
+    }
+    /** 渲染产物端到端：SVG 里的控制点必须与常量一致（不许渲染端自己现算） */
+    {
+      const svg = renderScoreToSvg(layoutScore(parseJps(CODE929), CFGS929[0][1]))[0]
+      const ctrl = [...svg.matchAll(/<path d="M ([\d.]+) ([\d.]+) Q [\d.]+ ([\d.]+) [\d.]+ \2" fill="none"/g)].map((m) => ({
+        y: Number(m[2]),
+        ctrl: Number(m[3]),
+      }))
+      check(
+        'adj929 渲染端：SVG 里每条弧的控制点偏移都 = `SLUR_SAG`（= 2×弧顶高），弧顶 = 常量',
+        ctrl.length >= 3 && ctrl.every((c) => Math.abs(c.y - c.ctrl - SLUR_SAG) < 0.06) && ctrl.every((c) => Math.abs((c.y - c.ctrl) / 2 - SLUR_APEX_H) < 0.03),
+        `控制点偏移=[${ctrl.map((c) => (c.y - c.ctrl).toFixed(2)).join(',')}]`,
+      )
+    }
   }
   /**
    * adj692（用户口径）：「临时多声部块**两端各留 2 倍大括号宽度的墨迹留白**
