@@ -22,7 +22,7 @@
 | 开发 | `npm run dev`（http://localhost:5173，纯 Web 即可验证） |
 | 构建 | `npm run build`（= gen:info + tsc -b + vite build） |
 | 引擎测试 | `npm run smoke`（断言在 scripts/smoke.mts，先写断言再实现；**已串入 `cli:typecheck` + `cli:build`**） |
-| 命令行 CLI | **`ijipu` 是独立 Node 包**（`packages/ijipu-cli`，包名 `@ijipu/cli`）：`npm run cli -- <命令>` 跑；`npm run cli:build` 出 `packages/ijipu-cli/dist/ijipu.cjs`；`npm i -g ./packages/ijipu-cli` 装机。⚠ **`ijipu.exe` 是纯 GUI**（双击即界面，`--help` 不打帮助、**不做**子命令分流）。位图/音频（`-t png\|jpg\|pdf\|wav`）要应用当**能力宿主**（命名管道 `src-tauri/src/cli_host.rs`，`IJIPU_CLI_HOST=1` 或 `--cli-host` 开启；`npm run test:rust` 跑它的单测 —— 需先 `. .\scripts\tauri-env.ps1`）——口径见 `docs/CLI.md` §一/§七之三、`docs/CLI-AND-COMMAND-PLAN.md` §九（adj874/adj875；E-2026-390） |
+| 命令行 CLI | **两条交付路径，同一份命令逻辑**（`packages/ijipu-cli/src/cli.ts` 的 `runCli(argv, io)` ✓）：① **内嵌版（adj942）**：`ijipu.exe cli <命令>` —— 那段 JS 用 `npm run cli:embed` 出 `dist/ijipu-embed.js`、由 `src-tauri/src/cli_embed.rs` 用 `include_bytes!` 编进 exe、内嵌 QuickJS（`rquickjs`）跑，**用户不必装 Node** ✓；⚠ 只认**第一个参数恰为 `cli`**，双击/关联 `.jps` **照旧进 GUI** ✓。② **Node 包**（`@ijipu/cli`）：`npm run cli -- <命令>`；`npm run cli:build` 出 `dist/ijipu.cjs`；`npm i -g ./packages/ijipu-cli` 装机。位图/音频（`-t png\|jpg\|pdf\|wav`）要应用当**能力宿主**（命名管道 `src-tauri/src/cli_host.rs`，`IJIPU_CLI_HOST=1` 或 `--cli-host` 开启；`npm run test:rust` 跑它的单测 —— 需先 `. .\scripts\tauri-env.ps1`）——口径见 `docs/CLI.md` §一/§一之二/§七之三、`docs/CLI-AND-COMMAND-PLAN.md` §九/§十（adj874/adj875/adj942；E-2026-390） |
 | Rust 单测 | `. .\scripts\tauri-env.ps1` 后 `npm run test:rust`（= `cargo test --manifest-path src-tauri/Cargo.toml --lib`）—— 目前覆盖能力宿主的**真管道收发**（`cli_host`） |
 | 渲染检查 | `npm run preview:render` → `dist-preview/` |
 | 桌面打包 | `. .\scripts\tauri-env.ps1` 后 `npx tauri build` → `src-tauri/target/release/bundle/nsis/*-setup.exe` |

@@ -9,8 +9,42 @@
 
 ## 一、怎么运行
 
-CLI 是一个**独立的 Node 包**（`packages/ijipu-cli`，包名 `@ijipu/cli`，命令名 `ijipu`），
-**不经过 `ijipu.exe`**：引擎源码已打进单文件产物，运行期**零依赖** ✓。
+命令行有**两条交付路径**，跑的是**同一份命令逻辑**（`packages/ijipu-cli/src/cli.ts` 的
+`runCli(argv, io)` ✓）—— 差别只在"谁提供 IO、谁提供引擎"。
+
+### 甲、随应用发布：`ijipu.exe cli <命令>`（`adj942` 起；**不需要装 Node**）
+
+装了 iJipu 就有命令行。形态是**明确的子命令 `cli`**（不是裸参数）：
+
+```powershell
+ijipu.exe cli --version                              # iJipu 0.58.0
+ijipu.exe cli --help                                 # 完整的命令/选项清单
+ijipu.exe cli lint -i 我的谱.jps                     # 有错 ⇒ 退出码 3
+ijipu.exe cli render -i 我的谱.jps -t svg -o 我的谱.svg
+ijipu.exe cli render -i 我的谱.jps -t midi -o 我的谱.mid
+```
+
+- **原理**：那段 JS（引擎 + CLI 逻辑）在**编译期**被 `include_bytes!` 打进 `ijipu.exe`，
+  运行时由**内嵌的 QuickJS**（`rquickjs`）执行；文件读写 / stdin / stdout 由 Rust 侧注入
+  （**不在 QuickJS 里硬造 `node:fs`** ✓）。⇒ 用户**不必装 Node**，也不用额外下载任何东西。
+  构建：`npm run cli:embed`（`npm run build` 与 `tauri build` 都会串它 ✓）。
+- ⚠ **与"双击 `.jps` 打开界面"不冲突**：判据是**第一个参数恰为 `cli`**
+  （`ijipu.exe 我的谱.jps` / 双击关联 / `ijipu.exe --help` **全都照旧进 GUI** ✓）。
+  这条有 Rust 单测钉着（`src-tauri/src/cli_embed.rs` 的 `split_cli_args`，`npm run test:rust` 里跑）。
+- ⚠ **控制台输出**：`ijipu.exe` 是 **GUI 子系统**程序（双击不弹黑框），所以启动时会
+  `AttachConsole(ATTACH_PARENT_PROCESS)` 挂到**调用它的那个终端**上（挂不上才 `AllocConsole` 自己开一个）；
+  **重定向到文件 / 管道照常工作**（那种情况下把原始 **UTF-8 字节**写进去，与 Node 版逐字节同口径 ✓）。
+  中文在真控制台上走 `WriteConsoleW`（UTF-16）⇒ 不受控制台代码页影响 ✓。
+- ⚠ **内嵌版没有"位图/音频/监视"能力**（与独立 Node 环境**同一口径**）：`render -t png|jpg|pdf`、
+  `play -t wav`、`lint --watch` 需要"隐藏窗口渲染"通道与长驻监视 ⇒ 现在**如实报错**（退出码 4 / 1），
+  不产半成品 ✗（通道状态见 §七之二 / §七之三）。
+- ⚠ 退出码与 Node 版**完全一致**（§四）；唯一的例外是**接线层自身**出错（引擎加载失败等）⇒ 退出码 **70**
+  并把原因打到 stderr（这类不是"用法错误"，刻意与 0–5 区分开 ✓）。
+
+### 乙、独立 Node 包 `@ijipu/cli`（给 CI / 没装应用的环境）
+
+CLI 也是一个**独立的 Node 包**（`packages/ijipu-cli`，包名 `@ijipu/cli`，命令名 `ijipu`）：
+引擎源码已打进单文件产物，运行期**零依赖** ✓。
 
 ```powershell
 # ① 开发/CI（本仓库内，改完源码立刻跑）：
@@ -19,16 +53,64 @@ npm run cli -- <命令> [选项]         # = npm run cli:build && node packages/
 # ② 直接跑已构建产物：
 node packages/ijipu-cli/dist/ijipu.cjs <命令> [选项]
 
-# ③ 当成普通命令行工具装（给用户的方式）：
+# ③ 当成普通命令行工具装（不需要装 iJipu 应用）：
 npm run cli:build                     # 先出产物
 npm i -g ./packages/ijipu-cli         # 装好后命令名就是 ijipu
 ijipu --help
 ```
 
-> **口径（adj874 起）**：`ijipu.exe` 是**纯 GUI 程序** —— 双击打开界面，`ijipu.exe --help`
-> **不会**打帮助（GUI 子系统程序也不连控制台）；命令行一律走上面的 `ijipu`（Node 包）✓。
-> 需要 canvas / 音频的两类输出（`render -t png|jpg|pdf`、`play -t wav`）要由**桌面端应用**提供能力，
-> 这条通道的落地见 §七之二（**尚未接线**：现在独立环境会如实报退出码 4 ✓）。
+> **两条路径怎么选**：装了桌面版 ⇒ 用甲（`ijipu.exe cli …`，零依赖 ✓）；
+> 只有 Node（CI、服务器、只写谱不装应用的人）⇒ 用乙。
+> 需要 canvas / 音频的两类输出（`render -t png|jpg|pdf`、`play -t wav`）两条路径**都**要由
+> **桌面端应用**提供能力，这条通道的落地见 §七之二（**尚未接线**：现在会如实报退出码 4 ✓）。
+
+### §一之二、内嵌版怎么调、什么前提、代价多少（`adj942` 实测）
+
+**前提**：装过 iJipu（`ijipu.exe` 就在安装目录里）。**不需要** Node、不需要联网、不需要额外文件。
+
+**调用形态与 shell 的配合**。⚠ `ijipu.exe` 是 **GUI 子系统**程序（双击 `.jps` 不开黑框的代价就是它），
+而 **cmd / PowerShell 都不会等 GUI 子系统程序**——这是 Windows 的固有行为，不是本 CLI 的 bug：
+
+| shell 写法 | 输出 | 退出码 |
+|---|---|---|
+| 交互式终端里直接敲 `ijipu.exe cli lint -i 谱.jps` | ✓ 打到那个终端（`AttachConsole` 挂上去） | ✗ **拿不到**（shell 没等它，`$LASTEXITCODE` 是上一次的旧值） |
+| PowerShell 管道：`ijipu.exe cli lint -i 谱.jps \| Set-Content out.txt` | ✓（也能 `\| Out-File` / `\| Select-String`） | ✓ `$LASTEXITCODE` |
+| PowerShell 严格同步：`Start-Process ijipu.exe -ArgumentList 'cli','lint','-i','谱.jps' -Wait -PassThru -NoNewWindow` | ✓（要 `-NoNewWindow` 才看得见） | ✓ `$p.ExitCode` |
+| cmd 重定向：`cmd /d /c "ijipu.exe cli lint -i 谱.jps > out.txt"` | ✓ 真写进文件（UTF-8） | ✗（cmd 同样不等它） |
+| PowerShell `>`：`ijipu.exe cli lint -i 谱.jps > out.txt` | ✗ **文件会是 0 字节** | ✗ |
+
+> **脚本里要"输出 + 退出码"就照第 2 / 3 行写**；写文件用 `| Set-Content`（PS）或 `cmd /d /c "… > file"`。
+> 这是"GUI 子系统 exe 兼做命令行"的通行代价（`code.exe` / `sublime_text.exe` 也一样，它们靠额外的
+> console 垫片解决）——**本轮不改**：要彻底消除就得换 console 子系统（双击会闪黑框）或再发一个
+> console 垫片 exe，两条都动架构，留给你拍板 ✗。
+
+**实测：体积**（同一次 `tauri build`，LZMA 压缩后的安装包）：
+| 项 | 改前（v0.58.0，无内嵌） | 改后 | 增量 |
+|---|---|---|---|
+| 安装包 `iJipu_0.58.0_x64-setup.exe` | 33,824,416 B（32.26 MB） | 34,548,670 B（32.95 MB） | **+724,254 B ≈ +0.69 MB** ✓ |
+| `ijipu.exe` 本体 | 26,107,801 B（24.90 MB） | 28,371,668 B（27.06 MB） | +2,263,867 B（未压缩） |
+| 其中：内嵌 JS 产物 | — | 196,873 B（192 KiB；gzip 71 KiB） | — |
+| 其中：QuickJS 目标文件 | — | 4.6 MB（编译产物，链进 exe） | — |
+
+> 对照（用户给的实测）：只放 `.cjs` **+0.18MB**（LZMA 折算）｜带 `node.exe` **+21.97MB**｜
+> pkg 单文件 exe **+15.27MB** ⇒ 内嵌 QuickJS + JS = **+0.69MB**，落在"0.5~1MB 量级"的目标内 ✓。
+
+**实测：耗时**（同一台机器；内嵌 = `ijipu.exe cli …`、Node = `node dist/ijipu.cjs …`；各跑 3 次，贴原始值）：
+
+| 谱 | `lint`（内嵌 ／ Node） | `render -t svg`（内嵌 ／ Node） |
+|---|---|---|
+| `samples/ershenbu.jps`（17 行） | 137 / 86 / 85 ms ／ 161 / 152 / 158 ms | 92 / 94 / 90 ms ／ 181 / 182 / 182 ms |
+| `壁上观.jps`（真谱 32 行） | 89 / 85 / 95 ms ／ 153 / 163 / 193 ms | 111 / 112 / 131 ms ／ 200 / 215 / 243 ms |
+| 合成 308 行 | 138 / 143 / 151 ms ／ 223 / 223 / 237 ms | 498 / 482 / 470 ms ／ 358 / 336 / 335 ms |
+| 合成 1008 行 | 241 / 241 / 224 ms ／ 219 / 245 / 229 ms | **1680 / 1635 / 1630 ms** ／ 591 / 580 / 553 ms |
+
+**怎么读**：
+- **启动**：内嵌省掉了 V8 启动 + 650KB 脚本解析 ⇒ **小谱上内嵌更快**（85–140ms vs 150–240ms，含 `--version` 那种空跑）；
+- **单位工作量**：QuickJS 比 V8 慢 ⇒ 谱一大就反过来：1008 行 `render -t svg` 内嵌 **≈1.65s**、
+  Node **≈0.58s**（**≈2.8 倍**）；同一份谱 `lint` 基本打平（≈0.23s vs ≈0.23s）；
+- 一次性出图 1.7s 可接受；**要批量渲染几百份**就选乙（Node 版）——两条路径产物口径一致 ✓。
+
+
 
 ## 二、命令一览（P1）
 
@@ -93,6 +175,7 @@ npm run cli -- doctor                                    # 能力自检：位图
 | `3` | **语法错误**（`lint` 命中；`format --check` 发现"需要格式化"） |
 | `4` | 渲染失败（P2 起） |
 | `5` | 设置非法（`--config`/`-s` 相关） |
+| `70` | **接线层自身出错**（只在内嵌版：内嵌 JS 加载失败 / 入口异常 / 产物缺失）—— 刻意与 0–5 分开，脚本**不要**把它当成"用法错误" ✓ |
 
 ## 五、示例
 
@@ -166,9 +249,10 @@ CLI 侧**已就绪** ✓：`render -t png|jpg|pdf`、`play -t wav` 需要宿主�
 **要接的是"谁提供这两个能力"** —— 决策②：用**隐藏窗口**（离屏 webview）复用应用既有渲染：
 
 ```
-ijipu.exe render -i 谱.jps -t png -o out.png
-  └─ src-tauri 入口解析到「带子命令」⇒ 不进 GUI（决策①）
+ijipu.exe cli render -i 谱.jps -t png -o out.png
+  └─ src-tauri 入口解析到「子命令 `cli`」⇒ 不进 GUI（`adj942` 起已落 ✓）
       ├─ 纯文本类（format/lint/info/render -t svg|midi/batch/settings/config/doctor）：**无需窗口** ✓
+      │    （内嵌 QuickJS 直接跑，宿主只提供文件/stdout —— 见 §一）
       └─ 位图/音频类（png/jpg/pdf/wav）：
           ① 建一个**不可见窗口**（或复用主窗口但先隐藏 / offscreen ✓），加载应用页面（同一套前端 ✓）
           ② 通过既有 IPC 把「要渲染的 .jps + pageConfig」交给前端
@@ -187,14 +271,14 @@ ijipu.exe render -i 谱.jps -t png -o out.png
 ### 请你在桌面端按这个清单验证（我在此环境无法跑 GUI ✗）
 | # | 命令 | 期望 |
 |---|---|---|
-| 1 | `ijipu --help`（Node 包，非 exe） | 打印 CLI 用法 ✓；`ijipu.exe --help` 则**照旧弹 GUI**（口径见 §一） |
-| 2 | `ijipu lint -i 我的谱.jps` | 与独立 Node 结果一致 ✓（**不需要宿主**） |
-| 3 | `ijipu render -i 我的谱.jps -t svg -o a.svg` | 生成 SVG ✓（不需要宿主） |
+| 1 | `ijipu --help`（Node 包）／`ijipu.exe cli --help`（内嵌版） | 都打印 CLI 用法 ✓；`ijipu.exe --help`（**没有 `cli`**）则**照旧弹 GUI**（口径见 §一） |
+| 2 | `ijipu lint -i 我的谱.jps` 或 `ijipu.exe cli lint -i 我的谱.jps` | 两者结果一致 ✓（**不需要宿主**） |
+| 3 | `ijipu render -i 我的谱.jps -t svg -o a.svg`（或内嵌版同理） | 生成 SVG ✓（不需要宿主） |
 | 4 | 应用在跑（见 §七之三 的开启方式）时 `ijipu render -i 我的谱.jps -t png -o a.png` | **生成 PNG ✓**；与应用「导出 PNG」**逐像素一致**（同 scale 下可对哈希 ✓） |
 | 5 | 同上 `-t pdf` | 生成 PDF，页数与 GUI 导出一致 ✓ |
 | 6 | 同上 `play -i 我的谱.jps -t wav -o a.wav` | 生成 WAV（需音色库就绪 ✓；缺音色库应**明确报错** ✗ 而不是静默出空文件 ✓） |
-| 7 | 双击一个 `.jps`（**无子命令**） | **照旧打开 GUI** ✓（exe 保持纯 UI ✓） |
-| 8 | 应用**没在跑**时 `-t png` | 现在应报退出码 4 + 原因 ✓；**一次性子进程通道**落地后应能自动起宿主 ✓ |
+| 7 | 双击一个 `.jps`（第一个参数是路径） | **照旧打开 GUI** ✓（`adj942` 加了 CLI 分流后**仍然如此**：只有第一个参数恰为 `cli` 才走命令行 —— 本轮已实测：`Start-Process ijipu.exe samples\ershenbu.jps` 起来的窗口一直活着 ✓） |
+| 8 | 应用**没在跑**时 `-t png`（含内嵌版 `ijipu.exe cli render … -t png`） | 报退出码 4 + 原因 ✓；**一次性子进程通道**落地后应能自动起宿主 ✓ |
 
 > 第 4 条的"逐像素一致"是这条通道**唯一**的验收硬指标 ✓ —— 若不一致，说明前端走的不是 `src/export/*` 那条链路 ✓（先查这里，别调算法 ✗）。
 
@@ -235,11 +319,16 @@ $env:IJIPU_CLI_HOST = "1"; .\ijipu.exe      # 或：.\ijipu.exe --cli-host
 
 1. **纯逻辑 + 注入式 IO**：核心是 `packages/ijipu-cli/src/cli.ts` 的 `runCli(argv, io)` ——
    不碰 `process`/`console` ⇒ 可被 ① **Node 包的 bin**（`src/nodeEntry.ts`；`npm run cli:build` 产出
-   `packages/ijipu-cli/dist/ijipu.cjs`）② 测试（`scripts/cli-assert.mts`）③ 将来的**能力宿主**通道，
-   **三处共用一份逻辑** ✓（adj874：**不再**走「同一个 exe 带子命令」，exe 保持纯 GUI —— 口径见 §一 ✓）；
+   `packages/ijipu-cli/dist/ijipu.cjs`）② **内嵌版的入口**（`src/embedEntry.ts`；`npm run cli:embed` 产出
+   `packages/ijipu-cli/dist/ijipu-embed.js`，由 `ijipu.exe` 里的 QuickJS 跑）③ 测试
+   （`scripts/cli-assert.mts`）④ 将来的**能力宿主**通道，**多处共用一份逻辑** ✓
+   （`adj942`：**重新**走「同一个 exe 带子命令」，但形态是**明确的 `cli` 子命令**、且**先把窗口分流掉**；
+   `adj874` 那条"exe 保持纯 GUI"的口径**已作废** —— 见 §一 ✓）；
 2. **不重写引擎**：解析/格式化只调 `@ijipu/engine`（AGENTS §六之二·4"数值口径必须同源"）；
-3. **不引依赖**：参数解析手写（§一"新增依赖必须先询问"）—— 包 `package.json` 里**没有 `dependencies`**
+3. **不引依赖**：参数解析手写（§一"新增依赖必须先询问"）—— CLI 包 `package.json` 里**没有 `dependencies`**
    （引擎已打进单文件产物），断言 `adj874` 守着这一条 ✓；
+   ⚠ 内嵌侧唯一的新依赖是 `src-tauri` 的 **`rquickjs`**（QuickJS 绑定，只挂 `cfg(windows)`）——
+   它属于"壳"，不进 CLI 包 ✓；
 4. **未实现就报错**：不给"看起来成功了"的假象 ✗（退出码 1 + 明确提示 ✓）；
 5. **凡新增命令**：同步更新本文件 + `--help` + 冒烟用例；`--help` 与命令集合的**一致性有闸门**
    （`adj874`：列全命令 + 负对照"不许把已实现的写成未实现"）✓。

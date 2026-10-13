@@ -6,7 +6,9 @@
 
 - **中文简称**：i记谱（i Jì Pǔ）——"我用 i记谱写了个曲子。"
 - **文件后缀**：`.jps`（**iJipu Script** 的后缀，兼容原「番茄简谱」）
-- **命令行（规划中）**：`jps run` / `jps compile` —— 像编译代码一样编译乐谱（后续 CLI 工具，当前为品牌概念）
+- **命令行**：**随桌面版一起发布**（`ijipu.exe cli <命令>` —— 内嵌到 exe，**不需要装 Node**）；
+  也保留**独立 Node 包** `@ijipu/cli`（给 CI / 没装应用的环境）：`format` / `lint` / `info` / `render` /
+  `play` / `batch` / `settings` / `config` / `doctor` / `completions` —— 用法与退出码见 [docs/CLI.md](docs/CLI.md)
 - **用户身份**：谱师（Score Smith）—— 写代码的叫程序员，用 iJipu 写简谱的叫谱师
 - **品牌色**：深空蓝 `#1E2A5E`（音乐的深邃与严谨）+ 霓虹青 `#00F0FF`（代码与科技感）
 

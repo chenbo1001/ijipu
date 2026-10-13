@@ -289,6 +289,25 @@ docs/CLI.md          ← 新增    命令参考 + CI 示例（GitHub Actions / p
    默认**关**，用 `IJIPU_CLI_HOST=1` 或内部开关 `--cli-host` 开启；Rust 单测真连真收发 ✓）
    + **把请求转交前端**、由前端复用 `src/export` 渲染后回传（**待做**）；一次性子进程的隐藏窗口模式（**待做**）；
 4. **安装器** —— exe 路径发现与（可选的）PATH/`App Paths` 注册（**待做**）。
+   > ⚠ **本节第 4 条的定位已被 §十（三次裁决）订正**：`adj942` 起 CLI **内嵌在 `ijipu.exe` 里**
+   > ⇒ "CLI 能不能用"**不再依赖** exe 路径发现；剩下的只是"想直接敲 `ijipu` 而不是 `ijipu.exe`"
+   > 这一件可选的便利（**PATH 本轮不做** ✗，用户口径）。
 
 > 仍适用的硬指标（来自 §七之二）：`ijipu render -t png` 与应用的「导出 PNG」**逐像素一致**；
 > 无窗口能力时**退出码 4 + 原因**、绝不产半成品 ✗；**不重写渲染**（一律复用 `src/export/*` 与音色库）。
+
+---
+
+## 十、三次裁决（2026-10-13，`adj942`；用户裁定「直接落，修」）
+
+| # | 事项 | 决定 | 影响 |
+|---|---|---|---|
+| ①″ | **CLI 的交付形态** | **把 CLI 内嵌进 `ijipu.exe`**（内嵌 QuickJS `rquickjs` 跑编进二进制的那段 JS）⇒ 用户**不必装 Node**；调用形态 = **明确子命令** `ijipu.exe cli <命令>` | 与 §九①′（独立 Node 包）**并存、不推翻**：`@ijipu/cli` 继续给 CI / 无应用的环境 ✓；exe 侧**新增**一条"零依赖"路径。**§九①′ 里"exe 不做子命令分流"这条作废** ⇒ 双击 `.jps` 与关联打开**照旧进 GUI**（只有**第一个参数恰为 `cli`** 才走命令行；判据是 `cli_embed::split_cli_args`，有 Rust 单测钉着 ✓） |
+| ②″ | 内嵌版的 IO | **不硬造 `node:fs`**：文件读写 / stdin / stdout 全由 Rust 侧注入 `__ijipuHost`（`packages/ijipu-cli/src/embedEntry.ts` 只做接线） | 两套入口共用**同一份** `runCli(argv, io)`（`packages/ijipu-cli/src/cli.ts`）⇒ 退出码与数值口径完全同源 ✓ |
+| ③″ | 能力（位图/音频/监视） | 内嵌 CLI **不注入** `rasterize` / `synthesize` / `watchFile` ⇒ `-t png\|jpg\|pdf`、`play -t wav`、`lint --watch` **如实报错**（退出码 4 / 1），与"独立 Node 环境"**同一口径** | §九②′ 的能力通道（命名管道 + 隐藏窗口）**仍然待做**；本轮**不**改那条口径 |
+
+**内嵌之后仍未做的（如实登记，别当成已完成 ✗）**：
+- **能力转交前端**（`src-tauri/src/cli_host.rs` 的 `rasterize`/`synthesize` 落地）—— **待做**；
+- **一次性子进程的隐藏窗口宿主**（应用没在跑时自己起宿主）—— **待做**；
+- **PATH / `App Paths` 注册** —— **本轮不做**（用户口径：PATH 本轮不做）。
+  要用命令行就写安装目录下的 **`ijipu.exe` 完整路径**，或自己把安装目录加进 PATH。
