@@ -65,6 +65,21 @@ const DOCS_REQUIRED = [
     'docs/iJipu-CLI-手册.md',
   ],
   ['THIRD-PARTY.md（第三方组件与许可，落在安装目录根）', /File\s+\/a\s+"\/oname=THIRD-PARTY\.md"/, '../THIRD-PARTY.md', 'THIRD-PARTY.md'],
+  /**
+   * adj946（用户实报）：**命令行入口垫片** `bin\ijipu.cmd`。
+   *
+   * 为什么必须机器守住：注册进 PATH 的是**安装目录下的 `bin` 目录**（只为实现"cmd 会等批处理
+   * 文件"这条 Windows 行为，见 `resources/bin/ijipu.cmd` 的文件头）；垫片一旦不进安装包，
+   * 用户终端里 `ijipu` 就找不到（`bin` 里空无一物），而装机时完全看不出来 —— 只有真跑才暴露。
+   * 判据与上面三份文档同构：① conf 里有这条映射；② 生成的 `installer.nsi` 里有对应 `File /oname=`；
+   * 两条各配一个负对照（删掉映射 / 删掉清单里那行 ⇒ 必须判红 ✓）。
+   */
+  [
+    '命令行入口垫片 bin/ijipu.cmd（注册进 PATH 的 bin 目录里必须有它）',
+    /File\s+\/a\s+"\/oname=bin[\\/]ijipu\.cmd"/,
+    '../resources/bin/ijipu.cmd',
+    'bin/ijipu.cmd',
+  ],
 ]
 
 /** 这三份文档的**仓库源文件**也要在（源没了安装包里自然也没有） */
@@ -72,6 +87,11 @@ const DOC_SOURCES = [
   ['LICENSE（仓库根，AGPL-3.0 全文）', 'LICENSE', 30_000],
   ['THIRD-PARTY.md（仓库根）', 'THIRD-PARTY.md', 2_000],
   ['docs/CLI-手册.md（仓库里那份＝**单一真源**，直接映射进安装包，不复制）', 'docs/CLI-手册.md', 8_000],
+  [
+    'resources/bin/ijipu.cmd（仓库里那份＝**单一真源**，直接映射进安装包，不复制）',
+    'resources/bin/ijipu.cmd',
+    500,
+  ],
 ]
 
 /**
@@ -138,7 +158,7 @@ for (const [label, path, minBytes] of SOURCES) {
 /**
  * adj945：**随包进安装目录的三份文档** + 每条判据的**负对照**（见上方 `DOCS_REQUIRED` 的说明）。
  */
-console.log('[check-installer] 随包文档（adj945：LICENSE / CLI 手册 / THIRD-PARTY.md）自检：')
+console.log('[check-installer] 随包文件（adj945：LICENSE / CLI 手册 / THIRD-PARTY.md；adj946：命令行入口垫片 bin/ijipu.cmd）自检：')
 {
   const confPath = 'src-tauri/tauri.conf.json'
   const conf = JSON.parse(readFileSync(confPath, 'utf8'))
@@ -173,7 +193,7 @@ console.log('[check-installer] 随包文档（adj945：LICENSE / CLI 手册 / TH
     )
     if (!(negConf && negNsi)) failed++
   }
-  console.log('[check-installer] 三份文档的仓库源文件自检：')
+  console.log('[check-installer] 随包文件的仓库源文件自检：')
   for (const [label, path, minBytes] of DOC_SOURCES) {
     const ok = existsSync(path) && statSync(path).size >= minBytes
     console.log(`  ${ok ? '✓' : '✗'} ${label}${ok ? `  ${Math.round(statSync(path).size / 1024)}KB` : '（缺失或体积不足）'}`)

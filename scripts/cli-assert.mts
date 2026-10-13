@@ -514,6 +514,12 @@ console.log('\n— 命令行（A·P1–P4）—')
     }
     return { host, writes, value: () => value, appPaths: () => appPaths }
   }
+  /**
+   * adj946：注册写进 PATH 的是**命令行入口目录**（`<安装目录>\bin`）—— 断言里的期望值就取它。
+   * 与 `envPath.ts` 的 `binDirOf` **同口径**（这里刻意不 import，只在断言里写一次字面量，
+   * 机器核对由 `smoke.mts` 的 `adj946` 那组负责 ✓）。
+   */
+  const BIN_DIR = 'C:\\Apps\\iJipu\\bin'
 
   // ① 没有宿主能力（独立 Node 环境）⇒ 如实报 6，且不假装成功
   {
@@ -544,9 +550,9 @@ console.log('\n— 命令行（A·P1–P4）—')
     const r0 = await runCli(['status', '--json'], st.io)
     const s0 = JSON.parse(String(st.logs.join('')))
     check(
-      'adj944 `status --json`：未注册时如实报 registered=false + 安装目录 + PATH 长度',
+      'adj944 `status --json`：未注册时如实报 registered=false + 安装目录 + 命令行入口目录 + PATH 长度',
       r0.code === EXIT.ok && s0.registered === false && s0.installDir === 'C:\\Apps\\iJipu' &&
-        s0.pathLength === 0 && s0.pathLimit === 2047,
+        s0.binDir === BIN_DIR && s0.legacy === false && s0.pathLength === 0 && s0.pathLimit === 2047,
       JSON.stringify(s0),
     )
 
@@ -554,8 +560,8 @@ console.log('\n— 命令行（A·P1–P4）—')
     reg.io.pathHost = a.host
     const r1 = await runCli(['register'], reg.io)
     check(
-      'adj944 `register` ⇒ 0、只写一次、写的就是安装目录，并提示"新开一个终端"',
-      r1.code === EXIT.ok && a.writes.length === 1 && a.writes[0] === 'C:\\Apps\\iJipu' &&
+      'adj944 `register` ⇒ 0、只写一次、**写的是命令行入口目录 bin**（adj946 口径），并提示"新开一个终端"',
+      r1.code === EXIT.ok && a.writes.length === 1 && a.writes[0] === BIN_DIR &&
         reg.logs.join('').includes('新开一个终端'),
       `writes=${JSON.stringify(a.writes)}`,
     )
@@ -582,9 +588,9 @@ console.log('\n— 命令行（A·P1–P4）—')
     check('adj944 再 `unregister` 一次 ⇒ 不改动（幂等）', r4.code === EXIT.ok && a.writes.length === 2)
   }
 
-  // ③ 别人的条目一个字都不许动 + 超长拒绝写入（负对照）
+  // ③ 别人的条目一个字都不许动 + 超长拒绝写入（负对照）+ adj946 旧形态兼容
   {
-    const b = makePathHost('C:\\Windows;C:\\Apps\\iJipu;C:\\Other')
+    const b = makePathHost(`C:\\Windows;${BIN_DIR};C:\\Other`)
     const un = makeIo({})
     un.io.pathHost = b.host
     await runCli(['unregister'], un.io)
@@ -608,6 +614,43 @@ console.log('\n— 命令行（A·P1–P4）—')
     check(
       'adj944 负对照：超长却照样写的情形与上面的"零写入"互斥',
       long.writes.length === 0 && r.code === EXIT.env,
+    )
+
+    /**
+     * adj946：**旧形态兼容**（adj944 曾把"安装目录本身"写进 PATH）。
+     * 必须做到两件事，否则用户升级后点「注册」会留下一条更靠前的 `ijipu.exe`（症状复发 ✗）：
+     *  ① `status` 要如实认出旧形态（`legacy=true` 且按**未注册**报）；
+     *  ② `register` 要**顺手把它换成 bin**；`unregister` 要**两种都摘**。
+     */
+    const legacy = makePathHost(`C:\\Windows;C:\\Apps\\iJipu;C:\\Other`)
+    const stLegacy = makeIo({})
+    stLegacy.io.pathHost = legacy.host
+    const rl = await runCli(['status', '--json'], stLegacy.io)
+    const sl = JSON.parse(String(stLegacy.logs.join('')))
+    check(
+      'adj946 `status --json`：PATH 里只有**旧形态**（安装目录本身）⇒ `legacy=true`、`registered=false`（如实报，不冒充已注册）',
+      rl.code === EXIT.ok && sl.legacy === true && sl.registered === false && sl.binDir === BIN_DIR,
+      JSON.stringify(sl),
+    )
+    const regLegacy = makeIo({})
+    regLegacy.io.pathHost = legacy.host
+    const rl2 = await runCli(['register'], regLegacy.io)
+    check(
+      'adj946 `register`：**把旧形态换成 bin**（`C:\\Windows;<安装目录>;C:\\Other` ⇒ `C:\\Windows;C:\\Other;<bin>`，别人的两条逐字未动）',
+      rl2.code === EXIT.ok && legacy.writes.length === 1 &&
+        legacy.value() === `C:\\Windows;C:\\Other;${BIN_DIR}` &&
+        regLegacy.logs.join('').includes(BIN_DIR),
+      `value=${JSON.stringify(legacy.value())}`,
+    )
+    const unLegacyHost = makePathHost(`C:\\Windows;C:\\Apps\\iJipu;C:\\Other`)
+    const unLegacy = makeIo({})
+    unLegacy.io.pathHost = unLegacyHost.host
+    const rl3 = await runCli(['unregister'], unLegacy.io)
+    check(
+      'adj946 `unregister`：**两种形态都摘**（只留旧形态时也摘得干净 ⇒ 不留指向 GUI exe 的尾巴）',
+      rl3.code === EXIT.ok && unLegacyHost.value() === 'C:\\Windows;C:\\Other' &&
+        unLegacyHost.writes.length === 1,
+      `value=${JSON.stringify(unLegacyHost.value())}`,
     )
   }
 }

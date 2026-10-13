@@ -1,5 +1,5 @@
 ﻿/**
- * nsis/cli-path.nsh — 卸载时把 iJipu 从**当前用户 PATH** 里摘掉（adj944，用户需求）
+ * nsis/cli-path.nsh — 卸载时把 iJipu 从**当前用户 PATH** 里摘掉（adj944；adj946 改口径）
  *
  * 由 `hooks.nsh` 在 `NSIS_HOOK_POSTUNINSTALL` 里 `!insertmacro IJIPU_PATH_UNREGISTER` 调用
  * （那里是"我方注册表清理"的统一落点，「只动自己写的东西」原则见 `hooks.nsh` 文件头）。
@@ -12,7 +12,8 @@
  *     引号/空白之类的"变体写法"只认大小写与末尾反斜杠两种（应用里那个「解除」按钮认得更多 ✓）。
  *
  * ## 口径（与 `packages/ijipu-cli/src/envPath.ts` 的 `removeDirFromPath` 对齐）
- *  · **只摘完全等于安装目录的那一条**（比较大小写无关，忽略末尾反斜杠）；
+ *  · **只摘完全等于我们那条的条目**（比较大小写无关，忽略末尾反斜杠）——
+ *    adj946 起是**两条**：`${INSTDIR}\bin`（现行，命令行入口目录）与 `${INSTDIR}`（adj944 旧形态）；
  *  · 其余条目**逐字保留** —— 尤其**连续分号留下的空条目**不许被"顺手清理"✗；
  *  · **幂等**：PATH 里没有我们那条 ⇒ 一个字都不写（连注册表都不碰）；
  *  · 摘完之后 PATH 空了 ⇒ 直接把 `Path` 值删掉（不留一个空值）。
@@ -165,7 +166,17 @@ Function un.IJIPU_EnvValueType
 FunctionEnd
 
 /**
- * 卸载时：把安装目录从**当前用户 PATH** 里摘掉 + 删我方 App Paths 与备份键 + 广播环境变更。
+ * 卸载时：把**我们写进 PATH 的那一条**从**当前用户 PATH** 里摘掉 + 删我方 App Paths 与备份键 + 广播环境变更。
+ *
+ * ⚠ adj946 改口径：注册写进 PATH 的是**命令行入口目录 `${INSTDIR}\bin`**（里面有控制台垫片
+ *   `ijipu.cmd`），**不是 `${INSTDIR}` 本身** ✗ —— 所以这里要**两个都摘**：
+ *   ① `${INSTDIR}\bin`（现行形态）；② `${INSTDIR}`（adj944 的旧形态，用户可能还留着）。
+ *   两条都摘才能保证"卸载后终端里敲不出 ijipu"（留旧的还更糟：`ijipu` 会解析回 GUI 的 exe，
+ *   于是又变回"提示符夹在输出中间"那个用户实报的症状 ✗）。
+ *   两次调用的"改过没有"要**累计**进 `$R9`（半路清零会出现"摘了一半却不写回"✗）；
+ *   `$R8` 存第一轮的结果串（第二次调用会把 `$1` 盖掉）。
+ *   ⚠ `$R8`/`$R9` 是**空着的**编号寄存器（`IJIPU_PathDropDir`/`IJIPU_PathKeepEntry` 只用
+ *   `$0`–`$9` 与 `$R0`–`$R2`，`$R3`–`$R7` 被本宏后面用到）—— 挑它们不会互相踩 ✓。
  *
  * ⚠ 必须在 `$UpdateMode <> 1` 时调用（更新流程会先跑一次卸载器：
  *   那时把 PATH 摘了，而更新路径又不会重新注册 ⇒ 用户"更新一次就丢注册"✗）。
@@ -173,9 +184,17 @@ FunctionEnd
 !macro IJIPU_PATH_UNREGISTER
   ReadRegStr $0 HKCU "${IJIPU_ENV_KEY}" "${IJIPU_ENV_NAME}"
   StrCmp $0 "" ijipu_pu_app_paths      ; 没有 PATH 值 ⇒ 没什么可摘（幂等 ✓）
-  StrCpy $R0 "$INSTDIR"                ; 要摘的目录 = 安装目录（注册时写的就是它）
+  StrCpy $R0 "$INSTDIR\bin"            ; adj946：现行形态 = 命令行入口目录
   Call un.IJIPU_PathDropDir
-  StrCmp $R1 0 ijipu_pu_app_paths      ; 里面本来就没有我们那条 ⇒ **一个字都不写** ✓
+  StrCpy $R8 "$1"                      ; 第一轮结果（第二轮会盖掉 $1）
+  StrCpy $R9 $R1                       ; 第一轮"改过没有"
+  StrCpy $0 "$R8"                      ; 第二轮输入 = 第一轮输出
+  StrCpy $R0 "$INSTDIR"                ; adj944 的旧形态 = 安装目录本身（一并摘掉）
+  Call un.IJIPU_PathDropDir
+  StrCmp $R1 0 ijipu_pu_legacy_done
+    StrCpy $R9 1
+  ijipu_pu_legacy_done:
+  StrCmp $R9 0 ijipu_pu_app_paths      ; 两条都不在里面 ⇒ **一个字都不写** ✓
   StrCpy $R4 "${IJIPU_ENV_KEY}"
   StrCpy $R5 "${IJIPU_ENV_NAME}"
   Call un.IJIPU_EnvValueType

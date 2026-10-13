@@ -9,8 +9,9 @@
 > ③ 嵌入版 RPC 默认关闭 + 仅 vault 内路径**）。
 > 阶段状态：**P1–P4 全部实现**（`format` / `lint` / `info` / `render` / `play` / `batch` /
 > `settings` / `config` / `doctor` / `completions` / `lint --watch`）；
-> adj944 起另有 **`register` / `unregister` / `status`**（把安装目录注册进当前用户 PATH ⇒
-> 终端里直接敲 `ijipu`，见 §二之二）。
+> adj944 起另有 **`register` / `unregister` / `status`**（把**命令行入口目录 `<安装目录>\bin`**
+> 注册进当前用户 PATH ⇒ 终端里直接敲 `ijipu`，见 §二之二；`adj946` 起那个 `bin` 目录里是
+> **控制台垫片** `ijipu.cmd` —— 见 §一之一）。
 > 其中**位图与音频**（`png/jpg/pdf/wav`）需要"隐藏窗口渲染"通道：在桌面端 exe 内可用 ✓，
 > 独立 Node 环境会**明确报错（退出码 4）**并给出替代（`-t svg` / `-t midi`）✓ —— 不假装成功 ✗。
 
@@ -19,17 +20,23 @@
 命令行有**两条交付路径**，跑的是**同一份命令逻辑**（`packages/ijipu-cli/src/cli.ts` 的
 `runCli(argv, io)` ✓）—— 差别只在"谁提供 IO、谁提供引擎"。
 
-### 甲、随应用发布：`ijipu.exe cli <命令>`（`adj942` 起；**不需要装 Node**）
+### 甲、随应用发布：`ijipu cli <命令>`（`adj942` 起；`adj946` 起有**控制台垫片**；**不需要装 Node**）
 
-装了 iJipu 就有命令行。形态是**明确的子命令 `cli`**（不是裸参数）：
+装了 iJipu 就有命令行。形态是**明确的子命令 `cli`**（不是裸参数）。
+命令行入口是**控制台垫片** `bin\ijipu.cmd`（注册 PATH 之后就是一个 `ijipu`，见 §一之一/§二之二）：
 
 ```powershell
-ijipu.exe cli --version                              # iJipu 0.58.0
-ijipu.exe cli --help                                 # 完整的命令/选项清单
-ijipu.exe cli lint -i 我的谱.jps                     # 有错 ⇒ 退出码 3
-ijipu.exe cli render -i 我的谱.jps -t svg -o 我的谱.svg
-ijipu.exe cli render -i 我的谱.jps -t midi -o 我的谱.mid
+ijipu cli --version                                  # iJipu 0.58.0
+ijipu cli --help                                     # 完整的命令/选项清单
+ijipu cli lint -i 我的谱.jps                         # 有错 ⇒ 退出码 3
+ijipu cli render -i 我的谱.jps -t svg -o 我的谱.svg
+ijipu cli render -i 我的谱.jps -t midi -o 我的谱.mid
 ```
+
+> **没注册 PATH 时**用垫片的完整路径，效果一样：
+> `"%LOCALAPPDATA%\iJipu\bin\ijipu.cmd" cli lint -i 我的谱.jps` ✓
+> （**别**直接调 `ijipu.exe`：GUI 子系统程序，cmd 不等它 ⇒ 输出顺序/退出码/重定向都不可靠 ✗，
+> 理由见 §一之一。）
 
 - **原理**：那段 JS（引擎 + CLI 逻辑）在**编译期**被 `include_bytes!` 打进 `ijipu.exe`，
   运行时由**内嵌的 QuickJS**（`rquickjs`）执行；文件读写 / stdin / stdout 由 Rust 侧注入
@@ -42,11 +49,35 @@ ijipu.exe cli render -i 我的谱.jps -t midi -o 我的谱.mid
   `AttachConsole(ATTACH_PARENT_PROCESS)` 挂到**调用它的那个终端**上（挂不上才 `AllocConsole` 自己开一个）；
   **重定向到文件 / 管道照常工作**（那种情况下把原始 **UTF-8 字节**写进去，与 Node 版逐字节同口径 ✓）。
   中文在真控制台上走 `WriteConsoleW`（UTF-16）⇒ 不受控制台代码页影响 ✓。
+  ⚠⚠ **但"GUI 子系统 exe 兼做命令行"这件事本身有 Windows 层面的坑**（cmd 不等 GUI 程序）——
+  用户 2026-10 实报（有截图）：在 cmd 里输出**每一行前面都多一个提示符**、退出码拿不到、
+  PowerShell 的 `>` 写出 0 字节文件。**`adj946` 起用控制台垫片解决**（见 §一之一），
+  所以**命令行入口请走 `bin\ijipu.cmd`（或注册后的 `ijipu`）**，不要直接调 `ijipu.exe` ✗。
 - ⚠ **内嵌版没有"位图/音频/监视"能力**（与独立 Node 环境**同一口径**）：`render -t png|jpg|pdf`、
   `play -t wav`、`lint --watch` 需要"隐藏窗口渲染"通道与长驻监视 ⇒ 现在**如实报错**（退出码 4 / 1），
   不产半成品 ✗（通道状态见 §七之二 / §七之三）。
 - ⚠ 退出码与 Node 版**完全一致**（§四）；唯一的例外是**接线层自身**出错（引擎加载失败等）⇒ 退出码 **70**
   并把原因打到 stderr（这类不是"用法错误"，刻意与 0–5 区分开 ✓）。
+
+### §一之一、控制台垫片 `bin\ijipu.cmd`（`adj946`，**命令行入口只走它**）
+
+**为什么要它**（用户 2026-10 实报 + 截图）：`ijipu.exe` 是 GUI 子系统程序 ⇒
+**cmd 不等它**（Windows 固有行为，`code.exe`/`sublime_text.exe` 也一样）⇒ 四连带症状：
+① 输出**跟在下一个提示符后面**；② `%ERRORLEVEL%` / `$LASTEXITCODE` 是旧值；
+③ PowerShell 的 `>` 写出 **0 字节**文件；④ 输出顺序不可靠。
+`adj945` 只在文档里写成"注意事项"让用户绕 ✗（用户认为不可接受）；`adj946` 照 VS Code 的成熟做法修：
+
+| 项 | 口径 |
+|---|---|
+| 交付物 | `resources/bin/ijipu.cmd`（**单一真源**，经 `bundle.resources` 映射成安装目录的 `bin/ijipu.cmd`，**不复制** ✓） |
+| 内容 | **可执行段只有两行**：`"%~dp0..\ijipu.exe" %*` + `exit /b %ERRORLEVEL%`（冒烟 `adj946` 逐字钉住） |
+| 为什么是**直接调用** | **实测**（2026-10-14，Windows 11 26300.9457，cmd 代码页 936）：直接调用 ⇒ 重定向文件 89 字节、退出码 3 ✓；`start /wait "" … %*` ⇒ **0 字节**（`start` 不给子进程传重定向句柄）✗。cmd **会等批处理文件**，所以直接调用就是同步的 |
+| 为什么不加 `cli` | **实测**：垫片若写成 `ijipu.exe cli %*`，用户敲的 `ijipu cli lint …` 会变成 `ijipu.exe cli cli lint …`（报「命令 "cli" 尚未实现」✗）⇒ 垫片**透明**转交 `%*` |
+| 为什么注释纯 ASCII | cmd 按 **OEM 代码页**（本机 936）解析 `.cmd`；UTF-8 中文注释在 DBCS 页上可能错位，而垫片坏掉＝命令行全坏（`scripts/git-push.bat` 的 "ASCII safe" 同一原因）。冒烟 `adj946` 钉住"纯 ASCII + 无 BOM" |
+| 注册口径 | 注册进 PATH 的是 **`<安装目录>\bin`**（不是安装目录本身 ✗）—— 由 TS `binDirOf()` **唯一一处**推导；`.CMD` 在 `PATHEXT` 里、`.exe` 不在 PATH 里 ⇒ 敲 `ijipu` 命中垫片 ✓ |
+| 双击/关联 | **不受影响**：`ijipu.exe` 仍是 GUI 子系统程序（双击 `.jps` / 关联打开照旧开窗口、不闪黑框 ✓） |
+| 旧形态兼容 | `adj944` 曾注册"安装目录本身"：`status` 认出它（`legacy`，并按**未注册**报）→ 点「注册」**顺手换掉**；`unregister` **两种都摘**；卸载钩子（`nsis/cli-path.nsh`）也**两条都摘** ✓ |
+| 闸门 | 冒烟 `[172] adj946`（垫片可执行段逐字/纯 ASCII 无 BOM/`binDirOf`/旧形态迁移/文案/NSIS/文档，每条配负对照）+ `cli-assert` 的 register/status/unregister + `check-installer` 的"安装清单必须含 `bin\ijipu.cmd`" |
 
 ### 乙、独立 Node 包 `@ijipu/cli`（给 CI / 没装应用的环境）
 
@@ -75,21 +106,30 @@ ijipu --help
 
 **前提**：装过 iJipu（`ijipu.exe` 就在安装目录里）。**不需要** Node、不需要联网、不需要额外文件。
 
-**调用形态与 shell 的配合**。⚠ `ijipu.exe` 是 **GUI 子系统**程序（双击 `.jps` 不开黑框的代价就是它），
-而 **cmd / PowerShell 都不会等 GUI 子系统程序**——这是 Windows 的固有行为，不是本 CLI 的 bug：
+**调用形态**。⚠ `ijipu.exe` 是 **GUI 子系统**程序（双击 `.jps` 不开黑框的代价就是它），
+而 **cmd / PowerShell 都不会等 GUI 子系统程序** —— 这是 Windows 的固有行为，不是本 CLI 的 bug。
+
+`adj946` 起这件事**已经修好**：命令行入口是**控制台垫片** `bin\ijipu.cmd`（命令行入口只走它，
+见 §一之一）。**注册之后**（`ijipu cli register`）PATH 里就是那个 `bin` 目录 ⇒ 下面这一行**全都正常**：
+
+```text
+ijipu cli lint -i 我的谱.jps          # 输出紧跟命令、%ERRORLEVEL% / $LASTEXITCODE 是真值
+ijipu cli lint -i 我的谱.jps > out.txt # cmd 与 PowerShell 的 > 都写出正常内容（不再是 0 字节）
+```
 
 | shell 写法 | 输出 | 退出码 |
 |---|---|---|
-| 交互式终端里直接敲 `ijipu.exe cli lint -i 谱.jps` | ✓ 打到那个终端（`AttachConsole` 挂上去） | ✗ **拿不到**（shell 没等它，`$LASTEXITCODE` 是上一次的旧值） |
-| PowerShell 管道：`ijipu.exe cli lint -i 谱.jps \| Set-Content out.txt` | ✓（也能 `\| Out-File` / `\| Select-String`） | ✓ `$LASTEXITCODE` |
-| PowerShell 严格同步：`Start-Process ijipu.exe -ArgumentList 'cli','lint','-i','谱.jps' -Wait -PassThru -NoNewWindow` | ✓（要 `-NoNewWindow` 才看得见） | ✓ `$p.ExitCode` |
-| cmd 重定向：`cmd /d /c "ijipu.exe cli lint -i 谱.jps > out.txt"` | ✓ 真写进文件（UTF-8） | ✗（cmd 同样不等它） |
-| PowerShell `>`：`ijipu.exe cli lint -i 谱.jps > out.txt` | ✗ **文件会是 0 字节** | ✗ |
+| `ijipu cli lint -i 谱.jps`（垫片，注册之后 ✓ **推荐**） | ✓ 紧跟在自己那条命令后面 | ✓ `%ERRORLEVEL%` / `$LASTEXITCODE` |
+| `ijipu cli lint -i 谱.jps > out.txt`（cmd 或 PowerShell） | ✓ 真写进文件（UTF-8） | ✓ |
+| `"%LOCALAPPDATA%\iJipu\bin\ijipu.cmd" cli lint -i 谱.jps`（**没注册**时用完整路径） | ✓ 同上 | ✓ |
+| `"%LOCALAPPDATA%\iJipu\ijipu.exe" cli lint -i 谱.jps`（**直呼 exe** ✗） | ✗ 提示符会夹在输出中间 | ✗（shell 没等它，拿到的是旧值） |
+| `…\ijipu.exe cli lint -i 谱.jps > out.txt`（**直呼 exe**，PowerShell 的 `>`） | ✗ **文件会是 0 字节** | ✗ |
+| `Start-Process …\ijipu.exe -ArgumentList 'cli','lint','-i','谱.jps' -Wait -PassThru -NoNewWindow`（绕过垫片的老办法） | ✓（要 `-NoNewWindow`） | ✓ `$p.ExitCode` |
 
-> **脚本里要"输出 + 退出码"就照第 2 / 3 行写**；写文件用 `| Set-Content`（PS）或 `cmd /d /c "… > file"`。
-> 这是"GUI 子系统 exe 兼做命令行"的通行代价（`code.exe` / `sublime_text.exe` 也一样，它们靠额外的
-> console 垫片解决）——**本轮不改**：要彻底消除就得换 console 子系统（双击会闪黑框）或再发一个
-> console 垫片 exe，两条都动架构，留给你拍板 ✗。
+> **结论**：命令行一律走 `ijipu cli …`（垫片）；**不要直接调 `ijipu.exe`** ✗ ——
+> 上表最后三行就是"直呼 exe"的代价（`adj946` 之前只能这么绕，现在不必了）。
+> 注意垫片是**透明**的：它不替你补 `cli` 子命令（补了会变成 `ijipu.exe cli cli …`，
+> 实测报「命令 "cli" 尚未实现」✗），所以形态仍是 `ijipu cli <命令>`。
 
 **实测：体积**（同一次 `tauri build`；⚠ NSIS 安装包**同一输入两次打包也会抖 ~2KB**：本轮三次打包分别为
 34,545,493 / 34,548,670 / 34,550,872 B，下表取中间那次作代表）：
@@ -135,7 +175,7 @@ ijipu --help
 | `config` | 打印**生效设置全表 + 每项来源** | `-i <谱>` `-t effective` |
 | `doctor` | 环境自检（可设置项数量、各项能力是否可用） | `--json` |
 | `completions` | 输出 shell 补全脚本 | `completions bash\|zsh\|powershell` |
-| `register` | 把**安装目录**写进当前用户 PATH（装了应用就能直接敲 `ijipu`） | `--json` |
+| `register` | 把**命令行入口目录 `<安装目录>\bin`** 写进当前用户 PATH（装了应用就能直接敲 `ijipu`；adj946 口径） | `--json` |
 | `unregister` | 从当前用户 PATH 里**摘掉自己那一条**（其余逐字不动） | `--json` |
 | `status` | 看现在注册了没有（**读系统实况**，不读配置） | `--json` |
 
@@ -163,14 +203,16 @@ npm run cli -- doctor                                    # 能力自检：位图
 > 与应用（实测版）可能有**亚像素差异**；版式、音符位置与页数一致 ✓。
 > 需要像素级一致时用应用导出（P3 的"隐藏窗口渲染"就是为此 ✓）。
 
-## 二之二、注册 / 解除：让终端里能直接敲 `ijipu`（adj944）
+## 二之二、注册 / 解除：让终端里能直接敲 `ijipu`（adj944；adj946 改口径）
 
-**要解决的事**：装了应用之后，`ijipu.exe` 躺在安装目录里（`%LOCALAPPDATA%\iJipu`），
-终端里**不能**直接敲 `ijipu`（PATH 里没有它）。`register` 就是把这个目录加进**当前用户**的 PATH。
+**要解决的事**：装了应用之后，命令行入口在**安装目录下的 `bin`** 里
+（默认 `%LOCALAPPDATA%\iJipu\bin\ijipu.cmd`），终端里**不能**直接敲 `ijipu`（PATH 里没有它）。
+`register` 就是把这个**命令行入口目录**加进**当前用户**的 PATH
+（`adj946` 起是 `bin` 目录，不再是把安装目录本身写进去 ✗ —— 原因见 §一之一）。
 
 ```powershell
 ijipu.exe cli status        # 现在注册了没有（读系统实况）
-ijipu.exe cli register      # 注册：把安装目录写进当前用户 PATH
+ijipu.exe cli register      # 注册：把**命令行入口目录 <安装目录>\bin** 写进当前用户 PATH
 ijipu.exe cli unregister    # 解除：只摘掉自己那一条，其余逐字不动
 ```
 
@@ -180,24 +222,27 @@ ijipu.exe cli unregister    # 解除：只摘掉自己那一条，其余逐字�
 > ijipu.exe cli status
 iJipu CLI 注册状态：未注册 ✗（终端里还敲不了 ijipu）
   安装目录：C:\Users\<你>\AppData\Local\iJipu
+  命令行入口目录（写进 PATH 的就是它）：C:\Users\<你>\AppData\Local\iJipu\bin
   当前用户 PATH：1387 / 2047 字符
   App Paths：（未注册）
   注册：ijipu cli register（注册后**新开一个终端**才生效；只对当前用户生效、不需要管理员）
 
 > ijipu.exe cli register
-已注册 ✓ 安装目录已加入当前用户 PATH：C:\Users\<你>\AppData\Local\iJipu
+已注册 ✓ 命令行入口目录已加入当前用户 PATH：C:\Users\<你>\AppData\Local\iJipu\bin
   · 请**新开一个终端**，之后就能直接敲：ijipu cli lint 我的谱.jps
   · 只对当前用户生效，不需要管理员权限
 ```
 
-**四条必须知道的口径**：
+**五条必须知道的口径**：
 
 | 事项 | 口径 |
 |---|---|
+| **写进 PATH 的是谁** | **`<安装目录>\bin`**（命令行入口目录，里面有垫片 `ijipu.cmd`）——由 TS `binDirOf()` **唯一一处**推导（Rust 只提供"安装目录"这个事实，不再自己拼一份 ✓） |
 | **注册后要不要重开终端** | **要**。已经开着的终端里环境块在进程创建时就固定了，**看不到**新的 PATH；`register` 会广播 `WM_SETTINGCHANGE`，那只帮到**之后新起**的进程 ✓ |
 | **权限** | 只写 `HKCU\Environment\Path`（**当前用户**），**不需要管理员**、不动系统级 PATH、不动别的用户 ✓（安装模式本来就是 currentUser） |
 | **只动自己那一条** | 解除时其余条目**逐字保留**（含连续分号留下的空条目）；已存在（大小写/末尾斜杠/引号不同也算）就**不重复追加**（幂等）✓ |
-| **卸载会自动解除** | 卸载器（`nsis/hooks.nsh` → `nsis/cli-path.nsh`）会把这一条摘掉，并把值的类型按原样写回；**更新流程不摘**（`$UpdateMode` 保护，免得"更新一次丢一次注册"）✓ |
+| **旧形态兼容（adj946）** | PATH 里若还留着 `adj944` 那条"安装目录本身"：`status` 报 `legacy` 且**按未注册**报（那条会跟垫片抢 `ijipu`）⇒ 点一次「注册」**顺手换掉**；`unregister` **两种形态都摘** ✓ |
+| **卸载会自动解除** | 卸载器（`nsis/hooks.nsh` → `nsis/cli-path.nsh`）会**两条都摘**（`${INSTDIR}\bin` 与 `${INSTDIR}`），并把值的类型按原样写回；**更新流程不摘**（`$UpdateMode` 保护，免得"更新一次丢一次注册"）✓ |
 
 **上限**：PATH 值超过 **2047 字符**就**不写**（明确报错 + 给三条可执行建议：先清理失效目录 / 把应用装到更短的路径 / 直接用完整路径调用）。
 理由是"写了之后某些老程序读不全"这类症状最难查 —— 宁可不写 ✓。

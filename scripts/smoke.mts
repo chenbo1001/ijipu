@@ -240,8 +240,10 @@ import { foldKeys, TOPBAR_DONATE_KEY, TOPBAR_FIXED_KIDS } from '../src/ui/topbar
 import { pickPrimary, hasShell, type ExternalFile } from '../src/store/externalOpen.ts'
 // adj944（用户需求「全局设置里注册 iJipu CLI」）：PATH 增删的**纯函数 + 编排** ——
 // 应用界面（全局设置那个按钮）与命令行（`ijipu cli register|unregister|status`）**共用这一份** ✓
+// adj946（用户实报 bug）：注册写进 PATH 的是**命令行入口目录 `<安装目录>\bin`**（`binDirOf` 是唯一一处推导）
 import {
   addDirToPath,
+  binDirOf,
   cliPathRegister,
   cliPathStatus,
   cliPathUnregister,
@@ -18231,8 +18233,10 @@ runAdj927ExternalChangeTests()
     runAdj942EmbedCliTests()
     // adj944：本段要读注入的假宿主（异步）⇒ 与收尾那行**排成一条链**（否则会在断言跑完前就打印通过 ✗）
     // adj945：手册/随包分发那组也是文件驱动的同步断言，接在同一条链上 ✓
+    // adj946：垫片 + 注册口径改成 bin 目录（用户实报 bug）—— 同样要读假宿主 ⇒ 接在链尾 ✓
     void runAdj944CliPathTests()
       .then(() => runAdj945CliManualTests())
+      .then(() => runAdj946ShimTests())
       .then(() => {
         console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
         process.exit(failed === 0 ? 0 : 1)
@@ -24067,6 +24071,12 @@ function runAdj942EmbedCliTests() {
 async function runAdj944CliPathTests() {
   console.log('[170] 注册 iJipu CLI 到当前用户 PATH（adj944）')
   const D = 'C:\\Apps\\iJipu'
+  /**
+   * adj946：**注册写进 PATH 的是命令行入口目录**（`<安装目录>\bin`）—— 编排断言一律拿它当期望值。
+   * ⚠ 这里**从 `binDirOf` 推导**（不手写一份 `'C:\\Apps\\iJipu\\bin'`）：手写就等于把口径抄成两份，
+   *   将来有人改了推导规则（或忘了拼 `\bin`），断言反而会替错误站台 ✗（AGENTS §六之二·4）。
+   */
+  const BIN = binDirOf(D)
   const readOrEmpty = (rel: string): string => (existsSync(join(root, rel)) ? readFileSync(join(root, rel), 'utf8') : '')
 
   // ---- ① 纯函数：切分 / 判定 ----
@@ -24193,7 +24203,7 @@ async function runAdj944CliPathTests() {
       st0.registered === false && st0.pathValue === '' && st0.installDir === D)
     const r1 = await cliPathRegister(a.host)
     check('adj944 编排：注册只写一次、**写后现读**即为"已注册"',
-      r1.ok === true && r1.changed === true && a.writes.length === 1 && a.writes[0] === D &&
+      r1.ok === true && r1.changed === true && a.writes.length === 1 && a.writes[0] === BIN &&
         r1.status.registered === true)
     check('adj944 编排：注册顺带写 App Paths（"运行"对话框/资源管理器地址栏也能敲 ijipu）',
       a.appPaths() === `${D}\\ijipu.exe`)
@@ -24205,11 +24215,11 @@ async function runAdj944CliPathTests() {
       r3.ok === true && r3.changed === true && a.value() === '' && a.appPaths() === null && a.writes.length === 2)
     const r4 = await cliPathUnregister(a.host)
     check('adj944 编排：再点一次「解除」⇒ 不改动（幂等）', r4.ok === true && r4.changed === false && a.writes.length === 2)
-    const b = makeHost(`C:\\Windows;${D};C:\\Other`)
+    const b = makeHost(`C:\\Windows;${BIN};C:\\Other`)
     const r5 = await cliPathUnregister(b.host)
     check('adj944 编排：解除只摘自己那条，别人的两条**逐字未动**',
       r5.ok === true && b.value() === 'C:\\Windows;C:\\Other' && b.writes.length === 1)
-    const c = makeHost('c:\\apps\\ijipu\\')
+    const c = makeHost('c:\\apps\\ijipu\\bin\\')
     const r6 = await cliPathRegister(c.host)
     check('adj944 编排：别人手写的同一目录 ⇒ 认成已注册、不重复写（负对照：写了就会多一条）',
       r6.ok === true && r6.changed === false && c.writes.length === 0)
@@ -24551,6 +24561,358 @@ function runAdj945CliManualTests() {
     check(
       'adj945 负对照⑬：不读 `commondir` 的写法把对象库指成 `<gitdir>` 自己 ⇒ 与正确值不同（判红）',
       naiveCommon(W, wtFs) === WT && wt !== null && wt.commonDir === DOT && naiveCommon(W, wtFs) !== wt.commonDir,
+    )
+  }
+}
+
+/**
+ * [172] **控制台垫片 `bin\ijipu.cmd` + 注册口径改成 bin 目录**（adj946，用户实报 bug）。
+ *
+ * 用户实报（有截图）：在 cmd 里敲 `ijipu cli lint "不如见一面.jps"`，**每一行输出前面都多一个提示符**、
+ * 退出码拿不到、PowerShell 的 `>` 写出 0 字节文件。根因：`ijipu.exe` 是 **GUI 子系统**程序 ⇒
+ * cmd **不等它**（Windows 固有行为）；adj945 只在文档里写成"注意事项"让用户绕 ✗，用户认为不可接受。
+ * 修法（照 VS Code 的成熟做法）：GUI 程序保持 GUI，另给一个**控制台垫片**做命令行入口，
+ * 注册进 PATH 的改成 `<安装目录>\bin`。
+ *
+ * 为什么这一段必须有（每一条都对应一种"会静默坏掉"的方式）：
+ *   · 垫片少写 `%*` ⇒ 参数丢了；多写一个 `cli` ⇒ 用户敲的 `ijipu cli lint …` 变成
+ *     `ijipu.exe cli cli lint …`（**实测**得到「命令 "cli" 尚未实现」✗）；
+ *   · 垫片写成 `start /wait` ⇒ **实测**重定向写出 0 字节（`start` 不给子进程传重定向句柄 ✗）；
+ *   · 垫片漏 `exit /b %ERRORLEVEL%` ⇒ 退出码又丢了（整个修复的意义没了）；
+ *   · 垫片里写中文 ⇒ cmd 按 OEM 代码页（本机 936）解析 .cmd，非 ASCII 字节在 DBCS 页上可能错位，
+ *     而**垫片坏掉 = 命令行全坏**（`scripts/git-push.bat` 的 "ASCII safe" 就是同一原因）；
+ *   · 注册口径漏了"顺手摘掉旧形态" ⇒ PATH 里更靠前的 `ijipu.exe` 把 `ijipu` 抢回去，
+ *     用户看到的还是老症状（而界面还显示"已注册"）；
+ *   · 卸载钩子只摘旧形态 ⇒ 卸载后残留一条指向 GUI exe 的项，症状复发。
+ * 所以下面**每条都有成对断言 + 负对照**（把判据喂给"故意写坏的一份"必须为假 ✓）。
+ *
+ * ⚠ 这里只测**文件内容与纯逻辑**；真机行为（cmd 里的输出顺序/退出码/重定向/双击不闪黑框）由
+ *   真机实测做（见 `docs/CLI.md` 与 `docs/CLI-手册.md` 的那两节），冒烟不去跑进程 ✗。
+ */
+async function runAdj946ShimTests() {
+  console.log('[172] 命令行垫片 bin\\ijipu.cmd + 注册口径改成 bin 目录（adj946）')
+  const readOrEmpty = (rel: string): string => (existsSync(join(root, rel)) ? readFileSync(join(root, rel), 'utf8') : '')
+  const SHIM = 'resources/bin/ijipu.cmd'
+  const shim = readOrEmpty(SHIM)
+  const shimBuf = existsSync(join(root, SHIM)) ? readFileSync(join(root, SHIM)) : Buffer.alloc(0)
+
+  // ---- ① 垫片：可执行段逐字两条（同步等待 + 透传参数 + 透传退出码）----
+  {
+    check(`adj946 垫片存在且像真脚本（${SHIM}）`, shim.length >= 500, `${shim.length} 字符`)
+    /**
+     * 只取**可执行行**（去掉空行 / `@echo off` / `rem` 注释）：
+     * 断言"这一份垫片到底会执行什么"，而不是"文本里有没有某个词"（注释里也有 `start /wait` 字样 ✓）。
+     */
+    const execLines = (src: string): string[] =>
+      src
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l !== '' && !/^rem\b/i.test(l) && !/^@echo off$/i.test(l))
+    const lines = execLines(shim)
+    check(
+      'adj946 垫片可执行段**只有两行**：`"%~dp0..\\ijipu.exe" %*` + `exit /b %ERRORLEVEL%`（同步等待 + 透传全部参数 + 透传退出码）',
+      lines.length === 2 && lines[0] === '"%~dp0..\\ijipu.exe" %*' && lines[1] === 'exit /b %ERRORLEVEL%',
+      JSON.stringify(lines),
+    )
+    /** 负对照①：把 `%*` 改成一个字都不传（参数丢掉）⇒ 判据必须判红 */
+    const dropArgs = shim.replace('"%~dp0..\\ijipu.exe" %*', '"%~dp0..\\ijipu.exe"')
+    check(
+      'adj946 负对照①：垫片不写 `%*`（参数丢掉）⇒ 判据判红',
+      dropArgs !== shim && execLines(dropArgs)[0] !== '"%~dp0..\\ijipu.exe" %*',
+    )
+    /** 负对照②：垫片擅自加一个 `cli`（＝用户敲 `ijipu cli lint` 会变成 `… cli cli lint`，实测报"命令 cli 尚未实现"） */
+    const addCli = shim.replace('"%~dp0..\\ijipu.exe" %*', '"%~dp0..\\ijipu.exe" cli %*')
+    check(
+      'adj946 负对照②：垫片擅自插入 `cli`（实测会变成 `ijipu.exe cli cli …`、报「命令 "cli" 尚未实现」）⇒ 判据判红',
+      addCli !== shim && execLines(addCli)[0] !== '"%~dp0..\\ijipu.exe" %*',
+    )
+    /** 负对照③：换成实测**更差**的 `start /wait`（等是等了、退出码也有，但重定向写出 0 字节）⇒ 判据判红 */
+    const startWait = shim.replace(
+      '"%~dp0..\\ijipu.exe" %*',
+      'start /wait "" "%~dp0..\\ijipu.exe" %*',
+    )
+    check(
+      'adj946 负对照③：换成 `start /wait`（实测重定向写出 0 字节）⇒ 判据判红',
+      startWait !== shim && execLines(startWait).length === 2 &&
+        execLines(startWait)[0] !== '"%~dp0..\\ijipu.exe" %*',
+    )
+    check(
+      'adj946 垫片**不用** `start` / 不改退出码写法（可执行段里没有第三行）',
+      !lines.some((l) => /^start\b/i.test(l)) && lines[1] === 'exit /b %ERRORLEVEL%',
+    )
+  }
+
+  // ---- ② 垫片：纯 ASCII + 无 BOM（cmd 按 OEM 代码页解析 .cmd）----
+  {
+    /**
+     * ⚠ 用 `charCodeAt` 判"非 ASCII"、**不写 `[^\x00-\x7F]` 那种正则** ✗：
+     * `\x00` 在正则字面量里是控制字符，oxlint 会报 `no-control-regex`（基线警告会 +1/处）。
+     */
+    const nonAsciiCount = (s: string): number =>
+      Array.from(s).filter((c) => (c.codePointAt(0) ?? 0) > 127).length
+    check(
+      'adj946 垫片是**纯 ASCII**（cmd 按 OEM 代码页解析 .cmd；非 ASCII 字节在 DBCS 页上会错位 —— 与 `scripts/git-push.bat` 的"ASCII safe"同一原因）',
+      shim.length > 0 && nonAsciiCount(shim) === 0,
+      `非 ASCII 字符 ${nonAsciiCount(shim)} 个`,
+    )
+    /** 负对照④：塞一个中文字符进去 ⇒ 同一条判据必须判红（证明它真在读字节） */
+    const withCjk = `${shim}\nrem 中文注释\n`
+    check(
+      'adj946 负对照④：垫片里塞一个中文注释（cmd 会按 GBK 解 UTF-8 字节）⇒ 判据判红',
+      nonAsciiCount(withCjk) > 0 && nonAsciiCount(shim) === 0,
+    )
+    check(
+      'adj946 垫片**无 UTF-8 BOM**（BOM 会被 cmd 当成命令开头 ⇒ 第一行报错）',
+      shimBuf.length > 0 && !(shimBuf[0] === 0xef && shimBuf[1] === 0xbb && shimBuf[2] === 0xbf),
+      `前 3 字节 ${Array.from(shimBuf.subarray(0, 3)).join(',')}`,
+    )
+    /**
+     * 文件头注释必须**写明为什么**（用户要求）：至少 5 条 `rem`，且提到实测对比的两种写法。
+     * 断言"注释里真写了理由"，不是"有注释"。
+     */
+    const rems = shim.split(/\r?\n/).filter((l) => /^rem\b/i.test(l))
+    check(
+      `adj946 垫片文件头写明了理由（${rems.length} 条 rem：为什么用垫片 / 为什么不用 start /wait / 为什么纯 ASCII / %* 怎么透传）`,
+      rems.length >= 8 && shim.includes('start /wait') && shim.includes('%*') && shim.includes('0-byte'),
+      `${rems.length} 条`,
+    )
+  }
+
+  // ---- ③ 口径纯函数：注册的是 `<安装目录>\bin`（唯一一处推导）----
+  {
+    const D = 'C:\\Apps\\iJipu'
+    const BIN = 'C:\\Apps\\iJipu\\bin'
+    check('adj946 `binDirOf`：安装目录 ⇒ `<安装目录>\\bin`', binDirOf(D) === BIN)
+    check(
+      'adj946 `binDirOf`：用户/别的软件手写的末尾斜杠（`\\` 或 `/`，含多个）都要归一化',
+      binDirOf('C:\\Apps\\iJipu\\') === BIN &&
+        binDirOf('C:\\Apps\\iJipu\\\\') === BIN &&
+        binDirOf('  C:\\Apps\\iJipu\\\\  ') === BIN,
+    )
+    /**
+     * 正斜杠写法（Windows 的 PATH 里 `/` 与 `\` 等价）：**比较口径**要认成同一个目录 ✓
+     * （`binDirOf` 只归一化末尾分隔符、不动路径中间 —— UNC 开头的 `\\` 不能被合并 ✗）。
+     */
+    check(
+      'adj946 `binDirOf` + `normalizePathEntry`：正斜杠写法（`C:/Apps/iJipu/`）在**比较时**等于 `C:\\Apps\\iJipu\\bin`',
+      binDirOf('C:/Apps/iJipu/') === 'C:/Apps/iJipu\\bin' &&
+        normalizePathEntry(binDirOf('C:/Apps/iJipu/')) === normalizePathEntry(BIN) &&
+        pathHasDir('C:\\Windows;C:/Apps/iJipu/bin;C:\\Other', BIN) === true,
+    )
+    /** 负对照⑤：旧口径（注册安装目录本身）—— 与现行口径**必须不同**，且 `pathHasDir` 认不出来 */
+    const legacyDir = (installDir: string): string => installDir
+    check(
+      'adj946 负对照⑤：旧口径（把安装目录本身当注册目标）⇒ 与 `binDirOf` 不同，且认不出只含 bin 的 PATH',
+      legacyDir(D) !== binDirOf(D) && pathHasDir(BIN, legacyDir(D)) === false && pathHasDir(BIN, binDirOf(D)) === true,
+    )
+  }
+
+  // ---- ④ 编排：注册写 bin / 认旧形态 / 迁移 / 解除两种都摘 ----
+  {
+    const D = 'C:\\Apps\\iJipu'
+    const BIN = binDirOf(D)
+    const makeHost = (pathValue: string | null, installDir = D) => {
+      let value = pathValue
+      let appPaths: string | null = null
+      const writes: string[] = []
+      const host: PathHostIo = {
+        async installDir() {
+          return installDir
+        },
+        async exePath() {
+          return `${installDir}\\ijipu.exe`
+        },
+        async readPath() {
+          return value
+        },
+        async writePath(next) {
+          writes.push(next)
+          value = next
+        },
+        async readAppPaths() {
+          return appPaths
+        },
+        async writeAppPaths(exe) {
+          appPaths = exe
+        },
+        async removeAppPaths() {
+          appPaths = null
+        },
+      }
+      return { host, writes, value: () => value, appPaths: () => appPaths }
+    }
+
+    const clean = makeHost('C:\\Windows;C:\\Other')
+    const st = await cliPathStatus(clean.host)
+    check(
+      'adj946 status：PATH 里没有我们那条 ⇒ `registered=false` + `legacy=false`，并如实给出 `binDir`',
+      st.registered === false && st.legacy === false && st.binDir === BIN && st.installDir === D,
+    )
+    const reg = await cliPathRegister(clean.host)
+    check(
+      'adj946 注册：写进去的是**命令行入口目录**（不是安装目录），别人的两条逐字未动',
+      reg.ok === true && reg.status.registered === true && clean.writes.length === 1 &&
+        clean.writes[0] === `C:\\Windows;C:\\Other;${BIN}`,
+      JSON.stringify(clean.writes),
+    )
+
+    /** 旧形态（adj944 写进去的安装目录本身）⇒ 按**未注册**报，且点一次「注册」就换成 bin ✓ */
+    const legacyOnly = makeHost(`C:\\Windows;${D};C:\\Other`)
+    const stL = await cliPathStatus(legacyOnly.host)
+    check(
+      'adj946 status：PATH 里只有**旧形态**（安装目录本身）⇒ `legacy=true` 且 `registered=false`（界面会提示 + 按钮显示「注册」⇒ 自愈）',
+      stL.legacy === true && stL.registered === false,
+    )
+    const fix = await cliPathRegister(legacyOnly.host)
+    check(
+      'adj946 注册**迁移旧形态**：`C:\\Windows;<安装目录>;C:\\Other` ⇒ `C:\\Windows;C:\\Other;<bin>`（旧条目摘掉、别人的两条逐字未动）',
+      fix.ok === true && legacyOnly.writes.length === 1 &&
+        legacyOnly.value() === `C:\\Windows;C:\\Other;${BIN}` && fix.status.registered === true &&
+        fix.status.legacy === false,
+      JSON.stringify(legacyOnly.value()),
+    )
+    check(
+      'adj946 迁移后**再点一次**「注册」⇒ 一个字都不写（幂等）',
+      (await cliPathRegister(legacyOnly.host)).changed === false && legacyOnly.writes.length === 1,
+    )
+
+    const both = makeHost(`${D};${BIN}`)
+    const stB = await cliPathStatus(both.host)
+    check(
+      'adj946 status：两种形态同时在 ⇒ 仍按**未注册**报（旧形态可能排在前面把 `ijipu` 抢回 exe）',
+      stB.legacy === true && stB.registered === false,
+    )
+    const fix2 = await cliPathRegister(both.host)
+    check(
+      'adj946 两种同时在 ⇒ 点「注册」只把旧形态摘掉（bin 已在、不重复追加）',
+      fix2.ok === true && fix2.changed === true && both.value() === `${BIN}` &&
+        fix2.status.registered === true && fix2.status.legacy === false,
+      JSON.stringify(both.value()),
+    )
+
+    const un = makeHost(`C:\\Windows;${BIN};C:\\Other`)
+    const r6 = await cliPathUnregister(un.host)
+    check(
+      'adj946 解除：摘掉 bin 那一条，别人的两条逐字未动',
+      r6.ok === true && un.value() === 'C:\\Windows;C:\\Other' && r6.status.registered === false,
+    )
+    /** 解除也要认得**只留旧形态**的情形（用户从 adj944 升上来、先点「解除」） */
+    const unLegacy = makeHost(`C:\\Windows;${D};C:\\Other`)
+    const r7 = await cliPathUnregister(unLegacy.host)
+    check(
+      'adj946 解除**也认旧形态**：只留"安装目录本身"时点「解除」⇒ 一并摘掉（不留尾巴）',
+      r7.ok === true && r7.changed === true && unLegacy.value() === 'C:\\Windows;C:\\Other',
+      JSON.stringify(unLegacy.value()),
+    )
+    const unBoth = makeHost(`${BIN};${D}`)
+    const r8 = await cliPathUnregister(unBoth.host)
+    check(
+      'adj946 解除：两种形态同时在 ⇒ 两条一起摘（幂等：再点一次不改动）',
+      r8.ok === true && r8.changed === true && unBoth.value() === '' &&
+        (await cliPathUnregister(unBoth.host)).changed === false,
+    )
+    /** 负对照⑥：只摘 bin、不管旧形态的写法 ⇒ 在"只留旧形态"那份 PATH 上**一个字都不改**（＝解除失败） */
+    const binOnlyRemove = (value: string, installDir: string): string => removeDirFromPath(value, binDirOf(installDir))
+    check(
+      'adj946 负对照⑥：解除只摘 bin、不认旧形态的写法 ⇒ 在"只留旧形态"的 PATH 上原样返回（＝解除失败）',
+      binOnlyRemove(`C:\\Windows;${D};C:\\Other`, D) === `C:\\Windows;${D};C:\\Other` &&
+        unLegacy.value() === 'C:\\Windows;C:\\Other',
+    )
+  }
+
+  // ---- ⑤ 闸门：随包映射 / 界面文案 / NSIS 卸载 / 文档口径 ----
+  {
+    // ① 随包：仓库里那份垫片**直接映射**进安装目录的 bin（不复制、单一真源 ✓）
+    const conf = readOrEmpty('src-tauri/tauri.conf.json')
+    const confHasShim = /"\.\.\/resources\/bin\/ijipu\.cmd"\s*:\s*"bin\/ijipu\.cmd"/.test(conf)
+    check(
+      'adj946 随包：`../resources/bin/ijipu.cmd` → 安装目录 `bin/ijipu.cmd`（直接映射仓库里那份，不复制）',
+      confHasShim,
+    )
+    check(
+      'adj946 负对照⑦：把这条映射从 conf 删掉（＝安装包里没有垫片、注册进 PATH 的 bin 是空目录）⇒ 判据判红',
+      !/"\.\.\/resources\/bin\/ijipu\.cmd"\s*:\s*"bin\/ijipu\.cmd"/.test(conf.split('\n').filter((l) => !l.includes('resources/bin/ijipu.cmd')).join('\n')) &&
+        confHasShim,
+    )
+    /** 打包自检脚本里必须有对应的"清单断言"（否则上面那条只是"配置写了、真没进包"） */
+    const ci = readOrEmpty('scripts/check-installer.mjs')
+    const ciHasShim = ci.includes('bin[\\\\/]ijipu\\.cmd')
+    check(
+      'adj946 `check-installer` 里有"安装清单必须含 `bin\\ijipu.cmd`"的断言（配负对照）',
+      ciHasShim && ci.includes("'../resources/bin/ijipu.cmd'"),
+    )
+    check(
+      'adj946 负对照⑧：把 check-installer 里那两处（正则 / 源映射）删掉 ⇒ 同一条判据判红',
+      ciHasShim && ci.includes("'../resources/bin/ijipu.cmd'") &&
+        !ci.split('\n').filter((l) => !l.includes('ijipu.cmd')).join('\n').includes("'../resources/bin/ijipu.cmd'"),
+    )
+
+    // ② 界面文案：口径改成 bin 目录，且旧形态要能被看见（文案只在 copy.ts ✓）
+    const copySrc = readOrEmpty('src/brand/copy.ts')
+    const dialog = readOrEmpty('src/dialogs/PageConfigDialog.tsx')
+    const stripTsComments = (src: string): string => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    check(
+      'adj946 文案：`cliPathCopy` 里有"命令行入口目录（写进 PATH 的就是它）"与旧形态提示（`binDirLabel` / `legacyHint`）',
+      copySrc.includes("binDirLabel: '命令行入口目录（写进 PATH 的就是它）'") &&
+        copySrc.includes('legacyHint') && copySrc.includes('旧的注册形态'),
+    )
+    check(
+      'adj946 界面：状态明细显示 `cliStatus.binDir`，旧形态提示走 `cliStatus?.legacy` + `cliPathCopy.legacyHint`（组件里不写字面量）',
+      dialog.includes('cliStatus.binDir') && dialog.includes('cliStatus?.legacy') && dialog.includes('cliPathCopy.legacyHint'),
+    )
+    check(
+      'adj946 负对照⑨：组件正文里没有「命令行入口目录」这个硬编码字面量（只在 `brand/copy.ts`）',
+      !stripTsComments(dialog).includes("'命令行入口目录") && !stripTsComments(dialog).includes('"命令行入口目录') &&
+        copySrc.includes('命令行入口目录'),
+    )
+
+    // ③ NSIS 卸载：**两种形态都摘**（现行 bin + adj944 旧形态）
+    const nsh = readOrEmpty('src-tauri/nsis/cli-path.nsh')
+    const dropsBin = nsh.includes('StrCpy $R0 "$INSTDIR\\bin"')
+    const dropsLegacy = nsh.includes('StrCpy $R0 "$INSTDIR"')
+    check(
+      'adj946 NSIS 卸载：**两种形态都摘**（`$INSTDIR\\bin` 现行 + `$INSTDIR` 旧形态），且两次的"改过没有"累计后再写回',
+      dropsBin && dropsLegacy && nsh.includes('StrCpy $R9 $R1') && nsh.includes('StrCpy $R4 "${IJIPU_ENV_KEY}"'),
+    )
+    check(
+      'adj946 负对照⑩：卸载只摘旧形态（漏掉 `$INSTDIR\\bin`）⇒ 判据判红（卸载后残留一条指向空 bin 的项）',
+      !nsh.split('\n').filter((l) => !l.includes('$INSTDIR\\bin')).join('\n').includes('StrCpy $R0 "$INSTDIR\\bin"') &&
+        dropsBin && dropsLegacy,
+    )
+
+    // ④ 文档口径：手册要说"现在直接敲即可"，并说明垫片在哪、旧终端要重开
+    const manual = readOrEmpty('docs/CLI-手册.md')
+    const cliDoc = readOrEmpty('docs/CLI.md')
+    check(
+      'adj946 手册：写明"注册的是 bin 目录 / 里面有控制台垫片 ijipu.cmd"与"现在直接敲即可"',
+      manual.includes('bin\\ijipu.cmd') && manual.includes('现在直接敲即可'),
+    )
+    check(
+      'adj946 负对照⑪：把"现在直接敲即可"那句从手册抹掉（＝手册还教用户绕）⇒ 判据判红',
+      (() => {
+        const cut = manual.split('现在直接敲即可').join('')
+        return cut !== manual && !cut.includes('现在直接敲即可') && manual.includes('bin\\ijipu.cmd')
+      })(),
+    )
+    check(
+      'adj946 手册与 `docs/CLI.md` 都写到了垫片这件事（维护口径与使用口径不能只改一边）',
+      cliDoc.includes('ijipu.cmd') && cliDoc.includes('垫片'),
+    )
+    check(
+      'adj946 负对照⑫：把 `docs/CLI.md` 里"垫片"的说法抹掉 ⇒ 判据判红',
+      (() => {
+        const cut = cliDoc.split('垫片').join('')
+        return cut !== cliDoc && !cut.includes('垫片') && cliDoc.includes('ijipu.cmd')
+      })(),
+    )
+    /** 关键句仍在：注册后**要新开一个终端**（老终端看不到新 PATH）—— 手册与文案两处都要有 ✓ */
+    check(
+      'adj946 关键句仍在：手册与界面文案都保留"新开一个终端"（负对照见 adj945 ⑨ 与下面这条）',
+      manual.includes('新开一个终端') && copySrc.includes('新开一个终端'),
+    )
+    check(
+      'adj946 负对照⑬：把文案里的"新开一个终端"抹掉 ⇒ 判据判红',
+      !copySrc.split('新开一个终端').join('').includes('新开一个终端') && copySrc.includes('新开一个终端'),
     )
   }
 }

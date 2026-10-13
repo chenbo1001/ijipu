@@ -1,11 +1,14 @@
 /**
- * store/cliPath.ts — 应用侧「注册 iJipu CLI 到当前用户 PATH」的 **IO 接线**（adj944）
+ * store/cliPath.ts — 应用侧「注册 iJipu 命令行入口到当前用户 PATH」的 **IO 接线**（adj944；adj946 改口径）
  *
  * 为什么单独一个文件：**纯逻辑不在这里**（那在 `packages/ijipu-cli/src/envPath.ts`：
- * `addDirToPath` / `removeDirFromPath` / `pathHasDir` + 三个编排函数）——
+ * `binDirOf` / `addDirToPath` / `removeDirFromPath` / `pathHasDir` + 三个编排函数）——
  * 那是桌面端按钮与 `ijipu cli register|unregister|status` **共用的一份实现** ✓
  * （AGENTS §六之二·4「数值口径必须同源」的同一道理：口径只许有一处）。
  * 本文件只做一件事：把 Rust 侧的注册表命令接成 `envPath.ts` 要的 `PathHostIo`。
+ *
+ * **注册写进 PATH 的是 `<安装目录>\bin`**（命令行入口垫片 `ijipu.cmd` 在那里；目录由
+ * `envPath.ts` 的 `binDirOf` 从安装目录推导，**不在这里再拼一遍** ✓）—— 理由见该文件头。
  *
  * Rust 侧的对应命令（`src-tauri/src/cli_path.rs`）：
  *  · `cli_path_status`      → 现读安装目录 / PATH 原值 / 原值类型 / App Paths / 我们的备份

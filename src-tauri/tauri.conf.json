@@ -60,7 +60,8 @@
       "../resources/soundfonts/README.md": "soundfonts/README.md",
       "../LICENSE": "LICENSE",
       "../THIRD-PARTY.md": "THIRD-PARTY.md",
-      "../docs/CLI-手册.md": "docs/iJipu-CLI-手册.md"
+      "../docs/CLI-手册.md": "docs/iJipu-CLI-手册.md",
+      "../resources/bin/ijipu.cmd": "bin/ijipu.cmd"
     }
   }
 }

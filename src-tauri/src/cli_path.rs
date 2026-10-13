@@ -1,12 +1,20 @@
 /**
- * cli_path.rs — 把 iJipu **注册进 / 解除出当前用户 PATH**（adj944，用户需求）
+ * cli_path.rs — 把 iJipu **注册进 / 解除出当前用户 PATH**（adj944；adj946 改口径）
  *
  * 用户原话：「需要在全局设置里添加一个注册 iJipu CLI 的提示和按钮，未注册时显示「注册」、
  * 已注册时显示「解除」；**只有注册后，才能在打开终端时就能 `ijipu cli`**」。
- * 方案（用户已选定）：**注册 = 把"安装目录本身"写进当前用户 PATH**（不建 bin 垫片 ✓）。
+ *
+ * ⚠ **口径（adj946，用户实报 bug 后改）**：注册写进 PATH 的是**安装目录下的 `bin` 目录**
+ *   （`<安装目录>\bin`，里面有控制台垫片 `ijipu.cmd`），**不是安装目录本身** ✗。
+ *   原因：`ijipu.exe` 是 GUI 子系统程序 ⇒ cmd 不等它（提示符夹在输出中间、退出码拿不到、
+ *   PowerShell 的 `>` 写出 0 字节文件）；cmd **会等批处理文件** ⇒ 垫片一次性修好这四条。
+ *   **这条目录由 TS 侧 `binDirOf()` 从安装目录推导**（`packages/ijipu-cli/src/envPath.ts`）：
+ *   本文件只提供"安装目录"这个事实，**不再自己拼一份** `\bin` ✓
+ *   （同一几何/字符串口径只许一处定义，AGENTS §六之二·4；NSIS 卸载钩子里那份是跨语言、
+ *    由 `scripts/smoke.mts` 的 `adj946` 闸门逐字核对）。
  *
  * ## 分工（**只有一份实现**，两端共用）
- *  · **字符串口径与编排**在 TS：`packages/ijipu-cli/src/envPath.ts`（`addDirToPath` /
+ *  · **字符串口径与编排**在 TS：`packages/ijipu-cli/src/envPath.ts`（`binDirOf` / `addDirToPath` /
  *    `removeDirFromPath` / `pathHasDir` + 三个编排函数）——应用界面（全局设置里的按钮）与
  *    命令行（`ijipu cli register|unregister|status`）调用的**就是同一组函数** ✓；
  *  · **本文件只做"碰系统"**：读写注册表、写前备份、写完**回读校验**、广播 `WM_SETTINGCHANGE`。
@@ -54,7 +62,7 @@ fn app_paths_key() -> String {
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CliPathStatus {
-    /// 安装目录（= 要写进 PATH 的那一条 = exe 所在目录）
+    /// 安装目录（= `ijipu.exe` 所在目录；**只用于显示**，PATH 里写的是它下面的 `bin`，见文件头）
     pub install_dir: String,
     /// `ijipu.exe` 的完整路径（App Paths 用）
     pub exe_path: String,
@@ -72,12 +80,15 @@ pub struct CliPathStatus {
 // exe / 安装目录
 // ---------------------------------------------------------------------------
 
-/// `ijipu.exe` 的完整路径（**注册的就是它的所在目录**）
+/// `ijipu.exe` 的完整路径（**App Paths 指向它**；PATH 里那条走的却是 `bin` 里的垫片，见文件头）
 pub fn exe_path() -> Result<PathBuf, String> {
     std::env::current_exe().map_err(|e| format!("取当前程序路径失败：{e}"))
 }
 
 /// 安装目录 = exe 所在目录（Windows 下 `resource_dir()` 与它是同一处，见 lib.rs 的说明）
+///
+/// ⚠ adj946：**它自己不再进 PATH** ✗ —— 进 PATH 的是 `<安装目录>\bin`，那条由 TS 的
+/// `binDirOf()` 推导（见文件头"口径"）。
 pub fn install_dir() -> Result<PathBuf, String> {
     let exe = exe_path()?;
     exe.parent()
@@ -85,7 +96,7 @@ pub fn install_dir() -> Result<PathBuf, String> {
         .ok_or_else(|| format!("取安装目录失败：{} 没有父目录", exe.display()))
 }
 
-/// 安装目录（字符串版；给前端/CLI 与嵌入宿主用）
+/// 安装目录（字符串版；给前端/CLI 与嵌入宿主用 —— 前端据此推导 `bin` 入口目录）
 pub fn install_dir_string() -> Result<String, String> {
     Ok(install_dir()?.to_string_lossy().into_owned())
 }

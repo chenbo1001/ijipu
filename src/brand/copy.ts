@@ -716,11 +716,15 @@ export const externalChangeCopy = {
  * adj944（用户需求，2026-10 原话）：「需要在全局设置里添加一个注册 iJipu CLI 的提示和按钮，
  * 未注册时显示「注册」，已注册时显示「解除」；**只有注册后，才能在打开终端时就能 `ijipu cli`**」。
  *
- * 口径（用户要求逐条落在这里）：
- *  · 「注册」= 把**安装目录本身**写进**当前用户**的 PATH（不建 bin 垫片 ✓）；
+ * 口径（用户要求逐条落在这里；**adj946 改**）：
+ *  · 「注册」= 把**命令行入口目录 `<安装目录>\bin`** 写进**当前用户**的 PATH ——
+ *    **不是安装目录本身** ✗：`ijipu.exe` 是 GUI 子系统程序，cmd **不等它**（提示符会夹在输出中间、
+ *    退出码拿不到、PowerShell 的 `>` 写出 0 字节文件，用户截图实报）；`bin\ijipu.cmd` 是**控制台垫片**，
+ *    cmd **会等批处理文件** ⇒ 输出顺序/退出码/重定向一次修好，而双击 `.jps` 照旧不闪黑框 ✓；
  *  · 状态**读系统实况**（现读 `HKCU\Environment\Path`）⇒ 用户手动改过 PATH 也如实反映 ✓；
  *  · 两条提示必须写清：① **注册后要新开一个终端**才生效（老终端看不到）；
  *    ② **仅对当前用户生效、不需要管理员** ✓；
+ *  · **旧形态**（adj944 曾把安装目录本身写进 PATH）要能识别 + 顺手换掉（否则它会跟垫片抢 `ijipu` ✗）；
  *  · 失败要把**原因**显示出来（不是笼统"失败了" ✗）。
  */
 export const cliPathCopy = {
@@ -728,10 +732,11 @@ export const cliPathCopy = {
   tabLabel: '命令行',
   /** 组标题 */
   groupTitle: '注册到命令行',
-  /** 一行说明：注册之后到底能得到什么 */
+  /** 一行说明：注册之后到底能得到什么（并点明"注册的是 bin 目录"这个关键口径） */
   intro:
-    '把 iJipu 的安装目录加进「当前用户」的 PATH，之后在终端里就能直接敲 ijipu cli …' +
-    '（例如 ijipu cli lint 我的谱.jps），不必再写一长串完整路径。',
+    '把 iJipu 的**命令行入口目录**（安装目录下的 bin）加进「当前用户」的 PATH，' +
+    '之后在终端里就能直接敲 ijipu cli …（例如 ijipu cli lint 我的谱.jps），不必再写一长串完整路径。' +
+    '这个 bin 里放的是控制台垫片 ijipu.cmd：输出顺序、退出码、重定向都正常，双击 .jps 也照旧打开界面。',
   /** 提示①（用户指定必须写清）：新终端才生效 */
   hintNewTerminal: '注册后要「新开一个终端」才生效 —— 已经开着的终端里看不到新的 PATH。',
   /** 提示②（用户指定必须写清）：只对当前用户生效、不用管理员 */
@@ -746,8 +751,18 @@ export const cliPathCopy = {
   statusWebOnly: '网页版不支持（要读写当前用户的 PATH，只有桌面版能做）',
   /** 状态行标签 */
   statusLabel: '当前状态',
-  /** 安装目录标签 */
+  /** 安装目录标签（只作显示；真正进 PATH 的是下面的命令行入口目录） */
   installDirLabel: '安装目录',
+  /** 命令行入口目录标签（adj946：**写进 PATH 的就是它**） */
+  binDirLabel: '命令行入口目录（写进 PATH 的就是它）',
+  /**
+   * adj946：PATH 里还留着**旧的注册形态**（安装目录本身，adj944 的口径）。
+   * 必须说出来 —— 它通常排在前面，会把 `ijipu` 抢回成 `ijipu.exe`（于是又变回用户实报的症状 ✗）；
+   * 点一次「注册」就会把它换成命令行入口目录 ✓。
+   */
+  legacyHint:
+    '⚠ 检测到「旧的注册形态」：PATH 里还有一条**安装目录本身**（旧版本注册的）。' +
+    '它会跟 bin 里的垫片抢 ijipu ⇒ 点一次「注册」会自动把它换成命令行入口目录（其余条目逐字不动）。',
   /** PATH 用量（离上限还有多远） */
   pathUsage: (n: number, limit: number) => `当前用户 PATH：${n} / ${limit} 字符`,
   /** App Paths（可选便利）标签 */
@@ -780,12 +795,12 @@ export const cliPathCopy = {
   manualWebOnly: '网页版没有这个能力（要打开本机文件，只有桌面版能做）',
   /** 打开失败：接**原因原文**（Rust 侧已带上"找过的路径 / 系统报的错"） */
   manualFailed: (reason: string) => `打不开 CLI 手册：${reason}`,
-  /** 操作成功：注册（`changed=false` = 本来就有） */
+  /** 操作成功：注册（`changed=false` = 本来就有；`dir` = **命令行入口目录**，不是安装目录 ✓） */
   okRegistered: (dir: string, changed: boolean) =>
     changed
-      ? `已注册 ✓ 安装目录已加入当前用户 PATH：${dir}`
+      ? `已注册 ✓ 命令行入口目录已加入当前用户 PATH：${dir}`
       : `本来就是已注册状态 ✓（PATH 里已有这一条，未重复写入）：${dir}`,
-  /** 操作成功：解除（`changed=false` = 本来就没有） */
+  /** 操作成功：解除（`changed=false` = 本来就没有；`dir` = **命令行入口目录**） */
   okUnregistered: (dir: string, changed: boolean) =>
     changed
       ? `已解除 ✓ 已从当前用户 PATH 里摘掉：${dir}（其余条目逐字未动）`
@@ -797,5 +812,5 @@ export const cliPathCopy = {
     `注册后当前用户 PATH 会有 ${length} 字符，超过上限 ${limit} ⇒ 未写入（PATH 一个字都没改）。` +
     '建议：① 先在「系统属性 → 环境变量」里删掉 PATH 中已经不存在的目录（反复装卸的软件常留一堆）；' +
     '② 或把 iJipu 装到更短的路径（例如 C:\\iJipu）后再注册；' +
-    '③ 也可以不动 PATH，直接用完整路径调用：<安装目录>\\ijipu.exe cli lint 我的谱.jps',
+    '③ 也可以不动 PATH，直接用完整路径调用：<安装目录>\\bin\\ijipu.cmd cli lint 我的谱.jps',
 } as const

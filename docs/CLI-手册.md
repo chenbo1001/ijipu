@@ -3,7 +3,8 @@
 > 这份文件讲**怎么用**（面向使用者）。命令行的**设计口径、协议与维护说明**在
 > `docs/CLI.md`（面向改代码的人）——两份分工不同，别把维护细节抄到这里。
 >
-> - 适用版本：**iJipu 0.58.0**（内嵌命令行 `adj942` / 注册 PATH `adj944` 起）
+> - 适用版本：**iJipu 0.58.0**（内嵌命令行 `adj942` / 注册 PATH `adj944` 起 /
+>   **控制台垫片 `bin\ijipu.cmd` `adj946` 起**）
 > - 许可：**AGPL-3.0** ｜ 源码与问题反馈：<https://github.com/snailhome/ijipu>
 > - 装完 iJipu 就有命令行，**不需要另外装 Node**，也不需要联网。
 
@@ -11,7 +12,7 @@
 
 ## 一、一分钟上手
 
-### 1.1 调用形态：`ijipu.exe cli <命令>`
+### 1.1 调用形态：`ijipu cli <命令>`
 
 装了 iJipu 之后，`ijipu.exe` 就在**安装目录**里（默认 `%LOCALAPPDATA%\iJipu`）。
 让它跑命令行，要显式写第一个参数 `cli`：
@@ -23,30 +24,44 @@ ijipu.exe cli <命令> [选项]
 - 只是查看用法、版本号，可以直接敲（不用注册）：
 
   ```text
-  > "%LOCALAPPDATA%\iJipu\ijipu.exe" cli --version
+  > "%LOCALAPPDATA%\iJipu\bin\ijipu.cmd" cli --version
   iJipu 0.58.0
   ```
 
+  ⚠ 上面用的是**命令行入口垫片**（`bin\ijipu.cmd`）。若直呼 `ijipu.exe` 本体，
+  **cmd 不会等它**（GUI 子系统程序）⇒ 输出顺序、退出码、`>` 重定向都不可靠（原因见 §1.3）；
+  注册之后（§1.2）这两种路径都可以写成简短的一句：`ijipu cli <命令> [选项]` ✓
+
 - ⚠ **第一个参数必须恰好是 `cli`**。不带 `cli` 时（双击 `.jps`、`ijipu.exe 我的谱.jps`）
   照旧**打开图形界面** —— 命令行与图形界面用的是同一个 exe，靠这个参数分流。
+  垫片是**透明**的（参数原样转交），所以你敲的仍然是 `ijipu cli …`，不是 `ijipu lint …`。
 
 ### 1.2 注册之后，终端里直接敲 `ijipu cli …`（推荐）
 
 每次都写一大串完整路径太麻烦。在应用的
-**底栏 →「全局」→「命令行」** 子页签里点一次「**注册**」，安装目录就进了
+**底栏 →「全局」→「命令行」** 子页签里点一次「**注册**」，就进了
 **当前用户**的 PATH，之后新开的终端里可以直接敲：
 
 ```text
 > ijipu cli lint 我的谱.jps
 ```
 
+**注册进去的是「命令行入口目录」`<安装目录>\bin`**，里面放的是一个小小的控制台垫片
+`bin\ijipu.cmd`（`ijipu.exe` 本体**不进 PATH**）。这样做的原因见 §1.3 —— 一句话：
+**现在直接敲即可，输出顺序、退出码、重定向都正常**。
+
+> **旧终端要重开**：注册只对新起的进程生效（已经开着的终端在启动那一刻就把环境变量固定了）。
+> 注册后**新开一个终端**才敲得到 `ijipu`。
+
 注册等价于在终端里跑（两者是同一份实现）：
 
 ```text
-> ijipu.exe cli register
-已注册 ✓ 安装目录已加入当前用户 PATH：C:\Users\<你>\AppData\Local\iJipu
+> "%LOCALAPPDATA%\iJipu\ijipu.exe" cli register
+已注册 ✓ 命令行入口目录已加入当前用户 PATH：C:\Users\<你>\AppData\Local\iJipu\bin
   · 请**新开一个终端**，之后就能直接敲：ijipu cli lint 我的谱.jps
   · 只对当前用户生效，不需要管理员权限
+  · 这一条是**命令行入口目录**（里面有控制台垫片 ijipu.cmd）：输出顺序、退出码、重定向都正常 ✓，
+    双击 .jps 照旧打开界面、不闪黑框
 ```
 
 三条必须知道的事：
@@ -57,22 +72,32 @@ ijipu.exe cli <命令> [选项]
 | **只对当前用户生效** | 只写当前用户的 PATH（`HKCU\Environment\Path`），**不需要管理员权限**，不动系统级 PATH，也不动别的用户。 |
 | **随时可以解除** | `ijipu cli unregister`（或设置里那个按钮）会把自己那一条摘掉，**其余条目逐字不动**。卸载应用时也会自动解除。 |
 
-### 1.3 Windows 控制台注意事项（⚠ 这一段最容易踩坑）
+### 1.3 为什么要有那个 `bin\ijipu.cmd` 垫片（Windows 控制台那点事）
 
 `ijipu.exe` 是 **GUI 子系统**程序（好处是双击 `.jps` 不弹黑框）。代价是
 **cmd 与 PowerShell 都不会等它跑完** —— 这是 Windows 的固有行为，不是本命令行的毛病
-（`code.exe`、`sublime_text.exe` 也一样）。
+（`code.exe`、`sublime_text.exe` 也一样）：
 
-| shell 写法 | 输出看得见吗 | 拿得到退出码吗 |
+- cmd 会**先把下一个提示符打出来**，我们的输出随后才补上去 ⇒ 看起来「每一行前面都多一个提示符」；
+- `%ERRORLEVEL%` / `$LASTEXITCODE` 留下的是**上一条命令**的值 ⇒ 脚本判断不了成败；
+- PowerShell 的 `>` 会写出一个 **0 字节**文件；`Start-Process -Wait -PassThru` 才拿得到退出码。
+
+**现在这些问题都没有了**：PATH 里放的是控制台垫片 `bin\ijipu.cmd`，而 **cmd 会等批处理文件**
+⇒ 输出顺序、退出码、`>` 重定向一次性都正常，同时 `ijipu.exe` 仍是 GUI 程序（双击照旧不闪黑框）。
+
+| 写法 | 输出看得见吗 | 拿得到退出码吗 |
 |---|---|---|
-| 交互式终端里直接敲 `ijipu.exe cli lint 我的谱.jps` | ✓ 打到当前终端 | ✗ **拿不到**（`$LASTEXITCODE` 是上一条命令的旧值） |
-| PowerShell 管道：`ijipu.exe cli lint 我的谱.jps \| Set-Content out.txt` | ✓ 写进文件（UTF-8） | ✓ `$LASTEXITCODE` |
-| PowerShell 严格同步：`Start-Process ijipu.exe -ArgumentList 'cli','lint','-i','我的谱.jps' -Wait -PassThru -NoNewWindow` | ✓（要 `-NoNewWindow`） | ✓ `$p.ExitCode` |
-| cmd 重定向：`cmd /d /c "ijipu.exe cli lint 我的谱.jps > out.txt"` | ✓ 真写进文件（UTF-8） | ✗（cmd 同样不等它） |
-| PowerShell 重定向：`ijipu.exe cli lint 我的谱.jps > out.txt` | ✗ **文件会是 0 字节** | ✗ |
+| `ijipu cli lint 我的谱.jps`（垫片，注册之后） | ✓ 紧跟在自己那条命令后面 | ✓ `%ERRORLEVEL%` / `$LASTEXITCODE` |
+| `ijipu cli lint 我的谱.jps > out.txt` | ✓ 真写进文件（UTF-8，不再是 0 字节） | ✓ |
+| 直接调 exe：`"%LOCALAPPDATA%\iJipu\ijipu.exe" cli lint 我的谱.jps` | ✗ 提示符会夹在输出中间 | ✗ 拿到的是旧值 |
+| 绕过垫片时的老办法：PowerShell `Start-Process -Wait -PassThru -NoNewWindow` | ✓（要 `-NoNewWindow`） | ✓ `$p.ExitCode` |
 
-**结论**：脚本里要「输出 + 退出码」就用上表第 2 行或第 3 行；要写文件用
-`| Set-Content`（PowerShell）或 `cmd /d /c "… > 文件"`。**不要用 PowerShell 的 `>`**。
+> **兜底**：不想注册 PATH 时，用垫片的**完整路径**调用也一样好 ——
+> `"%LOCALAPPDATA%\iJipu\bin\ijipu.cmd" cli lint 我的谱.jps` ✓
+> （**别**直接调 `ijipu.exe`：上面表格第 3 行那两条毛病会回来。）
+>
+> 垫片是**透明**的：它只把参数原样转给 `ijipu.exe`，**不会**替你补 `cli` 子命令 ⇒
+> 命令行形态仍然是 `ijipu cli <命令>`；`ijipu 我的谱.jps`（不带 `cli`）照旧打开图形界面。
 
 ---
 
@@ -390,6 +415,7 @@ Register-ArgumentCompleter -Native -CommandName ijipu -ScriptBlock {
 > ijipu.exe cli status
 iJipu CLI 注册状态：未注册 ✗（终端里还敲不了 ijipu）
   安装目录：C:\Users\<你>\AppData\Local\iJipu
+  命令行入口目录（写进 PATH 的就是它）：C:\Users\<你>\AppData\Local\iJipu\bin
   当前用户 PATH：519 / 2047 字符
   App Paths：（未注册）
   注册：ijipu cli register（注册后**新开一个终端**才生效；只对当前用户生效、不需要管理员）
@@ -397,17 +423,19 @@ iJipu CLI 注册状态：未注册 ✗（终端里还敲不了 ijipu）
 
 ```text
 > ijipu.exe cli register
-已注册 ✓ 安装目录已加入当前用户 PATH：C:\Users\<你>\AppData\Local\iJipu
+已注册 ✓ 命令行入口目录已加入当前用户 PATH：C:\Users\<你>\AppData\Local\iJipu\bin
   · 请**新开一个终端**，之后就能直接敲：ijipu cli lint 我的谱.jps
   · 只对当前用户生效，不需要管理员权限
+  · 这一条是**命令行入口目录**（里面有控制台垫片 ijipu.cmd）：输出顺序、退出码、重定向都正常 ✓，
+    双击 .jps 照旧打开界面、不闪黑框
 
 > ijipu.exe cli register        # 再点一次：幂等，一个字都不写
-已是注册状态 ✓（PATH 里本来就有这一条，未重复写入）：C:\Users\<你>\AppData\Local\iJipu
+已是注册状态 ✓（PATH 里本来就有这一条，未重复写入）：C:\Users\<你>\AppData\Local\iJipu\bin
 ```
 
 ```text
 > ijipu.exe cli unregister
-已解除 ✓ 已从当前用户 PATH 里摘掉：C:\Users\<你>\AppData\Local\iJipu
+已解除 ✓ 已从当前用户 PATH 里摘掉：C:\Users\<你>\AppData\Local\iJipu\bin
   · 其余 PATH 条目**逐字未动**；新开的终端里就不再能直接敲 ijipu 了
 ```
 
@@ -417,6 +445,10 @@ iJipu CLI 注册状态：未注册 ✗（终端里还敲不了 ijipu）
 - **幂等**：已注册再注册不重复追加；未注册再解除不改动 PATH；
 - **上限 2047 字符**：注册后会超过就不写（明确报错 + 给出三条可执行建议），
   因为「写了之后某些老程序读不全」这类问题最难查。
+
+> **从旧版本升上来的（`adj944` 那会儿注册的是「安装目录本身」）**：`status` 会把那一形态
+> 标成 `legacy`（并**按未注册**报，因为那条会跟垫片抢 `ijipu`）；点一次「注册」就会
+> **把它换成 `bin` 目录**，`unregister` 则**两种形态都摘**。设置的「命令行」页签里也会直接提示。
 
 > 这三个命令**要读写当前用户的注册表**，只有**桌面端**（`ijipu.exe cli …`）能做。
 > 用独立 Node 包跑会**如实报退出码 6**，并提示改用内嵌版（见 §三）。

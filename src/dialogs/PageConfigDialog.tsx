@@ -232,8 +232,9 @@ export function PageConfigDialog({
         kind: 'ok',
         text:
           mode === 'register'
-            ? cliPathCopy.okRegistered(r.status.installDir, r.changed)
-            : cliPathCopy.okUnregistered(r.status.installDir, r.changed),
+            ? // adj946：这两句给的是**命令行入口目录**（真正写进 PATH 的那一条），不是安装目录 ✓
+              cliPathCopy.okRegistered(r.status.binDir, r.changed)
+            : cliPathCopy.okUnregistered(r.status.binDir, r.changed),
       })
     } finally {
       setCliBusy(false)
@@ -609,14 +610,22 @@ export function PageConfigDialog({
               </button>
             </Row>
             {cliDesktop && cliStatus !== null && (
-              // 状态明细：安装目录 / PATH 用量（离 2047 上限还有多少）/ App Paths（可选便利）
+              // 状态明细（adj946：**注册的是命令行入口目录 `<安装目录>\bin`**，不是安装目录本身）：
+              // 安装目录 / 命令行入口目录 / PATH 用量（离 2047 上限还有多少）/ App Paths（可选便利）
               <div className="pcfg-note">
                 {cliPathCopy.installDirLabel}：{cliStatus.installDir}
+                <br />
+                {cliPathCopy.binDirLabel}：{cliStatus.binDir}
                 <br />
                 {cliPathCopy.pathUsage(cliStatus.pathLength, PATH_MAX_CHARS)}
                 <br />
                 {cliPathCopy.appPathsLabel}：{cliStatus.appPaths ?? cliPathCopy.appPathsNone}
               </div>
+            )}
+            {/* adj946：PATH 里还留着旧形态（安装目录本身）⇒ 必须说出来（它会跟垫片抢 ijipu）；
+                文案走 `cliPathCopy`（组件里不写字面量 ✓） */}
+            {cliDesktop && cliStatus?.legacy === true && (
+              <div className="pcfg-note cli-path-note err">{cliPathCopy.legacyHint}</div>
             )}
             <div className="pcfg-note">
               ⚠ {cliPathCopy.hintNewTerminal}

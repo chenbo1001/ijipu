@@ -113,7 +113,7 @@ const HELP = `iJipu 命令行（爱记谱）
   config        -i <谱> [-t effective] [--quiet]                              打印生效设置全表 + 每项来源
   doctor        [--json]                                                      环境自检（如实报告能力有无）
   completions   bash|zsh|powershell                                           输出 shell 补全脚本
-  register      [--json]                                                      把安装目录注册进当前用户 PATH
+  register      [--json]                                                      把命令行入口目录（<安装>\bin）注册进当前用户 PATH
   unregister    [--json]                                                      从当前用户 PATH 里解除注册
   status        [--json]                                                      看是否已注册（**读系统实况**）
 
@@ -135,6 +135,9 @@ const HELP = `iJipu 命令行（爱记谱）
 
 注册类命令（register / unregister / status）**只在内嵌版可用**（ijipu.exe cli register）：
   它要读写当前用户的 PATH / App Paths，这个能力由桌面端注入；独立 Node 环境 ⇒ 退出码 6 + 原因。
+  注册写进 PATH 的是**命令行入口目录 <安装目录>\bin**（里面有控制台垫片 ijipu.cmd）——
+  ijipu.exe 是 GUI 子系统程序，cmd 不等它（提示符会夹在输出中间、退出码也拿不到）；
+  cmd **会等批处理文件** ⇒ 垫片把输出顺序/退出码/重定向一次性修好，而双击 .jps 照旧不闪黑框。
   注册后**要新开一个终端**才生效（已开着的终端看不到新 PATH）；只对**当前用户**生效、不需要管理员。
 
 退出码：0 成功 ｜ 1 用法错误 ｜ 2 输入不存在 ｜ 3 语法错误 ｜ 4 渲染失败 ｜ 5 设置非法 ｜ 6 环境能力缺失
@@ -470,6 +473,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
         schema: 1,
         registered: st.registered,
         installDir: st.installDir,
+        binDir: st.binDir,
+        legacy: st.legacy,
         pathLength: st.pathLength,
         pathLimit: PATH_MAX_CHARS,
         pathValue: st.pathValue,
@@ -479,6 +484,14 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       else {
         line(io, `iJipu CLI 注册状态：${st.registered ? '已注册 ✓（终端里可以直接敲 ijipu）' : '未注册 ✗（终端里还敲不了 ijipu）'}`)
         line(io, `  安装目录：${st.installDir}`)
+        line(io, `  命令行入口目录（写进 PATH 的就是它）：${st.binDir}`)
+        if (st.legacy) {
+          line(
+            io,
+            '  ⚠ PATH 里还有**旧的注册形态**（安装目录本身，adj944 的口径）—— 它会跟垫片抢 ijipu，' +
+              '跑一次 `ijipu cli register` 会自动把它换成命令行入口目录 ✓',
+          )
+        }
         line(io, `  当前用户 PATH：${st.pathLength} / ${PATH_MAX_CHARS} 字符`)
         line(io, `  App Paths：${st.appPaths ?? '（未注册）'}`)
         if (!st.registered) {
@@ -494,7 +507,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
           `注册后当前用户 PATH 会有 ${action.error.length} 字符，超过上限 ${action.error.limit} ⇒ **未写入**（PATH 一个字都没改）。\n` +
             '  建议：① 先在「系统属性 → 环境变量」里删掉 PATH 中已经不存在的目录（反复装卸的软件常留一堆）；\n' +
             '        ② 或把 iJipu 装到更短的路径（例如 C:\\iJipu）后再注册；\n' +
-            '        ③ 也可以不动 PATH，直接用完整路径调用：<安装目录>\\ijipu.exe cli lint 我的谱.jps',
+            '        ③ 也可以不动 PATH，直接用完整路径调用：<安装目录>\\bin\\ijipu.cmd cli lint 我的谱.jps\n' +
+            '           （或 <安装目录>\\ijipu.exe cli lint 我的谱.jps —— 后者是 GUI 子系统程序，输出顺序/退出码/重定向都不如垫片）',
         )
       } else {
         io.err(
@@ -510,6 +524,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       changed: action.changed,
       registered: st.registered,
       installDir: st.installDir,
+      binDir: st.binDir,
+      legacy: st.legacy,
       pathLength: st.pathLength,
       pathValue: st.pathValue,
       appPaths: st.appPaths,
@@ -518,16 +534,24 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     else if (p.command === 'register') {
       line(
         io,
-        `${action.changed ? '已注册 ✓ 安装目录已加入当前用户 PATH' : '已是注册状态 ✓（PATH 里本来就有这一条，未重复写入）'}：${st.installDir}`,
+        `${action.changed ? '已注册 ✓ 命令行入口目录已加入当前用户 PATH' : '已是注册状态 ✓（PATH 里本来就有这一条，未重复写入）'}：${st.binDir}`,
       )
       line(io, '  · 请**新开一个终端**，之后就能直接敲：ijipu cli lint 我的谱.jps')
       line(io, '  · 只对当前用户生效，不需要管理员权限')
+      line(
+        io,
+        '  · 这一条是**命令行入口目录**（里面有控制台垫片 ijipu.cmd）：输出顺序、退出码、重定向都正常 ✓，' +
+          '双击 .jps 照旧打开界面、不闪黑框',
+      )
     } else {
       line(
         io,
-        `${action.changed ? '已解除 ✓ 已从当前用户 PATH 里摘掉' : '本就未注册 ✓（PATH 里没有这一条，未改动 PATH）'}：${st.installDir}`,
+        `${action.changed ? '已解除 ✓ 已从当前用户 PATH 里摘掉' : '本就未注册 ✓（PATH 里没有这一条，未改动 PATH）'}：${st.binDir}`,
       )
       line(io, '  · 其余 PATH 条目**逐字未动**；新开的终端里就不再能直接敲 ijipu 了')
+      if (st.legacy) {
+        line(io, `  · 旧形态（安装目录本身）也一并摘掉了：${st.installDir}`)
+      }
     }
     return { code: EXIT.ok, json: payload }
   }

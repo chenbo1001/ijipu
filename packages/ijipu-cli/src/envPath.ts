@@ -1,9 +1,19 @@
 /**
- * envPath.ts — 把「iJipu 安装目录」**注册进 / 解除出当前用户 PATH** 的纯逻辑（adj944）
+ * envPath.ts — 把「iJipu 命令行入口目录」**注册进 / 解除出当前用户 PATH** 的纯逻辑
+ * （adj944 起；adj946 改口径）
  *
  * 用户需求（2026-10 原话）：「需要在全局设置里添加一个注册 iJipu CLI 的提示和按钮，
  * 未注册时显示「注册」、已注册时显示「解除」；**只有注册后，才能在打开终端时就能 `ijipu cli`**」。
- * 用户已选定方案：**注册 = 把「安装目录本身」写进当前用户 PATH**（不建 bin 垫片 ✓）。
+ *
+ * ## 口径（adj946，用户实报 bug 后改）
+ * **注册 = 把「安装目录下的 `bin` 目录」写进当前用户 PATH** ✓（**不是**安装目录本身 ✗）。
+ *  · 为什么：`ijipu.exe` 是 **GUI 子系统**程序 ⇒ cmd **不等它**，于是"提示符夹在输出中间"、
+ *    退出码拿不到、PowerShell 的 `>` 写出 0 字节文件（用户截图实报）；
+ *  · `bin\ijipu.cmd` 是**控制台垫片**（cmd 会等批处理文件 ⇒ 上面四条一起好 ✓，而 exe 仍是 GUI、
+ *    双击 `.jps` 照旧不闪黑框 ✓）—— 所以 **PATH 里放的是 `bin` 目录，`ijipu` 解析到垫片** ✓；
+ *  · `.exe` **不在** PATH 里 ⇒ 不会跟垫片抢名字；`.CMD` 在 `PATHEXT` 里 ⇒ 直接敲 `ijipu` 就命中垫片 ✓。
+ *  · **兼容旧形态**（adj944 曾注册安装目录本身）：注册时**顺手把旧条目摘掉**（否则它在 PATH 里更靠前、
+ *    会把 `ijipu` 抢回成 `ijipu.exe` ✗）；解除时**两种形态都摘**；别人手写的同一目录也认得出来 ✓。
  *
  * ## 为什么这一段逻辑放这里（而不是 Rust 里、也不是应用侧各写一份）
  *  · PATH 的增删**是字符串口径**（分号切分 / 大小写无关比较 / 末尾分隔符 / 幂等 / 长度上限），
@@ -38,7 +48,7 @@ export const PATH_MAX_CHARS = 2047
 
 /** 增删 PATH 需要的**宿主 IO**（Rust 侧实现；应用界面与命令行各自注入一份） */
 export type PathHostIo = {
-  /** 本程序（`ijipu.exe`）所在目录 —— 就是写进 PATH 的那一条 */
+  /** 本程序（`ijipu.exe`）所在目录 —— 只用来**显示**与推导入口目录（它自己**不再**进 PATH ✗） */
   installDir(): Promise<string>
   /** `ijipu.exe` 的完整路径（App Paths 用；不注入就跳过 App Paths） */
   exePath?(): Promise<string>
@@ -54,16 +64,40 @@ export type PathHostIo = {
   removeAppPaths?(): Promise<void>
 }
 
+/**
+ * **命令行入口目录** = `<安装目录>\bin` —— 写进 PATH 的就是它（adj946）。
+ *
+ * 为什么做成**纯函数、只有这一处定义**：应用界面、`ijipu cli register`、卸载钩子（NSIS）三处
+ * 都要知道"PATH 里那一条长什么样"；一旦哪处自己拼一个（少个斜杠、多个斜杠、写成安装目录本身），
+ * 就会退回"提示符夹在输出中间"那个用户实报的 bug ✗。
+ * 归一化：先去首尾空白、再去掉末尾的 `\` / `/`（用户手动填过尾斜杠的情况也不出错 ✓），
+ * 然后拼 `\bin`。
+ * ⚠ 只归一化**末尾**的分隔符，不动路径中间的（UNC 的 `\\server\share` 开头那两个反斜杠不能被合并 ✗）；
+ *   正斜杠写法（`C:/Apps/iJipu`）由 `normalizePathEntry` 在**比较时**统一，回写的永远是这里拼出来的值 ✓。
+ */
+export function binDirOf(installDir: string): string {
+  return `${installDir.trim().replace(/[\\/]+$/, '')}\\bin`
+}
+
 /** 注册状态（**每次都现读系统**，不是缓存） */
 export type CliPathStatus = {
-  /** 安装目录（= 要写进 PATH 的条目） */
+  /** 安装目录（= `ijipu.exe` 所在目录；**只用于显示**，它自己不进 PATH ✗） */
   installDir: string
+  /** 命令行入口目录 = `<安装目录>\bin`（= 真正写进 PATH 的那一条；垫片 `ijipu.cmd` 在这里） */
+  binDir: string
   /** 当前用户 PATH 的原值（没有这个值 ⇒ 空串） */
   pathValue: string
   /** 原值长度（给界面显示"离上限还有多少"） */
   pathLength: number
-  /** 是否**已注册**（按 PATH 现况判定，不认"我们自己写过的格式" ✓） */
+  /**
+   * 是否**已注册**（按 PATH 现况判定，不认"我们自己写过的格式" ✓）。
+   *
+   * adj946：判据是"**现行形态**（`bin` 目录）在里面，**且**没有旧形态（安装目录本身）在抢" ——
+   * 两者同时在时 `ijipu` 可能被更靠前的 exe 抢走 ⇒ 这种状态按**未注册**报，点「注册」会自动纠正 ✓。
+   */
   registered: boolean
+  /** PATH 里是否还有**旧的注册形态**（`adj944` 写进去的"安装目录本身"）⇒ 点「注册」会顺手摘掉它 ✓ */
+  legacy: boolean
   /** App Paths 里当前指向的 exe（没有/拿不到 ⇒ null） */
   appPaths: string | null
 }
@@ -92,15 +126,17 @@ export function splitPathEntries(value: string): string[] {
 
 /**
  * 把一个条目归一化成**用于比较**的样子（**只用于比较，绝不回写** ✗）：
- * 去首尾空白、去掉包裹的双引号、去掉末尾的 `\` 或 `/`、统一小写。
+ * 去首尾空白、去掉包裹的双引号、把 `/` 统一成 `\`、去掉末尾的 `\`、统一小写。
  *
- * 这样"别人手动加的同一目录"（大小写不同 / 带引号 / 末尾多个反斜杠）也会被认成**已注册** ✓
- * —— 判据是"目录是不是已经在 PATH 里"，**不是**"是不是我们写过的那个样子" ✓。
+ * 这样"别人手动加的同一目录"（大小写不同 / 带引号 / 末尾多个反斜杠 / 正斜杠写法）也会被认成
+ * **已注册** ✓ —— 判据是"目录是不是已经在 PATH 里"，**不是**"是不是我们写过的那个样子" ✓。
+ * （Windows 的 PATH 里 `/` 与 `\` 等价 ⇒ 比较时不能各算一套；正斜杠的归一化只影响比较，
+ * 回写用的永远是原值 ✓。）
  */
 export function normalizePathEntry(entry: string): string {
   let s = entry.trim()
   if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) s = s.slice(1, -1)
-  s = s.replace(/[\\/]+$/, '')
+  s = s.replace(/\//g, '\\').replace(/\\+$/, '')
   return s.toLowerCase()
 }
 
@@ -153,14 +189,19 @@ export function removeDirFromPath(value: string, dir: string): string {
 /** 读**系统实况**（每次都现读；界面与命令行共用这一条 ✓） */
 export async function cliPathStatus(host: PathHostIo): Promise<CliPathStatus> {
   const installDir = await host.installDir()
+  const binDir = binDirOf(installDir)
   const raw = await host.readPath()
   const pathValue = raw ?? ''
   const appPaths = host.readAppPaths ? await host.readAppPaths() : null
+  const legacy = pathHasDir(pathValue, installDir)
   return {
     installDir,
+    binDir,
     pathValue,
     pathLength: pathValue.length,
-    registered: pathHasDir(pathValue, installDir),
+    // 旧形态还在 ⇒ 一律按"未注册"报（点「注册」会把它换成 bin 目录 ⇒ 自愈 ✓）
+    registered: pathHasDir(pathValue, binDir) && !legacy,
+    legacy,
     appPaths,
   }
 }
@@ -170,29 +211,45 @@ function asIoError(e: unknown): CliPathError {
   return { kind: 'io', detail: e instanceof Error ? e.message : String(e) }
 }
 
-/** 注册（幂等）：把安装目录追加进 PATH，顺带写 App Paths；返回**写后现读**的实况 */
+/**
+ * 注册（幂等）：把**命令行入口目录**（`<安装目录>\bin`）追加进 PATH，顺带写 App Paths；
+ * 返回**写后现读**的实况。
+ *
+ * adj946：**同时摘掉旧形态**（PATH 里那条"安装目录本身"）——
+ * 否则它通常排在前面，`ijipu` 会被解析回 `ijipu.exe`（于是又变回"提示符夹在输出中间"✗）。
+ * 顺序：先摘旧形态（只会变短）→ 再追加 bin（这一步才可能撞 2047 上限）。
+ */
 export async function cliPathRegister(host: PathHostIo): Promise<CliPathAction> {
   try {
     const before = await cliPathStatus(host)
-    const edit = addDirToPath(before.pathValue, before.installDir)
+    const stripped = removeDirFromPath(before.pathValue, before.installDir)
+    const edit = addDirToPath(stripped, before.binDir)
     if (!edit.ok) {
       return { ok: false, error: { kind: 'too-long', length: edit.length, limit: edit.limit } }
     }
-    if (edit.changed) await host.writePath(edit.value)
+    // 判据是"**整串有没有变**"：只摘掉旧形态 / 只补 bin，两种都算改动 ✓（各自幂等 ✓）
+    const changed = edit.value !== before.pathValue
+    if (changed) await host.writePath(edit.value)
     // App Paths 是**可选**便利（"运行"对话框 / 资源管理器地址栏也能敲 ijipu）：
     // 每次都写一遍 ⇒ 应用换目录后自动纠正 ✓；没有该能力的环境跳过 ✓。
     if (host.writeAppPaths && host.exePath) await host.writeAppPaths(await host.exePath())
-    return { ok: true, changed: edit.changed, status: await cliPathStatus(host) }
+    return { ok: true, changed, status: await cliPathStatus(host) }
   } catch (e) {
     return { ok: false, error: asIoError(e) }
   }
 }
 
-/** 解除（幂等）：只摘掉安装目录那一条，其余逐字不动；顺带删我们自己写的 App Paths */
+/**
+ * 解除（幂等）：**两种形态都摘**（`<安装目录>\bin` 与旧的"安装目录本身"），其余逐字不动；
+ * 顺带删我们自己写的 App Paths。
+ */
 export async function cliPathUnregister(host: PathHostIo): Promise<CliPathAction> {
   try {
     const before = await cliPathStatus(host)
-    const next = removeDirFromPath(before.pathValue, before.installDir)
+    const next = removeDirFromPath(
+      removeDirFromPath(before.pathValue, before.binDir),
+      before.installDir,
+    )
     if (next !== before.pathValue) await host.writePath(next)
     if (host.removeAppPaths) await host.removeAppPaths()
     return { ok: true, changed: next !== before.pathValue, status: await cliPathStatus(host) }
