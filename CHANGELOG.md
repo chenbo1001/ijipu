@@ -1,6 +1,6 @@
 ## [0.59.0] — 2026-10-14（**命令行随应用发布**：CLI 内嵌进 `ijipu.exe`（QuickJS，用户不必装 Node）+ 控制台垫片 `bin\ijipu.cmd`（输出顺序/退出码/重定向一次修好）+ 全局设置「命令行」页签一键注册/解除当前用户 PATH（写 `<安装目录>\bin`）+ CLI 使用手册与 LICENSE/THIRD-PARTY 随包 + 「关于」补源码仓库链接（AGPL §13）；并修掉嵌入版"内容相同却提示外部改动"；MINOR）
 
-> 本轮由用户实测驱动，五条线：① **命令行内嵌**（`ijipu.exe cli <命令>`，内嵌 QuickJS，安装包只 **+0.69MB**）；
+> 本轮由用户实测驱动，五条线：① **命令行内嵌**（`ijipu.exe cli <命令>`，内嵌 QuickJS，安装包只 **+0.72MB**）；
 > ② **命令行入口改控制台垫片**（GUI 子系统 exe 兼做命令行的四个连带症状：提示符夹在输出中间 / 拿不到
 > 退出码 / `>` 写 0 字节 / 双击闪黑框）；③ **注册/解除当前用户 PATH**（全局设置「命令行」页签，只写
 > `HKCU\Environment\Path`，不需要管理员）；④ **随包文档**（CLI 使用手册 + `LICENSE` + `THIRD-PARTY.md`）；
@@ -13,15 +13,19 @@
 - 新依赖 **`rquickjs` 0.14**（QuickJS-ng 的 Rust 绑定）——**只挂 Windows、只此一个**新依赖。
 - `packages/ijipu-cli/src/embedEntry.ts` 把宿主注入的 `io` 接成 `runCli(argv, io)`（**不在 QuickJS 里硬造
   `node:fs`**；另补一个 `TextEncoder` 补丁给 `-t midi`）；新构建配置 `packages/ijipu-cli/vite.embed.config.ts`
-  出 `dist/ijipu-embed.js`（**196,873 B**，**不影响** Node 版 `dist/ijipu.cjs`）。
+  出 `dist/ijipu-embed.js`（**203,519 B** —— adj942 首次落地时 196,873 B，之后 `adj944`/`adj946` 把
+  `register`/`unregister`/`status` 与文案加进来后长到这里；**不影响** Node 版 `dist/ijipu.cjs`）。
 - `src-tauri/src/cli_embed.rs` 用 `include_bytes!` 把产物编进 exe（宿主函数全是**同步字符串**、二进制走
   base64、微任务用 `execute_pending_job()` 跑干）；内嵌脚本跑在**专用工作线程**上（`stack_size = 64MiB`，
   QuickJS 上限取它允许的最大值 16MiB）⇒ 主线程 C 栈不够的问题从根上绕开。
 - `main.rs` 在**开窗口之前**只认**第一个参数恰为 `cli`** ⇒ **双击 / 关联 `.jps` 照旧进 GUI**（Rust 单测钉着）。
 - 新增 `npm run cli:embed` 并串进 `npm run build`（= Tauri `beforeBuildCommand`）；`build.rs` 加占位兜底
   （干净克隆裸 `cargo build` 不会因缺文件编不过）。
-- **体积**（实测）：exe `26,107,801 → 28,371,668 B`（+2.16MB 未压缩）；**安装包 `33,824,416 → 34,548,670 B`
-  （+0.69MB）**（NSIS 打包约 ±2KB 抖动，三次打包 `34,545,493 / 34,548,670 / 34,550,872 B`）。
+- **体积**（实测，发布前重打包后的最终值）：exe `26,107,801 → 28,438,298 B`（+2,330,497 B ≈ +2.22MB 未压缩）；
+  **安装包**（对已发布的 `v0.58.0` 附件 `33,824,416 B`）**→ `34,582,670 B`（+758,254 B ≈ +0.72MB）**。
+  > 开发期（`adj942` 刚落地时）量到的中间值是安装包 `33,824,416 → 34,548,670 B`（+0.69MB）——`adj944`~`adj946`
+  > 又补进 PATH 注册、手册/许可随包与垫片后长到上面的最终值；NSIS 打包本身有约 ±2KB 抖动
+  > （本轮开发期三次打包 `34,545,493 / 34,548,670 / 34,550,872 B`）。
 - **性能**（实测，同机同谱）：1008 行谱 `render -t svg` 内嵌 ≈**1.65s** vs Node ≈**0.58s**（约 2.8 倍）；
   `lint` 打平。差距如实写进 `docs/CLI.md`，不写成"无差别"。
 - 闸门：smoke `[169]`（**九对负对照**）+ `cli-assert` 新增 9 条（含 `TextEncoder` 负对照）+ `check:installer`
