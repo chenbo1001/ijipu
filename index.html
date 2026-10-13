@@ -38,11 +38,17 @@
     <meta name="twitter:card" content="summary_large_image" />
 
     <!--
-      防闪烁（adj876 / adj878）：`--site-*` 变量由 JS 注入、`landing.css` 也要等 JS 才加载，
-      所以这里先用一段**内联脚本**把主题模式定到 <html> 上，再用属性选择器给出兜底底色——
-      否则选了浅色的人会先看到一帧深色。
-      ⚠ 判定逻辑与 `brand/siteVars.ts` 的 `initialSiteMode()` 必须一致（改一处要改两处）；
-      ⚠ 两个兜底底色与 `SITE_BG` 也必须一致。
+      防闪烁（adj876 / adj878）+ 首屏启动层（adj930）：
+      `--site-*` 变量由 JS 注入、`landing.css` 要等网络，所以这里先用**内联脚本**把主题模式定到 <html> 上，
+      再用**内联样式**给出兜底底色与启动层（背景 + 转圈）；正文等关键资源就绪后由
+      `brand/siteBoot.ts` 淡出启动层揭示（用户要求：「先显示背景 + 一个转圈，等 CSS 都加载完再显示正文」）。
+      ⚠ 判定逻辑与 `brand/siteVars.ts` 的 `currentSiteMode()` 必须一致（改一处要改两处）；
+      ⚠ 这段**色值与 id 的唯一口径是 `brand/siteBoot.ts`**（`SITE_BOOT_COLORS` / `SITE_BOOT_ID` / …）：
+        四页这段必须**逐字相同**，`npm run smoke` 的 [168] 段与 `scripts/verify-site.mjs` 都会逐字核对；
+      ⚠ `html`/`body` 与启动层**同色**（否则淡出时边缘/滚动条区会露白，又是一次背景闪动）；
+      ⚠ 深浅两套都要有：`@media (prefers-color-scheme: …)` 兜住"脚本模式还没挂上"的一瞬，
+        `html[data-site-mode='light'|'dark']` 覆盖用户显式选择（所以写在媒体查询**之后**）；
+      ⚠ 这段里**不许**出现 `var(--site-*)` —— 那会儿变量还没注入。
     -->
     <script>
       (function () {
@@ -52,16 +58,74 @@
           try { m = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark' } catch (e) { m = 'dark' }
         }
         document.documentElement.dataset.siteMode = m
+        /* adj930 硬兜底：模块脚本压根没跑起来（404 / 被拦）时，到点也把启动层摘掉 ——
+           绝不让人对着转圈。正常路径下 brand/siteBoot.ts 会先置上接管标记，这里就不再插手。 */
+        setTimeout(function () {
+          if (window.__ijipuBootArmed) return
+          var el = document.getElementById('ijipu-boot')
+          if (el && el.parentNode) el.parentNode.removeChild(el)
+        }, 8000)
       })()
     </script>
     <style>
-      html { background: #0f1526; color-scheme: dark; }
-      html[data-site-mode='light'] { background: #f2f5fb; color-scheme: light; }
+      html { color-scheme: dark; }
+      html, body { background: #0f1526; }
       body { margin: 0; color: #e8ecf8; font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+      /* adj930 启动层：铺满视口盖住正文；与 html/body 同色 ⇒ 淡出时看不到"换背景" */
+      #ijipu-boot {
+        position: fixed; inset: 0; z-index: 2147483000;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+        background: #0f1526; color: #93a0c8;
+        font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+        transition: opacity 0.22s ease;
+      }
+      #ijipu-boot .ijipu-boot-spin {
+        width: 30px; height: 30px; border-radius: 50%;
+        border: 3px solid rgba(147, 160, 200, 0.28); border-top-color: #00f0ff;
+        animation: ijipu-boot-spin 0.8s linear infinite;
+      }
+      #ijipu-boot.ijipu-boot-out { opacity: 0; }
+      @keyframes ijipu-boot-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) {
+        #ijipu-boot { transition: none; }
+        #ijipu-boot .ijipu-boot-spin { animation: none; }
+      }
+      @media (prefers-color-scheme: light) {
+        html { color-scheme: light; }
+        html, body { background: #f2f5fb; }
+        body { color: #1c2540; }
+        #ijipu-boot { background: #f2f5fb; color: #7a86a8; }
+        #ijipu-boot .ijipu-boot-spin { border-color: rgba(70, 83, 122, 0.25); border-top-color: #0891a6; }
+      }
+      html[data-site-mode='dark'] { color-scheme: dark; }
+      html[data-site-mode='dark'], html[data-site-mode='dark'] body { background: #0f1526; }
+      html[data-site-mode='dark'] body { color: #e8ecf8; }
+      html[data-site-mode='dark'] #ijipu-boot { background: #0f1526; color: #93a0c8; }
+      html[data-site-mode='dark'] #ijipu-boot .ijipu-boot-spin {
+        border-color: rgba(147, 160, 200, 0.28); border-top-color: #00f0ff;
+      }
+      html[data-site-mode='light'] { color-scheme: light; }
+      html[data-site-mode='light'], html[data-site-mode='light'] body { background: #f2f5fb; }
       html[data-site-mode='light'] body { color: #1c2540; }
+      html[data-site-mode='light'] #ijipu-boot { background: #f2f5fb; color: #7a86a8; }
+      html[data-site-mode='light'] #ijipu-boot .ijipu-boot-spin {
+        border-color: rgba(70, 83, 122, 0.25); border-top-color: #0891a6;
+      }
     </style>
   </head>
   <body>
+    <!--
+      adj930：启动层（浮层）—— **静态写在 HTML 里**，不是 JS 造的：
+      JS 是 defer 的，等它跑起来正文早就画出一版没格式的了（那正是要消灭的那一闪）。
+      正文照旧静态写在 HTML 里（爬虫读得到，SEO 不受影响），启动层只是**盖在上面**；
+      `aria-busy` 让读屏软件知道"还在加载"；揭示后整块从 DOM 移除（不留残留）。
+    -->
+    <div id="ijipu-boot" role="status" aria-busy="true">
+      <span class="ijipu-boot-spin" aria-hidden="true"></span>
+      <span class="ijipu-boot-text">正在加载…</span>
+    </div>
+    <!-- 关掉 JS 时没有任何脚本能揭示 ⇒ 干脆不显示启动层（否则会永远转圈） -->
+    <noscript><style>#ijipu-boot { display: none; }</style></noscript>
     <!-- 顶栏：滚动后加背景（JS 加 .scrolled）；「打开应用」是常驻主按钮 -->
     <header class="topbar" id="topbar">
       <div class="topbar-inner">
@@ -76,10 +140,22 @@
           <!-- adj905x（用户要求）：插件有了自己的功能介绍 + 使用手册，顶栏这一排给它一个入口 -->
           <a href="/plugin/">插件手册</a>
           <a data-l="desktopDownloadUrl" href="#" rel="noreferrer">下载桌面端</a>
-          <a data-l="obsidianRepoUrl" href="#" rel="noreferrer">Obsidian 插件</a>
-          <a data-l="repoUrl" href="#" rel="noreferrer">GitHub</a>
-          <!-- adj896（用户反馈"少挂了个更新记录"）：全部发布页（历次版本 + 每版改了什么） -->
-          <a data-l="releasesUrl" href="#" rel="noreferrer">更新记录</a>
+          <!--
+            adj933（用户要求「ob插件标 插件Github，下一个标 应用 Github」，随后澄清「链接没串，我是说
+            把应用放前面、插件放后面」）：两条 GitHub 入口**标签写清楚** + **顺序对调**（应用在前、插件在后）。
+            ⚠ 已核对：**标签与地址没有串**（`repoUrl` → 应用仓库、`obsidianRepoUrl` → 插件仓库，
+              见 `src/brand/siteLinks.ts` 的键表）⇒ **两个 href 都保持原样、一个都不动**，只改标签与顺序。
+              "标签 ↔ 实际 href"与"DOM 顺序"两条都由 `scripts/verify-site.mjs` 的 `adj933` 段在真浏览器里守着。
+          -->
+          <a data-l="repoUrl" href="#" rel="noreferrer">应用 Github</a>
+          <a data-l="obsidianRepoUrl" href="#" rel="noreferrer">插件 Github</a>
+          <!--
+            adj933（用户要求）：「更新记录」这一条**删掉** —— 它本就指向 GitHub（`releasesUrl` → `…/releases`），
+              与上面两条 GitHub 入口重复。
+            ⚠ 首页**页脚**还有一条同样的入口（同一个 `releasesUrl` 键）：用户交代过"只删顶栏这一个、
+              别顺手删别处"⇒ 先留着、并在报告里列出请其拍板；所以 `siteLinks.ts` 的 `releasesUrl` 键
+              **也还不能删**（页脚那条还在用）。
+          -->
         </nav>
         <!--
           adj878（用户要求）：右上角的深浅主题开关。

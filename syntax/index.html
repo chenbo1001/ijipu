@@ -26,16 +26,74 @@
           try { m = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark' } catch (e) { m = 'dark' }
         }
         document.documentElement.dataset.siteMode = m
+        /* adj930 硬兜底：模块脚本压根没跑起来（404 / 被拦）时，到点也把启动层摘掉 ——
+           绝不让人对着转圈。正常路径下 brand/siteBoot.ts 会先置上接管标记，这里就不再插手。 */
+        setTimeout(function () {
+          if (window.__ijipuBootArmed) return
+          var el = document.getElementById('ijipu-boot')
+          if (el && el.parentNode) el.parentNode.removeChild(el)
+        }, 8000)
       })()
     </script>
     <style>
-      html { background: #0f1526; color-scheme: dark; }
-      html[data-site-mode='light'] { background: #f2f5fb; color-scheme: light; }
+      html { color-scheme: dark; }
+      html, body { background: #0f1526; }
       body { margin: 0; color: #e8ecf8; font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+      /* adj930 启动层：铺满视口盖住正文；与 html/body 同色 ⇒ 淡出时看不到"换背景" */
+      #ijipu-boot {
+        position: fixed; inset: 0; z-index: 2147483000;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+        background: #0f1526; color: #93a0c8;
+        font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+        transition: opacity 0.22s ease;
+      }
+      #ijipu-boot .ijipu-boot-spin {
+        width: 30px; height: 30px; border-radius: 50%;
+        border: 3px solid rgba(147, 160, 200, 0.28); border-top-color: #00f0ff;
+        animation: ijipu-boot-spin 0.8s linear infinite;
+      }
+      #ijipu-boot.ijipu-boot-out { opacity: 0; }
+      @keyframes ijipu-boot-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) {
+        #ijipu-boot { transition: none; }
+        #ijipu-boot .ijipu-boot-spin { animation: none; }
+      }
+      @media (prefers-color-scheme: light) {
+        html { color-scheme: light; }
+        html, body { background: #f2f5fb; }
+        body { color: #1c2540; }
+        #ijipu-boot { background: #f2f5fb; color: #7a86a8; }
+        #ijipu-boot .ijipu-boot-spin { border-color: rgba(70, 83, 122, 0.25); border-top-color: #0891a6; }
+      }
+      html[data-site-mode='dark'] { color-scheme: dark; }
+      html[data-site-mode='dark'], html[data-site-mode='dark'] body { background: #0f1526; }
+      html[data-site-mode='dark'] body { color: #e8ecf8; }
+      html[data-site-mode='dark'] #ijipu-boot { background: #0f1526; color: #93a0c8; }
+      html[data-site-mode='dark'] #ijipu-boot .ijipu-boot-spin {
+        border-color: rgba(147, 160, 200, 0.28); border-top-color: #00f0ff;
+      }
+      html[data-site-mode='light'] { color-scheme: light; }
+      html[data-site-mode='light'], html[data-site-mode='light'] body { background: #f2f5fb; }
       html[data-site-mode='light'] body { color: #1c2540; }
+      html[data-site-mode='light'] #ijipu-boot { background: #f2f5fb; color: #7a86a8; }
+      html[data-site-mode='light'] #ijipu-boot .ijipu-boot-spin {
+        border-color: rgba(70, 83, 122, 0.25); border-top-color: #0891a6;
+      }
     </style>
   </head>
   <body>
+    <!--
+      adj930：启动层（浮层）—— **静态写在 HTML 里**，不是 JS 造的：
+      JS 是 defer 的，等它跑起来正文早就画出一版没格式的了（那正是要消灭的那一闪）。
+      正文照旧静态写在 HTML 里（爬虫读得到，SEO 不受影响），启动层只是**盖在上面**；
+      `aria-busy` 让读屏软件知道"还在加载"；揭示后整块从 DOM 移除（不留残留）。
+    -->
+    <div id="ijipu-boot" role="status" aria-busy="true">
+      <span class="ijipu-boot-spin" aria-hidden="true"></span>
+      <span class="ijipu-boot-text">正在加载…</span>
+    </div>
+    <!-- 关掉 JS 时没有任何脚本能揭示 ⇒ 干脆不显示启动层（否则会永远转圈） -->
+    <noscript><style>#ijipu-boot { display: none; }</style></noscript>
     <header class="doc-topbar">
       <div class="doc-topbar-inner">
         <a class="doc-brand" href="/">

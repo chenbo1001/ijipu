@@ -940,17 +940,72 @@ async function main() {
           home.links.obsidianRepoUrl === SITE_PLUGIN,
         JSON.stringify(home.links))
       /**
-       * adj896（用户反馈「官网首页少挂了个更新记录」）：顶栏与页脚都要有「更新记录」，
-       * 且指向 **全部发布** 页（`…/releases`）—— 与 `desktopDownloadUrl` 的 `releases/latest`
-       * （直接拿最新安装包）是两件事，别写成同一个。
+       * adj896 原口径是「顶栏与页脚**都**要有『更新记录』」。
+       * **adj933（用户要求）已改**：顶栏那一条**按用户要求删除**（它本就指向 GitHub、与两条 GitHub 入口重复）
+       * ⇒ 判据改成"**顶栏里没有**、全页只剩页脚那一条"，并仍然钉住"指向**全部发布**页而非 latest"。
+       * ⚠ 这不是把判据放宽：条数从 `>= 2` 收紧成 `=== 1`，同时新增"顶栏里 0 条"。
+       * ⚠ 为什么页脚那条没删：用户交代过"只删首页顶栏这一个、别顺手删别处"，页脚那条已列进报告请其拍板。
        */
       const releasesLinks = await evalJs(
         c,
         `[...document.querySelectorAll('a[data-l="releasesUrl"]')].map((a) => a.href)`,
       )
-      check('adj896 首页有「更新记录」入口（顶栏 + 页脚），指向**全部发布**页而非 latest',
-        releasesLinks.length >= 2 && releasesLinks.every((h) => h === `${SITE_REPO}/releases`),
-        JSON.stringify(releasesLinks))
+      const releasesInNav = await evalJs(c, `[...document.querySelectorAll('.nav a[data-l="releasesUrl"]')].length`)
+      check('adj933 首页**顶栏**里已经没有「更新记录」了（用户要求删掉；页脚那条按"别顺手删别处"暂时保留），且剩下的仍指向**全部发布**页',
+        releasesInNav === 0 && releasesLinks.length === 1 && releasesLinks.every((h) => h === `${SITE_REPO}/releases`),
+        `顶栏 ${releasesInNav} 条 / 全页 ${releasesLinks.length} 条：${JSON.stringify(releasesLinks)}`)
+      /**
+       * ---- adj933（用户要求）：顶栏两条 GitHub 入口的**标签 ↔ 地址**与**DOM 顺序** ----
+       *
+       * 用户原话：「首页上面那排，ob插件标 插件Github，下一个标 应用 Github，或者再把两个github链接对调一下」，
+       * 随后澄清：「**链接没串，我是说把应用放前面、插件放后面**」。
+       * ⇒ 两个 href **一个都不动**（各自指向正确的仓库），要动的是**顺序**：应用在前、插件在后。
+       * 下面两条判据都写成纯函数 ⇒ 负对照（对调 href / 对调顺序）复用同一份，
+       * 分别证明它们真的在量"对应关系"与"顺序"，而不是"页面上有没有这两个链接"。
+       */
+      const navGhList = await evalJs(
+        c,
+        `[...document.querySelectorAll('.nav a[data-l]')].map((a) => ({ key: a.dataset.l, text: (a.textContent || '').trim(), href: a.href }))`,
+      )
+      const ghEntries = (list) => (Array.isArray(list) ? list : []).filter((a) => a.key === 'repoUrl' || a.key === 'obsidianRepoUrl')
+      /** 判据①对应关系：两个键各自的标签逐字正确、href 指向对应仓库 */
+      const navGhMappingOk = (list) => {
+        const byKey = Object.fromEntries((Array.isArray(list) ? list : []).map((a) => [a.key, a]))
+        return (
+          byKey.repoUrl?.text === '应用 Github' &&
+          byKey.repoUrl?.href === SITE_REPO &&
+          byKey.obsidianRepoUrl?.text === '插件 Github' &&
+          byKey.obsidianRepoUrl?.href === SITE_PLUGIN
+        )
+      }
+      /** 判据②顺序：DOM 里 **应用 Github 在前、插件 Github 在后**，且两条紧挨着 */
+      const navGhOrderOk = (list) => {
+        const all = Array.isArray(list) ? list : []
+        const i = all.findIndex((a) => a.key === 'repoUrl')
+        const j = all.findIndex((a) => a.key === 'obsidianRepoUrl')
+        return i >= 0 && j === i + 1 && all[i].text === '应用 Github' && all[j].text === '插件 Github' &&
+          all[i].href === SITE_REPO && all[j].href === SITE_PLUGIN
+      }
+      const ghHrefSwapped = navGhList.map((a) =>
+        a.key === 'repoUrl' ? { ...a, href: SITE_PLUGIN } : a.key === 'obsidianRepoUrl' ? { ...a, href: SITE_REPO } : a,
+      )
+      const ghOrderSwapped = (() => {
+        const all = [...navGhList]
+        const i = all.findIndex((a) => a.key === 'repoUrl')
+        const j = all.findIndex((a) => a.key === 'obsidianRepoUrl')
+        if (i >= 0 && j >= 0) [all[i], all[j]] = [all[j], all[i]]
+        return all
+      })()
+      check('adj933 首页顶栏：`repoUrl` 标「应用 Github」→ 应用仓库、`obsidianRepoUrl` 标「插件 Github」→ 插件仓库（标签与地址**没串**）',
+        navGhMappingOk(navGhList),
+        JSON.stringify({ 应用: navGhList.find((a) => a.key === 'repoUrl'), 插件: navGhList.find((a) => a.key === 'obsidianRepoUrl'), 应用仓库: SITE_REPO, 插件仓库: SITE_PLUGIN }))
+      check('adj933 首页顶栏**顺序**（用户澄清「把应用放前面、插件放后面」）：DOM 里「应用 Github」在前、「插件 Github」在后，两条紧挨着',
+        navGhOrderOk(navGhList),
+        JSON.stringify(ghEntries(navGhList).map((a) => `${a.text} → ${a.href}`)))
+      check('adj933 负对照：把两个 href 对调（＝"标签与地址串了"）⇒ 对应关系判据为假；把两条**顺序**对调 ⇒ 顺序判据为假（两条判据各量各的）',
+        navGhMappingOk(navGhList) && navGhOrderOk(navGhList) &&
+          !navGhMappingOk(ghHrefSwapped) && !navGhOrderOk(ghOrderSwapped),
+        `对调 href：mapping=${navGhMappingOk(ghHrefSwapped)}；对调顺序：order=${navGhOrderOk(ghOrderSwapped)}`)
       /**
        * 负对照（**保留 adj889 的修正**）：原来那条是 `'#'.startsWith(SITE_REPO) === false`，
        * 而 `'#'` 不以任何地址开头 ⇒ **恒为真、证不了任何事**。换成真正有风险的那件事：
@@ -2094,6 +2149,397 @@ async function main() {
         }
       }
       await viewport(1440, 900, 1)
+
+      /**
+       * ---------------- adj930（**用户实测反馈**）：官网首屏启动层（消灭 FOUC） ----------------
+       *
+       * 用户原话：「首页、手册页等这些页面，在 css 还没加载完就开始显示了，结果就是先显示没有格式的
+       * 文字版，再闪一下，显示 css 加持的正常版，不美观，建议**先显示背景，一个进度转转，
+       * css 所有资源加载完后再正常显示出来**」；追加口径：「背景要与要显示的背景一致，以免又是背景闪动」。
+       *
+       * 这一组在**真浏览器**里量四件事（每件都配负对照，且判据都是纯函数 ⇒ 负对照复用同一份）：
+       *   ① 启动层在**服务端返回的原始 HTML** 里：元素 + **内联** `<style>` 规则 + 深浅两套字面色值，
+       *      且外链 CSS 里**没有**它（放外链就等于没防 —— 那正是 FOUC 的形态）；
+       *   ② 页面加载完成后启动层**已从 DOM 移除**、正文可见、外部 CSS 真的生效（用 `display:grid` 当探针）；
+       *   ③ **慢资源**（CDP `Fetch` 把外链 CSS 扣住约 1s）：这段窗口里启动层**必须还在**、
+       *      不透明、铺满视口、与 `html` 同色；放行后**才**揭示（证明"等资源就绪再显示"，不是碰巧）；
+       *   ④ **资源失败**（挡掉 `*.css`）与**模块没跑起来**（挡掉 `*.js`）⇒ 照样揭示（超时/失败兜底），
+       *      绝不让人对着转圈。
+       *
+       * ⚠ 启动层的 CSS 是**内联**在各页 `<head>` 里的（唯一口径在 `src/brand/siteBoot.ts`），
+       *   所以这里判的是"产物 HTML 里到底有没有" —— 源码级那一半在 `npm run smoke` 的 `[168]` 段。
+       * ⚠ 本段会挡 CSS/JS 并产生同源加载失败事件，故**放在所有"无控制台错误"断言之后**（文件末尾附近）。
+       */
+      console.log('[verify-site] 验证首屏启动层（adj930）…')
+      const BOOT_ID = 'ijipu-boot'
+      const BOOT_SITES = [
+        ['首页', '/'],
+        ['操作手册', '/manual/'],
+        ['脚本语法说明', '/syntax/'],
+        ['插件手册', '/plugin/'],
+      ]
+      /** 页面里**内联**的 `<style>` 块（外链 CSS 不在此列） */
+      const inlineCssOf = (html) =>
+        [...String(html).matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n')
+      const externalCssOf = (html) =>
+        [...String(html).matchAll(/<link[^>]+rel="stylesheet"[^>]*href="([^"]+)"/gi)].map((m) => m[1])
+      /** 判据①（纯函数）：启动层内联在 HTML 里，且不依赖 `var(--…)` */
+      const bootInlineOk = (html) => {
+        const css = inlineCssOf(html).toLowerCase()
+        return (
+          new RegExp('<div id="' + BOOT_ID + '"[^>]*role="status"[^>]*aria-busy="true"').test(String(html)) &&
+          css.includes('#' + BOOT_ID) &&
+          css.includes('#0f1526') &&
+          css.includes('#f2f5fb') &&
+          !css.includes('var(--')
+        )
+      }
+      /** 量当前页的启动层状态（探测外部 CSS 是否生效用 `display:grid`：只有外链样式表里有这条） */
+      const bootMeasure = () =>
+        evalJs(
+          c,
+          `(() => {
+            const el = document.getElementById(${JSON.stringify(BOOT_ID)})
+            const cs = el ? getComputedStyle(el) : null
+            const r = el ? el.getBoundingClientRect() : null
+            const grid = document.querySelector('.link-grid') || document.querySelector('.doc-layout')
+            return {
+              present: !!el,
+              opacity: cs ? cs.opacity : null,
+              bg: cs ? cs.backgroundColor : null,
+              /* ⚠ 跟**布局视口**比（documentElement.clientWidth/clientHeight），不要跟 window.innerWidth/Height 比：
+                 position: fixed + inset: 0 铺的是布局视口，而 innerWidth 含竖向滚动条
+                 ⇒ 首页那种"没 CSS 时很长、一定有滚动条"的页面会被判成"没铺满"（本轮实测踩到） */
+              covers:
+                !!r &&
+                r.width >= document.documentElement.clientWidth - 1 &&
+                r.height >= document.documentElement.clientHeight - 1,
+              htmlBg: getComputedStyle(document.documentElement).backgroundColor,
+              bodyBg: getComputedStyle(document.body).backgroundColor,
+              cssApplied: grid ? getComputedStyle(grid).display === 'grid' : null,
+              textLen: (document.body.innerText || '').length,
+              /* 淡出路径的证据：「prefers-reduced-motion」两态下的 transition 时长（CSS 里两条媒体查询定的） */
+              fade: cs ? cs.transitionDuration : null,
+              reduce: matchMedia('(prefers-reduced-motion: reduce)').matches,
+            }
+          })()`,
+        )
+      /** 判据③：揭示前 —— 启动层在、不透明、铺满视口、与 html 同色（同色 ⇒ 淡出时不会二次闪动） */
+      const bootVisibleOk = (m) =>
+        !!m && m.present === true && m.opacity === '1' && m.covers === true && m.bg === m.htmlBg
+      /** 判据②：揭示后 —— 已从 DOM 移除、正文可见、外部 CSS 生效、底色与内联兜底色一致 */
+      const bootRevealedOk = (m) =>
+        !!m && m.present === false && m.textLen > 200 && m.cssApplied === true && m.bodyBg === m.htmlBg
+      const bootBrief = (m) =>
+        m
+          ? JSON.stringify({
+              present: m.present, opacity: m.opacity, bg: m.bg, htmlBg: m.htmlBg, covers: m.covers,
+              cssApplied: m.cssApplied, textLen: m.textLen, fade: m.fade, reduce: m.reduce,
+            })
+          : 'null'
+      /** 采样器：从文档一开始就盯着启动层（"首屏就有它"的证据 —— 不是 JS 事后造的） */
+      const BOOT_TRACE_SOURCE = `(() => {
+        const trace = { seen: false, firstOpacity: null, firstBg: null, htmlBg: null, gone: false, samples: 0 }
+        window.__bootTrace = trace
+        const tick = () => {
+          trace.samples++
+          const el = document.getElementById(${JSON.stringify(BOOT_ID)})
+          if (el) {
+            if (!trace.seen) {
+              trace.seen = true
+              const cs = getComputedStyle(el)
+              trace.firstOpacity = cs.opacity
+              trace.firstBg = cs.backgroundColor
+              trace.htmlBg = getComputedStyle(document.documentElement).backgroundColor
+            }
+          } else if (trace.seen) {
+            trace.gone = true
+          }
+        }
+        tick()
+        const timer = setInterval(tick, 40)
+        setTimeout(() => clearInterval(timer), 30000)
+      })()`
+      /** 等某个实测状态满足判据（重排/揭示都是异步的，靠固定 sleep 会偶发假红） */
+      const bootWait = async (pred, tries = 25, gap = 200) => {
+        let m = await bootMeasure()
+        for (let i = 0; i < tries && !pred(m); i++) {
+          await sleep(gap)
+          m = await bootMeasure()
+        }
+        return m
+      }
+      /** 控制台警告（收集"揭示原因"用）：`console.warn` 一般走 `Runtime.consoleAPICalled`；顺带也扫 `Log` */
+      const bootWarnings = (from) => {
+        const out = []
+        for (const m of c.events.slice(from)) {
+          if (m.method === 'Runtime.consoleAPICalled' && m.params?.type === 'warning') {
+            out.push((m.params.args ?? []).map((a) => (a.value != null ? String(a.value) : a.description ?? '')).join(' '))
+          }
+          if (m.method === 'Log.entryAdded' && m.params?.entry?.level === 'warning') {
+            out.push(String(m.params.entry.text ?? ''))
+          }
+        }
+        return out
+      }
+
+      /**
+       * ⚠ **先把 Service Worker 让开**（本轮实测踩到的坑，记在这里免得下次重踩）：
+       * `/app/` 那几条检查会注册 `public/sw.js`，它一接管本 origin，外链请求就由 **SW 发起** ——
+       * CDP 的 `Fetch` 拦截与 `Network.setBlockedURLs` **都作用不到它**。
+       * 实测后果：`Fetch` 扣到 **0** 个请求、CSS 却"已生效"（SW 缓存直接给了），于是
+       * "启动层还挡着"与"失败要告警"两条判据一红一假绿。⇒ 这一段开始前：
+       * ① 注销该页已注册的 SW 并清掉它的 Cache Storage；② 让网络层**绕过** SW。
+       */
+      await evalJs(
+        c,
+        `navigator.serviceWorker && navigator.serviceWorker.getRegistrations().then(function (rs) {
+          return Promise.all(rs.map(function (r) { return r.unregister() }))
+        }).then(function () {
+          return caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k) })) })
+        })`,
+      )
+      await c.send('Network.setBypassServiceWorker', { bypass: true })
+
+      // ---- ① + ②：四页都要有内联启动层，且加载完成后已移除、正文可见 ----
+      await viewport(1440, 900, 1)
+      for (const [label, url] of BOOT_SITES) {
+        const html = await (await fetch(`${origin}${url}`)).text()
+        const externals = externalCssOf(html)
+        const leaked = []
+        for (const href of externals) {
+          const body = await (await fetch(href.startsWith('http') ? href : `${origin}${href}`)).text()
+          if (body.includes(BOOT_ID)) leaked.push(href)
+        }
+        check(`adj930 ${label}：启动层**内联**在 HTML 里（元素 + 内联 <style> 的规则 + 深浅两套字面色值，且不用 var(--…)）`,
+          bootInlineOk(html), `内联块 ${inlineCssOf(html).length} 字符`)
+        check(`adj930 ${label}：启动层样式**不在外链 CSS** 里（外链样式表自己要等网络 ⇒ 放那儿防不住 FOUC）`,
+          externals.length > 0 && leaked.length === 0,
+          `外链 CSS ${externals.length} 个${leaked.length ? `，其中含启动层的：${leaked.join(', ')}` : ''}`)
+
+        await c.send('Page.navigate', { url: `${origin}${url}` })
+        const shown = await bootWait(bootRevealedOk)
+        check(`adj930 ${label}：加载完成后启动层**已从 DOM 移除**、正文可见、外部 CSS 真的生效`,
+          bootRevealedOk(shown), bootBrief(shown))
+      }
+
+      /**
+       * ③ 慢资源：把外链 CSS 扣住 ~1.5s，量"这段窗口里启动层必须还在"，
+       * 放行后**才**揭示 —— 这是"先显示背景 + 转圈、CSS 到了再显示正文"的直接证据。
+       * 顺带出两张图（启动层长什么样 / 揭示后是什么样），首页与 /manual/ 各一对。
+       */
+      const bootTraceScript = await c.send('Page.addScriptToEvaluateOnNewDocument', { source: BOOT_TRACE_SOURCE })
+      /** 扣住某类资源：返回 harvest() / continueAll()（全部放行）/ failAll()（全部判失败） */
+      const startHold = async (urlPattern) => {
+        await c.send('Fetch.enable', { patterns: [{ urlPattern, requestStage: 'Request' }] })
+        const held = []
+        let cursor = c.events.length
+        const harvest = () => {
+          for (let i = cursor; i < c.events.length; i++) {
+            const m = c.events[i]
+            if (m.method === 'Fetch.requestPaused') held.push(m.params.requestId)
+          }
+          cursor = c.events.length
+        }
+        return {
+          harvest,
+          continueAll: async () => {
+            harvest()
+            for (const requestId of held) await c.send('Fetch.continueRequest', { requestId }).catch(() => {})
+            await c.send('Fetch.disable').catch(() => {})
+            return held.length
+          },
+          failAll: async () => {
+            harvest()
+            for (const requestId of held) {
+              await c.send('Fetch.failRequest', { requestId, errorReason: 'Failed' }).catch(() => {})
+            }
+            await c.send('Fetch.disable').catch(() => {})
+            return held.length
+          },
+        }
+      }
+      /**
+       * ③ 慢资源（用户口径的直接证据）：把外链 CSS 扣住约 1s ⇒ 这段窗口里启动层必须还在；
+       * 放行后**才**揭示。顺带出两张图（启动层长什么样 / 揭示后是什么样），首页与 /manual/ 各一对。
+       *
+       * ⚠ 这里把 `prefers-reduced-motion` 模拟成 `no-preference`：本机无头 Chrome **默认就是 `reduce`**
+       *   （实测 `matchMedia('(prefers-reduced-motion: reduce)').matches === true`），而那条路径是
+       *   "不淡出、直接移除" ⇒ 不模拟就永远量不到"淡出"这条用户口径（实测踩到过一次）。
+       */
+      await c.send('Emulation.setEmulatedMedia', {
+        media: 'screen',
+        features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+      })
+      for (const [label, url, shotName] of [
+        ['首页', '/', 'home'],
+        ['操作手册', '/manual/', 'manual'],
+      ]) {
+        const warnFrom = c.events.length
+        const hold = await startHold('*.css')
+        await c.send('Page.navigate', { url: `${origin}${url}` })
+        /**
+         * ⚠ 扣住的总时长必须明显短于启动层的 2.5s 超时：超过就走"超时兜底"那条路，
+         *   下面的"没有启动层告警"会红（而那不是缺陷）。
+         * ⚠ 这一段**不截图**：外链 CSS 是**渲染阻塞**资源，扣住它浏览器**根本不画第一帧**
+         *   ⇒ `Page.captureScreenshot` 会一直等不到帧（本轮实测：CDP 30s 超时把整轮跑挂掉）。
+         *   "启动层长什么样"的图改在下面用**扣住模块脚本**（CSS 正常、页面已画出来）的方式拍。
+         */
+        await sleep(500)
+        hold.harvest()
+        const held = await bootMeasure()
+        check(`adj930 ${label}：**CSS 还没到**时启动层挡在前面（不透明、铺满视口、与 html 同色 ⇒ 看不到没格式的正文）`,
+          bootVisibleOk(held), bootBrief(held))
+        check(`adj930 ${label}：揭示方式配的是**淡出透明度**（实测 transition 时长 = ${held?.fade}）`,
+          !!held && held.fade === '0.22s' && held.reduce === false, bootBrief(held))
+        const trace = await evalJs(c, `window.__bootTrace || null`)
+        check(`adj930 ${label}：首屏采样确认启动层**一开始就在**（不是 JS 事后造的），且底色与 html 同色`,
+          !!trace && trace.seen === true && trace.firstOpacity === '1' && trace.firstBg === trace.htmlBg,
+          JSON.stringify(trace))
+        const stillHeld = await bootMeasure()
+        check(`adj930 ${label}：CSS 一直被扣着时**始终没揭示**（不是"先显示正文、再补样式"）`,
+          bootVisibleOk(stillHeld), bootBrief(stillHeld))
+        const released = await hold.continueAll()
+        check(`adj930 ${label}：这一步真的扣住了外链 CSS（扣 0 个 ⇒ 下面的结论不成立；SW 绕过没生效时就是这样）`,
+          released > 0, `扣住 ${released} 个 CSS 请求`)
+        const revealed = await bootWait(bootRevealedOk)
+        check(`adj930 ${label}：放行 CSS 后**才**揭示（等资源就绪，不是碰巧），且此时外部 CSS 已生效`,
+          bootRevealedOk(revealed), bootBrief(revealed))
+        const warns = bootWarnings(warnFrom).filter((t) => t.includes('启动层'))
+        check(`adj930 ${label}：这一程走的是"资源就绪"正常路径（没有启动层的超时/失败告警）`,
+          warns.length === 0, warns.slice(0, 2).join(' | '))
+      }
+      await c.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: bootTraceScript.identifier })
+
+      /**
+       * ③c **出图**（`--no-shots` 时跳过）：给用户看"启动层长什么样 / 揭示后是什么样"，
+       * 首页与 `/manual/` 各一对，落在 `dist-site-shots/boot-*.png`（不入库）。
+       *
+       * ⚠ 为什么这里扣的是**模块脚本**而不是外链 CSS：CSS 是渲染阻塞资源，扣住它页面**不画第一帧**，
+       *   截不到图（③ 那一段已说明）。扣住 `*.js` 时 CSS 正常生效、页面已经画出来了，启动层盖在
+       *   **真实的页面**上 —— 这正是用户实际看到的"加载中"那一屏（也顺便证明启动层真的会**被画出来**，
+       *   而不只是"计算样式说它在"）。
+       */
+      if (DO_SHOTS) {
+        for (const [label, url, shotName] of [
+          ['首页', '/', 'home'],
+          ['操作手册', '/manual/', 'manual'],
+        ]) {
+          const hold = await startHold('*.js')
+          await c.send('Page.navigate', { url: `${origin}${url}` })
+          await sleep(700)
+          hold.harvest()
+          const m = await bootMeasure()
+          check(`adj930 ${label}（出图）：扣住模块脚本时启动层**盖在已经画出来的页面上**（不透明、铺满、与 html 同色）`,
+            bootVisibleOk(m), bootBrief(m))
+          await saveShot(`boot-loading-${shotName}.png`, await shoot('png'))
+          const released = await hold.continueAll()
+          const revealed = await bootWait(bootRevealedOk)
+          check(`adj930 ${label}（出图）：放行脚本（${released} 个）后揭示，再拍一张"揭示后"的首屏`,
+            released > 0 && bootRevealedOk(revealed), bootBrief(revealed))
+          await saveShot(`boot-revealed-${shotName}.png`, await shoot('png'))
+        }
+      }
+
+      /**
+       * ③b `prefers-reduced-motion: reduce`（用户口径：**不淡出、直接移除**）。
+       * 量的是"过渡时长实测为 0"（那正是那条 CSS 的作用），而不是"源码里有没有写"。
+       */
+      {
+        await c.send('Emulation.setEmulatedMedia', {
+          media: 'screen',
+          features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+        })
+        const hold = await startHold('*.css')
+        await c.send('Page.navigate', { url: `${origin}/` })
+        await sleep(500)
+        hold.harvest()
+        const held = await bootMeasure()
+        const released = await hold.continueAll()
+        const gone = await bootWait((x) => !!x && x.present === false, 20, 200)
+        check('adj930 reduced-motion：模拟 `reduce` 时过渡时长实测为 `0s`（不淡出、直接移除）',
+          !!held && held.reduce === true && held.fade === '0s' && released > 0 && !!gone && gone.present === false,
+          `扣住 ${released} 个 / ${bootBrief(held)} → ${bootBrief(gone)}`)
+        await c.send('Emulation.setEmulatedMedia', {
+          media: 'screen',
+          features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+        })
+      }
+
+      /**
+       * ④ 失败兜底 A（**资源失败**）：让外链 CSS 在模块**装上监听之后**失败（`Fetch.failRequest`）——
+       * 走的是"任一资源失败 ⇒ 照样揭示"那条路（而不是 2.5s 超时那条）。判据里带上耗时：
+       * 超时路径至少要 2.5s+，失败路径应当在 1s 量级就揭示。
+       */
+      {
+        const warnFrom = c.events.length
+        const hold = await startHold('*.css')
+        const t0 = Date.now()
+        await c.send('Page.navigate', { url: `${origin}/manual/` })
+        await sleep(450)
+        const failed = await hold.failAll()
+        const m = await bootWait((x) => !!x && x.present === false, 20, 200)
+        const elapsed = Date.now() - t0
+        const warns = bootWarnings(warnFrom).filter((t) => t.includes('启动层'))
+        check('adj930 资源失败兜底：外链 CSS 加载失败时**照样揭示**（不让用户对着转圈），页面不白屏',
+          failed > 0 && !!m && m.present === false && m.textLen > 200,
+          `让 ${failed} 个 CSS 请求失败；${bootBrief(m)}`)
+        check(`adj930 资源失败兜底：走的是**失败**那条路（${elapsed}ms 就揭示了，明显早于 2.5s 超时）`,
+          failed > 0 && elapsed < 2200, `${elapsed}ms`)
+        check('adj930 资源失败兜底：失败原因被写进 console（`console.warn` 里点了启动层与失败）',
+          warns.length > 0 && warns.some((t) => t.includes('失败')), warns.slice(0, 2).join(' | '))
+        await c.send('Page.navigate', { url: `${origin}/manual/` })
+        const back = await bootWait(bootRevealedOk)
+        check('adj930 资源失败兜底：下一次正常打开就恢复（启动层移除 + CSS 生效，可逆）',
+          bootRevealedOk(back), bootBrief(back))
+      }
+
+      /**
+       * ⑤ 失败兜底 B（**模块压根没跑起来**）：挡掉 `*.js` ⇒ `siteBoot.ts` 永远不会执行，
+       * 那 2.5s 的超时定时器根本不存在 —— 这时靠的是 `<head>` 内联脚本里那条 8s 硬兜底。
+       * 这一条量的是"绝不卡死"的最后一道保险（所以它**必然**要等 8s 以上）。
+       */
+      {
+        await c.send('Network.setBlockedURLs', { urls: ['*.js'] })
+        await c.send('Page.navigate', { url: `${origin}/` })
+        await sleep(400)
+        const early = await bootMeasure()
+        const late = await bootWait((x) => !!x && x.present === false, 60, 300)
+        check('adj930 模块没跑起来兜底：脚本被挡掉时启动层一开始在、约 8s 后由**内联硬兜底**摘掉（绝不永远转圈）',
+          !!early && early.present === true && !!late && late.present === false,
+          `一开始 present=${early?.present} → 之后 ${bootBrief(late)}`)
+        await c.send('Network.setBlockedURLs', { urls: [] })
+        await c.send('Page.navigate', { url: `${origin}/` })
+        await bootWait(bootRevealedOk, 15, 200)
+      }
+
+      /**
+       * ⑥ 负对照（**必须为假**）：判据必须真的在量"HTML 里那份内联块"与"DOM 里那个元素"，
+       * 而不是恒真的空话。两条：
+       *   · 把服务端返回的 HTML 里的内联样式删掉（＝"改成依赖外部 CSS"的形态）⇒ 判据①为假；
+       *   · 在**活的 DOM** 里塞一个假的 `#ijipu-boot`（模拟"揭示后没删干净"）⇒ 判据②为假。
+       */
+      {
+        const html = await (await fetch(`${origin}/`)).text()
+        const noInline = html.replace(/<style[\s\S]*?<\/style>/gi, '')
+        check('adj930 负对照：删掉内联样式（改成依赖外部 CSS）⇒ "启动层内联"判据为假（内联是硬要求）',
+          noInline !== html && !bootInlineOk(noInline) && bootInlineOk(html))
+        const injected = await evalJs(
+          c,
+          `(() => {
+            const el = document.createElement('div')
+            el.id = ${JSON.stringify(BOOT_ID)}
+            document.body.append(el)
+            return true
+          })()`,
+        )
+        const dirty = await bootMeasure()
+        await evalJs(c, `document.getElementById(${JSON.stringify(BOOT_ID)})?.remove()`)
+        const clean = await bootMeasure()
+        check('adj930 负对照：往 DOM 里塞一个残留启动层 ⇒ "已从 DOM 移除"判据为假（这条真的在看 DOM）',
+          injected === true && !bootRevealedOk(dirty) && bootRevealedOk(clean),
+          `残留时 ${bootBrief(dirty)} → 清掉后 ${bootBrief(clean)}`)
+      }
 
       // ---------------- 负对照：确认"验证器真的在量东西" ----------------
       console.log('[verify-site] 负对照…')

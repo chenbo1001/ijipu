@@ -4,16 +4,20 @@
  * 设计取舍（为什么首页只做这么点事）：
  *   首页正文全部写在 `index.html` 里，不走 JS 渲染 —— 一是搜索引擎（尤其中文场景的百度）
  *   对不执行 JS 的抓取更友好，二是首屏不依赖 JS、没有"先白屏再出内容"的闪烁。
- *   所以这个文件的职责被刻意压到最小，只有五件事：
+ *   所以这个文件的职责被刻意压到最小，只有六件事：
  *     ① 把品牌色注入 CSS 变量（色值只在 `brand/tokens.ts` 定义一处）；
  *     ② 填外部链接地址（GitHub / 下载 / 插件 —— 同样只在 tokens 里定义）；
  *     ③ 填版本号（`data-app-version` 占位，发版即自动更新）；
  *     ④ 一点交互：顶栏滚动加背景、窄屏菜单、赞赏弹层；
- *     ⑤ 「你以前用过 → 直接进应用」提示条。
+ *     ⑤ 「你以前用过 → 直接进应用」提示条；
+ *     ⑥ adj930：等 CSS / 字体就绪后揭示**首屏启动层**（消灭"先出没格式的文字再闪一下"）。
  *   首页**没有**引入 React 或引擎，JS 体积保持在一个很小的量级。
  */
 import { injectSiteColors, currentSiteMode, saveSiteMode, type SiteMode } from '../brand/siteVars'
 import { fillExternalLinks } from '../brand/siteLinks'
+// adj930（用户要求「先显示背景 + 一个转圈，等资源加载完再显示正文」）：
+// 接管的时机与兜底见该文件头说明 —— 它等外链样式表 + 字体就绪后**只淡出透明度**再移除。
+import { revealSiteBoot } from '../brand/siteBoot'
 import { APP_VERSION } from '../brand/version'
 import './landing.css'
 // adj877：首页「自己改一段试试」区块（引擎按需加载，见该文件头说明）
@@ -153,6 +157,17 @@ function bindReturningTip(): void {
   })
 }
 
+/**
+ * adj930：**第一件事**就是接管启动层（不是最后）。
+ *
+ * 理由：`revealSiteBoot` 的揭示是异步的（等 `load` 事件 / `fonts.ready`），而模块这一串
+ * 同步初始化必须在**这一轮同步执行结束**前做完 —— 把接管放最前面，后面任何一步抛错
+ * 都不会让用户对着转圈（那时链条照样会走到淡出）。
+ *
+ * ⚠ 首页正文是**静态写在 HTML 里**的（SEO / 首屏），所以这里没有"等正文注入"这一步；
+ *   文档页要额外等正文（见 `docs/render.ts`）。
+ */
+revealSiteBoot()
 // 主题：`<head>` 的内联脚本已经把模式定在 `<html>` 上（防闪烁），这里注入完整配色并接上开关
 injectSiteColors(currentSiteMode())
 // adj881：插图也要与主题一致（首屏就得对，不能等用户点一下才换）

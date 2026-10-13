@@ -13,6 +13,22 @@ import { mdToHtml, extractToc, parseJpsInfo, inlineMd } from '../src/help/markdo
 // adj883：首页示例精简（去掉 `# jps-config:{…}` 与装饰线，但必须保住正文）
 import { BRAND_SAMPLES, simplifyJps } from '../src/landing/samples'
 /**
+ * adj930：官网首屏启动层的**色值 / 元素 id / 揭示时机的唯一口径**。
+ * 四个官网页的 `<head>` 里各手写了一段同样的内联块（必须内联，外链样式表来不及防闪烁）
+ * ⇒ "同一份色值抄四遍"最容易漂移，本文件 `[168]` 段逐字核对（含负对照）。
+ * ⚠ 这个模块只在**函数内部**碰 document/window，顶层全是常量 ⇒ 可以在 Node 里直接 import。
+ */
+import {
+  SITE_BOOT_ARMED_FLAG,
+  SITE_BOOT_COLORS,
+  SITE_BOOT_FADE_MS,
+  SITE_BOOT_HARD_FALLBACK_MS,
+  SITE_BOOT_ID,
+  SITE_BOOT_OUT_CLASS,
+  SITE_BOOT_TIMEOUT_MS,
+} from '../src/brand/siteBoot'
+import { SITE_BG } from '../src/brand/siteVars'
+/**
  * adj905：调色板常量 —— 断言"主旋律拿回红色"要用它（**不硬编码色值**）。
  *
  * ⚠ 这里踩过一个坑：我补这行 import 时 `old_string` 没匹配上、**没补成功就跑了**，
@@ -20929,6 +20945,42 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
    */
   check('adj905x 首页顶栏有「插件手册」入口（指向 `/plugin/`）',
     /<nav class="nav"[\s\S]*?<a href="\/plugin\/">插件手册<\/a>[\s\S]*?<\/nav>/.test(homeHtml))
+  /**
+   * adj933（用户要求）：「首页上面那排，ob 插件标 插件 Github，下一个标 应用 Github，……更新记录既然是指向
+   * github，就不要了」；随后澄清：「链接没串，我是说**把应用放前面、插件放后面**」。
+   *
+   * 已核对「标签 ↔ 目标地址」：**没有串**（`repoUrl` → 应用仓库、`obsidianRepoUrl` → 插件仓库，
+   * 见 `src/brand/siteLinks.ts` 的键表）⇒ **两个 href 一个都不动**，只改**标签**与**顺序**。
+   * 页面上"标签 ↔ 实际 href"与"DOM 顺序"两条的**实测**判据（各带负对照）在
+   * `scripts/verify-site.mjs` 的 `adj933` 段；这里是源码级轻闸门，防"以后又把标签写含糊 / 顺序又调回去"。
+   * ⚠ 页脚那条「更新记录」按用户"别顺手删别处"的要求**留着**，故判据只看 `nav` 里面。
+   */
+  const navHtml = /<nav class="nav"[\s\S]*?<\/nav>/.exec(homeHtml)?.[0] ?? ''
+  const APP_TAG = '<a data-l="repoUrl" href="#" rel="noreferrer">应用 Github</a>'
+  const PLUGIN_TAG = '<a data-l="obsidianRepoUrl" href="#" rel="noreferrer">插件 Github</a>'
+  const navLabelsOk = (nav: string): boolean =>
+    nav.includes(APP_TAG) && nav.includes(PLUGIN_TAG) && !/data-l="releasesUrl"/.test(nav)
+  /** 顺序判据：**应用 Github 在前、插件 Github 在后**，且两条紧挨着（中间只有空白） */
+  const navOrderOk = (nav: string): boolean => {
+    const app = nav.indexOf(APP_TAG)
+    const plugin = nav.indexOf(PLUGIN_TAG)
+    // ⚠ 必须显式判 `plugin > app`：`slice(大, 小)` 会返回空串 ⇒ 只判"中间是空白"会把顺序反过来也判成真
+    if (app < 0 || plugin < 0 || plugin < app) return false
+    return nav.slice(app + APP_TAG.length, plugin).trim() === ''
+  }
+  check('adj933 首页顶栏：两个 GitHub 入口逐字标「应用 Github」/「插件 Github」，且顶栏里**已无**「更新记录」',
+    navLabelsOk(navHtml), navHtml.replace(/\s+/g, ' ').slice(0, 220))
+  check('adj933 首页顶栏**顺序**：`应用 Github` 在前、`插件 Github` 在后，且两条紧挨着（用户澄清口径）',
+    navOrderOk(navHtml),
+    `app@${navHtml.indexOf(APP_TAG)} plugin@${navHtml.indexOf(PLUGIN_TAG)}`)
+  check('adj933 负对照：标签改回旧写法（`Obsidian 插件` / `GitHub`）、把「更新记录」加回顶栏、或把两条顺序对调 ⇒ 判据为假',
+    navLabelsOk(navHtml) &&
+      navOrderOk(navHtml) &&
+      !navLabelsOk(navHtml.replace(APP_TAG, '<a data-l="repoUrl" href="#" rel="noreferrer">GitHub</a>')) &&
+      !navLabelsOk(navHtml.replace(PLUGIN_TAG, '<a data-l="obsidianRepoUrl" href="#" rel="noreferrer">Obsidian 插件</a>')) &&
+      !navLabelsOk(navHtml.replace(APP_TAG, '<a data-l="releasesUrl" href="#" rel="noreferrer">更新记录</a>')) &&
+      !navOrderOk(navHtml.replace(APP_TAG, '@@TMP@@').replace(PLUGIN_TAG, APP_TAG).replace('@@TMP@@', PLUGIN_TAG)),
+    `nav 命中「更新记录」=${/data-l="releasesUrl"/.test(navHtml)}`)
   check('adj905x 三个文档页顶栏互相可切换（`.doc-switch` 里三份都在）',
     [manualHtml, syntaxHtml, pluginHtml].every(
       (h) =>
@@ -22384,4 +22436,179 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   }
   check('adj885 前三部分的每个 jps 示例都零错误零告警（读者照抄不该看到 ⚠）',
     offenders.length === 0, offenders.slice(0, 8).join(' ｜ '))
+}
+
+/**
+ * adj930（**用户实测反馈**）：官网页面的**首屏启动层** —— 消灭"先出没格式的文字、再闪一下"的 FOUC。
+ *
+ * 用户原话：「首页、手册页等这些页面，在 css 还没加载完就开始显示了，结果就是先显示没有格式的文字版，
+ * 再闪一下，显示 css 加持的正常版，不美观，建议**先显示背景，一个进度转转，css 所有资源加载完后再
+ * 正常显示出来**」；追加口径：「一行内联 CSS + 一个全屏背景可以，但**背景要与要显示的背景一致**，
+ * 以免又是背景闪动」。
+ *
+ * 启动层那段 CSS **必须内联在各页 `<head>` 里**（外链样式表自己就要等网络 ⇒ 拿它防闪烁等于没防），
+ * 内联就意味着"同一份色值抄四遍" ⇒ 最容易出的坏味道是"改了主题忘了改启动层"，
+ * 那正是"背景又闪一下"的复发路径。所以这里把三件事钉死、每条都配**负对照**：
+ *   ① 四页内联块里**自带**启动层全部字面色值，且**不依赖** `var(--site-*)`（那会儿变量还没注入）；
+ *   ② 内联的深/浅底色 == `styles/theme.css` 里 `--jp-bg-app` 的主题 token 值（深浅两套）；
+ *   ③ 揭示时机的实现齐备：等外链样式表 + `document.fonts.ready` + （文档页）正文注入；
+ *      超时/失败照样揭示并打进 console；`prefers-reduced-motion` 下不淡出直接移除；末尾 `remove()`。
+ *
+ * 真浏览器里的表现（首屏就有启动层、覆盖视口且与 html 同色、揭示后已从 DOM 移除、慢/失败资源下的揭示）
+ * 归 `scripts/verify-site.mjs` 的同名段 `adj930` 端到端验（那里也有负对照）。
+ */
+{
+  console.log('[168] 官网首屏启动层（adj930）')
+  const SITE_PAGES: [string, string][] = [
+    ['首页', 'index.html'],
+    ['操作手册', 'manual/index.html'],
+    ['脚本语法说明', 'syntax/index.html'],
+    ['插件手册', 'plugin/index.html'],
+  ]
+  const htmlOf = (rel: string) => String(readFileSync(join(root, rel), 'utf8'))
+  /** 主题 token 的原文（判据②要拿它当"唯一的字面量来源"） */
+  const themeCss = String(readFileSync(join(root, 'src', 'styles', 'theme.css'), 'utf8'))
+  /** 页面里**内联**的 `<style>` 块（外链 CSS 不在此列 —— 那正是"没防住"的形态） */
+  const inlineStyles = (html: string): string[] =>
+    [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1])
+  /** 归一化：大小写与空白不影响比对（HTML 里按惯例写小写、brand token 里是大写） */
+  const normCss = (s: string) => s.toLowerCase().replace(/\s+/g, ' ')
+  /** 启动层用到的**全部**字面色值 */
+  const bootColors = [
+    SITE_BOOT_COLORS.dark.bg,
+    SITE_BOOT_COLORS.light.bg,
+    SITE_BOOT_COLORS.dark.accent,
+    SITE_BOOT_COLORS.light.accent,
+    SITE_BOOT_COLORS.dark.ink,
+    SITE_BOOT_COLORS.light.ink,
+    SITE_BOOT_COLORS.dark.track,
+    SITE_BOOT_COLORS.light.track,
+  ]
+  /**
+   * 判据①（纯函数 ⇒ 负对照复用同一份）：某页的**内联**块里自带启动层全部字面色值、
+   * 且整段**不依赖** `var(--…)`（依赖外部变量 = 那会儿还是没颜色）。
+   */
+  const bootInlineOk = (html: string): boolean => {
+    const css = normCss(inlineStyles(html).join('\n'))
+    if (!css.includes(`#${SITE_BOOT_ID}`)) return false
+    if (css.includes('var(--')) return false
+    return bootColors.every((c) => css.includes(normCss(c)))
+  }
+  /**
+   * 判据②（纯函数 ⇒ 负对照复用同一份）：这一页的**内联**块里，深浅两个底色就是给定的
+   * 主题 token 值（把 token 改歪 ⇒ 这条必须判假）。
+   */
+  const bootTokenOk = (html: string, tokenDark: string, tokenLight: string): boolean => {
+    const css = normCss(inlineStyles(html).join('\n'))
+    return css.includes(normCss(tokenDark)) && css.includes(normCss(tokenLight))
+  }
+  /** 取 `theme.css` 里某个选择器块（这些块里没有嵌套花括号 ⇒ indexOf 取到第一个 `}` 就够） */
+  const blockOf = (selector: string): string => {
+    const i = themeCss.indexOf(selector)
+    if (i < 0) return ''
+    const open = themeCss.indexOf('{', i)
+    const close = themeCss.indexOf('}', open)
+    return open < 0 || close < 0 ? '' : themeCss.slice(open + 1, close)
+  }
+  /** 取变量值；值是 `var(--x)` 就顺着 `:root` 再查一层（同一份 token 只允许一处字面量） */
+  const varValue = (block: string, name: string): string => {
+    const raw = new RegExp(`${name}\\s*:\\s*([^;]+);`).exec(block)?.[1]?.trim() ?? ''
+    const ref = /var\((--[\w-]+)\)/.exec(raw)?.[1]
+    return ref ? varValue(blockOf(':root'), ref) : raw
+  }
+
+  // ---- 启动层元素：必须是**静态 HTML**（JS 造的来不及：模块是 defer 的） ----
+  const missingEl = SITE_PAGES.filter(([, rel]) => {
+    const html = htmlOf(rel)
+    return !new RegExp(`<div id="${SITE_BOOT_ID}"[^>]*role="status"[^>]*aria-busy="true"`).test(html)
+  })
+  check('adj930 四个官网页的 `<body>` 里都有启动层浮层（**静态写在 HTML 里**、带 `role=status` + `aria-busy`）',
+    missingEl.length === 0, missingEl.map(([l]) => l).join('、'))
+  /** `<noscript>` 兜底：关掉 JS 时没有任何脚本能揭示 ⇒ 必须干脆不显示（否则永远转圈） */
+  const noJsFallback = SITE_PAGES.filter(([, rel]) => !/<noscript><style>#ijipu-boot \{ display: none; \}<\/style><\/noscript>/.test(htmlOf(rel)))
+  check('adj930 四页都有关掉 JS 的兜底（`<noscript>` 里把启动层 `display:none`，否则无 JS 会永远转圈）',
+    noJsFallback.length === 0, noJsFallback.map(([l]) => l).join('、'))
+
+  // ---- 判据①：内联块自带色值、不依赖外部变量 ----
+  const inlineFail = SITE_PAGES.filter(([, rel]) => !bootInlineOk(htmlOf(rel)))
+  check('adj930 四页的**内联**块里都有启动层的全部字面色值（深浅两套），且不出现 `var(--…)`',
+    inlineFail.length === 0,
+    inlineFail.length
+      ? `不合格：${inlineFail.map(([l]) => l).join('、')}`
+      : `深底 ${SITE_BOOT_COLORS.dark.bg} / 浅底 ${SITE_BOOT_COLORS.light.bg} / 强调 ${SITE_BOOT_COLORS.dark.accent}`)
+
+  // ---- 四页那段内联块必须**逐字相同**（同一份色值抄四遍 ⇒ 用闸门代替记性） ----
+  const firstInline = SITE_PAGES.map(([, rel]) => inlineStyles(htmlOf(rel))[0] ?? '')
+  check('adj930 四页 `<head>` 的内联块**逐字相同**（含启动层；改色必须四页一起改）',
+    firstInline.every((s) => s.length > 0 && s === firstInline[0]),
+    `${new Set(firstInline).size} 种版本 / 长度 ${firstInline.map((s) => s.length).join(',')}`)
+  /** 淡出那条规则也必须**内联**：否则揭示时加的类不生效（元素会直接消失 = 又变回一次闪） */
+  const noFadeRule = SITE_PAGES.filter(
+    ([, rel]) => !normCss(htmlOf(rel)).includes(normCss(`#${SITE_BOOT_ID}.${SITE_BOOT_OUT_CLASS} { opacity: 0; }`)),
+  )
+  check('adj930 四页内联块里都有"淡出只改透明度"那条规则（`#ijipu-boot.ijipu-boot-out { opacity: 0; }`）',
+    noFadeRule.length === 0, noFadeRule.map(([l]) => l).join('、'))
+
+  // ---- 判据②：内联底色 == `styles/theme.css` 的主题 token（深浅两套） ----
+  const darkToken = varValue(blockOf(':root'), '--jp-bg-app')
+  const lightToken = varValue(blockOf("[data-mode='light']"), '--jp-bg-app')
+  const tokenOk =
+    normCss(darkToken) === normCss(SITE_BOOT_COLORS.dark.bg) &&
+    normCss(lightToken) === normCss(SITE_BOOT_COLORS.light.bg) &&
+    normCss(SITE_BG.dark) === normCss(darkToken) &&
+    normCss(SITE_BG.light) === normCss(lightToken)
+  check('adj930 启动层的深浅底色 == 主题 token `--jp-bg-app`（`theme.css`）== `SITE_BG`（三处同一个值）',
+    tokenOk,
+    `深 token=${darkToken} / 浅 token=${lightToken}；SITE_BG=${SITE_BG.dark}|${SITE_BG.light}；` +
+      `SITE_BOOT=${SITE_BOOT_COLORS.dark.bg}|${SITE_BOOT_COLORS.light.bg}`)
+  /** 判据②的"内联侧"：页面内联块里真的出现了这两个 token 值 */
+  const tokenMissing = SITE_PAGES.filter(([, rel]) => !bootTokenOk(htmlOf(rel), darkToken, lightToken))
+  check('adj930 四页内联块里都找得到那两个 token 值（"内联启动色 == 主题页面底色"这条真的在页面上）',
+    tokenMissing.length === 0, tokenMissing.map(([l]) => l).join('、'))
+
+  // ---- 判据③：揭示时机的实现齐备 ----
+  const bootSrc = String(readFileSync(join(root, 'src', 'brand', 'siteBoot.ts'), 'utf8'))
+  check('adj930 揭示前等的是**外链样式表全部 loaded** + `document.fonts.ready`（字体不齐会二次跳动）',
+    bootSrc.includes('link[rel~="stylesheet"]') && bootSrc.includes('document.fonts.ready') &&
+      bootSrc.includes("link.addEventListener('load'") && bootSrc.includes("'error'"))
+  check('adj930 超时（' + SITE_BOOT_TIMEOUT_MS + 'ms）或任一资源失败 ⇒ **照样揭示**，并把原因 `console.warn` 出来',
+    new RegExp(`SITE_BOOT_TIMEOUT_MS\\s*=\\s*${SITE_BOOT_TIMEOUT_MS}\\b`).test(bootSrc) &&
+      bootSrc.includes('console.warn') && bootSrc.includes('timedOut'))
+  check('adj930 揭示只**淡出透明度**（不改尺寸/位置，其下 html/body 同色）；reduced-motion 下不淡出直接移除',
+    bootSrc.includes('SITE_BOOT_OUT_CLASS') && /prefers-reduced-motion/.test(bootSrc) &&
+      bootSrc.includes('transitionend') &&
+      new RegExp(`SITE_BOOT_FADE_MS\\s*=\\s*${SITE_BOOT_FADE_MS}\\b`).test(bootSrc))
+  check('adj930 揭示后启动层**从 DOM 移除**（不留残留、不挡点击）',
+    /\.remove\(\)/.test(bootSrc) && bootSrc.includes("el.classList.add(SITE_BOOT_OUT_CLASS)"))
+  /** 硬兜底：模块压根没跑起来（404/被拦）时，`<head>` 内联脚本到点把启动层摘掉 */
+  const hardFallback = SITE_PAGES.filter(([, rel]) => {
+    const html = htmlOf(rel)
+    return !html.includes(SITE_BOOT_ARMED_FLAG) || !html.includes(`}, ${SITE_BOOT_HARD_FALLBACK_MS})`)
+  })
+  check(`adj930 四页都有"模块没跑起来"的硬兜底（${SITE_BOOT_HARD_FALLBACK_MS}ms 后摘掉启动层，用 ${SITE_BOOT_ARMED_FLAG} 让位给正常揭示）`,
+    hardFallback.length === 0, hardFallback.map(([l]) => l).join('、'))
+
+  // ---- 两个入口都接上了揭示（否则启动层会一直转圈到超时） ----
+  const landingSrc = String(readFileSync(join(root, 'src', 'landing', 'main.ts'), 'utf8'))
+  const renderSrc = String(readFileSync(join(root, 'src', 'docs', 'render.ts'), 'utf8'))
+  check('adj930 首页入口调用 `revealSiteBoot()`（首页正文静态在 HTML 里 ⇒ 不用额外等）',
+    landingSrc.includes("from '../brand/siteBoot'") && landingSrc.includes('revealSiteBoot()'))
+  check('adj930 文档页入口把"正文注入完成"这个 promise 交给 `revealSiteBoot`（正文是运行时注入的）',
+    renderSrc.includes("from '../brand/siteBoot'") && renderSrc.includes('revealSiteBoot(bodyInjected)') &&
+      renderSrc.includes('markBodyDone()'))
+
+  // ---- 负对照：三条判据各自都要真的能判假 ----
+  const homeHtml = htmlOf('index.html')
+  const wrongDark = homeHtml.replace(/#0f1526/g, '#123456')
+  const noInline = homeHtml.replace(/<style[\s\S]*?<\/style>/gi, '')
+  check('adj930 负对照①：把深色底改歪一个色值 ⇒ 判据①为假（证明它真的在逐字比对色值）',
+    wrongDark !== homeHtml && !bootInlineOk(wrongDark) && bootInlineOk(homeHtml))
+  check('adj930 负对照②：删掉内联块（＝"改成依赖外部 CSS"的形态）⇒ 判据①与"内联里找得到 token"都为假',
+    noInline !== homeHtml && !bootInlineOk(noInline) && !bootTokenOk(noInline, darkToken, lightToken))
+  const onePageChanged = [firstInline[0], firstInline[1], firstInline[2] + ' /* 只改这一页 */', firstInline[3]]
+  check('adj930 负对照③：四页里只改一页 ⇒ "逐字相同"这条为假（不会出现"三页改了、一页忘了"还能绿）',
+    !onePageChanged.every((s) => s === onePageChanged[0]) && firstInline.every((s) => s === firstInline[0]))
+  check('adj930 负对照④：主题 token 换成别的值 ⇒ 判据②为假（以后改主题忘了改启动层，这里会红）',
+    !bootTokenOk(homeHtml, '#123456', lightToken) && bootTokenOk(homeHtml, darkToken, lightToken) &&
+      normCss(darkToken) === normCss(SITE_BOOT_COLORS.dark.bg) && normCss(lightToken) === normCss(SITE_BOOT_COLORS.light.bg))
 }

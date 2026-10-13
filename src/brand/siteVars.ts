@@ -83,7 +83,14 @@ const LIGHT_VARS: Record<string, string> = {
   '--site-topbar-bg': 'rgba(242, 245, 251, 0.88)',
 }
 
-/** 兜底背景色：与各 HTML `<head>` 里那段"防闪烁"内联样式**必须一致**（两处都改） */
+/**
+ * 兜底背景色：与各 HTML `<head>` 里那段"防闪烁"内联样式**必须一致**（两处都改）。
+ *
+ * adj930：它同时是**首屏启动层**的底色（`brand/siteBoot.ts` 的 `SITE_BOOT_COLORS` 直接取它），
+ * 而"内联值 == 这里的值 == `styles/theme.css` 的主题 token"这三处一致性
+ * **已有机器闸门**（`npm run smoke` 的 `[168]` 段 + `scripts/verify-site.mjs` 的同名段）；
+ * 原文那句"两处都改"从此不再依赖人的记性。
+ */
 export const SITE_BG: Record<SiteMode, string> = {
   dark: ui.bgApp,
   light: '#f2f5fb',

@@ -18,6 +18,9 @@
 import { extractToc, mdToHtml } from '../help/markdown'
 import { mountJpsBlocks } from '../help/jpsPreview'
 import { injectSiteColors, currentSiteMode, saveSiteMode, type SiteMode } from '../brand/siteVars'
+// adj930（用户要求「先显示背景 + 一个转圈，等资源加载完再显示正文」）：文档页的正文是
+// **运行时注入**的 ⇒ 揭示前除了等外链样式表与字体，还要等这里注入完成（见 renderDoc 末尾）。
+import { revealSiteBoot } from '../brand/siteBoot'
 import { fillExternalLinks } from '../brand/siteLinks'
 import './docs.css'
 
@@ -138,6 +141,19 @@ function bindThemeToggle(): void {
  * 页头不再另放一个标题——否则同一个名字会出现两遍，而且目录也要跟着特判。
  */
 export function renderDoc(page: DocPage): void {
+  /**
+   * adj930：先接管首屏启动层（`<head>` 内联的那层背景 + 转圈）。
+   *
+   * 为什么这里要**显式传一个 promise**：文档页的正文是**运行时注入**的 ——
+   * 只等 CSS / 字体就可能揭示出一张空骨架（用户看到的正是"先出没格式的文字再闪一下"）。
+   * 这个 promise 在函数**最后一行**兑现（那时正文、目录、滚动高亮都装好了）；
+   * 而 `revealSiteBoot` 本身还有 2.5s 超时兜底 ⇒ 万一中途抛错也不会永远转圈。
+   */
+  let markBodyDone: () => void = () => {}
+  const bodyInjected = new Promise<void>((resolve) => {
+    markBodyDone = resolve
+  })
+  revealSiteBoot(bodyInjected)
   // 主题：`<head>` 的内联脚本已经把模式定在 `<html>` 上（防闪烁），
   // 这里注入完整配色（否则 var(--site-*) 全是空值，会先闪一下无色版式）并接上右上角开关
   injectSiteColors(currentSiteMode())
@@ -157,4 +173,6 @@ export function renderDoc(page: DocPage): void {
   renderToc(page)
   bindScrollSpy()
   bindTocToggle()
+  // adj930：正文（含目录与滚动高亮）都装好了 ⇒ 兑现"正文注入完成"，启动层才会淡出
+  markBodyDone()
 }

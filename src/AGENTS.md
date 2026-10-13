@@ -16,9 +16,9 @@
 | `dialogs/` | 功能对话框：PageConfig、Playback、Export、Samples、Shortcuts、About | 每个对话框一个文件，统一用 `ui/Modal`；打开/关闭走 uiStore.modal |
 | `export/` | 导出模块：PDF/JPG/SVG/PNG（export.ts） | 纯函数 + 浏览器下载，仅在用户主动触发时执行 |
 | `playback/` | 播放辅助：采样音色库离线缓存（浏览器 IndexedDB / Tauri 文件系统，samplerCache.ts，adj323） | 实现 engine 的 `SamplerCache` 接口；只做缓存读写与预缓存编排，音频播放仍走 engine |
-| `brand/` | 品牌层：tokens（色板/字体/口号/**官网地址**）、copy（面向用户文案）、themes（中国色主题）、version（版本号）、siteVars/siteLinks（**官网页面**的品牌色注入与外部链接填充，adj876） | 所有品牌字面量集中于此，禁止在其它代码硬编码文案/色值/版本号；官网的**外部地址**（GitHub / 下载 / 插件）也放这里，HTML 里只写 `data-l="<键名>"` 由 `siteLinks.ts` 填 |
+| `brand/` | 品牌层：tokens（色板/字体/口号/**官网地址**）、copy（面向用户文案）、themes（中国色主题）、version（版本号）、siteVars/siteLinks（**官网页面**的品牌色注入与外部链接填充，adj876）、siteBoot（**官网首屏启动层**：色值/元素 id 的唯一口径 + 揭示时机，adj930） | 所有品牌字面量集中于此，禁止在其它代码硬编码文案/色值/版本号；官网的**外部地址**（GitHub / 下载 / 插件）也放这里，HTML 里只写 `data-l="<键名>"` 由 `siteLinks.ts` 填；**启动层那段内联 CSS 必须留在各页 `<head>` 里**（外链样式表来不及防闪烁），色值只改 `siteBoot.ts` + 四页（smoke `[168]` 逐字核对） |
 | `help/` | 帮助文档渲染：markdown.ts（Markdown→HTML 纯函数 + `extractToc`，adj876 从 `dialogs/DocDialog.tsx` 抽出） | **纯函数、零依赖、可在 Node 里直接断言**；应用内帮助与官网 `/manual/`、`/syntax/` **共用这一个渲染器**（标题 id 与目录锚点必须同源，有 smoke 闸门兜底）；不许在这里引 React/DOM |
-| `landing/` | **官网介绍首页**（`/`）的入口与样式：main.ts + landing.css（adj876） | 只做"注入品牌色 / 填外链 / 填版本号 / 少量交互"；**不引 React、不引引擎**（首页正文写在根 `index.html` 里，为的是 SEO 与首屏，有 smoke 断言守着）；样式只消费 `--site-*` 变量 |
+| `landing/` | **官网介绍首页**（`/`）的入口与样式：main.ts + landing.css（adj876） | 只做"注入品牌色 / 填外链 / 填版本号 / 少量交互 / 揭示首屏启动层（adj930，见 `brand/siteBoot.ts`）"；**不引 React、不引引擎**（首页正文写在根 `index.html` 里，为的是 SEO 与首屏，有 smoke 断言守着）；样式只消费 `--site-*` 变量 |
 | `docs/` | **官网文档页**（`/manual/`、`/syntax/`）：render.ts（共用的渲染+目录+滚动高亮）+ manual.ts / syntax.ts（两个入口各导自己那份 md）+ docs.css（adj876） | 两个入口**各自 import 自己那份 `docs/*.md`**，不要合并（否则一页会把另一份 80KB 也下下来）；正文运行时注入，与应用内帮助同源 |
 | `styles/` | 主题样式：theme.css（品牌 token CSS 变量） | 样式统一用 `var(--jp-*)` 变量，禁止散落魔法色值 |
 | `gen/` | 自动生成：buildInfo.ts（BUILD_DATE/GIT_COMMIT） | 由 scripts/gen-build-info.mjs 生成，**禁止手改**（已在 .gitignore） |
