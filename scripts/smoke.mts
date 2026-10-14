@@ -210,7 +210,8 @@ import { PAD_GROUPS } from '../src/editor/padLayout.ts'
 // adj416：音源来源解析（安装目录内置 SF2 / 缓存 / 远端）——用假 Tauri + 假缓存断言，不碰真 IndexedDB
 import { resolveHqBank, prefetchHqLibraryProgress } from '../src/playback/spessaCache.ts'
 import type { HqCache } from '../src/playback/spessaCache.ts'
-import { hasBuiltinBank, GM_VOICE_OPTIONS } from '../src/playback/spessaSynthBackend.ts'
+// adj953：负对照夹具要**逐字复刻改动前的预取**（缓存 → 内置 → 联网）⇒ 需要这一个取的入口
+import { hasBuiltinBank, loadHqBank, GM_VOICE_OPTIONS } from '../src/playback/spessaSynthBackend.ts'
 import type { HqSampleLibrary } from '../src/playback/spessaSynthBackend.ts'
 // adj417：按钮图标清单（public/icons/ 下的文件名）——断言文件存在、sw.js 预热清单未漂移
 import { ICON_DIR, ICON_FILES, ICON_FILE_NAMES } from '../src/ui/toolIcons.ts'
@@ -8576,6 +8577,414 @@ async function runAdj416BankSourceTests() {
   } finally {
     g.window = savedWindow
     g.fetch = savedFetch
+  }
+}
+
+/**
+ * ---- 102b. **预取先问宿主**：嵌入版里音源就在插件目录，别再去联网下 32MB（adj953） ----
+ *
+ * ## 用户实报（2026-10）
+ *
+ * 把带插件的库拷到**另一台电脑**打开：`…/plugins/ijipu/soundfonts/generaluser_gs.sf2`（32,319,396 B）
+ * 明明在盘上，嵌入版**每次都提示「正在后台下载音色库（约30MB，仅首次）…」**；网络不通就报
+ * 「自动下载失败 ⇒ 手动导入」，导入后**下次打开还提示**。
+ *
+ * ## 根因（adj950 排查）
+ *
+ * 音源的**取用路径有两条，判据不一致**：
+ *  · **真正加载**（试听/导出）走 `resolveHqBank(lib, cache, hostBankUrl(lib.id))` —— **问了宿主** ✓；
+ *  · **预取**（`SoundBankPanel.tsx:70`、`PlaybackDialog.tsx:175`）只调
+ *    `prefetchHqLibraryProgress(lib, cache)` —— **压根不带宿主地址** ✗。
+ *  于是预取链只有"应用自己的缓存 → 安装目录内置 → CDN"，缓存里没有（实测 IndexedDB 里
+ *  只有键与元数据、合计 ≈11KB）⇒ **每次冷启动都真的去下那 32MB** ⇒ 每次都提示。
+ *
+ * ## 本段断言的口径
+ *
+ * 本 bug 的核心判据是**四类调用的各自次数**，所以夹具把四类调用全部分开计数：
+ *  · `counts.host`    —— 按**宿主地址**取字节（`hostUrl`）；
+ *  · `counts.builtin` —— 按 `sf_soundfont_resource_read` 取安装目录内置字节；
+ *  · `counts.cdn`     —— 按库自身的 `source`/`fallbackSource` 联网取字节；
+ *  · `counts.writes`  —— `cache.save` 写缓存次数。
+ *
+ * 每条断言都配**负对照**（跑一下"改动前那样"的行为，证明断言真的在判东西）。
+ * 宿主地址那条**用调用点当夹具**（不是自造一个"理想实现"）：调用点怎么传参数，这里就怎么调。
+ */
+async function runAdj953HostBankPrefetchTests() {
+  const lib: HqSampleLibrary = {
+    id: 'generaluser_gs',
+    name: '测试音源',
+    source: 'https://cdn.example.invalid/generaluser_gs.sf2',
+    sizeBytes: 4,
+    format: 'sf2',
+  }
+  /** 四类调用各自的字节（值不同，便于发现"拿错了来源"） */
+  const HOST_BUF = new Uint8Array([1, 1, 1, 1]).buffer
+  const BUILTIN_BUF = new Uint8Array([2, 2, 2]).buffer
+  const CDN_BUF = new Uint8Array([9, 9, 9, 9, 9]).buffer
+  const HOST_URL = `app://obsidian.md/${lib.id}.sf2`
+  const g = globalThis as unknown as { window?: unknown; fetch?: unknown; indexedDB?: unknown }
+  const savedWindow = g.window
+  const savedFetch = g.fetch
+  const savedIndexedDB = g.indexedDB
+  // 纯浏览器/纯桌面 WebView 的判据是"没有 indexedDB"；夹具里不碰真 IndexedDB，
+  // 但 `spessaCache` 里若有顶层兜底会读它 ⇒ 显式删掉再恢复。
+  const counts = { host: 0, builtin: 0, cdn: 0, writes: 0 }
+  const resetCounts = (): void => {
+    counts.host = 0
+    counts.builtin = 0
+    counts.cdn = 0
+    counts.writes = 0
+  }
+
+  /** 假 fetch：按 URL 分流，宿主 / CDN 各自计数（这是本 bug 的核心判据） */
+  const mockFetch = (opts: { hostStatus?: number; hostThrow?: boolean; hostEmpty?: boolean; cdnOk?: boolean }) => {
+    g.fetch = (async (url: unknown) => {
+      const u = String(url)
+      if (u === HOST_URL) {
+        counts.host++
+        if (opts.hostThrow) throw new TypeError('Failed to fetch')
+        const status = opts.hostStatus ?? 200
+        if (status !== 200) return { ok: false, status, arrayBuffer: async () => new ArrayBuffer(0) } as unknown as Response
+        return { ok: true, status: 200, arrayBuffer: async () => (opts.hostEmpty ? new ArrayBuffer(0) : HOST_BUF) } as unknown as Response
+      }
+      // ⚠ `String(undefined)` 这种"没判空就拿去 fetch"的调用**不算宿主**——它只是多打了一次网络
+      //   （④的负对照就靠这条把它们分开）。假网络里"undefined"/空串是不可解析地址 ⇒ 直接抛，
+      //   与浏览器里 `fetch(undefined)` 的真实结果一致。
+      if (u === 'undefined' || u === '') {
+        counts.cdn++
+        throw new TypeError("Failed to parse URL from undefined")
+      }
+      counts.cdn++
+      const ok = opts.cdnOk !== false
+      return { ok, status: ok ? 200 : 404, arrayBuffer: async () => CDN_BUF } as unknown as Response
+    }) as unknown as typeof fetch
+  }
+  /** 假 Tauri：`sf_soundfont_resource_read` 计"内置取字节"次数；探测路径按 `builtin` 给 */
+  const mockTauri = (builtin: boolean) => {
+    g.window = {
+      __TAURI__: {
+        core: {
+          invoke: async (cmd: string) => {
+            if (cmd === 'sf_soundfont_builtin_path') return builtin ? `C:\\Program Files\\iJipu\\${lib.id}.sf2` : null
+            if (cmd === 'sf_soundfont_resource_read') {
+              counts.builtin++
+              return BUILTIN_BUF
+            }
+            return null
+          },
+        },
+      },
+    }
+  }
+  /** 假缓存（不碰真 IndexedDB）：`existing` 为 null 即"冷缓存"，save 计"写缓存"次数 */
+  const cacheOf = (existing: ArrayBuffer | null): HqCache =>
+    ({
+      load: async () => existing,
+      has: async () => existing !== null,
+      save: async (_id: string, ab: ArrayBuffer) => {
+        saved.push(ab)
+        counts.writes++
+      },
+    }) as unknown as HqCache
+  let saved: ArrayBuffer[] = []
+
+  /**
+   * **改动前的预取**（负对照夹具）——逐字对应 adj953 之前的 `prefetchHqLibraryProgress`：
+   * 缓存 → 内置 → 联网。它对 `hostUrl` 一无所知，所以"宿主有音源"这件事它看不见。
+   * 与上面的实现**成对使用**：断言"新行为比旧行为少下了 CDN"，而不是只断言一个常量。
+   */
+  const legacyPrefetch = async (l: HqSampleLibrary, cache: HqCache): Promise<string> => {
+    if (await cache.has(l.id)) return 'cache'
+    if (await hasBuiltinBank(l)) return 'builtin'
+    const bank = await loadHqBank(l)
+    await cache.save(l.id, bank)
+    return 'remote'
+  }
+
+  try {
+    delete g.indexedDB
+    // ① 宿主有音源（冷缓存）⇒ 从宿主取、写缓存、**一次 CDN 都不发**
+    //    ⚠ 参数按**调用点**的写法传：`hostUrl` 是第 4 个参数（第 3 个仍是 onProgress）✓
+    {
+      resetCounts()
+      saved = []
+      mockFetch({})
+      mockTauri(false)
+      const src = await prefetchHqLibraryProgress(lib, cacheOf(null), undefined, HOST_URL)
+      check('adj953 ①有宿主地址 + 冷缓存 ⇒ 来源 = host', src === 'host', src)
+      check('adj953 ①从宿主取字节恰好 1 次', counts.host === 1, `${counts.host}`)
+      check('adj953 ①**CDN 请求 0 次**（用户报的"每次都提示下载"就是这条没做到）', counts.cdn === 0, `${counts.cdn}`)
+      check('adj953 ①**缓存被写入**（下次打开不再提示的前提）', counts.writes === 1, `${counts.writes}`)
+      check('adj953 ①写进缓存的确实是**宿主那份字节**（不是 CDN 的）', saved[0] === HOST_BUF, `${saved[0]?.byteLength ?? 0} 字节`)
+      check('adj953 ①宿主命中时不读内置、不探测内置', counts.builtin === 0, `${counts.builtin}`)
+    }
+    // ①负对照：把"宿主优先"去掉（= 改动前那两个调用点的写法：只传 lib+cache）⇒ CDN 被下 1 次
+    {
+      resetCounts()
+      saved = []
+      mockFetch({})
+      mockTauri(false)
+      const src = await prefetchHqLibraryProgress(lib, cacheOf(null))
+      check(
+        'adj953 ①负对照：不把宿主地址传进去 ⇒ 来源 = remote、CDN 被下 1 次（证明上面那三条不是在判恒真）',
+        src === 'remote' && counts.cdn === 1 && counts.host === 0,
+        `${src} host=${counts.host} cdn=${counts.cdn}`,
+      )
+      check('adj953 ①负对照：那种写法下写缓存的字节是 **CDN 那份**（与宿主那份不同字节）', saved[0] === CDN_BUF, `${saved[0]?.byteLength ?? 0} 字节`)
+    }
+    // ② 第二次预取（缓存已热）⇒ **0 次网络**（宿主与 CDN 都不碰）——"下次打开不再提示"的机器口径
+    {
+      resetCounts()
+      saved = []
+      mockFetch({})
+      mockTauri(false)
+      const src = await prefetchHqLibraryProgress(lib, cacheOf(HOST_BUF), undefined, HOST_URL)
+      check('adj953 ②第二次预取（缓存已热）⇒ 来源 = cache、宿主与 CDN 各 0 次', src === 'cache' && counts.host === 0 && counts.cdn === 0, `${src} host=${counts.host} cdn=${counts.cdn}`)
+      check('adj953 ②热缓存不重复写缓存（缓存里已经是它）', counts.writes === 0, `${counts.writes}`)
+      check('adj953 ②热缓存不读内置、不探测内置', counts.builtin === 0, `${counts.builtin}`)
+    }
+    // ②负对照：旧写法每次冷启动都重下（"每次都提示"的机器画像）——同一份热缓存输入，它照样下 CDN
+    {
+      resetCounts()
+      saved = []
+      mockFetch({})
+      mockTauri(false)
+      let legacySrc = ''
+      let err = ''
+      try {
+        // 旧写法看不到宿主 ⇒ 对"宿主有音源但应用缓存里没有"的输入必然走 CDN；
+        // 这里给的是"缓存已热"的最有利输入，它仍会去 CDN 当缓存为空时的那一套（见下一块）
+        legacySrc = await legacyPrefetch(lib, cacheOf(HOST_BUF))
+      } catch (e) {
+        err = e instanceof Error ? e.message : String(e)
+      }
+      check('adj953 ②负对照：旧写法在**同样的热缓存**输入下也是 cache（说明"热缓存"这条不是新挣的，判据在①）', legacySrc === 'cache' && err === '', `${legacySrc} ${err}`)
+      // 真正的负对照：**宿主有音源、应用缓存为空**（= 用户那台电脑的真实状态）
+      resetCounts()
+      saved = []
+      mockFetch({})
+      mockTauri(false)
+      const legacyCold = await legacyPrefetch(lib, cacheOf(null))
+      check(
+        'adj953 ②负对照：同一份"宿主有音源、应用缓存为空"的输入，旧写法走 CDN 1 次并写缓存（这就是用户每次冷启动看到的下载）',
+        legacyCold === 'remote' && counts.cdn === 1 && counts.writes === 1,
+        `${legacyCold} cdn=${counts.cdn} writes=${counts.writes}`,
+      )
+    }
+    // ③ 宿主 404 ⇒ 回退内置（**不崩、不整条失败**），且不发 CDN
+    {
+      resetCounts()
+      saved = []
+      mockFetch({ hostStatus: 404 })
+      mockTauri(true)
+      let src = ''
+      let err = ''
+      try {
+        src = await prefetchHqLibraryProgress(lib, cacheOf(null), undefined, HOST_URL)
+      } catch (e) {
+        err = e instanceof Error ? e.message : String(e)
+      }
+      check('adj953 ③宿主 404 ⇒ 回退到内置（来源 = builtin），**不抛错**', src === 'builtin' && err === '', `${src} ${err}`)
+      check('adj953 ③宿主 404 时 CDN 请求 0 次（回退顺序里内置在 CDN 之前）', counts.cdn === 0, `${counts.cdn}`)
+      check('adj953 ③回退内置不写缓存（内置文件已在安装目录，不重复占 30MB —— 与 adj416 同一口径）', counts.writes === 0, `${counts.writes}`)
+    }
+    // ③b 宿主 404 + 无内置 ⇒ 回退 CDN，仍然不崩
+    {
+      resetCounts()
+      saved = []
+      mockFetch({ hostStatus: 404 })
+      mockTauri(false)
+      let src = ''
+      let err = ''
+      try {
+        src = await prefetchHqLibraryProgress(lib, cacheOf(null), undefined, HOST_URL)
+      } catch (e) {
+        err = e instanceof Error ? e.message : String(e)
+      }
+      check('adj953 ③b 宿主 404 + 无内置 ⇒ 回退 CDN（来源 = remote）、不崩', src === 'remote' && err === '', `${src} ${err}`)
+      check('adj953 ③b 回退 CDN 才写缓存（宿主失败不许把整条预取判失败，也不许漏写缓存）', counts.writes === 1 && saved[0] === CDN_BUF, `${counts.writes}`)
+    }
+    // ③c 宿主取字节时抛异常（宿主不可达）⇒ 同样回退，不许冒泡成"整条失败"
+    {
+      resetCounts()
+      saved = []
+      mockFetch({ hostThrow: true })
+      mockTauri(true)
+      let src = ''
+      let err = ''
+      try {
+        src = await prefetchHqLibraryProgress(lib, cacheOf(null), undefined, HOST_URL)
+      } catch (e) {
+        err = e instanceof Error ? e.message : String(e)
+      }
+      check('adj953 ③c 宿主 fetch 抛错 ⇒ 回退内置、不冒泡（失败只记在宿主这一步）', src === 'builtin' && err === '', `${src} ${err}`)
+      check('adj953 ③c 宿主抛错时不发 CDN（内置先兜住）', counts.cdn === 0, `${counts.cdn}`)
+    }
+    // ③d 宿主拿到 0 字节（损坏/空文件）⇒ 不当成有效音源，继续往后走
+    {
+      resetCounts()
+      saved = []
+      mockFetch({ hostEmpty: true })
+      mockTauri(false)
+      let src = ''
+      let err = ''
+      try {
+        src = await prefetchHqLibraryProgress(lib, cacheOf(null), undefined, HOST_URL)
+      } catch (e) {
+        err = e instanceof Error ? e.message : String(e)
+      }
+      check('adj953 ③d 宿主返回 0 字节 ⇒ 视为损坏、继续回退到 CDN（来源 = remote）', src === 'remote' && err === '', `${src} ${err}`)
+      check('adj953 ③d 0 字节的宿主响应不写缓存（写进缓存的是 CDN 那份）', counts.writes === 1 && saved[0] === CDN_BUF, `${counts.writes}`)
+    }
+    // ③负对照：把"宿主失败"做成"整条失败"（一种很自然的错法）⇒ 用户会看到"加载失败"而不是回退
+    {
+      resetCounts()
+      saved = []
+      mockFetch({ hostStatus: 404 })
+      mockTauri(true)
+      let legacySrc = ''
+      let err = ''
+      try {
+        // 错法：宿主失败直接抛出（不回退）
+        await (async () => {
+          const res = await fetch(HOST_URL)
+          if (!res.ok) throw new Error(`宿主音源加载失败（HTTP ${res.status}）`)
+        })()
+        legacySrc = 'builtin'
+      } catch (e) {
+        err = e instanceof Error ? e.message : String(e)
+      }
+      check(
+        'adj953 ③负对照：宿主失败就整体抛错（不回退）⇒ 拿不到内置、也就没有音源（证明③那条真的在判"回退"）',
+        legacySrc === '' && err.includes('404'),
+        `${legacySrc} ${err}`,
+      )
+      const ok = await prefetchHqLibraryProgress(lib, cacheOf(null), undefined, HOST_URL)
+      check('adj953 ③负对照：同一份 404 输入，实现里判出来的是 builtin（回退成功）', ok === 'builtin', ok)
+    }
+    // ④ 无宿主地址（网页版 / 独立桌面版）⇒ 与**改动前逐值一致**
+    {
+      const withHostAbsent = async (cache: HqCache): Promise<{ src: string; cdn: number; builtin: number; writes: number; bytes: number | null }> => {
+        resetCounts()
+        saved = []
+        const src = await prefetchHqLibraryProgress(lib, cache, undefined, undefined)
+        return { src, cdn: counts.cdn, builtin: counts.builtin, writes: counts.writes, bytes: saved[0]?.byteLength ?? null }
+      }
+      const withLegacy = async (cache: HqCache): Promise<{ src: string; cdn: number; builtin: number; writes: number; bytes: number | null }> => {
+        resetCounts()
+        saved = []
+        const src = await legacyPrefetch(lib, cache)
+        return { src, cdn: counts.cdn, builtin: counts.builtin, writes: counts.writes, bytes: saved[0]?.byteLength ?? null }
+      }
+      mockFetch({})
+      mockTauri(false)
+      const a1 = await withHostAbsent(cacheOf(null))
+      const b1 = await withLegacy(cacheOf(null))
+      check(
+        'adj953 ④无宿主 + 冷缓存 ⇒ 与旧写法**逐值一致**（remote / cdn 1 / builtin 0 / writes 1 / 同字节）',
+        JSON.stringify(a1) === JSON.stringify(b1) && a1.src === 'remote' && a1.cdn === 1,
+        `${JSON.stringify(a1)} vs ${JSON.stringify(b1)}`,
+      )
+      mockFetch({})
+      mockTauri(true)
+      const a2 = await withHostAbsent(cacheOf(null))
+      const b2 = await withLegacy(cacheOf(null))
+      check(
+        'adj953 ④无宿主 + 有内置 ⇒ 与旧写法逐值一致（builtin / cdn 0 / writes 0）',
+        JSON.stringify(a2) === JSON.stringify(b2) && a2.src === 'builtin',
+        `${JSON.stringify(a2)} vs ${JSON.stringify(b2)}`,
+      )
+      mockFetch({})
+      mockTauri(false)
+      const a3 = await withHostAbsent(cacheOf(CDN_BUF))
+      const b3 = await withLegacy(cacheOf(CDN_BUF))
+      check(
+        'adj953 ④无宿主 + 热缓存 ⇒ 与旧写法逐值一致（cache / 0 次网络 / 0 次写）',
+        JSON.stringify(a3) === JSON.stringify(b3) && a3.src === 'cache' && a3.cdn === 0,
+        `${JSON.stringify(a3)} vs ${JSON.stringify(b3)}`,
+      )
+    }
+    // ④负对照：网页版（无宿主地址）也去问一次宿主 —— 一种很自然的错法，会把 `undefined` 当 URL 去 fetch
+    {
+      resetCounts()
+      saved = []
+      mockFetch({})
+      mockTauri(false)
+      const wrong = async (): Promise<string> => {
+        // 错法：不判空，"宿主地址"直接当 URL 用
+        const res = await fetch(String(undefined))
+        return res.ok ? 'host' : 'remote'
+      }
+      let wrongSrc = ''
+      let err = ''
+      try {
+        wrongSrc = await wrong()
+      } catch (e) {
+        err = e instanceof Error ? e.message : String(e)
+      }
+      check(
+        'adj953 ④负对照：无宿主地址却照样 fetch ⇒ 凭空多出 1 次网络请求（证明④真的在判"不查宿主"）',
+        wrongSrc !== 'host' && counts.cdn === 1,
+        `${wrongSrc} cdn=${counts.cdn} ${err}`,
+      )
+    }
+    // ⑤ 源码闸门：两个**预取调用点**必须把宿主地址传进去（否则本修法在真机上等于没生效）
+    {
+      const panelSrc = String(readFileSync(join(root, 'src', 'dialogs', 'SoundBankPanel.tsx'), 'utf8'))
+      const dlgSrc = String(readFileSync(join(root, 'src', 'dialogs', 'PlaybackDialog.tsx'), 'utf8'))
+      const cacheSrc = String(readFileSync(join(root, 'src', 'playback', 'spessaCache.ts'), 'utf8'))
+      check(
+        'adj953 ⑤SoundBankPanel 的预取带上宿主地址 `hostBankUrl(lib.id)`',
+        /prefetchHqLibraryProgress\([\s\S]{0,600}?hostBankUrl\(lib\.id\)/.test(panelSrc),
+        (panelSrc.match(/prefetchHqLibraryProgress\([\s\S]{0,600}?\)\n/) ?? [''])[0].replace(/\s+/g, ' '),
+      )
+      check(
+        'adj953 ⑤PlaybackDialog 的预取带上宿主地址 `hostBankUrl(hqLib.id)`',
+        /prefetchHqLibraryProgress\(\s*hqLib,\s*hqCache,\s*[^)]*hostBankUrl\(hqLib\.id\)/.test(dlgSrc),
+        (dlgSrc.match(/prefetchHqLibraryProgress\([^)]*\)/)?.[0] ?? '未找到调用'),
+      )
+      check(
+        'adj953 ⑤负对照：改动前的写法（只传 lib + cache）在两处都已不存在',
+        !/prefetchHqLibraryProgress\(\s*lib,\s*hqCache\.current\s*\)/.test(panelSrc) &&
+          !/prefetchHqLibraryProgress\(\s*hqLib,\s*hqCache\s*\)/.test(dlgSrc),
+        '仍有一处只传两个参数',
+      )
+      check(
+        'adj953 ⑤预取签名把宿主地址放在**第 4 位**（第 3 位仍是 onProgress ⇒ 既有调用点不受影响）',
+        /export async function prefetchHqLibraryProgress\([\s\S]{0,220}onProgress\?: \(p: number\) => void,[\s\S]{0,80}hostUrl\?: string,/.test(cacheSrc),
+        (cacheSrc.match(/export async function prefetchHqLibraryProgress\([\s\S]{0,240}?\): Promise<ResolvedHqBankSource>/) ?? ['未匹配'])[0],
+      )
+      check(
+        'adj953 ⑤预取与解析**共用同一段宿主取字节代码**（一个实现、两处调用，不许各写一套）',
+        /async function fetchHostBank\(/.test(cacheSrc) &&
+          (cacheSrc.match(/fetchHostBank\(hostUrl\)/g) ?? []).length >= 2,
+        `${(cacheSrc.match(/fetchHostBank\(/g) ?? []).length} 处`,
+      )
+      check(
+        'adj953 ⑤UI 的「正在下载 30MB」只在**真的走联网**时显示（预取用 onRemote 通知）',
+        /onRemote: \(\) => setHqDl\('downloading'\)/.test(panelSrc) && /\{hqDl === 'downloading' &&/.test(panelSrc) &&
+          !/hqDl === 'loading'/.test(panelSrc),
+        (panelSrc.match(/hqDl === '[a-z]+'/g) ?? []).join(','),
+      )
+    }
+    // ⑥ 夹具自检：上面那一排断言真的在**新实现**上跑出了 host 来源（防止"夹具自己坏了、全判恒真"）
+    {
+      resetCounts()
+      saved = []
+      mockFetch({})
+      mockTauri(false)
+      const warm: ArrayBuffer[] = []
+      const src = await prefetchHqLibraryProgress(lib, cacheOf(null), undefined, HOST_URL)
+      warm.push(...saved)
+      check('adj953 ⑥夹具自检：新实现给出的来源是 `host`（不是 legacy 的 `cache|builtin|remote` 三者之一）', src === 'host', src)
+      check('adj953 ⑥夹具自检：来源枚举里 host 是**独立取值**（与 remote 区分开，UI/日志能分辨宿主与联网）', src !== 'remote' && src !== 'cache' && src !== 'builtin', src)
+      check('adj953 ⑥夹具自检：写缓存的字节 = 宿主字节、长度 4', warm.length === 1 && warm[0].byteLength === 4, `${warm.length}/${warm[0]?.byteLength ?? 0}`)
+    }
+  } finally {
+    g.window = savedWindow
+    g.fetch = savedFetch
+    if (savedIndexedDB === undefined) delete g.indexedDB
+    else g.indexedDB = savedIndexedDB
   }
 }
 
@@ -17087,6 +17496,12 @@ runAdj927ExternalChangeTests()
   .catch((e) => {
     failed++
     console.error('  ✗ adj416 音源来源用例抛异常', e)
+  })
+  // adj953：预取**先问宿主**（嵌入版音源就在插件目录，别再去联网下 32MB —— 用户实报"每次都提示下载"）
+  .then(() => runAdj953HostBankPrefetchTests())
+  .catch((e) => {
+    failed++
+    console.error('  ✗ adj953 预取先问宿主用例抛异常', e)
   })
   .then(() => {
     try {

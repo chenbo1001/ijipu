@@ -37,7 +37,9 @@ export function SoundBankPanel() {
   const [notice, setNotice] = useState<string | null>(null)
   // adj347/348：打开音色库管理即自动后台下载音源（初次体验）；仅文字提示，不阻塞其它交互
   // adj416：桌面端随安装包内置（安装目录 generaluser_gs.sf2）→ 直接可用，显示「已内置」而非下载提示
-  const [hqDl, setHqDl] = useState<'idle' | 'loading' | 'done' | 'builtin' | 'error'>('idle')
+  // adj953：`'preparing'` = 正在**问宿主/查缓存/探测内置**（都很快）——这段不能再谎报"正在下载 30MB"；
+  //        只有真的走联网那一步才切到 `'downloading'`（用户实报的假提示就是这一点）
+  const [hqDl, setHqDl] = useState<'idle' | 'preparing' | 'downloading' | 'done' | 'builtin' | 'error'>('idle')
   /** adj724b：失败原因（用于给用户"该怎么做"的提示，而不是笼统的"请检查网络"） */
   const [hqDlError, setHqDlError] = useState<unknown>(null)
   const enabled = useUiStore((s) => s.playbackHqEnabled)
@@ -53,6 +55,8 @@ export function SoundBankPanel() {
 
   // adj347/349：打开音色库管理自动下载音源——延迟到 UI 渲染后再触发，不干扰打开/交互
   // adj416：先探测桌面安装目录内置音源（极快）——有就直接用，不显示「正在下载」提示
+  // adj953：**再问一次宿主（插件目录）**——嵌入版里那份就是"随文库一起走"的权威副本，
+  //        有它就不联网；只有真的落回联网下载时才显示「正在后台下载…」（用户实报的假提示就是它）
   useEffect(() => {
     const t = window.setTimeout(() => {
       void (async () => {
@@ -62,9 +66,18 @@ export function SoundBankPanel() {
             setHqDl('builtin')
             return
           }
-          setHqDl('loading')
-          await prefetchHqLibraryProgress(lib, hqCache.current)
-          setHqDl('done')
+          setHqDl('preparing')
+          const source = await prefetchHqLibraryProgress(
+            lib,
+            hqCache.current,
+            // adj953：`onProgress` 只在预取**收尾**回调一次 ⇒ 收尾时若还停在 `'downloading'`，说明这轮下完了
+            () => setHqDl((s) => (s === 'downloading' ? 'done' : s)),
+            hostBankUrl(lib.id),
+            // adj953：**真的落回联网那一步**才切成下载提示（宿主/缓存/内置命中时一句话都不说）
+            { onRemote: () => setHqDl('downloading') },
+          )
+          if (source === 'builtin') setHqDl('builtin')
+          else setHqDl('done')
         } catch (e) {
           // adj724b：把原因留下来，提示里要说清"是地址不可达、可以手动导入"
           setHqDlError(e)
@@ -193,8 +206,13 @@ export function SoundBankPanel() {
         {hqDl === 'builtin' && (
           <div style={{ color: 'var(--jp-accent)', fontSize: 11, marginTop: 4 }}>{playbackCopy.builtinBankHint}</div>
         )}
-        {/* adj347/348：自动下载——后台进行，仅提示，不阻塞其它操作 */}
-        {hqDl === 'loading' && (
+        {/* adj953：**先问宿主/查缓存/探测内置**——这几步都很快，别说成"正在下载 30MB" */}
+        {hqDl === 'preparing' && (
+          <div style={{ color: HIGHLIGHT, fontSize: 11, marginTop: 4 }}>{playbackCopy.loading}</div>
+        )}
+        {/* adj347/348：自动下载——后台进行，仅提示，不阻塞其它操作
+            adj953：**只有真要走联网那一步**（宿主/缓存/内置都没接住）才显示这句 */}
+        {hqDl === 'downloading' && (
           <div style={{ color: 'var(--jp-warning)', fontSize: 11, marginTop: 4 }}>
             ⏳ 正在后台下载音色库（约 30MB，仅首次）…下载期间可正常操作。
           </div>

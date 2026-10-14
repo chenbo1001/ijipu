@@ -156,6 +156,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   // adj347：确保音源就绪（优先读缓存；未缓存则自动下载并缓存，带进度提示）。
   // 用共享 Promise：打开试听即自动下载，点播放时复用同一下载，避免重复下载。
   // adj416：桌面端音源随安装包内置在安装目录——先探测（极快），有就直接用、不显示下载提示。
+  // adj953：嵌入版还要**问一次宿主（插件目录）**——宿主有那份音源时下 0 次 CDN（见 spessaCache 的说明）。
   const ensureBank = (): Promise<void> => {
     if (!bankPromiseRef.current) {
       const hqLib = getHqLibrary()
@@ -167,19 +168,27 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
           setSamplerState('ready')
           return
         }
-        setDownloading(true)
-        try {
-          await prefetchHqLibraryProgress(hqLib, hqCache)
-          setSamplerState('ready')
-        } finally {
-          setDownloading(false)
-        }
+        // adj953：**先去缓存、再去宿主（插件目录）、最后才联网**——
+        // `onRemote` 只在真的要走联网那一刻回调，于是嵌入版有宿主音源时
+        // **不会**出现「正在后台下载音色库」那句（用户实报的假提示：宿主那份没被用上，回回联网下 32MB）。
+        // 不需要百分比读数 ⇒ `onProgress` 传 `undefined`（签名第 3 位不变，既有调用点不受影响）。
+        const source = await prefetchHqLibraryProgress(
+          hqLib,
+          hqCache,
+          undefined,
+          hostBankUrl(hqLib.id),
+          { onRemote: () => setDownloading(true) },
+        )
+        setDownloading(false)
+        if (source === 'builtin') setBuiltinBank(true)
+        setSamplerState('ready')
       })()
         .catch((e) => {
           setSamplerState('failed')
           throw e
         })
         .finally(() => {
+          setDownloading(false)
           bankPromiseRef.current = null
         })
     }
