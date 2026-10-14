@@ -37,6 +37,19 @@ export const EXIT = {
   env: 6,
 } as const
 
+/**
+ * 目录里的一项（adj956）。
+ *
+ * 为什么不是"只回文件名"了：`batch` / `lint -i <目录>` 要能**递归子目录**（`-r`），
+ * 而"名字"本身分不出哪个是目录 ✗。用一次 `readdir(withFileTypes)` 就拿到，不必额外 stat。
+ */
+export type DirEntry = {
+  /** 条目名（不含路径） */
+  name: string
+  /** 是不是目录（递归时据此下钻） */
+  dir: boolean
+}
+
 /** 注入式 IO（便于测试与"同 exe 子命令"复用） */
 export type CliIo = {
   readStdin(): Promise<string>
@@ -44,8 +57,14 @@ export type CliIo = {
   /** 文本或**二进制**（MIDI 等；adj802 起支持 `Uint8Array`） */
   writeFile(path: string, data: string | Uint8Array): Promise<void>
   exists(path: string): Promise<boolean>
-  /** 列目录里的文件（`batch` 用；只返回文件名，不含路径） */
-  listDir(dir: string): Promise<string[]>
+  /**
+   * 列目录里**一层**的条目（`batch` / `lint -i <目录>` 用）。
+   *
+   * adj956：返回值从 `string[]` 改成 `DirEntry[]` —— 只有名字分不出目录，递归无从下手。
+   * 约定：**按名字排序**（顺序可复现 ⇒ 输出能逐字节比对 ✓）、**只回一层**（递归由 CLI 自己下钻，
+   * 免得把"要不要跟符号链接"这类平台细节塞进每个宿主）。
+   */
+  listDir(dir: string): Promise<DirEntry[]>
   /**
    * adj803（A·P3）**可选能力**：把 SVG 页栅格化成 png/jpg/pdf。
    *
@@ -107,12 +126,14 @@ const HELP = `iJipu 命令行（爱记谱）
 
 命令：
   format        -i <文件|-> [-o <文件|->] [--check] [--in-place] [--diff]     按应用规范规范化源码
-  lint          -i <文件|-> [--format text|json|gh] [--watch]                 语法检查（有错 ⇒ 退出码 3）
+  lint          -i <文件|目录|-> [--format text|json|gh] [--watch]            语法检查（有错 ⇒ 退出码 3）
+                [-r] [--filter <通配>]                                      输入给**目录**时批量检查
   info          -i <文件|-> [-t text|json]                                    谱面概况（行数/分组/问题数）
   render        -i <文件|-> -t svg|midi|png|jpg|pdf -o <输出>                 渲染/导出
                 [--crop page|score] [--pad N] [--ink x,y,w,h]                画布范围（缺省 page = 整页）
   play          -i <文件|-> -t midi|wav -o <输出>                             导出音频
-  batch         --in <目录> -o <目录> [-t svg|midi|fmt]                       目录批量转换
+  batch         --in <目录> [-o <目录>] [-t lint,svg,midi,fmt]                目录批量操作
+                [-r] [--filter <通配>]                                      任务可逗号组合；只有 -t lint 能省 -o
   settings      -i <谱> <键名> [-s k=v]                                       看某个设置项的值与来源
   config        -i <谱> [-t effective] [--quiet]                              打印生效设置全表 + 每项来源
   doctor        [--json]                                                      环境自检（如实报告能力有无）
@@ -121,14 +142,20 @@ const HELP = `iJipu 命令行（爱记谱）
   unregister    [--json]                                                      从当前用户 PATH 里解除注册
   status        [--json]                                                      看是否已注册（**读系统实况**）
 
+目录类选项（lint -i <目录> 与 batch 都是这一套）：
+  -r, --recursive           输入是目录时**连子目录一起**（缺省只看当前一层）
+  --filter <通配符>          只处理**文件名**匹配的（支持 * 与 ?，如 --filter "春*"）；
+                            输入是单个文件时它不生效（点名要那个文件，就没有再筛掉的道理）
+
 全局选项：
-  -i, --input <文件|->      输入文件（- = stdin；省略时也读 stdin）；--in 是别名
-  -o, --output <文件|->     输出文件（- 或省略 = stdout）
-  -t, --type <类型>         输出类型（省略时按 -o 后缀推断）
+  -i, --input <文件|目录|-> 输入（- = stdin；省略时也读 stdin）；--in 是别名
+  -o, --output <文件|->     输出文件（- 或省略 = stdout）；batch 里是**输出目录**
+  -t, --type <类型>         输出类型（省略时按 -o 后缀推断；batch 里可逗号组合）
   --json                    机器可读输出（带 schema 版本）
   --quiet                   不输出非必要信息
   --deterministic           输出不含时间戳（CI 逐字节比对用）
   -s <k=v>                  临时设置（可重复；优先级最高，**不落盘**）
+                            接受于 settings / config / render / play / batch；键名写错 ⇒ 退出码 5
   --config <文件>           CLI 配置文件（**尚未实现**；给了 ⇒ 退出码 5）
   -h, --help                帮助
   -v, --version             版本
@@ -175,6 +202,19 @@ type Parsed = {
   pad: string | null
   /** adj873：`--ink x,y,w,h` 显式墨迹盒（覆盖布局级估算；有 DOM 的宿主量到后可喂进来） */
   ink: string | null
+  /**
+   * adj956：`-r` / `--recursive` —— 目录输入要不要**下钻子目录**。
+   *
+   * 缺省是**不递归**：一次手滑就会扫出用户没预期的一大批文件（"我只想查这一层"是更常见的意图）。
+   */
+  recursive: boolean
+  /**
+   * adj956：`--filter <通配符>` —— 按**文件名**筛（支持 `*` 与 `?`，如 `--filter "春*"`）。
+   *
+   * 为什么按文件名而不是整条路径：这个 CLI 的批量操作都是"一个目录里的谱"，
+   * 让用户去写路径通配更容易写错；真要按目录挑，多敲一次 `-i <子目录>` 更直观。
+   */
+  filter: string | null
 }
 
 /** 手写参数解析（**不引依赖** —— AGENTS §一"新增依赖必须先询问"，这里完全用不着） */
@@ -200,8 +240,10 @@ function parseArgs(argv: string[]): Parsed {
     crop: null,
     pad: null,
     ink: null,
+    recursive: false,
+    filter: null,
   }
-  const takesValue = new Set(['-i', '--input', '-o', '--output', '-t', '--type', '-s', '--set', '--config', '--format', '--crop', '--pad', '--ink'])
+  const takesValue = new Set(['-i', '--input', '-o', '--output', '-t', '--type', '-s', '--set', '--config', '--format', '--crop', '--pad', '--ink', '--filter'])
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i]
     const next = (): string => {
@@ -222,6 +264,11 @@ function parseArgs(argv: string[]): Parsed {
     else if (a === '--in-place') p.inPlace = true
     else if (a === '--diff') p.diff = true
     else if (a === '--watch') p.watch = true
+    else if (a === '-r' || a === '--recursive') p.recursive = true
+    else if (a === '--filter') {
+      const v = next()
+      if (v !== '') p.filter = v
+    }
     else if (a === '-i' || a === '--input' || a === '--in') {
       /**
        * adj806：`--in` 是 `-i` 的别名 —— `docs/CLI.md` 里 `batch` 一直写的是 `--in <目录>`，
@@ -289,6 +336,107 @@ function inferType(p: Parsed): string {
     if (ext !== '') return ext
   }
   return 'text'
+}
+
+/** 拼路径（统一用 `/`：CLI 只把路径字符串交给宿主，平台分隔符由宿主自己认） */
+function joinPath(dir: string, name: string): string {
+  const d = dir.replace(/[\\/]+$/, '')
+  return d === '' ? name : `${d}/${name}`
+}
+
+/**
+ * adj956：把 `--filter` 的 `*` / `?` 通配符转成正则（大小写不敏感；只匹配**文件名**）。
+ *
+ * 刻意不引入 glob 依赖（`AGENTS §一`：新增依赖必须先询问）——`*` 与 `?` 两条就够用了，
+ * 而且**只按文件名**匹配，写法越简单越不容易出错。
+ */
+function filterToRe(glob: string): RegExp {
+  const esc = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')
+  return new RegExp(`^${esc}$`, 'i')
+}
+
+/**
+ * adj956：把输入展开成"要处理的 `.jps` 列表"（`lint -i <目录>` 与 `batch` **共用这一份口径**）。
+ *
+ * · **目录** ⇒ 列一层（`recursive` 时下钻子目录），按 `.jps` 后缀 + `--filter` 筛；
+ * · **文件** ⇒ 原样一条（`--filter` **对它不生效**：用户点名要这个文件，没有再筛掉的道理）。
+ *
+ * 目录/文件的判据是**试一次 `listDir`**：宿主能力里目前只有它能区分二者（`exists` 只给"在不在"）。
+ * 这样不必为了"这是文件还是目录"再给三处宿主接线加一个 `statKind`；而在文件上 `listDir`
+ * 必然失败 ⇒ 落到"当文件读"，与从前行为一致 ✓。
+ */
+async function expandInputs(
+  target: string,
+  io: CliIo,
+  recursive: boolean,
+  filter: string | null,
+): Promise<{ files: string[]; isDir: boolean }> {
+  const re = filter === null ? null : filterToRe(filter)
+  const hit = (name: string): boolean =>
+    name.toLowerCase().endsWith('.jps') && (re === null || re.test(name))
+  /**
+   * ⚠ **只对顶层这一次 `listDir` 的失败做降级**（"不是目录 ⇒ 当单文件"）。
+   *
+   * 子目录读失败**必须抛出去**：第一版把整个 `walk` 包在同一个 try 里 ⇒ 递归时某个子目录
+   * 权限不足/被删，异常会被那个 catch 吞掉、降级成"把目录当文件读"，最终报的是
+   * "输入不存在"——**根因被藏起来了**（这正是本项目反复记的"静默失败"那一类 ✗）。
+   */
+  let top: DirEntry[]
+  try {
+    top = await io.listDir(target)
+  } catch {
+    return { files: [target], isDir: false }
+  }
+  const out: string[] = []
+  const walk = async (dir: string, entries: DirEntry[]): Promise<void> => {
+    for (const e of entries) {
+      if (e.dir) {
+        if (recursive) {
+          const child = joinPath(dir, e.name)
+          await walk(child, await io.listDir(child))
+        }
+        continue
+      }
+      if (hit(e.name)) out.push(joinPath(dir, e.name))
+    }
+  }
+  await walk(target, top)
+  // 排序：宿主各自排过一层，但递归把多层拼起来后要靠这里统一（输出必须可复现 ✓）
+  return { files: out.sort(), isDir: true }
+}
+
+/**
+ * adj956（**修一个真 bug**）：把 `-s k=v` 解析成覆盖对象。
+ *
+ * 由来：`-s` 原先只在 `settings` / `config` 里被真正消费，但 [守卫](cli.ts) 同时放行了
+ * `render` / `play` / `batch` —— 那三个命令**从头到尾没读过 `p.sets`** ⇒ 用户写
+ * `batch --in 谱 -o 出 -t svg -s margin_right=10` 会"被接受、然后静默忽略"，
+ * 是最坏的一种错：不报错、结果却不是他要的。现在**统一在这里解析、由调用方套用**。
+ *
+ * 值按需粗转：能当数字就当数字（`margin_right=33` 要变成 `33` 而不是 `"33"`），
+ * 其余保留字符串（`page=A4`）；`true`/`false` 也认。
+ */
+function parseOverrides(sets: readonly string[]): { overrides: Record<string, unknown>; error?: string } {
+  const overrides: Record<string, unknown> = {}
+  for (const kv of sets) {
+    const i = kv.indexOf('=')
+    if (i <= 0) return { overrides, error: `-s 需要 k=v 形式（收到 “${kv}”）` }
+    const key = kv.slice(0, i)
+    const raw = kv.slice(i + 1)
+    overrides[key] =
+      raw === 'true' ? true : raw === 'false' ? false : raw.trim() !== '' && Number.isFinite(Number(raw)) ? Number(raw) : raw
+  }
+  return { overrides }
+}
+
+/**
+ * adj956：生效配置 = 代码默认 ← 谱面 `# jps-config` ← **命令行 `-s`（最高）**。
+ *
+ * `-s` 必须**最后**展开：`mergeJpsConfig` 内部是"源码盖过 fallback"，把覆盖值塞进 fallback
+ * 会被谱面里的值反过来盖掉 ⇒ 与 `--help` 承诺的"优先级最高"不符 ✗。
+ */
+function effectiveConfig(src: string, overrides: Record<string, unknown>): PageConfig {
+  return { ...mergeJpsConfig(src, defaultPageConfig), ...overrides } as PageConfig
 }
 
 /** 问题清单 → 一行文字（`--format gh` 用 GitHub Actions 注解格式） */
@@ -371,6 +519,11 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
    * （第一版把它放在读输入之后 ⇒ `ReferenceError: Cannot access 'wantJson' before initialization`）。
    */
   const wantJson = p.json || p.format === 'json'
+  /**
+   * adj956：**可设置项名单**（只此一处）——`settings` / `config` / `-s` 的键校验共用。
+   * 顺序与 `docs/CLI.md` 的"生效设置全表"一致（默认字段在前、可选字段在后）。
+   */
+  const CONFIG_KEYS: string[] = [...Object.keys(defaultPageConfig), ...OPTIONAL_CONFIG_FIELDS]
 
   if (p.help) {
     line(io, HELP)
@@ -392,8 +545,36 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     io.err('--config 属 P4，尚未实现（当前只支持命令行 -s）')
     return { code: EXIT.config }
   }
-  if (p.sets.length > 0 && p.command !== 'info' && p.command !== 'settings' && p.command !== 'config' && p.command !== 'render' && p.command !== 'play' && p.command !== 'batch') {
-    io.err('-s 目前接受于 info / settings / config / render / play / batch（写回谱面属后续）')
+  /**
+   * adj956：`-s` 的**接受范围收敛到"真的会用它"的命令**。
+   *
+   * 原先这里放行了 `info` / `render` / `play` / `batch`，但**只有 `settings` / `config` 真的读了它**
+   * ⇒ 另外那几条是"接受了、然后静默忽略"（最坏的一种错：不报错、结果却不是用户要的）。
+   * 现在：`info` 从名单里去掉（它不看谱面设置），其余三条**本轮真的接上了**（见 `effectiveConfig`）。
+   */
+  if (p.sets.length > 0 && !['settings', 'config', 'render', 'play', 'batch'].includes(p.command)) {
+    io.err('-s 只对 settings / config / render / play / batch 有意义（其它命令不看谱面设置；写回谱面属后续）')
+    return { code: EXIT.config }
+  }
+  /** `-s k=v` 的解析**只在这里做一次**（格式错就统一报退出码 5，各命令不必各写一遍） */
+  const parsedSets = parseOverrides(p.sets)
+  if (parsedSets.error !== undefined) {
+    io.err(parsedSets.error)
+    return { code: EXIT.config }
+  }
+  const overrides = parsedSets.overrides
+  /**
+   * adj956：覆盖键必须是**真的设置项**。
+   *
+   * 为什么非查不可：`-s margn_right=10` 这种拼错，如果原样塞进配置对象，引擎**不认识这个键**
+   * ⇒ 排版结果一个字不变、退出码还是 0 —— 又是一个"静默忽略"。宁可当用法错误拦下来。
+   */
+  const badKeys = Object.keys(overrides).filter((k) => !CONFIG_KEYS.includes(k))
+  if (badKeys.length > 0) {
+    io.err(
+      `-s 里有未知设置项：${badKeys.join('、')}\n` +
+        `  可用键 ${CONFIG_KEYS.length} 个（config -i <谱> -t effective 可全量列出；可选字段：${OPTIONAL_CONFIG_FIELDS.join('、')}）`,
+    )
     return { code: EXIT.config }
   }
 
@@ -584,7 +765,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       return { code: EXIT.syntax }
     }
     const parsed = parseJps(src)
-    const layout = layoutScore(parsed, mergeJpsConfig(src, defaultPageConfig))
+    // adj956：`-s` 真的生效（此前 play 接受了 -s 却从不读它 ⇒ 静默忽略）
+    const layout = layoutScore(parsed, effectiveConfig(src, overrides))
     const title = (parsed.header as unknown as Record<string, unknown>)['title']
     const bytes = eventsToMidi(buildPlaySequence(parsed, layout, 60).events, {
       bpm: 60,
@@ -635,19 +817,10 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
         return { code: EXIT.noInput }
       }
     }
-    /** 三层来源（当前 CLI 支持的两层 + 命令行覆盖） */
+    /** 三层来源（代码默认 ← 源内 # jps-config ← 命令行 -s）；`overrides` 已在上面统一解析并校验过 */
     const srcCfg = (extractJpsConfig(src) ?? {}) as Record<string, unknown>
     const merged = mergeJpsConfig(src, defaultPageConfig) as unknown as Record<string, unknown>
-    const overrides: Record<string, string> = {}
-    for (const kv of p.sets) {
-      const i = kv.indexOf('=')
-      if (i <= 0) {
-        io.err(`-s 需要 k=v 形式（收到 “${kv}”）`)
-        return { code: EXIT.config }
-      }
-      overrides[kv.slice(0, i)] = kv.slice(i + 1)
-    }
-    const keys = [...Object.keys(defaultPageConfig), ...OPTIONAL_CONFIG_FIELDS]
+    const keys = CONFIG_KEYS
     const where = (k: string): string => {
       if (k in overrides) return '命令行 -s'
       if (k in srcCfg) return '源内 # jps-config'
@@ -696,7 +869,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       io.err(`源码有 ${errors.length} 个错误，先修好再渲染（用 lint 看细节）`)
       return { code: EXIT.syntax }
     }
-    const cfg: PageConfig = mergeJpsConfig(src, defaultPageConfig)
+    const cfg: PageConfig = effectiveConfig(src, overrides)
     const parsed = parseJps(src)
     /**
      * adj873（T-3 补落点）：`--crop page|score [--pad N] [--ink x,y,w,h]` 的参数校验。
@@ -803,63 +976,230 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     return { code: EXIT.ok, json: { schema: 1, type: 'svg', pages: svgs.length, outputs: made, crop } }
   }
 
-  // ── batch（P2）：目录批量转换 ────────────────────────────
+  /**
+   * ── batch（P2）：目录批量操作 ────────────────────────────
+   *
+   * adj956（用户需求：**组合式批量**）：一次遍历目录，把多种任务一起做掉。
+   *  · `-t` 支持**逗号组合**：`-t lint,fmt,svg`（原来一次只能一种，想组合就得跑几遍、目录遍历几遍）；
+   *  · `-t lint` 时 `-o` **可以不写**（lint 不产出文件；原来 `-o` 是硬性必填，于是"只想查一遍"
+   *    也得先编一个输出目录）；
+   *  · `-r` 递归子目录、`--filter` 按文件名筛、`-s` 真的生效。
+   *
+   * `-t lint` 让"对整个目录做语法检查"不必再写 bat 循环（用户点名的那个用法）。
+   */
   if (p.command === 'batch') {
     const inDir = p.inputs[0]
-    const outDir = p.output
     if (inDir === undefined || inDir === '-') {
       io.err('batch 需要 --in <目录>（stdin 不适用）')
       return { code: EXIT.usage }
     }
-    if (outDir === null || outDir === '-') {
-      io.err('batch 需要 -o <目录>')
+    /** 任务名归一：同义词都收进来，免得用户为"fmt 还是 format"试两次 */
+    const normTask = (t: string): string | null => {
+      if (t === 'lint') return 'lint'
+      if (t === 'svg') return 'svg'
+      if (t === 'midi') return 'midi'
+      if (t === 'fmt' || t === 'format' || t === 'jps') return 'fmt'
+      return null
+    }
+    const tasks = (p.type ?? 'svg')
+      .toLowerCase()
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s !== '')
+    const kinds = tasks.map(normTask).filter((k): k is string => k !== null)
+    const badTasks = tasks.filter((t) => normTask(t) === null)
+    if (tasks.length === 0 || badTasks.length > 0) {
+      io.err(
+        `batch 的 -t 支持 lint | svg | midi | fmt（可逗号组合，如 -t lint,fmt,svg）；收到 “${badTasks.join(' ') || String(p.type ?? '')}”`,
+      )
       return { code: EXIT.usage }
     }
-    let names: string[]
+    const outDir = p.output
+    /** 只有 lint 不产出文件 ⇒ 只有"纯 lint"才允许省掉 `-o` */
+    const writesFiles = kinds.some((k) => k !== 'lint')
+    if (writesFiles && (outDir === null || outDir === '-')) {
+      io.err(
+        'batch 的 svg / midi / fmt 任务要写文件 ⇒ 必须给 -o <目录>（只有 -t lint 可以省略）\n' +
+          '  · 只想看语法检查结果：ijipu cli batch --in <目录> -t lint',
+      )
+      return { code: EXIT.usage }
+    }
+    let expanded: { files: string[]; isDir: boolean }
     try {
-      names = (await io.listDir(inDir)).filter((n) => n.toLowerCase().endsWith('.jps'))
+      expanded = await expandInputs(inDir, io, p.recursive, p.filter)
     } catch (e) {
       io.err(`读目录失败：${String(e)}`)
       return { code: EXIT.noInput }
     }
-    const to = (p.type ?? 'svg').toLowerCase()
+    if (!expanded.isDir) {
+      io.err(`batch 需要 --in <目录>（“${inDir}” 不是目录；单文件请用 lint / format / render）`)
+      return { code: EXIT.usage }
+    }
+    const files = expanded.files
     let okCount = 0
     const failed: string[] = []
-    for (const name of names) {
+    type LintRow = { input: string; ok: boolean; errors: { line: number; message: string }[] }
+    const lintRows: LintRow[] = []
+    const gh = p.format === 'gh'
+    for (const file of files) {
+      const name = file.split('/').pop() ?? file
       const stem = name.replace(/\.jps$/i, '')
+      /** 输出目录（纯 lint 时为空串）——⚠ 是**目录**，不是"目录 + 文件名"：
+       *  第一版这里写成 `joinPath(outDir, stem)` 再拼文件名 ⇒ 产出 `out/a/a.svg` ✗（断言当场抓出来） */
+      const outBase = outDir === null || outDir === '-' ? '' : outDir
       try {
-        const src = await io.readFile(`${inDir}/${name}`)
+        const src = await io.readFile(file)
         const { errors } = splitParseIssues(parseJps(src))
         if (errors.length > 0) {
-          failed.push(`${name}（${errors.length} 个语法错误）`)
+          failed.push(`${file}（${errors.length} 个语法错误）`)
+          if (kinds.includes('lint')) {
+            lintRows.push({
+              input: file,
+              ok: false,
+              errors: errors.map((e) => ({ line: e.line ?? 0, message: String(e.message ?? e.text ?? '') })),
+            })
+            if (gh) for (const e of errors) line(io, issueLine(e as { line?: number; message?: string }, true).replace('%FILE%', file))
+          }
           continue
         }
-        if (to === 'midi') {
+        if (kinds.includes('lint')) lintRows.push({ input: file, ok: true, errors: [] })
+        // adj956：`-s` 真的生效（此前 batch 接受了 -s 却从不读它 ⇒ 静默忽略）
+        const cfg = effectiveConfig(src, overrides)
+        if (kinds.includes('midi')) {
           const parsed = parseJps(src)
-          const layout = layoutScore(parsed, mergeJpsConfig(src, defaultPageConfig))
+          const layout = layoutScore(parsed, cfg)
           const bytes = eventsToMidi(buildPlaySequence(parsed, layout, 60).events, { bpm: 60, title: stem })
-          await io.writeFile(`${outDir}/${stem}.mid`, bytes)
-        } else if (to === 'fmt' || to === 'format' || to === 'jps') {
-          await io.writeFile(`${outDir}/${stem}.jps`, formatJps(src))
-        } else {
+          await io.writeFile(joinPath(outBase, `${stem}.mid`), bytes)
+        }
+        if (kinds.includes('fmt')) {
+          await io.writeFile(joinPath(outBase, `${stem}.jps`), formatJps(src))
+        }
+        if (kinds.includes('svg')) {
           const parsed = parseJps(src)
-          const layout = layoutScore(parsed, mergeJpsConfig(src, defaultPageConfig))
+          const layout = layoutScore(parsed, cfg)
           const svgs = renderScoreToSvg(layout)
           for (let i = 0; i < svgs.length; i += 1) {
-            const path = svgs.length > 1 ? `${outDir}/${stem}-${i + 1}.svg` : `${outDir}/${stem}.svg`
-            await io.writeFile(path, svgs[i])
+            const fileName = svgs.length > 1 ? `${stem}-${i + 1}.svg` : `${stem}.svg`
+            await io.writeFile(joinPath(outBase, fileName), svgs[i])
           }
         }
         okCount += 1
       } catch (e) {
-        failed.push(`${name}（${String(e)}）`)
+        failed.push(`${file}（${String(e)}）`)
       }
     }
-    line(io, `批处理完成：成功 ${okCount} 个、失败 ${failed.length} 个（输出到 ${outDir}，类型 ${to}）`)
-    for (const f of failed) line(io, `  ✗ ${f}`)
-    return {
-      code: failed.length === 0 ? EXIT.ok : EXIT.syntax,
-      json: { schema: 1, ok: okCount, failed },
+    const lintErrors = lintRows.reduce((n, r) => n + r.errors.length, 0)
+    const payload = {
+      schema: 1,
+      tasks: kinds,
+      inputs: files.length,
+      ok: okCount,
+      failed,
+      ...(kinds.includes('lint') ? { lint: lintRows, lintErrors } : {}),
+    }
+    /**
+     * adj956：`--json` 要**真的写 JSON 到 stdout**。
+     *
+     * 原实现无论有没有 `--json` 都只打那句中文汇总，`json` 只存在返回值里 ⇒ 拿这个 CLI 当
+     * 机器接口用的人（脚本/CI）在 `--json` 下拿到的仍然是人话，与 `lint`/`info`/`config`
+     * 的口径不一致 ✗（`--help` 明写"机器可读输出"）。
+     */
+    if (wantJson) line(io, JSON.stringify(payload, null, 2))
+    else {
+      line(
+        io,
+        `批处理完成：成功 ${okCount} 个、失败 ${failed.length} 个（任务 ${kinds.join(',')}；` +
+          `输入 ${files.length} 个文件${outDir === null || outDir === '-' ? '' : `，输出到 ${outDir}`}）`,
+      )
+      if (kinds.includes('lint') && !gh && !p.quiet) {
+        for (const r of lintRows) {
+          for (const e of r.errors) line(io, `  ${r.input} 第 ${e.line} 行：${e.message}`)
+        }
+      }
+      for (const f of failed) line(io, `  ✗ ${f}`)
+    }
+    return { code: failed.length === 0 ? EXIT.ok : EXIT.syntax, json: payload }
+  }
+
+  /**
+   * ── lint（adj956）：输入可以是**目录** ─────────────────────────
+   *
+   * 用户需求原话：「如果我要获取指定目录下的所有 jps 文件的 lint 情况，是需要借助 bat 文件来实现
+   * 还是 batch 参数就可以实现？」—— 改之前**两条路都走不通**（`batch` 没有 lint；`lint` 只吃单文件），
+   * 只能在 bat 里写 `for %%f in (*.jps) do ...`。现在一条命令：
+   *   `ijipu cli lint -i 乐谱目录 -r --filter "春*"`
+   *
+   * ⚠ 目录分支必须放在**读输入之前**：`readFile(目录)` 会失败，而"这是目录"只有 `listDir` 判得出来
+   *   （见 `expandInputs` 的说明）。单文件 / stdin 的老路径一个字不动，继续往下走。
+   */
+  if (p.command === 'lint' && p.inputs[0] !== undefined && p.inputs[0] !== '-') {
+    let expanded: { files: string[]; isDir: boolean }
+    try {
+      expanded = await expandInputs(p.inputs[0], io, p.recursive, p.filter)
+    } catch (e) {
+      io.err(`读目录失败：${String(e)}`)
+      return { code: EXIT.noInput }
+    }
+    if (expanded.isDir) {
+      if (p.watch) {
+        io.err('--watch 只支持单个文件（要对整个目录做即时检查，请用脚本循环逐文件调用）')
+        return { code: EXIT.usage }
+      }
+      if (expanded.files.length === 0) {
+        io.err(
+          `目录里没有 .jps：${p.inputs[0]}${p.recursive ? '' : '（子目录里的谱要加 -r 才会被扫到）'}`,
+        )
+        return { code: EXIT.noInput }
+      }
+      const gh = p.format === 'gh'
+      type Row = {
+        input: string
+        ok: boolean
+        errors: { line: number; message: string }[]
+        warnings: { line: number; message: string }[]
+      }
+      const rows: Row[] = []
+      let errCount = 0
+      let warnCount = 0
+      for (const file of expanded.files) {
+        let src = ''
+        try {
+          src = await io.readFile(file)
+        } catch (e) {
+          io.err(`读文件失败：${file}：${String(e)}`)
+          return { code: EXIT.noInput }
+        }
+        const { errors, warnings } = splitParseIssues(parseJps(src))
+        errCount += errors.length
+        warnCount += warnings.length
+        const pick = (x: { line?: number; message?: string; text?: string }): { line: number; message: string } => ({
+          line: x.line ?? 0,
+          message: String(x.message ?? x.text ?? ''),
+        })
+        rows.push({ input: file, ok: errors.length === 0, errors: errors.map(pick), warnings: warnings.map(pick) })
+        if (!wantJson && !p.quiet) {
+          for (const e of errors) line(io, issueLine(e as { line?: number; message?: string }, gh).replace('%FILE%', file))
+          for (const w of warnings) line(io, issueLine(w as { line?: number; message?: string }, gh).replace('%FILE%', file))
+        }
+      }
+      const payload = {
+        schema: 1,
+        generator: `ijipu ${version}`,
+        files: rows,
+        ok: errCount === 0,
+        errors: errCount,
+        warnings: warnCount,
+      }
+      if (wantJson) line(io, JSON.stringify(payload, null, 2))
+      else if (!p.quiet) {
+        const badCount = rows.filter((r) => !r.ok).length
+        line(
+          io,
+          `检查 ${rows.length} 个文件：${rows.length - badCount} 个通过、${badCount} 个有错` +
+            `（错误 ${errCount} 个、告警 ${warnCount} 个）`,
+        )
+      }
+      return { code: errCount === 0 ? EXIT.ok : EXIT.syntax, json: payload }
     }
   }
 

@@ -19,6 +19,8 @@ import type { HqSampleLibrary } from '@ijipu/engine'
 import { pitchToMidiNote, instrumentToProgram, GmChannelAllocator, GM_VOICES, gmVoiceRef } from '@ijipu/engine'
 import type { GmVoice } from '@ijipu/engine'
 import type { WorkletSynthesizer } from 'spessasynth_lib'
+// adj954：运行环境判定收敛到品牌层唯一出处（原先本文件自己读 `__TAURI__`）
+import { tauriCore } from '../brand/env'
 
 /** worklet processor 文件（已拷贝到 public/spessasynth/，经 BASE_URL 定位） */
 const WORKLET_URL = `${import.meta.env.BASE_URL}spessasynth/spessasynth_processor.min.js`
@@ -40,14 +42,11 @@ export const GM_VOICE_OPTIONS: GmVoice[] = GM_VOICES
 /** Tauri invoke 函数签名（window.__TAURI__.core.invoke） */
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
 
-/** 取 Tauri invoke（非桌面环境返回 undefined） */
+/** 取 Tauri invoke（非桌面环境返回 undefined）。
+ *  adj954：读 `__TAURI__` 收敛到 `brand/env.ts`（原先这里自己写了一遍类型体操）。 */
 function tauriInvoke(): TauriInvoke | undefined {
-  try {
-    const inv = (window as unknown as { __TAURI__?: { core?: { invoke?: TauriInvoke } } }).__TAURI__?.core?.invoke
-    return typeof inv === 'function' ? inv : undefined
-  } catch {
-    return undefined
-  }
+  const inv = tauriCore()?.invoke
+  return typeof inv === 'function' ? (inv as TauriInvoke) : undefined
 }
 
 /** 是否运行在 Tauri 桌面环境（window.__TAURI__ 由 withGlobalTauri 注入） */

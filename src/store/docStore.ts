@@ -23,12 +23,13 @@ import {
   createSavePhaseLog,
   fileBaseName,
   fileInputAccept,
-  isCoarsePointerDevice,
   isUserCancel,
   saveTextToHandle,
   shouldUseFileInputPicker,
   type SavePhaseLog,
 } from './saveSupport'
+// adj954：设备判据迁到品牌层唯一出处（原在 store/saveSupport.ts）
+import { isCoarsePointerDevice } from '../brand/env'
 import { useUiStore } from './uiStore'
 // adj724b：`shouldYieldBindingRestore` 用于"给宿主的 openFile 让路"（见文件末尾）
 import { isHostEmbedded, shouldYieldBindingRestore } from './hostBridge'

@@ -32,6 +32,8 @@ import { nextViewType } from './ui/viewCycle'
 import { nextThemeMode } from './brand/themes'
 // adj621：应用标题统一来源（浏览器页签 + 桌面窗口标题共用 `APP_TITLE_FULL`）
 import { APP_TITLE_FULL } from './brand/version'
+// adj954：`__TAURI__` 的读取收敛到品牌层唯一出处（本文件原先自己写了一段类型体操）
+import { tauriInvokeOrNull } from './brand/env'
 // adj350：对话框懒加载（React.lazy）——首屏不加载它们，显著减小主包、加快首屏显示
 // adj492：「关于」已迁入底栏 dock（见 ui/ToolDock），此处不再需要弹窗版懒加载
 const SamplesDialog = lazy(() => import('./dialogs/SamplesDialog').then((m) => ({ default: m.SamplesDialog })))
@@ -151,22 +153,16 @@ function App() {
    * 注入窗口标题 IPC 通道就绪（adj621 实测：mount 那一刻直接调会被静默吞掉，延一帧就好）。
    *
    * 失败（非 Tauri 环境 / 权限缺失）静默忽略——浏览器里没这个 IPC。
+   *
+   * adj954：`__TAURI__` 的读取收敛到 `brand/env.ts`；`tauriInvokeOrNull` 在非桌面壳里直接返回 `null`，
+   * 于是这里连"先判环境"都不用写（静默忽略的语义与原先一致）。
    */
   useEffect(() => {
     document.title = APP_TITLE_FULL
     const raf = requestAnimationFrame(() => {
-      const g = (window as unknown as {
-        __TAURI__?: {
-          core?: { invoke?: (cmd: string, args?: unknown) => Promise<unknown> }
-        }
-      }).__TAURI__
-      const invoke = g?.core?.invoke
-      if (typeof invoke === 'function') {
-        void invoke('plugin:window|set_title', { label: 'main', value: APP_TITLE_FULL }).catch(() => {
-          /* setTitle 失败不影响页面功能 —— document.title 已生效，至少页签/任务栏 tooltip
-             用的是页面 title（多数浏览器/Win 任务栏 hover 都看这个） */
-        })
-      }
+      void tauriInvokeOrNull('plugin:window|set_title', { label: 'main', value: APP_TITLE_FULL })
+      /* setTitle 失败不影响页面功能 —— document.title 已生效，至少页签/任务栏 tooltip
+         用的是页面 title（多数浏览器/Win 任务栏 hover 都看这个） */
     })
     return () => cancelAnimationFrame(raf)
   }, [])
@@ -537,6 +533,8 @@ function App() {
       {modal === 'shortcuts' && <Suspense fallback={null}><ShortcutsDialog /></Suspense>}
       {modal === 'manual' && <Suspense fallback={null}><DocDialog kind="manual" /></Suspense>}
       {modal === 'syntax' && <Suspense fallback={null}><DocDialog kind="syntax" /></Suspense>}
+      {/* adj957（用户裁定）：命令行手册与另外两本同路 —— 应用内渲染，不再依赖随包 MD */}
+      {modal === 'cli' && <Suspense fallback={null}><DocDialog kind="cli" /></Suspense>}
       {modal === 'donate' && <Suspense fallback={null}><DonateDialog /></Suspense>}
       {/* adj562：「粘贴源码导入」已迁入底栏「导入」页签（原 adj406 的弹窗入口下线） */}
       {/* adj509：试听音色选择对话框（音色库「指定音色」按钮触发） */}

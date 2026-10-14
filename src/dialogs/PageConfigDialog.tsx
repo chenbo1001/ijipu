@@ -25,9 +25,10 @@ import { draftAfterReset } from './pageConfigReset'
 import { THEMES, type ThemeMode } from '../brand/themes'
 import { uiCopy, numCopy, cliPathCopy } from '../brand/copy'
 // adj944：桌面版判定（网页版没有读写 PATH 的能力 ⇒ 界面如实禁用并说明）
-import { isDesktopShell } from '../brand/platform'
+// adj954：环境判定统一走 brand/env.ts（原 brand/platform.ts 已合并删除）
+import { isDesktopShell } from '../brand/env'
 // adj944：注册/解除 iJipu CLI（IO 接线在 store/cliPath.ts；**纯逻辑与命令行共用一份** ✓）
-import { applyCliPath, openCliManual, readCliPathStatus } from '../store/cliPath'
+import { applyCliPath, readCliPathStatus } from '../store/cliPath'
 import { PATH_MAX_CHARS, type CliPathStatus } from '../../packages/ijipu-cli/src/envPath'
 import { SoundBankPanel } from './SoundBankPanel'
 import type { PageConfig } from '@ijipu/engine'
@@ -74,6 +75,23 @@ const FIELDS_TABS: TabId[] = ['global', 'cli', 'score', 'font']
 const ROW_GAP = 8
 const CTL_MIN_W = 140
 const COL_GAP = 18
+
+/**
+ * adj955（用户要求）：**非桌面端整条隐藏「命令行」子页签**。
+ *
+ * 用户原话：「CLI 只对于桌面端有效，因此全局设置下的命令行设置组在非桌面端时连显示都不应该显示，
+ * 完全没用呀！」——`cli_path_status` / `cli_path_register` / `cli_path_unregister` 这三条 Rust
+ * 命令在网页版里**根本不存在**（要读写 `HKCU\Environment\Path`）。原先的做法是"页签照常出现、
+ * 里面的状态写一句「网页版不支持」并把按钮禁用"：用户白点一次，还得读一段解释才知道这页对他没用。
+ *
+ * 现在：**不可用就不出现**（入口都不给）。
+ *
+ * ⚠ 必须是**函数**、不能写成模块级常量 —— `__TAURI__` 是宿主注入的全局，判定要在**调用时**求值
+ * （同一课教训见 `brand/shortcuts.ts` 的 `newDocKbd`：状态在模块加载那一刻就被钉死是会出错的）。
+ */
+function visibleTabs(section: SettingsSection): typeof ALL_TABS {
+  return ALL_TABS.filter((t) => t.section === section && (t.id !== 'cli' || isDesktopShell()))
+}
 
 /**
  * adj605（用户要求）：**谱面级字段的登记表**——「布局」「字体」两个子页签各自有哪些 `PageConfig` 字段。
@@ -126,8 +144,9 @@ export function PageConfigDialog({
   inline = false,
   section = 'global',
 }: { inline?: boolean; section?: SettingsSection } = {}) {
-  /** 本实例负责的子页签（按 section 过滤；两个 dock 页签各渲染一份，互不干扰） */
-  const TABS = ALL_TABS.filter((t) => t.section === section)
+  /** 本实例负责的子页签（按 section 过滤；两个 dock 页签各渲染一份，互不干扰）。
+   *  adj955：再按"这台机器上真的能用吗"过滤 —— 非桌面端不出现「命令行」页签。 */
+  const TABS = visibleTabs(section)
   const pageConfig = useDocStore((s) => s.pageConfig)
   const setPageConfig = useDocStore((s) => s.setPageConfig)
   // adj462：设置面板已移入底部 dock——保存/固化后收起 dock（原为关闭弹窗）
@@ -159,7 +178,8 @@ export function PageConfigDialog({
 
   const [draft, setDraft] = useState<PageConfig>({ ...pageConfig })
   // adj603：默认子页签取本 section 的第一个（全局 → 版面、谱面 → 布局）
-  const [tab, setTab] = useState<TabId>(() => ALL_TABS.find((t) => t.section === section)?.id ?? 'global')
+  // adj955：走 `visibleTabs`（非桌面端没有「命令行」，不能把它当默认值选出来）
+  const [tab, setTab] = useState<TabId>(() => visibleTabs(section)[0]?.id ?? 'global')
   /**
    * adj728（用户要求）：**"跳到某个页签"的一次性意图**（`uiStore.openSettings(tab)`）。
    *
@@ -173,7 +193,8 @@ export function PageConfigDialog({
   const consumeSettingsTab = useUiStore((s) => s.consumeSettingsTab)
   useEffect(() => {
     if (!settingsTabRequest) return
-    if (!ALL_TABS.some((t) => t.id === settingsTabRequest && t.section === section)) return
+    // adj955：守卫也走 `visibleTabs` —— 非桌面端没有「命令行」，不能把意图落在一个不存在的页签上
+    if (!visibleTabs(section).some((t) => t.id === settingsTabRequest && t.section === section)) return
     setTab(settingsTabRequest)
     consumeSettingsTab()
   }, [settingsTabRequest, section, consumeSettingsTab])
@@ -241,28 +262,14 @@ export function PageConfigDialog({
     }
   }
   /**
-   * adj945（用户需求）：**「查看 CLI 手册」** —— 用系统默认程序打开安装目录里那份手册。
-   *
-   * 为什么单独一个忙碌态：打开动作是"交给系统"，可能被杀软/关联程序卡住 ⇒ 按钮要有忙碌文案，
-   * 免得用户以为没点上、连点多开几个窗口。
+   * adj957（用户裁定）：原先这里还有一段「查看 CLI 手册」——用**系统默认程序**打开随包放在
+   * 安装目录里的 `docs/iJipu-CLI-手册.md`。已删除，理由两条：
+   *  ① Windows **默认没有 `.md` 关联程序**，这个按钮在多数机器上会弹「你要如何打开此文件」；
+   *  ② 命令行手册现在与操作手册/语法说明一样，走**应用内 `DocDialog`**（顶栏「帮助 → 命令行手册」）
+   *     —— 应用内渲染，不依赖外部关联，也不必有随包 MD。
+   * 相关文案（`cliPathCopy.manual*`）与 Rust 命令（`cli_manual_open`）一并撤掉。
    */
-  const [cliManualBusy, setCliManualBusy] = useState(false)
-  const onOpenCliManual = async () => {
-    if (cliManualBusy) return
-    setCliManualBusy(true)
-    setCliNote(null)
-    try {
-      const r = await openCliManual()
-      setCliNote(
-        r.ok
-          ? { kind: 'ok', text: cliPathCopy.manualOpened(r.path) }
-          : // 网页版如实说"不支持"；桌面版把**原因原文**显示出来（Rust 侧已带上找过的路径）
-            { kind: 'err', text: r.reason === 'web' ? cliPathCopy.manualWebOnly : cliPathCopy.manualFailed(r.reason) },
-      )
-    } finally {
-      setCliManualBusy(false)
-    }
-  }
+
   // adj315：页面设置"即刻预览 + 保存持久化 + X 恢复"——
   // 打开时快照原值，调整时临时应用（预览非持久化），保存才写 .jps；关闭未保存则恢复快照。
   const snapRef = useRef<PageConfig>({ ...pageConfig })
@@ -632,18 +639,9 @@ export function PageConfigDialog({
               <br />
               {cliPathCopy.hintCurrentUser}
             </div>
-            {/* adj945（用户需求）：手册就随安装包放在安装目录里（`docs/iJipu-CLI-手册.md`），
-                这里给一个按钮用系统默认程序打开 —— 文案走 `cliPathCopy`，组件里不写字面量 ✓ */}
-            <Row label={cliPathCopy.manualLabel}>
-              <button
-                className="btn"
-                title={cliPathCopy.manualTip}
-                disabled={!cliDesktop || cliManualBusy}
-                onClick={() => void onOpenCliManual()}
-              >
-                {cliManualBusy ? cliPathCopy.manualBusy : cliPathCopy.manualButton}
-              </button>
-            </Row>
+            {/* adj957：原先这里还有一个「查看 CLI 手册」按钮（用系统默认程序打开随包 MD）。
+                已删除 —— 命令行手册改走应用内 `DocDialog`（顶栏「帮助 → 命令行手册」），
+                既不依赖 Windows 的 `.md` 关联程序，也不必再有随包 MD。 */}
             {cliNote && (
               <div className={`pcfg-note cli-path-note ${cliNote.kind}`} role="status">
                 {cliNote.text}

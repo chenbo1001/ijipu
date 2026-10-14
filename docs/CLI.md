@@ -1,9 +1,12 @@
 # iJipu 命令行（CLI）操作手册
 
 > ⚠ **这份是"给改代码的人看"的设计口径与维护说明**（方案、协议、实现约定）。
-> **面向使用者**的《命令集与使用示例手册》在 **`docs/CLI-手册.md`**（`adj945` 起，
-> 它会随安装包进安装目录的 `docs/iJipu-CLI-手册.md`，应用「全局 → 命令行 → 查看 CLI 手册」按钮打开它）。
+> **面向使用者**的《命令集与使用示例手册》在 **`docs/CLI-手册.md`**（`adj945` 起）。
 > 两边分工：**怎么用**看那一份，**为什么这么做/怎么维护**看这一份。
+> `adj957`（**用户裁定**）起那份手册**不再随安装包分发**（原先映射成安装目录的
+> `docs/iJipu-CLI-手册.md`、由应用「全局 → 命令行 → 查看 CLI 手册」按钮用系统默认程序打开）——
+> 理由与替代路径见 §二之三。它现在的三个入口都是**应用内渲染**（顶栏「帮助」下的
+> 操作手册 / 脚本语法说明 / 命令行手册，同一份 `docs/CLI-手册.md`）。
 > `adj949`（用户要求"手册的目的是告诉用户有什么和怎么用，不是为什么和原理、实现"）把这条分界线
 > 变成了**机器闸门**：`docs/CLI-手册.md` 里不许出现一组"实现/原理"词（`QuickJS` / **命名管道** /
 > `AttachConsole` / **OEM 代码页** / `fs.watch` / 设计取舍 …），而这些词必须**仍在本文件里** ——
@@ -30,7 +33,7 @@
 命令行入口是**控制台垫片** `bin\ijipu.cmd`（注册 PATH 之后就是一个 `ijipu`，见 §一之一/§二之二）：
 
 ```powershell
-ijipu cli --version                                  # iJipu 0.60.0
+ijipu cli --version                                  # iJipu 0.61.0
 ijipu cli --help                                     # 完整的命令/选项清单
 ijipu cli lint -i 我的谱.jps                         # 有错 ⇒ 退出码 3
 ijipu cli render -i 我的谱.jps -t svg -o 我的谱.svg
@@ -189,11 +192,11 @@ ijipu cli lint -i 我的谱.jps > out.txt # cmd 与 PowerShell 的 > 都写出�
 | 命令 | 作用 | 关键选项 |
 |---|---|---|
 | `format` | 按应用规范**规范化源码**（与应用编辑器/插件格式化同一实现） | `-i` `-o` `--check` `--in-place` `--diff` |
-| `lint` | 语法检查（错误/告警）；`--watch` 监视文件变化后**即时重检** | `-i` `--format text\|json\|gh` `--watch` |
+| `lint` | 语法检查（错误/告警）；输入可以是**目录**（`-r` 递归、`--filter` 按名筛）；`--watch` 监视文件变化后**即时重检** | `-i` `-r` `--filter` `--format text\|json\|gh` `--watch` |
 | `info` | 谱面概况（标题/调号/行数/分组/问题数） | `-i` `-t text\|json` |
 | `render` | 源码 → **SVG**（每页一段）／**MIDI**／**PNG·JPG·PDF**（需桌面端通道） | `-i` `-t svg\|midi\|png\|jpg\|pdf` `-o` |
 | `play` | 导出音频：**MIDI**（任意环境）／**WAV**（需桌面端通道） | `-i` `-t midi\|wav` `-o` |
-| `batch` | **目录批量**转换（SVG / MIDI / 规范化源码）；输出目录会自动创建 | `--in <目录>` `-o <目录>` `-t svg\|midi\|fmt` |
+| `batch` | **目录批量操作**（任务**可逗号组合**：`lint` / `svg` / `midi` / `fmt`）；输出目录会自动创建 | `--in <目录>` `-o <目录>`（**纯 `-t lint` 可省**）`-t lint,svg,midi,fmt` `-r` `--filter` |
 | `settings` | 看**某一个设置项**的值与**来源**（位置参数 = 键名） | `-i <谱>` `<键名>` `-s k=v`（临时覆盖） |
 | `config` | 打印**生效设置全表 + 每项来源** | `-i <谱>` `-t effective` |
 | `doctor` | 环境自检（可设置项数量、各项能力是否可用） | `--json` |
@@ -214,12 +217,42 @@ ijipu cli lint -i 我的谱.jps > out.txt # cmd 与 PowerShell 的 > 都写出�
 ```powershell
 npm run cli -- settings -i 我的谱.jps margin_right     # 例：margin_right = 40   [来自：代码默认]
 npm run cli -- settings -i 我的谱.jps margin_right -s margin_right=33
-#   margin_right = "33"   [来自：命令行 -s]
+#   margin_right = 33   [来自：命令行 -s]
 npm run cli -- config -i 我的谱.jps -t effective --quiet # 只看"非默认"的项（精简视图）
 npm run cli -- doctor                                    # 能力自检：位图/音频在独立 Node 里为 ✗（需桌面端通道）
 ```
-> `-s k=v` 目前可用于 `info` / `settings` / `config` / `render` / `play` / `batch`（**临时覆盖，不落盘** ✓）；
+> `-s k=v` 可用于 `settings` / `config` / `render` / `play` / `batch`（**临时覆盖，不落盘** ✓）；
 > 把设置**写回谱面**（`# jps-config` 差量写入）属后续阶段 ✓。
+
+### 二之一、目录级批量：`lint -i <目录>` 与 `batch` 的组合任务（`adj956`）
+
+由来（**用户需求原话**）：「如果我要获取指定目录下的所有 jps 文件的 lint 情况，是需要借助 bat 文件
+来实现还是 batch 参数就可以实现？一些操作是否可以通过 batch 参数形成组合式的批量操作的效果？」
+
+改之前**两条路都走不通**：`batch` 只认 `-t svg|midi|fmt`（没有 lint）、`-o` 是硬性必填（lint 根本不产出文件）、
+目录列举只回一层文件名 ⇒ 想在 bat 里 `for %%f in (*.jps) do …` 逐文件调用是唯一办法。
+现在（口径与实现都在 `cli.ts`）：
+
+| 能力 | 形态 | 说明 |
+|---|---|---|
+| **目录输入** | `lint -i <目录>` | 一次检查整个目录；退出码与单文件同口径（有错 ⇒ 3） |
+| **递归** | `-r` / `--recursive` | **缺省不递归**（只看当前一层）—— 一次手滑不该扫出用户没预期的一大批文件 |
+| **按名筛** | `--filter <通配>` | 只匹配**文件名**（`*` 与 `?`），如 `--filter "春*"`；输入是单文件时**不生效**（点名要的文件没有再筛掉的道理） |
+| **组合任务** | `batch -t lint,fmt,svg` | 一次遍历目录，多种产物一起拿 |
+| **`-o` 变可选** | `batch -t lint` | 只有"纯 lint"能省（不产出文件） |
+| **`--json` 真吐 JSON** | `batch … --json` | 原先 `batch` 无论有没有 `--json` 都只打那句中文汇总（`json` 只存在返回值里）⇒ 与 `lint`/`info`/`config` 口径不一致 ✗ |
+
+两条**判据/失败口径**上的讲究（都是本轮踩出来的）：
+
+- **目录/文件怎么判**：宿主能力里只有 `listDir` 能区分二者（`exists` 只给"在不在"）⇒ `expandInputs()`
+  **只对顶层那一次 `listDir` 的失败做降级**（"不是目录 ⇒ 当单文件"）。第一版把整个递归 `walk`
+  包在同一个 try 里，于是**子目录读失败会被吞掉**、降级成"把目录当文件读"，最终报的是"输入不存在"
+  —— 根因被藏起来（正是本项目反复记的"静默失败"那一类 ✗）。
+- **`-s` 的静默忽略（`adj956` 修）**：`-s` 原先只有 `settings` / `config` 真的读它，
+  却被 `info` / `render` / `play` / `batch` 的守卫放行 ⇒ "接受了、然后静默忽略"（最坏的一种错：
+  不报错、结果却不是用户要的）。现在：接受范围收敛到**真的会用它**的命令，值**按类型粗转**
+  （`margin_right=33` ⇒ 数字 `33`，与 `mergeJpsConfig` 给同一个键的类型一致），
+  键名写错 / 缺 `=` 一律**退出码 5**（不当没写），覆盖值**最后展开**（`-s` > 源内 `# jps-config` > 代码默认）。
 
 ### P3：位图/音频为什么在独立 Node 里"报错"而不是"硬做"
 `png/jpg/pdf` 需要 **canvas + 字体 + 分页**，`wav` 需要 **AudioContext + 音色库** ——
@@ -294,17 +327,44 @@ iJipu CLI 注册状态：未注册 ✗（终端里还敲不了 ijipu）
 > 不一致就**立刻用备份还原**再报错 ✓（卸载器会把这个键删掉）。
 > 值的类型**跟着原值走** —— PATH 里常有 `%USERPROFILE%` 这类变量，写成 `REG_SZ` 会让它们**不再展开** ✗。
 
+## 二之三、命令行手册的入口与随包口径（`adj957`，**用户裁定**）
+
+**结论：命令行手册不再随安装包分发；它的入口与另外两本手册合并。**
+
+原先（`adj945`）的口径是"手册随包落在 `<安装目录>/docs/iJipu-CLI-手册.md`，应用「全局 → 命令行 →
+查看 CLI 手册」按钮用**系统默认程序**打开它"（Rust 命令 `cli_manual_open`）。用户看完之后给的口径是
+「那几份 MD 不必随包分发」+「桌面端、插件都指定相对路径，网站自然是在线文档」。于是本轮全撤：
+
+| 撤掉的东西 | 位置 |
+|---|---|
+| 随包资源映射 | `src-tauri/tauri.conf.json` 的 `bundle.resources` |
+| Rust 命令 | `src-tauri/src/cli_manual.rs`（整份）+ `lib.rs` 的 `mod` 与 `invoke_handler` 注册 |
+| 设置里那个按钮 | `src/dialogs/PageConfigDialog.tsx` + `src/brand/copy.ts` 的 `cliPathCopy.manual*` 七条文案 |
+| 安装清单闸门 | `scripts/check-installer.mjs` 的 `DOCS_REQUIRED` / `DOC_SOURCES` 两条 |
+
+**换成了什么**：三本手册（操作手册 / 脚本语法说明 / 命令行手册）走**同一个 `DocDialog`**，
+在顶栏「帮助」菜单里各有一项 —— 应用内渲染，不依赖 Windows 的 `.md` 关联程序
+（那正是撤掉它的直接原因：**Windows 默认没有 `.md` 关联程序**，那个按钮在多数机器上会弹
+「你要如何打开此文件」）。机器闸门也从"必须有这条映射"翻成"**必须撤干净**"（`adj957` 的那一组，
+每条都配负对照）。
+
+> 顺带删掉的是手册开头那张 `manual-page.png`（1440×900、95.6 KB）——"这份手册在官网上的样子"，
+> 即**手册自己网页的截图**：对"怎么用"零帮助，而 `mdToHtml` 的 `<img>` **限不了宽** ⇒
+> 在应用内对话框里它必然是一块巨幅图。判据随之从"至少 1 张"改成"引用了就必须存在"（0 张合法）。
+
 ## 三、全局选项
 
 | 选项 | 含义 |
 |---|---|
-| `-i, --input <文件\|->` | 输入文件；`-` 表示 **stdin**（省略时也读 stdin） |
-| `-o, --output <文件\|->` | 输出文件；`-` 或省略 = **stdout** |
-| `-t, --type <类型>` | 指定输出类型；省略时**按 `-o` 后缀推断**（P1 只有文本类） |
+| `-i, --input <文件\|目录\|->` | 输入；`-` 表示 **stdin**（省略时也读 stdin）；`lint` 与 `batch` 接受**目录** |
+| `-o, --output <文件\|->` | 输出文件；`-` 或省略 = **stdout**；`batch` 里是**输出目录** |
+| `-t, --type <类型>` | 指定输出类型；省略时**按 `-o` 后缀推断**；`batch` 里可逗号组合 |
+| `-r, --recursive` | 输入是目录时**连子目录一起**（缺省只看当前一层；`adj956`） |
+| `--filter <通配符>` | 只处理**文件名**匹配的（`*` 与 `?`；`adj956`） |
 | `--json` | 机器可读输出（带 `"schema": 1`） |
 | `--quiet` | 不输出非必要信息（成功即静默，便于脚本判断） |
 | `--deterministic` | 输出不含时间戳（CI 逐字节比对用） |
-| `-s <k=v>` | 临时设置（P4 完整实现；当前仅 `info` 接受） |
+| `-s <k=v>` | 临时设置（**优先级最高、不落盘**）。只接受于 `settings` / `config` / `render` / `play` / `batch`；键名必须是真设置项，写错 ⇒ 退出码 5（`adj956`） |
 | `--config <文件>` | CLI 配置文件（**P4**，现在给会报退出码 5） |
 | `-h, --help` / `-v, --version` | 帮助 / 版本 |
 
@@ -353,10 +413,17 @@ npm run cli -- format -i 我的谱.jps --check
 # 8) 看差异（- 旧 / + 新，逐行）
 npm run cli -- format -i 乱.jps --diff
 
-# 9) 一次性批量（P2 起用 batch；P1 时代用 PowerShell 循环兜）
+# 9) 一次性批量（P2 起用 batch；P1 时代用 PowerShell 循环兜；adj956 起任务可组合）
 npm run cli -- batch --in samples -o dist-out -t svg     # 每个谱 → 一/多个 SVG（多页加 -1/-2）
 npm run cli -- batch --in samples -o dist-out -t midi    # 每个谱 → 一个 .mid
 npm run cli -- batch --in samples -o dist-out -t fmt     # 每个谱 → 规范化后的 .jps
+npm run cli -- batch --in samples -t lint                # 只查语法：**不必给 -o**（不产出文件）
+npm run cli -- batch --in samples -o dist-out -t lint,fmt,svg   # 组合：一次遍历拿三种结果
+
+# 9b) 目录级 lint（adj956 起 lint 直接吃目录；-r 递归、--filter 按文件名筛）
+npm run cli -- lint -i samples                           # 只查当前一层
+npm run cli -- lint -i samples -r                        # 连子目录一起
+npm run cli -- lint -i samples --filter "二*" --json      # 只查名字匹配的，输出机器可读汇总
 
 # 10) 导出矢量图 / MIDI
 npm run cli -- render -i 我的谱.jps -t svg -o 我的谱.svg
@@ -479,3 +546,15 @@ $env:IJIPU_CLI_HOST = "1"; .\ijipu.exe      # 或：.\ijipu.exe --cli-host
    `adj947`：**`--help` 的"用法"行必须带 `cli`**（用户实报漏了 `cli`、照它敲会走进 GUI ✗）——
    闸门在 `cli-assert`（对**真实 `--help` 输出**断言 + 负对照），手册/`copy.ts` 里的"怎么敲"
    由冒烟 `adj947` 那组按"不许出现缺 `cli` 的调用形态"钉住 ✓。
+6. **`CliIo.listDir` 的返回形状 = 目录项数组**（`{ name, dir }[]`，`adj956` 改）：
+   ```ts
+   listDir(dir: string): Promise<DirEntry[]>   // DirEntry = { name: string; dir: boolean }
+   ```
+   为什么改：`-r` 递归要下钻子目录，而"只有名字"**分不出哪个是目录** ✗。约定是**只回一层、
+   按名字排序**（顺序可复现 ⇒ 输出能逐字节比对）。三处宿主**必须同步**，少一处就有一端崩：
+   · `src/nodeEntry.ts`（`readdir(dir, { withFileTypes: true })`）；
+   · `src/embedEntry.ts` 的 `EmbedHost.listDir` 类型；
+   · `src-tauri/src/cli_embed.rs` 那个注入给 QuickJS 的 `listDir` 闭包（现在回 `{ name, dir }` 对象数组；
+     `file_type()` 失败按"不是目录"处理 —— 只会少扫一层，不会崩 ✓）。
+   测试侧的假 IO（`scripts/cli-assert.mts` 的 `makeIo`）也按同一形状归一：
+   给**字符串**时若能找到 `${目录}/${名字}/…` 这样的键就当作目录，给**对象**则原样用 ✓。

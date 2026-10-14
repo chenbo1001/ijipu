@@ -29,6 +29,9 @@ import { externalChangeCopy } from './brand/copy'
 // 一律**静态**引入（既静态又动态 import 会让打包器报 INEFFECTIVE_DYNAMIC_IMPORT）。
 import { getBaseline, probeExternalChange, baselineKeyOf } from './store/externalChange'
 import { installAppHeight } from './pwa/appHeight'
+// adj954：运行环境判定收敛到 `brand/env.ts` 唯一出处 —— 本文件原先自己写了两份
+//（`isTauriDesktop` / `isEmbeddedFrame`），与 brand、playback、preview 里那几份是同一个判据。
+import { isHostFrame, isTauriShell } from './brand/env'
 
 // adj404：应用高度跟随可视视口——软键盘弹出时（浏览器/PWA/自建外壳）编辑区自动让位，
 // 不再被键盘盖住（`.app { height: var(--app-h, 100dvh) }`，见 index.css）
@@ -302,19 +305,10 @@ void (async () => {
 })()
 
 /**
- * adj443：是否运行在 **Tauri 桌面端**（`window.__TAURI__` 由 `withGlobalTauri` 注入）。
- * 与 `playback/samplerCache.ts` 的判定同源。
- */
-function isTauriDesktop(): boolean {
-  try {
-    return typeof (window as unknown as { __TAURI__?: { core?: { invoke?: unknown } } }).__TAURI__?.core?.invoke === 'function'
-  } catch {
-    return false
-  }
-}
-
-/**
  * adj443：**桌面端绝不注册 Service Worker，并主动注销 + 清缓存**。
+ *
+ * adj954：本节的两个环境判据（"是不是 Tauri 桌面端" / "是不是在宿主 iframe 里"）
+ * 已收敛到 `brand/env.ts` 的 `isTauriShell()` / `isHostFrame()`，本文件不再自己读 `__TAURI__`。
  *
  * 问题（用户报）：PC 版重新安装后打开还是**旧界面**，要按 Ctrl+R 才更新 —— 普通用户会以为"没更新"。
  *
@@ -335,21 +329,17 @@ function isTauriDesktop(): boolean {
  * `http://127.0.0.1:<port>`），而那个服务只为本次会话提供单文件页面，
  * 完全没有 `/sw.js`；更糟的是 SW 会跨会话存活，可能在下次打开时把页面搞坏。
  * PWA 的离线能力只对**独立网页版**有意义。
+ *
+ * adj954：函数体已收敛到 `brand/env.ts` 的 `isHostFrame()`（判据与注释都留在那边，避免两处漂移）。
  */
-function isEmbeddedFrame(): boolean {
-  try {
-    return window.parent !== window
-  } catch {
-    return true // 跨源访问 parent 抛错 ⇒ 一定在 iframe 里
-  }
-}
 
 /**
  * ⚠⚠ adj859（**真正的根因与修法** ✓，别再改动这个位置 ✗）：
  * 我前几轮以为"放在模块顶层"就够了 ✗ —— 实际上那段 `installBridgeOnce` 被我插进了**下面的
  * Service Worker IIFE 里面** ✗，而那段 IIFE 的守卫是
- * `import.meta.env.PROD && 'serviceWorker' in navigator && !isEmbeddedFrame()` ✓
- * ⇒ **在嵌入版（iframe）里 `isEmbeddedFrame() === true` ⇒ 整段永不执行** ✗✓✓
+ * `import.meta.env.PROD && 'serviceWorker' in navigator && !isHostFrame()` ✓
+ * ⇒ **在嵌入版（iframe）里 `isHostFrame() === true` ⇒ 整段永不执行** ✗✓✓
+ * （adj954：函数已改名并收敛到 `brand/env.ts`，判据一字未变）
  * ⇒ 这正好解释了两个铁证：① 服务端发的**确实是含桥的新产物**（插件侧 ② 自检 = 是 ✓）；
  * ② 嵌入版 Console 里**从来没有** `bridge-installed` 日志 ✗（那段代码根本不跑 ✓）。
  *
@@ -387,8 +377,8 @@ function installBridgeOnce(): void {
 // ⚠ 模块作用域调用 ✓（在 SW 块之外 ✓、在任何 async IIFE 之外 ✓）—— 这就是本 bug 的修法 ✓
 installBridgeOnce()
 
-if (import.meta.env.PROD && 'serviceWorker' in navigator && !isEmbeddedFrame()) {
-  if (isTauriDesktop()) {
+if (import.meta.env.PROD && 'serviceWorker' in navigator && !isHostFrame()) {
+  if (isTauriShell()) {
     // 老版本可能已注册过 SW：注销 + 清缓存 + 重载一次（仅在确有注册/缓存时重载，避免每次启动都刷新）
     void (async () => {
       try {

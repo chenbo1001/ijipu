@@ -23,11 +23,22 @@
  * 后来又按用户要求**改回「打开文件」**；导出改用 `Ctrl+Y`（adj619b），
  * 而 `Ctrl+Y` 原是"重做" ⇒ **重做挪到跨平台惯例 `Ctrl+Shift+Z`**。
  */
-import { isDesktopShell } from './platform'
+import { isDesktopShell } from './env'
+
+/**
+ * adj954：**新建**的键名**运行时求值**，不进 `KBD` 那个 `as const` 表。
+ *
+ * 由来：原先 `KBD.newDoc` 是在**模块加载那一刻**算好的（`isDesktopShell() ? 'Ctrl+N' : 'Alt+N'`）。
+ * 那等于把"是不是桌面壳"这个判定钉死在模块求值时机上——而 `__TAURI__` 是宿主注入的全局，
+ * 注入时机与模块求值谁先谁后并不由我们决定（`App.tsx` 里 `adj621` 记过一次相邻的坑：
+ * mount 那一刻 `__TAURI__.window` 子树还没 ready）。
+ *
+ * 现在改成函数：**每次要用的时候现算**，时序依赖直接消失。
+ * 代价是调用点要写成 `newDocKbd()`（`ShortcutsDialog` / `TopBar` 两处）。
+ */
+export const newDocKbd = (): string => (isDesktopShell() ? 'Ctrl+N' : 'Alt+N')
 
 export const KBD = {
-  /** adj185 起：文件类。adj628：网页版改用 `Alt+N`（`Ctrl+N` 被浏览器收走，见上） */
-  newDoc: isDesktopShell() ? 'Ctrl+N' : 'Alt+N',
   /** 打开文件（adj615 一度改挂「导出」，adj619b 按用户要求**改回**打开文件） */
   openDoc: 'Ctrl+O',
   save: 'Ctrl+S',

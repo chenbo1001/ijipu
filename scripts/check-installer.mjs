@@ -43,27 +43,24 @@ const SOURCES = [
 ]
 
 /**
- * adj945（用户需求）**必须随包进安装目录的三份文档**：
+ * adj945/adj957 **必须随包进安装目录的两份文档**：
  * `[展示名, installer.nsi 里应出现的片段, bundle.resources 的源, bundle.resources 的目标]`。
  *
  * 为什么值得机器守住：
  *  · `LICENSE`（AGPL-3.0 全文）—— 分发本体的义务，**安装目录里必须有**（用户 2026-10 反馈"安装目录好像也没有 LICENSE"）；
- *  · `docs/iJipu-CLI-手册.md` —— 用户要求「CLI 的命令集和使用示例手册，**在安装目录也存一份 MD**」，
- *    应用里那个「查看 CLI 手册」按钮打开的就是它 ⇒ 漏了按钮就报"没找到"；
  *  · `THIRD-PARTY.md` —— 第三方组件（音色库 / WebView2 / Tauri / QuickJS…）的署名与许可说明。
- * 三者都是**资源映射**（`bundle.resources`）⇒ 判定要**两边一起看**：
+ * 两者都是**资源映射**（`bundle.resources`）⇒ 判定要**两边一起看**：
  *  ① 打包配置里有这条映射（源 → 目标）；② 生成的 `installer.nsi` 里真有那行 `File /oname=…`。
  * 每条都带**负对照**：把映射从 conf 删掉 / 把 nsi 里那行删掉 ⇒ 同一判据必须**判红** ✓
  * （证明它真的在读配置与清单，而不是恒真 ✗）。
+ *
+ * ⚠ adj957（用户裁定）：**原先这里还有一条 `docs/iJipu-CLI-手册.md`，已删除**。
+ * 用户口径是「那几份 MD 不必随包分发」——命令行手册改走**应用内 `DocDialog`**
+ * （与操作手册/语法说明同路），于是随包 MD、`src-tauri/src/cli_manual.rs`、
+ * `tauri.conf.json` 的这条映射**一并撤掉**（三处同源，缺一处就会露出"找不到文件"）。
  */
 const DOCS_REQUIRED = [
   ['LICENSE（AGPL-3.0 全文，落在安装目录根）', /File\s+\/a\s+"\/oname=LICENSE"/, '../LICENSE', 'LICENSE'],
-  [
-    'CLI 使用手册（落在安装目录 docs/）',
-    /File\s+\/a\s+"\/oname=docs[\\/]iJipu-CLI-手册\.md"/,
-    '../docs/CLI-手册.md',
-    'docs/iJipu-CLI-手册.md',
-  ],
   ['THIRD-PARTY.md（第三方组件与许可，落在安装目录根）', /File\s+\/a\s+"\/oname=THIRD-PARTY\.md"/, '../THIRD-PARTY.md', 'THIRD-PARTY.md'],
   /**
    * adj946（用户实报）：**命令行入口垫片** `bin\ijipu.cmd`。
@@ -82,11 +79,11 @@ const DOCS_REQUIRED = [
   ],
 ]
 
-/** 这三份文档的**仓库源文件**也要在（源没了安装包里自然也没有） */
+/** 这两份文档的**仓库源文件**也要在（源没了安装包里自然也没有）
+ *  adj957：`docs/CLI-手册.md` 那条已移除（不再随包分发；命令行手册走应用内 DocDialog）。 */
 const DOC_SOURCES = [
   ['LICENSE（仓库根，AGPL-3.0 全文）', 'LICENSE', 30_000],
   ['THIRD-PARTY.md（仓库根）', 'THIRD-PARTY.md', 2_000],
-  ['docs/CLI-手册.md（仓库里那份＝**单一真源**，直接映射进安装包，不复制）', 'docs/CLI-手册.md', 8_000],
   [
     'resources/bin/ijipu.cmd（仓库里那份＝**单一真源**，直接映射进安装包，不复制）',
     'resources/bin/ijipu.cmd',
@@ -156,14 +153,15 @@ for (const [label, path, minBytes] of SOURCES) {
 }
 
 /**
- * adj945：**随包进安装目录的三份文档** + 每条判据的**负对照**（见上方 `DOCS_REQUIRED` 的说明）。
+ * adj945：**随包进安装目录的文档** + 每条判据的**负对照**（见上方 `DOCS_REQUIRED` 的说明）。
+ * adj957：CLI 手册那条已撤（不再随包分发，见 `DOCS_REQUIRED` 的说明）。
  */
-console.log('[check-installer] 随包文件（adj945：LICENSE / CLI 手册 / THIRD-PARTY.md；adj946：命令行入口垫片 bin/ijipu.cmd）自检：')
+console.log('[check-installer] 随包文件（adj945：LICENSE / THIRD-PARTY.md；adj946：命令行入口垫片 bin/ijipu.cmd）自检：')
 {
   const confPath = 'src-tauri/tauri.conf.json'
   const conf = JSON.parse(readFileSync(confPath, 'utf8'))
   const res = conf.bundle?.resources ?? {}
-  /** 反斜杠统一成 `/`：conf 里写 `../docs/CLI-手册.md`、nsi 里写 `docs\…`，比较时不能各算一套 */
+  /** 反斜杠统一成 `/`：conf 里写 `../LICENSE`、nsi 里写 `LICENSE`，比较时不能各算一套 */
   const norm = (p) => String(p).split('\\').join('/')
   const confHas = (map, source, target) =>
     Object.entries(map).some(([s, t]) => norm(s).endsWith(source) && norm(t) === norm(target))

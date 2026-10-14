@@ -38,7 +38,7 @@ whenToUse: 仅当一次改动需要走完整发布链（判版本 → 文档 →
 | **OP-02** | 判定版本 | 看内容大小定 MAJOR/MINOR/PATCH（拿不准偏 MINOR）；**三处独立判**：应用版本、引擎包版本、插件版本 | 版本号写进后续所有文件前先定死 |
 | **OP-03** | 同步文档 | ① `CHANGELOG.md` 顶部当版条目（新增/变更/修复/清理，带 `adjNN`）；② `docs/ERRORS-LOG.md` 排错条目 `E-年份-序号`（现象/根因/解决/验证/预防）+ **末尾「变更记录」表追加一行**；③ 语法/口径变更 → `docs/SYNTAX.md`；④ 设置分层 → `docs/SETTINGS-AUDIT.md`；⑤ 流程规则 → `docs/VERSIONING.md` | 条目编号连续；表行与 CHANGELOG 口径一致 |
 | **OP-04** | 同步版本号 | **应用 5 处**：`src/brand/version.ts`（`APP_VERSION`）、`package.json`、`src-tauri/tauri.conf.json`、`package-lock.json`（顶层 + `packages[""]`）；**CLI 1 处**：`packages/ijipu-cli/package.json`（adj874 起：CLI 是独立发布的 Node 包，版本与应用一致；漏改会被 `cli-assert` 的 `adj874` 闸门拦住 ✓）；**引擎 1 处**：`packages/ijipu-engine/package.json` | `Select-String` 一次性列出全部命中，确认无遗漏、无旧值残留 |
-| **OP-05** | 验证门 | `npx tsc -b` → `npm run lint`（0 error）→ `npm run build` → `npm run smoke` | **smoke 必须 `ALL SMOKE TESTS PASSED`**；lint warning 数 == 基线（新增 warning 要处理） |
+| **OP-05** | 验证门 | `npx tsc -b` → `npm run lint`（0 error）→ `npm run build` → `npm run smoke` →（**改动涉及应用内 UI 时**）`npm run verify:app-ui` | **smoke 必须 `ALL SMOKE TESTS PASSED`**；lint warning 数 == 基线（新增 warning 要处理）；**UI 改动要真点一遍**（`adj959` 立的规：源码级判据守不住"事件挂错地方"，见该脚本文件头） |
 | **OP-06** | 提交 | 分**两个**提交（推荐）：① 改动批量 `fix(adjNNN-adjMMM): …`（代码+图标+相关文档）② `chore(release): x.y.z（…）`（版本号 + CHANGELOG + ERRORS-LOG）。信息先 `write` 到仓库外文件（如 `.ui-preview/commit1.txt`），再 `git commit -F <file>` | `git log --oneline -2`；`git show --stat` 核对文件集 |
 | **OP-07** | tag + 推送 | `git tag v<x.y.z>` → `git push origin main` → `git push origin v<x.y.z>` | `git rev-parse HEAD == origin/main`；`git ls-remote --tags origin \| grep v<x.y.z>` |
 | **OP-08** | 桌面打包 | **先建内嵌 CLI 产物**：`npm run cli:embed`（adj942 —— `ijipu.exe` 用 `include_bytes!` 把它编进去，**缺文件会直接编不过**；`npm run build` 里也串了一份，二者等价）→ `. .\scripts\tauri-env.ps1` → `npx tauri build`（**耗时数分钟，用后台任务**） | 产出 `src-tauri/target/release/bundle/nsis/iJipu_<x.y.z>_x64-setup.exe`；`packages/ijipu-cli/dist/ijipu-embed.js` 存在且**比 exe 旧**；`[stamp-sw] … v<x.y.z>` 且 commit 号 == 发布提交 |
@@ -164,7 +164,7 @@ Get-ChildItem $src -Recurse -File | ForEach-Object {
 - [ ] OP-02 版本幅度符合 SemVer；引擎包/插件版本**各自独立**判定
 - [ ] OP-03 CHANGELOG 当版条目 + ERRORS-LOG 条目与**变更记录表行**齐备；口径类改动同步 SYNTAX/SETTINGS-AUDIT/VERSIONING
 - [ ] OP-04 应用 5 处 + **CLI 1 处** + 引擎 1 处版本号全部命中、无旧值残留（`cli-assert` 的 `adj874` 会兜底拦一次 ✓）
-- [ ] OP-05 `tsc -b` / `lint` 0 error / `build` / **`smoke` 0 失败** 全绿
+- [ ] OP-05 `tsc -b` / `lint` 0 error / `build` / **`smoke` 0 失败** 全绿；**涉应用内 UI 改动时另跑 `npm run verify:app-ui`（真点，`adj959` 起）**
 - [ ] OP-06 提交信息 Conventional + `adjNN`；中文经 UTF-8 文件传入
 - [ ] OP-07 tag 打在发布提交上；分支与 tag 均已推送
 - [ ] OP-08/09 安装包版本号与三处一致；`check:installer 全部通过`（含内嵌 CLI 三条：产物不是占位 / exe 里有 `__ijipuCliMain`+`__ijipuHost` / exe 不比产物旧；**+ adj944 的 PATH 卸载解除那组**：`un.` 函数齐全 / include 与 `!insertmacro` 都在 / `$UpdateMode` 保护 / 两个 `.nsh` 带 UTF-8 BOM）

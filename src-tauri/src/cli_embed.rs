@@ -33,7 +33,7 @@
  * `render -t png|jpg|pdf`、`play -t wav`、`lint --watch` 会**如实报错**（退出码 4 / 1），
  * 与"独立 Node 环境"完全同一口径 —— 能力通道的接线是另一批（`cli_host.rs` 的文件头有说明）。
  */
-use rquickjs::{Context, Ctx, Exception, FromJs, Function, Object, Runtime, Value};
+use rquickjs::{Array, Context, Ctx, Exception, FromJs, Function, Object, Runtime, Value};
 use std::ffi::OsString;
 use std::path::Path;
 
@@ -346,16 +346,37 @@ fn build_host<'js>(ctx: &Ctx<'js>, argv: &[String]) -> rquickjs::Result<Object<'
         "listDir",
         Function::new(
             ctx.clone(),
-            |ctx: Ctx<'js>, dir: String| -> rquickjs::Result<Vec<String>> {
+            |ctx: Ctx<'js>, dir: String| -> rquickjs::Result<Array<'js>> {
                 let rd = std::fs::read_dir(&dir)
                     .map_err(|e| Exception::throw_message(&ctx, &format!("读目录失败 {dir}：{e}")))?;
-                // 与 node 入口同口径：只回文件名，且排序（可复现 ✓）
-                let mut names: Vec<String> = rd
+                /*
+                 * adj956：回 `{ name, dir }[]`（与 node 入口、`EmbedHost` 类型同口径）。
+                 *
+                 * 为什么不再回纯字符串数组：`batch` / `lint -i <目录>` 的 `-r` 要下钻子目录，
+                 * 而"只有名字"分不出哪个是目录 ✗。这里用一次 `read_dir` 的 `file_type()` 就给全，
+                 * 不必再额外 `stat`。
+                 * `file_type()` 失败（极少见）按"不是目录"处理 —— 那样只会少扫一层，不会崩 ✓。
+                 *
+                 * ⚠ 用 `/* */` 而不是 `/** */`：Rust 的**文档注释**只能挂在条目上，
+                 *   写在语句前面会报 `unused doc comment` 警告（我第一版就是这么写的）。
+                 */
+                let mut items: Vec<(String, bool)> = rd
                     .flatten()
-                    .filter_map(|e| e.file_name().into_string().ok())
+                    .filter_map(|e| {
+                        let name = e.file_name().into_string().ok()?;
+                        let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                        Some((name, is_dir))
+                    })
                     .collect();
-                names.sort();
-                Ok(names)
+                items.sort();
+                let arr = Array::new(ctx.clone())?;
+                for (i, (name, is_dir)) in items.into_iter().enumerate() {
+                    let o = Object::new(ctx.clone())?;
+                    o.set("name", name)?;
+                    o.set("dir", is_dir)?;
+                    arr.set(i, o)?;
+                }
+                Ok(arr)
             },
         ),
     )?;

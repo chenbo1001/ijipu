@@ -34,8 +34,13 @@ export type EmbedHost = {
   writeFile(path: string, text: string): void
   /** 写二进制文件（MIDI/PNG…；base64 —— 跨语言只传字符串最稳） */
   writeFileBinary(path: string, base64: string): void
-  /** 列目录（只回文件名，`batch` 用） */
-  listDir(dir: string): string[]
+  /**
+   * 列目录（**一层**；adj956 起每项是 `{ name, dir }`）。
+   *
+   * 为什么要带 `dir`：`batch` / `lint -i <目录>` 的 `-r` 要下钻子目录，
+   * 而"只有名字"分不出哪个是目录 ✗。宿主用一次 `read_dir` + `file_type()` 就能给全。
+   */
+  listDir(dir: string): { name: string; dir: boolean }[]
   /** 文件/目录是否存在 */
   exists(path: string): boolean
   /**

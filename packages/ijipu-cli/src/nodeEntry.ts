@@ -57,9 +57,14 @@ const io: CliIo = {
     else await writeFile(p, data)
   },
   async listDir(dir) {
-    // 供 `batch` 用；只回文件名（不含路径），排序保证可复现
-    const names = await readdir(dir)
-    return names.sort()
+    /**
+     * adj956：回 `{ name, dir }[]`（不再是纯文件名）。
+     * `-r` 递归要靠 `dir` 分目录；只回一层、按名字排序（顺序可复现 ⇒ 输出能逐字节比对 ✓）。
+     */
+    const entries = await readdir(dir, { withFileTypes: true })
+    return entries
+      .map((e) => ({ name: e.name, dir: e.isDirectory() }))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
   },
   exists: async (p) => {
     try {

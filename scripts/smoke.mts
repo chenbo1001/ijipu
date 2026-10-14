@@ -12918,10 +12918,15 @@ function runAdj530TopBarLayoutTests() {
       !/openModal\('pageConfig'\)/.test(topCode),
     '')
   // ③ `ModalKind` 只留**真的有渲染分支**的模态——防止同类死调用再次通过类型检查。
-  check('adj563 `ModalKind` 已收窄为仍有渲染分支的 6 种（about/pageConfig/playback/export 四个残留已删）',
-    /export type ModalKind = 'samples' \| 'shortcuts' \| 'manual' \| 'syntax' \| 'donate' \| 'voicePicker'/.test(
+  //    adj957：加上 `'cli'`（命令行手册改用应用内 DocDialog）⇒ 现在是 7 种，且 App.tsx 里
+  //    必须真的有 `modal === 'cli'` 的渲染分支（下面那条断言就是管这个的），否则又变成死调用。
+  check('adj563 `ModalKind` 已收窄为仍有渲染分支的 7 种（about/pageConfig/playback/export 四个残留已删；adj957 加 cli）',
+    /export type ModalKind = 'samples' \| 'shortcuts' \| 'manual' \| 'syntax' \| 'cli' \| 'donate' \| 'voicePicker'/.test(
       String(readFileSync('src/store/uiStore.ts', 'utf8')),
-    ),
+    ) &&
+      /modal === 'cli' && <Suspense fallback=\{null\}><DocDialog kind="cli" \/>/.test(
+        String(readFileSync('src/App.tsx', 'utf8')),
+      ),
     '')
   // ④ Ctrl+Q 是真快捷键（菜单上印着），原先 `openModal('playback')` 同样是死的 ⇒ 改为开关试听底栏。
   {
@@ -13441,8 +13446,11 @@ async function runAdj540WorkspaceTests() {
       /workspaceSaveIntent/.test(String(readFileSync('src/store/uiStore.ts', 'utf8'))) &&
       /clearWorkspaceSaveIntent\(\)/.test(panelSrc),
     '')
-  check('adj540 「手机端」判据只有一处（pick 策略与打开/另存为分流共用 saveSupport.isCoarsePointerDevice）',
-    /export function isCoarsePointerDevice/.test(String(readFileSync('src/store/saveSupport.ts', 'utf8'))) &&
+  // adj954：「手机端」判据（`isCoarsePointerDevice`）**迁到 `brand/env.ts`**（运行环境判定的唯一出处）。
+  // 判据本身要与原来等价，只是一处定义 —— 所以现在查的是"env 里导出它、saveSupport 里不再有第二份"。
+  check('adj540/adj954 「手机端」判据只有一处（现在定义在 brand/env.ts，pick 策略与打开/另存为分流共用它）',
+    /export function isCoarsePointerDevice/.test(String(readFileSync('src/brand/env.ts', 'utf8'))) &&
+      !/export function isCoarsePointerDevice/.test(String(readFileSync('src/store/saveSupport.ts', 'utf8'))) &&
       !/function isCoarsePointer\(/.test(store) &&
       /shouldUseFileInputPicker\(isCoarsePointerDevice\(\)/.test(store),
     '')
@@ -15290,8 +15298,8 @@ function runAdj617Tests() {
   const scSrc = String(readFileSync('src/dialogs/ShortcutsDialog.tsx', 'utf8'))
 
   check(
-    'adj617/adj724b 菜单项 kbd 角标改引 `KBD.*`（新建/保存/导入/工作区/试听/导出/打印）',
-    /entryNew: MenuEntry = \{ label: '新建\(&N\)', kbd: KBD\.newDoc/.test(topSrc) &&
+    'adj617/adj724b 菜单项 kbd 角标改引 `KBD.*`（新建/保存/导入/工作区/试听/导出/打印；adj954 起「新建」走 newDocKbd() 现算）',
+    /entryNew: MenuEntry = \{ label: '新建\(&N\)', kbd: newDocKbd\(\)/.test(topSrc) &&
       /entrySave: MenuEntry = \{ label: '保存\(&S\)', kbd: KBD\.save/.test(topSrc) &&
       /entryPaste: MenuEntry = \{ label: pasteImportCopy\.menuLabel, kbd: KBD\.import/.test(topSrc) &&
       // adj724b：`entryWorkspace` 改为多行（新增 `hidden: isHostEmbedded()`）⇒ 判据放宽为"多行内的该字段"
@@ -15332,8 +15340,8 @@ function runAdj617Tests() {
     '',
   )
   check(
-    'adj617 速查表键名列也引 `KBD.*`（与提示文本同源，不会出现"菜单写 Ctrl+B、速查表写 Ctrl+I"）',
-    /\[KBD\.newDoc, '新建'\]/.test(scSrc) &&
+    'adj617 速查表键名列也引 `shortcuts.ts`（与提示文本同源，不会出现"菜单写 Ctrl+B、速查表写 Ctrl+I"；adj954 起「新建」走 newDocKbd()）',
+    /\[newDocKbd\(\), '新建'\]/.test(scSrc) &&
       /\[KBD\.guides, '排版辅助虚线开关'\]/.test(scSrc) &&
       /\[KBD\.workspace, '工作区开关'\]/.test(scSrc) &&
       /\[KBD\.import, '导入开关'\]/.test(scSrc) &&
@@ -15877,10 +15885,29 @@ function runAdj603Tests() {
     '',
   )
   check(
-    'adj603 子页签按 section 分组：全局=版面/主题/音色库，谱面=布局/字体（改名到位）',
+    'adj603/adj955 子页签按 section 分组且按"能不能用"过滤：全局=版面/主题/音色库(+桌面端才有的命令行)，谱面=布局/字体',
     /\{ id: 'global', label: '版面', icon: '⚙', section: 'global' \}/.test(cfgSrc) &&
       /\{ id: 'score', label: '布局', icon: '▤', section: 'score' \}/.test(cfgSrc) &&
-      /ALL_TABS\.filter\(\(t\) => t\.section === section\)/.test(cfgSrc),
+      // adj955：过滤走 `visibleTabs()`（函数、运行时求值），非桌面端把 `cli` 整条摘掉
+      /function visibleTabs\(section: SettingsSection\)/.test(cfgSrc) &&
+      /t\.id !== 'cli' \|\| isDesktopShell\(\)/.test(cfgSrc) &&
+      /const TABS = visibleTabs\(section\)/.test(cfgSrc),
+    '',
+  )
+  /**
+   * adj955（用户要求）：**非桌面端连「命令行」子页签都不出现**。
+   *
+   * 用户原话：「CLI 只对于桌面端有效，因此全局设置下的命令行设置组在非桌面端时连显示都不应该显示，
+   * 完全没用呀！」——判据要**可判假**：把过滤去掉（退回裸 `ALL_TABS.filter(section)`）⇒ 必须判红。
+   */
+  check(
+    'adj955 非桌面端隐藏「命令行」子页签：默认页签与「跳到某页签」的意图也一并走同一个过滤器',
+    // 默认子页签不能把 cli 选出来
+    /useState<TabId>\(\(\) => visibleTabs\(section\)\[0\]\?\.id \?\? 'global'\)/.test(cfgSrc) &&
+      // 意图守卫也要用可见列表（否则网页版会 setTab 到一个不存在于 TABS 的页签）
+      /if \(!visibleTabs\(section\)\.some\(\(t\) => t\.id === settingsTabRequest && t\.section === section\)\) return/.test(cfgSrc) &&
+      // 负对照：过滤条件一旦退回"只按 section"，同一判据必须为假
+      !/const TABS = ALL_TABS\.filter/.test(cfgSrc),
     '',
   )
   check(
@@ -22766,8 +22793,22 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     const cliManualImgs = Array.from(cliManualMd.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)).map((m) => m[1])
     const cliManualHtml = mdToHtml(cliManualMd)
     const notRendered = cliManualImgs.filter((p) => !cliManualHtml.includes(`<img src="${p}"`))
-    check(`adj949 真实文档 \`docs/CLI-手册.md\` 里的 ${cliManualImgs.length} 张图都渲染成了 \`<img>\`（不是只认玩具用例）`,
-      cliManualImgs.length >= 1 && notRendered.length === 0, notRendered.join(' '))
+    /**
+     * adj957（用户裁定 "删掉"）：手册里那张"自己网页的截图"已删 ⇒ 现在是 **0 张图**。
+     * 判据从"至少 1 张"改成"**引用了就都得渲染成 `<img>`**"；空跑问题由下面的负对照兜住
+     * （把渲染结果里的 `<img` 全抹掉 ⇒ 每个路径都该被判为"没渲染"）。
+     */
+    const fakeMd = `${cliManualMd}\n![假的](/docs/cli/__nope__.png)\n`
+    const fakePaths = Array.from(fakeMd.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)).map((m) => m[1])
+    const fakeHtml = mdToHtml(fakeMd)
+    check(
+      `adj949/adj957 真实文档 \`docs/CLI-手册.md\` 里的 ${cliManualImgs.length} 张图都渲染成了 \`<img>\`（现 0 张；以后加图自动被守住）`,
+      notRendered.length === 0 &&
+        fakePaths.length === cliManualImgs.length + 1 &&
+        fakePaths.filter((p) => !fakeHtml.includes(`<img src="${p}"`)).length === 0 &&
+        fakePaths.filter((p) => !fakeHtml.replace(/<img /g, '<X ').includes(`<img src="${p}"`)).length === fakePaths.length,
+      notRendered.join(' '),
+    )
   }
 
   /**
@@ -24881,48 +24922,59 @@ function runAdj945CliManualTests() {
     codeChanged !== exitTable && exitCodes.includes(4) && !tableHasCode(codeChanged, 4) && tableHasCode(exitTable, 4),
   )
 
-  // ---- ④ 随包分发：三份文件必须在 `bundle.resources` 里，且与 Rust 侧打开的路径一致 ----
+  // ---- ④ 随包分发：LICENSE / THIRD-PARTY.md 必须在；**命令行手册已不随包**（adj957）----
   const conf = JSON.parse(readOrEmpty('src-tauri/tauri.conf.json')) as { bundle: { resources: Record<string, string> } }
   const res = conf.bundle.resources
   const resHas = (source: string, target: string): boolean =>
     Object.entries(res).some(([s, t]) => s.split('\\').join('/').endsWith(source) && t === target)
   check('adj945 conf：`../LICENSE` → 安装目录根 `LICENSE`（AGPL-3.0 全文随包）', resHas('../LICENSE', 'LICENSE'))
   check('adj945 conf：`../THIRD-PARTY.md` → 安装目录根 `THIRD-PARTY.md`', resHas('../THIRD-PARTY.md', 'THIRD-PARTY.md'))
+  /**
+   * adj957（**用户裁定**）：命令行手册**不再随包分发**。
+   *
+   * 由来：用户看过"安装目录那份 MD 与应用内手册其实是同一份内容"之后的口径是
+   * 「那几份 MD 不必随包分发」+「桌面端、插件都指定相对路径，网站自然是在线文档」。
+   * 于是命令行手册与操作手册/语法说明同路 —— 走**应用内 `DocDialog`**（`kind: 'cli'`）。
+   *
+   * 为什么仍然要机器守住**"不存在"**：撤得不干净就会留下三处半截状态，而且症状都很隐蔽：
+   *   · conf 里那条映射还在 ⇒ 安装包里白多一份永远没人打开的 MD（"两处维护同一份文档"回来了）；
+   *   · `cli_manual.rs` / `invoke_handler` 里的注册还在 ⇒ 多一条没人调的 Rust 命令；
+   *   · 设置里那个按钮还在 ⇒ 点了走"系统默认程序打开 .md"，而 Windows **默认没有 .md 关联程序**。
+   * 三条各配一条"它要是回来了就该判红"的负对照（判据不是恒真）。
+   */
   check(
-    `adj945 conf：\`../docs/CLI-手册.md\` → \`${MANUAL_TARGET}\`（**直接映射仓库里那份，不复制、不两处维护**）`,
-    resHas('../docs/CLI-手册.md', MANUAL_TARGET),
-  )
-  const resNoManual = Object.fromEntries(Object.entries(res).filter(([, t]) => t !== MANUAL_TARGET))
-  check(
-    'adj945 负对照⑤：把 conf 里手册那条映射删掉（＝安装包里没这份文件）⇒ 判据判红',
-    Object.keys(resNoManual).length === Object.keys(res).length - 1 &&
-      !Object.values(resNoManual).includes(MANUAL_TARGET) && resHas('../docs/CLI-手册.md', MANUAL_TARGET),
-  )
-  const rustManual = readOrEmpty('src-tauri/src/cli_manual.rs')
-  const rustRel = rustManual.match(/pub const CLI_MANUAL_REL: &str = "([^"]+)"/)?.[1] ?? ''
-  check(
-    `adj945 Rust 侧打开手册的相对路径与打包目标**逐字**一致（${rustRel}）`,
-    rustRel !== '' && rustRel === MANUAL_TARGET,
-  )
-  check(
-    'adj945 负对照⑥：把 Rust 那个常量改成别的路径（＝两处不一致，按钮会报"没找到"）⇒ 判据判红',
-    (() => {
-      const fake = rustManual.split(rustRel).join('docs/CLI-manual.md')
-      const fakeRel = fake.match(/pub const CLI_MANUAL_REL: &str = "([^"]+)"/)?.[1] ?? ''
-      return rustManual.includes('CLI_MANUAL_REL') && fake !== rustManual && fakeRel !== MANUAL_TARGET && rustRel === MANUAL_TARGET
-    })(),
-  )
-  const libRs = readOrEmpty('src-tauri/src/lib.rs')
-  check(
-    'adj945 Rust 命令已接线（`mod cli_manual;` + `invoke_handler` 里有 `cli_manual::cli_manual_open`）',
-    libRs.includes('mod cli_manual;') && libRs.includes('cli_manual::cli_manual_open'),
+    'adj957 命令行手册**不再随包**（conf 里没有 `docs/iJipu-CLI-手册.md` 这条目标）',
+    !Object.values(res).some((t) => t === MANUAL_TARGET) && resHas('../LICENSE', 'LICENSE'),
   )
   check(
-    'adj945 负对照⑦：把 `cli_manual::cli_manual_open` 从 invoke_handler 删掉（＝前端永远调不到）⇒ 判据判红',
-    (() => {
-      const cut = libRs.split('cli_manual::cli_manual_open').join('')
-      return cut !== libRs && !cut.includes('cli_manual::cli_manual_open')
-    })(),
+    'adj957 负对照⑭：把那条映射塞回 conf（＝又在两处维护同一份文档）⇒ 同一判据判红',
+    !resHas('../docs/CLI-手册.md', MANUAL_TARGET) &&
+      Object.entries({ ...res, '../docs/CLI-手册.md': MANUAL_TARGET }).some(
+        ([s, t]) => s.split('\\').join('/').endsWith('../docs/CLI-手册.md') && t === MANUAL_TARGET,
+      ),
+  )
+  check(
+    'adj957 Rust 侧 `cli_manual.rs` 已删除（那条"用系统默认程序打开安装目录 MD"的路没了）',
+    !existsSync(join(root, 'src-tauri/src/cli_manual.rs')),
+  )
+  {
+    const libRs = readOrEmpty('src-tauri/src/lib.rs')
+    /** Rust 注释也要先去掉 —— 撤掉之后我们**在注释里说明了撤掉什么**，不去注释就会误判成"还在" ✗ */
+    const libCode = libRs.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    check(
+      'adj957 `mod cli_manual;` 与 `invoke_handler` 里的 `cli_manual_open` 都已摘掉',
+      !libCode.includes('mod cli_manual;') &&
+        !libCode.includes('cli_manual::cli_manual_open') &&
+        libCode.includes('cli_path::cli_path_unregister'),
+    )
+    check(
+      'adj957 负对照⑮：把 `mod cli_manual;` 塞回 lib.rs（＝模块没了还挂着注册）⇒ 同一判据判红',
+      !libCode.includes('mod cli_manual;') && `${libCode}\nmod cli_manual;\n`.includes('mod cli_manual;'),
+    )
+  }
+  check(
+    'adj957 负对照⑯：仓库里确实**没有**那份随包改名后的 MD（`docs/iJipu-CLI-手册.md` 只是打包目标名，不该出现在仓库里）',
+    !existsSync(join(root, 'docs/iJipu-CLI-手册.md')),
   )
 
   // ---- ⑤ THIRD-PARTY.md：随包分发的第三方内容与署名必须真的写到 ----
@@ -24971,28 +25023,116 @@ function runAdj945CliManualTests() {
   const dialog = readOrEmpty('src/dialogs/PageConfigDialog.tsx')
   const store = readOrEmpty('src/store/cliPath.ts')
   const copyTs = readOrEmpty('src/brand/copy.ts')
-  check(
-    'adj945 设置「命令行」页签有「查看 CLI 手册」按钮（文案取 `cliPathCopy.manualButton`、动作走 `onOpenCliManual`）',
-    dialog.includes("case 'cli':") && dialog.includes('cliPathCopy.manualButton') && dialog.includes('onOpenCliManual'),
-  )
   /**
    * 只用于"组件里有没有硬编码文案"这条判据：**先把注释去掉** ——
    * 注释里提一句按钮名不算硬编码（判据要盯的是**会被渲染出来的字面量** ✓）。
    */
   const stripTsComments = (src: string): string => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
   const hardcodedManual = (src: string): boolean => stripTsComments(src).includes('查看 CLI 手册')
+  /** adj958：「目录」这个字面量不许出现在组件正文里（文案只在 `brand/copy.ts` 的 `docCopy`） */
+  const hardcodedToc = (src: string): boolean => stripTsComments(src).includes("'目录'")
+  /**
+   * adj957（用户裁定）：设置「命令行」页签里那个「查看 CLI 手册」按钮**已撤**。
+   *
+   * 撤它的理由（写在这里，免得以后有人"顺手加回来"）：
+   *  ① 它走的是"用系统默认程序打开安装目录里的 `.md`"，而 Windows **默认没有 `.md` 关联程序**
+   *     ⇒ 多数机器上会弹「你要如何打开此文件」；
+   *  ② 命令行手册现在与操作手册/语法说明同路（应用内 `DocDialog`）⇒ 三本手册的开法终于一致。
+   * 这条判据同时管三处：组件正文、`brand/copy.ts` 的文案、`store/cliPath.ts` 的 `cli_manual_open`。
+   */
   check(
-    'adj945 界面文案不硬编码：组件正文里没有「查看 CLI 手册」这个字面量（只在 `brand/copy.ts`）',
-    !hardcodedManual(dialog) && copyTs.includes("manualButton: '查看 CLI 手册'"),
+    'adj957 设置里那个「查看 CLI 手册」按钮已撤干净（组件正文 / copy.ts 文案 / cliPath 的 invoke 三处都没有）',
+    !hardcodedManual(dialog) &&
+      // copy.ts 里同样要先去掉注释（我们在注释里记了"原先那几个键已删"）
+      !stripTsComments(copyTs).includes('manualButton') &&
+      !stripTsComments(store).includes('cli_manual_open'),
   )
   check(
-    'adj945 负对照⑩：把该文案写进组件（`const cliManualLabel = \'查看 CLI 手册\'`）⇒ 判据判红（证明它真的在查组件）',
+    'adj957 负对照⑰：把该文案塞回组件（`const cliManualLabel = \'查看 CLI 手册\'`）⇒ 判据判红（证明它真的在查组件正文）',
     hardcodedManual(`${dialog}\nconst cliManualLabel = '查看 CLI 手册'\n`) && !hardcodedManual(dialog),
   )
-  check(
-    'adj945 打开动作走我们自己的 Rust 命令（`cli_manual_open`），**不是**前端直调 opener 的 `open_path`（会被 scope 拒且静默）',
-    store.includes("invoke('cli_manual_open')") && !store.includes('plugin:opener|open_path'),
-  )
+  /** ---- ⑨ adj957：命令行手册的**新出口** —— 帮助菜单 + `DocDialog`（与另外两本同路）---- */
+  {
+    const topbar = readOrEmpty('src/ui/TopBar.tsx')
+    const doc = readOrEmpty('src/dialogs/DocDialog.tsx')
+    const app = readOrEmpty('src/App.tsx')
+    /** 帮助菜单里那条「命令行手册」的**完整写法**（负对照就是把它改坏） */
+    const CLI_MENU = /label: '命令行手册\(&C\)', hotkey: 'c', onPick: \(\) => openModal\('cli'\) \}/
+    check("adj957 帮助菜单里有「命令行手册」，走 `openModal('cli')`", CLI_MENU.test(topbar))
+    check(
+      'adj957 `DocDialog` 收了命令行手册（`cli` 一种 + 引的是同一份 `docs/CLI-手册.md`）',
+      /cli: \{ title: '命令行手册', md: cliMd \}/.test(doc) &&
+        /import cliMd from '\.\.\/\.\.\/docs\/CLI-手册\.md\?raw'/.test(doc),
+    )
+    check(
+      "adj957 `App.tsx` 有 `modal === 'cli'` 的渲染分支（不是一个点不动的菜单项）",
+      /modal === 'cli' && <Suspense fallback=\{null\}><DocDialog kind="cli" \/>/.test(app),
+    )
+    check(
+      "adj957 负对照⑱：把菜单项改成指向 `manual`（＝命令行手册点到操作手册上）或删掉渲染分支 ⇒ 判据判红",
+      CLI_MENU.test(topbar.replace("openModal('cli')", "openModal('manual')")) === false &&
+        /modal === 'cli' && <Suspense fallback=\{null\}><DocDialog kind="cli" \/>/.test(
+          app.replace(`modal === 'cli' && <Suspense fallback={null}><DocDialog kind="cli" /></Suspense>`, ''),
+        ) === false &&
+        CLI_MENU.test(topbar),
+    )
+    /**
+     * adj958（用户要求）：应用内帮助对话框标题栏上的「目录」按钮。
+     * 判据同时盯三件事：目录数据与正文标题**同源**（`extractToc` + `mdToHtml` 同一套 id）、
+     * 文案走 `docCopy`（组件里不写字面量）、`Modal` 只提供 `headExtra` 插槽（不掺文档逻辑）。
+     */
+    const modal = readOrEmpty('src/ui/Modal.tsx')
+    check(
+      'adj958 `Modal` 提供 `headExtra` 插槽（通用组件不掺文档业务逻辑）',
+      /headExtra\?: ReactNode/.test(modal) &&
+        /<span className="modal-head-actions">\s*\{headExtra\}/.test(modal),
+    )
+    check(
+      'adj958 帮助对话框有「目录」按钮：目录条目取自 `extractToc`（与正文标题 id 同源），文案取 `docCopy`',
+      /import \{ extractToc, mdToHtml \} from '\.\.\/help\/markdown'/.test(doc) &&
+        /extractToc\(md\)/.test(doc) &&
+        /docCopy\.tocButton/.test(doc) &&
+        /const headExtra = \(/.test(doc) &&
+        !stripTsComments(doc).includes("'目录'"),
+    )
+    check(
+      'adj958 负对照⑲：把目录数据换成"自己算一遍标题"（不走 `extractToc`）⇒ 判据判红；文案硬编码进组件亦判红',
+      // ⚠ 先去掉注释再替换：文件头注释里也写了 `extractToc(md)`，
+      //   不先去注释的话 `replace` 只换掉注释里那一处，代码里那处仍在 ⇒ 判据恒真 ✗
+      !/extractToc\(md\)/.test(stripTsComments(doc).replace('extractToc(md)', 'myOwnToc(md)')) &&
+        /extractToc\(md\)/.test(stripTsComments(doc)) &&
+        hardcodedToc(doc) === false &&
+        hardcodedToc(`${doc}\nconst tocLabel = '目录'\n`) === true,
+    )
+    /**
+     * adj959（**用户实报**）：「手册的目录打开后，点击其它地方，菜单不会隐藏」——
+     * 查它时发现同一处还藏着第二个：**点目录条目根本不跳**。两个都是"事件挂错了地方"，
+     * 而这类错**光看代码看不出来**（代码里确实"挂了个监听"）⇒ 值得机器守住这两条结构性事实：
+     *
+     *  ① **点别处能关** ⇒ 监听必须注册在**捕获阶段**。`ui/Modal.tsx` 给 `.modal` 挂了
+     *     `onClick={(e) => e.stopPropagation()}`（点框内不该关掉对话框），而 React 的
+     *     `stopPropagation()` **会连带调用原生那次** ⇒ 冒泡阶段挂在 `document` 上的监听
+     *     对"框内点击"永远收不到。
+     *  ② **点条目能跳** ⇒ 跳转处理器不能挂在 `.doc-content` 上（目录浮层是它的**兄弟节点**，
+     *     浮层里的点击不会冒泡到它 ⇒ 委托收不到）。
+     *
+     * 两条各自配一个"把源码改回修复前写法 ⇒ 判据判红"的负对照。
+     */
+    {
+      const CAPTURE_OK = (src: string): boolean =>
+        /document\.addEventListener\('click', onDocClickCapture, true\)/.test(src) &&
+        /document\.removeEventListener\('click', onDocClickCapture, true\)/.test(src)
+      const NAV_OK = (src: string): boolean => /<nav className="doc-toc-pop"[^>]*onClick=\{onTocPick\}/.test(src)
+      check(
+        'adj959 「点别处关掉目录」的监听在**捕获阶段**（冒泡阶段会被 Modal 的 stopPropagation 掐断）',
+        CAPTURE_OK(doc) && !CAPTURE_OK(doc.replace(', true)', ')')) && !/document\.addEventListener\('click', onDocClick\b/.test(doc),
+      )
+      check(
+        'adj959 「点目录条目跳转」挂在 `<nav>` 自己身上（浮层是 `.doc-content` 的兄弟 ⇒ 委托收不到它的点击）',
+        NAV_OK(doc) && !NAV_OK(doc.replace(' onClick={onTocPick}', '')) && !/root\.addEventListener\('click'/.test(doc),
+      )
+    }
+  }
   check(
     'adj945 关于对话框补了**源码地址**（AGPL-3.0 网络条款那层；地址取 `brand.repoUrl`，不硬编码）',
     /aboutCopy\s*=\s*\{[\s\S]{0,2000}?url:\s*brand\.repoUrl/.test(copyTs),
@@ -26014,25 +26154,34 @@ function runAdj949ManualScopeTests() {
     manual.includes('docs/CLI.md') && cliDoc.includes('docs/CLI-手册.md'),
   )
 
-  // ---- ⑤ 图片：存在 + 绝对网络路径 ----
+  // ---- ⑤ 图片：**引用了就必须存在**（adj957 起手册里已经不放图，0 张也合法）----
+  /**
+   * adj957（用户裁定 "删掉"）：原先手册开头那张 `manual-page.png`（1440×900、95.6 KB）是
+   * "**这份手册在官网上的样子**"——一张手册自己的网页截图。三条理由删它：
+   *  ① 对"怎么用命令行"零帮助（纯元信息）；
+   *  ② `mdToHtml` 把 `![alt](src)` 渲染成裸 `<img>`，**限不了宽** ⇒ 在应用内对话框里它必然是一块巨幅图；
+   *  ③ 它是全包唯一一张图，白占 95.6 KB（网页版与桌面端各一份）。
+   *
+   * 于是判据从"至少 1 张"改成"**引用了就必须存在、且必须是 `public/` 下的绝对路径**":
+   * 0 张合法 ✓；一旦有人加图，路径写错 / 文件没跟上照旧判红（负对照就是"塞一张不存在的图"）✓。
+   */
   const imgPaths = (t: string): string[] => Array.from(t.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)).map((m) => m[1])
   const missingImgs = (t: string): string[] =>
-    imgPaths(t).filter((p) => !existsSync(join(root, 'public', p.replace(/^\//, ''))))
+    imgPaths(t).filter((p) => p.startsWith('/') && !existsSync(join(root, 'public', p.replace(/^\//, ''))))
   const imgs = imgPaths(manual)
   check(
-    `adj949 手册引用的 ${imgs.length} 张图片在 \`public/\` 下**真实存在**（${imgs.join(' ')}）`,
-    imgs.length >= 1 && missingImgs(manual).length === 0,
+    `adj949/adj957 手册引用的图片都在 \`public/\` 下真实存在（现 ${imgs.length} 张）`,
+    missingImgs(manual).length === 0,
     missingImgs(manual).join(' '),
   )
   check(
-    'adj949 负对照④：把图片路径改成不存在的文件 ⇒ 判据判红',
-    imgPaths(manual).length >= 1 &&
-      missingImgs(manual.split(imgs[0] ?? '').join('/docs/cli/__nope__.png')).length === 1 &&
-      missingImgs(manual).length === 0,
+    'adj949 负对照④：往手册里塞一张**不存在**的图 ⇒ 同一判据判红（证明它不是在空跑）',
+    missingImgs(`${manual}\n![假的](/docs/cli/__nope__.png)\n`).length === 1 && missingImgs(manual).length === 0,
   )
   check(
-    'adj949 图片一律写成 `public/` 下的**绝对网络路径**（官网 `/cli/` 才显示得出来；安装目录那份 MD 只是看不到图，文字不受影响）',
-    imgs.length >= 1 && imgs.every((p) => p.startsWith('/') && !p.includes('..')),
+    'adj949/adj957 手册里的图片路径一律是 `public/` 下的**绝对网络路径**（相对路径在官网 `/cli/` 下会 404）',
+    imgs.every((p) => p.startsWith('/') && !p.includes('..')) &&
+      !imgPaths('![x](../a.png)').every((p) => p.startsWith('/') && !p.includes('..')),
     imgs.join(' '),
   )
 

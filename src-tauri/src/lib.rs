@@ -29,9 +29,11 @@ mod cli_path;
 #[cfg(windows)]
 pub mod cli_embed;
 
-/// adj945（用户需求「设置里加一个『查看 CLI 手册』按钮」）：用**系统默认程序**打开安装目录里的
-/// 那份命令行手册 —— 走 Rust 侧调 opener（不经 ACL，路径由 `resource_dir()` 算），见该文件头说明。
-mod cli_manual;
+/// adj957（用户裁定）：`mod cli_manual;` 已删除 —— 原先它提供 `cli_manual_open`，用**系统默认程序**
+/// 打开随包放在安装目录里的 `docs/iJipu-CLI-手册.md`（adj945）。
+/// 用户口径：那几份 MD 不必随包分发，命令行手册改在**应用内**看（`dialogs/DocDialog.tsx` 的 `kind:'cli'`，
+/// 与操作手册/语法说明同路）⇒ 随包资源映射、`src-tauri/src/cli_manual.rs` 与本模块的注册一并撤掉。
+/// 顺带解决一个真缺陷：Windows 默认没有 `.md` 关联程序，那个按钮在多数机器上会弹「你要如何打开此文件」。
 
 /// adj538：待打开的 `.jps` 路径队列（去重前的原始路径，前端取走即清空）。
 ///
@@ -481,8 +483,7 @@ pub fn run() {
             cli_path::cli_path_status,
             cli_path::cli_path_register,
             cli_path::cli_path_unregister,
-            // adj945：用系统默认程序打开安装目录里的 CLI 使用手册
-            cli_manual::cli_manual_open,
+            // adj957：`cli_manual::cli_manual_open` 已删除（命令行手册改走应用内 DocDialog）
         ])
         .build(context)
         .expect("error while building tauri application")

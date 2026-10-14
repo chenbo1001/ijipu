@@ -7,12 +7,13 @@
  */
 import { Modal } from '../ui/Modal'
 // adj617（用户要求）：键名只在 `brand/shortcuts.ts` 定义一次——速查表也引它（不写字面量）
-import { KBD } from '../brand/shortcuts'
+import { KBD, newDocKbd } from '../brand/shortcuts'
 
 const SHORTCUTS: [string, string][] = [
-  // adj628：键名来自 `KBD.newDoc`（**按平台给**：桌面 = Ctrl+N；网页版 = Alt+N，
+  // adj628：键名来自 `brand/shortcuts.ts`（**按平台给**：桌面 = Ctrl+N；网页版 = Alt+N，
   // 因为浏览器把 Ctrl+N 占作"开新窗口"、页面收不到）——这里不写字面量，平台差异见表下的说明行。
-  [KBD.newDoc, '新建'],
+  // adj954：改用 `newDocKbd()` 现算（原先读 `KBD.newDoc`，那个值在模块加载时就定死了）
+  [newDocKbd(), '新建'],
   // adj619b（用户要求）：`Ctrl+O` 回到「打开文件」；导出改用 `Ctrl+Y`
   [KBD.openDoc, '打开文件'],
   [KBD.export, '导出（底栏）'],

@@ -18,7 +18,8 @@
  * ⚠ 网页版没有 `window.__TAURI__` ⇒ 这三条命令**根本不存在**：这里如实返回失败原因，
  *   界面据此显示"网页版不支持"并禁用按钮（**不假装可用** ✓）。
  */
-import { isDesktopShell } from '../brand/platform'
+// adj954：环境判定统一走 brand/env.ts（此前这里指向 brand/platform.ts，那份已合并删除）
+import { isDesktopShell, tauriInvoke } from '../brand/env'
 // ⚠ 与命令行共用同一份纯逻辑（跨包**相对路径**引用：本仓库对引擎也是"源码级共享"的口径）
 import {
   cliPathRegister,
@@ -28,19 +29,6 @@ import {
   type CliPathStatus,
   type PathHostIo,
 } from '../../packages/ijipu-cli/src/envPath'
-
-/** 桌面壳的 `invoke`（不在壳里 ⇒ null） */
-type ShellInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
-
-function shellInvoke(): ShellInvoke | null {
-  try {
-    const g = (window as unknown as { __TAURI__?: { core?: { invoke?: unknown } } }).__TAURI__
-    const fn = g?.core?.invoke
-    return typeof fn === 'function' ? (fn as ShellInvoke) : null
-  } catch {
-    return null
-  }
-}
 
 /** Rust `cli_path_status` 的返回（字段名与 `src-tauri/src/cli_path.rs` 的 `CliPathStatus` 一致） */
 type RawCliPathStatus = {
@@ -61,13 +49,14 @@ export type CliPathMode = 'register' | 'unregister'
  * 小优化：Rust 的 status 命令一次就把安装目录/PATH/App Paths 都读回来了，
  * 而 `envPath.ts` 的编排会问好几次 ⇒ 这里**每次动作只调一次 status**，之后走缓存；
  * 写入动作会把缓存清掉（写完必须重新现读，否则界面显示的就不是实况 ✗）。
+ *
+ * adj954：`invoke` 的取用改走 `brand/env.ts` 的 `tauriInvoke`（原先这里自己读 `__TAURI__`）。
  */
 function tauriPathHost(mode: CliPathMode): PathHostIo {
   let cached: RawCliPathStatus | null = null
-  const invoke = shellInvoke()
-  if (invoke === null) throw new Error('当前不在桌面版里：无法读写当前用户的 PATH')
+  if (!isDesktopShell()) throw new Error('当前不在桌面版里：无法读写当前用户的 PATH')
   const read = async (): Promise<RawCliPathStatus> => {
-    if (cached === null) cached = (await invoke('cli_path_status')) as RawCliPathStatus
+    if (cached === null) cached = await tauriInvoke<RawCliPathStatus>('cli_path_status')
     return cached
   }
   return {
@@ -85,7 +74,7 @@ function tauriPathHost(mode: CliPathMode): PathHostIo {
     },
     async writePath(value) {
       cached = null
-      await invoke(mode === 'register' ? 'cli_path_register' : 'cli_path_unregister', { next: value })
+      await tauriInvoke(mode === 'register' ? 'cli_path_register' : 'cli_path_unregister', { next: value })
     },
   }
 }
@@ -116,22 +105,13 @@ export async function applyCliPath(mode: CliPathMode): Promise<CliPathAction> {
 }
 
 /**
- * adj945（用户需求）：**用系统默认程序打开安装目录里的 CLI 使用手册**。
+ * adj957（用户裁定）：**`openCliManual()` 已删除** ——
  *
- * 为什么走我们自己的 Rust 命令（`cli_manual_open`）、而不是前端直接调 opener 的 `open_path`：
- * 见 `src-tauri/src/cli_manual.rs` 文件头 —— opener 的 `open_path` 除了"允许调用命令"还要
- * "路径落在 scope 里"，前端直接调会因"scope 为空"被拒，而前端那层是静默兜底 ⇒
- * 用户看到的是"点了没反应"（`adj894` 的官网链接就这么藏了一整个版本 ✗）。
- * Rust 侧调 opener **不经 ACL**，且路径由它按 `resource_dir()` 自己算 ✓。
+ * 原先它用系统默认程序打开随包放在安装目录里的 `docs/iJipu-CLI-手册.md`（Rust 命令 `cli_manual_open`）。
+ * 用户口径：那几份 MD **不必随包分发**，命令行手册在**应用内**看就行（与操作手册/语法说明同一个
+ * `DocDialog`，见 `dialogs/DocDialog.tsx`）⇒ 随包 MD、`cli_manual.rs`、`tauri.conf.json` 的资源映射、
+ * `scripts/check-installer.mjs` 的相关闸门**一并撤掉**。
  *
- * 失败一律带**可读原因**（文件不在 / 系统打不开），界面把它显示出来 —— **不静默失败** ✗。
+ * 顺带解决了一个真缺陷：Windows **默认没有 `.md` 关联程序**，那个按钮在多数机器上会弹
+ * 「你要如何打开此文件」——而 DocDialog 是应用内渲染，不依赖任何外部关联。
  */
-export async function openCliManual(): Promise<{ ok: true; path: string } | { ok: false; reason: string }> {
-  const invoke = shellInvoke()
-  if (invoke === null) return { ok: false, reason: 'web' }
-  try {
-    return { ok: true, path: (await invoke('cli_manual_open')) as string }
-  } catch (e) {
-    return { ok: false, reason: e instanceof Error ? e.message : String(e) }
-  }
-}

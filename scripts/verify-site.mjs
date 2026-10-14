@@ -1803,8 +1803,14 @@ async function main() {
         const imgPathsOf = (md) => Array.from(md.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)).map((m) => m[1])
         const CLI_IMG_PATHS = imgPathsOf(readFileSync(path.join(ROOT, 'docs', 'CLI-手册.md'), 'utf8'))
         const missingImgFiles = CLI_IMG_PATHS.filter((p) => !existsSync(path.join(DIST, p.replace(/^\//, ''))))
-        check(`adj949 \`/cli/\`：手册引用的 ${CLI_IMG_PATHS.length} 张图片在 \`dist/\` 里都是真文件（${CLI_IMG_PATHS.join(' ')}）`,
-          CLI_IMG_PATHS.length >= 1 && missingImgFiles.length === 0, missingImgFiles.join(' '))
+        /**
+         * adj957（用户裁定 "删掉"）：`/cli/` 那份手册原先开头有一张 `manual-page.png`
+         * ——**手册自己网页的截图**（1440×900、95.6 KB），既帮不上"怎么用"，又在应用内对话框里
+         * 必然是一块巨幅图（Markdown 限不了宽）⇒ 连文件一起删了。
+         * 所以判据从"至少 1 张"改成"**引用了就必须在 `dist/` 里是真文件**"：0 张合法 ✓。
+         */
+        check(`adj957 \`/cli/\`：手册引用的 ${CLI_IMG_PATHS.length} 张图片在 \`dist/\` 里都是真文件（手册不放图时 0 张）`,
+          missingImgFiles.length === 0, missingImgFiles.join(' '))
         const imgState = await evalJs(
           c,
           `(() => {
@@ -1817,24 +1823,35 @@ async function main() {
           })()`,
         )
         check(`adj949 \`/cli/\`：正文里 ${imgState?.n ?? 0} 张图**全部真的取到了**（naturalWidth > 0）`,
-          (imgState?.n ?? 0) >= 1 && imgState?.ok === imgState?.n, JSON.stringify(imgState))
+          (imgState?.ok ?? 0) === (imgState?.n ?? 0), JSON.stringify(imgState))
         const imgNeg = await evalJs(
           c,
           `(async () => {
-            const img = document.querySelector('#doc-body img')
-            if (!img) return { skip: true }
-            const before = img.getAttribute('src')
+            /**
+             * adj957：手册里现在**一张图都没有**（那张网页截图已删）⇒ 不能再去 querySelector 现成的图，
+             * 否则这条负对照会因为"没图可测"而空跑（skip 被当成通过）——那是假绿 ✗。
+             * 改成**自己塞一张真图进去**再测：判据与手册里有没有图彻底无关，永远真的在跑 ✓。
+             * 用的是站点里已有的 /icons/Jianpu.png（不额外产生本站 4xx）；
+             * 故意弄坏的那张是 data: URL（**不产生任何网络请求**，免得被后面"无本站 4xx"的断言记在账上）。
+             * ⚠ 这段是**模板字符串**：里面不能出现反引号（会提前结束模板、整份文件语法错误 ✗），
+             *   所以上面这些符号一律不加反引号。
+             */
+            const host = document.getElementById('doc-body')
+            if (!host) return { skip: true }
+            const img = document.createElement('img')
+            img.src = '/icons/Jianpu.png'
+            host.appendChild(img)
+            await new Promise((r) => setTimeout(r, 700))
             const okBefore = img.complete && img.naturalWidth > 0
             img.src = 'data:image/png;base64,___adj949_broken___'
             await new Promise((r) => setTimeout(r, 700))
             const okAfter = img.complete && img.naturalWidth > 0
-            img.src = before
-            await new Promise((r) => setTimeout(r, 700))
-            return { okBefore, okAfter, restored: img.complete && img.naturalWidth > 0 }
+            img.remove()
+            return { okBefore, okAfter }
           })()`,
         )
-        check('adj949 负对照：把图片 src 换成一个坏掉的 `data:` URL（不产生网络请求）⇒ 判据判假（不是"有 img 标签就算过"），换回来又为真',
-          imgNeg?.okBefore === true && imgNeg?.okAfter === false && imgNeg?.restored === true,
+        check('adj949 负对照：把图片 src 换成一个坏掉的 `data:` URL（不产生网络请求）⇒ 判据判假（不是"有 img 标签就算过"）',
+          imgNeg?.okBefore === true && imgNeg?.okAfter === false,
           JSON.stringify(imgNeg))
       }
 

@@ -64,6 +64,9 @@ npm run tauri:build  # 复用 npm run build（前端 dist），版本随 package
      不一致会被 `cli-assert` 的 `adj874` 闸门当场拦下 ✓）
    - 引擎改动涉及包版本时同步 `packages/ijipu-engine/package.json`、`packages/ijipu-engine/src/engine/...` 相关
 4. **验证**：`tsc -b` + `npm run build` 通过；`npm run smoke` **必须 0 失败**（adj456 起旧的"18 条预存失败基线"已逐条清理归零——不再接受"== 基线"的说法；若确有无法立刻修的失败，必须在断言里写明原因与跟踪项，并在提交信息里点名，而不是只写个数）。
+   - `npm run lint` **0 error**，且 warning 数 **== 改动前基线**（新增一条要么修掉、要么说清理由）。
+   - **改动涉及应用内 UI 时**，另跑 `npm run verify:app-ui`（真浏览器点一遍；`adj959` 立的规：
+     「事件挂错地方」这类缺陷源码级断言守不住 —— 代码里确实挂了监听，但**收不到事件**）。
 5. **git 提交 + 打 tag**：
    - 提交（Conventional + adjNN，如 `release: 版本升至 x.y.z（...）`、`feat(engine): ...`）
    - `git tag v<x.y.z>`（与既有 tag 一致，如 `v0.12.17`、`v0.13.0`），指向该提交。

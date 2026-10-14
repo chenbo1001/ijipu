@@ -5,6 +5,8 @@ import './localStorageMigration'
 import { create } from 'zustand'
 import { clampEditorFontSize, normalizeFontStack } from '@ijipu/engine'
 import { DEFAULT_THEME, DEFAULT_THEME_MODE, type ThemeMode } from '../brand/themes'
+// adj954：运行环境/设备判据统一走品牌层唯一出处（原先本文件自己写了一份 matchMedia）
+import { isCoarsePointerDevice } from '../brand/env'
 // L1「用户个性」：编辑器偏好 + 字体覆盖（不进谱面；详见 docs/SETTINGS-AUDIT.md 分层）
 import { loadEditorFont, loadEditorFontSize, loadFontOverride, saveEditorFont, saveEditorFontSize, saveFontOverride } from './editorPrefs'
 import type { FontOverride } from '@ijipu/engine'
@@ -17,7 +19,9 @@ import type { FontOverride } from '@ijipu/engine'
  * "Ctrl+Q 试听假的"两个 bug 一直没人发现。收窄后这类调用**直接编译报错**。
  * 需要打开底栏面板请用 `toggleDock(key)`；需要弹窗请用下面这些。
  */
-export type ModalKind = 'samples' | 'shortcuts' | 'manual' | 'syntax' | 'donate' | 'voicePicker'
+// adj957（用户裁定）：加上 `'cli'` —— 命令行手册改用应用内 `DocDialog` 打开
+// （原先只能靠"系统默认程序打开随包 MD"，Windows 默认没有 .md 关联程序 ⇒ 多半弹「如何打开」）
+export type ModalKind = 'samples' | 'shortcuts' | 'manual' | 'syntax' | 'cli' | 'donate' | 'voicePicker'
 
 /**
  * adj462：底部 dock 的面板（互斥，同一时间只显示一块）。
@@ -154,19 +158,18 @@ function detectSystemLight(): boolean {
   }
 }
 
-/** adj314：是否移动端/PAD（触屏或窄屏≤1024px）——决定脚本工具条默认开关。PC 大屏默认关 */
+/**
+ * adj314：是否移动端/PAD（触屏**或**窄屏 ≤1024px）——决定脚本工具条默认开关。PC 大屏默认关。
+ *
+ * adj954：判据改为**复用品牌层的那两条**，本文件不再自己写 `matchMedia`：
+ *   · `isCoarsePointerDevice()`（`brand/env.ts`）：真·触屏/手机（粗指针 + UA 兜底）；
+ *   · `detectNarrow()`：窗口 ≤1024px（纯布局概念，桌面把窗口拉窄也会为真）。
+ * 两者**或**起来，正是"这台设备是不是小到该默认打开脚本工具条"这个语义。
+ * ⚠ 与文件选择策略用的那个判据**不是一回事**：那边**不许**把"窄屏"算进来
+ * （窄窗口的桌面 Chrome 里系统选择器是好的，见 `store/saveSupport.ts` 的说明）。
+ */
 function detectTouch(): boolean {
-  try {
-    if (window.matchMedia('(pointer: coarse)').matches) return true
-  } catch {
-    /* 忽略 */
-  }
-  try {
-    if (window.innerWidth <= 1024) return true
-  } catch {
-    /* 忽略 */
-  }
-  return false
+  return isCoarsePointerDevice() || detectNarrow()
 }
 
 /** adj322：宽/窄屏分界（≤1024px = 窄屏）。matchMedia 支持时用 mq，否则读 innerWidth。

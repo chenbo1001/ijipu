@@ -20,6 +20,7 @@ export function Modal({
   width,
   onClose,
   inline,
+  headExtra,
 }: {
   title: string
   children: ReactNode
@@ -48,6 +49,14 @@ export function Modal({
    * 于是那三份内容不必重写，dock 只管容器与切换。内联模式下 Esc 关闭与拖动都不生效。
    */
   inline?: boolean
+  /**
+   * adj958（用户要求）：**标题栏右侧的额外交互**（放在 ✕ 左边）。
+   *
+   * 初衷是给帮助对话框挂一个「目录」按钮（`dialogs/DocDialog.tsx`），但本组件留在 `ui/` 层
+   * ⇒ 只给一个"插槽"，**不知道也不关心**里面是什么（不把文档相关的逻辑塞进通用模态框）。
+   * 标题栏的拖动已经忽略落在 `button` 上的按下（见 `onHeadMouseDown`）⇒ 按钮不会拖走窗口。
+   */
+  headExtra?: ReactNode
 }) {
   const closeModal = useUiStore((s) => s.closeModal)
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
@@ -126,9 +135,13 @@ export function Modal({
       >
         <div className="modal-head" onMouseDown={onHeadMouseDown}>
           <span>{title}</span>
-          <button className="modal-close" onClick={doClose}>
-            ✕
-          </button>
+          {/* adj958：右侧动作区（headExtra 插槽 + ✕）——包一层容器，标题栏的 space-between 才是两栏 */}
+          <span className="modal-head-actions">
+            {headExtra}
+            <button className="modal-close" onClick={doClose}>
+              ✕
+            </button>
+          </span>
         </div>
         <div className="modal-body">{children}</div>
       </div>

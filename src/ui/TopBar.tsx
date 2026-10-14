@@ -19,9 +19,10 @@ import { pasteImportCopy, numCopy, workspaceCopy } from '../brand/copy'
 // adj614：深浅模式的循环表（顶栏「深浅模式」按钮与 `Ctrl+T` 共用一份，见 `nextThemeMode`）
 import { nextThemeMode } from '../brand/themes'
 // adj617（用户要求）：快捷键提示的唯一出处——菜单 kbd 角标与顶栏/底栏/浮动栏的 title 都引它
-import { KBD, withKbd } from '../brand/shortcuts'
+import { KBD, newDocKbd, withKbd } from '../brand/shortcuts'
 // adj540：「打开/另存为」要按平台分流（**手机端以工作区优先**）并判断"是否已设工作区"
-import { isCoarsePointerDevice } from '../store/saveSupport'
+// adj954：设备判据迁到品牌层唯一出处（原在 store/saveSupport.ts）
+import { isCoarsePointerDevice } from '../brand/env'
 import { getWorkspace, isWorkspaceAvailable } from '../store/workspace'
 import { isHostEmbedded } from '../store/hostBridge'
 import {
@@ -1226,7 +1227,8 @@ export function TopBar() {
   //  · 续（用户要求"窄屏菜单可以更简化，主要操作以工作区操作按钮为主"）：连「新建」「保存」也收进面板
   //    —— 工作区面板里已有 新建（空谱）/ 保存 / 另存，菜单只留平台无关的入口：
   //    工作区 / 打开示例 / 粘贴源码导入 / 试听播放 / 导出。
-  const entryNew: MenuEntry = { label: '新建(&N)', kbd: KBD.newDoc, hotkey: 'n', onPick: newDoc }
+  // adj954：`kbd` 走 `newDocKbd()` 现算（原先读 `KBD.newDoc`，那个值在模块加载时就定死了）
+  const entryNew: MenuEntry = { label: '新建(&N)', kbd: newDocKbd(), hotkey: 'n', onPick: newDoc }
   const entryOpen: MenuEntry = { label: '打开(&O)…', kbd: KBD.openDoc, hotkey: 'o', onPick: runOpenSmart }
   // adj724b：嵌入版里系统选择器会被浏览器拒绝（跨源子框架）⇒ 该菜单项不出现
   const entryOpenSystem: MenuEntry = { label: workspaceCopy.openSystemLabel, onPick: runOpen, hidden: isHostEmbedded() }
@@ -1315,6 +1317,15 @@ export function TopBar() {
     // adj422：原「脚本语法」与「脚本规则说明」（独立 HTML 页）合并为一份「脚本语法说明」——
     // 两个入口内容重叠、容易互相漂移；现在统一读 docs/SYNTAX.md（列表页已删除）
     { label: '脚本语法说明(&S)', hotkey: 's', onPick: () => openModal('syntax') },
+    /**
+     * adj957（用户裁定）：**命令行手册**进帮助菜单。
+     *
+     * 原先命令行手册在应用里唯一的入口是「设置 → 命令行」里那个按钮，走的是
+     * "用系统默认程序打开安装目录里的 `docs/iJipu-CLI-手册.md`"——而 Windows **默认没有
+     * `.md` 关联程序**，多数机器上会弹「你要如何打开此文件」。现在与另外两本手册同路：
+     * `DocDialog` 应用内渲染（同一份 `docs/CLI-手册.md`），随包 MD 与那条 Rust 命令一并撤掉。
+     */
+    { label: '命令行手册(&C)', hotkey: 'c', onPick: () => openModal('cli') },
     // adj492：「关于」从弹窗迁入底栏 dock（与原「试听/导出/设置」同一套路：入口保持原位、改为开关）
     { label: '关于(&A)', hotkey: 'a', onPick: () => toggleDock('about') },
     // adj877（用户要求）：回官网的入口。adj879：与状态栏那个入口共用 `goSiteHome()`，

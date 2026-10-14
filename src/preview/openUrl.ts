@@ -20,17 +20,19 @@
  *
  * 兜底顺序：Tauri opener → `window.open`。两条都不成时**不静默失败**：控制台留一条 error，
  * 调用方（预览层）无需关心。
+ *
+ * adj954：`__TAURI__` 的读取收敛到 `brand/env.ts`（本文件不再自己判环境）。
  */
+import { tauriCore } from '../brand/env'
 
 /** 打开外部链接（http/https/mailto 等绝对地址） */
 export async function openExternalUrl(url: string): Promise<void> {
   const target = url.trim()
   if (!target) return
-  type TauriGlobal = { core?: { invoke?: (cmd: string, args?: unknown) => Promise<unknown> } }
-  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__
-  if (tauri?.core?.invoke) {
+  const invoke = tauriCore()?.invoke
+  if (typeof invoke === 'function') {
     try {
-      await tauri.core.invoke('plugin:opener|open_url', { url: target })
+      await invoke('plugin:opener|open_url', { url: target })
       return
     } catch (err) {
       /**

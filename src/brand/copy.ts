@@ -672,6 +672,21 @@ export const externalOpenCopy = {
 } as const
 
 /**
+ * adj958（用户要求）：应用内帮助对话框（`dialogs/DocDialog.tsx`）的**目录按钮**文案。
+ *
+ * 用户原话：「应用内 DocDialog 标题上是否可以加个目录弹出菜单按钮，跟窄屏的手册里的显示一样，
+ * 方便跳转」。三本手册（操作手册 / 脚本语法说明 / 命令行手册）共用这一套。
+ */
+export const docCopy = {
+  /** 标题栏那个按钮的文字（与官网窄屏文档页的「目录」同一个词） */
+  tocButton: '目录',
+  /** 悬浮提示：说清怎么关（对话框里 ESC 是关整个框，不是关目录，见 DocDialog 文件头） */
+  tocTip: '跳到某一节：点条目即跳转；再点一次「目录」、点条目或点别处都会收起（ESC 是关整个对话框）',
+  /** 浮层顶部的小标题 */
+  tocTitle: '目录',
+} as const
+
+/**
  * adj927/adj928：**"文件内容已在别处被改动"**的提示与差异框文案。
  *
  * 用户口径（2026-10）：
@@ -787,22 +802,13 @@ export const cliPathCopy = {
   /** 重新读一次系统实况（用户可能刚在"环境变量"里手改过 ⇒ 要有这条出路） */
   refresh: '重新读取',
   /**
-   * adj945（用户需求）：「查看 CLI 手册」—— 用**系统默认程序**打开安装目录里那份手册
-   * （随包资源 `<安装目录>/docs/iJipu-CLI-手册.md`）。
-   *
-   * 用户原话：「在全局设置那个「命令行」子页签里，再加一个「查看 CLI 手册」按钮
-   * ⇒ 用系统默认程序打开安装目录里那份 MD」「路径取不到时给明确提示，别静默失败」。
+   * adj957（用户裁定）：原先这里有 `manualLabel` / `manualButton` / `manualBusy` / `manualTip` /
+   * `manualOpened` / `manualWebOnly` / `manualFailed` 一组文案，对应「查看 CLI 手册」那个
+   * **用系统默认程序打开随包 MD** 的按钮。整组已删除，原因两条：
+   *  ① Windows **默认没有 `.md` 关联程序**，那个按钮在多数机器上会弹「你要如何打开此文件」；
+   *  ② 命令行手册现在与操作手册/语法说明同路 —— 走**应用内 `DocDialog`**（顶栏「帮助 → 命令行手册」），
+   *     不依赖外部关联，也让三本手册的开法终于一致。
    */
-  manualLabel: '使用手册',
-  manualButton: '查看 CLI 手册',
-  manualBusy: '正在打开…',
-  manualTip: '用系统默认程序打开安装目录里的《iJipu 命令行使用手册》（Markdown）。',
-  /** 打开成功：把**完整路径**显示出来（用户知道文件在哪，下次能自己找） */
-  manualOpened: (path: string) => `已用系统默认程序打开 CLI 手册：${path}`,
-  /** 网页版没有这个能力（与注册按钮同口径：如实说明，不假装可用） */
-  manualWebOnly: '网页版没有这个能力（要打开本机文件，只有桌面版能做）',
-  /** 打开失败：接**原因原文**（Rust 侧已带上"找过的路径 / 系统报的错"） */
-  manualFailed: (reason: string) => `打不开 CLI 手册：${reason}`,
   /** 操作成功：注册（`changed=false` = 本来就有；`dir` = **命令行入口目录**，不是安装目录 ✓） */
   okRegistered: (dir: string, changed: boolean) =>
     changed

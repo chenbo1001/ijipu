@@ -28,25 +28,17 @@ export interface ExternalFile {
 /** 外部打开事件名（Rust 侧 `app.emit("ijipu://open-files", paths)`） */
 export const EXTERNAL_OPEN_EVENT = 'ijipu://open-files'
 
-// adj628：环境判定收敛到 brand/platform.ts（快捷键按键名依赖它，见该文件说明）
-import { isDesktopShell } from '../brand/platform'
-
-interface TauriGlobal {
-  core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> }
-  event?: { listen?: (name: string, cb: (e: unknown) => void) => Promise<() => void> }
-}
+// adj628：环境判定收敛到品牌层（快捷键按键名依赖它，见该文件说明）；
+// adj954：再收敛一步 —— 读 `__TAURI__` 这个动作只允许发生在 `brand/env.ts` 一处
+import { isDesktopShell, tauriGlobal, type TauriGlobal } from '../brand/env'
 
 function tauri(): TauriGlobal | null {
-  try {
-    const g = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__
-    return g && g.core && typeof g.core.invoke === 'function' ? g : null
-  } catch {
-    return null
-  }
+  const g = tauriGlobal()
+  return g && g.core && typeof g.core.invoke === 'function' ? g : null
 }
 
 /** 是否运行在桌面壳里（Tauri 由 `withGlobalTauri: true` 注入 `window.__TAURI__`）
- *  adj628：判定收敛到 `brand/platform.ts`（快捷键要按平台给键名，两处各判一次必然漂移） */
+ *  adj628：判定收敛到品牌层（快捷键要按平台给键名，两处各判一次必然漂移） */
 export function hasShell(): boolean {
   return isDesktopShell()
 }

@@ -10,21 +10,13 @@
  * 试听用途，本模块不再被 PlaybackDialog 引用（保留兼容，供未来需恢复 midi-js 采样试听时复用）。
  */
 import type { SamplerCache, SamplerLibrary } from '@ijipu/engine'
-
-/** 是否运行在 Tauri 桌面环境（window.__TAURI__ 由 withGlobalTauri 注入） */
-function isTauri(): boolean {
-  try {
-    return typeof (window as unknown as { __TAURI__?: { core?: { invoke?: unknown } } }).__TAURI__?.core?.invoke === 'function'
-  } catch {
-    return false
-  }
-}
+// adj954：运行环境判定与 `invoke` 的取用都收敛到品牌层唯一出处
+//（原先这里自己写了一份 `isTauri()` 与一份类型体操 ⇒ 同一件事两处判定）
+import { isTauriShell, tauriInvoke as invokeTauri } from '../brand/env'
 
 /** 调用 Tauri 自定义 command（桌面端读写缓存文件） */
 async function tauriInvoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
-  const inv = (window as unknown as { __TAURI__?: { core?: { invoke?: (c: string, a?: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__?.core?.invoke
-  if (typeof inv !== 'function') throw new Error('Tauri invoke 不可用')
-  return inv(cmd, args)
+  return invokeTauri(cmd, args)
 }
 
 // ---- Tauri 文件系统缓存（桌面，读写成文本文件） ----
@@ -101,7 +93,7 @@ class IndexedDbCache implements SamplerCache {
 
 /** 创建缓存实现（Tauri 桌面 → 文件系统；否则 → IndexedDB） */
 export function createSamplerCache(): SamplerCache {
-  return isTauri() ? new TauriFsCache() : new IndexedDbCache()
+  return isTauriShell() ? new TauriFsCache() : new IndexedDbCache()
 }
 
 /** 预缓存一个采样库（未缓存则联网下载并写出；已缓存跳过） */

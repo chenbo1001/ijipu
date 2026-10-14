@@ -36,8 +36,20 @@ function check(title: string, ok: boolean, extra = ''): void {
   }
 }
 
-/** 内存文件系统（不碰真实磁盘 ⇒ 可断言"到底写了什么" ✓） */
-function makeIo(files: Record<string, string> = {}, dirs: Record<string, string[]> = {}): { io: CliIo; files: Record<string, string | Uint8Array>; logs: string[]; errs: string[] } {
+/**
+ * 内存文件系统（不碰真实磁盘 ⇒ 可断言"到底写了什么" ✓）
+ *
+ * adj956：`listDir` 的返回值跟着 `CliIo` 改了形状（`{ name, dir }[]`）。为了让老用例照旧能写
+ * （只给一串名字），这里做了归一：
+ *  · 给**字符串** ⇒ 若 `files` 里存在 `${目录}/${名字}/…` 这样的键，就当作**目录**，否则当文件；
+ *  · 给**对象** ⇒ 原样用（要精确控制"是目录但不是文件"时用这种写法）。
+ * 与真实宿主同口径地**按名字排序**（顺序可复现 ⇒ 输出能逐字节比对）。
+ */
+type FakeEntry = string | { name: string; dir: boolean }
+function makeIo(
+  files: Record<string, string> = {},
+  dirs: Record<string, FakeEntry[]> = {},
+): { io: CliIo; files: Record<string, string | Uint8Array>; logs: string[]; errs: string[] } {
   const out: Record<string, string | Uint8Array> = {}
   const logs: string[] = []
   const errs: string[] = []
@@ -58,6 +70,12 @@ function makeIo(files: Record<string, string> = {}, dirs: Record<string, string[
     async listDir(d) {
       if (!(d in dirs)) throw new Error(`ENOENT: ${d}`)
       return dirs[d]
+        .map((e) =>
+          typeof e === 'string'
+            ? { name: e, dir: Object.keys(files).some((k) => k.startsWith(`${d}/${e}/`)) }
+            : e,
+        )
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     },
     out: (t) => void logs.push(t),
     err: (t) => void errs.push(t),
@@ -233,6 +251,141 @@ console.log('\n— 命令行（A·P1–P4）—')
   check('adj806 batch 单个文件失败 ⇒ 退出码 3 且**不写**半成品', r3.code === EXIT.syntax && Object.keys(io3.files).length === 0, `code=${r3.code} files=${Object.keys(io3.files).join(',')}`)
 }
 
+/**
+ * ④b adj956（用户需求）：「如果我要获取指定目录下的所有 jps 文件的 lint 情况，是需要借助 bat 文件
+ * 来实现还是 batch 参数就可以实现？」—— 改之前**两条路都走不通**，只能写 bat 循环。
+ * 现在 `lint -i <目录> [-r] [--filter <通配>]` 一条命令。
+ */
+{
+  /** 与 ⑨ 的 `EMBED_BAD` 同一种"注定报错"的写法（小节时值不符） */
+  const ERR_JPS = 'V: 1.0\nB: 错\nD: C\nP: 4/4\nQ: 1 2 3 4 | {tp 5 6 7 1} |\n'
+  const tree = (): ReturnType<typeof makeIo> =>
+    makeIo(
+      { 'in/a.jps': GOOD, 'in/bad.jps': ERR_JPS, 'in/skip.txt': 'x', 'in/sub/c.jps': GOOD },
+      // ⚠ 键必须是**完整路径**（`in/sub`）——`listDir` 收的是路径，不是目录名
+      { in: ['a.jps', 'bad.jps', 'skip.txt', 'sub'], 'in/sub': ['c.jps'] },
+    )
+  const io = tree()
+  const r = await runCli(['lint', '-i', 'in', '--json'], io.io)
+  const j = JSON.parse(String(io.logs.join(''))) as {
+    files: { input: string; ok: boolean }[]
+    ok: boolean
+    errors: number
+  }
+  check(
+    'adj956 `lint -i <目录>`：只收 .jps、默认**不下钻**子目录（`in/sub/c.jps` 不在内）',
+    j.files.length === 2 && j.files.map((f) => f.input).join(',') === 'in/a.jps,in/bad.jps',
+    j.files.map((f) => f.input).join(','),
+  )
+  check(
+    'adj956 目录 lint 的退出码与汇总自洽（有错 ⇒ 3；`ok` 与 `errors` 同口径）',
+    r.code === (j.ok ? EXIT.ok : EXIT.syntax) && j.ok === (j.errors === 0),
+    `code=${r.code} ok=${j.ok} errors=${j.errors}`,
+  )
+  /** 负对照：这份谱是**故意写错**的 ⇒ 必须真的被算成错误（否则上面那条可能靠"全绿"蒙过去） */
+  check('adj956 负对照：目录里那份故意写错的谱确实被算作错误（不是"全绿"假象）', j.errors > 0 && j.ok === false, `errors=${j.errors}`)
+
+  const ioR = tree()
+  const rR = await runCli(['lint', '-i', 'in', '-r', '--json'], ioR.io)
+  const jR = JSON.parse(String(ioR.logs.join(''))) as { files: { input: string }[]; errors: number }
+  check(
+    'adj956 `-r` 递归：子目录里的谱也被扫到（3 个，含 `in/sub/c.jps`；那份故意写错的仍在 ⇒ 退出码 3）',
+    rR.code === EXIT.syntax && jR.errors > 0 && jR.files.length === 3 && jR.files.some((f) => f.input === 'in/sub/c.jps'),
+    `code=${rR.code} ${jR.files.map((f) => f.input).join(',')}`,
+  )
+
+  const ioF = makeIo({ 'in/春.jps': GOOD, 'in/夏.jps': GOOD }, { in: ['春.jps', '夏.jps'] })
+  const rF = await runCli(['lint', '-i', 'in', '--filter', '春*', '--json'], ioF.io)
+  const jF = JSON.parse(String(ioF.logs.join(''))) as { files: { input: string }[] }
+  check(
+    'adj956 `--filter 春*` 只留文件名匹配的（1 个，退出码 0）',
+    rF.code === EXIT.ok && jF.files.length === 1 && jF.files[0].input === 'in/春.jps',
+    jF.files.map((f) => f.input).join(','),
+  )
+
+  const ioEmpty = makeIo({}, { 'in/空': [] })
+  check(
+    'adj956 目录里没有 .jps ⇒ 退出码 2（输入不存在），并提示"子目录要加 -r"',
+    (await runCli(['lint', '-i', 'in/空'], ioEmpty.io)).code === EXIT.noInput,
+  )
+  check('adj956 `--watch` 不能用于目录 ⇒ 退出码 1（不静默不监视）', (await runCli(['lint', '-i', 'in', '--watch'], tree().io)).code === EXIT.usage)
+
+  /** 单文件与 stdin 的老路径**一个字没动**（回归） */
+  const one = tree()
+  check('adj956 回归：`lint -i <单个文件>` 仍走老路径（退出码 0）', (await runCli(['lint', '-i', 'in/a.jps'], one.io)).code === EXIT.ok)
+}
+
+/**
+ * ④c adj956（用户需求「一些操作是否可以通过 batch 参数形成组合式的批量操作的效果？」）：
+ * `-t` 逗号组合 + `-o` 只在真要写文件时才必填。
+ */
+{
+  const io = makeIo({ 'in/a.jps': GOOD }, { in: ['a.jps'] })
+  const r = await runCli(['batch', '--in', 'in', '-t', 'lint'], io.io)
+  check('adj956 `batch -t lint` **不必给 -o**（lint 不产出文件），且一个文件都没写', r.code === EXIT.ok && Object.keys(io.files).length === 0)
+
+  const io2 = makeIo({ 'in/a.jps': GOOD }, { in: ['a.jps'] })
+  const r2 = await runCli(['batch', '--in', 'in', '-o', 'out', '-t', 'lint,fmt,svg', '--json'], io2.io)
+  const j2 = JSON.parse(String(io2.logs.join(''))) as { tasks: string[]; inputs: number }
+  check(
+    'adj956 `-t lint,fmt,svg`：**一次遍历**产出三种结果（.jps + .svg 都写了），`--json` 真的吐 JSON',
+    r2.code === EXIT.ok && 'out/a.jps' in io2.files && 'out/a.svg' in io2.files && j2.tasks.join(',') === 'lint,fmt,svg',
+    `code=${r2.code} files=${Object.keys(io2.files).join(',')}`,
+  )
+
+  check(
+    'adj956 组合里只要有一个写文件的任务 ⇒ `-o` 仍是必填（`-t lint,svg` 缺 -o ⇒ 用法错误 1）',
+    (await runCli(['batch', '--in', 'in', '-t', 'lint,svg'], makeIo({ 'in/a.jps': GOOD }, { in: ['a.jps'] }).io)).code === EXIT.usage,
+  )
+  check(
+    'adj956 未知任务名 ⇒ 用法错误 1（不静默跳过）',
+    (await runCli(['batch', '--in', 'in', '-o', 'out', '-t', 'lint,png'], makeIo({ 'in/a.jps': GOOD }, { in: ['a.jps'] }).io)).code === EXIT.usage,
+  )
+  check(
+    'adj956 `batch --in <文件>` ⇒ 明确说"不是目录"（用法错误 1）',
+    (await runCli(['batch', '--in', 'in/a.jps', '-o', 'out'], makeIo({ 'in/a.jps': GOOD }, { in: ['a.jps'] }).io)).code === EXIT.usage,
+  )
+}
+
+/**
+ * ④d adj956（**修一个真 bug**）：`-s k=v` 原先只被 settings / config 消费，
+ * 却被 render / play / batch 的守卫放行 ⇒ "接受了、然后静默忽略"。
+ *
+ * 这条判据**本身就是那个 bug 的负对照**：修复前 `-s note_size=40` 不生效，
+ * 下面"两者不同"必然判红（不是恒真）。
+ */
+{
+  const mk = (): ReturnType<typeof makeIo> => makeIo({ 'p.jps': GOOD })
+  const a = mk()
+  const b = mk()
+  await runCli(['render', '-i', 'p.jps', '-t', 'svg', '-o', 'a.svg'], a.io)
+  await runCli(['render', '-i', 'p.jps', '-t', 'svg', '-o', 'b.svg'], b.io)
+  const svgA = String(a.files['a.svg'] ?? '')
+  const svgB = String(b.files['b.svg'] ?? '')
+  // 先证明渲染是**确定的**（否则下面那条差异就说明不了任何事）
+  check('adj956 前置：同一份谱渲染两次逐字节相同（差异只能来自 -s）', svgA !== '' && svgA === svgB)
+
+  const c = mk()
+  const rc = await runCli(['render', '-i', 'p.jps', '-t', 'svg', '-o', 'c.svg', '-s', 'note_size=40'], c.io)
+  const svgC = String(c.files['c.svg'] ?? '')
+  check(
+    'adj956 `render -s note_size=40` **真的生效**（产物与不加 -s 时不同；修复前二者会一样）',
+    rc.code === EXIT.ok && svgC !== '' && svgC !== svgA,
+  )
+  check(
+    'adj956 `-s margn_right=10`（键名拼错）⇒ 退出码 5，**不当没写**',
+    (await runCli(['render', '-i', 'p.jps', '-t', 'svg', '-o', 'x.svg', '-s', 'margn_right=10'], mk().io)).code === EXIT.config,
+  )
+  check(
+    'adj956 `-s margin_right`（缺 `=`）⇒ 退出码 5',
+    (await runCli(['render', '-i', 'p.jps', '-t', 'svg', '-o', 'x.svg', '-s', 'margin_right'], mk().io)).code === EXIT.config,
+  )
+  check(
+    'adj956 `-s` 对 info 不再"接受但忽略" ⇒ 退出码 5（它本来就不看谱面设置）',
+    (await runCli(['info', '-i', 'p.jps', '-s', 'margin_right=10'], mk().io)).code === EXIT.config,
+  )
+}
+
 // ⑤ settings：值 + 来源分层
 {
   const src = `# jps-config:{"margin_right": 44}\n${GOOD}`
@@ -243,7 +396,12 @@ console.log('\n— 命令行（A·P1–P4）—')
   const io2 = makeIo({ 'p.jps': src })
   await runCli(['settings', '-i', 'p.jps', 'margin_right', '-s', 'margin_right=33', '--json'], io2.io)
   const j2 = JSON.parse(String(io2.logs.join('')))
-  check('adj806 settings：命令行 -s 优先级最高', j2.value === '33' && j2.source === '命令行 -s', JSON.stringify(j2))
+  /**
+   * adj956：`-s` 的值现在**按类型粗转**（`margin_right` 是数字字段 ⇒ 得到数字 `33`）。
+   * 改之前这里是字符串 `'33'` —— 那是**错的**：`mergeJpsConfig` 给同一个键的是数字，
+   * 于是"命令行覆盖"报出来的值跟真正生效的值不是同一种东西（`AGENTS §六之二·4` 数值口径同源）。
+   */
+  check('adj806/adj956 settings：命令行 -s 优先级最高（值按类型转：数字字段得到数字 33）', j2.value === 33 && j2.source === '命令行 -s', JSON.stringify(j2))
   const io3 = makeIo({ 'p.jps': GOOD })
   await runCli(['settings', '-i', 'p.jps', 'margin_right', '--json'], io3.io)
   const j3 = JSON.parse(String(io3.logs.join('')))
@@ -781,14 +939,38 @@ console.log('\n— 命令行（A·P1–P4）—')
     {
       what: 'batch svg',
       argv: ['batch', '--in', 'samples', '-o', '输出目录', '-t', 'svg'],
-      lines: [`批处理完成：成功 ${SAMPLE_NAMES.length} 个、失败 0 个（输出到 输出目录，类型 svg）`],
+      // adj956：汇总文案改了口径（多了"任务 / 输入 N 个文件"），手册里那行也是现跑出来的
+      lines: [`批处理完成：成功 ${SAMPLE_NAMES.length} 个、失败 0 个（任务 svg；输入 ${SAMPLE_NAMES.length} 个文件，输出到 输出目录）`],
+      code: EXIT.ok,
+    },
+    /**
+     * adj956（用户需求）：`batch -t lint` —— 纯 lint 任务**不必给 `-o`**。
+     * 这正是用户问的那个用法：「获取指定目录下的所有 jps 文件的 lint 情况」。
+     */
+    {
+      what: 'batch -t lint（省略 -o）',
+      argv: ['batch', '--in', 'samples', '-t', 'lint'],
+      lines: [`批处理完成：成功 ${SAMPLE_NAMES.length} 个、失败 0 个（任务 lint；输入 ${SAMPLE_NAMES.length} 个文件）`],
+      code: EXIT.ok,
+    },
+    /**
+     * adj956：`lint -i <目录>` 的汇总行。
+     * ⚠ 只钉到"`N 个通过、M 个有错`"为止，**不钉告警个数** —— 告警数随 `samples/` 的内容变化，
+     *   把它写死会让"改一份示例谱"变成红灯（那不是文档过期，是断言太紧 ✗）。
+     */
+    {
+      what: 'lint 目录',
+      argv: ['lint', '-i', 'samples'],
+      lines: [`检查 ${SAMPLE_NAMES.length} 个文件：${SAMPLE_NAMES.length} 个通过、0 个有错`],
       code: EXIT.ok,
     },
     { what: 'settings 查键', argv: ['settings', '-i', 'samples\\ershenbu.jps', 'margin_right'], lines: ['margin_right = 50   [来自：代码默认]'], code: EXIT.ok },
     {
       what: 'settings -s 覆盖',
       argv: ['settings', '-i', 'samples\\ershenbu.jps', 'margin_right', '-s', 'margin_right=33'],
-      lines: ['margin_right = "33"   [来自：命令行 -s]'],
+      // adj956：`-s` 的值现在按类型粗转（`margin_right` 是数字字段 ⇒ 报 33 而不是字符串 "33"）。
+      // 改之前的 `"33"` 其实是**错的**：那个值引擎根本不会这么用。
+      lines: ['margin_right = 33   [来自：命令行 -s]'],
       code: EXIT.ok,
     },
     {
@@ -892,7 +1074,12 @@ console.log('\n— 命令行（A·P1–P4）—')
   check(
     'adj949 负对照③：把手册里 `doctor` 的示例全部改掉 ⇒ 该命令的变体数掉到 2 以下（判据判红）',
     (() => {
-      const cut = MANUAL.split('ijipu.exe cli doctor').join('ijipu.exe cli doc-tor')
+      /**
+       * ⚠ 两种写法都要换：手册里既有 `ijipu.exe cli doctor`（完整路径形态）也有 `ijipu cli doctor`。
+       * 只换前者的话，手册里若恰好一处都没写完整路径形态，`cut === MANUAL` ⇒ 这条负对照会**空跑** ✗
+       * （adj956 重写手册时就撞上了：新手册统一用短形态，负对照当场判红）。
+       */
+      const cut = MANUAL.split('ijipu.exe cli doctor').join('ijipu.exe cli doc-tor').split('ijipu cli doctor').join('ijipu cli doc-tor')
       return cut !== MANUAL && variantCount(cut, 'doctor') < 2 && variantCount(MANUAL, 'doctor') >= 2
     })(),
   )

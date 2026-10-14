@@ -35,6 +35,8 @@ import {
   type WorkspaceRecord,
 } from './fileHandleDb'
 import { ensureWritePermission } from './saveSupport'
+// adj954：运行环境判定与 `invoke` 的取用统一走品牌层唯一出处（原先进口里自己读 `__TAURI__`）
+import { tauriCore } from '../brand/env'
 import {
   hostBridge,
   isHostEmbedded,
@@ -505,17 +507,11 @@ export function stripJpsExt(name: string): string {
 // 其余函数一律建立在它们之上——这样网页版（FSA）与桌面版（路径）不会各自漂移出
 // "什么该显示"或"怎么写才算安全"的分歧。
 
-/** 取桌面壳的 `invoke`（不在壳里 ⇒ null；纯浏览器构建下恒为 null，行为与从前一致） */
+/** 取桌面壳的 `invoke`（不在壳里 ⇒ null；纯浏览器构建下恒为 null，行为与从前一致）
+ *  adj954：读 `__TAURI__` 收敛到 `brand/env.ts` 唯一出处 */
 function shellInvoke(): ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null {
-  try {
-    const g = (window as unknown as { __TAURI__?: { core?: { invoke?: unknown } } }).__TAURI__
-    const fn = g?.core?.invoke
-    return typeof fn === 'function'
-      ? (fn as (cmd: string, args?: Record<string, unknown>) => Promise<unknown>)
-      : null
-  } catch {
-    return null
-  }
+  const fn = tauriCore()?.invoke
+  return typeof fn === 'function' ? fn : null
 }
 
 /**
