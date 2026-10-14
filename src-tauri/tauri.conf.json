@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "iJipu",
-  "version": "0.60.0",
+  "version": "0.61.0",
   "identifier": "com.ijipu.app",
   "build": {
     "frontendDist": "../dist",
@@ -60,7 +60,6 @@
       "../resources/soundfonts/README.md": "soundfonts/README.md",
       "../LICENSE": "LICENSE",
       "../THIRD-PARTY.md": "THIRD-PARTY.md",
-      "../docs/CLI-手册.md": "docs/iJipu-CLI-手册.md",
       "../resources/bin/ijipu.cmd": "bin/ijipu.cmd"
     }
   }
