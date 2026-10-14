@@ -3,7 +3,7 @@
 > 这份文件讲**怎么用**（面向使用者）。命令行的**设计口径、协议与维护说明**在
 > `docs/CLI.md`（面向改代码的人）——两份分工不同，别把维护细节抄到这里。
 >
-> - 适用版本：**iJipu 0.59.0**（内嵌命令行 `adj942` / 注册 PATH `adj944` 起 /
+> - 适用版本：**iJipu 0.60.0**（内嵌命令行 `adj942` / 注册 PATH `adj944` 起 /
 >   **控制台垫片 `bin\ijipu.cmd` `adj946` 起**）
 > - 许可：**AGPL-3.0** ｜ 源码与问题反馈：<https://github.com/snailhome/ijipu>
 > - 装完 iJipu 就有命令行，**不需要另外装 Node**，也不需要联网。
@@ -25,7 +25,7 @@ ijipu.exe cli <命令> [选项]
 
   ```text
   > "%LOCALAPPDATA%\iJipu\bin\ijipu.cmd" cli --version
-  iJipu 0.59.0
+  iJipu 0.60.0
   ```
 
   ⚠ 上面用的是**命令行入口垫片**（`bin\ijipu.cmd`）。若直呼 `ijipu.exe` 本体，
@@ -145,7 +145,7 @@ ijipu.exe cli <命令> [选项]
 
 ```text
 > ijipu.exe cli --version
-iJipu 0.59.0
+iJipu 0.60.0
 
 > ijipu.exe cli --help
 iJipu 命令行（爱记谱）
@@ -216,7 +216,7 @@ iJipu 命令行（爱记谱）
 > ijipu.exe cli lint -i 我的谱.jps --json
 {
   "schema": 1,
-  "generator": "ijipu 0.59.0",
+  "generator": "ijipu 0.60.0",
   "input": "我的谱.jps",
   "ok": false,
   "errors": [
@@ -286,7 +286,7 @@ iJipu 命令行（爱记谱）
 > ijipu.exe cli info -i samples\ershenbu.jps --json
 {
   "schema": 1,
-  "generator": "ijipu 0.59.0",
+  "generator": "ijipu 0.60.0",
   "input": "samples\\ershenbu.jps",
   "title": null,
   "key": "C",
