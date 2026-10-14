@@ -18234,9 +18234,11 @@ runAdj927ExternalChangeTests()
     // adj944：本段要读注入的假宿主（异步）⇒ 与收尾那行**排成一条链**（否则会在断言跑完前就打印通过 ✗）
     // adj945：手册/随包分发那组也是文件驱动的同步断言，接在同一条链上 ✓
     // adj946：垫片 + 注册口径改成 bin 目录（用户实报 bug）—— 同样要读假宿主 ⇒ 接在链尾 ✓
+    // adj947：`cli` 前缀闸门（用户实报 `--help` 用法行漏 `cli`）—— 文件驱动的同步断言 ⇒ 接在链尾 ✓
     void runAdj944CliPathTests()
       .then(() => runAdj945CliManualTests())
       .then(() => runAdj946ShimTests())
+      .then(() => runAdj947CliPrefixTests())
       .then(() => {
         console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
         process.exit(failed === 0 ? 0 : 1)
@@ -24915,4 +24917,145 @@ async function runAdj946ShimTests() {
       !copySrc.split('新开一个终端').join('').includes('新开一个终端') && copySrc.includes('新开一个终端'),
     )
   }
+}
+
+/**
+ * [173] **`cli` 前缀闸门**（adj947，用户实报「`--help` 的用法行漏了 `cli`」）。
+ *
+ * 现象：`ijipu cli --help` 的用法行写成 `ijipu [全局选项] <命令> [命令选项]`（少一个 `cli`）⇒
+ * 用户照它敲 `ijipu lint 我的谱.jps`，**进的是图形界面**、命令一个都没跑 ✗。
+ * 根因不是"打错字"：命令行形态是 **`ijipu cli …`**（`ijipu.exe` 只认"第一个参数恰为 `cli`"分流，
+ * 见 `src-tauri/src/cli_embed.rs` 的 `split_cli_args`），而**垫片是透明的**（不替你补 `cli`，
+ * 补了会变成 `ijipu.exe cli cli …`）—— 所以凡"怎么敲"的地方漏 `cli`，用户都会掉进同一个坑。
+ *
+ * 为什么要有这一段：文案改起来没成本，**改错了也不报错**；而漏 `cli` 的症状是
+ * "命令看起来没反应、其实开了个窗口"。所以把三类"怎么敲"的地方一起钉住：
+ *  ① 手册 `docs/CLI-手册.md`（面向使用者，唯一对外口径）；
+ *  ② `docs/CLI.md`（维护口径，里面有"请在桌面端按这个清单验证"的命令表）；
+ *  ③ `src/brand/copy.ts`（设置「命令行」页签的全部文案；组件里不写字面量 ✓）。
+ * 判据**从源码驱动**（已知子命令集合取自 `cli.ts` 的 `known`）+ **每条配负对照** ✓。
+ *
+ * ⚠ **例外只有两种**（写进判据，且要求那一行**自带标记**，不是"整段放水"）：
+ *  · **反面例子**：行里有 `✗` / `不是` / `误区` —— 手册 §1.4「常见误区」表就是**故意**写错形态的；
+ *  · **独立 Node 包**：行里有 `Node 包` —— `@ijipu/cli` 的 bin 形态**本来就是**裸 `ijipu <命令>`
+ *    （`nodeEntry.ts` 把 argv 直接交给 `runCli`，没有 `cli` 这一层 ✓）。
+ *  把标记从行里去掉，判据立刻判红（负对照④）⇒ 证明例外是**窄**的。
+ */
+function runAdj947CliPrefixTests() {
+  console.log('[173] CLI 前缀闸门：凡"怎么敲"的地方都必须带 `cli`（adj947）')
+  const readOrEmpty = (rel: string): string => (existsSync(join(root, rel)) ? readFileSync(join(root, rel), 'utf8') : '')
+  const cliSrc = readOrEmpty('packages/ijipu-cli/src/cli.ts')
+  const manual = readOrEmpty('docs/CLI-手册.md')
+  const cliDoc = readOrEmpty('docs/CLI.md')
+  const copyTs = readOrEmpty('src/brand/copy.ts')
+  /** 已知子命令集合：**从源码里读**（`const known = new Set([...])`），不写死名单 ✓ */
+  const known = (() => {
+    const m = cliSrc.match(/const known = new Set\(\[([^\]]*)\]\)/)
+    return m === null ? [] : Array.from(m[1].matchAll(/'([^']+)'/g)).map((x) => x[1])
+  })()
+
+  // ---- ① 每个已知命令，在手册里都有一处**带 `cli` 的示例** ----
+  const hasCliExample = (text: string, c: string): boolean =>
+    new RegExp('ijipu(?:\\.exe)? cli ' + c + '\\b').test(text)
+  const noExample = known.filter((c) => !hasCliExample(manual, c))
+  check(
+    `adj947 手册里每个已知命令都有**带 \`cli\` 的示例**（从源码读到 ${known.length} 个命令）`,
+    known.length >= 13 && noExample.length === 0,
+    noExample.length > 0 ? `缺示例：${noExample.join(' ')}` : `known 只读到 ${known.length} 个（源码里的名单变了？）`,
+  )
+  check(
+    'adj947 负对照①：把手册里 `cli status` 的 `cli` 抹掉（＝那个命令的示例变成缺 `cli` 的形态）⇒ 判据判红',
+    (() => {
+      const cut = manual.split('cli status').join('status')
+      return cut !== manual && known.length >= 13 && !hasCliExample(cut, 'status') && hasCliExample(manual, 'status')
+    })(),
+  )
+
+  // ---- ② "缺 `cli` 的调用形态"扫描（手册 / CLI.md / 文案）----
+  /**
+   * 命中条件：行里出现 `ijipu`（可带 `.exe`）后**直接跟一个已知子命令**。
+   * `(?!cli\b)` 排除正确形态；非 ASCII 跟在 `ijipu` 后面的（如 `ijipu 我的谱.jps`）不匹配 ✓。
+   * 例外行必须**自带标记**（见函数头注释：反面例子 / 独立 Node 包）。
+   */
+  const EXEMPT_LINE = /✗|不是|误区|Node 包/
+  const missingCli = (text: string, exempt: RegExp = EXEMPT_LINE): string[] => {
+    const out: string[] = []
+    text.split('\n').forEach((l, i) => {
+      if (exempt.test(l)) return
+      for (const m of l.matchAll(/\bijipu(?:\.exe)?\s+(?!cli\b)([a-z][a-z-]*)/g)) {
+        if (known.includes(m[1])) out.push(`${i + 1}:${m[1]}`)
+      }
+    })
+    return out
+  }
+  const manMiss = missingCli(manual)
+  check('adj947 手册里没有"缺 `cli`"的调用形态（反面例子与 Node 包形态两条例外）', manMiss.length === 0, manMiss.join(' '))
+  check(
+    'adj947 负对照②：往手册里加一行**缺 `cli`** 的示例（`ijipu lint -i 我的谱.jps`）⇒ 判据判红',
+    missingCli(`${manual}\n> ijipu lint -i 我的谱.jps\n`).length === 1 && manMiss.length === 0,
+    missingCli(`${manual}\n> ijipu lint -i 我的谱.jps\n`).join(' '),
+  )
+  check(
+    'adj947 负对照③：同一行补上 `cli`（`ijipu cli lint …`）⇒ 判据不再报（证明它盯的是"缺 cli"、不是"出现过 lint"）',
+    missingCli(`${manual}\n> ijipu cli lint -i 我的谱.jps\n`).length === 0,
+  )
+  check(
+    'adj947 负对照④：把手册 §1.4 反面例子的标记（`✗` / `不是`）去掉 ⇒ 例外失效、判据判红（证明例外是**窄**的，不是放水）',
+    (() => {
+      const noMark = manual.split(' ✗').join('').split('不是').join('')
+      return noMark !== manual && missingCli(noMark).length > 0 && manMiss.length === 0
+    })(),
+    missingCli(manual.split(' ✗').join('').split('不是').join('')).join(' '),
+  )
+  const docMiss = missingCli(cliDoc)
+  check(
+    'adj947 `docs/CLI.md` 里没有"缺 `cli`"的调用形态（"请在桌面端验证"那张表也用带 `cli` 的形态）',
+    docMiss.length === 0,
+    docMiss.join(' '),
+  )
+  check(
+    'adj947 负对照⑤：往 `docs/CLI.md` 加一行缺 `cli` 的示例（`ijipu render -i 谱.jps -t svg -o a.svg`）⇒ 判据判红',
+    missingCli(`${cliDoc}\nijipu render -i 谱.jps -t svg -o a.svg\n`).length === 1 && docMiss.length === 0,
+  )
+  const copyMiss = missingCli(copyTs)
+  check('adj947 `src/brand/copy.ts`（设置「命令行」页签的全部文案）里没有"缺 `cli`"的调用形态', copyMiss.length === 0, copyMiss.join(' '))
+  check(
+    'adj947 负对照⑥：把 `copy.ts` 里那句示例的 `cli` 抹掉（`ijipu cli lint 我的谱.jps` ⇒ `ijipu lint 我的谱.jps`）⇒ 判据判红',
+    (() => {
+      const cut = copyTs.split('ijipu cli lint 我的谱.jps').join('ijipu lint 我的谱.jps')
+      return cut !== copyTs && missingCli(cut).length > 0 && copyMiss.length === 0
+    })(),
+  )
+
+  // ---- ③ 页签那两句提示也点明形态 ----
+  check(
+    'adj947 设置「命令行」页签的两句提示里也有带 `cli` 的形态（`ijipu cli --version` / `ijipu cli …`）',
+    copyTs.includes('ijipu cli --version') && copyTs.includes('ijipu cli …') &&
+      copyTs.includes('hintNewTerminal') && copyTs.includes('hintCurrentUser'),
+  )
+
+  // ---- ④ 手册要有"常见误区"一节，写明 `ijipu.exe --help` 不带 `cli` 会**开图形界面** ----
+  check(
+    'adj947 手册有「常见误区」一节，写明"不带 `cli` 会打开图形界面"与 `ijipu.exe --help`（不带 `cli`）**不打印帮助**',
+    manual.includes('常见误区') && manual.includes('ijipu.exe --help') && manual.includes('不打印命令行帮助') &&
+      manual.includes('ijipu lint 我的谱.jps') && manual.includes('ijipu cli lint 我的谱.jps'),
+  )
+  check(
+    'adj947 负对照⑦：把「常见误区」这一节的标题改掉（＝手册里没有这一节）⇒ 判据判红',
+    (() => {
+      const cut = manual.replace('### 1.4 常见误区', '### 1.4 其它')
+      return cut !== manual && !cut.includes('常见误区') && manual.includes('常见误区')
+    })(),
+  )
+
+  // ---- ⑤ 手册里引用的 `--help` 输出，那句用法行必须与程序里的**逐字一致** ----
+  const USAGE_OK = '用法：ijipu cli [全局选项] <命令> [命令选项]'
+  check('adj947 手册里引用的 `--help` 输出含正确用法行（与程序里那句逐字一致）', manual.includes(USAGE_OK))
+  check(
+    'adj947 负对照⑧：把手册里那句用法行的 `cli` 抹掉（＝手册还印着旧的错用法行）⇒ 判据判红',
+    (() => {
+      const cut = manual.split(USAGE_OK).join(USAGE_OK.replace('ijipu cli', 'ijipu'))
+      return cut !== manual && !cut.includes(USAGE_OK) && manual.includes(USAGE_OK)
+    })(),
+  )
 }

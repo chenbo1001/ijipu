@@ -99,6 +99,25 @@ ijipu.exe cli <命令> [选项]
 > 垫片是**透明**的：它只把参数原样转给 `ijipu.exe`，**不会**替你补 `cli` 子命令 ⇒
 > 命令行形态仍然是 `ijipu cli <命令>`；`ijipu 我的谱.jps`（不带 `cli`）照旧打开图形界面。
 
+### 1.4 常见误区：不带 `cli` 会**打开图形界面**（不是"命令没生效"）
+
+命令行与图形界面是**同一个 `ijipu.exe`**，靠"第一个参数是不是 `cli`"分流。所以下面这些写法
+**不执行命令**，而是照旧拉起窗口 —— 屏幕上出现界面时，别以为是"命令跑挂了"：
+
+| 你敲的（✗ 会开图形界面） | 实际发生的事 | 正确写法（✓） |
+|---|---|---|
+| `ijipu lint 我的谱.jps` ✗ | 拉起图形界面（`lint` 不是 `.jps` 路径 ⇒ 被忽略）⇒ **一个语法检查都没做**，命令行这边一个字都不打印 | `ijipu cli lint 我的谱.jps` |
+| `ijipu.exe --help` ✗ | 拉起图形界面，**不打印命令行帮助**（"看用法"要显式写 `cli`） | `ijipu.exe cli --help` |
+| `ijipu --version` ✗ | 同上，拉起图形界面 | `ijipu cli --version` |
+| `ijipu 我的谱.jps`（✓ 有意为之） | 打开图形界面并载入这份谱 —— 双击 `.jps`、文件关联走的就是这条路 | 想用命令行就写 `ijipu cli …` |
+
+> 一句话：**注册 PATH 省掉的是"路径"，不是"`cli`"** —— 形态永远是 `ijipu cli <命令>` ✓。
+> 垫片也不会替你补（补了会变成 `ijipu.exe cli cli …`，实测报「命令 "cli" 尚未实现」✗）。
+>
+> 上面这些现象都在 Windows 上实测过（下面两个 **✗ 形态**各起了一个应用窗口，
+> 标题都是「爱记谱 iJipu - v0.59.0」、进程一直活着，而 **stdout / stderr 都是 0 字节**：
+> `ijipu.exe --help` ✗ 与 `ijipu.exe lint samples\ershenbu.jps` ✗ —— 后者连"要检查的那份谱"都没被检查）。
+
 ---
 
 ## 二、命令集（逐条：真实示例 + 真实输出）
@@ -131,7 +150,11 @@ iJipu 0.58.0
 > ijipu.exe cli --help
 iJipu 命令行（爱记谱）
 
-用法：ijipu [全局选项] <命令> [命令选项]
+用法：ijipu cli [全局选项] <命令> [命令选项]
+
+⚠ 第一个参数必须**恰好**是 cli：命令行与图形界面是同一个 exe，靠它分流。
+  不带 cli 时（例如 ijipu 我的谱.jps、ijipu --help）会照旧**打开图形界面**，不执行命令。
+  注册 PATH 之后终端里的 ijipu 是控制台垫片 bin\ijipu.cmd：它**原样转交**参数、不替你补 cli。
 
 命令：
   format        -i <文件|-> [-o <文件|->] [--check] [--in-place] [--diff]     按应用规范规范化源码
@@ -310,7 +333,7 @@ iJipu 命令行（爱记谱）
 ```text
 > ijipu.exe cli render -i 我的谱.jps -t png -o 我的谱.png
 -t png 需要"隐藏窗口渲染"通道（桌面端 exe 内置）；当前环境没有该能力。
-  可用：-t svg（矢量，任意环境）｜或改用桌面端：ijipu render -i <谱> -t png -o <输出>
+  可用：-t svg（矢量，任意环境）｜或改用桌面端：ijipu cli render -i <谱> -t png -o <输出>
 （退出码 4）
 ```
 
@@ -329,7 +352,7 @@ iJipu 命令行（爱记谱）
 ```text
 > ijipu.exe cli play -i 我的谱.jps -t wav -o 我的谱.wav
 WAV 需要采样合成（音色库 + AudioContext），当前环境没有该能力。
-  可用：-t midi（任意环境）｜或改用桌面端：ijipu play -i <谱> -t wav -o <输出.wav>
+  可用：-t midi（任意环境）｜或改用桌面端：ijipu cli play -i <谱> -t wav -o <输出.wav>
 （退出码 4）
 ```
 
@@ -397,7 +420,7 @@ iJipu CLI doctor
 
 ```text
 > ijipu.exe cli completions powershell
-# iJipu PowerShell 补全：ijipu completions powershell | Out-String | Invoke-Expression
+# iJipu PowerShell 补全（桌面端）：ijipu cli completions powershell | Out-String | Invoke-Expression
 Register-ArgumentCompleter -Native -CommandName ijipu -ScriptBlock {
   param($wordToComplete, $commandAst, $cursorPosition)
   @('format','lint','info','render','play','batch','settings','config','doctor','completions','register','unregister','status') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
@@ -407,6 +430,8 @@ Register-ArgumentCompleter -Native -CommandName ijipu -ScriptBlock {
 ```
 
 按提示「照着那一行执行」就装上了；也支持 `bash` / `zsh`。
+（上面那段提示是**桌面端形态** —— 第一行里的 `ijipu cli …` 要带 `cli`。
+独立 Node 包（§三 的乙）装好后命令名才是裸 `ijipu`，那里没有 `cli` 这一层。）
 （补全对 `ijipu` 这个命令名生效 ⇒ 先注册 PATH 才有意义。）
 
 ### `register` / `unregister` / `status`

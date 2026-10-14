@@ -385,10 +385,10 @@ ijipu.exe cli render -i 谱.jps -t png -o out.png
 ### 请你在桌面端按这个清单验证（我在此环境无法跑 GUI ✗）
 | # | 命令 | 期望 |
 |---|---|---|
-| 1 | `ijipu --help`（Node 包）／`ijipu.exe cli --help`（内嵌版） | 都打印 CLI 用法 ✓；`ijipu.exe --help`（**没有 `cli`**）则**照旧弹 GUI**（口径见 §一） |
-| 2 | `ijipu lint -i 我的谱.jps` 或 `ijipu.exe cli lint -i 我的谱.jps` | 两者结果一致 ✓（**不需要宿主**） |
-| 3 | `ijipu render -i 我的谱.jps -t svg -o a.svg`（或内嵌版同理） | 生成 SVG ✓（不需要宿主） |
-| 4 | 应用在跑（见 §七之三 的开启方式）时 `ijipu render -i 我的谱.jps -t png -o a.png` | **生成 PNG ✓**；与应用「导出 PNG」**逐像素一致**（同 scale 下可对哈希 ✓） |
+| 1 | `ijipu.exe cli --help`（内嵌版）／`ijipu --help`（Node 包） | 都打印 CLI 用法 ✓；`ijipu.exe --help`（**没有 `cli`**）则**照旧弹 GUI** —— `adj947` 已实测：窗口标题「爱记谱 iJipu - v0.59.0」、进程一直活着、**stdout/stderr 都是 0 字节** ✓（口径见 §一） |
+| 2 | `ijipu.exe cli lint -i 我的谱.jps`（内嵌版）或 `ijipu lint -i 我的谱.jps`（Node 包） | 两者结果一致 ✓（**不需要宿主**） |
+| 3 | `ijipu.exe cli render -i 我的谱.jps -t svg -o a.svg`（Node 包形态去掉 `cli`，下同） | 生成 SVG ✓（不需要宿主） |
+| 4 | 应用在跑（见 §七之三 的开启方式）时 `ijipu.exe cli render -i 我的谱.jps -t png -o a.png` | **生成 PNG ✓**；与应用「导出 PNG」**逐像素一致**（同 scale 下可对哈希 ✓） |
 | 5 | 同上 `-t pdf` | 生成 PDF，页数与 GUI 导出一致 ✓ |
 | 6 | 同上 `play -i 我的谱.jps -t wav -o a.wav` | 生成 WAV（需音色库就绪 ✓；缺音色库应**明确报错** ✗ 而不是静默出空文件 ✓） |
 | 7 | 双击一个 `.jps`（第一个参数是路径） | **照旧打开 GUI** ✓（`adj942` 加了 CLI 分流后**仍然如此**：只有第一个参数恰为 `cli` 才走命令行 —— 本轮已实测：`Start-Process ijipu.exe samples\ershenbu.jps` 起来的窗口一直活着 ✓） |
@@ -445,4 +445,7 @@ $env:IJIPU_CLI_HOST = "1"; .\ijipu.exe      # 或：.\ijipu.exe --cli-host
    它属于"壳"，不进 CLI 包 ✓；
 4. **未实现就报错**：不给"看起来成功了"的假象 ✗（退出码 1 + 明确提示 ✓）；
 5. **凡新增命令**：同步更新本文件 + `--help` + 冒烟用例；`--help` 与命令集合的**一致性有闸门**
-   （`adj874`：列全命令 + 负对照"不许把已实现的写成未实现"）✓。
+   （`adj874`：列全命令 + 负对照"不许把已实现的写成未实现"）✓；
+   `adj947`：**`--help` 的"用法"行必须带 `cli`**（用户实报漏了 `cli`、照它敲会走进 GUI ✗）——
+   闸门在 `cli-assert`（对**真实 `--help` 输出**断言 + 负对照），手册/`copy.ts` 里的"怎么敲"
+   由冒烟 `adj947` 那组按"不许出现缺 `cli` 的调用形态"钉住 ✓。

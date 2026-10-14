@@ -655,6 +655,85 @@ console.log('\n— 命令行（A·P1–P4）—')
   }
 }
 
+// ⑪ adj947（用户实报）：`--help` 的"用法"行必须带 `cli`
+{
+  const io = makeIo({})
+  await runCli(['--help'], io.io, { version: '9.9.9' })
+  const help = String(io.logs.join(''))
+  /**
+   * 用法行 = 帮助里唯一以 `用法：` 开头的那一行（**行首匹配**，别用 `includes` ✗）。
+   * 判据是**逐字相等**、不是 `includes('cli')`：`ijipu cli [全局选项]` 与 `ijipu [全局选项]`
+   * 的差别就在那一个词上，而 `includes('cli')` 会被"iJipu CLI"这类字样满足 ⇒ 判据太松 ✗。
+   */
+  const usageLine = (text: string): string => text.split('\n').find((l) => l.startsWith('用法：')) ?? ''
+  const USAGE_OK = '用法：ijipu cli [全局选项] <命令> [命令选项]'
+  check(`adj947 --help 的用法行逐字是 \`${USAGE_OK}\``, usageLine(help) === USAGE_OK, `实际=${JSON.stringify(usageLine(help))}`)
+  check('adj947 --help 里不再出现旧的 `ijipu [全局选项]`（用户实报的那一行）', !help.includes('ijipu [全局选项]'))
+  const legacy = help.replace('ijipu cli [全局选项]', 'ijipu [全局选项]')
+  check(
+    'adj947 负对照①：把用法行改回 `ijipu [全局选项] …`（＝用户实报的写法）⇒ 判据判红',
+    legacy !== help && usageLine(legacy) !== USAGE_OK && usageLine(legacy) === '用法：ijipu [全局选项] <命令> [命令选项]',
+    `改坏后=${JSON.stringify(usageLine(legacy))}`,
+  )
+  const moved = help.replace('ijipu cli [全局选项]', 'ijipu [全局选项]').replace('iJipu 命令行', 'iJipu 命令行 cli')
+  check(
+    'adj947 负对照②：把 `cli` 挪出用法行、塞进标题（＝`includes("cli")` 那种松判据会放过）⇒ 判据仍判红',
+    moved !== help && moved.includes('cli') && usageLine(moved) !== USAGE_OK,
+    `实际=${JSON.stringify(usageLine(moved))}`,
+  )
+  /**
+   * 用法行以外的"示例命令"：帮助里凡把 `ijipu` / `ijipu.exe` 当命令名、后面**直接跟一个已知子命令**
+   * 的地方，都必须先有 `cli`。已知命令名单**从 `cli.ts` 源码里读**（不写死 ✓）。
+   * ⚠ 刻意不含"`ijipu 某个谱.jps`"这类形态：那是**对的**用法（双击/文件关联），不是漏 `cli` ✓。
+   */
+  const cliSrcForHelp = readFileSync('packages/ijipu-cli/src/cli.ts', 'utf8')
+  const knownSrc = cliSrcForHelp.match(/const known = new Set\(\[([^\]]*)\]\)/)
+  const KNOWN = knownSrc === null ? [] : Array.from(knownSrc[1].matchAll(/'([^']+)'/g)).map((x) => x[1])
+  const bareInvocations = (text: string): string[] => {
+    const out: string[] = []
+    for (const l of text.split('\n')) {
+      for (const m of l.matchAll(/\bijipu(?:\.exe)?\s+(?!cli\b)([a-z][a-z-]*)/g)) if (KNOWN.includes(m[1])) out.push(m[1])
+    }
+    return out
+  }
+  check(
+    `adj947 --help 里没有"缺 cli"的示例命令（名单从源码读到 ${KNOWN.length} 个）`,
+    KNOWN.length >= 13 && bareInvocations(help).length === 0,
+    `命中：${bareInvocations(help).join(' ')}`,
+  )
+  check(
+    'adj947 负对照③：往帮助里插一行 `ijipu lint -i a.jps`（＝漏 `cli` 的示例）⇒ 判据判红',
+    bareInvocations(`${help}\n  ijipu lint -i a.jps\n`).length === 1 && bareInvocations(help).length === 0,
+  )
+  check(
+    'adj947 负对照④：同一行写成 `ijipu.exe cli lint -i a.jps` ⇒ 判据不再报（证明它盯的是"缺 cli"、不是"出现过 lint"）',
+    bareInvocations(`${help}\n  ijipu.exe cli lint -i a.jps\n`).length === 0,
+  )
+  /**
+   * adj947（实测顺手抓到的**同族**缺陷）：HELP 是**模板字符串** ⇒ 里面的 `\b` 会被 JS 当成
+   * **退格符**（不是"反斜杠 + b"），用户看到的是 `<安装>in` 这种被吃掉一个字的乱码
+   * （`E-2026-396` 的"模板字符串里反引号"同族：**模板字符串里的转义字符**）。
+   * 判据：帮助输出里除 `\n` / `\t` 之外**不许出现控制字符** ✓。
+   */
+  const ctrlChars = (text: string): number[] =>
+    Array.from(text)
+      .map((c) => c.codePointAt(0) ?? 0)
+      .filter((n) => n < 32 && n !== 10 && n !== 9)
+  check(
+    'adj947 --help 里没有控制字符（除换行/制表）—— 模板字符串里的 `\\b` 会被当成退格符、把字吃掉',
+    ctrlChars(help).length === 0,
+    `控制字符码点：${ctrlChars(help).join(',')}`,
+  )
+  check(
+    'adj947 负对照⑤：往帮助里插一个 `\\b`（＝模板字符串里那个坑的原始形态）⇒ 判据判红',
+    ctrlChars(`${help}\n<安装目录>\bin\n`).length >= 1 && ctrlChars(help).length === 0,
+  )
+  check(
+    'adj947 --help 里的 `<安装目录>\\bin` 是**字面反斜杠**（目录名写全，不是被吃成退格的形态）',
+    help.includes('<安装目录>\\bin'),
+  )
+}
+
 console.log(failed === 0 ? `\nCLI 断言全部通过 ✅（${passed} 项）` : `\nCLI 断言失败 ${failed} 项 ❌`)
 process.exit(failed === 0 ? 0 : 1)
 }

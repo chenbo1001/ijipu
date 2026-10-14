@@ -99,7 +99,11 @@ const line = (io: CliIo, text: string): void => {
 
 const HELP = `iJipu 命令行（爱记谱）
 
-用法：ijipu [全局选项] <命令> [命令选项]
+用法：ijipu cli [全局选项] <命令> [命令选项]
+
+⚠ 第一个参数必须**恰好**是 cli：命令行与图形界面是同一个 exe，靠它分流。
+  不带 cli 时（例如 ijipu 我的谱.jps、ijipu --help）会照旧**打开图形界面**，不执行命令。
+  注册 PATH 之后终端里的 ijipu 是控制台垫片 bin\\ijipu.cmd：它**原样转交**参数、不替你补 cli。
 
 命令：
   format        -i <文件|-> [-o <文件|->] [--check] [--in-place] [--diff]     按应用规范规范化源码
@@ -113,7 +117,7 @@ const HELP = `iJipu 命令行（爱记谱）
   config        -i <谱> [-t effective] [--quiet]                              打印生效设置全表 + 每项来源
   doctor        [--json]                                                      环境自检（如实报告能力有无）
   completions   bash|zsh|powershell                                           输出 shell 补全脚本
-  register      [--json]                                                      把命令行入口目录（<安装>\bin）注册进当前用户 PATH
+  register      [--json]                                                      把命令行入口目录（<安装目录>\\bin）注册进当前用户 PATH
   unregister    [--json]                                                      从当前用户 PATH 里解除注册
   status        [--json]                                                      看是否已注册（**读系统实况**）
 
@@ -135,7 +139,7 @@ const HELP = `iJipu 命令行（爱记谱）
 
 注册类命令（register / unregister / status）**只在内嵌版可用**（ijipu.exe cli register）：
   它要读写当前用户的 PATH / App Paths，这个能力由桌面端注入；独立 Node 环境 ⇒ 退出码 6 + 原因。
-  注册写进 PATH 的是**命令行入口目录 <安装目录>\bin**（里面有控制台垫片 ijipu.cmd）——
+  注册写进 PATH 的是**命令行入口目录 <安装目录>\\bin**（里面有控制台垫片 ijipu.cmd）——
   ijipu.exe 是 GUI 子系统程序，cmd 不等它（提示符会夹在输出中间、退出码也拿不到）；
   cmd **会等批处理文件** ⇒ 垫片把输出顺序/退出码/重定向一次性修好，而双击 .jps 照旧不闪黑框。
   注册后**要新开一个终端**才生效（已开着的终端看不到新 PATH）；只对**当前用户**生效、不需要管理员。
@@ -409,10 +413,18 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
   if (p.command === 'completions') {
     const shell = (p.inputs[0] ?? p.type ?? 'bash').toLowerCase()
     const COMMANDS = 'format lint info render play batch settings config doctor completions register unregister status'
+    /**
+     * adj947（用户实报：`--help` 的用法行漏了 `cli`）：这三行**注释提示本身就是"怎么敲"**，
+     * 同样必须带 `cli` —— 否则用户照抄 `ijipu completions powershell` 会走进图形界面 ✗。
+     * ⚠ 这里**只改提示文案、不动补全逻辑**：脚本里的命令补全位次（bash 的 `COMP_CWORD -eq 1`、
+     * zsh 的 `'1:command:…'`）是按 **Node 包形态**（`ijipu <命令>`）写的，
+     * 与桌面端形态（`ijipu cli <命令>`）差一个参数位 —— 改它是**行为变更**，
+     * 已在报告里列出待用户裁定，本轮不动 ✗（改了会让 Node 包那边的补全反过来坏掉）。
+     */
     const scripts: Record<string, string> = {
-      bash: `# iJipu bash 补全：source <(ijipu completions bash)\n_ijipu() {\n  local cur="\${COMP_WORDS[COMP_CWORD]}"\n  if [ "\$COMP_CWORD" -eq 1 ]; then COMPREPLY=( \$(compgen -W "${COMMANDS}" -- "\$cur") ); return; fi\n  COMPREPLY=( \$(compgen -f -- "\$cur") )\n}\ncomplete -F _ijipu ijipu\n`,
-      zsh: `# iJipu zsh 补全：ijipu completions zsh > "\${fpath[1]}/_ijipu"\n#compdef ijipu\n_ijipu() { _arguments '1:command:(${COMMANDS})' '*:file:_files' }\n_ijipu "\$@"\n`,
-      powershell: `# iJipu PowerShell 补全：ijipu completions powershell | Out-String | Invoke-Expression\nRegister-ArgumentCompleter -Native -CommandName ijipu -ScriptBlock {\n  param(\$wordToComplete, \$commandAst, \$cursorPosition)\n  @('${COMMANDS.split(' ').join("','")}') | Where-Object { \$_ -like "\$wordToComplete*" } | ForEach-Object {\n    [System.Management.Automation.CompletionResult]::new(\$_, \$_, 'ParameterValue', \$_)\n  }\n}\n`,
+      bash: `# iJipu bash 补全（桌面端）：source <(ijipu cli completions bash)\n_ijipu() {\n  local cur="\${COMP_WORDS[COMP_CWORD]}"\n  if [ "\$COMP_CWORD" -eq 1 ]; then COMPREPLY=( \$(compgen -W "${COMMANDS}" -- "\$cur") ); return; fi\n  COMPREPLY=( \$(compgen -f -- "\$cur") )\n}\ncomplete -F _ijipu ijipu\n`,
+      zsh: `# iJipu zsh 补全（桌面端）：ijipu cli completions zsh > "\${fpath[1]}/_ijipu"\n#compdef ijipu\n_ijipu() { _arguments '1:command:(${COMMANDS})' '*:file:_files' }\n_ijipu "\$@"\n`,
+      powershell: `# iJipu PowerShell 补全（桌面端）：ijipu cli completions powershell | Out-String | Invoke-Expression\nRegister-ArgumentCompleter -Native -CommandName ijipu -ScriptBlock {\n  param(\$wordToComplete, \$commandAst, \$cursorPosition)\n  @('${COMMANDS.split(' ').join("','")}') | Where-Object { \$_ -like "\$wordToComplete*" } | ForEach-Object {\n    [System.Management.Automation.CompletionResult]::new(\$_, \$_, 'ParameterValue', \$_)\n  }\n}\n`,
     }
     const text = scripts[shell]
     if (text === undefined) {
@@ -595,7 +607,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       if (io.synthesize === undefined) {
         io.err(
           'WAV 需要采样合成（音色库 + AudioContext），当前环境没有该能力。\n' +
-            '  可用：-t midi（任意环境）｜或改用桌面端：ijipu play -i <谱> -t wav -o <输出.wav>',
+            '  可用：-t midi（任意环境）｜或改用桌面端：ijipu cli play -i <谱> -t wav -o <输出.wav>',
         )
         return { code: EXIT.render }
       }
@@ -735,7 +747,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       if (io.rasterize === undefined) {
         io.err(
           `-t ${type} 需要"隐藏窗口渲染"通道（桌面端 exe 内置）；当前环境没有该能力。\n` +
-            `  可用：-t svg（矢量，任意环境）｜或改用桌面端：ijipu render -i <谱> -t ${type} -o <输出>`,
+            `  可用：-t svg（矢量，任意环境）｜或改用桌面端：ijipu cli render -i <谱> -t ${type} -o <输出>`,
         )
         return { code: EXIT.render }
       }
