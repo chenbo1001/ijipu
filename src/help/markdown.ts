@@ -267,21 +267,35 @@ function showInlineEscapes(html: string): string {
 }
 
 /**
- * 行内 Markdown：`code`、**bold**、*italic*、[text](url)。普通文本 HTML 转义，语法片段包裹标签。
+ * 行内 Markdown：`code`、**bold**、*italic*、[text](url)、**![alt](图片)**。普通文本 HTML 转义，语法片段包裹标签。
  *
  * adj913：进来先 `hideInlineEscapes()`（`\`` / `\\` 占位）、出去再 `showInlineEscapes()` 还原 ——
  * 于是"句子中间的字面反引号"与"行内代码配对"两件事互不干扰。
+ *
+ * adj949（用户要求「手册中可以有更多的示例和截图」）：补**图片**支持 ——
+ * 文档里的 `![说明](/docs/cli/xxx.png)` 现在产出真正的 `<img>`。
+ * 口径：
+ *   · **必须写在图片前面**（正则第一支），否则 `[说明](url)` 会先被链接那支吃掉，
+ *     页面上留下一个字面的 `!` 加一个链接（改前的行为就是这样）；
+ *   · 路径**原样透传**（`public/` 下的绝对网络路径 `/…` 在官网直接可取），只把 `"` 转义掉；
+ *   · `alt` 只做 HTML 转义（不递归解析行内语法 —— 图片说明里不需要粗体/链接）；
+ *   · `loading="lazy"`：文档页可能很长，图片不该拖慢首屏。
  */
 export function inlineMd(raw: string): string {
   const src = hideInlineEscapes(raw)
-  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[[^\]]+\]\([^)]+\))/g
+  const re = /(!\[[^\]]*\]\([^)]+\))|(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[[^\]]+\]\([^)]+\))/g
   let out = ''
   let last = 0
   let m: RegExpExecArray | null
   while ((m = re.exec(src))) {
     out += esc(src.slice(last, m.index))
     const tok = m[0]
-    if (tok[0] === '`') {
+    if (tok.startsWith('![')) {
+      const inner = tok.match(/^!\[([^\]]*)\]\(([^)]+)\)$/)
+      const alt = inner ? inner[1] : ''
+      const img = inner ? inner[2].replace(/"/g, '&quot;') : ''
+      out += `<img src="${img}" alt="${esc(alt)}" loading="lazy" />`
+    } else if (tok[0] === '`') {
       out += `<code>${esc(tok.slice(1, -1))}</code>`
     } else if (tok.startsWith('**')) {
       out += `<strong>${inlineMd(tok.slice(2, -2))}</strong>`

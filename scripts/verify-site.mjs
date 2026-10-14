@@ -803,6 +803,13 @@ async function main() {
        */
       await c.send('Page.navigate', { url: `${origin}/cli/` })
       await sleep(1400)
+      /**
+       * adj949（用户要求「手册中可以有更多的示例和截图」）：`docs/CLI-手册.md` 正文里嵌了一张
+       * **"这一页长什么样"**的截图（`/docs/cli/manual-page.png`，素材就是下面这张 `cli-first-screen.png`）。
+       * 出图前先把它摘掉 ⇒① 免得**自己截自己**（图里套图）；② 免得"这张素材还没生成"时截到一个破图。
+       * 只影响这两张**仅供人工检查 / 供手册引用**的图，任何断言都不看它们 ✓。
+       */
+      await evalJs(c, `document.querySelectorAll('#doc-body img').forEach((el) => el.remove())`)
       await saveShot('cli-first-screen.png', await shoot('png'))
       await saveShot('cli.png', await shoot('png', { captureBeyondViewport: true }))
       /**
@@ -1777,6 +1784,58 @@ async function main() {
           JSON.stringify(neg))
         const cliErrs = collectErrors(mark)
         check('adj948 `/cli/`：无控制台错误 / 无本站 4xx', cliErrs.length === 0, cliErrs.slice(0, 4).join(' | '))
+
+        /**
+         * adj949（用户追加要求「手册中可以有更多的示例和截图」）：**图片真的取得到**。
+         *
+         * 判据两层，缺一不可：
+         *   ① **服务端**：手册里 `![…](/docs/cli/x.png)` 引用的每个路径，在 `dist/` 里都得是真文件
+         *      （`npm run build` 会把 `public/` 复制进 `dist/`）—— 这一层抓"图片忘了提交/忘了放对目录"；
+         *   ② **页面里**：正文每个 `<img>` 的 `naturalWidth > 0`（真的下载 + 解码成功），
+         *      而不是"DOM 里有个 img 标签"—— 这一层抓"路径写错 / 大小写不符 / 被 SW 拦掉"。
+         *
+         * 负对照（**必须为假**，放在最后做、且**不能**影响上面那条"无本站 4xx"）：
+         * 把某一处 `src` 换成一个**坏掉的 `data:` URL**（不是网络路径）⇒ 该图解码失败、
+         * `naturalWidth === 0` ⇒ 判据判假。用 `data:` 是刻意的：**不产生任何网络请求**，
+         * 否则这次故意的失败会被后面那些"无本站 4xx"断言记在账上
+         * （`collectErrors` 看的是整段事件流，实测一个 404 会串到好几页的检查里 ✗）。
+         */
+        const imgPathsOf = (md) => Array.from(md.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)).map((m) => m[1])
+        const CLI_IMG_PATHS = imgPathsOf(readFileSync(path.join(ROOT, 'docs', 'CLI-手册.md'), 'utf8'))
+        const missingImgFiles = CLI_IMG_PATHS.filter((p) => !existsSync(path.join(DIST, p.replace(/^\//, ''))))
+        check(`adj949 \`/cli/\`：手册引用的 ${CLI_IMG_PATHS.length} 张图片在 \`dist/\` 里都是真文件（${CLI_IMG_PATHS.join(' ')}）`,
+          CLI_IMG_PATHS.length >= 1 && missingImgFiles.length === 0, missingImgFiles.join(' '))
+        const imgState = await evalJs(
+          c,
+          `(() => {
+            const imgs = [...document.querySelectorAll('#doc-body img')]
+            return {
+              n: imgs.length,
+              ok: imgs.filter((i) => i.complete && i.naturalWidth > 0).length,
+              srcs: imgs.map((i) => i.getAttribute('src')),
+            }
+          })()`,
+        )
+        check(`adj949 \`/cli/\`：正文里 ${imgState?.n ?? 0} 张图**全部真的取到了**（naturalWidth > 0）`,
+          (imgState?.n ?? 0) >= 1 && imgState?.ok === imgState?.n, JSON.stringify(imgState))
+        const imgNeg = await evalJs(
+          c,
+          `(async () => {
+            const img = document.querySelector('#doc-body img')
+            if (!img) return { skip: true }
+            const before = img.getAttribute('src')
+            const okBefore = img.complete && img.naturalWidth > 0
+            img.src = 'data:image/png;base64,___adj949_broken___'
+            await new Promise((r) => setTimeout(r, 700))
+            const okAfter = img.complete && img.naturalWidth > 0
+            img.src = before
+            await new Promise((r) => setTimeout(r, 700))
+            return { okBefore, okAfter, restored: img.complete && img.naturalWidth > 0 }
+          })()`,
+        )
+        check('adj949 负对照：把图片 src 换成一个坏掉的 `data:` URL（不产生网络请求）⇒ 判据判假（不是"有 img 标签就算过"），换回来又为真',
+          imgNeg?.okBefore === true && imgNeg?.okAfter === false && imgNeg?.restored === true,
+          JSON.stringify(imgNeg))
       }
 
       /**

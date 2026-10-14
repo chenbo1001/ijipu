@@ -1,11 +1,12 @@
 /**
- * docs/docs.css — 官网文档页（`/manual/`、`/syntax/`）样式（adj876）
+ * docs/docs.css — 官网文档页（`/manual/`、`/syntax/`、`/plugin/`、`/cli/`）样式（adj876）
  *
- * 只被 `src/docs/render.ts` 引入（两个文档页共用），**不进应用 bundle、也不进首页**。
+ * 只被 `src/docs/render.ts` 引入（四个文档页共用），**不进应用 bundle、也不进首页**。
  * 色值一律走 `--site-*` 变量（由 `brand/siteVars.ts` 注入），主题与应用一致：深色。
  *
  * 正文的 HTML 结构由 `help/markdown.ts` 产出（h1–h6 / p / ul·ol / pre / table.doc-md-table /
- * blockquote / code / a），所以下面的正文样式是**按那份产出**写的，两边改动要一起看。
+ * blockquote / code / a / **img**（adj949）），所以下面的正文样式是**按那份产出**写的，
+ * 两边改动要一起看。
  */
 
 :root {
@@ -270,6 +271,22 @@ html[data-site-mode='light'] .theme-toggle .ico-moon { display: inline; }
   border-radius: 0 8px 8px 0;
 }
 .doc-body blockquote p { margin: 4px 0; }
+
+/*
+  图片（adj949：用户要求"手册中可以有更多的示例和截图"）——
+  `help/markdown.ts` 现在把 `![说明](/…png)` 产出 `<img>`。
+  口径：**永远不超过正文列宽**（截图原图 1440px 宽，放任自然尺寸会把整页撑宽，
+  与 adj911 修过的"窄屏被撑宽"是同一族问题）；高度自适应；下方留一点间距。
+  深色主题下截图（浅底）会显得刺眼，给一圈描边让它"像一张图"。
+*/
+.doc-body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 14px 0;
+  border: 1px solid var(--site-border);
+  border-radius: 8px;
+}
 
 /* 加载占位（正文由 JS 注入，注入前显示） */
 #doc-body:empty::before {

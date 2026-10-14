@@ -18237,11 +18237,13 @@ runAdj927ExternalChangeTests()
     // adj946：垫片 + 注册口径改成 bin 目录（用户实报 bug）—— 同样要读假宿主 ⇒ 接在链尾 ✓
     // adj947：`cli` 前缀闸门（用户实报 `--help` 用法行漏 `cli`）—— 文件驱动的同步断言 ⇒ 接在链尾 ✓
     // adj948：官网文案规范 + 新增 `/cli/` 命令行手册 —— 也是文件驱动的同步断言 ⇒ 接在链尾 ✓
+    // adj949：手册只讲"有什么/怎么用"（用户要求）+ 手册里的图片 —— 同样文件驱动 ⇒ 接在链尾 ✓
     void runAdj944CliPathTests()
       .then(() => runAdj945CliManualTests())
       .then(() => runAdj946ShimTests())
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
+      .then(() => runAdj949ManualScopeTests())
       .then(() => {
         console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
         process.exit(failed === 0 ? 0 : 1)
@@ -22307,6 +22309,37 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   }
 
   /**
+   * ---- adj949（**用户追加要求**「手册中可以有更多的示例和截图」）：文档里的图片 ----
+   *
+   * `![说明](/docs/cli/xxx.png)` 必须产出真 `<img>`。改之前这一支**没有**：
+   * `![图](/a.png)` 会先被"链接"那一支吃掉 ⇒ 页面上留下一个字面的 `!` 加一个链接 ✗。
+   * 判据三条 + 一条负对照：
+   *   ① 独占一段的图片 ⇒ `<img src=… alt=… loading="lazy" />`；
+   *   ② **行内夹杂**的图片也认（前后文字不许被吞）；
+   *   ③ 真实文档里每个 `![]()` 都在渲染结果里有对应的 `<img src>`（不是只认玩具用例）；
+   *   ④ 负对照：把"改前那版渲染结果"（字面 `!` + 链接）喂进判据 ⇒ 判假。
+   */
+  {
+    const imgMd = '![命令行手册](/docs/cli/manual-page.png)\n\n正文 ![小图](/docs/cli/x.png) 夹在中间\n'
+    const imgHtml = mdToHtml(imgMd)
+    const imgTag = (src: string, alt: string): string => `<img src="${src}" alt="${alt}" loading="lazy" />`
+    check('adj949 `![说明](路径)` 渲染成真 `<img>`（src/alt 逐字、`loading="lazy"`）',
+      imgHtml.includes(imgTag('/docs/cli/manual-page.png', '命令行手册')), imgHtml.split('\n').slice(0, 3).join(' ／ '))
+    check('adj949 行内夹杂的图片也认（前后文字不被吞掉）',
+      imgHtml.includes(`正文 ${imgTag('/docs/cli/x.png', '小图')} 夹在中间`), imgHtml.split('\n').slice(2, 5).join(' ／ '))
+    const legacyImgHtml = '<p>!<a href="/docs/cli/manual-page.png" target="_blank" rel="noreferrer">命令行手册</a></p>'
+    check('adj949 负对照：改前那版渲染结果是"字面 `!` + 链接"（没有 `<img>`）⇒ 判据判假（证明这条真的在起作用）',
+      !/<img/.test(legacyImgHtml) && !legacyImgHtml.includes(imgTag('/docs/cli/manual-page.png', '命令行手册')))
+    /** 真实文档：`docs/CLI-手册.md` 里每个图片路径都要在正文里有对应的 `<img src>` */
+    const cliManualMd = readSrc('docs/CLI-手册.md')
+    const cliManualImgs = Array.from(cliManualMd.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)).map((m) => m[1])
+    const cliManualHtml = mdToHtml(cliManualMd)
+    const notRendered = cliManualImgs.filter((p) => !cliManualHtml.includes(`<img src="${p}"`))
+    check(`adj949 真实文档 \`docs/CLI-手册.md\` 里的 ${cliManualImgs.length} 张图都渲染成了 \`<img>\`（不是只认玩具用例）`,
+      cliManualImgs.length >= 1 && notRendered.length === 0, notRendered.join(' '))
+  }
+
+  /**
    * ---- adj911（**用户反馈**）：手机端 ` ```jps ` 块被撑得很宽 ----
    *
    * 守的是**根因那两行**，不是 ` ```jps ` 组件本身：实测把 `.jps-block` 整块 `display:none`，
@@ -25411,8 +25444,8 @@ function runAdj948SiteCopyTests() {
   check('adj948 负对照⑦：把手册里一处「当前版本」改成 0.1.0（＝过期没跟着改）⇒ 判据判红',
     APP_VERSION !== '' &&
       currentVersions(cliManual.split(APP_VERSION).join('0.1.0')).filter((v) => v !== APP_VERSION).length > 0)
-  check('adj948 带 `v` 前缀的历史快照确实还在（说明"例外"是实的、不是空话）：改前那一版与当时的窗口标题',
-    cliDoc.includes('改前（v0.58.0') && cliDoc.includes('iJipu_0.58.0_x64-setup.exe') && cliManual.includes('- v0.59.0'))
+  check('adj948 带 `v` 前缀的历史快照确实还在（说明"例外"是实的、不是空话）：改前那一版、安装包名与当时的窗口标题',
+    cliDoc.includes('改前（v0.58.0') && cliDoc.includes('iJipu_0.58.0_x64-setup.exe') && cliDoc.includes('- v0.59.0'))
   /**
    * `--watch` 的"过期/矛盾"（用户点名的第二处）：`docs/CLI.md` 第 182 行一带原说「未实现（会后续）」，
    * 而同一节的表格已列它能用。**以代码为准**：
@@ -25428,11 +25461,171 @@ function runAdj948SiteCopyTests() {
   check('adj948 `docs/CLI.md` 不再把 `--watch` 说成"未实现/后续"，且写明两条路径（Node 包可用 / 内嵌版退出码 1）',
     !/未实现（\*\*会报错\*\*）：`--watch`/.test(cliDoc) && !cliDoc.includes('`--watch`（后续）') &&
       cliDoc.includes('独立 Node 包可用') && cliDoc.includes('内嵌版') && cliDoc.includes('`embedEntry.ts`'))
-  check('adj948 `docs/CLI-手册.md` 的能力表也写明"内嵌版没有该能力、独立 Node 包可用"',
-    cliManual.includes('内嵌版没有**该能力') && cliManual.includes('fs.watch` 提供'))
+  /**
+   * adj949（用户口径「手册只讲有什么/怎么用」）：手册里只留**事实**（内嵌版没有该能力、独立 Node 包可用），
+   * 实现词（`fs.watch`）按新分工留在 `docs/CLI.md` ⇒ 判据从"手册里必须有 `fs.watch`"改成
+   * **"事实在手册 + 实现词在设计文档"**（同一条判据的两半都在，没放宽 ✗）。
+   */
+  check('adj948 `docs/CLI-手册.md` 的能力表也写明"内嵌版没有该能力、独立 Node 包可用"（实现词 `fs.watch` 按 adj949 口径留在 `docs/CLI.md`）',
+    cliManual.includes('内嵌版没有**该能力') && cliManual.includes('独立 Node 包') && cliDoc.includes('fs.watch'))
   check('adj948 负对照⑧：把"未实现（会报错）：`--watch`（后续）"那句改回去 ⇒ 判据判红',
     (() => {
       const back = cliDoc.replace('`--watch` 分两条交付路径，**能力不一样**', '未实现（**会报错**）：`--watch`（后续）')
       return /未实现（\*\*会报错\*\*）：`--watch`/.test(back) && !/未实现（\*\*会报错\*\*）：`--watch`/.test(cliDoc)
     })())
+}
+
+/**
+ * [175] **手册只讲"有什么 / 怎么用"**（adj949，用户要求）
+ *
+ * 用户原话：「**手册的目的是告诉用户有什么和怎么用，而不是为什么和原理、实现**，这个内容还要再梳理」，
+ * 追加口径：「手册中可以有**更多的示例和截图**」「示例应该通过**即时预览生成**」。
+ *
+ * 于是分工固化成一条**机器闸门**（不靠"以后注意"）：
+ *   · `docs/CLI-手册.md`（面向使用者）= **有什么 / 怎么用 / 参数 / 真实示例与输出 / 用户必须知道的限制**；
+ *   · `docs/CLI.md`（面向维护者）= **为什么 / 原理 / 实现 / 设计取舍 / 内部机制**。
+ * 判据五件事，每条都配负对照（把判据喂给"故意改坏的一份"必须为假 ✓）：
+ *   ① 一组**窄而明确**的"原理/实现"词在手册里一个都不出现（词表理由见下）；
+ *   ② 同一组词**仍留在 `docs/CLI.md`**（手册瘦身**不许丢信息** ✗ —— 这条是①的对偶，缺了就会
+ *      "删干净了、但知识也没了"）；
+ *   ③ 手册里没有带 `v` 前缀的历史快照（历史与实测数字属设计文档）；
+ *   ④ 两份文档**互相指路**（手册开头指向设计文档、设计文档开头指回手册）；
+ *   ⑤ 手册引用的**图片**都在 `public/` 下真实存在，且写成绝对网络路径（官网能显示）。
+ *
+ * ⚠ 词表为什么**窄**（用户点名过的坑）：
+ *   · **不收"实现"本身** —— `--config 尚未实现（退出码 5）` 是**用法事实**，收它必然误伤 ✗；
+ *   · **不收"通道"/"宿主"/"隐藏窗口渲染"** —— 它们出现在**程序自己的报错原文**里，而报错必须
+ *     原样引用（真实输出不许改写 ✗）；
+ *   · 只收"一旦出现就说明这段在讲原理/实现"的**具体词**（内嵌运行时选型、Win32 API、能力通道机制、
+ *     垫片写法论证、代码级 API 名……）。
+ *
+ * 「示例是实跑的」那一半不在这里：由 `scripts/cli-assert.mts` 的 `adj949` 段**现跑一遍**比对
+ * （同一条 argv 在内存 IO 上跑出来的 stdout/stderr 必须与手册里引用的那行逐字相同 ✓）。
+ */
+function runAdj949ManualScopeTests() {
+  console.log('[175] 手册只讲"有什么 / 怎么用"（adj949）')
+  const readOrEmpty = (rel: string): string => (existsSync(join(root, rel)) ? readFileSync(join(root, rel), 'utf8') : '')
+  const manual = readOrEmpty('docs/CLI-手册.md')
+  const cliDoc = readOrEmpty('docs/CLI.md')
+
+  /** 禁词表（窄）：`[词, 为什么它属于"原理/实现"（不属于"怎么用"）]` */
+  const BANNED: Array<[string, string]> = [
+    ['QuickJS', '内嵌运行时选型（原理）'],
+    ['rquickjs', '内嵌运行时的绑定库（实现）'],
+    ['命名管道', '位图/音频能力通道的内部机制'],
+    ['AttachConsole', 'Windows 控制台附着细节（Win32 API）'],
+    ['AllocConsole', 'Windows 控制台自建细节（Win32 API）'],
+    ['WriteConsoleW', '中文输出的 Win32 API'],
+    ['OEM 代码页', '垫片注释为什么必须纯 ASCII（原理）'],
+    ['include_bytes!', '编译期把 JS 打进 exe（实现）'],
+    ['fs.watch', '`--watch` 在 Node 包里的实现'],
+    ['start /wait', '垫片写法实测对比里被否掉的方案'],
+    ['内嵌运行时', '运行时选型'],
+    ['设计取舍', '取舍论证（属设计文档）'],
+    ['实现约定', '维护约定（属设计文档）'],
+    ['实现细节', '实现细节（属设计文档）'],
+    ['为什么', '「为什么/原理」类行文的标志词（用户口径：手册不讲为什么）'],
+  ]
+  const bannedIn = (text: string): string[] => BANNED.filter(([w]) => text.includes(w)).map(([w]) => w)
+
+  // ---- ① 手册里一个都不能有 ----
+  const hits = bannedIn(manual)
+  check(
+    `adj949 手册里没有"原理/实现"类词（窄表 ${BANNED.length} 个：${BANNED.map(([w]) => w).join(' / ')}）`,
+    manual.length > 0 && hits.length === 0,
+    hits.join(' '),
+  )
+  const injected = BANNED.map(([w]) => manual.replace('# iJipu 命令行使用手册', `# iJipu 命令行使用手册（${w}）`))
+  check(
+    `adj949 负对照①：把 ${BANNED.length} 个禁词**逐个**塞进手册 ⇒ 逐个判红（${BANNED.length}/${BANNED.length}）`,
+    injected.length === BANNED.length && injected.every((t, i) => bannedIn(t).includes(BANNED[i][0])) && hits.length === 0,
+    injected.map((t, i) => (bannedIn(t).includes(BANNED[i][0]) ? '' : BANNED[i][0])).filter((x) => x !== '').join(' '),
+  )
+  check(
+    'adj949 判定范围：词表**不误伤**用法事实（「尚未实现」「实现了」「通道」这类照旧允许 —— 用户点名过的坑）',
+    bannedIn('本书尚未实现 · 已经实现了 · 需要隐藏窗口渲染通道').length === 0 &&
+      bannedIn('内嵌运行时').includes('内嵌运行时'),
+  )
+
+  // ---- ② 词仍在设计文档（不许丢信息）----
+  const lost = BANNED.filter(([w]) => !cliDoc.includes(w)).map(([w]) => w)
+  check(
+    `adj949 这 ${BANNED.length} 个词**仍留在** \`docs/CLI.md\`（手册瘦身不许把原理/实现一起删掉）`,
+    lost.length === 0,
+    lost.join(' '),
+  )
+  check(
+    'adj949 负对照②：从 `docs/CLI.md` 里抹掉一个词（`命名管道`）⇒ 判据判红（证明"信息没丢"是真的在查）',
+    (() => {
+      const cut = cliDoc.split('命名管道').join('')
+      return cut !== cliDoc && BANNED.filter(([w]) => !cut.includes(w)).length === 1 && lost.length === 0
+    })(),
+  )
+  check(
+    'adj949 负对照②b：从 `docs/CLI.md` 里抹掉另一个词（`OEM 代码页`）⇒ 同样判红（不是只盯着某一个词）',
+    (() => {
+      const cut = cliDoc.split('OEM 代码页').join('')
+      return cut !== cliDoc && BANNED.filter(([w]) => !cut.includes(w)).map(([w]) => w).includes('OEM 代码页') && lost.length === 0
+    })(),
+  )
+
+  // ---- ③ 手册里不带历史快照 ----
+  const hasVSsnapshot = (t: string): boolean => /v\d+\.\d+\.\d+/.test(t)
+  check('adj949 手册里没有带 `v` 前缀的历史版本快照（历史实测数据只在 `docs/CLI.md`）', !hasVSsnapshot(manual))
+  check(
+    'adj949 负对照③：往手册里塞一个 `v0.59.0` ⇒ 判据判红',
+    hasVSsnapshot(`${manual}\nv0.59.0`) && !hasVSsnapshot(manual),
+  )
+
+  // ---- ④ 两份文档互相指路 ----
+  check(
+    'adj949 两份文档互相指路（手册开头指向 `docs/CLI.md`；设计文档开头指回 `docs/CLI-手册.md`）',
+    manual.includes('docs/CLI.md') && cliDoc.includes('docs/CLI-手册.md'),
+  )
+
+  // ---- ⑤ 图片：存在 + 绝对网络路径 ----
+  const imgPaths = (t: string): string[] => Array.from(t.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)).map((m) => m[1])
+  const missingImgs = (t: string): string[] =>
+    imgPaths(t).filter((p) => !existsSync(join(root, 'public', p.replace(/^\//, ''))))
+  const imgs = imgPaths(manual)
+  check(
+    `adj949 手册引用的 ${imgs.length} 张图片在 \`public/\` 下**真实存在**（${imgs.join(' ')}）`,
+    imgs.length >= 1 && missingImgs(manual).length === 0,
+    missingImgs(manual).join(' '),
+  )
+  check(
+    'adj949 负对照④：把图片路径改成不存在的文件 ⇒ 判据判红',
+    imgPaths(manual).length >= 1 &&
+      missingImgs(manual.split(imgs[0] ?? '').join('/docs/cli/__nope__.png')).length === 1 &&
+      missingImgs(manual).length === 0,
+  )
+  check(
+    'adj949 图片一律写成 `public/` 下的**绝对网络路径**（官网 `/cli/` 才显示得出来；安装目录那份 MD 只是看不到图，文字不受影响）',
+    imgs.length >= 1 && imgs.every((p) => p.startsWith('/') && !p.includes('..')),
+    imgs.join(' '),
+  )
+
+  // ---- ⑥ 新结构：五节 + 「常见用法」一节 + "实跑"声明 ----
+  const h2s = Array.from(manual.matchAll(/^## (.+)$/gm)).map((m) => m[1])
+  check(
+    `adj949 手册的一级标题恰好 ${h2s.length} 节，顺序仍是「一分钟上手 / 命令集 / 能力与限制 / 退出码表 / 许可与源码」`,
+    h2s.length === 5 && ['一分钟上手', '命令集', '能力与限制', '退出码表', '许可与源码'].every((k, i) => (h2s[i] ?? '').includes(k)),
+    h2s.join(' | '),
+  )
+  check(
+    'adj949 负对照⑤：把「能力与限制」这一节删掉（＝用户必须知道的限制没地方写了）⇒ 判据判红',
+    (() => {
+      const cut = manual.replace(/^## 三、能力与限制$/m, '')
+      const h = Array.from(cut.matchAll(/^## (.+)$/gm)).map((m) => m[1])
+      return cut !== manual && (h.length !== 5 || !(h[2] ?? '').includes('能力与限制')) && h2s.length === 5
+    })(),
+  )
+  check(
+    'adj949 手册有「常见用法」一节（用户追加要求：单文件 / 批量 / 导出 / CI / 注册后仍要写 `cli`）',
+    manual.includes('常见用法') && manual.includes('--format gh') && manual.includes('在 CI / 提交前钩子里跑'),
+  )
+  check(
+    'adj949 手册写明示例是**实跑输出**（用户追加要求：「示例应该通过即时预览生成」⇒ 不许手抄）',
+    manual.includes('实跑输出') && manual.includes('实跑过'),
+  )
 }

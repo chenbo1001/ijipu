@@ -20,7 +20,7 @@ import { runCli, EXIT, type CliIo } from '../packages/ijipu-cli/src/cli'
 import { runEmbeddedCli, type EmbedHost } from '../packages/ijipu-cli/src/embedEntry'
 // adj873：`--crop` 断言要读渲染产物的 viewBox 来核对画布盒
 import { readViewBoxOf } from '@ijipu/engine/index.ts'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 
@@ -731,6 +731,170 @@ console.log('\n— 命令行（A·P1–P4）—')
   check(
     'adj947 --help 里的 `<安装目录>\\bin` 是**字面反斜杠**（目录名写全，不是被吃成退格的形态）',
     help.includes('<安装目录>\\bin'),
+  )
+}
+
+/**
+ * ⑨ adj949（**用户追加要求**：「示例应该通过即时预览生成」「手册里的每条示例输出都必须是真跑得到的」）：
+ *
+ * 手册 `docs/CLI-手册.md` 里的每一段输出，都**现跑一遍**再比对 —— 判据是双向的：
+ *   ① 同一条 argv 在内存 IO 上跑出来的 stdout/stderr 里**确实有**这一行（＝它不是手抄的）；
+ *   ② 手册里**确实写着**这一行（＝两者逐字一致，没有抄走样）。
+ * 任一侧不成立就判红 ⇒ 以后改输出文案而忘了改手册，`npm run smoke` 立刻拦下 ✓。
+ *
+ * ⚠ 只跑**纯计算**的那批（不碰注册表、不真写磁盘）：注册类命令的示例输出由 `adj944`/`adj946`
+ *   那两组（假宿主）守着，这里不重复 ✗。版本号从 `src/brand/version.ts` 读 ⇒ 手册里的
+ *   `"generator": "ijipu x.y.z"` 也跟着一起被钉住 ✓。
+ */
+{
+  const MANUAL = readFileSync(join('docs', 'CLI-手册.md'), 'utf8')
+  const APP_VERSION =
+    (readFileSync(join('src', 'brand', 'version.ts'), 'utf8').match(/APP_VERSION = '([^']+)'/) ?? [])[1] ?? ''
+  /** 手册里两份"出错示例"的全文（与手册里贴的逐字一致 ⇒ 用户照抄就能复现） */
+  const BAD_JPS = 'V: 1.0\nB: 错谱演示\nD: C\nP: 4/4\nQ: 1"注释没闭合 2 3 4 |\n'
+  const RAW_JPS = 'Q:1 2 3 4|\n'
+  const WARN_JPS = 'V: 1.0\nB: w\nD: C\nP: 4/4\nQ: 1 2 x 4 |\n'
+  /** 仓库 `samples/` 下的示例谱（手册的示例全用它们） */
+  const SAMPLE_NAMES = readdirSync('samples').filter((n) => n.endsWith('.jps')).sort()
+  const sampleFiles: Record<string, string> = {}
+  for (const n of SAMPLE_NAMES) sampleFiles[`samples/${n}`] = readFileSync(join('samples', n), 'utf8')
+
+  type ManualCase = { what: string; argv: string[]; lines: string[]; code?: number }
+  const cases: ManualCase[] = [
+    { what: 'lint 干净', argv: ['lint', '-i', 'samples\\ershenbu.jps'], lines: ['没有发现问题 ✓'], code: EXIT.ok },
+    {
+      what: 'info 文本',
+      argv: ['info', '-i', 'samples\\ershenbu.jps'],
+      lines: ['文件：samples\\ershenbu.jps', '调号：C', '源码行：17｜曲词分组：3｜字符：259', '问题：错误 0 个、告警 0 个'],
+      code: EXIT.ok,
+    },
+    { what: 'format --check 合规', argv: ['format', '-i', 'samples\\ershenbu.jps', '--check'], lines: ['已符合规范 ✓'], code: EXIT.ok },
+    { what: 'render svg', argv: ['render', '-i', 'samples\\ershenbu.jps', '-t', 'svg', '-o', '我的谱.svg'], lines: ['已写入 我的谱.svg'], code: EXIT.ok },
+    { what: 'render midi', argv: ['render', '-i', 'samples\\ershenbu.jps', '-t', 'midi', '-o', '我的谱.mid'], lines: ['已写入 我的谱.mid（MIDI，225 字节）'], code: EXIT.ok },
+    {
+      what: 'render --crop score --pad 4',
+      argv: ['render', '-i', 'samples\\ershenbu.jps', '-t', 'svg', '--crop', 'score', '--pad', '4', '-o', '我的谱.svg'],
+      lines: ['已写入 我的谱.svg'],
+      code: EXIT.ok,
+    },
+    { what: 'play midi', argv: ['play', '-i', 'samples\\ershenbu.jps', '-t', 'midi', '-o', '我的谱.mid'], lines: ['已写入 我的谱.mid（MIDI，225 字节）'], code: EXIT.ok },
+    {
+      what: 'batch svg',
+      argv: ['batch', '--in', 'samples', '-o', '输出目录', '-t', 'svg'],
+      lines: [`批处理完成：成功 ${SAMPLE_NAMES.length} 个、失败 0 个（输出到 输出目录，类型 svg）`],
+      code: EXIT.ok,
+    },
+    { what: 'settings 查键', argv: ['settings', '-i', 'samples\\ershenbu.jps', 'margin_right'], lines: ['margin_right = 50   [来自：代码默认]'], code: EXIT.ok },
+    {
+      what: 'settings -s 覆盖',
+      argv: ['settings', '-i', 'samples\\ershenbu.jps', 'margin_right', '-s', 'margin_right=33'],
+      lines: ['margin_right = "33"   [来自：命令行 -s]'],
+      code: EXIT.ok,
+    },
+    {
+      what: 'config --quiet',
+      argv: ['config', '-i', 'samples\\ershenbu.jps', '-t', 'effective', '--quiet'],
+      lines: ['生效设置（来源：命令行 > 源内 # jps-config > 代码默认）'],
+      code: EXIT.ok,
+    },
+    { what: 'doctor', argv: ['doctor'], lines: ['可设置项：35 个（含可选字段 5 个）', '能力：svg ✓｜midi ✓'], code: EXIT.ok },
+    { what: 'completions bash', argv: ['completions', 'bash'], lines: ['# iJipu bash 补全（桌面端）'], code: EXIT.ok },
+    { what: 'completions 用法错', argv: ['completions', 'foo'], lines: ['completions 支持 bash | zsh | powershell（收到 “foo”）'], code: EXIT.usage },
+    { what: 'lint 有错', argv: ['lint', '-i', '错谱.jps'], lines: ['第 5 行：引号注释未闭合'], code: EXIT.syntax },
+    { what: 'lint --format gh', argv: ['lint', '-i', '错谱.jps', '--format', 'gh'], lines: ['::error file=错谱.jps,line=5::引号注释未闭合'], code: EXIT.syntax },
+    { what: 'lint --json', argv: ['lint', '-i', '错谱.jps', '--json'], lines: ['"generator": "ijipu ' + APP_VERSION + '"', '"line": 5,'], code: EXIT.syntax },
+    { what: 'lint 告警不动退出码', argv: ['lint', '-i', '告警谱.jps'], lines: ['第 5 行：无法识别的符号 "x"'], code: EXIT.ok },
+    {
+      what: 'lint --watch 无能力',
+      argv: ['lint', '-i', 'samples\\ershenbu.jps', '--watch'],
+      lines: ['--watch 需要宿主的文件监视能力（node 入口提供；独立环境不可用）'],
+      code: EXIT.usage,
+    },
+    { what: 'format --check 不合规', argv: ['format', '-i', '我的谱.jps', '--check'], lines: ['需要格式化 ✗'], code: EXIT.syntax },
+    { what: 'format --diff', argv: ['format', '-i', '我的谱.jps', '--diff'], lines: ['- Q:1 2 3 4|', '+ Q: 1 2 3 4 |'], code: EXIT.ok },
+    { what: 'format -o -', argv: ['format', '-i', '我的谱.jps', '-o', '-'], lines: ['Q: 1 2 3 4 |'], code: EXIT.ok },
+    { what: 'format -o 文件', argv: ['format', '-i', '我的谱.jps', '-o', '我的谱.规范化.jps'], lines: ['已写入 我的谱.规范化.jps'], code: EXIT.ok },
+    { what: 'format --in-place', argv: ['format', '-i', '我的谱.jps', '--in-place'], lines: ['已原地格式化：我的谱.jps'], code: EXIT.ok },
+    {
+      what: 'render -t png 无能力',
+      argv: ['render', '-i', 'samples\\ershenbu.jps', '-t', 'png', '-o', '我的谱.png'],
+      lines: ['-t png 需要"隐藏窗口渲染"通道（桌面端 exe 内置）；当前环境没有该能力。'],
+      code: EXIT.render,
+    },
+    {
+      what: 'play -t wav 无能力',
+      argv: ['play', '-i', 'samples\\ershenbu.jps', '-t', 'wav', '-o', '我的谱.wav'],
+      lines: ['WAV 需要采样合成（音色库 + AudioContext），当前环境没有该能力。'],
+      code: EXIT.render,
+    },
+    { what: 'render -t midi 不能 stdout', argv: ['render', '-i', 'samples\\ershenbu.jps', '-t', 'midi'], lines: ['MIDI 是二进制，必须用 -o 指定文件（不能用 stdout）'], code: EXIT.usage },
+    { what: 'settings 缺键名', argv: ['settings', '-i', 'samples\\ershenbu.jps'], lines: ['settings 需要键名（位置参数），例如：settings -i <谱> margin_right'], code: EXIT.usage },
+    { what: 'info --json', argv: ['info', '-i', 'samples\\ershenbu.jps', '--json'], lines: ['"groups": 3,'], code: EXIT.ok },
+  ]
+
+  /** 每次都用**干净的一份 io**（同一份内存文件系统，互不干扰） */
+  const makeCaseIo = (): ReturnType<typeof makeIo> =>
+    makeIo({ ...sampleFiles, 'samples\\ershenbu.jps': GOOD, '错谱.jps': BAD_JPS, '我的谱.jps': RAW_JPS, '告警谱.jps': WARN_JPS }, { samples: SAMPLE_NAMES })
+
+  const mismatch: string[] = []
+  const notInManual: string[] = []
+  for (const c of cases) {
+    const io = makeCaseIo()
+    const r = await runCli(c.argv, io.io, { version: APP_VERSION })
+    const ran = `${io.logs.join('')}\n${io.errs.join('\n')}`
+    for (const l of c.lines) {
+      if (!ran.includes(l)) mismatch.push(`${c.what} 跑出来没有「${l}」`)
+      if (!MANUAL.includes(l)) notInManual.push(`${c.what} 手册里没有「${l}」`)
+    }
+    if (c.code !== undefined && r.code !== c.code) mismatch.push(`${c.what} 退出码 ${r.code}≠${c.code}`)
+  }
+  check(
+    `adj949 手册里的 ${cases.length} 组示例**逐行等于真跑输出**（同一条 argv 现跑一遍：跑得出 + 手册里逐字有）`,
+    mismatch.length === 0 && notInManual.length === 0,
+    [...mismatch, ...notInManual].slice(0, 6).join(' ｜ '),
+  )
+  check(
+    'adj949 负对照①：把手册里**所有** `没有发现问题 ✓` 改一个字（⇒ `没有问题 ✓`）⇒ 与真跑输出对不上、判据判红',
+    (() => {
+      const cut = MANUAL.split('没有发现问题 ✓').join('没有问题 ✓')
+      return cut !== MANUAL && !cut.includes('没有发现问题 ✓') && MANUAL.includes('没有发现问题 ✓')
+    })(),
+  )
+  /**
+   * 负对照②：**动 argv**（不是动手册）—— `-t png` 换成 `-t jpg` ⇒ 现跑出来的那行与手册里引用的那行
+   * 不再逐字相同。这一条证明判据量的是"跑出来的东西"，而不是"手册里有没有这句话" ✓。
+   */
+  const PNG_LINE = '-t png 需要"隐藏窗口渲染"通道（桌面端 exe 内置）；当前环境没有该能力。'
+  const negIo = makeCaseIo()
+  await runCli(['render', '-i', 'samples\\ershenbu.jps', '-t', 'jpg', '-o', '我的谱.png'], negIo.io, { version: APP_VERSION })
+  const negRan = negIo.errs.join('\n')
+  check(
+    'adj949 负对照②：把 argv 的 `-t png` 换成 `-t jpg` ⇒ 跑出来的行与手册里引用的那行不再逐字相同（判据判红）',
+    negRan.includes('-t jpg 需要') && !negRan.includes(PNG_LINE) && MANUAL.includes(PNG_LINE),
+  )
+
+  /**
+   * 用户追加要求：「**每个命令至少两个用法变体**」——
+   * 按"`ijipu [.exe] cli <命令>` 在手册里出现几次"来数（名单从 `cli.ts` 源码读，不写死 ✓）。
+   */
+  const KNOWN = (() => {
+    const m = readFileSync(join('packages', 'ijipu-cli', 'src', 'cli.ts'), 'utf8').match(/const known = new Set\(\[([^\]]*)\]\)/)
+    return m === null ? [] : Array.from(m[1].matchAll(/'([^']+)'/g)).map((x) => x[1])
+  })()
+  const variantCount = (text: string, c: string): number =>
+    (text.match(new RegExp('ijipu(?:\\.exe)? cli ' + c + '\\b', 'g')) ?? []).length
+  const thin = KNOWN.filter((c) => variantCount(MANUAL, c) < 2)
+  check(
+    `adj949 手册里每个命令都有 ≥2 个用法变体（现数：${KNOWN.map((c) => `${c}=${variantCount(MANUAL, c)}`).join(' ')}）`,
+    KNOWN.length >= 13 && thin.length === 0,
+    thin.map((c) => `${c}(${variantCount(MANUAL, c)})`).join(' '),
+  )
+  check(
+    'adj949 负对照③：把手册里 `doctor` 的示例全部改掉 ⇒ 该命令的变体数掉到 2 以下（判据判红）',
+    (() => {
+      const cut = MANUAL.split('ijipu.exe cli doctor').join('ijipu.exe cli doc-tor')
+      return cut !== MANUAL && variantCount(cut, 'doctor') < 2 && variantCount(MANUAL, 'doctor') >= 2
+    })(),
   )
 }
 
