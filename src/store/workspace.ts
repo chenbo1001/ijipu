@@ -871,10 +871,103 @@ export async function moveFile(
 }
 
 // ---- 会话内缓存：对话框与保存流程会反复取同一个工作区，避免每次都读库 ----
-let cached: WorkspaceRecord | null = null
 let cachedList: WorkspaceRecord[] = []
 let listLoaded = false
-let loaded = false
+
+/**
+ * adj951（用户实报，换一台电脑后）：**首次冷启动有两条路径并发取工作区**。
+ *
+ * 现象：「ob 第一次打开嵌入版 iJipu，点文件列表里的 `.jps` 打不开，提示『还没有设工作区』；
+ * 关掉 ob 再打开就正常」。
+ *
+ * | 时刻 | 路径 | 做了什么 |
+ * |---|---|---|
+ * | t0 | 模块求值期（`docStore.ts:1604` 的 `void getWorkspace()`） | 发起读库（**先发起**、后完成） |
+ * | t1 | 嵌入版分支（`main.tsx:126` 的 `await getWorkspace()`） | 又发起读库（**后发起**、先完成），拿到 null 后 `setWorkspace(vault 记录)` |
+ * | t2 | t1 那条先落地 | 缓存 = vault 记录 ✓ |
+ * | t3 | t0 那条**后落地**，用的是它发起时读到的**旧值 null** | `cached = null` ✗ **覆写** |
+ * | t4 | 用户点库里的 `.jps` ⇒ `openWorkspaceFile()` 取工作区 | 拿到 null ⇒ 「还没有设工作区」 |
+ *
+ * 这解释了两个特征：**首次必现**（只有首次启动才有两条并发加载）、**重开正常**（第二次启动库里
+ * 已有记录，且 t1 会走 `cur && isVaultWorkspace(cur)` 的早退，只剩一条加载路径）。
+ *
+ * ⇒ 结构性修法（**不靠调整 `await` 顺序**）：
+ *  ① **in-flight 去重**：同一个未完成的加载复用**同一个 Promise** ⇒ 底层 `loadWorkspace()` 只跑一次，
+ *     "晚到者"这个角色本身不复存在；
+ *  ② **不覆写已有值**：加载落地时若缓存已被别的路径（`setWorkspace()`）定下来，就**放弃这次结果**。
+ *     这条是必要的第二道防线——即便将来又冒出一条并发路径，旧读数也压不掉新值。
+ *
+ * 两条都收在下面这个**可注入 IO 的编排**里，smoke 用假 loader 把上面那张时序表直接跑出来。
+ */
+export interface WorkspaceLoadStore {
+  /** 取当前工作区（首次读库；库里是旧记录时补 id/name 并登记进"最近工作区"） */
+  get: () => Promise<WorkspaceRecord | null>
+  /** 直接定下当前工作区（同步写缓存；落库/登记由调用方做） */
+  set: (rec: WorkspaceRecord | null) => void
+  /** 看一眼缓存（不触发读库） */
+  peek: () => WorkspaceRecord | null
+  /** 只改"上次所在子目录"（缓存不存在时什么都不做） */
+  updatePath: (path: readonly string[]) => void
+}
+
+/**
+ * adj951：工作区**缓存 + 首次加载**的唯一实现。
+ *
+ * 为什么做成"注入 `load` 的工厂"而不是继续用模块级变量：这里出错的形式是**并发时序**，
+ * 只能靠"把时序真跑一遍"来守；注入假 IO ⇒ smoke 能在 Node 里直接断言，而生产代码只注入
+ * 真正的 `loadWorkspace`（IndexedDB）。**同一份实现既跑生产又被断言**，不会出现"断言测的是
+ * 一份副本"的漂移（与 `store/externalChange.ts` 同一口径）。
+ */
+export function createWorkspaceLoadStore(
+  load: () => Promise<WorkspaceRecord | null>,
+  onAdoptedLegacy?: (rec: WorkspaceRecord) => void,
+): WorkspaceLoadStore {
+  let cached: WorkspaceRecord | null = null
+  let loaded = false
+  /** adj951：**未完成的那一次加载**——同一时刻只允许有一个（in-flight 去重） */
+  let inFlight: Promise<void> | null = null
+
+  async function loadOnce(): Promise<void> {
+    try {
+      const raw = await load()
+      // ② 加载期间已有别的路径把工作区定下来了（`setWorkspace()`，例如嵌入版分支）⇒
+      //    这次读到的**旧结果作废**（修复前正是这里把 vault 记录覆写回 null）
+      if (loaded) return
+      const rec = normalizeRecord(raw)
+      cached = rec
+      loaded = true
+      // 旧记录补了 id ⇒ 落库一次，并登记进"最近工作区"
+      if (rec && (!raw?.id || !raw?.name)) onAdoptedLegacy?.(rec)
+    } finally {
+      inFlight = null
+    }
+  }
+
+  return {
+    async get() {
+      if (!loaded) {
+        // ① in-flight 去重：同一次加载期间的所有调用者等**同一个 Promise**
+        if (!inFlight) inFlight = loadOnce()
+        await inFlight
+      }
+      return cached
+    },
+    set(rec) {
+      cached = normalizeRecord(rec)
+      loaded = true
+    },
+    peek: () => cached,
+    updatePath(path) {
+      if (!cached) return
+      cached = { ...cached, path: normalizeRelPath(path) }
+    },
+  }
+}
+
+/** 当前工作区的缓存单例（`getWorkspace()` / `setWorkspace()` / 路径记忆都只经它） */
+const wsStore = createWorkspaceLoadStore(loadWorkspace, (rec) => {
+  void upsertWorkspaceList(rec)
+})
 
 /** 生成工作区身份（adj544）。优先 `crypto.randomUUID`，老环境退回随机串 */
 function newWorkspaceId(): string {
@@ -970,21 +1063,13 @@ function normalizeRecord(rec: WorkspaceRecord | null): WorkspaceRecord | null {
 
 /** 取当前工作区（首次会读 IndexedDB；返回的 `path` 已规整；旧记录会补上 id/name） */
 export async function getWorkspace(): Promise<WorkspaceRecord | null> {
-  if (!loaded) {
-    const raw = await loadWorkspace()
-    const rec = normalizeRecord(raw)
-    cached = rec
-    loaded = true
-    // 旧记录补了 id ⇒ 落库一次，并登记进"最近工作区"
-    if (rec && (!raw?.id || !raw?.name)) void upsertWorkspaceList(rec)
-  }
-  return cached
+  return wsStore.get()
 }
 
 /** 设/清工作区（同步更新缓存并落库；设置时登记进"最近工作区"列表） */
 export async function setWorkspace(rec: WorkspaceRecord | null): Promise<void> {
-  cached = normalizeRecord(rec)
-  loaded = true
+  wsStore.set(rec)
+  const cached = wsStore.peek()
   await saveWorkspace(cached)
   if (cached) await upsertWorkspaceList(cached)
 }
@@ -1002,8 +1087,10 @@ export async function setWorkspace(rec: WorkspaceRecord | null): Promise<void> {
  * 因此同一会话内切页签/重挂载马上就能读到新位置。
  */
 export async function rememberWorkspacePath(path: readonly string[]): Promise<void> {
+  if (!wsStore.peek()) return
+  wsStore.updatePath(path)
+  const cached = wsStore.peek()
   if (!cached) return
-  cached = { ...cached, path: normalizeRelPath(path) }
   await saveWorkspace(cached)
   syncListPath(cached) // adj550：**最近工作区列表里的那条也要跟着更新**，否则切回该工作区会拿到旧位置
 }
@@ -1027,6 +1114,7 @@ function syncListPath(rec: WorkspaceRecord): void {
  * 因为 `rememberWorkspacePath` 已经即时写，这里通常是空转；保留是为了异常路径兜底。
  */
 export function flushWorkspacePath(): void {
+  const cached = wsStore.peek()
   if (cached) void saveWorkspace(cached)
 }
 

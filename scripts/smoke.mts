@@ -6,6 +6,8 @@
  */
 import { readFileSync, existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+// adj951：冷启动端到端夹具要**另起一个进程**跑（"首次加载"一个进程只发生一次，见该夹具文件头）
+import { execFileSync } from 'node:child_process'
 // adj927：「要不要提示外部改动」的纯判据 + 带 IO 的编排（用注入的假 IO 守"mtime 相同就不读文件"）
 // adj943：外加"写盘在途"的登记（写盘落地与基准刷新之间的窗口，见该文件头说明）
 import {
@@ -233,7 +235,7 @@ import {
 } from '../src/preview/zoomFit.ts'
 // adj723z：「文件 → 最近…」二级菜单的数据口径（纯列表操作，Node 里可断言）
 import { applyOpenToRecent, sameRecentFile, type RecentJpsFile } from '../src/store/recentFiles.ts'
-import { RECENT_FILES_MAX } from '../src/store/fileHandleDb.ts'
+import { RECENT_FILES_MAX, type WorkspaceRecord } from '../src/store/fileHandleDb.ts'
 // adj530：顶栏"放不下就收进更多"的折叠判定（纯算式）——按可见优先级从最低的一位开始折叠
 import { foldKeys, TOPBAR_DONATE_KEY, TOPBAR_FIXED_KIDS } from '../src/ui/topbarFold.ts'
 // adj538：桌面壳「外部打开」——多文件取舍是纯逻辑，可在 Node 里直接断言（模块不碰 window 顶层）
@@ -272,6 +274,10 @@ import {
   sortDirEntries,
   stripJpsExt,
   type DirEntry,
+  // adj951：工作区**首次加载**的缓存编排（并发去重 + 晚落地不覆写）—— 注入假 loader ⇒
+  // 并发时序能在 Node 里直接跑（同一份实现既跑生产又被断言，见该函数的 JSDoc）
+  createWorkspaceLoadStore,
+  makeVaultWorkspaceRecord,
 } from '../src/store/workspace.ts'
 // adj526：谱面数值字段范围来自引擎同一份表（GUIDE_LIMITS/_EX）——断言"逐项相等"，防止抄成第二份
 import { PAGE_NUM_RANGES, coarseFor } from '../src/ui/numFieldRanges.ts'
@@ -18241,6 +18247,16 @@ runAdj927ExternalChangeTests()
     void runAdj944CliPathTests()
       .then(() => runAdj945CliManualTests())
       .then(() => runAdj946ShimTests())
+      // adj951：工作区"首次冷启动"的并发去重（用户实报：换一台电脑后首次打不开宿主推来的 .jps）
+      // —— 其中端到端那几条要另起一个进程跑（等它结束，再进下一步）；异常只算自己这一条 ✓
+      .then(async () => {
+        try {
+          await runAdj951WorkspaceLoadTests()
+        } catch (e) {
+          failed++
+          console.error('  ✗ adj951 工作区首次加载竞态用例抛异常', e)
+        }
+      })
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
       .then(() => runAdj949ManualScopeTests())
@@ -25628,4 +25644,227 @@ function runAdj949ManualScopeTests() {
     'adj949 手册写明示例是**实跑输出**（用户追加要求：「示例应该通过即时预览生成」⇒ 不许手抄）',
     manual.includes('实跑输出') && manual.includes('实跑过'),
   )
+}
+
+/**
+ * ---- [176] adj951：工作区"首次冷启动"的并发去重（用户实报） ----
+ *
+ * 用户现象：「ob 第一次打开嵌入版 iJipu，点文件列表里的 `.jps` 打不开，提示『打开新工作区』；
+ * 关掉 ob 再打开就正常」。根因（上一轮 adj943 已定位，本轮只修、不再论证）：首次冷启动有**两条路径并发**取工作区——
+ *
+ *  ① `docStore.ts:1604` **模块求值期**的 `void getWorkspace()`（先发起、后完成）；
+ *  ② `main.tsx:126` **嵌入版分支**的 `await getWorkspace()` + `setWorkspace(vault 记录)`（后发起、先完成）。
+ *
+ * 修复前两次各自 `await loadWorkspace()`，① 用**它发起时读到的旧值**（新电脑上是 null）覆写 `cached`
+ * ⇒ 宿主推来的 `.jps` 判「还没有设工作区」（首次必现、重开正常，两个特征都对得上）。
+ *
+ * 本段守住五件事，**每条都配负对照**（负对照一律是"修复前的写法/另一种省事写法"照原样跑一遍）：
+ *  ① 并发两次 `get()` ⇒ 底层 `load()` **只跑一次**（负对照：修复前的写法 ⇒ 跑两次）；
+ *  ② 并发两次调用拿到**同一个正确结果**（不许任何一次是 null / 空）；
+ *  ③ 加载期间落下的记录**不被晚落地的那次覆写**（负对照：修复前的写法 ⇒ 缓存变成 null）；
+ *  ④ 去重**只在 in-flight 期间**生效：加载完成后 `set()` 的新工作区必须立刻可见（负对照：把去重做成
+ *     "永久缓存那条已完成的 Promise" ⇒ 切工作区后仍拿到旧值）；
+ *  ⑤ 端到端（独立进程 + 真实 `docStore`/`workspace`/`hostBridge`）：冷启动并发后，宿主推来的 `.jps`
+ *     经**真实 `openWorkspaceFile`** 真的打开（负对照：把缓存落到修复前的终态 ⇒ 同一个函数判红）。
+ */
+async function runAdj951WorkspaceLoadTests() {
+  console.log('[176] 工作区首次冷启动：并发去重 + 晚落地不覆写（adj951）')
+
+  /** 假 loader：按 `rows` 逐次给出「延迟 + 值」（用超了重复最后一项）——用来精确编排并发时序 */
+  const makeFakeLoad = (rows: Array<[number, WorkspaceRecord | null]>) => {
+    let calls = 0
+    return {
+      calls: () => calls,
+      load: (): Promise<WorkspaceRecord | null> => {
+        const i = Math.min(calls, rows.length - 1)
+        calls++
+        return new Promise((r) => setTimeout(() => r(rows[i][1]), rows[i][0]))
+      },
+    }
+  }
+  const R_DB = makeVaultWorkspaceRecord('旧文库', '') // 库里那条（"上次的工作区"）
+  const R_VAULT = makeVaultWorkspaceRecord('测试文库', '') // 嵌入版分支写下的（宿主给的文库）
+
+  /**
+   * 负对照专用：**修复前那段 `getWorkspace()` 的写法**（逐字照搬机制：`loaded` 判断 + 各自
+   * `await load()` + 无条件 `cached = rec`）。只用来证明上面的断言真的在判"去重 / 不覆写"。
+   */
+  const makeLegacyStore = (load: () => Promise<WorkspaceRecord | null>) => {
+    let cached: WorkspaceRecord | null = null
+    let loaded = false
+    return {
+      get: async (): Promise<WorkspaceRecord | null> => {
+        if (!loaded) {
+          const raw = await load()
+          cached = raw // ← 修复前就是这一句：**无条件覆写**（晚到者把新值压回旧值）
+          loaded = true
+        }
+        return cached
+      },
+      set: (rec: WorkspaceRecord | null): void => {
+        cached = rec
+        loaded = true
+      },
+      peek: (): WorkspaceRecord | null => cached,
+    }
+  }
+
+  // ① 并发两次 get()（同一 tick 内发起）⇒ 底层只读一次库；两次拿到库里那条
+  {
+    const fake = makeFakeLoad([[30, R_DB]])
+    const store = createWorkspaceLoadStore(fake.load)
+    const p1 = store.get()
+    const p2 = store.get()
+    const r1 = await p1
+    const r2 = await p2
+    check(
+      'adj951 ①并发两次 getWorkspace ⇒ 底层只读一次库（in-flight 去重：两次调用等的是同一个 Promise）',
+      fake.calls() === 1,
+      `load 调用 ${fake.calls()} 次`,
+    )
+    check(
+      'adj951 ①两次并发调用都拿到库里那条（都没有被去重弄丢）',
+      !!r1 && !!r2 && r1.id === R_DB.id && r2.id === R_DB.id,
+      `r1=${r1?.id ?? 'null'} r2=${r2?.id ?? 'null'}`,
+    )
+  }
+  {
+    const fake = makeFakeLoad([[30, R_DB]])
+    const legacy = makeLegacyStore(fake.load)
+    const p1 = legacy.get()
+    const p2 = legacy.get()
+    await Promise.all([p1, p2])
+    check(
+      'adj951 ①负对照：关掉去重（修复前的写法）⇒ 同一次启动读库 **2 次**（证明①不是恒真）',
+      fake.calls() === 2,
+      `load 调用 ${fake.calls()} 次`,
+    )
+  }
+
+  /**
+   * ② 并发两次调用 + 加载**还在飞**的时候落下新工作区（= 嵌入版分支那条 `setWorkspace`）⇒
+   * 两次调用都必须拿到**那一条**（不许任何一次是 null，也不许是加载读到的旧记录）。
+   */
+  {
+    const fake = makeFakeLoad([[40, R_DB], [0, null]])
+    const store = createWorkspaceLoadStore(fake.load)
+    const p1 = store.get()
+    const p2 = store.get()
+    store.set(R_VAULT) // = main.tsx:127 的 `setWorkspace(rec)`（此刻加载还没落地）
+    const r1 = await p1
+    const r2 = await p2
+    check(
+      'adj951 ②并发两次调用返回**同一个正确结果**（都是加载期间落下的那条 vault 记录；没有任何一次是 null / 旧记录）',
+      r1?.id === R_VAULT.id && r2?.id === R_VAULT.id,
+      `r1=${r1?.id ?? 'null'} r2=${r2?.id ?? 'null'}（库里那条=${R_DB.id}）`,
+    )
+  }
+  {
+    const fake = makeFakeLoad([[40, R_DB], [0, null]])
+    const legacy = makeLegacyStore(fake.load)
+    const p1 = legacy.get()
+    const p2 = legacy.get()
+    legacy.set(R_VAULT)
+    const r1 = await p1
+    const r2 = await p2
+    check(
+      'adj951 ②负对照：修复前的写法下，两次并发调用**拿不到同一个结果**（一次 null、一次旧记录，都不是刚落下的那条）',
+      (r1 === null || r2 === null || r1.id !== r2.id) && r1?.id !== R_VAULT.id && r2?.id !== R_VAULT.id,
+      `r1=${r1?.id ?? 'null'} r2=${r2?.id ?? 'null'}`,
+    )
+  }
+
+  // ③ 新电脑：库里为空 + 加载在飞时嵌入版分支写下 vault 记录 ⇒ 晚落地那次不许覆写它
+  {
+    const fake = makeFakeLoad([[40, null], [0, null]])
+    const store = createWorkspaceLoadStore(fake.load)
+    const p1 = store.get() // ① 模块求值期那次（先发起、后落地）
+    const cur = await store.get() // ② 嵌入版分支那次（后发起）
+    if (!cur) store.set(R_VAULT) // = main.tsx:127 的 `setWorkspace(rec)`
+    await p1 // 等"先发起那次"落地（修复前它就在这一刻把缓存覆写回 null）
+    const after = await store.get()
+    check(
+      'adj951 ③加载期间落下的 vault 记录**不被晚落地的那次覆写**（缓存仍是它）',
+      after?.id === R_VAULT.id,
+      `缓存=${after?.id ?? 'null'}`,
+    )
+    check(
+      'adj951 ③同一次冷启动只读一次库（哪怕库里是空的、走了"cur 为空 ⇒ setWorkspace"那条分支）',
+      fake.calls() === 1,
+      `load 调用 ${fake.calls()} 次`,
+    )
+  }
+  {
+    const fake = makeFakeLoad([[40, null], [0, null]])
+    const legacy = makeLegacyStore(fake.load)
+    const p1 = legacy.get()
+    const cur = await legacy.get()
+    if (!cur) legacy.set(R_VAULT)
+    await p1
+    check(
+      'adj951 ③负对照：修复前的写法下，晚落地那次把缓存**覆写成 null**（= 用户看到的「还没有设工作区」）',
+      legacy.peek() === null,
+      `缓存=${legacy.peek() === null ? 'null' : legacy.peek()?.id}`,
+    )
+  }
+
+  // ④ 去重只在 in-flight 期间生效：加载完成后的 set()（工作区切换）必须立刻可见
+  {
+    const fake = makeFakeLoad([[10, R_DB]])
+    const store = createWorkspaceLoadStore(fake.load)
+    const first = await store.get()
+    store.set(R_VAULT) // 用户切工作区（真实路径：activateWorkspace → setWorkspace）
+    const again = await store.get()
+    check(
+      'adj951 ④去重只在 in-flight 期间生效：加载完成后 set() 的新工作区立刻可见（不是那条已完成 Promise 的旧值）',
+      first?.id === R_DB.id && again?.id === R_VAULT.id,
+      `first=${first?.id ?? 'null'} again=${again?.id ?? 'null'}`,
+    )
+    check('adj951 ④加载完成后再次取用不再读库（缓存命中，非并发行为不变）', fake.calls() === 1, `load 调用 ${fake.calls()} 次`)
+  }
+  {
+    // 负对照：把"去重"做成"永久记住那条已完成的 Promise"（一种看起来更省事的写法）
+    const memoGet = (): Promise<WorkspaceRecord | null> => Promise.resolve(R_DB)
+    const first = await memoGet()
+    const again = await memoGet()
+    check(
+      'adj951 ④负对照：把去重做成"永久缓存已完成的 Promise" ⇒ 切工作区后仍拿到旧值（证明④真的在判"只在 in-flight 生效"）',
+      first?.id === R_DB.id && again?.id === R_DB.id && again.id !== R_VAULT.id,
+      `again=${again?.id ?? 'null'}`,
+    )
+  }
+
+  // ⑤ 端到端：首次冷启动 + 宿主推 `.jps`（独立进程跑真实模块，见 scripts/adj951ColdStart.mts）
+  const out = execFileSync(process.execPath, ['dist-smoke/adj951-cold-start.cjs'], { cwd: root, encoding: 'utf8' })
+  const line = out.split(/\r?\n/).find((l) => l.startsWith('ADJ951_JSON '))
+  const rep = line ? (JSON.parse(line.slice('ADJ951_JSON '.length)) as Record<string, any>) : null
+  check(
+    'adj951 ⑤端到端夹具跑出了结果（独立进程 + 真实 docStore/workspace/hostBridge）',
+    !!rep,
+    line ?? out.slice(-300),
+  )
+  if (rep) {
+    check(
+      'adj951 ⑤首次冷启动：两条加载路径并发 ⇒ 底层仍然只读一次库',
+      rep.loadReads === 1,
+      `读库 ${rep.loadReads} 次`,
+    )
+    check(
+      'adj951 ⑤宿主推来的 `.jps` **真的打开了**（真实 `openWorkspaceFile` 返回 true + ok 提示 + 文件名对）',
+      rep.opened === true && rep.notice?.kind === 'ok' && rep.fileName === '花',
+      JSON.stringify({ opened: rep.opened, fileName: rep.fileName, notice: rep.notice }),
+    )
+    check(
+      'adj951 ⑤负对照：把缓存落到修复前的终态（晚到者覆写后的 null）⇒ 同一个 `openWorkspaceFile` 判红、提示"还没有设工作区"',
+      rep.openedAtLegacyState === false &&
+        rep.wsAtLegacyState === null &&
+        /还没有设工作区/.test(String(rep.noticeAtLegacyState?.text ?? '')),
+      JSON.stringify({ opened: rep.openedAtLegacyState, ws: rep.wsAtLegacyState, notice: rep.noticeAtLegacyState }),
+    )
+    check(
+      'adj951 ⑤夹具自身可信：它确实走了"嵌入版分支写下 vault 记录"这一步（否则上面几条是空跑）',
+      rep.didSetVault === true,
+      `didSetVault=${rep.didSetVault}`,
+    )
+  }
 }

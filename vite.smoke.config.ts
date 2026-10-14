@@ -48,6 +48,12 @@ export default defineConfig({
         // 不再从这里出 `dist-smoke/cli.cjs`，避免同一份入口两处构建而漂移 ✓。
         // adj806（A·P1–P4 的机器闸门）：命令行断言套件 ⇒ `dist-smoke/cli-assert.cjs`
         'cli-assert': 'scripts/cli-assert.mts',
+        /**
+         * adj951：工作区"首次冷启动"竞态夹具 ⇒ `dist-smoke/adj951-cold-start.cjs`
+         * （由 `smoke.mts` 起独立进程跑：`getWorkspace()` 的"首次加载"一个进程只发生一次，
+         *  而 smoke 主进程早就 import 过 `docStore` ⇒ 必须另起一个进程才有冷态 ✓）
+         */
+        'adj951-cold-start': 'scripts/adj951ColdStart.mts',
       },
       formats: ['cjs'],
       fileName: (_format, entryName) => `${entryName}.cjs`,
