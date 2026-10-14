@@ -128,6 +128,8 @@ const DOC_PAGE_MD = {
   '/manual/': 'docs/USER-GUIDE.md',
   '/syntax/': 'docs/SYNTAX.md',
   '/plugin/': 'docs/PLUGIN-GUIDE.md',
+  /* adj948：新增 `/cli/` 命令行手册（正文就是随安装包发布的那一份手册） */
+  '/cli/': 'docs/CLI-手册.md',
 }
 const RAW_ESCAPED_LINES = Object.fromEntries(
   Object.entries(DOC_PAGE_MD).map(([url, rel]) => [url, rawEscapedLines(rel)]),
@@ -765,12 +767,14 @@ async function main() {
         }
       }
 
-      // ---- 仅供检查：四个页面的整页图 ----
+      // ---- 仅供检查：五个页面的整页图（adj948：加入新增的 `/cli/`） ----
       await viewport(1440, 900, 1)
       await c.send('Page.navigate', { url: `${origin}/` })
       await sleep(900)
       await primeLazyImages()
       await saveShot('home.png', await shoot('png', { captureBeyondViewport: true }))
+      /* adj948：首页**首屏**（视口图，不含整页）—— 报告里要给用户看的就是这一张 */
+      await saveShot('home-first-screen.png', await shoot('png'))
 
       /**
        * 浅色版首页（**仅供人工检查**）：浅色下最容易出问题的是"对比度"与"深色截图贴在浅底上"，
@@ -792,6 +796,15 @@ async function main() {
       await c.send('Page.navigate', { url: `${origin}/plugin/` })
       await sleep(1200)
       await saveShot('plugin.png', await shoot('png', { captureBeyondViewport: true }))
+      /**
+       * adj948：命令行手册（新增页）的整页图 + **首屏图**。
+       * 首屏单独拍一张是因为整页图很长（手册 500+ 行），报告里要给人看"页首那段面向访客的引言"
+       * 长什么样 —— 那正是本次新增的东西。
+       */
+      await c.send('Page.navigate', { url: `${origin}/cli/` })
+      await sleep(1400)
+      await saveShot('cli-first-screen.png', await shoot('png'))
+      await saveShot('cli.png', await shoot('png', { captureBeyondViewport: true }))
       /**
        * adj911（用户反馈「手机端脚本/预览块会变得很宽」）：**手机视口**下的文档页整页图。
        * 修前这张图长这样：页面宽 4347px、` ```jps ` 块 4327px，一屏只看得到左边一小条。
@@ -865,6 +878,10 @@ async function main() {
             hasTheme: !!q('#theme-toggle'),
             /* adj905x（用户要求）：顶栏那一排的「插件手册」入口 */
             navPlugin: qa('.nav a').find((a) => (a.textContent || '').trim() === '插件手册')?.getAttribute('href') ?? '',
+            /* adj948（用户要求）：顶栏那一排的「命令行手册」入口 */
+            navCli: qa('.nav a').find((a) => (a.textContent || '').trim() === '命令行手册')?.getAttribute('href') ?? '',
+            /* adj948：入口卡里也要有一条（用户口径"首页底部「从哪儿开始」也加一张卡"） */
+            cardCli: qa('.link-grid .link-card').find((a) => (a.textContent || '').includes('命令行手册'))?.getAttribute('href') ?? '',
           }
         })()`,
       )
@@ -884,6 +901,11 @@ async function main() {
        * adj897（用户反馈）：功能卡的**图标与标题必须在同一行**。
        * 原来图标 / 标题 / 内容各占一行，手机上卡片窄 ⇒ 三行显得很散。
        * 这条**在手机视口下量真实几何**（用户说的正是那个场景），桌面也量一遍（是统一改的）。
+       *
+       * ⚠ adj948（**用户反馈**）：「首页那些卡片的图标怎么不见了？是不要了吗？」
+       *   —— 那排 emoji 图标**已逐字恢复**（8 张功能卡 + 7 张入口卡，含新增的命令行卡 ⌨️）。
+       *   本段判据因此**保持 adj897 的原口径**（图标在、与标题同一行、内容落下一行），
+       *   只把入口卡的数量从 6 提到 7（新增一张），并补一条"卡片数 + 图标齐全"的断言。
        */
       const measureCard = () =>
         evalJs(
@@ -902,6 +924,7 @@ async function main() {
               const a = ico.getBoundingClientRect(), b = title.getBoundingClientRect(), d = body.getBoundingClientRect()
               out.push({
                 sel,
+                ico: (ico.textContent || '').trim(),
                 sameRow: Math.abs(a.top - b.top) <= 12,
                 icoLeftOfTitle: b.left >= a.right - 2,
                 bodyBelow: d.top >= Math.max(a.bottom, b.bottom) - 2,
@@ -912,7 +935,17 @@ async function main() {
           })()`,
         )
       const cardsOk = (r) =>
-        Array.isArray(r) && r.length === 2 && r.every((x) => !x.missing && x.sameRow && x.icoLeftOfTitle && x.bodyBelow)
+        Array.isArray(r) && r.length === 2 &&
+        r.every((x) => !x.missing && x.ico.length > 0 && x.sameRow && x.icoLeftOfTitle && x.bodyBelow)
+      /** 卡片总数与图标齐全度（用户口径：图标是页面的一部分，不能被顺手删掉） */
+      const iconsOf = () =>
+        evalJs(
+          c,
+          `(() => ({
+            feature: [...document.querySelectorAll('.features .card .card-ico')].map((e) => (e.textContent || '').trim()),
+            link: [...document.querySelectorAll('.links .link-card .link-ico')].map((e) => (e.textContent || '').trim()),
+          }))()`,
+        )
       await viewport(390, 844, 2)
       await sleep(350)
       const cardMobile = await measureCard()
@@ -923,11 +956,35 @@ async function main() {
       const cardDesktop = await measureCard()
       check('adj897 桌面视口下同样成立（两类卡都是图标与标题一行，不是只在手机上改的）',
         cardsOk(cardDesktop), JSON.stringify(cardDesktop))
+      const cardIcons = await iconsOf()
+      check('adj948 首页两排卡片的 emoji 图标都还在（功能卡 8 个 + 入口卡 7 个，含新增的命令行卡）—— 用户明确要求图标不动',
+        cardIcons?.feature.length === 8 && cardIcons.feature.every((s) => s.length > 0) &&
+          cardIcons.link.length === 7 && cardIcons.link.every((s) => s.length > 0),
+        `功能卡 ${JSON.stringify(cardIcons?.feature)} / 入口卡 ${JSON.stringify(cardIcons?.link)}`)
+      /**
+       * 负对照（**必须为假**）：在活 DOM 上把第一张功能卡的图标删掉 ——
+       * 等价于"图标又不见了"（用户这次报的就是这个）⇒ 同一对判据必须判假。
+       */
+      const cardNeg = await evalJs(
+        c,
+        `(() => {
+          const ico = document.querySelector('.features .card .card-ico')
+          if (!ico) return null
+          ico.remove()
+          return { feature: document.querySelectorAll('.features .card .card-ico').length }
+        })()`,
+      )
+      check('adj948 负对照：把第一张卡的图标删掉 ⇒ "图标都在"判据判假（证明它真的在量图标，而不是恒真）',
+        !!cardNeg && cardNeg.feature === 7, JSON.stringify(cardNeg))
       // ⚠ adj899 的换行测试放在下面"切示例"那组**之后**（它要点击示例，会改变初始状态）
-      check('首页入口链接 6 个（应用/手册/语法/桌面/插件/赞赏）', home.entries === 6, String(home.entries))
+      check('首页入口链接 7 个（应用/手册/语法/命令行/桌面/插件/赞赏）', home.entries === 7, String(home.entries))
       check('首页顶栏导航 ≥ 6 条', home.navLinks >= 6, String(home.navLinks))
       check('adj905x 首页顶栏有「插件手册」入口（指向 `/plugin/`，用户要求）',
         home.navPlugin === '/plugin/', home.navPlugin)
+      check('adj948 首页顶栏有「命令行手册」入口（指向 `/cli/`，用户要求；排在插件手册之后）',
+        home.navCli === '/cli/', home.navCli)
+      check('adj948 首页入口卡里有「命令行手册」（指向 `/cli/`，用户要求"底部也加一张卡"）',
+        home.cardCli === '/cli/', home.cardCli)
       check('首页主按钮指向 `/app/`', home.cta === '/app/', home.cta)
       check('首页版本号占位全部填成 vX.Y.Z（没有漏成「·」）',
         home.verTotal > 0 && home.verCount === home.verTotal, `${home.verCount}/${home.verTotal}：${home.ver}`)
@@ -1023,14 +1080,17 @@ async function main() {
        * adj888（用户口径「**原则上先应用的功能介绍，再插件介绍**」）：
        * 这条顺序被用户调过两次（adj884 先放到最前、adj884b 退回一个位置、adj888 再对调一次），
        * 所以钉成断言 —— 以后谁打乱它，这里会红，而不是等用户再说一遍。
+       *
+       * adj948：标题按用户「正式、规范、优雅、简洁」的要求改过（口语化标题 ⇒ 名词化表述），
+       * 判据跟着换成新标题的**逐字**（顺序不变：两个应用功能段 → 插件 → 适用人群）。
        */
       const deepOrder = await evalJs(
         c,
         `[...document.querySelectorAll('.deep h2, .obsidian h2')].map((h) => h.textContent.trim())`,
       )
-      check('首页「先应用功能、再插件介绍」：Obsidian 段排在两个应用功能段**之后**',
+      check('首页「先应用功能、再插件介绍」：Obsidian 段排在两个应用功能段**之后**（标题为 adj948 名词化后的新写法）',
         JSON.stringify(deepOrder) ===
-          JSON.stringify(['写谱像写代码一样爽', '复杂谱子也扛得住', '在笔记里直接写谱', '写给谁']),
+          JSON.stringify(['以代码的方式写谱', '复杂谱面的排版', '在笔记中编写简谱', '适用人群']),
         JSON.stringify(deepOrder))
       check('插件专区两个按钮地址正确（社区市场 / GitHub 仓库）',
         home.obMarket === 'https://obsidian.md/plugins?id=ijipu' && home.obRepo === SITE_PLUGIN,
@@ -1303,12 +1363,17 @@ async function main() {
       const appErrs = collectErrors(mark).filter((e) => !/音色|soundfont|sampler|sf2|midi-js/i.test(e))
       check('应用无本站资源错误（音色库等跨域资源失败不计）', appErrs.length === 0, appErrs.slice(0, 4).join(' | '))
 
-      // ---------------- 文档页（三份都要：正文 + 目录 + 锚点） ----------------
-      for (const [label, url, minToc, minKids, needTable] of [
-        ['操作手册', '/manual/', 5, 20, false],
-        ['脚本语法说明', '/syntax/', 8, 40, true],
+      // ---------------- 文档页（四份都要：正文 + 目录 + 锚点） ----------------
+      // 元组：标签 / 路径 / 目录条数下限 / 正文子节点下限 / 需要表格 / **有没有 ` ```jps ` 示例**
+      // ⚠ 最后一列是 adj948 加的：`/cli/`（命令行手册）里的代码块全是 ` ```text ` 输出片段，
+      //   一个 ` ```jps ` 都没有 ⇒ "示例块能切预览"那一组对它**不适用**，要单独判（见下）。
+      for (const [label, url, minToc, minKids, needTable, hasJps] of [
+        ['操作手册', '/manual/', 5, 20, false, true],
+        ['脚本语法说明', '/syntax/', 8, 40, true, true],
         /* adj905x（用户要求）：插件功能介绍 + 使用手册 */
-        ['插件手册', '/plugin/', 8, 30, true],
+        ['插件手册', '/plugin/', 8, 30, true, true],
+        /* adj948（用户要求）：CLI 命令使用手册（正文 = 随安装包发布的那一份手册） */
+        ['命令行手册', '/cli/', 5, 30, true, false],
       ]) {
         console.log(`[verify-site] 验证 \`${url}\`（${label}）…`)
         mark = noteEvents()
@@ -1550,7 +1615,30 @@ async function main() {
         /**
          * ---- adj882（用户要求）：文档里的 ` ```jps ` 示例要变成「脚本 / 预览」块 ----
          * 这是这个功能的**核心验收**：语法说明里几十个示例，页面上都该是可切换的。
+         *
+         * adj948：`/cli/`（命令行手册）**没有** ` ```jps ` 示例（它的代码块全是 ` ```text ` 输出片段）
+         * ⇒ 这一组对它换成**反向判据**：页面里确实一个 jps 块都没有、但 ` ```text ` 代码块都在。
+         * （不是"跳过不查"—— 跳过的话，"误把 text 块变成 jps 块"这种坏味道就没人守。）
          */
+        if (!hasJps) {
+          const noJps = await evalJs(
+            c,
+            `(() => ({
+              jps: document.querySelectorAll('#doc-body .jps-block').length,
+              pre: document.querySelectorAll('#doc-body pre').length,
+            }))()`,
+          )
+          check(`${label}：正文里**没有** \`\`\`jps 示例块，但 \`\`\`text 输出片段都渲染成 <pre>（共 ${noJps?.pre ?? 0} 个）`,
+            !!noJps && noJps.jps === 0 && noJps.pre > 5, JSON.stringify(noJps))
+          const docFeedback0 = await evalJs(
+            c,
+            `(() => { const a = document.querySelector('.doc-foot a[data-l="repoUrl"]'); return a ? a.href : '' })()`,
+          )
+          check(`${label}：页脚反馈链接指向公开的源码仓库`, docFeedback0 === SITE_REPO, docFeedback0)
+          const docErrs0 = collectErrors(mark)
+          check(`${label}：无控制台错误 / 无本站 4xx`, docErrs0.length === 0, docErrs0.slice(0, 4).join(' | '))
+          continue
+        }
         const jpsBlocks = await evalJs(c, `document.querySelectorAll('#doc-body .jps-block').length`)
         check(`${label}：正文里的 \`\`\`jps 示例都变成了「脚本 / 预览」块（共 ${jpsBlocks} 个）`,
           jpsBlocks > 0, String(jpsBlocks))
@@ -1600,6 +1688,98 @@ async function main() {
       }
 
       /**
+       * ---------------- adj948：新增的 `/cli/` 命令行手册（用户要求「官网补 CLI 命令使用手册」） ----------------
+       *
+       * 用户口径：与 `/manual/` `/syntax/` `/plugin/` **同构**、正文用**同一份真源**
+       * （`docs/CLI-手册.md`，就是随安装包发布的那一份）、页首加一段**面向访客**的引言、
+       * 命令集齐全（**13 个命令都能在页面里找到**）。
+       *
+       * 上面那个文档页循环已经覆盖了"正文渲染出来 / 目录点得动 / 表格 / 页脚 / 无控制台报错"这些**通用项**，
+       * 这里只补这一页**独有**的三件事，每条配负对照：
+       *   ① 页首引言真的在（在正文**之前**、布局可见、内容写到"未注册 PATH 时用完整路径调用"）；
+       *   ② 命令集齐全 —— 名单**从源码读**（`cli.ts` 的 `known` 集合），逐个要求页面里出现
+       *      `<code>命令</code>`（在 Node 侧比对页面**实际渲染**的 code 文本，不是比对源码）；
+       *   ③ 顶栏切换条认得出"当前就是这一页"（`body[data-doc=cli]`，docs.css 靠它高亮）。
+       */
+      console.log('[verify-site] 验证 `/cli/`（命令行手册，adj948）…')
+      {
+        /** 命令名单从**源码**读（唯一一处名单）⇒ 以后加命令，这条自动要求页面跟上 */
+        const CLI_COMMANDS = (() => {
+          const src = readFileSync(path.join(ROOT, 'packages', 'ijipu-cli', 'src', 'cli.ts'), 'utf8')
+          const m = src.match(/const known = new Set\(\[([^\]]*)\]\)/)
+          return m === null ? [] : Array.from(m[1].matchAll(/'([^']+)'/g)).map((x) => x[1])
+        })()
+        await viewport(1440, 900, 1)
+        mark = noteEvents()
+        await c.send('Page.navigate', { url: `${origin}/cli/` })
+        await sleep(1600)
+        const cliPage = await evalJs(
+          c,
+          `(() => {
+            const intro = document.querySelector('.doc-intro')
+            const body = document.getElementById('doc-body')
+            const ir = intro ? intro.getBoundingClientRect() : null
+            const codes = [...document.querySelectorAll('#doc-body code')].map((el) => (el.textContent || '').trim())
+            return {
+              hasIntro: !!intro,
+              introVisible: !!ir && ir.width > 0 && ir.height > 0 && getComputedStyle(intro).display !== 'none',
+              introText: intro ? (intro.textContent || '').trim() : '',
+              /* 引言必须在正文**之前**（DOCUMENT_POSITION_FOLLOWING ⇒ body 排在 intro 后面） */
+              introBeforeBody: !!intro && !!body &&
+                (intro.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+              codes,
+              docKind: document.body.dataset.doc || '',
+              switchHrefs: [...document.querySelectorAll('.doc-switch a')].map((a) => a.getAttribute('href')),
+            }
+          })()`,
+        )
+        check('adj948 `/cli/`：页首引言存在、可见、且排在正文**之前**（用户要求"页首加一段面向访客的引言"）',
+          !!cliPage && cliPage.hasIntro && cliPage.introVisible && cliPage.introBeforeBody,
+          JSON.stringify({ has: cliPage?.hasIntro, vis: cliPage?.introVisible, before: cliPage?.introBeforeBody }))
+        check('adj948 `/cli/`：引言写明"未注册 PATH 时用完整路径调用"（访客最需要的那句）',
+          !!cliPage && cliPage.introText.includes('PATH') && cliPage.introText.includes('完整路径'),
+          (cliPage?.introText ?? '').slice(0, 80))
+        const noCodeCmd = CLI_COMMANDS.filter((cmd) => !(cliPage?.codes ?? []).includes(cmd))
+        check(`adj948 \`/cli/\`：**命令集齐全** —— 源码里的 ${CLI_COMMANDS.length} 个命令逐个在页面里渲染成 \`<code>命令</code>\``,
+          CLI_COMMANDS.length >= 13 && noCodeCmd.length === 0, noCodeCmd.join(' '))
+        check('adj948 `/cli/`：顶栏切换条认得出"当前是这一页"（`body[data-doc=cli]`，四份文档都在条上）',
+          cliPage?.docKind === 'cli' &&
+            JSON.stringify(cliPage?.switchHrefs) === JSON.stringify(['/manual/', '/syntax/', '/plugin/', '/cli/']),
+          `${cliPage?.docKind} / ${JSON.stringify(cliPage?.switchHrefs)}`)
+        /**
+         * 负对照（**必须为假**）：直接在活页面上"拆掉"证据 —— 不改实现文件、不动服务端。
+         *   · 删掉引言元素 ⇒ ①的外形判据为假；
+         *   · 把某一处 `<code>batch</code>` 的文字改成别的 ⇒ ②为假。
+         * 两处都改完后再核对原判据仍为真（证明上面量的确实是这两样东西，而不是恒真）。
+         */
+        const neg = await evalJs(
+          c,
+          `(() => {
+            const intro = document.querySelector('.doc-intro')
+            if (intro) intro.remove()
+            /* ⚠ 手册里同一个命令会出现**多次**（表格一次、小节标题一次…）⇒ 必须**全部**改掉，
+               只改第一个的话判据仍然为真，负对照就成了"假绿"（第一次就是这么写错的）。 */
+            let touched = 0
+            for (const el of document.querySelectorAll('#doc-body code')) {
+              if ((el.textContent || '').trim() === 'batch') { el.textContent = 'b4tch'; touched++ }
+            }
+            const codes = [...document.querySelectorAll('#doc-body code')].map((el) => (el.textContent || '').trim())
+            return {
+              introGone: !document.querySelector('.doc-intro'),
+              batchTouched: touched,
+              batchGone: !codes.includes('batch'),
+            }
+          })()`,
+        )
+        check('adj948 负对照：在活页面上删掉引言 / 改掉**全部** `<code>batch</code>` ⇒ ①与②各自判假（判据不是恒真）',
+          neg?.introGone === true && neg?.batchTouched >= 1 && neg?.batchGone === true &&
+            CLI_COMMANDS.includes('batch') && noCodeCmd.length === 0,
+          JSON.stringify(neg))
+        const cliErrs = collectErrors(mark)
+        check('adj948 `/cli/`：无控制台错误 / 无本站 4xx', cliErrs.length === 0, cliErrs.slice(0, 4).join(' | '))
+      }
+
+      /**
        * ---------------- 窄屏（手机视口）的目录抽屉 ----------------
        *
        * adj905x（**用户实测反馈**）：「手机上点『目录』，面板开在离我很远的上方 —— 点了没反应」。
@@ -1616,7 +1796,12 @@ async function main() {
        */
       console.log('[verify-site] 验证窄屏（手机视口）的目录抽屉…')
       await viewport(390, 844, 2)
-      for (const [label, url] of [['操作手册', '/manual/'], ['脚本语法说明', '/syntax/']]) {
+      /* adj948：四份文档页都过一遍（新增的 `/cli/` 也要有抽屉，否则新页面在手机上点不了目录） */
+      for (const [label, url] of [
+        ['操作手册', '/manual/'],
+        ['脚本语法说明', '/syntax/'],
+        ['命令行手册', '/cli/'],
+      ]) {
         mark = noteEvents()
         await c.send('Page.navigate', { url: `${origin}${url}` })
         await sleep(1400)
@@ -2177,6 +2362,8 @@ async function main() {
         ['操作手册', '/manual/'],
         ['脚本语法说明', '/syntax/'],
         ['插件手册', '/plugin/'],
+        /* adj948：新增的 `/cli/` 也要有首屏启动层（那段内联块五页逐字相同） */
+        ['命令行手册', '/cli/'],
       ]
       /** 页面里**内联**的 `<style>` 块（外链 CSS 不在此列） */
       const inlineCssOf = (html) =>

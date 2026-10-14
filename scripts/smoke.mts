@@ -39,8 +39,8 @@ import { mdToHtml, extractToc, parseJpsInfo, inlineMd } from '../src/help/markdo
 import { BRAND_SAMPLES, simplifyJps } from '../src/landing/samples'
 /**
  * adj930：官网首屏启动层的**色值 / 元素 id / 揭示时机的唯一口径**。
- * 四个官网页的 `<head>` 里各手写了一段同样的内联块（必须内联，外链样式表来不及防闪烁）
- * ⇒ "同一份色值抄四遍"最容易漂移，本文件 `[168]` 段逐字核对（含负对照）。
+ * 五个官网页的 `<head>` 里各手写了一段同样的内联块（必须内联，外链样式表来不及防闪烁）
+ * ⇒ "同一份色值抄五遍"最容易漂移，本文件 `[168]` 段逐字核对（含负对照）。
  * ⚠ 这个模块只在**函数内部**碰 document/window，顶层全是常量 ⇒ 可以在 Node 里直接 import。
  */
 import {
@@ -8744,7 +8744,8 @@ console.log('[103] icons live in public/icons and only the used ones (adj417)')
   // adj876：站点分成多页后，favicon 要**每一页都有**——浏览器标签页不看你是从哪个入口进来的。
   // （应用外壳在 `app/index.html`；首页的图标列表还多一个 apple-touch-icon，故阈值取 2。）
   // adj905x：新增 `/plugin/`（插件手册）后同样要在这一串里，否则"新页面忘了 favicon"没人守。
-  for (const rel of ['index.html', 'app/index.html', 'manual/index.html', 'syntax/index.html', 'plugin/index.html']) {
+  // adj948：新增 `/cli/`（命令行手册）同理 —— 新页面必须自己带上 favicon。
+  for (const rel of ['index.html', 'app/index.html', 'manual/index.html', 'syntax/index.html', 'plugin/index.html', 'cli/index.html']) {
     const html = readFileSync(join(root, rel), 'utf8')
     const htmlIcons = [...html.matchAll(/href="(\/icons\/[^"]+)"/g)].map((m) => m[1])
     check(
@@ -18235,10 +18236,12 @@ runAdj927ExternalChangeTests()
     // adj945：手册/随包分发那组也是文件驱动的同步断言，接在同一条链上 ✓
     // adj946：垫片 + 注册口径改成 bin 目录（用户实报 bug）—— 同样要读假宿主 ⇒ 接在链尾 ✓
     // adj947：`cli` 前缀闸门（用户实报 `--help` 用法行漏 `cli`）—— 文件驱动的同步断言 ⇒ 接在链尾 ✓
+    // adj948：官网文案规范 + 新增 `/cli/` 命令行手册 —— 也是文件驱动的同步断言 ⇒ 接在链尾 ✓
     void runAdj944CliPathTests()
       .then(() => runAdj945CliManualTests())
       .then(() => runAdj946ShimTests())
       .then(() => runAdj947CliPrefixTests())
+      .then(() => runAdj948SiteCopyTests())
       .then(() => {
         console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
         process.exit(failed === 0 ? 0 : 1)
@@ -22055,9 +22058,9 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   console.log('[160] 官网分层：首页 / 应用 / 文档页（adj876）')
   const readSrc = (rel: string) => String(readFileSync(join(root, rel), 'utf8'))
 
-  // ---- ① 五份 HTML 都在，且各自角色正确 ----
-  const rel = ['index.html', 'app/index.html', 'manual/index.html', 'syntax/index.html', 'plugin/index.html']
-  check('adj876 五份 HTML 入口都存在（首页 / 应用 / 手册 / 语法 / 插件）',
+  // ---- ① 六份 HTML 都在，且各自角色正确 ----
+  const rel = ['index.html', 'app/index.html', 'manual/index.html', 'syntax/index.html', 'plugin/index.html', 'cli/index.html']
+  check('adj876 六份 HTML 入口都存在（首页 / 应用 / 手册 / 语法 / 插件 / 命令行）',
     rel.every((p) => existsSync(join(root, p))), rel.join(', '))
 
   const homeHtml = readSrc('index.html')
@@ -22065,18 +22068,20 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   const manualHtml = readSrc('manual/index.html')
   const syntaxHtml = readSrc('syntax/index.html')
   const pluginHtml = readSrc('plugin/index.html')
+  const cliHtml = readSrc('cli/index.html')
 
   check('adj876 `app/index.html` 挂的是应用入口 `/src/main.tsx` 且带 `#root`（它是应用外壳的唯一来源）',
     shellHtml.includes('src="/src/main.tsx"') && shellHtml.includes('id="root"'))
   check('adj876 首页**不**挂应用入口（挂了就等于首页要把整个应用下下来）',
     !homeHtml.includes('/src/main.tsx') && homeHtml.includes('src="/src/landing/main.ts"'))
-  check('adj876 三个文档页各挂自己的入口（各自只带自己那份 md）',
+  check('adj876 四个文档页各挂自己的入口（各自只带自己那份 md）',
     manualHtml.includes('src="/src/docs/manual.ts"') &&
       syntaxHtml.includes('src="/src/docs/syntax.ts"') &&
-      pluginHtml.includes('src="/src/docs/plugin.ts"'))
+      pluginHtml.includes('src="/src/docs/plugin.ts"') &&
+      cliHtml.includes('src="/src/docs/cli.ts"'))
 
-  const titles = [homeHtml, shellHtml, manualHtml, syntaxHtml, pluginHtml].map((h) => h.match(/<title>([^<]*)<\/title>/)?.[1] ?? '')
-  check('adj876 五份 HTML 的 <title> 各不相同', new Set(titles).size === 5, titles.join(' | '))
+  const titles = [homeHtml, shellHtml, manualHtml, syntaxHtml, pluginHtml, cliHtml].map((h) => h.match(/<title>([^<]*)<\/title>/)?.[1] ?? '')
+  check('adj876 六份 HTML 的 <title> 各不相同', new Set(titles).size === 6, titles.join(' | '))
   check('adj876 首页 title 含 Slogan「码即成，谱自现」', titles[0].includes('码即成，谱自现'), titles[0])
   /**
    * adj905x（用户要求）：「**在首页上面一排增加一个链接，链接到插件这个手册**」。
@@ -22125,6 +22130,32 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       (h) =>
         /<nav class="doc-switch">[\s\S]*?href="\/manual\/"[\s\S]*?href="\/syntax\/"[\s\S]*?href="\/plugin\/"[\s\S]*?<\/nav>/.test(h),
     ))
+  /**
+   * adj948（用户要求：「顶栏加入口 —— 在『插件手册』之后加一项『命令行』」，首页底部「从哪儿开始」也加一张卡）。
+   *
+   * 判据盯的是**四份文档页的切换条**（`/cli/` 自己也在内）与**首页顶栏 / 首页入口卡**：
+   * 光建了页面、顶栏没入口，用户根本找不着（adj905x 的插件手册就是同一条教训）。
+   * 命名统一取「命令行手册」——与既有条目（使用手册 / 插件手册）同构，且**四个页面逐字相同**。
+   * 三条判据都写成**纯函数** ⇒ 负对照复用同一份（证明它们真的在量"入口在不在、位置对不对"）。
+   */
+  const docSwitchHasCli = (h: string): boolean =>
+    /<nav class="doc-switch">[\s\S]*?href="\/manual\/"[\s\S]*?href="\/syntax\/"[\s\S]*?href="\/plugin\/"[\s\S]*?href="\/cli\/">命令行手册<\/a>[\s\S]*?<\/nav>/.test(h)
+  const homeNavHasCli = (h: string): boolean =>
+    /<nav class="nav"[\s\S]*?<a href="\/plugin\/">插件手册<\/a>[\s\S]*?<a href="\/cli\/">命令行手册<\/a>[\s\S]*?<\/nav>/.test(h)
+  const homeCardHasCli = (h: string): boolean =>
+    /<a class="link-card" href="\/cli\/">[\s\S]*?<b>命令行手册<\/b>[\s\S]*?<\/a>/.test(h)
+  check('adj948 四份文档页顶栏可互相切换（`.doc-switch` 里四份都在，命令行手册在插件手册之后）',
+    [manualHtml, syntaxHtml, pluginHtml, cliHtml].every(docSwitchHasCli),
+    [manualHtml, syntaxHtml, pluginHtml, cliHtml].map(docSwitchHasCli).join(','))
+  check('adj948 首页顶栏有「命令行手册」入口（指向 `/cli/`），且排在「插件手册」之后', homeNavHasCli(homeHtml))
+  check('adj948 首页底部「开始使用」区有「命令行手册」入口卡（指向 `/cli/`）', homeCardHasCli(homeHtml))
+  check('adj948 四个文档页的页脚都能到命令行手册（其余三页都有这条，命令行页自己指向插件手册）',
+    [manualHtml, syntaxHtml, pluginHtml].every((h) => h.includes('<a href="/cli/">命令行手册</a>')) &&
+      cliHtml.includes('<a href="/plugin/">插件手册</a>'))
+  check('adj948 负对照：把顶栏那条 / 首页那张卡 / 某个文档页切换条里那条分别删掉 ⇒ 三条判据各自判假（不会恒真）',
+    !homeNavHasCli(homeHtml.replace('<a href="/cli/">命令行手册</a>', '')) &&
+      !homeCardHasCli(homeHtml.replace('<a class="link-card" href="/cli/">', '<a class="link-card" href="/manual/">')) &&
+      !docSwitchHasCli(cliHtml.replace('<a href="/cli/">命令行手册</a>', '')))
 
   /**
    * adj905x（**用户口径**）：「**`.jps` 文件和 `.jps` 代码块的曲谱编制方式是不一样的** ——
@@ -22205,6 +22236,9 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       ['/syntax/', '/syntax/index.html'],
       ['/plugin/', '/plugin/index.html'],
       ['/plugin', '/plugin/index.html'],
+      /* adj948：新增 `/cli/` 后漏了这条 ⇒ 离线打开命令行手册会被喂成首页 HTML（白屏） */
+      ['/cli/', '/cli/index.html'],
+      ['/cli', '/cli/index.html'],
       ['/whatever', '/index.html'],
     ]
     const bad = cases
@@ -22221,6 +22255,22 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     swSrc.includes("'jps-shell-v4'"))
   check('adj876 SW 预缓存含 PWA 启动页 `/app/index.html`（离线打开要能用）',
     swSrc.includes("'/app/index.html'"))
+  /**
+   * adj948：`/cli/` 是**靠 JS 渲染正文**的文档页 ⇒ 与 `/manual/`、`/syntax/`、`/plugin/` 同一口径
+   * **不进 PRECACHE**（预缓存一个空骨架没有意义，访问过之后自然会进缓存）。
+   * 这条守的是"以后有人顺手把它塞进预缓存"——那会让"离线看得到"变成假象（骨架在、正文不在）。
+   * ⚠ 只判 **PRECACHE 清单**：`fallbackFor()` 里当然有 `'/cli/index.html'`（导航回退要用），
+   * 拿整份 sw.js 去 `includes` 会把它误判成"进了预缓存"（第一版就是这么写错的）。
+   */
+  const precacheBlock = /const PRECACHE = \[([\s\S]*?)\]/.exec(swSrc)?.[1] ?? ''
+  const precacheHasDocPages = (block: string): boolean =>
+    block.includes('/cli/index.html') || block.includes('/manual/index.html') ||
+    block.includes('/syntax/index.html') || block.includes('/plugin/index.html')
+  check('adj948 `/cli/` 与其它文档页一样**不**进 SW 预缓存（正文靠 JS 渲染，预缓存空骨架没有意义）',
+    precacheBlock !== '' && precacheBlock.includes("'/app/index.html'") && !precacheHasDocPages(precacheBlock),
+    precacheBlock.replace(/\s+/g, ' ').slice(0, 120))
+  check('adj948 负对照：把 `/cli/index.html` 塞进 PRECACHE ⇒ 判据判红（证明它真的在量那份清单）',
+    precacheHasDocPages(precacheBlock.replace("'/app/index.html',", "'/app/index.html',\n  '/cli/index.html',")))
 
   // ---- ⑥ 文档页与应用内帮助同源：渲染器抽成了纯模块，且目录锚点与标题 id 逐个一致 ----
   const mdSrc = readSrc('src/help/markdown.ts')
@@ -22240,8 +22290,9 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   check('adj876 玩具用例：重名标题自动去重（第二个加 `-2`，否则后一个锚点点不动）',
     toyToc[2].id === '1-1-带标点的标题-含括号-2', toyToc[2].id)
 
-  // 真实文档：这才是要紧的——两份 .md 的**目录锚点与正文标题 id 必须逐个相同**
-  for (const doc of ['docs/USER-GUIDE.md', 'docs/SYNTAX.md']) {
+  // 真实文档：这才是要紧的——每份 .md 的**目录锚点与正文标题 id 必须逐个相同**
+  // （adj948：加上 `/cli/` 读的那一份 `docs/CLI-手册.md`，新页面的目录也要点得动）
+  for (const doc of ['docs/USER-GUIDE.md', 'docs/SYNTAX.md', 'docs/CLI-手册.md']) {
     const realMd = readSrc(doc)
     const realToc = extractToc(realMd)
     const realHtml = mdToHtml(realMd)
@@ -23729,9 +23780,9 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
  * 以免又是背景闪动」。
  *
  * 启动层那段 CSS **必须内联在各页 `<head>` 里**（外链样式表自己就要等网络 ⇒ 拿它防闪烁等于没防），
- * 内联就意味着"同一份色值抄四遍" ⇒ 最容易出的坏味道是"改了主题忘了改启动层"，
+ * 内联就意味着"同一份色值抄五遍" ⇒ 最容易出的坏味道是"改了主题忘了改启动层"，
  * 那正是"背景又闪一下"的复发路径。所以这里把三件事钉死、每条都配**负对照**：
- *   ① 四页内联块里**自带**启动层全部字面色值，且**不依赖** `var(--site-*)`（那会儿变量还没注入）；
+ *   ① 五页内联块里**自带**启动层全部字面色值，且**不依赖** `var(--site-*)`（那会儿变量还没注入）；
  *   ② 内联的深/浅底色 == `styles/theme.css` 里 `--jp-bg-app` 的主题 token 值（深浅两套）；
  *   ③ 揭示时机的实现齐备：等外链样式表 + `document.fonts.ready` + （文档页）正文注入；
  *      超时/失败照样揭示并打进 console；`prefers-reduced-motion` 下不淡出直接移除；末尾 `remove()`。
@@ -23746,6 +23797,8 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     ['操作手册', 'manual/index.html'],
     ['脚本语法说明', 'syntax/index.html'],
     ['插件手册', 'plugin/index.html'],
+    /* adj948：新增 `/cli/`（命令行手册）—— 启动层这段内联块**五页必须逐字相同** */
+    ['命令行手册', 'cli/index.html'],
   ]
   const htmlOf = (rel: string) => String(readFileSync(join(root, rel), 'utf8'))
   /** 主题 token 的原文（判据②要拿它当"唯一的字面量来源"） */
@@ -23804,31 +23857,31 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     const html = htmlOf(rel)
     return !new RegExp(`<div id="${SITE_BOOT_ID}"[^>]*role="status"[^>]*aria-busy="true"`).test(html)
   })
-  check('adj930 四个官网页的 `<body>` 里都有启动层浮层（**静态写在 HTML 里**、带 `role=status` + `aria-busy`）',
+  check('adj930 五个官网页的 `<body>` 里都有启动层浮层（**静态写在 HTML 里**、带 `role=status` + `aria-busy`）',
     missingEl.length === 0, missingEl.map(([l]) => l).join('、'))
   /** `<noscript>` 兜底：关掉 JS 时没有任何脚本能揭示 ⇒ 必须干脆不显示（否则永远转圈） */
   const noJsFallback = SITE_PAGES.filter(([, rel]) => !/<noscript><style>#ijipu-boot \{ display: none; \}<\/style><\/noscript>/.test(htmlOf(rel)))
-  check('adj930 四页都有关掉 JS 的兜底（`<noscript>` 里把启动层 `display:none`，否则无 JS 会永远转圈）',
+  check('adj930 五页都有关掉 JS 的兜底（`<noscript>` 里把启动层 `display:none`，否则无 JS 会永远转圈）',
     noJsFallback.length === 0, noJsFallback.map(([l]) => l).join('、'))
 
   // ---- 判据①：内联块自带色值、不依赖外部变量 ----
   const inlineFail = SITE_PAGES.filter(([, rel]) => !bootInlineOk(htmlOf(rel)))
-  check('adj930 四页的**内联**块里都有启动层的全部字面色值（深浅两套），且不出现 `var(--…)`',
+  check('adj930 五页的**内联**块里都有启动层的全部字面色值（深浅两套），且不出现 `var(--…)`',
     inlineFail.length === 0,
     inlineFail.length
       ? `不合格：${inlineFail.map(([l]) => l).join('、')}`
       : `深底 ${SITE_BOOT_COLORS.dark.bg} / 浅底 ${SITE_BOOT_COLORS.light.bg} / 强调 ${SITE_BOOT_COLORS.dark.accent}`)
 
-  // ---- 四页那段内联块必须**逐字相同**（同一份色值抄四遍 ⇒ 用闸门代替记性） ----
+  // ---- 五页那段内联块必须**逐字相同**（同一份色值抄五遍 ⇒ 用闸门代替记性） ----
   const firstInline = SITE_PAGES.map(([, rel]) => inlineStyles(htmlOf(rel))[0] ?? '')
-  check('adj930 四页 `<head>` 的内联块**逐字相同**（含启动层；改色必须四页一起改）',
+  check('adj930 五页 `<head>` 的内联块**逐字相同**（含启动层；改色必须五页一起改）',
     firstInline.every((s) => s.length > 0 && s === firstInline[0]),
     `${new Set(firstInline).size} 种版本 / 长度 ${firstInline.map((s) => s.length).join(',')}`)
   /** 淡出那条规则也必须**内联**：否则揭示时加的类不生效（元素会直接消失 = 又变回一次闪） */
   const noFadeRule = SITE_PAGES.filter(
     ([, rel]) => !normCss(htmlOf(rel)).includes(normCss(`#${SITE_BOOT_ID}.${SITE_BOOT_OUT_CLASS} { opacity: 0; }`)),
   )
-  check('adj930 四页内联块里都有"淡出只改透明度"那条规则（`#ijipu-boot.ijipu-boot-out { opacity: 0; }`）',
+  check('adj930 五页内联块里都有"淡出只改透明度"那条规则（`#ijipu-boot.ijipu-boot-out { opacity: 0; }`）',
     noFadeRule.length === 0, noFadeRule.map(([l]) => l).join('、'))
 
   // ---- 判据②：内联底色 == `styles/theme.css` 的主题 token（深浅两套） ----
@@ -23845,7 +23898,7 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
       `SITE_BOOT=${SITE_BOOT_COLORS.dark.bg}|${SITE_BOOT_COLORS.light.bg}`)
   /** 判据②的"内联侧"：页面内联块里真的出现了这两个 token 值 */
   const tokenMissing = SITE_PAGES.filter(([, rel]) => !bootTokenOk(htmlOf(rel), darkToken, lightToken))
-  check('adj930 四页内联块里都找得到那两个 token 值（"内联启动色 == 主题页面底色"这条真的在页面上）',
+  check('adj930 五页内联块里都找得到那两个 token 值（"内联启动色 == 主题页面底色"这条真的在页面上）',
     tokenMissing.length === 0, tokenMissing.map(([l]) => l).join('、'))
 
   // ---- 判据③：揭示时机的实现齐备 ----
@@ -23867,7 +23920,7 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     const html = htmlOf(rel)
     return !html.includes(SITE_BOOT_ARMED_FLAG) || !html.includes(`}, ${SITE_BOOT_HARD_FALLBACK_MS})`)
   })
-  check(`adj930 四页都有"模块没跑起来"的硬兜底（${SITE_BOOT_HARD_FALLBACK_MS}ms 后摘掉启动层，用 ${SITE_BOOT_ARMED_FLAG} 让位给正常揭示）`,
+  check(`adj930 五页都有"模块没跑起来"的硬兜底（${SITE_BOOT_HARD_FALLBACK_MS}ms 后摘掉启动层，用 ${SITE_BOOT_ARMED_FLAG} 让位给正常揭示）`,
     hardFallback.length === 0, hardFallback.map(([l]) => l).join('、'))
 
   // ---- 两个入口都接上了揭示（否则启动层会一直转圈到超时） ----
@@ -23887,8 +23940,9 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     wrongDark !== homeHtml && !bootInlineOk(wrongDark) && bootInlineOk(homeHtml))
   check('adj930 负对照②：删掉内联块（＝"改成依赖外部 CSS"的形态）⇒ 判据①与"内联里找得到 token"都为假',
     noInline !== homeHtml && !bootInlineOk(noInline) && !bootTokenOk(noInline, darkToken, lightToken))
-  const onePageChanged = [firstInline[0], firstInline[1], firstInline[2] + ' /* 只改这一页 */', firstInline[3]]
-  check('adj930 负对照③：四页里只改一页 ⇒ "逐字相同"这条为假（不会出现"三页改了、一页忘了"还能绿）',
+  // 从实际页数推导（adj948 起是 5 页）⇒ 以后再加页面也不用回来改这一行
+  const onePageChanged = firstInline.map((s, i) => (i === 2 ? s + ' /* 只改这一页 */' : s))
+  check('adj930 负对照③：五页里只改一页 ⇒ "逐字相同"这条为假（不会出现"四页改了、一页忘了"还能绿）',
     !onePageChanged.every((s) => s === onePageChanged[0]) && firstInline.every((s) => s === firstInline[0]))
   check('adj930 负对照④：主题 token 换成别的值 ⇒ 判据②为假（以后改主题忘了改启动层，这里会红）',
     !bootTokenOk(homeHtml, '#123456', lightToken) && bootTokenOk(homeHtml, darkToken, lightToken) &&
@@ -25058,4 +25112,327 @@ function runAdj947CliPrefixTests() {
       return cut !== manual && !cut.includes(USAGE_OK) && manual.includes(USAGE_OK)
     })(),
   )
+}
+
+/**
+ * [174] 官网文案规范 + 新增 `/cli/` 命令行手册（adj948，用户需求）
+ *
+ * 用户原话：「官方网站的内容我要求：**行文上要正式、规范、优雅、简洁，尽量减少 AI 味**」，
+ * 并点名三处（按钮「打开应用 →」⇒「打开应用」；悬浮提示里的「直接进入应用 →」⇒「打开应用」；
+ * 「写谱像写代码一样爽」⇒ 名词化表述），要求 emoji 图标收敛或去掉，
+ * 以及「官方网站上也没有 **CLI 命令使用手册**，也需要补」。
+ *
+ * 这一段把这些要求变成**机器闸门** —— 文案是最容易"这次改了、下次又写回去"的东西，
+ * 而 `verify-site.mjs` 只能守"页面上现在长什么样"，守不住"源码里是不是又冒出推销腔"。
+ * 覆盖六件事，**每条都配负对照**（把判据喂给"故意改坏的一份"必须为假）：
+ *   ① 禁用词表（**窄而明确**，8 个词）在五个页面的**可见文案**里一个都不出现；
+ *   ② 按钮 / 悬浮提示的文本**逐字**（用户点名的三处 + 同类收敛）；
+ *   ③ 口语化标题不再出现（断言新标题在、旧标题不在）；
+ *   ④ 首页**功能卡与入口卡**里没有 emoji 图标（用户要求"收敛或去掉"，我们选**去掉**）；
+ *   ⑤ 新页 `/cli/` 存在、被顶栏引用、正文来自**同一份** `docs/CLI-手册.md`、13 个命令齐全；
+ *   ⑥ 两份 CLI 文档里**过期/矛盾的版本与能力说明**已订正（版本从 `brand/version.ts` 读，不写死）。
+ *
+ * ⚠ 判定范围的口径（免得闸门变成"永远为真"或"误伤"）：
+ *   · 只扫**可见文案**（HTML 注释先剥掉）—— 注释是给维护者看的，不是给访客看的；
+ *   · 只扫**官网壳层与首页正文**，不扫 `docs/*.md` 的技术正文（用户明确要求那部分本次不动，
+ *     它与应用内帮助共用同一份源）；
+ *   · 版本闸门只认**不带 `v` 前缀**的「当前版本」口径（`iJipu 0.59.0` / `"ijipu 0.59.0"`）；
+ *     带 `v` 的那些是**实测快照**（窗口标题、安装包名、"改前"那一版），改它们反而是改历史 ✗。
+ */
+function runAdj948SiteCopyTests() {
+  console.log('[174] 官网文案规范 + 命令行手册页（adj948）')
+  const readOrEmpty = (rel: string): string => (existsSync(join(root, rel)) ? readFileSync(join(root, rel), 'utf8') : '')
+  /** 剥掉 HTML 注释 ⇒ 只留**访客看得见**的文案 */
+  const visible = (html: string): string => html.replace(/<!--[\s\S]*?-->/g, '')
+
+  const PAGES: [string, string][] = [
+    ['首页', 'index.html'],
+    ['操作手册', 'manual/index.html'],
+    ['脚本语法说明', 'syntax/index.html'],
+    ['插件手册', 'plugin/index.html'],
+    ['命令行手册', 'cli/index.html'],
+  ]
+  const htmlOf = (rel: string): string => readOrEmpty(rel)
+  const homeHtml = htmlOf('index.html')
+
+  // ============================================================
+  // ① 禁用词表：窄而明确（用户口径里点过名的"AI 味 / 推销腔"）
+  // ============================================================
+  /**
+   * 词表刻意**窄**：只收用户点过名的感叹与推销腔、以及空词堆砌。
+   * 为什么不收"一键导出"这类：它是**功能口径**（真的一键出文件），不属于"喊口号"；
+   * 但首页已经把它改写成"多格式导出"（见 ②），这类是否收敛由人判断，不写进机器闸门。
+   */
+  const BANNED = ['超方便', '一键搞定', '轻松上手', '太爽', '赋能', '一站式', '极致体验', '完美结合']
+  const bannedHits = (text: string): string[] => BANNED.filter((w) => text.includes(w))
+  const pageHits = PAGES.filter(([, rel]) => bannedHits(visible(htmlOf(rel))).length > 0)
+    .map(([label, rel]) => `${label}：${bannedHits(visible(htmlOf(rel))).join('/')}`)
+  check(`adj948 官网五页的可见文案里没有禁用词（${BANNED.join(' / ')}）`,
+    pageHits.length === 0, pageHits.join('；'))
+  /**
+   * 负对照：**逐个词**塞进首页正文（塞在最前面那个 `<h1>` 里 ⇒ 一定落在"可见文案"内）——
+   * 每个词都必须让判据判红。这条同时证明"判据真的在量文本"，而不是文件里有没有这些词。
+   */
+  const injected = BANNED.map((w) => homeHtml.replace('<h1>', `<h1>${w} `))
+  check('adj948 负对照①：把每个禁用词**分别**塞进首页正文 ⇒ 逐个判红（8/8）',
+    injected.length === BANNED.length &&
+      injected.every((h, i) => bannedHits(visible(h)).includes(BANNED[i])) &&
+      bannedHits(visible(homeHtml)).length === 0,
+    `命中：${injected.map((h) => bannedHits(visible(h)).join('')).join(' ')}`)
+  check('adj948 判定范围：注释里的词**不计入**（否则改个注释就误红灯），正文里的才算',
+    bannedHits(visible(`<!-- ${BANNED[0]} -->`)).length === 0 && bannedHits(`<!-- ${BANNED[0]} -->`).length === 1)
+
+  // ============================================================
+  // ② 按钮 / 悬浮提示文本逐字（用户点名的三处之一、之二）
+  // ============================================================
+  const BTN = '打开应用'
+  /** 首页顶栏主按钮：`<a class="btn btn-primary topbar-cta" href="/app/">打开应用</a>` */
+  const topbarCta = (h: string): string => /<a class="btn btn-primary topbar-cta" href="\/app\/">([^<]*)<\/a>/.exec(h)?.[1] ?? ''
+  /** 首页 Hero 主按钮 */
+  const heroCta = (h: string): string => /<a class="btn btn-primary btn-lg" href="\/app\/">([^<]*)<\/a>/.exec(h)?.[1] ?? ''
+  /** 文档页顶栏那个按钮 */
+  const docOpen = (h: string): string => /<a class="doc-open" href="\/app\/">([^<]*)<\/a>/.exec(h)?.[1] ?? ''
+  /** 悬浮提示条里的链接 */
+  const tipLink = (h: string): string => /<div class="tip" id="tip"[\s\S]*?<a href="\/app\/">([^<]*)<\/a>/.exec(h)?.[1] ?? ''
+  check(`adj948 首页顶栏主按钮文本逐字是「${BTN}」（用户点名：去掉箭头）`, topbarCta(homeHtml) === BTN, JSON.stringify(topbarCta(homeHtml)))
+  check(`adj948 首页 Hero 主按钮同为「${BTN}」（原「立即使用（免安装）」⇒ 收敛成同一口径）`, heroCta(homeHtml) === BTN, JSON.stringify(heroCta(homeHtml)))
+  const docOpens = PAGES.slice(1).map(([label, rel]) => `${label}=${JSON.stringify(docOpen(htmlOf(rel)))}`)
+  check(`adj948 四个文档页顶栏按钮也是「${BTN}」（同类按钮全站统一）`,
+    PAGES.slice(1).every(([, rel]) => docOpen(htmlOf(rel)) === BTN), docOpens.join(' '))
+  check(`adj948 悬浮提示里的链接文本逐字是「${BTN}」（用户点名：原「直接进入应用 →」）`,
+    tipLink(homeHtml) === BTN && !homeHtml.includes('直接进入应用'), JSON.stringify(tipLink(homeHtml)))
+  /**
+   * adj948（**用户第二轮口径**）：「『本机已有爱记谱使用记录 / 打开应用』—— 这一整个提示保留一个
+   * 『打开应用』就好」⇒ 提示条里**只剩那个链接**：原来那句解释性前缀整句删掉（不是改短、是去掉）。
+   * 判断逻辑（`src/landing/main.ts` 读 `ijipu.*` 本地键）不变 ⇒ 仍然只对"以前用过"的人出现。
+   */
+  const tipBlock = /<div class="tip" id="tip"[\s\S]*?<\/div>/.exec(homeHtml)?.[0] ?? ''
+  /** 判据（纯函数 ⇒ 负对照复用同一份）：提示条里除链接与关闭按钮外**没有别的文字** */
+  const tipOnlyOpen = (tip: string): boolean =>
+    tip !== '' && !/<span>/.test(tip) && !tip.includes('你以前用过') && !tip.includes('本机已有')
+  check('adj948 提示条里只剩「打开应用」一个链接（解释性前缀整句删掉，用户口径"这一整个提示保留一个就好"）',
+    tipOnlyOpen(tipBlock) && tipLink(homeHtml) === BTN, tipBlock.replace(/\s+/g, ' '))
+  check('adj948 负对照②b：把解释性前缀塞回提示条（用户刚否掉的那版写法）⇒ 判据判假',
+    !tipOnlyOpen(tipBlock.replace('<a href="/app/">', '<span>本机已有爱记谱使用记录</span><a href="/app/">')) &&
+      !tipOnlyOpen(tipBlock.replace('<a href="/app/">', '<span>你以前用过爱记谱</span><a href="/app/">')) &&
+      tipOnlyOpen(tipBlock))
+  check('adj948 提示条的判断逻辑没被一起删掉（`bindReturningTip` 仍在读 `ijipu.*` 本地键 + 关闭按钮仍写 dismissed）',
+    readOrEmpty('src/landing/main.ts').includes('bindReturningTip') &&
+      readOrEmpty('src/landing/main.ts').includes('TIP_DISMISSED_KEY') &&
+      homeHtml.includes('id="tip-close"'))
+  /**
+   * 负对照：把箭头加回去（`打开应用 →`）⇒ 两条判据各自判假。
+   * ⚠ 用户口径是"**去掉箭头**"，所以判据必须是**逐字相等**（`includes` 会放"打开应用 →"过去 ✗）。
+   */
+  check('adj948 负对照②：按钮 / 提示文本加回箭头（`打开应用 →`）⇒ 逐字判据判假（证明是等号、不是包含）',
+    topbarCta(homeHtml.replace('>打开应用</a>', '>打开应用 →</a>')) !== BTN &&
+      tipLink(homeHtml.replace('<a href="/app/">打开应用</a>\n      <button', '<a href="/app/">打开应用 →</a>\n      <button')) !== BTN)
+  /** 同类旧写法全站清零：这些在改前都在首页里出现过 */
+  const legacy = ['立即使用', '打开应用 →', '← 首页', '直接进入应用', '一键导出', '它凭什么好用', '从哪儿开始', '写给谁']
+  const legacyHits = PAGES.filter(([, rel]) => legacy.some((w) => visible(htmlOf(rel)).includes(w)))
+    .map(([label, rel]) => `${label}：${legacy.filter((w) => visible(htmlOf(rel)).includes(w)).join('/')}`)
+  check(`adj948 旧写法在五页可见文案里全部清零（${legacy.join(' / ')}）`, legacyHits.length === 0, legacyHits.join('；'))
+
+  // ============================================================
+  // ③ 口语化标题 ⇒ 名词化表述（用户点名的第三处）
+  // ============================================================
+  const oldTitles = ['写谱像写代码一样爽', '复杂谱子也扛得住', '在笔记里直接写谱', '手机电脑都能用', '排版能拖', '电脑手机都支持']
+  const newTitles = ['以代码的方式写谱', '复杂谱面的排版', '在笔记中编写简谱', '手机与电脑通用']
+  const homeVisible = visible(homeHtml)
+  check('adj948 首页里不再有口语化标题（用户点名「写谱像写代码一样爽」等）',
+    oldTitles.every((t) => !homeVisible.includes(t)),
+    oldTitles.filter((t) => homeVisible.includes(t)).join('、'))
+  check('adj948 首页改用名词化表述（「以代码的方式写谱」等确实在标题位）',
+    newTitles.every((t) => new RegExp(`<h[23]>${t}</h[23]>`).test(homeVisible)) &&
+      /<h2>适用人群<\/h2>/.test(homeVisible) && /<h2>核心能力<\/h2>/.test(homeVisible) &&
+      /<h2>开始使用<\/h2>/.test(homeVisible),
+    newTitles.map((t) => `${t}:${new RegExp(`<h[23]>${t}</h[23]>`).test(homeVisible)}`).join(' '))
+  check('adj948 负对照③：把旧标题塞回 `<h2>` ⇒ 两条判据各自判假',
+    oldTitles.some((t) => homeVisible.replace('<h2>', `<h2>${t} `).includes(t)) &&
+      !newTitles.every((t) => new RegExp(`<h[23]>${t}</h[23]>`).test(homeVisible.replace('<h2>以代码的方式写谱</h2>', '<h2>写谱像写代码一样爽</h2>'))))
+
+  // ============================================================
+  // ④ 卡片图标：**保留**（用户 2026-10 明确要求"图标不在这轮改动范围"）
+  // ============================================================
+  /**
+   * 由来（**口径反转过一次，留个记录免得下次又自作主张**）：
+   *   ① 任务书原话是「emoji 图标请**收敛或去掉**，你按'正式优雅'判断怎么做更好」；
+   *   ② 我据此把那两排 emoji 去掉了，并向用户报告"选了去掉"；
+   *   ③ 用户随即反馈「**首页那些卡片的图标怎么不见了？是不要了吗？**」
+   *      ⇒ 上级口径更正：**图标保留、逐字恢复**，本轮只管**文案**。
+   *
+   * 所以这条闸门现在是**反过来的**：图标必须在、且逐字是原来那批。
+   * 两排各配一次负对照（少一个 / 换一个都得判红）——判别力靠"逐字相等"，不靠"有没有 emoji"。
+   */
+  const FEATURE_ICONS = ['⌨️', '👁️', '🔊', '🖨️', '🎼', '🔁', '📱', '🔓']
+  const LINK_ICONS = ['🚀', '📖', '📐', '⌨️', '💾', '🧩', '☕']
+  const iconsOf = (html: string, cardRe: RegExp, icoRe: RegExp): string[] =>
+    (html.match(cardRe) ?? []).map((c) => icoRe.exec(c)?.[1] ?? '')
+  const featureIcons = iconsOf(homeHtml, /<article class="card">[\s\S]*?<\/article>/g, /<p class="card-ico">([^<]*)<\/p>/)
+  const linkIcons = iconsOf(homeHtml, /<a class="link-card"[^>]*>[\s\S]*?<\/a>/g, /<span class="link-ico">([^<]*)<\/span>/)
+  const sameList = (a: string[], b: string[]): boolean => a.length === b.length && a.every((x, i) => x === b[i])
+  check('adj948 首页 8 张功能卡的 emoji 图标逐字保留（⌨️👁️🔊🖨️🎼🔁📱🔓）—— 用户要求图标不动',
+    sameList(featureIcons, FEATURE_ICONS), JSON.stringify(featureIcons))
+  check('adj948 首页 7 张入口卡的 emoji 图标逐字在位（🚀📖📐💾🧩☕ + 新增命令行卡 ⌨️）—— 用户要求图标不动',
+    sameList(linkIcons, LINK_ICONS), JSON.stringify(linkIcons))
+  check('adj948 负对照④a：抹掉一张卡的图标（或把它换成别的符号）⇒ "逐字保留"判据判红',
+    !sameList(featureIcons.map((x, i) => (i === 0 ? '' : x)), FEATURE_ICONS) &&
+      !sameList(linkIcons.map((x, i) => (i === 0 ? '★' : x)), LINK_ICONS))
+  check('adj948 `.card-ico` / `.link-ico` 的布局样式仍在 `landing.css`（图标与标题同一行，adj897 那套没被拆掉）',
+    readOrEmpty('src/landing/landing.css').includes('.card-ico') &&
+      readOrEmpty('src/landing/landing.css').includes('.link-ico'))
+  /**
+   * 「图标位留着、但正文里不许再混 emoji」—— 这是文案那一半的要求（图标是图标、正文是正文）。
+   * 用**码点区间**判定（不用正则字符类：变体选择符会让 `no-misleading-character-class` 报警 ✗）。
+   */
+  const EMOJI_RANGES: [number, number][] = [[0x2328, 0x2328], [0x2600, 0x27bf], [0x1f000, 0x1faff]]
+  const bodyEmoji = (html: string): string[] =>
+    (html.match(/<(?:article class="card"|a class="link-card"[^>]*)>[\s\S]*?<\/(?:article|a)>/g) ?? [])
+      .flatMap((card) => {
+        const body = card.replace(/<(?:p|span) class="(?:card|link)-ico">[^<]*<\/(?:p|span)>/g, '')
+        return Array.from(body)
+          .filter((ch) => {
+            const cp = ch.codePointAt(0) ?? 0
+            return EMOJI_RANGES.some(([a, b]) => cp >= a && cp <= b)
+          })
+          .filter((ch) => ch.length > 0)
+      })
+  check('adj948 卡片**正文**里没有 emoji（图标只在图标位；正文是陈述句）',
+    bodyEmoji(homeHtml).length === 0, bodyEmoji(homeHtml).join(' '))
+  check('adj948 负对照④b：把 emoji 塞进卡片正文 ⇒ 判据判红',
+    bodyEmoji(homeHtml.replace('<h3>实时预览</h3>', '<h3>实时预览 🔊</h3>')).length > 0)
+  check('adj948 刻意保留的符号仍在（品牌署名 🐌 / 主题开关 🌞🌙 / 菜单 ☰ / 关闭 ✕）—— 本条判据只针对内容卡片',
+    homeHtml.includes('蜗牛🐌') && homeHtml.includes('🌞') && homeHtml.includes('🌙') &&
+      homeHtml.includes('☰') && homeHtml.includes('✕'))
+
+  // ============================================================
+  // ④之二 全站的提示 / 无障碍标签（用户要求"顺带全站扫一遍同类文案"）
+  // ============================================================
+  /**
+   * 用户点名的两句**逐字钉死**（"以前用过"那类引导语一律不出现）+ 中间那版被否掉的写法。
+   * 判定范围是**可见文案**（HTML 注释先剥掉）—— 注释里为留下"为什么删"的记录可以提它们。
+   */
+  const OLD_HINTS = ['你以前用过爱记谱', '直接进入应用', '本机已有爱记谱使用记录']
+  const hintHits = PAGES.filter(([, rel]) => OLD_HINTS.some((w) => visible(htmlOf(rel)).includes(w)))
+    .map(([label, rel]) => `${label}：${OLD_HINTS.filter((w) => visible(htmlOf(rel)).includes(w)).join('/')}`)
+  check('adj948 全站不再出现旧的引导 / 提示文案（提示条现在只剩「打开应用」）',
+    hintHits.length === 0, hintHits.join('；'))
+  check('adj948 负对照⑨：把旧提示文案塞回首页 ⇒ 判据判红（三个旧写法逐个都要能判出来）',
+    OLD_HINTS.every((w) => hintHits.length === 0 && visible(homeHtml.replace('<h2>核心能力</h2>', `<h2>${w}</h2>`)).includes(w)))
+  /**
+   * 无障碍信息**不许因为"去装饰/求简洁"被删掉**：纯图标按钮必须留一个**非空**的 `aria-label`。
+   * 判据是"按钮里没有汉字/字母数字 ⇒ 视为纯图标按钮 ⇒ 必须有非空 aria-label"，
+   * 而不是写死哪几个按钮 —— 以后新增图标按钮也自动被守住。
+   */
+  const buttonsOf = (html: string): string[] => html.match(/<button[^>]*>[\s\S]*?<\/button>/g) ?? []
+  const btnBadges = PAGES.flatMap(([label, rel]) =>
+    buttonsOf(visible(htmlOf(rel)))
+      .map((b) => ({
+        label,
+        text: b.replace(/^<button[^>]*>/, '').replace(/<\/button>$/, '').replace(/<[^>]*>/g, '').trim(),
+        aria: /aria-label="([^"]*)"/.exec(b)?.[1] ?? '',
+      }))
+      .filter((x) => !/[\u4e00-\u9fffA-Za-z0-9]/.test(x.text)),
+  )
+  check(`adj948 全站的纯图标按钮都有**非空** \`aria-label\`（共 ${btnBadges.length} 个：主题开关 / 菜单 / 关闭提示…）`,
+    btnBadges.length >= 3 && btnBadges.every((x) => x.aria.trim().length > 0),
+    btnBadges.map((x) => `${x.label}:${JSON.stringify(x.text)}→${JSON.stringify(x.aria)}`).join(' '))
+  check('adj948 负对照⑩：把某个纯图标按钮的 `aria-label` 清空 ⇒ 判据判红（不许"为了简洁"把无障碍信息删掉）',
+    (() => {
+      const blank = (h: string) => h.replace(/aria-label="切换深浅主题"/, 'aria-label=""')
+      return blank(homeHtml) !== homeHtml &&
+        btnBadges.every((x) => x.aria.trim().length > 0) &&
+        buttonsOf(blank(homeHtml))
+          .map((b) => ({
+            text: b.replace(/^<button[^>]*>/, '').replace(/<\/button>$/, '').replace(/<[^>]*>/g, '').trim(),
+            aria: /aria-label="([^"]*)"/.exec(b)?.[1] ?? '',
+          }))
+          .filter((x) => !/[\u4e00-\u9fffA-Za-z0-9]/.test(x.text))
+          .some((x) => x.aria.trim().length === 0)
+    })())
+
+  // ============================================================
+  // ⑤ 新页 `/cli/`：存在、被顶栏引用、正文同源、命令集齐全
+  // ============================================================
+  const cliHtml = htmlOf('cli/index.html')
+  check('adj948 `/cli/` 页存在，且与其它文档页同构（挂自己的入口脚本 + favicon + 启动层）',
+    cliHtml.includes('src="/src/docs/cli.ts"') && cliHtml.includes('/icons/Jianpu.ico') &&
+      cliHtml.includes(`<div id="ijipu-boot" role="status" aria-busy="true">`))
+  check('adj948 `/cli/` 读的是**同一份真源** `docs/CLI-手册.md`（就是随安装包发布的那一份）',
+    readOrEmpty('src/docs/cli.ts').includes("from '../../docs/CLI-手册.md?raw'"))
+  check('adj948 `/cli/` 页首有**面向访客**的引言（`.doc-intro`），写明"未注册 PATH 时可用完整路径调用"',
+    cliHtml.includes('class="doc-intro"') && cliHtml.includes('PATH') && cliHtml.includes('完整路径'))
+  check('adj948 负对照⑤：抹掉引言的 class（＝那段引言不再是引言）或换掉 import 的 md ⇒ 判据判假',
+    !cliHtml.replace('class="doc-intro"', 'class="x"').includes('class="doc-intro"') &&
+      !readOrEmpty('src/docs/cli.ts').replace("docs/CLI-手册.md?raw", 'docs/CLI.md?raw').includes("docs/CLI-手册.md?raw"))
+  /**
+   * 命令集齐全（用户要求"13 个命令都能在页面里找到"）：
+   * 名单**从源码读**（`cli.ts` 的 `known` 集合，唯一一处名单）⇒ 以后加命令，这里自动跟着要求手册写全。
+   * 页面渲染的就是这份 md ⇒ 它齐全就等于页面齐全（浏览器里的实测在 `verify-site.mjs`）。
+   */
+  const cliSrc = readOrEmpty('packages/ijipu-cli/src/cli.ts')
+  const knownCmds = (() => {
+    const m = cliSrc.match(/const known = new Set\(\[([^\]]*)\]\)/)
+    return m === null ? [] : Array.from(m[1].matchAll(/'([^']+)'/g)).map((x) => x[1])
+  })()
+  const cliManual = readOrEmpty('docs/CLI-手册.md')
+  const missingCmd = knownCmds.filter((c) => !cliManual.includes('`' + c + '`'))
+  check(`adj948 命令行手册覆盖全部 ${knownCmds.length} 个命令（逐个以 \`命令\` 出现 ⇒ 页面里也就找得到）`,
+    knownCmds.length >= 13 && missingCmd.length === 0, missingCmd.join(' '))
+  check('adj948 负对照⑥：从手册里抹掉一个命令（`batch`）⇒ 判据判红',
+    (() => {
+      const cut = cliManual.split('`batch`').join('batch')
+      return cut !== cliManual && knownCmds.filter((c) => !cut.includes('`' + c + '`')).includes('batch')
+    })())
+
+  // ============================================================
+  // ⑥ 过期/矛盾的文档事实已订正（用户已同意；**版本从 `brand/version.ts` 读，不写死**）
+  // ============================================================
+  const APP_VERSION = readOrEmpty('src/brand/version.ts').match(/APP_VERSION = '([^']+)'/)?.[1] ?? ''
+  /**
+   * 「当前版本」口径 = **不带 `v` 前缀**的 `iJipu X.Y.Z` / `ijipu X.Y.Z`：
+   *   · 手册的「适用版本：**iJipu 0.59.0**」；· `--version` 的输出行；· `"generator": "ijipu 0.59.0"`。
+   * ⚠ **刻意排除**带 `v` 前缀的那些 —— 它们是**实测快照**：
+   *   · `docs/CLI.md` §一之二的体积测量表记的是"内嵌命令行落地**之前**那一版"（`v0.58.0`）；
+   *   · 两份文档里"实测过…窗口标题「爱记谱 iJipu - v0.59.0」"记的是**当时**量到的标题。
+   *   把这些改成当前版本，等于**改历史**（用户口径："不许改事实"）⇒ 判据不管它们，由人读。
+   */
+  const CURRENT_VER_RE = /\biJipu (\d+\.\d+\.\d+)|\bijipu (\d+\.\d+\.\d+)/g
+  const currentVersions = (text: string): string[] =>
+    Array.from(text.matchAll(CURRENT_VER_RE)).map((m) => m[1] ?? m[2])
+  const cliDoc = readOrEmpty('docs/CLI.md')
+  const stale = [
+    ...currentVersions(cliManual).filter((v) => v !== APP_VERSION).map((v) => `CLI-手册.md:${v}`),
+    ...currentVersions(cliDoc).filter((v) => v !== APP_VERSION).map((v) => `CLI.md:${v}`),
+  ]
+  check(`adj948 两份 CLI 文档里的「当前版本」口径全部等于 \`brand/version.ts\` 的 APP_VERSION（${APP_VERSION}）`,
+    APP_VERSION !== '' && currentVersions(cliManual).length >= 5 && stale.length === 0,
+    stale.length > 0 ? `过期：${stale.join(' ')}` : `从源码读到 APP_VERSION=${APP_VERSION}`)
+  check('adj948 负对照⑦：把手册里一处「当前版本」改成 0.1.0（＝过期没跟着改）⇒ 判据判红',
+    APP_VERSION !== '' &&
+      currentVersions(cliManual.split(APP_VERSION).join('0.1.0')).filter((v) => v !== APP_VERSION).length > 0)
+  check('adj948 带 `v` 前缀的历史快照确实还在（说明"例外"是实的、不是空话）：改前那一版与当时的窗口标题',
+    cliDoc.includes('改前（v0.58.0') && cliDoc.includes('iJipu_0.58.0_x64-setup.exe') && cliManual.includes('- v0.59.0'))
+  /**
+   * `--watch` 的"过期/矛盾"（用户点名的第二处）：`docs/CLI.md` 第 182 行一带原说「未实现（会后续）」，
+   * 而同一节的表格已列它能用。**以代码为准**：
+   *   · `nodeEntry.ts` 用 `fs.watch` 注入 `watchFile` ⇒ 独立 Node 包**可用** ✓；
+   *   · `embedEntry.ts` **刻意不注入**（要长驻监视）⇒ 内嵌版**退出码 1** ✗。
+   */
+  const nodeEntry = readOrEmpty('packages/ijipu-cli/src/nodeEntry.ts')
+  const embedEntry = readOrEmpty('packages/ijipu-cli/src/embedEntry.ts')
+  check('adj948 以代码为准：`--watch` 的能力由宿主注入 —— nodeEntry 注入 `watchFile`、embedEntry 刻意不注入',
+    nodeEntry.includes('watchFile: (path, onChange)') && nodeEntry.includes("from 'node:fs'") &&
+      embedEntry.includes('rasterize` / `synthesize` / `watchFile` **刻意不注入**') &&
+      !/watchFile:\s*\(/.test(embedEntry))
+  check('adj948 `docs/CLI.md` 不再把 `--watch` 说成"未实现/后续"，且写明两条路径（Node 包可用 / 内嵌版退出码 1）',
+    !/未实现（\*\*会报错\*\*）：`--watch`/.test(cliDoc) && !cliDoc.includes('`--watch`（后续）') &&
+      cliDoc.includes('独立 Node 包可用') && cliDoc.includes('内嵌版') && cliDoc.includes('`embedEntry.ts`'))
+  check('adj948 `docs/CLI-手册.md` 的能力表也写明"内嵌版没有该能力、独立 Node 包可用"',
+    cliManual.includes('内嵌版没有**该能力') && cliManual.includes('fs.watch` 提供'))
+  check('adj948 负对照⑧：把"未实现（会报错）：`--watch`（后续）"那句改回去 ⇒ 判据判红',
+    (() => {
+      const back = cliDoc.replace('`--watch` 分两条交付路径，**能力不一样**', '未实现（**会报错**）：`--watch`（后续）')
+      return /未实现（\*\*会报错\*\*）：`--watch`/.test(back) && !/未实现（\*\*会报错\*\*）：`--watch`/.test(cliDoc)
+    })())
 }

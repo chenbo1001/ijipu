@@ -9,7 +9,8 @@
  * ## adj876（官网分层）改了四处
  *
  * 站点从"根路径就是应用"变成四页：`/`（介绍首页）、`/app/`（应用）、
- * `/manual/`（手册）、`/syntax/`（语法）——**adj905x 又加了 `/plugin/`（插件手册）**，同一套口径。
+ * `/manual/`（手册）、`/syntax/`（语法）——**adj905x 又加了 `/plugin/`（插件手册）、
+ * adj948 再加 `/cli/`（命令行手册）**，同一套口径。
  * 对 SW 的影响：
  *
  * ① **缓存名 v3 → v4**：`/index.html` 这个键的含义变了（以前是应用、现在是首页），
@@ -24,8 +25,8 @@
  * ④ **PRECACHE 换口径**：预缓存的是"离线时打开也应当可用的页面"——
  *    `/app/index.html`（PWA 的 `start_url` 是 `/app/`，必须离线可用）与 `/index.html`
  *    （首页正文写在 HTML 里，即使 JS/CSS 没进缓存也读得成）。
- *    `/manual/`、`/syntax/`、`/plugin/` **不预缓存**：它们的正文靠 JS 渲染，只预缓存一个空骨架没有意义
- *    （访问过之后自然会进缓存，离线再看就能用）。
+ *    `/manual/`、`/syntax/`、`/plugin/`、`/cli/` **不预缓存**：它们的正文靠 JS 渲染，
+ *    只预缓存一个空骨架没有意义（访问过之后自然会进缓存，离线再看就能用）。
  *
  * 注意：`/assets/*` 带 hash，**不做预缓存清单**（清单得在构建期注入才有意义）；
  * 沿用既有口径"访问过就离线可用"。
@@ -56,6 +57,8 @@ function fallbackFor(pathname) {
   if (pathname === '/manual' || pathname.startsWith('/manual/')) return '/manual/index.html'
   if (pathname === '/syntax' || pathname.startsWith('/syntax/')) return '/syntax/index.html'
   if (pathname === '/plugin' || pathname.startsWith('/plugin/')) return '/plugin/index.html'
+  // adj948（新增 `/cli/` 命令行手册）：漏了这条 ⇒ 离线打开 /cli/ 会被喂成首页 HTML（白屏）
+  if (pathname === '/cli' || pathname.startsWith('/cli/')) return '/cli/index.html'
   return '/index.html'
 }
 // #endregion

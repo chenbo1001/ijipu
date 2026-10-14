@@ -3,7 +3,7 @@
 > 这份文件讲**怎么用**（面向使用者）。命令行的**设计口径、协议与维护说明**在
 > `docs/CLI.md`（面向改代码的人）——两份分工不同，别把维护细节抄到这里。
 >
-> - 适用版本：**iJipu 0.58.0**（内嵌命令行 `adj942` / 注册 PATH `adj944` 起 /
+> - 适用版本：**iJipu 0.59.0**（内嵌命令行 `adj942` / 注册 PATH `adj944` 起 /
 >   **控制台垫片 `bin\ijipu.cmd` `adj946` 起**）
 > - 许可：**AGPL-3.0** ｜ 源码与问题反馈：<https://github.com/snailhome/ijipu>
 > - 装完 iJipu 就有命令行，**不需要另外装 Node**，也不需要联网。
@@ -25,7 +25,7 @@ ijipu.exe cli <命令> [选项]
 
   ```text
   > "%LOCALAPPDATA%\iJipu\bin\ijipu.cmd" cli --version
-  iJipu 0.58.0
+  iJipu 0.59.0
   ```
 
   ⚠ 上面用的是**命令行入口垫片**（`bin\ijipu.cmd`）。若直呼 `ijipu.exe` 本体，
@@ -145,7 +145,7 @@ ijipu.exe cli <命令> [选项]
 
 ```text
 > ijipu.exe cli --version
-iJipu 0.58.0
+iJipu 0.59.0
 
 > ijipu.exe cli --help
 iJipu 命令行（爱记谱）
@@ -216,7 +216,7 @@ iJipu 命令行（爱记谱）
 > ijipu.exe cli lint -i 我的谱.jps --json
 {
   "schema": 1,
-  "generator": "ijipu 0.58.0",
+  "generator": "ijipu 0.59.0",
   "input": "我的谱.jps",
   "ok": false,
   "errors": [
@@ -286,7 +286,7 @@ iJipu 命令行（爱记谱）
 > ijipu.exe cli info -i samples\ershenbu.jps --json
 {
   "schema": 1,
-  "generator": "ijipu 0.58.0",
+  "generator": "ijipu 0.59.0",
   "input": "samples\\ershenbu.jps",
   "title": null,
   "key": "C",
@@ -503,7 +503,7 @@ iJipu CLI 注册状态：未注册 ✗（终端里还敲不了 ijipu）
 | `render -t midi` / `play -t midi` | ✓ | 二进制 MIDI，必须 `-o` 指定文件（不能打 stdout） |
 | `render -t png \| jpg \| pdf` | ✗ 退出码 4 | 需要 canvas / 字体 / 分页（「隐藏窗口渲染」通道，尚未接线）⇒ 用应用里的「导出」 |
 | `play -t wav` | ✗ 退出码 4 | 需要音色库采样合成 ⇒ 用应用里的试听/导出 |
-| `lint --watch` | ✗ 退出码 1 | 需要文件监视能力（内嵌 CLI 没有） |
+| `lint --watch` | ✗ 退出码 1 | 需要文件监视能力。**内嵌版没有**该能力；独立 Node 包（`@ijipu/cli`）用 `fs.watch` 提供 ✓ |
 | `register` / `unregister` / `status` | ✓（仅内嵌版） | 要读写注册表；独立 Node 环境 ⇒ 退出码 6 |
 
 **两条交付路径的差别**（跑的是同一份命令逻辑）：

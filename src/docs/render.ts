@@ -1,7 +1,7 @@
 /**
- * docs/render.ts — 官网文档页（`/manual/`、`/syntax/`）的渲染逻辑（adj876）
+ * docs/render.ts — 官网文档页（`/manual/`、`/syntax/`、`/plugin/`、`/cli/`）的渲染逻辑（adj876）
  *
- * 与应用内帮助**同源**：同一份 `.md`（`docs/USER-GUIDE.md` / `docs/SYNTAX.md`）
+ * 与应用内帮助**同源**：同一份 `.md`（`docs/USER-GUIDE.md` / `docs/SYNTAX.md` …）
  * + 同一个渲染器（`src/help/markdown.ts`）⇒ 网页上看到的和应用里看到的必然一致。
  *
  * 为什么正文在运行时渲染、而不是构建期预渲染成静态 HTML：
@@ -12,7 +12,7 @@
  *   · 代价是一次"先出骨架、再出正文"的闪烁 —— 用 `#doc-body` 里的占位文字与
  *     固定最小高度吸收掉。
  *
- * ⚠ 两份 md 由**各自**的入口文件 import（`manual.ts` / `syntax.ts`），
+ * ⚠ 四份 md 由**各自**的入口文件 import（`manual.ts` / `syntax.ts` / `plugin.ts` / `cli.ts`），
  *   本文件只收 `md` 参数、不自己 import —— 否则 `/manual/` 会连带下载整份语法说明。
  */
 import { extractToc, mdToHtml } from '../help/markdown'
@@ -25,8 +25,11 @@ import { fillExternalLinks } from '../brand/siteLinks'
 import './docs.css'
 
 export interface DocPage {
-  /** 文档标识：与三份 md 一一对应（`plugin` 只在官网有，不进应用内帮助） */
-  kind: 'manual' | 'syntax' | 'plugin'
+  /**
+   * 文档标识：与四份 md 一一对应。
+   * `plugin` / `cli` **只在官网有**，不进应用内帮助（`docs/PLUGIN-GUIDE.md` / `docs/CLI-手册.md`）。
+   */
+  kind: 'manual' | 'syntax' | 'plugin' | 'cli'
   /** 浏览器页签后缀（形如「操作手册 - 爱记谱 iJipu」） */
   title: string
   /** Markdown 原文 */

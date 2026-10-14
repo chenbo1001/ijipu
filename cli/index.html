@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/x-icon" href="/icons/Jianpu.ico" />
+    <link rel="icon" type="image/png" href="/icons/Jianpu.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>命令行手册 - 爱记谱 iJipu</title>
+    <meta
+      name="description"
+      content="爱记谱 iJipu 命令行手册：随桌面版发布的命令行工具（ijipu cli），13 个命令、全局选项、退出码，以及能力与限制、PATH 注册与解除。"
+    />
+    <meta name="theme-color" content="#0F1526" />
+    <!--
+      adj948（用户要求「官方网站上也没有 CLI 命令使用手册，也需要补」）：新增 `/cli/`。
+      与 `/manual/`、`/syntax/`、`/plugin/` **同一套骨架**：正文由 `src/docs/cli.ts` 运行时注入
+      （#doc-body），这里只留骨架；正文源码是 `docs/CLI-手册.md` —— **与随桌面版一同发布的
+      那份手册是同一个文件**（单一真源，网页与手上装的内容不会对不上）。
+      本文额外在正文之前放一段**面向访客的引言**（`.doc-intro`）：说明它是随桌面版发布的
+      命令行工具、未注册 PATH 时可用完整路径调用 —— 手册正文是"已经决定要用"的人读的，
+      这一句是给"还不知道这是什么"的访客读的。
+      防白闪：在样式表到位前先把底色定住。
+    -->
+    <!-- adj878：主题必须在样式生效前定下来（`--site-*` 变量由 JS 注入），否则浅色用户会先看到一帧深色 -->
+    <script>
+      (function () {
+        var m
+        try { m = localStorage.getItem('ijipu.site.theme') } catch (e) {}
+        if (m !== 'light' && m !== 'dark') {
+          try { m = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark' } catch (e) { m = 'dark' }
+        }
+        document.documentElement.dataset.siteMode = m
+        /* adj930 硬兜底：模块脚本压根没跑起来（404 / 被拦）时，到点也把启动层摘掉 ——
+           绝不让人对着转圈。正常路径下 brand/siteBoot.ts 会先置上接管标记，这里就不再插手。 */
+        setTimeout(function () {
+          if (window.__ijipuBootArmed) return
+          var el = document.getElementById('ijipu-boot')
+          if (el && el.parentNode) el.parentNode.removeChild(el)
+        }, 8000)
+      })()
+    </script>
+    <style>
+      html { color-scheme: dark; }
+      html, body { background: #0f1526; }
+      body { margin: 0; color: #e8ecf8; font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+      /* adj930 启动层：铺满视口盖住正文；与 html/body 同色 ⇒ 淡出时看不到"换背景" */
+      #ijipu-boot {
+        position: fixed; inset: 0; z-index: 2147483000;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+        background: #0f1526; color: #93a0c8;
+        font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+        transition: opacity 0.22s ease;
+      }
+      #ijipu-boot .ijipu-boot-spin {
+        width: 30px; height: 30px; border-radius: 50%;
+        border: 3px solid rgba(147, 160, 200, 0.28); border-top-color: #00f0ff;
+        animation: ijipu-boot-spin 0.8s linear infinite;
+      }
+      #ijipu-boot.ijipu-boot-out { opacity: 0; }
+      @keyframes ijipu-boot-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) {
+        #ijipu-boot { transition: none; }
+        #ijipu-boot .ijipu-boot-spin { animation: none; }
+      }
+      @media (prefers-color-scheme: light) {
+        html { color-scheme: light; }
+        html, body { background: #f2f5fb; }
+        body { color: #1c2540; }
+        #ijipu-boot { background: #f2f5fb; color: #7a86a8; }
+        #ijipu-boot .ijipu-boot-spin { border-color: rgba(70, 83, 122, 0.25); border-top-color: #0891a6; }
+      }
+      html[data-site-mode='dark'] { color-scheme: dark; }
+      html[data-site-mode='dark'], html[data-site-mode='dark'] body { background: #0f1526; }
+      html[data-site-mode='dark'] body { color: #e8ecf8; }
+      html[data-site-mode='dark'] #ijipu-boot { background: #0f1526; color: #93a0c8; }
+      html[data-site-mode='dark'] #ijipu-boot .ijipu-boot-spin {
+        border-color: rgba(147, 160, 200, 0.28); border-top-color: #00f0ff;
+      }
+      html[data-site-mode='light'] { color-scheme: light; }
+      html[data-site-mode='light'], html[data-site-mode='light'] body { background: #f2f5fb; }
+      html[data-site-mode='light'] body { color: #1c2540; }
+      html[data-site-mode='light'] #ijipu-boot { background: #f2f5fb; color: #7a86a8; }
+      html[data-site-mode='light'] #ijipu-boot .ijipu-boot-spin {
+        border-color: rgba(70, 83, 122, 0.25); border-top-color: #0891a6;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      adj930：启动层（浮层）—— **静态写在 HTML 里**，不是 JS 造的：
+      JS 是 defer 的，等它跑起来正文早就画出一版没格式的了（那正是要消灭的那一闪）。
+      正文照旧静态写在 HTML 里（爬虫读得到，SEO 不受影响），启动层只是**盖在上面**；
+      `aria-busy` 让读屏软件知道"还在加载"；揭示后整块从 DOM 移除（不留残留）。
+    -->
+    <div id="ijipu-boot" role="status" aria-busy="true">
+      <span class="ijipu-boot-spin" aria-hidden="true"></span>
+      <span class="ijipu-boot-text">正在加载…</span>
+    </div>
+    <!-- 关掉 JS 时没有任何脚本能揭示 ⇒ 干脆不显示启动层（否则会永远转圈） -->
+    <noscript><style>#ijipu-boot { display: none; }</style></noscript>
+    <header class="doc-topbar">
+      <div class="doc-topbar-inner">
+        <a class="doc-brand" href="/">
+          <img src="/icons/Jianpu.png" alt="爱记谱 iJipu" width="24" height="24" />
+          <span>爱记谱 <b>iJipu</b></span>
+        </a>
+        <button class="toc-toggle" id="toc-toggle" type="button" aria-expanded="false">目录</button>
+        <nav class="doc-switch">
+          <a href="/manual/">操作手册</a>
+          <a href="/syntax/">脚本语法说明</a>
+          <a href="/plugin/">插件手册</a>
+          <!-- adj948（用户要求）：命令行手册排在插件手册之后 -->
+          <a href="/cli/">命令行手册</a>
+        </nav>
+        <!-- adj878：文档页也给同一个深浅开关（与首页同一套 `--site-*` 变量，图标由 CSS 按模式显示） -->
+        <button class="theme-toggle" id="theme-toggle" type="button" title="切换深浅主题" aria-label="切换深浅主题">
+          <span class="ico-sun" aria-hidden="true">🌞</span>
+          <span class="ico-moon" aria-hidden="true">🌙</span>
+        </button>
+        <!-- adj877（用户要求）：顶栏给一个明确的「首页」链接（logo 与页脚也都能回，但都容易被忽略） -->
+        <a class="doc-home" href="/">首页</a>
+        <a class="doc-open" href="/app/">打开应用</a>
+      </div>
+    </header>
+
+    <div class="doc-layout">
+      <!-- 目录由 JS 从正文标题生成（extractToc），与正文标题 id 同源 -->
+      <nav class="doc-toc" id="doc-toc" aria-label="目录"></nav>
+      <main class="doc-main">
+        <!--
+          adj948：面向**访客**的引言（手册正文是"已经决定要用"的人读的）。
+          写在骨架里而不是 md 里：这一页读的是 `docs/CLI-手册.md` 原文，改它就得动那份
+          随包发布的文件；引言是官网壳层的东西，留在官网这一侧 ✓。
+        -->
+        <p class="doc-intro">
+          命令行工具随 Windows 桌面版一同发布，不需要另外安装 Node，也不需要联网；
+          亦可作为独立的 Node 包 <code>@ijipu/cli</code> 使用。
+          未把命令行入口目录注册进 PATH 时，用完整路径调用即可（垫片
+          <code>bin\ijipu.cmd</code>）。以下内容与安装目录中随包发布的那份《CLI 使用手册》为同一份文档。
+        </p>
+        <article class="doc-body" id="doc-body"></article>
+      </main>
+    </div>
+
+    <footer class="doc-foot">
+      <a href="/">返回首页</a> · <a href="/app/">打开应用</a> ·
+      <a href="/manual/">操作手册</a> ·
+      <a href="/syntax/">脚本语法说明</a> ·
+      <a href="/plugin/">插件手册</a> ·
+      <a data-l="repoUrl" href="https://github.com/snailhome/ijipu" rel="noreferrer">发现问题 / 提建议</a>
+    </footer>
+
+    <script type="module" src="/src/docs/cli.ts"></script>
+  </body>
+</html>

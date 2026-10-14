@@ -73,7 +73,8 @@ a:hover { text-decoration: underline; }
  */
 body[data-doc='manual'] .doc-switch a[href='/manual/'],
 body[data-doc='syntax'] .doc-switch a[href='/syntax/'],
-body[data-doc='plugin'] .doc-switch a[href='/plugin/'] {
+body[data-doc='plugin'] .doc-switch a[href='/plugin/'],
+body[data-doc='cli'] .doc-switch a[href='/cli/'] {
   color: var(--site-text);
   background: var(--site-panel);
   border-color: var(--site-border);
@@ -174,6 +175,32 @@ html[data-site-mode='light'] .theme-toggle .ico-moon { display: inline; }
 .toc-item.active { color: var(--site-accent); border-left-color: var(--site-accent); background: var(--site-panel); }
 
 /* ---------- 正文（对应 help/markdown.ts 的产出） ---------- */
+/**
+ * adj948（用户要求「官网补 CLI 命令使用手册」）：`/cli/` 页首那段**面向访客**的引言。
+ * 它写在骨架 HTML 里（不在 md 里，见 `cli/index.html` 的注释），是正文之外的一块，
+ * 所以单独给样式：与引用块同款（左侧强调线 + 面板底），但**不占正文的标题层级**
+ * —— 不参与 `extractToc`（它不是 `#` 标题），目录里也就不会多出一条。
+ */
+.doc-intro {
+  margin: 0 0 22px;
+  padding: 12px 16px;
+  border-left: 3px solid var(--site-accent);
+  background: var(--site-panel);
+  border-radius: 0 8px 8px 0;
+  color: var(--site-text-2);
+  font-size: 14.5px;
+  line-height: 1.75;
+}
+.doc-intro code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
+  font-size: 0.9em;
+  background: var(--site-inline-bg);
+  border: 1px solid var(--site-border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: var(--site-code-ink);
+}
+
 .doc-body { min-width: 0; font-size: 15.5px; }
 .doc-body h1 { font-size: 24px; margin: 42px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--site-border); }
 .doc-body h1:first-child { margin-top: 0; }
@@ -265,6 +292,8 @@ html[data-site-mode='light'] .theme-toggle .ico-moon { display: inline; }
 /* ---------- adj878：浅色模式下的专属覆盖（集中放一处，免得散落满地找不齐） ---------- */
 html[data-site-mode='light'] .doc-md-table th { background: var(--site-panel-hover); }
 html[data-site-mode='light'] .doc-body blockquote { background: var(--site-panel-hover); }
+/* adj948：`/cli/` 页首的引言与引用块同款 ⇒ 浅色下一起换底 */
+html[data-site-mode='light'] .doc-intro { background: var(--site-panel-hover); }
 /* 正文里的谱面/截图类内容是白底或深色截图：浅色页面上给代码块一点投影，层次才分得开 */
 html[data-site-mode='light'] .doc-body pre { box-shadow: 0 4px 16px var(--site-shadow); }
 

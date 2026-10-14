@@ -26,7 +26,7 @@
 命令行入口是**控制台垫片** `bin\ijipu.cmd`（注册 PATH 之后就是一个 `ijipu`，见 §一之一/§二之二）：
 
 ```powershell
-ijipu cli --version                                  # iJipu 0.58.0
+ijipu cli --version                                  # iJipu 0.59.0
 ijipu cli --help                                     # 完整的命令/选项清单
 ijipu cli lint -i 我的谱.jps                         # 有错 ⇒ 退出码 3
 ijipu cli render -i 我的谱.jps -t svg -o 我的谱.svg
@@ -53,9 +53,9 @@ ijipu cli render -i 我的谱.jps -t midi -o 我的谱.mid
   用户 2026-10 实报（有截图）：在 cmd 里输出**每一行前面都多一个提示符**、退出码拿不到、
   PowerShell 的 `>` 写出 0 字节文件。**`adj946` 起用控制台垫片解决**（见 §一之一），
   所以**命令行入口请走 `bin\ijipu.cmd`（或注册后的 `ijipu`）**，不要直接调 `ijipu.exe` ✗。
-- ⚠ **内嵌版没有"位图/音频/监视"能力**（与独立 Node 环境**同一口径**）：`render -t png|jpg|pdf`、
-  `play -t wav`、`lint --watch` 需要"隐藏窗口渲染"通道与长驻监视 ⇒ 现在**如实报错**（退出码 4 / 1），
-  不产半成品 ✗（通道状态见 §七之二 / §七之三）。
+- ⚠ **内嵌版没有"位图/音频/监视"能力**：`render -t png|jpg|pdf`、`play -t wav` 需要"隐藏窗口渲染"通道
+  （**与独立 Node 环境同一口径**）⇒ 如实报错、退出码 4；`lint --watch` 需要宿主的文件监视能力，
+  内嵌版不注入 ⇒ 退出码 1（**独立 Node 包可用** ✓，见 §二）。都不产半成品 ✗（通道状态见 §七之二 / §七之三）。
 - ⚠ 退出码与 Node 版**完全一致**（§四）；唯一的例外是**接线层自身**出错（引擎加载失败等）⇒ 退出码 **70**
   并把原因打到 stderr（这类不是"用法错误"，刻意与 0–5 区分开 ✓）。
 
@@ -134,7 +134,7 @@ ijipu cli lint -i 我的谱.jps > out.txt # cmd 与 PowerShell 的 > 都写出�
 **实测：体积**（同一次 `tauri build`；⚠ NSIS 安装包**同一输入两次打包也会抖 ~2KB**：本轮三次打包分别为
 34,545,493 / 34,548,670 / 34,550,872 B，下表取中间那次作代表）：
 
-| 项 | 改前（v0.58.0，无内嵌） | 改后 | 增量 |
+| 项 | 改前（v0.58.0，无内嵌命令行） | 改后（v0.59.0 起） | 增量 |
 |---|---|---|---|
 | 安装包 `iJipu_0.58.0_x64-setup.exe` | 33,824,416 B（32.26 MB） | **34,545,493 ~ 34,550,872 B**（32.95 MB） | **+0.69 ~ +0.72 MB** ✓ |
 | `ijipu.exe` 本体 | 26,107,801 B（24.90 MB） | 28,371,423 ~ 28,371,668 B（27.06 MB） | +2.16 MB（未压缩） |
@@ -179,7 +179,14 @@ ijipu cli lint -i 我的谱.jps > out.txt # cmd 与 PowerShell 的 > 都写出�
 | `unregister` | 从当前用户 PATH 里**摘掉自己那一条**（其余逐字不动） | `--json` |
 | `status` | 看现在注册了没有（**读系统实况**，不读配置） | `--json` |
 
-未实现（**会报错**）：`--watch`（后续）。`settings` 的键名直接当**位置参数**给，例如：
+`--watch` 分两条交付路径，**能力不一样**（口径与代码一致，见 `cli.ts` 的 `watchFile` 宿主能力）：
+
+- **独立 Node 包可用 ✓**：`nodeEntry.ts` 用 `fs.watch` 注入 `watchFile` ⇒ `lint --watch` 监视文件变化后即时重检；
+- **内嵌版（`ijipu.exe cli …`）不可用 ✗**：`embedEntry.ts` **刻意不注入** `watchFile`（要长驻监视）
+  ⇒ 明确报错、**退出码 1**，不假装成功；
+- 两种路径都**不能对 stdin 用**（要监视具体文件）。
+
+`settings` 的键名直接当**位置参数**给，例如：
 
 ```powershell
 npm run cli -- settings -i 我的谱.jps margin_right     # 例：margin_right = 40   [来自：代码默认]
