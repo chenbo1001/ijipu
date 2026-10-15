@@ -381,8 +381,8 @@ console.log('\n— 命令行（A·P1–P4）—')
   )
 
   check(
-    'adj956 组合里只要有一个写文件的任务 ⇒ `-o` 仍是必填（`-t lint,svg` 缺 -o ⇒ 用法错误 1）',
-    (await runCli(['batch', '--in', 'in', '-t', 'lint,svg'], makeIo({ 'in/a.jps': GOOD }, { in: ['a.jps'] }).io)).code === EXIT.usage,
+    'adj956/adj961 组合 `-t lint,svg` 缺 -o ⇒ 现在**合法**（svg 就地写在源文件旁；adj961 改的口径）',
+    (await runCli(['batch', '--in', 'in', '-t', 'lint,svg'], makeIo({ 'in/a.jps': GOOD }, { in: ['a.jps'] }).io)).code === EXIT.ok,
   )
   check(
     'adj956 未知任务名 ⇒ 用法错误 1（不静默跳过）',
@@ -391,6 +391,52 @@ console.log('\n— 命令行（A·P1–P4）—')
   check(
     'adj956 `batch --in <文件>` ⇒ 明确说"不是目录"（用法错误 1）',
     (await runCli(['batch', '--in', 'in/a.jps', '-o', 'out'], makeIo({ 'in/a.jps': GOOD }, { in: ['a.jps'] }).io)).code === EXIT.usage,
+  )
+}
+
+/**
+ * ④c·2 adj961（**用户问**：「`-t svg` 必须要 `-o` 吗？不能导出在原目录吗？」）：
+ * 省略 `-o` ⇒ 产物写在**各源文件旁边**；但 `-t fmt` 就地会**覆盖源文件** ⇒ 必须显式 `--in-place`。
+ */
+{
+  const tree = (): ReturnType<typeof makeIo> =>
+    makeIo({ 'in/a.jps': GOOD, 'in/sub/c.jps': GOOD }, { in: ['a.jps', 'sub'], 'in/sub': ['c.jps'] })
+
+  const ip = tree()
+  const rIp = await runCli(['batch', '--in', 'in', '-t', 'svg', '-r'], ip.io)
+  check(
+    'adj961 省略 -o ⇒ 产物写在**各源文件旁边**（`-r` 时子目录里的也各贴各的）',
+    rIp.code === EXIT.ok && 'in/a.svg' in ip.files && 'in/sub/c.svg' in ip.files,
+    Object.keys(ip.files).join(','),
+  )
+
+  const lintOnly = makeIo({ 'in/a.jps': GOOD }, { in: ['a.jps'] })
+  await runCli(['batch', '--in', 'in', '-t', 'lint'], lintOnly.io)
+  check(
+    'adj961 纯 `-t lint` 的汇总**不提**产物落点（它不产出文件；提了反而是误导 —— 实测抓出来的）',
+    !String(lintOnly.logs.join('')).includes('输出'),
+    String(lintOnly.logs.join('')).trim(),
+  )
+
+  const noIp = makeIo({ 'in/a.jps': GOOD }, { in: ['a.jps'] })
+  const rNoIp = await runCli(['batch', '--in', 'in', '-t', 'fmt'], noIp.io)
+  check(
+    'adj961 `-t fmt` 省略 -o ⇒ **拒绝**（就地会覆盖源文件）且一个文件都没写',
+    rNoIp.code === EXIT.usage && Object.keys(noIp.files).length === 0,
+    `code=${rNoIp.code} files=${Object.keys(noIp.files).join(',')}`,
+  )
+
+  const withIp = makeIo({ 'in/a.jps': GOOD }, { in: ['a.jps'] })
+  const rWithIp = await runCli(['batch', '--in', 'in', '-t', 'fmt', '--in-place'], withIp.io)
+  check(
+    'adj961 `-t fmt --in-place` ⇒ **覆盖源文件本身**（写进 `in/a.jps`，不是另存）',
+    rWithIp.code === EXIT.ok && 'in/a.jps' in withIp.files && !('in/a/a.jps' in withIp.files),
+    Object.keys(withIp.files).join(','),
+  )
+
+  check(
+    'adj961 `-o` 与 `--in-place` 同时给 ⇒ 报歧义（用法错误 1，不猜用户想哪个）',
+    (await runCli(['batch', '--in', 'in', '-t', 'fmt', '-o', 'out', '--in-place'], makeIo({ 'in/a.jps': GOOD }, { in: ['a.jps'] }).io)).code === EXIT.usage,
   )
 }
 
@@ -991,9 +1037,27 @@ console.log('\n— 命令行（A·P1–P4）—')
       code: EXIT.ok,
     },
     /**
-     * adj956（用户需求）：`batch -t lint` —— 纯 lint 任务**不必给 `-o`**。
-     * 这正是用户问的那个用法：「获取指定目录下的所有 jps 文件的 lint 情况」。
+     * adj961（用户问「`-t svg` 必须要 `-o` 吗？不能导出在原目录吗？」）：省略 `-o` ⇒ 就地。
+     * 下面三条把手册 §2.8 里**新贴的三段输出**也现跑一遍钉住。
      */
+    {
+      what: 'batch 就地出图（省略 -o）',
+      argv: ['batch', '--in', 'samples', '-t', 'svg'],
+      lines: [`批处理完成：成功 ${SAMPLE_NAMES.length} 个、失败 0 个（任务 svg；输入 ${SAMPLE_NAMES.length} 个文件，输出与源文件同目录）`],
+      code: EXIT.ok,
+    },
+    {
+      what: 'batch -t fmt 省略 -o ⇒ 拒绝（要 --in-place 才肯就地）',
+      argv: ['batch', '--in', 'samples', '-t', 'fmt'],
+      lines: ['batch 不写 -o 时产物**就地**输出；而 `-t fmt` 就地就是**原地覆盖源文件** ⇒ 要显式确认：'],
+      code: EXIT.usage,
+    },
+    {
+      what: 'batch -t fmt --in-place',
+      argv: ['batch', '--in', 'samples', '-t', 'fmt', '--in-place'],
+      lines: [`批处理完成：成功 ${SAMPLE_NAMES.length} 个、失败 0 个（任务 fmt；输入 ${SAMPLE_NAMES.length} 个文件，fmt 任务原地覆盖源文件）`],
+      code: EXIT.ok,
+    },
     {
       what: 'batch -t lint（省略 -o）',
       argv: ['batch', '--in', 'samples', '-t', 'lint'],

@@ -133,7 +133,7 @@ const HELP = `iJipu 命令行（爱记谱）
                 [--crop page|score] [--pad N] [--ink x,y,w,h]                画布范围（缺省 page = 整页）
   play          -i <文件|-> -t midi|wav -o <输出>                             导出音频
   batch         --in <目录> [-o <目录>] [-t lint,svg,midi,fmt]                目录批量操作
-                [-r] [--filter <通配>]                                      任务可逗号组合；只有 -t lint 能省 -o
+                [-r] [--filter <通配>] [--in-place]                         任务可逗号组合；省略 -o ⇒ 产物写在各源文件旁
   settings      -i <谱> <键名> [-s k=v]                                       看某个设置项的值与来源
   config        -i <谱> [-t effective] [--quiet]                              打印生效设置全表 + 每项来源
   doctor        [--json]                                                      环境自检（如实报告能力有无）
@@ -146,6 +146,13 @@ const HELP = `iJipu 命令行（爱记谱）
   -r, --recursive           输入是目录时**连子目录一起**（缺省只看当前一层）
   --filter <通配符>          只处理**文件名**匹配的（支持 * 与 ?，如 --filter "春*"）；
                             输入是单个文件时它不生效（点名要那个文件，就没有再筛掉的道理）
+  --in-place                原地写（batch 里只对 -t fmt 有意义；与 -o 互斥）
+
+batch 的产物落点（三选一）：
+  -o <目录>                 另存到那个目录（每个谱一个/多个文件）
+  省略 -o                   产物写在**各源文件旁边**（-r 递归时也各贴各的）
+  -t fmt --in-place         原地覆盖源文件（**必须显式**：就地覆盖是数据损坏级别的操作，默认拒绝）
+  只有 -t lint 真的不产出文件，所以纯 lint 一定不需要 -o
 
 全局选项：
   -i, --input <文件|目录|-> 输入（- = stdin；省略时也读 stdin）；--in 是别名
@@ -1048,10 +1055,30 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     const outDir = p.output
     /** 只有 lint 不产出文件 ⇒ 只有"纯 lint"才允许省掉 `-o` */
     const writesFiles = kinds.some((k) => k !== 'lint')
-    if (writesFiles && (outDir === null || outDir === '-')) {
+    const hasOutDir = outDir !== null && outDir !== '-'
+    /**
+     * adj961（**用户问**：「`-t svg` 必须要 `-o` 吗？不能导出在原目录吗？」）：
+     * **不写 `-o` ⇒ 每个产物写在该输入文件所在的目录**（就地）。
+     *
+     * 为什么这样定：
+     *  · 就地是**最自然**的默认（`batch --in 乐谱 -t svg` 出 `乐谱/x.svg`），也省掉"先编一个输出目录"；
+     *  · 但 **`-t fmt` 不写 `-o` 就是原地覆盖源文件**（`x.jps` → `x.jps`）——那是数据损坏级别的操作，
+     *    **必须显式**：照 `format --in-place` 的既有口径，要求用户明写 `--in-place`（默认**拒绝**并说清出路）；
+     *  · `svg` / `midi` 是**新增**文件（不碰源文件）⇒ 允许直接就地。
+     *
+     * `-o` 与 `--in-place` 同时给是**歧义**（一个说另存、一个说就地）⇒ 报用法错误，不猜。
+     */
+    if (hasOutDir && p.inPlace) {
+      io.err('-o 与 --in-place 不能同时给：-o 是"另存到那个目录"，--in-place 是"原地覆盖源文件"')
+      return { code: EXIT.usage }
+    }
+    const inPlaceOut = !hasOutDir
+    if (writesFiles && inPlaceOut && kinds.includes('fmt') && !p.inPlace) {
       io.err(
-        'batch 的 svg / midi / fmt 任务要写文件 ⇒ 必须给 -o <目录>（只有 -t lint 可以省略）\n' +
-          '  · 只想看语法检查结果：ijipu cli batch --in <目录> -t lint',
+        'batch 不写 -o 时产物**就地**输出；而 `-t fmt` 就地就是**原地覆盖源文件** ⇒ 要显式确认：\n' +
+          '  · 确实要覆盖源文件：ijipu cli batch --in <目录> -t fmt --in-place\n' +
+          '  · 想另存一份：      ijipu cli batch --in <目录> -t fmt -o <输出目录>\n' +
+          '  · 只想先看看：      ijipu cli batch --in <目录> -t lint',
       )
       return { code: EXIT.usage }
     }
@@ -1067,6 +1094,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       return { code: EXIT.usage }
     }
     const files = expanded.files
+    /** `-t fmt --in-place`：直接覆盖 `file` 本身（上面已保证它不能与 `-o` 同时给） */
+    const fmtInPlace = p.inPlace
     let okCount = 0
     const failed: string[] = []
     type LintRow = { input: string; ok: boolean; errors: { line: number; message: string }[] }
@@ -1075,9 +1104,18 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     for (const file of files) {
       const name = file.split('/').pop() ?? file
       const stem = name.replace(/\.jps$/i, '')
-      /** 输出目录（纯 lint 时为空串）——⚠ 是**目录**，不是"目录 + 文件名"：
-       *  第一版这里写成 `joinPath(outDir, stem)` 再拼文件名 ⇒ 产出 `out/a/a.svg` ✗（断言当场抓出来） */
-      const outBase = outDir === null || outDir === '-' ? '' : outDir
+      /**
+       * 这个文件的产物写哪儿（adj961）：
+       *  · 给了 `-o` ⇒ 那个目录；
+       *  · 没给 ⇒ **该文件所在目录**（就地；`a/b/c.jps` ⇒ `a/b`，顶层文件 ⇒ 当前目录）。
+       *    这样 `-r` 递归时也是"每个产物贴着它自己的源文件"，而不是全糊到一处。
+       *    ⚠ `-t fmt --in-place` 除外 —— 那一路直接覆盖 `file` 本身（见下面 fmt 分支）。
+       */
+      const outBase = hasOutDir
+        ? String(outDir)
+        : file.includes('/')
+          ? file.slice(0, file.lastIndexOf('/'))
+          : ''
       try {
         const src = await io.readFile(file)
         const { errors } = splitParseIssues(parseJps(src))
@@ -1103,7 +1141,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
           await io.writeFile(joinPath(outBase, `${stem}.mid`), bytes)
         }
         if (kinds.includes('fmt')) {
-          await io.writeFile(joinPath(outBase, `${stem}.jps`), formatJps(src))
+          // adj961：`--in-place` ⇒ 覆盖源文件本身；否则写进 outBase（给了 -o 就是它，没给就是源目录）
+          await io.writeFile(fmtInPlace ? file : joinPath(outBase, `${stem}.jps`), formatJps(src))
         }
         if (kinds.includes('svg')) {
           const parsed = parseJps(src)
@@ -1126,6 +1165,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       inputs: files.length,
       ok: okCount,
       failed,
+      // adj961：产物落点也要进 `--json`（脚本据此知道文件去哪了）
+      ...(hasOutDir ? { output: outDir } : { output: null, inPlace: fmtInPlace }),
       ...(kinds.includes('lint') ? { lint: lintRows, lintErrors } : {}),
     }
     /**
@@ -1137,10 +1178,21 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
      */
     if (wantJson) line(io, JSON.stringify(payload, null, 2))
     else {
+      /**
+       * adj961：产物落点要说清 —— 但**纯 lint 一个字都不提**（它根本不产出文件，
+       * 提"输出与源文件同目录"反而是误导；这条是实测自己抓出来的）。
+       */
+      const whereText = !writesFiles
+        ? ''
+        : hasOutDir
+          ? `，输出到 ${outDir}`
+          : fmtInPlace
+            ? '，fmt 任务原地覆盖源文件'
+            : '，输出与源文件同目录'
       line(
         io,
         `批处理完成：成功 ${okCount} 个、失败 ${failed.length} 个（任务 ${kinds.join(',')}；` +
-          `输入 ${files.length} 个文件${outDir === null || outDir === '-' ? '' : `，输出到 ${outDir}`}）`,
+          `输入 ${files.length} 个文件${whereText}）`,
       )
       if (kinds.includes('lint') && !gh && !p.quiet) {
         for (const r of lintRows) {
