@@ -12965,6 +12965,142 @@ function runAdj530TopBarLayoutTests() {
  * 这里钉四件事：新建的解绑口径、有未保存修改时先问一句、保存三端分流的**唯一出处**、
  * 以及对话框的三条实现口径（复用 store 动作 / 默认名取描述头 / 授权必须在手势里）。
  */
+/**
+ * adj965（方案「OVL」）水印层与背景层：**纯函数级**断言（不跑浏览器）。
+ *
+ * 钉住四类：① 不用这功能的谱**逐字节不变**；② 层序（白底 → 背景 → 水印 → 曲谱 body）；
+ * ③ 几何（页宽基准、页面中心锚点、钳制）与转义；④ 差量写入只落"改过的那一项"。
+ *
+ * ⚠ 数值断言一律**从产物里正则抠出数字再按语义比较**（如"旋转中心 ≈ 页面中心"），
+ *   不写死 `297.6` 这种四舍五入后的串——否则改纸张/改精度就会假红。
+ */
+function runAdj965OverlayTests() {
+  console.log('[197] adj965 watermark / background layers (OVL)')
+  const SRC = 'V: 1.0\nB: 测试\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n'
+  const mkLayout = (cfg: Record<string, unknown> = {}) =>
+    layoutScore(parseJps(SRC), { ...defaultPageConfig, noteSpaceLayout: 'duration', ...cfg } as never)
+  const num = (re: RegExp, s: string): number[] => {
+    const m = re.exec(s)
+    return m === null ? [] : m.slice(1).map((x) => Number(x))
+  }
+  const near = (a: number, b: number, tol = 0.15): boolean => Number.isFinite(a) && Math.abs(a - b) <= tol
+
+  // ---- ① 回归：默认配置 + 无 assets ⇒ 一个字节都不插 ----
+  const plainLay = mkLayout()
+  const plain = renderScoreToSvg(plainLay)[0]
+  check(
+    'adj965 默认配置且无 assets ⇒ 产物里**没有** data-overlay、也没有 <defs>（不用这功能的谱逐字节不变）',
+    plain !== undefined && !plain.includes('data-overlay') && !plain.includes('<defs>'),
+    `长度 ${plain?.length ?? 0}`,
+  )
+
+  // ---- ② 文本水印：居中 / 绕自身中心 45° / opacity 0.25 / 字号 / 转义 ----
+  const p0 = plainLay.pages[0]
+  const wm = renderScoreToSvg(mkLayout({ wmText: '草稿<&"' }))[0] ?? ''
+  const rot = num(/transform="rotate\(([-\d.]+) ([-\d.]+) ([-\d.]+)\)"/, wm)
+  check(
+    'adj965 文本水印：绕**页面中心**旋转 45°、`opacity="0.25"`（25% 不许被四舍五入成 0.3）、字号 36',
+    wm.includes('data-overlay="wm"') &&
+      wm.includes('opacity="0.25"') &&
+      wm.includes('font-size="36"') &&
+      rot.length === 3 &&
+      near(rot[0] ?? 0, 45) &&
+      near(rot[1] ?? 0, p0.width / 2) &&
+      near(rot[2] ?? 0, p0.height / 2),
+    `rotate=${rot.join(',')} 页中心=${p0.width / 2},${p0.height / 2}`,
+  )
+  check(
+    'adj965 水印文本**必须转义**（`< & "` 不许裸着进 SVG —— 一个 `<` 就打坏整份产物）',
+    wm.includes('草稿&lt;&amp;&quot;') && !wm.includes('>草稿<'),
+    (wm.match(/<tspan[^>]*>[^<]*/) ?? [''])[0],
+  )
+
+  // ---- ③ 钳制（手改出来的越界值不该产生离谱画面）----
+  const clampSvg = renderScoreToSvg(mkLayout({ wmText: 'x', wmSize: 999, wmRotate: -400 }))[0] ?? ''
+  check(
+    'adj965 越界值在渲染端钳制：`wmSize=999` ⇒ 400、`wmRotate=-400` ⇒ -180（`# jps-config` 是纯文本，可能被手改）',
+    clampSvg.includes('font-size="400"') && clampSvg.includes('rotate(-180 '),
+    (clampSvg.match(/font-size="\d+"/) ?? [''])[0],
+  )
+
+  // ---- ④ 图形层几何：宽度＝页宽 × 比率、中心＝页中心 + 偏移、长宽比来自宿主实测 ----
+  const ASSET = { href: 'data:image/png;base64,AA', w: 200, h: 100 }
+  const bgSvg =
+    renderScoreToSvg(mkLayout({ bgImage: 'a.png', bgScale: 50, bgOffsetX: 30, bgOffsetY: -20 }), {
+      assets: { bg: ASSET },
+    })[0] ?? ''
+  const g = num(/<image [^>]*x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"/, bgSvg)
+  const wantW = p0.width * 0.5
+  check(
+    'adj965 背景图几何：宽 = 页宽 × 50%、高按**原图长宽比**（200×100 ⇒ 高 = 宽/2）、中心 = 页中心 + (30,-20)',
+    g.length === 4 &&
+      near(g[2] ?? 0, wantW) &&
+      near(g[3] ?? 0, wantW / 2) &&
+      near((g[0] ?? 0) + (g[2] ?? 0) / 2, p0.width / 2 + 30) &&
+      near((g[1] ?? 0) + (g[3] ?? 0) / 2, p0.height / 2 - 20),
+    `x,y,w,h=${g.join(',')} 期望宽 ${wantW.toFixed(1)}`,
+  )
+  check(
+    'adj965 两层都带 `data-overlay` 标记 + 本页页面矩形的 `clipPath`（"走出页面的部分不显示"）',
+    bgSvg.includes('data-overlay="bg"') &&
+      bgSvg.includes('clip-path="url(#ovl-clip-0)"') &&
+      bgSvg.includes('<clipPath id="ovl-clip-0">'),
+    '',
+  )
+
+  // ---- ⑤ 层序：白底 → 背景 → 水印 → 曲谱 body ----
+  const bothSvg =
+    renderScoreToSvg(mkLayout({ bgImage: 'a.png', wmText: 'W' }), { assets: { bg: ASSET } })[0] ?? ''
+  const iBg = bothSvg.indexOf('data-overlay="bg"')
+  const iWm = bothSvg.indexOf('data-overlay="wm"')
+  const iBgRect = bothSvg.indexOf('data-page-bg')
+  const iBody = bothSvg.indexOf('data-notepos')
+  check(
+    'adj965 层序「曲谱 > 水印 > 背景」= 拼接顺序 白底 → 背景 → 水印 → 曲谱 body（后画的盖在上面）',
+    iBgRect >= 0 && iBg > iBgRect && iWm > iBg && iBody > iWm,
+    `白底@${iBgRect} 背景@${iBg} 水印@${iWm} 曲谱@${iBody}`,
+  )
+
+  // ---- ⑥ 图形水印没解析出资源 ⇒ 不画（提示由应用层负责，见方案优化 7）----
+  const noAsset = renderScoreToSvg(mkLayout({ wmType: 'image', wmImage: 'gone.png' }))[0] ?? ''
+  check(
+    'adj965 `wmType=image` 但资源没解析出来 ⇒ **不画**水印层（且不抛错；缺图提示属应用层）',
+    !noAsset.includes('data-overlay="wm"') && noAsset.includes('</svg>'),
+    '',
+  )
+
+  // ---- ⑦ 多页：每页各画一次，clipPath 的 id **按页唯一** ----
+  // ⚠ 夹具必须真的分页：A4 上一行能放 6 个小节、可用高度约 19 行 ⇒ 60 个小节**只占 1 页**，
+  //   那样这条断言等于没测（第一版就是被下面那条"夹具自检"当场抓出来的）。240 小节 ⇒ 约 3 页。
+  const longSrc = `V: 1.0\nB: 长\nD: C\nP: 4/4\nQ: ${'1 2 3 4 | '.repeat(240)}\n`
+  const longLay = layoutScore(parseJps(longSrc), { ...defaultPageConfig, noteSpaceLayout: 'duration' } as never)
+  const longSvgs = renderScoreToSvg(longLay, { assets: {} })
+  const multi = renderScoreToSvg(
+    layoutScore(parseJps(longSrc), { ...defaultPageConfig, noteSpaceLayout: 'duration', wmText: 'S' } as never),
+  )
+  check(
+    'adj965 多页：每页都画一层，且 `clipPath` 的 id **按页唯一**（同一份 HTML 里多页 SVG 不会互相串）',
+    longLay.pages.length >= 2 &&
+      multi.length === longLay.pages.length &&
+      multi[0]?.includes('id="ovl-clip-0"') === true &&
+      multi[1]?.includes('id="ovl-clip-1"') === true &&
+      multi[1]?.includes('id="ovl-clip-0"') === false,
+    `页数 ${longLay.pages.length}（夹具自检：必须 ≥2 否则这条等于没测）`,
+  )
+  check('adj965 夹具自检：长谱确实分到多页', longSvgs.length >= 2, `页数 ${longSvgs.length}`)
+
+  // ---- ⑧ 差量写入：默认值一个键都不落；只改一项 ⇒ 只出现那一项 ----
+  const noLine = writeJpsConfig('Q:1 2 3 4|', { ...defaultPageConfig })
+  check(
+    'adj965 15 个新字段全是默认值时 ⇒ `# jps-config` **一个键都不写**（少写才是对的：默认配置下必须出正经谱）',
+    noLine === 'Q:1 2 3 4|',
+    noLine,
+  )
+  const oneKey = writeJpsConfig('Q:1 2 3 4|', { ...defaultPageConfig, wmText: '草稿' })
+  const keys = Object.keys(JSON.parse((/# jps-config:(.*)/.exec(oneKey) ?? [])[1] ?? '{}'))
+  check('adj965 只改一项 ⇒ 设置行里只出现那一项（差量写入）', keys.join(',') === 'wmText', keys.join(','))
+}
+
 function runAdj963NewAndSaveTests() {
   console.log('[196] adj963 new/save behaviour across three shells')
   const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
@@ -17670,6 +17806,14 @@ runAdj927ExternalChangeTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj534-537 界面调整用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj965OverlayTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj965 水印/背景层用例抛异常', e)
     }
   })
   .then(() => {
