@@ -12974,6 +12974,124 @@ function runAdj530TopBarLayoutTests() {
  * ⚠ 数值断言一律**从产物里正则抠出数字再按语义比较**（如"旋转中心 ≈ 页面中心"），
  *   不写死 `297.6` 这种四舍五入后的串——否则改纸张/改精度就会假红。
  */
+/**
+ * adj965（方案「OVL」EP-07）：图片资源解析器的**纯逻辑**断言（不碰 DOM，不读真文件）。
+ *
+ * `assetSource.ts` 被刻意设计成零 DOM + 通道/解码都可注入 ⇒ 这些判据能在 Node 里跑：
+ * 路径归一（含 `[[双链]]` 去壳）、扩展名白名单（**拒绝 svg**）、大小上限、
+ * 各类失败的**中文可照做提示**（方案优化 7：不静默降级）、以及**命中缓存不再读第二遍**。
+ */
+async function runAdj965AssetSourceTests() {
+  console.log('[198] adj965 asset resolver (OVL EP-07)')
+  const { assetPathOf, isAllowedAssetPath, resolveAsset, setAssetReader, setAssetDecoder, clearAssetCache, MAX_ASSET_BYTES } =
+    await import('../src/store/assetSource.ts')
+
+  // ---- ① 路径归一 ----
+  check(
+    'adj965 路径归一：`[[双链]]` 去掉包裹（含 `|别名`）、`\\` 归一成 `/`、去掉开头的 `./`',
+    assetPathOf('[[图.png]]').path === '图.png' &&
+      assetPathOf('[[图.png]]').link === true &&
+      assetPathOf('[[img/图.png|别名]]').path === 'img/图.png' &&
+      assetPathOf('.\\img\\图.PNG').path === 'img/图.PNG' &&
+      assetPathOf('data:image/png;base64,AA').isData === true,
+    JSON.stringify([assetPathOf('[[img/图.png|别名]]'), assetPathOf('.\\img\\图.PNG')]),
+  )
+
+  // ---- ② 扩展名白名单（**故意不含 svg**：SVG 能带脚本）----
+  check(
+    'adj965 扩展名白名单：png/jpg/jpeg/webp/gif/bmp 收，**svg 拒**，无扩展名/可执行文件拒（大小写不敏感）',
+    ['a.png', 'a.PNG', 'a.jpg', 'a.jpeg', 'a.webp', 'a.gif', 'a.bmp'].every((n) => isAllowedAssetPath(n)) &&
+      !isAllowedAssetPath('a.svg') &&
+      !isAllowedAssetPath('a.exe') &&
+      !isAllowedAssetPath('a') &&
+      !isAllowedAssetPath('a.png.exe'),
+    '',
+  )
+
+  // ---- ③ 各类失败都要有"能照着做"的中文提示 ----
+  const none = { kind: 'none' } as const
+  const native = { kind: 'native', dir: 'C:/谱' } as const
+  setAssetReader(null)
+  setAssetDecoder(null)
+  const fEmpty = await resolveAsset('  ', native)
+  const fLink = await resolveAsset('[[图.png]]', native)
+  const fExt = await resolveAsset('图.svg', native)
+  const fNone = await resolveAsset('图.png', none)
+  const fChan = await resolveAsset('图.png', native)
+  check(
+    'adj965 失败提示可照做：空路径 / 双链只在插件可用 / 不支持的类型 / 还没保存 / 本环境没有读图通道',
+    fEmpty.ok === false &&
+      fEmpty.error.includes('空') &&
+      fLink.ok === false &&
+      fLink.error.includes('双链') &&
+      fExt.ok === false &&
+      fExt.error.includes('不支持的图片类型') &&
+      fNone.ok === false &&
+      fNone.error.includes('还没有保存') &&
+      fChan.ok === false &&
+      fChan.error.includes('没有读取图片的通道'),
+    [fEmpty, fLink, fExt, fNone, fChan].map((f) => (f.ok ? 'ok' : f.error)).join(' ｜ '),
+  )
+
+  // ---- ④ 通道 + 解码都注入后：成功解析，且**第二次命中缓存、不再读第二遍** ----
+  let reads = 0
+  let decodes = 0
+  setAssetReader(async () => {
+    reads += 1
+    return { bytes: new Uint8Array([1, 2, 3]), mime: 'image/png', mtime: 123 }
+  })
+  setAssetDecoder(async () => {
+    decodes += 1
+    return { href: 'data:image/webp;base64,AAAA', w: 800, h: 400 }
+  })
+  clearAssetCache()
+  const ok1 = await resolveAsset('img/图.png', native)
+  const ok2 = await resolveAsset('img/图.png', native)
+  check(
+    'adj965 注入通道与解码器后能解析（拿到 href/w/h/bytes），且**第二次命中缓存**（预览每次重排都会问一次，不缓存会反复解码大图）',
+    ok1.ok === true &&
+      ok1.href === 'data:image/webp;base64,AAAA' &&
+      ok1.w === 800 &&
+      ok1.h === 400 &&
+      ok1.bytes === 3 &&
+      ok2.ok === true &&
+      reads === 1 &&
+      decodes === 1,
+    `reads=${reads} decodes=${decodes}`,
+  )
+
+  // ---- ⑤ 大小上限 / 找不到 / 解码失败 ----
+  const big = await (async () => {
+    clearAssetCache()
+    setAssetReader(async () => ({ bytes: new Uint8Array(MAX_ASSET_BYTES + 1), mime: 'image/png' }))
+    return resolveAsset('大图.png', native)
+  })()
+  clearAssetCache()
+  setAssetReader(async () => null)
+  const missing = await resolveAsset('没有.png', native)
+  clearAssetCache()
+  setAssetReader(async () => ({ bytes: new Uint8Array([9]), mime: 'image/png' }))
+  setAssetDecoder(async () => {
+    throw new Error('坏图')
+  })
+  const bad = await resolveAsset('坏.png', native)
+  check(
+    'adj965 上限与异常：超过 16MB 判"图片太大"、读不到判"找不到这张图片"、解码抛错判"图片解码失败"（都不静默）',
+    big.ok === false &&
+      big.error.includes('图片太大') &&
+      missing.ok === false &&
+      missing.error.includes('找不到这张图片') &&
+      bad.ok === false &&
+      bad.error.includes('图片解码失败'),
+    [big, missing, bad].map((f) => (f.ok ? 'ok' : f.error)).join(' ｜ '),
+  )
+
+  // 收尾：把注入的假实现拆掉，免得影响其它用例（本函数在本轮里是最后跑的之一，但保持干净）
+  setAssetReader(null)
+  setAssetDecoder(null)
+  clearAssetCache()
+}
+
 function runAdj965OverlayTests() {
   console.log('[197] adj965 watermark / background layers (OVL)')
   const SRC = 'V: 1.0\nB: 测试\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n'
@@ -17826,6 +17944,14 @@ runAdj927ExternalChangeTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj965 水印/背景层用例抛异常', e)
+    }
+  })
+  .then(async () => {
+    try {
+      await runAdj965AssetSourceTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj965 资源解析用例抛异常', e)
     }
   })
   .then(() => {
