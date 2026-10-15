@@ -566,3 +566,62 @@ pub fn run() {
             }
         });
 }
+
+/**
+ * adj965（方案 `docs/OVERLAY-PLAN.md`「OVL」EP-08）单测：读图命令的**安全边界**。
+ *
+ * 为什么值得有：这条边界是"`.jps` 是纯文本、可能来自别人"的唯一防线（方案 §八.10）——
+ * 扩展名白名单与大小上限**只有真调一次才现形**（写错了照样能编译、UI 上也只是"图没出来"）。
+ * 与 `cli_host.rs` 的管道测试同一个道理：**边界类的东西必须有真跑的判据**。
+ */
+#[cfg(test)]
+mod asset_tests {
+    use super::*;
+
+    /// 写一个临时文件（内容随意；这里只测"读得出来/读不出来"，不测解码）
+    fn tmp_file(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ijipu-asset-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(name);
+        std::fs::write(&p, bytes).unwrap();
+        p
+    }
+
+    #[test]
+    fn accepts_allowed_image_extensions() {
+        for ext in ["png", "jpg", "jpeg", "webp", "gif", "bmp", "PNG"] {
+            let p = tmp_file(&format!("ok.{ext}"), &[1, 2, 3]);
+            assert!(read_asset_bytes(&p).is_ok(), "{ext} 应当被接受");
+        }
+    }
+
+    #[test]
+    fn rejects_non_image_extensions() {
+        // ⚠ `svg` 是**故意**排除的：SVG 能内嵌脚本，当"图片"塞进产物等于开了个投递通道
+        for ext in ["svg", "exe", "jps", "txt", "png.exe"] {
+            let p = tmp_file(&format!("no.{ext}"), &[1, 2, 3]);
+            // 注意：`tauri::ipc::Response` **没有实现 `Debug`** ⇒ 不能用 `unwrap_err()`，
+            // 只能走 `.err()`（这样也不要求 Ok 类型可 Debug）
+            let e = read_asset_bytes(&p).err().expect("应当被拒");
+            assert!(e.contains("只接受图片扩展名"), "{ext} 应当被拒：{e}");
+        }
+        // 没有扩展名也要拒
+        let p = tmp_file("noext", &[1]);
+        assert!(read_asset_bytes(&p).is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_and_missing() {
+        // 造一个超过上限的文件（只写够上限+1 字节；用 set_len 免得真占 16MB 内存）
+        let p = tmp_file("big.png", &[]);
+        let f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+        f.set_len(ASSET_MAX_BYTES + 1).unwrap();
+        drop(f);
+        let e = read_asset_bytes(&p).err().expect("应当报太大");
+        assert!(e.contains("图片太大"), "应当报太大：{e}");
+
+        let missing = std::env::temp_dir().join("ijipu-asset-does-not-exist.png");
+        let _ = std::fs::remove_file(&missing);
+        assert!(read_asset_bytes(&missing).is_err());
+    }
+}
