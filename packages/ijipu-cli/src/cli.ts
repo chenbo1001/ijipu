@@ -152,13 +152,15 @@ const HELP = `iJipu 命令行（爱记谱）
                             输入是单个文件时它不生效（点名要那个文件，就没有再筛掉的道理）
   --in-place                原地写回原文件（batch 里只对 -t fmt 有意义；与 -o 互斥）
 
-产物落点（三选一；batch 与 set 同一套口径）：
-  -o <目录>                 另存到那个目录（每个谱一个/多个文件）
-  省略 -o                   产物写在**各源文件旁边**（-r 递归时也各贴各的；set 在单文件时是打到 stdout）
+产物落点（三选一；batch / set / format 同一套口径，差别只是 -o 是"目录"还是"文件"）：
+  -o <目录|文件>            另存到那里（batch/set 是目录、format 是文件）
+  省略 -o                   产物写在**各源文件旁边**（-r 递归时也各贴各的；单文件 + format/set 时打到 stdout）
   --in-place                原地覆盖源文件
     · set：就是"把设置写进这份谱"的正常用法（必须显式写出来）
     · batch -t fmt：就地覆盖是数据损坏级别的操作 ⇒ 不写就**拒绝**，写了才改
   只有 batch 的纯 -t lint 真的不产出文件，所以那一种一定不需要 -o
+  ⚠ -o 与 --in-place 同时给 = 歧义（一个说"另存"、一个说"就地"）⇒ **报用法错误**（三处一致，不猜）
+  ⚠ format --check 是**只读**保证：同时给了 --in-place 也一个字节都不写
 
 全局选项：
   -i, --input <文件|目录|-> 输入（- = stdin；省略时也读 stdin）；--in 是别名
@@ -1613,9 +1615,23 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
   }
 
   // ── format ──────────────────────────────────────────────
+  /**
+   * adj964（自测发现的**静默忽略**）：`-o` 与 `--in-place` 同时给时，旧实现让 `--in-place` 悄悄赢、
+   * `-o` 一个字节都不写、也不提示 —— 与 `batch` / `set`（那边报歧义、退出码 1）**不一致**，
+   * 属项目反复记的"接受了、然后静默忽略"（最坏的一种错：不报错，结果却不是用户要的）。
+   * 现在三处**同一口径**：一个说"另存"、一个说"就地"，说不清就报用法错误，不猜。
+   */
+  if (p.inPlace && p.output !== null && p.output !== '-') {
+    io.err('-o 与 --in-place 不能同时给：-o 是"另存到那个文件"，--in-place 是"原地覆盖源文件"')
+    return { code: EXIT.usage }
+  }
   const fixed = formatJps(source)
   const changed = fixed !== source
   if (p.check) {
+    /**
+     * ⚠ `--check` 是**只读保证**：即使同时给了 `--in-place` 也**一个字节都不写**
+     * （用户要"先看合不合规"，那就不能顺手改文件）。这条有闸门钉着（`cli-assert` `adj964`）。
+     */
     if (!p.quiet) line(io, changed ? '需要格式化 ✗' : '已符合规范 ✓')
     return { code: changed ? EXIT.syntax : EXIT.ok, json: { schema: 1, changed } }
   }

@@ -514,6 +514,40 @@ console.log('\n— 命令行（A·P1–P4）—')
 }
 
 /**
+ * ④c·4 adj964（自测发现的**静默忽略**）：`format` 的 `-o` 与 `--in-place` 同时给时，
+ * 旧实现让 `--in-place` 悄悄赢、`-o` 一个字节都不写、也不提示；而 `batch`/`set` 那边报歧义。
+ * 同一件事两种口径 ⇒ 统一成"报用法错误"；顺带把 `--check` 的**只读保证**钉住。
+ */
+{
+  const fmtIo = (): ReturnType<typeof makeIo> => makeIo({ 'a.jps': 'Q:1 2 3 4|\n' })
+
+  const a = fmtIo()
+  const ra = await runCli(['format', '-i', 'a.jps', '--in-place', '-o', 'out.jps'], a.io)
+  check(
+    'adj964 `format -o` 与 `--in-place` 同时给 ⇒ **报歧义**（退出码 1；与 batch/set 同口径，不再静默忽略 -o）',
+    ra.code === EXIT.usage && Object.keys(a.files).length === 0,
+    `code=${ra.code} files=${Object.keys(a.files).join(',')}`,
+  )
+
+  const b = fmtIo()
+  const rb = await runCli(['format', '-i', 'a.jps', '--check', '--in-place'], b.io)
+  check(
+    'adj964 `--check` 是**只读保证**：同时给了 `--in-place` 也一个字节都不写（只看合不合规）',
+    rb.code === EXIT.syntax && Object.keys(b.files).length === 0,
+    `code=${rb.code} files=${Object.keys(b.files).join(',')}`,
+  )
+
+  // **正对照**：同一个夹具下 `--in-place`（不带 --check）确实会写 ⇒ 说明上面"没写"不是恒真
+  const ctl = fmtIo()
+  await runCli(['format', '-i', 'a.jps', '--in-place'], ctl.io)
+  check(
+    'adj964 正对照：同一夹具下 `--in-place` 单独用时**确实写盘** ⇒ 上面那条"没写"的判据不是恒真',
+    'a.jps' in ctl.files,
+    Object.keys(ctl.files).join(','),
+  )
+}
+
+/**
  * ④d adj956（**修一个真 bug**）：`-s k=v` 原先只被 settings / config 消费，
  * 却被 render / play / batch 的守卫放行 ⇒ "接受了、然后静默忽略"。
  *
@@ -1093,6 +1127,16 @@ console.log('\n— 命令行（A·P1–P4）—')
       code: EXIT.ok,
     },
     { what: 'format --check 合规', argv: ['format', '-i', 'samples\\ershenbu.jps', '--check'], lines: ['已符合规范 ✓'], code: EXIT.ok },
+    /**
+     * adj964：`-o` 与 `--in-place` 互斥（自测发现的静默忽略 ⇒ 现在报歧义）。
+     * 手册 §2.4 里那段输出由这条现跑核对（`adj949` 是双向判据：跑得出 + 手册里逐字有）。
+     */
+    {
+      what: 'format -o 与 --in-place 互斥',
+      argv: ['format', '-i', '我的谱.jps', '--in-place', '-o', '我的谱.规范化.jps'],
+      lines: ['-o 与 --in-place 不能同时给：-o 是"另存到那个文件"，--in-place 是"原地覆盖源文件"'],
+      code: EXIT.usage,
+    },
     { what: 'render svg', argv: ['render', '-i', 'samples\\ershenbu.jps', '-t', 'svg', '-o', '我的谱.svg'], lines: ['已写入 我的谱.svg'], code: EXIT.ok },
     { what: 'render midi', argv: ['render', '-i', 'samples\\ershenbu.jps', '-t', 'midi', '-o', '我的谱.mid'], lines: ['已写入 我的谱.mid（MIDI，225 字节）'], code: EXIT.ok },
     {
