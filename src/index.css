@@ -3351,6 +3351,120 @@ body {
   gap: 8px;
 }
 
+/* adj963（用户要求）：「保存到工作区」对话框（插件嵌入版的保存主入口）。
+   布局与既有对话框一致：字段 → 目录列表（吃剩余高度）→ 底部按钮靠右。只消费 `--jp-*` 变量。 */
+.save-as {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 300px;
+}
+.save-as-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.save-as-label {
+  color: var(--jp-text-secondary);
+  font-size: 13px;
+  flex: none;
+}
+.save-as-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--jp-border);
+  border-radius: 6px;
+  background: var(--jp-bg-app);
+  color: var(--jp-text-primary);
+  font-size: 14px;
+}
+.save-as-input:focus { outline: none; border-color: var(--jp-accent); }
+.save-as-where {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+/* 当前目录可能很长 ⇒ 省略号 + 悬浮看全（`title` 里已放完整路径） */
+.save-as-path {
+  color: var(--jp-text-primary);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.save-as-hint {
+  color: var(--jp-text-secondary);
+  font-size: 12px;
+}
+.save-as-grant {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed var(--jp-border);
+  border-radius: 6px;
+}
+/* 目录列表：**吃剩余高度**（文库目录多时不用挤在小框里滚）；`listbox` 语义在组件里给了 */
+.save-as-list {
+  flex: 1;
+  min-height: 140px;
+  overflow: auto;
+  border: 1px solid var(--jp-border);
+  border-radius: 6px;
+  background: var(--jp-bg-app);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.save-as-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--jp-text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+.save-as-item:hover { background: var(--jp-bg-panel-hover); }
+.save-as-item.is-up { color: var(--jp-text-secondary); }
+/* 已存在的 `.jps`：只作参照（点它把名字填进输入框），颜色弱一档 */
+.save-as-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 8px 4px;
+}
+.save-as-file {
+  border: 1px solid var(--jp-border);
+  border-radius: 4px;
+  background: none;
+  color: var(--jp-text-secondary);
+  font-size: 12px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.save-as-file:hover { color: var(--jp-text-primary); border-color: var(--jp-accent); }
+.save-as-empty {
+  color: var(--jp-text-secondary);
+  font-size: 12px;
+  padding: 6px 8px;
+}
+.save-as-err {
+  color: var(--jp-danger, #d33);
+  font-size: 12px;
+}
+.save-as-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* adj958：帮助对话框标题栏里的「目录」按钮（与官网窄屏文档页同一个词、同一手感）。
    官网那套 `.doc-toc-toggle` 吃 `--site-*` 变量（只在官网页面注入）⇒ 这里另起一套 `--jp-*`。 */
 .doc-toc-toggle {

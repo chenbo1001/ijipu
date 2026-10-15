@@ -44,6 +44,7 @@ import {
   getWorkspace,
   hasEntry,
   isValidEntryName,
+  isWorkspaceAvailable,
   joinPath,
   moveFile,
   normalizeRelPath,
@@ -172,6 +173,17 @@ interface DocState {
   redo: () => void
   loadSample: (id: string) => void
   newDoc: () => void
+  /**
+   * adj963（**用户要求：规范新建/保存的行为**）：把"按运行环境选哪条保存路"收进 store **一处**。
+   *
+   * 为什么必须收口：改造前"模式判定"散在 `TopBar` 的 `runSaveSmart`，而 `App` 的 **Ctrl+S 直接调
+   * `saveFile()`**（绕过判定）⇒ 插件里对未绑定文档按 Ctrl+S 会走 `saveFileAs()` →
+   * 跨源子框架弹系统选择器必然被拒（`SecurityError`）。菜单与快捷键**两条入口两套判定**，
+   * 就是"必然漂"的老毛病（同 adj960 的 `%FILE%`）。现在菜单/快捷键都只调这三个动作。
+   */
+  requestNewDoc: () => void
+  requestSave: () => Promise<void>
+  requestSaveAs: () => Promise<void>
   markSaved: () => void
   /** adj406：粘贴源码导入（返回 false = 内容为空、未替换） */
   importSource: (raw: string) => boolean
@@ -677,6 +689,61 @@ export const useDocStore = create<DocState>()((set, get) => ({
     useUiStore.getState().showNotice(uiCopy.newDocDone, 'ok')
   },
   markSaved: () => set({ dirty: false }),
+
+  /**
+   * adj963：模式感知的「新建」——有未保存修改时先问一句（口径见接口上的说明）。
+   *
+   * `newDoc()` 会把草稿槽换成模板，**当前未保存的编辑就此消失、撤销也回不去**；
+   * 原文件不动（这点写进文案，免得用户以为文件被删了）。
+   * 确认走应用内确认条（`showAsk`），与 `main.tsx` 里"外部改动是否重新载入"同一套路。
+   */
+  requestNewDoc: () => {
+    if (!get().dirty) {
+      get().newDoc()
+      return
+    }
+    useUiStore.getState().showAsk({
+      text: uiCopy.newDocDirtyAsk,
+      confirmLabel: uiCopy.newDocDirtyConfirm,
+      cancelLabel: uiCopy.newDocDirtyCancel,
+      onConfirm: () => get().newDoc(),
+      onCancel: () => {},
+    })
+  },
+
+  /** adj963：模式感知的「保存」（口径见接口上的说明）——**Ctrl+S 与菜单项都走这里** */
+  requestSave: async () => {
+    const st = get()
+    // 嵌入版：未绑定 ⇒ 专用对话框（跨源子框架不能弹系统选择器；工作区页签在嵌入版又是隐藏的）
+    if (isHostEmbedded() && !st.binding) {
+      useUiStore.getState().openModal('saveAs')
+      return
+    }
+    // 手机端：未绑定 ⇒ 引导到工作区另存（`showSaveFilePicker` 在移动端不可靠）
+    if (isCoarsePointerDevice() && isWorkspaceAvailable() && !st.binding) {
+      const ui = useUiStore.getState()
+      ui.requestWorkspaceSave()
+      ui.toggleDock('workspace')
+      return
+    }
+    await st.saveFile()
+  },
+
+  /** adj963：模式感知的「另存为」——嵌入版与「保存未绑定文档」是同一件事（同一个对话框） */
+  requestSaveAs: async () => {
+    const st = get()
+    if (isHostEmbedded()) {
+      useUiStore.getState().openModal('saveAs')
+      return
+    }
+    if (isCoarsePointerDevice() && isWorkspaceAvailable()) {
+      const ui = useUiStore.getState()
+      ui.requestWorkspaceSave()
+      ui.toggleDock('workspace')
+      return
+    }
+    await st.saveFileAs()
+  },
 
   /**
    * adj406：粘贴源码导入——不依赖系统文件选择器的兜底入口

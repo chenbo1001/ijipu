@@ -12920,11 +12920,15 @@ function runAdj530TopBarLayoutTests() {
   // ③ `ModalKind` 只留**真的有渲染分支**的模态——防止同类死调用再次通过类型检查。
   //    adj957：加上 `'cli'`（命令行手册改用应用内 DocDialog）⇒ 现在是 7 种，且 App.tsx 里
   //    必须真的有 `modal === 'cli'` 的渲染分支（下面那条断言就是管这个的），否则又变成死调用。
-  check('adj563 `ModalKind` 已收窄为仍有渲染分支的 7 种（about/pageConfig/playback/export 四个残留已删；adj957 加 cli）',
-    /export type ModalKind = 'samples' \| 'shortcuts' \| 'manual' \| 'syntax' \| 'cli' \| 'donate' \| 'voicePicker'/.test(
+  check('adj563 `ModalKind` 已收窄为仍有渲染分支的 8 种（about/pageConfig/playback/export 四个残留已删；adj957 加 cli；adj963 加 saveAs）',
+    /export type ModalKind = 'samples' \| 'shortcuts' \| 'manual' \| 'syntax' \| 'cli' \| 'donate' \| 'voicePicker' \| 'saveAs'/.test(
       String(readFileSync('src/store/uiStore.ts', 'utf8')),
     ) &&
       /modal === 'cli' && <Suspense fallback=\{null\}><DocDialog kind="cli" \/>/.test(
+        String(readFileSync('src/App.tsx', 'utf8')),
+      ) &&
+      // adj963：新加的模态**同样必须有渲染分支**（这条断言就是防"死调用"的那一半）
+      /modal === 'saveAs' && <Suspense fallback=\{null\}><SaveAsDialog \/>/.test(
         String(readFileSync('src/App.tsx', 'utf8')),
       ),
     '')
@@ -12950,6 +12954,102 @@ function runAdj530TopBarLayoutTests() {
  * 这里的断言分两类：**"单一来源"类**（高度只允许有一个数：`--jp-btn-h`）与
  * **"接线"类**（图标键、栈长度、preventDefault 保焦点）——都是"改一处忘一处"最容易漂的地方。
  */
+/**
+ * adj963（**用户要求**）：恢复菜单里的「新建 / 保存」并规范它们在三端的行为。
+ *
+ * 用户原话要点：
+ *  ① **新建**：插件/网站/桌面端都以未命名模板建新文档，**断开与之前文件的连接**（新文档＝缓存里的无主之物）；
+ *  ② **保存**：插件模式给**保存对话框**（列当前工作区子目录 + 文件名输入框，默认填描述头第一个 `B:`）；
+ *     网站模式用工作区底栏；桌面端用**系统保存对话框**（用户裁定，保持原状）。
+ *
+ * 这里钉四件事：新建的解绑口径、有未保存修改时先问一句、保存三端分流的**唯一出处**、
+ * 以及对话框的三条实现口径（复用 store 动作 / 默认名取描述头 / 授权必须在手势里）。
+ */
+function runAdj963NewAndSaveTests() {
+  console.log('[196] adj963 new/save behaviour across three shells')
+  const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+  const storeSrc = String(readFileSync('src/store/docStore.ts', 'utf8'))
+  const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+  const uiSrc = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+  const dlg = String(readFileSync('src/dialogs/SaveAsDialog.tsx', 'utf8'))
+  const copySrc = String(readFileSync('src/brand/copy.ts', 'utf8'))
+
+  // ---- ① 新建：解绑口径（用户要求 ①）----
+  check('adj963 新建断开一切文件连接：句柄 / 桌面路径 / 工作区绑定 / 待恢复绑定 / 草稿来源（新文档＝缓存里的无主之物）',
+    /newDoc: \(\) => \{[\s\S]{0,2600}?set\(\{[\s\S]{0,800}?fileHandle: null,[\s\S]{0,120}?nativePath: null,[\s\S]{0,200}?binding: null,[\s\S]{0,80}?pendingBinding: null/.test(
+      storeSrc,
+    ) &&
+      /newDoc: \(\) => \{[\s\S]{0,2600}?saveDraftSrc\(null\)/.test(storeSrc) &&
+      /localStorage\.setItem\(DRAFT_KEY, template\)/.test(storeSrc),
+    '')
+
+  // ---- ①b 有未保存修改时先问一句（否则"点错一下"＝丢内容；E-2026-310 同族）----
+  check('adj963 有未保存修改时「新建」先经确认条问一句（`dirty` + `showAsk`），确认后才 `newDoc()`',
+    /requestNewDoc: \(\) => \{[\s\S]{0,500}?!get\(\)\.dirty[\s\S]{0,150}?get\(\)\.newDoc\(\)[\s\S]{0,800}?showAsk\(\{[\s\S]{0,300}?newDocDirtyAsk/.test(
+      storeSrc,
+    ) &&
+      /newDocDirtyAsk:/.test(copySrc) &&
+      /onConfirm: \(\) => get\(\)\.newDoc\(\)/.test(storeSrc) &&
+      // **负对照**：把"先问一句"去掉（`requestNewDoc` 直接 newDoc）⇒ 判据判红
+      !/requestNewDoc: \(\) => \{\s*get\(\)\.newDoc\(\)\s*\}/.test(storeSrc),
+    '')
+
+  // ---- ② 保存：三端分流的**唯一出处**（菜单与 Ctrl+S 共用同一份判定）----
+  check('adj963 保存三端分流收在 `docStore` 一处（嵌入版 ⇒ saveAs 对话框；手机端 ⇒ 工作区底栏；其余 ⇒ saveFile）',
+    /requestSave: async \(\) => \{[\s\S]{0,800}?isHostEmbedded\(\) && !st\.binding[\s\S]{0,240}?openModal\('saveAs'\)[\s\S]{0,1100}?await st\.saveFile\(\)/.test(
+      storeSrc,
+    ) &&
+      /void st\.requestSave\(\)/.test(appSrc) &&
+      /st\.requestNewDoc\(\)/.test(appSrc) &&
+      // **负对照**：Ctrl+S 退回直接调 `saveFile()`（＝改造前的写法，插件里会去弹系统选择器）⇒ 判据判红
+      !/void st\.saveFile\(\)/.test(appSrc),
+    '')
+
+  // ---- ③ 对话框：复用 store 动作（不许自己拼写盘）----
+  check('adj963 插件「保存到工作区」对话框：列当前工作区目录（`readDirEntries`）+ 写盘一律走 `saveToWorkspace`',
+    /readDirEntries\(ws, next\)/.test(dlg) &&
+      /saveToWorkspace\(\[\.\.\.segs, /.test(dlg) &&
+      // ⚠ **不许**绕过 store 自己拼写盘：那会漏掉重名保护、绑定、外部改动基准与"保存中…"提示
+      !/writeWorkspaceText\(/.test(dlg),
+    '')
+
+  // ---- ④ 默认文件名＝描述头第一个 `B:`（与 `saveFileAs` 同一句口径）----
+  check('adj963 对话框默认文件名＝**描述头第一个 `B:`**（`parseResult.header.titles[0]`，与 `saveFileAs` 同口径）',
+    /titles\[0\]/.test(dlg) && /header\.titles\[0\]/.test(storeSrc) &&
+      // **负对照**：默认名写死（不读描述头）⇒ 判据判红
+      !/setName\('未命名'\)/.test(dlg) &&
+      !/suggestedName: '未命名/.test(storeSrc),
+    '')
+
+  // ---- ⑤ 授权必须在用户手势里（挂载时静默申请会被浏览器拒）----
+  {
+    const from = dlg.indexOf('const run = async')
+    const to = dlg.indexOf('void run()')
+    const mountBody = from >= 0 && to > from ? dlg.slice(from, to) : ''
+    check('adj963 网页版（FSA）授权走「继续访问」按钮（`requestWorkspacePermission` 在用户手势里）；挂载时只 `query` 不 `request`',
+      mountBody !== '' &&
+        /queryWorkspacePermission\(rec\)/.test(mountBody) &&
+        !/requestWorkspacePermission/.test(mountBody) &&
+        /requestWorkspacePermission\(ws\)/.test(dlg) &&
+        /grantBtn/.test(copySrc),
+      mountBody === '' ? '没切出挂载段（正则要跟着改）' : '',
+    )
+  }
+
+  // ---- ⑥ 菜单：窄屏常驻三项；嵌入版仍按 adj724b 只藏「工作区」----
+  check('adj963 窄屏菜单常驻「新建/保存/另存为」，而「工作区」在嵌入版仍隐藏',
+    /isNarrow\s*\?\s*\[entryNew, entrySave, entrySaveAs, entryWorkspace/.test(topSrc) &&
+      /entryWorkspace: MenuEntry = \{[\s\S]{0,240}?hidden: isHostEmbedded\(\)/.test(topSrc) &&
+      // **负对照**：嵌入版把「保存」也藏掉 ⇒ 判据判红（插件里就又没保存入口了）
+      !/entrySave: MenuEntry = \{[^}]*hidden: isHostEmbedded\(\)/.test(topSrc),
+    '')
+
+  // ---- ⑦ 模态种类与渲染分支成对（防"死调用"，同 adj563 的道理）----
+  check('adj963 `saveAs` 同时在 `ModalKind` 与 App 的渲染分支里（成对，不留死调用）',
+    /\| 'saveAs'/.test(uiSrc) && /modal === 'saveAs' && <Suspense fallback=\{null\}><SaveAsDialog \/>/.test(appSrc),
+    '')
+}
+
 function runAdj534to537UiTests() {
   console.log('[119b] unified button height / 深浅模式 / tinted resize lines / pad undo-redo (adj534-adj537)')
   const css = String(readFileSync('src/index.css', 'utf8'))
@@ -13420,30 +13520,40 @@ async function runAdj540WorkspaceTests() {
       !/className="btn ws-root"/.test(panelSrc) &&
       /workspaceBtnTitle/.test(copySrc),
     '')
-  check('adj540 入口接线：**窄屏以工作区为主入口**（菜单里工作区排第一，只留平台无关项）',
-    // 窄屏分支：工作区在最前，且**不含**系统选择器/新建/保存/另存为那些项（都在面板里或只在 PC 上成立）
-    // adj615：末尾多了平台无关的「打印」
-    // adj723z：中间多了「最近…」（打开历史二级菜单，窄屏同样可用——它只依赖工作区）
-    /const fileEntries: \(MenuEntry \| 'sep'\)\[\] = isNarrow\s*\?\s*\[entryWorkspace, entrySamples, entryPaste, entryRecent, entryTryout, entryExport, entryPrint\]/.test(
+  check('adj540/adj963 入口接线：窄屏菜单**也保留完整文件操作**（新建/保存/另存为 + 工作区 + 平台无关项）',
+    // adj540：窄屏曾把「新建/保存/另存为」收进工作区面板（"窄屏以工作区操作按钮为主"）。
+    // adj963（**用户要求**）：改回**窄屏常驻** —— 因为嵌入版又隐藏了「工作区」项（adj724b
+    // "文件操作交给 Obsidian"），两者叠加 ⇒ 窄的插件面板里**一个文件操作入口都没有**。
+    // adj615：末尾有平台无关的「打印」；adj723z：中间有「最近…」（打开历史二级菜单）
+    /const fileEntries: \(MenuEntry \| 'sep'\)\[\] = isNarrow\s*\?\s*\[entryNew, entrySave, entrySaveAs, entryWorkspace, entrySamples, entryPaste, entryRecent, entryTryout, entryExport, entryPrint\]/.test(
       topSrc,
     ) &&
-      // adj724b：嵌入版里该菜单项带 `hidden`（跨源子框架不能弹系统选择器 ⇒ 直接不显示）
+      // **负对照**：把「新建」从窄屏那组里去掉（＝退回 adj540 的写法）⇒ 同一判据判红
+      !/const fileEntries: \(MenuEntry \| 'sep'\)\[\] = isNarrow\s*\?\s*\[entryWorkspace, entrySamples/.test(topSrc) &&
+      // adj724b：嵌入版里「工作区」菜单项带 `hidden`（跨源子框架不能弹系统选择器 ⇒ 直接不显示）
       /\{ label: workspaceCopy\.openSystemLabel, onPick: runOpen, hidden: isHostEmbedded\(\) \}/.test(topSrc) &&
       /\| 'workspace'/.test(ui),
     '')
-  check('adj540/adj724b 「保存」未绑定任何文件时自动引导到工作区另存（手机端与嵌入版都不走 showSaveFilePicker）',
-    // adj724b：判据从"仅粗指针"扩为"**粗指针 或 嵌入版**"——嵌入版在跨源 iframe 里
-    // 弹 `showSaveFilePicker` 会被浏览器拒（用户实测 #5 的 SecurityError）。
-    /const runSaveSmart = async \(\) => \{[\s\S]{0,320}?\(isCoarsePointerDevice\(\) \|\| isHostEmbedded\(\)\) && isWorkspaceAvailable\(\) && !useDocStore\.getState\(\)\.binding[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)/.test(
-      topSrc,
-    ) && /entrySave: MenuEntry = \{ label: '保存\(&S\)', kbd: KBD\.save, hotkey: 's', onPick: runSaveSmart \}/.test(topSrc),
+  check('adj540/adj724b/adj963 「保存」的模式判定收在 store **一处**：嵌入版未绑定 ⇒ 专用对话框；手机端未绑定 ⇒ 工作区另存',
+    // adj963：判定从 `TopBar.runSaveSmart` 搬进 `docStore.requestSave`。为什么必须搬：
+    //   菜单走 `runSaveSmart`（有模式判定），而 `App` 的 **Ctrl+S 直接调 `saveFile()`**
+    //   ⇒ 插件里对未绑定文档按 Ctrl+S 会去弹系统选择器（跨源子框架必然 SecurityError）。
+    //   同一件事两套判定就是"必然漂"（同 adj960 的 `%FILE%`）。
+    /requestSave: async \(\) => \{[\s\S]{0,700}?isHostEmbedded\(\) && !st\.binding[\s\S]{0,200}?openModal\('saveAs'\)/.test(store) &&
+      /isCoarsePointerDevice\(\) && isWorkspaceAvailable\(\) && !st\.binding[\s\S]{0,200}?requestWorkspaceSave\(\)[\s\S]{0,90}?toggleDock\('workspace'\)/.test(store) &&
+      /entrySave: MenuEntry = \{ label: '保存\(&S\)', kbd: KBD\.save, hotkey: 's', onPick: runSaveSmart \}/.test(topSrc) &&
+      /const runSaveSmart = \(\) => useDocStore\.getState\(\)\.requestSave\(\)/.test(topSrc) &&
+      // **负对照**：`Ctrl+S` 若退回直接调 `st.saveFile()`（＝改造前的写法）⇒ 判据判红
+      !/st\.saveFile\(\)/.test(appSrc) &&
+      /void st\.requestSave\(\)/.test(appSrc),
     '')
-  check('adj540/adj724b 「另存为」在手机端与嵌入版都走工作区（开面板 + 展开文件名输入），桌面端仍用系统另存为',
-    /const runSaveAsSmart = async \(\) => \{[\s\S]{0,300}?\(isCoarsePointerDevice\(\) \|\| isHostEmbedded\(\)\) && isWorkspaceAvailable\(\)[\s\S]{0,120}?requestWorkspaceSave\(\)[\s\S]{0,80}?toggleDock\('workspace'\)[\s\S]{0,80}?await saveFileAs\(\)/.test(
-      topSrc,
+  check('adj540/adj724b/adj963 「另存为」：嵌入版走专用对话框；手机端走工作区（开面板 + 展开文件名输入）；桌面端仍用系统另存为',
+    /requestSaveAs: async \(\) => \{[\s\S]{0,500}?isHostEmbedded\(\)[\s\S]{0,200}?openModal\('saveAs'\)[\s\S]{0,600}?isCoarsePointerDevice\(\) && isWorkspaceAvailable\(\)[\s\S]{0,300}?requestWorkspaceSave\(\)[\s\S]{0,120}?toggleDock\('workspace'\)[\s\S]{0,120}?await st\.saveFileAs\(\)/.test(
+      store,
     ) &&
       /另存为\(&A\)…', hotkey: 'a', onPick: runSaveAsSmart/.test(topSrc) &&
-      /workspaceSaveIntent/.test(String(readFileSync('src/store/uiStore.ts', 'utf8'))) &&
+      /const runSaveAsSmart = \(\) => useDocStore\.getState\(\)\.requestSaveAs\(\)/.test(topSrc) &&
+      /workspaceSaveIntent/.test(ui) &&
       /clearWorkspaceSaveIntent\(\)/.test(panelSrc),
     '')
   // adj954：「手机端」判据（`isCoarsePointerDevice`）**迁到 `brand/env.ts`**（运行环境判定的唯一出处）。
@@ -17560,6 +17670,14 @@ runAdj927ExternalChangeTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj534-537 界面调整用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj963NewAndSaveTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj963 新建/保存行为用例抛异常', e)
     }
   })
   .then(() => {

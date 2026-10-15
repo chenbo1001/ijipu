@@ -275,17 +275,16 @@ export function TopBar() {
   const splitHDir = useUiStore((s) => s.splitHDir)
   // adj322：宽/窄屏——按视口选 split(上下) 还是 splitH/splitHE(左右)
   const isNarrow = useUiStore((s) => s.isNarrow)
-  const newDoc = useDocStore((s) => s.newDoc)
+  // adj963：`newDoc` / `saveFile` / `saveFileAs` / `requestWorkspaceSave` 的订阅**已删** ——
+  // 新建与保存的模式判定整体搬进 `docStore`（`requestNewDoc`/`requestSave`/`requestSaveAs`），
+  // 本文件只把动作接上菜单（见下面 `runSaveSmart` 那几行）。留着这些订阅会变成"没人用的第二套入口"。
   const openFile = useDocStore((s) => s.openFile)
-  const saveFile = useDocStore((s) => s.saveFile)
-  const saveFileAs = useDocStore((s) => s.saveFileAs)
   // adj422：撤销/重做不再挂在菜单上（菜单「编辑」子菜单已移除），因此这里不再订阅 undo/redo —
   // 两个功能仍由编辑器里的 Ctrl+Z / Ctrl+Y 触发（EditorPane 直接调 store），行为未变。
   // ---- UI store ----
   const openModal = useUiStore((s) => s.openModal)
   // adj462：底部 dock（试听/导出/设置 = dock 入口开关；dockOpen/dockPanel 用于按钮高亮）
   const toggleDock = useUiStore((s) => s.toggleDock)
-  const requestWorkspaceSave = useUiStore((s) => s.requestWorkspaceSave)
   const dockOpen = useUiStore((s) => s.dockOpen)
   const dockPanel = useUiStore((s) => s.dockPanel)
   const showGuides = useUiStore((s) => s.showGuides)
@@ -1187,32 +1186,15 @@ export function TopBar() {
     await openFile()
   }
   /**
-   * adj540：「保存」——**手机端没有绑定任何文件时，直接引导到工作区另存**（用户要求"窄屏下通过工作区做文件操作"）。
-   * 手机上 `showSaveFilePicker` 不可靠，若还按老路走"保存 → 另存为对话框"，用户会撞到"点了没反应"。
-   * 已经绑定（工作区文件 / 桌面外部文件 / 浏览器句柄）的情况仍走 `saveFile()` 直接写回。
+   * adj963（**用户要求：规范新建/保存的行为**）：**模式判定已收进 `docStore` 一处**
+   * （`requestNewDoc` / `requestSave` / `requestSaveAs`，见那里的说明）——菜单与 `Ctrl+S`
+   * 走的是同一份判定，不再各写一套（改造前「保存」菜单走 `runSaveSmart` 的模式判定、
+   * 而 `Ctrl+S` 直接调 `saveFile()`：插件里对未绑定文档按 Ctrl+S 会去弹系统选择器
+   * ⇒ 跨源子框架必然 `SecurityError`；又是"同一件事两处实现必然漂"，同 adj960 的老毛病）。
    */
-  const runSaveSmart = async () => {
-    /**
-     * adj724b：**嵌入版（Obsidian iframe）里没有"文件句柄"这条路**——
-     * 浏览器禁止跨源子框架弹文件选择器（用户实测 #5 的 `SecurityError`）。
-     * ⇒ 未绑定文件时一律引导到**工作区另存**（文库写作），不再尝试 `showSaveFilePicker`。
-     */
-    if ((isCoarsePointerDevice() || isHostEmbedded()) && isWorkspaceAvailable() && !useDocStore.getState().binding) {
-      requestWorkspaceSave()
-      toggleDock('workspace')
-      return
-    }
-    await saveFile()
-  }
-  /** adj540：手机端「另存为」= 开工作区面板并直接展开文件名输入（`showSaveFilePicker` 在移动端不可靠）；adj724b 嵌入版同理 */
-  const runSaveAsSmart = async () => {
-    if ((isCoarsePointerDevice() || isHostEmbedded()) && isWorkspaceAvailable()) {
-      requestWorkspaceSave()
-      toggleDock('workspace')
-      return
-    }
-    await saveFileAs()
-  }
+  const runSaveSmart = () => useDocStore.getState().requestSave()
+  const runSaveAsSmart = () => useDocStore.getState().requestSaveAs()
+  const onNewDoc = () => useDocStore.getState().requestNewDoc()
   // adj724b：嵌入版的「打开」分流已合并进上面的 `runOpenSmart`（跨源子框架不能弹选择器）
 
   // adj424：菜单分组重排——「试听播放」「导出」从各自的播放/设置组挪到「文件」分组底部，
@@ -1228,7 +1210,7 @@ export function TopBar() {
   //    —— 工作区面板里已有 新建（空谱）/ 保存 / 另存，菜单只留平台无关的入口：
   //    工作区 / 打开示例 / 粘贴源码导入 / 试听播放 / 导出。
   // adj954：`kbd` 走 `newDocKbd()` 现算（原先读 `KBD.newDoc`，那个值在模块加载时就定死了）
-  const entryNew: MenuEntry = { label: '新建(&N)', kbd: newDocKbd(), hotkey: 'n', onPick: newDoc }
+  const entryNew: MenuEntry = { label: '新建(&N)', kbd: newDocKbd(), hotkey: 'n', onPick: onNewDoc }
   const entryOpen: MenuEntry = { label: '打开(&O)…', kbd: KBD.openDoc, hotkey: 'o', onPick: runOpenSmart }
   // adj724b：嵌入版里系统选择器会被浏览器拒绝（跨源子框架）⇒ 该菜单项不出现
   const entryOpenSystem: MenuEntry = { label: workspaceCopy.openSystemLabel, onPick: runOpen, hidden: isHostEmbedded() }
@@ -1281,8 +1263,18 @@ export function TopBar() {
           },
         ]
   const entryRecent: MenuEntry = { label: '最近…', hotkey: 'r', onPick: () => {}, submenu: recentSub }
+  /**
+   * adj963（**用户要求**）：窄屏菜单**恢复「新建 / 保存 / 另存为」**。
+   *
+   * 它们当初（adj540）被收进工作区面板，理由是"窄屏以工作区操作按钮为主"；
+   * 但那样一来插件（嵌入版）里就**一个文件操作入口都不剩**了 ——
+   * 「工作区」这一项在嵌入版是隐藏的（`entryWorkspace.hidden`，adj724b"文件操作交给 Obsidian"），
+   * 于是"藏起来的 + 本来就隐藏的"叠在一起，用户找不到新建也找不到保存。
+   * 现在这三项在窄屏也常驻（`entryWorkspace` 仍按原口径在嵌入版隐藏，
+   * 因为嵌入版的保存已由专用对话框接管，见 `docStore.requestSave`）。
+   */
   const fileEntries: (MenuEntry | 'sep')[] = isNarrow
-    ? [entryWorkspace, entrySamples, entryPaste, entryRecent, entryTryout, entryExport, entryPrint]
+    ? [entryNew, entrySave, entrySaveAs, entryWorkspace, entrySamples, entryPaste, entryRecent, entryTryout, entryExport, entryPrint]
     : [
         entryNew,
         entryOpen,

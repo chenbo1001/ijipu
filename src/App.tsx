@@ -47,6 +47,8 @@ const DonateDialog = lazy(() => import('./dialogs/DonateDialog').then((m) => ({ 
 const VoicePickerDialog = lazy(() => import('./dialogs/VoicePickerDialog').then((m) => ({ default: m.VoicePickerDialog })))
 // adj928：两栏源码差异框（确认条的「查看差异」打开；数据在 uiStore.fileDiff）
 const FileDiffDialog = lazy(() => import('./dialogs/FileDiffDialog').then((m) => ({ default: m.FileDiffDialog })))
+// adj963（用户要求）：「保存到工作区」专用对话框（插件嵌入版的保存主入口）
+const SaveAsDialog = lazy(() => import('./dialogs/SaveAsDialog').then((m) => ({ default: m.SaveAsDialog })))
 
 function App() {
   const viewType = useDocStore((s) => s.viewType)
@@ -247,7 +249,9 @@ function App() {
       } else if (e.ctrlKey && e.key.toLowerCase() === 's') {
         e.preventDefault()
         e.stopPropagation()
-        void st.saveFile()
+        // adj963：走**模式感知**的保存（嵌入版/手机端未绑定文档时要开专用对话框或工作区面板，
+        // 直接调 saveFile() 会在插件里弹系统选择器 ⇒ 跨源子框架 SecurityError）
+        void st.requestSave()
       } else if ((e.ctrlKey || e.altKey) && !e.shiftKey && e.key.toLowerCase() === 'n') {
         /**
          * adj628：**新建**同时接受 `Ctrl+N` 与 `Alt+N`。
@@ -260,7 +264,8 @@ function App() {
          */
         e.preventDefault()
         e.stopPropagation()
-        st.newDoc()
+        // adj963：走 `requestNewDoc()` —— 有未保存修改时先经确认条问一句（见 docStore 里的说明）
+        st.requestNewDoc()
       } else if (e.ctrlKey && e.key.toLowerCase() === 'q') {
         e.preventDefault()
         e.stopPropagation()
@@ -539,6 +544,7 @@ function App() {
       {/* adj562：「粘贴源码导入」已迁入底栏「导入」页签（原 adj406 的弹窗入口下线） */}
       {/* adj509：试听音色选择对话框（音色库「指定音色」按钮触发） */}
       {modal === 'voicePicker' && <Suspense fallback={null}><VoicePickerDialog /></Suspense>}
+      {modal === 'saveAs' && <Suspense fallback={null}><SaveAsDialog /></Suspense>}
       {/* adj928：两栏源码差异框（确认条 → 「查看差异」；左本地 / 右外部，可直接做决定） */}
       {fileDiff && <Suspense fallback={null}><FileDiffDialog /></Suspense>}
     </div>

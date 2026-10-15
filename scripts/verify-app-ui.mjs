@@ -313,6 +313,79 @@ async function main() {
       (await evalJs(c, `!!document.querySelector('.doc-toc-pop')`)) === false,
     )
 
+    // ================= adj963：新建/保存的入口与行为（用户要求） =================
+    await evalJs(c, `document.querySelector('.modal-close').click(), true`)
+    await sleep(250)
+    check(
+      '关掉帮助对话框后回到编辑器（后面的用例要在编辑器上做）',
+      (await evalJs(c, `!!document.querySelector('.editor-main textarea')`)) === true,
+    )
+
+    // ---- ⑨ 窄屏菜单**常驻**「新建 / 保存 / 另存为」----
+    //   来源：用户实报"菜单里没有新建和保存了" —— 窄屏分支（adj540）曾把这三项收进工作区面板，
+    //   而嵌入版又隐藏了「工作区」项 ⇒ 窄的插件面板里一个文件操作入口都没有。
+    //   这里把视口调窄（`isNarrow` 由视口宽度驱动）再打开菜单，**真看**这三个词在不在。
+    await c.send('Emulation.setDeviceMetricsOverride', {
+      width: 420,
+      height: 820,
+      deviceScaleFactor: 2,
+      mobile: true,
+    })
+    await sleep(500)
+    await evalJs(c, `document.querySelector('.topbar-hamburger-btn').click(), true`)
+    await waitFor(c, `!!document.querySelector('.topbar-hamburger.open .menu-dropdown')`, '窄屏菜单打开')
+    const narrowLabels = await evalJs(
+      c,
+      `[...document.querySelectorAll('.topbar-hamburger.open .menu-entry')].map((el) => el.textContent.trim())`,
+    )
+    check(
+      '窄屏菜单里有「新建 / 保存 / 另存为」（**用户要求恢复**；adj540 曾把三项收进工作区面板）',
+      narrowLabels.some((l) => l.startsWith('新建')) &&
+        narrowLabels.some((l) => l.startsWith('保存')) &&
+        narrowLabels.some((l) => l.startsWith('另存为')),
+      narrowLabels.slice(0, 4).join(' ／ '),
+    )
+
+    // ---- ⑩ 有未保存修改时点「新建」⇒ 先问一句；确认后才真的新建 ----
+    //   为什么要这条：`newDoc()` 会直接换掉草稿槽（原文件不动，但当前的未保存编辑就此消失）⇒
+    //   没有这一问，"点错一下"就等于丢内容（E-2026-310 同族）。
+    await evalJs(c, `document.querySelector('.topbar-hamburger-btn').click(), true`) // 先收起菜单
+    await sleep(150)
+    await evalJs(c, `document.querySelector('.editor-main textarea').focus(), true`)
+    await c.send('Input.insertText', { text: '\nQ: 5 6 7 1 |' }) // 真打字 ⇒ 走 React 的 onChange
+    await sleep(300)
+    const dirtyShown = await evalJs(c, `!!document.querySelector('.dirty-dot')`)
+    check('在编辑器里真打字之后出现未保存标记（`.dirty-dot`）', dirtyShown === true)
+    const beforeNew = await evalJs(c, `document.querySelector('.editor-main textarea').value`)
+
+    await evalJs(c, `document.querySelector('.topbar-hamburger-btn').click(), true`)
+    await waitFor(c, `!!document.querySelector('.topbar-hamburger.open .menu-dropdown')`, '菜单再开（准备点新建）')
+    await evalJs(
+      c,
+      `[...document.querySelectorAll('.topbar-hamburger.open .menu-entry')].find((el) => el.textContent.includes('新建')).click(), true`,
+    )
+    await waitFor(c, `!!document.querySelector('.confirm-bar')`, '确认条出现')
+    const askText = String(await evalJs(c, `document.querySelector('.confirm-bar-text').textContent`))
+    const afterAsk = await evalJs(c, `document.querySelector('.editor-main textarea').value`)
+    check(
+      '有未保存修改时点「新建」⇒ 出现确认条，且**此时还没有**真的新建（内容原封不动）',
+      askText.includes('未保存') && afterAsk === beforeNew,
+      askText.slice(0, 28),
+    )
+
+    await evalJs(c, `document.querySelector('.confirm-bar-btn.is-primary').click(), true`)
+    await sleep(400)
+    const afterOk = await evalJs(c, `document.querySelector('.editor-main textarea').value`)
+    const footText = String(await evalJs(c, `document.querySelector('.footer-file')?.textContent ?? ''`))
+    check(
+      '确认后真的新建：内容换成未命名模板、状态栏回到「未命名」、未保存标记消失（新文档＝缓存里的无主之物）',
+      afterOk !== beforeNew &&
+        afterOk.includes('B: 未命名') &&
+        footText.includes('未命名') &&
+        (await evalJs(c, `!!document.querySelector('.dirty-dot')`)) === false,
+      `${footText.trim()} ／ 首行 ${afterOk.split('\n')[0]}`,
+    )
+
     c.close()
   } catch (e) {
     check(`脚本自身出错：${e instanceof Error ? e.message : String(e)}`, false)
