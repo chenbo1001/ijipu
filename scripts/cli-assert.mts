@@ -441,6 +441,79 @@ console.log('\n— 命令行（A·P1–P4）—')
 }
 
 /**
+ * ④c·3 adj962（**用户需求**：「如果要为指定文件/目录（批量）添加一个设置项及设置值，如何操作？」）：
+ * 新命令 `set` —— 把设置**写进谱面**（源码里的 `# jps-config`）；读=settings、写=set。
+ *
+ * 钉四件事：① 不给落点只打到 stdout、**一个文件都不改**；② `--in-place` 才写；
+ * ③ **差量写入**（原有设置项不许丢；设回默认值那一项要**从设置行去掉**）；
+ * ④ **反斜杠路径**（Windows 单文件输入的真实形态 —— 这里抓到过一个真 bug，见负对照那条）。
+ */
+{
+  const CFG_JPS = '# jps-config:{"margin_right":33}\n\n\nQ: 1 2 3 4 |\n'
+
+  const a = makeIo({ 'p.jps': GOOD })
+  await runCli(['set', '-i', 'p.jps', 'margin_right=33'], a.io)
+  check(
+    'adj962 `set` 不给落点 ⇒ 打到 stdout（**不改文件**，与 format 同口径）',
+    Object.keys(a.files).length === 0 && String(a.logs.join('')).includes('# jps-config:{"margin_right":33}'),
+    String(a.logs.join('')).split('\n').filter((l) => l !== '').slice(-1)[0],
+  )
+
+  const b = makeIo({ 'p.jps': CFG_JPS })
+  await runCli(['set', '-i', 'p.jps', 'page=A5', '--in-place'], b.io)
+  const bWrote = String(b.files['p.jps'] ?? '')
+  check(
+    'adj962 `--in-place` 写回原文件，且**差量**：原有 `margin_right` 没丢（新增 `page`）',
+    'p.jps' in b.files && bWrote.includes('"page":"A5"') && bWrote.includes('"margin_right":33'),
+    (bWrote.split('\n')[0] ?? '').trim(),
+  )
+
+  const c = makeIo({ 'p.jps': CFG_JPS })
+  await runCli(['set', '-i', 'p.jps', 'margin_right=50', '--in-place'], c.io)
+  check(
+    'adj962 把值设回**默认** ⇒ 该项从设置行里去掉（不留一堆等于默认值的键）',
+    !String(c.files['p.jps'] ?? '').includes('margin_right'),
+    (String(c.files['p.jps'] ?? '').split('\n')[0] ?? '').trim(),
+  )
+
+  const d = makeIo({ 'dir\\a.jps': GOOD })
+  const rd = await runCli(['set', '-i', 'dir\\a.jps', '-o', 'out\\sub', 'page=A5'], d.io)
+  const dKeys = Object.keys(d.files)
+  check(
+    'adj962 负对照（**自己实测抓到的真 bug**）：`\\` 路径下产物必须是 `out\\sub\\a.jps`，绝不能把整条输入路径粘上去',
+    rd.code === EXIT.ok && dKeys.length === 1 && dKeys[0] === 'out\\sub\\a.jps' && !(dKeys[0] ?? '').includes('dir\\a.jps'),
+    dKeys.join(' | '),
+  )
+
+  const e = makeIo({ 'in/a.jps': GOOD }, { in: ['a.jps'] })
+  check(
+    'adj962 目录输入不给 `--in-place` / `-o` ⇒ 用法错误 1（多份源码不能都打到 stdout）',
+    (await runCli(['set', '-i', 'in', 'page=A5'], e.io)).code === EXIT.usage,
+  )
+
+  const f = makeIo({ 'in/a.jps': GOOD, 'in/b.jps': GOOD }, { in: ['a.jps', 'b.jps'] })
+  const rf = await runCli(['set', '-i', 'in', '-o', 'out', 'page=A5'], f.io)
+  check(
+    'adj962 目录 + `-o`：逐个另存（`out/a.jps`、`out/b.jps`），汇总行**不带**文件名（adj960 的另一半）',
+    rf.code === EXIT.ok && 'out/a.jps' in f.files && 'out/b.jps' in f.files && /^已处理 2 个文件：/m.test(String(f.logs.join(''))),
+    Object.keys(f.files).join(','),
+  )
+
+  check(
+    'adj962 一组 `k=v` 都没给 ⇒ 用法错误 1（给出示例，并指路"只想临时生效就用 -s"）',
+    (await runCli(['set', '-i', 'p.jps'], makeIo({ 'p.jps': GOOD }).io)).code === EXIT.usage,
+  )
+  check(
+    'adj962 未知设置项 ⇒ 退出码 5（与 `-s` 同口径；不静默忽略）',
+    (await runCli(['set', '-i', 'p.jps', 'margn_right=10', '--in-place'], makeIo({ 'p.jps': GOOD }).io)).code === EXIT.config,
+  )
+  check(
+    'adj962 `-s` 用在 `set` 上 ⇒ 退出码 5（`set` 的值是位置参数 `k=v`；`-s` 是"临时生效"那一路，不混用）',
+    (await runCli(['set', '-i', 'p.jps', 'page=A5', '-s', 'margin_right=10'], makeIo({ 'p.jps': GOOD }).io)).code === EXIT.config,
+  )
+}
+
+/**
  * ④d adj956（**修一个真 bug**）：`-s k=v` 原先只被 settings / config 消费，
  * 却被 render / play / batch 的守卫放行 ⇒ "接受了、然后静默忽略"。
  *
@@ -1124,6 +1197,19 @@ console.log('\n— 命令行（A·P1–P4）—')
     { what: 'render -t midi 不能 stdout', argv: ['render', '-i', 'samples\\ershenbu.jps', '-t', 'midi'], lines: ['MIDI 是二进制，必须用 -o 指定文件（不能用 stdout）'], code: EXIT.usage },
     { what: 'settings 缺键名', argv: ['settings', '-i', 'samples\\ershenbu.jps'], lines: ['settings 需要键名（位置参数），例如：settings -i <谱> margin_right'], code: EXIT.usage },
     { what: 'info --json', argv: ['info', '-i', 'samples\\ershenbu.jps', '--json'], lines: ['"groups": 3,'], code: EXIT.ok },
+    /**
+     * adj962（用户需求）：`set` 把设置**写进谱面**。手册 §2.9 里那三段输出现跑一遍钉住。
+     * ⚠ 只钉到"`已处理 N 个文件：`"为止（后面的"几个有改动"随 `samples/` 内容变），
+     *   与 `lint 目录` 那条同一个取舍。
+     */
+    { what: 'set 打到 stdout（不给落点 ⇒ 不改文件）', argv: ['set', '-i', '我的谱.jps', 'margin_right=33'], lines: ['# jps-config:{"margin_right":33}'], code: EXIT.ok },
+    { what: 'set --in-place', argv: ['set', '-i', '我的谱.jps', 'margin_right=33', '--in-place'], lines: ['我的谱.jps 已写回'], code: EXIT.ok },
+    {
+      what: 'set 目录 + -o（批量另存）',
+      argv: ['set', '--in', 'samples', '-o', '输出目录', 'page=A5'],
+      lines: [`已处理 ${SAMPLE_NAMES.length} 个文件：`],
+      code: EXIT.ok,
+    },
   ]
 
   /** 每次都用**干净的一份 io**（同一份内存文件系统，互不干扰） */

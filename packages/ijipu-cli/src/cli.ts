@@ -11,7 +11,9 @@
  * 本阶段（P1）实现：`format` / `lint` / `info` + 全局选项 + `--json`。
  * `render` / `play` / `batch` / `settings` / `config` / `doctor` 属 P2–P4，**未实现时明确报错**（不假装成功 ✗）。
  */
-import { formatJps, parseJps, splitParseIssues, layoutScore, renderScoreToSvg, buildPlaySequence, eventsToMidi, defaultPageConfig, mergeJpsConfig, extractJpsConfig, OPTIONAL_CONFIG_FIELDS, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, inkBoxesOfLayout, type PageConfig, type ScoreLayout, type RangeBox, type ExportRange, type ProblemRow } from '@ijipu/engine'
+import { formatJps, parseJps, splitParseIssues, layoutScore, renderScoreToSvg, buildPlaySequence, eventsToMidi, defaultPageConfig, mergeJpsConfig, extractJpsConfig, OPTIONAL_CONFIG_FIELDS, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, inkBoxesOfLayout, type PageConfig, type ScoreLayout, type RangeBox, type ExportRange, type ProblemRow,
+  // adj962：把设置**写进谱面**（`set` 命令）——与应用的「保存设置」**同一份引擎实现**
+  writeJpsConfig, mergeConfigEdits } from '@ijipu/engine'
 // adj944：注册/解除 PATH 的**纯逻辑与编排**（与全局设置里那个按钮**共用同一份** ✓）
 import {
   cliPathRegister,
@@ -134,7 +136,9 @@ const HELP = `iJipu 命令行（爱记谱）
   play          -i <文件|-> -t midi|wav -o <输出>                             导出音频
   batch         --in <目录> [-o <目录>] [-t lint,svg,midi,fmt]                目录批量操作
                 [-r] [--filter <通配>] [--in-place]                         任务可逗号组合；省略 -o ⇒ 产物写在各源文件旁
-  settings      -i <谱> <键名> [-s k=v]                                       看某个设置项的值与来源
+  settings      -i <谱> <键名> [-s k=v]                                       看某个设置项的值与来源（**只读**）
+  set           -i <文件|目录|-> k=v [k=v …]                                  把设置**写进谱面**（源码里的 # jps-config）
+                [--in-place | -o <目录>] [-r] [--filter <通配>]               不给落点 ⇒ 打到 stdout（**不改文件**）
   config        -i <谱> [-t effective] [--quiet]                              打印生效设置全表 + 每项来源
   doctor        [--json]                                                      环境自检（如实报告能力有无）
   completions   bash|zsh|powershell                                           输出 shell 补全脚本
@@ -142,17 +146,19 @@ const HELP = `iJipu 命令行（爱记谱）
   unregister    [--json]                                                      从当前用户 PATH 里解除注册
   status        [--json]                                                      看是否已注册（**读系统实况**）
 
-目录类选项（lint -i <目录> 与 batch 都是这一套）：
+目录类选项（lint -i <目录> / batch / set 都是这一套）：
   -r, --recursive           输入是目录时**连子目录一起**（缺省只看当前一层）
   --filter <通配符>          只处理**文件名**匹配的（支持 * 与 ?，如 --filter "春*"）；
                             输入是单个文件时它不生效（点名要那个文件，就没有再筛掉的道理）
-  --in-place                原地写（batch 里只对 -t fmt 有意义；与 -o 互斥）
+  --in-place                原地写回原文件（batch 里只对 -t fmt 有意义；与 -o 互斥）
 
-batch 的产物落点（三选一）：
+产物落点（三选一；batch 与 set 同一套口径）：
   -o <目录>                 另存到那个目录（每个谱一个/多个文件）
-  省略 -o                   产物写在**各源文件旁边**（-r 递归时也各贴各的）
-  -t fmt --in-place         原地覆盖源文件（**必须显式**：就地覆盖是数据损坏级别的操作，默认拒绝）
-  只有 -t lint 真的不产出文件，所以纯 lint 一定不需要 -o
+  省略 -o                   产物写在**各源文件旁边**（-r 递归时也各贴各的；set 在单文件时是打到 stdout）
+  --in-place                原地覆盖源文件
+    · set：就是"把设置写进这份谱"的正常用法（必须显式写出来）
+    · batch -t fmt：就地覆盖是数据损坏级别的操作 ⇒ 不写就**拒绝**，写了才改
+  只有 batch 的纯 -t lint 真的不产出文件，所以那一种一定不需要 -o
 
 全局选项：
   -i, --input <文件|目录|-> 输入（- = stdin；省略时也读 stdin）；--in 是别名
@@ -346,15 +352,33 @@ function inferType(p: Parsed): string {
 }
 
 /**
- * 拼路径（统一用 `/`：CLI 只把路径字符串交给宿主，平台分隔符由宿主自己认）。
+ * 取路径里的**文件名**。
+ *
+ * ⚠ adj962（**自己实测抓到的真 bug**）：一开始写的是 `p.split('/').pop()` —— 对**目录输入**
+ * 没问题（`expandInputs` 拼出来的路径统一用 `/`），但**单文件输入**的路径是**用户原样给的**
+ * （Windows 上就是 `D:\我的谱\a.jps`）⇒ `split('/')` 切不开，整条路径被当成文件名，
+ * 最终拼成 `<输出目录>\D:\我的谱\a.jps`、`mkdir` 直接 ENOENT（7 个文件全失败）。
+ * 所以这里 `\` 与 `/` **都算**分隔符。
+ */
+function baseNameOf(p: string): string {
+  return p.split(/[\\/]/).pop() ?? p
+}
+
+/**
+ * 拼路径。
  *
  * adj960：`-i .`（用户实报那次的写法）走出来的路径会带 `./` 前缀 ⇒ 归一化掉，
  * 免得逐行输出长成 `./samples/x.jps 第 3 行：…`、与"直接给目录名"的形态不一致。
+ *
+ * adj962：**沿用用户输入里那种斜杠** —— `set -i D:\我的谱 -o D:\输出` 的产物路径不能长成
+ * `D:\输出/x.jps` 这种半截混合形态（`set` 是第一条会把拼好的输出路径打出来的命令）。
+ * 输入里没有斜杠时用 `/`（跨平台默认；Windows 也认）。
  */
 function joinPath(dir: string, name: string): string {
   const d = dir.replace(/[\\/]+$/, '')
   if (d === '' || d === '.') return name
-  return `${d}/${name}`
+  const sep = d.includes('\\') && !d.includes('/') ? '\\' : '/'
+  return `${d}${sep}${name}`
 }
 
 /**
@@ -591,7 +615,10 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
    * 现在：`info` 从名单里去掉（它不看谱面设置），其余三条**本轮真的接上了**（见 `effectiveConfig`）。
    */
   if (p.sets.length > 0 && !['settings', 'config', 'render', 'play', 'batch'].includes(p.command)) {
-    io.err('-s 只对 settings / config / render / play / batch 有意义（其它命令不看谱面设置；写回谱面属后续）')
+    io.err(
+      '-s 只对 settings / config / render / play / batch 有意义（**临时生效、不落盘**）。\n' +
+        '  想把设置**写进谱面**（跟着文件走）用：ijipu cli set -i <谱> k=v --in-place',
+    )
     return { code: EXIT.config }
   }
   /** `-s k=v` 的解析**只在这里做一次**（格式错就统一报退出码 5，各命令不必各写一遍） */
@@ -622,7 +649,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
    * ⚠ SVG 走引擎**估算**角标墨迹（Node 里没有 canvas 实测 ⇒ 与应用的实测版会有亚像素差异，
    *    这是"CLI 无 DOM"的必然取舍，已在 docs/CLI.md 写明口径）。
    */
-  const known = new Set(['format', 'lint', 'info', 'render', 'play', 'batch', 'settings', 'config', 'doctor', 'completions', 'register', 'unregister', 'status'])
+  const known = new Set(['format', 'lint', 'info', 'render', 'play', 'batch', 'settings', 'set', 'config', 'doctor', 'completions', 'register', 'unregister', 'status'])
   if (!known.has(p.command)) {
     io.err(`命令 “${p.command}” 尚未实现（用 --help 看已实现命令）`)
     return { code: EXIT.usage }
@@ -631,7 +658,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
   // ── completions（P4）：输出补全脚本（纯静态文本，零依赖）────
   if (p.command === 'completions') {
     const shell = (p.inputs[0] ?? p.type ?? 'bash').toLowerCase()
-    const COMMANDS = 'format lint info render play batch settings config doctor completions register unregister status'
+    const COMMANDS = 'format lint info render play batch settings set config doctor completions register unregister status'
     /**
      * adj947（用户实报：`--help` 的用法行漏了 `cli`）：这三行**注释提示本身就是"怎么敲"**，
      * 同样必须带 `cli` —— 否则用户照抄 `ijipu completions powershell` 会走进图形界面 ✗。
@@ -893,6 +920,188 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     return { code: EXIT.ok, json: payload }
   }
 
+  /**
+   * ── set（adj962，**用户需求**）：把设置**写进谱面**（源码里的 `# jps-config`）────────────
+   *
+   * 由来（用户原话）：「如果要为指定文件/目录（批量）添加一个设置项及设置值，如何操作？」
+   * —— 改之前 **做不到**：`-s k=v` 是**临时**覆盖（不落盘），`--config` 还没实现，
+   * 而引擎里其实早就有这个能力（`writeJpsConfig` + `mergeConfigEdits`，应用「保存设置」走的就是它）
+   * ⇒ 缺的只是 CLI 这一层接线。
+   *
+   * ## 三条口径（都不是新发明的，全是照抄既有的）
+   *
+   *  · **读=settings、写=set**（跟 `git config` 同一对）：`set` 只负责把 `k=v` 写进去。
+   *  · **落点三选一，与 `format` / `batch` 完全同口径**：不给落点 ⇒ 打到 **stdout**（不改文件）；
+   *    `--in-place` ⇒ 写回原文件；`-o <目录>` ⇒ 另存一份。目录输入**必须**给后两者之一
+   *    （多份源码没法都打到 stdout）。
+   *  · **差量写入**（`mergeConfigEdits` + `writeJpsConfig` 的 `diff` 模式）：只写"与现状不同"的项、
+   *    保留文件里已有的其它项、与默认值相同的项**不写进谱面**、更**不把本机偏好固化进去**。
+   *    ⚠ 绝不能直接 `writeJpsConfig(code, {…})` —— 那会把**整条设置行**换成只有我传的那几个键
+   *    （文件里原有的设置会被抹掉）✗；所以必须走 `mergeConfigEdits(code, before, after)`。
+   *
+   * 逐项输出带**文件名**（`adj960` 的口径）；汇总行不带（共同信息）。
+   */
+  if (p.command === 'set') {
+    /**
+     * 位置参数：`k=v` 是"要写的设置"，其余（至多一个）是**输入路径**。
+     * 于是两种写法都收：`set -i 我的谱.jps margin_right=33` 与 `set 我的谱.jps margin_right=33`。
+     */
+    const looksLikePair = (s: string): boolean => /^[A-Za-z_][A-Za-z0-9_]*=/.test(s)
+    const pairArgs = p.inputs.filter(looksLikePair)
+    const restArgs = p.inputs.filter((s) => !looksLikePair(s))
+    if (restArgs.length > 1) {
+      io.err(`set 只接受**一个**输入路径（多给了 ${restArgs.length - 1} 个）；要写多个设置项就写多组 k=v`)
+      return { code: EXIT.usage }
+    }
+    const setTarget = restArgs[0]
+    if (pairArgs.length === 0) {
+      io.err(
+        'set 需要至少一组 k=v（要写进谱面的设置），例如：\n' +
+          '  · ijipu cli set -i 我的谱.jps margin_right=33\n' +
+          '  · ijipu cli set -i 乐谱 -r --in-place margin_right=33 page=A4\n' +
+          '  · 只想"处理时按这个值来"、不写进文件：用 -s（如 render … -s margin_right=33）',
+      )
+      return { code: EXIT.usage }
+    }
+    const parsedSet = parseOverrides(pairArgs)
+    if (parsedSet.error !== undefined) {
+      io.err(parsedSet.error)
+      return { code: EXIT.config }
+    }
+    const setEdits = parsedSet.overrides
+    const badSetKeys = Object.keys(setEdits).filter((k) => !CONFIG_KEYS.includes(k))
+    if (badSetKeys.length > 0) {
+      io.err(
+        `set 里有未知设置项：${badSetKeys.join('、')}\n` +
+          `  可用键 ${CONFIG_KEYS.length} 个（config -i <谱> -t effective 可全量列出；可选字段：${OPTIONAL_CONFIG_FIELDS.join('、')}）`,
+      )
+      return { code: EXIT.config }
+    }
+
+    const setFromStdin = setTarget === undefined || setTarget === '-'
+    if (p.inPlace && setFromStdin) {
+      io.err('--in-place 需要文件输入（不能对 stdin 原地写）；要看结果就省略落点、打到 stdout')
+      return { code: EXIT.usage }
+    }
+    const setOutDir = p.output !== null && p.output !== '-' ? p.output : null
+    let setFiles: string[] = []
+    let setTargetIsDir = false
+    if (!setFromStdin) {
+      let expandedSet: { files: string[]; isDir: boolean }
+      try {
+        expandedSet = await expandInputs(String(setTarget), io, p.recursive, p.filter)
+      } catch (e) {
+        io.err(`读目录失败：${String(e)}`)
+        return { code: EXIT.noInput }
+      }
+      setTargetIsDir = expandedSet.isDir
+      setFiles = expandedSet.files
+    }
+    if (setTargetIsDir) {
+      if (setOutDir === null && !p.inPlace) {
+        io.err('目录输入必须给 --in-place（写回原文件）或 -o <目录>（另存一份）：多份源码不能都打到 stdout')
+        return { code: EXIT.usage }
+      }
+      if (setFiles.length === 0) {
+        io.err(`目录里没有 .jps：${String(setTarget)}${p.recursive ? '' : '（子目录里的谱要加 -r 才会被扫到）'}`)
+        return { code: EXIT.noInput }
+      }
+    }
+
+    /**
+     * 把一份源码按 `setEdits` 改好。**差量**：`mergeConfigEdits(code, before, after)` 只挑出
+     * "本次真的改了"的键并**并进文件原有的设置**里 ⇒ 文件里别的设置项一个都不会丢 ✓。
+     */
+    const applySet = (src: string): { next: string; changed: boolean } => {
+      const before = mergeJpsConfig(src, defaultPageConfig)
+      const after = { ...before, ...setEdits } as PageConfig
+      const next = writeJpsConfig(src, mergeConfigEdits(src, before, after))
+      return { next, changed: next !== src }
+    }
+
+    // ① 单文件 / stdin，且**没给落点** ⇒ 打到 stdout（与 `format` 一致：只读不改）
+    if (!setTargetIsDir && setOutDir === null && !p.inPlace) {
+      let src = ''
+      try {
+        src = setFromStdin ? await io.readStdin() : await io.readFile(String(setTarget))
+      } catch (e) {
+        io.err(`读输入失败：${String(e)}`)
+        return { code: EXIT.noInput }
+      }
+      const { next, changed } = applySet(src)
+      await writeOutput(null, next, io)
+      return {
+        code: EXIT.ok,
+        json: {
+          schema: 1,
+          generator: `ijipu ${version}`,
+          input: fileLabelOf(setTarget, setFromStdin),
+          changed,
+          keys: Object.keys(setEdits),
+        },
+      }
+    }
+
+    // ② 有落点（`--in-place` 或 `-o`）：单文件或目录，逐个处理
+    const targets = setTargetIsDir ? setFiles : [String(setTarget)]
+    let changedCount = 0
+    let unchangedCount = 0
+    const setFailed: string[] = []
+    const setRows: { input: string; output: string; changed: boolean }[] = []
+    for (const file of targets) {
+      let src = ''
+      try {
+        src = await io.readFile(file)
+      } catch (e) {
+        setFailed.push(`${file}（读失败：${String(e)}）`)
+        continue
+      }
+      const { next, changed } = applySet(src)
+      // adj962：用 `baseNameOf`（`\` 与 `/` 都算分隔符）—— 单文件输入的路径是用户原样给的
+      const name = baseNameOf(file)
+      const stem = name.replace(/\.jps$/i, '')
+      const outPath = p.inPlace ? file : joinPath(String(setOutDir), `${stem}.jps`)
+      try {
+        await io.writeFile(outPath, next)
+      } catch (e) {
+        setFailed.push(`${file}（写失败：${String(e)}）`)
+        continue
+      }
+      if (changed) changedCount += 1
+      else unchangedCount += 1
+      setRows.push({ input: file, output: outPath, changed })
+      if (!p.quiet && !wantJson) {
+        // 逐项信息**带文件名**（adj960 的口径）
+        line(
+          io,
+          p.inPlace
+            ? `${file} ${changed ? '已写回' : '未改动（设置值已与现状一致）'}`
+            : `${outPath} 已写入（来自 ${file}${changed ? '' : '，内容未变'}）`,
+        )
+      }
+    }
+    const setPayload = {
+      schema: 1,
+      generator: `ijipu ${version}`,
+      keys: Object.keys(setEdits),
+      ...(setTargetIsDir
+        ? { files: setRows, changed: changedCount, unchanged: unchangedCount, failed: setFailed }
+        : {
+            input: String(setTarget),
+            output: setRows[0]?.output ?? String(setTarget),
+            changed: setRows[0]?.changed ?? false,
+            ...(setFailed.length > 0 ? { failed: setFailed } : {}),
+          }),
+    }
+    if (wantJson) line(io, JSON.stringify(setPayload, null, 2))
+    else if (setTargetIsDir && !p.quiet) {
+      // 汇总行是**共同信息** ⇒ 不带文件名（adj960 的另一半）
+      line(io, `已处理 ${targets.length} 个文件：${changedCount} 个有改动、${unchangedCount} 个未改动`)
+    }
+    if (!wantJson) for (const f of setFailed) line(io, `  ✗ ${f}`)
+    return { code: setFailed.length === 0 ? EXIT.ok : EXIT.noInput, json: setPayload }
+  }
+
   if (p.command === 'render') {
     let src = ''
     try {
@@ -1102,7 +1311,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     const lintRows: LintRow[] = []
     const gh = p.format === 'gh'
     for (const file of files) {
-      const name = file.split('/').pop() ?? file
+      const name = baseNameOf(file)
       const stem = name.replace(/\.jps$/i, '')
       /**
        * 这个文件的产物写哪儿（adj961）：

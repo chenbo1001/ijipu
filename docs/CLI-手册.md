@@ -139,7 +139,8 @@ iJipu CLI 注册状态：已注册 ✓（终端里可以直接敲 ijipu）
 | `render` | 渲染导出：`-t svg` ｜ `-t midi` ｜ `-t png` `-t jpg` `-t pdf` | `-i` `-t` `-o` `--crop` `--pad` `--ink` |
 | `play` | 导出音频：`-t midi` ｜ `-t wav` | `-i` `-t` `-o` |
 | `batch` | 目录批量操作，**任务可逗号组合** | `--in` `-o` `-t lint,svg,midi,fmt` `-r` `--filter` |
-| `settings` | 查**某一个设置项**的值与来源 | `-i <谱>` `<键名>` `-s k=v` |
+| `settings` | 查**某一个设置项**的值与来源（**只读**） | `-i <谱>` `<键名>` `-s k=v` |
+| `set` | 把设置**写进谱面**（源码里的 `# jps-config`） | `-i <文件\|目录>` `k=v …` `--in-place` ｜ `-o <目录>` `-r` `--filter` |
 | `config` | 打印**生效设置全表**与每项来源 | `-i <谱>` `-t effective` `--quiet` `--json` |
 | `doctor` | 环境自检（如实报告各能力有没有） | `--json` |
 | `completions` | 输出 shell 补全脚本 | `bash` ｜ `zsh` ｜ `powershell` |
@@ -465,7 +466,9 @@ batch 不写 -o 时产物**就地**输出；而 `-t fmt` 就地就是**原地覆
 
 任务名写错（如 `-t lint,png`）直接报用法错误（退出码 1）。
 
-### 2.9 `settings` / `config`：设置项的值与来源
+### 2.9 `settings` / `config` / `set`：看设置、写设置
+
+前两条**只读**；第三条 `set` 会把设置**写进谱面**（源码里那行 `# jps-config`，跟着文件走）。
 
 ```text
 > ijipu cli settings -i samples\ershenbu.jps margin_right
@@ -505,6 +508,51 @@ settings 需要键名（位置参数），例如：settings -i <谱> margin_righ
 ```
 
 来源优先级：**命令行 `-s` > 源内 `# jps-config` > 代码默认**。
+
+**把设置写进谱面**（`set`）：`k=v` 直接跟在命令后面，写几组都行。不给落点就打到屏幕，**不改文件**：
+
+```text
+> ijipu cli set -i 我的谱.jps margin_right=33
+Q:1 2 3 4|
+
+
+
+# jps-config:{"margin_right":33}
+```
+
+⇒ 源码末尾多出那行 `# jps-config`。这样做出来的谱是**自包含**的：发给别人、或在别的机器上打开，
+效果都一样（这正是"设置写进谱面"而不是"只在本机生效"的意义）。
+
+要写回原文件就**显式**加 `--in-place`：
+
+```text
+> ijipu cli set -i 我的谱.jps margin_right=33 --in-place
+我的谱.jps 已写回
+```
+
+**整个目录批量**（落点与 `batch` 同一套口径；不给落点会报用法错误 —— 多份源码没法都打到屏幕上）：
+
+```text
+> ijipu cli set -i samples -o 输出目录 page=A5
+输出目录/ershenbu.jps 已写入（来自 samples/ershenbu.jps）
+输出目录/fanfu-tiaofangzi.jps 已写入（来自 samples/fanfu-tiaofangzi.jps）
+…
+已处理 7 个文件：7 个有改动、0 个未改动
+```
+
+想就地改整个目录就把 `-o 输出目录` 换成 `--in-place`；连子目录一起用 `-r`，按名字挑用 `--filter`。
+
+四条**差量写入**的口径（都有断言守着）：
+
+| 情形 | 结果 |
+| --- | --- |
+| 文件里已经有别的设置项 | **原样保留**（`set page=A5` 不会把原有的 `margin_right` 弄丢） |
+| 设的值正好等于**默认值** | 那一项**从设置行里去掉**（不写一堆等于默认值的键） |
+| 设的值与现状相同 | 文件**不动**，报"未改动" |
+| 本机偏好（在应用里改过、没写进谱面的） | **不会被固化**进谱面（不会"点一下就把我的偏好写进别人的谱"） |
+
+> **只想让这一次按某个值来、不写进文件**：那用 `-s`（见上一条），别用 `set`。
+> `set` 的值是**位置参数** `k=v`；`-s` 是"临时生效"那一路，两者不混用（`set` 上给 `-s` 会报退出码 5）。
 
 ### 2.10 `doctor` / `completions`
 

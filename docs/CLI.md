@@ -198,6 +198,7 @@ ijipu cli lint -i 我的谱.jps > out.txt # cmd 与 PowerShell 的 > 都写出�
 | `play` | 导出音频：**MIDI**（任意环境）／**WAV**（需桌面端通道） | `-i` `-t midi\|wav` `-o` |
 | `batch` | **目录批量操作**（任务**可逗号组合**：`lint` / `svg` / `midi` / `fmt`）；输出目录会自动创建 | `--in <目录>` `-o <目录>`（**纯 `-t lint` 可省**）`-t lint,svg,midi,fmt` `-r` `--filter` |
 | `settings` | 看**某一个设置项**的值与**来源**（位置参数 = 键名） | `-i <谱>` `<键名>` `-s k=v`（临时覆盖） |
+| `set` | 把设置**写进谱面**（源码里的 `# jps-config`）—— 与 `settings` 是"读 / 写"一对（`adj962`） | `-i <文件\|目录>` `k=v …`（位置参数，可多组）`--in-place` ｜ `-o <目录>` `-r` `--filter` `--json` |
 | `config` | 打印**生效设置全表 + 每项来源** | `-i <谱>` `-t effective` |
 | `doctor` | 环境自检（可设置项数量、各项能力是否可用） | `--json` |
 | `completions` | 输出 shell 补全脚本 | `completions bash\|zsh\|powershell` |
@@ -224,7 +225,7 @@ npm run cli -- doctor                                    # 能力自检：位图
 > `-s k=v` 可用于 `settings` / `config` / `render` / `play` / `batch`（**临时覆盖，不落盘** ✓）；
 > 把设置**写回谱面**（`# jps-config` 差量写入）属后续阶段 ✓。
 
-### 二之一、目录级批量：`lint -i <目录>` 与 `batch` 的组合任务（`adj956`）
+### 二之一、目录级批量：`lint -i <目录>` / `batch` 组合任务 / `set` 写设置（`adj956`/`adj961`/`adj962`）
 
 由来（**用户需求原话**）：「如果我要获取指定目录下的所有 jps 文件的 lint 情况，是需要借助 bat 文件
 来实现还是 batch 参数就可以实现？一些操作是否可以通过 batch 参数形成组合式的批量操作的效果？」
@@ -272,6 +273,40 @@ npm run cli -- doctor                                    # 能力自检：位图
   此前 `batch` 里另写了一份、而 `lint` 那份漏了文件名（同一件事两处实现，必然漂 ✗）。
   单文件输入**也带**（同一口径，混在一个日志里不会对不上号）；`-i .` 走出来的路径归一化掉 `./` 前缀。
   闸门：`cli-assert` 的 `adj960` 五条（目录 / 单文件 / `batch -t lint` 三处都要带 + 汇总行**不许**带 + 负对照）。
+
+#### 二之一·补、把设置**写进谱面**：`set`（`adj962`，**用户需求**）
+
+由来（用户原话）：「如果要为指定**文件/目录（批量）**添加一个设置项及设置值，如何操作？」
+改之前**做不到**：`-s k=v` 是**临时**覆盖（不落盘）、`--config` 还没实现；而引擎里早就有这个能力
+（`writeJpsConfig` + `mergeConfigEdits`，应用「保存设置」走的就是它）⇒ **缺的只是 CLI 这一层接线**。
+
+形态：**读 = `settings`、写 = `set`**（与 `git config` 同一对）。值用**位置参数** `k=v`（可多组），
+**不用 `-s`** —— `-s` 是"临时生效"那一路，两者混用会让"到底落不落盘"变得不可知（`set` 上给 `-s` ⇒ 退出码 5）。
+
+```text
+ijipu cli set -i 我的谱.jps margin_right=33                 # 打到 stdout（**不改文件**）
+ijipu cli set -i 我的谱.jps margin_right=33 --in-place      # 写回原文件
+ijipu cli set -i 乐谱 -r --filter "春*" page=A5 -o 输出目录   # 目录批量另存
+```
+
+四条口径（都不是新发明的，全部照抄既有实现）：
+
+| 口径 | 依据 |
+|---|---|
+| **落点三选一**：不给 ⇒ stdout；`--in-place` ⇒ 写回；`-o <目录>` ⇒ 另存 | 与 `format` / `batch` **同一套**（目录输入必须给后两者之一：多份源码没法都打到 stdout） |
+| **差量写入**：只写"与现状不同"的项、保留文件里已有的其它项 | `mergeConfigEdits(code, before, after)` —— ⚠ **绝不能**直接 `writeJpsConfig(code, {…})`，那会把**整条设置行**换成只有传进去的那几个键（文件里原有设置被抹掉 ✗） |
+| **与默认值相同的项不写进谱面** | `writeJpsConfig` 缺省 `mode:'diff'`：设回默认值 ⇒ 该项**从设置行去掉** |
+| **本机偏好不被固化** | 与 `mergeConfigEdits` 的设计意图一致（它当初就是为了修"点一次保存就把本机偏好写进谱面"） |
+
+逐项输出带**文件名**、汇总行不带（`adj960` 的口径）。
+
+**本轮自己实测抓到的真 bug（已修 + 已立闸门）**：`set` 的**单文件**输入路径是**用户原样给的**
+（Windows 上 `D:\我的谱\a.jps`），而我第一版用 `p.split('/').pop()` 取文件名 ⇒ `split` 切不开、
+**整条路径被当成文件名**，产物拼成 `<输出目录>\D:\我的谱\a.jps`、`mkdir` 直接 ENOENT（7 个文件全失败）。
+目录输入那条路因为路径来自 `expandInputs`（统一 `/`）而**掩盖**了它 ——
+现在统一走 `baseNameOf()`（`\` 与 `/` 都算分隔符），并有一条负对照钉着（`cli-assert` 的 `adj962`）。
+同批顺手把 `joinPath()` 改成"**沿用用户输入里那种斜杠**"（否则 `-i D:\我的谱 -o D:\输出` 会打出
+`D:\输出/x.jps` 这种半截混合形态）。
 
 ### P3：位图/音频为什么在独立 Node 里"报错"而不是"硬做"
 `png/jpg/pdf` 需要 **canvas + 字体 + 分页**，`wav` 需要 **AudioContext + 音色库** ——
