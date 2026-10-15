@@ -118,73 +118,87 @@ const line = (io: CliIo, text: string): void => {
   io.out(text.endsWith(NL) ? text : text + NL)
 }
 
+/**
+ * 帮助正文（`ijipu cli --help`）。
+ *
+ * ## 文案口径：正式、规范、优雅、简洁（用户 2026-10-14 定的官网同一条标准，`adj965m` 起同样管这里）
+ *
+ * **这是纯文本，会原样打到终端** ⇒ 里面不许出现 Markdown 强调（`**…**` 在终端里就是四个星号，
+ * 用户看到的是 `必须**恰好**是`）与表情/警示符号（`⚠` 同理）。强调靠语序与「」，不靠标记。
+ * 同一族毛病在官网修过一次（`adj948`：首页示例区字面 `**` 未渲染，`E-2026-432`）——
+ * 那次只修了网页，**命令行这边漏了**，直到用户点名。
+ *
+ * 另外两条硬约束（都有闸门，别凭手感改）：
+ *  · 用法行**逐字**是 `用法：ijipu cli [全局选项] <命令> [命令选项]`（`adj947`）；
+ *  · 行宽按**显示列**（中文算 2 列）不超过 120 —— 常见终端一屏读得完，不做水平滚动。
+ */
 const HELP = `iJipu 命令行（爱记谱）
 
 用法：ijipu cli [全局选项] <命令> [命令选项]
 
-⚠ 第一个参数必须**恰好**是 cli：命令行与图形界面是同一个 exe，靠它分流。
-  不带 cli 时（例如 ijipu 我的谱.jps、ijipu --help）会照旧**打开图形界面**，不执行命令。
-  注册 PATH 之后终端里的 ijipu 是控制台垫片 bin\\ijipu.cmd：它**原样转交**参数、不替你补 cli。
+第一个参数必须恰为 cli：命令行与图形界面是同一个可执行文件，据此分流。
+省略 cli（例如 ijipu 我的谱.jps、ijipu --help）会打开图形界面，不执行命令。
+注册 PATH 后，终端里的 ijipu 是控制台垫片 bin\\ijipu.cmd：它原样转交参数，不代为补齐 cli。
 
 命令：
-  format        -i <文件|-> [-o <文件|->] [--check] [--in-place] [--diff]     按应用规范规范化源码
-  lint          -i <文件|目录|-> [--format text|json|gh] [--watch]            语法检查（有错 ⇒ 退出码 3）
-                [-r] [--filter <通配>]                                      输入给**目录**时批量检查
-  info          -i <文件|-> [-t text|json]                                    谱面概况（行数/分组/问题数）
-  render        -i <文件|-> -t svg|midi|png|jpg|pdf -o <输出>                 渲染/导出
-                [--crop page|score] [--pad N] [--ink x,y,w,h]                画布范围（缺省 page = 整页）
-  play          -i <文件|-> -t midi|wav -o <输出>                             导出音频
-  batch         --in <目录> [-o <目录>] [-t lint,svg,midi,fmt]                目录批量操作
-                [-r] [--filter <通配>] [--in-place]                         任务可逗号组合；省略 -o ⇒ 产物写在各源文件旁
-  settings      -i <谱> <键名> [-s k=v]                                       看某个设置项的值与来源（**只读**）
-  set           -i <文件|目录|-> k=v [k=v …]                                  把设置**写进谱面**（源码里的 # jps-config）
-                [--in-place | -o <目录>] [-r] [--filter <通配>]               不给落点 ⇒ 打到 stdout（**不改文件**）
-  config        -i <谱> [-t effective] [--quiet]                              打印生效设置全表 + 每项来源
-  doctor        [--json]                                                      环境自检（如实报告能力有无）
-  completions   bash|zsh|powershell                                           输出 shell 补全脚本
-  register      [--json]                                                      把命令行入口目录（<安装目录>\\bin）注册进当前用户 PATH
-  unregister    [--json]                                                      从当前用户 PATH 里解除注册
-  status        [--json]                                                      看是否已注册（**读系统实况**）
+  format        -i <文件|-> [-o <文件|->] [--check] [--in-place] [--diff]   按应用规范规范化源码
+  lint          -i <文件|目录|-> [--format text|json|gh] [--watch]          语法检查（有错 ⇒ 退出码 3）
+                [-r] [--filter <通配>]                                    输入为目录时批量检查
+  info          -i <文件|-> [-t text|json]                                  谱面概况（行数 / 分组 / 问题数）
+  render        -i <文件|-> -t svg|midi|png|jpg|pdf -o <输出>               渲染导出
+                [--crop page|score] [--pad N] [--ink x,y,w,h]              画布范围（缺省 page = 整页）
+  play          -i <文件|-> -t midi|wav -o <输出>                           导出音频
+  batch         --in <目录> [-o <目录>] [-t lint,svg,midi,fmt]              目录批量操作
+                [-r] [--filter <通配>] [--in-place]                       任务可逗号组合；省略 -o ⇒ 产物写在各源文件旁
+  settings      -i <谱> <键名> [-s k=v]                                     查看设置项的值与来源（只读）
+  set           -i <文件|目录|-> k=v [k=v …]                                把设置写进谱面（源码里的 # jps-config）
+                [--in-place | -o <目录>] [-r] [--filter <通配>]             不给落点 ⇒ 打到 stdout（不写入文件）
+  config        -i <谱> [-t effective] [--quiet]                            打印生效设置全表与每项来源
+  doctor        [--json]                                                    环境自检（如实报告能力有无）
+  completions   bash|zsh|powershell                                         输出 shell 补全脚本
+  register      [--json]                                                    注册命令行入口目录到当前用户 PATH
+  unregister    [--json]                                                    从当前用户 PATH 解除注册
+  status        [--json]                                                    查看是否已注册（读系统实况）
 
-目录类选项（lint -i <目录> / batch / set 都是这一套）：
-  -r, --recursive           输入是目录时**连子目录一起**（缺省只看当前一层）
-  --filter <通配符>          只处理**文件名**匹配的（支持 * 与 ?，如 --filter "春*"）；
-                            输入是单个文件时它不生效（点名要那个文件，就没有再筛掉的道理）
-  --in-place                原地写回原文件（batch 里只对 -t fmt 有意义；与 -o 互斥）
+目录类选项（lint -i <目录>、batch、set 同此一套）：
+  -r, --recursive            输入为目录时连同子目录（缺省只看当前一层）
+  --filter <通配符>           只处理文件名匹配的项（支持 * 与 ?，如 --filter "春*"）；
+                             输入为单个文件时不生效（既已指名文件，无须再筛）
+  --in-place                 原地写回源文件（batch 中只对 -t fmt 有意义；与 -o 互斥）
 
-产物落点（三选一；batch / set / format 同一套口径，差别只是 -o 是"目录"还是"文件"）：
-  -o <目录|文件>            另存到那里（batch/set 是目录、format 是文件）
-  省略 -o                   产物写在**各源文件旁边**（-r 递归时也各贴各的；单文件 + format/set 时打到 stdout）
-  --in-place                原地覆盖源文件
-    · set：就是"把设置写进这份谱"的正常用法（必须显式写出来）
-    · batch -t fmt：就地覆盖是数据损坏级别的操作 ⇒ 不写就**拒绝**，写了才改
-  只有 batch 的纯 -t lint 真的不产出文件，所以那一种一定不需要 -o
-  ⚠ -o 与 --in-place 同时给 = 歧义（一个说"另存"、一个说"就地"）⇒ **报用法错误**（三处一致，不猜）
-  ⚠ format --check 是**只读**保证：同时给了 --in-place 也一个字节都不写
+产物落点（三选一；batch、set、format 同一套口径，差别仅在 -o 是目录还是文件）：
+  -o <目录|文件>             另存到该处（batch、set 为目录，format 为文件）
+  省略 -o                    产物写在各源文件旁（-r 递归时亦然；单文件加 format 或 set 时打到 stdout）
+  --in-place                 原地覆盖源文件
+    · set：把设置写进这份谱的常规写法，必须显式写出
+    · batch -t fmt：原地覆盖会改动源文件，不写 --in-place 即拒绝
+  仅 batch 的纯 -t lint 不产出文件，因此不需要 -o
+  -o 与 --in-place 同时给出即语义冲突（一为另存、一为就地）⇒ 报用法错误（三处判定一致）
+  format --check 为只读：即使同时给出 --in-place，也不写入任何字节
 
 全局选项：
-  -i, --input <文件|目录|-> 输入（- = stdin；省略时也读 stdin）；--in 是别名
-  -o, --output <文件|->     输出文件（- 或省略 = stdout）；batch 里是**输出目录**
-  -t, --type <类型>         输出类型（省略时按 -o 后缀推断；batch 里可逗号组合）
+  -i, --input <文件|目录|-> 输入（- 为 stdin；省略时也读 stdin）；--in 为别名
+  -o, --output <文件|->     输出文件（- 或省略为 stdout）；batch 中为输出目录
+  -t, --type <类型>         输出类型（省略时按 -o 后缀推断；batch 中可用逗号组合）
   --json                    机器可读输出（带 schema 版本）
   --quiet                   不输出非必要信息
-  --deterministic           输出不含时间戳（CI 逐字节比对用）
-  -s <k=v>                  临时设置（可重复；优先级最高，**不落盘**）
-                            接受于 settings / config / render / play / batch；键名写错 ⇒ 退出码 5
-  --config <文件>           CLI 配置文件（**尚未实现**；给了 ⇒ 退出码 5）
+  --deterministic           输出不含时间戳（供 CI 逐字节比对）
+  -s <k=v>                  临时设置（可重复；优先级最高，不落盘）
+                            适用于 settings、config、render、play、batch；键名有误 ⇒ 退出码 5
+  --config <文件>           CLI 配置文件（尚未实现；给出即退出码 5）
   -h, --help                帮助
   -v, --version             版本
 
-需要桌面端能力的两类输出：render -t png|jpg|pdf（canvas/字体/分页）、play -t wav（AudioContext + 音色库）。
-  有宿主能力 ⇒ 正常产出；没有（独立 Node 环境）⇒ **退出码 4 + 原因** 并给出替代（-t svg / -t midi），
-  不产出半成品、不假装成功。
+需要桌面端能力的两类输出：render -t png|jpg|pdf（画布、字体、分页）与 play -t wav（音频上下文、音色库）。
+  具备宿主能力时正常产出；不具备时（独立 Node 环境）退出码 4 并说明原因，同时给出替代方案
+  （-t svg 或 -t midi）；不产出半成品，也不报成功。
 
-注册类命令（register / unregister / status）**只在内嵌版可用**（ijipu.exe cli register）：
-  它要读写当前用户的 PATH / App Paths，这个能力由桌面端注入；独立 Node 环境 ⇒ 退出码 6 + 原因。
-  注册写进 PATH 的是**命令行入口目录 <安装目录>\\bin**（里面有控制台垫片 ijipu.cmd）——
-  ijipu.exe 是 GUI 子系统程序，cmd 不等它（提示符会夹在输出中间、退出码也拿不到）；
-  cmd **会等批处理文件** ⇒ 垫片把输出顺序/退出码/重定向一次性修好，而双击 .jps 照旧不闪黑框。
-  注册后**要新开一个终端**才生效（已开着的终端看不到新 PATH）；只对**当前用户**生效、不需要管理员。
+注册类命令（register、unregister、status）仅内嵌版可用（ijipu.exe cli register）：
+  这三条需要读写当前用户的 PATH 与 App Paths，该能力由桌面端注入；无该能力时退出码 6 并说明原因。
+  写入 PATH 的是命令行入口目录 <安装目录>\\bin（内含控制台垫片 ijipu.cmd）：
+  ijipu.exe 是图形界面子系统程序，cmd 不等待它（提示符会夹在输出中间，退出码也取不到）；
+  cmd 会等待批处理文件，因此垫片使输出顺序、退出码与重定向均为正常，而双击 .jps 仍不闪窗口。
+  注册后要新开一个终端才生效（已打开的终端读不到新 PATH）；仅对当前用户生效，不需要管理员权限。
 
 退出码：0 成功 ｜ 1 用法错误 ｜ 2 输入不存在 ｜ 3 语法错误 ｜ 4 渲染失败 ｜ 5 设置非法 ｜ 6 环境能力缺失
 `
@@ -618,8 +632,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
    */
   if (p.sets.length > 0 && !['settings', 'config', 'render', 'play', 'batch'].includes(p.command)) {
     io.err(
-      '-s 只对 settings / config / render / play / batch 有意义（**临时生效、不落盘**）。\n' +
-        '  想把设置**写进谱面**（跟着文件走）用：ijipu cli set -i <谱> k=v --in-place',
+      '-s 只对 settings / config / render / play / batch 有意义（临时生效，不落盘）。\n' +
+        '  要把设置写进谱面（跟着文件走）用：ijipu cli set -i <谱> k=v --in-place',
     )
     return { code: EXIT.config }
   }
@@ -722,7 +736,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     const host = io.pathHost
     if (host === undefined) {
       io.err(
-        `“${p.command}”需要读写当前用户的 PATH/注册表，这个能力由**桌面端**注入（内嵌 CLI）。\n` +
+        `“${p.command}”需要读写当前用户的 PATH 或注册表，这个能力由桌面端注入（内嵌 CLI）。\n` +
           `  请改用：ijipu.exe cli ${p.command}（独立 Node 环境没有该能力 ⇒ 退出码 6）`,
       )
       return { code: EXIT.env }
@@ -748,14 +762,14 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
         if (st.legacy) {
           line(
             io,
-            '  ⚠ PATH 里还有**旧的注册形态**（安装目录本身，adj944 的口径）—— 它会跟垫片抢 ijipu，' +
+            '  注意：PATH 里还有旧的注册形态（安装目录本身）—— 它会跟垫片抢 ijipu，' +
               '跑一次 `ijipu cli register` 会自动把它换成命令行入口目录 ✓',
           )
         }
         line(io, `  当前用户 PATH：${st.pathLength} / ${PATH_MAX_CHARS} 字符`)
         line(io, `  App Paths：${st.appPaths ?? '（未注册）'}`)
         if (!st.registered) {
-          line(io, '  注册：ijipu cli register（注册后**新开一个终端**才生效；只对当前用户生效、不需要管理员）')
+          line(io, '  注册：ijipu cli register（注册后要新开一个终端才生效；只对当前用户生效、不需要管理员）')
         }
       }
       return { code: EXIT.ok, json: payload }
@@ -764,7 +778,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     if (!action.ok) {
       if (action.error.kind === 'too-long') {
         io.err(
-          `注册后当前用户 PATH 会有 ${action.error.length} 字符，超过上限 ${action.error.limit} ⇒ **未写入**（PATH 一个字都没改）。\n` +
+          `注册后当前用户 PATH 会有 ${action.error.length} 字符，超过上限 ${action.error.limit} ⇒ 未写入（PATH 一个字都没改）。\n` +
             '  建议：① 先在「系统属性 → 环境变量」里删掉 PATH 中已经不存在的目录（反复装卸的软件常留一堆）；\n' +
             '        ② 或把 iJipu 装到更短的路径（例如 C:\\iJipu）后再注册；\n' +
             '        ③ 也可以不动 PATH，直接用完整路径调用：<安装目录>\\bin\\ijipu.cmd cli lint 我的谱.jps\n' +
@@ -796,19 +810,19 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
         io,
         `${action.changed ? '已注册 ✓ 命令行入口目录已加入当前用户 PATH' : '已是注册状态 ✓（PATH 里本来就有这一条，未重复写入）'}：${st.binDir}`,
       )
-      line(io, '  · 请**新开一个终端**，之后就能直接敲：ijipu cli lint 我的谱.jps')
+      line(io, '  · 请新开一个终端，之后就能直接敲：ijipu cli lint 我的谱.jps')
       line(io, '  · 只对当前用户生效，不需要管理员权限')
       line(
         io,
-        '  · 这一条是**命令行入口目录**（里面有控制台垫片 ijipu.cmd）：输出顺序、退出码、重定向都正常 ✓，' +
-          '双击 .jps 照旧打开界面、不闪黑框',
+        '  · 这一条是命令行入口目录（里面有控制台垫片 ijipu.cmd）：输出顺序、退出码、重定向都正常 ✓，' +
+          '双击 .jps 仍打开界面、不闪窗口',
       )
     } else {
       line(
         io,
         `${action.changed ? '已解除 ✓ 已从当前用户 PATH 里摘掉' : '本就未注册 ✓（PATH 里没有这一条，未改动 PATH）'}：${st.binDir}`,
       )
-      line(io, '  · 其余 PATH 条目**逐字未动**；新开的终端里就不再能直接敲 ijipu 了')
+      line(io, '  · 其余 PATH 条目逐字未动；新开的终端里就不再能直接敲 ijipu 了')
       if (st.legacy) {
         line(io, `  · 旧形态（安装目录本身）也一并摘掉了：${st.installDir}`)
       }
@@ -952,7 +966,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     const pairArgs = p.inputs.filter(looksLikePair)
     const restArgs = p.inputs.filter((s) => !looksLikePair(s))
     if (restArgs.length > 1) {
-      io.err(`set 只接受**一个**输入路径（多给了 ${restArgs.length - 1} 个）；要写多个设置项就写多组 k=v`)
+      io.err(`set 只接受一个输入路径（多给了 ${restArgs.length - 1} 个）；要写多个设置项就写多组 k=v`)
       return { code: EXIT.usage }
     }
     const setTarget = restArgs[0]
@@ -1286,7 +1300,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     const inPlaceOut = !hasOutDir
     if (writesFiles && inPlaceOut && kinds.includes('fmt') && !p.inPlace) {
       io.err(
-        'batch 不写 -o 时产物**就地**输出；而 `-t fmt` 就地就是**原地覆盖源文件** ⇒ 要显式确认：\n' +
+        'batch 不写 -o 时产物就地输出；而 `-t fmt` 就地就是原地覆盖源文件 ⇒ 要显式确认：\n' +
           '  · 确实要覆盖源文件：ijipu cli batch --in <目录> -t fmt --in-place\n' +
           '  · 想另存一份：      ijipu cli batch --in <目录> -t fmt -o <输出目录>\n' +
           '  · 只想先看看：      ijipu cli batch --in <目录> -t lint',

@@ -20,10 +20,10 @@
 ```text
 > ijipu.exe cli register
 已注册 ✓ 命令行入口目录已加入当前用户 PATH：C:\Users\<你>\AppData\Local\iJipu\bin
-  · 请**新开一个终端**，之后就能直接敲：ijipu cli lint 我的谱.jps
+  · 请新开一个终端，之后就能直接敲：ijipu cli lint 我的谱.jps
   · 只对当前用户生效，不需要管理员权限
-  · 这一条是**命令行入口目录**（里面有控制台垫片 ijipu.cmd）：输出顺序、退出码、重定向都正常 ✓，
-    双击 .jps 照旧打开界面、不闪黑框
+  · 这一条是命令行入口目录（里面有控制台垫片 ijipu.cmd）：输出顺序、退出码、重定向都正常 ✓，
+    双击 .jps 仍打开界面、不闪窗口
 ```
 
 写进 PATH 的是**命令行入口目录** `<安装目录>\bin`（`ijipu.exe` 本体**不进 PATH**），
@@ -462,7 +462,7 @@ WAV 需要采样合成（音色库 + AudioContext），当前环境没有该能�
 
 ```text
 > ijipu cli batch --in samples -t fmt
-batch 不写 -o 时产物**就地**输出；而 `-t fmt` 就地就是**原地覆盖源文件** ⇒ 要显式确认：
+batch 不写 -o 时产物就地输出；而 `-t fmt` 就地就是原地覆盖源文件 ⇒ 要显式确认：
   · 确实要覆盖源文件：ijipu cli batch --in <目录> -t fmt --in-place
   · 想另存一份：      ijipu cli batch --in <目录> -t fmt -o <输出目录>
   · 只想先看看：      ijipu cli batch --in <目录> -t lint
@@ -621,7 +621,7 @@ completions 支持 bash | zsh | powershell（收到 “foo”）
 ```text
 > ijipu cli unregister
 已解除 ✓ 已从当前用户 PATH 里摘掉：C:\Users\<你>\AppData\Local\iJipu\bin
-  · 其余 PATH 条目**逐字未动**；新开的终端里就不再能直接敲 ijipu 了
+  · 其余 PATH 条目逐字未动；新开的终端里就不再能直接敲 ijipu 了
 ```
 
 ```text
@@ -631,7 +631,7 @@ iJipu CLI 注册状态：未注册 ✗（终端里还敲不了 ijipu）
   命令行入口目录（写进 PATH 的就是它）：C:\Users\<你>\AppData\Local\iJipu\bin
   当前用户 PATH：450 / 2047 字符
   App Paths：（未注册）
-  注册：ijipu cli register（注册后**新开一个终端**才生效；只对当前用户生效、不需要管理员）
+  注册：ijipu cli register（注册后要新开一个终端才生效；只对当前用户生效、不需要管理员）
 ```
 
 三个命令都是**幂等**的：重复跑不会把 PATH 写坏。当前用户 PATH 超过 **2047 字符**时**不写**，

@@ -1093,6 +1093,114 @@ console.log('\n— 命令行（A·P1–P4）—')
 }
 
 /**
+ * ⑫ adj965m（用户 2026-10-15 要求）：「**cli 的 `--help` 也要遵循文案的信雅达**」——
+ * 即与官网同一条标准（`adj948`：正式、规范、优雅、简洁），而命令行还多一条更硬的约束：
+ * `--help` 与各条提示都是**纯文本**，里面的 Markdown 强调（`**…**`）与警示符号（`⚠`）
+ * 会**原样打到终端**（用户看到的是 `必须**恰好**是`）。
+ *
+ * 实测（改之前）：`--help` 输出里 **46 个 `**`、3 个 `⚠`**，最宽一行 **131 显示列**
+ * （常见 120 列终端会折行）。同一族毛病官网修过一次（`adj948` 首页字面 `**`，`E-2026-432`），
+ * 那次只修了网页，**命令行这边漏了**。
+ *
+ * 四条判据，每条都配负对照（表刻意**窄**：只抓"真的会被用户看见"的两类标记，不做宽泛的风格扫描）：
+ *  ① 源码里**非注释行**（＝会被打印的字符串）没有 `**` / 警示符号；
+ *  ② 真跑 `--help`：输出同样干净，且每行**显示列**（中文算 2 列）≤ 120；
+ *  ③ 关键信息点逐项仍在（重写不许把信息删掉）；
+ *  ④ 帮助里不出现内部编号（`adjNNN` / `E-2026-NNN`）—— 那是维护者口径，不该出现在用户眼前。
+ */
+{
+  const cliSource = readFileSync('packages/ijipu-cli/src/cli.ts', 'utf8')
+  /** 警示符号（窄表：只列终端里最扎眼的几个；`✓ ✗ ⇒ ｜ ·` 是命令行既有惯例，不在表内） */
+  const WARN_MARKS = ['⚠', '❗', '❕', '🚧', '🔥']
+  const markHits = (text: string): string[] => {
+    const out: string[] = []
+    if (text.includes('**')) out.push('**')
+    for (const w of WARN_MARKS) if (text.includes(w)) out.push(w)
+    return out
+  }
+  /** 会被打印的源码行＝去掉注释行（以 `*` / `//` / `/*` 开头）；注释里写 `**` 是给维护者看的，不算 */
+  const printable = (src: string): string =>
+    src
+      .split('\n')
+      .filter((l) => {
+        const t = l.trim()
+        return !(t.startsWith('*') || t.startsWith('//') || t.startsWith('/*'))
+      })
+      .join('\n')
+  check(
+    'adj965m ① cli.ts 的**可打印字符串**里没有 Markdown 强调与警示符号（`**` 在终端里就是星号）',
+    markHits(printable(cliSource)).length === 0,
+    `命中：${markHits(printable(cliSource)).join(' ')}`,
+  )
+  check(
+    'adj965m ① **负对照**：往一行可打印字符串里塞 `**` 与 `⚠` ⇒ 判据判红（不是恒绿）',
+    markHits(printable(`${cliSource}\nconst x = '**加粗** ⚠ 注意'\n`)).length >= 2,
+  )
+
+  const ioM = makeIo({})
+  await runCli(['--help'], ioM.io, { version: '9.9.9' })
+  const helpText = String(ioM.logs.join(''))
+  /** 终端显示宽度：CJK/全角算 2 列（否则"字符数不长"的行其实会折行） */
+  const displayWidth = (line: string): number =>
+    [...line].reduce((a, c) => a + (/[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE6F\uFF00-\uFF60\uFFE0-\uFFE6]/.test(c) ? 2 : 1), 0)
+  const widest = (text: string): number => Math.max(0, ...text.split('\n').map(displayWidth))
+  check(
+    'adj965m ② 真跑 `--help`：输出里没有 `**`/警示符号，且最宽一行 ≤ 120 显示列（常见终端不折行）',
+    markHits(helpText).length === 0 && widest(helpText) <= 120,
+    `命中：${markHits(helpText).join(' ')}；最宽 ${widest(helpText)} 列`,
+  )
+  check(
+    'adj965m ② **负对照**：往帮助里插 `**` / 追加一行 130 列的长文本 ⇒ 标记与行宽两条分别判红',
+    markHits(`${helpText}\n**放不下**\n`).length === 1 && widest(`${helpText}\n${'x'.repeat(130)}\n`) > 120,
+  )
+
+  /**
+   * ③ 关键信息点：重写文案**不许把信息删掉**（`adj948` 的先例也是"信息一条未删"）。
+   * 清单只放"删了会让用户少知道一件事"的点：用法行、各段标题、退出码全表、入口目录、几个不易察觉的选项。
+   */
+  const KEY_FACTS = [
+    '用法：ijipu cli [全局选项] <命令> [命令选项]',
+    '命令：',
+    '目录类选项',
+    '产物落点',
+    '全局选项：',
+    '退出码：0 成功 ｜ 1 用法错误 ｜ 2 输入不存在 ｜ 3 语法错误 ｜ 4 渲染失败 ｜ 5 设置非法 ｜ 6 环境能力缺失',
+    '<安装目录>\\bin',
+    '--deterministic',
+    '--filter',
+    'completions',
+    'register',
+    'status',
+  ]
+  const missingFacts = (text: string): string[] => KEY_FACTS.filter((f) => !text.includes(f))
+  check(
+    `adj965m ③ 重写后**关键信息一条不丢**（${KEY_FACTS.length} 项：用法行 / 各段标题 / 退出码全表 / 入口目录 / 若干选项与命令）`,
+    missingFacts(helpText).length === 0,
+    `缺：${missingFacts(helpText).join(' / ')}`,
+  )
+  const cut = helpText
+    .replace('目录类选项', '')
+    .replace('退出码：0 成功', '')
+    .replace('<安装目录>\\bin', '')
+    .replace('--deterministic', '')
+  check(
+    'adj965m ③ **负对照**：四类各删一项（段标题 / 退出码 / 入口目录 / 选项）⇒ 判据**逐项**判红（缺 4 项）',
+    missingFacts(cut).length === 4,
+    `实际缺 ${missingFacts(cut).length} 项`,
+  )
+  const internalTags = (text: string): string[] => text.match(/\badj\d+[a-z]?\b|E-2026-\d+/g) ?? []
+  check(
+    'adj965m ④ 帮助里不出现内部编号（`adjNNN` / `E-2026-NNN`）—— 那是维护者口径，不该出现在用户眼前',
+    internalTags(helpText).length === 0,
+    `命中：${internalTags(helpText).join(' ')}`,
+  )
+  check(
+    'adj965m ④ **负对照**：塞一个 `adj965m` 与一个 `E-2026-445` 进去 ⇒ 判据判红',
+    internalTags(`${helpText}\nadj965m E-2026-445\n`).length === 2,
+  )
+}
+
+/**
  * ⑨ adj949（**用户追加要求**：「示例应该通过即时预览生成」「手册里的每条示例输出都必须是真跑得到的」）：
  *
  * 手册 `docs/CLI-手册.md` 里的每一段输出，都**现跑一遍**再比对 —— 判据是双向的：
@@ -1166,7 +1274,13 @@ console.log('\n— 命令行（A·P1–P4）—')
     {
       what: 'batch -t fmt 省略 -o ⇒ 拒绝（要 --in-place 才肯就地）',
       argv: ['batch', '--in', 'samples', '-t', 'fmt'],
-      lines: ['batch 不写 -o 时产物**就地**输出；而 `-t fmt` 就地就是**原地覆盖源文件** ⇒ 要显式确认：'],
+      /**
+       * adj965m（**文案规范化**：用户要求命令行的 `--help` 与输出也按官网同一条标准「正式、规范、
+       * 优雅、简洁」）：这条断言的期望文本原来带 Markdown 强调（`**就地**`）—— 那是**会原样打到终端**的
+       * 星号，已随 `cli.ts` 一并去掉。**口径变更**（不是放宽：判据仍逐字相等，只是对上了新文案），
+       * 同一处文本的引用在 `docs/CLI-手册.md` 也同步改掉了（`adj949` 逐行核着手册）。
+       */
+      lines: ['batch 不写 -o 时产物就地输出；而 `-t fmt` 就地就是原地覆盖源文件 ⇒ 要显式确认：'],
       code: EXIT.usage,
     },
     {
