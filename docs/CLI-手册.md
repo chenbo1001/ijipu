@@ -3,7 +3,7 @@
 > 这份文件只讲**怎么用**：怎么注册、怎么确认注册好了、每个命令有哪些参数、输出长什么样。
 > 命令行的维护与设计说明在 `docs/CLI.md`（面向改代码的人）——两份分工不同。
 >
-> - 适用版本：**iJipu 0.61.0**
+> - 适用版本：**iJipu 0.62.0**
 > - 许可：**AGPL-3.0** ｜ 源码与问题反馈：<https://github.com/snailhome/ijipu>
 > - 装完 iJipu 就有命令行：**不需要另外装 Node，也不需要联网**。
 > - 一共 **13 个命令**。下面每条示例都是**实跑输出**：`>` 开头的是敲的命令，紧跟其后的是真实输出
@@ -62,7 +62,7 @@
 
 ```text
 > ijipu cli --version
-iJipu 0.61.0
+iJipu 0.62.0
 ```
 
 ```text
@@ -233,7 +233,7 @@ Q: 1"注释没闭合 2 3 4 |
 > ijipu cli lint -i 错谱.jps --json
 {
   "schema": 1,
-  "generator": "ijipu 0.61.0",
+  "generator": "ijipu 0.62.0",
   "input": "错谱.jps",
   "ok": false,
   …
@@ -247,7 +247,7 @@ Q: 1"注释没闭合 2 3 4 |
 > ijipu cli lint -i samples -r --json
 {
   "schema": 1,
-  "generator": "ijipu 0.61.0",
+  "generator": "ijipu 0.62.0",
   "files": [
 ```
 
@@ -348,7 +348,7 @@ Q: 1 2 3 4 |
 > ijipu cli info -i samples\ershenbu.jps --json
 {
   "schema": 1,
-  "generator": "ijipu 0.61.0",
+  "generator": "ijipu 0.62.0",
   …
   "groups": 3,
 ```
@@ -584,7 +584,7 @@ iJipu CLI doctor
 > ijipu cli doctor --json
 {
   "schema": 1,
-  "generator": "ijipu 0.61.0",
+  "generator": "ijipu 0.62.0",
   "capabilities": {
     "svg": true,
     "midi": true,
@@ -730,7 +730,7 @@ iJipu CLI 注册状态：未注册 ✗（终端里还敲不了 ijipu）
 
 ## 五、许可与源码
 
-iJipu（爱记谱）0.61.0 以 **GNU Affero General Public License v3.0（AGPL-3.0）** 发布，
+iJipu（爱记谱）0.62.0 以 **GNU Affero General Public License v3.0（AGPL-3.0）** 发布，
 全文随安装目录放在 `LICENSE`；第三方组件与音色库的许可见安装目录的 `THIRD-PARTY.md`。
 
 - 源码：<https://github.com/snailhome/ijipu>
