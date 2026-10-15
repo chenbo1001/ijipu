@@ -253,7 +253,7 @@ resolveAsset(raw: string, base: AssetBase): Promise<{ href, w, h } | { error }>
 | **EP-11** | `obsidian-ijipu/` | ① ✅ `vendor/engine` 已同步；② `scorePane.measureContentBox` 排除 `[data-overlay]`(:2226)；③ `DEFS` + `README` 补行（**EP-12 之后闸门会强制**）；④ 重生成嵌入产物（`npm run build:embed && node scripts/embed-emit.mjs`，闸门 `adj733`） | 插件 `npm run smoke` 全绿（现已 766 ✓） |
 | **EP-12** ✅ | `PageConfigDialog.tsx` + `index.css` | 两个页签 + 5 处登记 + `.pcfg-text`；顺手修两条闸门探针（写死块名的解析器 / 只查 `cfgSrc` 的图例探针） | 已完成（`1dcc03b`）+ `verify-app-ui` 真点 3 条 |
 | **EP-13** | `PreviewPane.tsx`、`ui/dragGesture.ts`、`brand/shortcuts.ts` | 排版模式下的滚轮/拖动 + 4px 阈值 + 松手写盘（§六） | **`npm run verify:app-ui`**：滚轮/拖动真的改了配置；**非排版模式下 Ctrl+单击仍能试听**（负向判据） |
-| **EP-14** | `workspace.ts`、`packages/ijipu-cli/src/*` | 网页版 FSA 二进制读；CLI `CliIo.readBinary` + 读不到就跳过并说明 + `--no-assets` | CLI 出图带背景（Node 可读时）；读不到时 stderr 有明确一行 |
+| **EP-14** | `workspace.ts`、`packages/ijipu-cli/src/*` | ① ✅ **网页版 FSA 读图已接**（`store/assetReaderFsa.ts`：工作区目录句柄逐级下钻 → 字节；未授权与"图不在"分开报；冒烟用假句柄 3 条断言）；② CLI `CliIo.readBinary` + 读不到就跳过并说明 + `--no-assets` | CLI 出图带背景（Node 可读时）；读不到时 stderr 有明确一行 |
 
 ## 八、优化清单（10 条，**用户已采纳**）
 

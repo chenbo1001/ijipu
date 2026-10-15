@@ -124,7 +124,18 @@ void (async () => {
   {
     const { installAssetReader, installAssetDecoder } = await import('./store/overlayAssets')
     const { isHostEmbedded } = await import('./store/hostBridge')
-    installAssetReader(bridge !== null || isHostEmbedded() ? null : undefined)
+    const { isTauriShell } = await import('./brand/env')
+    if (bridge !== null || isHostEmbedded()) {
+      // 嵌入版（Obsidian）：走宿主桥那条（EP-09）；桥没接上之前**明确不装** ⇒ 上层给"不支持"提示
+      installAssetReader(null)
+    } else if (isTauriShell()) {
+      // 桌面端：Rust 的 `read_asset_file`（绝对路径）/ `ws_read_binary`（工作区相对路径）
+      installAssetReader()
+    } else {
+      // **网页版：工作区目录句柄**（EP-14）——没有它，`npm run dev` 里图片永远不显示
+      const { fsaAssetReader } = await import('./store/assetReaderFsa')
+      installAssetReader(fsaAssetReader)
+    }
     installAssetDecoder()
   }
   const { default: App } = await import('./App.tsx')

@@ -13092,6 +13092,63 @@ async function runAdj965AssetSourceTests() {
   clearAssetCache()
 
   /**
+   * EP-14（前半）：**网页版读图通道**（`assetReaderFsa`）。
+   *
+   * 用**假目录句柄**直接断言（本文件零 DOM ⇒ 在 Node 里可跑）：
+   * ① 从"本谱所在目录"下钻、并进图片自己的子目录；② 只认工作区基准；
+   * ③ 未授权（`NotAllowedError`）要说清"去授权"，**不能**误报成"图不在"。
+   */
+  {
+    const { fsaAssetReader } = await import('../src/store/assetReaderFsa.ts')
+    /** 假"文件"：只要 `getFile()` 能给出 `arrayBuffer`/`type`/`lastModified` */
+    const mkFile = (bytes: number[], type = 'image/png', lastModified = 7) => ({
+      getFile: async () => ({ arrayBuffer: async () => new Uint8Array(bytes).buffer, type, lastModified }),
+    })
+    /** 假"目录"：按名字给出子目录或文件，找不到就抛 `NotFoundError`（与真句柄同款错误名） */
+    const mkDir = (children: Record<string, unknown>) => ({
+      getDirectoryHandle: async (n: string) => {
+        const c = children[n]
+        if (c === undefined) throw Object.assign(new Error('不在'), { name: 'NotFoundError' })
+        return c
+      },
+      getFileHandle: async (n: string) => {
+        const c = children[n]
+        if (c === undefined) throw Object.assign(new Error('不在'), { name: 'NotFoundError' })
+        return c
+      },
+    })
+    // 工作区根 → 乐谱/（本谱所在目录）→ img/图.png
+    const root = mkDir({ 乐谱: mkDir({ img: mkDir({ '图.png': mkFile([1, 2, 3]) }), '谱.jps': mkFile([9]) }) })
+    const rec = { id: 'w', name: 'ws', handle: root, path: [] } as never
+    const got = await fsaAssetReader('img/图.png', { kind: 'workspace', rec, segs: ['乐谱', '谱.jps'] })
+    check(
+      'adj965 EP-14 网页版读图：从工作区句柄逐级下钻（本谱目录 → 图片子目录）并读出字节与 mtime',
+      got !== null && got.bytes.byteLength === 3 && got.bytes[0] === 1 && got.mime === 'image/png' && got.mtime === 7,
+      JSON.stringify(got === null ? null : { n: got.bytes.byteLength, mime: got.mime }),
+    )
+    check(
+      'adj965 EP-14 网页版读图只认工作区基准（桌面端绝对路径那条不归它管 ⇒ 返回 null 让上层给提示）',
+      (await fsaAssetReader('a.png', { kind: 'native', dir: 'C:/x' })) === null &&
+        (await fsaAssetReader('a.png', { kind: 'none' })) === null,
+      '',
+    )
+    // 未授权：必须与"图不在"分开说 —— 两者用户要做的事完全不同
+    const denied = { getDirectoryHandle: async () => { throw Object.assign(new Error('未授权'), { name: 'NotAllowedError' }) }, getFileHandle: async () => { throw new Error('x') } }
+    let deniedMsg = ''
+    try {
+      // ⚠ 必须让读取**先下钻目录**才会碰到未授权（`segs` 要带上谱所在的那层目录）
+      await fsaAssetReader('a.png', { kind: 'workspace', rec: { id: 'w', name: 'ws', handle: denied, path: [] } as never, segs: ['乐谱', '谱.jps'] })
+    } catch (e) {
+      deniedMsg = e instanceof Error ? e.message : String(e)
+    }
+    check(
+      'adj965 EP-14 未授权与"图不在"**分开报**：`NotAllowedError` ⇒ 提示去重新授权（不误报成找不到图）',
+      deniedMsg.includes('重新授权'),
+      deniedMsg,
+    )
+  }
+
+  /**
    * EP-10 接线（源码级）：**三处渲染点都必须走 `withOverlay`**。
    *
    * 为什么这条必须有：水印/背景是"页面级底图"，预览与导出/打印各渲一遍 ⇒ 只要有一处忘了包，
