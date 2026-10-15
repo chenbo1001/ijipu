@@ -39,7 +39,7 @@ import { useNumberScrub, useHoldRepeat } from '../ui/numberScrubGesture'
 // adj526：谱面数值字段的 [min,max] 单一来源（逐项引用引擎 GUIDE_LIMITS / GUIDE_LIMITS_EX）
 import { PAGE_NUM_RANGES as RANGE, coarseFor } from '../ui/numFieldRanges'
 
-type TabId = 'global' | 'theme' | 'soundbank' | 'cli' | 'score' | 'font'
+type TabId = 'global' | 'theme' | 'soundbank' | 'cli' | 'score' | 'font' | 'watermark' | 'background'
 
 /**
  * adj603（用户要求）：设置**拆成两个底栏页签**——
@@ -63,12 +63,16 @@ const ALL_TABS: { id: TabId; label: string; icon: string; section: SettingsSecti
   // adj418：原「页面 / 音符布局 / 间距 / 连音线」四个标签合并为「布局」（都是"这份谱长什么样"）
   { id: 'score', label: '布局', icon: '▤', section: 'score' },
   { id: 'font', label: '字体', icon: 'Aa', section: 'score' },
+  // adj965（用户需求，方案 docs/OVERLAY-PLAN.md「OVL」）：水印层与背景层各占一个子页签。
+  // 都是"这份谱长什么样" ⇒ L2、随谱走（与「布局/字体」同一半）。
+  { id: 'watermark', label: '水印', icon: '◈', section: 'score' },
+  { id: 'background', label: '背景', icon: '▧', section: 'score' },
 ]
 
 /** adj482：内容是「字段行」的子页签——dock 里套 `.pcfg-fields` 网格，按当页最长标签对齐；
  *  主题（主题色块列表）与音色库（自带面板）不套该层，保持各自布局
  *  adj944：「命令行」也是字段行（状态行 + 两个按钮）⇒ 参与网格 ✓ */
-const FIELDS_TABS: TabId[] = ['global', 'cli', 'score', 'font']
+const FIELDS_TABS: TabId[] = ['global', 'cli', 'score', 'font', 'watermark', 'background']
 
 /** adj482：字段网格的三个常量——标签与控件之间的间隙（与 CSS 的 row `gap` 一致）、
  *  一格至少给控件留的宽度、格与格之间的列间距（与 CSS 的 `column-gap` 一致，用于算跨格数） */
@@ -138,6 +142,23 @@ const TAB_CONFIG_KEYS: Partial<Record<TabId, readonly string[]>> = {
     'notes_font',
     'notes_size',
   ],
+  /**
+   * adj965（方案 OVL）：水印层与背景层的 15 个字段。
+   * ⚠ 登记表必须与源码里的 `isNonDefault('键')` **双向一致**（smoke 两条闸门各管一个方向）：
+   *   这里列了却没行在用 ⇒ 判红；行在用却没登记 ⇒ 也判红。
+   */
+  watermark: [
+    'wmType',
+    'wmText',
+    'wmImage',
+    'wmSize',
+    'wmScale',
+    'wmRotate',
+    'wmOpacity',
+    'wmOffsetX',
+    'wmOffsetY',
+  ],
+  background: ['bgImage', 'bgScale', 'bgRotate', 'bgOpacity', 'bgOffsetX', 'bgOffsetY'],
 }
 
 export function PageConfigDialog({
@@ -861,6 +882,105 @@ export function PageConfigDialog({
                 与默认值不同——点「保存设置」后会写进这份谱的设置（# jps-config）。
               </div>
             )}
+          </>
+        )
+      /**
+       * adj965（用户需求，方案 docs/OVERLAY-PLAN.md「OVL」）：**水印层**。
+       *
+       * 层序：曲谱（最上）→ 水印 → 背景。所有字段都是 L2（随谱走），默认值等于默认时**一个键都不写**。
+       * 两处口径容易被误解，所以标签里写明：
+       *  · "显示比率"以**页宽**为 100%（图形的宽度 = 页宽 × 比率，高度按原图比例）；
+       *  · "位置"是**元素中心相对页面中心**的偏移（0,0 = 正中）。
+       */
+      case 'watermark':
+        return (
+          <>
+            <div className="pcfg-group-title">水印</div>
+            <Row label="类型" mark={isNonDefault('wmType')}>
+              <select value={draft.wmType} onChange={(e) => updateDraft({ wmType: e.target.value as PageConfig['wmType'] })}>
+                <option value="text">文字</option>
+                <option value="image">图形</option>
+              </select>
+            </Row>
+            <Row label="文本" mark={isNonDefault('wmText')}>
+              <input
+                className="pcfg-text"
+                value={draft.wmText}
+                placeholder="水印文字（可多行）"
+                spellCheck={false}
+                onChange={(e) => updateDraft({ wmText: e.target.value })}
+              />
+            </Row>
+            <Row label="图形文件" mark={isNonDefault('wmImage')}>
+              <input
+                className="pcfg-text"
+                value={draft.wmImage}
+                placeholder="相对这份 .jps 的路径（插件里可写 [[图片.png]]）"
+                spellCheck={false}
+                onChange={(e) => updateDraft({ wmImage: e.target.value })}
+              />
+            </Row>
+            {/* 下面两行**始终渲染**（不按类型隐藏）：否则"按类型切换"会让脏标记计数漏项、也让用户以为字段消失了 */}
+            <Row label="字号(pt)·文字" mark={isNonDefault('wmSize')}>
+              <NumInput label="" range={[6, 400]} value={draft.wmSize} onChange={(v) => updateDraft({ wmSize: v })} />
+            </Row>
+            <Row label="显示比率(%)·图形" mark={isNonDefault('wmScale')}>
+              <NumInput label="" range={[10, 1000]} value={draft.wmScale} onChange={(v) => updateDraft({ wmScale: v })} />
+            </Row>
+            <Row label="旋转(°)" mark={isNonDefault('wmRotate')}>
+              <NumInput label="" range={[-180, 180]} value={draft.wmRotate} onChange={(v) => updateDraft({ wmRotate: v })} />
+            </Row>
+            <Row label="透明度(0-100)" mark={isNonDefault('wmOpacity')}>
+              <NumInput label="" range={[0, 100]} value={draft.wmOpacity} onChange={(v) => updateDraft({ wmOpacity: v })} />
+            </Row>
+            <Row label="位置(px)" mark={isNonDefault('wmOffsetX') || isNonDefault('wmOffsetY')}>
+              <NumInput label="X" value={draft.wmOffsetX} onChange={(v) => updateDraft({ wmOffsetX: v })} />
+              <NumInput label="Y" value={draft.wmOffsetY} onChange={(v) => updateDraft({ wmOffsetY: v })} />
+            </Row>
+            <div className="pcfg-note">
+              显示比率以<strong>页宽</strong>为 100%（图形的宽度 = 页宽 × 比率，高度按原图比例）；
+              位置是<strong>元素中心相对页面中心</strong>的偏移（0,0 = 正中）。透明度的 100 = 完全不透明。
+            </div>
+          </>
+        )
+      /**
+       * adj965：**背景层**（最底层，只显示页面内的部分）。
+       * 空路径 ⇒ 什么都不画；默认值等于默认 ⇒ 不用这功能的谱一个键都不多。
+       */
+      case 'background':
+        return (
+          <>
+            <div className="pcfg-group-title">背景</div>
+            <Row label="图形文件" mark={isNonDefault('bgImage')}>
+              <input
+                className="pcfg-text"
+                value={draft.bgImage}
+                placeholder="相对这份 .jps 的路径（插件里可写 [[图片.png]]）"
+                spellCheck={false}
+                onChange={(e) => updateDraft({ bgImage: e.target.value })}
+              />
+            </Row>
+            <Row label="位置(px)" mark={isNonDefault('bgOffsetX') || isNonDefault('bgOffsetY')}>
+              <NumInput label="X" value={draft.bgOffsetX} onChange={(v) => updateDraft({ bgOffsetX: v })} />
+              <NumInput label="Y" value={draft.bgOffsetY} onChange={(v) => updateDraft({ bgOffsetY: v })} />
+            </Row>
+            <Row label="显示比率(%)" mark={isNonDefault('bgScale')}>
+              <NumInput label="" range={[10, 1000]} value={draft.bgScale} onChange={(v) => updateDraft({ bgScale: v })} />
+            </Row>
+            <Row label="旋转(°)" mark={isNonDefault('bgRotate')}>
+              <NumInput label="" range={[-180, 180]} value={draft.bgRotate} onChange={(v) => updateDraft({ bgRotate: v })} />
+            </Row>
+            <Row label="透明度(0-100)" mark={isNonDefault('bgOpacity')}>
+              <NumInput label="" range={[0, 100]} value={draft.bgOpacity} onChange={(v) => updateDraft({ bgOpacity: v })} />
+            </Row>
+            <div className="pcfg-note">
+              <strong>只显示在页面内的部分</strong>（走出页面的会被裁掉）；显示比率以<strong>页宽</strong>为 100%，
+              位置是图片<strong>中心相对页面中心</strong>的偏移（0,0 = 正中）。
+              图片按<strong>相对这份 <code>.jps</code> 的路径</strong>取：把它发给别人时要连图一起给
+              （或改为内嵌，见「OVL」方案）。
+              「排版辅助」打开时可用 <code>Ctrl+滚轮</code> 缩放、<code>Ctrl+Alt+滚轮</code> 旋转、
+              <code>Ctrl+拖动</code> 移动位置。
+            </div>
           </>
         )
     }

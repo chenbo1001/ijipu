@@ -16246,19 +16246,28 @@ function runAdj605Tests() {
   const explicitUndef = { ...defaultPageConfig, notes_font: undefined } as unknown as typeof defaultPageConfig
   check('adj605 undefined/null（未设置）不算非默认', nonDefaultConfigKeys(explicitUndef).length === 0, nonDefaultConfigKeys(explicitUndef).join(','))
   // ---- 面板接线：登记表里的每个字段都得真有一行在用它 ----
-  const tabKeys = [
-    ...(cfgSrc.match(/\n\s{2}score: \[[\s\S]*?\n\s{2}\],/)?.[0].match(/'[A-Za-z_]+'/g) ?? []),
-    ...(cfgSrc.match(/\n\s{2}font: \[[\s\S]*?\n\s{2}\],/)?.[0].match(/'[A-Za-z_]+'/g) ?? []),
-  ].map((s) => s.slice(1, -1))
-  const notWired = tabKeys.filter((k) => !cfgSrc.includes(`isNonDefault('${k}')`))
+  /**
+   * adj965：改成**通用**解析 —— 原来只抠 `score:` 与 `font:` 两个块（写死块名），
+   * 新加水印/背景页签时当场判红过：闸门报"未登记 wmType…"，其实**登记了**，是解析器不认识新块。
+   * 教训与 `adj960` 的 `%FILE%` 同族：**同一件事两处实现/写死名单，必然漂**。
+   *
+   * ⚠ 先**剥注释**再解析：登记表的注释里写了 `isNonDefault('键')` 这种示意，不剥会被当成真的键名。
+   */
+  const cfgNoComment = cfgSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  const registry = cfgNoComment.match(/const TAB_CONFIG_KEYS[\s\S]*?\n\}/)?.[0] ?? ''
+  const tabKeys = [...registry.matchAll(/:\s*\[([\s\S]*?)\]/g)]
+    .flatMap((m) => (m[1] ?? '').match(/'[A-Za-z_][A-Za-z0-9_]*'/g) ?? [])
+    .map((s) => s.slice(1, -1))
+  const notWired = tabKeys.filter((k) => !cfgNoComment.includes(`isNonDefault('${k}')`))
   check(
-    `adj605 登记表（score+font，${tabKeys.length} 项）每项都有字段行在用 \`isNonDefault('键')\``,
+    `adj605 登记表（**全部**页签，${tabKeys.length} 项）每项都有字段行在用 \`isNonDefault('键')\``,
     tabKeys.length >= 25 && notWired.length === 0,
     `未接线：${notWired.join(',')}`,
   )
   // adj629z：**反向**也要成立——凡是带 `mark={isNonDefault('键')}` 的字段行，都必须登记进 TAB_CONFIG_KEYS。
   // 漏登记的后果：红线照亮、但"当页非默认项数"少算它 ⇒ 末尾图例可能不出现（adj625 的方框小节两项就漏了）。
-  const markedKeys = [...new Set([...cfgSrc.matchAll(/isNonDefault\('([A-Za-z_][A-Za-z0-9_]*)'\)/g)].map((m) => m[1]))]
+  // adj965：同样剥注释后再抠（免得注释里的示意键名混进来）。
+  const markedKeys = [...new Set([...cfgNoComment.matchAll(/isNonDefault\('([A-Za-z_][A-Za-z0-9_]*)'\)/g)].map((m) => m[1]))]
   const unregistered = markedKeys.filter((k) => !tabKeys.includes(k))
   check(
     `adj629z 每个带 \`mark\` 的字段行都登记进 TAB_CONFIG_KEYS（共 ${markedKeys.length} 项）`,
@@ -16293,8 +16302,11 @@ function runAdj605Tests() {
   )
   check(
     'adj605 图例文字是**纯文本**（`.pcfg-note` 不解析 Markdown：写成 `**…**` 会原样显示）',
-    /pcfg-def-legend[\s\S]{0,220}?与默认值不同——点「保存设置」后会写进这份谱的设置/.test(cfgSrc) &&
-      !/pcfg-def-legend[\s\S]{0,300}?\*\*/.test(cfgSrc),
+    // adj965：改查**剥掉注释**的源码 —— 探针是"图例后 300 字符内不许有 `**`"，
+    // 而项目注释风格本身就大量用 `**粗体**`；新页签的注释正好插进这个窗口
+    // ⇒ 旧探针会把"注释里写了粗体"误判成"图例里写了 Markdown"（当场红过一次）。
+    /pcfg-def-legend[\s\S]{0,220}?与默认值不同——点「保存设置」后会写进这份谱的设置/.test(cfgNoComment) &&
+      !/pcfg-def-legend[\s\S]{0,300}?\*\*/.test(cfgNoComment),
     '',
   )
   check(

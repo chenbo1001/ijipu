@@ -386,6 +386,63 @@ async function main() {
       `${footText.trim()} ／ 首行 ${afterOk.split('\n')[0]}`,
     )
 
+    // ============ adj965：水印设置 → 预览 → 写进谱面（端到端真点） ============
+    //   这条覆盖的是"设置界面 → 引擎渲染 → 差量写盘"整整一条链，只靠源码级闸门是证明不了的：
+    //   源码级只能证明"有那一行"，证明不了"点了真的出层、保存真的落键"。
+    await c.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
+    await sleep(400)
+    const dockBtn = await evalJs(
+      c,
+      `(() => {
+         const b = [...document.querySelectorAll('.topbar-btn')].find((el) => (el.getAttribute('title') || '').includes('谱面'))
+         if (!b) return 'no-btn'
+         b.click()
+         return 'ok'
+       })()`,
+    )
+    check('顶栏能找到「谱面设置」按钮并点开', dockBtn === 'ok')
+    await waitFor(c, `!!document.querySelector('.pcfg-root')`, '谱面设置面板出现')
+    await waitFor(
+      c,
+      `[...document.querySelectorAll('.jp-tab')].some((t) => t.textContent.includes('水印'))`,
+      '「水印」子页签出现',
+    )
+    await evalJs(
+      c,
+      `[...document.querySelectorAll('.jp-tab')].find((t) => t.textContent.includes('水印')).click(), true`,
+    )
+    await waitFor(c, `!!document.querySelector('.pcfg-text')`, '水印页签内容出现（路径/文本输入框）')
+
+    // 真打字：聚焦水印文本输入框后走 CDP 输入（React 的 onChange 才会触发）
+    await evalJs(c, `document.querySelector('.pcfg-text').focus(), true`)
+    await c.send('Input.insertText', { text: '内部草稿' })
+    await sleep(400)
+    const wmInPreview = await evalJs(c, `!!document.querySelector('.score-page svg [data-overlay="wm"]')`)
+    const wmText = await evalJs(
+      c,
+      `document.querySelector('.score-page svg [data-overlay="wm"] tspan')?.textContent ?? ''`,
+    )
+    check(
+      '在「水印」页签里打字 ⇒ **预览里真的出现了水印层**（且文字对得上）',
+      wmInPreview === true && wmText === '内部草稿',
+      `tspan="${wmText}"`,
+    )
+
+    // 保存设置 ⇒ 真的差量写进 # jps-config（只该出现 wmText 这一项）
+    await evalJs(
+      c,
+      `[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存设置').click(), true`,
+    )
+    await sleep(500)
+    const codeNow = String(await evalJs(c, `document.querySelector('.editor-main textarea').value`))
+    const cfgLine = (codeNow.match(/# jps-config:(.*)/) ?? [])[1] ?? ''
+    const cfgKeys = Object.keys(JSON.parse(cfgLine || '{}'))
+    check(
+      '点「保存设置」⇒ 真的写进 `# jps-config`，且**只写这一项**（差量写入：15 个新字段里只有 wmText 落键）',
+      cfgKeys.length === 1 && cfgKeys[0] === 'wmText',
+      cfgLine,
+    )
+
     c.close()
   } catch (e) {
     check(`脚本自身出错：${e instanceof Error ? e.message : String(e)}`, false)
