@@ -48,6 +48,7 @@ import {
   overlayWheelMode,
   overlayWheelSteps,
   wheelDeltaPx,
+  OVERLAY_COMMIT_DELAY_MS,
 } from '@ijipu/engine'
 // adj965d：预览区角落的「调整对象」与键位提示文案（面向用户的文案一律集中在 brand/copy.ts）
 import { overlayCopy } from '../brand/copy'
@@ -89,13 +90,9 @@ function applyNoteHighlight(el: Element, on: boolean): void {
 const PREVIEW_W = PREVIEW_BASE_W
 
 /**
- * adj965d（EP-13）：滚轮手势的"停顿落盘"延时（毫秒）。
- *
- * 拖动有"松手"可以判定一次手势结束，滚轮没有 ⇒ 只能按停顿判定：
- * 连续滚动期间每次事件都重置这个定时器，停手约 0.4s 后把这一串改动**一次性**写进 `# jps-config`
- * （于是"滚一下"和"滚十下"都是一条撤销，而不是十条）。
+ * adj965d（EP-13）：滚轮手势的"停顿落盘"延时 —— 取值来自**引擎**，与 Obsidian 插件同源
+ * （同一套交互口径，两端不各写一个数；语义见 `engine/overlayGesture.ts` 里那段说明）。
  */
-const OVERLAY_COMMIT_DELAY_MS = 400
 
 export function PreviewPane() {
   const parseResult = useDocStore((s) => s.parseResult)
