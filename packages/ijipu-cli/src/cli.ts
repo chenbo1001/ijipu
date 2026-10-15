@@ -338,10 +338,16 @@ function inferType(p: Parsed): string {
   return 'text'
 }
 
-/** 拼路径（统一用 `/`：CLI 只把路径字符串交给宿主，平台分隔符由宿主自己认） */
+/**
+ * 拼路径（统一用 `/`：CLI 只把路径字符串交给宿主，平台分隔符由宿主自己认）。
+ *
+ * adj960：`-i .`（用户实报那次的写法）走出来的路径会带 `./` 前缀 ⇒ 归一化掉，
+ * 免得逐行输出长成 `./samples/x.jps 第 3 行：…`、与"直接给目录名"的形态不一致。
+ */
 function joinPath(dir: string, name: string): string {
   const d = dir.replace(/[\\/]+$/, '')
-  return d === '' ? name : `${d}/${name}`
+  if (d === '' || d === '.') return name
+  return `${d}/${name}`
 }
 
 /**
@@ -439,11 +445,36 @@ function effectiveConfig(src: string, overrides: Record<string, unknown>): PageC
   return { ...mergeJpsConfig(src, defaultPageConfig), ...overrides } as PageConfig
 }
 
-/** 问题清单 → 一行文字（`--format gh` 用 GitHub Actions 注解格式） */
-function issueLine(issue: { line?: number; message?: string; text?: string }, gh: boolean): string {
+/**
+ * 问题清单 → 一行文字（`--format gh` 用 GitHub Actions 注解格式）。
+ *
+ * ## adj960（**用户实报**）：批量输入必须**指明是哪个文件**
+ *
+ * 用户拿 `ijipu cli -i . -r lint` 查 54 个文件，输出里只有一片 `第 20 行：倚音内不支持的符号`
+ * —— **对不上号**（哪个文件？）。用户给的判据很清楚：
+ * **"输出的信息是单一文件独有、还是共同信息"** ⇒ **独有的必须带文件名，共同的（那句汇总）不带**。
+ *
+ * 于是这个函数收一个可选的 `file`，并成为**唯一一处**格式出处（此前 `batch` 里另写了一份
+ * `<文件> 第 N 行：…`，而 `lint` 那份漏了文件名 —— 同一件事两处实现，必然漂 ✗）：
+ *  · `gh`：`::error file=<文件>,line=N::<消息>`（GitHub 靠这个 file 把问题标到对应的 diff 上）
+ *  · 文本：`<文件> 第 N 行：<消息>`
+ *
+ * ⚠ 单文件输入（`lint -i a.jps`）**也带**文件名 —— 与目录输入同一口径（用户那条判据不区分两者）；
+ *   stdin 没有文件名，用 `(stdin)` 顶上。
+ */
+function issueLine(
+  issue: { line?: number; message?: string; text?: string },
+  gh: boolean,
+  file: string,
+): string {
   const ln = issue.line ?? 0
   const msg = String(issue.message ?? issue.text ?? '').trim()
-  return gh ? `::error file=%FILE%,line=${ln}::${msg}` : `第 ${ln} 行：${msg}`
+  return gh ? `::error file=${file},line=${ln}::${msg}` : `${file} 第 ${ln} 行：${msg}`
+}
+
+/** 输入的文件名（stdin 用 `(stdin)`）——**逐项输出**统一用它做归属 */
+function fileLabelOf(spec: string | undefined, fromStdin: boolean): string {
+  return fromStdin || spec === undefined || spec === '-' ? '(stdin)' : spec
 }
 
 /**
@@ -1058,7 +1089,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
               ok: false,
               errors: errors.map((e) => ({ line: e.line ?? 0, message: String(e.message ?? e.text ?? '') })),
             })
-            if (gh) for (const e of errors) line(io, issueLine(e as { line?: number; message?: string }, true).replace('%FILE%', file))
+            if (gh) for (const e of errors) line(io, issueLine(e as { line?: number; message?: string }, true, file))
           }
           continue
         }
@@ -1113,7 +1144,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       )
       if (kinds.includes('lint') && !gh && !p.quiet) {
         for (const r of lintRows) {
-          for (const e of r.errors) line(io, `  ${r.input} 第 ${e.line} 行：${e.message}`)
+          // adj960：与 `lint -i <目录>` **同一份格式**（含文件名；此前这里另写了一份）
+          for (const e of r.errors) line(io, issueLine({ line: e.line, message: e.message }, false, r.input))
         }
       }
       for (const f of failed) line(io, `  ✗ ${f}`)
@@ -1178,8 +1210,9 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
         })
         rows.push({ input: file, ok: errors.length === 0, errors: errors.map(pick), warnings: warnings.map(pick) })
         if (!wantJson && !p.quiet) {
-          for (const e of errors) line(io, issueLine(e as { line?: number; message?: string }, gh).replace('%FILE%', file))
-          for (const w of warnings) line(io, issueLine(w as { line?: number; message?: string }, gh).replace('%FILE%', file))
+          // adj960：目录输入 —— 每条问题都带文件名（**用户实报的那条**）
+          for (const e of errors) line(io, issueLine(e as { line?: number; message?: string }, gh, file))
+          for (const w of warnings) line(io, issueLine(w as { line?: number; message?: string }, gh, file))
         }
       }
       const payload = {
@@ -1275,7 +1308,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       const pass = (): void => {
         const r = runOnce()
         line(io, `${first ? '首次' : '变更后'}检查：错误 ${r.errors.length} 个、告警 ${r.warnings.length} 个${r.ok ? ' ✓' : ''}`)
-        for (const e of r.errors.slice(0, 5)) line(io, issueLine(e as { line?: number; message?: string; text?: string }, false).replace('%FILE%', target))
+        for (const e of r.errors.slice(0, 5)) line(io, issueLine(e as { line?: number; message?: string; text?: string }, false, target))
         first = false
       }
       pass()
@@ -1297,7 +1330,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     }
     const { errors, warnings } = runOnce()
     const gh = p.format === 'gh'
-    const file = fromStdin ? '(stdin)' : String(p.inputs[0])
+    // adj960：逐项输出的"文件归属"只有这一处口径（stdin ⇒ `(stdin)`）
+    const file = fileLabelOf(p.inputs[0], fromStdin)
     const payload = {
       schema: 1,
       generator: `ijipu ${version}`,
@@ -1308,8 +1342,10 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     }
     if (wantJson) line(io, JSON.stringify(payload, null, 2))
     else if (!p.quiet) {
-      for (const e of errors) line(io, issueLine(e as { line?: number; message?: string; text?: string }, gh).replace('%FILE%', file))
-      for (const w of warnings) line(io, issueLine(w as { line?: number; message?: string; text?: string }, gh).replace('%FILE%', file))
+      // adj960：单文件**也带**文件名 —— 与目录输入同一口径（用户那条判据不区分两者）；
+      //   stdin 时 `file` 就是 `(stdin)`（见上面 `fileLabelOf`）
+      for (const e of errors) line(io, issueLine(e as { line?: number; message?: string; text?: string }, gh, file))
+      for (const w of warnings) line(io, issueLine(w as { line?: number; message?: string; text?: string }, gh, file))
       if (errors.length === 0 && warnings.length === 0) line(io, '没有发现问题 ✓')
     }
     return { code: errors.length === 0 ? EXIT.ok : EXIT.syntax, json: payload }

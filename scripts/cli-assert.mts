@@ -316,6 +316,53 @@ console.log('\n— 命令行（A·P1–P4）—')
 }
 
 /**
+ * ④b·2 adj960（**用户实报**）：逐项输出必须指明**是哪个文件**。
+ *
+ * 用户拿 `ijipu cli -i . -r lint` 查了 54 个文件，输出里只有一片 `第 20 行：倚音内不支持的符号`
+ * —— **完全对不上号**。用户给的判据：**"输出的信息是单一文件独有、还是共同信息"**
+ * ⇒ 独有的带文件名、共同的（那句汇总）不带。
+ *
+ * 这里把**两半**都钉住：① 逐项必须带；② 汇总**不许**带（免得矫枉过正成"每行都糊一个文件名"）。
+ */
+{
+  const DIR_ERR = 'V: 1.0\nB: 错\nD: C\nP: 4/4\nQ: 1 2 3 4 | {tp 5 6 7 1} |\n'
+  const dir = makeIo({ 'in/a.jps': GOOD, 'in/bad.jps': DIR_ERR }, { in: ['a.jps', 'bad.jps'] })
+  await runCli(['lint', '-i', 'in'], dir.io)
+  const out = String(dir.logs.join(''))
+  const hasFile = /^in\/bad\.jps 第 \d+ 行：/m.test(out)
+  check(
+    'adj960 `lint -i <目录>`：每条问题**行首带文件名**（用户实报：只有 `第 N 行：…` 对不上号）',
+    hasFile && !/^第 \d+ 行：/m.test(out),
+    out.split('\n').slice(0, 3).join(' ｜ '),
+  )
+  check(
+    'adj960 同一条的另一半：那句**汇总**是共同信息 ⇒ **不带**文件名（`检查 N 个文件：…`）',
+    /^检查 2 个文件：/m.test(out),
+    out.split('\n').slice(-1)[0],
+  )
+  check(
+    'adj960 负对照：把文件名抹掉（＝修复前的写法）⇒ 同一判据判红',
+    !/^in\/bad\.jps 第 \d+ 行：/m.test(out.replace(/in\/bad\.jps /g, '')) && hasFile,
+  )
+
+  const oneFile = makeIo({ 'err.jps': DIR_ERR })
+  await runCli(['lint', '-i', 'err.jps'], oneFile.io)
+  check(
+    'adj960 单文件**也带**文件名（与目录输入同一口径；与目录输出混在一个日志里不会对不上号）',
+    /^err\.jps 第 \d+ 行：/m.test(String(oneFile.logs.join(''))),
+    String(oneFile.logs.join('')).split('\n')[0],
+  )
+
+  const batchLint = makeIo({ 'in/bad.jps': DIR_ERR }, { in: ['bad.jps'] })
+  await runCli(['batch', '--in', 'in', '-t', 'lint'], batchLint.io)
+  check(
+    'adj960 `batch -t lint` 的明细与 `lint -i <目录>` **同一份格式**（都带文件名）',
+    /^in\/bad\.jps 第 \d+ 行：/m.test(String(batchLint.logs.join(''))),
+    String(batchLint.logs.join('')).split('\n').slice(0, 2).join(' ｜ '),
+  )
+}
+
+/**
  * ④c adj956（用户需求「一些操作是否可以通过 batch 参数形成组合式的批量操作的效果？」）：
  * `-t` 逗号组合 + `-o` 只在真要写文件时才必填。
  */
@@ -982,10 +1029,11 @@ console.log('\n— 命令行（A·P1–P4）—')
     { what: 'doctor', argv: ['doctor'], lines: ['可设置项：35 个（含可选字段 5 个）', '能力：svg ✓｜midi ✓'], code: EXIT.ok },
     { what: 'completions bash', argv: ['completions', 'bash'], lines: ['# iJipu bash 补全（桌面端）'], code: EXIT.ok },
     { what: 'completions 用法错', argv: ['completions', 'foo'], lines: ['completions 支持 bash | zsh | powershell（收到 “foo”）'], code: EXIT.usage },
-    { what: 'lint 有错', argv: ['lint', '-i', '错谱.jps'], lines: ['第 5 行：引号注释未闭合'], code: EXIT.syntax },
+    // adj960（用户实报）：逐项输出**必须带文件名** ⇒ 下面两条按完整行钉（含行首的文件名）
+    { what: 'lint 有错', argv: ['lint', '-i', '错谱.jps'], lines: ['错谱.jps 第 5 行：引号注释未闭合'], code: EXIT.syntax },
     { what: 'lint --format gh', argv: ['lint', '-i', '错谱.jps', '--format', 'gh'], lines: ['::error file=错谱.jps,line=5::引号注释未闭合'], code: EXIT.syntax },
     { what: 'lint --json', argv: ['lint', '-i', '错谱.jps', '--json'], lines: ['"generator": "ijipu ' + APP_VERSION + '"', '"line": 5,'], code: EXIT.syntax },
-    { what: 'lint 告警不动退出码', argv: ['lint', '-i', '告警谱.jps'], lines: ['第 5 行：无法识别的符号 "x"'], code: EXIT.ok },
+    { what: 'lint 告警不动退出码', argv: ['lint', '-i', '告警谱.jps'], lines: ['告警谱.jps 第 5 行：无法识别的符号 "x"'], code: EXIT.ok },
     {
       what: 'lint --watch 无能力',
       argv: ['lint', '-i', 'samples\\ershenbu.jps', '--watch'],
