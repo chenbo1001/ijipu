@@ -3,7 +3,7 @@
 > **方案名：OVL**（Overlay，水印层 + 背景层）。
 > 开工只需一句：**「按 OVL 方案做」**，并指向本文件。
 >
-> **状态**：**EP-01 已完成**（见 §零）；**从 EP-02 开始做**。
+> **状态**：**EP-01…EP-06、EP-12 已完成**（见 §零）；**从 EP-07 开始做**（图片取图通道）。
 > 本文是"动手前的唯一口径"：字段、单位、默认值、层序、裁剪、跨端取图、交互、执行清单、闸门。
 > 用户 2026-10-15 提需求 → 4 项裁定（§十）→ 采纳 10 条优化（§八）。
 
@@ -15,19 +15,27 @@
 
 | 项 | 内容 | 证据 |
 |---|---|---|
-| **EP-01** | `PageConfig` 加 15 个字段 + `defaultPageConfig` 默认值（渲染尚未接线） | commit `212e38b`（`feat(engine): adj965 P1-a …`） |
-| 计数同步 | 字段进白名单后 CLI `doctor` 35 → **50**、`settings` 的"可用键 35 个"→ 50；手册与 `cli-assert` 里是**逐字比对** ⇒ 已同步（数值取自真跑输出） | `docs/CLI-手册.md` 两处、`scripts/cli-assert.mts` 的 `doctor` 用例 |
-| 本文 | 规格 → 完整方案（含执行清单） | 原 `docs/WATERMARK-AND-BACKGROUND.md`，已 `git mv` 成本文件名 |
+| **EP-01** | `PageConfig` 加 15 个字段 + `defaultPageConfig` 默认值 | commit `212e38b` |
+| 计数同步 | 字段进白名单后 CLI `doctor` 35 → **50**、`settings` 的"可用键 35 个"→ 50（手册与 `cli-assert` 是逐字比对） | `docs/CLI-手册.md` 两处、`cli-assert` 的 `doctor` 用例 |
+| **EP-02…EP-05** | `expectDescOf` 加 `wmType` 枚举校验；新增纯模块 `render/overlay.ts`；`renderPage`/`renderScoreToSvg` 收 `RenderOpts = RenderFontMeta & { assets? }` 并在白底 rect 与 `body` 之间插入两层；`smoke` 加 **12 条**闸门 | commit `b048d8e` |
+| 公共工具 | `render/svgUtil.ts`（`r1n`/`r2n`/`xmlEsc`）—— 从 `render/index.ts` 抽出，overlay 共用一份口径 | 同上 |
+| **EP-06** | `SETTINGS-AUDIT.md`（50 字段 + 新 15 行）、`SYNTAX.md` §2.14（新键与"自包含被打了洞"的告警） | commit `ccdaf16` |
+| **EP-12** | 谱面设置加「水印 / 背景」两个子页签（5 处登记 + `.pcfg-text`）；`verify-app-ui` 加**真点端到端**（打字 → 预览真出层 → 保存真落键） | commit `1dcc03b` |
+| **EP-11①** | `obsidian-ijipu/vendor/engine` 已同步（51 文件、哈希 0 差异）；插件冒烟 **766 passed / 0 failed** | 插件仓库 commit `8c53434` |
+| 本文 | 规格 → 完整方案（含执行清单） | commit `b8cdd3a` |
 
-**基线**：`tsc -b` 0 错；`oxlint` 54 警告 / 0 错（＝基线）；`npm run smoke` 全绿；CLI 断言 **118 项**；`git status` 干净。
-（开工第一件事：复跑 `npm run smoke` 确认基线仍成立。）
+**当前能用的能力**：**文本水印已全程可用** —— 设置界面 → 预览 → PNG/JPG/PDF/打印导出 → 差量写进 `# jps-config`。
+（图片水印与背景图还差取图通道：EP-07/EP-08/EP-09/EP-10；交互 EP-13；插件 DEFS/README 与嵌入产物 EP-11②③④。）
 
-### ⚠ 已知的跨仓不一致（**动手前必须知道**）
+**基线**：`tsc -b` 0 错；`oxlint` 54 警告 / 0 错（＝基线）；`npm run smoke` 全绿（CLI 断言 118 项）；
+`npm run verify:app-ui` **17/17**；两个仓库 `git status` 干净。
 
-引擎已改、`obsidian-ijipu/vendor/engine` **尚未同步** ⇒ 插件仓库冒烟
-`adj770`（`vendor/engine` 与应用引擎**逐文件 SHA256 比对**，`obsidian-ijipu/scripts/smoke-frontmatter.mts:2508`）
-**现在会红**。这不是 bug，是"改了引擎还没同步"的正常中间态 —— **EP-11 处理**。
-**不要在 EP-11 之前发布插件版本。**
+### 跨仓状态
+
+`vendor/engine` **已同步**（`adj770` 绿）。**仍待做**：插件 `DEFS` + `README` 补行（EP-11③，等 EP-12 的字段进
+`TAB_CONFIG_KEYS` 之后闸门会强制）、嵌入产物重生成（EP-11④，顺序铁律）。
+**在 EP-11 全部做完之前不要发布插件版本。**
+
 
 ---
 
@@ -231,17 +239,17 @@ resolveAsset(raw: string, base: AssetBase): Promise<{ href, w, h } | { error }>
 | # | 改哪里 | 做什么 | 验收 |
 |---|---|---|---|
 | **EP-01** ✅ | `engine/types.ts` | 15 个字段 + 默认值 | 已完成（`212e38b`）+ 计数同步 |
-| **EP-02** | `engine/settings.ts` | `expectDescOf` 加 `case 'wmType': return v === 'text' \|\| v === 'image' ? null : '"text" 或 "image"'`（其余字段的**类型**校验由 `default` 分支自动覆盖） | smoke：`{"wmType":"image"}` 通过、`{"wmType":"bogus"}` 被拒并有告警 |
-| **EP-03** | 新增 `engine/render/overlay.ts` | 纯函数 `overlayLayers(config, page, assets)` → `{ bg: string; wm: string }`：钳制、矩形（页宽基准/中心锚点）、旋转、opacity、`<clipPath>`、图形 `<image>`、文本 `<text text-anchor="middle">`。**空资源/空文本 ⇒ 返回 `''`**；`clipPath` 的 **id 必须按页唯一**（`ovl-clip-N`） | smoke：数值断言（宽度=页宽×比率、中心=页面中心+偏移、旋转角、opacity、钳制上下界） |
-| **EP-04** | `engine/render/index.ts` | 定义 `RenderAssets` / `RenderOpts`；`renderPage`/`renderScoreToSvg` 换签名；在白底 rect 之后、`body.join` 之前插 `bg + wm` | smoke：层序（bg 在 wm 前、二者都在 body 前）、**`assets` 缺省时与改动前逐字节相同** |
-| **EP-05** | `scripts/smoke.mts` | 补齐上面断言 + 差量断言（默认值 ⇒ `# jps-config` 不出现新键；改一项 ⇒ 只出现那一项） | `npm run smoke` 全绿 |
-| **EP-06** | `docs/SETTINGS-AUDIT.md`、`docs/SYNTAX.md` | 字段表加 15 行（并修正标题里已过期的"34 字段"）；`# jps-config` 新键的对外口径 | 人工（§五.1 要求语法/格式变更同步文档） |
+| **EP-02** ✅ | `engine/settings.ts` | `expectDescOf` 加 `case 'wmType'` | 已完成（`b048d8e`） |
+| **EP-03** ✅ | `engine/render/overlay.ts`（新） | `overlayLayers()`：钳制/矩形/旋转/opacity/`<clipPath>`/`<image>`/`<text>`；空资源返回 `''`；id 按页唯一 | 已完成 |
+| **EP-04** ✅ | `engine/render/index.ts` | `RenderAssets`/`RenderOpts` + 两层插在白底 rect 与 `body` 之间 | 已完成（**`assets` 缺省逐字节不变**） |
+| **EP-05** ✅ | `scripts/smoke.mts` | `runAdj965OverlayTests()` **12 条** | 已完成（含"夹具自检：必须真分页"） |
+| **EP-06** ✅ | `SETTINGS-AUDIT.md` / `SYNTAX.md` | 50 字段 + 新键口径 + 自包含告警 | 已完成（`ccdaf16`） |
 | **EP-07** | 新增 `src/store/assetSource.ts` | 解析 + 白名单 + 上限 + 降采样 + 缓存（§四.2） | 纯函数部分进 smoke（路径归一、`[[…]]` 去壳、白名单/上限判定） |
 | **EP-08** | `src-tauri/src/lib.rs` | 新增 `#[tauri::command] async fn read_asset_file(path: String) -> Result<tauri::ipc::Response, String>`（照 `sf_soundfont_resource_read:207` 的原始字节写法；**扩展名白名单 + 大小上限**）+ 注册进 `generate_handler!`(:464)；前端封装走 `brand/env.ts` 的 `tauriInvoke` | 桌面端双击打开的谱能出背景图（真跑：`. .\scripts\tauri-env.ps1` 后 `npx tauri build`） |
 | **EP-09** | `obsidian-ijipu/src/embed/bridge.ts` + `ijipu/src/store/hostBridge.ts` + `workspace.ts` | 桥加 `readAsset` op（`adapter.readBinary` → base64/data URL）+ 应用侧方法 + 二进制原语 | 插件里能出背景图；越界路径被拒 |
 | **EP-10** | `src/preview/PreviewPane.tsx`、`src/export/*` | 解析出的 assets 传进 `renderScoreToSvg`（预览与导出**共用同一份**，避免"预览有、导出没有"） | 预览/PNG/JPG/PDF/打印五路一致；解析失败给明确提示（**不静默降级**） |
-| **EP-11** | `obsidian-ijipu/` | ① `vendor/engine` 逐字节同步（闸门 `adj770`，`smoke-frontmatter.mts:2508`）；② `scorePane.measureContentBox` 排除 `[data-overlay]`(:2226)；③ `DEFS` + `README` 补行；④ 按顺序铁律重生成嵌入产物（`npm run build:embed && node scripts/embed-emit.mjs`，闸门 `adj733`） | 插件 `npm run smoke` 全绿；跨仓哈希一致 |
-| **EP-12** | `src/dialogs/PageConfigDialog.tsx` + `uiStore.ts` | 两个页签 + 5 处登记 + 合并两份页签名单位名单 + 选图/内嵌/置空按钮 | smoke 那两条**双向**闸门（`*` 标记集 == 写盘键集；`TAB_CONFIG_KEYS` ↔ `isNonDefault`） |
+| **EP-11** | `obsidian-ijipu/` | ① ✅ `vendor/engine` 已同步；② `scorePane.measureContentBox` 排除 `[data-overlay]`(:2226)；③ `DEFS` + `README` 补行（**EP-12 之后闸门会强制**）；④ 重生成嵌入产物（`npm run build:embed && node scripts/embed-emit.mjs`，闸门 `adj733`） | 插件 `npm run smoke` 全绿（现已 766 ✓） |
+| **EP-12** ✅ | `PageConfigDialog.tsx` + `index.css` | 两个页签 + 5 处登记 + `.pcfg-text`；顺手修两条闸门探针（写死块名的解析器 / 只查 `cfgSrc` 的图例探针） | 已完成（`1dcc03b`）+ `verify-app-ui` 真点 3 条 |
 | **EP-13** | `PreviewPane.tsx`、`ui/dragGesture.ts`、`brand/shortcuts.ts` | 排版模式下的滚轮/拖动 + 4px 阈值 + 松手写盘（§六） | **`npm run verify:app-ui`**：滚轮/拖动真的改了配置；**非排版模式下 Ctrl+单击仍能试听**（负向判据） |
 | **EP-14** | `workspace.ts`、`packages/ijipu-cli/src/*` | 网页版 FSA 二进制读；CLI `CliIo.readBinary` + 读不到就跳过并说明 + `--no-assets` | CLI 出图带背景（Node 可读时）；读不到时 stderr 有明确一行 |
 
