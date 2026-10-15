@@ -24,6 +24,8 @@
  * （本项目「数值口径必须同源」那条，见 `AGENTS.md` 六之二·4）。
  */
 import type { PageConfig } from '@ijipu/engine'
+// 该层各项的**代码默认值**（`overlayGestureBase` 要用它们当"基线里的默认"）
+import { defaultPageConfig } from '@ijipu/engine'
 // 层名（`'wm' | 'bg'`）的唯一出处是 store —— 那是"用户正在调哪一层"这份状态的归属地，
 // 预览层只消费它（`AGENTS.md` src 一「store 是唯一状态源」）。**只导类型**，运行时零依赖。
 import type { OverlayLayer } from '../store/uiStore'
@@ -108,6 +110,56 @@ export function overlayOffsetOf(cfg: PageConfig, layer: OverlayLayer): { x: numb
   return layer === 'wm'
     ? { x: numOr(cfg.wmOffsetX, 0), y: numOr(cfg.wmOffsetY, 0) }
     : { x: numOr(cfg.bgOffsetX, 0), y: numOr(cfg.bgOffsetY, 0) }
+}
+
+/**
+ * 手势落盘时用的**基线快照**：把"目标层自己那些键"置回**代码默认值**，其余字段照旧。
+ *
+ * ## 为什么不能直接用"按下时的生效配置"当基线（**真机上踩到过**）
+ *
+ * 落盘那一句是 `setPageConfig(最新, true, base)` → `mergeConfigEdits(code, base, cfg)`，
+ * 而它的规则是「**只把 `base` 与 `cfg` 不同的键**并进源码层」（`settings.ts:483`）。
+ * 于是：用户只在设置面板里**打开**了水印/背景（没点「保存设置」）时，
+ * `wmEnabled` / `wmText` / `bgImage` 这些只活在草稿里、源码层没有 ⇒ 基线里它们与最新值相同 ⇒
+ * **一个键都不会被写**，写进谱面的只有手势真正动过的那个字段（比如 `wmSize`）。
+ * 结果就是**半截配置**：谱面里多了一个"没启用的水印层 + 一个孤零零的字号"；
+ * 此后任何一次"从源码重新派生生效配置"的动作（在编辑器里打字、刷新页面、宿主整页重载）
+ * 都会让这一层**连提示条带手势一起消失**，而配置行里那个孤儿键还留着。
+ *
+ * 把这个层的键在基线里置默认 ⇒ 它们在 `mergeConfigEdits` 眼里都算"本次改动"，
+ * 于是**一次手势 = 把被调的那一层按现在看到的样子固化进谱面**（启用 + 内容 + 各项参数），
+ * 而且**仍然不碰别的东西**——页边距、字体、另一层那些同批草稿改动都不会被顺手带进谱面
+ * （`mergeConfigEdits` 的本意"不把本机/草稿设置泄漏成谱面级"原样保留）。
+ */
+export function overlayGestureBase(cfg: PageConfig, layer: OverlayLayer): PageConfig {
+  const d = defaultPageConfig
+  if (layer === 'bg') {
+    return {
+      ...cfg,
+      bgEnabled: d.bgEnabled,
+      bgImage: d.bgImage,
+      bgScale: d.bgScale,
+      bgRotate: d.bgRotate,
+      bgOpacity: d.bgOpacity,
+      bgOffsetX: d.bgOffsetX,
+      bgOffsetY: d.bgOffsetY,
+    }
+  }
+  return {
+    ...cfg,
+    wmEnabled: d.wmEnabled,
+    wmType: d.wmType,
+    wmText: d.wmText,
+    wmImage: d.wmImage,
+    wmSize: d.wmSize,
+    wmScale: d.wmScale,
+    wmRotate: d.wmRotate,
+    wmRepeat: d.wmRepeat,
+    wmRepeatGap: d.wmRepeatGap,
+    wmOpacity: d.wmOpacity,
+    wmOffsetX: d.wmOffsetX,
+    wmOffsetY: d.wmOffsetY,
+  }
 }
 
 /**

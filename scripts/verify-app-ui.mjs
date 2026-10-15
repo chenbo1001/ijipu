@@ -685,6 +685,23 @@ async function main() {
         cfgBgLayer.wmOffsetX === cfgWmLayer.wmOffsetX,
       `bgScale ${cfgWmLayer.bgScale ?? '（无）'} → ${cfgBgLayer.bgScale}`,
     )
+    /**
+     * adj965d（**用户在真机上踩到的那个坑**）：手势落盘**不许留"半截配置"**。
+     *
+     * 本用例到这一步为止，背景层只在**面板草稿**里开着（`bgEnabled`/`bgImage` 从没点过「保存设置」）
+     * ⇒ 生效配置里有、源码层里没有。落盘走的是 `mergeConfigEdits(code, base, cfg)`
+     * ——「只并 base 与 cfg 不同的键」：若基线取"按下时的完整快照"，那就**只有 `bgScale`** 被写进去，
+     * 源码里留下"一个没启用的背景层 + 一个孤零零的宽度值"；用户随后在编辑器里打字/刷新一次
+     * （生效配置重新从源码派生）⇒ 这一层连提示条带手势**一起消失**，而配置行里还留着那个孤儿键。
+     *
+     * 正确口径：**一次手势 = 把被调的那一层按现在看到的样子固化进谱面**
+     * （该层自己的键在基线里置回默认 ⇒ 它们都算"本次改动"），同时**仍然不碰**别的东西。
+     */
+    check(
+      'adj965d **不许留半截配置**：该层自己的键（启用 + 内容）跟手势**一起固化**（`bgEnabled`/`bgImage` 只在草稿里，也得写进去）',
+      cfgBgLayer.bgEnabled === true && cfgBgLayer.bgImage === '图.png' && cfgBgLayer.bgScale !== undefined,
+      `bgEnabled=${String(cfgBgLayer.bgEnabled)} bgImage=${String(cfgBgLayer.bgImage)} bgScale=${String(cfgBgLayer.bgScale)}`,
+    )
 
     // ---- ⑤ 负向判据：**非排版辅助模式下按 Alt 什么都不该发生** ----
     await evalJs(

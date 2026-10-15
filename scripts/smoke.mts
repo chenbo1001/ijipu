@@ -151,6 +151,7 @@ import {
   applyOverlayDrag,
   applyOverlayWheel,
   bothOverlayLayersVisible,
+  overlayGestureBase,
   overlayLayerVisible,
   overlayWheelMode,
 } from '../src/preview/overlayGesture.ts'
@@ -13548,6 +13549,65 @@ function runAdj965dOverlayGestureTests() {
       /setPageConfig\(applyOverlayDrag\([\s\S]{0,160}?, false\)/.test(paneSrc) &&
       /setPageConfig\(pageConfigRef\.current, true, base\)/.test(paneSrc),
     '',
+  )
+
+  /**
+   * ⑨ **落盘不许留"半截配置"**（真机上踩到的那个坑，见 `overlayGestureBase` 的说明）。
+   *
+   * 这里直接做**真合并**（`mergeConfigEdits` + `writeJpsConfig`，与 `docStore.setPageConfig` 同一条路），
+   * 不用正则猜。夹具：两层都只在**草稿**里开着（源码层空 `{}`），外加一个**同批草稿里的**页边距改动
+   * ——用来同时验"该写的写了""不该写的没写"。
+   */
+  const fragCode = 'Q:1 2 3 4|\n# jps-config:{}'
+  const fragDraft = {
+    ...defaultPageConfig,
+    wmEnabled: true,
+    wmText: '草稿',
+    wmSize: 38,
+    bgEnabled: true,
+    bgImage: '图.png',
+    margin_left: 77,
+  } as PageConfig
+  const writtenFrom = (base: PageConfig, next: PageConfig): Record<string, unknown> =>
+    JSON.parse(
+      (/# jps-config:(.*)/.exec(writeJpsConfig(fragCode, mergeConfigEdits(fragCode, base, next))) ?? [])[1] ?? '{}',
+    ) as Record<string, unknown>
+  /** 手势的形状 =「基线快照 + 这一次手势真的改了的那一项」：水印字号 38 → 43 */
+  const wmNext = { ...fragDraft, wmSize: 43 } as PageConfig
+  // **负对照**：基线取"按下时的完整快照"（＝修之前的写法）⇒ 只剩手势动过的那一个键
+  const viaOld = writtenFrom({ ...fragDraft }, wmNext)
+  check(
+    'adj965d **负对照**：基线取"完整快照"（修之前的写法）⇒ 源码里只剩 `wmSize` 一个孤儿键（"半截水印"）',
+    Object.keys(viaOld).join(',') === 'wmSize',
+    `写进去的键：${Object.keys(viaOld).join(',') || '（无）'}`,
+  )
+  const viaNew = writtenFrom(overlayGestureBase(wmNext, 'wm'), wmNext)
+  check(
+    'adj965d 落盘**不留半截**：被调那一层整层固化（启用 + 内容 + 参数），且**不碰**别的东西（同批草稿的页边距不进去）',
+    viaNew.wmEnabled === true &&
+      viaNew.wmText === '草稿' &&
+      viaNew.wmSize === 43 &&
+      // 该层里仍是默认值的项照旧不写（差量写入的本意不变）
+      viaNew.wmScale === undefined &&
+      // 另一层（背景）只在草稿里开着 ⇒ 不该被顺手固化
+      viaNew.bgEnabled === undefined &&
+      viaNew.bgImage === undefined &&
+      // 同批草稿里的页边距改动也不该被带进谱面（`mergeConfigEdits` 的本意）
+      viaNew.margin_left === undefined,
+    `写进去的键：${Object.keys(viaNew).sort().join(',')}`,
+  )
+  /** 换成背景层（宽度 100 → 105）同理：固化的是背景那一层，水印层不受影响 */
+  const bgNext = { ...fragDraft, bgScale: 105 } as PageConfig
+  const viaNewBg = writtenFrom(overlayGestureBase(bgNext, 'bg'), bgNext)
+  check(
+    'adj965d 换到背景层同理：固化的是背景那一层（`bgEnabled`/`bgImage`/`bgScale`），水印层不受影响',
+    viaNewBg.bgEnabled === true &&
+      viaNewBg.bgImage === '图.png' &&
+      viaNewBg.bgScale === 105 &&
+      viaNewBg.wmEnabled === undefined &&
+      viaNewBg.wmText === undefined &&
+      viaNewBg.margin_left === undefined,
+    `写进去的键：${Object.keys(viaNewBg).sort().join(',')}`,
   )
 }
 

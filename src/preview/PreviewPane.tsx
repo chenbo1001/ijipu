@@ -40,6 +40,7 @@ import {
   applyOverlayDrag,
   applyOverlayWheel,
   bothOverlayLayersVisible,
+  overlayGestureBase,
   overlayOffsetOf,
   overlayWheelMode,
 } from './overlayGesture'
@@ -587,8 +588,13 @@ export function PreviewPane() {
    *
    * ## 写盘时机（与描述头 / 辅助虚线拖拽**同一口径**）
    *  · 手势期间只 `setPageConfig(next, false)`：只做预览、不写源码；
-   *  · **松手**才 `setPageConfig(cur, true, baseCfg)` 落盘 ⇒ 一次拖动 = 一条撤销、差量只含本次改动；
+   *  · **松手**才 `setPageConfig(cur, true, baseCfg)` 落盘 ⇒ 一次拖动 = 一条撤销；
    *  · 滚轮**没有"松手"事件** ⇒ 停顿 `OVERLAY_COMMIT_DELAY_MS` 再落盘，一次连续滚动同样只一条撤销。
+   *
+   * ⚠ 基线**不是**"按下时的完整快照"，而是 `overlayGestureBase(...)`（该层自己的键置回默认）——
+   * 这样差量里除了手势动过的那一项，还包括**被调那一层自己的键**（启用 + 内容 + 参数），
+   * 否则会在谱面里留下"半截的水印/背景"（详见 `overlayGesture.ts` 里那段说明；真机上踩到过）。
+   * 别的东西（页边距、字体、另一层）依旧**不会被带进谱面**。
    */
   const cancelGestureTimer = () => {
     if (gestureTimerRef.current === null) return
@@ -617,7 +623,9 @@ export function PreviewPane() {
       if (layer === null) return
       // 到这里才拦：既不滚页面，也不触发宿主的缩放
       ev.preventDefault()
-      if (gestureBaseRef.current === null) gestureBaseRef.current = { ...pageConfigRef.current }
+      // 基线：**该层自己的键置回默认**（`overlayGestureBase` 的说明）——这样落盘时会
+      // 把这一层整层固化进谱面，而不是只写手势动过的那一个键（"半截配置"就是这么来的）
+      if (gestureBaseRef.current === null) gestureBaseRef.current = overlayGestureBase(pageConfigRef.current, layer)
       setPageConfig(applyOverlayWheel(pageConfigRef.current, layer, mode, ev.deltaY), false)
       cancelGestureTimer()
       gestureTimerRef.current = window.setTimeout(commitOverlayGesture, OVERLAY_COMMIT_DELAY_MS)
@@ -650,7 +658,8 @@ export function PreviewPane() {
     if (e.pointerType === 'mouse' && e.button !== 0) return false
     const layer = overlayTarget
     const start = overlayOffsetOf(pageConfigRef.current, layer)
-    gestureBaseRef.current = { ...pageConfigRef.current }
+    // 基线同上：该层自己的键置回默认 ⇒ 松手落盘时把这一层整层固化（不是只写偏移那两个键）
+    gestureBaseRef.current = overlayGestureBase(pageConfigRef.current, layer)
     beginDrag(e, {
       onMove: (dx, dy, ev) => {
         if (dx === 0 && dy === 0) return
