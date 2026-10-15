@@ -132,15 +132,16 @@ export function installObsidianBridge(deps: {
         // ③ 参数校验
         const source = params.source
         /**
-         * adj965j：上限由 500000 放宽到 **8 000 000** 字符。
+         * adj965k：上限**收回 500000 字符**（adj965j 曾放宽到 8 000 000，那是为"把水印/背景图内联成
+         * `data:` URI 写进这份源码"服务的）。
          *
-         * 为什么：Obsidian 插件的导出命令在栅格化前会把**水印/背景图内联成 `data:` URI** 写进这份
-         * 临时源码（应用在 iframe 里读不到 vault，只能由宿主读好再递过来，用户实报"导出 PNG 没背景"）。
-         * 一张几百 KB 的图 base64 后就是几十万字符 ⇒ 旧上限会**误拒**这份合法请求 ✗。
-         * 桥是**同源父子窗口**之间的本地通道（不是对外接口），放宽到 8MB 字符仍然安全 ✓。
+         * 为什么收回：那条内联做法**被用户实测证伪**（引擎渲染图片只认 `params.assets` 那份
+         * `{href,w,h}`，源码里写路径没用）⇒ 源码再也不会因为图片而变长，旧上限失去了存在理由 ✗。
+         * 留着一个"因为废掉的做法而放宽"的上限，只会把真正的异常（超大源码）放过去 —— 收回即收紧 ✓。
+         * 图片字节仍然**照旧经 `params.assets` 递过来**（走的是另一条长度口径，不受这里影响）。
          */
-        if (typeof source !== 'string' || source.length > 8_000_000) {
-          fail(CODE.invalidParams, 'params.source 必须是字符串（≤8000000 字符）')
+        if (typeof source !== 'string' || source.length > 500_000) {
+          fail(CODE.invalidParams, 'params.source 必须是字符串（≤500000 字符）')
           return
         }
         const pageConfig =
