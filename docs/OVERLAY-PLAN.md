@@ -21,7 +21,7 @@
 | 公共工具 | `render/svgUtil.ts`（`r1n`/`r2n`/`xmlEsc`）—— 从 `render/index.ts` 抽出，overlay 共用一份口径 | 同上 |
 | **EP-06** | `SETTINGS-AUDIT.md`（50 字段 + 新 15 行）、`SYNTAX.md` §2.14（新键与"自包含被打了洞"的告警） | commit `ccdaf16` |
 | **EP-12** | 谱面设置加「水印 / 背景」两个子页签（5 处登记 + `.pcfg-text`）；`verify-app-ui` 加**真点端到端**（打字 → 预览真出层 → 保存真落键） | commit `1dcc03b` |
-| **EP-13** | **预览区手势**（`adj965d`）：`Alt+滚轮` 缩放 / `Alt+Shift+滚轮` 旋转 / `Alt+左键拖动` 平移该层 + 三条前提 + 松手/停顿落盘；新增纯模块 `src/preview/overlayGesture.ts`（smoke 14 条）；`verify-app-ui` **真派发鼠标事件** 16 条（含负向判据与 `Ctrl+单击` 回归） | 本轮 commit（见 §七 EP-13 那一行） |
+| **EP-13** | **预览区手势**（`adj965d`）：`Alt+滚轮` 缩放 / `Alt+Shift+滚轮` 旋转 / `Alt+左键拖动` 平移该层 + 三条前提 + 松手/停顿落盘；判定逻辑落**引擎** `engine/overlayGesture.ts`（应用与 Obsidian 插件共用一份）；`verify-app-ui` **真派发鼠标事件**（含负向判据、`Ctrl+单击` 回归、累计步进、`preventDefault` 生效） | 本轮 commit（见 §七 EP-13 那一行） |
 | **EP-14①** | 网页版 FSA 读图通道（`store/assetReaderFsa.ts`：工作区目录句柄逐级下钻 → 字节；未授权与"图不在"分开报） | commit `101f64f` |
 | **EP-11①** | `obsidian-ijipu/vendor/engine` 已同步（51 文件、哈希 0 差异）；插件冒烟 **766 passed / 0 failed** | 插件仓库 commit `8c53434` |
 | 本文 | 规格 → 完整方案（含执行清单） | commit `b8cdd3a` |
@@ -226,7 +226,7 @@ resolveAsset(raw: string, base: AssetBase): Promise<{ href, w, h } | { error }>
 
 **三条前提（缺一不动）**：①「排版辅助」`uiStore.showGuides` 打开；②该层已启用（`wmEnabled`/`bgEnabled`）；
 ③该层有内容。②③ 的判据与引擎 `render/overlay.ts` 的 `overlayLayers()` **同口径**
-（实现在纯模块 `src/preview/overlayGesture.ts`，smoke 可断言）。
+（判定逻辑在**引擎**的 `engine/overlayGesture.ts` —— 应用与插件共用一份，两端只负责接线，smoke 可断言）。
 
 **为什么不用 `Ctrl`**（用户指出）：`Ctrl+滚轮` 是浏览器/桌面壳的**页面缩放**热键；
 而 `Ctrl+单击` 已经是"从这里试听"（`src/preview/noteClickAction.ts` 的 `ctrl-tryout`）。
@@ -299,7 +299,7 @@ resolveAsset(raw: string, base: AssetBase): Promise<{ href, w, h } | { error }>
 | **EP-10** | `src/preview/PreviewPane.tsx`、`src/export/*` | 解析出的 assets 传进 `renderScoreToSvg`（预览与导出**共用同一份**，避免"预览有、导出没有"） | 预览/PNG/JPG/PDF/打印五路一致；解析失败给明确提示（**不静默降级**） |
 | **EP-11** | `obsidian-ijipu/` | ① ✅ `vendor/engine` 已同步；② `scorePane.measureContentBox` 排除 `[data-overlay]`(:2226)；③ `DEFS` + `README` 补行（**EP-12 之后闸门会强制**）；④ 重生成嵌入产物（`npm run build:embed && node scripts/embed-emit.mjs`，闸门 `adj733`） | 插件 `npm run smoke` 全绿（现已 766 ✓） |
 | **EP-12** ✅ | `PageConfigDialog.tsx` + `index.css` | 两个页签 + 5 处登记 + `.pcfg-text`；顺手修两条闸门探针（写死块名的解析器 / 只查 `cfgSrc` 的图例探针） | 已完成（`1dcc03b`）+ `verify-app-ui` 真点 3 条 |
-| **EP-13** ✅ | `PreviewPane.tsx`、`ui/dragGesture.ts`、新增 `preview/overlayGesture.ts` | **`Alt+滚轮` 缩放 / `Alt+Shift+滚轮` 旋转 / `Alt+左键拖动` 平移**（裁定 9，方案 A）+ 施力前提三条（排版辅助开 + 该层启用 + 有内容）+ 松手/停顿写盘（§六） | 已完成：`npm run verify:app-ui` **34/34**——真派发 `Alt+滚轮` / `Alt+Shift+滚轮` / `Alt+拖动` ⇒ **配置真的变了**（`wmSize`/`wmRotate`/`wmOffsetX,Y`/`bgScale` 真的落进 `# jps-config`，预览里的字号/角度/中心真的动了）；**非排版辅助模式下按 Alt 一个字都不变**（负向判据）；`Ctrl+单击` 试听照旧 |
+| **EP-13** ✅ | `PreviewPane.tsx`、`ui/dragGesture.ts`、新增**引擎** `engine/overlayGesture.ts` | **`Alt+滚轮` 缩放 / `Alt+Shift+滚轮` 旋转 / `Alt+左键拖动` 平移**（裁定 9，方案 A）+ 施力前提三条（排版辅助开 + 该层启用 + 有内容）+ 松手/停顿写盘（§六）+ 滚轮累计约 100px 一档 + 「调整对象」切换器与「尚未写入谱面」提醒 | 已完成：`npm run verify:app-ui` **41/41**——真派发 `Alt+滚轮` / `Alt+Shift+滚轮` / `Alt+拖动` ⇒ **配置真的变了**（`wmSize`/`wmRotate`/`wmOffsetX,Y`/`bgScale` 真的落进 `# jps-config`，预览里的字号/角度/中心真的动了）；**非排版辅助模式下按 Alt 一个字都不变**（负向判据）；`Ctrl+单击` 试听照旧；累计步进与 `preventDefault` 各有真派发证据 |
 | **EP-14** | `workspace.ts`、`packages/ijipu-cli/src/*` | ① ✅ **网页版 FSA 读图已接**（`store/assetReaderFsa.ts`：工作区目录句柄逐级下钻 → 字节；未授权与"图不在"分开报；冒烟用假句柄 3 条断言）；② CLI `CliIo.readBinary` + 读不到就跳过并说明 + `--no-assets` | CLI 出图带背景（Node 可读时）；读不到时 stderr 有明确一行 |
 
 ## 八、优化清单（10 条，**用户已采纳**）
@@ -330,7 +330,7 @@ resolveAsset(raw: string, base: AssetBase): Promise<{ href, w, h } | { error }>
   `Ctrl+单击` 仍能从这里试听（回归，防新手势把老路抢走）。
   ⚠ 另有一条**只能从源码钉**的：wheel 监听必须 `{ passive: false }` —— 挂成被动监听时
   `preventDefault()` 被忽略，**手势照样生效**（所以真派发测不出来），只是页面同时跟着滚。
-- **纯函数断言**（EP-13）：`src/preview/overlayGesture.ts` 的步进/钳制/目标层/三条前提/口径同源
+- **纯函数断言**（EP-13）：**引擎** `engine/overlayGesture.ts` 的步进/累计/钳制/目标层/三条前提/口径同源
   （smoke `[199]`，17 条）。
 - **"半截配置"闸门**（EP-13，`adj965d` 真机踩坑后补）：拿真合并（`mergeConfigEdits` + `writeJpsConfig`，
   与 `docStore.setPageConfig` 同一条路）跑"两层都只在草稿里开着"的夹具 ⇒

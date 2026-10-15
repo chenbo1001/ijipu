@@ -10,9 +10,10 @@ import { isCoarsePointerDevice } from '../brand/env'
 // L1「用户个性」：编辑器偏好 + 字体覆盖（不进谱面；详见 docs/SETTINGS-AUDIT.md 分层）
 import { loadEditorFont, loadEditorFontSize, loadFontOverride, saveEditorFont, saveEditorFontSize, saveFontOverride } from './editorPrefs'
 import type { FontOverride } from '@ijipu/engine'
-// adj965d：`OverlayLayer`（`'wm' | 'bg'`）在本文件定义 —— "用户正在调哪一层"是状态，
-// 归属在 store；`preview/overlayGesture.ts` 只**导类型**消费它
-export type OverlayLayer = 'wm' | 'bg'
+// adj965d：`OverlayLayer`（`'wm' | 'bg'`）的唯一出处是**引擎**（`overlayGesture.ts`）——
+// 它是"水印层/背景层"这个领域概念，应用与插件共用；store 只在这里给它一个"用户选中的那层"的槽位
+export type { OverlayLayer } from '@ijipu/engine'
+import type { OverlayLayer } from '@ijipu/engine'
 
 /**
  * adj563：**只保留 App 里真的还有渲染分支的模态**（原来还躺着 'about' / 'pageConfig' / 'playback' /
@@ -214,7 +215,7 @@ interface UiState {
    *
    * 只在**水印与背景都可用**（各自已启用且有内容）时才有意义——那时预览角落会显示
    * 「调整对象」切换器；只有一层可用时手势直接作用在它身上，用户选的值被忽略
-   * （判定见 `preview/overlayGesture.ts` 的 `activeOverlayLayer`）。
+   * （判定见引擎 `overlayGesture.ts` 的 `activeOverlayLayer`）。
    *
    * ⚠ **L3 会话级**（`AGENTS.md` §七）：这是"我正在调哪一层"的临时意图，不是个性偏好，
    * 也不随谱走 ⇒ **内存态，不写 localStorage**（同 `debugBounds` 的做法）。

@@ -34,8 +34,8 @@ import {
 import type { ScorePage, PageConfig } from '@ijipu/engine'
 // adj965（方案「OVL」，EP-10）：水印/背景图的资源状态（订阅 + 并进渲染参数）
 import { getOverlaySnapshot, subscribeOverlayAssets, withOverlay } from '../store/overlayAssets'
-// adj965d（方案「OVL」，EP-13）：预览区里调水印/背景层的 **Alt 手势**——判定与换算都在纯模块里
-// （`Alt+滚轮` 缩放 / `Alt+Shift+滚轮` 旋转 / `Alt+拖动` 平移），这里只负责接线与写盘时机
+// adj965d（方案「OVL」，EP-13）：预览区里调水印/背景层的 **Alt 手势**——判定与换算在**引擎**里
+// （`@ijipu/engine` 的 `overlayGesture.ts`，与 Obsidian 插件共用一份），这里只负责接线与写盘时机
 import {
   activeOverlayLayer,
   applyOverlayDrag,
@@ -48,7 +48,7 @@ import {
   overlayWheelMode,
   overlayWheelSteps,
   wheelDeltaPx,
-} from './overlayGesture'
+} from '@ijipu/engine'
 // adj965d：预览区角落的「调整对象」与键位提示文案（面向用户的文案一律集中在 brand/copy.ts）
 import { overlayCopy } from '../brand/copy'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides'
