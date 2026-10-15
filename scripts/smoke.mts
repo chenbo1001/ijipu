@@ -13117,15 +13117,43 @@ function runAdj965OverlayTests() {
   const wm = renderScoreToSvg(mkLayout({ wmText: '草稿<&"' }))[0] ?? ''
   const rot = num(/transform="rotate\(([-\d.]+) ([-\d.]+) ([-\d.]+)\)"/, wm)
   check(
-    'adj965 文本水印：绕**页面中心**旋转 45°、`opacity="0.25"`（25% 不许被四舍五入成 0.3）、字号 36',
+    'adj965 文本水印：绕**页面中心**旋转（默认 -45°）、`opacity="0.25"`（25% 不许被四舍五入成 0.3）、字号 36',
     wm.includes('data-overlay="wm"') &&
       wm.includes('opacity="0.25"') &&
       wm.includes('font-size="36"') &&
       rot.length === 3 &&
-      near(rot[0] ?? 0, 45) &&
+      near(rot[0] ?? 0, -45) &&
       near(rot[1] ?? 0, p0.width / 2) &&
       near(rot[2] ?? 0, p0.height / 2),
     `rotate=${rot.join(',')} 页中心=${p0.width / 2},${p0.height / 2}`,
+  )
+  // adj965b（用户 2026-10-15 裁定）：默认旋转由 +45 改为 **-45**，且默认是"单个居中"（不重复）
+  check(
+    'adj965b 水印旋转默认 **-45°**（用户裁定改写）；重复铺满默认**关闭**、平铺间隔默认 100%',
+    defaultPageConfig.wmRotate === -45 &&
+      defaultPageConfig.wmRepeat === false &&
+      defaultPageConfig.wmRepeatGap === 100 &&
+      wm.includes('rotate(-45 ') &&
+      !writeJpsConfig('', { ...defaultPageConfig }, { mode: 'diff' }).includes('wmRepeat'),
+    `wmRotate=${defaultPageConfig.wmRotate} wmRepeat=${String(defaultPageConfig.wmRepeat)}`,
+  )
+  // adj965b：重复水印（平铺满页面）——判据**双向**：不勾选必须只有一枚、勾选必须多枚
+  const countWmText = (s: string): number => (s.match(/<text text-anchor="middle"/g) ?? []).length
+  const wmRepeatSvg = renderScoreToSvg(mkLayout({ wmText: '草稿', wmRepeat: true }))[0] ?? ''
+  check(
+    'adj965b 重复水印：勾选后**平铺满页面**（多枚、且仍受本页 clipPath 约束），不勾选**只画正中一枚**',
+    countWmText(wm) === 1 &&
+      countWmText(wmRepeatSvg) > 5 &&
+      wmRepeatSvg.includes('data-overlay="wm"') &&
+      wmRepeatSvg.includes('clip-path="url(#ovl-clip-0)"'),
+    `单枚=${countWmText(wm)} 平铺=${countWmText(wmRepeatSvg)}`,
+  )
+  // 间隔越大铺得越疏（同一夹具下比较枚数 ⇒ 证明这个字段真的在起作用，不是摆设）
+  const sparse = renderScoreToSvg(mkLayout({ wmText: '草稿', wmRepeat: true, wmRepeatGap: 400 }))[0] ?? ''
+  check(
+    'adj965b 平铺间隔真的生效：`wmRepeatGap=400` 比默认 100 铺得**稀**（枚数更少）',
+    countWmText(sparse) > 1 && countWmText(sparse) < countWmText(wmRepeatSvg),
+    `间隔100=${countWmText(wmRepeatSvg)} 间隔400=${countWmText(sparse)}`,
   )
   check(
     'adj965 水印文本**必须转义**（`< & "` 不许裸着进 SVG —— 一个 `<` 就打坏整份产物）',

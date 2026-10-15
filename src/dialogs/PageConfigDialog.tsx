@@ -154,6 +154,8 @@ const TAB_CONFIG_KEYS: Partial<Record<TabId, readonly string[]>> = {
     'wmSize',
     'wmScale',
     'wmRotate',
+    'wmRepeat',
+    'wmRepeatGap',
     'wmOpacity',
     'wmOffsetX',
     'wmOffsetY',
@@ -929,6 +931,25 @@ export function PageConfigDialog({
             </Row>
             <Row label="旋转(°)" mark={isNonDefault('wmRotate')}>
               <NumInput label="" range={[-180, 180]} value={draft.wmRotate} onChange={(v) => updateDraft({ wmRotate: v })} />
+            </Row>
+            {/* adj965b（用户 2026-10-15）：**重复水印**（平铺满页面）+ 行列间隔 */}
+            <Row label="重复铺满" mark={isNonDefault('wmRepeat')}>
+              <label className="pcfg-check">
+                <input
+                  type="checkbox"
+                  checked={draft.wmRepeat === true}
+                  onChange={(e) => updateDraft({ wmRepeat: e.target.checked })}
+                />
+                <span>按行列间隔平铺（不勾选＝只在页面正中画一个）</span>
+              </label>
+            </Row>
+            <Row label="平铺间隔(%)" mark={isNonDefault('wmRepeatGap')}>
+              <NumInput
+                label=""
+                range={[0, 1000]}
+                value={draft.wmRepeatGap}
+                onChange={(v) => updateDraft({ wmRepeatGap: v })}
+              />
             </Row>
             <Row label="透明度(0-100)" mark={isNonDefault('wmOpacity')}>
               <NumInput label="" range={[0, 100]} value={draft.wmOpacity} onChange={(v) => updateDraft({ wmOpacity: v })} />

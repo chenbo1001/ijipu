@@ -3351,6 +3351,17 @@ body {
   gap: 8px;
 }
 
+/* adj965b：设置行里的复选框（重复水印）。与既有 `.pcfg-row-ctl` 里的控件同高、同行对齐。 */
+.pcfg-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--jp-text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+.pcfg-check input { margin: 0; }
+
 /* adj965：「水印 / 背景」两个子页签里的路径输入框（设置行里唯一需要的文本控件）。
    样式与设置面板其它控件一致：只消费 `--jp-*`，`flex: 1` 吃满控件格。 */
 .pcfg-text {

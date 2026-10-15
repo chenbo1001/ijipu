@@ -323,6 +323,62 @@ fn ws_read_text(root: String, segs: Vec<String>) -> Result<String, String> {
     std::fs::read_to_string(&p).map_err(|e| format!("{}: {}", p.display(), e))
 }
 
+// ============================================================================
+// adj965（方案 docs/OVERLAY-PLAN.md「OVL」§四.1）：读「水印 / 背景图」的原始字节
+//
+// 为什么必须在 Rust 侧读：桌面端**双击打开**的 `.jps` 前端只拿到一串绝对路径（`nativePath`），
+// 而 WebView 侧没有任何"按绝对路径读文件"的能力（既有的 `ws_read_text` 要求"工作区根 + 相对段"）。
+//
+// 安全边界（**两个命令共用**，见方案 §八.10）：
+//   · 只接受**图片扩展名**（png/jpg/jpeg/webp/gif/bmp）——`svg` 明确排除（SVG 可内嵌脚本）；
+//   · 单文件 ≤ 16MB（超过它当背景基本也糊，且会让每页 SVG 巨大）；
+//   · 返回 `tauri::ipc::Response`（原始字节，照 `sf_soundfont_resource_read` 的写法），
+//     不经 JSON/base64 ⇒ 不额外膨胀 33%。前端拿到 `ArrayBuffer`（既有消费先例见 spessaSynthBackend）。
+//
+// `.jps` 是纯文本、可能来自别人 ⇒ 这两条边界就是"不让一句路径把任意文件读进来当图"的闸门。
+// ============================================================================
+
+/// 图片资源的字节上限（与前端 `assetSource.ts` 的 `MAX_ASSET_BYTES` **同一口径**，改一处要改两处）
+const ASSET_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+/// 读一张图片资源（扩展名白名单 + 大小上限都在这里判，两个命令共用）
+fn read_asset_bytes(p: &std::path::Path) -> Result<tauri::ipc::Response, String> {
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp") {
+        return Err(format!(
+            "只接受图片扩展名（png/jpg/jpeg/webp/gif/bmp）：{}",
+            p.display()
+        ));
+    }
+    let meta = std::fs::metadata(p).map_err(|e| format!("{}: {}", p.display(), e))?;
+    if meta.len() > ASSET_MAX_BYTES {
+        return Err(format!(
+            "图片太大（超过 {}MB）：{}",
+            ASSET_MAX_BYTES / 1024 / 1024,
+            p.display()
+        ));
+    }
+    let bytes = std::fs::read(p).map_err(|e| format!("{}: {}", p.display(), e))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// 按**绝对路径**读一张图片（桌面端双击打开 `.jps` 的那条路：前端只有 `nativePath`）
+#[tauri::command(async)]
+fn read_asset_file(path: String) -> Result<tauri::ipc::Response, String> {
+    read_asset_bytes(std::path::Path::new(&path))
+}
+
+/// 按**工作区相对路径**读一张图片（桌面端"工作区"那条路；路径穿越校验复用 `ws_path`）
+#[tauri::command(async)]
+fn ws_read_binary(root: String, segs: Vec<String>) -> Result<tauri::ipc::Response, String> {
+    let p = ws_path(&root, &segs)?;
+    read_asset_bytes(&p)
+}
+
 /// 写一个文件并**回读校验**——与 FSA 分支、`write_external_file` 同一口径：
 /// 宁可如实报失败，也绝不谎报"已保存"。
 #[tauri::command(async)]
@@ -476,6 +532,9 @@ pub fn run() {
             ws_is_dir_empty,
             ws_read_text,
             ws_write_text,
+            // adj965：读水印/背景图的原始字节（绝对路径 + 工作区相对路径两条；含扩展名白名单与大小上限）
+            read_asset_file,
+            ws_read_binary,
             ws_create_dir,
             ws_remove_file,
             ws_remove_empty_dir,
