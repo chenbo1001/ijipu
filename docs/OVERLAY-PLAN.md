@@ -3,7 +3,7 @@
 > **方案名：OVL**（Overlay，水印层 + 背景层）。
 > 开工只需一句：**「按 OVL 方案做」**，并指向本文件。
 >
-> **状态**：**EP-01…EP-06、EP-12 已完成**（见 §零）；**从 EP-07 开始做**（图片取图通道）。
+> **状态**：**EP-01…EP-06、EP-12、EP-13、EP-14① 已完成**（见 §零）；**从 EP-07 开始做**（图片取图通道）。
 > 本文是"动手前的唯一口径"：字段、单位、默认值、层序、裁剪、跨端取图、交互、执行清单、闸门。
 > 用户 2026-10-15 提需求 → 4 项裁定（§十）→ 采纳 10 条优化（§八）。
 
@@ -21,14 +21,18 @@
 | 公共工具 | `render/svgUtil.ts`（`r1n`/`r2n`/`xmlEsc`）—— 从 `render/index.ts` 抽出，overlay 共用一份口径 | 同上 |
 | **EP-06** | `SETTINGS-AUDIT.md`（50 字段 + 新 15 行）、`SYNTAX.md` §2.14（新键与"自包含被打了洞"的告警） | commit `ccdaf16` |
 | **EP-12** | 谱面设置加「水印 / 背景」两个子页签（5 处登记 + `.pcfg-text`）；`verify-app-ui` 加**真点端到端**（打字 → 预览真出层 → 保存真落键） | commit `1dcc03b` |
+| **EP-13** | **预览区手势**（`adj965d`）：`Alt+滚轮` 缩放 / `Alt+Shift+滚轮` 旋转 / `Alt+左键拖动` 平移该层 + 三条前提 + 松手/停顿落盘；新增纯模块 `src/preview/overlayGesture.ts`（smoke 14 条）；`verify-app-ui` **真派发鼠标事件** 16 条（含负向判据与 `Ctrl+单击` 回归） | 本轮 commit（见 §七 EP-13 那一行） |
+| **EP-14①** | 网页版 FSA 读图通道（`store/assetReaderFsa.ts`：工作区目录句柄逐级下钻 → 字节；未授权与"图不在"分开报） | commit `101f64f` |
 | **EP-11①** | `obsidian-ijipu/vendor/engine` 已同步（51 文件、哈希 0 差异）；插件冒烟 **766 passed / 0 failed** | 插件仓库 commit `8c53434` |
 | 本文 | 规格 → 完整方案（含执行清单） | commit `b8cdd3a` |
 
-**当前能用的能力**：**文本水印已全程可用** —— 设置界面 → 预览 → PNG/JPG/PDF/打印导出 → 差量写进 `# jps-config`。
-（图片水印与背景图还差取图通道：EP-07/EP-08/EP-09/EP-10；交互 EP-13；插件 DEFS/README 与嵌入产物 EP-11②③④。）
+**当前能用的能力**：**文本水印已全程可用** —— 设置界面 → 预览 → PNG/JPG/PDF/打印导出 → 差量写进 `# jps-config`；
+**预览区的 Alt 手势已可用**（水印层与背景层都能在预览里缩放/旋转/平移，前提三条见 §六）。
+（图片水印与背景图还差取图通道：EP-07/EP-08/EP-09/EP-10；网页版 FSA 那条 EP-14① 已接；
+插件 DEFS/README 与嵌入产物 EP-11②③④。）
 
 **基线**：`tsc -b` 0 错；`oxlint` 54 警告 / 0 错（＝基线）；`npm run smoke` 全绿（CLI 断言 118 项）；
-`npm run verify:app-ui` **17/17**；两个仓库 `git status` 干净。
+`npm run verify:app-ui` **34/34**；两个仓库 `git status` 干净。
 
 ### 跨仓状态
 
@@ -211,26 +215,45 @@ resolveAsset(raw: string, base: AssetBase): Promise<{ href, w, h } | { error }>
 
 ## 六、交互（EP-13）
 
-仅当 `showGuides`（排版辅助，默认开）**且已设背景图**时生效：
+**键位以裁定 9 为准**（用户 2026-10-15 终裁＝方案 A「Alt 一族全包」；本节早期版本写的是 `Ctrl` 一族，
+那是**被否掉的**方案，已按终裁改写）：
 
 | 操作 | 行为 | 步进 / 钳制 |
 |---|---|---|
-| `Ctrl+滚轮` | 缩放背景图（改 `bgScale`） | 5%，钳 10~1000；`Ctrl+Shift` ⇒ 1% |
-| `Ctrl+Alt+滚轮` | 旋转背景图（改 `bgRotate`） | 5°，钳 -180~180；`+Shift` ⇒ 1° |
-| `Ctrl+左键按住拖动` | 平移（改 `bgOffsetX/Y`） | 1pt 取整；`Shift` 吸附页面中心 |
+| `Alt+滚轮` | 缩放该层 | 比例类每次 **5**（个百分点），钳 10~1000；**文本水印改字号**（见下） |
+| `Alt+Shift+滚轮` | 旋转该层（**绕元素自身中心**，裁定 9.1） | 每次 **5°**，钳 -180~180 |
+| `Alt+左键按住拖动` | 平移该层（改中心偏移） | 1pt 取整；按住 `Shift` 吸附页面中心 |
 
-**与 `Ctrl+单击音符 = 试听` 的区分（双保险）**：
+**三条前提（缺一不动）**：①「排版辅助」`uiStore.showGuides` 打开；②该层已启用（`wmEnabled`/`bgEnabled`）；
+③该层有内容。②③ 的判据与引擎 `render/overlay.ts` 的 `overlayLayers()` **同口径**
+（实现在纯模块 `src/preview/overlayGesture.ts`，smoke 可断言）。
 
-1. **位移阈值 4px**：`pointerdown` 后位移 < 4px 且抬起 ⇒ **不介入**，让原有的 `Ctrl+单击`
-   （`src/preview/noteClickAction.ts:35` 的 `ctrl-tryout`）照旧触发；超过阈值才进入拖动，
-   并在松手时抑制这一次 `click`。
-2. **仅排版模式**：非排版模式下这条逻辑完全不注册 ⇒ 试听行为一字不变。
+**为什么不用 `Ctrl`**（用户指出）：`Ctrl+滚轮` 是浏览器/桌面壳的**页面缩放**热键；
+而 `Ctrl+单击` 已经是"从这里试听"（`src/preview/noteClickAction.ts` 的 `ctrl-tryout`）。
+拖动也改用 `Alt` 之后两者**完全不冲突** ⇒ **不再需要**早期方案里"4px 位移阈值 + 抑制 click"那套判据。
 
-实现要点：滚轮监听挂在预览容器上且 `{ passive: false }` + `preventDefault()`
-（否则触发浏览器页面缩放；预览现在**没有任何 wheel 监听**，Ctrl+滚轮是空的 ✓）；
+**与 `Ctrl+单击音符 = 试听` 的关系**：只剩一条防线 —— 手势仅在**排版辅助打开**时注册，
+非排版模式下按 Alt 什么都不发生；而 `Ctrl+单击` 走的是另一条路（不带 Alt），一字未变。
+（拖动确实移动过时仍会吞掉紧随其后的那一次 `click`，防的是"小位移松手时指针还停在音符上"。）
+
+### 实现口径（本轮定的两处，**未经用户逐条确认，写在这里备查**）
+
+1. **「调整对象」切换器**（用户 2026-10-15 追加要求）：水印与背景**都可调**时，预览区右下角给出
+   `调整对象：水印 / 背景` 切换器 + 一行键位提示；**只有一层可调**时不显示切换器（手势直接作用在它身上）；
+   都没得调时整块提示不渲染。选择存在 `uiStore.overlayEditLayer`（**L3 会话级，不落盘**）。
+2. **文本水印的"缩放"改的是字号 `wmSize`**，不是 `wmScale`：引擎的文本层只读 `wmSize`
+   （`overlay.ts` 的 `textLayer`），若去改 `wmScale` 就会"改了却什么都没变"。
+   步进按字号的 **≈5%（至少 1pt）**，钳 6~400 —— 与比例类的"±5 个百分点"不同，
+   因为字号是 pt 值（36 → 38 才自然，36 → 41 太跳）。相应地，"该层有内容"也按
+   **`wmType` 实际画的那一种**判：文本要有文字、图形要有路径。
+
+实现要点：滚轮监听挂在**预览容器** `.preview-pane` 上且 `{ passive: false }` + `preventDefault()`
+（React 的合成 `onWheel` 是 passive 的，里面 `preventDefault()` 会被忽略 ⇒ 页面照滚）；
 拖动复用 `src/ui/dragGesture.ts` 的指针捕获范式（`setPointerCapture` + `window` 上的 `pointermove`），
-**松手才写盘**（复用 `docStore.setPageConfig(最新, true, 按下时快照)` ⇒ 一次拖动 = 一条撤销、
-差量只含本次改动 —— 与描述头/虚线拖拽 `PreviewPane.tsx:495` 同口径）。
+**松手才写盘**（`docStore.setPageConfig(最新, true, 按下时快照)` ⇒ 一次拖动 = 一条撤销、
+差量只含本次改动 —— 与描述头/虚线拖拽同口径）；滚轮没有"松手"事件 ⇒ **停顿 400ms 落盘**
+（一次连续滚动同样只产生一条撤销）。
+`Alt+左键` 的平移与描述头拖拽共用 `.pages` 的那一个 `pointerdown`：**手势优先**，不满足条件时原样下传。
 
 ## 七、执行清单（EP-01 ～ EP-14）
 
@@ -252,7 +275,7 @@ resolveAsset(raw: string, base: AssetBase): Promise<{ href, w, h } | { error }>
 | **EP-10** | `src/preview/PreviewPane.tsx`、`src/export/*` | 解析出的 assets 传进 `renderScoreToSvg`（预览与导出**共用同一份**，避免"预览有、导出没有"） | 预览/PNG/JPG/PDF/打印五路一致；解析失败给明确提示（**不静默降级**） |
 | **EP-11** | `obsidian-ijipu/` | ① ✅ `vendor/engine` 已同步；② `scorePane.measureContentBox` 排除 `[data-overlay]`(:2226)；③ `DEFS` + `README` 补行（**EP-12 之后闸门会强制**）；④ 重生成嵌入产物（`npm run build:embed && node scripts/embed-emit.mjs`，闸门 `adj733`） | 插件 `npm run smoke` 全绿（现已 766 ✓） |
 | **EP-12** ✅ | `PageConfigDialog.tsx` + `index.css` | 两个页签 + 5 处登记 + `.pcfg-text`；顺手修两条闸门探针（写死块名的解析器 / 只查 `cfgSrc` 的图例探针） | 已完成（`1dcc03b`）+ `verify-app-ui` 真点 3 条 |
-| **EP-13** | `PreviewPane.tsx`、`ui/dragGesture.ts` | **`Alt+滚轮` 缩放 / `Alt+Shift+滚轮` 旋转 / `Alt+左键拖动` 平移**（裁定 9，方案 A）+ 施力前提三条（排版辅助开 + 该层启用 + 有内容）+ 松手/停顿写盘（§六） | **`npm run verify:app-ui`**：真派发 `Alt+滚轮` / `Alt+拖动` ⇒ **配置真的变了**；**非排版模式下按 Alt 什么都不该发生**（负向判据）；且 `Ctrl+单击` 试听照旧（不再与拖动冲突） |
+| **EP-13** ✅ | `PreviewPane.tsx`、`ui/dragGesture.ts`、新增 `preview/overlayGesture.ts` | **`Alt+滚轮` 缩放 / `Alt+Shift+滚轮` 旋转 / `Alt+左键拖动` 平移**（裁定 9，方案 A）+ 施力前提三条（排版辅助开 + 该层启用 + 有内容）+ 松手/停顿写盘（§六） | 已完成：`npm run verify:app-ui` **34/34**——真派发 `Alt+滚轮` / `Alt+Shift+滚轮` / `Alt+拖动` ⇒ **配置真的变了**（`wmSize`/`wmRotate`/`wmOffsetX,Y`/`bgScale` 真的落进 `# jps-config`，预览里的字号/角度/中心真的动了）；**非排版辅助模式下按 Alt 一个字都不变**（负向判据）；`Ctrl+单击` 试听照旧 |
 | **EP-14** | `workspace.ts`、`packages/ijipu-cli/src/*` | ① ✅ **网页版 FSA 读图已接**（`store/assetReaderFsa.ts`：工作区目录句柄逐级下钻 → 字节；未授权与"图不在"分开报；冒烟用假句柄 3 条断言）；② CLI `CliIo.readBinary` + 读不到就跳过并说明 + `--no-assets` | CLI 出图带背景（Node 可读时）；读不到时 stderr 有明确一行 |
 
 ## 八、优化清单（10 条，**用户已采纳**）
@@ -277,8 +300,14 @@ resolveAsset(raw: string, base: AssetBase): Promise<{ href, w, h } | { error }>
 - **注册与差量**：默认值 ⇒ `# jps-config` 不出现新键；改一项 ⇒ 只出现那一项；往返一致；
   `-s`/`set`/`doctor` 自动带上新键（计数变化会让手册的逐字比对判红 ⇒ 记得同步）。
 - **UI 双向闸门**（EP-12）：`TAB_CONFIG_KEYS` ↔ `isNonDefault('键')`（既有两条，`:16112`/`:16123`）。
-- **真点验证**（EP-13，`verify-app-ui`）：滚轮缩放 → 配置真的变了；拖拽 → 位置真的变了；
-  **非排版模式下 Ctrl+单击仍能试听**（负向判据，防把试听搞坏）。
+- **真派发验证**（EP-13，`verify-app-ui`）：`Alt+滚轮`/`Alt+Shift+滚轮`/`Alt+拖动` 一律走
+  CDP `Input.dispatchMouseEvent`（浏览器原生输入路径，不是 `dispatchEvent(new Event(…))`）⇒
+  **预览产物与 `# jps-config` 双向都真的变了**；**非排版辅助模式下按 Alt 一个字都不变**（负向判据）；
+  `Ctrl+单击` 仍能从这里试听（回归，防新手势把老路抢走）。
+  ⚠ 另有一条**只能从源码钉**的：wheel 监听必须 `{ passive: false }` —— 挂成被动监听时
+  `preventDefault()` 被忽略，**手势照样生效**（所以真派发测不出来），只是页面同时跟着滚。
+- **纯函数断言**（EP-13）：`src/preview/overlayGesture.ts` 的步进/钳制/目标层/三条前提/口径同源
+  （smoke `[199]`，14 条）。
 - **跨仓**（EP-11）：`vendor/engine` 逐字节一致 + 插件冒烟（DEFS / README / 嵌入门槛 `adj733`）。
 
 ## 十、决策记录
@@ -295,11 +324,19 @@ resolveAsset(raw: string, base: AssetBase): Promise<{ href, w, h } | { error }>
 | 8 | 水印/背景的**总开关** | 各加一个 `wmEnabled` / `bgEnabled`（用户 2026-10-15 要求"决定是否显示"），**默认关**（用户裁定）：不勾就不画，勾上会写进 `# jps-config`（否则换机器打开又不显示） |
 | 9 | 排版模式下的**交互键**（EP-13，**用户 2026-10-15 终裁 = 方案 A「Alt 一族全包」**） | **`Alt+滚轮` 缩放**、**`Alt+Shift+滚轮` 旋转**、**`Alt+左键拖动` 平移**。 为什么不用 `Ctrl+滚轮`：**那是页面缩放的热键**（用户指出）；为什么拖动也从 `Ctrl+左键` 改成 `Alt+左键`：与「`Ctrl+单击`=试听」**完全不冲突** ⇒ 不再需要 4px 位移阈值那套判据，修饰键也只剩一个（Alt），好记。⚠ 三件前提：**「排版辅助」打开** + **该层已启用** + **有内容**（`bgImage` 非空 / 水印文本或图形非空） |
 | 9.1 | 旋转**绕哪个点** | **绕元素自身中心**（用户 2026-10-15 裁定）。引擎现状即如此：`rotateAttr(θ, cx, cy)` 的 `cx/cy` 是该元素的中心；重复平铺时**每一枚各绕自己的中心**。**不是**绕鼠标位置（那会让元素边转边"跳位"） |
+| 11 | 两层**都可调**时手势作用在哪一层 | **预览区角落加「调整对象：水印 / 背景」切换器**（用户 2026-10-15 追加要求）。⚠ 用户同时明确：**只有一层可调、或两层都不可调时都不显示切换器**（只有一层就直接作用在它身上）。状态存 `uiStore.overlayEditLayer`（L3 会话级，不落盘） |
+| 12 | 文本水印的"缩放"改哪个字段 | **改字号 `wmSize`**（本轮实现口径，**未经用户逐条确认**，见 §六"实现口径"第 2 条）：引擎的文本层只读 `wmSize`，改 `wmScale` 等于"改了却什么都没变" |
 | 10 | 文案口径 | 面向用户的文案一律**正式、规范、简洁**，且**不许写字面 Markdown**（`.pcfg-note` 是纯文本渲染，`**加粗**` 会原样显示成星号）；集中在 `brand/copy.ts`（用户 2026-10-15 两轮指正） |
 | 6 | 桌面端保存走底栏还是系统对话框（同批裁定，与本功能无关） | 系统保存对话框 |
 
-**待定（先按"不做"实现，需要时再加）**：仅首页/每页开关、水印位置也可拖、水印文本多行与变量占位符、
+**待定（先按"不做"实现，需要时再加）**：仅首页/每页开关、水印文本多行与变量占位符、
 预览用 blob URL 省内存（导出仍用 data URI）。
+（原列在这里的"**水印位置也可拖**"已在 EP-13 做掉：水印与背景都能用 `Alt+左键拖动` 平移。）
+
+**EP-13 的滚轮步进是"一个 wheel 事件 = 一档"**（不累计位移）：鼠标滚一格恰好一档（Chrome/Windows 下
+一格约 `deltaY=100`），但**触控板一次两指滑动会派发很多个小 delta ⇒ 会连跳好几档**。
+要不要改成"累计约 100px 才走一档"（触控板手感更稳、个别驱动一格不满 100px 的鼠标则要滚两下才动一档）
+**留给用户定**；改的话只动 `PreviewPane.tsx` 里那一处累加，纯函数与闸门都不用变。
 
 ## 十一、风险与边界
 

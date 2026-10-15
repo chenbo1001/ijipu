@@ -932,6 +932,18 @@ export const overlayCopy = {
    */
   wmDisabledHint: '未启用水印：本谱不绘制水印层，勾选上方「启用水印」后生效。',
   bgDisabledHint: '未启用背景：本谱不绘制背景，勾选上方「启用背景」后生效。',
+  // ---- 预览区的手势提示与「调整对象」切换器（adj965d，EP-13） ----
+  /**
+   * 两层的名字。**设置面板的两个子页签标签也用这两条**（`PageConfigDialog` 的 `ALL_TABS`）——
+   * "水印/背景"这层身份只有一个出处，免得两处各写一份、改一处漏一处。
+   */
+  layerWm: '水印',
+  layerBg: '背景',
+  /** 标题：两层都可用 ⇒ 给一个切换器；只有一层可用 ⇒ 直接点名（用户口径：单一层不显示切换器） */
+  editTargetTitle: '调整对象',
+  editTargetOne: (layer: string) => `调整${layer}`,
+  /** 手势说明（一行纯文本；键位是用户 2026-10-15 终裁的 Alt 一族，见方案裁定记录 9） */
+  gestureKeys: 'Alt+滚轮 缩放 · Alt+Shift+滚轮 旋转 · Alt+拖动 平移',
   // ---- 解析失败原因（都要能照着做） ----
   errEmptyPath: '图片路径为空',
   errLinkNotSupported: '[[…]] 双链仅在 Obsidian 插件内可用；此处请填写相对本谱的路径',

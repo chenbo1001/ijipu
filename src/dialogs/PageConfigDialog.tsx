@@ -68,8 +68,8 @@ const ALL_TABS: { id: TabId; label: string; icon: string; section: SettingsSecti
   { id: 'font', label: '字体', icon: 'Aa', section: 'score' },
   // adj965（用户需求，方案 docs/OVERLAY-PLAN.md「OVL」）：水印层与背景层各占一个子页签。
   // 都是"这份谱长什么样" ⇒ L2、随谱走（与「布局/字体」同一半）。
-  { id: 'watermark', label: '水印', icon: '◈', section: 'score' },
-  { id: 'background', label: '背景', icon: '▧', section: 'score' },
+  { id: 'watermark', label: overlayCopy.layerWm, icon: '◈', section: 'score' },
+  { id: 'background', label: overlayCopy.layerBg, icon: '▧', section: 'score' },
 ]
 
 /** adj482：内容是「字段行」的子页签——dock 里套 `.pcfg-fields` 网格，按当页最长标签对齐；

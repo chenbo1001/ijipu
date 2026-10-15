@@ -31,6 +31,16 @@
  * 把 `src/dialogs/DocDialog.tsx` 里那两处 `, true)` 去掉（＝退回冒泡阶段）→ `npx vite build` → 再跑本脚本
  * ⇒ 「点正文里的一段文字 ⇒ 目录浮层收起」**判红**（这正是用户实报的现象），加回 `true` 即全绿。
  * 本轮就是这么确认根因的。
+ *
+ * ## adj965d（EP-13）那一段：预览区调水印/背景的 Alt 手势
+ *
+ * 同一类"源码级断言守不住"的缺陷，而且更隐蔽：`wheel` 监听**挂错容器 / 挂成被动监听**时，
+ * 代码看着全对、`tsc`/`lint`/`smoke` 全绿，但用户按下去要么没反应、要么页面跟着滚。
+ * 所以这一段一律走 CDP 的 `Input.dispatchMouseEvent`（**浏览器原生输入路径**，
+ * `modifiers` 位掩码：Alt=1、Ctrl=2、Shift=8），并**双向**判：
+ *   · 正向：`Alt+滚轮` / `Alt+Shift+滚轮` / `Alt+拖动` ⇒ 预览产物**与** `# jps-config` **都真的变了**；
+ *   · 负向：关掉「排版辅助」后按 Alt ⇒ 一个字都不许变（前提①）；
+ *   · 回归：`Ctrl+单击音符` 仍能从这里试听（不能被同区域的新手势抢走）。
  */
 import { createServer } from 'node:http'
 import { readFileSync, existsSync, statSync } from 'node:fs'
@@ -491,6 +501,266 @@ async function main() {
       '图片路径解析不了时**就地提示**（不静默少画一层）',
       errText.includes('尚未保存') || errText.includes('不支持读取图片'),
       errText.trim().slice(0, 40),
+    )
+
+    // ============ adj965d（EP-13）：预览区调「水印 / 背景」的 Alt 手势（**真派发鼠标事件**）============
+    //   为什么必须真派发：`adj959` 的教训 —— "代码里挂了监听"与"事件真收得到"是两件事
+    //   （监听挂错层、被 `stopPropagation` 掐断、wheel 挂成被动监听…源码级断言全都看不见）。
+    //   这里走 CDP 的 `Input.dispatchMouseEvent`（浏览器原生输入路径），不是 `dispatchEvent(new Event(...))`。
+    //
+    //   本用例开工时的状态（承接上面 ⑫）：水印 = 已启用 + 文本「内部草稿」（已落盘）；
+    //   背景 = 草稿里勾了启用 + 填了 `图.png`（未落盘，解析不了但**配置上有内容**）
+    //   ⇒ 三层前提齐、且**两层都可用** ⇒ 角落应当出现「调整对象」切换器。
+    await sleep(400)
+    check(
+      'adj965d 两层都可用 ⇒ 预览角落出现「调整对象」切换器（水印 / 背景）',
+      (await evalJs(c, `!!document.querySelector('.preview-overlay-hint .poh-chip')`)) === true,
+    )
+    check(
+      'adj965d 切换器默认选中「背景」（两层都可用时，手势默认作用在背景层）',
+      (await evalJs(c, `document.querySelector('.poh-chip.is-active')?.textContent ?? ''`)) === '背景',
+    )
+    check(
+      'adj965d 角落提示确实落在**预览区**里（`position: sticky` 生效，矩形在 `.preview-pane` 范围内）',
+      await evalJs(
+        c,
+        `(() => {
+           const h = document.querySelector('.preview-overlay-hint')
+           const p = document.querySelector('.preview-pane')
+           if (!h || !p) return false
+           const a = h.getBoundingClientRect(), b = p.getBoundingClientRect()
+           return a.height > 0 && a.bottom <= b.bottom + 1 && a.right <= b.right + 1 && a.top >= b.top - 1
+         })()`,
+      ),
+    )
+    // 切到「水印」：文本水印**在预览里真的画着** ⇒ 后面的断言既看配置、也看产物
+    await evalJs(c, `[...document.querySelectorAll('.poh-chip')].find((el) => el.textContent === '水印').click(), true`)
+    await sleep(200)
+    check(
+      'adj965d 点「水印」⇒ 它成为当前调整对象（切换器是真的在切）',
+      (await evalJs(c, `document.querySelector('.poh-chip.is-active')?.textContent ?? ''`)) === '水印',
+    )
+
+    /** 取一个"同时落在预览容器与第一页里"的屏幕坐标（真鼠标事件必须有坐标，且必须落在监听的那个容器内） */
+    const pointInPage = async (xFrac = 0.5, yFrac = 0.35) =>
+      await evalJs(
+        c,
+        `(() => {
+           const pane = document.querySelector('.preview-pane')?.getBoundingClientRect()
+           const page = document.querySelector('.score-page')?.getBoundingClientRect()
+           if (!pane || !page) return null
+           const l = Math.max(pane.left, page.left, 0), r = Math.min(pane.right, page.right, window.innerWidth)
+           const t = Math.max(pane.top, page.top, 0), b = Math.min(pane.bottom, page.bottom, window.innerHeight)
+           if (r - l < 8 || b - t < 8) return null
+           return { x: Math.round(l + (r - l) * ${xFrac}), y: Math.round(t + (b - t) * ${yFrac}) }
+         })()`,
+      )
+    /** 预览里文本水印的三个可观测量：字号 / 旋转 / 中心 x（平移就看 tspan 的 x） */
+    const wmVisual = async () =>
+      await evalJs(
+        c,
+        `(() => {
+           const t = document.querySelector('.score-page svg [data-overlay="wm"] text')
+           if (!t) return null
+           const span = t.querySelector('tspan')
+           return { font: t.getAttribute('font-size'), transform: t.getAttribute('transform'), x: span ? Number(span.getAttribute('x')) : null }
+         })()`,
+      )
+    /** 谱面源码里的 `# jps-config`（手势落盘后看它） */
+    const cfgNow = async () => {
+      const src = String(await evalJs(c, `document.querySelector('.editor-main textarea').value`))
+      const line = (src.match(/# jps-config:(.*)/) ?? [])[1] ?? '{}'
+      try {
+        return JSON.parse(line)
+      } catch {
+        return {}
+      }
+    }
+    /** 派发一次滚轮（`modifiers`：Alt=1、Ctrl=2、Shift=8，CDP 位掩码） */
+    const wheel = (pt, deltaY, modifiers) =>
+      c.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: pt.x, y: pt.y, deltaX: 0, deltaY, modifiers })
+
+    const pt = await pointInPage()
+    check('adj965d 夹具自检：取到了"落在预览页内"的坐标（否则下面的真派发等于没发）', pt !== null, JSON.stringify(pt))
+
+    // ---- ① `Alt+滚轮` ⇒ 缩放该层 ----
+    const vis0 = await wmVisual()
+    const cfg0 = await cfgNow()
+    await wheel(pt, -120, 1)
+    await sleep(700) // 手势停顿后自动落盘（实现里 OVERLAY_COMMIT_DELAY_MS = 400）
+    const vis1 = await wmVisual()
+    const cfg1 = await cfgNow()
+    check(
+      'adj965d **Alt+滚轮 ⇒ 缩放该层**：预览里的水印**真的变了**（文本水印缩的是字号）',
+      vis0 !== null && vis1 !== null && Number(vis1.font) > Number(vis0.font),
+      `字号 ${vis0?.font} → ${vis1?.font}`,
+    )
+    check(
+      'adj965d 缩放**停顿后落盘**：`# jps-config` 里真的写进了 `wmSize`',
+      cfg1.wmSize !== undefined && cfg1.wmSize !== cfg0.wmSize,
+      `wmSize ${cfg0.wmSize ?? '（无）'} → ${cfg1.wmSize}`,
+    )
+
+    // ---- ② `Alt+Shift+滚轮` ⇒ 旋转该层 ----
+    await wheel(pt, -120, 1 | 8)
+    await sleep(700)
+    const vis2 = await wmVisual()
+    const cfg2 = await cfgNow()
+    check(
+      'adj965d **Alt+Shift+滚轮 ⇒ 旋转该层**：预览里的 `rotate(...)` 角度真的变了（绕元素自身中心由引擎保证）',
+      vis2 !== null && /rotate\(/.test(String(vis2.transform)) && vis2.transform !== vis1?.transform,
+      `${vis1?.transform ?? '（无）'} → ${vis2?.transform ?? '（无）'}`,
+    )
+    check(
+      'adj965d 旋转停顿后落盘：`# jps-config` 里多了 `wmRotate`',
+      cfg2.wmRotate !== undefined && cfg2.wmRotate !== cfg1.wmRotate,
+      `wmRotate ${cfg1.wmRotate ?? '（无）'} → ${cfg2.wmRotate}`,
+    )
+
+    // ---- ③ `Alt+左键拖动` ⇒ 平移该层（按下 → 两次移动 → 松手，全走原生输入）----
+    const vis3 = await wmVisual()
+    const drag0 = await pointInPage(0.4, 0.4)
+    const dragSteps = [
+      [40, 26],
+      [80, 52],
+    ]
+    await c.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: drag0.x,
+      y: drag0.y,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1,
+      modifiers: 1,
+    })
+    for (const [dx, dy] of dragSteps) {
+      await c.send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: drag0.x + dx,
+        y: drag0.y + dy,
+        button: 'left',
+        buttons: 1,
+        modifiers: 1,
+      })
+    }
+    const [lastDx, lastDy] = dragSteps[dragSteps.length - 1]
+    await c.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: drag0.x + lastDx,
+      y: drag0.y + lastDy,
+      button: 'left',
+      buttons: 0,
+      clickCount: 1,
+      modifiers: 1,
+    })
+    await sleep(500)
+    const vis4 = await wmVisual()
+    const cfg4 = await cfgNow()
+    check(
+      'adj965d **Alt+左键拖动 ⇒ 平移该层**：预览里水印中心真的往右下挪了（tspan 的 x 变大）',
+      vis3 !== null && vis4 !== null && Number(vis4.x) > Number(vis3.x),
+      `水印中心 x ${vis3?.x} → ${vis4?.x}`,
+    )
+    check(
+      'adj965d 拖动**松手即落盘**：`# jps-config` 里多了 `wmOffsetX` / `wmOffsetY`（且都是整数）',
+      Number.isInteger(cfg4.wmOffsetX) && Number.isInteger(cfg4.wmOffsetY) && cfg4.wmOffsetX > 0 && cfg4.wmOffsetY > 0,
+      `offset = ${cfg4.wmOffsetX}, ${cfg4.wmOffsetY}`,
+    )
+
+    // ---- ④ 切到「背景」再滚一次：证明切换器**真的换了作用对象**（改的是 `bgScale`，不是 `wmScale`）----
+    //   背景图在本夹具里解析不了（未保存的谱 + 相对路径）⇒ 预览里没有 bg 层可看，
+    //   所以这一条只判**配置**：那正是"背景图能不能摆"的唯一凭据。
+    const cfgWmLayer = await cfgNow()
+    await evalJs(c, `[...document.querySelectorAll('.poh-chip')].find((el) => el.textContent === '背景').click(), true`)
+    await sleep(200)
+    await wheel(pt, -120, 1)
+    await sleep(700)
+    const cfgBgLayer = await cfgNow()
+    check(
+      'adj965d 切到「背景」后 Alt+滚轮 ⇒ 改的是 **`bgScale`**（水印那几个键**原封不动**，两层不串台）',
+      cfgBgLayer.bgScale !== undefined &&
+        cfgBgLayer.bgScale !== cfgWmLayer.bgScale &&
+        cfgBgLayer.wmSize === cfgWmLayer.wmSize &&
+        cfgBgLayer.wmRotate === cfgWmLayer.wmRotate &&
+        cfgBgLayer.wmOffsetX === cfgWmLayer.wmOffsetX,
+      `bgScale ${cfgWmLayer.bgScale ?? '（无）'} → ${cfgBgLayer.bgScale}`,
+    )
+
+    // ---- ⑤ 负向判据：**非排版辅助模式下按 Alt 什么都不该发生** ----
+    await evalJs(
+      c,
+      `[...document.querySelectorAll('.topbar-btn')].find((el) => (el.getAttribute('title') || '').includes('排版辅助')).click(), true`,
+    )
+    await sleep(300)
+    check(
+      'adj965d 关掉「排版辅助」⇒ 角落提示与切换器一并消失（前提①）',
+      (await evalJs(c, `!!document.querySelector('.preview-overlay-hint')`)) === false,
+    )
+    const cfgBeforeNeg = await cfgNow()
+    const visBeforeNeg = await wmVisual()
+    await wheel(pt, -120, 1)
+    await sleep(900)
+    const cfgAfterNeg = await cfgNow()
+    const visAfterNeg = await wmVisual()
+    check(
+      'adj965d **负向判据**：排版辅助关着时 Alt+滚轮 ⇒ 配置与预览**一个字都没变**（手势完全不介入）',
+      JSON.stringify(cfgAfterNeg) === JSON.stringify(cfgBeforeNeg) &&
+        visAfterNeg?.font === visBeforeNeg?.font &&
+        visAfterNeg?.transform === visBeforeNeg?.transform,
+      `wmSize ${cfgBeforeNeg.wmSize} → ${cfgAfterNeg.wmSize}`,
+    )
+
+    // ---- ⑥ 正向回归：`Ctrl+单击音符` = 从这里试听，**照旧可用**（没被 Alt 手势抢走）----
+    //     刻意在**排版辅助打开**（手势生效的模式）下测——这才是"两套交互并存"的真实场景。
+    await evalJs(
+      c,
+      `[...document.querySelectorAll('.topbar-btn')].find((el) => (el.getAttribute('title') || '').includes('排版辅助')).click(), true`,
+    )
+    await sleep(300)
+    await evalJs(c, `(() => { const p = document.querySelector('.preview-pane'); p.scrollTop = 0; p.scrollLeft = 0; return true })()`)
+    await sleep(250)
+    const notePt = await evalJs(
+      c,
+      `(() => {
+         const pane = document.querySelector('.preview-pane')?.getBoundingClientRect()
+         if (!pane) return null
+         for (const el of document.querySelectorAll('.score-page svg [data-notepos]')) {
+           const r = el.getBoundingClientRect()
+           const x = r.left + r.width / 2, y = r.top + r.height / 2
+           if (r.width > 0 && r.height > 0 && x > pane.left + 4 && x < pane.right - 4 && y > pane.top + 4 && y < pane.bottom - 4) {
+             return { x: Math.round(x), y: Math.round(y) }
+           }
+         }
+         return null
+       })()`,
+    )
+    check('adj965d 夹具自检：取到了预览里可见音符的坐标', notePt !== null, JSON.stringify(notePt))
+    // `Ctrl+单击`：modifiers=2（Ctrl）
+    await c.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: notePt.x,
+      y: notePt.y,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1,
+      modifiers: 2,
+    })
+    await c.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: notePt.x,
+      y: notePt.y,
+      button: 'left',
+      buttons: 0,
+      clickCount: 1,
+      modifiers: 2,
+    })
+    await sleep(800)
+    check(
+      'adj965d **Ctrl+单击音符 ⇒ 照旧从这里试听**（底栏切到「试听」；Alt 手势没有把这条路抢走）',
+      (await evalJs(
+        c,
+        `[...document.querySelectorAll('.tool-dock-tab')].find((t) => t.textContent.includes('试听'))?.classList.contains('is-active') === true`,
+      )) === true,
     )
 
     c.close()

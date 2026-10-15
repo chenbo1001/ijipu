@@ -19,8 +19,12 @@ import type React from 'react'
 export interface DragHandlers {
   /** 按下时调用（返回 `false` 可放弃本次拖拽，比如"当前不可拖"） */
   onStart?: () => boolean | void
-  /** 拖动中：`dx` / `dy` 为相对按下点的位移（px，右/下为正） */
-  onMove: (dx: number, dy: number) => void
+  /**
+   * 拖动中：`dx` / `dy` 为相对按下点的位移（px，右/下为正）。
+   * `ev` 是本次 `pointermove`——需要读**当时的**修饰键（如 `Alt` 手势的 `Shift` 吸附）
+   * 或屏幕坐标时用它；只关心位移的调用方照旧只写前两个参数即可（adj965d 加的第三个参数）。
+   */
+  onMove: (dx: number, dy: number, ev: PointerEvent) => void
   /** 松手或被系统取消（如来电话、手势打断）时调用 */
   onEnd?: () => void
 }
@@ -48,7 +52,7 @@ export function beginDrag(e: React.PointerEvent, handlers: DragHandlers): void {
   const move = (ev: PointerEvent) => {
     if (ev.pointerId !== pointerId) return
     ev.preventDefault()
-    handlers.onMove(ev.clientX - x0, ev.clientY - y0)
+    handlers.onMove(ev.clientX - x0, ev.clientY - y0, ev)
   }
   const end = (ev: PointerEvent) => {
     if (ev.pointerId !== pointerId) return

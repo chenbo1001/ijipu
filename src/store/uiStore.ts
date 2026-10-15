@@ -10,6 +10,9 @@ import { isCoarsePointerDevice } from '../brand/env'
 // L1「用户个性」：编辑器偏好 + 字体覆盖（不进谱面；详见 docs/SETTINGS-AUDIT.md 分层）
 import { loadEditorFont, loadEditorFontSize, loadFontOverride, saveEditorFont, saveEditorFontSize, saveFontOverride } from './editorPrefs'
 import type { FontOverride } from '@ijipu/engine'
+// adj965d：`OverlayLayer`（`'wm' | 'bg'`）在本文件定义 —— "用户正在调哪一层"是状态，
+// 归属在 store；`preview/overlayGesture.ts` 只**导类型**消费它
+export type OverlayLayer = 'wm' | 'bg'
 
 /**
  * adj563：**只保留 App 里真的还有渲染分支的模态**（原来还躺着 'about' / 'pageConfig' / 'playback' /
@@ -206,6 +209,17 @@ interface UiState {
    * **下次运行恢复默认关** ⇒ **内存态、不写 localStorage**（不要用 `loadBool`）。
    */
   debugBounds: boolean
+  /**
+   * adj965d（方案「OVL」EP-13）：预览区里 `Alt+滚轮 / Alt+Shift+滚轮 / Alt+拖动` 调的是**哪一层**。
+   *
+   * 只在**水印与背景都可用**（各自已启用且有内容）时才有意义——那时预览角落会显示
+   * 「调整对象」切换器；只有一层可用时手势直接作用在它身上，用户选的值被忽略
+   * （判定见 `preview/overlayGesture.ts` 的 `activeOverlayLayer`）。
+   *
+   * ⚠ **L3 会话级**（`AGENTS.md` §七）：这是"我正在调哪一层"的临时意图，不是个性偏好，
+   * 也不随谱走 ⇒ **内存态，不写 localStorage**（同 `debugBounds` 的做法）。
+   */
+  overlayEditLayer: OverlayLayer
   /** 中国色主题 id */
   theme: string
   /** 深浅色模式：auto=跟随系统 prefers-color-scheme（adj48） */
@@ -340,6 +354,8 @@ interface UiState {
   setShowGuides: (b: boolean) => void
   /** adj905q：预览可视调试开关（L3 会话级，不持久化） */
   setDebugBounds: (b: boolean) => void
+  /** adj965d：预览区 Alt 手势"调哪一层"（L3 会话级，不持久化；只在两层都可用时才由用户选） */
+  setOverlayEditLayer: (l: OverlayLayer) => void
   setTheme: (id: string) => void
   setThemeMode: (m: ThemeMode) => void
   setSystemLight: (b: boolean) => void
@@ -428,6 +444,8 @@ export const useUiStore = create<UiState>()((set) => ({
   showGuides: loadBool(SHOW_GUIDES_KEY, true),
   // adj905q：预览可视调试 —— **L3 会话级**，刻意不读 localStorage（重开即恢复默认关）
   debugBounds: false,
+  // adj965d（EP-13）：预览区 Alt 手势默认调**背景层**（L3 会话级，不落盘）
+  overlayEditLayer: 'bg',
   theme: loadTheme(),
   themeMode: loadThemeMode(),
   systemLight: detectSystemLight(),
@@ -506,6 +524,9 @@ export const useUiStore = create<UiState>()((set) => ({
   bumpPlaybackTick: () => set((s) => ({ playbackTick: s.playbackTick + 1 })),
   // adj905q：预览可视调试开关（L3 会话级）——**不落盘**，重开应用即回到默认关
   setDebugBounds: (b) => set({ debugBounds: b }),
+  // adj965d：Alt 手势调哪一层（L3 会话级）——**不落盘**；默认背景层：
+  // 需要摆位置的通常是垫进来的那张背景图（水印多为居中一个）
+  setOverlayEditLayer: (l) => set({ overlayEditLayer: l }),
   setShowGuides: (b) => {
     try {
       localStorage.setItem(SHOW_GUIDES_KEY, b ? '1' : '0')

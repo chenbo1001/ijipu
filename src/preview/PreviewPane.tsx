@@ -33,6 +33,18 @@ import {
 import type { ScorePage, PageConfig } from '@ijipu/engine'
 // adj965（方案「OVL」，EP-10）：水印/背景图的资源状态（订阅 + 并进渲染参数）
 import { getOverlaySnapshot, subscribeOverlayAssets, withOverlay } from '../store/overlayAssets'
+// adj965d（方案「OVL」，EP-13）：预览区里调水印/背景层的 **Alt 手势**——判定与换算都在纯模块里
+// （`Alt+滚轮` 缩放 / `Alt+Shift+滚轮` 旋转 / `Alt+拖动` 平移），这里只负责接线与写盘时机
+import {
+  activeOverlayLayer,
+  applyOverlayDrag,
+  applyOverlayWheel,
+  bothOverlayLayersVisible,
+  overlayOffsetOf,
+  overlayWheelMode,
+} from './overlayGesture'
+// adj965d：预览区角落的「调整对象」与键位提示文案（面向用户的文案一律集中在 brand/copy.ts）
+import { overlayCopy } from '../brand/copy'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides'
 // adj905q：预览可视调试的边界虚线几何（时值格 / 墨迹 / 段层）——几何在引擎侧算好，这里只消费
 import { computeDebugBounds } from '@ijipu/engine/layout/guides'
@@ -70,6 +82,15 @@ function applyNoteHighlight(el: Element, on: boolean): void {
  */
 const PREVIEW_W = PREVIEW_BASE_W
 
+/**
+ * adj965d（EP-13）：滚轮手势的"停顿落盘"延时（毫秒）。
+ *
+ * 拖动有"松手"可以判定一次手势结束，滚轮没有 ⇒ 只能按停顿判定：
+ * 连续滚动期间每次事件都重置这个定时器，停手约 0.4s 后把这一串改动**一次性**写进 `# jps-config`
+ * （于是"滚一下"和"滚十下"都是一条撤销，而不是十条）。
+ */
+const OVERLAY_COMMIT_DELAY_MS = 400
+
 export function PreviewPane() {
   const parseResult = useDocStore((s) => s.parseResult)
   const pageConfig = useDocStore((s) => s.pageConfig)
@@ -82,6 +103,9 @@ export function PreviewPane() {
   const activeNoteIds = useDocStore((s) => s.activeNoteIds)
   const jumpCursor = useDocStore((s) => s.jumpCursor)
   const showGuides = useUiStore((s) => s.showGuides)
+  // adj965d（EP-13）：Alt 手势调的是哪一层（L3 会话级；两层都可用时由预览角落的切换器决定）
+  const overlayEditLayer = useUiStore((s) => s.overlayEditLayer)
+  const setOverlayEditLayer = useUiStore((s) => s.setOverlayEditLayer)
   // adj905q：预览可视调试开关（L3 会话级，不落盘；关着时不计算几何）
   const debugBounds = useUiStore((s) => s.debugBounds)
   const previewZoom = useUiStore((s) => s.previewZoom)
@@ -105,6 +129,31 @@ export function PreviewPane() {
   const containerRef = useRef<HTMLDivElement>(null)
   const pageConfigRef = useRef(pageConfig)
   pageConfigRef.current = pageConfig
+
+  // ---- adj965d（EP-13）：Alt 手势要用到的引用（全部只在手势里读写，不参与渲染）----
+  /** 预览滚动容器（滚轮监听挂在它上面：`{ passive: false }` 才能 `preventDefault`） */
+  const paneRef = useRef<HTMLDivElement>(null)
+  /**
+   * 本轮手势**开始前**的生效配置快照。写盘时以它为基线（`setPageConfig(cur, true, base)`）⇒
+   * 一次拖动/一次连续滚动只固化本次改动、只产生一条撤销（与描述头、辅助虚线拖拽同一口径，adj454）。
+   */
+  const gestureBaseRef = useRef<PageConfig | null>(null)
+  /** 滚轮的"停顿落盘"定时器（滚轮没有松手事件，只能靠停顿判定一次手势结束） */
+  const gestureTimerRef = useRef<number | null>(null)
+  /**
+   * 刚做完一次 `Alt+拖动` ⇒ 抑制紧随其后的那次 `click`。
+   * 为什么需要：`Alt+拖动` 落在音符上时，松手仍会派发一次 `click`，
+   * 而那会被 `onClick` 当成"单击音符"把编辑器光标跳走 —— 用户只是在摆背景图。
+   */
+  const suppressClickRef = useRef(false)
+
+  /**
+   * adj965d：当前手势作用在哪一层（`null` = 三条前提不齐 ⇒ 完全不介入）。
+   * ①「排版辅助」关 ⇒ 直接 `null`（负向判据）；②该层已启用 ③该层有内容 ⇒ 在纯模块里判。
+   */
+  const overlayTarget = showGuides ? activeOverlayLayer(pageConfig, overlayEditLayer) : null
+  /** 两层都可用时才显示「调整对象」切换器（用户口径：只有一层或都没有，不显示切换器） */
+  const overlaySwitcher = overlayTarget !== null && bothOverlayLayersVisible(pageConfig)
 
   /**
    * adj965（方案「OVL」，EP-10）：水印/背景图的资源来自**异步解析**（读字节 + 解码），
@@ -296,6 +345,18 @@ export function PreviewPane() {
   // adj652：点**谱面文本里的链接**（引擎把 URL 包成了 `a.jp-link`，如 S: 谱尾说明里的官网）
   //   → 用系统浏览器打开，不走"音符跳转"那条路。
   const onClick = (e: React.MouseEvent) => {
+    /**
+     * adj965d（EP-13）：刚做完一次 `Alt+拖动` ⇒ **吞掉这一次 click**。
+     * 松手时若指针正好停在音符上，这次 click 会被下面当成"单击音符"把光标跳走——
+     * 而用户只是在摆水印/背景图。标记由 `startOverlayDrag` 在**真的移动过**时置上，
+     * 并在每次 `pointerdown` 重置（所以"没移动的 Alt+单击"照旧落到正常分支）。
+     */
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
     const link = (e.target as Element).closest('a.jp-link')
     if (link) {
       e.preventDefault()
@@ -514,6 +575,105 @@ export function PreviewPane() {
     }
   }, [drag, layout, setPageConfig, previewZoom])
 
+  // ==================== adj965d（EP-13）：水印层 / 背景层的 Alt 手势 ====================
+  /**
+   * 键位（用户 2026-10-15 终裁＝方案 A「Alt 一族全包」，见方案裁定记录 9）：
+   *   `Alt+滚轮` 缩放该层、`Alt+Shift+滚轮` 旋转该层、`Alt+左键拖动` 平移该层。
+   * 旋转绕**元素自身中心**——引擎 `overlay.ts` 的 `rotateAttr(θ, cx, cy)` 的 `cx/cy` 就是元素中心
+   * （裁定 9.1），所以这里**只改角度值**，不需要传任何旋转中心。
+   *
+   * 不用 `Ctrl`：那是**页面缩放**的热键（用户指出），而且 `Ctrl+单击` 已经是"从这里试听"
+   * （`noteClickAction`）⇒ 拖动改用 `Alt` 后两者完全不冲突，也就不需要"4px 位移阈值"那套判据。
+   *
+   * ## 写盘时机（与描述头 / 辅助虚线拖拽**同一口径**）
+   *  · 手势期间只 `setPageConfig(next, false)`：只做预览、不写源码；
+   *  · **松手**才 `setPageConfig(cur, true, baseCfg)` 落盘 ⇒ 一次拖动 = 一条撤销、差量只含本次改动；
+   *  · 滚轮**没有"松手"事件** ⇒ 停顿 `OVERLAY_COMMIT_DELAY_MS` 再落盘，一次连续滚动同样只一条撤销。
+   */
+  const cancelGestureTimer = () => {
+    if (gestureTimerRef.current === null) return
+    clearTimeout(gestureTimerRef.current)
+    gestureTimerRef.current = null
+  }
+  /** 把本轮手势的改动并进 `# jps-config`（基线取"手势开始前"的那份快照） */
+  const commitOverlayGesture = () => {
+    cancelGestureTimer()
+    const base = gestureBaseRef.current
+    gestureBaseRef.current = null
+    if (base !== null) setPageConfig(pageConfigRef.current, true, base)
+  }
+  /** 指针位移(px) → 谱面 pt 的换算系数（含预览 zoom；与描述头/辅助虚线拖拽同一算式） */
+  const ptScale = (): number => (layout ? (PREVIEW_W / layout.pages[0].width) * (previewZoom / 100) : 1)
+
+  useEffect(() => {
+    const pane = paneRef.current
+    if (!pane) return
+    const onWheel = (ev: WheelEvent) => {
+      // ① 没按 Alt ⇒ 直接返回（**绝不 preventDefault**：普通滚动、`Ctrl+滚轮` 页面缩写照旧）
+      const mode = overlayWheelMode(ev)
+      if (mode === null || ev.deltaY === 0) return
+      // ②③ 该层已启用且有内容（`overlayTarget` 已把「排版辅助」也算进去了）
+      const layer = overlayTarget
+      if (layer === null) return
+      // 到这里才拦：既不滚页面，也不触发宿主的缩放
+      ev.preventDefault()
+      if (gestureBaseRef.current === null) gestureBaseRef.current = { ...pageConfigRef.current }
+      setPageConfig(applyOverlayWheel(pageConfigRef.current, layer, mode, ev.deltaY), false)
+      cancelGestureTimer()
+      gestureTimerRef.current = window.setTimeout(commitOverlayGesture, OVERLAY_COMMIT_DELAY_MS)
+    }
+    // ⚠ 必须 `{ passive: false }`：React 的合成 `onWheel` 与浏览器默认监听都是 passive 的，
+    // 里面调 `preventDefault()` 会被忽略（控制台只丢一句警告，页面照滚）——adj965d 实测确认。
+    pane.addEventListener('wheel', onWheel, { passive: false })
+    return () => pane.removeEventListener('wheel', onWheel)
+    // 依赖全是原始值/稳定引用 ⇒ 一次连续滚动期间**不会**反复装卸监听
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout, setPageConfig, overlayTarget, previewZoom])
+
+  /** 组件卸载时把"还没到停顿点"的那次滚轮改动固化掉（否则最后一下会丢） */
+  useEffect(
+    () => () => {
+      if (gestureTimerRef.current !== null) clearTimeout(gestureTimerRef.current)
+      const base = gestureBaseRef.current
+      gestureBaseRef.current = null
+      if (base !== null) setPageConfig(pageConfigRef.current, true, base)
+    },
+    [setPageConfig],
+  )
+
+  /**
+   * `Alt+左键按下` ⇒ 开始平移该层；返回 `true` 表示"这次按下归手势管"（描述头拖拽不再接手）。
+   * 不满足条件时返回 `false`，**不 `preventDefault`、不捕获指针** ⇒ 试听/光标/描述头拖拽一字不变。
+   */
+  const startOverlayDrag = (e: React.PointerEvent): boolean => {
+    if (overlayTarget === null || e.altKey !== true) return false
+    if (e.pointerType === 'mouse' && e.button !== 0) return false
+    const layer = overlayTarget
+    const start = overlayOffsetOf(pageConfigRef.current, layer)
+    gestureBaseRef.current = { ...pageConfigRef.current }
+    beginDrag(e, {
+      onMove: (dx, dy, ev) => {
+        if (dx === 0 && dy === 0) return
+        suppressClickRef.current = true
+        // `Shift` 吸附页面中心（方案优化 6）——读**当时的**修饰键，中途按下也生效
+        setPageConfig(applyOverlayDrag(pageConfigRef.current, layer, start, dx, dy, ptScale(), ev.shiftKey), false)
+      },
+      onEnd: () => commitOverlayGesture(),
+    })
+    return true
+  }
+
+  /**
+   * 预览区的 `pointerdown` 只有这一个入口：**先给手势，再给描述头拖拽**。
+   * （分两个 prop 是做不到的——同一个事件只有一个 handler；这里显式表达优先级。）
+   */
+  const onPointerDown = (e: React.PointerEvent) => {
+    // 每次按下都重置"抑制 click"标记：上一次手势若没真的移动过，就不该影响后面的正常点击
+    suppressClickRef.current = false
+    if (startOverlayDrag(e)) return
+    onMetaPointerDown(e)
+  }
+
   if (!layout || pagesHtml.length === 0) {
     return (
       <div className="preview-pane">
@@ -553,8 +713,8 @@ export function PreviewPane() {
   }
 
   return (
-    <div className="preview-pane">
-      <div className="pages" ref={containerRef} onClick={onClick} onDoubleClick={onDoubleClick} onPointerDown={onMetaPointerDown}>
+    <div className="preview-pane" ref={paneRef}>
+      <div className="pages" ref={containerRef} onClick={onClick} onDoubleClick={onDoubleClick} onPointerDown={onPointerDown}>
         {pagesHtml.map((svg, i) => {
           const page = layout.pages[i]
           const pct = (v: number) => `${((v / page.width) * 100).toFixed(2)}%`
@@ -810,6 +970,33 @@ export function PreviewPane() {
           )
         })}
       </div>
+      {/* adj965d（EP-13）：角落的手势提示 + 「调整对象」切换器。
+          显示条件 = 三条前提齐（排版辅助开 + 该层已启用 + 有内容）；**切换器**只在两层都可用时出现
+          （用户口径：只有一层或都没有，不需要切换器）。
+          `position: sticky` 而不是 absolute：`.preview-pane` 本身是滚动容器，
+          绝对定位会随内容滚走，sticky 才能始终贴在预览区右下角。 */}
+      {overlayTarget !== null && (
+        <div className="preview-overlay-hint">
+          <span className="poh-title">
+            {overlaySwitcher
+              ? overlayCopy.editTargetTitle
+              : overlayCopy.editTargetOne(overlayTarget === 'wm' ? overlayCopy.layerWm : overlayCopy.layerBg)}
+          </span>
+          {overlaySwitcher &&
+            (['wm', 'bg'] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                className={`poh-chip${overlayTarget === k ? ' is-active' : ''}`}
+                aria-pressed={overlayTarget === k}
+                onClick={() => setOverlayEditLayer(k)}
+              >
+                {k === 'wm' ? overlayCopy.layerWm : overlayCopy.layerBg}
+              </button>
+            ))}
+          <span className="poh-keys">{overlayCopy.gestureKeys}</span>
+        </div>
+      )}
     </div>
   )
 }

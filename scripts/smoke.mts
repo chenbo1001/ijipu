@@ -145,6 +145,15 @@ import { fmtClock } from '../src/dialogs/playbackClock.ts'
 import { createPlaybackGeneration, shouldAutoPlay } from '../src/dialogs/playbackSession.ts'
 // adj723：预览区音符点击的动作判定（单击 / Ctrl+单击）
 import { noteClickAction, noteClickKind } from '../src/preview/noteClickAction.ts'
+// adj965d（方案「OVL」EP-13）：预览区调水印/背景层的 Alt 手势（纯函数：步进/钳制/目标层/前提）
+import {
+  activeOverlayLayer,
+  applyOverlayDrag,
+  applyOverlayWheel,
+  bothOverlayLayersVisible,
+  overlayLayerVisible,
+  overlayWheelMode,
+} from '../src/preview/overlayGesture.ts'
 
 /**
  * adj722：`{dsb}` 两层的**唯一判定口径**（供本文件多处断言共用）。
@@ -13368,6 +13377,180 @@ function runAdj965OverlayTests() {
   check('adj965 只改一项 ⇒ 设置行里只出现那一项（差量写入）', keys.join(',') === 'wmText', keys.join(','))
 }
 
+function runAdj965dOverlayGestureTests() {
+  console.log('[199] adj965d overlay Alt gestures (OVL EP-13)')
+  const cfgOf = (patch: Record<string, unknown> = {}) =>
+    ({
+      ...defaultPageConfig,
+      wmEnabled: true,
+      bgEnabled: true,
+      wmText: '草稿',
+      bgImage: 'a.png',
+      ...patch,
+    }) as PageConfig
+
+  // ---- ① 三条前提之②③：该层"已启用 + 有内容"（判据与引擎 overlayLayers 同口径） ----
+  check(
+    'adj965d 前提②③：总开关关 / 内容为空 ⇒ 该层不参与手势；都满足 ⇒ 参与',
+    overlayLayerVisible(cfgOf({ bgEnabled: false }), 'bg') === false &&
+      overlayLayerVisible(cfgOf({ bgImage: '' }), 'bg') === false &&
+      overlayLayerVisible(cfgOf({ wmEnabled: false }), 'wm') === false &&
+      overlayLayerVisible(cfgOf({ wmText: '' }), 'wm') === false &&
+      overlayLayerVisible(cfgOf(), 'bg') === true &&
+      overlayLayerVisible(cfgOf(), 'wm') === true,
+    '',
+  )
+  /**
+   * **文本水印的"有内容"看的是 `wmText`，不是"两个字段有一个非空"**：
+   * `wmType==='text'` 时引擎只读 `wmText`，若此时只填了图片却让手势介入，滚轮会去改 `wmScale`——
+   * 而文本层根本不读它 ⇒ "改了却什么都没变"（最容易让人以为功能坏了的情形）。
+   */
+  check(
+    'adj965d 文本水印只填了图片 ⇒ **不算"有内容"**（否则滚轮改 `wmScale`，而文本层根本不读它）',
+    overlayLayerVisible(cfgOf({ wmType: 'text', wmText: '', wmImage: 'a.png' }), 'wm') === false &&
+      overlayLayerVisible(cfgOf({ wmType: 'image', wmText: '', wmImage: 'a.png' }), 'wm') === true &&
+      overlayLayerVisible(cfgOf({ wmType: 'image', wmText: '草稿', wmImage: '' }), 'wm') === false,
+    '',
+  )
+
+  // ---- ② 目标层：两层都可用才由用户选；只有一层就是它；都没有不介入 ----
+  const both = cfgOf()
+  check(
+    'adj965d 两层都可用 ⇒ 用手选的那层；只有一层可用 ⇒ 就是它（此时**不显示切换器**）；都没有 ⇒ 不介入',
+    activeOverlayLayer(both, 'wm') === 'wm' &&
+      activeOverlayLayer(both, 'bg') === 'bg' &&
+      activeOverlayLayer(cfgOf({ wmText: '' }), 'wm') === 'bg' &&
+      activeOverlayLayer(cfgOf({ bgImage: '' }), 'bg') === 'wm' &&
+      activeOverlayLayer(cfgOf({ wmText: '', bgImage: '' }), 'bg') === null &&
+      bothOverlayLayersVisible(both) === true &&
+      bothOverlayLayersVisible(cfgOf({ wmText: '' })) === false &&
+      bothOverlayLayersVisible(cfgOf({ bgImage: '' })) === false,
+    '',
+  )
+
+  // ---- ③ 键位：只有 Alt 才介入；Shift 在滚轮里切换"缩放/旋转" ----
+  check(
+    'adj965d 键位：没按 Alt ⇒ 不介入（普通滚动与 Ctrl+滚轮 页面缩放照旧）；Alt ⇒ 缩放；Alt+Shift ⇒ 旋转',
+    overlayWheelMode({ altKey: false, shiftKey: false }) === null &&
+      overlayWheelMode({ altKey: false, shiftKey: true }) === null &&
+      overlayWheelMode({}) === null &&
+      overlayWheelMode({ altKey: true, shiftKey: false }) === 'scale' &&
+      overlayWheelMode({ altKey: true, shiftKey: true }) === 'rotate',
+    '',
+  )
+
+  // ---- ④ 缩放：步进 5（个百分点）、方向、钳制 ----
+  const bg100 = cfgOf({ bgScale: 100 })
+  check(
+    'adj965d 滚轮缩放背景：向上滚 +5、向下滚 −5；钳在 10~1000（`# jps-config` 可能被手改出越界值）',
+    applyOverlayWheel(bg100, 'bg', 'scale', -100).bgScale === 105 &&
+      applyOverlayWheel(bg100, 'bg', 'scale', 100).bgScale === 95 &&
+      applyOverlayWheel(cfgOf({ bgScale: 1000 }), 'bg', 'scale', -100).bgScale === 1000 &&
+      applyOverlayWheel(cfgOf({ bgScale: 10 }), 'bg', 'scale', 100).bgScale === 10,
+    '',
+  )
+  /**
+   * **文本水印的"缩放"改的是字号 `wmSize`**（引擎的文本层只读它）；
+   * 图形水印与背景图才是 `wmScale` / `bgScale`。这条与上面"有内容"的判据是同一件事的两面。
+   */
+  check(
+    'adj965d 文本水印的"缩放"改**字号 `wmSize`**（≈5%、至少 1pt、钳 6~400），**不动 `wmScale`**；图形水印才改 `wmScale`',
+    applyOverlayWheel(cfgOf({ wmType: 'text', wmSize: 36 }), 'wm', 'scale', -100).wmSize === 38 &&
+      applyOverlayWheel(cfgOf({ wmType: 'text', wmSize: 36 }), 'wm', 'scale', -100).wmScale === 100 &&
+      applyOverlayWheel(cfgOf({ wmType: 'text', wmSize: 6 }), 'wm', 'scale', -100).wmSize === 7 &&
+      applyOverlayWheel(cfgOf({ wmType: 'text', wmSize: 400 }), 'wm', 'scale', -100).wmSize === 400 &&
+      applyOverlayWheel(cfgOf({ wmType: 'image', wmSize: 36 }), 'wm', 'scale', -100).wmScale === 105,
+    '',
+  )
+
+  // ---- ⑤ 旋转：步进 5°、方向、钳 -180~180 ----
+  check(
+    'adj965d 滚轮旋转：向上滚 +5°、向下滚 −5°；钳在 -180~180（旋转中心是元素自身中心，引擎侧无需传参）',
+    applyOverlayWheel(cfgOf({ wmRotate: -45 }), 'wm', 'rotate', -100).wmRotate === -40 &&
+      applyOverlayWheel(cfgOf({ wmRotate: -45 }), 'wm', 'rotate', 100).wmRotate === -50 &&
+      applyOverlayWheel(cfgOf({ bgRotate: 0 }), 'bg', 'rotate', -100).bgRotate === 5 &&
+      applyOverlayWheel(cfgOf({ bgRotate: 180 }), 'bg', 'rotate', -100).bgRotate === 180 &&
+      applyOverlayWheel(cfgOf({ bgRotate: -180 }), 'bg', 'rotate', 100).bgRotate === -180,
+    '',
+  )
+
+  // ---- ⑥ 平移：位移换算（含预览缩放）、取整、基线不自我累加、Shift 吸附中心 ----
+  check(
+    'adj965d 拖动平移：位移÷预览缩放后取整加到**按下时的**偏移上（不自我累加）；Shift ⇒ 吸附页面中心 (0,0)',
+    applyOverlayDrag(cfgOf(), 'bg', { x: 0, y: 0 }, 30, -20, 1, false).bgOffsetX === 30 &&
+      applyOverlayDrag(cfgOf(), 'bg', { x: 0, y: 0 }, 30, -20, 1, false).bgOffsetY === -20 &&
+      // 缩放 2 倍 ⇒ 位移要折半（与描述头/辅助虚线拖拽的换算同一口径）
+      applyOverlayDrag(cfgOf(), 'bg', { x: 0, y: 0 }, 30, 30, 2, false).bgOffsetX === 15 &&
+      // 基线是按下时那一份 ⇒ 5px 的位移不会因为反复调用而越走越远
+      applyOverlayDrag(cfgOf(), 'bg', { x: 10, y: 10 }, 5, 5, 1, false).bgOffsetX === 15 &&
+      // 非整数位移取整（px/pt 一律整数，与设置面板一致）
+      applyOverlayDrag(cfgOf(), 'bg', { x: 0, y: 0 }, 3, 0, 2, false).bgOffsetX === 2 &&
+      applyOverlayDrag(cfgOf({ bgOffsetX: 77, bgOffsetY: -66 }), 'bg', { x: 77, y: -66 }, 40, 40, 1, true)
+        .bgOffsetY === 0,
+    '',
+  )
+  check(
+    'adj965d 水印与背景各改自己那四个字段（互不串台）',
+    applyOverlayDrag(cfgOf(), 'wm', { x: 0, y: 0 }, 12, 0, 1, false).wmOffsetX === 12 &&
+      applyOverlayDrag(cfgOf(), 'wm', { x: 0, y: 0 }, 12, 0, 1, false).bgOffsetX === 0 &&
+      applyOverlayWheel(cfgOf(), 'wm', 'scale', -100).bgScale === 100,
+    '',
+  )
+
+  /**
+   * ⑦ **口径同源**：手势写出来的字段，引擎必须真的读。
+   * 只证明"函数返回了 38"是不够的（那可能是个没人消费的字段）——这里把结果喂进真渲染。
+   */
+  const SRC = 'V: 1.0\nB: 测试\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n'
+  const wmCfg = applyOverlayWheel(cfgOf({ wmType: 'text', wmText: '草稿', wmSize: 36 }), 'wm', 'scale', -100)
+  const wmLay = layoutScore(parseJps(SRC), { ...wmCfg, bgEnabled: false } as never)
+  const wmSvg = renderScoreToSvg(wmLay)[0] ?? ''
+  const bgCfg = applyOverlayWheel(cfgOf({ bgScale: 100 }), 'bg', 'scale', -100)
+  // 期望宽度从**夹具自己的页宽**算（不写死 1000：换纸张/边距时这条不该跟着红）
+  const wantImageW = wmLay.pages[0].width * 1.05
+  const bgSvg =
+    renderScoreToSvg(layoutScore(parseJps(SRC), { ...bgCfg, wmEnabled: false } as never), {
+      assets: { bg: { href: 'data:image/png;base64,AA', w: 200, h: 100 } },
+    })[0] ?? ''
+  const gotImageW = Number(/<image[^>]* width="([\d.]+)"/.exec(bgSvg)?.[1] ?? 0)
+  check(
+    'adj965d 口径同源：手势改出来的值**引擎真的读**（字号 38 进产物；背景 105% ⇒ image 宽 = 页宽 × 1.05）',
+    wmSvg.includes('font-size="38"') && Math.abs(gotImageW - wantImageW) < 1,
+    `image 宽 ${gotImageW}（页宽 ${wmLay.pages[0].width} × 1.05 = ${wantImageW.toFixed(1)}）`,
+  )
+
+  // ---- ⑧ 源码级接线闸门：三条"机器闸门守不住就会静默失效"的接线 ----
+  const paneSrc = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
+  /**
+   * ⚠ **必须 `{ passive: false }`**：被动监听里 `preventDefault()` 会被忽略（页面照滚，只丢一句警告）。
+   * 这条**真派发也测不出来**（手势照样改配置，只是页面同时滚了），所以只能从源码上钉。
+   */
+  check(
+    'adj965d 滚轮监听挂在预览容器上且 `{ passive: false }`（否则 preventDefault 被忽略、页面照滚）',
+    /<div className="preview-pane" ref=\{paneRef\}>/.test(paneSrc) &&
+      /addEventListener\('wheel', onWheel, \{ passive: false \}\)/.test(paneSrc),
+    '',
+  )
+  check(
+    'adj965d 前提①在代码里：`showGuides` 关 ⇒ 目标层为 `null`（不拦事件、不写盘 ⇒ 按 Alt 什么都不发生）',
+    /const overlayTarget = showGuides \? activeOverlayLayer\(pageConfig, overlayEditLayer\) : null/.test(paneSrc),
+    '',
+  )
+  check(
+    'adj965d 「调整对象」切换器**只在两层都可用**时渲染（用户口径：单一层或都没有就不显示）',
+    /const overlaySwitcher = overlayTarget !== null && bothOverlayLayersVisible\(pageConfig\)/.test(paneSrc) &&
+      /\{overlaySwitcher &&/.test(paneSrc),
+    '',
+  )
+  check(
+    'adj965d 写盘时机与既有虚线拖拽同口径：手势期只预览（`, false)`），落盘那一处带上按下时的基线快照',
+    /setPageConfig\(applyOverlayWheel\([\s\S]{0,120}?, false\)/.test(paneSrc) &&
+      /setPageConfig\(applyOverlayDrag\([\s\S]{0,160}?, false\)/.test(paneSrc) &&
+      /setPageConfig\(pageConfigRef\.current, true, base\)/.test(paneSrc),
+    '',
+  )
+}
+
 function runAdj963NewAndSaveTests() {
   console.log('[196] adj963 new/save behaviour across three shells')
   const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
@@ -17417,8 +17600,17 @@ console.log('[113] touch-friendly drag handles (adj487)')
   check('adj487 调整条与 split 分隔条改为 Pointer Events（不再 onMouseDown）',
     dockSrc.includes('onPointerDown={startDrag}') && /onPointerDown=\{startSplitDrag/.test(appSrc),
     '')
+  /**
+   * ⚠ adj965d（EP-13）改了这里的**接线口径**，断言随之改写（不是放宽）：
+   * 预览区的 `pointerdown` 现在只有**一个**入口 `onPointerDown` —— 同一个事件只能有一个 handler，
+   * 而 `Alt+左键` 的"平移水印/背景层"必须在描述头拖拽**之前**拿到事件。
+   * 所以旧判据（`.pages` 直接挂 `onMetaPointerDown`）不再成立，新口径是：
+   * ① `.pages` 仍走 Pointer Events 的 `onPointerDown`；② 描述头拖拽仍是它的下游分支。
+   * `pointermove/pointerup/pointercancel` 三条照旧要求（Pointer Events 的移植没有回退）。
+   */
   check('adj487 预览里描述头 / 辅助虚线拖拽也用 Pointer Events',
-    /onPointerDown=\{onMetaPointerDown\}/.test(prevSrc) &&
+    /onPointerDown=\{onPointerDown\}/.test(prevSrc) &&
+      /if \(startOverlayDrag\(e\)\) return\s*\n\s*onMetaPointerDown\(e\)/.test(prevSrc) &&
       prevSrc.includes('pointermove') && prevSrc.includes('pointerup') && prevSrc.includes('pointercancel'),
     '')
   check('adj487 预览虚线 startDrag 签名改为 React.PointerEvent',
@@ -18144,6 +18336,14 @@ runAdj927ExternalChangeTests()
     } catch (e) {
       failed++
       console.error('  ✗ adj534-537 界面调整用例抛异常', e)
+    }
+  })
+  .then(() => {
+    try {
+      runAdj965dOverlayGestureTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj965d 水印/背景 Alt 手势用例抛异常', e)
     }
   })
   .then(() => {
