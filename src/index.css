@@ -3351,6 +3351,9 @@ body {
   gap: 8px;
 }
 
+/* adj965：图片解析失败的提示（水印/背景页签里就地显示；用警示色，别让人以为是普通说明） */
+.pcfg-asset-err { color: var(--jp-danger, #d33); }
+
 /* adj965b：设置行里的复选框（重复水印）。与既有 `.pcfg-row-ctl` 里的控件同高、同行对齐。 */
 .pcfg-check {
   display: flex;

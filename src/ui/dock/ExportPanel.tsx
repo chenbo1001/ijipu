@@ -16,6 +16,8 @@
  */
 import { useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../../store/docStore'
+// adj965（方案 OVL，EP-10）：水印/背景资源（与预览/打印共用同一份）
+import { withOverlay } from '../../store/overlayAssets'
 import { useUiStore } from '../../store/uiStore'
 import { exportCopy } from '../../brand/copy'
 import { layoutScore, renderScoreToSvg, buildPlaySequence, inferBpm, eventsToMidi, rangeBox, applyRangeToSvg, readViewBoxOf } from '@ijipu/engine'
@@ -117,7 +119,8 @@ export function ExportPanel() {
     // adj647：导出与预览共用同一份宿主字体实测（否则导出的 PDF/SVG 与预览版面不一致）
     const fm = measureFontMeta(pageConfig)
     const layout = layoutScore(parseResult, pageConfig, defaultInstrumentRef, fm.layout)
-    return applyRange(renderScoreToSvg(layout, fm.render))
+    // adj965（方案 OVL，EP-10）：导出与预览**共用同一份**水印/背景资源（否则会出现"预览有、导出没有"）
+    return applyRange(renderScoreToSvg(layout, withOverlay(fm.render)))
   }
 
   const downloadJps = () => {

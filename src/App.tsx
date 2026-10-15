@@ -135,6 +135,42 @@ function App() {
   }, [])
 
   /**
+   * adj965（方案「OVL」，EP-10）：**水印/背景图的解析触发**。
+   *
+   * 何时需要重新解析：① `wmImage` / `bgImage` / `wmType` 变了（用户改了设置）；
+   * ② 文档换了"基准"（打开了别的文件、从桌面双击打开、切了工作区）。
+   *
+   * 基准三态（方案 §四.1）：工作区绑定 → `nativePath` 目录 → 都没有（未保存的新文档）。
+   * ⚠ 解析失败**不在这里弹提示**（每次重排都会重跑，会把用户烦死）——
+   * 错误存在快照里，由「水印 / 背景」两个设置页签就地显示（`overlaySnapshot.errors`）。
+   */
+  const assetPageConfig = useDocStore((s) => s.pageConfig)
+  const assetBinding = useDocStore((s) => s.binding)
+  const assetNativePath = useDocStore((s) => s.nativePath)
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      const { getWorkspace } = await import('./store/workspace')
+      const { syncOverlayAssets } = await import('./store/overlayAssets')
+      const rec = assetBinding !== null ? await getWorkspace() : null
+      if (!alive) return
+      const base =
+        assetBinding !== null && rec !== null
+          ? ({ kind: 'workspace', rec, segs: assetBinding.segs } as const)
+          : assetNativePath !== null
+            ? ({ kind: 'native', dir: assetNativePath.replace(/[\\/][^\\/]*$/, '') } as const)
+            : ({ kind: 'none' } as const)
+      await syncOverlayAssets(
+        { wmType: assetPageConfig.wmType, wmImage: assetPageConfig.wmImage, bgImage: assetPageConfig.bgImage },
+        base,
+      )
+    })()
+    return () => {
+      alive = false
+    }
+  }, [assetPageConfig.wmType, assetPageConfig.wmImage, assetPageConfig.bgImage, assetBinding, assetNativePath])
+
+  /**
    * adj621（用户要求）：**统一应用标题**——浏览器页签、PWA 页签、Tauri 桌面窗口标题都用
    * 「爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)」形式，方便在 OS 任务栏 / Alt+Tab /
    * Chrome 页签一眼看出当前应用版本。

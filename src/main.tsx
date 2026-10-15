@@ -113,6 +113,20 @@ void (async () => {
 
   // 存储就绪后才求值 store 模块（见上面的说明）
   await import('./store/uiStore')
+  /**
+   * adj965（方案「OVL」，EP-10）：装配**图片通道**与**解码器**。
+   *
+   * · 放在 `initHostBridge()` **之后**：宿主形态（`isHostEmbedded()`）此时才确定；
+   * · 桌面端用默认的 Rust 通道（`read_asset_file` / `ws_read_binary`）；嵌入版那条宿主桥
+   *   等 EP-09 接（届时它会**后装**并覆盖这里 ⇒ `setAssetReader` 是"后装者生效"）；
+   *   纯网页版暂时没有通道 ⇒ 图片字段会给出**明确提示**（不静默少画一层）。
+   */
+  {
+    const { installAssetReader, installAssetDecoder } = await import('./store/overlayAssets')
+    const { isHostEmbedded } = await import('./store/hostBridge')
+    installAssetReader(bridge !== null || isHostEmbedded() ? null : undefined)
+    installAssetDecoder()
+  }
   const { default: App } = await import('./App.tsx')
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

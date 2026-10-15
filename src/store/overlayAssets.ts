@@ -102,9 +102,12 @@ export async function syncOverlayAssets(
 /**
  * 把当前资源并入渲染参数 —— **三处渲染点都走它**（预览 / 导出面板 / 打印）。
  * 没有资源时等价于"不加任何东西"，产物与 `adj965` 之前**逐字节相同**（有闸门钉着）。
+ *
+ * @param opts 宿主实测的字体度量
+ * @param assets 资源；**预览显式传**它订阅到的那份（这样 `useMemo` 的依赖是真的、lint 也能看出来），
+ *               导出/打印省略 ⇒ 读当前快照（它们不是 React 渲染路径，读当下值正合适）
  */
-export function withOverlay(opts?: RenderFontMeta): RenderOpts {
-  const assets = snapshot.assets
+export function withOverlay(opts?: RenderFontMeta, assets: RenderAssets | undefined = snapshot.assets): RenderOpts {
   return assets === undefined ? { ...(opts ?? {}) } : { ...(opts ?? {}), assets }
 }
 

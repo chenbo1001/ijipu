@@ -65,6 +65,8 @@ import { uiCopy, savePhaseCopy, pasteImportCopy, externalOpenCopy, workspaceCopy
 // adj927：外部改动的**基准**（我们最后一次写出去/读进来的内容指纹 + mtime）——见 externalChange.ts
 // adj943：写盘**发出前**还要登记"在途写"（写盘落地与基准刷新之间有窗口，见该文件头说明）
 import { baselineKeyOf, setBaseline, markWriteInFlight } from './externalChange'
+// adj965（方案 OVL，EP-10）：打印页也要带水印/背景层 —— 与预览/导出共用同一份资源
+import { withOverlay } from './overlayAssets'
 // adj615：打印（菜单「打印」/ Ctrl+P）——浏览器侧原语在 export/print.ts，页面在这里现算
 import { installPrintHooks, printPages } from '../export/print'
 import { printFileNameOfResult } from '../export/printName'
@@ -85,7 +87,8 @@ function currentPrintPages(s: DocState): string[] {
   const instrumentRef = firstEnabledInstrumentRef(useUiStore.getState().playbackHqEnabled)
   // adj647：打印与预览共用同一份宿主实测（否则打印出来的角标间距/占宽与预览不一致）
   const fm = measureFontMeta(s.pageConfig)
-  return renderScoreToSvg(layoutScore(s.parseResult, s.pageConfig, instrumentRef, fm.layout), fm.render)
+  // adj965（方案 OVL，EP-10）：打印与预览/导出**共用同一份**水印/背景资源
+  return renderScoreToSvg(layoutScore(s.parseResult, s.pageConfig, instrumentRef, fm.layout), withOverlay(fm.render))
 }
 
 /**

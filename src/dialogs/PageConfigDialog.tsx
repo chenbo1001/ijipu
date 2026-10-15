@@ -15,7 +15,7 @@
  * 之后在**新开的终端**里就能直接 `ijipu cli …`（未注册显示「注册」、已注册显示「解除」；
  * 状态**每次现读系统实况**，不记在我们自己的配置里 ✓）。文案在 `brand/copy.ts` 的 `cliPathCopy`。
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
@@ -38,6 +38,8 @@ import { ToolIcon } from '../ui/ToolIcon'
 import { useNumberScrub, useHoldRepeat } from '../ui/numberScrubGesture'
 // adj526：谱面数值字段的 [min,max] 单一来源（逐项引用引擎 GUIDE_LIMITS / GUIDE_LIMITS_EX）
 import { PAGE_NUM_RANGES as RANGE, coarseFor } from '../ui/numFieldRanges'
+// adj965（方案「OVL」，EP-10）：水印/背景图解析失败要就地提示（订阅资源快照）
+import { getOverlaySnapshot, subscribeOverlayAssets } from '../store/overlayAssets'
 
 type TabId = 'global' | 'theme' | 'soundbank' | 'cli' | 'score' | 'font' | 'watermark' | 'background'
 
@@ -335,6 +337,13 @@ export function PageConfigDialog({
    */
   const nonDefaultKeys = useMemo(() => new Set(nonDefaultConfigKeys(draft)), [draft])
   const isNonDefault = (key: string) => nonDefaultKeys.has(key)
+  /**
+   * adj965（方案「OVL」优化 7）：水印/背景图的**解析失败**要就地告诉用户（"图不在/太大/类型不对"），
+   * 而不是静默少画一层让人以为"设置了没用"。按前缀分给各自的页签。
+   */
+  const overlaySnap = useSyncExternalStore(subscribeOverlayAssets, getOverlaySnapshot)
+  const overlayErrors = (prefix: '水印图' | '背景图'): string[] =>
+    overlaySnap.errors.filter((e) => e.startsWith(prefix))
   /** 当前子页签里"非默认"的项数——>0 才在面板末尾给出图例（没标记时不占地方） */
   const tabNonDefaultCount = (TAB_CONFIG_KEYS[tab] ?? []).filter((k) => nonDefaultKeys.has(k)).length
 
@@ -962,6 +971,12 @@ export function PageConfigDialog({
               显示比率以<strong>页宽</strong>为 100%（图形的宽度 = 页宽 × 比率，高度按原图比例）；
               位置是<strong>元素中心相对页面中心</strong>的偏移（0,0 = 正中）。透明度的 100 = 完全不透明。
             </div>
+            {/* adj965（方案优化 7）：图片解析失败**就地显示**，不静默少画一层 */}
+            {overlayErrors('水印图').map((e) => (
+              <div key={e} className="pcfg-note pcfg-asset-err">
+                ⚠ {e}
+              </div>
+            ))}
           </>
         )
       /**
@@ -1002,6 +1017,11 @@ export function PageConfigDialog({
               「排版辅助」打开时可用 <code>Ctrl+滚轮</code> 缩放、<code>Ctrl+Alt+滚轮</code> 旋转、
               <code>Ctrl+拖动</code> 移动位置。
             </div>
+            {overlayErrors('背景图').map((e) => (
+              <div key={e} className="pcfg-note pcfg-asset-err">
+                ⚠ {e}
+              </div>
+            ))}
           </>
         )
     }

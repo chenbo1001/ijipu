@@ -5,7 +5,7 @@
  * 联动（M3）：activeNoteId 高亮对应音符并滚动；点击音符/歌词跳转编辑器光标。
  * 辅助虚线（adj7）：页面四边距 + 每行行距虚线，按住拖拽直接调整页面设置。
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 // adj529：预览页基准宽（与顶栏"双击比率按宽度适配"的反算算式同源）
@@ -31,6 +31,8 @@ import {
   playheadBaseOf,
 } from '@ijipu/engine'
 import type { ScorePage, PageConfig } from '@ijipu/engine'
+// adj965（方案「OVL」，EP-10）：水印/背景图的资源状态（订阅 + 并进渲染参数）
+import { getOverlaySnapshot, subscribeOverlayAssets, withOverlay } from '../store/overlayAssets'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides'
 // adj905q：预览可视调试的边界虚线几何（时值格 / 墨迹 / 段层）——几何在引擎侧算好，这里只消费
 import { computeDebugBounds } from '@ijipu/engine/layout/guides'
@@ -104,6 +106,11 @@ export function PreviewPane() {
   const pageConfigRef = useRef(pageConfig)
   pageConfigRef.current = pageConfig
 
+  /**
+   * adj965（方案「OVL」，EP-10）：水印/背景图的资源来自**异步解析**（读字节 + 解码），
+   * 所以预览要订阅它——资源到位后才重画一次。`overlay` 也进下面 useMemo 的依赖。
+   */
+  const overlay = useSyncExternalStore(subscribeOverlayAssets, getOverlaySnapshot)
   const { layout, pagesHtml, summary } = useMemo(() => {
     const musicLines = parseResult.groups.length
     const notes = parseResult.groups.reduce((n, g) => n + g.music.tokens.length, 0)
@@ -134,10 +141,12 @@ export function PreviewPane() {
     // adj199/adj629v/adj638/adj647：宿主实测的字体度量（渲染侧）——见 preview/fontMeta.ts
     return {
       layout: lay,
-      pagesHtml: renderScoreToSvg(lay, fm.render),
+      // adj965：`withOverlay` 把当前解析好的图片资源并进渲染参数（与导出/打印**共用同一份**）；
+      // 这里**显式传**订阅到的那份，`useMemo` 的依赖才是真的（不然依赖藏在模块状态里）
+      pagesHtml: renderScoreToSvg(lay, withOverlay(fm.render, overlay.assets)),
       summary: sum,
     }
-  }, [parseResult, pageConfig, defaultInstrumentRef, enabledInstRefs])
+  }, [parseResult, pageConfig, defaultInstrumentRef, enabledInstRefs, overlay])
 
   // adj291：布局后把「音符 index → 物理页」映射回填 store，供编辑器光标联动对齐音符 id.page（自动分页一致）
   useEffect(() => {

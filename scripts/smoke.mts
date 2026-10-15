@@ -13090,6 +13090,27 @@ async function runAdj965AssetSourceTests() {
   setAssetReader(null)
   setAssetDecoder(null)
   clearAssetCache()
+
+  /**
+   * EP-10 接线（源码级）：**三处渲染点都必须走 `withOverlay`**。
+   *
+   * 为什么这条必须有：水印/背景是"页面级底图"，预览与导出/打印各渲一遍 ⇒ 只要有一处忘了包，
+   * 就会出现"预览里有水印、导出的图里没有"（或反过来）——用户看到的是"导出的东西不对"，
+   * 而两边代码各自看都"没错"。这正是 `adj960` 的 `%FILE%`、`adj965` 两条探针那个老毛病：
+   * **同一件事多处实现 ⇒ 必然漂**。
+   */
+  const previewSrc = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
+  const exportSrc = String(readFileSync('src/ui/dock/ExportPanel.tsx', 'utf8'))
+  const docSrcW = String(readFileSync('src/store/docStore.ts', 'utf8'))
+  check(
+    'adj965 EP-10 预览 / 导出面板 / 打印三处渲染都走 `withOverlay`（三处一致，不会"预览有、导出没有"）',
+    /renderScoreToSvg\(lay, withOverlay\(fm\.render, overlay\.assets\)\)/.test(previewSrc) &&
+      /renderScoreToSvg\(layout, withOverlay\(fm\.render\)\)/.test(exportSrc) &&
+      /renderScoreToSvg\(layoutScore\(s\.parseResult[^)]*\), withOverlay\(fm\.render\)\)/.test(docSrcW) &&
+      // **负对照**：预览若退回"直接传 fm.render"（＝忘了包）⇒ 同一判据判假
+      !/renderScoreToSvg\(lay, fm\.render\)/.test(previewSrc),
+    '',
+  )
 }
 
 function runAdj965OverlayTests() {
@@ -15614,7 +15635,7 @@ function runAdj615Tests() {
       storeSrc,
     ) &&
       /measureFontMeta\(s\.pageConfig\)/.test(storeSrc) &&
-      /renderScoreToSvg\(layoutScore\(s\.parseResult, s\.pageConfig, instrumentRef, fm\.layout\), fm\.render\)/.test(storeSrc) &&
+      /renderScoreToSvg\(layoutScore\(s\.parseResult, s\.pageConfig, instrumentRef, fm\.layout\), withOverlay\(fm\.render\)\)/.test(storeSrc) &&
       /showNotice\(exportCopy\.blockedByError, 'warn'\)/.test(storeSrc),
     '',
   )

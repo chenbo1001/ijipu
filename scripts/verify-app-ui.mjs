@@ -443,6 +443,34 @@ async function main() {
       cfgLine,
     )
 
+    // ---- ⑫ adj965：图片路径解析不了时**就地提示**（方案优化 7：绝不静默少画一层）----
+    //   本用例里的文档是"未命名模板"（既没绑定工作区、也没有 nativePath）⇒ 相对路径必然解析不了，
+    //   而**恰好**能验证"解析失败要说话"这一条 —— 这正是最容易做错的地方：
+    //   悄悄不画，用户只会以为"设置了没用"。
+    //   走「背景」页签（只填一个路径框即可触发解析），不必去动下拉框。
+    //   ⚠ 上一步「保存设置」会**收起底栏** ⇒ 这里必须重新打开面板，否则 `.jp-tab` 已经不在 DOM 里。
+    await evalJs(
+      c,
+      `[...document.querySelectorAll('.topbar-btn')].find((el) => (el.getAttribute('title') || '').includes('谱面')).click(), true`,
+    )
+    await waitFor(c, `!!document.querySelector('.pcfg-root')`, '谱面设置面板重新出现')
+    await waitFor(
+      c,
+      `[...document.querySelectorAll('.jp-tab')].some((t) => t.textContent.includes('背景'))`,
+      '「背景」子页签出现',
+    )
+    await evalJs(c, `[...document.querySelectorAll('.jp-tab')].find((t) => t.textContent.includes('背景')).click(), true`)
+    await waitFor(c, `!!document.querySelector('.pcfg-text')`, '背景页签内容出现')
+    await evalJs(c, `document.querySelector('.pcfg-text').focus(), true`)
+    await c.send('Input.insertText', { text: '图.png' })
+    await sleep(800)
+    const errText = String(await evalJs(c, `document.querySelector('.pcfg-asset-err')?.textContent ?? ''`))
+    check(
+      '图片路径解析不了时**就地提示**（不静默少画一层）',
+      errText.includes('还没有保存') || errText.includes('没有读取图片的通道'),
+      errText.trim().slice(0, 40),
+    )
+
     c.close()
   } catch (e) {
     check(`脚本自身出错：${e instanceof Error ? e.message : String(e)}`, false)
