@@ -31,8 +31,8 @@
 （图片水印与背景图还差取图通道：EP-07/EP-08/EP-09/EP-10；网页版 FSA 那条 EP-14① 已接；
 插件 DEFS/README 与嵌入产物 EP-11②③④。）
 
-**基线**：`tsc -b` 0 错；`oxlint` 54 警告 / 0 错（＝基线）；`npm run smoke` 全绿（CLI 断言 118 项）；
-`npm run verify:app-ui` **34/34**；两个仓库 `git status` 干净。
+**基线**：`tsc -b` 0 错；`oxlint` 54 警告 / 0 错（＝基线）；`npm run smoke` 全绿（CLI 断言 126 项）；
+`npm run verify:app-ui` **41/41**；两个仓库 `git status` 干净。
 
 ### 跨仓状态
 
