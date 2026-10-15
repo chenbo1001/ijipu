@@ -29,8 +29,9 @@ export const MODIFIER_SYMBOLS: { symbol: string; label: string; barline?: boolea
   { symbol: 'sby+', label: '上波音（3.5 齿）' },
   { symbol: 'xby', label: '下波音（带竖线）' },
   { symbol: 'xby+', label: '下波音（3.5 齿）' },
-  { symbol: 'shy', label: '上滑音（弧线；从**下方**滑进本音，记号画在音符左侧）' },
-  { symbol: 'xhy', label: '下滑音（弧线；从**上方**滑进本音，记号画在音符左侧）' },
+  // adj965（用户指正）：补全标签是**纯文本** ⇒ 去掉字面 `**`（会显示成星号）
+  { symbol: 'shy', label: '上滑音（弧线；从下方滑进本音，记号画在音符左侧）' },
+  { symbol: 'xhy', label: '下滑音（弧线；从上方滑进本音，记号画在音符左侧）' },
   // adj375：&hx 已独立为标记块（不再依附音符）——可写在音符前或后，占宽；播放时占用
   // 前一个音符总时值（含同音连音/增时线/附点）的 1/4 作呼吸换气（最多 1/2 拍，静音）
   { symbol: 'hx', label: '呼吸记号（独立块，换气静音）' },

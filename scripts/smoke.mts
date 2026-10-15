@@ -16515,22 +16515,38 @@ function runAdj605Tests() {
     '',
   )
   /**
-   * adj965（用户 2026-10-15 指正）：**纯文本界面的文案里不许出现 Markdown 标记**。
+   * adj965（用户 2026-10-15 指正）：**界面文案里不许出现字面 Markdown 加粗**。
    *
-   * 由来：`cliPathCopy.intro` / `legacyHint`（注册命令行那组）与 `uiCopy.segmentRowGapHint` 里
-   * 写了 `**加粗**`，而它们都是 `.pcfg-note` **纯文本**渲染 ⇒ 用户在界面上看到的是**字面星号**。
-   * `adj605` 的图例探针只覆盖图例那一小块，管不到别处 ⇒ 这里补一条覆盖全部文案的闸门。
+   * 由来：`cliPathCopy.intro` / `legacyHint`（注册命令行那组）、`uiCopy.segmentRowGapHint`、
+   * 快捷键表的 `预览区**点音符**…`、补全标签的 `从**下方**滑进本音` 都写了 `**加粗**`，
+   * 而它们全是**纯文本**渲染 ⇒ 用户在界面上看到的是**字面星号**。
+   * `adj605` 的图例探针只覆盖图例那一小块，管不到别处 ⇒ 这里补一条**扫全 src** 的闸门。
    *
-   * 判据：剥掉注释后，扫 `brand/copy.ts` 的**字符串字面量**（单引号；模板串暂不覆盖，已注明）。
+   * 覆盖范围：`src/**` 的单引号字符串字面量（剥注释后）；**模板串暂不覆盖**（保底声明）。
+   * 唯一豁免：`src/help/markdown.ts` —— 它是 Markdown **解析器**本身，`'**'` 是它的语法标记。
    */
-  const copyNoComment = String(readFileSync('src/brand/copy.ts', 'utf8'))
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/[^\n]*/g, '')
-  const markedCopy = [...copyNoComment.matchAll(/'[^'\n]*\*\*[^'\n]*'/g)].map((m) => m[0].slice(0, 48))
+  const mdScanned: string[] = []
+  const walkTs = (dir: string): string[] => {
+    const out: string[] = []
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = `${dir}/${e.name}`
+      if (e.isDirectory()) {
+        if (e.name !== 'gen') out.push(...walkTs(p))
+      } else if (/\.tsx?$/.test(e.name)) out.push(p)
+    }
+    return out
+  }
+  for (const rel of walkTs('src')) {
+    if (rel.endsWith('help/markdown.ts')) continue
+    const stripped = String(readFileSync(rel, 'utf8'))
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '')
+    for (const m of stripped.matchAll(/'[^'\n]*\*\*[^'\n]*'/g)) mdScanned.push(`${rel}: ${m[0].slice(0, 46)}`)
+  }
   check(
-    'adj965 纯文本文案里不许出现 Markdown 加粗（`**…**` 会原样显示成星号；应改用「」或多句陈述）',
-    markedCopy.length === 0,
-    markedCopy.join(' ｜ '),
+    'adj965 全 src 的界面文案里不许出现字面 Markdown 加粗（纯文本渲染会原样显示星号）',
+    mdScanned.length === 0,
+    mdScanned.join(' ｜ '),
   )
   check(
     'adj605 标记位宽度恒定（否则字段网格随 * 亮灭横跳）+ 红色取 `--jp-danger`',
@@ -16919,13 +16935,34 @@ async function runAdj541DockToggleTests() {
   // adj546：**用"假句柄 + 手机量级延迟"实测并发收益**——真机 FSA 每次枚举约 5ms，
   // 这里给每个条目注入 2ms 延迟，比较 concurrency=1 与 4 的耗时。确定性（不依赖真实磁盘）。
   {
+    /**
+     * adj965（顺手修一条**会假红**的闸门）：原来这条比的是**墙上时钟**（`parMs * 1.6 < serialMs`），
+     * 机器一忙就假红 —— 实测并行跑别的重活时 2649ms → 1788ms（1.48×）判失败，同一份代码复跑两次都过。
+     * 计时类判据不该当"并发真的重叠了吗"的主判据。
+     *
+     * 现在改成**数在飞数**：每个目录枚举进入时 +1、结束时 −1，取峰值。
+     * 并发 4 时峰值必须 > 1（真的重叠），串行时峰值恰好 1 —— 这在任何负载下都成立 ✓。
+     * 耗时仍然打印（信息用，不参与判据）。
+     */
+    let inFlight = 0
+    let peak = 0
+    const resetPeak = (): void => {
+      inFlight = 0
+      peak = 0
+    }
     const mkDir = (name: string, children: unknown[], perEntryMs: number): unknown => ({
       kind: 'directory',
       name,
       values: async function* () {
-        for (const c of children) {
-          await new Promise((r) => setTimeout(r, perEntryMs))
-          yield c
+        inFlight += 1
+        peak = Math.max(peak, inFlight)
+        try {
+          for (const c of children) {
+            await new Promise((r) => setTimeout(r, perEntryMs))
+            yield c
+          }
+        } finally {
+          inFlight -= 1
         }
       },
     })
@@ -16937,11 +16974,15 @@ async function runAdj541DockToggleTests() {
     const perEntry = 2
     const root = mkDir('root', Array.from({ length: 8 }, (_, i) => mkDir(`d${i}`, files(20, perEntry), perEntry)), perEntry) as never
     const t1 = Date.now()
+    resetPeak()
     const r1 = await searchWorkspaceJps(fsaRec(root), '*', { concurrency: 1 })
     const serialMs = Date.now() - t1
+    const peakSerial = peak
     const t4 = Date.now()
+    resetPeak()
     const r4 = await searchWorkspaceJps(fsaRec(root), '*', { concurrency: 4 })
     const parMs = Date.now() - t4
+    const peakPar = peak
     console.log(`    并发实测（假句柄 ${perEntry}ms/条）：串行 ${serialMs}ms → 并发4 ${parMs}ms（提速 ${(serialMs / Math.max(1, parMs)).toFixed(1)}×）`)
     // adj553（用户反馈）：输入条放不下时，**PC 端也要能滑到后面的按键**——手机上靠触摸滑动，
     // 而鼠标滚轮默认只驱动纵向滚动、滚动条又被隐藏 ⇒ 后面的按键够不到、也看不出"还有内容"。
@@ -16962,9 +17003,9 @@ async function runAdj541DockToggleTests() {
         '')
     }
     check(
-      'adj546 并发枚举确实快于串行（假句柄注入 2ms/条延迟；真机 FSA 就是这个量级）',
-      r1.hits.length === 160 && r4.hits.length === 160 && parMs * 1.6 < serialMs,
-      `串行 ${serialMs}ms / 并发4 ${parMs}ms（命中 ${r4.hits.length}）`,
+      'adj546 并发枚举**真的重叠**（判据 = 同时在飞的目录枚举数峰值：串行恰好 1、并发 4 时 > 1；不用墙上时钟）',
+      r1.hits.length === 160 && r4.hits.length === 160 && peakSerial === 1 && peakPar > 1,
+      `在飞峰值 串行 ${peakSerial} / 并发4 ${peakPar}；耗时 ${serialMs}ms → ${parMs}ms（仅参考）`,
     )
     // 隐藏项：`.git` 下的谱一个都不能进结果，且不该被计数
     const hidden = mkDir('.git', files(50, perEntry), perEntry)
