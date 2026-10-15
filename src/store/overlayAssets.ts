@@ -20,8 +20,8 @@
  * 所以"当前文档是什么"由**调用方**（`App.tsx`）把 `pageConfig` 与 `base` 传进来：
  * 本模块只依赖 `assetSource` 与引擎类型，**零环**。
  */
-import type { RenderAssets, RenderFontMeta, RenderOpts } from '@ijipu/engine'
-import { mimeOf } from '@ijipu/engine'
+import type { PageConfig, RenderAssets, RenderFontMeta, RenderOpts } from '@ijipu/engine'
+import { mimeOf, overlayAssetRefs } from '@ijipu/engine'
 import { resolveAsset, setAssetReader, type AssetBase, type AssetReader } from './assetSource'
 import { decodeAsset } from './assetDecode'
 import { overlayCopy as C } from '../brand/copy'
@@ -85,8 +85,10 @@ export async function syncOverlayAssets(
   base: AssetBase,
 ): Promise<void> {
   // adj965c（用户 2026-10-15）：总开关关掉 ⇒ **连读都不读**（不浪费 IO、也不产生"图找不到"的噪音提示）
-  const needWm = input.wmEnabled && input.wmType === 'image' && input.wmImage.trim() !== ''
-  const needBg = input.bgEnabled && input.bgImage.trim() !== ''
+  // adj965（EP-09 起）：这条判据搬去引擎 `overlayAssetRefs`（插件代码块预览也要同一份口径）
+  const want = overlayAssetRefs(input as unknown as PageConfig)
+  const needWm = want.wm !== ''
+  const needBg = want.bg !== ''
   if (!needWm && !needBg) {
     publish(EMPTY)
     return

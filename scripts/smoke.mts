@@ -13200,8 +13200,10 @@ async function runAdj965AssetSourceTests() {
       JSON.stringify(vaultAssetTarget('图.png', true, ['乐谱', '谱.jps'], '子目录')),
     )
     check(
-      'adj965 EP-09 嵌入版取图③：`..` 越界 / 空路径 / 只有目录没有文件名 ⇒ 一律拒绝（不生成请求）',
+      'adj965 EP-09 嵌入版取图③：`..` 越界（含 `img/..` 这种"上跳段落在文件名位"的写法）/ 空路径 / 只有目录 ⇒ 一律拒绝',
       vaultAssetTarget('../../etc/passwd', false, ['谱.jps'], '') === null &&
+        vaultAssetTarget('img/../x.png', false, ['谱.jps'], '') === null &&
+        vaultAssetTarget('img/..', false, ['谱.jps'], '') === null &&
         vaultAssetTarget('', false, ['谱.jps'], '') === null &&
         vaultAssetTarget('img/', false, ['谱.jps'], '') === null,
       '',

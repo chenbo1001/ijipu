@@ -50,8 +50,10 @@ export function vaultAssetTarget(
   if (link) return { kind: 'link', link: path, source: vaultSourcePathOf(root, noteSegs) }
   // 只有目录没有文件名（`img/`）⇒ 早一步拒：否则会被当成"名叫 img 的文件"，靠宿主那头才报错
   if (path.endsWith('/')) return null
+  // 任何位置的上跳段都拒（`../x.png`、`img/../x.png`、`img/..` —— 最后那种会把 `..` 落到"文件名"位上）
+  if (path.split('/').includes('..')) return null
   const { dirs, name } = splitAssetPath(path)
-  if (name === '' || dirs.includes('..')) return null
+  if (name === '') return null
   // 本谱所在目录 + 图片自己的子目录（与桌面端工作区那条同一算式）
   return { kind: 'rel', segs: [...noteSegs.slice(0, -1), ...dirs, name] }
 }
