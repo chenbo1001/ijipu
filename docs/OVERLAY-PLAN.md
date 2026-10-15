@@ -252,7 +252,7 @@ resolveAsset(raw: string, base: AssetBase): Promise<{ href, w, h } | { error }>
 | **EP-10** | `src/preview/PreviewPane.tsx`、`src/export/*` | 解析出的 assets 传进 `renderScoreToSvg`（预览与导出**共用同一份**，避免"预览有、导出没有"） | 预览/PNG/JPG/PDF/打印五路一致；解析失败给明确提示（**不静默降级**） |
 | **EP-11** | `obsidian-ijipu/` | ① ✅ `vendor/engine` 已同步；② `scorePane.measureContentBox` 排除 `[data-overlay]`(:2226)；③ `DEFS` + `README` 补行（**EP-12 之后闸门会强制**）；④ 重生成嵌入产物（`npm run build:embed && node scripts/embed-emit.mjs`，闸门 `adj733`） | 插件 `npm run smoke` 全绿（现已 766 ✓） |
 | **EP-12** ✅ | `PageConfigDialog.tsx` + `index.css` | 两个页签 + 5 处登记 + `.pcfg-text`；顺手修两条闸门探针（写死块名的解析器 / 只查 `cfgSrc` 的图例探针） | 已完成（`1dcc03b`）+ `verify-app-ui` 真点 3 条 |
-| **EP-13** | `PreviewPane.tsx`、`ui/dragGesture.ts`、`brand/shortcuts.ts` | 排版模式下的滚轮/拖动 + 4px 阈值 + 松手写盘（§六） | **`npm run verify:app-ui`**：滚轮/拖动真的改了配置；**非排版模式下 Ctrl+单击仍能试听**（负向判据） |
+| **EP-13** | `PreviewPane.tsx`、`ui/dragGesture.ts` | **`Alt+滚轮` 缩放 / `Alt+Shift+滚轮` 旋转 / `Alt+左键拖动` 平移**（裁定 9，方案 A）+ 施力前提三条（排版辅助开 + 该层启用 + 有内容）+ 松手/停顿写盘（§六） | **`npm run verify:app-ui`**：真派发 `Alt+滚轮` / `Alt+拖动` ⇒ **配置真的变了**；**非排版模式下按 Alt 什么都不该发生**（负向判据）；且 `Ctrl+单击` 试听照旧（不再与拖动冲突） |
 | **EP-14** | `workspace.ts`、`packages/ijipu-cli/src/*` | ① ✅ **网页版 FSA 读图已接**（`store/assetReaderFsa.ts`：工作区目录句柄逐级下钻 → 字节；未授权与"图不在"分开报；冒烟用假句柄 3 条断言）；② CLI `CliIo.readBinary` + 读不到就跳过并说明 + `--no-assets` | CLI 出图带背景（Node 可读时）；读不到时 stderr 有明确一行 |
 
 ## 八、优化清单（10 条，**用户已采纳**）
@@ -293,7 +293,8 @@ resolveAsset(raw: string, base: AssetBase): Promise<{ href, w, h } | { error }>
 | 6 | 水印**旋转默认值** | **-45°**（用户 2026-10-15 追加裁定：由 +45 改为 -45） |
 | 7 | 水印**是否重复铺满** | 加**复选框** `wmRepeat`（默认关）+ 间隔 `wmRepeatGap`（默认 100%）；勾选后按行列间隔平铺满页面，**奇数行错位半格**（斜置水印用正交网格会留空带） |
 | 8 | 水印/背景的**总开关** | 各加一个 `wmEnabled` / `bgEnabled`（用户 2026-10-15 要求"决定是否显示"），**默认关**（用户裁定）：不勾就不画，勾上会写进 `# jps-config`（否则换机器打开又不显示） |
-| 9 | 排版模式下的**交互键**（EP-13） | **`Alt+滚轮` 缩放**、**`Alt+Shift+滚轮` 旋转**、**`Ctrl+左键拖动` 平移**。 之所以不用 `Ctrl+滚轮`：**那是页面缩放的热键**（用户 2026-10-15 指出"好像还不能用在背景的缩放上面"）——不夺走用户的既有手势；`Ctrl+左键` 与「单击试听」靠 **4px 位移阈值**区分 |
+| 9 | 排版模式下的**交互键**（EP-13，**用户 2026-10-15 终裁 = 方案 A「Alt 一族全包」**） | **`Alt+滚轮` 缩放**、**`Alt+Shift+滚轮` 旋转**、**`Alt+左键拖动` 平移**。 为什么不用 `Ctrl+滚轮`：**那是页面缩放的热键**（用户指出）；为什么拖动也从 `Ctrl+左键` 改成 `Alt+左键`：与「`Ctrl+单击`=试听」**完全不冲突** ⇒ 不再需要 4px 位移阈值那套判据，修饰键也只剩一个（Alt），好记。⚠ 三件前提：**「排版辅助」打开** + **该层已启用** + **有内容**（`bgImage` 非空 / 水印文本或图形非空） |
+| 9.1 | 旋转**绕哪个点** | **绕元素自身中心**（用户 2026-10-15 裁定）。引擎现状即如此：`rotateAttr(θ, cx, cy)` 的 `cx/cy` 是该元素的中心；重复平铺时**每一枚各绕自己的中心**。**不是**绕鼠标位置（那会让元素边转边"跳位"） |
 | 10 | 文案口径 | 面向用户的文案一律**正式、规范、简洁**，且**不许写字面 Markdown**（`.pcfg-note` 是纯文本渲染，`**加粗**` 会原样显示成星号）；集中在 `brand/copy.ts`（用户 2026-10-15 两轮指正） |
 | 6 | 桌面端保存走底栏还是系统对话框（同批裁定，与本功能无关） | 系统保存对话框 |
 
