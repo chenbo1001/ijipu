@@ -13376,6 +13376,43 @@ function runAdj965OverlayTests() {
       bgSvg.includes('<clipPath id="ovl-clip-0">'),
     '',
   )
+  /**
+   * adj965（用户 2026-10-15 追问）：**图形水印（印章图片）的位置也必须真的进产物**。
+   *
+   * 为什么单独钉一条：`bgOffset` 上面已经有了端到端断言，而 `wmOffset` 此前只在**手势换算函数**
+   * 里被断言过（`applyOverlayDrag` 那几条），**没有**"写进配置 ⇒ 真的挪了那枚 `<image>`"这条链。
+   * 用户的用法正是"把印章图当水印、不重复、放在指定位置" ⇒ 这条链断了就白搭。
+   */
+  const wmImgSvg =
+    renderScoreToSvg(
+      mkLayout({ wmType: 'image', wmImage: '印章.png', wmScale: 10, wmRotate: 0, wmOffsetX: 120, wmOffsetY: -80 }),
+      { assets: { wm: ASSET } },
+    )[0] ?? ''
+  const wi = num(/<image [^>]*x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"/, wmImgSvg)
+  const wantWmW = p0.width * 0.1
+  check(
+    'adj965 图形水印几何：宽 = 页宽 × 10%、高按原图长宽比、中心 = 页中心 + (120,-80)（印章图片"放在指定位置"靠它）',
+    wi.length === 4 &&
+      near(wi[2] ?? 0, wantWmW) &&
+      near(wi[3] ?? 0, wantWmW / 2) &&
+      near((wi[0] ?? 0) + (wi[2] ?? 0) / 2, p0.width / 2 + 120) &&
+      near((wi[1] ?? 0) + (wi[3] ?? 0) / 2, p0.height / 2 - 80) &&
+      wmImgSvg.includes('data-overlay="wm"'),
+    `x,y,w,h=${wi.join(',')} 期望宽 ${wantWmW.toFixed(1)}`,
+  )
+  /** 负对照：偏移为 0 时**必须**居中——否则上面那条可能是"恒偏移"而不是"真按偏移走" */
+  const wmImgCenter =
+    renderScoreToSvg(mkLayout({ wmType: 'image', wmImage: '印章.png', wmScale: 10, wmRotate: 0 }), {
+      assets: { wm: ASSET },
+    })[0] ?? ''
+  const wc = num(/<image [^>]*x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"/, wmImgCenter)
+  check(
+    'adj965 图形水印负对照：偏移为 0 ⇒ 中心正好落在页中心（证明上面那条真的在按偏移走，不是恒偏）',
+    wc.length === 4 &&
+      near((wc[0] ?? 0) + (wc[2] ?? 0) / 2, p0.width / 2) &&
+      near((wc[1] ?? 0) + (wc[3] ?? 0) / 2, p0.height / 2),
+    `x,y,w,h=${wc.join(',')}`,
+  )
 
   // ---- ⑤ 层序：白底 → 背景 → 水印 → 曲谱 body ----
   const bothSvg =
