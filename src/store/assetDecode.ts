@@ -21,12 +21,18 @@
  *  · 无论成功失败都 `revokeObjectURL`（不然每换一次图就漏一个 blob）。
  */
 
+/**
+ * adj965（EP-09 起）：这三个数是**两端共用的策略**（插件侧的取图实现也认同一份）
+ * ⇒ 定义搬去引擎 `engine/overlayAsset.ts`，这里再导出，既有 import 不用动。
+ */
+import { ASSET_MAX_EDGE, ASSET_REENCODE_BYTES, ASSET_REENCODE_QUALITY } from '@ijipu/engine'
+
 /** 长边上限（px）——超过就按比例缩 */
-export const MAX_EDGE = 2000
+export const MAX_EDGE = ASSET_MAX_EDGE
 /** 超过这个字节数就重编码（小图标不值得重编码，免得弄糊） */
-export const RE_ENCODE_BYTES = 256 * 1024
+export const RE_ENCODE_BYTES = ASSET_REENCODE_BYTES
 /** 重编码质量（WebP） */
-export const RE_ENCODE_QUALITY = 0.85
+export const RE_ENCODE_QUALITY = ASSET_REENCODE_QUALITY
 
 /** 把 `Blob`/data URI 读成可画的图（失败时抛错，由 `assetSource` 转成给用户看的中文提示） */
 async function loadImage(src: string): Promise<HTMLImageElement> {

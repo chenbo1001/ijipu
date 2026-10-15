@@ -157,7 +157,7 @@ import {
   overlayWheelMode,
   overlayWheelSteps,
   wheelDeltaPx,
-} from '../src/preview/overlayGesture.ts'
+} from '@ijipu/engine/index.ts'
 
 /**
  * adj722：`{dsb}` 两层的**唯一判定口径**（供本文件多处断言共用）。
@@ -13158,6 +13158,59 @@ async function runAdj965AssetSourceTests() {
       'adj965 EP-14 未授权与"图不在"**分开报**：`NotAllowedError` ⇒ 提示去重新授权（不误报成找不到图）',
       deniedMsg.includes('重新授权'),
       deniedMsg,
+    )
+    /**
+     * adj965（EP-09 补的契约）：**`[[双链]]` 不归网页版管** —— `resolveAsset` 会把 `[[ ]]` 剥掉再交给通道，
+     * 所以通道必须靠第三个参数 `opts.link` 分辨；看到双链要返回 `null`（上层报"未找到图片"），
+     * **不要**拿链接原文当相对路径去试（那会给出"未找到图片：图片.png"这种误导性提示）。
+     */
+    check(
+      'adj965 EP-09 网页版读图见到 `[[双链]]`（`opts.link`）⇒ 返回 null，**不拿链接原文当路径试**',
+      (await fsaAssetReader('图.png', { kind: 'workspace', rec, segs: ['乐谱', '谱.jps'] }, { link: true })) ===
+        null,
+      '',
+    )
+  }
+
+  /**
+   * EP-09（后半）：**嵌入版（Obsidian 插件）的读图通道**。
+   *
+   * 桥本身没法在 Node 里起（要 `window`/iframe）⇒ 这里钉**纯逻辑**（可断言的那一半）：
+   * ① 相对路径 → "本谱所在目录 + 图片子目录"的**工作区相对段**；
+   * ② 双链 → 交给**宿主的链接解析**，并带上"从哪篇笔记写的"（文库路径）；
+   * ③ `..` 越界 / 空路径 → 拒绝；
+   * ④ 通道只认工作区基准（桌面端绝对路径那条不归它管）。
+   * 真正的桥往返由**插件侧冒烟**（`readAsset` op）与真机验证覆盖。
+   */
+  {
+    const { vaultAssetTarget, vaultSourcePathOf, vaultAssetReader } = await import('../src/store/assetReaderVault.ts')
+    check(
+      'adj965 EP-09 嵌入版取图①：相对路径拼成"本谱目录 + 图片子目录"的工作区相对段',
+      JSON.stringify(vaultAssetTarget('img/图.png', false, ['乐谱', '谱.jps'], '')) ===
+        JSON.stringify({ kind: 'rel', segs: ['乐谱', 'img', '图.png'] }) &&
+        JSON.stringify(vaultAssetTarget('图.png', false, ['谱.jps'], '')) ===
+          JSON.stringify({ kind: 'rel', segs: ['图.png'] }),
+      JSON.stringify(vaultAssetTarget('img/图.png', false, ['乐谱', '谱.jps'], '')),
+    )
+    check(
+      'adj965 EP-09 嵌入版取图②：`[[双链]]` 交给宿主的链接解析，并带上"从哪篇笔记写的"（含工作区根）',
+      JSON.stringify(vaultAssetTarget('图.png', true, ['乐谱', '谱.jps'], '子目录')) ===
+        JSON.stringify({ kind: 'link', link: '图.png', source: '子目录/乐谱/谱.jps' }) &&
+        vaultSourcePathOf('', ['乐谱', '谱.jps']) === '乐谱/谱.jps',
+      JSON.stringify(vaultAssetTarget('图.png', true, ['乐谱', '谱.jps'], '子目录')),
+    )
+    check(
+      'adj965 EP-09 嵌入版取图③：`..` 越界 / 空路径 / 只有目录没有文件名 ⇒ 一律拒绝（不生成请求）',
+      vaultAssetTarget('../../etc/passwd', false, ['谱.jps'], '') === null &&
+        vaultAssetTarget('', false, ['谱.jps'], '') === null &&
+        vaultAssetTarget('img/', false, ['谱.jps'], '') === null,
+      '',
+    )
+    check(
+      'adj965 EP-09 嵌入版通道只认工作区基准（桌面端绝对路径那条不归它管 ⇒ 返回 null 让上层给提示）',
+      (await vaultAssetReader('a.png', { kind: 'native', dir: 'C:/x' }, { link: false })) === null &&
+        (await vaultAssetReader('a.png', { kind: 'none' }, { link: false })) === null,
+      '',
     )
   }
 

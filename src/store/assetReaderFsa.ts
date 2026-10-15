@@ -23,21 +23,19 @@
  *  · `..` 这类上跳段直接拒绝（`getDirectoryHandle` 本身不接受 `..`，但仍显式挡一道）。
  */
 import type { AssetReader } from './assetSource'
-
-/** 图片文件路径 → 目录段 + 文件名（`img/图.png` ⇒ `['img']` + `图.png`） */
-function splitAssetPath(path: string): { dirs: string[]; name: string } {
-  const parts = path.split('/').filter((s) => s !== '' && s !== '.')
-  const name = parts.pop() ?? ''
-  return { dirs: parts, name }
-}
+// adj965（EP-09）：路径切分口径搬去引擎（插件的 vault 读图那道也要用同一份）
+import { splitAssetPath } from '@ijipu/engine'
 
 /**
  * 网页版读图（`File System Access` 目录句柄）。
  *
  * 用到的能力都来自传入的句柄，**本文件不碰任何 DOM 全局** ⇒ 冒烟里能用假句柄直接断言。
  */
-export const fsaAssetReader: AssetReader = async (path, base) => {
+export const fsaAssetReader: AssetReader = async (path, base, opts = { link: false }) => {
   if (base.kind !== 'workspace') return null
+  // adj965（EP-09）：**双链 `[[…]]` 不归网页版管**（那是 Obsidian 的链接语义，只有插件能解）
+  // ⇒ 返回 null（上层报"未找到图片"），不要拿链接原文当相对路径去试
+  if (opts.link) return null
   const root = base.rec.handle as FileSystemDirectoryHandle | undefined
   if (root === undefined) return null
 

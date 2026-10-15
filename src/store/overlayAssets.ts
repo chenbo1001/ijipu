@@ -21,6 +21,7 @@
  * 本模块只依赖 `assetSource` 与引擎类型，**零环**。
  */
 import type { RenderAssets, RenderFontMeta, RenderOpts } from '@ijipu/engine'
+import { mimeOf } from '@ijipu/engine'
 import { resolveAsset, setAssetReader, type AssetBase, type AssetReader } from './assetSource'
 import { decodeAsset } from './assetDecode'
 import { overlayCopy as C } from '../brand/copy'
@@ -135,7 +136,9 @@ export function installAssetReader(reader: AssetReader | null = desktopAssetRead
 }
 
 /** 桌面端读图：把"基准 + 相对路径"翻译成两条 Rust 命令之一 */
-const desktopAssetReader: AssetReader = async (path, base) => {
+const desktopAssetReader: AssetReader = async (path, base, opts = { link: false }) => {
+  // adj965（EP-09）：**双链 `[[…]]` 不归桌面端管**（那是 Obsidian 的链接语义，只有插件能解）
+  if (opts.link) return null
   // 动态 import：不在桌面壳里时不必把 `brand/env` 拉进这条链
   const { tauriInvoke } = await import('../brand/env')
   if (base.kind === 'native') {
@@ -160,25 +163,8 @@ function joinNativePath(dir: string, rel: string): string {
   return `${d}${sep}${rel.replace(/[\\/]/g, sep === '\\' ? '\\' : '/')}`
 }
 
-/** 扩展名 → mime（与 `assetSource.mimeOf` 同口径；这里避免把整个模块再 import 一次造成循环阅读负担） */
-function mimeOfPath(path: string): string {
-  const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
-  switch (ext) {
-    case 'png':
-      return 'image/png'
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg'
-    case 'webp':
-      return 'image/webp'
-    case 'gif':
-      return 'image/gif'
-    case 'bmp':
-      return 'image/bmp'
-    default:
-      return 'application/octet-stream'
-  }
-}
+/** 扩展名 → mime：**引擎那一份**（adj965 EP-09 起搬去 `engine/overlayAsset.ts`，两端共用，不再本地复制） */
+const mimeOfPath = mimeOf
 
 /** 解码器在这里装配（`assetDecode` 是本工程里唯一碰 `Image`/`canvas` 的地方） */
 export function installAssetDecoder(): void {

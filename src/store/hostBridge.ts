@@ -20,6 +20,7 @@
  * 宿主 → 应用事件 `{ ch:'ijipu', type:'welcome'|'theme'|'openFile', ... }`。
  */
 import { normalizeRelPath } from './workspace'
+import { fromBase64 } from '@ijipu/engine'
 
 /** 与插件侧共用的通道标识 */
 const CHANNEL = 'ijipu'
@@ -214,6 +215,32 @@ export class HostBridge {
     return this.call<{ ok: boolean; canceled?: boolean; error?: string }>('importSoundbank', { id })
   }
 
+  // ───────────────── adj965（方案 OVL，EP-09）：水印 / 背景图的**读图**通道 ─────────────────
+
+  /**
+   * 读一张图片的字节（**工作区相对路径段**，末段是文件名）。
+   *
+   * 为什么必须走桥：嵌入版在 iframe 里（浏览器上下文），拿不到 vault 的二进制读；
+   * 而"相对本谱的路径"这条口径在插件里就是"vault 里的路径"。
+   *
+   * 契约与 `AssetReader` 对齐：
+   *  · **文件不在** ⇒ `null`（这条通道"读不到"，上层报"未找到图片"）；
+   *  · **越界 / 不是图片 / 太大** ⇒ 宿主返回失败 ⇒ 这里**抛错**，把宿主那句能照着做的中文说明带上去。
+   */
+  async readAsset(segs: readonly string[]): Promise<AssetBytes | null> {
+    const r = await this.call<RawAsset | null>('readAsset', { path: hostPathOf(segs) })
+    return toAssetBytes(r)
+  }
+
+  /**
+   * 读一张**双链**写的图片（`[[图片.png]]`）——由**宿主**用 Obsidian 的链接解析去找
+   * （vault 全域、可跨目录；`sourceVaultPath` 是"从哪篇笔记里写的"，决定相对链接的基准）。
+   */
+  async readLinkedAsset(link: string, sourceVaultPath: string): Promise<AssetBytes | null> {
+    const r = await this.call<RawAsset | null>('readAsset', { link, source: sourceVaultPath })
+    return toAssetBytes(r)
+  }
+
   /**
    * 执行一个宿主操作。
    * 失败时**抛错**（调用方按既有错误路径处理，例如"保存失败"提示）。
@@ -312,4 +339,28 @@ export async function initHostBridge(): Promise<HostBridge | null> {
 /** 把工作区相对路径段数组转成宿主认的字符串（宿主侧再归一化一次） */
 export function hostPathOf(segs: readonly string[]): string {
   return normalizeRelPath(segs).join('/')
+}
+
+/** 宿主 `readAsset` 的原始返回（base64；`null` = 文件不在） */
+interface RawAsset {
+  base64?: string
+  mime?: string
+  mtime?: number
+}
+
+/** 读图结果（与 `assetSource` 的 `AssetReader` 返回值同形） */
+export interface AssetBytes {
+  bytes: Uint8Array
+  mime: string
+  mtime: number
+}
+
+/** base64 → 字节（`fromBase64` 是引擎里的纯函数，两端同一份；这里只做形状归一 + 容错） */
+function toAssetBytes(r: RawAsset | null): AssetBytes | null {
+  if (r === null || typeof r.base64 !== 'string' || r.base64 === '') return null
+  return {
+    bytes: fromBase64(r.base64),
+    mime: typeof r.mime === 'string' && r.mime !== '' ? r.mime : 'application/octet-stream',
+    mtime: typeof r.mtime === 'number' ? r.mtime : 0,
+  }
 }

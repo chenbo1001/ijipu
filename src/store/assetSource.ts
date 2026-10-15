@@ -32,14 +32,23 @@
 import type { WorkspaceRecord } from './fileHandleDb'
 import { overlayCopy as C } from '../brand/copy'
 
-/** 单文件上限：16MB（超过它当背景基本也糊，且会让每页 SVG 巨大） */
-export const MAX_ASSET_BYTES = 16 * 1024 * 1024
-
 /**
- * 允许的图片扩展名。**故意不含 `svg`**：SVG 能带 `<script>`/外链，当"图片"塞进产物里
- * 等于把 `.jps` 变成脚本投递通道（见方案 §八.10）。
+ * adj965（EP-09 起）：**策略部分搬去引擎**，本文件从这里再导出，其余模块的 import 不用动。
+ *
+ * 为什么必须搬：同一套白名单/上限/路径归一/mime 映射**插件侧也要用**
+ * （宿主桥的 `readAsset` op、代码块预览的取图），而插件只同步 `vendor/engine`
+ * ⇒ 留在应用侧就等于让两端各写一份（本项目「两端共用的规则一律先落 engine」那条）。
  */
-export const ALLOWED_ASSET_EXT = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] as const
+export {
+  MAX_ASSET_BYTES,
+  ALLOWED_ASSET_EXT,
+  assetPathOf,
+  extOf,
+  isAllowedAssetPath,
+  mimeOf,
+  splitAssetPath,
+} from '@ijipu/engine'
+import { MAX_ASSET_BYTES, assetPathOf, isAllowedAssetPath } from '@ijipu/engine'
 
 /** 解析失败的原因（都带**能照着做**的中文说明；方案优化 7：不许静默降级） */
 export interface AssetFailure {
@@ -67,10 +76,19 @@ export type AssetBase =
   /** 没有基准（新建未保存、粘贴导入等）⇒ 相对路径无从解析，明确报错 */
   | { kind: 'none' }
 
-/** 平台通道：把"基准 + 相对路径"读成字节 */
+/**
+ * 平台通道：把"基准 + 相对路径"读成字节。
+ *
+ * `opts.link`（adj965 EP-09 补）＝ 这个路径来自 **Obsidian 双链** `[[图片.png]]`：
+ * 它的解析语义是"vault 全域找同名文件"（可跨目录），与"相对本谱的路径"**不是一回事**
+ * ⇒ 只有能解链接的宿主（插件）才认；其它端据此返回 `null`（未找到）而不是拿链接原文当路径去试。
+ * 为什么要把 `link` 传下来：`resolveAsset` 在调用通道**之前**就把 `[[ ]]` 剥掉了，
+ * 通道自己看不出这个区别。
+ */
 export type AssetReader = (
   path: string,
   base: AssetBase,
+  opts: { link: boolean },
 ) => Promise<{ bytes: Uint8Array; mime: string; mtime?: number } | null>
 
 /**
@@ -97,53 +115,7 @@ export function setAssetDecoder(d: AssetDecoder | null): void {
   decoder = d
 }
 
-/** 路径归一：`[[双链]]` 去掉包裹、去首尾空白、`\` 归一成 `/`、去掉开头的 `./` */
-export function assetPathOf(raw: string): { path: string; link: boolean; isData: boolean } {
-  let s = String(raw ?? '').trim()
-  let link = false
-  // Obsidian 双链：`[[图片.png]]`（也接受 `[[图片.png|别名]]` —— 取 `|` 前那半）
-  const m = /^\[\[([^\]]+)\]\]$/.exec(s)
-  if (m !== null) {
-    link = true
-    s = (m[1] ?? '').split('|')[0]?.trim() ?? ''
-  }
-  if (/^data:/i.test(s)) return { path: s, link, isData: true }
-  return { path: s.replace(/\\/g, '/').replace(/^\.\//, ''), link, isData: false }
-}
-
-/** 取扩展名（小写、不含点） */
-export function extOf(path: string): string {
-  const i = path.lastIndexOf('.')
-  return i < 0 ? '' : path.slice(i + 1).toLowerCase()
-}
-
-/**
- * 扩展名白名单。
- * ⚠ 只按扩展名判**不是**安全边界（真正的边界是"读哪条通道 + 不解释内容"），
- * 但它能挡住"随手写个路径把系统文件读进来当图"这一大类，且给用户一句能懂的话。
- */
-export function isAllowedAssetPath(path: string): boolean {
-  return (ALLOWED_ASSET_EXT as readonly string[]).includes(extOf(path))
-}
-
-/** mime ← 扩展名（data URI 用；`data:` 直通时用原 mime） */
-export function mimeOf(path: string): string {
-  switch (extOf(path)) {
-    case 'png':
-      return 'image/png'
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg'
-    case 'webp':
-      return 'image/webp'
-    case 'gif':
-      return 'image/gif'
-    case 'bmp':
-      return 'image/bmp'
-    default:
-      return 'application/octet-stream'
-  }
-}
+/** 路径归一、扩展名白名单、mime、单文件上限 —— 定义见引擎 `engine/overlayAsset.ts`（两端共用） */
 
 /**
  * 同一次会话内的解析缓存（键 = **基准 + 路径**）。
@@ -207,7 +179,7 @@ export async function resolveAsset(raw: string, base: AssetBase): Promise<Resolv
 
   let got: Awaited<ReturnType<AssetReader>>
   try {
-    got = await reader(path, base)
+    got = await reader(path, base, { link })
   } catch (e) {
     return { ok: false, error: C.errReadFailed(e instanceof Error ? e.message : String(e)) }
   }

@@ -126,8 +126,10 @@ void (async () => {
     const { isHostEmbedded } = await import('./store/hostBridge')
     const { isTauriShell } = await import('./brand/env')
     if (bridge !== null || isHostEmbedded()) {
-      // 嵌入版（Obsidian）：走宿主桥那条（EP-09）；桥没接上之前**明确不装** ⇒ 上层给"不支持"提示
-      installAssetReader(null)
+      // 嵌入版（Obsidian）：走**宿主桥的 readAsset op**（EP-09）——相对本谱的路径 = vault 里的路径、
+      // `[[双链]]` 交给宿主的链接解析；越界/非图片/超限由宿主明确报错
+      const { vaultAssetReader } = await import('./store/assetReaderVault')
+      installAssetReader(vaultAssetReader)
     } else if (isTauriShell()) {
       // 桌面端：Rust 的 `read_asset_file`（绝对路径）/ `ws_read_binary`（工作区相对路径）
       installAssetReader()
