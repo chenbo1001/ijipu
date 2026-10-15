@@ -1089,6 +1089,16 @@ body {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/**
+ * adj965d（用户要求"加一层保险"）：该层**还没写进谱面**时的提醒。
+ * 走告警色而不是 muted —— 它要解释的是"为什么这一层过一会儿可能就没了"，
+ * muted 的灰字会被当成装饰忽略掉（与设置面板里"与默认值不同"的红 `*` 同一套 token）。
+ */
+.preview-overlay-hint .poh-unsaved {
+  color: var(--jp-danger);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 
 /* adj282：播放进度跟随色块——接近透明的竖向色框（高 = 该声部行，宽 = 每段≤1 拍）
    adj299：颜色由组件按声部内联设置（多声部各声部不同色，voice1 红）；transition 使段间平滑滑动 */

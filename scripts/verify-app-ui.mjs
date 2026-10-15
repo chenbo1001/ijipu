@@ -540,6 +540,21 @@ async function main() {
       'adj965d 点「水印」⇒ 它成为当前调整对象（切换器是真的在切）',
       (await evalJs(c, `document.querySelector('.poh-chip.is-active')?.textContent ?? ''`)) === '水印',
     )
+    /**
+     * adj965d：**只读自检钩子**。三条前提不满足时"什么都不发生"是设计使然，
+     * 而远程看不见用户机器上的实况（真机上已经踩过一次）⇒ 留一个一句话取证的入口
+     * （同 `__ijipuPlayhead` 的套路）。这里真调一次，确认它报的就是"此刻调哪一层"。
+     */
+    const overlayDiag = String(
+      await evalJs(c, `typeof window.__ijipuOverlay === 'function' ? window.__ijipuOverlay() : '（没有自检钩子）'`),
+    )
+    check(
+      'adj965d 自检钩子 `__ijipuOverlay()` 一句话说清"此刻调的是哪一层 / 三条前提各是什么"',
+      overlayDiag.includes('排版辅助（前提①）=是') &&
+        overlayDiag.includes('当前调整对象=水印') &&
+        overlayDiag.includes('配置行=# jps-config'),
+      overlayDiag.split('\n')[1] ?? '',
+    )
 
     /** 取一个"同时落在预览容器与第一页里"的屏幕坐标（真鼠标事件必须有坐标，且必须落在监听的那个容器内） */
     const pointInPage = async (xFrac = 0.5, yFrac = 0.35) =>
@@ -617,6 +632,40 @@ async function main() {
       `wmRotate ${cfg1.wmRotate ?? '（无）'} → ${cfg2.wmRotate}`,
     )
 
+    // ---- ②b 滚轮**累计**（用户 2026-10-15 确认）：不足一档不动，攒够一档才走一步 ----
+    //   为什么必须真派发：这是"触控板一次滑动连跳好几档"的修法，纯逻辑断言只能证明函数，
+    //   证明不了"事件接线里真的在累计"（余数没留 / 每事件都重置，都会在这里露出来）。
+    const sizeBefore = (await cfgNow()).wmSize
+    const stepOfSize = Math.max(1, Math.round(Number(sizeBefore) * 0.05))
+    await wheel(pt, -50, 1)
+    await sleep(700) // 停够时间：证明"不足一档 ⇒ 连落盘都不发生"（不是被吞掉后再补写）
+    check(
+      'adj965d 滚轮累计：**单次不足一档（50px）⇒ 配置一个字都没动**（余数留着，等下一次）',
+      (await cfgNow()).wmSize === sizeBefore,
+      `wmSize ${sizeBefore} → ${(await cfgNow()).wmSize}`,
+    )
+    await wheel(pt, -50, 1)
+    await sleep(700)
+    check(
+      'adj965d 滚轮累计：**再补 50px（累计正好一档）⇒ 正好走一档**（余数没被丢掉）',
+      (await cfgNow()).wmSize === Number(sizeBefore) + stepOfSize,
+      `wmSize ${sizeBefore} → ${(await cfgNow()).wmSize}（应 +${stepOfSize}）`,
+    )
+    // 「preventDefault 真的生效」的真派发证据：Alt+滚轮**向下**滚三档，预览区不该跟着滚。
+    // （挂成被动监听时 `preventDefault()` 被忽略 ⇒ 这里立刻变红；源码级闸门只是第二道保险。）
+    // ⚠ 先把预览区滚回顶：否则"没滚"可能只是"本来就到底了"（空跑判真）。
+    await evalJs(c, `(() => { const p = document.querySelector('.preview-pane'); p.scrollTop = 0; return true })()`)
+    await sleep(150)
+    const st0 = await evalJs(c, `document.querySelector('.preview-pane').scrollTop`)
+    await wheel(pt, 300, 1)
+    await sleep(700)
+    const st1 = await evalJs(c, `document.querySelector('.preview-pane').scrollTop`)
+    check(
+      'adj965d Alt+滚轮**不会把预览区滚走**（`{ passive: false }` + preventDefault 真的生效）',
+      st0 === 0 && st1 === 0,
+      `预览区 scrollTop ${st0} → ${st1}（起始必须是 0，否则那条判据是空跑）`,
+    )
+
     // ---- ③ `Alt+左键拖动` ⇒ 平移该层（按下 → 两次移动 → 松手，全走原生输入）----
     const vis3 = await wmVisual()
     const drag0 = await pointInPage(0.4, 0.4)
@@ -673,6 +722,16 @@ async function main() {
     const cfgWmLayer = await cfgNow()
     await evalJs(c, `[...document.querySelectorAll('.poh-chip')].find((el) => el.textContent === '背景').click(), true`)
     await sleep(200)
+    /**
+     * adj965d（用户要求"加一层保险"）：背景层此刻**只在面板草稿里**（从没点过「保存设置」）
+     * ⇒ 角落必须当面说一句"尚未写入谱面"，而不是让用户过一会儿发现"条没了、手势也不动了"。
+     * 紧跟着滚一下（下面那条）会把它整层固化 ⇒ 提醒应当随即消失。
+     */
+    check(
+      'adj965d 该层只在草稿里 ⇒ 角落给出「尚未写入谱面」提醒（**加的那层保险**）',
+      String(await evalJs(c, `document.querySelector('.poh-unsaved')?.textContent ?? ''`)).includes('尚未写入谱面'),
+      String(await evalJs(c, `document.querySelector('.poh-unsaved')?.textContent ?? ''`)).slice(0, 30),
+    )
     await wheel(pt, -120, 1)
     await sleep(700)
     const cfgBgLayer = await cfgNow()
@@ -701,6 +760,10 @@ async function main() {
       'adj965d **不许留半截配置**：该层自己的键（启用 + 内容）跟手势**一起固化**（`bgEnabled`/`bgImage` 只在草稿里，也得写进去）',
       cfgBgLayer.bgEnabled === true && cfgBgLayer.bgImage === '图.png' && cfgBgLayer.bgScale !== undefined,
       `bgEnabled=${String(cfgBgLayer.bgEnabled)} bgImage=${String(cfgBgLayer.bgImage)} bgScale=${String(cfgBgLayer.bgScale)}`,
+    )
+    check(
+      'adj965d 手势把它写进谱面之后 ⇒ 「尚未写入谱面」提醒**自己消失**（保险不是恒亮的）',
+      (await evalJs(c, `!!document.querySelector('.poh-unsaved')`)) === false,
     )
 
     // ---- ⑤ 负向判据：**非排版辅助模式下按 Alt 什么都不该发生** ----

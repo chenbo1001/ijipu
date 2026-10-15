@@ -44,6 +44,16 @@ const OVERLAY_OFFSET_LIMIT = 1e6
 /** 滚轮步进：比例类 ±5（**个百分点**，100 → 105）；字号类 ±5%（相对当前字号，至少 1pt） */
 const SCALE_STEP = 5
 const SIZE_STEP_RATIO = 0.05
+/**
+ * 滚轮的**累计阈值**（CSS px）：累计滚动够这个量才走一档。
+ *
+ * 由来（用户 2026-10-15 确认改成累计）：鼠标滚一格在 Chrome/Windows 上恰好是 `deltaY≈100`
+ * ⇒ 一格一档；而**触控板**一次两指滑动会派发很多个小 delta，若"一个事件一档"就会滑一下连跳好几档。
+ * 代价：个别"一格不满 100px"的鼠标要滚两下才动一档（用户已确认接受）。
+ */
+export const OVERLAY_WHEEL_STEP_PX = 100
+/** 单次事件最多走几档：防"页"模式或异常 delta 把值一次拉飞（正常情况下远到不了这个数） */
+const OVERLAY_WHEEL_MAX_STEPS = 20
 
 /** 滚轮（按住了 Alt）要做的事 */
 export type OverlayWheelMode = 'scale' | 'rotate'
@@ -92,6 +102,44 @@ export function activeOverlayLayer(cfg: PageConfig, preferred: OverlayLayer): Ov
 /** 两层是否都可用——**只有这时才需要「调整对象」切换器**（用户口径：单一层或都没有就不显示） */
 export function bothOverlayLayersVisible(cfg: PageConfig): boolean {
   return overlayLayerVisible(cfg, 'wm') && overlayLayerVisible(cfg, 'bg')
+}
+
+/**
+ * 该层是否**已经写进谱面**（按**源码层**配置算，不看面板草稿）。
+ *
+ * 只用来决定预览角落那句「尚未写入谱面」的提醒：用户只在设置面板里勾了开关时，
+ * 这一层只活在草稿里 —— 此时**除手势以外**的任何动作都可能让它消失
+ * （在编辑器里打字、刷新、宿主整页重载都会让生效配置重新从源码派生），
+ * 与其让人"莫名其妙就没了"，不如当面说一句（用户 2026-10-15 要求"加一层保险"）。
+ *
+ * 判据与"这一层看不看得见"**同一个函数**：源码层配置下它仍然可见 ⇒ 就已经在谱面里了。
+ */
+export function overlayLayerPersisted(sourceCfg: PageConfig, layer: OverlayLayer): boolean {
+  return overlayLayerVisible(sourceCfg, layer)
+}
+
+/**
+ * 一次 `wheel` 事件的位移换算成 CSS px。
+ * `deltaMode`：0 = 像素、1 = 行（按 16px 粗算）、2 = 页（按预览区高度）。
+ */
+export function wheelDeltaPx(ev: { deltaY: number; deltaMode?: number }, pagePx = 0): number {
+  const d = typeof ev.deltaY === 'number' && Number.isFinite(ev.deltaY) ? ev.deltaY : 0
+  if (ev.deltaMode === 1) return d * 16
+  if (ev.deltaMode === 2) return d * (pagePx > 0 ? pagePx : 800)
+  return d
+}
+
+/**
+ * 累计位移 → **这一次要走几档**，以及剩下的累计值（留给下一次事件）。
+ *
+ * `steps` 为正 = 向下滚（值变小）。不足一档时返回 `{ steps: 0, rest }`
+ * ——**余数要留着**，否则触控板上永远攒不满一档。
+ */
+export function overlayWheelSteps(acc: number, deltaPx: number): { steps: number; rest: number } {
+  const total = acc + deltaPx
+  const raw = Math.trunc(total / OVERLAY_WHEEL_STEP_PX)
+  const steps = Math.max(-OVERLAY_WHEEL_MAX_STEPS, Math.min(OVERLAY_WHEEL_MAX_STEPS, raw))
+  return { steps, rest: total - steps * OVERLAY_WHEEL_STEP_PX }
 }
 
 /**

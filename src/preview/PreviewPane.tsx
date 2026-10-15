@@ -23,6 +23,7 @@ import {
   renderScoreToSvg,
   noteIdToCodePos,
   buildIndexToPage,
+  mergeJpsConfig,
   SEGMENT_ROW_GAP_DEFAULT,
   notesRowBaseline,
   trackKeysOf,
@@ -41,8 +42,12 @@ import {
   applyOverlayWheel,
   bothOverlayLayersVisible,
   overlayGestureBase,
+  overlayLayerPersisted,
+  overlayLayerVisible,
   overlayOffsetOf,
   overlayWheelMode,
+  overlayWheelSteps,
+  wheelDeltaPx,
 } from './overlayGesture'
 // adj965d：预览区角落的「调整对象」与键位提示文案（面向用户的文案一律集中在 brand/copy.ts）
 import { overlayCopy } from '../brand/copy'
@@ -142,11 +147,24 @@ export function PreviewPane() {
   /** 滚轮的"停顿落盘"定时器（滚轮没有松手事件，只能靠停顿判定一次手势结束） */
   const gestureTimerRef = useRef<number | null>(null)
   /**
+   * 滚轮位移的**累计值**（CSS px，未满一档的余数留到下一次事件）。
+   * 为什么要有它：鼠标滚一格恰好约 100px ⇒ 一格一档；触控板一次滑动会派发很多个小 delta，
+   * "一个事件一档"会连跳好几档。累计到 `OVERLAY_WHEEL_STEP_PX` 才走一档（用户 2026-10-15 确认）。
+   */
+  const wheelAccRef = useRef(0)
+  /**
    * 刚做完一次 `Alt+拖动` ⇒ 抑制紧随其后的那次 `click`。
    * 为什么需要：`Alt+拖动` 落在音符上时，松手仍会派发一次 `click`，
    * 而那会被 `onClick` 当成"单击音符"把编辑器光标跳走 —— 用户只是在摆背景图。
    */
   const suppressClickRef = useRef(false)
+
+  /**
+   * adj965d：**源码层**的生效配置——只按谱面里的 `# jps-config` 算，**不含设置面板的草稿**。
+   * 用来回答"这一层到底写进谱面没有"（见下面的 `overlayUnsaved`）。
+   * 应用侧没有 L1 页面设置层（adj480），所以 `mergeJpsConfig(code, null)` 就是"这份谱自己说的"。
+   */
+  const sourceConfig = useMemo(() => mergeJpsConfig(code, null), [code])
 
   /**
    * adj965d：当前手势作用在哪一层（`null` = 三条前提不齐 ⇒ 完全不介入）。
@@ -155,6 +173,17 @@ export function PreviewPane() {
   const overlayTarget = showGuides ? activeOverlayLayer(pageConfig, overlayEditLayer) : null
   /** 两层都可用时才显示「调整对象」切换器（用户口径：只有一层或都没有，不显示切换器） */
   const overlaySwitcher = overlayTarget !== null && bothOverlayLayersVisible(pageConfig)
+  /**
+   * adj965d（用户要求"加一层保险"）：**这一层还只活在面板草稿里**（谱面源码里还没有它）。
+   *
+   * 为什么要当面说：只在面板里勾了开关、没点「保存设置」时，**除手势以外**的任何动作都可能让它消失
+   * （在编辑器里打字、刷新页面、宿主整页重载都会让生效配置重新从源码派生）
+   * —— 上一次就是这样"莫名其妙条没了、手势也不动了"。所以角落提示里加一句，
+   * 并且在它旁边就能看到"点「保存设置」"这个动作（或者直接用手势调一下，落盘会整层固化）。
+   *
+   * `mergeJpsConfig(code, null)` = **只按源码层**算的生效配置（应用侧没有 L1 页面设置层，adj480）。
+   */
+  const overlayUnsaved = overlayTarget !== null && !overlayLayerPersisted(sourceConfig, overlayTarget)
 
   /**
    * adj965（方案「OVL」，EP-10）：水印/背景图的资源来自**异步解析**（读字节 + 解码），
@@ -604,6 +633,8 @@ export function PreviewPane() {
   /** 把本轮手势的改动并进 `# jps-config`（基线取"手势开始前"的那份快照） */
   const commitOverlayGesture = () => {
     cancelGestureTimer()
+    // 一轮手势结束 ⇒ 滚轮累计值归零（下一次滚动重新攒够一档才动）
+    wheelAccRef.current = 0
     const base = gestureBaseRef.current
     gestureBaseRef.current = null
     if (base !== null) setPageConfig(pageConfigRef.current, true, base)
@@ -614,19 +645,31 @@ export function PreviewPane() {
   useEffect(() => {
     const pane = paneRef.current
     if (!pane) return
+    // 目标层换了（或布局/缩放变了）⇒ 累计值重来，别把"替上一层攒的位移"带到另一层
+    wheelAccRef.current = 0
     const onWheel = (ev: WheelEvent) => {
       // ① 没按 Alt ⇒ 直接返回（**绝不 preventDefault**：普通滚动、`Ctrl+滚轮` 页面缩写照旧）
       const mode = overlayWheelMode(ev)
-      if (mode === null || ev.deltaY === 0) return
+      if (mode === null) return
       // ②③ 该层已启用且有内容（`overlayTarget` 已把「排版辅助」也算进去了）
       const layer = overlayTarget
       if (layer === null) return
-      // 到这里才拦：既不滚页面，也不触发宿主的缩放
+      const deltaPx = wheelDeltaPx(ev, pane.clientHeight)
+      if (deltaPx === 0) return
+      // 手上有这一层 ⇒ 滚轮归手势：**即使这一刻还没攒够一档也不滚页面**
       ev.preventDefault()
+      // 累计位移：够一档才动（鼠标一格 ≈ 100px 正好一档；触控板小 delta 攒起来）
+      const { steps, rest } = overlayWheelSteps(wheelAccRef.current, deltaPx)
+      wheelAccRef.current = rest
+      if (steps === 0) return
       // 基线：**该层自己的键置回默认**（`overlayGestureBase` 的说明）——这样落盘时会
       // 把这一层整层固化进谱面，而不是只写手势动过的那一个键（"半截配置"就是这么来的）
       if (gestureBaseRef.current === null) gestureBaseRef.current = overlayGestureBase(pageConfigRef.current, layer)
-      setPageConfig(applyOverlayWheel(pageConfigRef.current, layer, mode, ev.deltaY), false)
+      // 一次事件可能攒够多档（快滑）；正 = 向下滚 = 值变小
+      const sign = steps > 0 ? 1 : -1
+      let next = pageConfigRef.current
+      for (let i = 0; i < Math.abs(steps); i += 1) next = applyOverlayWheel(next, layer, mode, sign)
+      setPageConfig(next, false)
       cancelGestureTimer()
       gestureTimerRef.current = window.setTimeout(commitOverlayGesture, OVERLAY_COMMIT_DELAY_MS)
     }
@@ -652,8 +695,7 @@ export function PreviewPane() {
   /**
    * `Alt+左键按下` ⇒ 开始平移该层；返回 `true` 表示"这次按下归手势管"（描述头拖拽不再接手）。
    * 不满足条件时返回 `false`，**不 `preventDefault`、不捕获指针** ⇒ 试听/光标/描述头拖拽一字不变。
-   */
-  const startOverlayDrag = (e: React.PointerEvent): boolean => {
+   */  const startOverlayDrag = (e: React.PointerEvent): boolean => {
     if (overlayTarget === null || e.altKey !== true) return false
     if (e.pointerType === 'mouse' && e.button !== 0) return false
     const layer = overlayTarget
@@ -682,6 +724,33 @@ export function PreviewPane() {
     if (startOverlayDrag(e)) return
     onMetaPointerDown(e)
   }
+
+  /**
+   * adj965d：Alt 手势的**只读自检** —— 控制台里 `__ijipuOverlay()` 一句话取回"为什么没生效"
+   * （同 `adj723b` 的 `window.__ijipuPlayhead()` 套路，见 `PlayheadDiag` 的说明）。
+   *
+   * 为什么必须有：这套手势有**三条前提**，任一条不满足时"什么都不发生"是**设计使然**，
+   * 而远程看不见用户机器上的实况 —— 真机上已经踩过一次（"面板里看着都开着，条和手势却都没了"，
+   * 根因是那一层只活在草稿里、又从源码重新派生过一次）。有了它，下一次一句话就能定位。
+   * 生产构建同样保留：只读、无副作用、只多一个函数引用。
+   */
+  useEffect(() => {
+    const yn = (b: boolean) => (b ? '是' : '否')
+    const label = (l: 'wm' | 'bg') => `${l === 'wm' ? overlayCopy.layerWm : overlayCopy.layerBg}（${l}）`
+    const dump = (): string =>
+      [
+        `排版辅助（前提①）=${yn(showGuides)}`,
+        `当前调整对象=${overlayTarget === null ? '（无：三条前提不齐 ⇒ 手势完全不介入）' : label(overlayTarget)}`,
+        `切换器=${yn(overlaySwitcher)}　尚未写入谱面提醒=${yn(overlayUnsaved)}`,
+        `水印　手势可用=${yn(overlayLayerVisible(pageConfig, 'wm'))}　已写入谱面=${yn(overlayLayerPersisted(sourceConfig, 'wm'))}` +
+          `　wmEnabled=${String(pageConfig.wmEnabled)}　wmType=${pageConfig.wmType}` +
+          `　文本长度=${String(pageConfig.wmText ?? '').length}　图形=${pageConfig.wmImage || '（空）'}`,
+        `背景　手势可用=${yn(overlayLayerVisible(pageConfig, 'bg'))}　已写入谱面=${yn(overlayLayerPersisted(sourceConfig, 'bg'))}` +
+          `　bgEnabled=${String(pageConfig.bgEnabled)}　图形=${pageConfig.bgImage || '（空）'}`,
+        `配置行=${(/# jps-config:.*/.exec(code) ?? ['（没有这一行）'])[0]}`,
+      ].join('\n')
+    ;(window as unknown as { __ijipuOverlay?: () => string }).__ijipuOverlay = dump
+  }, [showGuides, overlayTarget, overlaySwitcher, overlayUnsaved, pageConfig, sourceConfig, code])
 
   if (!layout || pagesHtml.length === 0) {
     return (
@@ -1003,6 +1072,8 @@ export function PreviewPane() {
                 {k === 'wm' ? overlayCopy.layerWm : overlayCopy.layerBg}
               </button>
             ))}
+          {/* 该层还只在面板草稿里 ⇒ 当面说一句（"加一层保险"，用户 2026-10-15 要求） */}
+          {overlayUnsaved && <span className="poh-unsaved">⚠ {overlayCopy.notInScore}</span>}
           <span className="poh-keys">{overlayCopy.gestureKeys}</span>
         </div>
       )}

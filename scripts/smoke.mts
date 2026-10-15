@@ -152,8 +152,11 @@ import {
   applyOverlayWheel,
   bothOverlayLayersVisible,
   overlayGestureBase,
+  overlayLayerPersisted,
   overlayLayerVisible,
   overlayWheelMode,
+  overlayWheelSteps,
+  wheelDeltaPx,
 } from '../src/preview/overlayGesture.ts'
 
 /**
@@ -13475,6 +13478,57 @@ function runAdj965dOverlayGestureTests() {
     '',
   )
 
+  // ---- ⑤b 滚轮**累计**步进（用户 2026-10-15 确认）----
+  /**
+   * 鼠标滚一格在 Chrome/Windows 上恰好 `deltaY≈100` ⇒ 一格一档；
+   * 触控板一次滑动会派发很多个小 delta ⇒ 必须**累计够一档才走一档**，
+   * 否则"滑一下连跳好几档"。余数要留着（否则触控板上永远攒不满一档）。
+   */
+  check(
+    'adj965d 滚轮累计：一格 100px 正好一档；50+50 才走一档（余数留着）；一次 250px 走两档、余 50',
+    overlayWheelSteps(0, -100).steps === -1 &&
+      overlayWheelSteps(0, -100).rest === 0 &&
+      // 不足一档 ⇒ 0 档，但**余数必须留下**（否则触控板永远攒不满）
+      overlayWheelSteps(0, -50).steps === 0 &&
+      overlayWheelSteps(0, -50).rest === -50 &&
+      overlayWheelSteps(-50, -50).steps === -1 &&
+      overlayWheelSteps(-50, -50).rest === 0 &&
+      // 一格略多于阈值（实测 Chrome 常见 120）⇒ 仍是一档，余 20 留给下一次
+      overlayWheelSteps(0, -120).steps === -1 &&
+      overlayWheelSteps(0, -120).rest === -20 &&
+      overlayWheelSteps(0, 250).steps === 2 &&
+      overlayWheelSteps(0, 250).rest === 50 &&
+      // 方向对称
+      overlayWheelSteps(0, 100).steps === 1,
+    '',
+  )
+  check(
+    'adj965d 滚轮累计：单次事件最多走 20 档（"页"模式或异常 delta 不该把值一次拉飞）',
+    overlayWheelSteps(0, 1e6).steps === 20 && wheelDeltaPx({ deltaY: 3, deltaMode: 1 }) === 48,
+    `1e6 ⇒ ${overlayWheelSteps(0, 1e6).steps} 档`,
+  )
+  check(
+    'adj965d deltaMode 换算：像素原样、行 ×16、页 ×预览区高（Firefox/触控板驱动的写法都兜住）',
+    wheelDeltaPx({ deltaY: 100, deltaMode: 0 }) === 100 &&
+      wheelDeltaPx({ deltaY: 3, deltaMode: 2 }, 700) === 2100 &&
+      // 拿不到高度时按 800 兜底，不返回 0（否则整个手势静默失效）
+      wheelDeltaPx({ deltaY: 1, deltaMode: 2 }) === 800 &&
+      wheelDeltaPx({ deltaY: Number.NaN }) === 0,
+    '',
+  )
+  /**
+   * 「该层写进谱面没有」的判据（角落那句提醒用）：**只看源码层配置**，与"看不看得见"同源。
+   */
+  check(
+    'adj965d 「已写入谱面」判据：源码层里这一层还看得见 ⇒ 算已写入；只在草稿里 ⇒ 算未写入',
+    overlayLayerPersisted(cfgOf(), 'wm') === true &&
+      overlayLayerPersisted(cfgOf({ wmEnabled: false }), 'wm') === false &&
+      overlayLayerPersisted(cfgOf({ wmText: '' }), 'wm') === false &&
+      overlayLayerPersisted(cfgOf({ bgEnabled: false }), 'bg') === false &&
+      overlayLayerPersisted(cfgOf(), 'bg') === true,
+    '',
+  )
+
   // ---- ⑥ 平移：位移换算（含预览缩放）、取整、基线不自我累加、Shift 吸附中心 ----
   check(
     'adj965d 拖动平移：位移÷预览缩放后取整加到**按下时的**偏移上（不自我累加）；Shift ⇒ 吸附页面中心 (0,0)',
@@ -13543,11 +13597,20 @@ function runAdj965dOverlayGestureTests() {
       /\{overlaySwitcher &&/.test(paneSrc),
     '',
   )
+  /**
+   * ⚠ adj965d 滚轮改成"**累计够一档才动**"之后，这条判据的形状变了（不是放宽）：
+   * 落盘前的预览调用不再是 `setPageConfig(applyOverlayWheel(…), false)` 一行，
+   * 而是「累计 → 按档数循环 `applyOverlayWheel` 得到 `next` → `setPageConfig(next, false)`」。
+   * 所以改成钉三件**语义**：①两条预览路径都传 `false`（只预览）；②落盘那一处带按下时的基线快照；
+   * ③基线**必须是** `overlayGestureBase(...)`（滚轮与拖动各一处）——这是"不留半截配置"的机制本身。
+   */
   check(
-    'adj965d 写盘时机与既有虚线拖拽同口径：手势期只预览（`, false)`），落盘那一处带上按下时的基线快照',
-    /setPageConfig\(applyOverlayWheel\([\s\S]{0,120}?, false\)/.test(paneSrc) &&
-      /setPageConfig\(applyOverlayDrag\([\s\S]{0,160}?, false\)/.test(paneSrc) &&
-      /setPageConfig\(pageConfigRef\.current, true, base\)/.test(paneSrc),
+    'adj965d 写盘时机与既有虚线拖拽同口径：手势期只预览（都传 `false`）；落盘那一处带基线快照，且基线是 `overlayGestureBase`',
+    /setPageConfig\(applyOverlayDrag\([\s\S]{0,200}?, false\)/.test(paneSrc) &&
+      /for \(let i = 0; i < Math\.abs\(steps\); i \+= 1\) next = applyOverlayWheel\(/.test(paneSrc) &&
+      /setPageConfig\(next, false\)/.test(paneSrc) &&
+      /setPageConfig\(pageConfigRef\.current, true, base\)/.test(paneSrc) &&
+      (paneSrc.match(/gestureBaseRef\.current = overlayGestureBase\(/g) ?? []).length === 2,
     '',
   )
 
@@ -13608,6 +13671,11 @@ function runAdj965dOverlayGestureTests() {
       viaNewBg.wmText === undefined &&
       viaNewBg.margin_left === undefined,
     `写进去的键：${Object.keys(viaNewBg).sort().join(',')}`,
+  )
+  check(
+    'adj965d 留有**只读自检钩子** `window.__ijipuOverlay()`（三条前提不满足时"什么都不发生"是设计使然，出问题要能一句话自证）',
+    /__ijipuOverlay/.test(paneSrc) && /window as unknown as \{ __ijipuOverlay\?: \(\) => string \}/.test(paneSrc),
+    '',
   )
 }
 
