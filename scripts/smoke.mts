@@ -13287,14 +13287,15 @@ function runAdj965OverlayTests() {
     `rotate=${rot.join(',')} 页中心=${p0.width / 2},${p0.height / 2}`,
   )
   // adj965b（用户 2026-10-15 裁定）：默认旋转由 +45 改为 **-45**，且默认是"单个居中"（不重复）
+  // adj965f（用户 2026-10-15 追加裁定）：平铺间隔默认由 100 改为 **300**（100 太密）
   check(
-    'adj965b 水印旋转默认 **-45°**（用户裁定改写）；重复铺满默认**关闭**、平铺间隔默认 100%',
+    'adj965b/f 水印旋转默认 **-45°**（用户裁定改写）；重复铺满默认**关闭**、平铺间隔默认 **300%**',
     defaultPageConfig.wmRotate === -45 &&
       defaultPageConfig.wmRepeat === false &&
-      defaultPageConfig.wmRepeatGap === 100 &&
+      defaultPageConfig.wmRepeatGap === 300 &&
       wm.includes('rotate(-45 ') &&
       !writeJpsConfig('', { ...defaultPageConfig }, { mode: 'diff' }).includes('wmRepeat'),
-    `wmRotate=${defaultPageConfig.wmRotate} wmRepeat=${String(defaultPageConfig.wmRepeat)}`,
+    `wmRotate=${defaultPageConfig.wmRotate} wmRepeat=${String(defaultPageConfig.wmRepeat)} wmRepeatGap=${defaultPageConfig.wmRepeatGap}`,
   )
   // adj965b：重复水印（平铺满页面）——判据**双向**：不勾选必须只有一枚、勾选必须多枚
   const countWmText = (s: string): number => (s.match(/<text text-anchor="middle"/g) ?? []).length
@@ -13308,11 +13309,86 @@ function runAdj965OverlayTests() {
     `单枚=${countWmText(wm)} 平铺=${countWmText(wmRepeatSvg)}`,
   )
   // 间隔越大铺得越疏（同一夹具下比较枚数 ⇒ 证明这个字段真的在起作用，不是摆设）
+  const dense = renderScoreToSvg(mkLayout({ wmText: '草稿', wmRepeat: true, wmRepeatGap: 100 }))[0] ?? ''
   const sparse = renderScoreToSvg(mkLayout({ wmText: '草稿', wmRepeat: true, wmRepeatGap: 400 }))[0] ?? ''
   check(
-    'adj965b 平铺间隔真的生效：`wmRepeatGap=400` 比默认 100 铺得**稀**（枚数更少）',
-    countWmText(sparse) > 1 && countWmText(sparse) < countWmText(wmRepeatSvg),
-    `间隔100=${countWmText(wmRepeatSvg)} 间隔400=${countWmText(sparse)}`,
+    'adj965b 平铺间隔真的生效：100 比默认 300 密、300 比 400 密（枚数单调 ⇒ 这个字段不是摆设）',
+    countWmText(dense) > countWmText(wmRepeatSvg) &&
+      countWmText(wmRepeatSvg) > countWmText(sparse) &&
+      countWmText(sparse) > 1,
+    `间隔100=${countWmText(dense)} 间隔300(默认)=${countWmText(wmRepeatSvg)} 间隔400=${countWmText(sparse)}`,
+  )
+  /**
+   * adj965f（用户 2026-10-15 追问："选中了平铺整页就看不出水印有移动的效果"）：
+   * **平铺网格必须以水印自身为基点** ⇒ 位置一变，**整片**格子跟着平移到新位置。
+   *
+   * 判据按**看得见的语义**写（不走字符串匹配：坐标是 `r1n` 格式化过的）：
+   *  · **基点那一格**必须正好落在**水印中心**（页中心 + 偏移）——位置所见即所得；
+   *  · 与基点同一行里的格距**严格等距**（刚性格子 ⇒ 拖动不会"跳格"，这是"整体平移"的标志）；
+   *  · 格子仍**铺出页面四边**（页面始终铺满，多铺的那圈由 clipPath 裁掉）；
+   *  · 负对照：偏移一变，基点那一格**不再**落在页中心。
+   *
+   * ⚠ 不判"两个集合逐格平移相等"：枚举范围会随偏移整体挪，页面**外**多铺的那圈会进出，
+   * 而那圈被裁掉、用户看不见 —— 拿它当判据会假红（第一次就是这么写的：63 格 → 48 格）。
+   */
+  const tilePts = (s: string): Array<[number, number]> =>
+    [...s.matchAll(/<tspan x="([-\d.]+)" y="([-\d.]+)">/g)].map((m) => [Number(m[1]), Number(m[2])] as [number, number])
+  const nearest = (pts: Array<[number, number]>, x: number, y: number): [number, number] | null => {
+    let best: [number, number] | null = null
+    let bd = Number.POSITIVE_INFINITY
+    for (const p of pts) {
+      const d = (p[0] - x) ** 2 + (p[1] - y) ** 2
+      if (d < bd) {
+        bd = d
+        best = p
+      }
+    }
+    return best
+  }
+  const rowGaps = (pts: Array<[number, number]>, y: number): number[] => {
+    const xs = pts.filter(([, py]) => Math.abs(py - y) < 0.25).map(([px]) => px).sort((a, b) => a - b)
+    return xs.slice(1).map((x, i) => x - (xs[i] ?? 0))
+  }
+  const coversPage = (pts: Array<[number, number]>): boolean =>
+    pts.some(([x]) => x <= 0.25) &&
+    pts.some(([x]) => x >= p0.width - 0.25) &&
+    pts.some(([, y]) => y <= 0.25) &&
+    pts.some(([, y]) => y >= p0.height - 0.25)
+  const rigidSvg = renderScoreToSvg(mkLayout({ wmText: '草稿', wmRepeat: true, wmRotate: 0 }))[0] ?? ''
+  const movedSvg =
+    renderScoreToSvg(mkLayout({ wmText: '草稿', wmRepeat: true, wmRotate: 0, wmOffsetX: 120, wmOffsetY: -80 }))[0] ?? ''
+  const pts0 = tilePts(rigidSvg)
+  const pts1 = tilePts(movedSvg)
+  const a0 = nearest(pts0, p0.width / 2, p0.height / 2)
+  const a1 = nearest(pts1, p0.width / 2 + 120, p0.height / 2 - 80)
+  check(
+    'adj965f 平铺以水印自身为基点：偏移 0 ⇒ 有格正落在页中心；偏移 (120,-80) ⇒ 有格正落在"页中心+偏移"（= 水印中心）',
+    a0 !== null &&
+      near(a0[0], p0.width / 2) &&
+      near(a0[1], p0.height / 2) &&
+      a1 !== null &&
+      near(a1[0], p0.width / 2 + 120) &&
+      near(a1[1], p0.height / 2 - 80),
+    `基点格 0=${JSON.stringify(a0)} 移动后=${JSON.stringify(a1)}`,
+  )
+  check(
+    'adj965f 平铺是**刚性格子**：与基点同一行的格距严格等距（相邻间距全相等 ⇒ 拖动时整体平移、不会跳格）',
+    (() => {
+      const gaps = rowGaps(pts1, p0.height / 2 - 80)
+      return gaps.length >= 3 && gaps.every((g) => Math.abs(g - (gaps[0] ?? 0)) < 0.25)
+    })(),
+    `行内间距=${rowGaps(pts1, p0.height / 2 - 80).map((g) => g.toFixed(1)).join(' ')}`,
+  )
+  check(
+    'adj965f 平铺**始终铺满页面**：偏移 0 与偏移 (120,-80) 两种情形下，格子都铺出页面四边（多铺的那圈由 clipPath 裁掉）',
+    coversPage(pts0) && coversPage(pts1) && pts0.length > 5 && pts1.length > 5,
+    `格数 ${pts0.length} / ${pts1.length}；四边覆盖 ${String(coversPage(pts0))} / ${String(coversPage(pts1))}`,
+  )
+  check(
+    'adj965f 负对照：偏移一变，**基点那一格就不再落在页中心**（证明上面那条真的在量"跟着走"，不是恒真）',
+    nearest(pts1, p0.width / 2, p0.height / 2) !== null &&
+      !near((nearest(pts1, p0.width / 2, p0.height / 2) ?? [0, 0])[0], p0.width / 2),
+    '',
   )
   check(
     'adj965 水印文本**必须转义**（`< & "` 不许裸着进 SVG —— 一个 `<` 就打坏整份产物）',
