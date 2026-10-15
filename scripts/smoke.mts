@@ -13210,7 +13210,12 @@ function runAdj965OverlayTests() {
         })[0] ?? ''
       ).includes('data-overlay="bg"') &&
       // **负对照**：把开关勾上（`mkLayout` 默认已勾）就一定画 —— 证明上面判的不是"恒不画"
-      (renderScoreToSvg(mkLayout({ wmText: '草稿' }))[0] ?? '').includes('data-overlay="wm"'),
+      (renderScoreToSvg(mkLayout({ wmText: '草稿' }))[0] ?? '').includes('data-overlay="wm"') &&
+      // 用户实报"背景没有显示" ⇒ 补一条：**开关关着但已填内容时必须给出说明**（不是错误，是提示），
+      // 否则"填了路径 + 没勾开关"在界面上就是静默不显示，看起来像功能坏了 ✗
+      /draft\.bgEnabled !== true && draft\.bgImage\.trim\(\) !== ''/.test(
+        String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8')),
+      ),
     '',
   )
 

@@ -983,6 +983,10 @@ export function PageConfigDialog({
               <NumInput label="Y" value={draft.wmOffsetY} onChange={(v) => updateDraft({ wmOffsetY: v })} />
             </Row>
             <div className="pcfg-note">{overlayCopy.wmNote}</div>
+            {/* adj965c：同上（水印侧）。文本/图形任一有内容都算"已填" */}
+            {draft.wmEnabled !== true && (draft.wmText.trim() !== '' || draft.wmImage.trim() !== '') && (
+              <div className="pcfg-note">{overlayCopy.wmDisabledHint}</div>
+            )}
             {/* adj965（方案优化 7）：图片解析失败**就地显示**，不静默少画一层 */}
             {overlayErrors(overlayCopy.wmErrorPrefix).map((e) => (
               <div key={e} className="pcfg-note pcfg-asset-err">
@@ -1033,6 +1037,10 @@ export function PageConfigDialog({
               <NumInput label="" range={[0, 100]} value={draft.bgOpacity} onChange={(v) => updateDraft({ bgOpacity: v })} />
             </Row>
             <div className="pcfg-note">{overlayCopy.bgNote}</div>
+            {/* adj965c（用户实报"背景没有显示"）：开关关着但路径已填 ⇒ 必须说明"是没启用，不是坏了" */}
+            {draft.bgEnabled !== true && draft.bgImage.trim() !== '' && (
+              <div className="pcfg-note">{overlayCopy.bgDisabledHint}</div>
+            )}
             {overlayErrors(overlayCopy.bgErrorPrefix).map((e) => (
               <div key={e} className="pcfg-note pcfg-asset-err">
                 ⚠ {e}
