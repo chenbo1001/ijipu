@@ -381,11 +381,11 @@ function installBridgeOnce(): void {
   if (obsidianBridgeInstalled) return
   obsidianBridgeInstalled = true
   installObsidianBridge({
-    renderSvg: (source, pageConfig) => {
+    renderSvg: (source, pageConfig, assets) => {
       const { errors } = splitParseIssues(parseJps(source))
       if (errors.length > 0) return { ok: false, svgs: [], error: `${errors.length} 个语法错误（先修好再渲染）` }
       const cfg = mergeJpsConfig(source, { ...defaultPageConfig, ...(pageConfig as Partial<PageConfig> | undefined) })
-      return { ok: true, svgs: renderScoreToSvg(layoutScore(parseJps(source), cfg)) }
+      return { ok: true, svgs: renderScoreToSvg(layoutScore(parseJps(source), cfg), assets === undefined ? undefined : { assets }) }
     },
     exportMidi: (source) => {
       const { errors } = splitParseIssues(parseJps(source))
@@ -437,11 +437,11 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator && !isHostFrame()) {
  * ⚠ 不要再移回 `load` 回调里 ✗（这正是本 bug 的由来）。
  */
 installObsidianBridge({
-  renderSvg: (source, pageConfig) => {
+  renderSvg: (source, pageConfig, assets) => {
     const { errors } = splitParseIssues(parseJps(source))
     if (errors.length > 0) return { ok: false, svgs: [], error: `${errors.length} 个语法错误（先修好再渲染）` }
     const cfg = mergeJpsConfig(source, { ...defaultPageConfig, ...(pageConfig as Partial<PageConfig> | undefined) })
-    return { ok: true, svgs: renderScoreToSvg(layoutScore(parseJps(source), cfg)) }
+    return { ok: true, svgs: renderScoreToSvg(layoutScore(parseJps(source), cfg), assets === undefined ? undefined : { assets }) }
   },
   exportMidi: (source) => {
     const { errors } = splitParseIssues(parseJps(source))
@@ -470,11 +470,11 @@ function installBridgeOnce(): void {
   if (obsidianBridgeInstalled) return
   obsidianBridgeInstalled = true
   installObsidianBridge({
-    renderSvg: (source, pageConfig) => {
+    renderSvg: (source, pageConfig, assets) => {
       const { errors } = splitParseIssues(parseJps(source))
       if (errors.length > 0) return { ok: false, svgs: [], error: `${errors.length} 个语法错误（先修好再渲染）` }
       const cfg = mergeJpsConfig(source, { ...defaultPageConfig, ...(pageConfig as Partial<PageConfig> | undefined) })
-      return { ok: true, svgs: renderScoreToSvg(layoutScore(parseJps(source), cfg)) }
+      return { ok: true, svgs: renderScoreToSvg(layoutScore(parseJps(source), cfg), assets === undefined ? undefined : { assets }) }
     },
     exportMidi: (source) => {
       const { errors } = splitParseIssues(parseJps(source))

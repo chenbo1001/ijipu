@@ -40,8 +40,31 @@ function parseCrop(raw: unknown): RangeBox | null | undefined {
   return { x, y, w, h }
 }
 
-type Request = { __ijipuAppRequest: 1; id: number; method: string; params?: Record<string, unknown> }
 /**
+ * adj965j：解析宿主传来的**图片资源** `params.assets`（`{wm?:{href,w,h}, bg?:{href,w,h}}`）。
+ *
+ * 为什么由宿主解析：应用在 iframe 里**读不到 vault**（拿不到字节、也量不到宽高）⇒
+ * "相对本谱的路径"与"`[[]]` 双链"这两类取值只有宿主能解析（插件侧 `src/overlayAssets.ts`）。
+ * 这里**只做校验与转交**，不重算任何几何 ✓。返回 `null` = 传了但非法（**如实报错**，不静默当没有 ✓）。
+ */
+function parseAssets(raw: unknown): Record<string, unknown> | null | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const k of ['wm', 'bg'] as const) {
+    const v = o[k]
+    if (v === undefined || v === null) continue
+    if (typeof v !== 'object') return null
+    const e = v as Record<string, unknown>
+    if (typeof e.href !== 'string' || !e.href.startsWith('data:image/')) return null
+    if (typeof e.w !== 'number' || typeof e.h !== 'number' || !(e.w > 0) || !(e.h > 0)) return null
+    out[k] = { href: e.href, w: e.w, h: e.h }
+  }
+  return out
+}
+
+type Request = { __ijipuAppRequest: 1; id: number; method: string; params?: Record<string, unknown> }/**
  * ⚠ 回应体单独定义：`Omit<Reply, …>` 作用在**联合类型**上会塌成"公共键" ✗
  * （第一版就这么写，`tsc` 报 `'error' does not exist in type` ✓）⇒ 显式写联合 ✓。
  */
@@ -68,7 +91,19 @@ function bytesToBase64(bytes: Uint8Array): string {
  * @param exportMidi 复用应用的 MIDI 导出链路 ✓
  */
 export function installObsidianBridge(deps: {
-  renderSvg: (source: string, pageConfig?: Record<string, unknown>) => { ok: boolean; svgs: string[]; error?: string }
+  /**
+   * adj965j（用户 2026-10-15 实报后修正）：**多一个 `assets`**。
+   *
+   * 用户报"代码块里背景用 `[[]]` 双链时预览正常、导出 PNG 没背景"。第一次修法是"宿主把图内联成
+   * `data:` URI 写进临时源码"，**没用** —— 因为引擎渲染图片**只认 `assets` 里那份 `{href,w,h}`**，
+   * 它不会自己去解析源码里的路径/`data:`（设计如此：引擎零 DOM，量不到宽高、也读不到字节）。
+   * ⇒ 正确做法是宿主解析好后**把 `assets` 递过来**，这里转交给 `renderScoreToSvg` 的 `RenderOpts` ✓。
+   */
+  renderSvg: (
+    source: string,
+    pageConfig?: Record<string, unknown>,
+    assets?: Record<string, unknown>,
+  ) => { ok: boolean; svgs: string[]; error?: string }
   exportMidi: (source: string) => { ok: boolean; bytes?: Uint8Array; error?: string }
 }): () => void {
   const embedded = window.parent !== window && window.parent !== null
@@ -127,7 +162,7 @@ export function installObsidianBridge(deps: {
           reply({ ok: true, result: { midiBase64: bytesToBase64(r.bytes), bytes: r.bytes.length } })
           return
         }
-        const r = deps.renderSvg(source, pageConfig)
+        const r = deps.renderSvg(source, pageConfig, parseAssets(params.assets) ?? undefined)
         if (!r.ok) {
           fail(CODE.internal, r.error ?? '渲染失败')
           return
