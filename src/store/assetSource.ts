@@ -30,6 +30,7 @@
  * **拒绝 `svg`**（SVG 可以内嵌脚本），并有单文件大小上限。否则一句路径就能读走任意文件。
  */
 import type { WorkspaceRecord } from './fileHandleDb'
+import { overlayCopy as C } from '../brand/copy'
 
 /** 单文件上限：16MB（超过它当背景基本也糊，且会让每页 SVG 巨大） */
 export const MAX_ASSET_BYTES = 16 * 1024 * 1024
@@ -179,7 +180,7 @@ function cacheKeyOf(path: string, base: AssetBase): string {
  */
 export async function resolveAsset(raw: string, base: AssetBase): Promise<ResolvedAsset | AssetFailure> {
   const { path, link, isData } = assetPathOf(raw)
-  if (path === '') return { ok: false, error: '图片路径是空的' }
+  if (path === '') return { ok: false, error: C.errEmptyPath }
 
   if (isData) {
     return decode(`data:${path.length}:${path.slice(0, 64)}`, { dataUri: path })
@@ -187,19 +188,16 @@ export async function resolveAsset(raw: string, base: AssetBase): Promise<Resolv
 
   // 双链只有"能解链接"的宿主（Obsidian 插件）才认：网页版/桌面端里 `[[…]]` 不是一个合法路径
   if (link && base.kind !== 'workspace') {
-    return { ok: false, error: '`[[…]]` 双链只在 Obsidian 插件里可用（这里请写相对这份 .jps 的路径）' }
+    return { ok: false, error: C.errLinkNotSupported }
   }
   if (!isAllowedAssetPath(path)) {
-    return {
-      ok: false,
-      error: `不支持的图片类型（只收 ${ALLOWED_ASSET_EXT.join(' / ')}）：${path}`,
-    }
+    return { ok: false, error: C.errUnsupportedType(path) }
   }
   if (base.kind === 'none') {
-    return { ok: false, error: '这份谱还没有保存到文件，无法按相对路径找图：先保存它，或改用 data: 内嵌' }
+    return { ok: false, error: C.errNotSaved }
   }
   if (reader === null) {
-    return { ok: false, error: '当前环境没有读取图片的通道（详情见 docs/OVERLAY-PLAN.md §四）' }
+    return { ok: false, error: C.errNoChannel }
   }
 
   // **先查缓存再读字节**（见 `cache` 的说明：查晚了等于没省）
@@ -211,12 +209,11 @@ export async function resolveAsset(raw: string, base: AssetBase): Promise<Resolv
   try {
     got = await reader(path, base)
   } catch (e) {
-    return { ok: false, error: `读图片失败：${e instanceof Error ? e.message : String(e)}` }
+    return { ok: false, error: C.errReadFailed(e instanceof Error ? e.message : String(e)) }
   }
-  if (got === null) return { ok: false, error: `找不到这张图片：${path}` }
+  if (got === null) return { ok: false, error: C.errNotFound(path) }
   if (got.bytes.byteLength > MAX_ASSET_BYTES) {
-    const mb = (MAX_ASSET_BYTES / 1024 / 1024).toFixed(0)
-    return { ok: false, error: `图片太大（超过 ${mb}MB）：${path}（先把它压小，或改用分辨率低一些的图）` }
+    return { ok: false, error: C.errTooLarge(Math.round(MAX_ASSET_BYTES / 1024 / 1024), path) }
   }
   return decode(key, { bytes: got.bytes, mime: got.mime })
 }
@@ -241,6 +238,6 @@ async function decode(
     cache.set(identity, out)
     return out
   } catch (e) {
-    return { ok: false, error: `图片解码失败（可能不是有效图片）：${e instanceof Error ? e.message : String(e)}` }
+    return { ok: false, error: C.errDecodeFailed(e instanceof Error ? e.message : String(e)) }
   }
 }

@@ -935,11 +935,13 @@ C2: 有 人 唱 情 歌 有 人 听 晚 钟 {tp 4/ 3/ 6,/ 6,/ 1/ 1/ 1} 借 一 �
   再点「保存设置」，若确实全都等于默认，这一行就是 `# jps-config:{}`（不会残留 `{"metaPos":{…}}` 这种尾巴）。
   其中 `metaPos` 记的是**描述头各元素的自定义位置**（`title`/`subtitle_i`/`author_i`/`keyline`/`tempo`/`notes_i`，
   相对各自锚点的 px 偏移）——**在预览区拖动那些文字**时才会产生，没拖过就不会有这个字段。
-- **水印层与背景层（adj965）**：谱面设置里多了两个组，键见 `docs/SETTINGS-AUDIT.md` 第 38–54 行
-  （水印 `wmType/wmText/wmImage/wmSize/wmScale/wmRotate/wmRepeat/wmRepeatGap/wmOpacity/wmOffsetX/wmOffsetY`、
-  背景 `bgImage/bgScale/bgRotate/bgOpacity/bgOffsetX/bgOffsetY`）。
-  **默认全部等于默认值 ⇒ `# jps-config` 里一个键都不会多**（等于没这个功能）。
-  水印默认是**页面正中一个、旋转 -45°**；勾选「重复铺满」后按「平铺间隔」把水印平铺满页面（间隔 100% = 步进为水印自身尺寸的 2 倍）。
+- **水印层与背景层（adj965）**：谱面设置里多了两个组，键见 `docs/SETTINGS-AUDIT.md` 第 38–56 行
+  （水印 `wmEnabled/wmType/wmText/wmImage/wmSize/wmScale/wmRotate/wmRepeat/wmRepeatGap/wmOpacity/wmOffsetX/wmOffsetY`、
+  背景 `bgEnabled/bgImage/bgScale/bgRotate/bgOpacity/bgOffsetX/bgOffsetY`）。
+  **两个总开关 `wmEnabled` / `bgEnabled` 默认关**（用户 2026-10-15 裁定）：不勾选就不画，
+  勾上会写进 `# jps-config`（否则换台机器打开又不显示了）。
+  其余字段默认等于默认值 ⇒ 不用这功能的谱**一个键都不会多**。
+  水印默认在页面正中、旋转 -45°；勾选「重复铺满」后按「平铺间隔」平铺整页（间隔 100% = 步进为水印自身尺寸的 2 倍）。
   图形文件的取值是**相对这份 `.jps` 的路径**；插件里也可以写 Obsidian **双链** `[[图片.png]]`；也接受 `data:` 内嵌。
   > ⚠ **它把"谱面自包含"打了个洞**（adj480 的另一面）：把 `.jps` 发给别人时，**相对路径的图片不会跟着走**。
   > 要发给别人，要么把图一起给，要么用面板里的「内嵌进谱面」把它变成 `data:` URI（自包含、但源码会变大）。

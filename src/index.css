@@ -3378,6 +3378,8 @@ body {
   font-size: 13px;
 }
 .pcfg-text:focus { outline: none; border-color: var(--jp-accent); }
+/* adj965：水印文本用 textarea（引擎支持多行），一行起步、可纵向拉高 */
+.pcfg-textarea { resize: vertical; min-height: 26px; line-height: 1.35; font-family: inherit; }
 
 /* adj963（用户要求）：「保存到工作区」对话框（插件嵌入版的保存主入口）。
    布局与既有对话框一致：字段 → 目录列表（吃剩余高度）→ 底部按钮靠右。只消费 `--jp-*` 变量。 */

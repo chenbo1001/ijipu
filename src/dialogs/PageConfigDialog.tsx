@@ -40,6 +40,7 @@ import { useNumberScrub, useHoldRepeat } from '../ui/numberScrubGesture'
 import { PAGE_NUM_RANGES as RANGE, coarseFor } from '../ui/numFieldRanges'
 // adj965（方案「OVL」，EP-10）：水印/背景图解析失败要就地提示（订阅资源快照）
 import { getOverlaySnapshot, subscribeOverlayAssets } from '../store/overlayAssets'
+import { overlayCopy, settingsCopy } from '../brand/copy'
 
 type TabId = 'global' | 'theme' | 'soundbank' | 'cli' | 'score' | 'font' | 'watermark' | 'background'
 
@@ -150,6 +151,7 @@ const TAB_CONFIG_KEYS: Partial<Record<TabId, readonly string[]>> = {
    *   这里列了却没行在用 ⇒ 判红；行在用却没登记 ⇒ 也判红。
    */
   watermark: [
+    'wmEnabled',
     'wmType',
     'wmText',
     'wmImage',
@@ -162,7 +164,7 @@ const TAB_CONFIG_KEYS: Partial<Record<TabId, readonly string[]>> = {
     'wmOffsetX',
     'wmOffsetY',
   ],
-  background: ['bgImage', 'bgScale', 'bgRotate', 'bgOpacity', 'bgOffsetX', 'bgOffsetY'],
+  background: ['bgEnabled', 'bgImage', 'bgScale', 'bgRotate', 'bgOpacity', 'bgOffsetX', 'bgOffsetY'],
 }
 
 export function PageConfigDialog({
@@ -342,8 +344,7 @@ export function PageConfigDialog({
    * 而不是静默少画一层让人以为"设置了没用"。按前缀分给各自的页签。
    */
   const overlaySnap = useSyncExternalStore(subscribeOverlayAssets, getOverlaySnapshot)
-  const overlayErrors = (prefix: '水印图' | '背景图'): string[] =>
-    overlaySnap.errors.filter((e) => e.startsWith(prefix))
+  const overlayErrors = (prefix: string): string[] => overlaySnap.errors.filter((e) => e.startsWith(prefix))
   /** 当前子页签里"非默认"的项数——>0 才在面板末尾给出图例（没标记时不占地方） */
   const tabNonDefaultCount = (TAB_CONFIG_KEYS[tab] ?? []).filter((k) => nonDefaultKeys.has(k)).length
 
@@ -525,8 +526,8 @@ export function PageConfigDialog({
               </Row>
             )}
             <div className="pcfg-note">
-              以上为**本机偏好**（L1），不随谱保存；谱面字体在「字体」标签里设置（随谱走）。
-              {fontOverride.enabled && '　⚠ 字体覆盖已开启："你看到的字体"与别人不同（它不随谱走）——分享谱面时建议关掉。'}
+              {settingsCopy.hostPrefNote}
+              {fontOverride.enabled && `　${settingsCopy.fontOverrideOn}`}
             </div>
           </>
         )
@@ -829,7 +830,7 @@ export function PageConfigDialog({
             {tabNonDefaultCount > 0 && (
               <div className="pcfg-note pcfg-def-legend">
                 <span className="pcfg-def-mark on" aria-hidden="true">*</span>
-                与默认值不同——点「保存设置」后会写进这份谱的设置（# jps-config）。
+                {settingsCopy.defLegend}
               </div>
             )}
           </>
@@ -890,7 +891,7 @@ export function PageConfigDialog({
             {tabNonDefaultCount > 0 && (
               <div className="pcfg-note pcfg-def-legend">
                 <span className="pcfg-def-mark on" aria-hidden="true">*</span>
-                与默认值不同——点「保存设置」后会写进这份谱的设置（# jps-config）。
+                {settingsCopy.defLegend}
               </div>
             )}
           </>
@@ -907,6 +908,17 @@ export function PageConfigDialog({
         return (
           <>
             <div className="pcfg-group-title">水印</div>
+            {/* adj965c（用户要求）：页内**开头**的总开关 —— 决定这份谱是否画水印 */}
+            <Row label="启用水印" mark={isNonDefault('wmEnabled')}>
+              <label className="pcfg-check">
+                <input
+                  type="checkbox"
+                  checked={draft.wmEnabled === true}
+                  onChange={(e) => updateDraft({ wmEnabled: e.target.checked })}
+                />
+                {overlayCopy.wmEnableDesc}
+              </label>
+            </Row>
             <Row label="类型" mark={isNonDefault('wmType')}>
               <select value={draft.wmType} onChange={(e) => updateDraft({ wmType: e.target.value as PageConfig['wmType'] })}>
                 <option value="text">文字</option>
@@ -914,10 +926,13 @@ export function PageConfigDialog({
               </select>
             </Row>
             <Row label="文本" mark={isNonDefault('wmText')}>
-              <input
-                className="pcfg-text"
+              {/* 用 textarea 而非 input：`wmText` 支持换行（引擎按多行整块居中绘制），
+                  而 `<input>` **根本打不进换行** ⇒ 写"可多行"就成了假话 */}
+              <textarea
+                className="pcfg-text pcfg-textarea"
+                rows={1}
                 value={draft.wmText}
-                placeholder="水印文字（可多行）"
+                placeholder={overlayCopy.wmTextPlaceholder}
                 spellCheck={false}
                 onChange={(e) => updateDraft({ wmText: e.target.value })}
               />
@@ -926,16 +941,16 @@ export function PageConfigDialog({
               <input
                 className="pcfg-text"
                 value={draft.wmImage}
-                placeholder="相对这份 .jps 的路径（插件里可写 [[图片.png]]）"
+                placeholder={overlayCopy.imagePathPlaceholder}
                 spellCheck={false}
                 onChange={(e) => updateDraft({ wmImage: e.target.value })}
               />
             </Row>
             {/* 下面两行**始终渲染**（不按类型隐藏）：否则"按类型切换"会让脏标记计数漏项、也让用户以为字段消失了 */}
-            <Row label="字号(pt)·文字" mark={isNonDefault('wmSize')}>
+            <Row label="文本字号(pt)" mark={isNonDefault('wmSize')}>
               <NumInput label="" range={[6, 400]} value={draft.wmSize} onChange={(v) => updateDraft({ wmSize: v })} />
             </Row>
-            <Row label="显示比率(%)·图形" mark={isNonDefault('wmScale')}>
+            <Row label="图形宽度(%)" mark={isNonDefault('wmScale')}>
               <NumInput label="" range={[10, 1000]} value={draft.wmScale} onChange={(v) => updateDraft({ wmScale: v })} />
             </Row>
             <Row label="旋转(°)" mark={isNonDefault('wmRotate')}>
@@ -949,7 +964,7 @@ export function PageConfigDialog({
                   checked={draft.wmRepeat === true}
                   onChange={(e) => updateDraft({ wmRepeat: e.target.checked })}
                 />
-                <span>按行列间隔平铺（不勾选＝只在页面正中画一个）</span>
+                {overlayCopy.wmRepeatDesc}
               </label>
             </Row>
             <Row label="平铺间隔(%)" mark={isNonDefault('wmRepeatGap')}>
@@ -967,12 +982,9 @@ export function PageConfigDialog({
               <NumInput label="X" value={draft.wmOffsetX} onChange={(v) => updateDraft({ wmOffsetX: v })} />
               <NumInput label="Y" value={draft.wmOffsetY} onChange={(v) => updateDraft({ wmOffsetY: v })} />
             </Row>
-            <div className="pcfg-note">
-              显示比率以<strong>页宽</strong>为 100%（图形的宽度 = 页宽 × 比率，高度按原图比例）；
-              位置是<strong>元素中心相对页面中心</strong>的偏移（0,0 = 正中）。透明度的 100 = 完全不透明。
-            </div>
+            <div className="pcfg-note">{overlayCopy.wmNote}</div>
             {/* adj965（方案优化 7）：图片解析失败**就地显示**，不静默少画一层 */}
-            {overlayErrors('水印图').map((e) => (
+            {overlayErrors(overlayCopy.wmErrorPrefix).map((e) => (
               <div key={e} className="pcfg-note pcfg-asset-err">
                 ⚠ {e}
               </div>
@@ -987,11 +999,22 @@ export function PageConfigDialog({
         return (
           <>
             <div className="pcfg-group-title">背景</div>
+            {/* adj965c（用户要求）：同上，背景也有总开关 */}
+            <Row label="启用背景" mark={isNonDefault('bgEnabled')}>
+              <label className="pcfg-check">
+                <input
+                  type="checkbox"
+                  checked={draft.bgEnabled === true}
+                  onChange={(e) => updateDraft({ bgEnabled: e.target.checked })}
+                />
+                {overlayCopy.bgEnableDesc}
+              </label>
+            </Row>
             <Row label="图形文件" mark={isNonDefault('bgImage')}>
               <input
                 className="pcfg-text"
                 value={draft.bgImage}
-                placeholder="相对这份 .jps 的路径（插件里可写 [[图片.png]]）"
+                placeholder={overlayCopy.imagePathPlaceholder}
                 spellCheck={false}
                 onChange={(e) => updateDraft({ bgImage: e.target.value })}
               />
@@ -1000,7 +1023,7 @@ export function PageConfigDialog({
               <NumInput label="X" value={draft.bgOffsetX} onChange={(v) => updateDraft({ bgOffsetX: v })} />
               <NumInput label="Y" value={draft.bgOffsetY} onChange={(v) => updateDraft({ bgOffsetY: v })} />
             </Row>
-            <Row label="显示比率(%)" mark={isNonDefault('bgScale')}>
+            <Row label="宽度(%)" mark={isNonDefault('bgScale')}>
               <NumInput label="" range={[10, 1000]} value={draft.bgScale} onChange={(v) => updateDraft({ bgScale: v })} />
             </Row>
             <Row label="旋转(°)" mark={isNonDefault('bgRotate')}>
@@ -1009,15 +1032,8 @@ export function PageConfigDialog({
             <Row label="透明度(0-100)" mark={isNonDefault('bgOpacity')}>
               <NumInput label="" range={[0, 100]} value={draft.bgOpacity} onChange={(v) => updateDraft({ bgOpacity: v })} />
             </Row>
-            <div className="pcfg-note">
-              <strong>只显示在页面内的部分</strong>（走出页面的会被裁掉）；显示比率以<strong>页宽</strong>为 100%，
-              位置是图片<strong>中心相对页面中心</strong>的偏移（0,0 = 正中）。
-              图片按<strong>相对这份 <code>.jps</code> 的路径</strong>取：把它发给别人时要连图一起给
-              （或改为内嵌，见「OVL」方案）。
-              「排版辅助」打开时可用 <code>Ctrl+滚轮</code> 缩放、<code>Ctrl+Alt+滚轮</code> 旋转、
-              <code>Ctrl+拖动</code> 移动位置。
-            </div>
-            {overlayErrors('背景图').map((e) => (
+            <div className="pcfg-note">{overlayCopy.bgNote}</div>
+            {overlayErrors(overlayCopy.bgErrorPrefix).map((e) => (
               <div key={e} className="pcfg-note pcfg-asset-err">
                 ⚠ {e}
               </div>
@@ -1085,7 +1101,7 @@ export function PageConfigDialog({
           </button>
           <button
             className="btn primary"
-            title="把这次改动写进这份谱的 # jps-config（只写与默认不同的项）——谱面因此自包含，复制给别人显示一致"
+            title={settingsCopy.saveConfigTitle}
             onClick={() => {
               // adj83：保存设置时持久化到源码 # jps-config 注释（每首谱用自己的设置）
               // adj-font（D1）：默认**差量写入**（只写与默认不同的字段；全部为默认时删除设置行）
@@ -1159,7 +1175,7 @@ function Row({ label, mark, children }: { label: string; mark?: boolean; childre
           <span
             className={`pcfg-def-mark${mark ? ' on' : ''}`}
             aria-hidden="true"
-            title={mark ? '与默认值不同：保存后会写进这份谱的设置（# jps-config）' : undefined}
+            title={mark ? settingsCopy.defMarkTitle : undefined}
           >
             {mark ? '*' : ''}
           </span>

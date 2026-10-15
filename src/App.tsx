@@ -161,14 +161,28 @@ function App() {
             ? ({ kind: 'native', dir: assetNativePath.replace(/[\\/][^\\/]*$/, '') } as const)
             : ({ kind: 'none' } as const)
       await syncOverlayAssets(
-        { wmType: assetPageConfig.wmType, wmImage: assetPageConfig.wmImage, bgImage: assetPageConfig.bgImage },
+        {
+          wmEnabled: assetPageConfig.wmEnabled !== false,
+          wmType: assetPageConfig.wmType,
+          wmImage: assetPageConfig.wmImage,
+          bgEnabled: assetPageConfig.bgEnabled !== false,
+          bgImage: assetPageConfig.bgImage,
+        },
         base,
       )
     })()
     return () => {
       alive = false
     }
-  }, [assetPageConfig.wmType, assetPageConfig.wmImage, assetPageConfig.bgImage, assetBinding, assetNativePath])
+  }, [
+    assetPageConfig.wmEnabled,
+    assetPageConfig.wmType,
+    assetPageConfig.wmImage,
+    assetPageConfig.bgEnabled,
+    assetPageConfig.bgImage,
+    assetBinding,
+    assetNativePath,
+  ])
 
   /**
    * adj621（用户要求）：**统一应用标题**——浏览器页签、PWA 页签、Tauri 桌面窗口标题都用

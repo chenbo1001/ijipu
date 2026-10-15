@@ -411,7 +411,18 @@ async function main() {
       c,
       `[...document.querySelectorAll('.jp-tab')].find((t) => t.textContent.includes('水印')).click(), true`,
     )
-    await waitFor(c, `!!document.querySelector('.pcfg-text')`, '水印页签内容出现（路径/文本输入框）')
+    await waitFor(c, `!!document.querySelector('.pcfg-text')`, '水印页签内容出现（文本/路径输入框）')
+
+    // 先勾「启用水印」——adj965c 起两个总开关**默认关**（用户裁定），不勾就不会画
+    await evalJs(
+      c,
+      `(() => {
+         const box = [...document.querySelectorAll('.pcfg-check input[type=checkbox]')][0]
+         box.click()
+         return box.checked
+       })()`,
+    )
+    await sleep(250)
 
     // 真打字：聚焦水印文本输入框后走 CDP 输入（React 的 onChange 才会触发）
     await evalJs(c, `document.querySelector('.pcfg-text').focus(), true`)
@@ -423,12 +434,12 @@ async function main() {
       `document.querySelector('.score-page svg [data-overlay="wm"] tspan')?.textContent ?? ''`,
     )
     check(
-      '在「水印」页签里打字 ⇒ **预览里真的出现了水印层**（且文字对得上）',
+      '在「水印」页签里勾「启用水印」并打字 ⇒ **预览里真的出现了水印层**（且文字对得上）',
       wmInPreview === true && wmText === '内部草稿',
       `tspan="${wmText}"`,
     )
 
-    // 保存设置 ⇒ 真的差量写进 # jps-config（只该出现 wmText 这一项）
+    // 保存设置 ⇒ 真的差量写进 # jps-config（默认关的开关必须落键，否则换台机器打开就又不显示了）
     await evalJs(
       c,
       `[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存设置').click(), true`,
@@ -436,10 +447,10 @@ async function main() {
     await sleep(500)
     const codeNow = String(await evalJs(c, `document.querySelector('.editor-main textarea').value`))
     const cfgLine = (codeNow.match(/# jps-config:(.*)/) ?? [])[1] ?? ''
-    const cfgKeys = Object.keys(JSON.parse(cfgLine || '{}'))
+    const cfgKeys = Object.keys(JSON.parse(cfgLine || '{}')).sort()
     check(
-      '点「保存设置」⇒ 真的写进 `# jps-config`，且**只写这一项**（差量写入：15 个新字段里只有 wmText 落键）',
-      cfgKeys.length === 1 && cfgKeys[0] === 'wmText',
+      '点「保存设置」⇒ 真的写进 `# jps-config`，且**只写改过的那两项**（启用开关 + 文本）',
+      cfgKeys.length === 2 && cfgKeys[0] === 'wmEnabled' && cfgKeys[1] === 'wmText',
       cfgLine,
     )
 
@@ -461,13 +472,24 @@ async function main() {
     )
     await evalJs(c, `[...document.querySelectorAll('.jp-tab')].find((t) => t.textContent.includes('背景')).click(), true`)
     await waitFor(c, `!!document.querySelector('.pcfg-text')`, '背景页签内容出现')
+    // ⚠ 「启用背景」默认关（用户裁定）⇒ 关着时**连解析都不做**（不产生噪音提示），
+    //   所以要先勾上，才谈得上"填了路径但解析不了"这个被测场景
+    await evalJs(
+      c,
+      `(() => {
+         const box = [...document.querySelectorAll('.pcfg-check input[type=checkbox]')][0]
+         box.click()
+         return box.checked
+       })()`,
+    )
+    await sleep(250)
     await evalJs(c, `document.querySelector('.pcfg-text').focus(), true`)
     await c.send('Input.insertText', { text: '图.png' })
     await sleep(800)
     const errText = String(await evalJs(c, `document.querySelector('.pcfg-asset-err')?.textContent ?? ''`))
     check(
       '图片路径解析不了时**就地提示**（不静默少画一层）',
-      errText.includes('还没有保存') || errText.includes('没有读取图片的通道'),
+      errText.includes('尚未保存') || errText.includes('不支持读取图片'),
       errText.trim().slice(0, 40),
     )
 

@@ -13019,17 +13019,17 @@ async function runAdj965AssetSourceTests() {
   const fNone = await resolveAsset('图.png', none)
   const fChan = await resolveAsset('图.png', native)
   check(
-    'adj965 失败提示可照做：空路径 / 双链只在插件可用 / 不支持的类型 / 还没保存 / 本环境没有读图通道',
+    'adj965 失败提示可照做：空路径 / 双链只在插件可用 / 不支持的类型 / 尚未保存 / 本环境不支持读图',
     fEmpty.ok === false &&
-      fEmpty.error.includes('空') &&
+      fEmpty.error.includes('路径为空') &&
       fLink.ok === false &&
       fLink.error.includes('双链') &&
       fExt.ok === false &&
-      fExt.error.includes('不支持的图片类型') &&
+      fExt.error.includes('仅支持') &&
       fNone.ok === false &&
-      fNone.error.includes('还没有保存') &&
+      fNone.error.includes('尚未保存') &&
       fChan.ok === false &&
-      fChan.error.includes('没有读取图片的通道'),
+      fChan.error.includes('不支持读取图片'),
     [fEmpty, fLink, fExt, fNone, fChan].map((f) => (f.ok ? 'ok' : f.error)).join(' ｜ '),
   )
 
@@ -13076,11 +13076,11 @@ async function runAdj965AssetSourceTests() {
   })
   const bad = await resolveAsset('坏.png', native)
   check(
-    'adj965 上限与异常：超过 16MB 判"图片太大"、读不到判"找不到这张图片"、解码抛错判"图片解码失败"（都不静默）',
+    'adj965 上限与异常：超过 16MB 判"超过上限"、读不到判"未找到图片"、解码抛错判"图片解码失败"（都不静默）',
     big.ok === false &&
-      big.error.includes('图片太大') &&
+      big.error.includes('超过') &&
       missing.ok === false &&
-      missing.error.includes('找不到这张图片') &&
+      missing.error.includes('未找到图片') &&
       bad.ok === false &&
       bad.error.includes('图片解码失败'),
     [big, missing, bad].map((f) => (f.ok ? 'ok' : f.error)).join(' ｜ '),
@@ -13116,8 +13116,21 @@ async function runAdj965AssetSourceTests() {
 function runAdj965OverlayTests() {
   console.log('[197] adj965 watermark / background layers (OVL)')
   const SRC = 'V: 1.0\nB: 测试\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n'
+  /**
+   * 夹具默认**把两个总开关打开**（`adj965c` 起默认是关的）。
+   *
+   * 理由：下面这些断言测的是"**画法**"（几何/层序/钳制/转义…），不是开关本身；
+   * 开关由 `adj965c` 那条专项闸门**显式传参**验证（它会把 `wmEnabled:false` 覆盖进来）。
+   * 若不在这里默认打开，每条几何断言都得重复写一遍 `wmEnabled:true`，一处漏了就变成"空跑判真"。
+   */
   const mkLayout = (cfg: Record<string, unknown> = {}) =>
-    layoutScore(parseJps(SRC), { ...defaultPageConfig, noteSpaceLayout: 'duration', ...cfg } as never)
+    layoutScore(parseJps(SRC), {
+      ...defaultPageConfig,
+      wmEnabled: true,
+      bgEnabled: true,
+      noteSpaceLayout: 'duration',
+      ...cfg,
+    } as never)
   const num = (re: RegExp, s: string): number[] => {
     const m = re.exec(s)
     return m === null ? [] : m.slice(1).map((x) => Number(x))
@@ -13182,6 +13195,25 @@ function runAdj965OverlayTests() {
     (wm.match(/<tspan[^>]*>[^<]*/) ?? [''])[0],
   )
 
+  // adj965c（用户 2026-10-15 裁定）：两个"总开关"**默认关**（必须显式勾上才画）；
+  // 关掉时整层不画**且连 `<defs>` 都不产出**（不画"空层"），配置本身保留。
+  check(
+    'adj965c 「启用水印 / 启用背景」默认 **关**（用户裁定）；关掉 ⇒ 整层与 `<defs>` 都不产出；勾上 ⇒ 照常画',
+    defaultPageConfig.wmEnabled === false &&
+      defaultPageConfig.bgEnabled === false &&
+      // 默认（不勾）⇒ 一个字节都不插，即便填了文字
+      !(renderScoreToSvg(mkLayout({ wmText: '草稿', wmEnabled: false }))[0] ?? '').includes('data-overlay="wm"') &&
+      !(renderScoreToSvg(mkLayout({ wmText: '草稿', wmEnabled: false }))[0] ?? '').includes('<defs>') &&
+      !(
+        renderScoreToSvg(mkLayout({ bgImage: 'a.png', bgEnabled: false }), {
+          assets: { bg: { href: 'data:image/png;base64,AA', w: 200, h: 100 } },
+        })[0] ?? ''
+      ).includes('data-overlay="bg"') &&
+      // **负对照**：把开关勾上（`mkLayout` 默认已勾）就一定画 —— 证明上面判的不是"恒不画"
+      (renderScoreToSvg(mkLayout({ wmText: '草稿' }))[0] ?? '').includes('data-overlay="wm"'),
+    '',
+  )
+
   // ---- ③ 钳制（手改出来的越界值不该产生离谱画面）----
   const clampSvg = renderScoreToSvg(mkLayout({ wmText: 'x', wmSize: 999, wmRotate: -400 }))[0] ?? ''
   check(
@@ -13243,7 +13275,13 @@ function runAdj965OverlayTests() {
   const longLay = layoutScore(parseJps(longSrc), { ...defaultPageConfig, noteSpaceLayout: 'duration' } as never)
   const longSvgs = renderScoreToSvg(longLay, { assets: {} })
   const multi = renderScoreToSvg(
-    layoutScore(parseJps(longSrc), { ...defaultPageConfig, noteSpaceLayout: 'duration', wmText: 'S' } as never),
+    // ⚠ 这条走的是**裸 layoutScore**（不是 `mkLayout`）⇒ 得自己带上启用开关（默认是关的）
+    layoutScore(parseJps(longSrc), {
+      ...defaultPageConfig,
+      noteSpaceLayout: 'duration',
+      wmEnabled: true,
+      wmText: 'S',
+    } as never),
   )
   check(
     'adj965 多页：每页都画一层，且 `clipPath` 的 id **按页唯一**（同一份 HTML 里多页 SVG 不会互相串）',
@@ -16468,13 +16506,31 @@ function runAdj605Tests() {
     '',
   )
   check(
-    'adj605 图例文字是**纯文本**（`.pcfg-note` 不解析 Markdown：写成 `**…**` 会原样显示）',
-    // adj965：改查**剥掉注释**的源码 —— 探针是"图例后 300 字符内不许有 `**`"，
-    // 而项目注释风格本身就大量用 `**粗体**`；新页签的注释正好插进这个窗口
-    // ⇒ 旧探针会把"注释里写了粗体"误判成"图例里写了 Markdown"（当场红过一次）。
-    /pcfg-def-legend[\s\S]{0,220}?与默认值不同——点「保存设置」后会写进这份谱的设置/.test(cfgNoComment) &&
+    'adj605 图例**纯文本**且出处唯一（渲染在面板上的是 `settingsCopy.defLegend`，组件不写字面量文案）',
+    // adj965（用户指正）：文案改为从 `brand/copy.ts` 取 ⇒ 判据改成"引用 + 文案本身干净"。
+    // 探针查**剥掉注释**的源码：项目注释风格本身就大量用 `**粗体**`，不剥会把注释误判成界面文案。
+    (cfgNoComment.match(/pcfg-def-legend/g) ?? []).length === 2 &&
+      (cfgNoComment.match(/\{settingsCopy\.defLegend\}/g) ?? []).length === 2 &&
       !/pcfg-def-legend[\s\S]{0,300}?\*\*/.test(cfgNoComment),
     '',
+  )
+  /**
+   * adj965（用户 2026-10-15 指正）：**纯文本界面的文案里不许出现 Markdown 标记**。
+   *
+   * 由来：`cliPathCopy.intro` / `legacyHint`（注册命令行那组）与 `uiCopy.segmentRowGapHint` 里
+   * 写了 `**加粗**`，而它们都是 `.pcfg-note` **纯文本**渲染 ⇒ 用户在界面上看到的是**字面星号**。
+   * `adj605` 的图例探针只覆盖图例那一小块，管不到别处 ⇒ 这里补一条覆盖全部文案的闸门。
+   *
+   * 判据：剥掉注释后，扫 `brand/copy.ts` 的**字符串字面量**（单引号；模板串暂不覆盖，已注明）。
+   */
+  const copyNoComment = String(readFileSync('src/brand/copy.ts', 'utf8'))
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '')
+  const markedCopy = [...copyNoComment.matchAll(/'[^'\n]*\*\*[^'\n]*'/g)].map((m) => m[0].slice(0, 48))
+  check(
+    'adj965 纯文本文案里不许出现 Markdown 加粗（`**…**` 会原样显示成星号；应改用「」或多句陈述）',
+    markedCopy.length === 0,
+    markedCopy.join(' ｜ '),
   )
   check(
     'adj605 标记位宽度恒定（否则字段网格随 * 亮灭横跳）+ 红色取 `--jp-danger`',
@@ -25961,9 +26017,9 @@ async function runAdj946ShimTests() {
     const dialog = readOrEmpty('src/dialogs/PageConfigDialog.tsx')
     const stripTsComments = (src: string): string => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
     check(
-      'adj946 文案：`cliPathCopy` 里有"命令行入口目录（写进 PATH 的就是它）"与旧形态提示（`binDirLabel` / `legacyHint`）',
-      copySrc.includes("binDirLabel: '命令行入口目录（写进 PATH 的就是它）'") &&
-        copySrc.includes('legacyHint') && copySrc.includes('旧的注册形态'),
+      'adj946 文案：`cliPathCopy` 里说清"写入 PATH 的是命令行入口目录"，且有旧形态提示（`binDirLabel` / `legacyHint`）',
+      copySrc.includes("binDirLabel: '命令行入口目录（即将写入 PATH）'") &&
+        copySrc.includes('legacyHint') && copySrc.includes('旧注册形态'),
     )
     check(
       'adj946 界面：状态明细显示 `cliStatus.binDir`，旧形态提示走 `cliStatus?.legacy` + `cliPathCopy.legacyHint`（组件里不写字面量）',

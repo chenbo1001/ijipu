@@ -23,6 +23,7 @@
 import type { RenderAssets, RenderFontMeta, RenderOpts } from '@ijipu/engine'
 import { resolveAsset, setAssetReader, type AssetBase, type AssetReader } from './assetSource'
 import { decodeAsset } from './assetDecode'
+import { overlayCopy as C } from '../brand/copy'
 
 /** 给 UI 的快照（**引用稳定**：只有真的变了才换新对象，否则 `useSyncExternalStore` 会死循环） */
 export interface OverlaySnapshot {
@@ -73,11 +74,18 @@ export function clearOverlayAssets(): void {
  * 只在"真的要用图片"时才去读：文本水印走 `wmText`，根本不需要资源 ⇒ 不做任何 IO。
  */
 export async function syncOverlayAssets(
-  input: { wmType: 'text' | 'image'; wmImage: string; bgImage: string },
+  input: {
+    wmEnabled: boolean
+    wmType: 'text' | 'image'
+    wmImage: string
+    bgEnabled: boolean
+    bgImage: string
+  },
   base: AssetBase,
 ): Promise<void> {
-  const needWm = input.wmType === 'image' && input.wmImage.trim() !== ''
-  const needBg = input.bgImage.trim() !== ''
+  // adj965c（用户 2026-10-15）：总开关关掉 ⇒ **连读都不读**（不浪费 IO、也不产生"图找不到"的噪音提示）
+  const needWm = input.wmEnabled && input.wmType === 'image' && input.wmImage.trim() !== ''
+  const needBg = input.bgEnabled && input.bgImage.trim() !== ''
   if (!needWm && !needBg) {
     publish(EMPTY)
     return
@@ -90,11 +98,11 @@ export async function syncOverlayAssets(
   const next: RenderAssets = {}
   if (wmR !== null) {
     if (wmR.ok) next.wm = { href: wmR.href, w: wmR.w, h: wmR.h }
-    else errors.push(`水印图：${wmR.error}`)
+    else errors.push(`${C.wmErrorPrefix}${wmR.error}`)
   }
   if (bgR !== null) {
     if (bgR.ok) next.bg = { href: bgR.href, w: bgR.w, h: bgR.h }
-    else errors.push(`背景图：${bgR.error}`)
+    else errors.push(`${C.bgErrorPrefix}${bgR.error}`)
   }
   publish({ ...(Object.keys(next).length > 0 ? { assets: next } : {}), errors })
 }
