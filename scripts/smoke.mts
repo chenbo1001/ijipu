@@ -26101,12 +26101,21 @@ function runAdj945CliManualTests() {
   )
 
   // ---- ⑥ 面向使用者的必备内容（用户逐条点名的那几段）----
+  /**
+   * ⚠ **adj946b（口径变更，用户 2026-10-15 指示）**：原来这里有两条断言要求手册写
+   * 「Windows 控制台注意事项 `Start-Process -Wait -PassThru -NoNewWindow`」与「PowerShell `>` 写出 0 字节文件」。
+   * 用户复核手册后指出：**这些是实现/绕过细节，使用者只要知道"在终端直接 `ijipu cli …` 就行"**，
+   * 于是那两条换成"用户真正需要知道的两件事"：
+   *  · 未注册时 `ijipu` 还不在 PATH ⇒ 用完整路径（否则照手册敲必然失败，属**不可达操作**）；
+   *  · 不要直接运行安装目录里的 `ijipu.exe` 当命令行用（输出顺序与退出码不可靠）。
+   * 这不是放宽：条数不变、仍是逐条 `includes` 断言，且下面负对照⑨仍在（去掉"新开一个终端"必须判红）。
+   */
   const mustHave: Array<[string, string]> = [
     ['调用形态 `ijipu.exe cli <命令>`', 'ijipu.exe cli'],
     ['注册后可直接敲 `ijipu cli …`，并说明"要新开终端才生效"', '新开一个终端'],
     ['只对当前用户生效、不需要管理员', '不需要管理员'],
-    ['Windows 控制台注意事项：`Start-Process -Wait -PassThru -NoNewWindow`', 'Start-Process'],
-    ['PowerShell `>` 会写出 0 字节文件', '0 字节'],
+    ['未注册时用完整路径调用（否则 `ijipu` 还不在 PATH 里）', '%LOCALAPPDATA%'],
+    ['不要直接运行安装目录里的 `ijipu.exe` 当命令行用', '不要在终端里直接运行'],
     ['退出码 6 = 环境能力缺失（独立 Node 环境没有注册表能力）', '环境能力缺失'],
     ['许可与源码地址（AGPL-3.0 + GitHub）', 'AGPL-3.0'],
     ['源码仓库地址', 'github.com/snailhome/ijipu'],
@@ -26644,23 +26653,25 @@ async function runAdj946ShimTests() {
         dropsBin && dropsLegacy,
     )
 
-    // ④ 文档口径：手册要说"现在直接敲即可"，并说明垫片在哪、旧终端要重开
+    // ④ 文档口径（**adj946b 新口径，用户 2026-10-15**）："垫片/入口目录"这类**实现概念只留在维护文档**
+    //    （`docs/CLI.md`）；使用手册只讲"怎么用"—— 注册后即可直接使用 `ijipu cli <命令>`。
+    //    用户原话：这类实现说明"对于普通使用者能不能理解，这句话对他有没有用"。
     const manual = readOrEmpty('docs/CLI-手册.md')
     const cliDoc = readOrEmpty('docs/CLI.md')
+    const manualStaysUserFacing = (t: string): boolean => !t.includes('垫片') && t.includes('即可直接使用')
     check(
-      'adj946 手册：写明"注册的是 bin 目录 / 里面有控制台垫片 ijipu.cmd"与"现在直接敲即可"',
-      manual.includes('bin\\ijipu.cmd') && manual.includes('现在直接敲即可'),
+      'adj946 手册只讲怎么用：不出现"垫片"这个实现概念，并写明注册后即可直接使用 `ijipu cli <命令>`',
+      manualStaysUserFacing(manual),
     )
     check(
-      'adj946 负对照⑪：把"现在直接敲即可"那句从手册抹掉（＝手册还教用户绕）⇒ 判据判红',
-      (() => {
-        const cut = manual.split('现在直接敲即可').join('')
-        return cut !== manual && !cut.includes('现在直接敲即可') && manual.includes('bin\\ijipu.cmd')
-      })(),
+      'adj946 负对照⑪（新口径）：抹掉"即可直接使用"那句 / 把"垫片"塞回手册 ⇒ 两种改法都判红',
+      !manualStaysUserFacing(manual.split('即可直接使用').join('')) &&
+        !manualStaysUserFacing(`${manual}\n垫片\n`) &&
+        manualStaysUserFacing(manual),
     )
     check(
-      'adj946 手册与 `docs/CLI.md` 都写到了垫片这件事（维护口径与使用口径不能只改一边）',
-      cliDoc.includes('ijipu.cmd') && cliDoc.includes('垫片'),
+      'adj946 "垫片"这件事**只**留在维护文档 `docs/CLI.md`（使用口径与维护口径各归其位）',
+      cliDoc.includes('ijipu.cmd') && cliDoc.includes('垫片') && !manual.includes('垫片'),
     )
     check(
       'adj946 负对照⑫：把 `docs/CLI.md` 里"垫片"的说法抹掉 ⇒ 判据判红',

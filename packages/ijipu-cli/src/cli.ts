@@ -138,7 +138,7 @@ const HELP = `iJipu 命令行（爱记谱）
 
 第一个参数必须恰为 cli：命令行与图形界面是同一个可执行文件，据此分流。
 省略 cli（例如 ijipu 我的谱.jps、ijipu --help）会打开图形界面，不执行命令。
-注册 PATH 后，终端里的 ijipu 是控制台垫片 bin\\ijipu.cmd：它原样转交参数，不代为补齐 cli。
+注册 PATH 后仍需写 cli：命令行入口不会代为补齐。
 
 命令：
   format        -i <文件|-> [-o <文件|->] [--check] [--in-place] [--diff]   按应用规范规范化源码
@@ -195,10 +195,9 @@ const HELP = `iJipu 命令行（爱记谱）
 
 注册类命令（register、unregister、status）仅内嵌版可用（ijipu.exe cli register）：
   这三条需要读写当前用户的 PATH 与 App Paths，该能力由桌面端注入；无该能力时退出码 6 并说明原因。
-  写入 PATH 的是命令行入口目录 <安装目录>\\bin（内含控制台垫片 ijipu.cmd）：
-  ijipu.exe 是图形界面子系统程序，cmd 不等待它（提示符会夹在输出中间，退出码也取不到）；
-  cmd 会等待批处理文件，因此垫片使输出顺序、退出码与重定向均为正常，而双击 .jps 仍不闪窗口。
-  注册后要新开一个终端才生效（已打开的终端读不到新 PATH）；仅对当前用户生效，不需要管理员权限。
+  写入 PATH 的是命令行入口目录 <安装目录>\\bin；注册后终端里输出顺序、退出码与重定向均正常，
+  双击 .jps 仍打开界面。注册后要新开一个终端才生效（已打开的终端读不到新 PATH）；
+  仅对当前用户生效，不需要管理员权限。
 
 退出码：0 成功 ｜ 1 用法错误 ｜ 2 输入不存在 ｜ 3 语法错误 ｜ 4 渲染失败 ｜ 5 设置非法 ｜ 6 环境能力缺失
 `
@@ -762,7 +761,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
         if (st.legacy) {
           line(
             io,
-            '  注意：PATH 里还有旧的注册形态（安装目录本身）—— 它会跟垫片抢 ijipu，' +
+            '  注意：PATH 里还有旧的注册形态（安装目录本身）—— 它会与命令行入口抢 ijipu，' +
               '跑一次 `ijipu cli register` 会自动把它换成命令行入口目录 ✓',
           )
         }
@@ -782,7 +781,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
             '  建议：① 先在「系统属性 → 环境变量」里删掉 PATH 中已经不存在的目录（反复装卸的软件常留一堆）；\n' +
             '        ② 或把 iJipu 装到更短的路径（例如 C:\\iJipu）后再注册；\n' +
             '        ③ 也可以不动 PATH，直接用完整路径调用：<安装目录>\\bin\\ijipu.cmd cli lint 我的谱.jps\n' +
-            '           （或 <安装目录>\\ijipu.exe cli lint 我的谱.jps —— 后者是 GUI 子系统程序，输出顺序/退出码/重定向都不如垫片）',
+            '           （或 <安装目录>\\ijipu.exe cli lint 我的谱.jps —— 后者的输出顺序与退出码不如上面那种可靠）',
         )
       } else {
         io.err(
@@ -812,11 +811,6 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       )
       line(io, '  · 请新开一个终端，之后就能直接敲：ijipu cli lint 我的谱.jps')
       line(io, '  · 只对当前用户生效，不需要管理员权限')
-      line(
-        io,
-        '  · 这一条是命令行入口目录（里面有控制台垫片 ijipu.cmd）：输出顺序、退出码、重定向都正常 ✓，' +
-          '双击 .jps 仍打开界面、不闪窗口',
-      )
     } else {
       line(
         io,
