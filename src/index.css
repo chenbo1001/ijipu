@@ -5104,7 +5104,10 @@ span.ws-check {
 }
 
 /* adj724b：确认条（顶部横幅，用于"文件已被外部修改"这类需要二选一的提示）。
-   与 .toast 同一套 token，但它**必须**停在顶部并且可点——自动消失的提示承担不了这个语义。 */
+   与 .toast 同一套 token，但它**必须**停在顶部并且可点——自动消失的提示承担不了这个语义。
+   adj967e（用户 2026-10-17 截图实报"布局很不好看"）：改成**文字在上、按钮在下面一排**。
+   为什么原来那么窄：它是 `position: fixed` 且**没设宽** ⇒ 宽度按内容收缩，横排时三个按钮先占掉
+   ~480px，长文案被挤成一条窄柱（用户截图里那样）。竖排后文案按 `max-width` 舒展开、按钮另起一行。 */
 .confirm-bar {
   position: fixed;
   left: 50%;
@@ -5112,8 +5115,9 @@ span.ws-check {
   transform: translateX(-50%);
   z-index: 1200;
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   max-width: min(720px, calc(100vw - 32px));
   padding: 10px 14px;
   border-radius: 8px;
@@ -5126,13 +5130,16 @@ span.ws-check {
 }
 
 .confirm-bar-text {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
 }
 
 .confirm-bar-actions {
   flex: 0 0 auto;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  /* 按钮排在**下面一排**、靠右（与对话框底部操作区同一习惯） */
+  justify-content: flex-end;
 }
 
 .confirm-bar-btn {

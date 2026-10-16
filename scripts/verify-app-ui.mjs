@@ -393,6 +393,38 @@ async function main() {
       askText.slice(0, 28),
     )
 
+    /**
+     * adj967e（用户截图实报"布局很不好看"）：确认条必须**文字在上、按钮在下面一排**。
+     * 为什么这条要真浏览器量：症状纯由 CSS 布局造成（`position: fixed` 不设宽 ⇒ 按内容收缩，
+     * 三个按钮把长文案挤成一条窄柱）。源码里"改没改 CSS"看不出来，只有量 DOM 盒模型才作数。
+     */
+    const barGeom = await evalJs(
+      c,
+      `(() => {
+        const bar = document.querySelector('.confirm-bar')
+        const txt = document.querySelector('.confirm-bar-text')
+        const acts = document.querySelector('.confirm-bar-actions')
+        if (!bar || !txt || !acts) return null
+        const b = bar.getBoundingClientRect(), t = txt.getBoundingClientRect(), a = acts.getBoundingClientRect()
+        const btns = [...acts.querySelectorAll('.confirm-bar-btn')].map((x) => x.getBoundingClientRect())
+        return {
+          barW: Math.round(b.width), textW: Math.round(t.width),
+          textBelow: Math.round(t.bottom) <= Math.round(a.top) + 1,
+          sameRow: btns.length >= 2 ? btns.every((r) => Math.abs(r.top - btns[0].top) < 1) : false,
+          inside: t.left >= b.left - 1 && a.right <= b.right + 1 && a.bottom <= b.bottom + 1,
+        }
+      })()`,
+    )
+    check(
+      'adj967e 确认条：**文字在上、按钮在下面一排**（按钮同一行、都在条内；文字不再被挤成窄柱）',
+      barGeom !== null &&
+        barGeom.textBelow === true &&
+        barGeom.sameRow === true &&
+        barGeom.inside === true &&
+        barGeom.textW > 260,
+      JSON.stringify(barGeom),
+    )
+
     await evalJs(c, `document.querySelector('.confirm-bar-btn.is-primary').click(), true`)
     await sleep(400)
     const afterOk = await evalJs(c, `document.querySelector('.editor-main textarea').value`)
