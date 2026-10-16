@@ -559,6 +559,53 @@ pub fn run() {
         // 前端用 `core.invoke('plugin:opener|open_url', { url })` 调它（见 src/preview/openUrl.ts）。
         .plugin(tauri_plugin_opener::init())
         .manage(PendingOpen::default())
+        /*
+         * adj968（用户要求）：**把 `.jps` 从资源管理器拖进窗口就能打开**。
+         *
+         * 桌面端必须走**原生拖放事件**（不是网页的 HTML5 `drop`）：WebView2 默认由原生层接管拖放
+         * （Tauri 的 `dragDropEnabled` 默认 `true`，本仓 `tauri.conf.json` 没写这一项 ⇒ 默认接管），
+         * 页面里的 `dragover/drop` 在桌面端**收不到**。好在原生事件给的是**真实绝对路径** ⇒
+         * 直接复用双击关联那条链（`queue_open_paths` 入队 + `ijipu://open-files` 通知前端）：
+         * 于是它能写回原文件、能参与外部改动轮询，**不需要任何授权弹窗**，前端一行都不用改。
+         *
+         * 另外发一个 `ijipu://drag-hover`（带上要打开的文件名）给前端画"松开即打开 xxx.jps"的高亮层；
+         * 拖走的瞬间（`Leave`）也发一次，避免高亮卡住。
+         *（写成普通块注释而不是 `/** */`：链式调用位置上不接受文档注释，rustc 会报 E0585。）
+         */
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::DragDrop(drag) = event {
+                match drag {
+                    tauri::DragDropEvent::Enter { paths, .. } => {
+                        // 只把**认识的**类型说给用户听（拖进来的是图片/压缩包时不该说"松开即打开"）
+                        let names: Vec<String> = paths
+                            .iter()
+                            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+                            .filter(|n| n.to_ascii_lowercase().ends_with(".jps"))
+                            .collect();
+                        let _ = window.app_handle().emit("ijipu://drag-hover", names.first().cloned());
+                    }
+                    tauri::DragDropEvent::Leave => {
+                        let _ = window
+                            .app_handle()
+                            .emit("ijipu://drag-hover", Option::<String>::None);
+                    }
+                    tauri::DragDropEvent::Drop { paths, .. } => {
+                        let _ = window
+                            .app_handle()
+                            .emit("ijipu://drag-hover", Option::<String>::None);
+                        // 与双击关联**同一条链**：`.jps` 之外的路径由 `jps_paths_from_string_args` 过滤掉
+                        let strs: Vec<String> = paths
+                            .iter()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect();
+                        queue_open_paths(window.app_handle(), jps_paths_from_string_args(strs));
+                    }
+                    tauri::DragDropEvent::Over { .. } => {}
+                    // `DragDropEvent` 标了 `#[non_exhaustive]`（上游将来可能加相位）⇒ 必须留通配臂
+                    _ => {}
+                }
+            }
+        })
         .setup(|app| {
             // 冷启动：双击 `.jps` 时路径就在本进程的命令行参数里（NSIS 写的是 `"ijipu.exe" "%1"`）。
             // v2 的 `Env` 默认已 manage（内容即 `std::env::args_os()`），用它避免非 UTF-8 参数 panic。

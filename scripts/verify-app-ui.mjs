@@ -1054,6 +1054,67 @@ async function main() {
         (await evalJs(c, `!!document.querySelector('.file-diff')`)) === false,
     )
 
+    // ============ adj968：把 .jps 拖进窗口就能打开（**真拖一次**） ============
+    //
+    // 为什么这段必须真跑：拖放的坑全在"事件与默认行为"上 —— 不 `preventDefault()` 浏览器会把拖进来的
+    // 文件当成"导航到该文件"、直接把应用页替换掉；`getAsFileSystemHandle()` 晚一步收集就永远拿不到句柄。
+    // 源码级断言只能证明"写了这几行"，证明不了"拖进去真的打开了"。
+    // 构造方式：页面里 `new DataTransfer()` + `new File(...)` + `new DragEvent('dragover'/'drop')`
+    // ——真实拖放的 `dataTransfer.files/items` 正是这样被填充的（本机无 OS 级拖放模拟通道）。
+    console.log('[verify-app-ui] adj968：拖放打开 .jps（真拖）')
+    const DROP_TEXT = 'V: 1.0\nB: 拖放测试\nD: C\nP: 4/4\nQ: 1 2 3 |\n'
+    const fireDrag = (name, text, phase) => `(() => {
+      const dt = new DataTransfer()
+      dt.items.add(new File([${JSON.stringify(text)}], ${JSON.stringify(name)}, { type: 'text/plain' }))
+      const ev = new DragEvent(${JSON.stringify(phase)}, { dataTransfer: dt, bubbles: true, cancelable: true })
+      window.dispatchEvent(ev)
+      return { prevented: ev.defaultPrevented }
+    })()`
+    const overInfo = await evalJs(c, fireDrag('拖放测试.jps', DROP_TEXT, 'dragover'))
+    // ⚠ 覆盖层是 React 状态驱动的 ⇒ 必须等一次渲染再读 DOM（同一次 JS 回合里读只会拿到 null）
+    await sleep(250)
+    const hintText = String(await evalJs(c, `document.querySelector('.drop-overlay-main')?.textContent ?? ''`))
+    const subText = String(await evalJs(c, `document.querySelector('.drop-overlay-sub')?.textContent ?? ''`))
+    check(
+      'adj968 dragover **必须被拦**（否则浏览器会把拖进来的文件当成"导航到该文件"，把应用页替换掉）+ 覆盖层显示"松开即打开「拖放测试.jps」"',
+      overInfo?.prevented === true && hintText.includes('拖放测试.jps') && subText.includes('替换'),
+      JSON.stringify({ ...overInfo, hint: hintText }),
+    )
+    await evalJs(c, fireDrag('拖放测试.jps', DROP_TEXT, 'drop'))
+    await waitFor(c, `document.querySelector('.editor-main textarea').value.includes('拖放测试')`, '拖入的谱已进编辑器')
+    const dropNotice = String(await evalJs(c, `document.querySelector('.toast-text')?.textContent ?? ''`))
+    const overlayGone = await evalJs(c, `!!document.querySelector('.drop-overlay')`)
+    check(
+      'adj968 拖入 ⇒ **真的打开了**（内容进编辑器 + 提示里点名这份文件）、且覆盖层收掉了',
+      dropNotice.includes('拖放测试') && overlayGone === false,
+      JSON.stringify({ 提示: dropNotice.slice(0, 34) }),
+    )
+    // ---- 脏文档闸：有未保存修改时先问一句，确认之前一个字都不许变 ----
+    await retypeEditor(`${DROP_TEXT}Q: 5 5 5 |\n`)
+    const dirtyNow = await evalJs(c, `!!document.querySelector('.dirty-dot')`)
+    const beforeDrop = String(await evalJs(c, `document.querySelector('.editor-main textarea').value`))
+    await evalJs(c, fireDrag('第二次拖入.jps', 'V: 1.0\\nB: 第二次拖入\\nD: C\\nP: 4/4\\nQ: 6 6 6 |\\n', 'drop'))
+    await waitFor(c, `!!document.querySelector('.confirm-bar')`, '脏文档拖入 ⇒ 确认条')
+    const dropAskText = String(await evalJs(c, `document.querySelector('.confirm-bar-text').textContent`))
+    const stillOld = String(await evalJs(c, `document.querySelector('.editor-main textarea').value`))
+    check(
+      'adj968 **脏文档先问一句**：拖入时弹出确认条（文案点明"未保存 + 打开并替换"），且**此时内容原封不动**',
+      dirtyNow === true && dropAskText.includes('未保存') && dropAskText.includes('第二次拖入') && stillOld === beforeDrop,
+      JSON.stringify({ 脏标记: dirtyNow, 文案: dropAskText.slice(0, 30) }),
+    )
+    await evalJs(c, `document.querySelector('.confirm-bar-btn.is-primary').click(), true`)
+    await waitFor(c, `document.querySelector('.editor-main textarea').value.includes('第二次拖入')`, '确认后真的替换了文档')
+    check('adj968 确认后按用户选的做：文档换成拖入的那一份（没有静默丢、也不是"点了没反应"）', true)
+    // ---- 负对照：拖进来的不是 .jps ⇒ 什么都不做（内容不变、不弹确认条） ----
+    const beforePng = String(await evalJs(c, `document.querySelector('.editor-main textarea').value`))
+    await evalJs(c, fireDrag('图片.png', 'not a score', 'drop'))
+    await sleep(400)
+    check(
+      'adj968 **负对照**：拖进来的不是 .jps ⇒ 什么都不做（内容不变、不弹确认条）',
+      (await evalJs(c, `document.querySelector('.editor-main textarea').value`)) === beforePng &&
+        (await evalJs(c, `!!document.querySelector('.confirm-bar')`)) === false,
+    )
+
     c.close()
   } catch (e) {
     check(`脚本自身出错：${e instanceof Error ? e.message : String(e)}`, false)
@@ -1065,3 +1126,5 @@ async function main() {
 }
 
 void main()
+
+

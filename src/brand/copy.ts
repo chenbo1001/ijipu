@@ -858,6 +858,37 @@ export const persistPermissionCopy = {
 } as const
 
 /**
+ * adj968（用户要求）：**把 `.jps` 从文件管理器拖进应用就能打开**的文案。
+ *
+ * 两端的机制不同（网页 = HTML5 拖放 + 可写句柄；桌面 = Tauri 原生拖放 + 真实路径），
+ * 但**给用户看到的话必须一套**（与文件模型那条总口径一致：差别只在能力，不在交互）。
+ */
+export const dropOpenCopy = {
+  /** 覆盖层主句（已经知道文件名时） */
+  releaseToOpen: (name: string) => `松开即打开「${name}」`,
+  /** 覆盖层主句（只知道拖的是文件、名字还读不到时） */
+  releaseGeneric: '松开即打开乐谱（.jps）',
+  /** 覆盖层副句：说明拖进来的东西会替换当前文档 */
+  overlayHint: '会替换当前正在编辑的文档',
+  /** 一个 `.jps` 都没认出来（拖了图片/压缩包等）——只提示，不做任何事 */
+  onlyJps: (ignored: number) => `拖入的文件里没有 .jps 乐谱（另有 ${ignored} 个其它文件已忽略）`,
+  /** 一次拖了多个 `.jps`：只打开第一个，其余如实报数（与双击多选同一口径 `pickPrimary`） */
+  extraIgnored: (n: number) => `（另有 ${n} 个 .jps 未打开；一次拖放只打开第一个）`,
+  /** 打开失败（句柄/文件读不出来） */
+  failed: (reason: string) => `拖入的文件打不开：${reason}`,
+  /** 拖入的是"只读"档（没有可写句柄）：说清它不会被写回，保存请走另存为 */
+  uploadedReadOnly: (name: string) => `已载入「${name}」（本端拿不到可写句柄 ⇒ 保存请用「另存为」）`,
+  /**
+   * 当前文档有未保存修改时的确认句（与「新建」那套确认条同一实现）。
+   * 拖入是**替换文档**的动作 ⇒ 必须让用户自己决定，绝不静默丢编辑。
+   */
+  replaceDirtyAsk: (name: string) =>
+    `当前文档有未保存的修改。打开「${name}」会替换这些修改（磁盘上的原文件不受影响），确定要打开吗？`,
+  replaceDirtyConfirm: '打开并替换',
+  replaceDirtyCancel: '取消',
+} as const
+
+/**
  * adj944（用户需求，2026-10 原话）：「需要在全局设置里添加一个注册 iJipu CLI 的提示和按钮，
  * 未注册时显示「注册」，已注册时显示「解除」；**只有注册后，才能在打开终端时就能 `ijipu cli`**」。
  *

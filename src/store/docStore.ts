@@ -64,7 +64,7 @@ import {
  *  必须只在用户还未进行任何文件操作时应用，避免它在用户新建/另存为之后才完成，从而把
  *  fileHandle / fileName 覆盖回旧文件（旧值 A）。 */
 let fileStateTouched = false
-import { uiCopy, savePhaseCopy, pasteImportCopy, externalOpenCopy, workspaceCopy, exportCopy, persistPermissionCopy } from '../brand/copy'
+import { uiCopy, savePhaseCopy, pasteImportCopy, externalOpenCopy, workspaceCopy, exportCopy, persistPermissionCopy, dropOpenCopy } from '../brand/copy'
 // adj927：外部改动的**基准**（我们最后一次写出去/读进来的内容指纹 + mtime）——见 externalChange.ts
 // adj943：写盘**发出前**还要登记"在途写"（写盘落地与基准刷新之间有窗口，见该文件头说明）
 import { baselineKeyOf, bindingKeyOf, setBaseline, markWriteInFlight } from './externalChange'
@@ -268,6 +268,15 @@ interface DocState {
   openExternalFiles: (files: ExternalFile[]) => boolean
   /** 打开文件对话框：读取 .jps 载入；用户取消返回 false */
   openFile: () => Promise<boolean>
+  /**
+   * adj968（用户要求）：**把拖进来的 `.jps` 载入编辑器**（`store/dropOpen.ts` 调它）。
+   *
+   * 两种输入都接（拖放的两种能力档）：
+   *  · `handle` 有值（Chromium 的 `getAsFileSystemHandle()`）⇒ 与「打开」同一档：**绑定句柄、能写回、能轮询**；
+   *  · 只有 `file`（Firefox/Safari，或浏览器不给句柄）⇒ 与「打开=上传」同一档：读入内容、**不绑定**（走草稿）。
+   * 当前文档**有未保存修改时先问一句**（拖入是替换文档的动作，与「新建」同一套确认条）——绝不静默丢编辑。
+   */
+  openDropped: (input: { handle: FileSystemFileHandle | null; file: File | null }) => Promise<boolean>
   /** 保存：已有句柄直接写入；否则走另存为对话框 */
   saveFile: () => Promise<boolean>
   /** 另存为对话框：选择保存位置与文件名后写入 */
@@ -892,6 +901,53 @@ export const useDocStore = create<DocState>()((set, get) => ({
     )
     return true
   },
+  openDropped: async ({ handle, file }) => {
+    const ui = useUiStore.getState()
+    let name = ''
+    let code = ''
+    let mtime: number | null = null
+    try {
+      if (handle) {
+        const f = await handle.getFile()
+        name = fileBaseName(f.name)
+        code = await f.text()
+        mtime = f.lastModified
+      } else if (file) {
+        name = fileBaseName(file.name)
+        code = await file.text()
+      } else {
+        return false
+      }
+    } catch (e) {
+      // 读不出来如实报错（不是静默打不开）
+      ui.showNotice(dropOpenCopy.failed(e instanceof Error ? e.message : String(e)), 'error')
+      return false
+    }
+    /** 真正装载那一下（确认之后才执行） */
+    const run = (): void =>
+      adoptDoc(
+        handle
+          ? { name, code, handle, mtime, notice: `${uiCopy.openOkPrefix}${name}.jps` }
+          : // 拿不到可写句柄 ⇒ 说清"保存请用另存为"，别让用户以为能存回原文件
+            { name, code, notice: dropOpenCopy.uploadedReadOnly(name), noticeKind: 'warn' },
+      )
+    /**
+     * 拖入是**替换当前文档**的动作：有未保存修改就先问一句（与「新建」同一套确认条，
+     * 见 `requestNewDoc`）——绝不静默丢编辑。确认条是异步的，故这里先返回 true。
+     */
+    if (get().dirty) {
+      useUiStore.getState().showAsk({
+        text: dropOpenCopy.replaceDirtyAsk(`${name}.jps`),
+        confirmLabel: dropOpenCopy.replaceDirtyConfirm,
+        cancelLabel: dropOpenCopy.replaceDirtyCancel,
+        onConfirm: run,
+        onCancel: () => {},
+      })
+      return true
+    }
+    run()
+    return true
+  },
   openFile: async () => {
     fileStateTouched = true
     const picker = (window as any).showOpenFilePicker
@@ -908,53 +964,10 @@ export const useDocStore = create<DocState>()((set, get) => ({
       const file = await handle.getFile()
       const code = await file.text()
       const name = fileBaseName(file.name)
-      /**
-       * adj966：句柄绑定的**系统文件**也要记基准 —— 这里能拿到 `lastModified`，
-       * 所以基准带 mtime ⇒ 轮询可先走"mtime 快筛"，连内容都不用读（`probeFileChange` ①）。
-       */
-      setBaseline(bindingKeyOf({ kind: 'handle', name }), code, file.lastModified)
-      /**
-       * adj966：**网页 / PWA 的持久权限引导**（用户口径：把权限选择交给用户）——
-       * 刚打开一个文件时是唯一合适的时机（权限气泡刚出现过）。只提示一次、**不阻断**任何操作。
-       */
-      void guidePersistPermissionOnce(handle, name)
-      try {
-        localStorage.setItem(DRAFT_KEY, code)
-        localStorage.setItem(DRAFT_NAME_KEY, name)
-      } catch {
-        /* 存储不可用时静默 */
-      }
-      // adj161：打开的文件成为操作主体，句柄持久化（下次保存直接写回）
-      void saveFileHandle(handle)
-      // adj628：来源换成了这个本地文件 ⇒ 落盘的工作区来源必须清掉（否则下次加载又绑回老工作区文件）
-      saveDraftSrc(null)
-      // adj212：打开文件时同步 pageConfig——此前漏了 mergeJpsConfig，
-      // 其它浏览器打开带 # jps-config 的谱时页面设置仍是打开前的旧值
-      set({
-        code,
-        fileName: name,
-        parseResult: parseJps(code),
-        pageConfig: resolveConfig(code),
-        dirty: false,
-        fileHandle: handle,
-        // adj538：改用对话框打开 ⇒ 与"外部路径"解绑（两者互斥，否则保存会写回上一个外部文件）
-        nativePath: null,
-        // adj540：同理与工作区解绑（三者互斥）
-        binding: null,
-        pendingBinding: null,
-        activeNoteId: null,
-        activeNoteIds: [],
-        voiceBlocks: [],
-        cursorJump: null,
-        undoStack: [],
-        redoStack: [],
-        lastEditAt: 0,
-        sel: { start: 0, end: 0 },
-      })
+      // adj968：装载 + 记基准（带 mtime）+ 句柄持久化 + 持久权限引导都收在 `adoptDoc`（与"拖入"同一份实现）
+      adoptDoc({ name, code, handle, mtime: file.lastModified, notice: `${uiCopy.openOkPrefix}${name}.jps` })
       // adj370：打开成功给出明确反馈（含实际文件名与句柄名），避免"打开了没打开"无从判断
-      const ui = useUiStore.getState()
       console.info(`[iJipu] 打开文件：name=${name} handle=${handle.name}`)
-      ui.showNotice(`${uiCopy.openOkPrefix}${name}.jps`, 'ok')
       return true
     } catch (e) {
       // adj370：打开失败不再静默——此前 catch 直接 return false，用户只看到"没反应"；
@@ -1645,6 +1658,79 @@ function workspaceOpErrorText(name: string, e: unknown): string {
  * adj399/adj540：是否触屏/移动端 —— 判据已收敛到 `saveSupport.isCoarsePointerDevice()`
  * （「打开/另存为」在手机端要**以工作区优先**，两处必须用同一个判断，见该函数注释）。
  */
+/**
+ * adj968（用户要求"拖进窗口就打开"）：**把一份刚拿到手的内容装载成当前文档**——三处入口共用一份实现。
+ *
+ * 三处入口的差别**只在"绑定什么"**，装载动作（解析、页面设置、清空历史与联动、写草稿）必须一字不差：
+ *  · 打开对话框（FSA 句柄）／拖入（拿得到句柄）⇒ 记基准（带 mtime）+ 持久化句柄 + 持久权限引导；
+ *  · 拖入（只有 `File`）／`<input>` 上传降级 ⇒ **不绑定**（草稿 + 另存为/导出）。
+ * 收在一处的原因与项目里其它"一处口径"一样：三份实现必然漂（此前"打开对话框"与"上传降级"就是两份）。
+ */
+function adoptDoc(input: {
+  name: string
+  code: string
+  /** 可写句柄；拿不到就 `null`（那一档不绑定，保存走另存为） */
+  handle?: FileSystemFileHandle | null
+  /** 句柄那次读到的 `lastModified`（走 mtime 快筛）；没有就 `null` */
+  mtime?: number | null
+  notice: string
+  noticeKind?: 'ok' | 'warn' | 'error'
+}): void {
+  const { name, code, handle = null } = input
+  fileStateTouched = true
+  if (handle) {
+    /**
+     * adj966：句柄绑定的**系统文件**要记基准 —— 这里能拿到 `lastModified`，
+     * 所以基准带 mtime ⇒ 轮询可先走"mtime 快筛"，连内容都不用读（`probeFileChange` ①）。
+     */
+    setBaseline(bindingKeyOf({ kind: 'handle', name }), code, input.mtime ?? null)
+    // adj161：打开的文件成为操作主体，句柄持久化（下次保存直接写回）
+    void saveFileHandle(handle)
+    /**
+     * adj966：**网页 / PWA 的持久权限引导**（用户口径：把权限选择交给用户）——
+     * 刚打开一个文件时是唯一合适的时机（权限气泡刚出现过）。只提示一次、**不阻断**任何操作。
+     */
+    void guidePersistPermissionOnce(handle, name)
+  }
+  try {
+    localStorage.setItem(DRAFT_KEY, code)
+    localStorage.setItem(DRAFT_NAME_KEY, name)
+  } catch {
+    /* 存储不可用时静默 */
+  }
+  // adj628：来源换成了这个本地文件 ⇒ 落盘的工作区来源必须清掉（否则下次加载又绑回老工作区文件）
+  saveDraftSrc(null)
+  // adj212：打开文件时同步 pageConfig——此前漏了 mergeJpsConfig，
+  // 其它浏览器打开带 # jps-config 的谱时页面设置仍是打开前的旧值
+  setDocState({
+    code,
+    fileName: name,
+    parseResult: parseJps(code),
+    pageConfig: resolveConfig(code),
+    dirty: false,
+    fileHandle: handle,
+    // adj538：改用对话框打开 ⇒ 与"外部路径"解绑（两者互斥，否则保存会写回上一个外部文件）
+    nativePath: null,
+    // adj540：同理与工作区解绑（三者互斥）
+    binding: null,
+    pendingBinding: null,
+    activeNoteId: null,
+    activeNoteIds: [],
+    voiceBlocks: [],
+    cursorJump: null,
+    undoStack: [],
+    redoStack: [],
+    lastEditAt: 0,
+    sel: { start: 0, end: 0 },
+  })
+  useUiStore.getState().showNotice(input.notice, input.noticeKind ?? 'ok')
+}
+
+/** `adoptDoc` 用的 setter（模块级函数里拿不到 store 工厂的 `set`，走 zustand 的静态 setState） */
+function setDocState(partial: Partial<DocState>): void {
+  useDocStore.setState(partial)
+}
+
 function openFileViaInput(): Promise<boolean> {
   return new Promise((resolve) => {
     const mobile = isCoarsePointerDevice()
@@ -1692,37 +1778,8 @@ function openFileViaInput(): Promise<boolean> {
       try {
         const code = await file.text()
         const name = fileBaseName(file.name)
-        try {
-          localStorage.setItem(DRAFT_KEY, code)
-          localStorage.setItem(DRAFT_NAME_KEY, name)
-        } catch {
-          /* 存储不可用时静默 */
-        }
-        // adj628：换成了这个本地文件 ⇒ 落盘的工作区来源要清掉（否则下次加载又绑回老工作区文件）
-        saveDraftSrc(null)
-        useDocStore.setState({
-          code,
-          fileName: name,
-          parseResult: parseJps(code),
-          pageConfig: resolveConfig(code),
-          dirty: false,
-          // adj281：降级环境无写回权限，不关联磁盘句柄（保存走 saveFileAs → 会提示 saveUnsupported）
-          fileHandle: null,
-          // adj538：同理与"外部路径"解绑
-          nativePath: null,
-          // adj540：降级打开也没有工作区绑定（下次保存走另存为/导出）
-          binding: null,
-          pendingBinding: null,
-          activeNoteId: null,
-          activeNoteIds: [],
-          voiceBlocks: [],
-          cursorJump: null,
-          undoStack: [],
-          redoStack: [],
-          lastEditAt: 0,
-          sel: { start: 0, end: 0 },
-        })
-        useUiStore.getState().showNotice(uiCopy.openFallbackNotice, 'warn')
+        // adj968：与"拖入"共用同一份装载实现（差别只是这里拿不到可写句柄 ⇒ 不绑定）
+        adoptDoc({ name, code, notice: uiCopy.openFallbackNotice, noticeKind: 'warn' })
         finish(true)
       } catch {
         finish(false)

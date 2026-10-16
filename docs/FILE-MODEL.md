@@ -22,7 +22,7 @@ PC 端与 Web/PWA 端要按**同一套口径**补上，而不是各写一套。
 
 | 能力 | 含义 | 桌面壳（Tauri） | 插件嵌入版 | Web（Chromium） | PWA（安装版） | 其它浏览器 / 手机 |
 |---|---|---|---|---|---|---|
-| `open` | 打开方式 | 原生对话框 / 原生路径 | 文库文件（宿主桥） | 文件选择器（FSA） | 同 Web | `<input type=file>`（只读一次） |
+| `open` | 打开方式 | 原生对话框 / 原生路径 / **拖入（原生拖放，给真实路径）** | 文库文件（宿主桥） | 文件选择器（FSA）/ **拖入（给可写句柄）** | 同 Web | `<input type=file>`（只读一次） |
 | `readWithoutGesture` | 无手势读当前内容 | ✓ | ✓ | ✓（句柄在手即可 `getFile()`） | ✓ | ✗ |
 | `writeWithoutGesture` | 无手势写回 | ✓（原生） | ✓（宿主桥） | **看权限**（§3） | 同 Web | ✗ |
 | `watch` | 外部改动检测 | `poll`／将来 `event` | `event`（宿主 `modify`） | `poll` + 聚焦/可见时检查 | 同 Web | `none` |
@@ -71,7 +71,7 @@ PC 端与 Web/PWA 端要按**同一套口径**补上，而不是各写一套。
 > 只是"点打开就操作系统文件"更符合 PC 习惯。
 
 **A. PC（Tauri）——先做，先把默认换过来**
-1. **默认以系统文件为操作对象**：打开走原生对话框/原生路径；保存写回**同一个文件**（不再要求先建工作区）。
+1. **默认以系统文件为操作对象**：打开走原生对话框/原生路径/**拖入**；保存写回**同一个文件**（不再要求先建工作区）。
 2. **外部变更检测**：原生侧加"读 + stat（mtime）"与**轮询**（有 `notify` 事件源时升级为 `event`），
    触发既有 `probeExternalChange`；不一致 ⇒ 既有三选弹条 + 差异框。
 3. **工作区降级**：从"主入口"变成"可选的组织方式"（后续版本再谈移除），**打开/保存绝不依赖工作区**。
@@ -122,6 +122,7 @@ PC 端与 Web/PWA 端要按**同一套口径**补上，而不是各写一套。
 | **块级采纳 + 自动三路合并**（P1/P2） | `src/diff/merge.ts`（纯函数）+ `docStore.applyMergeResult` + `FileDiffDialog` / `ConfirmBar` / `main.tsx` | `[177] adj966f` 二十四条（五条负向判据各配负对照）+ `verify:app-ui` 的 adj966f 段（真点） |
 | **第六态 `bound-conflict`**（两边都改过） | `fileHost.docStateOf` | `[177]` 两条（只"外部改了 + 本地有改动"才算 + 负对照） |
 | **分层口径：谁走工作区、谁走系统文件** | `fileHost.shouldOpenWorkspaceDock` + `uiStore.initialDock` + `TopBar.runOpenSmart`（删掉"设过工作区就开面板"那一支） | `[177]` 四条（逐档 + 两条负对照 + 接线存在性） |
+| **拖放打开 `.jps`**（`adj968`） | 网页：`store/dropOpen.ts` + `ui/DropOverlay.tsx`（HTML5 拖放，`getAsFileSystemHandle` 给可写句柄）；桌面：`src-tauri/src/lib.rs` 的 `WindowEvent::DragDrop`（原生化路径 ⇒ **复用双击那条链**）；打开动作收在 `docStore.openDropped`（脏文档先问一句）；纯判据 `store/dropPick.ts` | `[179] adj968` 六条（纯判据 + 负对照 + 两端接线与接线负对照）+ `verify:app-ui` 五条**真拖**（拦默认 / 覆盖层 / 真打开 / 脏文档闸 / 非 .jps 什么都不做） |
 
 **待做（按顺序）**
 

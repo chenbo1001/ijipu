@@ -263,6 +263,8 @@ import type { FileHostProfile } from '../src/store/fileHost.ts'
 import { EXT_POLL_MS, watchTick, startExternalWatch } from '../src/store/externalChangeWatch.ts'
 // adj966f：**两边都改了怎么办** —— 块级采纳（P1）与自动三路合并（P2）；纯函数，逐例断言
 import { applyMerge, applyMergePlan, planMerge } from '../src/diff/merge.ts'
+// adj968：拖放"该打开哪一个"的纯判据（单独模块，不 import store ⇒ Node 里可直接断言）
+import { classifyDropNames } from '../src/store/dropPick.ts'
 import type { RuntimeEnv } from '../src/brand/env.ts'
 // adj944（用户需求「全局设置里注册 iJipu CLI」）：PATH 增删的**纯函数 + 编排** ——
 // 应用界面（全局设置那个按钮）与命令行（`ijipu cli register|unregister|status`）**共用这一份** ✓
@@ -18927,6 +18929,13 @@ runAdj927ExternalChangeTests()
       failed++
       console.error('  ✗ adj967 小节序号落点用例抛异常', e)
     }
+    try {
+      // adj968：拖放打开 .jps（用户要求；真拖那一下在 verify:app-ui）
+      runAdj968Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj968 拖放打开用例抛异常', e)
+    }
   })
   .then(() => {
     try {
@@ -20138,6 +20147,70 @@ function runAdj967Tests() {
         !wired(src.replace('isGhostTrailingSeg(p.segs, nc)', '')) &&
         !wired(src.replace('pushRowStartBarNumber(ord[fc] as number, yBottomBar, voice, groupIndex, prevEndLine)', '')) &&
         !wired(src.replace('pushRowStartBarNumber(ord[row.segIdx] as number, yBottomBar, voice, groupIndex, prevEndLine)', '')),
+      '')
+  }
+}
+
+/**
+ * adj968（用户要求）：**把 `.jps` 从文件管理器拖进应用就能打开**。
+ *
+ * 这一组只断言"判据与接线"（真正的"拖一下"是浏览器事件，放在 `npm run verify:app-ui` 里）：
+ *  · 纯判据 `classifyDropNames`（只认 `.jps`、多个取第一个、其余报数）；
+ *  · 两端各自的接线：网页必须 `preventDefault()`（否则浏览器会"导航到该文件"、把应用页替换掉）、
+ *    句柄必须在 drop 事件里**同步收集**（`getAsFileSystemHandle()` 的 Promise 晚一步就拿不到）；
+ *    桌面端走 Rust 的原生拖放事件、且**复用双击那条链**（`queue_open_paths`）。
+ */
+function runAdj968Tests() {
+  console.log('[179] 拖放打开 .jps（adj968）')
+  // ---- 纯判据：只认 .jps（大小写不敏感）→ 取第一个；其余 .jps 报数、非 .jps 忽略 ----
+  const p1 = classifyDropNames(['a.jps', 'B.JPS', 'x.png'])
+  check('adj968 只认 .jps（大小写不敏感）：取第一个，其余 .jps 计入 extraCount、非 .jps 计入 ignored',
+    p1.primary === 'a.jps' && p1.extraCount === 1 && p1.ignored === 1,
+    JSON.stringify(p1))
+  const p2 = classifyDropNames(['x.png', 'y.zip'])
+  check('adj968 一个 .jps 都没有 ⇒ primary=null（调用方据此"只提示、什么都不做"）',
+    p2.primary === null && p2.extraCount === 0 && p2.ignored === 2, JSON.stringify(p2))
+  check('adj968 空列表 ⇒ 同样是"没事发生"', classifyDropNames([]).primary === null, '')
+  /**
+   * 负对照：**不做扩展名过滤**（直接取第一个 = 最省事的写法）在"先拖进一张图"时会把图片当乐谱打开 ——
+   * 判据必须能分辨这两种实现。
+   */
+  const naive = (names: readonly string[]): string | null => names[0] ?? null
+  check('adj968 **负对照**：不按扩展名筛（直接取第一个）⇒ 混入图片时 primary 就不是 .jps（判据能分辨两种实现）',
+    classifyDropNames(['x.png', 'a.jps']).primary === 'a.jps' && naive(['x.png', 'a.jps']) === 'x.png', '')
+
+  // ---- 接线（源码级；"点得动/拖得进去"那部分交给 verify:app-ui） ----
+  {
+    const drop = String(readFileSync('src/store/dropOpen.ts', 'utf8'))
+    const store = String(readFileSync('src/store/docStore.ts', 'utf8'))
+    const overlay = String(readFileSync('src/ui/DropOverlay.tsx', 'utf8'))
+    const app = String(readFileSync('src/App.tsx', 'utf8'))
+    const rust = String(readFileSync('src-tauri/src/lib.rs', 'utf8'))
+    const wired = (d: string, s: string, o: string, a: string, r: string): boolean =>
+      // 网页：拦默认行为（否则浏览器把拖进来的文件当成"导航"）+ 三个事件都装 + 句柄同步收集
+      d.includes('e.preventDefault()') &&
+      d.includes("window.addEventListener('dragover', onDragOver)") &&
+      d.includes("window.addEventListener('drop', onDrop)") &&
+      d.includes('const handles = fileItems.map') &&
+      d.includes('await handles[idx]') &&
+      // 打开动作收在 docStore（脏文档先问一句）
+      s.includes('openDropped: async ({ handle, file })') &&
+      s.includes('if (get().dirty)') &&
+      // 高亮层挂在 App 里
+      o.includes('attachDropOpen(setHint)') &&
+      a.includes('<DropOverlay />') &&
+      // 桌面端：原生拖放事件 + 复用双击那条链
+      r.includes('tauri::WindowEvent::DragDrop(drag)') &&
+      r.includes('queue_open_paths(window.app_handle(), jps_paths_from_string_args(strs))')
+    check('adj968 接线：网页（拦默认 + dragover/drop + 句柄同步收集）／docStore（脏文档闸）／高亮层／桌面原生链 都在',
+      wired(drop, store, overlay, app, rust), '')
+    check('adj968 **负对照**：逐处删（拦默认 / 句柄同步收集 / 桌面原生链）⇒ 判据判假',
+      wired(drop, store, overlay, app, rust) &&
+        // ⚠ 必须 `replaceAll`：`e.preventDefault()` 在文件里出现**两处**（dragover 与 drop），
+        // 只删第一处会让负对照恒真（E-2026-450 的补充里记过同一个坑）
+        !wired(drop.replaceAll('e.preventDefault()', ''), store, overlay, app, rust) &&
+        !wired(drop.replace('const handles = fileItems.map', 'const handles = await Promise.all(fileItems.map'), store, overlay, app, rust) &&
+        !wired(drop, store, overlay, app, rust.replace('tauri::WindowEvent::DragDrop(drag)', 'false')),
       '')
   }
 }
@@ -23554,8 +23627,16 @@ function runAdj966Tests() {
   const need = [
     // 打开：双击打开的系统文件记基准
     "setBaseline(bindingKeyOf({ kind: 'native', path: primary.path }), primary.code, null)",
-    // 打开：FSA 句柄记基准（这一处能带 mtime ⇒ 轮询可走快筛）
-    "setBaseline(bindingKeyOf({ kind: 'handle', name }), code, file.lastModified)",
+    /**
+     * 打开：FSA 句柄记基准（这一处能带 mtime ⇒ 轮询可走快筛）。
+     *
+     * ⚠ adj968（用户要求"拖放打开"）**按新口径改了这两条断言**：句柄那条"打开记基准"从
+     * `openFile` 里搬进了三个入口共用的 `adoptDoc`（打开对话框 / 拖入 / 上传降级），
+     * 所以现在是 `input.mtime ?? null`，而 `openFile` 负责把 `file.lastModified` 传进去。
+     * 断言跟着口径走（不是放宽）：**句柄路径仍必须带 mtime、且必须真的传来**。
+     */
+    "setBaseline(bindingKeyOf({ kind: 'handle', name }), code, input.mtime ?? null)",
+    "adoptDoc({ name, code, handle, mtime: file.lastModified, notice: `${uiCopy.openOkPrefix}${name}.jps` })",
     // 保存：原生路径 写前在途写 + 写后刷基准
     "markWriteInFlight(bindingKeyOf({ kind: 'native', path }), code)",
     "setBaseline(bindingKeyOf({ kind: 'native', path }), code, null)",
@@ -23565,9 +23646,10 @@ function runAdj966Tests() {
   const hasAll = (t: string): boolean => need.every((s) => t.includes(s))
   check('adj966 接线：系统文件的两条路（原生路径 / FSA 句柄）在"打开记基准"与"写前在途写 + 写后刷基准"都接上了',
     hasAll(docSrcText), JSON.stringify(need.filter((s) => !docSrcText.includes(s))))
-  check('adj966 负对照：删掉"打开记基准"或"写后在途写"任一处 ⇒ 同一条判据判假（它真的在数这几处接线）',
-    hasAll(docSrcText) && !hasAll(docSrcText.replace(need[0], '')) && !hasAll(docSrcText.replace(need[2], '')),
-    JSON.stringify({ 原始: hasAll(docSrcText), 删打开记基准: hasAll(docSrcText.replace(need[0], '')), 删在途写: hasAll(docSrcText.replace(need[2], '')) }))
+  check('adj966 负对照：删掉"打开记基准"（原生或句柄任一处）或"写前在途写"⇒ 同一条判据判假',
+    hasAll(docSrcText) && !hasAll(docSrcText.replace(need[0], '')) && !hasAll(docSrcText.replace(need[1], '')) &&
+      !hasAll(docSrcText.replace(need[3], '')),
+    JSON.stringify({ 原始: hasAll(docSrcText), 删原生记基准: hasAll(docSrcText.replace(need[0], '')), 删句柄记基准: hasAll(docSrcText.replace(need[1], '')), 删在途写: hasAll(docSrcText.replace(need[3], '')) }))
 
   /**
    * adj966：**Web/PWA 的持久权限引导**（用户口径：把权限选择交给用户）——

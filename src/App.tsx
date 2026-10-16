@@ -12,6 +12,8 @@ import { ToolDock } from './ui/ToolDock'
 import { beginDrag } from './ui/dragGesture'
 import { Toast } from './ui/Toast'
 import { ConfirmBar } from './ui/ConfirmBar'
+// adj968：拖放高亮层（把 .jps 拖进窗口就能打开，见 store/dropOpen.ts）
+import { DropOverlay } from './ui/DropOverlay'
 import { UpdatePrompt } from './ui/UpdatePrompt'
 import { EditorPane } from './editor/EditorPane'
 // adj642（用户要求）：Ctrl+F 用编辑区选中文本预填查找框（纯函数，冒烟有断言）
@@ -581,6 +583,8 @@ function App() {
       <Toast />
       {/* adj724b：需要用户二选一的确认条（嵌入版"文件已被外部修改"） */}
       <ConfirmBar />
+      {/* adj968：把 .jps 拖进窗口时的"松开即打开"高亮层（桌面壳由原生拖放事件驱动） */}
+      <DropOverlay />
       {/* adj379：检测到 SW 新版本时的「点击刷新」提示 */}
       <UpdatePrompt />
 
