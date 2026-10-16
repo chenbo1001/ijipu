@@ -260,10 +260,16 @@ void (async () => {
           if (verdict.kind !== 'external') return
           const name = segs[segs.length - 1]
           // adj966：提示与差异框**只有一处实现**（`askLoadExternalChange`），宿主事件与轮询共用
-          askLoadExternalChange(name, verdict.externalText, () => {
-            // 用文件里的内容替换当前文档（仍走 store 的打开逻辑，历史会记一步，可撤销）
-            void useDocStore.getState().openWorkspaceFile(segs)
-          })
+          askLoadExternalChange(
+            name,
+            verdict.externalText,
+            () => {
+              // 用文件里的内容替换当前文档（仍走 store 的打开逻辑，历史会记一步，可撤销）
+              void useDocStore.getState().openWorkspaceFile(segs)
+            },
+            // 保留本地 ⇒ 立刻写回原文件（写回成功即刷新基准，提示随之停止；用户口径见 `askLoadExternalChange`）
+            () => void useDocStore.getState().saveFile(),
+          )
         })()
       },
     })
@@ -319,7 +325,12 @@ void (async () => {
  * adj966：**冲突提示只有一处实现** —— 宿主事件（`fileChanged`）与轮询（`startExternalWatch`）共用它，
  * 将来加原生 notify 也走它。三端一致：文案 `externalChangeCopy` + 差异框 `FileDiffDialog`。
  */
-function askLoadExternalChange(name: string, externalText: string, loadExternal: () => void): void {
+function askLoadExternalChange(
+  name: string,
+  externalText: string,
+  loadExternal: () => void,
+  keepLocal: () => void,
+): void {
   void (async () => {
     const { useUiStore } = await import('./store/uiStore')
     const { useDocStore } = await import('./store/docStore')
@@ -328,9 +339,16 @@ function askLoadExternalChange(name: string, externalText: string, loadExternal:
       confirmLabel: externalChangeCopy.loadExternal,
       cancelLabel: externalChangeCopy.keepLocal,
       onConfirm: loadExternal,
+      /**
+       * adj966b（**用户实报**：「选了保留本地后一直提示」）：保留本地**不能只写日志** ——
+       * 必须把"本地这份"落到文件上（写回成功即刷新基准）⇒ 下一轮轮询判"没变"，提示自然停 ✓。
+       * 用户看过了差异、明确选了保留本地，此时**写回原文件正是他要的语义**（不是静默覆盖别人：
+       * 提示里已写明"下次保存会写回文件"，这里只是把它立刻做掉）。
+       * 写失败的兜底由轮询侧负责（同一份外部内容只提示一次，见 `externalChangeWatch.ts`）。
+       */
       onCancel: () => {
-        // 保留本地：什么都不做。用户下次保存会用本地内容覆盖外部改动（提示里已说明）
-        console.info('[iJipu] 保留本地修改，忽略外部改动')
+        console.info('[iJipu] 保留本地修改：立刻写回原文件（覆盖外部改动）')
+        keepLocal()
       },
       // adj928：多一个「查看差异」——本地内容**点开时再取**（用户可能还在编辑）
       diff: { name, localText: () => useDocStore.getState().code, externalText },
@@ -405,11 +423,17 @@ void (async () => {
       onExternal: (externalText) => {
         const s = useDocStore.getState()
         const name = s.binding?.segs?.[s.binding.segs.length - 1] ?? `${s.fileName}.jps`
-        askLoadExternalChange(name, externalText, () => {
-          const cur = useDocStore.getState()
-          if (cur.binding && cur.binding.segs.length > 0) void cur.openWorkspaceFile(cur.binding.segs)
-          else void cur.openFile()
-        })
+        askLoadExternalChange(
+          name,
+          externalText,
+          () => {
+            const cur = useDocStore.getState()
+            if (cur.binding && cur.binding.segs.length > 0) void cur.openWorkspaceFile(cur.binding.segs)
+            else void cur.openFile()
+          },
+          // 保留本地 ⇒ 立刻写回原文件（与宿主事件那条同口径，见 `askLoadExternalChange`）
+          () => void useDocStore.getState().saveFile(),
+        )
       },
       startInterval: (fn, ms) => {
         const t = window.setInterval(fn, ms)

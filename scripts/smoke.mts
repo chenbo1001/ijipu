@@ -23287,6 +23287,31 @@ async function runAdj966bTests() {
   check('adj966b 负对照：换成宿主事件档 ⇒ 有外部改动也不轮询（能力档真的在管这件事）',
     e.calls() === 0 && e.ext.length === 0, JSON.stringify({ calls: e.calls(), ext: e.ext }))
   e.stop()
+
+  /**
+   * adj966b（**用户实报**：「选了保留本地后一直提示」）：
+   * ① 同一份外部内容**只提示一次**（写回没成功时也不反复打扰）；
+   * ② 内容真又变了 ⇒ 必须再提示（别把新改动吞掉）。
+   */
+  const f = harness({
+    mode: 'poll',
+    results: [
+      async () => ({ kind: 'external', externalText: '外部A' }),
+      async () => ({ kind: 'external', externalText: '外部A' }),
+      async () => ({ kind: 'external', externalText: '外部B' }),
+    ],
+  })
+  f.ticks[0]?.()
+  await flush()
+  f.ticks[0]?.()
+  await flush()
+  check('adj966b ⑧ 同一份外部内容**只提示一次**（用户看过差异、选了保留本地后不再反复打扰）',
+    f.ext.length === 1 && f.ext[0] === '外部A', JSON.stringify(f.ext))
+  f.ticks[0]?.()
+  await flush()
+  check('adj966b ⑨ 内容**又变了**（不同文本）⇒ 必须再提示（不许把新的外部改动吞掉）',
+    f.ext.length === 2 && f.ext[1] === '外部B', JSON.stringify(f.ext))
+  f.stop()
 }
 
 /**
@@ -23475,6 +23500,18 @@ function runAdj966Tests() {
     JSON.stringify({ 调用: docSrcText.includes(noticeCall), 文案: workspaceCopy.pcNoAutoOpen }))
   check('adj966 负对照：把这次告知删掉 ⇒ 判据判假（它确实在数"必须告知"这件事）',
     docSrcText.includes(noticeCall) && !docSrcText.replace(noticeCall, '').includes(noticeCall), '')
+
+  /**
+   * adj966b（**用户实报**「选了保留本地后一直提示」的根因）：保留本地**必须写回**，
+   * 不能只写日志 —— 只写日志则基准不刷新 ⇒ 下一轮又判"外部改动"⇒ 提示停不下来。
+   */
+  const keepLocalWrite = '() => void useDocStore.getState().saveFile(),'
+  const mainSrc = String(readFileSync('src/main.tsx', 'utf8'))
+  check('adj966 接线：两处冲突提示的「保留本地」都**立刻写回原文件**（写回成功即刷新基准，提示才会停）',
+    mainSrc.includes(keepLocalWrite) && (mainSrc.match(/useDocStore\.getState\(\)\.saveFile\(\)/g) ?? []).length >= 2,
+    JSON.stringify({ 调用次数: (mainSrc.match(/useDocStore\.getState\(\)\.saveFile\(\)/g) ?? []).length }))
+  check('adj966 负对照：把「保留本地」那处写回删掉 ⇒ 判据判假（它确实在数这两处写回）',
+    mainSrc.includes(keepLocalWrite) && !mainSrc.replaceAll(keepLocalWrite, '').includes(keepLocalWrite), '')
 }
 
 /**

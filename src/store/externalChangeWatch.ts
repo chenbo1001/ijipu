@@ -85,6 +85,14 @@ export interface WatchDeps {
 export function startExternalWatch(deps: WatchDeps): () => void {
   let busy = false
   let stopped = false
+  /**
+   * adj966b（**用户实报**：「选择了保留本地后，还会再检测到差异再提示，**一直提示**」）：
+   * 记住"**已经就这一份外部内容提示过**"。理由：用户看过差异、选了「保留本地」之后，
+   * 若那次写回没成功（只读文件 / 文件被移走 / 权限掉了），基准仍是旧的 ⇒ 下一次轮询又判"外部改动"
+   * ⇒ 弹个没完 ✗。**同一份外部内容只提示一次**；内容真又变了（不同文本）才再提示 ✓。
+   * 正常路径（写回成功 ⇒ 基准刷新）本来就不会重复，这只是写不回去时的保险。
+   */
+  let prompted: string | null = null
 
   async function tick(): Promise<void> {
     if (stopped || busy) return
@@ -99,7 +107,11 @@ export function startExternalWatch(deps: WatchDeps): () => void {
         mtimeOf: io.mtimeOf,
         readText: io.readText,
       })
-      if (!stopped && verdict.kind === 'external') deps.onExternal(verdict.externalText)
+      if (!stopped && verdict.kind === 'external') {
+        if (verdict.externalText === prompted) return // 同一份外部内容：已经提示过，别再打扰
+        prompted = verdict.externalText
+        deps.onExternal(verdict.externalText)
+      }
     } catch {
       // 读不到（刚被删 / 被移走 / 权限掉了）⇒ 静默跳过，交给保存路径与其它提示
     } finally {
