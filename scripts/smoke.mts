@@ -109,7 +109,7 @@ import {
 } from '@ijipu/engine/playback/ornaments.ts'
 import { slideOf, slidePlan, slideStepMs, SLIDE_SYMBOLS, SLIDE_STEP_MIN_MS, SLIDE_STEP_MAX_MS } from '@ijipu/engine/playback/slides.ts'
 import { midiToPitchName } from '@ijipu/engine/playback/midi.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_APEX_H, SLUR_SAG, slurApexY, VOLTA_INK_GAP, digitBottomY, digitInkW, digitTopY, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap, tyBaselineY, HS_FONT_SIZE } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_APEX_H, SLUR_SAG, slurApexY, VOLTA_INK_GAP, digitBottomY, digitInkW, digitTopY, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap, tyBaselineY, HS_FONT_SIZE, barDownMarkInk, barDownMarkSpan, hasBarDownMark } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
@@ -19090,6 +19090,13 @@ runAdj927ExternalChangeTests()
       failed++
       console.error('  ✗ adj968 拖放打开用例抛异常', e)
     }
+    try {
+      // adj970：小节线下方记号（&fine/&dc/&ds）与序号方框的错开（用户截图实报）
+      runAdj970Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj970 序号与线下方记号错开用例抛异常', e)
+    }
   })
   .then(() => {
     try {
@@ -20331,6 +20338,137 @@ function runAdj967Tests() {
       '')
   }
 }
+
+/**
+ * adj970（**用户实报 + 截图**）：小节线**下方**的文本记号（`&fine` / `&dc` / `&ds`，画成 Fine / D.C. / D.S.）
+ * 与小节**序号方框**叠在一起 —— 截图里那个细黑框就是序号方框，斜体 `D.S.` 压在框里、数字被盖住。
+ *
+ * 根因：两者都挂在小节线正下方，**各自算各自的 y**：方框由布局端给（`yBarBottom + 间隙`），
+ * 记号由**渲染端**现算（`yBottom + 9.8s`）——布局端根本不知道有这个记号。
+ * 实测（用户那条 Q 行、默认版式）：记号墨迹 ≈[158.9…165.6]、方框 ≈[158.6…166.3] ⇒ 完全重叠。
+ *
+ * 判据一律按**墨迹**、且按**两个方向**判（`x` 与 `y` **任一方向分离**就算不重叠，符合口径里
+ * "墨迹矩形不得相交"）：
+ *  · 无歌词夹具 ⇒ **上下错开**（`yDrop`），因为下方有余量；
+ *  · 有歌词夹具（默认版式）⇒ **左右错开**（`xShift`）——实测线底到歌词墨迹上沿只有 14.6px，
+ *    而"记号 6.7 + 层间距 2 + 框 7.7 = 16.4px"塞不下；撑行距又违反 `adj625c`（序号显隐不得影响排版）。
+ */
+function runAdj970Tests() {
+  console.log('[180] 小节线下方记号 与 序号方框 的错开（adj970）')
+  /** 用户那条 Q 行（原文照抄）：第 3 根线上写了 `&ds"p:2/4"` */
+  const QLINE =
+    'Q: 5\'/. 6\'// 5\'/ 2\'/ 3\'[2\'/] 0/ 6// 5// | 6/ 5\'// (3\'// 3\'/) 3\'/ 2\' 7&yc | 0 5 6[5/]- |&ds"p:2/4" &zkh 0 6/ 5/&sby |\n'
+  const srcOf = (extra: string): string => `V: 1.0\nB: t\nD: C\nP: 4/4\n${QLINE}${extra}`
+  /** 歌词字宽估算：照抄 `inkBox.ts` 的 `estTextW`（CJK 取满字身宽、其余 0.55em） */
+  const estW = (t: string, size: number): number => {
+    let w = 0
+    for (const ch of t) w += (ch.codePointAt(0) ?? 0) > 127 ? size : size * 0.55
+    return w
+  }
+  /** 两个矩形是否相交（开区间：贴边不算交） */
+  const hit = (
+    a: { x0: number; x1: number; y0: number; y1: number },
+    b: { x0: number; x1: number; y0: number; y1: number },
+  ): boolean => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1
+
+  for (const mode of ['space', 'duration'] as const) {
+    for (const [tag, extra, expect] of [
+      ['无歌词', '', 'yDrop'],
+      ['有歌词', 'C: 笔。 笔。 笔。 笔。\n', 'xShift'],
+    ] as const) {
+      const cfg: PageConfig = { ...defaultPageConfig, noteSpaceLayout: mode, showBarCount: true, barCountInterval: 1 }
+      const L = layoutScore(parseJps(srcOf(extra)), cfg)
+      const page = L.pages[0]
+      const ns = cfg.note_size
+      const s = noteScaleOf(ns)
+      /** 那根带 `ds` 的线 */
+      const line = page.barlines.find((l) => (l.marks ?? []).includes('ds'))
+      /** 要标的那个序号：第 4 小节（它的左边界就是那根带 `ds` 的线） */
+      const bn = page.barNumbers.find((b) => b.n === 4)
+      if (line === undefined || bn === undefined) {
+        check(`adj970（${mode}／${tag}）夹具自检：找得到带 \`&ds\` 的线与第 4 小节序号`, false)
+        continue
+      }
+      // ---- 记号墨迹（与渲染端同源：中心 = 线位 + 线组半宽；宽 = `barDownMarkSpan`）----
+      const markW = barDownMarkSpan(line.marks, ns)
+      const markCx = line.x + barlineGeometry(line.type).total / 2
+      const mInk = barDownMarkInk(line.yBottom, ns)
+      const mark = { x0: markCx - markW / 2, x1: markCx + markW / 2, y0: mInk.top, y1: mInk.bottom }
+      // ---- 序号方框墨迹（按布局给的 `xShift`/`yDrop`；这正是渲染端画的位置）----
+      const bw = barNumberBoxW(bn.n, ns)
+      const bh = barNumberBoxH(ns)
+      const cx = bn.x - (bn.xShift ?? 0)
+      const top = bn.yBarBottom + BAR_NUMBER_BOTTOM_GAP + (bn.yDrop ?? 0)
+      const box = { x0: cx - bw / 2, x1: cx + bw / 2, y0: top, y1: top + bh }
+      check(
+        `adj970（${mode}／${tag}）**不让位就会叠**（负对照，证明判据不是恒绿）：按"没有错开"的几何算 ⇒ 方框与记号墨迹确实相交`,
+        hit({ ...box, x0: bn.x - bw / 2, x1: bn.x + bw / 2, y0: bn.yBarBottom + BAR_NUMBER_BOTTOM_GAP, y1: bn.yBarBottom + BAR_NUMBER_BOTTOM_GAP + bh }, mark),
+        JSON.stringify({ 记号: [mark.x0, mark.x1, mark.y0, mark.y1], 方框: [box.x0, box.x1, box.y0, box.y1] }),
+      )
+      check(
+        `adj970（${mode}／${tag}）错开之后**方框与记号墨迹不相交**，且错开方向按余量选（${expect}）`,
+        !hit(box, mark) && (expect === 'yDrop' ? (bn.yDrop ?? 0) > 0 && bn.xShift === undefined : (bn.xShift ?? 0) > 0 && bn.yDrop === undefined),
+        JSON.stringify({ n: bn.n, x: bn.x, yBarBottom: bn.yBarBottom, yDrop: bn.yDrop, xShift: bn.xShift, 记号: [mark.y0, mark.y1], 方框: [box.y0, box.y1] }),
+      )
+      check(
+        `adj970（${mode}／${tag}）**口径不变**：\`x\` 仍是线位、\`yBarBottom\` 仍是线底缘（错开量单独记），且方框不出**版心**`,
+        Math.abs(bn.x - line.x) < 0.6 && Math.abs(bn.yBarBottom - line.yBottom) < 0.6 &&
+          box.x0 >= cfg.margin_left - 0.6 && box.x1 <= page.width - cfg.margin_right + 0.6,
+        JSON.stringify({ 线: [line.x, line.yBottom], 号: [bn.x, bn.yBarBottom], 框x: [box.x0, box.x1] }),
+      )
+      // ---- 负对照：把 `&ds` 去掉 ⇒ 不发生任何错开（方框就贴在线上）----
+      {
+        const noDs = layoutScore(parseJps(srcOf(extra).replace('|&ds"p:2/4"', '|"p:2/4"')), cfg).pages[0]
+        const b4 = noDs.barNumbers.find((b) => b.n === 4)
+        check(
+          `adj970（${mode}／${tag}）**负对照**：把 \`&ds\` 去掉 ⇒ 一个字都不错开（\`yDrop\`/\`xShift\` 都不产出、框心 == 线位）`,
+          b4 !== undefined && b4.yDrop === undefined && b4.xShift === undefined && b4.x === noDs.barlines.find((l) => Math.abs(l.x - b4.x) < 0.6)?.x,
+          JSON.stringify(b4),
+        )
+      }
+      // ---- 有歌词时：还要与**歌词墨迹**不相交（不能"让开记号却压了歌词"）----
+      if (extra !== '') {
+        const gs = cfg.geci_size
+        const lyrics = page.lyrics.map((l) => ({
+          x0: l.x,
+          x1: l.x + estW(`${l.char.text}${l.char.trailing ?? ''}`, gs),
+          y0: l.y - gs * 0.9,
+          y1: l.y + gs * 0.2,
+        }))
+        const clash = lyrics.filter((r) => hit(box, r))
+        check(
+          `adj970（${mode}／${tag}）让开记号之后**也不压歌词**（错开只能"挪附属物"，不许把重叠转移给下一个元素）`,
+          clash.length === 0,
+          JSON.stringify({ 方框: [box.x0, box.x1, box.y0, box.y1], 撞到的字: clash.length }),
+        )
+      }
+    }
+  }
+
+  // ---- 接线（源码级；负对照逐处删）----
+  {
+    const src = String(readFileSync('packages/ijipu-engine/src/engine/layout/index.ts', 'utf8'))
+    const wired = (t: string): boolean =>
+      (t.match(/avoidAtBar\(/g) ?? []).length >= 3 &&
+      t.includes('barNumberAvoid(n, prevEnd.y, prevEnd.marks, prevEnd.maxTop)') &&
+      t.includes('const barNumberAvoid = (') &&
+      t.includes('BAR_NUMBER_BOTTOM_GAP, barNumberBoxH, barNumberBoxW, barDownMarkInk, barDownMarkSpan, hasBarDownMark')
+    check(
+      'adj970 接线：三处埋点（duration / space / 多声部块）都走 `avoidAtBar`，行首那一档走 `barNumberAvoid`（含锚点里的 marks 与余量）',
+      wired(src),
+      '',
+    )
+    check(
+      'adj970 **负对照**：删掉任一处的让位调用 / 行首那一档 / 让位函数本身 ⇒ 判据判假',
+      wired(src) &&
+        !wired(src.replace(/avoidAtBar\(/g, 'noAvoid(')) &&
+        !wired(src.replace('barNumberAvoid(n, prevEnd.y, prevEnd.marks, prevEnd.maxTop)', '')) &&
+        !wired(src.replace('const barNumberAvoid = (', 'const noAvoid = (')),
+      '',
+    )
+  }
+}
+
 
 /**
  * adj968（用户要求）：**把 `.jps` 从文件管理器拖进应用就能打开**。
