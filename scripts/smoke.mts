@@ -257,6 +257,8 @@ import { pickPrimary, hasShell, type ExternalFile } from '../src/store/externalO
 // adj966：文件宿主能力与降级决策（纯函数 ⇒ 逐端逐档断言，不必真跑三端；口径见 docs/FILE-MODEL.md）
 import { hostIdOf, hostProfile, decideWriteMode, decideWatch, decideWriteGate } from '../src/store/fileHost.ts'
 import type { FileHostProfile } from '../src/store/fileHost.ts'
+// adj966b：外部改动轮询编排（定时器/IO 全注入 ⇒ 在 Node 里真跑时序）
+import { EXT_POLL_MS, watchTick, startExternalWatch } from '../src/store/externalChangeWatch.ts'
 import type { RuntimeEnv } from '../src/brand/env.ts'
 // adj944（用户需求「全局设置里注册 iJipu CLI」）：PATH 增删的**纯函数 + 编排** ——
 // 应用界面（全局设置那个按钮）与命令行（`ijipu cli register|unregister|status`）**共用这一份** ✓
@@ -19831,6 +19833,15 @@ runAdj927ExternalChangeTests()
           console.error('  ✗ adj951 工作区首次加载竞态用例抛异常', e)
         }
       })
+      // adj966b：外部改动**轮询**的时序（假定时器 + 假 IO 真跑一遍；必须 await，否则汇总会先跑）
+      .then(async () => {
+        try {
+          await runAdj966bTests()
+        } catch (e) {
+          failed++
+          console.error('  ✗ adj966b 外部改动轮询用例抛异常', e)
+        }
+      })
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
       .then(() => runAdj949ManualScopeTests())
@@ -23145,6 +23156,131 @@ C2: 忘掉年轮。可能 {tp 3/ 3 2/} 要多年以后才能 {tp (3/ 2//) (2// 2
   check('adj675b ④ 这一行的字序与 x 序一致（补出来的字没插到前面去）',
     g1.every((c, i) => i === 0 || c.x >= g1[i - 1].x - 0.01),
     JSON.stringify(g1.map((c) => `${c.char.text}@${Math.round(c.x)}`)))
+}
+
+/**
+ * adj966b：外部改动**轮询**的时序（`store/externalChangeWatch.ts`）——定时器与 IO 全注入，
+ * 所以能在 Node 里把"该不该查 / 查几次 / 隐藏时查不查 / 重叠去重 / 停止后不再查"真跑一遍。
+ */
+async function runAdj966bTests() {
+  console.log('[164] 外部改动轮询的时序（adj966b）')
+
+  check('adj966b 该不该查：宿主事件档与受限档**不轮询**；没绑定不查；可见才轮询；隐藏时不查；回到前台补查一次',
+    watchTick('event', true, true) === 'skip' && watchTick('none', true, true) === 'skip' &&
+      watchTick('poll', true, false) === 'skip' && watchTick('poll', true, true) === 'poll' &&
+      watchTick('poll', false, true) === 'skip' && watchTick('focus-only', false, true) === 'once',
+    JSON.stringify({
+      宿主事件: watchTick('event', true, true),
+      受限: watchTick('none', true, true),
+      没绑定: watchTick('poll', true, false),
+      可见: watchTick('poll', true, true),
+      隐藏: watchTick('poll', false, true),
+      隐藏降级: watchTick('focus-only', false, true),
+    }))
+
+  type ProbeR = { kind: 'unchanged' } | { kind: 'external'; externalText: string }
+  /** 假编排架子：假定时器（手动 tick）、假可见性、假 IO、可编排的 probe */
+  const harness = (opts: {
+    mode: WatchMode
+    visible?: boolean
+    results: (() => Promise<ProbeR>)[]
+    hasBinding?: boolean
+  }) => {
+    const ticks: (() => void)[] = []
+    const visFns: (() => void)[] = []
+    let calls = 0
+    const ext: string[] = []
+    const io = { key: 'k', mtimeOf: async () => 123, readText: async () => '外部内容' }
+    /** ⚠ 可见性**可变**：真实适配器在 `visibilitychange` 触发时已更新 `visibilityState`
+     *（见 `externalChangeWatch.ts` 的 `visible` 契约）⇒ 架子也要能模拟"回到前台"那一刻 */
+    let visible = opts.visible ?? true
+    const stop = startExternalWatch({
+      mode: () => opts.mode,
+      visible: () => visible,
+      hasBinding: () => opts.hasBinding ?? true,
+      io: () => io,
+      localText: () => '本地内容',
+      onExternal: (t) => ext.push(t),
+      startInterval: (fn) => {
+        ticks.push(fn)
+        return () => {
+          const i = ticks.indexOf(fn)
+          if (i >= 0) ticks.splice(i, 1)
+        }
+      },
+      onVisible: (fn) => {
+        visFns.push(fn)
+        return () => {
+          const i = visFns.indexOf(fn)
+          if (i >= 0) visFns.splice(i, 1)
+        }
+      },
+      probe: async () => {
+        calls += 1
+        const r = opts.results[Math.min(calls - 1, opts.results.length - 1)]
+        return r()
+      },
+    })
+    return { ticks, visFns, ext, stop, calls: () => calls, setVisible: (v: boolean) => (visible = v) }
+  }
+  const flush = () => new Promise((r) => setTimeout(r, 0))
+
+  const a = harness({ mode: 'poll', results: [async () => ({ kind: 'unchanged' })] })
+  a.ticks[0]?.()
+  await flush()
+  check('adj966b ① 判为"没变"（自己刚写完 / 宿主回环）⇒ **不打扰用户**（回调零次）',
+    a.calls() === 1 && a.ext.length === 0, JSON.stringify({ calls: a.calls(), ext: a.ext }))
+  a.stop()
+
+  const b = harness({ mode: 'poll', results: [async () => ({ kind: 'external', externalText: '外部内容' })] })
+  b.ticks[0]?.()
+  await flush()
+  check('adj966b ② 判为"真外部改动" ⇒ 回调一次，且把**文件现在的原始文本**交出去（差异框/载入外部用它）',
+    b.ext.length === 1 && b.ext[0] === '外部内容', JSON.stringify(b.ext))
+  check('adj966b ③ 轮询只**通知**、绝不自动写：编排里没有任何写盘入口（只有 onExternal 回调）',
+    !String(startExternalWatch).includes('write') && b.ext.length === 1, '')
+  b.stop()
+
+  const c = harness({ mode: 'poll', visible: false, results: [async () => ({ kind: 'external', externalText: 'x' })] })
+  c.ticks[0]?.()
+  await flush()
+  check('adj966b ④ 页面隐藏 ⇒ 不查（省电省 IO）；但"回到前台"时会补查一次（走 onVisible）',
+    c.calls() === 0 && c.visFns.length === 1,
+    JSON.stringify({ calls: c.calls(), vis: c.visFns.length }))
+  c.setVisible(true) // 真实适配器：visibilitychange 触发时 visibilityState 已变成 visible
+  c.visFns[0]?.()
+  await flush()
+  check('adj966b ⑤ 回到前台补查确实发生（此时 `visible()` 已为真 ⇒ 真的查了一次）', c.calls() === 1, String(c.calls()))
+  c.stop()
+
+  let release: (() => void) | null = null
+  const d = harness({
+    mode: 'poll',
+    results: [
+      () =>
+        new Promise<ProbeR>((res) => {
+          release = () => res({ kind: 'unchanged' })
+        }),
+    ],
+  })
+  d.ticks[0]?.()
+  d.ticks[0]?.()
+  await flush()
+  check('adj966b ⑥ 上一次还没读完时再 tick ⇒ **不并发**（去重，只跑一次）', d.calls() === 1, String(d.calls()))
+  release?.()
+  await flush()
+  d.stop()
+  d.ticks[0]?.()
+  await flush()
+  check('adj966b ⑦ 停止后不再查（换绑定/卸载必须停干净）', d.calls() === 1, String(d.calls()))
+
+  /** 负对照：把档位换成"宿主事件"⇒ 即使文件真的变了也**不轮询**（证明轮询受能力档控制，不是无条件跑） */
+  const e = harness({ mode: 'event', results: [async () => ({ kind: 'external', externalText: 'x' })] })
+  e.ticks[0]?.()
+  await flush()
+  check('adj966b 负对照：换成宿主事件档 ⇒ 有外部改动也不轮询（能力档真的在管这件事）',
+    e.calls() === 0 && e.ext.length === 0, JSON.stringify({ calls: e.calls(), ext: e.ext }))
+  e.stop()
 }
 
 /**

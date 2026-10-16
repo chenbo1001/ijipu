@@ -120,6 +120,57 @@ fn write_external_file(path: String, text: String) -> Result<(), String> {
     Ok(())
 }
 
+/// adj966：读一个**系统文件**的当前内容 + mtime（毫秒）——"外部改动检测"的原生 IO。
+///
+/// 为什么要单独一条命令：既有的 `ws_read_text` 要求"工作区根 + 相对段"，
+/// 而桌面端要**默认直接操作系统文件**（原生路径绑定，见双击关联打开那条路）——
+/// 轮询检测外部改动需要**按绝对路径**读一次内容并取 mtime。信任模型与 `write_external_file` 一致：
+/// 路径来自用户自己的选择（打开/另存为/双击关联），这里不额外放开任何目录范围。
+#[derive(serde::Serialize)]
+struct NativeFileProbe {
+    text: String,
+    /// 修改时间（毫秒，自 UNIX 纪元）；取不到就是 `None` ⇒ 前端退化为**只比内容**（安全判据不依赖时间戳）
+    mtime_ms: Option<u64>,
+}
+
+#[tauri::command]
+fn read_native_probe(path: String) -> Result<NativeFileProbe, String> {
+    let p = PathBuf::from(&path);
+    if !p.is_file() {
+        return Err(format!("文件不存在或不是普通文件：{}", path));
+    }
+    let text = std::fs::read_to_string(&p).map_err(|e| format!("{}: {}", path, e))?;
+    let mtime_ms = std::fs::metadata(&p)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64);
+    Ok(NativeFileProbe { text, mtime_ms })
+}
+
+#[cfg(test)]
+mod native_probe_tests {
+    use super::read_native_probe;
+
+    /// adj966：外部改动检测的原生读取——内容要读回来、mtime 要能取到；
+    /// 不存在 / 不是普通文件必须**报错**（不许返回空内容，否则前端会把"读不到"当成"文件被清空"）。
+    #[test]
+    fn reads_text_and_mtime_and_rejects_missing() {
+        let dir = std::env::temp_dir().join("ijipu-native-probe-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("probe.jps");
+        std::fs::write(&f, "1 2 3\n").unwrap();
+        let got = read_native_probe(f.to_string_lossy().to_string()).unwrap();
+        assert_eq!(got.text, "1 2 3\n");
+        assert!(got.mtime_ms.is_some(), "应当能取到 mtime");
+        let missing = read_native_probe(dir.join("nope.jps").to_string_lossy().to_string());
+        assert!(missing.is_err(), "不存在的文件必须报错");
+        let as_dir = read_native_probe(dir.to_string_lossy().to_string());
+        assert!(as_dir.is_err(), "目录不是普通文件，必须报错");
+        let _ = std::fs::remove_file(&f);
+    }
+}
+
 /// 把路径入队并通知前端（冷启动由 `setup()` 调用；热启动由单实例回调调用）。
 fn queue_open_paths(app: &tauri::AppHandle, paths: Vec<String>) {
     if paths.is_empty() {
@@ -525,6 +576,8 @@ pub fn run() {
             sf_soundfont_resource_read,
             take_pending_open_files,
             write_external_file,
+            // adj966：按绝对路径读系统文件 + 取 mtime（外部改动检测的轮询 IO）
+            read_native_probe,
             // adj568：桌面端工作区（原生选目录 + 按路径读写）
             ws_pick_dir,
             ws_list_dir,

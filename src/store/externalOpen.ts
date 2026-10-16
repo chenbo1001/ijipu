@@ -76,6 +76,22 @@ export async function writeExternalFile(path: string, text: string): Promise<voi
 }
 
 /**
+ * adj966：按绝对路径读**系统文件此刻的内容**（外加 mtime）——外部改动检测的轮询 IO。
+ *
+ * 与 `writeExternalFile` 成对：桌面端"直接操作系统文件"时，编辑中要能发现"文件被同步端改过"。
+ * 读失败**抛错**（不返回空内容）——否则前端会把"读不到"当成"文件被清空"。
+ */
+export async function readNativeProbe(path: string): Promise<{ text: string; mtimeMs: number | null }> {
+  const g = tauri()
+  if (!g?.core?.invoke) throw new Error('当前环境不支持按路径读文件')
+  const r = (await g.core.invoke('read_native_probe', { path })) as { text?: unknown; mtime_ms?: unknown }
+  return {
+    text: typeof r?.text === 'string' ? r.text : '',
+    mtimeMs: typeof r?.mtime_ms === 'number' ? r.mtime_ms : null,
+  }
+}
+
+/**
  * 监听"后续再有文件要打开"（应用已运行时再次双击）：返回取消监听的函数。
  * 注意：**冷启动**那一次不走这里（事件可能早于本函数注册），而是由调用方在挂载时
  * 先 `drainExternalFiles()` 拉取一次——两条路都指向同一个队列，故不会漏也不会重。
