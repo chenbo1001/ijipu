@@ -23,7 +23,7 @@
  * 性能兜底：超长输入时 `planMerge` / `diffTexts` 会退化（只标改动区块、不做行内高亮），
  * 这里在摘要行里如实提示，**不许卡死**。
  */
-import { useMemo, useRef, useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import { externalChangeCopy } from '../brand/copy'
 import { applyMergePlan, planMerge, type MergeBlock, type MergePlan, type MergeSide } from '../diff/merge'
@@ -114,30 +114,32 @@ function DiffPane({
       <div className="file-diff-pane-head">{title}</div>
       <div className="file-diff-body" ref={scrollRef} onScroll={onScroll}>
         {items.map((it, seq) => {
-          if (it.bar !== null) {
-            return (
-              <div className="diff-bar" key={`b${seq}`}>
-                {renderBar(it.bar)}
-              </div>
-            )
-          }
-          if (it.gap !== null) {
-            return (
-              <div className="diff-line is-gap" key={`g${seq}`}>
-                <span className="diff-no" />
-                <span className="diff-code">{externalChangeCopy.collapsed(it.gap)}</span>
-              </div>
-            )
-          }
-          const row = rows[it.at]
-          const no = side === 'left' ? row.leftNo : row.rightNo
-          const text = side === 'left' ? row.leftText : row.rightText
-          const ink = side === 'left' ? row.leftInk : row.rightInk
+          /**
+           * ⚠ adj967c（**用户截图实报**：「有变化处看不到两侧各修改的是什么，遮住了」）：
+           * 操作条是**额外一条**，必须**紧接着把块首那一行也画出来** ——
+           * 早先写成"`bar` 有值就 return"（把两者当同一条 item），结果那一行**被吃掉**：
+           * 单行改动块里"改动的那一行"正好是块首行 ⇒ 用户只看到操作条、看不到改了什么。
+           * 现在两栏都按 `bar → 该行` 的顺序渲染（两栏项序一致 ⇒ 同步滚动与逐行对齐都不受影响）。
+           */
+          const row = it.gap === null ? rows[it.at] : null
+          const no = row ? (side === 'left' ? row.leftNo : row.rightNo) : null
+          const text = row ? (side === 'left' ? row.leftText : row.rightText) : null
+          const ink = row ? (side === 'left' ? row.leftInk : row.rightInk) : []
           return (
-            <div className="diff-line" data-kind={row.kind} key={`r${seq}`}>
-              <span className="diff-no">{no ?? ''}</span>
-              <span className="diff-code">{text === null ? '' : <InkLine text={text} ink={ink} />}</span>
-            </div>
+            <Fragment key={seq}>
+              {it.bar !== null && <div className="diff-bar">{renderBar(it.bar)}</div>}
+              {it.gap !== null ? (
+                <div className="diff-line is-gap">
+                  <span className="diff-no" />
+                  <span className="diff-code">{externalChangeCopy.collapsed(it.gap)}</span>
+                </div>
+              ) : (
+                <div className="diff-line" data-kind={row?.kind}>
+                  <span className="diff-no">{no ?? ''}</span>
+                  <span className="diff-code">{text === null ? '' : <InkLine text={text} ink={ink} />}</span>
+                </div>
+              )}
+            </Fragment>
           )
         })}
       </div>

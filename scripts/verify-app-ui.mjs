@@ -1002,6 +1002,33 @@ async function main() {
       barCount >= 2 && barCount % 2 === 0 && barLabels.includes('用左') && barLabels.includes('用右') && barTags.includes('冲突'),
       JSON.stringify({ 操作条: barCount, 按钮: barLabels, 标签: barTags.slice(0, 40) }),
     )
+    /**
+     * adj967c（**用户截图实报**「有变化处看不到两侧各修改的是什么，遮住了」）：
+     * 块操作条早先与"块首那一行"是**同一条 item** ⇒ 那一行被吃掉；单行改动块里"改动的那一行"
+     * 正好是块首行 ⇒ 用户只看到操作条、看不到改了什么。这条判据盯的就是"改动的行必须真的在 DOM 里、
+     * 两栏各显示自己那一版"，光看"操作条在不在"是抓不住的。
+     */
+    const changeLines = await evalJs(
+      c,
+      `[...document.querySelectorAll('.file-diff-pane')].map((p) => [...p.querySelectorAll('.diff-line[data-kind="change"]')].map((l) => l.textContent.trim()).join('\\n'))`,
+    )
+    const leftChange = String(changeLines?.[0] ?? '')
+    const rightChange = String(changeLines?.[1] ?? '')
+    check(
+      'adj967c **改动的行必须可见**：左栏显示本地那一版、右栏显示外部那一版（不是被操作条盖住/吃掉）',
+      leftChange.includes('2 2 9') && rightChange.includes('8 8 8') && !leftChange.includes('8 8 8') && !rightChange.includes('2 2 9'),
+      JSON.stringify({ 左栏改动行: leftChange.slice(0, 40), 右栏改动行: rightChange.slice(0, 40) }),
+    )
+    const barOverRow = await evalJs(
+      c,
+      `(() => {
+         const bars = [...document.querySelectorAll('.diff-bar')].map((b) => b.getBoundingClientRect())
+         const rows = [...document.querySelectorAll('.diff-line')].map((r) => r.getBoundingClientRect())
+         // 操作条与任何**行**都不许在纵向上相互覆盖
+         return bars.some((b) => rows.some((r) => b.top < r.bottom - 1 && r.top < b.bottom - 1))
+       })()`,
+    )
+    check('adj967c 操作条与代码行**不重叠**（几何上各占各的高度）', barOverRow === false, String(barOverRow))
     // 点**第一条**操作条里的「用右」（= 那个冲突块改用外部那一版）
     await evalJs(c, `document.querySelectorAll('.diff-bar')[0].querySelectorAll('.diff-bar-btn')[1].click(), true`)
     await sleep(250)
