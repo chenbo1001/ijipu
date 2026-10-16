@@ -56,10 +56,18 @@
  */
 import { contentFingerprint } from '../diff/textDiff'
 
-/** 基准：我们最后一次"读进来 / 写出去"这个文件时的内容指纹与当时的 mtime */
+/** 基准：我们最后一次"读进来 / 写出去"这个文件时的内容、指纹与当时的 mtime */
 export interface FileBaseline {
   /** 工作区身份 + 相对路径（换文件即失效） */
   key: string
+  /**
+   * adj966f（P2 自动三路合并的**前提**）：基准保留的**原文**。
+   *
+   * 有它才有"共同祖先"：`diff/merge.ts` 的 `planMerge(base, local, external)` 靠它判
+   * 「两边改的是不是同一块」——没有祖先就只能退化成二路逐块采纳（P1）。
+   * 内存代价 = 一份谱面文本（可忽略）；`setBaseline` 本来就收到 `text`，此前只是没存。
+   */
+  text: string
   /** 归一化后的内容指纹（见 `contentFingerprint`） */
   fingerprint: string
   /** 当时的文件 mtime；拿不到就是 `null`（嵌入版） */
@@ -88,9 +96,11 @@ let baseline: FileBaseline | null = null
 /**
  * 记下基准（**自己写完立刻刷**，见 `docStore.ts` 的三处写盘成功点与 `openWorkspaceFile`）。
  * `mtime` 拿不到就传 `null`（嵌入版宿主不回传）。
+ *
+ * adj966f：**同时留下原文**（`text`）当"共同祖先"——P2 的三路合并靠它判冲突（见 `FileBaseline.text`）。
  */
 export function setBaseline(key: string, text: string, mtime: number | null = null): void {
-  baseline = { key, fingerprint: contentFingerprint(text), mtime }
+  baseline = { key, text, fingerprint: contentFingerprint(text), mtime }
   // adj943：基准接管了这一份内容 ⇒ "在途写"不必再单独记着
   inFlight = null
 }
@@ -98,6 +108,16 @@ export function setBaseline(key: string, text: string, mtime: number | null = nu
 /** 当前基准（排错/断言用；换绑定时不清，靠 `key` 比对失效） */
 export function getBaseline(): FileBaseline | null {
   return baseline
+}
+
+/**
+ * adj966f：取"这份绑定的**共同祖先原文**"（键对得上才有）——给三路合并当 `base`。
+ *
+ * 键对不上就返回 `null`：那说明手里这份基准是**别的文件**的（换文件即失效），
+ * 拿它当祖先会合出乱七八糟的结果 ⇒ 宁可退化为二路逐块采纳（P1）。
+ */
+export function getBaselineText(key: string): string | null {
+  return baseline && baseline.key === key ? baseline.text : null
 }
 
 /** 清掉基准（例如绑定的文件被删除/移走） */
@@ -226,7 +246,7 @@ export async function probeExternalChange(io: ExternalChangeIO): Promise<Externa
   const localFingerprint = contentFingerprint(localText)
   // 换文件 / 首次没有基准 ⇒ 用"本地内容"当临时基准（旧口径兜底），mtime 记 null
   const base: FileBaseline =
-    cur && cur.key === io.key ? cur : { key: io.key, fingerprint: localFingerprint, mtime: null }
+    cur && cur.key === io.key ? cur : { key: io.key, text: localText, fingerprint: localFingerprint, mtime: null }
   // 在途写只认同一把键的那份（换文件后不能拿别的文件的内容当"我们写的"）
   const inFlightFingerprint = inFlight && inFlight.key === io.key ? inFlight.fingerprint : null
   let actualMtime: number | null = null
@@ -258,8 +278,8 @@ export async function probeExternalChange(io: ExternalChangeIO): Promise<Externa
     localFingerprint,
   })
   if (second === 'external') return { kind: 'external', externalText: text }
-  // 内容没变 ⇒ 静默刷新基准（mtime 一起刷，下次事件就能走快筛）
-  baseline = { key: io.key, fingerprint, mtime: actualMtime }
+  // 内容没变 ⇒ 静默刷新基准（mtime 一起刷，下次事件就能走快筛；原文也刷，见 adj966f）
+  baseline = { key: io.key, text, fingerprint, mtime: actualMtime }
   inFlight = null
   return { kind: 'unchanged', read: true }
 }

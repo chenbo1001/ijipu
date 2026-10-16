@@ -5279,6 +5279,56 @@ span.ws-check {
   background: color-mix(in srgb, var(--jp-success) 45%, transparent);
 }
 
+/* adj966f（P1/P2）：每个改动块的操作条（类别 + 「用左 / 用右」）。
+   两栏**都渲染同一条**（内容一样）⇒ 高度必然一致、逐行对齐不被破坏（高度写死成一档）。 */
+.diff-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 6px;
+  background: var(--jp-bg-panel-hover);
+  border-top: 1px solid var(--jp-border);
+  border-bottom: 1px solid var(--jp-border);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.diff-bar-tag {
+  flex: 1 1 auto;
+  color: var(--jp-text-secondary);
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.diff-bar-tag.is-conflict {
+  color: var(--jp-warning);
+  font-weight: 600;
+}
+
+.diff-bar-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+}
+
+.diff-bar-btn {
+  padding: 1px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--jp-border);
+  background: var(--jp-bg-panel);
+  color: var(--jp-text-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.diff-bar-btn.is-on {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+  font-weight: 600;
+}
+
 .file-diff-foot {
   flex: 0 0 auto;
   display: flex;

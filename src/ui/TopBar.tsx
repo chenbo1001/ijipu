@@ -23,7 +23,7 @@ import { KBD, newDocKbd, withKbd } from '../brand/shortcuts'
 // adj540：「打开/另存为」要按平台分流（**手机端以工作区优先**）并判断"是否已设工作区"
 // adj954：设备判据迁到品牌层唯一出处（原在 store/saveSupport.ts）
 import { isCoarsePointerDevice } from '../brand/env'
-import { getWorkspace, isWorkspaceAvailable } from '../store/workspace'
+import { isWorkspaceAvailable } from '../store/workspace'
 import { isHostEmbedded } from '../store/hostBridge'
 import {
   clearRecentFiles,
@@ -1169,17 +1169,23 @@ export function TopBar() {
    *  · **手机/平板（粗指针）且浏览器支持选文件夹** ⇒ 一律开底栏工作区面板（没设工作区时面板里就是
    *    「选择文件夹当工作区」那个大按钮）。手机上的系统选择器不可靠：`.jps` 这种自定义扩展名会被
    *    按 MIME 隐藏（adj399），PWA 里 `showOpenFilePicker` 还出现过"点了没反应"（adj405 + Chromium 457203705）；
-   *  · 已经设过工作区 ⇒ 同样开面板（桌面端也遵循"工作区优先"）；
-   *  · 其余（桌面端未设工作区 / iOS 等不支持选文件夹的浏览器）⇒ 保持原样走系统选择器 / input 降级。
-   * 系统选择器另留一个菜单项（runOpenSystem），不做成"必须先设工作区才能打开"。
+   *  · 其余（**PC 各档**：桌面壳 / 桌面浏览器；以及 iOS 等不支持选文件夹的浏览器）⇒
+   *    **一律走系统文件选择器 / input 降级**。
    *  · **adj724b 嵌入版**：浏览器禁止**跨源子框架**弹选择器 ⇒ 一律进工作区面板（文库即工作区）。
+   *
+   * adj966g（用户 2026-10-17 口径，**改了这里原有的一支**）：
+   * 「需要权限确认的（手机端 Web 这种）**还继续使用工作区底栏**；其它可以直接使用文件系统的
+   * **PC 端的各模式**，还是继续使用系统文件操作（这样更习惯）；**插件还继续使用 OB 端的文件管理**」。
+   * ⇒ 删掉了原先"**只要设过工作区就走工作区面板**"那一支 —— 在 PC 上点「打开…」应当**始终**弹系统文件选择器
+   * （那才是 PC 用户的习惯；工作区没删，仍可从菜单「工作区」或底栏显式进入）。
+   * 对应地：**底栏默认展开「工作区」**也只发生在受限档且能选文件夹时（见 `uiStore.initialDock`）。
    */
   const runOpenSmart = async () => {
     if (isHostEmbedded() && isWorkspaceAvailable()) {
       toggleDock('workspace')
       return
     }
-    if ((isCoarsePointerDevice() && isWorkspaceAvailable()) || (await getWorkspace())) {
+    if (isCoarsePointerDevice() && isWorkspaceAvailable()) {
       toggleDock('workspace')
       return
     }

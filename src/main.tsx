@@ -25,9 +25,12 @@ import { APP_VERSION_FULL } from './brand/version'
 import { externalChangeCopy } from './brand/copy'
 // adj927：外部改动的判据与基准（纯模块：无 DOM/存储依赖）
 //  · `getBaseline` 给下面的排错探针用（排"又提示外部变更"时必须一眼看到"应用手里的基准"）；
-//  · `probeExternalChange` / `baselineKeyOf` 给 `fileChanged` 用。
+//  · `probeExternalChange` / `baselineKeyOf` 给 `fileChanged` 用；
+//  · adj966f：`getBaselineText` 取"共同祖先原文"，给三路合并（`planMerge`）当 `base`。
 // 一律**静态**引入（既静态又动态 import 会让打包器报 INEFFECTIVE_DYNAMIC_IMPORT）。
-import { getBaseline, probeExternalChange, baselineKeyOf } from './store/externalChange'
+import { getBaseline, getBaselineText, probeExternalChange, baselineKeyOf } from './store/externalChange'
+// adj966f：三路合并的纯函数（块级采纳 / 自动合并）——提示条文案与「应用」按钮都要它
+import { applyMergePlan, planMerge } from './diff/merge'
 import { installAppHeight } from './pwa/appHeight'
 // adj954：运行环境判定收敛到 `brand/env.ts` 唯一出处 —— 本文件原先自己写了两份
 //（`isTauriDesktop` / `isEmbeddedFrame`），与 brand、playback、preview 里那几份是同一个判据。
@@ -259,10 +262,13 @@ void (async () => {
           }
           if (verdict.kind !== 'external') return
           const name = segs[segs.length - 1]
+          const key = baselineKeyOf(ws.id, segs)
           // adj966：提示与差异框**只有一处实现**（`askLoadExternalChange`），宿主事件与轮询共用
           askLoadExternalChange(
             name,
             verdict.externalText,
+            // adj966f：共同祖先 = 基准里留下的原文（换文件即对不上 ⇒ 退化为逐块采纳）
+            getBaselineText(key),
             () => {
               // 用文件里的内容替换当前文档（仍走 store 的打开逻辑，历史会记一步，可撤销）
               void useDocStore.getState().openWorkspaceFile(segs)
@@ -324,18 +330,41 @@ void (async () => {
 /**
  * adj966：**冲突提示只有一处实现** —— 宿主事件（`fileChanged`）与轮询（`startExternalWatch`）共用它，
  * 将来加原生 notify 也走它。三端一致：文案 `externalChangeCopy` + 差异框 `FileDiffDialog`。
+ *
+ * adj966f（P1 块级采纳 + P2 自动三路合并，用户 2026-10-16 拍板）：
+ *  · `baseText` = **共同祖先**（`externalChange.getBaselineText`，键对不上就是 `null`）；
+ *    有它 ⇒ 差异框能判"两边改的是不是同一块"、能把互不重叠的块**自动合好**；
+ *    没有 ⇒ 退化成二路逐块采纳（P1），照常可用；
+ *  · **无冲突块时提示条换一句话**（用户口径："已自动合好（N 块互不重叠），点「应用」即用合并结果"），
+ *    并直接给一个「应用」按钮 —— 合并结果此时是确定的，不必让用户先点查看差异再点应用两跳；
+ *  · 应用 = `docStore.applyMergeResult`（写回文件 + 立刻保存 + 刷基准 + 一步历史）。
  */
 function askLoadExternalChange(
   name: string,
   externalText: string,
+  baseText: string | null,
   loadExternal: () => void,
   keepLocal: () => void,
 ): void {
   void (async () => {
     const { useUiStore } = await import('./store/uiStore')
     const { useDocStore } = await import('./store/docStore')
+    // 提示条文案要"先跑一遍 planMerge"：有没有冲突块，决定了问法（也是 P2 的判据所在）
+    const plan = planMerge(baseText, useDocStore.getState().code, externalText)
+    const clean = plan.conflicts === 0 && plan.changeCount > 0
+    /**
+     * 「应用」按钮：**点击那一刻**再算一次（用户可能还在编辑器里敲字，用的是此刻的本地内容），
+     * 选择全用默认（口径③"以本地为底"：只有外部一方改过的块用外部）。
+     */
+    const applyAuto = (): void => {
+      const cur = useDocStore.getState()
+      cur.applyMergeResult(applyMergePlan(planMerge(baseText, cur.code, externalText)), externalText)
+    }
+    /** 差异框底部「应用（并保存）」也走同一条收尾（用户逐块选完后按它） */
+    const applyMerged = (merged: string): void =>
+      useDocStore.getState().applyMergeResult(merged, externalText)
     useUiStore.getState().showAsk({
-      text: externalChangeCopy.askText(name),
+      text: clean ? externalChangeCopy.mergedAskText(name, plan.changeCount) : externalChangeCopy.askText(name),
       confirmLabel: externalChangeCopy.loadExternal,
       cancelLabel: externalChangeCopy.keepLocal,
       onConfirm: loadExternal,
@@ -351,7 +380,9 @@ function askLoadExternalChange(
         keepLocal()
       },
       // adj928：多一个「查看差异」——本地内容**点开时再取**（用户可能还在编辑）
-      diff: { name, localText: () => useDocStore.getState().code, externalText },
+      diff: { name, baseText, localText: () => useDocStore.getState().code, externalText, onApplyMerge: applyMerged },
+      // adj966f：无冲突块时多给一个「应用」（同样的收尾：关提示条 + 关差异框 + 落盘）
+      extra: clean ? { label: externalChangeCopy.applyMergeShort, run: applyAuto } : undefined,
     })
   })()
 }
@@ -379,6 +410,20 @@ void (async () => {
     const visible = (): boolean => document.visibilityState === 'visible'
     const fsa = typeof (window as unknown as { showOpenFilePicker?: unknown }).showOpenFilePicker === 'function'
     const profile = hostProfile(getRuntimeEnv(), fsa)
+    /**
+     * adj966f：当前绑定对应的**基准键**（三种绑定各一档，与 `docStore` 记基准时同源）。
+     *
+     * 抽出来的理由：有两处必须用**同一把键** —— 轮询取 IO（`io()`）与提示时取"共同祖先原文"
+     * （`getBaselineText(key)`）。各写一份就会漂（"一个判据两处实现"是本项目的老毛病）。
+     */
+    const keyOfState = (s: ReturnType<typeof useDocStore.getState>): string | null =>
+      s.fileHandle
+        ? bindingKeyOf({ kind: 'handle', name: s.fileName })
+        : s.nativePath
+          ? bindingKeyOf({ kind: 'native', path: s.nativePath })
+          : s.binding && s.binding.segs.length > 0
+            ? baselineKeyOf(s.binding.wsId, s.binding.segs)
+            : null
     startExternalWatch({
       mode: () => decideWatch(profile, visible()),
       visible,
@@ -388,10 +433,12 @@ void (async () => {
       },
       io: () => {
         const s = useDocStore.getState()
+        const key = keyOfState(s)
+        if (!key) return null
         if (s.fileHandle) {
           const h = s.fileHandle
           return {
-            key: bindingKeyOf({ kind: 'handle', name: s.fileName }),
+            key,
             mtimeOf: async () => (await h.getFile()).lastModified,
             readText: async () => (await h.getFile()).text(),
           }
@@ -399,7 +446,7 @@ void (async () => {
         if (s.nativePath) {
           const path = s.nativePath
           return {
-            key: bindingKeyOf({ kind: 'native', path }),
+            key,
             mtimeOf: async () => (await readNativeProbe(path)).mtimeMs,
             readText: async () => (await readNativeProbe(path)).text,
           }
@@ -408,7 +455,7 @@ void (async () => {
         if (bind && bind.segs.length > 0) {
           const segs = bind.segs
           return {
-            key: baselineKeyOf(bind.wsId, segs),
+            key,
             mtimeOf: async () => null, // 宿主/工作区不回传 mtime ⇒ 走内容判据
             readText: async () => {
               const ws = await getWorkspace()
@@ -425,9 +472,12 @@ void (async () => {
       onExternal: (externalText) => {
         const s = useDocStore.getState()
         const name = s.binding?.segs?.[s.binding.segs.length - 1] ?? `${s.fileName}.jps`
+        const key = keyOfState(s)
         askLoadExternalChange(
           name,
           externalText,
+          // adj966f：共同祖先 = 基准里留下的原文（拿不到就退化为逐块采纳）
+          key ? getBaselineText(key) : null,
           () => {
             const cur = useDocStore.getState()
             if (cur.binding && cur.binding.segs.length > 0) void cur.openWorkspaceFile(cur.binding.segs)

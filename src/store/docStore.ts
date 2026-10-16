@@ -272,6 +272,17 @@ interface DocState {
   saveFile: () => Promise<boolean>
   /** 另存为对话框：选择保存位置与文件名后写入 */
   saveFileAs: () => Promise<boolean>
+  /**
+   * adj966f（P1 块级采纳 + P2 自动三路合并，用户 2026-10-16 口径③④）：**应用合并结果**。
+   *
+   * 差异框底部「应用（并保存）」按下时调它（`merged` 由 `diff/merge.ts` 的 `applyMerge` 算出）。
+   * 一趟做完四件事，顺序是刻意的：
+   *  ① **备份两侧**（本地那份 + 外部那份，各写一份 L1 键）——护栏"两侧都不丢"；
+   *  ② `setCode(merged)` ⇒ **一步历史**（可撤销）+ 解析器重算（**体检**：有问题直接进问题面板）；
+   *  ③ **立刻写回同一个文件**（`saveFile`）⇒ 写前登记在途写、写后刷基准（口径④）；
+   *  ④ 基准刷新后状态自然从 `bound-conflict` 回到"已保存"（`fileHost.docStateOf`）。
+   */
+  applyMergeResult: (merged: string, externalText: string) => void
 }
 
 /** 本地草稿（localStorage，自动保存） */
@@ -283,6 +294,17 @@ const DRAFT_NAME_KEY = 'ijipu.draftName'
  */
 const DRAFT_SRC_KEY = 'ijipu.draftSrc'
 const PAGE_CONFIG_KEY = 'ijipu.pageConfig'
+/**
+ * adj966f（护栏①：**两侧都不丢**）：应用冲突合并前，把"本地那份"与"外部那份"各留一份备份。
+ *
+ * 为什么用 localStorage 而不是内存：合并**紧接着就写盘**了，用户若事后发现合错了，
+ * 需要的是"当时那两份原文"，而内存里那份会被后续编辑覆盖。谱面文本量级很小（几十 KB），
+ * 用 L1 机器级缓存足够；键停在 `ijipu.` 前缀下（`docs/SETTINGS-AUDIT.md` 的口径）。
+ */
+const MERGE_BACKUP_LOCAL_KEY = 'ijipu.mergeBackupLocal'
+const MERGE_BACKUP_EXTERNAL_KEY = 'ijipu.mergeBackupExternal'
+/** 备份里同时记下"什么时候、哪份文件"——排错时能对上（纯文本，不参与判据） */
+const MERGE_BACKUP_AT_KEY = 'ijipu.mergeBackupAt'
 
 /** adj544：文档在工作区里的绑定（身份 + 相对路径） */
 export interface WorkspaceBinding {
@@ -1261,6 +1283,31 @@ export const useDocStore = create<DocState>()((set, get) => ({
     } finally {
       saveInFlight = null
     }
+  },
+  /**
+   * adj966f：**应用合并结果**（差异框底部「应用（并保存）」/ 无冲突块时提示条上的「应用」）。
+   *
+   * 四步（顺序刻意，见接口处的说明）：备份两侧 → 一步历史 + 解析器体检 → 立刻写回文件 → 基准收口。
+   */
+  applyMergeResult: (merged, externalText) => {
+    const s = get()
+    // ① 备份"当时那两份原文"（护栏①：两侧都不丢；合错了还能回看）
+    try {
+      localStorage.setItem(MERGE_BACKUP_LOCAL_KEY, s.code)
+      localStorage.setItem(MERGE_BACKUP_EXTERNAL_KEY, externalText)
+      localStorage.setItem(MERGE_BACKUP_AT_KEY, `${new Date().toISOString()} ${s.fileName}`)
+    } catch {
+      /* 存储不可用时静默：备份是护栏，不是主路径 */
+    }
+    /**
+     * ② **一步历史**：先把合并窗口的时间戳清零 —— `recordEdit` 会把 1.2s 内的连续编辑并成一步，
+     * 不清零的话"刚敲完字就点应用"会把合并并进上一次输入里，用户撤销时**跨过**这一步 ✗
+     * （用户口径④要求"应用 = 一步历史，可撤销"）。
+     */
+    set({ lastEditAt: 0 })
+    get().setCode(merged)
+    // ③ 立刻写回同一个文件（口径④）；写回成功即刷新基准 ⇒ 状态从"两边都改过"回到"已保存"
+    void get().saveFile()
   },
   saveFileAs: async () => {
     fileStateTouched = true

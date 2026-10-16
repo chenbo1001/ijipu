@@ -14,6 +14,7 @@ import {
   probeFileChange,
   probeExternalChange,
   getBaseline,
+  getBaselineText,
   setBaseline,
   markWriteInFlight,
   getWriteInFlight,
@@ -256,10 +257,12 @@ import { foldKeys, TOPBAR_DONATE_KEY, TOPBAR_FIXED_KIDS } from '../src/ui/topbar
 // adj538：桌面壳「外部打开」——多文件取舍是纯逻辑，可在 Node 里直接断言（模块不碰 window 顶层）
 import { pickPrimary, hasShell, type ExternalFile } from '../src/store/externalOpen.ts'
 // adj966：文件宿主能力与降级决策（纯函数 ⇒ 逐端逐档断言，不必真跑三端；口径见 docs/FILE-MODEL.md）
-import { hostIdOf, hostProfile, decideWriteMode, decideWatch, decideWriteGate, shouldGuidePersistPermission, docStateOf } from '../src/store/fileHost.ts'
+import { hostIdOf, hostProfile, decideWriteMode, decideWatch, decideWriteGate, shouldGuidePersistPermission, shouldOpenWorkspaceDock, docStateOf } from '../src/store/fileHost.ts'
 import type { FileHostProfile } from '../src/store/fileHost.ts'
 // adj966b：外部改动轮询编排（定时器/IO 全注入 ⇒ 在 Node 里真跑时序）
 import { EXT_POLL_MS, watchTick, startExternalWatch } from '../src/store/externalChangeWatch.ts'
+// adj966f：**两边都改了怎么办** —— 块级采纳（P1）与自动三路合并（P2）；纯函数，逐例断言
+import { applyMerge, applyMergePlan, planMerge } from '../src/diff/merge.ts'
 import type { RuntimeEnv } from '../src/brand/env.ts'
 // adj944（用户需求「全局设置里注册 iJipu CLI」）：PATH 增删的**纯函数 + 编排** ——
 // 应用界面（全局设置那个按钮）与命令行（`ijipu cli register|unregister|status`）**共用这一份** ✓
@@ -19848,6 +19851,15 @@ runAdj927ExternalChangeTests()
           console.error('  ✗ adj966b 外部改动轮询用例抛异常', e)
         }
       })
+      // adj966f：块级采纳 + 自动三路合并（纯函数逐例断言；⑤ 那一段要 await）
+      .then(async () => {
+        try {
+          await runAdj966fTests()
+        } catch (e) {
+          failed++
+          console.error('  ✗ adj966f 三路合并用例抛异常', e)
+        }
+      })
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
       .then(() => runAdj949ManualScopeTests())
@@ -23523,6 +23535,64 @@ function runAdj966Tests() {
     docSrcText.includes(guideCall) && !docSrcText.replace(guideCall, '').includes(guideCall), '')
 
   /**
+   * adj966g（**用户 2026-10-17 口径**）：
+   * 「需要权限确认的（手机端 Web 这种）**还继续使用工作区底栏**；其它可以直接使用文件系统的
+   * **PC 端的各模式**还是继续使用系统文件操作（更习惯）；**插件还继续使用 OB 端的文件管理方式**」。
+   *
+   * 两层落点，各一条判据 + 负对照：
+   *  ① **底栏默认页**：只有"受限档 **且** 本端能选文件夹"（手机/PAD 的 Web 与 PWA）才默认展开「工作区」；
+   *     PC 各档（桌面壳 / 桌面浏览器）与插件照旧收起（面板留给「问题」）。
+   *  ② **「打开…」的分流**：PC 上**一律**走系统文件选择器 —— 原先"只要设过工作区就走工作区面板"那一支删掉。
+   */
+  check('adj966g 底栏默认页：只有"受限档 + 能选文件夹"（手机端 Web/PWA）才默认展开「工作区」；PC 各档与插件都收起',
+    shouldOpenWorkspaceDock(hostProfile(mobileWeb, true), true) &&
+      shouldOpenWorkspaceDock(lim, true) && // 受限档但**本端能选文件夹**（手机 Chrome）
+      shouldOpenWorkspaceDock(lim, false) === false && // 受限档且选不了文件夹（桌面版 Firefox / Safari）
+      shouldOpenWorkspaceDock(d, true) === false &&
+      shouldOpenWorkspaceDock(w, true) === false &&
+      shouldOpenWorkspaceDock(hostProfile(pwa, true), true) === false &&
+      shouldOpenWorkspaceDock(pg, true) === false,
+    JSON.stringify({
+      手机Web_能选文件夹: shouldOpenWorkspaceDock(hostProfile(mobileWeb, true), true),
+      受限档_能选文件夹: shouldOpenWorkspaceDock(lim, true),
+      受限档_选不了文件夹: shouldOpenWorkspaceDock(lim, false),
+      桌面壳: shouldOpenWorkspaceDock(d, true),
+      桌面浏览器: shouldOpenWorkspaceDock(w, true),
+      已装PWA: shouldOpenWorkspaceDock(hostProfile(pwa, true), true),
+      插件: shouldOpenWorkspaceDock(pg, true),
+    }))
+  check('adj966g **负对照**：把"能选文件夹"这一格反过来（受限档但选不了文件夹：桌面版 Firefox / Safari）⇒ 判假',
+    shouldOpenWorkspaceDock(hostProfile(mobileWeb, true), true) &&
+      shouldOpenWorkspaceDock(hostProfile(mobileWeb, true), false) === false &&
+      shouldOpenWorkspaceDock(lim, false) === false, '')
+  {
+    const uiSrc = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+    const topSrc = String(readFileSync('src/ui/TopBar.tsx', 'utf8'))
+    /** 接线判据（抽成函数是为了负对照：改一份源码文本进去，它必须判假） */
+    const wired = (u: string, t: string): boolean =>
+      u.includes('shouldOpenWorkspaceDock(profile, canPickDir)') &&
+      u.includes("return { open: true, panel: 'workspace' }") &&
+      u.includes('dockOpen: initialDock().open') &&
+      !t.includes('(await getWorkspace())')
+    check('adj966g 接线：底栏默认页走 `shouldOpenWorkspaceDock`；「打开…」里**不再**"设过工作区就走面板"',
+      wired(uiSrc, topSrc),
+      JSON.stringify({
+        uiStore接线: uiSrc.includes('shouldOpenWorkspaceDock(profile, canPickDir)'),
+        TopBar已去掉工作区那一支: !topSrc.includes('(await getWorkspace())'),
+      }))
+    check('adj966g **负对照**：① 把底栏判据换成恒假；② 把 `(await getWorkspace())` 那一支塞回 TopBar ⇒ 两条都判假',
+      !wired(uiSrc.replace('shouldOpenWorkspaceDock(profile, canPickDir)', 'false'), topSrc) &&
+        !wired(
+          uiSrc,
+          topSrc.replace(
+            'await openFile()',
+            "if (await getWorkspace()) { toggleDock('workspace'); return }\n    await openFile()",
+          ),
+        ),
+      '')
+  }
+
+  /**
    * adj966：桌面壳"不再自动接管工作区"必须**明确告知一次**（用户不该以为文件丢了）——
    * 告知每个会话只弹一次（启动竞态里可能被调用多次），且**不是错误**（`ok` 级）。
    */
@@ -23563,12 +23633,269 @@ function runAdj966Tests() {
       未核对: docStateOf({ bound: true, dirty: false, verdict: 'unknown' }),
     }))
   check('adj966d **外部改动优先于未保存**（用户最需要知道的是"我这份可能过时了"，而不是"我改过几个字"）',
-    docStateOf({ bound: true, dirty: true, verdict: 'external' }) === 'bound-stale' &&
+    // adj966f：这条优先级之上再分出一档 —— "两边都改了"是**第六态**（三路合并的入口），
+    // 它比单独的"外部改了"更具体（能逐块采纳），所以放在 `bound-stale` 之前判
+    docStateOf({ bound: true, dirty: true, verdict: 'external' }) === 'bound-conflict' &&
       docStateOf({ bound: true, dirty: false, verdict: 'external' }) === 'bound-stale',
     JSON.stringify({
       有改动且外部改了: docStateOf({ bound: true, dirty: true, verdict: 'external' }),
       没改动但外部改了: docStateOf({ bound: true, dirty: false, verdict: 'external' }),
     }))
+  check('adj966f 第六态 `bound-conflict`（两边都改过）**只在"外部改了 + 本地有改动"时成立**（负对照：只外部改 / 只本地改都不算）',
+    docStateOf({ bound: true, dirty: true, verdict: 'external' }) === 'bound-conflict' &&
+      docStateOf({ bound: true, dirty: false, verdict: 'external' }) === 'bound-stale' &&
+      docStateOf({ bound: true, dirty: true, verdict: 'unchanged' }) === 'bound-dirty' &&
+      docStateOf({ bound: true, dirty: false, verdict: 'unchanged' }) === 'bound-clean' &&
+      docStateOf({ bound: false, dirty: true, verdict: 'external' }) === 'draft-only',
+    JSON.stringify({
+      两边都改: docStateOf({ bound: true, dirty: true, verdict: 'external' }),
+      只外部改: docStateOf({ bound: true, dirty: false, verdict: 'external' }),
+      只本地改: docStateOf({ bound: true, dirty: true, verdict: 'unchanged' }),
+      都没改: docStateOf({ bound: true, dirty: false, verdict: 'unchanged' }),
+    }))
+}
+
+/**
+ * adj966f：**两边都改了怎么办** —— 块级采纳（P1）+ 自动三路合并（P2）（用户 2026-10-16 拍板四条）。
+ *
+ * 口径（见 `docs/FILE-MODEL.md` §9，**不许改**）：① 先 P1 再 P2；② 按钮叫「用左 / 用右」；
+ * ③ 合并**以本地为底**；④ 采纳后**立即保存**（这一条由 `docStore.applyMergeResult` 收口，见接线判据）。
+ *
+ * 每条都要有**负对照**（用户要求）——下面每条 check 后面基本都跟着一条"把关键条件反过来，
+ * 判据必须跟着变"的 check；判据本身是 `diff/merge.ts` 的纯函数，夹具是四行小谱。
+ */
+async function runAdj966fTests() {
+  console.log('[177] 两边都改了怎么办：块级采纳 + 自动三路合并（adj966f）')
+  /** 夹具：一份四行小谱。一行 = 一条语句 / 一个小节（`.jps` 的常态 ⇒ 同步冲突大多落在**不同行**） */
+  const B = ['B: 测试', 'Q: 1 2 3 |', 'Q: 4 5 6 |', 'Q: 7 1 2 |'].join('\n')
+  /** 把第 `i` 行（0 基）换成新内容 */
+  const repl = (src: string, i: number, line: string): string => {
+    const a = src.split('\n')
+    a[i] = line
+    return a.join('\n')
+  }
+  const delLine = (src: string, i: number): string =>
+    src
+      .split('\n')
+      .filter((_, k) => k !== i)
+      .join('\n')
+  const local1 = repl(B, 1, 'Q: 1 2 3 4 |') // 本地改第 2 行
+  const local1b = repl(B, 1, 'Q: 1 2 3 5 |') // 本地改第 2 行（另一种改法）
+  const ext1 = repl(B, 1, 'Q: 1 2 3 9 |') // 外部**也**改第 2 行
+  const ext2 = repl(B, 2, 'Q: 4 5 6 7 |') // 外部改第 3 行
+
+  // ---------- 判据①：两边改同一块 ⇒ conflict（不许自动合并吞掉） ----------
+  {
+    const clash = planMerge(B, local1, ext1)
+    const apart = planMerge(B, local1, ext2)
+    check('adj966f ① 两边改了**同一块** ⇒ 判 conflict，且类别是 both（必须问用户，不许自动合并吞掉）',
+      clash.mode === 'three-way' && clash.conflicts === 1 && clash.blocks.length === 1 &&
+        clash.blocks[0].conflict && clash.blocks[0].kind === 'both',
+      JSON.stringify({ mode: clash.mode, conflicts: clash.conflicts, kind: clash.blocks[0]?.kind }))
+    check('adj966f ① **负对照**：改的是**不同块** ⇒ 同一份夹具判 0 冲突（判据真的在比"块"，不是恒红）',
+      apart.conflicts === 0 && apart.blocks.length === 2 && apart.blocks.every((b) => !b.conflict),
+      JSON.stringify({ conflicts: apart.conflicts, blocks: apart.blocks.map((b) => b.kind) }))
+    /**
+     * P3 不做（用户口径）：同一行里两边各改一处**仍是冲突**——不做行内字符级自动合并。
+     * 负对照：两边把**同一块改成同一样子** ⇒ 不算冲突（用左用右结果相同，问用户毫无意义）。
+     */
+    const sameEdit = planMerge(B, local1, local1)
+    check('adj966f P3（不做行内自动合并）：同一行两边各改一处 ⇒ 仍是**一个冲突块**，交给用户选',
+      planMerge(B, local1, local1b).conflicts === 1,
+      JSON.stringify(planMerge(B, local1, local1b).blocks.map((b) => b.kind)))
+    check('adj966f **负对照**：两边把同一块改成**同一样子** ⇒ 不算冲突（块表为空，合并结果 = 两边那份）',
+      sameEdit.conflicts === 0 && sameEdit.blocks.length === 0 && applyMerge(B, local1, local1) === local1,
+      JSON.stringify({ conflicts: sameEdit.conflicts, blocks: sameEdit.blocks.length }))
+  }
+
+  // ---------- 判据②：只一边改 ⇒ 自动合 ----------
+  {
+    const onlyLocal = planMerge(B, local1, B)
+    const onlyExt = planMerge(B, B, ext2)
+    check('adj966f ② 只一边改 ⇒ **自动合**（不打扰用户）：只本地改的块默认"用左"、只外部改的块默认"用右"',
+      onlyLocal.conflicts === 0 && onlyLocal.autoCount === 1 && onlyLocal.blocks[0].kind === 'local-only' &&
+        onlyLocal.blocks[0].defaultChoice === 'local' &&
+        onlyExt.conflicts === 0 && onlyExt.autoCount === 1 && onlyExt.blocks[0].kind === 'external-only' &&
+        onlyExt.blocks[0].defaultChoice === 'external',
+      JSON.stringify({
+        只本地改: [onlyLocal.blocks[0]?.kind, onlyLocal.blocks[0]?.defaultChoice],
+        只外部改: [onlyExt.blocks[0]?.kind, onlyExt.blocks[0]?.defaultChoice],
+      }))
+    const twoWay = planMerge(null, local1, B)
+    check('adj966f ② **负对照**：没有共同祖先（`base=null`）⇒ 同一份差异退化为**二路逐块采纳**，一律要问',
+      twoWay.mode === 'two-way' && twoWay.blocks[0].kind === 'manual' && twoWay.conflicts === twoWay.blocks.length &&
+        twoWay.autoCount === 0 && applyMerge(null, local1, B) === local1,
+      JSON.stringify({ mode: twoWay.mode, kind: twoWay.blocks[0]?.kind, conflicts: twoWay.conflicts }))
+    /** 纯插入（外部在末尾加一行）也是"只一边改"：零长度改动段不许把它当成与别处打架 */
+    const extIns = `${B}\nQ: 3 3 3 |`
+    const ins = planMerge(B, local1, extIns)
+    check('adj966f ② 纯插入（外部在末尾加一行）+ 本地改别处 ⇒ 互不重叠 ⇒ 自动合（本地那处保留、插入那行也进来）',
+      ins.conflicts === 0 && applyMerge(B, local1, extIns) === `${local1}\nQ: 3 3 3 |`,
+      JSON.stringify({ merged: applyMerge(B, local1, extIns) }))
+  }
+
+  // ---------- 判据③：合并**以本地为底** ----------
+  {
+    /**
+     * 三块混合夹具（**注意块粒度**：一个块 = 某一侧的一段**连续**改动行，与 git / diff3 同口径）：
+     *  · 冲突块：第 2 行两边都改（本地 `…4 |`、外部 `…9 |`）；
+     *  · 只外部改：第 4 行（与第 2 行**隔着**一行未改的，所以是独立块）；
+     *  · 只本地改：本地删掉第 5 行。
+     */
+    const B5 = ['B: 测试', 'Q: 1 2 3 |', 'Q: 4 5 6 |', 'Q: 7 1 2 |', 'Q: 3 3 3 |'].join('\n')
+    /** 本地：第 2 行改成 `…4 |`、第 5 行删掉 */
+    const M2 = delLine(repl(B5, 1, 'Q: 1 2 3 4 |'), 4)
+    /** 外部：第 2 行改成 `…9 |`（与本地冲突）、第 4 行改成 `Q: 7 1 2 9 |`（独立块） */
+    const E = repl(repl(B5, 1, 'Q: 1 2 3 9 |'), 3, 'Q: 7 1 2 9 |')
+    const plan = planMerge(B5, M2, E)
+    const defaults = applyMerge(B5, M2, E)
+    check('adj966f ③ 三方夹具自检：冲突 1 块 + 只外部 1 块 + 只本地 1 块（三块互不重叠）',
+      plan.conflicts === 1 && plan.blocks.length === 3 &&
+        plan.blocks.map((b) => b.kind).join(',') === 'both,external-only,local-only',
+      JSON.stringify(plan.blocks.map((b) => [b.kind, b.conflict])))
+    check('adj966f ③ **以本地为底**：默认选择 = 本地那份 + 自动补进"只外部改"的块（冲突块未被采纳的外部内容**不许混进来**）',
+      defaults ===
+        ['B: 测试', 'Q: 1 2 3 4 |', 'Q: 4 5 6 |', 'Q: 7 1 2 9 |'].join('\n') &&
+        !defaults.includes('Q: 1 2 3 9 |') && !defaults.includes('Q: 3 3 3 |'),
+      JSON.stringify(defaults))
+    check('adj966f ③ **全用左 ⇒ 逐字等于本地；全用右 ⇒ 逐字等于外部**（两栏逐行拼起来就等于两侧原文）',
+      applyMergePlan(plan, allSide(plan, 'local')) === M2 && applyMergePlan(plan, allSide(plan, 'external')) === E,
+      JSON.stringify({ 全用左: applyMergePlan(plan, allSide(plan, 'local')) === M2, 全用右: applyMergePlan(plan, allSide(plan, 'external')) === E }))
+    check('adj966f ③ **负对照**：逐块指定"用左"仍等于默认结果；改成"用右" ⇒ 外部那份才进来（选择真的在管合并）',
+      applyMerge(B5, M2, E, { 0: 'local' }) === defaults &&
+        applyMerge(B5, M2, E, { 0: 'external' }) === repl(defaults, 1, 'Q: 1 2 3 9 |'),
+      JSON.stringify({ 选左: applyMerge(B5, M2, E, { 0: 'local' }), 选右: applyMerge(B5, M2, E, { 0: 'external' }) }))
+    /** 两栏不变式：左栏逐行拼起来 = 本地原文、右栏 = 外部原文（归一化口径）——界面显示与合并结果同源 */
+    const colText = (p: ReturnType<typeof planMerge>, side: 'left' | 'right'): string =>
+      p.rows.map((r) => (side === 'left' ? r.leftText : r.rightText)).filter((t): t is string => t !== null).join('\n')
+    check('adj966f ③ 两栏不变式：左栏拼起来 = 本地、右栏拼起来 = 外部（归一化口径）',
+      colText(plan, 'left') === normalizeForDiff(M2) && colText(plan, 'right') === normalizeForDiff(E) &&
+        colText(planMerge(null, M2, E), 'left') === normalizeForDiff(M2) &&
+        colText(planMerge(null, M2, E), 'right') === normalizeForDiff(E),
+      JSON.stringify({ 左: colText(plan, 'left') === normalizeForDiff(M2), 右: colText(plan, 'right') === normalizeForDiff(E) }))
+    check('adj966f ③ 块的行范围与"每行属于哪一块"一致（界面按它插按钮：错了按钮就挂到别的块上）',
+      plan.blocks.every((b) => b.rowTo >= b.rowFrom && plan.blockOfRow[b.rowFrom] === b.index && plan.blockOfRow[b.rowTo] === b.index),
+      JSON.stringify(plan.blocks.map((b) => [b.rowFrom, b.rowTo, b.index])))
+    /**
+     * **块粒度**（必须写清，否则"自动合"的边界说不明白）：一个块 = 某一侧的一段**连续**改动行，
+     * 与 git / diff3 的 change-hunk 同口径 —— 相邻两行都改 ⇒ 一个块；中间隔着一行没改 ⇒ 两个块。
+     * 这是刻意偏保守的一档：宁可把"邻行改动"并进同一个块一起问，也不把它劈开静默拼半个谱。
+     */
+    check('adj966f ③ 块粒度 = 一侧的**连续改动段**：相邻两行都改 ⇒ 1 块；中间隔一行 ⇒ 2 块（与 git/diff3 同口径）',
+      planMerge(B5, B5, repl(repl(B5, 1, 'Q: 1 1 1 |'), 2, 'Q: 2 2 2 |')).blocks.length === 1 &&
+        planMerge(B5, B5, repl(repl(B5, 1, 'Q: 1 1 1 |'), 3, 'Q: 2 2 2 |')).blocks.length === 2,
+      JSON.stringify({
+        相邻两行: planMerge(B5, B5, repl(repl(B5, 1, 'Q: 1 1 1 |'), 2, 'Q: 2 2 2 |')).blocks.length,
+        隔一行: planMerge(B5, B5, repl(repl(B5, 1, 'Q: 1 1 1 |'), 3, 'Q: 2 2 2 |')).blocks.length,
+      }))
+  }
+
+  // ---------- 判据④：有外部改动时不许静默写盘 ----------
+  {
+    check('adj966f ④ 有外部改动 ⇒ 写盘闸门仍判 `ask`（负对照：没变才 `write`）——合并**不绕过**任何安全口径',
+      decideWriteGate('external', { kind: 'write-now' }) === 'ask' &&
+        decideWriteGate('unchanged', { kind: 'write-now' }) === 'write',
+      JSON.stringify({ 有外部改动: decideWriteGate('external', { kind: 'write-now' }), 没变: decideWriteGate('unchanged', { kind: 'write-now' }) }))
+    check('adj966f ④ 合并**本身是纯函数、没有写盘入口**（落盘只发生在用户点「应用」之后，与 adj966b ③ 同口径）',
+      !String(planMerge).includes('write') && !String(applyMergePlan).includes('write') && !String(applyMerge).includes('write'), '')
+    const docSrcText = String(readFileSync('src/store/docStore.ts', 'utf8'))
+    const mergeSteps = [
+      'applyMergeResult: (merged, externalText)',
+      'localStorage.setItem(MERGE_BACKUP_LOCAL_KEY, s.code)',
+      'localStorage.setItem(MERGE_BACKUP_EXTERNAL_KEY, externalText)',
+      'set({ lastEditAt: 0 })',
+      'get().setCode(merged)',
+      'void get().saveFile()',
+    ]
+    const hasMergeSteps = (t: string): boolean => mergeSteps.every((s) => t.includes(s))
+    check('adj966f ④ 接线：「应用」的落点 = 备份两侧 → 一步历史（可撤销）→ **立刻写回同一个文件**（口径④ + 护栏①②）',
+      hasMergeSteps(docSrcText), JSON.stringify(mergeSteps.filter((s) => !docSrcText.includes(s))))
+    check('adj966f ④ **负对照**：任删一步（备份 / 独立历史 / 立刻写回）⇒ 判据判假（它真的在数这几步）',
+      hasMergeSteps(docSrcText) && !hasMergeSteps(docSrcText.replace(mergeSteps[1], '')) &&
+        !hasMergeSteps(docSrcText.replace(mergeSteps[3], '')) && !hasMergeSteps(docSrcText.replace(mergeSteps[5], '')),
+      JSON.stringify({ 删备份: hasMergeSteps(docSrcText.replace(mergeSteps[1], '')), 删独立历史: hasMergeSteps(docSrcText.replace(mergeSteps[3], '')), 删写回: hasMergeSteps(docSrcText.replace(mergeSteps[5], '')) }))
+  }
+
+  // ---------- 判据⑤：同一份外部内容只提示一次（写不回去时也不反复弹） ----------
+  {
+    const harnessOnce = () => {
+      const ticks: (() => void)[] = []
+      const ext: string[] = []
+      let text = 'X'
+      const io = { key: 'k', mtimeOf: async () => 1, readText: async () => text }
+      const stop = startExternalWatch({
+        mode: () => 'poll',
+        visible: () => true,
+        hasBinding: () => true,
+        io: () => io,
+        localText: () => '本地',
+        onExternal: (t) => ext.push(t),
+        startInterval: (fn) => {
+          ticks.push(fn)
+          return () => {
+            const i = ticks.indexOf(fn)
+            if (i >= 0) ticks.splice(i, 1)
+          }
+        },
+        onVisible: () => () => {},
+        probe: async () => ({ kind: 'external', externalText: text }),
+      })
+      return { ticks, ext, stop, setText: (t: string) => (text = t) }
+    }
+    const h = harnessOnce()
+    h.ticks[0]?.()
+    await new Promise((r) => setTimeout(r, 0))
+    h.ticks[0]?.()
+    await new Promise((r) => setTimeout(r, 0))
+    const afterSame = h.ext.length
+    h.setText('Y') // 内容真的又变了
+    h.ticks[0]?.()
+    await new Promise((r) => setTimeout(r, 0))
+    check('adj966f ⑤ 同一份外部内容**只提示一次**（写不回去时也不反复弹）；**负对照**：内容真变了必须再提示',
+      afterSame === 1 && h.ext.length === 2, JSON.stringify(h.ext))
+    h.stop()
+  }
+
+  // ---------- UI 接线（差异框 / 确认条 / 文案）：adj959 的口径 —— 结构级判据兜"挂错地方"，真点交给 verify:app-ui ----------
+  {
+    const dialogSrc = String(readFileSync('src/dialogs/FileDiffDialog.tsx', 'utf8'))
+    const barSrc = String(readFileSync('src/ui/ConfirmBar.tsx', 'utf8'))
+    const mainSrc = String(readFileSync('src/main.tsx', 'utf8'))
+    check('adj966f UI：差异框每块给「用左 / 用右」、顶部「全用左 / 全用右」、底部「应用（并保存）」（口径②③）',
+      dialogSrc.includes('externalChangeCopy.useLeft') && dialogSrc.includes('externalChangeCopy.useRight') &&
+        dialogSrc.includes('externalChangeCopy.useAllLeft') && dialogSrc.includes('externalChangeCopy.useAllRight') &&
+        dialogSrc.includes('externalChangeCopy.applyMerge') && dialogSrc.includes('applyMergePlan(plan, picked)') &&
+        externalChangeCopy.useLeft === '用左' && externalChangeCopy.useRight === '用右' &&
+        externalChangeCopy.applyMerge.includes('应用'),
+      JSON.stringify({ 用左: externalChangeCopy.useLeft, 用右: externalChangeCopy.useRight, 应用: externalChangeCopy.applyMerge }))
+    check('adj966f UI：差异框拿的是**共同祖先**（`planMerge(diff.base, …)`），确认条把 `baseText` 与 `onApplyMerge` 一起递进去',
+      dialogSrc.includes('planMerge(diff.base, diff.local, diff.external)') && barSrc.includes('base: diff.baseText') &&
+        barSrc.includes('diff.onApplyMerge(merged)'), '')
+    const cleanCond = 'const clean = plan.conflicts === 0 && plan.changeCount > 0'
+    const uiOk = (t: string): boolean =>
+      t.includes(cleanCond) &&
+      t.includes('externalChangeCopy.mergedAskText(name, plan.changeCount)') &&
+      t.includes('extra: clean ? { label: externalChangeCopy.applyMergeShort, run: applyAuto } : undefined')
+    check('adj966f UI（P2）：**没有冲突块**时提示条换成"已自动合好（N 块互不重叠）"并直接给一个「应用」按钮',
+      uiOk(mainSrc) && externalChangeCopy.mergedAskText('可能', 2).includes('互不重叠') &&
+        externalChangeCopy.mergedAskText('可能', 2).includes('应用') &&
+        externalChangeCopy.applyMergeShort === '应用',
+      externalChangeCopy.mergedAskText('可能', 2))
+    check('adj966f UI **负对照**：把"无冲突才换文案 / 才给按钮"的条件去成恒真 ⇒ 判据判假（它在守那个条件）',
+      uiOk(mainSrc) && !uiOk(mainSrc.replace(cleanCond, 'const clean = true')), '')
+    /** 基准里要**留下原文**（P2 的前提）：`getBaselineText` 对得上键才给，换文件即失效 */
+    setBaseline('native:X.jps', B, 1)
+    check('adj966f 基准留原文：`getBaselineText` 键对得上才给（**换文件即失效** ⇒ 不许拿别的文件的原文当祖先）',
+      getBaselineText('native:X.jps') === B && getBaselineText('native:Y.jps') === null,
+      JSON.stringify({ 同键: getBaselineText('native:X.jps')?.slice(0, 12), 换文件: getBaselineText('native:Y.jps') }))
+  }
+}
+
+/** 把"整份用某一侧"做成 choices（全用左 / 全用右 的等价物，断言用） */
+function allSide(plan: ReturnType<typeof planMerge>, side: 'local' | 'external'): Record<number, 'local' | 'external'> {
+  const map: Record<number, 'local' | 'external'> = {}
+  for (const b of plan.blocks) map[b.index] = side
+  return map
 }
 
 /**

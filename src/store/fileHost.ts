@@ -190,6 +190,24 @@ export function shouldGuidePersistPermission(p: FileHostProfile, perm: PermState
 }
 
 /**
+ * adj966g（用户 2026-10-17 口径）：**底栏默认展开「工作区」的档**。
+ *
+ * 用户原话：「需要权限确认的（可能就手机端 Web 这种模式）**还继续使用工作区底栏**；
+ * 其它可以直接使用文件系统的 **PC 端的各模式**，还是继续使用系统文件操作（这样更习惯）；
+ * **插件还继续使用 OB 端的文件管理方式**」。
+ *
+ * ⇒ 分层的判据就是能力表里那一格：**受限档（`limited`：手机端 / 没有 FSA 的浏览器）
+ * 且本端确实能选文件夹**（`canPickDir` = 有 `showDirectoryPicker`）时，底栏默认**展开在「工作区」**。
+ *  · 桌面壳（`desktop`）/ 网页与 PWA（`web`/`pwa`）能直接对系统文件读写 ⇒ **不展开**（PC 习惯是开系统文件）；
+ *  · 桌面版 Firefox / Safari 虽然是 `limited`，但**连 `showDirectoryPicker` 都没有**
+ *    （`canPickDir === false`）⇒ 展开也没用（那一档是"打开=上传、保存=下载"，必须留草稿）；
+ *  · 插件（`plugin`，文库即工作区）由宿主自己在侧栏管文件 ⇒ 不展开。
+ */
+export function shouldOpenWorkspaceDock(p: FileHostProfile, canPickDir: boolean): boolean {
+  return p.id === 'limited' && canPickDir
+}
+
+/**
  * **文档状态**（adj966d，用户要求：状态栏要能看出"这份是草稿还是已存到文件 / 手里是新版还是旧版"）。
  *
  * 为什么要一个纯函数：这三个问题（绑没绑文件 · 与文件一致吗 · 文件被外部改了吗）分别散在
@@ -201,10 +219,15 @@ export function shouldGuidePersistPermission(p: FileHostProfile, perm: PermState
  * | `draft-only` | 没绑定文件：现在编辑的是**草稿**（新建 / 粘贴导入 / 示例） |
  * | `bound-clean` | 已绑定文件，且内容与文件一致（= 已保存） |
  * | `bound-dirty` | 已绑定文件，但**有未保存改动**（文件里还是旧内容） |
- * | `bound-stale` | 已绑定文件，且**文件已被外部改动**（手里这份是旧版；提示条与「重新载入」在这里最有用） |
+ * | `bound-stale` | 已绑定文件，且**文件已被外部改动**（手里这份没有本地改动；提示条与「重新载入」在这里最有用） |
+ * | `bound-conflict` | 已绑定文件，**两边都改了**（外部改了、本地也有未保存改动）⇒ 交给块级采纳 / 三路合并（`diff/merge.ts`） |
  * | `bound-unknown` | 已绑定文件，但**还没核对过**（启动恢复那一瞬间；不谎称"一致"） |
+ *
+ * adj966f：新增第六态 `bound-conflict`（"两边都改过"）—— 用户口径见 `docs/FILE-MODEL.md` §9 护栏 5。
+ * 它与 `bound-stale` 的差别只有一个事实：**本地有没有未保存改动**。两者都要提示，
+ * 但"两边都改了"才谈得上逐块采纳 / 自动合并（三路合并的入口就在这一态）。
  */
-export type DocStateKind = 'draft-only' | 'bound-clean' | 'bound-dirty' | 'bound-stale' | 'bound-unknown'
+export type DocStateKind = 'draft-only' | 'bound-clean' | 'bound-dirty' | 'bound-stale' | 'bound-conflict' | 'bound-unknown'
 
 /** 由"三处事实"推文档状态（纯函数：`verdict` 来自 `externalChange` 的比对，不用本模块自己算） */
 export function docStateOf(i: {
@@ -217,8 +240,9 @@ export function docStateOf(i: {
 }): DocStateKind {
   if (!i.bound) return 'draft-only'
   // ⚠ 顺序要紧：**"文件被外部改了"优先于"我有改动"** ——
-  // 用户最需要知道的是"我这份可能已经过时"，而不是"我改过几个字"
-  if (i.verdict === 'external') return 'bound-stale'
+  // 用户最需要知道的是"我这份可能已经过时"，而不是"我改过几个字"；
+  // 而"两边都改了"是其中最需要用户做决定的一种（逐块采纳 / 自动合并），比单独的"外部改了"更具体
+  if (i.verdict === 'external') return i.dirty ? 'bound-conflict' : 'bound-stale'
   if (i.dirty) return 'bound-dirty'
   if (i.verdict === 'unknown') return 'bound-unknown'
   return 'bound-clean'

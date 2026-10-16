@@ -11,6 +11,10 @@
  * （左 = 本地正在编辑的、右 = 文件里的新内容），让用户看清差异再决定；点它**不关闭**本确认条
  * （差异框里也能直接做决定，关掉差异框就回到这里）。
  *
+ * adj966f（P1/P2）：两边都改了、且改动**互不重叠**时，`ask.extra` 会带来第三个按钮「应用」——
+ * 合并结果此时是确定的（以本地为底、外部只补进没打架的地方），点一下即写回文件；
+ * 「查看差异」里则能逐块选「用左 / 用右」。
+ *
  * 无待确认项时不渲染任何元素。
  */
 import { externalChangeCopy } from '../brand/copy'
@@ -42,12 +46,22 @@ export function ConfirmBar() {
                 name: diff.name,
                 local: diff.localText(),
                 external: diff.externalText,
+                // adj966f：共同祖先原文（没有就是 null ⇒ 差异框退化为逐块采纳）
+                base: diff.baseText,
                 onKeepLocal: () => decide(ask.onCancel),
                 onLoadExternal: () => decide(ask.onConfirm),
+                // adj966f（口径④）：应用合并结果 = 写回文件 + 立刻保存（由 docStore 收口）
+                onApplyMerge: (merged) => decide(() => diff.onApplyMerge(merged)),
               })
             }}
           >
             {externalChangeCopy.viewDiff}
+          </button>
+        )}
+        {/* adj966f：无冲突块时才有的「应用」（P2：已自动合好，一点即用） */}
+        {ask.extra && (
+          <button type="button" className="confirm-bar-btn" onClick={() => decide(ask.extra!.run)}>
+            {ask.extra.label}
           </button>
         )}
         <button type="button" className="confirm-bar-btn is-primary" onClick={() => decide(ask.onConfirm)}>

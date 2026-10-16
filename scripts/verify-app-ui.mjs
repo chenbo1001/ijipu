@@ -41,6 +41,16 @@
  *   · 正向：`Alt+滚轮` / `Alt+Shift+滚轮` / `Alt+拖动` ⇒ 预览产物**与** `# jps-config` **都真的变了**；
  *   · 负向：关掉「排版辅助」后按 Alt ⇒ 一个字都不许变（前提①）；
  *   · 回归：`Ctrl+单击音符` 仍能从这里试听（不能被同区域的新手势抢走）。
+ *
+ * ## adj966f 那一段：两边都改了 ⇒ 逐块采纳 / 自动三路合并（`docs/FILE-MODEL.md` §9）
+ *
+ * 同一类问题的第三次应用：差异框里「用左 / 用右」按钮、底部「应用（并保存）」是否**真的生效**
+ * （点了有没有反应、结果有没有写回文件、提示条有没有收口），源码级断言一个都证明不了。
+ * 做法：`Page.addScriptToEvaluateOnNewDocument` 注入一个**假 FSA 句柄**
+ * （`showOpenFilePicker` + `getFile` / `createWritable`）⇒ 应用走正常的"网页版 FSA 档"，
+ * 打开 = 真句柄、监视 = 真轮询（4 秒一跳）；"外部改动"= 直接改那个假文件的内容与 mtime。
+ * 两个场景：① 两边改**不同块** ⇒ 确认条应说"已自动合好…互不重叠"并给「应用」，点完**假文件里真出现合并结果**；
+ * ② 两边改**同一块** ⇒ 确认条应走"要你决定"、差异框里标"冲突"，选「用右」+ 应用后**外部那一版进文件、本地那版被换掉**。
  */
 import { createServer } from 'node:http'
 import { readFileSync, existsSync, statSync } from 'node:fs'
@@ -841,6 +851,180 @@ async function main() {
         c,
         `[...document.querySelectorAll('.tool-dock-tab')].find((t) => t.textContent.includes('试听'))?.classList.contains('is-active') === true`,
       )) === true,
+    )
+
+    // ============ adj966f：两边都改了 ⇒ 逐块采纳 / 自动三路合并（**真点一遍**） ============
+    //
+    // 为什么这段必须真点（而不是只写源码级断言）：`adj959` 的教训 —— "事件挂错地方"这类缺陷
+    // 源码里看着全对（`tsc`/`lint`/`smoke` 全绿），点下去却没反应：差异框里按钮点了不生效、
+    // 「应用（并保存）」没把结果写回文件、状态没收口（提示条不走），冒烟全都看不见。
+    //
+    // 做法：**注入一个假 FSA 句柄**（`showOpenFilePicker` + `getFile` / `createWritable`），
+    // 于是应用走的是正常的"网页版 FSA 档"：打开 = 真句柄、监视 = 真轮询（4 秒一跳）、
+    // "外部改动" = 我们直接改那个假文件的内容与 mtime ⇒ 从头到尾走完整条链，
+    // 直到差异框里逐块点「用左 / 用右」与底部「应用（并保存）」——**并核对假文件真的被写回**。
+    const BASE_JPS = [
+      'V: 1.0',
+      'B: 合并测试',
+      'D: C',
+      'P: 4/4',
+      'Q: 1 2 3 | 4 5 6 |',
+      'Q: 1 1 1 | 2 2 2 |',
+      'Q: 3 3 3 | 4 4 4 |',
+      'Q: 5 5 5 | 6 6 6 |',
+      '',
+    ].join('\n')
+    /** 本地那份：把第 6 行改成 `…2 2 9 |`（`withLocal` 用于两个场景各改一次） */
+    const LOCAL_LINE = 'Q: 1 1 1 | 2 2 9 |'
+    const CONFLICT_LINE = 'Q: 1 1 1 | 8 8 8 |'
+    await c.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
+    await sleep(300)
+    await c.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `(() => {
+        window.__fakeFile = { name: '合并测试.jps', text: ${JSON.stringify(BASE_JPS)}, mtime: 1000 }
+        window.showOpenFilePicker = async () => [{
+          kind: 'file',
+          name: window.__fakeFile.name,
+          getFile: async () => new File([window.__fakeFile.text], window.__fakeFile.name, { lastModified: window.__fakeFile.mtime }),
+          createWritable: async () => ({
+            write: async (t) => { window.__fakeFile.text = String(t) },
+            close: async () => { window.__fakeFile.mtime += 1000 },
+            abort: async () => {},
+          }),
+          queryPermission: async () => 'granted',
+          requestPermission: async () => 'granted',
+        }]
+      })()`,
+    })
+    await c.send('Page.reload')
+    await sleep(700)
+    await waitFor(
+      c,
+      `typeof window.showOpenFilePicker === 'function' && !!document.querySelector('.editor-main textarea')`,
+      '重载后：假 FSA 就位 + 应用首屏',
+    )
+    console.log('[verify-app-ui] adj966f：两边都改了 —— 块级采纳 / 自动三路合并（真点）')
+
+    /** 走真实菜单打开那个假文件（用「打开（系统文件选择器）」这一项：它必然调 `openFile`） */
+    const openFakeFile = async () => {
+      await evalJs(c, `document.querySelector('.topbar-hamburger-btn').click(), true`)
+      await waitFor(c, `!!document.querySelector('.topbar-hamburger.open .menu-dropdown')`, '菜单打开')
+      const hit = await evalJs(
+        c,
+        `(() => {
+           const el = [...document.querySelectorAll('.topbar-hamburger.open .menu-entry')].find((x) => x.textContent.includes('系统文件选择器'))
+           if (!el) return 'no-entry'
+           el.click()
+           return 'ok'
+         })()`,
+      )
+      if (hit !== 'ok') throw new Error('菜单里找不到「打开（系统文件选择器）」')
+      await waitFor(
+        c,
+        `document.querySelector('.editor-main textarea').value.includes('合并测试')`,
+        '假文件已打开（内容进编辑器）',
+      )
+    }
+    /** 把编辑器内容整份换成 `text`（真输入事件，走 React 的 onChange） */
+    const retypeEditor = async (text) => {
+      await evalJs(
+        c,
+        `(() => { const ta = document.querySelector('.editor-main textarea'); ta.focus(); ta.setSelectionRange(0, ta.value.length); return true })()`,
+      )
+      await c.send('Input.insertText', { text })
+      await sleep(700)
+    }
+    const fakeSetText = (text) =>
+      evalJs(c, `(window.__fakeFile.text = ${JSON.stringify(text)}, window.__fakeFile.mtime += 5000, true)`)
+
+    // ---- 场景一：两边改**不同块**（互不重叠）⇒ P2 自动合 + 一键「应用」 ----
+    await openFakeFile()
+    await retypeEditor(BASE_JPS.replace('Q: 1 1 1 | 2 2 2 |', LOCAL_LINE))
+    const localNow = String(await evalJs(c, `document.querySelector('.editor-main textarea').value`))
+    check(
+      'adj966f 夹具自检：本地那行改动已进编辑器（没被自动格式化改掉）',
+      localNow.includes('2 2 9'),
+      localNow.split('\n').slice(4, 7).join(' ／ '),
+    )
+    await fakeSetText(BASE_JPS.replace('Q: 5 5 5 | 6 6 6 |', 'Q: 5 5 5 | 6 6 7 |'))
+    await waitFor(c, `!!document.querySelector('.confirm-bar')`, '轮询发现外部改动 ⇒ 确认条出现', 60)
+    const autoAsk = String(await evalJs(c, `document.querySelector('.confirm-bar-text').textContent`))
+    const autoBtns = await evalJs(c, `[...document.querySelectorAll('.confirm-bar-btn')].map((b) => b.textContent.trim())`)
+    check(
+      'adj966f **P2 自动合**：两边改的块互不重叠 ⇒ 确认条说"已自动合好…互不重叠"，并给出「应用」按钮',
+      autoAsk.includes('互不重叠') && autoBtns.includes('应用'),
+      JSON.stringify({ 文案: autoAsk.slice(0, 34), 按钮: autoBtns }),
+    )
+    await evalJs(
+      c,
+      `[...document.querySelectorAll('.confirm-bar-btn')].find((b) => b.textContent.trim() === '应用').click(), true`,
+    )
+    await sleep(900)
+    const autoFile = String(await evalJs(c, `window.__fakeFile.text`))
+    const autoEditor = String(await evalJs(c, `document.querySelector('.editor-main textarea').value`))
+    check(
+      'adj966f **点「应用」⇒ 合并结果真的写回了文件**（假句柄收到的文本 == 编辑器），且**两边都没丢**（本地那行 + 外部那行都在）',
+      autoFile === autoEditor && autoFile.includes('2 2 9') && autoFile.includes('6 6 7'),
+      JSON.stringify({ 文件尾: autoFile.split('\n').slice(-4).join(' ／ ') }),
+    )
+
+    // ---- 场景二：两边改**同一块** ⇒ 必须逐块选（不许自动合并吞掉），选「用右」再应用 ----
+    await fakeSetText(BASE_JPS) // 假文件恢复成共同祖先那份（同时推进 mtime）
+    await c.send('Page.reload')
+    await sleep(700)
+    await waitFor(
+      c,
+      `typeof window.showOpenFilePicker === 'function' && !!document.querySelector('.editor-main textarea')`,
+      '重载（冲突场）',
+    )
+    await openFakeFile()
+    await retypeEditor(BASE_JPS.replace('Q: 1 1 1 | 2 2 2 |', LOCAL_LINE)) // 本地改第 6 行
+    await fakeSetText(BASE_JPS.replace('Q: 1 1 1 | 2 2 2 |', CONFLICT_LINE)) // 外部改**同一行**（另一种改法）
+    await waitFor(c, `!!document.querySelector('.confirm-bar')`, '轮询发现外部改动（冲突场）', 60)
+    const clashAsk = String(await evalJs(c, `document.querySelector('.confirm-bar-text').textContent`))
+    const clashBtns = await evalJs(c, `[...document.querySelectorAll('.confirm-bar-btn')].map((b) => b.textContent.trim())`)
+    check(
+      'adj966f **冲突**：两边改同一块 ⇒ 确认条走"要你决定"的说法（不是"已自动合好"），且**不给**「应用」快捷按钮',
+      clashAsk.includes('查看差异') && !clashAsk.includes('互不重叠') && !clashBtns.includes('应用'),
+      JSON.stringify({ 文案: clashAsk.slice(0, 34), 按钮: clashBtns }),
+    )
+    await evalJs(
+      c,
+      `[...document.querySelectorAll('.confirm-bar-btn')].find((b) => b.textContent.trim() === '查看差异').click(), true`,
+    )
+    await waitFor(c, `!!document.querySelector('.file-diff')`, '差异框打开')
+    await waitFor(c, `document.querySelectorAll('.diff-bar').length > 0`, '差异框里有块操作条')
+    const barCount = await evalJs(c, `document.querySelectorAll('.diff-bar').length`)
+    const barLabels = await evalJs(c, `[...new Set([...document.querySelectorAll('.diff-bar-btn')].map((b) => b.textContent.trim()))]`)
+    const barTags = String(await evalJs(c, `[...document.querySelectorAll('.diff-bar-tag')].map((t) => t.textContent).join(' ｜ ')`))
+    check(
+      'adj966f 差异框：每个改动块给出「用左 / 用右」（两栏各一条 ⇒ 块数 ×2），冲突块标出"两边都改了同一块"',
+      barCount >= 2 && barCount % 2 === 0 && barLabels.includes('用左') && barLabels.includes('用右') && barTags.includes('冲突'),
+      JSON.stringify({ 操作条: barCount, 按钮: barLabels, 标签: barTags.slice(0, 40) }),
+    )
+    // 点**第一条**操作条里的「用右」（= 那个冲突块改用外部那一版）
+    await evalJs(c, `document.querySelectorAll('.diff-bar')[0].querySelectorAll('.diff-bar-btn')[1].click(), true`)
+    await sleep(250)
+    const onCls = String(
+      await evalJs(c, `document.querySelectorAll('.diff-bar')[0].querySelectorAll('.diff-bar-btn')[1].className`),
+    )
+    check('adj966f 差异框：点「用右」⇒ 该块选中态真的切过去（按钮挂在该块上，不是点了没反应）', onCls.includes('is-on'), onCls)
+    await evalJs(
+      c,
+      `[...document.querySelectorAll('.file-diff-foot button')].find((b) => b.textContent.includes('应用')).click(), true`,
+    )
+    await sleep(900)
+    const clashFile = String(await evalJs(c, `window.__fakeFile.text`))
+    const clashEditor = String(await evalJs(c, `document.querySelector('.editor-main textarea').value`))
+    check(
+      'adj966f 冲突场：选「用右」+「应用（并保存）」⇒ **外部那一版进了文件、本地那一版被换掉**，编辑器与文件一致',
+      clashFile === clashEditor && clashFile.includes('8 8 8') && !clashFile.includes('2 2 9'),
+      JSON.stringify({ 第6行: (clashFile.split('\n')[5] ?? '').trim() }),
+    )
+    check(
+      'adj966f 收口：应用并保存后**确认条与差异框都关掉了**（基准已刷新 ⇒ 不会反复提示）',
+      (await evalJs(c, `!!document.querySelector('.confirm-bar')`)) === false &&
+        (await evalJs(c, `!!document.querySelector('.file-diff')`)) === false,
     )
 
     c.close()

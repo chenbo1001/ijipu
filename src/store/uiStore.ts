@@ -6,7 +6,9 @@ import { create } from 'zustand'
 import { clampEditorFontSize, normalizeFontStack } from '@ijipu/engine'
 import { DEFAULT_THEME, DEFAULT_THEME_MODE, type ThemeMode } from '../brand/themes'
 // adj954：运行环境/设备判据统一走品牌层唯一出处（原先本文件自己写了一份 matchMedia）
-import { isCoarsePointerDevice } from '../brand/env'
+import { getRuntimeEnv, isCoarsePointerDevice } from '../brand/env'
+// adj966g：底栏默认页按**本端能力档**决定（要权限的那一档展开在工作区，PC/插件收起）
+import { hostProfile, shouldOpenWorkspaceDock } from './fileHost'
 // L1「用户个性」：编辑器偏好 + 字体覆盖（不进谱面；详见 docs/SETTINGS-AUDIT.md 分层）
 import { loadEditorFont, loadEditorFontSize, loadFontOverride, saveEditorFont, saveEditorFontSize, saveFontOverride } from './editorPrefs'
 import type { FontOverride } from '@ijipu/engine'
@@ -175,6 +177,29 @@ function detectSystemLight(): boolean {
  */
 function detectTouch(): boolean {
   return isCoarsePointerDevice() || detectNarrow()
+}
+
+/**
+ * adj966g（用户 2026-10-17 口径）：**底栏一开始开在哪个面板**。
+ *
+ * 「需要权限确认」的那一档（手机端 Web / PWA，且能选文件夹）⇒ 一进来就展开在「**工作区**」
+ * （那是它唯一的文件入口：`<input type=file>` 只能"打开=上传"，保存走导出；工作区才是主入口）；
+ * 其余（PC 各档 / 插件 / 无 FSA 的桌面浏览器）⇒ 照旧**收起**、面板留给「问题」
+ * （PC 直接操作系统文件，不需要先把人推到工作区）。
+ *
+ * 判据在 `store/fileHost.ts` 的 `shouldOpenWorkspaceDock`（纯函数、有闸门断言），本文件只负责接线。
+ * 只在**模块初始化时算一次**（面板不持久化 ⇒ 每次会话按本端能力给默认值）。
+ */
+function initialDock(): { open: boolean; panel: DockPanelKey } {
+  try {
+    const w = window as unknown as { showOpenFilePicker?: unknown; showDirectoryPicker?: unknown }
+    const profile = hostProfile(getRuntimeEnv(), typeof w.showOpenFilePicker === 'function')
+    const canPickDir = typeof w.showDirectoryPicker === 'function'
+    if (shouldOpenWorkspaceDock(profile, canPickDir)) return { open: true, panel: 'workspace' }
+  } catch {
+    /* 环境探测失败 ⇒ 退回"收起 + 问题"（最保守的观感） */
+  }
+  return { open: false, panel: 'problems' }
 }
 
 /** adj322：宽/窄屏分界（≤1024px = 窄屏）。matchMedia 支持时用 mq，否则读 innerWidth。
@@ -408,21 +433,39 @@ interface UiState {
 /** adj928：确认条上「查看差异」的数据来源（"本地"内容**延迟取**：用户可能还在编辑） */
 export interface AskDiffSource {
   name: string
+  /**
+   * adj966f：**共同祖先的原文**（基准里保留的那份，`externalChange.getBaselineText`）。
+   * 拿不到（旧基准 / 没有基准）就是 `null` ⇒ 差异框退化为二路逐块采纳（P1）。
+   */
+  baseText: string | null
   /** 点开差异框那一刻的本地内容（当前编辑器里的） */
   localText: () => string
   /** 文件里现在的内容（外部那侧；原始文本，未归一化） */
   externalText: string
+  /**
+   * adj966f（口径④）：**应用合并结果**——差异框底部「应用（并保存）」按下时调它。
+   * 由 `main.tsx` 的 `askLoadExternalChange` 提供（落到 `docStore.applyMergeResult`：
+   * 备份两侧 + 一步历史 + 写回文件 + 刷基准 + 解析器体检）。
+   */
+  onApplyMerge: (merged: string) => void
 }
 
-/** adj928：差异框要显示的内容与两个决定 */
+/** adj928：差异框要显示的内容与几个决定 */
 export interface FileDiffState {
   name: string
   /** 左栏：本地（正在编辑的这份） */
   local: string
   /** 右栏：外部（文件里的新内容） */
   external: string
+  /** adj966f：共同祖先原文（`null` = 没有 ⇒ 只能逐块采纳，不能自动合并） */
+  base: string | null
   onKeepLocal: () => void
   onLoadExternal: () => void
+  /**
+   * adj966f（口径④）：**应用合并结果**——把逐块选择拼出来的文本写回文件并立刻保存
+   * （落到编辑器、刷新基准、跑解析器体检）。
+   */
+  onApplyMerge: (merged: string) => void
 }
 
 /** 确认条的内容与动作（adj724b） */
@@ -436,6 +479,14 @@ export interface AskState {
   onCancel: () => void
   /** adj928：非空则确认条上多一个「查看差异」按钮（打开两栏差异框） */
   diff?: AskDiffSource
+  /**
+   * adj966f（P2）：**额外的第三个动作**（在「查看差异」与主/次按钮之外）。
+   *
+   * 用途只有一个但很关键：两边都改了、且改动**互不重叠**时（`MergePlan.conflicts === 0`），
+   * 合并结果是确定的 ⇒ 确认条上直接给一个「应用」按钮（=`externalChangeCopy.applyMergeShort`），
+   * 用户不必"先点查看差异、再点应用"两跳。文案里写明"以本地为底、未被采纳的外部内容不会写进来"。
+   */
+  extra?: { label: string; run: () => void }
 }
 
 export const useUiStore = create<UiState>()((set) => ({
@@ -667,8 +718,12 @@ export const useUiStore = create<UiState>()((set) => ({
   updateReady: false,
   setUpdateReady: (b) => set({ updateReady: b }),
   // adj462：底部 dock 状态机 + 导出任务指示
-  dockOpen: false,
-  dockPanel: 'problems',
+  //
+  // adj966g（用户口径）：**底栏默认展开「工作区」**只发生在"需要权限确认、拿不到可写句柄"的那一档
+  // （手机端 Web / PWA 且本端能选文件夹）；PC（桌面壳 / 桌面浏览器）与插件照旧**默认收起**
+  // （PC 的习惯是直接操作系统文件，插件由 OB 自己管文件）。判据只有一处：`fileHost.shouldOpenWorkspaceDock`。
+  dockOpen: initialDock().open,
+  dockPanel: initialDock().panel,
   exportJob: null,
   toggleDock: (panel) =>
     set((s) => {
