@@ -196,7 +196,7 @@ import {
   writeTextToHandle,
 } from '../src/store/saveSupport.ts'
 // adj558：工作区"新建目录"端到端验证（createSubdir + readDirEntries 在假 FSA 上闭环）
-import { createSubdir, readDirEntries } from '../src/store/workspace.ts'
+import { createSubdir, readDirEntries, isPathWorkspace } from '../src/store/workspace.ts'
 // adj373：作者署名（品牌 tokens + 关于对话框文案）
 import { brand } from '../src/brand/tokens.ts'
 import { aboutCopy } from '../src/brand/copy.ts'
@@ -23422,6 +23422,28 @@ function runAdj966Tests() {
       persistPermissionCopy.notice('可能').includes('仅此次') &&
       persistPermissionCopy.notice('可能').includes('草稿') &&
       persistPermissionCopy.level === 'info', persistPermissionCopy.notice('可能'))
+
+  /**
+   * adj966：**PC 端逐步退出"工作区"操作方式**（用户口径：打开/保存一律走系统文件）——
+   * 边界判据：`isPathWorkspace` 只认原生目录（`dir`），文库（`vault`）与网页句柄（`fsa`）**不算**，
+   * 所以桌面壳的"不自动接管"闸**不会**误伤插件与网页端。
+   */
+  check('adj966 工作区后端判定：原生目录 = `path`；文库（vault）与网页句柄（fsa）不算 ⇒ 闸只挡桌面壳',
+    isPathWorkspace({ dir: 'D:\\谱' }) &&
+      !isPathWorkspace({ bridge: {} }) &&
+      !isPathWorkspace({ handle: {} as FileSystemDirectoryHandle }) &&
+      !isPathWorkspace(null),
+    JSON.stringify({ 原生目录: isPathWorkspace({ dir: 'D:\\谱' }), 文库: isPathWorkspace({ bridge: {} }) }))
+  const pathGuard = 'if (isPathWorkspace(ws)) {'
+  const adopt = 'useDocStore.setState({ binding: pending, pendingBinding: null })'
+  const guardAt = docSrcText.indexOf(pathGuard)
+  const adoptAt = docSrcText.indexOf(adopt)
+  check('adj966 接线：桌面壳**不再自动接管**原生目录工作区绑定（闸在"转成正式绑定"之前，且带日志）',
+    guardAt > 0 && adoptAt > guardAt && docSrcText.includes('不自动接管原生目录工作区绑定'),
+    JSON.stringify({ 闸位置: guardAt, 采用位置: adoptAt }))
+  check('adj966 负对照：把这道闸删掉 ⇒ 同一条判据判假（它确实在守"先挡后采用"的顺序）',
+    docSrcText.includes(pathGuard) && !docSrcText.replace(pathGuard, '').includes(pathGuard),
+    '')
 }
 
 /**

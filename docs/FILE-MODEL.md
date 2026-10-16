@@ -94,13 +94,12 @@ PC 端与 Web/PWA 端要按**同一套口径**补上，而不是各写一套。
 | **系统文件绑定记基准** | `docStore.ts`：原生路径 / FSA 句柄的**打开**与**保存**（写前在途写、写后刷基准；另存为跟到新文件） | `[163]` 的"接线存在性"判据 + 负对照 |
 | **轮询启动** | `src/main.tsx`：按能力档启动，三种绑定各一适配器；冲突提示收敛为 `askLoadExternalChange()` | `[164]` + `npm run verify:app-ui`（真点） |
 | **Web/PWA 持久权限引导** | 文案 `brand/copy.ts` 的 `persistPermissionCopy`；判据 `fileHost.shouldGuidePersistPermission` | `[163]` 三条（只在 FSA 档 + `prompt` + 未提示过时提示一次，不阻断） |
+| **PC 不再自动接管工作区** | `docStore.resolvePendingBinding()`：`isPathWorkspace(ws)` ⇒ 不接管（只挡 `'path'` 后端，插件 `'vault'` / 网页 `'fsa'` 不动） | `[163]` 三条（后端判定边界 + "闸在采用之前" + 负对照） |
 
 **待做（按顺序）**
 
-1. **PC 默认系统文件、工作区降级为可选**：落点 = 启动时对 `'path'` 后端的工作区绑定**不再自动接管**
-   （`docStore.ts` 末尾的绑定恢复 + `bindingKeyOf`/`pendingBinding`/`resolvePendingBinding` 那条链；
-   `workspace.ts` 的 `createWorkspaceLoadStore`）。插件 `'vault'` 与网页 `'fsa'` **本轮不动**——按"逐步逐端退出"的顺序。
-   完成后：打开/保存一律走系统文件；工作区只剩"显式打开工作区"这一条路（**先降级、不删**）。
+1. ✅ ~~PC 默认系统文件、工作区降级为可选~~（本批完成：启动不再自动接管原生目录工作区；打开/保存走系统文件；
+   工作区只剩"显式打开工作区"这条路，**未删**）。剩余可选项：Dock 面板默认页是否要从"工作区"换掉（观感项，待用户拍板）。
 2. 引导文案的**接线**：首次成功打开 FSA 文件后调用一次；"这台机器提示过"的键按 §七之5 登记到 store 顶部常量。
 3. 插件侧**文案统一**（沿用 `externalChangeCopy`，不另造一套）。
 4. **发布**（版本 + CHANGELOG/ERRORS-LOG + 门 + 发布链）。

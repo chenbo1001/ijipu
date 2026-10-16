@@ -45,6 +45,7 @@ import {
   hasEntry,
   isValidEntryName,
   isWorkspaceAvailable,
+  isPathWorkspace,
   joinPath,
   moveFile,
   normalizeRelPath,
@@ -1786,6 +1787,19 @@ export async function resolvePendingBinding(): Promise<boolean> {
       `[iJipu] 放弃恢复绑定：${joinPath(segs)}（期间已有更新的绑定：${joinPath(now.binding.segs)}）`,
     )
     // 清掉过期的待恢复项，避免它下次又冒出来覆盖
+    useDocStore.setState({ pendingBinding: null })
+    return false
+  }
+  /**
+   * adj966（用户口径）：**PC 端逐步退出"工作区"这种操作方式** —— 打开/保存一律走系统文件，
+   * 所以桌面壳里**不再自动接管**上次的"原生目录工作区"绑定（`'path'` 后端）。
+   *
+   * 为什么只挡 `'path'`：插件嵌入版的"工作区"就是 OB 文库（`'vault'`，用户口径是"默认以文库为主工作区"），
+   * 网页版的目录句柄（`'fsa'`）也还没轮到 —— 按"逐步逐端退出"的顺序，本轮只动桌面壳。
+   * 不自动恢复 ≠ 不能用：在工作区面板里**显式**打开一个文件，绑定照样建立（那条路不经这里）。
+   */
+  if (isPathWorkspace(ws)) {
+    console.info(`[iJipu] 不自动接管原生目录工作区绑定：${joinPath(segs)}（PC 已改为默认直接操作系统文件）`)
     useDocStore.setState({ pendingBinding: null })
     return false
   }
