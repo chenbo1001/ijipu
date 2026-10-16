@@ -23312,6 +23312,40 @@ async function runAdj966bTests() {
   check('adj966b ⑨ 内容**又变了**（不同文本）⇒ 必须再提示（不许把新的外部改动吞掉）',
     f.ext.length === 2 && f.ext[1] === '外部B', JSON.stringify(f.ext))
   f.stop()
+
+  /** adj966c：**写盘期间不查**（避免读句柄把最慢的 commit 拖慢）——门要能被打开/关上 */
+  const g2 = (() => {
+    let paused = true
+    const ticks: (() => void)[] = []
+    let calls = 0
+    const stop = startExternalWatch({
+      mode: () => 'poll',
+      visible: () => true,
+      hasBinding: () => true,
+      io: () => ({ key: 'k', mtimeOf: async () => 1, readText: async () => 'x' }),
+      localText: () => 'y',
+      onExternal: () => {},
+      startInterval: (fn) => {
+        ticks.push(fn)
+        return () => {}
+      },
+      onVisible: () => () => {},
+      probe: async () => {
+        calls += 1
+        return { kind: 'unchanged' as const }
+      },
+      paused: () => paused,
+    })
+    return { ticks, calls: () => calls, setPaused: (v: boolean) => (paused = v), stop }
+  })()
+  g2.ticks[0]?.()
+  await flush()
+  check('adj966c 写盘期间（`paused()` 为真）⇒ 轮询不查（读句柄会拖慢最慢的那段 commit）', g2.calls() === 0, String(g2.calls()))
+  g2.setPaused(false)
+  g2.ticks[0]?.()
+  await flush()
+  check('adj966c 写盘结束后 ⇒ 照常查（门只在该让路时关上）', g2.calls() === 1, String(g2.calls()))
+  g2.stop()
 }
 
 /**

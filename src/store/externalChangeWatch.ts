@@ -79,6 +79,15 @@ export interface WatchDeps {
     mtimeOf: (() => Promise<number | null>) | null
     readText: () => Promise<string>
   }) => Promise<{ kind: 'unchanged' } | { kind: 'external'; externalText: string }>
+  /**
+   * adj966c（用户实报「保存还是比较慢」）：**正在写盘时不要查**。
+   *
+   * 为什么：轮询会真的去读那个文件。Windows 上"读句柄还没放"的时候，写盘的**原子替换（close/commit）**
+   * 可能被拖慢甚至短暂重试 —— 而 commit 恰恰是保存里最慢的一段（历史上实测过 7.1s）。
+   * 写盘期间本来就"必然不同"，查了也没意义 ⇒ 直接让路。
+   * 生产传 `() => getWriteInFlight() !== null`（写盘发出前登记、写成功后刷基准时自动清掉）。
+   */
+  paused?: () => boolean
 }
 
 /** 启动轮询；返回停止函数（组件卸载 / 换绑定时调用） */
@@ -96,6 +105,7 @@ export function startExternalWatch(deps: WatchDeps): () => void {
 
   async function tick(): Promise<void> {
     if (stopped || busy) return
+    if (deps.paused?.()) return // 正在写盘：让路（见 `paused` 的说明）
     if (watchTick(deps.mode(), deps.visible(), deps.hasBinding()) === 'skip') return
     const io = deps.io()
     if (!io) return

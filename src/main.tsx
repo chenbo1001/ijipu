@@ -373,7 +373,7 @@ void (async () => {
     const { hostProfile, decideWatch } = await import('./store/fileHost')
     const { startExternalWatch } = await import('./store/externalChangeWatch')
     const { useDocStore } = await import('./store/docStore')
-    const { baselineKeyOf, bindingKeyOf, probeExternalChange } = await import('./store/externalChange')
+    const { baselineKeyOf, bindingKeyOf, probeExternalChange, getWriteInFlight } = await import('./store/externalChange')
     const { readNativeProbe } = await import('./store/externalOpen')
     const { readWorkspaceText, getWorkspace } = await import('./store/workspace')
     const visible = (): boolean => document.visibilityState === 'visible'
@@ -420,6 +420,8 @@ void (async () => {
         return null
       },
       localText: () => useDocStore.getState().code,
+      // adj966c：写盘期间让路（避免读句柄把"原子替换"那段最慢的 commit 拖得更慢）
+      paused: () => getWriteInFlight() !== null,
       onExternal: (externalText) => {
         const s = useDocStore.getState()
         const name = s.binding?.segs?.[s.binding.segs.length - 1] ?? `${s.fileName}.jps`
