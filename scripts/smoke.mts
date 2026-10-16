@@ -256,7 +256,7 @@ import { foldKeys, TOPBAR_DONATE_KEY, TOPBAR_FIXED_KIDS } from '../src/ui/topbar
 // adj538：桌面壳「外部打开」——多文件取舍是纯逻辑，可在 Node 里直接断言（模块不碰 window 顶层）
 import { pickPrimary, hasShell, type ExternalFile } from '../src/store/externalOpen.ts'
 // adj966：文件宿主能力与降级决策（纯函数 ⇒ 逐端逐档断言，不必真跑三端；口径见 docs/FILE-MODEL.md）
-import { hostIdOf, hostProfile, decideWriteMode, decideWatch, decideWriteGate, shouldGuidePersistPermission } from '../src/store/fileHost.ts'
+import { hostIdOf, hostProfile, decideWriteMode, decideWatch, decideWriteGate, shouldGuidePersistPermission, docStateOf } from '../src/store/fileHost.ts'
 import type { FileHostProfile } from '../src/store/fileHost.ts'
 // adj966b：外部改动轮询编排（定时器/IO 全注入 ⇒ 在 Node 里真跑时序）
 import { EXT_POLL_MS, watchTick, startExternalWatch } from '../src/store/externalChangeWatch.ts'
@@ -23546,6 +23546,29 @@ function runAdj966Tests() {
     JSON.stringify({ 调用次数: (mainSrc.match(/useDocStore\.getState\(\)\.saveFile\(\)/g) ?? []).length }))
   check('adj966 负对照：把「保留本地」那处写回删掉 ⇒ 判据判假（它确实在数这两处写回）',
     mainSrc.includes(keepLocalWrite) && !mainSrc.replaceAll(keepLocalWrite, '').includes(keepLocalWrite), '')
+
+  /**
+   * adj966d（用户要求）：状态栏要能看出"这份是草稿还是已存到文件 / 手里是新版还是旧版"。
+   * 三个事实（绑没绑文件 / 有没有未保存改动 / 文件被外部改了吗）⇒ **一组可枚举状态**，纯函数可断言。
+   */
+  check('adj966d 文档状态：没绑定 ⇒ `draft-only`；绑定后按"外部改动 > 未保存 > 未核对 > 一致"的优先级',
+    docStateOf({ bound: false, dirty: true, verdict: 'external' }) === 'draft-only' &&
+      docStateOf({ bound: true, dirty: false, verdict: 'unchanged' }) === 'bound-clean' &&
+      docStateOf({ bound: true, dirty: true, verdict: 'unchanged' }) === 'bound-dirty' &&
+      docStateOf({ bound: true, dirty: false, verdict: 'unknown' }) === 'bound-unknown',
+    JSON.stringify({
+      草稿: docStateOf({ bound: false, dirty: true, verdict: 'external' }),
+      一致: docStateOf({ bound: true, dirty: false, verdict: 'unchanged' }),
+      未保存: docStateOf({ bound: true, dirty: true, verdict: 'unchanged' }),
+      未核对: docStateOf({ bound: true, dirty: false, verdict: 'unknown' }),
+    }))
+  check('adj966d **外部改动优先于未保存**（用户最需要知道的是"我这份可能过时了"，而不是"我改过几个字"）',
+    docStateOf({ bound: true, dirty: true, verdict: 'external' }) === 'bound-stale' &&
+      docStateOf({ bound: true, dirty: false, verdict: 'external' }) === 'bound-stale',
+    JSON.stringify({
+      有改动且外部改了: docStateOf({ bound: true, dirty: true, verdict: 'external' }),
+      没改动但外部改了: docStateOf({ bound: true, dirty: false, verdict: 'external' }),
+    }))
 }
 
 /**

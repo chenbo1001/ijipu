@@ -188,3 +188,38 @@ export function shouldGuidePersistPermission(p: FileHostProfile, perm: PermState
   if (!p.needsGestureForWrite) return false
   return perm === 'prompt'
 }
+
+/**
+ * **文档状态**（adj966d，用户要求：状态栏要能看出"这份是草稿还是已存到文件 / 手里是新版还是旧版"）。
+ *
+ * 为什么要一个纯函数：这三个问题（绑没绑文件 · 与文件一致吗 · 文件被外部改了吗）分别散在
+ * `fileHandle`/`nativePath`/`binding`、`dirty`、以及 `externalChange` 的基准判据里，
+ * 状态栏各写一套就会漂移。这里把三处事实**收成一组可枚举的状态**，UI 只管照着渲染、判据只管断言这组状态。
+ *
+ * | 状态 | 含义（给用户的说法） |
+ * |---|---|
+ * | `draft-only` | 没绑定文件：现在编辑的是**草稿**（新建 / 粘贴导入 / 示例） |
+ * | `bound-clean` | 已绑定文件，且内容与文件一致（= 已保存） |
+ * | `bound-dirty` | 已绑定文件，但**有未保存改动**（文件里还是旧内容） |
+ * | `bound-stale` | 已绑定文件，且**文件已被外部改动**（手里这份是旧版；提示条与「重新载入」在这里最有用） |
+ * | `bound-unknown` | 已绑定文件，但**还没核对过**（启动恢复那一瞬间；不谎称"一致"） |
+ */
+export type DocStateKind = 'draft-only' | 'bound-clean' | 'bound-dirty' | 'bound-stale' | 'bound-unknown'
+
+/** 由"三处事实"推文档状态（纯函数：`verdict` 来自 `externalChange` 的比对，不用本模块自己算） */
+export function docStateOf(i: {
+  /** 是否绑定了文件（句柄 / 原生路径 / 工作区文件，三者任一） */
+  bound: boolean
+  /** 是否有未保存改动（编辑器与"我们写出去的那份"不一致） */
+  dirty: boolean
+  /** 与文件的比对结论：`'unknown'` = 还没核对过 */
+  verdict: 'unchanged' | 'external' | 'unknown'
+}): DocStateKind {
+  if (!i.bound) return 'draft-only'
+  // ⚠ 顺序要紧：**"文件被外部改了"优先于"我有改动"** ——
+  // 用户最需要知道的是"我这份可能已经过时"，而不是"我改过几个字"
+  if (i.verdict === 'external') return 'bound-stale'
+  if (i.dirty) return 'bound-dirty'
+  if (i.verdict === 'unknown') return 'bound-unknown'
+  return 'bound-clean'
+}
