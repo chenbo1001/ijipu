@@ -26,6 +26,32 @@ import {
 export const EDITOR_FONT_KEY = 'ijipu.editorFont'
 export const EDITOR_FONT_SIZE_KEY = 'ijipu.editorFontSize'
 export const FONT_OVERRIDE_KEY = 'ijipu.fontOverride'
+/**
+ * adj966：网页版 / PWA 的「持久权限」引导**只提示一次**。
+ *
+ * 属 **L1 用户个性**（"这台机器上我已经知道这件事了"），与具体谱面无关 ⇒ 存 localStorage、不进 `# jps-config`。
+ * 文案与判据分别在 `brand/copy.ts` 的 `persistPermissionCopy`、`store/fileHost.ts` 的
+ * `shouldGuidePersistPermission`；这里只负责"记住提示过"。
+ */
+export const PERM_GUIDE_KEY = 'ijipu.permGuideShown'
+
+/** 这台机器上是否已经提示过（存储不可用时按"没提示过"处理：最多多提示一次，不会出错） */
+export function hasShownPermGuide(): boolean {
+  try {
+    return localStorage.getItem(PERM_GUIDE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** 记下"已提示"（存储不可用时静默——引导只是告知，失败不影响任何功能） */
+export function markPermGuideShown(): void {
+  try {
+    localStorage.setItem(PERM_GUIDE_KEY, '1')
+  } catch {
+    /* 存储不可用时静默 */
+  }
+}
 
 /** 历史遗留的等宽字体白名单（旧值可能是任意字体名，仅这些允许继续用） */
 const LEGACY_MONO = new Set(['Consolas', 'Courier New', 'monospace'])

@@ -29,11 +29,13 @@ import {
   type SavePhaseLog,
 } from './saveSupport'
 // adj954：设备判据迁到品牌层唯一出处（原在 store/saveSupport.ts）
-import { isCoarsePointerDevice } from '../brand/env'
+import { isCoarsePointerDevice, getRuntimeEnv } from '../brand/env'
+// adj966：文件宿主能力与降级决策（纯函数；"要不要引导持久权限"也在这里判）
+import { hostProfile, shouldGuidePersistPermission, type PermState } from './fileHost'
 import { useUiStore } from './uiStore'
 // adj724b：`shouldYieldBindingRestore` 用于"给宿主的 openFile 让路"（见文件末尾）
 import { isHostEmbedded, shouldYieldBindingRestore } from './hostBridge'
-import { loadFontOverride, migrateLegacyEditorPrefs } from './editorPrefs'
+import { loadFontOverride, migrateLegacyEditorPrefs, hasShownPermGuide, markPermGuideShown } from './editorPrefs'
 import { normalizePastedSource } from './importSource'
 // adj538：桌面壳的「外部打开」（双击 .jps）——纯网页下这些函数一律惰性/空转，见该模块注释
 import { pickPrimary, writeExternalFile, type ExternalFile } from './externalOpen'
@@ -62,7 +64,7 @@ import {
  *  必须只在用户还未进行任何文件操作时应用，避免它在用户新建/另存为之后才完成，从而把
  *  fileHandle / fileName 覆盖回旧文件（旧值 A）。 */
 let fileStateTouched = false
-import { uiCopy, savePhaseCopy, pasteImportCopy, externalOpenCopy, workspaceCopy, exportCopy } from '../brand/copy'
+import { uiCopy, savePhaseCopy, pasteImportCopy, externalOpenCopy, workspaceCopy, exportCopy, persistPermissionCopy } from '../brand/copy'
 // adj927：外部改动的**基准**（我们最后一次写出去/读进来的内容指纹 + mtime）——见 externalChange.ts
 // adj943：写盘**发出前**还要登记"在途写"（写盘落地与基准刷新之间有窗口，见该文件头说明）
 import { baselineKeyOf, bindingKeyOf, setBaseline, markWriteInFlight } from './externalChange'
@@ -889,6 +891,11 @@ export const useDocStore = create<DocState>()((set, get) => ({
        * 所以基准带 mtime ⇒ 轮询可先走"mtime 快筛"，连内容都不用读（`probeFileChange` ①）。
        */
       setBaseline(bindingKeyOf({ kind: 'handle', name }), code, file.lastModified)
+      /**
+       * adj966：**网页 / PWA 的持久权限引导**（用户口径：把权限选择交给用户）——
+       * 刚打开一个文件时是唯一合适的时机（权限气泡刚出现过）。只提示一次、**不阻断**任何操作。
+       */
+      void guidePersistPermissionOnce(handle, name)
       try {
         localStorage.setItem(DRAFT_KEY, code)
         localStorage.setItem(DRAFT_NAME_KEY, name)
@@ -1386,6 +1393,28 @@ function reportSaved(t0: number, log?: SavePhaseLog, savedName?: string): void {
       `${uiCopy.saveOk}${who} · ${(ms / 1000).toFixed(1)}s${worstSex}${commitStuck ? ` · ${uiCopy.saveSlowCommitHint}` : ''}`,
       commitStuck ? 'warn' : 'ok',
     )
+}
+
+/**
+ * adj966：首次成功打开 FSA 文件后**提示一次**「想免手点保存就选『每次访问都允许』」。
+ *
+ * 判据在 `fileHost.shouldGuidePersistPermission`（只 FSA 档 + 权限仍是 `prompt` + 这台机器没提示过）；
+ * 文案在 `brand/copy.ts` 的 `persistPermissionCopy`。**不阻断**：用户点「仅此次」照样能用
+ * （那时降级为草稿 + 手动保存，且"写盘前必比基准"照样生效）。任何一步失败都静默——它只是告知。
+ */
+async function guidePersistPermissionOnce(handle: FileSystemFileHandle, name: string): Promise<void> {
+  try {
+    if (hasShownPermGuide()) return
+    const fsa = typeof (window as unknown as { showOpenFilePicker?: unknown }).showOpenFilePicker === 'function'
+    const profile = hostProfile(getRuntimeEnv(), fsa)
+    const q = (handle as unknown as { queryPermission?: (d: { mode: string }) => Promise<PermissionState> }).queryPermission
+    const perm: PermState = q ? ((await q.call(handle, { mode: 'readwrite' })) as PermState) : 'granted'
+    if (!shouldGuidePersistPermission(profile, perm, false)) return
+    markPermGuideShown()
+    useUiStore.getState().showNotice(persistPermissionCopy.notice(name), persistPermissionCopy.level)
+  } catch {
+    /* 引导失败不影响打开 */
+  }
 }
 
 /** 「保存」主流程：有可用句柄直接写回；否则走另存为 */

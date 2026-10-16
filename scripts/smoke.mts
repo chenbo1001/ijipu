@@ -23421,7 +23421,7 @@ function runAdj966Tests() {
     persistPermissionCopy.notice('可能').includes('每次访问都允许') &&
       persistPermissionCopy.notice('可能').includes('仅此次') &&
       persistPermissionCopy.notice('可能').includes('草稿') &&
-      persistPermissionCopy.level === 'info', persistPermissionCopy.notice('可能'))
+      persistPermissionCopy.level === 'ok', persistPermissionCopy.notice('可能'))
 
   /**
    * adj966：**PC 端逐步退出"工作区"操作方式**（用户口径：打开/保存一律走系统文件）——
@@ -23444,6 +23444,19 @@ function runAdj966Tests() {
   check('adj966 负对照：把这道闸删掉 ⇒ 同一条判据判假（它确实在守"先挡后采用"的顺序）',
     docSrcText.includes(pathGuard) && !docSrcText.replace(pathGuard, '').includes(pathGuard),
     '')
+
+  /**
+   * adj966：**授权引导的接线**（首次成功打开 FSA 文件后调一次）——
+   * 没有这一步，前面那三条判据就只是"口径存在"，用户永远看不到引导。
+   */
+  const guideCall = 'void guidePersistPermissionOnce(handle, name)'
+  check('adj966 接线：打开 FSA 文件成功后调用一次授权引导；"提示过"的标记在 L1 偏好里（`ijipu.permGuideShown`）',
+    docSrcText.includes(guideCall) &&
+      String(readFileSync('src/store/editorPrefs.ts', 'utf8')).includes("'ijipu.permGuideShown'") &&
+      /export function hasShownPermGuide|export function markPermGuideShown/.test(String(readFileSync('src/store/editorPrefs.ts', 'utf8'))),
+    JSON.stringify({ 调用点: docSrcText.includes(guideCall) }))
+  check('adj966 负对照：把引导调用删掉 ⇒ 接线判据判假（它真的在数这一处调用）',
+    docSrcText.includes(guideCall) && !docSrcText.replace(guideCall, '').includes(guideCall), '')
 }
 
 /**

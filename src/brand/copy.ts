@@ -805,8 +805,8 @@ export const persistPermissionCopy = {
   notice: (name: string) =>
     `「${name}」已打开。想以后**免手点保存**、并在文件被同步端改动时自动发现，` +
     '请在权限气泡里选「每次访问都允许」；选「仅此次」也可以，只是关掉标签页后要重新授权，期间编辑内容先存在草稿里。',
-  /** 提示级别：`info`（不是错误、也不是警告） */
-  level: 'info',
+  /** 提示级别：`ok`（是告知，不是错误也不是警告；`showNotice` 只接受 ok/warn/error） */
+  level: 'ok',
 } as const
 
 /**
