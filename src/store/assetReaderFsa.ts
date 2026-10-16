@@ -17,7 +17,8 @@
  *
  * ## 边界
  *
- *  · 只认 `base.kind === 'workspace'`（桌面端绝对路径那条不归它管 ⇒ 返回 `null`，让上层给提示）；
+ *  · 只认"有目录句柄"的两档（`workspace` = 工作区根、`picked` = adj969 用户额外授权的"本谱所在目录"）；
+ *    桌面端绝对路径那条不归它管 ⇒ 返回 `null`，让上层给提示；
  *  · **未授权**（`NotAllowedError`）要说清怎么办 —— 授权申请必须在用户手势内，读图不是手势，
  *    这里只能如实报错，不假装"图不在"（两者用户该做的事完全不同）；
  *  · `..` 这类上跳段直接拒绝（`getDirectoryHandle` 本身不接受 `..`，但仍显式挡一道）。
@@ -32,20 +33,23 @@ import { splitAssetPath } from '@ijipu/engine'
  * 用到的能力都来自传入的句柄，**本文件不碰任何 DOM 全局** ⇒ 冒烟里能用假句柄直接断言。
  */
 export const fsaAssetReader: AssetReader = async (path, base, opts = { link: false }) => {
-  if (base.kind !== 'workspace') return null
+  const root = rootDirOf(base)
+  if (root === null) return null
   // adj965（EP-09）：**双链 `[[…]]` 不归网页版管**（那是 Obsidian 的链接语义，只有插件能解）
   // ⇒ 返回 null（上层报"未找到图片"），不要拿链接原文当相对路径去试
   if (opts.link) return null
-  const root = base.rec.handle as FileSystemDirectoryHandle | undefined
-  if (root === undefined) return null
 
   const { dirs, name } = splitAssetPath(path)
   if (name === '' || dirs.some((d) => d === '..')) return null
 
   try {
-    // 先下钻到**本谱所在的目录**（`segs` 末段是 `.jps` 自己），再进图片自己的子目录
+    // 先下钻到**本谱所在的目录**，再进图片自己的子目录。
+    // ⚠ 两档的"本谱所在目录"求法不同：
+    //   · `workspace`：根 + `segs`（末段是 `.jps` 自己）⇒ 要去掉末段
+    //   · `picked`（adj969）：用户授权的那**就是**本谱所在目录 ⇒ 一个字都不用加
+    const noteDirs = base.kind === 'workspace' ? base.segs.slice(0, -1) : []
     let dir: FileSystemDirectoryHandle = root
-    for (const seg of [...base.segs.slice(0, -1), ...dirs]) {
+    for (const seg of [...noteDirs, ...dirs]) {
       dir = await dir.getDirectoryHandle(seg)
     }
     const fileHandle = await dir.getFileHandle(name)
@@ -59,9 +63,23 @@ export const fsaAssetReader: AssetReader = async (path, base, opts = { link: fal
   } catch (e) {
     // 未授权与"文件不在"是两件事，用户要做的事也不同 ⇒ 分开说（不静默、也不误报）
     if (e instanceof Error && e.name === 'NotAllowedError') {
-      throw new Error('工作区未授权：请先在「工作区」面板里重新授权这个目录')
+      // adj969：两档的"去哪儿重新授权"不是一个地方（工作区面板 / 设置页签），别把用户指错门
+      throw new Error(
+        base.kind === 'picked'
+          ? '本谱所在的文件夹未授权：请在「设置 → 水印 / 背景」里重新点「授权所在文件夹」'
+          : '工作区未授权：请先在「工作区」面板里重新授权这个目录',
+      )
     }
     if (e instanceof Error && e.name === 'NotFoundError') return null
     throw e
   }
 }
+
+/** 这个基准有没有"目录句柄"可用（没有 ⇒ 不归本通道管，交给别的通道/上层提示） */
+function rootDirOf(base: Parameters<AssetReader>[1]): FileSystemDirectoryHandle | null {
+  if (base.kind === 'workspace') return (base.rec.handle as FileSystemDirectoryHandle | undefined) ?? null
+  // adj969：用户额外授权的"本谱所在目录"
+  if (base.kind === 'picked') return base.dir
+  return null
+}
+

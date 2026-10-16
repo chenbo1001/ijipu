@@ -19,7 +19,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
-import { clampEditorFontSize, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE, nonDefaultConfigKeys, SCORE_FONT_OPTIONS, SEGMENT_ROW_GAP_DEFAULT } from '@ijipu/engine'
+import { clampEditorFontSize, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE, localAssetRefs, nonDefaultConfigKeys, SCORE_FONT_OPTIONS, SEGMENT_ROW_GAP_DEFAULT } from '@ijipu/engine'
 // adj629x：恢复默认的草稿**整份替换**（纯函数，见该文件头的踩坑说明）
 import { draftAfterReset } from './pageConfigReset'
 import { THEMES, type ThemeMode } from '../brand/themes'
@@ -240,6 +240,27 @@ export function PageConfigDialog({
   const [cliStatus, setCliStatus] = useState<CliPathStatus | null>(null)
   const [cliBusy, setCliBusy] = useState(false)
   const [cliNote, setCliNote] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  /**
+   * adj969（**用户实报**）：网页 / PWA 用**文件方式**打开的谱，浏览器不给文件句柄的父目录
+   * ⇒ 相对路径的背景图 / 水印图读不到。这里就地给一个「授权所在文件夹」按钮
+   * （点了会弹 `showDirectoryPicker`，必须由用户手势触发 ⇒ 只能放在按钮里，不能在后台自动弹）。
+   */
+  const assetFile = useDocStore((s) => s.fileHandle)
+  const [authBusy, setAuthBusy] = useState(false)
+  const authAssetDir = (): void => {
+    setAuthBusy(true)
+    void (async () => {
+      try {
+        const { requestAssetDirNow, refOfHandle } = await import('../store/assetDirAuth')
+        // "需不需要目录"的判据与 `App.tsx` 用同一份（引擎的 `localAssetRefs`），
+        // 判的是**面板正在显示的值** `draft`（用户刚把路径填进去、还没保存设置也应能授权）
+        await requestAssetDirNow(localAssetRefs(draft).length > 0, await refOfHandle(assetFile))
+      } finally {
+        setAuthBusy(false)
+      }
+    })()
+  }
+
   const refreshCliStatus = async () => {
     const r = await readCliPathStatus()
     if (r.ok) {
@@ -345,6 +366,19 @@ export function PageConfigDialog({
    */
   const overlaySnap = useSyncExternalStore(subscribeOverlayAssets, getOverlaySnapshot)
   const overlayErrors = (prefix: string): string[] => overlaySnap.errors.filter((e) => e.startsWith(prefix))
+  /**
+   * adj969：缺"资源目录"授权时的**处置按钮**（两个页签都用同一份）。
+   *
+   * 为什么值得单独给按钮：那条错误（"浏览器不提供文件所在目录…"）用户看懂了也**做不了什么**，
+   * 必须有一个点了就弹选择器的入口；否则等于把用户堵在一句提示上。
+   */
+  const assetDirAuthNote = overlaySnap.needsDirAuth ? (
+    <div className="pcfg-note pcfg-asset-err">
+      <button className="btn" disabled={authBusy} onClick={authAssetDir}>
+        {overlayCopy.authDirButton}
+      </button>
+    </div>
+  ) : null
   /** 当前子页签里"非默认"的项数——>0 才在面板末尾给出图例（没标记时不占地方） */
   const tabNonDefaultCount = (TAB_CONFIG_KEYS[tab] ?? []).filter((k) => nonDefaultKeys.has(k)).length
 
@@ -993,6 +1027,8 @@ export function PageConfigDialog({
                 ⚠ {e}
               </div>
             ))}
+            {/* adj969：缺"资源目录"授权时给按钮（换个文件夹就行，别只留一句提示） */}
+            {assetDirAuthNote}
           </>
         )
       /**
@@ -1046,6 +1082,8 @@ export function PageConfigDialog({
                 ⚠ {e}
               </div>
             ))}
+            {/* adj969：同上（背景侧） */}
+            {assetDirAuthNote}
           </>
         )
     }

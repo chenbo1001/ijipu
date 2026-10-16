@@ -31,9 +31,14 @@ export interface OverlaySnapshot {
   assets?: RenderAssets
   /** 解析失败的说明（中文、能照着做）；空数组 = 一切正常 */
   errors: string[]
+  /**
+   * adj969：这些失败里**至少有一条"只差一次文件夹授权"**（网页 / PWA 用文件句柄打开的谱）。
+   * 设置页签据此就地渲染「授权所在文件夹」按钮（再授权一次就能好，比让用户自己猜强）。
+   */
+  needsDirAuth: boolean
 }
 
-const EMPTY: OverlaySnapshot = { errors: [] }
+const EMPTY: OverlaySnapshot = { errors: [], needsDirAuth: false }
 let snapshot: OverlaySnapshot = EMPTY
 const listeners = new Set<() => void>()
 
@@ -53,6 +58,7 @@ function publish(next: OverlaySnapshot): void {
   const same =
     snapshot.errors.length === next.errors.length &&
     snapshot.errors.every((e, i) => e === next.errors[i]) &&
+    snapshot.needsDirAuth === next.needsDirAuth &&
     (snapshot.assets === next.assets ||
       (snapshot.assets === undefined && next.assets === undefined) ||
       (snapshot.assets !== undefined &&
@@ -99,15 +105,23 @@ export async function syncOverlayAssets(
   ])
   const errors: string[] = []
   const next: RenderAssets = {}
+  /** adj969：有没有"只差一次文件夹授权"的失败（设置页签据此给按钮） */
+  let needsDirAuth = false
   if (wmR !== null) {
     if (wmR.ok) next.wm = { href: wmR.href, w: wmR.w, h: wmR.h }
-    else errors.push(`${C.wmErrorPrefix}${wmR.error}`)
+    else {
+      errors.push(`${C.wmErrorPrefix}${wmR.error}`)
+      if (wmR.needDir === true) needsDirAuth = true
+    }
   }
   if (bgR !== null) {
     if (bgR.ok) next.bg = { href: bgR.href, w: bgR.w, h: bgR.h }
-    else errors.push(`${C.bgErrorPrefix}${bgR.error}`)
+    else {
+      errors.push(`${C.bgErrorPrefix}${bgR.error}`)
+      if (bgR.needDir === true) needsDirAuth = true
+    }
   }
-  publish({ ...(Object.keys(next).length > 0 ? { assets: next } : {}), errors })
+  publish({ ...(Object.keys(next).length > 0 ? { assets: next } : {}), errors, needsDirAuth })
 }
 
 /**
@@ -141,6 +155,16 @@ export function installAssetReader(reader: AssetReader | null = desktopAssetRead
 const desktopAssetReader: AssetReader = async (path, base, opts = { link: false }) => {
   // adj965（EP-09）：**双链 `[[…]]` 不归桌面端管**（那是 Obsidian 的链接语义，只有插件能解）
   if (opts.link) return null
+  /**
+   * adj969：**桌面端也有"文件方式打开"这一档**——PC 上「打开…」走的是 `showOpenFilePicker`
+   * （`TopBar.runOpenSmart` 对 PC 各档一律走系统选择器），于是 `nativePath` 为空、只剩一个
+   * 拿不到父目录的文件句柄。WebView2 同样有目录句柄与 `showDirectoryPicker`，
+   * 所以这一档**复用网页版那条通道**（同一套逐级下钻）。
+   */
+  if (base.kind === 'picked') {
+    const { fsaAssetReader } = await import('./assetReaderFsa')
+    return fsaAssetReader(path, base, opts)
+  }
   // 动态 import：不在桌面壳里时不必把 `brand/env` 拉进这条链
   const { tauriInvoke } = await import('../brand/env')
   if (base.kind === 'native') {

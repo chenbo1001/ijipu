@@ -4,7 +4,7 @@
  */
 import './localStorageMigration'
 import { create } from 'zustand'
-import { parseJps, defaultPageConfig, applyFontOverride, mergeJpsConfig, mergeConfigEdits, writeJpsConfig, layoutScore, renderScoreToSvg } from '@ijipu/engine'
+import { parseJps, defaultPageConfig, applyFontOverride, mergeJpsConfig, mergeConfigEdits, writeJpsConfig, layoutScore, renderScoreToSvg, localAssetRefs } from '@ijipu/engine'
 import type { PageConfig, ParseResult } from '@ijipu/engine'
 // adj647：宿主字体实测（打印与预览共用同一份；见 preview/fontMeta.ts）
 import { measureFontMeta } from '../preview/fontMeta'
@@ -18,6 +18,8 @@ import {
   type HistoryState,
 } from '../editor/history'
 import { saveFileHandle, loadFileHandle } from './fileHandleDb'
+// adj969：文件方式打开的谱 ⇒ 相对路径的图要靠"额外授权一次所在文件夹"（见该模块文件头）
+import { askAssetDirOnOpen, refOfFile, type AssetFileRef } from './assetDirAuth'
 import {
   classifySaveError,
   createSavePhaseLog,
@@ -906,15 +908,19 @@ export const useDocStore = create<DocState>()((set, get) => ({
     let name = ''
     let code = ''
     let mtime: number | null = null
+    /** adj969：这份文件的身份（两条档都能给：句柄读到的 `File`，或拖进来的 `File`） */
+    let fileRef: AssetFileRef | null = null
     try {
       if (handle) {
         const f = await handle.getFile()
         name = fileBaseName(f.name)
         code = await f.text()
         mtime = f.lastModified
+        fileRef = refOfFile(f)
       } else if (file) {
         name = fileBaseName(file.name)
         code = await file.text()
+        fileRef = refOfFile(file)
       } else {
         return false
       }
@@ -927,9 +933,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
     const run = (): void =>
       adoptDoc(
         handle
-          ? { name, code, handle, mtime, notice: `${uiCopy.openOkPrefix}${name}.jps` }
+          ? { name, code, handle, mtime, fileRef, notice: `${uiCopy.openOkPrefix}${name}.jps` }
           : // 拿不到可写句柄 ⇒ 说清"保存请用另存为"，别让用户以为能存回原文件
-            { name, code, notice: dropOpenCopy.uploadedReadOnly(name), noticeKind: 'warn' },
+            { name, code, fileRef, notice: dropOpenCopy.uploadedReadOnly(name), noticeKind: 'warn' },
       )
     /**
      * 拖入是**替换当前文档**的动作：有未保存修改就先问一句（与「新建」同一套确认条，
@@ -965,7 +971,15 @@ export const useDocStore = create<DocState>()((set, get) => ({
       const code = await file.text()
       const name = fileBaseName(file.name)
       // adj968：装载 + 记基准（带 mtime）+ 句柄持久化 + 持久权限引导都收在 `adoptDoc`（与"拖入"同一份实现）
-      adoptDoc({ name, code, handle, mtime: file.lastModified, notice: `${uiCopy.openOkPrefix}${name}.jps` })
+      adoptDoc({
+        name,
+        code,
+        handle,
+        mtime: file.lastModified,
+        // adj969：这份文件的身份（拿它去核对"用户授权的文件夹里是不是就是这一份"）
+        fileRef: refOfFile(file),
+        notice: `${uiCopy.openOkPrefix}${name}.jps`,
+      })
       // adj370：打开成功给出明确反馈（含实际文件名与句柄名），避免"打开了没打开"无从判断
       console.info(`[iJipu] 打开文件：name=${name} handle=${handle.name}`)
       return true
@@ -1673,6 +1687,14 @@ function adoptDoc(input: {
   handle?: FileSystemFileHandle | null
   /** 句柄那次读到的 `lastModified`（走 mtime 快筛）；没有就 `null` */
   mtime?: number | null
+  /**
+   * adj969：这份 `.jps` 自己的**身份**（真实文件名 + 字节数 + 修改时间）。
+   *
+   * 为什么要它：网页 / PWA 里浏览器**不给文件句柄的父目录** ⇒ 相对路径的背景图读不到，
+   * 唯一出路是让用户额外授权一次所在文件夹；而"用户选的目录对不对"只能靠
+   * **同名 + 同字节数 + 同修改时间**来反证（见 `store/assetDirAuth.ts`）。
+   */
+  fileRef?: AssetFileRef | null
   notice: string
   noticeKind?: 'ok' | 'warn' | 'error'
 }): void {
@@ -1702,11 +1724,12 @@ function adoptDoc(input: {
   saveDraftSrc(null)
   // adj212：打开文件时同步 pageConfig——此前漏了 mergeJpsConfig，
   // 其它浏览器打开带 # jps-config 的谱时页面设置仍是打开前的旧值
+  const cfg = resolveConfig(code)
   setDocState({
     code,
     fileName: name,
     parseResult: parseJps(code),
-    pageConfig: resolveConfig(code),
+    pageConfig: cfg,
     dirty: false,
     fileHandle: handle,
     // adj538：改用对话框打开 ⇒ 与"外部路径"解绑（两者互斥，否则保存会写回上一个外部文件）
@@ -1723,6 +1746,19 @@ function adoptDoc(input: {
     lastEditAt: 0,
     sel: { start: 0, end: 0 },
   })
+  /**
+   * adj969（**用户 2026-10-17 拍板**）：这份谱若写了**相对本谱的**背景图 / 水印图，而当前没有
+   * 可用的"基准目录"，就**立刻问一句**"要不要授权它所在的文件夹"。
+   *
+   * 为什么必须在这里、而不是在别处：
+   *  · 要读了配置才知道"这份谱到底需不需要目录" ⇒ 只能在装载之后；
+   *  · 但**不能在这里直接弹文件夹对话框**：`showOpenFilePicker()` 已经把"用户手势"用掉了
+   *    （`verify:app-ui` 真浏览器实测 `navigator.userActivation.isActive === false`）⇒ 直接弹必被拒。
+   *    所以走"**应用内先问、用户点那一下再弹**"（见 `assetDirAuth.askAssetDirOnOpen` 的说明）；
+   *  · 收在这一处：三条打开入口（对话框 / 拖入 / input 降级）都汇到本函数 ⇒ 不必各写一遍。
+   * 不 await：装载动作是同步返回的，问那一句是"后台再问"，用户点「暂不」也不影响已经打开的文档。
+   */
+  void askAssetDirOnOpen(localAssetRefs(cfg).length > 0, input.fileRef ?? null)
   useUiStore.getState().showNotice(input.notice, input.noticeKind ?? 'ok')
 }
 
@@ -1779,7 +1815,8 @@ function openFileViaInput(): Promise<boolean> {
         const code = await file.text()
         const name = fileBaseName(file.name)
         // adj968：与"拖入"共用同一份装载实现（差别只是这里拿不到可写句柄 ⇒ 不绑定）
-        adoptDoc({ name, code, notice: uiCopy.openFallbackNotice, noticeKind: 'warn' })
+        // adj969：`fileRef` 仍要给——图是相对路径的话，用户还能额外授权一次所在文件夹
+        adoptDoc({ name, code, fileRef: refOfFile(file), notice: uiCopy.openFallbackNotice, noticeKind: 'warn' })
         finish(true)
       } catch {
         finish(false)

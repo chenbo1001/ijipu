@@ -66,6 +66,51 @@ export async function loadFileHandle(): Promise<FileSystemFileHandle | null> {
 }
 
 /**
+ * adj969（**用户实报**："文件方式"打开的谱里相对路径图找不到）：**资源目录句柄**的持久化。
+ *
+ * 为什么必须记住：网页层**拿不到文件句柄的父目录**（Web 的硬限制），所以"相对本谱的路径"
+ * 只能靠用户**额外授权一次所在文件夹**（`showDirectoryPicker`）。若每次打开都要重选，
+ * 这个功能等于没有（用户口径：把"文件夹句柄 + 文件句柄"一起记住）。
+ *
+ * 与工作区记录（`workspace`）分开存：两者语义不同（工作区是"以某个根为界的一个域"，
+ * 这里只是"某份谱所在的那个目录"），混在一个键里会让"换工作区"把授权连带冲掉。
+ */
+const ASSET_DIR_KEY = 'assetDir'
+
+/** 保存"资源目录"句柄（null 清除） */
+export async function saveAssetDir(handle: FileSystemDirectoryHandle | null): Promise<void> {
+  try {
+    const db = await openDb()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite')
+      tx.objectStore(STORE).put(handle, ASSET_DIR_KEY)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+    db.close()
+  } catch {
+    /* IndexedDB 不可用时静默（退化为每次都要重选） */
+  }
+}
+
+/** 读"资源目录"句柄（无则 null）。⚠ 句柄能读出来 ≠ 还有权限，用之前必须核对（见 `assetDirAuth.ts`） */
+export async function loadAssetDir(): Promise<FileSystemDirectoryHandle | null> {
+  try {
+    const db = await openDb()
+    const val = await new Promise<FileSystemDirectoryHandle | null>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly')
+      const req = tx.objectStore(STORE).get(ASSET_DIR_KEY)
+      req.onsuccess = () => resolve((req.result as FileSystemDirectoryHandle | undefined) ?? null)
+      req.onerror = () => reject(req.error)
+    })
+    db.close()
+    return val
+  } catch {
+    return null
+  }
+}
+
+/**
  * adj540：**工作区目录**（Android/移动端「选一个文件夹当工作区」）。
  *
  * 同一个库同一个 store，只是换一个键——目录句柄与文件句柄一样是内存对象，只能存 IndexedDB。

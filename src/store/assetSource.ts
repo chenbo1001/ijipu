@@ -55,6 +55,12 @@ export interface AssetFailure {
   ok: false
   /** 给用户看的一句话（含"该怎么办"） */
   error: string
+  /**
+   * adj969：这条失败**是因为缺一个"资源目录"授权**（用户实报的那条）⇒ 调用方据此在设置页签里
+   * 就地给一个「授权…」按钮（`overlaySnapshot.needsDirAuth`）。
+   * 与「图不在」「类型不对」分开：那两条再授权也没用，给了按钮只会让人白点一次。
+   */
+  needDir?: true
 }
 
 /** 解析成功：引擎要的三件东西 + 供缓存/提示用的元信息 */
@@ -73,6 +79,24 @@ export type AssetBase =
   | { kind: 'native'; dir: string }
   /** 网页版 / 插件：工作区根 + 该 `.jps` 的工作区相对段（`segs` 末段是文件名） */
   | { kind: 'workspace'; rec: WorkspaceRecord; segs: readonly string[] }
+  /**
+   * adj969（**用户实报**："文件方式"打开的谱里相对路径图找不到）：网页 / PWA 用**文件句柄**
+   * 打开的谱，用户**额外授权了它所在的文件夹**（`showDirectoryPicker`）⇒ 这个句柄就是"本谱所在的目录"，
+   * 直接当基准（不再像工作区那样还要按 `segs` 下钻）。
+   *
+   * 为什么必须多这一档：浏览器**不给文件句柄的父目录**（这是 Web 的硬限制，不是我们没写），
+   * 于是此前"文件方式打开"的谱一律落到 `{kind:'none'}` ⇒ 相对路径图必然解析失败（E-2026-*）。
+   * 句柄的来源与核对见 `store/assetDirAuth.ts`（句柄存 IndexedDB，跨会话复用；每次用之前
+   * 都要用"同名 + 同字节数 + 同修改时间"核对一遍，避免把另一个目录里同名的谱当成这一份）。
+   */
+  | { kind: 'picked'; dir: FileSystemDirectoryHandle; id: string }
+  /**
+   * adj969：**有文件、但没有它所在的目录**（用户还没授权，或拒绝了）。
+   *
+   * 与 `{kind:'none'}`（未保存的新谱）分开：两者给用户的**处置完全不同**
+   * —— 这一档要说"授权一下那个文件夹就行"（并给按钮），而不是"请先保存本谱"。
+   */
+  | { kind: 'fileNoDir'; name: string }
   /** 没有基准（新建未保存、粘贴导入等）⇒ 相对路径无从解析，明确报错 */
   | { kind: 'none' }
 
@@ -140,7 +164,12 @@ function cacheKeyOf(path: string, base: AssetBase): string {
       ? `n:${base.dir}`
       : base.kind === 'workspace'
         ? `w:${base.rec.id}:${base.segs.slice(0, -1).join('/')}`
-        : 'x'
+        : base.kind === 'picked'
+          ? // adj969：目录句柄**没有可打印的身份**（`name` 只是末级目录名，两个同名目录会撞）
+            // ⇒ 由 `assetDirAuth` 在启用那一刻发一个会话内 id（`d1`/`d2`…）当身份。
+            // 少了它，用户在 A 目录看过的图会被 B 目录同名路径**静默复用**（假绿）。
+            `p:${base.id}`
+          : 'x'
   return `${where}|${path}`
 }
 
@@ -167,6 +196,11 @@ export async function resolveAsset(raw: string, base: AssetBase): Promise<Resolv
   }
   if (base.kind === 'none') {
     return { ok: false, error: C.errNotSaved }
+  }
+  // adj969：**有文件、没有它所在的目录**（网页 / PWA 用文件句柄打开的谱）⇒ 说清"授权一下就行"，
+  // 并带上 `needDir` 让设置页签就地给按钮（不是"请先保存本谱"那种答非所问的话）
+  if (base.kind === 'fileNoDir') {
+    return { ok: false, error: C.errNeedDirAuth(base.name), needDir: true }
   }
   if (reader === null) {
     return { ok: false, error: C.errNoChannel }

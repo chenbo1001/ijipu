@@ -1147,6 +1147,227 @@ async function main() {
         (await evalJs(c, `!!document.querySelector('.confirm-bar')`)) === false,
     )
 
+    // ============ adj969：**文件方式打开的谱**里相对路径背景图（真授权一次文件夹） ============
+    //
+    // 用户实报："拖入 / 文件选择器打开的 .jps 里，文件方式的相对路径背景图找不到。"
+    // 根因：浏览器**不给文件句柄的父目录**（Web 的硬限制）⇒ 基准算不出来 ⇒ 相对路径解析必然失败，
+    // 而且失败只在「设置 → 水印/背景」页签里显示（怕每次重排刷屏）⇒ 用户等于没有提示。
+    //
+    // 为什么这段必须真点（源码级断言守不住）：`showDirectoryPicker()` **必须在用户手势里**调，
+    // 而"打开动作那个手势还在不在"只有真浏览器 + 真点击能回答 —— 这里用
+    // `navigator.userActivation.isActive` 在假选择器里**当场记下**，证明我们确实是在手势里弹的。
+    //
+    // 三段：
+    //  ① 打开 ⇒ **自动弹一次**文件夹选择器（且在手势里）；用户选了个**不含这份谱的目录** ⇒ 不采信；
+    //  ② 负对照：此时预览里**没有**背景层（假目录不采信 ⇒ 绝不拿它去读同名图）；
+    //  ③ 去「设置 → 背景」页签点「授权所在文件夹」⇒ 这次选对 ⇒ **背景图真的画出来了**，提示也收掉了。
+    console.log('[verify-app-ui] adj969：文件方式打开的谱 + 相对路径背景图（真授权）')
+    const ASSET_JPS =
+      'V: 1.0\nB: 授权测试\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\n# jps-config:{"bgEnabled":true,"bgImage":"img/底纹.png"}\n'
+    /** 1×1 透明 PNG（真图片字节 ⇒ 走 `Image`/`decode` 那条真解码路径） */
+    const TINY_PNG_B64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=='
+    await c.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `(() => {
+        const JPS = ${JSON.stringify(ASSET_JPS)}
+        const PNG = Uint8Array.from(atob(${JSON.stringify(TINY_PNG_B64)}), (ch) => ch.charCodeAt(0))
+        const MTIME = 424242
+        window.__assetProbe = { dirCalls: 0, activation: [], picked: [] }
+        // 假"文件句柄"：getFile() 给出与 .jps 完全一致的 name/size/lastModified
+        const jpsHandle = {
+          kind: 'file',
+          name: '授权测试.jps',
+          getFile: async () => new File([JPS], '授权测试.jps', { lastModified: MTIME }),
+          createWritable: async () => ({ write: async () => {}, close: async () => {}, abort: async () => {} }),
+        }
+        const imgHandle = {
+          kind: 'file',
+          name: '底纹.png',
+          getFile: async () => ({ arrayBuffer: async () => PNG.buffer, type: 'image/png', lastModified: 1 }),
+        }
+        // 假目录：correct = 本谱所在目录（含同名 .jps + img/底纹.png）；wrong = 别的目录
+        const dir = (name, children) => ({
+          kind: 'directory',
+          name,
+          getDirectoryHandle: async (n) => {
+            const c = children[n]
+            if (c === undefined) throw Object.assign(new Error('不在'), { name: 'NotFoundError' })
+            return c
+          },
+          getFileHandle: async (n) => {
+            const c = children[n]
+            if (c === undefined) throw Object.assign(new Error('不在'), { name: 'NotFoundError' })
+            return c
+          },
+        })
+        window.__assetDirs = {
+          correct: dir('正确的目录', { '授权测试.jps': jpsHandle, img: dir('img', { '底纹.png': imgHandle }) }),
+          wrong: dir('错误的目录', { '别的谱.jps': jpsHandle }),
+        }
+        window.showOpenFilePicker = async () => [jpsHandle]
+        /**
+         * 第 1 次（打开时自动弹的那次）返回**错的目录**（用来做负对照），之后返回对的目录。
+         * 同时把"弹出时用户手势还在不在"记下来。
+         */
+        window.showDirectoryPicker = async (opts) => {
+          window.__assetProbe.dirCalls += 1
+          window.__assetProbe.activation.push(!!(navigator.userActivation && navigator.userActivation.isActive))
+          const pick = window.__assetProbe.dirCalls === 1 ? 'wrong' : 'correct'
+          window.__assetProbe.picked.push(pick)
+          return window.__assetDirs[pick]
+        }
+      })()`,
+    })
+    await c.send('Page.reload')
+    await sleep(800)
+    await waitFor(
+      c,
+      `typeof window.showDirectoryPicker === 'function' && !!document.querySelector('.editor-main textarea')`,
+      '重载后：假文件/文件夹选择器就位 + 应用首屏',
+    )
+    // ① 走真实菜单打开那个假文件
+    await evalJs(c, `document.querySelector('.topbar-hamburger-btn').click(), true`)
+    await waitFor(c, `!!document.querySelector('.topbar-hamburger.open .menu-dropdown')`, '菜单打开')
+    const opened = await evalJs(
+      c,
+      `(() => {
+         const el = [...document.querySelectorAll('.topbar-hamburger.open .menu-entry')].find((x) => x.textContent.includes('系统文件选择器'))
+         if (!el) return 'no-entry'
+         el.click()
+         return 'ok'
+       })()`,
+    )
+    if (opened !== 'ok') throw new Error('菜单里找不到「打开（系统文件选择器）」')
+    await waitFor(c, `document.querySelector('.editor-main textarea').value.includes('授权测试')`, '假文件已打开')
+    // 打开后**立刻问一句**（顶部确认条）——注意：**不能**在这里直接弹文件夹对话框，
+    // 因为 `showOpenFilePicker()` 已经把这次"用户手势"用掉了（下面那条断言就是量这个的：
+    // 点确认条按钮时 `userActivation.isActive` 必须为真，而打开动作之后它已经是 false）。
+    await waitFor(c, `!!document.querySelector('.confirm-bar')`, '打开后立刻在确认条里问一句', 40)
+    const dirAskText = String(await evalJs(c, `document.querySelector('.confirm-bar-text')?.textContent ?? ''`))
+    const dirAskBtns = await evalJs(c, `[...document.querySelectorAll('.confirm-bar-btn')].map((b) => b.textContent.trim())`)
+    check(
+      'adj969 打开后**立刻问一句**：确认条说明"文件方式打开的谱 + 浏览器不给目录"，并给出「授权所在文件夹」按钮',
+      dirAskText.includes('相对路径的图片') && dirAskText.includes('浏览器不提供文件所在目录') && dirAskBtns.includes('授权所在文件夹'),
+      JSON.stringify({ 文案: dirAskText.slice(0, 40), 按钮: dirAskBtns }),
+    )
+    const probe0 = await evalJs(c, `JSON.parse(JSON.stringify(window.__assetProbe))`)
+    check(
+      'adj969 夹具自检：**打开动作本身没有弹过任何文件夹对话框**（否则下面"点按钮那一下才有手势"是空跑）',
+      probe0?.dirCalls === 0,
+      JSON.stringify(probe0),
+    )
+    /**
+     * 真点一个按钮（走 CDP 原生鼠标路径）。
+     *
+     * ⚠ 这里**必须**用真鼠标：`el.click()` 是**合成点击**，**不会产生用户手势**
+     * （本轮实测：合成点击时 `navigator.userActivation.isActive === false`）。本段的判据正是
+     * "点按钮那一下有没有手势"，用合成点击等于把判据自己做成恒假。
+     *
+     * ⚠ 还必须**先把元素滚进视口**：设置面板在底栏 dock 里、内容可滚动，而"背景"页签底部那个
+     * 按钮很可能落在视口外（`getBoundingClientRect().top > 视口高`）—— 合成点击照样能触发，
+     * 真鼠标点击则会点到窗口外面（本轮实测：`dirCalls` 一直停在 1，看起来像"按钮没反应"）。
+     */
+    const realClickText = async (selector, text) => {
+      const found = await evalJs(
+        c,
+        `(() => {
+           const el = [...document.querySelectorAll(${JSON.stringify(selector)})].find((b) => b.textContent.includes(${JSON.stringify(text)}))
+           if (!el) return false
+           el.scrollIntoView({ block: 'center', inline: 'center' })
+           return true
+         })()`,
+      )
+      if (!found) throw new Error(`找不到按钮：${selector} × ${text}`)
+      await sleep(250) // 等滚动/重排落定再量坐标
+      const pt = await evalJs(
+        c,
+        `(() => {
+           const el = [...document.querySelectorAll(${JSON.stringify(selector)})].find((b) => b.textContent.includes(${JSON.stringify(text)}))
+           if (!el) return null
+           const r = el.getBoundingClientRect()
+           return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), vw: innerWidth, vh: innerHeight }
+         })()`,
+      )
+      if (!pt || pt.x < 0 || pt.y < 0 || pt.x > pt.vw || pt.y > pt.vh) {
+        throw new Error(`按钮不在视口内，点不到：${JSON.stringify(pt)}`)
+      }
+      await c.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', buttons: 1, clickCount: 1 })
+      await c.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', buttons: 0, clickCount: 1 })
+      return pt
+    }
+    // 点确认条上的按钮 ⇒ **这一下才是合法手势**（假选择器里当场记下 userActivation）
+    await realClickText('.confirm-bar-btn', '授权所在文件夹')
+    await waitFor(c, `window.__assetProbe.dirCalls >= 1`, '按钮真的弹出了文件夹选择器', 40)
+    await sleep(600)
+    const probe1 = await evalJs(c, `JSON.parse(JSON.stringify(window.__assetProbe))`)
+    check(
+      'adj969 **真点**「授权所在文件夹」⇒ 选择器真的弹出，且这一下 `userActivation.isActive` 为真（真浏览器里不会被 `SecurityError` 顶掉）',
+      probe1?.dirCalls === 1 && probe1?.activation?.[0] === true && probe1?.picked?.[0] === 'wrong',
+      JSON.stringify(probe1),
+    )
+    // ② 负对照：选的是**不含这份谱**的目录 ⇒ 不采信 ⇒ 预览里不许出现背景层
+    const bgBefore = await evalJs(c, `!!document.querySelector('.score-page svg [data-overlay="bg"]')`)
+    check(
+      'adj969 **负对照**：所选目录里没有这份谱 ⇒ **不采信**（预览里没有背景层，绝不拿它去读同名图）',
+      bgBefore === false,
+    )
+    // ③ 去「背景」页签点「授权所在文件夹」⇒ 这次选对 ⇒ 背景图真的画出来
+    await evalJs(
+      c,
+      `(() => {
+         const b = [...document.querySelectorAll('.topbar-btn')].find((el) => (el.getAttribute('title') || '').includes('谱面'))
+         if (b) b.click()
+         return true
+       })()`,
+    )
+    await waitFor(c, `!!document.querySelector('.pcfg-root')`, '谱面设置面板出现')
+    await waitFor(
+      c,
+      `[...document.querySelectorAll('.jp-tab')].some((t) => t.textContent.includes('背景'))`,
+      '「背景」子页签出现',
+    )
+    await evalJs(c, `[...document.querySelectorAll('.jp-tab')].find((t) => t.textContent.includes('背景')).click(), true`)
+    await waitFor(c, `!!document.querySelector('.pcfg-asset-err')`, '页签里就地显示"取不到图"的提示')
+    const assetErrText = String(await evalJs(c, `document.querySelector('.pcfg-asset-err')?.textContent ?? ''`))
+    check(
+      'adj969 提示能照着做：页签里说明"浏览器不给文件所在目录"，并给出「授权所在文件夹」按钮',
+      assetErrText.includes('浏览器不提供文件所在目录') && assetErrText.includes('授权所在文件夹'),
+      assetErrText.slice(0, 60),
+    )
+    // 设置页签里那个按钮也**真点**（同上：合成点击没有手势；真机上是用户手指/鼠标点的）
+    //
+    // ⚠ 这一步要**量准了再点**：这个面板是常驻在底栏 dock 里的，切页签后 `measureFields()` 会按
+    // 容器宽重排字段网格（`useLayoutEffect` + `MutationObserver`）⇒ 按钮位置可能在"量"与"点"
+    // 之间挪一点。所以这里带**重试**（最多 3 次），而不是只点一下 —— 否则就会像本轮第一次那样
+    // 报"等待超时：按钮真的弹出了文件夹选择器"，而其实只是点空了。
+    let dirHit = false
+    for (let i = 0; i < 3 && !dirHit; i++) {
+      await sleep(400)
+      await realClickText('.pcfg-asset-err button', '授权所在文件夹')
+      await sleep(600)
+      dirHit = (await evalJs(c, `window.__assetProbe.dirCalls`)) >= 2
+    }
+    check('adj969 页签里的「授权所在文件夹」按钮真的弹出了文件夹选择器（最多重试 3 次，避开面板重排）', dirHit)
+    await waitFor(
+      c,
+      `!!document.querySelector('.score-page svg [data-overlay="bg"] image')`,
+      '授权后背景图真的画出来了',
+      60,
+    )
+    const bgHref = String(
+      await evalJs(c, `document.querySelector('.score-page svg [data-overlay="bg"] image')?.getAttribute('href') ?? ''`),
+    )
+    check(
+      'adj969 **授权所在文件夹之后，相对路径的背景图真的画出来**（是内嵌 data URI，导出/打印同一份）',
+      bgHref.startsWith('data:image/'),
+      bgHref.slice(0, 30),
+    )
+    await sleep(300)
+    check(
+      'adj969 授权成功后提示**收掉**（不留着一条已经解决的红字）',
+      (await evalJs(c, `!!document.querySelector('.pcfg-asset-err')`)) === false,
+    )
+
     c.close()
   } catch (e) {
     check(`脚本自身出错：${e instanceof Error ? e.message : String(e)}`, false)

@@ -5,7 +5,7 @@
  *   ToolDock（adj462：底部 dock，告警/试听/导出/设置互斥切换）/
  *   EditorFootBar（合并原脚本编辑器顶栏 + 状态栏）+ 模态框
  */
-import { Suspense, lazy, useEffect, useRef } from 'react'
+import { Suspense, lazy, useEffect, useRef, useSyncExternalStore } from 'react'
 import { TopBar } from './ui/TopBar'
 import { EditorFootBar } from './ui/EditorFootBar'
 import { ToolDock } from './ui/ToolDock'
@@ -25,6 +25,10 @@ import { useUiStore } from './store/uiStore'
 import { drainExternalFiles, hasShell, onExternalOpen } from './store/externalOpen'
 // adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
 import { readJpsFromSearch, withoutJpsParam } from './store/urlImport'
+// adj969：「资源目录」授权（网页 / PWA 用文件句柄打开的谱，浏览器不给父目录）
+import { getAssetDirRevision, subscribeAssetDir } from './store/assetDirAuth'
+// adj969：判"这份谱需不需要基准目录"的唯一口径（引擎里，两端共用）
+import { localAssetRefs } from '@ijipu/engine'
 import { startWorkspaceIndexWarmup } from './store/workspaceIndexWarm'
 // adj610：Ctrl+D / Ctrl+H 的"有告警先看告警"判据与「展开底栏」按钮同一份（`ui/problems.ts`）
 import { summarizeProblems } from './ui/problems'
@@ -137,31 +141,65 @@ function App() {
   }, [])
 
   /**
-   * adj965（方案「OVL」，EP-10）：**水印/背景图的解析触发**。
+   * adj965（方案「OVL」，EP-10）+ adj969：**水印/背景图的解析触发**。
    *
    * 何时需要重新解析：① `wmImage` / `bgImage` / `wmType` 变了（用户改了设置）；
-   * ② 文档换了"基准"（打开了别的文件、从桌面双击打开、切了工作区）。
+   * ② 文档换了"基准"（打开了别的文件、从桌面双击打开、切了工作区）；
+   * ③ adj969：**资源目录授权状态变了**（`assetDirRev`）——用户刚授权完文件夹，图要立刻出来。
    *
-   * 基准三态（方案 §四.1）：工作区绑定 → `nativePath` 目录 → 都没有（未保存的新文档）。
+   * 基准四态（方案 §四.1 的三态 + adj969 补的第四态）：
+   *   工作区绑定 → `nativePath` 目录 → **已授权的"本谱所在目录"（文件方式打开的谱）** → 都没有。
+   * 第四态就是用户实报的那条：网页 / PWA 用文件句柄打开的谱，浏览器**不给父目录**，
+   * 只能靠用户额外授权一次所在文件夹（`store/assetDirAuth.ts`）。
+   *
    * ⚠ 解析失败**不在这里弹提示**（每次重排都会重跑，会把用户烦死）——
    * 错误存在快照里，由「水印 / 背景」两个设置页签就地显示（`overlaySnapshot.errors`）。
+   * （唯一会弹的那一次是"打开后自动问一句要不要授权文件夹"，它发生在打开动作的手势里，
+   *  见 `docStore.adoptDoc` —— 这里这条路只**核对**记忆，绝不弹。）
    */
   const assetPageConfig = useDocStore((s) => s.pageConfig)
   const assetBinding = useDocStore((s) => s.binding)
   const assetNativePath = useDocStore((s) => s.nativePath)
+  // adj969：文件方式打开时的一句柄 + 文件名（算基准的第四态要用）
+  const assetFileHandle = useDocStore((s) => s.fileHandle)
+  const assetFileName = useDocStore((s) => s.fileName)
+  /**
+   * adj969：这份谱**需不需要**"基准目录"（写了相对路径的水印/背景图才算）。
+   *
+   * 在**渲染体**里算成一个布尔量（而不是把整个 `assetPageConfig` 对象塞进 effect 的依赖）：
+   * 那个对象每次改设置都换引用，带进依赖会让 effect 每敲一个字就重跑一次 IO。
+   */
+  const assetNeedDir = localAssetRefs(assetPageConfig).length > 0
+  const assetDirRev = useSyncExternalStore(subscribeAssetDir, getAssetDirRevision)
   useEffect(() => {
     let alive = true
     void (async () => {
       const { getWorkspace } = await import('./store/workspace')
       const { syncOverlayAssets } = await import('./store/overlayAssets')
+      // adj969：资源目录那一层（授权状态 + 基准对象）
+      const { adoptRememberedAssetDir, getAssetBase, refOfHandle } = await import('./store/assetDirAuth')
       const rec = assetBinding !== null ? await getWorkspace() : null
+      const fileOnly = assetBinding === null && assetNativePath === null && assetFileHandle !== null
+      /**
+       * adj969：**只核对记忆，不弹选择器**（这条路不是用户手势）。
+       * 弹的那一次在打开动作里（`docStore.adoptDoc` → `autoEnsureAssetDir`）；
+       * 启动时恢复草稿、或用户手改设置触发的重算都走这里 ⇒ 没授权时只留提示，不骚扰。
+       */
+      if (fileOnly && getAssetBase() === null) {
+        await adoptRememberedAssetDir(assetNeedDir, await refOfHandle(assetFileHandle))
+      }
       if (!alive) return
+      const picked = fileOnly ? getAssetBase() : null
       const base =
         assetBinding !== null && rec !== null
           ? ({ kind: 'workspace', rec, segs: assetBinding.segs } as const)
           : assetNativePath !== null
             ? ({ kind: 'native', dir: assetNativePath.replace(/[\\/][^\\/]*$/, '') } as const)
-            : ({ kind: 'none' } as const)
+            : picked !== null
+              ? picked
+              : fileOnly
+                ? ({ kind: 'fileNoDir', name: assetFileName } as const)
+                : ({ kind: 'none' } as const)
       await syncOverlayAssets(
         {
           wmEnabled: assetPageConfig.wmEnabled !== false,
@@ -184,6 +222,10 @@ function App() {
     assetPageConfig.bgImage,
     assetBinding,
     assetNativePath,
+    assetFileHandle,
+    assetFileName,
+    assetNeedDir,
+    assetDirRev,
   ])
 
   /**

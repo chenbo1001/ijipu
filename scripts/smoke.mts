@@ -13190,6 +13190,160 @@ async function runAdj965AssetSourceTests() {
   }
 
   /**
+   * adj969（**用户实报**："文件方式"打开的谱里相对路径的图找不到）：**第四档基准**
+   * （`picked` = 用户额外授权的"本谱所在目录"）。
+   *
+   * 根因回顾：浏览器**不给文件句柄的父目录** ⇒ 此前"文件方式打开"一律落到 `{kind:'none'}`
+   * ⇒ 相对路径必然解析失败，且失败只在设置页签里显示（怕每次重排刷屏）。
+   *
+   * 这里钉四件事（都在 Node 里可跑，靠假句柄 + 注入通道/解码器）：
+   *  ① 判"需不需要目录"的口径（引擎 `localAssetRefs`）：相对路径算、`data:` 与 `[[双链]]` **不算**；
+   *  ② `picked` 与 `workspace` 的**下钻语义不同**（前者那**就是**本谱所在目录，不许再按 `segs` 加一层）
+   *     —— 带负对照：同一条相对路径在两种基准下**结果必须不同**，否则说明这一档根本没生效；
+   *  ③ 白名单 / `..` 越界在 `picked` 这条通道上照旧被拒，且**带负对照**（正常路径读得到）；
+   *  ④ 缺授权那一档要给"能照着做"的提示并带上 `needDir` 标记（设置页签据此给按钮），
+   *     而**不是**答非所问的"请先保存本谱"；缓存键要把**目录身份**算进去（否则 A 目录的图会被 B 目录同名路径静默复用）。
+   */
+  {
+    const { resolveAsset, setAssetReader, setAssetDecoder, clearAssetCache } = await import('../src/store/assetSource.ts')
+    const { localAssetRefs } = await import('@ijipu/engine/index.ts')
+    /**
+     * ⚠ 下面这一行不是"顺手多测一个常量"：`ASSET_MAX_EDGE` / `ASSET_REENCODE_*` 由引擎再导出，
+     * 而**唯一**用它们的是应用的 `assetDecode.ts`（不在冒烟这张图里）⇒ 在本图的视角下它们属于
+     * **死再导出**，rolldown 8 会给这种符号判"不在任何 chunk 里"并 panic
+     * （本轮实测：往这张图里多挂一个模块就必崩，`SymbolRef "ASSET_MAX_EDGE" is not in any chunk`）。
+     * 这里**如实断言**这三个阈值（它们本来就是两端共用的降采样口径），顺便让符号有归属。
+     * 见 `docs/ERRORS-LOG.md` 的 adj969 那一条。
+     */
+    const { ASSET_MAX_EDGE, ASSET_REENCODE_BYTES, ASSET_REENCODE_QUALITY } = await import('@ijipu/engine/index.ts')
+    check(
+      'adj969 降采样阈值仍是两端共用的那一份（长边 2000 / 重编码阈值 256KB / 质量 0.85）',
+      ASSET_MAX_EDGE === 2000 && ASSET_REENCODE_BYTES === 256 * 1024 && ASSET_REENCODE_QUALITY === 0.85,
+      JSON.stringify([ASSET_MAX_EDGE, ASSET_REENCODE_BYTES, ASSET_REENCODE_QUALITY]),
+    )
+    const { fsaAssetReader } = await import('../src/store/assetReaderFsa.ts')
+
+    // ---- ① "需不需要一个目录基准"的口径 ----
+    const cfgOf = (patch: Record<string, unknown>) =>
+      ({ wmEnabled: true, wmType: 'image', wmImage: '', bgEnabled: true, bgImage: '', ...patch }) as never
+    check(
+      'adj969 判"要不要向用户要一个目录"：相对路径算、`data:` 内嵌不算、`[[双链]]` 不算、开关关着不算',
+      localAssetRefs(cfgOf({ bgImage: 'img/底纹.png' })).length === 1 &&
+        localAssetRefs(cfgOf({ wmImage: '印章.png' })).length === 1 &&
+        localAssetRefs(cfgOf({ bgImage: 'data:image/png;base64,AA' })).length === 0 &&
+        localAssetRefs(cfgOf({ bgImage: '[[底纹.png]]' })).length === 0 &&
+        localAssetRefs(cfgOf({ bgImage: 'img/底纹.png', bgEnabled: false })).length === 0 &&
+        // 负对照：水印开着但类型是**文本** ⇒ 不读图片（`overlayAssetRefs` 的老口径，别被这一档改写）
+        localAssetRefs(cfgOf({ wmType: 'text', wmImage: 'img/底纹.png' })).length === 0,
+      JSON.stringify({
+        相对: localAssetRefs(cfgOf({ bgImage: 'img/底纹.png' })),
+        内嵌: localAssetRefs(cfgOf({ bgImage: 'data:image/png;base64,AA' })),
+      }),
+    )
+
+    // ---- 夹具：假句柄（与前面 EP-14 那套同款：找不到就抛 NotFoundError）----
+    const mkFile = (bytes: number[], type = 'image/png', lastModified = 7) => ({
+      getFile: async () => ({ arrayBuffer: async () => new Uint8Array(bytes).buffer, type, lastModified }),
+    })
+    const mkDir = (children: Record<string, unknown>) => ({
+      getDirectoryHandle: async (n: string) => {
+        const c = children[n]
+        if (c === undefined) throw Object.assign(new Error('不在'), { name: 'NotFoundError' })
+        return c
+      },
+      getFileHandle: async (n: string) => {
+        const c = children[n]
+        if (c === undefined) throw Object.assign(new Error('不在'), { name: 'NotFoundError' })
+        return c
+      },
+    })
+    // 用户授权的那**就是**本谱所在的目录：里面直接有 img/ 与 谱.jps（**没有**"乐谱/"这一层）
+    const pickedDir = mkDir({ img: mkDir({ '图.png': mkFile([1, 2, 3]) }), '谱.jps': mkFile([9]) })
+    const picked = { kind: 'picked', dir: pickedDir, id: 'd1' } as never
+
+    // ---- ② 两档语义不同（含负对照）----
+    setAssetReader(fsaAssetReader)
+    setAssetDecoder(async () => ({ href: 'data:image/png;base64,AAAA', w: 2, h: 1 }))
+    clearAssetCache()
+    const viaPicked = await resolveAsset('img/图.png', picked)
+    // 负对照：同一个句柄当**工作区根**、`segs` 说本谱在"乐谱/"下 ⇒ 那层目录不存在 ⇒ 必须读不到
+    const asWorkspace = await resolveAsset('img/图.png', {
+      kind: 'workspace',
+      rec: { id: 'w', name: 'ws', handle: pickedDir, path: [] } as never,
+      segs: ['乐谱', '谱.jps'],
+    })
+    check(
+      'adj969 `picked` 基准 = **本谱所在目录本身**（不再按 `segs` 加一层）⇒ 相对路径图读得到；' +
+        '负对照：同一个句柄按"工作区根 + 乐谱/谱.jps"解释时读不到（证明这一档真的换了下钻口径）',
+      viaPicked.ok === true && asWorkspace.ok === false,
+      `${viaPicked.ok ? 'ok' : viaPicked.error} ｜ ${asWorkspace.ok ? 'ok' : asWorkspace.error}`,
+    )
+
+    // ---- ③ 白名单 / 越界：在 `picked` 这条通道上照旧拦住（带负对照：正常路径读得到）----
+    clearAssetCache()
+    const ext = await resolveAsset('img/图.svg', picked)
+    const up = await resolveAsset('../../秘密.png', picked)
+    const up2 = await resolveAsset('img/../../秘密.png', picked)
+    clearAssetCache()
+    const normal = await resolveAsset('img/图.png', picked)
+    check(
+      'adj969 `picked` 通道照旧守白名单与越界：`.svg` 拒、`..`/上跳段拒（都是"明确报错"不是静默）；' +
+        '负对照：同一条正常相对路径能读到（证明上面三条不是恒红）',
+      ext.ok === false &&
+        ext.error.includes('仅支持') &&
+        up.ok === false &&
+        up2.ok === false &&
+        normal.ok === true,
+      `${ext.ok ? 'ok' : ext.error} ｜ ${up.ok ? 'ok' : up.error} ｜ ${normal.ok ? 'ok' : normal.error}`,
+    )
+
+    // ---- ④ 缺授权那一档：提示要能照着做 + 带 `needDir` 标记 ----
+    setAssetReader(fsaAssetReader)
+    setAssetDecoder(async () => ({ href: 'data:image/png;base64,AAAA', w: 2, h: 1 }))
+    clearAssetCache()
+    const noDir = await resolveAsset('img/底纹.png', { kind: 'fileNoDir', name: '谱.jps' })
+    const notSaved = await resolveAsset('img/底纹.png', { kind: 'none' })
+    check(
+      'adj969 缺"资源目录"授权的提示：说明"浏览器不给父目录"并指向「授权所在文件夹」，且**带 `needDir` 标记**' +
+        '（设置页签据此给按钮）；与"尚未保存"那一档分开（两者处置完全不同）',
+      noDir.ok === false &&
+        noDir.needDir === true &&
+        noDir.error.includes('授权') &&
+        noDir.error.includes('谱.jps') &&
+        notSaved.ok === false &&
+        notSaved.needDir === undefined &&
+        notSaved.error.includes('尚未保存'),
+      noDir.ok ? 'ok' : noDir.error,
+    )
+
+    // ---- ⑤ 缓存键必须含**目录身份**（否则换目录后同名路径会命中上一个目录的图）----
+    let pickedReads = 0
+    setAssetReader(async (path, base) => {
+      if (base.kind !== 'picked') return null
+      pickedReads += 1
+      return { bytes: new Uint8Array([pickedReads, 0, 0]), mime: 'image/png', mtime: 1 }
+    })
+    setAssetDecoder(async () => ({ href: 'data:image/png;base64,AAAA', w: 2, h: 1 }))
+    clearAssetCache()
+    await resolveAsset('img/图.png', { kind: 'picked', dir: pickedDir, id: 'd1' } as never)
+    await resolveAsset('img/图.png', { kind: 'picked', dir: pickedDir, id: 'd1' } as never)
+    const afterSameDir = pickedReads
+    // 负对照：同一个句柄对象、但换了**目录身份**（另一次授权拿到的新 id）⇒ 必须重新读，不许命中
+    await resolveAsset('img/图.png', { kind: 'picked', dir: pickedDir, id: 'd2' } as never)
+    check(
+      'adj969 解析缓存键含"目录身份"：同一目录第二次命中缓存（reads 不变）；' +
+        '负对照：目录身份一变 ⇒ 重新读（否则 A 目录看过的图会被 B 目录同名路径**静默复用**）',
+      afterSameDir === 1 && pickedReads === 2,
+      `reads=${pickedReads}`,
+    )
+
+    // 收尾：把注入的假实现拆掉（与前面几段同一口径）
+    setAssetReader(null)
+    setAssetDecoder(null)
+    clearAssetCache()
+  }
+
+  /**
    * EP-09（后半）：**嵌入版（Obsidian 插件）的读图通道**。
    *
    * 桥本身没法在 Node 里起（要 `window`/iframe）⇒ 这里钉**纯逻辑**（可断言的那一半）：
@@ -23663,14 +23817,27 @@ function runAdj966Tests() {
      * 断言跟着口径走（不是放宽）：**句柄路径仍必须带 mtime、且必须真的传来**。
      */
     "setBaseline(bindingKeyOf({ kind: 'handle', name }), code, input.mtime ?? null)",
-    "adoptDoc({ name, code, handle, mtime: file.lastModified, notice: `${uiCopy.openOkPrefix}${name}.jps` })",
+    /**
+     * ⚠ adj969：这一条从"逐字比对一整行"改成"**忽略空白/换行**后比对到 `mtime: file.lastModified` 为止"。
+     *
+     * 原因（不是放宽）：本轮给这次 `adoptDoc(...)` 调用加了 `fileRef` 参数并改成多行写法，
+     * 逐字比对一整行的写法会**因为排版换行而假红**（`adj969` 实测就是这么红的）；
+     * 判据的意图（`openFile` 必须把 `lastModified` 传进共用的 `adoptDoc`）一字未变
+     * —— 上面那条 `input.mtime ?? null` 仍然钉着"`adoptDoc` 真的拿它记了基准"。
+     */
+    "adoptDoc({ name, code, handle, mtime: file.lastModified",
     // 保存：原生路径 写前在途写 + 写后刷基准
     "markWriteInFlight(bindingKeyOf({ kind: 'native', path }), code)",
     "setBaseline(bindingKeyOf({ kind: 'native', path }), code, null)",
     // 保存：句柄 写前在途写（写后刷基准用同一个键变量）
     "const hKey = bindingKeyOf({ kind: 'handle', name })",
   ]
-  const hasAll = (t: string): boolean => need.every((s) => t.includes(s))
+  /**
+   * 比对前**折叠空白**：这些判据量的是"接线在不在"，不该因为源码排版（换行/缩进）而假红
+   * （`adj969` 实测：把一次调用改成多行写法就红了）。
+   */
+  const flat = (t: string): string => t.replace(/\s+/g, ' ')
+  const hasAll = (t: string): boolean => need.every((s) => flat(t).includes(s))
   check('adj966 接线：系统文件的两条路（原生路径 / FSA 句柄）在"打开记基准"与"写前在途写 + 写后刷基准"都接上了',
     hasAll(docSrcText), JSON.stringify(need.filter((s) => !docSrcText.includes(s))))
   check('adj966 负对照：删掉"打开记基准"（原生或句柄任一处）或"写前在途写"⇒ 同一条判据判假',

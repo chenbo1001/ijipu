@@ -63,6 +63,32 @@ export default defineConfig({
       // adj801：命令行入口用 `node:fs/promises`
       // adj874：cli-assert 要真的把 CLI 产物当命令跑一次（`execFileSync`）
       external: ['node:fs', 'node:fs/promises', 'node:url', 'node:path', 'node:zlib', 'node:child_process', 'fs', 'url', 'path', 'zlib'],
+      /**
+       * adj969（**构建期问题，与本次功能改动无关**）：**关掉 tree-shaking**。
+       *
+       * 为什么必须关：本配置有 4 个入口（smoke / preview / cli-assert / adj951-cold-start），
+       * 引擎入口 `packages/ijipu-engine/src/engine/index.ts` 被它们共享。rolldown 8 在这种
+       * "多入口 + 共享模块"的图里会把引擎入口里**谁都没用到的再导出**判成"不在任何 chunk 里"
+       * 并**直接 panic 终止构建**（`error during build: [Panic in async function]`）：
+       *
+       * ```
+       * thread '<unnamed>' panicked at crates\rolldown\src\module_finalizers\mod.rs:596:13:
+       * SymbolRef { owner: 53, symbol: SymbolId(1) } "DEFAULT_NEW_JPS_BASE" is not in any chunk, which is unexpected
+       * ```
+       *
+       * 触发条件**与功能改动无关**：往这张模块图里多挂**任意**一个模块就必现
+       * （本轮用一个只有一行 `export const PROBE = 1` 的临时模块复现过；把报出来的那个符号
+       * 在冒烟里用掉之后，它立刻换成下一个死再导出，如 `ASSET_MAX_EDGE` ⇒ 一个一个补是补不完的）。
+       *
+       * 只影响**测试产物**（`dist-smoke/*.cjs`）：应用本体的 `vite.config.ts` 是单入口、
+       * 不受影响（本轮实测 `npx vite build` 正常）；断言一条不动（关掉 tree-shaking 只会让
+       * 产物里多留代码，不会让任何 `check` 变绿或变红）。
+       *
+       * 其它试过但**不管用**的旋钮：`treeshake:'safest'`、把引擎整份钉进 `manualChunks`。
+       * 上游相关修复（升级 rolldown/vite 后应重试并删掉本项）：
+       * https://github.com/rolldown/rolldown/pull/9836 、 https://github.com/rolldown/rolldown/pull/9669
+       */
+      treeshake: false,
     },
   },
 })

@@ -9415,6 +9415,90 @@
 
 | v0.65.0 | 2026-10-17 | 追加 E-2026-454（**拖放打开 `.jps`**：网页走 HTML5+可写句柄、桌面走原生拖放复用双击链、插件不做；两条坑＝必须拦默认行为、句柄必须同轮收集；顺手把"装载文档"收成 `adoptDoc` 一处） |
 
+### E-2026-455 "文件方式"打开的谱里相对路径背景图找不到，而且**只在设置页签里悄悄报错**（用户实报，adj969）
+
+- **现象**（用户原话）：「拖入 / 文件选择器打开的 `.jps` 里，**文件方式**的相对路径背景图找不到。」
+- **根因（一条链，三处叠加）**：
+  ① `src/App.tsx` 算"资源基准"时只有**三态**（工作区绑定 → `nativePath` 目录 → 都没有），
+     **没有"文件句柄"这一档** ⇒ 网页 / PWA 用文件句柄打开的谱一律落到"没有基准"⇒ 相对路径必然解析失败；
+  ② 更根本的是 **Web 的硬限制**：`FileSystemFileHandle` 上**没有任何"我在哪个目录"的 API**，
+     浏览器**不给文件句柄的父目录** —— 这不是漏写，是拿不到；
+  ③ 失败提示只在「设置 → 水印 / 背景」页签里显示（`adj965` 刻意不在这里弹 Toast：每次重排都会重跑、
+     弹一次就刷屏）⇒ 用户**既没图、也没提示**，看起来就是"功能坏了"。
+- **解决**（三条一起）：
+  · **多一档基准**：`AssetBase` 增 `{kind:'picked', dir, id}`（用户额外授权的那一刻目录）与
+    `{kind:'fileNoDir', name}`（有文件、没有目录 ⇒ 报"授权一下就行"，不再是"请先保存本谱"那种答非所问）；
+  · **新增 `store/assetDirAuth.ts`**：`showDirectoryPicker()` 授权一次 ⇒ 句柄存 IndexedDB
+    （`fileHandleDb` 的新键 `assetDir`，与工作区记录分开）；**用户 2026-10-17 拍板**："打开时自动问一句"；
+  · **⚠ 但"直接弹文件夹对话框"做不到（实测）**：`showOpenFilePicker()` 已经把那次"用户手势"
+    **用掉了**（`verify:app-ui` 里在假选择器内读 `navigator.userActivation.isActive`，实测为 **false**）
+    ⇒ 真浏览器里打开之后再弹文件夹对话框只会 `SecurityError` ⇒ 用户看到的是"什么都没发生" ✗。
+    改成：打开后**立刻在顶部确认条问一句**，用户点「授权所在文件夹」那一下才是合法手势（选「暂不」则只留提示）；
+  · **可做的提示**：设置页签里那条错误旁边就地给一个「授权所在文件夹」按钮（点它同样是手势）；
+- **安全判据（不许省）**：网页层拿不到任何路径，**无法证明用户选的就是这份谱所在的目录** ⇒
+  在所选目录里按**同名**取文件，要求 **字节数 + 修改时间**都与当前这份 `.jps` 一致才采信；
+  核不过就**不采信**（否则会"静默画出另一个目录里的同名图"，比不显示更坏）。
+  同一份谱在一次会话里只自动问一次（取消过就不再骚扰）。
+- **顺带补上桌面端同一档**：PC 的「打开…」在**桌面壳里也走 `showOpenFilePicker`**（`TopBar.runOpenSmart`
+  对 PC 各档一律走系统选择器）⇒ `nativePath` 为空、同样只剩一个"没有父目录"的文件句柄。
+  WebView2 也有目录句柄与 `showDirectoryPicker`，所以 `desktopAssetReader` 遇到 `picked` 时**复用网页版那条通道**。
+- **验证**：`npm run smoke` **ALL SMOKE TESTS PASSED ✅**（新增 6 条，全部带负对照：`localAssetRefs` 判据 /
+  `picked` 与 `workspace` 的**下钻语义必须不同** / 白名单与 `..` 越界照旧拦住 / `needDir` 提示与"尚未保存"分开 /
+  **缓存键必须含目录身份**——少了它 A 目录看过的图会被 B 目录同名路径静默复用）；`npm run verify:app-ui` **65/65**
+  （新增 7 条真点：打开后**立刻问一句**（按钮 + 暂不）/ 打开动作本身没弹过选择器 / **真点**按钮时
+  `userActivation.isActive` 为真 / **负对照**：选错目录不采信、预览里没有背景层 / 页签提示能照着做 /
+  **点按钮授权后相对路径背景图真的画出来**（data URI）/ 提示收掉）。
+- **预防**：
+  ① **"能读到文件"与"能读到它旁边的文件"是两件事** —— 凡"相对本文件"的引用（图片、附件、`%FILE%` 一类），
+     都要先问"这个端能不能拿到**父目录**"；拿不到就必须**显式向用户要一次**，并把这条通路当成一个**基准档**接进
+     既有的"基准"体系里（而不是在解析处特判）；
+  ② **失败提示的位置也是功能的一部分**：`adj965` 选择"不 Toast、只在页签里显示"是对付刷屏的正确取舍，
+     但那就必须**同时给一个能立刻解决问题的入口**（按钮/链接），否则等于把用户堵在一句提示上；
+  ③ **"用户选了一个东西"必须核对**：凡是"让用户指认某个位置"的交互（选目录、选文件、选工作区），
+     都要有一条"他选的是不是我要的那个"的判据 —— 本轮用的是"同名 + 同字节数 + 同修改时间"；
+  ④ **浏览器里"用户手势"是一次性的**：`showOpenFilePicker()` 会把它**用掉** ⇒ 打开之后再弹任何选择器
+     都必然被拒（实测 `navigator.userActivation.isActive` 由 true 变 false）。凡"打开之后再要一次权限"
+     的交互，都必须让用户**再点一下**（确认条按钮 / 提示里的按钮），不能指望打开那一下的手势还留着；
+  ⑤ **`verify:app-ui` 里"点按钮"有两条坑**（本轮都踩到了，红得像功能坏了）：
+     · `el.click()` 是**合成点击、不产生用户手势** ⇒ 要有手势必须走 CDP 的 `Input.dispatchMouseEvent`；
+     · 真鼠标点击要求元素**在视口内** —— 底栏 dock 里可滚动的按钮得先 `scrollIntoView` 再量坐标，
+       否则 `getBoundingClientRect()` 给的是视口外的坐标，表现为"点了没反应"（其实点空了）。
+
+### E-2026-456 rolldown 8：多入口 + 引擎入口"死再导出" ⇒ 构建直接 panic（与功能改动无关，adj969 撞上）
+
+- **现象**：`npm run smoke`（以及 `npx vite build --config vite.smoke.config.ts`）在 `transforming` 之后直接崩：
+  `error during build: [Panic in async function]`，真正的原因藏在上面几行：
+  `thread '<unnamed>' panicked at crates\rolldown\src\module_finalizers\mod.rs:596:13:
+  SymbolRef { owner: 53, symbol: SymbolId(1) } "DEFAULT_NEW_JPS_BASE" is not in any chunk, which is unexpected`。
+- **根因（用空探针模块证过）**：`vite.smoke.config.ts` 是**多入口**（smoke / preview / cli-assert / adj951-cold-start），
+  引擎入口 `index.ts` 被它们共享，而它里面有**没有任何入口用到的再导出**（`ASSET_MAX_EDGE`、`DEFAULT_NEW_JPS_BASE`…）
+  ⇒ rolldown 8 把这些符号判成"不在任何 chunk 里"并 panic。**触发条件是"图里多挂一个模块"**，与改了什么无关：
+  我写了一个只有一行 `export const PROBE = 1` 的临时模块挂进 smoke 图，一样崩；
+  把报出来的那个符号在冒烟里用掉之后，它立刻换成**下一个**死再导出 ⇒ 一个一个补是补不完的。
+  单入口的 `vite.config.ts`（应用本体）**不受影响**（实测 `npx vite build` 正常）。
+- **解决**：`vite.smoke.config.ts` 里 `rollupOptions.treeshake = false`（**只影响测试产物** `dist-smoke/*.cjs`）。
+  试过但**不管用**的：`treeshake: 'safest'`、把引擎整份钉进 `manualChunks`。
+- **预防**：升级 `vite` / `rolldown` 之后**先重试关掉这一项**（上游相关修复：
+  [PR #9836](https://github.com/rolldown/rolldown/pull/9836)、[PR #9669](https://github.com/rolldown/rolldown/pull/9669)）；
+  在这之前，**"冒烟构建突然 panic 且报 `is not in any chunk`"就是这条**，别去翻业务代码。
+
+### E-2026-457 源码级接线判据"逐字比对一整行"，被无关的排版换行弄红（adj969 撞上）
+
+- **现象**：`adj966` 的两条接线断言在 `npm run smoke` 里报红，红字里贴着的却是**完全正确**的代码：
+  `adoptDoc({ name, code, handle, mtime: file.lastModified, notice: ... })`。
+- **根因**：那两条判据用 `docSrcText.includes("…一整行…")` 比对源码文本，而本轮给这次调用**加了一个参数
+  并改成多行写法** ⇒ 字符串对不上。判据的**意图**（"打开时必须把 `lastModified` 传进共用的 `adoptDoc`"）
+  一个字都没变 —— 红的只是**排版**。
+- **解决**：比对前**折叠空白**（`t.replace(/\s+/g,' ')`），并把那一条匹配到 `mtime: file.lastModified` 为止；
+  判据**没有放宽**（`setBaseline(..., input.mtime ?? null)` 那条仍在钉"真的拿它记了基准"），
+  负对照（删掉任一处 ⇒ 判假）也照旧成立。
+- **预防**：**源码级判据只该钉"接线在不在"，不该钉排版** —— 匹配长片段时先折叠空白，
+  或者匹配"语法上稳定的最小片段"（函数名 + 关键实参名），别匹配整行字面量。
+
+| v0.65.0（待发） | 2026-10-18 | 追加 E-2026-455/456/457（**文件方式打开的谱读不到相对路径图**：补"已授权目录"基准 + 打开时先问一句 +
+同名校验；**rolldown 8 多入口死再导出 panic**：冒烟配置关 tree-shaking；**源码级判据被排版换行弄红**：比对前折叠空白） |
+
+
 ### E-2026-449 替谱段 `{tp … }` 的歌词对位错位：一是抢字、二是留空洞（用户实报，adj675）
 
 - **现象**（用户原话）：「红色部分 `2` 的音符对应的词第一行是对的，第二行应该是对应的是『经』，
