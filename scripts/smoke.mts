@@ -33,7 +33,7 @@ import {
   type DiffRow,
 } from '../src/diff/textDiff'
 // adj927：提示文案（不再笼统说"外部变更"）
-import { externalChangeCopy } from '../src/brand/copy'
+import { externalChangeCopy, persistPermissionCopy } from '../src/brand/copy'
 // adj876：官网文档页与应用内帮助共用同一个 Markdown 渲染器（纯函数，可在 Node 里直接断言）
 // adj882：` ```jps ` 块的显示参数解析（`m=` / `z=`，口径沿用 Obsidian 插件）
 // adj913：行内解析的**反引号转义**（`inlineMd` 也导出，好直接断言行为）
@@ -256,7 +256,7 @@ import { foldKeys, TOPBAR_DONATE_KEY, TOPBAR_FIXED_KIDS } from '../src/ui/topbar
 // adj538：桌面壳「外部打开」——多文件取舍是纯逻辑，可在 Node 里直接断言（模块不碰 window 顶层）
 import { pickPrimary, hasShell, type ExternalFile } from '../src/store/externalOpen.ts'
 // adj966：文件宿主能力与降级决策（纯函数 ⇒ 逐端逐档断言，不必真跑三端；口径见 docs/FILE-MODEL.md）
-import { hostIdOf, hostProfile, decideWriteMode, decideWatch, decideWriteGate } from '../src/store/fileHost.ts'
+import { hostIdOf, hostProfile, decideWriteMode, decideWatch, decideWriteGate, shouldGuidePersistPermission } from '../src/store/fileHost.ts'
 import type { FileHostProfile } from '../src/store/fileHost.ts'
 // adj966b：外部改动轮询编排（定时器/IO 全注入 ⇒ 在 Node 里真跑时序）
 import { EXT_POLL_MS, watchTick, startExternalWatch } from '../src/store/externalChangeWatch.ts'
@@ -23398,6 +23398,30 @@ function runAdj966Tests() {
   check('adj966 负对照：删掉"打开记基准"或"写后在途写"任一处 ⇒ 同一条判据判假（它真的在数这几处接线）',
     hasAll(docSrcText) && !hasAll(docSrcText.replace(need[0], '')) && !hasAll(docSrcText.replace(need[2], '')),
     JSON.stringify({ 原始: hasAll(docSrcText), 删打开记基准: hasAll(docSrcText.replace(need[0], '')), 删在途写: hasAll(docSrcText.replace(need[2], '')) }))
+
+  /**
+   * adj966：**Web/PWA 的持久权限引导**（用户口径：把权限选择交给用户）——
+   * 只在"FSA 档 + 刚打开文件 + 还没拿到持久授权 + 这台机器没提示过"时提示一次；
+   * 提示只是告知，不阻断（点「仅此次」照样能用，降级为草稿 + 手动保存）。
+   */
+  check('adj966 授权引导：只在网页/PWA（FSA 档）且权限仍是 `prompt` 时提示；已提示过则不再提示',
+    shouldGuidePersistPermission(w, 'prompt', false) && shouldGuidePersistPermission(hostProfile(pwa, true), 'prompt', false) &&
+      !shouldGuidePersistPermission(w, 'prompt', true) &&
+      !shouldGuidePersistPermission(w, 'granted', false) && !shouldGuidePersistPermission(w, 'denied', false),
+    JSON.stringify({
+      网页未授权: shouldGuidePersistPermission(w, 'prompt', false),
+      已提示过: shouldGuidePersistPermission(w, 'prompt', true),
+      已授权: shouldGuidePersistPermission(w, 'granted', false),
+    }))
+  check('adj966 授权引导：桌面壳 / 插件 / 受限档**一律不提示**（它们要么本来就能无手势写，要么根本做不到）',
+    !shouldGuidePersistPermission(d, 'prompt', false) &&
+      !shouldGuidePersistPermission(pg, 'prompt', false) &&
+      !shouldGuidePersistPermission(lim, 'prompt', false), '')
+  check('adj966 授权引导文案说清后果、且**不阻断**（含"每次访问都允许"与"仅此次也可以"两种选择）',
+    persistPermissionCopy.notice('可能').includes('每次访问都允许') &&
+      persistPermissionCopy.notice('可能').includes('仅此次') &&
+      persistPermissionCopy.notice('可能').includes('草稿') &&
+      persistPermissionCopy.level === 'info', persistPermissionCopy.notice('可能'))
 }
 
 /**

@@ -173,3 +173,18 @@ export function decideWriteGate(verdict: ChangeVerdict, mode: WriteMode): 'write
   if (verdict === 'need-read') return 'read-first'
   return 'write'
 }
+
+/**
+ * **要不要引导用户选「每次访问都允许」**（纯判据，用户口径："把权限选择交给用户"）。
+ *
+ * 只在这种情况提示：本端是 **FSA 档**（网页 / PWA）、刚刚成功打开了一个文件（`perm === 'prompt'`
+ * = 还没拿到持久授权）、而且**这一台机器上还没提示过**。
+ * 桌面壳 / 插件 / 受限档一律不提示（它们本来就能无手势写，或在能力上根本做不到）。
+ * 提示**只是告知**，不阻断：用户点「仅此次」照样能用（降级为草稿 + 手动保存）。
+ */
+export function shouldGuidePersistPermission(p: FileHostProfile, perm: PermState, shownBefore: boolean): boolean {
+  if (shownBefore) return false
+  if (p.open !== 'fsa-picker') return false
+  if (!p.needsGestureForWrite) return false
+  return perm === 'prompt'
+}
