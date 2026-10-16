@@ -1251,15 +1251,16 @@ export function layoutScore(
    * 显示个嘛？**」
    *
    * 命中的是**幽灵末小节**：源码末尾多写了一个小节线（`… 4 | |`）或末尾留了一个空小节时，
-   * 解析出来的**最后一个 seg 是空的**（没有音符），却仍被 `barOrdinalsOf` 编上了小节号
+   * 解析出来的**末尾那些 seg 是空的**（没有音符），却仍被 `barOrdinalsOf` 编上了小节号
    * （那里只把"组首空 seg"判为 `null`）⇒ 行末埋点会给它画一个方框，挂在最后那条线旁。
    * 那种"小节"没有任何内容、后面也没有小节 ⇒ **不画**。
    *
-   * 只排除"**组的最后一个 seg 且为空**"这一种：中间真的写了一个空小节（`| |` 夹在中间）时，
-   * 它仍是这一小节序列里的一格，照旧编号（用户口径只针对"最后一条线后面没有小节"）。
+   * 判据写成"**从这一格起、到本组末尾全是空的**"（而不是"必须是最后一个 seg"）：
+   * 末尾常见写法不止一种（`… |`、`… | |`、`… | || |`……），凡是"尾部的空段串"一律不算小节。
+   * ⚠ 中间真的写了一个空小节（`| |` 夹在中间、后面还有音符）时，它仍是序列里的一格 ⇒ 照旧编号。
    */
   const isGhostTrailingSeg = (segs: BarSeg[], nc: number): boolean =>
-    nc === segs.length - 1 && (segs[nc]?.notes.length ?? 0) === 0
+    segs.length > 0 && segs.slice(nc).every((s) => s.notes.length === 0)
   /**
    * 记一条序号锚点（渲染层据此画「数字 + 外框」）；`pageIdx` 缺省 = 当前页（adj967 起允许跨页）
    */
@@ -1535,6 +1536,14 @@ export function layoutScore(
     //  ② 拍内音符最小间距 1px（need = max(14, 12.16/拍内最小时值)）
     //  ③ 超拍挤占其它正常拍空间，正常拍再平均调整
     const leadingEmpty = row.start < row.end && segs[row.start].notes.length === 0 ? 1 : 0
+    /**
+     * adj967d（**用户口径**："**统一**将放在行首的序号放在上一行的行末" —— 用户实测里还留在行首的那一档）：
+     * 本行第一个"算作小节"的 seg。行内埋点用它判断"要标的那一格是不是**行首那一格**"：
+     * 典型写法是 Q 行**以小节线开头**（`Q: |/&hs 2' …`、`Q: | 1 2 …`）⇒ 解析出一个"行首空 seg"，
+     * 于是行首埋点（要求 `fc === row.start`）**不触发**，序号改由**行内埋点**挂在行首那条线上。
+     * 若不特判，它会一直留在行首（= 左边距）——正是用户截图里那个"行首还有序号"。
+     */
+    const fcRow = firstCountedSeg(ord, row)
     // adj625：**行首那个序号**——行首小节线通常不画（隐藏小节线），序号就放在它的位置下（= 左边距）。
     // 只有「本行第一个算作小节的 seg」正好落在行首时才在此埋点；若它在本行靠后，
     // 说明其左侧小节线是**上一小节的收尾线**（在行内），由那边的埋点负责。
@@ -2052,7 +2061,10 @@ export function layoutScore(
             const nc = nextCountedSeg(ord, b, row.end)
             // adj967b：幽灵末小节（末尾空 seg）不画 —— "后面又没有小节了"（用户口径）
             if (nc < row.end && isNumberedBar(ord[nc]) && !isGhostTrailingSeg(segs, nc)) {
-              pushBarNumber(ord[nc] as number, lineX, yBottomBar, voice, groupIndex)
+              // adj967d：要标的那一格正是**本行第一个计数小节** ⇒ 它的左边界就是**行首的隐藏线**，
+              // 与"行首那一档"同一情形 ⇒ 走同一份锚点逻辑（能挪就挪到上一行行末那条真线下）
+              if (nc === fcRow) pushRowStartBarNumber(ord[nc] as number, yBottomBar, voice, groupIndex, prevEndLine)
+              else pushBarNumber(ord[nc] as number, lineX, yBottomBar, voice, groupIndex)
             }
           }
           page.barlines.push({
@@ -2151,6 +2163,14 @@ export function layoutScore(
     const prevEndLine = prevRowEndLine
     prevRowEndLine = null
     const leadingEmpty = row.start < row.end && segs[row.start].notes.length === 0 ? 1 : 0
+    /**
+     * adj967d（**用户口径**："**统一**将放在行首的序号放在上一行的行末" —— 用户实测里还留在行首的那一档）：
+     * 本行第一个"算作小节"的 seg。行内埋点用它判断"要标的那一格是不是**行首那一格**"：
+     * 典型写法是 Q 行**以小节线开头**（`Q: |/&hs 2' …`、`Q: | 1 2 …`）⇒ 解析出一个"行首空 seg"，
+     * 于是行首埋点（要求 `fc === row.start`）**不触发**，序号改由**行内埋点**挂在行首那条线上。
+     * 若不特判，它会一直留在行首（= 左边距）——正是用户截图里那个"行首还有序号"。
+     */
+    const fcRow = firstCountedSeg(ord, row)
     // adj625：行首序号（行首小节线通常隐藏 ⇒ 放在它的位置下 = 左边距）；与 `placeMusicRow` 同一口径。
     // adj967：能挪到上一行行末那条真线下面就挪（用户口径，两处判据同一份实现）。
     // 小节线高度公式与 `placeMusicRow` 一致（基线-18.4×s .. 基线+4.5×s）。
@@ -2770,13 +2790,15 @@ export function layoutScore(
         const bid: LayoutId = { page: pageIndex, voice, group: groupIndex, index: barCounter }
         // adj625：本 seg 的收尾小节线 = 「下一个算作小节的 seg」的左侧小节线（同 `placeMusicRow`）：
         // 那个小节在本行内才在此埋点，跨到下一行的由下一行的行首埋点负责。
-        {
-          const nc = nextCountedSeg(ord, b, row.end)
-          // adj967b：同上 —— 幽灵末小节不画
-          if (nc < row.end && isNumberedBar(ord[nc]) && !isGhostTrailingSeg(segs, nc)) {
-            pushBarNumber(ord[nc] as number, lineX, yBottomBar, voice, groupIndex)
+          {
+            const nc = nextCountedSeg(ord, b, row.end)
+            // adj967b：同上 —— 幽灵末小节不画
+            if (nc < row.end && isNumberedBar(ord[nc]) && !isGhostTrailingSeg(segs, nc)) {
+              // adj967d：要标的是**本行第一个计数小节** ⇒ 左边界即"行首隐藏线" ⇒ 与行首那一档同口径
+              if (nc === fcRow) pushRowStartBarNumber(ord[nc] as number, yBottomBar, voice, groupIndex, prevEndLine)
+              else pushBarNumber(ord[nc] as number, lineX, yBottomBar, voice, groupIndex)
+            }
           }
-        }
         page.barlines.push({
           id: bid,
           type: bk.bar.type,

@@ -20131,6 +20131,33 @@ function runAdj967Tests() {
     }),
     JSON.stringify(g.map((b) => [b.n, b.x, b.yBarBottom])))
 
+  // ---- 判据③（adj967d，**用户截图实报**：末尾的挪走了、行首还有一个）----
+  /**
+   * 情形：Q 行**以小节线开头**（`Q: |/&hs 2' …`）⇒ 解析出一个"行首空 seg"，
+   * 于是"行首埋点"（要求 `fc === row.start`）不触发，序号改由**行内埋点**挂在行首那条线上。
+   * 实测（用户那份谱的写法）：改前 `20@50`（= 左边距，即行首），改后 `20@544.9`（上一行行末线）。
+   */
+  {
+    const M = '1/ 2/ 3/ 4/ 5/ 6/ 7/ 1/'
+    const line = (k: number): string => `Q: ${Array.from({ length: k }, () => M).join(' | ')} |\n`
+    /** 19 个普通小节 + 一行以 `|/&hs` 开头 ⇒ 那一行的首小节正好是第 20 小节（间隔 4 ⇒ 要画序号） */
+    const HEAD = `V: 1.0\nB: t\nD: C\nP: 4/4\n${line(5)}${line(5)}${line(5)}${line(4)}Q: |/&hs 2'/ 1'// (3// 3//) 5/ 5// 0/ 6/ 2/ 1/ | 2/ 1// (2// 2//) 5/ 3// 0/ 5/ 6/ 7/ | 2'/ 1'// (3// 3//) 5/ 5// 0/ 6/ (3$// 2//) 1/ |\n`
+    for (const mode of ['space', 'duration'] as const) {
+      const cfg: PageConfig = { ...defaultPageConfig, noteSpaceLayout: mode, showBarCount: true, barCountInterval: 4 }
+      const L = lay(HEAD, cfg)
+      const b20 = L.pages.flatMap((p) => p.barNumbers).find((b) => b.n === 20)
+      const onSomeBar = L.pages.some((p) => p.barlines.some((l) => Math.abs(l.x - (b20?.x ?? -1)) < 0.6 && Math.abs(l.yBottom - (b20?.yBarBottom ?? -1)) < 0.6))
+      check(`adj967d（${mode}）**Q 行以小节线开头**时，行首那一格也要挪走：20 号不在左边距上，且落在某条真线的正下方`,
+        b20 !== undefined && Math.abs(b20.x - cfg.margin_left) > 0.6 && onSomeBar,
+        JSON.stringify({ n20: [b20?.x, b20?.yBarBottom], 左边距: cfg.margin_left }))
+      check(`adj967d（${mode}）**负对照**：整份谱第一行那一格仍必须留在行首（没有上一行可挪）`,
+        (() => {
+          const first = lay(HEAD, { ...cfg, barCountInterval: 1 }).pages[0].barNumbers.find((b) => b.n === 1)
+          return first !== undefined && Math.abs(first.x - cfg.margin_left) < 0.6
+        })(), '')
+    }
+  }
+
   // ---- 接线：两条单声部路径 + 多声部路径都接上了（源码级；负对照逐处删） ----
   {
     const src = String(readFileSync('packages/ijipu-engine/src/engine/layout/index.ts', 'utf8'))
