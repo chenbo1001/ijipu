@@ -33,7 +33,7 @@ import {
   type DiffRow,
 } from '../src/diff/textDiff'
 // adj927：提示文案（不再笼统说"外部变更"）
-import { externalChangeCopy, persistPermissionCopy } from '../src/brand/copy'
+import { externalChangeCopy, persistPermissionCopy, workspaceCopy } from '../src/brand/copy'
 // adj876：官网文档页与应用内帮助共用同一个 Markdown 渲染器（纯函数，可在 Node 里直接断言）
 // adj882：` ```jps ` 块的显示参数解析（`m=` / `z=`，口径沿用 Obsidian 插件）
 // adj913：行内解析的**反引号转义**（`inlineMd` 也导出，好直接断言行为）
@@ -7318,7 +7318,12 @@ console.log('[82] author credit (adj373)')
   {
     const storeSrc3 = String(readFileSync('src/store/docStore.ts', 'utf8'))
     const fnStart = storeSrc3.indexOf('export async function resolvePendingBinding()')
-    const fnBody = fnStart >= 0 ? storeSrc3.slice(fnStart, fnStart + 3200) : ''
+    /**
+     * 窗口从 3200 提到 5200：**adj966** 在这个函数里加了两段（桌面壳"不再自动接管原生目录工作区"的闸 +
+     * 一次告知），函数确实变长了 —— 判据的**实质没变**（仍是"先重读实时状态、再落笔"），
+     * 只是取窗口要盖得住这几段。这不是放宽口径，改的是扫描范围。
+     */
+    const fnBody = fnStart >= 0 ? storeSrc3.slice(fnStart, fnStart + 5200) : ''
     const hasEntryAt = fnBody.indexOf('await hasEntry(')
     const recheckAt = fnBody.indexOf('const now = useDocStore.getState()')
     const writeAt = fnBody.indexOf('setState({ binding: pending, pendingBinding: null })')
@@ -23457,6 +23462,19 @@ function runAdj966Tests() {
     JSON.stringify({ 调用点: docSrcText.includes(guideCall) }))
   check('adj966 负对照：把引导调用删掉 ⇒ 接线判据判假（它真的在数这一处调用）',
     docSrcText.includes(guideCall) && !docSrcText.replace(guideCall, '').includes(guideCall), '')
+
+  /**
+   * adj966：桌面壳"不再自动接管工作区"必须**明确告知一次**（用户不该以为文件丢了）——
+   * 告知每个会话只弹一次（启动竞态里可能被调用多次），且**不是错误**（`ok` 级）。
+   */
+  const noticeCall = 'showNotice(workspaceCopy.pcNoAutoOpen, ' + "'ok')"
+  check('adj966 接线：不自动接管工作区时**告知一次**（每会话一次、`ok` 级，并指向"面板里显式打开"）',
+    docSrcText.includes(noticeCall) && docSrcText.includes('if (!pcWorkspaceNoticeShown)') &&
+      workspaceCopy.pcNoAutoOpen.includes('不会自动打开') && workspaceCopy.pcNoAutoOpen.includes('工作区') &&
+      workspaceCopy.pcNoAutoOpen.includes('面板'),
+    JSON.stringify({ 调用: docSrcText.includes(noticeCall), 文案: workspaceCopy.pcNoAutoOpen }))
+  check('adj966 负对照：把这次告知删掉 ⇒ 判据判假（它确实在数"必须告知"这件事）',
+    docSrcText.includes(noticeCall) && !docSrcText.replace(noticeCall, '').includes(noticeCall), '')
 }
 
 /**

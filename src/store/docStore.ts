@@ -1395,6 +1395,9 @@ function reportSaved(t0: number, log?: SavePhaseLog, savedName?: string): void {
     )
 }
 
+/** adj966：「PC 不再自动接管工作区」的告知**每个会话只弹一次**（避免启动竞态里重复提示） */
+let pcWorkspaceNoticeShown = false
+
 /**
  * adj966：首次成功打开 FSA 文件后**提示一次**「想免手点保存就选『每次访问都允许』」。
  *
@@ -1829,6 +1832,14 @@ export async function resolvePendingBinding(): Promise<boolean> {
    */
   if (isPathWorkspace(ws)) {
     console.info(`[iJipu] 不自动接管原生目录工作区绑定：${joinPath(segs)}（PC 已改为默认直接操作系统文件）`)
+    /**
+     * **明确告知一次**（本会话只提示一次）：用户不该因为"没自动打开"而以为文件丢了。
+     * 这不是错误 ⇒ 用 `ok` 级提示；工作区仍然可用（面板里显式打开）。
+     */
+    if (!pcWorkspaceNoticeShown) {
+      pcWorkspaceNoticeShown = true
+      useUiStore.getState().showNotice(workspaceCopy.pcNoAutoOpen, 'ok')
+    }
     useDocStore.setState({ pendingBinding: null })
     return false
   }
