@@ -18981,6 +18981,12 @@ runAdj927ExternalChangeTests()
       failed++
       console.error('  ✗ adj658 一行三替谱用例抛异常', e)
     }
+    try {
+      runAdj675Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj675 替谱歌词=发音序列用例抛异常', e)
+    }
   })
   .then(() => {
     /**
@@ -22961,6 +22967,91 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/. | 3 1/ 7,/ 6,/ 7,/ 1/
     mainNotes.length === 31 && noTpNotes.length === mainNotes.length &&
       mainNotes.map(sig).join('|') === noTpNotes.map(sig).join('|'),
     JSON.stringify({ n: mainNotes.length, noTp: noTpNotes.length }))
+}
+
+/**
+ * adj675（**用户 2026-10-15 实报**，原话）：
+ * 「红色部分 `2` 的音符对应的词第一行是对的，第二行应该是对应的是『经』，但实际对应到『曾』了，
+ *  需知道根据节拍，`2` 已经回到主旋律了，已不在替谱范围了，此处的词对齐音符就对错了位置」。
+ *
+ * 根因：替谱段替换掉的**只是它覆盖的那几个主旋律音**（由它的拍跨度决定），而它自己的音数可以不同
+ * （用户谱面：`{tp (3/ 2//) (2// 2/) 1/}` 有 5 个音、只覆盖 4 个主旋律音）。旧口径"替谱有几个音就
+ * 往下占几个槽位"⇒ 多吃一个槽位：本该落在主旋律那个音上的字被抢到替谱最后一个音上，
+ * 而那个主旋律音**空着没有字**（实测：红 `2` 无字、`曾` 在替谱第 5 音、`经` 顺延到下一个音）。
+ *
+ * 新口径（`layout/index.ts` 的 `spliceTpNotes`）：字跟着**这一遍的发声音序列**（替谱的音接进序列、
+ * 替换掉它覆盖的那几个主旋律音）；替谱音**少于**覆盖数时，多出来的主旋律音仍是字位（`adj658` 那条）。
+ */
+function runAdj675Tests() {
+  console.log('[160] 替谱段的歌词 = 跟"这一遍的发声音序列"（adj675）')
+  const code = `V: 1.0
+B: 替谱歌词对位
+D: C
+P: 4/4
+Q: 1/ 6, 5,/ 6, 6,/ 6,/ | 6,/ 3 2/ 3/ 6,/ 6,/ 3/ | 2/. (1// 1/) 3/ 2 5,/ 2/ | 2/ 2 1/ 2/ 5,/ 5,/ 1/ |
+C1: 孤独的人。可能枕边有微笑才能暖你@清晨，可能夜空有浏览才能
+C2: 忘掉年轮。可能 {tp 3/ 3 2/} 要多年以后才能 {tp (3/ 2//) (2// 2/) 1/} 看@清@曾经，可能在当时身边有双
+`
+  const parsed = parseJps(code)
+  check('adj675 用户谱例无**错误**（两份小谱例没有反复结构，会有"替谱轮不到"的告警，属正常）',
+    parsed.errors.filter((e) => e.severity === 'error').length === 0,
+    JSON.stringify(parsed.errors.map((e) => `${e.severity}:${e.message}`)))
+  const page = layoutScore(parsed, defaultPageConfig).pages[0]
+  const c2 = page.lyrics.filter((c) => c.line === 1).sort((a, b) => a.x - b.x)
+  const main = page.notes.filter((n) => !n.segment).sort((a, b) => a.x - b.x)
+  /** 第二个 `{tp … }`（`variantIdx === 1`）段内的 5 个音 —— 按 id 命名空间筛，不按 x 猜 */
+  const tpNotes = page.notes
+    .filter((n) => n.segment?.type === 'tp' && decodeTpNoteId(n.id.index)?.variantIdx === 1)
+    .sort((a, b) => a.x - b.x)
+  /** 找"某个音上的字"（|字心 − 音心| ≤ 2px，与其它歌词判据同口径） */
+  const charOn = (note: (typeof main)[number]): string =>
+    c2
+      .filter((c) => Math.abs(c.x - note.x) <= 2)
+      .map((c) => `${c.char.text}${c.char.trailing ?? ''}`)
+      .join('')
+
+  /** 用户标红的那个音：第 3 小节（`barIndex` 2）第 2 拍上的主旋律 `2` —— 按**拍位**找，不按 x 猜 */
+  const isRed2 = (n: (typeof main)[number]): boolean =>
+    n.barIndex === 2 && n.beatPos === 2 && n.duration === 1 && n.token.kind === 'note' && n.token.pitch === 2
+  const red2 = main.find(isRed2)
+  check('adj675 夹具自检：找到了用户标红的那个主旋律 `2`（第 3 小节第 2 拍、时值 1 拍）', red2 !== undefined,
+    JSON.stringify(main.filter((n) => n.barIndex === 2).map((n) => `${n.token.kind === 'note' ? n.token.pitch : n.token.kind}@${n.beatPos}+${n.duration}`)))
+  /**
+   * ① **红 `2` 上必须是「经」**（用户的核心诉求）：替谱 5 个音替换 4 个主旋律音 ⇒ 后面的字整体左移一位。
+   * 旧口径这里**一个字都没有**（`曾` 被抢到替谱第 5 音、`经` 落在下一个音上）。
+   */
+  check('adj675 ① 红 `2`（已回到主旋律的那个音）上是「经，」—— 替谱覆盖区之后的字整体左移一位',
+    red2 !== undefined && charOn(red2) === '经，', `实际「${red2 ? charOn(red2) : '?'}」`)
+  /** ② 替谱自己的 5 个音按"发声音序列"吃字：第 1/3/5 个音依次是 看 / 清 / 曾（`@` 跳空占位不带字） */
+  check('adj675 ② 替谱那 5 个音上依次是 看 / 清 / 曾（`@` 跳空占位、不带字）',
+    tpNotes.length === 5 && charOn(tpNotes[0]) === '看' && charOn(tpNotes[1]) === '' &&
+      charOn(tpNotes[2]) === '清' && charOn(tpNotes[3]) === '' && charOn(tpNotes[4]) === '曾',
+    JSON.stringify(tpNotes.map((n) => charOn(n))))
+  /** ③ **不留空洞**：替谱覆盖区之后的三个主旋律音都各有其字（旧口径红 `2` 是空的） */
+  const after = main.filter((n) => n.barIndex === 2 && n.beatPos >= 2).sort((a, b) => a.x - b.x)
+  check('adj675 ③ 替谱之后的三个主旋律音都挂上了字（旧口径红 `2` 空着）',
+    after.length === 3 && after.every((n) => charOn(n) !== ''),
+    JSON.stringify(after.map((n) => `${n.token.kind === 'note' ? n.token.pitch : n.token.kind}:${charOn(n)}`)))
+  /** ④ 字序与 x 序一致（没有把字甩到别处） */
+  const xs = c2.map((c) => c.x)
+  check('adj675 ④ 第二行歌词的字序与 x 序一致（没有乱序）', xs.every((v, i) => i === 0 || v >= xs[i - 1] - 0.01),
+    JSON.stringify(xs.map((v) => Math.round(v))))
+  /**
+   * 负对照：**把两个 `{tp … }` 都去掉** ⇒ 这行回到"逐槽对主旋律音"的老样子，
+   * 红 `2` 上就不再是「经」（而是 `曾`）⇒ 上面 ① 那条判据必须判假 —— 证明它量的是"替谱带来的左移"，
+   * 而不是"红 `2` 上随便有个字就算过"。
+   */
+  const pageNo = layoutScore(parseJps(code.replace(/\{tp[^}]*\}/g, '')), defaultPageConfig).pages[0]
+  const mainNo = pageNo.notes.filter((n) => !n.segment).sort((a, b) => a.x - b.x)
+  const redNo = mainNo.find((n) => n.barIndex === 2 && n.beatPos === 2 && n.duration === 1 && n.token.kind === 'note' && n.token.pitch === 2)
+  const charNo = redNo
+    ? pageNo.lyrics
+        .filter((c) => c.line === 1 && Math.abs(c.x - redNo.x) <= 2)
+        .map((c) => `${c.char.text}${c.char.trailing ?? ''}`)
+        .join('')
+    : ''
+  check('adj675 负对照：去掉 `{tp}` 后红 `2` 上不是「经」（＝上面 ① 判的是替谱造成的左移，不是恒真）',
+    redNo !== undefined && charNo !== '经，' && charNo !== '', `实际「${charNo}」`)
 }
 
 /**
