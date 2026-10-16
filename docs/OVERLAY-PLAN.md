@@ -23,12 +23,15 @@
 | **EP-12** | 谱面设置加「水印 / 背景」两个子页签（5 处登记 + `.pcfg-text`）；`verify-app-ui` 加**真点端到端**（打字 → 预览真出层 → 保存真落键） | commit `1dcc03b` |
 | **EP-13** | **预览区手势**（`adj965d`）：`Alt+滚轮` 缩放 / `Alt+Shift+滚轮` 旋转 / `Alt+左键拖动` 平移该层 + 三条前提 + 松手/停顿落盘；判定逻辑落**引擎** `engine/overlayGesture.ts`（应用与 Obsidian 插件共用一份）；`verify-app-ui` **真派发鼠标事件**（含负向判据、`Ctrl+单击` 回归、累计步进、`preventDefault` 生效） | 本轮 commit（见 §七 EP-13 那一行） |
 | **EP-14①** | 网页版 FSA 读图通道（`store/assetReaderFsa.ts`：工作区目录句柄逐级下钻 → 字节；未授权与"图不在"分开报） | commit `101f64f` |
+| **EP-14②** | `adj969`（用户实报"文件方式打开的谱里相对路径图找不到"）：网页版**单文件句柄**那一档补齐 —— `AssetBase` 增 `{kind:'picked'}` / `{kind:'fileNoDir'}`，新增 `store/assetDirAuth.ts`（授权一次所在文件夹 + 同名/字节数/修改时间校验 + IndexedDB 记忆 + 打开时先问一句），设置页签就地给按钮；桌面壳 PC 的「打开…」同一档（`desktopAssetReader` 复用网页版通道） | commit `21ac580`（v0.66.0） |
 | **EP-11①** | `obsidian-ijipu/vendor/engine` 已同步（51 文件、哈希 0 差异）；插件冒烟 **766 passed / 0 failed** | 插件仓库 commit `8c53434` |
 | 本文 | 规格 → 完整方案（含执行清单） | commit `b8cdd3a` |
 
 **当前能用的能力**：**文本水印已全程可用** —— 设置界面 → 预览 → PNG/JPG/PDF/打印导出 → 差量写进 `# jps-config`；
 **预览区的 Alt 手势已可用**（水印层与背景层都能在预览里缩放/旋转/平移，前提三条见 §六）。
-（图片水印与背景图还差取图通道：EP-07/EP-08/EP-09/EP-10；网页版 FSA 那条 EP-14① 已接；
+**"文件方式"打开的谱**（拖入 / 文件选择器 / 最近文件）现在也能读相对路径的图了 —— `adj969` 起
+打开后会在顶部确认条问一句，点「授权所在文件夹」授权一次即可（句柄记住、跨会话复用，见 §4.1 那一行）。
+（图片水印与背景图还差取图通道：EP-07/EP-08/EP-09/EP-10；网页版 FSA 那两条 EP-14①② 已接；
 插件 DEFS/README 与嵌入产物 EP-11②③④。）
 
 **基线**：`tsc -b` 0 错；`oxlint` 54 警告 / 0 错（＝基线）；`npm run smoke` 全绿（CLI 断言 126 项）；
@@ -180,7 +183,7 @@ PNG/JPG/PDF 三条导出都是"把 SVG 交给 `new Image()` 栅格化"
 | **桌面端**（双击 `.jps`） | `nativePath` 的目录 | ❌ | 桌面端**没有**"按任意绝对路径读内容"的命令（只有写文本的 `write_external_file`、要工作区根+相对段的 `ws_read_text`）；唯一返原始字节的 `sf_soundfont_resource_read`（`src-tauri/src/lib.rs:207`）路径被限死在安装目录 ⇒ **需新增（EP-08）** |
 | 桌面端（工作区） | 工作区根 + `segs` | 半 ✓ | `ws_*` 只有文本读写 ⇒ 需加二进制读（可并入 EP-08） |
 | **网页版**（工作区 FSA） | 工作区根 | 定位 ✓ / 读 ❌ | `resolveFileHandle` 能逐级拿到句柄（`src/store/workspace.ts:543`），但只有 `readTextRaw`（`:690`）⇒ 需加 ArrayBuffer 读（EP-14） |
-| 网页版（单文件句柄） | — | ❌ | FSA 单文件句柄**拿不到父目录**（硬限制）⇒ 只能提示"改用工作区 / 把图内嵌" |
+| 网页版（单文件句柄） | 用户**额外授权的那份谱所在目录**（`{kind:'picked'}`） | ✓（`adj969`） | 单文件句柄**拿不到父目录**（FSA 硬限制）⇒ 改为"打开后立刻在确认条问一句，用户点「授权所在文件夹」再弹 `showDirectoryPicker`"；句柄存 IndexedDB 跨会话复用，**采信判据**=所选目录里同名 `.jps` 的字节数 + 修改时间都对得上（`src/store/assetDirAuth.ts`）。⚠ 不能在打开动作之后**直接弹**对话框：`showOpenFilePicker()` 已把那次"用户手势"用掉（实测 `userActivation.isActive === false`）⇒ 必被 `SecurityError` 拒 |
 | **手机 PWA** | 同工作区 | 同上 | 移动端打开常走 `<input type=file>` 降级、**连句柄都没有** ⇒ 现实路径是"工作区"或"图内嵌" |
 | **插件（嵌入版）** | vault（`welcome.root` + 当前 `segs`） | 半 ✓ | 桥的 `read` 是**纯文本**（`obsidian-ijipu/src/embed/bridge.ts:344`）；`adapter.readBinary` 插件里已有用例（`src/bankFile.ts:86`）⇒ **需新增桥 op（EP-09）** |
 | 插件（代码块 `[[…]]`） | 笔记所在目录 | 解析 ✓ | `metadataCache.getFirstLinkpathDest(link, sourcePath)` 有先例（`obsidian-ijipu/src/embed.ts:176`），但代码块面板（`scorePane.ts`）今天不做链接解析 ⇒ **需新增**；"当前笔记路径"已有：`ctx.sourcePath` → `IJipuBlock.sourcePath` → `ScorePaneHost.containerPath` |
