@@ -18920,6 +18920,13 @@ runAdj927ExternalChangeTests()
       failed++
       console.error('  ✗ adj625 方框小节序号用例抛异常', e)
     }
+    try {
+      // adj967：行首序号挪到上一行行末小节线 + 末尾无小节不画（用户 2026-10-17 两条口径）
+      runAdj967Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj967 小节序号落点用例抛异常', e)
+    }
   })
   .then(() => {
     try {
@@ -19920,9 +19927,14 @@ function runAdj625Tests() {
   check('adj625 间隔 1 ⇒ 每个小节都有序号（含全曲第 1 小节）',
     p1.barNumbers.length === 8 && p1.barNumbers[0].n === 1 && p1.barNumbers[0].x === defaultPageConfig.margin_left,
     `n=${p1.barNumbers.length} first=${p1.barNumbers[0]?.n}@${p1.barNumbers[0]?.x}`)
-  check('adj625 间隔 1 ⇒ 每个行首小节都落在边距线上（行首小节线隐藏）',
-    atMargin.length >= 1 && atMargin.length <= rowCount,
-    `行首锚点=${atMargin.length} 行数=${rowCount}`)
+  /**
+   * adj967（**用户 2026-10-17 口径**）改了这条的行为：行首序号不再留在边距线上，而是挪到**上一行行末小节线**下
+   * （两处是同一条小节边界，行末那侧有线可依）⇒ 于是**只有全曲第 1 小节**（没有上一行）才落在边距线上。
+   * 旧断言写的是"每个行首小节都落在边距线上"，按新口径重写（否则它只是在"碰巧还过"）。
+   */
+  check('adj625/adj967 间隔 1 ⇒ **只有全曲第 1 小节**落在边距线上（其余行首序号已挪到上一行行末小节线下）',
+    atMargin.length === 1 && atMargin[0].n === 1,
+    `行首锚点=${atMargin.map((b) => b.n).join(',')} 行数=${rowCount}`)
 
   // ---- ⑤ 多声部：块首序号在**大括号与音符之间**，高度取**最上面声部**的小节线底缘 ----
   const MV = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 4 | 5 6 7 1 |\nQ2: 1, 2, 3, 4 | 5, 6, 7, 1 |\n'
@@ -20048,6 +20060,88 @@ function runAdj625Tests() {
  * adj626（用户要求）：**PDF 改走系统打印（矢量、不开新窗口）**，且
  * **打印/另存 PDF 的默认文件名 = 第一个描述头 `B:` 的值**（标题）。
  */
+/**
+ * adj967（**用户 2026-10-17 两条口径**）：
+ *  ① 「小节序号方块如果是在**行首**，是不是可以改放到**上一行行末的小节线处** —— 两处实际都指向同一个小节，
+ *     且**行末固定有小节线**，会更直观」；
+ *  ② 「**最后一条小节线的序号方块不显示的哦，后面又没有小节了**」（用户给了截图：末尾 `‖` 下面挂着一个
+ *     多余号码）。
+ *
+ * 实测出的两条对应关系（都不是猜的）：
+ *  · ①的夹具：3 条 `Q:` 行 × 4 小节、间隔 3 ⇒ 9 号落在第 3 行行首；改前 `x=50`（= 左边距，**上面没有线**），
+ *    改后 `x=544.8`、y 降到上一行线底 —— 而它标注的小节左边界正是上一行那条画出来的线 `544.3`。
+ *  · ②的成因是**幽灵末小节**：源码末尾多写一个小节线（`… 4 5 6 7 | |`）时，解析出的**最后一个 seg 是空的**
+ *    却仍被 `barOrdinalsOf` 编了号（那里只把"组首空 seg"判 null）⇒ 行末埋点给它画了方框；而那条空小节
+ *    只有 ~11px 宽（实测 533.5→544.3），于是方框看起来就"挂在最后那条 `‖` 上"——与用户截图一致。
+ */
+function runAdj967Tests() {
+  console.log('[178] 行首序号挪到上一行行末小节线 + 末尾无小节不画（adj967）')
+  const lay = (src: string, cfg: PageConfig) => layoutScore(parseJps(src), cfg)
+  const BOXES = (src: string, cfg: PageConfig) => lay(src, cfg).pages.flatMap((p) => p.barNumbers)
+  /** 每条 Q 行 4 个密集小节（实测恰好一行 4 小节）⇒ 3 行共 12 小节 */
+  const DENSE = 'Q: 1/ 2/ 3/ 4/ 5/ 6/ 7/ 1/ | 1/ 2/ 3/ 4/ 5/ 6/ 7/ 1/ | 1/ 2/ 3/ 4/ 5/ 6/ 7/ 1/ | 1/ 2/ 3/ 4/ 5/ 6/ 7/ 1/ |\n'
+  const SRC = `V: 1.0\nB: t\nD: C\nP: 4/4\n${DENSE}${DENSE}${DENSE}# jps-config:{"barCountInterval":3}\n`
+
+  // ---- 判据①：行首 ⇒ 挂到上一行行末小节线下（两条布局路径都要成立） ----
+  for (const mode of ['space', 'duration'] as const) {
+    const cfg: PageConfig = { ...defaultPageConfig, noteSpaceLayout: mode, showBarCount: true, barCountInterval: 3 }
+    const page = lay(SRC, cfg).pages[0]
+    const n6 = page.barNumbers.find((b) => b.n === 6)
+    const n9 = page.barNumbers.find((b) => b.n === 9)
+    const prevRowBars = page.barlines.filter((l) => n6 !== undefined && Math.abs(l.yBottom - n6.yBarBottom) < 0.6)
+    const prevEndX = prevRowBars.length > 0 ? Math.max(...prevRowBars.map((l) => l.x)) : NaN
+    check(`adj967（${mode}）行首序号（9 号）挂在**上一行行末小节线**下：x 对齐那条线、y 与上一行内的序号(6 号)同高`,
+      n6 !== undefined && n9 !== undefined && prevRowBars.length > 0 &&
+        Math.abs(n9.x - prevEndX) < 0.6 && Math.abs(n9.yBarBottom - n6.yBarBottom) < 0.6,
+      JSON.stringify({ n6: [n6?.x, n6?.yBarBottom], n9: [n9?.x, n9?.yBarBottom], 上一行末线: prevEndX }))
+    check(`adj967（${mode}）**负对照**：9 号不再落在行首隐藏线（左边距）上 —— 改前的实现就会落在那里`,
+      n9 !== undefined && Math.abs(n9.x - cfg.margin_left) > 0.6,
+      `9号x=${n9?.x} 左边距=${cfg.margin_left}`)
+    /** 兜底：没有上一行时（全曲第 1 小节）仍挂边距线 —— 间隔 1 ⇒ 3 行的行首分别是第 1/5/9 小节 */
+    const cfg1: PageConfig = { ...defaultPageConfig, noteSpaceLayout: mode, showBarCount: true, barCountInterval: 1 }
+    const p1 = lay(SRC, cfg1).pages[0]
+    const atMargin1 = p1.barNumbers.filter((b) => Math.abs(b.x - cfg1.margin_left) < 0.6)
+    check(`adj967（${mode}）兜底：**只有全曲第 1 小节**留在边距线上（第 5、9 小节都挪到上一行行末线了）`,
+      atMargin1.length === 1 && atMargin1[0].n === 1,
+      `边距线上的=${atMargin1.map((b) => b.n).join(',')}`)
+  }
+
+  // ---- 判据②：**最后一条小节线后面没有小节 ⇒ 不画**（用户截图那条） ----
+  const GHOST = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 | 3 4 5 6 | 7 1 2 3 | 4 5 6 7 | |\n'
+  const MID = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | | 2 3 4 5 |\n'
+  const g = BOXES(GHOST, { ...defaultPageConfig, showBarCount: true, barCountInterval: 4 })
+  const m = BOXES(MID, { ...defaultPageConfig, showBarCount: true, barCountInterval: 1 })
+  check('adj967 末尾多一个小节线（幽灵末小节）⇒ **不画方框**：间隔 4、7 个真小节 ⇒ 只该有 4 号，不该有 8 号',
+    g.map((b) => b.n).join(',') === '4', g.map((b) => b.n).join(','))
+  check('adj967 **负对照**：同一个空小节夹在**中间**时照旧编号（"末"与"中间"要分清，别一起砍掉）',
+    m.map((b) => b.n).join(',') === '1,2,3', m.map((b) => b.n).join(','))
+  check('adj967 序号仍然只会落在**小节线**上（x/y 都与某条线逐项对齐）——挪位没有把它挪到半空中',
+    g.every((bn) => {
+      const p = lay(GHOST, { ...defaultPageConfig, showBarCount: true, barCountInterval: 4 }).pages[0]
+      return p.barlines.some((l) => Math.abs(l.x - bn.x) < 0.6 && Math.abs(l.yBottom - bn.yBarBottom) < 0.6)
+    }),
+    JSON.stringify(g.map((b) => [b.n, b.x, b.yBarBottom])))
+
+  // ---- 接线：两条单声部路径 + 多声部路径都接上了（源码级；负对照逐处删） ----
+  {
+    const src = String(readFileSync('packages/ijipu-engine/src/engine/layout/index.ts', 'utf8'))
+    const wired = (t: string): boolean =>
+      t.includes('isGhostTrailingSeg(segs, nc)') &&
+      t.includes('isGhostTrailingSeg(p.segs, nc)') &&
+      t.includes('pushRowStartBarNumber(ord[fc] as number, yBottomBar, voice, groupIndex, prevEndLine)') &&
+      t.includes('pushRowStartBarNumber(ord[fc] as number, yBottomBarLead, voice, groupIndex, prevEndLine)') &&
+      t.includes('pushRowStartBarNumber(ord[row.segIdx] as number, yBottomBar, voice, groupIndex, prevEndLine)')
+    check('adj967 接线：幽灵闸（单声部 2 处 + 多声部 1 处）与行首锚点（duration / space / 碎片行）都接上了',
+      wired(src), '')
+    check('adj967 **负对照**：任删一处（多声部幽灵闸 / duration 行首锚点 / 碎片行锚点）⇒ 判据判假',
+      wired(src) &&
+        !wired(src.replace('isGhostTrailingSeg(p.segs, nc)', '')) &&
+        !wired(src.replace('pushRowStartBarNumber(ord[fc] as number, yBottomBar, voice, groupIndex, prevEndLine)', '')) &&
+        !wired(src.replace('pushRowStartBarNumber(ord[row.segIdx] as number, yBottomBar, voice, groupIndex, prevEndLine)', '')),
+      '')
+  }
+}
+
 function runAdj626Tests() {
   console.log('[149] PDF 走打印 + 默认文件名 = 第一个 B:（adj626）')
   // ---- ① 命名规则（纯函数）----
