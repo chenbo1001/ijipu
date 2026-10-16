@@ -100,9 +100,16 @@ PC 端与 Web/PWA 端要按**同一套口径**补上，而不是各写一套。
 
 1. ✅ ~~PC 默认系统文件、工作区降级为可选~~（本批完成：启动不再自动接管原生目录工作区；打开/保存走系统文件；
    工作区只剩"显式打开工作区"这条路，**未删**）。剩余可选项：Dock 面板默认页是否要从"工作区"换掉（观感项，待用户拍板）。
-2. 引导文案的**接线**：首次成功打开 FSA 文件后调用一次；"这台机器提示过"的键按 §七之5 登记到 store 顶部常量。
-3. 插件侧**文案统一**（沿用 `externalChangeCopy`，不另造一套）。
-4. **发布**（版本 + CHANGELOG/ERRORS-LOG + 门 + 发布链）。
+2. ✅ ~~授权引导的**接线**~~（`docStore.guidePersistPermissionOnce` 在打开 FSA 文件成功后调一次；
+   `'提示过'` 的键登记在 `editorPrefs.ts` 的 `PERM_GUIDE_KEY`）。
+3. ✅ ~~插件侧**文案统一**~~ —— **核对结论：无需改动**。插件侧本来就是这套机制的宿主端：
+   `obsidian-ijipu/src/main.ts:764`（`adj724b`）把"库里的 `.jps` 被改了"推给嵌入版（`bridge.broadcast('fileChanged')`），
+   `obsidian-ijipu/src/embed.ts:296/335` 是自己的写盘回环守卫；而用户在 Obsidian 里看到的提示条与差异框
+   **就是应用的那一份**（`brand/copy.ts` 的 `externalChangeCopy` + `FileDiffDialog`）⇒ 三端口径天然同源，
+   不需要在插件仓库再写一套文案。
+4. ⬜ **发布**：版本号（应用 / 引擎 / 插件各自判定）+ CHANGELOG 当版 + ERRORS-LOG 条目与变更记录表
+   + 门（tsc/lint/build/smoke/verify:app-ui/verify:site）+ 打包与 `check:installer` + Release + 插件 `vendor/engine`
+   同步与插件发布（按 `.dsh/skills/版本发布/SKILL.md` 的 OP-01…OP-16 整串执行）。**未开始。**
 
 **已知未验**
 
