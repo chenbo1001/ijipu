@@ -1,0 +1,175 @@
+/**
+ * store/fileHost.ts — 「文件宿主能力」与「降级决策」的**唯一口径**（adj966）
+ *
+ * ## 为什么单独一个模块
+ *
+ * 三种宿主（桌面壳 Tauri / 插件嵌入版 / 网页版与 PWA）对"文件"的能力不同，但**交互必须一样**：
+ * 打开 → 编辑 → 保存 → 冲突三选。把「宿主 → 能力 → 决策」抽成**纯函数**，好处有两个：
+ *  ① smoke 能**逐端逐档**断言（含负对照），不必真跑三端；
+ *  ② 各端只提供适配器（`readText` / `mtimeOf` / `watch`），**判据不许各写一套**
+ *     ——与 `store/externalChange.ts`（比对判据）、`store/saveSupport.ts`（写盘与权限）同一口径。
+ *
+ * 口径与能力矩阵见 `docs/FILE-MODEL.md`；**改这张表就要同步那份文档**。
+ *
+ * ## 三条不变量（本模块只负责把它们变成可断言的决定）
+ *
+ * 1. 打开/读入 ⇒ 记基准（`externalChange.setBaseline`）；
+ * 2. **写盘前必比基准**：有外部改动 ⇒ **先问用户**（`decideWriteGate` 返回 `'ask'`），任何端都不许静默覆盖；
+ * 3. 写盘后刷基准 + 登记在途写 ⇒ 自己的回环不提示（`externalChange.markWriteInFlight`）。
+ */
+import type { RuntimeEnv } from '../brand/env'
+import type { ChangeVerdict } from './externalChange'
+
+/** 宿主身份（决定默认能力档） */
+export type FileHostId = 'desktop' | 'plugin' | 'web' | 'pwa' | 'limited'
+/** 打开一个文件的方式 */
+export type OpenMode = 'native-picker' | 'fsa-picker' | 'host-file' | 'upload-only'
+/** 外部改动检测方式 */
+export type WatchMode = 'event' | 'poll' | 'focus-only' | 'none'
+/** 绑定的跨会话保存方式 */
+export type PersistMode = 'native-path' | 'host-record' | 'indexeddb-handle' | 'none'
+
+/** 一个宿主的能力档（**静态**能力；写权限那种"运行时才知道"的另走 `decideWriteMode`） */
+export interface FileHostProfile {
+  id: FileHostId
+  open: OpenMode
+  /** 无手势读到"文件此刻的内容" */
+  readWithoutGesture: boolean
+  /** 无手势写回（静态能力；Web 记 `false`，实际能不能写看 `decideWriteMode`） */
+  writeWithoutGesture: boolean
+  watch: WatchMode
+  /** 能否拿到 mtime（拿不到就只能比内容，见 `externalChange.ts` 头注释） */
+  hasMtime: boolean
+  persistBinding: PersistMode
+  /** 写回是否**可能**需要一次用户手势（Web 未持久授权时） */
+  needsGestureForWrite: boolean
+}
+
+/** 桌面壳：原生对话档 + 原生读写 + 原生 mtime；监视先用轮询（原生事件源后续再升级为 `event`，判据不变） */
+const DESKTOP: FileHostProfile = {
+  id: 'desktop',
+  open: 'native-picker',
+  readWithoutGesture: true,
+  writeWithoutGesture: true,
+  watch: 'poll',
+  hasMtime: true,
+  persistBinding: 'native-path',
+  needsGestureForWrite: false,
+}
+
+/** 插件嵌入版：一切经宿主桥；**没有 mtime**（宿主只推 path ⇒ 走内容判据）；有宿主 `modify` 事件 */
+const PLUGIN: FileHostProfile = {
+  id: 'plugin',
+  open: 'host-file',
+  readWithoutGesture: true,
+  writeWithoutGesture: true,
+  watch: 'event',
+  hasMtime: false,
+  persistBinding: 'host-record',
+  needsGestureForWrite: false,
+}
+
+/** 网页版 / PWA（Chromium 且有 FSA）：句柄存 IndexedDB，能读；能不能写看权限（`decideWriteMode`） */
+function webProfile(id: 'web' | 'pwa'): FileHostProfile {
+  return {
+    id,
+    open: 'fsa-picker',
+    readWithoutGesture: true,
+    writeWithoutGesture: false, // 静态"看你授权了没" ⇒ 交给 decideWriteMode
+    watch: 'poll',
+    hasMtime: true, // File.lastModified
+    persistBinding: 'indexeddb-handle',
+    needsGestureForWrite: true,
+  }
+}
+
+/**
+ * 受限档：**Firefox / Safari（含 iOS 上一切浏览器与 PWA）没有 FSA**，以及手机端
+ * （`adj405`：已安装 PWA 里 `showOpenFilePicker` 不可靠 ⇒ 一律走 `<input type=file>`）。
+ * 这一档"打开 = 上传、保存 = 下载"，**必须保留草稿**（刷新即失去内容）。
+ */
+const LIMITED: FileHostProfile = {
+  id: 'limited',
+  open: 'upload-only',
+  readWithoutGesture: false,
+  writeWithoutGesture: false,
+  watch: 'none',
+  hasMtime: false,
+  persistBinding: 'none',
+  needsGestureForWrite: true,
+}
+
+/** 当前宿主的身份（`fsa` = 探测到 `showOpenFilePicker`；由调用方传入，便于断言） */
+export function hostIdOf(env: RuntimeEnv, fsa: boolean): FileHostId {
+  if (env.shell === 'tauri') return 'desktop'
+  if (env.shell === 'host') return 'plugin'
+  if (env.device === 'mobile' || !fsa) return 'limited'
+  return env.installed ? 'pwa' : 'web'
+}
+
+/** 身份 → 能力档 */
+export function profileOf(id: FileHostId): FileHostProfile {
+  switch (id) {
+    case 'desktop':
+      return DESKTOP
+    case 'plugin':
+      return PLUGIN
+    case 'web':
+    case 'pwa':
+      return webProfile(id)
+    default:
+      return LIMITED
+  }
+}
+
+/** 一步到位：当前宿主的完整能力档 */
+export function hostProfile(env: RuntimeEnv, fsa: boolean): FileHostProfile {
+  return profileOf(hostIdOf(env, fsa))
+}
+
+/** 句柄/绑定的权限状态（Web 用 `queryPermission`；原生与宿主恒为 `granted`） */
+export type PermState = 'granted' | 'prompt' | 'denied'
+
+/** 保存该怎么走 */
+export type WriteMode =
+  | { kind: 'write-now' } // 无手势直接写（桌面 / 宿主 / Web 已授权）
+  | { kind: 'need-gesture' } // 需要一次用户手势重新授权（Web 未授权）
+  | { kind: 'need-pick' } // 还没有绑定对象 ⇒ 让用户选一个文件（另存为）
+  | { kind: 'save-as-only' } // 本端没有原位写回能力 ⇒ 只能另存为下载
+
+/**
+ * **能不能现在写**（纯决策）：
+ *  · 没有绑定 ⇒ 必须先选文件；
+ *  · 静态就不能无手势写（受限档）⇒ 只能另存为；
+ *  · 有绑定且静态能写（桌面/宿主）⇒ 直接写；
+ *  · 有绑定但静态不能写（Web）⇒ 看权限：`granted`（本会话已授权或用户选了「每次访问都允许」）⇒ 直接写；
+ *    `prompt` ⇒ 要一次手势；`denied` ⇒ 只能另存为。
+ */
+export function decideWriteMode(p: FileHostProfile, perm: PermState, hasBinding: boolean): WriteMode {
+  if (!hasBinding) return p.open === 'upload-only' ? { kind: 'save-as-only' } : { kind: 'need-pick' }
+  if (p.writeWithoutGesture) return { kind: 'write-now' }
+  if (p.open !== 'fsa-picker') return { kind: 'save-as-only' }
+  if (perm === 'granted') return { kind: 'write-now' }
+  if (perm === 'denied') return { kind: 'save-as-only' }
+  return { kind: 'need-gesture' }
+}
+
+/** 外部改动该怎么查（隐藏标签页不轮询，改为"回到前台/可见时查一次"） */
+export function decideWatch(p: FileHostProfile, visible: boolean): WatchMode {
+  if (p.watch === 'none') return 'none'
+  if (p.watch === 'event') return 'event'
+  return visible ? 'poll' : 'focus-only'
+}
+
+/**
+ * **写盘前的最后一道闸**（数据安全的保底，任何端都一样）：
+ *  · 有外部改动 ⇒ `'ask'`（由 UI 弹"保留本地 / 载入外部 / 查看差异"，**不许直接写**）；
+ *  · 还没读过内容 ⇒ `'read-first'`（先读一次再定，不许拿 mtime 不同就当真外部改动）；
+ *  · 没变 ⇒ `'write'`。
+ */
+export function decideWriteGate(verdict: ChangeVerdict, mode: WriteMode): 'write' | 'ask' | 'read-first' | 'blocked' {
+  if (mode.kind === 'save-as-only') return 'blocked' // 不是"有冲突"，是本端写不回去 ⇒ 走另存为
+  if (verdict === 'external') return 'ask'
+  if (verdict === 'need-read') return 'read-first'
+  return 'write'
+}

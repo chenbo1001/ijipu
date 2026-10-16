@@ -254,6 +254,10 @@ import { RECENT_FILES_MAX, type WorkspaceRecord } from '../src/store/fileHandleD
 import { foldKeys, TOPBAR_DONATE_KEY, TOPBAR_FIXED_KIDS } from '../src/ui/topbarFold.ts'
 // adj538：桌面壳「外部打开」——多文件取舍是纯逻辑，可在 Node 里直接断言（模块不碰 window 顶层）
 import { pickPrimary, hasShell, type ExternalFile } from '../src/store/externalOpen.ts'
+// adj966：文件宿主能力与降级决策（纯函数 ⇒ 逐端逐档断言，不必真跑三端；口径见 docs/FILE-MODEL.md）
+import { hostIdOf, hostProfile, decideWriteMode, decideWatch, decideWriteGate } from '../src/store/fileHost.ts'
+import type { FileHostProfile } from '../src/store/fileHost.ts'
+import type { RuntimeEnv } from '../src/brand/env.ts'
 // adj944（用户需求「全局设置里注册 iJipu CLI」）：PATH 增删的**纯函数 + 编排** ——
 // 应用界面（全局设置那个按钮）与命令行（`ijipu cli register|unregister|status`）**共用这一份** ✓
 // adj946（用户实报 bug）：注册写进 PATH 的是**命令行入口目录 `<安装目录>\bin`**（`binDirOf` 是唯一一处推导）
@@ -18999,6 +19003,12 @@ runAdj927ExternalChangeTests()
       failed++
       console.error('  ✗ adj675c 歌词联动指向用例抛异常', e)
     }
+    try {
+      runAdj966Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj966 文件宿主能力用例抛异常', e)
+    }
   })
   .then(() => {
     /**
@@ -23135,6 +23145,91 @@ C2: 忘掉年轮。可能 {tp 3/ 3 2/} 要多年以后才能 {tp (3/ 2//) (2// 2
   check('adj675b ④ 这一行的字序与 x 序一致（补出来的字没插到前面去）',
     g1.every((c, i) => i === 0 || c.x >= g1[i - 1].x - 0.01),
     JSON.stringify(g1.map((c) => `${c.char.text}@${Math.round(c.x)}`)))
+}
+
+/**
+ * adj966（用户口径：**按能力降级**修文件模型）：「宿主 → 能力 → 决策」是纯函数 ⇒ 逐端逐档断言，
+ * 不必真跑三端。口径与能力矩阵见 `docs/FILE-MODEL.md`，判据只在 `src/store/fileHost.ts` 一处定义。
+ */
+function runAdj966Tests() {
+  console.log('[163] 文件宿主能力与降级决策（adj966）')
+  const web: RuntimeEnv = { shell: 'web', host: null, device: 'desktop', installed: false }
+  const pwa: RuntimeEnv = { ...web, installed: true }
+  const mobileWeb: RuntimeEnv = { ...web, device: 'mobile' }
+  const tauri: RuntimeEnv = { ...web, shell: 'tauri' }
+  const host: RuntimeEnv = { shell: 'host', host: 'obsidian', device: 'desktop', installed: false }
+
+  check('adj966 宿主身份：壳 / 宿主 / 网页 / 已装 PWA / 受限档（无 FSA 或手机端）',
+    hostIdOf(tauri, false) === 'desktop' && hostIdOf(host, false) === 'plugin' &&
+      hostIdOf(web, true) === 'web' && hostIdOf(pwa, true) === 'pwa' &&
+      hostIdOf(web, false) === 'limited' && hostIdOf(mobileWeb, true) === 'limited',
+    JSON.stringify({ tauri: hostIdOf(tauri, false), host: hostIdOf(host, false), web: hostIdOf(web, true), pwa: hostIdOf(pwa, true), 无FSA: hostIdOf(web, false), 手机: hostIdOf(mobileWeb, true) }))
+
+  const d = hostProfile(tauri, false)
+  const pg = hostProfile(host, false)
+  const w = hostProfile(web, true)
+  const lim = hostProfile(web, false)
+
+  check('adj966 桌面壳：无手势读+写、**有 mtime**、轮询监视、绑定记原生路径',
+    d.readWithoutGesture && d.writeWithoutGesture && d.hasMtime && d.watch === 'poll' &&
+      d.persistBinding === 'native-path' && !d.needsGestureForWrite, JSON.stringify(d))
+  check('adj966 插件嵌入版：宿主事件监视、**没有 mtime**（走内容判据）、可无手势读写',
+    pg.watch === 'event' && pg.hasMtime === false && pg.readWithoutGesture && pg.writeWithoutGesture,
+    JSON.stringify(pg))
+  check('adj966 网页 / PWA：静态写能力为 false（要权限）、句柄存 IndexedDB、**有 mtime（File.lastModified）**',
+    !w.writeWithoutGesture && w.needsGestureForWrite && w.persistBinding === 'indexeddb-handle' && w.hasMtime &&
+      hostProfile(pwa, true).id === 'pwa' && hostProfile(pwa, true).open === 'fsa-picker',
+    JSON.stringify(w))
+  check('adj966 受限档（Firefox / Safari / 手机）：只能上传下载、不监视、绑定不保留 ⇒ 必须留草稿',
+    lim.open === 'upload-only' && !lim.readWithoutGesture && lim.watch === 'none' &&
+      lim.persistBinding === 'none', JSON.stringify(lim))
+
+  check('adj966 写模式：桌面直接写；Web 已授权直接写；Web 未授权要手势；被拒只能另存为；无绑定先选文件；受限档只能另存为',
+    decideWriteMode(d, 'granted', true).kind === 'write-now' &&
+      decideWriteMode(w, 'granted', true).kind === 'write-now' &&
+      decideWriteMode(w, 'prompt', true).kind === 'need-gesture' &&
+      decideWriteMode(w, 'denied', true).kind === 'save-as-only' &&
+      decideWriteMode(w, 'granted', false).kind === 'need-pick' &&
+      decideWriteMode(lim, 'granted', true).kind === 'save-as-only',
+    JSON.stringify({
+      桌面: decideWriteMode(d, 'granted', true).kind,
+      已授权: decideWriteMode(w, 'granted', true).kind,
+      未授权: decideWriteMode(w, 'prompt', true).kind,
+      被拒: decideWriteMode(w, 'denied', true).kind,
+      无绑定: decideWriteMode(w, 'granted', false).kind,
+      受限: decideWriteMode(lim, 'granted', true).kind,
+    }))
+
+  check('adj966 监视：宿主事件照旧；轮询只在**页面可见**时；隐藏标签页退为"回到前台再查"；受限档不查',
+    decideWatch(pg, true) === 'event' && decideWatch(d, true) === 'poll' &&
+      decideWatch(d, false) === 'focus-only' && decideWatch(lim, true) === 'none',
+    JSON.stringify({ 宿主: decideWatch(pg, true), 桌面可见: decideWatch(d, true), 桌面隐藏: decideWatch(d, false), 受限: decideWatch(lim, true) }))
+
+  check('adj966 **写盘前必比基准**（数据安全保底，任何端一样）：有外部改动 ⇒ 必须问；未读内容 ⇒ 先读；没变 ⇒ 才写',
+    decideWriteGate('external', { kind: 'write-now' }) === 'ask' &&
+      decideWriteGate('external', { kind: 'need-pick' }) === 'ask' &&
+      decideWriteGate('need-read', { kind: 'write-now' }) === 'read-first' &&
+      decideWriteGate('unchanged', { kind: 'write-now' }) === 'write' &&
+      decideWriteGate('unchanged', { kind: 'save-as-only' }) === 'blocked',
+    JSON.stringify({
+      外部加直接写: decideWriteGate('external', { kind: 'write-now' }),
+      外部加要选文件: decideWriteGate('external', { kind: 'need-pick' }),
+      未读: decideWriteGate('need-read', { kind: 'write-now' }),
+      没变: decideWriteGate('unchanged', { kind: 'write-now' }),
+      写不回去: decideWriteGate('unchanged', { kind: 'save-as-only' }),
+    }))
+
+  /** 负对照①：把"静态能无手势写"改成 true ⇒ 同一 `prompt` 权限下决策必须变成"直接写"（能力表不是摆设） */
+  const fake: FileHostProfile = { ...w, writeWithoutGesture: true }
+  check('adj966 负对照①：静态写能力改成 true ⇒ `prompt` 权限下也直接写（证明决策真的读这张表）',
+    decideWriteMode(w, 'prompt', true).kind === 'need-gesture' &&
+      decideWriteMode(fake, 'prompt', true).kind === 'write-now',
+    JSON.stringify({ 原: decideWriteMode(w, 'prompt', true).kind, 改后: decideWriteMode(fake, 'prompt', true).kind }))
+  /** 负对照②：把"拿得到 mtime"改成 false 不影响安全闸门（安全只认内容判据，不认时间戳） */
+  const noM: FileHostProfile = { ...d, hasMtime: false }
+  check('adj966 负对照②：拿不到 mtime 时安全闸门行为不变（冲突仍问、没变仍写）—— 安全不依赖时间戳',
+    decideWriteGate('external', decideWriteMode(noM, 'granted', true)) === 'ask' &&
+      decideWriteGate('unchanged', decideWriteMode(noM, 'granted', true)) === 'write', '')
 }
 
 /**
