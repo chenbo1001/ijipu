@@ -90,6 +90,25 @@ code {
 .brand { display: flex; align-items: center; gap: 9px; color: var(--site-text); font-size: 16px; }
 .brand:hover { text-decoration: none; }
 .brand b { color: var(--site-accent); }
+/**
+ * adj971（**用户口径**）：「版本信息显示在……官网首页的**左边**」——
+ * 就是品牌名右侧这个胶囊徽标（页面左上角）。文本由 `landing/main.ts` 的 `fillVersion()` 填 `vX.Y.Z`。
+ * 窄屏也留着（它很窄、不占地方），只是把内边距收一点。
+ */
+.topbar-version {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid var(--site-border);
+  border-radius: 999px;
+  color: var(--site-text-2);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: nowrap;
+  cursor: default;
+}
+@media (max-width: 520px) {
+  .topbar-version { padding: 1px 6px; font-size: 11.5px; }
+}
 .nav { display: flex; align-items: center; gap: 20px; margin-left: auto; font-size: 14.5px; }
 .nav a { color: var(--site-text-2); }
 .nav a:hover { color: var(--site-text); text-decoration: none; }

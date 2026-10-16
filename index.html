@@ -138,6 +138,13 @@
           <img src="/icons/Jianpu.png" alt="爱记谱 iJipu" width="28" height="28" />
           <span>爱记谱 <b>iJipu</b></span>
         </a>
+        <!--
+          adj971（**用户 2026-10-18 口径**）：「版本信息显示在……官网首页的**左边**」。
+          放在顶栏品牌名右侧（页面左上角）—— 版本号占位由 `src/landing/main.ts` 的 `fillVersion()` 填，
+          与页脚/首屏那两处共用同一个 `data-app-version` 约定（`scripts/verify-site.mjs` 会逐个核对
+          "全都被填成了 `vX.Y.Z`"）。应用标题里**不再**带版本，所以首页这一处是"官网侧"的版本入口。
+        -->
+        <span class="topbar-version" data-app-version title="当前版本">·</span>
         <nav class="nav" id="nav">
           <a href="#features">功能</a>
           <a href="/manual/">使用手册</a>

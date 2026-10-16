@@ -857,6 +857,17 @@ async function main() {
           const q = (s) => document.querySelector(s)
           const qa = (s) => [...document.querySelectorAll(s)]
           const ver = q('[data-app-version]')?.textContent ?? ''
+          /* adj971（用户口径「版本信息显示在……官网首页的左边」）：不只核对文本，还要**量位置** ——
+             徽标必须在顶栏左半边、紧挨品牌名（只看文本时"放页脚了"也会过）。 */
+          const verRect = q('.topbar-version')?.getBoundingClientRect() ?? null
+          const brandRect = q('.brand')?.getBoundingClientRect() ?? null
+          const verPos = verRect
+            ? {
+                left: Math.round(verRect.left),
+                vw: innerWidth,
+                brandRight: brandRect ? Math.round(brandRect.right) : null,
+              }
+            : null
           const imgs = qa('img').map((i) => ({ src: i.getAttribute('src'), ok: i.complete && i.naturalWidth > 0 }))
           const links = Object.fromEntries(qa('a[data-l]').map((a) => [a.dataset.l, a.getAttribute('href')]))
           return {
@@ -867,6 +878,7 @@ async function main() {
             navLinks: qa('.nav a').length,
             cta: q('.hero-actions a.btn-primary')?.getAttribute('href') ?? '',
             ver,
+            verPos,
             verCount: qa('[data-app-version]').filter((e) => /^v\\d+\\.\\d+\\.\\d+$/.test(e.textContent.trim())).length,
             verTotal: qa('[data-app-version]').length,
             imgs,
@@ -995,6 +1007,21 @@ async function main() {
       check('首页主按钮指向 `/app/`', home.cta === '/app/', home.cta)
       check('首页版本号占位全部填成 vX.Y.Z（没有漏成「·」）',
         home.verTotal > 0 && home.verCount === home.verTotal, `${home.verCount}/${home.verTotal}：${home.ver}`)
+      /**
+       * adj971（**用户 2026-10-18 口径**）：「版本信息显示在……官网首页的**左边**」。
+       *
+       * 为什么量几何而不是只看源码顺序：源码里写在品牌名后面、CSS 一改（`order`/`flex-direction`）
+       * 就可能跑到右边去 —— 用户要的正是"左边"这件事本身。
+       * 判据两条：① 在视口**左半边**；② 紧挨品牌名（在其右侧、间距 < 120px，允许窄屏换行时略微拉开）。
+       */
+      check('adj971 版本徽标在**首页顶栏左侧**（视口左半边、紧挨品牌名）',
+        home.verPos !== null && home.verPos.left > 0 && home.verPos.left < home.verPos.vw / 2 &&
+          home.verPos.brandRight !== null && home.verPos.left >= home.verPos.brandRight - 2 &&
+          home.verPos.left - home.verPos.brandRight < 120,
+        JSON.stringify(home.verPos))
+      check('adj971 **负对照**：版本徽标**不在**页面右半边（放右半边就判假 —— 证明上面那条真的在量"左边"）',
+        home.verPos !== null && home.verPos.left < home.verPos.vw / 2 && home.verPos.left < home.verPos.vw * 0.6,
+        JSON.stringify(home.verPos))
       const brokenImgs = home.imgs.filter((i) => !i.ok).map((i) => i.src)
       check('首页所有图片都真的加载出来了（无破图）', brokenImgs.length === 0, brokenImgs.join(', '))
       // ⚠ 首页**没有** `feedbackUrl`（那是文档页页脚的键）⇒ 这里只查首页真正用到的三个
@@ -1356,10 +1383,20 @@ async function main() {
             /* adj877（用户要求）：应用里回官网的路 */
             siteHref: q('.footer-site')?.getAttribute('href') ?? '',
             siteText: (q('.footer-site')?.textContent ?? '').trim(),
+            /* adj971（用户口径）：版本信息显示在**状态栏右侧** */
+            footVer: (q('.footer-version')?.textContent ?? '').trim(),
           }
         })()`,
       )
-      check('应用 title = 「爱记谱 iJipu - vX.Y.Z (…）」形式', /^爱记谱 iJipu - v\d+\.\d+\.\d+/.test(app.title), app.title)
+      /**
+       * adj971（**用户 2026-10-18 口径反转**）：应用标题不再是 `爱记谱 iJipu - vX.Y.Z (…)`，
+       * 而是 **`文件名.jps - 爱记谱 iJipu`**（这一程注入的草稿叫「粘贴导入」⇒ 标题就带它的名字）；
+       * 版本挪到状态栏右侧 —— 顺手在这里也量一下（`/app/` 是真浏览器里最方便量它的一程）。
+       */
+      check('adj971 应用 title = 「文件名.jps - 爱记谱 iJipu」形式，且**不带版本号**',
+        /^.+\.jps - 爱记谱 iJipu$/.test(app.title) && !/v\d+\.\d+\.\d+/.test(app.title), app.title)
+      check('adj971 应用状态栏右侧显示版本号（`.footer-version` 可见 `vX.Y.Z`）',
+        /^v\d+\.\d+\.\d+$/.test(String(app.footVer).trim()), JSON.stringify({ 版本: app.footVer }))
       check('应用挂载成功（#root 有内容）', app.rootKids > 0, String(app.rootKids))
       check('应用编辑器在位（textarea 存在）', app.hasEditor)
       check('应用谱面渲染出来了（有 svg）', app.svgCount > 0, String(app.svgCount))

@@ -31,7 +31,10 @@ import { mountPlayground } from './playground'
 const SITE_KEY_PREFIX = 'ijipu.site.'
 const TIP_DISMISSED_KEY = `${SITE_KEY_PREFIX}tipDismissed`
 
-/** 版本号占位符：`<b data-app-version>` 在首页出现多处（Hero 小字与页脚） */
+/**
+ * 版本号占位符：`<b data-app-version>` 在首页出现三处 —— 顶栏品牌名右侧（adj971 用户要求：
+ * 「版本信息显示在……官网首页的**左边**」）、首屏 Hero 小字、页脚。
+ */
 function fillVersion(): void {
   document.querySelectorAll('[data-app-version]').forEach((el) => {
     el.textContent = `v${APP_VERSION}`

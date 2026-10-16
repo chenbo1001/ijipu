@@ -76,6 +76,8 @@ import { FOLLOW_SAFE_HIGH, FOLLOW_SAFE_LOW, followScrollTargetX } from '../src/p
 import { JPS_PARAM_MAX_LEN, readJpsFromSearch, withoutJpsParam } from '../src/store/urlImport'
 import { inflateSync } from 'node:zlib'
 import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO, inkBoxOfLayout, inkBoxesOfLayout, INK_ESTIMATE_SLACK, insertPngPhys, readPngPhys, crc32, isPng, dpiForScale, pixelsPerMeterFor } from '@ijipu/engine/index.ts'
+// adj971：应用标题（`文件名.jps - 爱记谱 iJipu`）与版本串的**唯一来源** —— 冒烟直接调真函数，不抄模板
+import { appTitleOf, APP_TITLE_PREFIX, APP_VERSION, APP_VERSION_FULL } from '../src/brand/version.ts'
 /**
  * adj594：`parseJps` 现在会自动并入**小节时值校验**告警（用户要求）。
  * 本文件里大量老断言写的是"无错误/无告警"，而它们的测试片段本身就是"不满一小节"的玩具谱
@@ -16664,37 +16666,80 @@ function runAdj620Tests() {
 }
 
 /**
- * adj621（用户要求）：应用标题统一为 `爱记谱 iJipu - vX.Y.Z (YYYY-MM-DD @commit)` 形式，
- * 覆盖浏览器页签 / PWA 页签 / Tauri 桌面窗口标题三处（便于 OS 任务栏、Alt+Tab、浏览器页签一眼看出当前版本）。
+ * adj621 → **adj971（用户 2026-10-18 新口径）**：应用标题 = **`文件名.jps - 爱记谱 iJipu`**，
+ * 覆盖桌面壳窗口标题 / PWA / 网页版页签 / 插件嵌入版四处；**版本信息不再进标题**，
+ * 改为显示在「**状态栏右侧**」与「**官网首页左侧**」。
  *
- * 设计：单一来源 `brand/version.ts` 的 `APP_TITLE_FULL`。
- *   ① `app/index.html` <title>：静态前缀 `爱记谱 iJipu`（无版本后缀，避免每次 commit 产生无意义 diff）；
- *      （adj876：应用外壳从根 `index.html` 搬到 `app/index.html`——根 `index.html` 现在是介绍首页，
- *       它有自己的 SEO 标题，不受"应用标题"这条口径管）
- *   ② `App.tsx` mount 后 `document.title = APP_TITLE_FULL`（覆盖浏览器页签 + PWA 页签）；
- *   ③ `App.tsx` mount 后 `__TAURI__.window.getCurrentWindow().setTitle(APP_TITLE_FULL)`（覆盖桌面窗口标题栏/任务栏）；
- *   ④ capability `core:window:allow-set-title` 必须声明，否则桌面端 `setTitle` 会被 IPC 拒绝。
+ * （`adj621` 的旧口径是 `爱记谱 iJipu - vX.Y.Z (date @commit)`：把版本塞进标题。
+ *   本次按用户要求整条换掉 —— 断言是**按新口径重写**，不是放宽。）
+ *
+ * 单一来源与落点：
+ *   ① `brand/version.ts`：`APP_TITLE_PREFIX` + `appTitleOf(fileBase)`（**唯一的标题拼接处**）；
+ *   ② `app/index.html` <title>：静态占位 = 应用名（不带文件名、也不带版本）；
+ *   ③ `App.tsx`：`document.title = appTitleOf(fileName)`，**跟着文件名变**；
+ *      桌面端同值走 `core.invoke('plugin:window|set_title', …)`；
+ *   ④ 版本显示：`ui/EditorFootBar.tsx`（状态栏右侧，短版本号 + 悬停完整串）与
+ *      根 `index.html` 顶栏**品牌名右侧**（`data-app-version`，由 `landing/main.ts` 填）。
  */
 function runAdj621Tests() {
-  console.log('[146] 应用标题统一来源：页签 + 桌面窗口标题（adj621）')
+  console.log('[146] 应用标题（文件名 + 应用名）+ 版本移到状态栏/首页（adj971）')
   const versionSrc = String(readFileSync('src/brand/version.ts', 'utf8'))
   const appSrc = String(readFileSync('src/App.tsx', 'utf8'))
+  const footSrc = String(readFileSync('src/ui/EditorFootBar.tsx', 'utf8'))
+  const appCssSrc = String(readFileSync('src/index.css', 'utf8'))
   const indexSrc = String(readFileSync(join(root, 'app', 'index.html'), 'utf8'))
+  const homeSrc = String(readFileSync(join(root, 'index.html'), 'utf8'))
+  const landingCssSrc = String(readFileSync('src/landing/landing.css', 'utf8'))
   const capSrc = String(readFileSync('src-tauri/capabilities/default.json', 'utf8'))
 
-  // ① brand/version.ts 提供单一来源 `APP_TITLE_PREFIX` + `APP_TITLE_FULL`
+  // ① brand/version.ts：应用名 + 标题拼接函数（**标题里不许再出现版本**）
   check(
-    'adj621 `brand/version.ts` 导出 `APP_TITLE_PREFIX = \'爱记谱 iJipu\'` 与 `APP_TITLE_FULL`（单一来源）',
+    'adj971 `brand/version.ts` 导出 `APP_TITLE_PREFIX` 与 `appTitleOf(文件名)`（单一来源），且**标题不含版本**',
     /export const APP_TITLE_PREFIX = '爱记谱 iJipu'/.test(versionSrc) &&
-      /export const APP_TITLE_FULL = `\$\{APP_TITLE_PREFIX\} - \$\{APP_VERSION_FULL\}`/.test(versionSrc),
+      /export function appTitleOf\(/.test(versionSrc) &&
+      // 拼接式：`${base}.jps - ${APP_TITLE_PREFIX}`（含防御性剥 `.jps`）
+      /\.jps - \$\{APP_TITLE_PREFIX\}/.test(versionSrc) &&
+      /replace\(\/\\\.jps\$\/i, ''\)/.test(versionSrc) &&
+      // 旧口径的"标题带版本"常量必须已经删掉（否则会有人继续用它）
+      !/APP_TITLE_FULL/.test(versionSrc) &&
+      !/APP_TITLE_FULL/.test(appSrc),
     '',
   )
+  {
+    /**
+     * 逐字核对拼接结果 —— **直接调真函数**（不是把模板抄一遍再比）：
+     * 含防御（传了全名不该出现 `.jps.jps`）与空名兜底。
+     */
+    const cases: [string, string][] = [
+      ['茉莉花', '茉莉花.jps - 爱记谱 iJipu'],
+      ['未命名', '未命名.jps - 爱记谱 iJipu'],
+      ['可能.jps', '可能.jps - 爱记谱 iJipu'],
+      ['', '未命名.jps - 爱记谱 iJipu'],
+    ]
+    check(
+      'adj971 标题拼接逐字正确（`茉莉花.jps - 爱记谱 iJipu`；传全名不出现 `.jps.jps`；空名兜底"未命名"），且**文件名在前、应用名在后**',
+      cases.every(([input, want]) => appTitleOf(input) === want) &&
+        appTitleOf('茉莉花').endsWith(APP_TITLE_PREFIX) &&
+        !appTitleOf('茉莉花').startsWith(APP_TITLE_PREFIX),
+      JSON.stringify(cases.map(([i, w]) => `${i} ⇒ ${appTitleOf(i)}｜期望 ${w}`)),
+    )
+    check(
+      'adj971 **负对照**：旧口径的标题（`爱记谱 iJipu - vX.Y.Z (date @commit)`）**不等于**新函数的结果，且新结果里没有版本号',
+      appTitleOf('茉莉花') !== `爱记谱 iJipu - ${APP_VERSION_FULL}` &&
+        !/v\d+\.\d+\.\d+/.test(appTitleOf('茉莉花')) &&
+        /v\d+\.\d+\.\d+/.test(APP_VERSION_FULL),
+      appTitleOf('茉莉花'),
+    )
+  }
 
-  // ② App.tsx 在挂载时把 document.title 与 Tauri 窗口标题都设为 APP_TITLE_FULL
+  // ② App.tsx：document.title 走 appTitleOf(fileName)，桌面端同值走裸 IPC
   check(
-    'adj621 `App.tsx` mount 后 `document.title = APP_TITLE_FULL`（覆盖浏览器页签 + PWA 页签）',
-    /document\.title = APP_TITLE_FULL/.test(appSrc) &&
-      /import \{ APP_TITLE_FULL \} from '\.\/brand\/version'/.test(appSrc),
+    'adj971 `App.tsx` 的标题走 `appTitleOf(文件名)`，且**跟着文件名变**（换文件/另存为/新建都要改标题）',
+    /document\.title = title\b/.test(appSrc) &&
+      /import \{ appTitleOf \} from '\.\/brand\/version'/.test(appSrc) &&
+      /const title = appTitleOf\(titleFile\)/.test(appSrc) &&
+      /const titleFile = useDocStore\(\(s\) => s\.fileName\)/.test(appSrc) &&
+      /\}, \[titleFile\]\)/.test(appSrc),
     '',
   )
   check(
@@ -16703,10 +16748,10 @@ function runAdj621Tests() {
     // `__TAURI__.window.getCurrentWindow().setTitle()` 也可能在子树未 ready 时静默失败，
     // 错误被 `void setter().catch(()=>{})` 吞掉。修法：走裸 IPC `core.invoke('plugin:window|set_title', { label, value })`，
     // 包在 requestAnimationFrame 里跑确保 IPC 通道就绪；Tauri v2 set_title 参数是 `value`（不是 `title`）。
-    'adj621b `App.tsx` mount 后桌面端走 core.invoke 改 OS 窗口标题（不再用 setTitle JS API）',
+    'adj621b 桌面端仍走 core.invoke 改 OS 窗口标题，且传的是**同一个 title 变量**（不再是旧常量）',
     /core\.invoke\(['"]plugin:window\|set_title['"]/.test(appSrc) &&
       /label:\s*['"]main['"]/.test(appSrc) &&
-      /value:\s*APP_TITLE_FULL/.test(appSrc) &&
+      /value:\s*title\b/.test(appSrc) &&
       // 反向：旧的 JS API 调用路径不应再出现（避免有人改回去后又踩同一个坑）
       !/__TAURI__[\s\S]*?\.window[\s\S]*?\.getCurrentWindow[\s\S]*?\.setTitle/.test(appSrc) &&
       // requestAnimationFrame 包了一层（避免 mount 时 IPC 通道未就绪）
@@ -16714,9 +16759,9 @@ function runAdj621Tests() {
     '',
   )
 
-  // ③ app/index.html <title> 静态前缀是「爱记谱 iJipu」（不带版本后缀），避免每次 GIT_COMMIT 变化产生 diff
+  // ③ app/index.html 静态 <title> = 应用名（不带文件名、不带版本）
   check(
-    'adj621 `app/index.html` 静态 <title> 用不带版本的前缀 `爱记谱 iJipu`，由运行时 `APP_TITLE_FULL` 覆盖完整形式',
+    'adj971 `app/index.html` 静态 <title> 是应用名 `爱记谱 iJipu`（挂载前占位；不含文件名、不含版本号）',
     /<title>爱记谱 iJipu<\/title>/.test(indexSrc) && !/v\d+\.\d+\.\d+/.test(indexSrc.match(/<title>[^<]*<\/title>/)?.[0] ?? ''),
     '',
   )
@@ -16728,24 +16773,72 @@ function runAdj621Tests() {
     '',
   )
 
-  // ⑤ 运行时产物 `APP_TITLE_FULL` 拼接结果正确：`爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)`
+  // ⑤ 版本信息的新落点：状态栏右侧（可见短号 + 悬停完整串）
   check(
-    'adj621 运行时 `APP_TITLE_FULL` 拼接正确（爱记谱 iJipu - vX.Y.Z (date @commit)）',
+    'adj971 **版本显示在状态栏右侧**：`EditorFootBar` 渲染 `v{APP_VERSION}`（悬停 `APP_VERSION_FULL`），且样式类 `.footer-version` 在样式表里定义',
+    /import \{ APP_VERSION, APP_VERSION_FULL \} from '\.\.\/brand\/version'/.test(footSrc) &&
+      /className="footer-version"/.test(footSrc) &&
+      /title=\{APP_VERSION_FULL\}/.test(footSrc) &&
+      /v\{APP_VERSION\}/.test(footSrc) &&
+      /\.footer-version \{/.test(appCssSrc),
+    '',
+  )
+  {
+    // 结构判据：版本必须在 `footer-spacer` **之后**（= 右侧那一段），而不是左侧
+    const footBody = footSrc.slice(footSrc.indexOf('<div className="footer">'))
+    check(
+      'adj971 **负对照/结构**：`.footer-version` 出现在 `footer-spacer` 之后（真在右侧）——若挪到文件名旁边那条就判假',
+      footBody.indexOf('footer-spacer') < footBody.indexOf('footer-version') && footBody.indexOf('footer-version') > 0,
+      '',
+    )
+  }
+
+  // ⑥ 版本信息的另一个落点：官网首页**左边**（顶栏品牌名右侧）
+  {
+    const brandAt = homeSrc.indexOf('class="brand"')
+    const verAt = homeSrc.indexOf('data-app-version')
+    const navAt = homeSrc.indexOf('class="nav"')
+    check(
+      'adj971 **版本显示在官网首页左侧**：`data-app-version` 徽标在顶栏**品牌名之后、导航之前**（页面左半边）',
+      brandAt >= 0 && verAt > brandAt && navAt > verAt && /class="topbar-version"/.test(homeSrc),
+      JSON.stringify({ brandAt, verAt, navAt }),
+    )
+    check(
+      'adj971 首页徽标有样式（胶囊 + 窄屏收一点），且仍走 `data-app-version` 占位（`landing/main.ts` 的 `fillVersion()` 会填它）',
+      /\.topbar-version \{/.test(landingCssSrc) &&
+        /data-app-version/.test(String(readFileSync('src/landing/main.ts', 'utf8'))),
+      '',
+    )
+  }
+
+  // ⑦ 负对照：把标题拼回"带版本"的旧口径 ⇒ 判据判假（证明判据真的在管这件事）
+  {
+    const oldStyle = (): string => `爱记谱 iJipu - v1.2.3 (2026-01-01 @deadbeef)`
+    const newStyle = (base: string): string => `${base}.jps - 爱记谱 iJipu`
+    const okByNewRule = (t: string): boolean => t.endsWith('.jps - 爱记谱 iJipu') && !/v\d+\.\d+\.\d+/.test(t)
+    check(
+      'adj971 **负对照**：按旧口径拼出来的标题（含版本、没有文件名）判假 ⇒ 判据能分辨新旧两种实现',
+      okByNewRule(newStyle('茉莉花')) && !okByNewRule(oldStyle()),
+      oldStyle(),
+    )
+  }
+
+  // ⑧ 版本串本身仍带版本/日期/commit 三要素（**它现在只在状态栏与关于框显示**，不再进标题）
+  check(
+    'adj971 `APP_VERSION_FULL` 仍是 `vX.Y.Z (date @commit)` 三要素（状态栏悬停 / 关于框显示它），只是不再进标题',
     (() => {
-      // 直接用 src/gen/buildInfo.ts 与 brand/version.ts 的字面量，跑一遍模板，断言产物含版本/日期/commit 三要素
       const buildInfoSrc = String(readFileSync('src/gen/buildInfo.ts', 'utf8'))
       const dateMatch = buildInfoSrc.match(/BUILD_DATE = '([^']+)'/)
-      const commitMatch = buildInfoSrc.match(/GIT_COMMIT = '([^']+)'/)
+      const commitMatch = buildInfoSrc.match(/GIT_COMMIT = '([0-9a-f]+)'/)
       const verMatch = versionSrc.match(/APP_VERSION = '([^']+)'/)
       if (!dateMatch || !commitMatch || !verMatch) return false
-      const expanded = `爱记谱 iJipu - v${verMatch[1]} (${dateMatch[1]} @${commitMatch[1]})`
       return (
-        expanded.startsWith('爱记谱 iJipu - v') &&
-        /\(\d{4}-\d{2}-\d{2} @[0-9a-f]{8}\)/.test(expanded) &&
-        expanded === `爱记谱 iJipu - v${verMatch[1]} (${dateMatch[1]} @${commitMatch[1]})`
+        APP_VERSION === verMatch[1] &&
+        APP_VERSION_FULL === `v${verMatch[1]} (${dateMatch[1]} @${commitMatch[1]})` &&
+        /^v\d+\.\d+\.\d+ \(\d{4}-\d{2}-\d{2} @[0-9a-f]{8}\)$/.test(APP_VERSION_FULL)
       )
     })(),
-    '',
+    APP_VERSION_FULL,
   )
 }
 
@@ -20394,6 +20487,12 @@ function runAdj970Tests() {
       const markCx = line.x + barlineGeometry(line.type).total / 2
       const mInk = barDownMarkInk(line.yBottom, ns)
       const mark = { x0: markCx - markW / 2, x1: markCx + markW / 2, y0: mInk.top, y1: mInk.bottom }
+      check(
+        `adj970（${mode}／${tag}）"线下方记号"的判据同源：` +
+          `\`hasBarDownMark\` 认这一根（\`&ds\`）而**不认**画在线**上方**的 \`&ty\`/\`&hs\`（负对照）`,
+        hasBarDownMark(line.marks) && !hasBarDownMark(['ty']) && !hasBarDownMark(['hs']) && !hasBarDownMark([]) && !hasBarDownMark(undefined),
+        JSON.stringify(line.marks),
+      )
       // ---- 序号方框墨迹（按布局给的 `xShift`/`yDrop`；这正是渲染端画的位置）----
       const bw = barNumberBoxW(bn.n, ns)
       const bh = barNumberBoxH(ns)

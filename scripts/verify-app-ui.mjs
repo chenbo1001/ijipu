@@ -1368,6 +1368,70 @@ async function main() {
       (await evalJs(c, `!!document.querySelector('.pcfg-asset-err')`)) === false,
     )
 
+    // ============ adj971：标题 = 「文件名.jps - 爱记谱 iJipu」、版本在状态栏右侧（**真读 DOM**）============
+    //
+    // 为什么必须真读：标题与状态栏都是"运行时才写上去"的东西 —— 源码里写了 `document.title = title`
+    // 不等于**这一份文件**的名字真的进了标题（可能是空、可能没跟着换文件变）。这里就着上一步已经
+    // 打开的 `授权测试.jps` 直接读页面状态。
+    console.log('[verify-app-ui] adj971：标题（文件名 + 应用名）+ 状态栏版本')
+    const titleNow = String(await evalJs(c, `document.title`))
+    const footVer = String(await evalJs(c, `document.querySelector('.footer-version')?.textContent ?? ''`))
+    const footVerTitle = String(await evalJs(c, `document.querySelector('.footer-version')?.getAttribute('title') ?? ''`))
+    check(
+      'adj971 **标题 = 「文件名.jps - 爱记谱 iJipu」**（当前打开的是「授权测试.jps」⇒ 标题逐字对得上）',
+      titleNow === '授权测试.jps - 爱记谱 iJipu',
+      titleNow,
+    )
+    check(
+      'adj971 标题里**不再带版本号**（版本已挪到状态栏与官网首页）——负对照式的判据：标题里不该出现 `vX.Y.Z`',
+      !/v\d+\.\d+\.\d+/.test(titleNow),
+      titleNow,
+    )
+    check(
+      'adj971 **版本显示在状态栏右侧**：`.footer-version` 可见文本是 `vX.Y.Z`，悬停 title 是完整串（含日期与 commit）',
+      /^v\d+\.\d+\.\d+$/.test(footVer.trim()) && /^v\d+\.\d+\.\d+ \(\d{4}-\d{2}-\d{2} @[0-9a-f]{8}\)$/.test(footVerTitle),
+      JSON.stringify({ 可见: footVer.trim(), 悬停: footVerTitle }),
+    )
+    {
+      /** 结构判据：它在 `footer-spacer` **之后**（真在右半边）—— 只看文本容易"放在左边也算过" */
+      const onRight = await evalJs(
+        c,
+        `(() => {
+           const v = document.querySelector('.footer-version')
+           const bar = document.querySelector('.footer')
+           if (!v || !bar) return null
+           const vr = v.getBoundingClientRect()
+           const br = bar.getBoundingClientRect()
+           const spacer = document.querySelector('.footer-spacer')
+           const sr = spacer ? spacer.getBoundingClientRect() : null
+           return { 版本左缘: Math.round(vr.left), 状态栏中线: Math.round(br.left + br.width / 2), 在spacer右侧: sr ? vr.left >= sr.right - 1 : null }
+         })()`,
+      )
+      check(
+        'adj971 版本徽标**真在状态栏右半边**（左缘越过状态栏中线，且在 `footer-spacer` 右侧）',
+        onRight !== null && onRight.版本左缘 > onRight.状态栏中线 && onRight.在spacer右侧 === true,
+        JSON.stringify(onRight),
+      )
+    }
+    // ---- 负对照：换一份文件（拖入）⇒ 标题必须跟着换 ----
+    {
+      const before = String(await evalJs(c, `document.title`))
+      await evalJs(c, fireDrag('标题跟随.jps', 'V: 1.0\nB: 标题跟随\nD: C\nP: 4/4\nQ: 1 2 3 |\n', 'drop'))
+      // 万一这份文档此刻有未保存修改，拖入会先弹确认条（那是 adj968 的口径）⇒ 按主按钮继续
+      await sleep(400)
+      if (await evalJs(c, `!!document.querySelector('.confirm-bar')`)) {
+        await evalJs(c, `document.querySelector('.confirm-bar-btn.is-primary')?.click(), true`)
+      }
+      await waitFor(c, `document.querySelector('.editor-main textarea').value.includes('标题跟随')`, '拖入的新文件已打开')
+      await sleep(300)
+      const after = String(await evalJs(c, `document.title`))
+      check(
+        'adj971 **换文件 ⇒ 标题跟着换**（不是只在 mount 时写一次）：`标题跟随.jps - 爱记谱 iJipu`',
+        after === '标题跟随.jps - 爱记谱 iJipu' && after !== before,
+        JSON.stringify({ 前: before, 后: after }),
+      )
+    }
+
     c.close()
   } catch (e) {
     check(`脚本自身出错：${e instanceof Error ? e.message : String(e)}`, false)

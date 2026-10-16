@@ -19,11 +19,16 @@ export const APP_VERSION = '0.65.0'
 export const APP_VERSION_FULL = `v${APP_VERSION} (${BUILD_DATE} @${GIT_COMMIT})`
 
 /**
- * adj621：应用标题统一来源。
+ * adj971（**用户 2026-10-18 口径**）：应用标题统一来源。
  *
- * 浏览器页签、PWA 打开时的页签、Tauri 桌面窗口标题，三处都用这个常量渲染，
- * 形式为「`爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)`」——加版本后缀方便查看
- * 当前正在跑的应用版本（OS 任务栏 / Alt+Tab / Chrome 页签一眼可见）。
+ * 旧口径（`adj621`）：`爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)` —— 把版本塞进标题，
+ * 靠 OS 任务栏 / Alt+Tab / 浏览器页签"一眼看到版本"。
+ *
+ * **新口径**（用户原话：「壳端、PWA 标题、网站页签、插件的嵌入版 ijipu 的标题信息改为
+ * "文件名.jps - 爱记谱 iJipu"，而版本信息显示在**状态栏的右侧**、**官网首页的左边**」）：
+ *   · 标题 = **文件名 + 应用名**（见 `appTitleOf`）—— 打开多个窗口/页签时靠它区分是哪一份谱；
+ *   · 版本 = 挪到应用**状态栏右侧**（`ui/EditorFootBar.tsx`，短版本号 + 悬停看完整串）与
+ *     **官网首页左侧**（根 `index.html` 顶栏的品牌名右侧，`data-app-version` 占位）。
  *
  * 前缀 `爱记谱 iJipu` 与 `brand/tokens.ts` 的 brand.nameZh + brand.name 一致；
  * 放在 `version.ts` 而非 `tokens.ts`，是因为它天然跟版本号绑定，需要在版本递增
@@ -31,5 +36,16 @@ export const APP_VERSION_FULL = `v${APP_VERSION} (${BUILD_DATE} @${GIT_COMMIT})`
  */
 export const APP_TITLE_PREFIX = '爱记谱 iJipu'
 
-/** 完整应用标题：`爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)` */
-export const APP_TITLE_FULL = `${APP_TITLE_PREFIX} - ${APP_VERSION_FULL}`
+/**
+ * adj971：**应用标题** = `文件名.jps - 爱记谱 iJipu`（四处宿主共用这一份：桌面壳窗口标题、
+ * PWA 窗口/页签、网页版页签、Obsidian 嵌入版）。
+ *
+ * @param fileBase 文件名（**不带扩展名**；`docStore.fileName` 就是这个形态）。
+ *   这里仍**防御性地**剥掉一次 `.jps`：调用方若手滑传了全名，标题不该变成 `x.jps.jps - …`。
+ *   ⚠ 不 import `store/saveSupport` 的 `fileBaseName`：品牌层不许依赖 store 层（分层约束）。
+ */
+export function appTitleOf(fileBase: string): string {
+  const base = String(fileBase ?? '').trim().replace(/\.jps$/i, '')
+  return `${base === '' ? '未命名' : base}.jps - ${APP_TITLE_PREFIX}`
+}
+

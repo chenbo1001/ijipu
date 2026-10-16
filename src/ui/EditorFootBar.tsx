@@ -10,12 +10,18 @@
  *         从首页点「打开应用」进来之后，应用自己的界面里原本**没有任何回官网的路**。
  *         网页版/PWA 直接跳 `/`；桌面壳里没有"首页"这回事（窗口无地址栏、无后退），
  *         跳过去会把人困在介绍页 ⇒ 那里改成**用系统浏览器打开官网**。
+ * adj971（**用户 2026-10-18 口径**）：**版本信息从标题挪到状态栏右侧**（标题改成
+ *         「文件名.jps - 爱记谱 iJipu」，见 `brand/version.ts` 的 `appTitleOf`）。
+ *         可见部分只放短版本号（`v0.65.0`），完整串（含构建日期 + commit）放 `title` 悬停看 ——
+ *         状态栏本来就窄，塞完整串会把左侧的文件名/行列挤掉。
  */
 import { useMemo } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { problemCopy, dockCopy } from '../brand/copy'
 import { summarizeProblems } from './problems'
+// adj971：版本号在状态栏右侧显示（单一来源在 brand/version.ts）
+import { APP_VERSION, APP_VERSION_FULL } from '../brand/version'
 // adj618（用户要求）：状态栏那条告警按钮的提示后面带快捷键（键名一处定义）
 import { KBD, withKbd } from '../brand/shortcuts'
 // adj622（用户要求）：状态栏文件名改成「工作区/路径/文件名」格式
@@ -126,6 +132,12 @@ export function EditorFootBar() {
           {dockCopy.exportRunning(exportJob)}
         </button>
       )}
+
+      {/* adj971（用户口径）：**版本信息显示在状态栏右侧**（原先只在标题里）。
+          可见 = 短版本号，悬停 = 完整串（`v0.65.0 (2026-10-18 @abc1234)`）。 */}
+      <span className="footer-version" title={APP_VERSION_FULL}>
+        v{APP_VERSION}
+      </span>
     </div>
   )
 }

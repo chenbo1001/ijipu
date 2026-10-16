@@ -2693,6 +2693,20 @@ body {
 .footer-export:hover {
   text-decoration: underline;
 }
+
+/**
+ * adj971（**用户口径**）：「版本信息显示在状态栏的右侧」。
+ * 原先版本只出现在窗口/页签标题里（`爱记谱 iJipu - v…`），标题改成「文件名.jps - 爱记谱 iJipu」
+ * 之后，版本挪到这里 —— 可见只有短版本号，完整串（构建日期 + commit）在 `title` 里悬停看。
+ * `margin-left: 2px` 让它与左边的「官网首页」/导出指示留一点净距，不贴着。
+ */
+.footer-version {
+  flex: 0 0 auto;
+  margin-left: 2px;
+  color: var(--jp-text-secondary);
+  white-space: nowrap;
+  cursor: default;
+}
 .footer-export-spinner {
   flex: 0 0 auto;
   width: 10px;

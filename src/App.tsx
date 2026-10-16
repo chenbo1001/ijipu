@@ -36,8 +36,8 @@ import { summarizeProblems } from './ui/problems'
 import { nextViewType } from './ui/viewCycle'
 // adj614：Ctrl+T 的深浅模式循环（与顶栏「深浅模式」按钮同一份）
 import { nextThemeMode } from './brand/themes'
-// adj621：应用标题统一来源（浏览器页签 + 桌面窗口标题共用 `APP_TITLE_FULL`）
-import { APP_TITLE_FULL } from './brand/version'
+// adj621/adj971：应用标题统一来源（浏览器页签 + PWA + 桌面窗口标题共用 `appTitleOf(文件名)`）
+import { appTitleOf } from './brand/version'
 // adj954：`__TAURI__` 的读取收敛到品牌层唯一出处（本文件原先自己写了一段类型体操）
 import { tauriInvokeOrNull } from './brand/env'
 // adj350：对话框懒加载（React.lazy）——首屏不加载它们，显著减小主包、加快首屏显示
@@ -229,21 +229,21 @@ function App() {
   ])
 
   /**
-   * adj621（用户要求）：**统一应用标题**——浏览器页签、PWA 页签、Tauri 桌面窗口标题都用
-   * 「爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)」形式，方便在 OS 任务栏 / Alt+Tab /
-   * Chrome 页签一眼看出当前应用版本。
+   * adj621 + adj971（**用户 2026-10-18 口径**）：**统一应用标题**——四处宿主共用一份：
+   * 桌面壳（Tauri）窗口标题、PWA 窗口/页签、网页版页签、Obsidian 嵌入版。
    *
-   * 三处都来自 `brand/version.ts` 的 `APP_TITLE_FULL` 单一来源：
-   *   ① `document.title`：浏览器页签 + PWA 页签（同一份 window.title，无副作用）；
-   *   ② `core.invoke('plugin:window|set_title', { label, value })`：桌面 OS 窗口标题栏 / 任务栏
-   *      —— 用裸 IPC 而非 `getCurrentWindow().setTitle()` JS API，因为后者在 React mount 时
-   *      可能撞上 `window.__TAURI__` 注入时机（adj621 实测：mount 那一刻 `__TAURI__.window`
-   *      子树可能还没 ready，JS API 包装的 setTitle 静默失败、document.title 改对了但 OS 窗口标题
-   *      没动；用户实测看到的 OS 任务栏一直是 `tauri.conf.json` 里的硬编码「爱记谱 iJipu」）。
-   *      用 `core.invoke` 走短路径更稳：capability 已声明 `core:window:allow-set-title`，
-   *      IPC 参数 `{ label: 'main', value: APP_TITLE_FULL }`（v2 命令签名是 `value` 不是 `title`）。
-   *   ③ 初始 `index.html` <title> 仍是 `爱记谱 iJipu`（无版本），挂载前那一瞬的占位——
-   *      几十毫秒内就被本 effect 覆盖；用户能看到的最终标题就是这里 set 的完整形式。
+   * **口径已改**（用户原话）：「壳端、PWA 标题、网站页签、插件的嵌入版 ijipu 的标题信息改为
+   * "文件名.jps - 爱记谱 iJipu"，而版本信息显示在**状态栏的右侧**、**官网首页的左边**」。
+   *  ① 标题 = `brand/version.ts` 的 `appTitleOf(fileName)`（单一来源），**不再带版本**；
+   *  ② `document.title`：浏览器页签 + PWA 页签（同一份 window.title，无副作用）；
+   *  ③ `core.invoke('plugin:window|set_title', { label, value })`：桌面 OS 窗口标题栏 / 任务栏
+   *     —— 用裸 IPC 而非 `getCurrentWindow().setTitle()` JS API，因为后者在 React mount 时
+   *     可能撞上 `window.__TAURI__` 注入时机（adj621 实测：mount 那一刻 `__TAURI__.window`
+   *     子树可能还没 ready，JS API 包装的 setTitle 静默失败、document.title 改对了但 OS 窗口标题
+   *     没动；用户实测看到的 OS 任务栏一直是 `tauri.conf.json` 里的硬编码「爱记谱 iJipu」）。
+   *     用 `core.invoke` 走短路径更稳：capability 已声明 `core:window:allow-set-title`，
+   *     IPC 参数 `{ label: 'main', value: <标题> }`（v2 命令签名是 `value` 不是 `title`）。
+   *  ④ 初始 `app/index.html` <title> 仍是 `爱记谱 iJipu`，挂载前那一瞬的占位——几十毫秒内被覆盖。
    *
    * 设置 OS 窗口标题放在 `requestAnimationFrame` 之后跑，确保 WebView 的 `withGlobalTauri`
    * 注入窗口标题 IPC 通道就绪（adj621 实测：mount 那一刻直接调会被静默吞掉，延一帧就好）。
@@ -252,16 +252,21 @@ function App() {
    *
    * adj954：`__TAURI__` 的读取收敛到 `brand/env.ts`；`tauriInvokeOrNull` 在非桌面壳里直接返回 `null`，
    * 于是这里连"先判环境"都不用写（静默忽略的语义与原先一致）。
+   *
+   * ⚠ adj971 起**依赖 `fileName`**：换文件 / 另存为 / 新建都要跟着改标题
+   * （所以效果从"mount 时一次"变成"文件名变一次就跟一次"）。
    */
+  const titleFile = useDocStore((s) => s.fileName)
   useEffect(() => {
-    document.title = APP_TITLE_FULL
+    const title = appTitleOf(titleFile)
+    document.title = title
     const raf = requestAnimationFrame(() => {
-      void tauriInvokeOrNull('plugin:window|set_title', { label: 'main', value: APP_TITLE_FULL })
+      void tauriInvokeOrNull('plugin:window|set_title', { label: 'main', value: title })
       /* setTitle 失败不影响页面功能 —— document.title 已生效，至少页签/任务栏 tooltip
          用的是页面 title（多数浏览器/Win 任务栏 hover 都看这个） */
     })
     return () => cancelAnimationFrame(raf)
-  }, [])
+  }, [titleFile])
 
   // adj48：跟随系统深浅色——监听 prefers-color-scheme 变化
   useEffect(() => {
