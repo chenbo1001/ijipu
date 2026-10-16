@@ -6159,16 +6159,36 @@ function placeSegmentOverlays(pages: ScorePage[], result: ParseResult, config: P
           const hit = src ? pages[src.page]?.lyrics.find((c) => c.line === lineIdx && sameNote(c, src.note)) : undefined
           const x = r1(target.x + halfDigitW(config.note_size) - config.geci_size / 2)
           if (hit) {
-            // y 不动：字始终在它那条歌词行上；只有 x 跟着"第 k 个发声音"走
+            /**
+             * ⚠️ adj675c（用户实报「词的文本对齐了，但**颜色**没对齐」）：字挪到新音上时
+             * **必须把它的 `id` 一起换掉**。
+             *
+             * `PlacedLyric.id` 就是"这个字属于哪个音"——渲染端 `data-cipos` 由它来（`noteposId(lyric.id)`），
+             * 点谱面跳源码、光标联动、"哪个字对哪个音"的一切都认它。
+             * 只改 `x` 不改 `id` ⇒ 字**画在**替谱音下面、**联动却仍指向**主旋律那个音
+             * （实测：第二行的 `曾` 画在替谱末音上、`id` 还指着主旋律那个音 ⇒ 高亮/联动对不上）。
+             * y 不动：字始终在它那条歌词行上；`slotW` 跟着新音（歌词缩窄判据用它）。
+             */
             hit.x = x
+            hit.id = target.id
+            hit.slotW = r1(target.width)
             continue
           }
           /**
-           * 放置阶段就被丢掉的字（该行槽位比主旋律音多）：补一条挂到目标音上 ——
-           * y 取该行在同一页已有的行 y（与放置阶段同一口径）；拿不到就不补（与旧实现一致）。
+           * 放置阶段就被丢掉的字（该行槽位比主旋律音多）：补一条挂到目标音上。
+           *
+           * ⚠️ adj675b（用户实报「第二行的后面漏了一个歌词『双』」）：`y` 必须取**目标音所在那一行**的
+           * 歌词 y，而且要**只认本组**——两个坑：
+           *  ① **歌词行的 `line` 序号是每个曲部各自从 0 数的** ⇒ 只按 `line` 找会匹配到**别的曲部**的
+           *     同号歌词行（实测：真谱里 `双` 被写成 `y=249`，那是上一曲部的行 ⇒ 它"从这一行消失"）；
+           *  ② 一行长歌词会**折成多个视觉行**（用户的谱面就是）⇒ 取"本行的第一条"会把补出来的字扔到
+           *     上一行去。
+           * 所以按「**本组 + 本歌词行 + 在目标音下方最近**」取 y（歌词行总在它上面那行曲部的下方）。
            */
           const pg = pages.find((p) => p.notes.includes(target))
-          const yRef = pg?.lyrics.find((c) => c.line === lineIdx)?.y
+          const yRef = pg?.lyrics
+            .filter((c) => c.line === lineIdx && c.id.group === gi && c.y > target.y - 1)
+            .sort((a, b) => a.y - b.y)[0]?.y
           if (pg && yRef !== undefined) {
             pg.lyrics.push({ id: target.id, char: ch, x, y: r1(yRef), line: lineIdx, slotW: r1(target.width) })
           }

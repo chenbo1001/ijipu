@@ -18987,6 +18987,18 @@ runAdj927ExternalChangeTests()
       failed++
       console.error('  ✗ adj675 替谱歌词=发音序列用例抛异常', e)
     }
+    try {
+      runAdj675bTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj675b 替谱补字落行用例抛异常', e)
+    }
+    try {
+      runAdj675cTests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj675c 歌词联动指向用例抛异常', e)
+    }
   })
   .then(() => {
     /**
@@ -20838,12 +20850,32 @@ function runAdj629Tests() {
   const kLyOf = (n: (typeof kMain)[number] | undefined) =>
     n ? kLy.find((l) => l.id.index === n.id.index && l.id.group === n.id.group) : undefined
   const kFirstMain = kMain.find((n) => n.barIndex === 3 && n.beatPos === 0)
-  const kOff = (kLyOf(kFirstMain)?.x ?? 0) - kMainX(3, 0)
-  const kLastMain = kMain.find((n) => n.barIndex === 3 && n.beatPos === 1)
-  const kLastLy = kLyOf(kLastMain)
-  check('adj629k/adj657 歌词：替谱块之后的字按**槽位**对到替谱音上（第 4 槽 → 第 4 音，`@` 跳空才算跳）',
-    kLastLy !== undefined && kLastMain !== undefined && Math.abs(kLastLy.x - kOff - kTp[3].x) < 0.2,
-    JSON.stringify({ ly: kLastLy?.x, off: kOff, tp3: kTp[3].x, tp5: kTp[4].x, main: kMainX(3, 1) }))
+  const kBar3 = kMain.filter((n) => n.barIndex === 3).sort((a, b) => a.x - b.x)
+  /** 第 3 小节**最后一个音**（`1-`，不在替谱覆盖区里）——用它定"字相对音"的横向偏移 */
+  const kOutMain = kBar3[kBar3.length - 1]
+  const kOutLy = kLyOf(kOutMain)
+  const kOff = (kOutLy?.x ?? 0) - (kOutMain?.x ?? 0)
+  /**
+   * adj675c（**用户实报「词的文本对齐了，但颜色没对齐」**）：字挪到替谱音上时，它的 `id` 要**一起换**
+   * ——`id` = "这个字属于哪个音"，渲染端 `data-cipos`、光标联动、高亮都认它。
+   * 只改 `x` 不改 `id` ⇒ 字画在替谱音下、联动却还指着主旋律那个音（用户看到的"颜色没对齐"）。
+   *
+   * 判据按**新口径**重写（不是放宽，是测得更严）：
+   *  ① 画在替谱音下面的那个字，联动必须指向那个替谱音；
+   *  ② 被替谱覆盖的主旋律音**名下不再挂字**（字与联动都跟着"这一遍的发声音"走了）；
+   *  ③ 不被覆盖的主旋律音，它名下的字仍画在它下面（位置与联动一致）。
+   */
+  const kTpLy = kLy.find((l) => Math.abs(l.x - kOff - kTp[3].x) < 0.2)
+  check('adj629k/adj675 ① 画在替谱音下的字，**联动也指向那个替谱音**（id 跟着位置换）',
+    kTpLy !== undefined && kTpLy.id.index === kTp[3].id.index && kTpLy.id.group === kTp[3].id.group,
+    JSON.stringify({ 字: kTpLy?.char.text, 字的id: kTpLy?.id.index, 替谱音id: kTp[3].id.index }))
+  const kCoveredMain = kMain.find((n) => n.barIndex === 3 && n.beatPos === 1)
+  check('adj629k/adj675 ② 被替谱覆盖的主旋律音**名下不再挂字**（旧口径把字留在它名下＝联动错位）',
+    kCoveredMain !== undefined && kLyOf(kCoveredMain) === undefined,
+    JSON.stringify({ 覆盖音: kMainX(3, 1), 名下字: kLyOf(kCoveredMain)?.char.text ?? '（无）' }))
+  check('adj629k/adj675 ③ 不被覆盖的主旋律音，它名下的字仍画在它下面（位置与联动一致）',
+    kOutMain !== undefined && kOutLy !== undefined && Math.abs(kOutLy.x - kOff - kOutMain.x) < 0.2 && Math.abs(kOff) > 0.5,
+    JSON.stringify({ 字: kOutLy?.char.text, 字x: kOutLy?.x, 音x: kOutMain?.x, off: kOff }))
 
   // ---- ⑬ adj629m（用户要求）：临时伴奏 / 临时多声部 / 替谱 **三种段层**都按"多声部规则"
   //      参与**相应曲部**的占宽计算 ⇒ 段层更密的拍把主旋律那一拍一并撑宽（行总宽不变），
@@ -23052,6 +23084,106 @@ C2: 忘掉年轮。可能 {tp 3/ 3 2/} 要多年以后才能 {tp (3/ 2//) (2// 2
     : ''
   check('adj675 负对照：去掉 `{tp}` 后红 `2` 上不是「经」（＝上面 ① 判的是替谱造成的左移，不是恒真）',
     redNo !== undefined && charNo !== '经，' && charNo !== '', `实际「${charNo}」`)
+}
+
+/**
+ * adj675b（**用户 2026-10-15 第二次实报**：「后面漏了一个歌词『双』」，且"红音符与歌词并不齐"）：
+ * 替谱让"超出主旋律音数"的那个字（挂在替谱音上的新条目）**必须落在它自己那一行**。
+ *
+ * 根因（实测用户真谱 `2.曲谱集/可能/可能.jps`）：补条目时找"本行歌词 y"只按 `line` 找，
+ * 而**歌词行的 `line` 是每个曲部各自从 0 数的** ⇒ 匹配到**上一个曲部**的同号歌词行
+ * （实测 `双` 被写成 `y=249`——那是上一曲部的行，而它该在 `y≈520` 那一行）⇒ 这个字就"消失"了。
+ * 判据：`双` 的 y 必须与**同组同歌词行**的其它字同一行，且 x 贴在最后一个主旋律音上。
+ */
+function runAdj675bTests() {
+  console.log('[161] 替谱补出来的字要落在"自己那一行"（adj675b）')
+  const code = `V: 1.0
+B: 两个曲部 · 第二部的第二行带替谱
+D: C
+P: 4/4
+Q: 1/ 6, 5,/ 6, 6,/ 6,/ | 6,/ 3 2/ 3/ 6,/ 6,/ 3/ | 2/. (2// 2/) 1/ 2 5,/ 2/ | 2/ 2 1/ 2/ 5,/ 5,/ 1/ |
+C1: 可能南方的阳光照着北方@的风，可能时光被吹走从此
+C2: 桂林的渔船为你迷茫@点灯，可能在呼伦草原牛羊
+Q: 1/ 6, 5,/ 6, 6,/ 6,/ | 6,/ 3 2/ 3/ 6,/ 6,/ 3/ | 2/. (1// 1/) 3/ 2 5,/ 2/ | 2/ 2 1/ 2/ 5,/ 5,/ 1/ |
+C1: 孤独的人。可能枕边有微笑才能暖你@清晨，可能夜空有浏览才能
+C2: 忘掉年轮。可能 {tp 3/ 3 2/} 要多年以后才能 {tp (3/ 2//) (2// 2/) 1/} 看@清@曾经，可能在当时身边有双
+`
+  const parsed = parseJps(code)
+  const page = layoutScore(parsed, defaultPageConfig).pages[0]
+  /** 第一部的 C2（`line === 1`、`group === 0`）——它是"同号歌词行"陷阱的来源 */
+  const g0c2 = page.lyrics.filter((c) => c.line === 1 && c.id.group === 0)
+  const g1 = page.lyrics.filter((c) => c.line === 1 && c.id.group === 1).sort((a, b) => a.x - b.x)
+  const shuang = g1.find((c) => c.char.text === '双')
+  const you = g1.find((c) => c.char.text === '有')
+  check('adj675b 夹具自检：两个曲部都存在，第二部的第二行末尾是「有 双」',
+    g0c2.length > 0 && g1.length > 0 && you !== undefined && shuang !== undefined,
+    JSON.stringify({ g0c2: g0c2.length, g1: g1.length, tail: g1.slice(-3).map((c) => c.char.text).join('') }))
+  check('adj675b ① 「双」与同组同歌词行的「有」**同一行**（y 相同）—— 旧实现把它扔到了上一曲部那一行',
+    shuang !== undefined && you !== undefined && Math.abs(shuang.y - you.y) < 0.6,
+    JSON.stringify({ 双: shuang?.y, 有: you?.y, 上一曲部第二行y: g0c2[0]?.y }))
+  check('adj675b ② 「双」的 y **不等于**上一曲部第二行那条的 y（负对照：按 `line` 单条件找就会落这里）',
+    shuang !== undefined && g0c2.length > 0 && Math.abs(shuang.y - g0c2[0].y) > 1,
+    JSON.stringify({ 双: shuang?.y, 上一曲部: g0c2[0]?.y }))
+  /** 最后一个主旋律音（第 2 部第 3 小节末拍的 `1`）——「双」应当贴它 */
+  const lastNote = page.notes
+    .filter((n) => !n.segment && n.id.group === 1)
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+    .at(-1)
+  check('adj675b ③ 「双」贴在最后一个主旋律音上（|字心 − 音心| ≤ 2px）',
+    shuang !== undefined && lastNote !== undefined && Math.abs(shuang.x - lastNote.x) <= 2,
+    JSON.stringify({ 双: shuang?.x, 末音: lastNote?.x }))
+  check('adj675b ④ 这一行的字序与 x 序一致（补出来的字没插到前面去）',
+    g1.every((c, i) => i === 0 || c.x >= g1[i - 1].x - 0.01),
+    JSON.stringify(g1.map((c) => `${c.char.text}@${Math.round(c.x)}`)))
+}
+
+/**
+ * adj675c（**用户 2026-10-15 第三次实报**：「词的文本目前上下对齐是正确了，但第二行的红色有错位；
+ * 规范来说是**词有对齐，但颜色没对齐**」）：
+ * 把字挪到替谱音上时，**它的 `id` 必须一起换**——`PlacedLyric.id` = "这个字属于哪个音"，
+ * 渲染端 `data-cipos` 由它来（`noteposId(lyric.id)`），点谱面跳源码、光标联动、高亮都认它。
+ * 只改 `x` 不改 `id` ⇒ 字**画**在替谱音下、**联动却仍指向**主旋律那个音（用户看到的"颜色没对齐"）。
+ * 这正是用户那两张标注图的内容：他框住的是"某一个音"＋"两行里各自与它联动的那个字"。
+ */
+function runAdj675cTests() {
+  console.log('[162] 挪过位置的歌词字，联动指向也要跟着挪（adj675c）')
+  const code = `V: 1.0
+B: 替谱歌词对位
+D: C
+P: 4/4
+Q: 1/ 6, 5,/ 6, 6,/ 6,/ | 6,/ 3 2/ 3/ 6,/ 6,/ 3/ | 2/. (1// 1/) 3/ 2 5,/ 2/ | 2/ 2 1/ 2/ 5,/ 5,/ 1/ |
+C1: 孤独的人。可能枕边有微笑才能暖你@清晨，可能夜空有浏览才能
+C2: 忘掉年轮。可能 {tp 3/ 3 2/} 要多年以后才能 {tp (3/ 2//) (2// 2/) 1/} 看@清@曾经，可能在当时身边有双
+`
+  const page = layoutScore(parseJps(code), defaultPageConfig).pages[0]
+  type N = (typeof page.notes)[number]
+  const byId = new Map<string, N>(page.notes.map((n) => [`${n.id.page}|${n.id.group}|${n.id.index}`, n]))
+  const linked = (c: (typeof page.lyrics)[number]): N | undefined => byId.get(`${c.id.page}|${c.id.group}|${c.id.index}`)
+  const c2 = page.lyrics.filter((c) => c.line === 1).sort((a, b) => a.x - b.x)
+  const off = c2.filter((c) => {
+    const n = linked(c)
+    return !n || Math.abs(c.x - n.x) > 2
+  })
+  check('adj675c 第二行每个字都**联动指向它被画在下面的那个音**（|字心 − 音心| ≤ 2px）',
+    c2.length > 0 && off.length === 0,
+    JSON.stringify(off.map((c) => `${c.char.text}:${Math.round(c.x)}→${linked(c) ? Math.round(linked(c)!.x) : '无'}`)))
+  const zeng = c2.find((c) => c.char.text === '曾')
+  const jing = c2.find((c) => c.char.text === '经')
+  const zn = zeng ? linked(zeng) : undefined
+  const jn = jing ? linked(jing) : undefined
+  /**
+   * 负对照（旧实现就是这两种"错"）：`曾` 画在**替谱末音**下，它的联动就必须指向那个替谱音
+   * （旧实现仍指向主旋律的原槽位音）；`经` 画在**主旋律那个 `2`** 下，联动必须指向它。
+   */
+  check('adj675c ① `曾` 的联动指向**替谱音**（它就画在替谱末音下）',
+    zn?.segment?.type === 'tp',
+    JSON.stringify({ 曾画在: zeng ? Math.round(zeng.x) : '无', 联动: zn ? `${zn.segment?.type ?? '主旋律'}@${Math.round(zn.x)}` : '无' }))
+  check('adj675c ② `经` 的联动指向**主旋律那个 `2`**（不是它原来所在的那个音）',
+    jn !== undefined && jn.segment === undefined && jn.token.kind === 'note' && jn.token.pitch === 2,
+    JSON.stringify({
+      经画在: jing ? Math.round(jing.x) : '无',
+      联动: jn ? `${jn.token.kind === 'note' ? jn.token.pitch : jn.token.kind}@${Math.round(jn.x)}` : '无',
+    }))
 }
 
 /**
