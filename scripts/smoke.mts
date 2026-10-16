@@ -18,6 +18,7 @@ import {
   markWriteInFlight,
   getWriteInFlight,
   baselineKeyOf,
+  bindingKeyOf,
 } from '../src/store/externalChange'
 // adj927/adj928：归一化 + 内容指纹；两栏差异（行级 LCS + 行内字符级高亮）
 // ⚠ 别名：`saveSupport.ts` 里已经有一个 `sameContent`（另一个语义），不许重名
@@ -23366,6 +23367,37 @@ function runAdj966Tests() {
   check('adj966 负对照②：拿不到 mtime 时安全闸门行为不变（冲突仍问、没变仍写）—— 安全不依赖时间戳',
     decideWriteGate('external', decideWriteMode(noM, 'granted', true)) === 'ask' &&
       decideWriteGate('unchanged', decideWriteMode(noM, 'granted', true)) === 'write', '')
+
+  /**
+   * adj966：**系统文件**（原生路径 / FSA 句柄）的基准键与"记基准"的接线。
+   * 这是"写盘前必比基准"能成立的**前提**：没有基准，判据会退化成"拿磁盘比编辑器缓冲区"，
+   * 用户一打字就被当成外部改动（假提示）。
+   */
+  check('adj966 基准键：句柄用文件名、原生用绝对路径；**换文件即失效**（同名但不同端也不同键）',
+    bindingKeyOf({ kind: 'handle', name: '可能' }) === 'handle:可能' &&
+      bindingKeyOf({ kind: 'native', path: 'D:\\a\\可能.jps' }) === 'native:D:\\a\\可能.jps' &&
+      bindingKeyOf({ kind: 'handle', name: '可能' }) !== bindingKeyOf({ kind: 'native', path: '可能' }) &&
+      bindingKeyOf({ kind: 'native', path: 'D:\\a\\x.jps' }) !== bindingKeyOf({ kind: 'native', path: 'D:\\b\\x.jps' }),
+    JSON.stringify([bindingKeyOf({ kind: 'handle', name: '可能' }), bindingKeyOf({ kind: 'native', path: 'D:\\a\\可能.jps' })]))
+
+  const docSrcText = String(readFileSync('src/store/docStore.ts', 'utf8'))
+  const need = [
+    // 打开：双击打开的系统文件记基准
+    "setBaseline(bindingKeyOf({ kind: 'native', path: primary.path }), primary.code, null)",
+    // 打开：FSA 句柄记基准（这一处能带 mtime ⇒ 轮询可走快筛）
+    "setBaseline(bindingKeyOf({ kind: 'handle', name }), code, file.lastModified)",
+    // 保存：原生路径 写前在途写 + 写后刷基准
+    "markWriteInFlight(bindingKeyOf({ kind: 'native', path }), code)",
+    "setBaseline(bindingKeyOf({ kind: 'native', path }), code, null)",
+    // 保存：句柄 写前在途写（写后刷基准用同一个键变量）
+    "const hKey = bindingKeyOf({ kind: 'handle', name })",
+  ]
+  const hasAll = (t: string): boolean => need.every((s) => t.includes(s))
+  check('adj966 接线：系统文件的两条路（原生路径 / FSA 句柄）在"打开记基准"与"写前在途写 + 写后刷基准"都接上了',
+    hasAll(docSrcText), JSON.stringify(need.filter((s) => !docSrcText.includes(s))))
+  check('adj966 负对照：删掉"打开记基准"或"写后在途写"任一处 ⇒ 同一条判据判假（它真的在数这几处接线）',
+    hasAll(docSrcText) && !hasAll(docSrcText.replace(need[0], '')) && !hasAll(docSrcText.replace(need[2], '')),
+    JSON.stringify({ 原始: hasAll(docSrcText), 删打开记基准: hasAll(docSrcText.replace(need[0], '')), 删在途写: hasAll(docSrcText.replace(need[2], '')) }))
 }
 
 /**

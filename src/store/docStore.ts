@@ -64,7 +64,7 @@ let fileStateTouched = false
 import { uiCopy, savePhaseCopy, pasteImportCopy, externalOpenCopy, workspaceCopy, exportCopy } from '../brand/copy'
 // adj927：外部改动的**基准**（我们最后一次写出去/读进来的内容指纹 + mtime）——见 externalChange.ts
 // adj943：写盘**发出前**还要登记"在途写"（写盘落地与基准刷新之间有窗口，见该文件头说明）
-import { baselineKeyOf, setBaseline, markWriteInFlight } from './externalChange'
+import { baselineKeyOf, bindingKeyOf, setBaseline, markWriteInFlight } from './externalChange'
 // adj965（方案 OVL，EP-10）：打印页也要带水印/背景层 —— 与预览/导出共用同一份资源
 import { withOverlay } from './overlayAssets'
 // adj615：打印（菜单「打印」/ Ctrl+P）——浏览器侧原语在 export/print.ts，页面在这里现算
@@ -834,6 +834,12 @@ export const useDocStore = create<DocState>()((set, get) => ({
     // 与「打开对话框」同款装载：解析 + 页面设置 + 清空历史/联动状态；
     // 数据源是外部路径 ⇒ 清掉 FSA 句柄（两者互斥），避免"保存写到了上一个文件"
     disconnectFileHandle()
+    /**
+     * adj966：双击打开的**系统文件**也要记**基准**（内容指纹）——这是"写盘前必比基准"的前提。
+     * 没有基准时判据会退化成"拿磁盘内容比编辑器缓冲区"，用户一打字就会被误判成"外部改动" ⇒ **假提示**。
+     * mtime 传 `null`：宿主把文件读好交给前端时没带 mtime（与嵌入版同一取舍，走内容判据）。
+     */
+    setBaseline(bindingKeyOf({ kind: 'native', path: primary.path }), primary.code, null)
     // adj628：工作区来源同样要落盘清掉（外部路径与工作区互斥，见下面 binding: null）
     saveDraftSrc(null)
     set({
@@ -877,6 +883,11 @@ export const useDocStore = create<DocState>()((set, get) => ({
       const file = await handle.getFile()
       const code = await file.text()
       const name = fileBaseName(file.name)
+      /**
+       * adj966：句柄绑定的**系统文件**也要记基准 —— 这里能拿到 `lastModified`，
+       * 所以基准带 mtime ⇒ 轮询可先走"mtime 快筛"，连内容都不用读（`probeFileChange` ①）。
+       */
+      setBaseline(bindingKeyOf({ kind: 'handle', name }), code, file.lastModified)
       try {
         localStorage.setItem(DRAFT_KEY, code)
         localStorage.setItem(DRAFT_NAME_KEY, name)
@@ -1270,12 +1281,17 @@ export const useDocStore = create<DocState>()((set, get) => ({
       const name = fileBaseName(handle.name)
       const optimistic = prevName !== name
       if (optimistic) applyOptimisticName(name)
+      // adj966：另存为之后，基准要跟到**新文件**上（写前登记在途写、写成功刷基准）——
+      // 否则轮询还在盯旧键，且"刚写完"会被当成外部改动
+      const asKey = bindingKeyOf({ kind: 'handle', name })
+      markWriteInFlight(asKey, code)
       // adj365：选完文件后才武装「保存中…」提示（选文件期间提示会误导）
       const t0 = performance.now()
       const cancelHint = armSavingHint()
       const phaseLog = collectSavePhases()
       try {
         await saveTextToHandle(handle, code, { trace: phaseLog.trace })
+        setBaseline(asKey, code, null)
       } catch (e) {
         if (optimistic) rollbackOptimisticName(prevName)
         throw e
@@ -1385,7 +1401,10 @@ async function doSaveFile(): Promise<boolean> {
     const cancelHint = armSavingHint()
     try {
       const code = useDocStore.getState().code
+      // adj966：写之前登记"在途写"、写成功后刷基准 ⇒ 自己的写盘回环不弹"外部变更"（与工作区那条同口径）
+      markWriteInFlight(bindingKeyOf({ kind: 'native', path }), code)
       await writeExternalFile(path, code)
+      setBaseline(bindingKeyOf({ kind: 'native', path }), code, null)
       // 写入期间用户可能继续输入 ⇒ 内容变了就保留未保存标记（与句柄路径同一口径）
       useDocStore.setState({ dirty: useDocStore.getState().code !== code })
       console.info(`[iJipu] 保存到原文件：${path}（${Math.round(performance.now() - t0)}ms）`)
@@ -1465,8 +1484,12 @@ async function doSaveFile(): Promise<boolean> {
   if (optimistic) applyOptimisticName(name)
   try {
     const code = useDocStore.getState().code
+    // adj966：写前登记"在途写"、写成功后刷基准（与 nativePath / 工作区两条同口径）⇒ 自己的回环不弹提示
+    const hKey = bindingKeyOf({ kind: 'handle', name })
+    markWriteInFlight(hKey, code)
     // adj364：最快路径——直接写；权限失效时才申请权限并重试（不再每次前置查权限/回读）
     await saveTextToHandle(handle, code, { trace: phaseLog.trace })
+    setBaseline(hKey, code, null)
     const tStore = performance.now()
     phaseLog.tail('store', performance.now() - tStore)
     // 句柄与显示名保持一致（句柄持久化已在获取/打开该文件时完成，保存热路径不再重复写库）

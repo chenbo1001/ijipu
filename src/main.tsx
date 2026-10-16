@@ -236,7 +236,6 @@ void (async () => {
           if (segs.length === 0) return
           const { useDocStore } = await import('./store/docStore')
           const { readWorkspaceText, getWorkspace } = await import('./store/workspace')
-          const { useUiStore } = await import('./store/uiStore')
           const st = useDocStore.getState()
           // 只关心"当前正在编辑的这个文件"
           const bind = st.binding
@@ -260,24 +259,10 @@ void (async () => {
           }
           if (verdict.kind !== 'external') return
           const name = segs[segs.length - 1]
-          useUiStore.getState().showAsk({
-            text: externalChangeCopy.askText(name),
-            confirmLabel: externalChangeCopy.loadExternal,
-            cancelLabel: externalChangeCopy.keepLocal,
-            onConfirm: () => {
-              // 用文件里的内容替换当前文档（仍走 store 的打开逻辑，历史会记一步，可撤销）
-              void useDocStore.getState().openWorkspaceFile(segs)
-            },
-            onCancel: () => {
-              // 保留本地：什么都不做。用户下次保存会用本地内容覆盖外部改动（提示里已说明）
-              console.info('[iJipu] 保留本地修改，忽略外部改动')
-            },
-            // adj928：多一个「查看差异」——本地内容**点开时再取**（用户可能还在编辑）
-            diff: {
-              name,
-              localText: () => useDocStore.getState().code,
-              externalText: verdict.externalText,
-            },
+          // adj966：提示与差异框**只有一处实现**（`askLoadExternalChange`），宿主事件与轮询共用
+          askLoadExternalChange(name, verdict.externalText, () => {
+            // 用文件里的内容替换当前文档（仍走 store 的打开逻辑，历史会记一步，可撤销）
+            void useDocStore.getState().openWorkspaceFile(segs)
           })
         })()
       },
@@ -328,6 +313,126 @@ void (async () => {
     // 但**要留痕**：嵌入版初始化失败会表现为"打开了但显示的不是文库"，
     // 静默吞掉会让排错无从下手（冒烟脚本也靠这条日志定位）。
     console.warn('[iJipu] 嵌入版初始化失败：', e)
+  }
+})()
+/**
+ * adj966：**冲突提示只有一处实现** —— 宿主事件（`fileChanged`）与轮询（`startExternalWatch`）共用它，
+ * 将来加原生 notify 也走它。三端一致：文案 `externalChangeCopy` + 差异框 `FileDiffDialog`。
+ */
+function askLoadExternalChange(name: string, externalText: string, loadExternal: () => void): void {
+  void (async () => {
+    const { useUiStore } = await import('./store/uiStore')
+    const { useDocStore } = await import('./store/docStore')
+    useUiStore.getState().showAsk({
+      text: externalChangeCopy.askText(name),
+      confirmLabel: externalChangeCopy.loadExternal,
+      cancelLabel: externalChangeCopy.keepLocal,
+      onConfirm: loadExternal,
+      onCancel: () => {
+        // 保留本地：什么都不做。用户下次保存会用本地内容覆盖外部改动（提示里已说明）
+        console.info('[iJipu] 保留本地修改，忽略外部改动')
+      },
+      // adj928：多一个「查看差异」——本地内容**点开时再取**（用户可能还在编辑）
+      diff: { name, localText: () => useDocStore.getState().code, externalText },
+    })
+  })()
+}
+
+/**
+ * adj966：**外部改动轮询**（桌面壳 / 网页 / PWA）。
+ *
+ * 为什么需要：一份 `.jps` 被同步端改过之后，本端"编辑内容来自缓存"并不知道 ⇒ 下次保存会覆盖最新内容。
+ * 插件端有宿主 `modify` 事件（能力档 `watch: 'event'`），桌面壳与网页端没有事件源 ⇒ **轮询**。
+ *
+ * 分工（判据都只有一处）：
+ *  · 「查不查 / 什么档」→ `store/fileHost.ts` 的 `decideWatch`（按宿主能力降级；宿主事件档与受限档**不轮询**）；
+ *  · 「变没变」→ `store/externalChange.ts` 的 `probeExternalChange`（基准指纹 + mtime 快筛）；
+ *  · 本段只做**接线**：把三种绑定（FSA 句柄 / 原生路径 / 工作区）各自接到同一套 IO 形状上。
+ */
+void (async () => {
+  try {
+    const { getRuntimeEnv } = await import('./brand/env')
+    const { hostProfile, decideWatch } = await import('./store/fileHost')
+    const { startExternalWatch } = await import('./store/externalChangeWatch')
+    const { useDocStore } = await import('./store/docStore')
+    const { baselineKeyOf, bindingKeyOf, probeExternalChange } = await import('./store/externalChange')
+    const { readNativeProbe } = await import('./store/externalOpen')
+    const { readWorkspaceText, getWorkspace } = await import('./store/workspace')
+    const visible = (): boolean => document.visibilityState === 'visible'
+    const fsa = typeof (window as unknown as { showOpenFilePicker?: unknown }).showOpenFilePicker === 'function'
+    const profile = hostProfile(getRuntimeEnv(), fsa)
+    startExternalWatch({
+      mode: () => decideWatch(profile, visible()),
+      visible,
+      hasBinding: () => {
+        const s = useDocStore.getState()
+        return !!(s.fileHandle || s.nativePath || (s.binding && s.binding.segs.length > 0))
+      },
+      io: () => {
+        const s = useDocStore.getState()
+        if (s.fileHandle) {
+          const h = s.fileHandle
+          return {
+            key: bindingKeyOf({ kind: 'handle', name: s.fileName }),
+            mtimeOf: async () => (await h.getFile()).lastModified,
+            readText: async () => (await h.getFile()).text(),
+          }
+        }
+        if (s.nativePath) {
+          const path = s.nativePath
+          return {
+            key: bindingKeyOf({ kind: 'native', path }),
+            mtimeOf: async () => (await readNativeProbe(path)).mtimeMs,
+            readText: async () => (await readNativeProbe(path)).text,
+          }
+        }
+        const bind = s.binding
+        if (bind && bind.segs.length > 0) {
+          const segs = bind.segs
+          return {
+            key: baselineKeyOf(bind.wsId, segs),
+            mtimeOf: async () => null, // 宿主/工作区不回传 mtime ⇒ 走内容判据
+            readText: async () => {
+              const ws = await getWorkspace()
+              if (!ws) throw new Error('没有工作区')
+              return readWorkspaceText(ws, segs)
+            },
+          }
+        }
+        return null
+      },
+      localText: () => useDocStore.getState().code,
+      onExternal: (externalText) => {
+        const s = useDocStore.getState()
+        const name = s.binding?.segs?.[s.binding.segs.length - 1] ?? `${s.fileName}.jps`
+        askLoadExternalChange(name, externalText, () => {
+          const cur = useDocStore.getState()
+          if (cur.binding && cur.binding.segs.length > 0) void cur.openWorkspaceFile(cur.binding.segs)
+          else void cur.openFile()
+        })
+      },
+      startInterval: (fn, ms) => {
+        const t = window.setInterval(fn, ms)
+        return () => window.clearInterval(t)
+      },
+      onVisible: (fn) => {
+        /**
+         * ⚠ 契约（见 `externalChangeWatch.ts`）：回调被调用时 `visible()` 必须已返回**新的**可见性。
+         * `visibilitychange` 天然满足；`focus` 也满足（此刻页面已可见）。
+         */
+        const h = (): void => fn()
+        document.addEventListener('visibilitychange', h)
+        window.addEventListener('focus', h)
+        return () => {
+          document.removeEventListener('visibilitychange', h)
+          window.removeEventListener('focus', h)
+        }
+      },
+      probe: probeExternalChange,
+    })
+  } catch (e) {
+    // 轮询起不来不该影响主流程（只留痕）
+    console.warn('[iJipu] 外部改动轮询未启动：', e)
   }
 })()
 

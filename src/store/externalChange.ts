@@ -71,6 +71,17 @@ export function baselineKeyOf(wsId: string, segs: readonly string[]): string {
   return `${wsId}\u0000${segs.join('/')}`
 }
 
+/**
+ * adj966：**句柄 / 原生路径**这两种"系统文件"绑定的基准键（与上面工作区那条并列）。
+ *
+ * 键必须"换文件即失效"：句柄用**文件名**（同一次会话里同名 `.jps` 极少冲突，且句柄没有合适的字符串身份），
+ * 原生路径用**绝对路径**（唯一、稳定，正是"写回同一个文件"的判据）。
+ * 三端统一：桌面原生路径 / 网页与 PWA 的 FSA 句柄 / 宿主（插件）走工作区那条 —— 由各端适配器给出同一个键。
+ */
+export function bindingKeyOf(binding: { kind: 'handle'; name: string } | { kind: 'native'; path: string }): string {
+  return binding.kind === 'handle' ? `handle:${binding.name}` : `native:${binding.path}`
+}
+
 /** 会话级基准（L3：内存，重开即重建，不持久化——持久化反而会把过期基准当准） */
 let baseline: FileBaseline | null = null
 
