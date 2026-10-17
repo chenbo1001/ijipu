@@ -47,15 +47,46 @@ export const APP_COMMIT = GIT_COMMIT
 export const APP_TITLE_PREFIX = '爱记谱 iJipu'
 
 /**
- * adj971：**应用标题** = `文件名.jps - 爱记谱 iJipu`（四处宿主共用这一份：桌面壳窗口标题、
- * PWA 窗口/页签、网页版页签、Obsidian 嵌入版）。
+ * 应用名（转成**正则安全**的形态）：下面要从文件名里把它剥掉，正则里不能塞裸字符串。
+ * `APP_TITLE_PREFIX` 目前是「爱记谱 iJipu」（无正则元字符），但这里仍统一转义，改名字时不会静默失效。
+ */
+const PREFIX_RE_SRC = APP_TITLE_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** 文件名**前面**重复带着应用名的写法（中间可用 `-` / `—` / `–` 连接） */
+const LEADING_PREFIX_RE = new RegExp(`^${PREFIX_RE_SRC}\\s*[-—–]\\s*`)
+/** 文件名**后面**重复带着应用名的写法 */
+const TRAILING_PREFIX_RE = new RegExp(`\\s*[-—–]\\s*${PREFIX_RE_SRC}$`)
+/** **整个名字就是应用名**（`爱记谱 iJipu.jps`）——那就等于"没有名字"，走 `未命名` 兜底 */
+const ONLY_PREFIX_RE = new RegExp(`^${PREFIX_RE_SRC}$`)
+
+/**
+ * adj976（**用户 2026-10-18 实报，截图**）：标题里应用名**只许出现一次**。
  *
- * @param fileBase 文件名（**不带扩展名**；`docStore.fileName` 就是这个形态）。
- *   这里仍**防御性地**剥掉一次 `.jps`：调用方若手滑传了全名，标题不该变成 `x.jps.jps - …`。
- *   ⚠ 不 import `store/saveSupport` 的 `fileBaseName`：品牌层不许依赖 store 层（分层约束）。
+ * 用户截图里的窗口标题是 `爱记谱 iJipu - 望月.jps - 爱记谱 iJipu` —— 应用名重复了两遍。
+ * 查下来我们自己的代码只拼一次（`App.tsx` 设 `document.title` / `set_title` 都是这一个函数的返回值），
+ * 所以重复来自**文件名本身**就带应用名（如 `爱记谱 iJipu - 望月.jps`，多半是早先某次另存/重命名带进去的）：
+ * 于是"文件名 + 应用名"就把它拼了两遍。
+ *
+ * 口径：先把这个"已经写在文件名里的应用名"剥掉（**两端都剥、可反复剥**），再按
+ * `文件名.jps - 爱记谱 iJipu` 拼一次 ⇒ 该函数因此是**幂等**的（传 `望月.jps - 爱记谱 iJipu` 也得同一结果）。
+ *
+ * ⚠ 只剥"独立成段的应用名"（前面/后面紧挨分隔符 `-` `—` `–` 或整个名字就是它）：
+ * 像 `我的爱记谱 iJipu 笔记` 这种**夹在中间**的名字**不动**（那不是重复，是用户的文件名）。
+ *
+ * @param fileBase 文件名（可带 `.jps`；也允许已经带过应用名 —— 见上面的幂等说明）。
  */
 export function appTitleOf(fileBase: string): string {
-  const base = String(fileBase ?? '').trim().replace(/\.jps$/i, '')
+  let base = String(fileBase ?? '').trim()
+  // 反复剥：可能"前后都带"，也可能剥完一段又露出 `.jps`
+  for (;;) {
+    const next = base
+      .replace(LEADING_PREFIX_RE, '')
+      .replace(TRAILING_PREFIX_RE, '')
+      .replace(ONLY_PREFIX_RE, '')
+      .replace(/\.jps$/i, '')
+      .trim()
+    if (next === base) break
+    base = next
+  }
   return `${base === '' ? '未命名' : base}.jps - ${APP_TITLE_PREFIX}`
 }
 

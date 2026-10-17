@@ -16821,6 +16821,36 @@ function runAdj621Tests() {
         !appTitleOf('茉莉花').startsWith(APP_TITLE_PREFIX),
       JSON.stringify(cases.map(([i, w]) => `${i} ⇒ ${appTitleOf(i)}｜期望 ${w}`)),
     )
+    /**
+     * adj976（**用户截图实报**）：标题里应用名**只许出现一次**。
+     *
+     * 用户那份窗口标题是 `爱记谱 iJipu - 望月.jps - 爱记谱 iJipu` —— 重复了两遍。我们的代码只拼一次，
+     * 所以重复来自**文件名本身**就带应用名（`爱记谱 iJipu - 望月.jps`）。这里把"两端重复"都逐字钉住，
+     * 并配**不该动的**负对照（夹在中间的应用名是用户文件名的一部分，不许剥）。
+     */
+    {
+      const dedup: [string, string][] = [
+        ['爱记谱 iJipu - 望月', '望月.jps - 爱记谱 iJipu'], // 用户截图里那种（前缀重复）
+        ['爱记谱 iJipu - 望月.jps', '望月.jps - 爱记谱 iJipu'], // 带扩展名
+        ['望月 - 爱记谱 iJipu', '望月.jps - 爱记谱 iJipu'], // 后缀重复
+        ['爱记谱 iJipu—望月–别', '望月–别.jps - 爱记谱 iJipu'], // 破折号变体；中间那个 `–` 不是分隔应用名的
+        ['爱记谱 iJipu', '未命名.jps - 爱记谱 iJipu'], // 整个名字就是应用名 ⇒ 兜底
+        ['望月.jps - 爱记谱 iJipu', '望月.jps - 爱记谱 iJipu'], // **幂等**：已是目标形态再传一次不变
+      ]
+      check(
+        'adj976 标题里**应用名只出现一次**：文件名若自带 `爱记谱 iJipu`（前缀/后缀/带扩展名/破折号变体）先剥掉再拼；且**幂等**（已是目标形态再传一次不变）',
+        dedup.every(([input, want]) => appTitleOf(input) === want) &&
+          dedup.every(([, want]) => (want.match(/爱记谱 iJipu/g) ?? []).length === 1),
+        JSON.stringify(dedup.map(([i, w]) => `${i} ⇒ ${appTitleOf(i)}｜期望 ${w}`)),
+      )
+      check(
+        'adj976 **负对照**：应用名**夹在文件名中间**时不许剥（`我的爱记谱 iJipu 笔记` 是用户的文件名，不是重复），也**不许**把普通文件名改坏',
+        appTitleOf('我的爱记谱 iJipu 笔记') === '我的爱记谱 iJipu 笔记.jps - 爱记谱 iJipu' &&
+          appTitleOf('望月') === '望月.jps - 爱记谱 iJipu' &&
+          appTitleOf('爱记谱') === '爱记谱.jps - 爱记谱 iJipu',
+        JSON.stringify([appTitleOf('我的爱记谱 iJipu 笔记'), appTitleOf('望月'), appTitleOf('爱记谱')]),
+      )
+    }
     check(
       'adj971 **负对照**：旧口径的标题（`爱记谱 iJipu - vX.Y.Z (date @commit)`）**不等于**新函数的结果，且新结果里没有版本号',
       appTitleOf('茉莉花') !== `爱记谱 iJipu - ${APP_VERSION_FULL}` &&
