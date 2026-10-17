@@ -19397,6 +19397,13 @@ runAdj927ExternalChangeTests()
       failed++
       console.error('  ✗ adj982 段层附点贴紧数字用例抛异常', e)
     }
+    try {
+      // adj983：反复跳回的连音线要画、且不报括号错（用户实报）
+      runAdj983Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj983 反复跳回连音线用例抛异常', e)
+    }
   })
   .then(() => {
     try {
@@ -20851,6 +20858,79 @@ function runAdj982Tests() {
         // 负对照：把"贴紧"那半句去掉（只剩旧的三等分/栅格口径）⇒ 判假
         !/dotCX = curX \+ g \+ n\.noteBodyW \+ g \+ n\.dotBodyW \/ 2\s*\n\s*\}/.test(laySrc),
       '',
+    )
+  }
+}
+
+/**
+ * adj983（**用户 2026-10-18 实报**）：**反复跳回**的连音线。
+ *
+ * 用户原话：「最后一个 Q 行的 `(6/[5/]` 因为 `:|` 再跳回 `|:` 接着第一个 Q 行的 `6/)`，
+ * 因此 `(6/[5/]` 的连音线还是有效的跨行连音线，**还是要画，且接到第一个 Q 行**」；
+ * 现在的问题是"没有画跨行连音线，且报错了"。
+ *
+ * 判据（成对，含负对照）：
+ *  ① 有 `|:` / `:|` 时：**零条**连音线相关告警；`slurPairs` 里有一条 `wrap: true`
+ *     且 `start > end`（末行的音 → 首行的音）；
+ *  ② 布局真的画了**两半**（末行一段 + 首行一段，跨行样式）；
+ *  ③ **负对照**：同样的括号写法但**没有反复记号** ⇒ 仍报两条（孤立 `)` + 未闭合 `(`），
+ *     且没有 `wrap` 对 —— 证明这条"跳回"判据是**窄**的，不是把错的也放过。
+ */
+function runAdj983Tests() {
+  console.log('[184] adj983 repeat-wrap slur (last `(` closes on the `)` after `|:`)')
+  const WRAP = [
+    'V: 1.0',
+    'B: t',
+    'D: C',
+    'P: 4/4',
+    'Q: |: 6/) (6. 6.) 2/ | 5/ 5/ 5/ 6/ | 6,/ 3/ 2/. (1/ 1/) 5/ | 3[3/5/] - - 3/ |',
+    'C: 川 阴山下，',
+    'Q: 6/ 5/ 3/ 2/ | 6[1/] - - &ykh 3/ (6/[5/] :|',
+    'C: 敕勒',
+  ].join('\n')
+  const NORPT = [
+    'V: 1.0',
+    'B: t',
+    'D: C',
+    'P: 4/4',
+    'Q: 6/) (6. 6.) 2/ | 5/ 5/ 5/ 6/ |',
+    'C: 一',
+    'Q: 6/ 5/ 3/ 2/ | 6[1/] - - 3/ (6/[5/] |',
+    'C: 二',
+  ].join('\n')
+  const slurProblemsOf = (src: string) =>
+    parseJps(src).errors.filter((e) => /连音线|`\(`|`\)`/.test(e.message))
+  {
+    const pr = parseJps(WRAP)
+    const probs = slurProblemsOf(WRAP)
+    const wrap = (pr.slurPairs ?? []).filter((p) => p.wrap === true)
+    check(
+      'adj983 有 `|:`/`:|` 时：**零条**连音线告警，且配对结果里有一条 `wrap` 对（`start` 是末行的音、`end` 是首行的音）',
+      probs.length === 0 && wrap.length === 1 && wrap[0].start > wrap[0].end,
+      JSON.stringify({ 告警: probs.map((p) => p.message), wrap }),
+    )
+    const slurs = layoutScore(pr, defaultPageConfig).pages.flatMap((p) => p.slurs ?? [])
+    const cross = slurs.filter((s) => s.style !== undefined && s.style !== 'normal')
+    const allRows = new Set(slurs.map((s) => s.row))
+    const crossRows = new Set(cross.map((s) => s.row))
+    const firstRow = 0
+    const lastRow = Math.max(...allRows)
+    check(
+      'adj983 布局**真的画了**这条跨行线：末行（`start` 那半段）与首行（`end` 那半段）**各有**一段跨行样式的线',
+      cross.length >= 2 && allRows.size >= 2 && crossRows.has(firstRow) && crossRows.has(lastRow),
+      JSON.stringify({ 跨行段: cross.length, 全部段: slurs.length, 有线的行: [...allRows], 跨行所在行: [...crossRows] }),
+    )
+  }
+  {
+    const pr2 = parseJps(NORPT)
+    const probs2 = slurProblemsOf(NORPT)
+    const wrap2 = (pr2.slurPairs ?? []).filter((p) => p.wrap === true)
+    check(
+      'adj983 **负对照**：同样括号写法但**没有反复记号** ⇒ 仍报两条（多一个 `)` + `(` 没闭合），且没有 `wrap` 对',
+      probs2.length === 2 && wrap2.length === 0 &&
+        probs2.some((p) => /多了一个/.test(p.message)) &&
+        probs2.some((p) => /没有对应的/.test(p.message)),
+      JSON.stringify(probs2.map((p) => p.message)),
     )
   }
 }

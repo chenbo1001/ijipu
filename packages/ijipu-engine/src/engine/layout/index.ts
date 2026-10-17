@@ -4524,7 +4524,7 @@ export function layoutScore(
         row: rowA,
         rowTop: r1(rows[rowA].y),
       })
-    } else if (rowB === rowA + 1 || sp.houseTie) {
+    } else if (rowB === rowA + 1 || sp.houseTie || sp.wrap) {
       // 相邻行：上一行左半部（开始 → 行末小节线）、下一行右半部（边距 → 结束）；
       // 行首/行末均为连音符最高点；相隔多行视为误输入，不渲染
       //

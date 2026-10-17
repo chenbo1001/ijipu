@@ -103,6 +103,27 @@ export function pairSlurs(result: ParseResult): SlurPairing {
   let houseTieStart = -1
   /** 已扫描到的小节线根数（含纯跳房子起点）——判断连音线是否跨过房子起始线 */
   let barSeq = 0
+  /**
+   * adj983（**用户 2026-10-18 实报**）：**反复跳回**的连音线。
+   *
+   * 用户原话：「上例中如图，最后一个 Q 行的 `(6/[5/]` 因为 `:|` 再跳回 `|:` 接着第一个 Q 行的
+   * `6/)`，因此 `(6/[5/]` 的连音线还是有效的跨行连音线，还是要画，且接到第一个 Q 行」。
+   *
+   * 线性扫描下这一对是**反的**：先遇到首行 `|: 6/)` 那个 `)`（栈为空 ⇒ 以前判"多余"），
+   * 再遇到末行 `(6/[5/]` 的 `(`（到谱末仍未闭合 ⇒ 以前判"没配对"）。两条告警都发错了。
+   *
+   * 规则：孤立 `)` 若出现在**反复起点 `|:` 之后**，并且它后面**还有**一个未闭合的 `(`、
+   * 那个 `(` 之后又有**反复终点 `:|`** ⇒ 它们是同一条连音线（唱到末尾跳回开头）。
+   * 于是：
+   *   · 记下这类"候选孤立 `)`"（每个 `|:` 之后只认**第一个**），暂不报警；
+   *   · 谱末再把这个候选取用掉：配成 `wrap: true` 的对（`start` = 末行的音 > `end` = 首行的音），
+   *     被用掉的那条 `)` 与那个 `(` **都不再报警**，其余照旧报。
+   */
+  const strayCloses: { note: number; line: number; col: number; wrapOk: boolean; used?: boolean }[] = []
+  /** 见过 `|:`（反复起点）⇒ 下一个孤立 `)` 可能是"跳回"的闭合 */
+  let repeatStartArmed = false
+  /** 最近一次见到 `:|` / `:|:` 时的小节线序号（配对时判定"那个 `(` 之后确实有反复终点"） */
+  let lastRepeatEndBarSeq = -1
   /** 「跳房子首音」音符索引集合 + 各自起始小节线的小节线序号（配对时判定跨线） */
   const voltaFirstNotes = new Set<number>()
   const voltaFirstBarSeq = new Map<number, number>()
@@ -147,6 +168,9 @@ export function pairSlurs(result: ParseResult): SlurPairing {
       } else if (t.kind === 'barline') {
         // `adj651`：只需数根数与识别房子起始——连音线跨线判定用
         barSeq++
+        // adj983：反复起点 / 终点（`|:` 之后那个孤立 `)` 可能是"跳回"的闭合）
+        if (t.type === '|:' || t.type === ':|:') repeatStartArmed = true
+        if (t.type === ':|' || t.type === ':|:') lastRepeatEndBarSeq = barSeq
         if (t.voltaStart) {
           pendingVoltaBarSeq = barSeq
           expectVoltaFirst = true
@@ -204,15 +228,19 @@ export function pairSlurs(result: ParseResult): SlurPairing {
              * adj973（ⓑ，用户要求）：**多出来的 `)`** —— 前面没有未闭合的 `(`（也不是跳房子延续线）。
              * 此前同样静默：整条连线凭空消失，而用户只能盯着源码找那个多余的括号。
              * 锚点取**这个 `)` 自己**（它才是多余的那个）。
+             *
+             * adj983：**先不报** —— 它可能是"反复跳回"那条连音线的闭合（见 `strayCloses` 的说明），
+             * 留到谱末统一判定：被配掉的不报，没被配掉的才报。
              */
             const at = colOf(music.raw, t)
-            problems.push({
+            strayCloses.push({
+              note: lastNote,
               line: music.pos.line,
               col: at,
-              message: '多了一个 `)`（前面没有未闭合的 `(`）',
-              severity: 'warning',
-              hint: HINT_STRAY_CLOSE,
+              // 只认 `|:` 之后**第一个**孤立 `)`（连写两个 `)` 时第二个仍是多余的）
+              wrapOk: repeatStartArmed,
             })
+            if (repeatStartArmed) repeatStartArmed = false
           }
         }
       }
@@ -220,8 +248,48 @@ export function pairSlurs(result: ParseResult): SlurPairing {
   }
 
   /**
+   * adj983（**用户 2026-10-18 实报**）：先把"**反复跳回**"那一对配掉。
+   *
+   * 判据三条同时成立才配（宁可少配、不可错配）：
+   *  ① 有一个"`|:` 之后的孤立 `)`"候选（`wrapOk`）；
+   *  ② 栈里还有未闭合、且**已经锚到音符**的 `(`（取最内层那个 = LIFO，与普通配对同序）；
+   *  ③ 那个 `(` 之后**确实有反复终点**（`lastRepeatEndBarSeq` 在它的小节线序号之后）——
+   *     只有真的会跳回去，这个 `)` 才是它的闭合；没有反复的谱里，这种写法仍然是错的、要报。
+   */
+  {
+    const cand = strayCloses.find((c) => c.wrapOk && !c.used)
+    const innermost = sQueue.length > 0 ? sQueue[sQueue.length - 1] : undefined
+    if (cand && innermost && innermost.start !== -1 && innermost.barSeq <= lastRepeatEndBarSeq) {
+      sQueue.pop()
+      cand.used = true
+      pairs.push({
+        start: innermost.start,
+        end: cand.note,
+        depth: innermost.depth,
+        tuplet: innermost.tuplet,
+        plus: innermost.plus,
+        minus: innermost.minus,
+        wrap: true,
+      })
+    }
+  }
+
+  /** 没被"跳回"用掉的孤立 `)` 才报（adj973 ⓑ 的口径不变） */
+  for (const c of strayCloses) {
+    if (c.used) continue
+    problems.push({
+      line: c.line,
+      col: c.col,
+      message: '多了一个 `)`（前面没有未闭合的 `(`）',
+      severity: 'warning',
+      hint: HINT_STRAY_CLOSE,
+    })
+  }
+
+  /**
    * adj973（ⓑ，用户要求）：**谱面结束时仍有未闭合的 `(`** ⇒ 这些线一条也画不出来，此前静默。
    * 只报"括号后面**有音符**"的那些（`start !== -1`）：`()` 里没音符属于退化写法，没有线可画，不吵人。
+   * adj983：被"反复跳回"配掉的那个 `(` 已出栈，不会在这里再报。
    */
   for (const s of sQueue) {
     if (s.start === -1) continue
