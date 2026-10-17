@@ -1388,23 +1388,39 @@ async function main() {
       titleNow,
     )
     check(
-      'adj971 **版本显示在状态栏右侧**：`.footer-version` 可见文本是 `vX.Y.Z`，悬停 title 是完整串（含日期与 commit）',
-      /^v\d+\.\d+\.\d+$/.test(footVer.trim()) && /^v\d+\.\d+\.\d+ \(\d{4}-\d{2}-\d{2} @[0-9a-f]{8}\)$/.test(footVerTitle),
+      'adj971/adj975 **版本显示在状态栏**：可见文本是 `vX.Y.Z (日期 @commit)`（adj975：日期与指纹**直接显示**，不再只在悬停里），悬停 title 同样是完整串',
+      /^v\d+\.\d+\.\d+ \(\d{4}-\d{2}-\d{2} @[0-9a-f]{7,8}\)$/.test(footVer.trim()) &&
+        /^v\d+\.\d+\.\d+ \(\d{4}-\d{2}-\d{2} @[0-9a-f]{7,8}\)$/.test(footVerTitle),
       JSON.stringify({ 可见: footVer.trim(), 悬停: footVerTitle }),
     )
     {
-      /** 结构判据：它在 `footer-spacer` **之后**（真在右半边）—— 只看文本容易"放在左边也算过" */
+      /**
+       * 结构判据（adj975 用户口径）：它在 `footer-spacer` **之后**（真在右半边），且**在「官网首页」链接的左边**。
+       * 只按源码顺序不够 —— 这里量**真实几何**：版本的右缘 ≤ 官网链接的左缘，两者同一行。
+       */
       const onRight = await evalJs(
         c,
         `(() => {
            const v = document.querySelector('.footer-version')
            const bar = document.querySelector('.footer')
+           const site = document.querySelector('.footer-site')
            if (!v || !bar) return null
            const vr = v.getBoundingClientRect()
            const br = bar.getBoundingClientRect()
            const spacer = document.querySelector('.footer-spacer')
            const sr = spacer ? spacer.getBoundingClientRect() : null
-           return { 版本左缘: Math.round(vr.left), 状态栏中线: Math.round(br.left + br.width / 2), 在spacer右侧: sr ? vr.left >= sr.right - 1 : null }
+           const gr = site ? site.getBoundingClientRect() : null
+           const meta = document.querySelector('.footer-version-meta')
+           const mr = meta ? meta.getBoundingClientRect() : null
+           return {
+             版本左缘: Math.round(vr.left),
+             版本右缘: Math.round(vr.right),
+             官网左缘: gr ? Math.round(gr.left) : null,
+             同一行: gr ? Math.abs((vr.top + vr.bottom) / 2 - (gr.top + gr.bottom) / 2) <= 2 : null,
+             状态栏中线: Math.round(br.left + br.width / 2),
+             在spacer右侧: sr ? vr.left >= sr.right - 1 : null,
+             日期指纹宽: mr ? Math.round(mr.width) : 0,
+           }
          })()`,
       )
       check(
@@ -1412,6 +1428,41 @@ async function main() {
         onRight !== null && onRight.版本左缘 > onRight.状态栏中线 && onRight.在spacer右侧 === true,
         JSON.stringify(onRight),
       )
+      check(
+        'adj975 版本徽标**真在「官网首页」链接的左边**（版本的右缘 ≤ 官网链接的左缘，且两者同一行）——用户要求"放在官网链接的左边"',
+        onRight !== null && onRight.官网左缘 !== null && onRight.版本右缘 <= onRight.官网左缘 && onRight.同一行 === true,
+        JSON.stringify(onRight),
+      )
+      check(
+        'adj975 日期与指纹那一段**真的可见**（宽 > 0，不是只写在 `title` 里）',
+        onRight !== null && onRight.日期指纹宽 > 20,
+        JSON.stringify({ 日期指纹宽: onRight?.日期指纹宽 }),
+      )
+      /** 负对照（真环境）：窄屏（≤720px）下那一段必须**收起来**，只留版本号 */
+      await c.send('Emulation.setDeviceMetricsOverride', { width: 700, height: 900, deviceScaleFactor: 1, mobile: false })
+      await sleep(300)
+      const narrowVer = await evalJs(
+        c,
+        `(() => {
+           const v = document.querySelector('.footer-version')
+           const meta = document.querySelector('.footer-version-meta')
+           if (!v) return null
+           return {
+             /* ⚠ 用 innerText（＝真正看得见的文本）：textContent 会把 display:none 的那段也算进来，
+                那样"窄屏已收起"就会被判成"还在"。 */
+             可见文本: (v.innerText || '').trim(),
+             版本宽: Math.round(v.getBoundingClientRect().width),
+             日期指纹可见: meta ? getComputedStyle(meta).display !== 'none' : null,
+           }
+         })()`,
+      )
+      check(
+        'adj975 **负对照（窄屏 ≤720px）**：只留版本号（看得见的文本里没有日期/指纹、宽度也缩回去了）——否则手机上状态栏会被挤爆',
+        narrowVer !== null && narrowVer.日期指纹可见 === false && /^v\d+\.\d+\.\d+$/.test(narrowVer.可见文本) && narrowVer.版本宽 < 80,
+        JSON.stringify(narrowVer),
+      )
+      await c.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
+      await sleep(200)
     }
     // ---- 负对照：换一份文件（拖入）⇒ 标题必须跟着换 ----
     {

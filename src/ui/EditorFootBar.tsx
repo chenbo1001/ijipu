@@ -21,7 +21,7 @@ import { useUiStore } from '../store/uiStore'
 import { problemCopy, dockCopy } from '../brand/copy'
 import { summarizeProblems } from './problems'
 // adj971：版本号在状态栏右侧显示（单一来源在 brand/version.ts）
-import { APP_VERSION, APP_VERSION_FULL } from '../brand/version'
+import { APP_BUILD_DATE, APP_COMMIT, APP_VERSION, APP_VERSION_FULL } from '../brand/version'
 // adj618（用户要求）：状态栏那条告警按钮的提示后面带快捷键（键名一处定义）
 import { KBD, withKbd } from '../brand/shortcuts'
 // adj622（用户要求）：状态栏文件名改成「工作区/路径/文件名」格式
@@ -105,6 +105,15 @@ export function EditorFootBar() {
 
       <div className="footer-spacer" />
 
+      {/* adj975（**用户口径**）：版本信息显示在状态栏右侧、**「官网首页」链接的左边**
+          （adj971 时它排在最右边；用户要求挪到官网链接左侧），并且**日期与 commit 指纹直接显示** ——
+          原先只有悬停的 `title` 里能看到。可见文本 = `v0.67.0 (2026-10-17 @db3ffd76)`；
+          窄屏（≤720px）只留版本号（`.footer-version-meta` 由媒体查询隐藏），完整串仍在 `title` 上。 */}
+      <span className="footer-version" title={APP_VERSION_FULL}>
+        {`v${APP_VERSION}`}
+        <span className="footer-version-meta">{` (${APP_BUILD_DATE} @${APP_COMMIT})`}</span>
+      </span>
+
       {/* adj877（用户要求）：回官网首页的入口；adj879：与菜单里的那个共用 `goSiteHome()` */}
       <a
         className="footer-site"
@@ -132,12 +141,6 @@ export function EditorFootBar() {
           {dockCopy.exportRunning(exportJob)}
         </button>
       )}
-
-      {/* adj971（用户口径）：**版本信息显示在状态栏右侧**（原先只在标题里）。
-          可见 = 短版本号，悬停 = 完整串（`v0.65.0 (2026-10-18 @abc1234)`）。 */}
-      <span className="footer-version" title={APP_VERSION_FULL}>
-        v{APP_VERSION}
-      </span>
     </div>
   )
 }

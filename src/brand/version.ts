@@ -19,6 +19,16 @@ export const APP_VERSION = '0.67.0'
 export const APP_VERSION_FULL = `v${APP_VERSION} (${BUILD_DATE} @${GIT_COMMIT})`
 
 /**
+ * adj975（**用户 2026-10-18 口径**）：「状态栏的版本号将**日期、指纹**也加上呀」。
+ *
+ * 状态栏那一格要按「版本号 + 构建日期 + commit 指纹」三段显示（`v0.67.0 (2026-10-17 @db3ffd76)`），
+ * 而 `BUILD_DATE` / `GIT_COMMIT` 来自生成物 `gen/buildInfo`。组件不该直接去 import 那个生成物
+ * （品牌层是版本信息的唯一出处，见本文件头）⇒ 在这里转出两段，供 `ui/EditorFootBar.tsx` 拼。
+ */
+export const APP_BUILD_DATE = BUILD_DATE
+export const APP_COMMIT = GIT_COMMIT
+
+/**
  * adj971（**用户 2026-10-18 口径**）：应用标题统一来源。
  *
  * 旧口径（`adj621`）：`爱记谱 iJipu - v0.36.0 (2026-09-23 @4ed877a3)` —— 把版本塞进标题，

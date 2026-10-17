@@ -16871,22 +16871,35 @@ function runAdj621Tests() {
     '',
   )
 
-  // ⑤ 版本信息的新落点：状态栏右侧（可见短号 + 悬停完整串）
+  // ⑤ 版本信息的新落点：状态栏右侧（adj975 起**日期 + commit 指纹直接显示**、位置在「官网首页」链接左边）
   check(
-    'adj971 **版本显示在状态栏右侧**：`EditorFootBar` 渲染 `v{APP_VERSION}`（悬停 `APP_VERSION_FULL`），且样式类 `.footer-version` 在样式表里定义',
-    /import \{ APP_VERSION, APP_VERSION_FULL \} from '\.\.\/brand\/version'/.test(footSrc) &&
+    'adj971/adj975 **版本显示在状态栏右侧**：`EditorFootBar` 渲染 `v{APP_VERSION}` + **日期/指纹那一段**（`.footer-version-meta`），悬停仍是完整串；样式类两处都在样式表里',
+    /import \{ APP_BUILD_DATE, APP_COMMIT, APP_VERSION, APP_VERSION_FULL \} from '\.\.\/brand\/version'/.test(footSrc) &&
       /className="footer-version"/.test(footSrc) &&
       /title=\{APP_VERSION_FULL\}/.test(footSrc) &&
-      /v\{APP_VERSION\}/.test(footSrc) &&
-      /\.footer-version \{/.test(appCssSrc),
+      /v\$\{APP_VERSION\}/.test(footSrc) &&
+      /className="footer-version-meta"/.test(footSrc) &&
+      /APP_BUILD_DATE\} @\$\{APP_COMMIT\}/.test(footSrc) &&
+      /\.footer-version \{/.test(appCssSrc) &&
+      /\.footer-version-meta \{/.test(appCssSrc),
     '',
   )
   {
-    // 结构判据：版本必须在 `footer-spacer` **之后**（= 右侧那一段），而不是左侧
+    // 结构判据：版本必须在 `footer-spacer` **之后**（= 右侧那一段），且**在「官网首页」链接之前**（用户口径）
     const footBody = footSrc.slice(footSrc.indexOf('<div className="footer">'))
+    const verAt = footBody.indexOf('footer-version')
     check(
-      'adj971 **负对照/结构**：`.footer-version` 出现在 `footer-spacer` 之后（真在右侧）——若挪到文件名旁边那条就判假',
-      footBody.indexOf('footer-spacer') < footBody.indexOf('footer-version') && footBody.indexOf('footer-version') > 0,
+      'adj975 **负对照/结构**：`.footer-version` 在 `footer-spacer` **之后**（真在右半边）且**在「官网首页」链接之前**（用户要求"放在官网链接的左边"）——挪回最右或挪到文件名旁边都判假',
+      verAt > footBody.indexOf('footer-spacer') &&
+        verAt >= 0 &&
+        verAt < footBody.indexOf('footer-site'),
+      JSON.stringify({ spacer: footBody.indexOf('footer-spacer'), ver: verAt, site: footBody.indexOf('footer-site') }),
+    )
+    // 窄屏：日期/指纹那一段要能被媒体查询藏起来（否则手机上状态栏会被挤爆）
+    const mq = appCssSrc.slice(appCssSrc.lastIndexOf('@media (max-width: 720px)'))
+    check(
+      'adj975 窄屏（≤720px）只留版本号：媒体查询里 `.footer-version-meta { display: none }`（信息不删，仍在 `title` 上）',
+      /\.footer-version-meta \{[^}]*display: none/.test(mq),
       '',
     )
   }

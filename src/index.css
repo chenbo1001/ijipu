@@ -2697,15 +2697,22 @@ body {
 /**
  * adj971（**用户口径**）：「版本信息显示在状态栏的右侧」。
  * 原先版本只出现在窗口/页签标题里（`爱记谱 iJipu - v…`），标题改成「文件名.jps - 爱记谱 iJipu」
- * 之后，版本挪到这里 —— 可见只有短版本号，完整串（构建日期 + commit）在 `title` 里悬停看。
- * `margin-left: 2px` 让它与左边的「官网首页」/导出指示留一点净距，不贴着。
+ * 之后，版本挪到这里。
+ *
+ * adj975（**用户口径**）：① 位置再挪到**「官网首页」链接的左边**（原在最右）；
+ * ② **日期与 commit 指纹直接显示**（原先只有悬停里看得到）—— `.footer-version-meta` 那一段；
+ * 窄屏（≤720px）由文件末尾的媒体查询把它隐藏，只留版本号（完整串仍在 `title` 上）。
+ * 间距交给 `.footer` 的 `gap`，所以这里不再需要 `margin-left`。
  */
 .footer-version {
   flex: 0 0 auto;
-  margin-left: 2px;
   color: var(--jp-text-secondary);
   white-space: nowrap;
   cursor: default;
+}
+/* adj975：日期 + 指纹比版本号**弱一档**（视觉主次：一眼先看到版本号） */
+.footer-version-meta {
+  color: var(--jp-text-muted);
 }
 .footer-export-spinner {
   flex: 0 0 auto;
@@ -5378,6 +5385,13 @@ span.ws-check {
 
   .file-diff-pane {
     flex: 1 1 50%;
+  }
+
+  /* adj975：状态栏放不下「版本号 + 日期 + 指纹」⇒ 窄屏只留版本号。
+     用 `display: none` 而不是缩字号：日期/指纹在手机上本来就是"想核对时才看"的信息，
+     完整串仍在 `title` 上（长按/悬停可看）——**不删信息，只是不占位**。 */
+  .footer-version-meta {
+    display: none;
   }
 }
 
