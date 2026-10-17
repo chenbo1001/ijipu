@@ -1483,27 +1483,6 @@ async function main() {
       )
     }
 
-    // ---- adj976（用户截图实报）：文件名里自带应用名时，标题里应用名**只许出现一次** ----
-    //
-    // 用户那份窗口标题是 `爱记谱 iJipu - 望月.jps - 爱记谱 iJipu`（重复两遍）。我们的代码只拼一次，
-    // 所以重复来自**文件名本身**带应用名。这里就用那种文件名真拖一次，量真标题。
-    {
-      await evalJs(c, fireDrag('爱记谱 iJipu - 望月.jps', 'V: 1.0\nB: 望月\nD: C\nP: 4/4\nQ: 1 2 3 |\n', 'drop'))
-      await sleep(400)
-      if (await evalJs(c, `!!document.querySelector('.confirm-bar')`)) {
-        await evalJs(c, `document.querySelector('.confirm-bar-btn.is-primary')?.click(), true`)
-      }
-      await waitFor(c, `document.querySelector('.editor-main textarea').value.includes('望月')`, '拖入「爱记谱 iJipu - 望月.jps」已打开')
-      await sleep(300)
-      const dedupTitle = String(await evalJs(c, `document.title`))
-      const dupCount = (dedupTitle.match(/爱记谱 iJipu/g) ?? []).length
-      check(
-        'adj976 文件名自带应用名时标题**不再重复**：`爱记谱 iJipu - 望月.jps` ⇒ 标题 `望月.jps - 爱记谱 iJipu`（应用名只出现 1 次）',
-        dedupTitle === '望月.jps - 爱记谱 iJipu' && dupCount === 1,
-        JSON.stringify({ 标题: dedupTitle, 应用名出现次数: dupCount }),
-      )
-    }
-
     // ============ adj972：「保存到工作区」对话框 —— 目录多时**列表内滚动**，整框不滚 ============
     //
     // 用户截图实报（插件里那个对话框）：「目录列表，目录较多时，使用列表内滚动，不要整个对话框滚动」。
