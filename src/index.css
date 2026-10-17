@@ -3463,12 +3463,19 @@ body {
 .pcfg-textarea { resize: vertical; min-height: 26px; line-height: 1.35; font-family: inherit; }
 
 /* adj963（用户要求）：「保存到工作区」对话框（插件嵌入版的保存主入口）。
-   布局与既有对话框一致：字段 → 目录列表（吃剩余高度）→ 底部按钮靠右。只消费 `--jp-*` 变量。 */
+   布局与既有对话框一致：字段 → 目录列表（吃剩余高度）→ 底部按钮靠右。只消费 `--jp-*` 变量。
+
+   adj972（**用户截图实报**：「目录较多时，使用列表内滚动，不要整个对话框滚动」）：
+   本对话框改用 `Modal` 的 `fill`（见 `SaveAsDialog.tsx` 的说明）⇒ 这里必须**参与那条 flex 链**：
+   `flex: 1; min-height: 0` 才能把高度让给 `.save-as-list`，否则它按内容长高、由整个对话框去滚。
+   ⚠ 原来那个 `min-height: 300px` 一并去掉：`fill` 下它会让对话框**下不去**（视口矮时内容被裁，
+   因为 `.modal.fill` 是 `overflow:hidden`）——最小高度改由列表自己的 `min-height: 140px` 保证。 */
 .save-as {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-height: 300px;
+  flex: 1;
+  min-height: 0;
 }
 .save-as-field {
   display: flex;
@@ -3517,11 +3524,14 @@ body {
   border: 1px dashed var(--jp-border);
   border-radius: 6px;
 }
-/* 目录列表：**吃剩余高度**（文库目录多时不用挤在小框里滚）；`listbox` 语义在组件里给了 */
+/* 目录列表：**吃剩余高度**、**自己滚**（adj972：文库目录多时不许把整个对话框撑高去滚）。
+   `listbox` 语义在组件里给了；`overflow` 只作用在 y（文件小标签横向换行，不需要横向滚动条）。 */
 .save-as-list {
   flex: 1;
   min-height: 140px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   border: 1px solid var(--jp-border);
   border-radius: 6px;
   background: var(--jp-bg-app);

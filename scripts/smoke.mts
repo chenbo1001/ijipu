@@ -14076,6 +14076,50 @@ function runAdj963NewAndSaveTests() {
       !/suggestedName: '未命名/.test(storeSrc),
     '')
 
+  /**
+   * ---- ④b adj972（**用户截图实报**：「目录较多时，使用列表内滚动，不要整个对话框滚动」）----
+   *
+   * 滚动归属是**布局链**问题：`.modal` 自己 `max-height:80vh; overflow:auto`（整框可滚），
+   * 而 `.save-as-list` 的 `flex:1` 在"父链没有高度约束"时**不生效** ⇒ 列表被条目撑到自然高、整框去滚。
+   * 修法沿用项目里既有那一套：给这个对话框加 `Modal` 的 **`fill`**（`.modal` 变 flex 列 + `overflow:hidden`，
+   * `.modal-body` 变受限 flex 列）⇒ `.save-as` 必须**参与那条链**（`flex:1; min-height:0`），
+   * 列表才真正吃到剩余高度、自己滚。
+   *
+   * 这里只钉**接线**（"`fill` 有没有给、那条 flex 链在不在、列表是不是那个滚动容器"）；
+   * **真实几何**（整框不滚 / 列表滚 / 按钮仍在视口内）由 `npm run verify:app-ui` 的 adj972 段
+   * 用同构 DOM 在真浏览器里量（本轮实测：改后整框溢出 0、列表溢出 804；改前整框溢出 804、列表溢出 0、
+   * 按钮底 1591 > 视口 900）——源码级判据守不住"滚动到底归谁"。
+   */
+  {
+    const css = String(readFileSync('src/index.css', 'utf8'))
+    /** 抽出某条规则的花括号体（够用即可：这些类都是扁平规则） */
+    const ruleBody = (text: string, sel: string): string => {
+      const i = text.indexOf(`${sel} {`)
+      if (i < 0) return ''
+      const j = text.indexOf('}', i)
+      return j < 0 ? '' : text.slice(i, j)
+    }
+    const wired = (t: string, c: string): boolean => {
+      const sa = ruleBody(c, '.save-as')
+      const li = ruleBody(c, '.save-as-list')
+      return (
+        /<Modal title=\{saveAsCopy\.title\} width=\{560\} fill>/.test(t) &&
+        /flex:\s*1;/.test(sa) &&
+        /min-height:\s*0;/.test(sa) &&
+        /overflow-y:\s*auto;/.test(li) &&
+        /flex:\s*1;/.test(li)
+      )
+    }
+    check('adj972 「保存到工作区」对话框：`Modal` 带 **`fill`**，且 `.save-as` 参与 flex 链（`flex:1; min-height:0`）、列表是滚动容器（`overflow-y:auto`）',
+      wired(dlg, css), JSON.stringify({ 有fill: /fill>/.test(dlg), saveAs: ruleBody(css, '.save-as').slice(0, 40) }))
+    check('adj972 **负对照**：去掉 `fill` / 抽掉 `.save-as` 的 `flex:1` / 把列表的 `overflow-y:auto` 换回 `overflow:auto` ⇒ 判据判假',
+      wired(dlg, css) &&
+        !wired(dlg.replace(' width={560} fill>', ' width={560}>'), css) &&
+        !wired(dlg, css.replace(/\.save-as \{[\s\S]*?\}/, '.save-as { display: flex; flex-direction: column; min-height: 0; }')) &&
+        !wired(dlg, css.replace('.save-as-list {\n  flex: 1;\n  min-height: 140px;\n  overflow-y: auto;', '.save-as-list {\n  flex: 1;\n  min-height: 140px;\n  overflow: auto;')),
+      '')
+  }
+
   // ---- ⑤ 授权必须在用户手势里（挂载时静默申请会被浏览器拒）----
   {
     const from = dlg.indexOf('const run = async')

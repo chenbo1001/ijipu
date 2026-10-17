@@ -1432,6 +1432,80 @@ async function main() {
       )
     }
 
+    // ============ adj972：「保存到工作区」对话框 —— 目录多时**列表内滚动**，整框不滚 ============
+    //
+    // 用户截图实报（插件里那个对话框）：「目录列表，目录较多时，使用列表内滚动，不要整个对话框滚动」。
+    // 根因是**滚动归属**：`.modal` 自己 `max-height:80vh; overflow:auto`，而 `.save-as-list` 的
+    // `flex:1` 在"父链没有高度约束"时不生效 ⇒ 列表被条目撑到自然高 ⇒ 溢出的部分由**整个对话框**去滚。
+    //
+    // 为什么用**同构 DOM 探针**（而不是真打开那个对话框）：那个对话框只在**嵌入版**（Obsidian 宿主）
+    // 这条路上弹（`docStore.requestSaveAs` 的 `isHostEmbedded()` 分支），而本脚本跑的是网页版
+    // （保存走系统对话框）⇒ 没法定点"点开它"。这里按**组件里那串类名**造一份同构 DOM（同一份 CSS 生效），
+    // 量的正是"滚动归属于谁"这件布局事实；再用**不带 `fill`** 的那一版当负对照，
+    // 证明判据分得清改前/改后（否则它就是恒绿）。
+    console.log('[verify-app-ui] adj972：保存到工作区对话框的滚动归属（列表内滚，整框不滚）')
+    {
+      const probe = (fill) => `(() => {
+        const old = document.getElementById('adj972-probe'); if (old) old.remove()
+        const mask = document.createElement('div')
+        mask.className = 'modal-mask'; mask.id = 'adj972-probe'
+        const modal = document.createElement('div')
+        modal.className = 'modal' + (${JSON.stringify(fill)} ? ' fill' : '')
+        modal.innerHTML =
+          '<div class="modal-head">保存到工作区</div>' +
+          '<div class="modal-body"><div class="save-as">' +
+            '<div class="save-as-field"><label class="save-as-label">文件名</label>' +
+              '<input class="save-as-input" value="闲庭絮"></div>' +
+            '<div class="save-as-where"><span class="save-as-label">保存到</span>' +
+              '<span class="save-as-path">2.曲谱集/安和桥</span></div>' +
+            '<div class="save-as-hint">只列当前这一层</div>' +
+            /* 目录条目按用户截图里的量级给足 40 条 */
+            '<div class="save-as-list" role="listbox">' +
+              '<button class="save-as-item is-up">↑ 上一层</button>' +
+              Array.from({ length: 40 }, (_, i) => '<button class="save-as-item">📁 目录 ' + (i + 1) + '</button>').join('') +
+              '<div class="save-as-files"><button class="save-as-file">安和桥.jps</button></div>' +
+            '</div>' +
+            '<div class="save-as-actions"><button class="btn">取消</button>' +
+              '<button class="btn primary">保存</button></div>' +
+          '</div></div>'
+        mask.appendChild(modal)
+        document.body.appendChild(mask)
+        const list = modal.querySelector('.save-as-list')
+        const actions = modal.querySelector('.save-as-actions')
+        return {
+          整框溢出: modal.scrollHeight - modal.clientHeight,
+          列表溢出: list.scrollHeight - list.clientHeight,
+          列表高: Math.round(list.getBoundingClientRect().height),
+          整框底: Math.round(modal.getBoundingClientRect().bottom),
+          按钮底: Math.round(actions.getBoundingClientRect().bottom),
+          视口高: innerHeight,
+        }
+      })()`
+      const fixed = await evalJs(c, probe(true))
+      check(
+        'adj972 目录 40 条时**列表自己滚**（`scrollHeight > clientHeight`，且列表高被对话框高度封住）',
+        fixed.列表溢出 > 20 && fixed.列表高 < 700,
+        JSON.stringify(fixed),
+      )
+      check(
+        'adj972 且**整个对话框不滚**（整框没有可滚余量）——这正是用户要的那一条',
+        fixed.整框溢出 <= 1,
+        JSON.stringify(fixed),
+      )
+      check(
+        'adj972 底部「取消 / 保存」**仍在视口内**（没被目录列表推到屏幕外）',
+        fixed.按钮底 <= fixed.视口高 + 1,
+        JSON.stringify({ 按钮底: fixed.按钮底, 视口高: fixed.视口高 }),
+      )
+      const broke = await evalJs(c, probe(false))
+      check(
+        'adj972 **负对照**：不带 `fill`（＝改前的类名链）⇒「整框会滚、列表不滚」，判据能分辨两种实现',
+        broke.整框溢出 > 20 && broke.列表溢出 <= 1,
+        JSON.stringify(broke),
+      )
+      await evalJs(c, `document.getElementById('adj972-probe')?.remove(), true`)
+    }
+
     c.close()
   } catch (e) {
     check(`脚本自身出错：${e instanceof Error ? e.message : String(e)}`, false)

@@ -166,7 +166,16 @@ export function SaveAsDialog() {
   const files = entries.filter((e) => e.kind === 'file')
 
   return (
-    <Modal title={saveAsCopy.title} width={560}>
+    // adj972（**用户截图实报**）：「目录较多时，使用列表内滚动，不要整个对话框滚动」。
+    //
+    // 根因：`.modal` 自己是 `max-height:80vh; overflow:auto`（整框可滚），而 `.save-as-list`
+    // 虽然写了 `flex:1`，但**父链没有高度约束**（`.save-as` 不是受限的 flex 列）⇒ `flex:1` 不生效、
+    // 列表被目录条目撑到自然高 ⇒ 溢出的那部分由**整个对话框**去滚（用户看到的正是这个）。
+    //
+    // 解法沿用项目里既有那一套（`PageConfigDialog` / `FileDiffDialog` 同样是这个问题）：
+    // **`fill`** ⇒ `.modal` 变成 flex 列 + `overflow:hidden`（head/foot 固定、整框不滚），
+    // `.modal-body` 变成受限的 flex 列 ⇒ 里面的 `.save-as-list` 才真正吃到剩余高度、自己滚。
+    <Modal title={saveAsCopy.title} width={560} fill>
       <div className="save-as">
         <div className="save-as-field">
           <label className="save-as-label" htmlFor="save-as-name">
