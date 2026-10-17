@@ -111,7 +111,7 @@ import {
 } from '@ijipu/engine/playback/ornaments.ts'
 import { slideOf, slidePlan, slideStepMs, SLIDE_SYMBOLS, SLIDE_STEP_MIN_MS, SLIDE_STEP_MAX_MS } from '@ijipu/engine/playback/slides.ts'
 import { midiToPitchName } from '@ijipu/engine/playback/midi.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_APEX_H, SLUR_SAG, slurApexY, VOLTA_INK_GAP, digitBottomY, digitInkW, digitTopY, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap, tyBaselineY, HS_FONT_SIZE, barDownMarkInk, barDownMarkSpan, hasBarDownMark } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_BEAM_TOP_RATIO, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, BAR_NUMBER_SIZE_RATIO, DIGIT_HEIGHT_RATIO, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_APEX_H, SLUR_SAG, slurApexY, VOLTA_INK_GAP, digitBottomY, digitInkW, digitTopY, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap, tyBaselineY, HS_FONT_SIZE, barDownMarkInk, barDownMarkSpan, hasBarDownMark } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
@@ -352,6 +352,9 @@ const DOT_RD_S = R1(DOT_R_DOT * NS_S) // 附点半径
 const BEAM_H_S = R1(BEAM_H * NS_S) // 减时线高
 const GRACE_FS = defaultPageConfig.note_size * GRACE_SIZE_RATIO // 倚音字号（0.5×主音符，渲染不取整）
 const DIGIT_TOP = defaultPageConfig.note_size * 0.8 // 数字字高（0.8em）
+// adj980（用户 2026-10-18 口径）：倚音**第一条减时线** = 主音符墨迹高的 **2/3** 处（自基线往上量）。
+// 此前它与"主音符数字上沿"同高（= `DIGIT_TOP`）；现在是 `DIGIT_TOP × 2/3`，即下移 1/3 个数字高。
+const GRACE_BEAM_TOP = DIGIT_TOP * GRACE_BEAM_TOP_RATIO
 const GRACE_SLOT_W = defaultPageConfig.note_size * GRACE_SLOT_RATIO // 倚音数字槽宽
 const GRACE_SLOT_W_MULTI = defaultPageConfig.note_size * GRACE_SLOT_RATIO_MULTI // 多音符倚音间距
 
@@ -4123,8 +4126,10 @@ for (const m of svg98g.matchAll(new RegExp(`<line x1="([^"]+)" y1="([^"]+)" x2="
 const gLineYs100 = [...gLineGroups100.values()].map((g) => g.sort((a, b) => a - b))
 const firstLineY100 = Math.min(...gLineYs100.flat())
 const maxGroup100 = gLineYs100.reduce((a, b) => (b.length > a.length ? b : a), [])
-check('adj100 首条减时线 y = 主音符文本上端（基线 - 0.8em）', gLineYs100.length >= 2 && Math.abs(firstLineY100 - (n100[0].y - DIGIT_TOP)) < 0.5, `first=${firstLineY100} mainTop=${(n100[0].y - DIGIT_TOP).toFixed(1)}`)
-check('adj100 减时线间距 1.2×s', maxGroup100.length >= 2 && Math.abs(maxGroup100[1] - maxGroup100[0] - GRACE_BEAM_GAP * NS_S) < 0.05, `ys=${maxGroup100.join(',')}`)
+check('adj980 首条减时线 y = 基线 − 主音符墨迹高×2/3（用户口径；此前是"与数字上沿同高"）', gLineYs100.length >= 2 && Math.abs(firstLineY100 - (n100[0].y - GRACE_BEAM_TOP)) < 0.5, `first=${firstLineY100} 期望=${(n100[0].y - GRACE_BEAM_TOP).toFixed(1)}`)
+// ⚠ 容差 0.12：SVG 里的 y 经 `r1n` 取到 **0.1** 位，两条线的差值最多带 ±0.1 舍入误差
+// （以前首条正好落在 x.x5 附近、误差只有 0.03 侥幸通过；adj980 减时线下移后暴露出来）。
+check('adj100 减时线间距 1.2×s', maxGroup100.length >= 2 && Math.abs(maxGroup100[1] - maxGroup100[0] - GRACE_BEAM_GAP * NS_S) < 0.12, `ys=${maxGroup100.join(',')}`)
 // adj100：倚音数字上移，基线在首条减时线上方（不压线）
 const gTextY100 = Number(svg98g.match(new RegExp(`<text x="[^"]+" y="([^"]+)" font-size="${GRACE_FS}"`))?.[1] ?? 'NaN')
 check('adj100 倚音数字上移（基线 < 首条减时线 - 1）', !Number.isNaN(gTextY100) && gTextY100 < gLineYs100[0] - 1, `gy=${gTextY100} line0=${gLineYs100[0]}`)
@@ -4139,14 +4144,80 @@ const svg36d = renderScoreToSvg(layoutScore(r36d, DUR_CFG))[0]
 const yMain36d = Number(svg36d.match(new RegExp(`<text x="[^"]+" y="([^"]+)" data-notepos="[^"]+" font-size="${defaultPageConfig.note_size}"[^>]*font-weight="bold"[^>]*>1<`))?.[1] ?? 'NaN')
 const lowCy36d = Math.max(...[...svg36d.matchAll(/<circle cx="[^"]+" cy="([^"]+)" r="[^"]+" fill="#1b1b1b"/g)].map((m) => Number(m[1])))
 // 5, 无减时（dc=1 → 线 1 条）：圆心 = mainTop + 半线高 + (LAYER_GAP+DOT_R)×gs；gs = 倚音缩放因子
-const gs = GRACE_FS / defaultPageConfig.note_size // 倚音缩放因子
-check('adj101 低八度点在最后一条减时线下方（线底+LAYER_GAP×s）', !Number.isNaN(yMain36d) && Math.abs(lowCy36d - (yMain36d - DIGIT_TOP + (GRACE_LINE_W * NS_S) / 2 + (LAYER_GAP + DOT_R) * gs)) < 0.6, `lowCy=${lowCy36d} expect=${(yMain36d - DIGIT_TOP + (GRACE_LINE_W * NS_S) / 2 + (LAYER_GAP + DOT_R) * gs).toFixed(2)}`)
+const gs = GRACE_FS / 18 // 倚音缩放因子（渲染端口径：**倚音字号 / 18**；不是"倚音字号 / 主音符字号"）
+check('adj101 低八度点在最后一条减时线下方（线底+LAYER_GAP×s）', !Number.isNaN(yMain36d) && Math.abs(lowCy36d - (yMain36d - GRACE_BEAM_TOP + (GRACE_LINE_W * NS_S) / 2 + (LAYER_GAP + DOT_R) * gs)) < 0.6, `lowCy=${lowCy36d} expect=${(yMain36d - GRACE_BEAM_TOP + (GRACE_LINE_W * NS_S) / 2 + (LAYER_GAP + DOT_R) * gs).toFixed(2)}`)
 // adj102：弧线起点——无低八度点 → 最后一条减时线底（直接连接）；有低八度点 → 最低点底 + LAYER_GAP×s
 const yMain36c = Number(svg36c.match(new RegExp(`<text x="[^"]+" y="([^"]+)" data-notepos="[^"]+" font-size="${defaultPageConfig.note_size}"[^>]*font-weight="bold"[^>]*>1<`))?.[1] ?? 'NaN')
 const arcStarts36c = [...svg36c.matchAll(/<path d="M [-\d.]+ ([-\d.]+) Q/g)].map((m) => Number(m[1]))
-check('adj102 无低八度点：弧线起点 = 最后一条减时线底（与线连接）', arcStarts36c.length === 2 && arcStarts36c.every((sy) => Math.abs(sy - (yMain36c - DIGIT_TOP + (GRACE_LINE_W * NS_S) / 2)) < 0.5), `sy=${arcStarts36c.join(',')} lineBottom=${(yMain36c - DIGIT_TOP + (GRACE_LINE_W * NS_S) / 2).toFixed(1)}`)
+check('adj102 无低八度点：弧线起点 = 最后一条减时线底（与线连接）', arcStarts36c.length === 2 && arcStarts36c.every((sy) => Math.abs(sy - (yMain36c - GRACE_BEAM_TOP + (GRACE_LINE_W * NS_S) / 2)) < 0.5), `sy=${arcStarts36c.join(',')} lineBottom=${(yMain36c - GRACE_BEAM_TOP + (GRACE_LINE_W * NS_S) / 2).toFixed(1)}`)
 const arcSy36d = Number(svg36d.match(/<path d="M [-\d.]+ ([-\d.]+) Q/)?.[1] ?? 'NaN')
 check('adj102 有低八度点：弧线起点 = 低八度点底 + LAYER_GAP×s', !Number.isNaN(arcSy36d) && Math.abs(arcSy36d - (lowCy36d + (DOT_R + LAYER_GAP) * gs)) < 0.6, `arcSy=${arcSy36d} expect=${(lowCy36d + (DOT_R + LAYER_GAP) * gs).toFixed(2)}`)
+/**
+ * adj980（**用户 2026-10-18 口径，两条**）：
+ *  ①「倚音字号 6.50（= 0.5 × 主音符）→ 调整为 **2/3 × 主音符**」；
+ *  ②「倚音的减时线，第一条与主音符数字上沿同高 143.9 → 调整为 **2/3 主音符高**」。
+ *
+ * 判据一律**从真渲染的 SVG 里量**（不抄常量），并覆盖两种字号（默认 13 与 18）：
+ *  · 字号：倚音数字的 `font-size` == `主音符字号 × 2/3`；
+ *  · 线位：第一条减时线的 y == `基线 − 主音符墨迹高(0.8×字号) × 2/3`；
+ *  · **墨迹判据**：倚音数字的墨迹底必须在"第一条减时线上缘"之上（线不许穿过数字）——
+ *    这条是**改线位时必须连带改数字基线**的原因（只挪线不挪数字就会压上去）；
+ *  · **负对照**：按旧锚点（＝主音符数字上沿）放线时，上面那条墨迹判据**必然不成立** ——
+ *    证明它真的在分辨新旧两种口径，而不是恒绿。
+ */
+{
+  const cases980: [string, number][] = [
+    ['默认字号', defaultPageConfig.note_size],
+    ['18 号', 18],
+  ]
+  for (const [label, size980] of cases980) {
+    const cfg980 = { ...defaultPageConfig, note_size: size980 }
+    const svg980 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1[6/5/] 2 |\n'), cfg980))[0] ?? ''
+    const s980 = noteScaleOf(size980)
+    const gSize980 = size980 * GRACE_SIZE_RATIO
+    const mainY980 = Number(
+      svg980.match(new RegExp(`<text x="[^"]+" y="([^"]+)" data-notepos="[^"]+" font-size="${size980}"[^>]*font-weight="bold"[^>]*>1<`))?.[1] ?? 'NaN',
+    )
+    const gDigits980 = [...svg980.matchAll(new RegExp(`<text x="([^"]+)" y="([^"]+)" font-size="${gSize980}"[^>]*font-weight="bold"[^>]*>([^<]*)<`, 'g'))].map((m) => ({
+      x: Number(m[1]),
+      y: Number(m[2]),
+    }))
+    const beams980 = [
+      ...svg980.matchAll(
+        new RegExp(`<line x1="[^"]+" y1="([^"]+)" x2="[^"]+" y2="[^"]+" stroke="#1b1b1b" stroke-width="${GRACE_LINE_W * s980}"`, 'g'),
+      ),
+    ].map((m) => Number(m[1]))
+    const beamTop980 = beams980.length > 0 ? Math.min(...beams980) : NaN
+    const lineHalf980 = (GRACE_LINE_W * s980) / 2
+    check(
+      `adj980（${label}）倚音字号 = 主音符 × **2/3**（实测 font-size=${gSize980.toFixed(3)}）`,
+      Math.abs(GRACE_SIZE_RATIO - 2 / 3) < 1e-9 && gDigits980.length >= 2 && Math.abs(gSize980 - size980 * (2 / 3)) < 1e-9,
+      `ratio=${GRACE_SIZE_RATIO.toFixed(4)} gSize=${gSize980}`,
+    )
+    check(
+      `adj980（${label}）**第一条减时线** = 基线 − 主音符墨迹高(0.8×${size980})×**2/3**（实测 y=${Number.isNaN(beamTop980) ? 'NaN' : beamTop980.toFixed(2)}）`,
+      !Number.isNaN(beamTop980) &&
+        Math.abs(GRACE_BEAM_TOP_RATIO - 2 / 3) < 1e-9 &&
+        Math.abs(beamTop980 - (mainY980 - size980 * DIGIT_HEIGHT_RATIO * GRACE_BEAM_TOP_RATIO)) < 0.12,
+      `beamTop=${beamTop980} 期望=${(mainY980 - size980 * DIGIT_HEIGHT_RATIO * GRACE_BEAM_TOP_RATIO).toFixed(2)}`,
+    )
+    check(
+      `adj980（${label}）**墨迹判据**：倚音数字墨迹底 ≤ 第一条减时线上缘（线不穿数字）`,
+      gDigits980.length > 0 && !Number.isNaN(beamTop980) && Math.max(...gDigits980.map((g) => g.y)) <= beamTop980 - lineHalf980 + 0.01,
+      `数字底=${Math.max(...gDigits980.map((g) => g.y))} 线上缘=${(beamTop980 - lineHalf980).toFixed(2)}`,
+    )
+    {
+      // 负对照：按**旧锚点**放线（＝主音符数字上沿）时，上面那条墨迹判据必然不成立
+      const oldBeamTop980 = mainY980 - size980 * DIGIT_HEIGHT_RATIO
+      const digitBottom980 = Math.max(...gDigits980.map((g) => g.y))
+      check(
+        `adj980（${label}）**负对照**：把线放回旧锚点（主音符数字上沿 ${oldBeamTop980.toFixed(2)}）⇒ 它就**穿进**倚音数字墨迹（${digitBottom980.toFixed(2)}），墨迹判据判红`,
+        oldBeamTop980 < digitBottom980 - lineHalf980,
+        `旧锚点=${oldBeamTop980.toFixed(2)} 数字底=${digitBottom980.toFixed(2)}`,
+      )
+    }
+  }
+}
 // adj103：多音符（≥2）倚音数字间距缩小为 0.5×字号（×GRACE_SLOT_RATIO_MULTI）；1[65] 与 2[h56] 两组
 const gx36c = [...svg36c.matchAll(new RegExp(`<text x="([^"]+)" y="[^"]+" font-size="${GRACE_FS}"`, 'g'))].map((m) => Number(m[1])).sort((a, b) => a - b)
 const gSize36 = Math.max(6 * NS_S, defaultPageConfig.note_size * GRACE_SIZE_RATIO) // 倚音字号（同渲染）
@@ -16938,19 +17009,20 @@ function runAdj621Tests() {
   }
 
   // ⑧ 版本串本身仍带版本/日期/commit 三要素（**它现在只在状态栏与关于框显示**，不再进标题）
+  //
+  // ⚠ **不要**拿磁盘上的 `src/gen/buildInfo.ts` 去逐字比对 `APP_VERSION_FULL`：
+  // 那个文件每次 `gen:info` 都重写（HEAD 一变 commit 就变），而 `APP_VERSION_FULL` 是**本卷构建那一刻**
+  // 打进来的常量 —— 两次 `gen:info` 之间跑断言就会"假红"（本轮实测撞到一次）。
+  // 所以这里判两件事：① 版本串的**形状**（三要素齐全、版本号与 `APP_VERSION` 一致）；
+  // ② 生成物文件里那两行本身是合法形状（能解析、不是占位）。
   check(
     'adj971 `APP_VERSION_FULL` 仍是 `vX.Y.Z (date @commit)` 三要素（状态栏悬停 / 关于框显示它），只是不再进标题',
     (() => {
       const buildInfoSrc = String(readFileSync('src/gen/buildInfo.ts', 'utf8'))
-      const dateMatch = buildInfoSrc.match(/BUILD_DATE = '([^']+)'/)
-      const commitMatch = buildInfoSrc.match(/GIT_COMMIT = '([0-9a-f]+)'/)
-      const verMatch = versionSrc.match(/APP_VERSION = '([^']+)'/)
-      if (!dateMatch || !commitMatch || !verMatch) return false
-      return (
-        APP_VERSION === verMatch[1] &&
-        APP_VERSION_FULL === `v${verMatch[1]} (${dateMatch[1]} @${commitMatch[1]})` &&
-        /^v\d+\.\d+\.\d+ \(\d{4}-\d{2}-\d{2} @[0-9a-f]{8}\)$/.test(APP_VERSION_FULL)
-      )
+      const dateOk = /BUILD_DATE = '\d{4}-\d{2}-\d{2}'/.test(buildInfoSrc)
+      const commitOk = /GIT_COMMIT = '[0-9a-f]{7,8}'/.test(buildInfoSrc)
+      const m = APP_VERSION_FULL.match(/^v(\d+\.\d+\.\d+) \((\d{4}-\d{2}-\d{2}) @([0-9a-f]{7,8})\)$/)
+      return dateOk && commitOk && m !== null && m[1] === APP_VERSION
     })(),
     APP_VERSION_FULL,
   )
@@ -20416,25 +20488,37 @@ function runAdj625Tests() {
   check('adj625 默认配置本身没有任何「非默认」字段（新增项不污染默认）',
     nonDefaultConfigKeys(defaultPageConfig).length === 0, JSON.stringify(nonDefaultConfigKeys(defaultPageConfig)))
 
-  // ---- ⑨ 渲染：方框 + 序号文字（字号 = **倚音音符**字号 × 3/4）----
+  // ---- ⑨ 渲染：方框 + 序号文字（字号 = **主音符字号 × 0.5** × 3/4）----
   const svg = renderScoreToSvg(lay(BAR8, ON))[0]
-  const graceFs = Math.max(6 * noteScaleOf(defaultPageConfig.note_size), defaultPageConfig.note_size * GRACE_SIZE_RATIO)
-  const fs = graceFs * BAR_NUMBER_SCALE
+  /**
+   * adj980（用户口径，只改倚音字号）：**序号字号不再跟着倚音走**。
+   *
+   * 原先口径是「序号字号 = 倚音字号 × 3/4」（两者同源取值 0.5，看上去"序号和倚音一样大"）；
+   * 倚音按用户要求调到 **2/3** 之后，若继续跟着走，**小节序号会被一起放大** —— 用户没要求、
+   * 而且序号框还参与布局避让（框变大 = 行距/让位全变）。⇒ 拆出独立比例 `BAR_NUMBER_SIZE_RATIO = 0.5`，
+   * 序号**保持原来的大小**。本组断言随之改为按 `BAR_NUMBER_SIZE_RATIO` 口径核对。
+   */
+  const barFsRatio = Math.max(6 * noteScaleOf(defaultPageConfig.note_size), defaultPageConfig.note_size * BAR_NUMBER_SIZE_RATIO)
+  const fs = barFsRatio * BAR_NUMBER_SCALE
   const fsSvg = Math.round(fs * 10) / 10 // 渲染端字号经 r1n 取到 0.1
   check('adj625 渲染出方框序号（data-barnumber + rect 外框）',
     /data-barnumber="4"/.test(svg) && /data-barnumber="8"/.test(svg) &&
       /<rect x="[\d.-]+" y="[\d.-]+" width="[\d.-]+" height="[\d.-]+" fill="none" stroke="#1b1b1b"/.test(svg),
     '')
-  check('adj625b 序号字号 = 倚音字号 × 3/4（用户要求整体缩到 3/4）',
+  check('adj625b/adj980 序号字号 = 主音符字号 × BAR_NUMBER_SIZE_RATIO(0.5) × 3/4（**不随倚音字号 2/3 变**）',
     Math.abs(BAR_NUMBER_SCALE - 0.75) < 1e-9 &&
-      Math.abs(barNumberFontSize(defaultPageConfig.note_size) - graceFs * 0.75) < 1e-9,
-    `grace=${graceFs} fs=${fs}`)
+      Math.abs(BAR_NUMBER_SIZE_RATIO - 0.5) < 1e-9 &&
+      Math.abs(barNumberFontSize(defaultPageConfig.note_size) - barFsRatio * 0.75) < 1e-9 &&
+      // **负对照**：倚音字号变了，序号字号**不跟着变**（二者已解耦）
+      Math.abs(GRACE_SIZE_RATIO - 2 / 3) < 1e-9 &&
+      Math.abs(barNumberFontSize(defaultPageConfig.note_size) - defaultPageConfig.note_size * GRACE_SIZE_RATIO * 0.75) > 1e-6,
+    `序号字号=${barNumberFontSize(defaultPageConfig.note_size)} 倚音字号=${defaultPageConfig.note_size * GRACE_SIZE_RATIO}`)
   check('adj625b 方框同步按 3/4 缩（框高 = 字号 + 1.125×2 + 0.6；空隙与线宽都已 ×0.75）',
     Math.abs(barNumberBoxH(defaultPageConfig.note_size) -
       (fs + 1.5 * 0.75 * 2 + 0.8 * 0.75)) < 1e-9 &&
       Math.abs(BAR_NUMBER_PAD - 1.125) < 1e-9 && Math.abs(BAR_NUMBER_STROKE - 0.6) < 1e-9,
     `boxH=${barNumberBoxH(defaultPageConfig.note_size)} pad=${BAR_NUMBER_PAD} stroke=${BAR_NUMBER_STROKE}`)
-  check('adj625b 渲染字号 = 倚音字号 × 0.75（取到 0.1）',
+  check('adj625b 渲染字号 = 序号字号（取到 0.1）',
     new RegExp(`data-barnumber="4"[\\s\\S]{0,400}font-size="${fsSvg}"`).test(svg) &&
       new RegExp(`data-barnumber="8"[\\s\\S]{0,400}font-size="${fsSvg}"`).test(svg),
     `fsSvg=${fsSvg}`)
