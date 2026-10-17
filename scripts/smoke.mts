@@ -267,6 +267,8 @@ import { EXT_POLL_MS, watchTick, startExternalWatch } from '../src/store/externa
 import { applyMerge, applyMergePlan, planMerge } from '../src/diff/merge.ts'
 // adj968：拖放"该打开哪一个"的纯判据（单独模块，不 import store ⇒ Node 里可直接断言）
 import { classifyDropNames } from '../src/store/dropPick.ts'
+// adj979（用户实报：谱在桌面/下载里时背景图读不出来、也没提示）：Chromium 敏感目录的纯判据
+import { parentDirNameOf, sensitiveDirLabelOf } from '../src/store/assetDirSensitive.ts'
 import type { RuntimeEnv } from '../src/brand/env.ts'
 // adj944（用户需求「全局设置里注册 iJipu CLI」）：PATH 增删的**纯函数 + 编排** ——
 // 应用界面（全局设置那个按钮）与命令行（`ijipu cli register|unregister|status`）**共用这一份** ✓
@@ -19309,6 +19311,13 @@ runAdj927ExternalChangeTests()
       failed++
       console.error('  ✗ adj973 连音线配对告警用例抛异常', e)
     }
+    try {
+      // adj979：谱在桌面/文档/下载里时要把"浏览器不让授权"的原因说出来（用户实报）
+      runAdj979Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj979 敏感目录提示用例抛异常', e)
+    }
   })
   .then(() => {
     try {
@@ -20586,6 +20595,96 @@ function runAdj967Tests() {
  *  · 列号必须**正好落在那个括号字符上**（拿源码逐字符核对，防"差一格"这种低级错）；
  *  · **负对照**：干净写法与"合法的两层嵌套"**一条都不该报**（防过度报警把好谱也说成有问题）。
  */
+/**
+ * adj979（**用户 2026-10-18 实报 + 拍板**）：谱和背景图放在**桌面 / 文档 / 下载**里时，
+ * Chromium **直接禁止**网页授权这三个目录（`showDirectoryPicker` 抛 `AbortError`，与"用户取消"同码
+ * ⇒ 我们区分不出来），用户看到的就是"点了没反应、图就是不显示"。
+ *
+ * 用户原话：「这个提示"这个目录浏览器不让授权，请把谱和图放到别的文件夹，或改用工作区"，**可以**，
+ * 这样**可以告诉用户为什么不显示**」。
+ *
+ * 判据是纯函数 `store/assetDirSensitive.ts` 的 `sensitiveDirLabelOf(nativePath)`；这里量三件事：
+ *  ① 判据只在**直接父目录**命中那三个名字时成立（子目录**不**命中 —— Chromium 只拦那三个目录本身）；
+ *  ② 桌面壳那条"原生打开"的路（有真实路径、没有 `AssetFileRef`）确实**接上了**这个提示；
+ *  ③ **负对照**：普通目录 / 桌面的子目录 / 网页端（没有路径）**都不该**冒这条提示。
+ */
+function runAdj979Tests() {
+  console.log('[182] adj979 sensitive dir (Desktop/Documents/Downloads) never grantable')
+  const S = 'D:/Coding/JianpuScript/ijipu/src/store/assetDirSensitive.ts'
+  const src = String(readFileSync(S, 'utf8'))
+  check(
+    'adj979 纯函数判据在（`sensitiveDirLabelOf` / `parentDirNameOf`），且名单就是**桌面/文档/下载**三个（ASCII 目录名匹配）',
+    /export function parentDirNameOf\(/.test(src) &&
+      /export function sensitiveDirLabelOf\(/.test(src) &&
+      /key: 'desktop', label: '桌面'/.test(src) &&
+      /key: 'documents', label: '文档'/.test(src) &&
+      /key: 'downloads', label: '下载'/.test(src),
+    '',
+  )
+  {
+    const parent = parentDirNameOf
+    const label = sensitiveDirLabelOf
+    check(
+      'adj979 判定：`…\\Desktop\\望月.jps` ⇒ 桌面、`…\\Documents\\a.jps` ⇒ 文档、`…\\Downloads\\a.jps` ⇒ 下载（Windows 与 POSIX 分隔符都认，大小写不敏感）',
+      label('C:\\Users\\x\\Desktop\\望月.jps') === '桌面' &&
+        label('C:\\Users\\x\\Documents\\a.jps') === '文档' &&
+        label('/home/x/Downloads/a.jps') === '下载' &&
+        label('C:\\Users\\x\\OneDrive\\Desktop\\a.jps') === '桌面' &&
+        label('C:\\Users\\x\\DESKTOP\\a.jps') === '桌面' &&
+        // 语义：入参是**文件路径** ⇒ 取"文件名上一段"当目录
+        parent('C:\\Users\\x\\Desktop\\a.jps') === 'desktop' &&
+        parent('/home/x/Downloads/a.jps') === 'downloads',
+      JSON.stringify([
+        label('C:\\Users\\x\\Desktop\\望月.jps'),
+        label('C:\\Users\\x\\Documents\\a.jps'),
+        label('/home/x/Downloads/a.jps'),
+      ]),
+    )
+    check(
+      'adj979 **负对照（不许误报）**：普通目录 / 桌面的**子目录** / 空路径都判 null —— Chromium 只拦那三个目录本身，子目录是选得动的',
+      label('D:\\曲谱\\望月.jps') === null &&
+        label('C:\\Users\\x\\Desktop\\谱\\望月.jps') === null &&
+        label('') === null &&
+        label(null) === null &&
+        label(undefined) === null,
+      JSON.stringify([
+        label('D:\\曲谱\\望月.jps'),
+        label('C:\\Users\\x\\Desktop\\谱\\望月.jps'),
+        label(null),
+      ]),
+    )
+  }
+  {
+    const authSrc = String(readFileSync('src/store/assetDirAuth.ts', 'utf8'))
+    const storeSrc = String(readFileSync('src/store/docStore.ts', 'utf8'))
+    const copySrc = String(readFileSync('src/brand/copy.ts', 'utf8'))
+    check(
+      'adj979 接线：桌面壳"原生打开"那条路（`openExternalFiles`，有真实路径、没有 `AssetFileRef`）会调 `askSensitiveDirOnNativeOpen`；设置页签按钮也把路径传下去',
+      /export function askSensitiveDirOnNativeOpen\(/.test(authSrc) &&
+        /askSensitiveDirOnNativeOpen\(localAssetRefs\(resolveConfig\(primary\.code\)\)\.length > 0, name, primary\.path\)/.test(storeSrc) &&
+        /requestAssetDirNow\(localAssetRefs\(draft\)\.length > 0, await refOfHandle\(assetFile\), assetNativePath\)/.test(
+          String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8')),
+        ),
+      '',
+    )
+    check(
+      'adj979 提示语按用户口径**说清原因**（"浏览器不让授权 桌面/文档/下载 这三个目录" + 给两条出路），且确认条上**不给**会失败的那个按钮',
+      /assetDirSensitiveAsk: \(name: string, dir: string\) =>/.test(copySrc) &&
+        /浏览器（Chromium）不允许网页授权/.test(copySrc) &&
+        /请把谱和图片一起放到别的文件夹/.test(copySrc) &&
+        /改用工作区/.test(copySrc) &&
+        /assetDirSensitiveOk: '知道了'/.test(copySrc) &&
+        // 敏感档的确认按钮是"知道了"（点击无动作），**不许**接成 `requestAssetDirNow`（那个注定失败）
+        /confirmLabel: C\.assetDirSensitiveOk,\s*\n\s*onConfirm: \(\) => \{\}/.test(authSrc) &&
+        // 设置页签那条按钮在敏感档下**不去弹**选择器，只提示
+        /const sensitiveDir = sensitiveDirLabelOf\(nativePath\)\s*\n\s*if \(sensitiveDir !== null\) \{\s*\n\s*ui\.showNotice\(C\.authDirSensitive\(sensitiveDir\), 'warn'\)/.test(
+          authSrc,
+        ),
+      '',
+    )
+  }
+}
+
 function runAdj973Tests() {
   console.log('[181] adj973 slur pairing warnings (not-drawn slurs must be visible)')
   const HEAD = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'

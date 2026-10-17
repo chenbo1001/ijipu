@@ -246,6 +246,8 @@ export function PageConfigDialog({
    * （点了会弹 `showDirectoryPicker`，必须由用户手势触发 ⇒ 只能放在按钮里，不能在后台自动弹）。
    */
   const assetFile = useDocStore((s) => s.fileHandle)
+  /** adj979：桌面壳才有真实路径 —— 用它判"谱是不是在桌面/文档/下载里"（那三个目录浏览器不让授权） */
+  const assetNativePath = useDocStore((s) => s.nativePath)
   const [authBusy, setAuthBusy] = useState(false)
   const authAssetDir = (): void => {
     setAuthBusy(true)
@@ -254,7 +256,7 @@ export function PageConfigDialog({
         const { requestAssetDirNow, refOfHandle } = await import('../store/assetDirAuth')
         // "需不需要目录"的判据与 `App.tsx` 用同一份（引擎的 `localAssetRefs`），
         // 判的是**面板正在显示的值** `draft`（用户刚把路径填进去、还没保存设置也应能授权）
-        await requestAssetDirNow(localAssetRefs(draft).length > 0, await refOfHandle(assetFile))
+        await requestAssetDirNow(localAssetRefs(draft).length > 0, await refOfHandle(assetFile), assetNativePath)
       } finally {
         setAuthBusy(false)
       }

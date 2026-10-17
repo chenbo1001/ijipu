@@ -19,7 +19,7 @@ import {
 } from '../editor/history'
 import { saveFileHandle, loadFileHandle } from './fileHandleDb'
 // adj969：文件方式打开的谱 ⇒ 相对路径的图要靠"额外授权一次所在文件夹"（见该模块文件头）
-import { askAssetDirOnOpen, refOfFile, type AssetFileRef } from './assetDirAuth'
+import { askAssetDirOnOpen, askSensitiveDirOnNativeOpen, refOfFile, type AssetFileRef } from './assetDirAuth'
 import {
   classifySaveError,
   createSavePhaseLog,
@@ -876,6 +876,12 @@ export const useDocStore = create<DocState>()((set, get) => ({
      * mtime 传 `null`：宿主把文件读好交给前端时没带 mtime（与嵌入版同一取舍，走内容判据）。
      */
     setBaseline(bindingKeyOf({ kind: 'native', path: primary.path }), primary.code, null)
+    /**
+     * adj979（用户 2026-10-18 实报）：**这条路有真实路径**（`primary.path`）⇒ 如果谱写在
+     * 桌面 / 文档 / 下载里、又用了相对路径的图，就**当场把原因说清楚**（Chromium 禁止授权那三个目录），
+     * 别让用户对着"图就是不显示"猜。判据见 `store/assetDirSensitive.ts`，提示见 `brand/copy.ts`。
+     */
+    void askSensitiveDirOnNativeOpen(localAssetRefs(resolveConfig(primary.code)).length > 0, name, primary.path)
     // adj628：工作区来源同样要落盘清掉（外部路径与工作区互斥，见下面 binding: null）
     saveDraftSrc(null)
     set({
@@ -1695,6 +1701,16 @@ function adoptDoc(input: {
    * **同名 + 同字节数 + 同修改时间**来反证（见 `store/assetDirAuth.ts`）。
    */
   fileRef?: AssetFileRef | null
+  /**
+   * adj979：**桌面壳**才有的真实文件路径（如 `C:\Users\…\Desktop\望月.jps`）。
+   *
+   * 只用于一件事：判断"谱是不是放在**桌面 / 文档 / 下载**里" —— 那三个目录 Chromium
+   * **直接禁止**网页授权（抛 `AbortError`，与"用户取消"同码、区分不出来），所以提示里要把
+   * **原因**说清楚，而不是让用户对着"点了没反应"猜。判据是纯函数
+   * `store/assetDirSensitive.ts` 的 `sensitiveDirLabelOf()`。
+   * 网页 / PWA 一档永远是 `null`（浏览器不给路径，那一档也没有"被拦"这回事）。
+   */
+  nativePath?: string | null
   notice: string
   noticeKind?: 'ok' | 'warn' | 'error'
 }): void {
@@ -1758,7 +1774,7 @@ function adoptDoc(input: {
    *  · 收在这一处：三条打开入口（对话框 / 拖入 / input 降级）都汇到本函数 ⇒ 不必各写一遍。
    * 不 await：装载动作是同步返回的，问那一句是"后台再问"，用户点「暂不」也不影响已经打开的文档。
    */
-  void askAssetDirOnOpen(localAssetRefs(cfg).length > 0, input.fileRef ?? null)
+  void askAssetDirOnOpen(localAssetRefs(cfg).length > 0, input.fileRef ?? null, input.nativePath ?? null)
   useUiStore.getState().showNotice(input.notice, input.noticeKind ?? 'ok')
 }
 

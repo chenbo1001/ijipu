@@ -39,6 +39,8 @@ import { loadAssetDir, saveAssetDir } from './fileHandleDb'
 import { isHostFrame } from '../brand/env'
 import { overlayCopy as C } from '../brand/copy'
 import { useUiStore } from './uiStore'
+// adj979：谱在"桌面 / 文档 / 下载"里时 Chromium 直接禁止授权那几个目录 ⇒ 提前说清原因
+import { sensitiveDirLabelOf } from './assetDirSensitive'
 
 /**
  * 当前这份谱的**文件身份**（用于核对"所选目录里是不是就是这一份"）。
@@ -310,12 +312,71 @@ async function core(need: boolean, ref: AssetFileRef | null, ask: boolean): Prom
  *
  * 只在"确实需要"（写了相对路径的图）且"记忆里没有可用的目录"时才问，不会为没写图的谱骚扰。
  */
-export async function askAssetDirOnOpen(need: boolean, ref: AssetFileRef | null): Promise<AssetDirOutcome> {
+/** adj979：把"这个目录浏览器不让授权"的原因**问出来**（确认条：知道了 / 改用工作区） */
+function showSensitiveDirAsk(name: string, dir: string): void {
+  useUiStore.getState().showAsk({
+    text: C.assetDirSensitiveAsk(name, dir),
+    confirmLabel: C.assetDirSensitiveOk,
+    onConfirm: () => {},
+    cancelLabel: C.assetDirSensitiveSwitch,
+    // 工作区是这一档唯一走得通的替代路径 ⇒ 次按钮直接把他带过去（底栏「工作区」面板）
+    onCancel: () => {
+      // `setDockPanel` 自带 `dockOpen: true`（见 uiStore），不必再单独开
+      useUiStore.getState().setDockPanel('workspace')
+    },
+  })
+}
+
+/**
+ * adj979：**桌面壳**在"双击 / 原生打开"这条路上打开了一份谱 —— 这条路有**真实路径**，
+ * 但**没有 `AssetFileRef`**（原生读取不给字节数与修改时间）⇒ 走不了"授权文件夹"那一套，
+ * 所以以前这里**一句话都不提示**（用户看到的就是"背景图就是不显示、也没人告诉我为什么"）。
+ *
+ * 现在：只有一件事值得说 —— **谱在桌面 / 文档 / 下载里**（Chromium 禁止授权那三个目录），
+ * 那就把原因说清楚；其余情形保持安静（别为没写图的谱、或本来就能读到图的谱打扰人）。
+ */
+export function askSensitiveDirOnNativeOpen(
+  need: boolean,
+  name: string,
+  nativePath: string | null | undefined,
+): AssetDirOutcome {
+  if (!need) return 'not-needed'
+  const dir = sensitiveDirLabelOf(nativePath)
+  if (dir === null) return 'need-grant'
+  const key = `native:${nativePath ?? ''}`
+  if (askedFor === key) return 'asked'
+  askedFor = key
+  showSensitiveDirAsk(name, dir)
+  return 'asked'
+}
+
+export async function askAssetDirOnOpen(
+  need: boolean,
+  ref: AssetFileRef | null,
+  nativePath?: string | null,
+): Promise<AssetDirOutcome> {
   if (!need) return 'not-needed'
   if (ref === null) return 'no-ref'
   // 先**只核对记忆**（跨会话复用）：核得过就什么都不问（打开一份谱不该每次都弹东西）
   const out = await core(need, ref, false)
   if (out === 'ready') return 'ready'
+  /**
+   * adj979（**用户 2026-10-18 实报 + 拍板**）：谱在**桌面 / 文档 / 下载**里时，
+   * Chromium **直接禁止**授权这三个目录（`AbortError`，与"用户取消"同码 ⇒ 我们区分不出来），
+   * 点了只会"没反应、图还是不显示" ✗。
+   *
+   * ⇒ 这一档**不去弹那个注定失败的选择器**，而是把**原因**说清楚（用户原话：
+   * 「这样可以告诉用户为什么不显示」），并给一条真正能走通的路（改用工作区）。
+   * 判据是纯函数 `assetDirSensitive.sensitiveDirLabelOf(nativePath)`（只有桌面壳才拿得到真实路径）。
+   */
+  const sensitiveDir = sensitiveDirLabelOf(nativePath)
+  if (sensitiveDir !== null) {
+    const key = assetFileKeyOf(ref)
+    if (askedFor === key) return 'asked'
+    askedFor = key
+    showSensitiveDirAsk(ref.name, sensitiveDir)
+    return 'asked'
+  }
   /**
    * 同一份谱在一次会话里只自动问一次（用户点「暂不」之后不该每次重排都再冒出来）。
    * 用户主动去设置页签点按钮不受此限（那是他明确要的）。
@@ -327,7 +388,7 @@ export async function askAssetDirOnOpen(need: boolean, ref: AssetFileRef | null)
     text: C.assetDirAsk(ref.name),
     confirmLabel: C.authDirButton,
     // 点这一下 = 新的用户手势 ⇒ 选择器这次一定能弹出来（见上面实测说明）
-    onConfirm: () => void requestAssetDirNow(need, ref),
+    onConfirm: () => void requestAssetDirNow(need, ref, nativePath),
     cancelLabel: C.assetDirLater,
     onCancel: () => {},
   })
@@ -338,8 +399,21 @@ export async function askAssetDirOnOpen(need: boolean, ref: AssetFileRef | null)
  * 设置页签里那个按钮：**手动**再授权一次。
  * 用户点了按钮就必须有反馈 ⇒ 每种结果都说一句（含"取消了"这种看起来像没反应的）。
  */
-export async function requestAssetDirNow(need: boolean, ref: AssetFileRef | null): Promise<AssetDirOutcome> {
+export async function requestAssetDirNow(
+  need: boolean,
+  ref: AssetFileRef | null,
+  nativePath?: string | null,
+): Promise<AssetDirOutcome> {
   const ui = useUiStore.getState()
+  /**
+   * adj979：设置页签里那个按钮在**敏感目录**（桌面/文档/下载）下也照样点得到 ⇒
+   * 这一档**不弹**那个注定失败的选择器（Chromium 直接拒），而是把原因说清楚。
+   */
+  const sensitiveDir = sensitiveDirLabelOf(nativePath)
+  if (sensitiveDir !== null) {
+    ui.showNotice(C.authDirSensitive(sensitiveDir), 'warn')
+    return 'need-grant'
+  }
   if (!canRequestAssetDir()) {
     ui.showNotice(C.authDirUnsupported, 'warn')
     return 'unsupported'
