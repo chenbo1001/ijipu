@@ -4129,7 +4129,7 @@ const maxGroup100 = gLineYs100.reduce((a, b) => (b.length > a.length ? b : a), [
 check('adj980 首条减时线 y = 基线 − 主音符墨迹高×2/3（用户口径；此前是"与数字上沿同高"）', gLineYs100.length >= 2 && Math.abs(firstLineY100 - (n100[0].y - GRACE_BEAM_TOP)) < 0.5, `first=${firstLineY100} 期望=${(n100[0].y - GRACE_BEAM_TOP).toFixed(1)}`)
 // ⚠ 容差 0.12：SVG 里的 y 经 `r1n` 取到 **0.1** 位，两条线的差值最多带 ±0.1 舍入误差
 // （以前首条正好落在 x.x5 附近、误差只有 0.03 侥幸通过；adj980 减时线下移后暴露出来）。
-check('adj100 减时线间距 1.2×s', maxGroup100.length >= 2 && Math.abs(maxGroup100[1] - maxGroup100[0] - GRACE_BEAM_GAP * NS_S) < 0.12, `ys=${maxGroup100.join(',')}`)
+check('adj981 减时线**间距 = 1.5×s**（用户口径；此前 1.2×s）', maxGroup100.length >= 2 && Math.abs(maxGroup100[1] - maxGroup100[0] - GRACE_BEAM_GAP * NS_S) < 0.12 && Math.abs(GRACE_BEAM_GAP - 1.5) < 1e-9, `ys=${maxGroup100.join(',')} gap=${(maxGroup100[1] - maxGroup100[0]).toFixed(3)} 期望=${(GRACE_BEAM_GAP * NS_S).toFixed(3)}`)
 // adj100：倚音数字上移，基线在首条减时线上方（不压线）
 const gTextY100 = Number(svg98g.match(new RegExp(`<text x="[^"]+" y="([^"]+)" font-size="${GRACE_FS}"`))?.[1] ?? 'NaN')
 check('adj100 倚音数字上移（基线 < 首条减时线 - 1）', !Number.isNaN(gTextY100) && gTextY100 < gLineYs100[0] - 1, `gy=${gTextY100} line0=${gLineYs100[0]}`)

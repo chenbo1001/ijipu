@@ -469,8 +469,14 @@ export const BAR_NUMBER_SIZE_RATIO = 0.5
 export const GRACE_SLOT_RATIO = 0.62
 /** 倚音多音符（≥2 个）时数字间占宽与字号比值（adj103：缩小多音符间距，0.62 → 0.5） */
 export const GRACE_SLOT_RATIO_MULTI = 0.5
-/** 倚音减时线间距设计值（px，adj100 由 1.8 减小；实际 ×s） */
-export const GRACE_BEAM_GAP = 1.2
+/**
+ * 倚音减时线**相邻两条**之间的间距（设计值 px，实际 `× s`，`s = 字号/18`）。
+ *
+ * adj100 由 1.8 减到 1.2；
+ * **adj981（用户 2026-10-18 口径）**：「倚音的减时线，**第二条间距 = 1.5×s**」⇒ 1.2 → **1.5**。
+ * （13 号时：1.5 × 0.722 = **1.083px**；18 号时 = 1.5px。）
+ */
+export const GRACE_BEAM_GAP = 1.5
 /** 倚音减时线/连接弧线线宽设计值（px，adj97；实际 ×s） */
 export const GRACE_LINE_W = 0.6
 /**
