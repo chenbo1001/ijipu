@@ -20963,6 +20963,33 @@ function runAdj983Tests() {
       `半段=${halves3.length} ${JSON.stringify(halves3.map((h) => `${h.half}@row${h.row}`))}`,
     )
   }
+  {
+    /**
+     * adj984（**用户追问「你是怎么计算为 3 层的？」**）：深度 = **实际包含关系**，不是"打开时栈多长"。
+     *  · 两层：`((3 2/) 4)` ⇒ 深度 [0,1] ⇒ **两条都画**；
+     *  · **负对照**真三层：`(((3 2/) 4) 5)` ⇒ 最内层深度 2 ⇒ 不画并告警（判据没放水）。
+     */
+    const layersOf = (s: string): { depths: number[]; warns: number } => {
+      const pr = parseJps(s)
+      return {
+        depths: (pr.slurPairs ?? []).map((p) => p.depth).sort((a, b) => a - b),
+        warns: pr.errors.filter((e) => /嵌套超过两层/.test(e.message)).length,
+      }
+    }
+    const HEAD984 = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+    const two984 = layersOf(`${HEAD984}Q: ((3 2/) 4) 5 |\n`)
+    const three984 = layersOf(`${HEAD984}Q: (((3 2/) 4) 5) |\n`)
+    check(
+      'adj984 两层写法 `((3 2/) 4)` ⇒ 深度只到 **1**、两条都画、零"嵌套超层"告警',
+      two984.depths.length === 2 && Math.max(...two984.depths) === 1 && two984.warns === 0,
+      JSON.stringify(two984),
+    )
+    check(
+      'adj984 **负对照**：真三层 `(((3 2/) 4) 5)` ⇒ 出现"嵌套超过两层"告警（判据没被放宽到三层）',
+      three984.warns >= 1,
+      JSON.stringify(three984),
+    )
+  }
 }
 
 function runAdj973Tests() {
@@ -20983,19 +21010,40 @@ function runAdj973Tests() {
     (src.split('\n')[e.line - 1] ?? '')[e.col] === ch
   const count = (ws: { message: string }[], kw: string): number => ws.filter((w) => w.message.includes(kw)).length
 
-  // ---- ① 用户那份：三条告警，且每条都点在正确的括号上 ----
+  // ---- ① 用户那份：那条多余的 `(` 自己要告警；内层两条**照常画**（新口径，见下）----
   {
     const ws = slurWarnOf(EXTRA)
+    /**
+     * adj984（用户追问「你是怎么计算为 3 层的？」）改口径后，这份谱的结论变了：
+     *
+     * 旧口径：深度 = **打开时栈里还有几个 `(`** ⇒ 行首那个多余的 `(` 一直不开闭，
+     *         把内层两条顶到"第 3 层" ⇒ **两条都不画** + 两条告警。
+     * 新口径：深度 = **实际有几条别的连音线把这一段包在里面**（包含关系）⇒
+     *         内层两条只是"被外层包住"= 深度 **1**，照常画；只剩那条多余的 `(` 因为没闭合而告警。
+     * 回归里两者都要钉住：**告警只剩一条**（未闭合的 `(`），而且**内层两条确实画出来了**。
+     */
     check(
-      'adj973 **用户那份谱**（上一行多一个 `(`）⇒ 三条告警：2 条"嵌套超过两层"（内层普通 + 内层等时值）+ 1 条"`(` 没有对应的 `)`"（行首那个多余的括号）',
-      count(ws, '嵌套超过两层') === 2 && count(ws, '没有对应的 `)`') === 1,
+      'adj973/adj984 **用户那份谱**（上一行多一个 `(`）⇒ **一条**告警：形如 `(` 没有对应的 `)`（行首那个多余的括号）；不再连带把内层两条闷掉',
+      count(ws, '没有对应的 `)`') === 1 && count(ws, '嵌套超过两层') === 0,
       ws.map((w) => `第${w.line}行${w.col}：${w.message}`).join(' ／ '),
     )
     check(
-      'adj973 三条告警的**列都正好落在那个 `(` 上**（不是"差一格"、也不是指到音符上）',
-      ws.length === 3 && ws.every((w) => colHits(EXTRA, w, '(')),
+      'adj973/adj984 那条告警的**列正好落在那个 `(` 上**（不是"差一格"、也不是指到音符上）',
+      ws.length === 1 && ws.every((w) => colHits(EXTRA, w, '(')),
       ws.map((w) => `第${w.line}行第${w.col + 1}列`).join(' ／ '),
     )
+    {
+      // 内层两条照常画：这份谱里的连音线段数应与"干净写法"一致（多出来的那条 `(` 没闭、画不出来）
+      const L1 = layoutScore(parseJps(EXTRA), defaultPageConfig)
+      const L2 = layoutScore(parseJps(CLEAN), defaultPageConfig)
+      const n1 = L1.pages.flatMap((p) => p.slurs).length
+      const n2 = L2.pages.flatMap((p) => p.slurs).length
+      check(
+        'adj984 **内层两条不再被闷掉**：多写一个 `(` 之后，画出的连音线段数与干净写法**一样多**（只是多了那条告警）',
+        n1 === n2 && n1 > 0,
+        `多写=${n1} 干净=${n2}`,
+      )
+    }
     check(
       'adj973 告警都带 `hint`（"正确写法"）且级别是 `warning`（谱面照常渲染，只是这几条线没有）',
       ws.length > 0 && ws.every((w) => w.severity === 'warning' && (w.hint ?? '').length > 0),
@@ -21061,9 +21109,9 @@ function runAdj973Tests() {
       oneHome(lay, pair, par), JSON.stringify({ 布局自建: /const sQueue/.test(lay), 唯一实现: /export function pairSlurs\(/.test(pair) }))
     check('adj973 **负对照**：把"布局改为消费"那一行去掉（回到布局自己配对）⇒ 上面那条判假',
       oneHome(lay, pair, par) && !oneHome(lay.replace('result.slurPairs ?? []', 'undefined as never'), pair, par))
-    check('adj973 告警走的是**三端共用的那条链**：`parseJps(src).errors` 里就能拿到（应用问题面板 / 插件 / 命令行 `lint` 都只读它 ⇒ 三处零改动可见）',
-      slurWarnOf(EXTRA).length === 3 && slurWarnOf(EXTRA).every((w) => (w.hint ?? '').length > 0),
-      `${slurWarnOf(EXTRA).length} 条`)
+    check('adj973/adj984 告警走的是**三端共用的那条链**：`parseJps(src).errors` 里就能拿到（应用问题面板 / 插件 / 命令行 `lint` 都只读它 ⇒ 三处零改动可见）',
+      slurWarnOf(EXTRA).length === 1 && slurWarnOf(EXTRA).every((w) => (w.hint ?? '').length > 0),
+      `${slurWarnOf(EXTRA).length} 条（adj984 起：内层不再算三层，只剩未闭合那条）`)
   }
 }
 

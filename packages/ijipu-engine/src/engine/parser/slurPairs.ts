@@ -144,6 +144,18 @@ export function pairSlurs(result: ParseResult): SlurPairing {
    * `adj651`：登记一条连音线；若它「跨过房子起始小节线且终点是该房子首音」，
    * 就记下它的起点，供后续房子里的孤立 `)` 延续。
    */
+  /**
+   * adj984（**用户 2026-10-18 追问**）：「这 4 个告警的连音线都是正确的，你是怎么计算为 3 层的？」
+   *
+   * 查下来：`depth` 原先取"**打开那一刻**栈里还有几个 `(`"。而"等跳回闭合"的那条 `(`（`(6/[5/]` 之后
+   * 就是 `:|`）会一直挂在栈上直到谱末 ⇒ **后面所有括号的深度都被它顶高一层**，于是两层的写法被算成三层 ✗。
+   *
+   * 正确口径：深度 = **实际有多少条别的连音线把这一段包在里面**（包含关系），与"谁先挂在栈上"无关。
+   * 所以这里先照常收对（深度是临时值），**谱末统一按包含关系重算**，再据此判"超过两层"。
+   *   · `houseTie`（跳房子延续线）与 `wrap`（反复跳回）是"接续"类，**不参与包含计数、深度固定 0**；
+   *   · 退化对（`start === end`，如 `(3)`）不是一层，不计。
+   */
+  const anchorsOf = new Map<SlurPair, { line: number; col: number }>()
   const pushSlurPair = (
     start: number,
     end: number,
@@ -153,8 +165,11 @@ export function pairSlurs(result: ParseResult): SlurPairing {
     minus: number,
     openBarSeq: number,
     houseTie = false,
+    anchor?: { line: number; col: number },
   ): void => {
-    pairs.push({ start, end, depth, tuplet, plus, minus, houseTie })
+    const p: SlurPair = { start, end, depth, tuplet, plus, minus, houseTie }
+    pairs.push(p)
+    if (anchor) anchorsOf.set(p, anchor)
     if (voltaFirstNotes.has(end) && openBarSeq < (voltaFirstBarSeq.get(end) ?? -1)) houseTieStart = start
   }
 
@@ -219,25 +234,22 @@ export function pairSlurs(result: ParseResult): SlurPairing {
               // `adj321` 连接点：终止栈内前一个未闭合连音（prev）于 X，并以 X 为起点重开新连音
               const prev = sQueue.pop()
               if (prev && prev.start !== -1 && lastNote >= prev.start) {
-                pushSlurPair(prev.start, lastNote, prev.depth, prev.tuplet, prev.plus, prev.minus, prev.barSeq)
+                pushSlurPair(prev.start, lastNote, prev.depth, prev.tuplet, prev.plus, prev.minus, prev.barSeq, false, {
+                  line: prev.line,
+                  col: prev.col,
+                })
               }
               // 新连音从 X 起，层级取被终止的 prev（断开嵌套，保持可渲染）
               sQueue.push({ ...s, start: lastNote, depth: prev ? prev.depth : s.depth })
-            } else if (s.depth < 2) {
-              // 普通配对（受 `adj91` 的 `depth < 2` 渲染限制：最多两层嵌套）
-              pushSlurPair(s.start, lastNote, s.depth, s.tuplet, s.plus, s.minus, s.barSeq)
             } else {
               /**
-               * adj973（**用户 2026-10-18 实报**）：**嵌套超过两层 ⇒ 不绘制**，此前**静默**。
-               * 本轮用户那份谱就是这个下场（上一行多了一个 `(` ⇒ 内层两条落到第三层）。
-               * ⇒ 现在发一条 `warning`，把"哪一行哪个 `(` 没画出来"直接说给用户听。
+               * 普通配对。**一律先收下**，深度留给谱末按"包含关系"重算（adj984）——
+               * 以前在这里按"打开时的栈长度"判 `depth < 2`，会被那条"等跳回闭合、整段挂在栈上"的
+               * `(` 顶高一层，把两层的正确写法误判成三层。
                */
-              problems.push({
+              pushSlurPair(s.start, lastNote, s.depth, s.tuplet, s.plus, s.minus, s.barSeq, false, {
                 line: s.line,
                 col: s.col,
-                message: '这条连音线嵌套超过两层（最多两层），没有绘制',
-                severity: 'warning',
-                hint: HINT_DEPTH,
               })
             }
           } else if (!s && houseTieStart >= 0 && lastNote > houseTieStart) {
@@ -296,12 +308,61 @@ export function pairSlurs(result: ParseResult): SlurPairing {
     pairs.push({
       start: open.start,
       end: cand.note,
-      depth: open.depth,
+      depth: 0,
       tuplet: open.tuplet,
       plus: open.plus,
       minus: open.minus,
       wrap: true,
     })
+  }
+
+  /**
+   * adj984：**按"实际包含关系"重算深度**，并据此判"超过两层"。
+   *
+   * 深度 = 有多少条**别的**连音线把这一段包在里面（`q.start <= p.start && p.end <= q.end` 且区间不同）：
+   *  · 两层写法（外 `(` 包住内 `(`）⇒ 内层深度 1 ⇒ 都画 ✓（用户那 4 条就属于这种）；
+   *  · 三层写法（真的三层套娃）⇒ 最内深度 2 ⇒ 不画并告警；
+   *  · `houseTie`（跳房子延续线）/ `wrap`（反复跳回）是接续类 ⇒ **不参与计数、深度固定 0**；
+   *  · 退化对（`start === end`）不包任何人、也不被算作"层"。
+   *
+   * 为什么不能按"打开时的栈长度"：那条"等跳回闭合"的 `(` 会一直挂在栈上，
+   * 把**后面所有**括号的深度都顶高一层（用户追问「你是怎么计算为 3 层的？」的答案）。
+   */
+  {
+    const kept: SlurPair[] = []
+    for (const p of pairs) {
+      if (p.houseTie || p.wrap) {
+        p.depth = 0
+        kept.push(p)
+        continue
+      }
+      if (p.start === p.end) {
+        p.depth = 0
+        kept.push(p)
+        continue
+      }
+      let d = 0
+      for (const q of pairs) {
+        if (q === p || q.houseTie || q.wrap) continue
+        if (q.start === q.end) continue
+        if (q.start <= p.start && p.end <= q.end && !(q.start === p.start && q.end === p.end)) d++
+      }
+      p.depth = d
+      if (d < 2) {
+        kept.push(p)
+      } else {
+        const a = anchorsOf.get(p)
+        problems.push({
+          line: a?.line ?? 0,
+          col: a?.col ?? 0,
+          message: '这条连音线嵌套超过两层（最多两层），没有绘制',
+          severity: 'warning',
+          hint: HINT_DEPTH,
+        })
+      }
+    }
+    pairs.length = 0
+    pairs.push(...kept)
   }
 
   /** 没被"跳回"用掉的孤立 `)` 才报（adj973 ⓑ 的口径不变） */
