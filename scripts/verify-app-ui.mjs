@@ -1368,7 +1368,7 @@ async function main() {
       (await evalJs(c, `!!document.querySelector('.pcfg-asset-err')`)) === false,
     )
 
-    // ============ adj971：标题 = 「文件名.jps - 爱记谱 iJipu」、版本在状态栏右侧（**真读 DOM**）============
+    // ============ adj971/adj978：标题 = **文件名**（应用名交给外壳）、版本在状态栏（**真读 DOM**）============
     //
     // 为什么必须真读：标题与状态栏都是"运行时才写上去"的东西 —— 源码里写了 `document.title = title`
     // 不等于**这一份文件**的名字真的进了标题（可能是空、可能没跟着换文件变）。这里就着上一步已经
@@ -1378,8 +1378,8 @@ async function main() {
     const footVer = String(await evalJs(c, `document.querySelector('.footer-version')?.textContent ?? ''`))
     const footVerTitle = String(await evalJs(c, `document.querySelector('.footer-version')?.getAttribute('title') ?? ''`))
     check(
-      'adj971 **标题 = 「文件名.jps - 爱记谱 iJipu」**（当前打开的是「授权测试.jps」⇒ 标题逐字对得上）',
-      titleNow === '授权测试.jps - 爱记谱 iJipu',
+      'adj978 **标题 = 文件名**（当前打开的是「授权测试.jps」⇒ 标题逐字 `授权测试.jps`，**不带应用名**：应用名由壳去显示）',
+      titleNow === '授权测试.jps' && !titleNow.includes('爱记谱 iJipu'),
       titleNow,
     )
     check(
@@ -1477,8 +1477,8 @@ async function main() {
       await sleep(300)
       const after = String(await evalJs(c, `document.title`))
       check(
-        'adj971 **换文件 ⇒ 标题跟着换**（不是只在 mount 时写一次）：`标题跟随.jps - 爱记谱 iJipu`',
-        after === '标题跟随.jps - 爱记谱 iJipu' && after !== before,
+        'adj971/adj978 **换文件 ⇒ 标题跟着换**（不是只在 mount 时写一次）：`标题跟随.jps`',
+        after === '标题跟随.jps' && after !== before,
         JSON.stringify({ 前: before, 后: after }),
       )
     }
@@ -1657,18 +1657,21 @@ async function main() {
       })
       const pwa = await boot('已安装 PWA')
       check(
-        'adj977 **已安装手机 PWA**：标题只放文件名（`xx.jps`）、**不带应用名** —— 应用名由安卓那层标题栏显示，否则重复成 `爱记谱 iJipu - xx.jps - 爱记谱 iJipu`',
+        'adj978 **已安装手机 PWA**（安卓 WebAPK）：标题**只有文件名**（`xx.jps`）、不带应用名 —— 那层标题栏自己会拼 `爱记谱 iJipu`，我们再带就重复了',
         pwa.title.endsWith('.jps') && !pwa.title.includes('爱记谱 iJipu') && pwa.standalone === true && pwa.coarse === true,
         JSON.stringify(pwa),
       )
-      // ② 撤掉伪造 + 退回桌面环境 ⇒ 标题恢复「文件名 + 应用名」
+      // ② 撤掉伪造 + 退回桌面浏览器 ⇒ **同一个标题**（不再按宿主分档：应用名交给各层外壳自己决定要不要显示）
       await c.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: fake.identifier })
       await c.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
       await c.send('Emulation.setTouchEmulationEnabled', { enabled: false })
       const desk = await boot('桌面浏览器')
       check(
-        'adj977 **负对照（桌面浏览器）**：同一份谱的标题**仍带应用名**（`xx.jps - 爱记谱 iJipu`）—— 证明上面那条是"按宿主分档"，不是把应用名整个去掉',
-        desk.title.endsWith(' - 爱记谱 iJipu') && desk.standalone === false && desk.title !== pwa.title,
+        'adj978 **不分档（负对照）**：桌面浏览器的标题与 PWA 档**完全一致**（都是文件名、都不含应用名）—— 证明 `adj977` 那套"按宿主决定带不带应用名"已经删掉',
+        desk.standalone === false &&
+          desk.title === pwa.title &&
+          desk.title.endsWith('.jps') &&
+          !desk.title.includes('爱记谱 iJipu'),
         JSON.stringify({ 桌面: desk, PWA: pwa }),
       )
     }

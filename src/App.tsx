@@ -39,7 +39,7 @@ import { nextThemeMode } from './brand/themes'
 // adj621/adj971：应用标题统一来源（浏览器页签 + PWA + 桌面窗口标题共用 `appTitleOf(文件名)`）
 import { appTitleOf } from './brand/version'
 // adj954：`__TAURI__` 的读取收敛到品牌层唯一出处（本文件原先自己写了一段类型体操）
-import { isCoarsePointerDevice, isStandalonePwa, tauriInvokeOrNull } from './brand/env'
+import { tauriInvokeOrNull } from './brand/env'
 // adj350：对话框懒加载（React.lazy）——首屏不加载它们，显著减小主包、加快首屏显示
 // adj492：「关于」已迁入底栏 dock（见 ui/ToolDock），此处不再需要弹窗版懒加载
 const SamplesDialog = lazy(() => import('./dialogs/SamplesDialog').then((m) => ({ default: m.SamplesDialog })))
@@ -259,16 +259,14 @@ function App() {
   const titleFile = useDocStore((s) => s.fileName)
   useEffect(() => {
     /**
-     * adj977（**用户 2026-10-18 截图，Android PWA**）：那层窗口标题栏显示的是
-     * `<manifest 的 name>` + ` - ` + `<页面标题>`，于是标题变成
-     * `爱记谱 iJipu - 望月.jps - 爱记谱 iJipu`（应用名重复）。⇒ **已安装的手机 PWA** 这一档
-     * 只放文件名（应用名由外壳显示）；判定用品牌层的**同两个判据**（不与别处各写一份）：
-     *   · `isStandalonePwa()` —— 已安装（`display-mode: standalone` / iOS `navigator.standalone`）；
-     *   · `isCoarsePointerDevice()` —— 手机 / 触屏。
-     * 两个**都要**：桌面浏览器页签、桌面壳、插件都没有这层外壳，仍要「文件名 + 应用名」；
-     * 桌面**已安装 PWA**（Chrome Windows）的窗口标题栏也不会自己加应用名 ⇒ 保持带应用名。
+     * adj978（**用户 2026-10-18 最终口径**）：「**直接显示文件名**，壳有加应用名就加，没有的就只显示
+     * 文件名，**重复显示反而不美**」⇒ 标题**只有文件名**（`appTitleOf` 不再拼应用名）。
+     *
+     * 为什么最终这么定（`adj977` 实测）：安卓已安装 PWA（WebAPK）的标题栏格式是
+     * `<manifest 的 name>` + ` - ` + `<页面标题>` ⇒ 我们无论把应用名放前面还是后面，都会重复一次；
+     * 而"应用名"本来就该由**显示它的那一层**去显示（安卓有，桌面壳/浏览器页签没有，那就没有）。
      */
-    const title = appTitleOf(titleFile, { omitAppName: isStandalonePwa() && isCoarsePointerDevice() })
+    const title = appTitleOf(titleFile)
     document.title = title
     const raf = requestAnimationFrame(() => {
       void tauriInvokeOrNull('plugin:window|set_title', { label: 'main', value: title })
