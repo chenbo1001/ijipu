@@ -166,19 +166,16 @@ function detectSystemLight(): boolean {
 }
 
 /**
- * adj314：是否移动端/PAD（触屏**或**窄屏 ≤1024px）——决定脚本工具条默认开关。PC 大屏默认关。
+ * adj974（**用户 2026-10-18 口径**）：「PC 端默认输入条设为**关闭**，手机端默认设为**开**」。
  *
- * adj954：判据改为**复用品牌层的那两条**，本文件不再自己写 `matchMedia`：
- *   · `isCoarsePointerDevice()`（`brand/env.ts`）：真·触屏/手机（粗指针 + UA 兜底）；
- *   · `detectNarrow()`：窗口 ≤1024px（纯布局概念，桌面把窗口拉窄也会为真）。
- * 两者**或**起来，正是"这台设备是不是小到该默认打开脚本工具条"这个语义。
- * ⚠ 与文件选择策略用的那个判据**不是一回事**：那边**不许**把"窄屏"算进来
- * （窄窗口的桌面 Chrome 里系统选择器是好的，见 `store/saveSupport.ts` 的说明）。
+ * 于是这里**删掉了旧的 `detectTouch()`**（= `isCoarsePointerDevice() || detectNarrow()`）：
+ * 它把"**窗口 ≤1024px**"也算进"该默认打开输入条"，于是**PC 上把窗口拉窄、或在 Obsidian 的窄侧栏里**
+ * 打开时会**默认弹出输入条**（用户要的正是关掉这一档）。现在只看"**是不是真手机/触屏**"
+ * （`brand/env.ts` 的 `isCoarsePointerDevice()`：粗指针 + UA 兜底，**不含窗口宽度**）。
+ *
+ * ⚠ 与文件选择策略用的那个判据**仍然不是一回事**（那边连"触屏"都不算，见 `store/saveSupport.ts`）；
+ * 而 `detectNarrow()` 继续只表示"布局走窄屏形态"（分屏方向那一档在用）。
  */
-function detectTouch(): boolean {
-  return isCoarsePointerDevice() || detectNarrow()
-}
-
 /**
  * adj966g（用户 2026-10-17 口径）：**底栏一开始开在哪个面板**。
  *
@@ -203,7 +200,7 @@ function initialDock(): { open: boolean; panel: DockPanelKey } {
 }
 
 /** adj322：宽/窄屏分界（≤1024px = 窄屏）。matchMedia 支持时用 mq，否则读 innerWidth。
- * 阈值与 detectTouch 一致——统一「≤1024px = 窄屏」语义（触屏设备通常也窄） */
+ * 统一「≤1024px = 窄屏」语义；⚠ `adj974` 起它**不再**参与"输入条默认开不开"（那只按真手机/触屏）。 */
 const NARROW_MQ = '(max-width: 1024px)'
 function detectNarrow(): boolean {
   try {
@@ -509,8 +506,18 @@ export const useUiStore = create<UiState>()((set) => ({
   // adj311：自动折行改为默认开启——Textarea 与显示层折行同步已修复
   //（mirror div 与 textarea 折行点一致），开启后长行软折行对位正确无横向滚动
   autoWrap: loadBool(AUTO_WRAP_KEY, true),
-  // adj314：脚本工具条默认按设备——移动端/PAD（触屏或≤1024px）默认开、PC 默认关
-  showScriptPad: loadBool(SHOW_SCRIPT_PAD_KEY, detectTouch()),
+  /**
+   * adj314 立、**adj974（用户 2026-10-18 口径）改**：输入条默认开关 =
+   * **手机/触屏 ⇒ 开**（`isCoarsePointerDevice()`：粗指针 + UA 兜底）、**PC ⇒ 关**。
+   *
+   * ⚠ 旧口径是 `isCoarsePointerDevice() || detectNarrow()`（"窄屏也算"）⇒ **PC 把窗口拉窄、
+   * 或插件在 Obsidian 的窄侧栏里打开时会默认弹出输入条**；用户明确要求那两档也**默认关**
+   * （输入条是手机上没有物理键盘才需要的东西）。判据的取舍写在文件上方那段注释里。
+   *
+   * 用户手动开/关过就按它存的值走（`setShowScriptPad` 落 `ijipu.showScriptPad`）——
+   * 这里只影响**没存过值**的首次默认。
+   */
+  showScriptPad: loadBool(SHOW_SCRIPT_PAD_KEY, isCoarsePointerDevice()),
   // adj322：宽/窄屏（≤1024px 视为窄屏）—— matchMedia 实时同步
   isNarrow: detectNarrow(),
   // adj315：左右拆分排列方向（previewLeft=左预览右编辑，默认）

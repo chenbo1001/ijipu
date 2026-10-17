@@ -159,7 +159,8 @@ export function setHostKind(kind: HostKind): void {
  *
  * 判据只看"指针粗不粗 + UA"，**不含窗口宽度**——窄窗口的桌面 Chrome 不该被当成手机
  * （文件选择器的策略完全不同，见 `store/saveSupport.ts` 的说明）。
- * 需要"窄屏也算"的语义时，调用方自己与 `detectNarrow()` 或起来（见 `store/uiStore.ts` 的 `detectTouch`）。
+ * 需要"窄屏也算"的语义时，调用方自己与 `detectNarrow()` 或起来；
+ * ⚠ 但"输入条默认开不开"**不用**那个或起来的版本（`adj974` 用户口径：PC 一律默认关、只手机端默认开）。
  */
 export function isCoarsePointerDevice(): boolean {
   try {

@@ -16298,6 +16298,52 @@ function runAdj614Tests() {
       !/const next: Record<typeof themeMode, typeof themeMode>/.test(topSrc),
     '',
   )
+  /**
+   * adj974（**用户 2026-10-18 口径**）：「PC 端默认输入条设为**关闭**，手机端默认设为**开**」。
+   *
+   * 旧默认是 `detectTouch()` = `isCoarsePointerDevice() || detectNarrow()` —— 把"窗口 ≤1024px"
+   * 也算成"该默认打开输入条"，于是 **PC 把窗口拉窄、或插件在 Obsidian 的窄侧栏里打开**
+   * 会默认弹出输入条（用户要关掉的正是这一档）。现在只看"是不是真手机/触屏"。
+   *
+   * 判据按**接线**写（默认值的那一行逐字），并带负对照（改回旧口径 / 把窄屏再或回来 ⇒ 判假）。
+   * ⚠ 这里测的是"**没存过值**时的默认"；用户手动开/关过就按存的值走（`setShowScriptPad` 落盘），
+   * 所以下面那条一并守住"手动开关仍然持久化"。
+   */
+  {
+    const uiSrc = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+    /**
+     * ⚠ 只取**默认值那个表达式**来判（`loadBool(SHOW_SCRIPT_PAD_KEY, <这里>)`）——
+     * 不拿"整份源码里有没有某个词"来判：那段注释**本来就要说明**"旧口径是 `… || detectNarrow()`"，
+     * 按词判会把自己写的说明当成违规（本轮已踩过一次）。
+     */
+    const defaultExprOf = (t: string): string =>
+      /showScriptPad: loadBool\(SHOW_SCRIPT_PAD_KEY, ([A-Za-z0-9_(). ]+)\),/.exec(t)?.[1]?.trim() ?? ''
+    const human = (t: string): boolean =>
+      defaultExprOf(t) === 'isCoarsePointerDevice()' &&
+      !/function detectTouch\b/.test(t) &&
+      /import \{ getRuntimeEnv, isCoarsePointerDevice \} from '\.\.\/brand\/env'/.test(t)
+    check(
+      'adj974 输入条默认值 = **`isCoarsePointerDevice()`**（真手机/触屏 ⇒ 开、PC ⇒ 关）：判据同源于 `brand/env`，且**不留**"触屏或窄屏"那版 `detectTouch`',
+      human(uiSrc),
+      JSON.stringify({
+        默认表达式: defaultExprOf(uiSrc),
+        残留声明: /function detectTouch\b/.test(uiSrc),
+      }),
+    )
+    check(
+      'adj974 **负对照**：默认改成 `true`／或把 `|| detectNarrow()` 再或回来（＝旧口径）⇒ 判据判假',
+      human(uiSrc) &&
+        !human(uiSrc.replace('isCoarsePointerDevice())', 'true)')) &&
+        !human(uiSrc.replace('isCoarsePointerDevice())', 'isCoarsePointerDevice() || detectNarrow())')),
+      '',
+    )
+    check(
+      'adj974 用户**手动**开/关过就按他的值走（`setShowScriptPad` 落 `ijipu.showScriptPad`，默认只影响没存过的首次）',
+      /setShowScriptPad: \(b\) => \{[\s\S]{0,200}?localStorage\.setItem\(SHOW_SCRIPT_PAD_KEY/.test(uiSrc) &&
+        /const SHOW_SCRIPT_PAD_KEY = 'ijipu\.showScriptPad'/.test(uiSrc),
+      '',
+    )
+  }
   check(
     'adj614 Ctrl+M 调 `nextViewType(cur, { narrow, splitHDir })`（窄屏与左右拆分方向都按顶栏口径）',
     /st\.setViewType\(nextViewType\(st\.viewType, \{ narrow: ui\.isNarrow, splitHDir: ui\.splitHDir \}\)\)/.test(appSrc),

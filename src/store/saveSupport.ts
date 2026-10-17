@@ -125,8 +125,9 @@ export function shouldUseFileInputPicker(coarsePointer: boolean, hasFileSystemAc
  *     （Android SAF / iOS 文件 App 会当作未知类型隐藏或置灰），所以移动端 `<input type=file>` 不设 accept；
  *  ② adj540：移动端**以工作区优先**——系统选择器在手机上不可靠（adj405 + Chromium 457203705），
  *     工作区（`showDirectoryPicker`）才是主路径。
- * 注意与 `uiStore.detectTouch()` 的区别：那个把"窄屏 ≤1024"也算移动端（用于脚本工具条默认开关），
- * **不能**拿来做文件选择策略——窄窗口的桌面 Chrome 里系统选择器是好的。
+ * 注意与"输入条默认开关"那个判据的区别（`adj974` 之前是 `uiStore.detectTouch()` = 触屏**或**窄屏，
+ * 现已按用户口径收成只看真手机/触屏）：无论如何都**不能**把"窄屏"算进文件选择策略 ——
+ * 窄窗口的桌面 Chrome 里系统选择器是好的。
  */
 
 /**

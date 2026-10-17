@@ -1506,6 +1506,70 @@ async function main() {
       await evalJs(c, `document.getElementById('adj972-probe')?.remove(), true`)
     }
 
+    // ============ adj974：输入条（`.script-pad`）的**默认**开关 —— PC 关、手机开 ============
+    //
+    // 用户口径（2026-10-18）：「PC 端默认输入条设为**关闭**，手机端默认设为**开**」。
+    // 旧口径是 `isCoarsePointerDevice() || detectNarrow()` —— **窗口 ≤1024px 也算** ⇒ PC 把窗口拉窄
+    // （或插件在 Obsidian 窄侧栏里）打开时会默认弹出输入条。判据改只看"真手机/触屏"。
+    //
+    // 为什么必须**真浏览器 + 真重载**：这是"**没存过值时**的默认"，只有让 store **重新初始化**
+    // 才能量到它（源码级断言只证明"那行字写了什么"）。所以每一档都：清掉 `ijipu.showScriptPad`
+    // ⇒ 模拟该端环境 ⇒ `Page.reload` ⇒ 看 `.script-pad` 在不在。
+    //
+    // 三档：① 手机（移动 UA + 触屏 + 390 宽）⇒ **在**；② PC 常规 1440 宽 ⇒ **不在**；
+    //      ③ **窄窗口的 PC（700 宽、无触屏、桌面 UA）⇒ 也不在** —— 这一档正是用户要修的那个情形
+    //      （旧口径下它是"在"，所以它同时是这条判据的负对照）。
+    console.log('[verify-app-ui] adj974：输入条默认开关（PC 关 / 手机开，含"窄窗口 PC 也要关"）')
+    {
+      const DESKTOP_UA = await evalJs(c, 'navigator.userAgent')
+      const MOBILE_UA =
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+      /** 换一套环境 + 清掉"用户存过的值" ⇒ 重载 ⇒ 量"默认给了什么" */
+      const bootWith = async ({ width, height, mobile, touch, ua }) => {
+        await c.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: mobile ? 3 : 1, mobile })
+        // ⚠ `maxTouchPoints` 只在**开**的时候传（CDP 要求 1–16，传 0 会 `-32602` 报错）
+        await c.send('Emulation.setTouchEmulationEnabled', touch ? { enabled: true, maxTouchPoints: 5 } : { enabled: false })
+        await c.send('Emulation.setUserAgentOverride', { userAgent: ua })
+        await evalJs(c, `localStorage.removeItem('ijipu.showScriptPad'), true`)
+        await c.send('Page.reload')
+        await sleep(500)
+        await waitFor(c, `!!document.querySelector('.editor-main textarea')`, `重载后应用首屏（${width}×${height}）`)
+        return await evalJs(
+          c,
+          `({
+             pad: !!document.querySelector('.script-pad'),
+             stored: localStorage.getItem('ijipu.showScriptPad'),
+             coarse: window.matchMedia('(pointer: coarse)').matches,
+             ua: /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent),
+             w: window.innerWidth,
+           })`,
+        )
+      }
+      const phone = await bootWith({ width: 390, height: 844, mobile: true, touch: true, ua: MOBILE_UA })
+      check(
+        'adj974 **手机端默认开**：移动 UA + 触屏环境重载后，输入条 `.script-pad` **在页面上**，且 `localStorage` 里**没有**存过的值（证明看到的是"默认"而不是残留）',
+        phone.pad === true && phone.stored === null,
+        JSON.stringify(phone),
+      )
+      const pc = await bootWith({ width: 1440, height: 900, mobile: false, touch: false, ua: DESKTOP_UA })
+      check(
+        'adj974 **PC 默认关**：桌面环境重载后输入条**不在页面上**（`localStorage` 同样没有存过的值）',
+        pc.pad === false && pc.stored === null,
+        JSON.stringify(pc),
+      )
+      const pcNarrow = await bootWith({ width: 700, height: 900, mobile: false, touch: false, ua: DESKTOP_UA })
+      check(
+        'adj974 **负对照（用户要修的那一档）**：**窄窗口的 PC**（700 宽、无触屏、桌面 UA）重载后输入条**也不在** —— 旧口径（"触屏或窄屏"）下这里是"在"，所以这条能分辨新旧实现',
+        pcNarrow.pad === false && pcNarrow.w <= 1024 && pcNarrow.coarse === false,
+        JSON.stringify(pcNarrow),
+      )
+      // 收尾：恢复桌面环境（后面的用例若还要用视口，不至于停在手机档）
+      await c.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
+      await c.send('Emulation.setTouchEmulationEnabled', { enabled: false })
+      await c.send('Emulation.setUserAgentOverride', { userAgent: DESKTOP_UA })
+      await evalJs(c, `localStorage.removeItem('ijipu.showScriptPad'), true`)
+    }
+
     c.close()
   } catch (e) {
     check(`脚本自身出错：${e instanceof Error ? e.message : String(e)}`, false)

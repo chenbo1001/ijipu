@@ -206,7 +206,7 @@
 | 项 | 位置 | 说明 |
 |---|---|---|
 | 等宽字体白名单 | `uiStore`（`MONO` 集合） | 编辑器字体只允许等宽、且排除连字字体（防止高亮层错位） |
-| `isNarrow` / `detectTouch` | `uiStore`（`window.matchMedia`/`innerWidth`） | **必须改为"容器感知"**：Obsidian 侧边面板窄、窗口宽，用 window 判断会误判（嵌入关键改动） |
+| `isNarrow` / `detectNarrow` | `uiStore`（`window.matchMedia`/`innerWidth`） | **必须改为"容器感知"**：Obsidian 侧边面板窄、窗口宽，用 window 判断会误判（嵌入关键改动）。<br>⚠ `adj974`（用户口径）：**"输入条默认开不开"不再用这条窄屏判据**（PC 一律默认关、只手机/触屏默认开）—— 这里只服务"布局走窄屏形态"（分屏方向等） |
 | `systemLight` | `uiStore`（`prefers-color-scheme`） | 由宿主提供主题更准 |
 
 ---
@@ -241,7 +241,7 @@
 draft 草稿、文件句柄库、PWA/SW 与更新提示、Tauri 音源分支、`localStorageMigration`、打开/另存为入口（文件视图下）、`window` 级快捷键捕获（改为容器作用域）。
 
 **必须改写为"容器感知"**
-`isNarrow`/`detectTouch`/`detectNarrow`、拖拽与滚动的坐标基准、`document.body` 上的临时元素（测量用 textarea/mirror 需挂到容器或改用 `ResizeObserver`）。
+`isNarrow`/`detectNarrow`、拖拽与滚动的坐标基准、`document.body` 上的临时元素（测量用 textarea/mirror 需挂到容器或改用 `ResizeObserver`）。
 
 ---
 
