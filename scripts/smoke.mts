@@ -111,7 +111,7 @@ import {
 } from '@ijipu/engine/playback/ornaments.ts'
 import { slideOf, slidePlan, slideStepMs, SLIDE_SYMBOLS, SLIDE_STEP_MIN_MS, SLIDE_STEP_MAX_MS } from '@ijipu/engine/playback/slides.ts'
 import { midiToPitchName } from '@ijipu/engine/playback/midi.ts'
-import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_BEAM_TOP_RATIO, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, BAR_NUMBER_SIZE_RATIO, DIGIT_HEIGHT_RATIO, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_APEX_H, SLUR_SAG, slurApexY, VOLTA_INK_GAP, digitBottomY, digitInkW, digitTopY, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap, tyBaselineY, HS_FONT_SIZE, barDownMarkInk, barDownMarkSpan, hasBarDownMark } from '@ijipu/engine/layout/spacing.ts'
+import { DOT_R, DOT_R_DOT, H_GAP, INNER_GAP, BEAM_H, LAYER_GAP, VOLTA_BAR_GAP, VOLTA_RAISE, NOTE_COMMENT_FONT_RATIO, NOTE_COMMENT_RAISE, noteScaleOf, lowDotY, octaveDotY, beamY, octaveTopY, BARLINE_DOT_R, BARLINE_W_THIN, BARLINE_W_THICK, BARLINE_LINE_GAP, BARLINE_DOT_GAP, barlinePad, barlineTotalW, barlineGeometry, GRACE_SIZE_RATIO, GRACE_BEAM_GAP, GRACE_BEAM_TOP_RATIO, GRACE_LINE_W, GRACE_SLOT_RATIO, GRACE_SLOT_RATIO_MULTI, BAR_NUMBER_SIZE_RATIO, DIGIT_HEIGHT_RATIO, DOT_AFTER_DIGIT_GAP, markFontSize, digitInkH, DIGIT_INK_ASC_RATIO, barNumberBoxW, barNumberFontSize, barNumberBoxH, BAR_NUMBER_SCALE, BAR_NUMBER_PAD, BAR_NUMBER_STROKE, BAR_NUMBER_BOTTOM_GAP, SEGMENT_LAYER_YSCALE, SEGMENT_BRACE_ASPECT, SEGMENT_BRACE_MIN_W, TP_BRACKET_GAP, NOTE_BOTTOM_RATIO, SLUR_APEX_H, SLUR_SAG, slurApexY, VOLTA_INK_GAP, digitBottomY, digitInkW, digitTopY, MODIFIER_LAYERS_ABOVE, MODIFIER_LAYERS_BELOW, accidentalGap, tyBaselineY, HS_FONT_SIZE, barDownMarkInk, barDownMarkSpan, hasBarDownMark } from '@ijipu/engine/layout/spacing.ts'
 import { clampMetaPos, metaCornerOffsets, metaAuthorRowY } from '@ijipu/engine/layout/metaAnchors.ts'
 // adj630b：谱尾说明行基线（渲染端与预览端同一个函数，smoke 据此核对渲染结果）
 import { notesRowBaseline } from '@ijipu/engine/layout/spacing.ts'
@@ -19390,6 +19390,13 @@ runAdj927ExternalChangeTests()
       failed++
       console.error('  ✗ adj979 敏感目录提示用例抛异常', e)
     }
+    try {
+      // adj982：替谱段里的附点要贴紧数字（用户截图实报：附点偏右、贴上 &ykh）
+      runAdj982Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj982 段层附点贴紧数字用例抛异常', e)
+    }
   })
   .then(() => {
     try {
@@ -20764,6 +20771,85 @@ function runAdj979Tests() {
         /const sensitiveDir = sensitiveDirLabelOf\(nativePath\)\s*\n\s*if \(sensitiveDir !== null\) \{\s*\n\s*ui\.showNotice\(C\.authDirSensitive\(sensitiveDir\), 'warn'\)/.test(
           authSrc,
         ),
+      '',
+    )
+  }
+}
+
+/**
+ * adj982（**用户截图实报**）：替谱段 `{tp …}` 里**附点偏靠右、贴上 `&ykh` 右括号**。
+ *
+ * 根因：段层给各分量取 x 走的是**拍位栅格**（附点那 0.5 拍被段层拉伸推开）/ 或把格内余白**三等分**，
+ * 两种都会让附点离开数字、顶到右括号上。口径：**附点属于数字**，净距一律用主旋律那个
+ * `DOT_AFTER_DIGIT_GAP`。
+ *
+ * 判据（全部用**用户那份谱**的真排版结果）：
+ *  · 段层里带附点的音符：`附点圆心 − 数字右缘 − 附点半径 == DOT_AFTER_DIGIT_GAP`（允许 0.06 舍入）；
+ *  · **负对照**：同一份谱里**主旋律**带附点的音符净距与段层**相等**（证明两条路径同一口径，
+ *    不是各写一套；同时也排掉"只改了一处"）。
+ */
+function runAdj982Tests() {
+  console.log('[183] adj982 segment-layer dotted note hugs its digit (tp/bz/dsb)')
+  const src = [
+    'V: 1.0',
+    'B: t',
+    'D: C',
+    'P: 4/4',
+    'Q: 1 0/ 1// 7,// 1 0// 6,// 6,// 7,// | 1/ 7,/ 6,/ (5,/ 5,) &hx 1/ 2/ | 3 1/ 7,/ 6,/ 7,// (1// 1/) 3/ | 2 7,/ 6,/ 5,/# 5/ 3/ 7,/ |',
+    'C1: 沫，@某一刻@你的光照亮了我。@如果说你是遥远的@星河，耀眼得让人想',
+    'C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 6,/ 7,/ 1// 3/.} 渺小一个@我， {tp 7,/ 6,// (5,//# 5,/) 4/ 3/ 7,// 1//} 因为你@有梦可做，',
+  ].join('\n')
+  const ns = defaultPageConfig.note_size
+  const rDot = DOT_R_DOT * noteScaleOf(ns)
+  const gap = DOT_AFTER_DIGIT_GAP(ns)
+  const pr = parseJps(src)
+  const lay = layoutScore(pr, defaultPageConfig)
+  /** 每页里所有"带 dot 段"的音符：量 `附点圆心 − 数字槽右缘 − 半径` */
+  const rows: { y: number; pitch?: number; net: number }[] = []
+  for (const n of lay.pages[0].notes) {
+    const dot = (n.segments ?? []).find((s) => s.el === 'dot')
+    if (!dot) continue
+    rows.push({
+      y: n.y,
+      pitch: (n.token as { pitch?: number } | undefined)?.pitch,
+      net: dot.x - (n.x + digitSlotW(ns)) - rDot,
+    })
+  }
+  check(
+    'adj982 带附点的音符（含替谱段）**附点贴紧数字**：净距 = `DOT_AFTER_DIGIT_GAP`（不是被段层拉伸推开）',
+    rows.length >= 2 && rows.every((r) => Math.abs(r.net - gap) < 0.06),
+    JSON.stringify(rows.map((r) => `p${r.pitch}@y${r.y} 净距=${r.net.toFixed(3)}`)),
+  )
+  {
+    /**
+     * 负对照：**另取一份主旋律带附点的谱**，量同一个净距 —— 段层与主旋律必须同口径。
+     * （为什么不在同一份谱里按 y 分组：这份谱里带附点的音符都在**替谱层**、y 相同，
+     *  主旋律那条线里没有附点，分组分不出来。取两份谱比净距更直接，也证明"两条路径同一口径"。）
+     */
+    const mainPr = parseJps(['V: 1.0', 'B: t', 'D: C', 'P: 4/4', 'Q: 1 2. 3 | 4 5 6 7 |'].join('\n'))
+    const mainLay = layoutScore(mainPr, defaultPageConfig)
+    const mainNets: number[] = []
+    for (const n of mainLay.pages[0].notes) {
+      const dot = (n.segments ?? []).find((s) => s.el === 'dot')
+      if (dot) mainNets.push(dot.x - (n.x + digitSlotW(ns)) - rDot)
+    }
+    check(
+      'adj982 **负对照**：主旋律那条路的净距与段层**完全一致** —— 证明不是"只改了段层那一处"（同口径）',
+      mainNets.length > 0 &&
+        rows.length > 0 &&
+        mainNets.every((m) => Math.abs(m - gap) < 0.06) &&
+        rows.every((r) => mainNets.every((m) => Math.abs(r.net - m) < 0.06)),
+      JSON.stringify({ 主旋律: mainNets, 段层: rows.map((r) => r.net) }),
+    )
+  }
+  {
+    const laySrc = String(readFileSync('packages/ijipu-engine/src/engine/layout/index.ts', 'utf8'))
+    check(
+      'adj982 结构：段层两条路径（bz/dsb 的块放置 + 替谱/叠加层的分量拆分）都改用 `DOT_AFTER_DIGIT_GAP` 贴紧数字，且**不再**用"余白三等分"给附点定位',
+      /dotGap982 = DOT_AFTER_DIGIT_GAP\(m\.noteSize\)/.test(laySrc) &&
+        /dotHugX982 = bx0 \+ digitSlotW\(ns\) \+ DOT_AFTER_DIGIT_GAP\(ns\)/.test(laySrc) &&
+        // 负对照：把"贴紧"那半句去掉（只剩旧的三等分/栅格口径）⇒ 判假
+        !/dotCX = curX \+ g \+ n\.noteBodyW \+ g \+ n\.dotBodyW \/ 2\s*\n\s*\}/.test(laySrc),
       '',
     )
   }
