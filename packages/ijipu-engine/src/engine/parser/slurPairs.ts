@@ -43,6 +43,14 @@ export interface SlurPairing {
 
 /** 「正确写法」提示（告警里跟着给出，别只告诉用户"哪里错了"） */
 const HINT_PAIRED = '`(` 与 `)` 必须成对；连音线至少要连接 **2 个音符**，如 `(1 2)`'
+/** adj983：`|:` 之后那个 `)` —— 既是"反复前那条 `(`"的闭合，也是"反复体末尾那条 `(`"跳回的闭合 */
+interface WrapCand {
+  note: number
+  line: number
+  col: number
+  barSeq: number
+  used?: boolean
+}
 const HINT_DEPTH = '连音线**最多嵌套两层**；本条在第三层及更深处、因此没有绘制。' +
   '常见原因是**前面多写了一个 `(`**（会把内层的线整体挤到第三层）——请检查括号是否配对'
 const HINT_STRAY_CLOSE = '多了一个 `)`（前面没有未闭合的 `(`）。' +
@@ -119,7 +127,9 @@ export function pairSlurs(result: ParseResult): SlurPairing {
    *   · 谱末再把这个候选取用掉：配成 `wrap: true` 的对（`start` = 末行的音 > `end` = 首行的音），
    *     被用掉的那条 `)` 与那个 `(` **都不再报警**，其余照旧报。
    */
-  const strayCloses: { note: number; line: number; col: number; wrapOk: boolean; used?: boolean }[] = []
+  const strayCloses: { note: number; line: number; col: number; usedForWrap?: boolean; cand?: WrapCand }[] = []
+  /** `|:` 之后遇到的**第一个 `)`** —— "跳回"那条连音线的闭合（可能同时闭合了反复前那条 `(`） */
+  const wrapCands: WrapCand[] = []
   /** 见过 `|:`（反复起点）⇒ 下一个孤立 `)` 可能是"跳回"的闭合 */
   let repeatStartArmed = false
   /** 最近一次见到 `:|` / `:|:` 时的小节线序号（配对时判定"那个 `(` 之后确实有反复终点"） */
@@ -189,6 +199,19 @@ export function pairSlurs(result: ParseResult): SlurPairing {
             col,
           })
         } else {
+          /**
+           * adj983：**`|:` 之后遇到的第一个 `)`** 记成"跳回闭合"的候选 —— **哪怕它同时也闭合了
+           * 反复之前那条 `(`**（用户补全原谱后的真实情形：前奏行末尾的 `(6/[5/]` 与反复体末尾的
+           * `(6/[5/]` **共用** `|: 6/)` 这个 `)`；线性配对只会给前者，后者就被判"没闭合"、
+           * 还会把后面 2. 房子里的括号顶到第三层、连带不画）。
+           */
+          const at983 = colOf(music.raw, t)
+          let cand983: WrapCand | undefined
+          if (repeatStartArmed) {
+            cand983 = { note: lastNote, line: music.pos.line, col: at983, barSeq }
+            wrapCands.push(cand983)
+            repeatStartArmed = false
+          }
           // `adj55`：先进后出 —— pop 最近打开的开括号；栈跨行保留（未闭合延续到后续行）
           const s = sQueue.pop()
           if (s && s.start !== -1 && lastNote >= s.start) {
@@ -229,18 +252,10 @@ export function pairSlurs(result: ParseResult): SlurPairing {
              * 此前同样静默：整条连线凭空消失，而用户只能盯着源码找那个多余的括号。
              * 锚点取**这个 `)` 自己**（它才是多余的那个）。
              *
-             * adj983：**先不报** —— 它可能是"反复跳回"那条连音线的闭合（见 `strayCloses` 的说明），
-             * 留到谱末统一判定：被配掉的不报，没被配掉的才报。
+             * adj983：**先不报** —— 它可能正是"反复跳回"那条连音线的闭合（见 `wrapCands`），
+             * 留到谱末统一判定：被用掉的不报，没被用掉的才报。
              */
-            const at = colOf(music.raw, t)
-            strayCloses.push({
-              note: lastNote,
-              line: music.pos.line,
-              col: at,
-              // 只认 `|:` 之后**第一个**孤立 `)`（连写两个 `)` 时第二个仍是多余的）
-              wrapOk: repeatStartArmed,
-            })
-            if (repeatStartArmed) repeatStartArmed = false
+            strayCloses.push({ note: lastNote, line: music.pos.line, col: at983, cand: cand983 })
           }
         }
       }
@@ -248,35 +263,50 @@ export function pairSlurs(result: ParseResult): SlurPairing {
   }
 
   /**
-   * adj983（**用户 2026-10-18 实报**）：先把"**反复跳回**"那一对配掉。
+   * adj983（**用户 2026-10-18 实报**）：把"**反复跳回**"那条配掉。
    *
-   * 判据三条同时成立才配（宁可少配、不可错配）：
-   *  ① 有一个"`|:` 之后的孤立 `)`"候选（`wrapOk`）；
-   *  ② 栈里还有未闭合、且**已经锚到音符**的 `(`（取最内层那个 = LIFO，与普通配对同序）；
-   *  ③ 那个 `(` 之后**确实有反复终点**（`lastRepeatEndBarSeq` 在它的小节线序号之后）——
-   *     只有真的会跳回去，这个 `)` 才是它的闭合；没有反复的谱里，这种写法仍然是错的、要报。
+   * 用户补全原谱后的真实情形：`|:` 后面那个 `)` **同时**是两条 `(` 的闭合 ——
+   *   · 反复之前那行末尾的 `(6/[5/]`（线性配对已经用它闭合了 ✓ 画成相邻两行的跨行线）；
+   *   · 反复体末尾的 `(6/[5/]`（跳到 `|:` 之后接着唱 ⇒ 也用这个 `)`）。
+   * 所以这里**允许候选已被线性配对用过**（`cand.used` 只表示"这条候选已被某条 wrap 用掉"，
+   * 不表示"这个 `)` 已经闭过别人"）。
+   *
+   * 判据（宁可少配、不可错配）：
+   *  ① 有未用的 `|:` 之后 `)` 候选；
+   *  ② 栈里还有未闭合、已锚到音符、且**在候选之后**（`barSeq >= cand.barSeq`）的 `(` —— 取最内层；
+   *  ③ 那个 `(` 之后**确实有反复终点**（`lastRepeatEndBarSeq >= open.barSeq`）——
+   *     没有真的跳回去，这种写法仍然算错、要报。
    */
-  {
-    const cand = strayCloses.find((c) => c.wrapOk && !c.used)
-    const innermost = sQueue.length > 0 ? sQueue[sQueue.length - 1] : undefined
-    if (cand && innermost && innermost.start !== -1 && innermost.barSeq <= lastRepeatEndBarSeq) {
-      sQueue.pop()
-      cand.used = true
-      pairs.push({
-        start: innermost.start,
-        end: cand.note,
-        depth: innermost.depth,
-        tuplet: innermost.tuplet,
-        plus: innermost.plus,
-        minus: innermost.minus,
-        wrap: true,
-      })
+  for (const cand of wrapCands) {
+    if (cand.used) continue
+    let openIdx = -1
+    for (let k = sQueue.length - 1; k >= 0; k--) {
+      const s = sQueue[k]
+      if (s.start !== -1 && s.barSeq >= cand.barSeq && s.barSeq <= lastRepeatEndBarSeq) {
+        openIdx = k
+        break
+      }
     }
+    if (openIdx < 0) continue
+    const open = sQueue[openIdx]
+    sQueue.splice(openIdx, 1)
+    cand.used = true
+    // 这个 `)` 若本来被判"多余"，也不许再报 —— 它就是这条跳回连音线的闭合
+    for (const c of strayCloses) if (c.cand === cand) c.usedForWrap = true
+    pairs.push({
+      start: open.start,
+      end: cand.note,
+      depth: open.depth,
+      tuplet: open.tuplet,
+      plus: open.plus,
+      minus: open.minus,
+      wrap: true,
+    })
   }
 
   /** 没被"跳回"用掉的孤立 `)` 才报（adj973 ⓑ 的口径不变） */
   for (const c of strayCloses) {
-    if (c.used) continue
+    if (c.usedForWrap) continue
     problems.push({
       line: c.line,
       col: c.col,

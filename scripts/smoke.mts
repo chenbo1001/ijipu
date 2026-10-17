@@ -20933,6 +20933,36 @@ function runAdj983Tests() {
       JSON.stringify(probs2.map((p) => p.message)),
     )
   }
+  {
+    /**
+     * adj983b（**用用户的真文件实报**）：**同一个 `|:` 之后的 `)` 可以同时是两条 `(` 的闭合** ——
+     * 反复之前那行末尾的 `(6/[5/]`（线性配对用它闭合），与反复体末尾的 `(6/[5/]`（跳回也用它闭合）。
+     * 夹具与真文件"结构同形"（前奏行末尾 `(` → `|: 6/)`；反复体末尾 `(` → 同一个 `)`）。
+     */
+    const SHARED = [
+      'V: 1.0', 'B: t', 'D: C', 'P: 4/4',
+      'Q: 5,/ (6,/ 6,) - &hx 3/ (6/[5/] |',
+      'C: 前奏',
+      'Q: |: 6/) (6. 6.) 2/ | 5/ 5/ 5/ 6/ |',
+      'C: 反复体',
+      'Q: 6/ 5/ 3/ 2/ | 6[1/] - - 3/ (6/[5/] :|',
+      'C: 结束',
+    ].join('\n')
+    const pr3 = parseJps(SHARED)
+    const probs3 = pr3.errors.filter((e) => /连音线|`\(`|`\)`/.test(e.message))
+    const wraps3 = (pr3.slurPairs ?? []).filter((p) => p.wrap === true)
+    check(
+      'adj983b **共用一个 `)`**：前后两条 `(` 都配上了（一条相邻跨行、一条跳回），且**零告警**',
+      probs3.length === 0 && wraps3.length === 1,
+      JSON.stringify({ 告警: probs3.map((p) => p.message), wrap: wraps3 }),
+    )
+    const halves3 = layoutScore(pr3, defaultPageConfig).pages.flatMap((p) => p.slurs ?? []).filter((s) => s.half)
+    check(
+      'adj983b 两半都在：跨行半段至少 4 段（前一条两半 + 跳回那条两半）',
+      halves3.length >= 4,
+      `半段=${halves3.length} ${JSON.stringify(halves3.map((h) => `${h.half}@row${h.row}`))}`,
+    )
+  }
 }
 
 function runAdj973Tests() {
