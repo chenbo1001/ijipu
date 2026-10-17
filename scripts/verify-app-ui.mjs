@@ -1621,6 +1621,58 @@ async function main() {
       await evalJs(c, `localStorage.removeItem('ijipu.showScriptPad'), true`)
     }
 
+    // ============ adj977：已安装的手机 PWA（Android WebAPK）标题**不许重复应用名** ============
+    //
+    // 用户截图（安卓）：那层窗口标题栏显示 `<manifest name> - <页面标题>`，于是变成
+    // `爱记谱 iJipu - 望月.jps - 爱记谱 iJipu`。⇒ 这一档标题只放文件名（应用名由外壳显示）。
+    //
+    // ⚠ 怎么"装成"已安装 PWA：CDP 的 `Emulation.setEmulatedMedia({features:[display-mode]})`
+    // **实测无效**（量到 `matchMedia('(display-mode: standalone)').matches === false`），
+    // 所以用本脚本既有的套路 —— `Page.addScriptToEvaluateOnNewDocument` 在**页面脚本之前**改掉
+    // `matchMedia`（伪 `showOpenFilePicker` 用的也是这一招），再用 `remove` 撤回做负对照。
+    console.log('[verify-app-ui] adj977：已安装手机 PWA 的标题不重复应用名')
+    {
+      const boot = async (label) => {
+        await c.send('Page.reload')
+        await sleep(600)
+        await waitFor(c, `!!document.querySelector('.editor-main textarea')`, `重载后应用首屏（${label}）`)
+        await sleep(300)
+        return await evalJs(
+          c,
+          `({ title: document.title, standalone: (() => { try { return matchMedia('(display-mode: standalone)').matches } catch { return null } })(), coarse: matchMedia('(pointer: coarse)').matches })`,
+        )
+      }
+      // 手机视口 + 触屏（⇒ `(pointer: coarse)` 为真）
+      await c.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 3, mobile: true })
+      await c.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
+      // ① 装成"已安装 PWA" ⇒ 标题只放文件名
+      const fake = await c.send('Page.addScriptToEvaluateOnNewDocument', {
+        source: `(() => {
+          const orig = window.matchMedia.bind(window)
+          window.matchMedia = (q) => /display-mode:\\s*standalone/.test(String(q))
+            ? { matches: true, media: String(q), onchange: null, addEventListener() {}, removeEventListener() {},
+                addListener() {}, removeListener() {}, dispatchEvent() { return false } }
+            : orig(q)
+        })()`,
+      })
+      const pwa = await boot('已安装 PWA')
+      check(
+        'adj977 **已安装手机 PWA**：标题只放文件名（`xx.jps`）、**不带应用名** —— 应用名由安卓那层标题栏显示，否则重复成 `爱记谱 iJipu - xx.jps - 爱记谱 iJipu`',
+        pwa.title.endsWith('.jps') && !pwa.title.includes('爱记谱 iJipu') && pwa.standalone === true && pwa.coarse === true,
+        JSON.stringify(pwa),
+      )
+      // ② 撤掉伪造 + 退回桌面环境 ⇒ 标题恢复「文件名 + 应用名」
+      await c.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: fake.identifier })
+      await c.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
+      await c.send('Emulation.setTouchEmulationEnabled', { enabled: false })
+      const desk = await boot('桌面浏览器')
+      check(
+        'adj977 **负对照（桌面浏览器）**：同一份谱的标题**仍带应用名**（`xx.jps - 爱记谱 iJipu`）—— 证明上面那条是"按宿主分档"，不是把应用名整个去掉',
+        desk.title.endsWith(' - 爱记谱 iJipu') && desk.standalone === false && desk.title !== pwa.title,
+        JSON.stringify({ 桌面: desk, PWA: pwa }),
+      )
+    }
+
     c.close()
   } catch (e) {
     check(`脚本自身出错：${e instanceof Error ? e.message : String(e)}`, false)

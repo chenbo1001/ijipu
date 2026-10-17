@@ -16795,8 +16795,9 @@ function runAdj621Tests() {
     'adj971 `brand/version.ts` 导出 `APP_TITLE_PREFIX` 与 `appTitleOf(文件名)`（单一来源），且**标题不含版本**',
     /export const APP_TITLE_PREFIX = '爱记谱 iJipu'/.test(versionSrc) &&
       /export function appTitleOf\(/.test(versionSrc) &&
-      // 拼接式：`${base}.jps - ${APP_TITLE_PREFIX}`（含防御性剥 `.jps`）
-      /\.jps - \$\{APP_TITLE_PREFIX\}/.test(versionSrc) &&
+      // 拼接式：`${name}.jps` + ` - ${APP_TITLE_PREFIX}`（含防御性剥 `.jps`；adj977 起拆成 name 两段）
+      /`\$\{base === '' \? '未命名' : base\}\.jps`/.test(versionSrc) &&
+      /\$\{name\} - \$\{APP_TITLE_PREFIX\}/.test(versionSrc) &&
       /replace\(\/\\\.jps\$\/i, ''\)/.test(versionSrc) &&
       // 旧口径的"标题带版本"常量必须已经删掉（否则会有人继续用它）
       !/APP_TITLE_FULL/.test(versionSrc) &&
@@ -16835,11 +16836,41 @@ function runAdj621Tests() {
     'adj971 `App.tsx` 的标题走 `appTitleOf(文件名)`，且**跟着文件名变**（换文件/另存为/新建都要改标题）',
     /document\.title = title\b/.test(appSrc) &&
       /import \{ appTitleOf \} from '\.\/brand\/version'/.test(appSrc) &&
-      /const title = appTitleOf\(titleFile\)/.test(appSrc) &&
+      /const title = appTitleOf\(titleFile, \{ omitAppName: isStandalonePwa\(\) && isCoarsePointerDevice\(\) \}\)/.test(appSrc) &&
       /const titleFile = useDocStore\(\(s\) => s\.fileName\)/.test(appSrc) &&
       /\}, \[titleFile\]\)/.test(appSrc),
     '',
   )
+  /**
+   * adj977（**用户 2026-10-18 截图，Android PWA**）：已安装的手机 PWA 那层窗口标题栏显示
+   * `<manifest name> - <页面标题>` ⇒ 我们再带应用名就重复（`爱记谱 iJipu - 望月.jps - 爱记谱 iJipu`）。
+   * 判据 = **已安装 PWA** 且 **手机/触屏**，两个都要（桌面页签/桌面壳/插件都没有这层外壳）。
+   */
+  {
+    check(
+      'adj977 `appTitleOf(名, { omitAppName: true })` 只放文件名（应用名交给外壳）；默认仍「文件名 + 应用名」',
+      appTitleOf('望月', { omitAppName: true }) === '望月.jps' &&
+        appTitleOf('望月') === '望月.jps - 爱记谱 iJipu' &&
+        appTitleOf('', { omitAppName: true }) === '未命名.jps',
+      JSON.stringify([appTitleOf('望月', { omitAppName: true }), appTitleOf('望月')]),
+    )
+    check(
+      'adj977 判据**同源**且**两个都要**：`isStandalonePwa()` **且** `isCoarsePointerDevice()`（只判已安装 / 只判手机都判假）',
+      /omitAppName: isStandalonePwa\(\) && isCoarsePointerDevice\(\)/.test(appSrc) &&
+        /import \{ isCoarsePointerDevice, isStandalonePwa, tauriInvokeOrNull \} from '\.\/brand\/env'/.test(appSrc) &&
+        // **负对照**：只判其中一个（两个都是错的口径）
+        !/omitAppName: isStandalonePwa\(\) \}/.test(appSrc) &&
+        !/omitAppName: isCoarsePointerDevice\(\) \}/.test(appSrc),
+      '',
+    )
+    check(
+      'adj977 **负对照**：不传 `omitAppName`（＝别的宿主）时**不许**丢应用名 —— 桌面页签 / 桌面壳 / 插件的标题口径没变',
+      appTitleOf('望月').endsWith(` - ${APP_TITLE_PREFIX}`) &&
+        appTitleOf('望月', {}).endsWith(` - ${APP_TITLE_PREFIX}`) &&
+        appTitleOf('望月', { omitAppName: false }).endsWith(` - ${APP_TITLE_PREFIX}`),
+      JSON.stringify([appTitleOf('望月'), appTitleOf('望月', {})]),
+    )
+  }
   check(
     // adj621b（用户实测：CDP 看到 document.title 已更新，但 OS 任务栏/Alt+Tab 仍是「爱记谱 iJipu」——
     // 实测 WebView2 下 document.title 与 OS 窗标题是两份独立状态；React mount 时

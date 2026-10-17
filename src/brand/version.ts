@@ -50,12 +50,19 @@ export const APP_TITLE_PREFIX = '爱记谱 iJipu'
  * adj971：**应用标题** = `文件名.jps - 爱记谱 iJipu`（四处宿主共用这一份：桌面壳窗口标题、
  * PWA 窗口/页签、网页版页签、Obsidian 嵌入版）。
  *
+ * adj977（**用户 2026-10-18 截图**）：**已安装的手机 PWA（Android WebAPK）会重复一次应用名** ——
+ * 那层窗口标题栏显示的是 `<manifest 的 name>` + ` - ` + `<页面标题>`，于是变成
+ * `爱记谱 iJipu - 望月.jps - 爱记谱 iJipu`。这一档由 **`omitAppName`** 只放文件名
+ * （应用名交给外壳显示），其余宿主照旧「文件名在前、应用名在后」。
+ *
  * @param fileBase 文件名（**不带扩展名**；`docStore.fileName` 就是这个形态）。
  *   这里仍**防御性地**剥掉一次 `.jps`：调用方若手滑传了全名，标题不该变成 `x.jps.jps - …`。
  *   ⚠ 不 import `store/saveSupport` 的 `fileBaseName`：品牌层不许依赖 store 层（分层约束）。
+ * @param opts.omitAppName `true` = **宿主自己已经显示应用名**（已安装的手机 PWA）⇒ 标题不再带它。
  */
-export function appTitleOf(fileBase: string): string {
+export function appTitleOf(fileBase: string, opts?: { omitAppName?: boolean }): string {
   const base = String(fileBase ?? '').trim().replace(/\.jps$/i, '')
-  return `${base === '' ? '未命名' : base}.jps - ${APP_TITLE_PREFIX}`
+  const name = `${base === '' ? '未命名' : base}.jps`
+  return opts?.omitAppName === true ? name : `${name} - ${APP_TITLE_PREFIX}`
 }
 
