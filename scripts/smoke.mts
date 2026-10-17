@@ -7346,7 +7346,7 @@ console.log('[83] playhead highlight & blocks cover augmentation (adj374)')
   // ① 渲染契约：一个音符的「数字 + 各条增时线」共用同一 data-notepos（消费方 querySelectorAll 才能全高亮）
   const countId = (svg: string, id: string) => svg.split(`data-notepos="${id}"`).length - 1
   {
-    const r1 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: | 6,) 1-- ||\n')
+    const r1 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: | 6, 1-- ||\n')
     const svg1 = renderScoreToSvg(layoutScore(r1, DUR_CFG))[0] ?? ''
     check('adj374 增时线音符：data-notepos 出现 3 次（数字 + 2 条增时线）', countId(svg1, '0_1_0_1') === 3, String(countId(svg1, '0_1_0_1')))
     const r2 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: | 1 2 ||\n')
@@ -7354,15 +7354,20 @@ console.log('[83] playhead highlight & blocks cover augmentation (adj374)')
     check('adj374 无增时线音符：data-notepos 仍只出现 1 次', countId(svg2, '0_1_0_1') === 1, String(countId(svg2, '0_1_0_1')))
   }
   // ② 色块右边界不变量：每条增时线的色块必须盖住它自己那一格（含"末元素无后续小节线"的常见写法）
+  //
+  // ⚠ adj973：这批夹具原来逐字抄的是用户当时那行 `Q: | 6,) 1-- ||` —— 其中 `)` 是**用户手写带进来的笔误**
+  // （与色块/增时线这件事毫无关系；旧代码对它**静默忽略**，去掉后几何一个像素都不变）。
+  // adj973 起"多了一个 `)`"会**发告警**，而这些 check 要求 `rv.errors.length === 0`（夹具必须干净）
+  // ⇒ 把那个多余的 `)` 去掉、其余逐字不动。
   const variants: [string, string][] = [
-    ['v1 单行 结尾 ||', 'Q: | 6,) 1-- ||'],
-    ['v2 三增时线', 'Q: | 6,) 1--- ||'],
-    ['v3 无收尾小节线', 'Q: | 6,) 1--'],
-    ['v4 行末（前面 3 小节撑满一行）', 'Q: | 5 5 5 5 | 5 5 5 5 | 5 5 5 5 | 6,) 1-- ||'],
-    ['v5 跳房子收尾 |]', 'Q: | 6,) 1-- |]'],
-    ['v6 终止线后带 &fine', 'Q: | 6,) 1-- ||&fine'],
-    ['v7 多行末行', 'Q: | 5 5 5 5 | 5 5 5 5 | 5 5 5 5 | 5 5 5 5 |\nQ: | 6,) 1-- ||'],
-    ['v8 增时线拆开写（1 - -）', 'Q: | 6,) 1 - - ||'],
+    ['v1 单行 结尾 ||', 'Q: | 6, 1-- ||'],
+    ['v2 三增时线', 'Q: | 6, 1--- ||'],
+    ['v3 无收尾小节线', 'Q: | 6, 1--'],
+    ['v4 行末（前面 3 小节撑满一行）', 'Q: | 5 5 5 5 | 5 5 5 5 | 5 5 5 5 | 6, 1-- ||'],
+    ['v5 跳房子收尾 |]', 'Q: | 6, 1-- |]'],
+    ['v6 终止线后带 &fine', 'Q: | 6, 1-- ||&fine'],
+    ['v7 多行末行', 'Q: | 5 5 5 5 | 5 5 5 5 | 5 5 5 5 | 5 5 5 5 |\nQ: | 6, 1-- ||'],
+    ['v8 增时线拆开写（1 - -）', 'Q: | 6, 1 - - ||'],
   ]
   for (const [name, q] of variants) {
     const rv = parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\n${q}\n`)
@@ -7405,10 +7410,10 @@ console.log('[83] playhead highlight & blocks cover augmentation (adj374)')
   // 用户实测的两条对照谱（adj374）：更强的不变量——**每条增时线的实际笔画中心必须落在某个色块内**。
   // adj378：**同时覆盖用户实际字号（13 号）与几种常见字号**——此前只在默认字号下断言过。
   for (const [name, q] of [
-    ['用户 A：| 6,) 1-- ||', 'Q: | 6,) 1-- ||'],
+    ['用户 A：| 6, 1-- ||', 'Q: | 6, 1-- ||'],
     ['用户 B：| 1- 0 0 &ykh ||', 'Q: | 1- 0 0 &ykh ||'],
-    ['用户 A 变体：末小节不写收尾线', 'Q: | 6,) 1--'],
-    ['用户 A 多小节（5 小节行末）', 'Q: | 5 5 5 5 | 5 5 5 5 | 5 5 5 5 | 6,) 1-- ||'],
+    ['用户 A 变体：末小节不写收尾线', 'Q: | 6, 1--'],
+    ['用户 A 多小节（5 小节行末）', 'Q: | 5 5 5 5 | 5 5 5 5 | 5 5 5 5 | 6, 1-- ||'],
   ] as [string, string][]) {
     // adj380：**两种布局模式都要核对**——应用默认是「空间优先」(space)，此前断言多跑在时值优先(duration)
     for (const mode of ['duration', 'space'] as const) {
@@ -7431,7 +7436,7 @@ console.log('[83] playhead highlight & blocks cover augmentation (adj374)')
   }
   // adj378：多声部（Q1/Q2）同款核对——多声部还有整列 voiceBlocks 色框，另需看其 x 覆盖
   {
-    const srcMV = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: | 6,) 1-- ||\nQ2: | 5 5 5 5 ||\n'
+    const srcMV = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: | 6, 1-- ||\nQ2: | 5 5 5 5 ||\n'
     const rMV = parseJps(srcMV)
     const layMV = layoutScore(rMV, { ...DUR_CFG, note_size: 13 })
     const seqMV = buildPlaySequence(rMV, layMV, 120)
@@ -7686,11 +7691,11 @@ console.log('[87] augmentation data-notepos coverage (adj380)')
 {
   // [名称, Q 行, 末音符 id, id 期望出现次数（数字 1 + 增时线 N）]
   const cases: [string, string, string, number][] = [
-    ['连写 1--', 'Q: | 6,) 1-- ||', '0_1_0_1', 3],
-    ['拆开写 1 - -', 'Q: | 6,) 1 - - ||', '0_1_0_1', 3],
-    ['单条 1-', 'Q: | 6,) 1- ||', '0_1_0_1', 2],
-    ['三条 1---', 'Q: | 6,) 1--- ||', '0_1_0_1', 4],
-    ['附点+增时线 1-.', 'Q: | 6,) 1-. ||', '0_1_0_1', 2],
+    ['连写 1--', 'Q: | 6, 1-- ||', '0_1_0_1', 3],
+    ['拆开写 1 - -', 'Q: | 6, 1 - - ||', '0_1_0_1', 3],
+    ['单条 1-', 'Q: | 6, 1- ||', '0_1_0_1', 2],
+    ['三条 1---', 'Q: | 6, 1--- ||', '0_1_0_1', 4],
+    ['附点+增时线 1-.', 'Q: | 6, 1-. ||', '0_1_0_1', 2],
     ['用户谱 6,--- &ykh', 'Q: | 6,--- &ykh ||', '0_1_0_0', 4],
     ['用户谱 6,--- &ykh（带前面小节）', 'Q: | 5 5 5 5 | 6,--- &ykh ||', '0_1_0_4', 4],
   ]
@@ -7725,7 +7730,10 @@ console.log('[88] play totalMs covers last-note tail (adj381)')
   // 收尾定时器在末音符刚起声时清空色块轨道 → 末音符后面的增时线永远没有色块。
   const tailCases: [string, string][] = [
     ['用户本次对照 6,--- &ykh', 'Q: | 1 2 3 4 | 6,--- &ykh ||'],
-    ['用户最初报告 1--', 'Q: | 1 2 | 6,) 1-- ||'],
+    // ⚠ 原样是 `6, 1--`——那个孤立的 `)` 是用户当时手写带进来的**笔误**（与"末音符时值"这件事无关）。
+    // adj973 起"多了一个 `)`"会**发告警**，而下面这条 check 要求 `rv.errors.length === 0`（夹具必须干净，
+    // 时值断言才有意义）⇒ 这里把这个多余的括号码去掉，其余逐字不动。
+    ['用户最初报告 1--', 'Q: | 1 2 | 6, 1-- ||'],
     ['单小节末尾长音符 6,---', 'Q: | 6,--- ||'],
   ]
   const stubBackend = { play: async () => {}, stop: () => {} } as unknown as Parameters<typeof schedulePlay>[1]
@@ -19234,6 +19242,13 @@ runAdj927ExternalChangeTests()
       failed++
       console.error('  ✗ adj970 序号与线下方记号错开用例抛异常', e)
     }
+    try {
+      // adj973：连音线"没画出来"要看得见（用户实报：上一行多一个 `(` ⇒ 内层两条静默消失）
+      runAdj973Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj973 连音线配对告警用例抛异常', e)
+    }
   })
   .then(() => {
     try {
@@ -20490,6 +20505,129 @@ function runAdj967Tests() {
  *  · 有歌词夹具（默认版式）⇒ **左右错开**（`xShift`）——实测线底到歌词墨迹上沿只有 14.6px，
  *    而"记号 6.7 + 层间距 2 + 框 7.7 = 16.4px"塞不下；撑行距又违反 `adj625c`（序号显隐不得影响排版）。
  */
+/**
+ * adj973（**用户 2026-10-18 实报**）：连音线**没画出来**时要**看得见**（告警），不许静默消失。
+ *
+ * 用户原话：「`Q: (4/ 6/ | (2'- 2'/) 1'/ (y7/ 6/ 3/) | 5)` 这一段里，内层的 1 个连音线和
+ * 1 个等时值连音线都没有画出来」。查下来**根因不在这一段**：是**上一行多了一个 `(`**
+ * ⇒ 整栈深度 +1 ⇒ 内层两条落到 `depth ≥ 2`，被 `adj91` 的"最多两层嵌套"在弹栈时**静默丢掉**；
+ * 最后那个 `)` 配掉的是 depth 1 那条（画出来的是**配错**的一条），行首那个多余 `(` 从头到尾没人关。
+ * 三处全是**静默** ⇒ 用户只能靠肉眼在源码里找那个多出来的括号。
+ *
+ * 本轮（用户拍板「ⓐ+ⓑ，告警」）：
+ *  · ⓐ 因**嵌套超过两层**而没画的连音线 → 告警（锚在那个 `(` 上）；
+ *  · ⓑ **谱末未闭合的 `(`** / **多出来的 `)`** → 告警；
+ *  · 顺带把**配对**从 `layout/index.ts` 抽成 `parser/slurPairs.ts` 的**唯一一份**纯函数
+ *    （否则"哪几条被丢了"只有布局知道，而告警必须进 `parseResult.errors` 才能被
+ *    应用问题面板 / 插件 / 命令行 `lint` 同时看见）。
+ *
+ * 判据写法（要点）：
+ *  · 告警**必须落进 `parseResult.errors`**——这是三端共用的唯一那条链（负对照见最后两条）；
+ *  · 列号必须**正好落在那个括号字符上**（拿源码逐字符核对，防"差一格"这种低级错）；
+ *  · **负对照**：干净写法与"合法的两层嵌套"**一条都不该报**（防过度报警把好谱也说成有问题）。
+ */
+function runAdj973Tests() {
+  console.log('[181] adj973 slur pairing warnings (not-drawn slurs must be visible)')
+  const HEAD = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  /** 用户那份（上一行多了一个 `(`） */
+  const EXTRA = HEAD + "Q: (7/ 7/ | 7/ 7/ |\nQ: (4/ 6/ | (2'- 2'/) 1'/ (y7/ 6/ 3/) | 5)\n"
+  /** 负对照：去掉上一行那个多余的 `(` ⇒ 三条线都画得出来，且**一条这类告警都没有** */
+  const CLEAN = HEAD + "Q: 7/ 7/ | 7/ 7/ |\nQ: (4/ 6/ | (2'- 2'/) 1'/ (y7/ 6/ 3/) | 5)\n"
+
+  /** 「没画出来 / 括号本身有问题」这一类告警（本轮新增的那三条消息） */
+  const slurWarnOf = (src: string) =>
+    parseJps(src).errors.filter(
+      (e) => e.severity === 'warning' && /嵌套超过两层|没有对应的 `\)`|多了一个 `\)`/.test(e.message),
+    )
+  /** 告警的列必须**正好落在指定括号字符上**（引擎 `col` 是 0-based；取源码那一行核对） */
+  const colHits = (src: string, e: { line: number; col: number }, ch: string): boolean =>
+    (src.split('\n')[e.line - 1] ?? '')[e.col] === ch
+  const count = (ws: { message: string }[], kw: string): number => ws.filter((w) => w.message.includes(kw)).length
+
+  // ---- ① 用户那份：三条告警，且每条都点在正确的括号上 ----
+  {
+    const ws = slurWarnOf(EXTRA)
+    check(
+      'adj973 **用户那份谱**（上一行多一个 `(`）⇒ 三条告警：2 条"嵌套超过两层"（内层普通 + 内层等时值）+ 1 条"`(` 没有对应的 `)`"（行首那个多余的括号）',
+      count(ws, '嵌套超过两层') === 2 && count(ws, '没有对应的 `)`') === 1,
+      ws.map((w) => `第${w.line}行${w.col}：${w.message}`).join(' ／ '),
+    )
+    check(
+      'adj973 三条告警的**列都正好落在那个 `(` 上**（不是"差一格"、也不是指到音符上）',
+      ws.length === 3 && ws.every((w) => colHits(EXTRA, w, '(')),
+      ws.map((w) => `第${w.line}行第${w.col + 1}列`).join(' ／ '),
+    )
+    check(
+      'adj973 告警都带 `hint`（"正确写法"）且级别是 `warning`（谱面照常渲染，只是这几条线没有）',
+      ws.length > 0 && ws.every((w) => w.severity === 'warning' && (w.hint ?? '').length > 0),
+      JSON.stringify(ws.map((w) => w.hint?.slice(0, 24))),
+    )
+  }
+
+  // ---- ② 负对照：干净写法**一条都不报**，且三条线照旧画出来（守住"配对搬家没改几何"）----
+  {
+    const ws = slurWarnOf(CLEAN)
+    check('adj973 **负对照**：把上一行那个多余的 `(` 去掉 ⇒ 这一类告警**一条都没有**（证明它不是恒报）',
+      ws.length === 0, JSON.stringify(ws.map((w) => w.message)))
+    for (const mode of ['space', 'duration'] as const) {
+      const cfg = { ...defaultPageConfig, noteSpaceLayout: mode }
+      const L = layoutScore(parseJps(CLEAN), cfg)
+      const slurs = L.pages.flatMap((p) => p.slurs)
+      check(
+        `adj973（${mode}）干净写法**三条线一条不少**：外层跨小节 1 条（depth 0）+ 内层普通 1 条（depth 1）+ 内层等时值 1 条（depth 1、带连音组数字 3）`,
+        slurs.length === 3 &&
+          slurs.filter((s) => s.depth === 0).length === 1 &&
+          slurs.filter((s) => s.depth === 1 && s.tupletCount === undefined).length === 1 &&
+          slurs.filter((s) => s.depth === 1 && s.tupletCount === 3).length === 1,
+        slurs.map((s) => `d${s.depth}${s.tupletCount !== undefined ? ` t${s.tupletCount}` : ''}`).join(' '),
+      )
+    }
+  }
+
+  // ---- ③ ⓑ：多余的 `)` / 未闭合的 `(`（各一条，列都点在括号上）----
+  {
+    const stray = HEAD + 'Q: 1 2 3)\n'
+    const ws = slurWarnOf(stray)
+    check('adj973 ⓑ **多出来的 `)`**（前面没有未闭合的 `(`）⇒ 告警，且列正好落在那一个 `)` 上',
+      count(ws, '多了一个 `)`') === 1 && ws.every((w) => colHits(stray, w, ')')),
+      ws.map((w) => `第${w.line}行第${w.col + 1}列：${w.message}`).join(' ／ '))
+    const open = HEAD + 'Q: (1 2 3\n'
+    const wo = slurWarnOf(open)
+    check('adj973 ⓑ **谱末仍未闭合的 `(`** ⇒ 告警（这条线一条也画不出来），列落在那个 `(` 上',
+      count(wo, '没有对应的 `)`') === 1 && wo.every((w) => colHits(open, w, '(')),
+      wo.map((w) => `第${w.line}行第${w.col + 1}列：${w.message}`).join(' ／ '))
+  }
+
+  // ---- ④ 深度判据要"该报才报"：合法两层不报、三层才报（防过度报警）----
+  {
+    const two = HEAD + 'Q: (1 (2 3) 4)\n'
+    check('adj973 **负对照（不过度报警）**：合法的**两层**嵌套 `(1 (2 3) 4)` ⇒ 一条都不报',
+      slurWarnOf(two).length === 0, JSON.stringify(slurWarnOf(two).map((w) => w.message)))
+    const three = HEAD + 'Q: (1 (2 (3 4) 5) 6)\n'
+    const w3 = slurWarnOf(three)
+    check('adj973 **真三层嵌套**（不是配错、就是写深了）⇒ 报 1 条"嵌套超过两层"，且列落在**第三个** `(` 上',
+      count(w3, '嵌套超过两层') === 1 && w3.every((w) => colHits(three, w, '(')) && w3[0]?.col === three.split('\n')[4].indexOf('(3'),
+      JSON.stringify(w3.map((w) => `第${w.line}行第${w.col + 1}列`)))
+  }
+
+  // ---- ⑤ 结构闸门：配对**只有一份实现**（否则告警与几何迟早各说各话）----
+  {
+    const lay = String(readFileSync('packages/ijipu-engine/src/engine/layout/index.ts', 'utf8'))
+    const pair = String(readFileSync('packages/ijipu-engine/src/engine/parser/slurPairs.ts', 'utf8'))
+    const par = String(readFileSync('packages/ijipu-engine/src/engine/parser/parser.ts', 'utf8'))
+    const oneHome = (L: string, P: string, R: string): boolean =>
+      /result\.slurPairs \?\? \[\]/.test(L) && !/pushSlurPair/.test(L) && !/const sQueue/.test(L) &&
+      /export function pairSlurs\(/.test(P) && /problems\.push/.test(P) && /pairSlurs\(preliminary\)/.test(R)
+    check('adj973 结构：配对只在 `parser/slurPairs.ts` 一处（布局只 `result.slurPairs ?? []` 消费、不再自建 `sQueue`/`pushSlurPair`；解析期 `pairSlurs(preliminary)` 接上）',
+      oneHome(lay, pair, par), JSON.stringify({ 布局自建: /const sQueue/.test(lay), 唯一实现: /export function pairSlurs\(/.test(pair) }))
+    check('adj973 **负对照**：把"布局改为消费"那一行去掉（回到布局自己配对）⇒ 上面那条判假',
+      oneHome(lay, pair, par) && !oneHome(lay.replace('result.slurPairs ?? []', 'undefined as never'), pair, par))
+    check('adj973 告警走的是**三端共用的那条链**：`parseJps(src).errors` 里就能拿到（应用问题面板 / 插件 / 命令行 `lint` 都只读它 ⇒ 三处零改动可见）',
+      slurWarnOf(EXTRA).length === 3 && slurWarnOf(EXTRA).every((w) => (w.hint ?? '').length > 0),
+      `${slurWarnOf(EXTRA).length} 条`)
+  }
+}
+
 function runAdj970Tests() {
   console.log('[180] 小节线下方记号 与 序号方框 的错开（adj970）')
   /** 用户那条 Q 行（原文照抄）：第 3 根线上写了 `&ds"p:2/4"` */
