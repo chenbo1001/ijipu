@@ -22953,6 +22953,38 @@ console.log('[adj632] grace note marks: &tu/&die/&da above, &shy/&xhy at right')
   const ratio632 = (T_INK_H632 * MFS632) / digitInkH(GRACE_FS)
   check('adj632b 尺寸：倚音 T 墨迹高 / 倚音数字墨迹高 ≈ 用户示例图实测的 13/24 = 0.542',
     Math.abs(ratio632 - 13 / 24) < 0.02, `ratio=${ratio632}（示例图 0.542）`)
+  /**
+   * adj988（**用户 2026-10-18 实报**）：`7/$[6/]` 里**变音记号 `b` 与前倚音重叠**。
+   * 用户口径：两者共存时**倚音让位** —— 由主音符往左依次是 7、b、6/。
+   *
+   * 判据（按**墨迹**）：倚音数字墨迹右缘 ≤ 变音记号墨迹左缘；
+   * 负对照：去掉 `$` 后倚音明显更靠右（仍紧贴主音符）。
+   */
+  {
+    const size988 = defaultPageConfig.note_size
+    const svg988 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 7/$[6/] 6/ 5/ 3/ |\n'), defaultPageConfig))[0]
+    /** 变音记号 `b` 的**文字锚点** x（renderer 里 `<text … font-size=…>b</text>`） */
+    // 注意：SVG 里的 font-size 是**四舍五入到 1 位**的（`r1n`），不能用精确值去比
+    const accX988 = Number(svg988.match(/<text x="([\d.]+)" y="[^"]+" font-size="[\d.]+"[^>]*>b<\/text>/)?.[1] ?? 'NaN')
+    /** 变音墨迹左缘 = 锚点 + lsb×字号（`accidentalInkLeftDx` 与 `accidentalPenDx` 同为"相对主音符 x"的量） */
+    const accInkL988 = accX988 + (accidentalInkLeftDx(size988, '$') - accidentalPenDx(size988, '$'))
+    const grace988 = graceDigit632(svg988)
+    /** 倚音数字墨迹右缘 = 数字 x + 数字槽宽 */
+    const graceInkR988 = grace988 ? grace988.x + GW632 : NaN
+    check('adj988 `7/$[6/]`：**前倚音让位给变音记号**（倚音墨迹右缘 ≤ 变音墨迹左缘）',
+      Number.isFinite(accInkL988) && Number.isFinite(graceInkR988) && graceInkR988 <= accInkL988 + 0.1,
+      `accX=${accX988} accInkL=${accInkL988} grace=${JSON.stringify(grace988)} graceInkR=${graceInkR988}`)
+/** 负对照口径：看**相对主音符数字左缘的净距**（绝对值会被布局左移/右移的 x 干扰） */
+    const svg988b = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 7/[6/] 6/ 5/ 3/ |\n'), defaultPageConfig))[0]
+    const graceNoAcc988 = graceDigit632(svg988b)
+    const digit988 = digitX632(svg988, '7')
+    const digit988b = digitX632(svg988b, '7')
+    const gapWith988 = digit988 - graceInkR988
+    const gapWithout988 = digit988b - (graceNoAcc988 ? graceNoAcc988.x + GW632 : NaN)
+    check('adj988 **负对照**：带变音时倚音到数字的净距 ≈ 变音占位宽；不带变音时只有 ~1px（说明"让位"确实是新增的）',
+      Number.isFinite(gapWith988) && Number.isFinite(gapWithout988) && gapWith988 > gapWithout988 + 2,
+      `withAcc净距=${gapWith988} withoutAcc净距=${gapWithout988}`)
+  }
   const svgDa632 = renderScoreToSvg(layoutScore(parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 6/[5/&da] 1/ |\n'), defaultPageConfig))[0]
   check('adj632b 渲染：`&da` 用主音符同款字形 扌（粗体、居中、倚音记号的字号）',
     aboveMark632(svgDa632, '扌') !== null && Math.abs(aboveMark632(svgDa632, '扌')!.fs - MFS632) < 0.05,
