@@ -28,11 +28,6 @@ import { useUiStore } from '../store/uiStore'
 import { docKeyOf, loadMarks, saveMarks } from '../store/practiceMarks'
 import { playbackCopy } from '../brand/copy'
 
-/** 音符 id → `g组#序号`（读数里显示用；解析不出来给 `?`） */
-function noteLabelOf(id: string): string {
-  const m = /^(\d+)_(\d+)_(\d+)_(\d+)$/.exec(id)
-  return m ? `g${m[3]}#${m[4]}` : '?'
-}
 
 export function PracticeMarkBar(): React.JSX.Element {
   const marks = useUiStore((s) => s.practiceMarks)
@@ -119,37 +114,6 @@ export function PracticeMarkBar(): React.JSX.Element {
     setPracticeRangeIds(resolved.ids)
   }, [resolved, setPracticeRangeIds])
 
-  /**
-   * adj987m：**只读自检**（与 `window.__ijipuPlayhead()` 同一套路）。
-   *
-   * 用户实报"添加了标记段但不按段播放"时，光看界面分不清是"标记 id 对不上"还是"切片没生效"；
-   * 把这份状态挂到 window 上，贴回来就能定位（不参与渲染）。
-   */
-  useEffect(() => {
-    interface Probe {
-      markId: string
-      startId: string | null
-      endId: string | null
-      marks: number
-      candidates: number
-      rangeIds: number
-      rangeMs: number
-    }
-    const fn = (): Probe => ({
-      markId,
-      startId: cur?.startId ?? null,
-      endId: cur?.endId ?? null,
-      marks: marks.length,
-      candidates: candidates.length,
-      rangeIds: resolved.ids.length,
-      rangeMs: Math.round(resolved.rangeMs),
-    })
-    const w = window as unknown as { __ijipuPracticeMark?: () => Probe }
-    w.__ijipuPracticeMark = fn
-    return () => {
-      delete w.__ijipuPracticeMark
-    }
-  }, [markId, cur, marks, candidates, resolved])
 
   const canAdd = !!selStart && !!selStop
   /**
@@ -257,26 +221,6 @@ export function PracticeMarkBar(): React.JSX.Element {
                 </option>
               ))}
             </select>
-          )}
-          {/* adj987s（用户实报"停止音没播放"）：把**解析结果**直接摆出来。
-              用户在界面上就能看到"这段被算成了几个音、多长"——不用开开发者工具也能判断
-              是"段算短了"还是"段对但播放没吃到"。 */}
-          {cur && (
-            <span className="practice-readout" title={playbackCopy.practiceSelectTitle}>
-              {resolved.ids.length > 0
-                ? playbackCopy.practiceResolved(
-                    resolved.ids.length,
-                    (resolved.rangeMs / 1000).toFixed(1) + ' 秒',
-                    resolved.lastNote,
-                    noteLabelOf(cur.endId),
-                  )
-                : playbackCopy.practiceResolvedMissing(
-                    resolved.missing === 'start' ? '起点' : resolved.missing === 'end' ? '终点' : '这一段的音符',
-                    noteLabelOf(cur.startId),
-                    noteLabelOf(cur.endId),
-                    resolved.totalEvents,
-                  )}
-            </span>
           )}
         </>
       )}

@@ -752,18 +752,6 @@ export const playbackCopy = {
   practicePassTitle: '这一对起止对应多处（反复/跳跃）——选你要练的那一遍',
   /** 标记失效：端点音符在当前谱面里找不到（谱被改过 / 标在被跳过的房子里） */
   practiceMarkInvalid: '这段标记的音符在当前谱面里找不到（可能改过谱），本次按「全曲」播放；请重新标一段。',
-  /** adj987s：标记段解析结果的一句话读数（音数 + 时长），直接显示在按钮组里便于核对 */
-  practiceResolved: (n: number, secs: string, lastNote: string, markedEnd: string) =>
-    lastNote === markedEnd
-      ? ' · ' + n + ' 个音 · ' + secs + ' · 末音 ' + lastNote
-      : ' · ' + n + ' 个音 · ' + secs + ' · 末音 ' + lastNote + '（标的停止音 ' + markedEnd + '）',
-  /** 解析不出（标记失效）时的短提示（按钮组里用，比弹提示轻） */
-  /**
-   * adj987w：找不到时**带上两个端点 id 与音数** —— 用户实报"提示找不到这段音符"时，
-   * 这行字直接给出定位信息（不用开开发者工具）；同时区分是起点还是终点没找到。
-   */
-  practiceResolvedMissing: (which: string, start: string, end: string, total: number) =>
-    ' · 找不到' + which + '（起 ' + start + ' / 止 ' + end + '，全曲 ' + total + ' 个音）',
   /** 循环之间的 3 秒静默（用户口径：区分循环位置 + 喘口气） */
   practiceLoopGapHint: '循环时每遍之间静默 3 秒',
 } as const

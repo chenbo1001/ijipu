@@ -5628,10 +5628,4 @@ span.ws-check {
   pointer-events: none;
   user-select: none;
 }
-/* adj987s：标记段"解析结果"读数（几个音、多长）——小字灰色，不抢按钮 */
-.practice-readout {
-  flex: 0 0 auto;
-  font-size: 11px;
-  color: var(--jp-text-muted);
-  white-space: nowrap;
 }
