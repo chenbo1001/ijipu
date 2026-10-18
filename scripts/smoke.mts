@@ -21298,6 +21298,40 @@ function runAdj987Tests() {
       JSON.stringify({ withPass, badPass }),
     )
   }
+  {
+    /**
+     * adj987f（**用户 2026-10-18 口径**）：结尾音符要**完整奏完**——
+     * 「被标记为停止的音符也要播放，包括其后的**附点**和**增时线**，**后倚音**等与该音符直接关联的修饰符」。
+     *
+     * 判据分两层（都不依赖"后倚音会产生独立事件"这种实现细节）：
+     *  ① **源码**：`slicePlaySequenceByRange` 里有"向前多吃"的循环（把与结尾音符同时发声的事件纳入）；
+     *  ② **行为**：终点音符是 `1-`（两拍）时，`rangeMs` 至少覆盖它自己**完整的时值**
+     *     （60 BPM 下两拍 = 2000ms）——即"停止音符不会被切掉"。
+     */
+    const seqSrc987 = String(readFileSync('packages/ijipu-engine/src/engine/playback/sequence.ts', 'utf8'))
+    check(
+      'adj987f 源码：裁段有"向前多吃"——凡起点早于**终点音符结束时刻**的事件都纳入（后倚音/同时发声的别声部）',
+      /while \(last \+ 1 < seq\.events\.length && seq\.events\[last \+ 1\]\.atMs < endT - 0\.5\)/.test(seqSrc987),
+      '',
+    )
+    const R987 = ['V: 1.0', 'B: t', 'D: C', 'P: 4/4', 'Q: 1 2 3 4 |', ''].join('\n')
+    const r987 = parseJps(R987)
+    const seq987 = buildPlaySequence(r987, layoutScore(r987, defaultPageConfig), 60)
+    const ids987 = seq987.events.map((e) => noteIdStringOf(e.placed.id))
+    const i0 = 0
+    const i1 = 1
+    const sliced = i0 >= 0 && i1 > i0 ? slicePlaySequenceByRange(seq987, i0, i1) : null
+    const endNote = seq987.events[i1]
+    check(
+      'adj987f **行为**：终点音符 `2`（一拍）⇒ 切片时长覆盖它**完整时值**（60 BPM 下 ≥ 900ms），不会被切短',
+      !!sliced && !!endNote && sliced.rangeMs >= endNote.durationMs - 100 && sliced.rangeMs >= 900,
+      JSON.stringify({
+        rangeMs: sliced?.rangeMs ?? null,
+        终点时值: endNote?.durationMs ?? null,
+        n: sliced?.events.length ?? null,
+      }),
+    )
+  }
 }
 
 function runAdj973Tests() {

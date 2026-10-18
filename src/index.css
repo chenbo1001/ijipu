@@ -1867,15 +1867,16 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
+  margin-top: 8px;
   padding: 4px 6px;
   border: 1px solid var(--jp-border);
   border-radius: 6px;
   background: var(--jp-surface-2);
 }
-.practice-bar.is-collapsed {
-  padding: 2px 4px;
-  border-color: transparent;
-  background: transparent;
+/* adj987e：收起时整组不渲染；"展开"入口挪到歌名前，用这个类与组内那个 ▾ 区分（更小、无边框） */
+.practice-expand-inline {
+  margin-right: 4px;
+  vertical-align: middle;
 }
 /* 左上角的小按钮：不占地方、不抢视觉 */
 .practice-collapse {
@@ -1907,10 +1908,17 @@ body {
 .practice-pass {
   flex: 0 1 140px;
 }
+/* 纯图标按钮：固定方块、字形居中（中文只在 title/aria-label 里，不外显） */
 .practice-btn {
   flex: 0 0 auto;
-  font-size: 12px;
-  padding: 2px 8px;
+  width: 26px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
 }
 /* 已登记起点/终点、循环开启 ⇒ 按钮呈"激活"态（与红焦点色区分，用强调色边框） */
 .practice-btn.is-on {

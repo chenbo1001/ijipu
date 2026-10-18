@@ -722,24 +722,24 @@ export const playbackCopy = {
   builtinBankHint: '✓ 使用随应用内置音源（安装目录 generaluser_gs.sf2），无需下载、离线可用。',
   /* ---- adj987（用户 2026-10-18 需求）：试听「练习段」 ---- */
   /** 段组标题（收起时也显示） */
-  practiceTitle: '练习段',
+  practiceTitle: '标记段',
   /** 下拉第一项：无标记 = 演奏全曲（**不可删除**） */
   practiceNone: '无（演奏全曲）',
-  practiceSelectTitle: '选择练习段（第一项「无」= 演奏全曲，不可删除）',
+  practiceSelectTitle: '选择标记段（第一项「无」= 演奏全曲，不可删除）',
   /** 「起始」「停止」两个按钮 —— 先点音符，再点它们 */
   practiceStart: '起始',
   practiceStop: '停止',
   practiceStartHint: '先在谱面点一个音符，再点这里 ⇒ 把它设为这段的起始',
   practiceStopHint: '先在谱面点一个音符，再点这里 ⇒ 把它设为这段的停止',
   practiceAdd: '添加',
-  practiceAddHint: '把当前的起始/停止登记成一段（起止都标好才可用）',
+  practiceAddHint: '把当前的起始/停止登记成一段标记（起止都标好才可用）',
   practiceDelete: '删除',
-  practiceDeleteHint: '删除当前选中的练习段（「无」不可删除）',
+  practiceDeleteHint: '删除当前选中的标记段（「无」不可删除）',
   practiceLoop: '循环',
   practiceLoopHint: '循环播放这一段（关掉则播一遍就停）',
   /** 左上角小按钮 */
-  practiceCollapse: '收起练习段组',
-  practiceExpand: '展开练习段组',
+  practiceCollapse: '收起标记段组',
+  practiceExpand: '展开标记段组',
   /** 起止没标全就想添加 */
   practiceNeedBoth: '先标好「起始」与「停止」两个音符，再添加这一段。',
   /** 候选遍次（同一对起止在展开序列里可能有多处） */

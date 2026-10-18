@@ -257,6 +257,17 @@ export function resolvePracticeRange(seq: PlaySequence, startId: string, endId: 
  * adj987b：按**已解析出的候选区间**（事件下标）裁出序列；时间轴从 0 重排。
  *
  * 与 `slicePlaySequenceByNoteRange` 分开的原因：候选可能在"第 2 遍"，不能只按 id 取第一处。
+ *
+ * ## adj987f（**用户 2026-10-18 口径**）：结尾音符要**完整奏完**
+ *
+ * 用户原话：「被标记为停止的音符**也要播放**，包括其后的**附点**和**增时线**，
+ *   **后倚音**等与该音符直接关联的修饰符」。
+ *
+ * 附点/增时线在引擎里已经并进那个事件自己的 `durationMs`（不产生额外事件）；
+ * 但**后倚音**是紧跟在主音之后单独排的事件（`atMs` 落在主音的时值窗口里）。
+ * 若只切到"终点音符那个事件"，这些事件就被切掉 ⇒ 听感上"停止音符的后倚音没响"。
+ *
+ * ⇒ 切完后**向前多吃**：把"起点早于终点音符结束时刻"的事件都纳入（含后倚音、同时发声的其它声部）。
  */
 export function slicePlaySequenceByRange(
   seq: PlaySequence,
@@ -264,10 +275,15 @@ export function slicePlaySequenceByRange(
   i1: number,
 ): (PlaySequence & { rangeMs: number }) | null {
   if (i0 < 0 || i1 < i0 || i1 >= seq.events.length) return null
+  const endEvent = seq.events[i1]
+  const endT = endEvent.atMs + endEvent.durationMs
+  // adj987f：把"与结尾音符同时/在其时值窗口内发声"的事件一并纳入（后倚音、同时值的别声部…）
+  let last = i1
+  while (last + 1 < seq.events.length && seq.events[last + 1].atMs < endT - 0.5) last++
   const base = seq.events[i0].atMs
-  const events = seq.events.slice(i0, i1 + 1).map((e) => ({ ...e, atMs: Math.max(0, e.atMs - base) }))
-  const last = events[events.length - 1]
-  const rangeMs = Math.max(0, last.atMs + last.durationMs)
+  const events = seq.events.slice(i0, last + 1).map((e) => ({ ...e, atMs: Math.max(0, e.atMs - base) }))
+  const lastEv = events[events.length - 1]
+  const rangeMs = Math.max(0, lastEv.atMs + lastEv.durationMs)
   return { events, totalMs: rangeMs, bpm: seq.bpm, rangeMs }
 }
 

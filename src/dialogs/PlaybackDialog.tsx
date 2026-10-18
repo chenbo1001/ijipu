@@ -33,8 +33,8 @@ import { measureFontMeta } from '../preview/fontMeta'
 import { fmtClock } from './playbackClock'
 // adj723d：试听**单实例**保证（代次守卫，纯模块便于 smoke 断言）
 import { createPlaybackGeneration, shouldAutoPlay } from './playbackSession'
-// adj987（用户需求）：试听「练习段」的按钮组（收起/段选择/起始/停止/添加/删除/循环）
-import { PracticeMarkBar } from './PracticeMarkBar'
+// adj987（用户需求）：标记段组的按钮组（收起/段选择/起始/停止/添加/删除/循环）+ 收起时的"歌名前展开"按钮
+import { PracticeMarkBar, PracticeMarkExpandButton } from './PracticeMarkBar'
 // adj764（清单 B6）：试听时钟来自引擎 —— 与 Obsidian 插件共用"推进/暂停续播/取消/到点一次"的语义
 import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, resolvePracticeRange, slicePlaySequenceByRange, gmVoiceRef, countScoreInstrumentSwitches, createPlaybackClock, type PlaybackClock } from '@ijipu/engine'
 
@@ -672,6 +672,9 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
             宽屏整条压成**一行**；窄屏自动折行，按钮仍贴右。 */}
         <div className="dock-split">
           <div className="dock-split-main playback-meta">
+            {/* adj987e（**用户 2026-10-18 口径**）：标记段组**收起时**，展开按钮挪到**歌名前**——
+                否则它自己还要占一整行。展开后这里自动消失（组本身在下方出现）。 */}
+            <PracticeMarkExpandButton />
             <span className="playback-title">{header.titles[0] ?? '未命名'}</span>
             {/* adj488：曲目信息里"调式拍号"与"作者"位置对调——作者写在前面更显眼
                 （看谱时先想"谁写的"再看"什么调"），调式拍号放进次级灰色行 */}
@@ -716,9 +719,6 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
             {samplerState === 'failed' && <span className="dock-warn">{playbackCopy.failedFallback}</span>}
           </div>
 
-          {/* adj987（用户需求）：练习段组（含左上角收起按钮；起止/循环都在这个组件里） */}
-          <PracticeMarkBar />
-
           {/* 右：操作按钮（adj471：**竖排、靠上固定**，与设置面板右侧按钮列同一习惯；
               左侧曲目信息与设置项流式排列，两者顶部对齐） */}
           <div className="dock-split-actions playback-actions">
@@ -760,6 +760,10 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
             </button>
           </div>
         </div>
+
+        {/* adj987d（**用户 2026-10-18 口径**）：标记段组放在**试听区下方**（曲目信息 + 播放/停止**之上**的
+            那一整块之后），不再是"插在信息与按钮中间" */}
+        <PracticeMarkBar />
 
         {/* 提示区：只在确有内容时占行 */}
         {(playbackHqVoice !== null || playbackHqEnabled.length === 0 || downloading || builtinBank || playError || totalMs > 0) && (

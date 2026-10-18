@@ -75,19 +75,24 @@ export function PracticeMarkBar(): React.JSX.Element {
   }, [cur, parseResult, pageConfig])
 
   const canAdd = !!selStart && !!selStop
+  /**
+   * adj987e（**用户 2026-10-18 口径**）：**收起时整组不占地方** —— 这里直接不渲染，
+   * 改由歌名前的 `PracticeMarkExpandButton` 提供"展开"入口（否则这一行光放一个按钮太浪费）。
+   */
+  if (collapsed) return <></>
   return (
-    <div className={`practice-bar${collapsed ? ' is-collapsed' : ''}`}>
-      {/* 左上角的收起/显示小按钮（用户追加要求） */}
+    <div className="practice-bar">
+      {/* 左上角的收起小按钮（用户追加要求；展开入口在歌名前，见 `PracticeMarkExpandButton`） */}
       <button
         className="practice-collapse"
         onClick={toggleCollapsed}
-        title={collapsed ? playbackCopy.practiceExpand : playbackCopy.practiceCollapse}
-        aria-expanded={!collapsed}
-        aria-label={collapsed ? playbackCopy.practiceExpand : playbackCopy.practiceCollapse}
+        title={playbackCopy.practiceCollapse}
+        aria-expanded={true}
+        aria-label={playbackCopy.practiceCollapse}
       >
-        {collapsed ? '▸' : '▾'}
+        ▾
       </button>
-      {!collapsed && (
+      {(
         <>
           <span className="practice-title">{playbackCopy.practiceTitle}</span>
           <select
@@ -109,16 +114,18 @@ export function PracticeMarkBar(): React.JSX.Element {
             onClick={() => setSel('start', activeNoteId)}
             disabled={!activeNoteId}
             title={playbackCopy.practiceStartHint}
+            aria-label={playbackCopy.practiceStart}
           >
-            {playbackCopy.practiceStart}
+            <span aria-hidden="true">⇤</span>
           </button>
           <button
             className={`btn practice-btn${selStop ? ' is-on' : ''}`}
             onClick={() => setSel('stop', activeNoteId)}
             disabled={!activeNoteId}
             title={playbackCopy.practiceStopHint}
+            aria-label={playbackCopy.practiceStop}
           >
-            {playbackCopy.practiceStop}
+            <span aria-hidden="true">⇥</span>
           </button>
           <button
             className="btn practice-btn"
@@ -128,24 +135,27 @@ export function PracticeMarkBar(): React.JSX.Element {
             }}
             disabled={!canAdd}
             title={playbackCopy.practiceAddHint}
+            aria-label={playbackCopy.practiceAdd}
           >
-            {playbackCopy.practiceAdd}
+            <span aria-hidden="true">＋</span>
           </button>
           <button
             className="btn practice-btn"
             onClick={() => deleteMark(markId)}
             disabled={markId === ''}
             title={playbackCopy.practiceDeleteHint}
+            aria-label={playbackCopy.practiceDelete}
           >
-            {playbackCopy.practiceDelete}
+            <span aria-hidden="true">－</span>
           </button>
           <button
             className={`btn practice-btn${loop ? ' is-on' : ''}`}
             onClick={() => setLoop(!loop)}
             title={playbackCopy.practiceLoopHint}
+            aria-label={playbackCopy.practiceLoop}
             aria-pressed={loop}
           >
-            ⟲ {playbackCopy.practiceLoop}
+            <span aria-hidden="true">⟲</span>
           </button>
           {candidates.length > 1 && cur && (
             <select
@@ -164,5 +174,28 @@ export function PracticeMarkBar(): React.JSX.Element {
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * adj987e（**用户 2026-10-18 口径**）：**收起状态下的"展开"入口** —— 放在**歌名前**，
+ * 这样收起时标记段组**不占任何行**（用户原话：「不然还要占一行的位置」）。
+ *
+ * 展开状态下它自己返回空（组本身已经在试听区下方显示了 ▾ 收起按钮）。
+ */
+export function PracticeMarkExpandButton(): React.JSX.Element {
+  const collapsed = useUiStore((s) => s.practiceCollapsed)
+  const toggleCollapsed = useUiStore((s) => s.togglePracticeCollapsed)
+  if (!collapsed) return <></>
+  return (
+    <button
+      className="practice-collapse practice-expand-inline"
+      onClick={toggleCollapsed}
+      title={playbackCopy.practiceExpand}
+      aria-expanded={false}
+      aria-label={playbackCopy.practiceExpand}
+    >
+      ▸
+    </button>
   )
 }

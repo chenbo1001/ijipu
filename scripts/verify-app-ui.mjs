@@ -884,6 +884,38 @@ async function main() {
         `[...document.querySelectorAll('.tool-dock-tab')].find((t) => t.textContent.includes('试听'))?.classList.contains('is-active') === true`,
       )) === true,
     )
+    // ---- adj987d（用户 2026-10-18 口径）：标记段组的位置 / 纯图标 / 收起、文案 ----
+    check(
+      'adj987d 标记段组**在试听区下方**（DOM 里 `.practice-bar` 排在 `.playback-actions` 之后；不再插在曲目信息与播放按钮中间）',
+      (await evalJs(
+        c,
+        `(() => {
+          const bar = document.querySelector('.practice-bar')
+          const actions = document.querySelector('.playback-actions')
+          if (!bar || !actions) return 'missing'
+          const rel = actions.compareDocumentPosition(bar)
+          return (rel & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+        })()`,
+      )) === true,
+    )
+    check(
+      'adj987d 组内按钮**只用图标**（起始/停止/添加/删除/循环 五个按钮都不含中文文本），中文只留在 title/aria-label',
+      (await evalJs(
+        c,
+        `(() => {
+          const btns = [...document.querySelectorAll('.practice-bar .practice-btn')]
+          if (btns.length !== 5) return 'count:' + btns.length
+          const cjk = /[\\u4e00-\\u9fa5]/
+          const bad = btns.filter((b) => cjk.test(b.textContent || ''))
+          const labelled = btns.every((b) => (b.getAttribute('aria-label') || '').length > 0)
+          return bad.length === 0 && labelled
+        })()`,
+      )) === true,
+    )
+    check(
+      'adj987d 组标题文案是「**标记段**」（不再是「练习段」）',
+      (await evalJs(c, `document.querySelector('.practice-bar .practice-title')?.textContent`)) === '标记段',
+    )
 
     // ============ adj966f：两边都改了 ⇒ 逐块采纳 / 自动三路合并（**真点一遍**） ============
     //
