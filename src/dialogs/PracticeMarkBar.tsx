@@ -72,10 +72,10 @@ export function PracticeMarkBar(): React.JSX.Element {
    * （用户口径 #5：「允许起始在停止后，且要跟着演奏顺序画线」）。
    */
   const resolved = useMemo(() => {
-    if (!cur) return { candidates: [], ids: [] as string[] }
+    if (!cur) return { candidates: [], ids: [] as string[], rangeMs: 0 }
     const seq = buildPlaySequence(parseResult, layoutScore(parseResult, pageConfig), 90)
     const res = resolvePracticeRange(seq, cur.startId, cur.endId)
-    if (res.candidates.length === 0) return { candidates: [], ids: [] as string[] }
+    if (res.candidates.length === 0) return { candidates: [], ids: [] as string[], rangeMs: 0 }
     const idx = Math.min(Math.max(cur.pass ?? res.pick, 0), res.candidates.length - 1)
     const c = res.candidates[idx]
     // adj987n：画线也要用"延长到连音线末尾"之后的范围，否则线比实际演奏短一截
@@ -84,6 +84,7 @@ export function PracticeMarkBar(): React.JSX.Element {
     return {
       candidates: res.candidates,
       ids: sliced ? sliced.events.map((e) => noteIdStringOf(e.placed.id)) : [],
+      rangeMs: sliced?.rangeMs ?? 0,
     }
   }, [cur, parseResult, pageConfig])
   const candidates = resolved.candidates
@@ -105,6 +106,7 @@ export function PracticeMarkBar(): React.JSX.Element {
       marks: number
       candidates: number
       rangeIds: number
+      rangeMs: number
     }
     const fn = (): Probe => ({
       markId,
@@ -113,6 +115,7 @@ export function PracticeMarkBar(): React.JSX.Element {
       marks: marks.length,
       candidates: candidates.length,
       rangeIds: resolved.ids.length,
+      rangeMs: Math.round(resolved.rangeMs),
     })
     const w = window as unknown as { __ijipuPracticeMark?: () => Probe }
     w.__ijipuPracticeMark = fn

@@ -213,24 +213,33 @@ export interface ResolvedPracticeRange {
 export function resolvePracticeRange(seq: PlaySequence, startId: string, endId: string): ResolvedPracticeRange {
   const idOf = (e: PlayEvent): string => noteIdStringOf(e.placed.id)
   /**
-   * adj987g（**用户 2026-10-18 实报**「这段标记的音符在当前谱面里找不到」）：
-   * **id 不能只按整串精确比**——预览与试听各自 `layoutScore`（试听多了乐器/字体实测等参数），
-   * 分页与声部编号可能不同，但**同一行的音符序号**是稳定的。
+   * 宽松匹配（adj987g 起）——**先整串、再退到"组号+序号"**（预览与试听排版不同，页号/声部号可能变）。
    *
-   * ⇒ 先按整串比；找不到就退到「**组号 + 音符序号**」（`_group_index` 尾巴）再比一次。
+   * adj987p（**用户 2026-10-18 实报**「连停止位的音符都没有播放」）：退到"组号+序号"时，
+   * 多声部谱里**别的声部**可能也有同组同序号的音 ⇒ 终点会匹配到**更早**的那个 ⇒ 这一段在
+   * 真正的停止音之前就结束了 ✗。
+   * ⇒ 结尾的宽松匹配**额外要求声部号与起点一致**（起点用同样办法先定出来），
+   * 这样跨声部撞车的概率大幅下降；仍找不到才退回"只按组号+序号"。
    */
   const tailOf = (id: string): string => {
     const m = /^(\d+)_(\d+)_(\d+)_(\d+)$/.exec(id)
     return m ? `_${m[3]}_${m[4]}` : id
   }
-  const pickIdx = (want: string): number[] => {
+
+  const pickIdx = (want: string, sameVoiceAs?: number | null): number[] => {
     const exact = seq.events.map((e, i) => (idOf(e) === want ? i : -1)).filter((i) => i >= 0)
     if (exact.length > 0) return exact
     const tail = tailOf(want)
-    return seq.events.map((e, i) => (idOf(e).endsWith(tail) ? i : -1)).filter((i) => i >= 0)
+    const byTail = seq.events
+      .map((e, i) => (idOf(e).endsWith(tail) ? { i, v: e.placed.id.voice } : null))
+      .filter((x): x is { i: number; v: number } => x !== null)
+    if (sameVoiceAs === undefined || sameVoiceAs === null) return byTail.map((x) => x.i)
+    const sameVoice = byTail.filter((x) => x.v === sameVoiceAs).map((x) => x.i)
+    return sameVoice.length > 0 ? sameVoice : byTail.map((x) => x.i)
   }
   const starts = pickIdx(startId)
-  const ends = pickIdx(endId)
+  const vStart = starts.length > 0 ? seq.events[starts[0]].placed.id.voice : null
+  const ends = pickIdx(endId, vStart)
   if (starts.length === 0) return { pick: 0, candidates: [], missing: 'start' }
   if (ends.length === 0) return { pick: 0, candidates: [], missing: 'end' }
 
