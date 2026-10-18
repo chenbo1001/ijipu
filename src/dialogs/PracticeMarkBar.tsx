@@ -81,8 +81,11 @@ export function PracticeMarkBar(): React.JSX.Element {
       lastNote: string
       missing: '' | 'start' | 'end'
       totalEvents: number
+      i0: number
+      i1: number
+      eventCount: number
     }
-    const empty: Resolved = { candidates: [], ids: [], rangeMs: 0, lastNote: '', missing: '', totalEvents: 0 }
+    const empty: Resolved = { candidates: [], ids: [], rangeMs: 0, lastNote: '', missing: '', totalEvents: 0, i0: -1, i1: -1, eventCount: 0 }
     if (!cur) return empty
     const seq = buildPlaySequence(parseResult, layoutScore(parseResult, pageConfig), 90)
     const res = resolvePracticeRange(seq, cur.startId, cur.endId)
@@ -105,13 +108,17 @@ export function PracticeMarkBar(): React.JSX.Element {
        * 与标记的终点（同一格式）一比对，就能看出是不是"少了一个音"。
        */
       lastNote: lastEv ? `g${lastEv.placed.id.group}#${lastEv.placed.id.index}` : '',
+      i0: c.i0,
+      i1: c.i1,
+      eventCount: seq.events.length,
       missing: '' as const,
       totalEvents: seq.events.length,
     } satisfies Resolved
   }, [cur, parseResult, pageConfig])
   const candidates = resolved.candidates
   useEffect(() => {
-    setPracticeRangeIds(resolved.ids)
+    // adj991：把"画线用的区间"连同**下标与序列长度**一起发布 —— 播放端优先照它裁段（所见即所听）
+    setPracticeRangeIds(resolved.ids, resolved.i0, resolved.i1, resolved.eventCount)
   }, [resolved, setPracticeRangeIds])
 
 

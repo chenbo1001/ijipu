@@ -567,17 +567,38 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
          * 而 `slicePlaySequenceByRange` 会把它时值窗口内的事件一并纳入。
          * 想连到连音线末尾 ⇒ 把「停止」标在那条线的**最后一个主音**上（界面提示已写明）。
          */
-        const res = resolvePracticeRange(fullSeq, markNow.startId, markNow.endId)
-        if (res.candidates.length === 0) {
-          showNotice(playbackCopy.practiceMarkInvalid, 'warn')
-        } else {
-          const idx = Math.min(Math.max(markNow.pass ?? res.pick, 0), res.candidates.length - 1)
-          const c = res.candidates[idx]
-          const sliced = slicePlaySequenceByRange(fullSeq, c.i0, c.i1)
+        /**
+         * adj991（**用户 2026-10-19 实报**「画线是正确的，但播放不对」）：
+         * 画线与播放各算了一套区间 ⇒ 一旦两边的排版参数有差异（试听多传乐器/字体实测），
+         * 就可能出现"线画在你标的那几小节、声音却不是那几小节"。
+         *
+         * ⇒ **所见即所听**：只要画线那套解析记下的**序列长度**与本次序列相同，就直接用它给的 `i0/i1`；
+         * 长度不同（极少数排版差异）才退回自己解析。
+         */
+        let used = false
+        const { practiceRangeI0: i0s, practiceRangeI1: i1s, practiceRangeEventCount: nS } = useUiStore.getState()
+        if (i0s >= 0 && i1s >= i0s && nS === fullSeq.events.length) {
+          const sliced = slicePlaySequenceByRange(fullSeq, i0s, i1s)
           if (sliced) {
             seq = sliced
             practiceRangeMs = sliced.rangeMs
             practiceRangeMsRef.current = practiceRangeMs
+            used = true
+          }
+        }
+        if (!used) {
+          const res = resolvePracticeRange(fullSeq, markNow.startId, markNow.endId)
+          if (res.candidates.length === 0) {
+            showNotice(playbackCopy.practiceMarkInvalid, 'warn')
+          } else {
+            const idx = Math.min(Math.max(markNow.pass ?? res.pick, 0), res.candidates.length - 1)
+            const c = res.candidates[idx]
+            const sliced = slicePlaySequenceByRange(fullSeq, c.i0, c.i1)
+            if (sliced) {
+              seq = sliced
+              practiceRangeMs = sliced.rangeMs
+              practiceRangeMsRef.current = practiceRangeMs
+            }
           }
         }
       }

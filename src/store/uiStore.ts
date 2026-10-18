@@ -305,6 +305,16 @@ interface UiState {
    */
   practiceRangeIds: string[]
   /**
+   * adj991（**用户 2026-10-19 实报**「画线是正确的，但播放不对」）：
+   * 画线时那套解析算出的**区间下标** + 当时的**序列长度**。
+   *
+   * 播放端**优先用它们**：只要序列长度一致，就保证"**所见即所听**"；
+   * 长度不一致（音源/乐器参数导致排版差异）才自己重算。
+   */
+  practiceRangeI0: number
+  practiceRangeI1: number
+  practiceRangeEventCount: number
+  /**
    * adj987o（**用户 2026-10-18 口径**）：「在起始点处加一个动态 321 的倒数数字机制，
    * 在开始或重新循环开始之前进行倒数计数」⇒ 当前显示的倒数秒数（3 / 2 / 1；`null` = 不显示）。
    */
@@ -443,7 +453,7 @@ interface UiState {
   /** 点音符后按「起始」/「停止」：登记待添加的端点 */
   setPracticeSel: (which: 'start' | 'stop', noteId: string | null) => void
   /** adj987k：写入"这一段实际演奏到的音符 id"（`[]` = 只按起止范围画） */
-  setPracticeRangeIds: (ids: string[]) => void
+  setPracticeRangeIds: (ids: string[], i0?: number, i1?: number, eventCount?: number) => void
   /** adj987o：设置倒数秒数（`null` = 收起倒数） */
   setPracticeCountdown: (n: number | null) => void
   /** 用当前两个端点**新增**一段（名 `段 N`），并自动选中它 */
@@ -777,6 +787,9 @@ export const useUiStore = create<UiState>()((set) => ({
   practiceSelStart: null,
   practiceSelStop: null,
   practiceRangeIds: [],
+  practiceRangeI0: -1,
+  practiceRangeI1: -1,
+  practiceRangeEventCount: -1,
   practiceCountdown: null,
   setPracticeMarks: (marks) =>
     set((s) => {
@@ -788,7 +801,13 @@ export const useUiStore = create<UiState>()((set) => ({
   setPracticeMarkPass: (id, pass) =>
     set((s) => ({ practiceMarks: s.practiceMarks.map((m) => (m.id === id ? { ...m, pass } : m)) })),
   setPracticeSel: (which, noteId) => set(which === 'start' ? { practiceSelStart: noteId } : { practiceSelStop: noteId }),
-  setPracticeRangeIds: (ids) => set({ practiceRangeIds: ids }),
+  setPracticeRangeIds: (ids, i0, i1, eventCount) =>
+    set({
+      practiceRangeIds: ids,
+      practiceRangeI0: i0 ?? -1,
+      practiceRangeI1: i1 ?? -1,
+      practiceRangeEventCount: eventCount ?? -1,
+    }),
   setPracticeCountdown: (n) => set({ practiceCountdown: n }),
   addPracticeMark: () => {
     const s = useUiStore.getState()
