@@ -5605,15 +5605,23 @@ span.ws-check {
   user-select: none;
 }
 /* adj987o（用户口径）：开始 / 循环重来前的 **3-2-1 倒数**——画在起始音正上方，大号、醒目但不刺眼 */
+/* adj987q（用户口径）：倒数数字放起始竖头**左边**、更大、**白底**，保证在深色/密集谱面上都凸显 */
 .practice-countdown {
   position: absolute;
-  z-index: 0;
-  transform: translateX(-50%);
-  font-size: 22px;
+  z-index: 2;
+  /* 以右边贴住起始竖头左侧 4px、垂直居中于竖头 */
+  transform: translate(calc(-100% - 4px), -50%);
+  min-width: 30px;
+  padding: 1px 6px;
+  font-size: 30px;
   font-weight: 700;
-  line-height: 1;
-  color: #2f9e8f;
-  text-shadow: 0 0 3px #fff, 0 0 3px #fff;
+  line-height: 1.05;
+  text-align: center;
+  color: #1f7f72;
+  background: #ffffff;
+  border: 1.5px solid #2f9e8f;
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
   pointer-events: none;
   user-select: none;
 }

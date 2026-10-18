@@ -89,15 +89,16 @@ export function PracticeMarkLayer({ page, noteSize }: { page: ScorePageLike; not
           style={{ left: pct(last.x1), top: pctY(lineY(last.y) - tickH / 2), height: `${tickH}px` }}
         />
       )}
-      {/* adj987o（用户口径）：开始 / 循环重来前的 **3-2-1 倒数**，画在**起始音**正上方 */}
+      {/*
+        adj987q（**用户 2026-10-18 口径**）：「倒数数字放在起始线头**左边**，更大些、有白底以便凸显」
+        —— 放上方会遮住音符；挪到起始竖头的**左侧**（垂直居中于竖头），白底 + 描边保证看得清。
+      */}
       {countdown !== null && first && (
-        <span
-          className="practice-countdown"
-          style={{ left: pct(first.x0), top: pctY(lineY(first.y) - tickH - noteSize * 1.6) }}
-        >
+        <span className="practice-countdown" style={{ left: pct(first.x0), top: pctY(lineY(first.y) - tickH / 2) }}>
           {countdown}
         </span>
-      )}      {/* 循环开启 ⇒ 两端各一个 ⟲（用户口径：开启后两端显示循环标识） */}
+      )}
+      {/* 循环开启 ⇒ 两端各一个 ⟲（用户口径：开启后两端显示循环标识） */}
       {loop && first && (
         <span className="practice-mark-loop" style={{ left: pct(first.x0), top: pctY(lineY(first.y) + tickH / 2 + 2) }}>
           ⟲
