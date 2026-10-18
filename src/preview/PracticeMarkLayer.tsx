@@ -88,14 +88,17 @@ export function PracticeMarkLayer({ page, noteSize }: { page: ScorePageLike; not
           }}
         />
       ))}
-      {/* 两端的"起 / 止"小竖头（落在真正的首音/末音上；只看本页有没有那个音） */}
-      {startPt && (
+      {/*
+        adj993（**用户 2026-10-19 口径**）：「有循环时，用**循环标志代替端点**；没有循环时用现在的短竖线，
+        这样更明确」⇒ 竖头与 ⟲ **二选一**，不再同时画。
+      */}
+      {!loop && startPt && (
         <div
           className="practice-mark-tick practice-mark-tick-start"
           style={{ left: pct(startPt.x), top: pctY(lineY(startPt.y) - tickH / 2), height: `${tickH}px` }}
         />
       )}
-      {endPt && (
+      {!loop && endPt && (
         <div
           className="practice-mark-tick practice-mark-tick-stop"
           style={{ left: pct(endPt.rightX), top: pctY(lineY(endPt.y) - tickH / 2), height: `${tickH}px` }}
@@ -113,17 +116,14 @@ export function PracticeMarkLayer({ page, noteSize }: { page: ScorePageLike; not
           {countdown}
         </span>
       )}
-      {/* 循环开启 ⇒ 两端各一个 ⟲（用户口径：开启后两端显示循环标识） */}
+      {/* adj993：循环开启 ⇒ 两端的**循环标志**直接坐在线端（代替短竖头，见上） */}
       {loop && startPt && (
-        <span className="practice-mark-loop" style={{ left: pct(startPt.x), top: pctY(lineY(startPt.y) + tickH / 2 + 2) }}>
+        <span className="practice-mark-loop" style={{ left: pct(startPt.x), top: pctY(lineY(startPt.y)) }}>
           ⟲
         </span>
       )}
       {loop && endPt && (
-        <span
-          className="practice-mark-loop"
-          style={{ left: pct(endPt.rightX), top: pctY(lineY(endPt.y) + tickH / 2 + 2) }}
-        >
+        <span className="practice-mark-loop" style={{ left: pct(endPt.rightX), top: pctY(lineY(endPt.y)) }}>
           ⟲
         </span>
       )}
@@ -184,11 +184,17 @@ function bandsFromIds(page: ScorePageLike, ids: readonly string[]): { row: numbe
       return m ? `_${m[3]}_${m[4]}` : id
     }),
   )
-  const picked = page.notes.filter(
-    (n) => exact.has(noteIdOf(n)) || tails.has(`_${(n.id as { group?: number }).group ?? 0}_${n.id.index}`),
-  )
+  const matchOf = (n: ScorePageLike['notes'][number]): boolean =>
+    exact.has(noteIdOf(n)) || tails.has(`_${(n.id as { group?: number }).group ?? 0}_${n.id.index}`)
+  const picked = page.notes.filter(matchOf)
   if (picked.length === 0) return []
   const byRow = new Map<number, { x0: number; x1: number; y: number }>()
+  /** 每个段落行（按 y）最左的音符 x —— 用于"续行顶到行首" */
+  const rowLeft = new Map<number, number>()
+  for (const n of page.notes) {
+    const cur = rowLeft.get(n.y)
+    if (cur === undefined || n.x < cur) rowLeft.set(n.y, n.x)
+  }
   for (const n of picked) {
     const y = n.y
     const cur = byRow.get(y)
@@ -199,9 +205,21 @@ function bandsFromIds(page: ScorePageLike, ids: readonly string[]): { row: numbe
       cur.x1 = Math.max(cur.x1, right)
     }
   }
-  return [...byRow.entries()]
+  const bands = [...byRow.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([y, b], i) => ({ row: i, x0: b.x0, x1: b.x1, y }))
+  /**
+   * adj993（**用户 2026-10-19 实报**：「第二行的线左侧缩进去了，没有与音符 `3,` 对齐」）：
+   *
+   * 跨 `:|` 回跳后**接上来的那些行**（不是段落的第一行）实际是从该行**行首**继续唱的，
+   * 但切片里这一行的第一个事件可能不是行首那个音（行首音可能没有独立事件）⇒ 线从第二个音起画 ✗。
+   * ⇒ 第 2 条及以后的带，左端**顶到该行最左的音符**（第一行保持"从你标的起始音起"不变）。
+   */
+  for (let i = 1; i < bands.length; i++) {
+    const left = rowLeft.get(bands[i].y)
+    if (left !== undefined && left < bands[i].x0) bands[i].x0 = left
+  }
+  return bands
 }
 
 /** 音符 id 串（与引擎 `noteIdStringOf` 同形；这里只在本页里比对用） */

@@ -5594,13 +5594,17 @@ span.ws-check {
   width: 3px;
   margin-left: -1.5px;
 }
+/* adj993（用户口径）：循环标志**代替端点竖头**，坐在线的两端（垂直居中于线） */
 .practice-mark-loop {
   position: absolute;
-  z-index: 0;
-  transform: translateX(-50%);
-  font-size: 11px;
+  z-index: 1;
+  transform: translate(-50%, -50%);
+  font-size: 13px;
   line-height: 1;
   color: #2f9e8f;
+  background: var(--jp-page-bg, #fff);
+  border-radius: 50%;
+  padding: 0 1px;
   pointer-events: none;
   user-select: none;
 }
