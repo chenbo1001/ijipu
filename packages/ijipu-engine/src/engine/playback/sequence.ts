@@ -322,37 +322,65 @@ export function slicePlaySequenceByRange(
 }
 
 /**
- * adj987n（**用户 2026-10-18 实报**：「末尾有连音线的情况还是没完整播放完连音线部分」）：
- * 把"这一段"的终点**延伸到覆盖它的那条连音线的末尾**。
+ * adj987u（**用户 2026-10-18 给的实例**，根因确认）：把这一段终点**延伸到覆盖它的连音线末尾**。
  *
- * 为什么不按 id 串找：解析期 `slurPairs` 的序号与放置后的 `id.index` 在多声部/段层谱上未必一致，
- * 用字符串 id 去延长会"延长出一个不存在的音符"（上一版就是这么退回全曲的）。
+ * ⚠ 前两版都错在同一处：`slurPairs` 的 `start/end` 是**解析期 token 序号**
+ * （`pairSlurs` 里按 `note|rest|rhythm` 计数），而 `placed.id.index` 是**放置后音符序号**——
+ * 有倚音/段层时两者**会错开**。用户实例里外层线是 `{13 → 17}`，而事件序列里**根本没有 `#17`**
+ * ⇒ 永远找不到终点、不延长 ✗（他听到的就是"连音线里的音没奏"）。
  *
- * 这里改成**同组 + 同序号**在序列里往后找：终点事件取它自己的 `{group, index}`，
- * 用 `slurPairs` 求出覆盖它的最大终点序号，然后在**同一 group** 里找"序号等于该终点"的
- * **下一个**事件（必须在当前终点之后）。找不到就原样返回（宁可少延长，不误延长）。
+ * 正确做法：按 **token 对象身份**建映射 —— `PlacedToken.token` 与 `ParseResult.groups[g].music.tokens`
+ * 里是**同一批对象**，于是"放置序号 ↔ 解析序号"可以精确互转。目标 token 若没有独立事件
+ * （被并入前一个音的时值），退到"同组里解析序号不超过它的最后一个事件"。
  */
 export function extendRangeEndToSlurEnd(
   seq: PlaySequence,
   i1: number,
   slurPairs: readonly { start: number; end: number }[] | undefined,
+  result?: ParseResult,
 ): number {
-  if (!slurPairs || slurPairs.length === 0) return i1
+  if (!slurPairs || slurPairs.length === 0 || !result) return i1
   const ev = seq.events[i1]
   if (!ev) return i1
-  const { group, index } = ev.placed.id
+  const group = ev.placed.id.group
+  const g = result.groups.find((gr) => gr.music.voice === group) ?? result.groups[group]
+  if (!g) return i1
+  const parserIdxOf = new Map<unknown, number>()
+  const tokenOfParserIdx = new Map<number, unknown>()
+  let n = 0
+  for (const t of g.music.tokens) {
+    if (t.kind === 'note' || t.kind === 'rest' || t.kind === 'rhythm') {
+      parserIdxOf.set(t, n)
+      tokenOfParserIdx.set(n, t)
+      n++
+    }
+  }
+  const myParserIdx = parserIdxOf.get(ev.placed.token)
+  if (myParserIdx === undefined) return i1
   let hi = -1
   for (const p of slurPairs) {
     const lo = Math.min(p.start, p.end)
     const h = Math.max(p.start, p.end)
-    if (index >= lo && index <= h && h > index && h > hi) hi = h
+    if (myParserIdx >= lo && myParserIdx <= h && h > myParserIdx && h > hi) hi = h
   }
   if (hi < 0) return i1
-  for (let k = i1 + 1; k < seq.events.length; k++) {
-    const id = seq.events[k].placed.id
-    if (id.group === group && id.index === hi) return k
+  const wantTok = tokenOfParserIdx.get(hi)
+  if (wantTok !== undefined) {
+    for (let k = i1 + 1; k < seq.events.length; k++) {
+      const e2 = seq.events[k]
+      if (e2.placed.id.group === group && e2.placed.token === wantTok) return k
+    }
   }
-  return i1
+  // 目标 token 没有独立事件 ⇒ 退到"同组里解析序号不超过 hi 的最后一个事件"
+  let lastWithin = i1
+  for (let k = i1 + 1; k < seq.events.length; k++) {
+    const e2 = seq.events[k]
+    if (e2.placed.id.group !== group) continue
+    const pi = parserIdxOf.get(e2.placed.token)
+    if (pi === undefined || pi > hi) break
+    lastWithin = k
+  }
+  return lastWithin
 }
 
 /** 从描述头 J 推断拍速（30~240），无效或缺失默认 70（adj343；函数头注释此前误写 90） */export function inferBpm(result: ParseResult): number {

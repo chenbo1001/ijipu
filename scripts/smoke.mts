@@ -21338,6 +21338,34 @@ function runAdj987Tests() {
      * `extendRangeEndToSlurEnd` 按"**同组 + 同序号**"在序列里往后延伸 —— 不碰 id 串，
      * 不依赖解析期序号与放置序号一致。
      */
+    /**
+     * adj987u（**用户 2026-10-18 给的实例**）：终点标在 `(6,//[1/] 6,/)` 的 `6,` 上时，
+     * 必须奏到**外层连音线** `(( … 6,))` 的末尾 —— 修的是"解析期 token 序号 vs 放置序号错开"
+     * （用户实例里外层线是 `{13 → 17}`，事件里根本没有 `#17`）。
+     */
+    const R987u = [
+      'V: 1.0', 'B: t', 'D: C', 'P: 4/4',
+      "Q: 6/) 3.[3/5/] 0 3/ 5/ | 6/ 5// (3// 3) 2/ 3/ 5 | 2/. ((6,//[1/] 6,/) 1// (6,//[6,/1/] 6,)) &hx 2/ 3/ | 6,/ 3// (2// 2) 2/ 3/ 6,/ (5,/ |",
+      '',
+    ].join('\n')
+    const r987u = parseJps(R987u)
+    const seq987u = buildPlaySequence(r987u, layoutScore(r987u, defaultPageConfig), 90)
+    /** 找 b2 里"头一个 #13"的事件（就是 `(6,//[1/] 6,/)` 的那个 6,） */
+    const iStop987u = seq987u.events.findIndex((e) => e.placed.id.index === 13)
+    const ext987u = iStop987u >= 0 ? extendRangeEndToSlurEnd(seq987u, iStop987u, r987u.slurPairs, r987u) : -1
+    check(
+      'adj987u 终点在连音线 `(6,//[1/] 6,/)` 内部 ⇒ 延长到**外层线末尾**（事件 14 → 19：把 `(( … 6,))` 全包进去）',
+      iStop987u >= 0 && ext987u > iStop987u + 3,
+      JSON.stringify({ iStop987u, ext987u, 起点index: iStop987u >= 0 ? seq987u.events[iStop987u].placed.id.index : null }),
+    )
+    check(
+      'adj987u **负对照**：终点在 `2/.`（不在任何连音线里）⇒ 不延长',
+      (() => {
+        const i987 = seq987u.events.findIndex((e) => e.placed.id.index === 12)
+        return i987 >= 0 && extendRangeEndToSlurEnd(seq987u, i987, r987u.slurPairs, r987u) === i987
+      })(),
+      '',
+    )
     const R987n = ['V: 1.0', 'B: t', 'D: C', 'P: 4/4', 'Q: 1 2 (3 4 5) 6 |', ''].join('\n')
     const r987n = parseJps(R987n)
     const seq987n = buildPlaySequence(r987n, layoutScore(r987n, defaultPageConfig), 60)
@@ -21345,7 +21373,7 @@ function runAdj987Tests() {
     // 终点取"4"（连音线 (3 4 5) 覆盖它）⇒ 应延伸到"5"
     const i4 = seq987n.events.findIndex((e) => idIdx(seq987n.events.indexOf(e)) === 3)
     const i4b = seq987n.events.findIndex((e) => e.placed.id.index === 3)
-    const ext = i4b >= 0 ? extendRangeEndToSlurEnd(seq987n, i4b, r987n.slurPairs) : -1
+    const ext = i4b >= 0 ? extendRangeEndToSlurEnd(seq987n, i4b, r987n.slurPairs, r987n) : -1
     check(
       'adj987n 终点被连音线覆盖 ⇒ 往后延伸到**该连音线的末音**（4 → 5）；不延长则停在 4',
       i4b >= 0 && ext > i4b && seq987n.events[ext]?.placed.id.index === 4,
@@ -21353,7 +21381,7 @@ function runAdj987Tests() {
     )
     check(
       'adj987n **负对照**：终点没被任何连音线覆盖（6 号音之后）⇒ 原样返回（不误延长）',
-      extendRangeEndToSlurEnd(seq987n, seq987n.events.length - 1, r987n.slurPairs) === seq987n.events.length - 1,
+      extendRangeEndToSlurEnd(seq987n, seq987n.events.length - 1, r987n.slurPairs, r987n) === seq987n.events.length - 1,
       '',
     )
     const R987 = ['V: 1.0', 'B: t', 'D: C', 'P: 4/4', 'Q: 1 2 3 4 |', ''].join('\n')

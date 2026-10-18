@@ -551,7 +551,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
         } else {
           const idx = Math.min(Math.max(markNow.pass ?? res.pick, 0), res.candidates.length - 1)
           const c = res.candidates[idx]
-          const i1ext = extendRangeEndToSlurEnd(fullSeq, c.i1, parseResult.slurPairs)
+          const i1ext = extendRangeEndToSlurEnd(fullSeq, c.i1, parseResult.slurPairs, parseResult)
           const sliced = slicePlaySequenceByRange(fullSeq, c.i0, i1ext)
           if (sliced) {
             seq = sliced

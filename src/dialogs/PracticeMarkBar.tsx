@@ -86,7 +86,7 @@ export function PracticeMarkBar(): React.JSX.Element {
     const idx = Math.min(Math.max(cur.pass ?? res.pick, 0), res.candidates.length - 1)
     const c = res.candidates[idx]
     // adj987n：画线也要用"延长到连音线末尾"之后的范围，否则线比实际演奏短一截
-    const i1ext = extendRangeEndToSlurEnd(seq, c.i1, parseResult.slurPairs)
+    const i1ext = extendRangeEndToSlurEnd(seq, c.i1, parseResult.slurPairs, parseResult)
     const sliced = slicePlaySequenceByRange(seq, c.i0, i1ext)
     const evs = sliced?.events ?? []
     const lastEv = evs.length > 0 ? evs[evs.length - 1] : null
