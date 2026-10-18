@@ -35,6 +35,7 @@ import { fmtClock } from './playbackClock'
 import { createPlaybackGeneration, shouldAutoPlay } from './playbackSession'
 // adj987（用户需求）：标记段组的按钮组（收起/段选择/起始/停止/添加/删除/循环）+ 收起时的"歌名前展开"按钮
 import { PracticeMarkBar, PracticeMarkExpandButton } from './PracticeMarkBar'
+import { extendStopToSlurEnd } from '../store/practiceMarks'
 // adj764（清单 B6）：试听时钟来自引擎 —— 与 Obsidian 插件共用"推进/暂停续播/取消/到点一次"的语义
 import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, resolvePracticeRange, slicePlaySequenceByRange, gmVoiceRef, countScoreInstrumentSwitches, createPlaybackClock, type PlaybackClock } from '@ijipu/engine'
 
@@ -503,7 +504,19 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       let seq = fullSeq
       let practiceRangeMs = 0
       if (markNow) {
-        const res = resolvePracticeRange(fullSeq, markNow.startId, markNow.endId)
+        /**
+         * adj987m（**用户 2026-10-18 实报「又出现添加了标记段不按段播放」**）：
+         *
+         * 口径 #2 要求「停止音符上有连音线时，奏到那条线结束」。此前是在**标停止时**就把端点改成
+         * 连音线终点再存，但 `slurPairs` 的序号与音符 id 序号在有多声部/段层时未必一致 ⇒
+         * 存进去的 id 可能对不上任何音符 ⇒ 解析失败 ⇒ 退回全曲 ✗。
+         *
+         * 现在改成**播放时才算**，而且**先校验**：延长后的 id 解析不出候选，就退回用户标的那个端点。
+         */
+        const rawRes = resolvePracticeRange(fullSeq, markNow.startId, markNow.endId)
+        const extEnd = extendStopToSlurEnd(markNow.endId, parseResult.slurPairs)
+        const extRes = extEnd !== markNow.endId ? resolvePracticeRange(fullSeq, markNow.startId, extEnd) : null
+        const res = extRes && extRes.candidates.length > 0 ? extRes : rawRes
         if (res.candidates.length === 0) {
           showNotice(playbackCopy.practiceMarkInvalid, 'warn')
         } else {

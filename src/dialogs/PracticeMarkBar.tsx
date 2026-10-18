@@ -25,7 +25,7 @@ import { useEffect, useMemo } from 'react'
 import { buildPlaySequence, layoutScore, noteIdStringOf, resolvePracticeRange, slicePlaySequenceByRange } from '@ijipu/engine'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
-import { docKeyOf, extendStopToSlurEnd, loadMarks, saveMarks } from '../store/practiceMarks'
+import { docKeyOf, loadMarks, saveMarks } from '../store/practiceMarks'
 import { playbackCopy } from '../brand/copy'
 
 export function PracticeMarkBar(): React.JSX.Element {
@@ -89,6 +89,36 @@ export function PracticeMarkBar(): React.JSX.Element {
     setPracticeRangeIds(resolved.ids)
   }, [resolved, setPracticeRangeIds])
 
+  /**
+   * adj987m：**只读自检**（与 `window.__ijipuPlayhead()` 同一套路）。
+   *
+   * 用户实报"添加了标记段但不按段播放"时，光看界面分不清是"标记 id 对不上"还是"切片没生效"；
+   * 把这份状态挂到 window 上，贴回来就能定位（不参与渲染）。
+   */
+  useEffect(() => {
+    interface Probe {
+      markId: string
+      startId: string | null
+      endId: string | null
+      marks: number
+      candidates: number
+      rangeIds: number
+    }
+    const fn = (): Probe => ({
+      markId,
+      startId: cur?.startId ?? null,
+      endId: cur?.endId ?? null,
+      marks: marks.length,
+      candidates: candidates.length,
+      rangeIds: resolved.ids.length,
+    })
+    const w = window as unknown as { __ijipuPracticeMark?: () => Probe }
+    w.__ijipuPracticeMark = fn
+    return () => {
+      delete w.__ijipuPracticeMark
+    }
+  }, [markId, cur, marks, candidates, resolved])
+
   const canAdd = !!selStart && !!selStop
   /**
    * adj987e（**用户 2026-10-18 口径**）：**收起时整组不占地方** —— 这里直接不渲染，
@@ -137,11 +167,14 @@ export function PracticeMarkBar(): React.JSX.Element {
             className={`btn practice-btn${selStop ? ' is-on' : ''}`}
             onClick={() => {
               /**
-               * adj987j（用户口径 #2）：「停止音符如果有**连音线**，应该播放到覆盖该音符的连音线完为止
-               * （这个可以在停止位时定好实际的停止点）」⇒ 标停止时就把端点**延伸到该连音线的终点**。
+               * adj987j（用户口径 #2）：「停止音符如果有**连音线**，应该播放到覆盖该音符的连音线完为止」。
+               *
+               * ⚠ adj987m（**用户 2026-10-18 实报「又出现添加了标记段不按段播放」**）：
+               * 这里原先**当场把端点改成连音线终点再存**，但 `slurPairs` 的序号与音符 id 的序号
+               * 在有多声部/段层时**未必一致** ⇒ 存进去的 id 可能对不上任何音符 ⇒ 播放时解析失败、
+               * 退回"全曲" ✗。现在**只记用户点的那个音**，延长交给播放时算（见 PlaybackDialog 的注释）。
                */
-              const id = activeNoteId
-              setSel('stop', id ? extendStopToSlurEnd(id, parseResult.slurPairs) : null)
+              setSel('stop', activeNoteId)
             }}
             disabled={!activeNoteId}
             title={playbackCopy.practiceStopHint}
