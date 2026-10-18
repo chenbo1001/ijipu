@@ -22,7 +22,7 @@
  * 选过之后写回标记的 `pass`（持久化）。
  */
 import { useEffect, useMemo } from 'react'
-import { buildPlaySequence, extendRangeEndToSlurEnd, layoutScore, noteIdStringOf, resolvePracticeRange, slicePlaySequenceByRange } from '@ijipu/engine'
+import { buildPlaySequence, layoutScore, noteIdStringOf, resolvePracticeRange, slicePlaySequenceByRange } from '@ijipu/engine'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { docKeyOf, loadMarks, saveMarks } from '../store/practiceMarks'
@@ -85,9 +85,9 @@ export function PracticeMarkBar(): React.JSX.Element {
     if (res.candidates.length === 0) return empty
     const idx = Math.min(Math.max(cur.pass ?? res.pick, 0), res.candidates.length - 1)
     const c = res.candidates[idx]
-    // adj987n：画线也要用"延长到连音线末尾"之后的范围，否则线比实际演奏短一截
-    const i1ext = extendRangeEndToSlurEnd(seq, c.i1, parseResult.slurPairs, parseResult)
-    const sliced = slicePlaySequenceByRange(seq, c.i0, i1ext)
+    // 用户口径（2026-10-18 最后确认）：连音线**不自动判断**，想连到线尾就把「停止」标在最后一个主音上
+    // ⇒ 画线范围与实际演奏一致，都不再做连音线延长（附点/增时线本来就在事件的时值里）
+    const sliced = slicePlaySequenceByRange(seq, c.i0, c.i1)
     const evs = sliced?.events ?? []
     const lastEv = evs.length > 0 ? evs[evs.length - 1] : null
     return {

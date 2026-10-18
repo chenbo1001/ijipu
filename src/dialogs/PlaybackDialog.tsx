@@ -58,7 +58,7 @@ import { createPlaybackGeneration, shouldAutoPlay } from './playbackSession'
 import { PracticeMarkBar, PracticeMarkExpandButton } from './PracticeMarkBar'
 
 // adj764（清单 B6）：试听时钟来自引擎 —— 与 Obsidian 插件共用"推进/暂停续播/取消/到点一次"的语义
-import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, resolvePracticeRange, slicePlaySequenceByRange, extendRangeEndToSlurEnd, gmVoiceRef, countScoreInstrumentSwitches, createPlaybackClock, type PlaybackClock } from '@ijipu/engine'
+import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, resolvePracticeRange, slicePlaySequenceByRange, gmVoiceRef, countScoreInstrumentSwitches, createPlaybackClock, type PlaybackClock } from '@ijipu/engine'
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
 /**
@@ -536,14 +536,15 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       let practiceRangeMs = 0
       if (markNow) {
         /**
-         * adj987n（**用户 2026-10-18 实报**「末尾有连音线的情况还是没完整播放完连音线部分」）：
+         * adj987（用户 2026-10-18 需求）：选了标记段就只播这一段。
          *
-         * 口径 #2 要求"停止音符上有连音线时，奏到那条线结束"。上一版用**音符 id 串**去延长，
-         * 但解析期 `slurPairs` 的序号与放置后的 `id.index` 在多声部/段层谱上未必一致 ⇒ 延长出的 id
-         * 找不到 ⇒ 校验失败退回原端点 ⇒ **连音线还是没奏完** ✗。
+         * **口径变化（用户 2026-10-18 最后确认）**：「如果连音线的判断有难度，可以只考虑附点和增时线就好，
+         * 连音线部分可以指定到连音线最后一个主音符，不再自动判断，由用户来判断应该的位置」。
          *
-         * ⇒ 改成**在序列里按"组号 + 序号"往后延伸**（`extendRangeEndToSlurEnd`）：
-         * 不碰 id 串、不需要校验，也不会延长到不存在的音符。
+         * ⇒ 不再自动向连音线末尾延长（`extendRangeEndToSlurEnd` 保留在引擎里、有断言，但**界面不再调用**）。
+         * 停止音自己的**附点 / 增时线**仍然完整：它们并进了该事件的 `durationMs`，
+         * 而 `slicePlaySequenceByRange` 会把它时值窗口内的事件一并纳入。
+         * 想连到连音线末尾 ⇒ 把「停止」标在那条线的**最后一个主音**上（界面提示已写明）。
          */
         const res = resolvePracticeRange(fullSeq, markNow.startId, markNow.endId)
         if (res.candidates.length === 0) {
@@ -551,8 +552,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
         } else {
           const idx = Math.min(Math.max(markNow.pass ?? res.pick, 0), res.candidates.length - 1)
           const c = res.candidates[idx]
-          const i1ext = extendRangeEndToSlurEnd(fullSeq, c.i1, parseResult.slurPairs, parseResult)
-          const sliced = slicePlaySequenceByRange(fullSeq, c.i0, i1ext)
+          const sliced = slicePlaySequenceByRange(fullSeq, c.i0, c.i1)
           if (sliced) {
             seq = sliced
             practiceRangeMs = sliced.rangeMs
