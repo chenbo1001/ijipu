@@ -1,4 +1,25 @@
 /**
+ * adj987o（**用户 2026-10-18 口径**）：标记段开始 / 每次循环重来前的 **3-2-1 倒数**。
+ *
+ * 为什么做成模块级纯时序函数：① 时限逻辑（每 1 秒跳一个数、结束清空）一处写清；
+ * ② 组件只负责把数字写进 store（预览层据此在起始音上画），不掺时序细节；
+ * ③ 传 `stale()` 进来：倒数期间若用户按了停止 / 又发起新的播放，本次倒数**立刻放弃**。
+ *
+ * @param stale 代次守卫（返回 true = 这次播放已被作废）
+ */
+async function runCountdown3(stale: () => boolean): Promise<void> {
+  for (const n of [3, 2, 1]) {
+    if (stale()) {
+      useUiStore.getState().setPracticeCountdown(null)
+      return
+    }
+    useUiStore.getState().setPracticeCountdown(n)
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+  useUiStore.getState().setPracticeCountdown(null)
+}
+
+/**
  * dialogs/PlaybackDialog.tsx — 试听播放（adj344：固定 SpessaSynth 高保真，移除合成/midi-js 试听）
  *
  * 能力：速度 30~240 拍/分（默认取 J 描述头）；固定 SpessaSynth 高保真音源（桌面为随安装包
@@ -41,12 +62,13 @@ import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, resolvePractice
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
 /**
- * adj987（**用户 2026-10-18 口径**）：练习段**循环之间的静默间隔** = 3 秒。
+ * adj987（**用户 2026-10-18 口径**）：标记段**循环之间的等待** = 3 秒 —— 由 **3-2-1 倒数**实现
+ * （`runCountdown3` 每秒跳一个数，正好 3 秒）。用户原话：「每次循环前加一个 3s 的等待，
+ * 一个是区分出循环位置，一个是给用户循环练习时喘口气」。
  *
- * 用户原话：「选择循环时，每次循环前加一个 3s 的等待，一个是区分出循环位置，
- * 一个是给用户循环练习时喘口气」⇒ 循环**不是无缝接**，到点后先停 3 秒再重播。
+ * ⇒ 循环定时器只等"这一遍奏完 + 60ms 余量"；**不要再额外加 3 秒**（否则一共要等 6 秒）。
  */
-const LOOP_GAP_MS = 3000
+const LOOP_RESTART_DELAY_MS = 60
 
 export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   const parseResult = useDocStore((s) => s.parseResult)
@@ -470,6 +492,16 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       }
       // adj723d：音源就绪（或已确认不可得）后再核对一次代次——**只有最新一次播放能落地**
       if (stale()) return
+      /**
+       * adj987o（**用户 2026-10-18 口径**）：「在起始点处加一个动态 **321** 的倒数数字机制，
+       * 在开始或重新循环开始之前进行倒数计数」。
+       *
+       * 只在**选了标记段**时倒数（全曲播放不倒数——每按一次播就等 3 秒会很烦）。
+       * 倒数期间界面在起始音上显示 3→2→1（`practiceCountdown`），音频在这之后才开始。
+       */
+      const uiNow0 = useUiStore.getState()
+      const markNow0 = uiNow0.practiceMarks.find((m) => m.id === uiNow0.practiceMarkId) ?? null
+      if (markNow0) await runCountdown3(stale)
       if (!backendReady) {
         /**
          * 音源不可得：**保留视觉**（色块 + 高亮 + 进度读数照常），只是没有声音。
@@ -499,8 +531,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
        * · 候选（同一对起止在多处）由 `resolvePracticeRange` 给出，用户选过的 `pass` 优先；
        * · 失效（端点音符在本次排版里找不到）⇒ **退回全曲**，并提示一句 —— 不静默播半段。
        */
-      const uiNow = useUiStore.getState()
-      const markNow = uiNow.practiceMarks.find((m) => m.id === uiNow.practiceMarkId) ?? null
+      const markNow = markNow0
       let seq = fullSeq
       let practiceRangeMs = 0
       if (markNow) {
@@ -592,11 +623,13 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       // adj282/adj409：驱动定时器（RAF 色块 + 高亮 + 收尾复位）统一由 startTimers 启停
       startTimers(job, practiceRangeMs)
       /**
-       * adj987（**用户 2026-10-18 需求**）：选了练习段且开着「循环」⇒ 到点**自动重播这一段**。
+       * adj987（**用户 2026-10-18 需求**）：选了标记段且开着「循环」⇒ 到点**自动重播这一段**。
        *
        * 用户追加口径：「每次循环前加一个 **3s 的等待**，一个是**区分出循环位置**，
-       * 一个是给用户循环练习时**喘口气**」⇒ 到点后先静默 3 秒再重播（不是无缝接）。
-       * `play()` 自带"作废上一次在途播放"的代次守卫，重入安全。
+       * 一个是给用户循环练习时**喘口气**」。
+       *
+       * ⚠ adj987o：这 3 秒**由倒数接管**（`play()` 一进来就会走 `runCountdown3`：3→2→1 各 1 秒），
+       * 所以这里只需要等"这一遍奏完 + 60ms"，**不要再额外加 3 秒**（否则一共要等 6 秒）。
        */
       if (practiceRangeMs > 0 && useUiStore.getState().practiceLoop) {
         loopTimerRef.current = window.setTimeout(
@@ -604,7 +637,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
             loopTimerRef.current = null
             void play()
           },
-          practiceRangeMs + LOOP_GAP_MS,
+          practiceRangeMs + LOOP_RESTART_DELAY_MS,
         )
       }
       // 起点播放后清除标记，下次播放从头开始

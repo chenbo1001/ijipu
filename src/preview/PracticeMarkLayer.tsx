@@ -27,6 +27,8 @@ export function PracticeMarkLayer({ page, noteSize }: { page: ScorePageLike; not
   const selStop = useUiStore((s) => s.practiceSelStop)
   /** adj987k：这一段**实际演奏到的音符 id**（跨反复/跳跃时按播放顺序给） */
   const rangeIds = useUiStore((s) => s.practiceRangeIds)
+  /** adj987o：开始 / 循环重来前的倒数（3/2/1；null = 不显示） */
+  const countdown = useUiStore((s) => s.practiceCountdown)
   /** adj987l（用户口径 #4）：标记段线**只在试听面板打开时**显示（底栏的「试听」页签） */
   const showInDialog = useUiStore((s) => s.dockOpen && s.dockPanel === 'tryout')
   const cur = marks.find((m) => m.id === markId) ?? null
@@ -87,7 +89,15 @@ export function PracticeMarkLayer({ page, noteSize }: { page: ScorePageLike; not
           style={{ left: pct(last.x1), top: pctY(lineY(last.y) - tickH / 2), height: `${tickH}px` }}
         />
       )}
-      {/* 循环开启 ⇒ 两端各一个 ⟲（用户口径：开启后两端显示循环标识） */}
+      {/* adj987o（用户口径）：开始 / 循环重来前的 **3-2-1 倒数**，画在**起始音**正上方 */}
+      {countdown !== null && first && (
+        <span
+          className="practice-countdown"
+          style={{ left: pct(first.x0), top: pctY(lineY(first.y) - tickH - noteSize * 1.6) }}
+        >
+          {countdown}
+        </span>
+      )}      {/* 循环开启 ⇒ 两端各一个 ⟲（用户口径：开启后两端显示循环标识） */}
       {loop && first && (
         <span className="practice-mark-loop" style={{ left: pct(first.x0), top: pctY(lineY(first.y) + tickH / 2 + 2) }}>
           ⟲

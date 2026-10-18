@@ -304,6 +304,11 @@ interface UiState {
    * 而不是简单取"起点到停止点的源码区间"。
    */
   practiceRangeIds: string[]
+  /**
+   * adj987o（**用户 2026-10-18 口径**）：「在起始点处加一个动态 321 的倒数数字机制，
+   * 在开始或重新循环开始之前进行倒数计数」⇒ 当前显示的倒数秒数（3 / 2 / 1；`null` = 不显示）。
+   */
+  practiceCountdown: number | null
   /** 轻量浮动提示（null = 无提示） */
   notice: Notice | null
   /** adj379：检测到 SW 新版本（页面仍在跑旧 bundle）——右下角提示「点击刷新」 */
@@ -439,6 +444,8 @@ interface UiState {
   setPracticeSel: (which: 'start' | 'stop', noteId: string | null) => void
   /** adj987k：写入"这一段实际演奏到的音符 id"（`[]` = 只按起止范围画） */
   setPracticeRangeIds: (ids: string[]) => void
+  /** adj987o：设置倒数秒数（`null` = 收起倒数） */
+  setPracticeCountdown: (n: number | null) => void
   /** 用当前两个端点**新增**一段（名 `段 N`），并自动选中它 */
   addPracticeMark: () => PracticeMark | null
   /** 删除当前选中的标记（「无」不可删） */
@@ -770,6 +777,7 @@ export const useUiStore = create<UiState>()((set) => ({
   practiceSelStart: null,
   practiceSelStop: null,
   practiceRangeIds: [],
+  practiceCountdown: null,
   setPracticeMarks: (marks) =>
     set((s) => {
       // 当前选中的标记若不在新列表里（换文档了）⇒ 退回「无」
@@ -781,6 +789,7 @@ export const useUiStore = create<UiState>()((set) => ({
     set((s) => ({ practiceMarks: s.practiceMarks.map((m) => (m.id === id ? { ...m, pass } : m)) })),
   setPracticeSel: (which, noteId) => set(which === 'start' ? { practiceSelStart: noteId } : { practiceSelStop: noteId }),
   setPracticeRangeIds: (ids) => set({ practiceRangeIds: ids }),
+  setPracticeCountdown: (n) => set({ practiceCountdown: n }),
   addPracticeMark: () => {
     const s = useUiStore.getState()
     if (!s.practiceSelStart || !s.practiceSelStop) return null

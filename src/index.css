@@ -5604,3 +5604,16 @@ span.ws-check {
   pointer-events: none;
   user-select: none;
 }
+/* adj987o（用户口径）：开始 / 循环重来前的 **3-2-1 倒数**——画在起始音正上方，大号、醒目但不刺眼 */
+.practice-countdown {
+  position: absolute;
+  z-index: 0;
+  transform: translateX(-50%);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  color: #2f9e8f;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff;
+  pointer-events: none;
+  user-select: none;
+}
