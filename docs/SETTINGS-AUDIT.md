@@ -189,6 +189,10 @@
 | Obsidian 插件设置 `embedChannel` | `false` | **嵌入版通道**总开关（原「开发者：允许嵌入版调用插件能力」，adj868 改名） | **L1 用户个性 / 安全开关** | 管两条 postMessage 通道：**插件 → 应用**（`render.png` / `export.midi` / `playback.*` ⇒ 导出 PNG / MIDI / 复制为图片必经）与**应用 → 插件**（能力探测/渲染，目前无调用方）。adj868 起**持久化**（原来仅本会话有效）；默认关=安全优先；打开后仍受来源校验 + 方法白名单 + 参数校验约束 |
 | `ijipu.draft` | — | **未保存草稿正文** | 独立应用专用 | **嵌入时必须禁用**（vault 才是唯一真源） |
 | `ijipu.draftName` | — | 草稿文件名 | 独立应用专用 | 同上 |
+| `ijipu.draftNative` | — | 草稿对应的**本地文件路径**（adj985：双击打开后重启恢复用） | 独立应用专用 | 同上 |
+| `ijipu.practiceMarks.<docKey>` | `[]` | **试听「标记段」（adj987）**：按**文档身份**存的练习段（`ws:<wsId>/<segs>` / `native:<path>` / `name:<fileName>`）。**L1（本机）**，**不写进 `.jps`**，换机器不带过去（有意为之） | 用户个性（与具体谱相关但不随谱走） | 保留（嵌入版用同一键） |
+| `ijipu.practiceLoop` | false | 标记段「循环」开关（L1 记住） | 用户个性 | 保留 |
+| `ijipu.practiceCollapsed` | false | 标记段组「收起」状态（L1 记住） | 用户个性 | 保留 |
 
 ### 4.2 IndexedDB / Tauri / PWA
 
