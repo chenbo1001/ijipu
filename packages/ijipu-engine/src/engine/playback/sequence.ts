@@ -263,9 +263,37 @@ export function resolvePracticeRange(seq: PlaySequence, startId: string, endId: 
     const sameVoice = byTail.filter((x) => x.v === sameVoiceAs).map((x) => x.i)
     return sameVoice.length > 0 ? sameVoice : byTail.map((x) => x.i)
   }
-  const starts = pickIdx(startId)
-  const vStart = starts.length > 0 ? seq.events[starts[0]].placed.id.voice : null
-  const ends = pickIdx(endId, vStart)
+  /**
+   * adj987x（**用户 2026-10-18 实报**「添加这段时提示**找不到终点**」）：
+   * 终点 id 在播放序列里**没有对应事件**（标到的那个音没进序列：被并进前一个音的时值、
+   * 或者是段层里没有独立事件的音…），此前直接返回 `missing: 'end'` ⇒ 退回全曲 ✗。
+   *
+   * 兜底口径：**按"同组 + 同声部 + 序号就近夹紧"**——
+   *  · 终点：取"序号 ≤ 目标"的**最后一个**事件（宁可停在最近的那个音，也不要退回全曲）；
+   *  · 起点：取"序号 ≥ 目标"的**第一个**事件（不从目标之前起，避免把不该练的音带进来）。
+   * 兜底只在"确实一个都对不上"时发生，正常情况仍走上面的精确/宽松匹配。
+   */
+  const clampNear = (want: string, voice: number | null, dir: 'before' | 'after'): number[] => {
+    const m = /^(\d+)_(\d+)_(\d+)_(\d+)$/.exec(want)
+    if (!m) return []
+    const g = Number(m[3])
+    const idx = Number(m[4])
+    let best = -1
+    for (let i = 0; i < seq.events.length; i++) {
+      const id = seq.events[i].placed.id
+      if (id.group !== g) continue
+      if (voice !== null && id.voice !== voice) continue
+      if (dir === 'before') {
+        if (id.index <= idx) best = i
+      } else if (id.index >= idx) return [i]
+    }
+    return best >= 0 ? [best] : []
+  }
+  const starts0 = pickIdx(startId)
+  const vStart = starts0.length > 0 ? seq.events[starts0[0]].placed.id.voice : null
+  const starts = starts0.length > 0 ? starts0 : clampNear(startId, null, 'after')
+  const ends0 = pickIdx(endId, vStart)
+  const ends = ends0.length > 0 ? ends0 : clampNear(endId, vStart, 'before')
   if (starts.length === 0) return { pick: 0, candidates: [], missing: 'start' }
   if (ends.length === 0) return { pick: 0, candidates: [], missing: 'end' }
 

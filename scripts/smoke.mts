@@ -21366,6 +21366,26 @@ function runAdj987Tests() {
       })(),
       '',
     )
+    /**
+     * adj987x（**用户 2026-10-18 实报**「提示找不到终点」）：终点 id 在序列里**没有事件**时，
+     * 要按"同组+同声部+序号就近夹紧"救回来（取序号 ≤ 目标的最后一个），**不许**退回全曲。
+     */
+    const R987x = ['V: 1.0', 'B: t', 'D: C', 'P: 4/4', 'Q: 1 2 3 4 5 |', ''].join('\n')
+    const r987x = parseJps(R987x)
+    const seq987x = buildPlaySequence(r987x, layoutScore(r987x, defaultPageConfig), 60)
+    const id0 = noteIdStringOf(seq987x.events[0].placed.id)
+    const mkId = (idx: number) => id0.replace(/_(\d+)$/, `_${idx}`)
+    const resClamp = resolvePracticeRange(seq987x, id0, mkId(99))
+    check(
+      'adj987x 终点序号在序列里**不存在**（99）⇒ 夹到最近的那个音（最后一个），仍然给得出候选（不再报"找不到"）',
+      resClamp.missing === undefined && resClamp.candidates.length >= 1,
+      JSON.stringify({ id0, want: mkId(99), res: resClamp }),
+    )
+    check(
+      'adj987x **负对照**：起点序号也不存在（99）⇒ 起点夹到"序号 ≥ 目标"的第一个（不存在 ⇒ 仍报 `missing: start`）',
+      resolvePracticeRange(seq987x, mkId(99), mkId(99)).missing === 'start',
+      '',
+    )
     const R987n = ['V: 1.0', 'B: t', 'D: C', 'P: 4/4', 'Q: 1 2 (3 4 5) 6 |', ''].join('\n')
     const r987n = parseJps(R987n)
     const seq987n = buildPlaySequence(r987n, layoutScore(r987n, defaultPageConfig), 60)
