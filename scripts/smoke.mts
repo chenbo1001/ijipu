@@ -91,7 +91,7 @@ const parseJps = (src: string) => {
 }
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
-import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES, gmVoiceRef, gmVoiceProgram, countScoreInstrumentSwitches } from '@ijipu/engine/playback/index.ts'
+import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES, gmVoiceRef, gmVoiceProgram, countScoreInstrumentSwitches, noteIdStringOf, slicePlaySequenceByNoteRange } from '@ijipu/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
@@ -267,6 +267,8 @@ import { EXT_POLL_MS, watchTick, startExternalWatch } from '../src/store/externa
 import { applyMerge, applyMergePlan, planMerge } from '../src/diff/merge.ts'
 // adj968：拖放"该打开哪一个"的纯判据（单独模块，不 import store ⇒ Node 里可直接断言）
 import { classifyDropNames } from '../src/store/dropPick.ts'
+// adj987（用户需求）：试听练习段的数据层（纯函数部分可在 Node 里断言）
+import { docKeyOf, parseMarks, markBandsOf } from '../src/store/practiceMarks.ts'
 // adj979（用户实报：谱在桌面/下载里时背景图读不出来、也没提示）：Chromium 敏感目录的纯判据
 import { parentDirNameOf, sensitiveDirLabelOf } from '../src/store/assetDirSensitive.ts'
 import type { RuntimeEnv } from '../src/brand/env.ts'
@@ -19420,6 +19422,13 @@ runAdj927ExternalChangeTests()
       failed++
       console.error('  ✗ adj986 未封闭跳房子跳过落点用例抛异常', e)
     }
+    try {
+      // adj987：试听练习段（数据层 + 播放区间切片）
+      runAdj987Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj987 试听练习段用例抛异常', e)
+    }
   })
   .then(() => {
     try {
@@ -21138,6 +21147,96 @@ function runAdj986Tests() {
       'adj986 **负对照**：整段事件数 = 27（旧写法会在 D.S. 之后把 `]/` 之后的音再奏一遍 ⇒ 多出事件）',
       events.length === 27,
       `${events.length}`,
+    )
+  }
+}
+
+/**
+ * adj987（**用户 2026-10-18 需求**）：试听「练习段」——数据层 + 播放区间。
+ *
+ * 用户原话：「在试唱演奏练习时，我们经常针对一小段反复练……需要标注出反复练习段的起止点，
+ * 然后重复试唱演奏」。口径见 `src/store/practiceMarks.ts` 的文件头。
+ *
+ * 本轮只钉**纯函数**（UI 与循环在后续批次）：
+ *  ① `docKeyOf`：三种文档来源各给一个稳定键（工作区 / 原生路径 / 文件名）；
+ *  ② `parseMarks`：坏数据不炸、缺 id/名字时有兜底、空串 id 丢弃；
+ *  ③ `markBandsOf`：**跨行**标记按行切段（一行一段，x0 取该行最小、x1 取该行最大 rightX）；
+ *  ④ `slicePlaySequenceByNoteRange`：裁剪后时间轴从 0 起、事件数正确、找不到起点返回 `null`。
+ */
+function runAdj987Tests() {
+  console.log('[187] adj987 practice marks (data layer + play range slicing)')
+  check(
+    'adj987 `docKeyOf`：工作区 / 原生路径 / 文件名三种来源各给一个稳定键（同一份谱每次都一样）',
+    docKeyOf({ fileName: 'a.jps', binding: { wsId: 'w1', segs: ['曲', 'a.jps'] } }) === 'ws:w1/曲/a.jps' &&
+      docKeyOf({ fileName: 'a.jps', nativePath: 'D:\\x\\a.jps' }) === 'native:D:\\x\\a.jps' &&
+      docKeyOf({ fileName: 'a.jps' }) === 'name:a.jps' &&
+      docKeyOf({ fileName: 'a.jps', binding: null, nativePath: null }) === 'name:a.jps',
+    '',
+  )
+  {
+    const parsed = parseMarks(
+      JSON.stringify([
+        { startId: '0_1_0_3', endId: '0_1_0_9' },
+        { id: 'x', name: '副歌', startId: '0_1_0_10', endId: '0_1_0_12' },
+        { startId: '', endId: '0_1_0_20' },
+        { nope: 1 },
+      ]),
+    )
+    check(
+      'adj987 `parseMarks`：缺 id/名字有兜底、空串 id 与坏项丢弃（4 项 ⇒ 留 2 项）',
+      parsed.length === 2 && parsed[0].name === '段 1' && parsed[1].name === '副歌' && parsed[1].id === 'x',
+      JSON.stringify(parsed),
+    )
+    check('adj987 `parseMarks`：非 JSON / 非数组 / 空 一律返回空数组（不抛）', parseMarks('{oops').length === 0 && parseMarks('123').length === 0 && parseMarks(null).length === 0, '')
+  }
+  {
+    // 造两行音符：行 1 索引 3..5、行 2 索引 6..8（跨行标记 3..8）
+    const notes = [
+      { id: { index: 3 }, x: 100, rightX: 110, y: 200 },
+      { id: { index: 4 }, x: 120, rightX: 130, y: 200 },
+      { id: { index: 5 }, x: 140, rightX: 150, y: 200 },
+      { id: { index: 6 }, x: 100, rightX: 112, y: 260 },
+      { id: { index: 7 }, x: 130, rightX: 140, y: 260 },
+      { id: { index: 8 }, x: 150, rightX: 160, y: 260 },
+      { id: { index: 9 }, x: 200, rightX: 210, y: 260 },
+    ]
+    const bands = markBandsOf(notes, '0_1_0_3', '0_1_0_8')
+    check(
+      'adj987 `markBandsOf`：**跨行**标记按行切成两段带（行 1：100→150，行 2：100→160；9 号在范围外不并入）',
+      bands.length === 2 &&
+        bands[0].x0 === 100 &&
+        bands[0].x1 === 150 &&
+        bands[0].y === 200 &&
+        bands[1].x0 === 100 &&
+        bands[1].x1 === 160 &&
+        bands[1].y === 260,
+      JSON.stringify(bands),
+    )
+    check(
+      'adj987 `markBandsOf` **负对照**：起止 id 都解析不出来 ⇒ 空数组（不会画出"从 0 到无穷"的带）',
+      markBandsOf(notes, 'bad', 'worse').length === 0 && markBandsOf([], '0_1_0_1', '0_1_0_2').length === 0,
+      '',
+    )
+  }
+  {
+    const pr = parseJps(`${'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1\n'}`)
+    const seq = buildPlaySequence(pr, layoutScore(pr, defaultPageConfig), 60)
+    const ids = seq.events.map((e) => noteIdStringOf(e.placed.id))
+    const sliced = slicePlaySequenceByNoteRange(seq, ids[2], ids[5])
+    check(
+      'adj987 `slicePlaySequenceByNoteRange`：裁出 4 个事件（3、4、5、6 号），时间轴**从 0 重排**，rangeMs = 末事件结束时刻',
+      !!sliced &&
+        sliced.events.length === 4 &&
+        sliced.events[0].atMs === 0 &&
+        sliced.rangeMs > 0 &&
+        sliced.totalMs === sliced.rangeMs,
+      JSON.stringify(sliced ? { n: sliced.events.length, first: sliced.events[0].atMs, rangeMs: sliced.rangeMs } : null),
+    )
+    check(
+      'adj987 **负对照**：起点 id 不存在 ⇒ `null`（调用方退回"演奏全曲"，不会静默播半段）',
+      slicePlaySequenceByNoteRange(seq, 'no_such_id', ids[3]) === null &&
+        slicePlaySequenceByNoteRange(seq, ids[5], ids[2]) === null,
+      '',
     )
   }
 }

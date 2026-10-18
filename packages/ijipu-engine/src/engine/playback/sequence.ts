@@ -126,6 +126,49 @@ export interface PlaySequence {
   bpm: number
 }
 
+/** 音符 id → `page_voice_group_index` 串（与 `data-notepos` / `activeNoteId` 同一形状） */
+export function noteIdStringOf(id: { page: number; voice: number; group: number; index: number }): string {
+  return `${id.page}_${id.voice}_${id.group}_${id.index}`
+}
+
+/**
+ * adj987（**用户 2026-10-18 需求**）：试听「练习段」——把整份序列**裁成一段**。
+ *
+ * 用户原话：「在试唱演奏练习时，我们经常针对一小段反复练……需要标注出反复练习段的起止点，
+ * 然后重复试唱演奏」。
+ *
+ * 口径：
+ *  · 起止都是**音符 id**（`page_voice_group_index`），按序列里**出现的先后**取区间
+ *    —— 反复展开后同一音符可能出现多次，这里取**第一处**起点到**其后第一处**终点（通常就是第 1 遍里那段）；
+ *  · 时间轴**从 0 重排**（`atMs` 减去起点时刻），这样"从头播"就是"从这一段播"；
+ *  · `totalMs` = 该段最后一个事件的结束时刻；
+ *  · 起点找不到 / 终点在起点之前 ⇒ 返回 `null`（调用方退回"播放全曲"，别静默播半段）。
+ *
+ * @returns 裁剪后的序列（含 `rangeMs`），或 `null` 表示这段标记在本次排版里对不上
+ */
+export function slicePlaySequenceByNoteRange(
+  seq: PlaySequence,
+  startId: string,
+  endId: string,
+): (PlaySequence & { rangeMs: number }) | null {
+  const idOf = (e: PlayEvent): string => noteIdStringOf(e.placed.id)
+  const i0 = seq.events.findIndex((e) => idOf(e) === startId)
+  if (i0 < 0) return null
+  let i1 = -1
+  for (let i = i0; i < seq.events.length; i++) {
+    if (idOf(seq.events[i]) === endId) {
+      i1 = i
+      break
+    }
+  }
+  if (i1 < i0) return null
+  const base = seq.events[i0].atMs
+  const events = seq.events.slice(i0, i1 + 1).map((e) => ({ ...e, atMs: Math.max(0, e.atMs - base) }))
+  const last = events[events.length - 1]
+  const rangeMs = Math.max(0, last.atMs + last.durationMs)
+  return { events, totalMs: rangeMs, bpm: seq.bpm, rangeMs }
+}
+
 /** 从描述头 J 推断拍速（30~240），无效或缺失默认 70（adj343；函数头注释此前误写 90） */
 export function inferBpm(result: ParseResult): number {
   const t = result.header.tempoNum ?? result.header.tempo

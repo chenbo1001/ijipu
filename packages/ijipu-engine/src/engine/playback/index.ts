@@ -13,7 +13,7 @@ import type { SamplerCache } from './sampler-cache'
 import { SynthBackend } from './synth'
 import { SamplerBackend } from './sampler'
 
-export { buildPlaySequence, inferBpm, countScoreInstrumentSwitches } from './sequence'
+export { buildPlaySequence, inferBpm, countScoreInstrumentSwitches, noteIdStringOf, slicePlaySequenceByNoteRange } from './sequence'
 export type { PlayEvent, PlaySequence } from './sequence'
 export { SynthBackend, renderSynthNote, pitchToFreq } from './synth'
 export { SamplerBackend }
