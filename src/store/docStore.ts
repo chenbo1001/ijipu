@@ -304,6 +304,21 @@ const DRAFT_NAME_KEY = 'ijipu.draftName'
  * 与草稿一起写/读，重启后能恢复（校验通过前只是 `pendingBinding`）。属于 L3 会话态，不是设置项。
  */
 const DRAFT_SRC_KEY = 'ijipu.draftSrc'
+/**
+ * adj985（**用户 2026-10-18 实报**）：草稿的**原生路径**（桌面壳双击 / 关联打开时那份文件的绝对路径）。
+ *
+ * 症状：「桌面壳，在桌面已加入到工作区的情况下，**双击 `.jps`** 打开有背景；**直接开桌面壳**
+ * （上次关掉时还是这份谱）**没有背景**」。
+ *
+ * 根因：双击走 `openExternalFiles` ⇒ 记下 `nativePath` ⇒ `App.tsx` 用它推出
+ * `{kind:'native', dir}` 基准、背景图读取正常 ✓；而"直接开壳"是**恢复落盘草稿**，
+ * 只恢复了 `code` / `name` / 工作区绑定（`DRAFT_SRC_KEY`），**没恢复 `nativePath`** ⇒
+ * 基准退化成 `none` ⇒ 相对路径的背景图/水印图读不出来 ✗。
+ *
+ * ⇒ 与草稿一起写/读（L3 会话态，不是设置项）。恢复后它仍是"上次那份文件在哪"，
+ * 由 `App.tsx` 的基准判定照旧使用（图片读取失败时按既有口径降级提示，不会报错）。
+ */
+const DRAFT_NATIVE_KEY = 'ijipu.draftNative'
 const PAGE_CONFIG_KEY = 'ijipu.pageConfig'
 /**
  * adj966f（护栏①：**两侧都不丢**）：应用冲突合并前，把"本地那份"与"外部那份"各留一份备份。
@@ -327,14 +342,34 @@ export interface WorkspaceBinding {
   segs: string[]
 }
 
-function loadDraft(): { code: string; name: string; src: WorkspaceBinding | null } | null {
+function loadDraft(): { code: string; name: string; src: WorkspaceBinding | null; nativePath: string | null } | null {
   try {
     const code = localStorage.getItem(DRAFT_KEY)
     if (code === null) return null
     const name = localStorage.getItem(DRAFT_NAME_KEY) ?? '未命名'
-    return { code, name, src: loadDraftSrc() }
+    return { code, name, src: loadDraftSrc(), nativePath: loadDraftNative() }
   } catch {
     return null
+  }
+}
+
+/** adj985：读草稿的原生路径（缺失/损坏 → null，绝不抛） */
+function loadDraftNative(): string | null {
+  try {
+    const v = localStorage.getItem(DRAFT_NATIVE_KEY)
+    return v && v.trim() !== '' ? v : null
+  } catch {
+    return null
+  }
+}
+
+/** adj985：写草稿的原生路径（null = 清除；存储不可用时静默） */
+function saveDraftNative(p: string | null): void {
+  try {
+    if (!p) localStorage.removeItem(DRAFT_NATIVE_KEY)
+    else localStorage.setItem(DRAFT_NATIVE_KEY, p)
+  } catch {
+    /* 忽略 */
   }
 }
 
@@ -657,6 +692,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
     void saveFileHandle(null)
     // adj628：**同时清掉落盘的来源绑定**（见 newDoc 里那段说明）——否则重启/新开窗口会把老工作区文件重新绑回来
     saveDraftSrc(null)
+    saveDraftNative(null)
     set({
       code: s.code,
       fileName: s.name,
@@ -697,6 +733,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
      * 所以"解绑"必须**同时落到草稿记录里**——下列每个"非工作区来源"的载入路径都要清。
      */
     saveDraftSrc(null)
+    saveDraftNative(null)
     // adj214：新建文档强制使用 defaultPageConfig——不再被本机历史设置覆盖
     // （当时的问题是新建谱仍显示旧的本机设置；adj480 更进一步：本机页面设置层已整体取消）
     // 模板无 # jps-config，merge(null) 即纯默认
@@ -803,6 +840,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
     void saveFileHandle(null)
     // adj628：来源绑定同样要落盘清掉（否则重启后又把老工作区文件绑到这份粘贴稿上）
     saveDraftSrc(null)
+    saveDraftNative(null)
     set({
       code,
       fileName: pasteImportCopy.name,
@@ -841,7 +879,11 @@ export const useDocStore = create<DocState>()((set, get) => ({
 
   // ---- 文件读写（adj70） ----
   fileHandle: null,
-  nativePath: null,
+  /**
+   * adj985（用户实报）：**恢复草稿时要把原生路径也恢复** —— 否则"直接开桌面壳"这条路
+   * 拿不到 `{kind:'native', dir}` 这个基准，相对路径的背景图就画不出来（双击打开却正常）。
+   */
+  nativePath: draft?.nativePath ?? null,
   // adj540：工作区相对路径（见类型注释；同样只存内存）
   // adj544：`binding` 带工作区身份；`pendingBinding` 是随草稿恢复出来的**待校验**绑定
   binding: null,
@@ -884,6 +926,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
     void askSensitiveDirOnNativeOpen(localAssetRefs(resolveConfig(primary.code)).length > 0, name, primary.path)
     // adj628：工作区来源同样要落盘清掉（外部路径与工作区互斥，见下面 binding: null）
     saveDraftSrc(null)
+    // adj985（用户实报）：**这条路的原生路径要随草稿一起落盘** —— 下次"直接开桌面壳"恢复草稿时
+    // 靠它推出 `{kind:'native', dir}` 基准，相对路径的背景图/水印图才画得出来（此前恢复后没有它 ⇒ 无背景）。
+    saveDraftNative(primary.path)
     set({
       code: primary.code,
       fileName: name,
@@ -1045,6 +1090,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       const bind: WorkspaceBinding = { wsId: ws.id, wsName: ws.name, segs }
       set({ binding: bind, pendingBinding: null })
       saveDraftSrc(bind)
+      saveDraftNative(null)
       // 数据源是工作区 ⇒ 断开磁盘句柄（三者互斥），避免"保存写到了上一个文件"
       disconnectFileHandle()
       set({
@@ -1109,6 +1155,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
       const name = fileBaseName(segs[segs.length - 1])
       const bind: WorkspaceBinding = { wsId: ws.id, wsName: ws.name, segs }
       saveDraftSrc(bind)
+      saveDraftNative(null)
       set({
         fileName: name,
         fileHandle: null,
@@ -1256,6 +1303,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
         const target = joinPath(segs)
         if (cur && cur.wsId === ws.id && (joinPath(cur.segs) === target || (it.kind === 'dir' && joinPath(cur.segs).startsWith(`${target}/`)))) {
           saveDraftSrc(null)
+          saveDraftNative(null)
           set({ binding: null, pendingBinding: null })
           unbound = true
         }
@@ -1738,6 +1786,7 @@ function adoptDoc(input: {
   }
   // adj628：来源换成了这个本地文件 ⇒ 落盘的工作区来源必须清掉（否则下次加载又绑回老工作区文件）
   saveDraftSrc(null)
+  saveDraftNative(null)
   // adj212：打开文件时同步 pageConfig——此前漏了 mergeJpsConfig，
   // 其它浏览器打开带 # jps-config 的谱时页面设置仍是打开前的旧值
   const cfg = resolveConfig(code)

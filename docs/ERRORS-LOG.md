@@ -9989,6 +9989,35 @@ smoke 三条含"没反复仍报错"的负对照） |
 | v0.67.3 | 2026-10-18 | 追加 E-2026-471（**替谱段附点偏右、贴 `&ykh`**：段层两条路径分别用"拍位栅格"/"余白三等分"给附点定位
 ⇒ 一律改为 `DOT_AFTER_DIGIT_GAP` 贴紧数字、数字 x 不动；smoke 三条含"主旋律 vs 段层同口径"负对照） |
 
+### E-2026-472 桌面壳"直接打开"恢复上次那份谱时**没有背景图**（双击打开却正常）（用户实报，adj985）
+
+- **现象**（用户原话）：「桌面壳，在桌面已加入到工作区的情况下，通过**双击 jps 文件**打开的情况**有背景**，
+  通过**打开桌面壳**的方式（上一次关闭时还是这个 jps 文件）**无背景**」。
+- **根因**：两条路装载时记的东西不一样 ——
+  · 双击 / 关联打开 ⇒ `openExternalFiles`：**记下 `nativePath`**（绝对路径），
+    `App.tsx` 据此推出 `{kind:'native', dir}` 基准 ⇒ 相对路径的背景图/水印图读得出来 ✓；
+  · 直接开壳 ⇒ 走**恢复落盘草稿**：只恢复了 `code` / `name` / 工作区绑定（`ijipu.draftSrc`），
+    **`nativePath` 恒为 `null`** ⇒ 基准退化成 `{kind:'none'}` ⇒ 图读不出来 ✗。
+  （"桌面已加入工作区"并不救场：双击那条路把 `binding` 清成了 `null`，基准只能来自 `nativePath`。）
+- **解决**：给草稿加一个键 `ijipu.draftNative`（`DRAFT_NATIVE_KEY`）+ `loadDraftNative` / `saveDraftNative`：
+  · `openExternalFiles` 落盘**真实路径**（`saveDraftNative(primary.path)`）；
+  · 其余"来源变了"的所有位置（新建 / 载入示例 / 打开工作区文件 / 从工作区解绑 / 文件选择器打开）
+    与 `saveDraftSrc(...)` **一一配对**地写 `saveDraftNative(null)`（来源互斥，不能只清一半）；
+  · 初始状态由 `nativePath: null` 改为 **`nativePath: draft?.nativePath ?? null`**。
+- **验证**：`npm run smoke` **ALL SMOKE TESTS PASSED ✅**（新增 `[185] adj985` 五条：草稿层的键与读写函数、
+  初始状态用草稿、双击那条路落盘真实路径、**结构配对**"每处 `saveDraftSrc` 后面都跟一处 `saveDraftNative`"、
+  **负对照**"把初始状态改回 `nativePath: null` ⇒ 判假"）；`tsc` 0 错、`lint` 57 警告 0 错。
+  另：`adj724b` 的函数取样窗口从 2600 **放宽到 3600**（`openWorkspaceFile` 又长了两行，否则回滚那段被截断会假红）。
+- **预防**：
+  ① **同一份文档"存在哪"有三个来源**（`fileHandle` / `nativePath` / 工作区 `binding`），
+     凡是落盘"会话恢复"的信息，**每个来源都要有对应的持久化**；只持久化其中一个，
+     就会出现"这条路正常、那条路缺"（本轮正是如此）；
+  ② **来源切换要成对**：清 `draftSrc` 必须同时清 `draftNative`，新增来源时**用结构断言钉住配对**
+     （本轮用"每处 `saveDraftSrc` 后必须跟一处 `saveDraftNative`"来守，比逐个 review 靠得住）。
+
+| v0.67.3 之后（待发） | 2026-10-18 | 追加 E-2026-472（**直接开壳恢复上次谱时无背景图**：草稿多存 `ijipu.draftNative`，恢复时把 `nativePath` 一起恢复；
+smoke 五条含"来源切换成对"结构断言与负对照） |
+
 ### E-2026-449 替谱段 `{tp … }` 的歌词对位错位：一是抢字、二是留空洞（用户实报，adj675）
 
 - **现象**（用户原话）：「红色部分 `2` 的音符对应的词第一行是对的，第二行应该是对应的是『经』，

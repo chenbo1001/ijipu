@@ -7373,7 +7373,9 @@ console.log('[82] author credit (adj373)')
   {
     const storeSrc2 = String(readFileSync('src/store/docStore.ts', 'utf8'))
     const fnStart = storeSrc2.indexOf('openWorkspaceFile: async (path) => {')
-    const fnBody = fnStart >= 0 ? storeSrc2.slice(fnStart, fnStart + 2600) : ''
+    // adj985：函数体又长了（草稿来源与原生路径要一起落盘）⇒ 取样窗口从 2600 放宽到 3600，
+  // 不要为了省字符把它改回去（否则回滚那段会被截断，这条断言会假红）。
+  const fnBody = fnStart >= 0 ? storeSrc2.slice(fnStart, fnStart + 3600) : ''
     const claimAt = fnBody.indexOf('set({ binding: bind, pendingBinding: null })')
     const readAt = fnBody.indexOf('await readWorkspaceText(ws, segs)')
     check('adj724b `openWorkspaceFile` 在第一个 await 之前认领绑定（否则"恢复上次绑定"会并发覆盖它）',
@@ -19404,6 +19406,13 @@ runAdj927ExternalChangeTests()
       failed++
       console.error('  ✗ adj983 反复跳回连音线用例抛异常', e)
     }
+    try {
+      // adj985：直接开桌面壳恢复上次那份谱时，原生路径也要恢复（否则没有背景图，用户实报）
+      runAdj985Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj985 恢复草稿保留原生路径用例抛异常', e)
+    }
   })
   .then(() => {
     try {
@@ -20988,6 +20997,76 @@ function runAdj983Tests() {
       'adj984 **负对照**：真三层 `(((3 2/) 4) 5)` ⇒ 出现"嵌套超过两层"告警（判据没被放宽到三层）',
       three984.warns >= 1,
       JSON.stringify(three984),
+    )
+  }
+}
+
+/**
+ * adj985（**用户 2026-10-18 实报**）：「桌面壳，在桌面已加入到工作区的情况下，**双击 `.jps`** 打开的
+ * 有背景；**直接开桌面壳**（上次关掉时还是这份谱）**没有背景**」。
+ *
+ * 根因：双击走 `openExternalFiles` ⇒ 记下 `nativePath` ⇒ `App.tsx` 用它推出 `{kind:'native', dir}`
+ * 基准 ⇒ 相对路径的背景图读得出来 ✓；而"直接开壳"是**恢复落盘草稿**，以前只恢复
+ * `code`/`name`/工作区绑定，**不恢复 `nativePath`** ⇒ 基准退化成 `none` ⇒ 没有背景 ✗。
+ *
+ * 判据（源码级 + 结构配对，含负对照）：
+ *  ① 草稿层有 `ijipu.draftNative` 键与读写函数，`loadDraft()` 的返回值含 `nativePath`；
+ *  ② 初始状态用 `draft?.nativePath ?? null`（不是写死 null）；
+ *  ③ 原生打开那条路**落盘真实路径**（`saveDraftNative(primary.path)`）；
+ *  ④ **结构配对**：每一处 `saveDraftSrc(…)` 后面都紧跟一处 `saveDraftNative(…)`；
+ *  ⑤ **负对照**：把初始状态那行改回 `nativePath: null` ⇒ ② 判假（证明它不是恒绿）。
+ */
+function runAdj985Tests() {
+  console.log('[185] adj985 restore last doc keeps nativePath (desktop shell background image)')
+  const storeSrc = String(readFileSync('src/store/docStore.ts', 'utf8'))
+  check(
+    'adj985 草稿层记住**原生路径**：`ijipu.draftNative` 键 + 读写函数，且 `loadDraft()` 返回 `nativePath`',
+    /const DRAFT_NATIVE_KEY = 'ijipu\.draftNative'/.test(storeSrc) &&
+      /function loadDraftNative\(/.test(storeSrc) &&
+      /function saveDraftNative\(p: string \| null\)/.test(storeSrc) &&
+      /src: loadDraftSrc\(\), nativePath: loadDraftNative\(\)/.test(storeSrc),
+    '',
+  )
+  const initUsesDraft = /nativePath: draft\?\.nativePath \?\? null,/.test(storeSrc)
+  check(
+    'adj985 启动恢复时把 `nativePath` 一起恢复（否则"直接开壳"这条路的基准退化成 none ⇒ 没有背景）',
+    initUsesDraft,
+    JSON.stringify({ 初始状态用草稿: initUsesDraft }),
+  )
+  check(
+    'adj985 **负对照**：把初始状态改回 `nativePath: null` ⇒ 上一条判假（说明断言真在看这件事）',
+    initUsesDraft &&
+      !/nativePath: draft\?\.nativePath \?\? null,/.test(
+        storeSrc.replace('nativePath: draft?.nativePath ?? null,', 'nativePath: null,'),
+      ),
+    '',
+  )
+  check(
+    'adj985 双击/关联打开那条路**落盘真实路径**（`saveDraftNative(primary.path)`）',
+    /saveDraftNative\(primary\.path\)/.test(storeSrc),
+    '',
+  )
+  {
+    // 结构配对：每一个 `saveDraftSrc(...)` 之后都必须有一个 `saveDraftNative(...)`
+    const lines = storeSrc.split('\n')
+    let srcCalls = 0
+    let paired = 0
+    for (let i = 0; i < lines.length; i++) {
+      if (/^\s*saveDraftSrc\((null|bind)\)\s*$/.test(lines[i])) {
+        srcCalls++
+        for (let k = i + 1; k < Math.min(lines.length, i + 7); k++) {
+          if (/^\s*saveDraftNative\(/.test(lines[k])) {
+            paired++
+            break
+          }
+          if (/^\s*saveDraftSrc\(/.test(lines[k])) break
+        }
+      }
+    }
+    check(
+      'adj985 **结构配对**：每处 `saveDraftSrc(…)` 后面都跟一处 `saveDraftNative(…)`（来源换了，原生路径必须同步清/换）',
+      srcCalls > 0 && paired === srcCalls,
+      `${paired}/${srcCalls}`,
     )
   }
 }
