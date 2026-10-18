@@ -758,7 +758,12 @@ export const playbackCopy = {
       ? ' · ' + n + ' 个音 · ' + secs + ' · 末音 ' + lastNote
       : ' · ' + n + ' 个音 · ' + secs + ' · 末音 ' + lastNote + '（标的停止音 ' + markedEnd + '）',
   /** 解析不出（标记失效）时的短提示（按钮组里用，比弹提示轻） */
-  practiceResolvedMissing: ' · 找不到这段的音符',
+  /**
+   * adj987w：找不到时**带上两个端点 id 与音数** —— 用户实报"提示找不到这段音符"时，
+   * 这行字直接给出定位信息（不用开开发者工具）；同时区分是起点还是终点没找到。
+   */
+  practiceResolvedMissing: (which: string, start: string, end: string, total: number) =>
+    ' · 找不到' + which + '（起 ' + start + ' / 止 ' + end + '，全曲 ' + total + ' 个音）',
   /** 循环之间的 3 秒静默（用户口径：区分循环位置 + 喘口气） */
   practiceLoopGapHint: '循环时每遍之间静默 3 秒',
 } as const

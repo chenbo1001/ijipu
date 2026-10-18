@@ -78,11 +78,22 @@ export function PracticeMarkBar(): React.JSX.Element {
    * （用户口径 #5：「允许起始在停止后，且要跟着演奏顺序画线」）。
    */
   const resolved = useMemo(() => {
-    const empty = { candidates: [], ids: [] as string[], rangeMs: 0, lastNote: '' }
+    /** 解析结果的形状（`missing`/`totalEvents` 供"找不到"读数用） */
+    interface Resolved {
+      candidates: { i0: number; i1: number; startOccurrence: number; containsJump: boolean }[]
+      ids: string[]
+      rangeMs: number
+      lastNote: string
+      missing: '' | 'start' | 'end'
+      totalEvents: number
+    }
+    const empty: Resolved = { candidates: [], ids: [], rangeMs: 0, lastNote: '', missing: '', totalEvents: 0 }
     if (!cur) return empty
     const seq = buildPlaySequence(parseResult, layoutScore(parseResult, pageConfig), 90)
     const res = resolvePracticeRange(seq, cur.startId, cur.endId)
-    if (res.candidates.length === 0) return empty
+    if (res.candidates.length === 0) {
+      return { ...empty, missing: res.missing ?? '', totalEvents: seq.events.length }
+    }
     const idx = Math.min(Math.max(cur.pass ?? res.pick, 0), res.candidates.length - 1)
     const c = res.candidates[idx]
     // 用户口径（2026-10-18 最后确认）：连音线**不自动判断**，想连到线尾就把「停止」标在最后一个主音上
@@ -99,7 +110,9 @@ export function PracticeMarkBar(): React.JSX.Element {
        * 与标记的终点（同一格式）一比对，就能看出是不是"少了一个音"。
        */
       lastNote: lastEv ? `g${lastEv.placed.id.group}#${lastEv.placed.id.index}` : '',
-    }
+      missing: '' as const,
+      totalEvents: seq.events.length,
+    } satisfies Resolved
   }, [cur, parseResult, pageConfig])
   const candidates = resolved.candidates
   useEffect(() => {
@@ -257,7 +270,12 @@ export function PracticeMarkBar(): React.JSX.Element {
                     resolved.lastNote,
                     noteLabelOf(cur.endId),
                   )
-                : playbackCopy.practiceResolvedMissing}
+                : playbackCopy.practiceResolvedMissing(
+                    resolved.missing === 'start' ? '起点' : resolved.missing === 'end' ? '终点' : '这一段的音符',
+                    noteLabelOf(cur.startId),
+                    noteLabelOf(cur.endId),
+                    resolved.totalEvents,
+                  )}
             </span>
           )}
         </>
