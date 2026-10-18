@@ -99,9 +99,22 @@ export function PracticeMarkBar(): React.JSX.Element {
     const sliced = slicePlaySequenceByRange(seq, c.i0, c.i1)
     const evs = sliced?.events ?? []
     const lastEv = evs.length > 0 ? evs[evs.length - 1] : null
+    /**
+     * adj992（**用户 2026-10-19 实报**：「两个端点都对，但一按添加，停止位就回缩一个音——线少画一个音，
+     * 播放却是对的」）：
+     *
+     * 画线用的是"切片里的事件 id"；而切片会做两件可能让**端点音**不在列表里的事：
+     *  ① 终点那个音若没有独立事件（被并进前一个音的时值）⇒ 列表最后一个是它**前面**那个音；
+     *  ② "向前多吃"可能把后面别的事件也纳进来，端点音的先后位置就被打乱。
+     * ⇒ 画线列表**强制包含用户标的两个端点**（起点已在前就跳过，终点不在末尾就补上），
+     *   这样"线覆盖你标的那一对端点"永远成立；**播放区间（i0/i1）不动**，所以听到的不会变。
+     */
+    const ids = evs.map((e) => noteIdStringOf(e.placed.id))
+    if (!ids.includes(cur.startId)) ids.unshift(cur.startId)
+    if (!ids.includes(cur.endId)) ids.push(cur.endId)
     return {
       candidates: res.candidates,
-      ids: evs.map((e) => noteIdStringOf(e.placed.id)),
+      ids,
       rangeMs: sliced?.rangeMs ?? 0,
       /**
        * adj987t（用户实报「少了停止位的那个音」）：**这一段最后一个音**的 `g组#序号`。
