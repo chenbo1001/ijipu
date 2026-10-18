@@ -60,8 +60,20 @@ export function PracticeMarkLayer({ page, noteSize }: { page: ScorePageLike; not
   const lineY = (baseline: number) => baseline + noteSize * 1.15
   const lineH = Math.max(1.5, noteSize * 0.12)
   const tickH = noteSize * 0.55
-  const first = bands[0]
-  const last = bands[bands.length - 1]
+  /**
+   * adj987y（**用户 2026-10-18 实报**：「起始点标记错了，标记在第 1 个 Q 行的第一个音符上了，
+   * 倒数数字也在这」）：竖头/倒数原来取的是"**本页所有段内音符**里最靠上/最靠右"的那条带的端点，
+   * 而跨 `:|` 回跳的段落会覆盖多行、多页 ⇒ 竖头跑到**最靠上的那一行**（第 1 个 Q 行）去了 ✗。
+   *
+   * ⇒ 竖头与倒数必须落在**实际演奏的第一个音 / 最后一个音**上（按演奏顺序取首末）：
+   *  · 有 `rangeIds`（选中标记时由按钮组算好）⇒ 首 = `rangeIds[0]`，末 = 最后一个；
+   *  · 否则（还在标两端）⇒ 首 = 起点 id，末 = 终点 id。
+   * 本页只有"拥有该音"时才画对应的竖头/标识（另一页自己会画另一头）。
+   */
+  const firstId = rangeIds.length > 0 ? rangeIds[0] : startId
+  const lastId = rangeIds.length > 0 ? rangeIds[rangeIds.length - 1] : endId
+  const startPt = firstId ? posOfNoteId(page, firstId) : null
+  const endPt = lastId ? posOfNoteId(page, lastId) : null
   return (
     <>
       {bands.map((b, i) => (
@@ -76,36 +88,42 @@ export function PracticeMarkLayer({ page, noteSize }: { page: ScorePageLike; not
           }}
         />
       ))}
-      {/* 两端的"起 / 止"小竖头（只画真正的两端，不画行间断点） */}
-      {first && (
+      {/* 两端的"起 / 止"小竖头（落在真正的首音/末音上；只看本页有没有那个音） */}
+      {startPt && (
         <div
           className="practice-mark-tick practice-mark-tick-start"
-          style={{ left: pct(first.x0), top: pctY(lineY(first.y) - tickH / 2), height: `${tickH}px` }}
+          style={{ left: pct(startPt.x), top: pctY(lineY(startPt.y) - tickH / 2), height: `${tickH}px` }}
         />
       )}
-      {last && (
+      {endPt && (
         <div
           className="practice-mark-tick practice-mark-tick-stop"
-          style={{ left: pct(last.x1), top: pctY(lineY(last.y) - tickH / 2), height: `${tickH}px` }}
+          style={{ left: pct(endPt.rightX), top: pctY(lineY(endPt.y) - tickH / 2), height: `${tickH}px` }}
         />
       )}
       {/*
         adj987q（**用户 2026-10-18 口径**）：「倒数数字放在起始线头**左边**，更大些、有白底以便凸显」
         —— 放上方会遮住音符；挪到起始竖头的**左侧**（垂直居中于竖头），白底 + 描边保证看得清。
       */}
-      {countdown !== null && first && (
-        <span className="practice-countdown" style={{ left: pct(first.x0), top: pctY(lineY(first.y) - tickH / 2) }}>
+      {countdown !== null && startPt && (
+        <span
+          className="practice-countdown"
+          style={{ left: pct(startPt.x), top: pctY(lineY(startPt.y) - tickH / 2) }}
+        >
           {countdown}
         </span>
       )}
       {/* 循环开启 ⇒ 两端各一个 ⟲（用户口径：开启后两端显示循环标识） */}
-      {loop && first && (
-        <span className="practice-mark-loop" style={{ left: pct(first.x0), top: pctY(lineY(first.y) + tickH / 2 + 2) }}>
+      {loop && startPt && (
+        <span className="practice-mark-loop" style={{ left: pct(startPt.x), top: pctY(lineY(startPt.y) + tickH / 2 + 2) }}>
           ⟲
         </span>
       )}
-      {loop && last && (
-        <span className="practice-mark-loop" style={{ left: pct(last.x1), top: pctY(lineY(last.y) + tickH / 2 + 2) }}>
+      {loop && endPt && (
+        <span
+          className="practice-mark-loop"
+          style={{ left: pct(endPt.rightX), top: pctY(lineY(endPt.y) + tickH / 2 + 2) }}
+        >
           ⟲
         </span>
       )}
@@ -189,4 +207,23 @@ function bandsFromIds(page: ScorePageLike, ids: readonly string[]): { row: numbe
 /** 音符 id 串（与引擎 `noteIdStringOf` 同形；这里只在本页里比对用） */
 function noteIdOf(n: { id: { page?: number; voice?: number; group?: number; index: number } }): string {
   return `${n.id.page ?? 0}_${n.id.voice ?? 0}_${n.id.group ?? 0}_${n.id.index}`
+}
+
+/**
+ * adj987y：在**本页**里找某个音符（用于定位"实际演奏的第一个音 / 最后一个音"）。
+ *
+ * 匹配口径与引擎一致：先整串，再退到"组号 + 序号"（预览与试听排版可能页号/声部号不同）。
+ * 本页没有这个音就返回 `null` ⇒ 该页不画竖头/倒数（由拥有它的那一页画）。
+ */
+function posOfNoteId(
+  page: ScorePageLike,
+  id: string,
+): { x: number; y: number; rightX: number } | null {
+  const m = /^(\d+)_(\d+)_(\d+)_(\d+)$/.exec(id)
+  const wantTail = m ? `_${m[3]}_${m[4]}` : null
+  const n =
+    page.notes.find((t) => noteIdOf(t) === id) ??
+    (wantTail ? page.notes.find((t) => `_${(t.id as { group?: number }).group ?? 0}_${t.id.index}` === wantTail) : undefined)
+  if (!n) return null
+  return { x: n.x, y: n.y, rightX: n.rightX ?? n.x + 1 }
 }
