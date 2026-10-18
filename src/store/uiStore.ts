@@ -9,6 +9,8 @@ import { DEFAULT_THEME, DEFAULT_THEME_MODE, type ThemeMode } from '../brand/them
 import { getRuntimeEnv, isCoarsePointerDevice } from '../brand/env'
 // adj966g：底栏默认页按**本端能力档**决定（要权限的那一档展开在工作区，PC/插件收起）
 import { hostProfile, shouldOpenWorkspaceDock } from './fileHost'
+// adj987（用户需求）：试听「练习段」的数据类型与命名（标记本身按文档存，见 practiceMarks.ts）
+import { defaultMarkName, nextMarkId, type PracticeMark } from './practiceMarks'
 // L1「用户个性」：编辑器偏好 + 字体覆盖（不进谱面；详见 docs/SETTINGS-AUDIT.md 分层）
 import { loadEditorFont, loadEditorFontSize, loadFontOverride, saveEditorFont, saveEditorFontSize, saveFontOverride } from './editorPrefs'
 import type { FontOverride } from '@ijipu/engine'
@@ -117,6 +119,14 @@ const PLAYBACK_HQ_LIBRARY_KEY = 'ijipu.playbackHqLibrary'
  */
 const PLAYBACK_HQ_VOICE_KEY = 'ijipu.playbackHqVoice'
 const PLAYBACK_HQ_ENABLED_KEY = 'ijipu.playbackHqEnabled'
+/**
+ * adj987（**用户 2026-10-18 需求**）：试听「练习段」的三项界面偏好（L1 本机，与谱无关）：
+ *  · 循环开关（`practiceLoop`）——用户练一句时基本总想循环，记住它省一次点击；
+ *  · 段组收起（`practiceCollapsed`，用户追加要求「左上角加一个收起/显示整个段组的小按钮」）；
+ *  · 标记数据本身**按文档**存，见 `store/practiceMarks.ts`（不在 uiStore 里持久化）。
+ */
+const PRACTICE_LOOP_KEY = 'ijipu.practiceLoop'
+const PRACTICE_COLLAPSED_KEY = 'ijipu.practiceCollapsed'
 // adj347：默认启用的常用音色（初次用户打开试听即可选）——大钢琴/八音盒/小提琴/弦乐/小号/单簧管/长笛
 const DEFAULT_HQ_ENABLED: number[] = [0, 10, 40, 48, 56, 71, 73]
 
@@ -275,6 +285,18 @@ interface UiState {
   playbackHqVoice: number | null
   /** adj332：已启用（收藏）的音色 GM program 集合——试听只列这些，避免 128 项全列 */
   playbackHqEnabled: number[]
+  /* ---- adj987（用户 2026-10-18 需求）：试听「练习段」 ---- */
+  /** 当前文档的练习段（按文档缓存载入；`[]` = 只有「无」） */
+  practiceMarks: PracticeMark[]
+  /** 选中的标记 id（`''` = 无 ⇒ 演奏全曲；**不可删除**） */
+  practiceMarkId: string
+  /** 循环播放开关（L1 记住） */
+  practiceLoop: boolean
+  /** 段组是否收起（用户追加要求：左上角小按钮；L1 记住） */
+  practiceCollapsed: boolean
+  /** 待添加的起点 / 终点音符 id（点音符后再按「起始」「停止」） */
+  practiceSelStart: string | null
+  practiceSelStop: string | null
   /** 轻量浮动提示（null = 无提示） */
   notice: Notice | null
   /** adj379：检测到 SW 新版本（页面仍在跑旧 bundle）——右下角提示「点击刷新」 */
@@ -399,6 +421,23 @@ interface UiState {
   togglePlaybackHqVoice: (program: number) => void
   /** adj340：批量设置已启用音色集合（导入音色配置用） */
   setPlaybackHqEnabled: (programs: number[]) => void
+  /* ---- adj987（用户 2026-10-18 需求）：试听「练习段」 ---- */
+  /** 换一整批标记（打开文档 / 文档切换时由对话框载入） */
+  setPracticeMarks: (marks: PracticeMark[]) => void
+  /** 选中某个标记（`''` = 无 ⇒ 全曲） */
+  setPracticeMarkId: (id: string) => void
+  /** 改某个标记的"候选遍次"（用户在下拉里选过之后写回标记） */
+  setPracticeMarkPass: (id: string, pass: number) => void
+  /** 点音符后按「起始」/「停止」：登记待添加的端点 */
+  setPracticeSel: (which: 'start' | 'stop', noteId: string | null) => void
+  /** 用当前两个端点**新增**一段（名 `段 N`），并自动选中它 */
+  addPracticeMark: () => PracticeMark | null
+  /** 删除当前选中的标记（「无」不可删） */
+  deletePracticeMark: (id: string) => void
+  /** 循环开关（L1 记住） */
+  setPracticeLoop: (b: boolean) => void
+  /** 段组收起/展开（左上角小按钮；L1 记住） */
+  togglePracticeCollapsed: () => void
   /** adj379：设置「检测到新版本」状态（PWA 更新提示） */
   setUpdateReady: (b: boolean) => void
   /** adj728：`action` 非空时提示带一个按钮，且**不自动消失**（见 `NoticeAction`） */
@@ -713,6 +752,59 @@ export const useUiStore = create<UiState>()((set) => ({
   showNotice: (text, kind = 'ok', action) =>
     set((s) => ({ notice: { text, kind, nonce: (s.notice?.nonce ?? 0) + 1, ...(action ? { action } : {}) } })),
   clearNotice: () => set({ notice: null }),
+  /* ---- adj987（用户 2026-10-18 需求）：试听「练习段」 ---- */
+  practiceMarks: [],
+  practiceMarkId: '',
+  // 循环与"段组收起"是**本机偏好**（L1），下次打开还是这个状态
+  practiceLoop: loadBool(PRACTICE_LOOP_KEY, false),
+  practiceCollapsed: loadBool(PRACTICE_COLLAPSED_KEY, false),
+  practiceSelStart: null,
+  practiceSelStop: null,
+  setPracticeMarks: (marks) =>
+    set((s) => {
+      // 当前选中的标记若不在新列表里（换文档了）⇒ 退回「无」
+      const keep = marks.some((m) => m.id === s.practiceMarkId) ? s.practiceMarkId : ''
+      return { practiceMarks: marks, practiceMarkId: keep }
+    }),
+  setPracticeMarkId: (id) => set({ practiceMarkId: id }),
+  setPracticeMarkPass: (id, pass) =>
+    set((s) => ({ practiceMarks: s.practiceMarks.map((m) => (m.id === id ? { ...m, pass } : m)) })),
+  setPracticeSel: (which, noteId) => set(which === 'start' ? { practiceSelStart: noteId } : { practiceSelStop: noteId }),
+  addPracticeMark: () => {
+    const s = useUiStore.getState()
+    if (!s.practiceSelStart || !s.practiceSelStop) return null
+    const mark: PracticeMark = {
+      id: nextMarkId(s.practiceMarks.length + 1),
+      name: defaultMarkName(s.practiceMarks),
+      startId: s.practiceSelStart,
+      endId: s.practiceSelStop,
+    }
+    set({ practiceMarks: [...s.practiceMarks, mark], practiceMarkId: mark.id })
+    return mark
+  },
+  deletePracticeMark: (id) =>
+    set((s) => ({
+      practiceMarks: s.practiceMarks.filter((m) => m.id !== id),
+      practiceMarkId: s.practiceMarkId === id ? '' : s.practiceMarkId,
+    })),
+  setPracticeLoop: (b) => {
+    try {
+      localStorage.setItem(PRACTICE_LOOP_KEY, b ? '1' : '0')
+    } catch {
+      /* 忽略 */
+    }
+    set({ practiceLoop: b })
+  },
+  togglePracticeCollapsed: () =>
+    set((s) => {
+      const next = !s.practiceCollapsed
+      try {
+        localStorage.setItem(PRACTICE_COLLAPSED_KEY, next ? '1' : '0')
+      } catch {
+        /* 忽略 */
+      }
+      return { practiceCollapsed: next }
+    }),
   // adj724b：确认条（嵌入版"文件被外部修改"等需要用户二选一的场景）
   ask: null,
   showAsk: (ask) => set({ ask }),

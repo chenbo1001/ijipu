@@ -33,10 +33,19 @@ import { measureFontMeta } from '../preview/fontMeta'
 import { fmtClock } from './playbackClock'
 // adj723d：试听**单实例**保证（代次守卫，纯模块便于 smoke 断言）
 import { createPlaybackGeneration, shouldAutoPlay } from './playbackSession'
+// adj987（用户需求）：试听「练习段」的按钮组（收起/段选择/起始/停止/添加/删除/循环）
+import { PracticeMarkBar } from './PracticeMarkBar'
 // adj764（清单 B6）：试听时钟来自引擎 —— 与 Obsidian 插件共用"推进/暂停续播/取消/到点一次"的语义
-import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, gmVoiceRef, countScoreInstrumentSwitches, createPlaybackClock, type PlaybackClock } from '@ijipu/engine'
+import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, resolvePracticeRange, slicePlaySequenceByRange, gmVoiceRef, countScoreInstrumentSwitches, createPlaybackClock, type PlaybackClock } from '@ijipu/engine'
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
+/**
+ * adj987（**用户 2026-10-18 口径**）：练习段**循环之间的静默间隔** = 3 秒。
+ *
+ * 用户原话：「选择循环时，每次循环前加一个 3s 的等待，一个是区分出循环位置，
+ * 一个是给用户循环练习时喘口气」⇒ 循环**不是无缝接**，到点后先停 3 秒再重播。
+ */
+const LOOP_GAP_MS = 3000
 
 export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   const parseResult = useDocStore((s) => s.parseResult)
@@ -124,6 +133,8 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   const cancelRef = useRef<(() => void) | null>(null)
   // adj158：播完自动复位（playing=false → 对话框回中央）
   const doneTimerRef = useRef<number | null>(null)
+  /** adj987（用户需求）：练习段循环——"到点重播这一段"的定时器 */
+  const loopTimerRef = useRef<number | null>(null)
   // adj258：播放序列 + 启动时间（本地计时），高亮定时器按当前 atMs 设 activeNoteIds
   const seqRef = useRef<ReturnType<typeof buildPlaySequence> | null>(null)
   /** adj409：暂停时已播到的位置（原时间轴毫秒）= 续播起点 */
@@ -254,6 +265,11 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
     if (doneTimerRef.current !== null) {
       window.clearTimeout(doneTimerRef.current)
       doneTimerRef.current = null
+    }
+    // adj987：练习段循环的"到点重播"定时器也要一起清（否则停止后还会自己再播一遍）
+    if (loopTimerRef.current !== null) {
+      window.clearTimeout(loopTimerRef.current)
+      loopTimerRef.current = null
     }
     if (highlightTimerRef.current !== null) {
       window.clearInterval(highlightTimerRef.current)
@@ -468,7 +484,31 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       // adj455：选定具体音色 → **全篇统一音色**（含伴奏/第二声部与曲内 `@乐器名@`）；
       // 「自动」时传 undefined，完全按谱面路由。音色名 ref 由 GM 表逆映射得到（与 setVoice 的 program 同源）
       // adj908：末位 = 整份启用音色列表 —— 没写 `Y:` 的声部按序取（各声部音色/色块不再相同）
-      const seq = buildPlaySequence(parseResult, layout, bpm, playbackStartId, defaultInstrumentRef, voiceOverrideRef, enabledInstRefs)
+      const fullSeq = buildPlaySequence(parseResult, layout, bpm, playbackStartId, defaultInstrumentRef, voiceOverrideRef, enabledInstRefs)
+      /**
+       * adj987（用户 2026-10-18 需求）：选了「练习段」就只播这一段，并按「循环」开关决定是否重复。
+       *
+       * · 候选（同一对起止在多处）由 `resolvePracticeRange` 给出，用户选过的 `pass` 优先；
+       * · 失效（端点音符在本次排版里找不到）⇒ **退回全曲**，并提示一句 —— 不静默播半段。
+       */
+      const uiNow = useUiStore.getState()
+      const markNow = uiNow.practiceMarks.find((m) => m.id === uiNow.practiceMarkId) ?? null
+      let seq = fullSeq
+      let practiceRangeMs = 0
+      if (markNow) {
+        const res = resolvePracticeRange(fullSeq, markNow.startId, markNow.endId)
+        if (res.candidates.length === 0) {
+          showNotice(playbackCopy.practiceMarkInvalid, 'warn')
+        } else {
+          const idx = Math.min(Math.max(markNow.pass ?? res.pick, 0), res.candidates.length - 1)
+          const c = res.candidates[idx]
+          const sliced = slicePlaySequenceByRange(fullSeq, c.i0, c.i1)
+          if (sliced) {
+            seq = sliced
+            practiceRangeMs = sliced.rangeMs
+          }
+        }
+      }
       setTotalMs(seq.totalMs)
       // adj262：layout 后写入 voiceBlocks（纯曲部 yTop/yBottom）供预览色框覆盖整列
       setVoiceBlocks(
@@ -532,6 +572,22 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       setPlayError(null)
       // adj282/adj409：驱动定时器（RAF 色块 + 高亮 + 收尾复位）统一由 startTimers 启停
       startTimers(job)
+      /**
+       * adj987（**用户 2026-10-18 需求**）：选了练习段且开着「循环」⇒ 到点**自动重播这一段**。
+       *
+       * 用户追加口径：「每次循环前加一个 **3s 的等待**，一个是**区分出循环位置**，
+       * 一个是给用户循环练习时**喘口气**」⇒ 到点后先静默 3 秒再重播（不是无缝接）。
+       * `play()` 自带"作废上一次在途播放"的代次守卫，重入安全。
+       */
+      if (practiceRangeMs > 0 && useUiStore.getState().practiceLoop) {
+        loopTimerRef.current = window.setTimeout(
+          () => {
+            loopTimerRef.current = null
+            void play()
+          },
+          practiceRangeMs + LOOP_GAP_MS,
+        )
+      }
       // 起点播放后清除标记，下次播放从头开始
       if (playbackStartId) setPlaybackStart(null)
     } catch (e) {
@@ -659,6 +715,9 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
             {samplerState === 'loading' && <span className="dock-muted">{playbackCopy.loading}</span>}
             {samplerState === 'failed' && <span className="dock-warn">{playbackCopy.failedFallback}</span>}
           </div>
+
+          {/* adj987（用户需求）：练习段组（含左上角收起按钮；起止/循环都在这个组件里） */}
+          <PracticeMarkBar />
 
           {/* 右：操作按钮（adj471：**竖排、靠上固定**，与设置面板右侧按钮列同一习惯；
               左侧曲目信息与设置项流式排列，两者顶部对齐） */}

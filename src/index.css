@@ -1859,6 +1859,65 @@ body {
   align-items: center;
   gap: 6px 12px;
 }
+/* ---- adj987（用户 2026-10-18 需求）：试听「练习段」按钮组 ----
+ * 布局：左上角一个极小的**收起/展开**按钮，右侧一行（段选择 / 起始 / 停止 / 添加 / 删除 / 循环 / 遍次）。
+ * 收起时只留那个小按钮（`.is-collapsed`），整组占高为 0 的一行也不留。 */
+.practice-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 4px 6px;
+  border: 1px solid var(--jp-border);
+  border-radius: 6px;
+  background: var(--jp-surface-2);
+}
+.practice-bar.is-collapsed {
+  padding: 2px 4px;
+  border-color: transparent;
+  background: transparent;
+}
+/* 左上角的小按钮：不占地方、不抢视觉 */
+.practice-collapse {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  padding: 0;
+  font-size: 11px;
+  border: 1px solid var(--jp-border);
+  border-radius: 4px;
+  background: var(--jp-surface);
+  color: var(--jp-text-muted);
+  cursor: pointer;
+}
+.practice-collapse:hover {
+  color: var(--jp-text);
+  border-color: var(--jp-accent);
+}
+.practice-title {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--jp-text-muted);
+}
+.practice-select {
+  flex: 0 1 180px;
+  min-width: 120px;
+}
+.practice-pass {
+  flex: 0 1 140px;
+}
+.practice-btn {
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+/* 已登记起点/终点、循环开启 ⇒ 按钮呈"激活"态（与红焦点色区分，用强调色边框） */
+.practice-btn.is-on {
+  border-color: var(--jp-accent);
+  color: var(--jp-accent);
+  font-weight: 600;
+}
 /* adj463：dock 里的**通用排布习惯**——信息/内容靠左（可伸缩、可折行），操作按钮靠右。
  * 宽屏时整条压成一行：`信息 … 设置 … [右] 操作按钮`；窄屏自动折行且按钮仍贴右。 */
 .dock-split {

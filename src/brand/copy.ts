@@ -720,6 +720,34 @@ export const playbackCopy = {
   failedFallback: '加载失败',
   /** adj416：桌面端随安装包内置音源（安装目录 generaluser_gs.sf2）→ 直接读取，无需下载 */
   builtinBankHint: '✓ 使用随应用内置音源（安装目录 generaluser_gs.sf2），无需下载、离线可用。',
+  /* ---- adj987（用户 2026-10-18 需求）：试听「练习段」 ---- */
+  /** 段组标题（收起时也显示） */
+  practiceTitle: '练习段',
+  /** 下拉第一项：无标记 = 演奏全曲（**不可删除**） */
+  practiceNone: '无（演奏全曲）',
+  practiceSelectTitle: '选择练习段（第一项「无」= 演奏全曲，不可删除）',
+  /** 「起始」「停止」两个按钮 —— 先点音符，再点它们 */
+  practiceStart: '起始',
+  practiceStop: '停止',
+  practiceStartHint: '先在谱面点一个音符，再点这里 ⇒ 把它设为这段的起始',
+  practiceStopHint: '先在谱面点一个音符，再点这里 ⇒ 把它设为这段的停止',
+  practiceAdd: '添加',
+  practiceAddHint: '把当前的起始/停止登记成一段（起止都标好才可用）',
+  practiceDelete: '删除',
+  practiceDeleteHint: '删除当前选中的练习段（「无」不可删除）',
+  practiceLoop: '循环',
+  practiceLoopHint: '循环播放这一段（关掉则播一遍就停）',
+  /** 左上角小按钮 */
+  practiceCollapse: '收起练习段组',
+  practiceExpand: '展开练习段组',
+  /** 起止没标全就想添加 */
+  practiceNeedBoth: '先标好「起始」与「停止」两个音符，再添加这一段。',
+  /** 候选遍次（同一对起止在展开序列里可能有多处） */
+  practicePassTitle: '这一对起止对应多处（反复/跳跃）——选你要练的那一遍',
+  /** 标记失效：端点音符在当前谱面里找不到（谱被改过 / 标在被跳过的房子里） */
+  practiceMarkInvalid: '这段标记的音符在当前谱面里找不到（可能改过谱），本次按「全曲」播放；请重新标一段。',
+  /** 循环之间的 3 秒静默（用户口径：区分循环位置 + 喘口气） */
+  practiceLoopGapHint: '循环时每遍之间静默 3 秒',
 } as const
 
 /**
