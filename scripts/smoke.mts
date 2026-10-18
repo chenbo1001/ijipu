@@ -21330,8 +21330,15 @@ function runAdj987Tests() {
       JSON.stringify({ shifted, res: resShift }),
     )
     check(
-      'adj987g **负对照**：连"组号+音符序号"都对不上 ⇒ 仍然 `missing`（判据没放宽到底）',
-      resolvePracticeRange(seqG, '1_1_999_999', idsG[3]).missing === 'start',
+      /**
+       * adj990 起**口径变了**：端点一定解析出结果（宁可范围落在序列一端，也不再 `missing` / 退回全曲）。
+       * 这条原来的负对照（"对不上 ⇒ missing"）因此按新口径重写。
+       */
+      'adj987g **负对照（adj990 新口径）**：连"组号+音符序号"都对不上 ⇒ 兜底夹到序列一端，**不再报 missing**',
+      (() => {
+        const r = resolvePracticeRange(seqG, '1_1_999_999', idsG[3])
+        return r.missing === undefined && r.candidates.length >= 1 && r.candidates[0].i0 === 0
+      })(),
       '',
     )
     /**
@@ -21383,8 +21390,25 @@ function runAdj987Tests() {
       JSON.stringify({ id0, want: mkId(99), res: resClamp }),
     )
     check(
-      'adj987x **负对照**：起点序号也不存在（99）⇒ 起点夹到"序号 ≥ 目标"的第一个（不存在 ⇒ 仍报 `missing: start`）',
-      resolvePracticeRange(seq987x, mkId(99), mkId(99)).missing === 'start',
+      /** adj990 起口径：起点序号不存在 ⇒ 夹到"序号 ≥ 目标"的第一个（没有就落整条序列末尾），**不再 missing** */
+      'adj987x **负对照（adj990 新口径）**：起点序号不存在（99）⇒ 夹到序列末尾，仍然给得出候选',
+      (() => {
+        const r = resolvePracticeRange(seq987x, mkId(99), mkId(99))
+        return r.missing === undefined && r.candidates.length >= 1 && r.candidates[0].i0 === 0
+      })(),
+      '',
+    )
+    /** 把 id 的**分组号与序号**都改成指定值（模拟"分组号漂移"） */
+    const mkId990 = (v: number) => id0.replace(/_(\d+)_(\d+)$/, `_${v}_${v}`)    /**
+     * adj990（**用户 2026-10-19 实报**：标记段又弹"找不到…按全曲播放"）：
+     * 端点 id 连**分组号**都对不上时，必须退到"忽略分组、只按同声部+序号夹紧"，**不许**再报 missing。
+     */
+    check(
+      'adj990 分组号不存在（99）⇒ 仍能解析出候选（忽略分组兜底，不再退回全曲）',
+      (() => {
+        const r = resolvePracticeRange(seq987x, mkId990(0), mkId990(99))
+        return r.missing === undefined && r.candidates.length >= 1
+      })(),
       '',
     )
     const R987n = ['V: 1.0', 'B: t', 'D: C', 'P: 4/4', 'Q: 1 2 (3 4 5) 6 |', ''].join('\n')
