@@ -212,13 +212,25 @@ export interface ResolvedPracticeRange {
 
 export function resolvePracticeRange(seq: PlaySequence, startId: string, endId: string): ResolvedPracticeRange {
   const idOf = (e: PlayEvent): string => noteIdStringOf(e.placed.id)
-  const starts: number[] = []
-  const ends: number[] = []
-  for (let i = 0; i < seq.events.length; i++) {
-    const s = idOf(seq.events[i])
-    if (s === startId) starts.push(i)
-    if (s === endId) ends.push(i)
+  /**
+   * adj987g（**用户 2026-10-18 实报**「这段标记的音符在当前谱面里找不到」）：
+   * **id 不能只按整串精确比**——预览与试听各自 `layoutScore`（试听多了乐器/字体实测等参数），
+   * 分页与声部编号可能不同，但**同一行的音符序号**是稳定的。
+   *
+   * ⇒ 先按整串比；找不到就退到「**组号 + 音符序号**」（`_group_index` 尾巴）再比一次。
+   */
+  const tailOf = (id: string): string => {
+    const m = /^(\d+)_(\d+)_(\d+)_(\d+)$/.exec(id)
+    return m ? `_${m[3]}_${m[4]}` : id
   }
+  const pickIdx = (want: string): number[] => {
+    const exact = seq.events.map((e, i) => (idOf(e) === want ? i : -1)).filter((i) => i >= 0)
+    if (exact.length > 0) return exact
+    const tail = tailOf(want)
+    return seq.events.map((e, i) => (idOf(e).endsWith(tail) ? i : -1)).filter((i) => i >= 0)
+  }
+  const starts = pickIdx(startId)
+  const ends = pickIdx(endId)
   if (starts.length === 0) return { pick: 0, candidates: [], missing: 'start' }
   if (ends.length === 0) return { pick: 0, candidates: [], missing: 'end' }
 

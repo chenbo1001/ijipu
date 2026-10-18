@@ -5570,3 +5570,37 @@ span.ws-check {
   color: var(--jp-text-secondary);
   word-break: break-all;
 }
+/* ---- adj987h（用户 2026-10-18 需求）：试听「标记段」的标记线 ----
+ * 用户口径：「建议用线，不抢眼」⇒ 一条细线（每行一段）+ 两端小竖头，**不铺底色块**
+ * （底色会抢播放色块的视觉）；颜色用青色系，与红焦点 / 播放色块都区分得开。 */
+.practice-mark-line {
+  position: absolute;
+  z-index: 0;
+  background: #2f9e8f;
+  border-radius: 1px;
+  opacity: 0.85;
+  pointer-events: none;
+}
+.practice-mark-tick {
+  position: absolute;
+  z-index: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #2f9e8f;
+  pointer-events: none;
+}
+/* 起 / 止两端用同色，但"止"稍宽一点，便于分辨哪头是结束 */
+.practice-mark-tick-stop {
+  width: 3px;
+  margin-left: -1.5px;
+}
+.practice-mark-loop {
+  position: absolute;
+  z-index: 0;
+  transform: translateX(-50%);
+  font-size: 11px;
+  line-height: 1;
+  color: #2f9e8f;
+  pointer-events: none;
+  user-select: none;
+}

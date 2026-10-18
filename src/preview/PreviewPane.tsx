@@ -10,6 +10,8 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 // adj529：预览页基准宽（与顶栏"双击比率按宽度适配"的反算算式同源）
 import { PREVIEW_BASE_W, isFullyVisibleIn } from './zoomFit'
+// adj987h（用户需求）：试听「标记段」的标记线覆盖层
+import { PracticeMarkLayer } from './PracticeMarkLayer'
 // adj895：播放跟随滚动的「安全区」判定（纯函数，见该文件的口径说明）
 import { followScrollTargetX } from './followScroll'
 import { openExternalUrl } from './openUrl'
@@ -837,6 +839,8 @@ export function PreviewPane() {
                 />
                 {/* adj282：播放进度跟随色块（接近透明，随播放时钟滑动；未播放时自身不渲染） */}
                 <PlayheadLayer page={page} noteSize={pageConfig.note_size} />
+                {/* adj987h（用户需求）：试听「标记段」的标记线（每行一段 + 两端小竖头 + 循环 ⟲） */}
+                <PracticeMarkLayer page={page} noteSize={pageConfig.note_size} />
                 {/* adj723b：**只读自检**（见 `PlayheadDiag` 说明；不参与渲染） */}
                 <PlayheadDiag pageIndex={page.index} noteSize={pageConfig.note_size} />
                 {/* adj905q 预览可视调试：三套边界虚线（时值格 / 墨迹 / 段层）。

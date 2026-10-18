@@ -21314,6 +21314,25 @@ function runAdj987Tests() {
       /while \(last \+ 1 < seq\.events\.length && seq\.events\[last \+ 1\]\.atMs < endT - 0\.5\)/.test(seqSrc987),
       '',
     )
+    /**
+     * adj987g（**用户 2026-10-18 实报**：「这段标记的音符在当前谱面里找不到」）：
+     * 预览与试听各自排版，**页号/声部号可能不同**，但"组号 + 音符序号"稳定 ⇒ 解析必须能退到那个口径。
+     */
+    const seqG = buildPlaySequence(parseJps(['V: 1.0', 'B: t', 'D: C', 'P: 4/4', 'Q: 1 2 3 4 |', ''].join('\n')), layoutScore(parseJps(['V: 1.0', 'B: t', 'D: C', 'P: 4/4', 'Q: 1 2 3 4 |', ''].join('\n')), defaultPageConfig), 60)
+    const idsG = seqG.events.map((e) => noteIdStringOf(e.placed.id))
+    // 把第一个 id 的"页号/声部号"改成别的（模拟预览与试听编号不一致）
+    const shifted = idsG[0].replace(/^(\d+)_(\d+)_/, '99_99_')
+    const resShift = resolvePracticeRange(seqG, shifted, idsG[3])
+    check(
+      'adj987g **宽松匹配**：页号/声部号对不上时，退到"组号+音符序号"仍能解析出候选（不再误报"找不到"）',
+      resShift.missing === undefined && resShift.candidates.length >= 1,
+      JSON.stringify({ shifted, res: resShift }),
+    )
+    check(
+      'adj987g **负对照**：连"组号+音符序号"都对不上 ⇒ 仍然 `missing`（判据没放宽到底）',
+      resolvePracticeRange(seqG, '1_1_999_999', idsG[3]).missing === 'start',
+      '',
+    )
     const R987 = ['V: 1.0', 'B: t', 'D: C', 'P: 4/4', 'Q: 1 2 3 4 |', ''].join('\n')
     const r987 = parseJps(R987)
     const seq987 = buildPlaySequence(r987, layoutScore(r987, defaultPageConfig), 60)
