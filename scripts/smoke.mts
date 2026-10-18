@@ -19424,7 +19424,8 @@ runAdj927ExternalChangeTests()
     }
     try {
       // adj987：试听练习段（数据层 + 播放区间切片）
-      runAdj987Tests()
+      runAdj989Tests()
+  runAdj987Tests()
     } catch (e) {
       failed++
       console.error('  ✗ adj987 试听练习段用例抛异常', e)
@@ -21424,6 +21425,40 @@ function runAdj987Tests() {
   }
 }
 
+/**
+ * [188] adj989 暂停/续播的位置记忆（用户 2026-10-19 实报"续播位置有点乱"）
+ *
+ * 这一条要钉住的是**引擎时钟的语义**：`start()` 会把 `base` **清零**。
+ * 所以"续播"的正确姿势只能是 `start()` **之后**再 `seek(from)`；
+ * 先 `seek` 再 `start` 会把暂停点抹掉（当时的 bug）——而且症状很隐蔽：
+ * 声音对（音频另排）、只有色块跳回开头，**且下一次暂停取到的是小值**，越暂停越乱。
+ */
+function runAdj989Tests() {
+  console.log('[188] adj989 pause/resume clock position')
+  /** 可控时钟：手工推进 `t`（避免真等 1.5 秒） */
+  let t = 0
+  const mk = () => createPlaybackClock({ now: () => t, raf: () => 0, cancelRaf: () => {}, totalMs: 60000 })
+  const c1 = mk()
+  c1.start()
+  t = 1500
+  const pausedAt = c1.pause()
+  check('adj989 ① 暂停返回的是**已播到的位置**（start 后推进 1500ms ⇒ pause = 1500）', Math.abs(pausedAt - 1500) < 1, `pausedAt=${pausedAt}`)
+  c1.start()
+  check('adj989 ② **`start()` 会清零 `base`**（这正是当时的坑：先 seek 再 start ⇒ 暂停点被抹掉）',
+    c1.ms() < 1, `ms=${c1.ms()}`)
+  const c2 = mk()
+  c2.start()
+  c2.seek(pausedAt)
+  t = 1500 + 700
+  check('adj989 ③ 正确姿势 `start()` → `seek(from)`：时钟从暂停点继续（1500+700=2200）',
+    Math.abs(c2.ms() - 2200) < 1, `ms=${c2.ms()}`)
+  /** 源码口径：`startTimers` 里必须 `start()` 之后 seek；`resume()` 不再在 startTimers 之前 seek */
+  const dlg989 = String(readFileSync('src/dialogs/PlaybackDialog.tsx', 'utf8'))
+  check('adj989 ④ 源码：`startTimers` 在 `clock().start()` **之后**才 `seek(fromMs)`',
+    /clock\(\)\.start\(\)\s*\n\s*if \(fromMs > 0\) clock\(\)\.seek\(fromMs\)/.test(dlg989))
+  check('adj989 ④ 负对照：`resume()` 里**不再**直接 `clock().seek(from)`（那样会被 startTimers 的 start 清零）',
+    !/clock\(\)\.seek\(from\)\s*\n\s*setPaused\(false\)/.test(dlg989))
+}
 function runAdj973Tests() {
   console.log('[181] adj973 slur pairing warnings (not-drawn slurs must be visible)')
   const HEAD = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'

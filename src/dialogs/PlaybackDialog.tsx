@@ -158,6 +158,8 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   const doneTimerRef = useRef<number | null>(null)
   /** adj987（用户需求）：练习段循环——"到点重播这一段"的定时器 */
   const loopTimerRef = useRef<number | null>(null)
+  /** adj989：这一段的总长（ms）——续播时要据此算'还剩多长'，循环才不会断 */
+  const practiceRangeMsRef = useRef(0)
   // adj258：播放序列 + 启动时间（本地计时），高亮定时器按当前 atMs 设 activeNoteIds
   const seqRef = useRef<ReturnType<typeof buildPlaySequence> | null>(null)
   /** adj409：暂停时已播到的位置（原时间轴毫秒）= 续播起点 */
@@ -315,14 +317,25 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
    * 到点（job.totalMs + 100）自动复位。
    * 暂停后重排的序列是"相对现在"的，故收尾时间直接用 job.totalMs —— 与首次播放同一套语义。
    */
-  const startTimers = (job: { totalMs: number }, loopRangeMs = 0) => {
+  /**
+   * 启动三种驱动定时器。`loopRangeMs` 是"这一段还剩多长"（0 = 不循环/无标记段）。
+   *
+   * adj989（**用户 2026-10-19 实报**「暂停后继续播放位置有点乱」）：这里原来**无条件** `clock().start()`，
+   * 而 `Clock.start()` 会把 `base` **清零**；`resume()` 又是"先 `seek(from)` 再 `startTimers`" ⇒
+   * 暂停点被抹掉 ✗。后果有两个且都很难看出：
+   *  ① 续播后色块/高亮**跳回开头**（但声音是对的，因为音频是另排的）；
+   *  ② 更糟：**下一次暂停**取到的是"从续播点算起"的小值 ⇒ 再续播就从错的位置开始 ⇒ 越暂停越乱。
+   * ⇒ 改成把"从哪儿起"作为参数传进来：`start()` 之后立刻 `seek(fromMs)`，`base` 才是暂停点。
+   */
+  const startTimers = (job: { totalMs: number }, loopRangeMs = 0, fromMs = 0) => {
     clearTimers()
     /**
      * adj764：位置推进交给引擎时钟 —— `onTick` 里 `setCurrentMs(ms)`（色块平滑滑动），
      * 原来的 `rafLoop` 递归已删除（那是"自己实现的时钟"）。首次播放 `base = 0`；
-     * 续播前会先 `seek(from)` ⇒ `start()` 从暂停点继续。
+     * 续播时靠 `seek(from)` 把 `base` 抬到暂停点（adj989：必须在 `start()` **之后** seek）。
      */
     clock().start()
+    if (fromMs > 0) clock().seek(fromMs)
     const computeActive = () => {
       const cur = curMs()
       const ids: string[] = []
@@ -368,6 +381,8 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
     setPlaying(false)
     setPaused(false)
     pausedAtRef.current = 0
+    // adj989：段长同时清掉（否则下次"续播"会拿旧段长算剩余，循环会错位）
+    practiceRangeMsRef.current = 0
     clock().cancel()
     clearPlaybackUi()
   }
@@ -406,9 +421,15 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
     }
     const job = schedulePlay({ events }, backend, undefined, undefined, 0)
     cancelRef.current = job.cancel
-    clock().seek(from)
     setPaused(false)
-    startTimers(job)
+    /**
+     * adj989：续播要把 `from` 交给 `startTimers`（它负责 `start()` 后 `seek(from)`）——
+     * 原来在这里先 `seek(from)` 再 `startTimers(job)`，而 `start()` 会把 `base` 清零 ⇒ 暂停点被抹掉。
+     * 循环中续播也要把"这一段还剩多长"传进去，否则续播后循环就不再触发了。
+     */
+    const total = practiceRangeMsRef.current
+    const remainLoop = total > from ? total - from : 0
+    startTimers(job, remainLoop, from)
   }
 
   /** 播放键（开关语义）：未播放 → 播放；播放中 → 暂停；暂停中 → 继续 */
@@ -556,6 +577,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
           if (sliced) {
             seq = sliced
             practiceRangeMs = sliced.rangeMs
+            practiceRangeMsRef.current = practiceRangeMs
           }
         }
       }
