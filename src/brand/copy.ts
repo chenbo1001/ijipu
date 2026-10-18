@@ -747,7 +747,10 @@ export const playbackCopy = {
   /** 标记失效：端点音符在当前谱面里找不到（谱被改过 / 标在被跳过的房子里） */
   practiceMarkInvalid: '这段标记的音符在当前谱面里找不到（可能改过谱），本次按「全曲」播放；请重新标一段。',
   /** adj987s：标记段解析结果的一句话读数（音数 + 时长），直接显示在按钮组里便于核对 */
-  practiceResolved: (n: number, secs: string) => ` · ${n} 个音 · ${secs}`,
+  practiceResolved: (n: number, secs: string, lastNote: string, markedEnd: string) =>
+    lastNote === markedEnd
+      ? ' · ' + n + ' 个音 · ' + secs + ' · 末音 ' + lastNote
+      : ' · ' + n + ' 个音 · ' + secs + ' · 末音 ' + lastNote + '（标的停止音 ' + markedEnd + '）',
   /** 解析不出（标记失效）时的短提示（按钮组里用，比弹提示轻） */
   practiceResolvedMissing: ' · 找不到这段的音符',
   /** 循环之间的 3 秒静默（用户口径：区分循环位置 + 喘口气） */

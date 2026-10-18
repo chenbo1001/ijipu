@@ -28,6 +28,12 @@ import { useUiStore } from '../store/uiStore'
 import { docKeyOf, loadMarks, saveMarks } from '../store/practiceMarks'
 import { playbackCopy } from '../brand/copy'
 
+/** 音符 id → `g组#序号`（读数里显示用；解析不出来给 `?`） */
+function noteLabelOf(id: string): string {
+  const m = /^(\d+)_(\d+)_(\d+)_(\d+)$/.exec(id)
+  return m ? `g${m[3]}#${m[4]}` : '?'
+}
+
 export function PracticeMarkBar(): React.JSX.Element {
   const marks = useUiStore((s) => s.practiceMarks)
   const markId = useUiStore((s) => s.practiceMarkId)
@@ -72,19 +78,27 @@ export function PracticeMarkBar(): React.JSX.Element {
    * （用户口径 #5：「允许起始在停止后，且要跟着演奏顺序画线」）。
    */
   const resolved = useMemo(() => {
-    if (!cur) return { candidates: [], ids: [] as string[], rangeMs: 0 }
+    const empty = { candidates: [], ids: [] as string[], rangeMs: 0, lastNote: '' }
+    if (!cur) return empty
     const seq = buildPlaySequence(parseResult, layoutScore(parseResult, pageConfig), 90)
     const res = resolvePracticeRange(seq, cur.startId, cur.endId)
-    if (res.candidates.length === 0) return { candidates: [], ids: [] as string[], rangeMs: 0 }
+    if (res.candidates.length === 0) return empty
     const idx = Math.min(Math.max(cur.pass ?? res.pick, 0), res.candidates.length - 1)
     const c = res.candidates[idx]
     // adj987n：画线也要用"延长到连音线末尾"之后的范围，否则线比实际演奏短一截
     const i1ext = extendRangeEndToSlurEnd(seq, c.i1, parseResult.slurPairs)
     const sliced = slicePlaySequenceByRange(seq, c.i0, i1ext)
+    const evs = sliced?.events ?? []
+    const lastEv = evs.length > 0 ? evs[evs.length - 1] : null
     return {
       candidates: res.candidates,
-      ids: sliced ? sliced.events.map((e) => noteIdStringOf(e.placed.id)) : [],
+      ids: evs.map((e) => noteIdStringOf(e.placed.id)),
       rangeMs: sliced?.rangeMs ?? 0,
+      /**
+       * adj987t（用户实报「少了停止位的那个音」）：**这一段最后一个音**的 `g组#序号`。
+       * 与标记的终点（同一格式）一比对，就能看出是不是"少了一个音"。
+       */
+      lastNote: lastEv ? `g${lastEv.placed.id.group}#${lastEv.placed.id.index}` : '',
     }
   }, [cur, parseResult, pageConfig])
   const candidates = resolved.candidates
@@ -237,7 +251,12 @@ export function PracticeMarkBar(): React.JSX.Element {
           {cur && (
             <span className="practice-readout" title={playbackCopy.practiceSelectTitle}>
               {resolved.ids.length > 0
-                ? playbackCopy.practiceResolved(resolved.ids.length, (resolved.rangeMs / 1000).toFixed(1) + ' 秒')
+                ? playbackCopy.practiceResolved(
+                    resolved.ids.length,
+                    (resolved.rangeMs / 1000).toFixed(1) + ' 秒',
+                    resolved.lastNote,
+                    noteLabelOf(cur.endId),
+                  )
                 : playbackCopy.practiceResolvedMissing}
             </span>
           )}
