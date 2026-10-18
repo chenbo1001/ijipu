@@ -297,6 +297,13 @@ interface UiState {
   /** 待添加的起点 / 终点音符 id（点音符后再按「起始」「停止」） */
   practiceSelStart: string | null
   practiceSelStop: string | null
+  /**
+   * adj987k（用户 2026-10-18 口径 #5）：当前标记段**实际会演奏到的音符 id**（按**播放顺序**）。
+   *
+   * 预览层照它画线：跨 `:|` 回跳/跳房子时，线要**跟着演奏顺序**走（起在止之后也能画对），
+   * 而不是简单取"起点到停止点的源码区间"。
+   */
+  practiceRangeIds: string[]
   /** 轻量浮动提示（null = 无提示） */
   notice: Notice | null
   /** adj379：检测到 SW 新版本（页面仍在跑旧 bundle）——右下角提示「点击刷新」 */
@@ -430,6 +437,8 @@ interface UiState {
   setPracticeMarkPass: (id: string, pass: number) => void
   /** 点音符后按「起始」/「停止」：登记待添加的端点 */
   setPracticeSel: (which: 'start' | 'stop', noteId: string | null) => void
+  /** adj987k：写入"这一段实际演奏到的音符 id"（`[]` = 只按起止范围画） */
+  setPracticeRangeIds: (ids: string[]) => void
   /** 用当前两个端点**新增**一段（名 `段 N`），并自动选中它 */
   addPracticeMark: () => PracticeMark | null
   /** 删除当前选中的标记（「无」不可删） */
@@ -760,6 +769,7 @@ export const useUiStore = create<UiState>()((set) => ({
   practiceCollapsed: loadBool(PRACTICE_COLLAPSED_KEY, false),
   practiceSelStart: null,
   practiceSelStop: null,
+  practiceRangeIds: [],
   setPracticeMarks: (marks) =>
     set((s) => {
       // 当前选中的标记若不在新列表里（换文档了）⇒ 退回「无」
@@ -770,6 +780,7 @@ export const useUiStore = create<UiState>()((set) => ({
   setPracticeMarkPass: (id, pass) =>
     set((s) => ({ practiceMarks: s.practiceMarks.map((m) => (m.id === id ? { ...m, pass } : m)) })),
   setPracticeSel: (which, noteId) => set(which === 'start' ? { practiceSelStart: noteId } : { practiceSelStop: noteId }),
+  setPracticeRangeIds: (ids) => set({ practiceRangeIds: ids }),
   addPracticeMark: () => {
     const s = useUiStore.getState()
     if (!s.practiceSelStart || !s.practiceSelStop) return null
@@ -779,14 +790,27 @@ export const useUiStore = create<UiState>()((set) => ({
       startId: s.practiceSelStart,
       endId: s.practiceSelStop,
     }
-    set({ practiceMarks: [...s.practiceMarks, mark], practiceMarkId: mark.id })
+    // adj987k：添加后清掉"待标端点"，否则预览层会继续按旧端点画线
+    set({
+      practiceMarks: [...s.practiceMarks, mark],
+      practiceMarkId: mark.id,
+      practiceSelStart: null,
+      practiceSelStop: null,
+    })
     return mark
   },
   deletePracticeMark: (id) =>
-    set((s) => ({
-      practiceMarks: s.practiceMarks.filter((m) => m.id !== id),
-      practiceMarkId: s.practiceMarkId === id ? '' : s.practiceMarkId,
-    })),
+    set((s) => {
+      const removing = s.practiceMarkId === id
+      return {
+        practiceMarks: s.practiceMarks.filter((m) => m.id !== id),
+        practiceMarkId: removing ? '' : s.practiceMarkId,
+        // adj987k（用户实报「标记段删除了，线还在」）：删掉后连"实际演奏范围"与"待标端点"一起清
+        practiceRangeIds: removing ? [] : s.practiceRangeIds,
+        practiceSelStart: removing ? null : s.practiceSelStart,
+        practiceSelStop: removing ? null : s.practiceSelStop,
+      }
+    }),
   setPracticeLoop: (b) => {
     try {
       localStorage.setItem(PRACTICE_LOOP_KEY, b ? '1' : '0')

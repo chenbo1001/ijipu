@@ -22,10 +22,10 @@
  * 选过之后写回标记的 `pass`（持久化）。
  */
 import { useEffect, useMemo } from 'react'
-import { buildPlaySequence, layoutScore, resolvePracticeRange } from '@ijipu/engine'
+import { buildPlaySequence, layoutScore, noteIdStringOf, resolvePracticeRange, slicePlaySequenceByRange } from '@ijipu/engine'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
-import { docKeyOf, loadMarks, saveMarks } from '../store/practiceMarks'
+import { docKeyOf, extendStopToSlurEnd, loadMarks, saveMarks } from '../store/practiceMarks'
 import { playbackCopy } from '../brand/copy'
 
 export function PracticeMarkBar(): React.JSX.Element {
@@ -62,17 +62,32 @@ export function PracticeMarkBar(): React.JSX.Element {
     saveMarks(docKey, marks)
   }, [docKey, marks])
 
+  const setPracticeRangeIds = useUiStore((s) => s.setPracticeRangeIds)
   const cur = marks.find((m) => m.id === markId)
 
   /**
-   * 候选遍次：**只在选中了标记时**才算（要 buildPlaySequence，比较贵）。
-   * 解析不出来（标记失效）⇒ 空数组，UI 只显示提示，不显示遍次下拉。
+   * 候选遍次 + **这一段实际演奏到的音符 id**（adj987k）。
+   *
+   * 后者给预览层画线用：跨 `:|` 回跳/跳房子时线要**跟着演奏顺序**走
+   * （用户口径 #5：「允许起始在停止后，且要跟着演奏顺序画线」）。
    */
-  const candidates = useMemo(() => {
-    if (!cur) return []
+  const resolved = useMemo(() => {
+    if (!cur) return { candidates: [], ids: [] as string[] }
     const seq = buildPlaySequence(parseResult, layoutScore(parseResult, pageConfig), 90)
-    return resolvePracticeRange(seq, cur.startId, cur.endId).candidates
+    const res = resolvePracticeRange(seq, cur.startId, cur.endId)
+    if (res.candidates.length === 0) return { candidates: [], ids: [] as string[] }
+    const idx = Math.min(Math.max(cur.pass ?? res.pick, 0), res.candidates.length - 1)
+    const c = res.candidates[idx]
+    const sliced = slicePlaySequenceByRange(seq, c.i0, c.i1)
+    return {
+      candidates: res.candidates,
+      ids: sliced ? sliced.events.map((e) => noteIdStringOf(e.placed.id)) : [],
+    }
   }, [cur, parseResult, pageConfig])
+  const candidates = resolved.candidates
+  useEffect(() => {
+    setPracticeRangeIds(resolved.ids)
+  }, [resolved, setPracticeRangeIds])
 
   const canAdd = !!selStart && !!selStop
   /**
@@ -120,7 +135,14 @@ export function PracticeMarkBar(): React.JSX.Element {
           </button>
           <button
             className={`btn practice-btn${selStop ? ' is-on' : ''}`}
-            onClick={() => setSel('stop', activeNoteId)}
+            onClick={() => {
+              /**
+               * adj987j（用户口径 #2）：「停止音符如果有**连音线**，应该播放到覆盖该音符的连音线完为止
+               * （这个可以在停止位时定好实际的停止点）」⇒ 标停止时就把端点**延伸到该连音线的终点**。
+               */
+              const id = activeNoteId
+              setSel('stop', id ? extendStopToSlurEnd(id, parseResult.slurPairs) : null)
+            }}
             disabled={!activeNoteId}
             title={playbackCopy.practiceStopHint}
             aria-label={playbackCopy.practiceStop}

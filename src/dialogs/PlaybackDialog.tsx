@@ -292,7 +292,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
    * 到点（job.totalMs + 100）自动复位。
    * 暂停后重排的序列是"相对现在"的，故收尾时间直接用 job.totalMs —— 与首次播放同一套语义。
    */
-  const startTimers = (job: { totalMs: number }) => {
+  const startTimers = (job: { totalMs: number }, loopRangeMs = 0) => {
     clearTimers()
     /**
      * adj764：位置推进交给引擎时钟 —— `onTick` 里 `setCurrentMs(ms)`（色块平滑滑动），
@@ -316,16 +316,23 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
     }
     computeActive()
     highlightTimerRef.current = window.setInterval(computeActive, 50)
-    // adj158：播放结束后自动复位（playing=false，对话框从右下角回中央）
-    doneTimerRef.current = window.setTimeout(() => {
-      doneTimerRef.current = null
-      clearTimers()
-      clock().cancel()
-      setPlaying(false)
-      setPaused(false)
-      pausedAtRef.current = 0
-      clearPlaybackUi()
-    }, job.totalMs + 100)
+    /**
+     * adj987i（**用户 2026-10-18 实测**：「有选择循环，但实际没有循环播放」）：
+     * 这里原来**无条件**设"播完复位"定时器——它到点会 `clearTimers()`，把循环那个"到点重播"定时器
+     * 一起清掉（`clearTimers` 会清 `loopTimerRef`）⇒ 循环永远不触发 ✗。
+     * ⇒ **循环模式下不设收尾定时器**（这一遍结束时由循环定时器接上）。
+     */
+    if (!(loopRangeMs > 0 && useUiStore.getState().practiceLoop)) {
+      doneTimerRef.current = window.setTimeout(() => {
+        doneTimerRef.current = null
+        clearTimers()
+        clock().cancel()
+        setPlaying(false)
+        setPaused(false)
+        pausedAtRef.current = 0
+        clearPlaybackUi()
+      }, job.totalMs + 100)
+    }
   }
 
   const stop = () => {
@@ -571,7 +578,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       setPaused(false)
       setPlayError(null)
       // adj282/adj409：驱动定时器（RAF 色块 + 高亮 + 收尾复位）统一由 startTimers 启停
-      startTimers(job)
+      startTimers(job, practiceRangeMs)
       /**
        * adj987（**用户 2026-10-18 需求**）：选了练习段且开着「循环」⇒ 到点**自动重播这一段**。
        *

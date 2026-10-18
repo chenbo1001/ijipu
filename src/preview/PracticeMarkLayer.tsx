@@ -25,20 +25,33 @@ export function PracticeMarkLayer({ page, noteSize }: { page: ScorePageLike; not
   const loop = useUiStore((s) => s.practiceLoop)
   const selStart = useUiStore((s) => s.practiceSelStart)
   const selStop = useUiStore((s) => s.practiceSelStop)
+  /** adj987k：这一段**实际演奏到的音符 id**（跨反复/跳跃时按播放顺序给） */
+  const rangeIds = useUiStore((s) => s.practiceRangeIds)
+  /** adj987l（用户口径 #4）：标记段线**只在试听面板打开时**显示（底栏的「试听」页签） */
+  const showInDialog = useUiStore((s) => s.dockOpen && s.dockPanel === 'tryout')
   const cur = marks.find((m) => m.id === markId) ?? null
   /** 画哪一段：优先"已选中的标记"，其次"正在标的两端"；只有一个端点时只画那个小竖头 */
   const startId = cur?.startId ?? selStart ?? null
   const endId = cur?.endId ?? selStop ?? null
+  if (!showInDialog) return null
   if (!startId && !endId) return null
+  /**
+   * 画法优先级：
+   *  ① 有"实际演奏到的音符 id"（选中了标记时由按钮组算好）⇒ **按它画**——
+   *     跨 `:|` 回跳、跳房子时线跟着演奏顺序走（用户口径 #5：起在止之后也能画对）；
+   *  ② 否则退回"起止之间按序号取区间"（用于还没添加、只在标两端的时候）。
+   */
   const bands =
-    startId && endId
-      ? markBandsOf(
-          // `rightX` 在类型上是可选的（跨行/段层音符可能没有）⇒ 兜底成 `x + 1`，只影响线的右端点
-          page.notes.map((n) => ({ id: n.id, x: n.x, y: n.y, rightX: n.rightX ?? n.x + 1 })),
-          startId,
-          endId,
-        )
-      : []
+    rangeIds.length > 0
+      ? bandsFromIds(page, rangeIds)
+      : startId && endId
+        ? markBandsOf(
+            // `rightX` 在类型上是可选的（跨行/段层音符可能没有）⇒ 兜底成 `x + 1`，只影响线的右端点
+            page.notes.map((n) => ({ id: n.id, x: n.x, y: n.y, rightX: n.rightX ?? n.x + 1 })),
+            startId,
+            endId,
+          )
+        : []
   const pct = (v: number) => `${((v / page.width) * 100).toFixed(3)}%`
   const pctY = (v: number) => `${((v / page.height) * 100).toFixed(3)}%`
   /** 线画在音符**下方**（数字基线 + 1.15 倍字号 ≈ 减时线之下、歌词之上） */
@@ -124,5 +137,45 @@ function SingleTick({
 export interface ScorePageLike {
   width: number
   height: number
-  notes: readonly { id: { index: number }; x: number; y: number; rightX?: number }[]
+  notes: readonly { id: { index: number; page?: number; voice?: number; group?: number }; x: number; y: number; rightX?: number }[]
+}
+
+/**
+ * adj987k：按"**实际演奏到的音符 id 列表**"算出这一页上的线（按行切段）。
+ *
+ * 为什么不用"起止序号区间"：跨 `:|` 回跳/跳房子时，演奏顺序与源码顺序不一致
+ * （用户口径 #5：「起始在停止后」也允许），按 id 列表画才能**跟着演奏走**。
+ */
+function bandsFromIds(page: ScorePageLike, ids: readonly string[]): { row: number; x0: number; x1: number; y: number }[] {
+  const exact = new Set(ids)
+  /** 宽松匹配的"组号+序号"尾巴（与引擎 `resolvePracticeRange` 同一口径：页号/声部号可能不一致） */
+  const tails = new Set(
+    ids.map((id) => {
+      const m = /^(\d+)_(\d+)_(\d+)_(\d+)$/.exec(id)
+      return m ? `_${m[3]}_${m[4]}` : id
+    }),
+  )
+  const picked = page.notes.filter(
+    (n) => exact.has(noteIdOf(n)) || tails.has(`_${(n.id as { group?: number }).group ?? 0}_${n.id.index}`),
+  )
+  if (picked.length === 0) return []
+  const byRow = new Map<number, { x0: number; x1: number; y: number }>()
+  for (const n of picked) {
+    const y = n.y
+    const cur = byRow.get(y)
+    const right = n.rightX ?? n.x + 1
+    if (!cur) byRow.set(y, { x0: n.x, x1: right, y })
+    else {
+      cur.x0 = Math.min(cur.x0, n.x)
+      cur.x1 = Math.max(cur.x1, right)
+    }
+  }
+  return [...byRow.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([y, b], i) => ({ row: i, x0: b.x0, x1: b.x1, y }))
+}
+
+/** 音符 id 串（与引擎 `noteIdStringOf` 同形；这里只在本页里比对用） */
+function noteIdOf(n: { id: { page?: number; voice?: number; group?: number; index: number } }): string {
+  return `${n.id.page ?? 0}_${n.id.voice ?? 0}_${n.id.group ?? 0}_${n.id.index}`
 }

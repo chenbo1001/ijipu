@@ -190,3 +190,31 @@ export function markBandsOf(
     .sort((a, b) => a[0] - b[0])
     .map(([y, band], i) => ({ row: i, x0: band.x0, x1: band.x1, y }))
 }
+
+/**
+ * adj987j（**用户 2026-10-18 口径**）：「停止音符如果有**连音线**，也应该播放到**覆盖该音符的连音线完为止**
+ * （这个可以在停止位时定好实际的停止点）」。
+ *
+ * 做法：用户标「停止」时，若该音符落在某条连音线的范围内，就把实际停止点**延伸到那条连音线的终点**。
+ * 只在"确实被某条线覆盖"时才延伸（没有线就原样返回）。
+ *
+ * @param stopId 用户标的停止音符 id（`page_voice_group_index`）
+ * @param pairs  `parseResult.slurPairs`（`start`/`end` 是音符序号）
+ * @returns 实际停止点 id（若延伸了，替换最后一段序号）
+ */
+export function extendStopToSlurEnd(
+  stopId: string,
+  pairs: readonly { start: number; end: number }[] | undefined,
+): string {
+  const m = /^(\d+)_(\d+)_(\d+)_(\d+)$/.exec(stopId)
+  if (!m || !pairs || pairs.length === 0) return stopId
+  const idx = Number(m[4])
+  let best = -1
+  for (const p of pairs) {
+    const lo = Math.min(p.start, p.end)
+    const hi = Math.max(p.start, p.end)
+    if (idx >= lo && idx <= hi && hi > idx && hi > best) best = hi
+  }
+  if (best < 0) return stopId
+  return `${m[1]}_${m[2]}_${m[3]}_${best}`
+}
