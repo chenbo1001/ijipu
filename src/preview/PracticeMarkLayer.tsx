@@ -45,7 +45,7 @@ export function PracticeMarkLayer({ page, noteSize }: { page: ScorePageLike; not
    */
   const bands =
     rangeIds.length > 0
-      ? bandsFromIds(page, rangeIds)
+      ? bandsFromIds(page, rangeIds, noteSize)
       : startId && endId
         ? markBandsOf(
             // `rightX` 在类型上是可选的（跨行/段层音符可能没有）⇒ 兜底成 `x + 1`，只影响线的右端点
@@ -175,7 +175,7 @@ export interface ScorePageLike {
  * 为什么不用"起止序号区间"：跨 `:|` 回跳/跳房子时，演奏顺序与源码顺序不一致
  * （用户口径 #5：「起始在停止后」也允许），按 id 列表画才能**跟着演奏走**。
  */
-function bandsFromIds(page: ScorePageLike, ids: readonly string[]): { row: number; x0: number; x1: number; y: number }[] {
+function bandsFromIds(page: ScorePageLike, ids: readonly string[], noteSize: number): { row: number; x0: number; x1: number; y: number }[] {
   const exact = new Set(ids)
   /** 宽松匹配的"组号+序号"尾巴（与引擎 `resolvePracticeRange` 同一口径：页号/声部号可能不一致） */
   const tails = new Set(
@@ -209,15 +209,19 @@ function bandsFromIds(page: ScorePageLike, ids: readonly string[]): { row: numbe
     .sort((a, b) => a[0] - b[0])
     .map(([y, b], i) => ({ row: i, x0: b.x0, x1: b.x1, y }))
   /**
-   * adj993（**用户 2026-10-19 实报**：「第二行的线左侧缩进去了，没有与音符 `3,` 对齐」）：
+   * adj993 → **adj995 修正**（用户两次截图）：
    *
-   * 跨 `:|` 回跳后**接上来的那些行**（不是段落的第一行）实际是从该行**行首**继续唱的，
-   * 但切片里这一行的第一个事件可能不是行首那个音（行首音可能没有独立事件）⇒ 线从第二个音起画 ✗。
-   * ⇒ 第 2 条及以后的带，左端**顶到该行最左的音符**（第一行保持"从你标的起始音起"不变）。
+   * · adj993 想解决的是「第二行的线左侧缩进去一点、没与音符 `3,` 对齐」；
+   * · 但当时用的是"**无条件**顶到行首"⇒ 遇到 `跳房子 1` 这种**大间隔**时，会把一整段
+   *   **根本不演奏的音符**也画上线（用户红框圈出来的那条多余线）。
+   *
+   * ⇒ 改成**只吸附小缺口**：只有当带的左端离该行最左音符不到约 2 个字宽时，才把它顶到行首；
+   *   间隔更大（跨过整段跳房子/反复）就**保持原样**——因为那一段确实不演奏，不该画。
    */
+  const SNAP_MAX = noteSize * 1.8
   for (let i = 1; i < bands.length; i++) {
     const left = rowLeft.get(bands[i].y)
-    if (left !== undefined && left < bands[i].x0) bands[i].x0 = left
+    if (left !== undefined && bands[i].x0 - left < SNAP_MAX) bands[i].x0 = left
   }
   return bands
 }
