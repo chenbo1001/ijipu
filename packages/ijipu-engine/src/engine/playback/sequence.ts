@@ -169,8 +169,109 @@ export function slicePlaySequenceByNoteRange(
   return { events, totalMs: rangeMs, bpm: seq.bpm, rangeMs }
 }
 
-/** 从描述头 J 推断拍速（30~240），无效或缺失默认 70（adj343；函数头注释此前误写 90） */
-export function inferBpm(result: ParseResult): number {
+/**
+ * adj987b（**用户 2026-10-18 追问的歧义**）：练习段在**展开序列**里可能有多处候选。
+ *
+ * ## 为什么会歧义
+ *
+ * 标记存的是**源码位置**（音符 id），而序列是**反复/跳房子/D.S./D.C. 展开后**的 ——
+ * 同一个音符会出现多次，于是同一对起止 id 可能对应**多个区间**。
+ *
+ * ## 用户给的口径
+ *
+ * · 「起止跨 `D.S.`/`D.C.` 前后，**通常起在后、止在前**」⇒ **不按源码先后配**，
+ *   只按**播放先后**配：起点那次出现之后，取**其后最近**的终点出现（自然就跨过一次跳越）；
+ * · 「起点在公共段、终点也在公共段、但中间被跳跃分开的」⇒ 这类**真要用户选遍次**：
+ *   候选 > 1 时由 UI 出下拉，选中的候选号**存进标记**（`PracticeMark.pass`）。
+ *
+ * ## 判据（宁可少配、不可错配）
+ *
+ *  · 每个"起点出现"都取**其后最近的终点出现** ⇒ 得一组候选（去重）；
+ *  · `containsJump`：区间内源码位置**倒退**（group 变小，或同 group 内 index 变小）⇒ 含跳越；
+ *    **默认优先选不含跳越的**（用户本意多半只是"这一句"），同为不含则取**最早**那一个；
+ *  · 起点/终点在本次排版里**一次都没出现** ⇒ `missing`，调用方据此把该标记显示为"失效"、退回全曲。
+ */
+export interface PracticeRangeCandidate {
+  /** 起点事件下标（展开序列） */
+  i0: number
+  /** 终点事件下标（含） */
+  i1: number
+  /** 起点是该音符的**第几次**出现（1 起；UI 显示"第 N 遍"就用它） */
+  startOccurrence: number
+  /** 区间里是否**跨过跳越**（源码位置倒退） */
+  containsJump: boolean
+}
+
+export interface ResolvedPracticeRange {
+  /** 默认选中的候选下标（调用方可用用户保存的 `pass` 覆盖） */
+  pick: number
+  candidates: PracticeRangeCandidate[]
+  /** 起止有一端在展开序列里找不到 ⇒ 'start' / 'end'（标记失效） */
+  missing?: 'start' | 'end'
+}
+
+export function resolvePracticeRange(seq: PlaySequence, startId: string, endId: string): ResolvedPracticeRange {
+  const idOf = (e: PlayEvent): string => noteIdStringOf(e.placed.id)
+  const starts: number[] = []
+  const ends: number[] = []
+  for (let i = 0; i < seq.events.length; i++) {
+    const s = idOf(seq.events[i])
+    if (s === startId) starts.push(i)
+    if (s === endId) ends.push(i)
+  }
+  if (starts.length === 0) return { pick: 0, candidates: [], missing: 'start' }
+  if (ends.length === 0) return { pick: 0, candidates: [], missing: 'end' }
+
+  /** 源码位置是否"倒退"（跨反复 / D.S. / D.C. 的特征） */
+  const srcKey = (e: PlayEvent): [number, number] => [e.placed.id.group, e.placed.id.index]
+  const hasJump = (i0: number, i1: number): boolean => {
+    for (let i = i0 + 1; i <= i1; i++) {
+      const [g0, n0] = srcKey(seq.events[i - 1])
+      const [g1, n1] = srcKey(seq.events[i])
+      if (g1 < g0) return true
+      if (g1 === g0 && n1 < n0) return true
+    }
+    return false
+  }
+
+  const candidates: PracticeRangeCandidate[] = []
+  const seen = new Set<string>()
+  for (let k = 0; k < starts.length; k++) {
+    const i0 = starts[k]
+    const i1 = ends.find((j) => j > i0)
+    if (i1 === undefined) continue
+    const key = `${i0}:${i1}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    candidates.push({ i0, i1, startOccurrence: k + 1, containsJump: hasJump(i0, i1) })
+  }
+  if (candidates.length === 0) return { pick: 0, candidates: [], missing: 'end' }
+  // 默认：优先"不含跳越"的、其次最早
+  let pick = 0
+  const clean = candidates.findIndex((c) => !c.containsJump)
+  if (clean >= 0) pick = clean
+  return { pick, candidates }
+}
+
+/**
+ * adj987b：按**已解析出的候选区间**（事件下标）裁出序列；时间轴从 0 重排。
+ *
+ * 与 `slicePlaySequenceByNoteRange` 分开的原因：候选可能在"第 2 遍"，不能只按 id 取第一处。
+ */
+export function slicePlaySequenceByRange(
+  seq: PlaySequence,
+  i0: number,
+  i1: number,
+): (PlaySequence & { rangeMs: number }) | null {
+  if (i0 < 0 || i1 < i0 || i1 >= seq.events.length) return null
+  const base = seq.events[i0].atMs
+  const events = seq.events.slice(i0, i1 + 1).map((e) => ({ ...e, atMs: Math.max(0, e.atMs - base) }))
+  const last = events[events.length - 1]
+  const rangeMs = Math.max(0, last.atMs + last.durationMs)
+  return { events, totalMs: rangeMs, bpm: seq.bpm, rangeMs }
+}
+
+/** 从描述头 J 推断拍速（30~240），无效或缺失默认 70（adj343；函数头注释此前误写 90） */export function inferBpm(result: ParseResult): number {
   const t = result.header.tempoNum ?? result.header.tempo
   if (t) {
     const n = Number(t)

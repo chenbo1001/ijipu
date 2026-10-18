@@ -31,6 +31,13 @@ export interface PracticeMark {
   startId: string
   /** 结束音符 id（与 `startId` 相同 = 只有一个音） */
   endId: string
+  /**
+   * adj987b（用户 2026-10-18 口径）：**选中的候选号**（0 起，对应 `resolvePracticeRange` 的 `candidates`）。
+   *
+   * 为什么必须存：同一对起止在展开序列里可能有**多个候选**（例如起止都在公共段、中间被跳跃分开），
+   * 不记住"用户选的是第几个"，下次打开就会回到默认那一个，用户会以为标记漂了。
+   */
+  pass?: number
 }
 
 /** 存标记的键前缀（`ijipu.` 前缀 + 文档身份） */
@@ -83,11 +90,13 @@ export function parseMarks(raw: string | null): PracticeMark[] {
       const o = v as Partial<PracticeMark>
       if (typeof o.startId !== 'string' || typeof o.endId !== 'string') continue
       if (o.startId === '' || o.endId === '') continue
+      const pass = typeof o.pass === 'number' && Number.isInteger(o.pass) && o.pass >= 0 ? o.pass : undefined
       out.push({
         id: typeof o.id === 'string' && o.id !== '' ? o.id : nextMarkId(out.length + 1),
         name: typeof o.name === 'string' && o.name !== '' ? o.name : `段 ${out.length + 1}`,
         startId: o.startId,
         endId: o.endId,
+        ...(pass !== undefined ? { pass } : {}),
       })
     }
     return out

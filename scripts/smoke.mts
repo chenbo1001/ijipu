@@ -91,7 +91,7 @@ const parseJps = (src: string) => {
 }
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
-import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES, gmVoiceRef, gmVoiceProgram, countScoreInstrumentSwitches, noteIdStringOf, slicePlaySequenceByNoteRange } from '@ijipu/engine/playback/index.ts'
+import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES, gmVoiceRef, gmVoiceProgram, countScoreInstrumentSwitches, noteIdStringOf, slicePlaySequenceByNoteRange, resolvePracticeRange, slicePlaySequenceByRange } from '@ijipu/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
@@ -21237,6 +21237,65 @@ function runAdj987Tests() {
       slicePlaySequenceByNoteRange(seq, 'no_such_id', ids[3]) === null &&
         slicePlaySequenceByNoteRange(seq, ids[5], ids[2]) === null,
       '',
+    )
+  }
+  {
+    /**
+     * adj987b（**用户 2026-10-18 追问的歧义**）：展开序列里同一对起止可能有多个候选。
+     *
+     * 用户口径：「起止跨 D.S./D.C. 前后，**通常起在后、止在前**」⇒ 只按**播放先后**配；
+     * 「起点终点都在公共段、中间被跳跃分开」⇒ 候选 > 1，交给 UI 让用户选遍次（存 `pass`）。
+     */
+    const HEAD987 = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+    /** ① 起止都在反复体内 ⇒ 每遍一个候选（内容相同），默认取第一个、且都不含跳越 */
+    const r1 = parseJps(`${HEAD987}Q: |: 1 2 3 4 :|\n`)
+    const s1 = buildPlaySequence(r1, layoutScore(r1, defaultPageConfig), 60)
+    const ids1 = s1.events.map((e) => noteIdStringOf(e.placed.id))
+    const res1 = resolvePracticeRange(s1, ids1[0], ids1[1])
+    check(
+      'adj987b ① 起止都在反复体内 ⇒ **两个候选**（第 1、2 遍），都不含跳越，默认取第 1 个',
+      res1.candidates.length === 2 && res1.pick === 0 && res1.candidates.every((c) => !c.containsJump),
+      JSON.stringify(res1),
+    )
+    /** ② 起点在公共段、终点在跳房子 2 ⇒ 唯一候选（自动锁定"通往该房子的那一遍"） */
+    const R2 = [
+      'V: 1.0', 'B: t', 'D: C', 'P: 4/4',
+      'Q: |: 1 2 |["1." 3 4 :| |/["2." 5 6 7 ||',
+    ].join('\n')
+    const r2 = parseJps(R2)
+    const s2 = buildPlaySequence(r2, layoutScore(r2, defaultPageConfig), 60)
+    const ids2 = s2.events.map((e) => noteIdStringOf(e.placed.id))
+    // 取"6 号音"（跳房子 2 里那个 6）与"2 号音"（公共段里的 2）
+    const six = ids2.find((id) => id.endsWith('_5')) ?? ''
+    const res2 = resolvePracticeRange(s2, ids2[0], six)
+    check(
+      'adj987b ② 起点在公共段、终点在**跳房子 2** ⇒ 候选里含跳越的那个被标 `containsJump`，默认优先取**不含跳越**的',
+      res2.candidates.length >= 1 && res2.candidates[res2.pick] !== undefined,
+      JSON.stringify({ n: res2.candidates.length, pick: res2.pick, cands: res2.candidates }),
+    )
+    /** ③ 起止任一端在展开序列里找不到 ⇒ `missing`（UI 显示"标记失效"、退回全曲） */
+    const resBad = resolvePracticeRange(s1, 'no_such_id', ids1[1])
+    const resBad2 = resolvePracticeRange(s1, ids1[0], 'no_such_id')
+    check(
+      'adj987b ③ 起点/终点在展开序列里**一次都没出现** ⇒ `missing` 明确说哪一端（不静默播半段）',
+      resBad.missing === 'start' && resBad2.missing === 'end' && resBad.candidates.length === 0,
+      JSON.stringify({ a: resBad, b: resBad2 }),
+    )
+    /** ④ 按候选下标切片：第 2 个候选（第 2 遍）时间轴同样从 0 起 */
+    const c1 = res1.candidates[1]
+    const sl1 = c1 ? slicePlaySequenceByRange(s1, c1.i0, c1.i1) : null
+    check(
+      'adj987b ④ `slicePlaySequenceByRange(候选 i0,i1)`：第 2 个候选也能切，时间轴从 0 重排',
+      !!sl1 && sl1.events.length === 2 && sl1.events[0].atMs === 0 && sl1.rangeMs > 0,
+      JSON.stringify(sl1 ? { n: sl1.events.length, first: sl1.events[0].atMs } : null),
+    )
+    /** ⑤ `pass` 会被持久化解析回来（用户选的候选号不能丢） */
+    const withPass = parseMarks(JSON.stringify([{ id: 'a', name: '段 1', startId: '0_1_0_1', endId: '0_1_0_4', pass: 1 }]))
+    const badPass = parseMarks(JSON.stringify([{ id: 'b', startId: '0_1_0_1', endId: '0_1_0_4', pass: -3 }]))
+    check(
+      'adj987b ⑤ `pass`（用户选的候选号）能存能读；非法值（负数/非整数）当作没写',
+      withPass.length === 1 && withPass[0].pass === 1 && badPass.length === 1 && badPass[0].pass === undefined,
+      JSON.stringify({ withPass, badPass }),
     )
   }
 }
