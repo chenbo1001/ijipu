@@ -19413,6 +19413,13 @@ runAdj927ExternalChangeTests()
       failed++
       console.error('  ✗ adj985 恢复草稿保留原生路径用例抛异常', e)
     }
+    try {
+      // adj986：未封闭跳房子 `|]/` 的跳过落点不许落在 `]/` 那根线上（用户实报：第 3 遍多奏一段）
+      runAdj986Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj986 未封闭跳房子跳过落点用例抛异常', e)
+    }
   })
   .then(() => {
     try {
@@ -21067,6 +21074,70 @@ function runAdj985Tests() {
       'adj985 **结构配对**：每处 `saveDraftSrc(…)` 后面都跟一处 `saveDraftNative(…)`（来源换了，原生路径必须同步清/换）',
       srcCalls > 0 && paired === srcCalls,
       `${paired}/${srcCalls}`,
+    )
+  }
+}
+
+/**
+ * adj986（**用户 2026-10-18 实报**，真文件 `渡口.jps`）：「第 3 遍的时候 第 3 曲部的
+ * `|]/ (3- 3/) 3/ 3/ 3/ | 3-- 6 | (7- 7/) 1'/ 7/ 6/ | 6--- | 7-- &ykh 3 ||/&ds` 这段
+ * **多演奏了一遍**，这部分应该只在第 2 遍演奏一遍」。
+ *
+ * 根因：未封闭房子（`|]/`）的"**跳过落点**"表在没有后续 `:|` 时回退到了 `]/` 那根线**自己**
+ * （`voltaAfterRepeat.set(start, rep >= 0 ? rep : si)`）⇒ 跳过该房子时落在 `]/`，
+ * `]/` 之后的音被**再奏一遍**。
+ *
+ * 判据：
+ *  ① 源码：回退链是 `:|`/`:|:` → 跳跃线（`strict`） → 最后才 `si`，且**旧写法已不在**；
+ *  ② 行为（与真谱结构同形的夹具）：跳房子 2 的那段只在**第 2 遍**出现一次 ——
+ *     第 3 遍（D.S. 之后）**不再出现**它；
+ *  ③ **负对照**：整段事件数 = 27（旧写法会多出 `]/` 之后那几个音）。
+ */
+function runAdj986Tests() {
+  console.log('[186] adj986 unclosed volta `|]/`: skip must not land on the `]/` bar')
+  const seqSrc = String(readFileSync('packages/ijipu-engine/src/engine/playback/sequence.ts', 'utf8'))
+  check(
+    'adj986 源码：未封闭房子的跳过落点回退链 = `:|`/`:|:` → 跳跃线 → 最后才 `]/`（旧写法 `rep >= 0 ? rep : si` 已不在）',
+    /voltaAfterRepeat\.set\(start, rep >= 0 \? rep : strict >= 0 \? strict : si\)/.test(seqSrc) &&
+      !/voltaAfterRepeat\.set\(start, rep >= 0 \? rep : si\)/.test(seqSrc),
+    '',
+  )
+  {
+    const SRC986 = [
+      'V: 1.0', 'B: t', 'D: C', 'P: 4/4',
+      'Q: &zkh 1 |:&hs',
+      'C: 前',
+      'Q: 1- 2- 3- 4- |["1." 5- 6- 7- |]/',
+      'C: 体1',
+      'Q: 1- 2- 3- 4- :|',
+      'C: 体2',
+      "Q: |/[\"2.\" 8- 9- |]/ 1'/ 2'/ 3'/ ||/&ds",
+      'C: 房2',
+      "Q: |/[\"3.\" 4'/ 5'/ ||",
+      'C: 房3',
+    ].join('\n')
+    const pr986 = parseJps(SRC986)
+    const { events } = buildPlaySequence(pr986, layoutScore(pr986, defaultPageConfig), 120)
+    const order: string[] = []
+    let last986 = ''
+    for (const ev of events) {
+      const id = ev.placed.id as unknown as { group: number }
+      const bi = (ev.placed as unknown as { barIndex: number }).barIndex
+      const k = `g${id.group + 1}b${bi}`
+      if (k !== last986) {
+        order.push(k)
+        last986 = k
+      }
+    }
+    check(
+      'adj986 **行为**：跳房子 2 的尾巴（`g4b2`）只在第 2 遍出现一次；D.S. 之后的第 3 遍直接进跳房子 3（`g5b1`）',
+      order.filter((k) => k === 'g4b2').length === 1 && order.lastIndexOf('g4b2') < order.indexOf('g5b1'),
+      order.join(' → '),
+    )
+    check(
+      'adj986 **负对照**：整段事件数 = 27（旧写法会在 D.S. 之后把 `]/` 之后的音再奏一遍 ⇒ 多出事件）',
+      events.length === 27,
+      `${events.length}`,
     )
   }
 }

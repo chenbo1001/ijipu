@@ -1003,7 +1003,16 @@ export function buildPlaySequence(
           const rep = seq.findIndex((it, k) => k > si && isRepeatBar(it))
           const strict = seq.findIndex((it, k) => k > si && isStrictCloserBar(it))
           const withFine = seq.findIndex((it, k) => k > si && isFineOrStrictCloserBar(it))
-          voltaAfterRepeat.set(start, rep >= 0 ? rep : si)
+          /**
+           * adj986（**用户 2026-10-18 实报**）：「第 3 遍时，第三曲部 `|]/ (3- 3/) … ||/&ds` 这段
+           * **多演奏了一遍**」。根因：这里在"后面没有 `:|`"时**回退到 `si`（＝`]/` 那根线本身）**，
+           * 于是"跳过这个房子"的落点就是 `]/` —— 后半段（`]/` 之后的音）被原样再奏一遍 ✗。
+           *
+           * 口径（用户原话）：「`|]/` 只是**线画到这里**，并不表示跳房子范围到这里；
+           * 要往后推到下一个 `:|`/`:|:` 或跳跃 `&ds`/`&dc` 才是这个跳房子的末尾」。
+           * ⇒ 没有 `:|` 时**回退到跳跃线**（`strict`），别回退到 `]/` 自己。
+           */
+          voltaAfterRepeat.set(start, rep >= 0 ? rep : strict >= 0 ? strict : si)
           voltaAfterStrict.set(start, strict >= 0 ? strict : si)
           voltaAfterWithFine.set(start, withFine >= 0 ? withFine : si)
         } else {
