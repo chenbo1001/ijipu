@@ -5609,19 +5609,22 @@ span.ws-check {
 .practice-countdown {
   position: absolute;
   z-index: 2;
-  /* 以右边贴住起始竖头左侧 4px、垂直居中于竖头 */
+  /* 以圆形右边贴住起始竖头左侧 4px、垂直居中于竖头 */
   transform: translate(calc(-100% - 4px), -50%);
-  min-width: 30px;
-  padding: 1px 6px;
-  font-size: 30px;
+  /* adj987r（用户口径「外框用圆形的更显眼」）：正圆 + 居中大字 */
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
   font-weight: 700;
-  line-height: 1.05;
-  text-align: center;
+  line-height: 1;
   color: #1f7f72;
   background: #ffffff;
-  border: 1.5px solid #2f9e8f;
-  border-radius: 6px;
-  box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
+  border: 2px solid #2f9e8f;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 22%);
   pointer-events: none;
   user-select: none;
 }
