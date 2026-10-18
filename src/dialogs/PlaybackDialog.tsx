@@ -35,9 +35,9 @@ import { fmtClock } from './playbackClock'
 import { createPlaybackGeneration, shouldAutoPlay } from './playbackSession'
 // adj987（用户需求）：标记段组的按钮组（收起/段选择/起始/停止/添加/删除/循环）+ 收起时的"歌名前展开"按钮
 import { PracticeMarkBar, PracticeMarkExpandButton } from './PracticeMarkBar'
-import { extendStopToSlurEnd } from '../store/practiceMarks'
+
 // adj764（清单 B6）：试听时钟来自引擎 —— 与 Obsidian 插件共用"推进/暂停续播/取消/到点一次"的语义
-import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, resolvePracticeRange, slicePlaySequenceByRange, gmVoiceRef, countScoreInstrumentSwitches, createPlaybackClock, type PlaybackClock } from '@ijipu/engine'
+import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, resolvePracticeRange, slicePlaySequenceByRange, extendRangeEndToSlurEnd, gmVoiceRef, countScoreInstrumentSwitches, createPlaybackClock, type PlaybackClock } from '@ijipu/engine'
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
 /**
@@ -505,24 +505,23 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       let practiceRangeMs = 0
       if (markNow) {
         /**
-         * adj987m（**用户 2026-10-18 实报「又出现添加了标记段不按段播放」**）：
+         * adj987n（**用户 2026-10-18 实报**「末尾有连音线的情况还是没完整播放完连音线部分」）：
          *
-         * 口径 #2 要求「停止音符上有连音线时，奏到那条线结束」。此前是在**标停止时**就把端点改成
-         * 连音线终点再存，但 `slurPairs` 的序号与音符 id 序号在有多声部/段层时未必一致 ⇒
-         * 存进去的 id 可能对不上任何音符 ⇒ 解析失败 ⇒ 退回全曲 ✗。
+         * 口径 #2 要求"停止音符上有连音线时，奏到那条线结束"。上一版用**音符 id 串**去延长，
+         * 但解析期 `slurPairs` 的序号与放置后的 `id.index` 在多声部/段层谱上未必一致 ⇒ 延长出的 id
+         * 找不到 ⇒ 校验失败退回原端点 ⇒ **连音线还是没奏完** ✗。
          *
-         * 现在改成**播放时才算**，而且**先校验**：延长后的 id 解析不出候选，就退回用户标的那个端点。
+         * ⇒ 改成**在序列里按"组号 + 序号"往后延伸**（`extendRangeEndToSlurEnd`）：
+         * 不碰 id 串、不需要校验，也不会延长到不存在的音符。
          */
-        const rawRes = resolvePracticeRange(fullSeq, markNow.startId, markNow.endId)
-        const extEnd = extendStopToSlurEnd(markNow.endId, parseResult.slurPairs)
-        const extRes = extEnd !== markNow.endId ? resolvePracticeRange(fullSeq, markNow.startId, extEnd) : null
-        const res = extRes && extRes.candidates.length > 0 ? extRes : rawRes
+        const res = resolvePracticeRange(fullSeq, markNow.startId, markNow.endId)
         if (res.candidates.length === 0) {
           showNotice(playbackCopy.practiceMarkInvalid, 'warn')
         } else {
           const idx = Math.min(Math.max(markNow.pass ?? res.pick, 0), res.candidates.length - 1)
           const c = res.candidates[idx]
-          const sliced = slicePlaySequenceByRange(fullSeq, c.i0, c.i1)
+          const i1ext = extendRangeEndToSlurEnd(fullSeq, c.i1, parseResult.slurPairs)
+          const sliced = slicePlaySequenceByRange(fullSeq, c.i0, i1ext)
           if (sliced) {
             seq = sliced
             practiceRangeMs = sliced.rangeMs

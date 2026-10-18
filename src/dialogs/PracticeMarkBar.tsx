@@ -22,7 +22,7 @@
  * 选过之后写回标记的 `pass`（持久化）。
  */
 import { useEffect, useMemo } from 'react'
-import { buildPlaySequence, layoutScore, noteIdStringOf, resolvePracticeRange, slicePlaySequenceByRange } from '@ijipu/engine'
+import { buildPlaySequence, extendRangeEndToSlurEnd, layoutScore, noteIdStringOf, resolvePracticeRange, slicePlaySequenceByRange } from '@ijipu/engine'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { docKeyOf, loadMarks, saveMarks } from '../store/practiceMarks'
@@ -78,7 +78,9 @@ export function PracticeMarkBar(): React.JSX.Element {
     if (res.candidates.length === 0) return { candidates: [], ids: [] as string[] }
     const idx = Math.min(Math.max(cur.pass ?? res.pick, 0), res.candidates.length - 1)
     const c = res.candidates[idx]
-    const sliced = slicePlaySequenceByRange(seq, c.i0, c.i1)
+    // adj987n：画线也要用"延长到连音线末尾"之后的范围，否则线比实际演奏短一截
+    const i1ext = extendRangeEndToSlurEnd(seq, c.i1, parseResult.slurPairs)
+    const sliced = slicePlaySequenceByRange(seq, c.i0, i1ext)
     return {
       candidates: res.candidates,
       ids: sliced ? sliced.events.map((e) => noteIdStringOf(e.placed.id)) : [],

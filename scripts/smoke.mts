@@ -91,7 +91,7 @@ const parseJps = (src: string) => {
 }
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
-import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES, gmVoiceRef, gmVoiceProgram, countScoreInstrumentSwitches, noteIdStringOf, slicePlaySequenceByNoteRange, resolvePracticeRange, slicePlaySequenceByRange } from '@ijipu/engine/playback/index.ts'
+import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES, gmVoiceRef, gmVoiceProgram, countScoreInstrumentSwitches, noteIdStringOf, slicePlaySequenceByNoteRange, resolvePracticeRange, slicePlaySequenceByRange, extendRangeEndToSlurEnd } from '@ijipu/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
@@ -21331,6 +21331,29 @@ function runAdj987Tests() {
     check(
       'adj987g **负对照**：连"组号+音符序号"都对不上 ⇒ 仍然 `missing`（判据没放宽到底）',
       resolvePracticeRange(seqG, '1_1_999_999', idsG[3]).missing === 'start',
+      '',
+    )
+    /**
+     * adj987n（**用户 2026-10-18 实报**：「末尾有连音线的情况还是没完整播放完连音线部分」）：
+     * `extendRangeEndToSlurEnd` 按"**同组 + 同序号**"在序列里往后延伸 —— 不碰 id 串，
+     * 不依赖解析期序号与放置序号一致。
+     */
+    const R987n = ['V: 1.0', 'B: t', 'D: C', 'P: 4/4', 'Q: 1 2 (3 4 5) 6 |', ''].join('\n')
+    const r987n = parseJps(R987n)
+    const seq987n = buildPlaySequence(r987n, layoutScore(r987n, defaultPageConfig), 60)
+    const idIdx = (k: number): number => seq987n.events[k].placed.id.index
+    // 终点取"4"（连音线 (3 4 5) 覆盖它）⇒ 应延伸到"5"
+    const i4 = seq987n.events.findIndex((e) => idIdx(seq987n.events.indexOf(e)) === 3)
+    const i4b = seq987n.events.findIndex((e) => e.placed.id.index === 3)
+    const ext = i4b >= 0 ? extendRangeEndToSlurEnd(seq987n, i4b, r987n.slurPairs) : -1
+    check(
+      'adj987n 终点被连音线覆盖 ⇒ 往后延伸到**该连音线的末音**（4 → 5）；不延长则停在 4',
+      i4b >= 0 && ext > i4b && seq987n.events[ext]?.placed.id.index === 4,
+      JSON.stringify({ i4, i4b, ext, idxAtExt: ext >= 0 ? seq987n.events[ext]?.placed.id.index : null }),
+    )
+    check(
+      'adj987n **负对照**：终点没被任何连音线覆盖（6 号音之后）⇒ 原样返回（不误延长）',
+      extendRangeEndToSlurEnd(seq987n, seq987n.events.length - 1, r987n.slurPairs) === seq987n.events.length - 1,
       '',
     )
     const R987 = ['V: 1.0', 'B: t', 'D: C', 'P: 4/4', 'Q: 1 2 3 4 |', ''].join('\n')

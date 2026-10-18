@@ -299,6 +299,40 @@ export function slicePlaySequenceByRange(
   return { events, totalMs: rangeMs, bpm: seq.bpm, rangeMs }
 }
 
+/**
+ * adj987n（**用户 2026-10-18 实报**：「末尾有连音线的情况还是没完整播放完连音线部分」）：
+ * 把"这一段"的终点**延伸到覆盖它的那条连音线的末尾**。
+ *
+ * 为什么不按 id 串找：解析期 `slurPairs` 的序号与放置后的 `id.index` 在多声部/段层谱上未必一致，
+ * 用字符串 id 去延长会"延长出一个不存在的音符"（上一版就是这么退回全曲的）。
+ *
+ * 这里改成**同组 + 同序号**在序列里往后找：终点事件取它自己的 `{group, index}`，
+ * 用 `slurPairs` 求出覆盖它的最大终点序号，然后在**同一 group** 里找"序号等于该终点"的
+ * **下一个**事件（必须在当前终点之后）。找不到就原样返回（宁可少延长，不误延长）。
+ */
+export function extendRangeEndToSlurEnd(
+  seq: PlaySequence,
+  i1: number,
+  slurPairs: readonly { start: number; end: number }[] | undefined,
+): number {
+  if (!slurPairs || slurPairs.length === 0) return i1
+  const ev = seq.events[i1]
+  if (!ev) return i1
+  const { group, index } = ev.placed.id
+  let hi = -1
+  for (const p of slurPairs) {
+    const lo = Math.min(p.start, p.end)
+    const h = Math.max(p.start, p.end)
+    if (index >= lo && index <= h && h > index && h > hi) hi = h
+  }
+  if (hi < 0) return i1
+  for (let k = i1 + 1; k < seq.events.length; k++) {
+    const id = seq.events[k].placed.id
+    if (id.group === group && id.index === hi) return k
+  }
+  return i1
+}
+
 /** 从描述头 J 推断拍速（30~240），无效或缺失默认 70（adj343；函数头注释此前误写 90） */export function inferBpm(result: ParseResult): number {
   const t = result.header.tempoNum ?? result.header.tempo
   if (t) {
