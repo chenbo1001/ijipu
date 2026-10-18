@@ -231,6 +231,16 @@ export function PracticeMarkBar(): React.JSX.Element {
               ))}
             </select>
           )}
+          {/* adj987s（用户实报"停止音没播放"）：把**解析结果**直接摆出来。
+              用户在界面上就能看到"这段被算成了几个音、多长"——不用开开发者工具也能判断
+              是"段算短了"还是"段对但播放没吃到"。 */}
+          {cur && (
+            <span className="practice-readout" title={playbackCopy.practiceSelectTitle}>
+              {resolved.ids.length > 0
+                ? playbackCopy.practiceResolved(resolved.ids.length, (resolved.rangeMs / 1000).toFixed(1) + ' 秒')
+                : playbackCopy.practiceResolvedMissing}
+            </span>
+          )}
         </>
       )}
     </div>

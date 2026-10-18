@@ -191,6 +191,9 @@ export function slicePlaySequenceByNoteRange(
  *    **默认优先选不含跳越的**（用户本意多半只是"这一句"），同为不含则取**最早**那一个；
  *  · 起点/终点在本次排版里**一次都没出现** ⇒ `missing`，调用方据此把该标记显示为"失效"、退回全曲。
  */
+/** 段层音符的序号下限（{tp}/{bz}/{dsb} 的段基从这里起算，见 layout/segments.ts） */
+const SEGMENT_ID_BASE_MIN = 100000
+
 export interface PracticeRangeCandidate {
   /** 起点事件下标（展开序列） */
   i0: number
@@ -229,6 +232,16 @@ export function resolvePracticeRange(seq: PlaySequence, startId: string, endId: 
   const pickIdx = (want: string, sameVoiceAs?: number | null): number[] => {
     const exact = seq.events.map((e, i) => (idOf(e) === want ? i : -1)).filter((i) => i >= 0)
     if (exact.length > 0) return exact
+    /**
+     * adj987s（用户 2026-10-18 实报「停止位的音符及其直接关联音符还是没有播放」）：
+     * **段层音符**（`{tp}`/`{bz}`/`{dsb}` 里的音）的序号带"段基"（很大，如 `1000001`），
+     * 与主旋律的序号**不在同一个域**。对它做"组号+序号"宽松匹配，会撞上主旋律里序号**恰好相同**的音
+     * ⇒ 终点被匹配到很早的位置 ⇒ 停止音之前的音全被截掉 ✗。
+     * ⇒ **带段基的 id 只做整串精确匹配**（找不到就干脆报 missing，让用户重标，而不是悄悄定位到别处）。
+     */
+    const mWant = /^(\d+)_(\d+)_(\d+)_(\d+)$/.exec(want)
+    const wantIdx = mWant ? Number(mWant[4]) : 0
+    if (wantIdx >= SEGMENT_ID_BASE_MIN) return []
     const tail = tailOf(want)
     const byTail = seq.events
       .map((e, i) => (idOf(e).endsWith(tail) ? { i, v: e.placed.id.voice } : null))
