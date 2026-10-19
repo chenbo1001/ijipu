@@ -193,6 +193,9 @@
 | `ijipu.practiceMarks.<docKey>` | `[]` | **试听「标记段」（adj987）**：按**文档身份**存的练习段（`ws:<wsId>/<segs>` / `native:<path>` / `name:<fileName>`）。**L1（本机）**，**不写进 `.jps`**，换机器不带过去（有意为之） | 用户个性（与具体谱相关但不随谱走） | 保留（嵌入版用同一键） |
 | `ijipu.practiceLoop` | false | 标记段「循环」开关（L1 记住） | 用户个性 | 保留 |
 | `ijipu.practiceCollapsed` | false | 标记段组「收起」状态（L1 记住） | 用户个性 | 保留 |
+| `ijipu.previewSoften` | `light` | **预览柔化档位**（adj1000/adj1001）：`off` / `light` / `mid`。深色下走"反相 + contrast/brightness 微调"，浅色下只换**纸张色**（白 / `#FDFBF5` / `#F7EFDD`） | 用户个性 | 保留 |
+| `ijipu.exportBg` | `none` | **导出底色**（adj1002）：`none`（透明，**默认**）/ `white` / `paper`（跟随 `previewSoften` 的纸色）。⚠ JPG/PDF 无透明通道 ⇒ 透明档落白 | 用户个性 | 保留 |
+| `ijipu.exportBgImage` | false | **导出是否带背景图/水印**（adj1002，默认**不带**；与底色独立，导出时临时置 `bgEnabled:false`，**不改用户设置**） | 用户个性 | 保留 |
 
 ### 4.2 IndexedDB / Tauri / PWA
 
