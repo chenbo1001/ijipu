@@ -24,6 +24,8 @@ import { layoutScore, renderScoreToSvg, buildPlaySequence, inferBpm, eventsToMid
 import type { ExportRange } from '@ijipu/engine'
 import { renderToAudioBuffer, audioBufferToWav, audioBufferToMp3 } from '../../export/audio'
 import { exportSvg, exportPng, exportJpg, exportPdf } from '../../export/export'
+// adj1002：导出底色（纯函数，带 smoke 断言）
+import { exportBgColor } from '../../export/bgChoice'
 // adj873（T-3）：导出范围要"预览区实测墨迹盒" ⇒ 从这里量（只量，几何仍在引擎）
 import { measureInkFromPreview } from '../../export/exportRange'
 import { createHqCache, resolveHqBank } from '../../playback/spessaCache'
@@ -69,6 +71,8 @@ export function ExportPanel() {
   // adj1002：导出背景（底色 / 是否带背景图，两项独立，L1）；纸色档位来自 previewSoften
   const exportBg = useUiStore((s) => s.exportBg)
   const exportBgImage = useUiStore((s) => s.exportBgImage)
+  const setExportBg = useUiStore((s) => s.setExportBg)
+  const setExportBgImage = useUiStore((s) => s.setExportBgImage)
   const previewSoften = useUiStore((s) => s.previewSoften)
   const setExportJob = useUiStore((s) => s.setExportJob)
   // adj626：PDF 走打印（与 Ctrl+P / 菜单「打印」同一条路：同一份页面 + 同一个默认文件名）
@@ -131,23 +135,22 @@ export function ExportPanel() {
      */
     const cfg = exportBgImage ? pageConfig : { ...pageConfig, bgEnabled: false }
     const layout = layoutScore(parseResult, cfg, defaultInstrumentRef, fm.layout)
-    // adj965（方案 OVL，EP-10）：导出与预览**共用同一份**水印/背景资源（否则会出现"预览有、导出没有"）
-    return applyRange(renderScoreToSvg(layout, exportBgImage ? withOverlay(fm.render) : fm.render))
+    /**
+     * adj965（方案 OVL，EP-10）：导出与预览**共用同一份**水印/背景资源（否则会出现"预览有、导出没有"）。
+     * ⚠ adj1002：这里**始终**走 `withOverlay`（保持三处同源，闸门 `adj965` 守着这一点）；
+     * "不带背景图"只靠把 `bgEnabled` 置 false 实现——那是渲染层的开关，不能让 overlay 链路分叉。
+     */
+    return applyRange(renderScoreToSvg(layout, withOverlay(fm.render)))
   }
 
   /**
-   * adj1002：导出底色。
+   * adj1002：导出底色（口径与取值都在纯函数 `exportBgColor` 里，便于 smoke 断言）。
    * · `none`（默认）⇒ 透明：PNG 传 `null`（真透明），JPG/PDF 无透明通道 ⇒ 落白；
    * · `white` ⇒ 白；
    * · `paper` ⇒ **当前纸色档位**（浅色 关/轻/中 = 白 / #FDFBF5 / #F7EFDD）。
-   *   深色主题不参与导出（用户口径：导出永远按浅色），所以这里只取浅色档位。
+   *   深色主题不参与导出（用户口径：导出永远按浅色），所以只取浅色档位。
    */
-  const bgOf = (fmt: 'png' | 'jpg' | 'pdf'): string | null => {
-    const paper = previewSoften === 'mid' ? '#f7efdd' : previewSoften === 'light' ? '#fdfbf5' : '#ffffff'
-    if (exportBg === 'white') return '#ffffff'
-    if (exportBg === 'paper') return paper
-    return fmt === 'png' ? null : '#ffffff'
-  }
+  const bgOf = (fmt: 'png' | 'jpg' | 'pdf'): string | null => exportBgColor(exportBg, previewSoften, fmt)
 
   const downloadJps = () => {
     const blob = new Blob([code], { type: 'text/plain;charset=utf-8' })
@@ -271,6 +274,29 @@ export function ExportPanel() {
         </label>
         <span className="dock-muted">{exportCopy.scaleHint}</span>
         <span className="dock-muted">{exportCopy.rangeHint}</span>
+        {/*
+          adj1002（用户 2026-10-19 要求）：**导出背景**两项独立开关——
+          ① 底色（默认**透明**；纸色跟随当前纸色档位）；
+          ② 是否带**背景图/水印**（默认**不带**）。
+          "页面只有部分背景图"时，带图档的边距露出来的就是纸色，不会出现白块。
+        */}
+        <label className="dock-field">
+          <span className="dock-field-label">{exportCopy.bgLabel}</span>
+          <select
+            className="dock-select"
+            value={exportBg}
+            onChange={(e) => setExportBg((e.target.value as 'none' | 'white' | 'paper') ?? 'none')}
+          >
+            <option value="none">{exportCopy.bgNone}</option>
+            <option value="white">{exportCopy.bgWhite}</option>
+            <option value="paper">{exportCopy.bgPaper}</option>
+          </select>
+        </label>
+        <label className="dock-field export-bg-image">
+          <input type="checkbox" checked={exportBgImage} onChange={(e) => setExportBgImage(e.target.checked)} />
+          <span>{exportCopy.bgImageLabel}</span>
+        </label>
+        <span className="dock-muted">{exportCopy.bgHint}</span>
       </div>
       <div className="dock-actions export-actions">
         {items.map((it) => (

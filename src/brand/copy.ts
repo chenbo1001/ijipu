@@ -675,6 +675,14 @@ export const exportCopy = {
   /** 有语法错误时图片/PDF 导出的拦截提示 */
   blockedByError: '存在语法错误，无法导出。请先修正脚本。',
   errorHint: '当前脚本存在语法错误，图片/PDF 导出需先修正。',
+  /* adj1002（用户 2026-10-19 要求）：导出背景——底色与背景图是**两项独立**开关 */
+  bgLabel: '导出底色',
+  bgNone: '透明（默认）',
+  bgWhite: '白',
+  bgPaper: '纸色（跟随档位）',
+  bgImageLabel: '带上背景图/水印',
+  bgHint:
+    'PNG 支持透明；JPG/PDF 没有透明通道，选透明时按白底导出。背景图与底色独立：关掉它，页面边距露出的是纸色（不会出现白块）。',
 } as const
 
 /**

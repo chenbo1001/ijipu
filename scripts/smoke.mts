@@ -211,6 +211,8 @@ import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from '../src/pwa/swUpdat
 // adj409：试听暂停/续播的剩余事件平移（纯逻辑）
 import { shiftEventsFrom } from '../src/playback/playbackTimeline.ts'
 import { passAt, passLabel } from '../src/dialogs/playbackPass.ts'
+// adj1002：导出底色（纯函数）
+import { exportBgColor } from '../src/export/bgChoice.ts'
 // adj411：直接生成 PDF（不再开新窗口）——PDF 字节结构（纯逻辑）
 import { buildPdf, A4_W_PT, A4_H_PT } from '../src/export/pdf.ts'
 // adj626：打印链路 + 「另存为 PDF 的默认文件名」纯函数
@@ -19425,7 +19427,8 @@ runAdj927ExternalChangeTests()
     }
     try {
       // adj987：试听练习段（数据层 + 播放区间切片）
-      runAdj997Tests()
+      runAdj1002Tests()
+  runAdj997Tests()
   runAdj996Tests()
   runAdj989Tests()
   runAdj987Tests()
@@ -21476,6 +21479,32 @@ function runAdj987Tests() {
  *
  * 用户给的谱期望 **4 遍**：1(Q1 房子1) → 2(Q1 房子2 + Q2 + Q3 房子2) → 3(Q2 的 `|:` 起 + 房子3) → 4(`&ds` 回 `&hs` 后 + 结束句)。
  */
+/**
+ * [191] adj1002（用户 2026-10-19）：导出背景（底色 + 背景图，两项独立）
+ *
+ * 口径：底色默认**透明**；「纸色」取当前档位；**JPG/PDF 无透明通道 ⇒ 透明档落白**；
+ * 背景图默认**不带**（导出时临时把 `bgEnabled` 置 false，不改用户设置）；导出**不吃深色主题**。
+ */
+function runAdj1002Tests() {
+  console.log('[191] adj1002 export background')
+  check('adj1002 底色「透明」：PNG 不填色（null = 真透明）',
+    exportBgColor('none', 'light', 'png') === null, String(exportBgColor('none', 'light', 'png')))
+  check('adj1002 底色「透明」：JPG / PDF 无透明通道 ⇒ 落白（格式兜底）',
+    exportBgColor('none', 'mid', 'jpg') === '#ffffff' && exportBgColor('none', 'mid', 'pdf') === '#ffffff')
+  check('adj1002 底色「纸色」：跟随当前档位（关=白 / 轻=#fdfbf5 / 中=#f7efdd）',
+    exportBgColor('paper', 'off', 'png') === '#ffffff' &&
+      exportBgColor('paper', 'light', 'png') === '#fdfbf5' &&
+      exportBgColor('paper', 'mid', 'png') === '#f7efdd' &&
+      exportBgColor('white', 'mid', 'png') === '#ffffff')
+  /** 源码口径：默认**不带背景图**；导出链里不得出现深色滤镜（否则深色主题会污染导出） */
+  const panel1002 = String(readFileSync('src/ui/dock/ExportPanel.tsx', 'utf8'))
+  const exp1002 = String(readFileSync('src/export/export.ts', 'utf8'))
+  check('adj1002 源码：不带背景图时导出临时 `bgEnabled: false`（不改用户设置）+ 导出链无 filter/invert',
+    /exportBgImage \? pageConfig : \{ \.\.\.pageConfig, bgEnabled: false \}/.test(panel1002) &&
+      !/filter|invert/.test(exp1002) &&
+      /withOverlay\(fm\.render\)\)\n?/.test(panel1002))
+}
+
 function runAdj997Tests() {
   console.log('[190] adj997 continuous pass numbering')
   const SRC997 = [
@@ -21926,7 +21955,8 @@ function runAdj626Tests() {
       /const printScore = useDocStore\(\(s\) => s\.printScore\)/.test(panelSrc),
     '')
   check('adj626 位图 PDF 保留为二级入口（`pdfImg` → exportPdf，不经对话框一键出文件）',
-    /key: 'pdfImg',[\s\S]{0,300}exportPdf\(getPages\(\), baseName, imgScale\)/.test(panelSrc),
+    // adj1002：导出调用多了**底色参数**（`bgOf('pdf')`）；"二级入口、不经对话框"这条规则本身不变
+    /key: 'pdfImg',[\s\S]{0,320}exportPdf\(getPages\(\), baseName, imgScale, bgOf\('pdf'\)\)/.test(panelSrc),
     '')
   check('adj626 文案讲清两条 PDF 路径（打印=矢量/不开新窗口；图片=位图按清晰度）',
     /pdfPrintHint:[\s\S]{0,400}另存为 PDF/.test(String(readFileSync('src/brand/copy.ts', 'utf8'))) &&
