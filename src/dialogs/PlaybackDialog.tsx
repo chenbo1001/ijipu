@@ -52,6 +52,8 @@ import { shiftEventsFrom } from '../playback/playbackTimeline'
 import { measureFontMeta } from '../preview/fontMeta'
 // adj722：`mm:ss` 进度读数（纯函数，便于 smoke 断言）
 import { fmtClock } from './playbackClock'
+// adj996（用户 2026-10-19 要求）：遍次读数（纯函数，见该文件头）
+import { passLabel } from './playbackPass'
 // adj723d：试听**单实例**保证（代次守卫，纯模块便于 smoke 断言）
 import { createPlaybackGeneration, shouldAutoPlay } from './playbackSession'
 // adj987（用户需求）：标记段组的按钮组（收起/段选择/起始/停止/添加/删除/循环）+ 收起时的"歌名前展开"按钮
@@ -893,6 +895,20 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
                 {fmtClock(Math.min(clockMs, totalMs))} / {fmtClock(totalMs)}
               </span>
             )}
+            {/*
+              adj996（**用户 2026-10-19 要求**）：「在试听对话框里加一个**遍次数字**，
+              实时显示当前播放在第几个反复遍次上」。
+              取引擎 `passMarks` 里"最后一条 start ≤ 当前时刻"的遍号；只有一遍时不显示（免得恒为 1 抢眼）。
+            */}
+            {totalMs > 0 &&
+              (() => {
+                const label = passLabel(seqRef.current?.passMarks, Math.min(clockMs, totalMs), seqRef.current?.maxPass)
+                return label ? (
+                  <span className="dock-muted playback-pass" title="当前在第几遍反复（共几遍）">
+                    {label}
+                  </span>
+                ) : null
+              })()}
           </div>
         )}
       </div>

@@ -210,6 +210,7 @@ import { normalizePastedSource } from '../src/store/importSource.ts'
 import { UPDATE_CHECK_INTERVAL_MS, shouldPromptUpdate } from '../src/pwa/swUpdate.ts'
 // adj409：试听暂停/续播的剩余事件平移（纯逻辑）
 import { shiftEventsFrom } from '../src/playback/playbackTimeline.ts'
+import { passAt, passLabel } from '../src/dialogs/playbackPass.ts'
 // adj411：直接生成 PDF（不再开新窗口）——PDF 字节结构（纯逻辑）
 import { buildPdf, A4_W_PT, A4_H_PT } from '../src/export/pdf.ts'
 // adj626：打印链路 + 「另存为 PDF 的默认文件名」纯函数
@@ -19424,7 +19425,8 @@ runAdj927ExternalChangeTests()
     }
     try {
       // adj987：试听练习段（数据层 + 播放区间切片）
-      runAdj989Tests()
+      runAdj996Tests()
+  runAdj989Tests()
   runAdj987Tests()
     } catch (e) {
       failed++
@@ -21457,6 +21459,30 @@ function runAdj987Tests() {
  * 先 `seek` 再 `start` 会把暂停点抹掉（当时的 bug）——而且症状很隐蔽：
  * 声音对（音频另排）、只有色块跳回开头，**且下一次暂停取到的是小值**，越暂停越乱。
  */
+/**
+ * [189] adj996（用户 2026-10-19 要求）：试听里"第几遍"的读数
+ *
+ * 引擎给出 `passMarks`（每到一遍开头一条 `{atMs, pass}`），UI 侧用纯函数 `passAt` / `passLabel` 查表。
+ * 这里两层都钉住：① 反复谱确实产出两遍边界与 `maxPass`；② 查表与文案（只有一遍时不显示）。
+ */
+function runAdj996Tests() {
+  console.log('[189] adj996 playback pass number')
+  const r996 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 | 3 4 :| 5 6 |\n')
+  const seq996 = buildPlaySequence(r996, layoutScore(r996, defaultPageConfig), 60)
+  check('adj996 反复谱产出遍次时间轴：`passMarks` 至少 2 条、`maxPass` = 2（`|: … :|` 两遍）',
+    (seq996.passMarks?.length ?? 0) >= 2 && seq996.maxPass === 2,
+    JSON.stringify({ marks: seq996.passMarks, maxPass: seq996.maxPass }))
+  const m1 = seq996.passMarks?.[0]?.atMs ?? 0
+  const m2 = seq996.passMarks?.[1]?.atMs ?? 0
+  check('adj996 `passAt`：第 2 遍开始前 = 1，开始后 = 2（按时刻查表）',
+    passAt(seq996.passMarks, m1) === 1 && passAt(seq996.passMarks, m2 + 1) === 2,
+    JSON.stringify({ m1, m2, at1: passAt(seq996.passMarks, m1), at2: passAt(seq996.passMarks, m2 + 1) }))
+  check('adj996 `passLabel`：两遍时给"第 1 / 共 2 遍"；只有一遍时**不显示**（null）',
+    passLabel(seq996.passMarks, m1, seq996.maxPass) === '第 1 / 共 2 遍' &&
+      passLabel([{ atMs: 0, pass: 1 }], 0, 1) === null,
+    JSON.stringify({ two: passLabel(seq996.passMarks, m1, seq996.maxPass), one: passLabel([{ atMs: 0, pass: 1 }], 0, 1) }))
+}
+
 function runAdj989Tests() {
   console.log('[188] adj989 pause/resume clock position')
   /** 可控时钟：手工推进 `t`（避免真等 1.5 秒） */

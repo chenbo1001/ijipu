@@ -124,6 +124,14 @@ export interface PlaySequence {
   events: PlayEvent[]
   totalMs: number
   bpm: number
+  /**
+   * adj996（用户 2026-10-19 要求）：**遍次时间轴** —— 每到一遍的开始处记一条 `{atMs, pass}`，`pass` 从 1 起。
+   *
+   * 试听对话框据此实时显示"现在在第几遍"（按当前播放时刻取最后一条 `atMs <= t`）。
+   */
+  passMarks?: { atMs: number; pass: number }[]
+  /** adj996：整首一共用了几遍（= `passMarks` 里最大的 `pass`），供"第 N / 共 M 遍"显示 */
+  maxPass?: number
 }
 
 /** 音符 id → `page_voice_group_index` 串（与 `data-notepos` / `activeNoteId` 同一形状） */
@@ -376,7 +384,14 @@ export function slicePlaySequenceByRange(
   const events = seq.events.slice(i0, last + 1).map((e) => ({ ...e, atMs: Math.max(0, e.atMs - base) }))
   const lastEv = events[events.length - 1]
   const rangeMs = Math.max(0, lastEv.atMs + lastEv.durationMs)
-  return { events, totalMs: rangeMs, bpm: seq.bpm, rangeMs }
+  /**
+   * adj996：把**遍次时间轴**一起搬过来（区间内那几条 `passMarks`，并按新的 0 点重排）。
+   * 不搬的话，标记段播放时"第几遍"就不显示了（用户正是要练某一遍）。
+   */
+  const passMarks = seq.passMarks
+    ?.filter((m) => m.atMs >= base - 0.5 && m.atMs <= base + rangeMs + 0.5)
+    .map((m) => ({ atMs: Math.max(0, m.atMs - base), pass: m.pass }))
+  return { events, totalMs: rangeMs, bpm: seq.bpm, rangeMs, passMarks, maxPass: seq.maxPass }
 }
 
 /**
@@ -1615,6 +1630,16 @@ export function buildPlaySequence(
   }
 
   const events: PlayEvent[] = []
+  /**
+   * adj996（用户 2026-10-19 要求「实时显示当前在第几个反复遍次」）：
+   * 按**事件下标**收集遍次边界（`pass` 变化时才记），最后换算成播放时刻发给 UI。
+   */
+  const passIdxMarks: { idx: number; pass: number }[] = [{ idx: 0, pass: 1 }]
+  /** adj996：`pass` 与上一条不同就记一格（在主循环每轮开头调用） */
+  const markPass = (): void => {
+    const last = passIdxMarks[passIdxMarks.length - 1]
+    if (last.pass !== pass) passIdxMarks.push({ idx: events.length, pass })
+  }
   let pass = 1 // 当前反复遍次（1 起；决定演奏哪个 volta）
   let repeatStart = 0 // 反复起点（无 |: 时默认从头反复）
   let bigRepeatDone = false // adj359：&dc/&ds 是否已发生过（大反复；之后 &fine 生效、&ty 跳越、dc/ds 不再重复跳）
@@ -2099,6 +2124,7 @@ export function buildPlaySequence(
   }
 
   while (i < seq.length && guard++ < maxIter) {
+    markPass() // adj996：`pass` 变了就记进遍次时间轴（此刻 events.length = 该遍第一个事件）
     const item = seq[i]
     if (item.kind === 'segment') {
       // adj427：临时段（{bz}/{dsb}）——**不占主旋律时值**，此处只打标记；
@@ -2865,5 +2891,15 @@ export function buildPlaySequence(
     return { events, totalMs, bpm }
   }
 
-  return { events, totalMs, bpm }
+  /**
+   * adj996（用户 2026-10-19 要求）：把"按事件下标记的遍次边界"换算成**播放时刻**再交给 UI。
+   *
+   * 边界下标指向"该遍的第一个事件"；若那一遍没有任何事件（空遍/全被跳过），就落到 `totalMs`。
+   */
+  const passMarks = passIdxMarks
+    .map((m) => ({ atMs: m.idx < events.length ? events[m.idx].atMs : totalMs, pass: m.pass }))
+    .filter((m, k, arr) => k === 0 || m.atMs > arr[k - 1].atMs)
+  const maxPass = passIdxMarks.reduce((mx, m) => Math.max(mx, m.pass), 1)
+
+  return { events, totalMs, bpm, passMarks, maxPass }
 }
