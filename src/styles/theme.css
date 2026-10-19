@@ -312,3 +312,24 @@
   --jp-score-brightness: 1.06;
   --jp-score-saturate: 0.92;
 }
+
+/* adj1001（**用户 2026-10-19 要求**）：**浅色也做关/轻/中**，但**不用滤镜**——
+   浅色下墨色写死在 SVG 里（#1b1b1b），滤镜只会糊字、漂色；这里只改**纸张色**：
+     · 关   ：白（现状）
+     · 轻   ：极浅米 `#FDFBF5`（几乎看不出，刺眼感降一档）
+     · 中   ：明显米黄 `#F7EFDD`（像印刷纸）
+   墨色与文字锐度 100% 不变；纸色只作**最底层**——背景图/水印画在它之上，
+   所以"页面只有部分背景图"时，露出来的边距正好是这个纸色（不会出现白块）。
+   ⚠ 深色模式不走这条（深色由上面的 invert + 柔化档位处理）。 */
+[data-mode='light'][data-soften='off'] .score-page {
+  --jp-score-paper: var(--jp-paper-bg);
+}
+[data-mode='light'][data-soften='light'] .score-page {
+  --jp-score-paper: #fdfbf5;
+}
+[data-mode='light'][data-soften='mid'] .score-page {
+  --jp-score-paper: #f7efdd;
+}
+[data-mode='light'] .score-page {
+  background: var(--jp-score-paper, var(--jp-paper-bg));
+}
