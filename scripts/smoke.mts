@@ -19425,7 +19425,8 @@ runAdj927ExternalChangeTests()
     }
     try {
       // adj987：试听练习段（数据层 + 播放区间切片）
-      runAdj996Tests()
+      runAdj997Tests()
+  runAdj996Tests()
   runAdj989Tests()
   runAdj987Tests()
     } catch (e) {
@@ -21465,6 +21466,45 @@ function runAdj987Tests() {
  * 引擎给出 `passMarks`（每到一遍开头一条 `{atMs, pass}`），UI 侧用纯函数 `passAt` / `passLabel` 查表。
  * 这里两层都钉住：① 反复谱确实产出两遍边界与 `maxPass`；② 查表与文案（只有一遍时不显示）。
  */
+/**
+ * [190] adj997（用户 2026-10-19 定案）：**整曲连续遍次**
+ *
+ * 口径（用户逐字确认）：
+ *  · 遍次**全曲连续**（`|:` / `:|:` 不归 1；`&dc` 也只 +1）；
+ *  · 一个反复结构里夹着跳房子时，中间的 `|:` **只移动回跳点、不重新计数**；
+ *  · 回跳判据用「本段已走几遍 = pass − passBase + 1」与"段内 `:|` 根数 + 1"比。
+ *
+ * 用户给的谱期望 **4 遍**：1(Q1 房子1) → 2(Q1 房子2 + Q2 + Q3 房子2) → 3(Q2 的 `|:` 起 + 房子3) → 4(`&ds` 回 `&hs` 后 + 结束句)。
+ */
+function runAdj997Tests() {
+  console.log('[190] adj997 continuous pass numbering')
+  const SRC997 = [
+    'V: 1.0', 'B: t', 'D: C', 'P: 4/4',
+    'Q: |: &zkh 5/ 6/ 1\'/ 2\'/ 3\' |["1." 2-- :|]["2." (2-- | 2) 0 0 &ykh |]',
+    'Q: 6,-- | 2 2 1 |: 1 1/ 6,/ (1/ 2/) | 2 2 1 | 5, 6, 1 |&hs 5/ 6/ 1\'/ 2\'/ 3\' | 2\'- 1\' |',
+    'Q: |/["2." 1-- | &zkh 5/ 6/ 1\'/ 2\'/ 3\' |]/ (2-- | 2) 0 0 &ykh :|["3." 1-- ||/&ds]["结束句." 1-- ||]',
+    '',
+  ].join('\n')
+  const r997 = parseJps(SRC997)
+  const seq997 = buildPlaySequence(r997, layoutScore(r997, defaultPageConfig), 90)
+  const passes997 = (seq997.passMarks ?? []).map((m) => m.pass)
+  check('adj997 用户谱走 **4 遍**（整曲连续遍次，标号 1/2/3/4；`&dc` 也 +1）',
+    seq997.maxPass === 4 && JSON.stringify(passes997) === JSON.stringify([1, 2, 3, 4]),
+    JSON.stringify({ maxPass: seq997.maxPass, passes: passes997 }))
+  /** 第 4 遍只应当是「`&hs` 之后 + 结束句」——用事件数守一下（比逐音更稳） */
+  const marks997 = seq997.passMarks ?? []
+  const lastFrom = marks997[3]?.atMs ?? 0
+  const lastCount = seq997.events.filter((e) => e.atMs >= lastFrom - 0.5).length
+  check('adj997 第 4 遍只含 `&hs` 之后那几小节（事件数明显少于第 2 遍）',
+    lastCount > 0 && lastCount < seq997.events.length / 2,
+    JSON.stringify({ lastCount, total: seq997.events.length }))
+  /** 负对照：普通两遍反复仍报 2 遍（改动没有把"每段各自遍数"搞坏） */
+  const r997b = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 | 3 4 :| 5 6 |\n')
+  const seq997b = buildPlaySequence(r997b, layoutScore(r997b, defaultPageConfig), 60)
+  check('adj997 **负对照**：普通 `|: … :|` 仍是 2 遍（整曲连续不会让单段多奏）',
+    seq997b.maxPass === 2, JSON.stringify({ maxPass: seq997b.maxPass }))
+}
+
 function runAdj996Tests() {
   console.log('[189] adj996 playback pass number')
   const r996 = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 | 3 4 :| 5 6 |\n')

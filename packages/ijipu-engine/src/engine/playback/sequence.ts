@@ -1379,6 +1379,16 @@ export function buildPlaySequence(
   const repeatCountAt = new Map<number, number>()
   {
     let endCount = 0
+    /**
+     * adj997：当前这块"反复结构"是否还没真正收尾。
+     *
+     * 判据（用户 2026-10-19 口径）：**`:|` 后面紧跟另一个跳房子的起点（`:][`）时，这一大块还没完**
+     * —— 每个跳房子的末尾各带一根 `:|`，它们属于**同一个反复结构**，中间的 `|:` 只是把回跳点往后挪。
+     * 只有 `:|` 后面**不再接跳房子**时，这段才算收尾，下一个 `|:` 才重新计数（`adj723x` 那类谱）。
+     */
+    let open = false
+    /** adj997：本结构里是否出现过跳房子（决定 |:/:| 是否重新计数/收尾） */
+    let sawVolta = false
     seq.forEach((it, k) => {
       if (it.kind !== 'bar') return
       /**
@@ -1392,7 +1402,23 @@ export function buildPlaySequence(
        * 两侧（`repeatCountAt` 的统计 与 走查里的 `repeatStart`）**必须同一口径**，
        * 否则计数与回跳点对不上。
        */
-      if (it.bar?.type === '|:' || it.bar?.type === '||:') endCount = 0
+      /**
+       * adj997（**用户 2026-10-19 口径**）：**遍次整曲连续**；而且 `|:` **只移动回跳点、不重新计数**
+       * —— **除非**上一块已经真正收尾（上一根 `:|` 后面不再接跳房子）。
+       *
+       * 用户给的谱：Q1 的 `|:` 与 Q3 的 `:|["3."` 是同一个反复结构的两个终点（`:][` 后面接了房子 2），
+       * Q2 的 `|:` 夹在中间只挪回跳点 ⇒ 该段 count = 3 ⇒ 前两遍各回跳一次，
+       * 第 3 遍落到房子 3，随后 `&ds` 进第 4 遍（= 用户期望的 4 遍）。
+       * 旧实现"见 `|:` 就归零"会把它算成两段（count=2）⇒ 只走到第 3 遍 ✗。
+       */
+      /** adj997：这一段里出现过跳房子（[/]）⇒ 结构一直延续，中间的 |: 不再重新计数 */
+      if (it.bar?.voltaStart || it.bar?.voltaEnd) sawVolta = true
+      const startsRepeat = it.bar?.type === '|:' || it.bar?.type === '||:'
+      if (startsRepeat && (!open || !sawVolta)) {
+        endCount = 0
+        open = true
+        sawVolta = false
+      }
       if (it.bar?.type === ':|' || it.bar?.type === ':|:') {
         endCount++
         repeatCountAt.set(k, endCount + 1)
@@ -1403,6 +1429,12 @@ export function buildPlaySequence(
          * 被算成 count=3 ⇒ `12` 奏 3 遍；归零后 count=2 ⇒ 正好 2 遍）。
          */
         if (it.bar?.type === ':|:') endCount = 0
+        /**
+         * adj997：这根 `:|` 之后**还接另一个跳房子**（`:][`）⇒ 这一大块没完，保持 `open`；
+         * 否则收尾，下一个 `|:` 重新计数（`adj723x` 的 `|: A :| |: B :|` 就属于这种）。
+         */
+        /** 含跳房子的结构一路开着（volta 的各根 :| 属于同一结构）；无跳房子的才在这里收尾 */
+        if (!sawVolta) open = false
       }
     })
   }
@@ -1640,7 +1672,14 @@ export function buildPlaySequence(
     const last = passIdxMarks[passIdxMarks.length - 1]
     if (last.pass !== pass) passIdxMarks.push({ idx: events.length, pass })
   }
-  let pass = 1 // 当前反复遍次（1 起；决定演奏哪个 volta）
+  let pass = 1 // 当前反复遍次（1 起；**整曲连续**：|:/:|: 不再归 1，只有跳跃/repeat 前进时 +1）
+  /**
+   * adj997（用户 2026-10-19 口径「整曲连续遍次」）：**本反复段的起始遍次**。
+   * 
+   * 遍次全曲连续之后，不能再用 pass < count 判回跳（第二段的 pass 已经 ≥ 2）。
+   * 改用「**本段已走几遍** = pass - passBase + 1」与 count 比。
+   */
+  let passBase = 1
   let repeatStart = 0 // 反复起点（无 |: 时默认从头反复）
   let bigRepeatDone = false // adj359：&dc/&ds 是否已发生过（大反复；之后 &fine 生效、&ty 跳越、dc/ds 不再重复跳）
   /**
@@ -2682,7 +2721,8 @@ export function buildPlaySequence(
         if (!bigRepeatDone) {
           i = 0 // 从头反复
           bigRepeatDone = true
-          pass = 1
+          // adj997（用户 2026-10-19 口径）：**首曲连续遍次** —— &dc 也**只 +1**，不归 1
+          pass++
           repeatStart = 0
           pendingJumpMs = lastEndMs // adj361：从当前播放时刻无缝接上（从头反复）
           continue
@@ -2749,7 +2789,9 @@ export function buildPlaySequence(
     // 终止线 `||` / 段落起点 `|:` 仍要照常处理——落点线可能正是"结束"或"下一段起点"。
     if (!landedByVolta && (bar.type === ':|' || bar.type === ':|:')) {
       const count = repeatCountAt.get(i) ?? 2 // 本段内到该线的第几个 :|（+1 = 总遍数）
-      if (pass < count) {
+      /** adj997：本段已走遍数（整曲连续遍次下用相对量判回跳） */
+      const doneInSeg = pass - passBase + 1
+      if (doneInSeg < count) {
         /**
          * adj723x（用户报 `Q: 11:|: 12:| 13|: 14 :|` 里 `12` 被奏 **3** 遍）：
          *
@@ -2762,7 +2804,7 @@ export function buildPlaySequence(
          * 判定"这是最后一次回跳"：`pass + 1 >= count`（本跳之后本段正好走满）。
          * 修后同例实测 `11 11 12 12 13 14 14` ✔
          */
-        const lastJump = pass + 1 >= count
+        const lastJump = doneInSeg + 1 >= count
         const from = i
         /** adj723aa：**进入下一遍次时**把本遍进入过的注释组各扣 1（不管该组有没有都走完） */
         settlePassVolta()
@@ -2774,7 +2816,8 @@ export function buildPlaySequence(
       }
       if (bar.type === ':|:') {
         repeatStart = i + 1 // 新段落起点
-        pass = 1
+        passBase = pass // adj997：新段落以当前遍次为起点（整曲连续遍次）
+        // adj997：遍次**不重置**（整曲连续）；:|: 只换段起点
       }
       i++
       continue
@@ -2784,7 +2827,8 @@ export function buildPlaySequence(
       case '|:':
       case '||:':
         repeatStart = i + 1
-        pass = 1 // 新段落起点 → 遍次从 1 起
+        passBase = pass // adj997：新段落以当前遍次为起点（整曲连续遍次）
+        // adj997：遍次**不重置**（整曲连续）；|: 只换段起点
         i++
         break
       case '||':
