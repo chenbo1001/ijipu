@@ -199,6 +199,9 @@ export function PageConfigDialog({
   const setTheme = useUiStore((s) => s.setTheme)
   const themeMode = useUiStore((s) => s.themeMode)
   const setThemeMode = useUiStore((s) => s.setThemeMode)
+  // adj1000：深色预览柔化档位（L1 本机偏好，默认「轻」）
+  const previewSoften = useUiStore((s) => s.previewSoften)
+  const setPreviewSoften = useUiStore((s) => s.setPreviewSoften)
   // adj-font：字体覆盖（L1 用户个性；跨机缺字体时用我的字体，不改谱面文件）
   const fontOverride = useUiStore((s) => s.fontOverride)
   const setFontOverride = useUiStore((s) => s.setFontOverride)
@@ -604,6 +607,34 @@ export function PageConfigDialog({
                   ? '固定使用浅色配色'
                   : '固定使用深色配色'}
             </div>
+
+            {/*
+              adj1000（**用户 2026-10-19 要求**）：深色主题下预览区"黑底白字"对比过强，
+              给一个**柔化档位**（关 / 轻 / 中）。默认「轻」。
+              实现见 `styles/theme.css`：深色本来就是 `filter: invert(1)` 造"暗纸"，
+              这里只是在那条滤镜后面追加 `contrast/brightness/saturate`，按档位取值。
+            */}
+            <div className="pcfg-group-title">深色预览柔化</div>
+            <div className="theme-mode-row" style={{ padding: 0 }}>
+              {(
+                [
+                  { key: 'off' as const, label: uiCopy.previewSoftenOff },
+                  { key: 'light' as const, label: uiCopy.previewSoftenLight },
+                  { key: 'mid' as const, label: uiCopy.previewSoftenMid },
+                ]
+              ).map((m) => (
+                <button
+                  key={m.key}
+                  className={`theme-mode-btn${previewSoften === m.key ? ' active' : ''}`}
+                  onClick={() => setPreviewSoften(m.key)}
+                  title={m.label}
+                  aria-label={m.label}
+                >
+                  <span>{m.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="ijipu-form-hint">{uiCopy.previewSoftenHint}</div>
 
             {/* adj581（用户要求）：同上——统一成行标题样式 */}
             <div className="pcfg-group-title">主题配色</div>

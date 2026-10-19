@@ -127,6 +127,12 @@ const PLAYBACK_HQ_ENABLED_KEY = 'ijipu.playbackHqEnabled'
  */
 const PRACTICE_LOOP_KEY = 'ijipu.practiceLoop'
 const PRACTICE_COLLAPSED_KEY = 'ijipu.practiceCollapsed'
+/**
+ * adj1000（用户 2026-10-19 要求）：深色主题下预览区"黑底白字"对比过强 ⇒ **柔化档位**（L1 本机偏好）。
+ * 取值 `off` / `light` / `mid`，默认 **light**；实现见 `styles/theme.css` 的 `[data-soften]` 规则。
+ */
+const PREVIEW_SOFTEN_KEY = 'ijipu.previewSoften'
+export type PreviewSoften = 'off' | 'light' | 'mid'
 // adj347：默认启用的常用音色（初次用户打开试听即可选）——大钢琴/八音盒/小提琴/弦乐/小号/单簧管/长笛
 const DEFAULT_HQ_ENABLED: number[] = [0, 10, 40, 48, 56, 71, 73]
 
@@ -294,6 +300,8 @@ interface UiState {
   practiceLoop: boolean
   /** 段组是否收起（用户追加要求：左上角小按钮；L1 记住） */
   practiceCollapsed: boolean
+  /** adj1000：深色主题下预览区柔化档位（off / light / mid；默认 light） */
+  previewSoften: PreviewSoften
   /** 待添加的起点 / 终点音符 id（点音符后再按「起始」「停止」） */
   practiceSelStart: string | null
   practiceSelStop: string | null
@@ -464,6 +472,8 @@ interface UiState {
   setPracticeLoop: (b: boolean) => void
   /** 段组收起/展开（左上角小按钮；L1 记住） */
   togglePracticeCollapsed: () => void
+  /** adj1000：深色主题下预览区**柔化档位**（off / light / mid；L1 记住） */
+  setPreviewSoften: (v: PreviewSoften) => void
   /** adj379：设置「检测到新版本」状态（PWA 更新提示） */
   setUpdateReady: (b: boolean) => void
   /** adj728：`action` 非空时提示带一个按钮，且**不自动消失**（见 `NoticeAction`） */
@@ -769,6 +779,23 @@ export const useUiStore = create<UiState>()((set) => ({
       /* 忽略 */
     }
     set({ playbackHqEnabled: next })
+  },
+  // adj1000：默认「轻」（用户指定）；缓存里的非法值一律回退 light
+  previewSoften: ((): PreviewSoften => {
+    try {
+      const v = localStorage.getItem(PREVIEW_SOFTEN_KEY)
+      return v === 'off' || v === 'mid' || v === 'light' ? v : 'light'
+    } catch {
+      return 'light'
+    }
+  })(),
+  setPreviewSoften: (v) => {
+    try {
+      localStorage.setItem(PREVIEW_SOFTEN_KEY, v)
+    } catch {
+      /* 忽略 */
+    }
+    set({ previewSoften: v })
   },
   notice: null,
   /**

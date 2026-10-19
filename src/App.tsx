@@ -63,6 +63,8 @@ function App() {
   const fileDiff = useUiStore((s) => s.fileDiff)
   const theme = useUiStore((s) => s.theme)
   const themeMode = useUiStore((s) => s.themeMode)
+  // adj1000：深色预览柔化档位（挂到 <html data-soften>，由 styles/theme.css 消费）
+  const previewSoften = useUiStore((s) => s.previewSoften)
   const systemLight = useUiStore((s) => s.systemLight)
   const setSystemLight = useUiStore((s) => s.setSystemLight)
   const splitPct = useUiStore((s) => s.splitPct)
@@ -609,10 +611,12 @@ function App() {
     const el = document.documentElement
     el.setAttribute('data-theme', theme)
     el.setAttribute('data-mode', effectiveMode)
-  }, [theme, effectiveMode])
+    // adj1000：深色预览柔化档位（`styles/theme.css` 的 `[data-soften]` 规则消费它）
+    el.setAttribute('data-soften', previewSoften)
+  }, [theme, effectiveMode, previewSoften])
 
   return (
-    <div className="app" data-theme={theme} data-mode={effectiveMode}>
+    <div className="app" data-theme={theme} data-mode={effectiveMode} data-soften={previewSoften}>
       <TopBar />
       <div className={`app-main${isSplitHView ? ' app-main-h' : ''}`} ref={mainRef}>
         {viewType === 'code' && <EditorPane />}

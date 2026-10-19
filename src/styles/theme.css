@@ -281,13 +281,34 @@
 
 /* adj425（用户要求）：所有主题深色模式下预览区跟随反相做"暗纸"——
    引擎 SVG 内写死 #1b1b1b 墨色（engine/render/index.ts 89 处），CSS 变量 --jp-paper-ink 不生效；
-   用 CSS 滤镜 filter: invert(1) 把 .score-page 整体（含 CSS 背景 + 内嵌 SVG）反相：
-     · .score-page 的 var(--jp-paper-bg)=#fff → #000（暗纸）
-     · SVG 内的黑墨色 → 浅色（反相白）
-     · adj244 已把 SVG 自带白底 rect 透明化，不会有"双重底色"干扰
-   优点：所有主题自动适配——深色编辑区背景下，预览也是暗纸，元素对比与反相前一致；
-   浅色模式不动（白纸黑字保留），其它模式也都不动。
-   真正落地仍需改引擎（参数化底色与墨色）以取消 filter；本次仅做快速适配测试。*/
+   用 CSS 滤镜 filter: invert(1) 把 .score-page 整体（含 CSS 背景 + 内嵌 SVG）反相。
+
+   adj1000（**用户 2026-10-19 要求**）：「深色下预览区黑底白色对比很强，降低点对比度」。
+   做法 = **保留反相**（引擎墨色写死，反相是最省的"暗纸"手段），在它后面追加三档可调的
+   `contrast / brightness / saturate`，档位由 `[data-soften]` 提供的变量决定（默认「轻」）：
+     · off   ：完全不柔化（与旧版一致）
+     · light ：contrast .88 / brightness 1.03 —— 纸底从纯黑抬到深灰、墨色略收
+     · mid   ：contrast .80 / brightness 1.06 / saturate .92 —— 明显柔化
+   另：纸底用**中性**色（先在反相前给 #e6e5e5，反相后即 #191a1a），不再是纯黑。
+   ⚠ 色块 / 焦点 / 标记段层与 SVG 同级、都在 .score-page 内，因此也会受这条滤镜影响——
+      它们本来就是按"反相后"的观感选的色，档位只做轻微柔化，不改变语义色。 */
 [data-mode='dark'] .score-page {
-  filter: invert(1);
+  background: #e6e5e5; /* 反相后 = #191a1a（中性深灰纸底） */
+  filter: invert(1) contrast(var(--jp-score-contrast, 0.88)) brightness(var(--jp-score-brightness, 1.03))
+    saturate(var(--jp-score-saturate, 1));
+}
+[data-soften='off'] .score-page {
+  --jp-score-contrast: 1;
+  --jp-score-brightness: 1;
+  --jp-score-saturate: 1;
+}
+[data-soften='light'] .score-page {
+  --jp-score-contrast: 0.88;
+  --jp-score-brightness: 1.03;
+  --jp-score-saturate: 1;
+}
+[data-soften='mid'] .score-page {
+  --jp-score-contrast: 0.8;
+  --jp-score-brightness: 1.06;
+  --jp-score-saturate: 0.92;
 }

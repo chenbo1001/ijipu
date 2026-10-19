@@ -144,6 +144,12 @@ export const uiCopy = {
     '默认值：bz、dsb 为 22，tp 为 14。',
   // adj479：多声部块内「声部行间距」——此前只有预览虚线可拖（设置里没有输入框，用户报"无法调整"）
   shengbuGapLabel: '声部间距',
+  /* ---- adj1000（用户 2026-10-19 要求）：深色预览柔化 ---- */
+  previewSoftenOff: '关',
+  previewSoftenLight: '轻',
+  previewSoftenMid: '中',
+  previewSoftenHint:
+    '只影响深色主题下的谱面预览：档位越高，纸底越浅、墨色越柔，黑底白字的刺眼感越低。色块、焦点、标记段线的颜色不受影响。',
 } as const
 
 /**
