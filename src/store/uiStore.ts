@@ -133,6 +133,16 @@ const PRACTICE_COLLAPSED_KEY = 'ijipu.practiceCollapsed'
  */
 const PREVIEW_SOFTEN_KEY = 'ijipu.previewSoften'
 export type PreviewSoften = 'off' | 'light' | 'mid'
+/**
+ * adj1002（用户 2026-10-19 要求）：**导出背景**两项独立开关（L1 本机偏好）。
+ *
+ * · `exportBg`：导出**底色** —— `none`（透明，默认）/ `white` / `paper`（跟随当前纸色档位）；
+ * · `exportBgImage`：是否**带背景图/水印**（默认不带）——与底色分开，
+ *   因为"页面只有部分背景图"时，边距露出来的应是**纸色**而不是白块。
+ */
+const EXPORT_BG_KEY = 'ijipu.exportBg'
+const EXPORT_BG_IMAGE_KEY = 'ijipu.exportBgImage'
+export type ExportBg = 'none' | 'white' | 'paper'
 // adj347：默认启用的常用音色（初次用户打开试听即可选）——大钢琴/八音盒/小提琴/弦乐/小号/单簧管/长笛
 const DEFAULT_HQ_ENABLED: number[] = [0, 10, 40, 48, 56, 71, 73]
 
@@ -302,6 +312,10 @@ interface UiState {
   practiceCollapsed: boolean
   /** adj1000：深色主题下预览区柔化档位（off / light / mid；默认 light） */
   previewSoften: PreviewSoften
+  /** adj1002：导出底色（`none` 透明 / `white` / `paper` 跟随纸色档位；默认 `none`） */
+  exportBg: ExportBg
+  /** adj1002：导出是否带**背景图/水印**（默认不带；与底色独立） */
+  exportBgImage: boolean
   /** 待添加的起点 / 终点音符 id（点音符后再按「起始」「停止」） */
   practiceSelStart: string | null
   practiceSelStop: string | null
@@ -474,6 +488,10 @@ interface UiState {
   togglePracticeCollapsed: () => void
   /** adj1000：深色主题下预览区**柔化档位**（off / light / mid；L1 记住） */
   setPreviewSoften: (v: PreviewSoften) => void
+  /** adj1002：设置导出底色（L1，落 localStorage） */
+  setExportBg: (v: ExportBg) => void
+  /** adj1002：设置导出是否带背景图（L1，落 localStorage） */
+  setExportBgImage: (v: boolean) => void
   /** adj379：设置「检测到新版本」状态（PWA 更新提示） */
   setUpdateReady: (b: boolean) => void
   /** adj728：`action` 非空时提示带一个按钮，且**不自动消失**（见 `NoticeAction`） */
@@ -796,6 +814,32 @@ export const useUiStore = create<UiState>()((set) => ({
       /* 忽略 */
     }
     set({ previewSoften: v })
+  },
+  // adj1002：导出底色默认**透明**、背景图默认**不带**（用户 2026-10-19 指定）
+  exportBg: ((): ExportBg => {
+    try {
+      const v = localStorage.getItem(EXPORT_BG_KEY)
+      return v === 'white' || v === 'paper' || v === 'none' ? v : 'none'
+    } catch {
+      return 'none'
+    }
+  })(),
+  setExportBg: (v) => {
+    try {
+      localStorage.setItem(EXPORT_BG_KEY, v)
+    } catch {
+      /* 忽略 */
+    }
+    set({ exportBg: v })
+  },
+  exportBgImage: loadBool(EXPORT_BG_IMAGE_KEY, false),
+  setExportBgImage: (v) => {
+    try {
+      localStorage.setItem(EXPORT_BG_IMAGE_KEY, v ? '1' : '0')
+    } catch {
+      /* 忽略 */
+    }
+    set({ exportBgImage: v })
   },
   notice: null,
   /**

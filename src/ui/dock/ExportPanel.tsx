@@ -66,6 +66,10 @@ export function ExportPanel() {
   const pageConfig = useDocStore((s) => s.pageConfig)
   // adj354：@@ 恢复默认音色——无 Y 时用试听音色列表第一个启用音色（MIDI/音频导出与试听一致）
   const playbackHqEnabled = useUiStore((s) => s.playbackHqEnabled)
+  // adj1002：导出背景（底色 / 是否带背景图，两项独立，L1）；纸色档位来自 previewSoften
+  const exportBg = useUiStore((s) => s.exportBg)
+  const exportBgImage = useUiStore((s) => s.exportBgImage)
+  const previewSoften = useUiStore((s) => s.previewSoften)
   const setExportJob = useUiStore((s) => s.setExportJob)
   // adj626：PDF 走打印（与 Ctrl+P / 菜单「打印」同一条路：同一份页面 + 同一个默认文件名）
   const printScore = useDocStore((s) => s.printScore)
@@ -118,9 +122,31 @@ export function ExportPanel() {
     if (hasError) throw new Error(exportCopy.blockedByError)
     // adj647：导出与预览共用同一份宿主字体实测（否则导出的 PDF/SVG 与预览版面不一致）
     const fm = measureFontMeta(pageConfig)
-    const layout = layoutScore(parseResult, pageConfig, defaultInstrumentRef, fm.layout)
+    /**
+     * adj1002（用户 2026-10-19）：「导出背景」是**两项独立开关**——
+     *  ① 底色（透明/白/纸色）由 `svgToCanvas` 的 `bg` 参数处理（见下方 `bgOf`）；
+     *  ② **背景图/水印**在这里控制：默认**不带**（把 `bgEnabled` 临时置 false 渲染，
+     *     不改用户设置）。这样"页面只有部分背景图"时，露出来的边距是**纸色**而不是白块，
+     *     而"不带图"档导出的就是干净纸底。
+     */
+    const cfg = exportBgImage ? pageConfig : { ...pageConfig, bgEnabled: false }
+    const layout = layoutScore(parseResult, cfg, defaultInstrumentRef, fm.layout)
     // adj965（方案 OVL，EP-10）：导出与预览**共用同一份**水印/背景资源（否则会出现"预览有、导出没有"）
-    return applyRange(renderScoreToSvg(layout, withOverlay(fm.render)))
+    return applyRange(renderScoreToSvg(layout, exportBgImage ? withOverlay(fm.render) : fm.render))
+  }
+
+  /**
+   * adj1002：导出底色。
+   * · `none`（默认）⇒ 透明：PNG 传 `null`（真透明），JPG/PDF 无透明通道 ⇒ 落白；
+   * · `white` ⇒ 白；
+   * · `paper` ⇒ **当前纸色档位**（浅色 关/轻/中 = 白 / #FDFBF5 / #F7EFDD）。
+   *   深色主题不参与导出（用户口径：导出永远按浅色），所以这里只取浅色档位。
+   */
+  const bgOf = (fmt: 'png' | 'jpg' | 'pdf'): string | null => {
+    const paper = previewSoften === 'mid' ? '#f7efdd' : previewSoften === 'light' ? '#fdfbf5' : '#ffffff'
+    if (exportBg === 'white') return '#ffffff'
+    if (exportBg === 'paper') return paper
+    return fmt === 'png' ? null : '#ffffff'
   }
 
   const downloadJps = () => {
@@ -159,8 +185,8 @@ export function ExportPanel() {
         pages.forEach((s, i) => exportSvg(s, pages.length > 1 ? `${baseName}-${i + 1}.svg` : `${baseName}.svg`))
       }),
     },
-    { key: 'png', label: exportCopy.pngLabel, ext: '.png', run: () => run('png', async () => exportPng(getPages(), baseName, imgScale)) },
-    { key: 'jpg', label: exportCopy.jpgLabel, ext: '.jpg', run: () => run('jpg', async () => exportJpg(getPages(), baseName, imgScale)) },
+    { key: 'png', label: exportCopy.pngLabel, ext: '.png', run: () => run('png', async () => exportPng(getPages(), baseName, imgScale, bgOf('png'))) },
+    { key: 'jpg', label: exportCopy.jpgLabel, ext: '.jpg', run: () => run('jpg', async () => exportJpg(getPages(), baseName, imgScale, bgOf('jpg'))) },
     {
       // adj626（用户要求）：PDF 改走**系统打印 → 另存为 PDF**——矢量输出、放大不糊；
       // 打印走**当前窗口**（`window.print()`），不开新窗口 ⇒ 不存在"浏览器拦截新窗口"的问题。
@@ -175,7 +201,7 @@ export function ExportPanel() {
       key: 'pdfImg',
       label: exportCopy.pdfImageLabel,
       ext: '.pdf',
-      run: () => run('pdfImg', () => exportPdf(getPages(), baseName, imgScale)),
+      run: () => run('pdfImg', () => exportPdf(getPages(), baseName, imgScale, bgOf('pdf'))),
     },
     {
       // adj289：MIDI——复用播放序列（含反复展开），多声部每声部一条音轨
