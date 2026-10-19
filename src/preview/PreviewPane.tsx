@@ -919,29 +919,39 @@ export function PreviewPane() {
                       onPointerDown={(e) => startDrag({ key: 'margin_right', dir: 'h', invert: true }, e, pageConfig.margin_right)}
                       title="右边距（拖动调整）"
                     />
-                    {/* 描述头区域下端线（adj30：调整描述头内容区高度，与第一行曲部上端线区分） */}
-                    <div
-                      className="guide-line guide-h guide-desc"
-                      style={{
-                        top: pctY(metaAreaH(pageConfig) - pageConfig.body_margin_top),
-                        left: pct(pageConfig.margin_left),
-                        right: pct(pageConfig.margin_right),
-                        cursor: 'ns-resize',
-                        pointerEvents: 'auto',
-                      }}
-                      onPointerDown={(e) => startDrag({ key: 'descAreaH', dir: 'v' }, e, pageConfig.descAreaH)}
-                      title="描述头高度（拖动调整）"
-                    />
-                    {/* adj304：描述头区域水平中线——浅灰竖向虚线（纯标注，居中参考，不可拖拽） */}
-                    <div
-                      className="guide-line guide-v guide-desc-mid"
-                      style={{
-                        left: pct((pageConfig.margin_left + (page.width - pageConfig.margin_right)) / 2),
-                        top: pctY(pageConfig.margin_top),
-                        bottom: pctY(page.height - (metaAreaH(pageConfig) - pageConfig.body_margin_top)),
-                      }}
-                      title="描述头区域中线（标注）"
-                    />
+                    {/*
+                      adj1004（**用户 2026-10-19 要求**）：「排版模式下，第二页开始，页面上部不要显示描述头区那个虚框，
+                      第二页开始边距以内都是词曲部的内容」。
+                      ⇒ 描述头**只存在于第一页**：它的下端线与区域中线在**第 2 页起一律不画**
+                      （否则页面上部凭空一个"描述头框"，看着像留了一块空白区）。
+                    */}
+                    {page.index === 0 && (
+                      <>
+                        {/* 描述头区域下端线（adj30：调整描述头内容区高度，与第一行曲部上端线区分） */}
+                        <div
+                          className="guide-line guide-h guide-desc"
+                          style={{
+                            top: pctY(metaAreaH(pageConfig) - pageConfig.body_margin_top),
+                            left: pct(pageConfig.margin_left),
+                            right: pct(pageConfig.margin_right),
+                            cursor: 'ns-resize',
+                            pointerEvents: 'auto',
+                          }}
+                          onPointerDown={(e) => startDrag({ key: 'descAreaH', dir: 'v' }, e, pageConfig.descAreaH)}
+                          title="描述头高度（拖动调整）"
+                        />
+                        {/* adj304：描述头区域水平中线——浅灰竖向虚线（纯标注，居中参考，不可拖拽） */}
+                        <div
+                          className="guide-line guide-v guide-desc-mid"
+                          style={{
+                            left: pct((pageConfig.margin_left + (page.width - pageConfig.margin_right)) / 2),
+                            top: pctY(pageConfig.margin_top),
+                            bottom: pctY(page.height - (metaAreaH(pageConfig) - pageConfig.body_margin_top)),
+                          }}
+                          title="描述头区域中线（标注）"
+                        />
+                      </>
+                    )}
                     {/* 行结构虚线：曲部行虚线（数字中心）/ 曲词间距 / 词曲间距 / 词部行虚线 */}
                     {rowGuidesOfPage.map((rg, ri) => (
                       <div key={ri} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>

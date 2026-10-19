@@ -19427,7 +19427,8 @@ runAdj927ExternalChangeTests()
     }
     try {
       // adj987：试听练习段（数据层 + 播放区间切片）
-      runAdj1002Tests()
+      runAdj1004Tests()
+  runAdj1002Tests()
   runAdj997Tests()
   runAdj996Tests()
   runAdj989Tests()
@@ -21485,6 +21486,29 @@ function runAdj987Tests() {
  * 口径：底色默认**透明**；「纸色」取当前档位；**JPG/PDF 无透明通道 ⇒ 透明档落白**；
  * 背景图默认**不带**（导出时临时把 `bgEnabled` 置 false，不改用户设置）；导出**不吃深色主题**。
  */
+/**
+ * [192] adj1004（用户 2026-10-19）：排版辅助里**描述头区只画在第一页**
+ *
+ * 用户口径：「预览区，排版模式下，第二页开始，页面上部不要显示描述头区那个虚框；
+ * 第二页开始边距以内都是词曲部的内容」。布局侧本来就是"后续页不占描述头区域"
+ * （`y = m.bodyTopH`），所以这里只需守住**预览的辅助虚线**不再画到第 2 页起。
+ */
+function runAdj1004Tests() {
+  console.log('[192] adj1004 header guides only on page 1')
+  const pane1004 = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
+  /** 两根描述头辅助线（区域下端线 + 区域中线）都必须包在 `page.index === 0` 里 */
+  const gated =
+    /page\.index === 0 && \(\s*<>[\s\S]{0,1400}guide-desc/.test(pane1004) &&
+    /page\.index === 0 && \(\s*<>[\s\S]{0,1400}guide-desc-mid/.test(pane1004)
+  const descCount = (pane1004.match(/guide-desc/g) ?? []).length
+  check('adj1004 描述头区的两根辅助虚线只在**第一页**画（其余页边距以内直接是词曲部）',
+    gated && descCount === 2, JSON.stringify({ gated, descCount }))
+  /** 负对照：布局侧"后续页不占描述头区域"仍在（否则会真的空出一块） */
+  const layout1004 = String(readFileSync('packages/ijipu-engine/src/engine/layout/index.ts', 'utf8'))
+  check('adj1004 **负对照**：布局仍保证"换页后首行从 bodyTopH 起"（不占描述头区域）',
+    /y = m\.bodyTopH \/\/ 后续页不占描述头区域/.test(layout1004))
+}
+
 function runAdj1002Tests() {
   console.log('[191] adj1002 export background')
   check('adj1002 底色「透明」：PNG 不填色（null = 真透明）',
