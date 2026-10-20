@@ -22357,10 +22357,29 @@ function runAdj970Tests() {
         JSON.stringify({ 记号: [mark.x0, mark.x1, mark.y0, mark.y1], 方框: [box.x0, box.x1, box.y0, box.y1] }),
       )
       check(
-        `adj970（${mode}／${tag}）错开之后**方框与记号墨迹不相交**，且错开方向按余量选（${expect}）`,
+        `adj970/adj1008（${mode}／${tag}）错开之后**方框与记号墨迹不相交**，且**优先垂直**（下方放不下才左移；${expect}）`,
         !hit(box, mark) && (expect === 'yDrop' ? (bn.yDrop ?? 0) > 0 && bn.xShift === undefined : (bn.xShift ?? 0) > 0 && bn.yDrop === undefined),
         JSON.stringify({ n: bn.n, x: bn.x, yBarBottom: bn.yBarBottom, yDrop: bn.yDrop, xShift: bn.xShift, 记号: [mark.y0, mark.y1], 方框: [box.y0, box.y1] }),
       )
+      /**
+       * adj1008（用户 2026-10-21 最终口径）：「小节线下有修饰符和小节序号时，**优先小节线、修饰符、
+       * 序号顺序垂直放**」。这里把**顺序本身**钉住（不只判"不相交"）：
+       *  · 下方放得下 ⇒ 序号顶 = 修饰符墨迹底 + `LAYER_GAP`，且修饰符在线下（线 → 记号 → 序号）；
+       *  · 下方放不下（有歌词）⇒ 才退到左移（垂直优先的退路）。
+       */
+      if (expect === 'yDrop') {
+        check(
+          `adj1008（${mode}／${tag}）垂直顺序 = 小节线 → 修饰符 → 序号（序号顶 ≥ 记号墨迹底 + LAYER_GAP）`,
+          mark.y0 >= line.yBottom - 0.6 && box.y0 >= mark.y1 + LAYER_GAP - 0.06 && box.y1 > box.y0,
+          JSON.stringify({ lineBottom: line.yBottom, mark: [mark.y0, mark.y1], box: [box.y0, box.y1], LAYER_GAP }),
+        )
+      } else {
+        check(
+          `adj1008（${mode}／${tag}）下方放不下 ⇒ 才左移（垂直优先的退路），且不压歌词`,
+          (bn.yDrop ?? 0) === 0 && (bn.xShift ?? 0) > 0,
+          JSON.stringify({ yDrop: bn.yDrop, xShift: bn.xShift }),
+        )
+      }
       check(
         `adj970（${mode}／${tag}）**口径不变**：\`x\` 仍是线位、\`yBarBottom\` 仍是线底缘（错开量单独记），且方框不出**版心**`,
         Math.abs(bn.x - line.x) < 0.6 && Math.abs(bn.yBarBottom - line.yBottom) < 0.6 &&
