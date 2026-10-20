@@ -1301,6 +1301,31 @@ export function buildPlaySequence(
   /** 含 `&fine` 的末尾线（跳跃后备用） */
   const isFineOrStrictCloserBar = (it: SeqItem): boolean =>
     it.kind === 'bar' && !!it.bar && isVoltaCloserBarline(it.bar, true)
+  /**
+   * adj1005（用户 2026-10-20 定稿）：`|/` 是**不占小节**的隐藏线（画法上也不占位）。
+   *
+   * 跳过跳房子的落点、反复段（`|:` / `:|:`）的起点若落在它上面，应当**直接越过**——
+   * 否则"落到隐藏线上再走一步"会让回跳点/落点看起来多走了一节。
+   *
+   * 只越过**纯隐藏线**：带跳房子 `[`/`]` 或记号（`&ds` 等）的 `|/` 仍要参与配对/跳跃，
+   * 不能吞掉（否则落到它上面时会漏掉该房子的判定）。
+   */
+  const isPureHiddenBar = (k: number): boolean => {
+    const it = seq[k]
+    return (
+      it?.kind === 'bar' &&
+      it.bar?.type === '|/' &&
+      !it.bar.voltaStart &&
+      !it.bar.voltaEnd &&
+      !(it.bar.marks && it.bar.marks.length > 0)
+    )
+  }
+  /** adj1005：从 `k` 起跳过纯 `|/`，返回第一个"真正要处理"的序列项下标 */
+  const firstContentAt = (k: number): number => {
+    let j = k
+    while (j < seq.length && isPureHiddenBar(j)) j++
+    return j
+  }
   const voltaAfterRepeat = new Map<number, number>()
   const voltaAfterStrict = new Map<number, number>()
   const voltaAfterWithFine = new Map<number, number>()
@@ -1330,7 +1355,20 @@ export function buildPlaySequence(
         pendingStarts.push(si)
       } else if (pendingStarts.length > 0) {
         const start = pendingStarts.pop()!
-        if (item.bar.voltaEndSlash) {
+        /**
+         * adj1005（用户 2026-10-20 定稿）：**终点线优先取本跳房子自己的 `|]` / `:|]`**；
+         * 只有写成**不封闭**的 `|]/`（`voltaEndSlash`）时，才退回"其后最近的 `:|`/`:|:`"。
+         *
+         * `:|]/` = 反复线 + 未封闭跳房子：它自己的线**就是**反复线 ⇒ 仍以自己为终点
+         * （此时 `voltaEndSlash` 为真，但不能再往后找下一条 `:|`，否则终点被拉到下一个房子）。
+         */
+        const ownIsRepeat = isRepeatBar(item)
+        if (!item.bar.voltaEndSlash || ownIsRepeat) {
+          // 已封闭房子（`|]` / `:|]`）：就以该末尾小节线为界（各表一致）
+          voltaAfterRepeat.set(start, si)
+          voltaAfterStrict.set(start, si)
+          voltaAfterWithFine.set(start, si)
+        } else {
           // 未封闭房子（`|]/`）：末尾线优先取 `:|`/`:|:`，其次跳跃线
           const rep = seq.findIndex((it, k) => k > si && isRepeatBar(it))
           const strict = seq.findIndex((it, k) => k > si && isStrictCloserBar(it))
@@ -1347,11 +1385,6 @@ export function buildPlaySequence(
           voltaAfterRepeat.set(start, rep >= 0 ? rep : strict >= 0 ? strict : si)
           voltaAfterStrict.set(start, strict >= 0 ? strict : si)
           voltaAfterWithFine.set(start, withFine >= 0 ? withFine : si)
-        } else {
-          // 已封闭房子（`|]`）：就以该末尾小节线为界（各表一致）
-          voltaAfterRepeat.set(start, si)
-          voltaAfterStrict.set(start, si)
-          voltaAfterWithFine.set(start, si)
         }
       }
     }
@@ -2636,7 +2669,15 @@ export function buildPlaySequence(
       const repeatTarget = voltaAfterRepeat.get(i)
       const jumpTarget = allowFine ? voltaAfterWithFine.get(i) : voltaAfterStrict.get(i)
       const after = repeatTarget ?? jumpTarget
-      const target = after === undefined || after <= i ? i + 1 : after
+      /**
+       * adj1005（用户 2026-10-20 定稿）：跳过落点 = **末尾线之后的第一小节**，`|/` 不计。
+       *
+       * 落点仍先停在**末尾线本身**（`after`）——下一轮要先执行该线上的 `&ds`/`&dc`/`&fine`
+       * （adj598/adj653），再由 `landedByVolta` 越过它的 `:|` 回跳。
+       * **不能**取 `after - 1`（落到 `:|]` 之前 ⇒ 该线被当成正常反复线，多回跳一遍）；
+       * `firstContentAt` 只负责越过落在落点上的**纯 `|/` 隐藏线**。
+       */
+      const target = firstContentAt(after === undefined || after <= i ? i + 1 : after)
       landedByVoltaSkip = target
       i = target
       pendingJumpMs = lastEndMs // adj361：被跳过的房子不占时，从当前播放时刻无缝接上
@@ -2813,7 +2854,8 @@ export function buildPlaySequence(
         continue
       }
       if (bar.type === ':|:') {
-        repeatStart = i + 1 // 新段落起点
+        // adj1005：新段起点跳过紧跟的纯 `|/`（隐藏线不占小节；带跳房子/记号的线仍保留）
+        repeatStart = firstContentAt(i + 1)
         passBase = pass // adj997：新段落以当前遍次为起点（整曲连续遍次）
         // adj997：遍次**不重置**（整曲连续）；:|: 只换段起点
       }
@@ -2824,7 +2866,9 @@ export function buildPlaySequence(
     switch (bar.type) {
       case '|:':
       case '||:':
-        repeatStart = i + 1
+        // adj1005：反复段起点 = **`|:` 之后第一小节**；紧跟的纯 `|/` 隐藏线不占小节，直接越过。
+        // （带跳房子 `[` / 记号的 `|/` 不是"纯隐藏线"，仍从它起算——那些线本身要参与判定。）
+        repeatStart = firstContentAt(i + 1)
         passBase = pass // adj997：新段落以当前遍次为起点（整曲连续遍次）
         // adj997：遍次**不重置**（整曲连续）；|: 只换段起点
         i++

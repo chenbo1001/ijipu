@@ -19426,6 +19426,13 @@ runAdj927ExternalChangeTests()
       console.error('  ✗ adj986 未封闭跳房子跳过落点用例抛异常', e)
     }
     try {
+      // adj1005：带跳房子的多段反复（终点线 / 跳过落点 / 反复起点）
+      runAdj1005Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj1005 跳房子多段反复用例抛异常', e)
+    }
+    try {
       // adj987：试听练习段（数据层 + 播放区间切片）
       runAdj1004Tests()
   runAdj1002Tests()
@@ -21556,6 +21563,266 @@ function runAdj997Tests() {
   const seq997b = buildPlaySequence(r997b, layoutScore(r997b, defaultPageConfig), 60)
   check('adj997 **负对照**：普通 `|: … :|` 仍是 2 遍（整曲连续不会让单段多奏）',
     seq997b.maxPass === 2, JSON.stringify({ maxPass: seq997b.maxPass }))
+}
+
+/**
+ * [193] adj1005（用户 2026-10-20 第三次核对定稿）：**带跳房子的多段反复**
+ *
+ * 口径：
+ *  · 跳房子终点线优先取**自己的** `|]` / `:|]`；只有不封闭的 `|]/` 才退回"其后最近的 `:|`/`:|:`"；
+ *  · **跳过**跳房子时落点 = 末尾线之后的第一小节（**不得**落回末尾线之前，否则该线会被当成正常反复线）；
+ *  · 反复段起点 = `|:` / `:|:` 之后第一小节（紧跟的纯 `|/` 隐藏线不占小节，直接越过）。
+ *
+ * 真实用例：`D:\蜗居笔记\悟乐居杂记\2.曲谱集\乌兰巴托的夜\乌兰巴托的夜.jps`
+ * （文件存在时直接读它；不存在时用同一份 `Q:` 行做内置夹具，保证 CI 也能跑）。
+ *
+ * 期望四遍（按**方框小节号**，与 layout 的 `barNumbers` 同一口径）：
+ *   1..33 / 10..23,34..43 / 36..40,44..54 / 47..51,55..65
+ * （全曲 66 小节；第 66 小节是末句 `(1&sby- | 1)-` 的连音延长，事件仍记在 65。）
+ */
+function runAdj1005Tests() {
+  console.log('[193] adj1005 volta end / skip landing / repeat start')
+  const H1005 = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  /** 连续小节号数组（`1..33`） */
+  const R = (a: number, b: number): number[] => Array.from({ length: b - a + 1 }, (_, i) => a + i)
+  /** 把小节号数组压成区间文本，便于失败时一眼看出偏到哪 */
+  const ranges = (a: number[]): string => {
+    const out: string[] = []
+    for (let i = 0; i < a.length; ) {
+      let j = i
+      while (j + 1 < a.length && a[j + 1] === a[j] + 1) j++
+      out.push(i === j ? String(a[i]) : `${a[i]}-${a[j]}`)
+      i = j + 1
+    }
+    return out.join(',')
+  }
+  /**
+   * 按**方框小节号**把播放序列压成"每遍的小节序列"。
+   *
+   * 编号口径复刻 `layout/index.ts`：`splitBars` 数小节（**组首空 seg 不算小节**）+
+   * 排版单元按"各声部小节数最大值"推进（多声部块只推进一次）。这与渲染端画方框的
+   * `startBarOfGroup` / `barOrdinalsOf` 是同一套规则 ⇒ 得到的就是界面上的方框号。
+   */
+  const barPassesOf = (src: string): {
+    passes: number[][]
+    totalBars: number
+    maxPass: number
+    lastEndMs: number
+    totalMs: number
+  } => {
+    const r = parseJps(src)
+    const lay = layoutScore(r, defaultPageConfig)
+    const seq = buildPlaySequence(r, lay, 60)
+    const segsOf = (tokens: readonly { kind: string }[]): { notes: number }[] => {
+      const segs: { notes: number }[] = []
+      let cur = 0
+      for (const t of tokens) {
+        if (t.kind === 'barline') {
+          segs.push({ notes: cur })
+          cur = 0
+        } else cur++
+      }
+      if (cur > 0) segs.push({ notes: cur })
+      return segs
+    }
+    const segs = r.groups.map((g) => segsOf(g.music.tokens))
+    const countOf = (gi: number): number => {
+      const s = segs[gi]
+      return s.length - (s.length > 0 && s[0].notes === 0 ? 1 : 0)
+    }
+    // 排版单元序列（与 layout/sequence 的 unit 组装同一规则：声部号在本单元内重复即另起）
+    const units: number[][] = []
+    {
+      let cur: number[] = []
+      let voices = new Set<number>()
+      for (const line of r.lines) {
+        if (line.kind === 'pagebreak') {
+          if (cur.length > 0) units.push(cur)
+          cur = []
+          voices = new Set()
+          continue
+        }
+        if (line.kind !== 'music') continue
+        const gi = r.groups.findIndex((g) => g.music === line)
+        if (gi < 0) continue
+        const v = r.groups[gi].music.voice
+        if (cur.length > 0 && voices.has(v)) {
+          units.push(cur)
+          cur = []
+          voices = new Set()
+        }
+        cur.push(gi)
+        voices.add(v)
+      }
+      if (cur.length > 0) units.push(cur)
+    }
+    const startBar = new Map<number, number>()
+    let nextBar = 1
+    for (const u of units) {
+      let bars = 0
+      for (const gi of u) bars = Math.max(bars, countOf(gi))
+      for (const gi of u) startBar.set(gi, nextBar)
+      nextBar += bars
+    }
+    const barOf = (gi: number, bi: number): number => {
+      const firstEmpty = segs[gi].length > 0 && segs[gi][0].notes === 0
+      return (startBar.get(gi) ?? 1) + bi - (firstEmpty ? 1 : 0)
+    }
+    const marks = seq.passMarks ?? []
+    const passOf = (t: number): number => {
+      let pass = 1
+      for (const m of marks) if (m.atMs <= t + 1e-6) pass = m.pass
+      return pass
+    }
+    const maxPass = Math.max(1, seq.maxPass ?? 1)
+    const passes: number[][] = Array.from({ length: maxPass }, () => [])
+    for (const e of seq.events) {
+      const arr = passes[passOf(e.atMs) - 1]
+      const b = barOf(e.placed.id.group, e.placed.barIndex)
+      if (arr[arr.length - 1] !== b) arr.push(b)
+    }
+    return {
+      passes,
+      totalBars: nextBar - 1,
+      maxPass,
+      lastEndMs: seq.events.length > 0 ? seq.events[seq.events.length - 1].atMs + seq.events[seq.events.length - 1].durationMs : 0,
+      totalMs: seq.totalMs,
+    }
+  }
+
+  /**
+   * 真实谱的 10 条 `Q:` 行（与用户文件逐字一致；只去掉描述头之外的注释与 `# jps-config`）。
+   * 文件存在时优先读文件，下面两条断言都会跑。
+   */
+  const REAL_Q_1005 = [
+    'Q: &zkh 3/ 5/ | 6 1/ 3/ | 2 7,/ 6/ | 5/. 6// 1// (1/. | 1/) 6,// 7,// 1// 3// 1/ | 6 1/ 3/ | 2 7,/ (5/ | 5/.) 6,// 7,/ 6,/ |',
+    'Q: 7, &ykh 3,/ 5,/ |: 6, 6,/ 1/ | 2/ 0// 6,// 6,/ 5,/&sby | 3,- | 0 3,/ 5,/ | 6,/. 6,// 6,/ (3// 2//) |',
+    'Q: 2/ 0// 5,// 5,/ (5/ | 5) (3&sby | 3) 3/ (5// 6//) | 6 6/ (5// 3//) | (3// 2/.) 2/ 3/ | 5 3/ 2/ |',
+    'Q: (1/ (6,/ 6,/)) 0// 6,// | (3// 5//) 3/ (2// 1//) 1/ | 2 1/ 7,/ |["1." (6,[5,/]- | 6,) 0 | &zkh 0/ 6. |',
+    'Q: 0// 5/ 3// 2 | 0// 5// 3/ 2 | 6- | 0/ 2// 3// 2 | 5- | (6 6/.) 7// | 6// 7// 6/ &ykh 3,/ 5,/ :|]',
+    'Q: 6,[5,/]- | 0 3,/ (5,// 6,//) |: 6, 6,/ (3// 2//) | 2 1/ 2/ | (3&sby- | 3) 0/. 6,// | (3// 5//) 3/ 2/ 1/ |',
+    'Q: |/["2." 2 1// 1// 2/ | (3&sby- | 3) 3,/ (5,// 6,//) :|] 2 5/ 3//&xhy (2// | (3&sby)- | 3) 3/ (5// 6//) |:',
+    'Q: 6 6/ (5// 3//) | (3// 2/.) 2/ 3/ | 5 3/ 2/ | (1/ 6,) 0// 6,// | (3// 5//) 3/ 2/ 1/ |["3." 2 1/ 2/ |',
+    'Q: (3&sby- | 3) 3/ (5// 6//) :|] 2 1/ 1/ | (6,[5,/]- | 6,) 3/ (5// 6//) | 6 6/ (5// 3//) | 2[3/] 2/ 3/ |',
+    'Q: 5 3/ 2/ | (1/ 6,) 6,// 1// | 2/ (2. | 2) (2// 3//) (2/ | 2) 5,/ 6,/ | (1&sby- | 1)- ||',
+  ]
+  const REAL_HEAD_1005 = 'V: 1.0\nB: 乌兰巴托的夜\nD: E$\nP: 2/4\n'
+  const REAL_FIXTURE_1005 = REAL_HEAD_1005 + REAL_Q_1005.join('\n') + '\n'
+  const EXPECT_REAL_1005 = [
+    R(1, 33),
+    [...R(10, 23), ...R(34, 43)],
+    [...R(36, 40), ...R(44, 54)],
+    [...R(47, 51), ...R(55, 65)],
+  ]
+  const realPath = 'D:/蜗居笔记/悟乐居杂记/2.曲谱集/乌兰巴托的夜/乌兰巴托的夜.jps'
+  const realSrc = existsSync(realPath) ? String(readFileSync(realPath, 'utf8')) : REAL_FIXTURE_1005
+  const real = barPassesOf(realSrc)
+  check(
+    `adj1005 真实谱（${existsSync(realPath) ? '用户文件' : '内置夹具'}）四遍顺序 = ` +
+      `1-33 / 10-23,34-43 / 36-40,44-54 / 47-51,55-65`,
+    real.passes.length === 4 && JSON.stringify(real.passes) === JSON.stringify(EXPECT_REAL_1005),
+    `实际：${real.passes.map((p) => ranges(p)).join(' | ')}`,
+  )
+  check(
+    'adj1005 真实谱：全曲 66 小节、第 4 遍奏到 65（第 66 小节是末句 `(1&sby- | 1)-` 的连音延长，事件记在 65）',
+    real.totalBars === 66 && real.maxPass === 4 && real.passes[3]?.[real.passes[3].length - 1] === 65,
+    JSON.stringify({ totalBars: real.totalBars, maxPass: real.maxPass, last: real.passes[3]?.slice(-3) }),
+  )
+  check(
+    'adj1005 真实谱：末事件**响到全曲总时长**（连音把第 66 小节奏满，不是停在第 65 小节）',
+    Math.abs(real.lastEndMs - real.totalMs) < 1 && real.lastEndMs > 0,
+    JSON.stringify({ lastEndMs: real.lastEndMs, totalMs: real.totalMs }),
+  )
+  // 补一条夹具校验：真实文件若被用户后续编辑到结构不同，内置夹具仍守得住同一个口径
+  const realFix = barPassesOf(REAL_FIXTURE_1005)
+  check(
+    'adj1005 内置夹具与真实文件同口径（四遍顺序一致）',
+    JSON.stringify(realFix.passes) === JSON.stringify(real.passes) && realFix.totalBars === real.totalBars,
+    `夹具：${realFix.passes.map((p) => ranges(p)).join(' | ')}`,
+  )
+
+  /**
+   * 负对照 ①：**封闭 `|]`** —— 终点必须是「自己的 `|]`」，不能是"其后最近的 `:|`"。
+   *
+   * 夹具（13 小节）：`1 |: 2 | 3 |["1." 4 :|] 5 | 6 |: 7 |["2." 1' :|] 2' | 3' |: 4' |["3." 5' :|] 6' ||`
+   * 若终点误取"其后最近的 `:|`"（第 8 小节），第 1 遍会变成 1..8（多奏 5~8）。
+   */
+  const FIX_CLOSED_1005 =
+    H1005 + `Q: 1 |: 2 | 3 |["1." 4 :|] 5 | 6 |: 7 |["2." 1' :|] 2' | 3' |: 4' |["3." 5' :|] 6' ||\n`
+  const closed = barPassesOf(FIX_CLOSED_1005)
+  check(
+    'adj1005 封闭 `|]`：四遍 = 1-4 / 2,3,5-8 / 7,9-12 / 11,13',
+    JSON.stringify(closed.passes) === JSON.stringify([[1, 2, 3, 4], [2, 3, 5, 6, 7, 8], [7, 9, 10, 11, 12], [11, 13]]),
+    closed.passes.map((p) => ranges(p)).join(' | '),
+  )
+  check(
+    'adj1005 负对照（封闭 `|]`）：第 1 遍必须奏到末尾小节 4 再回跳（误取"其后最近的 :|" = 第 8 小节会变成 1..8）',
+    closed.passes[0]?.includes(4) === true && !closed.passes[0]?.includes(5),
+    `第 1 遍=${ranges(closed.passes[0] ?? [])}`,
+  )
+  check(
+    'adj1005 负对照（跳过落点）：第 2 遍不得出现末尾小节 4（旧落点"末尾线之前"会把 4 奏出来，并在 `:|` 处多回跳一遍）',
+    closed.passes[1]?.includes(4) === false,
+    `第 2 遍=${ranges(closed.passes[1] ?? [])}`,
+  )
+
+  /**
+   * 负对照 ①b：**plain `|]`**（不带 `:|`）—— 终点就是自己的 `|]`。
+   *
+   * 夹具（6 小节）：`1 |: 2 | 3 |["1." 4 |] 5 :| 6 ||`
+   * 若误取"其后最近的 `:|`"（第 5 小节），第 2 遍跳过房子会**连第 5 小节一起跳掉**（2,3,6）。
+   */
+  const FIX_CLOSED2_1005 = H1005 + `Q: 1 |: 2 | 3 |["1." 4 |] 5 :| 6 ||\n`
+  const closed2 = barPassesOf(FIX_CLOSED2_1005)
+  check(
+    'adj1005 封闭 `|]`（不带 `:|`）：两遍 = 1-5 / 2,3,5,6',
+    JSON.stringify(closed2.passes) === JSON.stringify([[1, 2, 3, 4, 5], [2, 3, 5, 6]]),
+    closed2.passes.map((p) => ranges(p)).join(' | '),
+  )
+  check(
+    'adj1005 负对照（plain `|]`）：第 2 遍必须奏到 5（终点误取其后最近的 `:|` 时会连 5 一起跳掉）',
+    closed2.passes[1]?.includes(5) === true,
+    `第 2 遍=${ranges(closed2.passes[1] ?? [])}`,
+  )
+
+  /**
+   * 负对照 ②：**不封闭 `|]/`** —— 终点必须退回到"其后最近的 `:|`"。
+   *
+   * 夹具（14 小节）：`1 |: 2 | 3 |["1." 4 |]/ 5 :| 6 |: 7 |["2." 1' |]/ 2' :| 3' |: 4' |["3." 5' |]/ 6' :| 7' ||`
+   * 若把 `|]/` 那根线当终点，第 1 遍只会到 4（漏掉 5），跳过时也会落到 5 之前。
+   */
+  const FIX_OPEN_1005 =
+    H1005 + `Q: 1 |: 2 | 3 |["1." 4 |]/ 5 :| 6 |: 7 |["2." 1' |]/ 2' :| 3' |: 4' |["3." 5' |]/ 6' :| 7' ||\n`
+  const open = barPassesOf(FIX_OPEN_1005)
+  check(
+    'adj1005 未封闭 `|]/`：四遍 = 1-5 / 2,3,6-9 / 7,10-13 / 11,14',
+    JSON.stringify(open.passes) === JSON.stringify([[1, 2, 3, 4, 5], [2, 3, 6, 7, 8, 9], [7, 10, 11, 12, 13], [11, 14]]),
+    open.passes.map((p) => ranges(p)).join(' | '),
+  )
+  check(
+    'adj1005 负对照（不封闭 `|]/`）：第 1 遍必须奏到 `:|` 所在的第 5 小节（把 `|]/` 当终点只会到 4）',
+    open.passes[0]?.includes(5) === true,
+    `第 1 遍=${ranges(open.passes[0] ?? [])}`,
+  )
+  check(
+    'adj1005 负对照（不封闭 `|]/` 的跳过落点）：第 2 遍不得出现 4/5（旧落点会落回末尾线之前，把房子尾巴再奏一遍）',
+    open.passes[1]?.includes(4) === false && open.passes[1]?.includes(5) === false,
+    `第 2 遍=${ranges(open.passes[1] ?? [])}`,
+  )
+
+  /**
+   * 负对照 ③（源码级）：旧落点写法的两个特征不得回来——
+   *  · `after - 1`（落到 `:|]` 之前）；
+   *  · 反复段起点 `repeatStart = i + 1` 不越过紧跟的 `|/`。
+   */
+  const seqSrc1005 = String(readFileSync('packages/ijipu-engine/src/engine/playback/sequence.ts', 'utf8'))
+  check(
+    'adj1005 源码：跳过落点不是 `after - 1`，且 `|:` / `:|:` 的 `repeatStart` 用 `firstContentAt` 越过纯 `|/`',
+    !/const target = [^\n]*after - 1/.test(seqSrc1005) &&
+      (seqSrc1005.match(/repeatStart = firstContentAt\(i \+ 1\)/g) ?? []).length >= 2 &&
+      /const target = firstContentAt\(after === undefined/.test(seqSrc1005),
+    '',
+  )
 }
 
 function runAdj996Tests() {
