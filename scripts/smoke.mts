@@ -5264,15 +5264,25 @@ const rightHalf107 = sortedVolta107[1]
 // adj162：跨行跳房子左半延伸到页面右边距（与跨行连音线一致），而非行末小节线
 const rightEdge107 = lay107.pages[0].width - defaultPageConfig.margin_right
 check('adj162 左半：起点线+2 → 页面右边距', leftHalf107 !== undefined && Math.abs(leftHalf107.x1 - (vStart107.x + 2)) < 0.5 && Math.abs(leftHalf107.x2 - rightEdge107) < 0.5, JSON.stringify(leftHalf107))
-// adj164：右半从下一行「行首小节线」开始（与渲染 rowStartBarX 一致）——取该行最小 x 小节线；
-// 该行无小节线则从边距+2
+// adj164：右半从下一行「行首内容左缘」开始——行首有无小节线分两种：
+//  · 有（第一音左侧）⇒ 从该小节线起；
+//  · 无（行首直接从音符开始）⇒ 从边距+2 起。
+// adj1007（用户 2026-10-20 实报）：旧写法在"无行首小节线"时退回 `arr[0]`（第一根小节线），
+// 而它在第一小节之后 ⇒ 右半漏掉最左那一小节。本夹具正是"无行首小节线"。
 const endRowBars107 = lay107.pages[0].barlines
   .filter((b) => Math.abs(b.yTop - vEnd107.yTop) < 1.5)
   .sort((a, b) => a.x - b.x)
-const expectStartB107 = endRowBars107.length > 0 ? endRowBars107[0].x : ML + 2
-check('adj164 右半：从下一行行首小节线/边距连到终点线-2', rightHalf107 !== undefined && Math.abs(rightHalf107.x1 - expectStartB107) < 1 && Math.abs(rightHalf107.x2 - (vEnd107.x - 2)) < 1, JSON.stringify({ right: rightHalf107, expect: expectStartB107, ve: vEnd107?.x }))
+const firstNoteX107 = Math.min(
+  ...lay107.pages[0].notes
+    .filter((n) => !n.segment && Math.abs(n.y - 18.4 * (defaultPageConfig.note_size / 18) - vEnd107.yTop) < 1)
+    .map((n) => n.x),
+)
+const leadingBar107 = Number.isFinite(firstNoteX107) ? endRowBars107.find((b) => b.x < firstNoteX107) : undefined
+const expectStartB107 = leadingBar107 ? leadingBar107.x : ML + 2
+check('adj164/adj1007 右半：行首有第一音左侧的小节线则从其起，否则从边距+2 连到终点线-2', rightHalf107 !== undefined && Math.abs(rightHalf107.x1 - expectStartB107) < 1 && Math.abs(rightHalf107.x2 - (vEnd107.x - 2)) < 1, JSON.stringify({ right: rightHalf107, expect: expectStartB107, ve: vEnd107?.x }))
 // adj164：下一行行首有小节线时，右半从其开始（与连音线 rowStartBarX 一致）；
-// 该场景终点行行首音符 x=86 而小节线最小 154（行首无小节线）→ 右半应从边距+2 开始
+// adj1007（用户 2026-10-20 实报）：行首**没有**第一音左侧的小节线时，必须从边距+2 起，
+// 否则第一根小节线在第一小节之后 ⇒ 漏掉最左那一小节。
 const r164b = parseJps(
   'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 | 3 4 5 6 | 7 1 2 3 | 4 5 6 7 | 1 2 3 4 | 5 6 7 1 | 2 3 4 5 |[ 6 7 1 2 | 3 4 5 6 | 7 1 2 3 | 4 5 6 7 | 1 2 3 4 | 5 6 7 1 | 2 3 4 5 |] 6 7 1 2 |\n',
 )
@@ -5288,9 +5298,19 @@ const rightHalf164b = lines164b[1]
 const endRowBars164b = lay164b.pages[0].barlines
   .filter((b) => Math.abs(b.yTop - vEnd164b.yTop) < 1.5)
   .sort((a, b) => a.x - b.x)
-const expectStart164b = endRowBars164b.length > 0 ? endRowBars164b[0].x : ML + 2
+const firstNoteX164b = Math.min(
+  ...lay164b.pages[0].notes
+    .filter((n) => !n.segment && Math.abs(n.y - 18.4 * (defaultPageConfig.note_size / 18) - vEnd164b.yTop) < 1)
+    .map((n) => n.x),
+)
 check(
-  'adj164 右半从行首小节线开始；无小节线时从边距+2',
+  'adj1007 夹具成立：终点行行首**没有**第一音左侧的小节线（第一音在首根小节线之前）',
+  Number.isFinite(firstNoteX164b) && endRowBars164b.length > 0 && firstNoteX164b < endRowBars164b[0].x,
+  JSON.stringify({ firstNoteX164b, firstBar: endRowBars164b[0]?.x }),
+)
+const expectStart164b = ML + 2
+check(
+  'adj1007 右半：行首无小节线 ⇒ 从边距+2 起（盖住最左那一小节），连到终点线-2',
   rightHalf164b !== undefined &&
     vStart164b !== undefined &&
     vEnd164b !== undefined &&
@@ -19440,6 +19460,13 @@ runAdj927ExternalChangeTests()
       console.error('  ✗ adj1006 起播保留遍次读数用例抛异常', e)
     }
     try {
+      // adj1007：跨行跳房子的右半段不得漏掉行首那一小节
+      runAdj1007Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj1007 跨行跳房子右半行首用例抛异常', e)
+    }
+    try {
       // adj987：试听练习段（数据层 + 播放区间切片）
       runAdj1004Tests()
   runAdj1002Tests()
@@ -22000,6 +22027,108 @@ function runAdj1006Tests() {
       JSON.stringify({ label: passLabel(byNote?.passMarks, 0, byNote?.maxPass), marks: byNote?.passMarks }),
     )
   }
+}
+
+/**
+ * [195] adj1007（用户 2026-10-20 实报）：跨行跳房子的**右半段**不能漏掉行首那一小节
+ *
+ * 用户原话：「跳房子1、跳房子3 后面一行的跳房子线少画一小节」，并澄清「是左边距开头的
+ * 那一小节线少了，不是后面」。
+ *
+ * 根因：`renderVoltas` 判断"行首小节线"时把音符基线偏移**写死 18.4**（默认字号 13 时实际是
+ * `18.4×13/18 = 13.29`）⇒ 匹配不到行首音符，退回"该行第一根小节线"；而它在第一小节之后
+ * ⇒ 右半从第一小节末尾起画，漏掉最左那一小节。
+ *
+ * 断言：真实谱的跳房子 1（第 24–33 小节）与跳房子 3（第 52–54 小节）都是**跨行**的，
+ * 其右半段 x1 必须 = 边距+2（= 行首内容左缘），且 ≤ 行首首音 x、< 行首第一根小节线 x。
+ */
+function runAdj1007Tests() {
+  console.log('[195] adj1007 cross-row volta right half covers row-first bar')
+  const REAL_PATH_1007 = 'D:/蜗居笔记/悟乐居杂记/2.曲谱集/乌兰巴托的夜/乌兰巴托的夜.jps'
+  if (!existsSync(REAL_PATH_1007)) {
+    console.log('    · adj1007 真实谱不在本机，跳过（合成夹具 r164b 已在 adj164/adj1007 覆盖同一规则）')
+    return
+  }
+  const src1007 = String(readFileSync(REAL_PATH_1007, 'utf8'))
+  const r1007 = parseJps(src1007)
+  // 用**谱面自带配置**排版（与用户界面同一分页），否则默认配置的分页可能不同
+  const cfg1007 = mergeJpsConfig(src1007, defaultPageConfig)
+  const lay1007 = layoutScore(r1007, cfg1007)
+  const svgs1007 = renderScoreToSvg(lay1007)
+  const ns1007 = cfg1007.note_size
+  const noteYOffset1007 = 18.4 * (ns1007 / 18)
+  const all1007 = lay1007.pages.flatMap((p, pi) => p.barlines.map((b) => ({ b, pi })))
+  const lineRe1007 = /<line x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)" stroke="#1b1b1b" stroke-width="0.8"\/>/g
+  /** 取某个注释的房子：起点后的第一个 voltaEnd = 它的终点 */
+  const checkVolta1007 = (comment: string): void => {
+    const si = all1007.findIndex((o) => o.b.voltaStart?.comment === comment)
+    const endObj = si >= 0 ? all1007.slice(si + 1).find((o) => o.b.voltaEnd) : undefined
+    const startObj = si >= 0 ? all1007[si] : undefined
+    const end = endObj?.b
+    if (si < 0 || !startObj || !endObj || !end) {
+      check(`adj1007 真实谱：找到跳房子 ${comment} 的起止线`, false, JSON.stringify({ si, end: end?.x }))
+      return
+    }
+    /**
+     * 跨**页**的右半段是另一处（`renderVoltas` 按页配对，起点在上一页时本页拿不到起点）；
+     * 本次修的是**跨行**（同一页内换行）。真实谱的跳房子 3 在默认分页下可能跨页，
+     * 这种情况下只记一条说明、不在这里判红。
+     */
+    if (startObj.pi !== endObj.pi) {
+      console.log(
+        `    · adj1007 跳房子 ${comment} 跨页（page ${startObj.pi} → ${endObj.pi}），跨页右半另记；本组只判跨行`,
+      )
+      return
+    }
+    const start = startObj.b
+    const svg = svgs1007[endObj.pi] ?? ''
+    const y = end.voltaYTop ?? end.yTop - VOLTA_BAR_GAP
+    const lines = [...svg.matchAll(lineRe1007)]
+      .map((m) => ({ x1: Number(m[1]), y1: Number(m[2]), x2: Number(m[3]) }))
+      .filter((l) => Math.abs(l.y1 - y) < 0.6 && l.x2 - l.x1 > 20)
+    /**
+     * 同一行的房子：一条横线从起点小节线+2 到终点线-2，整段都盖住（没有"右半段"）。
+     * 用**谱面自带配置**排版时，这份真实谱的跳房子 1/3 可能就落在同一行；
+     * 跨行右半的规则由 r164b 夹具（行首无小节线）专门守住。
+     */
+    if (Math.abs(start.yTop - end.yTop) < 1) {
+      const sameLine = lines.find(
+        (l) => Math.abs(l.x1 - (start.x + 2)) < 0.6 && Math.abs(l.x2 - (end.x - 2)) < 0.6,
+      )
+      check(
+        `adj1007 真实谱：跳房子 ${comment} 在同一行——一条横线从起点+2 到终点-2（整段盖住）`,
+        sameLine !== undefined,
+        JSON.stringify({ comment, sameLine, startX: start.x, endX: end.x, y }),
+      )
+      return
+    }
+    /**
+     * 跨行时**左右两半**的 x2 可能都≈`end.x−2`（终点就在页面右缘）——不能 `find` 第一条，
+     * 否则可能取到左半（x1=起点小节线）。按 **x1 最小**取：右半从行首内容左缘起，x1 最小。
+     */
+    const line = lines
+      .filter((l) => Math.abs(l.x2 - (end.x - 2)) < 0.6)
+      .sort((a, b) => a.x1 - b.x1)[0]
+    const rowNotes = lay1007.pages[endObj.pi].notes.filter(
+      (n) => !n.segment && Math.abs(n.y - noteYOffset1007 - end.yTop) < 1,
+    )
+    const firstNoteX = rowNotes.length > 0 ? Math.min(...rowNotes.map((n) => n.x)) : Number.POSITIVE_INFINITY
+    const rowBars = lay1007.pages[endObj.pi].barlines
+      .filter((b) => Math.abs(b.yTop - end.yTop) < 1.5)
+      .sort((a, b) => a.x - b.x)
+    const firstBarX = rowBars[0]?.x ?? Number.NaN
+    const wantX1 = cfg1007.margin_left + 2
+    check(
+      `adj1007 真实谱：跳房子 ${comment} 的跨行右半从边距+2（${wantX1}）起画，盖住行首那一小节`,
+      line !== undefined &&
+        Math.abs(line.x1 - wantX1) < 0.6 &&
+        line.x1 <= firstNoteX + 0.6 &&
+        line.x1 < firstBarX - 1,
+      JSON.stringify({ comment, line, wantX1, firstNoteX, firstBarX, endX: end.x, y }),
+    )
+  }
+  checkVolta1007('1.')
+  checkVolta1007('3.')
 }
 
 function runAdj996Tests() {
