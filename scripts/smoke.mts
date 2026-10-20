@@ -20742,9 +20742,10 @@ function runAdj967Tests() {
  *
  * 判据一律按**墨迹**、且按**两个方向**判（`x` 与 `y` **任一方向分离**就算不重叠，符合口径里
  * "墨迹矩形不得相交"）：
- *  · 无歌词夹具 ⇒ **上下错开**（`yDrop`），因为下方有余量；
- *  · 有歌词夹具（默认版式）⇒ **左右错开**（`xShift`）——实测线底到歌词墨迹上沿只有 14.6px，
- *    而"记号 6.7 + 层间距 2 + 框 7.7 = 16.4px"塞不下；撑行距又违反 `adj625c`（序号显隐不得影响排版）。
+ *  · `adj1008`（用户 2026-10-21 最终口径）：「如果会压到歌词就放左边，否则放下边」——
+ *    下移**不与这一格下面的实际歌词墨迹相交** ⇒ 下移（含"行里别处有歌词、这一格空着"）；
+ *    会相交 ⇒ 左移。两个夹具（无歌词 / 有歌词但不在这一格）都应走 `yDrop`；
+ *    "这一格下面真的有字"的短夹具走 `xShift`。
  */
 /**
  * adj973（**用户 2026-10-18 实报**）：连音线**没画出来**时要**看得见**（告警），不许静默消失。
@@ -22319,7 +22320,8 @@ function runAdj970Tests() {
   for (const mode of ['space', 'duration'] as const) {
     for (const [tag, extra, expect] of [
       ['无歌词', '', 'yDrop'],
-      ['有歌词', 'C: 笔。 笔。 笔。 笔。\n', 'xShift'],
+      // adj1008：行里**别处**有歌词、但这一格下面没有 ⇒ 仍应下移（用户截图的现象）
+      ['有歌词但不在这一格', 'C: 笔。 笔。 笔。 笔。\n', 'yDrop'],
     ] as const) {
       const cfg: PageConfig = { ...defaultPageConfig, noteSpaceLayout: mode, showBarCount: true, barCountInterval: 1 }
       const L = layoutScore(parseJps(srcOf(extra)), cfg)
@@ -22415,24 +22417,44 @@ function runAdj970Tests() {
     }
   }
 
+  // adj1008：这一格**下面真的压着歌词** ⇒ 才左移。
+  // 只取 space 路径：duration 路径下这一小节的音符间距更大、最近的歌词也不在方框 x 范围内
+  // ⇒ 那档本来就该下移（两条路径共用同一个末尾后处理，下面另有 down 覆盖）。
+  for (const mode of ['space'] as const) {
+    const cfg: PageConfig = { ...defaultPageConfig, noteSpaceLayout: mode, showBarCount: true, barCountInterval: 1 }
+    const dense = Array.from({ length: 32 }, () => '1///').join(' ')
+    const lyricLine = Array.from({ length: 36 }, () => '笔').join(' ')
+    const L = layoutScore(
+      parseJps(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${dense} |&ds 1 2 3 4 ||\nC: ${lyricLine}\n`),
+      cfg,
+    )
+    const page = L.pages[0]
+    const bn = page.barNumbers.find((b) => b.n === 2)
+    check(
+      `adj1008（${mode}）这一格下面**有歌词** ⇒ 左移（xShift），不压下移`,
+      bn !== undefined && (bn.xShift ?? 0) > 0 && bn.yDrop === undefined,
+      JSON.stringify({ bn, lyrics: page.lyrics.map((l) => ({ x: l.x, y: l.y, t: `${l.char.text}${l.char.trailing ?? ''}` })) }),
+    )
+  }
+
   // ---- 接线（源码级；负对照逐处删）----
   {
     const src = String(readFileSync('packages/ijipu-engine/src/engine/layout/index.ts', 'utf8'))
     const wired = (t: string): boolean =>
-      (t.match(/avoidAtBar\(/g) ?? []).length >= 3 &&
-      t.includes('barNumberAvoid(n, prevEnd.y, prevEnd.marks, prevEnd.maxTop)') &&
+      (t.match(/barNumberAvoid\(/g) ?? []).length >= 4 &&
+      t.includes('barNumberAvoid(n, prevEnd.y, prevEnd.marks)') &&
       t.includes('const barNumberAvoid = (') &&
       t.includes('BAR_NUMBER_BOTTOM_GAP, barNumberBoxH, barNumberBoxW, barDownMarkInk, barDownMarkSpan, hasBarDownMark')
     check(
-      'adj970 接线：三处埋点（duration / space / 多声部块）都走 `avoidAtBar`，行首那一档走 `barNumberAvoid`（含锚点里的 marks 与余量）',
+      'adj970/adj1008 接线：三处埋点（duration / space / 多声部块）+ 行首都走 `barNumberAvoid`（两个候选；末尾按实际歌词二选一）',
       wired(src),
       '',
     )
     check(
       'adj970 **负对照**：删掉任一处的让位调用 / 行首那一档 / 让位函数本身 ⇒ 判据判假',
       wired(src) &&
-        !wired(src.replace(/avoidAtBar\(/g, 'noAvoid(')) &&
-        !wired(src.replace('barNumberAvoid(n, prevEnd.y, prevEnd.marks, prevEnd.maxTop)', '')) &&
+        !wired(src.replace(/barNumberAvoid\(/g, 'noAvoid(')) &&
+        !wired(src.replace('barNumberAvoid(n, prevEnd.y, prevEnd.marks)', '')) &&
         !wired(src.replace('const barNumberAvoid = (', 'const noAvoid = (')),
       '',
     )
