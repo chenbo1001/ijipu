@@ -1389,14 +1389,15 @@ async function main() {
         })()`,
       )
       /**
-       * adj971（**用户 2026-10-18 口径反转**）：应用标题不再是 `爱记谱 iJipu - vX.Y.Z (…)`，
-       * 而是 **`文件名.jps - 爱记谱 iJipu`**（这一程注入的草稿叫「粘贴导入」⇒ 标题就带它的名字）；
-       * 版本挪到状态栏右侧 —— 顺手在这里也量一下（`/app/` 是真浏览器里最方便量它的一程）。
+       * adj971（**用户 2026-10-18 口径反转**）：应用标题不再是 `爱记谱 iJipu - vX.Y.Z (…)`；
+       * adj978 起**只显示文件名**（应用名交给壳，浏览器页签 / PWA / 桌面窗口都不再拼应用名）。
+       * 版本在状态栏右侧，且 adj975 起**日期 + 指纹也可见**（`vX.Y.Z (日期 @commit)`）。
        */
-      check('adj971 应用 title = 「文件名.jps - 爱记谱 iJipu」形式，且**不带版本号**',
-        /^.+\.jps - 爱记谱 iJipu$/.test(app.title) && !/v\d+\.\d+\.\d+/.test(app.title), app.title)
-      check('adj971 应用状态栏右侧显示版本号（`.footer-version` 可见 `vX.Y.Z`）',
-        /^v\d+\.\d+\.\d+$/.test(String(app.footVer).trim()), JSON.stringify({ 版本: app.footVer }))
+      check('adj971/adj978 应用 title = **只有文件名**（`xx.jps`），且**不带版本号**',
+        /^.+\.jps$/.test(app.title) && !/v\d+\.\d+\.\d+/.test(app.title), app.title)
+      check('adj971/adj975 应用状态栏右侧显示版本号（`.footer-version` 可见 `vX.Y.Z (日期 @commit)`）',
+        /^v\d+\.\d+\.\d+ \(\d{4}-\d{2}-\d{2} @[0-9a-f]{7,}\)$/.test(String(app.footVer).trim()),
+        JSON.stringify({ 版本: app.footVer }))
       check('应用挂载成功（#root 有内容）', app.rootKids > 0, String(app.rootKids))
       check('应用编辑器在位（textarea 存在）', app.hasEditor)
       check('应用谱面渲染出来了（有 svg）', app.svgCount > 0, String(app.svgCount))
