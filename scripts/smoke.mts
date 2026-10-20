@@ -19433,6 +19433,13 @@ runAdj927ExternalChangeTests()
       console.error('  ✗ adj1005 跳房子多段反复用例抛异常', e)
     }
     try {
+      // adj1006：从音符起播时，试听「第 N / 共 M 遍」不能丢
+      runAdj1006Tests()
+    } catch (e) {
+      failed++
+      console.error('  ✗ adj1006 起播保留遍次读数用例抛异常', e)
+    }
+    try {
       // adj987：试听练习段（数据层 + 播放区间切片）
       runAdj1004Tests()
   runAdj1002Tests()
@@ -21609,6 +21616,8 @@ function runAdj1005Tests() {
     maxPass: number
     lastEndMs: number
     totalMs: number
+    events: ReturnType<typeof buildPlaySequence>['events']
+    barOf: (gi: number, bi: number) => number
   } => {
     const r = parseJps(src)
     const lay = layoutScore(r, defaultPageConfig)
@@ -21687,6 +21696,8 @@ function runAdj1005Tests() {
       maxPass,
       lastEndMs: seq.events.length > 0 ? seq.events[seq.events.length - 1].atMs + seq.events[seq.events.length - 1].durationMs : 0,
       totalMs: seq.totalMs,
+      events: seq.events,
+      barOf: (gi: number, bi: number): number => barOf(gi, bi),
     }
   }
 
@@ -21786,6 +21797,28 @@ function runAdj1005Tests() {
   )
 
   /**
+   * 规则级边界：`:|]/` = **反复线 + 未封闭跳房子**。
+   * 它自己的线**就是** `:|`，所以终点仍取它自己（不能因为带 `/` 就往后找下一条 `:|`）。
+   *
+   * 夹具（6 小节）：`1 |: 2 | 3 |["1." 4 :|]/ 5 :| 6 ||`
+   * 这一段有**两根 `:|`**（第 4 小节的 `:|]/` 与第 5 小节的 `:|`）⇒ 反复段共 3 遍；
+   * 跳房子 1 只占第 4 小节。正确 = `1-4 | 2-3,5 | 2-3,5-6`。
+   * 若把它当"未封闭"往后找，终点会变成第 5 小节的 `:|` ⇒ 第 2 遍跳过时连 5 一起跳掉（只剩 2 遍）。
+   */
+  const FIX_SLASH_1005 = H1005 + `Q: 1 |: 2 | 3 |["1." 4 :|]/ 5 :| 6 ||\n`
+  const slash1005 = barPassesOf(FIX_SLASH_1005)
+  check(
+    'adj1005 `:|]/`（反复线 + 未封闭房子）：终点取自己那根 `:|]`，三遍 = 1-4 / 2,3,5 / 2,3,5,6',
+    JSON.stringify(slash1005.passes) === JSON.stringify([[1, 2, 3, 4], [2, 3, 5], [2, 3, 5, 6]]),
+    slash1005.passes.map((p) => ranges(p)).join(' | '),
+  )
+  check(
+    'adj1005 负对照（`:|]/`）：第 2 遍必须含 5（误当"未封闭"往后找 `:|` 时会连 5 一起跳掉，且只剩 2 遍）',
+    slash1005.passes[1]?.includes(5) === true && slash1005.passes.length === 3,
+    `第 2 遍=${ranges(slash1005.passes[1] ?? [])}；共 ${slash1005.passes.length} 遍`,
+  )
+
+  /**
    * 负对照 ②：**不封闭 `|]/`** —— 终点必须退回到"其后最近的 `:|`"。
    *
    * 夹具（14 小节）：`1 |: 2 | 3 |["1." 4 |]/ 5 :| 6 |: 7 |["2." 1' |]/ 2' :| 3' |: 4' |["3." 5' |]/ 6' :| 7' ||`
@@ -21823,6 +21856,150 @@ function runAdj1005Tests() {
       /const target = firstContentAt\(after === undefined/.test(seqSrc1005),
     '',
   )
+
+  /**
+   * 规则级护栏：仓库里**所有示例谱**（真实曲谱，含多段反复/跳房子/弱起/多声部）都还能
+   * 构造出**非空、atMs 单调**的播放序列与遍次时间轴 —— 这次改动不是"只对乌兰巴托那一种写法生效"。
+   */
+  {
+    const dirs = ['public/samples', 'src/samples', 'samples']
+    const files = dirs.flatMap((d) =>
+      existsSync(d) ? readdirSync(d).filter((f) => f.endsWith('.jps')).map((f) => join(d, f)) : [],
+    )
+    const bad: string[] = []
+    for (const f of files) {
+      const src = String(readFileSync(f, 'utf8'))
+      const r = parseJps(src)
+      const seq = buildPlaySequence(r, layoutScore(r, defaultPageConfig), inferBpm(r))
+      const marksOk = (seq.passMarks?.length ?? 0) >= 1 && (seq.maxPass ?? 0) >= 1
+      const eventsOk =
+        seq.events.length > 0 &&
+        seq.events.every((e) => Number.isFinite(e.atMs) && Number.isFinite(e.durationMs) && e.durationMs >= 0) &&
+        seq.events.every((e, k) => k === 0 || e.atMs >= seq.events[k - 1].atMs - 1e-6)
+      if (!marksOk || !eventsOk) bad.push(f)
+    }
+    check(
+      `adj1005 规则级护栏：${files.length} 份示例谱/新建模板都构造出**非空且有序**的播放序列与遍次时间轴`,
+      files.length >= 3 && bad.length === 0,
+      bad.length ? `失败：${bad.join(', ')}` : '',
+    )
+  }
+}
+
+/**
+ * [194] adj1006（用户 2026-10-20 实报）：从音符起播时，试听里的「第 N / 共 M 遍」不能消失
+ *
+ * 根因：`buildPlaySequence` 在 `startNoteId` 非空时走三条早退分支（双击音符试听 / 点音起播），
+ * 那三条原来只返回 `{events,totalMs,bpm}`，把 `passMarks`/`maxPass` 丢了 ⇒ 对话框拿到 `undefined`，
+ * `passLabel` 返回 `null`，读数整条消失。
+ *
+ * 本组断言：
+ *  · 夹具（两遍）从第 2 遍独有的音起播 ⇒ 0ms 就是「第 2 / 共 2 遍」、`maxPass` 仍是 2；
+ *  · 真实谱第 1/2/3/4 遍各取"该遍末尾那一小节"（33 / 43 / 54 / 65，只在该遍出现）起播
+ *    ⇒ 读数依次 1/2/3/4，`maxPass` 恒为 4；
+ *  · 负对照：旧口径（没有 `passMarks`）`passLabel` 必为 `null`。
+ */
+function runAdj1006Tests() {
+  console.log('[194] adj1006 pass label survives start-from-note')
+  const H1006 = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  const mk1006 = (src: string, startId?: string) => {
+    const r = parseJps(src)
+    return buildPlaySequence(r, layoutScore(r, defaultPageConfig), 60, startId)
+  }
+  /** 某一遍的起止时刻（下一遍起点 = 本遍终点；末遍到全曲结束） */
+  const passWindow1006 = (seq: ReturnType<typeof buildPlaySequence>, p: number): [number, number] => {
+    const marks = seq.passMarks ?? []
+    const start = marks.find((m) => m.pass === p)?.atMs ?? 0
+    const next = marks.find((m) => m.pass === p + 1)?.atMs ?? seq.totalMs
+    return [start, next]
+  }
+  /** 该遍**最后一个主旋律事件**（只用来取"只在该遍出现"的音符 id，不参与读数判据） */
+  const lastMainOfPass1006 = (seq: ReturnType<typeof buildPlaySequence>, p: number) => {
+    const [a, b] = passWindow1006(seq, p)
+    return [...seq.events].reverse().find((e) => !e.placed.segment && e.atMs >= a - 0.5 && e.atMs < b - 0.5)
+  }
+  // 夹具：两遍；第 4 小节（`7 8`）只在第 2 遍出现
+  const FIX1006 = H1006 + 'Q: 1 2 |: 3 4 | 5 6 :| 7 8 ||\n'
+  const fullFix1006 = mk1006(FIX1006)
+  const evFix1006 = lastMainOfPass1006(fullFix1006, 2)
+  check(
+    'adj1006 夹具成立：第 2 遍有独立事件、`passMarks` 两条',
+    evFix1006 !== undefined && (fullFix1006.passMarks?.length ?? 0) >= 2,
+    JSON.stringify(fullFix1006.passMarks),
+  )
+  const fromFix1006 = mk1006(FIX1006, String(evFix1006?.placed.id.index ?? 0))
+  check(
+    'adj1006 从第 2 遍的音符起播：`passMarks` 不丢、`maxPass` 仍是 2、0ms 显示「第 2 / 共 2 遍」',
+    (fromFix1006.passMarks?.length ?? 0) >= 1 &&
+      fromFix1006.maxPass === 2 &&
+      passLabel(fromFix1006.passMarks, 0, fromFix1006.maxPass) === '第 2 / 共 2 遍' &&
+      Math.abs(fromFix1006.events[0]?.atMs ?? -1) < 0.5,
+    JSON.stringify({
+      passMarks: fromFix1006.passMarks,
+      maxPass: fromFix1006.maxPass,
+      label: passLabel(fromFix1006.passMarks, 0, fromFix1006.maxPass),
+      first: fromFix1006.events[0]?.atMs,
+    }),
+  )
+  check(
+    'adj1006 **负对照**：旧口径只有 `{events,totalMs,bpm}`（没有 passMarks）⇒ 读数必为 null（这就是"显示不见了"）',
+    passLabel(undefined, 0, 2) === null && passLabel([], 0, 2) === null,
+  )
+
+  // 真实谱：第 1/2/3/4 遍各取该遍末尾那一小节（33 / 43 / 54 / 65，只在该遍出现）
+  const REAL_PATH_1006 = 'D:/蜗居笔记/悟乐居杂记/2.曲谱集/乌兰巴托的夜/乌兰巴托的夜.jps'
+  if (!existsSync(REAL_PATH_1006)) {
+    console.log('    · adj1006 真实谱不在本机，跳过真实谱的 1..4 遍读数（夹具断言已覆盖同一路径）')
+    return
+  }
+  const realSrc1006 = String(readFileSync(REAL_PATH_1006, 'utf8'))
+  const real1006 = mk1006(realSrc1006)
+  const labels1006: string[] = []
+  for (let p = 1; p <= 4; p++) {
+    const ev = lastMainOfPass1006(real1006, p)
+    const from = ev ? mk1006(realSrc1006, String(ev.placed.id.index)) : null
+    const label = passLabel(from?.passMarks, 0, from?.maxPass)
+    labels1006.push(label ?? '∅')
+    check(
+      `adj1006 真实谱：从第 ${p} 遍的音符起播，0ms 显示「第 ${p} / 共 4 遍」且 maxPass = 4`,
+      from !== null && from.maxPass === 4 && label === `第 ${p} / 共 4 遍`,
+      JSON.stringify({ p, label, maxPass: from?.maxPass, marks: from?.passMarks }),
+    )
+  }
+  check(
+    'adj1006 真实谱：四遍读数依次是 1/2/3/4（不是恒为 1、也不是空白）',
+    JSON.stringify(labels1006) ===
+      JSON.stringify(['第 1 / 共 4 遍', '第 2 / 共 4 遍', '第 3 / 共 4 遍', '第 4 / 共 4 遍']),
+    JSON.stringify(labels1006),
+  )
+
+  /**
+   * 同一族的另外两条切片路径：**练习段**（按事件下标）与**标记段**（按音符 id）。
+   * 从第 2 遍**中间**起播时，0 点也必须补"当前那一遍"，不能显示成下一遍。
+   */
+  {
+    /**
+     * 起点取第 2 遍**末尾**那一小节（第 43 小节，只在该遍出现）——
+     * 若取第 10 小节，它在第 1 遍也出现，`slicePlaySequenceByNoteRange` 会按 id 命中第 1 遍，
+     * 测的就不是"从第 2 遍中间起"了。
+     */
+    const evStart = lastMainOfPass1006(real1006, 2)
+    const i0 = evStart ? real1006.events.indexOf(evStart) : -1
+    const i1 = Math.min(i0 + 5, real1006.events.length - 1)
+    const sliced = i0 >= 0 && i1 > i0 ? slicePlaySequenceByRange(real1006, i0, i1) : null
+    check(
+      'adj1006 练习段（按事件下标）从第 2 遍中间起：0ms 显示「第 2 / 共 4 遍」',
+      sliced !== null && passLabel(sliced.passMarks, 0, sliced.maxPass) === '第 2 / 共 4 遍',
+      JSON.stringify({ i0, i1, label: passLabel(sliced?.passMarks, 0, sliced?.maxPass), marks: sliced?.passMarks }),
+    )
+    const startId = evStart ? noteIdStringOf(evStart.placed.id) : ''
+    const byNote = evStart ? slicePlaySequenceByNoteRange(real1006, startId, startId) : null
+    check(
+      'adj1006 标记段（按音符 id）从第 2 遍中间起：0ms 显示「第 2 / 共 4 遍」',
+      byNote !== null && passLabel(byNote.passMarks, 0, byNote.maxPass) === '第 2 / 共 4 遍',
+      JSON.stringify({ label: passLabel(byNote?.passMarks, 0, byNote?.maxPass), marks: byNote?.passMarks }),
+    )
+  }
 }
 
 function runAdj996Tests() {

@@ -140,6 +140,30 @@ export function noteIdStringOf(id: { page: number; voice: number; group: number;
 }
 
 /**
+ * adj1006：把遍次时间轴**搬到新时间轴**（0 点 = `base`）。
+ *
+ * · 起播点所在的那一遍要在 0 处补一条 —— 否则第一帧会显示成下一遍/第 1 遍
+ *   （`passAt` 取"最后一条 `atMs <= t`"，起播点之前没有本条时会退回上一条）；
+ * · `endMs` 给定 = 只保留切片区间内的标记（练习段/标记段）。
+ *
+ * 三处共用（整曲从音符起播 / `slicePlaySequenceByRange` / `slicePlaySequenceByNoteRange`）：
+ * 同一份"时间轴重排"只允许一处实现。
+ */
+function rebasePassMarksOf(
+  marks: readonly { atMs: number; pass: number }[] | undefined,
+  base: number,
+  endMs?: number,
+): { atMs: number; pass: number }[] {
+  if (!marks || marks.length === 0) return []
+  const cur = [...marks].reverse().find((m) => m.atMs <= base + 0.5)
+  const out = marks
+    .filter((m) => m.atMs >= base - 0.5 && (endMs === undefined || m.atMs <= endMs + 0.5))
+    .map((m) => ({ atMs: Math.max(0, m.atMs - base), pass: m.pass }))
+  if (cur && (out.length === 0 || out[0].atMs > 0.5)) out.unshift({ atMs: 0, pass: cur.pass })
+  return out
+}
+
+/**
  * adj987（**用户 2026-10-18 需求**）：试听「练习段」——把整份序列**裁成一段**。
  *
  * 用户原话：「在试唱演奏练习时，我们经常针对一小段反复练……需要标注出反复练习段的起止点，
@@ -174,7 +198,15 @@ export function slicePlaySequenceByNoteRange(
   const events = seq.events.slice(i0, i1 + 1).map((e) => ({ ...e, atMs: Math.max(0, e.atMs - base) }))
   const last = events[events.length - 1]
   const rangeMs = Math.max(0, last.atMs + last.durationMs)
-  return { events, totalMs: rangeMs, bpm: seq.bpm, rangeMs }
+  return {
+    events,
+    totalMs: rangeMs,
+    bpm: seq.bpm,
+    rangeMs,
+    // adj1006：遍次读数跟随切片重排（与 `slicePlaySequenceByRange` 同一口径）
+    passMarks: rebasePassMarksOf(seq.passMarks, base, rangeMs),
+    maxPass: seq.maxPass,
+  }
 }
 
 /**
@@ -387,10 +419,9 @@ export function slicePlaySequenceByRange(
   /**
    * adj996：把**遍次时间轴**一起搬过来（区间内那几条 `passMarks`，并按新的 0 点重排）。
    * 不搬的话，标记段播放时"第几遍"就不显示了（用户正是要练某一遍）。
+   * adj1006：从某遍**中间**起播时，0 点还要补当前那一遍（`rebasePassMarksOf` 统一处理）。
    */
-  const passMarks = seq.passMarks
-    ?.filter((m) => m.atMs >= base - 0.5 && m.atMs <= base + rangeMs + 0.5)
-    .map((m) => ({ atMs: Math.max(0, m.atMs - base), pass: m.pass }))
+  const passMarks = rebasePassMarksOf(seq.passMarks, base, rangeMs)
   return { events, totalMs: rangeMs, bpm: seq.bpm, rangeMs, passMarks, maxPass: seq.maxPass }
 }
 
@@ -2923,6 +2954,25 @@ export function buildPlaySequence(
    */
   alignSameBeatSegs(events)
 
+  /**
+   * adj996（用户 2026-10-19 要求）：把"按事件下标记的遍次边界"换算成**播放时刻**再交给 UI。
+   *
+   * 边界下标指向"该遍的第一个事件"；若那一遍没有任何事件（空遍/全被跳过），就落到 `totalMs`。
+   *
+   * adj1006（**用户 2026-10-20 实报**「试听里第 N / 共 M 遍的显示不见了」）：这段必须在
+   * **"从音符起播"的三条早退之前**算好 —— 那三条原来只返回 `{events,totalMs,bpm}`，
+   * 一旦 `playbackStartId` 非空（双击音符试听 / 点音起播），`passMarks`/`maxPass` 就被丢掉，
+   * 对话框只能拿到 `undefined` ⇒ 读数整条消失。
+   */
+  const passMarks = passIdxMarks
+    .map((m) => ({ atMs: m.idx < events.length ? events[m.idx].atMs : totalMs, pass: m.pass }))
+    .filter((m, k, arr) => k === 0 || m.atMs > arr[k - 1].atMs)
+  const maxPass = passIdxMarks.reduce((mx, m) => Math.max(mx, m.pass), 1)
+  /**
+   * adj1006：从音符起播时，遍次时间轴用 `rebasePassMarksOf` 搬到新时间轴（0 点 = 起播音符）；
+   * `maxPass` 保持全曲遍数（"共 M 遍"不是"还剩 M 遍"）。
+   */
+
   // adj88：从指定音符开始——丢弃起点之前的音符事件，其后 atMs 统一减去起点 atMs
   if (startIdxByPage !== null) {
     /**
@@ -2970,22 +3020,13 @@ export function buildPlaySequence(
     if (from > 0) {
       const base = events[from].atMs
       const sliced = events.slice(from).map((e) => ({ ...e, atMs: Math.max(0, e.atMs - base) }))
-      return { events: sliced, totalMs: totalMs - base, bpm }
+      // adj1006：遍次时间轴跟随切片重排（见 `rebasePassMarksOf`）
+      return { events: sliced, totalMs: totalMs - base, bpm, passMarks: rebasePassMarksOf(passMarks, base), maxPass }
     }
-    if (from === 0) return { events, totalMs, bpm }
+    if (from === 0) return { events, totalMs, bpm, passMarks, maxPass }
     // 起点音符不在事件中（隐藏休止符等）→ 从第一个可播放事件开始
-    return { events, totalMs, bpm }
+    return { events, totalMs, bpm, passMarks, maxPass }
   }
-
-  /**
-   * adj996（用户 2026-10-19 要求）：把"按事件下标记的遍次边界"换算成**播放时刻**再交给 UI。
-   *
-   * 边界下标指向"该遍的第一个事件"；若那一遍没有任何事件（空遍/全被跳过），就落到 `totalMs`。
-   */
-  const passMarks = passIdxMarks
-    .map((m) => ({ atMs: m.idx < events.length ? events[m.idx].atMs : totalMs, pass: m.pass }))
-    .filter((m, k, arr) => k === 0 || m.atMs > arr[k - 1].atMs)
-  const maxPass = passIdxMarks.reduce((mx, m) => Math.max(mx, m.pass), 1)
 
   return { events, totalMs, bpm, passMarks, maxPass }
 }
