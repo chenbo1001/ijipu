@@ -5716,3 +5716,66 @@ span.ws-check {
   min-width: 160px;
   accent-color: var(--jp-accent, #00f0ff);
 }
+
+/* ============ 预览区取景框（adj1033）============
+ * 框固定、框外压暗、框内是相机画面。`box-shadow` 的 9999px 扩散就是把整屏压暗的标准做法，
+ * 比单独铺四块遮罩省事、也不会在窗口缩放时露缝。
+ */
+.dyn-frame-layer {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  /* 压暗用的 box-shadow 扩散到 9999px，必须裁在预览区内：否则整个应用（编辑器/顶栏）都被压暗 */
+  overflow: hidden;
+}
+.dyn-frame-box {
+  position: absolute;
+  pointer-events: auto;
+  border: 2px solid rgb(255 93 108 / 90%);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 0 0 9999px rgb(8 12 24 / 62%);
+}
+.dyn-frame-box canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.dyn-frame-mask {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #e8eefc;
+  background: rgb(15 21 38 / 80%);
+}
+.dyn-frame-bar {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  background: rgb(15 21 38 / 88%);
+}
+.dyn-frame-bar .btn {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.dyn-frame-ratio.is-on {
+  border-color: rgb(0 240 255 / 80%);
+  color: #00f0ff;
+}
+.dyn-frame-meta {
+  font-size: 11px;
+  color: #cfd8f5;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

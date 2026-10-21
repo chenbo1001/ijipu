@@ -61,6 +61,8 @@ import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '@ijipu/engine/layout/m
 import { firstEnabledInstrumentRef, enabledInstrumentRefs } from '../playback/spessaSynthBackend'
 import { measureFontMeta } from './fontMeta'
 import { brand, ui as uiColors } from '../brand/tokens'
+// adj1033：动态谱取景框（固定框 + 框内相机画面）
+import { DynamicFrameOverlay } from './DynamicFrameOverlay'
 
 /**
  * adj380：播放高亮元素「加/去」高亮——**除 class 外直接写 fill 属性**。
@@ -791,6 +793,8 @@ export function PreviewPane() {
 
   return (
     <div className="preview-pane" ref={paneRef}>
+      {/* adj1033：动态谱取景框（固定在视口上，不随内容滚动；开关在 uiStore） */}
+      <DynamicFrameOverlay />
       <div className="pages" ref={containerRef} onClick={onClick} onDoubleClick={onDoubleClick} onPointerDown={onPointerDown}>
         {pagesHtml.map((svg, i) => {
           const page = layout.pages[i]

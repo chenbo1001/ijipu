@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { DYNAMIC_PRESETS, type DynamicPresetId } from '@ijipu/engine'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
+import { useUiStore } from '../store/uiStore'
 import { dynamicVideoCopy } from '../brand/copy'
 import { createDynamicSession, type DynamicSession } from '../export/video/renderer'
 
@@ -21,6 +22,9 @@ const PRESET_IDS: DynamicPresetId[] = ['9x16', '1x1', '16x9']
 
 export function DynamicVideoDialog() {
   const [preset, setPreset] = useState<DynamicPresetId>('9x16')
+  // adj1033：把取景框叠到预览区上看（框不动、内容走）
+  const setDynamicFrame = useUiStore((s) => s.setDynamicFrame)
+  const closeModal = useUiStore((s) => s.closeModal)
   const [reloadTick, setReloadTick] = useState(0)
   const [status, setStatus] = useState<'busy' | 'ready' | 'error'>('busy')
   const [error, setError] = useState('')
@@ -164,6 +168,17 @@ export function DynamicVideoDialog() {
           </label>
           <button type="button" className="btn" onClick={() => setReloadTick((v) => v + 1)}>
             {dynamicVideoCopy.reload}
+          </button>
+          {/* adj1033：回到预览区，用固定取景框看（框不动、内容走） */}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setDynamicFrame({ on: true, aspect: preset })
+              closeModal()
+            }}
+          >
+            在预览区看取景
           </button>
           <span className="dock-muted">{dynamicVideoCopy.noSound}</span>
         </div>
