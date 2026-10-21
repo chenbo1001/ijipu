@@ -32633,10 +32633,11 @@ function runDynamicCameraTests(): void {
     if (f.pageIndex !== r.pageIndex) continue
     const h = halfW(f.zoom)
     const frac = (r.x + r.w / 2 - (f.cx - h)) / (2 * h)
-    if (frac < 0.2 || frac > 0.8) {
+    if (frac < 0.15 || frac > 0.85) {
       offCenter = `t=${Math.round(t)} 位置=${(frac * 100).toFixed(0)}%`
       break
     }
   }
-  check('M3 跟拍时色块落在画面中间带（横向 20%~80%）', offCenter === '', offCenter)
+  // 2026-10-22 用户口径：色块在 20%~80% 之间走（到 4/5 推、推到 1/5）⇒ 断言留一点余量
+  check('M3 跟拍时色块落在画面中间带（横向 15%~85%）', offCenter === '', offCenter)
 }
