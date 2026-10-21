@@ -55,7 +55,7 @@ export interface BankRecord {
    * adj1015：文件现在在哪（扫描"发现"时写的）。
    * 桌面：`install`（随包，只读）/ `appdata`（我的音色库目录，可写）；插件：`plugin`；网页：`cache`。
    */
-  location?: 'install' | 'appdata' | 'plugin' | 'cache'
+  location?: 'install' | 'appdata' | 'resource' | 'plugin' | 'cache'
   /** adj1015：本次扫描是否还找得到。`false` ⇒ 界面标"文件不在了"，但**不删记录** */
   present?: boolean
   /** adj1015：预设表**是否已解析**。`false` ⇒ 界面写"音色数未知（选中后读取）"，不猜数字 */

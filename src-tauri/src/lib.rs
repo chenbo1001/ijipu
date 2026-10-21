@@ -233,6 +233,23 @@ fn sf_cache_remove(app: tauri::AppHandle, lib_id: String) -> Result<(), String> 
 /// `LICENSE-GeneralUserGS.txt` / `README.md` 同目录、一眼能看出是哪来的。
 /// 两个候选都保留 ⇒ ① 旧的便携版布局照常可用；② 用户仍可把自备 sf2 放**安装目录根**来**覆盖**内置那份
 /// （根目录**优先**于 soundfonts/，这正是把"可替换"这条路留在这里的原因）。
+/// adj1025：**资源安装包目录**（用户自备的资源包落点）。
+///
+/// 用户 2026-10-21 明确：资源安装包装到 `%LOCALAPPDATA%\iJipu\soundfonts\`。
+/// 它和"我的音色库目录"（`%APPDATA%\com.ijipu.app\soundfonts`）不是一处，所以单独扫。
+fn resource_soundfont_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path()
+        .local_data_dir()
+        .ok()
+        .map(|d| d.join("iJipu").join("soundfonts"))
+}
+
+/// 纯函数版：给单测用（AppHandle 在测试里造不出来）
+#[cfg(test)]
+fn resource_dir_under(local_data: &Path) -> PathBuf {
+    local_data.join("iJipu").join("soundfonts")
+}
+
 fn builtin_soundfont_candidates(app: &tauri::AppHandle, lib_id: &str) -> Result<Vec<PathBuf>, String> {
     let dir = app.path().resource_dir().map_err(|e| e.to_string())?;
     let file = format!("{}.sf2", lib_id);
@@ -241,6 +258,10 @@ fn builtin_soundfont_candidates(app: &tauri::AppHandle, lib_id: &str) -> Result<
     // 放在最后 ⇒ 随包那份仍然优先（它一定存在），用户那份作为兜底/覆盖。
     if let Ok(app_data) = app.path().app_data_dir() {
         out.push(app_data.join("soundfonts").join(&file));
+    }
+    // adj1025：资源安装包那份（%LOCALAPPDATA%\iJipu\soundfonts）也要能读出来
+    if let Some(res) = resource_soundfont_dir(app) {
+        out.push(res.join(&file));
     }
     Ok(out)
 }
@@ -382,7 +403,7 @@ fn scan_dir_into(dir: &Path, origin: &str, out: &mut Vec<ScannedSoundfont>) {
     }
 }
 
-/// 扫描三处：安装目录根、安装目录 `soundfonts/`、我的音色库目录。
+/// 扫描四处：安装目录根、安装目录 `soundfonts/`、我的音色库目录、资源安装包目录。
 ///
 /// 前端拿到结果后按**内容**认库（引擎 `readSf2Info` + 指纹），文件名只做兜底显示。
 #[tauri::command]
@@ -392,6 +413,10 @@ fn sf_soundfont_scan(app: tauri::AppHandle) -> Result<Vec<ScannedSoundfont>, Str
     scan_dir_into(&install, "install", &mut out);
     scan_dir_into(&install.join("soundfonts"), "install", &mut out);
     scan_dir_into(&user_soundfont_dir(&app)?, "appdata", &mut out);
+    // adj1025：资源安装包（%LOCALAPPDATA%\iJipu\soundfonts）—— 独立来源，界面单独报数
+    if let Some(dir) = resource_soundfont_dir(&app) {
+        scan_dir_into(&dir, "resource", &mut out);
+    }
     out.sort_by(|a, b| a.origin.cmp(&b.origin).then(a.file_name.cmp(&b.file_name)));
     Ok(out)
 }
@@ -1157,10 +1182,17 @@ mod soundfont_tests {
         assert!(out.is_empty());
     }
 
+    /// adj1025：资源安装包目录 = `%LOCALAPPDATA%\iJipu\soundfonts`（用户 2026-10-21 给定）
+    #[test]
+    fn resource_dir_is_localappdata_ijipu_soundfonts() {
+        let p = resource_dir_under(Path::new("C:/Users/x/AppData/Local"));
+        assert!(p.ends_with("soundfonts"), "{}", p.display());
+        assert!(p.to_string_lossy().contains("iJipu"), "{}", p.display());
+    }
+
     /// adj1021：下载地址会直接交给 curl ⇒ 只允许 http(s)，且不许空白（防参数注入）
     #[test]
-    fn download_url_must_be_http() {
-        for ok in ["https://example.com/a.sf2", "http://example.com/a.sf2"] {
+    fn download_url_must_be_http() {        for ok in ["https://example.com/a.sf2", "http://example.com/a.sf2"] {
             assert!(valid_download_url(ok).is_ok(), "{ok} 应当被接受");
         }
         for bad in [

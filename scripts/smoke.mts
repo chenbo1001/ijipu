@@ -8631,6 +8631,21 @@ console.log('[101] soundfonts are NOT bundled anymore (adj1020)')
   check('adj1020 Rust 探测仍接受"安装目录根 / soundfonts/ 子目录 / 我的音色库目录"三处',
     libRs.includes('dir.join(&file)') && libRs.includes('dir.join("soundfonts").join(&file)') &&
       /app_data_dir\(\)[\s\S]{0,120}join\("soundfonts"\)/.test(libRs))
+  /**
+   * adj1025（用户 2026-10-21 给定资源包落点）：`%LOCALAPPDATA%\iJipu\soundfonts\`。
+   * 它和"我的音色库目录"（`%APPDATA%\com.ijipu.app\soundfonts`）不是一处 ⇒ 必须单独扫、
+   * 单独报数，并且**播放时也要能读到**（候选里得有它）。
+   */
+  check('adj1025 资源包目录：Rust 用 `local_data_dir()\\iJipu\\soundfonts`，并进扫描（origin=resource）',
+    /fn resource_soundfont_dir\(/.test(libRs) &&
+      /local_data_dir\(\)[\s\S]{0,120}join\("iJipu"\)[\s\S]{0,60}join\("soundfonts"\)/.test(libRs) &&
+      /scan_dir_into\(&dir, "resource"/.test(libRs))
+  check('adj1025 资源包目录也在播放候选里（否则扫得到、播不了）',
+    /resource_soundfont_dir\(app\)[\s\S]{0,160}out\.push\(res\.join\(&file\)\)/.test(libRs))
+  check('adj1025 前端把 `resource` 当独立来源：计数与位置标签都有它',
+    /resource: number/.test(readFileSync(join(root, 'src', 'playback', 'bankDiscovery.ts'), 'utf8')) &&
+      /'resource'/.test(readFileSync(join(root, 'src', 'playback', 'bankDiscovery.ts'), 'utf8')) &&
+      /资源安装包（%LOCALAPPDATA%/.test(readFileSync(join(root, 'src', 'dialogs', 'SoundBankPanel.tsx'), 'utf8')))
 
   // 旧的"把音源拷到 exe 旁"脚本已删（否则 dev 有、用户没有，行为不一致）
   check('adj1020 `scripts/prepare-tauri-soundfont.mjs` 已删除（不再给 dev 制造"内置"假象）',
@@ -12211,6 +12226,15 @@ console.log('[adj447] instrument names must resolve to their own GM program')
   const bareNames = GM_VOICES.map((v) => v.label.replace(/^\d+\s+/, ''))
   check('adj1022 128 个名字互不重复（重名会让 `Y:` 解析到错的 program）',
     new Set(bareNames).size === 128, `${128 - new Set(bareNames).size} 个重复`)
+  /**
+   * adj1025（用户口径「按新名改一遍」）：`GM_NAME_PROGRAMS` 这张旧简称表也必须跟标准对齐，
+   * 否则"表里没有的旧简称"仍会落到错 program（例：`竖琴`曾是 45、`爵士吉他`曾是 31）。
+   */
+  check('adj1025 旧简称表已按新名对齐：竖琴 46 / 爵士吉他 26 / 竖笛 74 / 排箫 75 / 电吉他 27',
+    instrumentToProgram('竖琴') === 46 && instrumentToProgram('爵士吉他') === 26 &&
+      instrumentToProgram('竖笛') === 74 && instrumentToProgram('排箫') === 75 &&
+      instrumentToProgram('电吉他') === 27,
+    `${instrumentToProgram('竖琴')}/${instrumentToProgram('爵士吉他')}/${instrumentToProgram('竖笛')}/${instrumentToProgram('排箫')}`)
   // 端到端：两条 Y: 行写库内名称 → 两声部 program 不同、通道不同、逐事件音色正确
   {
     const code =

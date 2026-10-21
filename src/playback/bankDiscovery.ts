@@ -39,7 +39,7 @@ import {
 } from './bankRegistry'
 
 /** 文件在哪（也决定优先级与界面标签） */
-export type BankLocation = 'install' | 'appdata' | 'plugin' | 'cache'
+export type BankLocation = 'install' | 'appdata' | 'resource' | 'plugin' | 'cache'
 
 /** 扫描到的一个文件（**瞬时**，不写库表） */
 export interface DiscoveredFile {
@@ -72,6 +72,8 @@ export interface DiscoveryProblem {
 export interface DiscoveryCounts {
   install: number
   appdata: number
+  /** adj1025：资源安装包目录（`%LOCALAPPDATA%\iJipu\soundfonts`） */
+  resource: number
   plugin: number
   cache: number
 }
@@ -103,8 +105,8 @@ export interface DiscoveryIo {
   putRecords(records: BankRecord[]): Promise<void>
 }
 
-/** 同内容多处的取舍顺序：随包 > 我的目录 > 插件 > 缓存 */
-const LOCATION_RANK: Record<BankLocation, number> = { install: 0, appdata: 1, plugin: 2, cache: 3 }
+/** 同内容多处的取舍顺序：随包 > 我的目录 > 资源包 > 插件 > 缓存（资源包先于插件：桌面更常见） */
+const LOCATION_RANK: Record<BankLocation, number> = { install: 0, appdata: 1, resource: 2, plugin: 3, cache: 4 }
 
 /** 位置 → 记录里的 `origin`（语义标签；`location` 另存原始位置） */
 function originOf(location: BankLocation): BankRecord['origin'] {
@@ -123,7 +125,7 @@ export async function discoverBanks(io: DiscoveryIo, now: number): Promise<Disco
   const records = await io.listRecords()
   const byId = new Map(records.map((r) => [r.id, r]))
   const problems: DiscoveryProblem[] = []
-  const counts: DiscoveryCounts = { install: 0, appdata: 0, plugin: 0, cache: 0 }
+  const counts: DiscoveryCounts = { install: 0, appdata: 0, resource: 0, plugin: 0, cache: 0 }
   const found = new Map<string, DiscoveredBank>()
 
   const keep = (cand: DiscoveredBank): void => {
@@ -324,7 +326,12 @@ export function createAppDiscoveryIo(): DiscoveryIo {
         return raw
           .filter((e) => typeof e.path === 'string' && e.path !== '')
           .map((e) => ({
-            location: e.origin === 'install' ? ('install' as const) : ('appdata' as const),
+            location:
+              e.origin === 'install'
+                ? ('install' as const)
+                : e.origin === 'resource'
+                  ? ('resource' as const)
+                  : ('appdata' as const),
             fileName: e.file_name ?? baseNameOf(e.path ?? ''),
             ref: e.path as string,
             sizeBytes: Number(e.size_bytes ?? 0),

@@ -77,6 +77,7 @@ const SMALL = { color: HIGHLIGHT, fontSize: 11 } as const
 const LOCATION_LABEL: Record<string, string> = {
   install: '随包（安装目录，只读）',
   appdata: '我的音色库目录（%APPDATA%\\…\\soundfonts）',
+  resource: '资源安装包（%LOCALAPPDATA%\\iJipu\\soundfonts）',
   plugin: '插件目录',
   cache: '本机缓存',
 }
@@ -495,6 +496,7 @@ export function SoundBankPanel() {
     if (rec.present === false) return '文件不在了'
     if (rec.location === 'install') return '随包'
     if (rec.location === 'appdata') return '本机'
+    if (rec.location === 'resource') return '资源包'
     if (rec.location === 'plugin') return '插件目录'
     if (rec.location === 'cache') return '缓存'
     return rec.origin === 'imported' ? '已导入' : '已下载'
@@ -542,6 +544,7 @@ export function SoundBankPanel() {
           {scanInfo ? (
             <span style={SMALL}>
               上次扫描 {scanTime} · 安装目录 {scanInfo.counts.install} · 我的目录 {scanInfo.counts.appdata}
+              {scanInfo.counts.resource > 0 ? ` · 资源包 ${scanInfo.counts.resource}` : ''}
               {scanInfo.counts.plugin > 0 ? ` · 插件目录 ${scanInfo.counts.plugin}` : ''} · 缓存 {scanInfo.counts.cache}
             </span>
           ) : (
@@ -585,6 +588,7 @@ export function SoundBankPanel() {
               扫描过的地方：
               <br />· 安装目录\soundfonts\ —— {scanInfo ? (scanInfo.counts.install > 0 ? `${scanInfo.counts.install} 个文件` : '不存在或为空') : '未扫描'}
               <br />· 我的音色库目录 —— {scanInfo ? (scanInfo.counts.appdata > 0 ? `${scanInfo.counts.appdata} 个文件` : '不存在或为空') : '未扫描'}
+              <br />· 资源包目录（%LOCALAPPDATA%\iJipu\soundfonts）—— {scanInfo ? (scanInfo.counts.resource > 0 ? `${scanInfo.counts.resource} 个文件` : '不存在或为空') : '未扫描'}
               <br />· 本机缓存 —— {scanInfo ? (scanInfo.counts.cache > 0 ? `${scanInfo.counts.cache} 个库` : '空') : '未扫描'}
             </div>
           </div>
@@ -786,8 +790,8 @@ export function SoundBankPanel() {
               {activeRecord?.present === false ? ' · 文件不在了' : ''}
             </div>
             <div style={SMALL}>
-              扫描过的地方：安装目录 {scanInfo?.counts.install ?? 0} · 我的目录 {scanInfo?.counts.appdata ?? 0} · 缓存{' '}
-              {scanInfo?.counts.cache ?? 0}
+              扫描过的地方：安装目录 {scanInfo?.counts.install ?? 0} · 我的目录 {scanInfo?.counts.appdata ?? 0} · 资源包{' '}
+              {scanInfo?.counts.resource ?? 0} · 缓存 {scanInfo?.counts.cache ?? 0}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>

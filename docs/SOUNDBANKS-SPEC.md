@@ -127,12 +127,14 @@ GM 的 128 个中文名曾与 MIDI 标准**成段错位**，已按标准更正�
 4. **远端下载**——`HQ_LIBRARIES[].source`（GitHub raw），失败再试 `fallbackSource`；只有这一条的结果会写回缓存。
 
 **桌面（Tauri）的文件位置**：
-- **我的音色库目录**（可写、推荐）：`<app_data>\soundfonts\`，Windows 下即 `%APPDATA%\<应用标识>\soundfonts\`。
+- **我的音色库目录**（可写、推荐）：`<app_data>\soundfonts\`，Windows 下即 `%APPDATA%\com.ijipu.app\soundfonts\`。
   应用内「打开音色库目录」按钮会建好并打开它；下载/导入都落这里。
+- **资源安装包目录**（adj1025，用户 2026-10-21 给定）：`%LOCALAPPDATA%\iJipu\soundfonts\`。
+  用户自备的资源安装包装到这里；界面单独报「资源包 N 个文件」，位置标签写「资源安装包」。
 - **安装目录**（只读、可选）：`<安装目录>\<id>.sf2` 或 `<安装目录>\soundfonts\<id>.sf2`。
-  给"便携版/高级用户手动放一份"留的口子（`builtin_soundfont_candidates` 的候选顺序：根 → soundfonts/ → 我的音色库目录）。
-- 扫描三处：`sf_soundfont_scan`（安装目录根 / `soundfonts/` / 我的音色库目录），只读文件头尾各 64 KB；
-  音色表在该库**首次被选中**时读一次全量并缓存（SF2 的 `pdta` 在文件尾部）。
+- 扫描四处：`sf_soundfont_scan`（安装目录根 / `soundfonts/` / 我的音色库目录 / 资源包目录），
+  只读文件头尾各 64 KB；音色表在该库**首次被选中**时读一次全量并缓存（SF2 的 `pdta` 在文件尾部）。
+  播放读取的候选顺序：安装目录根 → `soundfonts/` → 我的音色库目录 → 资源包目录。
 - 校验：smoke `[101]`（不许随包 + 其余资源仍在 + 发现命令仍在）、`[204]`（命令与安全边界）、`[205]`（发现编排）。
 
 **Web（PWA）**：没有"目录"，缓存即目录 —— 下载/导入一律进 IndexedDB，之后离线可用。
