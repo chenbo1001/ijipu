@@ -230,9 +230,10 @@ export function buildBankRows(
   return rows
 }
 
-/** 这一行显示几个音色：有记录用真实值，没有就用已知库的实测值（还不知道就是 null） */
+/** 这一行显示几个音色：**只有真的解析过才算数**，否则用已知库的实测值（还不知道就是 null） */
 export function presetCountOf(row: BankRow): number | null {
-  if (row.record) return row.record.presets.length
+  const rec = row.record
+  if (rec && (rec.presetsKnown === true || rec.presets.length > 0)) return rec.presets.length
   return row.lib.presetCount ?? null
 }
 

@@ -234,7 +234,7 @@ import type { HqCache } from '../src/playback/spessaCache.ts'
 import { hasBuiltinBank, loadHqBank, GM_VOICE_OPTIONS } from '../src/playback/spessaSynthBackend.ts'
 import type { HqSampleLibrary } from '../src/playback/spessaSynthBackend.ts'
 // adj1009（多音色库 P1）：SF2 头部解析 + 已知库认领（引擎纯函数；本文件用**手搓夹具 + 真文件**双重断言）
-import { isSf2, isGitLfsPointer, readSf2Info, readSf2Presets, summarizeSf2Presets, matchKnownLibrary, HQ_LIBRARIES, findKnownLibrary, resolveActiveLibrary } from '@ijipu/engine/index.ts'
+import { isSf2, isGitLfsPointer, readSf2Info, readSf2Presets, summarizeSf2Presets, matchKnownLibrary, HQ_LIBRARIES, RECOMMENDED_BANKS, findKnownLibrary, resolveActiveLibrary } from '@ijipu/engine/index.ts'
 // adj1010（多音色库 P2）：库注册表——导入识别（纯函数）与一次性迁移（可注入 IO 的编排）
 import { fingerprintOf, fingerprintOfParts, bankIdOf, readBankFile, planLegacyMigration, migrateLegacyBanks, buildBankRows, presetCountOf, libViewOfRecord } from '../src/playback/bankRegistry.ts'
 // adj1015：发现与登记（三端 IO 注入；本文件用假 IO 跑编排）
@@ -14881,7 +14881,7 @@ async function runAdj540WorkspaceTests() {
       !/help-hint-touch/.test(String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8'))) &&
       !/\.help-hint-touch/.test(cssAll),
     '')
-  check('adj581/adj1012（用户要求）底栏内容标题统一成**谱面页的行标题样式**（`.pcfg-group-title`，即「纸张与边距」那种）：选择工作区 / 粘贴源码 / 深浅模式 / 主题配色 / 音色库 / 当前库的音色',
+  check('adj581/adj1012/adj1016（用户要求）底栏内容标题统一成**谱面页的行标题样式**（`.pcfg-group-title`，即「纸张与边距」那种）：选择工作区 / 粘贴源码 / 深浅模式 / 主题配色 / 音色库 / 选音色',
     (() => {
       const panelDlg = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
       const bank = String(readFileSync('src/dialogs/SoundBankPanel.tsx', 'utf8'))
@@ -14892,7 +14892,7 @@ async function runAdj540WorkspaceTests() {
         /className="pcfg-group-title">深浅模式</.test(panelDlg) &&
         /className="pcfg-group-title">主题配色</.test(panelDlg) &&
         /className="pcfg-group-title">\s*音色库/.test(bank) &&
-        /className="pcfg-group-title">\s*当前库的音色/.test(bank) &&
+        /className="pcfg-group-title">\s*选音色/.test(bank) &&
         /className="pcfg-group-title import-label"/.test(paste) &&
         // ⚠ adj581 踩过的坑：dock 的 `.pcfg-group-title` **绝不能**带 `flex: 0 0 100%`——
         // 那在横向 flex 里是"占满整行宽"，到了**纵向** flex（导入面板）主轴变成高度 ⇒ 标题被撑满整块高度
@@ -20438,6 +20438,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1014Tests())
       // adj1015：发现与登记（三端编排，假 IO 真跑）
       .then(() => runAdj1015Tests())
+      // adj1016：推荐清单 + 四层页面
+      .then(() => runAdj1016Tests())
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
       .then(() => runAdj949ManualScopeTests())
@@ -21213,6 +21215,57 @@ async function runAdj1015Tests() {
       reads === 0 && r.banks.length === 1 && r.banks[0].libId === 'fluidr3_gm' && r.banks[0].presets?.length === 1,
       `reads=${reads}`)
   }
+}
+
+/**
+ * ---- 206. 推荐清单 + 四层页面（adj1016，P7+P8）----
+ *
+ * 用户要求的两条（2026-10-21）：
+ * ① 推荐要经得起判断 —— **库名 / 文件大小 / 许可 / 音色数 / 推荐理由**，缺一条用户就没法决定；
+ * ② 页面按四层排：列表推荐 → 管理 → 选音色 → 使用；**"使用"只做说明**（不做第二套按钮）。
+ */
+async function runAdj1016Tests() {
+  console.log('[206] recommended banks + four-layer page (adj1016)')
+  check('adj1016 推荐清单非空，且就是"带推荐理由"的那几条',
+    RECOMMENDED_BANKS.length >= 2 && RECOMMENDED_BANKS.every((l) => !!l.reason),
+    RECOMMENDED_BANKS.map((l) => l.id).join(','))
+  check('adj1016 每条推荐都能让用户判断：体积>0 / 许可非空 / 音色数已知 / 理由非空',
+    RECOMMENDED_BANKS.every(
+      (l) => l.sizeBytes > 0 && !!l.license && typeof l.presetCount === 'number' && l.presetCount > 0 && !!l.reason,
+    ),
+    JSON.stringify(RECOMMENDED_BANKS.map((l) => ({ id: l.id, size: l.sizeBytes, lic: l.license, n: l.presetCount }))))
+  const gu = RECOMMENDED_BANKS.find((l) => l.id === 'generaluser_gs')
+  const fluid = RECOMMENDED_BANKS.find((l) => l.id === 'fluidr3_gm')
+  check('adj1016 能自动下载的只有"直链真的能 fetch 到字节"的那条（GeneralUser）；FluidR3 只给下载页',
+    !!gu && gu.source.startsWith('https://') && gu.autoDownload !== false &&
+      !!fluid && fluid.source === '' && fluid.autoDownload === false && !!fluid.downloadPage,
+    JSON.stringify({ gu: gu?.autoDownload, fluid: fluid?.autoDownload }))
+
+  // 源码闸门：页面确实按四层排，且接上了"发现"
+  const panel = String(readFileSync(join(root, 'src', 'dialogs', 'SoundBankPanel.tsx'), 'utf8'))
+  check('adj1016 页面接上"发现"：打开时扫描、按钮可重扫、能显示三个位置各扫到几个',
+    /scanAndRegister\(\)/.test(panel) && /重新扫描/.test(panel) &&
+      /counts\.install/.test(panel) && /counts\.appdata/.test(panel) && /counts\.cache/.test(panel))
+  check('adj1016 四层标题齐备：音色库 / 管理（当前库） / 选音色 / 使用',
+    /pcfg-group-title">\s*音色库/.test(panel) &&
+      /pcfg-group-title">\s*管理（当前库）/.test(panel) &&
+      /pcfg-group-title">\s*选音色/.test(panel) &&
+      /pcfg-group-title">\s*使用/.test(panel))
+  check('adj1016 空状态有**三条出路** + 三个位置的探测结果（否则用户不知道文件该放哪）',
+    /还没找到任何音色库/.test(panel) && /下载推荐音色库/.test(panel) &&
+      /添加音色库|导入本地文件/.test(panel) && /扫描过的地方/.test(panel))
+  check('adj1016 推荐区在"一个库都没有"时**自动展开**（不需要用户先找到折叠箭头）',
+    /showRecommended \|\| !hasUsable/.test(panel))
+  check('adj1016 "使用"层只做说明、不再放试听/导出按钮（避免两处入口）',
+    (() => {
+      const i = panel.indexOf('pcfg-group-title">使用')
+      if (i < 0) return false
+      const end = panel.indexOf('</section>', i)
+      const seg = panel.slice(i, end > i ? end : i + 600)
+      return !/<button/.test(seg) && /换库不会改谱面/.test(seg)
+    })())
+  check('adj1016 坏文件有诊断入口（跳过几个 + 看原因），不是静默吞掉',
+    /个文件被跳过/.test(panel) && /看原因/.test(panel))
 }
 
 

@@ -264,8 +264,8 @@ scanLibraries(io):
 |---|---|---|---|
 | **P5 扫描 IO** ✅ | adj1014 | Rust 四条命令：`sf_soundfont_scan()`（列安装目录 + 我的音色库目录）、`sf_soundfont_peek(path)`（读头 ≤256 KB）、`sf_soundfont_store(id, source)`（`fs::copy` 进 APPDATA）、`sf_soundfont_delete(id)`；`builtin_soundfont_candidates` 也认 APPDATA。插件桥加 `bankScan`（P9 做）；网页用 `listBankKeys` | smoke `[204]` 11 条源码闸门；Rust 单测 `soundfont_tests` 5 条（**本机跑不起来，见 §十备注**） |
 | **P6 发现与登记** ✅ | adj1015 | `src/playback/bankDiscovery.ts`：`discoverBanks(io)` 编排（扫文件 → 读头尾认库 → 读缓存 → 按 id 去重 → 合并旧记录标 `present` → 写回）；`createAppDiscoveryIo()` 桌面走 Tauri、网页只有缓存；`BankRecord` 扩 `location/present/presetsKnown/mtimeMs`；指纹拆出 `fingerprintOfParts`（**只读头尾 == 读全量**） | smoke `[205]` 10 条：指纹同口径 / 两处目录 + 坏文件 / 缓存键错位 / `present:false` 不删记录 / 幂等 |
-| **P7 推荐与空状态** | adj1016 | 引擎 `RECOMMENDED_BANKS`（含 `reason`）+ 页面空状态三出路 + 三个目录的探测结果 | smoke：推荐条目字段齐全、理由非空、直链只有能真下的 |
-| **P8 四层重排** | adj1017 | `SoundBankPanel` 按 §六 重排：摘要条 / ①列表+推荐 / ②管理+探测结果 / ③选音色 / ④使用说明 | `npm run verify:app-ui` 增一段"音色库页"用例（见 §十） |
+| **P7 推荐与空状态** ✅ | adj1016 | 引擎加 `reason` + `RECOMMENDED_BANKS`；页面空状态三条出路 + 三个位置的探测结果 | smoke `[206]`：推荐五字段齐全、直链只有能真下的 |
+| **P8 四层重排** ✅ | adj1016 | `SoundBankPanel` 按 §六 重排：摘要条 / ①音色库+推荐 / ②管理+探测结果 / ③选音色 / ④使用说明；并把 P6 的 `scanAndRegister` 接进来（打开即扫、可重扫） | `npm run verify:app-ui` 87 项全绿（但**不含**音色库页，见 §十备注） |
 | **P9 插件同步** | 另开会话 | `vendor/engine` 同步 + 插件设置页按同一 IA 改 + `bankScan` 真实现 | 插件自己的 smoke |
 
 **P5 / P6 已落地的东西（2026-10-21）**：
@@ -280,6 +280,21 @@ scanLibraries(io):
 - 扫描**不读缓存字节**：缓存里"有哪些库"只看键，记录里已有名字/体积/预设表 ⇒
   141 MB 的库不会每开一次设置页就从 IndexedDB 读一遍；只有"没有记录的老缓存"才真读一次。
 
+**P7 / P8 已落地（2026-10-21，adj1016）**：
+
+- 引擎 `HqSampleLibrary` 加 `reason`；`RECOMMENDED_BANKS = HQ_LIBRARIES.filter(有理由)`。
+  两条推荐的理由都只写**可核实的事实**（体积/音色数/首次加载快慢/许可），不写"音质最好"。
+- `SoundBankPanel` 按四层重排，**并把发现接进来**：
+  - 打开面板 → `scanAndRegister()`（扫三处 + 登记）→ 再准备当前库（探测内置/预取/补预设表）；
+  - 顶部一条「当前使用」摘要；扫描状态行写清"三个位置各扫到几个"；
+  - 空状态：三条出路（下载推荐 / 导入本地文件 / 重新扫描）+ 三个位置的探测结果；
+  - 推荐区：一个库都没有时**自动展开**；
+  - 行上标 `随包 / 本机 / 缓存 / 文件不在了`，文件不在了**不让删记录**、只提示放回去再扫；
+  - 坏文件进诊断区（"跳过 N 个文件 / 看原因"），不静默吞掉；
+  - 第 4 层「使用」**只有说明**（试听/导出/`Y:` 是它的下游）。
+- `presetCountOf` 修了口径：`presetsKnown === false` 时**不拿空数组当 0 个音色**，
+  而是回落到已知库的实测值（还没有就显示"音色数未知（选中后读取）"）。
+
 ---
 
 ## 十、验收（机器闸门 + 手测 + 负向）
@@ -290,7 +305,9 @@ scanLibraries(io):
   ⚠ **本机跑不起来**（见下方"环境备注"），P5 先用 `cargo check --lib` + `cargo build --lib` 证明编译。
 - `npm run smoke`：`[204]`（P5 桌面 IO 源码闸门）、`[205]`（P6 发现编排，假 IO 三端）、
   `[206]`（P7 推荐条目字段）全绿。
-- `npm run verify:app-ui`：新增一段真点——打开音色库页 → 断言列表行数/摘要条 → 点「使用」→ `localStorage` 的 `ijipu.playbackHqLibrary` 变了。
+- `npm run verify:app-ui`：本机现有 **87 项**全绿；但它**不含**音色库页（那 87 项是既有的手册/浮层/拖放/设置页），
+  音色库页的"点了要动"目前只能手测，或者以后单独加一段 CDP 用例（用 `DOM.setFileInputFiles` 选文件 +
+  读 `localStorage` 验证切库）。
 - `npm run build` / `tsc -b` / `oxlint` 全过。
 
 **环境备注（2026-10-21 实测）**：本机 `cargo test --lib` 在**加载期**就崩

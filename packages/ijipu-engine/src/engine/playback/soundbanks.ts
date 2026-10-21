@@ -48,6 +48,12 @@ export interface HqSampleLibrary {
   license?: string
   /** adj1009：已知库的**实测**预设条数（导入后由 `sf2.ts` 解析真实文件覆盖，这里只用于列表先显示） */
   presetCount?: number
+  /**
+   * adj1016：**推荐理由**（一句话，用户判断"要不要下它"时真正看的是这一条）。
+   * 只有带 `reason` 的库才进「推荐」区；理由必须写**可核实的事实**（体积/音色数/加载快慢/许可），
+   * 不写"音质最好"这种没有依据的话。
+   */
+  reason?: string
 }
 
 /** 可切换的高质量音源库列表（加库只需追加一条元数据；两端共用） */
@@ -67,6 +73,7 @@ export const HQ_LIBRARIES: HqSampleLibrary[] = [
     sf2NamePattern: 'generaluser',
     license: 'GeneralUser GS License v2.0',
     presetCount: 287,
+    reason: '体积适中（32 MB），128 个主音色 + 159 个变体/鼓组；桌面版随包内置，开箱即用',
   },
   {
     /**
@@ -89,8 +96,17 @@ export const HQ_LIBRARIES: HqSampleLibrary[] = [
     autoDownload: false,
     license: 'MIT',
     presetCount: 189,
+    reason: '采样更厚、听感偏"录音室"；体积 141 MB，首次加载明显更慢（低配机器慎选）',
   },
 ]
+
+/**
+ * adj1016：**推荐清单**（只含带 `reason` 的已知库）。
+ *
+ * 为什么单独导出一个数组：界面上的"推荐"必须和"已安装的库"分开——前者是"你还没有、可以考虑"，
+ * 后者是"你已经有、能用"。两者混在一格里，用户分不清"该不该点下载"。
+ */
+export const RECOMMENDED_BANKS: HqSampleLibrary[] = HQ_LIBRARIES.filter((l) => !!l.reason)
 
 /**
  * 按 id 查已知库（**找不到返回 `undefined`，不再默默回退默认库**，adj1009）。
