@@ -19,7 +19,7 @@ import { useUiStore, enabledVoicesOf } from '../store/uiStore'
 import { voicePickerCopy } from '../brand/copy'
 import { GM_VOICE_OPTIONS, resolveActiveLibrary } from '../playback/spessaSynthBackend'
 import { createBankRegistry, type BankRecord } from '../playback/bankRegistry'
-import { GM_GROUPS } from '@ijipu/engine'
+import { GM_GROUPS, ETHNIC_ALIASES, ethnicLabel, ethnicGmLabel } from '@ijipu/engine'
 
 const HIGHLIGHT = 'var(--jp-text-muted)'
 
@@ -176,6 +176,21 @@ export function VoicePickerDialog() {
           <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>{voicePickerCopy.fallbackHint(lib.name)}</div>
         )}
         {noBank0 && <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>{voicePickerCopy.noBank0Hint}</div>}
+
+        {/* adj1019：民族乐器只有"拟声"映射 —— 把对应关系摊开给用户看，名字一律带「（拟）」 */}
+        <details style={{ fontSize: 11, color: HIGHLIGHT }}>
+          <summary style={{ cursor: 'pointer', userSelect: 'none' }}>
+            {voicePickerCopy.ethnicTitle}（{ETHNIC_ALIASES.length} 个）
+          </summary>
+          <div style={{ marginTop: 4, lineHeight: 1.6 }}>{voicePickerCopy.ethnicHint}</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', marginTop: 4 }}>
+            {ETHNIC_ALIASES.map((a) => (
+              <span key={a.name} style={{ whiteSpace: 'nowrap' }}>
+                {ethnicLabel(a)} → {ethnicGmLabel(a)}
+              </span>
+            ))}
+          </div>
+        </details>
 
         {/* 主体：分组列表（无关键词时）或平铺列表（有过滤时） */}
         <div style={{ maxHeight: 'min(420px, 60vh)', overflow: 'auto', border: '1px solid var(--jp-border)', borderRadius: 6, padding: '4px 6px' }}>

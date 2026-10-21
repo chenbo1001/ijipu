@@ -89,6 +89,9 @@ export type { HqSampleLibrary, HqBankSource, ActiveLibrary } from './playback/so
 // 只读 RIFF 的 INFO 与 pdta/phdr，不碰采样数据；smoke 用手搓夹具 + 真文件双重断言。
 export { isSf2, isGitLfsPointer, readSf2Info, readSf2Presets, summarizeSf2Presets, matchKnownLibrary } from './playback/sf2'
 export type { Sf2Info, Sf2Preset, Sf2PresetSummary } from './playback/sf2'
+// adj1019：民族乐器的**拟声**映射（GM 里没有二胡/琵琶/古筝；显示一律带「（拟）」）
+export { ETHNIC_ALIASES, ethnicAliasOf, ethnicLabel, ethnicGmLabel } from './playback/ethnicVoices'
+export type { EthnicAlias } from './playback/ethnicVoices'
 // adj762（清单 B4）：整篇/逐行**高亮模型**（token + 行头 + 错误块 + 行级级别）——两端只做渲染映射
 export { highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf } from './highlight/model'
 export type { JpsLineModel, JpsHighlightModel, ProblemLevel } from './highlight/model'

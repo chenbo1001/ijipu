@@ -240,6 +240,8 @@ import { fingerprintOf, fingerprintOfParts, bankIdOf, readBankFile, planLegacyMi
 // adj1015：发现与登记（三端 IO 注入；本文件用假 IO 跑编排）
 import { discoverBanks } from '../src/playback/bankDiscovery.ts'
 import type { DiscoveryIo } from '../src/playback/bankDiscovery.ts'
+// adj1019：民族乐器「拟声」表（GM 里没有二胡/琵琶/古筝；显示一律带「（拟）」）
+import { ETHNIC_ALIASES, ethnicAliasOf, ethnicLabel, ethnicGmLabel } from '@ijipu/engine/index.ts'
 import type { BankRecord, LegacyBankEntry, LegacyBankIo } from '../src/playback/bankRegistry.ts'
 // adj417：按钮图标清单（public/icons/ 下的文件名）——断言文件存在、sw.js 预热清单未漂移
 import { ICON_DIR, ICON_FILES, ICON_FILE_NAMES } from '../src/ui/toolIcons.ts'
@@ -20440,6 +20442,10 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1015Tests())
       // adj1016：推荐清单 + 四层页面
       .then(() => runAdj1016Tests())
+      // adj1017：音色表未解析时的回退提示（用户实报"换库后列表一样"）
+      .then(() => runAdj1017Tests())
+      // adj1019：民族乐器拟声映射（显示一律带「（拟）」）
+      .then(() => runAdj1019Tests())
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
       .then(() => runAdj949ManualScopeTests())
@@ -21293,7 +21299,61 @@ async function runAdj1016Tests() {
     /还没有安装任何音色库/.test(panel) && /基础音色库需要先下载/.test(panel))
   check('adj1018 文件不在了的库**单列一组**（重新扫描 / 删除记录），不混进已安装列表',
     /missing\.length > 0/.test(panel) && /文件不在了/.test(panel) && /删除记录/.test(panel))
+}
 
+/**
+ * ---- 208. 民族乐器「拟声」映射（adj1019）----
+ *
+ * 用户口径（2026-10-21）：「民乐音色映射可以加，但最好加个**拟**，以示区别」。
+ *
+ * 所以这段守两件事：
+ * ① 映射**真的生效**（二胡→110、琵琶→105…），否则用户写 `Y: 二胡` 还是钢琴声；
+ * ② 凡显示映射结果的地方都带「（拟）」——**不许裸露民族乐器名**，否则会被当成真实采样。
+ *    另外 GM 里已有的名字（长笛/小提琴）**不许被抢**（负对照）。
+ */
+async function runAdj1019Tests() {
+  console.log('[208] ethnic instrument aliases marked as approximate (adj1019)')
+
+  check('adj1019 拟声表：非空、名字不重复',
+    ETHNIC_ALIASES.length >= 20 && new Set(ETHNIC_ALIASES.map((a) => a.name)).size === ETHNIC_ALIASES.length,
+    `${ETHNIC_ALIASES.length}`)
+  check('adj1019 拟声表：program 都在 0–127，且 `GM_VOICES` 里都有对应条目（显示名取那一份，不另存英文名防漂移）',
+    ETHNIC_ALIASES.every((a) => a.program >= 0 && a.program < 128 && GM_VOICES.some((v) => v.program === a.program)) &&
+      ETHNIC_ALIASES.every((a) => ethnicGmLabel(a).includes(String(a.program))),
+    ETHNIC_ALIASES.filter((a) => !GM_VOICES.some((v) => v.program === a.program))
+      .map((a) => `${a.name}:${a.program}`)
+      .join(','))
+  check('adj1019 显示名**一律**带「（拟）」——不许裸露民族乐器名',
+    ETHNIC_ALIASES.every((a) => ethnicLabel(a) === `${a.name}（拟）`))
+
+  check('adj1019 解析真的生效：二胡→110 / 琵琶→105 / 古筝→107 / 唢呐→111 / 埙→79',
+    instrumentToProgram('二胡') === 110 && instrumentToProgram('琵琶') === 105 &&
+      instrumentToProgram('古筝') === 107 && instrumentToProgram('唢呐') === 111 &&
+      instrumentToProgram('埙') === 79,
+    `${instrumentToProgram('二胡')}/${instrumentToProgram('琵琶')}/${instrumentToProgram('古筝')}`)
+  check('adj1019 带库前缀也认：`generaluser_gs:二胡` → 110',
+    instrumentToProgram('generaluser_gs:二胡') === 110)
+  check('adj1019 **负对照**：GM 里已有的名字不被抢（长笛仍 73、小提琴仍 40、且不是拟声条目）',
+    instrumentToProgram('长笛') === 73 && instrumentToProgram('小提琴') === 40 &&
+      ethnicAliasOf('长笛') === undefined && ethnicAliasOf('小提琴') === undefined,
+    `${instrumentToProgram('长笛')}/${instrumentToProgram('小提琴')}`)
+
+  const picker = String(readFileSync(join(root, 'src', 'dialogs', 'VoicePickerDialog.tsx'), 'utf8'))
+  const panel = String(readFileSync(join(root, 'src', 'dialogs', 'SoundBankPanel.tsx'), 'utf8'))
+  const copy = String(readFileSync(join(root, 'src', 'brand', 'copy.ts'), 'utf8'))
+  check('adj1019 选择器把对应关系摊开给用户看，且用 `ethnicLabel`（带「（拟）」）',
+    /ETHNIC_ALIASES/.test(picker) && /ethnicLabel\(a\)/.test(picker) && /ethnicTitle/.test(copy))
+  check('adj1019 音色库面板的「使用」说明也写明是「拟声、不是真实采样」',
+    /民族乐器名（二胡\/琵琶\/古筝…）按/.test(panel) && /不是真实采样/.test(panel))
+}
+
+/**
+ * ---- 207. 音色表未解析时的回退提示（adj1017）----
+ *
+ * 用户实报「切了第二个库，音色列表还是一样的」：判据必须是"**音色表真的解析过**"，
+ * 不能只判"记录在不在"——扫描登记过但没解析的库会静默回退成 GM 128 个中文名。
+ */
+function runAdj1017Tests() {
   /**
    * adj1017（用户实报「切了第二个库，音色列表还是一样的」）：
    * 判据必须是"**音色表真的解析过**"，不能只判"记录在不在"——
@@ -21301,6 +21361,7 @@ async function runAdj1016Tests() {
    */
   const picker = String(readFileSync(join(root, 'src', 'dialogs', 'VoicePickerDialog.tsx'), 'utf8'))
   const copy = String(readFileSync(join(root, 'src', 'brand', 'copy.ts'), 'utf8'))
+  const panel = String(readFileSync(join(root, 'src', 'dialogs', 'SoundBankPanel.tsx'), 'utf8'))
   check('adj1017 选择器按 `presetsKnown === true` 判"本库音色"，不再只看 `record` 存在',
     /const presetsKnown = !!record && record\.presetsKnown === true/.test(picker) &&
       // 负对照：旧写法（只判 record 就拿来当本库音色）必须已消失
