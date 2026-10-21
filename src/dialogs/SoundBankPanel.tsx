@@ -741,10 +741,10 @@ export function SoundBankPanel() {
         <div style={{ ...SMALL, marginTop: 8 }}>
           想挑别的音色库？看官网{' '}
           <a
-            href={`${brand.siteUrl}/#soundfonts`}
+            href={`${brand.siteUrl}/soundfonts/`}
             onClick={(e) => {
               e.preventDefault()
-              void openExternalUrl(`${brand.siteUrl}/#soundfonts`)
+              void openExternalUrl(`${brand.siteUrl}/soundfonts/`)
             }}
             style={{ color: 'var(--jp-accent)' }}
           >

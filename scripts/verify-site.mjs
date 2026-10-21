@@ -130,6 +130,8 @@ const DOC_PAGE_MD = {
   '/plugin/': 'docs/PLUGIN-GUIDE.md',
   /* adj948：新增 `/cli/` 命令行手册（正文就是随安装包发布的那一份手册） */
   '/cli/': 'docs/CLI-手册.md',
+  /* adj1026（用户要求「音色库推荐不放首页，窄屏表格效果不佳」）：独立页，正文不用表格 */
+  '/soundfonts/': 'docs/SOUNDFONTS.md',
 }
 const RAW_ESCAPED_LINES = Object.fromEntries(
   Object.entries(DOC_PAGE_MD).map(([url, rel]) => [url, rawEscapedLines(rel)]),

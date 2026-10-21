@@ -21326,7 +21326,7 @@ async function runAdj1016Tests() {
     /还没有安装任何音色库/.test(panel) && /下载基础音色库/.test(panel) &&
       /添加音色库…/.test(panel) && /扫描过的地方/.test(panel))
   check('adj1023 应用里**不放推荐清单**（`RECOMMENDED_BANKS` 不出现在面板），只给官网链接',
-    !/RECOMMENDED_BANKS/.test(panel) && /音色库推荐/.test(panel) && /siteUrl\}\/#soundfonts/.test(panel))
+    !/RECOMMENDED_BANKS/.test(panel) && /音色库推荐/.test(panel) && /siteUrl\}\/soundfonts\//.test(panel))
   check('adj1023 空状态的"下载"只针对**一个基础库**（BASE_BANK），不是一串推荐卡片',
     /BASE_BANK/.test(panel) && !/RECOMMENDED_BANKS\.map/.test(panel))
   check('adj1016 "使用"层只做说明、不再放试听/导出按钮（避免两处入口）',
@@ -21350,23 +21350,29 @@ async function runAdj1016Tests() {
   check('adj1018 已安装列表每行有「使用」、且**没有**下载入口（下载只留在空状态的"基础库"按钮）',
     iInstalled > 0 && installedSeg.includes('使用') && !installedSeg.includes('downloadAndRegister('),
     `installed=${iInstalled} seg=${installedSeg.length}`)
-  check('adj1023 官网首页有音色库推荐区（应用里的"更多库"链接指向 `#soundfonts`）',
-    /id="soundfonts"/.test(String(readFileSync(join(root, 'index.html'), 'utf8'))) &&
-      /音色库推荐/.test(String(readFileSync(join(root, 'index.html'), 'utf8'))))
   /**
-   * adj1024（用户 2026-10-21 给了 5 款 GM 库）：官网推荐区必须一条不落地列出来；
-   * 并且**不许链未标注许可的第三方合集**（Daniel-176 那个仓库 GitHub API 上 `license: null`）。
+   * adj1026（用户 2026-10-21）：「音色库推荐不放首页，窄屏显示表格效果不佳」。
+   * ⇒ 独立页 `/soundfonts/`，正文用**分块**写（不用表格），首页只留一个顶栏入口。
    */
+  const sfPage = String(readFileSync(join(root, 'soundfonts', 'index.html'), 'utf8'))
+  const sfMd = String(readFileSync(join(root, 'docs', 'SOUNDFONTS.md'), 'utf8'))
+  const home = String(readFileSync(join(root, 'index.html'), 'utf8'))
+  check('adj1026 音色库推荐是**独立页**（首页不再有该区；顶栏有入口指向 `/soundfonts/`）',
+    sfPage.includes('音色库推荐') && !/id="soundfonts"/.test(home) &&
+      /<a href="\/soundfonts\/">/.test(home))
+  check('adj1026 独立页正文**不用表格**（窄屏按块竖排）',
+    !/<table/i.test(sfMd) && !/\|---/.test(sfMd))
   {
-    const site = String(readFileSync(join(root, 'index.html'), 'utf8'))
     const named = ['GeneralUser GS', 'FluidR3 GM', 'Arachno SoundFont', 'Timbres of Heaven', 'SGM-V2.01']
-    const missing = named.filter((n) => !site.includes(n))
-    check('adj1024 官网列出用户点名的 5 款 GM 音色库', missing.length === 0, missing.join('、'))
-    check('adj1024 推荐区不链来路不明的合集（Daniel-176 那种无 LICENSE 的仓库）',
-      !/Daniel-176/i.test(site) && /不链未标注许可的第三方合集/.test(site))
-    check('adj1024 每款都有可点的外部下载页（`http(s)` + target=_blank）',
-      (site.match(/<a href="https:\/\/[^"]+" target="_blank"/g) ?? []).length >= 5)
+    const missing = named.filter((n) => !sfMd.includes(n))
+    check('adj1024 推荐页列出用户点名的 5 款 GM 音色库', missing.length === 0, missing.join('、'))
+    check('adj1024 推荐页不链来路不明的合集（Daniel-176 那种无 LICENSE 的仓库）',
+      !/Daniel-176/i.test(sfMd) && /不链未标注许可的第三方合集/.test(sfMd))
+    check('adj1024 每款都有可点的外部下载页（`https://` 链接）',
+      (sfMd.match(/https:\/\//g) ?? []).length >= 5)
   }
+  check('adj1023 应用里的"更多库"链接指向独立页 `/soundfonts/`（不再用首页锚点）',
+    /siteUrl\}\/soundfonts\//.test(panel))
   check('adj1018 空状态写明"基础音色库需要先下载，否则没有声音"',
     /还没有安装任何音色库/.test(panel) && /基础音色库需要先下载/.test(panel))
   check('adj1018 文件不在了的库**单列一组**（重新扫描 / 删除记录），不混进已安装列表',
@@ -28209,9 +28215,9 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   console.log('[160] 官网分层：首页 / 应用 / 文档页（adj876）')
   const readSrc = (rel: string) => String(readFileSync(join(root, rel), 'utf8'))
 
-  // ---- ① 六份 HTML 都在，且各自角色正确 ----
-  const rel = ['index.html', 'app/index.html', 'manual/index.html', 'syntax/index.html', 'plugin/index.html', 'cli/index.html']
-  check('adj876 六份 HTML 入口都存在（首页 / 应用 / 手册 / 语法 / 插件 / 命令行）',
+  // ---- ① 七份 HTML 都在，且各自角色正确 ----
+  const rel = ['index.html', 'app/index.html', 'manual/index.html', 'syntax/index.html', 'plugin/index.html', 'cli/index.html', 'soundfonts/index.html']
+  check('adj876/adj1026 七份 HTML 入口都存在（首页 / 应用 / 手册 / 语法 / 插件 / 命令行 / 音色库推荐）',
     rel.every((p) => existsSync(join(root, p))), rel.join(', '))
 
   const homeHtml = readSrc('index.html')
@@ -28220,6 +28226,7 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   const syntaxHtml = readSrc('syntax/index.html')
   const pluginHtml = readSrc('plugin/index.html')
   const cliHtml = readSrc('cli/index.html')
+  const sfHtml = readSrc('soundfonts/index.html')
 
   check('adj876 `app/index.html` 挂的是应用入口 `/src/main.tsx` 且带 `#root`（它是应用外壳的唯一来源）',
     shellHtml.includes('src="/src/main.tsx"') && shellHtml.includes('id="root"'))
@@ -28229,10 +28236,11 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     manualHtml.includes('src="/src/docs/manual.ts"') &&
       syntaxHtml.includes('src="/src/docs/syntax.ts"') &&
       pluginHtml.includes('src="/src/docs/plugin.ts"') &&
-      cliHtml.includes('src="/src/docs/cli.ts"'))
+      cliHtml.includes('src="/src/docs/cli.ts"') &&
+      sfHtml.includes('src="/src/docs/soundfonts.ts"'))
 
-  const titles = [homeHtml, shellHtml, manualHtml, syntaxHtml, pluginHtml, cliHtml].map((h) => h.match(/<title>([^<]*)<\/title>/)?.[1] ?? '')
-  check('adj876 六份 HTML 的 <title> 各不相同', new Set(titles).size === 6, titles.join(' | '))
+  const titles = [homeHtml, shellHtml, manualHtml, syntaxHtml, pluginHtml, cliHtml, sfHtml].map((h) => h.match(/<title>([^<]*)<\/title>/)?.[1] ?? '')
+  check('adj876/adj1026 七份 HTML 的 <title> 各不相同', new Set(titles).size === 7, titles.join(' | '))
   check('adj876 首页 title 含 Slogan「码即成，谱自现」', titles[0].includes('码即成，谱自现'), titles[0])
   /**
    * adj905x（用户要求）：「**在首页上面一排增加一个链接，链接到插件这个手册**」。

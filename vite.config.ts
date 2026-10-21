@@ -15,13 +15,14 @@ import { fileURLToPath, URL } from 'node:url'
  * | `dist/syntax/index.html` | `/syntax/` | 脚本语法说明（网页版） | `src/docs/syntax.ts` |
  * | `dist/plugin/index.html` | `/plugin/` | **插件手册**（Obsidian 插件，adj905x 用户要求） | `src/docs/plugin.ts` |
  * | `dist/cli/index.html` | `/cli/` | **命令行手册**（adj948 用户要求；正文 = `docs/CLI-手册.md`） | `src/docs/cli.ts` |
+ * | `dist/soundfonts/index.html` | `/soundfonts/` | **音色库推荐**（adj1026；正文 = `docs/SOUNDFONTS.md`） | `src/docs/soundfonts.ts` |
  *
  * 注意几点：
  *  · 资源引用一律是绝对路径（Vite 默认 `base: '/'`）⇒ Cloudflare Pages、PWA、
  *    桌面壳（`http://tauri.localhost/`）三处都能正确解析子路径页面里的 `/assets/...`。
  *  · `app/index.html` 同时被 **Obsidian 嵌入版**（`vite.config.embed.mjs`）当入口用，
  *    所以它是"应用外壳"的**唯一来源**——不要再单独复制一份。
- *  · 六份 HTML 的 `<title>` 各不相同，有 smoke 断言守着（改漏会红灯）。
+ *  · 七份 HTML 的 `<title>` 各不相同，有 smoke 断言守着（改漏会红灯）。
  */
 const entry = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
@@ -43,6 +44,8 @@ export default defineConfig({
         syntax: entry('./syntax/index.html'),
         plugin: entry('./plugin/index.html'),
         cli: entry('./cli/index.html'),
+        // adj1026：音色库推荐（用户要求不放首页；正文用分块，窄屏更好读）
+        soundfonts: entry('./soundfonts/index.html'),
       },
     },
   },
