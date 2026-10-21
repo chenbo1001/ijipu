@@ -4045,11 +4045,13 @@ body {
   background: transparent;
 }
 
-/* adj379：SW 新版本提示（右下角、可点击；放在 toast 上方避免遮挡） */
+/* adj379：SW 新版本提示（可点击）。
+   adj1013（用户要求）：它和 toast 同属"提示信息"，一起从**右下角**挪到**右上角、顶栏下方**——
+   原先 `bottom: 88px`，在宽屏左右拆分时正好压在编辑列底部的操作底栏 dock 上。 */
 .update-prompt {
   position: fixed;
   right: 20px;
-  bottom: 88px;
+  top: calc(var(--jp-topbar-h) + 10px);
   z-index: 1001;
   padding: 8px 16px;
   border-radius: 999px;
@@ -4068,12 +4070,23 @@ body {
   color: var(--jp-bg-panel);
 }
 
-/* ============ 轻量浮动提示（toast）============ */
+/* ============ 轻量浮动提示（toast）============
+ * adj1013（用户要求）：从**右下角**挪到**右上角、顶栏正下方**。
+ *
+ * 为什么：右下角是常用操作底栏 dock 的地盘（宽屏左右拆分时，dock 就挂在编辑列底部＝右下），
+ * 提示经常盖住正要点的按钮；挪到右上后**多行文字自然向下延伸**，不再吃住底部操作区。
+ *
+ * 定位口径：
+ *  · `top` = 顶栏高度 token（`--jp-topbar-h`）+ 10px —— 顶栏高度变了自动跟随，不写死像素；
+ *  · **只给 top、不给 height/max-height** ⇒ 文案多长就往下长多高（这就是"多行向下延伸"）；
+ *  · `z-index` 从 1000 降到 **45**：右上角正是「更多 / 设置」下拉展开的位置，
+ *    提示不该盖住用户正在点的菜单（顶栏 50 / 拖放层 60 / 工作区菜单 80 / 模态框 200 都在它之上），
+ *    但仍高于正文与编辑区自动提示浮层（40）。 */
 .toast {
   position: fixed;
   right: 20px;
-  bottom: 40px;
-  z-index: 1000;
+  top: calc(var(--jp-topbar-h) + 10px);
+  z-index: 45;
   max-width: 340px;
   padding: 8px 14px;
   border-radius: 6px;
@@ -4114,10 +4127,18 @@ body {
   flex-shrink: 0;
   white-space: nowrap;
 }
+/* adj1013：右上角两种提示可能同时出现（SW 刚更新 + 刚保存）。「点击刷新」占第一行
+   （z-index 更高、且必须点得到），toast 让到它下面：胶囊实测高 ≈ 34px
+   （上下 padding 8×2 + 13px 字行高 + 2px 边框）+ 10px 间距。 */
+.app:has(.update-prompt) .toast {
+  top: calc(var(--jp-topbar-h) + 54px);
+}
+/* adj1013：动画方向跟着换位——提示在顶部，从**上方**滑下来才对
+   （原先 `translateY(6px)` 是给底部提示"从下往上"的）。 */
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(-6px);
   }
   to {
     opacity: 1;
@@ -4131,6 +4152,16 @@ body {
 
 /* 窄屏（≤640px） */
 @media (max-width: 640px) {
+  /* adj1013：右上角的提示在窄屏上改为**左右贴边**——340px 宽 + 右缘 20px 在 360px 的机器上
+     会顶到左缘甚至越界；整条铺开、多行向下长更好读。胶囊（点击刷新）也把右缘收窄一档。 */
+  .toast {
+    left: 12px;
+    right: 12px;
+    max-width: none;
+  }
+  .update-prompt {
+    right: 12px;
+  }
   /* —— 顶栏：紧凑 + 全部只图标，缩放组 % 数值隐藏 —— */
   .topbar {
     padding: 0 6px;

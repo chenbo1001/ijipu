@@ -1153,6 +1153,49 @@ async function main() {
       dropNotice.includes('拖放测试') && overlayGone === false,
       JSON.stringify({ 提示: dropNotice.slice(0, 34) }),
     )
+    // ---- adj1013（用户要求）：提示改到**右上角、顶栏下方**（原来在右下角，被常用操作底栏 dock 遮住）----
+    // 为什么要在真浏览器里量：源码里断言"CSS 写了 top"证明不了实际落点（高度 token、父级定位、动画位移都可能让它跑偏）。
+    await sleep(200) // 尽量等入场动画（0.18s）走完再量；即便没走完，下面判据也留了 8px 容差（动画只有 -6px）
+    const toastBox = await evalJs(c, `(() => {
+      const el = document.querySelector('.toast')
+      if (!el) return null
+      const r = el.getBoundingClientRect()
+      const tb = document.querySelector('.topbar')?.getBoundingClientRect()
+      return { top: r.top, left: r.left, right: r.right, bottom: r.bottom, height: r.height, vw: innerWidth, vh: innerHeight, topbarBottom: tb ? tb.bottom : null }
+    })()`)
+    check(
+      'adj1013 提示真的落在**右上角、顶栏下方**（顶边在顶栏之下、右缘贴右、不越到下半区 ⇒ 不再压住底部 dock）',
+      !!toastBox &&
+        toastBox.topbarBottom !== null &&
+        toastBox.top >= toastBox.topbarBottom - 8 &&
+        toastBox.vw - toastBox.right <= 30 &&
+        toastBox.left > toastBox.vw / 2 &&
+        toastBox.bottom < toastBox.vh / 2,
+      JSON.stringify(toastBox),
+    )
+    // 多行文案：顶边不动、高度往下长（用户说的「多行信息向下延伸」）。
+    // 现造一条长提示来量：同一条 CSS 类、同一定位，只是文案变长。
+    const multilineBox = await evalJs(c, `(() => {
+      const host = document.querySelector('.app')
+      const el = document.createElement('div')
+      el.className = 'toast toast-warn'
+      el.style.animation = 'none' // 量静态落点，别被入场位移干扰
+      const span = document.createElement('span')
+      span.className = 'toast-text'
+      span.textContent = '这是一条很长的提示，用来确认多行时向下方延伸而不是向上顶到顶栏。'.repeat(3)
+      el.appendChild(span)
+      host.appendChild(el)
+      const r = el.getBoundingClientRect()
+      const lh = parseFloat(getComputedStyle(el).lineHeight)
+      const out = { top: r.top, height: r.height, lineHeight: lh }
+      el.remove()
+      return out
+    })()`)
+    check(
+      'adj1013 多行提示**向下延伸**（换行后高度 > 两行，顶边与单行提示同高）',
+      !!multilineBox && multilineBox.height > multilineBox.lineHeight * 2 && Math.abs(multilineBox.top - toastBox.top) < 8,
+      JSON.stringify(multilineBox),
+    )
     // ---- 脏文档闸：有未保存修改时先问一句，确认之前一个字都不许变 ----
     await retypeEditor(`${DROP_TEXT}Q: 5 5 5 |\n`)
     const dirtyNow = await evalJs(c, `!!document.querySelector('.dirty-dot')`)

@@ -31641,3 +31641,55 @@ async function runAdj951WorkspaceLoadTests() {
     )
   }
 }
+
+// ---- adj1013：轻量提示（toast）挪到右上角、顶栏下方 ----
+// 用户要求：「提示信息显示在右下角，但常用操作底栏 dock 也在右下，经常遮挡要操作的内容」
+// ⇒ 提示改到**右上角、顶栏下面**，多行时向下延伸。
+console.log('[adj1013] toast / update-prompt pinned below the topbar at top-right')
+{
+  const css = String(readFileSync('src/index.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  const blockOf = (sel: string): string =>
+    (css.match(new RegExp(`${sel}\\s*\\{([^}]*)\\}`))?.[1] ?? '').replace(/\s+/g, ' ').trim()
+  const toastBlock = blockOf('\\.toast')
+  const updateBlock = blockOf('\\.update-prompt')
+
+  check(
+    'adj1013 toast 定位在**右上角、顶栏下方**：top 取 `--jp-topbar-h` token + right 贴右缘，且不再用 bottom',
+    /position:\s*fixed/.test(toastBlock) &&
+      /top:\s*calc\(var\(--jp-topbar-h\) \+ 10px\)/.test(toastBlock) &&
+      /right:\s*20px/.test(toastBlock) &&
+      !/(^|;|\s)bottom:/.test(toastBlock),
+    toastBlock,
+  )
+  check(
+    'adj1013 toast 多行时**向下延伸**：只给 max-width，没有 height / max-height 把高钉死',
+    /max-width:\s*340px/.test(toastBlock) && !/(^|;|\s)(max-)?height:/.test(toastBlock),
+    toastBlock,
+  )
+  check(
+    'adj1013 提示层级低于顶栏下拉与模态框（z-index 45 < `.topbar` 的 50），不再盖住右上角的菜单',
+    /z-index:\s*45/.test(toastBlock) && /\.topbar \{[^}]*z-index:\s*50/.test(css),
+    '',
+  )
+  check(
+    'adj1013 负对照：旧口径「right: 20px + bottom: 40px」已经不存在',
+    !/\.toast \{[^}]*bottom:\s*40px/.test(css),
+    '',
+  )
+  check(
+    'adj1013 「点击刷新」（update-prompt）与 toast 同一列：也在顶栏下方，不再压住底部 dock',
+    /top:\s*calc\(var\(--jp-topbar-h\) \+ 10px\)/.test(updateBlock) &&
+      !/(^|;|\s)bottom:/.test(updateBlock),
+    updateBlock,
+  )
+  check(
+    'adj1013 两者同时出现时 toast 让到「点击刷新」下面（`.app:has(.update-prompt) .toast`）',
+    /\.app:has\(\.update-prompt\) \.toast \{[^}]*top:\s*calc\(var\(--jp-topbar-h\) \+ 54px\)/.test(css),
+    '',
+  )
+  check(
+    'adj1013 窄屏（≤640px）时提示左右贴边（不再用 340px 卡在右侧、避免越界）',
+    /@media \(max-width: 640px\) \{[\s\S]{0,400}?\.toast \{\s*left:\s*12px;\s*right:\s*12px;\s*max-width:\s*none;/.test(css),
+    '',
+  )
+}
