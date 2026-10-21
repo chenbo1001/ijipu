@@ -59,7 +59,7 @@ export const ETHNIC_ALIASES: EthnicAlias[] = [
   { name: '古筝', program: 107, note: '拨弦+余韵最接近' },
   { name: '筝', program: 107 },
   { name: '古琴', program: 107 },
-  { name: '箜篌', program: 45 },
+  { name: '箜篌', program: 46 },
   { name: '扬琴', program: 15, note: '同是击弦' },
   // ── 吹管 ──
   { name: '笛子', program: 73 },

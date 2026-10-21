@@ -12185,6 +12185,32 @@ console.log('[adj447] instrument names must resolve to their own GM program')
   const same = familyPairs.filter(([a, b]) => instrumentToProgram(a) === instrumentToProgram(b))
   check('AN5 同族音色（萨克斯/弦乐合奏/钢片琴…）各解析到不同 program', same.length === 0,
     same.map(([a, b]) => `${a}=${b}=${instrumentToProgram(a)}`).join(' '))
+
+  /**
+   * adj1022（用户 2026-10-21：「GM_VOICES 里个别条目与 MIDI 标准错位 —— 改」）：
+   * 旧表不是"个别"，而是**成段**错位：24-31 吉他整段轮转、36-39 贝斯名不对、
+   * 44-47 从"拨奏"开始整体挪了一位、74-87 管乐/主音串行、110-119 民族/打击全部对不上。
+   * 这里挑每个错位段的代表，钉住"名字必须与标准一致"，防止以后又漂回去。
+   */
+  const STD_LABELS: Array<[number, string]> = [
+    [8, '钢片琴'], [9, '钟琴'],
+    [24, '尼龙弦吉他'], [25, '钢弦吉他'], [26, '爵士电吉他'], [27, '清音电吉他'],
+    [28, '闷音电吉他'], [29, '过载电吉他'], [30, '失真电吉他'], [31, '吉他泛音'],
+    [36, '击弦贝斯1'], [37, '击弦贝斯2'], [38, '合成贝斯1'], [39, '合成贝斯2'],
+    [44, '震音弦乐'], [45, '拨奏弦乐'], [46, '管弦竖琴'], [47, '定音鼓'],
+    [74, '竖笛'], [75, '排箫'], [76, '吹瓶声'], [78, '口哨'], [79, '陶笛'],
+    [80, '方波主音'], [84, '恰朗戈主音'], [87, '贝斯主音'],
+    [110, '民谣提琴'], [111, '唢呐'], [112, '铃铛'], [114, '钢鼓'], [115, '木鱼'],
+    [116, '太鼓'], [118, '合成鼓'], [119, '反向镲'],
+  ]
+  const badStd = STD_LABELS.filter(
+    ([p, n]) => GM_VOICES[p]?.label.replace(/^\d+\s+/, '') !== n,
+  ).map(([p, n]) => `${p}:${GM_VOICES[p]?.label.replace(/^\d+\s+/, '')}≠${n}`)
+  check('adj1022 128 个中文名与 MIDI 标准一致（旧表 24-31 / 36-39 / 44-47 / 74-87 / 110-119 成段错位已修）',
+    badStd.length === 0, badStd.slice(0, 8).join(' '))
+  const bareNames = GM_VOICES.map((v) => v.label.replace(/^\d+\s+/, ''))
+  check('adj1022 128 个名字互不重复（重名会让 `Y:` 解析到错的 program）',
+    new Set(bareNames).size === 128, `${128 - new Set(bareNames).size} 个重复`)
   // 端到端：两条 Y: 行写库内名称 → 两声部 program 不同、通道不同、逐事件音色正确
   {
     const code =
