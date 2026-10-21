@@ -197,6 +197,13 @@ SF2 的结构是 `RIFF → LIST INFO → LIST sdta（采样）→ LIST pdta（�
 `[重新扫描]`、`[打开音色库目录]`；介绍与评价放**官网首页的「音色库推荐」**（`/#soundfonts`），
 应用里给一条外链。引擎仍保留 `RECOMMENDED_BANKS`（官网/文档取数据用），应用只用 `BASE_BANK`。
 
+**adj1024**：官网推荐区扩到用户点名的 5 款（GeneralUser GS / FluidR3 GM / Arachno SoundFont /
+Timbres of Heaven / SGM-V2.01），每款给体积、特点、许可、**原作者页**链接。
+**不链 `Daniel-176/Usefull-Soundfonts` 这类合集**：GitHub API 上 `license: null`（无许可声明）、
+无 releases、几百 MB 混装，来源与授权无法核对 —— 站点那句"只链原作者或项目方"就是这条口径。
+⚠ 官网清单是**静态内容**；引擎只登记"能自动处理"的两个已知库（`generaluser_gs` / `fluidr3_gm`），
+其余库按内容指纹导入即可（`imported_<指纹>`），不需要逐个登记。
+
 - 装机后「已安装」为空 ⇒ 提示下载基础音色库（`RECOMMENDED_BANKS` 第一条）。
 - 落点：`%APPDATA%\<app>\soundfonts\`；面板上新增「打开音色库目录」按钮（`sf_soundfont_open_dir`）。
 - **下载走系统 curl**（adj1021）：桌面端由 Rust 调 `curl.exe` 下到上面那个目录（绕开浏览器 CORS；

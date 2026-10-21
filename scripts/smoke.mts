@@ -21329,6 +21329,20 @@ async function runAdj1016Tests() {
   check('adj1023 官网首页有音色库推荐区（应用里的"更多库"链接指向 `#soundfonts`）',
     /id="soundfonts"/.test(String(readFileSync(join(root, 'index.html'), 'utf8'))) &&
       /音色库推荐/.test(String(readFileSync(join(root, 'index.html'), 'utf8'))))
+  /**
+   * adj1024（用户 2026-10-21 给了 5 款 GM 库）：官网推荐区必须一条不落地列出来；
+   * 并且**不许链未标注许可的第三方合集**（Daniel-176 那个仓库 GitHub API 上 `license: null`）。
+   */
+  {
+    const site = String(readFileSync(join(root, 'index.html'), 'utf8'))
+    const named = ['GeneralUser GS', 'FluidR3 GM', 'Arachno SoundFont', 'Timbres of Heaven', 'SGM-V2.01']
+    const missing = named.filter((n) => !site.includes(n))
+    check('adj1024 官网列出用户点名的 5 款 GM 音色库', missing.length === 0, missing.join('、'))
+    check('adj1024 推荐区不链来路不明的合集（Daniel-176 那种无 LICENSE 的仓库）',
+      !/Daniel-176/i.test(site) && /不链未标注许可的第三方合集/.test(site))
+    check('adj1024 每款都有可点的外部下载页（`http(s)` + target=_blank）',
+      (site.match(/<a href="https:\/\/[^"]+" target="_blank"/g) ?? []).length >= 5)
+  }
   check('adj1018 空状态写明"基础音色库需要先下载，否则没有声音"',
     /还没有安装任何音色库/.test(panel) && /基础音色库需要先下载/.test(panel))
   check('adj1018 文件不在了的库**单列一组**（重新扫描 / 删除记录），不混进已安装列表',

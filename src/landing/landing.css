@@ -556,6 +556,15 @@ html[data-site-mode='light'] .jps-block-preview svg { border: 1px solid var(--si
   font-size: 14.5px; line-height: 1.75; color: var(--site-text-2);
 }
 .sf-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.sf-table-wrap { overflow-x: auto; }
+.sf-table { width: 100%; border-collapse: collapse; font-size: 13.5px; line-height: 1.7; }
+.sf-table th, .sf-table td {
+  text-align: left; vertical-align: top; padding: 10px 12px;
+  border-bottom: 1px solid var(--site-border); color: var(--site-text-2);
+}
+.sf-table th { color: var(--site-text); font-weight: 600; white-space: nowrap; }
+.sf-table td:first-child { color: var(--site-text); white-space: nowrap; }
+.sf-table a { color: var(--site-accent); white-space: nowrap; }
 .sf-card {
   border: 1px solid var(--site-border); border-radius: 12px; padding: 16px 18px;
   background: var(--site-card); display: flex; flex-direction: column; gap: 8px;
