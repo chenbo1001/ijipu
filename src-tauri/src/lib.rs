@@ -300,16 +300,21 @@ pub struct ScannedSoundfont {
     pub origin: String,
 }
 
-/// 读头结果（供前端解析 INAM；**不含采样数据**）
+/// 读头结果（供前端解析 INAM + 算**与全量导入同口径**的指纹；**不含采样数据**）
 #[derive(serde::Serialize)]
 pub struct SoundfontPeek {
     pub file_name: String,
     pub size_bytes: u64,
+    /// 文件前 `min(size, 64 KB)` 字节（INFO/INAM 在这里）
     pub head: Vec<u8>,
+    /// 文件后 `min(size, 64 KB)` 字节 —— 指纹要"头尾同样采样"，
+    /// 否则"扫描到的文件"与"导入同一文件"会算成两个库（见前端 `fingerprintOfParts`）
+    pub tail: Vec<u8>,
 }
 
-/// 只读头这么长：SF2 的 `LIST INFO`（INAM/IENG/ifil）在最前面，256 KB 足够。
-const SF_HEAD_MAX: usize = 256 * 1024;
+/// 只读头/尾各 64 KB：SF2 的 `LIST INFO` 在最前面，`pdta`（音色表）在最后面。
+/// 这两个窗口刚好是前端指纹的采样窗口（`FP_WINDOW = 65536`）——**两处必须一致**。
+const SF_HEAD_MAX: usize = 64 * 1024;
 /// 导入体积上限（防手滑选到超大文件把磁盘写满）：512 MB
 const SF_MAX_BYTES: u64 = 512 * 1024 * 1024;
 
@@ -402,7 +407,25 @@ fn read_head(p: &Path, max: usize) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
-/// 读文件头（前端据此认库；`.sf2/.sf3` 之外的扩展名一律拒）。
+/// 只读文件**后** `max` 字节（从末尾往前定位；不读中间那几十上百 MB）
+fn read_tail(p: &Path, max: usize) -> Result<Vec<u8>, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(p).map_err(|e| format!("{}: {e}", p.display()))?;
+    let len = f.metadata().map_err(|e| format!("{}: {e}", p.display()))?.len();
+    let take = max.min(len as usize);
+    if take == 0 {
+        return Ok(Vec::new());
+    }
+    f.seek(SeekFrom::End(-(take as i64)))
+        .map_err(|e| format!("{}: {e}", p.display()))?;
+    let mut buf = Vec::with_capacity(take);
+    f.take(take as u64)
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("{}: {e}", p.display()))?;
+    Ok(buf)
+}
+
+/// 读文件头 + 文件尾（前端据此认库、算指纹；`.sf2/.sf3` 之外的扩展名一律拒）。
 #[tauri::command]
 fn sf_soundfont_peek(path: String) -> Result<SoundfontPeek, String> {
     let p = PathBuf::from(&path);
@@ -414,6 +437,7 @@ fn sf_soundfont_peek(path: String) -> Result<SoundfontPeek, String> {
         return Err(format!("不是文件：{path}"));
     }
     let head = read_head(&p, SF_HEAD_MAX)?;
+    let tail = read_tail(&p, SF_HEAD_MAX)?;
     let file_name = p
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -422,6 +446,7 @@ fn sf_soundfont_peek(path: String) -> Result<SoundfontPeek, String> {
         file_name,
         size_bytes: md.len(),
         head,
+        tail,
     })
 }
 
@@ -973,6 +998,26 @@ mod soundfont_tests {
         let small = d.join("small.sf2");
         std::fs::write(&small, [1u8, 2, 3]).unwrap();
         assert_eq!(read_head(&small, SF_HEAD_MAX).unwrap().len(), 3);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// 尾巴必须是**文件最后那一段**（不是头）：指纹要"头尾同采样"，取错位置会让
+    /// "扫描到的文件"与"导入同一文件"算成两个库
+    #[test]
+    fn tail_read_takes_the_end() {
+        let d = tmp_dir("tail");
+        let p = d.join("big.sf2");
+        let mut data = vec![0u8; SF_HEAD_MAX * 2];
+        for (i, b) in data.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        std::fs::write(&p, &data).unwrap();
+        let tail = read_tail(&p, SF_HEAD_MAX).unwrap();
+        assert_eq!(tail.len(), SF_HEAD_MAX);
+        assert_eq!(tail, &data[data.len() - SF_HEAD_MAX..], "必须是文件最后那一段");
+        let small = d.join("small.sf2");
+        std::fs::write(&small, [1u8, 2, 3]).unwrap();
+        assert_eq!(read_tail(&small, SF_HEAD_MAX).unwrap(), vec![1, 2, 3]);
         let _ = std::fs::remove_dir_all(&d);
     }
 

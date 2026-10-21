@@ -236,7 +236,10 @@ import type { HqSampleLibrary } from '../src/playback/spessaSynthBackend.ts'
 // adj1009（多音色库 P1）：SF2 头部解析 + 已知库认领（引擎纯函数；本文件用**手搓夹具 + 真文件**双重断言）
 import { isSf2, isGitLfsPointer, readSf2Info, readSf2Presets, summarizeSf2Presets, matchKnownLibrary, HQ_LIBRARIES, findKnownLibrary, resolveActiveLibrary } from '@ijipu/engine/index.ts'
 // adj1010（多音色库 P2）：库注册表——导入识别（纯函数）与一次性迁移（可注入 IO 的编排）
-import { fingerprintOf, bankIdOf, readBankFile, planLegacyMigration, migrateLegacyBanks, buildBankRows, presetCountOf, libViewOfRecord } from '../src/playback/bankRegistry.ts'
+import { fingerprintOf, fingerprintOfParts, bankIdOf, readBankFile, planLegacyMigration, migrateLegacyBanks, buildBankRows, presetCountOf, libViewOfRecord } from '../src/playback/bankRegistry.ts'
+// adj1015：发现与登记（三端 IO 注入；本文件用假 IO 跑编排）
+import { discoverBanks } from '../src/playback/bankDiscovery.ts'
+import type { DiscoveryIo } from '../src/playback/bankDiscovery.ts'
 import type { BankRecord, LegacyBankEntry, LegacyBankIo } from '../src/playback/bankRegistry.ts'
 // adj417：按钮图标清单（public/icons/ 下的文件名）——断言文件存在、sw.js 预热清单未漂移
 import { ICON_DIR, ICON_FILES, ICON_FILE_NAMES } from '../src/ui/toolIcons.ts'
@@ -20433,6 +20436,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1012Tests())
       // adj1014：音色库"发现"的桌面 IO（扫描目录 / 读头 / 导入到我的音色库目录）
       .then(() => runAdj1014Tests())
+      // adj1015：发现与登记（三端编排，假 IO 真跑）
+      .then(() => runAdj1015Tests())
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
       .then(() => runAdj949ManualScopeTests())
@@ -21028,8 +21033,8 @@ async function runAdj1014Tests() {
     /fn valid_lib_id\(/.test(rs) && /is_ascii_lowercase\(\) \|\| b\.is_ascii_digit\(\) \|\| b == b'_'/.test(rs))
   check('adj1014 只接受 `.sf2/.sf3`（读/写/导入三处共用 `is_sf_name`）',
     /fn is_sf_name\(/.test(rs) && (rs.match(/is_sf_name\(/g) ?? []).length >= 3)
-  check('adj1014 扫描**只读文件头**（`take(SF_HEAD_MAX)`），不把 141 MB 读进内存',
-    /const SF_HEAD_MAX: usize = 256 \* 1024/.test(rs) && /\.take\(max as u64\)/.test(rs))
+  check('adj1014 扫描**只读文件头尾**（各 `SF_HEAD_MAX`），不把 141 MB 读进内存',
+    /const SF_HEAD_MAX: usize = 64 \* 1024/.test(rs) && /\.take\(max as u64\)/.test(rs) && /fn read_tail\(/.test(rs))
   check('adj1014 扫描两处目录：安装目录（install，只读）+ 我的音色库目录（appdata，可写）',
     /scan_dir_into\(&install, "install"/.test(rs) &&
       /scan_dir_into\(&user_soundfont_dir\(&app\)\?, "appdata"/.test(rs))
@@ -21043,6 +21048,171 @@ async function runAdj1014Tests() {
     /builtin_soundfont_candidates[\s\S]{0,400}app_data_dir\(\)[\s\S]{0,120}join\("soundfonts"\)/.test(rs))
   check('adj1014 Rust 侧有这组命令的单测（`mod soundfont_tests`）',
     /mod soundfont_tests \{/.test(rs) && /fn lib_id_must_be_filename_safe/.test(rs) && /fn head_read_is_capped/.test(rs))
+}
+
+/**
+ * ---- 205. 音色库"发现与登记"（adj1015，P6）----
+ *
+ * 两条最容易写错的判据，这里都钉住：
+ * ① **扫描（只读头尾）与导入（读全量）必须算出同一个库 id** —— 否则同一个文件会出现两行；
+ * ② **"文件不在了"只是标 `present:false`，绝不删记录** —— 用户可能只是拔了盘/换了机器。
+ */
+async function runAdj1015Tests() {
+  console.log('[205] soundbank discovery: scan / register / present (adj1015)')
+
+  // ---------- ① 指纹：只读头尾 == 读全量 ----------
+  const mk = (n: number): Uint8Array => {
+    const b = new Uint8Array(n)
+    for (let i = 0; i < n; i++) b[i] = (i * 37 + 11) & 0xff
+    return b
+  }
+  const sameFp = [0, 7, 1000, 65535, 65536, 65537, 100_000, 200_000].every((n) => {
+    const b = mk(n)
+    const head = b.subarray(0, Math.min(n, 65536))
+    const tail = b.subarray(Math.max(0, n - 65536))
+    return fingerprintOfParts(head, tail, n) === fingerprintOf(b)
+  })
+  check('adj1015 指纹：只读头尾算出的值与读全量**完全一致**（含 100 KB 那种头尾重叠的情形）',
+    sameFp, '有尺寸对不上')
+
+  // ---------- 假 IO ----------
+  const guBytes = new Uint8Array(buildSf2Fixture({ info: { name: 'GeneralUser GS 2.0.3 BETA' }, presets: [{ name: 'Grand Piano', program: 0, bank: 0 }] }))
+  const fluidBytes = new Uint8Array(buildSf2Fixture({ info: { name: 'Fluid R3 GM' }, presets: [{ name: 'Flute', program: 73, bank: 0 }] }))
+  interface FakeFile { location: 'install' | 'appdata' | 'plugin' | 'cache'; fileName: string; bytes: Uint8Array }
+  const makeIo = (opts: { files: FakeFile[]; cache?: Record<string, Uint8Array>; records?: BankRecord[] }) => {
+    const state = { records: [...(opts.records ?? [])], writes: [] as BankRecord[] }
+    const io: DiscoveryIo = {
+      scanHost: async () =>
+        opts.files.map((f, i) => ({ location: f.location, fileName: f.fileName, ref: `f${i}`, sizeBytes: f.bytes.length })),
+      peekHost: async (file) => {
+        const f = opts.files[Number(file.ref.slice(1))]
+        return f ? { head: f.bytes, tail: f.bytes, sizeBytes: f.bytes.length } : null
+      },
+      listCacheIds: async () => Object.keys(opts.cache ?? {}),
+      readCache: async (id) => {
+        const b = opts.cache?.[id]
+        return b ? new Uint8Array(b).buffer : null
+      },
+      listRecords: async () => state.records,
+      putRecords: async (recs) => {
+        state.writes.push(...recs)
+        for (const r of recs) {
+          const i = state.records.findIndex((x) => x.id === r.id)
+          if (i >= 0) state.records[i] = r
+          else state.records.push(r)
+        }
+      },
+    }
+    return { io, state }
+  }
+
+  // ---------- ② 三端一次扫清：装机目录 + 我的目录 + 一个坏文件 + 缓存 ----------
+  {
+    const { io, state } = makeIo({
+      files: [
+        { location: 'install', fileName: 'generaluser_gs.sf2', bytes: guBytes },
+        { location: 'appdata', fileName: 'FluidR3_GM.sf2', bytes: fluidBytes },
+        { location: 'appdata', fileName: 'broken.sf2', bytes: new Uint8Array([1, 2, 3, 4]) },
+      ],
+      cache: { generaluser_gs: guBytes },
+    })
+    const r = await discoverBanks(io, 1000)
+    check('adj1015 扫描：两处目录都认出来了（GeneralUser 随包 + FluidR3 本机），坏文件进诊断不崩',
+      r.banks.length === 2 && r.counts.install === 1 && r.counts.appdata === 2 && r.counts.cache === 1 &&
+        r.problems.length === 1 && r.problems[0].file === 'broken.sf2',
+      JSON.stringify({ n: r.banks.length, counts: r.counts, problems: r.problems.map((p) => p.file) }))
+    const gu = state.records.find((x) => x.id === 'generaluser_gs')
+    const fluid = state.records.find((x) => x.id === 'fluidr3_gm')
+    check('adj1015 登记：GeneralUser 标随包（bundled/install），FluidR3 标导入（imported/appdata）',
+      gu?.origin === 'bundled' && gu?.location === 'install' && gu?.present === true &&
+        fluid?.origin === 'imported' && fluid?.location === 'appdata' && fluid?.present === true,
+      JSON.stringify({ gu: gu && [gu.origin, gu.location], fluid: fluid && [fluid.origin, fluid.location] }))
+    check('adj1015 登记：库名取 INAM（不是文件名），体积取真实大小',
+      gu?.name === 'GeneralUser GS 2.0.3 BETA' && fluid?.name === 'Fluid R3 GM' &&
+        gu?.sizeBytes === guBytes.length && fluid?.sizeBytes === fluidBytes.length,
+      `${gu?.name}/${fluid?.name}`)
+    check('adj1015 只读头扫描**不编造预设表**；但缓存里解析过的会带上（GeneralUser 来自缓存 ⇒ true，FluidR3 只有文件 ⇒ false）',
+      gu?.presetsKnown === true && gu?.presets.length === 1 && fluid?.presetsKnown === false,
+      JSON.stringify({ gu: gu && [gu.presetsKnown, gu.presets.length], fluid: fluid?.presetsKnown }))
+    check('adj1015 同内容多处的优先级：缓存里那份也已登记（同 id 只留一行，位置取随包）',
+      r.banks.filter((b) => b.libId === 'generaluser_gs').length === 1 &&
+        r.banks.find((b) => b.libId === 'generaluser_gs')?.location === 'install')
+  }
+
+  // ---------- ③ 缓存键与内容不符（历史"冒名"）→ 按内容登记 + 诊断 ----------
+  {
+    const { io, state } = makeIo({ files: [], cache: { generaluser_gs: fluidBytes } })
+    const r = await discoverBanks(io, 1)
+    check('adj1015 缓存键与内容不符：按**内容**登记成 fluidr3_gm，并在诊断里说清',
+      r.banks.length === 1 && r.banks[0].libId === 'fluidr3_gm' &&
+        state.records.some((x) => x.id === 'fluidr3_gm') &&
+        r.problems.some((p) => p.reason.includes('缓存键与内容不符')),
+      JSON.stringify({ banks: r.banks.map((b) => b.libId), problems: r.problems.map((p) => p.reason) }))
+    check('adj1015 缓存解析出的预设表**一并登记**（`presetsKnown=true`，音色数立刻可显示）',
+      state.records.find((x) => x.id === 'fluidr3_gm')?.presetsKnown === true &&
+        state.records.find((x) => x.id === 'fluidr3_gm')?.presets.length === 1)
+  }
+
+  // ---------- ④ 文件不在了：标 present=false，**不删记录** ----------
+  {
+    const old: BankRecord = {
+      id: 'imported_deadbeef',
+      name: 'Old Bank',
+      fileName: 'old.sf2',
+      sizeBytes: 10,
+      format: 'sf2',
+      origin: 'imported',
+      addedAt: 1,
+      presets: [{ bank: 0, program: 0, name: 'Piano' }],
+      presetsKnown: true,
+      present: true,
+      location: 'appdata',
+    }
+    const { io, state } = makeIo({ files: [], records: [old] })
+    const r = await discoverBanks(io, 2)
+    const kept = state.records.find((x) => x.id === 'imported_deadbeef')
+    check('adj1015 扫描不到旧库 ⇒ 只标 `present:false`，记录与预设表**保留**（插回盘就回来）',
+      r.records.find((x) => x.id === 'imported_deadbeef')?.present === false &&
+        kept?.presets.length === 1 && state.writes.some((w) => w.id === 'imported_deadbeef'),
+      JSON.stringify({ kept: kept && [kept.present, kept.presets.length] }))
+    // 再扫一次：已经标过 present=false ⇒ **不重复写**
+    const before = state.writes.length
+    await discoverBanks(io, 3)
+    check('adj1015 幂等：第二次扫描不再重复写"文件不在"的记录', state.writes.length === before, `${state.writes.length - before}`)
+  }
+
+  // ---------- ⑤ 已有记录的缓存库：**不读字节**（141 MB 不该每开一次页面读一遍） ----------
+  {
+    const rec: BankRecord = {
+      id: 'fluidr3_gm',
+      name: 'Fluid R3 GM',
+      fileName: 'FluidR3_GM.sf2',
+      sizeBytes: 148_398_306,
+      format: 'sf2',
+      origin: 'imported',
+      addedAt: 1,
+      presets: [{ bank: 0, program: 0, name: 'Yamaha Grand Piano' }],
+      presetsKnown: true,
+      location: 'cache',
+      present: true,
+    }
+    let reads = 0
+    const io: DiscoveryIo = {
+      scanHost: async () => [],
+      peekHost: async () => null,
+      listCacheIds: async () => ['fluidr3_gm'],
+      readCache: async () => {
+        reads += 1
+        throw new Error('已有记录时不该读缓存字节')
+      },
+      listRecords: async () => [rec],
+      putRecords: async () => {},
+    }
+    const r = await discoverBanks(io, 5)
+    check('adj1015 已有记录的缓存库**不读字节**（否则每次开设置页都要把 141 MB 从 IndexedDB 读进内存）',
+      reads === 0 && r.banks.length === 1 && r.banks[0].libId === 'fluidr3_gm' && r.banks[0].presets?.length === 1,
+      `reads=${reads}`)
+  }
 }
 
 

@@ -263,10 +263,22 @@ scanLibraries(io):
 | 阶段 | 编号 | 内容 | 验收 |
 |---|---|---|---|
 | **P5 扫描 IO** ✅ | adj1014 | Rust 四条命令：`sf_soundfont_scan()`（列安装目录 + 我的音色库目录）、`sf_soundfont_peek(path)`（读头 ≤256 KB）、`sf_soundfont_store(id, source)`（`fs::copy` 进 APPDATA）、`sf_soundfont_delete(id)`；`builtin_soundfont_candidates` 也认 APPDATA。插件桥加 `bankScan`（P9 做）；网页用 `listBankKeys` | smoke `[204]` 11 条源码闸门；Rust 单测 `soundfont_tests` 5 条（**本机跑不起来，见 §十备注**） |
-| **P6 发现与登记** | adj1015 | `src/playback/bankDiscovery.ts`：`scanLibraries(io)` 编排 + 三端 IO 适配 + 去重/优先级/`present` 标记；`libs` 记录扩字段 | smoke `[205]`：假 IO 三端各跑一遍；坏文件跳过；重复文件只登记一个；"文件不在"不删记录 |
+| **P6 发现与登记** ✅ | adj1015 | `src/playback/bankDiscovery.ts`：`discoverBanks(io)` 编排（扫文件 → 读头尾认库 → 读缓存 → 按 id 去重 → 合并旧记录标 `present` → 写回）；`createAppDiscoveryIo()` 桌面走 Tauri、网页只有缓存；`BankRecord` 扩 `location/present/presetsKnown/mtimeMs`；指纹拆出 `fingerprintOfParts`（**只读头尾 == 读全量**） | smoke `[205]` 10 条：指纹同口径 / 两处目录 + 坏文件 / 缓存键错位 / `present:false` 不删记录 / 幂等 |
 | **P7 推荐与空状态** | adj1016 | 引擎 `RECOMMENDED_BANKS`（含 `reason`）+ 页面空状态三出路 + 三个目录的探测结果 | smoke：推荐条目字段齐全、理由非空、直链只有能真下的 |
 | **P8 四层重排** | adj1017 | `SoundBankPanel` 按 §六 重排：摘要条 / ①列表+推荐 / ②管理+探测结果 / ③选音色 / ④使用说明 | `npm run verify:app-ui` 增一段"音色库页"用例（见 §十） |
 | **P9 插件同步** | 另开会话 | `vendor/engine` 同步 + 插件设置页按同一 IA 改 + `bankScan` 真实现 | 插件自己的 smoke |
+
+**P5 / P6 已落地的东西（2026-10-21）**：
+
+- Rust 四条命令：`sf_soundfont_scan` / `sf_soundfont_peek`（头尾各 64 KB）/ `sf_soundfont_store`（`fs::copy`）/
+  `sf_soundfont_delete`；`builtin_soundfont_candidates` 也认 `<app_data>/soundfonts`。
+- `bankDiscovery.ts`：`discoverBanks(io, now)` 是纯编排（smoke 用假 IO 真跑），
+  `createAppDiscoveryIo()` 负责桌面（Tauri）与网页（只有缓存）的差异。
+- **指纹同口径**是这一步的隐藏难点：扫描只读头尾、导入读全量，两边都走
+  `fingerprintOfParts` / `fingerprintOf`（同一算法），否则同一文件会出现两行。
+- 界面还没接上（P8）：现在 `discoverBanks` 只有 smoke 在用。
+- 扫描**不读缓存字节**：缓存里"有哪些库"只看键，记录里已有名字/体积/预设表 ⇒
+  141 MB 的库不会每开一次设置页就从 IndexedDB 读一遍；只有"没有记录的老缓存"才真读一次。
 
 ---
 

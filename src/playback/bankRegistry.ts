@@ -49,35 +49,69 @@ export interface BankRecord {
   origin: BankOrigin
   /** 导入/登记时间（ms） */
   addedAt: number
-  /** 预设表（导入时解析一次；启动不再重读 141 MB） */
+  /** 预设表（导入时解析一次；启动不再重读 141 MB）。**轻量登记**时是空数组，见 `presetsKnown` */
   presets: Sf2Preset[]
+  /**
+   * adj1015：文件现在在哪（扫描"发现"时写的）。
+   * 桌面：`install`（随包，只读）/ `appdata`（我的音色库目录，可写）；插件：`plugin`；网页：`cache`。
+   */
+  location?: 'install' | 'appdata' | 'plugin' | 'cache'
+  /** adj1015：本次扫描是否还找得到。`false` ⇒ 界面标"文件不在了"，但**不删记录** */
+  present?: boolean
+  /** adj1015：预设表**是否已解析**。`false` ⇒ 界面写"音色数未知（选中后读取）"，不猜数字 */
+  presetsKnown?: boolean
+  /** adj1015：文件修改时间（用于判断"文件换了要不要重新解析"） */
+  mtimeMs?: number
 }
 
 // ───────────────────────────── 纯函数（smoke 直接断言） ─────────────────────────────
+
+/** 指纹采样窗口（头/尾各 64 KB） */
+export const FP_WINDOW = 65536
 
 /**
  * 文件指纹（FNV-1a 32 位；采样"长度 + 头 64 KB + 尾 64 KB"）。
  *
  * 为什么不做全量哈希：141 MB 全量算一次要几百毫秒到数秒，而它的用途只是"认得出是不是同一个
  * 文件"。已知库靠 INAM 认领（不靠指纹），指纹只给"认不出的库"当 id 用，采样足够。
+ *
+ * ⚠ **同一个算法必须能从"只读头尾"复算出来**（见 `fingerprintOfParts`）：
+ * 扫描目录时只拿得到头尾两块，导入时拿得到全量 —— 两条路算出的 id 必须一致，
+ * 否则"扫描到某文件"与"导入同一文件"会变成两个库（这是本函数被拆成两半的原因）。
  */
 export function fingerprintOf(bytes: Uint8Array): string {
+  const size = bytes.length
+  const head = bytes.subarray(0, Math.min(size, FP_WINDOW))
+  const tail = bytes.subarray(Math.max(0, size - FP_WINDOW))
+  return fingerprintOfParts(head, tail, size)
+}
+
+/**
+ * 只用"文件头 + 文件尾"算指纹（与 `fingerprintOf` **逐字节同算法**）。
+ *
+ * @param head 文件**前** `min(size, 64 KB)` 字节
+ * @param tail 文件**后** `min(size, 64 KB)` 字节（不足 64 KB 时就是整个文件）
+ * @param sizeBytes 文件真实长度（参与混合；只读头尾时必须显式传）
+ */
+export function fingerprintOfParts(head: Uint8Array, tail: Uint8Array, sizeBytes: number): string {
   let h = 0x811c9dc5
   const mix = (b: number): void => {
     h ^= b
     h = Math.imul(h, 0x01000193) >>> 0
   }
-  const HEAD = 65536
-  const head = Math.min(bytes.length, HEAD)
-  for (let i = 0; i < head; i++) mix(bytes[i])
-  const tailStart = Math.max(head, bytes.length - HEAD)
-  for (let i = tailStart; i < bytes.length; i++) mix(bytes[i])
-  // 长度也参与：头尾采样相同的两个不同大小文件不该撞
-  const n = bytes.length
-  mix(n & 0xff)
-  mix((n >>> 8) & 0xff)
-  mix((n >>> 16) & 0xff)
-  mix((n >>> 24) & 0xff)
+  const headLen = Math.min(sizeBytes, FP_WINDOW)
+  for (let i = 0; i < headLen; i++) mix(head[i] ?? 0)
+  // 尾部起点与 `fingerprintOf` 完全一致：max(头长, size-窗口)
+  const tailStart = Math.max(headLen, sizeBytes - FP_WINDOW)
+  if (sizeBytes > tailStart && tail.length > 0) {
+    const tailBeginInFile = sizeBytes - tail.length
+    const from = Math.max(0, tailStart - tailBeginInFile)
+    for (let i = from; i < tail.length; i++) mix(tail[i])
+  }
+  mix(sizeBytes & 0xff)
+  mix((sizeBytes >>> 8) & 0xff)
+  mix((sizeBytes >>> 16) & 0xff)
+  mix((sizeBytes >>> 24) & 0xff)
   return h.toString(16).padStart(8, '0')
 }
 
@@ -92,12 +126,12 @@ export function bankIdOf(info: Sf2Info | null, fingerprint: string): string {
 }
 
 /** 从文件名猜格式（只用于展示/记录；真正的判定是 `isSf2`） */
-function formatOf(fileName: string): 'sf2' | 'sf3' {
+export function formatOf(fileName: string): 'sf2' | 'sf3' {
   return /\.sf3$/i.test(fileName) ? 'sf3' : 'sf2'
 }
 
 /** 文件名 → 兜底库名（`FluidR3_GM.sf2` → `FluidR3_GM`） */
-function baseNameOf(fileName: string): string {
+export function baseNameOf(fileName: string): string {
   return fileName.replace(/\.(sf2|sf3)$/i, '') || fileName
 }
 
