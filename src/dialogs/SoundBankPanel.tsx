@@ -26,6 +26,7 @@ import {
   resolveActiveLibrary,
   hasBuiltinBank,
   hqBankFailureText,
+  detectTauri,
 } from '../playback/spessaSynthBackend'
 import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../playback/spessaCache'
 import {
@@ -37,7 +38,13 @@ import {
   type BankRecord,
   type BankRow,
 } from '../playback/bankRegistry'
-import { scanAndRegister, openUserSoundfontDir, type DiscoveryCounts, type DiscoveryProblem } from '../playback/bankDiscovery'
+import {
+  scanAndRegister,
+  openUserSoundfontDir,
+  downloadBankToDisk,
+  type DiscoveryCounts,
+  type DiscoveryProblem,
+} from '../playback/bankDiscovery'
 import { summarizeSf2Presets } from '@ijipu/engine'
 import type { HqSampleLibrary } from '../playback/spessaSynthBackend'
 
@@ -362,11 +369,38 @@ export function SoundBankPanel() {
     )
   }
 
-  /** adj1012：已知库的「下载并导入」——取字节 → 解析 → 登记（GeneralUser 未内置时就走这条） */
+  /** adj1012/adj1021：已知库的「下载并导入」——桌面端走 Rust+curl（绕 CORS），网页走浏览器下载 */
   const downloadAndRegister = async (lib: HqSampleLibrary): Promise<void> => {
     setBusy(lib.id)
     setNotice(`正在获取「${lib.name}」（约 ${MB(lib.sizeBytes)} MB）…`)
     try {
+      /**
+       * adj1021：桌面端**先走系统 curl**（Rust 命令），因为浏览器 `fetch` 会被 CORS 拦死。
+       * `downloadBankToDisk` 在非桌面环境返回 `null` ⇒ 自动落到下面的浏览器路径。
+       */
+      if (detectTauri() && lib.source.trim() !== '') {
+        const total = Math.max(1, lib.sizeBytes)
+        const r = await downloadBankToDisk(lib.id, lib.source, (got) => {
+          const pct = Math.min(99, Math.round((got / total) * 100))
+          setNotice(`正在下载「${lib.name}」：${pct}%（约 ${MB(total)} MB）`)
+        })
+        if (r !== null) {
+          if (!r.ok) {
+            setNotice(`${r.error}。也可以点「下载页」自己下，再回来用「添加音色库…」导入。`)
+            return
+          }
+          setNotice('下载完成，正在读取音色表…')
+          await ensureRecord(lib)
+          await reload()
+          const rec = await registry.current.get(lib.id)
+          setNotice(
+            `✓ 「${lib.name}」已就绪：${rec?.presets.length ?? '?'} 个音色 · ${MB(rec?.sizeBytes ?? lib.sizeBytes)} MB` +
+              '。点它那一行的「使用」即可切到它。',
+          )
+          return
+        }
+      }
+      // 网页端（或非桌面壳）：浏览器下载 → 缓存 → 登记
       const { bank } = await resolveHqBank(lib, hqCache.current, hostBankUrl(lib.id))
       const parsed = readBankFile(bank, `${lib.id}.sf2`)
       if (!parsed.ok) {

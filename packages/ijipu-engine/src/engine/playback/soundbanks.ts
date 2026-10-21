@@ -73,7 +73,7 @@ export const HQ_LIBRARIES: HqSampleLibrary[] = [
     sf2NamePattern: 'generaluser',
     license: 'GeneralUser GS License v2.0',
     presetCount: 287,
-    reason: '体积适中（32 MB），128 个主音色 + 159 个变体/鼓组；桌面版随包内置，开箱即用',
+    reason: '体积适中（32 MB），128 个主音色 + 159 个变体/鼓组；下载一次后离线可用（桌面端可直接下）',
   },
   {
     /**

@@ -492,6 +492,96 @@ fn sf_soundfont_delete(app: tauri::AppHandle, id: String) -> Result<(), String> 
     Ok(())
 }
 
+/// 下载地址白名单：只允许 http(s)。
+///
+/// 为什么单独写：这个地址会被直接交给 `curl` 执行，**不能**让 `file://` / `-o` 之类的注入进来
+/// （虽然 Tauri 命令只有本应用能调，但"能把任意本地文件读成音源"是不必要的攻击面）。
+fn valid_download_url(url: &str) -> Result<(), String> {
+    let u = url.trim();
+    if !(u.starts_with("https://") || u.starts_with("http://")) {
+        return Err("下载地址必须是 http(s) 开头".into());
+    }
+    if u.contains(char::is_whitespace) {
+        return Err("下载地址里不能有空白字符".into());
+    }
+    Ok(())
+}
+
+/// adj1021：**桌面端自己下载**音色库（绕过浏览器 CORS），落到"我的音色库目录"。
+///
+/// 为什么不在 WebView 里 `fetch`：多数音源站不返回 `Access-Control-Allow-Origin`，
+/// 浏览器会直接拦死（FluidR3 的 SourceForge 页就是 HTML，连文件流都不是）。
+/// 桌面端用系统 `curl`（Win10+ 自带）下载，不受 CORS 限制，还能边下边发进度。
+///
+/// 落点：`<app_data>/soundfonts/<id>.part` → 成功后改名为 `<id>.sf2`
+/// （先写 `.part`：中途失败/被杀不会留下一个"看起来完整"的半截音源）。
+#[tauri::command]
+async fn sf_soundfont_download(
+    app: tauri::AppHandle,
+    id: String,
+    url: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || download_bank_blocking(&app, &id, &url))
+        .await
+        .map_err(|e| format!("下载任务异常：{e}"))?
+}
+
+fn download_bank_blocking(app: &tauri::AppHandle, id: &str, url: &str) -> Result<String, String> {
+    valid_lib_id(id)?;
+    valid_download_url(url)?;
+    let dir = user_soundfont_dir(app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let dest = dir.join(format!("{id}.sf2"));
+    let part = dir.join(format!("{id}.sf2.part"));
+    let _ = std::fs::remove_file(&part);
+
+    // `curl` 在 Windows 10 1803+ 自带；没有时明确报错（前端会回退到浏览器下载/下载页）
+    let mut child = std::process::Command::new("curl.exe")
+        .args(["-L", "--fail", "--silent", "--show-error", "-o"])
+        .arg(&part)
+        .arg(url.trim())
+        .spawn()
+        .map_err(|e| format!("调不起系统 curl（{e}）；可用「下载页」手动下载后导入"))?;
+
+    // 每 250ms 把"已收字节"发给前端（总大小前端知道，用于百分比）
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    let _ = std::fs::remove_file(&part);
+                    return Err(format!(
+                        "下载失败（curl 退出码 {:?}）；可点「下载页」手动下载后导入",
+                        status.code()
+                    ));
+                }
+                break;
+            }
+            Ok(None) => {
+                let got = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+                let _ = app.emit(
+                    "ijipu://sf-download",
+                    serde_json::json!({ "id": id, "bytes": got }),
+                );
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&part);
+                return Err(format!("等待 curl 失败：{e}"));
+            }
+        }
+    }
+    if !part.exists() {
+        return Err("下载没有产生文件（地址可能不是文件流）".into());
+    }
+    let size = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+    if size == 0 {
+        let _ = std::fs::remove_file(&part);
+        return Err("下载到的文件是空的".into());
+    }
+    std::fs::rename(&part, &dest).map_err(|e| format!("改名失败：{e}"))?;
+    Ok(dest.display().to_string())
+}
+
 /// adj1020：打开"我的音色库目录"（不存在就建）。
 ///
 /// 为什么需要它：去掉随包音色库之后，用户最常见的动作是"把 .sf2 拖进那个目录再重新扫描"，
@@ -864,6 +954,7 @@ pub fn run() {
             sf_soundfont_peek,
             sf_soundfont_store,
             sf_soundfont_delete,
+            sf_soundfont_download,
             sf_soundfont_open_dir,
             take_pending_open_files,
             write_external_file,
@@ -1064,5 +1155,23 @@ mod soundfont_tests {
             &mut out,
         );
         assert!(out.is_empty());
+    }
+
+    /// adj1021：下载地址会直接交给 curl ⇒ 只允许 http(s)，且不许空白（防参数注入）
+    #[test]
+    fn download_url_must_be_http() {
+        for ok in ["https://example.com/a.sf2", "http://example.com/a.sf2"] {
+            assert!(valid_download_url(ok).is_ok(), "{ok} 应当被接受");
+        }
+        for bad in [
+            "",
+            "file:///C:/Windows/win.ini",
+            "C:\\Windows\\win.ini",
+            "https://example.com/a b.sf2",
+            "-o",
+            "ftp://example.com/a.sf2",
+        ] {
+            assert!(valid_download_url(bad).is_err(), "{bad} 应当被拒");
+        }
     }
 }

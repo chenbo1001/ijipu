@@ -380,3 +380,49 @@ export async function openUserSoundfontDir(): Promise<string | null> {
   const p = await inv('sf_soundfont_open_dir')
   return typeof p === 'string' ? p : ''
 }
+
+/** Tauri 事件 API 的最小形状（`window.__TAURI__.event`，不引 npm 包） */
+interface TauriEventApi {
+  listen(event: string, handler: (e: { payload?: unknown }) => void): Promise<() => void>
+}
+
+function tauriEvents(): TauriEventApi | null {
+  const w = globalThis as unknown as { window?: { __TAURI__?: { event?: TauriEventApi } } }
+  const ev = w.window?.__TAURI__?.event
+  return ev && typeof ev.listen === 'function' ? ev : null
+}
+
+/**
+ * adj1021：**桌面端自己下载**音色库（Rust 走系统 curl，绕过浏览器 CORS），
+ * 落到"我的音色库目录"，边下边回报已收字节。
+ *
+ * 为什么必须绕开浏览器：多数音源站不返回 `Access-Control-Allow-Origin`，
+ * `fetch` 会被直接拦死（FluidR3 的 SourceForge 页甚至连文件流都不是）。
+ *
+ * @returns 非桌面环境返回 `null`（调用方回退到浏览器下载）
+ */
+export async function downloadBankToDisk(
+  id: string,
+  url: string,
+  onProgress?: (bytes: number) => void,
+): Promise<{ ok: true; path: string } | { ok: false; error: string } | null> {
+  const inv = tauriInvoke()
+  if (!inv) return null
+  const events = tauriEvents()
+  let unlisten: (() => void) | null = null
+  try {
+    if (events && onProgress) {
+      unlisten = await events.listen('ijipu://sf-download', (e) => {
+        const p = e.payload as { id?: unknown; bytes?: unknown } | undefined
+        if (p?.id !== id) return
+        onProgress(Number(p.bytes ?? 0))
+      })
+    }
+    const p = await inv('sf_soundfont_download', { id, url })
+    return { ok: true, path: typeof p === 'string' ? p : '' }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  } finally {
+    unlisten?.()
+  }
+}

@@ -194,6 +194,8 @@ SF2 的结构是 `RIFF → LIST INFO → LIST sdta（采样）→ LIST pdta（�
 
 - 装机后「已安装」为空 ⇒ 提示下载基础音色库（`RECOMMENDED_BANKS` 第一条）。
 - 落点：`%APPDATA%\<app>\soundfonts\`；面板上新增「打开音色库目录」按钮（`sf_soundfont_open_dir`）。
+- **下载走系统 curl**（adj1021）：桌面端由 Rust 调 `curl.exe` 下到上面那个目录（绕开浏览器 CORS；
+  先写 `.part` 再改名、边下边发进度），调不起/失败时回退浏览器下载并提示"可点下载页手动下、再导入"。
 - 反向闸门：`check-installer` 与 smoke `[101]` 都断言**不许再随包**（防哪天被顺手加回来）。
 
 ### 6.1 空状态（这是本方案的重点之一）

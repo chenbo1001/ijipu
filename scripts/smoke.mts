@@ -20452,6 +20452,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1017Tests())
       // adj1019：民族乐器拟声映射（显示一律带「（拟）」）
       .then(() => runAdj1019Tests())
+      // adj1021：桌面端用系统 curl 下载音色库（绕过浏览器 CORS）
+      .then(() => runAdj1021Tests())
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
       .then(() => runAdj949ManualScopeTests())
@@ -21351,6 +21353,46 @@ async function runAdj1019Tests() {
     /ETHNIC_ALIASES/.test(picker) && /ethnicLabel\(a\)/.test(picker) && /ethnicTitle/.test(copy))
   check('adj1019 音色库面板的「使用」说明也写明是「拟声、不是真实采样」',
     /民族乐器名（二胡\/琵琶\/古筝…）按/.test(panel) && /不是真实采样/.test(panel))
+}
+
+/**
+ * ---- 209. 桌面端下载音色库（系统 curl，绕 CORS）（adj1021）----
+ *
+ * 用户 2026-10-21 点头：「新增一个 HTTP 依赖或用系统 curl」。
+ * 选 curl：不新增 crate（构建体积/时间不变），Win10+ 自带；调不起时前端回退浏览器下载。
+ *
+ * 这段守的是"下载这条路真的能走通、且不会把坏文件当音源"：
+ * 地址白名单（防 file:// 与参数注入）、先写 `.part` 再改名、进度事件、失败有出路。
+ */
+async function runAdj1021Tests() {
+  console.log('[209] desktop soundfont download via system curl (adj1021)')
+  const rs = String(readFileSync(join(root, 'src-tauri', 'src', 'lib.rs'), 'utf8'))
+  const ts = String(readFileSync(join(root, 'src', 'playback', 'bankDiscovery.ts'), 'utf8'))
+  const panel = String(readFileSync(join(root, 'src', 'dialogs', 'SoundBankPanel.tsx'), 'utf8'))
+
+  check('adj1021 Rust 命令 `sf_soundfont_download` 存在并已注册',
+    /fn sf_soundfont_download\(/.test(rs) && /\n\s*sf_soundfont_download,/.test(rs))
+  check('adj1021 地址白名单：只允许 http(s)、禁空白（防把 file:// 或参数塞给 curl）',
+    /fn valid_download_url\(/.test(rs) && /starts_with\("https:\/\/"\)/.test(rs) &&
+      /contains\(char::is_whitespace\)/.test(rs))
+  check('adj1021 先写 `.part` 再改名（半截文件不会被当成完整音源）',
+    /\.sf2\.part/.test(rs) && /std::fs::rename\(&part, &dest\)/.test(rs))
+  check('adj1021 边下边发进度（`ijipu://sf-download`，每 250ms 一次）',
+    /ijipu:\/\/sf-download/.test(rs) && /from_millis\(250\)/.test(rs))
+  check('adj1021 用系统 curl（不新增 HTTP 依赖），调不起时给"可手动下载"的提示',
+    /Command::new\("curl\.exe"\)/.test(rs) && /下载页/.test(rs))
+  check('adj1021 Rust 侧有下载地址白名单的单测（含 file:// / 空白 / 参数注入）',
+    /fn download_url_must_be_http/.test(rs) && /file:\/\//.test(rs))
+
+  check('adj1021 TS 侧封装 `downloadBankToDisk`：非桌面返回 null（调用方回退浏览器下载）',
+    /export async function downloadBankToDisk\(/.test(ts) && /if \(!inv\) return null/.test(ts))
+  check('adj1021 下载进度监听在结束时**一定**解绑（`finally { unlisten?.() }`）',
+    /ijipu:\/\/sf-download/.test(ts) && /finally \{[\s\S]{0,40}unlisten\?\.\(\)/.test(ts))
+  check('adj1021 面板：桌面端先走 curl 下载，失败/非桌面回退浏览器下载（两条路都在）',
+    /detectTauri\(\) && lib\.source/.test(panel) && /downloadBankToDisk\(lib\.id/.test(panel) &&
+      /resolveHqBank\(lib, hqCache\.current/.test(panel))
+  check('adj1021 下载失败时提示"可点下载页手动下、再导入"（不留死路）',
+    /也可以点「下载页」自己下/.test(panel))
 }
 
 /**
@@ -30554,17 +30596,18 @@ function runAdj945CliManualTests() {
     !existsSync(join(root, 'docs/iJipu-CLI-手册.md')),
   )
 
-  // ---- ⑤ THIRD-PARTY.md：随包分发的第三方内容与署名必须真的写到 ----
+  // ---- ⑤ THIRD-PARTY.md：第三方内容与署名必须真的写到 ----
+  // adj1020：音色库**不再随包** ⇒ 那条"许可文件的随包落点"已删；改为要求"说明它不随包、怎么获取"
   const third = readOrEmpty('THIRD-PARTY.md')
   const thirdPoints: Array<[string, string]> = [
-    ['内置音色库 GeneralUser GS 的作者署名', 'S. Christian Collins'],
-    ['音色库许可文件的随包落点', 'soundfonts/LICENSE-GeneralUserGS.txt'],
+    ['音色库 GeneralUser GS 的作者署名', 'S. Christian Collins'],
+    ['音色库**不再随包**、由用户自行安装', '不再随包'],
     ['WebView2（微软运行时）', 'WebView2'],
     ['QuickJS（随 exe 内嵌）', 'QuickJS'],
     ['Tauri', 'Tauri'],
   ]
   const missThird = thirdPoints.filter(([, needle]) => !third.includes(needle)).map(([label]) => label)
-  check('adj945 THIRD-PARTY.md 写到了音色库署名/许可、WebView2、QuickJS、Tauri', missThird.length === 0, missThird.join('；'))
+  check('adj945/adj1020 THIRD-PARTY.md 写到了音色库署名与"不再随包"、WebView2、QuickJS、Tauri', missThird.length === 0, missThird.join('；'))
   check(
     'adj945 负对照⑧：把作者署名从 THIRD-PARTY.md 抹掉 ⇒ 判据判红',
     (() => {
