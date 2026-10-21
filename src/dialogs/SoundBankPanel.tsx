@@ -31,6 +31,7 @@ import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../play
 import {
   buildBankRows,
   createBankRegistry,
+  missingBankRows,
   presetCountOf,
   readBankFile,
   type BankRecord,
@@ -104,15 +105,26 @@ export function SoundBankPanel() {
   /** adj1011：当前选中的库（库被删/查不到时回退默认库并标 `fallback`） */
   const active = useMemo(() => resolveActiveLibrary(hqLibrary), [hqLibrary])
   const currentHqLib = active.lib
-  /** adj1012：列表行——已知库必出现（默认库永远第一行），用户导入/发现的库追加在后 */
+  /**
+   * adj1018（用户口径）：**已安装列表只放"真的有文件"的库**。
+   * 没下载/没导入的已知库（如 FluidR3）**不出现**在这里——它们只属于下面的「推荐」区。
+   */
   const rows = useMemo(() => buildBankRows(records), [records])
+  /** 曾装过、现在文件不在了（记录保留，放回去再扫就恢复） */
+  const missing = useMemo(() => missingBankRows(records), [records])
   const activeRow = useMemo(
-    () => rows.find((r) => r.lib.id === currentHqLib.id) ?? { lib: currentHqLib, record: null, known: true },
-    [rows, currentHqLib],
+    () =>
+      rows.find((r) => r.lib.id === currentHqLib.id) ??
+      missing.find((r) => r.lib.id === currentHqLib.id) ?? {
+        lib: currentHqLib,
+        record: records.find((r) => r.id === currentHqLib.id) ?? null,
+        known: true,
+      },
+    [rows, missing, records, currentHqLib],
   )
   const activeRecord = activeRow.record
-  /** "至少有一个能用的库"——没有就进空状态（推荐区自动展开 + 三条出路） */
-  const hasUsable = rows.some((r) => r.record && r.record.present !== false)
+  /** "至少装了一个"——没有就进空状态（基础库都没装 ⇒ 没声音） */
+  const hasUsable = rows.length > 0
   /** 当前库**可勾选**的音色（只 bank 0 —— 变体/鼓组要 bank select，暂不开放） */
   const activePresets = useMemo(
     () => (activeRecord?.presets ?? []).filter((p) => p.bank === 0),
@@ -446,12 +458,14 @@ export function SoundBankPanel() {
       {/* —— 0. 当前使用（一条摘要）—— */}
       <div style={{ ...ROW_BOX, alignItems: 'center', borderColor: 'var(--jp-accent)' }}>
         <span style={{ color: HIGHLIGHT, fontSize: 11 }}>当前使用</span>
-        <strong style={{ fontWeight: 600 }}>{currentHqLib.name}</strong>
-        {activeRecord?.presetsKnown === true ? (
+        <strong style={{ fontWeight: 600 }}>{hasUsable ? currentHqLib.name : '（还没有安装音色库）'}</strong>
+        {hasUsable && activeRecord?.presetsKnown === true ? (
           <span style={SMALL}>{presetSummary?.bank0 ?? 0} 个可选音色</span>
-        ) : (
+        ) : hasUsable ? (
           // adj1017：音色表没解析时，**不能**拿 GM 回退的 128 个当"本库音色数"（会和别的库看起来一样）
           <span style={{ color: 'var(--jp-warning)', fontSize: 11 }}>本库音色表未读取</span>
+        ) : (
+          <span style={{ color: 'var(--jp-warning)', fontSize: 11 }}>装好基础音色库后才能试听</span>
         )}
         {activeRecord?.present === false && (
           <span style={{ color: 'var(--jp-warning)', fontSize: 11 }}>· 本地文件不在了</span>
@@ -494,9 +508,9 @@ export function SoundBankPanel() {
               background: 'var(--jp-bg-app)',
             }}
           >
-            <div style={{ color: 'var(--jp-warning)', fontWeight: 600 }}>还没找到任何音色库</div>
+            <div style={{ color: 'var(--jp-warning)', fontWeight: 600 }}>还没有安装任何音色库</div>
             <div style={SMALL}>
-              音色库只是"声音采样"，不影响谱面内容与排版。下面三条任选一条：
+              **基础音色库需要先下载（或导入），否则试听/导出没有声音**；其它库都是可选的，装不装都行。
             </div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '6px 0' }}>
               <button className="btn" style={{ ...BTN, color: 'var(--jp-accent)' }} onClick={() => setShowRecommended(true)}>
@@ -518,14 +532,17 @@ export function SoundBankPanel() {
           </div>
         )}
 
-        {/* 1c. 库列表 */}
+        {/* 1c. 已安装的库（**只放真的有文件的**；推荐/未下载的库不在这里） */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {rows.length === 0 && (
+            <div style={{ ...SMALL, padding: '4px 2px' }}>
+              目前没有任何已安装的音色库。装好之后它才会出现在这里。
+            </div>
+          )}
           {rows.map((row) => {
             const { lib, record } = row
             const using = lib.id === currentHqLib.id
-            const missing = record?.present === false
             const count = presetCountOf(row)
-            const canDownload = lib.autoDownload !== false && lib.source.trim() !== ''
             const working = busy === lib.id
             return (
               <div
@@ -533,7 +550,6 @@ export function SoundBankPanel() {
                 style={{
                   ...ROW_BOX,
                   borderColor: using ? 'var(--jp-accent)' : 'var(--jp-border)',
-                  opacity: missing ? 0.65 : 1,
                 }}
               >
                 <div style={{ flex: '1 1 240px', minWidth: 0 }}>
@@ -541,7 +557,6 @@ export function SoundBankPanel() {
                     <strong style={{ fontWeight: 600 }}>{lib.name}</strong>
                     {using && <span style={{ color: 'var(--jp-accent)', fontSize: 11 }}>✓ 当前</span>}
                     {!row.known && <span style={{ ...SMALL }}>（已导入）</span>}
-                    {missing && <span style={{ color: 'var(--jp-warning)', fontSize: 11 }}>文件不在了</span>}
                   </div>
                   <div style={SMALL}>
                     {sourceLabel(row)} · {MB(record?.sizeBytes ?? lib.sizeBytes)} MB ·{' '}
@@ -557,14 +572,6 @@ export function SoundBankPanel() {
                         : ''}
                     </div>
                   )}
-                  {!record && row.known && (
-                    <div style={SMALL}>
-                      还没有本地文件；{canDownload ? '点「下载并导入」或' : ''}用「导入本地文件…」选 .sf2。
-                    </div>
-                  )}
-                  {missing && (
-                    <div style={SMALL}>记录还在（预设表也还在）；把文件放回去再点「重新扫描」就能恢复。</div>
-                  )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   <button
@@ -578,46 +585,64 @@ export function SoundBankPanel() {
                   >
                     使用
                   </button>
-                  {canDownload && (
-                    <button className="btn" style={BTN} disabled={working} onClick={() => void downloadAndRegister(lib)}>
-                      {working ? '处理中…' : record ? '重新获取' : '下载并导入'}
-                    </button>
-                  )}
-                  {lib.downloadPage && (
-                    <button
-                      className="btn"
-                      style={BTN}
-                      title={lib.downloadPage}
-                      onClick={() => window.open(lib.downloadPage, '_blank', 'noopener,noreferrer')}
-                    >
-                      下载页
-                    </button>
-                  )}
-                  {row.known && isHostEmbedded() && (
+                  {isHostEmbedded() && row.known && (
                     <button className="btn" style={BTN} disabled={working} onClick={() => void importViaHost(lib)}>
                       从插件目录导入
                     </button>
                   )}
-                  {(record || row.known) && (
-                    <button className="btn" style={BTN} disabled={working} onClick={() => void exportDataFile(lib)}>
-                      导出
-                    </button>
-                  )}
-                  {record && (
-                    <button
-                      className="btn"
-                      style={{ ...BTN, color: 'var(--jp-danger)' }}
-                      disabled={working}
-                      onClick={() => void removeBank(row)}
-                    >
-                      删除
-                    </button>
-                  )}
+                  <button className="btn" style={BTN} disabled={working} onClick={() => void exportDataFile(lib)}>
+                    导出
+                  </button>
+                  <button
+                    className="btn"
+                    style={{ ...BTN, color: 'var(--jp-danger)' }}
+                    disabled={working}
+                    onClick={() => void removeBank(row)}
+                  >
+                    删除
+                  </button>
                 </div>
               </div>
             )
           })}
         </div>
+
+        {/* 1c-2. 曾经装过、现在文件不在了（记录保留，放回去再扫就恢复） */}
+        {missing.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>
+              有 {missing.length} 个库的文件不在了（记录与音色表已保留，把文件放回去再点「重新扫描」即可恢复）：
+            </div>
+            {/* 缺失的库也走同一套行渲染，只是不参与"使用" */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+              {missing.map((row) => (
+                <div key={`miss-${row.lib.id}`} style={{ ...ROW_BOX, opacity: 0.7 }}>
+                  <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+                    <strong style={{ fontWeight: 600 }}>{row.lib.name}</strong>
+                    <span style={{ ...SMALL, marginLeft: 6 }}>文件不在了</span>
+                    <div style={SMALL}>
+                      {row.record?.fileName} · {MB(row.record?.sizeBytes ?? row.lib.sizeBytes)} MB
+                      {row.record ? ` · ${row.record.presets.length} 音色（已缓存）` : ''}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <button className="btn" style={BTN} disabled={scanning} onClick={() => void rescan()}>
+                      重新扫描
+                    </button>
+                    <button
+                      className="btn"
+                      style={{ ...BTN, color: 'var(--jp-danger)' }}
+                      disabled={busy === row.lib.id}
+                      onClick={() => void removeBank(row)}
+                    >
+                      删除记录
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 1d. 添加本地文件 + 扫描诊断 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
@@ -657,8 +682,8 @@ export function SoundBankPanel() {
             onClick={() => setShowRecommended((v) => !v)}
           >
             <span style={{ width: 12 }}>{showRecommended || !hasUsable ? '▾' : '▸'}</span>
-            <span style={{ color: 'var(--jp-text-secondary)', fontWeight: 600 }}>推荐音色库</span>
-            <span style={SMALL}>（免费可用；给出体积/许可/音色数与推荐理由，下不下你定）</span>
+            <span style={{ color: 'var(--jp-text-secondary)', fontWeight: 600 }}>可选 / 推荐音色库</span>
+            <span style={SMALL}>（还没装的库只在这里介绍；给出体积/许可/音色数与推荐理由，下不下你定）</span>
           </div>
           {(showRecommended || !hasUsable) && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>

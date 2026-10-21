@@ -236,7 +236,7 @@ import type { HqSampleLibrary } from '../src/playback/spessaSynthBackend.ts'
 // adj1009（多音色库 P1）：SF2 头部解析 + 已知库认领（引擎纯函数；本文件用**手搓夹具 + 真文件**双重断言）
 import { isSf2, isGitLfsPointer, readSf2Info, readSf2Presets, summarizeSf2Presets, matchKnownLibrary, HQ_LIBRARIES, RECOMMENDED_BANKS, findKnownLibrary, resolveActiveLibrary } from '@ijipu/engine/index.ts'
 // adj1010（多音色库 P2）：库注册表——导入识别（纯函数）与一次性迁移（可注入 IO 的编排）
-import { fingerprintOf, fingerprintOfParts, bankIdOf, readBankFile, planLegacyMigration, migrateLegacyBanks, buildBankRows, presetCountOf, libViewOfRecord } from '../src/playback/bankRegistry.ts'
+import { fingerprintOf, fingerprintOfParts, bankIdOf, readBankFile, planLegacyMigration, migrateLegacyBanks, buildBankRows, missingBankRows, presetCountOf, libViewOfRecord } from '../src/playback/bankRegistry.ts'
 // adj1015：发现与登记（三端 IO 注入；本文件用假 IO 跑编排）
 import { discoverBanks } from '../src/playback/bankDiscovery.ts'
 import type { DiscoveryIo } from '../src/playback/bankDiscovery.ts'
@@ -20976,18 +20976,25 @@ async function runAdj1012Tests() {
   ])
   const extraRec = recOf('imported_abc12345', 'My Bank', [{ bank: 0, program: 5, name: 'Rhodes' }])
   const rowsKnown = buildBankRows([fluidRec])
-  check('adj1012 列表：已知库**必定出现在列表里**（默认库永远第一行，即便还没下载）',
-    rowsKnown.length === 2 && rowsKnown[0].lib.id === 'generaluser_gs' && rowsKnown[0].record === null &&
-      rowsKnown[1].lib.id === 'fluidr3_gm' && rowsKnown[1].record?.id === 'fluidr3_gm',
-    rowsKnown.map((r) => `${r.lib.id}:${r.record ? '有' : '无'}`).join(','))
-  check('adj1012 列表：音色数——有记录用真实值、没有用已知库实测值（287）',
-    presetCountOf(rowsKnown[1]) === 3 && presetCountOf(rowsKnown[0]) === 287,
-    `${presetCountOf(rowsKnown[1])}/${presetCountOf(rowsKnown[0])}`)
+  check('adj1018 已安装列表：**只放真的有文件的库**（未下载的已知库 FluidR3 在这里，GeneralUser 不在）',
+    rowsKnown.length === 1 && rowsKnown[0].lib.id === 'fluidr3_gm' && rowsKnown[0].record?.id === 'fluidr3_gm',
+    rowsKnown.map((r) => r.lib.id).join(','))
+  check('adj1018 已安装列表：一个文件都没有 ⇒ **空列表**（不是"列出两条等你下载"）',
+    buildBankRows([]).length === 0, `${buildBankRows([]).length}`)
+  check('adj1012 音色数：解析过就用真实值；没记录的已知库回落实测值（287）',
+    presetCountOf(rowsKnown[0]) === 3 &&
+      presetCountOf({ lib: HQ_LIBRARIES[0], record: null, known: true }) === 287,
+    `${presetCountOf(rowsKnown[0])}`)
   const rowsExtra = buildBankRows([extraRec])
-  check('adj1012 列表：用户导入的库**追加在后**、标 known=false（不冒充已知库）',
-    rowsExtra.length === 3 && rowsExtra[2].lib.id === 'imported_abc12345' && rowsExtra[2].known === false &&
-      rowsExtra[2].record?.name === 'My Bank',
+  check('adj1018 已安装列表：用户导入的库也在列表里、标 known=false（不冒充已知库）',
+    rowsExtra.length === 1 && rowsExtra[0].lib.id === 'imported_abc12345' && rowsExtra[0].known === false &&
+      rowsExtra[0].record?.name === 'My Bank',
     rowsExtra.map((r) => r.lib.id).join(','))
+  const goneRec: BankRecord = { ...fluidRec, present: false }
+  const goneRows = missingBankRows([goneRec])
+  check('adj1018 文件不在了的库**单列一组**（不混进已安装列表，也不删记录）',
+    buildBankRows([goneRec]).length === 0 && goneRows.length === 1 && goneRows[0].lib.id === 'fluidr3_gm',
+    `installed=${buildBankRows([goneRec]).length} missing=${goneRows.length}`)
   const extraView = libViewOfRecord(extraRec)
   check('adj1012 用户库的视图：没有直链、autoDownload=false（界面不会出"点了必然失败"的下载按钮）',
     extraView.source === '' && extraView.autoDownload === false && extraView.id === extraRec.id)
@@ -21251,8 +21258,8 @@ async function runAdj1016Tests() {
       /pcfg-group-title">\s*管理（当前库）/.test(panel) &&
       /pcfg-group-title">\s*选音色/.test(panel) &&
       /pcfg-group-title">\s*使用/.test(panel))
-  check('adj1016 空状态有**三条出路** + 三个位置的探测结果（否则用户不知道文件该放哪）',
-    /还没找到任何音色库/.test(panel) && /下载推荐音色库/.test(panel) &&
+  check('adj1016/adj1018 空状态有**三条出路** + 三个位置的探测结果（否则用户不知道文件该放哪）',
+    /还没有安装任何音色库/.test(panel) && /下载推荐音色库/.test(panel) &&
       /添加音色库|导入本地文件/.test(panel) && /扫描过的地方/.test(panel))
   check('adj1016 推荐区在"一个库都没有"时**自动展开**（不需要用户先找到折叠箭头）',
     /showRecommended \|\| !hasUsable/.test(panel))
@@ -21266,6 +21273,26 @@ async function runAdj1016Tests() {
     })())
   check('adj1016 坏文件有诊断入口（跳过几个 + 看原因），不是静默吞掉',
     /个文件被跳过/.test(panel) && /看原因/.test(panel))
+
+  /**
+   * adj1018（用户口径修正）：**"已安装"与"可选/推荐"必须是两组**。
+   * 没下载的库不能出现在已安装列表里；下载入口只应出现在推荐区。
+   */
+  const iInstalled = panel.indexOf('{rows.map((row)')
+  const iMissing = panel.indexOf('missing.length > 0')
+  const iRec = panel.indexOf('RECOMMENDED_BANKS.map')
+  const installedSeg = iInstalled >= 0 ? panel.slice(iInstalled, iMissing > iInstalled ? iMissing : iInstalled + 4000) : ''
+  check('adj1018 已安装列表每行有「使用」、且**没有**下载入口（下载只应出现在推荐区）',
+    iInstalled > 0 && installedSeg.includes('使用') && !installedSeg.includes('downloadAndRegister('),
+    `installed=${iInstalled} seg=${installedSeg.length}`)
+  check('adj1018 推荐区独立成组：未安装的库只在这里介绍（下载 / 下载页 / 推荐理由）',
+    iRec > 0 && iRec > iInstalled &&
+      panel.slice(iRec, iRec + 2600).includes('downloadAndRegister(') &&
+      panel.slice(iRec, iRec + 2600).includes('打开下载页'))
+  check('adj1018 空状态写明"基础音色库需要先下载，否则没有声音"',
+    /还没有安装任何音色库/.test(panel) && /基础音色库需要先下载/.test(panel))
+  check('adj1018 文件不在了的库**单列一组**（重新扫描 / 删除记录），不混进已安装列表',
+    /missing\.length > 0/.test(panel) && /文件不在了/.test(panel) && /删除记录/.test(panel))
 
   /**
    * adj1017（用户实报「切了第二个库，音色列表还是一样的」）：

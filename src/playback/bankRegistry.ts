@@ -186,10 +186,10 @@ export function readBankFile(
 
 // ───────────────────────────── 列表行（界面用；纯数据，smoke 可断言） ─────────────────────────────
 
-/** 音色库列表的一行：已知库**必定**出现（即便还没文件），用户导入的库追加在后面 */
+/** 音色库列表的一行（**已安装**的库；推荐/未下载的库不进这里） */
 export interface BankRow {
   lib: HqSampleLibrary
-  /** 元数据（没导入/没下载过就是 null） */
+  /** 元数据（已安装的库一定有） */
   record: BankRecord | null
   /** 是否属于 `HQ_LIBRARIES` 的已知库（否则是用户导入的新库） */
   known: boolean
@@ -214,19 +214,52 @@ export function libViewOfRecord(rec: BankRecord): HqSampleLibrary {
 }
 
 /**
- * 列表行：**先按引擎的已知库顺序**（默认库永远在第一行），再接用户导入的库（按名字排）。
- * 这样"当前用哪个/哪些能下"的顺序稳定，不会因为导入动作把列表抖得找不到北。
+ * **已安装**的音色库列表（adj1018，用户口径修正）。
+ *
+ * 口径：**只有"真的有文件"的库才算已安装**。没下载/没导入的已知库（如 FluidR3）
+ * **不出现**在这里——它们只属于「推荐/可选」区，用户看完介绍自己决定下不下。
+ *
+ * 顺序：已知库按清单顺序在前，用户导入的库按名字排在后（顺序稳定，不因导入抖动）。
  */
 export function buildBankRows(
   records: readonly BankRecord[],
   libs: readonly HqSampleLibrary[] = HQ_LIBRARIES,
 ): BankRow[] {
-  const byId = new Map(records.map((r) => [r.id, r]))
-  const rows: BankRow[] = libs.map((lib) => ({ lib, record: byId.get(lib.id) ?? null, known: true }))
-  const extra = records
-    .filter((r) => !libs.some((l) => l.id === r.id))
-    .sort((a, b) => a.name.localeCompare(b.name))
+  const installed = records.filter((r) => r.present !== false)
+  const byId = new Map(installed.map((r) => [r.id, r]))
+  const rows: BankRow[] = []
+  for (const lib of libs) {
+    const rec = byId.get(lib.id)
+    if (!rec) continue // 没安装的已知库**不出现在已安装列表**
+    rows.push({ lib, record: rec, known: true })
+    byId.delete(lib.id)
+  }
+  const extra = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name))
   for (const rec of extra) rows.push({ lib: libViewOfRecord(rec), record: rec, known: false })
+  return rows
+}
+
+/**
+ * **曾经装过、现在文件不在了**的库（记录与预设表都还留着）。
+ *
+ * 为什么单列一组而不是混进已安装列表：它们"现在用不了"，但**不能自动删记录**
+ * （用户可能只是拔了盘、换了机器、或者把文件挪走了）；放回去再扫描一次就能恢复。
+ */
+export function missingBankRows(
+  records: readonly BankRecord[],
+  libs: readonly HqSampleLibrary[] = HQ_LIBRARIES,
+): BankRow[] {
+  const gone = new Map(records.filter((r) => r.present === false).map((r) => [r.id, r]))
+  const rows: BankRow[] = []
+  for (const lib of libs) {
+    const rec = gone.get(lib.id)
+    if (!rec) continue
+    rows.push({ lib, record: rec, known: true })
+    gone.delete(lib.id)
+  }
+  for (const rec of [...gone.values()].sort((a, b) => a.name.localeCompare(b.name))) {
+    rows.push({ lib: libViewOfRecord(rec), record: rec, known: false })
+  }
   return rows
 }
 
