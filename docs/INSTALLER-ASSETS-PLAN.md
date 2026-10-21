@@ -15,6 +15,16 @@
 > **相关**：`tauri.conf.json` 的 `bundle.resources`、`src-tauri/nsis/hooks.nsh`、
 > `src-tauri/src/lib.rs` 的音色库定位、`docs/CLI.md`（PATH 注册，卸载时要一起摘）
 
+> ---
+>
+> **⚠ 2026-10-22 更新：ffmpeg 不再需要。**
+> 出片改成 **WebCodecs + Mediabunny**（浏览器原生 H.264 / AAC 编码），实测可用并已跑通导入。
+> 于是本文里所有关于 **ffmpeg 的部分（§四 的组件、§八 的"两个来源"、I-4 里程碑）全部作废**，
+> 资源包只剩音色库。详见 `docs/DYNAMIC-SCORE-PLAN.md` §〇·2。
+>
+> 仍然有效的部分：**主包不带音色库**、**资源包装进安装目录的 `soundfonts\`**、
+> **卸载二选一（接管 NSIS 模板）**、**命名与显示名**。
+
 ---
 
 ## 一、现状（本机实测，不是猜的）
