@@ -45,7 +45,8 @@ import { useUiStore } from '../store/uiStore'
 import { hostBankUrl } from '../store/hostBridge'
 import { playbackCopy } from '../brand/copy'
 import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../playback/spessaCache'
-import { SpessaSynthBackend, getHqLibrary, hasBuiltinBank, GM_VOICE_OPTIONS, firstEnabledInstrumentRef, enabledInstrumentRefs, HQ_LIBRARIES, hqBankFailureText } from '../playback/spessaSynthBackend'
+// adj1011：`resolveActiveLibrary` = "当前用哪个库"的唯一判据（与导出/面板同源）
+import { SpessaSynthBackend, resolveActiveLibrary, hasBuiltinBank, GM_VOICE_OPTIONS, firstEnabledInstrumentRef, enabledInstrumentRefs, hqBankFailureText } from '../playback/spessaSynthBackend'
 // adj409：暂停/续播的剩余事件平移（纯函数）
 import { shiftEventsFrom } from '../playback/playbackTimeline'
 // adj647：宿主字体实测（与预览同一份 ⇒ 色块位置一致；见 preview/fontMeta.ts）
@@ -91,6 +92,9 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   const playbackHqEnabled = useUiStore((s) => s.playbackHqEnabled)
   const playbackHqVoice = useUiStore((s) => s.playbackHqVoice)
   const setPlaybackHqVoice = useUiStore((s) => s.setPlaybackHqVoice)
+  /** adj1011：当前选中的音色库（L1 偏好）；库被删/换机器时自动回退默认库并标 fallback */
+  const playbackHqLibrary = useUiStore((s) => s.playbackHqLibrary)
+  const activeLib = useMemo(() => resolveActiveLibrary(playbackHqLibrary), [playbackHqLibrary])
   // adj354：@@ 恢复默认音色=第一音色——无描述头 Y 时取试听音色列表第一个启用音色（GM program 名）
   const defaultInstrumentRef = useMemo(() => firstEnabledInstrumentRef(playbackHqEnabled), [playbackHqEnabled])
   /**
@@ -197,7 +201,8 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   // adj953：嵌入版还要**问一次宿主（插件目录）**——宿主有那份音源时下 0 次 CDN（见 spessaCache 的说明）。
   const ensureBank = (): Promise<void> => {
     if (!bankPromiseRef.current) {
-      const hqLib = getHqLibrary()
+      // adj1011：取**当前选中的库**（不再是无参默认库）
+      const hqLib = activeLib.lib
       setSamplerState('loading')
       bankPromiseRef.current = (async () => {
         // adj416：桌面随安装包内置音源（安装目录 SF2）→ 直接读文件即可，不必再走缓存/下载流程
@@ -234,12 +239,19 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   }
 
   // adj347/349：打开试听即后台自动下载音源——延迟到 UI 渲染后再触发，保证打开/交互秒响应
+  // adj1011：**切库要重新预取**——依赖 `playbackHqLibrary`，并先作废上一个库的 Promise 与状态
+  //          （否则会沿用旧库的"已就绪"，点播放还是老声音）
   useEffect(() => {
+    bankPromiseRef.current = null
+    setBuiltinBank(false)
+    setDownloading(false)
+    setSamplerState('idle')
     const t = window.setTimeout(() => {
       void ensureBank().catch((e) => {
         // adj724b：提示要说清"地址不可达、可手动导入一次（之后走缓存）"，见 `hqBankFailureText`
         // adj728：并**带一个按钮**直接跳到「设置 → 音色库」（该提示因此不自动消失）
-        showNotice(hqBankFailureText(HQ_LIBRARIES[0], e), 'error', {
+        // adj1011：文案里的库名必须是**当前库**（原来钉死默认库，切库后提示仍说 GeneralUser）
+        showNotice(hqBankFailureText(activeLib.lib, e), 'error', {
           label: '打开音色库',
           run: () => useUiStore.getState().openSettings('soundbank'),
         })
@@ -247,7 +259,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
     }, 60)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [playbackHqLibrary])
 
   // adj448：试听「音色」是**会话级**（store 初值恒为「自动」，不落盘）——选定具体音色会覆盖
   // 谱面 `Y:` 乐器，若被持久化，用户下次打开带多声部 `Y:` 的谱子时音色仍是上次那个，
@@ -492,7 +504,8 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       // ---- ② 音源字节（失败只置错误文本，**不再 return**）----
       if (backendReady && backend !== null) {
         try {
-          const hqLib = getHqLibrary()
+          // adj1011：取**当前选中的库**（同一个 id 也传给后端，它据此判断要不要重建）
+          const hqLib = activeLib.lib
           // adj347：先确保音源就绪（初次自动下载/缓存；已缓存直接读）；点播放不再重复下载
           await ensureBank()
           // adj723d：音源这一步最慢（可能下载 30MB）——等待期间用户完全可能再次 Ctrl+点音符或按停止
@@ -501,7 +514,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
           // adj729：嵌入版里最优先取**插件目录**那份（宿主给的 URL；随文库一起走）
           const { bank } = await resolveHqBank(hqLib, hqCache, hostBankUrl(hqLib.id))
           if (stale()) return
-          await backend.load(bank)
+          await backend.load(bank, undefined, hqLib.id)
           if (stale()) return
           backend.setVoice(playbackHqVoice)
           setSamplerState('ready')
@@ -880,7 +893,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
             {/* adj347/348：首次自动下载音源（后台进行，仅文字提示） */}
             {downloading && <span className="dock-warn">⏳ 正在后台下载音色库（约30MB，仅首次）…</span>}
             {/* adj416：桌面端随安装包内置音源（安装目录 generaluser_gs.sf2）→ 不提示下载 */}
-            {builtinBank && !downloading && <span className="dock-muted">{playbackCopy.builtinBankHint}</span>}
+            {builtinBank && !downloading && <span className="dock-muted">{playbackCopy.builtinBankHint(`${activeLib.lib.id}.sf2`)}</span>}
             {/* adj293：播放异常提示（不再静默失败） */}
             {playError && <span className="dock-error-inline">✗ 播放失败：{playError}</span>}
             {/*

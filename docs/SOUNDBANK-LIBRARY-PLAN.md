@@ -254,7 +254,8 @@ matchKnownLibrary(info): string | null               // 按 INAM 正则认领
 |---|---|---|
 | Phase 1（adj1009） | ✅ **已完成** | 引擎 `sf2.ts` + 库清单两条 + smoke `[200]`（30 条断言全绿，含两个真文件） |
 | Phase 2（adj1010） | ✅ **已完成** | `bankRegistry.ts`（libs 表 v2）+ 导入识别 + 一次性迁移；smoke `[201]` 20 条；`verify:app-ui` 85 项全绿 |
-| Phase 3–5 | 待开工 | 见下 |
+| Phase 3（adj1011） | ✅ **已完成** | 试听/导出/面板统一走 `resolveActiveLibrary`；后端换库即重建；smoke `[202]` 12 条；`verify:app-ui` 85 项 |
+| Phase 4–5 | 待开工 | 见下 |
 
 ### Phase 1（adj1009）：引擎 SF2 元数据解析 + 库清单扩展
 - 新增 `packages/ijipu-engine/src/engine/playback/sf2.ts`（上面三个函数 + `Sf2Preset` 类型）。
@@ -354,6 +355,34 @@ ALL SMOKE TESTS PASSED ✅
 - 切库时：`useEffect` 依赖 `playbackHqLibrary` → 重置 `bankPromiseRef`、`hqDl` 状态、停播、重载。
 - `brand/copy.ts:736` 的 `builtinBankHint` 改成 `builtinBankHint(fileName)`（不再硬编码 generaluser_gs.sf2）。
 - smoke：`resolveHqBank` 用**传入 lib 的 id** 取缓存（负对照：传 fluidr3 时不得读到 generaluser 的键）。
+
+**落地记录（2026-10-21，adj1011）**：
+
+| 文件 | 改动 |
+|---|---|
+| `engine/playback/soundbanks.ts` | 新增 `resolveActiveLibrary(id)` —— **"当前用哪个库"的唯一判据**：空 id ⇒ 默认库且 `fallback:false`；命中 ⇒ 那个库；有值但查不到 ⇒ 默认库 + **`fallback:true`**（界面必须告知） |
+| `src/playback/spessaSynthBackend.ts` | `HqCache` 之外那层：`SpessaSynthBackend` 新增 `loadedBankId`；`load(bank, url, libId)` 遇到**不同 id 就 `dispose()` 整段重建**（原来第二次调用直接 return，切库根本不换声）；失败时也 `dispose()` 清半成品（否则重试会跳过 `addSoundBank`，静默无声） |
+| `src/dialogs/PlaybackDialog.tsx` | 取音源改 `activeLib.lib`；预取 effect 依赖 `playbackHqLibrary`（切库作废旧 Promise 与状态）；`backend.load(bank, undefined, lib.id)`；失败提示里的库名改成当前库 |
+| `src/ui/dock/ExportPanel.tsx` | 导出音频用当前库（原来是无参取默认库） |
+| `src/dialogs/SoundBankPanel.tsx` | 面板显示/预取/导出都跟当前库；新增一行"你选的音色库不在了…已临时用默认库"（`fallback` 时才出） |
+| `src/brand/copy.ts` | `builtinBankHint` 改成 `(fileName) => …`，不再硬编码 `generaluser_gs.sf2` |
+| `scripts/smoke.mts` | 新增 `[202]` 段 12 条断言（判据 4 条 + 接线 6 条 + 负对照 1 条 + 文案 1 条） |
+
+实测输出（`npm run smoke`，退出码 0）：
+
+```
+[202] active soundbank wiring: pick library / reload backend (adj1011)
+  ✓ adj1011 判据：id 有值但查不到 ⇒ 回退默认库且 **fallback=true**
+  ✓ adj1011 试听/导出/面板**都不再**无参取默认库
+  ✓ adj1011 后端重建：`load()` 记库 id，id 变了就 `dispose()` 整段重来
+  ✓ adj1011 取字节**负对照**：GeneralUser 不会串用 FluidR3 的缓存
+ALL SMOKE TESTS PASSED ✅
+```
+
+另跑过：`npx tsc -b` 0、`npx oxlint` 0 error、`npm run build` 0、`npm run verify:app-ui` **85 项全绿**。
+
+⚠ **这一步做完，用户还看不出变化**：因为"选库"的按钮在 Phase 4 才做。现在 `playbackHqLibrary` 只有
+"导入收藏 JSON"能改；等 Phase 4 把库列表和「使用」按钮做出来，切换才会真正生效（底层已经全部接好）。
 
 ### Phase 4（adj1012）：UI——库列表 + 库内音色
 - `SoundBankPanel` 重排为三块（沿用 adj509 的分块风格）：

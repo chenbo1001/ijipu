@@ -234,7 +234,7 @@ import type { HqCache } from '../src/playback/spessaCache.ts'
 import { hasBuiltinBank, loadHqBank, GM_VOICE_OPTIONS } from '../src/playback/spessaSynthBackend.ts'
 import type { HqSampleLibrary } from '../src/playback/spessaSynthBackend.ts'
 // adj1009（多音色库 P1）：SF2 头部解析 + 已知库认领（引擎纯函数；本文件用**手搓夹具 + 真文件**双重断言）
-import { isSf2, isGitLfsPointer, readSf2Info, readSf2Presets, summarizeSf2Presets, matchKnownLibrary, HQ_LIBRARIES, findKnownLibrary } from '@ijipu/engine/index.ts'
+import { isSf2, isGitLfsPointer, readSf2Info, readSf2Presets, summarizeSf2Presets, matchKnownLibrary, HQ_LIBRARIES, findKnownLibrary, resolveActiveLibrary } from '@ijipu/engine/index.ts'
 // adj1010（多音色库 P2）：库注册表——导入识别（纯函数）与一次性迁移（可注入 IO 的编排）
 import { fingerprintOf, bankIdOf, readBankFile, planLegacyMigration, migrateLegacyBanks } from '../src/playback/bankRegistry.ts'
 import type { BankRecord, LegacyBankEntry, LegacyBankIo } from '../src/playback/bankRegistry.ts'
@@ -20427,6 +20427,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1009Tests())
       // adj1010：多音色库 P2——库注册表（导入识别 + 一次性迁移）
       .then(() => runAdj1010Tests())
+      // adj1011：多音色库 P3——播放/导出真正用"当前库"，换库重建后端
+      .then(() => runAdj1011Tests())
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
       .then(() => runAdj949ManualScopeTests())
@@ -20811,6 +20813,107 @@ async function runAdj1010Tests() {
   const broken = await migrateLegacyBanks(io2, 1)
   check('adj1010 迁移编排：老缓存里是垃圾字节（下载中断）⇒ 跳过、不搬不登记（不把垃圾当库）',
     broken.ran === false && banks2.has('broken') && libs2.size === 0)
+}
+
+
+/**
+ * ---- 202. 播放/导出接上"当前库"（adj1011，多音色库 P3）----
+ *
+ * 这一段的由来：`getHqLibrary()` **不带参数**时永远返回默认库，而三个取音源的地方
+ * （试听 / 导出 / 音色库面板）都那么写 ⇒ 用户切了库、界面上叫新库，声音还是老库。
+ * 所以这里两头都钉：
+ *  · **判据**（纯函数）：空 id = 默认库且不算回退；有值但查不到 = 默认库 + **明确标记回退**；
+ *  · **接线**（源码）：三处不许再出现无参 `getHqLibrary()`，且换库必须把 id 传给后端。
+ */
+async function runAdj1011Tests() {
+  console.log('[202] active soundbank wiring: pick library / reload backend (adj1011)')
+
+  // ---------- ① 唯一判据 ----------
+  const empty = resolveActiveLibrary('')
+  const known = resolveActiveLibrary('fluidr3_gm')
+  const missing = resolveActiveLibrary('deleted_lib')
+  check('adj1011 判据：空 id ⇒ 默认库，但**不算回退**（从没选过是正常初始态）',
+    empty.lib.id === 'generaluser_gs' && empty.fallback === false, JSON.stringify(empty.lib.id))
+  check('adj1011 判据：选中的 id 命中 ⇒ 就用它，fallback=false',
+    known.lib.id === 'fluidr3_gm' && known.fallback === false, known.lib.id)
+  check('adj1011 判据：id 有值但查不到（库被删/换机器）⇒ 回退默认库且 **fallback=true**（界面要告知）',
+    missing.lib.id === 'generaluser_gs' && missing.fallback === true, JSON.stringify(missing))
+  check('adj1011 判据：null / undefined 与空串同口径（不抛、不误报回退）',
+    resolveActiveLibrary(null).lib.id === 'generaluser_gs' && resolveActiveLibrary(undefined).fallback === false)
+
+  // ---------- ② 接线：三处取音源都改成"当前库" ----------
+  const dlgSrc = String(readFileSync(join(root, 'src', 'dialogs', 'PlaybackDialog.tsx'), 'utf8'))
+  const expSrc = String(readFileSync(join(root, 'src', 'ui', 'dock', 'ExportPanel.tsx'), 'utf8'))
+  const panelSrc = String(readFileSync(join(root, 'src', 'dialogs', 'SoundBankPanel.tsx'), 'utf8'))
+  const backendSrc = String(readFileSync(join(root, 'src', 'playback', 'spessaSynthBackend.ts'), 'utf8'))
+  /**
+   * 只看**代码行**：注释里出现 `getHqLibrary()` 是在说明"以前怎么错的"，不该判红。
+   * （第一次跑就因为自己写的注释里带了这个字面量而红了一次——这条注释就是那次教训。）
+   */
+  const codeOnly = (s: string): string =>
+    s
+      .split('\n')
+      .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+      .join('\n')
+  const dlgCode = codeOnly(dlgSrc)
+  const expCode = codeOnly(expSrc)
+  const panelCode = codeOnly(panelSrc)
+  check('adj1011 试听/导出/面板**都不再**无参取默认库（`getHqLibrary()` 已清零）',
+    !/\bgetHqLibrary\s*\(\s*\)/.test(dlgCode) && !/\bgetHqLibrary\s*\(\s*\)/.test(expCode) && !/\bgetHqLibrary\s*\(\s*\)/.test(panelCode),
+    `dlg=${/\bgetHqLibrary\s*\(\s*\)/.test(dlgCode)} exp=${/\bgetHqLibrary\s*\(\s*\)/.test(expCode)} panel=${/\bgetHqLibrary\s*\(\s*\)/.test(panelCode)}`)
+  check('adj1011 三处都改用同一判据 `resolveActiveLibrary(...)`',
+    /resolveActiveLibrary\(playbackHqLibrary\)/.test(dlgSrc) && /resolveActiveLibrary\(playbackHqLibrary\)/.test(expSrc) &&
+      /resolveActiveLibrary\(hqLibrary\)/.test(panelSrc))
+  check('adj1011 换库时机：试听面板的预取 effect 依赖 `playbackHqLibrary`（切库会重跑）',
+    /\}, \[playbackHqLibrary\]\)/.test(dlgSrc) && /\}, \[hqLibrary\]\)/.test(panelSrc))
+  check('adj1011 后端重建：`load()` 记库 id，id 变了就 `dispose()` 整段重来（否则切库不换声）',
+    /loadedBankId/.test(backendSrc) && /id === this\.loadedBankId/.test(backendSrc) &&
+      /this\.dispose\(\)/.test(backendSrc) && /this\.loadedBankId = id/.test(backendSrc))
+  check('adj1011 播放时把库 id 传给后端（`load(bank, undefined, hqLib.id)`）',
+    /load\(bank, undefined, hqLib\.id\)/.test(dlgSrc))
+
+  // ---------- ③ 取字节必须按**传入的库 id** 查缓存（负对照：别串到别的库） ----------
+  const fluid = findKnownLibrary('fluidr3_gm')
+  const gu = findKnownLibrary('generaluser_gs')
+  if (fluid && gu) {
+    const fluidBytes = new Uint8Array([7, 7, 7, 7]).buffer
+    const cacheById = (map: Record<string, ArrayBuffer>): HqCache =>
+      ({
+        load: async (id: string) => map[id] ?? null,
+        has: async (id: string) => id in map,
+        save: async () => {},
+        remove: async () => {},
+      }) as unknown as HqCache
+    const hit = await resolveHqBank(fluid, cacheById({ fluidr3_gm: fluidBytes }))
+    check('adj1011 取字节：传入 FluidR3 ⇒ 命中 fluidr3_gm 的缓存（按库 id 取，不按默认库）',
+      hit.source === 'cache' && hit.bank === fluidBytes, `${hit.source}/${hit.bank.byteLength}`)
+
+    const savedFetch = (globalThis as { fetch?: unknown }).fetch
+    let asked = 0
+    ;(globalThis as { fetch?: unknown }).fetch = async () => {
+      asked++
+      throw new Error('网不通（smoke 假网络）')
+    }
+    let leakErr = ''
+    let leaked: ArrayBuffer | null = null
+    try {
+      // 负对照：缓存里**只有 FluidR3**，却拿 GeneralUser 去取 ⇒ 绝不能把 FluidR3 的字节给它
+      const r = await resolveHqBank(gu, cacheById({ fluidr3_gm: fluidBytes }))
+      leaked = r.bank
+    } catch (e) {
+      leakErr = e instanceof Error ? e.message : String(e)
+    } finally {
+      ;(globalThis as { fetch?: unknown }).fetch = savedFetch
+    }
+    check('adj1011 取字节**负对照**：GeneralUser 不会串用 FluidR3 的缓存（串了就是"切库没换声"的另一种形态）',
+      leaked === null && leakErr.includes('加载失败') && asked > 0,
+      `leaked=${leaked === null ? 'null' : leaked.byteLength} err=${leakErr.slice(0, 60)} fetch=${asked}`)
+  }
+
+  // ---------- ④ 提示文案里的库名必须是当前库 ----------
+  const copySrc = String(readFileSync(join(root, 'src', 'brand', 'copy.ts'), 'utf8'))
+  check('adj1011 `builtinBankHint` 改成按文件名生成（不再钉死 generaluser_gs.sf2）',
+    /builtinBankHint:\s*\(fileName: string\)/.test(copySrc) && !/builtinBankHint:\s*'[^']*generaluser_gs\.sf2/.test(copySrc))
 }
 
 

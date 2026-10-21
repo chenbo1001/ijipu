@@ -14,11 +14,11 @@
  * adj509：内容**重新梳理排版**——按"音源状态 / 音色启用 / 数据导入导出 / 说明"四块分组，
  * 每块以小节标题明确边界；分组之间留 12px 间距，与「设置 → 谱面」一致。
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useUiStore } from '../store/uiStore'
 import { hostBankUrl, hostBridge, isHostEmbedded } from '../store/hostBridge'
 import { playbackCopy } from '../brand/copy'
-import { HQ_LIBRARIES, GM_VOICE_OPTIONS, getHqLibrary, hasBuiltinBank, hqBankFailureText } from '../playback/spessaSynthBackend'
+import { GM_VOICE_OPTIONS, resolveActiveLibrary, hasBuiltinBank, hqBankFailureText } from '../playback/spessaSynthBackend'
 import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../playback/spessaCache'
 // adj1010：导入 = 读懂"这是哪个库"→ 存字节（banks）+ 登记元数据（libs）
 import { createBankRegistry, readBankFile } from '../playback/bankRegistry'
@@ -55,7 +55,12 @@ export function SoundBankPanel() {
   const openModal = useUiStore((s) => s.openModal)
   const fileRef = useRef<HTMLInputElement>(null)
   const fileSf2Ref = useRef<HTMLInputElement>(null)
-  const currentHqLib = HQ_LIBRARIES[0]
+  /**
+   * adj1011：面板上显示的必须是**当前选中的库**（原来写死 `HQ_LIBRARIES[0]` ⇒ 切了库还显示 GeneralUser）。
+   * 用 `resolveActiveLibrary` 的同一个判据：库被删/查不到时回退默认库并标 `fallback`。
+   */
+  const active = useMemo(() => resolveActiveLibrary(hqLibrary), [hqLibrary])
+  const currentHqLib = active.lib
 
   // adj347/349：打开音色库管理自动下载音源——延迟到 UI 渲染后再触发，不干扰打开/交互
   // adj416：先探测桌面安装目录内置音源（极快）——有就直接用，不显示「正在下载」提示
@@ -65,12 +70,13 @@ export function SoundBankPanel() {
     const t = window.setTimeout(() => {
       void (async () => {
         try {
-          const lib = getHqLibrary()
+          // adj1011：探测/预取的永远是**当前库**（切库后这个 effect 会重跑，见末尾依赖）
+          const lib = active.lib
+          setHqDl('preparing')
           if (await hasBuiltinBank(lib)) {
             setHqDl('builtin')
             return
           }
-          setHqDl('preparing')
           const source = await prefetchHqLibraryProgress(
             lib,
             hqCache.current,
@@ -91,7 +97,7 @@ export function SoundBankPanel() {
     }, 60)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [hqLibrary])
 
   // adj342：全选 / 全消 改为面板直连的**快捷按钮**（adj509：从「指定音色」对话框里的复选框抽出）——
   // 不再需要展开库行查看全部音色后再勾选。
@@ -244,8 +250,14 @@ export function SoundBankPanel() {
           <span style={{ color: HIGHLIGHT, fontSize: 11, flexShrink: 0 }}>{(currentHqLib.sizeBytes / 1_000_000).toFixed(1)} MB · 内置</span>
         </div>
         {/* adj416：桌面端随安装包内置音源（安装目录 generaluser_gs.sf2）→ 直接读取，无需下载 */}
+        {/* adj1011：选中的库查不到（被删/换机器）⇒ 如实说一句，别让用户以为"还是在用我选的那个" */}
+        {active.fallback && (
+          <div style={{ color: 'var(--jp-warning)', fontSize: 11, marginTop: 4 }}>
+            你选的音色库不在了（可能被删或换了机器），已临时用「{currentHqLib.name}」。
+          </div>
+        )}
         {hqDl === 'builtin' && (
-          <div style={{ color: 'var(--jp-accent)', fontSize: 11, marginTop: 4 }}>{playbackCopy.builtinBankHint}</div>
+          <div style={{ color: 'var(--jp-accent)', fontSize: 11, marginTop: 4 }}>{playbackCopy.builtinBankHint(`${currentHqLib.id}.sf2`)}</div>
         )}
         {/* adj953：**先问宿主/查缓存/探测内置**——这几步都很快，别说成"正在下载 30MB" */}
         {hqDl === 'preparing' && (

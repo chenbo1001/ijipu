@@ -14,8 +14,9 @@
 import type { AudioBackend } from '@ijipu/engine'
 // adj760（清单 B3）：音源库**清单与取用顺序**来自引擎（两端共用；IO 各做各的）
 // adj1009：补 `findKnownLibrary`（按 id 查、找不到给 undefined）与 `hqBankManualOnlyText`（只能手动下载的库）
-export { HQ_LIBRARIES, findKnownLibrary, getHqLibrary, planHqBankLoad, hqBankFailureText, hqBankManualOnlyText } from '@ijipu/engine'
-export type { HqSampleLibrary, HqBankSource } from '@ijipu/engine'
+// adj1011：补 `resolveActiveLibrary` —— "当前用哪个库"的唯一判据（试听/导出/面板共用）
+export { HQ_LIBRARIES, findKnownLibrary, getHqLibrary, resolveActiveLibrary, planHqBankLoad, hqBankFailureText, hqBankManualOnlyText } from '@ijipu/engine'
+export type { HqSampleLibrary, HqBankSource, ActiveLibrary } from '@ijipu/engine'
 import { hqBankManualOnlyText } from '@ijipu/engine'
 import type { HqSampleLibrary } from '@ijipu/engine'
 import { pitchToMidiNote, instrumentToProgram, GmChannelAllocator, GM_VOICES, gmVoiceRef } from '@ijipu/engine'
@@ -208,6 +209,14 @@ export class SpessaSynthBackend implements AudioBackend {
   /** adj328：特征标记——UI 用其区分于 midi-js 采样后端（kind 相同，需额外标志） */
   readonly hq = true
   state: 'idle' | 'loading' | 'ready' | 'failed' = 'idle'
+  /**
+   * adj1011：**当前已加载的库 id**（空 = 还没加载过）。
+   *
+   * 为什么必须记：`load()` 原来只要 `state === 'ready'` 就直接 return ⇒ 用户切了库，
+   * 后端还挂着上一个库的音色，界面上却显示新库（"换了库声音没变"）。
+   * 现在 id 变了就整段重建（连 AudioContext 一起换，避免 worklet 里同时挂两份 141 MB）。
+   */
+  loadedBankId = ''
   /** adj330：全局乐器覆盖（GM program；null=按声部名自动路由） */
   private voiceOverride: number | null = null
   private ctx: AudioContext | null = null
@@ -246,9 +255,19 @@ export class SpessaSynthBackend implements AudioBackend {
     return this.ctx
   }
 
-  /** 加载音源：注册 worklet → 加载 SoundBank（SF2/SF3/DLS ArrayBuffer）→ 等 isReady */
-  async load(bank?: ArrayBuffer, workletUrl: string = WORKLET_URL): Promise<void> {
-    if (this.state === 'ready' || this.state === 'loading') return
+  /**
+   * 加载音源：注册 worklet → 加载 SoundBank（SF2/SF3/DLS ArrayBuffer）→ 等 isReady。
+   *
+   * adj1011：**换库即重建**。`libId` 与上一次不同 ⇒ 先 `dispose()` 再整套重来；
+   * 相同则直接复用（避免每按一次播放都重新解析 30–141 MB）。
+   */
+  async load(bank?: ArrayBuffer, workletUrl: string = WORKLET_URL, libId?: string): Promise<void> {
+    if (this.state === 'loading') return
+    const id = libId ?? ''
+    // 同一个库且已就绪 ⇒ 什么都不用做（旧行为）
+    if (this.state === 'ready' && id === this.loadedBankId) return
+    // 已就绪但是**另一个库**（或上次没记 id）⇒ 整段重建
+    if (this.state === 'ready' || this.loadedBankId !== '') this.dispose()
     this.state = 'loading'
     try {
       const ctx = await this.ensureCtx()
@@ -268,9 +287,13 @@ export class SpessaSynthBackend implements AudioBackend {
         this.synth = synth
       }
       await (this.synth as unknown as { isReady: Promise<unknown> }).isReady
+      this.loadedBankId = id
       this.state = 'ready'
-      console.info('[SpessaSynth] ready')
+      console.info('[SpessaSynth] ready', id || '(默认库)')
     } catch (e) {
+      // adj1011：失败后把半成品清掉。否则下次 load 看到 `this.synth` 已存在会跳过 addSoundBank，
+      // 于是"重试成功但没音源"——最难查的一类无声故障。
+      this.dispose()
       this.state = 'failed'
       console.error('[SpessaSynth] load failed', e)
       throw e
@@ -323,6 +346,8 @@ export class SpessaSynthBackend implements AudioBackend {
     this.channels.reset()
     this.synth?.disconnect()
     this.synth = null
+    // adj1011：库身份一起清掉——否则复用实例时会误判"还是同一个库"
+    this.loadedBankId = ''
     if (this.ctx) {
       void this.ctx.close().catch(() => {})
       this.ctx = null

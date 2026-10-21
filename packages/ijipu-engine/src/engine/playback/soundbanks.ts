@@ -116,6 +116,34 @@ export function getHqLibrary(id?: string | null): HqSampleLibrary {
   return findKnownLibrary(id) ?? HQ_LIBRARIES[0]
 }
 
+/** 当前生效的音色库（L1 偏好里的 id → 具体的库条目） */
+export interface ActiveLibrary {
+  lib: HqSampleLibrary
+  /**
+   * `true` = 用户选的那个 id **不存在**（库被删了 / 换了台机器 / 偏好串写坏），
+   * 已经回退到默认库。界面/提示要如实说一句，否则又回到"选了 A 却在用 B"的老毛病。
+   */
+  fallback: boolean
+}
+
+/**
+ * adj1011：**"当前用哪个库"的唯一判据**（试听 / 导出 / 音色库面板共用这一份）。
+ *
+ * 三种情形分得很清楚，不许再各自 `?? 默认库`：
+ *  · 空 id（从没选过）⇒ 默认库，`fallback:false`（这是正常初始态，不是"回退"）；
+ *  · id 命中 ⇒ 那个库；
+ *  · id 有值但查不到 ⇒ 默认库 + `fallback:true`（**要告知用户**：你选的库不在了）。
+ */
+export function resolveActiveLibrary(
+  id?: string | null,
+  libs: readonly HqSampleLibrary[] = HQ_LIBRARIES,
+): ActiveLibrary {
+  const key = (id ?? '').trim()
+  if (key === '') return { lib: libs[0], fallback: false }
+  const found = libs.find((l) => l.id === key)
+  return found ? { lib: found, fallback: false } : { lib: libs[0], fallback: true }
+}
+
 /** 音源取用的**层级**（各宿主按自己的实际情况映射；顺序由 `planHqBankLoad` 统一决定） */
 export type HqBankSource = 'host' | 'userFile' | 'cache' | 'builtin' | 'download'
 

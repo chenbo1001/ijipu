@@ -732,8 +732,12 @@ export const playbackCopy = {
   loading: '加载中…',
   loaded: '已加载',
   failedFallback: '加载失败',
-  /** adj416：桌面端随安装包内置音源（安装目录 generaluser_gs.sf2）→ 直接读取，无需下载 */
-  builtinBankHint: '✓ 使用随应用内置音源（安装目录 generaluser_gs.sf2），无需下载、离线可用。',
+  /**
+   * adj416：桌面端随安装包内置音源（安装目录 `<库 id>.sf2`）→ 直接读取，无需下载。
+   * adj1011：文件名由调用方传入 —— 原来钉死 `generaluser_gs.sf2`，切换/新增库后就是假话。
+   */
+  builtinBankHint: (fileName: string) =>
+    `✓ 使用随应用内置音源（安装目录 ${fileName}），无需下载、离线可用。`,
   /* ---- adj987（用户 2026-10-18 需求）：试听「练习段」 ---- */
   /** 段组标题（收起时也显示） */
   practiceTitle: '标记段',

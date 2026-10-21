@@ -29,7 +29,7 @@ import { exportBgColor } from '../../export/bgChoice'
 // adj873（T-3）：导出范围要"预览区实测墨迹盒" ⇒ 从这里量（只量，几何仍在引擎）
 import { measureInkFromPreview } from '../../export/exportRange'
 import { createHqCache, resolveHqBank } from '../../playback/spessaCache'
-import { getHqLibrary, firstEnabledInstrumentRef } from '../../playback/spessaSynthBackend'
+import { resolveActiveLibrary, firstEnabledInstrumentRef } from '../../playback/spessaSynthBackend'
 // adj729：嵌入版里音源优先取**插件目录**那份（宿主给的 URL；随文库一起走）
 import { hostBankUrl } from '../../store/hostBridge'
 // adj647：宿主字体实测（导出与预览共用同一份；见 preview/fontMeta.ts）
@@ -68,6 +68,8 @@ export function ExportPanel() {
   const pageConfig = useDocStore((s) => s.pageConfig)
   // adj354：@@ 恢复默认音色——无 Y 时用试听音色列表第一个启用音色（MIDI/音频导出与试听一致）
   const playbackHqEnabled = useUiStore((s) => s.playbackHqEnabled)
+  // adj1011：导出音频/每次渲染都用**当前选中的音色库**（与试听同一个判据）
+  const playbackHqLibrary = useUiStore((s) => s.playbackHqLibrary)
   // adj1002：导出背景（底色 / 是否带背景图，两项独立，L1）；纸色档位来自 previewSoften
   const exportBg = useUiStore((s) => s.exportBg)
   const exportBgImage = useUiStore((s) => s.exportBgImage)
@@ -97,7 +99,8 @@ export function ExportPanel() {
   /** 取高保真音源 ArrayBuffer（adj416：缓存 → 桌面安装目录内置 SF2 → 联网下载并写回缓存；
    *  adj729：嵌入版里最优先取**插件目录**那份 —— 宿主给 URL，随文库一起走） */
   const ensureHqBank = async (): Promise<ArrayBuffer> => {
-    const lib = getHqLibrary()
+    // adj1011：取当前选中的库（原来是无参 `getHqLibrary()` ⇒ 永远导出默认库的声音）
+    const lib = resolveActiveLibrary(playbackHqLibrary).lib
     const { bank } = await resolveHqBank(lib, hqCacheRef.current, hostBankUrl(lib.id))
     return bank
   }
