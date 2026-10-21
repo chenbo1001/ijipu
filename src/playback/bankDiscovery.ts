@@ -365,3 +365,18 @@ export function createAppDiscoveryIo(): DiscoveryIo {
 export async function scanAndRegister(now: number = Date.now()): Promise<DiscoveryResult> {
   return discoverBanks(createAppDiscoveryIo(), now)
 }
+
+/**
+ * adj1020：打开"我的音色库目录"（桌面端专用）。
+ *
+ * 去掉随包音色库之后，用户最常见的动作是"把 .sf2 拖进那个目录再重新扫描"，
+ * 而 `%APPDATA%\…\soundfonts` 并不好找 ⇒ 给一个按钮直接打开它。
+ *
+ * @returns 打开的目录；非桌面环境返回 `null`（网页版没有"目录"这个概念）
+ */
+export async function openUserSoundfontDir(): Promise<string | null> {
+  const inv = tauriInvoke()
+  if (!inv) return null
+  const p = await inv('sf_soundfont_open_dir')
+  return typeof p === 'string' ? p : ''
+}

@@ -83,28 +83,34 @@ GM 的 128 个 program 里**没有**二胡、琵琶、古筝、唢呐这些乐�
 ③ 输入工具条插入引用 + 显示名
 ④ `docs/SYNTAX.md` 同步 + smoke 断言
 
-## 10. 音源文件的来源与分发（adj346 / adj416）
+## 10. 音源文件的来源与分发（adj346 / adj416；**adj1020 起不再随包**）
 
 > 这一节讲"音源本体从哪来"，与上面的语法无关；改打包方式或音源来源时同步本节与 `scripts/check-installer.mjs`。
 >
-> ⚠ **adj1009 起要改成"多音色库"**（库列表 / 可添加 / 可切换）：方案与现状诊断见
-> **`docs/SOUNDBANK-LIBRARY-PLAN.md`**；页面与"扫描本机目录/推荐下载"见 **`docs/SOUNDBANK-PAGE-PLAN.md`**。
-> 本节现有的"只有一个默认库"口径在该方案落地后作废，
-> 届时按那份文档的 §五、§六 重写本节。
+> 多库架构见 `docs/SOUNDBANK-LIBRARY-PLAN.md`；页面与"扫描本机目录/推荐下载"见 `docs/SOUNDBANK-PAGE-PLAN.md`。
+
+**adj1020（用户 2026-10-21 决定）：音色库不随安装包分发。**
+
+- 安装包里**没有** `generaluser_gs.sf2`，也没有 `soundfonts/` 目录；
+- 首次安装后「已安装的音色库」列表**是空的**，页面提示"基础音色库需要先下载，否则没有声音"；
+- 三条获取路径：① 应用内「可选/推荐音色库」下载；② 资源安装包（用户自备，装进同一个目录）；
+  ③ 「添加音色库…」导入本地文件。
+- 反向闸门：`scripts/check-installer.mjs` 会**检查 `bundle.resources` 里不许再出现音色库**
+  （`adj1020` 那段），smoke `[101]` 同样只做反向断言 —— 免得哪天"顺手加回来"让安装包悄悄变大 32 MB。
 
 **来源优先级（`src/playback/spessaCache.ts` 的 `resolveHqBank`，试听/导出共用）**：
-1. **IndexedDB 缓存**（`ijipu-soundfonts-hq`，键 = 库 id）——用户导入的音色文件、或 Web 端已下载的音源；
-2. **桌面内置音源**——**安装目录**下的 `generaluser_gs.sf2`（见下）；
-3. **远端下载**——`HQ_LIBRARIES[].source`（GitHub raw），失败再试 `fallbackSource`；**只有这一条的结果会写回缓存**。
+1. **宿主给的地址**（仅 Obsidian 嵌入版：插件目录里那份，随文库走）；
+2. **IndexedDB 缓存**（`ijipu-soundfonts-hq`，键 = 库 id）——用户导入/下载的音色；
+3. **安装目录 / 我的音色库目录里的文件**（`<id>.sf2`）——给"便携版手动放文件"和资源包留的口子；
+4. **远端下载**——`HQ_LIBRARIES[].source`（GitHub raw），失败再试 `fallbackSource`；只有这一条的结果会写回缓存。
 
-**桌面（Tauri）内置音源**：
-- 发布程序把 `resources/soundfonts/generaluser_gs.sf2` **随安装包**装到**安装目录根**：`<安装目录>\generaluser_gs.sf2`
-  （`src-tauri/tauri.conf.json` 的 `bundle.resources` 映射 `../resources/soundfonts/generaluser_gs.sf2 → generaluser_gs.sf2`）。
-- Rust 侧查找顺序（`builtin_soundfont_candidates`）：**安装目录根 `<库id>.sf2` 优先**，其次 `soundfonts/<库id>.sf2`（兼容旧便携版布局）。
-- 前端**先用 `sf_soundfont_builtin_path` 探测存在性**（不读 30MB）：
-  - 命中 → 试听/音色库面板显示「✓ 使用随应用内置音源…无需下载」并**跳过下载提示**，播放时再 `sf_soundfont_resource_read` 读字节（raw body → ArrayBuffer）；
-  - 未命中（如 Web、或用户把文件删了）→ 显示原有的「正在后台下载音色库」提示并联网。
-- 便携/调试目录不含随包资源，由 `scripts/prepare-tauri-soundfont.mjs` 把音源放到 exe 旁（`target/release`、`target/debug`），布局与安装目录一致。
-- 校验：`npm run check:installer`（安装清单必须含 `generaluser_gs.sf2`）+ smoke `[101]`（映射/源文件为真 SF2/查找顺序/raw body）。
+**桌面（Tauri）的文件位置**：
+- **我的音色库目录**（可写、推荐）：`<app_data>\soundfonts\`，Windows 下即 `%APPDATA%\<应用标识>\soundfonts\`。
+  应用内「打开音色库目录」按钮会建好并打开它；下载/导入都落这里。
+- **安装目录**（只读、可选）：`<安装目录>\<id>.sf2` 或 `<安装目录>\soundfonts\<id>.sf2`。
+  给"便携版/高级用户手动放一份"留的口子（`builtin_soundfont_candidates` 的候选顺序：根 → soundfonts/ → 我的音色库目录）。
+- 扫描三处：`sf_soundfont_scan`（安装目录根 / `soundfonts/` / 我的音色库目录），只读文件头尾各 64 KB；
+  音色表在该库**首次被选中**时读一次全量并缓存（SF2 的 `pdta` 在文件尾部）。
+- 校验：smoke `[101]`（不许随包 + 其余资源仍在 + 发现命令仍在）、`[204]`（命令与安全边界）、`[205]`（发现编排）。
 
-**Web（PWA）**：音源不打包进 Web 产物（规避单文件体积上限），一律远端下载一次后缓存到 IndexedDB，之后直接用（离线可用）。
+**Web（PWA）**：没有"目录"，缓存即目录 —— 下载/导入一律进 IndexedDB，之后离线可用。

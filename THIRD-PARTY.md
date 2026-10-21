@@ -10,32 +10,33 @@ iJipu（爱记谱）本体以 **GNU Affero General Public License v3.0（AGPL-3.
 |---|---|
 | `LICENSE` | iJipu 本体的 AGPL-3.0 全文 |
 | `THIRD-PARTY.md` | 本文件 |
-| `soundfonts/generaluser_gs.sf2` | 内置音色库（第三方作品） |
-| `soundfonts/LICENSE-GeneralUserGS.txt` | 该音色库的许可**原文**（逐字保留） |
-| `soundfonts/README.md` | 该音色库的来源、署名与一处须如实说明的保留 |
-| `docs/iJipu-CLI-手册.md` | 命令行使用手册（本体文档） |
+
+> **adj1020（用户 2026-10-21 决定）：音色库不再随安装包分发。**
+> 安装目录不再有 `soundfonts/`；音色库改由用户自己下载/导入（默认落在
+> `%APPDATA%\…\soundfonts\`），详见下面第一节。因此本文件也**不再**承担"分发该音色库"的署名义务，
+> 保留这一节是为了在软件内推荐它时把来源与许可讲清楚。
 
 ---
 
-## 一、内置音色库：GeneralUser GS（第三方作品，随包分发）
+## 一、推荐的音色库：GeneralUser GS（**不再随包**，由用户自行安装）
 
 | 项 | 内容 |
 |---|---|
-| 名称 | **GeneralUser GS** v1.471 |
+| 名称 | **GeneralUser GS**（内置推荐版本 v1.471；原作者最新为 2.0.3 BETA） |
 | 作者 | **S. Christian Collins**（s_chriscollins@hotmail.com） |
 | 主页 | <http://www.schristiancollins.com> |
-| 许可 | **GeneralUser GS License v2.0** |
-| 许可原文 | 安装目录 `soundfonts/LICENSE-GeneralUserGS.txt`（与本文件同一次分发） |
+| 许可 | **GeneralUser GS License v2.0**（允许用在软件项目里、允许修改） |
+| 获取方式 | 应用内「音色库 → 可选/推荐音色库」里的「下载并导入 / 打开下载页」；或导入本地自备的 `.sf2` |
 
 许可是**明确允许**用在软件项目里的（原文："Please feel free to use it in your software
-projects, and to modify the SoundFont bank or its packaging to suit your needs."）；
-并要求**不要直链作者自己的下载文件** —— 我们随安装包分发一份**本地副本**，正是这条要求的做法。
+projects, and to modify the SoundFont bank or its packaging to suit your needs."），
+并要求**不要直链作者自己的下载文件** —— 所以推荐区给的是"下载页"而不是把文件塞进安装包。
 
 ⚠ 一处须如实说明的保留：原作者在许可里自己声明，该 bank 里大部分采样是原创的，
 但也有一些取自网络上免费（且合法）的 SoundFont，他**无法 100% 确认每个采样的来源**；
 Debian 因此在收录它时标记为 "unclean license"。iJipu 是**免费开源**项目、
 不靠这个音色库盈利，风险远低于商业软件；若你要把它用于**商业闭源产品**，这条不确定性请自行评估。
-完整说明见 `soundfonts/README.md`。
+完整说明见 `resources/soundfonts/README.md`（仓库内文档，不随安装包分发）。
 
 ---
 

@@ -492,6 +492,21 @@ fn sf_soundfont_delete(app: tauri::AppHandle, id: String) -> Result<(), String> 
     Ok(())
 }
 
+/// adj1020：打开"我的音色库目录"（不存在就建）。
+///
+/// 为什么需要它：去掉随包音色库之后，用户最常见的动作是"把 .sf2 拖进那个目录再重新扫描"，
+/// 而 `%APPDATA%\<app>\soundfonts` 对普通用户来说并不好找。
+#[tauri::command]
+fn sf_soundfont_open_dir(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = user_soundfont_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(dir.display().to_string(), None::<&str>)
+        .map_err(|e| e.to_string())?;
+    Ok(dir.display().to_string())
+}
+
 // ============================================================================
 // adj568：桌面端「工作区」——原生选文件夹 + 按路径读写
 //
@@ -849,6 +864,7 @@ pub fn run() {
             sf_soundfont_peek,
             sf_soundfont_store,
             sf_soundfont_delete,
+            sf_soundfont_open_dir,
             take_pending_open_files,
             write_external_file,
             // adj966：按绝对路径读系统文件 + 取 mtime（外部改动检测的轮询 IO）

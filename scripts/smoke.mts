@@ -8588,56 +8588,62 @@ console.log('[100] px values are always integers (adj413)')
   check('adj413 默认配置本身全为整数（无浮点默认值）', Object.entries(defaultPageConfig).every(([, v]) => typeof v !== 'number' || Number.isInteger(v)))
 }
 
-// ---- 101. 桌面内置音源（随安装包分发）打包不变量（adj416；adj894 起落点改为 soundfonts/） ----
-// PC 发布程序必须把 resources/soundfonts/generaluser_gs.sf2 打进安装包，与它的许可同目录：
-// 装完 `<安装目录>\soundfonts\generaluser_gs.sf2` 即存在，运行时 Rust 直接读该文件
-// （sf_soundfont_builtin_path 探测 → 前端跳过下载提示），不再依赖国内不可达的 GitHub raw。
-// adj894（用户要求"把内置的 sf2 也放在 soundfonts 里，和 LICENSE 放一起"）：落点由
-// **安装目录根**改为 **soundfonts/** ⇒ 本段的判定一律**接受可选前缀**（两种布局都算过）。
-// Rust 侧两个候选都保留 ⇒ "用户把自备 sf2 放安装目录根来覆盖内置那份"这条路仍然有效（根目录优先）。
-// 打包配置/源文件在这里兜底——漏了安装包会「静默」退回联网下载（用户以为没反应）。
-console.log('[101] desktop bundled soundfont packaging (adj416)')
+// ---- 101. 音色库**不随包** + 桌面"发现"能力仍在（adj1020，用户 2026-10-21 决定） ----
+// 用户口径：去掉随包音色库 —— 首次安装列表为空、提示"基础音色库需要下载"；
+// 音色库改由「首次使用下载 / 资源包安装 / 用户导入」进入 `%APPDATA%\…\soundfonts\`。
+//
+// 这一段是**反向闸门**：随包撤掉后，若有人把映射加回 `bundle.resources`，
+// 安装包会悄悄变大 32 MB、而"首次为空"的新口径又被打回旧行为——两边都没提示。
+// 同时守住"发现/读取"那几条 Rust 命令仍在（用户自己把 sf2 放进安装目录/我的目录也能用）。
+console.log('[101] soundfonts are NOT bundled anymore (adj1020)')
 {
   const conf = JSON.parse(readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf8')) as {
     bundle?: { resources?: Record<string, string> }
   }
   const resources = conf.bundle?.resources ?? {}
-  // adj894：目标路径可能是 `generaluser_gs.sf2`（安装目录根）或 `soundfonts/generaluser_gs.sf2`
-  const entry = Object.entries(resources).find(([, dest]) => /(^|[\\/])generaluser_gs\.sf2$/.test(dest))
-  check('adj416/adj894 bundle.resources 含 generaluser_gs.sf2（落点 soundfonts/ 或安装目录根都算）',
-    entry !== undefined, JSON.stringify(resources))
-  check('adj416 映射源为 resources/soundfonts/generaluser_gs.sf2（config 相对 src-tauri）', (entry?.[0] ?? '').replace(/\\/g, '/') === '../resources/soundfonts/generaluser_gs.sf2', entry?.[0] ?? '')
-  // 源文件：真实完整 SF2（RIFF 容器 + sfbk 类型标识），不是占位符
-  const sf2 = join(root, 'resources', 'soundfonts', 'generaluser_gs.sf2')
-  check('adj416 音源源文件存在', existsSync(sf2), sf2)
-  const size = existsSync(sf2) ? statSync(sf2).size : 0
-  check('adj416 音源体积 ≥30MB（真音源而非占位文件）', size >= 30_000_000, `${size}`)
-  let magic = ''
-  if (existsSync(sf2)) {
-    const fd = openSync(sf2, 'r')
-    const head = Buffer.alloc(12)
-    readSync(fd, head, 0, 12, 0)
-    closeSync(fd)
-    magic = head.toString('latin1')
-  }
-  check('adj416 音源是 SoundFont2（RIFF…sfbk）', magic.startsWith('RIFF') && magic.slice(8, 12) === 'sfbk', JSON.stringify(magic))
-  // Rust 侧：候选顺序（安装目录根 → 兼容旧 soundfonts/ 子目录）+ raw body（30MB 不走 JSON 数组，E-2026-146）
-  const libRs = readFileSync(join(root, 'src-tauri', 'src', 'lib.rs'), 'utf8')
-  check('adj416 Rust 探测命令已注册', libRs.includes('sf_soundfont_builtin_path'))
-  check('adj416 Rust 候选含安装目录根 <id>.sf2 优先、并兼容 soundfonts/ 子目录',
-    libRs.includes('dir.join(&file)') && libRs.includes('dir.join("soundfonts").join(&file)'))
-  check('adj416 Rust 以 raw body 返回音源字节（tauri::ipc::Response）', libRs.includes('tauri::ipc::Response::new(bytes)'))
-  // 检查脚本：安装包清单必需项 + 打包源体积兜底
+  const sfEntries = Object.entries(resources).filter(([src, dest]) =>
+    /generaluser_gs\.sf2|LICENSE-GeneralUserGS|soundfonts[\\/]README\.md/i.test(`${src} ${dest}`),
+  )
+  check('adj1020 bundle.resources **不含**音色库（sf2 / 它的许可 / README 三样都不许回来）',
+    sfEntries.length === 0, sfEntries.map(([s]) => s).join(','))
+  check('adj1020 其余随包资源仍在（WebView2Loader / LICENSE / THIRD-PARTY / bin）。'
+    + '漏了这些安装后直接坏',
+    Object.values(resources).some((d) => /WebView2Loader\.dll$/.test(d)) &&
+      Object.values(resources).some((d) => /^LICENSE$/.test(d)) &&
+      Object.values(resources).some((d) => /THIRD-PARTY\.md$/.test(d)) &&
+      Object.values(resources).some((d) => /bin[\\/]ijipu\.cmd$/.test(d)),
+    JSON.stringify(resources))
+
+  // 安装包自检脚本：既不许再把音色库列为必需，也要有"不许随包"的反向判据
   const chk = readFileSync(join(root, 'scripts', 'check-installer.mjs'), 'utf8')
-  check('adj416/adj894 check:installer 把 generaluser_gs.sf2 列为安装包必需文件（接受 soundfonts/ 前缀）',
-    chk.includes('generaluser_gs') && chk.includes('oname='), '')
-  check('adj894 check:installer 把音色库**许可**也列为必需文件（分发第三方作品的义务）',
-    chk.includes('LICENSE-GeneralUserGS'), '')
-  check('adj416 check:installer 校验打包源体积（≥20MB）', chk.includes('resources/soundfonts/generaluser_gs.sf2'))
-  // 便携/调试目录：prepare 脚本把音源放到 exe 旁（与安装目录同布局），dev 也能走内置
-  const prep = readFileSync(join(root, 'scripts', 'prepare-tauri-soundfont.mjs'), 'utf8')
-  check('adj416 prepare 脚本把音源放到 target/release 与 target/debug（exe 旁）',
-    prep.includes("target/release") && prep.includes("target/debug"))
+  check('adj1020 check:installer **不再**把 generaluser_gs.sf2 列为安装包必需文件',
+    // 必需项是一条数组条目（`['展示名', /File .../]`）——判据盯"条目"与"nsi 片段"，不盯注释里的说明文字
+    !/\['[^']*generaluser_gs/i.test(chk) &&
+      !/\/oname=(?:soundfonts[\\/])?generaluser_gs\.sf2/.test(chk))
+  check('adj1020 check:installer 有**反向判据**（音色库不许随包）',
+    /反向判据：音色库\*\*不随包\*\*/.test(chk) && /不许\*\*再带音色库/.test(chk))
+
+  // 「发现」能力必须还在：用户自己把 sf2 放进安装目录/我的目录时能认出来
+  const libRs = readFileSync(join(root, 'src-tauri', 'src', 'lib.rs'), 'utf8')
+  check('adj1020 Rust 的"发现/读取"命令仍在（扫描目录 / 读头尾 / 按库 id 读字节）',
+    libRs.includes('sf_soundfont_scan') && libRs.includes('sf_soundfont_peek') &&
+      libRs.includes('sf_soundfont_resource_read') && libRs.includes('sf_soundfont_builtin_path'))
+  check('adj1020 Rust 探测仍接受"安装目录根 / soundfonts/ 子目录 / 我的音色库目录"三处',
+    libRs.includes('dir.join(&file)') && libRs.includes('dir.join("soundfonts").join(&file)') &&
+      /app_data_dir\(\)[\s\S]{0,120}join\("soundfonts"\)/.test(libRs))
+
+  // 旧的"把音源拷到 exe 旁"脚本已删（否则 dev 有、用户没有，行为不一致）
+  check('adj1020 `scripts/prepare-tauri-soundfont.mjs` 已删除（不再给 dev 制造"内置"假象）',
+    !existsSync(join(root, 'scripts', 'prepare-tauri-soundfont.mjs')))
+
+  // 仓库里那份 sf2 仍可留作**开发/测试夹具**（smoke 的[200]用它验解析），但不再进安装包
+  const sf2 = join(root, 'resources', 'soundfonts', 'generaluser_gs.sf2')
+  if (existsSync(sf2)) {
+    check('adj1020 仓库内的 generaluser_gs.sf2 仍可用于开发/测试（体积 ≥30MB 的真文件）',
+      statSync(sf2).size >= 30_000_000, `${statSync(sf2).size}`)
+  } else {
+    console.log('  · (仓库里没有 generaluser_gs.sf2；[200] 的真文件断言会跳过)')
+  }
 }
 
 // ---- 102. 音源来源解析：安装目录内置优先、且不重复占缓存（adj416） ----
@@ -20640,7 +20646,7 @@ async function runAdj1009Tests() {
   // ---------- 真文件：证明"真的读了内容"（文件在才跑；FluidR3 未跟踪，CI 上没有）----------
   const realGeneral = join(root, 'resources', 'soundfonts', 'generaluser_gs.sf2')
   const realFluid = join(root, 'resources', 'soundfonts', 'FluidR3_GM.sf2')
-  check('adj1009 真文件：随包内置的 generaluser_gs.sf2 存在（打包不变量见 [101]）', existsSync(realGeneral))
+  check('adj1009 真文件：仓库里的 generaluser_gs.sf2 存在（开发/测试夹具；**不再随包**，见 [101]）', existsSync(realGeneral))
   const gPresets = existsSync(realGeneral) ? readSf2Presets(readFileSync(realGeneral)) ?? [] : []
   const gInfo = existsSync(realGeneral) ? readSf2Info(readFileSync(realGeneral)) : null
   if (existsSync(realGeneral)) {

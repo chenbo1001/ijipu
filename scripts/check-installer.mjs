@@ -25,22 +25,17 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 const REQUIRED = [
   ['主程序 ijipu.exe', /!define\s+MAINBINARYSRCPATH\s+"[^"]*ijipu\.exe"/],
   ['WebView2Loader.dll（GNU 工具链下为动态依赖）', /File\s+\/a\s+"\/oname=WebView2Loader\.dll"/],
-  // adj894：落点由"安装目录根"改为 `soundfonts/` ⇒ 前缀可选（两种布局都算过）
-  [
-    '内置音源 generaluser_gs.sf2（桌面离线试听/导出）',
-    /File\s+\/a\s+"\/oname=(?:soundfonts[\\/])?generaluser_gs\.sf2"/,
-  ],
-  // adj894：第三方音色库的许可必须随包分发（与音源同目录）
-  [
-    '音色库许可 LICENSE-GeneralUserGS.txt（分发第三方作品的义务）',
-    /File\s+\/a\s+"\/oname=soundfonts[\\/]LICENSE-GeneralUserGS\.txt"/,
-  ],
+  /**
+   * adj1020（用户 2026-10-21 决定：**去掉随包音色库**）：
+   * 安装包里**不再**包含 `generaluser_gs.sf2` 与它的许可 —— 音色库改由
+   * 「首次打开时下载 / 资源包安装 / 用户导入」三条路进入 `%APPDATA%\…\soundfonts\`。
+   *
+   * 所以这里**反过来**要守住"别再把它塞回来"：下面有一组负向判据（见 `assertNoBundledSoundfont`）。
+   */
 ]
 
-/** 打包源文件：[展示名, 路径, 最小字节数]——源缺失/是占位符时安装包里也就没有真音源 */
-const SOURCES = [
-  ['resources/soundfonts/generaluser_gs.sf2', 'resources/soundfonts/generaluser_gs.sf2', 20_000_000],
-]
+/** 打包源文件：[展示名, 路径, 最小字节数]——adj1020 起**不再有音色库源文件**（不随包） */
+const SOURCES = []
 
 /**
  * adj945/adj957 **必须随包进安装目录的两份文档**：
@@ -207,6 +202,26 @@ console.log('[check-installer] 随包文件（adj945：LICENSE / THIRD-PARTY.md�
 }
 
 /**
+ * adj1020（用户 2026-10-21：**去掉随包音色库**）：反向判据 —— 安装包**不许**再带音色库。
+ *
+ * 为什么值得机器守住：随包撤掉后，若哪天有人顺手把映射加回 `bundle.resources`，
+ * 安装包会悄悄变大 32 MB、而"首次为空、需要下载"的新口径又被打回旧行为——两边都没提示。
+ */
+console.log('[check-installer] 反向判据：音色库**不随包**（adj1020）：')
+{
+  const confPath = 'src-tauri/tauri.conf.json'
+  const conf = JSON.parse(readFileSync(confPath, 'utf8'))
+  const res = conf.bundle?.resources ?? {}
+  const hitConf = Object.entries(res).filter(([src, dst]) =>
+    /generaluser_gs\.sf2|LICENSE-GeneralUserGS|soundfonts[\\/]README\.md/i.test(`${src} ${dst}`),
+  )
+  const hitNsi = /generaluser_gs\.sf2|LICENSE-GeneralUserGS/i.test(nsi)
+  console.log(`  ${hitConf.length === 0 && !hitNsi ? '✓' : '✗'} 打包配置与 installer.nsi 都不含音色库文件`)
+  if (hitConf.length > 0) console.log(`      · 仍在 conf 里：${hitConf.map(([s]) => s).join(', ')}`)
+  if (hitConf.length > 0 || hitNsi) failed++
+}
+
+/**
  * adj942（用户裁定「直接落，修」·路线②）：**`ijipu.exe` 内置了 CLI** ——
  * 这就是"用户不必装 Node 也能用命令行"的交付物本身，所以值得机器守住。
  *
@@ -309,11 +324,11 @@ if (existsSync(SETUP_DIR)) {
 
 if (failed > 0) {
   console.error(
-    `\n[check-installer] ${failed} 项缺失：安装后会缺文件、离线试听不可用。\n` +
+    `\n[check-installer] ${failed} 项缺失：安装后会缺文件。\n` +
       '  修复：确认 src-tauri/tauri.conf.json 的 bundle.resources 含\n' +
       '  { "target/release/WebView2Loader.dll": "WebView2Loader.dll" }（GNU 工具链时必需）\n' +
-      '  { "../resources/soundfonts/generaluser_gs.sf2": "soundfonts/generaluser_gs.sf2" }（内置音源，adj894 起落在 soundfonts/）\n' +
-      '  { "../resources/soundfonts/LICENSE-GeneralUserGS.txt": "soundfonts/LICENSE-GeneralUserGS.txt" }（许可，必须随包）',
+      '  { "../LICENSE": "LICENSE" } / { "../THIRD-PARTY.md": "THIRD-PARTY.md" } / { "../resources/bin/ijipu.cmd": "bin/ijipu.cmd" }\n' +
+      '  ⚠ adj1020 起音色库**不随包**：不要再把 generaluser_gs.sf2 加回 bundle.resources。',
   )
   process.exit(1)
 }

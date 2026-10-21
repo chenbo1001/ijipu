@@ -37,7 +37,7 @@ import {
   type BankRecord,
   type BankRow,
 } from '../playback/bankRegistry'
-import { scanAndRegister, type DiscoveryCounts, type DiscoveryProblem } from '../playback/bankDiscovery'
+import { scanAndRegister, openUserSoundfontDir, type DiscoveryCounts, type DiscoveryProblem } from '../playback/bankDiscovery'
 import { summarizeSf2Presets } from '@ijipu/engine'
 import type { HqSampleLibrary } from '../playback/spessaSynthBackend'
 
@@ -230,6 +230,20 @@ export function SoundBankPanel() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hqLibrary])
+
+  /** adj1020：打开"我的音色库目录"——去掉随包后，这是"自己放文件"的最短路径 */
+  const openBankDir = async (): Promise<void> => {
+    try {
+      const p = await openUserSoundfontDir()
+      if (p === null) {
+        setNotice('网页版没有"音色库目录"：请用「添加音色库…」导入文件（会存进本机缓存）。')
+        return
+      }
+      setNotice(`✓ 已打开音色库目录：${p}（把 .sf2 放进去，再点「重新扫描」）`)
+    } catch (e) {
+      setNotice(`打开目录失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
 
   /** adj1016：用户点「重新扫描」——与打开面板同一条编排，但不切当前库 */
   const rescan = async (): Promise<void> => {
@@ -486,6 +500,9 @@ export function SoundBankPanel() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
           <button className="btn" style={BTN} disabled={scanning} onClick={() => void rescan()}>
             {scanning ? '扫描中…' : '重新扫描'}
+          </button>
+          <button className="btn" style={BTN} onClick={() => void openBankDir()} title="打开 %APPDATA%\\…\\soundfonts">
+            打开音色库目录
           </button>
           {scanInfo ? (
             <span style={SMALL}>
