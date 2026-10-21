@@ -32609,6 +32609,20 @@ function runDynamicCameraTests(): void {
   }
   check('M3 色块纵向也落在视界内', offVertical === '', offVertical)
 
+  // 带歌词的谱：歌词会填满行间空档，旧判定（按"行底含歌词"比间隙）会把相邻几行并成一行，
+  // 相机于是对到整块中间、第一行色块掉出框（用户实报）。这里用 6 行 Q+C 锁住。
+  {
+    const withLyric = `V: 1.0\nB: t\nD: C\nP: 4/4\n${Array(6)
+      .fill('Q: 1 2 3 4 | 5 6 7 1 |\nC: 一 二 三 四 五 六 七 一')
+      .join('\n')}\n`
+    const lp = parseJpsRaw(withLyric)
+    const ll = layoutScore(lp, DUR_CFG)
+    const ls = buildPlaySequence(lp, ll, 120)
+    const lt = buildRectTrack(ls, { noteSize: DUR_CFG.note_size })
+    const lv = buildFlowView(ll, lt, DUR_CFG)
+    check('M3 带歌词：6 个曲行不得被并成 1 行', lv.rows.length === 6, String(lv.rows.length))
+  }
+
   // 用户口径：色块要待在**画面中间带**（1/4 ~ 3/4），别贴着框边
   let offCenter = ''
   for (let i = 0; i < track.rects.length; i++) {

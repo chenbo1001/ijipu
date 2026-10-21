@@ -38,6 +38,13 @@ export interface FlowViewOptions {
 interface VisualRow {
   top: number
   bottom: number
+  /**
+   * **只算音符**的下沿（不含歌词）。合并判定必须用它。
+   *
+   * 为什么：带歌词时，上一行的歌词几乎顶到下一行的音符，按"行底（含歌词）"算间隙会 ≤ 0，
+   * 于是相邻几行全被并成一行 —— 相机对到整块中间，第一行的色块掉出取景框（用户实报）。
+   */
+  notesBottom: number
 }
 
 /** 每页的视觉行 */
@@ -48,13 +55,16 @@ function visualRowsOfPage(layout: ScoreLayout, pageIndex: number, cfg: PageConfi
   const sorted = [...guides].sort((a, b) => a.yTop - b.yTop)
   for (const g of sorted) {
     // 行底取"曲部内容下沿"与"歌词下沿"的较大者：歌词也是这一行的内容，不能被切掉
+    const notesBottom = g.yBottom
     const bottom = Math.max(g.yBottom, g.lyricBottom ?? g.yBottom)
     const last = rows[rows.length - 1]
-    if (last && g.yTop - last.bottom <= nSize * ROW_MERGE_RATIO) {
+    // 合并判定只看**音符**间隙（歌词会填满行间空档，用它判会把相邻行并成一行）
+    if (last && g.yTop - last.notesBottom <= nSize * ROW_MERGE_RATIO) {
       last.bottom = Math.max(last.bottom, bottom)
+      last.notesBottom = Math.max(last.notesBottom, notesBottom)
       last.top = Math.min(last.top, g.yTop)
     } else {
-      rows.push({ top: g.yTop, bottom })
+      rows.push({ top: g.yTop, bottom, notesBottom })
     }
   }
   return rows
@@ -71,7 +81,13 @@ function visualRowsOfPage(layout: ScoreLayout, pageIndex: number, cfg: PageConfi
  *  - 第一行从页顶起（把标题/调号一并带上，片头能看见曲名）；
  *  - 最后一行只到**行底 + 0.8×字号**，不把整页留白拖进条带。
  */
-function bandsOf(rows: VisualRow[], pageH: number, nSize: number): VisualRow[] {
+/** 取图带（只有上下界，不含"行内容"语义） */
+interface Band {
+  top: number
+  bottom: number
+}
+
+function bandsOf(rows: VisualRow[], pageH: number, nSize: number): Band[] {
   if (rows.length === 0) return [{ top: 0, bottom: pageH }]
   return rows.map((r, i) => {
     const nextTop = i < rows.length - 1 ? rows[i + 1].top : r.bottom + nSize * 0.8
