@@ -34,6 +34,12 @@ export function DynamicFrameOverlay() {
   const setDynamicFrame = useUiStore((s) => s.setDynamicFrame)
   const code = useDocStore((s) => s.code)
   const pageConfig = useDocStore((s) => s.pageConfig)
+  /**
+   * 试听时钟：有声音的那条路已经把它推进到 `currentMs` 了。
+   * 取景框直接跟它 ⇒ **音画同源**，不用另写一套音频；>0 就表示试听正在跑。
+   */
+  const currentMs = useDocStore((s) => s.currentMs)
+  const following = currentMs > 0
 
   const [rect, setRect] = useState<DOMRect | null>(null)
   const [status, setStatus] = useState<'busy' | 'ready' | 'error'>('busy')
@@ -109,6 +115,16 @@ export function DynamicFrameOverlay() {
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
 
+  // 试听在跑 ⇒ 取景框跟着它走（暂停自己的那套时钟，避免两个时钟打架）
+  useEffect(() => {
+    if (following) {
+      cancelAnimationFrame(rafRef.current)
+      setPlaying(false)
+      cursorRef.current = currentMs
+      paint(currentMs)
+    }
+  }, [following, currentMs, paint])
+
   const tick = useCallback(
     (ts: number) => {
       const s = sessionRef.current
@@ -165,8 +181,8 @@ export function DynamicFrameOverlay() {
           <div className="dyn-frame-mask">{status === 'busy' ? '正在准备画面…' : error || '没有可播放的音符'}</div>
         )}
         <div className="dyn-frame-bar">
-          <button type="button" className="btn" onClick={toggle} disabled={status !== 'ready'}>
-            {playing ? '暂停' : '播放'}
+          <button type="button" className="btn" onClick={toggle} disabled={status !== 'ready' || following}>
+            {following ? '跟随试听' : playing ? '暂停' : '播放'}
           </button>
           {ASPECTS.map((a) => (
             <button
