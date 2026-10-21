@@ -10,6 +10,16 @@ export { buildFlowView, ROW_MERGE_RATIO } from './flowView'
 export type { FlowViewOptions } from './flowView'
 export { frameAt, scrollYOfRow, frameTimeMs, frameIndexAt } from './frame'
 export {
+  buildCameraTrack,
+  cameraAt,
+  CAMERA_FOLLOW_ZOOM,
+  CAMERA_INTRO_MS,
+  CAMERA_LINE_MS,
+  CAMERA_PAN_MS,
+  CAMERA_SAFE_HALF,
+} from './camera'
+export type { CameraFrame, CameraTrack, CameraOptions, CameraRow, CameraPan } from './camera'
+export {
   DYNAMIC_PRESETS,
   DEFAULT_DYNAMIC_PRESET,
   dynamicPageConfig,

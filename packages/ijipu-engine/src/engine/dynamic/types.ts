@@ -76,6 +76,14 @@ export interface FlowRow {
   /** 页面坐标系里的取图区间（渲染时按它裁） */
   srcTop: number
   srcBottom: number
+  /**
+   * 这一行**内容**的上下界（音符 + 歌词，不含标题/页边）——相机按它居中。
+   *
+   * 为什么不能直接用 `srcTop/srcBottom`：第一行的取图带是从页顶起的（为了把标题带进条带），
+   * 拿它居中会把镜头拉高、标题被放大到画面里（实测过）。两个用途，两对边界。
+   */
+  contentTop: number
+  contentBottom: number
   /** 贴到条带上的纵坐标（条带坐标 = 页面 y 平移后的结果） */
   stripY: number
   /** 这一行在时间轴上的起止（含反复展开后的这一遍） */

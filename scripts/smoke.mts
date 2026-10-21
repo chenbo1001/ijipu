@@ -97,6 +97,8 @@ import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 import { buildRectTrack, rectsActiveAt } from '@ijipu/engine/index.ts'
 // M1-1 第二段：流式视图（分页 → 条带行）与出帧（时刻 → 一帧）
 import { buildFlowView, frameAt, frameTimeMs, frameIndexAt, dynamicPageConfig } from '@ijipu/engine/index.ts'
+// M1-3：相机（满宽片头 → 推近 → 安全区跟拍）
+import { buildCameraTrack, cameraAt } from '@ijipu/engine/index.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
@@ -20521,6 +20523,8 @@ runAdj927ExternalChangeTests()
       .then(() => runDynamicTimelineTests())
       // M1-2：流式视图与出帧（分页 → 条带行；时刻 → 一帧）
       .then(() => runDynamicFlowTests())
+      // M1-3：相机（满宽片头 → 推近 → 安全区跟拍；取景框不越界）
+      .then(() => runDynamicCameraTests())
       .then(() => {
         console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
         process.exit(failed === 0 ? 0 : 1)
@@ -32472,4 +32476,99 @@ function runDynamicFlowTests(): void {
       return f.scrollY >= minScroll - 1e-6 && f.scrollY <= maxScroll + 1e-6
     }),
   )
+}
+
+/**
+ * ---- [D] 相机（M1-3）----
+ *
+ * 相机方案的全部前提：**版面不动，只决定看哪一块**。所以断言只关心相机本身：
+ *  ① 片头满宽 + 整页居中；② 推近到跟拍倍数；③ 取景框永远不越出页面；
+ *  ④ 同一时刻结果恒定（纯函数）；⑤ 真的发生了横向跟拍，且当前音落在框内。
+ */
+function runDynamicCameraTests(): void {
+  console.log('\n[D] dynamic camera (M1-3)')
+
+  const BARS = '1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 | 1 1 5 5 | 6 6 5 5 | 4 4 3 3 | 2 2 1 1 |'
+  const parsed = parseJpsRaw(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${BARS}${BARS}\n`)
+  const layout = layoutScore(parsed, DUR_CFG)
+  const seq = buildPlaySequence(parsed, layout, 120)
+  const track = buildRectTrack(seq, { noteSize: DUR_CFG.note_size })
+  const view = buildFlowView(layout, track, DUR_CFG)
+  const cam = buildCameraTrack(view, track, DUR_CFG, { viewW: 1080, viewH: 1920 })
+
+  const halfW = (z: number) => cam.viewW / z / 2
+  const at0 = cameraAt(cam, 0)
+  check('M3 片头满宽（zoom = 1080/595.28 ≈ 1.81）', Math.abs(at0.zoom - cam.zoomFit) < 1e-9, String(at0.zoom))
+  check('M3 片头整页纵向居中', Math.abs(at0.cy - cam.pageH / 2) < 1e-9, String(at0.cy))
+
+  const after = cameraAt(cam, cam.firstT + cam.introMs + 1)
+  check('M3 推近结束后为 4× 跟拍', Math.abs(after.zoom - cam.zoomFollow) < 1e-9, String(after.zoom))
+  check(
+    'M3 缩放随时间单调不减（不会忽远忽近）',
+    (() => {
+      let prev = 0
+      for (let t = 0; t <= track.endMs; t += 37) {
+        const z = cameraAt(cam, t).zoom
+        if (z < prev - 1e-9) return false
+        prev = z
+      }
+      return true
+    })(),
+  )
+
+  check(
+    'M3 取景框永远不越出页面左右',
+    (() => {
+      for (let t = 0; t <= track.endMs; t += 41) {
+        const f = cameraAt(cam, t)
+        const h = halfW(f.zoom)
+        if (f.cx - h < -1e-6 || f.cx + h > cam.pageW + 1e-6) return false
+      }
+      return true
+    })(),
+  )
+  check(
+    'M3 相位中心始终落在页面内',
+    (() => {
+      for (let t = 0; t <= track.endMs; t += 41) {
+        const f = cameraAt(cam, t)
+        if (f.cy < -1e-6 || f.cy > cam.pageH + 1e-6) return false
+      }
+      return true
+    })(),
+  )
+
+  check(
+    'M3 纯函数：同一 t 两次调用逐值相等',
+    (() => {
+      for (let t = 0; t <= track.endMs; t += 113) {
+        const a = cameraAt(cam, t)
+        const b = cameraAt(cam, t)
+        if (a.cx !== b.cx || a.cy !== b.cy || a.zoom !== b.zoom || a.pageIndex !== b.pageIndex) return false
+      }
+      return true
+    })(),
+  )
+
+  check('M3 真的发生了横向跟拍（关键帧 ≥ 2）', cam.pans.length >= 2, String(cam.pans.length))
+
+  // 跟拍时"当前音"必须落在取景框内（安全区逻辑的最终判据）
+  let badNote = ''
+  for (let i = 0; i < track.rects.length; i++) {
+    const r = track.rects[i]
+    const t = (r.t0 + r.t1) / 2
+    if (t <= cam.firstT + cam.introMs) continue
+    const f = cameraAt(cam, t)
+    if (f.pageIndex !== r.pageIndex) continue
+    const h = halfW(f.zoom)
+    if (r.x < f.cx - h - 1e-6 || r.x + r.w > f.cx + h + 1e-6) {
+      const near = cam.pans
+        .filter((p) => Math.abs(p.t - t) < 4000)
+        .map((p) => `${Math.round(p.t)}:${Math.round(p.cx)}`)
+        .join(',')
+      badNote = `t=${Math.round(t)} x=${Math.round(r.x)}..${Math.round(r.x + r.w)} 窗口=${Math.round(f.cx - h)}..${Math.round(f.cx + h)} pans=[${near}]`
+      break
+    }
+  }
+  check('M3 跟拍阶段每个音都在取景框内', badNote === '', badNote)
 }

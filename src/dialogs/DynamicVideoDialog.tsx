@@ -45,12 +45,12 @@ export function DynamicVideoDialog() {
     }
     const ctx = c.getContext('2d')
     if (!ctx) return
-    const frame = s.draw(ctx, t)
+    const res = s.draw(ctx, t)
     if (seekRef.current) seekRef.current.value = String(Math.round(t))
     if (metaRef.current) {
       metaRef.current.textContent =
         `${(t / 1000).toFixed(1)}s / ${(s.totalMs / 1000).toFixed(1)}s` +
-        ` · 第 ${frame.row + 1}/${s.view.rows.length} 行`
+        ` · ${res.following ? '跟拍' : '满宽'} ${res.frame.zoom.toFixed(1)}×`
     }
   }, [])
 
@@ -64,7 +64,7 @@ export function DynamicVideoDialog() {
     cursorRef.current = 0
     lastTsRef.current = 0
     sessionRef.current = null
-    createDynamicSession(useDocStore.getState().code, preset)
+    createDynamicSession(useDocStore.getState().code, preset, useDocStore.getState().pageConfig)
       .then((s) => {
         if (cancelled) return
         sessionRef.current = s

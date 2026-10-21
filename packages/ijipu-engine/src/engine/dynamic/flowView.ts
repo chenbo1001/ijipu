@@ -96,7 +96,8 @@ export function buildFlowView(
 ): FlowView {
   const paper = PAPER_SIZE[cfg.page]
   const viewH = opts.viewH ?? paper.height
-  const bandsByPage = layout.pages.map((_, pi) => bandsOf(visualRowsOfPage(layout, pi, cfg), paper.height, cfg.note_size))
+  const visualByPage = layout.pages.map((_, pi) => visualRowsOfPage(layout, pi, cfg))
+  const bandsByPage = visualByPage.map((rows) => bandsOf(rows, paper.height, cfg.note_size))
 
   /** 每条矩形落在哪条取图带上（缺省 -1 = 找不到，理论上不该发生） */
   const bandOfRect: number[] = track.rects.map((r) => {
@@ -132,11 +133,14 @@ export function buildFlowView(
       const key = `${r.pageIndex}|${band.top}`
       const pass = (passOf.get(key) ?? 0) + 1
       passOf.set(key, pass)
+      const visual = visualByPage[r.pageIndex]?.[bi]
       rows.push({
         index: rows.length,
         pageIndex: r.pageIndex,
         srcTop: band.top,
         srcBottom: band.bottom,
+        contentTop: visual?.top ?? band.top,
+        contentBottom: visual?.bottom ?? band.bottom,
         stripY,
         t0: r.t0,
         t1: r.t1,
