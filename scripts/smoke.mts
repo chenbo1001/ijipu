@@ -93,6 +93,8 @@ import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES, gmVoiceRef, gmVoiceProgram, countScoreInstrumentSwitches, noteIdStringOf, slicePlaySequenceByNoteRange, resolvePracticeRange, slicePlaySequenceByRange, extendRangeEndToSlurEnd } from '@ijipu/engine/playback/index.ts'
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
+// M1-1 动态谱时间轴：把拍段收成"定时矩形"，供视频逐帧取"此刻哪几块在亮"
+import { buildRectTrack, rectsActiveAt } from '@ijipu/engine/index.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
@@ -20507,6 +20509,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
       .then(() => runAdj949ManualScopeTests())
+      // M1-1：动态谱时间轴（视频出片的"时间 → 哪几块在亮"）
+      .then(() => runDynamicTimelineTests())
       .then(() => {
         console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
         process.exit(failed === 0 ? 0 : 1)
@@ -32205,5 +32209,79 @@ console.log('[adj1013] toast / update-prompt pinned below the topbar at top-righ
     'adj1013 窄屏（≤640px）时提示左右贴边（不再用 340px 卡在右侧、避免越界）',
     /@media \(max-width: 640px\) \{[\s\S]{0,400}?\.toast \{\s*left:\s*12px;\s*right:\s*12px;\s*max-width:\s*none;/.test(css),
     '',
+  )
+}
+
+/**
+ * ---- [D] 动态谱时间轴（M1-1，视频出片的地基）----
+ *
+ * 这一层只回答一件事：**给定毫秒 t，页面上哪几块要高亮**。
+ * 断言分三类：① 建轨完整（不丢拍段、不造零时长）；② 查询正确（半开区间 / 边界 / 多声部）；
+ * ③ 可复现（同输入两次逐值相等 —— 视频逐帧出图的前提）。
+ *
+ * 视频这条路最怕"这一帧和下一帧算得不一样"，所以 ③ 不是锦上添花，是硬门槛。
+ */
+function runDynamicTimelineTests(): void {
+  console.log('\n[D] dynamic score timeline (M1-1)')
+
+  const seqOf = (code: string, bpm = 120) => {
+    const r = parseJpsRaw(code)
+    return buildPlaySequence(r, layoutScore(r, DUR_CFG), bpm)
+  }
+  const QUAD = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n'
+
+  const track = buildRectTrack(seqOf(QUAD), { noteSize: 18 })
+  check('D2 4 个音符 ⇒ 4 条矩形（每拍段一条，不合并）', track.rects.length === 4, String(track.rects.length))
+  check(
+    'D2 每条 t1 > t0（没有零时长 / 负时长）',
+    track.rects.every((r) => r.t1 > r.t0),
+    JSON.stringify(track.rects.map((r) => [r.t0, r.t1])),
+  )
+  check('D2 按 t0 升序', track.rects.every((r, i) => i === 0 || r.t0 >= track.rects[i - 1].t0))
+  check('D2 时间轴起止 0 → 2000ms（4 拍 @120）', track.startMs === 0 && track.endMs === 2000, `${track.startMs},${track.endMs}`)
+  check('D2 每条在自家中点都会被命中', track.rects.every((r) => rectsActiveAt(track, (r.t0 + r.t1) / 2).includes(r)))
+
+  // 半开区间：t=500 正好是第 1 拍结束 / 第 2 拍开始 ⇒ 只命中第 2 条
+  const at500 = rectsActiveAt(track, 500)
+  check(
+    'D2 拍边界按半开区间取后一条（t=500 只命中 t0=500 那条）',
+    at500.length === 1 && at500[0].t0 === 500,
+    JSON.stringify(at500.map((r) => r.t0)),
+  )
+
+  check('D8 t<0 返回空', rectsActiveAt(track, -1).length === 0)
+  check('D8 t=末端（2000）返回空', rectsActiveAt(track, track.endMs).length === 0)
+
+  const empty = buildRectTrack({ events: [], totalMs: 0, bpm: 120 })
+  check('D8 空序列 ⇒ 空轨道且不抛', empty.rects.length === 0 && empty.maxSpanMs === 0 && empty.endMs === 0)
+
+  // 反复：第二遍与第一遍不重叠（这是"展开成重复行"能成立的前提）
+  const rep = buildRectTrack(seqOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: 1 2 :| 3 4 |\n'), { noteSize: 18 })
+  check(
+    'D3 反复展开后各条按时间推进、互不重叠',
+    rep.rects.every((r, i) => i === 0 || r.t0 >= rep.rects[i - 1].t1 - 0.5),
+    rep.rects.map((r) => `${Math.round(r.t0)}-${Math.round(r.t1)}`).join(' '),
+  )
+  check('D3 反复后 6 条（1,2,1,2,3,4）', rep.rects.length === 6, String(rep.rects.length))
+
+  // 多声部：同一时刻 ≥2 条（D7 的雏形）
+  // ⚠ 夹具写法：多声部是 `Q1:` + `Q2:` 两条并列，**前面不能再写一条 `Q:`**
+  //   （写了会变成单声部 + 另一段，声部不是同一时刻 —— 第一版断言就是这么红的）
+  const multi = buildRectTrack(seqOf('V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 4 |\nQ2: 2 3 4 5 |\n'), { noteSize: 18 })
+  const atMulti = rectsActiveAt(multi, 260)
+  check('D7 多声部同一时刻返回 ≥2 条（不丢声部）', atMulti.length >= 2, String(atMulti.length))
+  check('D7 返回里声部号不止一个', new Set(atMulti.map((r) => r.voice)).size >= 2, atMulti.map((r) => r.voice).join(','))
+
+  // 可复现：同输入两次建轨逐值相等
+  const a1 = JSON.stringify(buildRectTrack(seqOf(QUAD), { noteSize: 18 }))
+  const a2 = JSON.stringify(buildRectTrack(seqOf(QUAD), { noteSize: 18 }))
+  check('D1 同一份谱两次建轨逐值相等（确定性）', a1 === a2)
+
+  // 负对照：字号会影响默认矩形的上下沿（证明 noteSize 真的被消费，不是摆设）
+  const tall = buildRectTrack(seqOf(QUAD), { noteSize: 40 })
+  check(
+    'D2 负对照：字号变大 ⇒ 默认矩形变高（noteSize 真被消费）',
+    tall.rects[0].h > track.rects[0].h,
+    `${tall.rects[0].h} vs ${track.rects[0].h}`,
   )
 }
