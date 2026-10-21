@@ -21298,11 +21298,13 @@ async function runAdj1016Tests() {
       /pcfg-group-title">\s*管理（当前库）/.test(panel) &&
       /pcfg-group-title">\s*选音色/.test(panel) &&
       /pcfg-group-title">\s*使用/.test(panel))
-  check('adj1016/adj1018 空状态有**三条出路** + 三个位置的探测结果（否则用户不知道文件该放哪）',
-    /还没有安装任何音色库/.test(panel) && /下载推荐音色库/.test(panel) &&
-      /添加音色库|导入本地文件/.test(panel) && /扫描过的地方/.test(panel))
-  check('adj1016 推荐区在"一个库都没有"时**自动展开**（不需要用户先找到折叠箭头）',
-    /showRecommended \|\| !hasUsable/.test(panel))
+  check('adj1016/adj1023 空状态有**两条出路 + 基础库下载** + 三个位置的探测结果',
+    /还没有安装任何音色库/.test(panel) && /下载基础音色库/.test(panel) &&
+      /添加音色库…/.test(panel) && /扫描过的地方/.test(panel))
+  check('adj1023 应用里**不放推荐清单**（`RECOMMENDED_BANKS` 不出现在面板），只给官网链接',
+    !/RECOMMENDED_BANKS/.test(panel) && /音色库推荐/.test(panel) && /siteUrl\}\/#soundfonts/.test(panel))
+  check('adj1023 空状态的"下载"只针对**一个基础库**（BASE_BANK），不是一串推荐卡片',
+    /BASE_BANK/.test(panel) && !/RECOMMENDED_BANKS\.map/.test(panel))
   check('adj1016 "使用"层只做说明、不再放试听/导出按钮（避免两处入口）',
     (() => {
       const i = panel.indexOf('pcfg-group-title">使用')
@@ -21320,19 +21322,25 @@ async function runAdj1016Tests() {
    */
   const iInstalled = panel.indexOf('{rows.map((row)')
   const iMissing = panel.indexOf('missing.length > 0')
-  const iRec = panel.indexOf('RECOMMENDED_BANKS.map')
   const installedSeg = iInstalled >= 0 ? panel.slice(iInstalled, iMissing > iInstalled ? iMissing : iInstalled + 4000) : ''
-  check('adj1018 已安装列表每行有「使用」、且**没有**下载入口（下载只应出现在推荐区）',
+  check('adj1018 已安装列表每行有「使用」、且**没有**下载入口（下载只留在空状态的"基础库"按钮）',
     iInstalled > 0 && installedSeg.includes('使用') && !installedSeg.includes('downloadAndRegister('),
     `installed=${iInstalled} seg=${installedSeg.length}`)
-  check('adj1018 推荐区独立成组：未安装的库只在这里介绍（下载 / 下载页 / 推荐理由）',
-    iRec > 0 && iRec > iInstalled &&
-      panel.slice(iRec, iRec + 2600).includes('downloadAndRegister(') &&
-      panel.slice(iRec, iRec + 2600).includes('打开下载页'))
+  check('adj1023 官网首页有音色库推荐区（应用里的"更多库"链接指向 `#soundfonts`）',
+    /id="soundfonts"/.test(String(readFileSync(join(root, 'index.html'), 'utf8'))) &&
+      /音色库推荐/.test(String(readFileSync(join(root, 'index.html'), 'utf8'))))
   check('adj1018 空状态写明"基础音色库需要先下载，否则没有声音"',
     /还没有安装任何音色库/.test(panel) && /基础音色库需要先下载/.test(panel))
   check('adj1018 文件不在了的库**单列一组**（重新扫描 / 删除记录），不混进已安装列表',
     /missing\.length > 0/.test(panel) && /文件不在了/.test(panel) && /删除记录/.test(panel))
+  /**
+   * adj1023（用户 2026-10-21 提问）：「添加音色库…」与「导入本地文件…」是同一个功能吗？
+   * 是 —— 两者都只是 `fileSf2Ref.click()` + `importDataFile`。两个名字会让人以为是两种操作
+   * ⇒ 统一成「添加音色库…」，空状态里也用同一个词。
+   */
+  check('adj1023 页面只有**一个**"选本地文件"的入口文案（不再有"导入本地文件…"这个别名）',
+    (panel.match(/添加音色库…/g) ?? []).length >= 1 && !/导入本地文件/.test(panel),
+    `别名出现 ${(panel.match(/导入本地文件/g) ?? []).length} 次`)
 }
 
 /**

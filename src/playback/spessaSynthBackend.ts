@@ -15,7 +15,7 @@ import type { AudioBackend } from '@ijipu/engine'
 // adj760（清单 B3）：音源库**清单与取用顺序**来自引擎（两端共用；IO 各做各的）
 // adj1009：补 `findKnownLibrary`（按 id 查、找不到给 undefined）与 `hqBankManualOnlyText`（只能手动下载的库）
 // adj1011：补 `resolveActiveLibrary` —— "当前用哪个库"的唯一判据（试听/导出/面板共用）
-export { HQ_LIBRARIES, RECOMMENDED_BANKS, findKnownLibrary, getHqLibrary, resolveActiveLibrary, planHqBankLoad, hqBankFailureText, hqBankManualOnlyText } from '@ijipu/engine'
+export { HQ_LIBRARIES, RECOMMENDED_BANKS, BASE_BANK, findKnownLibrary, getHqLibrary, resolveActiveLibrary, planHqBankLoad, hqBankFailureText, hqBankManualOnlyText } from '@ijipu/engine'
 export type { HqSampleLibrary, HqBankSource, ActiveLibrary } from '@ijipu/engine'
 import { hqBankManualOnlyText } from '@ijipu/engine'
 import type { HqSampleLibrary } from '@ijipu/engine'

@@ -147,6 +147,8 @@
         <span class="topbar-version" data-app-version title="当前版本">·</span>
         <nav class="nav" id="nav">
           <a href="#features">功能</a>
+          <!-- adj1023：音色库介绍/评价放官网（应用里只留"下载基础库"与导入），首页给一个入口 -->
+          <a href="#soundfonts">音色库</a>
           <a href="/manual/">使用手册</a>
           <a href="/syntax/">脚本语法</a>
           <!-- adj905x（用户要求）：插件有了自己的功能介绍 + 使用手册，顶栏这一排给它一个入口 -->
@@ -473,7 +475,45 @@ C: 一 闪 一 闪 亮 晶 晶 满 天 都 是 小 星 星</code></pre>
       </section>
 
       <!-- 常见问题 -->
-      <section class="faq">
+      <section class="soundfonts" id="soundfonts">
+  <h2>音色库推荐</h2>
+  <p class="sf-lead">
+    应用<b>不内置</b>音色库：首次打开时列表是空的，装一个基础库才能出声。
+    下面两个都免费、许可清晰；按体积与音色厚度挑一个即可。
+  </p>
+  <div class="sf-cards">
+    <article class="sf-card">
+      <h3>GeneralUser GS <span class="sf-tag">推荐先装</span></h3>
+      <p class="sf-meta">32.3 MB · 287 个音色（128 个 GM 主音色 + 159 个变体/鼓组）· GeneralUser GS License v2.0</p>
+      <p>体积适中、加载快，128 个 GM 音色齐全，适合日常练习、试听与小样。</p>
+      <p class="sf-actions">
+        <a class="btn btn-primary" href="https://github.com/mrbumpy409/GeneralUser-GS" target="_blank" rel="noreferrer">打开下载页</a>
+        <span class="sf-hint">桌面版也可以在应用内直接点「下载基础音色库」</span>
+      </p>
+    </article>
+    <article class="sf-card">
+      <h3>Fluid R3 GM</h3>
+      <p class="sf-meta">148.4 MB · 189 个音色 · MIT</p>
+      <p>采样更厚、听感偏"录音室"；体积大、首次加载明显更慢，低配机器慎选。</p>
+      <p class="sf-actions">
+        <a class="btn btn-ghost" href="https://sourceforge.net/projects/pianobooster/files/pianobooster/1.0.0/FluidR3_GM.sf2/download" target="_blank" rel="noreferrer">打开下载页</a>
+        <span class="sf-hint">下好 .sf2 后，在应用里「添加音色库…」选它</span>
+      </p>
+    </article>
+  </div>
+  <h3>怎么装进应用</h3>
+  <ol class="sf-steps">
+    <li>下载上面对应的 <code>.sf2</code> 文件（约 32–148 MB）。</li>
+    <li>启动应用，进入「设置 → 音色库」，点「添加音色库…」选中它；或把它放进「我的音色库目录」，再点「重新扫描」。</li>
+    <li>在库里点「使用」，然后「指定音色…」挑这次要用的音色。</li>
+  </ol>
+  <p class="sf-note">
+    民族乐器（二胡、琵琶、古筝…）在 GM 里没有采样，应用会按<b>「拟」</b>映射到最接近的 GM 音色——
+    只是"像"，要真民乐请用外部音源（可先导出 MIDI）。音色库只是声音，不影响谱面与排版。
+  </p>
+</section>
+
+<section class="faq">
         <h2>常见问题</h2>
         <details><summary>是否需要安装软件？是否收费？</summary><p>无需安装。打开网页即可编写（<a href="/app/">/app/</a>），手机、平板、电脑通用，完全免费、无需注册。如需双击 <code>.jps</code> 直接打开，可另行安装 Windows 桌面版。</p></details>
         <details><summary>谱面保存在哪里？会上传到服务器吗？</summary><p>保存在你自己的设备上：浏览器本地存储，或你指定的文件夹（工作区）。这是纯前端工具，谱面不会上传，也不经过服务器。</p></details>

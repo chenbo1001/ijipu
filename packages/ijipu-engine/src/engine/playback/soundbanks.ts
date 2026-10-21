@@ -105,8 +105,17 @@ export const HQ_LIBRARIES: HqSampleLibrary[] = [
  *
  * 为什么单独导出一个数组：界面上的"推荐"必须和"已安装的库"分开——前者是"你还没有、可以考虑"，
  * 后者是"你已经有、能用"。两者混在一格里，用户分不清"该不该点下载"。
+ *
+ * adj1023（用户口径「少即是多」）：**应用里不再摆这张清单**（介绍/评价放官网），
+ * 应用只用 `BASE_BANK` 这一个"必须有的基础库"做空状态的第一动作。
  */
 export const RECOMMENDED_BANKS: HqSampleLibrary[] = HQ_LIBRARIES.filter((l) => !!l.reason)
+
+/**
+ * adj1023：**基础音色库**——保证"装好就有一个能出声"的那一个（清单第一条）。
+ * 应用里只在"一个库都没有"时出现一个「下载基础音色库」按钮，不做成推荐列表。
+ */
+export const BASE_BANK: HqSampleLibrary = HQ_LIBRARIES[0]
 
 /**
  * 按 id 查已知库（**找不到返回 `undefined`，不再默默回退默认库**，adj1009）。

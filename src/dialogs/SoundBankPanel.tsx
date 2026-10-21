@@ -22,12 +22,14 @@ import { hostBankUrl, hostBridge, isHostEmbedded } from '../store/hostBridge'
 import { playbackCopy } from '../brand/copy'
 import {
   GM_VOICE_OPTIONS,
-  RECOMMENDED_BANKS,
+  BASE_BANK,
   resolveActiveLibrary,
   hasBuiltinBank,
   hqBankFailureText,
   detectTauri,
 } from '../playback/spessaSynthBackend'
+import { openExternalUrl } from '../preview/openUrl'
+import { brand } from '../brand/tokens'
 import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../playback/spessaCache'
 import {
   buildBankRows,
@@ -98,7 +100,6 @@ export function SoundBankPanel() {
   )
   const [showProblems, setShowProblems] = useState(false)
   /** adj1016：推荐区默认折叠；**一个库都没有时自动展开**（空状态的主要出路就是它） */
-  const [showRecommended, setShowRecommended] = useState(false)
   const enabled = useUiStore(enabledVoicesOf)
   const hqLibrary = useUiStore((s) => s.playbackHqLibrary)
   const hqVoice = useUiStore((s) => s.playbackHqVoice)
@@ -564,11 +565,17 @@ export function SoundBankPanel() {
               **基础音色库需要先下载（或导入），否则试听/导出没有声音**；其它库都是可选的，装不装都行。
             </div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '6px 0' }}>
-              <button className="btn" style={{ ...BTN, color: 'var(--jp-accent)' }} onClick={() => setShowRecommended(true)}>
-                下载推荐音色库
+              {/* adj1023：只留一个"基础库"动作（不是推荐列表）——少即是多 */}
+              <button
+                className="btn"
+                style={{ ...BTN, color: 'var(--jp-accent)' }}
+                disabled={busy === BASE_BANK.id}
+                onClick={() => void downloadAndRegister(BASE_BANK)}
+              >
+                {busy === BASE_BANK.id ? '处理中…' : `下载基础音色库（${MB(BASE_BANK.sizeBytes)} MB）`}
               </button>
               <button className="btn" style={{ ...BTN, color: 'var(--jp-accent)' }} onClick={() => fileSf2Ref.current?.click()}>
-                导入本地文件…
+                添加音色库…
               </button>
               <button className="btn" style={BTN} disabled={scanning} onClick={() => void rescan()}>
                 重新扫描
@@ -726,66 +733,20 @@ export function SoundBankPanel() {
           </div>
         )}
 
-        {/* 1e. 推荐（一个库都没有时自动展开） */}
-        <div style={{ marginTop: 10 }}>
-          <div
-            style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}
-            onClick={() => setShowRecommended((v) => !v)}
+        {/* adj1023（用户口径「少即是多」）：应用里**不放**推荐清单，介绍与评价放官网 */}
+        <div style={{ ...SMALL, marginTop: 8 }}>
+          想挑别的音色库？看官网{' '}
+          <a
+            href={`${brand.siteUrl}/#soundfonts`}
+            onClick={(e) => {
+              e.preventDefault()
+              void openExternalUrl(`${brand.siteUrl}/#soundfonts`)
+            }}
+            style={{ color: 'var(--jp-accent)' }}
           >
-            <span style={{ width: 12 }}>{showRecommended || !hasUsable ? '▾' : '▸'}</span>
-            <span style={{ color: 'var(--jp-text-secondary)', fontWeight: 600 }}>可选 / 推荐音色库</span>
-            <span style={SMALL}>（还没装的库只在这里介绍；给出体积/许可/音色数与推荐理由，下不下你定）</span>
-          </div>
-          {(showRecommended || !hasUsable) && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
-              {RECOMMENDED_BANKS.map((lib) => {
-                const rec = records.find((r) => r.id === lib.id)
-                const ready = rec && rec.present !== false
-                const working = busy === lib.id
-                const canDownload = lib.autoDownload !== false && lib.source.trim() !== ''
-                return (
-                  <div key={`rec-${lib.id}`} style={ROW_BOX}>
-                    <div style={{ flex: '1 1 260px', minWidth: 0 }}>
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                        <strong style={{ fontWeight: 600 }}>{lib.name}</strong>
-                        {ready && <span style={{ color: 'var(--jp-accent)', fontSize: 11 }}>已有</span>}
-                      </div>
-                      <div style={SMALL}>
-                        {MB(lib.sizeBytes)} MB · {lib.presetCount ?? '?'} 音色
-                        {lib.license ? ` · ${lib.license}` : ''}
-                      </div>
-                      {lib.reason && <div style={{ fontSize: 11, color: 'var(--jp-text-secondary)' }}>{lib.reason}</div>}
-                    </div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                      {canDownload && (
-                        <button
-                          className="btn"
-                          style={{ ...BTN, color: 'var(--jp-accent)' }}
-                          disabled={working}
-                          onClick={() => void downloadAndRegister(lib)}
-                        >
-                          {working ? '处理中…' : ready ? '重新获取' : '下载并导入'}
-                        </button>
-                      )}
-                      {lib.downloadPage && (
-                        <button
-                          className="btn"
-                          style={BTN}
-                          title={lib.downloadPage}
-                          onClick={() => window.open(lib.downloadPage, '_blank', 'noopener,noreferrer')}
-                        >
-                          打开下载页
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-              <div style={SMALL}>
-                需要更多库？把任意 .sf2 放进「我的音色库目录」再点「重新扫描」，或用「导入本地文件…」。
-              </div>
-            </div>
-          )}
+            《音色库推荐》
+          </a>
+          。也可以把 .sf2 放进「我的音色库目录」再点「重新扫描」。
         </div>
 
         {active.fallback && (
@@ -933,7 +894,7 @@ export function SoundBankPanel() {
         {currentHqLib.downloadPage && (
           <div style={{ ...SMALL, marginTop: 6, lineHeight: 1.6 }}>
             这个库不能应用内自动下载时，可以**手动装一次**：点它那一行的「下载页」自己下一个，
-            再回来点「导入本地文件…」选它。装好之后一直用本地那份、不再联网。
+            再回来点「添加音色库…」选它。装好之后一直用本地那份、不再联网。
             <br />
             下载页：<span style={{ userSelect: 'text' }}>{currentHqLib.downloadPage}</span>
           </div>
