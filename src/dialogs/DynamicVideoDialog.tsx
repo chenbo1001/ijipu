@@ -17,6 +17,7 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { dynamicVideoCopy } from '../brand/copy'
 import { createDynamicSession, type DynamicSession } from '../export/video/renderer'
+import { encodeMp4 } from '../export/video/mp4'
 
 const PRESET_IDS: DynamicPresetId[] = ['9x16', '1x1', '16x9']
 
@@ -29,6 +30,9 @@ export function DynamicVideoDialog() {
   const [status, setStatus] = useState<'busy' | 'ready' | 'error'>('busy')
   const [error, setError] = useState('')
   const [playing, setPlaying] = useState(false)
+  const [encoding, setEncoding] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const abortRef = useRef<AbortController | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const seekRef = useRef<HTMLInputElement | null>(null)
@@ -111,8 +115,38 @@ export function DynamicVideoDialog() {
     [paint],
   )
 
-  const toggle = () => {
+  /**
+   * 导出 MP4：逐帧编码（WebCodecs 硬件编码 + mp4-muxer 封装）。
+   * 上限 3 分钟——与方案一致，超出只导前 3 分钟（界面有提示）。
+   */
+  const exportVideo = async () => {
     const s = sessionRef.current
+    if (!s || encoding) return
+    setPlaying(false)
+    cancelAnimationFrame(rafRef.current)
+    setEncoding(true)
+    setProgress(0)
+    const ac = new AbortController()
+    abortRef.current = ac
+    try {
+      const blob = await encodeMp4(s, { fps: 30, maxMs: 180_000, signal: ac.signal, onProgress: setProgress })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `动态谱-${preset}.mp4`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+    } catch (e) {
+      if (!(e instanceof DOMException && e.name === 'AbortError')) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    } finally {
+      setEncoding(false)
+      abortRef.current = null
+    }
+  }
+
+  const toggle = () => {    const s = sessionRef.current
     if (!s) return
     if (playing) {
       setPlaying(false)
@@ -179,6 +213,15 @@ export function DynamicVideoDialog() {
             }}
           >
             在预览区看取景
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={encoding ? () => abortRef.current?.abort() : exportVideo}
+            disabled={status !== 'ready'}
+            title="逐帧编码为 MP4（上限 3 分钟；无声版，音轨随后）"
+          >
+            {encoding ? `取消（${Math.round(progress * 100)}%）` : dynamicVideoCopy.exportMp4}
           </button>
           <span className="dock-muted">{dynamicVideoCopy.noSound}</span>
         </div>

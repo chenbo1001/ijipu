@@ -1227,5 +1227,6 @@ export const dynamicVideoCopy = {
   reload: '重新载入当前谱',
   preparing: '正在准备画面…',
   empty: '这份谱没有可播放的音符',
-  noSound: '这一版只验画面：还没有声音，也还不能导出视频。',
+  noSound: '无声版（音轨下一步接）',
+  exportMp4: '导出 MP4',
 } as const

@@ -11,6 +11,7 @@
  */
 import { defaultPageConfig, DYNAMIC_PRESETS, type DynamicPresetId } from '@ijipu/engine'
 import { createDynamicSession, type DynamicSession } from '../src/export/video/renderer'
+import { encodeMp4 } from '../src/export/video/mp4'
 
 /** 素材：够长，能看出"换行 + 横向跟拍" */
 const DEMO = [
@@ -115,3 +116,16 @@ void rebuild(presetSel.value as DynamicPresetId).catch((e) => {
   hint.textContent = `出错了：${String(e)}`
   console.error(e)
 })
+
+/**
+ * 调试用：编一小段 MP4 并回报体积与文件头（`ftyp`）。
+ * 从控制台/CDP 调：`await window.__testMp4(3)`
+ */
+;(window as unknown as { __testMp4: (sec?: number) => Promise<unknown> }).__testMp4 = async (sec = 3) => {
+  if (!session) throw new Error('还没有会话')
+  const t0 = performance.now()
+  const blob = await encodeMp4(session, { fps: 30, maxMs: sec * 1000 })
+  const head = new Uint8Array(await blob.slice(0, 12).arrayBuffer())
+  const magic = String.fromCharCode(...head.slice(4, 8))
+  return { size: blob.size, magic, ms: Math.round(performance.now() - t0) }
+}

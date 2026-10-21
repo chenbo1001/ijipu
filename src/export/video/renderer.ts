@@ -45,6 +45,9 @@ export const RASTER_SCALE = 3
 export const HIGHLIGHT_FILL = 'rgba(255, 93, 108, 0.20)'
 export const HIGHLIGHT_STROKE = 'rgba(255, 93, 108, 0.85)'
 
+/** 2D 上下文（离屏画布与页面画布都行；编码时用 OffscreenCanvas 不占可见画布） */
+export type DrawCtx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
+
 export interface DynamicSession {
   camera: CameraTrack
   /** 每页一张已光栅化的画布 */
@@ -53,7 +56,7 @@ export interface DynamicSession {
   width: number
   height: number
   /** 画一帧，返回相机位置与"是否在跟拍"（供界面显示） */
-  draw: (ctx: CanvasRenderingContext2D, tMs: number) => { frame: CameraFrame; following: boolean }
+  draw: (ctx: DrawCtx, tMs: number) => { frame: CameraFrame; following: boolean }
 }
 
 /**
@@ -92,7 +95,7 @@ export async function createDynamicSession(
   const pages: HTMLCanvasElement[] = []
   for (const svg of svgs) pages.push(await svgToCanvas(svg, RASTER_SCALE, '#ffffff'))
 
-  const draw = (ctx: CanvasRenderingContext2D, tMs: number) => {
+  const draw = (ctx: DrawCtx, tMs: number) => {
     const frame = cameraAt(camera, tMs)
     const W = camera.viewW
     const H = camera.viewH
