@@ -236,7 +236,7 @@ import type { HqSampleLibrary } from '../src/playback/spessaSynthBackend.ts'
 // adj1009（多音色库 P1）：SF2 头部解析 + 已知库认领（引擎纯函数；本文件用**手搓夹具 + 真文件**双重断言）
 import { isSf2, isGitLfsPointer, readSf2Info, readSf2Presets, summarizeSf2Presets, matchKnownLibrary, HQ_LIBRARIES, findKnownLibrary, resolveActiveLibrary } from '@ijipu/engine/index.ts'
 // adj1010（多音色库 P2）：库注册表——导入识别（纯函数）与一次性迁移（可注入 IO 的编排）
-import { fingerprintOf, bankIdOf, readBankFile, planLegacyMigration, migrateLegacyBanks } from '../src/playback/bankRegistry.ts'
+import { fingerprintOf, bankIdOf, readBankFile, planLegacyMigration, migrateLegacyBanks, buildBankRows, presetCountOf, libViewOfRecord } from '../src/playback/bankRegistry.ts'
 import type { BankRecord, LegacyBankEntry, LegacyBankIo } from '../src/playback/bankRegistry.ts'
 // adj417：按钮图标清单（public/icons/ 下的文件名）——断言文件存在、sw.js 预热清单未漂移
 import { ICON_DIR, ICON_FILES, ICON_FILE_NAMES } from '../src/ui/toolIcons.ts'
@@ -14878,7 +14878,7 @@ async function runAdj540WorkspaceTests() {
       !/help-hint-touch/.test(String(readFileSync('src/dialogs/PasteImportDialog.tsx', 'utf8'))) &&
       !/\.help-hint-touch/.test(cssAll),
     '')
-  check('adj581（用户要求）底栏内容标题统一成**谱面页的行标题样式**（`.pcfg-group-title`，即「纸张与边距」那种）：选择工作区 / 粘贴源码 / 深浅模式 / 主题配色 / 音源 / 音色启用',
+  check('adj581/adj1012（用户要求）底栏内容标题统一成**谱面页的行标题样式**（`.pcfg-group-title`，即「纸张与边距」那种）：选择工作区 / 粘贴源码 / 深浅模式 / 主题配色 / 音色库 / 当前库的音色',
     (() => {
       const panelDlg = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
       const bank = String(readFileSync('src/dialogs/SoundBankPanel.tsx', 'utf8'))
@@ -14888,8 +14888,8 @@ async function runAdj540WorkspaceTests() {
       return (
         /className="pcfg-group-title">深浅模式</.test(panelDlg) &&
         /className="pcfg-group-title">主题配色</.test(panelDlg) &&
-        /className="pcfg-group-title">音源</.test(bank) &&
-        /className="pcfg-group-title">\s*音色启用/.test(bank) &&
+        /className="pcfg-group-title">\s*音色库/.test(bank) &&
+        /className="pcfg-group-title">\s*当前库的音色/.test(bank) &&
         /className="pcfg-group-title import-label"/.test(paste) &&
         // ⚠ adj581 踩过的坑：dock 的 `.pcfg-group-title` **绝不能**带 `flex: 0 0 100%`——
         // 那在横向 flex 里是"占满整行宽"，到了**纵向** flex（导入面板）主轴变成高度 ⇒ 标题被撑满整块高度
@@ -20429,6 +20429,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1010Tests())
       // adj1011：多音色库 P3——播放/导出真正用"当前库"，换库重建后端
       .then(() => runAdj1011Tests())
+      // adj1012：多音色库 P4——库列表 / 每库一套收藏 / 按库选音色
+      .then(() => runAdj1012Tests())
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
       .then(() => runAdj949ManualScopeTests())
@@ -20915,6 +20917,92 @@ async function runAdj1011Tests() {
   check('adj1011 `builtinBankHint` 改成按文件名生成（不再钉死 generaluser_gs.sf2）',
     /builtinBankHint:\s*\(fileName: string\)/.test(copySrc) && !/builtinBankHint:\s*'[^']*generaluser_gs\.sf2/.test(copySrc))
 }
+
+/**
+ * ---- 203. 多音色库 UI（adj1012，P4）----
+ *
+ * 三件事各自都有一个"看起来对、其实会坏"的形态：
+ *  ① **每库一套收藏**：写成 `map[id] ?? DEFAULT` 会让「全消」点不动（空数组被当成"没配过"）；
+ *  ② **列表行**：默认库必须永远在（用户可能还没下载），用户导入的库追加在后且不能冒充已知库；
+ *  ③ **音色选择器**：必须按**当前库**列，且"中文名 + 本库原名"两行都要有（不然换个库名字对不上）。
+ */
+async function runAdj1012Tests() {
+  console.log('[203] multi-library UI: rows / per-library favorites / picker (adj1012)')
+  const ui = (await import('../src/store/uiStore.ts')) as unknown as {
+    enabledVoicesOf: (s: { playbackHqLibrary: string; playbackHqEnabledByLib: Record<string, number[]> }) => number[]
+  }
+
+  // ---------- ① 每库一套：全消 vs 没配过 ----------
+  const neverSet = ui.enabledVoicesOf({ playbackHqLibrary: '', playbackHqEnabledByLib: {} })
+  const cleared = ui.enabledVoicesOf({ playbackHqLibrary: 'generaluser_gs', playbackHqEnabledByLib: { generaluser_gs: [] } })
+  const perLib = ui.enabledVoicesOf({
+    playbackHqLibrary: 'fluidr3_gm',
+    playbackHqEnabledByLib: { generaluser_gs: [0], fluidr3_gm: [40] },
+  })
+  const missingLib = ui.enabledVoicesOf({ playbackHqLibrary: 'deleted_lib', playbackHqEnabledByLib: { generaluser_gs: [7] } })
+  check('adj1012 收藏：从没配过 ⇒ 回落常用 7 个（含 0 号大钢琴与 73 长笛）',
+    neverSet.length === 7 && neverSet.includes(0) && neverSet.includes(73), neverSet.join(','))
+  check('adj1012 收藏：**配过但全消** ⇒ 就是空（不能退回默认 7 个，否则「全消」点不动）',
+    cleared.length === 0, cleared.join(','))
+  check('adj1012 收藏：切到 FluidR3 用的是**它自己那一套**（不是默认库那套）',
+    perLib.length === 1 && perLib[0] === 40, perLib.join(','))
+  check('adj1012 收藏：选中的库查不到 ⇒ 按回退后的默认库取（不抛、不空）',
+    missingLib.length === 1 && missingLib[0] === 7, missingLib.join(','))
+
+  // ---------- ② 列表行：已知库必在 + 导入库追加 ----------
+  const recOf = (id: string, name: string, presets: { bank: number; program: number; name: string }[]): BankRecord => ({
+    id,
+    name,
+    fileName: `${id}.sf2`,
+    sizeBytes: 1234,
+    format: 'sf2',
+    origin: 'imported',
+    addedAt: 1,
+    presets,
+  })
+  const fluidRec = recOf('fluidr3_gm', 'Fluid R3 GM', [
+    { bank: 0, program: 0, name: 'Yamaha Grand Piano' },
+    { bank: 0, program: 73, name: 'Flute' },
+    { bank: 128, program: 0, name: 'Standard' },
+  ])
+  const extraRec = recOf('imported_abc12345', 'My Bank', [{ bank: 0, program: 5, name: 'Rhodes' }])
+  const rowsKnown = buildBankRows([fluidRec])
+  check('adj1012 列表：已知库**必定出现在列表里**（默认库永远第一行，即便还没下载）',
+    rowsKnown.length === 2 && rowsKnown[0].lib.id === 'generaluser_gs' && rowsKnown[0].record === null &&
+      rowsKnown[1].lib.id === 'fluidr3_gm' && rowsKnown[1].record?.id === 'fluidr3_gm',
+    rowsKnown.map((r) => `${r.lib.id}:${r.record ? '有' : '无'}`).join(','))
+  check('adj1012 列表：音色数——有记录用真实值、没有用已知库实测值（287）',
+    presetCountOf(rowsKnown[1]) === 3 && presetCountOf(rowsKnown[0]) === 287,
+    `${presetCountOf(rowsKnown[1])}/${presetCountOf(rowsKnown[0])}`)
+  const rowsExtra = buildBankRows([extraRec])
+  check('adj1012 列表：用户导入的库**追加在后**、标 known=false（不冒充已知库）',
+    rowsExtra.length === 3 && rowsExtra[2].lib.id === 'imported_abc12345' && rowsExtra[2].known === false &&
+      rowsExtra[2].record?.name === 'My Bank',
+    rowsExtra.map((r) => r.lib.id).join(','))
+  const extraView = libViewOfRecord(extraRec)
+  check('adj1012 用户库的视图：没有直链、autoDownload=false（界面不会出"点了必然失败"的下载按钮）',
+    extraView.source === '' && extraView.autoDownload === false && extraView.id === extraRec.id)
+
+  // ---------- ③ 源码闸门：界面确实改成了多库 ----------
+  const panelSrc = String(readFileSync(join(root, 'src', 'dialogs', 'SoundBankPanel.tsx'), 'utf8'))
+  const pickerSrc = String(readFileSync(join(root, 'src', 'dialogs', 'VoicePickerDialog.tsx'), 'utf8'))
+  const storeSrc = String(readFileSync(join(root, 'src', 'store', 'uiStore.ts'), 'utf8'))
+  check('adj1012 面板：用 `buildBankRows` 出列表、有「添加音色库…」、能切库',
+    /buildBankRows\(records\)/.test(panelSrc) && /添加音色库/.test(panelSrc) &&
+      /setPlaybackHqLibrary\(lib\.id\)/.test(panelSrc) && /presetCountOf\(/.test(panelSrc))
+  check('adj1012 面板：**不再**写死默认库（`HQ_LIBRARIES[0]` 已清零）',
+    !/HQ_LIBRARIES\[0\]/.test(panelSrc))
+  check('adj1012 选择器：按当前库列音色（读 `record.presets`）并显示"中文名 + 本库原名"',
+    /resolveActiveLibrary\(hqLibrary\)/.test(pickerSrc) && /record\.presets\.filter/.test(pickerSrc) &&
+      /libName/.test(pickerSrc) && /GM_GROUPS/.test(pickerSrc))
+  check('adj1012 store：收藏改成 `playbackHqEnabledByLib` + 唯一读取口 `enabledVoicesOf`',
+    /playbackHqEnabledByLib: Record<string, number\[\]>/.test(storeSrc) &&
+      /export function enabledVoicesOf/.test(storeSrc) &&
+      !/^\s*playbackHqEnabled:\s*number\[\]/m.test(storeSrc))
+  check('adj1012 store：旧版单数组**真的**在迁移（读旧键 → 写到默认库 → 删旧键）',
+    /PLAYBACK_HQ_ENABLED_LEGACY_KEY/.test(storeSrc) && /removeItem\(PLAYBACK_HQ_ENABLED_LEGACY_KEY\)/.test(storeSrc))
+}
+
 
 
 /**

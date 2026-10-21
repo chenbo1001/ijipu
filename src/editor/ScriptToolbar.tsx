@@ -14,7 +14,7 @@
  * 本组件纯 UI：插入逻辑经 props 的 onInsert 交由 EditorPane 统一处理。
  */
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react'
-import { useUiStore } from '../store/uiStore'
+import { useUiStore, enabledVoicesOf } from '../store/uiStore'
 import { PAD_GROUPS, PAD_KB_KEY, PAD_REDO_KEY, PAD_UNDO_KEY, type PadGroup } from './padLayout'
 import { GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
 import { ToolIcon } from '../ui/ToolIcon'
@@ -88,7 +88,7 @@ export function ScriptToolbar({
 }) {
   const btnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   // adj333：动态「乐器」——把收藏的采样音色（GM 音色）加入乐器组，插入 @名
-  const hqEnabled = useUiStore((s) => s.playbackHqEnabled)
+  const hqEnabled = useUiStore(enabledVoicesOf)
   const hqVoiceKeys = hqEnabled
     .map((program) => GM_VOICE_OPTIONS.find((v) => v.program === program))
     .filter((v): v is NonNullable<typeof v> => !!v)

@@ -255,7 +255,8 @@ matchKnownLibrary(info): string | null               // 按 INAM 正则认领
 | Phase 1（adj1009） | ✅ **已完成** | 引擎 `sf2.ts` + 库清单两条 + smoke `[200]`（30 条断言全绿，含两个真文件） |
 | Phase 2（adj1010） | ✅ **已完成** | `bankRegistry.ts`（libs 表 v2）+ 导入识别 + 一次性迁移；smoke `[201]` 20 条；`verify:app-ui` 85 项全绿 |
 | Phase 3（adj1011） | ✅ **已完成** | 试听/导出/面板统一走 `resolveActiveLibrary`；后端换库即重建；smoke `[202]` 12 条；`verify:app-ui` 85 项 |
-| Phase 4–5 | 待开工 | 见下 |
+| Phase 4（adj1012） | ✅ **已完成** | 库列表 + 「使用」+ 每库一套收藏 + 按库选音色（双行）；smoke `[203]` 13 条；`verify:app-ui` 85 项 |
+| Phase 5（插件同步） | 待开工（另开会话） | 见下 |
 
 ### Phase 1（adj1009）：引擎 SF2 元数据解析 + 库清单扩展
 - 新增 `packages/ijipu-engine/src/engine/playback/sf2.ts`（上面三个函数 + `Sf2Preset` 类型）。
@@ -396,6 +397,45 @@ ALL SMOKE TESTS PASSED ✅
   `PlaybackDialog:91`、`ExportPanel:70`、`VoicePickerDialog:27`）。旧值（`number[]`）迁移到 `generaluser_gs`。
 - 新库默认收藏：该库存在的"常用 7 个"（`DEFAULT_HQ_ENABLED`）；一个都不存在时全选 bank 0。
 - **UI 改完必须跑 `npm run verify:app-ui`**（AGENTS：adj959 的教训，源码级断言守不住"点了没动"）。
+
+**落地记录（2026-10-21，adj1012）**：
+
+| 文件 | 改动 |
+|---|---|
+| `src/store/uiStore.ts` | `playbackHqEnabled: number[]` → **`playbackHqEnabledByLib: Record<string, number[]>`**；新增唯一读取口 `enabledVoicesOf(state)`（用 `hasOwnProperty` 区分"没配过"和"全消成空"）；新增 `replacePlaybackHqEnabledByLib`（导入收藏 v2 用）；**旧版单数组自动迁移**到默认库并删旧键；改 7 个调用点（docStore / ScriptToolbar / PreviewPane / PlaybackDialog / ExportPanel / VoicePickerDialog / SoundBankPanel） |
+| `src/playback/bankRegistry.ts` | 新增 `BankRow` / `buildBankRows`（已知库**永远在**、导入库追加在后）/ `libViewOfRecord`（用户库没有直链，不会出"注定失败"的下载按钮）/ `presetCountOf` |
+| `src/dialogs/SoundBankPanel.tsx` | **重写为三块**：① 音色库列表（行内 `[使用][下载并导入*][下载页*][从插件目录导入*][导出][删除*]` + 底部 `[添加音色库…]`）② 当前库的音色（已选/本库可选数 + 全选/指定/全消 + "另有 N 个变体/鼓组暂不可选"）③ 收藏导入导出（JSON v2） |
+| `src/dialogs/VoicePickerDialog.tsx` | 数据源改为**当前库的 presets**（只 bank 0）；每行 `GM 中文名 · 本库原始名`；本库音色表未读到时回退 GM 128 并**如实说明** |
+| `src/brand/copy.ts` | `voicePickerCopy.summary` 带库名；新增 `fallbackHint` |
+| `scripts/smoke.mts` | 新增 `[203]` 段 13 条；`adj581` 的标题断言跟着改成「音色库 / 当前库的音色」 |
+
+**几个刻意的取舍**（写下来免得以后当成 bug）：
+
+- 新库**不预置**收藏：`enabledVoicesOf` 对"没配过"的库回落常用 7 个，所以新库一上手就能试听；
+  点过「全消」之后就是空（不会又冒出来 7 个）。
+- 变体/鼓组（bank≠0）**只统计不开放**：行里写"另有 N 个"，不假装能选。
+- 收藏 JSON 导出 `version:2`（含每库一套），同时保留 `hqEnabled` 兼容字段；导入能读 v1/v2。
+- 覆盖同名库仍用 `window.confirm`（Phase 4 没做应用内确认框，避免动 `ui/Modal` 的层级）。
+
+实测输出（`npm run smoke`，退出码 0）：
+
+```
+[203] multi-library UI: rows / per-library favorites / picker (adj1012)
+  ✓ adj1012 收藏：**配过但全消** ⇒ 就是空（不能退回默认 7 个，否则「全消」点不动）
+  ✓ adj1012 列表：已知库**必定出现在列表里**（默认库永远第一行，即便还没下载）
+  ✓ adj1012 面板：**不再**写死默认库（`HQ_LIBRARIES[0]` 已清零）
+  ✓ adj1012 选择器：按当前库列音色（读 `record.presets`）并显示"中文名 + 本库原名"
+ALL SMOKE TESTS PASSED ✅
+```
+
+另跑过：`npx tsc -b` 0、`npx oxlint` 0 error、`npm run build` 0、`npm run verify:app-ui` **85 项全绿**。
+
+⚠ **仍然没验的两条**（和 Phase 2/3 一样，需要真机手点）：
+
+1. 真实 IndexedDB 的 v1→v2 升级；
+2. 两个新按钮的实际点击效果（`使用` 之后声音是否真的换、`添加音色库…` 选 141 MB 文件后的表现）。
+
+`verify:app-ui` 覆盖的是既有 85 项，**不含**音色库面板——这两条只能手点或另写一段 CDP 用例。
 
 ### Phase 5（另开会话）：Obsidian 插件同步
 - `vendor/engine` 逐字节同步 → 插件 `settings.ts` 的"音色库"改成列表 + 「导入为新库」；

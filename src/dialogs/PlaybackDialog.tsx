@@ -40,7 +40,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { ToolIcon } from '../ui/ToolIcon'
 import { useDocStore } from '../store/docStore'
-import { useUiStore } from '../store/uiStore'
+import { useUiStore, enabledVoicesOf } from '../store/uiStore'
 // adj729：嵌入版里音源优先取**插件目录**那份（宿主给的 URL；随文库一起走）
 import { hostBankUrl } from '../store/hostBridge'
 import { playbackCopy } from '../brand/copy'
@@ -89,7 +89,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   const setPlaybackStart = useUiStore((s) => s.setPlaybackStart)
   const playbackTick = useUiStore((s) => s.playbackTick)
   // adj332：已启用音色集合——试听音色下拉只列这些（避免 128 项全列）
-  const playbackHqEnabled = useUiStore((s) => s.playbackHqEnabled)
+  const playbackHqEnabled = useUiStore(enabledVoicesOf)
   const playbackHqVoice = useUiStore((s) => s.playbackHqVoice)
   const setPlaybackHqVoice = useUiStore((s) => s.setPlaybackHqVoice)
   /** adj1011：当前选中的音色库（L1 偏好）；库被删/换机器时自动回退默认库并标 fallback */

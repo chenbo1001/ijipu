@@ -23,8 +23,8 @@
  * `fingerprintOf` / `bankIdOf` / `readBankFile` / `planLegacyMigration` 是纯函数（smoke 直接断言）；
  * `openSoundfontDb` / `BankRegistry` / `migrateLegacyBanks` 才碰 IndexedDB（编排可注入假 IO 测）。
  */
-import type { Sf2Info, Sf2Preset } from '@ijipu/engine'
-import { isGitLfsPointer, isSf2, matchKnownLibrary, readSf2Info, readSf2Presets } from '@ijipu/engine'
+import type { HqSampleLibrary, Sf2Info, Sf2Preset } from '@ijipu/engine'
+import { HQ_LIBRARIES, isGitLfsPointer, isSf2, matchKnownLibrary, readSf2Info, readSf2Presets } from '@ijipu/engine'
 
 /** IndexedDB：音色库字节 + 元数据（v1 只有 `banks`；adj1010 起 v2 增 `libs`） */
 const DB_NAME = 'ijipu-soundfonts-hq'
@@ -150,8 +150,59 @@ export function readBankFile(
   }
 }
 
-/** 迁移的输入：`banks` 表里的一个旧键 + 它解析出来的元数据 */
-export interface LegacyBankEntry {
+// ───────────────────────────── 列表行（界面用；纯数据，smoke 可断言） ─────────────────────────────
+
+/** 音色库列表的一行：已知库**必定**出现（即便还没文件），用户导入的库追加在后面 */
+export interface BankRow {
+  lib: HqSampleLibrary
+  /** 元数据（没导入/没下载过就是 null） */
+  record: BankRecord | null
+  /** 是否属于 `HQ_LIBRARIES` 的已知库（否则是用户导入的新库） */
+  known: boolean
+}
+
+/**
+ * 把"只剩元数据、引擎里没有这条"的用户库包成 `HqSampleLibrary`，好让列表/界面一视同仁。
+ * `source` 留空、`autoDownload:false` ⇒ 界面上不会出现"下载并导入"这种注定失败的按钮。
+ */
+export function libViewOfRecord(rec: BankRecord): HqSampleLibrary {
+  return {
+    id: rec.id,
+    name: rec.name,
+    source: '',
+    sizeBytes: rec.sizeBytes,
+    format: rec.format,
+    autoDownload: false,
+    license: undefined,
+    downloadPage: undefined,
+    presetCount: rec.presets.length,
+  }
+}
+
+/**
+ * 列表行：**先按引擎的已知库顺序**（默认库永远在第一行），再接用户导入的库（按名字排）。
+ * 这样"当前用哪个/哪些能下"的顺序稳定，不会因为导入动作把列表抖得找不到北。
+ */
+export function buildBankRows(
+  records: readonly BankRecord[],
+  libs: readonly HqSampleLibrary[] = HQ_LIBRARIES,
+): BankRow[] {
+  const byId = new Map(records.map((r) => [r.id, r]))
+  const rows: BankRow[] = libs.map((lib) => ({ lib, record: byId.get(lib.id) ?? null, known: true }))
+  const extra = records
+    .filter((r) => !libs.some((l) => l.id === r.id))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  for (const rec of extra) rows.push({ lib: libViewOfRecord(rec), record: rec, known: false })
+  return rows
+}
+
+/** 这一行显示几个音色：有记录用真实值，没有就用已知库的实测值（还不知道就是 null） */
+export function presetCountOf(row: BankRow): number | null {
+  if (row.record) return row.record.presets.length
+  return row.lib.presetCount ?? null
+}
+
+/** 迁移的输入：`banks` 表里的一个旧键 + 它解析出来的元数据 */export interface LegacyBankEntry {
   /** 旧键（v1 时代就是库 id，但可能是"冒名"的，如 FluidR3 存在 generaluser_gs 下） */
   key: string
   fileName: string

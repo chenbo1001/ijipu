@@ -3,7 +3,7 @@
  */
 import './localStorageMigration'
 import { create } from 'zustand'
-import { clampEditorFontSize, normalizeFontStack } from '@ijipu/engine'
+import { clampEditorFontSize, normalizeFontStack, HQ_LIBRARIES, resolveActiveLibrary } from '@ijipu/engine'
 import { DEFAULT_THEME, DEFAULT_THEME_MODE, type ThemeMode } from '../brand/themes'
 // adj954：运行环境/设备判据统一走品牌层唯一出处（原先本文件自己写了一份 matchMedia）
 import { getRuntimeEnv, isCoarsePointerDevice } from '../brand/env'
@@ -118,7 +118,16 @@ const PLAYBACK_HQ_LIBRARY_KEY = 'ijipu.playbackHqLibrary'
  * （用户实测反馈）。此键仅用于**清理旧版本残留**。
  */
 const PLAYBACK_HQ_VOICE_KEY = 'ijipu.playbackHqVoice'
-const PLAYBACK_HQ_ENABLED_KEY = 'ijipu.playbackHqEnabled'
+/**
+ * adj1012：收藏音色**按库分开存**（`{ [库 id]: number[] }`）。
+ *
+ * 为什么必须分开：两个库的 program 名字不一样（实测同一份 128 个 program 里有 33 个名字不同），
+ * 共用一套会让人以为"我明明勾了长笛，怎么名字变了"；而且某个库缺某个 program 时，
+ * 共用一套会留下"勾了但库里没有"的悬空项。
+ */
+const PLAYBACK_HQ_ENABLED_BY_LIB_KEY = 'ijipu.playbackHqEnabledByLib'
+/** adj1012：旧版是**一个** `number[]`（那时只有一个库）——只在迁移时读它，读走即删 */
+const PLAYBACK_HQ_ENABLED_LEGACY_KEY = 'ijipu.playbackHqEnabled'
 /**
  * adj987（**用户 2026-10-18 需求**）：试听「练习段」的三项界面偏好（L1 本机，与谱无关）：
  *  · 循环开关（`practiceLoop`）——用户练一句时基本总想循环，记住它省一次点击；
@@ -145,6 +154,56 @@ const EXPORT_BG_IMAGE_KEY = 'ijipu.exportBgImage'
 export type ExportBg = 'none' | 'white' | 'paper'
 // adj347：默认启用的常用音色（初次用户打开试听即可选）——大钢琴/八音盒/小提琴/弦乐/小号/单簧管/长笛
 const DEFAULT_HQ_ENABLED: number[] = [0, 10, 40, 48, 56, 71, 73]
+/** 默认库 id（旧数据迁移的落点；库清单非空，兜底串只为类型安全） */
+const DEFAULT_HQ_LIB_ID = HQ_LIBRARIES[0]?.id ?? 'generaluser_gs'
+
+/** 合法 GM program 过滤（0–127 整数；越界/非数字一律丢弃——缓存可能被手改坏） */
+function sanitizePrograms(v: unknown): number[] | null {
+  if (!Array.isArray(v)) return null
+  return v.filter((n): n is number => Number.isInteger(n) && n >= 0 && n < 128)
+}
+
+/** 写 `{ [库 id]: number[] }` */
+function saveHqEnabledByLib(map: Record<string, number[]>): void {
+  try {
+    localStorage.setItem(PLAYBACK_HQ_ENABLED_BY_LIB_KEY, JSON.stringify(map))
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/**
+ * 读 `{ [库 id]: number[] }`（adj1012）——含**旧版单数组迁移**。
+ *
+ * 旧版（adj330–adj1011）只有一个库，所以那个数组的归属是确定的：默认库。
+ * 迁移时**先写新键、再删旧键**：中途崩溃也只会多读一次旧值，不会把用户的收藏弄丢。
+ */
+function loadHqEnabledByLib(): Record<string, number[]> {
+  const out: Record<string, number[]> = {}
+  try {
+    const raw = localStorage.getItem(PLAYBACK_HQ_ENABLED_BY_LIB_KEY)
+    if (raw !== null) {
+      const v: unknown = JSON.parse(raw)
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        for (const [k, arr] of Object.entries(v as Record<string, unknown>)) {
+          const list = sanitizePrograms(arr)
+          if (list) out[k] = list
+        }
+        return out
+      }
+    }
+    const legacy = localStorage.getItem(PLAYBACK_HQ_ENABLED_LEGACY_KEY)
+    if (legacy !== null) {
+      const list = sanitizePrograms(JSON.parse(legacy))
+      if (list) out[DEFAULT_HQ_LIB_ID] = list
+      saveHqEnabledByLib(out)
+      localStorage.removeItem(PLAYBACK_HQ_ENABLED_LEGACY_KEY)
+    }
+  } catch {
+    /* 缓存不可用/内容损坏：回退空表（读取时按库回落到默认 7 个） */
+  }
+  return out
+}
 
 function loadBool(key: string, def: boolean): boolean {
   try {
@@ -299,8 +358,9 @@ interface UiState {
   playbackHqLibrary: string
   /** adj330：SpessaSynth 全局音色（GM program；null=按声部名自动路由） */
   playbackHqVoice: number | null
-  /** adj332：已启用（收藏）的音色 GM program 集合——试听只列这些，避免 128 项全列 */
-  playbackHqEnabled: number[]
+  /** adj332/adj1012：**每个库一套**已启用（收藏）的音色 program —— 试听只列这些。
+   *  键=库 id；读一律走 `enabledVoicesOf(state)`（它会解析"当前库"并处理默认值）。 */
+  playbackHqEnabledByLib: Record<string, number[]>
   /* ---- adj987（用户 2026-10-18 需求）：试听「练习段」 ---- */
   /** 当前文档的练习段（按文档缓存载入；`[]` = 只有「无」） */
   practiceMarks: PracticeMark[]
@@ -463,8 +523,10 @@ interface UiState {
   setPlaybackHqVoice: (program: number | null) => void
   /** adj332：切换某音色是否启用（收藏），试听只列启用的 */
   togglePlaybackHqVoice: (program: number) => void
-  /** adj340：批量设置已启用音色集合（导入音色配置用） */
+  /** adj340：批量设置**当前库**的启用音色集合（全选/全消/导入音色配置用） */
   setPlaybackHqEnabled: (programs: number[]) => void
+  /** adj1012：整份替换"每库收藏"（导入收藏 JSON 用；逐库做合法性过滤） */
+  replacePlaybackHqEnabledByLib: (map: Record<string, number[]>) => void
   /* ---- adj987（用户 2026-10-18 需求）：试听「练习段」 ---- */
   /** 换一整批标记（打开文档 / 文档切换时由对话框载入） */
   setPracticeMarks: (marks: PracticeMark[]) => void
@@ -579,6 +641,23 @@ export interface AskState {
   extra?: { label: string; run: () => void }
 }
 
+/**
+ * adj1012：**当前库**的启用音色（全应用唯一的读取口）。
+ *
+ * 三件事收在这一处，避免 6 个调用点各自"猜"：
+ *  ① 先把 `playbackHqLibrary` 解析成真正的库 id（空/失效会回退默认库，见 `resolveActiveLibrary`）；
+ *  ② 该库**从没配过** ⇒ 回落常用 7 个（`DEFAULT_HQ_ENABLED`）；配过但**全消** ⇒ 就是空数组
+ *     （用 `hasOwnProperty` 区分"没配过"和"配成空"——写成 `?? DEFAULT` 会让"全消"点不动）；
+ *  ③ 返回的数组引用稳定（来自 state 或模块常量）⇒ zustand 选择器不会每次都判"变了"。
+ */
+export function enabledVoicesOf(
+  s: Pick<UiState, 'playbackHqEnabledByLib' | 'playbackHqLibrary'>,
+): number[] {
+  const libId = resolveActiveLibrary(s.playbackHqLibrary).lib.id
+  const map = s.playbackHqEnabledByLib
+  return Object.prototype.hasOwnProperty.call(map, libId) ? (map[libId] ?? []) : DEFAULT_HQ_ENABLED
+}
+
 export const useUiStore = create<UiState>()((set) => ({
   modal: null,
   playbackStartId: null,
@@ -642,17 +721,8 @@ export const useUiStore = create<UiState>()((set) => ({
     }
     return null
   })() as number | null,
-  // adj332/347：已启用音色集合（试听只列这些）；首次/损坏回退默认常用音色
-  playbackHqEnabled: (() => {
-    try {
-      const raw = localStorage.getItem(PLAYBACK_HQ_ENABLED_KEY)
-      if (raw === null) return DEFAULT_HQ_ENABLED // 首次：默认常用音色
-      const v = JSON.parse(raw)
-      return Array.isArray(v) ? v.filter((n) => Number.isInteger(n) && n >= 0 && n < 128) : DEFAULT_HQ_ENABLED
-    } catch {
-      return DEFAULT_HQ_ENABLED
-    }
-  })(),
+  // adj332/347：已启用音色集合（试听只列这些）；按库分开存，读取走 `enabledVoicesOf`
+  playbackHqEnabledByLib: loadHqEnabledByLib(),
   openModal: (m) => set({ modal: m }),
   // adj728：一次性"跳到某个设置页签"的意图（见接口处说明；由 PageConfigDialog 消费）
   settingsTab: null,
@@ -776,28 +846,36 @@ export const useUiStore = create<UiState>()((set) => ({
   },
   /** adj448：会话级（不落盘）——每次打开试听都从「自动」开始，见 PlaybackDialog 的挂载重置 */
   setPlaybackHqVoice: (program) => set({ playbackHqVoice: program }),
-  // adj332：切换音色启用（收藏），持久化数组
+  // adj332/adj1012：切换音色启用（收藏）——只改**当前库**那一份
   togglePlaybackHqVoice: (program) =>
     set((s) => {
-      const has = s.playbackHqEnabled.includes(program)
-      const next = has ? s.playbackHqEnabled.filter((n) => n !== program) : [...s.playbackHqEnabled, program]
-      try {
-        localStorage.setItem(PLAYBACK_HQ_ENABLED_KEY, JSON.stringify(next))
-      } catch {
-        /* 忽略 */
-      }
-      return { playbackHqEnabled: next }
+      const libId = resolveActiveLibrary(s.playbackHqLibrary).lib.id
+      const cur = enabledVoicesOf(s)
+      const next = cur.includes(program) ? cur.filter((n) => n !== program) : [...cur, program]
+      const map = { ...s.playbackHqEnabledByLib, [libId]: next }
+      saveHqEnabledByLib(map)
+      return { playbackHqEnabledByLib: map }
     }),
-  // adj340：批量设置已启用音色（导入），持久化
-  setPlaybackHqEnabled: (programs) => {
-    const next = programs.filter((n) => Number.isInteger(n) && n >= 0 && n < 128)
-    try {
-      localStorage.setItem(PLAYBACK_HQ_ENABLED_KEY, JSON.stringify(next))
-    } catch {
-      /* 忽略 */
-    }
-    set({ playbackHqEnabled: next })
-  },
+  // adj340/adj1012：批量设置**当前库**的启用音色（全选/全消/导入），持久化
+  setPlaybackHqEnabled: (programs) =>
+    set((s) => {
+      const libId = resolveActiveLibrary(s.playbackHqLibrary).lib.id
+      const next = (sanitizePrograms(programs) ?? []).slice()
+      const map = { ...s.playbackHqEnabledByLib, [libId]: next }
+      saveHqEnabledByLib(map)
+      return { playbackHqEnabledByLib: map }
+    }),
+  // adj1012：整份替换（导入收藏 JSON v2）——逐库过滤越界/非整数，坏数据不落盘
+  replacePlaybackHqEnabledByLib: (incoming) =>
+    set(() => {
+      const map: Record<string, number[]> = {}
+      for (const [key, value] of Object.entries(incoming ?? {})) {
+        const list = sanitizePrograms(value)
+        if (list) map[key] = list
+      }
+      saveHqEnabledByLib(map)
+      return { playbackHqEnabledByLib: map }
+    }),
   // adj1000：默认「轻」（用户指定）；缓存里的非法值一律回退 light
   previewSoften: ((): PreviewSoften => {
     try {

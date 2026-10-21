@@ -1,71 +1,113 @@
 /**
- * dialogs/VoicePickerDialog.tsx — 试听音色选择对话框（adj509：从音色库内联展开拆出）
+ * dialogs/VoicePickerDialog.tsx — 试听音色选择对话框（adj509 拆出；adj1012 改为**按当前库**列音色）
  *
- * 原 SoundBankPanel 内嵌的「库内音色（128 种）」展开列表被移到这里——
- * · 在音色库面板里点「指定音色」按钮即弹出本对话框（独立浮窗，遮罩 + 标题栏 + ✕）；
- * · 顶部给「全选 / 全消 / 反选 / 搜索」四个快捷操作，主体是 128 种 GM 音色复选框列表
- *   （按 GM 音色类别「钢琴/打击/风琴/吉他/贝斯/弦乐/铜管/簧管/笛/合成」分 10 组展开，每组
- *   单独有「选本组 / 消本组」），底部一行汇总已选数。
- * · 属**本机用户偏好（L1）**：与库行的 playbackHqEnabled 同源，不随谱保存。
+ * ## adj1012 改了什么
+ *
+ * 旧版列的是引擎里那张**写死的 GM 128 条中文名**，与"当前用哪个库"无关 ⇒ 切了库，名字还是老库的。
+ * 现在数据源是**当前库的预设表**（`libs` 表里的 `presets`，只取 bank 0）：
+ *  · 每行显示 `GM 中文名 · 本库原始名`（`073 长笛 · Flute`）——中文名是**谱面能写的名字**，
+ *    原始名是**这个库里实际叫什么**，两者都要能看到；
+ *  · 本库没有的 program ⇒ 不出现（不是灰掉：灰 128 行里的大半反而更难找）；
+ *  · 库里音色表还没读到（未下载/未导入）⇒ 回退 GM 标准 128 个，并在顶部如实说明。
+ *
+ * 勾选仍然存 **program**（语义层，跨库稳定，`Y:` 的解析不受影响）；存哪一份由 store 的
+ * `enabledVoicesOf` 决定 —— **每个库一套**。
  */
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../ui/Modal'
-import { useUiStore } from '../store/uiStore'
+import { useUiStore, enabledVoicesOf } from '../store/uiStore'
 import { voicePickerCopy } from '../brand/copy'
-import { GM_VOICE_OPTIONS } from '../playback/spessaSynthBackend'
+import { GM_VOICE_OPTIONS, resolveActiveLibrary } from '../playback/spessaSynthBackend'
+import { createBankRegistry, type BankRecord } from '../playback/bankRegistry'
 import { GM_GROUPS } from '@ijipu/engine'
-import type { GmVoice } from '@ijipu/engine'
-
-/**
- * GM 音色分类（14 类）——adj631 起**收敛到引擎** `GM_GROUPS`（唯一来源），
- * Obsidian 插件的「音色库 → 收藏音色」用同一张表（流式分类列表），两处不再各写一份。
- */
 
 const HIGHLIGHT = 'var(--jp-text-muted)'
 
+/** 一行可选音色 */
+interface PickerRow {
+  program: number
+  /** GM 中文名（谱面 `Y:` 能写的那个名字） */
+  zh: string
+  /** 本库原始名（可能没有：音色表没读到时） */
+  libName?: string
+}
+
+/** program → 中文名（去掉显示编号，如 `73 长笛` → `长笛`） */
+function zhNameOf(program: number): string {
+  const v = GM_VOICE_OPTIONS.find((x) => x.program === program)
+  return v ? v.label.replace(/^\d+\s+/, '') : `音色 ${program}`
+}
+
 export function VoicePickerDialog() {
-  const enabled = useUiStore((s) => s.playbackHqEnabled)
+  const enabled = useUiStore(enabledVoicesOf)
+  const hqLibrary = useUiStore((s) => s.playbackHqLibrary)
   const toggle = useUiStore((s) => s.togglePlaybackHqVoice)
   const setPlaybackHqEnabled = useUiStore((s) => s.setPlaybackHqEnabled)
   const closeModal = useUiStore((s) => s.closeModal)
-  /** 关键词过滤（按音色中文名包含即留空） */
   const [keyword, setKeyword] = useState('')
   /** 折叠/展开状态：默认全展开 */
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const searchRef = useRef<HTMLInputElement | null>(null)
+  /** adj1012：当前库的元数据（含预设表）；null = 还没读到 */
+  const [record, setRecord] = useState<BankRecord | null>(null)
+  const active = useMemo(() => resolveActiveLibrary(hqLibrary), [hqLibrary])
+  const lib = active.lib
+  const registry = useRef(createBankRegistry())
 
-  /** 按关键词过滤后的音色表（不分组；用于平铺视图） */
+  useEffect(() => {
+    let alive = true
+    void registry.current.get(lib.id).then((r) => {
+      if (alive) setRecord(r)
+    })
+    return () => {
+      alive = false
+    }
+  }, [lib.id])
+
+  /** 本库可选音色：有预设表就用它（只 bank 0），否则回退 GM 标准 128 个 */
+  const rows = useMemo<PickerRow[]>(() => {
+    const bank0 = record ? record.presets.filter((p) => p.bank === 0) : []
+    if (bank0.length > 0) {
+      return bank0
+        .map((p) => ({ program: p.program, zh: zhNameOf(p.program), libName: p.name }))
+        .sort((a, b) => a.program - b.program)
+    }
+    return GM_VOICE_OPTIONS.map((v) => ({ program: v.program, zh: zhNameOf(v.program) }))
+  }, [record])
+
+  /** 按关键词过滤（中文名或本库原名，大小写不敏感） */
   const filtered = useMemo(() => {
-    const k = keyword.trim()
-    if (!k) return GM_VOICE_OPTIONS
-    return GM_VOICE_OPTIONS.filter((v) => v.label.includes(k))
-  }, [keyword])
+    const k = keyword.trim().toLowerCase()
+    if (!k) return rows
+    return rows.filter((r) => r.zh.toLowerCase().includes(k) || (r.libName ?? '').toLowerCase().includes(k))
+  }, [rows, keyword])
 
-  /** 顶部四个快捷操作 */
-  const selectAll = () => setPlaybackHqEnabled(GM_VOICE_OPTIONS.map((v) => v.program))
+  /** 顶部三个快捷操作——**只作用于本库可选的 program**（不能把库里没有的勾进来） */
+  const selectAll = () => setPlaybackHqEnabled(rows.map((r) => r.program))
   const clearAll = () => setPlaybackHqEnabled([])
   const invert = () => {
     const set = new Set(enabled)
-    setPlaybackHqEnabled(GM_VOICE_OPTIONS.map((v) => v.program).filter((p) => !set.has(p)))
+    setPlaybackHqEnabled(rows.map((r) => r.program).filter((p) => !set.has(p)))
   }
 
-  /** 单组「选本组 / 消本组」——按当前 group.range 内的 program 算 */
+  /** 单组「选本组 / 消本组」——按当前行集和 GM 分组区间算 */
+  const groupRows = (range: [number, number]): PickerRow[] =>
+    rows.filter((r) => r.program >= range[0] && r.program <= range[1])
   const selectGroup = (range: [number, number]) => {
-    const programs = GM_VOICE_OPTIONS.filter((v) => v.program >= range[0] && v.program <= range[1]).map((v) => v.program)
     const set = new Set(enabled)
-    setPlaybackHqEnabled([...enabled, ...programs.filter((p) => !set.has(p))])
+    setPlaybackHqEnabled([...enabled, ...groupRows(range).map((r) => r.program).filter((p) => !set.has(p))])
   }
   const clearGroup = (range: [number, number]) => {
     setPlaybackHqEnabled(enabled.filter((p) => p < range[0] || p > range[1]))
   }
 
-  /** 渲染单条音色复选项 */
-  const row = (v: GmVoice) => (
+  /** 渲染单条音色复选项（双行：中文名 + 本库原始名） */
+  const row = (v: PickerRow) => (
     <label
       key={v.program}
       style={{
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'baseline',
         gap: 6,
         fontSize: 12,
         lineHeight: 1.7,
@@ -79,16 +121,17 @@ export function VoicePickerDialog() {
       <span style={{ color: HIGHLIGHT, fontSize: 10, width: 28, flexShrink: 0, fontFamily: 'var(--jp-font-mono)' }}>
         {String(v.program).padStart(3, '0')}
       </span>
-      <span>{v.label}</span>
+      <span>{v.zh}</span>
+      {v.libName && (
+        <span style={{ color: HIGHLIGHT, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          · {v.libName}
+        </span>
+      )}
     </label>
   )
 
   return (
-    <Modal
-      title={voicePickerCopy.title}
-      width="min(560px, 100%)"
-      onClose={() => closeModal()}
-    >
+    <Modal title={voicePickerCopy.title} width="min(560px, 100%)" onClose={() => closeModal()}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
         {/* 顶部工具条：快捷操作 + 搜索框 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -115,8 +158,10 @@ export function VoicePickerDialog() {
           />
         </div>
         <div style={{ color: HIGHLIGHT, fontSize: 11 }}>
-          {voicePickerCopy.summary(enabled.length, GM_VOICE_OPTIONS.length)}
+          {voicePickerCopy.summary(enabled.length, rows.length, lib.name)}
         </div>
+        {/* adj1012：本库音色表还没读到 ⇒ 如实说明下面是 GM 标准名（而不是假装这就是本库的音色） */}
+        {!record && <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>{voicePickerCopy.fallbackHint}</div>}
 
         {/* 主体：分组列表（无关键词时）或平铺列表（有过滤时） */}
         <div style={{ maxHeight: 'min(420px, 60vh)', overflow: 'auto', border: '1px solid var(--jp-border)', borderRadius: 6, padding: '4px 6px' }}>
@@ -124,8 +169,10 @@ export function VoicePickerDialog() {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 6px' }}>{filtered.map(row)}</div>
           ) : (
             GM_GROUPS.map((g) => {
+              const groupVoices = groupRows(g.range)
+              // 本库缺这个音色组时整组不显示（空组只是噪音）
+              if (groupVoices.length === 0) return null
               const isCollapsed = !!collapsed[g.title]
-              const groupVoices = GM_VOICE_OPTIONS.filter((v) => v.program >= g.range[0] && v.program <= g.range[1])
               const selectedInGroup = groupVoices.filter((v) => enabled.includes(v.program)).length
               return (
                 <div key={g.title} style={{ marginBottom: 4 }}>

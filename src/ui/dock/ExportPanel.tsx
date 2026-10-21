@@ -18,7 +18,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useDocStore } from '../../store/docStore'
 // adj965（方案 OVL，EP-10）：水印/背景资源（与预览/打印共用同一份）
 import { withOverlay } from '../../store/overlayAssets'
-import { useUiStore } from '../../store/uiStore'
+import { useUiStore, enabledVoicesOf } from '../../store/uiStore'
 import { exportCopy } from '../../brand/copy'
 import { layoutScore, renderScoreToSvg, buildPlaySequence, inferBpm, eventsToMidi, rangeBox, applyRangeToSvg, readViewBoxOf } from '@ijipu/engine'
 import type { ExportRange } from '@ijipu/engine'
@@ -67,7 +67,7 @@ export function ExportPanel() {
   const parseResult = useDocStore((s) => s.parseResult)
   const pageConfig = useDocStore((s) => s.pageConfig)
   // adj354：@@ 恢复默认音色——无 Y 时用试听音色列表第一个启用音色（MIDI/音频导出与试听一致）
-  const playbackHqEnabled = useUiStore((s) => s.playbackHqEnabled)
+  const playbackHqEnabled = useUiStore(enabledVoicesOf)
   // adj1011：导出音频/每次渲染都用**当前选中的音色库**（与试听同一个判据）
   const playbackHqLibrary = useUiStore((s) => s.playbackHqLibrary)
   // adj1002：导出背景（底色 / 是否带背景图，两项独立，L1）；纸色档位来自 previewSoften

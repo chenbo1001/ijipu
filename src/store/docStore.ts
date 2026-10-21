@@ -34,7 +34,7 @@ import {
 import { isCoarsePointerDevice, getRuntimeEnv } from '../brand/env'
 // adj966：文件宿主能力与降级决策（纯函数；"要不要引导持久权限"也在这里判）
 import { hostProfile, shouldGuidePersistPermission, type PermState } from './fileHost'
-import { useUiStore } from './uiStore'
+import { useUiStore, enabledVoicesOf } from './uiStore'
 // adj724b：`shouldYieldBindingRestore` 用于"给宿主的 openFile 让路"（见文件末尾）
 import { isHostEmbedded, shouldYieldBindingRestore } from './hostBridge'
 import { loadFontOverride, migrateLegacyEditorPrefs, hasShownPermGuide, markPermGuideShown } from './editorPrefs'
@@ -89,7 +89,7 @@ export type ViewType = 'code' | 'split' | 'splitH' | 'splitHE' | 'preview'
  */
 function currentPrintPages(s: DocState): string[] {
   if (s.parseResult.errors.some((e) => e.severity === 'error')) return []
-  const instrumentRef = firstEnabledInstrumentRef(useUiStore.getState().playbackHqEnabled)
+  const instrumentRef = firstEnabledInstrumentRef(enabledVoicesOf(useUiStore.getState()))
   // adj647：打印与预览共用同一份宿主实测（否则打印出来的角标间距/占宽与预览不一致）
   const fm = measureFontMeta(s.pageConfig)
   // adj965（方案 OVL，EP-10）：打印与预览/导出**共用同一份**水印/背景资源

@@ -693,9 +693,11 @@ export const voicePickerCopy = {
   title: '指定试听音色',
   /** 搜索框 placeholder */
   searchPlaceholder: '按名称搜索',
-  /** 顶部统计行 */
-  summary: (selected: number, total: number): string =>
-    `已选 ${selected} / ${total} 种 GM 音色（仅勾选项进入「试听」面板的音色下拉）。`,
+  /** 顶部统计行；adj1012：带上"当前库"——同一个 program 在不同库里名字不同，不写库名会让人以为选错了 */
+  summary: (selected: number, total: number, libName?: string): string =>
+    `已选 ${selected} / ${total} 个音色${libName ? `（本库：${libName}）` : ''}（仅勾选项进入「试听」面板的音色下拉）。`,
+  /** adj1012：本库音色表还没读到时，如实说明下面是 GM 标准名 */
+  fallbackHint: '还没读到这个库的音色表（先在「音色库」里下载/导入它）——下面按 GM 标准 128 个显示。',
   /** 快捷按钮 */
   selectAll: '全选',
   clearAll: '全消',

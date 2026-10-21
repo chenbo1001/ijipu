@@ -7,7 +7,7 @@
  */
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useDocStore } from '../store/docStore'
-import { useUiStore } from '../store/uiStore'
+import { useUiStore, enabledVoicesOf } from '../store/uiStore'
 // adj529：预览页基准宽（与顶栏"双击比率按宽度适配"的反算算式同源）
 import { PREVIEW_BASE_W, isFullyVisibleIn } from './zoomFit'
 // adj987h（用户需求）：试听「标记段」的标记线覆盖层
@@ -125,7 +125,7 @@ export function PreviewPane() {
   // "打开并聚焦"；不能是"开关"，否则试听已开着时会被收起来）
   const requestDockPanel = useUiStore((s) => s.requestDockPanel)
   // adj354：@@ 显示默认音色名——无 Y 时用试听音色列表第一个启用音色（与播放端一致）
-  const playbackHqEnabled = useUiStore((s) => s.playbackHqEnabled)
+  const playbackHqEnabled = useUiStore(enabledVoicesOf)
   const defaultInstrumentRef = useMemo(() => firstEnabledInstrumentRef(playbackHqEnabled), [playbackHqEnabled])
   // adj908：整份启用音色列表（与试听同一个来源）——没写 `Y:` 的声部按序取音色，
   // 使 `showInstrument` 标注的默认乐器名与实际演奏的音色一致（两处共用引擎的同一个纯函数）
