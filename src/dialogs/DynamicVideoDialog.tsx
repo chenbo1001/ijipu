@@ -18,6 +18,10 @@ import { useUiStore } from '../store/uiStore'
 import { dynamicVideoCopy } from '../brand/copy'
 import { createDynamicSession, type DynamicSession } from '../export/video/renderer'
 import { encodeMp4 } from '../export/video/mp4'
+import { renderToAudioBuffer } from '../export/audio'
+import { createHqCache, resolveHqBank } from '../playback/spessaCache'
+import { resolveActiveLibrary } from '../playback/spessaSynthBackend'
+import { hostBankUrl } from '../store/hostBridge'
 
 const PRESET_IDS: DynamicPresetId[] = ['9x16', '1x1', '16x9']
 
@@ -32,6 +36,10 @@ export function DynamicVideoDialog() {
   const [playing, setPlaying] = useState(false)
   const [encoding, setEncoding] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [phase, setPhase] = useState('')
+  /** 是否带声音（默认带；音源拿不到时降级为无声并提示） */
+  const [withAudio, setWithAudio] = useState(true)
+  const cacheRef = useRef<ReturnType<typeof createHqCache> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -129,7 +137,27 @@ export function DynamicVideoDialog() {
     const ac = new AbortController()
     abortRef.current = ac
     try {
-      const blob = await encodeMp4(s, { fps: 30, maxMs: 180_000, signal: ac.signal, onProgress: setProgress })
+      // 音轨：与画面同一份事件序列、同一个 bpm（离线渲染 ⇒ 长度确定，不随机器快慢）
+      let audio: AudioBuffer | null = null
+      if (withAudio) {
+        setPhase('正在渲染音轨…')
+        try {
+          const lib = resolveActiveLibrary(useUiStore.getState().playbackHqLibrary).lib
+          const cache = (cacheRef.current ??= createHqCache())
+          const { bank } = await resolveHqBank(lib, cache, hostBankUrl(lib.id))
+          audio = await renderToAudioBuffer(s.events, bank, { bpm: s.bpm })
+        } catch (e) {
+          setError(`音轨没渲染成，本次导出无声：${e instanceof Error ? e.message : String(e)}`)
+        }
+      }
+      setPhase('正在编码画面…')
+      const blob = await encodeMp4(s, {
+        fps: 30,
+        maxMs: 180_000,
+        audio,
+        signal: ac.signal,
+        onProgress: setProgress,
+      })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -142,6 +170,7 @@ export function DynamicVideoDialog() {
       }
     } finally {
       setEncoding(false)
+      setPhase('')
       abortRef.current = null
     }
   }
@@ -214,16 +243,26 @@ export function DynamicVideoDialog() {
           >
             在预览区看取景
           </button>
+          <label className="dock-field">
+            <input
+              type="checkbox"
+              checked={withAudio}
+              disabled={encoding}
+              onChange={(e) => setWithAudio(e.target.checked)}
+            />
+            <span>带声音</span>
+          </label>
           <button
             type="button"
             className="btn"
             onClick={encoding ? () => abortRef.current?.abort() : exportVideo}
             disabled={status !== 'ready'}
-            title="逐帧编码为 MP4（上限 3 分钟；无声版，音轨随后）"
+            title="逐帧编码为 MP4（上限 3 分钟）"
           >
             {encoding ? `取消（${Math.round(progress * 100)}%）` : dynamicVideoCopy.exportMp4}
           </button>
-          <span className="dock-muted">{dynamicVideoCopy.noSound}</span>
+          <span className="dock-muted">{encoding ? phase : dynamicVideoCopy.audioHint}</span>
+          {error && !encoding && <span className="dock-error">✗ {error}</span>}
         </div>
       </div>
     </Modal>

@@ -34,7 +34,7 @@
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
-    "mp4-muxer": "^5.2.2",
+    "mediabunny": "^1.62.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "spessasynth_core": "^4.3.22",

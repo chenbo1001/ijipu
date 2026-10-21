@@ -31,6 +31,7 @@ import {
   type PageConfig,
   type CameraFrame,
   type CameraTrack,
+  type PlayEvent,
 } from '@ijipu/engine'
 import { svgToCanvas } from '../export'
 
@@ -55,6 +56,10 @@ export interface DynamicSession {
   totalMs: number
   width: number
   height: number
+  /** 播放事件（给音轨离线渲染用，与画面同一份序列） */
+  events: PlayEvent[]
+  /** 拍速（音轨渲染要用同一个值，否则音画对不上） */
+  bpm: number
   /** 画一帧，返回相机位置与"是否在跟拍"（供界面显示） */
   draw: (ctx: DrawCtx, tMs: number) => { frame: CameraFrame; following: boolean }
 }
@@ -153,6 +158,8 @@ export async function createDynamicSession(
     totalMs: track.endMs,
     width: camera.viewW,
     height: camera.viewH,
+    events: seq.events,
+    bpm: beat,
     draw,
   }
 }

@@ -119,13 +119,32 @@ void rebuild(presetSel.value as DynamicPresetId).catch((e) => {
 
 /**
  * 调试用：编一小段 MP4 并回报体积与文件头（`ftyp`）。
- * 从控制台/CDP 调：`await window.__testMp4(3)`
+ * 从控制台/CDP 调：`await window.__testMp4(3)`；带音频：`__testMp4(3, true)`
  */
-;(window as unknown as { __testMp4: (sec?: number) => Promise<unknown> }).__testMp4 = async (sec = 3) => {
+;(window as unknown as { __testMp4: (sec?: number, withAudio?: boolean) => Promise<unknown> }).__testMp4 = async (
+  sec = 3,
+  withAudio = false,
+) => {
   if (!session) throw new Error('还没有会话')
+  let audio: AudioBuffer | null = null
+  if (withAudio) {
+    // 合成一段正弦当"音轨"，专门验 AAC 能不能进 MP4（不碰音色库）
+    const sr = 44100
+    const oac = new OfflineAudioContext(2, Math.ceil(sr * sec), sr)
+    const osc = oac.createOscillator()
+    const gain = oac.createGain()
+    gain.gain.value = 0.2
+    osc.frequency.value = 440
+    osc.connect(gain).connect(oac.destination)
+    osc.start(0)
+    audio = await oac.startRendering()
+  }
   const t0 = performance.now()
-  const blob = await encodeMp4(session, { fps: 30, maxMs: sec * 1000 })
+  const blob = await encodeMp4(session, { fps: 30, maxMs: sec * 1000, audio })
   const head = new Uint8Array(await blob.slice(0, 12).arrayBuffer())
   const magic = String.fromCharCode(...head.slice(4, 8))
-  return { size: blob.size, magic, ms: Math.round(performance.now() - t0) }
+  // 扫一遍容器里有没有音频轨（fastStart 下 moov 在前，但小文件直接全扫也很快）
+  const all = new Uint8Array(await blob.arrayBuffer())
+  const text = new TextDecoder('latin1').decode(all)
+  return { size: blob.size, magic, ms: Math.round(performance.now() - t0), audio: !!audio, hasAudioTrack: text.includes('mp4a') }
 }
