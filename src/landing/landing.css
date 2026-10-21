@@ -545,39 +545,5 @@ html[data-site-mode='light'] .jps-block-preview svg { border: 1px solid var(--si
   .topbar-burger { margin-left: 10px; }
 }
 
-/* ── adj1023：音色库推荐（官网）────────────────────────────────────────────
-   用户口径「少即是多」：介绍与评价放官网，应用里只留"下载基础库 + 添加音色库"。
-   所以这里只是两块卡片 + 三条安装步骤，不做对比表、不放截图。 */
-.soundfonts { padding-bottom: 64px; }
-.soundfonts h2 { text-align: center; margin-bottom: 12px; }
-.soundfonts h3 { margin: 26px 0 10px; font-size: 18px; }
-.sf-lead {
-  max-width: 720px; margin: 0 auto 26px; text-align: center;
-  font-size: 14.5px; line-height: 1.75; color: var(--site-text-2);
-}
-.sf-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
-.sf-table-wrap { overflow-x: auto; }
-.sf-table { width: 100%; border-collapse: collapse; font-size: 13.5px; line-height: 1.7; }
-.sf-table th, .sf-table td {
-  text-align: left; vertical-align: top; padding: 10px 12px;
-  border-bottom: 1px solid var(--site-border); color: var(--site-text-2);
-}
-.sf-table th { color: var(--site-text); font-weight: 600; white-space: nowrap; }
-.sf-table td:first-child { color: var(--site-text); white-space: nowrap; }
-.sf-table a { color: var(--site-accent); white-space: nowrap; }
-.sf-card {
-  border: 1px solid var(--site-border); border-radius: 12px; padding: 16px 18px;
-  background: var(--site-card); display: flex; flex-direction: column; gap: 8px;
-}
-.sf-card h3 { margin: 0; font-size: 17px; }
-.sf-tag {
-  margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600;
-  color: var(--site-accent); border: 1px solid var(--site-accent);
-}
-.sf-card p { margin: 0; font-size: 13.5px; line-height: 1.7; color: var(--site-text-2); }
-.sf-card .sf-meta { font-size: 12.5px; color: var(--site-muted); }
-.sf-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 4px; }
-.sf-hint { font-size: 12px; color: var(--site-muted); }
-.sf-steps { max-width: 720px; margin: 0; padding-left: 20px; font-size: 13.5px; line-height: 1.9; color: var(--site-text-2); }
-.sf-steps code { font-size: 12.5px; }
-.sf-note { max-width: 720px; margin: 18px 0 0; font-size: 12.5px; line-height: 1.8; color: var(--site-muted); }
+/* adj1027：上一版放在首页的「音色库推荐」样式（`.sf-*`，约 40 行死代码）已随迁移删除。
+   该页现在是独立文档页 `/soundfonts/`，样式走 `src/docs/docs.css`，首页不再需要这些规则。 */

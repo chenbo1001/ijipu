@@ -21373,6 +21373,18 @@ async function runAdj1016Tests() {
   }
   check('adj1023 应用里的"更多库"链接指向独立页 `/soundfonts/`（不再用首页锚点）',
     /siteUrl\}\/soundfonts\//.test(panel))
+  /**
+   * adj1027（用户 2026-10-21「其它四个文档页的顶栏可以加」）：
+   * 五个文档页的 `.doc-switch` 里都要有「音色库推荐」⇒ 用户从任何一页都能过去。
+   */
+  check('adj1027 五个文档页顶栏都链到 `/soundfonts/`（手册 / 语法 / 插件 / 命令行 / 推荐页自身）',
+    ['manual', 'syntax', 'plugin', 'cli', 'soundfonts'].every((f) =>
+      /<nav class="doc-switch">[\s\S]*?<a href="\/soundfonts\/">音色库推荐<\/a>/.test(
+        String(readFileSync(join(root, f, 'index.html'), 'utf8')),
+      ),
+    ))
+  check('adj1027 首页那份已经迁走的 `.sf-*` 死样式已删除（不留两套样式）',
+    !/\.sf-table|\.sf-card|\.sf-note/.test(String(readFileSync(join(root, 'src', 'landing', 'landing.css'), 'utf8'))))
   check('adj1018 空状态写明"基础音色库需要先下载，否则没有声音"',
     /还没有安装任何音色库/.test(panel) && /基础音色库需要先下载/.test(panel))
   check('adj1018 文件不在了的库**单列一组**（重新扫描 / 删除记录），不混进已安装列表',
