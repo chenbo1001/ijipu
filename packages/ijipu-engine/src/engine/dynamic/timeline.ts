@@ -83,6 +83,7 @@ export function buildRectTrack(seq: PlaySequence, opts: RectTrackOptions = {}): 
         y: yTop,
         w: s.width,
         h: Math.max(1, yBottom - yTop),
+        baselineY: s.y,
         voice: s.voice,
         group: s.group,
         ...(s.instrument !== undefined ? { instrument: s.instrument } : {}),

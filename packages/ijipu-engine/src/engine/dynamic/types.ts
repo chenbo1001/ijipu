@@ -27,6 +27,13 @@ export interface TimedRect {
   y: number
   w: number
   h: number
+  /**
+   * 该音符的**基线 y**（= `PlayheadSeg.y`）。
+   *
+   * 为什么要单独留一份：`y` 是矩形上沿，可能被 `yTopMin` 改过（多声部/临时段），
+   * 从 `y` 反推基线就不再可靠；而行归属必须按基线判，否则多声部里上下两排会被分到不同的行。
+   */
+  baselineY: number
   voice: number
   group: number
   /** 该段所用乐器（色块按音色着色，见 `playback/playhead.ts`） */
@@ -53,4 +60,61 @@ export interface RectTrack {
   endMs: number
   /** 参与建轨的拍段总数（含被丢弃的零时长段，仅供排查） */
   segCount: number
+}
+
+/**
+ * 流式视图的一行 = 条带上的一"段"。
+ *
+ * 只记「**从哪一页的哪一段取图、贴到条带哪个位置**」，不存重排后的音符：
+ *  - 反复时同一段音乐出现多次 ⇒ 多条 `FlowRow` 指向**同一组** `srcTop/srcBottom`，
+ *    `stripY` 与 `pass` 不同。这样反复展开不用复制任何几何数据，也不额外占位图内存。
+ *  - 行边界取相邻行中缝，所以各行的取图区间**不重叠、不漏**。
+ */
+export interface FlowRow {
+  index: number
+  pageIndex: number
+  /** 页面坐标系里的取图区间（渲染时按它裁） */
+  srcTop: number
+  srcBottom: number
+  /** 贴到条带上的纵坐标（条带坐标 = 页面 y 平移后的结果） */
+  stripY: number
+  /** 这一行在时间轴上的起止（含反复展开后的这一遍） */
+  t0: number
+  t1: number
+  /** 第几遍（从 1 起；同一源行第二次出现 = 2） */
+  pass: number
+}
+
+export interface FlowView {
+  rows: FlowRow[]
+  /** `RectTrack.rects` 每一项归属的条带行下标（等长；-1 = 没归进去，理论上不该出现） */
+  rectRow: number[]
+  /** 条带总高（像素坐标，不是位图） */
+  stripHeight: number
+  /** 画布尺寸（= 预设的宽高） */
+  viewW: number
+  viewH: number
+  noteSize: number
+}
+
+/** 一帧里要画的高亮块（**条带坐标**，已按所在行平移） */
+export interface FrameRect {
+  x: number
+  y: number
+  w: number
+  h: number
+  voice: number
+  group: number
+  instrument?: string
+  playVoice?: 'accomp' | 'main' | 'second'
+}
+
+/** `frameAt()` 的输出：这一帧滚动到哪、亮哪几块（纯数据，不含像素） */
+export interface Frame {
+  t: number
+  /** 当前行在 `FlowView.rows` 里的下标 */
+  row: number
+  /** 竖直滚动量（0 ~ stripHeight - viewH） */
+  scrollY: number
+  rects: FrameRect[]
 }

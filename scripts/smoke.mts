@@ -95,6 +95,8 @@ import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInst
 import { codePosToNoteId, noteIdToCodePos } from '@ijipu/engine/cursorMap.ts'
 // M1-1 动态谱时间轴：把拍段收成"定时矩形"，供视频逐帧取"此刻哪几块在亮"
 import { buildRectTrack, rectsActiveAt } from '@ijipu/engine/index.ts'
+// M1-1 第二段：流式视图（分页 → 条带行）与出帧（时刻 → 一帧）
+import { buildFlowView, frameAt, frameTimeMs, frameIndexAt, dynamicPageConfig } from '@ijipu/engine/index.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
@@ -20511,6 +20513,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj949ManualScopeTests())
       // M1-1：动态谱时间轴（视频出片的"时间 → 哪几块在亮"）
       .then(() => runDynamicTimelineTests())
+      // M1-2：流式视图与出帧（分页 → 条带行；时刻 → 一帧）
+      .then(() => runDynamicFlowTests())
       .then(() => {
         console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
         process.exit(failed === 0 ? 0 : 1)
@@ -32283,5 +32287,113 @@ function runDynamicTimelineTests(): void {
     'D2 负对照：字号变大 ⇒ 默认矩形变高（noteSize 真被消费）',
     tall.rects[0].h > track.rects[0].h,
     `${tall.rects[0].h} vs ${track.rects[0].h}`,
+  )
+}
+
+/**
+ * ---- [D] 流式视图与出帧（M1-2）----
+ *
+ * 验三件事：
+ *  ① **视图**：分页版面能拼成一条条带，每条矩形都归到了某一行（归错行 = 视频里高亮跑到别处）；
+ *  ② **出帧**：任意时刻的帧里，高亮块都在画布内、滚动量在可滚范围内；
+ *  ③ **帧率换算**：`frameTimeMs` / `frameIndexAt` 往返不漂（这是"音画同步"最基础的一条）。
+ */
+function runDynamicFlowTests(): void {
+  console.log('\n[D] dynamic flow view & frames (M1-2)')
+  const cfg = dynamicPageConfig('9x16')
+  /** 8 小节的素材；拼两遍 = 16 小节，保证在 1080 宽下**跨行**（只有跨行才能验"反复展开成重复行"） */
+  const BARS8 = '1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 | 1 1 5 5 | 6 6 5 5 | 4 4 3 3 | 2 2 1 1 |'
+  const code = `V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${BARS8}${BARS8}\n`
+  const build = (c: string) => {
+    const r = parseJpsRaw(c)
+    const lay = layoutScore(r, cfg)
+    const seq = buildPlaySequence(r, lay, 120)
+    return { lay, seq, track: buildRectTrack(seq, { noteSize: cfg.note_size }) }
+  }
+  const b = build(code)
+  check(
+    'M1 预设：9:16 画布 1080×1920',
+    b.lay.pages[0].width === 1080 && b.lay.pages[0].height === 1920,
+    `${b.lay.pages[0].width}×${b.lay.pages[0].height}`,
+  )
+  check('M1 预设：音符字号放大到 56（不是 A4 的 18）', cfg.note_size === 56, String(cfg.note_size))
+
+  const view = buildFlowView(b.lay, b.track, cfg)
+  check('M2 流式视图至少一行', view.rows.length >= 1, String(view.rows.length))
+  check('M2 长谱在 1080 宽下确实跨行（≥2 行，否则下面的反复断言无效）', view.rows.length >= 2, String(view.rows.length))
+  check('M2 每条矩形都归到了某一行（没有 -1）', view.rectRow.every((r) => r >= 0), JSON.stringify(view.rectRow))
+  check('M2 取图带不自交（srcBottom > srcTop）', view.rows.every((r) => r.srcBottom > r.srcTop))
+  check(
+    'M2 条带高 = 各行带高之和',
+    view.stripHeight === view.rows.reduce((a, r) => a + (r.srcBottom - r.srcTop), 0),
+  )
+  check(
+    'M2 行的时间按出现顺序不减',
+    view.rows.every((r, i) => i === 0 || r.t0 >= view.rows[i - 1].t0 - 1e-6),
+  )
+
+  // D5：每行在自己的中点时刻出帧，高亮块都落在画布内
+  const inside = view.rows.every((r) => {
+    const f = frameAt(view, b.track, (r.t0 + r.t1) / 2)
+    return f.rects.every((q) => q.y >= 0 && q.y <= view.viewH && q.x >= 0 && q.x <= view.viewW)
+  })
+  check('D5 每行中点出帧：高亮块都在画布内', inside)
+
+  // D6：竖屏安全区——谱面墨迹不进入底部 15%
+  const nSize = cfg.note_size
+  const inkBottom = Math.max(...b.lay.pages.flatMap((p) => p.notes.map((n) => n.y + nSize * 0.6)))
+  check(
+    'D6 谱面墨迹不进入底部 15% 安全区',
+    inkBottom <= 1920 * 0.85 + 0.5,
+    `${Math.round(inkBottom)} vs ${Math.round(1920 * 0.85)}`,
+  )
+
+  // 反复：同一段被展开成多次（pass 递增），源区间相同
+  const rep = build(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: |: ${BARS8}${BARS8} :|\n`)
+  const repView = buildFlowView(rep.lay, rep.track, cfg)
+  check(
+    'D3 反复段展开成重复行：pass 出现 2',
+    new Set(repView.rows.map((r) => r.pass)).has(2),
+    repView.rows.map((r) => r.pass).join(','),
+  )
+  check(
+    'D3 反复后行数 = 单遍的两倍（每行各贴一遍）',
+    repView.rows.length === view.rows.length * 2,
+    `${repView.rows.length} vs ${view.rows.length}`,
+  )
+  const firstPass1 = repView.rows[0]
+  const firstPass2 = repView.rows.find((r) => r.pass === 2)
+  check(
+    'D3 第二遍首行与第一遍首行指向同一段源区间',
+    firstPass1 !== undefined &&
+      firstPass2 !== undefined &&
+      firstPass1.pageIndex === firstPass2.pageIndex &&
+      firstPass1.srcTop === firstPass2.srcTop &&
+      firstPass1.srcBottom === firstPass2.srcBottom,
+    JSON.stringify([firstPass1, firstPass2]),
+  )
+
+  // D9：帧率换算不累积误差
+  check('D9 第 1800 帧 @30fps = 60000ms（整数运算不漂）', frameTimeMs(1800, 30) === 60000, String(frameTimeMs(1800, 30)))
+  let roundTrip = true
+  for (let n = 0; n <= 1800; n++) {
+    if (frameIndexAt(frameTimeMs(n, 30), 30) !== n) {
+      roundTrip = false
+      break
+    }
+  }
+  check('D9 帧号 ↔ 时间往返 0..1800 全部一致', roundTrip)
+
+  // 边界
+  const endFrame = frameAt(view, b.track, b.track.endMs + 5000)
+  check('D8 t 超出末尾：停在有效行且不抛', endFrame.row >= 0 && endFrame.row < view.rows.length, String(endFrame.row))
+  check(
+    'D8 scrollY 落在合法范围（内容短于视口时允许负值居中）',
+    view.rows.every((r) => {
+      const f = frameAt(view, b.track, (r.t0 + r.t1) / 2)
+      const minScroll = view.stripHeight <= view.viewH ? -(view.viewH - view.stripHeight) / 2 : 0
+      const maxScroll = Math.max(0, view.stripHeight - view.viewH)
+      return f.scrollY >= minScroll - 1e-6 && f.scrollY <= maxScroll + 1e-6
+    }),
   )
 }

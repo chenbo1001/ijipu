@@ -70,9 +70,23 @@ export {
   playheadPosIn,
 } from './playback/playhead'
 export type { PlayheadPos, PlayheadSegAt } from './playback/playhead'
-// 动态谱（视频出片 / 后续 H5）：时间轴 = 「时间 → 页面上哪些块在亮」（纯函数，可在 Node 里断言）
-export { buildRectTrack, rectsActiveAt, RECT_ABOVE_RATIO, RECT_BELOW_RATIO } from './dynamic'
-export type { RectTrack, TimedRect, RectTrackOptions } from './dynamic'
+// 动态谱（视频出片 / 后续 H5）：时间轴 → 流式视图 → 帧；画布预设
+export {
+  buildRectTrack,
+  rectsActiveAt,
+  RECT_ABOVE_RATIO,
+  RECT_BELOW_RATIO,
+  buildFlowView,
+  ROW_MERGE_RATIO,
+  frameAt,
+  scrollYOfRow,
+  frameTimeMs,
+  frameIndexAt,
+  DYNAMIC_PRESETS,
+  DEFAULT_DYNAMIC_PRESET,
+  dynamicPageConfig,
+} from './dynamic'
+export type { RectTrack, TimedRect, RectTrackOptions, FlowRow, FlowView, FrameRect, Frame, DynamicPreset, DynamicPresetId } from './dynamic'
 // adj759（清单 B2）：解析问题的分级/排序/计数/展示行（应用与插件共用；宿主可传自己的品牌标签）
 export {
   DEFAULT_PROBLEM_LABELS,
