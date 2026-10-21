@@ -12,7 +12,7 @@ import type { PlayEvent } from './sequence'
 import { matchInstrument, type InstrumentId } from './instruments'
 import { gmVoiceProgram } from './gmVoices'
 // adj1019：民族乐器「拟声」映射（GM 里没有二胡/琵琶/古筝…）
-import { ethnicAliasOf } from './ethnicVoices'
+import { ethnicAliasOf, isEthnicUsable } from './ethnicVoices'
 
 /** 简谱音名（如 C4 / F#5）→ MIDI 音符号（C4 = 60） */
 export function pitchToMidiNote(name: string): number {
@@ -67,8 +67,9 @@ export function instrumentToProgram(name: string | undefined): number {
   if (byVoice !== null) return byVoice
   // adj1019：民族乐器（拟声）——放在 GM 全表之后、旧别名表之前：
   // 用户写了 `长笛` 仍走 73，只有写了 `笛子/二胡/琵琶` 这些 GM 里没有的名字才落到这里。
+  // adj1028：还要**勾选过**才生效（`isEthnicUsable`）；没勾就按"不认识"继续往下走。
   const ethnic = ethnicAliasOf(trimmed)
-  if (ethnic) return ethnic.program
+  if (ethnic && isEthnicUsable(trimmed)) return ethnic.program
   const alias = GM_NAME_PROGRAMS[trimmed]
   if (alias !== undefined) return alias
   return GM_PROGRAMS[matchInstrument(name)] ?? 0

@@ -3,7 +3,7 @@
  */
 import './localStorageMigration'
 import { create } from 'zustand'
-import { clampEditorFontSize, normalizeFontStack, HQ_LIBRARIES, resolveActiveLibrary } from '@ijipu/engine'
+import { clampEditorFontSize, normalizeFontStack, HQ_LIBRARIES, resolveActiveLibrary, setEnabledEthnicVoices } from '@ijipu/engine'
 import { DEFAULT_THEME, DEFAULT_THEME_MODE, type ThemeMode } from '../brand/themes'
 // adj954：运行环境/设备判据统一走品牌层唯一出处（原先本文件自己写了一份 matchMedia）
 import { getRuntimeEnv, isCoarsePointerDevice } from '../brand/env'
@@ -129,6 +129,13 @@ const PLAYBACK_HQ_ENABLED_BY_LIB_KEY = 'ijipu.playbackHqEnabledByLib'
 /** adj1012：旧版是**一个** `number[]`（那时只有一个库）——只在迁移时读它，读走即删 */
 const PLAYBACK_HQ_ENABLED_LEGACY_KEY = 'ijipu.playbackHqEnabled'
 /**
+ * adj1028（用户 2026-10-21）：「指定音色」的**民族乐器（拟）**页签勾选了哪些名字。
+ *
+ * 口径：**勾选后，这个名字在脚本里才可用**（`@二胡@` ⇒ 110 民谣提琴）；没勾 ⇒ 不生效。
+ * 存的是名字（不是 program）：同一个名字的映射可能在引擎里调整，用户勾的是"我要用二胡"。
+ */
+const ETHNIC_VOICES_KEY = 'ijipu.ethnicVoices'
+/**
  * adj987（**用户 2026-10-18 需求**）：试听「练习段」的三项界面偏好（L1 本机，与谱无关）：
  *  · 循环开关（`practiceLoop`）——用户练一句时基本总想循环，记住它省一次点击；
  *  · 段组收起（`practiceCollapsed`，用户追加要求「左上角加一个收起/显示整个段组的小按钮」）；
@@ -167,6 +174,35 @@ function sanitizePrograms(v: unknown): number[] | null {
 function saveHqEnabledByLib(map: Record<string, number[]>): void {
   try {
     localStorage.setItem(PLAYBACK_HQ_ENABLED_BY_LIB_KEY, JSON.stringify(map))
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/**
+ * adj1028：读勾选的民族乐器名。
+ *
+ * 返回 `null` 表示"**这个环境没有本机存储**"（Node 单测 / 无 localStorage）——
+ * 这时**不要**把引擎切到"只有勾选的可用"，否则单测里 `二胡` 会突然失效（不是被测引擎的问题）。
+ * 返回 `[]` 才是"应用里一个都没勾"。
+ */
+function loadEthnicVoices(): string[] | null {
+  try {
+    if (typeof localStorage === 'undefined') return null
+    const raw = localStorage.getItem(ETHNIC_VOICES_KEY)
+    if (raw === null) return []
+    const v: unknown = JSON.parse(raw)
+    if (!Array.isArray(v)) return []
+    return v.filter((n): n is string => typeof n === 'string' && n.trim() !== '')
+  } catch {
+    return []
+  }
+}
+
+/** adj1028：写勾选列表（同一份也同步给引擎，让 `instrumentToProgram` 立刻按它判） */
+function saveEthnicVoices(names: string[]): void {
+  try {
+    localStorage.setItem(ETHNIC_VOICES_KEY, JSON.stringify(names))
   } catch {
     /* 忽略 */
   }
@@ -527,6 +563,13 @@ interface UiState {
   setPlaybackHqEnabled: (programs: number[]) => void
   /** adj1012：整份替换"每库收藏"（导入收藏 JSON 用；逐库做合法性过滤） */
   replacePlaybackHqEnabledByLib: (map: Record<string, number[]>) => void
+  /**
+   * adj1028：「民族乐器（拟）」里勾选了哪些名字。
+   * 勾选后脚本写 `@二胡@` 才会按 110 民谣提琴播放；没勾的名字不生效。
+   */
+  ethnicVoicesEnabled: string[]
+  /** adj1028：替换整份勾选（全选/全消/单个切换都走它；同时落盘并同步引擎） */
+  setEthnicVoicesEnabled: (names: string[]) => void
   /* ---- adj987（用户 2026-10-18 需求）：试听「练习段」 ---- */
   /** 换一整批标记（打开文档 / 文档切换时由对话框载入） */
   setPracticeMarks: (marks: PracticeMark[]) => void
@@ -723,6 +766,8 @@ export const useUiStore = create<UiState>()((set) => ({
   })() as number | null,
   // adj332/347：已启用音色集合（试听只列这些）；按库分开存，读取走 `enabledVoicesOf`
   playbackHqEnabledByLib: loadHqEnabledByLib(),
+  // adj1028：民族乐器（拟）的勾选；`setEthnicVoicesEnabled` 会同步给引擎
+  ethnicVoicesEnabled: loadEthnicVoices() ?? [],
   openModal: (m) => set({ modal: m }),
   // adj728：一次性"跳到某个设置页签"的意图（见接口处说明；由 PageConfigDialog 消费）
   settingsTab: null,
@@ -844,8 +889,20 @@ export const useUiStore = create<UiState>()((set) => ({
     }
     set({ playbackHqLibrary: id })
   },
-  /** adj448：会话级（不落盘）——每次打开试听都从「自动」开始，见 PlaybackDialog 的挂载重置 */
+  // adj448：会话级（不落盘）——每次打开试听都从「自动」开始，见 PlaybackDialog 的挂载重置
   setPlaybackHqVoice: (program) => set({ playbackHqVoice: program }),
+  /**
+   * adj1028：「民族乐器（拟）」页签的勾选（全选/全消/单个切换都走这里）。
+   * 同一份**立刻同步给引擎**（`setEnabledEthnicVoices`）——否则要等下次重载才生效，
+   * 用户勾完马上去试听会发现"没反应"。
+   */
+  setEthnicVoicesEnabled: (names) =>
+    set(() => {
+      const next = [...new Set(names.map((n) => n.trim()).filter(Boolean))]
+      saveEthnicVoices(next)
+      setEnabledEthnicVoices(next)
+      return { ethnicVoicesEnabled: next }
+    }),
   // adj332/adj1012：切换音色启用（收藏）——只改**当前库**那一份
   togglePlaybackHqVoice: (program) =>
     set((s) => {
@@ -1059,3 +1116,14 @@ export const useUiStore = create<UiState>()((set) => ({
     })),
   setExportJob: (label) => set({ exportJob: label }),
 }))
+
+/**
+ * adj1028：启动时把"勾选的民族乐器"交给引擎 —— **由应用入口调用**（见 `src/main.tsx`）。
+ *
+ * 为什么不在这里做模块级副作用：单测/CLI 会 import 这个 store（它们的 `localStorage`
+ * 要么没有、要么是桩），模块一加载就把引擎切成"只有勾选的可用"，会**意外**改掉解析结果。
+ * 入口里调一次，宿主边界清楚：应用用勾选，其它宿主保持 `null`（全部可用）。
+ */
+export function syncEthnicVoicesToEngine(): void {
+  setEnabledEthnicVoices(useUiStore.getState().ethnicVoicesEnabled)
+}

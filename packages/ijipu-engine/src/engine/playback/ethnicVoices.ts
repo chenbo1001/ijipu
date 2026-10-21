@@ -103,6 +103,38 @@ export function ethnicAliasOf(name: string | undefined | null): EthnicAlias | un
 }
 
 /**
+ * adj1028：**用户勾选了哪些民族乐器**（null = 全部可用）。
+ *
+ * 语义（用户 2026-10-21）：「勾选后，二胡音色名称可用，在 jps 脚本中指定 `@二胡@`
+ * 时播放的就是 110 民谣提琴的音色」。所以：
+ *  · `null`  ⇒ 宿主没接这个开关（插件 / CLI / 单测）⇒ 保持旧行为，全部可用；
+ *  · `[]`    ⇒ 应用里一个都没勾 ⇒ 民族乐器名**不生效**（退回普通解析，通常是钢琴）；
+ *  · `[..]`  ⇒ 只有勾选过的名字会落到 `program`。
+ *
+ * 为什么用模块级状态而不是给 `instrumentToProgram` 加参数：调用链（parser → sequence →
+ * midi/播放后端）都在引擎内部，逐个透传参数会改十几个签名；而"当前用户勾了哪些"本来就是
+ * 全局设置，不是每次调用的局部参数。宿主只需在设置变化时 `setEnabledEthnicVoices` 一次。
+ */
+let enabledEthnic: Set<string> | null = null
+
+/** 设置可用集合；传 `null` 恢复"全部可用"（宿主退出/测试复位用） */
+export function setEnabledEthnicVoices(names: readonly string[] | null): void {
+  enabledEthnic = names === null ? null : new Set(names.map((n) => n.trim()).filter(Boolean))
+}
+
+/** 当前可用集合（`null` 表示"全部可用"，界面据此显示"未接管"） */
+export function enabledEthnicVoices(): ReadonlySet<string> | null {
+  return enabledEthnic
+}
+
+/** 这个名字现在能不能按拟声演奏 */
+export function isEthnicUsable(name: string | undefined | null): boolean {
+  const key = (name ?? '').trim()
+  if (!key || !ethnicAliasOf(key)) return false
+  return enabledEthnic === null || enabledEthnic.has(key)
+}
+
+/**
  * **显示名**：`二胡（拟）`。
  *
  * 所有界面（音色选择器的说明、音色库面板的提示）都必须用它，而不是裸名字 ——

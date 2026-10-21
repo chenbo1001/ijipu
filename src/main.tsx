@@ -115,7 +115,13 @@ void (async () => {
   }
 
   // 存储就绪后才求值 store 模块（见上面的说明）
-  await import('./store/uiStore')
+  const { syncEthnicVoicesToEngine } = await import('./store/uiStore')
+  /**
+   * adj1028：把「民族乐器（拟）」的勾选交给引擎 —— **只在这里做一次**。
+   * 放在 store 模块里做模块级副作用会连带影响单测/CLI（它们的 localStorage 是桩），
+   * 已在 smoke 里踩过一次；入口处调用，宿主边界才清楚。
+   */
+  syncEthnicVoicesToEngine()
   /**
    * adj965（方案「OVL」，EP-10）：装配**图片通道**与**解码器**。
    *

@@ -44,6 +44,17 @@ export function VoicePickerDialog() {
   const toggle = useUiStore((s) => s.togglePlaybackHqVoice)
   const setPlaybackHqEnabled = useUiStore((s) => s.setPlaybackHqEnabled)
   const closeModal = useUiStore((s) => s.closeModal)
+  /**
+   * adj1028（用户 2026-10-21）：页签 —— 默认页签是**原音色清单**，
+   * 新页签「民族乐器（拟）」是**同样可勾选**的一组名字；勾了才在脚本里生效。
+   */
+  const [tab, setTab] = useState<'lib' | 'ethnic'>('lib')
+  const ethnicEnabled = useUiStore((s) => s.ethnicVoicesEnabled)
+  const setEthnicEnabled = useUiStore((s) => s.setEthnicVoicesEnabled)
+  const ethnicSet = useMemo(() => new Set(ethnicEnabled), [ethnicEnabled])
+  const toggleEthnic = (name: string): void => {
+    setEthnicEnabled(ethnicSet.has(name) ? ethnicEnabled.filter((n) => n !== name) : [...ethnicEnabled, name])
+  }
   const [keyword, setKeyword] = useState('')
   /** 折叠/展开状态：默认全展开 */
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
@@ -142,6 +153,30 @@ export function VoicePickerDialog() {
   return (
     <Modal title={voicePickerCopy.title} width="min(560px, 100%)" onClose={() => closeModal()}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
+        {/* adj1028（用户 2026-10-21）：两个页签 —— 原音色清单 / 民族乐器（拟） */}
+        <div role="tablist" style={{ display: 'flex', gap: 6, borderBottom: '1px solid var(--jp-border)', paddingBottom: 6 }}>
+          {([
+            ['lib', '音色清单'],
+            ['ethnic', `${voicePickerCopy.ethnicTitle}（${ETHNIC_ALIASES.length}）`],
+          ] as const).map(([k, label]) => (
+            <button
+              key={k}
+              role="tab"
+              aria-selected={tab === k}
+              className="btn"
+              style={{
+                ...btnStyle,
+                borderColor: tab === k ? 'var(--jp-accent)' : 'var(--jp-border)',
+                color: tab === k ? 'var(--jp-accent)' : 'var(--jp-text-primary)',
+              }}
+              onClick={() => setTab(k)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {/* 默认页签：原来的音色清单（内容保持原样，只在外层按页签显隐） */}
+        <div style={{ display: tab === 'lib' ? 'contents' : 'none' }}>
         {/* 顶部工具条：快捷操作 + 搜索框 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn" style={btnStyle} onClick={selectAll}>{voicePickerCopy.selectAll}</button>
@@ -176,21 +211,6 @@ export function VoicePickerDialog() {
           <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>{voicePickerCopy.fallbackHint(lib.name)}</div>
         )}
         {noBank0 && <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>{voicePickerCopy.noBank0Hint}</div>}
-
-        {/* adj1019：民族乐器只有"拟声"映射 —— 把对应关系摊开给用户看，名字一律带「（拟）」 */}
-        <details style={{ fontSize: 11, color: HIGHLIGHT }}>
-          <summary style={{ cursor: 'pointer', userSelect: 'none' }}>
-            {voicePickerCopy.ethnicTitle}（{ETHNIC_ALIASES.length} 个）
-          </summary>
-          <div style={{ marginTop: 4, lineHeight: 1.6 }}>{voicePickerCopy.ethnicHint}</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', marginTop: 4 }}>
-            {ETHNIC_ALIASES.map((a) => (
-              <span key={a.name} style={{ whiteSpace: 'nowrap' }}>
-                {ethnicLabel(a)} → {ethnicGmLabel(a)}
-              </span>
-            ))}
-          </div>
-        </details>
 
         {/* 主体：分组列表（无关键词时）或平铺列表（有过滤时） */}
         <div style={{ maxHeight: 'min(420px, 60vh)', overflow: 'auto', border: '1px solid var(--jp-border)', borderRadius: 6, padding: '4px 6px' }}>
@@ -259,6 +279,48 @@ export function VoicePickerDialog() {
               )
             })
           )}
+        </div>
+        </div>
+
+        {/* 民族乐器（拟）页签：与默认页签一样"可勾选"，勾了才能在脚本里用 */}
+        <div
+          role="tabpanel"
+          style={{ display: tab === 'ethnic' ? 'flex' : 'none', flexDirection: 'column', gap: 8, minHeight: 0 }}
+        >
+          <div style={{ fontSize: 11, color: HIGHLIGHT, lineHeight: 1.7 }}>{voicePickerCopy.ethnicHint}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <button className="btn" style={btnStyle} onClick={() => setEthnicEnabled(ETHNIC_ALIASES.map((a) => a.name))}>
+              {voicePickerCopy.selectAll}
+            </button>
+            <button className="btn" style={btnStyle} onClick={() => setEthnicEnabled([])}>
+              {voicePickerCopy.clearAll}
+            </button>
+            <span style={{ fontSize: 11, color: 'var(--jp-warning)' }}>
+              已勾选 {ethnicEnabled.length} / {ETHNIC_ALIASES.length}
+              {ethnicEnabled.length === 0 ? '（没勾的名字在脚本里不生效）' : ''}
+            </span>
+          </div>
+          <div
+            style={{
+              maxHeight: 'min(420px, 60vh)',
+              overflow: 'auto',
+              border: '1px solid var(--jp-border)',
+              borderRadius: 6,
+              padding: '4px 8px',
+            }}
+          >
+            {ETHNIC_ALIASES.map((a) => (
+              <label
+                key={a.name}
+                style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 12, lineHeight: 1.9, cursor: 'pointer' }}
+              >
+                <input type="checkbox" checked={ethnicSet.has(a.name)} onChange={() => toggleEthnic(a.name)} />
+                <span style={{ color: 'var(--jp-text-primary)', fontWeight: 600 }}>{ethnicLabel(a)}</span>
+                <span style={{ color: HIGHLIGHT }}>→ {ethnicGmLabel(a)}</span>
+                {a.note && <span style={{ color: HIGHLIGHT, fontSize: 11 }}>· {a.note}</span>}
+              </label>
+            ))}
+          </div>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 4 }}>

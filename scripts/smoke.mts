@@ -245,7 +245,7 @@ import { fingerprintOf, fingerprintOfParts, bankIdOf, readBankFile, planLegacyMi
 import { discoverBanks } from '../src/playback/bankDiscovery.ts'
 import type { DiscoveryIo } from '../src/playback/bankDiscovery.ts'
 // adj1019：民族乐器「拟声」表（GM 里没有二胡/琵琶/古筝；显示一律带「（拟）」）
-import { ETHNIC_ALIASES, ethnicAliasOf, ethnicLabel, ethnicGmLabel } from '@ijipu/engine/index.ts'
+import { ETHNIC_ALIASES, ethnicAliasOf, ethnicLabel, ethnicGmLabel, setEnabledEthnicVoices, isEthnicUsable } from '@ijipu/engine/index.ts'
 import type { BankRecord, LegacyBankEntry, LegacyBankIo } from '../src/playback/bankRegistry.ts'
 // adj417：按钮图标清单（public/icons/ 下的文件名）——断言文件存在、sw.js 预热清单未漂移
 import { ICON_DIR, ICON_FILES, ICON_FILE_NAMES } from '../src/ui/toolIcons.ts'
@@ -20508,6 +20508,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1019Tests())
       // adj1021：桌面端用系统 curl 下载音色库（绕过浏览器 CORS）
       .then(() => runAdj1021Tests())
+      // adj1028：民族乐器页签（勾选才生效）
+      .then(() => runAdj1028Tests())
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
       .then(() => runAdj949ManualScopeTests())
@@ -21462,6 +21464,55 @@ async function runAdj1019Tests() {
  * 这段守的是"下载这条路真的能走通、且不会把坏文件当音源"：
  * 地址白名单（防 file:// 与参数注入）、先写 `.part` 再改名、进度事件、失败有出路。
  */
+/**
+ * ---- 210. 民族乐器页签：勾选才生效（adj1028）----
+ *
+ * 用户 2026-10-21：「民族乐器（拟）新开一个页签，与默认页签里的选项一样的可选项，
+ * 如选项：二胡 → 110 民谣提琴，勾选后，二胡音色名称可用，在 jps 脚本中指定 @二胡@
+ * 时播放的就是 110 民谣提琴 的音色」。
+ *
+ * 所以判据有三层：
+ * ① `null`（宿主没接）仍是"全部可用"——插件/CLI 不因为这个功能坏掉；
+ * ② `[]`（应用里一个都没勾）⇒ 民族乐器名**不生效**，退回普通解析（钢琴），不是静默乱响；
+ * ③ 勾了哪个就只有哪个生效，且映射还是引擎那张表（二胡 → 110）。
+ */
+async function runAdj1028Tests() {
+  console.log('[210] ethnic tab with opt-in gating (adj1028)')
+  setEnabledEthnicVoices(null)
+  check('adj1028 宿主未接开关（null）时保持旧行为：二胡 → 110',
+    instrumentToProgram('二胡') === 110 && isEthnicUsable('二胡'))
+  setEnabledEthnicVoices([])
+  /**
+   * 没勾 ⇒ **不按拟声映射**，而是退回"认不出"的普通兜底（乐器族关键词，例：二胡→弦乐 48）。
+   * 这比"直接 0（钢琴）"更接近用户预期，所以断言写"不等于 110"而不是"等于 0"。
+   */
+  check('adj1028 一个都没勾 ⇒ 不按拟声映射（二胡不再是 110；退回乐器族兜底）',
+    instrumentToProgram('二胡') !== 110 && !isEthnicUsable('二胡') && !isEthnicUsable('琵琶'),
+    `${instrumentToProgram('二胡')}`)
+  setEnabledEthnicVoices(['二胡'])
+  check('adj1028 只勾二胡 ⇒ 二胡 110 生效、琵琶仍未勾（不再是 105）；GM 名字不受影响（长笛 73）',
+    instrumentToProgram('二胡') === 110 && instrumentToProgram('琵琶') !== 105 &&
+      instrumentToProgram('长笛') === 73 && isEthnicUsable('二胡') && !isEthnicUsable('琵琶'))
+  setEnabledEthnicVoices(null)
+
+  const storeSrc = String(readFileSync(join(root, 'src', 'store', 'uiStore.ts'), 'utf8'))
+  const pickerSrc = String(readFileSync(join(root, 'src', 'dialogs', 'VoicePickerDialog.tsx'), 'utf8'))
+  const panelSrc = String(readFileSync(join(root, 'src', 'dialogs', 'SoundBankPanel.tsx'), 'utf8'))
+  check('adj1028 store：键 `ijipu.ethnicVoices`、`setEthnicVoicesEnabled` 落盘并**同步引擎**',
+    /'ijipu\.ethnicVoices'/.test(storeSrc) && /setEthnicVoicesEnabled: \(names\)/.test(storeSrc) &&
+      /setEnabledEthnicVoices\(next\)/.test(storeSrc) && /saveEthnicVoices\(next\)/.test(storeSrc))
+  check('adj1028 应用入口在 store 就绪后调 `syncEthnicVoicesToEngine()`（不是模块级副作用）',
+    /syncEthnicVoicesToEngine\(\)/.test(String(readFileSync(join(root, 'src', 'main.tsx'), 'utf8'))) &&
+      /export function syncEthnicVoicesToEngine/.test(storeSrc) &&
+      !/^const initialEthnic = loadEthnicVoices\(\)/m.test(storeSrc))
+  check('adj1028 选择器：默认页签 + 民族页签，民族页签是**可勾选列表**（带「（拟）」与目标音色）',
+    /role="tablist"/.test(pickerSrc) && /role="tabpanel"/.test(pickerSrc) &&
+      /type="checkbox"/.test(pickerSrc) && /ethnicLabel\(a\)/.test(pickerSrc) &&
+      /ethnicGmLabel\(a\)/.test(pickerSrc))
+  check('adj1028 应用内说明写明"先勾选才生效"',
+    /先在「指定音色 → 民族乐器（拟）」里勾选/.test(panelSrc))
+}
+
 async function runAdj1021Tests() {
   console.log('[209] desktop soundfont download via system curl (adj1021)')
   const rs = String(readFileSync(join(root, 'src-tauri', 'src', 'lib.rs'), 'utf8'))
