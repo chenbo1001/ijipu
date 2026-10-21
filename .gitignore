@@ -63,3 +63,8 @@ dist-video/
 # 一次性排错脚本（AGENTS 六：`scripts/_tmp_*` 用后必删、**禁提交**）——
 # 写进这里当闸门：真忘了删也不会被 `git add -A` 顺手带进仓库（插件仓库同样有这条）。
 scripts/_tmp_*
+
+# adj1009：FluidR3_GM.sf2（141.5 MB）只是**本机参考样本**，不随仓库分发（随包内置的只有
+# generaluser_gs.sf2）。写进这里当闸门：它是 smoke 里"文件在才跑"的可选夹具，
+# 万一被 `git add -A` 带进仓库，一次提交就是 141 MB、且再也删不干净。
+resources/soundfonts/FluidR3_GM.sf2

@@ -233,6 +233,8 @@ import type { HqCache } from '../src/playback/spessaCache.ts'
 // adj953：负对照夹具要**逐字复刻改动前的预取**（缓存 → 内置 → 联网）⇒ 需要这一个取的入口
 import { hasBuiltinBank, loadHqBank, GM_VOICE_OPTIONS } from '../src/playback/spessaSynthBackend.ts'
 import type { HqSampleLibrary } from '../src/playback/spessaSynthBackend.ts'
+// adj1009（多音色库 P1）：SF2 头部解析 + 已知库认领（引擎纯函数；本文件用**手搓夹具 + 真文件**双重断言）
+import { isSf2, isGitLfsPointer, readSf2Info, readSf2Presets, summarizeSf2Presets, matchKnownLibrary, HQ_LIBRARIES, findKnownLibrary } from '@ijipu/engine/index.ts'
 // adj417：按钮图标清单（public/icons/ 下的文件名）——断言文件存在、sw.js 预热清单未漂移
 import { ICON_DIR, ICON_FILES, ICON_FILE_NAMES } from '../src/ui/toolIcons.ts'
 // adj526：数值"按住上下拖"的纯换算（上拖增大 / 粗调 / 钳制 / 无范围时相对增量）
@@ -1630,7 +1632,7 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
   check('adj767 应用不再自带音源库清单/失败文案（B3）——从引擎导入并走 planHqBankLoad',
     !/const HQ_LIBRARIES/.test(backend) && !/function hqBankFailureText/.test(backend) &&
       !/function getHqLibrary/.test(backend) &&
-      /export \{ HQ_LIBRARIES, getHqLibrary, planHqBankLoad, hqBankFailureText \} from '@ijipu\/engine'/.test(backend) &&
+      /export \{[^}]*\bHQ_LIBRARIES\b[^}]*\bgetHqLibrary\b[^}]*\bplanHqBankLoad\b[^}]*\bhqBankFailureText\b[^}]*\} from '@ijipu\/engine'/.test(backend) &&
       /planHqBankLoad\(\{ cache: !!cached, builtin: !!builtin \}\)/.test(cache))
   const dlg = code('src/dialogs/PlaybackDialog.tsx')
   check('adj767 应用不再自带时钟（B6）——只用引擎 createPlaybackClock',
@@ -20418,6 +20420,8 @@ runAdj927ExternalChangeTests()
           console.error('  ✗ adj966f 三路合并用例抛异常', e)
         }
       })
+      // adj1009：多音色库 P1——SF2 头部解析（手搓夹具 + 两个真文件）
+      .then(() => runAdj1009Tests())
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
       .then(() => runAdj949ManualScopeTests())
@@ -20426,6 +20430,207 @@ runAdj927ExternalChangeTests()
         process.exit(failed === 0 ? 0 : 1)
       })
   })
+
+
+/**
+ * ---- 103. SF2 头部元数据解析（adj1009，多音色库 P1）----
+ *
+ * 守的是三件"看起来对、其实会错"的事：
+ *
+ * ① **末条终止记录必须无条件丢掉**：SF2 规范是 `presets 数 = phdr 记录数 − 1`，但现实里
+ *    GeneralUser 与 FluidR3 都把末条名字写成了 `"EOP"`（不是空字段）⇒ 按"名字为空就跳过"过滤
+ *    会把 **0 号音色覆盖成 "EOP"**（我第一版探针就这么错的）。
+ * ② **记录顺序不能当索引**：FluidR3 的 phdr 第一条是 `0:127 Gun Shot`，必须自己按
+ *    `(bank, program)` 排序。
+ * ③ **库名（INAM）才是身份**：GeneralUser 2.0.3 与 v1.471 要归到同一个库 id；文件名不可信。
+ *
+ * 夹具是手搓的（几十字节），真文件只在"文件在"时才验 —— `FluidR3_GM.sf2` 有 141 MB 且
+ * **未跟踪进 git**（只在作者本机），CI 上没有它，不能让 smoke 因此变红。
+ */
+async function runAdj1009Tests() {
+  console.log('[200] sf2 metadata: info / presets / known-library matching (adj1009)')
+
+  // ---------- 夹具：最小 SF2（RIFF sfbk + LIST INFO + LIST pdta/phdr）----------
+  const chunk = (id: string, payload: Uint8Array): Buffer => {
+    const body = Buffer.from(payload)
+    const head = Buffer.alloc(8)
+    head.write(id, 0, 'latin1')
+    head.writeUInt32LE(body.length, 4)
+    // RIFF 块长度按偶数对齐：奇数补一个 0
+    const pad = body.length % 2 === 1 ? Buffer.from([0]) : Buffer.alloc(0)
+    return Buffer.concat([head, body, pad])
+  }
+  const list = (type: string, chunks: Buffer[]): Buffer =>
+    chunk('LIST', Buffer.concat([Buffer.from(type, 'latin1'), ...chunks]))
+  const infoText = (tag: string, text: string): Buffer => chunk(tag, Buffer.from(`${text}\u0000`, 'latin1'))
+  const phdrRecord = (name: string, program: number, bank: number): Buffer => {
+    const b = Buffer.alloc(38)
+    b.write(name, 0, 'latin1')
+    b.writeUInt16LE(program, 20)
+    b.writeUInt16LE(bank, 22)
+    return b
+  }
+  const ifil = Buffer.alloc(4)
+  ifil.writeUInt16LE(2, 0)
+  ifil.writeUInt16LE(1, 2)
+  // 故意：记录 4 条 + 末条 "EOP"（复刻真文件的样子）；顺序也故意打乱
+  const phdr = Buffer.concat([
+    phdrRecord('Zeta', 5, 0),
+    phdrRecord('Alpha', 0, 0),
+    phdrRecord('Kit', 0, 128),
+    phdrRecord('Beta', 3, 0),
+    phdrRecord('EOP', 0, 0),
+  ])
+  const sub = Buffer.concat([
+    list('INFO', [infoText('INAM', 'Test Bank'), infoText('IENG', 'Tester'), infoText('ISFT', 'Fixture'), chunk('ifil', ifil)]),
+    list('pdta', [chunk('phdr', phdr)]),
+  ])
+  const riffHead = Buffer.alloc(12)
+  riffHead.write('RIFF', 0, 'latin1')
+  riffHead.writeUInt32LE(sub.length + 4, 4)
+  riffHead.write('sfbk', 8, 'latin1')
+  const fixture = Buffer.concat([riffHead, sub])
+  // 同时准备 ArrayBuffer 形态（对外入口要能吃两种）
+  const fixtureAb = new Uint8Array(fixture).buffer
+
+  check('adj1009 夹具本身是合法 SF2（RIFF…sfbk）', isSf2(fixture) && isSf2(fixtureAb))
+  const info = readSf2Info(fixture)
+  check('adj1009 INFO：库名/作者/工具/版本都读出来（latin-1、NUL 截断）',
+    info?.name === 'Test Bank' && info.engineer === 'Tester' && info.software === 'Fixture' && info.version === '2.1',
+    JSON.stringify(info))
+  check('adj1009 readSf2Info 接受 ArrayBuffer 与 Uint8Array 两种入参',
+    readSf2Info(fixtureAb)?.name === 'Test Bank' && info?.name === 'Test Bank')
+
+  const presets = readSf2Presets(fixture) ?? []
+  check('adj1009 phdr：条数 = 记录数 − 1（5 条记录 ⇒ 4 个预设）', presets.length === 4, `${presets.length}`)
+  check('adj1009 **负对照**：末条 "EOP" 不在结果里（按名字过滤会把 0 号音色吞掉）',
+    presets.every((p) => p.name !== 'EOP'), presets.map((p) => p.name).join(','))
+  check('adj1009 预设按 (bank, program) 排序（不靠文件里的顺序）',
+    presets.map((p) => `${p.bank}:${p.program}`).join(',') === '0:0,0:3,0:5,128:0',
+    presets.map((p) => `${p.bank}:${p.program}`).join(','))
+  const sum = summarizeSf2Presets(presets)
+  check('adj1009 统计：总数 / bank0 / 其余 / bank 个数',
+    sum.total === 4 && sum.bank0 === 3 && sum.other === 1 && sum.banks === 2, JSON.stringify(sum))
+
+  // ---------- 非 SF2 / LFS 指针 ----------
+  const junk = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+  check('adj1009 非 SF2：isSf2 假、两个读取函数返回 null（不抛、不静默返回空表）',
+    !isSf2(junk) && readSf2Info(junk) === null && readSf2Presets(junk) === null)
+  const lfsText = 'version https://git-lfs.github.com/spec/v1\noid sha256:abcdef\nsize 148398306\n'
+  const lfs = new TextEncoder().encode(lfsText)
+  check('adj1009 Git LFS 指针能认出来（用户"右键另存 raw"拿到的就是它）',
+    isGitLfsPointer(lfs) && !isSf2(lfs) && readSf2Info(lfs) === null)
+  check('adj1009 正常音源不会被误判成 LFS 指针', !isGitLfsPointer(fixture))
+
+  // ---------- 库名认领（含同库不同版本）----------
+  check('adj1009 按 INAM 认领：GeneralUser 2.0.3 → generaluser_gs',
+    matchKnownLibrary({ name: 'GeneralUser GS 2.0.3 BETA' }) === 'generaluser_gs')
+  check('adj1009 按 INAM 认领：GeneralUser **v1.471 老版本**也归同一个库',
+    matchKnownLibrary({ name: 'GeneralUser GS v1.471' }) === 'generaluser_gs')
+  check('adj1009 按 INAM 认领：FluidR3（`Fluid R3 GM` / `FluidR3 GM` 两种写法都认）',
+    matchKnownLibrary({ name: 'Fluid R3 GM' }) === 'fluidr3_gm' &&
+      matchKnownLibrary({ name: 'FluidR3 GM' }) === 'fluidr3_gm')
+  check('adj1009 认不出就返回 null（不瞎猜、不回退默认库）',
+    matchKnownLibrary({ name: 'Random Bank 9000' }) === null &&
+      matchKnownLibrary({}) === null && matchKnownLibrary(null) === null)
+  check('adj1009 已知库的 sf2NamePattern 全部可编译（写错规则不会让导入整条失败）',
+    HQ_LIBRARIES.every((l) => {
+      if (!l.sf2NamePattern) return true
+      try {
+        new RegExp(l.sf2NamePattern, 'i')
+        return true
+      } catch {
+        return false
+      }
+    }))
+
+  // ---------- 库清单形状（FluidR3 只给下载页，不给必然失败的自动下载）----------
+  const fluid = findKnownLibrary('fluidr3_gm')
+  check('adj1009 库清单里有 fluidr3_gm（141.5 MiB / MIT / 189 预设）',
+    !!fluid && fluid.sizeBytes === 148_398_306 && fluid.license === 'MIT' && fluid.presetCount === 189,
+    JSON.stringify(fluid && { size: fluid.sizeBytes, license: fluid.license, n: fluid.presetCount }))
+  check('adj1009 FluidR3 **没有直链、autoDownload=false、只给 SourceForge 下载页**',
+    !!fluid && fluid.source === '' && fluid.autoDownload === false &&
+      (fluid.downloadPage ?? '').includes('sourceforge.net') && (fluid.downloadPage ?? '').endsWith('/download'),
+    JSON.stringify(fluid && { source: fluid.source, auto: fluid.autoDownload }))
+  const gu = findKnownLibrary('generaluser_gs')
+  check('adj1009 GeneralUser 仍走官方直链（唯一"真能 fetch 到字节"的那条）',
+    !!gu && gu.source.startsWith('https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/') &&
+      gu.autoDownload !== false && (gu.downloadPage ?? '').includes('github.com/mrbumpy409'),
+    JSON.stringify(gu && { source: gu.source, auto: gu.autoDownload }))
+  check('adj1009 findKnownLibrary：空串/未知 id 一律 undefined（不默默回退默认库）',
+    findKnownLibrary('') === undefined && findKnownLibrary(null) === undefined && findKnownLibrary('nope') === undefined)
+
+  // ---------- "只能手动下"的库：报错要说清怎么做，且**不发网络请求** ----------
+  if (fluid) {
+    const savedFetch = (globalThis as { fetch?: unknown }).fetch
+    let fetchCalls = 0
+    ;(globalThis as { fetch?: unknown }).fetch = async () => {
+      fetchCalls++
+      return { ok: false, status: 500 }
+    }
+    let manualErr = ''
+    try {
+      await loadHqBank(fluid)
+    } catch (e) {
+      manualErr = e instanceof Error ? e.message : String(e)
+    } finally {
+      ;(globalThis as { fetch?: unknown }).fetch = savedFetch
+    }
+    check('adj1009 FluidR3 加载即抛"手动下载"提示（不是"下载失败"，别让用户反复重试）',
+      manualErr.includes('不提供应用内自动下载') && manualErr.includes('打开下载页'), manualErr)
+    check('adj1009 FluidR3 抛错前**一次 fetch 都没发**（空 source 绝不能拿去请求当前页面 URL）',
+      fetchCalls === 0, `fetch 调用 ${fetchCalls} 次`)
+  }
+
+  // ---------- 真文件：证明"真的读了内容"（文件在才跑；FluidR3 未跟踪，CI 上没有）----------
+  const realGeneral = join(root, 'resources', 'soundfonts', 'generaluser_gs.sf2')
+  const realFluid = join(root, 'resources', 'soundfonts', 'FluidR3_GM.sf2')
+  check('adj1009 真文件：随包内置的 generaluser_gs.sf2 存在（打包不变量见 [101]）', existsSync(realGeneral))
+  const gPresets = existsSync(realGeneral) ? readSf2Presets(readFileSync(realGeneral)) ?? [] : []
+  const gInfo = existsSync(realGeneral) ? readSf2Info(readFileSync(realGeneral)) : null
+  if (existsSync(realGeneral)) {
+    check('adj1009 真 GeneralUser：INAM 认得出是 GeneralUser',
+      (gInfo?.name ?? '').toLowerCase().includes('generaluser'), JSON.stringify(gInfo?.name))
+    check('adj1009 真 GeneralUser：287 个预设 / 19 个 bank / bank0 恰好 128',
+      gPresets.length === 287 && new Set(gPresets.map((p) => p.bank)).size === 19 &&
+        gPresets.filter((p) => p.bank === 0).length === 128,
+      `${gPresets.length}/${new Set(gPresets.map((p) => p.bank)).size}`)
+    check('adj1009 真 GeneralUser：按 INAM 认领到 generaluser_gs',
+      matchKnownLibrary(gInfo) === 'generaluser_gs', String(matchKnownLibrary(gInfo)))
+    check('adj1009 真 GeneralUser：bank0 的 0 号是 Grand Piano（不是 "EOP"）',
+      gPresets.find((p) => p.bank === 0 && p.program === 0)?.name === 'Grand Piano',
+      String(gPresets.find((p) => p.bank === 0 && p.program === 0)?.name))
+  }
+  if (existsSync(realFluid)) {
+    const fPresets = readSf2Presets(readFileSync(realFluid)) ?? []
+    const fInfo = readSf2Info(readFileSync(realFluid))
+    check('adj1009 真 FluidR3：INAM = `Fluid R3 GM`，认领到 fluidr3_gm',
+      fInfo?.name === 'Fluid R3 GM' && matchKnownLibrary(fInfo) === 'fluidr3_gm', JSON.stringify(fInfo?.name))
+    check('adj1009 真 FluidR3：189 个预设 / 5 个 bank / bank0 恰好 128',
+      fPresets.length === 189 && new Set(fPresets.map((p) => p.bank)).size === 5 &&
+        fPresets.filter((p) => p.bank === 0).length === 128,
+      `${fPresets.length}/${new Set(fPresets.map((p) => p.bank)).size}`)
+    check('adj1009 真 FluidR3：结果**已排序**（文件里第一条是 `0:127 Gun Shot`，排序后第一条应是 0:0）',
+      fPresets[0]?.bank === 0 && fPresets[0]?.program === 0 && fPresets[0]?.name === 'Yamaha Grand Piano',
+      JSON.stringify(fPresets[0]))
+    // 两库都在时：bank0 名字差异 33 条（"库自己的名字"确实不同，UI 的双行显示不是摆设）
+    if (existsSync(realGeneral)) {
+      const nameOf = (ps: { bank: number; program: number; name: string }[]) => {
+        const m = new Map<number, string>()
+        for (const p of ps) if (p.bank === 0) m.set(p.program, p.name)
+        return m
+      }
+      const ga = nameOf(gPresets)
+      const fa = nameOf(fPresets)
+      const diff = [...ga.keys()].filter((prog) => ga.get(prog) !== fa.get(prog)).length
+      check('adj1009 两库 bank0 音色名**确有差异**（实测 33 / 128）——"换库后名字不变"是缺陷',
+        diff === 33, `差异 ${diff} 条`)
+    }
+  } else {
+    console.log('  · (`resources/soundfonts/FluidR3_GM.sf2` 不在，跳过 FluidR3 真文件断言——它未跟踪进 git)')
+  }
+}
 
 
 /**

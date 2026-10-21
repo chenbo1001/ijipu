@@ -13,8 +13,10 @@
  */
 import type { AudioBackend } from '@ijipu/engine'
 // adj760（清单 B3）：音源库**清单与取用顺序**来自引擎（两端共用；IO 各做各的）
-export { HQ_LIBRARIES, getHqLibrary, planHqBankLoad, hqBankFailureText } from '@ijipu/engine'
+// adj1009：补 `findKnownLibrary`（按 id 查、找不到给 undefined）与 `hqBankManualOnlyText`（只能手动下载的库）
+export { HQ_LIBRARIES, findKnownLibrary, getHqLibrary, planHqBankLoad, hqBankFailureText, hqBankManualOnlyText } from '@ijipu/engine'
 export type { HqSampleLibrary, HqBankSource } from '@ijipu/engine'
+import { hqBankManualOnlyText } from '@ijipu/engine'
 import type { HqSampleLibrary } from '@ijipu/engine'
 import { pitchToMidiNote, instrumentToProgram, GmChannelAllocator, GM_VOICES, gmVoiceRef } from '@ijipu/engine'
 import type { GmVoice } from '@ijipu/engine'
@@ -109,6 +111,17 @@ export async function loadBuiltinBank(lib: HqSampleLibrary): Promise<ArrayBuffer
 export async function loadHqBank(lib: HqSampleLibrary): Promise<ArrayBuffer> {
   const builtin = await loadBuiltinBank(lib)
   if (builtin) return builtin
+  /**
+   * adj1009：**只能手动下载的库**（`autoDownload === false` 或无直链）——直接抛"照做"提示。
+   *
+   * 两道门都必须有：
+   *  · `autoDownload === false`：如 FluidR3，源站给的是 HTML 页面、且没有 CORS 头，`fetch` 注定失败；
+   *  · `source` 为空：**绝不能拿空串去 `fetch`** —— `fetch('')` 会请求当前页面 URL（本地 dev server
+   *    或嵌入版的 `http://127.0.0.1:<port>/`），拿到一坨 HTML 当音源，报错还指向错误方向。
+   */
+  if (lib.autoDownload === false || lib.source.trim() === '') {
+    throw new Error(hqBankManualOnlyText(lib))
+  }
   /** 各候选源的失败原因（用于给用户一句能照着做的提示） */
   const tried: string[] = []
   try {
