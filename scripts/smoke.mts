@@ -248,6 +248,8 @@ import type { DiscoveryIo } from '../src/playback/bankDiscovery.ts'
 import { ETHNIC_ALIASES, ethnicAliasOf, ethnicLabel, ethnicGmLabel } from '@ijipu/engine/index.ts'
 // adj1028：勾选启用的三个函数（引擎深路径：index.ts 正被另一条工作流改动，不往里加导出行）
 import { setEnabledEthnicVoices, isEthnicUsable } from '@ijipu/engine/playback/ethnicVoices.ts'
+// adj1030：底栏音色选项合并（GM 勾选 + 民乐勾选）
+import { playbackVoiceOptions } from '@ijipu/engine/playback/voiceOptions.ts'
 import type { BankRecord, LegacyBankEntry, LegacyBankIo } from '../src/playback/bankRegistry.ts'
 // adj417：按钮图标清单（public/icons/ 下的文件名）——断言文件存在、sw.js 预热清单未漂移
 import { ICON_DIR, ICON_FILES, ICON_FILE_NAMES } from '../src/ui/toolIcons.ts'
@@ -21433,8 +21435,11 @@ async function runAdj1019Tests() {
     ETHNIC_ALIASES.filter((a) => !GM_VOICES.some((v) => v.program === a.program))
       .map((a) => `${a.name}:${a.program}`)
       .join(','))
-  check('adj1019 显示名**一律**带「（拟）」——不许裸露民族乐器名',
-    ETHNIC_ALIASES.every((a) => ethnicLabel(a) === `${a.name}（拟）`))
+  check('adj1029 名字是**裸名**（可直接写进 `@二胡@`）；「（拟）」只留在页签标题与说明里',
+    ETHNIC_ALIASES.every((a) => ethnicLabel(a) === a.name && !/[（(]拟[）)]/.test(ethnicLabel(a))))
+  check('adj1029 兼容旧标签：`二胡（拟）` / `二胡(拟)` 仍解析到 110（有人照着旧界面复制也不至于失效）',
+    ethnicAliasOf('二胡（拟）')?.program === 110 && ethnicAliasOf('二胡(拟)')?.program === 110 &&
+      instrumentToProgram('二胡（拟）') === 110)
 
   check('adj1019 解析真的生效：二胡→110 / 琵琶→105 / 古筝→107 / 唢呐→111 / 埙→79',
     instrumentToProgram('二胡') === 110 && instrumentToProgram('琵琶') === 105 &&
@@ -21513,6 +21518,24 @@ async function runAdj1028Tests() {
       /ethnicGmLabel\(a\)/.test(pickerSrc))
   check('adj1028 应用内说明写明"先勾选才生效"',
     /先在「指定音色 → 民族乐器（拟）」里勾选/.test(panelSrc))
+  /**
+   * adj1030（用户实报）：「选择完民乐音色后，在试听底栏的音色列表里看不到」。
+   * 底栏原来只列已勾选的 GM program，民乐名字在另一处 ⇒ 两套没合并。
+   */
+  const vOpts = playbackVoiceOptions([0], ['二胡'])
+  check('adj1030 底栏选项把民乐并进来：勾了二胡 ⇒ 出现 110，标签写「二胡（拟 · 110 民谣提琴）」',
+    vOpts.some((o) => o.program === 110 && o.ethnic && /^二胡（拟 · 110 /.test(o.label)) &&
+      vOpts.some((o) => o.program === 0 && !o.ethnic),
+    vOpts.map((o) => `${o.program}=${o.label}`).join(' | '))
+  check('adj1030 同一个 program 的多个民乐名合并成一条（不重复列出 110）',
+    playbackVoiceOptions([110], ['二胡', '高胡']).filter((o) => o.program === 110).length === 1 &&
+      /二胡\/高胡/.test(playbackVoiceOptions([], ['高胡', '二胡'])[0].label))
+  check('adj1030 一个都没勾（或名字不存在）⇒ 选项为空，不凭空多出条目',
+    playbackVoiceOptions([], []).length === 0 && playbackVoiceOptions([], ['不存在的乐器']).length === 0)
+  check('adj1030 底栏用合并后的选项表（不再直接 `GM_VOICE_OPTIONS.filter`）',
+    /playbackVoiceOptions\(playbackHqEnabled, ethnicVoicesEnabled\)/.test(
+      String(readFileSync(join(root, 'src', 'dialogs', 'PlaybackDialog.tsx'), 'utf8')),
+    ))
 }
 
 async function runAdj1021Tests() {

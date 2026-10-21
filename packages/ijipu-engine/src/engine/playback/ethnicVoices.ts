@@ -11,7 +11,8 @@
  *
  * 这些映射**只是"像"，不是"是"**：Fiddle 不是二胡、Koto 不是古筝。
  * 如果界面上只显示 `二胡 → 110`，用户会以为音源里真有二胡采样，拿去做正式作品才发现不对。
- * 所以：**凡是显示映射结果的地方，一律用 `ethnicLabel()` 的 `二胡（拟）`**。
+ * 所以「拟」要标出来 —— 但**标在页签/说明上，不标在名字上**（adj1029）：
+ * 名字是给用户写进 `@二胡@` 的，带后缀就写不进去。页签标题「民族乐器（拟）」+ 一句说明足够。
  *
  * 要真实民乐，请用外部音源（Ample China / Kong Audio 等 VST），应用侧只负责排谱与导出 MIDI。
  *
@@ -94,10 +95,16 @@ export const ETHNIC_ALIASES: EthnicAlias[] = [
   { name: '钹', program: 119 },
 ]
 
-/** 按名字查拟声映射（全名匹配；不做模糊匹配，避免"笛"误吞"长笛"） */
+/**
+ * 按名字查拟声映射（全名匹配；不做模糊匹配，避免"笛"误吞"长笛"）。
+ *
+ * adj1029（用户 2026-10-21）：**兼容带「（拟）」的写法** —— 界面上曾把标签写成
+ * `二胡（拟）`，用户可能照着复制；`二胡（拟）` / `二胡(拟)` 都按 `二胡` 认。
+ * 这层只是"别让人写不进去"，正常写法仍是裸名。
+ */
 export function ethnicAliasOf(name: string | undefined | null): EthnicAlias | undefined {
   if (!name) return undefined
-  const key = name.trim()
+  const key = name.trim().replace(/[（(]拟[）)]$/, '').trim()
   if (key === '') return undefined
   return ETHNIC_ALIASES.find((a) => a.name === key)
 }
@@ -135,13 +142,14 @@ export function isEthnicUsable(name: string | undefined | null): boolean {
 }
 
 /**
- * **显示名**：`二胡（拟）`。
+ * **可书写名**（谱面里写的就是它）：返回裸名字 `二胡`。
  *
- * 所有界面（音色选择器的说明、音色库面板的提示）都必须用它，而不是裸名字 ——
- * 裸名字会让人以为音源里真有这件乐器。
+ * adj1029（用户 2026-10-21）：「我写民乐乐器时是写 `@高胡@`，还是 `@高胡（拟）@`？」
+ * 名字是拿来写进脚本的，带后缀就写不进去；「拟」是**页签的说明**（标题已是
+ * 「民族乐器（拟）」），不该粘在名字上。所以这里不再拼「（拟）」。
  */
 export function ethnicLabel(alias: Pick<EthnicAlias, 'name'>): string {
-  return `${alias.name}（拟）`
+  return alias.name
 }
 
 /**

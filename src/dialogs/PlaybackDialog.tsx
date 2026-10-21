@@ -46,7 +46,9 @@ import { hostBankUrl } from '../store/hostBridge'
 import { playbackCopy } from '../brand/copy'
 import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../playback/spessaCache'
 // adj1011：`resolveActiveLibrary` = "当前用哪个库"的唯一判据（与导出/面板同源）
-import { SpessaSynthBackend, resolveActiveLibrary, hasBuiltinBank, GM_VOICE_OPTIONS, firstEnabledInstrumentRef, enabledInstrumentRefs, hqBankFailureText } from '../playback/spessaSynthBackend'
+import { SpessaSynthBackend, resolveActiveLibrary, hasBuiltinBank, firstEnabledInstrumentRef, enabledInstrumentRefs, hqBankFailureText } from '../playback/spessaSynthBackend'
+// adj1030：底栏音色下拉 = GM 勾选 + 民乐勾选（同一张表、按 program 去重）
+import { playbackVoiceOptions } from '@ijipu/engine/playback/voiceOptions'
 // adj409：暂停/续播的剩余事件平移（纯函数）
 import { shiftEventsFrom } from '../playback/playbackTimeline'
 // adj647：宿主字体实测（与预览同一份 ⇒ 色块位置一致；见 preview/fontMeta.ts）
@@ -90,6 +92,12 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   const playbackTick = useUiStore((s) => s.playbackTick)
   // adj332：已启用音色集合——试听音色下拉只列这些（避免 128 项全列）
   const playbackHqEnabled = useUiStore(enabledVoicesOf)
+  /** adj1030：民乐页签勾选的名字 —— 底栏音色列表要把它们并进来，否则"勾了却看不到" */
+  const ethnicVoicesEnabled = useUiStore((s) => s.ethnicVoicesEnabled)
+  const voiceOptions = useMemo(
+    () => playbackVoiceOptions(playbackHqEnabled, ethnicVoicesEnabled),
+    [playbackHqEnabled, ethnicVoicesEnabled],
+  )
   const playbackHqVoice = useUiStore((s) => s.playbackHqVoice)
   const setPlaybackHqVoice = useUiStore((s) => s.setPlaybackHqVoice)
   /** adj1011：当前选中的音色库（L1 偏好）；库被删/换机器时自动回退默认库并标 fallback */
@@ -819,7 +827,9 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
               >
                 {/* adj366：默认项 = 自动（跟随谱面声部/乐器） */}
                 <option value="">{playbackCopy.voiceAuto}</option>
-                {GM_VOICE_OPTIONS.filter((v) => playbackHqEnabled.includes(v.program)).map((v) => (
+                {/* adj1030：选项 = 「音色清单」勾选的 GM 音色 + 「民族乐器（拟）」勾选的名字，
+                    按 program 合并去重；民乐名旁标出它落到哪个 GM 音色（`二胡（拟 · 110 民谣提琴）`） */}
+                {voiceOptions.map((v) => (
                   <option key={v.program} value={v.program}>{v.label}</option>
                 ))}
               </select>
