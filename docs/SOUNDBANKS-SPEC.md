@@ -71,7 +71,8 @@
 > 这一节讲"音源本体从哪来"，与上面的语法无关；改打包方式或音源来源时同步本节与 `scripts/check-installer.mjs`。
 >
 > ⚠ **adj1009 起要改成"多音色库"**（库列表 / 可添加 / 可切换）：方案与现状诊断见
-> **`docs/SOUNDBANK-LIBRARY-PLAN.md`**。本节现有的"只有一个默认库"口径在该方案落地后作废，
+> **`docs/SOUNDBANK-LIBRARY-PLAN.md`**；页面与"扫描本机目录/推荐下载"见 **`docs/SOUNDBANK-PAGE-PLAN.md`**。
+> 本节现有的"只有一个默认库"口径在该方案落地后作废，
 > 届时按那份文档的 §五、§六 重写本节。
 
 **来源优先级（`src/playback/spessaCache.ts` 的 `resolveHqBank`，试听/导出共用）**：
