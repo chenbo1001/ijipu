@@ -137,14 +137,15 @@ export function buildCameraTrack(
   }))
 
   /**
-   * 横向关键帧：**让当前音尽量居中**。
+   * 横向关键帧：**两段式**（用户口径）——色块走到画面右 3/4 才推，一次推到左 1/4。
    *
-   * 早期写的是"出了安全区才推、推完停在 62.5%"，实测观感是"色块一直贴着框边、像没推"。
-   * 现在改成：偏离中心超过一个小死区就推回中心（死区防抖，避免每个音都微调），
-   * 到页边时由夹紧兜住（此时色块贴边是物理必然）。
+   * 也就是说：色块在 25%~75% 之间自由走，越界就平移**半个画面**把它带回另一侧的 1/4。
+   * 比"一直居中"少一半的推动次数，观感更像翻谱而不是镜头黏着音符。
+   *
+   * 换算：色块在 75% 处 ⇒ 距中心 +0.5×半宽；要把它放到 25% ⇒ 新中心 = 色块 + 0.5×半宽。
    */
   const halfW = viewW / zoomFollow / 2
-  const deadband = Math.max(4, halfW * 0.15)
+  const sweep = halfW * 0.5
   const pans: CameraPan[] = []
   let cx = paper.width / 2
   let lastRow = -1
@@ -160,9 +161,15 @@ export function buildCameraTrack(
       rowStartT = r.t0
     }
     const rectCx = r.x + r.w / 2
-    if (!isRowStart && Math.abs(rectCx - cx) <= deadband) continue
-    // 目标就是**这个音的中心**；只保证中心落在页内（允许取景框探出页边 ⇒ 色块才能真的居中）
-    cx = Math.max(0, Math.min(paper.width, rectCx))
+    if (!isRowStart) {
+      if (rectCx > cx + sweep) cx = rectCx + sweep
+      else if (rectCx < cx - sweep) cx = rectCx - sweep
+      else continue
+    } else {
+      cx = rectCx + sweep
+    }
+    // 只保证中心落在页内（允许取景框探出页边 ⇒ 色块才能真的落在 1/4 处）
+    cx = Math.max(0, Math.min(paper.width, cx))
     const last = pans[pans.length - 1]
     if (last && Math.abs(last.cx - cx) < 0.5) continue
     pans.push(
