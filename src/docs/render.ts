@@ -29,7 +29,7 @@ export interface DocPage {
    * 文档标识：与四份 md 一一对应。
    * `plugin` / `cli` **只在官网有**，不进应用内帮助（`docs/PLUGIN-GUIDE.md` / `docs/CLI-手册.md`）。
    */
-  kind: 'manual' | 'syntax' | 'plugin' | 'cli'
+  kind: 'manual' | 'syntax' | 'plugin' | 'cli' | 'soundfonts'
   /** 浏览器页签后缀（形如「操作手册 - 爱记谱 iJipu」） */
   title: string
   /** Markdown 原文 */
