@@ -32571,4 +32571,21 @@ function runDynamicCameraTests(): void {
     }
   }
   check('M3 跟拍阶段每个音都在取景框内', badNote === '', badNote)
+
+  // 用户口径：色块要待在**画面中间带**（1/4 ~ 3/4），别贴着框边
+  let offCenter = ''
+  for (let i = 0; i < track.rects.length; i++) {
+    const r = track.rects[i]
+    const t = (r.t0 + r.t1) / 2
+    if (t <= cam.firstT + cam.introMs) continue
+    const f = cameraAt(cam, t)
+    if (f.pageIndex !== r.pageIndex) continue
+    const h = halfW(f.zoom)
+    const frac = (r.x + r.w / 2 - (f.cx - h)) / (2 * h)
+    if (frac < 0.2 || frac > 0.8) {
+      offCenter = `t=${Math.round(t)} 位置=${(frac * 100).toFixed(0)}%`
+      break
+    }
+  }
+  check('M3 跟拍时色块落在画面中间带（横向 20%~80%）', offCenter === '', offCenter)
 }

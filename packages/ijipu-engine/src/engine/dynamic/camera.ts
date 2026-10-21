@@ -90,7 +90,6 @@ export interface CameraTrack {
   firstT: number
   rows: CameraRow[]
   pans: CameraPan[]
-  safeHalf: number
   introMs: number
   lineMs: number
   panMs: number
@@ -121,7 +120,6 @@ export function buildCameraTrack(
   const introMs = opts.introMs ?? CAMERA_INTRO_MS
   const lineMs = opts.lineMs ?? CAMERA_LINE_MS
   const panMs = opts.panMs ?? CAMERA_PAN_MS
-  const safeHalf = opts.safeHalf ?? CAMERA_SAFE_HALF
 
   const zoomFit = viewW / paper.width
   const firstT = view.rows.length > 0 ? view.rows[0].t0 : 0
@@ -135,10 +133,14 @@ export function buildCameraTrack(
   }))
 
   /**
-   * 横向关键帧：按时间扫一遍矩形，只在"当前音要出安全区"时推一次。
-   * 不能每拍都记——那样镜头会一直抖；也不计时插值——那样永远在慢慢漂。
+   * 横向关键帧：**让当前音尽量居中**。
+   *
+   * 早期写的是"出了安全区才推、推完停在 62.5%"，实测观感是"色块一直贴着框边、像没推"。
+   * 现在改成：偏离中心超过一个小死区就推回中心（死区防抖，避免每个音都微调），
+   * 到页边时由夹紧兜住（此时色块贴边是物理必然）。
    */
   const halfW = viewW / zoomFollow / 2
+  const deadband = Math.max(4, halfW * 0.15)
   const pans: CameraPan[] = []
   let cx = paper.width / 2
   let lastRow = -1
@@ -154,12 +156,8 @@ export function buildCameraTrack(
       rowStartT = r.t0
     }
     const rectCx = r.x + r.w / 2
-    const safeL = cx - halfW * safeHalf
-    const safeR = cx + halfW * safeHalf
-    if (rectCx > safeR) cx = rectCx - halfW * safeHalf
-    else if (rectCx < safeL) cx = rectCx + halfW * safeHalf
-    else continue
-    cx = Math.max(halfW, Math.min(paper.width - halfW, cx))
+    if (!isRowStart && Math.abs(rectCx - cx) <= deadband) continue
+    cx = Math.max(halfW, Math.min(paper.width - halfW, rectCx))
     const last = pans[pans.length - 1]
     if (last && Math.abs(last.cx - cx) < 0.5) continue
     pans.push(
@@ -181,7 +179,6 @@ export function buildCameraTrack(
     firstT,
     rows,
     pans,
-    safeHalf,
     introMs,
     lineMs,
     panMs,
@@ -240,6 +237,9 @@ export function cameraAt(cam: CameraTrack, t: number): CameraFrame {
   // 横向夹紧：按**当前缩放**算半宽（片头满宽时半宽接近页宽的一半，不能再用跟拍那套常量）
   const hw = cam.viewW / zoom / 2
   cx = cam.pageW <= 2 * hw ? cam.pageW / 2 : Math.max(hw, Math.min(cam.pageW - hw, cx))
+  // 纵向同理：不许把取景框顶到页面外（否则画面上下露白）
+  const hh = cam.viewH / zoom / 2
+  cy = cam.pageH <= 2 * hh ? cam.pageH / 2 : Math.max(hh, Math.min(cam.pageH - hh, cy))
 
   return { pageIndex: row.pageIndex, cx, cy, zoom }
 }
