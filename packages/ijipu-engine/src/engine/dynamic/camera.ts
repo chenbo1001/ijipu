@@ -157,7 +157,8 @@ export function buildCameraTrack(
     }
     const rectCx = r.x + r.w / 2
     if (!isRowStart && Math.abs(rectCx - cx) <= deadband) continue
-    cx = Math.max(halfW, Math.min(paper.width - halfW, rectCx))
+    // 目标就是**这个音的中心**；只保证中心落在页内（允许取景框探出页边 ⇒ 色块才能真的居中）
+    cx = Math.max(0, Math.min(paper.width, rectCx))
     const last = pans[pans.length - 1]
     if (last && Math.abs(last.cx - cx) < 0.5) continue
     pans.push(
@@ -205,21 +206,21 @@ function rowAt(cam: CameraTrack, t: number): { row: CameraRow; prev?: CameraRow 
 export function cameraAt(cam: CameraTrack, t: number): CameraFrame {
   const { row, prev } = rowAt(cam, t)
 
-  // 纵向：换行的平移**从行边界开始**（与横移同一原则：不提前离开上一行）
-  let cy = t <= cam.firstT ? cam.pageH / 2 : row.cy
+  // 片头进度：0 = 整页满宽，1 = 完全进入跟拍。缩放、横移、纵移都按这一个 k 走，
+  // 否则会出现"先跳过去再推近"（用户实测："刚开始播放时没有平移，色块不在视界里"）。
+  const introK = t <= cam.firstT ? 0 : ease((t - cam.firstT) / Math.max(1, cam.introMs))
+  const zoom = cam.zoomFit + (cam.zoomFollow - cam.zoomFit) * introK
+
+  // 纵向：换行的平移从行边界开始（不提前离开上一行）
+  let cy = row.cy
   if (prev && row.t0 > prev.t0) {
     const k = ease((t - row.t0) / Math.max(1, cam.lineMs))
     cy = prev.cy + (row.cy - prev.cy) * k
   }
+  // 片头从整页中心平滑过渡到当前行
+  cy = cam.pageH / 2 + (cy - cam.pageH / 2) * introK
 
-  // 缩放：第一拍之前满宽；第一拍之后 introMs 内推到跟拍倍数
-  let zoom = cam.zoomFit
-  if (t > cam.firstT) {
-    const k = ease((t - cam.firstT) / Math.max(1, cam.introMs))
-    zoom = cam.zoomFit + (cam.zoomFollow - cam.zoomFit) * k
-  }
-
-  // 横向：按关键帧的 from/dur 推移；**换行那一帧 dur=0**，直接在边界上归位
+  // 横向：按关键帧的 from/dur 推移；换行那一帧 dur=0，直接在边界上归位
   let cx = cam.pans[0]?.cx ?? cam.pageW / 2
   for (let i = 0; i < cam.pans.length; i++) {
     const p = cam.pans[i]
@@ -233,11 +234,18 @@ export function cameraAt(cam: CameraTrack, t: number): CameraFrame {
       break
     }
   }
+  // 片头同样从整页中心过渡（与缩放同步，观感才是"推近"而不是"跳"）
+  cx = cam.pageW / 2 + (cx - cam.pageW / 2) * introK
 
-  // 横向夹紧：按**当前缩放**算半宽（片头满宽时半宽接近页宽的一半，不能再用跟拍那套常量）
+  /**
+   * 夹紧：
+   *  - 取景框比页面宽（片头）⇒ 必须整页居中，否则一侧露白；
+   *  - 已经推近 ⇒ 只要求"页面还有一块在框里"，**允许探出页边**——
+   *    首行的音靠左边距，不放行的话它就永远停在 18% 的位置（用户实测就是这个）。
+   */
   const hw = cam.viewW / zoom / 2
-  cx = cam.pageW <= 2 * hw ? cam.pageW / 2 : Math.max(hw, Math.min(cam.pageW - hw, cx))
-  // 纵向同理：不许把取景框顶到页面外（否则画面上下露白）
+  cx = cam.pageW <= 2 * hw ? cam.pageW / 2 : Math.max(0, Math.min(cam.pageW, cx))
+  // 纵向保持"页面填满画面"：上下露白比左右露白更扎眼
   const hh = cam.viewH / zoom / 2
   cy = cam.pageH <= 2 * hh ? cam.pageH / 2 : Math.max(hh, Math.min(cam.pageH - hh, cy))
 

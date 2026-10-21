@@ -32517,12 +32517,13 @@ function runDynamicCameraTests(): void {
   )
 
   check(
-    'M3 取景框永远不越出页面左右',
+    'M3 取景框始终有一半以上压在页面上（允许探出页边，但不能整屏空白）',
     (() => {
       for (let t = 0; t <= track.endMs; t += 41) {
         const f = cameraAt(cam, t)
         const h = halfW(f.zoom)
-        if (f.cx - h < -1e-6 || f.cx + h > cam.pageW + 1e-6) return false
+        const overlap = Math.max(0, Math.min(f.cx + h, cam.pageW) - Math.max(f.cx - h, 0))
+        if (overlap / (2 * h) < 0.5) return false
       }
       return true
     })(),
