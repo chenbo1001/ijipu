@@ -65,15 +65,24 @@ export function VoicePickerDialog() {
   }, [lib.id])
 
   /** 本库可选音色：有预设表就用它（只 bank 0），否则回退 GM 标准 128 个 */
+  /**
+   * adj1017：**只有"音色表真的解析过"才算本库的音色**。
+   *
+   * 原来判的是 `record` 有没有（`bank0.length > 0`），于是"扫描登记过、但音色表还没解析"的库
+   * 会静默回退成 GM 标准 128 个中文名——看上去和 GeneralUser 一模一样，用户会以为"换库没换音色"。
+   */
+  const presetsKnown = !!record && record.presetsKnown === true
   const rows = useMemo<PickerRow[]>(() => {
-    const bank0 = record ? record.presets.filter((p) => p.bank === 0) : []
-    if (bank0.length > 0) {
-      return bank0
+    if (record && record.presetsKnown === true) {
+      return record.presets
+        .filter((p) => p.bank === 0)
         .map((p) => ({ program: p.program, zh: zhNameOf(p.program), libName: p.name }))
         .sort((a, b) => a.program - b.program)
     }
     return GM_VOICE_OPTIONS.map((v) => ({ program: v.program, zh: zhNameOf(v.program) }))
   }, [record])
+  /** 本库确实没有 bank 0（只有变体/鼓组）——这时**不能**拿 GM 128 个来冒充 */
+  const noBank0 = presetsKnown && rows.length === 0
 
   /** 按关键词过滤（中文名或本库原名，大小写不敏感） */
   const filtered = useMemo(() => {
@@ -158,10 +167,15 @@ export function VoicePickerDialog() {
           />
         </div>
         <div style={{ color: HIGHLIGHT, fontSize: 11 }}>
-          {voicePickerCopy.summary(enabled.length, rows.length, lib.name)}
+          {/* 回退到 GM 标准名时不带库名（否则会让人以为"本库就叫这些名字"） */}
+          {voicePickerCopy.summary(enabled.length, rows.length, presetsKnown ? lib.name : undefined)}
         </div>
-        {/* adj1012：本库音色表还没读到 ⇒ 如实说明下面是 GM 标准名（而不是假装这就是本库的音色） */}
-        {!record && <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>{voicePickerCopy.fallbackHint}</div>}
+        {/* adj1017：判定改成"**音色表是否真的解析过**"——只判 `record` 有没有会让
+            "扫描登记过但没解析"的库静默回退、而提示不出现（用户以为换库没换音色） */}
+        {!presetsKnown && (
+          <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>{voicePickerCopy.fallbackHint(lib.name)}</div>
+        )}
+        {noBank0 && <div style={{ color: 'var(--jp-warning)', fontSize: 11 }}>{voicePickerCopy.noBank0Hint}</div>}
 
         {/* 主体：分组列表（无关键词时）或平铺列表（有过滤时） */}
         <div style={{ maxHeight: 'min(420px, 60vh)', overflow: 'auto', border: '1px solid var(--jp-border)', borderRadius: 6, padding: '4px 6px' }}>

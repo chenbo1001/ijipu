@@ -447,7 +447,12 @@ export function SoundBankPanel() {
       <div style={{ ...ROW_BOX, alignItems: 'center', borderColor: 'var(--jp-accent)' }}>
         <span style={{ color: HIGHLIGHT, fontSize: 11 }}>当前使用</span>
         <strong style={{ fontWeight: 600 }}>{currentHqLib.name}</strong>
-        {presetSummary && <span style={SMALL}>{presetSummary.bank0} 个可选音色</span>}
+        {activeRecord?.presetsKnown === true ? (
+          <span style={SMALL}>{presetSummary?.bank0 ?? 0} 个可选音色</span>
+        ) : (
+          // adj1017：音色表没解析时，**不能**拿 GM 回退的 128 个当"本库音色数"（会和别的库看起来一样）
+          <span style={{ color: 'var(--jp-warning)', fontSize: 11 }}>本库音色表未读取</span>
+        )}
         {activeRecord?.present === false && (
           <span style={{ color: 'var(--jp-warning)', fontSize: 11 }}>· 本地文件不在了</span>
         )}
@@ -785,7 +790,7 @@ export function SoundBankPanel() {
           <button className="btn" style={BTN} onClick={clearAll}>全消本库</button>
           <span style={{ ...SMALL, marginLeft: 'auto' }}>
             已选 <strong style={{ color: 'var(--jp-text-primary)' }}>{enabled.length}</strong> / {voiceTotal}
-            {activeRecord ? '（本库）' : '（GM 标准名，本库音色表还没读到）'}
+            {activeRecord?.presetsKnown === true ? '（本库）' : '（GM 标准名，本库音色表还没读到）'}
           </span>
         </div>
         {presetSummary && presetSummary.other > 0 && (
@@ -794,7 +799,7 @@ export function SoundBankPanel() {
             个变体/鼓组（要 bank select，暂不开放）。
           </div>
         )}
-        {!activeRecord && (
+        {activeRecord?.presetsKnown !== true && (
           <div style={{ ...SMALL, marginTop: 4 }}>
             还没读到这个库的音色表——先在上面把它下载/导入好；在那之前音色按 GM 标准 128 个来选。
           </div>

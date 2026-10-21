@@ -21002,7 +21002,7 @@ async function runAdj1012Tests() {
   check('adj1012 面板：**不再**写死默认库（`HQ_LIBRARIES[0]` 已清零）',
     !/HQ_LIBRARIES\[0\]/.test(panelSrc))
   check('adj1012 选择器：按当前库列音色（读 `record.presets`）并显示"中文名 + 本库原名"',
-    /resolveActiveLibrary\(hqLibrary\)/.test(pickerSrc) && /record\.presets\.filter/.test(pickerSrc) &&
+    /resolveActiveLibrary\(hqLibrary\)/.test(pickerSrc) && /record\.presets[\s\S]{0,60}\.filter\(/.test(pickerSrc) &&
       /libName/.test(pickerSrc) && /GM_GROUPS/.test(pickerSrc))
   check('adj1012 store：收藏改成 `playbackHqEnabledByLib` + 唯一读取口 `enabledVoicesOf`',
     /playbackHqEnabledByLib: Record<string, number\[\]>/.test(storeSrc) &&
@@ -21266,6 +21266,26 @@ async function runAdj1016Tests() {
     })())
   check('adj1016 坏文件有诊断入口（跳过几个 + 看原因），不是静默吞掉',
     /个文件被跳过/.test(panel) && /看原因/.test(panel))
+
+  /**
+   * adj1017（用户实报「切了第二个库，音色列表还是一样的」）：
+   * 判据必须是"**音色表真的解析过**"，不能只判"记录在不在"——
+   * 扫描登记过但没解析的库会静默回退成 GM 128 个中文名，看起来和别的库一模一样。
+   */
+  const picker = String(readFileSync(join(root, 'src', 'dialogs', 'VoicePickerDialog.tsx'), 'utf8'))
+  const copy = String(readFileSync(join(root, 'src', 'brand', 'copy.ts'), 'utf8'))
+  check('adj1017 选择器按 `presetsKnown === true` 判"本库音色"，不再只看 `record` 存在',
+    /const presetsKnown = !!record && record\.presetsKnown === true/.test(picker) &&
+      // 负对照：旧写法（只判 record 就拿来当本库音色）必须已消失
+      !/const bank0 = record \? record\.presets\.filter/.test(picker))
+  check('adj1017 音色表没解析时**一定**出提示（原来 `!record` 的写法在"有记录没解析"时不出提示）',
+    /\{!presetsKnown && \(/.test(picker) && /fallbackHint\(lib\.name\)/.test(picker))
+  check('adj1017 提示文案说清"这些名字不是本库的"（不是轻描淡写一句"还没读到"）',
+    /fallbackHint: \(libName: string\)/.test(copy) && /这些名字不是本库的/.test(copy))
+  check('adj1017 本库确实没有 bank 0 时**不拿 GM 128 个冒充**（明确说暂不支持）',
+    /noBank0/.test(picker) && /noBank0Hint/.test(copy))
+  check('adj1017 面板摘要也按 presetsKnown 判：未解析就写"本库音色表未读取"，不显示 128',
+    /activeRecord\?\.presetsKnown === true \?/.test(panel) && /本库音色表未读取/.test(panel))
 }
 
 

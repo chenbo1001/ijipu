@@ -696,8 +696,11 @@ export const voicePickerCopy = {
   /** 顶部统计行；adj1012：带上"当前库"——同一个 program 在不同库里名字不同，不写库名会让人以为选错了 */
   summary: (selected: number, total: number, libName?: string): string =>
     `已选 ${selected} / ${total} 个音色${libName ? `（本库：${libName}）` : ''}（仅勾选项进入「试听」面板的音色下拉）。`,
-  /** adj1012：本库音色表还没读到时，如实说明下面是 GM 标准名 */
-  fallbackHint: '还没读到这个库的音色表（先在「音色库」里下载/导入它）——下面按 GM 标准 128 个显示。',
+  /** adj1012/adj1017：本库音色表还没读到时，**必须说清"下面不是本库的名字"** */
+  fallbackHint: (libName: string): string =>
+    `「${libName}」的音色表还没读到（先在「音色库」里下载/导入这个库）——下面按 GM 标准 128 个显示，**这些名字不是本库的**。`,
+  /** adj1017：本库确实没有 bank 0（只有变体/鼓组）——比"假装有 128 个"诚实 */
+  noBank0Hint: '本库没有 bank 0（GM 主音色），只有变体/鼓组——暂不支持选择。',
   /** 快捷按钮 */
   selectAll: '全选',
   clearAll: '全消',
