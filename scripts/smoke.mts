@@ -235,6 +235,9 @@ import { hasBuiltinBank, loadHqBank, GM_VOICE_OPTIONS } from '../src/playback/sp
 import type { HqSampleLibrary } from '../src/playback/spessaSynthBackend.ts'
 // adj1009（多音色库 P1）：SF2 头部解析 + 已知库认领（引擎纯函数；本文件用**手搓夹具 + 真文件**双重断言）
 import { isSf2, isGitLfsPointer, readSf2Info, readSf2Presets, summarizeSf2Presets, matchKnownLibrary, HQ_LIBRARIES, findKnownLibrary } from '@ijipu/engine/index.ts'
+// adj1010（多音色库 P2）：库注册表——导入识别（纯函数）与一次性迁移（可注入 IO 的编排）
+import { fingerprintOf, bankIdOf, readBankFile, planLegacyMigration, migrateLegacyBanks } from '../src/playback/bankRegistry.ts'
+import type { BankRecord, LegacyBankEntry, LegacyBankIo } from '../src/playback/bankRegistry.ts'
 // adj417：按钮图标清单（public/icons/ 下的文件名）——断言文件存在、sw.js 预热清单未漂移
 import { ICON_DIR, ICON_FILES, ICON_FILE_NAMES } from '../src/ui/toolIcons.ts'
 // adj526：数值"按住上下拖"的纯换算（上拖增大 / 粗调 / 钳制 / 无范围时相对增量）
@@ -20422,6 +20425,8 @@ runAdj927ExternalChangeTests()
       })
       // adj1009：多音色库 P1——SF2 头部解析（手搓夹具 + 两个真文件）
       .then(() => runAdj1009Tests())
+      // adj1010：多音色库 P2——库注册表（导入识别 + 一次性迁移）
+      .then(() => runAdj1010Tests())
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
       .then(() => runAdj949ManualScopeTests())
@@ -20433,24 +20438,18 @@ runAdj927ExternalChangeTests()
 
 
 /**
- * ---- 103. SF2 头部元数据解析（adj1009，多音色库 P1）----
+ * ---- 公共夹具：最小 SF2（[200] 与 [201] 共用，避免两份手搓字节各写一遍后漂移）----
  *
- * 守的是三件"看起来对、其实会错"的事：
- *
- * ① **末条终止记录必须无条件丢掉**：SF2 规范是 `presets 数 = phdr 记录数 − 1`，但现实里
- *    GeneralUser 与 FluidR3 都把末条名字写成了 `"EOP"`（不是空字段）⇒ 按"名字为空就跳过"过滤
- *    会把 **0 号音色覆盖成 "EOP"**（我第一版探针就这么错的）。
- * ② **记录顺序不能当索引**：FluidR3 的 phdr 第一条是 `0:127 Gun Shot`，必须自己按
- *    `(bank, program)` 排序。
- * ③ **库名（INAM）才是身份**：GeneralUser 2.0.3 与 v1.471 要归到同一个库 id；文件名不可信。
- *
- * 夹具是手搓的（几十字节），真文件只在"文件在"时才验 —— `FluidR3_GM.sf2` 有 141 MB 且
- * **未跟踪进 git**（只在作者本机），CI 上没有它，不能让 smoke 因此变红。
+ * 只拼 `RIFF sfbk` + `LIST INFO`（可选）+ `LIST pdta/phdr`，**不含任何采样数据** ——
+ * 对"读头部"的解析器来说足够了（真文件里 99% 的字节是采样）。
+ * `presets` 之后**自动追加一条末条终止记录**（名字可配，默认 `"EOP"`，复刻两个真文件的样子）。
  */
-async function runAdj1009Tests() {
-  console.log('[200] sf2 metadata: info / presets / known-library matching (adj1009)')
-
-  // ---------- 夹具：最小 SF2（RIFF sfbk + LIST INFO + LIST pdta/phdr）----------
+function buildSf2Fixture(opts: {
+  info?: { name?: string; engineer?: string; software?: string; version?: [number, number] }
+  presets: { name: string; program: number; bank: number }[]
+  /** 末条终止记录的名字；传 `''` 可测"没有 INAM/没有终止名"的退化情形 */
+  eopName?: string
+}): Buffer {
   const chunk = (id: string, payload: Uint8Array): Buffer => {
     const body = Buffer.from(payload)
     const head = Buffer.alloc(8)
@@ -20470,26 +20469,62 @@ async function runAdj1009Tests() {
     b.writeUInt16LE(bank, 22)
     return b
   }
-  const ifil = Buffer.alloc(4)
-  ifil.writeUInt16LE(2, 0)
-  ifil.writeUInt16LE(1, 2)
-  // 故意：记录 4 条 + 末条 "EOP"（复刻真文件的样子）；顺序也故意打乱
+  const top: Buffer[] = []
+  if (opts.info) {
+    const infoChunks: Buffer[] = []
+    if (opts.info.name) infoChunks.push(infoText('INAM', opts.info.name))
+    if (opts.info.engineer) infoChunks.push(infoText('IENG', opts.info.engineer))
+    if (opts.info.software) infoChunks.push(infoText('ISFT', opts.info.software))
+    if (opts.info.version) {
+      const ifil = Buffer.alloc(4)
+      ifil.writeUInt16LE(opts.info.version[0], 0)
+      ifil.writeUInt16LE(opts.info.version[1], 2)
+      infoChunks.push(chunk('ifil', ifil))
+    }
+    if (infoChunks.length > 0) top.push(list('INFO', infoChunks))
+  }
   const phdr = Buffer.concat([
-    phdrRecord('Zeta', 5, 0),
-    phdrRecord('Alpha', 0, 0),
-    phdrRecord('Kit', 0, 128),
-    phdrRecord('Beta', 3, 0),
-    phdrRecord('EOP', 0, 0),
+    ...opts.presets.map((p) => phdrRecord(p.name, p.program, p.bank)),
+    phdrRecord(opts.eopName ?? 'EOP', 0, 0),
   ])
-  const sub = Buffer.concat([
-    list('INFO', [infoText('INAM', 'Test Bank'), infoText('IENG', 'Tester'), infoText('ISFT', 'Fixture'), chunk('ifil', ifil)]),
-    list('pdta', [chunk('phdr', phdr)]),
-  ])
+  top.push(list('pdta', [chunk('phdr', phdr)]))
+  const sub = Buffer.concat(top)
   const riffHead = Buffer.alloc(12)
   riffHead.write('RIFF', 0, 'latin1')
   riffHead.writeUInt32LE(sub.length + 4, 4)
   riffHead.write('sfbk', 8, 'latin1')
-  const fixture = Buffer.concat([riffHead, sub])
+  return Buffer.concat([riffHead, sub])
+}
+
+/**
+ * ---- 103. SF2 头部元数据解析（adj1009，多音色库 P1）----
+ *
+ * 守的是三件"看起来对、其实会错"的事：
+ *
+ * ① **末条终止记录必须无条件丢掉**：SF2 规范是 `presets 数 = phdr 记录数 − 1`，但现实里
+ *    GeneralUser 与 FluidR3 都把末条名字写成了 `"EOP"`（不是空字段）⇒ 按"名字为空就跳过"过滤
+ *    会把 **0 号音色覆盖成 "EOP"**（我第一版探针就这么错的）。
+ * ② **记录顺序不能当索引**：FluidR3 的 phdr 第一条是 `0:127 Gun Shot`，必须自己按
+ *    `(bank, program)` 排序。
+ * ③ **库名（INAM）才是身份**：GeneralUser 2.0.3 与 v1.471 要归到同一个库 id；文件名不可信。
+ *
+ * 夹具是手搓的（几十字节），真文件只在"文件在"时才验 —— `FluidR3_GM.sf2` 有 141 MB 且
+ * **未跟踪进 git**（只在作者本机），CI 上没有它，不能让 smoke 因此变红。
+ */
+async function runAdj1009Tests() {
+  console.log('[200] sf2 metadata: info / presets / known-library matching (adj1009)')
+
+  // ---------- 夹具：最小 SF2（构造器被 [201] 复用，见 buildSf2Fixture）----------
+  const fixture = buildSf2Fixture({
+    info: { name: 'Test Bank', engineer: 'Tester', software: 'Fixture', version: [2, 1] },
+    // 故意：顺序打乱 + 末条 "EOP"（复刻两个真文件的样子）
+    presets: [
+      { name: 'Zeta', program: 5, bank: 0 },
+      { name: 'Alpha', program: 0, bank: 0 },
+      { name: 'Kit', program: 0, bank: 128 },
+      { name: 'Beta', program: 3, bank: 0 },
+    ],
+  })
   // 同时准备 ArrayBuffer 形态（对外入口要能吃两种）
   const fixtureAb = new Uint8Array(fixture).buffer
 
@@ -20630,6 +20665,152 @@ async function runAdj1009Tests() {
   } else {
     console.log('  · (`resources/soundfonts/FluidR3_GM.sf2` 不在，跳过 FluidR3 真文件断言——它未跟踪进 git)')
   }
+}
+
+
+/**
+ * ---- 201. 音色库注册表：导入识别 + 一次性迁移（adj1010，多音色库 P2）----
+ *
+ * 守的是"用户实报的那个 bug"会不会换一种形态回来：
+ *
+ * ① 导入时**必须按文件内容（INAM）认库**，不能按文件名、更不能写死默认库的键
+ *    （旧实现把 FluidR3 的字节存进 `generaluser_gs` 名下 ⇒ 名字与音色列表都不变）。
+ * ② 三种"看起来像音源、其实不是"的输入要**分别**说清原因：Git LFS 指针 / 不是 SF2 / 读不出音色表。
+ * ③ 老缓存（v1 只有字节）要能**自动掰正**：`generaluser_gs` 键里装的若真是 FluidR3，搬到 `fluidr3_gm`。
+ */
+async function runAdj1010Tests() {
+  console.log('[201] soundbank registry: import recognition + one-time migration (adj1010)')
+
+  // ---------- 文件指纹 ----------
+  const sample = new Uint8Array([1, 2, 3, 4, 5])
+  const fp1 = fingerprintOf(sample)
+  check('adj1010 文件指纹：同内容同值、固定 8 位十六进制（跨会话稳定）',
+    fp1 === fingerprintOf(new Uint8Array([1, 2, 3, 4, 5])) && /^[0-9a-f]{8}$/.test(fp1), fp1)
+  check('adj1010 文件指纹：内容不同 / 长度不同都会变（长度也参与，避免头尾相同的大小文件撞车）',
+    fingerprintOf(new Uint8Array([1, 2, 3, 4, 6])) !== fp1 &&
+      fingerprintOf(new Uint8Array([1, 2, 3, 4, 5, 0])) !== fp1)
+
+  // ---------- 库 id ----------
+  check('adj1010 库 id：已知库按 INAM 认领，与指纹无关（同库不同版本归同一个 id）',
+    bankIdOf({ name: 'GeneralUser GS 2.0.3 BETA' }, 'deadbeef') === 'generaluser_gs' &&
+      bankIdOf({ name: 'Fluid R3 GM' }, 'deadbeef') === 'fluidr3_gm')
+  check('adj1010 库 id：认不出才用 imported_<8 位指纹>',
+    bankIdOf({ name: 'Some Random Bank' }, 'deadbeef') === 'imported_deadbeef' &&
+      /^imported_[0-9a-f]{8}$/.test(bankIdOf(null, '0123abcd')))
+
+  // ---------- 导入识别（纯函数） ----------
+  const fixtureOf = (name: string, presets: { name: string; program: number; bank: number }[]): ArrayBuffer =>
+    new Uint8Array(
+      buildSf2Fixture({
+        info: { name, engineer: 'Tester', software: 'Fixture', version: [2, 1] },
+        presets,
+      }),
+    ).buffer
+  const fourPresets = [
+    { name: 'Zeta', program: 5, bank: 0 },
+    { name: 'Alpha', program: 0, bank: 0 },
+    { name: 'Kit', program: 0, bank: 128 },
+    { name: 'Beta', program: 3, bank: 0 },
+  ]
+  const ab = fixtureOf('Test Bank', fourPresets)
+  const r = readBankFile(ab, 'whatever.sf2', { now: 123 })
+  const rec = r.ok ? r.record : null
+  check('adj1010 导入识别：库名取 INAM、预设表入记录、体积/格式/来源/时间都对',
+    !!rec && rec.name === 'Test Bank' && rec.presets.length === 4 &&
+      rec.sizeBytes === ab.byteLength && rec.format === 'sf2' && rec.origin === 'imported' && rec.addedAt === 123,
+    JSON.stringify(rec && { name: rec.name, n: rec.presets.length, size: rec.sizeBytes, at: rec.addedAt }))
+  check('adj1010 导入识别：记录里的预设表**已排序**（与 [200] 同一口径）',
+    !!rec && rec.presets.map((p) => `${p.bank}:${p.program}`).join(',') === '0:0,0:3,0:5,128:0',
+    rec ? rec.presets.map((p) => `${p.bank}:${p.program}`).join(',') : '')
+  check('adj1010 导入识别：认不出的库 id = imported_<指纹>（同文件重复导入得到同一个 id）',
+    !!rec && rec.id === `imported_${fingerprintOf(new Uint8Array(ab))}` &&
+      readBankFile(ab, 'again.sf2').ok,
+    rec?.id ?? '')
+
+  const sf3 = readBankFile(ab, 'SomeBank.sf3')
+  check('adj1010 导入识别：`.sf3` 记成 sf3 格式', sf3.ok && sf3.record.format === 'sf3')
+  const noInamAb = new Uint8Array(buildSf2Fixture({ presets: fourPresets })).buffer
+  const noInam = readBankFile(noInamAb, 'FluidR3 GM.sf2')
+  check('adj1010 导入识别：读不到 INAM 时**用文件名兜底**（不叫"未命名库"）',
+    noInam.ok && noInam.record.name === 'FluidR3 GM', noInam.ok ? noInam.record.name : noInam.error)
+
+  const lfsBytes = new TextEncoder().encode('version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 148398306\n')
+  const lfsRes = readBankFile(new Uint8Array(lfsBytes).buffer, 'FluidR3_GM.sf2')
+  check('adj1010 导入识别：Git LFS 指针被拒，并说清"去下载页下真正的 .sf2"',
+    !lfsRes.ok && lfsRes.error.includes('Git LFS') && lfsRes.error.includes('下载页'),
+    lfsRes.ok ? '被当成音源了' : lfsRes.error)
+  const junkRes = readBankFile(new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]).buffer, 'a.sf2')
+  check('adj1010 导入识别：不是 SF2 ⇒ 拒收（.txt 改后缀 / 下载中断都会走到这）',
+    !junkRes.ok && junkRes.error.includes('不是有效的 SF2'), junkRes.ok ? '被收下了' : junkRes.error)
+  const emptyRes = readBankFile(new Uint8Array(buildSf2Fixture({ info: { name: 'Empty' }, presets: [] })).buffer, 'empty.sf2')
+  check('adj1010 导入识别：能打开但一个音色都没有 ⇒ 也拒收（导入了也选不了音色）',
+    !emptyRes.ok && emptyRes.error.includes('音色表'), emptyRes.ok ? '被收下了' : emptyRes.error)
+
+  // ---------- 迁移决策（纯函数） ----------
+  const entry = (key: string, name: string, fingerprint: string): LegacyBankEntry => ({
+    key,
+    fileName: `${key}.sf2`,
+    sizeBytes: 1024,
+    fingerprint,
+    info: { name },
+    presets: [{ bank: 0, program: 0, name: 'Grand Piano' }],
+  })
+  const p1 = planLegacyMigration([entry('generaluser_gs', 'GeneralUser GS 2.0.3 BETA', 'aaaa1111')], 999)
+  check('adj1010 迁移①：键与内容一致 ⇒ 不搬、只登记元数据（通用情形）',
+    p1.moves.length === 0 && p1.records.length === 1 &&
+      p1.records[0].id === 'generaluser_gs' && p1.records[0].addedAt === 999,
+    JSON.stringify(p1.moves))
+  const p2 = planLegacyMigration([entry('generaluser_gs', 'Fluid R3 GM', 'bbbb2222')], 1)
+  check('adj1010 迁移②：**冒名的键**（generaluser_gs 里装的是 FluidR3）⇒ 搬到 fluidr3_gm 并按 INAM 改名',
+    p2.moves.length === 1 && p2.moves[0].from === 'generaluser_gs' && p2.moves[0].to === 'fluidr3_gm' &&
+      p2.records.length === 1 && p2.records[0].id === 'fluidr3_gm' && p2.records[0].name === 'Fluid R3 GM',
+    JSON.stringify(p2))
+  const p3 = planLegacyMigration([entry('legacy_x', 'Unknown Bank', 'cccc3333')], 1)
+  check('adj1010 迁移③：谁也认不出 ⇒ 搬到 imported_<指纹>（不丢用户的东西）',
+    p3.moves.length === 1 && p3.moves[0].to === 'imported_cccc3333' && p3.records[0].id === 'imported_cccc3333',
+    JSON.stringify(p3.moves))
+  const p4 = planLegacyMigration([entry('generaluser_gs', 'GeneralUser GS 2.0.3 BETA', 'd1'), entry('generaluser_old', 'GeneralUser GS v1.471', 'd2')], 1)
+  check('adj1010 迁移：两个旧键认领到同一个库 ⇒ 只登记一条（不互相覆盖）',
+    p4.records.length === 1 && p4.moves.length === 1, JSON.stringify({ records: p4.records.length, moves: p4.moves }))
+
+  // ---------- 迁移编排（假 IO 真跑一遍） ----------
+  const banks = new Map<string, ArrayBuffer>()
+  const libs = new Map<string, BankRecord>()
+  const io: LegacyBankIo = {
+    listLibs: async () => [...libs.values()],
+    listKeys: async () => [...banks.keys()],
+    read: async (key) => banks.get(key) ?? null,
+    save: async (key, bytes) => {
+      banks.set(key, bytes)
+    },
+    remove: async (key) => {
+      banks.delete(key)
+    },
+    put: async (record) => {
+      libs.set(record.id, record)
+    },
+  }
+  const idle = await migrateLegacyBanks(io, 1)
+  check('adj1010 迁移编排：没有任何旧字节 ⇒ 什么都不做（ran=false，不写空记录）',
+    idle.ran === false && idle.records === 0 && idle.moved.length === 0 && libs.size === 0)
+
+  banks.set('generaluser_gs', fixtureOf('Fluid R3 GM', fourPresets))
+  const first = await migrateLegacyBanks(io, 5000)
+  check('adj1010 迁移编排：真的把 FluidR3 从 generaluser_gs 搬到 fluidr3_gm，并登记 1 个库',
+    first.ran === true && first.moved.length === 1 && first.moved[0].to === 'fluidr3_gm' && first.records === 1 &&
+      banks.has('fluidr3_gm') && !banks.has('generaluser_gs') &&
+      libs.get('fluidr3_gm')?.name === 'Fluid R3 GM',
+    JSON.stringify({ moved: first.moved, keys: [...banks.keys()], libs: [...libs.keys()] }))
+  const second = await migrateLegacyBanks(io, 6000)
+  check('adj1010 迁移编排：**幂等**——再跑一次直接跳过（`libs` 已有内容就不读任何字节）',
+    second.ran === false && second.records === 0 && libs.size === 1)
+
+  const banks2 = new Map<string, ArrayBuffer>([['broken', new Uint8Array([9, 9, 9]).buffer]])
+  const libs2 = new Map<string, BankRecord>()
+  const io2: LegacyBankIo = { ...io, listLibs: async () => [...libs2.values()], listKeys: async () => [...banks2.keys()], read: async (k) => banks2.get(k) ?? null, save: async (k, b) => { banks2.set(k, b) }, remove: async (k) => { banks2.delete(k) }, put: async (r) => { libs2.set(r.id, r) } }
+  const broken = await migrateLegacyBanks(io2, 1)
+  check('adj1010 迁移编排：老缓存里是垃圾字节（下载中断）⇒ 跳过、不搬不登记（不把垃圾当库）',
+    broken.ran === false && banks2.has('broken') && libs2.size === 0)
 }
 
 

@@ -11,67 +11,33 @@
 import { loadHqBank, loadBuiltinBank, hasBuiltinBank } from './spessaSynthBackend'
 import { planHqBankLoad } from '@ijipu/engine'
 import type { HqSampleLibrary } from './spessaSynthBackend'
+// adj1010：字节读写与数据库版本号收敛在注册表里（同一个库只能有一处 `indexedDB.open`）
+import { deleteBankBytes, hasBankBytes, readBankBytes, saveBankBytes } from './bankRegistry'
 
 /** 音源来源（adj416）：builtin=安装目录随包内置（桌面直读）；cache=IndexedDB 缓存；remote=联网下载；
  *  **host（adj953）=宿主（Obsidian 插件目录）给的那份**——嵌入版里它才是"随文库一起走"的权威副本 */
 export type HqBankSource = 'builtin' | 'cache' | 'remote'
 
-/** SF2/SF3 ArrayBuffer 缓存（IndexedDB，键=库 id） */
+/**
+ * SF2/SF3 ArrayBuffer 缓存（IndexedDB，键=库 id）。
+ *
+ * adj1010：底层读写**收敛到 `bankRegistry.ts`**（同一个数据库、同一个版本号只能有一处
+ * `indexedDB.open`——两处版本不一致会抛 `VersionError`）。本类只保留调用方需要的那四个方法，
+ * 接口一字未变，所以 `resolveHqBank` / `prefetchHqLibraryProgress` 一行都不用改。
+ */
 export class HqCache {
-  private db: IDBDatabase | null = null
-  private open(): Promise<IDBDatabase> {
-    if (this.db) return Promise.resolve(this.db)
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open('ijipu-soundfonts-hq', 1)
-      req.onupgradeneeded = () => {
-        if (!req.result.objectStoreNames.contains('banks')) req.result.createObjectStore('banks')
-      }
-      req.onsuccess = () => {
-        this.db = req.result
-        resolve(req.result)
-      }
-      req.onerror = () => reject(req.error)
-    })
+  load(id: string): Promise<ArrayBuffer | null> {
+    return readBankBytes(id)
   }
-  private get(id: string): Promise<ArrayBuffer | null> {
-    return this.open().then(
-      (db) =>
-        new Promise<ArrayBuffer | null>((resolve) => {
-          const r = db.transaction('banks', 'readonly').objectStore('banks').get(id)
-          r.onsuccess = () => resolve(r.result instanceof ArrayBuffer ? r.result : null)
-          r.onerror = () => resolve(null)
-        }),
-    )
+  /** 极快：只查键是否存在（getKey，不读全量 141MB） */
+  has(id: string): Promise<boolean> {
+    return hasBankBytes(id)
   }
-  async load(id: string): Promise<ArrayBuffer | null> {
-    return this.get(id)
+  save(id: string, ab: ArrayBuffer): Promise<void> {
+    return saveBankBytes(id, ab)
   }
-  async has(id: string): Promise<boolean> {
-    // 极快：只查键是否存在（getKey，不读全量 32MB）
-    const db = await this.open()
-    return new Promise<boolean>((resolve) => {
-      const r = db.transaction('banks', 'readonly').objectStore('banks').getKey(id)
-      r.onsuccess = () => resolve(r.result !== undefined)
-      r.onerror = () => resolve(false)
-    })
-  }
-  async save(id: string, ab: ArrayBuffer): Promise<void> {
-    const db = await this.open()
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction('banks', 'readwrite')
-      tx.objectStore('banks').put(ab, id)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
-    })
-  }
-  async remove(id: string): Promise<void> {
-    const db = await this.open()
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction('banks', 'readwrite')
-      tx.objectStore('banks').delete(id)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
-    })
+  remove(id: string): Promise<void> {
+    return deleteBankBytes(id)
   }
 }
 

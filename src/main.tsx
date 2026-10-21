@@ -150,6 +150,26 @@ void (async () => {
     </StrictMode>,
   )
 
+  /**
+   * adj1010：音色库注册表的**一次性迁移**（v1 的"只有字节" → v2 的元数据表）。
+   *
+   * 为什么放在 `render()` **之后**、且不 await：迁移要读（并可能搬）一份 32–141 MB 的音源，
+   * 挡在首屏前面会让"升级后第一次启动"明显变慢。而试听是用户点击后才发生，
+   * 迁移在几百毫秒内就跑完了，实际不会撞上。
+   * 失败只记日志、绝不阻断启动（没有音源最多是没声音，不能连编辑器都进不去）。
+   */
+  void (async () => {
+    try {
+      const { ensureBankRegistry } = await import('./playback/bankRegistry')
+      const r = await ensureBankRegistry()
+      if (r.ran) {
+        console.info(`[iJipu] 音色库迁移完成：搬键 ${r.moved.length} 个、登记 ${r.records} 个库`)
+      }
+    } catch (e) {
+      console.warn('[iJipu] 音色库迁移失败（不影响启动）：', e)
+    }
+  })()
+
   if (!bridge) return
   try {
     const { setWorkspace, makeVaultWorkspaceRecord, isVaultWorkspace, getWorkspace } = await import('./store/workspace')

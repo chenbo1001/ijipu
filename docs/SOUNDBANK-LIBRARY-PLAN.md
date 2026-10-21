@@ -253,7 +253,8 @@ matchKnownLibrary(info): string | null               // 按 INAM 正则认领
 | 阶段 | 状态 | 说明 |
 |---|---|---|
 | Phase 1（adj1009） | ✅ **已完成** | 引擎 `sf2.ts` + 库清单两条 + smoke `[200]`（30 条断言全绿，含两个真文件） |
-| Phase 2–5 | 待开工 | 见下 |
+| Phase 2（adj1010） | ✅ **已完成** | `bankRegistry.ts`（libs 表 v2）+ 导入识别 + 一次性迁移；smoke `[201]` 20 条；`verify:app-ui` 85 项全绿 |
+| Phase 3–5 | 待开工 | 见下 |
 
 ### Phase 1（adj1009）：引擎 SF2 元数据解析 + 库清单扩展
 - 新增 `packages/ijipu-engine/src/engine/playback/sf2.ts`（上面三个函数 + `Sf2Preset` 类型）。
@@ -311,6 +312,40 @@ ALL SMOKE TESTS PASSED ✅
   读那份字节的 INAM：是 GeneralUser ⇒ 登记为内置库的"用户提供"副本；是 FluidR3 ⇒
   **把字节搬到 `fluidr3_gm` 键**并登记；都不是 ⇒ `imported_<hash>`。**这就是修好你现在这台机器状态的那一步。**
 - smoke：迁移函数抽成纯编排（注入假 cache + 假解析器），断言三种归位结果。
+
+**落地记录（2026-10-21，adj1010）**：
+
+| 文件 | 改动 |
+|---|---|
+| `src/playback/bankRegistry.ts` | **新增**：`fingerprintOf` / `bankIdOf` / `readBankFile`（纯函数）、`openSoundfontDb`（**全应用唯一的 `indexedDB.open`**，v1→v2 增 `libs`）、字节读写四个函数、`BankRegistry`（list/get/put/remove）、`planLegacyMigration`（纯决策）、`migrateLegacyBanks`（可注入 IO 的编排）、`ensureBankRegistry`（启动入口，带 `ijipu.soundbankLibsV2` 标记） |
+| `src/playback/spessaCache.ts` | `HqCache` 四个方法改为委托 `bankRegistry` 的字节读写（**接口一字未变**），删掉自己那份 `indexedDB.open(…, 1)` |
+| `src/main.tsx` | `render()` **之后** fire-and-forget 跑一次迁移（141 MB 的读/搬不该挡首屏）；失败只 `console.warn`，不阻断启动 |
+| `src/dialogs/SoundBankPanel.tsx` | 「导入音色文件」改成：读字节 → `readBankFile` 认库 → （同名库先 `confirm`）→ 写 `banks/<id>` → 登记 `libs/<id>`；三种拒绝分别给原因 |
+| `scripts/smoke.mts` | 新增 `[201]` 段 20 条断言；把 SF2 夹具提成 `buildSf2Fixture`（`[200]`/`[201]` 共用，避免两份手搓字节漂移） |
+
+这一步刻意**没做**的两件事（留到 Phase 4）：
+
+- 覆盖确认用的是 `window.confirm`（临时）：Phase 4 换成应用内的确认条/对话框。
+- 「库列表」界面还没做：导入成功后只是写进了 `libs`，界面上要 Phase 4 才看得见（现在仍显示默认库那一行）。
+
+实测输出（`npm run smoke`，退出码 0）：
+
+```
+[201] soundbank registry: import recognition + one-time migration (adj1010)
+  ✓ adj1010 库 id：已知库按 INAM 认领，与指纹无关（同库不同版本归同一个 id）
+  ✓ adj1010 导入识别：Git LFS 指针被拒，并说清"去下载页下真正的 .sf2"
+  ✓ adj1010 导入识别：能打开但一个音色都没有 ⇒ 也拒收
+  ✓ adj1010 迁移②：**冒名的键**（generaluser_gs 里装的是 FluidR3）⇒ 搬到 fluidr3_gm 并按 INAM 改名
+  ✓ adj1010 迁移编排：**幂等**——再跑一次直接跳过
+  ✓ adj1010 迁移编排：老缓存里是垃圾字节（下载中断）⇒ 跳过、不搬不登记
+ALL SMOKE TESTS PASSED ✅
+```
+
+另跑过：`npm run build` 退出 0；`npm run verify:app-ui` **全部通过（85 项）**。
+
+⚠ **我没能验的一条**：真实 IndexedDB 的 v1→v2 升级路径（Node 里没有 `indexedDB`，smoke 用的是假 IO）。
+按标准 IDB 语义它是安全的（`onupgradeneeded` 里只 `createObjectStore` 缺的那张表），
+但我**没有**在真浏览器里做过"带着 v1 数据升级到 v2"的实测。Phase 3 之前建议在 dev 里手点一次导入确认。
 
 ### Phase 3（adj1011）：播放/导出接上"当前库"
 - `PlaybackDialog.ensureBank` / 播放段 / `ExportPanel` / `SoundBankPanel` 全部改成

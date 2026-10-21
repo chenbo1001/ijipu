@@ -20,6 +20,8 @@ import { hostBankUrl, hostBridge, isHostEmbedded } from '../store/hostBridge'
 import { playbackCopy } from '../brand/copy'
 import { HQ_LIBRARIES, GM_VOICE_OPTIONS, getHqLibrary, hasBuiltinBank, hqBankFailureText } from '../playback/spessaSynthBackend'
 import { createHqCache, prefetchHqLibraryProgress, resolveHqBank } from '../playback/spessaCache'
+// adj1010：导入 = 读懂"这是哪个库"→ 存字节（banks）+ 登记元数据（libs）
+import { createBankRegistry, readBankFile } from '../playback/bankRegistry'
 
 const HIGHLIGHT = 'var(--jp-text-muted)'
 const BTN = {
@@ -34,6 +36,8 @@ const BTN = {
 
 export function SoundBankPanel() {
   const hqCache = useRef(createHqCache())
+  /** adj1010：库元数据注册表（IndexedDB 的 `libs` 表；字节仍在 `banks` 表） */
+  const registry = useRef(createBankRegistry())
   const [notice, setNotice] = useState<string | null>(null)
   // adj347/348：打开音色库管理即自动后台下载音源（初次体验）；仅文字提示，不阻塞其它交互
   // adj416：桌面端随安装包内置（安装目录 generaluser_gs.sf2）→ 直接可用，显示「已内置」而非下载提示
@@ -122,17 +126,54 @@ export function SoundBankPanel() {
     reader.readAsText(file)
   }
   // 导入/导出「音色数据文件」（SF2/SF3 本体）——给不便联网用户导入/分享
-  const importDataFile = (file: File) => {
-    const reader = new FileReader()
-    reader.onload = async () => {
-      try {
-        await hqCache.current.save(currentHqLib.id, reader.result as ArrayBuffer)
-        setNotice(`✓ 已导入音色数据 → ${currentHqLib.name}`)
-      } catch {
-        setNotice('音色数据文件读取失败')
-      }
+  /**
+   * adj1010：导入**不再写死默认库的键**。
+   *
+   * 旧实现把字节存进 `currentHqLib.id`（= generaluser_gs）⇒ 用户导入 FluidR3 后，
+   * 字节存在 GeneralUser 的名下，界面名字/音色列表却还是 GeneralUser（用户实报的 bug）。
+   * 现在：先按文件内容（INAM）认出"这是哪个库"，再写 `banks/<认出来的 id>` + `libs/<同 id>`。
+   */
+  const importDataFile = async (file: File): Promise<void> => {
+    setNotice('正在读取音色文件…')
+    let bytes: ArrayBuffer
+    try {
+      bytes = await file.arrayBuffer()
+    } catch (e) {
+      setNotice(`音色数据文件读取失败：${e instanceof Error ? e.message : String(e)}`)
+      return
     }
-    reader.readAsArrayBuffer(file)
+    const res = readBankFile(bytes, file.name)
+    if (!res.ok) {
+      // 三种拒绝各有明确原因：Git LFS 指针 / 不是 SF2 / 读不出音色表
+      setNotice(res.error)
+      return
+    }
+    const { record } = res
+    const existed = await registry.current.get(record.id)
+    if (existed && !window.confirm(`已经有「${existed.name}」（${existed.fileName}）。用这份新文件替换它吗？`)) {
+      setNotice('已取消导入')
+      return
+    }
+    try {
+      // 先写字节（可能因配额失败），再登记元数据——顺序反了会留下"有条目没文件"的假库
+      await hqCache.current.save(record.id, bytes)
+    } catch (e) {
+      setNotice(
+        `音色数据写不进本地缓存（多半是空间不足）：${e instanceof Error ? e.message : String(e)}。本次导入未生效。`,
+      )
+      return
+    }
+    try {
+      await registry.current.put(record)
+    } catch (e) {
+      setNotice(`音色库登记失败：${e instanceof Error ? e.message : String(e)}（文件已写入，重试一次即可）`)
+      return
+    }
+    setHqDl('done')
+    setNotice(
+      `✓ 已导入音色库「${record.name}」：${record.presets.length} 个音色 · ${(record.sizeBytes / 1_000_000).toFixed(1)} MB` +
+        (existed ? '（已替换原文件）' : ''),
+    )
   }
   /**
    * adj729（用户要求）：**嵌入版里由插件来导入**，文件直接写进**插件目录**
@@ -295,7 +336,7 @@ export function SoundBankPanel() {
           <button className="btn" style={{ ...BTN, color: 'var(--jp-accent)' }} onClick={() => { if (isHostEmbedded()) void importViaHost(); else fileSf2Ref.current?.click() }}>导入音色文件</button>
           <button className="btn" style={{ ...BTN, color: 'var(--jp-accent)' }} onClick={() => void exportDataFile()}>导出音色文件</button>
           <input ref={fileRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importConfig(f); e.target.value = '' }} />
-          <input ref={fileSf2Ref} type="file" accept=".sf2,.sf3" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importDataFile(f); e.target.value = '' }} />
+          <input ref={fileSf2Ref} type="file" accept=".sf2,.sf3" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void importDataFile(f); e.target.value = '' }} />
         </div>
         {/* adj728（用户要求）：**手动下载 + 导入的引导说明**。
             为什么必须写在这里：自动下载在部分网络下必然失败（见 hqBankFailureText 的说明），
