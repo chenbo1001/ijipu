@@ -1228,5 +1228,6 @@ export const dynamicVideoCopy = {
   preparing: '正在准备画面…',
   empty: '这份谱没有可播放的音符',
   audioHint: '带声音需要音色库（首次约 30MB）',
+  overCap: '这首超过 3 分钟：只导出前 3 分钟，画面与声音一起截断',
   exportMp4: '导出 MP4',
 } as const

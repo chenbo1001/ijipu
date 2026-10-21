@@ -25,6 +25,9 @@ import { hostBankUrl } from '../store/hostBridge'
 
 const PRESET_IDS: DynamicPresetId[] = ['9x16', '1x1', '16x9']
 
+/** 单支导出上限（3 分钟；画面与音轨**同时**截断到这个长度） */
+const EXPORT_MAX_MS = 180_000
+
 export function DynamicVideoDialog() {
   const [preset, setPreset] = useState<DynamicPresetId>('9x16')
   // adj1033：把取景框叠到预览区上看（框不动、内容走）
@@ -34,11 +37,14 @@ export function DynamicVideoDialog() {
   const [status, setStatus] = useState<'busy' | 'ready' | 'error'>('busy')
   const [error, setError] = useState('')
   const [playing, setPlaying] = useState(false)
+  const [totalMs, setTotalMs] = useState(0)
   const [encoding, setEncoding] = useState(false)
   const [progress, setProgress] = useState(0)
   const [phase, setPhase] = useState('')
   /** 是否带声音（默认带；音源拿不到时降级为无声并提示） */
   const [withAudio, setWithAudio] = useState(true)
+  /** 超过 3 分钟时：是否导整首（默认不勾 ⇒ 两边都截到 3 分钟） */
+  const [fullLength, setFullLength] = useState(false)
   const cacheRef = useRef<ReturnType<typeof createHqCache> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -84,6 +90,7 @@ export function DynamicVideoDialog() {
       .then((s) => {
         if (cancelled) return
         sessionRef.current = s
+        setTotalMs(s.totalMs)
         if (seekRef.current) {
           seekRef.current.max = String(Math.round(s.totalMs))
           seekRef.current.value = '0'
@@ -153,7 +160,7 @@ export function DynamicVideoDialog() {
       setPhase('正在编码画面…')
       const blob = await encodeMp4(s, {
         fps: 30,
-        maxMs: 180_000,
+        maxMs: fullLength ? undefined : EXPORT_MAX_MS,
         audio,
         signal: ac.signal,
         onProgress: setProgress,
@@ -252,6 +259,17 @@ export function DynamicVideoDialog() {
             />
             <span>带声音</span>
           </label>
+          {totalMs > EXPORT_MAX_MS && (
+            <label className="dock-field">
+              <input
+                type="checkbox"
+                checked={fullLength}
+                disabled={encoding}
+                onChange={(e) => setFullLength(e.target.checked)}
+              />
+              <span>整首</span>
+            </label>
+          )}
           <button
             type="button"
             className="btn"
@@ -261,7 +279,15 @@ export function DynamicVideoDialog() {
           >
             {encoding ? `取消（${Math.round(progress * 100)}%）` : dynamicVideoCopy.exportMp4}
           </button>
-          <span className="dock-muted">{encoding ? phase : dynamicVideoCopy.audioHint}</span>
+          <span className="dock-muted">
+            {encoding
+              ? phase
+              : totalMs > EXPORT_MAX_MS
+                ? fullLength
+                  ? '整首导出（画面与声音都完整，时长较长）'
+                  : dynamicVideoCopy.overCap
+                : dynamicVideoCopy.audioHint}
+          </span>
           {error && !encoding && <span className="dock-error">✗ {error}</span>}
         </div>
       </div>

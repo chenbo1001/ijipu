@@ -44,6 +44,26 @@ export interface Mp4Options {
 const KEYFRAME_SEC = 2
 
 /**
+ * 把音轨截到与画面等长。
+ *
+ * 为什么必须截：画面有 3 分钟上限（`maxMs`），音轨却是整曲 ⇒ 导出文件会出现
+ * "视频 3:00、声音 3:42"（用户实测）。音轨比画面长时，播放器会继续放声音或直接把时长算成音频长度。
+ */
+export function trimAudio(buffer: AudioBuffer, ms: number): AudioBuffer {
+  const want = Math.min(buffer.length, Math.ceil((ms / 1000) * buffer.sampleRate))
+  if (want >= buffer.length) return buffer
+  const out = new AudioBuffer({
+    numberOfChannels: buffer.numberOfChannels,
+    length: want,
+    sampleRate: buffer.sampleRate,
+  })
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    out.copyToChannel(buffer.getChannelData(c).subarray(0, want), c)
+  }
+  return out
+}
+
+/**
  * 把一次放映会话编成 MP4。
  *
  * @param session `createDynamicSession()` 的结果（已含相机与页面位图）
@@ -89,7 +109,8 @@ export async function encodeMp4(session: DynamicSession, opts: Mp4Options = {}):
     }
     video.close()
     if (audio && opts.audio) {
-      await audio.add(opts.audio)
+      // 与画面等长（超出 3 分钟上限时两侧同时截断，避免"画面 3:00、声音 3:42"）
+      await audio.add(trimAudio(opts.audio, spanMs))
       audio.close()
       opts.onProgress?.(1)
     }

@@ -11,7 +11,7 @@
  */
 import { defaultPageConfig, DYNAMIC_PRESETS, type DynamicPresetId } from '@ijipu/engine'
 import { createDynamicSession, type DynamicSession } from '../src/export/video/renderer'
-import { encodeMp4 } from '../src/export/video/mp4'
+import { encodeMp4, trimAudio } from '../src/export/video/mp4'
 
 /** 素材：够长，能看出"换行 + 横向跟拍" */
 const DEMO = [
@@ -147,4 +147,16 @@ void rebuild(presetSel.value as DynamicPresetId).catch((e) => {
   const all = new Uint8Array(await blob.arrayBuffer())
   const text = new TextDecoder('latin1').decode(all)
   return { size: blob.size, magic, ms: Math.round(performance.now() - t0), audio: !!audio, hasAudioTrack: text.includes('mp4a') }
+}
+
+/** 调试：音轨截断（画面 3 分钟上限时，声音必须跟着截） */
+;(window as unknown as { __testTrim: () => Promise<unknown> }).__testTrim = async () => {
+  const sr = 44100
+  const oac = new OfflineAudioContext(2, sr * 6, sr)
+  const osc = oac.createOscillator()
+  osc.connect(oac.destination)
+  osc.start(0)
+  const buf = await oac.startRendering()
+  const cut = trimAudio(buf, 3000)
+  return { before: buf.duration, after: cut.duration, channels: cut.numberOfChannels }
 }
