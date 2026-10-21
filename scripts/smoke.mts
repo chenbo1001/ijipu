@@ -20431,6 +20431,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1011Tests())
       // adj1012：多音色库 P4——库列表 / 每库一套收藏 / 按库选音色
       .then(() => runAdj1012Tests())
+      // adj1014：音色库"发现"的桌面 IO（扫描目录 / 读头 / 导入到我的音色库目录）
+      .then(() => runAdj1014Tests())
       .then(() => runAdj947CliPrefixTests())
       .then(() => runAdj948SiteCopyTests())
       .then(() => runAdj949ManualScopeTests())
@@ -21001,6 +21003,46 @@ async function runAdj1012Tests() {
       !/^\s*playbackHqEnabled:\s*number\[\]/m.test(storeSrc))
   check('adj1012 store：旧版单数组**真的**在迁移（读旧键 → 写到默认库 → 删旧键）',
     /PLAYBACK_HQ_ENABLED_LEGACY_KEY/.test(storeSrc) && /removeItem\(PLAYBACK_HQ_ENABLED_LEGACY_KEY\)/.test(storeSrc))
+}
+
+/**
+ * ---- 204. 音色库"发现"的桌面 IO（adj1014，P5）----
+ *
+ * 为什么要有这一段：这组命令是"**不只是我们预设的库**"这条需求的地基 ——
+ * 没有"扫描目录"就只能按已知 id 查在不在（把 `abc.sf2` 放进 `soundfonts/` 永远看不见）。
+ *
+ * 这里只能做**源码闸门**（Node 里没有 Tauri）：命令存在、四条都注册、路径/后缀白名单、
+ * 只读文件头、扫的两处目录口径。真正的行为断言在 Rust 单测 `soundfont_tests` 里。
+ */
+async function runAdj1014Tests() {
+  console.log('[204] desktop soundfont discovery IO (adj1014)')
+  const rs = String(readFileSync(join(root, 'src-tauri', 'src', 'lib.rs'), 'utf8'))
+  const cmds = ['sf_soundfont_scan', 'sf_soundfont_peek', 'sf_soundfont_store', 'sf_soundfont_delete']
+  check('adj1014 四条发现/导入命令都在 Rust 侧定义',
+    cmds.every((c) => new RegExp(`fn ${c}\\(`).test(rs)),
+    cmds.filter((c) => !new RegExp(`fn ${c}\\(`).test(rs)).join(','))
+  check('adj1014 四条命令**都登记进 invoke_handler**（漏登记 ⇒ 前端调用直接失败）',
+    cmds.every((c) => new RegExp(`\\n\\s*${c},`).test(rs)),
+    cmds.filter((c) => !new RegExp(`\\n\\s*${c},`).test(rs)).join(','))
+  check('adj1014 库 id 有白名单（只允许小写字母/数字/下划线 ⇒ 拼不出 `..` 或路径分隔符）',
+    /fn valid_lib_id\(/.test(rs) && /is_ascii_lowercase\(\) \|\| b\.is_ascii_digit\(\) \|\| b == b'_'/.test(rs))
+  check('adj1014 只接受 `.sf2/.sf3`（读/写/导入三处共用 `is_sf_name`）',
+    /fn is_sf_name\(/.test(rs) && (rs.match(/is_sf_name\(/g) ?? []).length >= 3)
+  check('adj1014 扫描**只读文件头**（`take(SF_HEAD_MAX)`），不把 141 MB 读进内存',
+    /const SF_HEAD_MAX: usize = 256 \* 1024/.test(rs) && /\.take\(max as u64\)/.test(rs))
+  check('adj1014 扫描两处目录：安装目录（install，只读）+ 我的音色库目录（appdata，可写）',
+    /scan_dir_into\(&install, "install"/.test(rs) &&
+      /scan_dir_into\(&user_soundfont_dir\(&app\)\?, "appdata"/.test(rs))
+  check('adj1014 "我的音色库目录" = `<app_data>/soundfonts`（卸载不删、且是唯一可写处）',
+    /fn user_soundfont_dir\(/.test(rs) && /app_data_dir[\s\S]{0,80}join\("soundfonts"\)/.test(rs))
+  check('adj1014 目录不存在时**静默当空**（首次安装时我的音色库目录还不存在，不能报错）',
+    /let Ok\(rd\) = std::fs::read_dir\(dir\) else \{ return \}/.test(rs))
+  check('adj1014 导入**只传源路径**（`fs::copy`），不按 JSON 数组搬 32–141 MB 字节',
+    /std::fs::copy\(&src, &dest\)/.test(rs) && /fn sf_soundfont_store\(app: tauri::AppHandle, id: String, source: String\)/.test(rs))
+  check('adj1014 随包探测的候选顺序把"我的音色库目录"也算上（用户自己放的那份也能用）',
+    /builtin_soundfont_candidates[\s\S]{0,400}app_data_dir\(\)[\s\S]{0,120}join\("soundfonts"\)/.test(rs))
+  check('adj1014 Rust 侧有这组命令的单测（`mod soundfont_tests`）',
+    /mod soundfont_tests \{/.test(rs) && /fn lib_id_must_be_filename_safe/.test(rs) && /fn head_read_is_capped/.test(rs))
 }
 
 

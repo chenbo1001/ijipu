@@ -236,7 +236,13 @@ fn sf_cache_remove(app: tauri::AppHandle, lib_id: String) -> Result<(), String> 
 fn builtin_soundfont_candidates(app: &tauri::AppHandle, lib_id: &str) -> Result<Vec<PathBuf>, String> {
     let dir = app.path().resource_dir().map_err(|e| e.to_string())?;
     let file = format!("{}.sf2", lib_id);
-    Ok(vec![dir.join(&file), dir.join("soundfonts").join(&file)])
+    let mut out = vec![dir.join(&file), dir.join("soundfonts").join(&file)];
+    // adj1013：**我的音色库目录**也算"有这个库"（用户自己下载/导入的那份）。
+    // 放在最后 ⇒ 随包那份仍然优先（它一定存在），用户那份作为兜底/覆盖。
+    if let Ok(app_data) = app.path().app_data_dir() {
+        out.push(app_data.join("soundfonts").join(&file));
+    }
+    Ok(out)
 }
 
 /// adj416：探测内置音源是否存在——命中时返回其绝对路径，未随包提供返回 None。
@@ -267,6 +273,198 @@ fn sf_soundfont_resource_read(
         }
     }
     Err(format!("内置音源资源缺失: {}.sf2（未随包提供）", lib_id))
+}
+
+// ============================================================================
+// adj1013：音色库**发现**（扫描目录 + 读文件头 + 导入到"我的音色库目录"）
+//
+// 用户口径（2026-10-21）：「不预设用哪个音色库 —— 保证有一个基础库，其余靠发现本机文件 +
+// 推荐下载 + 手动导入」。于是桌面端需要回答三个新问题：
+//   ① 安装目录/我的音色库目录里**有什么** `.sf2`（原来只能按已知 id 查"在不在"）；
+//   ② 这个文件**是什么库**（只读文件头拿 INAM，不读采样）；
+//   ③ 用户选的库文件**存到哪**（`%APPDATA%\<app>\soundfonts\` —— 安装目录只读，
+//      而且放这里卸载不会删用户自己的音源）。
+//
+// ⚠ SF2 的 `pdta`（音色表）在**文件尾部**，所以"音色列表"要读全量；扫描阶段刻意**不读**，
+// 只读头 256 KB。音色表由前端在该库**首次被选中**时读一次再缓存（见 SOUNDBANK-PAGE-PLAN.md §4.2）。
+// ============================================================================
+
+/// 扫描结果的一项（只含"看一眼就有"的信息）
+#[derive(serde::Serialize)]
+pub struct ScannedSoundfont {
+    pub path: String,
+    pub file_name: String,
+    pub size_bytes: u64,
+    pub mtime_ms: u64,
+    /// `install` = 安装目录（只读、随包）；`appdata` = 我的音色库目录（可写、卸载不删）
+    pub origin: String,
+}
+
+/// 读头结果（供前端解析 INAM；**不含采样数据**）
+#[derive(serde::Serialize)]
+pub struct SoundfontPeek {
+    pub file_name: String,
+    pub size_bytes: u64,
+    pub head: Vec<u8>,
+}
+
+/// 只读头这么长：SF2 的 `LIST INFO`（INAM/IENG/ifil）在最前面，256 KB 足够。
+const SF_HEAD_MAX: usize = 256 * 1024;
+/// 导入体积上限（防手滑选到超大文件把磁盘写满）：512 MB
+const SF_MAX_BYTES: u64 = 512 * 1024 * 1024;
+
+/// 库 id 白名单（`generaluser_gs` / `imported_ab12cd34` / `fluidr3_gm`）。
+/// **绝不能含路径分隔符或 `..`** —— 它会被拼进文件名。
+fn valid_lib_id(id: &str) -> Result<(), String> {
+    if id.is_empty() || id.len() > 64 {
+        return Err(format!("库 id 长度非法（{}）", id.len()));
+    }
+    if !id
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+    {
+        return Err(format!("库 id 只允许小写字母/数字/下划线：{id}"));
+    }
+    Ok(())
+}
+
+/// 只认 `.sf2` / `.sf3`（大小写都行）。**这是文件白名单**：其它扩展名一律不读不写。
+fn is_sf_name(p: &Path) -> bool {
+    matches!(
+        p.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref(),
+        Some("sf2") | Some("sf3")
+    )
+}
+
+/// 我的音色库目录（可写）：`<app_data>/soundfonts`
+fn user_soundfont_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("soundfonts"))
+}
+
+/// 把一个目录里的音色库文件追加进结果（目录不存在/无权限 ⇒ 静默跳过，**不报错**：
+/// 首次安装时 `我的音色库目录` 本来就不存在，报错会把面板变成红字）。
+fn scan_dir_into(dir: &Path, origin: &str, out: &mut Vec<ScannedSoundfont>) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for entry in rd.flatten() {
+        let p = entry.path();
+        if !is_sf_name(&p) || !p.is_file() {
+            continue;
+        }
+        let Ok(md) = entry.metadata() else { continue };
+        if !md.is_file() {
+            continue;
+        }
+        let mtime_ms = md
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        out.push(ScannedSoundfont {
+            path: p.display().to_string(),
+            file_name: entry.file_name().to_string_lossy().into_owned(),
+            size_bytes: md.len(),
+            mtime_ms,
+            origin: origin.to_string(),
+        });
+    }
+}
+
+/// 扫描三处：安装目录根、安装目录 `soundfonts/`、我的音色库目录。
+///
+/// 前端拿到结果后按**内容**认库（引擎 `readSf2Info` + 指纹），文件名只做兜底显示。
+#[tauri::command]
+fn sf_soundfont_scan(app: tauri::AppHandle) -> Result<Vec<ScannedSoundfont>, String> {
+    let mut out = Vec::new();
+    let install = app.path().resource_dir().map_err(|e| e.to_string())?;
+    scan_dir_into(&install, "install", &mut out);
+    scan_dir_into(&install.join("soundfonts"), "install", &mut out);
+    scan_dir_into(&user_soundfont_dir(&app)?, "appdata", &mut out);
+    out.sort_by(|a, b| a.origin.cmp(&b.origin).then(a.file_name.cmp(&b.file_name)));
+    Ok(out)
+}
+
+/// 只读文件前 `max` 字节（按需读，**不按文件大小分配内存**）
+fn read_head(p: &Path, max: usize) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let f = std::fs::File::open(p).map_err(|e| format!("{}: {e}", p.display()))?;
+    let mut buf = Vec::with_capacity(max.min(64 * 1024));
+    f.take(max as u64)
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("{}: {e}", p.display()))?;
+    Ok(buf)
+}
+
+/// 读文件头（前端据此认库；`.sf2/.sf3` 之外的扩展名一律拒）。
+#[tauri::command]
+fn sf_soundfont_peek(path: String) -> Result<SoundfontPeek, String> {
+    let p = PathBuf::from(&path);
+    if !is_sf_name(&p) {
+        return Err("只接受 .sf2 / .sf3 文件".into());
+    }
+    let md = std::fs::metadata(&p).map_err(|e| format!("{path}: {e}"))?;
+    if !md.is_file() {
+        return Err(format!("不是文件：{path}"));
+    }
+    let head = read_head(&p, SF_HEAD_MAX)?;
+    let file_name = p
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.clone());
+    Ok(SoundfontPeek {
+        file_name,
+        size_bytes: md.len(),
+        head,
+    })
+}
+
+/// 把用户选的文件**复制**进"我的音色库目录"（`<app_data>/soundfonts/<id>.sf2`）。
+///
+/// 为什么不走 IPC 传字节：SF2 有 32–141 MB，按 JSON 数组传会膨胀数倍且极慢（E-2026-146）；
+/// 这里只传**源路径**，Rust 直接 `fs::copy`（不占前端内存）。
+#[tauri::command]
+fn sf_soundfont_store(app: tauri::AppHandle, id: String, source: String) -> Result<String, String> {
+    valid_lib_id(&id)?;
+    let src = PathBuf::from(&source);
+    if !is_sf_name(&src) {
+        return Err("只接受 .sf2 / .sf3 文件".into());
+    }
+    let md = std::fs::metadata(&src).map_err(|e| format!("{source}: {e}"))?;
+    if !md.is_file() {
+        return Err(format!("不是文件：{source}"));
+    }
+    if md.len() == 0 {
+        return Err("文件是空的（下载可能没完成）".into());
+    }
+    if md.len() > SF_MAX_BYTES {
+        return Err(format!(
+            "文件太大（{} MB，上限 512 MB）",
+            md.len() / 1_000_000
+        ));
+    }
+    let dir = user_soundfont_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let dest = dir.join(format!("{id}.sf2"));
+    std::fs::copy(&src, &dest).map_err(|e| format!("写入 {} 失败：{e}", dest.display()))?;
+    Ok(dest.display().to_string())
+}
+
+/// 删除"我的音色库目录"里的某个库文件（**只删这一处**；安装目录的随包文件永远不动）。
+#[tauri::command]
+fn sf_soundfont_delete(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    valid_lib_id(&id)?;
+    let p = user_soundfont_dir(&app)?.join(format!("{id}.sf2"));
+    if p.exists() {
+        std::fs::remove_file(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+    }
+    Ok(())
 }
 
 // ============================================================================
@@ -621,6 +819,11 @@ pub fn run() {
             sf_cache_remove,
             sf_soundfont_builtin_path,
             sf_soundfont_resource_read,
+            // adj1013：音色库"发现"——扫描目录 / 读文件头 / 复制进我的音色库目录 / 删除
+            sf_soundfont_scan,
+            sf_soundfont_peek,
+            sf_soundfont_store,
+            sf_soundfont_delete,
             take_pending_open_files,
             write_external_file,
             // adj966：按绝对路径读系统文件 + 取 mtime（外部改动检测的轮询 IO）
@@ -723,5 +926,82 @@ mod asset_tests {
         let missing = std::env::temp_dir().join("ijipu-asset-does-not-exist.png");
         let _ = std::fs::remove_file(&missing);
         assert!(read_asset_bytes(&missing).is_err());
+    }
+}
+
+/// adj1013：音色库"发现"那一组命令的纯逻辑单测（不碰 Tauri 运行时）。
+#[cfg(test)]
+mod soundfont_tests {
+    use super::*;
+
+    fn tmp_dir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ijipu-sf-test-{}-{}", std::process::id(), tag));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// 库 id 会被拼进文件名 ⇒ 必须**挡掉路径分隔符与 `..`**（这是本条命令的安全边界）
+    #[test]
+    fn lib_id_must_be_filename_safe() {
+        for ok in ["generaluser_gs", "fluidr3_gm", "imported_ab12cd34"] {
+            assert!(valid_lib_id(ok).is_ok(), "{ok} 应当被接受");
+        }
+        for bad in ["", "../x", "a/b", "a\\b", "ABC", "a-b", "a b", ".."] {
+            assert!(valid_lib_id(bad).is_err(), "{bad} 应当被拒");
+        }
+        assert!(valid_lib_id(&"a".repeat(65)).is_err(), "超长应当被拒");
+    }
+
+    #[test]
+    fn only_sf2_sf3_are_accepted() {
+        for ok in ["a.sf2", "a.SF2", "a.sf3", "a.SF3", "FluidR3_GM.sf2"] {
+            assert!(is_sf_name(Path::new(ok)), "{ok} 应当被接受");
+        }
+        for bad in ["a.txt", "a.sf2.exe", "a", "a.js", "a.sf2.bak"] {
+            assert!(!is_sf_name(Path::new(bad)), "{bad} 应当被拒");
+        }
+    }
+
+    /// 只读头必须真的"只读头"——否则扫描目录会把 141 MB 整个读进内存
+    #[test]
+    fn head_read_is_capped() {
+        let d = tmp_dir("head");
+        let p = d.join("big.sf2");
+        std::fs::write(&p, vec![7u8; SF_HEAD_MAX + 1024]).unwrap();
+        assert_eq!(read_head(&p, SF_HEAD_MAX).unwrap().len(), SF_HEAD_MAX);
+        let small = d.join("small.sf2");
+        std::fs::write(&small, [1u8, 2, 3]).unwrap();
+        assert_eq!(read_head(&small, SF_HEAD_MAX).unwrap().len(), 3);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn scan_lists_only_soundfonts() {
+        let d = tmp_dir("scan");
+        std::fs::write(d.join("a.sf2"), [1u8]).unwrap();
+        std::fs::write(d.join("b.SF3"), [1u8]).unwrap();
+        std::fs::write(d.join("note.txt"), [1u8]).unwrap();
+        std::fs::create_dir(d.join("sub.sf2")).unwrap(); // 目录即便叫 .sf2 也不算
+        let mut out = Vec::new();
+        scan_dir_into(&d, "appdata", &mut out);
+        let names: Vec<&str> = out.iter().map(|x| x.file_name.as_str()).collect();
+        assert_eq!(names.len(), 2, "只应列出 2 个：{names:?}");
+        assert!(names.contains(&"a.sf2") && names.contains(&"b.SF3"));
+        assert!(out.iter().all(|x| x.origin == "appdata"));
+        assert!(out.iter().all(|x| x.size_bytes == 1));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// 首次安装时"我的音色库目录"并不存在 ⇒ 必须当成空目录，而不是报错（否则面板整块变红）
+    #[test]
+    fn scan_missing_dir_is_empty_not_error() {
+        let mut out = Vec::new();
+        scan_dir_into(
+            &std::env::temp_dir().join("ijipu-sf-definitely-missing-dir"),
+            "appdata",
+            &mut out,
+        );
+        assert!(out.is_empty());
     }
 }
