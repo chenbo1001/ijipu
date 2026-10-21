@@ -3,7 +3,10 @@
  */
 import './localStorageMigration'
 import { create } from 'zustand'
-import { clampEditorFontSize, normalizeFontStack, HQ_LIBRARIES, resolveActiveLibrary, setEnabledEthnicVoices } from '@ijipu/engine'
+import { clampEditorFontSize, normalizeFontStack, HQ_LIBRARIES, resolveActiveLibrary } from '@ijipu/engine'
+// adj1028：民族乐器勾选的引擎开关（走深路径 import：本仓库 index.ts 正被另一条工作流改动，
+// 不往那里加导出行，避免把无关改动卷进提交；这条 API 稳定后再提回 index）
+import { setEnabledEthnicVoices } from '@ijipu/engine/playback/ethnicVoices'
 import { DEFAULT_THEME, DEFAULT_THEME_MODE, type ThemeMode } from '../brand/themes'
 // adj954：运行环境/设备判据统一走品牌层唯一出处（原先本文件自己写了一份 matchMedia）
 import { getRuntimeEnv, isCoarsePointerDevice } from '../brand/env'

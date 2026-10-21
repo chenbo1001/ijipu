@@ -245,7 +245,9 @@ import { fingerprintOf, fingerprintOfParts, bankIdOf, readBankFile, planLegacyMi
 import { discoverBanks } from '../src/playback/bankDiscovery.ts'
 import type { DiscoveryIo } from '../src/playback/bankDiscovery.ts'
 // adj1019：民族乐器「拟声」表（GM 里没有二胡/琵琶/古筝；显示一律带「（拟）」）
-import { ETHNIC_ALIASES, ethnicAliasOf, ethnicLabel, ethnicGmLabel, setEnabledEthnicVoices, isEthnicUsable } from '@ijipu/engine/index.ts'
+import { ETHNIC_ALIASES, ethnicAliasOf, ethnicLabel, ethnicGmLabel } from '@ijipu/engine/index.ts'
+// adj1028：勾选启用的三个函数（引擎深路径：index.ts 正被另一条工作流改动，不往里加导出行）
+import { setEnabledEthnicVoices, isEthnicUsable } from '@ijipu/engine/playback/ethnicVoices.ts'
 import type { BankRecord, LegacyBankEntry, LegacyBankIo } from '../src/playback/bankRegistry.ts'
 // adj417：按钮图标清单（public/icons/ 下的文件名）——断言文件存在、sw.js 预热清单未漂移
 import { ICON_DIR, ICON_FILES, ICON_FILE_NAMES } from '../src/ui/toolIcons.ts'
