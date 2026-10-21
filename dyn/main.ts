@@ -30,7 +30,8 @@ const DEMO = [
   'B: 小星星',
   'D: C',
   'P: 4/4',
-  'Q: |: 1 1 5 5 | 6 6 5 - | 4 4 3 3 | 2 2 1 - |:|',
+  // ⚠ 反复收尾是 `:|`（不是 `|:|`——后者会被读成"`|:` + 一条小节线"，多画一根线且不形成反复）
+  'Q: |: 1 1 5 5 | 6 6 5 - | 4 4 3 3 | 2 2 1 - :|',
   'Q: 5 5 4 4 | 3 3 2 - | 5 5 4 4 | 3 3 2 - |',
   'Q: 1 1 5 5 | 6 6 5 - | 4 4 3 3 | 2 2 1 - |',
   'Q: 5 5 4 4 | 3 3 2 - | 5 5 4 4 | 3 3 2 - |',
@@ -187,6 +188,10 @@ presetSel.addEventListener('change', () => {
   playBtn.textContent = '播放'
   void rebuild(presetSel.value as DynamicPresetId)
 })
+
+// 便于截图/定位：`?p=1x1` 直接以该预设打开
+const pParam = new URLSearchParams(location.search).get('p')
+if (pParam === '9x16' || pParam === '1x1' || pParam === '16x9') presetSel.value = pParam
 
 void rebuild(presetSel.value as DynamicPresetId).catch((e) => {
   hint.textContent = `出错了：${String(e)}`
