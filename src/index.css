@@ -5663,3 +5663,56 @@ span.ws-check {
   pointer-events: none;
   user-select: none;
 }
+
+/* ============ 动态谱预览（adj1031）============
+ * 画布尺寸 = 视频分辨率（1080×1920 等），这里只做**等比缩放**显示，
+ * 所以屏幕上看到的就是将来出片的构图（不是另做一套比例）。
+ */
+.dynamic-video {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dynamic-video-stage {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #0f1526;
+  border-radius: 8px;
+  padding: 10px;
+  min-height: 220px;
+}
+.dynamic-video-stage canvas {
+  display: block;
+  max-height: 60vh;
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  background: #ffffff;
+  border-radius: 4px;
+}
+.dynamic-video-mask {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  color: #e8eefc;
+  background: rgb(15 21 38 / 78%);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.dynamic-video-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.dynamic-video-bar input[type='range'] {
+  flex: 1;
+  min-width: 160px;
+  accent-color: var(--jp-accent, #00f0ff);
+}

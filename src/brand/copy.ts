@@ -1212,3 +1212,20 @@ export const settingsCopy = {
   saveConfigTitle:
     '将本次改动写入本谱的设置行（# jps-config），仅记录与默认值不同的项；本谱因此自包含，复制给他人后显示一致。',
 } as const
+
+/**
+ * 动态谱预览文案（adj1031：视频出片的第一步，先只验画面）
+ *
+ * 为什么单独一组：这块还要长出「导出视频」（参数、进度、取消），文案会跟导出面板一样多，
+ * 先集中在这里，别散进组件。
+ */
+export const dynamicVideoCopy = {
+  title: '动态谱预览',
+  presetLabel: '画布',
+  play: '播放',
+  pause: '暂停',
+  reload: '重新载入当前谱',
+  preparing: '正在准备画面…',
+  empty: '这份谱没有可播放的音符',
+  noSound: '这一版只验画面：还没有声音，也还不能导出视频。',
+} as const

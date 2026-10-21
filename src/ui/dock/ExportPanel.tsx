@@ -75,6 +75,8 @@ export function ExportPanel() {
   const exportBgImage = useUiStore((s) => s.exportBgImage)
   const setExportBg = useUiStore((s) => s.setExportBg)
   const setExportBgImage = useUiStore((s) => s.setExportBgImage)
+  // adj1031：动态视频预览入口（弹窗；先只验画面，编码随后）
+  const openModal = useUiStore((s) => s.openModal)
   const previewSoften = useUiStore((s) => s.previewSoften)
   const setExportJob = useUiStore((s) => s.setExportJob)
   // adj626：PDF 走打印（与 Ctrl+P / 菜单「打印」同一条路：同一份页面 + 同一个默认文件名）
@@ -308,6 +310,13 @@ export function ExportPanel() {
             <span className="export-btn-ext">{it.ext}</span>
           </button>
         ))}
+      </div>
+      {/* adj1031：动态视频（当前只出预览；MP4 编码随后接 ffmpeg） */}
+      <div className="dock-field">
+        <button type="button" className="btn" onClick={() => openModal('dynamicVideo')} disabled={busy !== null}>
+          动态视频预览
+        </button>
+        <span className="dock-muted">竖屏动谱（9:16 / 1:1 / 16:9）；当前只预览，还不能导出 MP4</span>
       </div>
       {/* adj626：说明 PDF 两条路的差别（默认那条走系统打印对话框，故必须讲清怎么选） */}
       <div className="dock-muted">{exportCopy.pdfPrintHint}</div>
