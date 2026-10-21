@@ -32489,8 +32489,11 @@ function runDynamicCameraTests(): void {
   console.log('\n[D] dynamic camera (M1-3)')
 
   const BARS = '1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 | 1 1 5 5 | 6 6 5 5 | 4 4 3 3 | 2 2 1 1 |'
-  const parsed = parseJpsRaw(`V: 1.0\nB: t\nD: C\nP: 4/4\nQ: ${BARS}${BARS}\n`)
+  // 20 条 `Q:` 行 ⇒ 20 个曲行 ⇒ 跨页（一个 Q 行只算一行，拼成一行反而不会分页）
+  const manyRows = Array(20).fill('Q: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 |').join('\n')
+  const parsed = parseJpsRaw(`V: 1.0\nB: t\nD: C\nP: 4/4\n${manyRows}\n`)
   const layout = layoutScore(parsed, DUR_CFG)
+  check('M3 夹具跨页（≥2 页），否则下面的同页断言压不住问题', layout.pages.length >= 2, String(layout.pages.length))
   const seq = buildPlaySequence(parsed, layout, 120)
   const track = buildRectTrack(seq, { noteSize: DUR_CFG.note_size })
   const view = buildFlowView(layout, track, DUR_CFG)
@@ -32572,6 +32575,39 @@ function runDynamicCameraTests(): void {
     }
   }
   check('M3 跟拍阶段每个音都在取景框内', badNote === '', badNote)
+
+  // 相机必须和色块**同页**：按行时间选行时，多声部/跨行时相机会跑到别的页，色块被同页过滤掉
+  let wrongPage = ''
+  for (let i = 0; i < track.rects.length; i++) {
+    const r = track.rects[i]
+    const t = (r.t0 + r.t1) / 2
+    const f = cameraAt(cam, t)
+    if (f.pageIndex !== r.pageIndex) {
+      wrongPage = `t=${Math.round(t)} 矩形页=${r.pageIndex} 相机页=${f.pageIndex}`
+      break
+    }
+  }
+  check('M3 相机与色块同页（不按行时间选行）', wrongPage === '', wrongPage)
+
+  // 纵向也要在视界内（歌词那一排在框外面就白做了）
+  let offVertical = ''
+  for (let i = 0; i < track.rects.length; i++) {
+    const r = track.rects[i]
+    const t = (r.t0 + r.t1) / 2
+    if (t <= cam.firstT + cam.introMs) continue
+    const f = cameraAt(cam, t)
+    if (f.pageIndex !== r.pageIndex) continue
+    const hh = cam.viewH / f.zoom / 2
+    const yTop = r.y - (f.cy - hh)
+    const yBottom = yTop + r.h
+    const topFrac = yTop / (2 * hh)
+    const botFrac = yBottom / (2 * hh)
+    if (topFrac < 0.05 || botFrac > 0.95) {
+      offVertical = `t=${Math.round(t)} 纵向 ${(topFrac * 100).toFixed(0)}%~${(botFrac * 100).toFixed(0)}%`
+      break
+    }
+  }
+  check('M3 色块纵向也落在视界内', offVertical === '', offVertical)
 
   // 用户口径：色块要待在**画面中间带**（1/4 ~ 3/4），别贴着框边
   let offCenter = ''

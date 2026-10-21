@@ -90,6 +90,10 @@ export interface CameraTrack {
   firstT: number
   rows: CameraRow[]
   pans: CameraPan[]
+  /** 每条矩形的起始时间（升序；相机按"当前正在响的那条"反推行，保证和色块同页同排） */
+  rectT0: number[]
+  /** 每条矩形归属的行下标（与 `rectT0` 等长） */
+  rectRow: number[]
   introMs: number
   lineMs: number
   panMs: number
@@ -180,24 +184,38 @@ export function buildCameraTrack(
     firstT,
     rows,
     pans,
+    rectT0: track.rects.map((r) => r.t0),
+    rectRow: [...view.rectRow],
     introMs,
     lineMs,
     panMs,
   }
 }
 
-/** 某时刻所在的行段（没开始前用第一行） */
+/**
+ * 某时刻所在的行段——**由当前音符反推**，而不是按行自己的起始时间。
+ *
+ * 为什么必须这样：行的时间（`row.t0`=该行第一个音的时刻）与"此刻正在响的是哪一行"在多声部、
+ * 临时段层、跨行连音时**不一定同步**；按行时间选行，相机会跑到别的排甚至别的页上，
+ * 于是色块被"同页过滤"掉（用户实测：6.7 秒时框里是后面的页，第一行的色块消失）。
+ */
 function rowAt(cam: CameraTrack, t: number): { row: CameraRow; prev?: CameraRow } {
-  const { rows } = cam
+  const { rows, rectT0, rectRow } = cam
   if (rows.length === 0) {
     return { row: { t0: 0, t1: 0, pageIndex: 0, cy: cam.pageH / 2 } }
   }
-  let i = 0
-  for (let k = 0; k < rows.length; k++) {
-    if (rows[k].t0 <= t) i = k
-    else break
+  // 二分：最后一个 t0 <= t 的矩形
+  let lo = 0
+  let hi = rectT0.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (rectT0[mid] <= t) lo = mid + 1
+    else hi = mid
   }
-  return { row: rows[i], prev: i > 0 ? rows[i - 1] : undefined }
+  const idx = lo - 1
+  const ri = idx >= 0 && rectRow[idx] >= 0 ? rectRow[idx] : 0
+  const row = rows[ri] ?? rows[0]
+  return { row, prev: ri > 0 ? rows[ri - 1] : undefined }
 }
 
 /**
