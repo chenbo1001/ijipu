@@ -99,6 +99,8 @@ import { buildRectTrack, rectsActiveAt } from '@ijipu/engine/index.ts'
 import { buildFlowView, frameAt, frameTimeMs, frameIndexAt, dynamicPageConfig } from '@ijipu/engine/index.ts'
 // M1-3：相机（满宽片头 → 推近 → 安全区跟拍）
 import { buildCameraTrack, cameraAt, ballAt, BALL_LANDING_TIMING } from '@ijipu/engine/index.ts'
+// adj1068：调号显示口径（描述头与动态视频片头卡共用）
+import { keySignatureOf } from '@ijipu/engine/index.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
@@ -32575,6 +32577,26 @@ function runDynamicCameraTests(): void {
   )
 
   check('M3 真的发生了横向跟拍（关键帧 ≥ 2）', cam.pans.length >= 2, String(cam.pans.length))
+
+  // adj1068：调号显示口径 = `1 = ` + 字母 + 左上角 ♯/♭ 角标（描述头预览与片头卡共用）
+  const keyD = keySignatureOf('D')
+  const keyC = keySignatureOf('C#')
+  const keyE = keySignatureOf('Eb')
+  check(
+    'adj1068 调号 1 = ... 与预览同口径（#/b/$ → ♯/♭，字母前角标）',
+    keyD.prefix === '1 = ' &&
+      keyD.letter === 'D' &&
+      keyD.accidental === '' &&
+      keyC.letter === 'C' &&
+      keyC.accidental === '♯' &&
+      keyE.letter === 'E' &&
+      keyE.accidental === '♭' &&
+      keySignatureOf('$B').letter === 'B' &&
+      keySignatureOf('$B').accidental === '♭' &&
+      keySignatureOf('bB').accidental === '♭' &&
+      keySignatureOf('B').accidental === '',
+    JSON.stringify({ D: keyD, C: keyC, E: keyE }),
+  )
 
   // 跟拍时"当前音"必须落在取景框内（安全区逻辑的最终判据）
   let badNote = ''

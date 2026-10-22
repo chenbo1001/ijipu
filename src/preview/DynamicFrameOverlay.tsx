@@ -57,7 +57,6 @@ export function DynamicFrameOverlay() {
   const [error, setError] = useState('')
   const [playing, setPlaying] = useState(false)
   const [preparingAudio, setPreparingAudio] = useState(false)
-  const [ended, setEnded] = useState(false)
   const [encoding, setEncoding] = useState(false)
   const [progress, setProgress] = useState(0)
   const [phase, setPhase] = useState('')
@@ -123,8 +122,8 @@ export function DynamicFrameOverlay() {
     if (seekRef.current) seekRef.current.value = String(Math.round(t))
     if (metaRef.current) {
       metaRef.current.textContent =
-        `${(t / 1000).toFixed(1)}s / ${(s.cardStartMs / 1000).toFixed(1)}s` +
-        ` · ${res.frame.zoom.toFixed(1)}×${s.totalMs > s.cardStartMs ? ` · ${dynamicVideoCopy.endCardOnly}` : ''}`
+        `${(t / 1000).toFixed(1)}s / ${(s.totalMs / 1000).toFixed(1)}s` +
+        ` · ${res.frame.zoom.toFixed(1)}×`
     }
   }, [])
 
@@ -175,7 +174,6 @@ export function DynamicFrameOverlay() {
     audioPlayerRef.current?.stop()
     setPlaying(false)
     setPreparingAudio(false)
-    setEnded(false)
     setStatus('busy')
     setError('')
     cursorRef.current = 0
@@ -191,7 +189,7 @@ export function DynamicFrameOverlay() {
         sessionRef.current = s
         setStatus('ready')
         if (seekRef.current) {
-          seekRef.current.max = String(Math.round(s.cardStartMs))
+          seekRef.current.max = String(Math.round(s.totalMs))
           seekRef.current.value = '0'
         }
         paint(0)
@@ -212,7 +210,7 @@ export function DynamicFrameOverlay() {
     (ts: number) => {
       const s = sessionRef.current
       if (!s) return
-      const previewEnd = s.cardStartMs
+      const previewEnd = s.totalMs
       const audioMs = audioPlayerRef.current?.currentMs() ?? null
       let next: number
       if (audioMs !== null) {
@@ -227,7 +225,6 @@ export function DynamicFrameOverlay() {
       paint(next)
       if (next >= previewEnd) {
         setPlaying(false)
-        setEnded(true)
         audioPlayerRef.current?.pause()
         lastTsRef.current = 0
         return
@@ -241,8 +238,7 @@ export function DynamicFrameOverlay() {
     async (from: number) => {
       const s = sessionRef.current
       if (!s) return
-      const start = Math.max(0, Math.min(from, s.cardStartMs))
-      setEnded(false)
+      const start = Math.max(0, Math.min(from, s.totalMs))
       // 首次要等离线渲染好几秒：必须在点击的同步栈里先解锁 AudioContext
       if (withAudioRef.current) {
         try {
@@ -264,10 +260,9 @@ export function DynamicFrameOverlay() {
         )
       }
       if (!audioStarted) audioPlayerRef.current?.stop()
-      if (start >= s.cardStartMs) {
+      if (start >= s.totalMs) {
         setPlaying(false)
         setPreparingAudio(false)
-        setEnded(true)
         return
       }
       setPlaying(true)
@@ -289,7 +284,7 @@ export function DynamicFrameOverlay() {
       lastTsRef.current = 0
       return
     }
-    if (cursorRef.current >= s.cardStartMs) cursorRef.current = 0
+    if (cursorRef.current >= s.totalMs) cursorRef.current = 0
     void startPlayback(cursorRef.current)
   }
 
@@ -297,7 +292,6 @@ export function DynamicFrameOverlay() {
     const s = sessionRef.current
     if (!s || encoding) return
     setPlaying(false)
-    setEnded(false)
     audioPlayerRef.current?.pause()
     cancelAnimationFrame(rafRef.current)
     setEncoding(true)
@@ -365,8 +359,6 @@ export function DynamicFrameOverlay() {
   const controlsW = Math.min(rect.width - 24, Math.max(w, 560))
   const controlsLeft = rect.left + (rect.width - controlsW) / 2
   const controlsTop = top + boxH + 10
-  const previewEnd = sessionRef.current?.cardStartMs ?? 0
-
   return (
     <div
       className="dyn-frame-layer"
@@ -376,7 +368,7 @@ export function DynamicFrameOverlay() {
         className="dyn-frame-box"
         style={{ left: left - rect.left, top: top - rect.top, width: w, height: boxH }}
       >
-        <canvas ref={canvasRef} className={ended ? 'is-ended' : undefined} />
+        <canvas ref={canvasRef} />
         {status !== 'ready' && (
           <div className="dyn-frame-mask">
             {status === 'busy' ? dynamicVideoCopy.preparing : error || dynamicVideoCopy.empty}
@@ -411,7 +403,6 @@ export function DynamicFrameOverlay() {
             onChange={(e) => {
               const t = Number(e.target.value)
               cursorRef.current = t
-              setEnded(t >= previewEnd)
               paint(t)
               if (playing) {
                 audioPlayerRef.current?.pause()

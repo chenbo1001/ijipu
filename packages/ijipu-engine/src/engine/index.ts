@@ -148,7 +148,7 @@ export {
   MEASURE_BEATS_EPSILON,
 } from './measures'
 export { layoutScore } from './layout'
-export { renderScoreToSvg } from './render'
+export { renderScoreToSvg, keySignatureOf } from './render'
 // adj863（T-3）：**范围**（整页 / 墨迹 ± 每边 N px）的唯一实现 + SVG 外框改写（插件预览与导出、应用导出、
 // CLI `render --crop` 都消费这一份；墨迹盒由有 DOM 的宿主量好传进来，引擎不瞎估）
 export { rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, normalizeMinInk, minInkFor, RANGE_PAD_DEFAULT, MIN_INK_FALLBACK, NEAR_PAGE_RATIO } from './render/range'
@@ -174,7 +174,7 @@ export type { AccidentalGlyphInk, AccidentalInkMetrics } from './layout/spacing'
 export { accidentalGeometry } from './layout/spaceLayout'
 export type { LayoutFontMeta } from './layout/index'
 // adj638：渲染端可选入参（宿主实测的 `1 = ` / ♯ / ♩ 宽）——应用与插件都按同一份口径传
-export type { RenderFontMeta } from './render/index'
+export type { RenderFontMeta, KeySignature } from './render/index'
 // adj965（方案「OVL」）：水印/背景层的运行时资源类型——宿主解析好图片后按这个形状传给引擎
 export type { RenderAssets, RenderOpts, OverlayAsset } from './render/index'
 // adj647：音符字体栈（宿主实测字形时必须与渲染用同一串 font-family）

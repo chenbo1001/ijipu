@@ -30,6 +30,7 @@ import {
   slicePlaySequenceByRange,
   ballAt,
   beatPhaseOf,
+  keySignatureOf,
   BALL_LANDING_TIMING,
   BALL_SQUASH_X,
   BALL_SQUASH_Y,
@@ -317,7 +318,8 @@ export async function createDynamicSession(
       const tempo = meta?.tempoNum
         ? `♩=${meta.tempoNum}${meta.tempoText ? ` ${meta.tempoText}` : ''}`
         : (meta?.tempo ?? '')
-      const info = [meta?.key, meta?.meter, tempo].filter(Boolean).join('   ')
+      const key = keySignatureOf(meta?.key ?? '')
+      const rest = [meta?.meter ?? '', tempo].filter((p) => p.length > 0)
       const maxW = W * 0.84
       ctx.save()
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha))
@@ -364,12 +366,65 @@ export async function createDynamicSession(
         ctx.font = `${size}px ${font}`
         ctx.fillText(authors, W / 2, y, maxW)
       }
-      if (info) {
-        const size = fit(info, Math.round(unit * 0.027))
+      if (key.letter || rest.length > 0) {
+        const base = Math.round(unit * 0.027)
+        /** 量整行宽（调号前缀 + 小角标 + 字母 + 拍号 + 速度），用于居中与缩放 */
+        const measureLine = (size: number): number => {
+          ctx.font = `${size}px ${font}`
+          let w = 0
+          if (key.letter) {
+            w += ctx.measureText(key.prefix).width
+            if (key.accidental) {
+              ctx.font = `${Math.round(size * 0.75)}px ${font}`
+              w += ctx.measureText(key.accidental).width
+              ctx.font = `${size}px ${font}`
+            }
+            w += ctx.measureText(key.letter).width
+          }
+          for (const part of rest) {
+            if (w > 0) w += ctx.measureText('   ').width
+            w += ctx.measureText(part).width
+          }
+          return w
+        }
+        let size = base
+        const min = Math.max(10, Math.round(base * 0.6))
+        while (size > min && measureLine(size) > maxW) size -= 1
+        const total = measureLine(size)
         y += size * 1.9
+        let x = W / 2 - total / 2
+        ctx.textAlign = 'left'
+        if (key.letter) {
+          ctx.font = `${size}px ${font}`
+          const prefixW = ctx.measureText(key.prefix).width
+          ctx.fillStyle = 'rgba(255,255,255,0.88)'
+          ctx.fillText(key.prefix, x, y)
+          x += prefixW
+          if (key.accidental) {
+            const symSize = Math.round(size * 0.75)
+            ctx.font = `${symSize}px ${font}`
+            ctx.fillStyle = palette.neonCyan
+            ctx.fillText(key.accidental, x, y - size * 0.35)
+            x += ctx.measureText(key.accidental).width
+            ctx.font = `${size}px ${font}`
+          }
+          ctx.fillStyle = 'rgba(255,255,255,0.88)'
+          ctx.fillText(key.letter, x, y)
+          x += ctx.measureText(key.letter).width
+        }
         ctx.fillStyle = 'rgba(255,255,255,0.62)'
-        ctx.font = `${size}px ${font}`
-        ctx.fillText(info, W / 2, y, maxW)
+        const separator = '   '
+        let first = !key.letter
+        for (const part of rest) {
+          if (!first) {
+            ctx.fillText(separator, x, y)
+            x += ctx.measureText(separator).width
+          }
+          ctx.fillText(part, x, y)
+          x += ctx.measureText(part).width
+          first = false
+        }
+        ctx.textAlign = 'center'
       }
       ctx.fillStyle = 'rgba(255,255,255,0.55)'
       ctx.font = `${Math.round(unit * 0.022)}px ${font}`

@@ -1237,5 +1237,4 @@ export const dynamicVideoCopy = {
   modeFull: '整首',
   rangeAll: '整曲',
   rangeSegment: '标记段',
-  endCardOnly: '片尾仅导出',
 } as const

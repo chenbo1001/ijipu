@@ -5689,10 +5689,6 @@ span.ws-check {
   width: 100%;
   height: 100%;
   background: #ffffff;
-  transition: opacity 0.5s ease;
-}
-.dyn-frame-box canvas.is-ended {
-  opacity: 0;
 }
 .dyn-frame-mask {
   position: absolute;
