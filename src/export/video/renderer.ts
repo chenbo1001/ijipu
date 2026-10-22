@@ -221,6 +221,131 @@ export async function createDynamicSession(
   const pages: HTMLCanvasElement[] = []
   for (const svg of svgs) pages.push(await svgToCanvas(svg, RASTER_SCALE, '#ffffff'))
 
+  const CARD_FONT = '"Microsoft YaHei", "PingFang SC", sans-serif'
+
+  /**
+   * adj1072（用户 2026-10-22「片头片尾有点干，不够出彩」）：片头/片尾共用的背景层。
+   *
+   * 深空蓝渐变 + 青色/蓝色双光晕 + 五线谱 + 大音符/品牌水印 + 细点粒子 + 缓慢扫光 + 暗角。
+   * 全部按 `t` 计算，预览与导出逐帧一致；文字不参与，保证可读性。
+   */
+  const paintCardBackdrop = (ctx: DrawCtx, W: number, H: number, t: number, mark: string) => {
+    const unit = Math.min(W, H)
+    const baseAlpha = ctx.globalAlpha
+    const g = ctx.createLinearGradient(0, 0, 0, H)
+    g.addColorStop(0, palette.deepSpaceBlueDark)
+    g.addColorStop(0.55, palette.deepSpaceBlue)
+    g.addColorStop(1, '#0a1024')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, W, H)
+
+    const glow = (x: number, y: number, r: number, color: string) => {
+      const rg = ctx.createRadialGradient(x, y, 0, x, y, r)
+      rg.addColorStop(0, color)
+      rg.addColorStop(1, 'rgba(0,0,0,0)')
+      ctx.fillStyle = rg
+      ctx.fillRect(0, 0, W, H)
+    }
+    glow(W * 0.72, H * 0.26, H * 0.6, 'rgba(0,240,255,0.16)')
+    glow(W * 0.16, H * 0.84, H * 0.52, 'rgba(90,120,255,0.12)')
+
+    // 五线谱：横向细线，压在偏下位置，和音乐主题呼应
+    ctx.save()
+    ctx.globalAlpha = baseAlpha * 0.05
+    ctx.strokeStyle = '#ffffff'
+    ctx.lineWidth = 1
+    for (let i = 0; i < 5; i++) {
+      const y = H * 0.6 + i * H * 0.026
+      ctx.beginPath()
+      ctx.moveTo(W * 0.06, y)
+      ctx.lineTo(W * 0.94, y)
+      ctx.stroke()
+    }
+    ctx.restore()
+
+    // 大号水印：片头用音符，片尾用品牌首字母（整串 iJipu 在宽图里会横贯画面、压过标题）
+    const markScale = mark.length <= 1 ? 0.52 : 0.42
+    ctx.save()
+    ctx.globalAlpha = baseAlpha * 0.03
+    ctx.fillStyle = '#ffffff'
+    ctx.textAlign = 'right'
+    ctx.font = `700 ${Math.round(H * markScale)}px ${CARD_FONT}`
+    ctx.fillText(mark, W * 0.98, H * 0.84)
+    ctx.restore()
+
+    // 细点粒子，缓慢明暗；位置固定，不随机
+    ctx.save()
+    ctx.fillStyle = '#8ffbff'
+    for (let i = 0; i < 18; i++) {
+      const x = (((i * 73) % 100) / 100) * W
+      const y = (((i * 41) % 100) / 100) * H
+      const a = 0.1 + 0.09 * Math.sin(t / 900 + i * 1.7)
+      ctx.globalAlpha = baseAlpha * Math.max(0, a)
+      ctx.beginPath()
+      ctx.arc(x, y, Math.max(1, unit * 0.0015), 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.restore()
+
+    // 斜向扫光，6 秒一轮
+    ctx.save()
+    ctx.globalAlpha = baseAlpha * 0.05
+    const sx = ((t / 6000) % 1) * W * 1.6 - W * 0.3
+    const sg = ctx.createLinearGradient(sx, 0, sx + W * 0.26, H)
+    sg.addColorStop(0, 'rgba(0,240,255,0)')
+    sg.addColorStop(0.5, 'rgba(0,240,255,1)')
+    sg.addColorStop(1, 'rgba(0,240,255,0)')
+    ctx.fillStyle = sg
+    ctx.fillRect(0, 0, W, H)
+    ctx.restore()
+
+    // 暗角：把视线收在中间
+    const vg = ctx.createRadialGradient(
+      W / 2,
+      H / 2,
+      Math.min(W, H) * 0.18,
+      W / 2,
+      H / 2,
+      Math.max(W, H) * 0.72,
+    )
+    vg.addColorStop(0, 'rgba(2,6,16,0)')
+    vg.addColorStop(1, 'rgba(2,6,16,0.55)')
+    ctx.fillStyle = vg
+    ctx.fillRect(0, 0, W, H)
+  }
+
+  /** adj1072：四角取景括号，给卡片一点“框”的设计感 */
+  const paintCardBrackets = (ctx: DrawCtx, W: number, H: number) => {
+    const unit = Math.min(W, H)
+    const baseAlpha = ctx.globalAlpha
+    const pad = unit * 0.06
+    const len = unit * 0.055
+    ctx.save()
+    ctx.globalAlpha = baseAlpha * 0.3
+    ctx.strokeStyle = palette.neonCyan
+    ctx.lineWidth = Math.max(1.2, unit * 0.0018)
+    const corners: [number, number, number, number][] = [
+      [pad, pad, 1, 1],
+      [W - pad, pad, -1, 1],
+      [pad, H - pad, 1, -1],
+      [W - pad, H - pad, -1, -1],
+    ]
+    for (const [x, y, sx, sy] of corners) {
+      ctx.beginPath()
+      ctx.moveTo(x, y + sy * len)
+      ctx.lineTo(x, y)
+      ctx.lineTo(x + sx * len, y)
+      ctx.stroke()
+    }
+    ctx.restore()
+  }
+
+  /** 卡片文字的淡入/上浮曲线（0→1） */
+  const cardReveal = (t: number, delay: number, dur: number): number => {
+    const k = Math.max(0, Math.min(1, (t - delay) / dur))
+    return k * k * (3 - 2 * k)
+  }
+
   const draw = (ctx: DrawCtx, tMs: number) => {
     const frame = cameraAt(camera, tMs)
     const W = camera.viewW
@@ -308,9 +433,9 @@ export async function createDynamicSession(
      * 自制片头卡（adj1067）：深空蓝底 + 霓虹青强调线 + 描述头信息。
      * 版式只依赖 `min(W,H)`，因此 9:16 / 1:1 / 16:9 看到的是同一张卡，不会出现裁切差异。
      */
-    const paintIntroCard = (alpha: number) => {
+    const paintIntroCard = (alpha: number, t: number) => {
       const unit = Math.min(W, H)
-      const font = '"Microsoft YaHei", "PingFang SC", sans-serif'
+      const font = CARD_FONT
       const meta = introMeta
       const title = (meta?.titles[0] ?? '').trim() || '未命名'
       const subtitle = (meta?.titles.slice(1).join(' ') ?? '').trim()
@@ -320,21 +445,34 @@ export async function createDynamicSession(
         : (meta?.tempo ?? '')
       const key = keySignatureOf(meta?.key ?? '')
       const rest = [meta?.meter ?? '', tempo].filter((p) => p.length > 0)
-      const maxW = W * 0.84
+      /**
+       * adj1072：三种比例不再只靠 min(W,H) 一套字号。
+       * 9:16 内容宽、字号收一点；1:1 居中；16:9 标题更大、内容列收窄，避免“宽画布里一行太长”。
+       */
+      const aspect = W / H
+      const tall = aspect < 0.8
+      const wide = aspect > 1.3
+      const titleScale = wide ? 1.14 : tall ? 1.0 : 1.04
+      const maxW = W * (wide ? 0.78 : tall ? 0.86 : 0.84)
+      const titleFont = pageConfig.biaoti_font || CARD_FONT
+      const titleBase = Math.round(unit * 0.1 * titleScale)
+      const subBase = Math.round(unit * (wide ? 0.048 : tall ? 0.042 : 0.045))
+      const authorBase = Math.round(unit * (wide ? 0.034 : tall ? 0.031 : 0.033))
+      const infoBase = Math.round(unit * (wide ? 0.027 : tall ? 0.025 : 0.026))
+      const brandBase = Math.round(unit * (wide ? 0.021 : tall ? 0.02 : 0.021))
+      const titleY = H * (wide ? 0.42 : tall ? 0.38 : 0.4)
+      const lineRatio = wide ? 0.16 : tall ? 0.2 : 0.18
       ctx.save()
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha))
-      const g = ctx.createLinearGradient(0, 0, 0, H)
-      g.addColorStop(0, palette.deepSpaceBlueDark)
-      g.addColorStop(1, palette.deepSpaceBlue)
-      ctx.fillStyle = g
-      ctx.fillRect(0, 0, W, H)
+      paintCardBackdrop(ctx, W, H, t, '♪')
+      paintCardBrackets(ctx, W, H)
 
       /** 先按宽度缩字号；`fillText` 再带 maxWidth 兜底，极长标题也不会溢出卡片 */
-      const fit = (text: string, base: number, bold = false): number => {
+      const fit = (text: string, base: number, bold = false, family = font): number => {
         let size = Math.round(base)
         const min = Math.max(10, Math.round(base * 0.5))
         while (size > min) {
-          ctx.font = `${bold ? 'bold ' : ''}${size}px ${font}`
+          ctx.font = `${bold ? 'bold ' : ''}${size}px ${family}`
           if (ctx.measureText(text).width <= maxW) break
           size -= 2
         }
@@ -343,37 +481,64 @@ export async function createDynamicSession(
 
       ctx.textAlign = 'center'
 
-      const titleSize = fit(title, Math.round(unit * 0.1), true)
-      const titleY = H * 0.4
-      ctx.fillStyle = '#ffffff'
-      ctx.font = `bold ${titleSize}px ${font}`
-      ctx.fillText(title, W / 2, titleY, maxW)
+      const titleSize = fit(title, titleBase, true, titleFont)
+      const titleE = cardReveal(t, 120, 650)
+      const lineE = cardReveal(t, 420, 650)
+      const subE = cardReveal(t, 560, 650)
+      const authorE = cardReveal(t, 680, 650)
+      const infoE = cardReveal(t, 800, 650)
+      const brandE = cardReveal(t, 920, 650)
+
+      // 标题：淡入 + 上浮 + 青色辉光 + 轻微冷白渐变
+      ctx.save()
+      ctx.globalAlpha = alpha * titleE
+      ctx.shadowColor = 'rgba(0,240,255,0.32)'
+      ctx.shadowBlur = titleSize * 0.22
+      const tg = ctx.createLinearGradient(0, titleY - titleSize, 0, titleY)
+      tg.addColorStop(0, '#ffffff')
+      tg.addColorStop(1, '#d6fbff')
+      ctx.fillStyle = tg
+      ctx.font = `bold ${titleSize}px ${titleFont}`
+      ctx.fillText(title, W / 2, titleY + (1 - titleE) * unit * 0.025, maxW)
+      ctx.restore()
 
       /**
        * adj1069：强调线放在**标题下方、下面内容之前**，位置按 `titleSize` 算。
-       * 旧写法 `H×0.3`：16:9 离标题 108px、9:16 离 192px，三种比例忽远忽近。
+       * adj1072：线从中间向两侧展开，并带一点光晕；宽度按比例（16:9 收窄、9:16 放宽）。
        */
-      const accentY = titleY + titleSize * 0.52
+      const accentY = titleY + titleSize * 0.6
+      const lineW = W * lineRatio * lineE
+      ctx.save()
+      ctx.globalAlpha = alpha
       ctx.fillStyle = palette.neonCyan
-      ctx.fillRect(W * 0.41, accentY, W * 0.18, Math.max(2, unit * 0.004))
+      ctx.shadowColor = palette.neonCyan
+      ctx.shadowBlur = unit * 0.025
+      ctx.fillRect(W / 2 - lineW / 2, accentY, lineW, Math.max(2, unit * 0.004))
+      ctx.restore()
 
       let y = titleY + titleSize * 0.85
       if (subtitle) {
-        const size = fit(subtitle, Math.round(unit * 0.045))
+        const size = fit(subtitle, subBase)
         y += size * 1.2
+        ctx.save()
+        ctx.globalAlpha = alpha * subE
         ctx.fillStyle = palette.neonCyan
         ctx.font = `${size}px ${font}`
         ctx.fillText(subtitle, W / 2, y, maxW)
+        ctx.restore()
       }
       if (authors) {
-        const size = fit(authors, Math.round(unit * 0.034))
-        y += size * 1.7
-        ctx.fillStyle = 'rgba(255,255,255,0.82)'
+        const size = fit(authors, authorBase)
+        y += size * 1.8
+        ctx.save()
+        ctx.globalAlpha = alpha * authorE
+        ctx.fillStyle = 'rgba(255,255,255,0.86)'
         ctx.font = `${size}px ${font}`
         ctx.fillText(authors, W / 2, y, maxW)
+        ctx.restore()
       }
       if (key.letter || rest.length > 0) {
-        const base = Math.round(unit * 0.027)
+        const base = infoBase
         /** 量整行宽（调号前缀 + 小角标 + 字母 + 拍号 + 速度），用于居中与缩放 */
         const measureLine = (size: number): number => {
           ctx.font = `${size}px ${font}`
@@ -397,13 +562,15 @@ export async function createDynamicSession(
         const min = Math.max(10, Math.round(base * 0.6))
         while (size > min && measureLine(size) > maxW) size -= 1
         const total = measureLine(size)
-        y += size * 1.9
+        y += size * 2.0
         let x = W / 2 - total / 2
+        ctx.save()
+        ctx.globalAlpha = alpha * infoE
         ctx.textAlign = 'left'
         if (key.letter) {
           ctx.font = `${size}px ${font}`
           const prefixW = ctx.measureText(key.prefix).width
-          ctx.fillStyle = 'rgba(255,255,255,0.88)'
+          ctx.fillStyle = 'rgba(255,255,255,0.9)'
           ctx.fillText(key.prefix, x, y)
           x += prefixW
           if (key.accidental) {
@@ -414,11 +581,11 @@ export async function createDynamicSession(
             x += ctx.measureText(key.accidental).width
             ctx.font = `${size}px ${font}`
           }
-          ctx.fillStyle = 'rgba(255,255,255,0.88)'
+          ctx.fillStyle = 'rgba(255,255,255,0.9)'
           ctx.fillText(key.letter, x, y)
           x += ctx.measureText(key.letter).width
         }
-        ctx.fillStyle = 'rgba(255,255,255,0.62)'
+        ctx.fillStyle = 'rgba(255,255,255,0.68)'
         const separator = '   '
         let first = !key.letter
         for (const part of rest) {
@@ -431,10 +598,14 @@ export async function createDynamicSession(
           first = false
         }
         ctx.textAlign = 'center'
+        ctx.restore()
       }
-      ctx.fillStyle = 'rgba(255,255,255,0.55)'
-      ctx.font = `${Math.round(unit * 0.022)}px ${font}`
+      ctx.save()
+      ctx.globalAlpha = alpha * brandE
+      ctx.fillStyle = 'rgba(255,255,255,0.52)'
+      ctx.font = `${brandBase}px ${font}`
       ctx.fillText(`${brand.nameZh} ${brand.name}`, W / 2, H * 0.9, maxW)
+      ctx.restore()
       ctx.restore()
     }
 
@@ -447,7 +618,7 @@ export async function createDynamicSession(
       const raw =
         introEnd <= 0 ? 1 : Math.max(0, Math.min(1, (tMs - introEnd) / INTRO_PAN_MS))
       const k = raw * raw * (3 - 2 * raw)
-      if (k < 1) paintIntroCard(1 - k)
+      if (k < 1) paintIntroCard(1 - k, tMs)
       if (k > 0) {
         const target = cameraAt(camera, camera.firstT)
         // 0.94→1 的轻微推近，观感是"卡缩进谱面"，不是硬切
@@ -464,7 +635,7 @@ export async function createDynamicSession(
       const lastT = Math.max(0, musicEndMs - 1)
       paintCamera(cameraAt(camera, lastT), 1, lastT)
       const k = Math.min(1, (tMs - cardStartMs) / 300)
-      paintEndCard(ctx, k)
+      paintEndCard(ctx, k, tMs - cardStartMs)
       return { frame, following: false }
     }
 
@@ -472,18 +643,15 @@ export async function createDynamicSession(
     return { frame, following: tMs >= camera.firstT }
   }
 
-  /** 品牌落版：深空蓝渐变 + 中英文名 + slogan + 网址 */
-  const paintEndCard = (ctx: DrawCtx, alpha: number) => {
+  /** 品牌落版：深空蓝 + 双光晕/五线谱/品牌水印 + 中英文名 + slogan + 网址 */
+  const paintEndCard = (ctx: DrawCtx, alpha: number, t: number) => {
     const W = camera.viewW
     const H = camera.viewH
-    const font = '"Microsoft YaHei", "PingFang SC", sans-serif'
+    const font = CARD_FONT
     ctx.save()
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha))
-    const g = ctx.createLinearGradient(0, 0, 0, H)
-    g.addColorStop(0, palette.deepSpaceBlueDark)
-    g.addColorStop(1, palette.deepSpaceBlue)
-    ctx.fillStyle = g
-    ctx.fillRect(0, 0, W, H)
+    paintCardBackdrop(ctx, W, H, t, brand.name.charAt(0))
+    paintCardBrackets(ctx, W, H)
 
     ctx.textAlign = 'center'
     /**
@@ -493,29 +661,61 @@ export async function createDynamicSession(
      * 现在字号按 `min(W,H)` 定（16:9 时 108px），行距按**字号**留足，纵向整体居中。
      */
     const unit = Math.min(W, H)
-    const titleSize = Math.round(unit * 0.1)
-    const sloganSize = Math.round(unit * 0.045)
-    const urlSize = Math.round(unit * 0.032)
-    const titleY = H * 0.44
+    const aspect = W / H
+    const tall = aspect < 0.8
+    const wide = aspect > 1.3
+    const titleScale = wide ? 1.14 : tall ? 1.0 : 1.04
+    const titleSize = Math.round(unit * 0.1 * titleScale)
+    const sloganSize = Math.round(unit * (wide ? 0.05 : tall ? 0.043 : 0.045))
+    const urlSize = Math.round(unit * (wide ? 0.034 : tall ? 0.03 : 0.032))
+    const titleY = H * (wide ? 0.44 : tall ? 0.42 : 0.44)
     const sloganY = titleY + Math.round(titleSize * 0.95)
-    const urlY = H * 0.78
+    const urlY = H * (wide ? 0.8 : tall ? 0.72 : 0.76)
+    const maxW = W * (wide ? 0.8 : 0.86)
     // adj1069：强调线放在标题与标语之间，距离按 titleSize（三种比例同值），不再固定在标题上方
-    const accentY = titleY + titleSize * 0.4
+    const accentY = titleY + titleSize * 0.45
+    const lineRatio = wide ? 0.14 : tall ? 0.18 : 0.16
+    const titleE = cardReveal(t, 100, 650)
+    const lineE = cardReveal(t, 380, 650)
+    const sloganE = cardReveal(t, 500, 650)
+    const urlE = cardReveal(t, 700, 650)
 
-    ctx.fillStyle = palette.neonCyan
-    ctx.fillRect(W * 0.42, accentY, W * 0.16, Math.max(2, unit * 0.004))
-
-    ctx.fillStyle = '#ffffff'
+    // 品牌名：淡入 + 上浮 + 辉光 + 轻微冷白渐变
+    ctx.save()
+    ctx.globalAlpha = alpha * titleE
+    ctx.shadowColor = 'rgba(0,240,255,0.32)'
+    ctx.shadowBlur = titleSize * 0.22
+    const tg = ctx.createLinearGradient(0, titleY - titleSize, 0, titleY)
+    tg.addColorStop(0, '#ffffff')
+    tg.addColorStop(1, '#d6fbff')
+    ctx.fillStyle = tg
     ctx.font = `bold ${titleSize}px ${font}`
-    ctx.fillText(`${brand.nameZh} ${brand.name}`, W / 2, titleY)
+    ctx.fillText(`${brand.nameZh} ${brand.name}`, W / 2, titleY + (1 - titleE) * unit * 0.025, maxW)
+    ctx.restore()
 
+    // 强调线：从中间展开 + 光晕
+    const lineW = W * lineRatio * lineE
+    ctx.save()
+    ctx.globalAlpha = alpha
+    ctx.fillStyle = palette.neonCyan
+    ctx.shadowColor = palette.neonCyan
+    ctx.shadowBlur = unit * 0.025
+    ctx.fillRect(W / 2 - lineW / 2, accentY, lineW, Math.max(2, unit * 0.004))
+    ctx.restore()
+
+    ctx.save()
+    ctx.globalAlpha = alpha * sloganE
     ctx.fillStyle = palette.neonCyan
     ctx.font = `${sloganSize}px ${font}`
-    ctx.fillText(brand.taglineMain, W / 2, sloganY)
+    ctx.fillText(brand.taglineMain, W / 2, sloganY + (1 - sloganE) * unit * 0.015)
+    ctx.restore()
 
+    ctx.save()
+    ctx.globalAlpha = alpha * urlE
     ctx.fillStyle = 'rgba(255,255,255,0.72)'
     ctx.font = `${urlSize}px ${font}`
     ctx.fillText(brand.siteUrl.replace(/^https?:\/\//, ''), W / 2, urlY)
+    ctx.restore()
     ctx.restore()
   }
 
