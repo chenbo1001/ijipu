@@ -7,7 +7,8 @@
  *  - 框里是成片画面（同一份 `createDynamicSession`，与导出逐像素同源），
  *    后方静态预览压暗做背景；播放/进度/比例/时长/声音/生成视频都在**框外暗部**；
  *  - 片头先**静止 3 秒描述头**，再用 0.7 秒推近/平移到第一拍（第一拍在 3.7s）；
- *  - 预览不播完整片尾：播到片尾卡开始就淡出；导出保留完整片尾。
+ *  - 预览播完整片尾（含品牌落版），与导出内容一致（adj1068）。
+ *  - 片头/片尾卡片模板由“卡片”下拉框选择（adj1073），默认品牌深空蓝，样式可持久化。
  *
  * ## 为什么不直接变换后方预览的 DOM
  *
@@ -18,9 +19,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DynamicPresetId } from '@ijipu/engine'
 import { useDocStore } from '../store/docStore'
-import { useUiStore, type DynamicAspect, type DynamicMode } from '../store/uiStore'
+import { useUiStore, type DynamicAspect, type DynamicCardStyleId, type DynamicMode } from '../store/uiStore'
 import { dynamicVideoCopy } from '../brand/copy'
 import { createDynamicSession, type DynamicSession } from '../export/video/renderer'
+import { CARD_TEMPLATES, cardStyleById } from '../export/video/cardTemplates'
 import { encodeMp4 } from '../export/video/mp4'
 import { DynamicAudioPlayer } from '../export/video/audioPlayer'
 import { renderToAudioBuffer } from '../export/audio'
@@ -49,6 +51,8 @@ export function DynamicFrameOverlay() {
   const range = useUiStore((s) => s.dynamicCamera.range)
   const mode = useUiStore((s) => s.dynamicCamera.mode)
   const setDynamicCamera = useUiStore((s) => s.setDynamicCamera)
+  const cardStyle = useUiStore((s) => s.dynamicCardStyle)
+  const setDynamicCardStyle = useUiStore((s) => s.setDynamicCardStyle)
   const code = useDocStore((s) => s.code)
   const pageConfig = useDocStore((s) => s.pageConfig)
 
@@ -183,6 +187,7 @@ export function DynamicFrameOverlay() {
       range,
       leadInMs: LEAD_IN_MS,
       maxMs: mode === '3min' ? EXPORT_MAX_MS : undefined,
+      cardStyle: cardStyleById(cardStyle),
     })
       .then((s) => {
         if (cancelled) return
@@ -202,7 +207,7 @@ export function DynamicFrameOverlay() {
     return () => {
       cancelled = true
     }
-  }, [on, aspect, code, pageConfig, range, mode, paint])
+  }, [on, aspect, code, pageConfig, range, mode, cardStyle, paint])
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
 
@@ -414,6 +419,24 @@ export function DynamicFrameOverlay() {
           <button type="button" className="btn dyn-frame-close" onClick={close} title="关闭相机位">
             ✕
           </button>
+        </div>
+
+        <div className="dyn-frame-controls-row">
+          <span className="dyn-frame-label">{dynamicVideoCopy.cardStyle}</span>
+          <select
+            className="dyn-frame-select"
+            value={cardStyle}
+            disabled={encoding || preparingAudio}
+            aria-label={dynamicVideoCopy.cardStyle}
+            onChange={(e) => setDynamicCardStyle(e.target.value as DynamicCardStyleId)}
+          >
+            {CARD_TEMPLATES.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+          <span className="dyn-frame-meta">{cardStyleById(cardStyle).description}</span>
         </div>
 
         <div className="dyn-frame-controls-row">

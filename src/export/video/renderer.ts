@@ -42,7 +42,8 @@ import {
   type PlayEvent,
 } from '@ijipu/engine'
 import { svgToCanvas } from '../export'
-import { brand, palette } from '../../brand/tokens'
+import { brand } from '../../brand/tokens'
+import { CARD_SANS, CARD_SERIF, DEFAULT_CARD_STYLE, type CardStyle } from './cardTemplates'
 
 /**
  * 页面位图的放大倍数：4 倍跟拍时，取景框宽 = 1080/4 = 270 页面单位，
@@ -108,9 +109,12 @@ export async function createDynamicSession(
     maxMs?: number
     /** 跳跳球（节拍指示，默认开） */
     ball?: boolean
+    /** adj1073：片头/片尾卡片模板（预设或以后的自定义样式；缺省 = 品牌深空蓝） */
+    cardStyle?: CardStyle
   },
 ): Promise<DynamicSession> {
   const preset = DYNAMIC_PRESETS[presetId]
+  const card = opts?.cardStyle ?? DEFAULT_CARD_STYLE
   const parsed = parseJps(code)
   const layout = layoutScore(parsed, pageConfig)
   const beat = bpm !== undefined && bpm > 0 ? bpm : inferBpm(parsed)
@@ -221,21 +225,20 @@ export async function createDynamicSession(
   const pages: HTMLCanvasElement[] = []
   for (const svg of svgs) pages.push(await svgToCanvas(svg, RASTER_SCALE, '#ffffff'))
 
-  const CARD_FONT = '"Microsoft YaHei", "PingFang SC", sans-serif'
+  const CARD_FONT = CARD_SANS
 
   /**
-   * adj1072（用户 2026-10-22「片头片尾有点干，不够出彩」）：片头/片尾共用的背景层。
-   *
-   * 深空蓝渐变 + 青色/蓝色双光晕 + 五线谱 + 大音符/品牌水印 + 细点粒子 + 缓慢扫光 + 暗角。
+   * adj1072：片头/片尾共用的背景层。
+   * adj1073：全部颜色/水印/粒子/扫光/暗角改成读 `card`（CardStyle），预设与以后的自定义共用这一条路径。
    * 全部按 `t` 计算，预览与导出逐帧一致；文字不参与，保证可读性。
    */
   const paintCardBackdrop = (ctx: DrawCtx, W: number, H: number, t: number, mark: string) => {
     const unit = Math.min(W, H)
     const baseAlpha = ctx.globalAlpha
     const g = ctx.createLinearGradient(0, 0, 0, H)
-    g.addColorStop(0, palette.deepSpaceBlueDark)
-    g.addColorStop(0.55, palette.deepSpaceBlue)
-    g.addColorStop(1, '#0a1024')
+    g.addColorStop(0, card.bg[0])
+    g.addColorStop(0.55, card.bg[1])
+    g.addColorStop(1, card.bg[2])
     ctx.fillStyle = g
     ctx.fillRect(0, 0, W, H)
 
@@ -246,83 +249,93 @@ export async function createDynamicSession(
       ctx.fillStyle = rg
       ctx.fillRect(0, 0, W, H)
     }
-    glow(W * 0.72, H * 0.26, H * 0.6, 'rgba(0,240,255,0.16)')
-    glow(W * 0.16, H * 0.84, H * 0.52, 'rgba(90,120,255,0.12)')
+    glow(W * 0.72, H * 0.26, H * 0.6, card.glow[0])
+    glow(W * 0.16, H * 0.84, H * 0.52, card.glow[1])
 
     // 五线谱：横向细线，压在偏下位置，和音乐主题呼应
-    ctx.save()
-    ctx.globalAlpha = baseAlpha * 0.05
-    ctx.strokeStyle = '#ffffff'
-    ctx.lineWidth = 1
-    for (let i = 0; i < 5; i++) {
-      const y = H * 0.6 + i * H * 0.026
-      ctx.beginPath()
-      ctx.moveTo(W * 0.06, y)
-      ctx.lineTo(W * 0.94, y)
-      ctx.stroke()
+    if (card.staff.alpha > 0) {
+      ctx.save()
+      ctx.globalAlpha = baseAlpha * card.staff.alpha
+      ctx.strokeStyle = card.staff.color
+      ctx.lineWidth = 1
+      for (let i = 0; i < 5; i++) {
+        const y = H * 0.6 + i * H * 0.026
+        ctx.beginPath()
+        ctx.moveTo(W * 0.06, y)
+        ctx.lineTo(W * 0.94, y)
+        ctx.stroke()
+      }
+      ctx.restore()
     }
-    ctx.restore()
 
-    // 大号水印：片头用音符，片尾用品牌首字母（整串 iJipu 在宽图里会横贯画面、压过标题）
-    const markScale = mark.length <= 1 ? 0.52 : 0.42
-    ctx.save()
-    ctx.globalAlpha = baseAlpha * 0.03
-    ctx.fillStyle = '#ffffff'
-    ctx.textAlign = 'right'
-    ctx.font = `700 ${Math.round(H * markScale)}px ${CARD_FONT}`
-    ctx.fillText(mark, W * 0.98, H * 0.84)
-    ctx.restore()
+    // 大号水印：每个模板决定字符/颜色/透明度/大小；空串不画
+    if (mark && card.watermark.alpha > 0) {
+      ctx.save()
+      ctx.globalAlpha = baseAlpha * card.watermark.alpha
+      ctx.fillStyle = card.watermark.color
+      ctx.textAlign = 'right'
+      ctx.font = `700 ${Math.round(H * card.watermark.scale)}px ${CARD_FONT}`
+      ctx.fillText(mark, W * 0.98, H * 0.84)
+      ctx.restore()
+    }
 
     // 细点粒子，缓慢明暗；位置固定，不随机
-    ctx.save()
-    ctx.fillStyle = '#8ffbff'
-    for (let i = 0; i < 18; i++) {
-      const x = (((i * 73) % 100) / 100) * W
-      const y = (((i * 41) % 100) / 100) * H
-      const a = 0.1 + 0.09 * Math.sin(t / 900 + i * 1.7)
-      ctx.globalAlpha = baseAlpha * Math.max(0, a)
-      ctx.beginPath()
-      ctx.arc(x, y, Math.max(1, unit * 0.0015), 0, Math.PI * 2)
-      ctx.fill()
+    if (card.particles) {
+      ctx.save()
+      ctx.fillStyle = card.accent
+      for (let i = 0; i < 18; i++) {
+        const x = (((i * 73) % 100) / 100) * W
+        const y = (((i * 41) % 100) / 100) * H
+        const a = 0.1 + 0.09 * Math.sin(t / 900 + i * 1.7)
+        ctx.globalAlpha = baseAlpha * Math.max(0, a)
+        ctx.beginPath()
+        ctx.arc(x, y, Math.max(1, unit * 0.0015), 0, Math.PI * 2)
+        ctx.fill()
+      }
+      ctx.restore()
     }
-    ctx.restore()
 
     // 斜向扫光，6 秒一轮
-    ctx.save()
-    ctx.globalAlpha = baseAlpha * 0.05
-    const sx = ((t / 6000) % 1) * W * 1.6 - W * 0.3
-    const sg = ctx.createLinearGradient(sx, 0, sx + W * 0.26, H)
-    sg.addColorStop(0, 'rgba(0,240,255,0)')
-    sg.addColorStop(0.5, 'rgba(0,240,255,1)')
-    sg.addColorStop(1, 'rgba(0,240,255,0)')
-    ctx.fillStyle = sg
-    ctx.fillRect(0, 0, W, H)
-    ctx.restore()
+    if (card.sweep) {
+      ctx.save()
+      ctx.globalAlpha = baseAlpha * 0.05
+      const sx = ((t / 6000) % 1) * W * 1.6 - W * 0.3
+      const sg = ctx.createLinearGradient(sx, 0, sx + W * 0.26, H)
+      sg.addColorStop(0, 'rgba(0,0,0,0)')
+      sg.addColorStop(0.5, card.accent)
+      sg.addColorStop(1, 'rgba(0,0,0,0)')
+      ctx.fillStyle = sg
+      ctx.fillRect(0, 0, W, H)
+      ctx.restore()
+    }
 
-    // 暗角：把视线收在中间
-    const vg = ctx.createRadialGradient(
-      W / 2,
-      H / 2,
-      Math.min(W, H) * 0.18,
-      W / 2,
-      H / 2,
-      Math.max(W, H) * 0.72,
-    )
-    vg.addColorStop(0, 'rgba(2,6,16,0)')
-    vg.addColorStop(1, 'rgba(2,6,16,0.55)')
-    ctx.fillStyle = vg
-    ctx.fillRect(0, 0, W, H)
+    // 暗角：把视线收在中间；纸面模板只给一点点暖暗角
+    if (card.vignette > 0) {
+      const vg = ctx.createRadialGradient(
+        W / 2,
+        H / 2,
+        Math.min(W, H) * 0.18,
+        W / 2,
+        H / 2,
+        Math.max(W, H) * 0.72,
+      )
+      vg.addColorStop(0, `rgba(${card.vignetteColor},0)`)
+      vg.addColorStop(1, `rgba(${card.vignetteColor},${card.vignette})`)
+      ctx.fillStyle = vg
+      ctx.fillRect(0, 0, W, H)
+    }
   }
 
-  /** adj1072：四角取景括号，给卡片一点“框”的设计感 */
+  /** adj1072：四角取景括号；颜色/强度由模板决定 */
   const paintCardBrackets = (ctx: DrawCtx, W: number, H: number) => {
+    if (card.bracket.alpha <= 0) return
     const unit = Math.min(W, H)
     const baseAlpha = ctx.globalAlpha
     const pad = unit * 0.06
     const len = unit * 0.055
     ctx.save()
-    ctx.globalAlpha = baseAlpha * 0.3
-    ctx.strokeStyle = palette.neonCyan
+    ctx.globalAlpha = baseAlpha * card.bracket.alpha
+    ctx.strokeStyle = card.bracket.color
     ctx.lineWidth = Math.max(1.2, unit * 0.0018)
     const corners: [number, number, number, number][] = [
       [pad, pad, 1, 1],
@@ -337,6 +350,27 @@ export async function createDynamicSession(
       ctx.lineTo(x + sx * len, y)
       ctx.stroke()
     }
+    ctx.restore()
+  }
+
+  /** adj1073：纸面/水墨的角落印章；品牌模板不画 */
+  const paintCardSeal = (ctx: DrawCtx, W: number, H: number, t: number) => {
+    if (!card.seal) return
+    const unit = Math.min(W, H)
+    const size = unit * 0.075
+    const x = W * 0.86 - size / 2
+    const y = H * 0.84 - size / 2
+    const reveal = card.motion ? cardReveal(t, 1000, 500) : 1
+    ctx.save()
+    ctx.globalAlpha = Math.max(0, Math.min(1, ctx.globalAlpha)) * reveal
+    ctx.strokeStyle = card.seal.color
+    ctx.fillStyle = card.seal.color
+    ctx.lineWidth = Math.max(1.4, unit * 0.0028)
+    ctx.strokeRect(x, y, size, size)
+    ctx.font = `${Math.round(size * 0.52)}px ${CARD_SERIF}`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(card.seal.text, x + size / 2, y + size / 2 + size * 0.04)
     ctx.restore()
   }
 
@@ -454,7 +488,12 @@ export async function createDynamicSession(
       const wide = aspect > 1.3
       const titleScale = wide ? 1.14 : tall ? 1.0 : 1.04
       const maxW = W * (wide ? 0.78 : tall ? 0.86 : 0.84)
-      const titleFont = pageConfig.biaoti_font || CARD_FONT
+      const titleFont =
+        card.title.font === 'score'
+          ? pageConfig.biaoti_font || CARD_SANS
+          : card.title.font === 'serif'
+            ? CARD_SERIF
+            : CARD_SANS
       const titleBase = Math.round(unit * 0.1 * titleScale)
       const subBase = Math.round(unit * (wide ? 0.048 : tall ? 0.042 : 0.045))
       const authorBase = Math.round(unit * (wide ? 0.034 : tall ? 0.031 : 0.033))
@@ -462,9 +501,11 @@ export async function createDynamicSession(
       const brandBase = Math.round(unit * (wide ? 0.021 : tall ? 0.02 : 0.021))
       const titleY = H * (wide ? 0.42 : tall ? 0.38 : 0.4)
       const lineRatio = wide ? 0.16 : tall ? 0.2 : 0.18
+      const revealAt = (delay: number, dur: number): number =>
+        card.motion ? cardReveal(t, delay, dur) : 1
       ctx.save()
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha))
-      paintCardBackdrop(ctx, W, H, t, '♪')
+      paintCardBackdrop(ctx, W, H, t, card.watermark.intro)
       paintCardBrackets(ctx, W, H)
 
       /** 先按宽度缩字号；`fillText` 再带 maxWidth 兜底，极长标题也不会溢出卡片 */
@@ -482,21 +523,21 @@ export async function createDynamicSession(
       ctx.textAlign = 'center'
 
       const titleSize = fit(title, titleBase, true, titleFont)
-      const titleE = cardReveal(t, 120, 650)
-      const lineE = cardReveal(t, 420, 650)
-      const subE = cardReveal(t, 560, 650)
-      const authorE = cardReveal(t, 680, 650)
-      const infoE = cardReveal(t, 800, 650)
-      const brandE = cardReveal(t, 920, 650)
+      const titleE = revealAt(120, 650)
+      const lineE = revealAt(420, 650)
+      const subE = revealAt(560, 650)
+      const authorE = revealAt(680, 650)
+      const infoE = revealAt(800, 650)
+      const brandE = revealAt(920, 650)
 
-      // 标题：淡入 + 上浮 + 青色辉光 + 轻微冷白渐变
+      // 标题：淡入 + 上浮 + 模板辉光 + 模板渐变
       ctx.save()
       ctx.globalAlpha = alpha * titleE
-      ctx.shadowColor = 'rgba(0,240,255,0.32)'
+      ctx.shadowColor = card.title.glow
       ctx.shadowBlur = titleSize * 0.22
       const tg = ctx.createLinearGradient(0, titleY - titleSize, 0, titleY)
-      tg.addColorStop(0, '#ffffff')
-      tg.addColorStop(1, '#d6fbff')
+      tg.addColorStop(0, card.title.from)
+      tg.addColorStop(1, card.title.to)
       ctx.fillStyle = tg
       ctx.font = `bold ${titleSize}px ${titleFont}`
       ctx.fillText(title, W / 2, titleY + (1 - titleE) * unit * 0.025, maxW)
@@ -510,8 +551,8 @@ export async function createDynamicSession(
       const lineW = W * lineRatio * lineE
       ctx.save()
       ctx.globalAlpha = alpha
-      ctx.fillStyle = palette.neonCyan
-      ctx.shadowColor = palette.neonCyan
+      ctx.fillStyle = card.accent
+      ctx.shadowColor = card.accent
       ctx.shadowBlur = unit * 0.025
       ctx.fillRect(W / 2 - lineW / 2, accentY, lineW, Math.max(2, unit * 0.004))
       ctx.restore()
@@ -522,7 +563,7 @@ export async function createDynamicSession(
         y += size * 1.2
         ctx.save()
         ctx.globalAlpha = alpha * subE
-        ctx.fillStyle = palette.neonCyan
+        ctx.fillStyle = card.subtitle
         ctx.font = `${size}px ${font}`
         ctx.fillText(subtitle, W / 2, y, maxW)
         ctx.restore()
@@ -532,7 +573,7 @@ export async function createDynamicSession(
         y += size * 1.8
         ctx.save()
         ctx.globalAlpha = alpha * authorE
-        ctx.fillStyle = 'rgba(255,255,255,0.86)'
+        ctx.fillStyle = card.author
         ctx.font = `${size}px ${font}`
         ctx.fillText(authors, W / 2, y, maxW)
         ctx.restore()
@@ -570,22 +611,22 @@ export async function createDynamicSession(
         if (key.letter) {
           ctx.font = `${size}px ${font}`
           const prefixW = ctx.measureText(key.prefix).width
-          ctx.fillStyle = 'rgba(255,255,255,0.9)'
+          ctx.fillStyle = card.author
           ctx.fillText(key.prefix, x, y)
           x += prefixW
           if (key.accidental) {
             const symSize = Math.round(size * 0.75)
             ctx.font = `${symSize}px ${font}`
-            ctx.fillStyle = palette.neonCyan
+            ctx.fillStyle = card.accent
             ctx.fillText(key.accidental, x, y - size * 0.35)
             x += ctx.measureText(key.accidental).width
             ctx.font = `${size}px ${font}`
           }
-          ctx.fillStyle = 'rgba(255,255,255,0.9)'
+          ctx.fillStyle = card.author
           ctx.fillText(key.letter, x, y)
           x += ctx.measureText(key.letter).width
         }
-        ctx.fillStyle = 'rgba(255,255,255,0.68)'
+        ctx.fillStyle = card.info
         const separator = '   '
         let first = !key.letter
         for (const part of rest) {
@@ -602,10 +643,11 @@ export async function createDynamicSession(
       }
       ctx.save()
       ctx.globalAlpha = alpha * brandE
-      ctx.fillStyle = 'rgba(255,255,255,0.52)'
+      ctx.fillStyle = card.brand
       ctx.font = `${brandBase}px ${font}`
       ctx.fillText(`${brand.nameZh} ${brand.name}`, W / 2, H * 0.9, maxW)
       ctx.restore()
+      paintCardSeal(ctx, W, H, t)
       ctx.restore()
     }
 
@@ -643,14 +685,20 @@ export async function createDynamicSession(
     return { frame, following: tMs >= camera.firstT }
   }
 
-  /** 品牌落版：深空蓝 + 双光晕/五线谱/品牌水印 + 中英文名 + slogan + 网址 */
+  /** 品牌落版：模板背景 + 中英文名 + slogan + 网址；所有模板都必须展示品牌 */
   const paintEndCard = (ctx: DrawCtx, alpha: number, t: number) => {
     const W = camera.viewW
     const H = camera.viewH
     const font = CARD_FONT
+    const endTitleFont =
+      card.title.font === 'serif'
+        ? CARD_SERIF
+        : card.title.font === 'score'
+          ? pageConfig.biaoti_font || CARD_SANS
+          : CARD_SANS
     ctx.save()
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha))
-    paintCardBackdrop(ctx, W, H, t, brand.name.charAt(0))
+    paintCardBackdrop(ctx, W, H, t, card.watermark.end)
     paintCardBrackets(ctx, W, H)
 
     ctx.textAlign = 'center'
@@ -675,21 +723,23 @@ export async function createDynamicSession(
     // adj1069：强调线放在标题与标语之间，距离按 titleSize（三种比例同值），不再固定在标题上方
     const accentY = titleY + titleSize * 0.45
     const lineRatio = wide ? 0.14 : tall ? 0.18 : 0.16
-    const titleE = cardReveal(t, 100, 650)
-    const lineE = cardReveal(t, 380, 650)
-    const sloganE = cardReveal(t, 500, 650)
-    const urlE = cardReveal(t, 700, 650)
+    const revealAt = (delay: number, dur: number): number =>
+      card.motion ? cardReveal(t, delay, dur) : 1
+    const titleE = revealAt(100, 650)
+    const lineE = revealAt(380, 650)
+    const sloganE = revealAt(500, 650)
+    const urlE = revealAt(700, 650)
 
-    // 品牌名：淡入 + 上浮 + 辉光 + 轻微冷白渐变
+    // 品牌名：淡入 + 上浮 + 模板辉光 + 模板渐变
     ctx.save()
     ctx.globalAlpha = alpha * titleE
-    ctx.shadowColor = 'rgba(0,240,255,0.32)'
+    ctx.shadowColor = card.title.glow
     ctx.shadowBlur = titleSize * 0.22
     const tg = ctx.createLinearGradient(0, titleY - titleSize, 0, titleY)
-    tg.addColorStop(0, '#ffffff')
-    tg.addColorStop(1, '#d6fbff')
+    tg.addColorStop(0, card.title.from)
+    tg.addColorStop(1, card.title.to)
     ctx.fillStyle = tg
-    ctx.font = `bold ${titleSize}px ${font}`
+    ctx.font = `bold ${titleSize}px ${endTitleFont}`
     ctx.fillText(`${brand.nameZh} ${brand.name}`, W / 2, titleY + (1 - titleE) * unit * 0.025, maxW)
     ctx.restore()
 
@@ -697,25 +747,26 @@ export async function createDynamicSession(
     const lineW = W * lineRatio * lineE
     ctx.save()
     ctx.globalAlpha = alpha
-    ctx.fillStyle = palette.neonCyan
-    ctx.shadowColor = palette.neonCyan
+    ctx.fillStyle = card.accent
+    ctx.shadowColor = card.accent
     ctx.shadowBlur = unit * 0.025
     ctx.fillRect(W / 2 - lineW / 2, accentY, lineW, Math.max(2, unit * 0.004))
     ctx.restore()
 
     ctx.save()
     ctx.globalAlpha = alpha * sloganE
-    ctx.fillStyle = palette.neonCyan
+    ctx.fillStyle = card.subtitle
     ctx.font = `${sloganSize}px ${font}`
     ctx.fillText(brand.taglineMain, W / 2, sloganY + (1 - sloganE) * unit * 0.015)
     ctx.restore()
 
     ctx.save()
     ctx.globalAlpha = alpha * urlE
-    ctx.fillStyle = 'rgba(255,255,255,0.72)'
+    ctx.fillStyle = card.url
     ctx.font = `${urlSize}px ${font}`
     ctx.fillText(brand.siteUrl.replace(/^https?:\/\//, ''), W / 2, urlY)
     ctx.restore()
+    paintCardSeal(ctx, W, H, t)
     ctx.restore()
   }
 

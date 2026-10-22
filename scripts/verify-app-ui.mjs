@@ -1759,6 +1759,28 @@ async function main() {
           frame.w >= 1000 && frame.h >= 1000 && frame.controls && frame.outside,
           JSON.stringify(frame),
         )
+        // 卡片模板会持久化：先固定为 brand，避免上次选过纸面让片头像素断言不稳定
+        await evalJs(
+          c,
+          `(() => {
+            const el = document.querySelector('.dyn-frame-select')
+            if (!el) return false
+            const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+            setter.call(el, 'brand')
+            el.dispatchEvent(new Event('change', { bubbles: true }))
+            return true
+          })()`,
+        )
+        await waitFor(
+          c,
+          `(() => {
+            const c = document.querySelector('.dyn-frame-box canvas')
+            return !!c && c.width === 1080 && c.height === 1920 &&
+              document.querySelector('.dyn-frame-select')?.value === 'brand'
+          })()`,
+          '相机位品牌卡片会话',
+          60,
+        )
         // adj1067：t=0 必须是自制深色标题卡；旧实现是白纸谱页（同一像素会接近 255）
         const introPixel = await evalJs(
           c,
@@ -1773,6 +1795,87 @@ async function main() {
           'adj1067 片头是自制深色标题卡（不是白纸谱页）',
           introPixel[0] < 80 && introPixel[1] < 100,
           JSON.stringify(introPixel),
+        )
+        // adj1073：卡片模板下拉框；选纸面后片头背景应变亮、选择持久化；最后恢复品牌
+        const cardSelect = await evalJs(
+          c,
+          `(() => {
+            const el = document.querySelector('.dyn-frame-select')
+            return el ? { value: el.value, options: [...el.options].map((o) => o.value) } : null
+          })()`,
+        )
+        check(
+          'adj1073 相机位有卡片模板选择（4 个预设）',
+          !!cardSelect && cardSelect.value === 'brand' && cardSelect.options.length === 4,
+          JSON.stringify(cardSelect),
+        )
+        await evalJs(
+          c,
+          `(() => {
+            const el = document.querySelector('.dyn-frame-select')
+            const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+            setter.call(el, 'paper')
+            el.dispatchEvent(new Event('change', { bubbles: true }))
+            return true
+          })()`,
+        )
+        await waitFor(
+          c,
+          `(() => {
+            const c = document.querySelector('.dyn-frame-box canvas')
+            return !!c && c.width === 1080 && c.height === 1920 &&
+              document.querySelector('.dyn-frame-select')?.value === 'paper'
+          })()`,
+          '相机位纸面卡片会话',
+          60,
+        )
+        await evalJs(
+          c,
+          `(() => {
+            const el = document.querySelector('.dyn-frame-controls input[type=range]')
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+            setter.call(el, '1500')
+            el.dispatchEvent(new Event('input', { bubbles: true }))
+            el.dispatchEvent(new Event('change', { bubbles: true }))
+            return true
+          })()`,
+        )
+        await new Promise((r) => setTimeout(r, 300))
+        const paperPixel = await evalJs(
+          c,
+          `(() => {
+            const ctx = document.querySelector('.dyn-frame-box canvas').getContext('2d')
+            const d = ctx.getImageData(20, 20, 1, 1).data
+            return [d[0], d[1], d[2]]
+          })()`,
+        )
+        check(
+          'adj1073 纸面模板的片头背景是浅色（模板确实生效）',
+          paperPixel[0] > 200 && paperPixel[1] > 190,
+          JSON.stringify(paperPixel),
+        )
+        const storedCardStyle = await evalJs(c, `localStorage.getItem('ijipu.dynamicCardStyle')`)
+        check('adj1073 卡片模板选择已持久化', storedCardStyle === 'paper', String(storedCardStyle))
+        // 恢复品牌，后面的 16:9 用品牌模板
+        await evalJs(
+          c,
+          `(() => {
+            const el = document.querySelector('.dyn-frame-select')
+            const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+            setter.call(el, 'brand')
+            el.dispatchEvent(new Event('change', { bubbles: true }))
+            return true
+          })()`,
+        )
+        await waitFor(
+          c,
+          `(() => {
+            const c = document.querySelector('.dyn-frame-box canvas')
+            return !!c && c.width === 1080 && c.height === 1920 &&
+              document.querySelector('.dyn-frame-select')?.value === 'brand'
+          })()`,
+          '相机位品牌卡片会话',
+          60,
         )
         // adj1071：控制条必须跟随主题变量（深/浅两套都验），不能写死深色
         const camBtnStyles = await evalJs(

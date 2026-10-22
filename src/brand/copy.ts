@@ -1222,6 +1222,7 @@ export const settingsCopy = {
 export const dynamicVideoCopy = {
   title: '动态谱视频',
   presetLabel: '画布',
+  cardStyle: '卡片',
   play: '播放',
   pause: '暂停',
   reload: '重新载入当前谱',

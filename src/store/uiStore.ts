@@ -17,6 +17,7 @@ import { defaultMarkName, nextMarkId, type PracticeMark } from './practiceMarks'
 // L1「用户个性」：编辑器偏好 + 字体覆盖（不进谱面；详见 docs/SETTINGS-AUDIT.md 分层）
 import { loadEditorFont, loadEditorFontSize, loadFontOverride, saveEditorFont, saveEditorFontSize, saveFontOverride } from './editorPrefs'
 import type { FontOverride } from '@ijipu/engine'
+import type { CardTemplateId } from '../export/video/cardTemplates'
 // adj965d：`OverlayLayer`（`'wm' | 'bg'`）的唯一出处是**引擎**（`overlayGesture.ts`）——
 // 它是"水印层/背景层"这个领域概念，应用与插件共用；store 只在这里给它一个"用户选中的那层"的槽位
 export type { OverlayLayer } from '@ijipu/engine'
@@ -49,6 +50,9 @@ export interface DynamicCameraState {
   range: { startId: string; endId: string } | null
   mode: DynamicMode
 }
+
+/** adj1073：动态谱片头/片尾卡片模板（L1 用户偏好，持久化；不写进 .jps） */
+export type DynamicCardStyleId = CardTemplateId
 
 /**
  * adj462：底部 dock 的面板（互斥，同一时间只显示一块）。
@@ -124,6 +128,20 @@ export const PREVIEW_ZOOM_LIMITS: readonly [number, number] = [30, 400]
 const AUTO_WRAP_KEY = 'ijipu.autoWrap'
 const SHOW_SCRIPT_PAD_KEY = 'ijipu.showScriptPad'
 const SHOW_GUIDES_KEY = 'ijipu.showGuides'
+/** adj1073：动态谱片头/片尾卡片模板（L1 用户偏好；不写进谱面） */
+const DYNAMIC_CARD_STYLE_KEY = 'ijipu.dynamicCardStyle'
+const DYNAMIC_CARD_STYLE_IDS: readonly DynamicCardStyleId[] = ['brand', 'paper', 'ink', 'minimal']
+
+function loadDynamicCardStyle(): DynamicCardStyleId {
+  try {
+    const v = localStorage.getItem(DYNAMIC_CARD_STYLE_KEY)
+    return DYNAMIC_CARD_STYLE_IDS.includes(v as DynamicCardStyleId)
+      ? (v as DynamicCardStyleId)
+      : 'brand'
+  } catch {
+    return 'brand'
+  }
+}
 // adj315：应用级视图偏好——左右拆分排列方向（默认视图已取消，改为记住顶栏上次设置）
 const SPLITH_DIR_KEY = 'ijipu.splitHDir'
 // adj330：SpessaSynth 高质量采样——音源库 + 全局音色（GM program）
@@ -371,6 +389,9 @@ interface UiState {
    */
   dynamicCamera: DynamicCameraState
   setDynamicCamera: (patch: Partial<DynamicCameraState>) => void
+  /** adj1073：片头/片尾卡片模板（L1 用户偏好，落盘；预设/以后的自定义） */
+  dynamicCardStyle: DynamicCardStyleId
+  setDynamicCardStyle: (id: DynamicCardStyleId) => void
   /**
    * adj905q（用户规格见 `docs/PREVIEW-DEBUG-BOUNDARIES.md`）：**预览可视调试**开关。
    * 开启后在预览里叠加「时值格 / 墨迹 / 段层」三套边界虚线（几何来自引擎
@@ -735,6 +756,8 @@ export const useUiStore = create<UiState>()((set) => ({
   showGuides: loadBool(SHOW_GUIDES_KEY, true),
   // adj1065：动态谱相机位（L3 会话级，不落盘）
   dynamicCamera: { on: false, aspect: '9x16', range: null, mode: '3min' },
+  // adj1073：卡片模板（L1，落盘；未知 id 回退 brand）
+  dynamicCardStyle: loadDynamicCardStyle(),
   // adj905q：预览可视调试 —— **L3 会话级**，刻意不读 localStorage（重开即恢复默认关）
   debugBounds: false,
   // adj965d（EP-13）：预览区 Alt 手势默认调**背景层**（L3 会话级，不落盘）
@@ -822,6 +845,15 @@ export const useUiStore = create<UiState>()((set) => ({
   setDebugBounds: (b) => set({ debugBounds: b }),
   // adj1065：动态谱相机位开关/比例/范围/时长（L3 会话级，不落盘）
   setDynamicCamera: (patch) => set((s) => ({ dynamicCamera: { ...s.dynamicCamera, ...patch } })),
+  // adj1073：卡片模板是 L1，落盘；未知值由 load 回退
+  setDynamicCardStyle: (id) => {
+    try {
+      localStorage.setItem(DYNAMIC_CARD_STYLE_KEY, id)
+    } catch {
+      // 忽略隐私模式/配额异常
+    }
+    set({ dynamicCardStyle: id })
+  },
   // adj965d：Alt 手势调哪一层（L3 会话级）——**不落盘**；默认背景层：
   // 需要摆位置的通常是垫进来的那张背景图（水印多为居中一个）
   setOverlayEditLayer: (l) => set({ overlayEditLayer: l }),
