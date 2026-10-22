@@ -342,14 +342,20 @@ export async function createDynamicSession(
       }
 
       ctx.textAlign = 'center'
-      ctx.fillStyle = palette.neonCyan
-      ctx.fillRect(W * 0.41, H * 0.3, W * 0.18, Math.max(2, unit * 0.004))
 
       const titleSize = fit(title, Math.round(unit * 0.1), true)
       const titleY = H * 0.4
       ctx.fillStyle = '#ffffff'
       ctx.font = `bold ${titleSize}px ${font}`
       ctx.fillText(title, W / 2, titleY, maxW)
+
+      /**
+       * adj1069：强调线放在**标题下方、下面内容之前**，位置按 `titleSize` 算。
+       * 旧写法 `H×0.3`：16:9 离标题 108px、9:16 离 192px，三种比例忽远忽近。
+       */
+      const accentY = titleY + titleSize * 0.52
+      ctx.fillStyle = palette.neonCyan
+      ctx.fillRect(W * 0.41, accentY, W * 0.18, Math.max(2, unit * 0.004))
 
       let y = titleY + titleSize * 0.85
       if (subtitle) {
@@ -493,7 +499,8 @@ export async function createDynamicSession(
     const titleY = H * 0.44
     const sloganY = titleY + Math.round(titleSize * 0.95)
     const urlY = H * 0.78
-    const accentY = titleY - titleSize * 1.05
+    // adj1069：强调线放在标题与标语之间，距离按 titleSize（三种比例同值），不再固定在标题上方
+    const accentY = titleY + titleSize * 0.4
 
     ctx.fillStyle = palette.neonCyan
     ctx.fillRect(W * 0.42, accentY, W * 0.16, Math.max(2, unit * 0.004))
