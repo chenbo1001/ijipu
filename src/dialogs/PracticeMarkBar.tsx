@@ -26,7 +26,8 @@ import { buildPlaySequence, layoutScore, noteIdStringOf, resolvePracticeRange, s
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { docKeyOf, loadMarks, saveMarks } from '../store/practiceMarks'
-import { playbackCopy } from '../brand/copy'
+import { playbackCopy, dynamicVideoCopy } from '../brand/copy'
+import { canGenerateVideo } from '../export/video/capability'
 
 
 export function PracticeMarkBar(): React.JSX.Element {
@@ -41,6 +42,8 @@ export function PracticeMarkBar(): React.JSX.Element {
   // adj1065：整段动态谱 = 预览区相机位（关掉试听弹窗，否则挡住预览区）
   const closeModal = useUiStore((s) => s.closeModal)
   const setDynamicCamera = useUiStore((s) => s.setDynamicCamera)
+  // adj1077：视频生成只开放给桌面壳；这里保留按钮但禁用，避免网站/插件“点了没反应”
+  const videoExportEnabled = canGenerateVideo()
   const setPass = useUiStore((s) => s.setPracticeMarkPass)
   const setSel = useUiStore((s) => s.setPracticeSel)
   const addMark = useUiStore((s) => s.addPracticeMark)
@@ -186,8 +189,12 @@ export function PracticeMarkBar(): React.JSX.Element {
               })
               closeModal()
             }}
-            disabled={!marks.some((x) => x.id === markId)}
-            title="把当前标记段导出成动态谱视频（一遍，不含循环）"
+            disabled={!videoExportEnabled || !marks.some((x) => x.id === markId)}
+            title={
+              videoExportEnabled
+                ? '把当前标记段导出成动态谱视频（一遍，不含循环）'
+                : dynamicVideoCopy.desktopOnly
+            }
             aria-label="导出这段动态谱"
           >
             <span aria-hidden="true">⇩</span>

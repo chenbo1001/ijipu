@@ -1236,6 +1236,7 @@ export const dynamicVideoCopy = {
   overCap: '这首超过 3 分钟：导出前 3 分钟（含片头与片尾），画面与声音一起截断',
   capping: '正在把音乐裁到 3 分钟内（保留片头与片尾）…',
   exportMp4: '生成视频',
+  desktopOnly: '生成视频仅桌面版可用（网站/插件暂不开放）',
   mode3min: '3 分钟',
   modeFull: '整首',
   rangeAll: '整曲',

@@ -104,6 +104,8 @@ import { keySignatureOf } from '@ijipu/engine/index.ts'
 // adj1075：卡片模板 zip 往返（纯函数，Node 里直接验）
 import { createCardTemplateZip, readCardTemplateZip } from '../src/export/video/cardTemplateZip.ts'
 import { DEFAULT_CARD_STYLE } from '../src/export/video/cardTemplates.ts'
+// adj1077：视频生成能力闸门（桌面壳 + WebCodecs；网站/插件不开放）
+import { canGenerateVideo } from '../src/export/video/capability.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
@@ -33223,5 +33225,22 @@ function runDynamicCameraTests(): void {
       back.accent === style.accent &&
       back.backgroundImage === png,
     `${zipBytes.length} bytes / ${String(back.backgroundImage).slice(0, 32)}`,
+  )
+}
+
+// adj1077：生成视频 = 桌面壳 + VideoEncoder + AudioEncoder，三者缺一不可
+{
+  const cap = (tauri: boolean, videoEncoder: boolean, audioEncoder: boolean) => ({
+    tauri,
+    videoEncoder,
+    audioEncoder,
+  })
+  check(
+    'adj1077 生成视频能力：仅桌面壳 + WebCodecs（网站/插件不可用）',
+    canGenerateVideo(cap(true, true, true)) &&
+      !canGenerateVideo(cap(false, true, true)) &&
+      !canGenerateVideo(cap(true, false, true)) &&
+      !canGenerateVideo(cap(true, true, false)),
+    'tauri+encoders required',
   )
 }

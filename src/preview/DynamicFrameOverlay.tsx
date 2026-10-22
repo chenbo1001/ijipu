@@ -23,6 +23,7 @@ import { useUiStore, type DynamicAspect, type DynamicCardStyleId, type DynamicMo
 import { dynamicVideoCopy } from '../brand/copy'
 import { createDynamicSession, type DynamicSession } from '../export/video/renderer'
 import { CARD_TEMPLATES, cardStyleById } from '../export/video/cardTemplates'
+import { canGenerateVideo } from '../export/video/capability'
 import { encodeMp4 } from '../export/video/mp4'
 import { DynamicAudioPlayer } from '../export/video/audioPlayer'
 import { renderToAudioBuffer } from '../export/audio'
@@ -57,6 +58,11 @@ export function DynamicFrameOverlay() {
   const openModal = useUiStore((s) => s.openModal)
   const effectiveCardStyle =
     cardStyle === 'custom' && customCardStyle ? customCardStyle : cardStyleById(cardStyle)
+  /**
+   * adj1077：生成视频只开放给 Tauri 桌面壳 + WebCodecs；
+   * 网站/插件仍可预览，但按钮禁用并显示原因（不出现“点了没反应”）。
+   */
+  const videoExportEnabled = canGenerateVideo()
   const code = useDocStore((s) => s.code)
   const pageConfig = useDocStore((s) => s.pageConfig)
 
@@ -299,7 +305,7 @@ export function DynamicFrameOverlay() {
 
   const exportVideo = async () => {
     const s = sessionRef.current
-    if (!s || encoding) return
+    if (!videoExportEnabled || !s || encoding) return
     setPlaying(false)
     audioPlayerRef.current?.pause()
     cancelAnimationFrame(rafRef.current)
@@ -519,12 +525,17 @@ export function DynamicFrameOverlay() {
             type="button"
             className="btn dyn-frame-generate"
             onClick={encoding ? () => abortRef.current?.abort() : exportVideo}
-            disabled={status !== 'ready'}
+            disabled={!videoExportEnabled || status !== 'ready'}
           >
             {encoding
               ? `取消（${Math.round(progress * 100)}%）`
               : dynamicVideoCopy.exportMp4}
           </button>
+          {!videoExportEnabled && (
+            <span className="dyn-frame-meta dyn-frame-desktop-only">
+              {dynamicVideoCopy.desktopOnly}
+            </span>
+          )}
           {preparingAudio && <span className="dyn-frame-meta">{dynamicVideoCopy.preparingAudio}</span>}
           {phase && <span className="dyn-frame-meta">{phase}</span>}
         </div>

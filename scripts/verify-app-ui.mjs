@@ -1759,6 +1759,22 @@ async function main() {
           frame.w >= 1000 && frame.h >= 1000 && frame.controls && frame.outside,
           JSON.stringify(frame),
         )
+        // adj1077：网站/插件只保留预览，生成视频禁用并提示仅桌面版
+        const videoGate = await evalJs(
+          c,
+          `(() => {
+            const b = document.querySelector('.dyn-frame-generate')
+            return {
+              disabled: !!b && b.disabled,
+              hint: document.querySelector('.dyn-frame-desktop-only')?.textContent ?? ''
+            }
+          })()`,
+        )
+        check(
+          'adj1077 浏览器/插件里生成视频禁用并提示仅桌面版',
+          videoGate.disabled && videoGate.hint.includes('桌面'),
+          JSON.stringify(videoGate),
+        )
         // 卡片模板会持久化：先固定为 brand，避免上次选过纸面让片头像素断言不稳定
         await evalJs(
           c,
