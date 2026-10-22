@@ -36,6 +36,7 @@ import {
   type PlayEvent,
 } from '@ijipu/engine'
 import { svgToCanvas } from '../export'
+import { brand, palette } from '../../brand/tokens'
 
 /**
  * 页面位图的放大倍数：4 倍跟拍时，取景框宽 = 1080/4 = 270 页面单位，
@@ -87,6 +88,8 @@ export async function createDynamicSession(
     range?: { startId: string; endId: string } | null
     /** 片头时长（ms，默认 2000；0 = 不要片头）。片头是**前置静音**，音画一起后移 */
     leadInMs?: number
+    /** 片尾时长（ms，默认 2500；0 = 不要片尾）。片尾是品牌落版，给个入口要人 */
+    endCardMs?: number
     /** 跳跳球（节拍指示，默认开） */
     ball?: boolean
   },
@@ -132,6 +135,8 @@ export async function createDynamicSession(
     ...(skipIntro ? { skipIntro: true } : {}),
   })
   const ball = opts?.ball !== false
+  const endCardMs = Math.max(0, opts?.endCardMs ?? 2500)
+  const musicEndMs = track.endMs
   // 段导出：片头用"第 1 页描述头"的标题卡，再交叉淡入到段首（不平移，免得横跨几页乱飞）
   const crossfadeIntro = skipIntro
   // 标题卡：满宽 + 整页居中（9:16 的取景框比页高，纵向只能居中）
@@ -246,14 +251,57 @@ export async function createDynamicSession(
       return { frame, following: false }
     }
 
+    /**
+     * 片尾：音乐结束后定格最后一帧，淡入品牌落版（推本应用）。
+     * 音频不额外补声——视频比音轨长，播放器就是自然静音。
+     */
+    if (endCardMs > 0 && tMs >= musicEndMs) {
+      const lastT = Math.max(0, musicEndMs - 1)
+      paintCamera(cameraAt(camera, lastT), 1, lastT)
+      const k = Math.min(1, (tMs - musicEndMs) / 300)
+      paintEndCard(ctx, k)
+      return { frame, following: false }
+    }
+
     paintCamera(frame, 1, tMs)
     return { frame, following: tMs >= camera.firstT }
+  }
+
+  /** 品牌落版：深空蓝渐变 + 中英文名 + slogan + 网址 */
+  const paintEndCard = (ctx: DrawCtx, alpha: number) => {
+    const W = camera.viewW
+    const H = camera.viewH
+    const font = '"Microsoft YaHei", "PingFang SC", sans-serif'
+    ctx.save()
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha))
+    const g = ctx.createLinearGradient(0, 0, 0, H)
+    g.addColorStop(0, palette.deepSpaceBlueDark)
+    g.addColorStop(1, palette.deepSpaceBlue)
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, W, H)
+
+    ctx.textAlign = 'center'
+    ctx.fillStyle = palette.neonCyan
+    ctx.fillRect(W * 0.42, H * 0.34, W * 0.16, Math.max(2, W * 0.004))
+
+    ctx.fillStyle = '#ffffff'
+    ctx.font = `bold ${Math.round(W * 0.082)}px ${font}`
+    ctx.fillText(`${brand.nameZh} ${brand.name}`, W / 2, H * 0.42)
+
+    ctx.fillStyle = palette.neonCyan
+    ctx.font = `${Math.round(W * 0.046)}px ${font}`
+    ctx.fillText(brand.taglineMain, W / 2, H * 0.49)
+
+    ctx.fillStyle = 'rgba(255,255,255,0.72)'
+    ctx.font = `${Math.round(W * 0.032)}px ${font}`
+    ctx.fillText(brand.siteUrl.replace(/^https?:\/\//, ''), W / 2, H * 0.78)
+    ctx.restore()
   }
 
   return {
     camera,
     pages,
-    totalMs: track.endMs,
+    totalMs: musicEndMs + endCardMs,
     width: camera.viewW,
     height: camera.viewH,
     events: seq.events,
