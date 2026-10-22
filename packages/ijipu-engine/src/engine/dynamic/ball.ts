@@ -20,6 +20,12 @@ export interface BallAnchor {
   cx: number
   /** 色块上沿 y（页面坐标） */
   top: number
+  /**
+   * 色块左缘与宽度（可选）。给了就按**拍点在这条色块里的比例**落位——
+   * 附点/长音的拍点落在音的中间，球落在色块中间偏右，而不是永远压在正中心。
+   */
+  x?: number
+  w?: number
 }
 
 export interface BallPos {
@@ -150,7 +156,20 @@ export function ballAt(
    * `lineJump` 只作为"整行平移"的兜底开关，默认不启用。
    */
   const target = a1
-  const x = a0.cx + (target.cx - a0.cx) * u
+  /**
+   * 落点横向位置：拍点落在色块**内部**时按比例定位（附点/长音的第二拍就在音中间），
+   * 拍点在色块起点或外面时就是左缘。
+   */
+  const landingX = (a: BallAnchor, beatT: number): number => {
+    if (a.x !== undefined && a.w !== undefined && a.t1 > a.t0) {
+      const f = Math.max(0, Math.min(1, (beatT - a.t0) / (a.t1 - a.t0)))
+      return a.x + a.w * f
+    }
+    return a.cx
+  }
+  const x0 = landingX(a0, b0)
+  const x1 = landingX(target, b1)
+  const x = x0 + (x1 - x0) * u
   const base = a0.top + (target.top - a0.top) * u
   return { x, y: base - 4 * u * (1 - u) * amp, u }
 }

@@ -32705,6 +32705,15 @@ function runDynamicCameraTests(): void {
     ]
     const atBar = ballAt(barA, 1000, 600, 0, 100, barT)
     check('M4 小节起点=第一拍（按小节重置，u=0 落地）', atBar !== null && Math.abs(atBar.u) < 1e-9, String(atBar?.u))
+
+    // 附点/长音：拍点落在音的**中间**时，落点也要落在色块对应的比例位置（不是永远压在中心）
+    const dottedA = [{ t0: 0, t1: 1500, cx: 100, top: 200, x: 0, w: 300 }]
+    const midBeat = ballAt(dottedA, 1000, 1000, 0, 100) // 第二拍落在 1.0s（音长 1.5 拍）
+    check(
+      'M4 拍点在音中间时按比例落位（2/3 处）',
+      midBeat !== null && Math.abs(midBeat.x - 200) < 1e-9,
+      String(midBeat?.x),
+    )
   }
 
   // 带歌词的谱：歌词会填满行间空档，旧判定（按"行底含歌词"比间隙）会把相邻几行并成一行，

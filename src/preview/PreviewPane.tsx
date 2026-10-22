@@ -1232,6 +1232,8 @@ function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }
           t1: s.atMs + s.durationMs,
           cx: s.x + s.width / 2,
           top: s.yTopMin ?? s.y - noteSize * 1.6,
+          x: s.x,
+          w: s.width,
         })
       }
     }

@@ -148,7 +148,7 @@ export async function createDynamicSession(
    */
   const ballAnchors = track.rects
     .filter((r) => r.playVoice === undefined || r.playVoice === 'main')
-    .map((r) => ({ t0: r.t0, t1: r.t1, cx: r.x + r.w / 2, top: r.y }))
+    .map((r) => ({ t0: r.t0, t1: r.t1, cx: r.x + r.w / 2, top: r.y, x: r.x, w: r.w }))
   const beatMs = 60000 / beat
   /** 拍网格相位：用长音起点投票，校正弱起谱的半拍偏移 */
   const beatPhase = beatPhaseOf(ballAnchors, beatMs)
