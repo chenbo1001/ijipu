@@ -32654,6 +32654,35 @@ function runDynamicCameraTests(): void {
     const fall1 = ballAt(anchors, 2350, 1000, 0, 100)
     check('M4 最后一拍后球自由落体（y 变大）', !!fall0 && !!fall1 && fall1.y > fall0.y, `${fall0?.y} → ${fall1?.y}`)
     check('M4 落出画面后不再返回球', ballAt(anchors, 9000, 1000, 0, 100) === null)
+
+    // 跨行：下一拍在页面左边（下一行）时，本拍不许向左横飞（用户实报「还没到下一行就往左弹」）
+    const lineAnchors = [
+      { t0: 0, t1: 1000, cx: 500, top: 200 },
+      { t0: 1000, t1: 2000, cx: 80, top: 320 },
+    ]
+    const mid = ballAt(lineAnchors, 500, 1000, 0, 100, { lineJump: 60 })
+    check('M4 跨行时不向左横飞（x 停在本行）', mid !== null && Math.abs(mid.x - 500) < 1e-9, String(mid?.x))
+    const same = ballAt(
+      [
+        { t0: 0, t1: 1000, cx: 100, top: 200 },
+        { t0: 1000, t1: 2000, cx: 300, top: 200 },
+      ],
+      500,
+      1000,
+      0,
+      100,
+      { lineJump: 60 },
+    )
+    check('M4 同一行内照常横飞（x 取中点）', same !== null && Math.abs(same.x - 200) < 1e-9, String(same?.x))
+
+    // 连音/重叠：两段同时响时，落点必须取**最晚开始**的那条（与色块同口径）
+    const overlap = [
+      { t0: 0, t1: 2000, cx: 100, top: 200 },
+      { t0: 500, t1: 1000, cx: 400, top: 200 },
+    ]
+    // 拍点落在两段都还响着的时刻（b0=750）：必须取最晚开始的那条
+    const ov = ballAt(overlap, 750, 250, 0, 100, { lineJump: 60 })
+    check('M4 重叠段取最晚开始的那条（与色块同口径）', ov !== null && Math.abs(ov.x - 400) < 1e-9, String(ov?.x))
   }
 
   // 带歌词的谱：歌词会填满行间空档，旧判定（按"行底含歌词"比间隙）会把相邻几行并成一行，

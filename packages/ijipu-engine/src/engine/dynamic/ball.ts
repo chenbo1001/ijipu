@@ -30,13 +30,28 @@ export interface BallPos {
   u: number
 }
 
+/** `ballAt` 的可选项 */
+export interface BallOptions {
+  /**
+   * 跨行判定阈值（页面坐标）：两次落点的纵向差超过它，就认为"换行了"。
+   *
+   * 为什么要单独判：换行时下一拍的落点会跑到**页面左边**，如果照常横飞，
+   * 球会在本行还没播完时就向左滑走（用户实报「还没到下一行就往左弹」）。
+   * 换行时改为**本拍原地弹、到拍点直接出现在新行**（相机本来也在行边界切换，观感一致）。
+   */
+  lineJump?: number
+}
+
 /** 找 `t` 时刻正在响的那条（t0 ≤ t < t1） */
 function anchorAt(anchors: readonly BallAnchor[], t: number): BallAnchor | null {
   let found: BallAnchor | null = null
   for (const a of anchors) {
     if (a.t0 <= t && t < a.t1) {
-      // 同一时刻可能有多条（多声部），取"最先开始"的那条作为主落点
-      if (!found || a.t0 < found.t0) found = a
+      /**
+       * 取**最晚开始**的那条 —— 必须与色块同口径（`playheadPosIn` 也是取"最后一个 atMs ≤ t"）。
+       * 取最早的话，连音/重叠时会落到**前一个**音上，看起来就是"球落在色块界外"（用户实报）。
+       */
+      if (!found || a.t0 >= found.t0) found = a
     }
   }
   return found
@@ -70,6 +85,7 @@ export function ballAt(
   beatMs: number,
   anchorMs: number,
   amp: number,
+  opts: BallOptions = {},
 ): BallPos | null {
   if (beatMs <= 0 || anchors.length === 0) return null
   const first = anchors[0]
@@ -90,7 +106,10 @@ export function ballAt(
   const a0 = anchorAt(anchors, b0) ?? nextAnchor(anchors, b0) ?? first
   const a1 = anchorAt(anchors, b1) ?? nextAnchor(anchors, b1) ?? a0
   const u = Math.max(0, Math.min(1, (t - b0) / beatMs))
-  const x = a0.cx + (a1.cx - a0.cx) * u
-  const base = a0.top + (a1.top - a0.top) * u
+  // 跨行：不横飞（否则会在本行没播完时向左滑走），本拍在原地弹，下一拍直接落到新行
+  const lineJump = opts.lineJump ?? 60
+  const sameLine = Math.abs(a1.top - a0.top) <= lineJump
+  const x = sameLine ? a0.cx + (a1.cx - a0.cx) * u : a0.cx
+  const base = sameLine ? a0.top + (a1.top - a0.top) * u : a0.top
   return { x, y: base - 4 * u * (1 - u) * amp, u }
 }

@@ -225,7 +225,9 @@ export async function createDynamicSession(
        */
       if (ball) {
         // 抛体：横向从这一拍落点飞到下一拍落点，纵向抛物线，落地 = 拍点
-        const bp = ballAt(ballAnchors, t, beatMs, camera.firstT, noteSize * 3.2)
+        const bp = ballAt(ballAnchors, t, beatMs, camera.firstT, noteSize * 3.2, {
+          lineJump: noteSize * 3,
+        })
         if (bp && bp.x >= 0 && bp.x <= camera.pageW) {
           const rad = Math.max(4, noteSize * z * 0.28)
           const bx = (bp.x - left) * z
