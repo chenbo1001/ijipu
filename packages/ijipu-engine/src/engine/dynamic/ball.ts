@@ -85,12 +85,10 @@ function anchorAt(anchors: readonly BallAnchor[], t: number): BallAnchor | null 
   let found: BallAnchor | null = null
   for (const a of anchors) {
     /**
-     * 0.5ms 容差（adj1062）：拍点与色块起点是**两条不同的浮点累加路径**算出来的
-     * （前者 `小节起点 + k×拍长`，后者 `passMs + groupStartMs + barStart + 拍位×拍长`），
-     * 可能差 1e-12 ms。严格 `<` / `<=` 会把"块刚好从这一拍开始"误判成空隙 ⇒ 球落空。
-     * 容差与拍界去重同一把尺子；最小拍长（32 分音符 @120）也有 62.5ms，不会把两拍并进来。
+     * 时间源只有一个：色块的 `atMs`。拍点已经在 `beatTimesOf` 里**吸附**到 0.5ms 内的
+     * 色块起点（见那里），所以这里可以精确比较，不需要给球单独加容差/提前量。
      */
-    if (a.t0 <= t + 0.5 && t < a.t1) {
+    if (a.t0 <= t && t < a.t1) {
       /**
        * 取**最晚开始**的那条 —— 必须与色块同口径（`playheadPosIn` 也是取"最后一个 atMs ≤ t"）。
        * 取最早的话，连音/重叠时会落到**前一个**音上，看起来就是"球落在色块界外"（用户实报）。
@@ -231,6 +229,29 @@ function beatTimesOf(
   if (out.length === 0 || !out.some((b) => Math.abs(b - firstT) <= 0.5)) {
     out.push(firstT)
     out.sort((a, b) => a - b)
+  }
+  /**
+   * adj1062（用户 2026-10-22 实报「色块还没到，球已落下」）：
+   * **把拍点吸附到 0.5ms 内的色块起点**，让"球落地"与"色块切换"是**同一个数**。
+   *
+   * 为什么：拍点由 `小节起点 + k×拍长` 累加，色块起点由 `passMs + groupStartMs + barStart + 拍位×拍长`
+   * 累加——同一条时间轴的两条浮点路径，可能差 1e-12 ms。严格比较时：
+   * `playheadPosIn` 还停在上一个块（`atMs <= currentMs` 不成立），
+   * 而 `ballAt` 的落点已经算到下一个块 ⇒ 视觉上"球在下一块、色块还没到"（截图里球在块右边）。
+   * 吸附用 0.5ms（与拍界去重同一把尺子；最小拍长 62.5ms，不会把两拍并进来）。
+   */
+  {
+    let ai = 0
+    for (let i = 0; i < out.length; i++) {
+      const t = out[i]
+      while (ai < anchors.length && anchors[ai].t0 < t - 0.5) ai++
+      const a = anchors[ai]
+      if (a && Math.abs(a.t0 - t) <= 0.5) out[i] = a.t0
+    }
+    // 吸附后可能与刚补的拍界重合，再去一次重
+    for (let i = out.length - 1; i > 0; i--) {
+      if (out[i] - out[i - 1] <= 0.5) out.splice(i, 1)
+    }
   }
   return out
 }

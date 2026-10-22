@@ -32983,6 +32983,22 @@ function runDynamicCameraTests(): void {
     )
 
     /**
+     * ⑦ 拍点吸附：色块起点比拍点晚 0.3ms（浮点/记谱的极小偏差）时，
+     * 球的拍点必须**吸附到块起点**——不能球已经在下一块、色块还停在上一个。
+     * 这是"色块 `atMs` 是唯一时间源"的直接断言。
+     */
+    const snapAnchors2 = [
+      { t0: 0, t1: 500, cx: 100, top: 200, x: 0, w: 100 },
+      { t0: 500.3, t1: 1000, cx: 900, top: 200, x: 800, w: 100 },
+    ]
+    const snapBall2 = ballAt(snapAnchors2, 500.3, 500, 0, 100, [0, 1000])
+    check(
+      'adj1062 拍点吸附到色块起点（晚 0.3ms 也一样）：球在块上 u=0',
+      snapBall2 !== null && Math.abs(snapBall2.u) < 1e-9 && Math.abs(snapBall2.x - 900) < 1e-6,
+      `x=${snapBall2?.x} u=${snapBall2?.u}`,
+    )
+
+    /**
      * 真实谱（`人间一两风.jps`，含弱起 + `|:`/`:|` + 二房子 + `&ds`）的**连续性体检**：
      * ① 10ms 采样：球不许瞬移（旧实现会在小节起点一下跳几百 px）；
      * ② 球出现后不许消失（空隙里也要有球）；
