@@ -80,48 +80,40 @@ export interface BallOptions {
 
 /**
  * adj1062（用户 2026-10-22 口径）：「球落地后不要马上弹起，给一个反弹的时间，
- * 尤如球落地后要变形蓄力后再反弹——这会有一个延迟，刚好这个时间色块到达，
- * 感觉就是球有落在色块上面」。
+ * 尤如球落地后要变形蓄力后再反弹——这会有一个延迟」。
  *
- * 于是把一拍拆成三段：
- *  1. **起点保持**（`dwell`）：落在本拍色块上，压扁的球慢慢回弹；
- *  2. **飞行**：从本拍到下一拍（时长 = 一拍 − 落地提前量 − 保持）；
- *  3. **提前落地 + 压紧**（`lead`）：在**拍点之前**就落到下一块上，压到最扁；
- *     拍点那一刻色块正好切过来，球还压在块上；下一拍的"起点保持"再慢慢回弹。
+ * 于是把一拍拆成：**飞行 → 落地保持（dwell）**：
+ *  · 落点仍是拍点上的那个色块（`points[i]`）；
+ *  · 球到达它的时刻 = `拍点 + landOffsetBeats×拍长`（正=晚、负=早）；
+ *  · 到点后保持 `dwell`：压扁的球慢慢回弹；再飞向下一拍。
  *
- * `lead` 让球先到、色块后到（用户看到的"球超前"是刻意的）；`dwell` 把这段接触拉长，
- * 使"色块到达"发生在球还压在块上的时候 ⇒ 观感是球落在色块上。
+ * 色块切换始终按 `atMs`（拍点），球晚到就是球晚到——看的就是"球在色块上停住"的那一下。
  */
 export interface BallTiming {
-  /** 一拍里"起点保持/回弹"的时长占比（0~1） */
+  /** 一拍里"落地保持/回弹"的时长占比（0~1） */
   dwellRatio?: number
-  /** 起点保持的封顶（ms） */
+  /** 落地保持的封顶（ms） */
   dwellMaxMs?: number
-  /** 一拍里"提前落地"的时长占比（0~1） */
-  leadRatio?: number
-  /** 提前落地的封顶（ms） */
-  leadMaxMs?: number
   /**
-   * adj1062（用户 2026-10-22 试调）：在"提前落地"的基础上**再晚多少拍**落地。
-   * 1/32 = 晚 1/32 拍；用于微调"球还是早了"的观感。若大于提前量，落点夹到拍点（不晚于拍点）。
+   * **落点相对拍点的偏移**（拍数；正 = 晚、负 = 早、0 = 与拍点同时）。
+   *
+   * 落点仍是**拍点上的那个色块**（落该块正中/比例位置），只是球**到达它**的时刻晚/早；
+   * 色块切换始终严格按 `atMs`（拍点）——球晚到就是球晚到，色块不会跟着晚。
    */
-  landDelayBeats?: number
+  landOffsetBeats?: number
 }
 
 /**
  * 落地保持的**默认参数**：预览与出片共用这一份（用户 2026-10-22「对齐，最好用同一种方式」）。
  *
- * 用户 2026-10-22 试调：**先去掉提前量**（`lead=0`、`landDelayBeats=0`）——
- * 球在**拍点/色块切换那一刻**落地，随后保持 `dwell` 压扁回弹，再起飞。
- * 66bpm 保持约 140ms、120bpm 约 80ms；一拍至少留 65% 给飞行。
- * （上一版是 `lead=5%` 提前落；若"同时"仍显早/晚，改这两个数即可。）
+ * 用户 2026-10-22 试调：**落地再晚 1/32 拍**（`landOffsetBeats = 1/32`）——
+ * 球在拍点/色块切换之后约 1/32 拍才落到块上，随后保持 `dwell` 压扁回弹，再起飞。
+ * 66bpm 约晚 28ms、120bpm 约晚 16ms；保持 66bpm 约 140ms、120bpm 约 80ms。
  */
 export const BALL_LANDING_TIMING: BallTiming = {
   dwellRatio: 0.16,
   dwellMaxMs: 140,
-  leadRatio: 0,
-  leadMaxMs: 0,
-  landDelayBeats: 0,
+  landOffsetBeats: 1 / 32,
 }
 
 /** 落地压扁的横向放大 / 纵向压缩比例（预览与出片同一套；`squash=1` 时为最大） */
@@ -312,6 +304,25 @@ function beatTimesOf(
   return out
 }
 
+/** 自由落体（最后一块之后）：从 `(x, top)` 往下掉；落出画面返回 null */
+function freeFallAt(
+  x: number,
+  top: number,
+  pageIndex: number | undefined,
+  dtMs: number,
+): BallPos | null {
+  const dt = dtMs / 1000
+  const y = top + 0.5 * 2600 * dt * dt
+  if (y > 2400) return null // 已经落出画面（页面高约 842）
+  return {
+    x,
+    y,
+    u: 0,
+    squash: 0,
+    ...(pageIndex !== undefined ? { pageIndex } : {}),
+  }
+}
+
 /**
  * 球在 `t` 时刻的位置。
  *
@@ -343,20 +354,9 @@ export function ballAt(
   const last = anchors[anchors.length - 1]
   // 第一个音之前：不画球（片头标题卡阶段）
   if (t < first.t0) return null
-  // 最后一个音结束之后：**自由落体**，球离开视界
-  // adj1061：用 `>=`——结束那一刻就不再属于"最后一拍"，否则会落到一个不存在的拍网格上
-  if (t >= last.t1) {
-    const dt = (t - last.t1) / 1000
-    const y = last.top + 0.5 * 2600 * dt * dt
-    if (y > 2400) return null // 已经落出画面（页面高约 842）
-    return {
-      x: last.cx,
-      y,
-      u: 0,
-      squash: 0,
-      ...(last.pageIndex !== undefined ? { pageIndex: last.pageIndex } : {}),
-    }
-  }
+  // 无 timing 的旧口径：最后一个音结束即自由落体
+  // adj1061：用 `>=`——结束那一刻就不再属于"最后一拍"
+  if (!timing && t >= last.t1) return freeFallAt(last.cx, last.top, last.pageIndex, t - last.t1)
   const times = beatTimesOf(anchors, beatMs, anchorMs, barStartsMs)
   if (times.length < 2) {
     // 极短谱 / 零时长：至少落在当前色块上，不要消失
@@ -413,23 +413,13 @@ export function ballAt(
       points[i] = points[next]
     }
   }
-  // 二分找 t 所在的拍：times[lo] ≤ t < times[hi]
-  let lo = 0
-  let hi = times.length - 1
-  while (lo + 1 < hi) {
-    const mid = (lo + hi) >> 1
-    if (times[mid] <= t) lo = mid
-    else hi = mid
-  }
-  const b0 = times[lo]
-  const b1 = times[hi]
-  /** 相邻两拍共享落点（本拍终点 = 下一拍起点）⇒ 拍与拍之间不会瞬移 */
-  const p0 = points[lo] ?? points[hi] ?? landingOf(first, b0)
-  const p1 = points[hi] ?? p0
-  const page = p0.pageIndex !== undefined ? { pageIndex: p0.pageIndex } : {}
   /**
-   * adj1062：一拍拆成 **起点保持 → 飞行 → 提前落地压紧** 三段（见 `BallTiming` 的说明）。
-   * 不传 `timing` 时 d = l = 0，退化成"落点即起跳"的旧行为。
+   * adj1062（用户 2026-10-22）：
+   * **落点排程** = 拍点 + `landOffsetBeats×拍长`（正=晚、负=早；第一个音不偏移）。
+   *
+   * 落点仍是拍点上的那个色块（`points[i]`，拍点=音符起点时取块正中）；
+   * 球到达时刻可以晚/早，色块切换始终按 `times[i]`（= atMs）——球晚到就是球晚到。
+   * 到点后保持 `dwell`（压扁回弹），再飞向下一拍。
    */
   const dwellMs = timing
     ? Math.min(
@@ -437,41 +427,58 @@ export function ballAt(
         beatMs * (timing.dwellRatio ?? BALL_LANDING_TIMING.dwellRatio ?? 0),
       )
     : 0
-  const leadMs = timing
-    ? Math.min(
-        timing.leadMaxMs ?? BALL_LANDING_TIMING.leadMaxMs ?? 0,
-        beatMs * (timing.leadRatio ?? BALL_LANDING_TIMING.leadRatio ?? 0),
-      )
-    : 0
-  /** adj1062（用户 2026-10-22 试调）：在提前量上再**晚**这么多拍落地 */
-  const landDelayMs = timing ? beatMs * (timing.landDelayBeats ?? 0) : 0
-  const len = b1 - b0
-  /** 短拍（小节末/前倚音补的界）按比例缩短，保证一拍里至少留 50% 给飞行 */
-  const d = Math.min(dwellMs, len * 0.35)
-  /** 实际提前量 = 提前量 − 再晚的时间；夹到 ≥0（最晚落在拍点，不晚于拍点） */
-  const l = Math.max(0, Math.min(leadMs, len * 0.15) - landDelayMs)
-  const flightStart = b0 + d
-  const flightEnd = b1 - l
-  // ① 起点保持：还压在本拍色块上，压扁量 1 → 0（回弹）
-  if (timing && t < flightStart) {
-    const s = d > 0 ? Math.max(0, Math.min(1, 1 - (t - b0) / d)) : 0
-    return { x: p0.x, y: p0.top, u: 0, squash: s, ...page }
+  const offsetMs = timing ? beatMs * (timing.landOffsetBeats ?? 0) : 0
+  /** 落点时刻：第一个音不偏移（球从第一块开始），其余整体平移 */
+  const landAt = times.map((bt, i) => (i === 0 ? bt : bt + offsetMs))
+  const n = landAt.length
+  /** 某个落点后的保持时长：按该拍长度缩短，保证一拍里至少 65% 给飞行 */
+  const dwellFor = (i: number): number => {
+    if (!timing) return 0
+    const gap = i + 1 < n ? landAt[i + 1] - landAt[i] : landAt[i] - landAt[i - 1]
+    return Math.max(0, Math.min(dwellMs, gap * 0.35))
   }
-  // ③ 提前落地 + 压紧：已经落在下一块上，压扁量 0 → 1；拍点那一刻色块切过来
-  if (timing && t >= flightEnd) {
-    const s = l > 0 ? Math.max(0, Math.min(1, (t - flightEnd) / l)) : 1
-    return {
-      x: p1.x,
-      y: p1.top,
-      u: 0,
-      squash: s,
-      ...(p1.pageIndex !== undefined ? { pageIndex: p1.pageIndex } : {}),
+  const pageOf = (p: Landing): { pageIndex?: number } =>
+    p.pageIndex !== undefined ? { pageIndex: p.pageIndex } : {}
+  /** 最后一块：保持 dwell 后自由落体（不早于最后一个音的结束） */
+  if (timing) {
+    const lastIdx = n - 1
+    const lastLanding = landAt[lastIdx]
+    const lastDwell = dwellFor(lastIdx)
+    const lastPoint = points[lastIdx] ?? landingOf(last, times[lastIdx])
+    const fallStart = Math.max(last.t1, lastLanding + lastDwell)
+    if (t >= fallStart) {
+      return freeFallAt(lastPoint.x, lastPoint.top, lastPoint.pageIndex, t - fallStart)
+    }
+    if (t >= lastLanding) {
+      const s =
+        lastDwell > 0 ? Math.max(0, Math.min(1, 1 - (t - lastLanding) / lastDwell)) : 1
+      return { x: lastPoint.x, y: lastPoint.top, u: 0, squash: s, ...pageOf(lastPoint) }
     }
   }
-  // ② 飞行：抛物线；这一段是正圆（squash=0）
-  const u = flightEnd > flightStart
-    ? Math.max(0, Math.min(1, (t - flightStart) / (flightEnd - flightStart)))
-    : 0
+  // 找 t 所落在的落点区间：landAt[lo] ≤ t < landAt[hi]
+  let lo = 0
+  let hi = n - 1
+  while (lo + 1 < hi) {
+    const mid = (lo + hi) >> 1
+    if (landAt[mid] <= t) lo = mid
+    else hi = mid
+  }
+  const p0 = points[lo] ?? landingOf(first, times[lo])
+  const p1 = points[hi] ?? p0
+  const hold = dwellFor(lo)
+  const holdEnd = landAt[lo] + hold
+  // 落地后保持：压扁量 1 → 0（回弹）
+  if (timing && t < holdEnd) {
+    const s = hold > 0 ? Math.max(0, Math.min(1, 1 - (t - landAt[lo]) / hold)) : 1
+    return { x: p0.x, y: p0.top, u: 0, squash: s, ...pageOf(p0) }
+  }
+  // 飞行：抛物线；这一段是正圆（squash=0）
+  const flightStart = holdEnd
+  const flightEnd = landAt[hi]
+  const u =
+    flightEnd > flightStart
+      ? Math.max(0, Math.min(1, (t - flightStart) / (flightEnd - flightStart)))
+      : 0
   const x = p0.x + (p1.x - p0.x) * u
   const top = p0.top + (p1.top - p0.top) * u
   return {
@@ -480,6 +487,6 @@ export function ballAt(
     u,
     squash: 0,
     // 这一拍从哪一页起飞（预览据此只画一颗球；视频/出片忽略）
-    ...page,
+    ...pageOf(p0),
   }
 }

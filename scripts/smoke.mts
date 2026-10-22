@@ -32999,9 +32999,9 @@ function runDynamicCameraTests(): void {
     )
 
     /**
-     * ⑧ 落地保持（用户 2026-10-22）：**先去掉提前量**，球与色块**同时**落地；
+     * ⑧ 落地保持 + **晚 1/32 拍**（用户 2026-10-22 试调）：球在拍点之后约 1/32 拍才落到块上，
      * 落地后压扁保持 `dwell` 再回弹起飞。
-     * 500ms 一拍时：dwell=80ms、lead=0 ⇒ 500ms 落、500ms 压到最扁、580ms 才起飞。
+     * 500ms 一拍时：dwell=80ms、offset=15.625ms ⇒ 515.625ms 落、515.625ms 压到最扁、595.625ms 才起飞。
      */
     const dwellAnchors2 = [
       { t0: 0, t1: 500, cx: 100, top: 200, x: 0, w: 100 },
@@ -33009,17 +33009,17 @@ function runDynamicCameraTests(): void {
       { t0: 1000, t1: 1500, cx: 500, top: 200, x: 400, w: 100 },
     ]
     const dwellBefore = ballAt(dwellAnchors2, 480, 500, 0, 100, undefined, BALL_LANDING_TIMING)
-    const dwellBeat = ballAt(dwellAnchors2, 500, 500, 0, 100, undefined, BALL_LANDING_TIMING)
+    const dwellLand = ballAt(dwellAnchors2, 515.625, 500, 0, 100, undefined, BALL_LANDING_TIMING)
     const dwellHold = ballAt(dwellAnchors2, 550, 500, 0, 100, undefined, BALL_LANDING_TIMING)
     const dwellFly = ballAt(dwellAnchors2, 600, 500, 0, 100, undefined, BALL_LANDING_TIMING)
     check(
-      'adj1062 落地与色块同时：拍点 500ms 落、压到最扁，80ms 后才起飞',
+      'adj1062 落地保持：晚 1/32 拍（515.625ms）落到块上，压到最扁，80ms 后才起飞',
       dwellBefore !== null &&
         dwellBefore.x < 899 &&
         Math.abs(dwellBefore.squash ?? 0) < 1e-9 &&
-        dwellBeat !== null &&
-        Math.abs(dwellBeat.x - 900) < 1e-6 &&
-        Math.abs((dwellBeat.squash ?? 0) - 1) < 1e-6 &&
+        dwellLand !== null &&
+        Math.abs(dwellLand.x - 900) < 1e-6 &&
+        Math.abs((dwellLand.squash ?? 0) - 1) < 1e-6 &&
         dwellHold !== null &&
         Math.abs(dwellHold.x - 900) < 1e-6 &&
         (dwellHold.squash ?? 0) > 0 &&
@@ -33027,7 +33027,7 @@ function runDynamicCameraTests(): void {
         dwellFly !== null &&
         Math.abs(dwellFly.squash ?? 0) < 1e-9 &&
         dwellFly.x < 899,
-      `before=${dwellBefore?.x}/${dwellBefore?.squash} beat=${dwellBeat?.x}/${dwellBeat?.squash} hold=${dwellHold?.x}/${dwellHold?.squash} fly=${dwellFly?.x}/${dwellFly?.squash}`,
+      `before=${dwellBefore?.x}/${dwellBefore?.squash} land=${dwellLand?.x}/${dwellLand?.squash} hold=${dwellHold?.x}/${dwellHold?.squash} fly=${dwellFly?.x}/${dwellFly?.squash}`,
     )
 
     /**
@@ -33082,12 +33082,14 @@ function runDynamicCameraTests(): void {
       check('adj1062 真实谱：球出现后不消失（空隙/反复/跳转里一直有球）', nullCount === 0, `null=${nullCount}`)
       // 换行：轨道 **group 变了**（一行一个 group）。同组里的和弦/倚音/换拍不算换行。
       const badLine: string[] = []
+      const rLandOffset = rBeat * (BALL_LANDING_TIMING.landOffsetBeats ?? 0)
       for (let i = 1; i < rAnchors.length; i++) {
         const a = rAnchors[i - 1]
         const b = rAnchors[i]
         if (b.group === a.group) continue
         const near = ballAt(rAnchors, b.t0 - 5, rBeat, 0, rAmp, rBars, BALL_LANDING_TIMING)
-        const at = ballAt(rAnchors, b.t0, rBeat, 0, rAmp, rBars, BALL_LANDING_TIMING)
+        // adj1062：落点比拍点晚 `landOffsetBeats` 拍 ⇒ 在"拍点 + 偏移"这一刻检查它已在块上
+        const at = ballAt(rAnchors, b.t0 + rLandOffset, rBeat, 0, rAmp, rBars, BALL_LANDING_TIMING)
         if (
           !near ||
           !at ||
@@ -33097,7 +33099,7 @@ function runDynamicCameraTests(): void {
         ) {
           if (badLine.length < 8) {
             badLine.push(
-              `${Math.round(b.t0)}:u=${at?.u ?? -1} near=${Math.round(near?.x ?? -1)}/at=${Math.round(at?.x ?? -1)}/want=${Math.round(b.cx)}`,
+              `${Math.round(b.t0)}+${rLandOffset.toFixed(1)}:u=${at?.u ?? -1} near=${Math.round(near?.x ?? -1)}/at=${Math.round(at?.x ?? -1)}/want=${Math.round(b.cx)}`,
             )
           }
         }
