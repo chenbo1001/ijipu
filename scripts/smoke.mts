@@ -32494,18 +32494,31 @@ function runDynamicCameraTests(): void {
   const parsed = parseJpsRaw(`V: 1.0\nB: t\nD: C\nP: 4/4\n${manyRows}\n`)
   const layout = layoutScore(parsed, DUR_CFG)
   check('M3 夹具跨页（≥2 页），否则下面的同页断言压不住问题', layout.pages.length >= 2, String(layout.pages.length))
-  const seq = buildPlaySequence(parsed, layout, 120)
+  const seq0 = buildPlaySequence(parsed, layout, 120)
+  // 模拟出片的"片头"：整条时间轴后移 2 秒（渲染器就是这么做的），
+  // 相机在第一拍**之前**完成推近 ⇒ t=0 才是满宽描述头。
+  const LEAD = 2000
+  const seq = {
+    ...seq0,
+    events: seq0.events.map((e) => ({ ...e, atMs: e.atMs + LEAD })),
+    totalMs: seq0.totalMs + LEAD,
+  }
   const track = buildRectTrack(seq, { noteSize: DUR_CFG.note_size })
   const view = buildFlowView(layout, track, DUR_CFG)
-  const cam = buildCameraTrack(view, track, DUR_CFG, { viewW: 1080, viewH: 1920 })
+  const headerCy = DUR_CFG.margin_top + DUR_CFG.descAreaH / 2
+  const cam = buildCameraTrack(view, track, DUR_CFG, { viewW: 1080, viewH: 1920, headerCy })
 
   const halfW = (z: number) => cam.viewW / z / 2
   const at0 = cameraAt(cam, 0)
   check('M3 片头满宽（zoom = 1080/595.28 ≈ 1.81）', Math.abs(at0.zoom - cam.zoomFit) < 1e-9, String(at0.zoom))
-  check('M3 片头整页纵向居中', Math.abs(at0.cy - cam.pageH / 2) < 1e-9, String(at0.cy))
+  check(
+    'M3 片头整页可见（取景框比页高 ⇒ 纵向居中）',
+    Math.abs(at0.cy - cam.pageH / 2) < 1e-9,
+    `${at0.cy} vs ${cam.pageH / 2}`,
+  )
 
-  const after = cameraAt(cam, cam.firstT + cam.introMs + 1)
-  check('M3 推近结束后为 4× 跟拍', Math.abs(after.zoom - cam.zoomFollow) < 1e-9, String(after.zoom))
+  const after = cameraAt(cam, cam.firstT)
+  check('M3 第一拍时已经推近到位（4×）', Math.abs(after.zoom - cam.zoomFollow) < 1e-9, String(after.zoom))
   check(
     'M3 缩放随时间单调不减（不会忽远忽近）',
     (() => {
@@ -32561,7 +32574,7 @@ function runDynamicCameraTests(): void {
   for (let i = 0; i < track.rects.length; i++) {
     const r = track.rects[i]
     const t = (r.t0 + r.t1) / 2
-    if (t <= cam.firstT + cam.introMs) continue
+    if (t < cam.firstT) continue
     const f = cameraAt(cam, t)
     if (f.pageIndex !== r.pageIndex) continue
     const h = halfW(f.zoom)
@@ -32594,7 +32607,7 @@ function runDynamicCameraTests(): void {
   for (let i = 0; i < track.rects.length; i++) {
     const r = track.rects[i]
     const t = (r.t0 + r.t1) / 2
-    if (t <= cam.firstT + cam.introMs) continue
+    if (t < cam.firstT) continue
     const f = cameraAt(cam, t)
     if (f.pageIndex !== r.pageIndex) continue
     const hh = cam.viewH / f.zoom / 2
@@ -32628,7 +32641,7 @@ function runDynamicCameraTests(): void {
   for (let i = 0; i < track.rects.length; i++) {
     const r = track.rects[i]
     const t = (r.t0 + r.t1) / 2
-    if (t <= cam.firstT + cam.introMs) continue
+    if (t < cam.firstT) continue
     const f = cameraAt(cam, t)
     if (f.pageIndex !== r.pageIndex) continue
     const h = halfW(f.zoom)

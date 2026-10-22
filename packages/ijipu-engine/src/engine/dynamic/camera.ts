@@ -54,6 +54,11 @@ export interface CameraOptions {
    * 观众会晕 ⇒ 段导出直接以跟拍倍数起步。
    */
   skipIntro?: boolean
+  /**
+   * 片头要对准的纵向中心（页面坐标）——一般是**描述头**（标题/作者/调号）的中间。
+   * 缺省按页高 15% 兜底。
+   */
+  headerCy?: number
 }
 
 /** 相机某一刻的位置（页面坐标系 + 缩放） */
@@ -104,6 +109,8 @@ export interface CameraTrack {
   introMs: number
   lineMs: number
   panMs: number
+  /** 片头对准的纵向中心（描述头中间） */
+  headerCy: number
 }
 
 /** 平滑缓动（0→1，两端速度为 0） */
@@ -136,6 +143,7 @@ export function buildCameraTrack(
   // 段导出不演"满宽片头"：一上来就是跟拍倍数
   const zoomFit = skipIntro ? zoomFollow : viewW / paper.width
   const firstT = view.rows.length > 0 ? view.rows[0].t0 : 0
+  const headerCy = opts.headerCy ?? paper.height * 0.15
 
   const rows: CameraRow[] = view.rows.map((r) => ({
     t0: r.t0,
@@ -204,6 +212,7 @@ export function buildCameraTrack(
     introMs,
     lineMs,
     panMs,
+    headerCy,
   }
 }
 
@@ -241,8 +250,11 @@ export function cameraAt(cam: CameraTrack, t: number): CameraFrame {
 
   // 片头进度：0 = 整页满宽，1 = 完全进入跟拍。缩放、横移、纵移都按这一个 k 走，
   // 否则会出现"先跳过去再推近"（用户实测："刚开始播放时没有平移，色块不在视界里"）。
+  // 片头推近：**在第一拍之前完成**（第一拍响起时画面已经到位）
   const introK =
-    cam.introMs <= 0 ? 1 : t <= cam.firstT ? 0 : ease((t - cam.firstT) / Math.max(1, cam.introMs))
+    cam.introMs <= 0
+      ? 1
+      : ease((t - (cam.firstT - cam.introMs)) / Math.max(1, cam.introMs))
   const zoom = cam.zoomFit + (cam.zoomFollow - cam.zoomFit) * introK
 
   // 纵向：换行的平移从行边界开始（不提前离开上一行）
@@ -252,6 +264,11 @@ export function cameraAt(cam: CameraTrack, t: number): CameraFrame {
     cy = prev.cy + (row.cy - prev.cy) * k
   }
   // 片头从整页中心平滑过渡到当前行
+  /**
+   * 片头纵向：取景框**比页面高**时（9:16 满宽就是这样）整页可见，纵向只能居中——
+   * 此时 `headerCy` 会被下面的夹紧覆盖（这是几何必然，不是 bug）。
+   * 只有取景框比页面矮时，`headerCy` 才真的生效。
+   */
   cy = cam.pageH / 2 + (cy - cam.pageH / 2) * introK
 
   // 横向：按关键帧的 from/dur 推移；换行那一帧 dur=0，直接在边界上归位
