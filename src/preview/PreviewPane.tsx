@@ -34,6 +34,9 @@ import {
   playheadBaseOf,
   ballAt,
   beatPhaseOf,
+  BALL_LANDING_TIMING,
+  BALL_SQUASH_X,
+  BALL_SQUASH_Y,
 } from '@ijipu/engine'
 import type { ScorePage, PageConfig, BallAnchor } from '@ijipu/engine'
 // adj965（方案「OVL」，EP-10）：水印/背景图的资源状态（订阅 + 并进渲染参数）
@@ -1294,20 +1297,36 @@ function PlayheadLayer({ page, pages, noteSize }: { page: ScorePage; pages: Scor
      * 末尾那条「曲末」不是小节开头，`ballAt` 自己会跳过它（只当自由落体的时刻）。
      */
     const beatAnchor = beatBars.length > 0 ? 0 : beatPhaseOf(ballAnchors, beatMs)
-    const bp = ballAt(ballAnchors, currentMs, beatMs, beatAnchor, noteSize * 3.2, beatBars)
+    const bp = ballAt(
+      ballAnchors,
+      currentMs,
+      beatMs,
+      beatAnchor,
+      noteSize * 3.2,
+      beatBars,
+      BALL_LANDING_TIMING,
+    )
     if (bp && (bp.pageIndex === undefined || bp.pageIndex === page.index)) {
       const rad = noteSize * 0.28
       // `bp.y` 是跨页坐标；减掉本页页顶才是本页内的 top（跨页飞行时会 <0 或 >page.height）
       const localTop = bp.y - (pageOffsets[page.index] ?? 0)
       /**
-       * adj1062：球**底边**贴在色块上沿（与出片 `renderer.ts` 的 `bp.y − rad` 同口径）。
+       * adj1062：球**底边**贴在色块上沿（与出片 `renderer.ts` 同口径）。
        * 旧写法 `localTop − rad` 把**球心**放在色块上沿 ⇒ 球有一半陷进色块，
        * 看起来会比实际落地早半个球（用户截图里"球已落下"的观感来源之一）。
+       * `squash` 以**球底**为不动点压扁（预览/出片共用 `BALL_SQUASH_X/Y`）。
        */
+      const squash = bp.squash ?? 0
       ball = (
         <div
           className="beat-ball"
-          style={{ left: pct(bp.x - rad), top: pctY(localTop - rad * 2), width: pct(rad * 2) }}
+          style={{
+            left: pct(bp.x - rad),
+            top: pctY(localTop - rad * 2),
+            width: pct(rad * 2),
+            transform: `scaleX(${1 + BALL_SQUASH_X * squash}) scaleY(${1 - BALL_SQUASH_Y * squash})`,
+            transformOrigin: '50% 100%',
+          }}
           aria-hidden="true"
         />
       )

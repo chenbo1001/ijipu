@@ -98,7 +98,7 @@ import { buildRectTrack, rectsActiveAt } from '@ijipu/engine/index.ts'
 // M1-1 第二段：流式视图（分页 → 条带行）与出帧（时刻 → 一帧）
 import { buildFlowView, frameAt, frameTimeMs, frameIndexAt, dynamicPageConfig } from '@ijipu/engine/index.ts'
 // M1-3：相机（满宽片头 → 推近 → 安全区跟拍）
-import { buildCameraTrack, cameraAt, ballAt } from '@ijipu/engine/index.ts'
+import { buildCameraTrack, cameraAt, ballAt, BALL_LANDING_TIMING } from '@ijipu/engine/index.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
@@ -32999,6 +32999,38 @@ function runDynamicCameraTests(): void {
     )
 
     /**
+     * ⑧ 落地保持（用户 2026-10-22 建议）：球提前 `lead` 落到下一块，压扁保持 `dwell`；
+     * 拍点那一刻色块切过来时球还压在块上，然后才弹起。
+     * 500ms 一拍时：dwell=80ms、lead=25ms ⇒ 475ms 提前落、500ms 压到最扁、580ms 才起飞。
+     */
+    const dwellAnchors2 = [
+      { t0: 0, t1: 500, cx: 100, top: 200, x: 0, w: 100 },
+      { t0: 500, t1: 1000, cx: 900, top: 200, x: 800, w: 100 },
+      { t0: 1000, t1: 1500, cx: 500, top: 200, x: 400, w: 100 },
+    ]
+    const dwellEarly = ballAt(dwellAnchors2, 480, 500, 0, 100, undefined, BALL_LANDING_TIMING)
+    const dwellBeat = ballAt(dwellAnchors2, 500, 500, 0, 100, undefined, BALL_LANDING_TIMING)
+    const dwellHold = ballAt(dwellAnchors2, 550, 500, 0, 100, undefined, BALL_LANDING_TIMING)
+    const dwellFly = ballAt(dwellAnchors2, 600, 500, 0, 100, undefined, BALL_LANDING_TIMING)
+    check(
+      'adj1062 落地保持：提前 25ms 落到块上，拍点压到最扁，80ms 后才起飞',
+      dwellEarly !== null &&
+        Math.abs(dwellEarly.x - 900) < 1e-6 &&
+        (dwellEarly.squash ?? 0) > 0.1 &&
+        dwellBeat !== null &&
+        Math.abs(dwellBeat.x - 900) < 1e-6 &&
+        Math.abs((dwellBeat.squash ?? 0) - 1) < 1e-6 &&
+        dwellHold !== null &&
+        Math.abs(dwellHold.x - 900) < 1e-6 &&
+        (dwellHold.squash ?? 0) > 0 &&
+        (dwellHold.squash ?? 0) < 1 &&
+        dwellFly !== null &&
+        Math.abs(dwellFly.squash ?? 0) < 1e-9 &&
+        dwellFly.x < 899,
+      `early=${dwellEarly?.x}/${dwellEarly?.squash} beat=${dwellBeat?.x}/${dwellBeat?.squash} hold=${dwellHold?.x}/${dwellHold?.squash} fly=${dwellFly?.x}/${dwellFly?.squash}`,
+    )
+
+    /**
      * 真实谱（`人间一两风.jps`，含弱起 + `|:`/`:|` + 二房子 + `&ds`）的**连续性体检**：
      * ① 10ms 采样：球不许瞬移（旧实现会在小节起点一下跳几百 px）；
      * ② 球出现后不许消失（空隙里也要有球）；
@@ -33027,7 +33059,7 @@ function runDynamicCameraTests(): void {
       let maxDxT = -1
       let nullCount = 0
       for (let t = rFirst; t < rLast; t += 10) {
-        const p = ballAt(rAnchors, t, rBeat, 0, rAmp, rBars)
+        const p = ballAt(rAnchors, t, rBeat, 0, rAmp, rBars, BALL_LANDING_TIMING)
         if (!p) {
           nullCount++
           prevP = null
@@ -33054,8 +33086,8 @@ function runDynamicCameraTests(): void {
         const a = rAnchors[i - 1]
         const b = rAnchors[i]
         if (b.group === a.group) continue
-        const near = ballAt(rAnchors, b.t0 - 5, rBeat, 0, rAmp, rBars)
-        const at = ballAt(rAnchors, b.t0, rBeat, 0, rAmp, rBars)
+        const near = ballAt(rAnchors, b.t0 - 5, rBeat, 0, rAmp, rBars, BALL_LANDING_TIMING)
+        const at = ballAt(rAnchors, b.t0, rBeat, 0, rAmp, rBars, BALL_LANDING_TIMING)
         if (
           !near ||
           !at ||

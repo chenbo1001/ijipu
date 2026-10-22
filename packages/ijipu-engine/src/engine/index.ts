@@ -84,6 +84,9 @@ export {
   frameIndexAt,
   ballAt,
   beatPhaseOf,
+  BALL_LANDING_TIMING,
+  BALL_SQUASH_X,
+  BALL_SQUASH_Y,
   buildCameraTrack,
   cameraAt,
   CAMERA_FOLLOW_ZOOM,
@@ -95,7 +98,7 @@ export {
   DEFAULT_DYNAMIC_PRESET,
   dynamicPageConfig,
 } from './dynamic'
-export type { RectTrack, TimedRect, RectTrackOptions, FlowRow, FlowView, FrameRect, Frame, DynamicPreset, DynamicPresetId, CameraFrame, CameraTrack, CameraOptions, CameraRow, CameraPan, BallAnchor, BallPos } from './dynamic'
+export type { RectTrack, TimedRect, RectTrackOptions, FlowRow, FlowView, FrameRect, Frame, DynamicPreset, DynamicPresetId, CameraFrame, CameraTrack, CameraOptions, CameraRow, CameraPan, BallAnchor, BallPos, BallTiming } from './dynamic'
 // adj759（清单 B2）：解析问题的分级/排序/计数/展示行（应用与插件共用；宿主可传自己的品牌标签）
 export {
   DEFAULT_PROBLEM_LABELS,

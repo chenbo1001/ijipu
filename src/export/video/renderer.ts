@@ -30,6 +30,9 @@ import {
   slicePlaySequenceByRange,
   ballAt,
   beatPhaseOf,
+  BALL_LANDING_TIMING,
+  BALL_SQUASH_X,
+  BALL_SQUASH_Y,
   DYNAMIC_PRESETS,
   type DynamicPresetId,
   type PageConfig,
@@ -231,18 +234,21 @@ export async function createDynamicSession(
       }
 
       /**
-       * 跳跳球：每拍弹一次，**落地那一刻正好是下一拍开始**。
-       * 高度用抛物线 `4u(1-u)`，u = 本拍已过的比例 ⇒ u=0 落地、u=1 落地。
+       * 跳跳球：每拍弹一次，落地 = 拍点前的 `lead`，随后压扁保持 `dwell`（adj1062）。
+       * 高度用抛物线 `4u(1-u)`；落地后按 `squash` 压成椭圆（球底仍贴色块上沿）。
        */
       if (ball) {
-        // 抛体：横向从这一拍落点飞到下一拍落点，纵向抛物线，落地 = 拍点
-        const bp = ballAt(ballAnchors, t, beatMs, beatPhase, noteSize * 3.2, ballBars)
+        const bp = ballAt(ballAnchors, t, beatMs, beatPhase, noteSize * 3.2, ballBars, BALL_LANDING_TIMING)
         if (bp && bp.x >= 0 && bp.x <= camera.pageW) {
           const rad = Math.max(4, noteSize * z * 0.28)
+          const s = bp.squash ?? 0
+          const rx = rad * (1 + BALL_SQUASH_X * s)
+          const ry = rad * (1 - BALL_SQUASH_Y * s)
           const bx = (bp.x - left) * z
-          const by = (bp.y - top) * z - rad
+          // 压扁以**球底**为不动点：中心 = 落点 − 当前纵向半径
+          const by = (bp.y - top) * z - ry
           ctx.beginPath()
-          ctx.arc(bx, by, rad, 0, Math.PI * 2)
+          ctx.ellipse(bx, by, rx, ry, 0, 0, Math.PI * 2)
           ctx.fillStyle = BALL_FILL
           ctx.fill()
           // 白圈：压在浅色谱面上也能看清边界

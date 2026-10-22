@@ -59,6 +59,12 @@ export interface BallPos {
    * 预览用它保证"跨页飞行时只在起飞的页上画一颗球"，落地后再换到下一页。
    */
   pageIndex?: number
+  /**
+   * adj1062：落地压扁量（0 = 正圆，1 = 最扁）。球落地后先压扁蓄力、再弹起；
+   * 宿主按 `BALL_SQUASH_X` / `BALL_SQUASH_Y` 做 `scaleX(1 + X·s) scaleY(1 − Y·s)`，
+   * 以**球底**为不动点（球底始终贴在色块上沿）。
+   */
+  squash?: number
 }
 
 /** `ballAt` 的可选项 */
@@ -71,6 +77,49 @@ export interface BallOptions {
    */
   lineJump?: number
 }
+
+/**
+ * adj1062（用户 2026-10-22 口径）：「球落地后不要马上弹起，给一个反弹的时间，
+ * 尤如球落地后要变形蓄力后再反弹——这会有一个延迟，刚好这个时间色块到达，
+ * 感觉就是球有落在色块上面」。
+ *
+ * 于是把一拍拆成三段：
+ *  1. **起点保持**（`dwell`）：落在本拍色块上，压扁的球慢慢回弹；
+ *  2. **飞行**：从本拍到下一拍（时长 = 一拍 − 落地提前量 − 保持）；
+ *  3. **提前落地 + 压紧**（`lead`）：在**拍点之前**就落到下一块上，压到最扁；
+ *     拍点那一刻色块正好切过来，球还压在块上；下一拍的"起点保持"再慢慢回弹。
+ *
+ * `lead` 让球先到、色块后到（用户看到的"球超前"是刻意的）；`dwell` 把这段接触拉长，
+ * 使"色块到达"发生在球还压在块上的时候 ⇒ 观感是球落在色块上。
+ */
+export interface BallTiming {
+  /** 一拍里"起点保持/回弹"的时长占比（0~1） */
+  dwellRatio?: number
+  /** 起点保持的封顶（ms） */
+  dwellMaxMs?: number
+  /** 一拍里"提前落地"的时长占比（0~1） */
+  leadRatio?: number
+  /** 提前落地的封顶（ms） */
+  leadMaxMs?: number
+}
+
+/**
+ * 落地保持的**默认参数**：预览与出片共用这一份（用户 2026-10-22「对齐，最好用同一种方式」）。
+ *
+ * 取值：保持 = min(140ms, 一拍×16%)；提前 = min(48ms, 一拍×5%)。
+ * 66bpm 下约"提前 45ms 落、保持 140ms"；120bpm 下约"提前 25ms、保持 80ms"。
+ * 一拍至少留 65% 给飞行，不会因为保持太久而看起来"卡住"。
+ */
+export const BALL_LANDING_TIMING: BallTiming = {
+  dwellRatio: 0.16,
+  dwellMaxMs: 140,
+  leadRatio: 0.05,
+  leadMaxMs: 48,
+}
+
+/** 落地压扁的横向放大 / 纵向压缩比例（预览与出片同一套；`squash=1` 时为最大） */
+export const BALL_SQUASH_X = 0.35
+export const BALL_SQUASH_Y = 0.45
 
 /** 一个落点（页面坐标）：`x` = 横向落点，`top` = 色块上沿 */
 interface Landing {
@@ -266,6 +315,8 @@ function beatTimesOf(
  * @param amp     抛物线最高点（页面坐标单位）——球"飞多高"
  * @param barStartsMs 小节起点（升序；**展开后逐遍**，末尾一条是「曲末」）。
  *   给了它，拍网格按小节重置，且每拍终点截到下一小节起点（见 `beatTimesOf`）。
+ * @param timing 落地保持/提前量（adj1062）。**不传 = 旧行为**（落点即起跳，没有压扁）；
+ *   预览与出片都传同一个 `BALL_LANDING_TIMING`。
  *
  * 边界：
  *  - 第一个音之前不画球（片头标题卡阶段）；
@@ -278,6 +329,7 @@ export function ballAt(
   anchorMs: number,
   amp: number,
   barStartsMs?: readonly number[],
+  timing?: BallTiming,
 ): BallPos | null {
   if (beatMs <= 0 || anchors.length === 0) return null
   const first = anchors[0]
@@ -294,6 +346,7 @@ export function ballAt(
       x: last.cx,
       y,
       u: 0,
+      squash: 0,
       ...(last.pageIndex !== undefined ? { pageIndex: last.pageIndex } : {}),
     }
   }
@@ -306,6 +359,7 @@ export function ballAt(
       x: p.x,
       y: p.top,
       u: 0,
+      squash: 0,
       ...(p.pageIndex !== undefined ? { pageIndex: p.pageIndex } : {}),
     }
   }
@@ -365,14 +419,57 @@ export function ballAt(
   /** 相邻两拍共享落点（本拍终点 = 下一拍起点）⇒ 拍与拍之间不会瞬移 */
   const p0 = points[lo] ?? points[hi] ?? landingOf(first, b0)
   const p1 = points[hi] ?? p0
-  const u = b1 > b0 ? Math.max(0, Math.min(1, (t - b0) / (b1 - b0))) : 0
+  const page = p0.pageIndex !== undefined ? { pageIndex: p0.pageIndex } : {}
+  /**
+   * adj1062：一拍拆成 **起点保持 → 飞行 → 提前落地压紧** 三段（见 `BallTiming` 的说明）。
+   * 不传 `timing` 时 d = l = 0，退化成"落点即起跳"的旧行为。
+   */
+  const dwellMs = timing
+    ? Math.min(
+        timing.dwellMaxMs ?? BALL_LANDING_TIMING.dwellMaxMs ?? 0,
+        beatMs * (timing.dwellRatio ?? BALL_LANDING_TIMING.dwellRatio ?? 0),
+      )
+    : 0
+  const leadMs = timing
+    ? Math.min(
+        timing.leadMaxMs ?? BALL_LANDING_TIMING.leadMaxMs ?? 0,
+        beatMs * (timing.leadRatio ?? BALL_LANDING_TIMING.leadRatio ?? 0),
+      )
+    : 0
+  const len = b1 - b0
+  /** 短拍（小节末/前倚音补的界）按比例缩短，保证一拍里至少留 50% 给飞行 */
+  const d = Math.min(dwellMs, len * 0.35)
+  const l = Math.min(leadMs, len * 0.15)
+  const flightStart = b0 + d
+  const flightEnd = b1 - l
+  // ① 起点保持：还压在本拍色块上，压扁量 1 → 0（回弹）
+  if (timing && t < flightStart) {
+    const s = d > 0 ? Math.max(0, Math.min(1, 1 - (t - b0) / d)) : 0
+    return { x: p0.x, y: p0.top, u: 0, squash: s, ...page }
+  }
+  // ③ 提前落地 + 压紧：已经落在下一块上，压扁量 0 → 1；拍点那一刻色块切过来
+  if (timing && t >= flightEnd) {
+    const s = l > 0 ? Math.max(0, Math.min(1, (t - flightEnd) / l)) : 1
+    return {
+      x: p1.x,
+      y: p1.top,
+      u: 0,
+      squash: s,
+      ...(p1.pageIndex !== undefined ? { pageIndex: p1.pageIndex } : {}),
+    }
+  }
+  // ② 飞行：抛物线；这一段是正圆（squash=0）
+  const u = flightEnd > flightStart
+    ? Math.max(0, Math.min(1, (t - flightStart) / (flightEnd - flightStart)))
+    : 0
   const x = p0.x + (p1.x - p0.x) * u
   const top = p0.top + (p1.top - p0.top) * u
   return {
     x,
     y: top - 4 * u * (1 - u) * amp,
     u,
+    squash: 0,
     // 这一拍从哪一页起飞（预览据此只画一颗球；视频/出片忽略）
-    ...(p0.pageIndex !== undefined ? { pageIndex: p0.pageIndex } : {}),
+    ...page,
   }
 }
