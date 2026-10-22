@@ -111,15 +111,20 @@ export function ballAt(
    * 弱起谱的拍网格是从**第一个音**开始数的，弱起不是整拍时网格会整体漂移，
    * 漂到某处"下一拍"已经越过本行末尾 ⇒ 球提前飞向下一行。
    *
-   * 判据不看拍子，看**本行还有没有音**：`top` 相同即同一行。
-   * 本行还有音 ⇒ 先飞本行下一个音；本行确实结束了 ⇒ 才飞下一行行首（这是对的）。
+   * 判据看**紧挨着的下一个音**（`anchors` 是按时间排好的展开序列）：
+   *  - 下一个音还在**本行** ⇒ 本行没播完 ⇒ 飞它（修掉漂移导致的提前左飞）；
+   *  - 下一个音已经在**别处**（换行 / 反复 `:|` / `&dc` / `&ds` / `&dy` 跳转）⇒
+   *    **本来就该在最后一拍朝那边弹**（用户 2026-10-22 口径），保持飞 `a1`。
+   *
+   * 因为播放序列已经把反复/跳转展开成一条时间线，"下一个音"就是跳转后的那个音，
+   * 所以这里不需要认识跳转记号本身。
    */
   const rowEps = opts.lineJump ?? 60
   const crossRow = Math.abs(a1.top - a0.top) > rowEps
   let target = a1
   if (crossRow) {
-    const sameRowNext = anchors.find((a) => a.t0 > a0.t0 && Math.abs(a.top - a0.top) <= rowEps)
-    if (sameRowNext) target = sameRowNext
+    const nextNote = anchors.find((a) => a.t0 > a0.t0)
+    if (nextNote && Math.abs(nextNote.top - a0.top) <= rowEps) target = nextNote
   }
   const x = a0.cx + (target.cx - a0.cx) * u
   const base = a0.top + (target.top - a0.top) * u
