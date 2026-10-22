@@ -1,34 +1,52 @@
 /**
- * export/video/capability.ts — 视频生成能力闸门（adj1077）
+ * export/video/capability.ts — 动态谱视频的整体能力闸门（adj1077 / adj1078）
  *
- * 用户口径（2026-10-23）：考虑到性能与浏览器限制，**生成视频先只放桌面壳端**，
- * 网站（纯 Web）和 Obsidian 插件先不开放；预览相机位仍保留。
+ * 用户口径（2026-10-23）：
+ *  - 考虑到性能与浏览器限制，**动态谱视频整块先只放桌面壳**；网站（纯 Web）和 Obsidian 插件
+ *    **连相机位预览也不显示**（不只是禁用“生成视频”）；
+ *  - 桌面壳里生成视频还必须支持 WebCodecs（`VideoEncoder` + `AudioEncoder`），
+ *    否则只保留预览、禁用生成。
  *
- * 两个条件必须同时满足：
- *  1. 运行在 Tauri 桌面壳（`isTauriShell()`；网站/插件都是 false）；
- *  2. 当前 WebView 支持 WebCodecs 的 `VideoEncoder` + `AudioEncoder`
- *     （MP4 编码走 mediabunny → WebCodecs；只判断桌面壳不够，老 WebView 也会失败）。
+ * 两档能力：
+ *  - `canUseDynamicVideo`：Tauri 桌面壳（或测试注入）→ 显示入口/相机位；
+ *  - `canGenerateVideo`：在 `canUseDynamicVideo` 之上再加 WebCodecs 检查。
  *
- * `canGenerateVideo` 接收能力对象，纯函数，smoke 可直接断言；
- * 运行时通过 `detectVideoCapability()` 探测。
+ * `__IJIPU_FORCE_DESKTOP__` 只给 `verify:app-ui` 在 Chrome 里模拟桌面壳用；真实网站/插件不会注入。
  */
 import { isTauriShell } from '../../brand/env'
 
-export interface VideoCapability {
+export interface DynamicVideoCapability {
   /** 是否 Tauri 桌面壳（网站、Obsidian 插件 iframe 都是 false） */
   tauri: boolean
+  /** 仅测试注入：在 Chrome 里模拟桌面壳 */
+  force?: boolean
+}
+
+export interface VideoCapability extends DynamicVideoCapability {
   videoEncoder: boolean
   audioEncoder: boolean
+}
+
+function testForce(): boolean {
+  if (typeof window === 'undefined') return false
+  return (window as unknown as { __IJIPU_FORCE_DESKTOP__?: boolean }).__IJIPU_FORCE_DESKTOP__ === true
+}
+
+export function canUseDynamicVideo(
+  cap: DynamicVideoCapability = { tauri: isTauriShell(), force: testForce() },
+): boolean {
+  return cap.tauri || cap.force === true
 }
 
 export function detectVideoCapability(): VideoCapability {
   return {
     tauri: isTauriShell(),
+    force: testForce(),
     videoEncoder: typeof VideoEncoder !== 'undefined',
     audioEncoder: typeof AudioEncoder !== 'undefined',
   }
 }
 
 export function canGenerateVideo(cap: VideoCapability = detectVideoCapability()): boolean {
-  return cap.tauri && cap.videoEncoder && cap.audioEncoder
+  return canUseDynamicVideo(cap) && cap.videoEncoder && cap.audioEncoder
 }

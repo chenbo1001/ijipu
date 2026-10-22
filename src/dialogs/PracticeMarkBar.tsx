@@ -27,7 +27,7 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { docKeyOf, loadMarks, saveMarks } from '../store/practiceMarks'
 import { playbackCopy, dynamicVideoCopy } from '../brand/copy'
-import { canGenerateVideo } from '../export/video/capability'
+import { canGenerateVideo, canUseDynamicVideo } from '../export/video/capability'
 
 
 export function PracticeMarkBar(): React.JSX.Element {
@@ -43,6 +43,8 @@ export function PracticeMarkBar(): React.JSX.Element {
   const closeModal = useUiStore((s) => s.closeModal)
   const setDynamicCamera = useUiStore((s) => s.setDynamicCamera)
   // adj1077：视频生成只开放给桌面壳；这里保留按钮但禁用，避免网站/插件“点了没反应”
+  // adj1078：网站/插件连相机位都不显示 ⇒ 整个按钮不渲染；桌面壳才出现
+  const dynamicVideoEnabled = canUseDynamicVideo()
   const videoExportEnabled = canGenerateVideo()
   const setPass = useUiStore((s) => s.setPracticeMarkPass)
   const setSel = useUiStore((s) => s.setPracticeSel)
@@ -176,29 +178,31 @@ export function PracticeMarkBar(): React.JSX.Element {
               </option>
             ))}
           </select>
-          <button
-            className="btn practice-btn practice-export-dyn"
-            onClick={() => {
-              const m = marks.find((x) => x.id === markId)
-              if (!m) return
-              // adj1065：这一段交给预览区相机位；试听弹窗先关，才能看到取景
-              setDynamicCamera({
-                on: true,
-                range: { startId: m.startId, endId: m.endId },
-                mode: '3min',
-              })
-              closeModal()
-            }}
-            disabled={!videoExportEnabled || !marks.some((x) => x.id === markId)}
-            title={
-              videoExportEnabled
-                ? '把当前标记段导出成动态谱视频（一遍，不含循环）'
-                : dynamicVideoCopy.desktopOnly
-            }
-            aria-label="导出这段动态谱"
-          >
-            <span aria-hidden="true">⇩</span>
-          </button>
+          {dynamicVideoEnabled && (
+            <button
+              className="btn practice-btn practice-export-dyn"
+              onClick={() => {
+                const m = marks.find((x) => x.id === markId)
+                if (!m) return
+                // adj1065：这一段交给预览区相机位；试听弹窗先关，才能看到取景
+                setDynamicCamera({
+                  on: true,
+                  range: { startId: m.startId, endId: m.endId },
+                  mode: '3min',
+                })
+                closeModal()
+              }}
+              disabled={!videoExportEnabled || !marks.some((x) => x.id === markId)}
+              title={
+                videoExportEnabled
+                  ? '把当前标记段导出成动态谱视频（一遍，不含循环）'
+                  : dynamicVideoCopy.desktopOnly
+              }
+              aria-label="导出这段动态谱"
+            >
+              <span aria-hidden="true">⇩</span>
+            </button>
+          )}
           <button
             className={`btn practice-btn${selStart ? ' is-on' : ''}`}
             onClick={() => setSel('start', activeNoteId)}

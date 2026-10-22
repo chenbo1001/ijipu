@@ -26,6 +26,8 @@ import { renderToAudioBuffer, audioBufferToWav, audioBufferToMp3 } from '../../e
 import { exportSvg, exportPng, exportJpg, exportPdf } from '../../export/export'
 // adj1002：导出底色（纯函数，带 smoke 断言）
 import { exportBgColor } from '../../export/bgChoice'
+// adj1078：动态谱视频整块只在桌面壳显示（网站/插件连相机位预览也不并入）
+import { canUseDynamicVideo } from '../../export/video/capability'
 // adj873（T-3）：导出范围要"预览区实测墨迹盒" ⇒ 从这里量（只量，几何仍在引擎）
 import { measureInkFromPreview } from '../../export/exportRange'
 import { createHqCache, resolveHqBank } from '../../playback/spessaCache'
@@ -77,6 +79,7 @@ export function ExportPanel() {
   const setExportBgImage = useUiStore((s) => s.setExportBgImage)
   // adj1065：动态谱视频入口 = 预览区相机位（不再开弹窗）；整曲入口清掉标记段范围
   const setDynamicCamera = useUiStore((s) => s.setDynamicCamera)
+  const dynamicVideoEnabled = canUseDynamicVideo()
   const previewSoften = useUiStore((s) => s.previewSoften)
   const setExportJob = useUiStore((s) => s.setExportJob)
   // adj626：PDF 走打印（与 Ctrl+P / 菜单「打印」同一条路：同一份页面 + 同一个默认文件名）
@@ -312,19 +315,22 @@ export function ExportPanel() {
         ))}
       </div>
       {/* adj1065：动态谱视频 = 预览区相机位（同一套预览/声音/生成视频） */}
-      <div className="dock-field">
-        <button
-          type="button"
-          className="btn"
-          onClick={() => {
-            setDynamicCamera({ on: true, range: null, mode: '3min' })
-          }}
-          disabled={busy !== null}
-        >
-          动态谱视频
-        </button>
-        <span className="dock-muted">在预览区打开相机位（9:16 / 1:1 / 16:9）；可生成视频</span>
-      </div>
+      {/* adj1078：整块只在桌面壳出现；网站/插件不显示入口与相机位 */}
+      {dynamicVideoEnabled && (
+        <div className="dock-field">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setDynamicCamera({ on: true, range: null, mode: '3min' })
+            }}
+            disabled={busy !== null}
+          >
+            动态谱视频
+          </button>
+          <span className="dock-muted">在预览区打开相机位（9:16 / 1:1 / 16:9）；可生成视频</span>
+        </div>
+      )}
       {/* adj626：说明 PDF 两条路的差别（默认那条走系统打印对话框，故必须讲清怎么选） */}
       <div className="dock-muted">{exportCopy.pdfPrintHint}</div>
       {hasError && <div className="dock-error">⚠ {exportCopy.errorHint}</div>}

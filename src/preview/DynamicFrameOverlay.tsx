@@ -23,7 +23,7 @@ import { useUiStore, type DynamicAspect, type DynamicCardStyleId, type DynamicMo
 import { dynamicVideoCopy } from '../brand/copy'
 import { createDynamicSession, type DynamicSession } from '../export/video/renderer'
 import { CARD_TEMPLATES, cardStyleById } from '../export/video/cardTemplates'
-import { canGenerateVideo } from '../export/video/capability'
+import { canGenerateVideo, canUseDynamicVideo } from '../export/video/capability'
 import { encodeMp4 } from '../export/video/mp4'
 import { DynamicAudioPlayer } from '../export/video/audioPlayer'
 import { renderToAudioBuffer } from '../export/audio'
@@ -59,9 +59,10 @@ export function DynamicFrameOverlay() {
   const effectiveCardStyle =
     cardStyle === 'custom' && customCardStyle ? customCardStyle : cardStyleById(cardStyle)
   /**
-   * adj1077：生成视频只开放给 Tauri 桌面壳 + WebCodecs；
-   * 网站/插件仍可预览，但按钮禁用并显示原因（不出现“点了没反应”）。
+   * adj1078：网站/插件整块不显示相机位（连预览也不并入）；桌面壳才显示。
+   * adj1077：桌面壳里生成视频还要 WebCodecs；缺 WebCodecs 时只保留预览并禁用生成。
    */
+  const dynamicVideoEnabled = canUseDynamicVideo()
   const videoExportEnabled = canGenerateVideo()
   const code = useDocStore((s) => s.code)
   const pageConfig = useDocStore((s) => s.pageConfig)
@@ -357,7 +358,7 @@ export function DynamicFrameOverlay() {
     setDynamicCamera({ on: false })
   }
 
-  if (!on || !rect) return null
+  if (!on || !rect || !dynamicVideoEnabled) return null
 
   const spec = ASPECTS.find((a) => a.id === aspect) ?? ASPECTS[0]
   const maxH = Math.min(rect.height * 0.66, rect.height - 150)

@@ -105,7 +105,7 @@ import { keySignatureOf } from '@ijipu/engine/index.ts'
 import { createCardTemplateZip, readCardTemplateZip } from '../src/export/video/cardTemplateZip.ts'
 import { DEFAULT_CARD_STYLE } from '../src/export/video/cardTemplates.ts'
 // adj1077：视频生成能力闸门（桌面壳 + WebCodecs；网站/插件不开放）
-import { canGenerateVideo } from '../src/export/video/capability.ts'
+import { canGenerateVideo, canUseDynamicVideo } from '../src/export/video/capability.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
@@ -33242,5 +33242,13 @@ function runDynamicCameraTests(): void {
       !canGenerateVideo(cap(true, false, true)) &&
       !canGenerateVideo(cap(true, true, false)),
     'tauri+encoders required',
+  )
+  check(
+    'adj1078 网站/插件连相机位都不显示（非桌面壳、无测试注入）',
+    !canUseDynamicVideo({ tauri: false, force: false }) &&
+      !canUseDynamicVideo({ tauri: false }) &&
+      canUseDynamicVideo({ tauri: true, force: false }) &&
+      canUseDynamicVideo({ tauri: false, force: true }),
+    'gate = tauri || testForce',
   )
 }

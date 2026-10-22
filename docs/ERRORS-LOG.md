@@ -10727,6 +10727,22 @@ smoke 五条含"来源切换成对"结构断言与负对照） |
   tsc / build / smoke / lint / encoding 全绿；桌面真实导出需在安装包/WebView2 里点一次。
 - **预防**：重资源导出统一走运行时能力闸门；UI 禁用 + 执行层守卫两道；预览与生成分离，网站/插件保留预览。
 
+## E-2026-505 网站/插件仍显示相机位预览（用户 2026-10-23 要求，adj1078）
+
+- **需求**：网站与 Obsidian 插件的相机位预览也一起隐藏；动态谱视频整块先只放桌面壳。
+- **解决**：
+  · `canUseDynamicVideo = tauri || 测试注入`；`canGenerateVideo = canUseDynamicVideo && WebCodecs`；
+  · 三条入口统一收口：导出面板「动态谱视频」不渲染、练习标记条「导出这段动态谱」不渲染、
+    `DynamicFrameOverlay` 在非桌面环境直接 `return null`（即使 store 里 on=true 也不显示）；
+  · 桌面壳保留相机位；桌面但缺 WebCodecs 时只禁用生成（上一轮行为）。
+- **测试注入**：`verify:app-ui` 在 `Page.navigate` 前注入 `window.__IJIPU_FORCE_DESKTOP__ = true`，
+  在 Chrome 里模拟桌面壳继续测相机位；真实网站/插件没有这个全局。smoke 用纯函数
+  `adj1078` 守住“非桌面壳一律不可用”。
+- **验证**：smoke 新增 `adj1078 网站/插件连相机位都不显示`；
+  `verify:app-ui` 的 `adj1077` 改为“桌面壳模拟里生成视频可用”，101 项全过；
+  tsc / build / smoke / lint / encoding 全绿。
+- **预防**：整块功能用 `canUseDynamicVideo` 收口，生成再用 WebCodecs 二次收口；测试注入只用于真浏览器测试。
+
 
 
 

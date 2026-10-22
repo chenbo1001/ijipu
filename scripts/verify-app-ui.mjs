@@ -249,6 +249,10 @@ async function main() {
     await c.ready
     await c.send('Page.enable')
     await c.send('Runtime.enable')
+    // adj1078：动态谱视频整块只在桌面壳显示；测试里注入一个全局模拟桌面壳，真实的网站/插件没有它
+    await c.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: 'window.__IJIPU_FORCE_DESKTOP__ = true',
+    })
     await c.send('Page.navigate', { url: `${origin}/app/` })
 
     console.log('[verify-app-ui] adj959：应用内手册的「目录」浮层（真点）')
@@ -1771,8 +1775,8 @@ async function main() {
           })()`,
         )
         check(
-          'adj1077 浏览器/插件里生成视频禁用并提示仅桌面版',
-          videoGate.disabled && videoGate.hint.includes('桌面'),
+          'adj1077 桌面壳模拟（测试注入）里生成视频可用',
+          !videoGate.disabled && videoGate.hint === '',
           JSON.stringify(videoGate),
         )
         // 卡片模板会持久化：先固定为 brand，避免上次选过纸面让片头像素断言不稳定
