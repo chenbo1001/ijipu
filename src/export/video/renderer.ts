@@ -26,6 +26,8 @@ import {
   rectsActiveAt,
   buildCameraTrack,
   cameraAt,
+  resolvePracticeRange,
+  slicePlaySequenceByRange,
   DYNAMIC_PRESETS,
   type DynamicPresetId,
   type PageConfig,
@@ -77,13 +79,30 @@ export async function createDynamicSession(
   presetId: DynamicPresetId,
   pageConfig: PageConfig,
   bpm?: number,
-  opts?: { followZoom?: number },
+  opts?: {
+    followZoom?: number
+    /** 只导某个标记段（起止音符 id）；缺省 = 整曲 */
+    range?: { startId: string; endId: string } | null
+  },
 ): Promise<DynamicSession> {
   const preset = DYNAMIC_PRESETS[presetId]
   const parsed = parseJps(code)
   const layout = layoutScore(parsed, pageConfig)
   const beat = bpm !== undefined && bpm > 0 ? bpm : inferBpm(parsed)
-  const seq = buildPlaySequence(parsed, layout, beat)
+  let seq = buildPlaySequence(parsed, layout, beat)
+
+  // 标记段：用与试听**完全相同**的口径切出这一段（时间归零），并跳过满宽片头
+  let skipIntro = false
+  if (opts?.range) {
+    const res = resolvePracticeRange(seq, opts.range.startId, opts.range.endId)
+    if (res.missing) throw new Error('标记段已失效（起止音符找不到），请重新标记')
+    const cand = res.candidates[res.pick] ?? res.candidates[0]
+    const sliced = cand ? slicePlaySequenceByRange(seq, cand.i0, cand.i1) : null
+    if (!sliced) throw new Error('标记段无效，请重新标记')
+    seq = sliced
+    skipIntro = true
+  }
+
   const track = buildRectTrack(seq, { noteSize: pageConfig.note_size })
   const view = buildFlowView(layout, track, pageConfig)
   if (view.rows.length === 0) throw new Error('这份谱没有可播放的音符')
@@ -92,6 +111,7 @@ export async function createDynamicSession(
     viewW: preset.width,
     viewH: preset.height,
     ...(opts?.followZoom !== undefined ? { followZoom: opts.followZoom } : {}),
+    ...(skipIntro ? { skipIntro: true } : {}),
   })
 
   // 字体没就绪就光栅化 ⇒ 字形回退，第一帧和后面不一样

@@ -33,6 +33,8 @@ export function DynamicVideoDialog() {
   // adj1033：把取景框叠到预览区上看（框不动、内容走）
   const setDynamicFrame = useUiStore((s) => s.setDynamicFrame)
   const closeModal = useUiStore((s) => s.closeModal)
+  /** adj1044：从试听「标记段」进来时只要这一段（null = 整曲） */
+  const range = useUiStore((s) => s.dynamicVideoRange)
   const [reloadTick, setReloadTick] = useState(0)
   const [status, setStatus] = useState<'busy' | 'ready' | 'error'>('busy')
   const [error, setError] = useState('')
@@ -86,7 +88,9 @@ export function DynamicVideoDialog() {
     cursorRef.current = 0
     lastTsRef.current = 0
     sessionRef.current = null
-    createDynamicSession(useDocStore.getState().code, preset, useDocStore.getState().pageConfig)
+    createDynamicSession(useDocStore.getState().code, preset, useDocStore.getState().pageConfig, undefined, {
+      range,
+    })
       .then((s) => {
         if (cancelled) return
         sessionRef.current = s
@@ -106,7 +110,7 @@ export function DynamicVideoDialog() {
     return () => {
       cancelled = true
     }
-  }, [preset, reloadTick, paint])
+  }, [preset, reloadTick, paint, range])
 
   // 卸载时收掉动画帧
   useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
@@ -282,11 +286,13 @@ export function DynamicVideoDialog() {
           <span className="dock-muted">
             {encoding
               ? phase
-              : totalMs > EXPORT_MAX_MS
-                ? fullLength
-                  ? '整首导出（画面与声音都完整，时长较长）'
-                  : dynamicVideoCopy.overCap
-                : dynamicVideoCopy.audioHint}
+              : range
+                ? '标记段导出（一遍，跳过片头）'
+                : totalMs > EXPORT_MAX_MS
+                  ? fullLength
+                    ? '整首导出（画面与声音都完整，时长较长）'
+                    : dynamicVideoCopy.overCap
+                  : dynamicVideoCopy.audioHint}
           </span>
           {error && !encoding && <span className="dock-error">✗ {error}</span>}
         </div>

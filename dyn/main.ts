@@ -9,7 +9,15 @@
  *
  * 打开：<http://localhost:5173/dyn/>（`?p=1x1` 切画布，`?t=12` 定位到第 12 秒）
  */
-import { defaultPageConfig, DYNAMIC_PRESETS, type DynamicPresetId } from '@ijipu/engine'
+import {
+  defaultPageConfig,
+  DYNAMIC_PRESETS,
+  parseJps,
+  layoutScore,
+  buildPlaySequence,
+  noteIdStringOf,
+  type DynamicPresetId,
+} from '@ijipu/engine'
 import { createDynamicSession, type DynamicSession } from '../src/export/video/renderer'
 import { encodeMp4, trimAudio } from '../src/export/video/mp4'
 
@@ -159,4 +167,25 @@ void rebuild(presetSel.value as DynamicPresetId).catch((e) => {
   const buf = await oac.startRendering()
   const cut = trimAudio(buf, 3000)
   return { before: buf.duration, after: cut.duration, channels: cut.numberOfChannels }
+}
+
+/** 调试：标记段导出——切出来的时长与"跳过满宽片头" */
+;(window as unknown as { __testRange: () => Promise<unknown> }).__testRange = async () => {
+  const code = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 |\n'
+  const r = parseJps(code)
+  const lay = layoutScore(r, defaultPageConfig)
+  const seq = buildPlaySequence(r, lay, 120)
+  const idAt = (i: number) => noteIdStringOf(seq.events[i].placed.id)
+  const s = await createDynamicSession(code, '9x16', defaultPageConfig, 120, {
+    range: { startId: idAt(4), endId: idAt(7) },
+  })
+  const oc = new OffscreenCanvas(s.width, s.height)
+  const ctx = oc.getContext('2d')!
+  const f0 = s.draw(ctx, 0)
+  return {
+    fullMs: Math.round(seq.totalMs),
+    cutMs: Math.round(s.totalMs),
+    zoomAt0: f0.frame.zoom,
+    introMs: s.camera.introMs,
+  }
 }

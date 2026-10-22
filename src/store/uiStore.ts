@@ -359,6 +359,12 @@ interface UiState {
   dynamicFrame: { on: boolean; aspect: DynamicAspect }
   setDynamicFrame: (patch: Partial<{ on: boolean; aspect: DynamicAspect }>) => void
   /**
+   * adj1044：从「试听 → 标记段」进入动态导出时的范围（起止音符 id）。
+   * `null` = 整曲。设了它，动态预览与导出都只处理这一段，并且**跳过满宽片头**。
+   */
+  dynamicVideoRange: { startId: string; endId: string } | null
+  setDynamicVideoRange: (r: { startId: string; endId: string } | null) => void
+  /**
    * adj905q（用户规格见 `docs/PREVIEW-DEBUG-BOUNDARIES.md`）：**预览可视调试**开关。
    * 开启后在预览里叠加「时值格 / 墨迹 / 段层」三套边界虚线（几何来自引擎
    * `engine/layout/guides.ts` 的 `computeDebugBounds`，预览层只消费不重算）。
@@ -722,6 +728,8 @@ export const useUiStore = create<UiState>()((set) => ({
   showGuides: loadBool(SHOW_GUIDES_KEY, true),
   // adj1033：动态谱取景框（L3 会话级，不落盘）
   dynamicFrame: { on: false, aspect: '9x16' },
+  // adj1044：标记段导出范围（L3 会话级）
+  dynamicVideoRange: null,
   // adj905q：预览可视调试 —— **L3 会话级**，刻意不读 localStorage（重开即恢复默认关）
   debugBounds: false,
   // adj965d（EP-13）：预览区 Alt 手势默认调**背景层**（L3 会话级，不落盘）
@@ -809,6 +817,7 @@ export const useUiStore = create<UiState>()((set) => ({
   setDebugBounds: (b) => set({ debugBounds: b }),
   // adj1033：取景框开关/比例（L3 会话级，不落盘）
   setDynamicFrame: (patch) => set((s) => ({ dynamicFrame: { ...s.dynamicFrame, ...patch } })),
+  setDynamicVideoRange: (r) => set({ dynamicVideoRange: r }),
   // adj965d：Alt 手势调哪一层（L3 会话级）——**不落盘**；默认背景层：
   // 需要摆位置的通常是垫进来的那张背景图（水印多为居中一个）
   setOverlayEditLayer: (l) => set({ overlayEditLayer: l }),

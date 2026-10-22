@@ -38,6 +38,9 @@ export function PracticeMarkBar(): React.JSX.Element {
   const selStop = useUiStore((s) => s.practiceSelStop)
   const setMarks = useUiStore((s) => s.setPracticeMarks)
   const setMarkId = useUiStore((s) => s.setPracticeMarkId)
+  // adj1044：整段导出动态谱
+  const openModal = useUiStore((s) => s.openModal)
+  const setDynamicVideoRange = useUiStore((s) => s.setDynamicVideoRange)
   const setPass = useUiStore((s) => s.setPracticeMarkPass)
   const setSel = useUiStore((s) => s.setPracticeSel)
   const addMark = useUiStore((s) => s.addPracticeMark)
@@ -170,6 +173,20 @@ export function PracticeMarkBar(): React.JSX.Element {
               </option>
             ))}
           </select>
+          <button
+            className="btn practice-btn practice-export-dyn"
+            onClick={() => {
+              const m = marks.find((x) => x.id === markId)
+              if (!m) return
+              // adj1044：把这一段交给动态谱导出（整曲入口会把它清掉）
+              setDynamicVideoRange({ startId: m.startId, endId: m.endId })
+              openModal('dynamicVideo')
+            }}
+            disabled={!marks.some((x) => x.id === markId)}
+            title="把当前标记段导出成动态谱视频（一遍，不含循环）"
+          >
+            导出这段
+          </button>
           <button
             className={`btn practice-btn${selStart ? ' is-on' : ''}`}
             onClick={() => setSel('start', activeNoteId)}

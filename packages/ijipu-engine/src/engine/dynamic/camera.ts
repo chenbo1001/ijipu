@@ -47,6 +47,13 @@ export interface CameraOptions {
   lineMs?: number
   panMs?: number
   safeHalf?: number
+  /**
+   * 跳过"满宽片头"（标记段导出用）。
+   *
+   * 片头满宽是给整曲开头展示曲名的；从中间某段开始导出时，先给一整页再猛地推回段首，
+   * 观众会晕 ⇒ 段导出直接以跟拍倍数起步。
+   */
+  skipIntro?: boolean
 }
 
 /** 相机某一刻的位置（页面坐标系 + 缩放） */
@@ -120,12 +127,14 @@ export function buildCameraTrack(
   const paper = PAPER_SIZE[cfg.page]
   const viewW = opts.viewW
   const viewH = opts.viewH
+  const skipIntro = opts.skipIntro === true
   const zoomFollow = opts.followZoom ?? CAMERA_FOLLOW_ZOOM
-  const introMs = opts.introMs ?? CAMERA_INTRO_MS
+  const introMs = skipIntro ? 0 : (opts.introMs ?? CAMERA_INTRO_MS)
   const lineMs = opts.lineMs ?? CAMERA_LINE_MS
   const panMs = opts.panMs ?? CAMERA_PAN_MS
 
-  const zoomFit = viewW / paper.width
+  // 段导出不演"满宽片头"：一上来就是跟拍倍数
+  const zoomFit = skipIntro ? zoomFollow : viewW / paper.width
   const firstT = view.rows.length > 0 ? view.rows[0].t0 : 0
 
   const rows: CameraRow[] = view.rows.map((r) => ({
@@ -232,7 +241,8 @@ export function cameraAt(cam: CameraTrack, t: number): CameraFrame {
 
   // 片头进度：0 = 整页满宽，1 = 完全进入跟拍。缩放、横移、纵移都按这一个 k 走，
   // 否则会出现"先跳过去再推近"（用户实测："刚开始播放时没有平移，色块不在视界里"）。
-  const introK = t <= cam.firstT ? 0 : ease((t - cam.firstT) / Math.max(1, cam.introMs))
+  const introK =
+    cam.introMs <= 0 ? 1 : t <= cam.firstT ? 0 : ease((t - cam.firstT) / Math.max(1, cam.introMs))
   const zoom = cam.zoomFit + (cam.zoomFollow - cam.zoomFit) * introK
 
   // 纵向：换行的平移从行边界开始（不提前离开上一行）
