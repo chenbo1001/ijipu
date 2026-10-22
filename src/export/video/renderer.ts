@@ -64,6 +64,10 @@ export interface DynamicSession {
   /** 每页一张已光栅化的画布 */
   pages: HTMLCanvasElement[]
   totalMs: number
+  /** 音乐结束（最后一拍结束） */
+  musicEndMs: number
+  /** 片尾卡开始：预览播到这里就淡出（导出继续到 totalMs，含完整片尾） */
+  cardStartMs: number
   width: number
   height: number
   /** 播放事件（给音轨离线渲染用，与画面同一份序列） */
@@ -360,6 +364,8 @@ export async function createDynamicSession(
     camera,
     pages,
     totalMs: cardStartMs + endCardMs,
+    musicEndMs,
+    cardStartMs,
     width: camera.viewW,
     height: camera.viewH,
     events: seq.events,

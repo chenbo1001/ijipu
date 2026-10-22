@@ -75,10 +75,8 @@ export function ExportPanel() {
   const exportBgImage = useUiStore((s) => s.exportBgImage)
   const setExportBg = useUiStore((s) => s.setExportBg)
   const setExportBgImage = useUiStore((s) => s.setExportBgImage)
-  // adj1031：动态视频预览入口（弹窗；先只验画面，编码随后）
-  const openModal = useUiStore((s) => s.openModal)
-  // adj1044：从导出面板进 = 整曲；把「标记段」范围清掉，免得悄悄只导一段
-  const setDynamicVideoRange = useUiStore((s) => s.setDynamicVideoRange)
+  // adj1065：动态谱视频入口 = 预览区相机位（不再开弹窗）；整曲入口清掉标记段范围
+  const setDynamicCamera = useUiStore((s) => s.setDynamicCamera)
   const previewSoften = useUiStore((s) => s.previewSoften)
   const setExportJob = useUiStore((s) => s.setExportJob)
   // adj626：PDF 走打印（与 Ctrl+P / 菜单「打印」同一条路：同一份页面 + 同一个默认文件名）
@@ -313,20 +311,19 @@ export function ExportPanel() {
           </button>
         ))}
       </div>
-      {/* adj1031：动态视频（预览 + 导出 MP4） */}
+      {/* adj1065：动态谱视频 = 预览区相机位（同一套预览/声音/生成视频） */}
       <div className="dock-field">
         <button
           type="button"
           className="btn"
           onClick={() => {
-            setDynamicVideoRange(null)
-            openModal('dynamicVideo')
+            setDynamicCamera({ on: true, range: null, mode: '3min' })
           }}
           disabled={busy !== null}
         >
-          动态视频预览
+          动态谱视频
         </button>
-        <span className="dock-muted">竖屏动谱（9:16 / 1:1 / 16:9）；可导出 MP4（带声音）</span>
+        <span className="dock-muted">在预览区打开相机位（9:16 / 1:1 / 16:9）；可生成视频</span>
       </div>
       {/* adj626：说明 PDF 两条路的差别（默认那条走系统打印对话框，故必须讲清怎么选） */}
       <div className="dock-muted">{exportCopy.pdfPrintHint}</div>

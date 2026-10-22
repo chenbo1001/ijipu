@@ -1705,6 +1705,66 @@ async function main() {
     // **实测无效**（量到 `matchMedia('(display-mode: standalone)').matches === false`），
     // 所以用本脚本既有的套路 —— `Page.addScriptToEvaluateOnNewDocument` 在**页面脚本之前**改掉
     // `matchMedia`（伪 `showOpenFilePicker` 用的也是这一招），再用 `remove` 撤回做负对照。
+    // ============ adj1065：动态谱视频 = 预览区相机位（真点入口 → 画布/控制条 → 关闭）============
+    const dynTab = await evalJs(
+      c,
+      `(() => {
+        const b = [...document.querySelectorAll('.topbar-btn')].find((el) => (el.getAttribute('title') || '').includes('导出'))
+        if (!b) return 'no-tab'
+        b.click()
+        return 'ok'
+      })()`,
+    )
+    check('adj1065 能找到顶栏「导出」按钮', dynTab === 'ok', dynTab)
+    if (dynTab === 'ok') {
+      await waitFor(c, `!!document.querySelector('.export-panel')`, '导出面板出现')
+      const dynClicked = await evalJs(
+        c,
+        `(() => {
+          const btn = [...document.querySelectorAll('.export-panel .btn')].find((b) => b.textContent.includes('动态谱视频'))
+          if (!btn) return 'no-btn'
+          btn.click()
+          return 'ok'
+        })()`,
+      )
+      check('adj1065 导出面板的「动态谱视频」能点开相机位', dynClicked === 'ok', dynClicked)
+      if (dynClicked === 'ok') {
+        await waitFor(c, `!!document.querySelector('.dyn-frame-layer')`, '相机位层出现')
+        await waitFor(c, `!!document.querySelector('.dyn-frame-controls')`, '相机位控制条出现')
+        // 画布由 createDynamicSession 建好并 paint(0) 后才有 1080×1920 的真实尺寸
+        await waitFor(
+          c,
+          `(() => { const c = document.querySelector('.dyn-frame-box canvas'); return !!c && c.width >= 1000 && c.height >= 1000 })()`,
+          '相机位动态画布（9:16）',
+          60,
+        )
+        const frame = await evalJs(
+          c,
+          `(() => {
+            const box = document.querySelector('.dyn-frame-box')
+            const cvs = box?.querySelector('canvas')
+            const ctl = document.querySelector('.dyn-frame-controls')
+            const b = box?.getBoundingClientRect()
+            const r = ctl?.getBoundingClientRect()
+            return {
+              w: cvs?.width ?? 0,
+              h: cvs?.height ?? 0,
+              controls: !!ctl,
+              outside: !!b && !!r && r.top >= b.bottom - 2
+            }
+          })()`,
+        )
+        check(
+          'adj1065 相机位里是动态视频画布，控制条在框外暗部',
+          frame.w >= 1000 && frame.h >= 1000 && frame.controls && frame.outside,
+          JSON.stringify(frame),
+        )
+        await evalJs(c, `document.querySelector('.dyn-frame-close')?.click(), true`)
+        await waitFor(c, `!document.querySelector('.dyn-frame-layer')`, '相机位关闭')
+        check('adj1065 关闭相机位后层消失', true)
+      }
+    }
+
     console.log('[verify-app-ui] adj977：已安装手机 PWA 的标题不重复应用名')
     {
       const boot = async (label) => {

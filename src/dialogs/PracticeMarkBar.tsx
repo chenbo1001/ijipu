@@ -38,9 +38,9 @@ export function PracticeMarkBar(): React.JSX.Element {
   const selStop = useUiStore((s) => s.practiceSelStop)
   const setMarks = useUiStore((s) => s.setPracticeMarks)
   const setMarkId = useUiStore((s) => s.setPracticeMarkId)
-  // adj1044：整段导出动态谱
-  const openModal = useUiStore((s) => s.openModal)
-  const setDynamicVideoRange = useUiStore((s) => s.setDynamicVideoRange)
+  // adj1065：整段动态谱 = 预览区相机位（关掉试听弹窗，否则挡住预览区）
+  const closeModal = useUiStore((s) => s.closeModal)
+  const setDynamicCamera = useUiStore((s) => s.setDynamicCamera)
   const setPass = useUiStore((s) => s.setPracticeMarkPass)
   const setSel = useUiStore((s) => s.setPracticeSel)
   const addMark = useUiStore((s) => s.addPracticeMark)
@@ -178,9 +178,13 @@ export function PracticeMarkBar(): React.JSX.Element {
             onClick={() => {
               const m = marks.find((x) => x.id === markId)
               if (!m) return
-              // adj1044：把这一段交给动态谱导出（整曲入口会把它清掉）
-              setDynamicVideoRange({ startId: m.startId, endId: m.endId })
-              openModal('dynamicVideo')
+              // adj1065：这一段交给预览区相机位；试听弹窗先关，才能看到取景
+              setDynamicCamera({
+                on: true,
+                range: { startId: m.startId, endId: m.endId },
+                mode: '3min',
+              })
+              closeModal()
             }}
             disabled={!marks.some((x) => x.id === markId)}
             title="把当前标记段导出成动态谱视频（一遍，不含循环）"

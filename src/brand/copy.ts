@@ -1220,7 +1220,7 @@ export const settingsCopy = {
  * 先集中在这里，别散进组件。
  */
 export const dynamicVideoCopy = {
-  title: '动态谱预览',
+  title: '动态谱视频',
   presetLabel: '画布',
   play: '播放',
   pause: '暂停',
@@ -1232,5 +1232,10 @@ export const dynamicVideoCopy = {
   audioHint: '带声音需要音色库（首次约 30MB）',
   overCap: '这首超过 3 分钟：导出前 3 分钟（含片头与片尾），画面与声音一起截断',
   capping: '正在把音乐裁到 3 分钟内（保留片头与片尾）…',
-  exportMp4: '导出 MP4',
+  exportMp4: '生成视频',
+  mode3min: '3 分钟',
+  modeFull: '整首',
+  rangeAll: '整曲',
+  rangeSegment: '标记段',
+  endCardOnly: '片尾仅导出',
 } as const

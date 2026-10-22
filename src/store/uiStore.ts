@@ -33,10 +33,22 @@ import type { OverlayLayer } from '@ijipu/engine'
 // adj957（用户裁定）：加上 `'cli'` —— 命令行手册改用应用内 `DocDialog` 打开
 // （原先只能靠"系统默认程序打开随包 MD"，Windows 默认没有 .md 关联程序 ⇒ 多半弹「如何打开」）
 // adj963（用户要求）：加上 `'saveAs'` —— 「保存到工作区」专用对话框（插件模式的保存主入口）
-export type ModalKind = 'samples' | 'shortcuts' | 'manual' | 'syntax' | 'cli' | 'donate' | 'voicePicker' | 'saveAs' | 'dynamicVideo'
+export type ModalKind = 'samples' | 'shortcuts' | 'manual' | 'syntax' | 'cli' | 'donate' | 'voicePicker' | 'saveAs'
 
-/** 动态谱取景框比例（与引擎 `DynamicPresetId` 同形；store 不引引擎类型，避免反向依赖） */
+/** 动态谱相机位比例（与引擎 `DynamicPresetId` 同形；store 不引引擎类型，避免反向依赖） */
 export type DynamicAspect = '9x16' | '1x1' | '16x9'
+
+/** adj1065：动态谱相机位的成片时长口径（3 分钟上限 / 整首） */
+export type DynamicMode = '3min' | 'full'
+
+/** adj1065：动态谱相机位的完整状态（预览、导出、标记段共用） */
+export interface DynamicCameraState {
+  on: boolean
+  aspect: DynamicAspect
+  /** 标记段范围；null = 整曲 */
+  range: { startId: string; endId: string } | null
+  mode: DynamicMode
+}
 
 /**
  * adj462：底部 dock 的面板（互斥，同一时间只显示一块）。
@@ -351,19 +363,14 @@ interface UiState {
   /** 预览页排版辅助虚线开关 */
   showGuides: boolean
   /**
-   * adj1033：**动态谱取景框**（L3 会话级）——叠在预览区上的"成片取景器"。
+   * adj1065（用户口径）：**动态谱相机位**（L3 会话级）——叠在预览区上的成片取景器。
    *
-   * 为什么放在 store：取景框挂在预览层（`PreviewPane`），入口在动态视频对话框里，
-   * 两者不在同一棵子树；再用 props 传就成了一条跨组件的"竖线"。
+   * 取代旧的「动态视频弹窗 + 预览区取景框」两条路：入口（导出菜单 / 试听标记段）
+   * 只设这一份状态，预览区里同一块相机画布负责画面、声音、进度和生成视频。
+   * 为什么放 store：相机位挂在预览层，入口在导出面板/试听弹窗，两者不在同一棵子树。
    */
-  dynamicFrame: { on: boolean; aspect: DynamicAspect }
-  setDynamicFrame: (patch: Partial<{ on: boolean; aspect: DynamicAspect }>) => void
-  /**
-   * adj1044：从「试听 → 标记段」进入动态导出时的范围（起止音符 id）。
-   * `null` = 整曲。设了它，动态预览与导出都只处理这一段，并且**跳过满宽片头**。
-   */
-  dynamicVideoRange: { startId: string; endId: string } | null
-  setDynamicVideoRange: (r: { startId: string; endId: string } | null) => void
+  dynamicCamera: DynamicCameraState
+  setDynamicCamera: (patch: Partial<DynamicCameraState>) => void
   /**
    * adj905q（用户规格见 `docs/PREVIEW-DEBUG-BOUNDARIES.md`）：**预览可视调试**开关。
    * 开启后在预览里叠加「时值格 / 墨迹 / 段层」三套边界虚线（几何来自引擎
@@ -726,10 +733,8 @@ export const useUiStore = create<UiState>()((set) => ({
   playbackStartId: null,
   playbackTick: 0,
   showGuides: loadBool(SHOW_GUIDES_KEY, true),
-  // adj1033：动态谱取景框（L3 会话级，不落盘）
-  dynamicFrame: { on: false, aspect: '9x16' },
-  // adj1044：标记段导出范围（L3 会话级）
-  dynamicVideoRange: null,
+  // adj1065：动态谱相机位（L3 会话级，不落盘）
+  dynamicCamera: { on: false, aspect: '9x16', range: null, mode: '3min' },
   // adj905q：预览可视调试 —— **L3 会话级**，刻意不读 localStorage（重开即恢复默认关）
   debugBounds: false,
   // adj965d（EP-13）：预览区 Alt 手势默认调**背景层**（L3 会话级，不落盘）
@@ -815,9 +820,8 @@ export const useUiStore = create<UiState>()((set) => ({
   bumpPlaybackTick: () => set((s) => ({ playbackTick: s.playbackTick + 1 })),
   // adj905q：预览可视调试开关（L3 会话级）——**不落盘**，重开应用即回到默认关
   setDebugBounds: (b) => set({ debugBounds: b }),
-  // adj1033：取景框开关/比例（L3 会话级，不落盘）
-  setDynamicFrame: (patch) => set((s) => ({ dynamicFrame: { ...s.dynamicFrame, ...patch } })),
-  setDynamicVideoRange: (r) => set({ dynamicVideoRange: r }),
+  // adj1065：动态谱相机位开关/比例/范围/时长（L3 会话级，不落盘）
+  setDynamicCamera: (patch) => set((s) => ({ dynamicCamera: { ...s.dynamicCamera, ...patch } })),
   // adj965d：Alt 手势调哪一层（L3 会话级）——**不落盘**；默认背景层：
   // 需要摆位置的通常是垫进来的那张背景图（水印多为居中一个）
   setOverlayEditLayer: (l) => set({ overlayEditLayer: l }),
