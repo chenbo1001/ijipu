@@ -104,7 +104,28 @@ function changedFiles() {
   return out
 }
 
+/**
+ * 仓库里**本来就存在**的工作区 CRLF 文件（历史遗留，index 是 LF）。
+ *
+ * 它们即使被编辑工具改过，也不是"这次把 LF 写成 CRLF"；必须排除，否则闸门会误伤。
+ * 名单与 `git ls-files --eol` 的 `w/crlf` 一致（2026-10-22 共 10 个）。
+ * 新增/正常文件仍按下面的规则判红——`smoke.mts` 那种原本 LF 被 shell 重写的不会被放过。
+ */
+const PREEXISTING_CRLF = new Set([
+  'gitPush.bat',
+  'packages/ijipu-engine/src/engine/duration.ts',
+  'packages/ijipu-engine/src/engine/format/format.ts',
+  'packages/ijipu-engine/src/engine/layout/metaAnchors.ts',
+  'packages/ijipu-engine/src/engine/parser/parser.ts',
+  'packages/ijipu-engine/src/engine/playback/synth.ts',
+  'scripts/verify-score-crop.mjs',
+  'src/brand/themes.ts',
+  'src/dialogs/ShortcutsDialog.tsx',
+  'src/styles/theme.css',
+])
+
 for (const rel of changedFiles()) {
+  if (PREEXISTING_CRLF.has(rel)) continue
   if (!EXTS.has(extname(rel))) continue
   let text
   try {
