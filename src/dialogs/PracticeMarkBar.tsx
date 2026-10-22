@@ -184,8 +184,9 @@ export function PracticeMarkBar(): React.JSX.Element {
             }}
             disabled={!marks.some((x) => x.id === markId)}
             title="把当前标记段导出成动态谱视频（一遍，不含循环）"
+            aria-label="导出这段动态谱"
           >
-            导出这段
+            <span aria-hidden="true">⇩</span>
           </button>
           <button
             className={`btn practice-btn${selStart ? ' is-on' : ''}`}
