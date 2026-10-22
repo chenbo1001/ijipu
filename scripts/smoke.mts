@@ -32999,24 +32999,24 @@ function runDynamicCameraTests(): void {
     )
 
     /**
-     * ⑧ 落地保持（用户 2026-10-22 建议）：球提前 `lead` 落到下一块，压扁保持 `dwell`；
-     * 拍点那一刻色块切过来时球还压在块上，然后才弹起。
-     * 500ms 一拍时：dwell=80ms、lead=25ms ⇒ 475ms 提前落、500ms 压到最扁、580ms 才起飞。
+     * ⑧ 落地保持（用户 2026-10-22）：**先去掉提前量**，球与色块**同时**落地；
+     * 落地后压扁保持 `dwell` 再回弹起飞。
+     * 500ms 一拍时：dwell=80ms、lead=0 ⇒ 500ms 落、500ms 压到最扁、580ms 才起飞。
      */
     const dwellAnchors2 = [
       { t0: 0, t1: 500, cx: 100, top: 200, x: 0, w: 100 },
       { t0: 500, t1: 1000, cx: 900, top: 200, x: 800, w: 100 },
       { t0: 1000, t1: 1500, cx: 500, top: 200, x: 400, w: 100 },
     ]
-    const dwellEarly = ballAt(dwellAnchors2, 480, 500, 0, 100, undefined, BALL_LANDING_TIMING)
+    const dwellBefore = ballAt(dwellAnchors2, 480, 500, 0, 100, undefined, BALL_LANDING_TIMING)
     const dwellBeat = ballAt(dwellAnchors2, 500, 500, 0, 100, undefined, BALL_LANDING_TIMING)
     const dwellHold = ballAt(dwellAnchors2, 550, 500, 0, 100, undefined, BALL_LANDING_TIMING)
     const dwellFly = ballAt(dwellAnchors2, 600, 500, 0, 100, undefined, BALL_LANDING_TIMING)
     check(
-      'adj1062 落地保持：提前 25ms 落到块上，拍点压到最扁，80ms 后才起飞',
-      dwellEarly !== null &&
-        Math.abs(dwellEarly.x - 900) < 1e-6 &&
-        (dwellEarly.squash ?? 0) > 0.1 &&
+      'adj1062 落地与色块同时：拍点 500ms 落、压到最扁，80ms 后才起飞',
+      dwellBefore !== null &&
+        dwellBefore.x < 899 &&
+        Math.abs(dwellBefore.squash ?? 0) < 1e-9 &&
         dwellBeat !== null &&
         Math.abs(dwellBeat.x - 900) < 1e-6 &&
         Math.abs((dwellBeat.squash ?? 0) - 1) < 1e-6 &&
@@ -33027,7 +33027,7 @@ function runDynamicCameraTests(): void {
         dwellFly !== null &&
         Math.abs(dwellFly.squash ?? 0) < 1e-9 &&
         dwellFly.x < 899,
-      `early=${dwellEarly?.x}/${dwellEarly?.squash} beat=${dwellBeat?.x}/${dwellBeat?.squash} hold=${dwellHold?.x}/${dwellHold?.squash} fly=${dwellFly?.x}/${dwellFly?.squash}`,
+      `before=${dwellBefore?.x}/${dwellBefore?.squash} beat=${dwellBeat?.x}/${dwellBeat?.squash} hold=${dwellHold?.x}/${dwellHold?.squash} fly=${dwellFly?.x}/${dwellFly?.squash}`,
     )
 
     /**

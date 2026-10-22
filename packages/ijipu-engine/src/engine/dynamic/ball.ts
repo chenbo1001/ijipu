@@ -101,20 +101,27 @@ export interface BallTiming {
   leadRatio?: number
   /** 提前落地的封顶（ms） */
   leadMaxMs?: number
+  /**
+   * adj1062（用户 2026-10-22 试调）：在"提前落地"的基础上**再晚多少拍**落地。
+   * 1/32 = 晚 1/32 拍；用于微调"球还是早了"的观感。若大于提前量，落点夹到拍点（不晚于拍点）。
+   */
+  landDelayBeats?: number
 }
 
 /**
  * 落地保持的**默认参数**：预览与出片共用这一份（用户 2026-10-22「对齐，最好用同一种方式」）。
  *
- * 取值：保持 = min(140ms, 一拍×16%)；提前 = min(48ms, 一拍×5%)。
- * 66bpm 下约"提前 45ms 落、保持 140ms"；120bpm 下约"提前 25ms、保持 80ms"。
- * 一拍至少留 65% 给飞行，不会因为保持太久而看起来"卡住"。
+ * 用户 2026-10-22 试调：**先去掉提前量**（`lead=0`、`landDelayBeats=0`）——
+ * 球在**拍点/色块切换那一刻**落地，随后保持 `dwell` 压扁回弹，再起飞。
+ * 66bpm 保持约 140ms、120bpm 约 80ms；一拍至少留 65% 给飞行。
+ * （上一版是 `lead=5%` 提前落；若"同时"仍显早/晚，改这两个数即可。）
  */
 export const BALL_LANDING_TIMING: BallTiming = {
   dwellRatio: 0.16,
   dwellMaxMs: 140,
-  leadRatio: 0.05,
-  leadMaxMs: 48,
+  leadRatio: 0,
+  leadMaxMs: 0,
+  landDelayBeats: 0,
 }
 
 /** 落地压扁的横向放大 / 纵向压缩比例（预览与出片同一套；`squash=1` 时为最大） */
@@ -436,10 +443,13 @@ export function ballAt(
         beatMs * (timing.leadRatio ?? BALL_LANDING_TIMING.leadRatio ?? 0),
       )
     : 0
+  /** adj1062（用户 2026-10-22 试调）：在提前量上再**晚**这么多拍落地 */
+  const landDelayMs = timing ? beatMs * (timing.landDelayBeats ?? 0) : 0
   const len = b1 - b0
   /** 短拍（小节末/前倚音补的界）按比例缩短，保证一拍里至少留 50% 给飞行 */
   const d = Math.min(dwellMs, len * 0.35)
-  const l = Math.min(leadMs, len * 0.15)
+  /** 实际提前量 = 提前量 − 再晚的时间；夹到 ≥0（最晚落在拍点，不晚于拍点） */
+  const l = Math.max(0, Math.min(leadMs, len * 0.15) - landDelayMs)
   const flightStart = b0 + d
   const flightEnd = b1 - l
   // ① 起点保持：还压在本拍色块上，压扁量 1 → 0（回弹）
