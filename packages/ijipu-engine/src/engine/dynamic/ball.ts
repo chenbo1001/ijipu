@@ -106,14 +106,14 @@ export interface BallTiming {
 /**
  * 落地保持的**默认参数**：预览与出片共用这一份（用户 2026-10-22「对齐，最好用同一种方式」）。
  *
- * 用户 2026-10-22 试调：**落地再晚 1/32 拍**（`landOffsetBeats = 1/32`）——
- * 球在拍点/色块切换之后约 1/32 拍才落到块上，随后保持 `dwell` 压扁回弹，再起飞。
- * 66bpm 约晚 28ms、120bpm 约晚 16ms；保持 66bpm 约 140ms、120bpm 约 80ms。
+ * 用户 2026-10-22 试调：**落地再晚 1/20 拍**（`landOffsetBeats = 1/20`）——
+ * 球在拍点/色块切换之后约 1/20 拍才落到块上，随后保持 `dwell` 压扁回弹，再起飞。
+ * 66bpm 约晚 45ms、120bpm 约晚 25ms；保持 66bpm 约 140ms、120bpm 约 80ms。
  */
 export const BALL_LANDING_TIMING: BallTiming = {
   dwellRatio: 0.16,
   dwellMaxMs: 140,
-  landOffsetBeats: 1 / 32,
+  landOffsetBeats: 1 / 20,
 }
 
 /** 落地压扁的横向放大 / 纵向压缩比例（预览与出片同一套；`squash=1` 时为最大） */

@@ -32999,9 +32999,9 @@ function runDynamicCameraTests(): void {
     )
 
     /**
-     * ⑧ 落地保持 + **晚 1/32 拍**（用户 2026-10-22 试调）：球在拍点之后约 1/32 拍才落到块上，
+     * ⑧ 落地保持 + **晚 1/20 拍**（用户 2026-10-22 试调）：球在拍点之后约 1/20 拍才落到块上，
      * 落地后压扁保持 `dwell` 再回弹起飞。
-     * 500ms 一拍时：dwell=80ms、offset=15.625ms ⇒ 515.625ms 落、515.625ms 压到最扁、595.625ms 才起飞。
+     * 500ms 一拍时：dwell=80ms、offset=25ms ⇒ 525ms 落、525ms 压到最扁、605ms 才起飞。
      */
     const dwellAnchors2 = [
       { t0: 0, t1: 500, cx: 100, top: 200, x: 0, w: 100 },
@@ -33009,11 +33009,11 @@ function runDynamicCameraTests(): void {
       { t0: 1000, t1: 1500, cx: 500, top: 200, x: 400, w: 100 },
     ]
     const dwellBefore = ballAt(dwellAnchors2, 480, 500, 0, 100, undefined, BALL_LANDING_TIMING)
-    const dwellLand = ballAt(dwellAnchors2, 515.625, 500, 0, 100, undefined, BALL_LANDING_TIMING)
+    const dwellLand = ballAt(dwellAnchors2, 525, 500, 0, 100, undefined, BALL_LANDING_TIMING)
     const dwellHold = ballAt(dwellAnchors2, 550, 500, 0, 100, undefined, BALL_LANDING_TIMING)
-    const dwellFly = ballAt(dwellAnchors2, 600, 500, 0, 100, undefined, BALL_LANDING_TIMING)
+    const dwellFly = ballAt(dwellAnchors2, 620, 500, 0, 100, undefined, BALL_LANDING_TIMING)
     check(
-      'adj1062 落地保持：晚 1/32 拍（515.625ms）落到块上，压到最扁，80ms 后才起飞',
+      'adj1062 落地保持：晚 1/20 拍（525ms）落到块上，压到最扁，80ms 后才起飞',
       dwellBefore !== null &&
         dwellBefore.x < 899 &&
         Math.abs(dwellBefore.squash ?? 0) < 1e-9 &&
