@@ -137,6 +137,12 @@ interface DocState {
    *  （重叠伴奏/第二声部 0.75），**预留给强弱单（渐强/渐弱）与力度记号**：后续算出逐音力度后，
    *  音频与色块轨道自动同步，无需再改数据结构 */
   playheadTrack: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number; instrument?: string; yTopMin?: number; yBottomMax?: number; playVoice?: 'accomp' | 'main' | 'second'; gain?: number }[]
+  /**
+   * adj1048：试听「拍网格」——跳跳球要按**拍**落，不能按音落（一拍可能有两个八分音符）。
+   * `playheadBeatMs` = 一拍多少毫秒；`playheadAnchorMs` = 第一拍对应的时刻。
+   */
+  playheadBeatMs: number
+  playheadAnchorMs: number
   /** adj262：多声部 voiceBlocks（纯曲部 yTop/yBottom/x）——播放时渲染竖向色框覆盖整列 */
   voiceBlocks: { x: number; yTop: number; yBottom: number; pageIndex: number; voices: number[] }[]
   /** adj291：布局后的「全局音符 index → 物理页 page」映射（自动分页一致）——光标联动定位音符 id.page */
@@ -176,6 +182,8 @@ interface DocState {
   setPlayheadTrack: (t: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number }[]) => void
   /** adj263：设置播放当前 ms（RAF 驱动，PreviewPane 渲染平滑色框） */
   setCurrentMs: (ms: number) => void
+  /** adj1048：拍网格（跳跳球按拍落，不按音落） */
+  setPlayheadBeat: (beatMs: number, anchorMs: number) => void
   jumpCursor: (pos: number, end?: number) => void
   undo: () => void
   redo: () => void
@@ -589,6 +597,9 @@ export const useDocStore = create<DocState>()((set, get) => ({
   activeNoteIds: [],
   currentMs: 0,
   playheadTrack: [],
+  // adj1048：拍网格（0 = 未知，跳跳球不画）
+  playheadBeatMs: 0,
+  playheadAnchorMs: 0,
   voiceBlocks: [],
   noteIndexToPage: null,
   cursorJump: null,
@@ -661,6 +672,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   setVoiceBlocks: (vbs) => set({ voiceBlocks: vbs }),
   setNoteIndexToPage: (m) => set({ noteIndexToPage: m }),
   setPlayheadTrack: (t) => set({ playheadTrack: t }),
+  setPlayheadBeat: (beatMs, anchorMs) => set({ playheadBeatMs: beatMs, playheadAnchorMs: anchorMs }),
   setCurrentMs: (ms) => set({ currentMs: ms }),
   jumpCursor: (pos, end) =>
     set((s) => ({

@@ -208,14 +208,15 @@ export async function createDynamicSession(
        */
       if (ball && active.length > 0) {
         const r = active.find((q) => q.playVoice !== 'accomp' && q.playVoice !== 'second') ?? active[0]
-        const dur = r.t1 - r.t0
-        if (dur > 0) {
-          const u = Math.min(1, Math.max(0, (t - r.t0) / dur))
-          const hop = 4 * u * (1 - u)
-          /**
-           * 用户口径：**弹起高度 = 色块高度**，**落点 = 色块上沿**。
-           * 球心再减去半径，让球的**底边**正好落在色块上沿（而不是球心压在线里）。
-           */
+        /**
+         * 按**拍网格**算相位（不是按音）：
+         * 一拍里可能有两个八分音符，按音算就会"每个音落一次"（用户实报）。
+         * 网格锚点 = 第一个音的时刻（谱面第一拍），之后每 beatMs 一拍。
+         */
+        const beatMs = 60000 / beat
+        if (beatMs > 0) {
+          const phase = (((t - camera.firstT) / beatMs) % 1 + 1) % 1
+          const hop = 4 * phase * (1 - phase)
           const rad = Math.max(4, noteSize * z * 0.26)
           const bx = (r.x + r.w / 2 - left) * z
           const baseY = (r.y - top) * z - rad

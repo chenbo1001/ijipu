@@ -1166,6 +1166,9 @@ function PlayheadDiag({ pageIndex, noteSize }: { pageIndex: number; noteSize: nu
 function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }) {
   const currentMs = useDocStore((s) => s.currentMs)
   const track = useDocStore((s) => s.playheadTrack)
+  // adj1048：拍网格（跳跳球按**拍**落，不按音落）
+  const beatMs = useDocStore((s) => s.playheadBeatMs)
+  const beatAnchorMs = useDocStore((s) => s.playheadAnchorMs)
 
   /**
    * adj895（用户要求）：**播放跟随滚动**——把色块保持在"安全区"内，而不是等它贴到视界边上。
@@ -1220,8 +1223,9 @@ function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }
     if (!pos) continue
     if (pos.playVoice !== undefined && pos.playVoice !== 'main') continue
     const seg = segs.find((s) => currentMs >= s.atMs && currentMs < s.atMs + s.durationMs)
-    if (!seg || seg.durationMs <= 0) continue
-    const u = Math.min(1, Math.max(0, (currentMs - seg.atMs) / seg.durationMs))
+    if (!seg || seg.durationMs <= 0 || beatMs <= 0) continue
+    // 相位按**拍网格**算：一拍里两个八分音符也只落一次
+    const u = (((currentMs - beatAnchorMs) / beatMs) % 1 + 1) % 1
     const hop = 4 * u * (1 - u)
     const rad = noteSize * 0.26
     const blockH = pos.yBottom - pos.yTop
