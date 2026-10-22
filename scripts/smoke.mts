@@ -32655,13 +32655,17 @@ function runDynamicCameraTests(): void {
     check('M4 最后一拍后球自由落体（y 变大）', !!fall0 && !!fall1 && fall1.y > fall0.y, `${fall0?.y} → ${fall1?.y}`)
     check('M4 落出画面后不再返回球', ballAt(anchors, 9000, 1000, 0, 100) === null)
 
-    // 跨行：下一拍在页面左边（下一行）时，本拍不许向左横飞（用户实报「还没到下一行就往左弹」）
+    // 一行最后一拍：**应该**飞向下一行行首（用户 2026-10-22 明确：往左弹是对的）
     const lineAnchors = [
       { t0: 0, t1: 1000, cx: 500, top: 200 },
       { t0: 1000, t1: 2000, cx: 80, top: 320 },
     ]
-    const mid = ballAt(lineAnchors, 500, 1000, 0, 100, { lineJump: 60 })
-    check('M4 跨行时不向左横飞（x 停在本行）', mid !== null && Math.abs(mid.x - 500) < 1e-9, String(mid?.x))
+    const mid = ballAt(lineAnchors, 500, 1000, 0, 100)
+    check(
+      'M4 一行最后一拍飞向下一行行首（x 取中点）',
+      mid !== null && Math.abs(mid.x - 290) < 1e-9,
+      String(mid?.x),
+    )
     const same = ballAt(
       [
         { t0: 0, t1: 1000, cx: 100, top: 200 },

@@ -35,9 +35,8 @@ export interface BallOptions {
   /**
    * 跨行判定阈值（页面坐标）：两次落点的纵向差超过它，就认为"换行了"。
    *
-   * 为什么要单独判：换行时下一拍的落点会跑到**页面左边**，如果照常横飞，
-   * 球会在本行还没播完时就向左滑走（用户实报「还没到下一行就往左弹」）。
-   * 换行时改为**本拍原地弹、到拍点直接出现在新行**（相机本来也在行边界切换，观感一致）。
+   * **默认关闭（Infinity）**：用户 2026-10-22 明确「一行的最后一拍就该往下一行行首飞」——
+   * 那是正常的抛体轨迹，不该截断。这个选项只留给将来"想让换行更硬"时用。
    */
   lineJump?: number
 }
@@ -106,8 +105,8 @@ export function ballAt(
   const a0 = anchorAt(anchors, b0) ?? nextAnchor(anchors, b0) ?? first
   const a1 = anchorAt(anchors, b1) ?? nextAnchor(anchors, b1) ?? a0
   const u = Math.max(0, Math.min(1, (t - b0) / beatMs))
-  // 跨行：不横飞（否则会在本行没播完时向左滑走），本拍在原地弹，下一拍直接落到新行
-  const lineJump = opts.lineJump ?? 60
+  // 跨行默认照常横飞（飞向下一行行首）；只有显式给了 lineJump 且超出时才截断
+  const lineJump = opts.lineJump ?? Number.POSITIVE_INFINITY
   const sameLine = Math.abs(a1.top - a0.top) <= lineJump
   const x = sameLine ? a0.cx + (a1.cx - a0.cx) * u : a0.cx
   const base = sameLine ? a0.top + (a1.top - a0.top) * u : a0.top

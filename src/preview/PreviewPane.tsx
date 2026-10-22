@@ -1234,9 +1234,7 @@ function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }
         })
       }
     }
-    const bp = ballAt(anchors, currentMs, beatMs, beatAnchorMs, noteSize * 3.2, {
-      lineJump: noteSize * 3,
-    })
+    const bp = ballAt(anchors, currentMs, beatMs, beatAnchorMs, noteSize * 3.2)
     if (bp) {
       const rad = noteSize * 0.28
       ball = (
