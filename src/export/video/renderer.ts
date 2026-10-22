@@ -138,6 +138,9 @@ export async function createDynamicSession(
   const ball = opts?.ball !== false
   const endCardMs = Math.max(0, opts?.endCardMs ?? 2500)
   const musicEndMs = track.endMs
+  /** 最后一拍之后留给"球自由落体出画"的时间（片尾卡在这之后才出） */
+  const fallMs = 600
+  const cardStartMs = musicEndMs + fallMs
   /**
    * 跳跳球的落点表：只取主声部（多声部各飞一颗会打架）。
    * 球是**抛体**：每拍落下一次，落点 = 那一拍开始时色块上沿的中心。
@@ -256,10 +259,10 @@ export async function createDynamicSession(
      * 片尾：音乐结束后定格最后一帧，淡入品牌落版（推本应用）。
      * 音频不额外补声——视频比音轨长，播放器就是自然静音。
      */
-    if (endCardMs > 0 && tMs >= musicEndMs) {
+    if (endCardMs > 0 && tMs >= cardStartMs) {
       const lastT = Math.max(0, musicEndMs - 1)
       paintCamera(cameraAt(camera, lastT), 1, lastT)
-      const k = Math.min(1, (tMs - musicEndMs) / 300)
+      const k = Math.min(1, (tMs - cardStartMs) / 300)
       paintEndCard(ctx, k)
       return { frame, following: false }
     }
@@ -302,7 +305,7 @@ export async function createDynamicSession(
   return {
     camera,
     pages,
-    totalMs: musicEndMs + endCardMs,
+    totalMs: cardStartMs + endCardMs,
     width: camera.viewW,
     height: camera.viewH,
     events: seq.events,

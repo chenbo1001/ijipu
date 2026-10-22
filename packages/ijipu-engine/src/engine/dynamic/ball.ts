@@ -42,6 +42,12 @@ function anchorAt(anchors: readonly BallAnchor[], t: number): BallAnchor | null 
   return found
 }
 
+/** 找 `t` 时刻之后**第一个开始**的落点（休止拍用：球照样往前跳，不许原地消失） */
+function nextAnchor(anchors: readonly BallAnchor[], t: number): BallAnchor | null {
+  for (const a of anchors) if (a.t0 > t) return a
+  return null
+}
+
 /**
  * 球在 `t` 时刻的位置。
  *
@@ -50,6 +56,13 @@ function anchorAt(anchors: readonly BallAnchor[], t: number): BallAnchor | null 
  * @param beatMs  一拍多少毫秒
  * @param anchorMs 第一拍的时刻
  * @param amp     抛物线最高点（页面坐标单位）——球"飞多高"
+ *
+ * ## 为什么会「时隐时现」「乱飞」（用户实报，2026-10-22）
+ *
+ * - **隐**：休止拍 / 音与音之间有空档时，`anchorAt` 找不到落点就返回 null ⇒ 球消失。
+ *   现在改成：这一拍没音就**朝下一个有音的位置跳**（球只出现一次、之后不再消失）。
+ * - **乱飞**：落点为空时回退到"上一个落点"，球会原地上下掉。同一条修法解决。
+ * - **收尾**：最后一个音结束后球**自由落体**（离开画面），这是用户要的。
  */
 export function ballAt(
   anchors: readonly BallAnchor[],
@@ -59,13 +72,23 @@ export function ballAt(
   amp: number,
 ): BallPos | null {
   if (beatMs <= 0 || anchors.length === 0) return null
+  const first = anchors[0]
+  const last = anchors[anchors.length - 1]
+  // 第一个音之前：不画球（片头标题卡阶段）
+  if (t < first.t0) return null
+  // 最后一个音结束之后：**自由落体**，球离开视界
+  if (t > last.t1) {
+    const dt = (t - last.t1) / 1000
+    const y = last.top + 0.5 * 2600 * dt * dt
+    if (y > 2400) return null // 已经落出画面（页面高约 842）
+    return { x: last.cx, y, u: 0 }
+  }
   const k = Math.floor((t - anchorMs) / beatMs)
   const b0 = anchorMs + k * beatMs
   const b1 = b0 + beatMs
-  const a0 = anchorAt(anchors, b0)
-  if (!a0) return null // 这一拍没在响（休止/片头）⇒ 不画球
-  // 下一拍的落点：如果那一拍没有音，就把球"抛回原地"（它会落回同一处）
-  const a1 = anchorAt(anchors, b1) ?? a0
+  // 这一拍没音 ⇒ 朝下一个有音的落点跳（不再返回 null，球不会消失）
+  const a0 = anchorAt(anchors, b0) ?? nextAnchor(anchors, b0) ?? first
+  const a1 = anchorAt(anchors, b1) ?? nextAnchor(anchors, b1) ?? a0
   const u = Math.max(0, Math.min(1, (t - b0) / beatMs))
   const x = a0.cx + (a1.cx - a0.cx) * u
   const base = a0.top + (a1.top - a0.top) * u

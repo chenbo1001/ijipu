@@ -32641,6 +32641,19 @@ function runDynamicCameraTests(): void {
       'M4 负对照：拍点高度严格低于拍中间',
       (at(0)?.y ?? 0) > (at(250)?.y ?? 0) && (at(1000)?.y ?? 0) > (at(750)?.y ?? 0),
     )
+
+    // 休止拍：这一拍没音，球也必须存在（朝下一个有音的落点跳），不许"时隐时现"
+    const gapAnchors = [
+      { t0: 0, t1: 400, cx: 100, top: 200 },
+      { t0: 800, t1: 1200, cx: 300, top: 200 },
+    ]
+    check('M4 休止拍球不消失（朝下一个落点跳）', ballAt(gapAnchors, 500, 400, 0, 100) !== null)
+
+    // 最后一拍结束后：自由落体（y 越来越大），直到落出画面才返回 null
+    const fall0 = ballAt(anchors, 2050, 1000, 0, 100)
+    const fall1 = ballAt(anchors, 2350, 1000, 0, 100)
+    check('M4 最后一拍后球自由落体（y 变大）', !!fall0 && !!fall1 && fall1.y > fall0.y, `${fall0?.y} → ${fall1?.y}`)
+    check('M4 落出画面后不再返回球', ballAt(anchors, 9000, 1000, 0, 100) === null)
   }
 
   // 带歌词的谱：歌词会填满行间空档，旧判定（按"行底含歌词"比间隙）会把相邻几行并成一行，
