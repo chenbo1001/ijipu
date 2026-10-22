@@ -84,7 +84,13 @@ interface Landing {
 function anchorAt(anchors: readonly BallAnchor[], t: number): BallAnchor | null {
   let found: BallAnchor | null = null
   for (const a of anchors) {
-    if (a.t0 <= t && t < a.t1) {
+    /**
+     * 0.5ms 容差（adj1062）：拍点与色块起点是**两条不同的浮点累加路径**算出来的
+     * （前者 `小节起点 + k×拍长`，后者 `passMs + groupStartMs + barStart + 拍位×拍长`），
+     * 可能差 1e-12 ms。严格 `<` / `<=` 会把"块刚好从这一拍开始"误判成空隙 ⇒ 球落空。
+     * 容差与拍界去重同一把尺子；最小拍长（32 分音符 @120）也有 62.5ms，不会把两拍并进来。
+     */
+    if (a.t0 <= t + 0.5 && t < a.t1) {
       /**
        * 取**最晚开始**的那条 —— 必须与色块同口径（`playheadPosIn` 也是取"最后一个 atMs ≤ t"）。
        * 取最早的话，连音/重叠时会落到**前一个**音上，看起来就是"球落在色块界外"（用户实报）。

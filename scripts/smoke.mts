@@ -32948,6 +32948,41 @@ function runDynamicCameraTests(): void {
     )
 
     /**
+     * ⑥ 前倚音：用户口径「色块总是在当前音符，球落的拍子开头总是在色块在音符的时候」。
+     * `Q: 1 3[2/] 2 |` 里 `3[2/]` 在第 2 拍 = **500ms**（主音 625ms）；
+     * 前倚音占本音符开头（adj623），色块必须从**拍点 500ms** 开始，不能挂在主音 625ms 上。
+     */
+    const graceSrc2 = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 3[2/] 2 |\n'
+    const graceR2 = parseJpsRaw(graceSrc2)
+    const graceL2 = layoutScore(graceR2, DUR_CFG)
+    const graceS2 = buildPlaySequence(graceR2, graceL2, 120)
+    const graceEvs2 = graceS2.events.filter(
+      (e) => !e.placed.segment && e.placed.token.kind === 'note' && e.placed.token.pitch === 3,
+    )
+    const graceFirst2 = graceEvs2[0]
+    check(
+      'adj1062 前倚音：色块挂在最早事件（拍点 500ms，不是主音 625ms）',
+      graceFirst2?.atMs === 500 && (graceFirst2?.playheadSegs?.length ?? 0) > 0,
+      `first=${graceFirst2?.atMs} segs=${graceFirst2?.playheadSegs?.length ?? 0} all=${graceEvs2.map((e) => e.atMs).join(',')}`,
+    )
+    const graceTrack2 = buildRectTrack(graceS2, { noteSize: DUR_CFG.note_size })
+    const graceRects2 = graceTrack2.rects
+      .filter((r) => r.playVoice === undefined || r.playVoice === 'main')
+      .map((r) => ({ t0: r.t0, t1: r.t1, cx: r.x + r.w / 2, top: r.y, x: r.x, w: r.w }))
+    const graceBlock2 = graceTrack2.rects.find(
+      (r) => Math.abs(r.t0 - 500) < 1 && (r.playVoice === undefined || r.playVoice === 'main'),
+    )
+    const graceBall2 = ballAt(graceRects2, 500, 500, 0, 100, graceS2.barStartsMs)
+    check(
+      'adj1062 前倚音：拍点 500ms 上球正好落在色块上（u=0，x=块中心）',
+      graceBlock2 !== undefined &&
+        graceBall2 !== null &&
+        Math.abs(graceBall2.u) < 1e-9 &&
+        Math.abs(graceBall2.x - (graceBlock2.x + graceBlock2.w / 2)) < 1e-6,
+      `block=${graceBlock2 ? `${Math.round(graceBlock2.t0)}+${Math.round(graceBlock2.w)}` : '无'} x=${graceBall2?.x} u=${graceBall2?.u}`,
+    )
+
+    /**
      * 真实谱（`人间一两风.jps`，含弱起 + `|:`/`:|` + 二房子 + `&ds`）的**连续性体检**：
      * ① 10ms 采样：球不许瞬移（旧实现会在小节起点一下跳几百 px）；
      * ② 球出现后不许消失（空隙里也要有球）；
@@ -33023,6 +33058,31 @@ function runDynamicCameraTests(): void {
         'adj1062 真实谱：每次换行的大跳都落在下一行第一个色块（不停在行末）',
         badLine.length === 0,
         badLine.join(' | '),
+      )
+      /**
+       * 用户口径：「球落的拍子开头，总是在色块在音符的时候」⇒ **每个拍点上该有一块在响**。
+       * 这条直接量色块轨道（不看球）：若某个拍点没有任何块，球就必然落空（除非不同步/空拍）。
+       */
+      const rectsMain1062 = rTrack.rects.filter(
+        (r) => r.playVoice === undefined || r.playVoice === 'main',
+      )
+      let noBlock1062 = 0
+      let noBlockAt1062 = ''
+      for (let i = 0; i + 1 < rBars.length; i++) {
+        const s = rBars[i]
+        const e = Math.min(rBars[i + 1], rLast)
+        if (e <= s + 0.5) continue
+        for (let b = s; b < e - 0.5; b += rBeat) {
+          if (!rectsMain1062.some((r) => r.t0 <= b + 0.5 && b < r.t1 - 0.5)) {
+            noBlock1062++
+            if (noBlockAt1062 === '') noBlockAt1062 = String(Math.round(b))
+          }
+        }
+      }
+      check(
+        'adj1062 真实谱：每个拍点都有主声部色块在响（球落点总在块上）',
+        noBlock1062 === 0,
+        `无块拍=${noBlock1062} 首个=${noBlockAt1062}`,
       )
     }
   }

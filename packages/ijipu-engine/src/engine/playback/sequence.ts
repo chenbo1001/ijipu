@@ -2625,9 +2625,14 @@ export function buildPlaySequence(
           // 否则 `prevBeat` 会从 0 起算、色块与已有段重叠。
           const blockEv = events[lastBlockEvIdx >= 0 ? lastBlockEvIdx : lastMainEvIdx]
           const prevBeat = (blockEv.playheadSegs ?? []).reduce((a, s) => a + s.beats, 0)
-          // adj451：并入的拍段力度取**发声事件（prev）的 gain**——合并后是一个 noteOn，
-          // 音频只可能用一个力度，色块轨道必须跟着它，二者不能各说各话。
-          const prevGain = prev.gain ?? 1
+          /**
+           * adj451/adj1062：并入的拍段力度取**承载色块的那个事件**的 gain（`blockEv`）。
+           *
+           * adj1062 起色块挂在"本音符最早事件"上——前倚音时它是**前倚音事件**（短倚音 gain=0.9），
+           * 不再是主音事件（gain=1）。拍段与承载者同源，`AQ1` 才成立；
+           * 音频仍由下面的 `prev`（主音事件）发声，色块轨只是视觉/预留力度提示。
+           */
+          const prevGain = blockEv.gain ?? 1
           blockEv.playheadSegs = (blockEv.playheadSegs ?? []).concat(
             buildPlayheadSegs(item.note!, prevBeat, rightEdgeByNoteIdx.get(item.note!.id.index), computeColorBounds(item.note!, pageByNoteIdx.get(item.note!.id.index)!, voiceBlockByNoteIdx, noteSize)).map((s) => ({ ...s, instrument: blockEv.instrument, playVoice: item.note!.playVoice, gain: prevGain })),
           )
@@ -2649,6 +2654,17 @@ export function buildPlaySequence(
           continue
         }
       }
+      /**
+       * adj1062（用户 2026-10-22 口径：「色块总是在当前音符，球落的拍子开头总是在色块在音符的时候」）：
+       * 色块要挂在**本音符最早的那个事件**上（前倚音 / 装饰短音 / 主音…），而不是主音事件上。
+       *
+       * 为什么：前倚音占本音符的**开头**（adj623），主音事件比拍点晚一个倚音组；色块挂在主音上
+       * ⇒ 拍点上根本没有块，球只能落在空处（用户看到"落点不在色块上"）。
+       * 挂到最早事件后，色块从 `atMs`（拍点）开始，正好是音符的起点。
+       *
+       * 注意：这个下标必须在 `emitSegmentEvents` 之后、本音符任何事件 push 之前取。
+       */
+      const noteFirstEvIdx = events.length
       if (gn && !gn.after && gracePitches.length > 0) {
         // adj623：前倚音一律从**本音符自己的拍点**起奏（占用本音符的时值），主音符顺延到倚音之后。
         let gAt = atMs
@@ -2665,10 +2681,9 @@ export function buildPlaySequence(
       // adj375：新事件开始 → 上一个事件已完成（不会再被连音合并）→ 结算它的呼吸静音
       settleBreath()
       // adj502/adj635/adj636：演奏型装饰与滑音的**前置短音**（装饰短音 / 滑音半音阶梯）
-      // ——首个短音顺便携带色块（色块要与"音符起奏"对齐，否则会晚一个短音的长度才亮）
       const playheadSegs = buildPlayheadSegs(item.note!, 0, rightEdgeByNoteIdx.get(item.note!.id.index), computeColorBounds(item.note!, pageByNoteIdx.get(item.note!.id.index)!, voiceBlockByNoteIdx, noteSize)).map((s) => ({ ...s, instrument, playVoice: item.note!.playVoice, gain }))
-      // adj503：色块挂在**首个前置短音**上（有装饰/滑音时）或主事件上（都没有）——记下来供连音合并追加拍段
-      const blockEvIdx = preSeq.length > 0 ? events.length : -1
+      // adj1062：色块挂在**本音符最早的事件**上（见上面 `noteFirstEvIdx` 的说明）
+      const blockEvIdx = noteFirstEvIdx
       {
         let at = mainAtMs
         for (let si = 0; si < preSeq.length; si++) {
@@ -2683,7 +2698,6 @@ export function buildPlaySequence(
             gain,
             playVoice: playRole,
             ...(hasExplicitInst ? { explicitInstrument: true } : {}),
-            ...(si === 0 ? { playheadSegs } : {}),
           })
           at += st.ms
         }
@@ -2701,9 +2715,19 @@ export function buildPlaySequence(
         ...(pitch && pitch !== placed.audioPitch ? { pitch } : {}),
         // adj434：`@乐器名@` 显式指定 → 播放端保留该音色（不被「试听音色」全局覆盖压掉）
         ...(hasExplicitInst ? { explicitInstrument: true } : {}),
-        // 有色块的话，色块已挂在首个前置短音上（见上）
-        ...(preSeq.length === 0 ? { playheadSegs } : {}),
       })
+      /**
+       * adj1062：**所有事件都 push 完再挂色块**——挂到本音符最早的事件上。
+       * （前倚音时最早事件在 `atMs`；没有倚音/装饰时就是主音事件，与旧口径一致。）
+       *
+       * 拍段的 `gain` 跟着**承载者**走：前倚音事件是短倚音（gain=0.9），主音事件是 1。
+       * 色块轨与承载者同源（`AQ1` 的判据），音频仍由主音事件发声，两者不矛盾。
+       */
+      const blockOwner = events[noteFirstEvIdx]
+      if (blockOwner) {
+        const ownerGain = blockOwner.gain ?? 1
+        blockOwner.playheadSegs = playheadSegs.map((s) => ({ ...s, gain: ownerGain }))
+      }
       // adj623：前倚音只吃**本音符自己的时值** ⇒ 无需再回改上一个主音符事件
       // （adj508 的旧口径会把上一个音符截短来给倚音腾出"拍点前"的时间，现已废弃）。
       // adj375：本音符是某 &hx 的作用对象 → 标记该事件待结算（连音合并会累加时值后再一起算）
