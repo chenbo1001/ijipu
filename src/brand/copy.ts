@@ -1230,6 +1230,7 @@ export const dynamicVideoCopy = {
   previewAudioFailed: '预览声音渲染失败，画面继续静音',
   empty: '这份谱没有可播放的音符',
   audioHint: '带声音需要音色库（首次约 30MB）',
-  overCap: '这首超过 3 分钟：只导出前 3 分钟，画面与声音一起截断',
+  overCap: '这首超过 3 分钟：导出前 3 分钟（含片头与片尾），画面与声音一起截断',
+  capping: '正在把音乐裁到 3 分钟内（保留片头与片尾）…',
   exportMp4: '导出 MP4',
 } as const

@@ -11,7 +11,7 @@
  *  3. **画布尺寸跟着预设走**（1080×1920 等），CSS 只做缩放 ⇒ 看到的就是将来视频的分辨率。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { DYNAMIC_PRESETS, type DynamicPresetId } from '@ijipu/engine'
+import { DYNAMIC_PRESETS, type DynamicPresetId, type PageConfig } from '@ijipu/engine'
 import { Modal } from '../ui/Modal'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
@@ -65,6 +65,8 @@ export function DynamicVideoDialog() {
   const seekRef = useRef<HTMLInputElement | null>(null)
   const metaRef = useRef<HTMLSpanElement | null>(null)
   const sessionRef = useRef<DynamicSession | null>(null)
+  /** 建这份会话时的源码/页面配置：3 分钟裁剪版必须用同一份，不能读编辑后还没重载的新代码 */
+  const sessionDocRef = useRef<{ code: string; pageConfig: PageConfig } | null>(null)
   const cursorRef = useRef(0)
   const lastTsRef = useRef(0)
   const rafRef = useRef(0)
@@ -90,6 +92,17 @@ export function DynamicVideoDialog() {
   }, [])
 
   /**
+   * 按某个会话渲染音轨（预览与导出共用；导出的 3 分钟裁剪版是**另一个会话**）。
+   * 音源由 `resolveHqBank` 统一取（首次下载并缓存）。
+   */
+  const renderAudioFor = useCallback(async (session: DynamicSession): Promise<AudioBuffer> => {
+    const lib = resolveActiveLibrary(useUiStore.getState().playbackHqLibrary).lib
+    const cache = (cacheRef.current ??= createHqCache())
+    const { bank } = await resolveHqBank(lib, cache, hostBankUrl(lib.id))
+    return renderToAudioBuffer(session.events, bank, { bpm: session.bpm })
+  }, [])
+
+  /**
    * 预览/导出共用的一份音轨：离线渲染整曲（含片头静音），只渲染一次。
    *
    * adj1063：预览原来完全没有声音（只跑 rAF）；现在按需渲染 AudioBuffer，
@@ -102,10 +115,7 @@ export function DynamicVideoDialog() {
     const s = sessionRef.current
     if (!s) return null
     const job = (async () => {
-      const lib = resolveActiveLibrary(useUiStore.getState().playbackHqLibrary).lib
-      const cache = (cacheRef.current ??= createHqCache())
-      const { bank } = await resolveHqBank(lib, cache, hostBankUrl(lib.id))
-      const buffer = await renderToAudioBuffer(s.events, bank, { bpm: s.bpm })
+      const buffer = await renderAudioFor(s)
       if (sessionRef.current !== s) return null
       audioBufferRef.current = buffer
       audioPlayerRef.current?.setBuffer(buffer)
@@ -117,7 +127,7 @@ export function DynamicVideoDialog() {
     } finally {
       audioLoadRef.current = null
     }
-  }, [])
+  }, [renderAudioFor])
 
   // 打开 / 换画布 / 点重新载入 ⇒ 重建一次会话
   useEffect(() => {
@@ -137,7 +147,9 @@ export function DynamicVideoDialog() {
     cursorRef.current = 0
     lastTsRef.current = 0
     sessionRef.current = null
-    createDynamicSession(useDocStore.getState().code, preset, useDocStore.getState().pageConfig, undefined, {
+    const doc = useDocStore.getState()
+    sessionDocRef.current = { code: doc.code, pageConfig: doc.pageConfig }
+    createDynamicSession(doc.code, preset, doc.pageConfig, undefined, {
       range,
     })
       .then((s) => {
@@ -268,21 +280,38 @@ export function DynamicVideoDialog() {
     const ac = new AbortController()
     abortRef.current = ac
     try {
+      /**
+       * adj1064：3 分钟模式**先重建一个含片头片尾的裁剪会话**，而不是在编码末尾硬截。
+       * 预览仍用完整会话（`s`）；只有导出这一份按上限裁音乐，片尾卡在 3 分钟内。
+       */
+      let exportSession = s
+      if (!fullLength && s.totalMs > EXPORT_MAX_MS) {
+        setPhase(dynamicVideoCopy.capping)
+        const doc = sessionDocRef.current ?? useDocStore.getState()
+        exportSession = await createDynamicSession(doc.code, preset, doc.pageConfig, undefined, {
+          range,
+          maxMs: EXPORT_MAX_MS,
+        })
+      }
       // 音轨：与画面同一份事件序列、同一个 bpm（离线渲染 ⇒ 长度确定，不随机器快慢）
-      // adj1063：与预览共用 `prepareAudio()`，只渲染一次；片头静音由 audio.ts 保证不被跳过
+      // adj1063：与预览共用 `prepareAudio()`，只渲染一次；裁剪版单独渲染（事件已裁到切点）
       let audio: AudioBuffer | null = null
       if (withAudio) {
         setPhase('正在渲染音轨…')
         try {
-          audio = await prepareAudio()
+          audio =
+            exportSession === s
+              ? await prepareAudio()
+              : await renderAudioFor(exportSession)
         } catch (e) {
           setError(`音轨没渲染成，本次导出无声：${e instanceof Error ? e.message : String(e)}`)
         }
       }
       setPhase('正在编码画面…')
-      const blob = await encodeMp4(s, {
+      const blob = await encodeMp4(exportSession, {
         fps: 30,
-        maxMs: fullLength ? undefined : EXPORT_MAX_MS,
+        // 会话已经按 3 分钟裁好（含片头片尾）；不要再让编码层截帧，否则会切掉片尾卡
+        maxMs: undefined,
         audio,
         signal: ac.signal,
         onProgress: setProgress,

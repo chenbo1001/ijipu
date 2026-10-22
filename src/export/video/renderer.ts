@@ -95,6 +95,12 @@ export async function createDynamicSession(
     leadInMs?: number
     /** 片尾时长（ms，默认 2500；0 = 不要片尾）。片尾是品牌落版，给个入口要人 */
     endCardMs?: number
+    /**
+     * **整片时长上限**（ms，含片头/片尾；adj1064）。超出时先把音乐裁短，
+     * 保证片头、片尾卡都在上限之内——不能像以前那样在 `encodeMp4` 末尾硬截，
+     * 那会把片尾卡截掉（用户实报：「不管 3 分钟、标记段还是整首，都要有片头片尾」）。
+     */
+    maxMs?: number
     /** 跳跳球（节拍指示，默认开） */
     ball?: boolean
   },
@@ -127,6 +133,40 @@ export async function createDynamicSession(
     }
   }
 
+  /**
+   * adj1064：整片上限（3 分钟）**先裁音乐、不裁片尾**。
+   *
+   * 以前 `maxMs` 只在 `encodeMp4` 末尾截帧：整首超过 180s 时，片尾卡在 180s 之后，
+   * 直接被切掉。这里按「上限 − 片尾 − 自由落体」反推音乐能用到哪，并优先切在
+   * **最后一个完整小节的起点**（避免切进小节中间）；剩余时间给片头/片尾。
+   * 音轨用同一份（已裁）事件序列，所以声音也在切点结束，不会在片尾卡里继续唱。
+   */
+  const endCardMs = Math.max(0, opts?.endCardMs ?? 2500)
+  const fallMs = 600
+  if (opts?.maxMs && opts.maxMs > 0) {
+    const contentCap = opts.maxMs - endCardMs - fallMs
+    if (seq.totalMs > contentCap) {
+      let cut = Math.max(0, contentCap)
+      for (const b of seq.barStartsMs ?? []) {
+        const abs = b + leadInMs
+        if (abs <= contentCap && abs > 0) cut = abs
+      }
+      const events = seq.events
+        .filter((e) => e.atMs < cut)
+        .map((e) => ({
+          ...e,
+          durationMs: Math.max(1, Math.min(e.durationMs, cut - e.atMs)),
+        }))
+      seq = {
+        ...seq,
+        events,
+        totalMs: cut,
+        // `barStartsMs` 是相对时间（出片时统一 +leadInMs），这里也按相对值过滤
+        barStartsMs: (seq.barStartsMs ?? []).filter((b) => b + leadInMs <= cut),
+      }
+    }
+  }
+
   const track = buildRectTrack(seq, { noteSize: pageConfig.note_size })
   const view = buildFlowView(layout, track, pageConfig)
   if (view.rows.length === 0) throw new Error('这份谱没有可播放的音符')
@@ -140,10 +180,7 @@ export async function createDynamicSession(
     ...(skipIntro ? { skipIntro: true } : {}),
   })
   const ball = opts?.ball !== false
-  const endCardMs = Math.max(0, opts?.endCardMs ?? 2500)
   const musicEndMs = track.endMs
-  /** 最后一拍之后留给"球自由落体出画"的时间（片尾卡在这之后才出） */
-  const fallMs = 600
   const cardStartMs = musicEndMs + fallMs
   /**
    * 跳跳球的落点表：只取主声部（多声部各飞一颗会打架）。
