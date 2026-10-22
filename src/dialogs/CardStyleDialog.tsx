@@ -20,6 +20,25 @@ import { useUiStore, type DynamicCardStyleId } from '../store/uiStore'
 
 const MAX_IMAGE_BYTES = 2_500_000
 
+/**
+ * 系统“另存为”对话框的最小类型（File System Access API）。
+ * 非 Chromium 内核 / 不支持该 API 的 WebView 会没有这个函数，走浏览器下载兜底。
+ */
+interface CardSaveHandle {
+  name: string
+  createWritable: () => Promise<{
+    write: (data: ArrayBuffer) => Promise<void>
+    close: () => Promise<void>
+  }>
+}
+interface CardSavePickerOptions {
+  suggestedName: string
+  types: { description: string; accept: Record<string, string[]> }[]
+}
+type CardSavePicker = (opts: CardSavePickerOptions) => Promise<CardSaveHandle>
+
+const CARD_ZIP_NAME = 'ijipu-card.zip'
+
 function cloneStyle(style: CardStyle): CardStyle {
   return {
     ...style,
@@ -149,17 +168,43 @@ export function CardStyleDialog() {
     reader.readAsDataURL(file)
   }
 
-  const exportZip = () => {
+  const exportZip = async () => {
     try {
       const bytes = createCardTemplateZip(draft)
       // TS 6 的 BlobPart 只认 ArrayBuffer；这里复制一份，避开 Uint8Array<ArrayBufferLike> 的类型冲突
       const buffer = new ArrayBuffer(bytes.byteLength)
       new Uint8Array(buffer).set(bytes)
+
+      // 优先系统“另存为”：让用户选目录和文件名，默认名已填好
+      const picker = (window as unknown as { showSaveFilePicker?: CardSavePicker })
+        .showSaveFilePicker
+      if (typeof picker === 'function') {
+        try {
+          const handle = await picker({
+            suggestedName: CARD_ZIP_NAME,
+            types: [{ description: 'iJipu 卡片模板', accept: { 'application/zip': ['.zip'] } }],
+          })
+          const writable = await handle.createWritable()
+          await writable.write(buffer)
+          await writable.close()
+          setZipError(false)
+          setZipMsg(`${cardStyleCopy.exported}：${handle.name}`)
+          return
+        } catch (e) {
+          if ((e as { name?: string } | null)?.name === 'AbortError') {
+            setZipError(false)
+            setZipMsg(cardStyleCopy.cancelled)
+            return
+          }
+          // 权限/不支持该 API → 退回浏览器下载（不能再谎报“已保存”）
+        }
+      }
+
       const blob = new Blob([buffer], { type: 'application/zip' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = 'ijipu-card.zip'
+      a.download = CARD_ZIP_NAME
       a.click()
       setTimeout(() => URL.revokeObjectURL(url), 1000)
       setZipError(false)

@@ -1290,6 +1290,7 @@ export const cardStyleCopy = {
   migrateHint: '导出会把当前设计 + 背景图打成一个 zip；导入后先看效果，再点“保存并应用”。',
   imported: '已导入模板，检查后保存',
   exported: '已导出 zip',
+  cancelled: '已取消',
   save: '保存并应用',
   cancel: '取消',
   reset: '从当前模板重来',

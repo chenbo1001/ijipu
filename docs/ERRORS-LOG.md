@@ -10699,6 +10699,17 @@ smoke 五条含"来源切换成对"结构断言与负对照） |
 - **预防**：`Modal fill` 的对话框一律「滚动区 + 固定底栏」，不要把长表单直接塞进 `.modal-body`；
   模板交换格式只产 `card.json + background.*`，图片不要塞进 JSON。
 
+## E-2026-503 导出模板直接下载，不能选保存位置/文件名（用户 2026-10-23 要求，adj1076）
+
+- **现象**：点「导出模板 zip」直接走 `<a download>`，用户不能选目录、也不能改文件名。
+- **解决**：优先调 **File System Access API** `showSaveFilePicker`：
+  · 默认文件名 `ijipu-card.zip`、类型 `application/zip`，系统“另存为”里可改目录/名字；
+  · `createWritable()` 写入后关闭；用户取消（`AbortError`）提示“已取消”，不报错；
+  · 浏览器/WebView 不支持该 API 或权限失败时，退回原来的下载（仍用默认名），不谎报已保存。
+- **验证**：tsc / build / verify:app-ui（100 项）/ smoke（zip 往返）/ lint / encoding 全绿；
+  系统保存对话框需真机点一次确认（无 API 的环境会退回下载，这是预期兜底）。
+- **预防**：凡是“导出文件”优先系统保存对话框 + 默认文件名；不支持的环境才下载兜底，并在注释写明。
+
 
 
 
