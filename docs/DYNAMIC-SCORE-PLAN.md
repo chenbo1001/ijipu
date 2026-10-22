@@ -10,6 +10,10 @@
 >
 > **状态**：**M1 已完成**（2026-10-22，`adj1028`–`adj1042`）。开工时按 `git log` 取 `adj` 号。
 >
+> **开发模式（adj1079，2026-10-23 用户口径）**：`npm run dev` 下动态谱视频入口/相机位/生成默认开放
+> （生成仍要求浏览器 WebCodecs）；生产网站/插件仍隐藏（整块桌面专属）；插件宿主桥接不开放。
+> 需要 Tauri 原生命令的测试用 `tauri dev`；环境闸门统一走 `brand/env.ts` 的 `isDevBuild()`。
+>
 > **相关文档**：`docs/APP-PROMO-VIDEO.md`（宣传片脚本，非本功能）、`docs/REQUIREMENTS.md`
 
 ---

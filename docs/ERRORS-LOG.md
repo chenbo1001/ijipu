@@ -10744,6 +10744,20 @@ smoke 五条含"来源切换成对"结构断言与负对照） |
   tsc / build / smoke / lint / encoding 全绿。
 - **预防**：整块功能用 `canUseDynamicVideo` 收口，生成再用 WebCodecs 二次收口；测试注入只用于真浏览器测试。
 
+## E-2026-506 dev 模式下动态谱视频也被隐藏，无法真浏览器测试（用户 2026-10-23 要求，adj1079）
+
+- **现象**：`npm run dev` 是纯 Web（`isTauriShell()` 为 false），动态谱视频整块被产品边界隐藏，
+  开发时看不到入口/相机位，没法在真浏览器里测试。
+- **解决**：
+  · `brand/env.ts` 新增 `isDevBuild()`（只认 Vite `import.meta.env.DEV`）；
+  · `canUseDynamicVideo` 增加 `dev` 档：`tauri || 测试注入 || dev`；`canGenerateVideo` 仍要求 WebCodecs；
+  · prod（网站/插件嵌入版）`DEV=false`，行为不变；dev 下入口/相机位/生成全开；
+  · 插件宿主桥接（host bridge）不在此闸门内，保持只由宿主提供；
+  · 需要 Tauri 原生命令的功能（如音色库“发现”扫描）仍用 `tauri dev` 测（`isDevBuild` 只管 UI 是否开放）。
+- **验证**：smoke 新增 `adj1079`（dev 开 / prod 关 / WebCodecs 组成）；生产构建、网站、插件行为不变；
+  `tsc/lint/build/smoke/verify:app-ui/verify-site` 全绿。
+- **预防**：环境隐藏的 UI 功能必须有 dev 开放通道（`isDevBuild`）；唯一例外是插件宿主交互；写进 AGENTS。
+
 
 
 

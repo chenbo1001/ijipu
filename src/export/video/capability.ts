@@ -8,18 +8,22 @@
  *    否则只保留预览、禁用生成。
  *
  * 两档能力：
- *  - `canUseDynamicVideo`：Tauri 桌面壳（或测试注入）→ 显示入口/相机位；
+ *  - `canUseDynamicVideo`：Tauri 桌面壳、测试注入、或 Vite 开发模式（dev 功能全开）→ 显示入口/相机位；
  *  - `canGenerateVideo`：在 `canUseDynamicVideo` 之上再加 WebCodecs 检查。
  *
  * `__IJIPU_FORCE_DESKTOP__` 只给 `verify:app-ui` 在 Chrome 里模拟桌面壳用；真实网站/插件不会注入。
+ * `isDevBuild()` 只认 Vite 的 `import.meta.env.DEV`：`npm run dev` 下动态谱视频可用（含生成，
+ * 前提是浏览器支持 WebCodecs）；生产网站/插件仍隐藏。插件宿主桥接（host bridge）不在本闸门内。
  */
-import { isTauriShell } from '../../brand/env'
+import { isDevBuild, isTauriShell } from '../../brand/env'
 
 export interface DynamicVideoCapability {
   /** 是否 Tauri 桌面壳（网站、Obsidian 插件 iframe 都是 false） */
   tauri: boolean
   /** 仅测试注入：在 Chrome 里模拟桌面壳 */
   force?: boolean
+  /** Vite 开发模式（`npm run dev`）：功能全开，便于真浏览器测试 */
+  dev?: boolean
 }
 
 export interface VideoCapability extends DynamicVideoCapability {
@@ -33,15 +37,20 @@ function testForce(): boolean {
 }
 
 export function canUseDynamicVideo(
-  cap: DynamicVideoCapability = { tauri: isTauriShell(), force: testForce() },
+  cap: DynamicVideoCapability = {
+    tauri: isTauriShell(),
+    force: testForce(),
+    dev: isDevBuild(),
+  },
 ): boolean {
-  return cap.tauri || cap.force === true
+  return cap.tauri || cap.force === true || cap.dev === true
 }
 
 export function detectVideoCapability(): VideoCapability {
   return {
     tauri: isTauriShell(),
     force: testForce(),
+    dev: isDevBuild(),
     videoEncoder: typeof VideoEncoder !== 'undefined',
     audioEncoder: typeof AudioEncoder !== 'undefined',
   }

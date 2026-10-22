@@ -67,3 +67,7 @@
    **浮层不要靠正文容器做事件委托**。
 6. **做事件委托前先核对 DOM 关系**：被委托的元素必须是目标元素的**祖先**（Portal、`position: fixed`
    浮层、兄弟节点都会让委托静默失效）；跨组件时还要看上游有没有 `stopPropagation` 掐断原生化冒泡。
+7. **dev 模式功能全开**（用户 2026-10-23 口径）：`npm run dev`（`isDevBuild()`）下，因产品边界隐藏的 UI 功能
+   **必须开放**（动态谱视频等），方便真浏览器测试；**唯一例外是必须由插件宿主提供的能力**（host bridge）。
+   需要 Tauri 原生命令的功能（如音色库“发现”扫描）用 `tauri dev` 测。生产网站/插件仍按边界隐藏；
+   环境闸门统一走 `brand/env.ts` 的 `isTauriShell()` / `isHostFrame()` / `isDevBuild()`，不许各写一套。

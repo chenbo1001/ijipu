@@ -33245,10 +33245,23 @@ function runDynamicCameraTests(): void {
   )
   check(
     'adj1078 网站/插件连相机位都不显示（非桌面壳、无测试注入）',
-    !canUseDynamicVideo({ tauri: false, force: false }) &&
+    !canUseDynamicVideo({ tauri: false, force: false, dev: false }) &&
       !canUseDynamicVideo({ tauri: false }) &&
       canUseDynamicVideo({ tauri: true, force: false }) &&
       canUseDynamicVideo({ tauri: false, force: true }),
     'gate = tauri || testForce',
+  )
+  check(
+    'adj1079 开发模式（dev）动态谱视频全开，生产网站/插件仍隐藏',
+    canUseDynamicVideo({ tauri: false, force: false, dev: true }) &&
+      canGenerateVideo({
+        tauri: false,
+        force: false,
+        dev: true,
+        videoEncoder: true,
+        audioEncoder: true,
+      }) &&
+      !canUseDynamicVideo({ tauri: false, force: false, dev: false }),
+    'dev gates',
   )
 }

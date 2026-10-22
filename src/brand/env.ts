@@ -105,6 +105,20 @@ export function isTauriShell(): boolean {
 export const isDesktopShell = isTauriShell
 
 /**
+ * 是否 **Vite 开发模式**（`npm run dev`，含浏览器开发与 Tauri 的 dev）。
+ *
+ * adj1079（用户口径）：**dev 下功能全开，唯一例外是必须由插件宿主提供的能力**
+ * （Obsidian host bridge）。环境隐藏的 UI 功能在 dev 下要能看见、能点，否则没法真浏览器测试；
+ * 生产构建（网站 / 插件嵌入版）仍按产品边界隐藏。
+ *
+ * 注意：需要 Tauri 原生通道的功能（如音色库“发现”扫描）在**浏览器 dev** 里仍调不到原生命令，
+ * 要测那类功能请用 `tauri dev`（`isTauriShell()` 为真）；本函数只管“UI 是否开放”。
+ */
+export function isDevBuild(): boolean {
+  return import.meta.env.DEV === true
+}
+
+/**
  * 调一条 Tauri 命令（**不在桌面壳里 ⇒ 抛错**，由调用方决定怎么降级）。
  *
  * 集中在这里的好处：不必每处再写一遍 `__TAURI__` 的类型体操，
