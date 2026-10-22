@@ -32727,6 +32727,129 @@ function runDynamicCameraTests(): void {
     )
   }
 
+  /**
+   * adj1061（用户 2026-10-22 实报「反复之后球落点漂移、乱跳」）：
+   * `barStartsMs` 必须是**展开后逐遍**的（第二遍 = 该遍偏移 + 源码小节起点）。
+   *
+   * 夹具：弱起 1 拍 + 3 拍的完整小节 + `|: 2 3 4 5/ | 2 3 4 5 :|`
+   * ——反复段第一小节 **3.5 拍**，所以第二遍第二节的小节起点（第 15 拍）离
+   * "源码小节起点"不是整数拍；+ 反复后的 2 拍收尾。
+   * 旧口径（源码小节线）只能给到 6750ms（第 13.5 拍），拍网格在 7500ms 处落在半拍上，
+   * 正是"球落早了 / 乱跳"的来源。
+   */
+  {
+    const H1061 = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+    const FIX1061 = `${H1061}Q: (5/ 6/) | 1 2 3 |: 2 3 4 5/ | 2 3 4 5 :| 6 7 |\n`
+    const r1061 = parseJpsRaw(FIX1061)
+    const l1061 = layoutScore(r1061, DUR_CFG)
+    const s1061 = buildPlaySequence(r1061, l1061, 120)
+    const bars1061 = s1061.barStartsMs ?? []
+    // 第二遍的起点（passMarks 里 pass=2 那一条）与"该遍第一个音"
+    const pass2At = s1061.passMarks?.find((m) => m.pass === 2)?.atMs ?? NaN
+    const pass2First = s1061.events.find((e) => !e.placed.segment && e.atMs >= pass2At - 0.5)?.atMs ?? NaN
+    check(
+      'adj1061 第二遍第一个小节的起点 = 该遍第一个音的时刻',
+      Number.isFinite(pass2At) && bars1061.some((s) => Math.abs(s - pass2First) <= 0.5),
+      `pass2@${pass2At} first=${pass2First} bars=${bars1061.map((s) => Math.round(s)).join(',')}`,
+    )
+    /**
+     * 直接按用户验收口径**逐小节**比一遍（不能只查"包含"）：
+     * 不做 pass 偏移时，第二遍首小节的时间可能与源码末尾的小节撞值而假绿；
+     * 按序列比就能在"该遍第二节"处判红（旧网格 6750 vs 7500）。
+     */
+    const pass2Bars1061 = bars1061.filter((s) => s >= pass2At - 0.5 && s < s1061.totalMs - 0.5)
+    const pass2Firsts1061 = [
+      ...new Set(
+        s1061.events
+          .filter((e) => !e.placed.segment && Math.abs(e.placed.beatPos) < 1e-6 && e.atMs >= pass2At - 0.5)
+          .map((e) => e.atMs),
+      ),
+    ]
+    check(
+      'adj1061 第二遍的每个小节起点按序列等于该遍各小节第一个音的时刻',
+      pass2Bars1061.length === pass2Firsts1061.length &&
+        pass2Bars1061.every((s, k) => Math.abs(s - pass2Firsts1061[k]) <= 0.5),
+      `bars=${pass2Bars1061.map((s) => Math.round(s)).join(',')} firsts=${pass2Firsts1061.map((s) => Math.round(s)).join(',')}`,
+    )
+    /**
+     * 负对照：把 `|:`/`:|` 去掉再建一次序列 —— 它的 `barStartsMs` 就是**源码小节起点**
+     * （= 旧实现直接返回的那个数组）。第二遍第二节（7500ms）不在里面 ⇒ 旧网格必然错位。
+     */
+    const SRC_ONLY1061 = `${H1061}Q: (5/ 6/) | 1 2 3 | 2 3 4 5/ | 2 3 4 5 | 6 7 |\n`
+    const rSrc1061 = parseJpsRaw(SRC_ONLY1061)
+    const legacyBars1061 =
+      buildPlaySequence(rSrc1061, layoutScore(rSrc1061, DUR_CFG), 120).barStartsMs ?? []
+    const pass2Bar2Ms = 7500 // 第 15 拍 @120bpm
+    check(
+      'adj1061 负对照：源码小节起点里没有第二遍第二节（不做 pass 偏移 ⇒ 网格错位）',
+      !legacyBars1061.some((s) => Math.abs(s - pass2Bar2Ms) <= 0.5),
+      `bars=${legacyBars1061.map((s) => Math.round(s)).join(',')}`,
+    )
+    // 行为级：新网格正落在拍点（u=0）；旧网格落在半拍上（u≈0.5，球落早了）
+    const tr1061 = buildRectTrack(s1061, { noteSize: 18 })
+    const an1061 = tr1061.rects
+      .filter((r) => r.playVoice === undefined || r.playVoice === 'main')
+      .map((r) => ({ t0: r.t0, t1: r.t1, cx: r.x + r.w / 2, top: r.y, x: r.x, w: r.w }))
+    const ballNew1061 = ballAt(an1061, pass2Bar2Ms, 500, 0, 100, bars1061)
+    const ballOld1061 = ballAt(an1061, pass2Bar2Ms, 500, 0, 100, legacyBars1061)
+    check(
+      'adj1061 第二遍第二节：新网格正落在拍点（u=0）',
+      ballNew1061 !== null && Math.abs(ballNew1061.u) < 1e-9,
+      `u=${ballNew1061?.u}`,
+    )
+    check(
+      'adj1061 负对照：旧网格在第二遍第二节落点错半拍（u≈0.5）',
+      ballOld1061 !== null && Math.abs(ballOld1061.u - 0.5) < 1e-6,
+      `u=${ballOld1061?.u}`,
+    )
+
+    /**
+     * 多 Q 行：主旋律按 Q 行分成多个 group。旧实现直接取 `barStartMsInGroup[0]`，
+     * **只覆盖第一行**（真谱实测整曲只记到第一行的 6 个小节）⇒ 第二行起球只能沿用
+     * 上一小节的网格。这条断言守住"每个 group 的小节起点都要记"。
+     */
+    const rMulti1061 = parseJpsRaw(`${H1061}Q: 1 2 3 4 | 5 6 7 1 |\nQ: 2 3 4 5 | 6 7 1 2 |\n`)
+    const sMulti1061 = buildPlaySequence(rMulti1061, layoutScore(rMulti1061, DUR_CFG), 120)
+    const barsMulti1061 = sMulti1061.barStartsMs ?? []
+    check(
+      'adj1061 多 Q 行：第二行起的小节起点也在数组里（不只是 group 0）',
+      [0, 2000, 4000, 6000].every((t) => barsMulti1061.some((s) => Math.abs(s - t) <= 0.5)),
+      `bars=${barsMulti1061.map((s) => Math.round(s)).join(',')}`,
+    )
+
+    /**
+     * 切片两条路也一样要重基（用户要求：**不能返回未平移的数组**）：
+     * ① 起点切片（从某个音符起播）：基点在第一节第 2 拍（1000ms）⇒ 首条为负值（保住这一小节的相位）；
+     * ② 练习段切片（`slicePlaySequenceByRange`）：切第二遍前两小节 ⇒ 小节起点从 0 起。
+     */
+    const startNote1061 = s1061.events.find((e) => !e.placed.segment && Math.abs(e.atMs - 1000) < 0.5)
+    const fromNote1061 = startNote1061
+      ? buildPlaySequence(r1061, l1061, 120, String(startNote1061.placed.id.index))
+      : null
+    const fb1061 = fromNote1061?.barStartsMs ?? []
+    check(
+      'adj1061 起点切片：小节起点跟着重基（首条 ≤ 0，且没有未平移的绝对时刻）',
+      fromNote1061 !== null &&
+        fb1061.length > 0 &&
+        fb1061[0] <= 0.5 &&
+        fb1061.every((s) => s <= fromNote1061.totalMs + 0.5),
+      `bars=${fb1061.map((s) => Math.round(s)).join(',')} total=${Math.round(fromNote1061?.totalMs ?? -1)}`,
+    )
+    const i0sp = s1061.events.findIndex((e) => !e.placed.segment && Math.abs(e.atMs - 5750) < 0.5)
+    const i1sp = s1061.events.findIndex((e) => !e.placed.segment && Math.abs(e.atMs - 7500) < 0.5) - 1
+    const practice1061 = i0sp >= 0 && i1sp > i0sp ? slicePlaySequenceByRange(s1061, i0sp, i1sp) : null
+    const pb1061 = practice1061?.barStartsMs ?? []
+    check(
+      'adj1061 练习段切片：小节起点重基到 0 起（首条 0，第二条 = 下一小节）',
+      practice1061 !== null &&
+        pb1061.length >= 2 &&
+        Math.abs(pb1061[0]) <= 0.5 &&
+        Math.abs(pb1061[1] - 1750) <= 0.5 &&
+        pb1061.every((s) => s <= practice1061.rangeMs + 0.5),
+      `bars=${pb1061.map((s) => Math.round(s)).join(',')} range=${Math.round(practice1061?.rangeMs ?? -1)}`,
+    )
+  }
+
   // 带歌词的谱：歌词会填满行间空档，旧判定（按"行底含歌词"比间隙）会把相邻几行并成一行，
   // 相机于是对到整块中间、第一行色块掉出框（用户实报）。这里用 6 行 Q+C 锁住。
   {

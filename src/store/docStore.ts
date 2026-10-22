@@ -143,7 +143,7 @@ interface DocState {
    */
   playheadBeatMs: number
   playheadAnchorMs: number
-  /** adj1058：小节起点时刻（跳跳球按小节重置拍网格） */
+  /** adj1058/adj1061：小节起点时刻（**展开后逐遍、逐 Q 行**；末尾一条是「曲末」，球自由落体的时刻） */
   playheadBarStartsMs: number[]
   /** adj262：多声部 voiceBlocks（纯曲部 yTop/yBottom/x）——播放时渲染竖向色框覆盖整列 */
   voiceBlocks: { x: number; yTop: number; yBottom: number; pageIndex: number; voices: number[] }[]

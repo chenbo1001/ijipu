@@ -1237,7 +1237,14 @@ function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }
         })
       }
     }
-    const bp = ballAt(anchors, currentMs, beatMs, beatPhaseOf(anchors, beatMs), noteSize * 3.2, beatBars)
+    /**
+     * adj1061：`beatBars` 现在是**展开后逐遍**的小节起点（反复/跳转每一遍都有），
+     * 拍网格由它逐小节给出；`beatPhaseOf` 只作"没有小节起点"时的兜底
+     * （它逐帧遍历全部锚点投票，能省则省）。
+     * 末尾那条「曲末」不是小节开头，`ballAt` 自己会跳过它（只当自由落体的时刻）。
+     */
+    const beatAnchor = beatBars.length > 0 ? 0 : beatPhaseOf(anchors, beatMs)
+    const bp = ballAt(anchors, currentMs, beatMs, beatAnchor, noteSize * 3.2, beatBars)
     if (bp) {
       const rad = noteSize * 0.28
       ball = (

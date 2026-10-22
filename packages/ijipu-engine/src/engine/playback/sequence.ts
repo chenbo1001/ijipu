@@ -133,10 +133,18 @@ export interface PlaySequence {
   /** adj996：整首一共用了几遍（= `passMarks` 里最大的 `pass`），供"第 N / 共 M 遍"显示 */
   maxPass?: number
   /**
-   * adj1058（用户口径）：**每个小节起点的时刻**（升序，主声部）。
+   * adj1058/adj1061（用户口径）：**展开后的小节起点时刻**（升序，主旋律各 Q 行）。
    *
    * 用户原话：「用小节的自然拍的位置，小节开始的第一个音总是第一拍的开始」。
    * 跳跳球据此按**小节**重置拍网格——弱起/漂移不会累积到下一小节。
+   *
+   * adj1061（用户 2026-10-22 实报「反复之后球落点漂移、乱跳」）：必须**逐遍记录**——
+   * `|: … :|` / `&dc` / `&ds` / `&ty` 会被展开成多遍，第二遍起的小节起点 =
+   * **该遍偏移 + 源码小节起点**；旧实现只给源码小节线（只覆盖第一遍），
+   * 第二遍起拿第一遍的网格 ⇒ 相位越走越偏。
+   *
+   * 末尾那条是**「曲末」时刻**（= 整曲播放结束，不是下一小节的开头）：
+   * 用户 2026-10-22 口径「正好作为球自由下落的时刻」，`ballAt` 不拿它当拍网格原点。
    */
   barStartsMs?: number[]
 }
@@ -167,6 +175,37 @@ function rebasePassMarksOf(
     .filter((m) => m.atMs >= base - 0.5 && (endMs === undefined || m.atMs <= endMs + 0.5))
     .map((m) => ({ atMs: Math.max(0, m.atMs - base), pass: m.pass }))
   if (cur && (out.length === 0 || out[0].atMs > 0.5)) out.unshift({ atMs: 0, pass: cur.pass })
+  return out
+}
+
+/**
+ * adj1061：把**展开后的小节起点**搬到切片的新时间轴（0 点 = `base`）。
+ *
+ * 与 `rebasePassMarksOf` 同一口径，三条要求：
+ *  · 区间内的小节起点按 `base` 平移（**不能原样返回**：切片后事件从 0 起，未平移的数组会整体错位）；
+ *  · 起播点若落在**小节中间**，把该小节起点也带上（**可以是负值**）——
+ *    拍网格 `barStart + k×拍长` 因此保住"这一小节已经走了几拍"的相位；
+ *    若硬钳成 0，从八分音符起播时球会整体提前半拍（起点切片/练习段都会中招）；
+ *  · 末尾补一条**切片自己的「曲末」时刻**（`endMs`）：球从这一刻开始自由落体。
+ *    源序列末尾那条「曲末」若超出切片范围会被过滤掉，这里补的是**切片的**结束时刻。
+ */
+function rebaseBarStartsOf(
+  bars: readonly number[] | undefined,
+  base: number,
+  endMs: number,
+): number[] {
+  if (!bars || bars.length === 0) return []
+  const cur = [...bars].reverse().find((s) => s <= base + 0.5)
+  const out: number[] = []
+  for (const s of bars) {
+    const t = s - base
+    if (t < -0.5) continue
+    if (t > endMs + 0.5) break
+    out.push(t)
+  }
+  // 起播点在小节中间：补上当前小节的起点（负值 = 保住拍位相位）
+  if (cur !== undefined && (out.length === 0 || out[0] > 0.5)) out.unshift(cur - base)
+  if (out.length === 0 || endMs > out[out.length - 1] + 0.5) out.push(endMs)
   return out
 }
 
@@ -213,6 +252,8 @@ export function slicePlaySequenceByNoteRange(
     // adj1006：遍次读数跟随切片重排（与 `slicePlaySequenceByRange` 同一口径）
     passMarks: rebasePassMarksOf(seq.passMarks, base, rangeMs),
     maxPass: seq.maxPass,
+    // adj1061：小节起点同样重基（切片后事件从 0 起；末尾补切片自己的「曲末」）
+    barStartsMs: rebaseBarStartsOf(seq.barStartsMs, base, rangeMs),
   }
 }
 
@@ -429,7 +470,16 @@ export function slicePlaySequenceByRange(
    * adj1006：从某遍**中间**起播时，0 点还要补当前那一遍（`rebasePassMarksOf` 统一处理）。
    */
   const passMarks = rebasePassMarksOf(seq.passMarks, base, rangeMs)
-  return { events, totalMs: rangeMs, bpm: seq.bpm, rangeMs, passMarks, maxPass: seq.maxPass }
+  return {
+    events,
+    totalMs: rangeMs,
+    bpm: seq.bpm,
+    rangeMs,
+    passMarks,
+    maxPass: seq.maxPass,
+    // adj1061：小节起点跟着切片重基（否则练习段里球还用着整曲的时间轴 ⇒ 整体错位/乱跳）
+    barStartsMs: rebaseBarStartsOf(seq.barStartsMs, base, rangeMs),
+  }
 }
 
 /**
@@ -1743,6 +1793,22 @@ export function buildPlaySequence(
     const last = passIdxMarks[passIdxMarks.length - 1]
     if (last.pass !== pass) passIdxMarks.push({ idx: events.length, pass })
   }
+  /**
+   * adj1061：**展开后的小节起点**（跳跳球按小节重置拍网格）。
+   *
+   * 用户 2026-10-22 实报「反复之后球落点漂移、乱跳」，根因：
+   * 旧实现直接拿 `barStartMsInGroup[0]`（**源码小节线**累加），只覆盖第一遍；
+   * 而下面这段走查会把 `|: … :|`、`&dc` / `&ds` / `&ty` 展开成多遍 ⇒
+   * 第二遍起继续用第一遍的小节起点当拍网格原点，相位错开，越走越偏。
+   *
+   * 现在在走查里**逐遍、逐 Q 行**记录：`passMs + groupStartMs[g] + 源码小节起点`
+   * （= 本音符的 `atMs` 减去它在本小节内的拍偏移，也就是"这一遍这一小节从哪一刻开始"）。
+   * 升序去重（多声部块里各声部起点相同）。
+   */
+  const barStartsMs: number[] = []
+  const recordBarStart = (t: number): void => {
+    if (barStartsMs.length === 0 || t > barStartsMs[barStartsMs.length - 1] + 0.5) barStartsMs.push(t)
+  }
   let pass = 1 // 当前反复遍次（1 起；**整曲连续**：|:/:|: 不再归 1，只有跳跃/repeat 前进时 +1）
   /**
    * adj997（用户 2026-10-19 口径「整曲连续遍次」）：**本反复段的起始遍次**。
@@ -2260,6 +2326,18 @@ export function buildPlaySequence(
         passMs = pendingJumpMs - clock
         pendingJumpMs = -1
       }
+      /**
+       * adj1061：**逐遍**记下本小节的起点（该遍 `passMs` 偏移 + 源码小节起点）。
+       *
+       * 放在"替谱静音"之前：被 `{tp}` 替代的主旋律音虽然不发声，它所在的小节仍然客观存在
+       * （球在这一遍照样要吃这一小节的拍网格），漏记会让该小节的网格退化成上一小节。
+       *
+       * ⚠ **不能只收 group 0**：一份谱的主旋律按 Q 行分成多个 group（一行一个），
+       * 旧实现直接取 `barStartMsInGroup[0]`，真谱实测**只记到第一行的 6 个小节**，
+       * 第二行起球就只能沿用上一小节的网格（这才是"整曲都在漂"的主因）。
+       * 多声部块里各声部的 `groupStartMs` 与小节长相同 ⇒ 起点相同，靠 `recordBarStart` 去重。
+       */
+      recordBarStart(passMs + groupStartMs[g] + (barStartMsInGroup[g][bi] ?? 0))
       /**
        * adj629k：**补发临时段要放在"静音判定"之前**。
        *
@@ -2931,6 +3009,16 @@ export function buildPlaySequence(
   // adj361：总时长 = 实际播放到的时刻（= 所有事件的最大结束时刻，含反复遍）
   // adj427：再与段层事件末刻取最大（段落比其后主旋律长时不被截断）
   totalMs = Math.max(lastEndMs, segEndMs)
+  /**
+   * adj1061：末尾保留**「曲末」时刻**（用户 2026-10-22 口径：正好是球自由下落的时刻）。
+   *
+   * 它**不是**"下一小节的开头"：`ballAt` 只把**早于最后一个音结束**的条目当拍网格原点
+   * （见 `dynamic/ball.ts`），所以它只承担"整曲到此结束"这一个语义。
+   * 旧数组末尾本来就有这一条（源码最后一小节的总长），重建时不能把它丢掉。
+   */
+  if (barStartsMs.length === 0 || totalMs > barStartsMs[barStartsMs.length - 1] + 0.5) {
+    barStartsMs.push(totalMs)
+  }
 
   /**
    * adj723u：**按 `atMs` 稳定排序**——修「含 `{dsb}` 时演奏/色块顺序乱」。
@@ -3028,14 +3116,20 @@ export function buildPlaySequence(
       const base = events[from].atMs
       const sliced = events.slice(from).map((e) => ({ ...e, atMs: Math.max(0, e.atMs - base) }))
       // adj1006：遍次时间轴跟随切片重排（见 `rebasePassMarksOf`）
-      return { events: sliced, totalMs: totalMs - base, bpm, passMarks: rebasePassMarksOf(passMarks, base), maxPass }
+      // adj1061：小节起点同样重基（起播点可能在小节中间 ⇒ 该小节起点一起带上，可为负值）
+      return {
+        events: sliced,
+        totalMs: totalMs - base,
+        bpm,
+        passMarks: rebasePassMarksOf(passMarks, base),
+        maxPass,
+        barStartsMs: rebaseBarStartsOf(barStartsMs, base, totalMs - base),
+      }
     }
-    if (from === 0) return { events, totalMs, bpm, passMarks, maxPass }
+    if (from === 0) return { events, totalMs, bpm, passMarks, maxPass, barStartsMs }
     // 起点音符不在事件中（隐藏休止符等）→ 从第一个可播放事件开始
-    return { events, totalMs, bpm, passMarks, maxPass }
+    return { events, totalMs, bpm, passMarks, maxPass, barStartsMs }
   }
 
-  // adj1058：小节起点（跳跳球按小节重置拍网格）
-  const barStartsMs = (barStartMsInGroup[0] ?? []).slice()
   return { events, totalMs, bpm, passMarks, maxPass, barStartsMs }
 }

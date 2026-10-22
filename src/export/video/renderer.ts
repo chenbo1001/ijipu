@@ -150,10 +150,16 @@ export async function createDynamicSession(
     .filter((r) => r.playVoice === undefined || r.playVoice === 'main')
     .map((r) => ({ t0: r.t0, t1: r.t1, cx: r.x + r.w / 2, top: r.y, x: r.x, w: r.w }))
   const beatMs = 60000 / beat
-  /** 拍网格相位：用长音起点投票，校正弱起谱的半拍偏移 */
-  const beatPhase = beatPhaseOf(ballAnchors, beatMs)
-  /** 小节起点（按小节重置拍网格；片头后移所以要加 leadIn） */
+  /**
+   * 小节起点（按小节重置拍网格；片头后移所以要加 `leadIn`）。
+   *
+   * adj1061（用户 2026-10-22 实报「反复后球落点漂移」）：`seq.barStartsMs` 现在是
+   * **展开后逐遍**的小节起点（练习段切片已重基），末尾那条「曲末」不是小节开头，
+   * `ballAt` 只把它当"球自由落体"的时刻。
+   */
   const ballBars = (seq.barStartsMs ?? []).map((s) => s + leadInMs)
+  /** 拍网格相位：只作"没有小节起点"时的兜底（有 `ballBars` 时 `ballAt` 不看它） */
+  const beatPhase = ballBars.length > 0 ? 0 : beatPhaseOf(ballAnchors, beatMs)
   // 段导出：片头用"第 1 页描述头"的标题卡，再交叉淡入到段首（不平移，免得横跨几页乱飞）
   const crossfadeIntro = skipIntro
   // 标题卡：满宽 + 整页居中（9:16 的取景框比页高，纵向只能居中）

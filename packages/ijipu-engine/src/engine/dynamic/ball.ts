@@ -119,6 +119,10 @@ export function ballAt(
   /**
    * 小节起点时刻（升序）。给了它，拍网格**按小节重置**——
    * 用户口径：「小节开始的第一个音总是第一拍的开始」，弱起/漂移不会累到下一小节。
+   *
+   * ⚠ `PlaySequence.barStartsMs` 的末尾还带一条**「曲末」时刻**（整曲结束，用户 2026-10-22
+   * 口径：正好是球自由落体的时刻）。它**不是小节开头** ⇒ 不能当拍网格原点，
+   * 否则结束那一帧会把球弹回第一个音。下面只收**早于最后一个音结束**的条目。
    */
   barStartsMs?: readonly number[],
 ): BallPos | null {
@@ -128,7 +132,8 @@ export function ballAt(
   // 第一个音之前：不画球（片头标题卡阶段）
   if (t < first.t0) return null
   // 最后一个音结束之后：**自由落体**，球离开视界
-  if (t > last.t1) {
+  // adj1061：用 `>=`——结束那一刻就不再属于"最后一拍"，否则会落到一个不存在的拍网格上
+  if (t >= last.t1) {
     const dt = (t - last.t1) / 1000
     const y = last.top + 0.5 * 2600 * dt * dt
     if (y > 2400) return null // 已经落出画面（页面高约 842）
@@ -138,8 +143,10 @@ export function ballAt(
   let barStart = anchorMs
   if (barStartsMs && barStartsMs.length > 0) {
     for (const s of barStartsMs) {
-      if (s <= t) barStart = s
-      else break
+      if (s > t) break
+      // adj1061：末尾那条「曲末」不是小节开头（见上）
+      if (s >= last.t1) continue
+      barStart = s
     }
   }
   const k = Math.floor((t - barStart) / beatMs)
