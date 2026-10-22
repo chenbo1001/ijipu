@@ -84,7 +84,6 @@ export function ballAt(
   beatMs: number,
   anchorMs: number,
   amp: number,
-  opts: BallOptions = {},
 ): BallPos | null {
   if (beatMs <= 0 || anchors.length === 0) return null
   const first = anchors[0]
@@ -106,26 +105,12 @@ export function ballAt(
   const a1 = anchorAt(anchors, b1) ?? nextAnchor(anchors, b1) ?? a0
   const u = Math.max(0, Math.min(1, (t - b0) / beatMs))
   /**
-   * 跨行保护（用户实报「还没到一行最后一拍就往左飞」）：
+   * 目标 = **下一拍**那个色块（用户 2026-10-22 口径：不是"下一个音"——八分音符也是音，但不是拍）。
+   * 这一拍里球从当前落点飞向下一拍落点；若下一拍换了行/跳转，就朝那边飞。
    *
-   * 弱起谱的拍网格是从**第一个音**开始数的，弱起不是整拍时网格会整体漂移，
-   * 漂到某处"下一拍"已经越过本行末尾 ⇒ 球提前飞向下一行。
-   *
-   * 判据看**紧挨着的下一个音**（`anchors` 是按时间排好的展开序列）：
-   *  - 下一个音还在**本行** ⇒ 本行没播完 ⇒ 飞它（修掉漂移导致的提前左飞）；
-   *  - 下一个音已经在**别处**（换行 / 反复 `:|` / `&dc` / `&ds` / `&dy` 跳转）⇒
-   *    **本来就该在最后一拍朝那边弹**（用户 2026-10-22 口径），保持飞 `a1`。
-   *
-   * 因为播放序列已经把反复/跳转展开成一条时间线，"下一个音"就是跳转后的那个音，
-   * 所以这里不需要认识跳转记号本身。
+   * `lineJump` 只作为"整行平移"的兜底开关，默认不启用。
    */
-  const rowEps = opts.lineJump ?? 60
-  const crossRow = Math.abs(a1.top - a0.top) > rowEps
-  let target = a1
-  if (crossRow) {
-    const nextNote = anchors.find((a) => a.t0 > a0.t0)
-    if (nextNote && Math.abs(nextNote.top - a0.top) <= rowEps) target = nextNote
-  }
+  const target = a1
   const x = a0.cx + (target.cx - a0.cx) * u
   const base = a0.top + (target.top - a0.top) * u
   return { x, y: base - 4 * u * (1 - u) * amp, u }

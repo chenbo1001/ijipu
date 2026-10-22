@@ -32675,7 +32675,6 @@ function runDynamicCameraTests(): void {
       1000,
       0,
       100,
-      { lineJump: 60 },
     )
     check('M4 同一行内照常横飞（x 取中点）', same !== null && Math.abs(same.x - 200) < 1e-9, String(same?.x))
 
@@ -32685,22 +32684,18 @@ function runDynamicCameraTests(): void {
       { t0: 500, t1: 1000, cx: 400, top: 200 },
     ]
     // 拍点落在两段都还响着的时刻（b0=750）：必须取最晚开始的那条
-    const ov = ballAt(overlap, 750, 250, 0, 100, { lineJump: 60 })
+    const ov = ballAt(overlap, 750, 250, 0, 100)
     check('M4 重叠段取最晚开始的那条（与色块同口径）', ov !== null && Math.abs(ov.x - 400) < 1e-9, String(ov?.x))
 
-    // 本行还没播完时，即使"下一拍"落在下一行，也不能提前左飞（弱起谱网格会漂移）
+    // 本行还有音但"下一拍"已在下一行：按用户口径仍然飞**下一拍**（不再按"下一个音"拦）
     const drift = [
       { t0: 0, t1: 3000, cx: 100, top: 200 },
       { t0: 3000, t1: 3200, cx: 200, top: 200 },
-      { t0: 3200, t1: 3600, cx: 400, top: 200 }, // 本行还有这个音
-      { t0: 4000, t1: 5000, cx: 60, top: 320 }, // 下一行
+      { t0: 3200, t1: 3600, cx: 400, top: 200 },
+      { t0: 4000, t1: 5000, cx: 60, top: 320 },
     ]
     const d = ballAt(drift, 3500, 1000, 0, 100)
-    check(
-      'M4 本行还有音时不许提前飞下一行（x 仍在本行）',
-      d !== null && Math.abs(d.x - 300) < 1e-9,
-      String(d?.x),
-    )
+    check('M4 目标取下一拍的色块（下拍在下一行就飞过去）', d !== null && d.x < 200, String(d?.x))
   }
 
   // 带歌词的谱：歌词会填满行间空档，旧判定（按"行底含歌词"比间隙）会把相邻几行并成一行，
