@@ -10758,6 +10758,18 @@ smoke 五条含"来源切换成对"结构断言与负对照） |
   `tsc/lint/build/smoke/verify:app-ui/verify-site` 全绿。
 - **预防**：环境隐藏的 UI 功能必须有 dev 开放通道（`isDevBuild`）；唯一例外是插件宿主交互；写进 AGENTS。
 
+## E-2026-507 谱面用了背景图，导出动态谱视频里却没有（用户 2026-10-23 实报，adj1081）
+
+- **现象**：谱面设置了背景图（预览里可见），导出的 MP4 整页还是白的，背景图和水印都没进视频。
+- **根因**：`src/export/video/renderer.ts` 的 `createDynamicSession` 把页面 SVG 光栅化时用的是
+  `renderScoreToSvg(layout)`，**没有带 `withOverlay()`**；预览/静态导出走的是带 overlay 的那条，
+  所以背景图/水印只存在于预览，不在视频的页位图里。
+- **解决**：改成 `renderScoreToSvg(layout, withOverlay())`，并引入 `store/overlayAssets`；
+  动态页位图与预览/静态导出同源。卡片背景图（片头/片尾）是另一条，不受影响。
+- **验证**：smoke 新增 `adj1081` 源码闸门（必须出现 `renderScoreToSvg(layout, withOverlay())`）；
+  `tsc/lint/build/smoke/verify:app-ui/verify-site` 全绿。
+- **预防**：动态视频的页位图只能走 `withOverlay()`，不许再手写裸 `renderScoreToSvg(layout)`；写在断言里。
+
 
 
 

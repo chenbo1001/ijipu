@@ -147,31 +147,15 @@
         <span class="topbar-version" data-app-version title="当前版本">·</span>
         <nav class="nav" id="nav">
           <a href="#features">功能</a>
-          <!-- adj1026：音色库推荐独立成页（用户要求：首页不放，窄屏表格不好读） -->
-          <a href="/soundfonts/">音色库推荐</a>
-          <a href="/manual/">使用手册</a>
-          <a href="/syntax/">脚本语法</a>
-          <!-- adj905x（用户要求）：插件有了自己的功能介绍 + 使用手册，顶栏这一排给它一个入口 -->
-          <a href="/plugin/">插件手册</a>
-          <!-- adj948（用户要求「官网上没有 CLI 命令使用手册，需要补」）：命令行手册排在插件手册之后 -->
-          <a href="/cli/">命令行手册</a>
+          <!--
+            adj1080（用户 2026-10-23）：顶栏链接太多会折行，不好看；文档收敛成一个入口。
+            五份文档（使用手册 / 脚本语法 / 插件手册 / 命令行手册 / 音色库推荐）统一从
+            `/manual/` 顶部的切换条进入，首页不再逐条摆。下面只留功能、文档、下载、GitHub，
+            加上右侧常驻的「打开应用」= 5 条。
+          -->
+          <a href="/manual/">文档</a>
           <a data-l="desktopDownloadUrl" href="#" rel="noreferrer">下载桌面端</a>
-          <!--
-            adj933（用户要求「ob插件标 插件Github，下一个标 应用 Github」，随后澄清「链接没串，我是说
-            把应用放前面、插件放后面」）：两条 GitHub 入口**标签写清楚** + **顺序对调**（应用在前、插件在后）。
-            ⚠ 已核对：**标签与地址没有串**（`repoUrl` → 应用仓库、`obsidianRepoUrl` → 插件仓库，
-              见 `src/brand/siteLinks.ts` 的键表）⇒ **两个 href 都保持原样、一个都不动**，只改标签与顺序。
-              "标签 ↔ 实际 href"与"DOM 顺序"两条都由 `scripts/verify-site.mjs` 的 `adj933` 段在真浏览器里守着。
-          -->
-          <a data-l="repoUrl" href="#" rel="noreferrer">应用 Github</a>
-          <a data-l="obsidianRepoUrl" href="#" rel="noreferrer">插件 Github</a>
-          <!--
-            adj933（用户要求）：「更新记录」这一条**删掉** —— 它本就指向 GitHub（`releasesUrl` → `…/releases`），
-              与上面两条 GitHub 入口重复。
-            ⚠ 首页**页脚**还有一条同样的入口（同一个 `releasesUrl` 键）：用户交代过"只删顶栏这一个、
-              别顺手删别处"⇒ 先留着、并在报告里列出请其拍板；所以 `siteLinks.ts` 的 `releasesUrl` 键
-              **也还不能删**（页脚那条还在用）。
-          -->
+          <a data-l="repoUrl" href="#" rel="noreferrer">GitHub</a>
         </nav>
         <!--
           adj878（用户要求）：右上角的深浅主题开关。

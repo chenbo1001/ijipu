@@ -21382,9 +21382,9 @@ async function runAdj1016Tests() {
   const sfPage = String(readFileSync(join(root, 'soundfonts', 'index.html'), 'utf8'))
   const sfMd = String(readFileSync(join(root, 'docs', 'SOUNDFONTS.md'), 'utf8'))
   const home = String(readFileSync(join(root, 'index.html'), 'utf8'))
-  check('adj1026 音色库推荐是**独立页**（首页不再有该区；顶栏有入口指向 `/soundfonts/`）',
+  check('adj1026 音色库推荐是**独立页**（首页不再有该区；首页从「文档」入口进，/manual/ 的切换条里有它）',
     sfPage.includes('音色库推荐') && !/id="soundfonts"/.test(home) &&
-      /<a href="\/soundfonts\/">/.test(home))
+      /<a href="\/manual\/">文档<\/a>/.test(home))
   check('adj1026 独立页正文**不用表格**（窄屏按块竖排）',
     !/<table/i.test(sfMd) && !/\|---/.test(sfMd))
   {
@@ -28350,78 +28350,55 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   check('adj876/adj1026 七份 HTML 的 <title> 各不相同', new Set(titles).size === 7, titles.join(' | '))
   check('adj876 首页 title 含 Slogan「码即成，谱自现」', titles[0].includes('码即成，谱自现'), titles[0])
   /**
-   * adj905x（用户要求）：「**在首页上面一排增加一个链接，链接到插件这个手册**」。
-   * 判据盯的是"首页顶栏那一排"（`.nav`）里真的有这一条 —— 光有页面、首页没入口，用户找不着。
-   */
-  check('adj905x 首页顶栏有「插件手册」入口（指向 `/plugin/`）',
-    /<nav class="nav"[\s\S]*?<a href="\/plugin\/">插件手册<\/a>[\s\S]*?<\/nav>/.test(homeHtml))
-  /**
-   * adj933（用户要求）：「首页上面那排，ob 插件标 插件 Github，下一个标 应用 Github，……更新记录既然是指向
-   * github，就不要了」；随后澄清：「链接没串，我是说**把应用放前面、插件放后面**」。
+   * adj1080（用户 2026-10-23）：「首页上面一排链接放太多，导致文本折行；应做些链接的精简」。
    *
-   * 已核对「标签 ↔ 目标地址」：**没有串**（`repoUrl` → 应用仓库、`obsidianRepoUrl` → 插件仓库，
-   * 见 `src/brand/siteLinks.ts` 的键表）⇒ **两个 href 一个都不动**，只改**标签**与**顺序**。
-   * 页面上"标签 ↔ 实际 href"与"DOM 顺序"两条的**实测**判据（各带负对照）在
-   * `scripts/verify-site.mjs` 的 `adj933` 段；这里是源码级轻闸门，防"以后又把标签写含糊 / 顺序又调回去"。
-   * ⚠ 页脚那条「更新记录」按用户"别顺手删别处"的要求**留着**，故判据只看 `nav` 里面。
+   * 新口径：
+   *  · 顶栏只留 5 条：功能 / 文档（→ `/manual/`）/ 下载桌面端 / GitHub（应用仓库）/ 打开应用（CTA）；
+   *  · 五份文档（手册 / 语法 / 插件 / CLI / 音色库）统一从 `/manual/` 顶部的切换条进入；
+   *  · 插件仓库入口移到「Obsidian 插件」区（`obsidianRepoUrl`），不再占顶栏；
+   *  · 首页底部「开始使用」区的 CLI 入口卡保留（不在顶栏）。
+   *
+   * 断言同时保留覆盖：文档切换条五份都在、插件仓库仍在页面里、顶栏不再有插件/CLI/音色库/两条 GitHub。
    */
   const navHtml = /<nav class="nav"[\s\S]*?<\/nav>/.exec(homeHtml)?.[0] ?? ''
-  const APP_TAG = '<a data-l="repoUrl" href="#" rel="noreferrer">应用 Github</a>'
-  const PLUGIN_TAG = '<a data-l="obsidianRepoUrl" href="#" rel="noreferrer">插件 Github</a>'
-  const navLabelsOk = (nav: string): boolean =>
-    nav.includes(APP_TAG) && nav.includes(PLUGIN_TAG) && !/data-l="releasesUrl"/.test(nav)
-  /** 顺序判据：**应用 Github 在前、插件 Github 在后**，且两条紧挨着（中间只有空白） */
-  const navOrderOk = (nav: string): boolean => {
-    const app = nav.indexOf(APP_TAG)
-    const plugin = nav.indexOf(PLUGIN_TAG)
-    // ⚠ 必须显式判 `plugin > app`：`slice(大, 小)` 会返回空串 ⇒ 只判"中间是空白"会把顺序反过来也判成真
-    if (app < 0 || plugin < 0 || plugin < app) return false
-    return nav.slice(app + APP_TAG.length, plugin).trim() === ''
-  }
-  check('adj933 首页顶栏：两个 GitHub 入口逐字标「应用 Github」/「插件 Github」，且顶栏里**已无**「更新记录」',
-    navLabelsOk(navHtml), navHtml.replace(/\s+/g, ' ').slice(0, 220))
-  check('adj933 首页顶栏**顺序**：`应用 Github` 在前、`插件 Github` 在后，且两条紧挨着（用户澄清口径）',
-    navOrderOk(navHtml),
-    `app@${navHtml.indexOf(APP_TAG)} plugin@${navHtml.indexOf(PLUGIN_TAG)}`)
-  check('adj933 负对照：标签改回旧写法（`Obsidian 插件` / `GitHub`）、把「更新记录」加回顶栏、或把两条顺序对调 ⇒ 判据为假',
-    navLabelsOk(navHtml) &&
-      navOrderOk(navHtml) &&
-      !navLabelsOk(navHtml.replace(APP_TAG, '<a data-l="repoUrl" href="#" rel="noreferrer">GitHub</a>')) &&
-      !navLabelsOk(navHtml.replace(PLUGIN_TAG, '<a data-l="obsidianRepoUrl" href="#" rel="noreferrer">Obsidian 插件</a>')) &&
-      !navLabelsOk(navHtml.replace(APP_TAG, '<a data-l="releasesUrl" href="#" rel="noreferrer">更新记录</a>')) &&
-      !navOrderOk(navHtml.replace(APP_TAG, '@@TMP@@').replace(PLUGIN_TAG, APP_TAG).replace('@@TMP@@', PLUGIN_TAG)),
-    `nav 命中「更新记录」=${/data-l="releasesUrl"/.test(navHtml)}`)
-  check('adj905x 三个文档页顶栏互相可切换（`.doc-switch` 里三份都在）',
-    [manualHtml, syntaxHtml, pluginHtml].every(
-      (h) =>
-        /<nav class="doc-switch">[\s\S]*?href="\/manual\/"[\s\S]*?href="\/syntax\/"[\s\S]*?href="\/plugin\/"[\s\S]*?<\/nav>/.test(h),
-    ))
+  /** 注释里会提到「插件手册 / 命令行手册 / 音色库推荐」；判据只看真实标签，先剥注释 */
+  const navPlain = navHtml.replace(/<!--[\s\S]*?-->/g, '')
+  const navHas = (nav: string, text: string): boolean => new RegExp(`<a\\b[^>]*>${text}</a>`).test(nav)
+  const navMinimalOk = (nav: string): boolean =>
+    navHas(nav, '功能') &&
+    /<a href="\/manual\/">文档<\/a>/.test(nav) &&
+    navHas(nav, '下载桌面端') &&
+    /<a data-l="repoUrl"[^>]*>GitHub<\/a>/.test(nav) &&
+    !/插件手册|命令行手册|音色库推荐|应用 Github|插件 Github/.test(nav)
+  check('adj1080 首页顶栏只剩 5 条：功能 / 文档 / 下载桌面端 / GitHub / 打开应用',
+    navMinimalOk(navPlain) && /topbar-cta" href="\/app\/">打开应用<\/a>/.test(homeHtml),
+    navPlain.replace(/\s+/g, ' ').slice(0, 240))
+  check('adj1080 负对照：把插件手册 / 命令行手册 / 音色库推荐任一条塞回顶栏 ⇒ 判据为假',
+    !navMinimalOk(navPlain.replace('</a>', '</a><a href="/plugin/">插件手册</a>')) &&
+      !navMinimalOk(navPlain.replace('</a>', '</a><a href="/cli/">命令行手册</a>')) &&
+      !navMinimalOk(navPlain.replace('</a>', '</a><a href="/soundfonts/">音色库推荐</a>')))
+  check('adj933/adj1080 顶栏只留一个 GitHub（应用仓库）；插件仓库入口在「Obsidian 插件」区',
+    /<a data-l="repoUrl"[^>]*>GitHub<\/a>/.test(navHtml) &&
+      !/obsidianRepoUrl/.test(navHtml) &&
+      /data-l="obsidianRepoUrl"/.test(homeHtml) &&
+      !/data-l="releasesUrl"/.test(navHtml))
+  check('adj905x/adj948/adj1026 五份文档页顶栏可互相切换（手册 / 语法 / 插件 / CLI / 音色库）',
+    [manualHtml, syntaxHtml, pluginHtml, cliHtml, sfHtml].every((h) =>
+      /<nav class="doc-switch">[\s\S]*?href="\/manual\/"[\s\S]*?href="\/syntax\/"[\s\S]*?href="\/plugin\/"[\s\S]*?href="\/cli\/"[\s\S]*?href="\/soundfonts\/"[\s\S]*?<\/nav>/.test(h)))
   /**
    * adj948（用户要求：「顶栏加入口 —— 在『插件手册』之后加一项『命令行』」，首页底部「从哪儿开始」也加一张卡）。
-   *
-   * 判据盯的是**四份文档页的切换条**（`/cli/` 自己也在内）与**首页顶栏 / 首页入口卡**：
-   * 光建了页面、顶栏没入口，用户根本找不着（adj905x 的插件手册就是同一条教训）。
-   * 命名统一取「命令行手册」——与既有条目（使用手册 / 插件手册）同构，且**四个页面逐字相同**。
-   * 三条判据都写成**纯函数** ⇒ 负对照复用同一份（证明它们真的在量"入口在不在、位置对不对"）。
+   * adj1080 起顶栏收敛为「文档」一个入口；CLI 等四个文档入口改由 `/manual/` 的切换条承载，
+   * 首页底部那张「命令行手册」卡仍保留。
    */
-  const docSwitchHasCli = (h: string): boolean =>
-    /<nav class="doc-switch">[\s\S]*?href="\/manual\/"[\s\S]*?href="\/syntax\/"[\s\S]*?href="\/plugin\/"[\s\S]*?href="\/cli\/">命令行手册<\/a>[\s\S]*?<\/nav>/.test(h)
-  const homeNavHasCli = (h: string): boolean =>
-    /<nav class="nav"[\s\S]*?<a href="\/plugin\/">插件手册<\/a>[\s\S]*?<a href="\/cli\/">命令行手册<\/a>[\s\S]*?<\/nav>/.test(h)
   const homeCardHasCli = (h: string): boolean =>
     /<a class="link-card" href="\/cli\/">[\s\S]*?<b>命令行手册<\/b>[\s\S]*?<\/a>/.test(h)
-  check('adj948 四份文档页顶栏可互相切换（`.doc-switch` 里四份都在，命令行手册在插件手册之后）',
-    [manualHtml, syntaxHtml, pluginHtml, cliHtml].every(docSwitchHasCli),
-    [manualHtml, syntaxHtml, pluginHtml, cliHtml].map(docSwitchHasCli).join(','))
-  check('adj948 首页顶栏有「命令行手册」入口（指向 `/cli/`），且排在「插件手册」之后', homeNavHasCli(homeHtml))
   check('adj948 首页底部「开始使用」区有「命令行手册」入口卡（指向 `/cli/`）', homeCardHasCli(homeHtml))
-  check('adj948 四个文档页的页脚都能到命令行手册（其余三页都有这条，命令行页自己指向插件手册）',
+  check('adj948 文档页页脚仍能到命令行手册 / 插件手册',
     [manualHtml, syntaxHtml, pluginHtml].every((h) => h.includes('<a href="/cli/">命令行手册</a>')) &&
       cliHtml.includes('<a href="/plugin/">插件手册</a>'))
-  check('adj948 负对照：把顶栏那条 / 首页那张卡 / 某个文档页切换条里那条分别删掉 ⇒ 三条判据各自判假（不会恒真）',
-    !homeNavHasCli(homeHtml.replace('<a href="/cli/">命令行手册</a>', '')) &&
-      !homeCardHasCli(homeHtml.replace('<a class="link-card" href="/cli/">', '<a class="link-card" href="/manual/">')) &&
-      !docSwitchHasCli(cliHtml.replace('<a href="/cli/">命令行手册</a>', '')))
+  check('adj1080 负对照：删掉首页「文档」入口 / 底部 CLI 卡 ⇒ 判据为假',
+    !/<a href="\/manual\/">文档<\/a>/.test(homeHtml.replace('<a href="/manual/">文档</a>', '')) &&
+      !homeCardHasCli(homeHtml.replace('<a class="link-card" href="/cli/">', '<a class="link-card" href="/manual/">')))
 
   /**
    * adj905x（**用户口径**）：「**`.jps` 文件和 `.jps` 代码块的曲谱编制方式是不一样的** ——
@@ -33264,4 +33241,17 @@ function runDynamicCameraTests(): void {
       !canUseDynamicVideo({ tauri: false, force: false, dev: false }),
     'dev gates',
   )
+  /**
+   * adj1081（用户 2026-10-23 实报）：谱面用了背景图，导出视频里却没有。
+   * 根因：动态会话把页面 SVG 光栅化时只传了 `layout`、没带 `withOverlay()`，
+   * 而预览/静态导出走的是带 overlay 的那条 ⇒ 背景图/水印都没进视频。
+   */
+  {
+    const dynRendererSrc = readFileSync(join(root, 'src/export/video/renderer.ts'), 'utf8')
+    check(
+      'adj1081 动态会话的页位图带 withOverlay()（谱面背景图/水印与预览同源）',
+      /renderScoreToSvg\(layout,\s*withOverlay\(\)\)/.test(dynRendererSrc) &&
+        /from '\.\.\/\.\.\/store\/overlayAssets'/.test(dynRendererSrc),
+    )
+  }
 }

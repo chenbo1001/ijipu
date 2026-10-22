@@ -897,10 +897,8 @@ async function main() {
             pgBlocks: qa('#playground .jps-block').length,
             /* adj878：右上角的深浅主题开关 */
             hasTheme: !!q('#theme-toggle'),
-            /* adj905x（用户要求）：顶栏那一排的「插件手册」入口 */
-            navPlugin: qa('.nav a').find((a) => (a.textContent || '').trim() === '插件手册')?.getAttribute('href') ?? '',
-            /* adj948（用户要求）：顶栏那一排的「命令行手册」入口 */
-            navCli: qa('.nav a').find((a) => (a.textContent || '').trim() === '命令行手册')?.getAttribute('href') ?? '',
+            /* adj1080：顶栏文档收敛成一个入口（五份文档从 /manual/ 切换条进） */
+            navDocs: qa('.nav a').find((a) => (a.textContent || '').trim() === '文档')?.getAttribute('href') ?? '',
             /* adj948：入口卡里也要有一条（用户口径"首页底部「从哪儿开始」也加一张卡"） */
             cardCli: qa('.link-grid .link-card').find((a) => (a.textContent || '').includes('命令行手册'))?.getAttribute('href') ?? '',
           }
@@ -999,11 +997,9 @@ async function main() {
         !!cardNeg && cardNeg.feature === 7, JSON.stringify(cardNeg))
       // ⚠ adj899 的换行测试放在下面"切示例"那组**之后**（它要点击示例，会改变初始状态）
       check('首页入口链接 7 个（应用/手册/语法/命令行/桌面/插件/赞赏）', home.entries === 7, String(home.entries))
-      check('首页顶栏导航 ≥ 6 条', home.navLinks >= 6, String(home.navLinks))
-      check('adj905x 首页顶栏有「插件手册」入口（指向 `/plugin/`，用户要求）',
-        home.navPlugin === '/plugin/', home.navPlugin)
-      check('adj948 首页顶栏有「命令行手册」入口（指向 `/cli/`，用户要求；排在插件手册之后）',
-        home.navCli === '/cli/', home.navCli)
+      check('首页顶栏导航 ≥ 4 条（文档收敛后：功能/文档/下载/GitHub + 打开应用）', home.navLinks >= 4, String(home.navLinks))
+      check('adj1080 首页顶栏「文档」入口指向 `/manual/`（五份文档从那里切换）',
+        home.navDocs === '/manual/', home.navDocs)
       check('adj948 首页入口卡里有「命令行手册」（指向 `/cli/`，用户要求"底部也加一张卡"）',
         home.cardCli === '/cli/', home.cardCli)
       check('首页主按钮指向 `/app/`', home.cta === '/app/', home.cta)
@@ -1060,45 +1056,24 @@ async function main() {
         c,
         `[...document.querySelectorAll('.nav a[data-l]')].map((a) => ({ key: a.dataset.l, text: (a.textContent || '').trim(), href: a.href }))`,
       )
-      const ghEntries = (list) => (Array.isArray(list) ? list : []).filter((a) => a.key === 'repoUrl' || a.key === 'obsidianRepoUrl')
-      /** 判据①对应关系：两个键各自的标签逐字正确、href 指向对应仓库 */
-      const navGhMappingOk = (list) => {
-        const byKey = Object.fromEntries((Array.isArray(list) ? list : []).map((a) => [a.key, a]))
-        return (
-          byKey.repoUrl?.text === '应用 Github' &&
-          byKey.repoUrl?.href === SITE_REPO &&
-          byKey.obsidianRepoUrl?.text === '插件 Github' &&
-          byKey.obsidianRepoUrl?.href === SITE_PLUGIN
-        )
-      }
-      /** 判据②顺序：DOM 里 **应用 Github 在前、插件 Github 在后**，且两条紧挨着 */
-      const navGhOrderOk = (list) => {
-        const all = Array.isArray(list) ? list : []
-        const i = all.findIndex((a) => a.key === 'repoUrl')
-        const j = all.findIndex((a) => a.key === 'obsidianRepoUrl')
-        return i >= 0 && j === i + 1 && all[i].text === '应用 Github' && all[j].text === '插件 Github' &&
-          all[i].href === SITE_REPO && all[j].href === SITE_PLUGIN
-      }
-      const ghHrefSwapped = navGhList.map((a) =>
-        a.key === 'repoUrl' ? { ...a, href: SITE_PLUGIN } : a.key === 'obsidianRepoUrl' ? { ...a, href: SITE_REPO } : a,
+      const pluginRepoLink = await evalJs(
+        c,
+        `document.querySelector('a[data-l="obsidianRepoUrl"]')?.href ?? ''`,
       )
-      const ghOrderSwapped = (() => {
-        const all = [...navGhList]
-        const i = all.findIndex((a) => a.key === 'repoUrl')
-        const j = all.findIndex((a) => a.key === 'obsidianRepoUrl')
-        if (i >= 0 && j >= 0) [all[i], all[j]] = [all[j], all[i]]
-        return all
-      })()
-      check('adj933 首页顶栏：`repoUrl` 标「应用 Github」→ 应用仓库、`obsidianRepoUrl` 标「插件 Github」→ 插件仓库（标签与地址**没串**）',
-        navGhMappingOk(navGhList),
-        JSON.stringify({ 应用: navGhList.find((a) => a.key === 'repoUrl'), 插件: navGhList.find((a) => a.key === 'obsidianRepoUrl'), 应用仓库: SITE_REPO, 插件仓库: SITE_PLUGIN }))
-      check('adj933 首页顶栏**顺序**（用户澄清「把应用放前面、插件放后面」）：DOM 里「应用 Github」在前、「插件 Github」在后，两条紧挨着',
-        navGhOrderOk(navGhList),
-        JSON.stringify(ghEntries(navGhList).map((a) => `${a.text} → ${a.href}`)))
-      check('adj933 负对照：把两个 href 对调（＝"标签与地址串了"）⇒ 对应关系判据为假；把两条**顺序**对调 ⇒ 顺序判据为假（两条判据各量各的）',
-        navGhMappingOk(navGhList) && navGhOrderOk(navGhList) &&
-          !navGhMappingOk(ghHrefSwapped) && !navGhOrderOk(ghOrderSwapped),
-        `对调 href：mapping=${navGhMappingOk(ghHrefSwapped)}；对调顺序：order=${navGhOrderOk(ghOrderSwapped)}`)
+      const navAppGh = navGhList.find((a) => a.key === 'repoUrl') ?? {}
+      /** adj1080：顶栏只留应用仓库一个 GitHub；插件仓库入口在「Obsidian 插件」区 */
+      const navGhMinimalOk = (list) => {
+        if (!Array.isArray(list)) return false
+        const app = list.find((a) => a.key === 'repoUrl')
+        return app?.text === 'GitHub' && app?.href === SITE_REPO &&
+          !list.some((a) => a.key === 'obsidianRepoUrl')
+      }
+      check('adj1080 首页顶栏只留一个 GitHub（应用仓库）；插件仓库入口在「Obsidian 插件」区',
+        navGhMinimalOk(navGhList) && pluginRepoLink === SITE_PLUGIN,
+        JSON.stringify({ 顶栏: navGhList, 插件仓库: pluginRepoLink, 应用仓库: SITE_REPO }))
+      check('adj1080 负对照：把插件仓库链接塞回顶栏 / 把应用 GitHub 指向插件仓库 ⇒ 判据为假',
+        !navGhMinimalOk([...navGhList, { key: 'obsidianRepoUrl', text: '插件 Github', href: SITE_PLUGIN }]) &&
+          !navGhMinimalOk([{ ...navAppGh, href: SITE_PLUGIN }]))
       /**
        * 负对照（**保留 adj889 的修正**）：原来那条是 `'#'.startsWith(SITE_REPO) === false`，
        * 而 `'#'` 不以任何地址开头 ⇒ **恒为真、证不了任何事**。换成真正有风险的那件事：

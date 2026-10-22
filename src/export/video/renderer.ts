@@ -42,6 +42,7 @@ import {
   type PlayEvent,
 } from '@ijipu/engine'
 import { svgToCanvas } from '../export'
+import { withOverlay } from '../../store/overlayAssets'
 import { brand } from '../../brand/tokens'
 import { CARD_SANS, CARD_SERIF, DEFAULT_CARD_STYLE, type CardStyle } from './cardTemplates'
 
@@ -235,7 +236,9 @@ export async function createDynamicSession(
 
   // 字体没就绪就光栅化 ⇒ 字形回退，第一帧和后面不一样
   await document.fonts.ready
-  const svgs = renderScoreToSvg(layout)
+  // adj1081：动态谱的页位图必须和预览/静态导出同源——带上谱面背景图与水印（`withOverlay()`）。
+  // 以前只传 `layout`，背景图没进 SVG ⇒ 视频里整页是白的。用户实报：谱面用了背景图，导出视频却没有。
+  const svgs = renderScoreToSvg(layout, withOverlay())
   const pages: HTMLCanvasElement[] = []
   for (const svg of svgs) pages.push(await svgToCanvas(svg, RASTER_SCALE, '#ffffff'))
 
