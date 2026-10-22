@@ -166,7 +166,7 @@
 
 ## 四、L1 用户级：全部持久化项清点
 
-### 4.1 localStorage（17 个键，全部 `ijipu.` 前缀）
+### 4.1 localStorage（键数随功能增加；全部 `ijipu.` 前缀）
 
 | 键 | 默认 | 作用 | 类别 | 嵌入后的归属 |
 |---|---|---|---|---|
@@ -196,6 +196,9 @@
 | `ijipu.previewSoften` | `light` | **预览柔化档位**（adj1000/adj1001）：`off` / `light` / `mid`。深色下走"反相 + contrast/brightness 微调"，浅色下只换**纸张色**（白 / `#FDFBF5` / `#F7EFDD`） | 用户个性 | 保留 |
 | `ijipu.exportBg` | `none` | **导出底色**（adj1002）：`none`（透明，**默认**）/ `white` / `paper`（跟随 `previewSoften` 的纸色）。⚠ JPG/PDF 无透明通道 ⇒ 透明档落白 | 用户个性 | 保留 |
 | `ijipu.exportBgImage` | false | **导出是否带背景图/水印**（adj1002，默认**不带**；与底色独立，导出时临时置 `bgEnabled:false`，**不改用户设置**） | 用户个性 | 保留 |
+| `ijipu.playbackHqEnabledByLib` | `{}` | **每库一套收藏音色**（adj1012）：按音色库 id 存收藏集合 | 用户个性 | → 插件设置（保留） |
+| `ijipu.dynamicCardStyle` | `brand` | **动态谱片头/片尾卡片模板**（adj1073）：`brand`/`paper`/`ink`/`minimal`/`custom`；L1，不写进 `.jps` | 用户个性（视频样式） | 桌面端保留；网站/插件不显示动态谱视频 |
+| `ijipu.dynamicCardStyleCustom` | null | **自定义卡片样式 JSON**（adj1074）：颜色/字体/水印/效果/背景图 data URL（≤2.5MB）；L1，不随谱走 | 用户个性（视频样式） | 桌面端保留；换机器不跟谱 |
 
 ### 4.2 IndexedDB / Tauri / PWA
 
@@ -206,6 +209,7 @@
 | IDB `ijipu-soundfonts-hq` | HQ 音源缓存（约 30~90MB） | 用户缓存 | 保留（建议共享缓存省流量，见 D4） |
 | IDB `ijipu-soundfonts` | 旧采样缓存 | 用户缓存 | 保留/清理 |
 | Tauri `sf_cache_read/write/remove` | 桌面版音源缓存落地（应用数据目录） | 平台实现 | 收敛为宿主能力（Obsidian 用 IDB/插件目录） |
+| Tauri 资源安装包目录 `%LOCALAPPDATA%\iJipu\soundfonts` | **adj1025**：用户把下载的 SF2 放这里，应用扫描/导入；后续“资源安装包”也落这里 | L1/桌面 | 桌面端保留；插件用自己的库目录 |
 | `public/sw.js` + `manifest.webmanifest` + `uiStore.updateReady` | PWA 安装与更新提示 | 独立运行专用 | **嵌入时禁用**（否则抢 Obsidian 的 SW 生命周期） |
 
 ### 4.3 其他"隐式用户级"
@@ -220,7 +224,7 @@
 
 ## 五、L3 会话级（内存，重开即丢）
 
-`modal`（当前对话框）、`playbackStartId`、`playbackTick`、`activeNoteId(s)`、`playheadTrack`、`voiceBlocks`、`noteIndexToPage`、`notice`、`dirty`/`fileName`/`fileStateTouched`、撤销重做历史（50 步）、`isNarrow`、`systemLight`、`updateReady`。
+`modal`（当前对话框）、`playbackStartId`、`playbackTick`、`activeNoteId(s)`、`playheadTrack`、`voiceBlocks`、`noteIndexToPage`、`notice`、`dirty`/`fileName`/`fileStateTouched`、撤销重做历史（50 步）、`isNarrow`、`systemLight`、`updateReady`、`dynamicCamera`（相机位开关/比例/范围/时长；L3，重开即丢）。
 
 **注意（嵌入关键）**：`docStore`/`uiStore` 目前是**模块级单例**（`create()` 各一次）。L3 状态天然"每实例独立"，但单例会让"同时打开两个 .jps 视图"互相污染。
 

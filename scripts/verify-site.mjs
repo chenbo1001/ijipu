@@ -1789,9 +1789,9 @@ async function main() {
         const noCodeCmd = CLI_COMMANDS.filter((cmd) => !(cliPage?.codes ?? []).includes(cmd))
         check(`adj948 \`/cli/\`：**命令集齐全** —— 源码里的 ${CLI_COMMANDS.length} 个命令逐个在页面里渲染成 \`<code>命令</code>\``,
           CLI_COMMANDS.length >= 13 && noCodeCmd.length === 0, noCodeCmd.join(' '))
-        check('adj948 `/cli/`：顶栏切换条认得出"当前是这一页"（`body[data-doc=cli]`，四份文档都在条上）',
+        check('adj948 `/cli/`：顶栏切换条认得出"当前是这一页"（`body[data-doc=cli]`，五份文档都在条上）',
           cliPage?.docKind === 'cli' &&
-            JSON.stringify(cliPage?.switchHrefs) === JSON.stringify(['/manual/', '/syntax/', '/plugin/', '/cli/']),
+            JSON.stringify(cliPage?.switchHrefs) === JSON.stringify(['/manual/', '/syntax/', '/plugin/', '/cli/', '/soundfonts/']),
           `${cliPage?.docKind} / ${JSON.stringify(cliPage?.switchHrefs)}`)
         /**
          * 负对照（**必须为假**）：直接在活页面上"拆掉"证据 —— 不改实现文件、不动服务端。
