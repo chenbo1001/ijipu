@@ -1759,6 +1759,18 @@ async function main() {
           frame.w >= 1000 && frame.h >= 1000 && frame.controls && frame.outside,
           JSON.stringify(frame),
         )
+        // adj1066：用户实报的 16:9 —— 相机位必须真的重建为 1920×1080 会话
+        await evalJs(
+          c,
+          `[...document.querySelectorAll('.dyn-frame-controls .dyn-frame-ratio')].find((b) => b.textContent.trim() === '16:9')?.click(), true`,
+        )
+        await waitFor(
+          c,
+          `(() => { const c = document.querySelector('.dyn-frame-box canvas'); return !!c && c.width === 1920 && c.height === 1080 })()`,
+          '相机位 16:9 画布',
+          60,
+        )
+        check('adj1066 16:9 相机位真的重建为 1920×1080 画布', true)
         await evalJs(c, `document.querySelector('.dyn-frame-close')?.click(), true`)
         await waitFor(c, `!document.querySelector('.dyn-frame-layer')`, '相机位关闭')
         check('adj1065 关闭相机位后层消失', true)

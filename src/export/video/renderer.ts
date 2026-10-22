@@ -210,7 +210,9 @@ export async function createDynamicSession(
   const headerFrame: CameraFrame = {
     pageIndex: 0,
     cx: camera.pageW / 2,
-    cy: camera.pageH / 2,
+    // adj1066：标题卡必须对准**描述头**。16:9 的取景框比页高矮，页面居中只看到中部的谱行，
+    // 描述头（页顶）被裁到画外 ⇒ 标记段看起来像没有片头（用户 2026-10-22 实报）。
+    cy: pageConfig.margin_top + pageConfig.descAreaH / 2,
     zoom: camera.viewW / camera.pageW,
   }
 
@@ -343,20 +345,35 @@ export async function createDynamicSession(
     ctx.fillRect(0, 0, W, H)
 
     ctx.textAlign = 'center'
+    /**
+     * adj1066（用户 2026-10-22 实报「16:9 片尾内容重叠」）：
+     * 旧写法字号按**宽 W**、纵向位置按**高 H**：16:9 时 W=1920 ⇒ 标题 157px，
+     * 而标题到标语只隔 0.07H=76px ⇒ 两行字直接叠在一起。
+     * 现在字号按 `min(W,H)` 定（16:9 时 108px），行距按**字号**留足，纵向整体居中。
+     */
+    const unit = Math.min(W, H)
+    const titleSize = Math.round(unit * 0.1)
+    const sloganSize = Math.round(unit * 0.045)
+    const urlSize = Math.round(unit * 0.032)
+    const titleY = H * 0.44
+    const sloganY = titleY + Math.round(titleSize * 0.95)
+    const urlY = H * 0.78
+    const accentY = titleY - titleSize * 1.05
+
     ctx.fillStyle = palette.neonCyan
-    ctx.fillRect(W * 0.42, H * 0.34, W * 0.16, Math.max(2, W * 0.004))
+    ctx.fillRect(W * 0.42, accentY, W * 0.16, Math.max(2, unit * 0.004))
 
     ctx.fillStyle = '#ffffff'
-    ctx.font = `bold ${Math.round(W * 0.082)}px ${font}`
-    ctx.fillText(`${brand.nameZh} ${brand.name}`, W / 2, H * 0.42)
+    ctx.font = `bold ${titleSize}px ${font}`
+    ctx.fillText(`${brand.nameZh} ${brand.name}`, W / 2, titleY)
 
     ctx.fillStyle = palette.neonCyan
-    ctx.font = `${Math.round(W * 0.046)}px ${font}`
-    ctx.fillText(brand.taglineMain, W / 2, H * 0.49)
+    ctx.font = `${sloganSize}px ${font}`
+    ctx.fillText(brand.taglineMain, W / 2, sloganY)
 
     ctx.fillStyle = 'rgba(255,255,255,0.72)'
-    ctx.font = `${Math.round(W * 0.032)}px ${font}`
-    ctx.fillText(brand.siteUrl.replace(/^https?:\/\//, ''), W / 2, H * 0.78)
+    ctx.font = `${urlSize}px ${font}`
+    ctx.fillText(brand.siteUrl.replace(/^https?:\/\//, ''), W / 2, urlY)
     ctx.restore()
   }
 
