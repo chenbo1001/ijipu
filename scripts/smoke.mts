@@ -32512,13 +32512,20 @@ function runDynamicCameraTests(): void {
   const at0 = cameraAt(cam, 0)
   check('M3 片头满宽（zoom = 1080/595.28 ≈ 1.81）', Math.abs(at0.zoom - cam.zoomFit) < 1e-9, String(at0.zoom))
   check(
-    'M3 片头整页可见（取景框比页高 ⇒ 纵向居中）',
-    Math.abs(at0.cy - cam.pageH / 2) < 1e-9,
-    `${at0.cy} vs ${cam.pageH / 2}`,
+    'M3 片头对准描述头（headerCy），不再停在整页中心',
+    Math.abs(at0.cy - cam.headerCy) < 1e-9,
+    `${at0.cy} vs ${cam.headerCy}`,
   )
 
   const after = cameraAt(cam, cam.firstT)
   check('M3 第一拍时已经推近到位（4×）', Math.abs(after.zoom - cam.zoomFollow) < 1e-9, String(after.zoom))
+  const midIntro = cameraAt(cam, cam.firstT - cam.introMs / 2)
+  check(
+    'M3 片头从描述头向第一行平移（中途位置在两端之间且确实移动了）',
+    midIntro.cy > Math.min(at0.cy, after.cy) + 1 &&
+      midIntro.cy < Math.max(at0.cy, after.cy) - 1,
+    `header=${at0.cy} mid=${midIntro.cy} after=${after.cy}`,
+  )
   check(
     'M3 缩放随时间单调不减（不会忽远忽近）',
     (() => {

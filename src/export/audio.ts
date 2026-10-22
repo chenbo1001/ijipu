@@ -48,6 +48,14 @@ export async function renderToAudioBuffer(
     midiSequence: midi,
     soundBankList: [{ bankOffset: 0, soundBankBuffer: soundBank }],
     loopCount: 0,
+    /**
+     * adj1063（用户 2026-10-22 实报「导出的 MP4 声音超前」）：
+     * SpessaSynth 的 Sequencer 默认 `skipToFirstNoteOn = true`——离线渲染会**跳到第一个音**，
+     * 把片头那段静音丢掉。而画面是按完整时间轴（含 `leadInMs`）出的 ⇒ 音轨从第一个音开始、
+     * 画面还停在描述头，听起来就是声音整体超前一个片头。
+     * 这里必须显式关掉：MIDI 里第一个音前面的 rest 要原样渲染成静音，音画才是同一条时间轴。
+     */
+    sequencerOptions: { skipToFirstNoteOn: false },
   })
   // startRendering() 渲染整图（含 worklet 输出 downmix 到 2ch），返回播放序列对应的 AudioBuffer
   return ctx.startRendering()

@@ -10436,6 +10436,48 @@ smoke 五条含"来源切换成对"结构断言与负对照） |
   ③ 多页布局里，球的坐标要换算到**同一套纵向坐标**，不能每页各算一颗（否则页边界必消失再出现）；
   ④ 真谱断言用**采样**找瞬移（10ms 相邻位移）和消失帧，比逐点断言更容易抓住"偶发乱跳"。
 
+## E-2026-487 导出 MP4 声音超前（用户 2026-10-22 实报，adj1063）
+
+- **现象**：导出的 MP4，声音比画面早；片头描述头还没结束，音乐已经进来。
+- **根因**：`src/export/audio.ts` 调 `WorkletSynthesizer.startOfflineRender()` 时只传了
+  `midiSequence / soundBankList / loopCount`。SpessaSynth 的 Sequencer 默认
+  `skipToFirstNoteOn = true`：离线渲染会**直接跳到第一个音**，把 MIDI 第一个音之前的 rest
+  （= 画面片头 `leadInMs` 的 2 秒）整段丢掉。画面是按完整时间轴逐帧出的 ⇒ 音轨整体超前一个片头。
+- **解决**：`startOfflineRender` 显式传 `sequencerOptions: { skipToFirstNoteOn: false }`，
+  首个音前的静音原样渲染。预览与导出共用 `renderToAudioBuffer`，两边一起修。
+- **预防**：凡"离线渲染/导出"都必须显式声明**时间轴起点**，不能依赖库的"跳到第一个音"默认；
+  片头/前置静音的时长与画面 `leadInMs` 同源（`session.events` 已带偏移）。
+
+## E-2026-488 动态谱片头没有平移到描述头（用户 2026-10-22 实报，adj1063）
+
+- **现象**：9:16 动态谱片头停在整页中心，描述头（标题/作者/调号）只缩在画面顶部，
+  没有"平移过去"。
+- **根因**：`createDynamicSession` 已经算出 `headerCy = margin_top + descAreaH/2` 并传给
+  `buildCameraTrack`、也存进了 `CameraTrack`，但 `cameraAt()` 片头纵向仍然用 `pageH/2`：
+  `cy = pageH/2 + (cy−pageH/2)×introK`。`headerCy` 从头到尾没被读；9:16 满宽时后面的
+  "取景框比页高 ⇒ 纵向居中"夹紧又把它盖掉 ⇒ 永远整页中心。
+- **解决**：片头纵向改成从 `headerCy` 过渡到"跟拍到位后的 `followCy`"：
+  `followCy` 先按 `zoomFollow` 夹紧，片头阶段不再二次夹紧（允许描述头上下留白），
+  `introK=1` 时正好接上 followCy；片头那一段 `pageIndex` 固定为第一行所在页。
+- **验证**：smoke `M3 片头对准描述头` / `M3 片头从描述头向第一行平移`。
+- **预防**：凡是"建进轨道/选项"的几何量，必须有消费端断言；否则就是死参数。
+
+## E-2026-489 动态谱预览没有声音（用户 2026-10-22 实报，adj1063）
+
+- **现象**：动态谱预览能播放画面，但完全没有声音；导出 MP4 有声音。
+- **根因**：`DynamicVideoDialog` 的播放循环只有 `requestAnimationFrame`，逐帧 `draw`；
+  文件头注释也写着"声音与出片是后续两步"——预览从未接音频。
+- **解决**：
+  · 新增 `export/video/audioPlayer.ts`：`DynamicAudioPlayer` 持有 `AudioBuffer` +
+    `AudioBufferSourceNode`，以 `AudioContext.currentTime` 为母钟报告"当前毫秒"；
+  · `DynamicVideoDialog` 复用 `renderToAudioBuffer(session.events)`（与导出一份），
+    首次播放按需渲染并缓存；播放/拖动/暂停/勾选「带声音」都走它；
+  · rAF 每帧优先用 `player.currentMs()`，没有音频才退回墙钟；有声音时音画同一条时间轴；
+  · 在点击的同步栈里 `unlock()` AudioContext（首次渲染可能几秒，避免手势失效导致 suspended）。
+- **验证**：tsc / smoke / build / verify:app-ui；真机播放需人工听（自动测试不能断言声音）。
+- **预防**：预览与导出必须共用同一份事件序列与音频渲染函数；预览的时钟以音频为准，
+  不能各走各的。
+
 
 
 

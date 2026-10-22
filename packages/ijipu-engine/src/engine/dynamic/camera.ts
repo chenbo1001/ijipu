@@ -265,11 +265,21 @@ export function cameraAt(cam: CameraTrack, t: number): CameraFrame {
   }
   // 片头从整页中心平滑过渡到当前行
   /**
-   * 片头纵向：取景框**比页面高**时（9:16 满宽就是这样）整页可见，纵向只能居中——
-   * 此时 `headerCy` 会被下面的夹紧覆盖（这是几何必然，不是 bug）。
-   * 只有取景框比页面矮时，`headerCy` 才真的生效。
+   * adj1063（用户 2026-10-22 实报「动态谱片头没有平移到描述头」）：
+   * 片头的纵向中心必须用 `headerCy`（描述头中间），不能用 `pageH/2`——
+   * 旧代码虽然把 `headerCy` 建进轨道，但这里从来没读它，片头永远停在整页中心，
+   * 描述头（标题/作者/调号）只是缩在画面顶部，看着就是"没平移过去"。
+   *
+   * 目标 `followCy` 先按**跟拍倍数**夹紧，片头阶段不再二次夹紧：
+   * 否则 9:16 满宽时 `pageH/2` 会把 headerCy 顶掉，或者中途被夹到一半跳一下。
+   * 片头允许描述头上下留白；推近完成后 `introK=1`，cy 正好等于 followCy，接上正常跟拍。
    */
-  cy = cam.pageH / 2 + (cy - cam.pageH / 2) * introK
+  const hhFollow = cam.viewH / cam.zoomFollow / 2
+  const followCy =
+    cam.pageH <= 2 * hhFollow
+      ? cam.pageH / 2
+      : Math.max(hhFollow, Math.min(cam.pageH - hhFollow, cy))
+  cy = cam.headerCy + (followCy - cam.headerCy) * introK
 
   // 横向：按关键帧的 from/dur 推移；换行那一帧 dur=0，直接在边界上归位
   let cx = cam.pans[0]?.cx ?? cam.pageW / 2
@@ -296,9 +306,8 @@ export function cameraAt(cam: CameraTrack, t: number): CameraFrame {
    */
   const hw = cam.viewW / zoom / 2
   cx = cam.pageW <= 2 * hw ? cam.pageW / 2 : Math.max(0, Math.min(cam.pageW, cx))
-  // 纵向保持"页面填满画面"：上下露白比左右露白更扎眼
-  const hh = cam.viewH / zoom / 2
-  cy = cam.pageH <= 2 * hh ? cam.pageH / 2 : Math.max(hh, Math.min(cam.pageH - hh, cy))
 
-  return { pageIndex: row.pageIndex, cx, cy, zoom }
+  // 片头那一段属于第一行的页（描述头在第 1 页）
+  const pageIndex = introK < 1 ? (cam.rows[0]?.pageIndex ?? row.pageIndex) : row.pageIndex
+  return { pageIndex, cx, cy, zoom }
 }

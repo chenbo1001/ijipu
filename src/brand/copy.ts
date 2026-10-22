@@ -1226,6 +1226,8 @@ export const dynamicVideoCopy = {
   pause: '暂停',
   reload: '重新载入当前谱',
   preparing: '正在准备画面…',
+  preparingAudio: '正在准备声音…',
+  previewAudioFailed: '预览声音渲染失败，画面继续静音',
   empty: '这份谱没有可播放的音符',
   audioHint: '带声音需要音色库（首次约 30MB）',
   overCap: '这首超过 3 分钟：只导出前 3 分钟，画面与声音一起截断',
