@@ -32714,6 +32714,17 @@ function runDynamicCameraTests(): void {
       midBeat !== null && Math.abs(midBeat.x - 200) < 1e-9,
       String(midBeat?.x),
     )
+    // 拍点正好是音符起点 ⇒ 落这块的正中（用户口径）
+    const twoNotes = [
+      { t0: 0, t1: 1500, cx: 150, top: 200, x: 0, w: 300 },
+      { t0: 1500, t1: 2500, cx: 400, top: 200, x: 300, w: 200 },
+    ]
+    const startBeat = ballAt(twoNotes, 1500, 1500, 0, 100)
+    check(
+      'M4 拍点是音符起点时落正中',
+      startBeat !== null && Math.abs(startBeat.x - 400) < 1e-9,
+      String(startBeat?.x),
+    )
   }
 
   // 带歌词的谱：歌词会填满行间空档，旧判定（按"行底含歌词"比间隙）会把相邻几行并成一行，

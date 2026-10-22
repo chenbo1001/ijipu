@@ -157,15 +157,15 @@ export function ballAt(
    */
   const target = a1
   /**
-   * 落点横向位置：拍点落在色块**内部**时按比例定位（附点/长音的第二拍就在音中间），
-   * 拍点在色块起点或外面时就是左缘。
+   * 落点横向位置（用户 2026-10-22 口径）：
+   *  - **拍点就是音符起点** ⇒ 落这个音色块的**正中**；
+   *  - **拍点在音的时值里**（附点/长音的第二拍等，不是音符起点）⇒ 按比例落在色块对应位置。
    */
   const landingX = (a: BallAnchor, beatT: number): number => {
-    if (a.x !== undefined && a.w !== undefined && a.t1 > a.t0) {
-      const f = Math.max(0, Math.min(1, (beatT - a.t0) / (a.t1 - a.t0)))
-      return a.x + a.w * f
-    }
-    return a.cx
+    const isNoteStart = Math.abs(beatT - a.t0) <= 5
+    if (isNoteStart || a.x === undefined || a.w === undefined || a.t1 <= a.t0) return a.cx
+    const f = Math.max(0, Math.min(1, (beatT - a.t0) / (a.t1 - a.t0)))
+    return a.x + a.w * f
   }
   const x0 = landingX(a0, b0)
   const x1 = landingX(target, b1)
