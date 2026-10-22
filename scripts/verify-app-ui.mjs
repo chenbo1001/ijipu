@@ -1774,6 +1774,28 @@ async function main() {
           introPixel[0] < 80 && introPixel[1] < 100,
           JSON.stringify(introPixel),
         )
+        // adj1070：控制条按钮对比度——生成视频实心青、选中态深底青字（不能浅底浅青字）
+        const camBtnStyles = await evalJs(
+          c,
+          `(() => {
+            const gen = getComputedStyle(document.querySelector('.dyn-frame-generate'))
+            const sel = getComputedStyle(document.querySelector('.dyn-frame-ratio.is-on'))
+            return {
+              genBg: gen.backgroundColor,
+              genColor: gen.color,
+              selBg: sel.backgroundColor,
+              selColor: sel.color
+            }
+          })()`,
+        )
+        check(
+          'adj1070 相机位按钮高对比：生成视频实心青、选中态深底青字',
+          camBtnStyles.genBg === 'rgb(0, 240, 255)' &&
+            camBtnStyles.genColor === 'rgb(11, 18, 32)' &&
+            camBtnStyles.selBg === 'rgba(0, 240, 255, 0.18)' &&
+            camBtnStyles.selColor === 'rgb(143, 251, 255)',
+          JSON.stringify(camBtnStyles),
+        )
         // adj1066：用户实报的 16:9 —— 相机位必须真的重建为 1920×1080 会话
         await evalJs(
           c,

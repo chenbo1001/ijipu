@@ -5718,12 +5718,14 @@ span.ws-check {
   font-size: 12px;
 }
 .dyn-frame-ratio.is-on {
-  border-color: rgb(0 240 255 / 80%);
-  color: #00f0ff;
+  border-color: #00f0ff;
+  background: rgb(0 240 255 / 18%);
+  color: #8ffbff;
+  font-weight: 600;
 }
 .dyn-frame-meta {
-  font-size: 11px;
-  color: #cfd8f5;
+  font-size: 12px;
+  color: #e8eefc;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -5754,13 +5756,43 @@ span.ws-check {
 .dyn-frame-controls .btn {
   padding: 3px 9px;
   font-size: 12px;
+  border: 1px solid rgb(120 150 220 / 35%);
+  background: #1b2747;
+  color: #e8eefc;
+}
+.dyn-frame-controls .btn:hover:not(:disabled) {
+  background: #24345c;
+  border-color: rgb(0 240 255 / 55%);
+}
+.dyn-frame-controls .btn:disabled {
+  opacity: 0.48;
+}
+/* 选中态必须压过 `.dyn-frame-controls .btn`（同色深底） */
+.dyn-frame-controls .dyn-frame-ratio.is-on {
+  border-color: #00f0ff;
+  background: rgb(0 240 255 / 18%);
+  color: #8ffbff;
+  font-weight: 600;
+}
+.dyn-frame-controls .dyn-frame-generate {
+  margin-left: auto;
+  border-color: #00f0ff;
+  background: #00f0ff;
+  color: #0b1220;
+  font-weight: 700;
+}
+.dyn-frame-controls .dyn-frame-generate:hover:not(:disabled) {
+  background: #5ff8ff;
+  border-color: #5ff8ff;
+  color: #0b1220;
 }
 .dyn-frame-controls .dyn-frame-play {
   min-width: 64px;
 }
 .dyn-frame-label {
-  font-size: 11px;
-  color: #8fa3cc;
+  font-size: 12px;
+  font-weight: 500;
+  color: #c7d4f0;
   white-space: nowrap;
 }
 .dyn-frame-audio {
@@ -5770,13 +5802,25 @@ span.ws-check {
   font-size: 12px;
   color: #e8eefc;
 }
+.dyn-frame-close {
+  min-width: 30px;
+  background: #1b2747;
+  color: #ffffff;
+}
 .dyn-frame-generate {
   margin-left: auto;
-  border-color: rgb(0 240 255 / 55%);
-  color: #00f0ff;
+  border-color: #00f0ff;
+  background: #00f0ff;
+  color: #0b1220;
+  font-weight: 700;
+}
+.dyn-frame-generate:hover:not(:disabled) {
+  background: #5ff8ff;
+  border-color: #5ff8ff;
+  color: #0b1220;
 }
 .dyn-frame-error {
-  font-size: 11px;
+  font-size: 12px;
   color: #ff9aa8;
   line-height: 1.4;
 }
