@@ -5818,7 +5818,23 @@ span.ws-check {
 .card-style-form {
   display: flex;
   flex-direction: column;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+/* 关键：内容区独立滚动，底部按钮固定；否则 .modal.fill 的 overflow:hidden 会把下面全截掉 */
+.card-style-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  padding-right: 4px;
+}
+.card-style-ok {
+  font-size: 12px;
+  color: var(--jp-success);
 }
 .card-style-intro {
   margin: 0;
@@ -5943,7 +5959,11 @@ span.ws-check {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-  padding-top: 4px;
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px solid var(--jp-border);
+  background: var(--jp-bg-panel);
+  flex: 0 0 auto;
 }
 .card-style-footer .card-style-save {
   border-color: var(--jp-accent);

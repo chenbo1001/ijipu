@@ -10679,6 +10679,26 @@ smoke 五条含"来源切换成对"结构断言与负对照） |
   全部 99 项通过；tsc / build / smoke / lint / encoding 全绿。
 - **预防**：自定义只产 `CardStyle` 数据；不新增绘制分支；背景图必须在会话创建时解码一次，不能每帧 new Image。
 
+## E-2026-502 卡片对话框不能滚动、按钮点不到；模板不能导出/导入 zip（用户 2026-10-22 实报，adj1075）
+
+- **现象**：卡片风格对话框内容比屏幕高，但页面不滚动，下面内容和「保存」按钮看不到、点不到；
+  模板只能存在本机，换机器/发给别人无法迁移。
+- **根因**：对话框用了 `Modal fill`，而 `.modal.fill` 是 `overflow:hidden`；`.card-style-form` 没有
+  自己的滚动区，整份表单被截断。模板也没有序列化交换格式。
+- **解决**：
+  · 表单改成 **内容区滚动 + 底部按钮固定**：`.card-style-scroll`（`flex:1; min-height:0; overflow-y:auto`）
+    包住所有 section，`.card-style-footer` 留在滚动区外；保存按钮始终可见；
+  · 新增 `export/video/cardTemplateZip.ts`：**零第三方依赖**的最小 ZIP 读写（store 条目、UTF-8 文件名、
+    CRC32 复用引擎）；包内容 `card.json + background.* + README.txt`；
+  · 对话框「模板迁移」：导出当前草稿为 `ijipu-card.zip`；导入 zip 后先回填草稿，检查后再保存；
+    `card.json` 里的 `backgroundImage` 置 null、图片单独放 background.*，导入再还原 data URL；
+  · zip 里的背景图按 MIME 扩展名（png/jpg/webp/gif）还原；非 store 条目给出明确错误。
+- **验证**：smoke 新增 `adj1075 卡片模板 zip 往返（JSON + 背景图）`；
+  `verify:app-ui` 新增 1 条（内容区可滚动、底部保存固定、含导入/导出 zip），全部 100 项通过；
+  tsc / build / smoke / lint / encoding 全绿。
+- **预防**：`Modal fill` 的对话框一律「滚动区 + 固定底栏」，不要把长表单直接塞进 `.modal-body`；
+  模板交换格式只产 `card.json + background.*`，图片不要塞进 JSON。
+
 
 
 

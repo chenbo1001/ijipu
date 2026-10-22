@@ -15,6 +15,7 @@ import {
   cardStyleById,
   type CardStyle,
 } from '../export/video/cardTemplates'
+import { createCardTemplateZip, readCardTemplateZip } from '../export/video/cardTemplateZip'
 import { useUiStore, type DynamicCardStyleId } from '../store/uiStore'
 
 const MAX_IMAGE_BYTES = 2_500_000
@@ -123,6 +124,8 @@ export function CardStyleDialog() {
   const [draft, setDraft] = useState<CardStyle>(() => cloneStyle(custom ?? cardStyleById(current)))
   const [base, setBase] = useState<DynamicCardStyleId>(current === 'custom' ? 'brand' : current)
   const [imageError, setImageError] = useState('')
+  const [zipMsg, setZipMsg] = useState('')
+  const [zipError, setZipError] = useState(false)
 
   const patch = (p: Partial<CardStyle>) => setDraft((d) => ({ ...d, ...p }))
 
@@ -146,6 +149,41 @@ export function CardStyleDialog() {
     reader.readAsDataURL(file)
   }
 
+  const exportZip = () => {
+    try {
+      const bytes = createCardTemplateZip(draft)
+      // TS 6 的 BlobPart 只认 ArrayBuffer；这里复制一份，避开 Uint8Array<ArrayBufferLike> 的类型冲突
+      const buffer = new ArrayBuffer(bytes.byteLength)
+      new Uint8Array(buffer).set(bytes)
+      const blob = new Blob([buffer], { type: 'application/zip' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'ijipu-card.zip'
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      setZipError(false)
+      setZipMsg(cardStyleCopy.exported)
+    } catch (e) {
+      setZipError(true)
+      setZipMsg(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const onPickZip = async (file: File | null) => {
+    if (!file) return
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      const style = readCardTemplateZip(bytes)
+      setDraft({ ...style, id: 'custom', name: '自定义', description: '用户自定义卡片' })
+      setZipError(false)
+      setZipMsg(cardStyleCopy.imported)
+    } catch (e) {
+      setZipError(true)
+      setZipMsg(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   const save = () => {
     setCustom({ ...draft, id: 'custom', name: '自定义', description: '用户自定义卡片' })
     closeModal()
@@ -154,6 +192,7 @@ export function CardStyleDialog() {
   return (
     <Modal title={cardStyleCopy.title} fill width={620}>
       <div className="card-style-form">
+        <div className="card-style-scroll">
         <p className="card-style-intro">{cardStyleCopy.intro}</p>
 
         <section className="card-style-section">
@@ -440,6 +479,28 @@ export function CardStyleDialog() {
           </div>
           {imageError && <p className="card-style-error">{imageError}</p>}
         </section>
+
+        <section className="card-style-section">
+          <h3>{cardStyleCopy.migrate}</h3>
+          <div className="card-style-row">
+            <button type="button" className="btn" onClick={exportZip}>
+              {cardStyleCopy.exportZip}
+            </button>
+            <label className="btn card-style-file">
+              {cardStyleCopy.importZip}
+              <input
+                type="file"
+                accept=".zip,application/zip"
+                onChange={(e) => void onPickZip(e.target.files?.[0] ?? null)}
+              />
+            </label>
+            {zipMsg && (
+              <span className={zipError ? 'card-style-error' : 'card-style-ok'}>{zipMsg}</span>
+            )}
+          </div>
+          <p className="card-style-intro">{cardStyleCopy.migrateHint}</p>
+        </section>
+        </div>
 
         <div className="card-style-footer">
           <button type="button" className="btn" onClick={() => applyBase(base)}>

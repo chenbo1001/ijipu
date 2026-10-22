@@ -101,6 +101,9 @@ import { buildFlowView, frameAt, frameTimeMs, frameIndexAt, dynamicPageConfig } 
 import { buildCameraTrack, cameraAt, ballAt, BALL_LANDING_TIMING } from '@ijipu/engine/index.ts'
 // adj1068：调号显示口径（描述头与动态视频片头卡共用）
 import { keySignatureOf } from '@ijipu/engine/index.ts'
+// adj1075：卡片模板 zip 往返（纯函数，Node 里直接验）
+import { createCardTemplateZip, readCardTemplateZip } from '../src/export/video/cardTemplateZip.ts'
+import { DEFAULT_CARD_STYLE } from '../src/export/video/cardTemplates.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
@@ -33197,4 +33200,28 @@ function runDynamicCameraTests(): void {
   }
   // 2026-10-22 用户口径：色块在 20%~80% 之间走（到 4/5 推、推到 1/5）⇒ 断言留一点余量
   check('M3 跟拍时色块落在画面中间带（横向 15%~85%）', offCenter === '', offCenter)
+}
+
+// adj1075：卡片模板 zip 往返（card.json + background.png + README.txt）
+{
+  const png =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  const style = {
+    ...DEFAULT_CARD_STYLE,
+    id: 'custom',
+    name: '自定义',
+    description: 'zip roundtrip',
+    backgroundImage: png,
+  }
+  const zipBytes = createCardTemplateZip(style)
+  const back = readCardTemplateZip(zipBytes)
+  check(
+    'adj1075 卡片模板 zip 往返（JSON + 背景图）',
+    zipBytes[0] === 0x50 &&
+      zipBytes[1] === 0x4b &&
+      back.name === '自定义' &&
+      back.accent === style.accent &&
+      back.backgroundImage === png,
+    `${zipBytes.length} bytes / ${String(back.backgroundImage).slice(0, 32)}`,
+  )
 }

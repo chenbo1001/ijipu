@@ -1886,6 +1886,29 @@ async function main() {
           'adj1074 相机位能打开自定义卡片对话框',
           await evalJs(c, `!!document.querySelector('.card-style-save')`),
         )
+        const cardDialog = await evalJs(
+          c,
+          `(() => {
+            const form = document.querySelector('.card-style-form')
+            const scroll = document.querySelector('.card-style-scroll')
+            return {
+              scroll: !!scroll,
+              overflow: scroll ? getComputedStyle(scroll).overflowY : '',
+              save: !!document.querySelector('.card-style-save'),
+              exportZip: !!form && [...form.querySelectorAll('button')].some((b) => b.textContent.includes('导出模板')),
+              importZip: !!form && !!form.querySelector('input[type=file][accept*="zip"]')
+            }
+          })()`,
+        )
+        check(
+          'adj1075 卡片对话框内容可滚动、底部保存固定、含导入/导出 zip',
+          cardDialog.scroll &&
+            cardDialog.overflow === 'auto' &&
+            cardDialog.save &&
+            cardDialog.exportZip &&
+            cardDialog.importZip,
+          JSON.stringify(cardDialog),
+        )
         await evalJs(c, `document.querySelector('.card-style-save')?.click(), true`)
         await waitFor(c, `!document.querySelector('.card-style-form')`, '卡片风格对话框关闭', 30)
         await waitFor(
