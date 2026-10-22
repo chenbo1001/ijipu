@@ -105,10 +105,23 @@ export function ballAt(
   const a0 = anchorAt(anchors, b0) ?? nextAnchor(anchors, b0) ?? first
   const a1 = anchorAt(anchors, b1) ?? nextAnchor(anchors, b1) ?? a0
   const u = Math.max(0, Math.min(1, (t - b0) / beatMs))
-  // 跨行默认照常横飞（飞向下一行行首）；只有显式给了 lineJump 且超出时才截断
-  const lineJump = opts.lineJump ?? Number.POSITIVE_INFINITY
-  const sameLine = Math.abs(a1.top - a0.top) <= lineJump
-  const x = sameLine ? a0.cx + (a1.cx - a0.cx) * u : a0.cx
-  const base = sameLine ? a0.top + (a1.top - a0.top) * u : a0.top
+  /**
+   * 跨行保护（用户实报「还没到一行最后一拍就往左飞」）：
+   *
+   * 弱起谱的拍网格是从**第一个音**开始数的，弱起不是整拍时网格会整体漂移，
+   * 漂到某处"下一拍"已经越过本行末尾 ⇒ 球提前飞向下一行。
+   *
+   * 判据不看拍子，看**本行还有没有音**：`top` 相同即同一行。
+   * 本行还有音 ⇒ 先飞本行下一个音；本行确实结束了 ⇒ 才飞下一行行首（这是对的）。
+   */
+  const rowEps = opts.lineJump ?? 60
+  const crossRow = Math.abs(a1.top - a0.top) > rowEps
+  let target = a1
+  if (crossRow) {
+    const sameRowNext = anchors.find((a) => a.t0 > a0.t0 && Math.abs(a.top - a0.top) <= rowEps)
+    if (sameRowNext) target = sameRowNext
+  }
+  const x = a0.cx + (target.cx - a0.cx) * u
+  const base = a0.top + (target.top - a0.top) * u
   return { x, y: base - 4 * u * (1 - u) * amp, u }
 }
