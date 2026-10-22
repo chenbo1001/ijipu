@@ -98,7 +98,7 @@ import { buildRectTrack, rectsActiveAt } from '@ijipu/engine/index.ts'
 // M1-1 第二段：流式视图（分页 → 条带行）与出帧（时刻 → 一帧）
 import { buildFlowView, frameAt, frameTimeMs, frameIndexAt, dynamicPageConfig } from '@ijipu/engine/index.ts'
 // M1-3：相机（满宽片头 → 推近 → 安全区跟拍）
-import { buildCameraTrack, cameraAt } from '@ijipu/engine/index.ts'
+import { buildCameraTrack, cameraAt, ballAt } from '@ijipu/engine/index.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
@@ -32621,6 +32621,27 @@ function runDynamicCameraTests(): void {
     }
   }
   check('M3 色块纵向也落在视界内', offVertical === '', offVertical)
+
+  /**
+   * 跳跳球的相位（用户追问「是不是高点落在拍子上」）：
+   * 落地 = 拍点，最高点 = 拍中间。这里直接用合成锚点取样，不受谱面影响。
+   */
+  {
+    const anchors = [
+      { t0: 0, t1: 1000, cx: 100, top: 200 },
+      { t0: 1000, t1: 2000, cx: 200, top: 200 },
+    ]
+    const at = (t: number) => ballAt(anchors, t, 1000, 0, 100)
+    check('M4 球在拍点**落地**（y = 色块上沿）', at(0)?.y === 200, String(at(0)?.y))
+    check('M4 球在拍中间**最高**（y = 落点 − 弹幅）', Math.abs((at(500)?.y ?? 0) - 100) < 1e-9, String(at(500)?.y))
+    check('M4 第二拍再次落地', Math.abs((at(1000)?.y ?? 0) - 200) < 1e-9, String(at(1000)?.y))
+    check('M4 横向在两落点之间（50%）', Math.abs((at(500)?.x ?? 0) - 150) < 1e-9, String(at(500)?.x))
+    // 负对照：把相位倒过来（高点在拍点）应当被这些断言抓住
+    check(
+      'M4 负对照：拍点高度严格低于拍中间',
+      (at(0)?.y ?? 0) > (at(250)?.y ?? 0) && (at(1000)?.y ?? 0) > (at(750)?.y ?? 0),
+    )
+  }
 
   // 带歌词的谱：歌词会填满行间空档，旧判定（按"行底含歌词"比间隙）会把相邻几行并成一行，
   // 相机于是对到整块中间、第一行色块掉出框（用户实报）。这里用 6 行 Q+C 锁住。
