@@ -55,6 +55,7 @@ const VoicePickerDialog = lazy(() => import('./dialogs/VoicePickerDialog').then(
 const FileDiffDialog = lazy(() => import('./dialogs/FileDiffDialog').then((m) => ({ default: m.FileDiffDialog })))
 // adj963（用户要求）：「保存到工作区」专用对话框（插件嵌入版的保存主入口）
 const SaveAsDialog = lazy(() => import('./dialogs/SaveAsDialog').then((m) => ({ default: m.SaveAsDialog })))
+const CardStyleDialog = lazy(() => import('./dialogs/CardStyleDialog').then((m) => ({ default: m.CardStyleDialog })))
 
 function App() {
   const viewType = useDocStore((s) => s.viewType)
@@ -658,6 +659,8 @@ function App() {
       {/* adj509：试听音色选择对话框（音色库「指定音色」按钮触发） */}
       {modal === 'voicePicker' && <Suspense fallback={null}><VoicePickerDialog /></Suspense>}
       {modal === 'saveAs' && <Suspense fallback={null}><SaveAsDialog /></Suspense>}
+      {/* adj1074：自定义卡片风格（相机位「自定义…」触发） */}
+      {modal === 'cardStyle' && <Suspense fallback={null}><CardStyleDialog /></Suspense>}
       {/* adj928：两栏源码差异框（确认条 → 「查看差异」；左本地 / 右外部，可直接做决定） */}
       {fileDiff && <Suspense fallback={null}><FileDiffDialog /></Suspense>}
     </div>

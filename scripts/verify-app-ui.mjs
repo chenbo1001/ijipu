@@ -1806,7 +1806,9 @@ async function main() {
         )
         check(
           'adj1073 相机位有卡片模板选择（4 个预设）',
-          !!cardSelect && cardSelect.value === 'brand' && cardSelect.options.length === 4,
+          !!cardSelect &&
+            cardSelect.value === 'brand' &&
+            ['brand', 'paper', 'ink', 'minimal'].every((id) => cardSelect.options.includes(id)),
           JSON.stringify(cardSelect),
         )
         await evalJs(
@@ -1876,6 +1878,31 @@ async function main() {
           })()`,
           '相机位品牌卡片会话',
           60,
+        )
+        // adj1074：打开“自定义卡片”对话框 → 保存 → 成为当前自定义模板
+        await evalJs(c, `document.querySelector('.dyn-frame-card-edit')?.click(), true`)
+        await waitFor(c, `!!document.querySelector('.card-style-form')`, '卡片风格对话框', 30)
+        check(
+          'adj1074 相机位能打开自定义卡片对话框',
+          await evalJs(c, `!!document.querySelector('.card-style-save')`),
+        )
+        await evalJs(c, `document.querySelector('.card-style-save')?.click(), true`)
+        await waitFor(c, `!document.querySelector('.card-style-form')`, '卡片风格对话框关闭', 30)
+        await waitFor(
+          c,
+          `(() => {
+            const c = document.querySelector('.dyn-frame-box canvas')
+            return !!c && c.width === 1080 && c.height === 1920 &&
+              document.querySelector('.dyn-frame-select')?.value === 'custom'
+          })()`,
+          '相机位自定义卡片会话',
+          60,
+        )
+        const customStored = await evalJs(c, `localStorage.getItem('ijipu.dynamicCardStyleCustom')`)
+        check(
+          'adj1074 自定义卡片已保存并成为当前模板',
+          typeof customStored === 'string' && customStored.includes('"id":"custom"'),
+          String(customStored).slice(0, 80),
         )
         // adj1071：控制条必须跟随主题变量（深/浅两套都验），不能写死深色
         const camBtnStyles = await evalJs(

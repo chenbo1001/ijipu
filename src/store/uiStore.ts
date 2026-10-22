@@ -17,7 +17,11 @@ import { defaultMarkName, nextMarkId, type PracticeMark } from './practiceMarks'
 // L1「用户个性」：编辑器偏好 + 字体覆盖（不进谱面；详见 docs/SETTINGS-AUDIT.md 分层）
 import { loadEditorFont, loadEditorFontSize, loadFontOverride, saveEditorFont, saveEditorFontSize, saveFontOverride } from './editorPrefs'
 import type { FontOverride } from '@ijipu/engine'
-import type { CardTemplateId } from '../export/video/cardTemplates'
+import {
+  normalizeCardStyle,
+  type CardStyle,
+  type CardTemplateId,
+} from '../export/video/cardTemplates'
 // adj965d：`OverlayLayer`（`'wm' | 'bg'`）的唯一出处是**引擎**（`overlayGesture.ts`）——
 // 它是"水印层/背景层"这个领域概念，应用与插件共用；store 只在这里给它一个"用户选中的那层"的槽位
 export type { OverlayLayer } from '@ijipu/engine'
@@ -34,7 +38,7 @@ import type { OverlayLayer } from '@ijipu/engine'
 // adj957（用户裁定）：加上 `'cli'` —— 命令行手册改用应用内 `DocDialog` 打开
 // （原先只能靠"系统默认程序打开随包 MD"，Windows 默认没有 .md 关联程序 ⇒ 多半弹「如何打开」）
 // adj963（用户要求）：加上 `'saveAs'` —— 「保存到工作区」专用对话框（插件模式的保存主入口）
-export type ModalKind = 'samples' | 'shortcuts' | 'manual' | 'syntax' | 'cli' | 'donate' | 'voicePicker' | 'saveAs'
+export type ModalKind = 'samples' | 'shortcuts' | 'manual' | 'syntax' | 'cli' | 'donate' | 'voicePicker' | 'saveAs' | 'cardStyle'
 
 /** 动态谱相机位比例（与引擎 `DynamicPresetId` 同形；store 不引引擎类型，避免反向依赖） */
 export type DynamicAspect = '9x16' | '1x1' | '16x9'
@@ -52,7 +56,7 @@ export interface DynamicCameraState {
 }
 
 /** adj1073：动态谱片头/片尾卡片模板（L1 用户偏好，持久化；不写进 .jps） */
-export type DynamicCardStyleId = CardTemplateId
+export type DynamicCardStyleId = CardTemplateId | 'custom'
 
 /**
  * adj462：底部 dock 的面板（互斥，同一时间只显示一块）。
@@ -130,13 +134,28 @@ const SHOW_SCRIPT_PAD_KEY = 'ijipu.showScriptPad'
 const SHOW_GUIDES_KEY = 'ijipu.showGuides'
 /** adj1073：动态谱片头/片尾卡片模板（L1 用户偏好；不写进谱面） */
 const DYNAMIC_CARD_STYLE_KEY = 'ijipu.dynamicCardStyle'
-const DYNAMIC_CARD_STYLE_IDS: readonly DynamicCardStyleId[] = ['brand', 'paper', 'ink', 'minimal']
+const DYNAMIC_CARD_STYLE_CUSTOM_KEY = 'ijipu.dynamicCardStyleCustom'
+const DYNAMIC_CARD_STYLE_IDS: readonly CardTemplateId[] = ['brand', 'paper', 'ink', 'minimal']
 
-function loadDynamicCardStyle(): DynamicCardStyleId {
+/** adj1074：自定义卡片样式（含背景图 data URL）；坏数据回退 null，不让预览打不开 */
+function loadCustomCardStyle(): CardStyle | null {
+  try {
+    const raw = localStorage.getItem(DYNAMIC_CARD_STYLE_CUSTOM_KEY)
+    if (!raw) return null
+    return normalizeCardStyle(JSON.parse(raw) as Partial<CardStyle>)
+  } catch {
+    return null
+  }
+}
+
+const initialCustomCardStyle = loadCustomCardStyle()
+
+function loadDynamicCardStyle(custom: CardStyle | null): DynamicCardStyleId {
   try {
     const v = localStorage.getItem(DYNAMIC_CARD_STYLE_KEY)
-    return DYNAMIC_CARD_STYLE_IDS.includes(v as DynamicCardStyleId)
-      ? (v as DynamicCardStyleId)
+    if (v === 'custom') return custom ? 'custom' : 'brand'
+    return DYNAMIC_CARD_STYLE_IDS.includes(v as CardTemplateId)
+      ? (v as CardTemplateId)
       : 'brand'
   } catch {
     return 'brand'
@@ -392,6 +411,10 @@ interface UiState {
   /** adj1073：片头/片尾卡片模板（L1 用户偏好，落盘；预设/以后的自定义） */
   dynamicCardStyle: DynamicCardStyleId
   setDynamicCardStyle: (id: DynamicCardStyleId) => void
+  /** adj1074：用户自定义卡片（含背景图）；null = 还没创建 */
+  dynamicCardStyleCustom: CardStyle | null
+  setDynamicCardStyleCustom: (style: CardStyle) => void
+  resetDynamicCardStyleCustom: () => void
   /**
    * adj905q（用户规格见 `docs/PREVIEW-DEBUG-BOUNDARIES.md`）：**预览可视调试**开关。
    * 开启后在预览里叠加「时值格 / 墨迹 / 段层」三套边界虚线（几何来自引擎
@@ -757,7 +780,9 @@ export const useUiStore = create<UiState>()((set) => ({
   // adj1065：动态谱相机位（L3 会话级，不落盘）
   dynamicCamera: { on: false, aspect: '9x16', range: null, mode: '3min' },
   // adj1073：卡片模板（L1，落盘；未知 id 回退 brand）
-  dynamicCardStyle: loadDynamicCardStyle(),
+  dynamicCardStyle: loadDynamicCardStyle(initialCustomCardStyle),
+  // adj1074：自定义卡片（L1，落盘；坏数据回退 null）
+  dynamicCardStyleCustom: initialCustomCardStyle,
   // adj905q：预览可视调试 —— **L3 会话级**，刻意不读 localStorage（重开即恢复默认关）
   debugBounds: false,
   // adj965d（EP-13）：预览区 Alt 手势默认调**背景层**（L3 会话级，不落盘）
@@ -853,6 +878,27 @@ export const useUiStore = create<UiState>()((set) => ({
       // 忽略隐私模式/配额异常
     }
     set({ dynamicCardStyle: id })
+  },
+  // adj1074：保存自定义卡片（L1）；背景图是 data URL，保存失败（配额）时仍切到自定义，界面提示由对话框负责
+  setDynamicCardStyleCustom: (style) => {
+    const normalized = normalizeCardStyle({ ...style, id: 'custom', name: style.name || '自定义' })
+    try {
+      localStorage.setItem(DYNAMIC_CARD_STYLE_CUSTOM_KEY, JSON.stringify(normalized))
+    } catch {
+      // 配额/隐私模式：保留内存中的自定义，不阻断预览
+    }
+    set({ dynamicCardStyleCustom: normalized, dynamicCardStyle: 'custom' })
+  },
+  resetDynamicCardStyleCustom: () => {
+    try {
+      localStorage.removeItem(DYNAMIC_CARD_STYLE_CUSTOM_KEY)
+    } catch {
+      // 忽略
+    }
+    set((s) => ({
+      dynamicCardStyleCustom: null,
+      dynamicCardStyle: s.dynamicCardStyle === 'custom' ? 'brand' : s.dynamicCardStyle,
+    }))
   },
   // adj965d：Alt 手势调哪一层（L3 会话级）——**不落盘**；默认背景层：
   // 需要摆位置的通常是垫进来的那张背景图（水印多为居中一个）

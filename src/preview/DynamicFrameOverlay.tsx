@@ -53,6 +53,10 @@ export function DynamicFrameOverlay() {
   const setDynamicCamera = useUiStore((s) => s.setDynamicCamera)
   const cardStyle = useUiStore((s) => s.dynamicCardStyle)
   const setDynamicCardStyle = useUiStore((s) => s.setDynamicCardStyle)
+  const customCardStyle = useUiStore((s) => s.dynamicCardStyleCustom)
+  const openModal = useUiStore((s) => s.openModal)
+  const effectiveCardStyle =
+    cardStyle === 'custom' && customCardStyle ? customCardStyle : cardStyleById(cardStyle)
   const code = useDocStore((s) => s.code)
   const pageConfig = useDocStore((s) => s.pageConfig)
 
@@ -187,7 +191,7 @@ export function DynamicFrameOverlay() {
       range,
       leadInMs: LEAD_IN_MS,
       maxMs: mode === '3min' ? EXPORT_MAX_MS : undefined,
-      cardStyle: cardStyleById(cardStyle),
+      cardStyle: effectiveCardStyle,
     })
       .then((s) => {
         if (cancelled) return
@@ -207,7 +211,7 @@ export function DynamicFrameOverlay() {
     return () => {
       cancelled = true
     }
-  }, [on, aspect, code, pageConfig, range, mode, cardStyle, paint])
+  }, [on, aspect, code, pageConfig, range, mode, effectiveCardStyle, paint])
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
 
@@ -435,8 +439,19 @@ export function DynamicFrameOverlay() {
                 {t.name}
               </option>
             ))}
+            {customCardStyle && (
+              <option value="custom">{dynamicVideoCopy.cardCustomName}</option>
+            )}
           </select>
-          <span className="dyn-frame-meta">{cardStyleById(cardStyle).description}</span>
+          <button
+            type="button"
+            className="btn dyn-frame-card-edit"
+            disabled={encoding || preparingAudio}
+            onClick={() => openModal('cardStyle')}
+          >
+            {dynamicVideoCopy.cardCustom}
+          </button>
+          <span className="dyn-frame-meta">{effectiveCardStyle.description}</span>
         </div>
 
         <div className="dyn-frame-controls-row">

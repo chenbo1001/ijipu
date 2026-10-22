@@ -115,6 +115,20 @@ export async function createDynamicSession(
 ): Promise<DynamicSession> {
   const preset = DYNAMIC_PRESETS[presetId]
   const card = opts?.cardStyle ?? DEFAULT_CARD_STYLE
+  /**
+   * adj1074：自定义卡片可以带一张背景图（data URL/文件 URL）。
+   * 在这里一次性解码，之后预览与导出都画同一张，不在每帧 new Image。
+   */
+  let cardImage: HTMLImageElement | null = null
+  if (card.backgroundImage) {
+    try {
+      cardImage = new Image()
+      cardImage.src = card.backgroundImage
+      await cardImage.decode()
+    } catch {
+      cardImage = null
+    }
+  }
   const parsed = parseJps(code)
   const layout = layoutScore(parsed, pageConfig)
   const beat = bpm !== undefined && bpm > 0 ? bpm : inferBpm(parsed)
@@ -241,6 +255,19 @@ export async function createDynamicSession(
     g.addColorStop(1, card.bg[2])
     ctx.fillStyle = g
     ctx.fillRect(0, 0, W, H)
+    if (cardImage) {
+      // 自定义背景图：cover 裁切，再压一层主题色，保证任何图上标题都可读
+      const iw = cardImage.naturalWidth || W
+      const ih = cardImage.naturalHeight || H
+      const z = Math.max(W / iw, H / ih)
+      const dw = iw * z
+      const dh = ih * z
+      ctx.drawImage(cardImage, (W - dw) / 2, (H - dh) / 2, dw, dh)
+      ctx.fillStyle = card.bg[1]
+      ctx.globalAlpha = baseAlpha * 0.55
+      ctx.fillRect(0, 0, W, H)
+      ctx.globalAlpha = baseAlpha
+    }
 
     const glow = (x: number, y: number, r: number, color: string) => {
       const rg = ctx.createRadialGradient(x, y, 0, x, y, r)
