@@ -32,8 +32,9 @@ import {
   playheadPosIn,
   instrumentColorMap,
   playheadBaseOf,
+  ballAt,
 } from '@ijipu/engine'
-import type { ScorePage, PageConfig } from '@ijipu/engine'
+import type { ScorePage, PageConfig, BallAnchor } from '@ijipu/engine'
 // adj965（方案「OVL」，EP-10）：水印/背景图的资源状态（订阅 + 并进渲染参数）
 import { getOverlaySnapshot, subscribeOverlayAssets, withOverlay } from '../store/overlayAssets'
 // adj965d（方案「OVL」，EP-13）：预览区里调水印/背景层的 **Alt 手势**——判定与换算在**引擎**里
@@ -1218,28 +1219,32 @@ function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }
    * 只画主声部那一颗（多声部各画一颗会打架）。
    */
   let ball: React.JSX.Element | null = null
-  for (const [, segs] of items) {
-    const pos = playheadPosIn(segs, currentMs, page.index, noteSize)
-    if (!pos) continue
-    if (pos.playVoice !== undefined && pos.playVoice !== 'main') continue
-    const seg = segs.find((s) => currentMs >= s.atMs && currentMs < s.atMs + s.durationMs)
-    if (!seg || seg.durationMs <= 0 || beatMs <= 0) continue
-    // 相位按**拍网格**算：一拍里两个八分音符也只落一次
-    const u = (((currentMs - beatAnchorMs) / beatMs) % 1 + 1) % 1
-    const hop = 4 * u * (1 - u)
-    const rad = noteSize * 0.26
-    const blockH = pos.yBottom - pos.yTop
-    const cx = pos.x + pos.width / 2
-    // 球心 = 色块上沿 − 半径 − 弹起高度 ⇒ 落点正好压在色块上沿
-    const cy = pos.yTop - rad - hop * blockH
-    ball = (
-      <div
-        className="beat-ball"
-        style={{ left: pct(cx - rad), top: pctY(cy - rad), width: pct(rad * 2) }}
-        aria-hidden="true"
-      />
-    )
-    break
+  if (beatMs > 0) {
+    // 落点表：主声部色块（上沿中心），球按抛体轨迹在拍与拍之间飞
+    const anchors: BallAnchor[] = []
+    for (const [, segs] of items) {
+      for (const s of segs) {
+        if (s.playVoice !== undefined && s.playVoice !== 'main') continue
+        if (s.durationMs <= 0) continue
+        anchors.push({
+          t0: s.atMs,
+          t1: s.atMs + s.durationMs,
+          cx: s.x + s.width / 2,
+          top: s.yTopMin ?? s.y - noteSize * 1.6,
+        })
+      }
+    }
+    const bp = ballAt(anchors, currentMs, beatMs, beatAnchorMs, noteSize * 3.2)
+    if (bp) {
+      const rad = noteSize * 0.28
+      ball = (
+        <div
+          className="beat-ball"
+          style={{ left: pct(bp.x - rad), top: pctY(bp.y - rad), width: pct(rad * 2) }}
+          aria-hidden="true"
+        />
+      )
+    }
   }
 
   return (

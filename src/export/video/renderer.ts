@@ -28,6 +28,7 @@ import {
   cameraAt,
   resolvePracticeRange,
   slicePlaySequenceByRange,
+  ballAt,
   DYNAMIC_PRESETS,
   type DynamicPresetId,
   type PageConfig,
@@ -137,6 +138,14 @@ export async function createDynamicSession(
   const ball = opts?.ball !== false
   const endCardMs = Math.max(0, opts?.endCardMs ?? 2500)
   const musicEndMs = track.endMs
+  /**
+   * 跳跳球的落点表：只取主声部（多声部各飞一颗会打架）。
+   * 球是**抛体**：每拍落下一次，落点 = 那一拍开始时色块上沿的中心。
+   */
+  const ballAnchors = track.rects
+    .filter((r) => r.playVoice === undefined || r.playVoice === 'main')
+    .map((r) => ({ t0: r.t0, t1: r.t1, cx: r.x + r.w / 2, top: r.y }))
+  const beatMs = 60000 / beat
   // 段导出：片头用"第 1 页描述头"的标题卡，再交叉淡入到段首（不平移，免得横跨几页乱飞）
   const crossfadeIntro = skipIntro
   // 标题卡：满宽 + 整页居中（9:16 的取景框比页高，纵向只能居中）
@@ -211,21 +220,13 @@ export async function createDynamicSession(
        * 跳跳球：每拍弹一次，**落地那一刻正好是下一拍开始**。
        * 高度用抛物线 `4u(1-u)`，u = 本拍已过的比例 ⇒ u=0 落地、u=1 落地。
        */
-      if (ball && active.length > 0) {
-        const r = active.find((q) => q.playVoice !== 'accomp' && q.playVoice !== 'second') ?? active[0]
-        /**
-         * 按**拍网格**算相位（不是按音）：
-         * 一拍里可能有两个八分音符，按音算就会"每个音落一次"（用户实报）。
-         * 网格锚点 = 第一个音的时刻（谱面第一拍），之后每 beatMs 一拍。
-         */
-        const beatMs = 60000 / beat
-        if (beatMs > 0) {
-          const phase = (((t - camera.firstT) / beatMs) % 1 + 1) % 1
-          const hop = 4 * phase * (1 - phase)
-          const rad = Math.max(4, noteSize * z * 0.26)
-          const bx = (r.x + r.w / 2 - left) * z
-          const baseY = (r.y - top) * z - rad
-          const by = baseY - hop * r.h * z
+      if (ball) {
+        // 抛体：横向从这一拍落点飞到下一拍落点，纵向抛物线，落地 = 拍点
+        const bp = ballAt(ballAnchors, t, beatMs, camera.firstT, noteSize * 3.2)
+        if (bp && bp.x >= 0 && bp.x <= camera.pageW) {
+          const rad = Math.max(4, noteSize * z * 0.28)
+          const bx = (bp.x - left) * z
+          const by = (bp.y - top) * z - rad
           ctx.beginPath()
           ctx.arc(bx, by, rad, 0, Math.PI * 2)
           ctx.fillStyle = BALL_FILL
