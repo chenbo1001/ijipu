@@ -14611,8 +14611,8 @@ function runAdj539ShellTests() {
       /IfFileExists "\$DESKTOP\\\$\{IJIPU_LNK_OLD\}" 0/.test(hooksCode) &&
       (hooksCode.match(/!insertmacro IJIPU_SET_AUMI/g) ?? []).length === 2,
     '')
-  check('adj539 卸载补删中文名快捷方式，且与模板同样受 `$UpdateMode` 保护（更新流程会先跑卸载器，删了就白丢图标）',
-    /!macro NSIS_HOOK_PREUNINSTALL[\s\S]{0,500}?\$\{If\} \$UpdateMode <> 1[\s\S]{0,500}?Delete "\$DESKTOP\\\$\{IJIPU_LNK_NEW\}"/.test(
+  check('adj539 卸载补删中文名快捷方式，且与模板同样受 `$UpdateMode` 保护（另一段在二选一之后）',
+    /!macro NSIS_HOOK_PREUNINSTALL[\s\S]*?\$\{If\} \$UpdateMode <> 1\s*!insertmacro UnpinShortcut "\$DESKTOP\\\$\{IJIPU_LNK_NEW\}"[\s\S]{0,500}?Delete "\$DESKTOP\\\$\{IJIPU_LNK_NEW\}"/.test(
       hooksCode,
     ),
     '')

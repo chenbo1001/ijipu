@@ -178,6 +178,9 @@ FunctionEnd
   ; ③ 快捷方式中文名 + 备注
   Call IJIPU_FixShortcuts
   !insertmacro IJIPU_NOTIFY_SHELL
+  ; ④ adj1082：资源包靠这个值找主程序目录；「应用和功能」里只改显示名，不动 productName。
+  WriteRegStr HKCU "Software\iJipu" "InstallDir" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}" "DisplayName" "爱记谱 iJipu"
 !macroend
 
 /**
@@ -188,6 +191,29 @@ FunctionEnd
  * 按名删除、不做目标校验：名字是我们自己起的；校验目标反而会在用户手工改过目标时漏删。
  */
 !macro NSIS_HOOK_PREUNINSTALL
+  ; adj1082：卸载二选一（完全卸载 / 保留音色库与资源包），默认保留。
+  ; 更新（$UpdateMode=1）与静默卸载（/S）不弹窗，默认保留；静默清空要走「完全卸载」请手动删目录。
+  ${If} $UpdateMode <> 1
+    IfSilent ijipu_keep_assets
+    MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "要完全卸载吗？$\r$\n$\r$\n是：同时删除音色库、资源包和本机数据。$\r$\n否：只删程序，保留音色库和资源包，下次安装可直接复用。" IDYES ijipu_full_uninstall IDNO ijipu_keep_assets
+    ijipu_full_uninstall:
+      ; 先调用资源包卸载器（它只删自己装的 sf2/manifest）；调不到再按目录兜底。
+      ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\iJipuAssets" "UninstallString"
+      StrCmp $0 "" ijipu_assets_dir_only
+      ExecWait '"$0" /S'
+      Goto ijipu_assets_cleanup
+      ijipu_assets_dir_only:
+      ijipu_assets_cleanup:
+      ; 「完全卸载」按目录清（含老版本随包的那份 generaluser_gs.sf2，它已不在新卸载清单里）。
+      RMDir /r "$INSTDIR\soundfonts"
+      RMDir /r "$INSTDIR\tools"
+      Goto ijipu_assets_done
+    ijipu_keep_assets:
+      FileOpen $0 "$INSTDIR\keep.flag" w
+      FileWrite $0 "iJipu 按用户选择保留了音色库/资源包。$\r$\n下次安装会直接复用；要彻底删除请重新运行卸载并选「完全卸载」。$\r$\n"
+      FileClose $0
+    ijipu_assets_done:
+  ${EndIf}
   ${If} $UpdateMode <> 1
     !insertmacro UnpinShortcut "$DESKTOP\${IJIPU_LNK_NEW}"
     Delete "$DESKTOP\${IJIPU_LNK_NEW}"

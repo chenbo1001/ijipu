@@ -10770,6 +10770,23 @@ smoke 五条含"来源切换成对"结构断言与负对照） |
   `tsc/lint/build/smoke/verify:app-ui/verify-site` 全绿。
 - **预防**：动态视频的页位图只能走 `withOverlay()`，不许再手写裸 `renderScoreToSvg(layout)`；写在断言里。
 
+## E-2026-508 资源包安装器/卸载二选一的首轮落地（adj1082）
+
+- **背景**：主包已去音色库（`adj1020`），但方案里的「独立资源包安装器 + 卸载二选一」还没实现。
+- **解决**：
+  · 新增 `src-tauri/nsis/assets-installer.nsi`：独立 NSIS，装到 `HKCU\Software\iJipu\InstallDir`
+    指向的主程序目录 `soundfonts\`，校验 `ijipu.exe`，自己的卸载项 `iJipuAssets`；
+  · `scripts/build-assets-installer.mjs` 复用 Tauri 的 `makensis`；`check-assets-installer.mjs` 做静态闸门；
+  · 主安装钩子写 `InstallDir` + 中文 `DisplayName`；卸载前弹「完全卸载 / 保留」，默认保留并写 `keep.flag`；
+    「完全卸载」先 `ExecWait` 资源包卸载器，再按目录兜底。
+- **偏差（如实记录）**：方案 §三·2 定的是「接管 Tauri 的 installer.nsi 模板」做中文单选页；
+  本轮先用 `installerHooks` 的 `MessageBox` 落地**同样的用户选择**，没有接管模板。
+  代价：模板自带的「删除应用数据」勾选框仍在，两处控制；好处：不承担模板漂移风险，先可用。
+  模板接管与单选页列为后续可选项（`docs/INSTALLER-ASSETS-PLAN.md` 顶部已同步状态）。
+- **验证**：`check:installer` 全部通过 ✓；`check:assets` 12 项全过 ✅；
+  `iJipu_0.71.0_x64-setup.exe` 7.2MB、`iJipu-Assets_0.1.0_x64-setup.exe` 140MB 均已产出。
+- **预防**：含中文的 `.nsh/.nsi` 必须带 UTF-8 BOM（`edit` 工具会丢 BOM，改完必须用 `check:installer` 复核）。
+
 
 
 

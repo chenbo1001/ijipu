@@ -41,6 +41,19 @@
 - 动态谱导出音画同步、片头描述头、预览声音；3 分钟/标记段/整首保留片头片尾（`adj1063`/`adj1064`）。
 - 编码闸门增加“改动文件 CRLF”检查，并排除 10 个历史 CRLF 工作区文件（`adj1062` 收尾 / `7cd520f`）。
 
+### 安装包（主包 + 资源包）
+
+- 主安装包 `iJipu_0.71.0` **不含任何音色库**（`adj1020`），本次构建 **7.2MB**（此前 33MB）。
+- 新增「**爱记谱 iJipu 资源包**」独立安装器 `iJipu-Assets_0.1.0`：
+  基础音色库（GeneralUser GS）默认勾选、高级音色库（FluidR3 GM）可选；
+  自动通过 `HKCU\Software\iJipu\InstallDir` 找主程序（校验 `ijipu.exe`），装进 `soundfonts\`；
+  写 `assets.manifest.json`；自己的卸载项 `iJipuAssets`（只删自己装的 sf2/manifest）。
+- 主程序卸载二选一：**完全卸载 / 保留音色库与资源包**（默认保留）；保留时写 `keep.flag`；
+  完全卸载会先调资源包卸载器，再按目录兜底。
+- 「应用和功能」显示名：主程序 **爱记谱 iJipu**、资源包 **爱记谱 iJipu 资源包**；
+  安装目录与卸载键名保持不变（不迁移老用户）。
+- 闸门：`npm run check:installer`、`npm run check:assets` 全绿。
+
 ### 网站与文档
 
 - 官网首页顶栏从 8 条收到 **5 条**（功能 / 文档 / 下载桌面端 / GitHub / 打开应用）；

@@ -24,6 +24,8 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "check:installer": "node scripts/check-installer.mjs",
+    "build:assets": "node scripts/build-assets-installer.mjs",
+    "check:assets": "node scripts/check-assets-installer.mjs",
     "postinstall": "node scripts/patch-vite.js",
     "cli": "npm run cli:build && node packages/ijipu-cli/dist/ijipu.cjs",
     "cli:build": "vite build --config packages/ijipu-cli/vite.config.ts && npm run cli:embed",
