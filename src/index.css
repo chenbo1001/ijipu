@@ -5779,3 +5779,15 @@ span.ws-check {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* adj1047：试听时的跳跳球（与出片同口径：落点 = 色块上沿，弹起高度 = 色块高度）
+ * 宽度用百分比（跟页面缩放走），高度用 aspect-ratio 保持正圆。 */
+.beat-ball {
+  position: absolute;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: rgb(255 93 108 / 95%);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 90%);
+  pointer-events: none;
+  z-index: 3;
+}

@@ -212,12 +212,14 @@ export async function createDynamicSession(
         if (dur > 0) {
           const u = Math.min(1, Math.max(0, (t - r.t0) / dur))
           const hop = 4 * u * (1 - u)
-          // 弹幅压到一个字号以内：再高就会飞到上一行（首行还会压到调号/拍号）
-          const amp = noteSize * 0.8
-          const bx = (r.x + r.w / 2 - left) * z
-          const baseY = (r.y - top) * z - noteSize * z * 0.35
-          const by = baseY - hop * amp * z
+          /**
+           * 用户口径：**弹起高度 = 色块高度**，**落点 = 色块上沿**。
+           * 球心再减去半径，让球的**底边**正好落在色块上沿（而不是球心压在线里）。
+           */
           const rad = Math.max(4, noteSize * z * 0.26)
+          const bx = (r.x + r.w / 2 - left) * z
+          const baseY = (r.y - top) * z - rad
+          const by = baseY - hop * r.h * z
           ctx.beginPath()
           ctx.arc(bx, by, rad, 0, Math.PI * 2)
           ctx.fillStyle = BALL_FILL

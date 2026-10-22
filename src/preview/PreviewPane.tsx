@@ -1208,6 +1208,36 @@ function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }
   const colorMap = instrumentColorMap(track)
   const pct = (v: number) => `${((v / page.width) * 100).toFixed(3)}%`
   const pctY = (v: number) => `${((v / page.height) * 100).toFixed(3)}%`
+
+  /**
+   * adj1047：试听时的**跳跳球**（用户要求）。
+   * 与出片同一条口径：每拍一条抛物线，落点 = 色块上沿，弹起高度 = 色块高度。
+   * 只画主声部那一颗（多声部各画一颗会打架）。
+   */
+  let ball: React.JSX.Element | null = null
+  for (const [, segs] of items) {
+    const pos = playheadPosIn(segs, currentMs, page.index, noteSize)
+    if (!pos) continue
+    if (pos.playVoice !== undefined && pos.playVoice !== 'main') continue
+    const seg = segs.find((s) => currentMs >= s.atMs && currentMs < s.atMs + s.durationMs)
+    if (!seg || seg.durationMs <= 0) continue
+    const u = Math.min(1, Math.max(0, (currentMs - seg.atMs) / seg.durationMs))
+    const hop = 4 * u * (1 - u)
+    const rad = noteSize * 0.26
+    const blockH = pos.yBottom - pos.yTop
+    const cx = pos.x + pos.width / 2
+    // 球心 = 色块上沿 − 半径 − 弹起高度 ⇒ 落点正好压在色块上沿
+    const cy = pos.yTop - rad - hop * blockH
+    ball = (
+      <div
+        className="beat-ball"
+        style={{ left: pct(cx - rad), top: pctY(cy - rad), width: pct(rad * 2) }}
+        aria-hidden="true"
+      />
+    )
+    break
+  }
+
   return (
     <>
       {items.map(([key, segs]) => {
@@ -1230,6 +1260,8 @@ function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }
           />
         )
       })}
+      {/* adj1047：跳跳球（色块上方，拍点落地） */}
+      {ball}
     </>
   )
 }
