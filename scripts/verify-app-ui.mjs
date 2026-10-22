@@ -1759,6 +1759,21 @@ async function main() {
           frame.w >= 1000 && frame.h >= 1000 && frame.controls && frame.outside,
           JSON.stringify(frame),
         )
+        // adj1067：t=0 必须是自制深色标题卡；旧实现是白纸谱页（同一像素会接近 255）
+        const introPixel = await evalJs(
+          c,
+          `(() => {
+            const cvs = document.querySelector('.dyn-frame-box canvas')
+            const ctx = cvs.getContext('2d')
+            const d = ctx.getImageData(20, 20, 1, 1).data
+            return [d[0], d[1], d[2]]
+          })()`,
+        )
+        check(
+          'adj1067 片头是自制深色标题卡（不是白纸谱页）',
+          introPixel[0] < 80 && introPixel[1] < 100,
+          JSON.stringify(introPixel),
+        )
         // adj1066：用户实报的 16:9 —— 相机位必须真的重建为 1920×1080 会话
         await evalJs(
           c,

@@ -204,17 +204,15 @@ export async function createDynamicSession(
   const ballBars = (seq.barStartsMs ?? []).map((s) => s + leadInMs)
   /** 拍网格相位：只作"没有小节起点"时的兜底（有 `ballBars` 时 `ballAt` 不看它） */
   const beatPhase = ballBars.length > 0 ? 0 : beatPhaseOf(ballAnchors, beatMs)
-  // 段导出：片头用"第 1 页描述头"的标题卡，再交叉淡入到段首（不平移，免得横跨几页乱飞）
-  const crossfadeIntro = skipIntro
-  // 标题卡：满宽 + 整页居中（9:16 的取景框比页高，纵向只能居中）
-  const headerFrame: CameraFrame = {
-    pageIndex: 0,
-    cx: camera.pageW / 2,
-    // adj1066：标题卡必须对准**描述头**。16:9 的取景框比页高矮，页面居中只看到中部的谱行，
-    // 描述头（页顶）被裁到画外 ⇒ 标记段看起来像没有片头（用户 2026-10-22 实报）。
-    cy: pageConfig.margin_top + pageConfig.descAreaH / 2,
-    zoom: camera.viewW / camera.pageW,
-  }
+  /**
+   * adj1067（用户 2026-10-22）：片头改成**自制标题卡**，信息直接取第 1 页描述头。
+   *
+   * 为什么不继续用页面描述头的截图：16:9 取景框比页高矮，页面居中的标题卡会把页顶裁掉；
+   * 9:16/1:1/16:9 三种比例看到的“描述头”范围也不一样。自制卡按 `min(W,H)` 排版、
+   * 按宽度自动缩字，三种尺寸同一套版式；3 秒卡 + 0.7 秒淡入/推近到第一拍。
+   */
+  const introMeta = layout.pages[0]?.meta
+  const INTRO_PAN_MS = 700
 
   // 字体没就绪就光栅化 ⇒ 字形回退，第一帧和后面不一样
   await document.fonts.ready
@@ -227,6 +225,8 @@ export async function createDynamicSession(
     const W = camera.viewW
     const H = camera.viewH
     const noteSize = pageConfig.note_size
+    // 每帧先清空：片头卡与首帧的交叉淡入必须叠在同一张透明画布上，不能叠到上一帧
+    ctx.clearRect(0, 0, W, H)
 
     /** 按给定相机画一帧（alpha<1 用于片头交叉淡入） */
     const paintCamera = (c: CameraFrame, alpha: number, t: number) => {
@@ -304,14 +304,94 @@ export async function createDynamicSession(
     }
 
     /**
-     * 段导出：片头先给"第 1 页描述头"的整宽标题卡，再 **200ms 交叉淡入**到段首。
-     * 为什么不像整首那样平移过去：标记段可能在别的页，横跨几页的平移会变成乱飞。
+     * 自制片头卡（adj1067）：深空蓝底 + 霓虹青强调线 + 描述头信息。
+     * 版式只依赖 `min(W,H)`，因此 9:16 / 1:1 / 16:9 看到的是同一张卡，不会出现裁切差异。
      */
-    if (crossfadeIntro && tMs < camera.firstT) {
-      const fadeMs = 200
-      const k = Math.max(0, Math.min(1, (tMs - (camera.firstT - fadeMs)) / fadeMs))
-      paintCamera(headerFrame, 1, tMs)
-      if (k > 0) paintCamera(cameraAt(camera, camera.firstT), k, camera.firstT)
+    const paintIntroCard = (alpha: number) => {
+      const unit = Math.min(W, H)
+      const font = '"Microsoft YaHei", "PingFang SC", sans-serif'
+      const meta = introMeta
+      const title = (meta?.titles[0] ?? '').trim() || '未命名'
+      const subtitle = (meta?.titles.slice(1).join(' ') ?? '').trim()
+      const authors = (meta?.authors.join(' / ') ?? '').trim()
+      const tempo = meta?.tempoNum
+        ? `♩=${meta.tempoNum}${meta.tempoText ? ` ${meta.tempoText}` : ''}`
+        : (meta?.tempo ?? '')
+      const info = [meta?.key, meta?.meter, tempo].filter(Boolean).join('   ')
+      const maxW = W * 0.84
+      ctx.save()
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha))
+      const g = ctx.createLinearGradient(0, 0, 0, H)
+      g.addColorStop(0, palette.deepSpaceBlueDark)
+      g.addColorStop(1, palette.deepSpaceBlue)
+      ctx.fillStyle = g
+      ctx.fillRect(0, 0, W, H)
+
+      /** 先按宽度缩字号；`fillText` 再带 maxWidth 兜底，极长标题也不会溢出卡片 */
+      const fit = (text: string, base: number, bold = false): number => {
+        let size = Math.round(base)
+        const min = Math.max(10, Math.round(base * 0.5))
+        while (size > min) {
+          ctx.font = `${bold ? 'bold ' : ''}${size}px ${font}`
+          if (ctx.measureText(text).width <= maxW) break
+          size -= 2
+        }
+        return size
+      }
+
+      ctx.textAlign = 'center'
+      ctx.fillStyle = palette.neonCyan
+      ctx.fillRect(W * 0.41, H * 0.3, W * 0.18, Math.max(2, unit * 0.004))
+
+      const titleSize = fit(title, Math.round(unit * 0.1), true)
+      const titleY = H * 0.4
+      ctx.fillStyle = '#ffffff'
+      ctx.font = `bold ${titleSize}px ${font}`
+      ctx.fillText(title, W / 2, titleY, maxW)
+
+      let y = titleY + titleSize * 0.85
+      if (subtitle) {
+        const size = fit(subtitle, Math.round(unit * 0.045))
+        y += size * 1.2
+        ctx.fillStyle = palette.neonCyan
+        ctx.font = `${size}px ${font}`
+        ctx.fillText(subtitle, W / 2, y, maxW)
+      }
+      if (authors) {
+        const size = fit(authors, Math.round(unit * 0.034))
+        y += size * 1.7
+        ctx.fillStyle = 'rgba(255,255,255,0.82)'
+        ctx.font = `${size}px ${font}`
+        ctx.fillText(authors, W / 2, y, maxW)
+      }
+      if (info) {
+        const size = fit(info, Math.round(unit * 0.027))
+        y += size * 1.9
+        ctx.fillStyle = 'rgba(255,255,255,0.62)'
+        ctx.font = `${size}px ${font}`
+        ctx.fillText(info, W / 2, y, maxW)
+      }
+      ctx.fillStyle = 'rgba(255,255,255,0.55)'
+      ctx.font = `${Math.round(unit * 0.022)}px ${font}`
+      ctx.fillText(`${brand.nameZh} ${brand.name}`, W / 2, H * 0.9, maxW)
+      ctx.restore()
+    }
+
+    /**
+     * adj1067：片头卡 3 秒，最后 0.7 秒把画面淡入/推近到第一拍。
+     * 不再区分整首/标记段——两者都用同一张自制卡，标记段也不会因为跨页而丢掉片头。
+     */
+    if (tMs < camera.firstT) {
+      const introEnd = Math.max(0, camera.firstT - INTRO_PAN_MS)
+      const raw =
+        introEnd <= 0 ? 1 : Math.max(0, Math.min(1, (tMs - introEnd) / INTRO_PAN_MS))
+      const k = raw * raw * (3 - 2 * raw)
+      if (k < 1) paintIntroCard(1 - k)
+      if (k > 0) {
+        const target = cameraAt(camera, camera.firstT)
+        // 0.94→1 的轻微推近，观感是"卡缩进谱面"，不是硬切
+        paintCamera({ ...target, zoom: target.zoom * (0.94 + 0.06 * k) }, k, camera.firstT)
+      }
       return { frame, following: false }
     }
 
