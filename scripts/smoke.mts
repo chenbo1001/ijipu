@@ -32850,6 +32850,183 @@ function runDynamicCameraTests(): void {
     )
   }
 
+  /**
+   * adj1062（用户 2026-10-22 追问「还是会乱跳 / 乱滑动 / 消失再出现」）：
+   * 球的每一拍必须**连续**——只有换行/反复/跳跃/跨跳房子的前一拍可以大跳；
+   * 其余情况一拍只走一格。下面四条都是用户实报症状的最小复现：
+   *  ① 小节不是整拍（3.5 拍）时，最后一拍被截短，终点必须是下一小节第一个音；
+   *  ② 行末不是整拍时，最后一拍必须飞向下一行行首（不是"行末落下、再从下一行首冒出"）；
+   *  ③ 空隙（没有音的拍）按时间插值，一拍走一格，不在空隙开头就跳到下一个音；
+   *  ④ 真正的换行/反复：大跳只占跳跃前一拍，且落地 `u=0`。
+   */
+  {
+    // ① 3.5 拍小节：旧实现 b1=4000ms 会跨过下一小节（3500ms），在 3500ms 处从 ~405 瞬移到 900
+    const fracBars = [0, 3500, 7500]
+    const fracAnchors = [
+      { t0: 0, t1: 3500, cx: 100, top: 200, x: 0, w: 200 },
+      { t0: 3500, t1: 3900, cx: 900, top: 300, x: 800, w: 200 },
+      { t0: 3900, t1: 7500, cx: 500, top: 300, x: 400, w: 200 },
+    ]
+    const fracBefore = ballAt(fracAnchors, 3499, 1000, 0, 100, fracBars)
+    const fracAt = ballAt(fracAnchors, 3500, 1000, 0, 100, fracBars)
+    check(
+      'adj1062 小节不是整拍：最后一拍落到下一小节第一个音（不在小节起点瞬移）',
+      fracBefore !== null &&
+        fracAt !== null &&
+        Math.abs(fracBefore.x - 900) < 5 &&
+        Math.abs(fracAt.x - 900) < 1e-6,
+      `before=${fracBefore?.x} at=${fracAt?.x}`,
+    )
+
+    // ② 行末 1.5 拍：旧实现 b1=2000ms 会落到下一行**第二个**音（600），到 1500ms 才瞬移回行首 900
+    const lineBars2 = [0, 1500, 3000]
+    const lineAnchors2 = [
+      { t0: 0, t1: 1500, cx: 100, top: 200, x: 0, w: 200 },
+      { t0: 1500, t1: 1700, cx: 900, top: 320, x: 800, w: 200 },
+      { t0: 1700, t1: 3000, cx: 600, top: 320, x: 500, w: 200 },
+    ]
+    const lineBefore2 = ballAt(lineAnchors2, 1499, 1000, 0, 100, lineBars2)
+    const lineAt2 = ballAt(lineAnchors2, 1500, 1000, 0, 100, lineBars2)
+    check(
+      'adj1062 行末不是整拍：最后一拍飞向下一行行首（不停在行末）',
+      lineBefore2 !== null &&
+        lineAt2 !== null &&
+        Math.abs(lineBefore2.x - 900) < 5 &&
+        Math.abs(lineAt2.x - 900) < 1e-6,
+      `before=${lineBefore2?.x} at=${lineAt2?.x}`,
+    )
+
+    // ③ 空隙：0~500ms 一个音，2000~2500ms 下一个音；600ms 处应约 340（不是一步跳到 900）
+    const gapAnchors2 = [
+      { t0: 0, t1: 500, cx: 100, top: 200, x: 0, w: 100 },
+      { t0: 2000, t1: 2500, cx: 900, top: 200, x: 800, w: 100 },
+    ]
+    const gapMid2 = ballAt(gapAnchors2, 600, 500, 0, 100)
+    const gapLand2 = ballAt(gapAnchors2, 2000, 500, 0, 100)
+    check(
+      'adj1062 空拍不跳到下一音（按时间插值，一拍走一格）',
+      gapMid2 !== null && gapMid2.x < 500 && gapLand2 !== null && Math.abs(gapLand2.x - 900) < 1e-6,
+      `mid=${gapMid2?.x} land=${gapLand2?.x}`,
+    )
+    let vanished1062 = ''
+    for (let t = 0; t < 2500; t += 10) {
+      if (ballAt(gapAnchors2, t, 500, 0, 100) === null) {
+        vanished1062 = String(t)
+        break
+      }
+    }
+    check('adj1062 球出现后不再消失（空隙里也一直有球）', vanished1062 === '', vanished1062)
+
+    // ④ 换行/反复：大跳只占跳跃前一拍；落地正落在下一个色块（u=0）
+    const jumpAnchors2 = [
+      { t0: 0, t1: 500, cx: 100, top: 200, x: 0, w: 100 },
+      { t0: 500, t1: 1000, cx: 900, top: 320, x: 800, w: 100 },
+    ]
+    const hopMid2 = ballAt(jumpAnchors2, 250, 500, 0, 100)
+    const hopAt2 = ballAt(jumpAnchors2, 500, 500, 0, 100)
+    check(
+      'adj1062 换行/反复的大跳只占跳跃前一拍（落地正落在下一个色块）',
+      hopMid2 !== null &&
+        hopAt2 !== null &&
+        Math.abs(hopMid2.x - 500) < 1e-6 &&
+        Math.abs(hopAt2.x - 900) < 1e-6 &&
+        hopAt2.u === 0,
+      `mid=${hopMid2?.x} at=${hopAt2?.x} u=${hopAt2?.u}`,
+    )
+
+    // ⑤ 跨页：`pageIndex` 跟这一拍的**起飞页**走（预览据此只画一颗球，落地后交接给下一页）
+    const pageAnchors2 = [
+      { t0: 0, t1: 500, cx: 100, top: 200, x: 0, w: 100, pageIndex: 0 },
+      { t0: 500, t1: 1000, cx: 900, top: 320, x: 800, w: 100, pageIndex: 1 },
+    ]
+    const p0page = ballAt(pageAnchors2, 250, 500, 0, 100)
+    const p1page = ballAt(pageAnchors2, 500, 500, 0, 100)
+    check(
+      'adj1062 跨页：pageIndex 跟这一拍的起飞页（落地后交接给下一页）',
+      p0page?.pageIndex === 0 && p1page?.pageIndex === 1,
+      `mid=${p0page?.pageIndex} at=${p1page?.pageIndex}`,
+    )
+
+    /**
+     * 真实谱（`人间一两风.jps`，含弱起 + `|:`/`:|` + 二房子 + `&ds`）的**连续性体检**：
+     * ① 10ms 采样：球不许瞬移（旧实现会在小节起点一下跳几百 px）；
+     * ② 球出现后不许消失（空隙里也要有球）；
+     * ③ 每次**换行**的大跳都必须落在下一行第一个色块上（不是"行末落下、下一行首冒出"）。
+     * 文件不在本机就跳过（合成夹具已覆盖同一路径）。
+     */
+    const real1062 = 'D:\\蜗居笔记\\悟乐居杂记\\2.曲谱集\\人间一两风\\人间一两风.jps'
+    if (!existsSync(real1062)) {
+      console.log('    · adj1062 真实谱不在本机，跳过连续性体检（合成夹具已覆盖同一路径）')
+    } else {
+      const rr = parseJpsRaw(readFileSync(real1062, 'utf8'))
+      const rl = layoutScore(rr, DUR_CFG)
+      const rBpm = inferBpm(rr)
+      const rSeq = buildPlaySequence(rr, rl, rBpm)
+      const rTrack = buildRectTrack(rSeq, { noteSize: DUR_CFG.note_size })
+      const rAnchors = rTrack.rects
+        .filter((r) => r.playVoice === undefined || r.playVoice === 'main')
+        .map((r) => ({ t0: r.t0, t1: r.t1, cx: r.x + r.w / 2, top: r.y, x: r.x, w: r.w, group: r.group }))
+      const rBars = rSeq.barStartsMs ?? []
+      const rBeat = 60000 / rBpm
+      const rAmp = DUR_CFG.note_size * 3.2
+      const rFirst = rAnchors[0].t0
+      const rLast = rAnchors[rAnchors.length - 1].t1
+      let prevP: { x: number; y: number } | null = null
+      let maxDx = 0
+      let maxDxT = -1
+      let nullCount = 0
+      for (let t = rFirst; t < rLast; t += 10) {
+        const p = ballAt(rAnchors, t, rBeat, 0, rAmp, rBars)
+        if (!p) {
+          nullCount++
+          prevP = null
+          continue
+        }
+        if (prevP) {
+          const dx = Math.abs(p.x - prevP.x)
+          if (dx > maxDx) {
+            maxDx = dx
+            maxDxT = t
+          }
+        }
+        prevP = p
+      }
+      check(
+        'adj1062 真实谱：球不瞬移（10ms 采样最大位移 < 100px）',
+        maxDx < 100,
+        `maxDx=${maxDx.toFixed(1)}@${Math.round(maxDxT)}`,
+      )
+      check('adj1062 真实谱：球出现后不消失（空隙/反复/跳转里一直有球）', nullCount === 0, `null=${nullCount}`)
+      // 换行：轨道 **group 变了**（一行一个 group）。同组里的和弦/倚音/换拍不算换行。
+      const badLine: string[] = []
+      for (let i = 1; i < rAnchors.length; i++) {
+        const a = rAnchors[i - 1]
+        const b = rAnchors[i]
+        if (b.group === a.group) continue
+        const near = ballAt(rAnchors, b.t0 - 5, rBeat, 0, rAmp, rBars)
+        const at = ballAt(rAnchors, b.t0, rBeat, 0, rAmp, rBars)
+        if (
+          !near ||
+          !at ||
+          at.u > 0.01 ||
+          Math.abs(near.x - b.cx) > 80 ||
+          Math.abs(at.x - b.cx) > 5
+        ) {
+          if (badLine.length < 8) {
+            badLine.push(
+              `${Math.round(b.t0)}:u=${at?.u ?? -1} near=${Math.round(near?.x ?? -1)}/at=${Math.round(at?.x ?? -1)}/want=${Math.round(b.cx)}`,
+            )
+          }
+        }
+      }
+      check(
+        'adj1062 真实谱：每次换行的大跳都落在下一行第一个色块（不停在行末）',
+        badLine.length === 0,
+        badLine.join(' | '),
+      )
+    }
+  }
+
   // 带歌词的谱：歌词会填满行间空档，旧判定（按"行底含歌词"比间隙）会把相邻几行并成一行，
   // 相机于是对到整块中间、第一行色块掉出框（用户实报）。这里用 6 行 Q+C 锁住。
   {

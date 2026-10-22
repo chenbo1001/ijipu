@@ -96,6 +96,15 @@ function applyNoteHighlight(el: Element, on: boolean): void {
 const PREVIEW_W = PREVIEW_BASE_W
 
 /**
+ * adj1062：预览页与页之间的间距（CSS px）。
+ *
+ * 为什么要放进 TS：跳跳球现在**跨页**飞（从本页末飞进下一页首），得把各页换算到同一套
+ * 纵向坐标里；这个间距是换算的一环。`.pages` 的内联 `gap` 与这里**同一个常量**，
+ * CSS 里的 `gap: 24px` 只作兜底（不写两份数）。
+ */
+const PAGE_GAP_PX = 24
+
+/**
  * adj965d（EP-13）：滚轮手势的"停顿落盘"延时 —— 取值来自**引擎**，与 Obsidian 插件同源
  * （同一套交互口径，两端不各写一个数；语义见 `engine/overlayGesture.ts` 里那段说明）。
  */
@@ -797,7 +806,7 @@ export function PreviewPane() {
     <div className="preview-pane" ref={paneRef}>
       {/* adj1033：动态谱取景框（固定在视口上，不随内容滚动；开关在 uiStore） */}
       <DynamicFrameOverlay />
-      <div className="pages" ref={containerRef} onClick={onClick} onDoubleClick={onDoubleClick} onPointerDown={onPointerDown}>
+      <div className="pages" ref={containerRef} style={{ gap: PAGE_GAP_PX }} onClick={onClick} onDoubleClick={onDoubleClick} onPointerDown={onPointerDown}>
         {pagesHtml.map((svg, i) => {
           const page = layout.pages[i]
           const pct = (v: number) => `${((v / page.width) * 100).toFixed(2)}%`
@@ -844,7 +853,7 @@ export function PreviewPane() {
                   style={{ position: 'relative', zIndex: 1, pointerEvents: 'none' }}
                 />
                 {/* adj282：播放进度跟随色块（接近透明，随播放时钟滑动；未播放时自身不渲染） */}
-                <PlayheadLayer page={page} noteSize={pageConfig.note_size} />
+                <PlayheadLayer page={page} pages={layout.pages} noteSize={pageConfig.note_size} />
                 {/* adj987h（用户需求）：试听「标记段」的标记线（每行一段 + 两端小竖头 + 循环 ⟲） */}
                 <PracticeMarkLayer page={page} noteSize={pageConfig.note_size} />
                 {/* adj723b：**只读自检**（见 `PlayheadDiag` 说明；不参与渲染） */}
@@ -1165,12 +1174,64 @@ function PlayheadDiag({ pageIndex, noteSize }: { pageIndex: number; noteSize: nu
  * 随播放逐帧重渲染（SVG 层不重建，仅本轻量色块刷新）。
  * adj299：每曲行（group）独立一个色块（按各自拍段滑动、按 voice 配色、各自行高）。
  */
-function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }) {
+function PlayheadLayer({ page, pages, noteSize }: { page: ScorePage; pages: ScorePage[]; noteSize: number }) {
   const currentMs = useDocStore((s) => s.currentMs)
   const track = useDocStore((s) => s.playheadTrack)
   // adj1048：拍网格（跳跳球按**拍**落，不按音落）；相位由 beatPhaseOf 投票得出
   const beatMs = useDocStore((s) => s.playheadBeatMs)
   const beatBars = useDocStore((s) => s.playheadBarStartsMs)
+  // adj1062：跨页球的纵向换算要用到预览缩放（与 `.preview-zoom-scale` 的 zoom 同源）
+  const previewZoom = useUiStore((s) => s.previewZoom)
+
+  /**
+   * adj1062：各页顶在**同一套纵向坐标**里的位置（引擎单位）。
+   *
+   * 预览是把多页竖排、页间留 `PAGE_GAP_PX` 的。球的锚点本来是"页内坐标"，
+   * 跨页时会从本页末直接跳到下一页首（= 用户看到的"消失再在其它地方出现"）。
+   * 把所有页的 `top` 加上各自的页顶偏移，球就能从上一页末**飞进**下一页首；
+   * 落地那一刻再交接给下一页的图层（`BallPos.pageIndex`）。
+   *
+   * 换算：页内容按 `PREVIEW_W × zoom% / page.width` 缩放，页间距是**未缩放**的 CSS px，
+   * 所以先除以缩放比折回引擎单位。
+   */
+  const pageOffsets = useMemo(() => {
+    const out: number[] = []
+    let acc = 0
+    for (const p of pages) {
+      out.push(acc)
+      const scale = ((PREVIEW_W * previewZoom) / 100) / Math.max(1, p.width)
+      acc += p.height + (scale > 0 ? PAGE_GAP_PX / scale : 0)
+    }
+    return out
+  }, [pages, previewZoom])
+
+  /**
+   * adj1062：**全曲**的主声部落点（跨页），按 `t0` 升序。
+   *
+   * `trackKeysOf` 的键里带页号，遍历全部页才能拿到"下一页的第一个色块"；
+   * 逐帧重建代价大，故按 `track / pageOffsets / noteSize` 记忆（播放中它们不变）。
+   */
+  const ballAnchors = useMemo(() => {
+    const out: BallAnchor[] = []
+    for (const [, segs] of trackKeysOf(track)) {
+      for (const s of segs) {
+        if (s.playVoice !== undefined && s.playVoice !== 'main') continue
+        if (s.durationMs <= 0) continue
+        const off = pageOffsets[s.pageIndex] ?? 0
+        out.push({
+          t0: s.atMs,
+          t1: s.atMs + s.durationMs,
+          cx: s.x + s.width / 2,
+          top: (s.yTopMin ?? s.y - noteSize * 1.6) + off,
+          x: s.x,
+          w: s.width,
+          pageIndex: s.pageIndex,
+        })
+      }
+    }
+    out.sort((a, b) => a.t0 - b.t0)
+    return out
+  }, [track, pageOffsets, noteSize])
 
   /**
    * adj895（用户要求）：**播放跟随滚动**——把色块保持在"安全区"内，而不是等它贴到视界边上。
@@ -1218,39 +1279,30 @@ function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }
    * adj1047：试听时的**跳跳球**（用户要求）。
    * 与出片同一条口径：每拍一条抛物线，落点 = 色块上沿，弹起高度 = 色块高度。
    * 只画主声部那一颗（多声部各画一颗会打架）。
+   *
+   * adj1062：锚点用**全曲、跨页**的 `ballAnchors`，并按 `BallPos.pageIndex`（这一拍从哪页起飞）
+   * 决定哪一层画——跨页飞行时只有起飞页那一层画球（`top` 会超出 100%，正好飞过页间空隙），
+   * 落地那拍 `pageIndex` 换成下一页 ⇒ 由下一页的图层接着画，**不再"旧页落下、新页冒出"**。
+   * （前提：各页等宽，预览就是这么排的；页宽不同时 x 需要再加页左偏移。）
    */
   let ball: React.JSX.Element | null = null
-  if (beatMs > 0) {
-    // 落点表：主声部色块（上沿中心），球按抛体轨迹在拍与拍之间飞
-    const anchors: BallAnchor[] = []
-    for (const [, segs] of items) {
-      for (const s of segs) {
-        if (s.playVoice !== undefined && s.playVoice !== 'main') continue
-        if (s.durationMs <= 0) continue
-        anchors.push({
-          t0: s.atMs,
-          t1: s.atMs + s.durationMs,
-          cx: s.x + s.width / 2,
-          top: s.yTopMin ?? s.y - noteSize * 1.6,
-          x: s.x,
-          w: s.width,
-        })
-      }
-    }
+  if (beatMs > 0 && ballAnchors.length > 0) {
     /**
      * adj1061：`beatBars` 现在是**展开后逐遍**的小节起点（反复/跳转每一遍都有），
      * 拍网格由它逐小节给出；`beatPhaseOf` 只作"没有小节起点"时的兜底
      * （它逐帧遍历全部锚点投票，能省则省）。
      * 末尾那条「曲末」不是小节开头，`ballAt` 自己会跳过它（只当自由落体的时刻）。
      */
-    const beatAnchor = beatBars.length > 0 ? 0 : beatPhaseOf(anchors, beatMs)
-    const bp = ballAt(anchors, currentMs, beatMs, beatAnchor, noteSize * 3.2, beatBars)
-    if (bp) {
+    const beatAnchor = beatBars.length > 0 ? 0 : beatPhaseOf(ballAnchors, beatMs)
+    const bp = ballAt(ballAnchors, currentMs, beatMs, beatAnchor, noteSize * 3.2, beatBars)
+    if (bp && (bp.pageIndex === undefined || bp.pageIndex === page.index)) {
       const rad = noteSize * 0.28
+      // `bp.y` 是跨页坐标；减掉本页页顶才是本页内的 top（跨页飞行时会 <0 或 >page.height）
+      const localTop = bp.y - (pageOffsets[page.index] ?? 0)
       ball = (
         <div
           className="beat-ball"
-          style={{ left: pct(bp.x - rad), top: pctY(bp.y - rad), width: pct(rad * 2) }}
+          style={{ left: pct(bp.x - rad), top: pctY(localTop - rad), width: pct(rad * 2) }}
           aria-hidden="true"
         />
       )

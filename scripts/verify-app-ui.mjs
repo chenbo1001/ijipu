@@ -899,12 +899,12 @@ async function main() {
       )) === true,
     )
     check(
-      'adj987d 组内按钮**只用图标**（起始/停止/添加/删除/循环 五个按钮都不含中文文本），中文只留在 title/aria-label',
+      'adj987d 组内按钮**只用图标**（起始/停止/添加/删除/循环 + adj1044 的导出动态谱，六个按钮都不含中文文本），中文只留在 title/aria-label',
       (await evalJs(
         c,
         `(() => {
           const btns = [...document.querySelectorAll('.practice-bar .practice-btn')]
-          if (btns.length !== 5) return 'count:' + btns.length
+          if (btns.length !== 6) return 'count:' + btns.length
           const cjk = /[\\u4e00-\\u9fa5]/
           const bad = btns.filter((b) => cjk.test(b.textContent || ''))
           const labelled = btns.every((b) => (b.getAttribute('aria-label') || '').length > 0)
