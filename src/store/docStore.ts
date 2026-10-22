@@ -143,6 +143,8 @@ interface DocState {
    */
   playheadBeatMs: number
   playheadAnchorMs: number
+  /** adj1058：小节起点时刻（跳跳球按小节重置拍网格） */
+  playheadBarStartsMs: number[]
   /** adj262：多声部 voiceBlocks（纯曲部 yTop/yBottom/x）——播放时渲染竖向色框覆盖整列 */
   voiceBlocks: { x: number; yTop: number; yBottom: number; pageIndex: number; voices: number[] }[]
   /** adj291：布局后的「全局音符 index → 物理页 page」映射（自动分页一致）——光标联动定位音符 id.page */
@@ -183,7 +185,7 @@ interface DocState {
   /** adj263：设置播放当前 ms（RAF 驱动，PreviewPane 渲染平滑色框） */
   setCurrentMs: (ms: number) => void
   /** adj1048：拍网格（跳跳球按拍落，不按音落） */
-  setPlayheadBeat: (beatMs: number, anchorMs: number) => void
+  setPlayheadBeat: (beatMs: number, anchorMs: number, barStartsMs?: number[]) => void
   jumpCursor: (pos: number, end?: number) => void
   undo: () => void
   redo: () => void
@@ -600,6 +602,7 @@ export const useDocStore = create<DocState>()((set, get) => ({
   // adj1048：拍网格（0 = 未知，跳跳球不画）
   playheadBeatMs: 0,
   playheadAnchorMs: 0,
+  playheadBarStartsMs: [],
   voiceBlocks: [],
   noteIndexToPage: null,
   cursorJump: null,
@@ -672,7 +675,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
   setVoiceBlocks: (vbs) => set({ voiceBlocks: vbs }),
   setNoteIndexToPage: (m) => set({ noteIndexToPage: m }),
   setPlayheadTrack: (t) => set({ playheadTrack: t }),
-  setPlayheadBeat: (beatMs, anchorMs) => set({ playheadBeatMs: beatMs, playheadAnchorMs: anchorMs }),
+  setPlayheadBeat: (beatMs, anchorMs, barStartsMs = []) =>
+    set({ playheadBeatMs: beatMs, playheadAnchorMs: anchorMs, playheadBarStartsMs: barStartsMs }),
   setCurrentMs: (ms) => set({ currentMs: ms }),
   jumpCursor: (pos, end) =>
     set((s) => ({

@@ -132,6 +132,13 @@ export interface PlaySequence {
   passMarks?: { atMs: number; pass: number }[]
   /** adj996：整首一共用了几遍（= `passMarks` 里最大的 `pass`），供"第 N / 共 M 遍"显示 */
   maxPass?: number
+  /**
+   * adj1058（用户口径）：**每个小节起点的时刻**（升序，主声部）。
+   *
+   * 用户原话：「用小节的自然拍的位置，小节开始的第一个音总是第一拍的开始」。
+   * 跳跳球据此按**小节**重置拍网格——弱起/漂移不会累积到下一小节。
+   */
+  barStartsMs?: number[]
 }
 
 /** 音符 id → `page_voice_group_index` 串（与 `data-notepos` / `activeNoteId` 同一形状） */
@@ -3028,5 +3035,7 @@ export function buildPlaySequence(
     return { events, totalMs, bpm, passMarks, maxPass }
   }
 
-  return { events, totalMs, bpm, passMarks, maxPass }
+  // adj1058：小节起点（跳跳球按小节重置拍网格）
+  const barStartsMs = (barStartMsInGroup[0] ?? []).slice()
+  return { events, totalMs, bpm, passMarks, maxPass, barStartsMs }
 }

@@ -32696,6 +32696,15 @@ function runDynamicCameraTests(): void {
     ]
     const d = ballAt(drift, 3500, 1000, 0, 100)
     check('M4 目标取下一拍的色块（下拍在下一行就飞过去）', d !== null && d.x < 200, String(d?.x))
+
+    // adj1058 用户口径：小节开始的第一个音 = 第一拍 ⇒ 拍网格按小节重置
+    const barT = [0, 1000]
+    const barA = [
+      { t0: 0, t1: 400, cx: 100, top: 200 },
+      { t0: 1000, t1: 1400, cx: 300, top: 200 },
+    ]
+    const atBar = ballAt(barA, 1000, 600, 0, 100, barT)
+    check('M4 小节起点=第一拍（按小节重置，u=0 落地）', atBar !== null && Math.abs(atBar.u) < 1e-9, String(atBar?.u))
   }
 
   // 带歌词的谱：歌词会填满行间空档，旧判定（按"行底含歌词"比间隙）会把相邻几行并成一行，

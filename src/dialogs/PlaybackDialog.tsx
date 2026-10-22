@@ -667,7 +667,7 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
         ),
       )
       // adj1048：拍网格（跳跳球按拍落，不按音落）——锚点取第一个事件的时刻
-      setPlayheadBeat(beatMs, seq.events[0]?.atMs ?? 0)
+      setPlayheadBeat(beatMs, seq.events[0]?.atMs ?? 0, seq.barStartsMs ?? [])
       // adj258：保存序列 + 启动位置，启动高亮定时器按当前 atMs 设 activeNoteIds
       // adj764：位置一律由引擎时钟管 —— 首次播放从 0 起（`cancel()` 会把时钟置回 0），
       // 起播延迟由下面的音频调度与 `startTimers` 共同体现（旧写法是把 startTime 往后推 200ms）

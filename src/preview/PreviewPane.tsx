@@ -33,6 +33,7 @@ import {
   instrumentColorMap,
   playheadBaseOf,
   ballAt,
+  beatPhaseOf,
 } from '@ijipu/engine'
 import type { ScorePage, PageConfig, BallAnchor } from '@ijipu/engine'
 // adj965（方案「OVL」，EP-10）：水印/背景图的资源状态（订阅 + 并进渲染参数）
@@ -1167,9 +1168,9 @@ function PlayheadDiag({ pageIndex, noteSize }: { pageIndex: number; noteSize: nu
 function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }) {
   const currentMs = useDocStore((s) => s.currentMs)
   const track = useDocStore((s) => s.playheadTrack)
-  // adj1048：拍网格（跳跳球按**拍**落，不按音落）
+  // adj1048：拍网格（跳跳球按**拍**落，不按音落）；相位由 beatPhaseOf 投票得出
   const beatMs = useDocStore((s) => s.playheadBeatMs)
-  const beatAnchorMs = useDocStore((s) => s.playheadAnchorMs)
+  const beatBars = useDocStore((s) => s.playheadBarStartsMs)
 
   /**
    * adj895（用户要求）：**播放跟随滚动**——把色块保持在"安全区"内，而不是等它贴到视界边上。
@@ -1234,7 +1235,7 @@ function PlayheadLayer({ page, noteSize }: { page: ScorePage; noteSize: number }
         })
       }
     }
-    const bp = ballAt(anchors, currentMs, beatMs, beatAnchorMs, noteSize * 3.2)
+    const bp = ballAt(anchors, currentMs, beatMs, beatPhaseOf(anchors, beatMs), noteSize * 3.2, beatBars)
     if (bp) {
       const rad = noteSize * 0.28
       ball = (

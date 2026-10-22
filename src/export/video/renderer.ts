@@ -29,6 +29,7 @@ import {
   resolvePracticeRange,
   slicePlaySequenceByRange,
   ballAt,
+  beatPhaseOf,
   DYNAMIC_PRESETS,
   type DynamicPresetId,
   type PageConfig,
@@ -149,6 +150,10 @@ export async function createDynamicSession(
     .filter((r) => r.playVoice === undefined || r.playVoice === 'main')
     .map((r) => ({ t0: r.t0, t1: r.t1, cx: r.x + r.w / 2, top: r.y }))
   const beatMs = 60000 / beat
+  /** 拍网格相位：用长音起点投票，校正弱起谱的半拍偏移 */
+  const beatPhase = beatPhaseOf(ballAnchors, beatMs)
+  /** 小节起点（按小节重置拍网格；片头后移所以要加 leadIn） */
+  const ballBars = (seq.barStartsMs ?? []).map((s) => s + leadInMs)
   // 段导出：片头用"第 1 页描述头"的标题卡，再交叉淡入到段首（不平移，免得横跨几页乱飞）
   const crossfadeIntro = skipIntro
   // 标题卡：满宽 + 整页居中（9:16 的取景框比页高，纵向只能居中）
@@ -225,7 +230,7 @@ export async function createDynamicSession(
        */
       if (ball) {
         // 抛体：横向从这一拍落点飞到下一拍落点，纵向抛物线，落地 = 拍点
-        const bp = ballAt(ballAnchors, t, beatMs, camera.firstT, noteSize * 3.2)
+        const bp = ballAt(ballAnchors, t, beatMs, beatPhase, noteSize * 3.2, ballBars)
         if (bp && bp.x >= 0 && bp.x <= camera.pageW) {
           const rad = Math.max(4, noteSize * z * 0.28)
           const bx = (bp.x - left) * z

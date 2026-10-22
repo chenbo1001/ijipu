@@ -83,6 +83,7 @@ export {
   frameTimeMs,
   frameIndexAt,
   ballAt,
+  beatPhaseOf,
   buildCameraTrack,
   cameraAt,
   CAMERA_FOLLOW_ZOOM,

@@ -56,7 +56,33 @@ function anchorAt(anchors: readonly BallAnchor[], t: number): BallAnchor | null 
   return found
 }
 
-/** 找 `t` 时刻之后**第一个开始**的落点（休止拍用：球照样往前跳，不许原地消失） */
+/**
+ * 拍网格的**相位**（毫秒，0 ≤ phase < beatMs）。
+ *
+ * 为什么需要：序列时间是从**第一个音**开始算 0 的，弱起谱（如 `( 5 5 6 )`）真正的拍点
+ * 会落在半个拍上 ⇒ 直接用 0 当锚点，球整体偏半拍（用户实报「落点晚了」）。
+ *
+ * 做法：拿**长音（≥ 0.9 拍）的起点**投票——长音基本都压在拍上，取票数最多的余数。
+ * 没有长音（全是很短的音）就退回 0，保持原行为。
+ */
+export function beatPhaseOf(anchors: readonly BallAnchor[], beatMs: number): number {
+  if (beatMs <= 0) return 0
+  const buckets = new Map<number, number>()
+  for (const a of anchors) {
+    if (a.t1 - a.t0 < beatMs * 0.9) continue
+    const r = Math.round((((a.t0 % beatMs) + beatMs) % beatMs) / 5) * 5
+    buckets.set(r, (buckets.get(r) ?? 0) + 1)
+  }
+  let best = 0
+  let bestN = 0
+  for (const [r, n] of buckets) {
+    if (n > bestN) {
+      best = r
+      bestN = n
+    }
+  }
+  return best
+}
 function nextAnchor(anchors: readonly BallAnchor[], t: number): BallAnchor | null {
   for (const a of anchors) if (a.t0 > t) return a
   return null
@@ -84,6 +110,11 @@ export function ballAt(
   beatMs: number,
   anchorMs: number,
   amp: number,
+  /**
+   * 小节起点时刻（升序）。给了它，拍网格**按小节重置**——
+   * 用户口径：「小节开始的第一个音总是第一拍的开始」，弱起/漂移不会累到下一小节。
+   */
+  barStartsMs?: readonly number[],
 ): BallPos | null {
   if (beatMs <= 0 || anchors.length === 0) return null
   const first = anchors[0]
@@ -97,8 +128,16 @@ export function ballAt(
     if (y > 2400) return null // 已经落出画面（页面高约 842）
     return { x: last.cx, y, u: 0 }
   }
-  const k = Math.floor((t - anchorMs) / beatMs)
-  const b0 = anchorMs + k * beatMs
+  // 有小节起点就用"本小节的拍网格"：小节第一个音 = 第一拍
+  let barStart = anchorMs
+  if (barStartsMs && barStartsMs.length > 0) {
+    for (const s of barStartsMs) {
+      if (s <= t) barStart = s
+      else break
+    }
+  }
+  const k = Math.floor((t - barStart) / beatMs)
+  const b0 = barStart + k * beatMs
   const b1 = b0 + beatMs
   // 这一拍没音 ⇒ 朝下一个有音的落点跳（不再返回 null，球不会消失）
   const a0 = anchorAt(anchors, b0) ?? nextAnchor(anchors, b0) ?? first
