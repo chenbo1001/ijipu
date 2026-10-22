@@ -27,6 +27,8 @@
   --jp-text-secondary: #93a0c8;
   --jp-text-muted: #5a6a99;
   --jp-accent: var(--jp-neon-cyan);
+  /* adj1071：强调色实底按钮上的文字色（深色主题用深字，浅色主题用白字） */
+  --jp-on-accent: #0b1220;
   --jp-danger: #ff5d6c;
   --jp-success: #3ddc97;
   --jp-warning: #ffc857;
@@ -89,6 +91,8 @@
   --jp-text-secondary: #46537a;
   --jp-text-muted: #7a86a8;
   --jp-accent: #0891a6;
+  /* adj1071：浅色主题的强调色是深青，实底上用白字 */
+  --jp-on-accent: #ffffff;
   --jp-danger: #d64550;
   --jp-success: #1f9d6a;
   --jp-warning: #c98a00;

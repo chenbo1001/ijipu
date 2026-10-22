@@ -1774,26 +1774,56 @@ async function main() {
           introPixel[0] < 80 && introPixel[1] < 100,
           JSON.stringify(introPixel),
         )
-        // adj1070：控制条按钮对比度——生成视频实心青、选中态深底青字（不能浅底浅青字）
+        // adj1071：控制条必须跟随主题变量（深/浅两套都验），不能写死深色
         const camBtnStyles = await evalJs(
           c,
           `(() => {
-            const gen = getComputedStyle(document.querySelector('.dyn-frame-generate'))
-            const sel = getComputedStyle(document.querySelector('.dyn-frame-ratio.is-on'))
-            return {
-              genBg: gen.backgroundColor,
-              genColor: gen.color,
-              selBg: sel.backgroundColor,
-              selColor: sel.color
+            const themeOf = () => {
+              const probe = document.createElement('div')
+              probe.style.position = 'absolute'
+              probe.style.left = '-9999px'
+              document.body.appendChild(probe)
+              const bg = (name) => {
+                probe.style.background = 'var(' + name + ')'
+                return getComputedStyle(probe).backgroundColor
+              }
+              const panel = bg('--jp-bg-panel')
+              const accent = bg('--jp-accent')
+              probe.style.background = 'transparent'
+              probe.style.color = 'var(--jp-on-accent)'
+              const onAccent = getComputedStyle(probe).color
+              probe.remove()
+              const controls = getComputedStyle(document.querySelector('.dyn-frame-controls'))
+              const gen = getComputedStyle(document.querySelector('.dyn-frame-generate'))
+              const sel = getComputedStyle(document.querySelector('.dyn-frame-ratio.is-on'))
+              return {
+                panel, accent, onAccent,
+                controlsBg: controls.backgroundColor,
+                genBg: gen.backgroundColor,
+                genColor: gen.color,
+                selBg: sel.backgroundColor,
+                selColor: sel.color
+              }
             }
+            const root = document.documentElement
+            const orig = root.getAttribute('data-mode')
+            const dark = themeOf()
+            root.setAttribute('data-mode', 'light')
+            const light = themeOf()
+            if (orig === null) root.removeAttribute('data-mode')
+            else root.setAttribute('data-mode', orig)
+            return { dark, light }
           })()`,
         )
+        const themeOk = (t) =>
+          t.controlsBg === t.panel &&
+          t.genBg === t.accent &&
+          t.genColor === t.onAccent &&
+          t.selBg === t.accent &&
+          t.selColor === t.onAccent
         check(
-          'adj1070 相机位按钮高对比：生成视频实心青、选中态深底青字',
-          camBtnStyles.genBg === 'rgb(0, 240, 255)' &&
-            camBtnStyles.genColor === 'rgb(11, 18, 32)' &&
-            camBtnStyles.selBg === 'rgba(0, 240, 255, 0.18)' &&
-            camBtnStyles.selColor === 'rgb(143, 251, 255)',
+          'adj1071 相机位控制条跟随主题（深/浅两套：面板/强调色/on-accent 同源）',
+          themeOk(camBtnStyles.dark) && themeOk(camBtnStyles.light),
           JSON.stringify(camBtnStyles),
         )
         // adj1066：用户实报的 16:9 —— 相机位必须真的重建为 1920×1080 会话

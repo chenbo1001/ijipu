@@ -5718,14 +5718,14 @@ span.ws-check {
   font-size: 12px;
 }
 .dyn-frame-ratio.is-on {
-  border-color: #00f0ff;
-  background: rgb(0 240 255 / 18%);
-  color: #8ffbff;
+  border-color: var(--jp-accent);
+  background: var(--jp-accent);
+  color: var(--jp-on-accent);
   font-weight: 600;
 }
 .dyn-frame-meta {
   font-size: 12px;
-  color: #e8eefc;
+  color: var(--jp-text-primary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -5737,10 +5737,11 @@ span.ws-check {
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px;
-  border: 1px solid rgb(120 150 220 / 30%);
+  border: 1px solid var(--jp-border);
   border-radius: 10px;
-  background: rgb(15 21 38 / 92%);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+  background: var(--jp-bg-panel);
+  color: var(--jp-text-primary);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 28%);
 }
 .dyn-frame-controls-row {
   display: flex;
@@ -5756,35 +5757,41 @@ span.ws-check {
 .dyn-frame-controls .btn {
   padding: 3px 9px;
   font-size: 12px;
-  border: 1px solid rgb(120 150 220 / 35%);
-  background: #1b2747;
-  color: #e8eefc;
+  border: 1px solid var(--jp-border);
+  background: var(--jp-bg-panel);
+  color: var(--jp-text-primary);
 }
 .dyn-frame-controls .btn:hover:not(:disabled) {
-  background: #24345c;
-  border-color: rgb(0 240 255 / 55%);
+  background: var(--jp-bg-panel-hover);
+  border-color: var(--jp-accent);
 }
 .dyn-frame-controls .btn:disabled {
   opacity: 0.48;
 }
-/* 选中态必须压过 `.dyn-frame-controls .btn`（同色深底） */
+/* 选中态必须压过 `.dyn-frame-controls .btn`（同色面板底） */
 .dyn-frame-controls .dyn-frame-ratio.is-on {
-  border-color: #00f0ff;
-  background: rgb(0 240 255 / 18%);
-  color: #8ffbff;
+  border-color: var(--jp-accent);
+  background: var(--jp-accent);
+  color: var(--jp-on-accent);
   font-weight: 600;
+}
+.dyn-frame-controls .dyn-frame-ratio.is-on:hover:not(:disabled) {
+  background: var(--jp-accent);
+  border-color: var(--jp-accent);
+  color: var(--jp-on-accent);
+  filter: brightness(1.08);
 }
 .dyn-frame-controls .dyn-frame-generate {
   margin-left: auto;
-  border-color: #00f0ff;
-  background: #00f0ff;
-  color: #0b1220;
+  border-color: var(--jp-accent);
+  background: var(--jp-accent);
+  color: var(--jp-on-accent);
   font-weight: 700;
 }
 .dyn-frame-controls .dyn-frame-generate:hover:not(:disabled) {
-  background: #5ff8ff;
-  border-color: #5ff8ff;
-  color: #0b1220;
+  background: var(--jp-accent);
+  border-color: var(--jp-accent);
+  filter: brightness(1.08);
 }
 .dyn-frame-controls .dyn-frame-play {
   min-width: 64px;
@@ -5792,7 +5799,7 @@ span.ws-check {
 .dyn-frame-label {
   font-size: 12px;
   font-weight: 500;
-  color: #c7d4f0;
+  color: var(--jp-text-secondary);
   white-space: nowrap;
 }
 .dyn-frame-audio {
@@ -5800,28 +5807,14 @@ span.ws-check {
 }
 .dyn-frame-audio span {
   font-size: 12px;
-  color: #e8eefc;
+  color: var(--jp-text-primary);
 }
 .dyn-frame-close {
   min-width: 30px;
-  background: #1b2747;
-  color: #ffffff;
-}
-.dyn-frame-generate {
-  margin-left: auto;
-  border-color: #00f0ff;
-  background: #00f0ff;
-  color: #0b1220;
-  font-weight: 700;
-}
-.dyn-frame-generate:hover:not(:disabled) {
-  background: #5ff8ff;
-  border-color: #5ff8ff;
-  color: #0b1220;
 }
 .dyn-frame-error {
   font-size: 12px;
-  color: #ff9aa8;
+  color: var(--jp-danger);
   line-height: 1.4;
 }
 
