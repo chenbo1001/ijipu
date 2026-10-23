@@ -8,9 +8,9 @@
  *
  * | 文件 | 体积 | 为什么不用 |
  * |---|---|---|
- * | `Jianpu.ico` | 184 KB | 浏览器标签页 favicon；iframe 里不显示标签页图标 |
- * | `pwa-512.png` | 42 KB | PWA 安装图标 |
- * | `pwa-192.png` | 7.6 KB | PWA 安装图标 / apple-touch-icon |
+ * | `Jianpu.ico` | 33 KB | 浏览器标签页 favicon；iframe 里不显示标签页图标 |
+ * | `pwa-512.png` | 27 KB | PWA 安装图标 |
+ * | `pwa-192.png` | 10 KB | PWA 安装图标 / apple-touch-icon |
  *
  * 另有 8 个 `.svg`（波音/滑音/延长记号/大括号，共 ~8.7 KB）：**引擎的曲谱图形是 SVG 现画**，
  * 源码里没有任何地方按路径加载它们（已在 `src/` 与 `packages/ijipu-engine/src/` 全文搜索确认），
