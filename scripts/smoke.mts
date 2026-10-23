@@ -34875,4 +34875,25 @@ function runDynamicCameraTests(): void {
       )
     }
   }
+  /**
+   * adj1112（用户 2026-10-23 反馈）：片尾落款的网址要**写完整**（含 `https://`）。
+   *
+   * 官网走 https，而人手动输入域名时浏览器默认补 `http://` ⇒ 片尾若只印 `ijipu.pages.dev`，
+   * 观众照抄可能打不开。判据：渲染用的是完整 `brand.siteUrl`，且**不许**再剥协议。
+   */
+  {
+    const rendererSrc = readFileSync(join(root, 'src/export/video/renderer.ts'), 'utf8')
+    const okFullUrl = (s: string): boolean =>
+      /ctx\.fillText\(brand\.siteUrl,/.test(s) && !/brand\.siteUrl\.replace\(/.test(s)
+    check(
+      'adj1112 片尾落款写完整地址：直接用 brand.siteUrl（含 https://），不再剥协议',
+      okFullUrl(rendererSrc) && brand.siteUrl.startsWith('https://'),
+      brand.siteUrl,
+    )
+    check(
+      'adj1112 负对照：旧写法（`brand.siteUrl.replace(/^https?:\\/\\//, ...)`）被同一判据判红',
+      !okFullUrl("ctx.fillText(brand.siteUrl.replace(/^https?:\\/\\//, ''), W / 2, urlY)"),
+      '剥协议的写法 → 判红',
+    )
+  }
 }

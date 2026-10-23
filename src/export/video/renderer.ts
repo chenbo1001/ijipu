@@ -861,7 +861,13 @@ export async function createDynamicSession(
     ctx.globalAlpha = alpha * urlE
     ctx.fillStyle = card.url
     ctx.font = `${urlSize}px ${font}`
-    ctx.fillText(brand.siteUrl.replace(/^https?:\/\//, ''), W / 2, urlY)
+    /**
+     * adj1112（用户 2026-10-23 反馈）：网址要**写完整**，不再剥掉 `https://`。
+     *
+     * 原因：官网走的是 https（`ijipu.pages.dev`），而人手动输入域名时浏览器默认补 `http://`
+     * ⇒ 抄片尾那行「ijipu.pages.dev」可能打不开。这一行是给观众照抄的落款，就得能直接抄。
+     */
+    ctx.fillText(brand.siteUrl, W / 2, urlY)
     ctx.restore()
     paintCardSeal(ctx, W, H, t)
     ctx.restore()
