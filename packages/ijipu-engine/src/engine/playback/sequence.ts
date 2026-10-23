@@ -511,21 +511,27 @@ export function resolvePracticeRange(
   }
   const unique = [...bySig.values()].sort((a, b) => a.i0 - b.i0)
   /**
-   * adj1104（用户 2026-10-23 实报：`段1 [26:3 - 46:2]` 的"第 2 遍"其实到不了）：
-   * 若某个候选的区间**被另一个候选完全包住**，它只是同一条"旅程"里**后一次起点**的截断版，
-   * 不是另一遍 —— 去掉。实测 `赤伶`：起点 `0_1_5_141` 出现在第 1、2 遍，终点 `0_1_9_249`
-   * 只在第 3 遍 ⇒ 两个候选 `137..419` / `328..419`，后者是前者的子区间（用户："第二遍次是从 27:1 开始的"）。
+   * adj1104 **已撤销**（用户 2026-10-23 口径，`段 [27:1 - 46:2]`）：
+   * 「标记应该有 3 遍次，第一遍最长最完整，第二遍是第一遍的后面一部分，第三遍是第二遍的后面一部分」。
+   *
+   * ⇒ **嵌套候选是合法的**（每一遍从不同的重复/跳越入口重新走到同一个终点），不能再"被包住就丢"。
+   * 需要去掉的是"根本到不了的那一遍"（adj1102 的到达性判定）与"内容完全相同的重复"（adj1103 的内容签名去重）。
    */
-  const pruned = unique.filter(
-    (c) => !unique.some((d) => d !== c && d.i0 <= c.i0 && d.i1 >= c.i1 && (d.i0 < c.i0 || d.i1 > c.i1)),
-  )
-  if (pruned.length === 0) return { pick: 0, candidates: [], missing: 'end' }
+  if (unique.length === 0) return { pick: 0, candidates: [], missing: 'end' }
   /** 去重后重新编号（UI 的「第 N 遍」= 候选序号，不是"第几次出现"） */
-  const deduped = pruned.map((c, i) => ({ ...c, startOccurrence: i + 1 }))
-  // 默认：优先"不含跳越"的、其次最早
+  const deduped = unique.map((c, i) => ({ ...c, startOccurrence: i + 1 }))
+  /**
+   * 默认选哪个：**嵌套候选**（每一遍都是上一遍的后半截，用户 `27:1→46:2` 的三遍正是这样）
+   * ⇒ 取**最完整的第一遍**；否则仍旧"优先不含跳越、其次最早"。
+   */
+  const nested =
+    deduped.length > 1 &&
+    deduped.every((c, i) => i === 0 || (deduped[i - 1].i0 <= c.i0 && deduped[i - 1].i1 >= c.i1))
   let pick = 0
-  const clean = deduped.findIndex((c) => !c.containsJump)
-  if (clean >= 0) pick = clean
+  if (!nested) {
+    const clean = deduped.findIndex((c) => !c.containsJump)
+    if (clean >= 0) pick = clean
+  }
   return { pick, candidates: deduped }
 }
 
