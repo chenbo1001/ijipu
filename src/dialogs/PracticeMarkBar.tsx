@@ -154,9 +154,27 @@ export function PracticeMarkBar(): React.JSX.Element {
     const ids = evs.map((e) => noteIdStringOf(e.placed.id))
     if (!ids.includes(cur.startId)) ids.unshift(cur.startId)
     if (!ids.includes(cur.endId)) ids.push(cur.endId)
+    /**
+     * adj1108（用户 2026-10-23 截图：「红框处是连音线的后段，标记线不该断开」）：
+     * 连音线/同音合并会让中间那个音**没有独立事件** ⇒ 画线时出现一个"假缺口"。
+     * 这里只补**同组内序号恰好差 2**（中间正好漏一个音）的那一个 —— 大跳越（跳房子/反复跳过整段）
+     * 的序号差远大于 2，不会被补上，仍然断线。
+     */
+    const layoutIds = new Set<string>()
+    for (const p of layoutForResolve.pages) for (const n of p.notes) layoutIds.add(noteIdStringOf(n.id))
+    const filled: string[] = []
+    for (let i = 0; i < ids.length; i++) {
+      filled.push(ids[i])
+      const a = /^(\d+)_(\d+)_(\d+)_(\d+)$/.exec(ids[i])
+      const b = /^(\d+)_(\d+)_(\d+)_(\d+)$/.exec(ids[i + 1] ?? '')
+      if (a !== null && b !== null && a[3] === b[3] && Number(b[4]) - Number(a[4]) === 2) {
+        const mid = `${a[1]}_${a[2]}_${a[3]}_${Number(a[4]) + 1}`
+        if (layoutIds.has(mid)) filled.push(mid)
+      }
+    }
     return {
       candidates: res.candidates,
-      ids,
+      ids: filled,
       rangeMs: sliced?.rangeMs ?? 0,
       /**
        * adj987t（用户实报「少了停止位的那个音」）：**这一段最后一个音**的 `g组#序号`。

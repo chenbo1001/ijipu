@@ -53,8 +53,9 @@ export function PracticeMarkLayer({ page, noteSize }: { page: ScorePageLike; not
             startId,
             endId,
             (n) => n.y,
-            // adj1106：跳过不演奏的那一段（跳房子/反复）把线断开
-            noteSize * 2.2,
+            // adj1106/adj1108：跳过不演奏的那一段（跳房子/反复）把线断开；
+            // 但**连音线后段**这种"同一段里被合并掉的音"只有约一个音距，不能断 ⇒ 阈值放宽到 3.8 个字号
+            noteSize * 3.8,
           )
         : []
   const pct = (v: number) => `${((v / page.width) * 100).toFixed(3)}%`
@@ -192,13 +193,14 @@ function bandsFromIds(page: ScorePageLike, ids: readonly string[], noteSize: num
   const picked = page.notes.filter(matchOf)
   if (picked.length === 0) return []
   /**
-   * adj1106（用户 2026-10-23 截图实报）：同一行里"没演奏的那一段"不能被一条长线横穿 ——
-   * 按相邻间距切成若干段（跳房子/反复跳过的地方断开），行与行之间照旧分开。
+   * adj1106 / adj1108（用户两次截图）：同一行里"没演奏的那一段"不能被一条长线横穿（跳房子/反复跳过）；
+   * 但**连音线后段**（被合并进前一个音、没有独立事件）不能断——那里只有约一个音距。
+   * ⇒ 用 3.8 个字号作阈值：整段跳过（≥4 个音）会断，连音线后段（≈1 个音）仍连上。
    */
   return splitIntoRuns(
     picked.map((n) => ({ x: n.x, y: n.y, rightX: n.rightX ?? n.x + 1 })),
     (n) => n.y,
-    noteSize * 2.2,
+    noteSize * 3.8,
   )
 }
 
