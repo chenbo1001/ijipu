@@ -103,7 +103,7 @@ export type CliIo = {
     pass: number | null
     /** 输出文件（绝对路径或相对当前目录；宿主按此写盘） */
     output: string
-    /** 画布比例（由 `--aspect` 决定；CLI 缺省 `16x9`，见 `runCli` 里的说明） */
+    /** 画布比例（由 `--aspect` 决定；CLI 缺省 `9x16`，见 `runCli` 里的说明） */
     aspect: '9x16' | '1x1' | '16x9'
     /** `full` = 整曲（缺省）；`3min` = 单支上限 3 分钟 */
     mode: 'full' | '3min'
@@ -192,7 +192,7 @@ const HELP = `iJipu 命令行（爱记谱）
   render        -i <文件|-> -t svg|midi|png|jpg|pdf|mp4 -o <输出>           渲染导出
                 [--crop page|score] [--pad N] [--ink x,y,w,h]              画布范围（缺省 page = 整页）
                 [--from 27:3 --to 50:1 [--pass 2]]                        只导这一段（mp4）
-                [--aspect 9:16|1:1|16:9]                                  画布比例（缺省 16:9）
+                [--aspect 9:16|1:1|16:9]                                  画布比例（缺省 9:16）
                 [--card [brand|paper|ink|minimal]]                        片头片尾模板（不写 = 不带；只写 = 极简）
                 [--nosound]                                               导出无声视频（缺省带声音）
   play          -i <文件|-> -t midi|wav -o <输出>                           导出音频
@@ -309,8 +309,9 @@ type Parsed = {
   /**
    * adj1115：`--aspect <9:16|1:1|16:9>` 的原始字符串（画布比例）。
    *
-   * 只认界面上写的那三种（与相机位的「画布」按钮同一套词）；缺省 `16:9`（**维持 CLI 原有行为**，
-   * 不跟着界面的 9:16 走 —— 已经写好的命令不能因为加了新参数就悄悄换比例）。
+   * 只认界面上写的那三种（与相机位的「画布」按钮同一套词）；`9x16` 这类内部 id **不认** ——
+   * 一种行为只留一种写法。缺省 `9:16`（adj1117 起与界面的默认画布一致；用户拍板：
+   * 这个参数刚加、没有存量脚本要照顾，正好把两处缺省对齐）。
    */
   aspect: string | null
   /**
@@ -1360,19 +1361,20 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
        * adj1115（用户 2026-10-23 要求）：画布比例 `--aspect`。
        *
        * 只认相机位「画布」按钮上那三种写法（`9:16` / `1:1` / `16:9`），内部 id 是
-       * `9x16 / 1x1 / 16x9`（与 `DYNAMIC_PRESETS` 的键、任务文件同一套）。
-       * 缺省 **16:9** —— 这是 CLI 一直以来的行为，**刻意不跟着界面的 9:16 走**：
-       * 加了新参数就换缺省，等于让旧命令悄悄出另一种片子。
+       * `9x16 / 1x1 / 16x9`（与 `DYNAMIC_PRESETS` 的键、任务文件同一套）；`9x16` 这种内部写法
+       * **明确不认** —— 一种行为只留一种写法，少一种写法就少一类"看着像却解析不成"。
+       * 缺省 **9:16**（adj1117，用户拍板）：与界面相机位的默认画布一致。
+       * 这个参数刚加、还没有存量脚本要照顾，正好把两处缺省对齐。
        */
       const ASPECT_IDS: Record<'9:16' | '1:1' | '16:9', '9x16' | '1x1' | '16x9'> = {
         '9:16': '9x16',
         '1:1': '1x1',
         '16:9': '16x9',
       }
-      const aspectArg = (p.aspect ?? '16:9').trim()
+      const aspectArg = (p.aspect ?? '9:16').trim()
       if (!(aspectArg in ASPECT_IDS)) {
         io.err(
-          `--aspect 支持 9:16（竖屏）| 1:1（方形）| 16:9（横屏）；收到 “${String(p.aspect)}”，不写则为 16:9`,
+          `--aspect 支持 9:16（竖屏）| 1:1（方形）| 16:9（横屏）；收到 “${String(p.aspect)}”，不写则为 9:16`,
         )
         return { code: EXIT.usage }
       }
@@ -1464,7 +1466,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
           endId,
           pass,
           output: target,
-          // adj1115：画布比例（缺省 16:9）；整曲时长是 CLI 的缺省，3 分钟会把长曲悄悄截短，命令行不做
+          // adj1115/adj1117：画布比例（缺省 9:16，与界面一致）；整曲时长是 CLI 的缺省，3 分钟会把长曲悄悄截短，命令行不做
           aspect,
           mode: 'full',
           cardStyleId,

@@ -1538,8 +1538,8 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
   }
   check('adj1084 CLI 自己**不写** MP4（由宿主写盘，避免大字节穿管道）', !('out.mp4' in cap.files))
   check(
-    'adj1084 视频缺省 16:9 + 整曲（3 分钟会把长曲悄悄截短，命令行不做）',
-    seen !== null && seen.aspect === '16x9' && seen.mode === 'full',
+    'adj1084/adj1117 视频缺省 9:16（与界面默认画布一致）+ 整曲（3 分钟会把长曲悄悄截短，命令行不做）',
+    seen !== null && seen.aspect === '9x16' && seen.mode === 'full',
     `seen=${JSON.stringify(seen)}`,
   )
   /**
@@ -1690,7 +1690,7 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
 
   /**
    * adj1115（用户 2026-10-23）：`--aspect` 画布比例 —— 只认相机位「画布」那三种写法，
-   * 缺省 16:9（维持 CLI 原有行为，不跟着界面的 9:16 走）。
+   * 缺省 9:16（adj1117 起与界面的默认画布一致）。
    */
   {
     const mk = (): { m: ReturnType<typeof makeIo>; seen: { v: SeenVideo | null } } => {
@@ -1730,12 +1730,14 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
         EXIT.usage && bad.m.errs.join('').includes('9:16'),
       bad.m.errs.join('｜').slice(0, 120),
     )
-    const alt = mk()
-    check(
-      'adj1115 `--aspect 9x16`（内部 id 写法）⇒ 1（对外只留 `9:16`，不搞两种写法）',
-      (await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--aspect', '9x16'], alt.m.io)).code ===
-        EXIT.usage,
-    )
+    for (const alt of ['9x16', '16x9']) {
+      const altIo = mk()
+      check(
+        `adj1115/adj1117 \`--aspect ${alt}\`（内部 id 写法）⇒ 1（一种行为只留一种写法）`,
+        (await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--aspect', alt], altIo.m.io))
+          .code === EXIT.usage,
+      )
+    }
     const svgAspect = mk()
     check(
       'adj1115 `--aspect` 只用于 -t mp4（给 svg ⇒ 1，不静默忽略）',
