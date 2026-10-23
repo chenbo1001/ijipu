@@ -78,6 +78,19 @@ export function PracticeMarkLayer({ page, noteSize }: { page: ScorePageLike; not
   const lastId = rangeIds.length > 0 ? rangeIds[rangeIds.length - 1] : endId
   const startPt = firstId ? posOfNoteId(page, firstId) : null
   const endPt = lastId ? posOfNoteId(page, lastId) : null
+  /**
+   * adj1109（用户 2026-10-23 截图：「这里的跳房子没补上」——线从第二个音才开始，起点那个音被漏掉）：
+   * 画线的点数来自"实际演奏到的 id"，起点/终点音若因为合并/序号跳变没被列进去，线就会缩一小截。
+   * ⇒ 线**必须覆盖用户标的两个端点**（离得近才补，绝不跨页/跨大段去连）。
+   */
+  if (startPt) {
+    const b = bands.find((x) => x.y === startPt.y && startPt.x <= x.x0 + 0.5)
+    if (b && b.x0 - startPt.x <= noteSize * 6) b.x0 = startPt.x
+  }
+  if (endPt) {
+    const b = bands.find((x) => x.y === endPt.y && endPt.rightX >= x.x1 - 0.5)
+    if (b && endPt.rightX - b.x1 <= noteSize * 6) b.x1 = endPt.rightX
+  }
   return (
     <>
       {bands.map((b, i) => (
