@@ -456,10 +456,35 @@ export function slicePlaySequenceByRange(
 ): (PlaySequence & { rangeMs: number }) | null {
   if (i0 < 0 || i1 < i0 || i1 >= seq.events.length) return null
   const endEvent = seq.events[i1]
-  const endT = endEvent.atMs + endEvent.durationMs
-  // adj987f：把"与结尾音符同时/在其时值窗口内发声"的事件一并纳入（后倚音、同时值的别声部…）
+  let endT = endEvent.atMs + endEvent.durationMs
   let last = i1
-  while (last + 1 < seq.events.length && seq.events[last + 1].atMs < endT - 0.5) last++
+  /**
+   * adj1100（用户 2026-10-23 实报：`33:1 → 34:2` 的段**停止音只响一小截**）：
+   * 同一个音符可能被拆成**连续的几段事件**（后倚音 / 连音线把尾音切开时就是这样，
+   * 实测 `(6/[7/] 6)--` 处同一个 `6` 拆成 107ms + 2893ms 两段，`placed.id` 完全相同）。
+   * 只切到第一段 ⇒ 停止音被截短。这里把"同 id 且首尾相接"的后续段一起带上；
+   * 顺便也继续带入"与结尾同时/在其时值窗口内发声"的其它事件（adj987f 的原有口径）。
+   */
+  const endId = noteIdStringOf(endEvent.placed.id)
+  for (;;) {
+    let advanced = false
+    while (
+      last + 1 < seq.events.length &&
+      noteIdStringOf(seq.events[last + 1].placed.id) === endId &&
+      seq.events[last + 1].atMs <= endT + 0.5
+    ) {
+      last++
+      endT = Math.max(endT, seq.events[last].atMs + seq.events[last].durationMs)
+      advanced = true
+    }
+    // adj987f：把"与结尾音符同时/在其时值窗口内发声"的事件一并纳入（后倚音、同时值的别声部…）
+    while (last + 1 < seq.events.length && seq.events[last + 1].atMs < endT - 0.5) {
+      last++
+      endT = Math.max(endT, seq.events[last].atMs + seq.events[last].durationMs)
+      advanced = true
+    }
+    if (!advanced) break
+  }
   const base = seq.events[i0].atMs
   const events = seq.events.slice(i0, last + 1).map((e) => ({ ...e, atMs: Math.max(0, e.atMs - base) }))
   const lastEv = events[events.length - 1]
@@ -470,6 +495,15 @@ export function slicePlaySequenceByRange(
    * adj1006：从某遍**中间**起播时，0 点还要补当前那一遍（`rebasePassMarksOf` 统一处理）。
    */
   const passMarks = rebasePassMarksOf(seq.passMarks, base, rangeMs)
+  /**
+   * adj1100（用户 2026-10-23）：**「共 M 遍」到底算谁的**——
+   *
+   * · 切片这里仍保留**整曲**遍数（adj1006 的口径：「共 M 遍」是"整首一共几遍"，不是"还剩几遍"，
+   *   也不是"这一段里有几遍"）；
+   * · 但**标记段**的"这一段有几遍"必须按**候选个数**算（同一对起止在展开序列里配出几个区间），
+   *   由调用方传给 `passLabel` —— 用户实报：`赤伶 33:1→34:2` 要进跳房子 1，必然只有 1 遍，
+   *   而整曲有反复 + `&ds` 共 3 遍，界面却显示"共 3 遍"。
+   */
   return {
     events,
     totalMs: rangeMs,

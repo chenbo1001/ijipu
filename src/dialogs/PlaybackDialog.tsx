@@ -176,6 +176,14 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
   const loopTimerRef = useRef<number | null>(null)
   /** adj989：这一段的总长（ms）——续播时要据此算'还剩多长'，循环才不会断 */
   const practiceRangeMsRef = useRef(0)
+  /**
+   * adj1100（用户 2026-10-23 实报）：选了**练习段**时，「共 M 遍」要用**这一段的遍数**
+   * （= 同一对起止配出的候选个数），而不是整曲遍数。
+   *
+   * 用户原话：`33:1→34:2` 要进跳房子 1，「必然只有一遍」，界面却显示"共 3 遍"。
+   * `null` = 没选段（全曲播放）⇒ 仍按整曲 `maxPass`。
+   */
+  const practicePassTotalRef = useRef<number | null>(null)
   // adj258：播放序列 + 启动时间（本地计时），高亮定时器按当前 atMs 设 activeNoteIds
   const seqRef = useRef<ReturnType<typeof buildPlaySequence> | null>(null)
   /** adj409：暂停时已播到的位置（原时间轴毫秒）= 续播起点 */
@@ -580,6 +588,8 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
       const markNow = markNow0
       let seq = fullSeq
       let practiceRangeMs = 0
+      /** adj1100：选了练习段 ⇒ 记下"这一段有几遍"（候选个数）；整曲播放 ⇒ null */
+      practicePassTotalRef.current = null
       if (markNow) {
         /**
          * adj987（用户 2026-10-18 需求）：选了标记段就只播这一段。
@@ -601,6 +611,12 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
          * 长度不同（极少数排版差异）才退回自己解析。
          */
         let used = false
+        /**
+         * adj1100：**先解析一次**——「这一段的遍数」要按候选个数算（用户口径：进跳房子 1 ⇒ 只有 1 遍），
+         * 不能拿整曲的 `maxPass`（这首有反复 + `&ds` 共 3 遍）。解析结果两条分支共用。
+         */
+        const res = resolvePracticeRange(fullSeq, markNow.startId, markNow.endId)
+        practicePassTotalRef.current = Math.max(1, res.candidates.length)
         const { practiceRangeI0: i0s, practiceRangeI1: i1s, practiceRangeEventCount: nS } = useUiStore.getState()
         if (i0s >= 0 && i1s >= i0s && nS === fullSeq.events.length) {
           const sliced = slicePlaySequenceByRange(fullSeq, i0s, i1s)
@@ -612,7 +628,6 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
           }
         }
         if (!used) {
-          const res = resolvePracticeRange(fullSeq, markNow.startId, markNow.endId)
           if (res.candidates.length === 0) {
             showNotice(playbackCopy.practiceMarkInvalid, 'warn')
           } else {
@@ -932,7 +947,12 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
             */}
             {totalMs > 0 &&
               (() => {
-                const label = passLabel(seqRef.current?.passMarks, Math.min(clockMs, totalMs), seqRef.current?.maxPass)
+                const label = passLabel(
+                  seqRef.current?.passMarks,
+                  Math.min(clockMs, totalMs),
+                  // adj1100：选了练习段 ⇒ 用**这一段**的遍数（候选个数）；全曲播放 ⇒ 整曲遍数
+                  practicePassTotalRef.current ?? seqRef.current?.maxPass,
+                )
                 return label ? (
                   <span className="dock-muted playback-pass" title="当前在第几遍反复（共几遍）">
                     {label}

@@ -2284,6 +2284,71 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
   )
 }
 
+/**
+ * adj1100（用户 2026-10-23 实报，赤伶 `33:1 → 34:2`）：标记段的「共 M 遍」与停止音长度。
+ *
+ * ① 段内只有 1 遍时，`maxPass` 不能抄整曲的遍数（用户原话：「因为要进跳房子 1，必然只有一遍。
+ *    但现在的计算是 3 遍」——整曲有反复 + `&ds`，共 3 遍）；
+ * ② 停止音被拆成连续两段事件时，切片要把整条带上（用户原话「3 遍的结果都不对」——
+ *    实测停止音只响了 107ms，后面的 2893ms 被切掉）。
+ */
+{
+  console.log('[adj1100] 标记段的遍次按"这一段"算 + 停止音要完整')
+  const SRC = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\nQ: |: 5 6 7 1 | 2 3 4 5 :|\nQ: 6 7 1 2 |\n'
+  const parsed = parseJps(SRC)
+  const lay = layoutScore(parsed, DUR_CFG)
+  const seq = buildPlaySequence(parsed, lay, 120)
+  const idOf = (i: number): string => noteIdStringOf(seq.events[i].placed.id)
+  const g1 = seq.events.map((e, i) => ({ i, g: e.placed.id.group })).filter((x) => x.g === 1)
+  const res = resolvePracticeRange(seq, idOf(g1[0].i), idOf(g1[g1.length - 1].i))
+  check(
+    'adj1100 反复段里的同一对起止配出 2 个候选（"这一段有 2 遍"）',
+    seq.maxPass === 2 && res.candidates.length === 2,
+    `整曲=${seq.maxPass} 候选=${res.candidates.length}`,
+  )
+  check(
+    'adj1100 练习段读数按"这一段几遍"：候选 1 个 ⇒ 不显示；旧口径（整曲 3 遍）会显示"第 1 / 共 3 遍"',
+    passLabel([{ atMs: 0, pass: 1 }], 0, 1) === null &&
+      passLabel([{ atMs: 0, pass: 1 }], 0, 3) === '第 1 / 共 3 遍',
+  )
+  const playbackSrc1100 = String(readFileSync('src/dialogs/PlaybackDialog.tsx', 'utf8'))
+  check(
+    'adj1100 试听接线：选了练习段时用 `practicePassTotalRef`（候选个数）而不是整曲 `maxPass`',
+    /practicePassTotalRef\.current = Math\.max\(1, res\.candidates\.length\)/.test(playbackSrc1100) &&
+      /practicePassTotalRef\.current \?\? seqRef\.current\?\.maxPass/.test(playbackSrc1100),
+  )
+  // ② 停止音被拆成"同 id 的连续两段" ⇒ 整条带上
+  const mk = (atMs: number, durationMs: number, index: number) => ({
+    atMs,
+    durationMs,
+    placed: { id: { pageIndex: 0, voice: 1, group: 0, index } },
+  })
+  const fragSeq = {
+    events: [mk(0, 500, 0), mk(500, 500, 1), mk(1000, 107, 2), mk(1107, 2893, 2), mk(4000, 500, 3)],
+    bpm: 120,
+    passMarks: [{ atMs: 0, pass: 1 }],
+    barStartsMs: [0],
+    maxPass: 1,
+  }
+  const frag = slicePlaySequenceByRange(fragSeq as never, 0, 2)
+  check(
+    'adj1100 停止音被拆成连续两段（同 id）⇒ 切片把整条带上（不再只响 107ms）',
+    frag !== null && frag.events.length === 4 && Math.round(frag.totalMs) === 4000,
+    frag === null ? 'null' : `${frag.events.length} 事件 / ${Math.round(frag.totalMs)}ms`,
+  )
+  // 负对照：同 id 但**不相接**（隔了 500ms）⇒ 不能吞掉后面那一大段
+  const gapSeq = {
+    ...fragSeq,
+    events: [mk(0, 500, 0), mk(500, 500, 1), mk(1000, 107, 2), mk(2000, 1000, 2), mk(4000, 500, 3)],
+  }
+  const gap = slicePlaySequenceByRange(gapSeq as never, 0, 2)
+  check(
+    'adj1100 负对照：同 id 但不相接 ⇒ 不吞（证明上一条按"首尾相接"判，不是按 id 判）',
+    gap !== null && gap.events.length === 3,
+    gap === null ? 'null' : String(gap.events.length),
+  )
+}
+
 // adj303：显示乐器名——@乐器名 / @@ 后第一个音符正上方标注
 const rIns = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 弦乐\nQ: 1 2 @钢琴 3 4 @@ 5 6 |\n')
 const layIns = layoutScore(rIns, { ...DUR_CFG, showInstrument: true })
