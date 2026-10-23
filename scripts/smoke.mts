@@ -106,6 +106,7 @@ import { createCardTemplateZip, readCardTemplateZip } from '../src/export/video/
 import { DEFAULT_CARD_STYLE } from '../src/export/video/cardTemplates.ts'
 // adj1077：视频生成能力闸门（桌面壳 + WebCodecs；网站/插件不开放）
 import { canGenerateVideo, canUseDynamicVideo } from '../src/export/video/capability.ts'
+import { pickPracticeCandidate } from '../src/export/video/practicePick.ts'
 import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
@@ -33252,6 +33253,25 @@ function runDynamicCameraTests(): void {
       'adj1081 动态会话的页位图带 withOverlay()（谱面背景图/水印与预览同源）',
       /renderScoreToSvg\(layout,\s*withOverlay\(\)\)/.test(dynRendererSrc) &&
         /from '\.\.\/\.\.\/store\/overlayAssets'/.test(dynRendererSrc),
+    )
+  }
+  /**
+   * adj1083（用户 2026-10-23 实报）：标记段选了第 2/3 遍导出，成片却按第 1 遍出。
+   * 根因：导出只传了起止音符 id，没把标记上用户选过的 `pass` 带进 `createDynamicSession`。
+   */
+  {
+    const barSrc = readFileSync(join(root, 'src/dialogs/PracticeMarkBar.tsx'), 'utf8')
+    const rendererSrc = readFileSync(join(root, 'src/export/video/renderer.ts'), 'utf8')
+    check(
+      'adj1083 标记段多遍次导出：选中的 pass 生效，缺省才回退默认/第一个候选',
+      pickPracticeCandidate(['first', 'second', 'third'], 0, 2) === 'third' &&
+        pickPracticeCandidate(['first', 'second', 'third'], 0, undefined) === 'first' &&
+        pickPracticeCandidate(['first', 'second', 'third'], 1, 0) === 'first' &&
+        pickPracticeCandidate(['first', 'second', 'third'], 0, 9) === 'first' &&
+        pickPracticeCandidate([], 0, 1) === undefined &&
+        /range:\s*\{\s*startId:\s*m\.startId,\s*endId:\s*m\.endId,\s*pass:\s*m\.pass\s*\}/.test(barSrc) &&
+        /pickPracticeCandidate\(res\.candidates,\s*res\.pick,\s*opts\.range\.pass\)/.test(rendererSrc),
+      'pass must flow mark -> camera -> session',
     )
   }
 }

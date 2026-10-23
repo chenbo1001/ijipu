@@ -187,7 +187,7 @@ export function PracticeMarkBar(): React.JSX.Element {
                 // adj1065：这一段交给预览区相机位；试听弹窗先关，才能看到取景
                 setDynamicCamera({
                   on: true,
-                  range: { startId: m.startId, endId: m.endId },
+                  range: { startId: m.startId, endId: m.endId, pass: m.pass },
                   mode: '3min',
                 })
                 closeModal()

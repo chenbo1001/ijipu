@@ -43,6 +43,7 @@ import {
 } from '@ijipu/engine'
 import { svgToCanvas } from '../export'
 import { withOverlay } from '../../store/overlayAssets'
+import { pickPracticeCandidate } from './practicePick'
 import { brand } from '../../brand/tokens'
 import { CARD_SANS, CARD_SERIF, DEFAULT_CARD_STYLE, type CardStyle } from './cardTemplates'
 
@@ -96,8 +97,8 @@ export async function createDynamicSession(
   bpm?: number,
   opts?: {
     followZoom?: number
-    /** 只导某个标记段（起止音符 id）；缺省 = 整曲 */
-    range?: { startId: string; endId: string } | null
+    /** 只导某个标记段（起止音符 id + 用户选过的候选遍次）；缺省 = 整曲 */
+    range?: { startId: string; endId: string; pass?: number } | null
     /** 片头时长（ms，默认 2000；0 = 不要片头）。片头是**前置静音**，音画一起后移 */
     leadInMs?: number
     /** 片尾时长（ms，默认 2500；0 = 不要片尾）。片尾是品牌落版，给个入口要人 */
@@ -140,7 +141,9 @@ export async function createDynamicSession(
   if (opts?.range) {
     const res = resolvePracticeRange(seq, opts.range.startId, opts.range.endId)
     if (res.missing) throw new Error('标记段已失效（起止音符找不到），请重新标记')
-    const cand = res.candidates[res.pick] ?? res.candidates[0]
+    // adj1083：用户在下拉里选过「第 N 遍」就按那个候选导；否则才用解析器默认的第一个候选。
+    // 此前只传 note id，多遍次时永远取第 1 个候选，用户选的第 2/3 遍不会生效。
+    const cand = pickPracticeCandidate(res.candidates, res.pick, opts.range.pass)
     const sliced = cand ? slicePlaySequenceByRange(seq, cand.i0, cand.i1) : null
     if (!sliced) throw new Error('标记段无效，请重新标记')
     seq = sliced

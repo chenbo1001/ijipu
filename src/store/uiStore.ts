@@ -50,8 +50,8 @@ export type DynamicMode = '3min' | 'full'
 export interface DynamicCameraState {
   on: boolean
   aspect: DynamicAspect
-  /** 标记段范围；null = 整曲 */
-  range: { startId: string; endId: string } | null
+  /** 标记段范围；null = 整曲。`pass` = 用户在下拉里选的候选遍次（0 起），缺省按解析器的第一个候选 */
+  range: { startId: string; endId: string; pass?: number } | null
   mode: DynamicMode
 }
 

@@ -10787,6 +10787,20 @@ smoke 五条含"来源切换成对"结构断言与负对照） |
   `iJipu_0.71.0_x64-setup.exe` 7.2MB、`iJipu-Assets_0.1.0_x64-setup.exe` 140MB 均已产出。
 - **预防**：含中文的 `.nsh/.nsi` 必须带 UTF-8 BOM（`edit` 工具会丢 BOM，改完必须用 `check:installer` 复核）。
 
+## E-2026-509 标记段多遍次导出按第 1 遍出（用户 2026-10-23 实报，adj1083）
+
+- **现象**：标记段有多个候选遍次，用户在下拉里选了第 2/3 遍再导出视频，成片却按第 1 遍出。
+- **根因**：试听播放用的是 `cur.pass ?? res.pick`，而导出入口只把 `{startId, endId}` 传给相机位，
+  `createDynamicSession` 里只能 `res.candidates[res.pick]`（默认第 1 个候选）⇒ 用户选的遍次丢失。
+- **解决**：
+  · `DynamicCameraState.range` 增加 `pass?: number`；
+  · `PracticeMarkBar` 导出时带 `pass: m.pass`；
+  · 新增纯函数 `pickPracticeCandidate(candidates, defaultPick, pass)`，渲染器用它选候选；
+    用户选的 pass 优先，无效/缺省才回退解析器默认、再回退第一个候选。
+- **验证**：smoke 新增 `adj1083`（纯函数三种回退 + 标记/渲染器源码链）；
+  `tsc/lint/build/smoke/verify:app-ui` 全绿。
+- **预防**：所有"标记段起止"入口（试听、导出、以后新增的）都必须带 `pass`；选择逻辑只走 `pickPracticeCandidate`。
+
 
 
 
