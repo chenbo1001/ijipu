@@ -70,6 +70,22 @@ export type EmbedHost = {
     /** 删我们自己写的 App Paths 条目（不是我们写的不动 ✓） */
     removeAppPaths(): void
   }
+  /**
+   * adj1084：动态谱视频（MP4）的宿主能力。
+   *
+   * 为什么不是"在 QuickJS 里编"：成片要 **WebCodecs + 画布 + 字体 + 音色库**，
+   * QuickJS 一个都没有；由 Rust 宿主起一个**隐藏窗口**（`src-tauri/src/cli_video.rs`），
+   * 让 WebView2 里的前端用与应用完全同一份 `createDynamicSession` + `encodeMp4` 出片。
+   *
+   * 接口刻意做成"**字符串进、字符串出**"（与其它宿主函数同口径）：
+   * 请求是 CLI 组好的 JSON（源码 / 页面配置 / 起止音符 id / 遍次 / 输出路径），
+   * 回包也是 JSON（`{ok, error, bytes, audio}`）——跨语言只传字符串最稳。
+   * 旧宿主没有这个对象 ⇒ `render -t mp4` 如实报错（退出码 4），不假装成功。
+   */
+  video?: {
+    /** 同步阻塞到子进程出片结束；回 JSON 字符串（失败用 `{ok:false,error}`，不抛） */
+    export(reqJson: string): string
+  }
   /** 写 stdout（原样，不补换行 —— CLI 自己补，见 `cli.ts` 的 `line()`） */
   out(text: string): void
   /** 写 stderr（CLI 传进来时已带换行；宿主**不要**再补） */
@@ -152,6 +168,7 @@ function installTextEncoderPolyfill(): void {
 /** 把宿主能力接成 `runCli` 要的 `CliIo`（**唯一一处**接线，测试与宿主共用 ✓） */
 function ioOf(host: EmbedHost): CliIo {
   const cliPath = host.cliPath
+  const video = host.video
   return {
     async readStdin() {
       return host.readStdin()
@@ -207,7 +224,29 @@ function ioOf(host: EmbedHost): CliIo {
      * ⚠ `rasterize` / `synthesize` / `watchFile` **刻意不注入** ✗ ——
      * 位图/音频要应用当能力宿主（命名管道，`docs/CLI.md` §七之三），`--watch` 要长驻监视；
      * 这三样现在都没有 ⇒ 用到时 CLI **如实报错**（退出码 4 / 1），**不假装成功** ✓。
+     * 视频不同（adj1084）：`video.export` 由 Rust 另起隐藏窗口出片，所以内嵌版**能用**。
      */
+    /**
+     * adj1084：视频宿主（隐藏窗口出片）。
+     * 失败**抛异常**（走 CLI 的 `catch` → 退出码 4 + 原文），与 `rasterize` 同口径；
+     * 宿主自己用 `{ok:false,error}` 回，是为了让失败原因跨语言原样带回来。
+     */
+    encodeVideo:
+      video === undefined
+        ? undefined
+        : async (req) => {
+            let parsed: { ok?: boolean; error?: string | null; bytes?: number; audio?: boolean } = {}
+            try {
+              parsed = JSON.parse(video.export(JSON.stringify(req))) as typeof parsed
+            } catch {
+              throw new Error('视频宿主返回的不是合法 JSON（接线异常）')
+            }
+            if (parsed.ok !== true) throw new Error(parsed.error ?? '视频导出失败（宿主没有给出原因）')
+            return {
+              bytes: typeof parsed.bytes === 'number' ? parsed.bytes : 0,
+              audio: parsed.audio === true,
+            }
+          },
     out: (text) => host.out(text),
     err: (text) => host.err(text),
   }

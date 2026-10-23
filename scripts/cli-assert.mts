@@ -15,7 +15,7 @@
  *
  * 运行：`npm run smoke`（已串在后面）；也可单独 `node dist-smoke/cli-assert.cjs`。
  */
-import { runCli, EXIT, type CliIo } from '../packages/ijipu-cli/src/cli'
+import { runCli, EXIT, flattenScoreNotes, type CliIo } from '../packages/ijipu-cli/src/cli'
 // adj942：**内嵌入口**（`ijipu.exe` 里跑的就是这一份）——这里真跑一遍它的接线 ✓
 import { runEmbeddedCli, type EmbedHost } from '../packages/ijipu-cli/src/embedEntry'
 // adj873：`--crop` 断言要读渲染产物的 viewBox 来核对画布盒
@@ -651,7 +651,7 @@ console.log('\n— 命令行（A·P1–P4）—')
    * 这条钉死"不许再把已实现的写成未实现" ✓。
    */
   check('adj874 --help 不再把已实现命令写成"未实现（P2–P4）"（负对照）', !help.includes('未实现（P2–P4'))
-  check('adj874 --help 覆盖后加的选项（--crop/--pad/--ink/--watch）', ['--crop', '--pad', '--ink', '--watch'].every((o) => help.includes(o)))
+  check('adj874 --help 覆盖后加的选项（--crop/--pad/--ink/--watch/--from/--to/--pass/--card）', ['--crop', '--pad', '--ink', '--watch', '--from', '--to', '--pass', '--card'].every((o) => help.includes(o)))
 
   const ioV = makeIo({})
   const ioV2 = makeIo({})
@@ -1347,6 +1347,13 @@ console.log('\n— 命令行（A·P1–P4）—')
       code: EXIT.render,
     },
     {
+      // adj1084：视频在独立环境（没有隐藏窗口通道）必须如实报错，手册 §2.6 ⑤ 逐字引用这一行
+      what: 'render -t mp4 无能力',
+      argv: ['render', '-i', 'samples\\ershenbu.jps', '-t', 'mp4', '-o', '我的谱.mp4'],
+      lines: ['MP4 需要"桌面端隐藏窗口"通道（WebCodecs 编码）；当前环境没有该能力。'],
+      code: EXIT.render,
+    },
+    {
       what: 'play -t wav 无能力',
       argv: ['play', '-i', 'samples\\ershenbu.jps', '-t', 'wav', '-o', '我的谱.wav'],
       lines: ['WAV 需要采样合成（音色库 + AudioContext），当前环境没有该能力。'],
@@ -1438,6 +1445,162 @@ console.log('\n— 命令行（A·P1–P4）—')
       const cut = MANUAL.split('ijipu.exe cli doctor').join('ijipu.exe cli doc-tor').split('ijipu cli doctor').join('ijipu cli doc-tor')
       return cut !== MANUAL && variantCount(cut, 'doctor') < 2 && variantCount(MANUAL, 'doctor') >= 2
     })(),
+  )
+}
+
+console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
+{
+  /**
+   * 视频的判据分两层：
+   *  ① **参数层**（本组前几条）：写法不对必须当场退回，不能"看着跑">
+   *  ② **换算层**（注入假宿主）：拍位要变成**音符 id**，且 `--pass` 的 1 起/0 起不能写反。
+   */
+  const noHost = makeIo({ '(stdin)': GOOD })
+  const r0 = await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'out.mp4'], noHost.io)
+  check(
+    'adj1084 无视频宿主 ⇒ 4（渲染失败），并指向桌面端',
+    r0.code === EXIT.render && noHost.errs.join('').includes('桌面端'),
+    `code=${r0.code} err=${noHost.errs.join('｜').slice(0, 80)}`,
+  )
+
+  const slash = makeIo({ '(stdin)': GOOD })
+  check(
+    'adj1084 只认 <小节>:<拍>（`27/3` ⇒ 1，不猜）',
+    (await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--from', '27/3', '--to', '50:1'], slash.io)).code === EXIT.usage,
+  )
+  const half = makeIo({ '(stdin)': GOOD })
+  check(
+    'adj1084 --from/--to 必须成对（只给一个 ⇒ 1）',
+    (await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--from', '1:1'], half.io)).code === EXIT.usage,
+  )
+  const zeroPass = makeIo({ '(stdin)': GOOD })
+  check(
+    'adj1084 --pass 从 1 起（写 0 ⇒ 1）',
+    (await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--from', '1:1', '--to', '2:1', '--pass', '0'], zeroPass.io)).code === EXIT.usage,
+  )
+  const passOnly = makeIo({ '(stdin)': GOOD })
+  check(
+    'adj1084 --pass 只能配段落（整曲给 --pass ⇒ 1）',
+    (await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--pass', '2'], passOnly.io)).code === EXIT.usage,
+  )
+
+  type SeenVideo = {
+    startId: string | null
+    endId: string | null
+    pass: number | null
+    aspect: string
+    mode: string
+    cardStyleId: string
+    output: string
+  }
+  /**
+   * 反复段落：`|: … :|` 把这两小节唱两遍 ⇒ `--pass 2` 才有意义。
+   * 用它验证"CLI 的 1 起 → 引擎的 0 起"换算。
+   */
+  const REPEAT = "V:1.0\nQ: 1 2 3 4 |: 5 6 7 1' | 2 3 4 5 :|\n"
+  const cap = makeIo({ '(stdin)': REPEAT })
+  let seen: SeenVideo | null = null
+  cap.io.encodeVideo = async (req) => {
+    seen = { ...req }
+    return { bytes: 1234, audio: true }
+  }
+  const ok = await runCli(
+    ['render', '-i', '-', '-t', 'mp4', '-o', 'out.mp4', '--from', '2:1', '--to', '3:1', '--pass', '2'],
+    cap.io,
+  )
+  check(
+    'adj1084 有宿主 ⇒ 0，拍位换算成音符 id，`--pass 2` ⇒ 内部 1',
+    ok.code === EXIT.ok && seen !== null && seen.startId !== null && seen.endId !== null && seen.pass === 1 && seen.output === 'out.mp4',
+    `code=${ok.code} seen=${JSON.stringify(seen)} err=${cap.errs.join('｜').slice(0, 120)}`,
+  )
+  check('adj1084 CLI 自己**不写** MP4（由宿主写盘，避免大字节穿管道）', !('out.mp4' in cap.files))
+  check(
+    'adj1084 视频缺省 16:9 + 整曲（3 分钟会把长曲悄悄截短，命令行不做）',
+    seen !== null && seen.aspect === '16x9' && seen.mode === 'full',
+    `seen=${JSON.stringify(seen)}`,
+  )
+  check('adj1084 片头片尾缺省 brand（深空蓝，与界面一致）', seen !== null && seen.cardStyleId === 'brand', `seen=${JSON.stringify(seen)}`)
+
+  /**
+   * ⚠ **真 bug 的回归**（adj1084 第一版就踩了）：
+   * `PlacedToken.barIndex` 是**曲行内**编号，每换一行就从 0 起；第一版按"页内偏移 + barIndex"
+   * 算全局小节号 ⇒ 整份谱被算成只有 6 小节（用户写 `--from 27:3` 直接报"没有第 27 小节"）。
+   * 这里造一份**40 小节、必然折成多行**的谱：改成按小节线累加之后，第 35~40 小节必须找得到。
+   */
+  const LONG = 'V:1.0\nQ: ' + Array.from({ length: 40 }, (_, i) => `${(i % 7) + 1} 2 3 4 |`).join(' ') + '\n'
+  const longIo = makeIo({ '(stdin)': LONG })
+  longIo.io.encodeVideo = async () => ({ bytes: 1, audio: false })
+  const rLong = await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--from', '35:1', '--to', '40:1'], longIo.io)
+  /**
+   * 诊断用：把"算出来的小节号分布"一起带进断言信息（失败时能一眼看出是错位还是缺行）。
+   * 顺便把它也钉成断言：40 小节必须**连续**落在 1..40，每个 4 个音。
+   */
+  const { layoutScore, parseJps, defaultPageConfig } = await import('@ijipu/engine/index.ts')
+  const longNotes = flattenScoreNotes(layoutScore(parseJps(LONG), defaultPageConfig))
+  const dist = new Map<number, number>()
+  for (const n of longNotes) dist.set(n.bar, (dist.get(n.bar) ?? 0) + 1)
+  const bars = Array.from(dist.keys()).sort((a, b) => a - b)
+  const continuous = bars.length === 40 && bars.every((b, i) => b === i + 1) && Array.from(dist.values()).every((v) => v === 4)
+  check(
+    'adj1084 全局小节号跨曲行累加（40 小节的谱能定位到第 35~40 小节）',
+    rLong.code === EXIT.ok,
+    `code=${rLong.code} err=${longIo.errs.join('｜').slice(0, 100)} bars=${bars[0] ?? '-'}..${bars[bars.length - 1] ?? '-'}(${bars.length})`,
+  )
+  check(
+    'adj1084 小节号连续、每小节 4 个音（负对照：行序/行首小节线算错就会断号）',
+    continuous,
+    `bars=${bars.slice(0, 8).join(',')}… 共 ${bars.length}，每节音数=${Array.from(dist.values()).slice(0, 8).join(',')}`,
+  )
+
+  const card = makeIo({ '(stdin)': GOOD })
+  let sawCard = ''
+  card.io.encodeVideo = async (req) => {
+    sawCard = req.cardStyleId
+    return { bytes: 1, audio: false }
+  }
+  const rCard = await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--card', 'ink'], card.io)
+  check('adj1084 `--card ink` 透传到宿主（水墨）', rCard.code === EXIT.ok && sawCard === 'ink', `code=${rCard.code} card=${sawCard}`)
+
+  const badCard = makeIo({ '(stdin)': GOOD })
+  check(
+    'adj1084 `--card custom` ⇒ 1（自定义是本机偏好，命令行拒绝而不是当 brand）',
+    (await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--card', 'custom'], badCard.io)).code === EXIT.usage,
+  )
+  check('adj1084 起止落在不同音符上（终点不含目标那一拍）', seen !== null && seen.startId !== seen.endId)
+
+  const noRepeat = makeIo({ '(stdin)': GOOD })
+  noRepeat.io.encodeVideo = async () => ({ bytes: 1, audio: false })
+  const rNoRepeat = await runCli(
+    ['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--from', '1:1', '--to', '2:1', '--pass', '2'],
+    noRepeat.io,
+  )
+  check(
+    'adj1084 段落没有第 2 遍 ⇒ 1（在起出片窗口之前就说清"只有几遍"）',
+    rNoRepeat.code === EXIT.usage && noRepeat.errs.join('').includes('遍') && !('x.mp4' in noRepeat.files),
+    `code=${rNoRepeat.code} err=${noRepeat.errs.join('｜').slice(0, 80)}`,
+  )
+
+  const infer = makeIo({ '(stdin)': GOOD })
+  let sawInfer = false
+  infer.io.encodeVideo = async () => {
+    sawInfer = true
+    return { bytes: 1, audio: false }
+  }
+  const rInfer = await runCli(['render', '-i', '-', '-o', 'out.mp4'], infer.io)
+  check('adj1084 `-o x.mp4` 自动识别为 mp4（不必再写 -t）', rInfer.code === EXIT.ok && sawInfer, `code=${rInfer.code}`)
+
+  const far = makeIo({ '(stdin)': GOOD })
+  far.io.encodeVideo = async () => ({ bytes: 0, audio: false })
+  const rFar = await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--from', '999:1', '--to', '999:2'], far.io)
+  check(
+    'adj1084 不存在的小节 ⇒ 1，且一个文件都不写（说清"共几小节"）',
+    rFar.code === EXIT.usage && Object.keys(far.files).length === 0 && far.errs.join('').includes('小节'),
+    `code=${rFar.code} err=${far.errs.join('｜').slice(0, 80)}`,
+  )
+  const nonMp4 = makeIo({ '(stdin)': GOOD })
+  check(
+    'adj1084 --from 用在 svg 上 ⇒ 1（不静默忽略）',
+    (await runCli(['render', '-i', '-', '-t', 'svg', '-o', 'x.svg', '--from', '1:1', '--to', '2:1'], nonMp4.io)).code === EXIT.usage,
   )
 }
 

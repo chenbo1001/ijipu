@@ -18,6 +18,8 @@ use tauri::{Emitter, Manager};
 
 /// adj875：命令行（`@ijipu/cli`）的**能力宿主**模块（Windows 命名管道；默认不开启）。
 mod cli_host;
+// adj1084：命令行导出视频的宿主侧（隐藏出片窗口 + 父进程等待）
+mod cli_video;
 
 /// adj944（用户需求「全局设置里加注册 iJipu CLI 的按钮」）：把**安装目录注册进当前用户 PATH** ——
 /// 读写注册表 / 写前备份 / 回读校验 / 广播 `WM_SETTINGCHANGE` 都在这里；
@@ -879,6 +881,33 @@ fn purge_stale_service_worker(app_local_dir: &Path) {
     }
 }
 
+/**
+ * adj1084：出片窗口的三条命令（只在该窗口里有意义，普通窗口调用会被 `cli_video` 拒绝）。
+ *
+ * 为什么不合成一条"导出并返回字节"的命令：MP4 动辄几十上百 MB，
+ * 一次性跨 IPC 传会先复制好几份；这里改成"**分块写盘**"，内存占用只有一块。
+ */
+#[tauri::command]
+fn cli_video_job() -> Option<String> {
+    cli_video::job_json()
+}
+
+#[tauri::command]
+fn cli_video_write(path: String, b64: String, append: bool) -> Result<(), String> {
+    cli_video::write_chunk(&path, &b64, append)
+}
+
+#[tauri::command]
+fn cli_video_progress(p: f64, phase: String) {
+    cli_video::write_progress(p, &phase)
+}
+
+#[tauri::command]
+fn cli_video_result(app: tauri::AppHandle, ok: bool, bytes: u64, audio: bool, message: String) {
+    cli_video::write_result(ok, bytes, audio, &message);
+    app.exit(if ok { 0 } else { 1 });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // adj539：必须在 webview 起来之前清（否则旧 SW 已经抢先把页面喂成白屏）——见函数注释。
@@ -893,7 +922,14 @@ pub fn run() {
             purge_stale_service_worker(&PathBuf::from(local).join(identifier));
         }
     }
-    tauri::Builder::default()
+    // adj1084：先认"出片窗口"这个内部开关（见 `cli_video.rs`）。
+    // 它要完整起 Tauri，但窗口隐藏、也不该被"单实例"插件转交给在跑的界面窗口。
+    cli_video::init_from_args();
+    // adj1084：出片窗口**不注册单实例插件** —— 它是 CLI 起的独立子进程，
+    // 若被转交给正在运行的界面窗口，父进程会立刻拿到"子进程退出"而误判失败。
+    let mut builder = tauri::Builder::default();
+    if !cli_video::is_worker() {
+        builder = builder
         // adj538：单实例插件**必须第一个注册**（插件按注册顺序执行；官方 README 要求）。
         // 作用：应用已在运行时再次双击 `.jps`，不再启动第二个进程，而是走这个回调——
         // 把窗口置前，并把文件路径入队通知前端打开。不做这一步就会出现"两个窗口、两份编辑状态"。
@@ -904,7 +940,9 @@ pub fn run() {
                 let _ = w.set_focus();
             }
             queue_open_paths(app, jps_paths_from_string_args(argv));
-        }))
+        }));
+    }
+    builder
         // adj568：原生文件夹选择器（工作区）。同单实例插件：**只作 Rust 依赖**，
         // 我们用自己的 command 调它，故不需要 npm 包，也不需要补 ACL 权限。
         .plugin(tauri_plugin_dialog::init())
@@ -963,6 +1001,13 @@ pub fn run() {
             // 冷启动：双击 `.jps` 时路径就在本进程的命令行参数里（NSIS 写的是 `"ijipu.exe" "%1"`）。
             // v2 的 `Env` 默认已 manage（内容即 `std::env::args_os()`），用它避免非 UTF-8 参数 panic。
             queue_open_paths(app.handle(), jps_paths_from_os_args(app.env().args_os.clone()));
+            // adj1084：出片窗口只干活、不给人看（前端跑完会自己退出）。
+            // 隐藏而不是"不创建"：WebView2 里隐藏窗口照样能画离屏画布/编码。
+            if cli_video::is_worker() {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            }
             // adj875：命令行能力宿主（命名管道）。**默认不开** —— 只有显式给了
             // `IJIPU_CLI_HOST=1` 或内部开关 `--cli-host` 才起 ⇒ 双击打开的现状行为一字不变 ✓。
             cli_host::start_if_enabled(app.handle().clone());
@@ -1002,6 +1047,11 @@ pub fn run() {
             cli_path::cli_path_status,
             cli_path::cli_path_register,
             cli_path::cli_path_unregister,
+            // adj1084：命令行导出视频（隐藏出片窗口取任务 / 分块写盘 / 回报结果）
+            cli_video_job,
+            cli_video_write,
+            cli_video_progress,
+            cli_video_result,
             // adj957：`cli_manual::cli_manual_open` 已删除（命令行手册改走应用内 DocDialog）
         ])
         .build(context)

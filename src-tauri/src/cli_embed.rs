@@ -161,6 +161,7 @@ mod con {
         write(STD_ERROR_HANDLE, text)
     }
 
+
     /// 读完 stdin（`-i -` / 省略 `-i` 时用）。
     /// 没有重定向（交互式控制台）时也照读 —— 与 Node 版"没输入就等输入"同口径 ✓，
     /// 由用户用 Ctrl+Z / Ctrl+D 结束（不静默当成空串 ✗）。
@@ -189,6 +190,20 @@ mod con {
             String::from_utf8_lossy(&buf).into_owned()
         }
     }
+}
+
+/**
+ * adj1084：给"命令行导出视频"的父进程打进度行（`cli_video.rs` 在等待循环里调）。
+ *
+ * 为什么不直接用 `con::write_err`：`con` 是 Windows 专用的私有模块；
+ * 这里开一个跨平台的小口子，保证非 Windows 编译也能过（那边只打印到 stderr）。
+ */
+pub fn progress_line(text: &str) {
+    // 自己补换行：`con::write_err` 只写原文（CLI 的 `err` 在 JS 侧已带换行，这里不是同一条路）
+    #[cfg(windows)]
+    con::write_err(&format!("{text}\n"));
+    #[cfg(not(windows))]
+    eprintln!("{text}");
 }
 
 /**
@@ -392,6 +407,12 @@ fn build_host<'js>(ctx: &Ctx<'js>, argv: &[String]) -> rquickjs::Result<Object<'
     //   那个按钮**共用同一份** ✓。**失败不抛异常**：`writePath` 用 `{ok,error}` 回，
     //   否则会被上层当成"接线异常（70）"，而这是"注册表写不进去"这个正常失败 ✓。
     host.set("cliPath", build_cli_path_host(ctx)?)?;
+    /*
+     * adj1084：动态谱视频（`render -t mp4`）。**同步阻塞**到子进程出片结束 ——
+     * CLI 本来就是"一条命令、跑完退出"，没有并发要图；请求/回包都是 JSON 字符串，
+     * 与其它宿主函数同口径（见 `embedEntry.ts` 的 `EmbedHost.video`）。
+     */
+    host.set("video", build_video_host(ctx)?)?;
     host.set(
         "out",
         Function::new(ctx.clone(), |text: String| {
@@ -411,6 +432,19 @@ fn build_host<'js>(ctx: &Ctx<'js>, argv: &[String]) -> rquickjs::Result<Object<'
         }),
     )?;
     Ok(host)
+}
+
+/// adj1084：把 `src/cli_video.rs` 的出片通道接成 JS 侧的 `__ijipuHost.video`
+/// （字段口径见 `packages/ijipu-cli/src/embedEntry.ts` 的 `EmbedHost.video`）
+fn build_video_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
+    let obj = Object::new(ctx.clone())?;
+    obj.set(
+        "export",
+        Function::new(ctx.clone(), |req_json: String| -> String {
+            crate::cli_video::export_blocking(&req_json)
+        }),
+    )?;
+    Ok(obj)
 }
 
 /// adj944：把 `src/cli_path.rs` 的那组函数接成 JS 侧的 `__ijipuHost.cliPath`

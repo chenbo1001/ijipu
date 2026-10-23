@@ -24,7 +24,7 @@ import { dynamicVideoCopy } from '../brand/copy'
 import { createDynamicSession, type DynamicSession } from '../export/video/renderer'
 import { CARD_TEMPLATES, cardStyleById } from '../export/video/cardTemplates'
 import { canGenerateVideo, canUseDynamicVideo } from '../export/video/capability'
-import { encodeMp4 } from '../export/video/mp4'
+import { EXPORT_MAX_MS, LEAD_IN_MS, exportDynamicVideo } from '../export/video/exportDynamic'
 import { DynamicAudioPlayer } from '../export/video/audioPlayer'
 import { renderToAudioBuffer } from '../export/audio'
 import { createHqCache, resolveHqBank } from '../playback/spessaCache'
@@ -41,10 +41,7 @@ const MODES: { id: DynamicMode; label: string }[] = [
   { id: 'full', label: dynamicVideoCopy.modeFull },
 ]
 
-/** 单支视频上限（3 分钟；含片头/片尾） */
-const EXPORT_MAX_MS = 180_000
-/** 片头：描述头静止 3 秒 + 推近 0.7 秒 ⇒ 第一拍在 3.7 秒 */
-const LEAD_IN_MS = 3_700
+/** 单支视频上限 / 片头时长：**唯一来源**在 `export/video/exportDynamic.ts`（界面与命令行同口径） */
 
 export function DynamicFrameOverlay() {
   const on = useUiStore((s) => s.dynamicCamera.on)
@@ -315,25 +312,22 @@ export function DynamicFrameOverlay() {
     const ac = new AbortController()
     abortRef.current = ac
     try {
-      let audio: AudioBuffer | null = null
-      if (withAudio) {
-        setPhase('正在渲染音轨…')
-        try {
-          audio = await prepareAudio()
-        } catch (e) {
-          setError(`音轨没渲染成，本次导出无声：${e instanceof Error ? e.message : String(e)}`)
-        }
-      }
-      setPhase('正在编码画面…')
-      const blob = await encodeMp4(s, {
-        fps: 30,
-        // 会话已按 3 分钟/整首建好（含片头片尾）；不要再按 maxMs 截帧
-        maxMs: undefined,
-        audio,
+      const res = await exportDynamicVideo({
+        code,
+        pageConfig,
+        aspect: aspect as DynamicPresetId,
+        mode,
+        range,
+        cardStyle: effectiveCardStyle,
+        // 逐次导出都重新按会话渲音轨：分段/遍次变了，事件序列就不同（缓存只能按会话建）
+        ...(withAudio ? { makeAudio: renderAudioFor } : {}),
+        onProgress: (p, ph) => {
+          setProgress(p)
+          setPhase(ph)
+        },
         signal: ac.signal,
-        onProgress: setProgress,
       })
-      const url = URL.createObjectURL(blob)
+      const url = URL.createObjectURL(res.blob)
       const a = document.createElement('a')
       a.href = url
       a.download = `动态谱-${aspect}.mp4`

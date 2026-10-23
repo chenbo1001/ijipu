@@ -66,6 +66,8 @@ ijipu cli render -i 我的谱.jps -t midi -o 我的谱.mid
 - ⚠ **内嵌版没有"位图/音频/监视"能力**：`render -t png|jpg|pdf`、`play -t wav` 需要"隐藏窗口渲染"通道
   （**与独立 Node 环境同一口径**）⇒ 如实报错、退出码 4；`lint --watch` 需要宿主的文件监视能力，
   内嵌版不注入 ⇒ 退出码 1（**独立 Node 包可用** ✓，见 §二）。都不产半成品 ✗（通道状态见 §七之二 / §七之三）。
+  **视频是例外**（`adj1084`）：`render -t mp4` 由宿主**另起一个隐藏窗口**去编（见 §二之一），
+  所以内嵌版能出片；独立 Node 包没有这条通道，仍然退出码 4。
 - ⚠ 退出码与 Node 版**完全一致**（§四）；唯一的例外是**接线层自身**出错（引擎加载失败等）⇒ 退出码 **70**
   并把原因打到 stderr（这类不是"用法错误"，刻意与 0–5 区分开 ✓）。
 
@@ -194,7 +196,7 @@ ijipu cli lint -i 我的谱.jps > out.txt # cmd 与 PowerShell 的 > 都写出�
 | `format` | 按应用规范**规范化源码**（与应用编辑器/插件格式化同一实现） | `-i` `-o` `--check` `--in-place` `--diff` |
 | `lint` | 语法检查（错误/告警）；输入可以是**目录**（`-r` 递归、`--filter` 按名筛）；`--watch` 监视文件变化后**即时重检** | `-i` `-r` `--filter` `--format text\|json\|gh` `--watch` |
 | `info` | 谱面概况（标题/调号/行数/分组/问题数） | `-i` `-t text\|json` |
-| `render` | 源码 → **SVG**（每页一段）／**MIDI**／**PNG·JPG·PDF**（需桌面端通道） | `-i` `-t svg\|midi\|png\|jpg\|pdf` `-o` |
+| `render` | 源码 → **SVG**（每页一段）／**MIDI**／**PNG·JPG·PDF**（需桌面端通道）／**MP4 动态谱视频**（桌面端，另起隐藏窗口） | `-i` `-t svg\|midi\|png\|jpg\|pdf\|mp4` `-o` `--from` `--to` `--pass` `--card` |
 | `play` | 导出音频：**MIDI**（任意环境）／**WAV**（需桌面端通道） | `-i` `-t midi\|wav` `-o` |
 | `batch` | **目录批量操作**（任务**可逗号组合**：`lint` / `svg` / `midi` / `fmt`）；输出目录会自动创建 | `--in <目录>` `-o <目录>`（**纯 `-t lint` 可省**）`-t lint,svg,midi,fmt` `-r` `--filter` |
 | `settings` | 看**某一个设置项**的值与**来源**（位置参数 = 键名） | `-i <谱>` `<键名>` `-s k=v`（临时覆盖） |
@@ -212,6 +214,48 @@ ijipu cli lint -i 我的谱.jps > out.txt # cmd 与 PowerShell 的 > 都写出�
 - **内嵌版（`ijipu.exe cli …`）不可用 ✗**：`embedEntry.ts` **刻意不注入** `watchFile`（要长驻监视）
   ⇒ 明确报错、**退出码 1**，不假装成功；
 - 两种路径都**不能对 stdin 用**（要监视具体文件）。
+
+### §二之一、动态谱视频（`render -t mp4`，`adj1084`）
+
+```powershell
+ijipu cli render -i 赤伶.jps -t mp4 -o 赤伶-第2遍.mp4 --from 27:3 --to 50:1 --pass 2 --card ink
+ijipu cli render -i 我的谱.jps -t mp4 -o 整曲.mp4          # 不写起止 = 整曲
+ijipu cli render -i 我的谱.jps -o 整曲.mp4                  # -o 后缀即可推断类型
+```
+
+**拍位口径**（用户 2026-10-23 拍板：**只用这一种写法**）
+
+- 统一 `<小节>:<拍>`，如 `27:3`；`27/3`、`@27/3` 之类**不认**（写法越少，歧义越少）。
+- 小节与拍都从 **1** 起，拍可带小数（`3.5` = 第 3 拍后半拍）。
+- 起点取"这一小节里第一个不早于该拍的音"；终点取"该拍那个音的**前一个**音" ⇒
+  `--from 27:3 --to 50:1` 到第 50 小节第 1 拍**之前**收住，不含那一拍。
+- `--pass N`：反复段落里的第 N 遍（**1 起**）；内部候选遍次 0 起，换算在 CLI 做。
+  不给就按解析器的第一遍。与界面「标记段」的遍次下拉是同一套 `pickPracticeCandidate`。
+- `--card brand|paper|ink|minimal`：片头/片尾模板（深空蓝／纸面／水墨／极简），缺省 `brand`。
+  `custom` **刻意不支持**：那是本机偏好，同一条命令换台机器会出不一样的片。
+
+**缺省与边界**
+
+- 缺省 **16:9、整曲时长**。界面里的「3 分钟」会把长曲裁短，命令行不替用户做这个决定。
+- `-o` 必填（MP4 是二进制，不能 stdout）；CLI **不自己写** MP4，字节由宿主窗口落盘。
+- 片头 3.7 秒（描述头静止 + 推近）与片尾卡都保留，与界面导出同一份编排（`exportDynamic.ts`）。
+- 音轨失败（如音源不可用）⇒ 出**无声片**并在结果里如实标 `audio:false`，不会因此导不出来。
+
+**为什么内嵌版也能出片**（架构，见 `src-tauri/src/cli_video.rs`）
+
+```text
+ijipu.exe cli render -t mp4 …（QuickJS，没有 WebCodecs）
+  → 把请求写成临时 JSON（源码可能几万行，走不了命令行参数）
+  → 起子进程 ijipu.exe --cli-video-job <任务文件>（正常 Tauri，但窗口隐藏）
+  → 前端 export/video/cliWorker.ts 用与应用同一份 createDynamicSession + encodeMp4 出片
+  → 分块写回 MP4（大文件不走一行一条 JSON 的管道）→ 回报结果 → 退出
+  → 父进程读结果，CLI 按退出码收场（0 成功 / 1 用法 / 4 渲染失败）
+```
+
+> 出片窗口**不注册单实例插件**：否则应用已开着时，子进程会被转交给主窗口、立刻退出，
+> 父进程误判失败。等待上限 20 分钟（超时杀掉并如实报错）。
+
+### §二之二、`settings` 的键名与来源
 
 `settings` 的键名直接当**位置参数**给，例如：
 

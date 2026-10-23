@@ -340,7 +340,7 @@ Q: 1 2 3 4 |
 
 ### 2.6 `render`：渲染导出
 
-输出类型：`-t svg|midi|png|jpg|pdf`。
+输出类型：`-t svg|midi|png|jpg|pdf|mp4`。
 
 **① 矢量图**（多页谱会自动加 `-1` `-2`…）：
 
@@ -374,6 +374,32 @@ MIDI 是二进制，必须用 -o 指定文件（不能用 stdout）
 > ijipu cli render -i samples\ershenbu.jps -t png -o 我的谱.png
 -t png 需要"隐藏窗口渲染"通道（桌面端 exe 内置）；当前环境没有该能力。
   可用：-t svg（矢量，任意环境）｜或改用桌面端：ijipu cli render -i <谱> -t png -o <输出>
+```
+
+**⑤ 动态谱视频（MP4）**：只有桌面端版本具备（成片要用 WebCodecs 编码）。
+拍位统一写成 `<小节>:<拍>`，小节与拍都从 **1** 起，拍可带小数：
+
+```text
+> ijipu cli render -i 赤伶.jps -t mp4 -o 赤伶-第2遍.mp4 --from 27:3 --to 50:1 --pass 2 --card ink
+正在导出视频：第 27 小节第 3 拍 → 第 50 小节第 1 拍之前，第 2 遍（16:9，全片长，片头片尾：水墨）
+已写入 赤伶-第2遍.mp4（MP4，86.4 MB，含音轨）
+```
+
+- 不写 `--from` / `--to` 就是整曲；两个要一起给，只给一个会报用法错误。
+- 终点**不含**那一拍上的音（`--to 50:1` = 到第 50 小节第 1 拍之前收住）。
+- `--pass 2` 是反复段落里的第 2 遍（从 1 起）；不写则按解析器的第一遍。
+- `--card` 选片头片尾模板：`brand`（深空蓝，缺省）、`paper`（纸面）、`ink`（水墨）、`minimal`（极简）。
+  自定义卡片是本机偏好，命令行不接受 `custom`。
+- 缺省 **16:9、整曲时长**（不会像界面里的「3 分钟」那样把长曲悄悄截短）。
+- `-o` 必须写文件：MP4 是二进制，不能走 stdout。
+
+在独立 Node 环境（没有桌面能力）下，这条命令会明确报错，而不是假装成功：
+
+```text
+> ijipu cli render -i samples\ershenbu.jps -t mp4 -o 我的谱.mp4
+MP4 需要"桌面端隐藏窗口"通道（WebCodecs 编码）；当前环境没有该能力。
+  请在桌面端运行：ijipu cli render -i <谱> -t mp4 -o <输出> [--from 27:3 --to 50:1 --pass 2]
+  或改用 -t svg（任意环境）｜-t midi（任意环境）。
 ```
 
 ### 2.7 `play`：导出音频文件
@@ -560,7 +586,7 @@ Q:1 2 3 4|
 > ijipu cli doctor
 iJipu CLI doctor
   可设置项：54 个（含可选字段 5 个）
-  能力：svg ✓｜midi ✓｜位图(png/jpg/pdf) ✗（需桌面端隐藏窗口渲染）｜音频(wav) ✗（需音色库合成）
+  能力：svg ✓｜midi ✓｜位图(png/jpg/pdf) ✗（需桌面端隐藏窗口渲染）｜音频(wav) ✗（需音色库合成）｜视频(mp4) ✗（需桌面端隐藏窗口）
   提示：位图/音频在桌面端 exe 内可用；独立 Node 环境只能用 svg/midi ✓
 ```
 

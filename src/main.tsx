@@ -101,6 +101,47 @@ void (async () => {
     `[iJipu] 嵌入版启动 ${APP_VERSION_FULL}` +
       `${window.parent !== window ? '（宿主内）' : '（独立页）'}`,
   )
+  /**
+   * adj1084：命令行 `ijipu cli render -t mp4` 起的**隐藏出片窗口**。
+   *
+   * 判据在 Rust 那边（有没有 `--cli-video-job`）：`cli_video_job` 回 `null` 就是普通启动，
+   * 本段零开销、照旧进界面；有任务就不渲染 App，跑完出片直接退出（用户只看到命令行）。
+   *
+   * 必须排在最前面：后面那串 `await initHostBridge()` 是给 Obsidian 嵌入版用的，
+   * 命令行窗口不嵌在任何宿主里，不该为它等一步。
+   */
+  if (isTauriShell()) {
+    /**
+     * 先问一句"有没有出片任务"，再决定要不要动态加载出片模块。
+     *
+     * 为什么不在 `runCliVideoJob` 里问：失败处理需要知道"这到底是不是出片窗口"——
+     * 是的话，任何异常都必须**回报给父进程**（否则命令行会一直等，用户只看到卡住）；
+     * 不是的话，异常只该是一条警告，界面照常启动。
+     */
+    let jobText: string | null = null
+    try {
+      const { tauriCore } = await import('./brand/env')
+      jobText = ((await tauriCore()?.invoke?.('cli_video_job')) as string | null) ?? null
+    } catch {
+      jobText = null
+    }
+    if (jobText !== null && jobText !== '') {
+      try {
+        const { runCliVideoJob } = await import('./export/video/cliWorker')
+        await runCliVideoJob(jobText)
+      } catch (e) {
+        const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+        console.error('[iJipu] 命令行出片失败：', e)
+        try {
+          const { tauriCore } = await import('./brand/env')
+          await tauriCore()?.invoke?.('cli_video_result', { ok: false, bytes: 0, audio: false, message: `出片窗口启动失败：${msg}` })
+        } catch {
+          /* 连回报都失败：父进程会在"首次响应"超时里报错 */
+        }
+      }
+      return
+    }
+  }
   let bridge: Awaited<ReturnType<typeof import('./store/hostBridge').initHostBridge>> = null
   try {
     const { initHostBridge } = await import('./store/hostBridge')

@@ -11,7 +11,7 @@
  * 本阶段（P1）实现：`format` / `lint` / `info` + 全局选项 + `--json`。
  * `render` / `play` / `batch` / `settings` / `config` / `doctor` 属 P2–P4，**未实现时明确报错**（不假装成功 ✗）。
  */
-import { formatJps, parseJps, splitParseIssues, layoutScore, renderScoreToSvg, buildPlaySequence, eventsToMidi, defaultPageConfig, mergeJpsConfig, extractJpsConfig, OPTIONAL_CONFIG_FIELDS, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, inkBoxesOfLayout, type PageConfig, type ScoreLayout, type RangeBox, type ExportRange, type ProblemRow,
+import { formatJps, parseJps, splitParseIssues, layoutScore, renderScoreToSvg, buildPlaySequence, inferBpm, resolvePracticeRange, eventsToMidi, noteIdStringOf, defaultPageConfig, mergeJpsConfig, extractJpsConfig, OPTIONAL_CONFIG_FIELDS, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, inkBoxesOfLayout, type PageConfig, type ScoreLayout, type RangeBox, type ExportRange, type ProblemRow,
   // adj962：把设置**写进谱面**（`set` 命令）——与应用的「保存设置」**同一份引擎实现**
   writeJpsConfig, mergeConfigEdits } from '@ijipu/engine'
 // adj944：注册/解除 PATH 的**纯逻辑与编排**（与全局设置里那个按钮**共用同一份** ✓）
@@ -80,6 +80,43 @@ export type CliIo = {
    */
   synthesize?: (midi: Uint8Array) => Promise<Uint8Array>
   /**
+   * adj1084 **可选能力**：导出动态谱视频（MP4）。
+   *
+   * 为什么必须是"宿主注入"：成片要 **WebCodecs**（`VideoEncoder` + `AudioEncoder`）与
+   * 画布/字体/音色库，这些只在**桌面端的 WebView2** 里有；内嵌 CLI 跑在 QuickJS 里、
+   * 独立 Node 更是连 DOM 都没有 ⇒ 由桌面宿主起一个隐藏窗口去编（`src-tauri/src/cli_video.rs`）。
+   * 未注入时 `render -t mp4` **明确报错**（退出码 4），不产出半成品、也不假装成功。
+   *
+   * 传的是**已经解析好的音符 id**（`p_v_g_i` 形状，与界面标记段同一口径）：
+   * 拍位 → 音符的换算在 CLI（纯函数、可单测），宿主只负责"照这份谱、这一段、这一遍"出片。
+   */
+  encodeVideo?: (req: {
+    /** `.jps` 源码（宿主自己写临时文件也行，这里直接给文本，省一次读盘） */
+    source: string
+    /** 生效的页面配置（与 `render -t svg` 完全同一份，保证版面一致） */
+    pageConfig: PageConfig
+    /** 起始音符 id（含） */
+    startId: string | null
+    /** 结束音符 id（含）；`null` = 到曲末 */
+    endId: string | null
+    /** 第几遍（**0 起**；CLI 的 `--pass` 是 1 起，解析时已减一） */
+    pass: number | null
+    /** 输出文件（绝对路径或相对当前目录；宿主按此写盘） */
+    output: string
+    /** 画布比例（缺省 9x16，与应用一致） */
+    aspect: '9x16' | '1x1' | '16x9'
+    /** `full` = 整曲（缺省）；`3min` = 单支上限 3 分钟 */
+    mode: 'full' | '3min'
+    /**
+     * 片头/片尾卡片的模板（`brand` 深空蓝 / `paper` 纸面 / `ink` 水墨 / `minimal` 极简）。
+     *
+     * 与界面「卡片」下拉是**同一组模板**（`src/export/video/cardTemplates.ts` 的 `CARD_TEMPLATES`）；
+     * 命令行只给这四种预设，`custom`（用户自己存的那份）不在此列 —— 自定义样式是本机偏好、
+     * 换台机器就没有，放进命令行会变成"同一条命令在别人机器上出片不一样"。
+     */
+    cardStyleId: 'brand' | 'paper' | 'ink' | 'minimal'
+  }) => Promise<{ bytes: number; audio: boolean }>
+  /**
    * adj814（A·P4 尾项）**可选能力**：监视文件变化（`--watch` 用）。
    * 与 `rasterize`/`synthesize` 同一口径：**宿主注入** ✓（node 入口用 `fs.watch` ✓；测试注入假实现 ✓）；
    * 未注入时 `--watch` **明确报错**（退出码 1）而不是"静默不监视" ✗。
@@ -145,8 +182,10 @@ const HELP = `iJipu 命令行（爱记谱）
   lint          -i <文件|目录|-> [--format text|json|gh] [--watch]          语法检查（有错 ⇒ 退出码 3）
                 [-r] [--filter <通配>]                                    输入为目录时批量检查
   info          -i <文件|-> [-t text|json]                                  谱面概况（行数 / 分组 / 问题数）
-  render        -i <文件|-> -t svg|midi|png|jpg|pdf -o <输出>               渲染导出
+  render        -i <文件|-> -t svg|midi|png|jpg|pdf|mp4 -o <输出>           渲染导出
                 [--crop page|score] [--pad N] [--ink x,y,w,h]              画布范围（缺省 page = 整页）
+                [--from 27:3 --to 50:1 [--pass 2]]                        只导这一段（mp4）
+                [--card brand|paper|ink|minimal]                          片头片尾模板（缺省 brand）
   play          -i <文件|-> -t midi|wav -o <输出>                           导出音频
   batch         --in <目录> [-o <目录>] [-t lint,svg,midi,fmt]              目录批量操作
                 [-r] [--filter <通配>] [--in-place]                       任务可逗号组合；省略 -o ⇒ 产物写在各源文件旁
@@ -189,9 +228,14 @@ const HELP = `iJipu 命令行（爱记谱）
   -h, --help                帮助
   -v, --version             版本
 
-需要桌面端能力的两类输出：render -t png|jpg|pdf（画布、字体、分页）与 play -t wav（音频上下文、音色库）。
+需要桌面端能力的两类输出：render -t png|jpg|pdf|mp4（画布、字体、分页、WebCodecs）与 play -t wav（音频上下文、音色库）。
   具备宿主能力时正常产出；不具备时（独立 Node 环境）退出码 4 并说明原因，同时给出替代方案
-  （-t svg 或 -t midi）；不产出半成品，也不报成功。
+  （-t svg、-t midi，或视频改用桌面端 ijipu cli render -t mp4）；不产出半成品，也不报成功。
+
+视频的段落写法（只认 <小节>:<拍> 这一种，不写 --from/--to 即整曲）：
+  --from 27:3 --to 50:1     从第 27 小节第 3 拍，到第 50 小节第 1 拍之前
+  --pass 2                  反复段落里的第 2 遍（从 1 起；缺省按解析器的第一遍）
+  拍号可带小数（如 27:3.5 = 第 27 小节第 3 拍的后半拍）；结束位置不含该拍那个音。
 
 注册类命令（register、unregister、status）仅内嵌版可用（ijipu.exe cli register）：
   这三条需要读写当前用户的 PATH 与 App Paths，该能力由桌面端注入；无该能力时退出码 6 并说明原因。
@@ -243,6 +287,23 @@ type Parsed = {
    * 让用户去写路径通配更容易写错；真要按目录挑，多敲一次 `-i <子目录>` 更直观。
    */
   filter: string | null
+  /**
+   * adj1084：`render -t mp4` 的段落起止（**原始字符串**，在命令里再校验）。
+   *
+   * 口径（用户 2026-10-23 拍板）：只认 `<小节>:<拍>` 一种写法，例如 `27:3`；
+   * 拍号从 1 起、可带小数。**不做** `27/3`、`@27/3` 之类的兼容写法（少一种写法就少一类歧义）。
+   */
+  from: string | null
+  to: string | null
+  /** `--pass <N>` 的原始字符串（1 起；同样在命令里校验） */
+  pass: string | null
+  /**
+   * `--card <模板>` 的原始字符串：片头/片尾卡片。
+   *
+   * 只认四个预设（`brand` 深空蓝 / `paper` 纸面 / `ink` 水墨 / `minimal` 极简）；
+   * 缺省 `brand`（与界面一致）。`custom` 不开放 —— 那是本机偏好，见 `CliIo.encodeVideo` 的说明。
+   */
+  card: string | null
 }
 
 /** 手写参数解析（**不引依赖** —— AGENTS §一"新增依赖必须先询问"，这里完全用不着） */
@@ -270,8 +331,12 @@ function parseArgs(argv: string[]): Parsed {
     ink: null,
     recursive: false,
     filter: null,
+    from: null,
+    to: null,
+    pass: null,
+    card: null,
   }
-  const takesValue = new Set(['-i', '--input', '-o', '--output', '-t', '--type', '-s', '--set', '--config', '--format', '--crop', '--pad', '--ink', '--filter'])
+  const takesValue = new Set(['-i', '--input', '-o', '--output', '-t', '--type', '-s', '--set', '--config', '--format', '--crop', '--pad', '--ink', '--filter', '--from', '--to', '--pass', '--card'])
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i]
     const next = (): string => {
@@ -325,6 +390,18 @@ function parseArgs(argv: string[]): Parsed {
     } else if (a === '--ink') {
       const v = next()
       if (v !== '') p.ink = v
+    } else if (a === '--from') {
+      const v = next()
+      if (v !== '') p.from = v
+    } else if (a === '--to') {
+      const v = next()
+      if (v !== '') p.to = v
+    } else if (a === '--pass') {
+      const v = next()
+      if (v !== '') p.pass = v
+    } else if (a === '--card') {
+      const v = next()
+      if (v !== '') p.card = v
     } else if (a === '--format') {
       const v = next()
       if (v === 'text' || v === 'json' || v === 'gh') p.format = v
@@ -364,6 +441,183 @@ function inferType(p: Parsed): string {
     if (ext !== '') return ext
   }
   return 'text'
+}
+
+/**
+ * adj1084：`<小节>:<拍>` 的**唯一**解析口径（用户 2026-10-23 拍板：只用这一种写法）。
+ *
+ * · 小节从 **1** 起、拍从 **1** 起（与乐谱上的叫法一致："第 27 小节第 3 拍"）；
+ * · 拍**可带小数**（`3.5` = 第 3 拍的后半拍，`3.25` = 第 3 拍的前四分之一处）；
+ * · 其它写法（`27/3`、`@27/3`、`27-3`）**一律不认** —— 多一种写法就多一类"看着像却解析不成"的歧义。
+ *
+ * @returns 解析结果；写法不对 ⇒ `null`（由调用方报用法错误，不猜）
+ */
+export function parseBarBeat(raw: string): { bar: number; beat: number } | null {
+  const m = /^(\d+):(\d+(?:\.\d+)?)$/.exec(raw.trim())
+  if (m === null) return null
+  const bar = Number(m[1])
+  const beat = Number(m[2])
+  if (!Number.isSafeInteger(bar) || bar < 1) return null
+  if (!Number.isFinite(beat) || beat < 1) return null
+  return { bar, beat }
+}
+
+/** 拍位比较的容差：`beatPos` 是累加出来的浮点数（0.9999999 要当成 1） */
+const BEAT_EPS = 1e-6
+
+export type ScoreSpotNote = {
+  id: string
+  /** 全局小节号（1 起） */
+  bar: number
+  /** 小节内累积拍（0 起，与引擎 `PlacedToken.beatPos` 同口径） */
+  beatPos: number
+  y: number
+}
+
+/**
+ * 把谱面摊平成"全局小节号 + 拍位"的音符表（**只取主旋律、只取可发声的音符**）。
+ *
+ * 为什么需要摊平：布局给的 `PlacedToken.barIndex` 是**曲行内**的编号（每一行从 0 起），
+ * 而用户说的是整份谱的第 27 小节 ⇒ 必须先按曲行累加出全局小节号。
+ *
+ * 曲行的小节数从**小节线**数出来（`PlacedBarline.id.group` 就是它属于哪一行）：
+ * 一行里有几根小节线，就有几个小节（每根收一个小节，含行末那根）。
+ * 段层音符（`{bz}`/`{dsb}`/`{tp}`）与休止符不算"某一拍的那个音"，这里排除 ——
+ * 否则同一拍会命中好几个 id、用户点名的位置就对不上。
+ */
+export function flattenScoreNotes(layout: ScoreLayout): ScoreSpotNote[] {
+  /**
+   * `barIndex` 是**曲行内**编号（每换一行从 0 起），所以全局小节号 =
+   * 「前面各行的小节数之和」+ `barIndex` + 1。
+   *
+   * 一行有几小节，按**该行音符的最大 `barIndex` + 1** 算（实测：赤伶 10 行、
+   * 每行 4–6 小节 = 51 小节；40 小节的单行谱则是 1 行 40 小节）。
+   * 不用小节线数量：行首的 `|:` 也会产生一根线，按根数算会把整份谱的小节号推移一位。
+   */
+  const barsByRow = new Map<string, number>()
+  for (const page of layout.pages) {
+    for (const n of page.notes) {
+      if (n.segment !== undefined || !n.playable) continue
+      const key = `${page.index}:${n.id.group}`
+      const need = n.barIndex + 1
+      if (need > (barsByRow.get(key) ?? 0)) barsByRow.set(key, need)
+    }
+  }
+
+  // 行序按**数字**排（字符串排序会把 "0:10" 排到 "0:2" 前面）
+  const offset = new Map<string, number>()
+  let totalBars = 0
+  const rowKeys = Array.from(barsByRow.keys()).sort((a, b) => {
+    const [pa, ga] = a.split(':').map(Number)
+    const [pb, gb] = b.split(':').map(Number)
+    return pa !== pb ? pa - pb : ga - gb
+  })
+  for (const key of rowKeys) {
+    offset.set(key, totalBars)
+    totalBars += barsByRow.get(key) ?? 0
+  }
+
+  const out: ScoreSpotNote[] = []
+  for (const page of layout.pages) {
+    for (const n of page.notes) {
+      if (n.segment !== undefined || !n.playable) continue
+      const key = `${page.index}:${n.id.group}`
+      const base = offset.get(key)
+      // 找不到行偏移（极少数畸形版面）：跳过而不是算成第 1 小节 —— 错位比缺失更难查
+      if (base === undefined) continue
+      out.push({ id: noteIdStringOf(n.id), bar: base + n.barIndex + 1, beatPos: n.beatPos, y: n.y })
+    }
+  }
+  flatTotalBars = totalBars
+  // 稳定排序：先小节、再拍位；同拍多声部按纵向位置（上面的那条 = 主旋律）
+  return out.sort((a, b) =>
+    a.bar !== b.bar ? a.bar - b.bar : Math.abs(a.beatPos - b.beatPos) > BEAT_EPS ? a.beatPos - b.beatPos : a.y - b.y,
+  )
+}
+
+/**
+ * 最近一次 `flattenScoreNotes` 数出来的总小节数。
+ *
+ * 为什么用模块级变量而不是返回值：小节总数要用于**报错文案**（"谱面只有 N 个小节"），
+ * 而调用方只关心音符表。它是纯函数的副产物、每次调用都会重写，不会跨请求残留。
+ */
+let flatTotalBars = 0
+
+type BarBeatRange = {
+  startId: string
+  endId: string
+  /** 给用户看的定位说明（"第 27 小节第 3 拍 → …"），出错时也用它 */
+  startLabel: string
+  endLabel: string
+  totalBars: number
+}
+
+/**
+ * 把用户写的两个拍位换算成**音符 id**（`render -t mp4` 的段落）。
+ *
+ * 口径（逐条都是刻意选的）：
+ *  · 起点：该小节**第一个不早于**这一拍的音符（拍位落在音符中间 ⇒ 取这个音符，符合"从这拍开始"）；
+ *  · 终点：这一拍那个音符的**前一个**音符 —— 用户说"到 50:1"，意思是**到第 50 小节第 1 拍为止**，
+ *    不该把第 50 小节的第一个音也带进来；这样 `--from 27:3 --to 50:1` 正好是"第 27 小节第 3 拍
+ *    到第 49 小节末尾"；
+ *  · 两个位置都按**乐谱顺序**（不做反复展开）：反复遍次由 `--pass` 在放映时挑（与界面标记段同一套）。
+ *
+ * @returns 成功给 id 与说明；失败给 `error`（原文可直接打到终端）
+ */
+export function resolveBarBeatRange(
+  layout: ScoreLayout,
+  from: { bar: number; beat: number },
+  to: { bar: number; beat: number },
+): BarBeatRange | { error: string } {
+  const notes = flattenScoreNotes(layout)
+  const totalBars = flatTotalBars
+
+  /**
+   * 找一个位置的**下标**。
+   * 找不到时把"这一小节实际有哪些拍"说出来 —— 只报"没有第 9 拍"用户仍不知道该怎么改。
+   */
+  const locate = (spot: { bar: number; beat: number }, which: string): { index: number; note: ScoreSpotNote } | { error: string } => {
+    if (spot.bar > totalBars) {
+      return { error: `${which}：谱面只有 ${totalBars} 个小节，没有第 ${spot.bar} 小节` }
+    }
+    const inBar = notes.filter((n) => n.bar === spot.bar)
+    if (inBar.length === 0) {
+      return { error: `${which}：第 ${spot.bar} 小节没有可发声的音符（只有休止符？）` }
+    }
+    const target = spot.beat - 1
+    const idx = notes.findIndex((n) => n.bar === spot.bar && n.beatPos >= target - BEAT_EPS)
+    if (idx < 0) {
+      const last = inBar[inBar.length - 1].beatPos + BEAT_EPS
+      const span = Number.isInteger(last) ? String(last) : last.toFixed(2)
+      return { error: `${which}：第 ${spot.bar} 小节最后停在 ${span} 拍，没有第 ${spot.beat} 拍` }
+    }
+    return { index: idx, note: notes[idx] }
+  }
+
+  const a = locate(from, '--from')
+  if ('error' in a) return a
+  const b = locate(to, '--to')
+  if ('error' in b) return b
+  if (b.index <= a.index) {
+    return { error: `--to 必须在 --from 之后（现在两者落在同一个音上：${a.note.id}）` }
+  }
+
+  /**
+   * 终点取"目标音符的前一个"。
+   *
+   * 如果目标就是全谱第一个音，说明这一段是空的：如实报错，而不是悄悄导出一整曲。
+   */
+  const endIdx = b.index - 1
+  if (endIdx < a.index) {
+    return { error: '结束位置之前没有音符：这一段是空的（--to 请往后写一点）' }
+  }
+  return {
+    startId: a.note.id,
+    endId: notes[endIdx].id,
+    startLabel: `第 ${from.bar} 小节第 ${from.beat} 拍`,
+    endLabel: `第 ${to.bar} 小节第 ${to.beat} 拍之前`,
+    totalBars,
+  }
 }
 
 /**
@@ -703,6 +957,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       midi: true,
       raster: io.rasterize !== undefined,
       audio: io.synthesize !== undefined,
+      // adj1084：动态谱视频（WebCodecs）——同样只有桌面宿主能给
+      video: io.encodeVideo !== undefined,
     }
     const report = {
       schema: 1,
@@ -716,7 +972,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     else {
       line(io, `iJipu CLI doctor`)
       line(io, `  可设置项：${report.configKeys} 个（含可选字段 ${OPTIONAL_CONFIG_FIELDS.length} 个）`)
-      line(io, `  能力：svg ✓｜midi ✓｜位图(png/jpg/pdf) ${caps.raster ? '✓（桌面端通道已就绪）' : '✗（需桌面端隐藏窗口渲染）'}｜音频(wav) ${caps.audio ? '✓' : '✗（需音色库合成）'}`)
+      line(io, `  能力：svg ✓｜midi ✓｜位图(png/jpg/pdf) ${caps.raster ? '✓（桌面端通道已就绪）' : '✗（需桌面端隐藏窗口渲染）'}｜音频(wav) ${caps.audio ? '✓' : '✗（需音色库合成）'}｜视频(mp4) ${caps.video ? '✓（桌面端隐藏窗口）' : '✗（需桌面端隐藏窗口）'}`)
       line(io, `  提示：位图/音频在桌面端 exe 内可用；独立 Node 环境只能用 svg/midi ✓`)
     }
     return { code: EXIT.ok, json: report }
@@ -1151,6 +1407,152 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       io.err(`--ink 需要 x,y,w,h 四个正数（如 --ink 50,80,495,600；收到 “${p.ink}”）`)
       return { code: EXIT.usage }
     }
+    /**
+     * adj1084：`--from/--to/--pass` 只属于视频。
+     *
+     * 别的类型给了就报用法错误 —— 静默忽略是最坏的：用户以为"只导这一段"，
+     * 实际拿到整页/整曲，还以为自己写对了。
+     */
+    if (type !== 'mp4' && (p.from !== null || p.to !== null || p.pass !== null || p.card !== null)) {
+      io.err('--from / --to / --pass / --card 只用于 -t mp4（其它类型没有"第几拍""片头卡片"这些概念）')
+      return { code: EXIT.usage }
+    }
+    if (type === 'mp4') {
+      const target = p.output
+      if (target === null || target === '-') {
+        io.err('MP4 是二进制，必须用 -o 指定文件（不能用 stdout）')
+        return { code: EXIT.usage }
+      }
+      if ((p.from === null) !== (p.to === null)) {
+        io.err('--from 与 --to 要一起给（两个都不给 = 整曲）')
+        return { code: EXIT.usage }
+      }
+      let from: { bar: number; beat: number } | null = null
+      let to: { bar: number; beat: number } | null = null
+      if (p.from !== null && p.to !== null) {
+        from = parseBarBeat(p.from)
+        to = parseBarBeat(p.to)
+        if (from === null || to === null) {
+          io.err(
+            `段落写法是 <小节>:<拍>，小节与拍都从 1 起、拍可带小数（如 27:3、50:1.5）。\n` +
+              `  收到：--from ${p.from} --to ${p.to}`,
+          )
+          return { code: EXIT.usage }
+        }
+      }
+      let pass: number | null = null
+      if (p.pass !== null) {
+        if (!/^\d+$/.test(p.pass) || Number(p.pass) < 1) {
+          io.err(`--pass 从 1 起（第 1 遍写 1，第 2 遍写 2）；收到 “${p.pass}”`)
+          return { code: EXIT.usage }
+        }
+        if (from === null) {
+          io.err('--pass 只用于段落导出：要同时给 --from 与 --to')
+          return { code: EXIT.usage }
+        }
+        // CLI 对外 1 起；内部候选遍次 0 起（与界面下拉一致）
+        pass = Number(p.pass) - 1
+      }
+      /**
+       * 片头/片尾卡片：四个预设模板，缺省 `brand`（与界面一致）。
+       * 收 `custom` 是**明确拒绝**而不是默默当 brand —— 自定义样式存在本机，
+       * 同一条命令在别人机器上会出不同的片，那不该是命令行的语义。
+       */
+      const CARD_NAMES: Record<'brand' | 'paper' | 'ink' | 'minimal', string> = {
+        brand: '深空蓝',
+        paper: '纸面',
+        ink: '水墨',
+        minimal: '极简',
+      }
+      const cardRaw = (p.card ?? 'brand').toLowerCase()
+      if (!(cardRaw in CARD_NAMES)) {
+        io.err(
+          `--card 支持 brand（深空蓝）| paper（纸面）| ink（水墨）| minimal（极简）；收到 “${p.card}”。\n` +
+            '  自定义卡片是本机偏好，只在界面里用；命令行不接受 custom（换台机器会出不一样的片）。',
+        )
+        return { code: EXIT.usage }
+      }
+      const cardStyleId = cardRaw as 'brand' | 'paper' | 'ink' | 'minimal'
+      if (io.encodeVideo === undefined) {
+        io.err(
+          'MP4 需要"桌面端隐藏窗口"通道（WebCodecs 编码）；当前环境没有该能力。\n' +
+            '  请在桌面端运行：ijipu cli render -i <谱> -t mp4 -o <输出> [--from 27:3 --to 50:1 --pass 2]\n' +
+            '  或改用 -t svg（任意环境）｜-t midi（任意环境）。',
+        )
+        return { code: EXIT.render }
+      }
+      let startId: string | null = null
+      let endId: string | null = null
+      let rangeText = '整曲'
+      if (from !== null && to !== null) {
+        const layoutR = layoutScore(parsed, cfg)
+        const r = resolveBarBeatRange(layoutR, from, to)
+        if ('error' in r) {
+          io.err(r.error)
+          return { code: EXIT.usage }
+        }
+        startId = r.startId
+        endId = r.endId
+        rangeText = `${r.startLabel} → ${r.endLabel}`
+        const sid = r.startId
+        const eid = r.endId
+        /**
+         * `--pass` 的**可数性**：反复段落有几遍，由引擎的候选表说了算（与界面标记段同一份）。
+         * 先在这里数清楚 —— 否则用户要等出片窗口起来，才收到一句"标记段已失效"，
+         * 而真正的原因只是"这一段没有第 2 遍"。
+         */
+        if (pass !== null) {
+          const seq = buildPlaySequence(parsed, layoutR, inferBpm(parsed))
+          const cand = resolvePracticeRange(seq, sid, eid)
+          const n = cand.candidates.length
+          if (n <= pass) {
+            io.err(
+              n === 0
+                ? '这一段找不到可放映的遍次（起止之间没有音符）'
+                : `这一段只有 ${n} 遍（没有第 ${pass + 1} 遍）；--pass 只能是 1${n > 1 ? `..${n}` : ''}`,
+            )
+            return { code: EXIT.usage }
+          }
+        }
+      }
+      const passText = pass === null ? '' : `，第 ${pass + 1} 遍`
+      if (!p.quiet) {
+        line(io, `正在导出视频：${rangeText}${passText}（16:9，全片长，片头片尾：${CARD_NAMES[cardStyleId]}）`)
+      }
+      try {
+        const out = await io.encodeVideo({
+          source: src,
+          pageConfig: cfg,
+          startId,
+          endId,
+          pass,
+          output: target,
+          // CLI 的缺省：16:9 + 整曲。选 3 分钟会把长曲**悄悄截短**，命令行里不做这种事。
+          aspect: '16x9',
+          mode: 'full',
+          cardStyleId,
+        })
+        if (!p.quiet) {
+          const mb = (out.bytes / (1024 * 1024)).toFixed(1)
+          line(io, `已写入 ${target}（MP4，${mb} MB${out.audio ? '，含音轨' : '，无声'}）`)
+        }
+        return {
+          code: EXIT.ok,
+          json: {
+            schema: 1,
+            type: 'mp4',
+            output: target,
+            bytes: out.bytes,
+            audio: out.audio,
+            card: cardStyleId,
+            range: startId === null ? null : { startId, endId, pass },
+          },
+        }
+      } catch (e) {
+        io.err(`视频导出失败：${e instanceof Error ? e.message : String(e)}`)
+        return { code: EXIT.render }
+      }
+    }
     if (type === 'midi') {
       const layout = layoutScore(parsed, cfg)
       const seq = buildPlaySequence(parsed, layout, typeof cfg === 'object' ? 60 : 60)
@@ -1164,8 +1566,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       if (!p.quiet) line(io, `已写入 ${target}（MIDI，${bytes.length} 字节）`)
       return { code: EXIT.ok, json: { schema: 1, type: 'midi', output: target, bytes: bytes.length } }
     }
-    if (type !== 'svg' && type !== 'text' && type !== 'png' && type !== 'jpg' && type !== 'pdf') {
-      io.err(`render 的 -t 支持 svg | midi | png | jpg | pdf（收到 “${type}”；wav 请用 play -t wav）`)
+    if (type !== 'svg' && type !== 'text' && type !== 'png' && type !== 'jpg' && type !== 'pdf' && type !== 'mp4') {
+      io.err(`render 的 -t 支持 svg | midi | png | jpg | pdf | mp4（收到 “${type}”；wav 请用 play -t wav）`)
       return { code: EXIT.usage }
     }
     if (type === 'png' || type === 'jpg' || type === 'pdf') {

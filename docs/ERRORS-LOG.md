@@ -10801,7 +10801,16 @@ smoke 五条含"来源切换成对"结构断言与负对照） |
   `tsc/lint/build/smoke/verify:app-ui` 全绿。
 - **预防**：所有"标记段起止"入口（试听、导出、以后新增的）都必须带 `pass`；选择逻辑只走 `pickPracticeCandidate`。
 
-
+### E-2026-510 命令行导出视频"卡住 90 秒"：用 `cargo build` 的调试版代替 `tauri build`，隐藏窗口加载的是 `devUrl`
+- **场景**：实现 `ijipu cli render -t mp4`（隐藏出片窗口），本地验证。
+- **现象**：命令一直停在"正在导出视频"，终端没有任何进度；等到超时也拿不到结果。出片窗口进程与 WebView2 都在，但前端一行都没执行。
+- **根因**：为省时间，改完 Rust 后直接用 `cargo build` 出 debug exe。Tauri 的 **debug 配置走 `devUrl`**
+  （本仓是 `http://localhost:5173/app/`），而不是打进 exe 的 `frontendDist` ⇒ 出片窗口去连一个**没在跑**的
+  Vite 服务，页面白屏、JS 不执行。`npx tauri build --debug --no-bundle` 才会把 `dist` 嵌进去。
+- **解决**：验证隐藏窗口一律用 `tauri build`（或先起 `npm run dev` 再跑 debug exe）；另给父进程加
+  **90 秒首响看门狗**（收不到"出片窗口已就绪"就杀掉并如实报错），把"无声卡死"变成可操作的错误。
+- **预防**：凡"前端没界面、只在后台跑"的宿主路径，必须有**首响超时 + 可读错误**；调试版与发布版的前端来源
+  要在验证清单里写明，别拿 `cargo build` 当等价物。
 
 
 
