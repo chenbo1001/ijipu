@@ -7413,6 +7413,31 @@ console.log('[82] author credit (adj373)')
         /if \(st\.binding\) return false/.test(docSrc))
   }
   /**
+   * adj1085：桌面壳本机配置的**启动顺序**。
+   *
+   * 这条守的是一个实测竞态：`main.tsx` 末尾的外部改动轮询 IIFE 在模块求值时就启动，
+   * 并会 `import('./store/docStore')` → docStore 静态 import uiStore；如果它不等
+   * `prefsReady`，uiStore 会先用 WebView2 的旧值求值（文件里 dark、界面 light）。
+   * 顺序问题源码断言守得住（不像像素/交互那样只能真跑），所以钉在这里。
+   */
+  {
+    const mainSrc = String(readFileSync('src/main.tsx', 'utf8'))
+    const prefsSrc = String(readFileSync('src/store/prefs.ts', 'utf8'))
+    const prefsCoreSrc = String(readFileSync('src/store/prefsCore.ts', 'utf8'))
+    const orderRe = /void \(async \(\) => \{[\s\S]{0,900}?await prefsReady[\s\S]{0,600}?import\('\.\/store\/docStore'\)/
+    check(
+      'adj1085 外部改动轮询在碰 store 之前先 `await prefsReady`（桌面配置先接管，再求值 uiStore）',
+      orderRe.test(mainSrc) &&
+        /export const prefsReady/.test(prefsSrc) &&
+        /markReady\(\)/.test(prefsSrc) &&
+        /PREFS_PREFIX = 'ijipu\.'/.test(prefsCoreSrc),
+    )
+    check(
+      'adj1085 负对照：删掉 `await prefsReady` ⇒ 顺序判据判红（不是恒绿）',
+      !orderRe.test(mainSrc.replace('await prefsReady', 'void 0')),
+    )
+  }
+  /**
    * adj724b（用户实测，真正的根因）：**`openWorkspaceFile` 必须在第一个 await 之前"认领"绑定**。
    *
    * 日志顺序：`宿主推来的文件打开成功：…痴情冢` 之后又出现 `已恢复工作区绑定：…茶花开了`。

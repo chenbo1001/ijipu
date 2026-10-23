@@ -10812,6 +10812,17 @@ smoke 五条含"来源切换成对"结构断言与负对照） |
 - **预防**：凡"前端没界面、只在后台跑"的宿主路径，必须有**首响超时 + 可读错误**；调试版与发布版的前端来源
   要在验证清单里写明，别拿 `cargo build` 当等价物。
 
+### E-2026-511 桌面本机配置"文件是 dark、界面是 light"：顶层 IIFE 与配置预载抢跑，uiStore 先读了浏览器旧值
+- **场景**：adj1085 首次把 `ijipu.*` 落到 `%APPDATA%\iJipu\settings.json`，冷启动验证。
+- **现象**：文件里 `themeMode=dark`，冷启动后界面仍是浅色（`data-mode=light`），在页面里刷新一次才变深；连跑三次有两次复现。
+- **根因**：`main.tsx` 末尾**外部改动轮询**那个顶层 IIFE 在模块求值时就启动，并 `import('./store/docStore')`；
+  docStore 静态 import 了 uiStore。它与主 IIFE 里"读配置文件"的 IPC **并行**：IPC 稍慢，uiStore 就先用
+  WebView2 `localStorage` 的旧值把主题/缩放定死。刷新时 IPC 已热，所以看起来"刷新就好"。
+- **解决**：`prefs.ts` 导出 `prefsReady`；该 IIFE 在碰 store 前 `await prefsReady`。预载在成功/失败/无需接管的
+  **所有出口**都 resolve（只保证"等待结束"）。另在 `smoke` 加源码顺序断言（含负对照）。
+- **预防**：模块求值期启动的 IIFE，只要会 import store，就必须先等"存储后端就绪"；
+  "先读后端再求值 store"要作为桌面存储的硬约束（写进 `docs/DATA-STORAGE.md`），不能靠调用顺序碰运气。
+
 
 
 

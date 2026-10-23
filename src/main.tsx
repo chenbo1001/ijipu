@@ -142,6 +142,21 @@ void (async () => {
       return
     }
   }
+  /**
+   * adj1085：**桌面壳的本机配置**（`%APPDATA%\iJipu\settings.json`）。
+   *
+   * 必须排在任何 store 模块求值之前：`uiStore` / `docStore` 在模块顶层就会读主题、缩放、草稿。
+   * 这里只做"读文件 + 替换 localStorage 门面"，失败就退回浏览器存储，绝不挡启动。
+   * （命令行出片窗口在上面已经 return，不会走到这里 —— 它是第二个进程，不该写配置。）
+   */
+  if (isTauriShell()) {
+    try {
+      const { preloadDesktopPrefs } = await import('./store/prefs')
+      await preloadDesktopPrefs()
+    } catch (e) {
+      console.warn('[iJipu] 本机配置未接管，继续使用浏览器存储：', e)
+    }
+  }
   let bridge: Awaited<ReturnType<typeof import('./store/hostBridge').initHostBridge>> = null
   try {
     const { initHostBridge } = await import('./store/hostBridge')
@@ -466,6 +481,17 @@ function askLoadExternalChange(
  *  · 本段只做**接线**：把三种绑定（FSA 句柄 / 原生路径 / 工作区）各自接到同一套 IO 形状上。
  */
 void (async () => {
+  /**
+   * adj1085：**先等本机配置接管完**，再碰 store。
+   *
+   * 这个 IIFE 在模块求值时就启动（与上面的主 IIFE 并行），而它下面会 `import('./store/docStore')`
+   * → docStore 静态 import 了 uiStore ⇒ uiStore 会在"读配置文件"的 IPC 还没回来时先求值，
+   * 用浏览器 localStorage 的旧值把主题/缩放定死（实测：文件里是 dark、界面是 light，刷新才对）。
+   */
+  if (isTauriShell()) {
+    const { prefsReady } = await import('./store/prefs')
+    await prefsReady
+  }
   try {
     const { getRuntimeEnv } = await import('./brand/env')
     const { hostProfile, decideWatch } = await import('./store/fileHost')

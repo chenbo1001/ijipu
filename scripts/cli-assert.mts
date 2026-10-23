@@ -16,6 +16,8 @@
  * 运行：`npm run smoke`（已串在后面）；也可单独 `node dist-smoke/cli-assert.cjs`。
  */
 import { runCli, EXIT, flattenScoreNotes, type CliIo } from '../packages/ijipu-cli/src/cli'
+// adj1085：桌面壳本机配置的**纯逻辑**（不碰 Tauri/DOM，可在 Node 里直接断言）
+import { createPrefsFacade, importLegacyPrefs, mergedKeys, prefsValuesOf, PREFS_PREFIX } from '../src/store/prefsCore'
 // adj942：**内嵌入口**（`ijipu.exe` 里跑的就是这一份）——这里真跑一遍它的接线 ✓
 import { runEmbeddedCli, type EmbedHost } from '../packages/ijipu-cli/src/embedEntry'
 // adj873：`--crop` 断言要读渲染产物的 viewBox 来核对画布盒
@@ -1602,6 +1604,88 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
     'adj1084 --from 用在 svg 上 ⇒ 1（不静默忽略）',
     (await runCli(['render', '-i', '-', '-t', 'svg', '-o', 'x.svg', '--from', '1:1', '--to', '2:1'], nonMp4.io)).code === EXIT.usage,
   )
+}
+
+console.log('\n— adj1085 本机配置（桌面壳落 %APPDATA%\\iJipu，不依赖浏览器缓存）—')
+{
+  /** 内存版 Storage（语义与浏览器一致：字符串键值、有 length/key） */
+  const fakeStorage = (init: Record<string, string> = {}): { storage: Storage; map: Map<string, string> } => {
+    const map = new Map(Object.entries(init))
+    const storage: Storage = {
+      get length() {
+        return map.size
+      },
+      key(i: number) {
+        return [...map.keys()][i] ?? null
+      },
+      getItem(k: string) {
+        return map.get(k) ?? null
+      },
+      setItem(k: string, v: string) {
+        map.set(k, String(v))
+      },
+      removeItem(k: string) {
+        map.delete(k)
+      },
+      clear() {
+        map.clear()
+      },
+    }
+    return { storage, map }
+  }
+
+  const legacy = fakeStorage({ 'ijipu.theme': 'ink', 'ijipu.draft': 'Q: 1 2', 'other.key': 'x' })
+  const imported = importLegacyPrefs(legacy.storage)
+  check(
+    'adj1085 首次迁移只搬 `ijipu.*`，不碰别人的键',
+    imported.get('ijipu.theme') === 'ink' && imported.get('ijipu.draft') === 'Q: 1 2' && !imported.has('other.key'),
+    `keys=${[...imported.keys()].join(',')}`,
+  )
+
+  const real = fakeStorage({ 'other.key': 'real', 'ijipu.stale': 'old' })
+  const snapshot = new Map(imported)
+  let changed = 0
+  const facade = createPrefsFacade(real.storage, snapshot, () => {
+    changed += 1
+  })
+  facade.setItem('ijipu.theme', 'paper')
+  facade.setItem('other.key', 'new')
+  check(
+    'adj1085 门面：`ijipu.*` 走内存快照，其余键原样转发',
+    facade.getItem('ijipu.theme') === 'paper' && facade.getItem('other.key') === 'new' && real.map.get('other.key') === 'new',
+    `theme=${facade.getItem('ijipu.theme')} other=${real.map.get('other.key')}`,
+  )
+  check('adj1085 门面：改一次只触发一次落盘标记（值没变不重复触发）', changed === 1, `changed=${changed}`)
+  facade.setItem('ijipu.theme', 'paper')
+  check('adj1085 门面：写入同值不再触发落盘', changed === 1, `changed=${changed}`)
+
+  facade.removeItem('ijipu.draft')
+  check(
+    'adj1085 门面：remove 只删快照里的键，真实存储里的旧键不动',
+    facade.getItem('ijipu.draft') === null && real.map.get('ijipu.stale') === 'old',
+  )
+
+  const keys = mergedKeys(real.storage, snapshot)
+  check(
+    'adj1085 可见键 = 真实键 ∪ 快照键（去重；遍历类旧代码仍能看到全部）',
+    keys.includes('other.key') && keys.includes('ijipu.stale') && keys.includes('ijipu.theme') && new Set(keys).size === keys.length,
+    `keys=${keys.join(',')}`,
+  )
+
+  facade.clear()
+  check(
+    'adj1085 clear 只清本项目命名空间（不误删别的站内键）',
+    snapshot.size === 0 && real.map.get('other.key') === 'new',
+    `snapshot=${snapshot.size} other=${real.map.get('other.key')}`,
+  )
+
+  const values = prefsValuesOf(new Map([['ijipu.theme', 'ink'], ['ijipu.previewZoom', '125']]))
+  check(
+    'adj1085 落盘形状是纯 `Record<string,string>`（与 Rust 的 prefs_save 契约一致）',
+    JSON.stringify(values) === '{"ijipu.theme":"ink","ijipu.previewZoom":"125"}',
+    JSON.stringify(values),
+  )
+  check('adj1085 键前缀常量是 `ijipu.`（三端同一键空间）', PREFS_PREFIX === 'ijipu.')
 }
 
 console.log(failed === 0 ? `\nCLI 断言全部通过 ✅（${passed} 项）` : `\nCLI 断言失败 ${failed} 项 ❌`)

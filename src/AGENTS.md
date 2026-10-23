@@ -44,6 +44,11 @@
 4. **持久化键**：`ijipu.` 前缀常量集中在 store 文件顶部（DRAFT_KEY/PREVIEW_ZOOM_KEY 等），读取必须 try/catch 回退默认值。
    **adj480：不再有"页面设置"缓存键**——`PageConfig` 只有「代码默认 ← 谱面 `# jps-config`」两层（谱面自包含才谈得上"复制给别人显示一致"）；
    `ijipu.pageConfig` 只保留一次性迁移清理（`docStore.migrateLegacyPageConfig`），**不得再写入**
+5. **本机配置的三端落点（adj1085，用户口径）**：同一个 `ijipu.*` 键空间，落点按端区分——
+   桌面壳：`store/prefs.ts` 把 `window.localStorage` 换成门面，落 `%APPDATA%\iJipu\settings.json`（`settings.bak.json` 备份、
+   原子替换、首次从 WebView2 `localStorage` 迁移一次）；网站/PWA：浏览器 `localStorage`；Obsidian 插件：宿主桥 → 插件目录 `data.json`。
+   新增 L1 偏好**照旧用 `ijipu.` 前缀 + localStorage 读写**（无需感知后端）；**L2 谱面配置永远进 `.jps`**；
+   图片等大值走文件/IndexedDB，不塞键值表。命令行出片窗口是第二个进程，**不写配置**。完整口径见 `docs/DATA-STORAGE.md`。
 
 ## 四、品牌与文案集中管理（强制）
 
