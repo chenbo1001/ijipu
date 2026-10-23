@@ -29360,6 +29360,62 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     spans1090[1].top > spans1090[0].bottom - 0.51,
     `第二条 top=${spans1090[1].top.toFixed(1)} 第一条 bottom=${spans1090[0].bottom.toFixed(1)}`,
   )
+  /**
+   * 负对照（E-2026-513）：**按"行间空隙 ≤0.8×字号"合并**（出片相机那套视觉行口径）
+   * 会把同一组多声部拆成两条 —— 所以试听必须按曲行归组，不能靠间距猜。
+   * 这条不改实现，只用同一份 guide 数据把"旧口径会拆开"算出来。
+   */
+  let legacyRows = 0
+  let legacyBottom = Number.NEGATIVE_INFINITY
+  for (const g of [...guides1090].sort((a, b) => a.yTop - b.yTop)) {
+    if (g.yTop - legacyBottom > DUR_CFG.note_size * 0.8) legacyRows++
+    legacyBottom = Math.max(legacyBottom, g.yBottom)
+  }
+  check(
+    'adj1090 负对照：按行间空隙合并会把同组多声部拆成 3 条（按曲行归组才是 2 条）',
+    legacyRows === 3 && spans1090.length === 2,
+    `旧口径=${legacyRows} 条 / 新口径=${spans1090.length} 条（行顶差 ${(guides1090[1].yTop - guides1090[0].yTop).toFixed(1)}，字号 ${DUR_CFG.note_size}）`,
+  )
+  /**
+   * 段层（`{bz}` 画在主旋律上方 / `{dsb}` 上下两层）也属于**同一个曲行**：
+   * 换行时若把它们漏在外面，伴奏/第二声部会被裁在视口上沿之外。
+   */
+  {
+    const spanOf = (src: string) => {
+      const lay = layoutScore(parseJpsRaw(src), DUR_CFG)
+      const guides =
+        computeRowGuides(lay, { quci: DUR_CFG.height_quci, geci: DUR_CFG.geci_size }, DUR_CFG.note_size)[0] ?? []
+      const spans = rowSpansOfPage(lay, 0, {
+        quci: DUR_CFG.height_quci,
+        geci: DUR_CFG.geci_size,
+        noteSize: DUR_CFG.note_size,
+      })
+      const segRows = guides.filter((g) => g.segType !== undefined)
+      const main = guides.find((g) => g.segType === undefined)
+      const cover = main
+        ? spans.find((s) => s.top <= main.yTop + 0.5 && s.bottom >= Math.max(main.yBottom, main.lyricBottom ?? main.yBottom) - 0.51)
+        : undefined
+      return { guides, spans, segRows, main, cover }
+    }
+    const bz = spanOf(`${HEAD1090}Q: 1 2 {bz 3 4} 5 6 |\n`)
+    check(
+      'adj1090 `{bz}` 伴奏层并入主旋律那一条 span（换行时伴奏不会留在视口上方）',
+      bz.segRows.length >= 1 &&
+        bz.cover !== undefined &&
+        bz.cover.tops.length >= 2 &&
+        bz.cover.top <= Math.min(...bz.segRows.map((g) => g.yTop)) + 0.51,
+      `段层行=${bz.segRows.length} cover.tops=${bz.cover?.tops.map((y) => y.toFixed(1)).join(',')}`,
+    )
+    const dsb = spanOf(`${HEAD1090}Q: 1 2 {dsb 3 4} 5 6 |\n`)
+    check(
+      'adj1090 `{dsb}` 两层也并入同一条 span（上下两个声部同视界）',
+      dsb.segRows.length >= 1 &&
+        dsb.cover !== undefined &&
+        dsb.cover.tops.length >= 2 &&
+        dsb.cover.top <= Math.min(...dsb.segRows.map((g) => g.yTop)) + 0.51,
+      `段层行=${dsb.segRows.length} cover.tops=${dsb.cover?.tops.map((y) => y.toFixed(1)).join(',')}`,
+    )
+  }
 
   /**
    * 夹具 B：**单声部 + 两行歌词** ⇒ 行底必须由「最后一行歌词」决定
