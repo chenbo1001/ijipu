@@ -123,6 +123,9 @@ import { DEFAULT_CARD_STYLE } from '../src/export/video/cardTemplates.ts'
 // adj1077：视频生成能力闸门（桌面壳 + WebCodecs；网站/插件不开放）
 import { canGenerateVideo, canUseDynamicVideo } from '../src/export/video/capability.ts'
 import { pickPracticeCandidate } from '../src/export/video/practicePick.ts'
+// adj1111：导出视频的封面（片头卡完整帧 → MP4 的 `ilst/covr`）
+import { COVER_MIME, DEFAULT_COVER_MS, coverImageOf } from '../src/export/video/mp4.ts'
+import { COVER_MS } from '../src/export/video/exportDynamic.ts'
 import { computeRowTops, computeRowGuides, rowSpansOfPage, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
@@ -34815,5 +34818,61 @@ function runDynamicCameraTests(): void {
         /pickPracticeCandidate\(res\.candidates,\s*res\.pick,\s*opts\.range\.pass\)/.test(rendererSrc),
       'pass must flow mark -> camera -> session',
     )
+  }
+  /**
+   * adj1111（用户 2026-10-23 要求）：导出视频的系统缩略图只有一片背景，看不出是哪首。
+   * 根因：片头是"先出背景、再淡入标题"，第 0 帧基本是空底色，而系统缩略图常取首帧。
+   * 解法：把片头卡**完整显现**的那一帧（t = 3000ms）编成 JPEG 当 MP4 封面
+   * （Mediabunny `setMetadataTags({ images })` → `moov/udta/meta/ilst/covr`）。
+   */
+  {
+    check(
+      'adj1111 封面时刻 = 片头卡完整显现的最后一刻（3700 − 700 = 3000ms）',
+      COVER_MS === 3000 && DEFAULT_COVER_MS === 3000,
+      `COVER_MS=${COVER_MS} / DEFAULT=${DEFAULT_COVER_MS}`,
+    )
+    {
+      // 只验"字节原样带过去"（Node 里没有 WebCodecs，编不出真视频；JPEG 头用 SOI+APP0 占位）
+      const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46])
+      const tag = coverImageOf(jpeg)
+      check(
+        'adj1111 封面标签形状：coverFront + image/jpeg + 字节原样（MP4 写成 ilst/covr）',
+        tag.kind === 'coverFront' &&
+          tag.mimeType === COVER_MIME &&
+          tag.mimeType === 'image/jpeg' &&
+          tag.data.length === jpeg.length &&
+          tag.data.every((b, i) => b === jpeg[i]),
+        `${tag.kind} / ${tag.mimeType} / ${tag.data.length}B`,
+      )
+      check(
+        'adj1111 负对照：封面必须是 coverFront + JPEG（改成 coverBack / PNG 就判红）',
+        coverImageOf(jpeg).kind !== 'coverBack' && COVER_MIME !== 'image/png',
+        'coverFront / jpeg 是硬口径',
+      )
+    }
+    {
+      const mp4Src = readFileSync(join(root, 'src/export/video/mp4.ts'), 'utf8')
+      const expSrc = readFileSync(join(root, 'src/export/video/exportDynamic.ts'), 'utf8')
+      const drawAt = mp4Src.indexOf('session.draw(ctx, coverMs)')
+      const metaAt = mp4Src.indexOf('setMetadataTags(')
+      const startAt = mp4Src.indexOf('await output.start()')
+      check(
+        'adj1111 出片接线：先画 coverMs 那一帧、再 setMetadataTags，两步都在 output.start() 之前',
+        drawAt > 0 && startAt > 0 && drawAt < metaAt && metaAt < startAt &&
+          /coverMs:\s*COVER_MS/.test(expSrc),
+        `draw@${drawAt} meta@${metaAt} start@${startAt}`,
+      )
+      check(
+        'adj1111 负对照：coverMs 传 null ⇒ 不写封面；时刻越界（≥ 时长）⇒ 跳过',
+        /opts\.coverMs === undefined \? DEFAULT_COVER_MS : opts\.coverMs/.test(mp4Src) &&
+          /coverMs !== null && coverMs < spanMs/.test(mp4Src),
+        'null 与越界两个出口都在',
+      )
+      check(
+        'adj1111 封面编码是 JPEG（缩略图实现兼容性最好），不是 PNG',
+        /convertToBlob\(\{\s*type:\s*COVER_MIME/.test(mp4Src) && COVER_MIME === 'image/jpeg',
+        COVER_MIME,
+      )
+    }
   }
 }

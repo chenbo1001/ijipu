@@ -11,7 +11,7 @@
  *  · 画面与会话仍然走 `createDynamicSession`（引擎 + 宿主层），不另造一份。
  */
 import type { DynamicPresetId, PageConfig, PanMode } from '@ijipu/engine'
-import { createDynamicSession, type DynamicSession } from './renderer'
+import { createDynamicSession, INTRO_PAN_MS, type DynamicSession } from './renderer'
 import { encodeMp4 } from './mp4'
 import type { CardStyle } from './cardTemplates'
 
@@ -19,6 +19,15 @@ import type { CardStyle } from './cardTemplates'
 export const EXPORT_MAX_MS = 180_000
 /** 片头：描述头静止 3 秒 + 推近 0.7 秒 ⇒ 第一拍在 3.7 秒 */
 export const LEAD_IN_MS = 3_700
+
+/**
+ * 视频封面取的时刻（`adj1111`）：片头卡**完全显现**的最后一刻。
+ *
+ * = `LEAD_IN_MS − INTRO_PAN_MS`（3700 − 700 = 3000）。这一帧是"标题 + 曲目信息"最完整的样子，
+ * 再往后 0.7 秒卡片就开始淡出、推近到第一拍。与 `mp4.ts` 的 `DEFAULT_COVER_MS` 同值——
+ * 这里显式传，改片头节奏时不会忘了改封面。
+ */
+export const COVER_MS = LEAD_IN_MS - INTRO_PAN_MS
 
 export interface DynamicExportOptions {
   code: string
@@ -92,6 +101,8 @@ export async function exportDynamicVideo(opts: DynamicExportOptions): Promise<Dy
     fps: 30,
     maxMs: undefined,
     audio,
+    // adj1111：封面 = 片头卡完整帧（系统缩略图/播放器封面不再是一张空背景）
+    coverMs: COVER_MS,
     ...(opts.signal === undefined ? {} : { signal: opts.signal }),
     onProgress: (p) => opts.onProgress?.(p, '正在编码画面…'),
   })

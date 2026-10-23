@@ -70,6 +70,15 @@ export const BALL_FILL = 'rgba(255, 93, 108, 0.95)'
 /** 2D 上下文（离屏画布与页面画布都行；编码时用 OffscreenCanvas 不占可见画布） */
 export type DrawCtx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
+/**
+ * 片头卡最后 0.7 秒：从"完整卡片"淡入/推近到第一拍（`adj1067` 定下的口径）。
+ *
+ * 为什么要导出这个常量：**视频封面**要取"卡片最完整"的那一刻，而那一刻正是
+ * `leadInMs − 本值`（默认 `3700 − 700 = 3000ms`）。封面时间必须与这里同源，
+ * 否则改了片头节奏、封面就会取到淡出中途的半透明帧（见 `mp4.ts` 的 `coverMs`）。
+ */
+export const INTRO_PAN_MS = 700
+
 export interface DynamicSession {
   camera: CameraTrack
   /** 每页一张已光栅化的画布 */
@@ -292,7 +301,6 @@ export async function createDynamicSession(
    * 按宽度自动缩字，三种尺寸同一套版式；3 秒卡 + 0.7 秒淡入/推近到第一拍。
    */
   const introMeta = layout.pages[0]?.meta
-  const INTRO_PAN_MS = 700
 
   // 字体没就绪就光栅化 ⇒ 字形回退，第一帧和后面不一样
   await document.fonts.ready

@@ -21,6 +21,7 @@
  * 不依赖机器快慢 ⇒ 同一份谱两次导出逐帧一致。
  */
 import { Output, Mp4OutputFormat, BufferTarget, CanvasSource, AudioBufferSource, Quality } from 'mediabunny'
+import type { AttachedImage } from 'mediabunny'
 import type { DynamicSession } from './renderer'
 
 export interface Mp4Options {
@@ -34,6 +35,14 @@ export interface Mp4Options {
   audioBitrate?: number
   /** 只编前 N 毫秒（导出范围 / 试编一段用） */
   maxMs?: number
+  /**
+   * 封面帧的时刻（ms）。缺省 = 片头卡**完全显现**的那一刻（`LEAD_IN_MS − INTRO_PAN_MS` = 3000）。
+   * 传 `null` = 不写封面（测试 / 极短片段用）。
+   *
+   * 为什么要封面：mp4 自身不带"封面"时，系统与播放器抽哪一帧全凭各自实现
+   * （Windows 资源管理器常用第 0 帧 ⇒ 只显示动画开头的背景），于是缩略图看不出是什么曲子。
+   */
+  coverMs?: number | null
   /** 进度回调（0~1） */
   onProgress?: (p: number) => void
   /** 取消 */
@@ -42,6 +51,28 @@ export interface Mp4Options {
 
 /** 关键帧间隔（秒）——seek/播放器拖动更稳 */
 const KEYFRAME_SEC = 2
+
+/** 封面缺省时刻：片头卡完整显现的最后一刻（= `LEAD_IN_MS 3700 − INTRO_PAN_MS 700`） */
+export const DEFAULT_COVER_MS = 3000
+
+/** 封面图的 MIME（JPEG：体积小，各类缩略图实现都认） */
+export const COVER_MIME = 'image/jpeg'
+
+/**
+ * 把一帧 JPEG 包成 Mediabunny 的封面图 —— MP4 会写成 `moov/udta/meta/ilst/covr`（`kind: coverFront`）。
+ *
+ * 为什么抽成纯函数：冒烟跑在 Node 里、没有 WebCodecs，编不出真视频；
+ * 但"封面标签的形状对不对（coverFront / image/jpeg / 字节原样）"可以单独断言。
+ */
+export function coverImageOf(jpeg: Uint8Array): AttachedImage {
+  return {
+    data: jpeg,
+    mimeType: COVER_MIME,
+    kind: 'coverFront',
+    name: 'cover.jpg',
+    description: '视频封面（片头卡完整帧）',
+  }
+}
 
 /**
  * 把音轨截到与画面等长。
@@ -96,6 +127,20 @@ export async function encodeMp4(session: DynamicSession, opts: Mp4Options = {}):
       ? new AudioBufferSource({ codec: 'aac', quality: new Quality({ bitrate: opts.audioBitrate ?? 128_000 }) })
       : null
   if (audio) output.addAudioTrack(audio)
+
+  /**
+   * 封面：抓片头卡**完整显现**的那一帧（`adj1111`）。
+   *
+   * 为什么不拿第 0 帧：片头是"先出背景、再淡入标题"，第 0 帧基本只有底色 ——
+   * 系统缩略图（Windows 资源管理器常取首帧）就成了一张空背景。
+   * 取 3 秒这一帧，缩略图直接就是"标题 + 曲目信息"的完整卡片。
+   */
+  const coverMs = opts.coverMs === undefined ? DEFAULT_COVER_MS : opts.coverMs
+  if (coverMs !== null && coverMs < spanMs) {
+    session.draw(ctx, coverMs)
+    const jpeg = await canvas.convertToBlob({ type: COVER_MIME, quality: 0.9 })
+    output.setMetadataTags({ images: [coverImageOf(new Uint8Array(await jpeg.arrayBuffer()))] })
+  }
 
   await output.start()
   try {
