@@ -2450,6 +2450,65 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
   )
 }
 
+/**
+ * adj1104（用户 2026-10-23 实报：`段1 [26:3 - 46:2]` 的"第 2 遍"其实到不了——第二遍是从 27:1 开始的）：
+ * 若某个候选的区间**被另一个完全包住**，它只是同一条旅程里"后一次起点"的截断版，不是另一遍 ⇒ 去掉。
+ * 真实谱实测：起点 `0_1_5_141` 在第 1、2 遍出现，终点 `0_1_9_249` 只在第 3 遍出现 ⇒
+ * 两个候选 `137..419`（170s）与 `328..419`（57s），后者是前者的子区间。
+ */
+{
+  console.log('[adj1104] 被包含的候选（同一条旅程的后半截）不算另一遍')
+  const mkEv = (index: number, atMs: number) => ({
+    atMs,
+    durationMs: 500,
+    placed: { id: { page: 0, voice: 1, group: 0, index } },
+  })
+  // 起点（100）出现两次、终点（102）只出现一次且在两者之后 ⇒ 候选 (0,3) 与 (2,3)，后者被前者包住
+  const seq1104 = {
+    events: [mkEv(100, 0), mkEv(101, 500), mkEv(100, 1000), mkEv(102, 1500)],
+    bpm: 120,
+    passMarks: [{ atMs: 0, pass: 1 }],
+    maxPass: 1,
+    barStartsMs: [],
+  }
+  const res1104 = resolvePracticeRange(seq1104 as never, '0_1_0_100', '0_1_0_102')
+  check(
+    'adj1104 两个候选但一个是另一个的子区间 ⇒ 只留**外层那一个**',
+    res1104.candidates.length === 1 && res1104.candidates[0].i0 === 0 && res1104.candidates[0].i1 === 3,
+    JSON.stringify(res1104.candidates),
+  )
+  // 负对照：两条**内容不同**的旅程（转调 / 不同线路）⇒ 两个都保留
+  const mkEvP = (index: number, atMs: number, pitch: string) => ({
+    atMs,
+    durationMs: 500,
+    pitch,
+    placed: { id: { page: 0, voice: 1, group: 0, index } },
+  })
+  const seq1104b = {
+    events: [
+      mkEvP(100, 0, 'C4'),
+      mkEvP(101, 500, 'D4'),
+      mkEvP(102, 1000, 'E4'),
+      mkEvP(100, 2000, 'G4'),
+      mkEvP(101, 2500, 'A4'),
+      mkEvP(102, 3000, 'B4'),
+    ],
+    bpm: 120,
+    passMarks: [
+      { atMs: 0, pass: 1 },
+      { atMs: 2000, pass: 2 },
+    ],
+    maxPass: 2,
+    barStartsMs: [],
+  }
+  const res1104b = resolvePracticeRange(seq1104b as never, '0_1_0_100', '0_1_0_102')
+  check(
+    'adj1104 负对照：两条内容不同、互不包含的旅程 ⇒ 两个候选都保留（不是"见重复就砍"）',
+    res1104b.candidates.length === 2,
+    JSON.stringify(res1104b.candidates),
+  )
+}
+
 // adj303：显示乐器名——@乐器名 / @@ 后第一个音符正上方标注
 const rIns = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 弦乐\nQ: 1 2 @钢琴 3 4 @@ 5 6 |\n')
 const layIns = layoutScore(rIns, { ...DUR_CFG, showInstrument: true })
