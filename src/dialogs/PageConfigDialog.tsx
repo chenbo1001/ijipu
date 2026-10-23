@@ -213,6 +213,9 @@ export function PageConfigDialog({
   // adj1089：动态视频/试听的行中平移方式（L1 本机偏好，默认跟随）
   const panMode = useUiStore((s) => s.panMode)
   const setPanMode = useUiStore((s) => s.setPanMode)
+  // adj1094：行末提前平移量（L1，单位拍，默认 0.5）
+  const rowLeadBeats = useUiStore((s) => s.rowLeadBeats)
+  const setRowLeadBeats = useUiStore((s) => s.setRowLeadBeats)
 
   const [draft, setDraft] = useState<PageConfig>({ ...pageConfig })
   // adj603：默认子页签取本 section 的第一个（全局 → 版面、谱面 → 布局）
@@ -702,6 +705,20 @@ export function PageConfigDialog({
               </select>
             </Row>
             <div className="ijipu-form-hint">{dynamicVideoCopy.panModeHint}</div>
+            {/* adj1094（用户要求）：行末提前平移量——三种模式共用，默认半拍、最多 2 拍 */}
+            <Row label={dynamicVideoCopy.rowLeadLabel}>
+              <select
+                value={String(rowLeadBeats)}
+                onChange={(e) => setRowLeadBeats(Number(e.target.value))}
+              >
+                <option value="0">{dynamicVideoCopy.rowLead0}</option>
+                <option value="0.5">{dynamicVideoCopy.rowLead05}</option>
+                <option value="1">{dynamicVideoCopy.rowLead1}</option>
+                <option value="1.5">{dynamicVideoCopy.rowLead15}</option>
+                <option value="2">{dynamicVideoCopy.rowLead2}</option>
+              </select>
+            </Row>
+            <div className="ijipu-form-hint">{dynamicVideoCopy.rowLeadHint}</div>
             <LocalDataPanel />
           </>
         )

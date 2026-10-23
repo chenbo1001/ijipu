@@ -29639,6 +29639,77 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
 }
 
 /**
+ * adj1094：试听侧的行末提前量（`panFocusAt` 的 `leadMs`）+ **默认按拍** + 设置项接线。
+ */
+{
+  console.log('[163f] row-end lead & default beat pan (adj1094)')
+  const segs = [
+    { y: 150, atMs: 0, durationMs: 500, x: 100, width: 40 },
+    { y: 150, atMs: 1500, durationMs: 500, x: 280, width: 40 },
+    { y: 450, atMs: 2000, durationMs: 500, x: 100, width: 40 },
+  ]
+  const spans = [
+    { top: 100, bottom: 300 },
+    { top: 400, bottom: 600 },
+  ]
+  const base = { mode: 'beat' as const, beatMs: 500, anchorMs: 0, bars: [0, 2000], segs, spans }
+  const early = panFocusAt({ ...base, t: 1800, leadMs: 250 })
+  check(
+    'adj1094 行末提前 250ms：行切换在行首前 250ms 就发生（t=1800 已按下一行第一块居中）',
+    early !== null && early.spanIndex === 1 && early.blockCenterX === 120,
+    JSON.stringify(early),
+  )
+  const noLead = panFocusAt({ ...base, t: 1800, leadMs: 0 })
+  check(
+    'adj1094 提前量 0 ⇒ 同一时刻还没切（仍在上一行，用当前块居中）',
+    noLead !== null && noLead.spanIndex === 0 && noLead.blockCenterX === 300,
+    JSON.stringify(noLead),
+  )
+  check(
+    'adj1094 提前量不影响"同一行内用当前块居中"',
+    panFocusAt({ ...base, t: 1600, leadMs: 250 })?.blockCenterX === 300,
+    JSON.stringify(panFocusAt({ ...base, t: 1600, leadMs: 250 })),
+  )
+
+  const uiSrc = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+  const rendererSrc = String(readFileSync('src/export/video/renderer.ts', 'utf8'))
+  const overlaySrc = String(readFileSync('src/preview/DynamicFrameOverlay.tsx', 'utf8'))
+  const cliSrc = String(readFileSync('src/export/video/cliWorker.ts', 'utf8'))
+  const exportSrc = String(readFileSync('src/export/video/exportDynamic.ts', 'utf8'))
+  const dialogSrc = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
+  check(
+    'adj1094 uiStore：默认半拍、写入钳到 [0,2]、读失败回退半拍',
+    /ROW_LEAD_BEATS_DEFAULT = 0\.5/.test(uiSrc) &&
+      /ROW_LEAD_BEATS_MAX = 2/.test(uiSrc) &&
+      /Math\.min\(ROW_LEAD_BEATS_MAX, Math\.max\(0, beats\)\)/.test(uiSrc) &&
+      /rowLeadBeats: loadRowLeadBeats\(\)/.test(uiSrc),
+  )
+  check(
+    'adj1094 默认平移方式改成**按拍**（store 回退 beat + 出片缺省 beat）',
+    /return 'beat'/.test(uiSrc) && /opts\?\.panMode \?\? 'beat'/.test(rendererSrc),
+  )
+  check(
+    'adj1094 三处透传：出片把 rowLeadMs 交给 buildCameraTrack；预览 / 导出 / 命令行传 rowLeadBeats',
+    /rowLeadMs,/.test(rendererSrc) &&
+      /rowLeadBeats,/.test(overlaySrc) &&
+      /rowLeadBeats: opts\.rowLeadBeats/.test(exportSrc) &&
+      /rowLeadBeats: useUiStore\.getState\(\)\.rowLeadBeats/.test(cliSrc),
+  )
+  check(
+    'adj1094 设置项：本机页签有「行末提前」下拉（0 / 0.5 / 1 / 1.5 / 2 拍）',
+    /dynamicVideoCopy\.rowLeadLabel/.test(dialogSrc) &&
+      /dynamicVideoCopy\.rowLead05/.test(dialogSrc) &&
+      /setRowLeadBeats\(Number\(e\.target\.value\)\)/.test(dialogSrc),
+  )
+  const previewSrc1094 = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
+  check(
+    'adj1094 试听：横向/纵向都按同一个提前量（panFocusAt 的 leadMs + 纵向 look-ahead）',
+    /leadMs: rowLeadMs/.test(previewSrc1094) &&
+      /lastMainSegAtOrBefore\(track, page\.index, currentMs \+ rowLeadMs\)/.test(previewSrc1094),
+  )
+}
+
+/**
  * adj898（用户要求）：首页每个示例谱都必须**规范** ——
  * 用户原话「完整的示例谱要规范，如以 `||` 结束，拍子要对，不能有告警」。
  *
@@ -33063,7 +33134,7 @@ function runDynamicCameraTests(): void {
     ]
 
     check(
-      'adj1089 默认（不传 panMode）= follow：pans 逐值相等（没设置过的用户观感不变）',
+      'adj1089 引擎缺省（不传 panMode）= follow：pans 逐值相等（应用默认已改按拍，见 adj1094）',
       camFollow.pans.length === cam.pans.length &&
         camFollow.pans.every(
           (p, i) =>
@@ -33254,18 +33325,20 @@ function runDynamicCameraTests(): void {
         /const ballBars = \(seq\.barStartsMs \?\? \[\]\)\.map\(\(s\) => s \+ leadInMs\)/.test(rendererSrc),
     )
     check(
-      'adj1089 平移方式只有一份来源（uiStore 的 L1 键；预览订阅、导出与命令行出片透传）',
+      'adj1089/adj1094 平移方式只有一份来源（uiStore 的 L1 键；预览订阅、导出与命令行出片透传；默认按拍）',
       /const PAN_MODE_KEY = 'ijipu\.panMode'/.test(storeSrcAdj) &&
         /panMode:\s*loadPanMode\(\)/.test(storeSrcAdj) &&
         /useUiStore\(\(s\) => s\.panMode\)/.test(previewSrcAdj) &&
         /useUiStore\(\(s\) => s\.panMode\)/.test(overlaySrcAdj) &&
-        /opts\?\.panMode \?\? 'follow'/.test(rendererSrc) &&
+        /opts\?\.panMode \?\? 'beat'/.test(rendererSrc) &&
         /panMode: opts\.panMode/.test(exportSrcAdj) &&
         /panMode: useUiStore\.getState\(\)\.panMode/.test(cliSrcAdj),
     )
     check(
-      'adj1089 换了平移方式会**重建相机会话**（否则设置点了没反应：还在放旧 pans）',
-      /\[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, paint\]/.test(overlaySrcAdj),
+      'adj1089/adj1094 换了平移方式/提前量会**重建相机会话**（否则设置点了没反应：还在放旧 pans）',
+      /\[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, paint\]/.test(
+        overlaySrcAdj,
+      ),
     )
     check(
       'adj1089 设置里的下拉真接了 setPanMode，文案走 copy.ts（组件里不写这三种选择的字面量）',
@@ -33530,6 +33603,66 @@ function runDynamicCameraTests(): void {
       'adj1093 **本行最后一个小节不推**（该小节里没有非行首、非小节线的 pan）',
       lastBarPush === 0 && lastBarSamples > 0,
       `最后小节推=${lastBarPush} 样本=${lastBarSamples}`,
+    )
+  }
+
+  /**
+   * ---- adj1094（用户 2026-10-23 口径）：**行末提前平移量** ----
+   *
+   * 用户原话：「播放到行末时……等平移到下一行首时已经播放一小部分了，没有一个提前量看后继的谱子
+   * ……添加一个变量，即行末提前平移量，默认半拍……最多 2 拍」。
+   *
+   * 断言：换行的横向 pan 与**纵向换行**都提前 `rowLeadMs` 完成；`rowLeadMs=0` 回到旧行为。
+   */
+  {
+    console.log('    [adj1094] 行末提前平移量')
+    const SRC = `V: 1.0\nB: t\nD: C\nP: 4/4\n${Array(4)
+      .fill('Q: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 |')
+      .join('\n')}\n`
+    const parsed = parseJpsRaw(SRC)
+    const lay = layoutScore(parsed, DUR_CFG)
+    const seq = buildPlaySequence(parsed, lay, 120)
+    const tr = buildRectTrack(seq, { noteSize: DUR_CFG.note_size })
+    const v = buildFlowView(lay, tr, DUR_CFG)
+    const lead = 250 // 半拍 @120bpm
+    const camLead = buildCameraTrack(v, tr, DUR_CFG, {
+      viewW: 1080,
+      viewH: 1920,
+      panMode: 'beat',
+      beatMs: 500,
+      rowLeadMs: lead,
+    })
+    let bad = ''
+    for (const [ri, r] of v.rows.entries()) {
+      if (ri === 0) continue
+      const p = camLead.pans.find((x) => Math.abs(x.t - (r.t0 - lead)) <= 2)
+      if (p === undefined) {
+        bad = `行${ri} 期望行首 pan@${Math.round(r.t0 - lead)}（实际 pans=${camLead.pans.map((x) => Math.round(x.t)).join(',')}）`
+        break
+      }
+      const cyEarly = cameraAt(camLead, r.t0 - lead).cy
+      const cyLater = cameraAt(camLead, r.t0 - lead + 60).cy
+      if (Math.abs(cyEarly - cyLater) > 0.01) {
+        bad = `行${ri} 纵向在提前量之后还在动：cy(${Math.round(r.t0 - lead)})=${cyEarly.toFixed(1)} vs +60ms=${cyLater.toFixed(1)}`
+        break
+      }
+    }
+    check(
+      'adj1094 成片：换行**提前 rowLeadMs 完成**（横向 pan 在 t0−lead，纵向 cy 那时已到位）',
+      bad === '',
+      bad,
+    )
+    const camNoLead = buildCameraTrack(v, tr, DUR_CFG, {
+      viewW: 1080,
+      viewH: 1920,
+      panMode: 'beat',
+      beatMs: 500,
+      rowLeadMs: 0,
+    })
+    check(
+      'adj1094 lead=0 ⇒ 回到旧行为（行首 pan 仍在行首 t0）',
+      v.rows.slice(1).every((r) => camNoLead.pans.some((p) => Math.abs(p.t - r.t0) <= 2)),
+      camNoLead.pans.map((p) => Math.round(p.t)).join(','),
     )
   }
 

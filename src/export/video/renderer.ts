@@ -120,9 +120,16 @@ export async function createDynamicSession(
      * 由**调用方**从 `uiStore.panMode`（L1 偏好）取来传进来，本文件不读 store：
      * 预览（`DynamicFrameOverlay`）会订阅它、导出与命令行出片在调用时取一次，
      * 这样"设置里改了下拉"能立刻触发会话重建，而不是继续放旧 `pans`。
-     * 缺省 `follow` = 既有行为。
+     * 缺省 `beat`（adj1094 起宿主默认按拍；跟随仍可选）。
      */
     panMode?: PanMode
+    /**
+     * adj1094：**行末提前平移量**（单位：拍，默认半拍、最多 2 拍）。
+     *
+     * 三种平移模式共用：换到下一行（横向 + 纵向）提前这么多拍完成，好提前看到下一行。
+     * 与 `panMode` 一样由调用方从 `uiStore.rowLeadBeats`（L1）取来传进来，本文件不读 store。
+     */
+    rowLeadBeats?: number
   },
 ): Promise<DynamicSession> {
   const preset = DYNAMIC_PRESETS[presetId]
@@ -228,7 +235,13 @@ export async function createDynamicSession(
    * adj1089：平移方式由调用方给（`uiStore.panMode` 的 L1 偏好；缺省 follow = 既有行为）。
    * 这里不读 store：预览要订阅它才能"改了下拉立刻重建会话"，所以依赖必须是显式的。
    */
-  const panMode = opts?.panMode ?? 'follow'
+  const panMode = opts?.panMode ?? 'beat'
+  /**
+   * adj1094：行末提前平移量（拍 → ms）。默认半拍、最多 2 拍；宿主（预览/导出/命令行）从
+   * `uiStore.rowLeadBeats` 取来传进来，改了就重建会话。
+   */
+  const rowLeadBeats = Math.min(2, Math.max(0, opts?.rowLeadBeats ?? 0.5))
+  const rowLeadMs = rowLeadBeats * beatMs
 
   const camera = buildCameraTrack(view, track, pageConfig, {
     viewW: preset.width,
@@ -241,6 +254,8 @@ export async function createDynamicSession(
     panMode,
     beatMs,
     bars: ballBars,
+    // adj1094：换到下一行提前这么多毫秒完成（三种模式共用）
+    rowLeadMs,
   })
   const ball = opts?.ball !== false
   const musicEndMs = track.endMs

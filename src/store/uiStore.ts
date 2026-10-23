@@ -150,13 +150,39 @@ const DYNAMIC_CARD_STYLE_IDS: readonly CardTemplateId[] = ['brand', 'paper', 'in
 const PAN_MODE_KEY = 'ijipu.panMode'
 const PAN_MODES: readonly PanMode[] = ['follow', 'beat', 'bar']
 
-/** 读失败 / 旧版本没有这个键 / 脏值 ⇒ 一律回退 `follow`（= 既有行为，不改变任何老用户观感） */
+/** 读失败 / 旧版本没有这个键 / 脏值 ⇒ 回退 `beat`（adj1094 起**默认按拍平移**） */
 function loadPanMode(): PanMode {
   try {
     const v = localStorage.getItem(PAN_MODE_KEY)
-    return PAN_MODES.includes(v as PanMode) ? (v as PanMode) : 'follow'
+    return PAN_MODES.includes(v as PanMode) ? (v as PanMode) : 'beat'
   } catch {
-    return 'follow'
+    return 'beat'
+  }
+}
+
+/**
+ * adj1094（用户 2026-10-23 口径）：**行末提前平移量**（单位：拍；L1 用户偏好）。
+ *
+ * 用户原话：「播放到行末时……等平移到下一行首时已经播放一小部分了，没有一个提前量看后继的谱子
+ * ……添加一个变量，即行末提前平移量，默认半拍……可以调整到最多 2 拍」。
+ *
+ * 含义：换到下一行（横向平移 + 纵向换行）**提前多少拍**完成，默认 0.5 拍。
+ * `0` = 回到旧行为（正好在行首那一下换行）。
+ */
+const ROW_LEAD_BEATS_KEY = 'ijipu.rowLeadBeats'
+export const ROW_LEAD_BEATS_DEFAULT = 0.5
+export const ROW_LEAD_BEATS_MAX = 2
+
+/** 读失败 / 旧版本没有这个键 / 越界 ⇒ 回退默认半拍（并钳到 [0, 2]） */
+function loadRowLeadBeats(): number {
+  try {
+    const raw = localStorage.getItem(ROW_LEAD_BEATS_KEY)
+    if (raw === null) return ROW_LEAD_BEATS_DEFAULT
+    const v = Number(raw)
+    if (!Number.isFinite(v)) return ROW_LEAD_BEATS_DEFAULT
+    return Math.min(ROW_LEAD_BEATS_MAX, Math.max(0, v))
+  } catch {
+    return ROW_LEAD_BEATS_DEFAULT
   }
 }
 
@@ -441,8 +467,8 @@ interface UiState {
   /**
    * adj1089（用户 2026-10-23 口径）：动态视频与试听的**行中平移方式**（L1，落 localStorage）。
    *
-   * - `follow`（默认）：色块到画面右 4/5 才推，一次推到左 1/5；
-   * - `beat`：每拍移一次，把当前拍的色块放到画面中间；
+   * - `follow`：色块到画面右 4/5 才推，一次推到左 1/5；
+   * - `beat`（**adj1094 起默认**）：每拍移一次，把当前拍的色块放到画面中间；
    * - `bar`：每小节移一次，同上。
    *
    * 三种都受"左右露白 ≤ 画面 10%"约束（引擎 `clampRowCenter`，出片与试听共用）。
@@ -450,6 +476,15 @@ interface UiState {
   panMode: PanMode
   /** adj1089：写入前校验取值（只允许三种），脏值忽略、不落盘 */
   setPanMode: (m: PanMode) => void
+  /**
+   * adj1094（用户 2026-10-23 口径）：**行末提前平移量**（单位：拍；L1，落 localStorage）。
+   *
+   * 三种平移模式共用：换到下一行（横向 + 纵向）提前这么多拍**完成**，好让观众提前看到下一行。
+   * 默认 0.5 拍，可调 0~2 拍；`0` = 正好在行首那一下换行（旧行为）。
+   */
+  rowLeadBeats: number
+  /** adj1094：写入前钳到 [0, ROW_LEAD_BEATS_MAX]，脏值忽略 */
+  setRowLeadBeats: (beats: number) => void
   /**
    * adj905q（用户规格见 `docs/PREVIEW-DEBUG-BOUNDARIES.md`）：**预览可视调试**开关。
    * 开启后在预览里叠加「时值格 / 墨迹 / 段层」三套边界虚线（几何来自引擎
@@ -818,8 +853,10 @@ export const useUiStore = create<UiState>()((set) => ({
   dynamicCardStyle: loadDynamicCardStyle(initialCustomCardStyle),
   // adj1074：自定义卡片（L1，落盘；坏数据回退 null）
   dynamicCardStyleCustom: initialCustomCardStyle,
-  // adj1089：平移方式（L1，落盘；脏值/读失败回退 follow ⇒ 老用户观感不变）
+  // adj1089：平移方式（L1，落盘；脏值/读失败回退 beat ⇒ adj1094 起默认按拍）
   panMode: loadPanMode(),
+  // adj1094：行末提前平移量（L1，落盘；默认半拍）
+  rowLeadBeats: loadRowLeadBeats(),
   // adj905q：预览可视调试 —— **L3 会话级**，刻意不读 localStorage（重开即恢复默认关）
   debugBounds: false,
   // adj965d（EP-13）：预览区 Alt 手势默认调**背景层**（L3 会话级，不落盘）
@@ -951,6 +988,22 @@ export const useUiStore = create<UiState>()((set) => ({
       /* 忽略隐私模式/配额异常 */
     }
     set({ panMode: m })
+  },
+  /**
+   * adj1094：行末提前平移量（L1，单位：拍）。
+   *
+   * **写入前钳制**：`[0, ROW_LEAD_BEATS_MAX]`、非有限值直接忽略（脏值不落盘、不改内存，
+   * 否则下次启动会回退默认，用户以为"设置没生效"）。允许 0.5 的步进由界面负责，这里不取整。
+   */
+  setRowLeadBeats: (beats) => {
+    if (!Number.isFinite(beats)) return
+    const v = Math.min(ROW_LEAD_BEATS_MAX, Math.max(0, beats))
+    try {
+      localStorage.setItem(ROW_LEAD_BEATS_KEY, String(v))
+    } catch {
+      /* 忽略 */
+    }
+    set({ rowLeadBeats: v })
   },
   // adj965d：Alt 手势调哪一层（L3 会话级）——**不落盘**；默认背景层：
   // 需要摆位置的通常是垫进来的那张背景图（水印多为居中一个）

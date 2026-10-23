@@ -1242,6 +1242,26 @@ function currentMainSeg(
 }
 
 /**
+ * adj1094：`t` 之前**最后开始**的主声部段（不要求此刻仍在响）。
+ *
+ * 用途：纵向滚动按"行末提前量"提前切到下一行——行首前 `leadMs` 就已经要看到新行了，
+ * 而那时当前行可能还在响、新行还没开始，所以不能只认"正在响的段"。
+ */
+function lastMainSegAtOrBefore(
+  track: readonly PlayheadSegLike[],
+  pageIndex: number,
+  t: number,
+): PlayheadSegLike | null {
+  let best: PlayheadSegLike | null = null
+  for (const s of track) {
+    if (s.pageIndex !== pageIndex) continue
+    if (s.playVoice !== undefined && s.playVoice !== 'main') continue
+    if (s.atMs <= t && (!best || s.atMs >= best.atMs)) best = s
+  }
+  return best
+}
+
+/**
  * adj282：跟随色块渲染层——仅订阅 currentMs/playheadTrack，避免 PreviewPane 主组件
  * 随播放逐帧重渲染（SVG 层不重建，仅本轻量色块刷新）。
  * adj299：每曲行（group）独立一个色块（按各自拍段滑动、按 voice 配色、各自行高）。
@@ -1274,6 +1294,9 @@ function PlayheadLayer({
   const panKeyRef = useRef('')
   // adj1092：本页的段（按拍/小节平移要用它判断"行变了"与"新行的第一块"）
   const segsOfPage = useMemo(() => track.filter((s) => s.pageIndex === page.index), [track, page.index])
+  // adj1094：行末提前平移量（拍 → ms）；10:00 起默认半拍，最多 2 拍
+  const rowLeadBeats = useUiStore((s) => s.rowLeadBeats)
+  const rowLeadMs = Math.max(0, Math.min(2, rowLeadBeats)) * Math.max(0, beatMs)
   // adj1090：同一视觉行里只按"行"滚一次（首次播放 / 换行各一次）
   const rowKeyRef = useRef('')
   // adj1062：跨页球的纵向换算要用到预览缩放（与 `.preview-zoom-scale` 的 zoom 同源）
@@ -1398,7 +1421,7 @@ function PlayheadLayer({
     const scale = pageRect.width / page.width
     const pageLeft = pageRect.left - scRect.left + scroller.scrollLeft
 
-    // ① 拍/小节 + 行：行变了也滚（adj1092）
+    // ① 拍/小节 + 行：行变了也滚（adj1092）；行末提前（adj1094）由 `leadMs` 控制
     const focus = panFocusAt({
       mode: panMode === 'bar' ? 'bar' : 'beat',
       t: currentMs,
@@ -1407,6 +1430,7 @@ function PlayheadLayer({
       bars: beatBars,
       segs: segsOfPage,
       spans,
+      leadMs: rowLeadMs,
     })
     if (focus !== null && panKeyRef.current !== `${panMode}:${focus.key}`) {
       panKeyRef.current = `${panMode}:${focus.key}`
@@ -1444,7 +1468,7 @@ function PlayheadLayer({
     if (target !== null && Math.abs(target - scroller.scrollLeft) >= 1) {
       scroller.scrollTo({ left: target, behavior: 'smooth' })
     }
-  }, [currentMs, track, segsOfPage, rowSpans, panMode, beatMs, beatBars, anchorMs, page.index, page.width])
+  }, [currentMs, track, segsOfPage, rowSpans, panMode, beatMs, beatBars, anchorMs, rowLeadMs, page.index, page.width])
 
   /**
    * adj1090（用户 2026-10-23 口径）：**纵向**滚动——首次播放 / 换行时，判断"曲部 + 词部"
@@ -1461,7 +1485,7 @@ function PlayheadLayer({
     if (track.length === 0 || currentMs <= 0) return
     const spans = rowSpans[page.index] ?? []
     if (spans.length === 0) return
-    const seg = currentMainSeg(track, page.index, currentMs)
+    const seg = lastMainSegAtOrBefore(track, page.index, currentMs + rowLeadMs)
     if (!seg) return
     // 行归属：当前发声段的**基线 y** 落在哪个曲行的纵向范围里（同组多声部落在同一个 span）
     const spanIdx = spans.findIndex((s) => seg.y >= s.top - 0.5 && seg.y <= s.bottom + 0.5)
@@ -1493,7 +1517,7 @@ function PlayheadLayer({
     if (target === null) return
     if (Math.abs(target - scroller.scrollTop) < 1) return
     scroller.scrollTo({ top: target, behavior: 'smooth' })
-  }, [currentMs, track, rowSpans, page.index, page.height])
+  }, [currentMs, track, rowSpans, rowLeadMs, page.index, page.height])
 
   if (track.length === 0 || currentMs <= 0) return null
   // adj427：按「本页 + 曲行 + 声部 + 音色」**逐组**定位——重叠区（bz 伴奏 / dsb 第二声部）

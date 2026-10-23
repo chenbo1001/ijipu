@@ -2080,12 +2080,12 @@ async function main() {
         )
         await waitFor(c, `!!document.querySelector('.pcfg-fields select')`, '本机页签内容出现（含下拉）')
       }
-      /** 按行标签找「平移方式」那一行的 select；可选地改成某个值 */
-      const panSelect = async (setTo) =>
+      /** 按行标签找一个下拉控件；可选地改成某个值（不按序号找，避免上下一加行就点错） */
+      const selectByLabel = async (label, setTo) =>
         evalJs(
           c,
           `(() => {
-             const row = [...document.querySelectorAll('.pcfg-row')].find((r) => (r.textContent || '').includes('平移方式'))
+             const row = [...document.querySelectorAll('.pcfg-row')].find((r) => (r.textContent || '').includes(${JSON.stringify(label)}))
              const sel = row && row.querySelector('select')
              if (!sel) return null
              const labels = [...sel.options].map((o) => o.textContent.trim())
@@ -2097,9 +2097,18 @@ async function main() {
              return { value: sel.value, labels }
            })()`,
         )
+      const panSelect = (setTo) => selectByLabel('平移方式', setTo)
+      const rowLeadSelect = (setTo) => selectByLabel('行末提前', setTo)
 
       await openLocalTab()
-      const first = await panSelect('beat')
+      // adj1094：**默认平移方式已改成"按拍"**（新装/没有任何配置时）
+      const initialPan = await panSelect(null)
+      check(
+        'adj1094 默认平移方式 = **按拍**（没有存过这个键时）',
+        initialPan?.value === 'beat',
+        JSON.stringify(initialPan),
+      )
+      const first = await panSelect('follow')
       check(
         'adj1089 设置 → 本机 的「平移方式」下拉有三项：跟随（4/5→1/5）/ 按拍 / 按小节',
         first?.labels?.length === 3 &&
@@ -2111,23 +2120,45 @@ async function main() {
       )
       await sleep(300)
       const stored = await evalJs(c, `localStorage.getItem('ijipu.panMode')`)
-      check('adj1089 选「按拍」⇒ 真的写进本机偏好（`ijipu.panMode = beat`）', stored === 'beat', String(stored))
+      check('adj1089 选「跟随」⇒ 真的写进本机偏好（`ijipu.panMode = follow`）', stored === 'follow', String(stored))
 
-      // 重载：L1 偏好要记住，并且界面上的下拉要显示回来
+      // adj1094：行末提前平移量（默认半拍、5 档）
+      const leadInit = await rowLeadSelect(null)
+      check(
+        'adj1094 「行末提前」下拉默认 **0.5 拍**、共 5 档（0 / 0.5 / 1 / 1.5 / 2）',
+        leadInit?.value === '0.5' &&
+          leadInit.labels.length === 5 &&
+          leadInit.labels[0].includes('0 拍') &&
+          leadInit.labels[4].includes('2 拍'),
+        JSON.stringify(leadInit),
+      )
+      await rowLeadSelect('1')
+      await sleep(250)
+      const leadStored = await evalJs(c, `localStorage.getItem('ijipu.rowLeadBeats')`)
+      check('adj1094 选 1 拍 ⇒ 真的落盘（`ijipu.rowLeadBeats = 1`）', leadStored === '1', String(leadStored))
+
+      // 重载：两项 L1 偏好都要记住，并且界面上的下拉要显示回来
       await c.send('Page.reload')
       await sleep(600)
       await waitFor(c, `!!document.querySelector('.editor-main textarea')`, '重载后应用首屏')
       await openLocalTab()
       const after = await panSelect(null)
+      const leadAfter = await rowLeadSelect(null)
       check(
-        'adj1089 重载后仍是「按拍」（偏好落盘 + 下拉显示回来，不是只写在内存里）',
-        after?.value === 'beat',
-        JSON.stringify(after),
+        'adj1089/adj1094 重载后两项都记住（平移方式=跟随、行末提前=1 拍）',
+        after?.value === 'follow' && leadAfter?.value === '1',
+        JSON.stringify({ pan: after?.value, lead: leadAfter?.value }),
       )
-      await panSelect('follow')
+      // 恢复默认（按拍 / 半拍），不影响后面的用例
+      await panSelect('beat')
+      await rowLeadSelect('0.5')
       await sleep(250)
-      const back = await evalJs(c, `localStorage.getItem('ijipu.panMode')`)
-      check('adj1089 改回「跟随」也真的生效（不是单向写死）', back === 'follow', String(back))
+      const back = await evalJs(c, `({ pan: localStorage.getItem('ijipu.panMode'), lead: localStorage.getItem('ijipu.rowLeadBeats') })`)
+      check(
+        'adj1094 恢复默认也真的生效（按拍 / 0.5 拍）',
+        back?.pan === 'beat' && back?.lead === '0.5',
+        JSON.stringify(back),
+      )
     }
 
     console.log('[verify-app-ui] adj977：已安装手机 PWA 的标题不重复应用名')

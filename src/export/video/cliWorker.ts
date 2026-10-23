@@ -120,6 +120,8 @@ export async function runCliVideoJob(raw: string | null = null): Promise<boolean
       cardStyle: cardStyleById(job.cardStyleId),
       // adj1089：命令行出片跟随**本机**的平移方式（只读偏好，不写配置；与预览/界面导出同一份）
       panMode: useUiStore.getState().panMode,
+      // adj1094：行末提前平移量同样跟随本机偏好
+      rowLeadBeats: useUiStore.getState().rowLeadBeats,
       range:
         job.startId === null || job.endId === null
           ? null

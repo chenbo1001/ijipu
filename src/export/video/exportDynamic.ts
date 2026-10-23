@@ -35,6 +35,11 @@ export interface DynamicExportOptions {
    */
   panMode?: PanMode
   /**
+   * adj1094：**行末提前平移量**（单位：拍，默认 0.5、最多 2）。三种模式共用；
+   * 与 `panMode` 一样由调用方从 `uiStore` 取（本文件不读 store）。
+   */
+  rowLeadBeats?: number
+  /**
    * 音轨工厂。**不传 = 无声**（不是"忘了"）：调用方明确决定要不要声音。
    * 失败由调用方处理（界面那边是"本次导出无声"的提示，命令行是回包里说明）。
    */
@@ -67,6 +72,8 @@ export async function exportDynamicVideo(opts: DynamicExportOptions): Promise<Dy
     ...(opts.cardStyle === undefined ? {} : { cardStyle: opts.cardStyle }),
     // adj1089：平移方式透传（与预览/试听同一份 L1 偏好）
     ...(opts.panMode === undefined ? {} : { panMode: opts.panMode }),
+    // adj1094：行末提前平移量透传
+    ...(opts.rowLeadBeats === undefined ? {} : { rowLeadBeats: opts.rowLeadBeats }),
   })
 
   let audio: AudioBuffer | null = null

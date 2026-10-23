@@ -199,7 +199,8 @@
 | `ijipu.playbackHqEnabledByLib` | `{}` | **每库一套收藏音色**（adj1012）：按音色库 id 存收藏集合 | 用户个性 | → 插件设置（保留） |
 | `ijipu.dynamicCardStyle` | `brand` | **动态谱片头/片尾卡片模板**（adj1073）：`brand`/`paper`/`ink`/`minimal`/`custom`；L1，不写进 `.jps` | 用户个性（视频样式） | 桌面端保留；网站/插件不显示动态谱视频 |
 | `ijipu.dynamicCardStyleCustom` | null | **自定义卡片样式 JSON**（adj1074）：颜色/字体/水印/效果/背景图 data URL（≤2.5MB）；L1，不随谱走 | 用户个性（视频样式） | 桌面端保留；换机器不跟谱 |
-| `ijipu.panMode` | `follow` | **动态视频/试听的行中平移方式**（adj1089）：`follow`（色块到右 4/5 才推、一次推到左 1/5）/ `beat`（按拍居中）/ `bar`（按小节居中）。三种都受"行首、行末左右露白 ≤ 画面 10%"约束（引擎 `CAMERA_WHITE_MARGIN` / `clampRowCenter`）；L1，不写进 `.jps` | 用户个性（怎么看谱/成片） | 桌面端保留；网站/插件不显示动态谱视频（试听跟随滚动仍读这个键） |
+| `ijipu.panMode` | `beat` | **动态视频/试听的行中平移方式**（adj1089；**adj1094 起默认 `beat`**）：`follow`（色块到右 4/5 才推、一次推到左 1/5）/ `beat`（按拍居中，默认）/ `bar`（按小节居中 + 行内 4/5 安全推）。三种都受"行首、行末左右露白 ≤ 画面 10%"约束（引擎 `CAMERA_WHITE_MARGIN` / `clampRowCenter`）；L1，不写进 `.jps` | 用户个性（怎么看谱/成片） | 桌面端保留；网站/插件不显示动态谱视频（试听跟随滚动仍读这个键） |
+| `ijipu.rowLeadBeats` | `0.5` | **行末提前平移量**（adj1094，单位：拍，0~2）：三种平移模式共用——换到下一行（横向 + 纵向）提前这么多拍**完成**，好提前看到下一行；`0` = 正好在行首那一下换行；L1，不写进 `.jps` | 用户个性（怎么看谱/成片） | 桌面端保留；试听同样读它 |
 
 ### 4.2 IndexedDB / Tauri / PWA
 
