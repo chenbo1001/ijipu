@@ -28,17 +28,19 @@ export type ScoreSpotNote = {
 /**
  * 把谱面摊平成"全局小节号 + 拍位"的音符表。
  *
- * 一行有几小节，按**该行音符的最大 `barIndex` + 1** 算（实测：赤伶 10 行、每行 4–6 小节 = 51 小节；
- * 40 小节的单行谱则是 1 行 40 小节）。**不用小节线数量**：行首的 `|:` 也会产生一根线，
- * 按根数算会把整份谱的小节号推移一位。
- *
- * @returns 按（小节 → 拍位 → 纵向位置）稳定排序的音符表
+ * @param opts.includeRests 连带**休止符**一起收（标记段的端点可能点在休止符上；展示用需要它，
+ *   `--from/--to` 换算**不能**收——见 `resolveBarBeatRange` 里"只取可发声音符"的口径）
  */
-export function flattenScoreNotes(layout: ScoreLayout): ScoreSpotNote[] {
+export function flattenScoreNotes(
+  layout: ScoreLayout,
+  opts: { includeRests?: boolean } = {},
+): ScoreSpotNote[] {
+  /** 参与"行内几小节"统计的只有**可发声的主旋律音**（与 `--from/--to` 同一口径，含休止符会推移行偏移） */
+  const isMain = (n: { segment?: unknown }): boolean => n.segment === undefined
   const barsByRow = new Map<string, number>()
   for (const page of layout.pages) {
     for (const n of page.notes) {
-      if (n.segment !== undefined || !n.playable) continue
+      if (!isMain(n) || !n.playable) continue
       const key = `${page.index}:${n.id.group}`
       const need = n.barIndex + 1
       if (need > (barsByRow.get(key) ?? 0)) barsByRow.set(key, need)
@@ -61,7 +63,8 @@ export function flattenScoreNotes(layout: ScoreLayout): ScoreSpotNote[] {
   const out: ScoreSpotNote[] = []
   for (const page of layout.pages) {
     for (const n of page.notes) {
-      if (n.segment !== undefined || !n.playable) continue
+      // 主旋律音；`includeRests` 时连休止符一起收（标记段端点可能点在休止符上，展示用）
+      if (!isMain(n) || (!n.playable && opts.includeRests !== true)) continue
       const key = `${page.index}:${n.id.group}`
       const base = offset.get(key)
       // 找不到行偏移（极少数畸形版面）：跳过而不是算成第 1 小节 —— 错位比缺失更难查
@@ -111,8 +114,12 @@ function tailOfId(id: string): string {
  * 先精确匹配，再退到"组号 + 序号"（与 `resolvePracticeRange` 的宽松匹配同一口径）——
  * 标记是**预览**排版时记下的，而这里可能用**播放**排版来查。
  */
-export function measureSpotOf(layout: ScoreLayout, id: string): ScoreSpotNote | null {
-  return spotOfIn(flattenScoreNotes(layout), id)
+export function measureSpotOf(
+  layout: ScoreLayout,
+  id: string,
+  opts: { includeRests?: boolean } = {},
+): ScoreSpotNote | null {
+  return spotOfIn(flattenScoreNotes(layout, opts), id)
 }
 
 /**

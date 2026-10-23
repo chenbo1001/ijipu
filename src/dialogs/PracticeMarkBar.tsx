@@ -84,7 +84,9 @@ export function PracticeMarkBar(): React.JSX.Element {
   const optionTextById = useMemo(() => {
     const map = new Map<string, string>()
     if (marks.length === 0) return map
-    const notes = flattenScoreNotes(layoutScore(parseResult, pageConfig))
+    // adj1105：标记段的端点可能点在**休止符**上 ⇒ 展示用的小节/拍要把休止符也收进去
+    // （只影响"显示"，`--from/--to` 的换算仍只认可发声音符）
+    const notes = flattenScoreNotes(layoutScore(parseResult, pageConfig), { includeRests: true })
     for (const m of marks) {
       map.set(m.id, markOptionText(m.name, spotOfIn(notes, m.startId), spotOfIn(notes, m.endId)))
     }

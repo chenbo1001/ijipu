@@ -2397,6 +2397,22 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
     'adj1101 下拉项真的用了 `markOptionText`（不是仍只显示段名）',
     /optionTextById\.get\(m\.id\) \?\? m\.name/.test(markBarSrc) && /markOptionText\(m\.name/.test(markBarSrc),
   )
+  /**
+   * adj1105（用户 2026-10-23 实报「添加段2时，没有带起始-停止坐标」）：
+   * 标记段的端点可能点在**休止符**上；`flattenScoreNotes` 默认只收可发声的主旋律音 ⇒
+   * 查不到位置 ⇒ 下拉只剩段名（看起来就是"没带坐标"）。展示口径要连休止符一起收，
+   * 而 `--from/--to` 的换算**仍只认可发声音符**（否则小节号会被推移）。
+   */
+  const restParsed = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 0 4 |\n')
+  const restLayout = layoutScore(restParsed, DUR_CFG)
+  const restId = '0_1_0_2'
+  check(
+    'adj1105 端点落在休止符上：展示口径（includeRests）能给出小节:拍，命令行口径不取（不推移小节号）',
+    measureSpotOf(restLayout, restId) === null &&
+      measureSpotOf(restLayout, restId, { includeRests: true })?.bar === 1 &&
+      measureSpotOf(restLayout, restId, { includeRests: true })?.beatPos === 2,
+    JSON.stringify(measureSpotOf(restLayout, restId, { includeRests: true })),
+  )
 }
 
 /**
