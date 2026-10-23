@@ -192,6 +192,40 @@ export function desktopPrefsStatus(): { installed: boolean; keys: number; error:
   return { installed, keys: snapshot.size, error: lastError }
 }
 
+/** 当前配置快照（导出设置用；只读副本） */
+export function prefsSnapshotValues(): Record<string, string> {
+  return prefsValuesOf(snapshot)
+}
+
+/** 是否已经接管（桌面壳且读写正常） */
+export function prefsInstalled(): boolean {
+  return installed
+}
+
+/**
+ * 合并导入一批配置（设置 zip 导入用）：
+ * 只覆盖同名键，不删除本地独有的键；随后**立刻落盘**（不等 300ms 防抖）。
+ */
+export async function mergePrefs(entries: Record<string, string>): Promise<number> {
+  let n = 0
+  for (const [k, v] of Object.entries(entries)) {
+    if (!k.startsWith(PREFS_PREFIX) || typeof v !== 'string') continue
+    if (snapshot.get(k) === v) continue
+    snapshot.set(k, v)
+    n += 1
+  }
+  if (n > 0) {
+    dirty = true
+    await flushPrefsNow()
+  }
+  return n
+}
+
+/** 在资源管理器/访达里打开配置目录（桌面壳） */
+export async function openPrefsDir(): Promise<void> {
+  await invoke('prefs_open_dir')
+}
+
 /** 仅供测试/排错：当前快照里以某前缀开头的键（不暴露整份配置） */
 export function prefsKeysWithPrefix(prefix = PREFS_PREFIX): string[] {
   return [...snapshot.keys()].filter((k) => k.startsWith(prefix)).sort()

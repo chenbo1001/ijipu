@@ -18,6 +18,10 @@
 import { runCli, EXIT, flattenScoreNotes, type CliIo } from '../packages/ijipu-cli/src/cli'
 // adj1085：桌面壳本机配置的**纯逻辑**（不碰 Tauri/DOM，可在 Node 里直接断言）
 import { createPrefsFacade, importLegacyPrefs, mergedKeys, prefsValuesOf, PREFS_PREFIX } from '../src/store/prefsCore'
+// adj1085 P1：zip 与卡片图引用（设置导出导入 / 大图外置）
+import { readZip, writeZip } from '../src/export/zip'
+import { blobNameOf, dataUrlToBytes, isBlobRef } from '../src/store/cardImageStore'
+import { referencedBlobNamesForTest, exportSettingsZip, importSettingsZip } from '../src/store/settingsArchive'
 // adj942：**内嵌入口**（`ijipu.exe` 里跑的就是这一份）——这里真跑一遍它的接线 ✓
 import { runEmbeddedCli, type EmbedHost } from '../packages/ijipu-cli/src/embedEntry'
 // adj873：`--crop` 断言要读渲染产物的 viewBox 来核对画布盒
@@ -1686,6 +1690,95 @@ console.log('\n— adj1085 本机配置（桌面壳落 %APPDATA%\\iJipu，不依
     JSON.stringify(values),
   )
   check('adj1085 键前缀常量是 `ijipu.`（三端同一键空间）', PREFS_PREFIX === 'ijipu.')
+}
+
+console.log('\n— adj1085 P1 大图外置 / 设置 zip —')
+{
+  const enc = new TextEncoder()
+  const dec = new TextDecoder()
+  const zip = writeZip([
+    { name: 'settings.json', data: enc.encode('{"values":{"ijipu.theme":"ink"}}') },
+    { name: 'files/abcd0123.png', data: new Uint8Array([137, 80, 78, 71]) },
+  ])
+  const back = readZip(zip)
+  check(
+    'adj1085 P1 zip 往返：settings.json 与 files/ 都能原样读回',
+    dec.decode(back.get('settings.json') ?? new Uint8Array()) === '{"values":{"ijipu.theme":"ink"}}' &&
+      (back.get('files/abcd0123.png') ?? new Uint8Array()).length === 4,
+    `entries=${[...back.keys()].join(',')}`,
+  )
+
+  const ref = 'ijipu-blob:abcd0123.png'
+  check(
+    'adj1085 P1 引用只认 `ijipu-blob:<hex>.<ext>`，且能取出文件名',
+    isBlobRef(ref) && blobNameOf(ref) === 'abcd0123.png' && !isBlobRef('data:image/png;base64,AA=='),
+  )
+
+  // 1x1 PNG 的 data URL：解码回 8 字节头（PNG 签名）
+  const png = 'data:image/png;base64,iVBORw0KGgo='
+  const parsed = dataUrlToBytes(png)
+  check(
+    'adj1085 P1 data URL 能解回二进制（旧内联图迁移用）',
+    parsed !== null && parsed.mime === 'image/png' && parsed.bytes.length === 8 && parsed.bytes[1] === 0x50,
+    JSON.stringify(parsed?.bytes.slice(0, 4)),
+  )
+
+  const names = referencedBlobNamesForTest({
+    'ijipu.dynamicCardStyleCustom': '{"backgroundImage":"ijipu-blob:aa11.png"}',
+    'ijipu.other': 'not a ref',
+  })
+  check('adj1085 P1 导出时能列出配置里引用的附件（去重）', names.length === 1 && names[0] === 'aa11.png', names.join(','))
+
+  // 网页/插件路径：没有桌面 prefs 时，导出/导入走 localStorage（这里用内存桩模拟）
+  const mem = new Map<string, string>()
+  const fakeStorage: Storage = {
+    get length() {
+      return mem.size
+    },
+    key(i: number) {
+      return [...mem.keys()][i] ?? null
+    },
+    getItem(k: string) {
+      return mem.get(k) ?? null
+    },
+    setItem(k: string, v: string) {
+      mem.set(k, String(v))
+    },
+    removeItem(k: string) {
+      mem.delete(k)
+    },
+    clear() {
+      mem.clear()
+    },
+  }
+  const hadLocalStorage = 'localStorage' in globalThis
+  Object.defineProperty(globalThis, 'localStorage', { value: fakeStorage, configurable: true })
+  try {
+    mem.set('ijipu.theme', 'ink')
+    mem.set('ijipu.previewZoom', '125')
+    const archive = await exportSettingsZip()
+    const entries = readZip(archive)
+    const settings = JSON.parse(dec.decode(entries.get('settings.json') ?? new Uint8Array())) as {
+      values?: Record<string, string>
+    }
+    check(
+      'adj1085 P1 网页/插件导出：settings.json 里是 localStorage 的 `ijipu.*`',
+      settings.values?.['ijipu.theme'] === 'ink' && settings.values?.['ijipu.previewZoom'] === '125',
+      JSON.stringify(settings.values),
+    )
+
+    const incoming = writeZip([
+      { name: 'settings.json', data: enc.encode(JSON.stringify({ values: { 'ijipu.theme': 'paper', 'other': 'x' } })) },
+    ])
+    const r = await importSettingsZip(incoming)
+    check(
+      'adj1085 P1 网页/插件导入：只合并 `ijipu.*`，不删本地独有键',
+      r.keys === 1 && mem.get('ijipu.theme') === 'paper' && mem.get('ijipu.previewZoom') === '125' && !mem.has('other'),
+      `keys=${r.keys} theme=${mem.get('ijipu.theme')}`,
+    )
+  } finally {
+    if (!hadLocalStorage) delete (globalThis as { localStorage?: Storage }).localStorage
+  }
 }
 
 console.log(failed === 0 ? `\nCLI 断言全部通过 ✅（${passed} 项）` : `\nCLI 断言失败 ${failed} 项 ❌`)

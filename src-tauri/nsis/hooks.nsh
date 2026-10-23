@@ -195,7 +195,7 @@ FunctionEnd
   ; 更新（$UpdateMode=1）与静默卸载（/S）不弹窗，默认保留；静默清空要走「完全卸载」请手动删目录。
   ${If} $UpdateMode <> 1
     IfSilent ijipu_keep_assets
-    MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "要完全卸载吗？$\r$\n$\r$\n是：同时删除音色库、资源包和本机数据。$\r$\n否：只删程序，保留音色库和资源包，下次安装可直接复用。" IDYES ijipu_full_uninstall IDNO ijipu_keep_assets
+    MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "要完全卸载吗？$\r$\n$\r$\n是：同时删除音色库、资源包、本机配置（主题 / 卡片 / 草稿）和浏览器缓存。$\r$\n否：只删程序，以上全部保留（下次安装可直接复用）。" IDYES ijipu_full_uninstall IDNO ijipu_keep_assets
     ijipu_full_uninstall:
       ; 先调用资源包卸载器（它只删自己装的 sf2/manifest）；调不到再按目录兜底。
       ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\iJipuAssets" "UninstallString"
@@ -207,6 +207,10 @@ FunctionEnd
       ; 「完全卸载」按目录清（含老版本随包的那份 generaluser_gs.sf2，它已不在新卸载清单里）。
       RMDir /r "$INSTDIR\soundfonts"
       RMDir /r "$INSTDIR\tools"
+      ; adj1085：本机配置（%APPDATA%\iJipu）与 WebView2 的浏览器存储（旧配置/缓存）。
+      ; 只在「完全卸载」分支删；选「否」或静默卸载默认保留。
+      RMDir /r "$APPDATA\iJipu"
+      RMDir /r "$LOCALAPPDATA\${IJIPU_AUMI}"
       Goto ijipu_assets_done
     ijipu_keep_assets:
       FileOpen $0 "$INSTDIR\keep.flag" w

@@ -23,6 +23,7 @@ import { useUiStore, type DynamicAspect, type DynamicCardStyleId, type DynamicMo
 import { dynamicVideoCopy } from '../brand/copy'
 import { createDynamicSession, type DynamicSession } from '../export/video/renderer'
 import { CARD_TEMPLATES, cardStyleById } from '../export/video/cardTemplates'
+import { resolveCardImage } from '../store/cardImageStore'
 import { canGenerateVideo, canUseDynamicVideo } from '../export/video/capability'
 import { EXPORT_MAX_MS, LEAD_IN_MS, exportDynamicVideo } from '../export/video/exportDynamic'
 import { DynamicAudioPlayer } from '../export/video/audioPlayer'
@@ -191,12 +192,16 @@ export function DynamicFrameOverlay() {
     cursorRef.current = 0
     lastTsRef.current = 0
     sessionRef.current = null
-    createDynamicSession(code, aspect as DynamicPresetId, pageConfig, undefined, {
-      range,
-      leadInMs: LEAD_IN_MS,
-      maxMs: mode === '3min' ? EXPORT_MAX_MS : undefined,
-      cardStyle: effectiveCardStyle,
-    })
+    void (async () => {
+      // adj1085：自定义卡片背景图可能是外置引用（`ijipu-blob:`），画之前解析成 data URL
+      const backgroundImage = await resolveCardImage(effectiveCardStyle.backgroundImage)
+      return createDynamicSession(code, aspect as DynamicPresetId, pageConfig, undefined, {
+        range,
+        leadInMs: LEAD_IN_MS,
+        maxMs: mode === '3min' ? EXPORT_MAX_MS : undefined,
+        cardStyle: { ...effectiveCardStyle, backgroundImage },
+      })
+    })()
       .then((s) => {
         if (cancelled) return
         sessionRef.current = s

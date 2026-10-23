@@ -7,7 +7,7 @@
  * 背景图片：读成 data URL 存进 `CardStyle.backgroundImage`（≤2.5MB）；
  * 渲染器会 cover 裁切并压一层主题色，保证标题/副标题在任意图上仍可读。
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { cardStyleCopy } from '../brand/copy'
 import {
@@ -16,6 +16,8 @@ import {
   type CardStyle,
 } from '../export/video/cardTemplates'
 import { createCardTemplateZip, readCardTemplateZip } from '../export/video/cardTemplateZip'
+// adj1085：背景图外置（桌面落 files/、网页落 IndexedDB），配置里只留 `ijipu-blob:` 引用
+import { dataUrlToBytes, deleteCardImage, imageBlobOf, isBlobRef, resolveCardImage, saveCardImage } from '../store/cardImageStore'
 import { useUiStore, type DynamicCardStyleId } from '../store/uiStore'
 
 const MAX_IMAGE_BYTES = 2_500_000
@@ -143,8 +145,20 @@ export function CardStyleDialog() {
   const [draft, setDraft] = useState<CardStyle>(() => cloneStyle(custom ?? cardStyleById(current)))
   const [base, setBase] = useState<DynamicCardStyleId>(current === 'custom' ? 'brand' : current)
   const [imageError, setImageError] = useState('')
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null)
   const [zipMsg, setZipMsg] = useState('')
   const [zipError, setZipError] = useState(false)
+
+  /** 背景图可能是 `ijipu-blob:` 引用：预览要先解析成 data URL（旧 data URL 原样用） */
+  useEffect(() => {
+    let alive = true
+    void resolveCardImage(draft.backgroundImage).then((url) => {
+      if (alive) setPreviewSrc(url)
+    })
+    return () => {
+      alive = false
+    }
+  }, [draft.backgroundImage])
 
   const patch = (p: Partial<CardStyle>) => setDraft((d) => ({ ...d, ...p }))
 
@@ -154,23 +168,27 @@ export function CardStyleDialog() {
     setDraft(cloneStyle(cardStyleById(id)))
   }
 
-  const onPickImage = (file: File | null) => {
+  const onPickImage = async (file: File | null) => {
     if (!file) return
     if (file.size > MAX_IMAGE_BYTES) {
       setImageError(cardStyleCopy.imageTooLarge)
       return
     }
     setImageError('')
-    const reader = new FileReader()
-    reader.onload = () => {
-      setDraft((d) => ({ ...d, backgroundImage: String(reader.result) }))
+    try {
+      // adj1085：存到「附件」（桌面 files/、网页 IndexedDB），配置里只留引用
+      const ref = await saveCardImage(file)
+      setDraft((d) => ({ ...d, backgroundImage: ref }))
+    } catch (e) {
+      setImageError(e instanceof Error ? e.message : String(e))
     }
-    reader.readAsDataURL(file)
   }
 
   const exportZip = async () => {
     try {
-      const bytes = createCardTemplateZip(draft)
+      // 导出 zip 里要放**图片本体**：引用先解析回 data URL（旧格式原样返回）
+      const resolved = await resolveCardImage(draft.backgroundImage)
+      const bytes = createCardTemplateZip({ ...draft, backgroundImage: resolved })
       // TS 6 的 BlobPart 只认 ArrayBuffer；这里复制一份，避开 Uint8Array<ArrayBufferLike> 的类型冲突
       const buffer = new ArrayBuffer(bytes.byteLength)
       new Uint8Array(buffer).set(bytes)
@@ -220,7 +238,18 @@ export function CardStyleDialog() {
     try {
       const bytes = new Uint8Array(await file.arrayBuffer())
       const style = readCardTemplateZip(bytes)
-      setDraft({ ...style, id: 'custom', name: '自定义', description: '用户自定义卡片' })
+      /**
+       * adj1085：导入的 zip 里背景图是 data URL；这里顺手转成外置引用，
+       * 免得又回到"整份 JSON 塞几 MB"的老路。
+       */
+      let backgroundImage = style.backgroundImage
+      if (backgroundImage?.startsWith('data:image/')) {
+        const parsed = dataUrlToBytes(backgroundImage)
+        if (parsed !== null) {
+          backgroundImage = await saveCardImage(imageBlobOf(parsed.bytes, parsed.mime))
+        }
+      }
+      setDraft({ ...style, backgroundImage, id: 'custom', name: '自定义', description: '用户自定义卡片' })
       setZipError(false)
       setZipMsg(cardStyleCopy.imported)
     } catch (e) {
@@ -230,7 +259,10 @@ export function CardStyleDialog() {
   }
 
   const save = () => {
+    const previous = custom?.backgroundImage
     setCustom({ ...draft, id: 'custom', name: '自定义', description: '用户自定义卡片' })
+    // 换图/删图后旧附件不再被引用：删掉它（同名同图会被新配置继续引用，不能误删）
+    if (isBlobRef(previous) && previous !== draft.backgroundImage) void deleteCardImage(previous)
     closeModal()
   }
 
@@ -498,7 +530,7 @@ export function CardStyleDialog() {
           <h3>{cardStyleCopy.backgroundImage}</h3>
           <div className="card-style-image">
             {draft.backgroundImage ? (
-              <img src={draft.backgroundImage} alt={cardStyleCopy.backgroundImage} />
+              <img src={previewSrc ?? ''} alt={cardStyleCopy.backgroundImage} />
             ) : (
               <span>{cardStyleCopy.imageHint}</span>
             )}

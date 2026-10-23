@@ -202,6 +202,89 @@ pub fn prefs_path(app: AppHandle) -> Result<String, String> {
     Ok(prefs_dir(&app)?.display().to_string())
 }
 
+/// 大文件目录：`<config_dir>/iJipu/files`（卡片背景图等；settings.json 里只存 `ijipu-blob:<名>`）
+fn files_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(prefs_dir(app)?.join("files"))
+}
+
+/**
+ * 文件名校验：**只接受前端生成的 `<hex>.<图片扩展名>`**。
+ *
+ * 为什么卡这么死：这些命令会按名字写/删文件；名字如果来自 zip 条目或手改的 JSON，
+ * 就可能是 `..\..\某文件`。白名单比"过滤 `..`"更稳（不用去想 Windows 的短名/设备名/UNC）。
+ */
+fn safe_blob_name(name: &str) -> bool {
+    let Some((stem, ext)) = name.split_once('.') else {
+        return false;
+    };
+    let hex = !stem.is_empty() && stem.len() <= 40 && stem.bytes().all(|b| b.is_ascii_hexdigit());
+    let ext_ok = matches!(ext.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif");
+    hex && ext_ok
+}
+
+/// 写一个附件（base64 进；已存在则覆盖 —— 同名即同内容，按内容哈希命名）
+#[tauri::command]
+pub fn prefs_blob_write(app: AppHandle, name: String, b64: String) -> Result<(), String> {
+    if !safe_blob_name(&name) {
+        return Err(format!("附件名不合法：{name}"));
+    }
+    let dir = files_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("建附件目录失败 {}：{e}", dir.display()))?;
+    let bytes = crate::b64::decode(&b64).ok_or_else(|| "附件不是合法 base64".to_string())?;
+    if bytes.len() > 20 * 1024 * 1024 {
+        return Err("附件超过 20 MB（卡片背景图请压到 2.5 MB 以内）".to_string());
+    }
+    let path = dir.join(&name);
+    let tmp = dir.join(format!("{name}.tmp"));
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&tmp).map_err(|e| format!("写附件失败 {}：{e}", tmp.display()))?;
+        f.write_all(&bytes).map_err(|e| format!("写附件失败 {}：{e}", tmp.display()))?;
+        f.sync_all().map_err(|e| format!("刷盘失败 {}：{e}", tmp.display()))?;
+    }
+    replace_file(&tmp, &path).map_err(|e| format!("保存附件失败 {}：{e}", path.display()))?;
+    Ok(())
+}
+
+/// 读一个附件（base64 回；不存在 ⇒ 明确报错）
+#[tauri::command]
+pub fn prefs_blob_read(app: AppHandle, name: String) -> Result<String, String> {
+    if !safe_blob_name(&name) {
+        return Err(format!("附件名不合法：{name}"));
+    }
+    let path = files_dir(&app)?.join(&name);
+    let bytes = std::fs::read(&path).map_err(|e| format!("读附件失败 {}：{e}", path.display()))?;
+    Ok(crate::b64::encode(&bytes))
+}
+
+/// 删一个附件（不存在视为成功；清理旧卡片图时不该因为"已经没了"报错）
+#[tauri::command]
+pub fn prefs_blob_delete(app: AppHandle, name: String) -> Result<(), String> {
+    if !safe_blob_name(&name) {
+        return Err(format!("附件名不合法：{name}"));
+    }
+    let path = files_dir(&app)?.join(&name);
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("删附件失败 {}：{e}", path.display())),
+    }
+}
+
+/// 在资源管理器里打开配置目录（设置页按钮）
+#[tauri::command]
+pub fn prefs_open_dir(app: AppHandle) -> Result<(), String> {
+    let dir = prefs_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("建配置目录失败 {}：{e}", dir.display()))?;
+    #[cfg(windows)]
+    let spawned = std::process::Command::new("explorer").arg(&dir).spawn();
+    #[cfg(target_os = "macos")]
+    let spawned = std::process::Command::new("open").arg(&dir).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let spawned = std::process::Command::new("xdg-open").arg(&dir).spawn();
+    spawned.map(|_| ()).map_err(|e| format!("打开配置目录失败：{e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,5 +349,15 @@ mod tests {
         let got = load_from(&dir);
         assert_eq!(got.values.len(), 1);
         assert_eq!(got.values.get("a").map(String::as_str), Some("1"));
+    }
+
+    #[test]
+    fn blob_name_whitelist_blocks_traversal() {
+        assert!(safe_blob_name("abcd0123.png"));
+        assert!(safe_blob_name("AABB.jpg"));
+        assert!(!safe_blob_name("../evil.png"));
+        assert!(!safe_blob_name("abcd0123.exe"));
+        assert!(!safe_blob_name("abcd0123"));
+        assert!(!safe_blob_name("abcd/0123.png"));
     }
 }

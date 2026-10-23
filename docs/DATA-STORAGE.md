@@ -10,7 +10,7 @@
 |---|---|---|
 | **L2 谱面配置** | 页边距、字号、行距、背景图、水印、`# jps-config` 全部字段 | **始终写在 `.jps` 里**；三端一致，**不进**本机配置 |
 | **L1 本机偏好** | 主题、缩放、拆分比例、卡片模板/自定义卡片、音色库选择、导出背景、草稿… | 桌面：`%APPDATA%\iJipu\settings.json`；网站/PWA：浏览器 `localStorage`；插件：插件目录 `data.json` |
-| **L1 大文件** | 自定义卡片背景图（当前 ≤2.5MB 的 data URL） | P1：桌面落 `files\`、网站 IndexedDB、插件目录文件；P0 暂存在键值里 |
+| **L1 大文件** | 自定义卡片背景图（≤2.5MB） | 桌面：`files\<hash>.<ext>`；网站/PWA：IndexedDB（`ijipu-assets`）；插件：仍内联在 `data.json`（宿主桥暂无写二进制 op） |
 | **L3 会话** | 当前弹窗、临时预览状态 | 内存，不落盘 |
 
 硬规则：**换台机器打开同一份 `.jps`，谱面必须一样** ⇒ L2 永远跟着谱走；
@@ -23,6 +23,7 @@
   settings.json        # 当前配置（人可读、可手改）
   settings.bak.json    # 上一份（主文件坏了回退）
   settings.json.tmp    # 原子写的临时文件（写完即替换，读的人看不到半截）
+  files\<hash>.<ext>   # 卡片背景图等大附件（settings 里只存 ijipu-blob:<名>）
 ```
 
 - Windows 上 `%APPDATA%` = `C:\Users\<你>\AppData\Roaming`；macOS 是
@@ -77,7 +78,7 @@ IPC **赛跑**：IPC 稍慢，uiStore 就先用 WebView2 里的旧值求值了�
 | | 桌面壳 | 网站 / PWA | Obsidian 插件 |
 |---|---|---|---|
 | L1 配置 | `%APPDATA%\iJipu\settings.json` | `localStorage` | `<vault>/.obsidian/plugins/ijipu/data.json` |
-| 大文件 | `%APPDATA%\iJipu\files\`（P1） | IndexedDB（P1） | 插件目录文件（P1） |
+| 大文件 | `%APPDATA%\iJipu\files\` | IndexedDB（`ijipu-assets`） | 插件目录 `data.json`（内联 data URL） |
 | 跨端迁移 | 首次从 `localStorage` 抄一次 | — | 早已由 `embedKv` 走宿主桥 |
 | L2 谱面配置 | `.jps` | `.jps` | `.jps` |
 
@@ -103,9 +104,23 @@ IPC **赛跑**：IPC 稍慢，uiStore 就先用 WebView2 里的旧值求值了�
   民族乐器、音色库选择）；把文件改成 `themeMode=dark` 后**冷启动 3 次**，界面均为深色
   （`data-mode=dark`、背景 `rgb(23,13,12)`），证明"读的是文件"而不是浏览器缓存。
 
-## 七、还没做的（P1）
+## 七、P1 已做（adj1085）
 
-- 自定义卡片背景图等大值外置（桌面文件 / 网站 IndexedDB / 插件文件），避免 3MB 字符串塞 JSON。
-- 设置页的「打开配置目录」「导出/导入设置（zip）」。
-- 卸载器里的"同时删除本机配置"选项（默认保留）。
-- 草稿体积变大后再拆 `drafts/`（P0 先与其它 L1 一起放 `settings.json`，草稿是文本、量级可接受）。
+- **大图外置**：卡片背景图不再以 data URL 塞进 `settings.json`。
+  - 桌面：写 `%APPDATA%\iJipu\files\<hash>.<ext>`，配置里存 `ijipu-blob:<名>`；
+  - 网站/PWA：写 IndexedDB（`ijipu-assets`）；
+  - 插件：仍内联在 `data.json`（宿主桥目前没有写二进制文件的 op；插件本身不在浏览器缓存里）；
+  - 旧数据：启动时把 `ijipu.dynamicCardStyleCustom` 里的 data URL 自动迁成引用（一次性、失败保留原样）。
+- **设置页「本机」子页签**：显示配置落点、打开配置目录（桌面）、导出/导入设置 zip。
+  - zip 内容：`settings.json`（带 schema/app/exportedAt/values）+ `files/<名>` + `README.txt`；
+  - 导入只**合并**同名 `ijipu.*`、不删本地独有键；附件名白名单（防 `..\`）、单文件 ≤20MB；
+  - 附件缺失时清空那张卡片图的引用，不留打不开的图；导入后自动重新加载界面。
+- **卸载选项**：选「完全卸载」时删 `%APPDATA%\iJipu` 与 WebView2 的 `%LOCALAPPDATA%\com.ijipu.app`；
+  选「否」（默认）或静默卸载时**全部保留**。NSIS 模板不支持在卸载页加自定义复选框，
+  这里沿用已有的「完全卸载 / 保留」二选一（默认保留），语义等价。
+
+## 八、后续可做
+
+- 插件端把背景图写到插件目录（需要宿主桥新增"写二进制文件" op）。
+- 草稿体积变大后再拆 `drafts/`（现在与其它 L1 一起放 `settings.json`，草稿是文本、量级可接受）。
+- 配置的"导出前清理孤儿附件"（现在只在新图替换/删除时清旧的，异常退出可能留一两个孤儿文件）。

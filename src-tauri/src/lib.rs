@@ -22,6 +22,8 @@ mod cli_host;
 mod cli_video;
 // adj1085：桌面壳本机配置（%APPDATA%\iJipu\settings.json，三端存储分层）
 mod prefs;
+// adj1085：配置附件（卡片背景图）的 base64 编解码
+mod b64;
 
 /// adj944（用户需求「全局设置里加注册 iJipu CLI 的按钮」）：把**安装目录注册进当前用户 PATH** ——
 /// 读写注册表 / 写前备份 / 回读校验 / 广播 `WM_SETTINGCHANGE` 都在这里；
@@ -1058,6 +1060,11 @@ pub fn run() {
             prefs::prefs_load,
             prefs::prefs_save,
             prefs::prefs_path,
+            // adj1085：配置目录打开 + 卡片背景图等附件（P1 大图外置）
+            prefs::prefs_open_dir,
+            prefs::prefs_blob_write,
+            prefs::prefs_blob_read,
+            prefs::prefs_blob_delete,
             // adj957：`cli_manual::cli_manual_open` 已删除（命令行手册改走应用内 DocDialog）
         ])
         .build(context)

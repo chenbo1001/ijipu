@@ -41,8 +41,9 @@ import { PAGE_NUM_RANGES as RANGE, coarseFor } from '../ui/numFieldRanges'
 // adj965（方案「OVL」，EP-10）：水印/背景图解析失败要就地提示（订阅资源快照）
 import { getOverlaySnapshot, subscribeOverlayAssets } from '../store/overlayAssets'
 import { overlayCopy, settingsCopy } from '../brand/copy'
+import { LocalDataPanel } from './LocalDataPanel'
 
-type TabId = 'global' | 'theme' | 'soundbank' | 'cli' | 'score' | 'font' | 'watermark' | 'background'
+type TabId = 'global' | 'theme' | 'soundbank' | 'cli' | 'local' | 'score' | 'font' | 'watermark' | 'background'
 
 /**
  * adj603（用户要求）：设置**拆成两个底栏页签**——
@@ -63,6 +64,8 @@ const ALL_TABS: { id: TabId; label: string; icon: string; section: SettingsSecti
   // adj944（用户需求）：**注册 iJipu CLI** —— 把安装目录加进当前用户 PATH，
   // 之后新开的终端里就能直接 `ijipu cli …`。文案走 copy.ts（标签也走，别再硬编码 ✓）。
   { id: 'cli', label: cliPathCopy.tabLabel, icon: '>_', section: 'global' },
+  // adj1085（用户要求）：本机配置的落点 / 打开目录 / 导出导入（桌面落个人目录，网页走浏览器存储）
+  { id: 'local', label: '本机', icon: '⌂', section: 'global' },
   // adj418：原「页面 / 音符布局 / 间距 / 连音线」四个标签合并为「布局」（都是"这份谱长什么样"）
   { id: 'score', label: '布局', icon: '▤', section: 'score' },
   { id: 'font', label: '字体', icon: 'Aa', section: 'score' },
@@ -75,7 +78,7 @@ const ALL_TABS: { id: TabId; label: string; icon: string; section: SettingsSecti
 /** adj482：内容是「字段行」的子页签——dock 里套 `.pcfg-fields` 网格，按当页最长标签对齐；
  *  主题（主题色块列表）与音色库（自带面板）不套该层，保持各自布局
  *  adj944：「命令行」也是字段行（状态行 + 两个按钮）⇒ 参与网格 ✓ */
-const FIELDS_TABS: TabId[] = ['global', 'cli', 'score', 'font', 'watermark', 'background']
+const FIELDS_TABS: TabId[] = ['global', 'cli', 'local', 'score', 'font', 'watermark', 'background']
 
 /** adj482：字段网格的三个常量——标签与控件之间的间隙（与 CSS 的 row `gap` 一致）、
  *  一格至少给控件留的宽度、格与格之间的列间距（与 CSS 的 `column-gap` 一致，用于算跨格数） */
@@ -680,6 +683,9 @@ export function PageConfigDialog({
             </div>
           </>
         )
+      case 'local':
+        // adj1085：本机配置（桌面个人目录 / 网页浏览器存储；导出导入 zip）
+        return <LocalDataPanel />
       case 'cli':
         // adj944（用户需求）：**注册 iJipu CLI** —— 未注册显示「注册」、已注册显示「解除」。
         // 状态从 `cliStatus` 来（`cli_path_status` **现读系统实况**，不读我们自己的配置 ✓）；

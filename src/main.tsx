@@ -170,6 +170,13 @@ void (async () => {
     console.warn('[iJipu] 宿主桥初始化失败：', e)
   }
 
+  // adj1085：卡片背景图外置（旧的 data URL 在这里迁成 `ijipu-blob:`，必须早于 uiStore 求值）
+  try {
+    const { migrateInlineCardImageInLocalStorage } = await import('./store/cardImageStore')
+    await migrateInlineCardImageInLocalStorage()
+  } catch (e) {
+    console.warn('[iJipu] 卡片背景图迁移未完成（保留原样）：', e)
+  }
   // 存储就绪后才求值 store 模块（见上面的说明）
   const { syncEthnicVoicesToEngine } = await import('./store/uiStore')
   /**
