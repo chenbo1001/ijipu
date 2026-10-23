@@ -2211,6 +2211,10 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
     if (!(L.titleY < L.accentY && L.accentY < L.sloganY && L.sloganY < L.urlY)) return '三行顺序不对'
     if (L.sloganY - L.titleY < L.titleSize * 1.2)
       return `标题—标语 ${(L.sloganY - L.titleY).toFixed(0)} < 1.2×标题字号 ${(L.titleSize * 1.2).toFixed(0)}`
+    // adj1099：标题墨迹 ↔ 标语墨迹的空白至少一个标题字高（用户要求"再大一些"）
+    const inkGap = L.sloganY - L.sloganSize * 0.8 - (L.titleY + L.titleSize * 0.2)
+    if (inkGap < L.titleSize * 1.05)
+      return `标题—标语墨迹间隙 ${inkGap.toFixed(0)} < 1.05×标题字号 ${(L.titleSize * 1.05).toFixed(0)}`
     if (L.accentY - (L.titleY + L.titleSize * 0.2) < unit * 0.01) return '强调线离标题太近'
     // adj1098：强调线必须落在"标题墨迹下沿 ↔ 标语墨迹上沿"的正中间（用户看图实报"横线偏下"）
     const mid = (L.titleY + L.titleSize * 0.2 + (L.sloganY - L.sloganSize * 0.8)) / 2
@@ -2248,6 +2252,13 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
     'adj1098 负对照：线按旧口径（标题基线下 0.45×标题字号）⇒ 居中判据判红（线偏下）',
     okOf(oldLine, 1080, 1920).includes('不居中'),
     okOf(oldLine, 1080, 1920),
+  )
+  // adj1099 负对照：间距退回旧口径（墨迹空白约 0.72×标题字号）⇒ "至少一个标题字高"判据判红
+  const oldGap = { ...L9, sloganY: L9.titleY + L9.titleSize * 0.75 + L9.sloganSize * 1.2 }
+  check(
+    'adj1099 负对照：墨迹空白退回旧口径（约 0.72×标题字号）⇒ "≥1.05×标题字号"判据判红',
+    okOf(oldGap, 1080, 1920).includes('墨迹间隙'),
+    okOf(oldGap, 1080, 1920),
   )
 }
 
