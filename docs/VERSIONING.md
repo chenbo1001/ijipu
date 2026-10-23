@@ -85,6 +85,9 @@ npm run tauri:build  # 复用 npm run build（前端 dist），版本随 package
 8. **上传安装包附件**：`gh release create/edit v<x.y.z> --notes-file release-body-<x.y.z>.md <安装包>`；
    重新打包后替换附件用 `gh release upload v<x.y.z> <安装包> --clobber`。
    > 核对 Release 状态一律用**带鉴权的 `gh api`/`gh release view`**（匿名 `curl api.github.com` 有 CDN 缓存，会读到旧内容 → `E-2026-130`）。
+9. **漏发不补**（用户 2026-10-23 口径）：某版本当时没打 tag、也没建 Release，事后**一律不补**，
+   直接随下一个版本发；只需在 `CHANGELOG.md` 该版条目下留一句「未单独发版（内容包含在后续版本里）」。
+   > 实例：`v0.72.0` 未打 tag / 未建 Release，用户 2026-10-23 决定不补，内容已含在 `v0.73.0` / `v0.74.x` 里。
 
 ---
 ## 双仓库联动（ijipu 引擎 ↔ obsidian-ijipu）
