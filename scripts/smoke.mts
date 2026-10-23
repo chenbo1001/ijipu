@@ -78,8 +78,10 @@ import { panScrollTargetX, panTickIndex } from '../src/preview/followScroll'
 import { FOLLOW_V_PAD_RATIO, followScrollTargetY } from '../src/preview/followScroll'
 // adj1092：试听**按拍/按小节**平移——每拍/每小节 + **每一行**都要移（行变了就用新行第一块居中）
 import { panFocusAt } from '../src/preview/followScroll'
-// adj1093：按小节模式的 **4/5 安全推**（本行最后一个小节不推）
+// adj1093：按小节模式的 **4/5 安全推**（本行最后的小节不推）
 import { safetyPanTargetX, spanLastBarStart } from '../src/preview/followScroll'
+// adj1096：片尾卡纵向排版（纯函数；标题 / 强调线 / 标语 / 网址的间距）
+import { endCardLayout } from '../src/export/video/cardLayout'
 // adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
 import { JPS_PARAM_MAX_LEN, readJpsFromSearch, withoutJpsParam } from '../src/store/urlImport'
 import { inflateSync } from 'node:zlib'
@@ -2191,6 +2193,51 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
       /primaryVoiceOf\(track\.rects\)/.test(rendererSrc),
   )
   check('adj1095 试听：球锚点也只取第一声部', /primaryVoiceOf\(track\)/.test(previewSrc))
+}
+
+/**
+ * adj1096（用户 2026-10-23）：「片尾标题和内容之间间距可以均衡点，有点太挤了」。
+ *
+ * 片尾三行（品牌名 / 标语 / 网址）的排版原来各写各的 `H×百分比`：标题与标语只隔
+ * `0.95×标题字号`（强调线几乎压着标题下沿）。现在抽成纯函数 `endCardLayout`，
+ * 这里按三种画布断言"不挤、不压、不出画、不压印章"。
+ */
+{
+  console.log('[adj1096] 片尾卡纵向排版：标题 / 强调线 / 标语不再挤在一起')
+  /** 判据（返回空串 = 通过）——同一套判据也用来做负对照 */
+  const okOf = (L: ReturnType<typeof endCardLayout>, w: number, h: number): string => {
+    const unit = Math.min(w, h)
+    const lineH = Math.max(2, unit * 0.004)
+    if (!(L.titleY < L.accentY && L.accentY < L.sloganY && L.sloganY < L.urlY)) return '三行顺序不对'
+    if (L.sloganY - L.titleY < L.titleSize * 1.2)
+      return `标题—标语 ${(L.sloganY - L.titleY).toFixed(0)} < 1.2×标题字号 ${(L.titleSize * 1.2).toFixed(0)}`
+    if (L.accentY - (L.titleY + L.titleSize * 0.2) < unit * 0.01) return '强调线离标题太近'
+    if (L.sloganY - L.sloganSize * 0.8 - (L.accentY + lineH) < unit * 0.006) return '强调线离标语太近'
+    if (L.urlY + L.urlSize * 0.3 > h * 0.84) return '网址压到印章区'
+    if (L.urlY - L.sloganY < L.sloganSize * 2) return '网址离标语太近'
+    if (L.titleY - L.titleSize * 0.9 < 0) return '标题出画'
+    if (L.maxW > w * 0.9) return '文本宽度超限'
+    return ''
+  }
+  const cases: { w: number; h: number; name: string }[] = [
+    { w: 1080, h: 1920, name: '9:16' },
+    { w: 1080, h: 1080, name: '1:1' },
+    { w: 1920, h: 1080, name: '16:9' },
+  ]
+  const bad: string[] = []
+  for (const c of cases) {
+    const why = okOf(endCardLayout(c.w, c.h), c.w, c.h)
+    if (why !== '') bad.push(`${c.name}：${why}`)
+  }
+  check('adj1096 片尾排版（9:16 / 1:1 / 16:9）不挤、不压、不出画、不压印章', bad.length === 0, bad.join('；'))
+  // 负对照：把标题—标语间距改回旧口径（0.95×标题字号）⇒ 同一判据必须判红
+  const L9 = endCardLayout(1080, 1920)
+  const oldLayout = { ...L9, sloganY: L9.titleY + Math.round(L9.titleSize * 0.95) }
+  check(
+    'adj1096 负对照：旧口径 0.95×标题字号的间距会被同一判据判红（证明阈值不是恒真）',
+    okOf(oldLayout, 1080, 1920) !== '',
+    okOf(oldLayout, 1080, 1920),
+  )
 }
 
 // adj303：显示乐器名——@乐器名 / @@ 后第一个音符正上方标注

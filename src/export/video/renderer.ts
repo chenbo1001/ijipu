@@ -51,6 +51,7 @@ import { withOverlay } from '../../store/overlayAssets'
 import { pickPracticeCandidate } from './practicePick'
 import { brand } from '../../brand/tokens'
 import { CARD_SANS, CARD_SERIF, DEFAULT_CARD_STYLE, type CardStyle } from './cardTemplates'
+import { endCardLayout } from './cardLayout'
 
 /**
  * 页面位图的放大倍数：4 倍跟拍时，取景框宽 = 1080/4 = 270 页面单位，
@@ -789,26 +790,22 @@ export async function createDynamicSession(
 
     ctx.textAlign = 'center'
     /**
-     * adj1066（用户 2026-10-22 实报「16:9 片尾内容重叠」）：
-     * 旧写法字号按**宽 W**、纵向位置按**高 H**：16:9 时 W=1920 ⇒ 标题 157px，
-     * 而标题到标语只隔 0.07H=76px ⇒ 两行字直接叠在一起。
-     * 现在字号按 `min(W,H)` 定（16:9 时 108px），行距按**字号**留足，纵向整体居中。
+     * adj1066（用户 2026-10-22 实报「16:9 片尾内容重叠」）：字号按 `min(W,H)` 定、纵向位置按**字号**
+     * 留足行距。adj1096（用户 2026-10-23：「标题和内容之间间距可以均衡点，有点太挤了」）：
+     * 排版抽到纯函数 `cardLayout.ts`，按字号成比例给间距（可被 smoke 断言，不用渲位图）。
      */
     const unit = Math.min(W, H)
-    const aspect = W / H
-    const tall = aspect < 0.8
-    const wide = aspect > 1.3
-    const titleScale = wide ? 1.14 : tall ? 1.0 : 1.04
-    const titleSize = Math.round(unit * 0.1 * titleScale)
-    const sloganSize = Math.round(unit * (wide ? 0.05 : tall ? 0.043 : 0.045))
-    const urlSize = Math.round(unit * (wide ? 0.034 : tall ? 0.03 : 0.032))
-    const titleY = H * (wide ? 0.44 : tall ? 0.42 : 0.44)
-    const sloganY = titleY + Math.round(titleSize * 0.95)
-    const urlY = H * (wide ? 0.8 : tall ? 0.72 : 0.76)
-    const maxW = W * (wide ? 0.8 : 0.86)
+    const layout = endCardLayout(W, H)
+    const titleSize = layout.titleSize
+    const sloganSize = layout.sloganSize
+    const urlSize = layout.urlSize
+    const titleY = layout.titleY
+    const sloganY = layout.sloganY
+    const urlY = layout.urlY
+    const maxW = layout.maxW
     // adj1069：强调线放在标题与标语之间，距离按 titleSize（三种比例同值），不再固定在标题上方
-    const accentY = titleY + titleSize * 0.45
-    const lineRatio = wide ? 0.14 : tall ? 0.18 : 0.16
+    const accentY = layout.accentY
+    const lineRatio = layout.lineRatio
     const revealAt = (delay: number, dur: number): number =>
       card.motion ? cardReveal(t, delay, dur) : 1
     const titleE = revealAt(100, 650)
