@@ -77,18 +77,29 @@ export function PracticeMarkBar(): React.JSX.Element {
   const cur = marks.find((m) => m.id === markId)
 
   /**
-   * adj1101（用户 2026-10-23 口径）：「标记段下拉列表够大，可以显示为 `段1 [ 33:1 - 34:2 ]`，
-   * 这个形式更明确」——段名后面补上**小节:拍**的起止，取引擎 `flattenScoreNotes` + `spotOfIn`
-   * （与命令行 `--from 33:1` 同一套换算，不会两边数出不同的小节号）。
+   * adj1101 / adj1107（用户 2026-10-23 实报「只有段1带 []，其它段没带」）：
+   * 逐段算「段名 [ 起 - 止 ]」。端点直接查不到时（旧标记的 id 与当前排版对不上、
+   * 端点在休止符/段层上），退回**播放端同一套解析**（`resolvePracticeRange` + 切片）取首末音再查一次。
    */
   const optionTextById = useMemo(() => {
     const map = new Map<string, string>()
     if (marks.length === 0) return map
-    // adj1105：标记段的端点可能点在**休止符**上 ⇒ 展示用的小节/拍要把休止符也收进去
-    // （只影响"显示"，`--from/--to` 的换算仍只认可发声音符）
-    const notes = flattenScoreNotes(layoutScore(parseResult, pageConfig), { includeRests: true })
+    const layout = layoutScore(parseResult, pageConfig)
+    const notes = flattenScoreNotes(layout, { includeRests: true })
+    const seq = buildPlaySequence(parseResult, layout, 90)
     for (const m of marks) {
-      map.set(m.id, markOptionText(m.name, spotOfIn(notes, m.startId), spotOfIn(notes, m.endId)))
+      let a = spotOfIn(notes, m.startId)
+      let b = spotOfIn(notes, m.endId)
+      if (a === null || b === null) {
+        const res = resolvePracticeRange(seq, m.startId, m.endId, { endInLayout: hasNoteId(layout, m.endId) })
+        const c = res.candidates[res.pick] ?? res.candidates[0]
+        const ids = c ? (slicePlaySequenceByRange(seq, c.i0, c.i1)?.events.map((e) => noteIdStringOf(e.placed.id)) ?? []) : []
+        const first = ids.find((id) => spotOfIn(notes, id) !== null)
+        const last = [...ids].reverse().find((id) => spotOfIn(notes, id) !== null)
+        if (a === null && first !== undefined) a = spotOfIn(notes, first)
+        if (b === null && last !== undefined) b = spotOfIn(notes, last)
+      }
+      map.set(m.id, markOptionText(m.name, a, b))
     }
     return map
   }, [marks, parseResult, pageConfig])

@@ -2397,6 +2397,11 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
     'adj1101 下拉项真的用了 `markOptionText`（不是仍只显示段名）',
     /optionTextById\.get\(m\.id\) \?\? m\.name/.test(markBarSrc) && /markOptionText\(m\.name/.test(markBarSrc),
   )
+  check(
+    'adj1107 端点直接查不到时退回"播放端同一套解析"再查一次（旧标记 id 与当前排版对不上也显示区间）',
+    /resolvePracticeRange\(seq, m\.startId, m\.endId, \{ endInLayout: hasNoteId\(layout, m\.endId\) \}\)/.test(markBarSrc) &&
+      /slicePlaySequenceByRange\(seq, c\.i0, c\.i1\)\?\.events\.map/.test(markBarSrc),
+  )
   /**
    * adj1105（用户 2026-10-23 实报「添加段2时，没有带起始-停止坐标」）：
    * 标记段的端点可能点在**休止符**上；`flattenScoreNotes` 默认只收可发声的主旋律音 ⇒
