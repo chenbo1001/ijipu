@@ -35,6 +35,7 @@ import {
   playheadBaseOf,
   primaryVoiceOf,
   keySignatureOf,
+  hasNoteId,
   BALL_LANDING_TIMING,
   BALL_SQUASH_X,
   BALL_SQUASH_Y,
@@ -161,7 +162,10 @@ export async function createDynamicSession(
   // 标记段：用与试听**完全相同**的口径切出这一段（时间归零），并跳过满宽片头
   let skipIntro = false
   if (opts?.range) {
-    const res = resolvePracticeRange(seq, opts.range.startId, opts.range.endId)
+    // adj1102：终点在排版里存在但没有事件 ⇒ 是被连音线/同音合并了，按"紧邻的前一个音"配
+    const res = resolvePracticeRange(seq, opts.range.startId, opts.range.endId, {
+      endInLayout: hasNoteId(layout, opts.range.endId),
+    })
     if (res.missing) throw new Error('标记段已失效（起止音符找不到），请重新标记')
     // adj1083：用户在下拉里选过「第 N 遍」就按那个候选导；否则才用解析器默认的第一个候选。
     // 此前只传 note id，多遍次时永远取第 1 个候选，用户选的第 2/3 遍不会生效。

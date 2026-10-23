@@ -303,7 +303,23 @@ export interface ResolvedPracticeRange {
   missing?: 'start' | 'end'
 }
 
-export function resolvePracticeRange(seq: PlaySequence, startId: string, endId: string): ResolvedPracticeRange {
+export interface PracticeRangeOptions {
+  /**
+   * 终点 id 在**当前排版**里确实存在（标记是点音符产生的）。
+   *
+   * adj1102：存在但没有事件 ⇒ 它被连音线/同音合并并进了前一个音 ⇒ 按"紧邻的前一个音"去配
+   * （`target − 1`），配不上就跳过那一遍。为 `false`（缺省）时保持 adj990 的旧口径：
+   * 端点对不上就夹到序列一端，绝不给 `missing`。
+   */
+  endInLayout?: boolean
+}
+
+export function resolvePracticeRange(
+  seq: PlaySequence,
+  startId: string,
+  endId: string,
+  opts: PracticeRangeOptions = {},
+): ResolvedPracticeRange {
   const idOf = (e: PlayEvent): string => noteIdStringOf(e.placed.id)
   /**
    * 宽松匹配（adj987g 起）——**先整串、再退到"组号+序号"**（预览与试听排版不同，页号/声部号可能变）。
@@ -403,9 +419,40 @@ export function resolvePracticeRange(seq: PlaySequence, startId: string, endId: 
   const vStart = starts0.length > 0 ? seq.events[starts0[0]].placed.id.voice : null
   const starts = starts0.length > 0 ? starts0 : clampNear(startId, null, 'after')
   const ends0 = pickIdx(endId, vStart)
-  const ends = ends0.length > 0 ? ends0 : clampNear(endId, vStart, 'before')
   if (starts.length === 0) return { pick: 0, candidates: [], missing: 'start' }
-  if (ends.length === 0) return { pick: 0, candidates: [], missing: 'end' }
+  /**
+   * adj1102（用户 2026-10-23 实报：标记段 `33:1→34:2` 出现 **3 个候选**、每个切片都长得离谱）：
+   *
+   * 终点音符可能**没有独立事件**——被连音线 / 同音合并并进了前一个音（实测 `赤伶` 的标记终点
+   * `0_1_6_187` 在布局里有、序列里没有，它被并进 `0_1_6_186`）。旧兜底 `clampNear('before')` 扫**整个序列**
+   * 取"最后一个序号 ≤ 目标的同组事件"⇒ 在多遍的谱里落到**最后一遍**（实测 147s / 34s / 3.9s 三个候选）。
+   *
+   * 新口径：**只在这个起点之后**找，取"源码序号 ≤ 目标且最大"的那一组里**最早出现**的事件
+   * （= 被并进去的那个音）；找不到就**不给这个起点配候选**（那一遍确实到不了这个终点）。
+   */
+  const nearestEndAfter = (want: string, voice: number | null, i0: number): number | null => {
+    const m = /^(\d+)_(\d+)_(\d+)_(\d+)$/.exec(want)
+    if (!m) return null
+    const g = Number(m[3])
+    /**
+     * 只认**紧邻的前一个音**（`target − 1`）：同音合并/连音线并进去时，源序号只差 1。
+     * 不能放宽成"≤ 目标的任意较大序号"——多遍的谱里到处都有较小的序号，
+     * 那样又会配到毫不相干的音上（实测 pass 2 的 `184`）。
+     */
+    const wantPrev = Number(m[4]) - 1
+    if (wantPrev < 0) return null
+    const pickIn = (sameGroup: boolean): number | null => {
+      for (let i = i0 + 1; i < seq.events.length; i++) {
+        const id = seq.events[i].placed.id
+        if (sameGroup && id.group !== g) continue
+        if (voice !== null && id.voice !== voice) continue
+        if (id.index !== wantPrev) continue
+        return i
+      }
+      return null
+    }
+    return pickIn(true) ?? pickIn(false)
+  }
 
   /** 源码位置是否"倒退"（跨反复 / D.S. / D.C. 的特征） */
   const srcKey = (e: PlayEvent): [number, number] => [e.placed.id.group, e.placed.id.index]
@@ -423,19 +470,54 @@ export function resolvePracticeRange(seq: PlaySequence, startId: string, endId: 
   const seen = new Set<string>()
   for (let k = 0; k < starts.length; k++) {
     const i0 = starts[k]
-    const i1 = ends.find((j) => j > i0)
+    const i1 =
+      ends0.length > 0
+        ? ends0.find((j) => j > i0)
+        : opts.endInLayout === true
+          ? // adj1102：终点在排版里存在但没有事件 ⇒ 按"紧邻的前一个音"配；配不上就跳过这一遍
+            (nearestEndAfter(endId, vStart, i0) ?? undefined)
+          : // adj990 旧口径（端点 id 是脏值/对不上）：夹到序列一端，绝不给 missing
+            (() => {
+              const clamped = clampNear(endId, vStart, 'before')[0]
+              return clamped !== undefined && clamped > i0 ? clamped : undefined
+            })()
     if (i1 === undefined) continue
     const key = `${i0}:${i1}`
     if (seen.has(key)) continue
     seen.add(key)
     candidates.push({ i0, i1, startOccurrence: k + 1, containsJump: hasJump(i0, i1) })
   }
-  if (candidates.length === 0) return { pick: 0, candidates: [], missing: 'end' }
+  /**
+   * adj1103（用户 2026-10-23 口径，三条一起）：
+   *  ① 起点/终点在某一遍里**到不了** ⇒ 那一遍不加入候选（由上面的配法自然保证）；
+   *  ② 只有**中间走的路不同**才需要多个遍次（不同跳房子/不同走线）；
+   *  ③ 反复多次走**同一条线路**（内容完全一样）⇒ 只留一个遍次。
+   *
+   * 判据：候选区间的**内容签名**（事件 id + 音高 + 音色）。同一份内容被展开成多遍时签名相同 ⇒ 去重；
+   * `{tp}` 替谱段 / 转调 / 跳房子走不同支路时内容不同 ⇒ 签名不同，各自保留。
+   */
+  const sigOf = (i0: number, i1: number): string => {
+    let sig = ''
+    for (let i = i0; i <= i1; i++) {
+      const e = seq.events[i]
+      sig += `${noteIdStringOf(e.placed.id)}|${e.pitch ?? ''}|${e.instrument ?? ''}|`
+    }
+    return sig
+  }
+  const bySig = new Map<string, PracticeRangeCandidate>()
+  for (const c of candidates) {
+    const sig = sigOf(c.i0, c.i1)
+    if (!bySig.has(sig)) bySig.set(sig, c)
+  }
+  const unique = [...bySig.values()].sort((a, b) => a.i0 - b.i0)
+  if (unique.length === 0) return { pick: 0, candidates: [], missing: 'end' }
+  /** 去重后重新编号（UI 的「第 N 遍」= 候选序号，不是"第几次出现"） */
+  const deduped = unique.map((c, i) => ({ ...c, startOccurrence: i + 1 }))
   // 默认：优先"不含跳越"的、其次最早
   let pick = 0
-  const clean = candidates.findIndex((c) => !c.containsJump)
+  const clean = deduped.findIndex((c) => !c.containsJump)
   if (clean >= 0) pick = clean
-  return { pick, candidates }
+  return { pick, candidates: deduped }
 }
 
 /**

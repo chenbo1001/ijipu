@@ -1500,8 +1500,10 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
     output: string
   }
   /**
-   * 反复段落：`|: … :|` 把这两小节唱两遍 ⇒ `--pass 2` 才有意义。
-   * 用它验证"CLI 的 1 起 → 引擎的 0 起"换算。
+   * 反复段落：`|: … :|` 把这两小节唱两遍。
+   *
+   * adj1103（用户 2026-10-23 口径）：两遍**走同一线路**（内容完全一样）⇒ 只算 **1 个遍次**，
+   * `--pass 2` 会如实报"只有 1 遍"。这里用 `--pass 1` 验证"CLI 的 1 起 → 引擎的 0 起"换算。
    */
   const REPEAT = "V:1.0\nQ: 1 2 3 4 |: 5 6 7 1' | 2 3 4 5 :|\n"
   const cap = makeIo({ '(stdin)': REPEAT })
@@ -1511,14 +1513,28 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
     return { bytes: 1234, audio: true }
   }
   const ok = await runCli(
-    ['render', '-i', '-', '-t', 'mp4', '-o', 'out.mp4', '--from', '2:1', '--to', '3:1', '--pass', '2'],
+    ['render', '-i', '-', '-t', 'mp4', '-o', 'out.mp4', '--from', '2:1', '--to', '3:1', '--pass', '1'],
     cap.io,
   )
   check(
-    'adj1084 有宿主 ⇒ 0，拍位换算成音符 id，`--pass 2` ⇒ 内部 1',
-    ok.code === EXIT.ok && seen !== null && seen.startId !== null && seen.endId !== null && seen.pass === 1 && seen.output === 'out.mp4',
+    'adj1084/adj1103 有宿主 ⇒ 0，拍位换算成音符 id，`--pass 1` ⇒ 内部 0',
+    ok.code === EXIT.ok && seen !== null && seen.startId !== null && seen.endId !== null && seen.pass === 0 && seen.output === 'out.mp4',
     `code=${ok.code} seen=${JSON.stringify(seen)} err=${cap.errs.join('｜').slice(0, 120)}`,
   )
+  {
+    /** adj1103 负对照：同一线路的两遍只有 1 个遍次 ⇒ `--pass 2` 必须在起出片窗口前就拒绝 */
+    const same = makeIo({ '(stdin)': REPEAT })
+    same.io.encodeVideo = async () => ({ bytes: 1, audio: false })
+    const rSame = await runCli(
+      ['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--from', '2:1', '--to', '3:1', '--pass', '2'],
+      same.io,
+    )
+    check(
+      'adj1103 反复两遍走同一线路 ⇒ `--pass 2` 报"只有 1 遍"（不再把相同内容列成第 2 遍）',
+      rSame.code === EXIT.usage && same.errs.join('').includes('只有 1 遍'),
+      `code=${rSame.code} err=${same.errs.join('｜').slice(0, 100)}`,
+    )
+  }
   check('adj1084 CLI 自己**不写** MP4（由宿主写盘，避免大字节穿管道）', !('out.mp4' in cap.files))
   check(
     'adj1084 视频缺省 16:9 + 整曲（3 分钟会把长曲悄悄截短，命令行不做）',

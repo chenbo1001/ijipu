@@ -2306,8 +2306,8 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
   const g1 = seq.events.map((e, i) => ({ i, g: e.placed.id.group })).filter((x) => x.g === 1)
   const res = resolvePracticeRange(seq, idOf(g1[0].i), idOf(g1[g1.length - 1].i))
   check(
-    'adj1100 反复段里的同一对起止配出 2 个候选（"这一段有 2 遍"）',
-    seq.maxPass === 2 && res.candidates.length === 2,
+    'adj1100/adj1103 反复段里的同一对起止：内容相同的两遍只留 **1 个候选**（"这一段有 1 遍"）',
+    seq.maxPass === 2 && res.candidates.length === 1,
     `整曲=${seq.maxPass} 候选=${res.candidates.length}`,
   )
   check(
@@ -2396,6 +2396,57 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
   check(
     'adj1101 下拉项真的用了 `markOptionText`（不是仍只显示段名）',
     /optionTextById\.get\(m\.id\) \?\? m\.name/.test(markBarSrc) && /markOptionText\(m\.name/.test(markBarSrc),
+  )
+}
+
+/**
+ * adj1102（用户 2026-10-23 实报，`赤伶` 的真实标记 `startId=0_1_6_179 / endId=0_1_6_187`）：
+ * 终点音符**没有独立事件**（被连音线/同音合并并进前一个音），旧兜底扫全序列取"最后一个序号 ≤ 目标"s
+ * ⇒ 在多遍的谱里落到**最后一遍**，配出 147s / 34s / 3.9s 三个候选（用户："3 遍的结果都不对"）。
+ * 新口径：只在本起点之后找"**紧邻的前一个音**"（`target − 1`），找不到就不给这个起点配候选。
+ */
+{
+  console.log('[adj1102] 终点音符没有事件（被合并）⇒ 按起点之后紧邻的前一个音配')
+  const mkEv = (index: number, atMs: number) => ({
+    atMs,
+    durationMs: 500,
+    placed: { id: { page: 0, voice: 1, group: 0, index } },
+  })
+  const seq1102 = {
+    events: [
+      // 第 1 遍：100..110（终点 111 被并进 110）
+      ...Array.from({ length: 11 }, (_, i) => mkEv(100 + i, i * 500)),
+      // 第 2 遍：100..106 —— 这一遍**到不了** 110
+      ...Array.from({ length: 7 }, (_, i) => mkEv(100 + i, 10000 + i * 500)),
+      // 收尾段：120..125
+      ...Array.from({ length: 6 }, (_, i) => mkEv(120 + i, 20000 + i * 500)),
+    ],
+    bpm: 120,
+    passMarks: [
+      { atMs: 0, pass: 1 },
+      { atMs: 10000, pass: 2 },
+    ],
+    maxPass: 2,
+    barStartsMs: [],
+  }
+  const res1102 = resolvePracticeRange(seq1102 as never, '0_1_0_100', '0_1_0_111', { endInLayout: true })
+  check(
+    'adj1102 终点没有事件 ⇒ 只配**能到达它的那一遍**（1 个候选，终点 = 紧邻的前一个音 110）',
+    res1102.candidates.length === 1 &&
+      res1102.candidates[0].i0 === 0 &&
+      seq1102.events[res1102.candidates[0].i1].placed.id.index === 110,
+    JSON.stringify({ n: res1102.candidates.length, end: seq1102.events[res1102.candidates[0]?.i1 ?? 0]?.placed.id.index }),
+  )
+  check(
+    'adj1102 负对照：旧口径（扫全序列取最后一个序号 ≤ 目标）会落到第 2 遍的 106 ⇒ 判据能分辨',
+    (() => {
+      let last = -1
+      for (let i = 0; i < seq1102.events.length; i++) {
+        if (seq1102.events[i].placed.id.index <= 111) last = i
+      }
+      return last >= 0 && seq1102.events[last].placed.id.index !== 110
+    })(),
+    '',
   )
 }
 
@@ -22778,14 +22829,18 @@ function runAdj987Tests() {
      * 「起点终点都在公共段、中间被跳跃分开」⇒ 候选 > 1，交给 UI 让用户选遍次（存 `pass`）。
      */
     const HEAD987 = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
-    /** ① 起止都在反复体内 ⇒ 每遍一个候选（内容相同），默认取第一个、且都不含跳越 */
+    /**
+     * ① 起止都在反复体内 ⇒ **只剩一个候选**（adj1103 口径：反复走的是同一条线路 ⇒ 只留一个遍次；
+     *   旧口径"每遍一个候选"已废弃 —— 用户 2026-10-23：「如果有多次反复但走的是同一线路，
+     *   也只要添加一个遍次」）。
+     */
     const r1 = parseJps(`${HEAD987}Q: |: 1 2 3 4 :|\n`)
     const s1 = buildPlaySequence(r1, layoutScore(r1, defaultPageConfig), 60)
     const ids1 = s1.events.map((e) => noteIdStringOf(e.placed.id))
     const res1 = resolvePracticeRange(s1, ids1[0], ids1[1])
     check(
-      'adj987b ① 起止都在反复体内 ⇒ **两个候选**（第 1、2 遍），都不含跳越，默认取第 1 个',
-      res1.candidates.length === 2 && res1.pick === 0 && res1.candidates.every((c) => !c.containsJump),
+      'adj987b/adj1103 ① 起止都在反复体内、两遍内容相同 ⇒ **只有一个候选**（同一线路不重复添加）',
+      res1.candidates.length === 1 && res1.pick === 0 && res1.candidates.every((c) => !c.containsJump),
       JSON.stringify(res1),
     )
     /** ② 起点在公共段、终点在跳房子 2 ⇒ 唯一候选（自动锁定"通往该房子的那一遍"） */
@@ -22812,11 +22867,11 @@ function runAdj987Tests() {
       resBad.missing === 'start' && resBad2.missing === 'end' && resBad.candidates.length === 0,
       JSON.stringify({ a: resBad, b: resBad2 }),
     )
-    /** ④ 按候选下标切片：第 2 个候选（第 2 遍）时间轴同样从 0 起 */
-    const c1 = res1.candidates[1]
+    /** ④ 按候选下标切片：时间轴从 0 起（adj1103 起同一线路只剩一个候选） */
+    const c1 = res1.candidates[0]
     const sl1 = c1 ? slicePlaySequenceByRange(s1, c1.i0, c1.i1) : null
     check(
-      'adj987b ④ `slicePlaySequenceByRange(候选 i0,i1)`：第 2 个候选也能切，时间轴从 0 重排',
+      'adj987b ④ `slicePlaySequenceByRange(候选 i0,i1)`：切片时间轴从 0 重排',
       !!sl1 && sl1.events.length === 2 && sl1.events[0].atMs === 0 && sl1.rangeMs > 0,
       JSON.stringify(sl1 ? { n: sl1.events.length, first: sl1.events[0].atMs } : null),
     )

@@ -63,7 +63,7 @@ import { createPlaybackGeneration, shouldAutoPlay } from './playbackSession'
 import { PracticeMarkBar, PracticeMarkExpandButton } from './PracticeMarkBar'
 
 // adj764（清单 B6）：试听时钟来自引擎 —— 与 Obsidian 插件共用"推进/暂停续播/取消/到点一次"的语义
-import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, resolvePracticeRange, slicePlaySequenceByRange, gmVoiceRef, countScoreInstrumentSwitches, createPlaybackClock, type PlaybackClock } from '@ijipu/engine'
+import { layoutScore, buildPlaySequence, inferBpm, schedulePlay, resolvePracticeRange, slicePlaySequenceByRange, hasNoteId, gmVoiceRef, countScoreInstrumentSwitches, createPlaybackClock, type PlaybackClock } from '@ijipu/engine'
 
 const BPM_OPTIONS = [60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]
 /**
@@ -615,7 +615,10 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
          * adj1100：**先解析一次**——「这一段的遍数」要按候选个数算（用户口径：进跳房子 1 ⇒ 只有 1 遍），
          * 不能拿整曲的 `maxPass`（这首有反复 + `&ds` 共 3 遍）。解析结果两条分支共用。
          */
-        const res = resolvePracticeRange(fullSeq, markNow.startId, markNow.endId)
+        const res = resolvePracticeRange(fullSeq, markNow.startId, markNow.endId, {
+          // adj1102：终点在排版里存在 ⇒ 没有事件是被合并了，按"紧邻的前一个音"配
+          endInLayout: hasNoteId(layout, markNow.endId),
+        })
         practicePassTotalRef.current = Math.max(1, res.candidates.length)
         const { practiceRangeI0: i0s, practiceRangeI1: i1s, practiceRangeEventCount: nS } = useUiStore.getState()
         if (i0s >= 0 && i1s >= i0s && nS === fullSeq.events.length) {

@@ -166,7 +166,7 @@ export { buildPlaySequence, inferBpm, countScoreInstrumentSwitches, noteIdString
 export { codePosToNoteId, noteIdToCodePos, parseNoteId, buildIndexToPage } from './cursorMap'
 export { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_ITEMS, GUIDE_LIMITS, GUIDE_LIMITS_EX, computeDebugBounds } from './layout/guides'
 // adj1101：全局小节号/拍位的**唯一口径**（界面标记段显示 `33:1 - 34:2` 与命令行 `--from 33:1` 共用）
-export { flattenScoreNotes, totalBarsOf, measureSpotOf, spotOfIn, resolveBarBeatRange, BEAT_EPS } from './layout/measureMap'
+export { flattenScoreNotes, totalBarsOf, measureSpotOf, spotOfIn, hasNoteId, resolveBarBeatRange, BEAT_EPS } from './layout/measureMap'
 export type { ScoreSpotNote, BarBeatRange } from './layout/measureMap'
 export { metaAnchorOf, metaAnchorPt, clampMetaPos, metaCornerOffsets, metaAuthorRowY } from './layout/metaAnchors'
 export { splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, accidentalGlyphOf, braceInkRightOffset, BRACE_LINE_DX, hxBodyW, slideGlyphInk, slideExtraW, graceSlotLayout, graceSlideInk, mordentInkW } from './layout/spaceLayout'

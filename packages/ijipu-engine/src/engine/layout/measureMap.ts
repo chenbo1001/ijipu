@@ -83,6 +83,22 @@ export function totalBarsOf(notes: readonly ScoreSpotNote[]): number {
   return notes.reduce((mx, n) => Math.max(mx, n.bar), 0)
 }
 
+/**
+ * 这个音符 id 在当前排版里**存在吗**（含段层音符）。
+ *
+ * 用途（adj1102）：标记段的终点是"点音符"记下来的 ⇒ 只要它在排版里存在、却在播放序列里没有事件，
+ * 就说明**被连音线/同音合并并进了前一个音**（不是"标记失效"）。调用方据此告诉
+ * `resolvePracticeRange`：按"紧邻的前一个音"去配，**不要**退到"夹到序列末尾"（那会配出跨好几遍的怪区间）。
+ */
+export function hasNoteId(layout: ScoreLayout, id: string): boolean {
+  for (const page of layout.pages) {
+    for (const n of page.notes) {
+      if (noteIdStringOf(n.id) === id) return true
+    }
+  }
+  return false
+}
+
 /** 音符 id 的尾巴（`_组号_序号`）——预览与播放排版不同时页号/声部号可能变 */
 function tailOfId(id: string): string {
   const m = /^(\d+)_(\d+)_(\d+)_(\d+)$/.exec(id)

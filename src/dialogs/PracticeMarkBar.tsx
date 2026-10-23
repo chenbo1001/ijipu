@@ -22,7 +22,7 @@
  * 选过之后写回标记的 `pass`（持久化）。
  */
 import { useEffect, useMemo } from 'react'
-import { buildPlaySequence, layoutScore, noteIdStringOf, resolvePracticeRange, slicePlaySequenceByRange, flattenScoreNotes, spotOfIn } from '@ijipu/engine'
+import { buildPlaySequence, layoutScore, noteIdStringOf, resolvePracticeRange, slicePlaySequenceByRange, flattenScoreNotes, spotOfIn, hasNoteId } from '@ijipu/engine'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { docKeyOf, loadMarks, saveMarks } from '../store/practiceMarks'
@@ -112,8 +112,12 @@ export function PracticeMarkBar(): React.JSX.Element {
     }
     const empty: Resolved = { candidates: [], ids: [], rangeMs: 0, lastNote: '', missing: '', totalEvents: 0, i0: -1, i1: -1, eventCount: 0 }
     if (!cur) return empty
-    const seq = buildPlaySequence(parseResult, layoutScore(parseResult, pageConfig), 90)
-    const res = resolvePracticeRange(seq, cur.startId, cur.endId)
+    const layoutForResolve = layoutScore(parseResult, pageConfig)
+    const seq = buildPlaySequence(parseResult, layoutForResolve, 90)
+    // adj1102：终点在排版里存在 ⇒ 告诉引擎"没有事件是被合并了"，按紧邻的前一个音配
+    const res = resolvePracticeRange(seq, cur.startId, cur.endId, {
+      endInLayout: hasNoteId(layoutForResolve, cur.endId),
+    })
     if (res.candidates.length === 0) {
       return { ...empty, missing: res.missing ?? '', totalEvents: seq.events.length }
     }
