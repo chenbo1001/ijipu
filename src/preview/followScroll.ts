@@ -49,6 +49,13 @@ import { CAMERA_WHITE_MARGIN, clampRowCenter, type PanMode } from '@ijipu/engine
 export const FOLLOW_SAFE_LOW = 0.25
 /** 安全带上沿（占视口宽的比例）：目标点大于它就算"太靠右" ⇒ **提前**触发 */
 export const FOLLOW_SAFE_HIGH = 0.75
+/**
+ * adj1090：纵向滚动时行内容离视口上/下沿至少留这么多（占视口**高**）。
+ *
+ * 为什么留边：行顶/行底正好贴住视口边时，歌词下伸或减时线会被裁掉半截，
+ * 看起来像"没显示全"。4% 是"看得出是完整一行"的最小留白，也不会把可用高度吃掉太多。
+ */
+export const FOLLOW_V_PAD_RATIO = 0.04
 
 export interface FollowScrollInput {
   /** 目标点（色块左缘）在**视口坐标**里的 x —— 0 = 视口左缘。由 `getBoundingClientRect()` 直接得到 */
@@ -143,4 +150,53 @@ export function panScrollTargetX(input: PanScrollInput): number | null {
   const cx = clampRowCenter(rowX0, rowX1, viewW, CAMERA_WHITE_MARGIN, blockCenterX)
   const maxScroll = scrollW - viewW
   return Math.max(0, Math.min(maxScroll, cx - viewW / 2))
+}
+
+export interface FollowScrollYInput {
+  /** 行内容（曲部 + 词部）上沿在**内容坐标**（px，= 视口坐标 + scrollTop） */
+  top: number
+  /** 行内容下沿（含最后一行歌词的下伸） */
+  bottom: number
+  /** 视口高（`clientHeight`） */
+  viewH: number
+  /** 可滚内容总高（`scrollHeight`） */
+  scrollH: number
+  /** 当前 `scrollTop` */
+  scrollTop: number
+}
+
+/**
+ * adj1090（用户 2026-10-23 口径）：**纵向**滚动目标——保证"曲部 + 词部"整行在**高度**上进视界。
+ *
+ * 用户原话：「首次开始播放或新行播放时，应判断该曲部对应的歌词是否显示全（要考虑多行歌词的情况），
+ * 没显示全要页面上移，保证同曲部词部行显示在视界中；对于多声部，同样要考虑同一组的多声部及歌词
+ * 显示在同一视界」。⇒ 这是**高度**上的要求，与横向跟随（`followScrollTargetX`）互不相干。
+ *
+ * 行范围由引擎 `visualRowsOfPage()` 给（多声部堆叠 + 段层 + 该行下所有歌词行，
+ * 与出片相机同一套行判定），这里只负责"滚到哪"：
+ * ```
+ * 放得下（整行 + 上下留边 ≤ 视口高）：
+ *   · 已经整行可见（含留边）⇒ null（不打扰，绝不逐帧抖）
+ *   · 否则居中
+ * 放不下（行比视口还高，如多行歌词 + 多声部叠在一起）：
+ *   · 把**行顶**对齐到上留边（先保曲部，词部顺着往下看），不能两头都保证
+ * ```
+ * 结果再钳到浏览器自己的可滚上限 `scrollHeight − clientHeight`。
+ */
+export function followScrollTargetY(input: FollowScrollYInput): number | null {
+  const { top, bottom, viewH, scrollH, scrollTop } = input
+  if (!(viewH > 0) || !(scrollH > viewH)) return null
+  const h = Math.max(0, bottom - top)
+  const maxScroll = scrollH - viewH
+  const pad = viewH * FOLLOW_V_PAD_RATIO
+  if (h + 2 * pad <= viewH) {
+    // 已经整行在视界里（含留边）⇒ 什么都不做
+    if (top >= scrollTop + pad - 0.5 && bottom <= scrollTop + viewH - pad + 0.5) return null
+    const want = top + h / 2 - viewH / 2
+    return Math.max(0, Math.min(maxScroll, want))
+  }
+  // 行比视口高：先保曲部（行顶进视界），词部只能往下滚着看
+  const want = top - pad
+  if (Math.abs(want - scrollTop) < 1) return null
+  return Math.max(0, Math.min(maxScroll, want))
 }

@@ -14,7 +14,7 @@ import { PREVIEW_BASE_W, isFullyVisibleIn } from './zoomFit'
 import { PracticeMarkLayer } from './PracticeMarkLayer'
 // adj895：播放跟随滚动的「安全区」判定（纯函数，见该文件的口径说明）
 // adj1089：按拍/按小节的居中 + "左右露白 ≤10%"夹紧（与出片同一个 clampRowCenter）
-import { followScrollTargetX, panScrollTargetX, panTickIndex } from './followScroll'
+import { followScrollTargetX, followScrollTargetY, panScrollTargetX, panTickIndex } from './followScroll'
 import { openExternalUrl } from './openUrl'
 import { beginDrag } from '../ui/dragGesture'
 // adj723：音符点击（单击 / Ctrl+单击）的动作判定（纯模块，便于 smoke 断言）
@@ -60,7 +60,9 @@ import {
 } from '@ijipu/engine'
 // adj965d：预览区角落的「调整对象」与键位提示文案（面向用户的文案一律集中在 brand/copy.ts）
 import { overlayCopy } from '../brand/copy'
-import { computeRowTops, computeRowGuides, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides'
+import { computeRowTops, computeRowGuides, rowSpansOfPage, dragDelta, clamp, metaAreaH, GUIDE_LIMITS, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides'
+// adj1090：曲行的纵向范围（曲部 + 词部，多声部块合成一组）
+import type { RowSpan } from '@ijipu/engine/layout/guides'
 // adj905q：预览可视调试的边界虚线几何（时值格 / 墨迹 / 段层）——几何在引擎侧算好，这里只消费
 import { computeDebugBounds } from '@ijipu/engine/layout/guides'
 import { clampMetaPos, metaAnchorOf, metaAnchorPt } from '@ijipu/engine/layout/metaAnchors'
@@ -256,6 +258,26 @@ export function PreviewPane() {
             layout,
             { quci: pageConfig.height_quci, geci: pageConfig.geci_size },
             pageConfig.note_size,
+          )
+        : [],
+    [layout, pageConfig.height_quci, pageConfig.geci_size, pageConfig.note_size],
+  )
+  /**
+   * adj1090（用户口径）：**每页每个曲行的纵向范围**（曲部 + 词部）。
+   *
+   * 口径在引擎 `rowSpansOfPage`：多声部块（`page.voiceBlocks`）内的所有声部行合成一组，
+   * 段层（`{bz}`/`{dsb}`/`{tp}`）并入所属曲行，行底取到**最后一行歌词** —— 多行歌词都在里面。
+   * 试听换行时据此把整组滚进视界（高度），与横向跟随互不相干。
+   */
+  const rowSpansByPage = useMemo(
+    () =>
+      layout
+        ? layout.pages.map((_, i) =>
+            rowSpansOfPage(layout, i, {
+              quci: pageConfig.height_quci,
+              geci: pageConfig.geci_size,
+              noteSize: pageConfig.note_size,
+            }),
           )
         : [],
     [layout, pageConfig.height_quci, pageConfig.geci_size, pageConfig.note_size],
@@ -857,7 +879,12 @@ export function PreviewPane() {
                   style={{ position: 'relative', zIndex: 1, pointerEvents: 'none' }}
                 />
                 {/* adj282：播放进度跟随色块（接近透明，随播放时钟滑动；未播放时自身不渲染） */}
-                <PlayheadLayer page={page} pages={layout.pages} noteSize={pageConfig.note_size} />
+                <PlayheadLayer
+                  page={page}
+                  pages={layout.pages}
+                  noteSize={pageConfig.note_size}
+                  rowSpans={rowSpansByPage}
+                />
                 {/* adj987h（用户需求）：试听「标记段」的标记线（每行一段 + 两端小竖头 + 循环 ⟲） */}
                 <PracticeMarkLayer page={page} noteSize={pageConfig.note_size} />
                 {/* adj723b：**只读自检**（见 `PlayheadDiag` 说明；不参与渲染） */}
@@ -1173,6 +1200,40 @@ function PlayheadDiag({ pageIndex, noteSize }: { pageIndex: number; noteSize: nu
   return null
 }
 
+/** 色块/曲行定位只关心这几个字段（`docStore.playheadTrack` 的一项） */
+type PlayheadSegLike = {
+  pageIndex: number
+  group: number
+  x: number
+  width: number
+  /** 音符基线 y（页面坐标）——纵向行判定用它 */
+  y: number
+  atMs: number
+  durationMs: number
+  playVoice?: 'accomp' | 'main' | 'second'
+}
+
+/**
+ * 此刻正在响的**主声部**段（多声部同时响时取最晚开始的那条，与色块/球同口径）。
+ *
+ * 为什么要有它：行归属不能按"行时间"猜（多声部/跨行连音时行时间与发声不同步），
+ * 只能由当前发声的那条段反推它在哪一行（同 `camera.ts` 的 `rowAt` 口径）。
+ */
+function currentMainSeg(
+  track: readonly PlayheadSegLike[],
+  pageIndex: number,
+  t: number,
+): PlayheadSegLike | null {
+  let best: PlayheadSegLike | null = null
+  for (const s of track) {
+    if (s.pageIndex !== pageIndex) continue
+    if (s.playVoice !== undefined && s.playVoice !== 'main') continue
+    if (!(s.atMs <= t && t < s.atMs + s.durationMs)) continue
+    if (!best || s.atMs >= best.atMs) best = s
+  }
+  return best
+}
+
 /**
  * adj1089：某时刻**本页当前曲行**的左右边界（页面单位）。
  *
@@ -1184,30 +1245,13 @@ function PlayheadDiag({ pageIndex, noteSize }: { pageIndex: number; noteSize: nu
  * 再用它的 `group` 找整行边界——不按行时间猜行（那会在多声部/跨行连音时锁错行）。
  */
 function rowBoundsAt(
-  track: readonly {
-    pageIndex: number
-    group: number
-    x: number
-    width: number
-    atMs: number
-    durationMs: number
-    playVoice?: 'accomp' | 'main' | 'second'
-  }[],
+  track: readonly PlayheadSegLike[],
   pageIndex: number,
   t: number,
 ): { x0: number; x1: number } | null {
-  let group = -1
-  let bestAt = Number.NEGATIVE_INFINITY
-  for (const s of track) {
-    if (s.pageIndex !== pageIndex) continue
-    if (s.playVoice !== undefined && s.playVoice !== 'main') continue
-    if (!(s.atMs <= t && t < s.atMs + s.durationMs)) continue
-    if (s.atMs >= bestAt) {
-      bestAt = s.atMs
-      group = s.group
-    }
-  }
-  if (group < 0) return null
+  const seg = currentMainSeg(track, pageIndex, t)
+  if (!seg) return null
+  const group = seg.group
   let x0 = Number.POSITIVE_INFINITY
   let x1 = Number.NEGATIVE_INFINITY
   for (const s of track) {
@@ -1223,7 +1267,21 @@ function rowBoundsAt(
  * 随播放逐帧重渲染（SVG 层不重建，仅本轻量色块刷新）。
  * adj299：每曲行（group）独立一个色块（按各自拍段滑动、按 voice 配色、各自行高）。
  */
-function PlayheadLayer({ page, pages, noteSize }: { page: ScorePage; pages: ScorePage[]; noteSize: number }) {
+function PlayheadLayer({
+  page,
+  pages,
+  noteSize,
+  rowSpans,
+}: {
+  page: ScorePage
+  pages: ScorePage[]
+  noteSize: number
+  /**
+   * adj1090：每页**每个曲行**的纵向范围（引擎 `rowSpansOfPage`）——
+   * 曲部（同组多声部 + 段层）到它最后一行歌词。试听换行时据此把整组滚进视界。
+   */
+  rowSpans: RowSpan[][]
+}) {
   const currentMs = useDocStore((s) => s.currentMs)
   const track = useDocStore((s) => s.playheadTrack)
   // adj1048：拍网格（跳跳球按**拍**落，不按音落）；相位由 beatPhaseOf 投票得出
@@ -1235,6 +1293,8 @@ function PlayheadLayer({ page, pages, noteSize }: { page: ScorePage; pages: Scor
   const anchorMs = useDocStore((s) => s.playheadAnchorMs)
   // adj1089：同一拍 / 同一小节里只居中一次（逐帧都算就退化成连续跟随）
   const panKeyRef = useRef('')
+  // adj1090：同一视觉行里只按"行"滚一次（首次播放 / 换行各一次）
+  const rowKeyRef = useRef('')
   // adj1062：跨页球的纵向换算要用到预览缩放（与 `.preview-zoom-scale` 的 zoom 同源）
   const previewZoom = useUiStore((s) => s.previewZoom)
 
@@ -1361,6 +1421,55 @@ function PlayheadLayer({ page, pages, noteSize }: { page: ScorePage; pages: Scor
     if (Math.abs(target - scrollLeft) < 1) return
     scroller.scrollTo({ left: target, behavior: 'smooth' })
   }, [currentMs, track, panMode, beatMs, beatBars, anchorMs, page.index, page.width])
+
+  /**
+   * adj1090（用户 2026-10-23 口径）：**纵向**滚动——首次播放 / 换行时，判断"曲部 + 词部"
+   * 整行是否在**高度**上进视界（多行歌词、同组多声部都算同一行），没显示全就把页面滚上去。
+   *
+   * 与横向的分工：横向（adj895/adj1089）管"这一行左右看得到哪一段"，纵向只管"这一行上下
+   * 看不看得全"，两个轴各滚各的。
+   *
+   * 触发时机：**每个曲行一次**（`rowKeyRef` 记住当前曲行）。不能逐帧算——那会在播放中
+   * 把用户手动滚到的位置一直抢回去；也必须"行没变就不动"，否则观感是页面在抖。
+   * 首次播放（key 从 `''` 变成某一行）同样算一次，正是用户说的"首次开始播放"。
+   */
+  useEffect(() => {
+    if (track.length === 0 || currentMs <= 0) return
+    const spans = rowSpans[page.index] ?? []
+    if (spans.length === 0) return
+    const seg = currentMainSeg(track, page.index, currentMs)
+    if (!seg) return
+    // 行归属：当前发声段的**基线 y** 落在哪个曲行的纵向范围里（同组多声部落在同一个 span）
+    const spanIdx = spans.findIndex((s) => seg.y >= s.top - 0.5 && seg.y <= s.bottom + 0.5)
+    if (spanIdx < 0) return
+    const key = `${page.index}:${spanIdx}`
+    if (rowKeyRef.current === key) return
+    /**
+     * 页面元素按**序号**取，不按色块反查：跨页那一刻可能两页同时有色块，
+     * `document.querySelector('.playhead-marker')` 会拿到前一页的块 ⇒ 页面顶算错。
+     */
+    const pageEl = document.querySelectorAll('.preview-zoom-scale')[page.index]
+    const scroller = pageEl?.closest('.preview-pane')
+    if (!(pageEl instanceof HTMLElement) || !(scroller instanceof HTMLElement)) return
+    const scRect = scroller.getBoundingClientRect()
+    const pageRect = pageEl.getBoundingClientRect()
+    if (!(pageRect.height > 0) || !(page.height > 0)) return
+    // 预览缩放有两层（字号 + 预览比率）⇒ 一律按"实际渲染高 / 页高"折回内容 px，不自己算
+    const scale = pageRect.height / page.height
+    const pageTop = pageRect.top - scRect.top + scroller.scrollTop
+    const target = followScrollTargetY({
+      top: pageTop + spans[spanIdx].top * scale,
+      bottom: pageTop + spans[spanIdx].bottom * scale,
+      viewH: scroller.clientHeight,
+      scrollH: scroller.scrollHeight,
+      scrollTop: scroller.scrollTop,
+    })
+    rowKeyRef.current = key
+    // `null` = 这一行本来就整行可见（含留边）⇒ 什么都不做
+    if (target === null) return
+    if (Math.abs(target - scroller.scrollTop) < 1) return
+    scroller.scrollTo({ top: target, behavior: 'smooth' })
+  }, [currentMs, track, rowSpans, page.index, page.height])
 
   if (track.length === 0 || currentMs <= 0) return null
   // adj427：按「本页 + 曲行 + 声部 + 音色」**逐组**定位——重叠区（bz 伴奏 / dsb 第二声部）

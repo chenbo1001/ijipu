@@ -74,6 +74,8 @@ import { computeDebugBounds } from '@ijipu/engine/index.ts'
 import { FOLLOW_SAFE_HIGH, FOLLOW_SAFE_LOW, followScrollTargetX } from '../src/preview/followScroll'
 // adj1089：试听「按拍 / 按小节」居中 + "左右露白 ≤10%"夹紧（与出片共用引擎 clampRowCenter）
 import { panScrollTargetX, panTickIndex } from '../src/preview/followScroll'
+// adj1090：试听**纵向**滚动——曲部 + 词部整行（高度）进视界
+import { FOLLOW_V_PAD_RATIO, followScrollTargetY } from '../src/preview/followScroll'
 // adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
 import { JPS_PARAM_MAX_LEN, readJpsFromSearch, withoutJpsParam } from '../src/store/urlImport'
 import { inflateSync } from 'node:zlib'
@@ -111,7 +113,7 @@ import { DEFAULT_CARD_STYLE } from '../src/export/video/cardTemplates.ts'
 // adj1077：视频生成能力闸门（桌面壳 + WebCodecs；网站/插件不开放）
 import { canGenerateVideo, canUseDynamicVideo } from '../src/export/video/capability.ts'
 import { pickPracticeCandidate } from '../src/export/video/practicePick.ts'
-import { computeRowTops, computeRowGuides, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
+import { computeRowTops, computeRowGuides, rowSpansOfPage, dragDelta, clamp, GUIDE_LIMITS_EX } from '@ijipu/engine/layout/guides.ts'
 import { MIN_HAIRPIN_W } from '@ijipu/engine/layout/hairpins.ts'
 // adj502：波音演奏时值（纯函数）
 import { mordentOf, mordentPlan, mordentShortMs, neighborDegree, MORDENT_SYMBOLS, ORNAMENT_SHORT_MIN_MS, ORNAMENT_SHORT_MAX_MS } from '@ijipu/engine/playback/ornaments.ts'
@@ -29291,6 +29293,147 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
     // 上面几条期望值（160 / 840 / 125）就是按**字面 10%** 算的 ⇒ 常量改成 0.5 时它们必然判红
     Math.abs(CAMERA_WHITE_MARGIN - 0.1) < 1e-9 && 200 - (with05 - halfW) > viewW * 0.1 + 1,
     `常量=${CAMERA_WHITE_MARGIN} 左露白=${200 - (with05 - halfW)}`,
+  )
+}
+
+/**
+ * adj1090（用户 2026-10-23 口径）：试听的**纵向**滚动——"曲部 + 词部"整行在**高度**上进视界。
+ *
+ * 用户原话：「首次开始播放或新行播放时，应判断该曲部对应的歌词是否显示全（要考虑多行歌词的情况），
+ * 没显示全要页面上移，保证同曲部词部行显示在视界中；对于多声部，同样要考虑同一组的多声部及歌词
+ * 显示在同一视界」。⇒ 约束的是**高度**，与横向跟随（adj895/adj1089）互不相干。
+ *
+ * 两段断言：
+ *  ① 引擎 `rowSpansOfPage`：一个**曲行**的纵向范围 = 曲部（同组多声部 + 段层）+ 该行**所有**歌词行；
+ *  ② 纯函数 `followScrollTargetY`：放得下就整行进视界（已可见则不动）、放不下先保曲部。
+ */
+{
+  console.log('[163c] preview vertical follow: 曲部 + 词部整行进视界 (adj1090)')
+  const HEAD1090 = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  /**
+   * 夹具 A：第一组是**多声部**（Q1+Q2）+ **两行歌词**（两个 `C:`），第二组是单声部一行。
+   * ⇒ 第一组必须归成**一条** span（多声部同视界），第二组另成一条；
+   *    且 span 的纵向范围要把两个声部、两行歌词都盖住。
+   *
+   * 为什么要用"按曲行归组"而不是"按行间空隙合并"：实测这组 Q1/Q2 的行顶差 87，
+   * 而字号只有 13（空隙 65）⇒ 按空隙合并会把两个声部拆成两个视觉行（试听只看得到一个声部）。
+   */
+  const SRC1090 = `${HEAD1090}Q1: 1 2 3 4 | 5 6 7 1 |\nQ2: 5 6 5 3 | 1 2 3 4 |\nC: 一 二 三 四 五 六 七 一\nC: 甲 乙 丙 丁 戊 己 庚 辛\nQ: 1 2 3 4 | 5 6 7 1 |\n`
+  const lay1090 = layoutScore(parseJpsRaw(SRC1090), DUR_CFG)
+  const page1090 = lay1090.pages[0]
+  const lyricYs1090 = [...new Set(page1090.lyrics.map((l) => Math.round(l.y * 10) / 10))].sort((a, b) => a - b)
+  check(
+    'adj1090 夹具自检：解析出**两行歌词**（多行歌词才谈得上"看全"）',
+    lyricYs1090.length === 2 && new Set(page1090.lyrics.map((l) => l.line)).size === 2,
+    JSON.stringify(lyricYs1090),
+  )
+  const guides1090 =
+    computeRowGuides(lay1090, { quci: DUR_CFG.height_quci, geci: DUR_CFG.geci_size }, DUR_CFG.note_size)[0] ?? []
+  const spans1090 = rowSpansOfPage(lay1090, 0, {
+    quci: DUR_CFG.height_quci,
+    geci: DUR_CFG.geci_size,
+    noteSize: DUR_CFG.note_size,
+  })
+  check(
+    'adj1090 多声部归成**一条** span、两个曲行**不合并**（共 2 条）',
+    spans1090.length === 2,
+    `span 数=${spans1090.length}（guide 行=${guides1090.length}）`,
+  )
+  check(
+    'adj1090 同一组多声部的两条曲部行都在同一个 span 里（"同视界"的前提）',
+    spans1090[0].tops.length === 2,
+    `组内 guide 行=${spans1090[0].tops.length} tops=${spans1090[0].tops.map((y) => y.toFixed(1)).join(',')}`,
+  )
+  check(
+    'adj1090 span 行顶 = 最上面那条声部行顶（多声部一起进视界）',
+    Math.abs(spans1090[0].top - Math.min(...guides1090.slice(0, 2).map((g) => g.yTop))) < 0.01,
+    `top=${spans1090[0].top} 最上声部行顶=${Math.min(...guides1090.slice(0, 2).map((g) => g.yTop))}`,
+  )
+  check(
+    'adj1090 span 行底盖住**最后一行歌词**与最低那条声部行（取较大者）',
+    spans1090[0].bottom >= lyricYs1090[1] + DUR_CFG.geci_size - 0.01 &&
+      spans1090[0].bottom >= Math.max(...guides1090.slice(0, 2).map((g) => g.yBottom)) - 0.01,
+    `bottom=${spans1090[0].bottom.toFixed(1)} 最后歌词底=${(lyricYs1090[1] + DUR_CFG.geci_size).toFixed(1)} 曲部底=${Math.max(...guides1090.slice(0, 2).map((g) => g.yBottom)).toFixed(1)}`,
+  )
+  check(
+    'adj1090 下一曲行的 span 在上一行 span 之后（歌词没被算到下一行去）',
+    spans1090[1].top > spans1090[0].bottom - 0.51,
+    `第二条 top=${spans1090[1].top.toFixed(1)} 第一条 bottom=${spans1090[0].bottom.toFixed(1)}`,
+  )
+
+  /**
+   * 夹具 B：**单声部 + 两行歌词** ⇒ 行底必须由「最后一行歌词」决定
+   * （只算曲部的话，第二行歌词会被裁在视界外 —— 正是用户报的那条）。
+   */
+  const SRC1090B = `${HEAD1090}Q: 1 2 3 4 | 5 6 7 1 |\nC: 一 二 三 四 五 六 七 一\nC: 甲 乙 丙 丁 戊 己 庚 辛\nQ: 1 2 3 4 | 5 6 7 1 |\n`
+  const lay1090B = layoutScore(parseJpsRaw(SRC1090B), DUR_CFG)
+  const guides1090B =
+    computeRowGuides(lay1090B, { quci: DUR_CFG.height_quci, geci: DUR_CFG.geci_size }, DUR_CFG.note_size)[0] ?? []
+  const spans1090B = rowSpansOfPage(lay1090B, 0, {
+    quci: DUR_CFG.height_quci,
+    geci: DUR_CFG.geci_size,
+    noteSize: DUR_CFG.note_size,
+  })
+  const lastLyricB = Math.max(...(guides1090B[0]?.lyricRows.map((l) => l.y) ?? [0])) + DUR_CFG.geci_size
+  check(
+    'adj1090 单声部 + 多行歌词：span 行底 = **最后一行歌词下沿**（不是曲部下沿）',
+    spans1090B.length >= 1 &&
+      Math.abs(spans1090B[0].bottom - lastLyricB) < 0.51 &&
+      spans1090B[0].bottom > guides1090B[0].yBottom + 1,
+    `bottom=${spans1090B[0]?.bottom.toFixed(1)} 最后歌词底=${lastLyricB.toFixed(1)} 曲部底=${guides1090B[0]?.yBottom.toFixed(1)}`,
+  )
+
+  // ---- 纯函数：滚到哪 ----
+  const viewH = 600
+  const scrollH = 2000
+  const pad = viewH * FOLLOW_V_PAD_RATIO
+  check(
+    'adj1090 整行（曲部+词部）已可见（含上下留边）⇒ **不滚**（播放中页面不许自己抖）',
+    followScrollTargetY({ top: 700, bottom: 900, viewH, scrollH, scrollTop: 620 }) === null,
+  )
+  // 行内容 500..900，视口只剩 [200,800]：词部被裁在下方 ⇒ 必须"页面上移"（scrollTop 变大）
+  const cut = followScrollTargetY({ top: 500, bottom: 900, viewH, scrollH, scrollTop: 200 })
+  check(
+    'adj1090 词部被裁在下方 ⇒ **页面上移**（scrollTop 变大），滚完整行可见',
+    cut === 400 && cut > 200,
+    String(cut),
+  )
+  check(
+    'adj1090 整行在视口**上方** ⇒ 往回滚（target < 当前 scrollTop）',
+    followScrollTargetY({ top: 100, bottom: 300, viewH, scrollH, scrollTop: 500 }) === 0,
+    String(followScrollTargetY({ top: 100, bottom: 300, viewH, scrollH, scrollTop: 500 })),
+  )
+  check(
+    'adj1090 行比视口还高（多行歌词 + 多声部叠起来）⇒ **先保曲部**：行顶对齐上留边',
+    followScrollTargetY({ top: 300, bottom: 1200, viewH, scrollH, scrollTop: 0 }) === 300 - pad,
+    String(followScrollTargetY({ top: 300, bottom: 1200, viewH, scrollH, scrollTop: 0 })),
+  )
+  check(
+    'adj1090 内容不比视口高 ⇒ 永不竖滚',
+    followScrollTargetY({ top: 100, bottom: 200, viewH, scrollH: 500, scrollTop: 0 }) === null,
+  )
+  check(
+    'adj1090 目标钳在可滚上限内（scrollHeight − clientHeight）',
+    followScrollTargetY({ top: 1900, bottom: 1990, viewH, scrollH, scrollTop: 0 }) === 1400,
+    String(followScrollTargetY({ top: 1900, bottom: 1990, viewH, scrollH, scrollTop: 0 })),
+  )
+
+  // ---- 宿主接线（源码闸门）----
+  const previewSrc1090 = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
+  const followSrc1090 = String(readFileSync('src/preview/followScroll.ts', 'utf8'))
+  const guidesSrc1090 = String(readFileSync('packages/ijipu-engine/src/engine/layout/guides.ts', 'utf8'))
+  check(
+    'adj1090 试听接线：换行/首播按**曲行**滚一次（`followScrollTargetY` + 行 key，不逐帧算）',
+    /followScrollTargetY\(/.test(previewSrc1090) &&
+      /rowKeyRef\.current === key/.test(previewSrc1090) &&
+      /rowSpansOfPage\(layout, i, \{/.test(previewSrc1090) &&
+      /scroller\.scrollTo\(\{ top: target/.test(previewSrc1090),
+  )
+  check(
+    'adj1090 曲行归组在引擎（`rowSpansOfPage` 用 `page.voiceBlocks` 认多声部块），预览只消费不重算',
+    /export function rowSpansOfPage/.test(guidesSrc1090) &&
+      /page\.voiceBlocks/.test(guidesSrc1090) &&
+      /FOLLOW_V_PAD_RATIO/.test(followSrc1090),
   )
 }
 
