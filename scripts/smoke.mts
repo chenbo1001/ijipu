@@ -78,6 +78,8 @@ import { panScrollTargetX, panTickIndex } from '../src/preview/followScroll'
 import { FOLLOW_V_PAD_RATIO, followScrollTargetY } from '../src/preview/followScroll'
 // adj1092：试听**按拍/按小节**平移——每拍/每小节 + **每一行**都要移（行变了就用新行第一块居中）
 import { panFocusAt } from '../src/preview/followScroll'
+// adj1093：按小节模式的 **4/5 安全推**（本行最后一个小节不推）
+import { safetyPanTargetX, spanLastBarStart } from '../src/preview/followScroll'
 // adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
 import { JPS_PARAM_MAX_LEN, readJpsFromSearch, withoutJpsParam } from '../src/store/urlImport'
 import { inflateSync } from 'node:zlib'
@@ -29575,8 +29577,64 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
   check(
     'adj1092 试听接线：`panFocusAt` + `panKeyRef`（行进 key），不再只看小节序号',
     /panFocusAt\(/.test(previewSrc1092) &&
-      /const key = `\$\{panMode\}:\$\{focus\.key\}`/.test(previewSrc1092) &&
+      /panKeyRef\.current !== `\$\{panMode\}:\$\{focus\.key\}`/.test(previewSrc1092) &&
       !/panTickIndex\(panMode, currentMs/.test(previewSrc1092),
+  )
+}
+
+/**
+ * adj1093（用户 2026-10-23 实报）：`bar` 模式的 **4/5 安全推**。
+ *
+ * 用户原话：「有时下一小节已经很贴近右视界了，而按小节平移也要到色块接近小节线再平移，
+ * 这会导致一小节视谱偏晚而衔接不上……在到达视界 4/5 的时候，如果还没到达下一小节，也要平移；
+ * （除非是在一行的最后一个小节……因为有露白 10% 的限制）」
+ */
+{
+  console.log('[163e] bar-mode 4/5 safety pan (adj1093)')
+  check(
+    'adj1093 `spanLastBarStart` 取该行时间范围内**最后一个小节**',
+    spanLastBarStart([0, 2000, 4000], [
+      { atMs: 0, durationMs: 1000 },
+      { atMs: 3000, durationMs: 1000 },
+    ]) === 2000,
+  )
+  check(
+    'adj1093 没有小节线 / 整行只有一个小节 ⇒ 整行都算"最后一个小节"（= 行首时刻）',
+    spanLastBarStart([0], [
+      { atMs: 0, durationMs: 1000 },
+      { atMs: 3000, durationMs: 1000 },
+    ]) === 0 && spanLastBarStart([], [{ atMs: 500, durationMs: 100 }]) === 500,
+  )
+  const viewW = 1000
+  const scrollW = 4000
+  check(
+    'adj1093 非最后小节：色块越过右沿（75%）⇒ 按跟随规则推（推到安全带左沿 25%）',
+    safetyPanTargetX({ xInView: 800, viewW, scrollW, scrollLeft: 0, inLastBar: false }) === 550,
+    String(safetyPanTargetX({ xInView: 800, viewW, scrollW, scrollLeft: 0, inLastBar: false })),
+  )
+  check(
+    'adj1093 非最后小节：还在安全带内 ⇒ 不推',
+    safetyPanTargetX({ xInView: 700, viewW, scrollW, scrollLeft: 0, inLastBar: false }) === null,
+  )
+  check(
+    'adj1093 **本行最后一个小节**：越过右沿也不推（交给行末右侧露白 ≤10%）',
+    safetyPanTargetX({ xInView: 950, viewW, scrollW, scrollLeft: 0, inLastBar: true }) === null,
+  )
+  check(
+    'adj1093 只推右沿：色块在左侧（行首）不推（否则会把行首左侧露白撑到 25%）',
+    safetyPanTargetX({ xInView: 100, viewW, scrollW, scrollLeft: 500, inLastBar: false }) === null,
+  )
+  const previewSrc1093 = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
+  const cameraSrc1093 = String(readFileSync('packages/ijipu-engine/src/engine/dynamic/camera.ts', 'utf8'))
+  check(
+    'adj1093 试听接线：按小节分支真的调 `safetyPanTargetX` + `spanLastBarStart`（且只在 bar 模式）',
+    /safetyPanTargetX\(/.test(previewSrc1093) &&
+      /spanLastBarStart\(beatBars, inSpan\)/.test(previewSrc1093) &&
+      /if \(panMode !== 'bar'\) return/.test(previewSrc1093),
+  )
+  check(
+    'adj1093 出片接线：按小节模式有"4/5 安全推"检查点（`kind: \'push\'`），且排除本行最后一个小节',
+    /kind: 'push'/.test(cameraSrc1093) && /lastBarOfRow\[ri\]/.test(cameraSrc1093),
   )
 }
 
@@ -33405,6 +33463,73 @@ function runDynamicCameraTests(): void {
       'adj1092 bar 模式仍按小节平移（行内出现非行首的 pan）',
       midPans.length >= 1,
       `行内 pans=${midPans.length}（总 pans=${camBar2.pans.length}，行数=${v.rows.length}）`,
+    )
+  }
+
+  /**
+   * ---- adj1093（用户 2026-10-23 实报）：`bar` 模式的**行内 4/5 安全推** ----
+   *
+   * 用户原话：「有时下一小节已经很贴近右视界了……在到达视界 4/5 的时候，如果还没到达下一小节，
+   * 也要平移；（除非是在一行的最后一个小节……因为有露白 10% 的限制）」
+   */
+  {
+    console.log('    [adj1093] bar 模式行内 4/5 安全推')
+    const SRC = `V: 1.0\nB: t\nD: C\nP: 4/4\n${Array(4)
+      .fill('Q: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 |')
+      .join('\n')}\n`
+    const parsed = parseJpsRaw(SRC)
+    const lay = layoutScore(parsed, DUR_CFG)
+    const seq = buildPlaySequence(parsed, lay, 120)
+    const tr = buildRectTrack(seq, { noteSize: DUR_CFG.note_size })
+    const v = buildFlowView(lay, tr, DUR_CFG)
+    const bars = seq.barStartsMs ?? []
+    const cam3 = buildCameraTrack(v, tr, DUR_CFG, { viewW: 1080, viewH: 1920, panMode: 'bar', bars, beatMs: 500 })
+    const hw = 1080 / cam3.zoomFollow / 2
+    let worstFrac = -1
+    let worstAt = ''
+    let pushHits = 0
+    let lastBarPush = 0
+    let lastBarSamples = 0
+    for (const [ri, r] of v.rows.entries()) {
+      let lastBar = Number.NEGATIVE_INFINITY
+      for (const b of bars) if (b >= r.t0 - 0.5 && b <= r.t1 - 0.5 && b > lastBar) lastBar = b
+      for (let i = 0; i < tr.rects.length; i++) {
+        if (v.rectRow[i] !== ri) continue
+        const rr = tr.rects[i]
+        const isRowStart = Math.abs(rr.t0 - r.t0) <= 0.5
+        const isBarStart = bars.some((b) => Math.abs(b - rr.t0) <= 0.5)
+        const pushed = cam3.pans.some((p) => Math.abs(p.t - rr.t0) <= 1)
+        const inLastBar = rr.t0 >= lastBar - 0.5
+        if (!isRowStart && !isBarStart && pushed) {
+          if (inLastBar) lastBarPush++
+          else pushHits++
+        }
+        if (inLastBar) {
+          lastBarSamples++
+          continue
+        }
+        const f = cameraAt(cam3, rr.t0)
+        const frac = (rr.x + rr.w / 2 - (f.cx - hw)) / (2 * hw)
+        if (frac > worstFrac) {
+          worstFrac = frac
+          worstAt = `行${ri} t=${Math.round(rr.t0)}`
+        }
+      }
+    }
+    check(
+      'adj1093 bar 模式：行内**非最后小节**的色块始终在画面 4/5 以内（越过就推）',
+      worstFrac <= 0.8 + 0.012,
+      `最差 ${(worstFrac * 100).toFixed(0)}%（${worstAt}，阈值 80%）`,
+    )
+    check(
+      'adj1093 确实发生了 4/5 安全推（非行首、非小节线处的 pan ≥ 1）',
+      pushHits >= 1,
+      `推=${pushHits}`,
+    )
+    check(
+      'adj1093 **本行最后一个小节不推**（该小节里没有非行首、非小节线的 pan）',
+      lastBarPush === 0 && lastBarSamples > 0,
+      `最后小节推=${lastBarPush} 样本=${lastBarSamples}`,
     )
   }
 

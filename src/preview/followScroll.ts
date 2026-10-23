@@ -330,3 +330,49 @@ export function panFocusAt(input: PanFocusInput): PanFocus | null {
     key: `${tick}:${spanIndex}`,
   }
 }
+
+/**
+ * adj1093：某个曲行的**最后一个小节起点**（该行时间范围内最大的小节线时刻，页面时间轴）。
+ *
+ * 用途：`bar` 模式的 4/5 安全推**不在最后一个小节里做**——那里由"行末右侧露白 ≤10%"接管
+ * （用户 2026-10-23 口径）。找不到小节线（或整行只有一个小节）⇒ 返回该行第一块时刻，
+ * 即"整行都算最后一个小节"。
+ */
+export function spanLastBarStart(
+  bars: readonly number[],
+  segs: readonly { atMs: number; durationMs: number }[],
+): number {
+  let t0 = Number.POSITIVE_INFINITY
+  let t1 = Number.NEGATIVE_INFINITY
+  for (const s of segs) {
+    t0 = Math.min(t0, s.atMs)
+    t1 = Math.max(t1, s.atMs + s.durationMs)
+  }
+  if (!Number.isFinite(t0)) return Number.POSITIVE_INFINITY
+  let last = Number.NEGATIVE_INFINITY
+  for (const b of bars) if (b >= t0 - 0.5 && b <= t1 - 0.5 && b > last) last = b
+  return Number.isFinite(last) ? last : t0
+}
+
+/**
+ * adj1093（用户 2026-10-23 口径）：`bar` 模式的 **4/5 安全推**。
+ *
+ * 用户原话：「有时下一小节已经很贴近右视界了，而按小节平移也要到色块接近小节线再平移，
+ * 这会导致一小节视谱偏晚而衔接不上……在到达视界 4/5 的时候，如果还没到达下一小节，也要平移；
+ * （除非是在一行的最后一个小节……因为有露白 10% 的限制）」
+ *
+ * 规则：
+ *  · 只处理**越过右沿**（`xInView > FOLLOW_SAFE_HIGH`）——左侧由行首/小节对齐与 10% 露白夹紧负责，
+ *    在这里往左推反而会把行首的左侧露白撑到 25%，破坏露白规则；
+ *  · 本行最后一个小节**不推**（`inLastBar`），交给行末露白夹紧；
+ *  · 推的位置与跟随模式同一套（推到安全带左沿），不重新居中。
+ *
+ * @returns 目标 `scrollLeft`；`null` = 不推
+ */
+export function safetyPanTargetX(input: FollowScrollInput & { inLastBar: boolean }): number | null {
+  if (input.inLastBar) return null
+  const { xInView, viewW, scrollW } = input
+  if (!(viewW > 0) || !(scrollW > viewW)) return null
+  if (xInView <= viewW * FOLLOW_SAFE_HIGH) return null
+  return followScrollTargetX(input)
+}

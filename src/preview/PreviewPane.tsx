@@ -14,7 +14,14 @@ import { PREVIEW_BASE_W, isFullyVisibleIn } from './zoomFit'
 import { PracticeMarkLayer } from './PracticeMarkLayer'
 // adj895：播放跟随滚动的「安全区」判定（纯函数，见该文件的口径说明）
 // adj1089：按拍/按小节的居中 + "左右露白 ≤10%"夹紧（与出片同一个 clampRowCenter）
-import { followScrollTargetX, followScrollTargetY, panFocusAt, panScrollTargetX } from './followScroll'
+import {
+  followScrollTargetX,
+  followScrollTargetY,
+  panFocusAt,
+  panScrollTargetX,
+  safetyPanTargetX,
+  spanLastBarStart,
+} from './followScroll'
 import { openExternalUrl } from './openUrl'
 import { beginDrag } from '../ui/dragGesture'
 // adj723：音符点击（单击 / Ctrl+单击）的动作判定（纯模块，便于 smoke 断言）
@@ -1342,6 +1349,9 @@ function PlayheadLayer({
    * `beat` / `bar` 的节流键里**加上行**——行变了就滚，且用**新行的第一块**居中。
    * 只按小节序号节流时，行首那一下会被上一行最后一个小节吃掉（或与小节网格差几毫秒而错过）。
    *
+   * adj1093（用户实报「按小节时上一小节读得太晚、接不上」）：`bar` 模式再加一道
+   * **行内 4/5 安全推**——色块越过安全带右沿就按跟随规则推（本行最后一个小节不推）。
+   *
    * ⚠ hook 必须在下面那两个 `return null` **之前**（条件调用 hooks 会破坏顺序）。
    */
   useEffect(() => {
@@ -1375,18 +1385,6 @@ function PlayheadLayer({
      * `panFocusAt` 里"行变了就用新行的第一块居中"，行首因此一定进视界。
      */
     const spans = rowSpans[page.index] ?? []
-    const focus = panFocusAt({
-      mode: panMode === 'bar' ? 'bar' : 'beat',
-      t: currentMs,
-      beatMs,
-      anchorMs,
-      bars: beatBars,
-      segs: segsOfPage,
-      spans,
-    })
-    if (focus === null) return
-    const key = `${panMode}:${focus.key}`
-    if (panKeyRef.current === key) return
     /**
      * 页面元素按**序号**取、再按"这一页实际渲染宽 / 页宽"折成内容 px：
      * 预览的缩放有两层（pageConfig 字号 + 用户预览比率），逐处自己算缩放迟早算错。
@@ -1399,17 +1397,53 @@ function PlayheadLayer({
     if (!(pageRect.width > 0) || !(page.width > 0)) return
     const scale = pageRect.width / page.width
     const pageLeft = pageRect.left - scRect.left + scroller.scrollLeft
-    const target = panScrollTargetX({
-      blockCenterX: pageLeft + focus.blockCenterX * scale,
-      rowX0: pageLeft + focus.rowX0 * scale,
-      rowX1: pageLeft + focus.rowX1 * scale,
+
+    // ① 拍/小节 + 行：行变了也滚（adj1092）
+    const focus = panFocusAt({
+      mode: panMode === 'bar' ? 'bar' : 'beat',
+      t: currentMs,
+      beatMs,
+      anchorMs,
+      bars: beatBars,
+      segs: segsOfPage,
+      spans,
+    })
+    if (focus !== null && panKeyRef.current !== `${panMode}:${focus.key}`) {
+      panKeyRef.current = `${panMode}:${focus.key}`
+      const target = panScrollTargetX({
+        blockCenterX: pageLeft + focus.blockCenterX * scale,
+        rowX0: pageLeft + focus.rowX0 * scale,
+        rowX1: pageLeft + focus.rowX1 * scale,
+        viewW: scroller.clientWidth,
+        scrollW: scroller.scrollWidth,
+      })
+      if (target !== null && Math.abs(target - scroller.scrollLeft) >= 1) {
+        scroller.scrollTo({ left: target, behavior: 'smooth' })
+      }
+    }
+
+    /**
+     * ② adj1093：**行内 4/5 安全推**——按小节时，若色块在"下一小节到来之前"就快贴到右视界，
+     * 也按跟随的规则推一次，免得上一小节读得太晚、接不上。
+     * 本行**最后一个小节不推**（那里由"行末右侧露白 ≤10%"接管；只推右沿，不推左沿）。
+     */
+    if (panMode !== 'bar') return
+    const cur = currentMainSeg(track, page.index, currentMs)
+    if (cur === null) return
+    const span = spans.find((s) => cur.y >= s.top - 0.5 && cur.y <= s.bottom + 0.5)
+    if (span === undefined) return
+    const inSpan = segsOfPage.filter((s) => s.y >= span.top - 0.5 && s.y <= span.bottom + 0.5)
+    const lastBar = spanLastBarStart(beatBars, inSpan)
+    const target = safetyPanTargetX({
+      xInView: pageLeft + cur.x * scale - scroller.scrollLeft,
       viewW: scroller.clientWidth,
       scrollW: scroller.scrollWidth,
+      scrollLeft: scroller.scrollLeft,
+      inLastBar: cur.atMs >= lastBar - 0.5,
     })
-    if (target === null) return
-    panKeyRef.current = key
-    if (Math.abs(target - scroller.scrollLeft) < 1) return
-    scroller.scrollTo({ left: target, behavior: 'smooth' })
+    if (target !== null && Math.abs(target - scroller.scrollLeft) >= 1) {
+      scroller.scrollTo({ left: target, behavior: 'smooth' })
+    }
   }, [currentMs, track, segsOfPage, rowSpans, panMode, beatMs, beatBars, anchorMs, page.index, page.width])
 
   /**

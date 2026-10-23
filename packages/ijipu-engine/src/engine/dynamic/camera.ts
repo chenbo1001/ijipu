@@ -313,12 +313,13 @@ export function buildCameraTrack(
       return best
     }
     const bt = opts.beatMs ?? 0
+    const barList = (opts.bars ?? []).filter((b) => b >= firstT && b <= track.endMs)
     /** 拍/小节 tick；`rectIndex` = 行首那条（时间取该行第一块自己的 t0，不取网格时刻） */
     const ticks: { t: number; rowStart: boolean; rectIndex?: number }[] = []
     if (panMode === 'beat' && bt > 0) {
       for (let t = firstT; t <= track.endMs; t += bt) ticks.push({ t, rowStart: false })
     } else if (panMode === 'bar') {
-      for (const b of opts.bars ?? []) if (b >= firstT && b <= track.endMs) ticks.push({ t: b, rowStart: false })
+      for (const b of barList) ticks.push({ t: b, rowStart: false })
     }
     /**
      * adj1092（用户实报「按小节时，从行末移到行首不会平移，行首那一小节看不到」）：
@@ -347,20 +348,60 @@ export function buildCameraTrack(
       }
       ticks.push({ t, rowStart: true, rectIndex: i })
     }
-    ticks.sort((a, b) => a.t - b.t || (a.rowStart === b.rowStart ? 0 : a.rowStart ? -1 : 1))
+    /**
+     * adj1093（用户 2026-10-23 实报）：**行内 4/5 安全推**。
+     *
+     * 用户原话：「有时下一小节已经很贴近右视界了，而按小节平移也要到色块接近小节线再平移，
+     * 这会导致一小节视谱偏晚而衔接不上……在到达视界 4/5 的时候，如果还没到达下一小节，也要平移；
+     * （除非是在一行的最后一个小节，可以不遵守 4/5 的要求，因为有露白 10% 的限制）」
+     *
+     * 做法：`bar` 模式下，除"行首"与"小节线"两个时刻外，**每个色块起点也作为检查点**：
+     * 当前镜头下它的中心越过 4/5（`cx + sweep`）就推一次（推到 1/5，与跟随模式同一手感），
+     * 但**本行最后一个小节里不推**——那里由"行末右侧露白 ≤10%"的夹紧接管，
+     * 推了反而看不到行末那几拍。
+     */
+    const lastBarOfRow: number[] = rows.map((r) => {
+      let last = Number.NEGATIVE_INFINITY
+      for (const b of barList) if (b >= r.t0 - 0.5 && b <= r.t1 - 0.5 && b > last) last = b
+      return last
+    })
+    type Checkpoint = { t: number; kind: 'row' | 'tick' | 'push'; rectIndex: number }
+    const checks: Checkpoint[] = []
+    for (const k of ticks) checks.push({ t: k.t, kind: k.rowStart ? 'row' : 'tick', rectIndex: k.rectIndex ?? -1 })
+    if (panMode === 'bar') {
+      for (let i = 0; i < track.rects.length; i++) {
+        const ri = view.rectRow[i]
+        if (ri < 0 || ri >= rows.length) continue
+        // 本行最后一个小节：不推（交给 10% 露白夹紧）
+        if (!Number.isFinite(lastBarOfRow[ri])) continue
+        if (track.rects[i].t0 >= lastBarOfRow[ri] - 0.5) continue
+        checks.push({ t: track.rects[i].t0, kind: 'push', rectIndex: i })
+      }
+    }
+    const rank = (k: Checkpoint['kind']): number => (k === 'row' ? 0 : k === 'tick' ? 1 : 2)
+    checks.sort((a, b) => a.t - b.t || rank(a.kind) - rank(b.kind))
     pans.length = 0
-    for (const k of ticks) {
-      let i = k.rectIndex ?? rectIndexAt(k.t)
-      if (i < 0) i = nextRectAtOrAfter(k.t)
-      if (i < 0) continue
-      const want = track.rects[i].x + track.rects[i].w / 2
-      const wantCx = Math.max(0, Math.min(paper.width, clampRow(view.rectRow[i], want)))
-      const last = pans[pans.length - 1]
-      if (last && Math.abs(last.cx - wantCx) < 0.5) continue
+    let cx = paper.width / 2
+    for (const k of checks) {
+      let i = k.rectIndex
+      if (k.kind !== 'push') {
+        if (i < 0) i = rectIndexAt(k.t)
+        if (i < 0) i = nextRectAtOrAfter(k.t)
+        if (i < 0) continue
+      } else if (i < 0) continue
+      const ri = view.rectRow[i]
+      const rectCx = track.rects[i].x + track.rects[i].w / 2
+      if (k.kind === 'push' && rectCx <= cx + sweep) continue // 还没到 4/5
+      const wantCx = Math.max(0, Math.min(paper.width, clampRow(ri, rectCx)))
+      if (Math.abs(wantCx - cx) < 0.5) {
+        cx = wantCx
+        continue
+      }
+      cx = wantCx
       pans.push(
-        k.rowStart
-          ? { t: k.t, cx: wantCx, from: k.t, dur: 0 }
-          : { t: k.t, cx: wantCx, from: Math.max(firstT, k.t - panMs), dur: panMs },
+        k.kind === 'row'
+          ? { t: k.t, cx, from: k.t, dur: 0 }
+          : { t: k.t, cx, from: Math.max(rows[ri]?.t0 ?? firstT, k.t - panMs), dur: panMs },
       )
     }
   }
