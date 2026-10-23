@@ -5975,8 +5975,7 @@ span.ws-check {
 .dyn-frame-cards {
   margin: 0;
 }
-.dyn-frame-audio span,
-.dyn-frame-cards span {
+.dyn-frame-audio span {
   font-size: 12px;
   color: var(--jp-text-primary);
 }

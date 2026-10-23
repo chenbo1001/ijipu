@@ -2309,6 +2309,12 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
       /checked=\{withCards\}/.test(overlay),
   )
   check(
+    'adj1116 复选框**不带文字标签**（用户口径：只留框，含义放悬浮提示）；无障碍名走 aria-label',
+    /className="dock-field dyn-frame-cards" title=\{dynamicVideoCopy\.cardsHint\}/.test(overlay) &&
+      /aria-label=\{dynamicVideoCopy\.cards\}/.test(overlay) &&
+      !/<span>\{dynamicVideoCopy\.cards\}<\/span>/.test(overlay),
+  )
+  check(
     'adj1113 不勾选 ⇒ 会话不建片头/片尾（预览与导出同一口径，不是"只管导出"）',
     /leadInMs: withCards \? LEAD_IN_MS : 0/.test(overlay) &&
       /withCards \? \{\} : \{ endCardMs: 0 \}/.test(overlay),

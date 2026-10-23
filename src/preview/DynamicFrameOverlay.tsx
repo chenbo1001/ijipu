@@ -477,15 +477,15 @@ export function DynamicFrameOverlay() {
         </div>
 
         <div className="dyn-frame-controls-row">
-          {/* adj1113：复选框放在「卡片」前 —— 不勾选 = 只导出动态谱（片头片尾都不要） */}
+          {/* adj1113：复选框紧挨「卡片」前，不占一行字；说明放悬浮提示（adj1116 用户口径） */}
           <label className="dock-field dyn-frame-cards" title={dynamicVideoCopy.cardsHint}>
             <input
               type="checkbox"
               checked={withCards}
               disabled={encoding || preparingAudio}
+              aria-label={dynamicVideoCopy.cards}
               onChange={(e) => setWithCards(e.target.checked)}
             />
-            <span>{dynamicVideoCopy.cards}</span>
           </label>
           <span className="dyn-frame-label">{dynamicVideoCopy.cardStyle}</span>
           <select

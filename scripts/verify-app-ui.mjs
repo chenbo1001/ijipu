@@ -1825,12 +1825,22 @@ async function main() {
           c,
           `(() => {
             const el = document.querySelector('.dyn-frame-cards input[type=checkbox]')
-            return el ? { checked: el.checked, label: el.parentElement?.textContent?.trim() ?? '' } : null
+            if (!el) return null
+            const label = el.closest('label')
+            return {
+              checked: el.checked,
+              text: label?.textContent?.trim() ?? '',
+              title: label?.title ?? '',
+              aria: el.getAttribute('aria-label') ?? ''
+            }
           })()`,
         )
         check(
-          'adj1113 相机位卡片前有「带片头片尾」复选框，默认勾选',
-          !!cardsToggle && cardsToggle.checked === true && cardsToggle.label.includes('带片头片尾'),
+          'adj1113/adj1116 卡片前只有一个复选框（**不带文字**），默认勾选；含义在悬浮提示与无障碍名里',
+          !!cardsToggle &&
+            cardsToggle.checked === true &&
+            cardsToggle.text === '' &&
+            (cardsToggle.title + cardsToggle.aria).includes('带片头片尾'),
           JSON.stringify(cardsToggle),
         )
         const cornerPixel = `(() => {
