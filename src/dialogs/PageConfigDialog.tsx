@@ -23,7 +23,7 @@ import { clampEditorFontSize, EDITOR_FONT_OPTIONS, EDITOR_FONT_SIZE_RANGE, local
 // adj629x：恢复默认的草稿**整份替换**（纯函数，见该文件头的踩坑说明）
 import { draftAfterReset } from './pageConfigReset'
 import { THEMES, type ThemeMode } from '../brand/themes'
-import { uiCopy, numCopy, cliPathCopy } from '../brand/copy'
+import { uiCopy, numCopy, cliPathCopy, dynamicVideoCopy } from '../brand/copy'
 // adj944：桌面版判定（网页版没有读写 PATH 的能力 ⇒ 界面如实禁用并说明）
 // adj954：环境判定统一走 brand/env.ts（原 brand/platform.ts 已合并删除）
 import { isDesktopShell } from '../brand/env'
@@ -32,6 +32,8 @@ import { applyCliPath, readCliPathStatus } from '../store/cliPath'
 import { PATH_MAX_CHARS, type CliPathStatus } from '../../packages/ijipu-cli/src/envPath'
 import { SoundBankPanel } from './SoundBankPanel'
 import type { PageConfig } from '@ijipu/engine'
+// adj1089：平移方式的取值域（与 uiStore / 出片同一份）
+import type { PanMode } from '@ijipu/engine'
 // adj426：主题按钮用 ToolIcon（与顶栏三状态按钮共用图标：自动主题/浅色主题/深色主题）
 import { ToolIcon } from '../ui/ToolIcon'
 // adj526：数值"按住上下拖"+`−`/`+` 步进（手机端没有原生上下小按钮，靠这两条路径改数）
@@ -208,6 +210,9 @@ export function PageConfigDialog({
   // adj-font：字体覆盖（L1 用户个性；跨机缺字体时用我的字体，不改谱面文件）
   const fontOverride = useUiStore((s) => s.fontOverride)
   const setFontOverride = useUiStore((s) => s.setFontOverride)
+  // adj1089：动态视频/试听的行中平移方式（L1 本机偏好，默认跟随）
+  const panMode = useUiStore((s) => s.panMode)
+  const setPanMode = useUiStore((s) => s.setPanMode)
 
   const [draft, setDraft] = useState<PageConfig>({ ...pageConfig })
   // adj603：默认子页签取本 section 的第一个（全局 → 版面、谱面 → 布局）
@@ -685,7 +690,21 @@ export function PageConfigDialog({
         )
       case 'local':
         // adj1085：本机配置（桌面个人目录 / 网页浏览器存储；导出导入 zip）
-        return <LocalDataPanel />
+        // adj1089：上面再挂一组"本机偏好"——动态视频/试听的平移方式（L1，随「导出设置」一起备份）
+        return (
+          <>
+            <div className="pcfg-group-title">{dynamicVideoCopy.panModeGroup}</div>
+            <Row label={dynamicVideoCopy.panModeLabel}>
+              <select value={panMode} onChange={(e) => setPanMode(e.target.value as PanMode)}>
+                <option value="follow">{dynamicVideoCopy.panModeFollow}</option>
+                <option value="beat">{dynamicVideoCopy.panModeBeat}</option>
+                <option value="bar">{dynamicVideoCopy.panModeBar}</option>
+              </select>
+            </Row>
+            <div className="ijipu-form-hint">{dynamicVideoCopy.panModeHint}</div>
+            <LocalDataPanel />
+          </>
+        )
       case 'cli':
         // adj944（用户需求）：**注册 iJipu CLI** —— 未注册显示「注册」、已注册显示「解除」。
         // 状态从 `cliStatus` 来（`cli_path_status` **现读系统实况**，不读我们自己的配置 ✓）；

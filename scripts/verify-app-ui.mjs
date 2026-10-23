@@ -2017,6 +2017,119 @@ async function main() {
       }
     }
 
+    /**
+     * adj1089（用户口径"下拉要真点一遍"）：设置 → 本机 → 「平移方式」下拉。
+     *
+     * 源码级断言只能证明"代码里挂了 onChange / 有写 localStorage"，
+     * 证明不了"点得动、真的记住"。这里走真浏览器：
+     *  ① 打开「全局设置」→「本机」子页签，按**行标签**找到下拉（不按序号，避免上下一加行就点错）；
+     *  ② 真改值（原生 setter + change 事件，React 的 onChange 才收得到）；
+     *  ③ 读 localStorage 确认落盘；④ 重载后确认**还是「按拍」**（L1 偏好真的记住了）；
+     *  ⑤ 改回「跟随」，不影响后面的用例。
+     */
+    console.log('[verify-app-ui] adj1089：设置 → 本机 →「平移方式」下拉')
+    {
+      /**
+       * 打开「全局设置 → 本机」。
+       *
+       * ⚠ 两个坑都在这条链上，别退回旧写法：
+       *  ① 子页签的 `textContent` 是「**⌂本机**」（图标 span 也是文本）⇒ 只能用 `includes('本机')`，
+       *     判等会永远等不到（第一版就是这么超时的）；
+       *  ② 顶栏「全局设置」是**开关**（再点一次会收起底栏）⇒ 已经在这一页时**不许再点**。
+       */
+      const openLocalTab = async () => {
+        const already = await evalJs(
+          c,
+          `[...document.querySelectorAll('.jp-tab')].some((t) => t.textContent.includes('本机'))`,
+        )
+        if (already !== true) {
+          const hit = await evalJs(
+            c,
+            `(() => {
+               const b = [...document.querySelectorAll('.topbar-btn')].find((el) => el.getAttribute('title') === '全局设置')
+               if (b) b.click()
+               return !!b
+             })()`,
+          )
+          if (hit !== true) {
+            // 顶栏按钮可能被折进「更多」⇒ 退到菜单里的同一项
+            await evalJs(
+              c,
+              `(() => {
+                 const more = document.querySelector('.topbar-more')
+                 if (more) more.click()
+                 return true
+               })()`,
+            )
+            await sleep(200)
+            await evalJs(
+              c,
+              `[...document.querySelectorAll('button')].find((b) => (b.textContent || '').includes('全局设置'))?.click(), true`,
+            )
+          }
+          await waitFor(c, `!!document.querySelector('.pcfg-root')`, '设置面板出现')
+        }
+        await waitFor(
+          c,
+          `[...document.querySelectorAll('.jp-tab')].some((t) => t.textContent.includes('本机'))`,
+          '「本机」子页签出现',
+        )
+        await evalJs(
+          c,
+          `[...document.querySelectorAll('.jp-tab')].find((t) => t.textContent.includes('本机'))?.click(), true`,
+        )
+        await waitFor(c, `!!document.querySelector('.pcfg-fields select')`, '本机页签内容出现（含下拉）')
+      }
+      /** 按行标签找「平移方式」那一行的 select；可选地改成某个值 */
+      const panSelect = async (setTo) =>
+        evalJs(
+          c,
+          `(() => {
+             const row = [...document.querySelectorAll('.pcfg-row')].find((r) => (r.textContent || '').includes('平移方式'))
+             const sel = row && row.querySelector('select')
+             if (!sel) return null
+             const labels = [...sel.options].map((o) => o.textContent.trim())
+             if (${JSON.stringify(setTo)} !== null) {
+               const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+               setter.call(sel, ${JSON.stringify(setTo)})
+               sel.dispatchEvent(new Event('change', { bubbles: true }))
+             }
+             return { value: sel.value, labels }
+           })()`,
+        )
+
+      await openLocalTab()
+      const first = await panSelect('beat')
+      check(
+        'adj1089 设置 → 本机 的「平移方式」下拉有三项：跟随（4/5→1/5）/ 按拍 / 按小节',
+        first?.labels?.length === 3 &&
+          first.labels[0].includes('跟随') &&
+          first.labels[0].includes('4/5') &&
+          first.labels[1] === '按拍' &&
+          first.labels[2] === '按小节',
+        JSON.stringify(first),
+      )
+      await sleep(300)
+      const stored = await evalJs(c, `localStorage.getItem('ijipu.panMode')`)
+      check('adj1089 选「按拍」⇒ 真的写进本机偏好（`ijipu.panMode = beat`）', stored === 'beat', String(stored))
+
+      // 重载：L1 偏好要记住，并且界面上的下拉要显示回来
+      await c.send('Page.reload')
+      await sleep(600)
+      await waitFor(c, `!!document.querySelector('.editor-main textarea')`, '重载后应用首屏')
+      await openLocalTab()
+      const after = await panSelect(null)
+      check(
+        'adj1089 重载后仍是「按拍」（偏好落盘 + 下拉显示回来，不是只写在内存里）',
+        after?.value === 'beat',
+        JSON.stringify(after),
+      )
+      await panSelect('follow')
+      await sleep(250)
+      const back = await evalJs(c, `localStorage.getItem('ijipu.panMode')`)
+      check('adj1089 改回「跟随」也真的生效（不是单向写死）', back === 'follow', String(back))
+    }
+
     console.log('[verify-app-ui] adj977：已安装手机 PWA 的标题不重复应用名')
     {
       const boot = async (label) => {

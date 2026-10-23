@@ -13,7 +13,8 @@ import { PREVIEW_BASE_W, isFullyVisibleIn } from './zoomFit'
 // adj987h（用户需求）：试听「标记段」的标记线覆盖层
 import { PracticeMarkLayer } from './PracticeMarkLayer'
 // adj895：播放跟随滚动的「安全区」判定（纯函数，见该文件的口径说明）
-import { followScrollTargetX } from './followScroll'
+// adj1089：按拍/按小节的居中 + "左右露白 ≤10%"夹紧（与出片同一个 clampRowCenter）
+import { followScrollTargetX, panScrollTargetX, panTickIndex } from './followScroll'
 import { openExternalUrl } from './openUrl'
 import { beginDrag } from '../ui/dragGesture'
 // adj723：音符点击（单击 / Ctrl+单击）的动作判定（纯模块，便于 smoke 断言）
@@ -1173,6 +1174,51 @@ function PlayheadDiag({ pageIndex, noteSize }: { pageIndex: number; noteSize: nu
 }
 
 /**
+ * adj1089：某时刻**本页当前曲行**的左右边界（页面单位）。
+ *
+ * 为什么按"曲行（group）"取：出片的"行内容左右边界"就是这一行**全部色块**的并集
+ * （引擎 `buildCameraTrack` 里的 rowX0/rowX1）。预览的色块同样按 (页, 曲行, 声部, 音色) 分组，
+ * 所以这里把同一页、同一曲行的所有段并起来 = 同一份"行内容"。
+ *
+ * 锁行方式与色块一致：取**此刻正在响的主声部段**（多声部同时响时取最晚开始的那条），
+ * 再用它的 `group` 找整行边界——不按行时间猜行（那会在多声部/跨行连音时锁错行）。
+ */
+function rowBoundsAt(
+  track: readonly {
+    pageIndex: number
+    group: number
+    x: number
+    width: number
+    atMs: number
+    durationMs: number
+    playVoice?: 'accomp' | 'main' | 'second'
+  }[],
+  pageIndex: number,
+  t: number,
+): { x0: number; x1: number } | null {
+  let group = -1
+  let bestAt = Number.NEGATIVE_INFINITY
+  for (const s of track) {
+    if (s.pageIndex !== pageIndex) continue
+    if (s.playVoice !== undefined && s.playVoice !== 'main') continue
+    if (!(s.atMs <= t && t < s.atMs + s.durationMs)) continue
+    if (s.atMs >= bestAt) {
+      bestAt = s.atMs
+      group = s.group
+    }
+  }
+  if (group < 0) return null
+  let x0 = Number.POSITIVE_INFINITY
+  let x1 = Number.NEGATIVE_INFINITY
+  for (const s of track) {
+    if (s.pageIndex !== pageIndex || s.group !== group) continue
+    x0 = Math.min(x0, s.x)
+    x1 = Math.max(x1, s.x + s.width)
+  }
+  return Number.isFinite(x0) && Number.isFinite(x1) ? { x0, x1 } : null
+}
+
+/**
  * adj282：跟随色块渲染层——仅订阅 currentMs/playheadTrack，避免 PreviewPane 主组件
  * 随播放逐帧重渲染（SVG 层不重建，仅本轻量色块刷新）。
  * adj299：每曲行（group）独立一个色块（按各自拍段滑动、按 voice 配色、各自行高）。
@@ -1183,6 +1229,12 @@ function PlayheadLayer({ page, pages, noteSize }: { page: ScorePage; pages: Scor
   // adj1048：拍网格（跳跳球按**拍**落，不按音落）；相位由 beatPhaseOf 投票得出
   const beatMs = useDocStore((s) => s.playheadBeatMs)
   const beatBars = useDocStore((s) => s.playheadBarStartsMs)
+  // adj1089：试听跟随滚动读**同一个**平移方式（出片侧是 `renderer.ts` 读的同一个键）
+  const panMode = useUiStore((s) => s.panMode)
+  // adj1089：`beat` 模式的拍网格起点（第一拍的时刻）
+  const anchorMs = useDocStore((s) => s.playheadAnchorMs)
+  // adj1089：同一拍 / 同一小节里只居中一次（逐帧都算就退化成连续跟随）
+  const panKeyRef = useRef('')
   // adj1062：跨页球的纵向换算要用到预览缩放（与 `.preview-zoom-scale` 的 zoom 同源）
   const previewZoom = useUiStore((s) => s.previewZoom)
 
@@ -1247,6 +1299,11 @@ function PlayheadLayer({ page, pages, noteSize }: { page: ScorePage; pages: Scor
    * 为什么放在本组件：主组件订阅 `currentMs` 会让整层 SVG 逐帧重建（`adj282` 明确避免），
    * 而本组件本来就每帧渲染 ⇒ 多一条 effect 不扩大重渲染面。
    *
+   * adj1089（用户 2026-10-23 口径）：按 `uiStore.panMode` 分两条路——
+   *   · `follow`（默认）：下面这套安全带，**行为与 adj895 完全一致**；
+   *   · `beat` / `bar`：每拍 / 每小节把色块滚到画面中间，再做同一套"左右露白 ≤10%"夹紧
+   *     （算式直接调引擎 `clampRowCenter`，与出片同源，见 `followScroll.ts`）。
+   *
    * ⚠ hook 必须在下面那两个 `return null` **之前**（条件调用 hooks 会破坏顺序）。
    */
   useEffect(() => {
@@ -1256,18 +1313,54 @@ function PlayheadLayer({ page, pages, noteSize }: { page: ScorePage; pages: Scor
     const scroller = marker?.closest('.preview-pane')
     if (!(marker instanceof HTMLElement) || !(scroller instanceof HTMLElement)) return
     const scRect = scroller.getBoundingClientRect()
-    const target = followScrollTargetX({
-      xInView: marker.getBoundingClientRect().left - scRect.left,
+    const scrollLeft = scroller.scrollLeft
+    const markerRect = marker.getBoundingClientRect()
+
+    if (panMode === 'follow') {
+      const target = followScrollTargetX({
+        xInView: markerRect.left - scRect.left,
+        viewW: scroller.clientWidth,
+        scrollW: scroller.scrollWidth,
+        scrollLeft,
+      })
+      // `null` = 还在安全区里 ⇒ 什么都不做（这正是"顺滑"的来源：极少真的调滚动）
+      if (target === null) return
+      // 目标几乎没变就不打扰 —— 免得连续两次 `smooth` 互相打断（那才会看出"一跳一跳"）
+      if (Math.abs(target - scroller.scrollLeft) < 1) return
+      scroller.scrollTo({ left: target, behavior: 'smooth' })
+      return
+    }
+
+    // beat / bar：同一拍/小节只居中一次（逐帧都算就退化成连续跟随）
+    const tick = panTickIndex(panMode, currentMs, beatMs, anchorMs, beatBars)
+    if (tick < 0) return
+    const key = `${panMode}:${tick}`
+    if (panKeyRef.current === key) return
+    /**
+     * 行内容左右边界用**页面单位**量、再按"这一页实际渲染宽 / 页宽"折成内容 px：
+     * 预览的缩放有两层（pageConfig 字号 + 用户预览比率），逐处自己算缩放迟早算错，
+     * 直接量 `.preview-zoom-scale` 的实际宽度最稳。
+     */
+    const pageEl = marker.closest('.preview-zoom-scale')
+    if (!(pageEl instanceof HTMLElement)) return
+    const pageRect = pageEl.getBoundingClientRect()
+    if (!(pageRect.width > 0) || !(page.width > 0)) return
+    const row = rowBoundsAt(track, page.index, currentMs)
+    if (!row) return
+    const scale = pageRect.width / page.width
+    const pageLeft = pageRect.left - scRect.left + scrollLeft
+    const target = panScrollTargetX({
+      blockCenterX: markerRect.left - scRect.left + scrollLeft + markerRect.width / 2,
+      rowX0: pageLeft + row.x0 * scale,
+      rowX1: pageLeft + row.x1 * scale,
       viewW: scroller.clientWidth,
       scrollW: scroller.scrollWidth,
-      scrollLeft: scroller.scrollLeft,
     })
-    // `null` = 还在安全区里 ⇒ 什么都不做（这正是"顺滑"的来源：极少真的调滚动）
     if (target === null) return
-    // 目标几乎没变就不打扰 —— 免得连续两次 `smooth` 互相打断（那才会看出"一跳一跳"）
-    if (Math.abs(target - scroller.scrollLeft) < 1) return
+    panKeyRef.current = key
+    if (Math.abs(target - scrollLeft) < 1) return
     scroller.scrollTo({ left: target, behavior: 'smooth' })
-  }, [currentMs, track])
+  }, [currentMs, track, panMode, beatMs, beatBars, anchorMs, page.index, page.width])
 
   if (track.length === 0 || currentMs <= 0) return null
   // adj427：按「本页 + 曲行 + 声部 + 音色」**逐组**定位——重叠区（bz 伴奏 / dsb 第二声部）

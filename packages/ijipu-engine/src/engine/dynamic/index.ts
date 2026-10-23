@@ -14,13 +14,15 @@ export type { BallAnchor, BallPos, BallTiming } from './ball'
 export {
   buildCameraTrack,
   cameraAt,
+  clampRowCenter,
   CAMERA_FOLLOW_ZOOM,
   CAMERA_INTRO_MS,
   CAMERA_LINE_MS,
   CAMERA_PAN_MS,
   CAMERA_SAFE_HALF,
+  CAMERA_WHITE_MARGIN,
 } from './camera'
-export type { CameraFrame, CameraTrack, CameraOptions, CameraRow, CameraPan } from './camera'
+export type { CameraFrame, CameraTrack, CameraOptions, CameraRow, CameraPan, PanMode } from './camera'
 export {
   DYNAMIC_PRESETS,
   DEFAULT_DYNAMIC_PRESET,

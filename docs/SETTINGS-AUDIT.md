@@ -199,6 +199,7 @@
 | `ijipu.playbackHqEnabledByLib` | `{}` | **每库一套收藏音色**（adj1012）：按音色库 id 存收藏集合 | 用户个性 | → 插件设置（保留） |
 | `ijipu.dynamicCardStyle` | `brand` | **动态谱片头/片尾卡片模板**（adj1073）：`brand`/`paper`/`ink`/`minimal`/`custom`；L1，不写进 `.jps` | 用户个性（视频样式） | 桌面端保留；网站/插件不显示动态谱视频 |
 | `ijipu.dynamicCardStyleCustom` | null | **自定义卡片样式 JSON**（adj1074）：颜色/字体/水印/效果/背景图 data URL（≤2.5MB）；L1，不随谱走 | 用户个性（视频样式） | 桌面端保留；换机器不跟谱 |
+| `ijipu.panMode` | `follow` | **动态视频/试听的行中平移方式**（adj1089）：`follow`（色块到右 4/5 才推、一次推到左 1/5）/ `beat`（按拍居中）/ `bar`（按小节居中）。三种都受"行首、行末左右露白 ≤ 画面 10%"约束（引擎 `CAMERA_WHITE_MARGIN` / `clampRowCenter`）；L1，不写进 `.jps` | 用户个性（怎么看谱/成片） | 桌面端保留；网站/插件不显示动态谱视频（试听跟随滚动仍读这个键） |
 
 ### 4.2 IndexedDB / Tauri / PWA
 

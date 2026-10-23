@@ -39,6 +39,7 @@ import {
   type PageConfig,
   type CameraFrame,
   type CameraTrack,
+  type PanMode,
   type PlayEvent,
 } from '@ijipu/engine'
 import { svgToCanvas } from '../export'
@@ -113,6 +114,15 @@ export async function createDynamicSession(
     ball?: boolean
     /** adj1073：片头/片尾卡片模板（预设或以后的自定义样式；缺省 = 品牌深空蓝） */
     cardStyle?: CardStyle
+    /**
+     * adj1089：行中平移方式（`follow` / `beat` / `bar`）。
+     *
+     * 由**调用方**从 `uiStore.panMode`（L1 偏好）取来传进来，本文件不读 store：
+     * 预览（`DynamicFrameOverlay`）会订阅它、导出与命令行出片在调用时取一次，
+     * 这样"设置里改了下拉"能立刻触发会话重建，而不是继续放旧 `pans`。
+     * 缺省 `follow` = 既有行为。
+     */
+    panMode?: PanMode
   },
 ): Promise<DynamicSession> {
   const preset = DYNAMIC_PRESETS[presetId]
@@ -198,6 +208,28 @@ export async function createDynamicSession(
   const view = buildFlowView(layout, track, pageConfig)
   if (view.rows.length === 0) throw new Error('这份谱没有可播放的音符')
 
+  /**
+   * 一拍多少毫秒（相机 `beat` 模式与跳跳球共用；必须与 `buildPlaySequence` 用同一个 beat）。
+   */
+  const beatMs = 60000 / beat
+  /**
+   * 小节起点（按小节重置拍网格；片头后移所以要加 `leadIn`）。
+   *
+   * adj1061（用户 2026-10-22 实报「反复后球落点漂移」）：`seq.barStartsMs` 现在是
+   * **展开后逐遍**的小节起点（练习段切片已重基），末尾那条「曲末」不是小节开头，
+   * `ballAt` 只把它当"球自由落体"的时刻。
+   *
+   * adj1089：相机的 `bar` 模式读**同一份**数组。末尾那条"曲末"保留：
+   * 球要拿它做自由落体；相机会按 `t <= endMs` 过滤，且那一刻没有色块在响（`rectIndexAt` 返回 -1），
+   * 不会多出一条 pans。
+   */
+  const ballBars = (seq.barStartsMs ?? []).map((s) => s + leadInMs)
+  /**
+   * adj1089：平移方式由调用方给（`uiStore.panMode` 的 L1 偏好；缺省 follow = 既有行为）。
+   * 这里不读 store：预览要订阅它才能"改了下拉立刻重建会话"，所以依赖必须是显式的。
+   */
+  const panMode = opts?.panMode ?? 'follow'
+
   const camera = buildCameraTrack(view, track, pageConfig, {
     viewW: preset.width,
     viewH: preset.height,
@@ -205,6 +237,10 @@ export async function createDynamicSession(
     headerCy: pageConfig.margin_top + pageConfig.descAreaH / 2,
     ...(opts?.followZoom !== undefined ? { followZoom: opts.followZoom } : {}),
     ...(skipIntro ? { skipIntro: true } : {}),
+    // adj1089：按拍/按小节平移（都受"左右露白 ≤10%"夹紧；见引擎 clampRowCenter）
+    panMode,
+    beatMs,
+    bars: ballBars,
   })
   const ball = opts?.ball !== false
   const musicEndMs = track.endMs
@@ -216,15 +252,6 @@ export async function createDynamicSession(
   const ballAnchors = track.rects
     .filter((r) => r.playVoice === undefined || r.playVoice === 'main')
     .map((r) => ({ t0: r.t0, t1: r.t1, cx: r.x + r.w / 2, top: r.y, x: r.x, w: r.w }))
-  const beatMs = 60000 / beat
-  /**
-   * 小节起点（按小节重置拍网格；片头后移所以要加 `leadIn`）。
-   *
-   * adj1061（用户 2026-10-22 实报「反复后球落点漂移」）：`seq.barStartsMs` 现在是
-   * **展开后逐遍**的小节起点（练习段切片已重基），末尾那条「曲末」不是小节开头，
-   * `ballAt` 只把它当"球自由落体"的时刻。
-   */
-  const ballBars = (seq.barStartsMs ?? []).map((s) => s + leadInMs)
   /** 拍网格相位：只作"没有小节起点"时的兜底（有 `ballBars` 时 `ballAt` 不看它） */
   const beatPhase = ballBars.length > 0 ? 0 : beatPhaseOf(ballAnchors, beatMs)
   /**

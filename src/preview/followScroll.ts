@@ -32,7 +32,18 @@
  *
  * 纵向**不在这里**：页面纵向是"逐行推进"，语义与横向不同（用户本轮只提横向）。
  * 若日后也要余量，按同一模型加一个 `followScrollTargetY` 即可，别把这套逻辑写进组件里。
+ *
+ * ## adj1089：按拍 / 按小节（与出片同一套"露白 ≤10%"夹紧）
+ *
+ * 出片（`engine/dynamic/camera.ts`）的 `panMode` 有三种，试听必须读**同一个值**：
+ *   · `follow` ⇒ 上面那套安全带（本文件前半，行为不变）；
+ *   · `beat` / `bar` ⇒ 按拍 / 按小节把色块**滚到中间**，再做同一套夹紧。
+ *
+ * 夹紧算式**不在这里重抄一遍**：直接调引擎的 `clampRowCenter`
+ * （它按"行内容左右边界 + 露白比例"算相机中心，这里换成 `scrollLeft = cx − 视宽/2`）。
+ * 于是"改一个 0.1"只有一处，出片与试听不会各走各的。
  */
+import { CAMERA_WHITE_MARGIN, clampRowCenter, type PanMode } from '@ijipu/engine'
 
 /** 安全带下沿（占视口宽的比例）：目标点小于它就算"太靠左" */
 export const FOLLOW_SAFE_LOW = 0.25
@@ -66,4 +77,70 @@ export function followScrollTargetX(input: FollowScrollInput): number | null {
   const want = xInView > high ? low : high
   const maxScroll = scrollW - viewW
   return Math.max(0, Math.min(scrollLeft + (xInView - want), maxScroll))
+}
+
+/**
+ * adj1089：当前"这一拍 / 这一小节"的序号——用来保证**同一拍内不重复居中**。
+ *
+ * 为什么需要序号：`beat`/`bar` 模式的语义是"每拍/每小节移一次"，
+ * 若逐帧都算"把色块滚到中间"，就退化成连续跟随（既不按拍、也在跟浏览器平滑滚动打架）。
+ *
+ * @param t        当前播放时刻（ms）
+ * @param anchorMs 第一拍的时刻（`playheadAnchorMs`）
+ * @param bars     展开后逐遍的小节起点（`playheadBarStartsMs`；末尾那条"曲末"不会被命中）
+ * @returns ≥0 的序号；`-1` = 参数不足或还没到第一拍（调用方不居中）
+ */
+export function panTickIndex(
+  mode: PanMode,
+  t: number,
+  beatMs: number,
+  anchorMs: number,
+  bars: readonly number[],
+): number {
+  if (mode === 'follow' || !(t > 0)) return -1
+  if (mode === 'beat') {
+    if (!(beatMs > 0)) return -1
+    const i = Math.floor((t - anchorMs) / beatMs)
+    return i >= 0 ? i : -1
+  }
+  let idx = -1
+  for (let i = 0; i < bars.length; i++) {
+    if (bars[i] <= t + 1e-6) idx = i
+    else break
+  }
+  return idx
+}
+
+export interface PanScrollInput {
+  /** 色块中心在**内容坐标**（px，= 视口坐标 + scrollLeft）里的位置 */
+  blockCenterX: number
+  /** 本行内容的左右缘（同样内容坐标 px；行内容 = 这一行全部色块的并集） */
+  rowX0: number
+  rowX1: number
+  /** 视口宽（`clientWidth`，已排除滚动条） */
+  viewW: number
+  /** 可滚内容总宽（`scrollWidth`） */
+  scrollW: number
+}
+
+/**
+ * adj1089：`beat` / `bar` 模式要滚到的 `scrollLeft`；无横向可滚余地时返回 `null`。
+ *
+ * 算式与出片**同一个** `clampRowCenter`：
+ * ```
+ * 相机中心 cx：把色块中心夹进"行首露白 ≤10% / 行末露白 ≤10%"的区间
+ *             （整行放得下时 clampRowCenter 直接给行中心 ⇒ 不平移）
+ * 滚动量      ：scrollLeft = cx − 视宽/2（视口左缘正好压在 cx 半宽处）
+ * ```
+ * 最后再钳到浏览器自己的可滚上限 `scrollWidth − clientWidth`（与 `followScrollTargetX` 同口径）。
+ *
+ * ⚠ 与出片的差别只在**坐标**：出片用页面单位、这里是内容 px；比例（10%）是同一个常量，
+ * 所以"试听看到的露白"和"成片里的露白"是同一条规则，不是两套。
+ */
+export function panScrollTargetX(input: PanScrollInput): number | null {
+  const { blockCenterX, rowX0, rowX1, viewW, scrollW } = input
+  if (!(viewW > 0) || !(scrollW > viewW)) return null
+  const cx = clampRowCenter(rowX0, rowX1, viewW, CAMERA_WHITE_MARGIN, blockCenterX)
+  const maxScroll = scrollW - viewW
+  return Math.max(0, Math.min(maxScroll, cx - viewW / 2))
 }

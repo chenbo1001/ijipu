@@ -53,6 +53,12 @@ export function DynamicFrameOverlay() {
   const cardStyle = useUiStore((s) => s.dynamicCardStyle)
   const setDynamicCardStyle = useUiStore((s) => s.setDynamicCardStyle)
   const customCardStyle = useUiStore((s) => s.dynamicCardStyleCustom)
+  /**
+   * adj1089：平移方式虽然是**引擎读**的（`renderer.ts` 里取 `uiStore.getState().panMode`），
+   * 但这里必须也订阅它并放进"重建会话"的依赖里 —— 否则用户在设置里换了平移方式，
+   * 已经打开的相机位仍播着旧 `pans`（看起来就是"设置没生效"）。
+   */
+  const panMode = useUiStore((s) => s.panMode)
   const openModal = useUiStore((s) => s.openModal)
   const effectiveCardStyle =
     cardStyle === 'custom' && customCardStyle ? customCardStyle : cardStyleById(cardStyle)
@@ -200,6 +206,8 @@ export function DynamicFrameOverlay() {
         leadInMs: LEAD_IN_MS,
         maxMs: mode === '3min' ? EXPORT_MAX_MS : undefined,
         cardStyle: { ...effectiveCardStyle, backgroundImage },
+        // adj1089：平移方式（订阅了 ⇒ 切下拉会重建会话；见上面的依赖数组）
+        panMode,
       })
     })()
       .then((s) => {
@@ -220,7 +228,7 @@ export function DynamicFrameOverlay() {
     return () => {
       cancelled = true
     }
-  }, [on, aspect, code, pageConfig, range, mode, effectiveCardStyle, paint])
+  }, [on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, paint])
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
 
@@ -324,6 +332,8 @@ export function DynamicFrameOverlay() {
         mode,
         range,
         cardStyle: effectiveCardStyle,
+        // adj1089：出片与预览同一份平移方式（设置 → 本机 的 L1 偏好）
+        panMode,
         // 逐次导出都重新按会话渲音轨：分段/遍次变了，事件序列就不同（缓存只能按会话建）
         ...(withAudio ? { makeAudio: renderAudioFor } : {}),
         onProgress: (p, ph) => {

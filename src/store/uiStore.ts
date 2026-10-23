@@ -26,6 +26,10 @@ import {
 // 它是"水印层/背景层"这个领域概念，应用与插件共用；store 只在这里给它一个"用户选中的那层"的槽位
 export type { OverlayLayer } from '@ijipu/engine'
 import type { OverlayLayer } from '@ijipu/engine'
+// adj1089：平移方式的取值域同样在引擎（`dynamic/camera.ts` 的 `PanMode`）——
+// 校验规则必须与 `buildCameraTrack` 认的三种一致，store 不另抄一份
+export type { PanMode } from '@ijipu/engine'
+import type { PanMode } from '@ijipu/engine'
 
 /**
  * adj563：**只保留 App 里真的还有渲染分支的模态**（原来还躺着 'about' / 'pageConfig' / 'playback' /
@@ -136,6 +140,25 @@ const SHOW_GUIDES_KEY = 'ijipu.showGuides'
 const DYNAMIC_CARD_STYLE_KEY = 'ijipu.dynamicCardStyle'
 const DYNAMIC_CARD_STYLE_CUSTOM_KEY = 'ijipu.dynamicCardStyleCustom'
 const DYNAMIC_CARD_STYLE_IDS: readonly CardTemplateId[] = ['brand', 'paper', 'ink', 'minimal']
+/**
+ * adj1089（用户 2026-10-23 口径）：动态视频与试听的**行中平移方式**（L1 用户偏好）。
+ *
+ * 为什么不塞进 `dynamicCamera`：那是 **L3 会话级**（关掉相机位就归零）；
+ * "喜欢怎么看谱"属于"这个人怎么用" ⇒ L1、要跨运行记住。
+ * 取值域在引擎（`PanMode`），这里只做读取回退与写入校验。
+ */
+const PAN_MODE_KEY = 'ijipu.panMode'
+const PAN_MODES: readonly PanMode[] = ['follow', 'beat', 'bar']
+
+/** 读失败 / 旧版本没有这个键 / 脏值 ⇒ 一律回退 `follow`（= 既有行为，不改变任何老用户观感） */
+function loadPanMode(): PanMode {
+  try {
+    const v = localStorage.getItem(PAN_MODE_KEY)
+    return PAN_MODES.includes(v as PanMode) ? (v as PanMode) : 'follow'
+  } catch {
+    return 'follow'
+  }
+}
 
 /** adj1074：自定义卡片样式（含背景图 data URL）；坏数据回退 null，不让预览打不开 */
 function loadCustomCardStyle(): CardStyle | null {
@@ -415,6 +438,18 @@ interface UiState {
   dynamicCardStyleCustom: CardStyle | null
   setDynamicCardStyleCustom: (style: CardStyle) => void
   resetDynamicCardStyleCustom: () => void
+  /**
+   * adj1089（用户 2026-10-23 口径）：动态视频与试听的**行中平移方式**（L1，落 localStorage）。
+   *
+   * - `follow`（默认）：色块到画面右 4/5 才推，一次推到左 1/5；
+   * - `beat`：每拍移一次，把当前拍的色块放到画面中间；
+   * - `bar`：每小节移一次，同上。
+   *
+   * 三种都受"左右露白 ≤ 画面 10%"约束（引擎 `clampRowCenter`，出片与试听共用）。
+   */
+  panMode: PanMode
+  /** adj1089：写入前校验取值（只允许三种），脏值忽略、不落盘 */
+  setPanMode: (m: PanMode) => void
   /**
    * adj905q（用户规格见 `docs/PREVIEW-DEBUG-BOUNDARIES.md`）：**预览可视调试**开关。
    * 开启后在预览里叠加「时值格 / 墨迹 / 段层」三套边界虚线（几何来自引擎
@@ -783,6 +818,8 @@ export const useUiStore = create<UiState>()((set) => ({
   dynamicCardStyle: loadDynamicCardStyle(initialCustomCardStyle),
   // adj1074：自定义卡片（L1，落盘；坏数据回退 null）
   dynamicCardStyleCustom: initialCustomCardStyle,
+  // adj1089：平移方式（L1，落盘；脏值/读失败回退 follow ⇒ 老用户观感不变）
+  panMode: loadPanMode(),
   // adj905q：预览可视调试 —— **L3 会话级**，刻意不读 localStorage（重开即恢复默认关）
   debugBounds: false,
   // adj965d（EP-13）：预览区 Alt 手势默认调**背景层**（L3 会话级，不落盘）
@@ -899,6 +936,21 @@ export const useUiStore = create<UiState>()((set) => ({
       dynamicCardStyleCustom: null,
       dynamicCardStyle: s.dynamicCardStyle === 'custom' ? 'brand' : s.dynamicCardStyle,
     }))
+  },
+  /**
+   * adj1089：平移方式（L1）。
+   *
+   * **写入前校验**：只允许 `PAN_MODES` 里的三种。脏值不落盘、也不改内存——
+   * 若把脏值写进去，下次启动 `loadPanMode` 会回退 `follow`，用户会以为"设置点了没生效"。
+   */
+  setPanMode: (m) => {
+    if (!PAN_MODES.includes(m)) return
+    try {
+      localStorage.setItem(PAN_MODE_KEY, m)
+    } catch {
+      /* 忽略隐私模式/配额异常 */
+    }
+    set({ panMode: m })
   },
   // adj965d：Alt 手势调哪一层（L3 会话级）——**不落盘**；默认背景层：
   // 需要摆位置的通常是垫进来的那张背景图（水印多为居中一个）

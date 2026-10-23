@@ -10,7 +10,7 @@
  *    界面那边用现成的 HQ 音源缓存，命令行那边自己解析音色库；
  *  · 画面与会话仍然走 `createDynamicSession`（引擎 + 宿主层），不另造一份。
  */
-import type { DynamicPresetId, PageConfig } from '@ijipu/engine'
+import type { DynamicPresetId, PageConfig, PanMode } from '@ijipu/engine'
 import { createDynamicSession, type DynamicSession } from './renderer'
 import { encodeMp4 } from './mp4'
 import type { CardStyle } from './cardTemplates'
@@ -29,6 +29,11 @@ export interface DynamicExportOptions {
   /** 只导某个标记段（起止音符 id + 候选遍次，0 起）；`null` = 整曲 */
   range: { startId: string; endId: string; pass?: number } | null
   cardStyle?: CardStyle
+  /**
+   * adj1089：行中平移方式（`follow` / `beat` / `bar`）。
+   * 调用方从 `uiStore.panMode` 取（本文件刻意不读 store，见文件头的依赖边界）；缺省 follow。
+   */
+  panMode?: PanMode
   /**
    * 音轨工厂。**不传 = 无声**（不是"忘了"）：调用方明确决定要不要声音。
    * 失败由调用方处理（界面那边是"本次导出无声"的提示，命令行是回包里说明）。
@@ -60,6 +65,8 @@ export async function exportDynamicVideo(opts: DynamicExportOptions): Promise<Dy
     leadInMs: LEAD_IN_MS,
     ...(opts.mode === '3min' ? { maxMs: EXPORT_MAX_MS } : {}),
     ...(opts.cardStyle === undefined ? {} : { cardStyle: opts.cardStyle }),
+    // adj1089：平移方式透传（与预览/试听同一份 L1 偏好）
+    ...(opts.panMode === undefined ? {} : { panMode: opts.panMode }),
   })
 
   let audio: AudioBuffer | null = null

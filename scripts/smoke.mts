@@ -72,6 +72,8 @@ import { PLAYHEAD_COLORS } from '@ijipu/engine/index.ts'
 import { computeDebugBounds } from '@ijipu/engine/index.ts'
 // adj895：播放跟随滚动的「安全区」（纯函数 ⇒ 可在 Node 里直接断言）
 import { FOLLOW_SAFE_HIGH, FOLLOW_SAFE_LOW, followScrollTargetX } from '../src/preview/followScroll'
+// adj1089：试听「按拍 / 按小节」居中 + "左右露白 ≤10%"夹紧（与出片共用引擎 clampRowCenter）
+import { panScrollTargetX, panTickIndex } from '../src/preview/followScroll'
 // adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
 import { JPS_PARAM_MAX_LEN, readJpsFromSearch, withoutJpsParam } from '../src/store/urlImport'
 import { inflateSync } from 'node:zlib'
@@ -99,6 +101,8 @@ import { buildRectTrack, rectsActiveAt } from '@ijipu/engine/index.ts'
 import { buildFlowView, frameAt, frameTimeMs, frameIndexAt, dynamicPageConfig } from '@ijipu/engine/index.ts'
 // M1-3：相机（满宽片头 → 推近 → 安全区跟拍）
 import { buildCameraTrack, cameraAt, ballAt, BALL_LANDING_TIMING } from '@ijipu/engine/index.ts'
+// adj1089：露白夹紧的算式与阈值（出片与试听共用一份；正/负对照都直接用它们）
+import { clampRowCenter, CAMERA_WHITE_MARGIN } from '@ijipu/engine/index.ts'
 // adj1068：调号显示口径（描述头与动态视频片头卡共用）
 import { keySignatureOf } from '@ijipu/engine/index.ts'
 // adj1075：卡片模板 zip 往返（纯函数，Node 里直接验）
@@ -29212,6 +29216,85 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
 }
 
 /**
+ * adj1089（用户口径）：试听的「按拍 / 按小节」平移——与出片**同一套**"露白 ≤10%"夹紧。
+ *
+ * 试听里这段是 DOM effect（无头环境跑不了），所以把**算目标 scrollLeft** 的那一步抽成纯函数
+ * `panScrollTargetX`，在这里直接断言；组件只负责"量坐标 + 调 scrollTo"。
+ *
+ * 坐标口径：全部是**内容坐标 px**（= 视口坐标 + scrollLeft）；`viewW` = 视口宽。
+ * 行内容边界按"这一行全部色块"算（不是纸张边距）——与出片 `rowX0/rowX1` 同源。
+ */
+{
+  console.log('[163b] playhead pan modes: beat / bar (adj1089)')
+  const viewW = 400
+  const scrollW = 1400
+  // 行内容 200..1200（行宽 1000 > 视宽）：必须按 10% 夹紧
+  const longRow = { rowX0: 200, rowX1: 1200, viewW, scrollW }
+  check(
+    'adj1089 按拍：色块在行内 ⇒ 滚到画面中间（scrollLeft = 块中心 − 视宽/2）',
+    panScrollTargetX({ ...longRow, blockCenterX: 600 }) === 400,
+    String(panScrollTargetX({ ...longRow, blockCenterX: 600 })),
+  )
+  // 行首：块中心 260 会让左露白 40+ 超过 10%（=40px）⇒ 夹到 160（左露白恰好 40）
+  const atStart = panScrollTargetX({ ...longRow, blockCenterX: 260 })
+  check(
+    'adj1089 按拍：行首**夹紧**——左侧露白恰好 ≤10% 视宽（不把行首推出画面）',
+    atStart === 160,
+    `target=${String(atStart)} 左露白=${String(atStart === null ? NaN : 200 - atStart)}`,
+  )
+  const atEnd = panScrollTargetX({ ...longRow, blockCenterX: 1140 })
+  check(
+    'adj1089 按拍：行末**夹紧**——右侧露白恰好 ≤10% 视宽',
+    atEnd === 840,
+    `target=${String(atEnd)} 右露白=${String(atEnd === null ? NaN : atEnd + viewW - 1200)}`,
+  )
+  // 整行放得下（行宽 250 + 两侧 40 ≤ 400）⇒ 取行中心、不平移
+  const fits = panScrollTargetX({ rowX0: 200, rowX1: 450, blockCenterX: 205, viewW, scrollW })
+  check('adj1089 整行放得下 ⇒ 取行中心（块在行首也不硬推到中间）', fits === 125, String(fits))
+  check(
+    'adj1089 内容不比视口宽 ⇒ 不滚（没有横向可滚余地）',
+    panScrollTargetX({ rowX0: 0, rowX1: 300, blockCenterX: 100, viewW, scrollW: 300 }) === null &&
+      panScrollTargetX({ rowX0: 0, rowX1: 300, blockCenterX: 100, viewW: 0, scrollW: 300 }) === null,
+  )
+  check(
+    'adj1089 目标钳在可滚上限内（scrollWidth − clientWidth）',
+    panScrollTargetX({ rowX0: 1200, rowX1: 2000, blockCenterX: 1300, viewW, scrollW }) === 1000,
+    String(panScrollTargetX({ rowX0: 1200, rowX1: 2000, blockCenterX: 1300, viewW, scrollW })),
+  )
+  /**
+   * 拍/小节**序号**：同一拍/小节内不重复居中（否则逐帧都算 ⇒ 退化成连续跟随）。
+   */
+  check(
+    'adj1089 beat 序号：按下标每拍 +1（同一拍内不变）',
+    panTickIndex('beat', 1000, 500, 0, []) === 2 &&
+      panTickIndex('beat', 1499, 500, 0, []) === 2 &&
+      panTickIndex('beat', 1500, 500, 0, []) === 3,
+  )
+  check(
+    'adj1089 beat 序号：拍速未知 / 还没到第一拍 ⇒ -1（不居中）',
+    panTickIndex('beat', 1000, 0, 0, []) === -1 && panTickIndex('follow', 1000, 500, 0, []) === -1,
+  )
+  check(
+    'adj1089 bar 序号：取最后一个 ≤ t 的小节起点（末尾"曲末"不会被提前命中）',
+    panTickIndex('bar', 2500, 500, 0, [0, 2000, 4000]) === 1 &&
+      panTickIndex('bar', 3999, 500, 0, [0, 2000, 4000]) === 1 &&
+      panTickIndex('bar', 4000, 500, 0, [0, 2000, 4000]) === 2,
+  )
+  /**
+   * 负对照：**阈值本身**在起作用 —— 把 0.1 换成 0.5 后，同一行首的露白会变成 50% 视宽。
+   * （阈值只有一处：`CAMERA_WHITE_MARGIN`；出片与试听都吃它，见 `clampRowCenter`。）
+   */
+  const halfW = viewW / 2
+  const with05 = clampRowCenter(200, 1200, viewW, 0.5, 200)
+  check(
+    'adj1089 负对照：露白阈值 0.1 → 0.5 ⇒ 行首露白变成 50% 视宽（= 断言真的在量阈值，不是恒绿）',
+    // 上面几条期望值（160 / 840 / 125）就是按**字面 10%** 算的 ⇒ 常量改成 0.5 时它们必然判红
+    Math.abs(CAMERA_WHITE_MARGIN - 0.1) < 1e-9 && 200 - (with05 - halfW) > viewW * 0.1 + 1,
+    `常量=${CAMERA_WHITE_MARGIN} 左露白=${200 - (with05 - halfW)}`,
+  )
+}
+
+/**
  * adj898（用户要求）：首页每个示例谱都必须**规范** ——
  * 用户原话「完整的示例谱要规范，如以 `||` 结束，拍子要对，不能有告警」。
  *
@@ -32586,6 +32669,275 @@ function runDynamicCameraTests(): void {
 
   check('M3 真的发生了横向跟拍（关键帧 ≥ 2）', cam.pans.length >= 2, String(cam.pans.length))
 
+  /**
+   * ---- adj1089：平移模式（follow / beat / bar）与"左右露白 ≤10%" ----
+   *
+   * 用户验收口径（2026-10-23）：
+   *  ① 三模式各一条：同一夹具下 pans 的**数量与时机**都不同；
+   *  ② 两条露白断言：长行**行首左侧** / **行末右侧**露白 ≤10%（**按行内容**算，不是纸张边距）；
+   *  ③ 整行放得下：该行只有一个 pan，且 cx = 行中心；
+   *  ④ 负向判据：露白阈值 0.1 → 0.5 ⇒ 断言必须红（这里用 `clampRowCenter` 直接算，机器化）。
+   *
+   * 行内容 = 这一行**全部色块的并集**（`x .. x+w`），与引擎 `buildCameraTrack` 里
+   * `rowX0 / rowX1` 同一口径——**不是**纸张边距（用纸张边距算出来的 cx 会不同，见下面那条对照）。
+   */
+  {
+    console.log('    [adj1089] 平移模式 + 露白 ≤10%')
+    /**
+     * ⚠ 断言里的阈值用**字面 10%**（用户口径），**刻意不读**引擎的 `CAMERA_WHITE_MARGIN`：
+     * 读同一个常量就成了恒真判据——把 0.1 改成 0.5 时断言也会跟着放宽、照样全绿。
+     * 负向判据（用户要求"改 0.5 必须红"）靠的就是这一处字面值；
+     * 常量与用户口径是否一致由下面那条 `CAMERA_WHITE_MARGIN === WHITE_MAX` 单独守。
+     */
+    const WHITE_MAX = 0.1
+    const worldW = cam.viewW / cam.zoomFollow
+    const halfW = worldW / 2
+    const m = worldW * WHITE_MAX
+    const rowX0 = view.rows.map(() => Number.POSITIVE_INFINITY)
+    const rowX1 = view.rows.map(() => Number.NEGATIVE_INFINITY)
+    for (let i = 0; i < track.rects.length; i++) {
+      const ri = view.rectRow[i]
+      if (ri < 0 || ri >= view.rows.length) continue
+      rowX0[ri] = Math.min(rowX0[ri], track.rects[i].x)
+      rowX1[ri] = Math.max(rowX1[ri], track.rects[i].x + track.rects[i].w)
+    }
+    const bars = (seq0.barStartsMs ?? []).map((s) => s + LEAD)
+    const beatMsCam = 60000 / 120
+    const baseOpts = { viewW: 1080, viewH: 1920, headerCy }
+    const camFollow = buildCameraTrack(view, track, DUR_CFG, { ...baseOpts, panMode: 'follow' })
+    const camBeat = buildCameraTrack(view, track, DUR_CFG, {
+      ...baseOpts,
+      panMode: 'beat',
+      beatMs: beatMsCam,
+      bars,
+    })
+    const camBar = buildCameraTrack(view, track, DUR_CFG, { ...baseOpts, panMode: 'bar', bars })
+    const modes: [string, typeof camFollow][] = [
+      ['follow', camFollow],
+      ['beat', camBeat],
+      ['bar', camBar],
+    ]
+
+    check(
+      'adj1089 默认（不传 panMode）= follow：pans 逐值相等（没设置过的用户观感不变）',
+      camFollow.pans.length === cam.pans.length &&
+        camFollow.pans.every(
+          (p, i) =>
+            p.t === cam.pans[i].t &&
+            p.cx === cam.pans[i].cx &&
+            p.from === cam.pans[i].from &&
+            p.dur === cam.pans[i].dur,
+        ),
+      `${camFollow.pans.length} vs ${cam.pans.length}`,
+    )
+    check(
+      'adj1089 三模式 pans **数量**各不相同',
+      new Set(modes.map(([, c]) => c.pans.length)).size === 3,
+      modes.map(([n, c]) => `${n}=${c.pans.length}`).join(' '),
+    )
+    const timesOf = (c: typeof camFollow): string => c.pans.map((p) => Math.round(p.t)).join(',')
+    check(
+      'adj1089 三模式 pans **时机**各不相同（不是只换了个数字）',
+      timesOf(camFollow) !== timesOf(camBeat) &&
+        timesOf(camBeat) !== timesOf(camBar) &&
+        timesOf(camFollow) !== timesOf(camBar),
+    )
+
+    // 行内容左缘明显在纸张左边距右侧 ⇒ "按行内容算"与"按纸张边距算"是两套不同的值
+    check(
+      'adj1089 夹具自检：行内容左缘在纸张左边距右侧（所以"按行内容算"确实不是纸张边距）',
+      rowX0.every((x, i) => !Number.isFinite(x) || x > DUR_CFG.margin_left + 2),
+      `rowX0[0]=${rowX0[0]} margin_left=${DUR_CFG.margin_left}`,
+    )
+
+    const rowAtTime = (t: number): number => {
+      for (let i = 0; i < view.rows.length; i++) {
+        const r = view.rows[i]
+        if (t >= r.t0 - 0.5 && t < r.t1) return i
+      }
+      return -1
+    }
+    /** 整行放得下（行宽 + 两侧 10% ≤ 视宽）⇒ 露白规则让位给"取行中心" */
+    const fitsRow = (ri: number): boolean => rowX1[ri] - rowX0[ri] + 2 * m <= worldW
+    const longRows: number[] = []
+    for (let i = 0; i < view.rows.length; i++) {
+      if (Number.isFinite(rowX0[i]) && !fitsRow(i)) longRows.push(i)
+    }
+    check(
+      'adj1089 夹具里有足够多的"放不下的长行"（否则下面两条露白断言压不住问题）',
+      longRows.length >= 3,
+      `${longRows.length} / ${view.rows.length}`,
+    )
+
+    let worstLeft = { v: Number.NEGATIVE_INFINITY, at: '' }
+    let worstRight = { v: Number.NEGATIVE_INFINITY, at: '' }
+    for (const [name, c] of modes) {
+      for (const p of c.pans) {
+        const ri = rowAtTime(p.t)
+        if (ri < 0 || fitsRow(ri)) continue
+        const l = rowX0[ri] - (p.cx - halfW)
+        const r = p.cx + halfW - rowX1[ri]
+        if (l > worstLeft.v) worstLeft = { v: l, at: `${name} 行${ri} t=${Math.round(p.t)}` }
+        if (r > worstRight.v) worstRight = { v: r, at: `${name} 行${ri} t=${Math.round(p.t)}` }
+      }
+    }
+    check(
+      'adj1089 三模式：**每一处**平移的左右露白都 ≤10% 视宽（按行内容算）',
+      worstLeft.v <= m + 0.51 && worstRight.v <= m + 0.51,
+      `左=${worstLeft.v.toFixed(1)}（${worstLeft.at}） 右=${worstRight.v.toFixed(1)}（${worstRight.at}） 阈值=${m.toFixed(1)}`,
+    )
+
+    /**
+     * ② 两条**露白断言**（用户点名的验收项）：长行的行首 / 行末。
+     *
+     * 为什么取"该行第一处 / 最后一处 pans"：`cameraAt` 在关键帧时刻（`p.t`）已经归位
+     * （推移在 `p.t` 之前完成），所以这两个时刻就是"观众看清行首/行末"的那一帧。
+     */
+    let badStart = ''
+    let badEnd = ''
+    for (const [name, c] of modes) {
+      for (const ri of longRows) {
+        const r = view.rows[ri]
+        const rowPans = c.pans.filter((p) => p.t >= r.t0 - 0.5 && p.t < r.t1)
+        if (rowPans.length === 0) {
+          if (badStart === '') badStart = `${name} 行${ri}：这一行一个 pan 都没有`
+          continue
+        }
+        const leftWhite = rowX0[ri] - (rowPans[0].cx - halfW)
+        const last = rowPans[rowPans.length - 1]
+        const rightWhite = last.cx + halfW - rowX1[ri]
+        if (leftWhite > m + 0.51 && badStart === '') {
+          badStart = `${name} 行${ri}：左露白 ${leftWhite.toFixed(1)} > ${m.toFixed(1)}（行内容 x0=${rowX0[ri].toFixed(1)}）`
+        }
+        if (rightWhite > m + 0.51 && badEnd === '') {
+          badEnd = `${name} 行${ri}：右露白 ${rightWhite.toFixed(1)} > ${m.toFixed(1)}（行内容 x1=${rowX1[ri].toFixed(1)}）`
+        }
+      }
+    }
+    check('adj1089 长行**行首**：左侧露白 ≤10% 视宽（三种模式各一遍）', badStart === '', badStart)
+    check('adj1089 长行**行末**：右侧露白 ≤10% 视宽（三种模式各一遍）', badEnd === '', badEnd)
+
+    /**
+     * ③ 整行放得下：该行**只有一个 pan**，且 `cx = 行中心`（三种模式都要这样）。
+     *
+     * 夹具：两行满的 + 一行只有一个音的末行。⚠ 末行的**色块**会撑满那一小节
+     * （实测行内容 x=56..297.5、行宽 241.5，而 4× 跟拍下视宽只有 270）⇒ 用 4× 时它其实**放不下**。
+     * 这里把跟拍倍数设成 3（视宽 360 页面单位）：241.5 + 2×10% = 313.5 ≤ 360 ⇒ 真正"放得下"。
+     */
+    const SHORT_SRC = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 |\nQ: 1 2 3 4 | 5 6 7 1 |\nQ: 1 |\n'
+    const shortParsed = parseJpsRaw(SHORT_SRC)
+    const shortLayout = layoutScore(shortParsed, DUR_CFG)
+    const shortSeq = buildPlaySequence(shortParsed, shortLayout, 120)
+    const shortTrack = buildRectTrack(shortSeq, { noteSize: DUR_CFG.note_size })
+    const shortView = buildFlowView(shortLayout, shortTrack, DUR_CFG)
+    const shortIdx = shortView.rows.length - 1
+    const shortOpts = { ...baseOpts, followZoom: 3 }
+    const shortWorldW = shortOpts.viewW / shortOpts.followZoom
+    const shortM = shortWorldW * WHITE_MAX
+    let sx0 = Number.POSITIVE_INFINITY
+    let sx1 = Number.NEGATIVE_INFINITY
+    for (let i = 0; i < shortTrack.rects.length; i++) {
+      if (shortView.rectRow[i] !== shortIdx) continue
+      sx0 = Math.min(sx0, shortTrack.rects[i].x)
+      sx1 = Math.max(sx1, shortTrack.rects[i].x + shortTrack.rects[i].w)
+    }
+    check(
+      'adj1089 "放得下"夹具自检：该行行宽 + 两侧 10% ≤ 视宽',
+      Number.isFinite(sx0) && sx1 - sx0 + 2 * shortM <= shortWorldW,
+      `行宽=${(sx1 - sx0).toFixed(1)} 视宽=${shortWorldW.toFixed(1)}`,
+    )
+    const shortBars = shortSeq.barStartsMs ?? []
+    const shortCams: [string, typeof camFollow][] = [
+      ['follow', buildCameraTrack(shortView, shortTrack, DUR_CFG, { ...shortOpts, panMode: 'follow' })],
+      [
+        'beat',
+        buildCameraTrack(shortView, shortTrack, DUR_CFG, {
+          ...shortOpts,
+          panMode: 'beat',
+          beatMs: beatMsCam,
+          bars: shortBars,
+        }),
+      ],
+      ['bar', buildCameraTrack(shortView, shortTrack, DUR_CFG, { ...shortOpts, panMode: 'bar', bars: shortBars })],
+    ]
+    const shortRowSpan = shortView.rows[shortIdx]
+    let fitsBad = ''
+    for (const [name, c] of shortCams) {
+      const rowPans = c.pans.filter((p) => p.t >= shortRowSpan.t0 - 0.5 && p.t < shortRowSpan.t1)
+      if (rowPans.length !== 1) {
+        fitsBad = `${name}：该行 pans=${rowPans.length}（应为 1）`
+        break
+      }
+      const center = (sx0 + sx1) / 2
+      if (Math.abs(rowPans[0].cx - center) > 0.5) {
+        fitsBad = `${name}：cx=${rowPans[0].cx.toFixed(2)}，行中心=${center.toFixed(2)}`
+        break
+      }
+    }
+    check('adj1089 整行放得下 ⇒ 该行只有一个 pan 且 cx = 行中心（三种模式各一遍）', fitsBad === '', fitsBad)
+
+    /**
+     * ④ 负向判据（机器化）：把露白阈值 0.1 改成 0.5，同一行的行首露白会变成 50% 视宽。
+     * 这就证明上面两条断言**真的在量阈值**，而不是无论怎么改都绿。
+     *
+     * （上面的断言用的是字面 `WHITE_MAX = 0.1`；下面这条另外守"引擎常量 == 用户口径"，
+     *   所以把 `CAMERA_WHITE_MARGIN` 改成 0.5 时**两处都会红**：露白断言按 10% 量不过，
+     *   这条则指出常量本身已经不是用户要的 10%。）
+     */
+    const negCx = clampRowCenter(40, 560, worldW, 0.5, 40)
+    const negLeft = 40 - (negCx - halfW)
+    check(
+      'adj1089 阈值常量 == 用户口径 10%，且负对照（0.5）下同一行首露白变成 50% 视宽',
+      Math.abs(CAMERA_WHITE_MARGIN - WHITE_MAX) < 1e-9 && negLeft > m + 1,
+      `常量=${CAMERA_WHITE_MARGIN} 左露白=${negLeft.toFixed(1)} 阈值=${m.toFixed(1)}`,
+    )
+
+    /**
+     * ⑤ **宿主接线**（源码闸门）：引擎支持三模式 ≠ 宿主用上了。
+     * 这四处任何一处退回，"引擎侧已完成"就等于实际不生效（本轮之前正是这种状态）。
+     */
+    const rendererSrc = String(readFileSync('src/export/video/renderer.ts', 'utf8'))
+    const storeSrcAdj = String(readFileSync('src/store/uiStore.ts', 'utf8'))
+    const dialogSrcAdj = String(readFileSync('src/dialogs/PageConfigDialog.tsx', 'utf8'))
+    const previewSrcAdj = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
+    const followSrcAdj = String(readFileSync('src/preview/followScroll.ts', 'utf8'))
+    const overlaySrcAdj = String(readFileSync('src/preview/DynamicFrameOverlay.tsx', 'utf8'))
+    const exportSrcAdj = String(readFileSync('src/export/video/exportDynamic.ts', 'utf8'))
+    const cliSrcAdj = String(readFileSync('src/export/video/cliWorker.ts', 'utf8'))
+    check(
+      'adj1089 出片接线：`buildCameraTrack` 真的收到 panMode + beatMs + bars（bars = 小节起点 + 片头偏移）',
+      /panMode,\s*beatMs,\s*bars:\s*ballBars/.test(rendererSrc) &&
+        /const ballBars = \(seq\.barStartsMs \?\? \[\]\)\.map\(\(s\) => s \+ leadInMs\)/.test(rendererSrc),
+    )
+    check(
+      'adj1089 平移方式只有一份来源（uiStore 的 L1 键；预览订阅、导出与命令行出片透传）',
+      /const PAN_MODE_KEY = 'ijipu\.panMode'/.test(storeSrcAdj) &&
+        /panMode:\s*loadPanMode\(\)/.test(storeSrcAdj) &&
+        /useUiStore\(\(s\) => s\.panMode\)/.test(previewSrcAdj) &&
+        /useUiStore\(\(s\) => s\.panMode\)/.test(overlaySrcAdj) &&
+        /opts\?\.panMode \?\? 'follow'/.test(rendererSrc) &&
+        /panMode: opts\.panMode/.test(exportSrcAdj) &&
+        /panMode: useUiStore\.getState\(\)\.panMode/.test(cliSrcAdj),
+    )
+    check(
+      'adj1089 换了平移方式会**重建相机会话**（否则设置点了没反应：还在放旧 pans）',
+      /\[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, paint\]/.test(overlaySrcAdj),
+    )
+    check(
+      'adj1089 设置里的下拉真接了 setPanMode，文案走 copy.ts（组件里不写这三种选择的字面量）',
+      /dynamicVideoCopy\.panModeFollow/.test(dialogSrcAdj) &&
+        /dynamicVideoCopy\.panModeBeat/.test(dialogSrcAdj) &&
+        /dynamicVideoCopy\.panModeBar/.test(dialogSrcAdj) &&
+        /onChange=\{\(e\) => setPanMode\(/.test(dialogSrcAdj),
+    )
+    check(
+      'adj1089 试听 beat/bar：按拍/小节节流（panTickIndex）+ 与出片同一个 clampRowCenter 夹紧',
+      /panTickIndex\(/.test(previewSrcAdj) &&
+        /panScrollTargetX\(/.test(previewSrcAdj) &&
+        /clampRowCenter\(rowX0, rowX1, viewW, CAMERA_WHITE_MARGIN, blockCenterX\)/.test(followSrcAdj),
+    )
+  }
+
   // adj1068：调号显示口径 = `1 = ` + 字母 + 左上角 ♯/♭ 角标（描述头预览与片头卡共用）
   const keyD = keySignatureOf('D')
   const keyC = keySignatureOf('C#')
@@ -33188,7 +33540,15 @@ function runDynamicCameraTests(): void {
     check('M3 带歌词：6 个曲行不得被并成 1 行', lv.rows.length === 6, String(lv.rows.length))
   }
 
-  // 用户口径：色块要待在**画面中间带**（1/4 ~ 3/4），别贴着框边
+  /**
+   * 用户口径：色块要待在**画面中间带**，别贴着框边。
+   *
+   * ⚠ **adj1089 口径更新（不是放宽，是规则变了）**：新规则是"行首/行末的**露白** ≤10%"，
+   * 约束的是**行内容边缘**，不是色块中心。于是行末最后一个色块的**中心**可以到
+   * `90% − 半个块宽 / 视宽` 处（块宽 24.8、视宽 270 时 ≈ 85.4%），
+   * 行首同理 ≈ 14.6% —— 旧的 `15%~85%` 会因此判红。
+   * 现在按新规则的**理论上限**守：中心 ∈ [10%, 90%]（真正贴框外的情形仍会被抓住）。
+   */
   let offCenter = ''
   for (let i = 0; i < track.rects.length; i++) {
     const r = track.rects[i]
@@ -33198,13 +33558,12 @@ function runDynamicCameraTests(): void {
     if (f.pageIndex !== r.pageIndex) continue
     const h = halfW(f.zoom)
     const frac = (r.x + r.w / 2 - (f.cx - h)) / (2 * h)
-    if (frac < 0.15 || frac > 0.85) {
+    if (frac < 0.1 || frac > 0.9) {
       offCenter = `t=${Math.round(t)} 位置=${(frac * 100).toFixed(0)}%`
       break
     }
   }
-  // 2026-10-22 用户口径：色块在 20%~80% 之间走（到 4/5 推、推到 1/5）⇒ 断言留一点余量
-  check('M3 跟拍时色块落在画面中间带（横向 15%~85%）', offCenter === '', offCenter)
+  check('M3 跟拍时色块落在画面中间带（横向 10%~90%，见上方 adj1089 口径）', offCenter === '', offCenter)
 }
 
 // adj1075：卡片模板 zip 往返（card.json + background.png + README.txt）

@@ -1241,6 +1241,14 @@ export const dynamicVideoCopy = {
   modeFull: '整首',
   rangeAll: '整曲',
   rangeSegment: '标记段',
+  /* ---- adj1089：行中平移方式（设置 → 本机） ---- */
+  panModeGroup: '动态视频',
+  panModeLabel: '平移方式',
+  panModeFollow: '跟随（4/5→1/5）',
+  panModeBeat: '按拍',
+  panModeBar: '按小节',
+  panModeHint:
+    '跟随：色块到画面右侧 4/5 才推，一次推到左 1/5；按拍/按小节：每拍/每小节把色块放到画面中间。三种方式都保证行首、行末的左右露白不超过画面 10%（整行放得下时直接居中、不平移）。本机偏好，不随谱保存。',
 } as const
 
 /** adj1074：自定义卡片风格对话框 */
