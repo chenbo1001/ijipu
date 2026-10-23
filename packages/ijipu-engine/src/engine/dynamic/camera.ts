@@ -59,6 +59,20 @@ export interface CameraOptions {
    * 缺省按页高 15% 兜底。
    */
   headerCy?: number
+  /**
+   * adj1086（用户口径）：行中平移方式。
+   *
+   * - `follow`（默认）：色块到画面右 4/5 才推，一次推到左 1/5；
+   * - `beat`：每**拍**移一次，尽量把当前拍的色块放在画面中间；
+   * - `bar`：每**小节**移一次，同上。
+   *
+   * 三种都受"左右露白 ≤ 画面 10%"约束（见 buildCameraTrack 内 clampRow）。
+   */
+  panMode?: 'follow' | 'beat' | 'bar'
+  /** 一拍多少毫秒（`beat` 模式要） */
+  beatMs?: number
+  /** 小节起点时刻（`bar` 模式要；与 track 同一时间轴，升序） */
+  bars?: readonly number[]
 }
 
 /** 相机某一刻的位置（页面坐标系 + 缩放） */
@@ -162,6 +176,32 @@ export function buildCameraTrack(
    */
   const halfW = viewW / zoomFollow / 2
   const sweep = halfW * 0.6
+  /**
+   * adj1086（用户口径）：**左右露白 ≤ 画面 10%**，三种平移模式共用的夹紧。
+   *
+   * - 一行谱整行放得下（行宽 + 两侧 10% 余量 ≤ 视宽）⇒ **不平移**，取行中心；
+   * - 放不下 ⇒ 行首时左侧露白 ≤10%，行末时右侧露白 ≤10%。
+   *
+   * "露白"按**行内容**（色块覆盖范围）算，不看纸张边距。
+   */
+  const rowX0: number[] = rows.map(() => Number.POSITIVE_INFINITY)
+  const rowX1: number[] = rows.map(() => Number.NEGATIVE_INFINITY)
+  for (let i = 0; i < track.rects.length; i++) {
+    const ri = view.rectRow[i]
+    if (ri < 0 || ri >= rows.length) continue
+    rowX0[ri] = Math.min(rowX0[ri], track.rects[i].x)
+    rowX1[ri] = Math.max(rowX1[ri], track.rects[i].x + track.rects[i].w)
+  }
+  const whiteMargin = (viewW / zoomFollow) * 0.1
+  const clampRow = (rowIdx: number, want: number): number => {
+    const x0 = rowX0[rowIdx]
+    const x1 = rowX1[rowIdx]
+    if (!Number.isFinite(x0) || !Number.isFinite(x1)) return want
+    const leftLimit = x0 - halfW + whiteMargin
+    const rightLimit = x1 + halfW - whiteMargin
+    if (leftLimit >= rightLimit) return (x0 + x1) / 2 // 整行放得下 ⇒ 不平移
+    return Math.max(leftLimit, Math.min(rightLimit, want))
+  }
   const pans: CameraPan[] = []
   let cx = paper.width / 2
   let lastRow = -1
@@ -184,7 +224,8 @@ export function buildCameraTrack(
     } else {
       cx = rectCx + sweep
     }
-    // 只保证中心落在页内（允许取景框探出页边 ⇒ 色块才能真的落在 1/4 处）
+    // adj1086：先按"露白 ≤10%"夹紧（整行放得下就居中、不平移），再保证中心落在页内
+    cx = clampRow(rowIdx, cx)
     cx = Math.max(0, Math.min(paper.width, cx))
     const last = pans[pans.length - 1]
     if (last && Math.abs(last.cx - cx) < 0.5) continue
@@ -194,6 +235,38 @@ export function buildCameraTrack(
         : { t: r.t0, cx, from: Math.max(rowStartT, r.t0 - panMs), dur: panMs },
     )
   }
+  /**
+   * adj1086：`beat` / `bar` 两种模式——按拍或按小节，把当前色块尽量放到画面中间，
+   * 再走同一套"露白 ≤10%"夹紧。换行时仍以行首那条色块为准。
+   */
+  const panMode = opts.panMode ?? 'follow'
+  if (panMode !== 'follow') {
+    const rectIndexAt = (t: number): number => {
+      for (let i = 0; i < track.rects.length; i++) {
+        const r = track.rects[i]
+        if (r.t0 <= t && t < r.t1) return i
+      }
+      return -1
+    }
+    const bt = opts.beatMs ?? 0
+    const times: number[] = []
+    if (panMode === 'beat' && bt > 0) {
+      for (let t = firstT; t <= track.endMs; t += bt) times.push(t)
+    } else if (panMode === 'bar') {
+      for (const b of opts.bars ?? []) if (b >= firstT && b <= track.endMs) times.push(b)
+    }
+    pans.length = 0
+    for (const t of times) {
+      const i = rectIndexAt(t)
+      if (i < 0) continue
+      const want = track.rects[i].x + track.rects[i].w / 2
+      const wantCx = Math.max(0, Math.min(paper.width, clampRow(view.rectRow[i], want)))
+      const last = pans[pans.length - 1]
+      if (last && Math.abs(last.cx - wantCx) < 0.5) continue
+      pans.push({ t, cx: wantCx, from: Math.max(firstT, t - panMs), dur: panMs })
+    }
+  }
+
   if (pans.length === 0) pans.push({ t: firstT, cx: paper.width / 2, from: firstT, dur: 0 })
 
   return {
