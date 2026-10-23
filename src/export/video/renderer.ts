@@ -30,6 +30,10 @@ import {
   slicePlaySequenceByRange,
   ballAt,
   beatPhaseOf,
+  // adj1095：多声部色块按"声部 + 音色"分色（与试听同一套盘），跳跳球只落第一声部
+  instrumentColorMap,
+  playheadBaseOf,
+  primaryVoiceOf,
   keySignatureOf,
   BALL_LANDING_TIMING,
   BALL_SQUASH_X,
@@ -55,7 +59,7 @@ import { CARD_SANS, CARD_SERIF, DEFAULT_CARD_STYLE, type CardStyle } from './car
  */
 export const RASTER_SCALE = 3
 
-/** 高亮块配色（占位：正式版按声部/音色走 `playback/playhead.ts` 的调色板） */
+/** 高亮块配色：**按声部 + 音色**取色（`playheadBaseOf`），这两个常量只留作单声部默认/排查参照 */
 export const HIGHLIGHT_FILL = 'rgba(255, 93, 108, 0.20)'
 export const HIGHLIGHT_STROKE = 'rgba(255, 93, 108, 0.85)'
 /** 跳跳球颜色（同一套强调色，落地那一刻最显眼） */
@@ -261,12 +265,18 @@ export async function createDynamicSession(
   const musicEndMs = track.endMs
   const cardStartMs = musicEndMs + fallMs
   /**
-   * 跳跳球的落点表：只取主声部（多声部各飞一颗会打架）。
+   * 跳跳球的落点表：只取**第一声部**的主声部（多声部各飞一颗会打架；用户 adj1095：
+   * 「通常跳跳球应该在第一声部上跳，这才是主声部」）。
    * 球是**抛体**：每拍落下一次，落点 = 那一拍开始时色块上沿的中心。
    */
+  const ballVoice = primaryVoiceOf(track.rects)
   const ballAnchors = track.rects
-    .filter((r) => r.playVoice === undefined || r.playVoice === 'main')
+    .filter(
+      (r) => (r.playVoice === undefined || r.playVoice === 'main') && r.voice === ballVoice,
+    )
     .map((r) => ({ t0: r.t0, t1: r.t1, cx: r.x + r.w / 2, top: r.y, x: r.x, w: r.w }))
+  /** adj1095：色块按"声部 + 音色"取色（与试听 `PreviewPane` 共用引擎的调色盘） */
+  const colorMap = instrumentColorMap(track.rects)
   /** 拍网格相位：只作"没有小节起点"时的兜底（有 `ballBars` 时 `ballAt` 不看它） */
   const beatPhase = ballBars.length > 0 ? 0 : beatPhaseOf(ballAnchors, beatMs)
   /**
@@ -495,19 +505,20 @@ export async function createDynamicSession(
         }
       }
 
-      // 高亮：只画当前页上的（跨页时不会把上一页的块贴过来）
+      // 高亮：只画当前页上的（跨页时不会把上一页的块贴过来）；颜色按"声部 + 音色"（adj1095）
       const active = rectsActiveAt(track, t).filter((r) => r.pageIndex === c.pageIndex)
       for (const r of active) {
         const x = (r.x - left) * z
         const y = (r.y - top) * z
         const w = r.w * z
         const h = r.h * z
+        const base = playheadBaseOf(r, colorMap)
         ctx.beginPath()
         ctx.roundRect(x - 4, y - 3, w + 8, h + 6, Math.max(4, 8 * (z / 4)))
-        ctx.fillStyle = HIGHLIGHT_FILL
+        ctx.fillStyle = `${base} 0.20)`
         ctx.fill()
         ctx.lineWidth = Math.max(2, 3 * (z / 4))
-        ctx.strokeStyle = HIGHLIGHT_STROKE
+        ctx.strokeStyle = `${base} 0.85)`
         ctx.stroke()
       }
 

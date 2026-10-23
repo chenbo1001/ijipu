@@ -83,7 +83,7 @@ import { safetyPanTargetX, spanLastBarStart } from '../src/preview/followScroll'
 // adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
 import { JPS_PARAM_MAX_LEN, readJpsFromSearch, withoutJpsParam } from '../src/store/urlImport'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO, inkBoxOfLayout, inkBoxesOfLayout, INK_ESTIMATE_SLACK, insertPngPhys, readPngPhys, crc32, isPng, dpiForScale, pixelsPerMeterFor } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, primaryVoiceOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO, inkBoxOfLayout, inkBoxesOfLayout, INK_ESTIMATE_SLACK, insertPngPhys, readPngPhys, crc32, isPng, dpiForScale, pixelsPerMeterFor } from '@ijipu/engine/index.ts'
 // adj971：应用标题（`文件名.jps - 爱记谱 iJipu`）与版本串的**唯一来源** —— 冒烟直接调真函数，不抄模板
 import { appTitleOf, APP_TITLE_PREFIX, APP_VERSION, APP_VERSION_FULL } from '../src/brand/version.ts'
 /**
@@ -1285,7 +1285,7 @@ check('adj204 光标在块后远隔空白（col-1 为空格）→ 不高亮', !h
   check('adj758 trackKeysOf 按 track 引用缓存（同引用不重建）', trackKeysOf(track) === trackKeysOf(track))
   // ② 配色：先给 voice 1 的音色排第 1 位（单声部仍是红块）；声部角色有固定色
   const cmap = instrumentColorMap(track)
-  check('adj758 instrumentColorMap：voice 1 的音色拿第 1 个色（红）', cmap.get('手风琴') === 0, String(cmap.get('手风琴')))
+  check('adj758/adj1095 instrumentColorMap：voice 1 的音色拿第 1 个色（红；键 = 声部|音色）', cmap.get('1|手风琴') === 0, String(cmap.get('1|手风琴')))
   check('adj758 playheadBaseOf：声部角色固定色优先于音色推断',
     playheadBaseOf({ voice: 1, instrument: '手风琴', playVoice: 'accomp' }, cmap) === 'rgba(87, 170, 255,' &&
       playheadBaseOf({ voice: 1, instrument: '手风琴', playVoice: 'second' }, cmap) === 'rgba(63, 122, 46,' &&
@@ -2089,15 +2089,17 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
   check('adj908 色块：Q1/Q2 两块颜色不同，且主声部仍是 PLAYHEAD_COLORS[0]',
     col908.get(1) !== undefined && col908.get(2) !== undefined && col908.get(1) !== col908.get(2) && col908.get(1) === PLAYHEAD_COLORS[0],
     `v1=${col908.get(1)} v2=${col908.get(2)} map=${JSON.stringify([...instrumentColorMap(trackOf908(seq908))])}`)
-  // 负对照：显式把两声部写成同一音色 ⇒ 音色与色块都该"同"（证明上一条不是恒真）
+  // adj1095（新口径）：**声部优先于音色**——显式把两声部写成同一音色，色块也必须分色
   const rNeg908 = parseJps(`${H908}Y: 大钢琴\nY: 大钢琴\nQ1: 1 2 3 4 |\nQ2: 5 6 5 3 |\n`)
   const seqNeg908 = buildPlaySequence(rNeg908, layoutScore(rNeg908, DUR_CFG), 120, undefined, REFS8[0], undefined, REFS8)
   const colNeg908 = colorsOf908(seqNeg908)
   check('adj908 负对照：显式 `Y: 大钢琴`×2 ⇒ 音色集合 size=1',
     new Set(seqNeg908.events.map((e) => e.instrument)).size === 1,
     `集合=${[...new Set(seqNeg908.events.map((e) => e.instrument))].join('/')}`)
-  check('adj908 负对照：两声部色块**同色**（色集 size=1 ⇒ 上一条断言不是恒真）',
-    colNeg908.get(1) !== undefined && colNeg908.get(1) === colNeg908.get(2),
+  check('adj1095 同音色两声部也**分色**（Q1 = 红、Q2 = 蓝；旧口径同色，用户实报已改）',
+    colNeg908.get(1) !== undefined &&
+      colNeg908.get(1) === PLAYHEAD_COLORS[0] &&
+      colNeg908.get(2) === PLAYHEAD_COLORS[1],
     `v1=${colNeg908.get(1)} v2=${colNeg908.get(2)}`)
   // ② 显式 `Y:` 以谱面为准（不被启用列表改写）
   const rFx908 = parseJps(`${H908}Y: 钢琴\nY: 弦乐\nQ1: 1 2 3 4 |\nQ2: 5 6 5 3 |\n`)
@@ -2137,6 +2139,60 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
     lbl908(1) === REFS8[0] && lbl908(2) === REFS8[1],
     `v1=${lbl908(1)} v2=${lbl908(2)} refs=${REFS8.slice(0, 2).join('/')}`)
 }
+
+/**
+ * adj1095（用户 2026-10-23 实报）：
+ *  ① 「多声部各声部色块颜色没有区分开，音色倒是有」——色块以前只按音色去重，同音色同色；
+ *  ② 「通常跳跳球应该在第一声部上跳，这才是主声部」——球以前可能落在 Q2/Q3 上。
+ */
+{
+  console.log('[adj1095] 多声部色块按声部分色 + 球只落第一声部')
+  const H = 'V: 1.0\nB: t\nD: C\nP: 4/4\n'
+  // ① 同音色两声部：色块必须不同色（声部优先于音色）
+  const r = parseJps(`${H}Y: 大钢琴\nY: 大钢琴\nQ1: 1 2 3 4 |\nQ2: 5 6 5 3 |\n`)
+  const seq = buildPlaySequence(r, layoutScore(r, DUR_CFG), 120)
+  const trk = seq.events.flatMap((e) =>
+    (e.playheadSegs ?? []).map((s) => ({
+      voice: s.voice,
+      ...(s.instrument !== undefined ? { instrument: s.instrument } : {}),
+      ...(s.playVoice !== undefined ? { playVoice: s.playVoice } : {}),
+    })),
+  )
+  const cm = instrumentColorMap(trk)
+  const c1 = playheadBaseOf({ voice: 1, instrument: '大钢琴' }, cm)
+  const c2 = playheadBaseOf({ voice: 2, instrument: '大钢琴' }, cm)
+  check(
+    'adj1095 同音色不同声部 ⇒ **不同色**（键 = 声部|音色；Q1 红、Q2 蓝）',
+    c1 !== c2 && c1 === PLAYHEAD_COLORS[0] && c2 === PLAYHEAD_COLORS[1],
+    `${c1} / ${c2}`,
+  )
+  check(
+    'adj1095 同一声部同一音色恒定同色（声部内不跳色）',
+    playheadBaseOf({ voice: 1, instrument: '大钢琴' }, cm) === c1,
+  )
+  // ② 球：只落第一声部
+  check(
+    'adj1095 球锚点声部 = 1（多声部同时起音也只认第一声部）',
+    primaryVoiceOf([{ voice: 1 }, { voice: 2 }, { voice: 3 }, { voice: 1, playVoice: 'accomp' }]) === 1,
+  )
+  check('adj1095 没有 voice 1 时退到最小声部号（只写 Q2/Q3）', primaryVoiceOf([{ voice: 3 }, { voice: 2 }]) === 2)
+  check(
+    'adj1095 段层（accomp/second）不参与选声部（只认 main 或"无角色"）',
+    primaryVoiceOf([{ voice: 1, playVoice: 'accomp' }, { voice: 2, playVoice: 'main' }]) === 2,
+  )
+  check('adj1095 空表兜底 = 1（调用方据此过滤成空锚点，不乱跳）', primaryVoiceOf([]) === 1)
+  // ③ 两处消费都接上：视频逐块取色 + 球选声部；试听球锚点也选声部
+  const rendererSrc = String(readFileSync('src/export/video/renderer.ts', 'utf8'))
+  const previewSrc = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
+  check(
+    'adj1095 视频：色块按 `playheadBaseOf` 逐块取色、球按 `primaryVoiceOf` 选声部',
+    /instrumentColorMap\(track\.rects\)/.test(rendererSrc) &&
+      /playheadBaseOf\(r, colorMap\)/.test(rendererSrc) &&
+      /primaryVoiceOf\(track\.rects\)/.test(rendererSrc),
+  )
+  check('adj1095 试听：球锚点也只取第一声部', /primaryVoiceOf\(track\)/.test(previewSrc))
+}
+
 // adj303：显示乐器名——@乐器名 / @@ 后第一个音符正上方标注
 const rIns = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 弦乐\nQ: 1 2 @钢琴 3 4 @@ 5 6 |\n')
 const layIns = layoutScore(rIns, { ...DUR_CFG, showInstrument: true })

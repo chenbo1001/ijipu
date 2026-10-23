@@ -42,6 +42,7 @@ import {
   playheadBaseOf,
   ballAt,
   beatPhaseOf,
+  primaryVoiceOf,
   BALL_LANDING_TIMING,
   BALL_SQUASH_X,
   BALL_SQUASH_Y,
@@ -1331,10 +1332,13 @@ function PlayheadLayer({
    * 逐帧重建代价大，故按 `track / pageOffsets / noteSize` 记忆（播放中它们不变）。
    */
   const ballAnchors = useMemo(() => {
+    // adj1095：球只落在**第一声部**（主声部）上——多声部同时起音时不再落到 Q2/Q3 上
+    const ballVoice = primaryVoiceOf(track)
     const out: BallAnchor[] = []
     for (const [, segs] of trackKeysOf(track)) {
       for (const s of segs) {
         if (s.playVoice !== undefined && s.playVoice !== 'main') continue
+        if (s.voice !== ballVoice) continue
         if (s.durationMs <= 0) continue
         const off = pageOffsets[s.pageIndex] ?? 0
         out.push({
