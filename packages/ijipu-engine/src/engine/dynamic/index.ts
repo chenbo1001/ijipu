@@ -6,7 +6,7 @@
  */
 export { buildRectTrack, rectsActiveAt, RECT_ABOVE_RATIO, RECT_BELOW_RATIO } from './timeline'
 export type { RectTrackOptions } from './timeline'
-export { buildFlowView, ROW_MERGE_RATIO } from './flowView'
+export { buildFlowView } from './flowView'
 export type { FlowViewOptions } from './flowView'
 export { frameAt, scrollYOfRow, frameTimeMs, frameIndexAt } from './frame'
 export { ballAt, beatPhaseOf, BALL_LANDING_TIMING, BALL_SQUASH_X, BALL_SQUASH_Y } from './ball'

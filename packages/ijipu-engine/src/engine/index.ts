@@ -77,7 +77,6 @@ export {
   RECT_ABOVE_RATIO,
   RECT_BELOW_RATIO,
   buildFlowView,
-  ROW_MERGE_RATIO,
   frameAt,
   scrollYOfRow,
   frameTimeMs,

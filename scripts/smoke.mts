@@ -33137,6 +33137,79 @@ function runDynamicCameraTests(): void {
     )
   }
 
+  /**
+   * ---- adj1091（用户 2026-10-23 口径）：**成片相机也按曲行取景** ----
+   *
+   * 用户原话：「成片相机也按这个规则进行显示」——即与试听纵向滚动同一套行口径
+   * （`rowSpansOfPage`：多声部块 + 段层 + 该行全部歌词算一行）。
+   *
+   * 为什么必须换：旧口径按"相邻行空隙 ≤ 0.8×字号"合并，而多声部行距把歌词区也算进去
+   * ⇒ 同一组的两个声部被拆成两条行，相机在同一时刻两行之间来回对（观众只看到其中一个声部）。
+   */
+  {
+    console.log('    [adj1091] 成片相机按曲行取景（多声部 + 多行歌词）')
+    const SRC =
+      'V: 1.0\nB: t\nD: C\nP: 4/4\nQ1: 1 2 3 4 | 5 6 7 1 |\nQ2: 5 6 5 3 | 1 2 3 4 |\nC: 一 二 三 四 五 六 七 一\nC: 甲 乙 丙 丁 戊 己 庚 辛\nQ: 1 2 3 4 | 5 6 7 1 |\n'
+    const parsed = parseJpsRaw(SRC)
+    const lay = layoutScore(parsed, DUR_CFG)
+    const seq = buildPlaySequence(parsed, lay, 120)
+    const tr = buildRectTrack(seq, { noteSize: DUR_CFG.note_size })
+    const v = buildFlowView(lay, tr, DUR_CFG)
+    const spans = rowSpansOfPage(lay, 0, {
+      quci: DUR_CFG.height_quci,
+      geci: DUR_CFG.geci_size,
+      noteSize: DUR_CFG.note_size,
+    })
+    check(
+      'adj1091 流式视图的行数 = 曲行数（与试听同一个 `rowSpansOfPage`）',
+      spans.length === 2 && v.rows.length === spans.length,
+      `view.rows=${v.rows.length} spans=${spans.length}`,
+    )
+    check(
+      'adj1091 行内容上下界 = 曲行 span（含最低声部与最后一行歌词）',
+      Math.abs(v.rows[0].contentTop - spans[0].top) < 0.01 &&
+        Math.abs(v.rows[0].contentBottom - spans[0].bottom) < 0.01,
+      `content=${v.rows[0].contentTop.toFixed(1)}..${v.rows[0].contentBottom.toFixed(1)} span=${spans[0].top.toFixed(1)}..${spans[0].bottom.toFixed(1)}`,
+    )
+    // 同一组两个声部（sequence 里 group 0 = Q1 / group 1 = Q2）的色块必须落在同一行
+    const groupRows = new Set<number>()
+    for (let i = 0; i < tr.rects.length; i++) {
+      if (tr.rects[i].group === 0 || tr.rects[i].group === 1) groupRows.add(v.rectRow[i])
+    }
+    check(
+      'adj1091 同组两个声部的色块落在**同一行**（相机不会在同一时刻两行之间跳）',
+      groupRows.size === 1,
+      `行号=${[...groupRows].join(',')}`,
+    )
+    const camV = buildCameraTrack(v, tr, DUR_CFG, { viewW: 1080, viewH: 1920 })
+    check(
+      'adj1091 相机纵向中心 = 曲行 span 中心（不是某一个声部）',
+      Math.abs(camV.rows[0].cy - (spans[0].top + spans[0].bottom) / 2) < 0.01,
+      `cy=${camV.rows[0].cy.toFixed(1)} span 中心=${((spans[0].top + spans[0].bottom) / 2).toFixed(1)}`,
+    )
+    const guides1091 =
+      computeRowGuides(lay, { quci: DUR_CFG.height_quci, geci: DUR_CFG.geci_size }, DUR_CFG.note_size)[0] ?? []
+    const voiceRows = guides1091.slice(0, 2)
+    check(
+      'adj1091 取图带覆盖同组两个声部的曲部上下沿',
+      v.rows[0].srcTop <= Math.min(...voiceRows.map((g) => g.yTop)) + 0.01 &&
+        v.rows[0].srcBottom >= Math.max(...voiceRows.map((g) => g.yBottom)) - 0.01,
+      `src=${v.rows[0].srcTop}..${v.rows[0].srcBottom} 声部=${voiceRows.map((g) => `${g.yTop}..${g.yBottom}`).join(' | ')}`,
+    )
+    // 负对照：旧"按空隙合并"会给 3 行（= 相机在两声部之间对），新口径 2 行
+    let legacyRows = 0
+    let prevBottom = Number.NEGATIVE_INFINITY
+    for (const g of [...guides1091].sort((a, b) => a.yTop - b.yTop)) {
+      if (g.yTop - prevBottom > DUR_CFG.note_size * 0.8) legacyRows++
+      prevBottom = Math.max(prevBottom, g.yBottom)
+    }
+    check(
+      'adj1091 负对照：旧"按行间空隙合并"会得到 3 行（多声部被拆开），新口径 2 行',
+      legacyRows === 3 && v.rows.length === 2,
+      `旧=${legacyRows} 新=${v.rows.length}`,
+    )
+  }
+
   // adj1068：调号显示口径 = `1 = ` + 字母 + 左上角 ♯/♭ 角标（描述头预览与片头卡共用）
   const keyD = keySignatureOf('D')
   const keyC = keySignatureOf('C#')
