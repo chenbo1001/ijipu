@@ -2212,6 +2212,10 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
     if (L.sloganY - L.titleY < L.titleSize * 1.2)
       return `标题—标语 ${(L.sloganY - L.titleY).toFixed(0)} < 1.2×标题字号 ${(L.titleSize * 1.2).toFixed(0)}`
     if (L.accentY - (L.titleY + L.titleSize * 0.2) < unit * 0.01) return '强调线离标题太近'
+    // adj1098：强调线必须落在"标题墨迹下沿 ↔ 标语墨迹上沿"的正中间（用户看图实报"横线偏下"）
+    const mid = (L.titleY + L.titleSize * 0.2 + (L.sloganY - L.sloganSize * 0.8)) / 2
+    const off = L.accentY + L.lineH / 2 - mid
+    if (Math.abs(off) > 0.5) return `强调线不居中（偏 ${off.toFixed(1)}px）`
     if (L.sloganY - L.sloganSize * 0.8 - (L.accentY + lineH) < unit * 0.006) return '强调线离标语太近'
     if (L.urlY + L.urlSize * 0.3 > h * 0.84) return '网址压到印章区'
     if (L.urlY - L.sloganY < L.sloganSize * 2) return '网址离标语太近'
@@ -2237,6 +2241,13 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
     'adj1096 负对照：旧口径 0.95×标题字号的间距会被同一判据判红（证明阈值不是恒真）',
     okOf(oldLayout, 1080, 1920) !== '',
     okOf(oldLayout, 1080, 1920),
+  )
+  // adj1098 负对照：线放回旧位置（标题基线下 0.45×标题字号）⇒ "居中"判据必须判红
+  const oldLine = { ...L9, accentY: L9.titleY + L9.titleSize * 0.45 }
+  check(
+    'adj1098 负对照：线按旧口径（标题基线下 0.45×标题字号）⇒ 居中判据判红（线偏下）',
+    okOf(oldLine, 1080, 1920).includes('不居中'),
+    okOf(oldLine, 1080, 1920),
   )
 }
 

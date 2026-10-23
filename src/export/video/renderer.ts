@@ -806,6 +806,7 @@ export async function createDynamicSession(
     // adj1069：强调线放在标题与标语之间，距离按 titleSize（三种比例同值），不再固定在标题上方
     const accentY = layout.accentY
     const lineRatio = layout.lineRatio
+    const lineH = layout.lineH
     const revealAt = (delay: number, dur: number): number =>
       card.motion ? cardReveal(t, delay, dur) : 1
     const titleE = revealAt(100, 650)
@@ -833,7 +834,8 @@ export async function createDynamicSession(
     ctx.fillStyle = card.accent
     ctx.shadowColor = card.accent
     ctx.shadowBlur = unit * 0.025
-    ctx.fillRect(W / 2 - lineW / 2, accentY, lineW, Math.max(2, unit * 0.004))
+    // adj1098：线高用排版函数给的值，保证"线中心 = 标题与标语墨迹的中点"只在一处定义
+    ctx.fillRect(W / 2 - lineW / 2, accentY, lineW, lineH)
     ctx.restore()
 
     ctx.save()
