@@ -103,7 +103,7 @@ export type CliIo = {
     pass: number | null
     /** 输出文件（绝对路径或相对当前目录；宿主按此写盘） */
     output: string
-    /** 画布比例（缺省 9x16，与应用一致） */
+    /** 画布比例（由 `--aspect` 决定；CLI 缺省 `16x9`，见 `runCli` 里的说明） */
     aspect: '9x16' | '1x1' | '16x9'
     /** `full` = 整曲（缺省）；`3min` = 单支上限 3 分钟 */
     mode: 'full' | '3min'
@@ -192,6 +192,7 @@ const HELP = `iJipu 命令行（爱记谱）
   render        -i <文件|-> -t svg|midi|png|jpg|pdf|mp4 -o <输出>           渲染导出
                 [--crop page|score] [--pad N] [--ink x,y,w,h]              画布范围（缺省 page = 整页）
                 [--from 27:3 --to 50:1 [--pass 2]]                        只导这一段（mp4）
+                [--aspect 9:16|1:1|16:9]                                  画布比例（缺省 16:9）
                 [--card [brand|paper|ink|minimal]]                        片头片尾模板（不写 = 不带；只写 = 极简）
                 [--nosound]                                               导出无声视频（缺省带声音）
   play          -i <文件|-> -t midi|wav -o <输出>                           导出音频
@@ -306,6 +307,13 @@ type Parsed = {
   /** `--pass <N>` 的原始字符串（1 起；同样在命令里校验） */
   pass: string | null
   /**
+   * adj1115：`--aspect <9:16|1:1|16:9>` 的原始字符串（画布比例）。
+   *
+   * 只认界面上写的那三种（与相机位的「画布」按钮同一套词）；缺省 `16:9`（**维持 CLI 原有行为**，
+   * 不跟着界面的 9:16 走 —— 已经写好的命令不能因为加了新参数就悄悄换比例）。
+   */
+  aspect: string | null
+  /**
    * `--card [模板]` 的原始字符串：片头/片尾卡片（adj1114 起模板是**可选值**）。
    *
    * · `null` = 没写 `--card` ⇒ **不带**片头片尾（只出动态谱）；
@@ -349,10 +357,11 @@ function parseArgs(argv: string[]): Parsed {
     from: null,
     to: null,
     pass: null,
+    aspect: null,
     card: null,
     nosound: false,
   }
-  const takesValue = new Set(['-i', '--input', '-o', '--output', '-t', '--type', '-s', '--set', '--config', '--format', '--crop', '--pad', '--ink', '--filter', '--from', '--to', '--pass', '--card'])
+  const takesValue = new Set(['-i', '--input', '-o', '--output', '-t', '--type', '-s', '--set', '--config', '--format', '--crop', '--pad', '--ink', '--filter', '--from', '--to', '--pass', '--aspect', '--card'])
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i]
     const next = (): string => {
@@ -415,6 +424,9 @@ function parseArgs(argv: string[]): Parsed {
     } else if (a === '--pass') {
       const v = next()
       if (v !== '') p.pass = v
+    } else if (a === '--aspect') {
+      const v = next()
+      if (v !== '') p.aspect = v
     } else if (a === '--card') {
       /**
        * adj1114（用户 2026-10-23）：`--card` 的模板是**可选值**。
@@ -1296,10 +1308,15 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
      */
     if (
       type !== 'mp4' &&
-      (p.from !== null || p.to !== null || p.pass !== null || p.card !== null || p.nosound)
+      (p.from !== null ||
+        p.to !== null ||
+        p.pass !== null ||
+        p.aspect !== null ||
+        p.card !== null ||
+        p.nosound)
     ) {
       io.err(
-        '--from / --to / --pass / --card / --nosound 只用于 -t mp4（其它类型没有"第几拍""片头卡片""音轨"这些概念）',
+        '--from / --to / --pass / --aspect / --card / --nosound 只用于 -t mp4（其它类型没有"第几拍""画布比例""片头卡片""音轨"这些概念）',
       )
       return { code: EXIT.usage }
     }
@@ -1339,6 +1356,27 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
         // CLI 对外 1 起；内部候选遍次 0 起（与界面下拉一致）
         pass = Number(p.pass) - 1
       }
+      /**
+       * adj1115（用户 2026-10-23 要求）：画布比例 `--aspect`。
+       *
+       * 只认相机位「画布」按钮上那三种写法（`9:16` / `1:1` / `16:9`），内部 id 是
+       * `9x16 / 1x1 / 16x9`（与 `DYNAMIC_PRESETS` 的键、任务文件同一套）。
+       * 缺省 **16:9** —— 这是 CLI 一直以来的行为，**刻意不跟着界面的 9:16 走**：
+       * 加了新参数就换缺省，等于让旧命令悄悄出另一种片子。
+       */
+      const ASPECT_IDS: Record<'9:16' | '1:1' | '16:9', '9x16' | '1x1' | '16x9'> = {
+        '9:16': '9x16',
+        '1:1': '1x1',
+        '16:9': '16x9',
+      }
+      const aspectArg = (p.aspect ?? '16:9').trim()
+      if (!(aspectArg in ASPECT_IDS)) {
+        io.err(
+          `--aspect 支持 9:16（竖屏）| 1:1（方形）| 16:9（横屏）；收到 “${String(p.aspect)}”，不写则为 16:9`,
+        )
+        return { code: EXIT.usage }
+      }
+      const aspect = ASPECT_IDS[aspectArg as '9:16' | '1:1' | '16:9']
       /**
        * 片头/片尾卡片（adj1114 起为**可选**，用户 2026-10-23 口径）：
        *  · 不写 `--card`        ⇒ **不带**片头片尾，只出动态谱；
@@ -1415,7 +1453,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       if (!p.quiet) {
         line(
           io,
-          `正在导出视频：${rangeText}${passText}（16:9，全片长，${cardText}${p.nosound ? '，无声' : ''}）`,
+          `正在导出视频：${rangeText}${passText}（${aspectArg}，全片长，${cardText}${p.nosound ? '，无声' : ''}）`,
         )
       }
       try {
@@ -1426,8 +1464,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
           endId,
           pass,
           output: target,
-          // CLI 的缺省：16:9 + 整曲。选 3 分钟会把长曲**悄悄截短**，命令行里不做这种事。
-          aspect: '16x9',
+          // adj1115：画布比例（缺省 16:9）；整曲时长是 CLI 的缺省，3 分钟会把长曲悄悄截短，命令行不做
+          aspect,
           mode: 'full',
           cardStyleId,
           // adj1114：`--nosound` 明确不要声音；缺省与界面「带声音」勾选一致
@@ -1445,6 +1483,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
             output: target,
             bytes: out.bytes,
             audio: out.audio,
+            // adj1115：画布比例也写进 JSON（内部 id，与任务文件一致）
+            aspect,
             card: cardStyleId,
             range: startId === null ? null : { startId, endId, pass },
           },

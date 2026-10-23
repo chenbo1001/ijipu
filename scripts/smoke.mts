@@ -2339,6 +2339,10 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
     /job\.cardStyleId === null \|\| job\.cardStyleId === undefined[\s\S]{0,120}\{ cards: false \}/.test(worker) &&
       /job\.withAudio === false \? \{\} : \{ makeAudio \}/.test(worker),
   )
+  check(
+    'adj1115 出片窗口透传 `--aspect`：任务里的画布比例真的进会话（不是只改终端那一行文案）',
+    /aspect: job\.aspect,/.test(worker),
+  )
 }
 
 /**

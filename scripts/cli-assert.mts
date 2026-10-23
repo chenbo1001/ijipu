@@ -657,7 +657,7 @@ console.log('\n— 命令行（A·P1–P4）—')
    * 这条钉死"不许再把已实现的写成未实现" ✓。
    */
   check('adj874 --help 不再把已实现命令写成"未实现（P2–P4）"（负对照）', !help.includes('未实现（P2–P4'))
-  check('adj874 --help 覆盖后加的选项（--crop/--pad/--ink/--watch/--from/--to/--pass/--card）', ['--crop', '--pad', '--ink', '--watch', '--from', '--to', '--pass', '--card'].every((o) => help.includes(o)))
+  check('adj874 --help 覆盖后加的选项（--crop/--pad/--ink/--watch/--from/--to/--pass/--aspect/--card/--nosound）', ['--crop', '--pad', '--ink', '--watch', '--from', '--to', '--pass', '--aspect', '--card', '--nosound'].every((o) => help.includes(o)))
 
   const ioV = makeIo({})
   const ioV2 = makeIo({})
@@ -1687,6 +1687,75 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
     )
   }
   check('adj1084 起止落在不同音符上（终点不含目标那一拍）', seen !== null && seen.startId !== seen.endId)
+
+  /**
+   * adj1115（用户 2026-10-23）：`--aspect` 画布比例 —— 只认相机位「画布」那三种写法，
+   * 缺省 16:9（维持 CLI 原有行为，不跟着界面的 9:16 走）。
+   */
+  {
+    const mk = (): { m: ReturnType<typeof makeIo>; seen: { v: SeenVideo | null } } => {
+      const m = makeIo({ '(stdin)': GOOD })
+      const seen: { v: SeenVideo | null } = { v: null }
+      m.io.encodeVideo = async (req) => {
+        seen.v = { ...req }
+        return { bytes: 1, audio: false }
+      }
+      return { m, seen }
+    }
+    const a916 = mk()
+    const r916 = await runCli(
+      ['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--aspect', '9:16'],
+      a916.m.io,
+    )
+    check(
+      'adj1115 `--aspect 9:16` ⇒ 任务里 `9x16`（竖屏），终端那一行也写 9:16',
+      r916.code === EXIT.ok &&
+        a916.seen.v?.aspect === '9x16' &&
+        a916.m.logs.join('').includes('（9:16，全片长'),
+      `code=${r916.code} seen=${JSON.stringify(a916.seen.v)} logs=${a916.m.logs.join('').slice(0, 120)}`,
+    )
+
+    const a11 = mk()
+    const r11 = await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--aspect', '1:1'], a11.m.io)
+    check(
+      'adj1115 `--aspect 1:1` ⇒ 任务里 `1x1`（方形）',
+      r11.code === EXIT.ok && a11.seen.v?.aspect === '1x1',
+      `code=${r11.code} seen=${JSON.stringify(a11.seen.v)}`,
+    )
+
+    const bad = mk()
+    check(
+      'adj1115 `--aspect 4:3` ⇒ 1（只认三种，不猜），错误里列全可选值',
+      (await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--aspect', '4:3'], bad.m.io)).code ===
+        EXIT.usage && bad.m.errs.join('').includes('9:16'),
+      bad.m.errs.join('｜').slice(0, 120),
+    )
+    const alt = mk()
+    check(
+      'adj1115 `--aspect 9x16`（内部 id 写法）⇒ 1（对外只留 `9:16`，不搞两种写法）',
+      (await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--aspect', '9x16'], alt.m.io)).code ===
+        EXIT.usage,
+    )
+    const svgAspect = mk()
+    check(
+      'adj1115 `--aspect` 只用于 -t mp4（给 svg ⇒ 1，不静默忽略）',
+      (await runCli(['render', '-i', '-', '-t', 'svg', '-o', 'x.svg', '--aspect', '1:1'], svgAspect.m.io)).code ===
+        EXIT.usage,
+    )
+
+    // 机器可读输出别漏这个字段（内部 id，与任务文件一致）
+    const jsonIo = mk()
+    const rJson = await runCli(
+      ['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--aspect', '9:16', '--json'],
+      jsonIo.m.io,
+    )
+    const obj = rJson.json as { aspect?: string } | undefined
+    check(
+      'adj1115 `--json` 输出带 aspect（`9x16`）',
+      rJson.code === EXIT.ok && obj?.aspect === '9x16',
+      JSON.stringify(obj),
+    )
+  }
 
   const noRepeat = makeIo({ '(stdin)': GOOD })
   noRepeat.io.encodeVideo = async () => ({ bytes: 1, audio: false })

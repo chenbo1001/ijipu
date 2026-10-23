@@ -196,7 +196,7 @@ ijipu cli lint -i 我的谱.jps > out.txt # cmd 与 PowerShell 的 > 都写出�
 | `format` | 按应用规范**规范化源码**（与应用编辑器/插件格式化同一实现） | `-i` `-o` `--check` `--in-place` `--diff` |
 | `lint` | 语法检查（错误/告警）；输入可以是**目录**（`-r` 递归、`--filter` 按名筛）；`--watch` 监视文件变化后**即时重检** | `-i` `-r` `--filter` `--format text\|json\|gh` `--watch` |
 | `info` | 谱面概况（标题/调号/行数/分组/问题数） | `-i` `-t text\|json` |
-| `render` | 源码 → **SVG**（每页一段）／**MIDI**／**PNG·JPG·PDF**（需桌面端通道）／**MP4 动态谱视频**（桌面端，另起隐藏窗口） | `-i` `-t svg\|midi\|png\|jpg\|pdf\|mp4` `-o` `--from` `--to` `--pass` `--card` `--nosound` |
+| `render` | 源码 → **SVG**（每页一段）／**MIDI**／**PNG·JPG·PDF**（需桌面端通道）／**MP4 动态谱视频**（桌面端，另起隐藏窗口） | `-i` `-t svg\|midi\|png\|jpg\|pdf\|mp4` `-o` `--from` `--to` `--pass` `--aspect` `--card` `--nosound` |
 | `play` | 导出音频：**MIDI**（任意环境）／**WAV**（需桌面端通道） | `-i` `-t midi\|wav` `-o` |
 | `batch` | **目录批量操作**（任务**可逗号组合**：`lint` / `svg` / `midi` / `fmt`）；输出目录会自动创建 | `--in <目录>` `-o <目录>`（**纯 `-t lint` 可省**）`-t lint,svg,midi,fmt` `-r` `--filter` |
 | `settings` | 看**某一个设置项**的值与**来源**（位置参数 = 键名） | `-i <谱>` `<键名>` `-s k=v`（临时覆盖） |
@@ -231,6 +231,9 @@ ijipu cli render -i 我的谱.jps -o 整曲.mp4                  # -o 后缀即�
   `--from 27:3 --to 50:1` 到第 50 小节第 1 拍**之前**收住，不含那一拍。
 - `--pass N`：反复段落里的第 N 遍（**1 起**）；内部候选遍次 0 起，换算在 CLI 做。
   不给就按解析器的第一遍。与界面「标记段」的遍次下拉是同一套 `pickPracticeCandidate`。
+- `--aspect 9:16|1:1|16:9`：画布比例（竖屏／方形／横屏），与相机位「画布」按钮**同一套写法**。
+  只认这三种（`9x16` 这类内部 id 不认）；缺省 **16:9** —— 刻意不跟界面的 9:16 缺省走，
+  否则旧命令会悄悄出另一种片子。
 - `--card [brand|paper|ink|minimal]`：片头/片尾模板（深空蓝／纸面／水墨／极简）。
   **不写 `--card` = 不带片头片尾**（只出动态谱）；**只写 `--card`、不跟模板 = 极简**（`minimal`）。
   `custom` **刻意不支持**：那是本机偏好，同一条命令换台机器会出不一样的片。
