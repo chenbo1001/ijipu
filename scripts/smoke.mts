@@ -76,6 +76,8 @@ import { FOLLOW_SAFE_HIGH, FOLLOW_SAFE_LOW, followScrollTargetX } from '../src/p
 import { panScrollTargetX, panTickIndex } from '../src/preview/followScroll'
 // adj1090：试听**纵向**滚动——曲部 + 词部整行（高度）进视界
 import { FOLLOW_V_PAD_RATIO, followScrollTargetY } from '../src/preview/followScroll'
+// adj1092：试听**按拍/按小节**平移——每拍/每小节 + **每一行**都要移（行变了就用新行第一块居中）
+import { panFocusAt } from '../src/preview/followScroll'
 // adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
 import { JPS_PARAM_MAX_LEN, readJpsFromSearch, withoutJpsParam } from '../src/store/urlImport'
 import { inflateSync } from 'node:zlib'
@@ -29494,6 +29496,91 @@ C2: 歌，@那么我@是想要画你的手。@ {tp 1// 2/.} 你看我多么 {tp 
 }
 
 /**
+ * adj1092（用户 2026-10-23 实报）：试听 `beat` / `bar` 模式——**每拍/每小节**移一次，
+ * **每一行**也要移一次（行末 → 行首必须发生平移，且用新行的第一块居中）。
+ *
+ * 纯函数 `panFocusAt`（`src/preview/followScroll.ts`）直接断言，不碰 DOM。
+ */
+{
+  console.log('[163d] preview pan focus: 每小节 + 每行都要移 (adj1092)')
+  /** 两行：行0 y=150（100..300），行1 y=450（400..600）；小节网格 0 / 2000 / 4000 */
+  const segs = [
+    { y: 150, atMs: 0, durationMs: 500, x: 100, width: 40 },
+    { y: 150, atMs: 500, durationMs: 500, x: 160, width: 40 },
+    { y: 150, atMs: 1000, durationMs: 500, x: 220, width: 40 },
+    { y: 150, atMs: 1500, durationMs: 500, x: 280, width: 40 },
+    { y: 450, atMs: 2000, durationMs: 500, x: 100, width: 40 },
+    { y: 450, atMs: 2500, durationMs: 500, x: 160, width: 40 },
+  ]
+  const spans = [
+    { top: 100, bottom: 300 },
+    { top: 400, bottom: 600 },
+  ]
+  const base = { mode: 'bar' as const, beatMs: 500, anchorMs: 0, bars: [0, 2000, 4000], segs, spans }
+  const inRow = panFocusAt({ ...base, t: 1200 })
+  check(
+    'adj1092 行内：同一小节里用**当前正在响的块**居中',
+    inRow !== null && inRow.spanIndex === 0 && inRow.blockCenterX === 240,
+    JSON.stringify(inRow),
+  )
+  // 行切换：行1 的第一块在 2000；提前量 400 ⇒ t=1600 时就该切到行1 并用**它的第一块**居中
+  const switchEarly = panFocusAt({ ...base, t: 1600 })
+  check(
+    'adj1092 行切换：提前 400ms 切到新行，用**新行第一块**居中（行首那一小节因此进视界）',
+    switchEarly !== null && switchEarly.spanIndex === 1 && switchEarly.blockCenterX === 120,
+    JSON.stringify(switchEarly),
+  )
+  check(
+    'adj1092 还没到提前量就不切（t=1400 仍在行0）',
+    panFocusAt({ ...base, t: 1400 })?.spanIndex === 0,
+    JSON.stringify(panFocusAt({ ...base, t: 1400 })),
+  )
+  /**
+   * 关键：**节流键里必须带行**。
+   * 这里把行1 的第一块放"小节中间"（2000ms 起，而小节网格只有 0/4000）——
+   * 旧实现只按小节序号节流 ⇒ t=1200 与 t=1700 的 key 相同（都在第 0 小节）⇒ 换行不滚。
+   */
+  const midBarSegs = segs.map((s) => (s.y === 450 ? { ...s, atMs: s.atMs } : s))
+  const midBase = { mode: 'bar' as const, beatMs: 500, anchorMs: 0, bars: [0, 4000], segs: midBarSegs, spans }
+  const before = panFocusAt({ ...midBase, t: 1200 })
+  const atRowChange = panFocusAt({ ...midBase, t: 1700 })
+  check(
+    'adj1092 行变了 ⇒ 节流键也变（同一小节内、行首与上一行错开时仍会滚）',
+    before !== null &&
+      atRowChange !== null &&
+      before.spanIndex === 0 &&
+      atRowChange.spanIndex === 1 &&
+      before.key !== atRowChange.key,
+    `before=${JSON.stringify(before)} after=${JSON.stringify(atRowChange)}`,
+  )
+  check(
+    'adj1092 负对照：只按小节序号的话两点是同一个 key（证明"行"必须进键）',
+    panTickIndex('bar', 1200, 500, 0, [0, 4000]) === panTickIndex('bar', 1700, 500, 0, [0, 4000]),
+  )
+  // 此刻是休止（没有正在响的块）⇒ 仍要看**即将到来的那一行**，不能什么都滚
+  const restSegs = segs.filter((s) => s.atMs !== 1500)
+  const atRest = panFocusAt({ ...base, segs: restSegs, t: 1600 })
+  check(
+    'adj1092 休止/空隙里也按**即将到来的行**滚（不是停在上一行）',
+    atRest !== null && atRest.spanIndex === 1 && atRest.blockCenterX === 120,
+    JSON.stringify(atRest),
+  )
+  check(
+    'adj1092 beat 模式同一套口径（按拍也要带行键）',
+    panFocusAt({ ...base, mode: 'beat', t: 1600 })?.spanIndex === 1,
+    JSON.stringify(panFocusAt({ ...base, mode: 'beat', t: 1600 })),
+  )
+  // 宿主接线：组件真的用 panFocusAt，且 key 里带行
+  const previewSrc1092 = String(readFileSync('src/preview/PreviewPane.tsx', 'utf8'))
+  check(
+    'adj1092 试听接线：`panFocusAt` + `panKeyRef`（行进 key），不再只看小节序号',
+    /panFocusAt\(/.test(previewSrc1092) &&
+      /const key = `\$\{panMode\}:\$\{focus\.key\}`/.test(previewSrc1092) &&
+      !/panTickIndex\(panMode, currentMs/.test(previewSrc1092),
+  )
+}
+
+/**
  * adj898（用户要求）：首页每个示例谱都必须**规范** ——
  * 用户原话「完整的示例谱要规范，如以 `||` 结束，拍子要对，不能有告警」。
  *
@@ -33130,10 +33217,11 @@ function runDynamicCameraTests(): void {
         /onChange=\{\(e\) => setPanMode\(/.test(dialogSrcAdj),
     )
     check(
-      'adj1089 试听 beat/bar：按拍/小节节流（panTickIndex）+ 与出片同一个 clampRowCenter 夹紧',
-      /panTickIndex\(/.test(previewSrcAdj) &&
+      'adj1089 试听 beat/bar：按拍/小节节流 + 与出片同一个 clampRowCenter 夹紧（adj1092 起统一走 `panFocusAt`）',
+      /panFocusAt\(/.test(previewSrcAdj) &&
         /panScrollTargetX\(/.test(previewSrcAdj) &&
-        /clampRowCenter\(rowX0, rowX1, viewW, CAMERA_WHITE_MARGIN, blockCenterX\)/.test(followSrcAdj),
+        /clampRowCenter\(rowX0, rowX1, viewW, CAMERA_WHITE_MARGIN, blockCenterX\)/.test(followSrcAdj) &&
+        /panTickIndex\(mode, t, beatMs, anchorMs, bars\)/.test(followSrcAdj),
     )
   }
 
@@ -33207,6 +33295,116 @@ function runDynamicCameraTests(): void {
       'adj1091 负对照：旧"按行间空隙合并"会得到 3 行（多声部被拆开），新口径 2 行',
       legacyRows === 3 && v.rows.length === 2,
       `旧=${legacyRows} 新=${v.rows.length}`,
+    )
+  }
+
+  /**
+   * ---- adj1092（用户 2026-10-23 实报）：`beat` / `bar` 模式**每个曲行必须有行首平移** ----
+   *
+   * 用户原话：「按小节平移的方式时，应该是在色块过小节时平移，不然从行末移到行首时不会发生平移，
+   * 到行首一小节看不到」。
+   *
+   * 根因：拍/小节网格的时刻来自 `seq.barStartsMs`（按拍数累加），而色块时刻来自事件
+   * （含呼吸缝/附点/倚音）⇒ **网格往往比事件早零点几毫秒**。行首那条 tick 落在"上一块还没结束"的
+   * 位置时，`rectIndexAt(网格时刻)` 拿到的是**上一行最后一块** ⇒ 那条关键帧把镜头对回旧行；
+   * 而旧实现的"行首补位"看到"附近已有 tick"就跳过 ⇒ 新行行首没有自己的平移。
+   *
+   * 断言：把网格整体**提前 0.3ms**（真实谱里就是这个方向），每行的行首 pan 仍必须
+   * 落在该行第一块自己的时刻上、并按**该行第一块**夹紧（不是上一行最后一块）。
+   */
+  {
+    console.log('    [adj1092] 按小节/按拍：每个曲行都有行首平移')
+    const SRC = `V: 1.0\nB: t\nD: C\nP: 4/4\n${Array(4)
+      .fill('Q: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 |')
+      .join('\n')}\n`
+    const parsed = parseJpsRaw(SRC)
+    const lay = layoutScore(parsed, DUR_CFG)
+    const seq = buildPlaySequence(parsed, lay, 120)
+    const tr = buildRectTrack(seq, { noteSize: DUR_CFG.note_size })
+    const v = buildFlowView(lay, tr, DUR_CFG)
+    const worldW = 1080 / cam.zoomFollow
+    const bars = (seq.barStartsMs ?? []).map((b) => b - 0.3) // 网格比事件早 0.3ms（真实谱的方向）
+    const camBar2 = buildCameraTrack(v, tr, DUR_CFG, {
+      viewW: 1080,
+      viewH: 1920,
+      panMode: 'bar',
+      bars,
+      beatMs: 500,
+    })
+    const rowX = (ri: number): { x0: number; x1: number; firstIdx: number } => {
+      let x0 = Number.POSITIVE_INFINITY
+      let x1 = Number.NEGATIVE_INFINITY
+      let firstIdx = -1
+      for (let i = 0; i < tr.rects.length; i++) {
+        if (v.rectRow[i] !== ri) continue
+        if (firstIdx < 0) firstIdx = i
+        x0 = Math.min(x0, tr.rects[i].x)
+        x1 = Math.max(x1, tr.rects[i].x + tr.rects[i].w)
+      }
+      return { x0, x1, firstIdx }
+    }
+    let badStart = ''
+    let badFrame = ''
+    for (const [ri, r] of v.rows.entries()) {
+      const first = camBar2.pans.find((p) => Math.abs(p.t - r.t0) <= 2)
+      if (first === undefined) {
+        if (badStart === '') badStart = `行${ri} t0=${Math.round(r.t0)} 没有行首 pan`
+        continue
+      }
+      const { x0, x1, firstIdx } = rowX(ri)
+      const wantX = tr.rects[firstIdx].x + tr.rects[firstIdx].w / 2
+      const expect = clampRowCenter(x0, x1, worldW, CAMERA_WHITE_MARGIN, wantX)
+      if (Math.abs(first.cx - expect) > 0.51 && badFrame === '') {
+        badFrame = `行${ri} 行首 pan cx=${first.cx.toFixed(1)}，按该行第一块应为 ${expect.toFixed(1)}`
+      }
+    }
+    check(
+      'adj1092 bar 模式：每一行的行首都有自己的 pan（网格比事件早 0.3ms 也不许丢）',
+      v.rows.length >= 3 && badStart === '',
+      badStart,
+    )
+    check(
+      'adj1092 bar 模式：行首 pan 按**该行第一块**夹紧（不是上一行的最后一块）',
+      badFrame === '',
+      badFrame,
+    )
+    // 负对照：拿"上一行最后一块"算出来的 cx 必须与"该行第一块"不同，否则上面两条分辨不出错位
+    const lastIdx = (ri: number): number => {
+      let last = -1
+      for (let i = 0; i < tr.rects.length; i++) if (v.rectRow[i] === ri) last = i
+      return last
+    }
+    const prevLast = lastIdx(0)
+    const row1 = rowX(1)
+    const prevLastCx = clampRowCenter(
+      row1.x0,
+      row1.x1,
+      worldW,
+      CAMERA_WHITE_MARGIN,
+      tr.rects[prevLast].x + tr.rects[prevLast].w / 2,
+    )
+    const firstCx = clampRowCenter(
+      row1.x0,
+      row1.x1,
+      worldW,
+      CAMERA_WHITE_MARGIN,
+      tr.rects[row1.firstIdx].x + tr.rects[row1.firstIdx].w / 2,
+    )
+    check(
+      'adj1092 负对照："上一行最后一块"与"该行第一块"的夹紧中心不同（否则判据分辨不出错位）',
+      Math.abs(prevLastCx - firstCx) > 1,
+      `上一行末块=${prevLastCx.toFixed(1)} 本行首块=${firstCx.toFixed(1)}`,
+    )
+    /**
+     * 小节本身仍要平移：行内**非行首**的容器里也要出现 pan。
+     * （不是每个小节都一定有 pan——目标 cx 没变时会被去重，这是"镜头不动"的正确行为。）
+     */
+    const rowStarts = v.rows.map((r) => r.t0)
+    const midPans = camBar2.pans.filter((p) => !rowStarts.some((t) => Math.abs(p.t - t) <= 2))
+    check(
+      'adj1092 bar 模式仍按小节平移（行内出现非行首的 pan）',
+      midPans.length >= 1,
+      `行内 pans=${midPans.length}（总 pans=${camBar2.pans.length}，行数=${v.rows.length}）`,
     )
   }
 

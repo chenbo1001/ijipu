@@ -303,37 +303,55 @@ export function buildCameraTrack(
       }
       return -1
     }
+    /** 此刻没有色块（休止/呼吸缝）⇒ 找**下一块**：镜头先到它那儿等着，别留在上一块 */
+    const nextRectAtOrAfter = (t: number): number => {
+      let best = -1
+      for (let i = 0; i < track.rects.length; i++) {
+        const r = track.rects[i]
+        if (r.t0 >= t && (best < 0 || r.t0 < track.rects[best].t0)) best = i
+      }
+      return best
+    }
     const bt = opts.beatMs ?? 0
-    /** 拍/小节 tick；`rowStart` = 行首补位（换行那一下必须归位，不能等下一拍） */
-    const ticks: { t: number; rowStart: boolean }[] = []
+    /** 拍/小节 tick；`rectIndex` = 行首那条（时间取该行第一块自己的 t0，不取网格时刻） */
+    const ticks: { t: number; rowStart: boolean; rectIndex?: number }[] = []
     if (panMode === 'beat' && bt > 0) {
       for (let t = firstT; t <= track.endMs; t += bt) ticks.push({ t, rowStart: false })
     } else if (panMode === 'bar') {
       for (const b of opts.bars ?? []) if (b >= firstT && b <= track.endMs) ticks.push({ t: b, rowStart: false })
     }
     /**
-     * adj1089：**行首补位**。
+     * adj1092（用户实报「按小节时，从行末移到行首不会平移，行首那一小节看不到」）：
+     * **每个曲行无条件补一条行首关键帧**。
      *
-     * 注释早就写着"换行时仍以行首那条色块为准"，但 adj1088 的实现把 `pans` 清空后只按拍/小节重建：
-     * 行首若不在拍/小节 tick 上（弱起行、行内切分小节），相机要等下一拍才归位，
-     * 中间那一段就露出大片空白（正是"露白 ≤10%"要防的）。这里只在该行起点**没有** tick 时补一条
-     * （有 tick 时不补，避免同一时刻两条关键帧打架）。
+     * 为什么必须无条件：拍/小节网格的时刻来自 `seq.barStartsMs`（按拍数累加），
+     * 而色块时刻来自事件（含呼吸缝/附点/倚音，二者会差几毫秒）；网格落在**上一块还没结束**的地方时，
+     * `rectIndexAt(网格时刻)` 拿到的是**上一行**的块 ⇒ 那条关键帧把镜头对回旧行，
+     * 新行行首就没有自己的平移（用户看到的就是"行首一小节看不到"，要等下一小节才回来）。
+     *
+     * 所以：行首关键帧的时刻取**该行第一块自己的 `t0`**、目标取**这一块的夹紧中心**，
+     * 并把同一时刻附近的拍/小节 tick **让位**（保留会互相覆盖，且那条可能是按旧行算的）。
      */
-    const rowStartT: number[] = rows.map(() => Number.NaN)
+    const rowFirstRect: number[] = rows.map(() => -1)
     for (let i = 0; i < track.rects.length; i++) {
       const ri = view.rectRow[i]
       if (ri < 0 || ri >= rows.length) continue
-      if (!Number.isFinite(rowStartT[ri])) rowStartT[ri] = track.rects[i].t0
+      if (rowFirstRect[ri] < 0) rowFirstRect[ri] = i
     }
-    for (const t of rowStartT) {
-      if (!Number.isFinite(t)) continue
-      if (ticks.some((k) => Math.abs(k.t - t) <= 0.5)) continue
-      ticks.push({ t, rowStart: true })
+    for (const i of rowFirstRect) {
+      if (i < 0) continue
+      const t = track.rects[i].t0
+      for (let k = ticks.length - 1; k >= 0; k--) {
+        // 行首平移是"换行那一下直接归位"（dur=0），窗口内的小节/拍 tick 由它取代
+        if (Math.abs(ticks[k].t - t) <= panMs) ticks.splice(k, 1)
+      }
+      ticks.push({ t, rowStart: true, rectIndex: i })
     }
     ticks.sort((a, b) => a.t - b.t || (a.rowStart === b.rowStart ? 0 : a.rowStart ? -1 : 1))
     pans.length = 0
     for (const k of ticks) {
-      const i = rectIndexAt(k.t)
+      let i = k.rectIndex ?? rectIndexAt(k.t)
+      if (i < 0) i = nextRectAtOrAfter(k.t)
       if (i < 0) continue
       const want = track.rects[i].x + track.rects[i].w / 2
       const wantCx = Math.max(0, Math.min(paper.width, clampRow(view.rectRow[i], want)))

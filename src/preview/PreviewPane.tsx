@@ -14,7 +14,7 @@ import { PREVIEW_BASE_W, isFullyVisibleIn } from './zoomFit'
 import { PracticeMarkLayer } from './PracticeMarkLayer'
 // adj895：播放跟随滚动的「安全区」判定（纯函数，见该文件的口径说明）
 // adj1089：按拍/按小节的居中 + "左右露白 ≤10%"夹紧（与出片同一个 clampRowCenter）
-import { followScrollTargetX, followScrollTargetY, panScrollTargetX, panTickIndex } from './followScroll'
+import { followScrollTargetX, followScrollTargetY, panFocusAt, panScrollTargetX } from './followScroll'
 import { openExternalUrl } from './openUrl'
 import { beginDrag } from '../ui/dragGesture'
 // adj723：音符点击（单击 / Ctrl+单击）的动作判定（纯模块，便于 smoke 断言）
@@ -1235,34 +1235,6 @@ function currentMainSeg(
 }
 
 /**
- * adj1089：某时刻**本页当前曲行**的左右边界（页面单位）。
- *
- * 为什么按"曲行（group）"取：出片的"行内容左右边界"就是这一行**全部色块**的并集
- * （引擎 `buildCameraTrack` 里的 rowX0/rowX1）。预览的色块同样按 (页, 曲行, 声部, 音色) 分组，
- * 所以这里把同一页、同一曲行的所有段并起来 = 同一份"行内容"。
- *
- * 锁行方式与色块一致：取**此刻正在响的主声部段**（多声部同时响时取最晚开始的那条），
- * 再用它的 `group` 找整行边界——不按行时间猜行（那会在多声部/跨行连音时锁错行）。
- */
-function rowBoundsAt(
-  track: readonly PlayheadSegLike[],
-  pageIndex: number,
-  t: number,
-): { x0: number; x1: number } | null {
-  const seg = currentMainSeg(track, pageIndex, t)
-  if (!seg) return null
-  const group = seg.group
-  let x0 = Number.POSITIVE_INFINITY
-  let x1 = Number.NEGATIVE_INFINITY
-  for (const s of track) {
-    if (s.pageIndex !== pageIndex || s.group !== group) continue
-    x0 = Math.min(x0, s.x)
-    x1 = Math.max(x1, s.x + s.width)
-  }
-  return Number.isFinite(x0) && Number.isFinite(x1) ? { x0, x1 } : null
-}
-
-/**
  * adj282：跟随色块渲染层——仅订阅 currentMs/playheadTrack，避免 PreviewPane 主组件
  * 随播放逐帧重渲染（SVG 层不重建，仅本轻量色块刷新）。
  * adj299：每曲行（group）独立一个色块（按各自拍段滑动、按 voice 配色、各自行高）。
@@ -1293,6 +1265,8 @@ function PlayheadLayer({
   const anchorMs = useDocStore((s) => s.playheadAnchorMs)
   // adj1089：同一拍 / 同一小节里只居中一次（逐帧都算就退化成连续跟随）
   const panKeyRef = useRef('')
+  // adj1092：本页的段（按拍/小节平移要用它判断"行变了"与"新行的第一块"）
+  const segsOfPage = useMemo(() => track.filter((s) => s.pageIndex === page.index), [track, page.index])
   // adj1090：同一视觉行里只按"行"滚一次（首次播放 / 换行各一次）
   const rowKeyRef = useRef('')
   // adj1062：跨页球的纵向换算要用到预览缩放（与 `.preview-zoom-scale` 的 zoom 同源）
@@ -1364,21 +1338,23 @@ function PlayheadLayer({
    *   · `beat` / `bar`：每拍 / 每小节把色块滚到画面中间，再做同一套"左右露白 ≤10%"夹紧
    *     （算式直接调引擎 `clampRowCenter`，与出片同源，见 `followScroll.ts`）。
    *
+   * adj1092（用户实报「按小节时，从行末移到行首不会平移，行首那一小节看不到」）：
+   * `beat` / `bar` 的节流键里**加上行**——行变了就滚，且用**新行的第一块**居中。
+   * 只按小节序号节流时，行首那一下会被上一行最后一个小节吃掉（或与小节网格差几毫秒而错过）。
+   *
    * ⚠ hook 必须在下面那两个 `return null` **之前**（条件调用 hooks 会破坏顺序）。
    */
   useEffect(() => {
     if (track.length === 0 || currentMs <= 0) return
-    // 色块由本层渲染 ⇒ 直接量它在屏幕上的位置最省事（不用把 SVG 坐标换算回视口坐标）
-    const marker = document.querySelector('.playhead-marker')
-    const scroller = marker?.closest('.preview-pane')
-    if (!(marker instanceof HTMLElement) || !(scroller instanceof HTMLElement)) return
-    const scRect = scroller.getBoundingClientRect()
-    const scrollLeft = scroller.scrollLeft
-    const markerRect = marker.getBoundingClientRect()
-
     if (panMode === 'follow') {
+      // 色块由本层渲染 ⇒ 直接量它在屏幕上的位置最省事（不用把 SVG 坐标换算回视口坐标）
+      const marker = document.querySelector('.playhead-marker')
+      const scroller = marker?.closest('.preview-pane')
+      if (!(marker instanceof HTMLElement) || !(scroller instanceof HTMLElement)) return
+      const scRect = scroller.getBoundingClientRect()
+      const scrollLeft = scroller.scrollLeft
       const target = followScrollTargetX({
-        xInView: markerRect.left - scRect.left,
+        xInView: marker.getBoundingClientRect().left - scRect.left,
         viewW: scroller.clientWidth,
         scrollW: scroller.scrollWidth,
         scrollLeft,
@@ -1391,36 +1367,50 @@ function PlayheadLayer({
       return
     }
 
-    // beat / bar：同一拍/小节只居中一次（逐帧都算就退化成连续跟随）
-    const tick = panTickIndex(panMode, currentMs, beatMs, anchorMs, beatBars)
-    if (tick < 0) return
-    const key = `${panMode}:${tick}`
+    /**
+     * beat / bar（adj1092）：**同一拍/小节 + 同一行内只滚一次**；行变了也滚。
+     *
+     * 行也进 key 是这次的关键：只按小节序号节流时，行首那一下会被上一行最后一个小节吃掉
+     * （或与小节网格错开几毫秒），于是"行末 → 行首"不发生平移、行首那一小节留在视界外。
+     * `panFocusAt` 里"行变了就用新行的第一块居中"，行首因此一定进视界。
+     */
+    const spans = rowSpans[page.index] ?? []
+    const focus = panFocusAt({
+      mode: panMode === 'bar' ? 'bar' : 'beat',
+      t: currentMs,
+      beatMs,
+      anchorMs,
+      bars: beatBars,
+      segs: segsOfPage,
+      spans,
+    })
+    if (focus === null) return
+    const key = `${panMode}:${focus.key}`
     if (panKeyRef.current === key) return
     /**
-     * 行内容左右边界用**页面单位**量、再按"这一页实际渲染宽 / 页宽"折成内容 px：
-     * 预览的缩放有两层（pageConfig 字号 + 用户预览比率），逐处自己算缩放迟早算错，
-     * 直接量 `.preview-zoom-scale` 的实际宽度最稳。
+     * 页面元素按**序号**取、再按"这一页实际渲染宽 / 页宽"折成内容 px：
+     * 预览的缩放有两层（pageConfig 字号 + 用户预览比率），逐处自己算缩放迟早算错。
      */
-    const pageEl = marker.closest('.preview-zoom-scale')
-    if (!(pageEl instanceof HTMLElement)) return
+    const pageEl = document.querySelectorAll('.preview-zoom-scale')[page.index]
+    const scroller = pageEl?.closest('.preview-pane')
+    if (!(pageEl instanceof HTMLElement) || !(scroller instanceof HTMLElement)) return
+    const scRect = scroller.getBoundingClientRect()
     const pageRect = pageEl.getBoundingClientRect()
     if (!(pageRect.width > 0) || !(page.width > 0)) return
-    const row = rowBoundsAt(track, page.index, currentMs)
-    if (!row) return
     const scale = pageRect.width / page.width
-    const pageLeft = pageRect.left - scRect.left + scrollLeft
+    const pageLeft = pageRect.left - scRect.left + scroller.scrollLeft
     const target = panScrollTargetX({
-      blockCenterX: markerRect.left - scRect.left + scrollLeft + markerRect.width / 2,
-      rowX0: pageLeft + row.x0 * scale,
-      rowX1: pageLeft + row.x1 * scale,
+      blockCenterX: pageLeft + focus.blockCenterX * scale,
+      rowX0: pageLeft + focus.rowX0 * scale,
+      rowX1: pageLeft + focus.rowX1 * scale,
       viewW: scroller.clientWidth,
       scrollW: scroller.scrollWidth,
     })
     if (target === null) return
     panKeyRef.current = key
-    if (Math.abs(target - scrollLeft) < 1) return
+    if (Math.abs(target - scroller.scrollLeft) < 1) return
     scroller.scrollTo({ left: target, behavior: 'smooth' })
-  }, [currentMs, track, panMode, beatMs, beatBars, anchorMs, page.index, page.width])
+  }, [currentMs, track, segsOfPage, rowSpans, panMode, beatMs, beatBars, anchorMs, page.index, page.width])
 
   /**
    * adj1090（用户 2026-10-23 口径）：**纵向**滚动——首次播放 / 换行时，判断"曲部 + 词部"

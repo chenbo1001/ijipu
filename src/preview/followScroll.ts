@@ -200,3 +200,133 @@ export function followScrollTargetY(input: FollowScrollYInput): number | null {
   if (Math.abs(want - scrollTop) < 1) return null
   return Math.max(0, Math.min(maxScroll, want))
 }
+
+/**
+ * adj1092：**换行前多久**就把画面滚到新行（ms）。
+ *
+ * 用户实报：「按小节时，从行末移到行首不会平移，行首那一小节看不到」——
+ * 只按"小节序号变了"触发时，行首那一次要么被上一行的最后一个小节吃掉、
+ * 要么因为小节网格与行首时刻差几毫秒而错过。这里跟出片的"行首关键帧"同一意图：
+ * **行变了就滚**，并且提前一点（400ms ≈ 出片 `CAMERA_PAN_MS` 的推镜时长）。
+ */
+export const PAN_ROW_LEAD_MS = 400
+
+/** 试听里参与"按拍/按小节平移"的一段色块（`playheadTrack` 的字段子集） */
+export interface PanFocusSeg {
+  /** 音符基线 y（页面坐标）——用来判断它属于哪个曲行 */
+  y: number
+  atMs: number
+  durationMs: number
+  x: number
+  width: number
+  playVoice?: 'accomp' | 'main' | 'second'
+}
+
+/** 曲行的纵向范围（引擎 `rowSpansOfPage` 的结果） */
+export interface PanFocusSpan {
+  top: number
+  bottom: number
+}
+
+export interface PanFocusInput {
+  mode: 'beat' | 'bar'
+  /** 当前播放时刻（ms） */
+  t: number
+  beatMs: number
+  anchorMs: number
+  bars: readonly number[]
+  /** **本页**的色块段 */
+  segs: readonly PanFocusSeg[]
+  /** **本页**的曲行纵向范围 */
+  spans: readonly PanFocusSpan[]
+  /** 行切换提前量（缺省 `PAN_ROW_LEAD_MS`） */
+  leadMs?: number
+}
+
+export interface PanFocus {
+  /** 目标曲行下标 */
+  spanIndex: number
+  /** 用哪一块的中心做"居中"（页面坐标 x） */
+  blockCenterX: number
+  /** 这一行内容的左右界（页面坐标） */
+  rowX0: number
+  rowX1: number
+  /**
+   * 节流键：同一拍/小节 + 同一行内不变。
+   *
+   * ⚠ **行也算进键里**（adj1092）：只看拍/小节序号时，行首若与拍/小节 tick 错开几毫秒，
+   * 或者行首那一下已经被上一行的最后一个小节用掉了，换行就不会再滚——用户看到"行首一小节看不到"。
+   */
+  key: string
+}
+
+/**
+ * adj1092：试听 `beat` / `bar` 模式"该把画面放到哪、用哪块居中"。
+ *
+ * 口径与出片相机一致：
+ *  · **每一拍 / 每一小节**移一次（`panTickIndex` 节流）；
+ *  · **每一行**也移一次（行首前 `leadMs` 就切过去），行首用**新行的第一块**居中，
+ *    这样"行末 → 行首"一定发生平移，行首那一小节不会留在视界外；
+ *  · 行内同一拍/小节里用**当前正在响的那块**居中（多声部取最晚开始的，与色块同口径）。
+ *
+ * 返回 `null` = 还不够条件（还没到第一拍 / 没有段 / 找不到行）。
+ */
+export function panFocusAt(input: PanFocusInput): PanFocus | null {
+  const { mode, t, beatMs, anchorMs, bars, segs, spans } = input
+  const lead = input.leadMs ?? PAN_ROW_LEAD_MS
+  const tick = panTickIndex(mode, t, beatMs, anchorMs, bars)
+  if (tick < 0 || spans.length === 0) return null
+  const spanOf = (y: number): number => {
+    for (let i = 0; i < spans.length; i++) {
+      if (y >= spans[i].top - 0.5 && y <= spans[i].bottom + 0.5) return i
+    }
+    return -1
+  }
+  // ① 先定"马上要看的行"：`t + lead` 之前最后开始的那一段落在哪一行
+  let focusSeg: PanFocusSeg | null = null
+  for (const s of segs) {
+    if (s.atMs <= t + lead && (focusSeg === null || s.atMs >= focusSeg.atMs)) focusSeg = s
+  }
+  if (focusSeg === null) return null
+  const spanIndex = spanOf(focusSeg.y)
+  if (spanIndex < 0) return null
+  const span = spans[spanIndex]
+  const inSpan = (s: PanFocusSeg): boolean => s.y >= span.top - 0.5 && s.y <= span.bottom + 0.5
+  // ② 此刻正在响的那块（多声部取最晚开始）
+  let curSeg: PanFocusSeg | null = null
+  for (const s of segs) {
+    if (!(s.atMs <= t && t < s.atMs + s.durationMs)) continue
+    if (curSeg === null || s.atMs >= curSeg.atMs) curSeg = s
+  }
+  const curSpan = curSeg === null ? -1 : spanOf(curSeg.y)
+  // ③ 行没变 ⇒ 用当前块；行变了（或此刻是休止）⇒ 用**新行的第一块**
+  let useSeg: PanFocusSeg | null = curSpan === spanIndex ? curSeg : null
+  if (useSeg === null) {
+    for (const s of segs) {
+      if (!inSpan(s)) continue
+      if (s.playVoice !== undefined && s.playVoice !== 'main') continue
+      if (useSeg === null || s.atMs < useSeg.atMs) useSeg = s
+    }
+    if (useSeg === null) {
+      for (const s of segs) {
+        if (inSpan(s) && (useSeg === null || s.atMs < useSeg.atMs)) useSeg = s
+      }
+    }
+    if (useSeg === null) return null
+  }
+  let x0 = Number.POSITIVE_INFINITY
+  let x1 = Number.NEGATIVE_INFINITY
+  for (const s of segs) {
+    if (!inSpan(s)) continue
+    x0 = Math.min(x0, s.x)
+    x1 = Math.max(x1, s.x + s.width)
+  }
+  if (!Number.isFinite(x0) || !Number.isFinite(x1)) return null
+  return {
+    spanIndex,
+    blockCenterX: useSeg.x + useSeg.width / 2,
+    rowX0: x0,
+    rowX1: x1,
+    key: `${tick}:${spanIndex}`,
+  }
+}
