@@ -11,7 +11,7 @@
  * 本阶段（P1）实现：`format` / `lint` / `info` + 全局选项 + `--json`。
  * `render` / `play` / `batch` / `settings` / `config` / `doctor` 属 P2–P4，**未实现时明确报错**（不假装成功 ✗）。
  */
-import { formatJps, parseJps, splitParseIssues, layoutScore, renderScoreToSvg, buildPlaySequence, inferBpm, resolvePracticeRange, eventsToMidi, noteIdStringOf, defaultPageConfig, mergeJpsConfig, extractJpsConfig, OPTIONAL_CONFIG_FIELDS, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, inkBoxesOfLayout, type PageConfig, type ScoreLayout, type RangeBox, type ExportRange, type ProblemRow,
+import { formatJps, parseJps, splitParseIssues, layoutScore, renderScoreToSvg, buildPlaySequence, inferBpm, resolvePracticeRange, resolveBarBeatRange, eventsToMidi, defaultPageConfig, mergeJpsConfig, extractJpsConfig, OPTIONAL_CONFIG_FIELDS, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, inkBoxesOfLayout, type PageConfig, type ScoreLayout, type RangeBox, type ExportRange, type ProblemRow,
   // adj962：把设置**写进谱面**（`set` 命令）——与应用的「保存设置」**同一份引擎实现**
   writeJpsConfig, mergeConfigEdits } from '@ijipu/engine'
 // adj944：注册/解除 PATH 的**纯逻辑与编排**（与全局设置里那个按钮**共用同一份** ✓）
@@ -463,162 +463,13 @@ export function parseBarBeat(raw: string): { bar: number; beat: number } | null 
 }
 
 /** 拍位比较的容差：`beatPos` 是累加出来的浮点数（0.9999999 要当成 1） */
-const BEAT_EPS = 1e-6
-
-export type ScoreSpotNote = {
-  id: string
-  /** 全局小节号（1 起） */
-  bar: number
-  /** 小节内累积拍（0 起，与引擎 `PlacedToken.beatPos` 同口径） */
-  beatPos: number
-  y: number
-}
-
 /**
- * 把谱面摊平成"全局小节号 + 拍位"的音符表（**只取主旋律、只取可发声的音符**）。
- *
- * 为什么需要摊平：布局给的 `PlacedToken.barIndex` 是**曲行内**的编号（每一行从 0 起），
- * 而用户说的是整份谱的第 27 小节 ⇒ 必须先按曲行累加出全局小节号。
- *
- * 曲行的小节数从**小节线**数出来（`PlacedBarline.id.group` 就是它属于哪一行）：
- * 一行里有几根小节线，就有几个小节（每根收一个小节，含行末那根）。
- * 段层音符（`{bz}`/`{dsb}`/`{tp}`）与休止符不算"某一拍的那个音"，这里排除 ——
- * 否则同一拍会命中好几个 id、用户点名的位置就对不上。
+ * adj1101：`flattenScoreNotes` / `resolveBarBeatRange` 已搬到引擎（`layout/measureMap.ts`）——
+ * 界面（标记段下拉显示 `33:1 - 34:2`）与命令行 `--from 33:1` 必须同一套小节/拍口径。
+ * 这里**只做转出**（`cli-assert` 与本文件其它地方照旧从 CLI 导入，不会断）。
  */
-export function flattenScoreNotes(layout: ScoreLayout): ScoreSpotNote[] {
-  /**
-   * `barIndex` 是**曲行内**编号（每换一行从 0 起），所以全局小节号 =
-   * 「前面各行的小节数之和」+ `barIndex` + 1。
-   *
-   * 一行有几小节，按**该行音符的最大 `barIndex` + 1** 算（实测：赤伶 10 行、
-   * 每行 4–6 小节 = 51 小节；40 小节的单行谱则是 1 行 40 小节）。
-   * 不用小节线数量：行首的 `|:` 也会产生一根线，按根数算会把整份谱的小节号推移一位。
-   */
-  const barsByRow = new Map<string, number>()
-  for (const page of layout.pages) {
-    for (const n of page.notes) {
-      if (n.segment !== undefined || !n.playable) continue
-      const key = `${page.index}:${n.id.group}`
-      const need = n.barIndex + 1
-      if (need > (barsByRow.get(key) ?? 0)) barsByRow.set(key, need)
-    }
-  }
-
-  // 行序按**数字**排（字符串排序会把 "0:10" 排到 "0:2" 前面）
-  const offset = new Map<string, number>()
-  let totalBars = 0
-  const rowKeys = Array.from(barsByRow.keys()).sort((a, b) => {
-    const [pa, ga] = a.split(':').map(Number)
-    const [pb, gb] = b.split(':').map(Number)
-    return pa !== pb ? pa - pb : ga - gb
-  })
-  for (const key of rowKeys) {
-    offset.set(key, totalBars)
-    totalBars += barsByRow.get(key) ?? 0
-  }
-
-  const out: ScoreSpotNote[] = []
-  for (const page of layout.pages) {
-    for (const n of page.notes) {
-      if (n.segment !== undefined || !n.playable) continue
-      const key = `${page.index}:${n.id.group}`
-      const base = offset.get(key)
-      // 找不到行偏移（极少数畸形版面）：跳过而不是算成第 1 小节 —— 错位比缺失更难查
-      if (base === undefined) continue
-      out.push({ id: noteIdStringOf(n.id), bar: base + n.barIndex + 1, beatPos: n.beatPos, y: n.y })
-    }
-  }
-  flatTotalBars = totalBars
-  // 稳定排序：先小节、再拍位；同拍多声部按纵向位置（上面的那条 = 主旋律）
-  return out.sort((a, b) =>
-    a.bar !== b.bar ? a.bar - b.bar : Math.abs(a.beatPos - b.beatPos) > BEAT_EPS ? a.beatPos - b.beatPos : a.y - b.y,
-  )
-}
-
-/**
- * 最近一次 `flattenScoreNotes` 数出来的总小节数。
- *
- * 为什么用模块级变量而不是返回值：小节总数要用于**报错文案**（"谱面只有 N 个小节"），
- * 而调用方只关心音符表。它是纯函数的副产物、每次调用都会重写，不会跨请求残留。
- */
-let flatTotalBars = 0
-
-type BarBeatRange = {
-  startId: string
-  endId: string
-  /** 给用户看的定位说明（"第 27 小节第 3 拍 → …"），出错时也用它 */
-  startLabel: string
-  endLabel: string
-  totalBars: number
-}
-
-/**
- * 把用户写的两个拍位换算成**音符 id**（`render -t mp4` 的段落）。
- *
- * 口径（逐条都是刻意选的）：
- *  · 起点：该小节**第一个不早于**这一拍的音符（拍位落在音符中间 ⇒ 取这个音符，符合"从这拍开始"）；
- *  · 终点：这一拍那个音符的**前一个**音符 —— 用户说"到 50:1"，意思是**到第 50 小节第 1 拍为止**，
- *    不该把第 50 小节的第一个音也带进来；这样 `--from 27:3 --to 50:1` 正好是"第 27 小节第 3 拍
- *    到第 49 小节末尾"；
- *  · 两个位置都按**乐谱顺序**（不做反复展开）：反复遍次由 `--pass` 在放映时挑（与界面标记段同一套）。
- *
- * @returns 成功给 id 与说明；失败给 `error`（原文可直接打到终端）
- */
-export function resolveBarBeatRange(
-  layout: ScoreLayout,
-  from: { bar: number; beat: number },
-  to: { bar: number; beat: number },
-): BarBeatRange | { error: string } {
-  const notes = flattenScoreNotes(layout)
-  const totalBars = flatTotalBars
-
-  /**
-   * 找一个位置的**下标**。
-   * 找不到时把"这一小节实际有哪些拍"说出来 —— 只报"没有第 9 拍"用户仍不知道该怎么改。
-   */
-  const locate = (spot: { bar: number; beat: number }, which: string): { index: number; note: ScoreSpotNote } | { error: string } => {
-    if (spot.bar > totalBars) {
-      return { error: `${which}：谱面只有 ${totalBars} 个小节，没有第 ${spot.bar} 小节` }
-    }
-    const inBar = notes.filter((n) => n.bar === spot.bar)
-    if (inBar.length === 0) {
-      return { error: `${which}：第 ${spot.bar} 小节没有可发声的音符（只有休止符？）` }
-    }
-    const target = spot.beat - 1
-    const idx = notes.findIndex((n) => n.bar === spot.bar && n.beatPos >= target - BEAT_EPS)
-    if (idx < 0) {
-      const last = inBar[inBar.length - 1].beatPos + BEAT_EPS
-      const span = Number.isInteger(last) ? String(last) : last.toFixed(2)
-      return { error: `${which}：第 ${spot.bar} 小节最后停在 ${span} 拍，没有第 ${spot.beat} 拍` }
-    }
-    return { index: idx, note: notes[idx] }
-  }
-
-  const a = locate(from, '--from')
-  if ('error' in a) return a
-  const b = locate(to, '--to')
-  if ('error' in b) return b
-  if (b.index <= a.index) {
-    return { error: `--to 必须在 --from 之后（现在两者落在同一个音上：${a.note.id}）` }
-  }
-
-  /**
-   * 终点取"目标音符的前一个"。
-   *
-   * 如果目标就是全谱第一个音，说明这一段是空的：如实报错，而不是悄悄导出一整曲。
-   */
-  const endIdx = b.index - 1
-  if (endIdx < a.index) {
-    return { error: '结束位置之前没有音符：这一段是空的（--to 请往后写一点）' }
-  }
-  return {
-    startId: a.note.id,
-    endId: notes[endIdx].id,
-    startLabel: `第 ${from.bar} 小节第 ${from.beat} 拍`,
-    endLabel: `第 ${to.bar} 小节第 ${to.beat} 拍之前`,
-    totalBars,
-  }
-}
+export { flattenScoreNotes, resolveBarBeatRange, totalBarsOf } from '@ijipu/engine'
+export type { ScoreSpotNote, BarBeatRange } from '@ijipu/engine'
 
 /**
  * 取路径里的**文件名**。

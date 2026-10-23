@@ -22,6 +22,8 @@ import type {
   VoiceBlock,
 } from '../types'
 import { tokenDuration } from '../duration'
+// adj1101：id 字符串函数搬到中立模块（layout 也要用），这里 import 一次供内部使用、再转出
+import { noteIdStringOf } from '../ids'
 import { parseKey, pitchToName, isVoltaCloserBarline } from '../layout/index'
 import { graceGroupBeats, gracePerNoteBeats } from '../layout/spaceLayout'
 // adj629d：段层/替谱音符 id 判定（试听"点音符跳过去"要按 id 精确命中事件）
@@ -149,10 +151,13 @@ export interface PlaySequence {
   barStartsMs?: number[]
 }
 
-/** 音符 id → `page_voice_group_index` 串（与 `data-notepos` / `activeNoteId` 同一形状） */
-export function noteIdStringOf(id: { page: number; voice: number; group: number; index: number }): string {
-  return `${id.page}_${id.voice}_${id.group}_${id.index}`
-}
+/**
+ * 音符 id → `page_voice_group_index` 串（与 `data-notepos` / `activeNoteId` 同一形状）
+ *
+ * adj1101：实现搬到 `engine/ids.ts`（中立模块，layout 也能用而不形成反向依赖）；这里转出，
+ * 保持所有既有 import 路径不变。
+ */
+export { noteIdStringOf } from '../ids'
 
 /**
  * adj1006：把遍次时间轴**搬到新时间轴**（0 点 = `base`）。

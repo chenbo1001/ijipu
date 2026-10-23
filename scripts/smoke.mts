@@ -80,8 +80,12 @@ import { FOLLOW_V_PAD_RATIO, followScrollTargetY } from '../src/preview/followSc
 import { panFocusAt } from '../src/preview/followScroll'
 // adj1093：按小节模式的 **4/5 安全推**（本行最后的小节不推）
 import { safetyPanTargetX, spanLastBarStart } from '../src/preview/followScroll'
+// adj1101：标记段下拉「段1 [ 33:1 - 34:2 ]」的文本（纯函数）
+import { beatLabelOf, markOptionText, markRangeText } from '../src/dialogs/practiceMarkText'
 // adj1096：片尾卡纵向排版（纯函数；标题 / 强调线 / 标语 / 网址的间距）
 import { endCardLayout } from '../src/export/video/cardLayout'
+// adj1101：全局小节号/拍位的唯一口径（界面与命令行共用）
+import { flattenScoreNotes, measureSpotOf, resolveBarBeatRange } from '@ijipu/engine/index.ts'
 // adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
 import { JPS_PARAM_MAX_LEN, readJpsFromSearch, withoutJpsParam } from '../src/store/urlImport'
 import { inflateSync } from 'node:zlib'
@@ -2346,6 +2350,52 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
     'adj1100 负对照：同 id 但不相接 ⇒ 不吞（证明上一条按"首尾相接"判，不是按 id 判）',
     gap !== null && gap.events.length === 3,
     gap === null ? 'null' : String(gap.events.length),
+  )
+}
+
+/**
+ * adj1101（用户 2026-10-23 口径）：「标记段下拉列表够大，可以显示为 `段1 [ 33:1 - 34:2 ]`，
+ * 这个形式更明确」——顺带把「全局小节号 + 拍位」的换算收进引擎（原来只在 CLI 里），
+ * 界面与命令行 `--from 33:1` 用**同一份**，不会两边数出不同的小节号。
+ */
+{
+  console.log('[adj1101] 标记段下拉显示「段1 [ 33:1 - 34:2 ]」')
+  check(
+    'adj1101 区间文本 = `33:1 - 34:2`',
+    markRangeText({ bar: 33, beatPos: 0 }, { bar: 34, beatPos: 1 }) === '33:1 - 34:2',
+    markRangeText({ bar: 33, beatPos: 0 }, { bar: 34, beatPos: 1 }),
+  )
+  check('adj1101 半拍照常显示小数（beatPos 2.5 ⇒ 3.5 拍）', beatLabelOf(2.5) === '3.5', beatLabelOf(2.5))
+  check(
+    'adj1101 下拉项全文 = 段名 + 区间（`段1 [ 33:1 - 34:2 ]`）',
+    markOptionText('段1', { bar: 33, beatPos: 0 }, { bar: 34, beatPos: 1 }) === '段1 [ 33:1 - 34:2 ]',
+  )
+  check(
+    'adj1101 任一端在当前排版里找不到 ⇒ 只显示段名（不留半截区间）',
+    markOptionText('段2', null, { bar: 3, beatPos: 0 }) === '段2',
+  )
+  // 引擎口径：每行 4 小节 ⇒ 第 2 行第一个音 = 第 5 小节第 1 拍；命令行解析回来必须是同一个位置
+  const M_SRC = 'V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 5 6 7 1 | 2 3 4 5 | 6 7 1 2 |\nQ: 2 3 4 5 | 6 7 1 2 | 3 4 5 6 | 7 1 2 3 |\n'
+  const mParsed = parseJps(M_SRC)
+  const mLayout = layoutScore(mParsed, DUR_CFG)
+  const mNotes = flattenScoreNotes(mLayout)
+  check(
+    'adj1101 全局小节号跨行累加（第 2 行第一个音 = 5:1）',
+    mNotes.some((n) => n.bar === 5 && n.beatPos === 0) && mNotes.length > 0,
+    `音符 ${mNotes.length} 个，最大小节 ${mNotes[mNotes.length - 1]?.bar}`,
+  )
+  const mRange = resolveBarBeatRange(mLayout, { bar: 5, beat: 1 }, { bar: 6, beat: 2 })
+  check(
+    'adj1101 命令行同一口径：`--from 5:1` 解析出的起点回查仍是 5:1',
+    !('error' in mRange) &&
+      measureSpotOf(mLayout, mRange.startId)?.bar === 5 &&
+      measureSpotOf(mLayout, mRange.startId)?.beatPos === 0,
+    'error' in mRange ? mRange.error : mRange.startId,
+  )
+  const markBarSrc = String(readFileSync('src/dialogs/PracticeMarkBar.tsx', 'utf8'))
+  check(
+    'adj1101 下拉项真的用了 `markOptionText`（不是仍只显示段名）',
+    /optionTextById\.get\(m\.id\) \?\? m\.name/.test(markBarSrc) && /markOptionText\(m\.name/.test(markBarSrc),
   )
 }
 

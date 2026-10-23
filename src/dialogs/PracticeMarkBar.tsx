@@ -22,10 +22,12 @@
  * 选过之后写回标记的 `pass`（持久化）。
  */
 import { useEffect, useMemo } from 'react'
-import { buildPlaySequence, layoutScore, noteIdStringOf, resolvePracticeRange, slicePlaySequenceByRange } from '@ijipu/engine'
+import { buildPlaySequence, layoutScore, noteIdStringOf, resolvePracticeRange, slicePlaySequenceByRange, flattenScoreNotes, spotOfIn } from '@ijipu/engine'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
 import { docKeyOf, loadMarks, saveMarks } from '../store/practiceMarks'
+// adj1101：下拉项「段1 [ 33:1 - 34:2 ]」的文本（纯函数，smoke 直接断言）
+import { markOptionText } from './practiceMarkText'
 import { playbackCopy, dynamicVideoCopy } from '../brand/copy'
 import { canGenerateVideo, canUseDynamicVideo } from '../export/video/capability'
 
@@ -73,6 +75,21 @@ export function PracticeMarkBar(): React.JSX.Element {
 
   const setPracticeRangeIds = useUiStore((s) => s.setPracticeRangeIds)
   const cur = marks.find((m) => m.id === markId)
+
+  /**
+   * adj1101（用户 2026-10-23 口径）：「标记段下拉列表够大，可以显示为 `段1 [ 33:1 - 34:2 ]`，
+   * 这个形式更明确」——段名后面补上**小节:拍**的起止，取引擎 `flattenScoreNotes` + `spotOfIn`
+   * （与命令行 `--from 33:1` 同一套换算，不会两边数出不同的小节号）。
+   */
+  const optionTextById = useMemo(() => {
+    const map = new Map<string, string>()
+    if (marks.length === 0) return map
+    const notes = flattenScoreNotes(layoutScore(parseResult, pageConfig))
+    for (const m of marks) {
+      map.set(m.id, markOptionText(m.name, spotOfIn(notes, m.startId), spotOfIn(notes, m.endId)))
+    }
+    return map
+  }, [marks, parseResult, pageConfig])
 
   /**
    * 候选遍次 + **这一段实际演奏到的音符 id**（adj987k）。
@@ -174,7 +191,7 @@ export function PracticeMarkBar(): React.JSX.Element {
             <option value="">{playbackCopy.practiceNone}</option>
             {marks.map((m) => (
               <option key={m.id} value={m.id}>
-                {m.name}
+                {optionTextById.get(m.id) ?? m.name}
               </option>
             ))}
           </select>
