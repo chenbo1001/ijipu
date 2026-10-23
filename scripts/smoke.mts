@@ -2240,6 +2240,28 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
   )
 }
 
+/**
+ * adj1097（用户 2026-10-23 实报）：自定义卡片带背景图时，**导出的视频里没有背景图**。
+ *
+ * 根因：自定义样式的大图存的是 `ijipu-blob:` **引用**；预览路径在 `createDynamicSession` 前
+ * 用 `resolveCardImage` 解析成 data URL，而导出路径直接传了原始样式 ⇒ `renderer.ts` 里
+ * `new Image().src = 'ijipu-blob:…'` 加载不了、`decode()` 失败 ⇒ 成片丢背景图。
+ */
+{
+  console.log('[adj1097] 导出的片头/片尾卡也要有自定义背景图')
+  const src = String(readFileSync('src/preview/DynamicFrameOverlay.tsx', 'utf8'))
+  check(
+    'adj1097 导出前先把背景图解析成 data URL（预览/导出共用 `withResolvedCardImage`）',
+    /async function withResolvedCardImage\(style: CardStyle\): Promise<CardStyle>/.test(src) &&
+      /resolveCardImage\(style\.backgroundImage\)/.test(src) &&
+      !/cardStyle: effectiveCardStyle,/.test(src),
+  )
+  check(
+    'adj1097 预览与导出**两条**路径用同一个入口（不再各写一套解析，避免再次漂移）',
+    (src.match(/cardStyle: await withResolvedCardImage\(effectiveCardStyle\)/g) ?? []).length === 2,
+  )
+}
+
 // adj303：显示乐器名——@乐器名 / @@ 后第一个音符正上方标注
 const rIns = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nY: 弦乐\nQ: 1 2 @钢琴 3 4 @@ 5 6 |\n')
 const layIns = layoutScore(rIns, { ...DUR_CFG, showInstrument: true })

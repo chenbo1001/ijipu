@@ -22,7 +22,7 @@ import { useDocStore } from '../store/docStore'
 import { useUiStore, type DynamicAspect, type DynamicCardStyleId, type DynamicMode } from '../store/uiStore'
 import { dynamicVideoCopy } from '../brand/copy'
 import { createDynamicSession, type DynamicSession } from '../export/video/renderer'
-import { CARD_TEMPLATES, cardStyleById } from '../export/video/cardTemplates'
+import { CARD_TEMPLATES, cardStyleById, type CardStyle } from '../export/video/cardTemplates'
 import { resolveCardImage } from '../store/cardImageStore'
 import { canGenerateVideo, canUseDynamicVideo } from '../export/video/capability'
 import { EXPORT_MAX_MS, LEAD_IN_MS, exportDynamicVideo } from '../export/video/exportDynamic'
@@ -31,6 +31,18 @@ import { renderToAudioBuffer } from '../export/audio'
 import { createHqCache, resolveHqBank } from '../playback/spessaCache'
 import { resolveActiveLibrary } from '../playback/spessaSynthBackend'
 import { hostBankUrl } from '../store/hostBridge'
+
+/**
+ * adj1097（用户 2026-10-23 实报「卡片加了背景图片，但导出的视频没有背景图片」）：
+ * 把自定义卡片样式里的**背景图引用**解析成能直接 `new Image().decode()` 的 data URL。
+ *
+ * 为什么要一个共用入口：预览与导出**都必须**先解析——大图在 `CardStyleDialog` 里存的是
+ * `ijipu-blob:` 引用（`cardImageStore.saveCardImage`），渲染进程直接拿它当 `src` 加载不了，
+ * `renderer.ts` 的 `decode()` 失败就退成"没有背景图"。上一版只有预览解析了，导出漏了。
+ */
+async function withResolvedCardImage(style: CardStyle): Promise<CardStyle> {
+  return { ...style, backgroundImage: await resolveCardImage(style.backgroundImage) }
+}
 
 const ASPECTS: { id: DynamicAspect; label: string; ratio: number }[] = [
   { id: '9x16', label: '9:16', ratio: 9 / 16 },
@@ -204,13 +216,12 @@ export function DynamicFrameOverlay() {
     lastTsRef.current = 0
     sessionRef.current = null
     void (async () => {
-      // adj1085：自定义卡片背景图可能是外置引用（`ijipu-blob:`），画之前解析成 data URL
-      const backgroundImage = await resolveCardImage(effectiveCardStyle.backgroundImage)
+      // adj1085 / adj1097：背景图引用（`ijipu-blob:`）在**建会话前**解析成 data URL（与导出共用入口）
       return createDynamicSession(code, aspect as DynamicPresetId, pageConfig, undefined, {
         range,
         leadInMs: LEAD_IN_MS,
         maxMs: mode === '3min' ? EXPORT_MAX_MS : undefined,
-        cardStyle: { ...effectiveCardStyle, backgroundImage },
+        cardStyle: await withResolvedCardImage(effectiveCardStyle),
         // adj1089：平移方式（订阅了 ⇒ 切下拉会重建会话；见上面的依赖数组）
         panMode,
         // adj1094：行末提前平移量（拍）
@@ -332,13 +343,17 @@ export function DynamicFrameOverlay() {
     const ac = new AbortController()
     abortRef.current = ac
     try {
+      /**
+       * adj1097：导出与预览走**同一个** `withResolvedCardImage`——自定义样式的大图存的是
+       * `ijipu-blob:` 引用，不解析就交给 `renderer.ts` 会 `decode()` 失败 ⇒ 成片丢背景图。
+       */
       const res = await exportDynamicVideo({
         code,
         pageConfig,
         aspect: aspect as DynamicPresetId,
         mode,
         range,
-        cardStyle: effectiveCardStyle,
+        cardStyle: await withResolvedCardImage(effectiveCardStyle),
         // adj1089：出片与预览同一份平移方式（设置 → 本机 的 L1 偏好）
         panMode,
         // adj1094：行末提前平移量（拍）
