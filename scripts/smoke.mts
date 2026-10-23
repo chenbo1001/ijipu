@@ -89,7 +89,7 @@ import { flattenScoreNotes, measureSpotOf, resolveBarBeatRange } from '@ijipu/en
 // adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
 import { JPS_PARAM_MAX_LEN, readJpsFromSearch, withoutJpsParam } from '../src/store/urlImport'
 import { inflateSync } from 'node:zlib'
-import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, primaryVoiceOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO, inkBoxOfLayout, inkBoxesOfLayout, INK_ESTIMATE_SLACK, insertPngPhys, readPngPhys, crc32, isPng, dpiForScale, pixelsPerMeterFor } from '@ijipu/engine/index.ts'
+import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, tokenizeJpsMusic, interludeBeatsOf, matchInterludeHead, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, primaryVoiceOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO, inkBoxOfLayout, inkBoxesOfLayout, INK_ESTIMATE_SLACK, insertPngPhys, readPngPhys, crc32, isPng, dpiForScale, pixelsPerMeterFor } from '@ijipu/engine/index.ts'
 // adj971：应用标题（`文件名.jps - 爱记谱 iJipu`）与版本串的**唯一来源** —— 冒烟直接调真函数，不抄模板
 import { appTitleOf, APP_TITLE_PREFIX, APP_VERSION, APP_VERSION_FULL } from '../src/brand/version.ts'
 /**
@@ -21057,6 +21057,8 @@ runAdj927ExternalChangeTests()
       .then(() => runDynamicFlowTests())
       // M1-3：相机（满宽片头 → 推近 → 安全区跟拍；取景框不越界）
       .then(() => runDynamicCameraTests())
+      // adj1118：间奏标记 `{jz N}`（替换口径 / 零宽 / 格式化不被拆数字 / 小节校验豁免）
+      .then(() => runAdj1118Tests())
       .then(() => {
         console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
         process.exit(failed === 0 ? 0 : 1)
@@ -34957,4 +34959,201 @@ function runDynamicCameraTests(): void {
       '剥协议的写法 → 判红',
     )
   }
+}
+
+/**
+ * adj1118（用户 2026-10-24 拍板）：**间奏标记 `{jz N}`**。
+ *
+ * 口径：`{jz N}` 跟在休止符后面，表示"这个休止符**一共**响 N 拍"（替换，不是追加）；
+ * **零宽**（排版一个像素不动）；注记 `间奏N拍` / `N拍间奏` 等价；`{jz N}` 优先于注记。
+ *
+ * 这一组断言守四件事：
+ *  ① 语法：三种写法等价、不产生 token（旧 `&jz16` 会被拆成音符 1 和 6）、错误写法有专门告警；
+ *  ② 时间轴：间奏后的音落在 N×拍长处；曲末间奏延长 `totalMs`/`track.endMs`；
+ *  ③ 排版零位移：加/去 `{jz N}`，每个音 x/y/width 逐字段相等；
+ *  ④ 格式化：`{jz 16}` 的 `16` 不许被"数字前补空格"拆成 `1 6`（`autoFormat` 默认开着）。
+ */
+function runAdj1118Tests(): void {
+  console.log('[adj1118] 间奏标记 {jz N}：解析 / 时间轴 / 零位移 / 格式化 / 小节校验')
+  const srcOf = (q: string): string => `V: 1.0\nB: 间奏\nD: C\nP: 4/4\nJ: 120\nQ: ${q}\n`
+  const musicLineOf = (s: string) => {
+    const r = parseJpsRaw(s)
+    const line = r.lines.find((l) => l.kind === 'music')
+    return { r, line: line && line.kind === 'music' ? line : undefined }
+  }
+  const jzOf = (s: string): number | null => {
+    const { line } = musicLineOf(s)
+    const rest = line?.tokens.find((t) => t.kind === 'rest')
+    return rest ? interludeBeatsOf(rest) : null
+  }
+  const noteCountOf = (s: string): number => {
+    const { line } = musicLineOf(s)
+    return line ? line.tokens.filter((t) => t.kind === 'note').length : -1
+  }
+  const warningsOf = (s: string): string[] =>
+    parseJpsRaw(s).errors.map((e) => `${e.message}${e.hint ? `｜${e.hint}` : ''}`)
+  const seqOf = (s: string) => {
+    const r = parseJpsRaw(s)
+    const lay = layoutScore(r, DUR_CFG)
+    return { parsed: r, lay, seq: buildPlaySequence(r, lay, 120) }
+  }
+  /** 第一个**真音符**（非休止）的起奏时刻 */
+  const firstNoteAt = (s: string): number => {
+    const ev = seqOf(s).seq.events.find((e) => e.placed.playable)
+    return ev ? ev.atMs : -1
+  }
+
+  // ① 语法：三种写法等价 + 不产生 token
+  const jzTight = jzOf(srcOf('0{jz 16} 1 2 3 |'))
+  const jzSpaced = jzOf(srcOf('0 {jz 16} 1 2 3 |'))
+  const jzTightNoSpace = jzOf(srcOf('0{jz16} 1 2 3 |'))
+  check(
+    'adj1118 三种写法等价：`0{jz 16}` / `0 {jz 16}` / `0{jz16}` 都得到 16',
+    jzTight === 16 && jzSpaced === 16 && jzTightNoSpace === 16,
+    `${jzTight} / ${jzSpaced} / ${jzTightNoSpace}`,
+  )
+  check(
+    'adj1118 `{jz N}` 不产生 token（旧 `&jz16` 会被拆成音符 1 和 6）',
+    noteCountOf(srcOf('0{jz 16} 1 2 3 |')) === 3 && noteCountOf(srcOf('0 1 2 3 |')) === 3,
+    String(noteCountOf(srcOf('0{jz 16} 1 2 3 |'))),
+  )
+  check(
+    'adj1118 matchInterludeHead：`{jz 16}` / `{jz16}` / `{jz 16 }` 命中；`{jz}` / `{bz 1}` 不命中',
+    matchInterludeHead('{jz 16}', 0)?.beats === 16 &&
+      matchInterludeHead('{jz16}', 0)?.beats === 16 &&
+      matchInterludeHead('{jz 16 }', 0)?.beats === 16 &&
+      matchInterludeHead('{jz}', 0) === null &&
+      matchInterludeHead('{bz 1}', 0) === null,
+    '',
+  )
+
+  // ② 时间轴（120bpm ⇒ 一拍 500ms）
+  check(
+    'adj1118 替换口径：`0{jz 16}` 之后的音落在 16×500 = 8000ms',
+    Math.abs(firstNoteAt(srcOf('0{jz 16} 1 2 3 |')) - 8000) < 0.5,
+    String(firstNoteAt(srcOf('0{jz 16} 1 2 3 |'))),
+  )
+  check(
+    'adj1118 负对照：去掉 `{jz 16}` ⇒ 同一个音回到 500ms',
+    Math.abs(firstNoteAt(srcOf('0 1 2 3 |')) - 500) < 0.5,
+    String(firstNoteAt(srcOf('0 1 2 3 |'))),
+  )
+  check(
+    'adj1118 `0---{jz 16}`：排版 4 拍、播放仍是 16 拍（不是 4+16）',
+    Math.abs(firstNoteAt(srcOf('0---{jz 16} | 1 2 3 4 |')) - 8000) < 0.5,
+    String(firstNoteAt(srcOf('0---{jz 16} | 1 2 3 4 |'))),
+  )
+  check(
+    'adj1118 注记等价：`0"16拍间奏略"` / `0"间奏16拍"` 都当 16 拍',
+    jzOf(srcOf('0"16拍间奏略" 1 2 3 |')) === 16 && jzOf(srcOf('0"间奏16拍" 1 2 3 |')) === 16,
+    `${jzOf(srcOf('0"16拍间奏略" 1 2 3 |'))} / ${jzOf(srcOf('0"间奏16拍" 1 2 3 |'))}`,
+  )
+  check(
+    'adj1118 注记写在**音符**上不算间奏（只认休止符）',
+    (() => {
+      const { line } = musicLineOf(srcOf('1"16拍间奏" 2 3 4 |'))
+      const note = line?.tokens.find((t) => t.kind === 'note')
+      return note !== undefined && interludeBeatsOf(note) === null
+    })(),
+    '',
+  )
+  // 老写法（注记）的两条迁移提示——它们是"静默错几拍"的唯一防线
+  check(
+    'adj1118 注记只写「间奏略」没写拍数 ⇒ 提示"间奏会按谱面时值播放"',
+    warningsOf(srcOf('0"间奏略" 0 0 1/ 2/ |')).some((m) => m.includes('没写几拍')),
+    warningsOf(srcOf('0"间奏略" 0 0 1/ 2/ |')).join(' / '),
+  )
+  check(
+    'adj1118 注记写了 16 拍但本小节还有 3 拍其它时值 ⇒ 提示"实际播放 19 拍、改写成 0---{jz 16}"',
+    warningsOf(srcOf('0"16拍间奏略" 0 0 0 |')).some((m) => m.includes('实际播放 19 拍')) &&
+      warningsOf(srcOf('0"16拍间奏略" 0 0 0 |')).some((m) => m.includes('0---{jz 16}')),
+    warningsOf(srcOf('0"16拍间奏略" 0 0 0 |')).join(' / '),
+  )
+
+  // ③ 曲末间奏：撑长 totalMs 与 track.endMs（色块整段罩住是前提）
+  const trail = seqOf(srcOf('1 2 3 4 | 0{jz 16} |'))
+  const restEv = trail.seq.events.find((e) => !e.placed.playable)
+  check(
+    'adj1118 休止事件自己的时长 = 16 拍（曲末间奏也撑长视频）',
+    Math.abs((restEv?.durationMs ?? -1) - 8000) < 0.5,
+    String(restEv?.durationMs),
+  )
+  check(
+    'adj1118 间奏色块整段罩住：只有 1 个 seg、beats = 16',
+    restEv?.playheadSegs?.length === 1 && Math.abs((restEv?.playheadSegs?.[0].beats ?? 0) - 16) < 1e-6,
+    JSON.stringify(restEv?.playheadSegs?.map((s) => s.beats)),
+  )
+  check(
+    'adj1118 曲末间奏延长 totalMs 与 track.endMs 到 2000 + 8000 = 10000ms',
+    Math.abs(trail.seq.totalMs - 10000) < 0.5 && Math.abs(buildRectTrack(trail.seq).endMs - 10000) < 0.5,
+    `total=${trail.seq.totalMs} track=${buildRectTrack(trail.seq).endMs}`,
+  )
+
+  // ④ 排版零位移
+  const layWith = layoutScore(parseJpsRaw(srcOf('0{jz 16} 1 2 3 |')), DUR_CFG)
+  const layWithout = layoutScore(parseJpsRaw(srcOf('0 1 2 3 |')), DUR_CFG)
+  const sigOf = (lay: typeof layWith): string =>
+    lay.pages
+      .flatMap((p) => p.notes.filter((n) => n.segment === undefined).map((n) => `${n.x}|${n.y}|${n.width}`))
+      .join(',')
+  check(
+    'adj1118 排版零位移：加/去 `{jz 16}`，每个音 x/y/width 逐字段相等',
+    sigOf(layWith) === sigOf(layWithout),
+    '',
+  )
+
+  // ⑤ 小节校验：含间奏的小节豁免；没有间奏照样报
+  check(
+    'adj1118 含间奏的小节豁免"拍数不符"（0{jz 16} 独占一小节，不再报）',
+    warningsOf(srcOf('1 2 3 4 | 0{jz 16} | 1 2 3 4 |')).length === 0,
+    warningsOf(srcOf('1 2 3 4 | 0{jz 16} | 1 2 3 4 |')).join(' / '),
+  )
+  check(
+    'adj1118 负对照：同一位置写 `0`（没有间奏）⇒ 照样报"拍数不符"',
+    warningsOf(srcOf('1 2 3 4 | 0 | 1 2 3 4 |')).some((m) => m.includes('不符')),
+    warningsOf(srcOf('1 2 3 4 | 0 | 1 2 3 4 |')).join(' / '),
+  )
+
+  // ⑥ 错误写法要有专门提示
+  check(
+    'adj1118 `1{jz 16}`（写在音符上）⇒ 告警"要紧跟在休止符后面"',
+    warningsOf(srcOf('1{jz 16} 2 3 4 |')).some((m) => m.includes('休止符')),
+    warningsOf(srcOf('1{jz 16} 2 3 4 |')).join(' / '),
+  )
+  check(
+    'adj1118 `{jz}` 缺拍数 ⇒ 专门提示（不是"无法识别的符号"，也不再额外报"多余的 }"）',
+    warningsOf(srcOf('0{jz} 1 2 3 |')).some((m) => m.includes('拍数')) &&
+      !warningsOf(srcOf('0{jz} 1 2 3 |')).some((m) => m.includes('多余的')),
+    warningsOf(srcOf('0{jz} 1 2 3 |')).join(' / '),
+  )
+  check(
+    'adj1118 `{jz 16}` 写在 `{bz}` 段内 ⇒ 告警"不能写在临时段里"',
+    warningsOf(srcOf('{bz 0{jz 16} 1 2 3 } |')).some((m) => m.includes('临时段')),
+    warningsOf(srcOf('{bz 0{jz 16} 1 2 3 } |')).join(' / '),
+  )
+
+  // ⑦ 格式化：`16` 不许被拆成 `1 6`（autoFormat 默认开着，这条是硬要求）
+  const fmt1 = formatLine('Q: 0{jz 16} 1 2 3 |')
+  check('adj1118 格式化保留 `{jz N}`：`0{jz 16}` → `0 {jz 16}`（16 不被拆开）', fmt1 === 'Q: 0 {jz 16} 1 2 3 |', fmt1)
+  const fmt2 = formatLine('Q: 0{jz16} 1')
+  check(
+    'adj1118 格式化归一：`0{jz16}` → `0 {jz 16}`，且**幂等**',
+    fmt2 === 'Q: 0 {jz 16} 1' && formatLine(fmt2) === fmt2,
+    fmt2,
+  )
+  check(
+    'adj1118 负对照：旧行为（`16` 被拆成 `1 6` 的 `{jz 1 6 }`）不成立',
+    fmt2 !== 'Q: 0 {jz 1 6 } 1' && !/\{jz 1 6/.test(fmt1),
+    fmt2,
+  )
+  const jpsDoc = srcOf('0{jz 16} 1 2 3 |')
+  check('adj1118 `formatJps` 对含 `{jz N}` 的整份源码也幂等', formatJps(formatJps(jpsDoc)) === formatJps(jpsDoc), '')
+
+  // ⑧ 高亮：`{jz 16}` 是一个"装饰"词（不是 `{` + 数字分开着色）
+  const hl = tokenizeJpsMusic('0{jz 16} 1')
+  check(
+    'adj1118 高亮：`{jz 16}` 整体按 decoration 着色',
+    hl.some((t) => t.cls === 'decoration' && t.text === '{jz 16}'),
+    JSON.stringify(hl),
+  )
 }
