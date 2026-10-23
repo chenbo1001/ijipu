@@ -5971,10 +5971,12 @@ span.ws-check {
   color: var(--jp-on-accent);
   font-weight: 700;
 }
-.dyn-frame-audio {
+.dyn-frame-audio,
+.dyn-frame-cards {
   margin: 0;
 }
-.dyn-frame-audio span {
+.dyn-frame-audio span,
+.dyn-frame-cards span {
   font-size: 12px;
   color: var(--jp-text-primary);
 }

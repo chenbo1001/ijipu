@@ -31,8 +31,13 @@ export interface CliVideoJob {
   output: string
   aspect: '9x16' | '1x1' | '16x9'
   mode: 'full' | '3min'
-  /** 片头/片尾模板（CLI 已校验过，只会是这四个之一） */
-  cardStyleId: 'brand' | 'paper' | 'ink' | 'minimal'
+  /** 片头/片尾模板（CLI 已校验过，只会是这四个之一）；`null` = 不带片头片尾（adj1114） */
+  cardStyleId: 'brand' | 'paper' | 'ink' | 'minimal' | null
+  /**
+   * adj1114：是否带音轨。`false` = 命令行给了 `--nosound`（对应界面「带声音」未勾选）；
+   * 老版本任务文件没有这个字段 ⇒ 按缺省 `true` 处理（见下面的 `job.withAudio === false`）。
+   */
+  withAudio: boolean
 }
 
 /**
@@ -117,7 +122,13 @@ export async function runCliVideoJob(raw: string | null = null): Promise<boolean
       pageConfig: job.pageConfig,
       aspect: job.aspect,
       mode: job.mode,
-      cardStyle: cardStyleById(job.cardStyleId),
+      /**
+       * adj1114：`--card` 没给 ⇒ 任务里 `cardStyleId: null` ⇒ 不带片头片尾（只出动态谱）。
+       * 给了模板才传 `cardStyle`（片头片尾都不画时它用不上，少一个分叉）。
+       */
+      ...(job.cardStyleId === null || job.cardStyleId === undefined
+        ? { cards: false }
+        : { cards: true, cardStyle: cardStyleById(job.cardStyleId) }),
       // adj1089：命令行出片跟随**本机**的平移方式（只读偏好，不写配置；与预览/界面导出同一份）
       panMode: useUiStore.getState().panMode,
       // adj1094：行末提前平移量同样跟随本机偏好
@@ -127,7 +138,8 @@ export async function runCliVideoJob(raw: string | null = null): Promise<boolean
           ? null
           : // pass 为 null 时不要写这个字段（`undefined` = 解析器默认候选）
             { startId: job.startId, endId: job.endId, ...(job.pass === null ? {} : { pass: job.pass }) },
-      makeAudio,
+      // adj1114：`--nosound` ⇒ 不传 `makeAudio`（`exportDynamic` 的口径：不传 = 无声，不白渲一条音轨）
+      ...(job.withAudio === false ? {} : { makeAudio }),
       onProgress,
     })
     const bytes = new Uint8Array(await res.blob.arrayBuffer())

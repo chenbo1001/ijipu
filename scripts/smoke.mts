@@ -2292,6 +2292,56 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
 }
 
 /**
+ * adj1113 / adj1114（用户 2026-10-23）：导出视频可选「不带片头片尾」+ 命令行 `--card` 可选值 / `--nosound`。
+ *
+ * 为什么这里只能按源码断言：这三处都要 DOM / 画布 / WebCodecs ——
+ * 真点一遍在 `verify:app-ui`（复选框、关掉后画面从第一拍开始），
+ * 真跑命令在 `cli-assert`（`--card` 缺值 / `--nosound` / 选项顺序）。
+ * 这里钉住的是**接线**：界面复选框 → 会话 → 导出 → 命令行任务，四段不许各写一套。
+ */
+{
+  console.log('[adj1113] 相机位「带片头片尾」复选框 + 导出/命令行同一口径')
+  const overlay = String(readFileSync('src/preview/DynamicFrameOverlay.tsx', 'utf8'))
+  check(
+    'adj1113 相机位的卡片前有「带片头片尾」复选框，**默认勾选**（L3 会话级）',
+    /const \[withCards, setWithCards\] = useState\(true\)/.test(overlay) &&
+      /className="dock-field dyn-frame-cards"/.test(overlay) &&
+      /checked=\{withCards\}/.test(overlay),
+  )
+  check(
+    'adj1113 不勾选 ⇒ 会话不建片头/片尾（预览与导出同一口径，不是"只管导出"）',
+    /leadInMs: withCards \? LEAD_IN_MS : 0/.test(overlay) &&
+      /withCards \? \{\} : \{ endCardMs: 0 \}/.test(overlay),
+    'leadIn/endCard 任一没跟着复选框走，预览就会和成片对不上',
+  )
+  check(
+    'adj1113 `withCards` 进了"重建会话"的依赖（点一下立刻重画，不继续播旧会话）',
+    /\}, \[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, paint\]\)/.test(overlay),
+  )
+  check(
+    'adj1113 导出透传 `cards: withCards`；不带片头片尾时卡片下拉/自定义按钮禁用（不是悄悄忽略）',
+    /cards: withCards,/.test(overlay) &&
+      (overlay.match(/disabled=\{encoding \|\| preparingAudio \|\| !withCards\}/g) ?? []).length === 2,
+  )
+
+  const ex = String(readFileSync('src/export/video/exportDynamic.ts', 'utf8'))
+  check(
+    'adj1113 `exportDynamicVideo` 的 `cards:false` ⇒ 片头 0 / 片尾 0 / 封面取第 0 帧（不去抓 3 秒那一刻）',
+    /const withCards = opts\.cards !== false/.test(ex) &&
+      /leadInMs: withCards \? LEAD_IN_MS : 0/.test(ex) &&
+      /\.\.\.\(withCards \? \{\} : \{ endCardMs: 0 \}\)/.test(ex) &&
+      /coverMs: withCards \? COVER_MS : 0/.test(ex),
+  )
+
+  const worker = String(readFileSync('src/export/video/cliWorker.ts', 'utf8'))
+  check(
+    'adj1114 出片窗口照任务出片：`cardStyleId:null` ⇒ cards:false；`withAudio:false` ⇒ 不传 makeAudio',
+    /job\.cardStyleId === null \|\| job\.cardStyleId === undefined[\s\S]{0,120}\{ cards: false \}/.test(worker) &&
+      /job\.withAudio === false \? \{\} : \{ makeAudio \}/.test(worker),
+  )
+}
+
+/**
  * adj1100（用户 2026-10-23 实报，赤伶 `33:1 → 34:2`）：标记段的「共 M 遍」与停止音长度。
  *
  * ① 段内只有 1 遍时，`maxPass` 不能抄整曲的遍数（用户原话：「因为要进跳房子 1，必然只有一遍。
@@ -33768,8 +33818,8 @@ function runDynamicCameraTests(): void {
         /panMode: useUiStore\.getState\(\)\.panMode/.test(cliSrcAdj),
     )
     check(
-      'adj1089/adj1094 换了平移方式/提前量会**重建相机会话**（否则设置点了没反应：还在放旧 pans）',
-      /\[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, paint\]/.test(
+      'adj1089/adj1094/adj1113 换了平移方式/提前量/带不带片头片尾都会**重建相机会话**（否则点了没反应：还在放旧会话）',
+      /\[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, paint\]/.test(
         overlaySrcAdj,
       ),
     )
@@ -34859,7 +34909,8 @@ function runDynamicCameraTests(): void {
       check(
         'adj1111 出片接线：先画 coverMs 那一帧、再 setMetadataTags，两步都在 output.start() 之前',
         drawAt > 0 && startAt > 0 && drawAt < metaAt && metaAt < startAt &&
-          /coverMs:\s*COVER_MS/.test(expSrc),
+          // adj1113：不带片头片尾时封面改取第 0 帧（第一拍），所以要按 `withCards ? COVER_MS : 0` 判
+          /coverMs: withCards \? COVER_MS : 0/.test(expSrc),
         `draw@${drawAt} meta@${metaAt} start@${startAt}`,
       )
       check(

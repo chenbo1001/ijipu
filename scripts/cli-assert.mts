@@ -1496,7 +1496,8 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
     pass: number | null
     aspect: string
     mode: string
-    cardStyleId: string
+    cardStyleId: string | null
+    withAudio: boolean
     output: string
   }
   /**
@@ -1541,7 +1542,16 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
     seen !== null && seen.aspect === '16x9' && seen.mode === 'full',
     `seen=${JSON.stringify(seen)}`,
   )
-  check('adj1084 片头片尾缺省 brand（深空蓝，与界面一致）', seen !== null && seen.cardStyleId === 'brand', `seen=${JSON.stringify(seen)}`)
+  /**
+   * adj1114（用户 2026-10-23 口径，**口径变了**）：不写 `--card` ⇒ **不带**片头片尾（只出动态谱）；
+   * 声音缺省是**带**的（`--nosound` 才关）。这条是旧断言「缺省 brand」的替代 —— 不是放宽，
+   * 是需求把缺省从"深空蓝卡片"改成了"根本不要卡片"；负对照见下面的 `--card ink` / `--card` 单写两条。
+   */
+  check(
+    'adj1114 不写 --card ⇒ 不带片头片尾（cardStyleId:null）；缺省**带声音**（withAudio:true）',
+    seen !== null && seen.cardStyleId === null && seen.withAudio === true,
+    `seen=${JSON.stringify(seen)}`,
+  )
 
   /**
    * ⚠ **真 bug 的回归**（adj1084 第一版就踩了）：
@@ -1575,7 +1585,7 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
   )
 
   const card = makeIo({ '(stdin)': GOOD })
-  let sawCard = ''
+  let sawCard: string | null = ''
   card.io.encodeVideo = async (req) => {
     sawCard = req.cardStyleId
     return { bytes: 1, audio: false }
@@ -1588,6 +1598,94 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
     'adj1084 `--card custom` ⇒ 1（自定义是本机偏好，命令行拒绝而不是当 brand）',
     (await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--card', 'custom'], badCard.io)).code === EXIT.usage,
   )
+
+  /**
+   * adj1114（用户 2026-10-23）：`--card` 的模板改成**可选值** ——
+   * 只写 `--card`（后面不跟模板）⇒ 默认极简；`--nosound` 明确不要音轨。
+   * 两条都不许"吃错下一个选项"（`--card --nosound` 里的 `--nosound` 不能被当成模板名）。
+   */
+  {
+    const bare = makeIo({ '(stdin)': GOOD })
+    let bareSeen: SeenVideo | null = null
+    bare.io.encodeVideo = async (req) => {
+      bareSeen = { ...req }
+      return { bytes: 1, audio: true }
+    }
+    const rBare = await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--card'], bare.io)
+    check(
+      'adj1114 只写 `--card`（不跟模板）⇒ 极简 minimal，退出码 0',
+      rBare.code === EXIT.ok && bareSeen !== null && bareSeen.cardStyleId === 'minimal',
+      `code=${rBare.code} seen=${JSON.stringify(bareSeen)} err=${bare.errs.join('｜').slice(0, 80)}`,
+    )
+    check(
+      'adj1114 `--card` 的参数是**可选**的：后面没词也不会报未知参数/用法错误',
+      rBare.code === EXIT.ok && bare.errs.length === 0,
+      `code=${rBare.code} err=${bare.errs.join('｜').slice(0, 100)}`,
+    )
+
+    const both = makeIo({ '(stdin)': GOOD })
+    let bothSeen: SeenVideo | null = null
+    both.io.encodeVideo = async (req) => {
+      bothSeen = { ...req }
+      return { bytes: 1, audio: false }
+    }
+    const rBoth = await runCli(
+      ['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--card', '--nosound'],
+      both.io,
+    )
+    check(
+      'adj1114 `--card --nosound`：`--nosound` 不被当成模板名（模板 = 极简，withAudio:false）',
+      rBoth.code === EXIT.ok && bothSeen !== null && bothSeen.cardStyleId === 'minimal' && bothSeen.withAudio === false,
+      `code=${rBoth.code} seen=${JSON.stringify(bothSeen)} err=${both.errs.join('｜').slice(0, 100)}`,
+    )
+    check(
+      'adj1114 终端那一行如实写"片头片尾：极简…无声"（用户能当场确认）',
+      both.logs.join('').includes('片头片尾：极简') && both.logs.join('').includes('无声'),
+      both.logs.join('').slice(0, 140),
+    )
+
+    const silent = makeIo({ '(stdin)': GOOD })
+    let silentSeen: SeenVideo | null = null
+    silent.io.encodeVideo = async (req) => {
+      silentSeen = { ...req }
+      return { bytes: 1, audio: false }
+    }
+    const rSilent = await runCli(['render', '-i', '-', '-t', 'mp4', '-o', 'x.mp4', '--nosound'], silent.io)
+    check(
+      'adj1114 `--nosound` 单独给：不动卡片（cardStyleId:null），只关声音（withAudio:false）',
+      rSilent.code === EXIT.ok && silentSeen !== null && silentSeen.cardStyleId === null && silentSeen.withAudio === false,
+      `code=${rSilent.code} seen=${JSON.stringify(silentSeen)}`,
+    )
+    check(
+      'adj1114 不给 `--card` 时终端写"不带片头片尾"（与"片头片尾：极简"是两条不同的路）',
+      silent.logs.join('').includes('不带片头片尾'),
+      silent.logs.join('').slice(0, 140),
+    )
+
+    /**
+     * 负对照：这两个选项只属于视频 —— 给别的类型必须当场退回，
+     * 否则用户以为"关了声音/加了卡片"，实际拿到的是别的产物。
+     */
+    const svgNoSound = makeIo({ '(stdin)': GOOD })
+    check(
+      'adj1114 `--nosound` 只用于 -t mp4（给 svg ⇒ 1）',
+      (await runCli(['render', '-i', '-', '-t', 'svg', '-o', 'x.svg', '--nosound'], svgNoSound.io)).code === EXIT.usage,
+    )
+    const svgCard = makeIo({ '(stdin)': GOOD })
+    check(
+      'adj1114 `--card` 只用于 -t mp4（给 svg ⇒ 1）',
+      (await runCli(['render', '-i', '-', '-t', 'svg', '-o', 'x.svg', '--card'], svgCard.io)).code === EXIT.usage,
+    )
+
+    const helpIo = makeIo({})
+    await runCli(['--help'], helpIo.io)
+    const helpText = String(helpIo.logs.join(''))
+    check(
+      'adj1114 --help 写清两条新口径：`--card` 不写 = 不带 / 只写 = 极简；`--nosound`',
+      helpText.includes('--nosound') && /不写 = 不带；只写 = 极简/.test(helpText),
+      helpText.split('\n').filter((l) => l.includes('--card') || l.includes('--nosound')).join('｜').slice(0, 200),
+    )
+  }
   check('adj1084 起止落在不同音符上（终点不含目标那一拍）', seen !== null && seen.startId !== seen.endId)
 
   const noRepeat = makeIo({ '(stdin)': GOOD })

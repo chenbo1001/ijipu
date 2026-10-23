@@ -1223,6 +1223,11 @@ export const dynamicVideoCopy = {
   title: '动态谱视频',
   presetLabel: '画布',
   cardStyle: '卡片',
+  /* ---- adj1113：是否带片头片尾（默认带；不勾 = 只导出动态谱） ---- */
+  cards: '带片头片尾',
+  cardsHint:
+    '勾选：成片带片头卡与片尾落版；不勾：只导出动态谱，画面直接从第一拍开始（预览与导出同一口径）。',
+  cardsOffHint: '不导出片头片尾，只导出动态谱',
   cardCustom: '自定义…',
   cardCustomName: '自定义',
   play: '播放',

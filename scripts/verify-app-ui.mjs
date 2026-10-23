@@ -1816,6 +1816,67 @@ async function main() {
           introPixel[0] < 80 && introPixel[1] < 100,
           JSON.stringify(introPixel),
         )
+        /**
+         * adj1113（用户 2026-10-23）：卡片前的「带片头片尾」复选框。
+         * 真点一遍：默认勾选 → 取消 ⇒ 会话重建、t=0 不再是深色片头卡（而是白纸谱页）→ 再勾回 ⇒ 片头回来。
+         * 这不只是"控件在不在"：像素变化证明复选框真的接进了建会话那条链（预览 = 成片口径）。
+         */
+        const cardsToggle = await evalJs(
+          c,
+          `(() => {
+            const el = document.querySelector('.dyn-frame-cards input[type=checkbox]')
+            return el ? { checked: el.checked, label: el.parentElement?.textContent?.trim() ?? '' } : null
+          })()`,
+        )
+        check(
+          'adj1113 相机位卡片前有「带片头片尾」复选框，默认勾选',
+          !!cardsToggle && cardsToggle.checked === true && cardsToggle.label.includes('带片头片尾'),
+          JSON.stringify(cardsToggle),
+        )
+        const cornerPixel = `(() => {
+          const d = document.querySelector('.dyn-frame-box canvas').getContext('2d').getImageData(20, 20, 1, 1).data
+          return [d[0], d[1], d[2]]
+        })()`
+        await evalJs(c, `document.querySelector('.dyn-frame-cards input[type=checkbox]')?.click(), true`)
+        await waitFor(
+          c,
+          `(() => {
+            const d = document.querySelector('.dyn-frame-box canvas').getContext('2d').getImageData(20, 20, 1, 1).data
+            return d[0] > 200 && d[1] > 200
+          })()`,
+          '关掉片头后 t=0 是谱页',
+          60,
+        )
+        const noIntroPixel = await evalJs(c, cornerPixel)
+        check(
+          'adj1113 不勾选「带片头片尾」⇒ 预览从第一拍开始（t=0 是白纸谱页，不是片头卡）',
+          noIntroPixel[0] > 200 && noIntroPixel[1] > 200,
+          JSON.stringify(noIntroPixel),
+        )
+        const cardControls = await evalJs(
+          c,
+          `(() => {
+            const s = document.querySelector('.dyn-frame-select')
+            const b = document.querySelector('.dyn-frame-card-edit')
+            return { sel: !!s && s.disabled, btn: !!b && b.disabled }
+          })()`,
+        )
+        check(
+          'adj1113 关掉片头片尾时卡片下拉与「自定义…」禁用（不是还能选模板却不出卡片）',
+          cardControls.sel && cardControls.btn,
+          JSON.stringify(cardControls),
+        )
+        await evalJs(c, `document.querySelector('.dyn-frame-cards input[type=checkbox]')?.click(), true`)
+        await waitFor(
+          c,
+          `(() => {
+            const d = document.querySelector('.dyn-frame-box canvas').getContext('2d').getImageData(20, 20, 1, 1).data
+            return d[0] < 80 && d[1] < 100
+          })()`,
+          '重新勾上后片头卡回来',
+          60,
+        )
+        check('adj1113 再勾回 ⇒ 片头卡回来（复选框两个方向都真的重建会话）', true)
         // adj1073：卡片模板下拉框；选纸面后片头背景应变亮、选择持久化；最后恢复品牌
         const cardSelect = await evalJs(
           c,

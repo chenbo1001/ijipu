@@ -39,6 +39,13 @@ export interface DynamicExportOptions {
   range: { startId: string; endId: string; pass?: number } | null
   cardStyle?: CardStyle
   /**
+   * adj1113（用户 2026-10-23）：**是否带片头/片尾卡**。缺省 `true`（与相机位复选框默认勾选一致）。
+   *
+   * `false` = 只导出动态谱：片头 0ms（第一拍就在 0 秒）、片尾 0ms；
+   * 封面改取第 0 帧（第一拍画面）——否则会去抓 3 秒那一刻，而那时画面已经演到曲子中间了。
+   */
+  cards?: boolean
+  /**
    * adj1089：行中平移方式（`follow` / `beat` / `bar`）。
    * 调用方从 `uiStore.panMode` 取（本文件刻意不读 store，见文件头的依赖边界）；缺省 follow。
    */
@@ -74,9 +81,15 @@ export interface DynamicExportResult {
  */
 export async function exportDynamicVideo(opts: DynamicExportOptions): Promise<DynamicExportResult> {
   opts.onProgress?.(0, '正在准备画面…')
+  /**
+   * adj1113：不带片头片尾 = 片头 0、片尾 0。
+   * 只在**建会话时**少给这两个时长，卡片模板照旧传（片头片尾都不画时它用不上，但少一个分叉）。
+   */
+  const withCards = opts.cards !== false
   const session = await createDynamicSession(opts.code, opts.aspect, opts.pageConfig, undefined, {
     range: opts.range,
-    leadInMs: LEAD_IN_MS,
+    leadInMs: withCards ? LEAD_IN_MS : 0,
+    ...(withCards ? {} : { endCardMs: 0 }),
     ...(opts.mode === '3min' ? { maxMs: EXPORT_MAX_MS } : {}),
     ...(opts.cardStyle === undefined ? {} : { cardStyle: opts.cardStyle }),
     // adj1089：平移方式透传（与预览/试听同一份 L1 偏好）
@@ -102,7 +115,8 @@ export async function exportDynamicVideo(opts: DynamicExportOptions): Promise<Dy
     maxMs: undefined,
     audio,
     // adj1111：封面 = 片头卡完整帧（系统缩略图/播放器封面不再是一张空背景）
-    coverMs: COVER_MS,
+    // adj1113：不带片头片尾时改取第 0 帧（第一拍），别去抓"3 秒那一刻"的曲子中间
+    coverMs: withCards ? COVER_MS : 0,
     ...(opts.signal === undefined ? {} : { signal: opts.signal }),
     onProgress: (p) => opts.onProgress?.(p, '正在编码画面…'),
   })

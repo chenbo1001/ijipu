@@ -97,6 +97,13 @@ export function DynamicFrameOverlay() {
   const [progress, setProgress] = useState(0)
   const [phase, setPhase] = useState('')
   const [withAudio, setWithAudio] = useState(true)
+  /**
+   * adj1113（用户 2026-10-23）：**带片头片尾**复选框 —— 不勾选就只导出动态谱。
+   *
+   * 为什么是"建会话"的开关而不是"导出"的开关：框里看到的必须就是导出的（adj1065 那条口径），
+   * 所以关掉之后预览也从第一拍开始；与「带声音」一样是**本次会话**的选项（L3，关掉相机位即回默认）。
+   */
+  const [withCards, setWithCards] = useState(true)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const seekRef = useRef<HTMLInputElement | null>(null)
@@ -219,7 +226,9 @@ export function DynamicFrameOverlay() {
       // adj1085 / adj1097：背景图引用（`ijipu-blob:`）在**建会话前**解析成 data URL（与导出共用入口）
       return createDynamicSession(code, aspect as DynamicPresetId, pageConfig, undefined, {
         range,
-        leadInMs: LEAD_IN_MS,
+        leadInMs: withCards ? LEAD_IN_MS : 0,
+        // adj1113：不勾"带片头片尾" ⇒ 片尾也 0；勾着就按默认 2.5 秒品牌落版
+        ...(withCards ? {} : { endCardMs: 0 }),
         maxMs: mode === '3min' ? EXPORT_MAX_MS : undefined,
         cardStyle: await withResolvedCardImage(effectiveCardStyle),
         // adj1089：平移方式（订阅了 ⇒ 切下拉会重建会话；见上面的依赖数组）
@@ -246,7 +255,7 @@ export function DynamicFrameOverlay() {
     return () => {
       cancelled = true
     }
-  }, [on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, paint])
+  }, [on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, paint])
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
 
@@ -354,6 +363,8 @@ export function DynamicFrameOverlay() {
         mode,
         range,
         cardStyle: await withResolvedCardImage(effectiveCardStyle),
+        // adj1113：不带片头片尾 ⇒ 只出动态谱（片头 0 / 片尾 0 / 封面取第一拍）
+        cards: withCards,
         // adj1089：出片与预览同一份平移方式（设置 → 本机 的 L1 偏好）
         panMode,
         // adj1094：行末提前平移量（拍）
@@ -466,11 +477,21 @@ export function DynamicFrameOverlay() {
         </div>
 
         <div className="dyn-frame-controls-row">
+          {/* adj1113：复选框放在「卡片」前 —— 不勾选 = 只导出动态谱（片头片尾都不要） */}
+          <label className="dock-field dyn-frame-cards" title={dynamicVideoCopy.cardsHint}>
+            <input
+              type="checkbox"
+              checked={withCards}
+              disabled={encoding || preparingAudio}
+              onChange={(e) => setWithCards(e.target.checked)}
+            />
+            <span>{dynamicVideoCopy.cards}</span>
+          </label>
           <span className="dyn-frame-label">{dynamicVideoCopy.cardStyle}</span>
           <select
             className="dyn-frame-select"
             value={cardStyle}
-            disabled={encoding || preparingAudio}
+            disabled={encoding || preparingAudio || !withCards}
             aria-label={dynamicVideoCopy.cardStyle}
             onChange={(e) => setDynamicCardStyle(e.target.value as DynamicCardStyleId)}
           >
@@ -486,12 +507,14 @@ export function DynamicFrameOverlay() {
           <button
             type="button"
             className="btn dyn-frame-card-edit"
-            disabled={encoding || preparingAudio}
+            disabled={encoding || preparingAudio || !withCards}
             onClick={() => openModal('cardStyle')}
           >
             {dynamicVideoCopy.cardCustom}
           </button>
-          <span className="dyn-frame-meta">{effectiveCardStyle.description}</span>
+          <span className="dyn-frame-meta">
+            {withCards ? effectiveCardStyle.description : dynamicVideoCopy.cardsOffHint}
+          </span>
         </div>
 
         <div className="dyn-frame-controls-row">

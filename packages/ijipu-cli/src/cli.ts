@@ -113,8 +113,15 @@ export type CliIo = {
      * 与界面「卡片」下拉是**同一组模板**（`src/export/video/cardTemplates.ts` 的 `CARD_TEMPLATES`）；
      * 命令行只给这四种预设，`custom`（用户自己存的那份）不在此列 —— 自定义样式是本机偏好、
      * 换台机器就没有，放进命令行会变成"同一条命令在别人机器上出片不一样"。
+     *
+     * adj1114（用户 2026-10-23）：`null` = **不带片头片尾**（用户没写 `--card`，只出动态谱）。
      */
-    cardStyleId: 'brand' | 'paper' | 'ink' | 'minimal'
+    cardStyleId: 'brand' | 'paper' | 'ink' | 'minimal' | null
+    /**
+     * adj1114：是否带音轨。缺省 `true`；`--nosound` 时 `false`（对应界面「带声音」未勾选）。
+     * 宿主据此决定要不要渲音轨 —— 明确说"不要"，就不要白渲一条再丢掉。
+     */
+    withAudio: boolean
   }) => Promise<{ bytes: number; audio: boolean }>
   /**
    * adj814（A·P4 尾项）**可选能力**：监视文件变化（`--watch` 用）。
@@ -185,7 +192,8 @@ const HELP = `iJipu 命令行（爱记谱）
   render        -i <文件|-> -t svg|midi|png|jpg|pdf|mp4 -o <输出>           渲染导出
                 [--crop page|score] [--pad N] [--ink x,y,w,h]              画布范围（缺省 page = 整页）
                 [--from 27:3 --to 50:1 [--pass 2]]                        只导这一段（mp4）
-                [--card brand|paper|ink|minimal]                          片头片尾模板（缺省 brand）
+                [--card [brand|paper|ink|minimal]]                        片头片尾模板（不写 = 不带；只写 = 极简）
+                [--nosound]                                               导出无声视频（缺省带声音）
   play          -i <文件|-> -t midi|wav -o <输出>                           导出音频
   batch         --in <目录> [-o <目录>] [-t lint,svg,midi,fmt]              目录批量操作
                 [-r] [--filter <通配>] [--in-place]                       任务可逗号组合；省略 -o ⇒ 产物写在各源文件旁
@@ -298,12 +306,19 @@ type Parsed = {
   /** `--pass <N>` 的原始字符串（1 起；同样在命令里校验） */
   pass: string | null
   /**
-   * `--card <模板>` 的原始字符串：片头/片尾卡片。
+   * `--card [模板]` 的原始字符串：片头/片尾卡片（adj1114 起模板是**可选值**）。
    *
-   * 只认四个预设（`brand` 深空蓝 / `paper` 纸面 / `ink` 水墨 / `minimal` 极简）；
-   * 缺省 `brand`（与界面一致）。`custom` 不开放 —— 那是本机偏好，见 `CliIo.encodeVideo` 的说明。
+   * · `null` = 没写 `--card` ⇒ **不带**片头片尾（只出动态谱）；
+   * · `''`   = 只写了 `--card`、后面没跟模板 ⇒ 用默认的**极简**（minimal）；
+   * · 其它   = brand / paper / ink / minimal（用户 2026-10-23 口径）；
+   *   `custom` 不开放 —— 那是本机偏好，见 `CliIo.encodeVideo` 的说明。
    */
   card: string | null
+  /**
+   * adj1114：`--nosound` —— 明确导出**不带声音**的视频（对应界面「带声音」未勾选）。
+   * 缺省带声音；这是布尔开关，所以**不需要**再给 `--sound` 的反向写法。
+   */
+  nosound: boolean
 }
 
 /** 手写参数解析（**不引依赖** —— AGENTS §一"新增依赖必须先询问"，这里完全用不着） */
@@ -335,6 +350,7 @@ function parseArgs(argv: string[]): Parsed {
     to: null,
     pass: null,
     card: null,
+    nosound: false,
   }
   const takesValue = new Set(['-i', '--input', '-o', '--output', '-t', '--type', '-s', '--set', '--config', '--format', '--crop', '--pad', '--ink', '--filter', '--from', '--to', '--pass', '--card'])
   for (let i = 0; i < argv.length; i += 1) {
@@ -400,8 +416,22 @@ function parseArgs(argv: string[]): Parsed {
       const v = next()
       if (v !== '') p.pass = v
     } else if (a === '--card') {
-      const v = next()
-      if (v !== '') p.card = v
+      /**
+       * adj1114（用户 2026-10-23）：`--card` 的模板是**可选值**。
+       *
+       * 后面紧跟的词不以 `-` 开头才当模板名；否则（后面没词、或直接跟下一个选项）
+       * 按"只给了 `--card`"处理 ⇒ `''` = 用默认的极简模板。
+       * 为什么不复用 `next()`：它把"缺值"报成未知参数，而这里**缺值是合法写法** ✓。
+       */
+      const v = argv[i + 1]
+      if (v !== undefined && v !== '' && !v.startsWith('-')) {
+        i += 1
+        p.card = v
+      } else {
+        p.card = ''
+      }
+    } else if (a === '--nosound') {
+      p.nosound = true
     } else if (a === '--format') {
       const v = next()
       if (v === 'text' || v === 'json' || v === 'gh') p.format = v
@@ -1264,8 +1294,13 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
      * 别的类型给了就报用法错误 —— 静默忽略是最坏的：用户以为"只导这一段"，
      * 实际拿到整页/整曲，还以为自己写对了。
      */
-    if (type !== 'mp4' && (p.from !== null || p.to !== null || p.pass !== null || p.card !== null)) {
-      io.err('--from / --to / --pass / --card 只用于 -t mp4（其它类型没有"第几拍""片头卡片"这些概念）')
+    if (
+      type !== 'mp4' &&
+      (p.from !== null || p.to !== null || p.pass !== null || p.card !== null || p.nosound)
+    ) {
+      io.err(
+        '--from / --to / --pass / --card / --nosound 只用于 -t mp4（其它类型没有"第几拍""片头卡片""音轨"这些概念）',
+      )
       return { code: EXIT.usage }
     }
     if (type === 'mp4') {
@@ -1305,7 +1340,10 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
         pass = Number(p.pass) - 1
       }
       /**
-       * 片头/片尾卡片：四个预设模板，缺省 `brand`（与界面一致）。
+       * 片头/片尾卡片（adj1114 起为**可选**，用户 2026-10-23 口径）：
+       *  · 不写 `--card`        ⇒ **不带**片头片尾，只出动态谱；
+       *  · 只写 `--card`        ⇒ 默认**极简**（minimal）；
+       *  · `--card <模板>`      ⇒ brand / paper / ink / minimal 之一。
        * 收 `custom` 是**明确拒绝**而不是默默当 brand —— 自定义样式存在本机，
        * 同一条命令在别人机器上会出不同的片，那不该是命令行的语义。
        */
@@ -1315,15 +1353,19 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
         ink: '水墨',
         minimal: '极简',
       }
-      const cardRaw = (p.card ?? 'brand').toLowerCase()
-      if (!(cardRaw in CARD_NAMES)) {
-        io.err(
-          `--card 支持 brand（深空蓝）| paper（纸面）| ink（水墨）| minimal（极简）；收到 “${p.card}”。\n` +
-            '  自定义卡片是本机偏好，只在界面里用；命令行不接受 custom（换台机器会出不一样的片）。',
-        )
-        return { code: EXIT.usage }
+      let cardStyleId: 'brand' | 'paper' | 'ink' | 'minimal' | null = null
+      if (p.card !== null) {
+        const cardRaw = (p.card === '' ? 'minimal' : p.card).toLowerCase()
+        if (!(cardRaw in CARD_NAMES)) {
+          io.err(
+            `--card 的模板支持 brand（深空蓝）| paper（纸面）| ink（水墨）| minimal（极简）；收到 “${p.card}”。\n` +
+              '  不写 --card = 不带片头片尾；只写 --card（后面不跟模板）= 极简。\n' +
+              '  自定义卡片是本机偏好，只在界面里用；命令行不接受 custom（换台机器会出不一样的片）。',
+          )
+          return { code: EXIT.usage }
+        }
+        cardStyleId = cardRaw as 'brand' | 'paper' | 'ink' | 'minimal'
       }
-      const cardStyleId = cardRaw as 'brand' | 'paper' | 'ink' | 'minimal'
       if (io.encodeVideo === undefined) {
         io.err(
           'MP4 需要"桌面端隐藏窗口"通道（WebCodecs 编码）；当前环境没有该能力。\n' +
@@ -1367,8 +1409,14 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
         }
       }
       const passText = pass === null ? '' : `，第 ${pass + 1} 遍`
+      /** adj1114：片头片尾与声音都在这一行说清 —— 用户得能从终端确认"到底出的是什么片" */
+      const cardText =
+        cardStyleId === null ? '不带片头片尾' : `片头片尾：${CARD_NAMES[cardStyleId]}`
       if (!p.quiet) {
-        line(io, `正在导出视频：${rangeText}${passText}（16:9，全片长，片头片尾：${CARD_NAMES[cardStyleId]}）`)
+        line(
+          io,
+          `正在导出视频：${rangeText}${passText}（16:9，全片长，${cardText}${p.nosound ? '，无声' : ''}）`,
+        )
       }
       try {
         const out = await io.encodeVideo({
@@ -1382,6 +1430,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
           aspect: '16x9',
           mode: 'full',
           cardStyleId,
+          // adj1114：`--nosound` 明确不要声音；缺省与界面「带声音」勾选一致
+          withAudio: !p.nosound,
         })
         if (!p.quiet) {
           const mb = (out.bytes / (1024 * 1024)).toFixed(1)
