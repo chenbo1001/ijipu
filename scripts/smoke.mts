@@ -2413,6 +2413,28 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
       measureSpotOf(restLayout, restId, { includeRests: true })?.beatPos === 2,
     JSON.stringify(measureSpotOf(restLayout, restId, { includeRests: true })),
   )
+  /**
+   * adj1106（用户 2026-10-23 截图）：标记线不能横穿"跳过不演奏的那一段"（跳房子/反复）——
+   * 同一行里相邻间距超过阈值就断成两段。
+   */
+  const bandNotes = [
+    { id: { index: 0 }, x: 100, rightX: 110, y: 200 },
+    { id: { index: 1 }, x: 120, rightX: 130, y: 200 },
+    { id: { index: 2 }, x: 140, rightX: 150, y: 200 },
+    // 跳过一大段（跳房子）后的音
+    { id: { index: 3 }, x: 400, rightX: 410, y: 200 },
+    { id: { index: 4 }, x: 420, rightX: 430, y: 200 },
+  ]
+  const splitBands = markBandsOf(bandNotes, '0_1_0_0', '0_1_0_4', (n) => n.y, 60)
+  check(
+    'adj1106 标记线在同行的"跳过段"处断开（大间隔 ⇒ 两条带，不再一条横穿）',
+    splitBands.length === 2 && splitBands[0].x1 <= 150 && splitBands[1].x0 >= 400,
+    JSON.stringify(splitBands),
+  )
+  check(
+    'adj1106 负对照：不传间隔阈值（旧口径）⇒ 同一行仍是一条带',
+    markBandsOf(bandNotes, '0_1_0_0', '0_1_0_4').length === 1,
+  )
 }
 
 /**

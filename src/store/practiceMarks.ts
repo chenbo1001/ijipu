@@ -163,6 +163,11 @@ export function markBandsOf(
   startId: string,
   endId: string,
   rowYOf: (n: { y: number }) => number = (n) => n.y,
+  /**
+   * adj1106（用户 2026-10-23 截图实报）：同一行里相邻音符的间距超过 `gapMax` 就**断开**——
+   * 反复/跳房子跳过的那一段不演奏，标记线不该横穿它（旧实现一行只给一条 min..max 的线）。
+   */
+  gapMax = Number.POSITIVE_INFINITY,
 ): MarkBand[] {
   const s = noteIndexInIdOf(startId)
   const e = noteIndexInIdOf(endId)
@@ -174,21 +179,42 @@ export function markBandsOf(
     const idx = n.id.index
     if (idx >= lo && idx <= hi) picked.push(n)
   }
-  if (picked.length === 0) return []
-  // 按行分组（用 rowYOf 的返回值为键；同行的 y 完全相同）
-  const byRow = new Map<number, { x0: number; x1: number; y: number }>()
-  for (const n of picked) {
+  return splitIntoRuns(picked, rowYOf, gapMax)
+}
+
+/**
+ * adj1106：把一批音符按"行 + 相邻间距"切成若干段（每段一条线）。
+ *
+ * 判据：同行的音符按 x 排序后，相邻两个的间距（后一个的左缘 − 前一个的右缘）> `gapMax` ⇒ 断开。
+ * 这样"跳过不演奏的那一段"不会被一条长线横穿，跨行也照旧切成多段。
+ */
+export function splitIntoRuns(
+  notes: readonly { x: number; rightX: number; y: number }[],
+  rowYOf: (n: { y: number }) => number = (n) => n.y,
+  gapMax = Number.POSITIVE_INFINITY,
+): MarkBand[] {
+  const byRow = new Map<number, { x: number; rightX: number }[]>()
+  for (const n of notes) {
     const y = rowYOf(n)
-    const cur = byRow.get(y)
-    if (!cur) byRow.set(y, { x0: n.x, x1: n.rightX, y })
-    else {
-      cur.x0 = Math.min(cur.x0, n.x)
-      cur.x1 = Math.max(cur.x1, n.rightX)
-    }
+    const arr = byRow.get(y)
+    if (arr) arr.push(n)
+    else byRow.set(y, [n])
   }
-  return [...byRow.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([y, band], i) => ({ row: i, x0: band.x0, x1: band.x1, y }))
+  const bands: MarkBand[] = []
+  for (const [y, arr] of [...byRow.entries()].sort((a, b) => a[0] - b[0])) {
+    arr.sort((a, b) => a.x - b.x)
+    let cur: MarkBand | null = null
+    for (const n of arr) {
+      if (cur !== null && n.x - cur.x1 <= gapMax) {
+        cur.x1 = Math.max(cur.x1, n.rightX)
+      } else {
+        if (cur !== null) bands.push(cur)
+        cur = { row: bands.length, x0: n.x, x1: n.rightX, y }
+      }
+    }
+    if (cur !== null) bands.push(cur)
+  }
+  return bands
 }
 
 /**

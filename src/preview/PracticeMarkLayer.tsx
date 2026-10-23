@@ -16,7 +16,7 @@
  * 与 `PlayheadLayer` 同理由：SVG 是 `dangerouslySetInnerHTML` 注进去的静态串，逐帧/随状态重画要重建整页；
  * 覆盖层用绝对定位 div，**只重画自己**，且不参与点击（`pointerEvents: none`）不抢音符的点击。
  */
-import { markBandsOf } from '../store/practiceMarks'
+import { markBandsOf, splitIntoRuns } from '../store/practiceMarks'
 import { useUiStore } from '../store/uiStore'
 
 export function PracticeMarkLayer({ page, noteSize }: { page: ScorePageLike; noteSize: number }) {
@@ -52,6 +52,9 @@ export function PracticeMarkLayer({ page, noteSize }: { page: ScorePageLike; not
             page.notes.map((n) => ({ id: n.id, x: n.x, y: n.y, rightX: n.rightX ?? n.x + 1 })),
             startId,
             endId,
+            (n) => n.y,
+            // adj1106：跳过不演奏的那一段（跳房子/反复）把线断开
+            noteSize * 2.2,
           )
         : []
   const pct = (v: number) => `${((v / page.width) * 100).toFixed(3)}%`
@@ -188,42 +191,15 @@ function bandsFromIds(page: ScorePageLike, ids: readonly string[], noteSize: num
     exact.has(noteIdOf(n)) || tails.has(`_${(n.id as { group?: number }).group ?? 0}_${n.id.index}`)
   const picked = page.notes.filter(matchOf)
   if (picked.length === 0) return []
-  const byRow = new Map<number, { x0: number; x1: number; y: number }>()
-  /** 每个段落行（按 y）最左的音符 x —— 用于"续行顶到行首" */
-  const rowLeft = new Map<number, number>()
-  for (const n of page.notes) {
-    const cur = rowLeft.get(n.y)
-    if (cur === undefined || n.x < cur) rowLeft.set(n.y, n.x)
-  }
-  for (const n of picked) {
-    const y = n.y
-    const cur = byRow.get(y)
-    const right = n.rightX ?? n.x + 1
-    if (!cur) byRow.set(y, { x0: n.x, x1: right, y })
-    else {
-      cur.x0 = Math.min(cur.x0, n.x)
-      cur.x1 = Math.max(cur.x1, right)
-    }
-  }
-  const bands = [...byRow.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([y, b], i) => ({ row: i, x0: b.x0, x1: b.x1, y }))
   /**
-   * adj993 → **adj995 修正**（用户两次截图）：
-   *
-   * · adj993 想解决的是「第二行的线左侧缩进去一点、没与音符 `3,` 对齐」；
-   * · 但当时用的是"**无条件**顶到行首"⇒ 遇到 `跳房子 1` 这种**大间隔**时，会把一整段
-   *   **根本不演奏的音符**也画上线（用户红框圈出来的那条多余线）。
-   *
-   * ⇒ 改成**只吸附小缺口**：只有当带的左端离该行最左音符不到约 2 个字宽时，才把它顶到行首；
-   *   间隔更大（跨过整段跳房子/反复）就**保持原样**——因为那一段确实不演奏，不该画。
+   * adj1106（用户 2026-10-23 截图实报）：同一行里"没演奏的那一段"不能被一条长线横穿 ——
+   * 按相邻间距切成若干段（跳房子/反复跳过的地方断开），行与行之间照旧分开。
    */
-  const SNAP_MAX = noteSize * 1.8
-  for (let i = 1; i < bands.length; i++) {
-    const left = rowLeft.get(bands[i].y)
-    if (left !== undefined && bands[i].x0 - left < SNAP_MAX) bands[i].x0 = left
-  }
-  return bands
+  return splitIntoRuns(
+    picked.map((n) => ({ x: n.x, y: n.y, rightX: n.rightX ?? n.x + 1 })),
+    (n) => n.y,
+    noteSize * 2.2,
+  )
 }
 
 /** 音符 id 串（与引擎 `noteIdStringOf` 同形；这里只在本页里比对用） */
