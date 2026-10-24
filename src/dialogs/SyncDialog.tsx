@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   buildPlaySequence,
   fitSync,
+  effectiveFitOf,
   inferBpm,
   layoutScore,
   residualBeatsOf,
@@ -363,13 +364,13 @@ export function SyncDialog() {
 
   const fit = doc?.tempo ?? null
   /** 没有解算结果时（<2 条锚点）也画刻度：用谱面 J + 第一条锚点的偏移 */
+  /**
+   * 有效拟合（adj1138 集中到引擎的 `effectiveFitOf`，口径有断言守着）：
+   * **1 条锚点 ⇒ 速度用谱面 `J:`、锚点只解偏移**；2 条以上才由锚点解速度。
+   */
   const effFit = useMemo(() => {
     if (fit) return fit
-    if (doc && doc.anchors.length > 0) {
-      const a = doc.anchors[0]
-      return { beatMs: scoreBeatMs, offsetMs: a.audioMs - a.beat * scoreBeatMs }
-    }
-    return null
+    return effectiveFitOf(doc?.anchors ?? [], scoreBeatMs)
   }, [fit, doc, scoreBeatMs])
 
   const durMs = Math.max(1, doc?.audioDurationMs || (audio ? Math.round(audio.duration * 1000) : 1))

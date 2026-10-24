@@ -104,7 +104,7 @@ const parseJps = (src: string) => {
   return { ...r, errors: r.errors.filter((e) => !METER_WARN_RE.test(e.message)) }
 }
 // adj1119：伴奏对拍的纯数学 + 边车文件（界面/出片/命令行共用同一份口径）
-import { fitSync, audioMsOfBeat, beatOfAudioMs, residualBeatsOf, bpmOfFit, inTrimRange, displayBpm, sessionMsOfAudioMs, INTERLUDE_COLOR } from '@ijipu/engine/index.ts'
+import { fitSync, effectiveFitOf, audioMsOfBeat, beatOfAudioMs, residualBeatsOf, bpmOfFit, inTrimRange, displayBpm, sessionMsOfAudioMs, INTERLUDE_COLOR } from '@ijipu/engine/index.ts'
 import {
   SYNC_SUFFIX,
   SYNC_VERSION,
@@ -35312,6 +35312,53 @@ function runAdj1119Tests(): void {
     fitSync([{ beat: 0, audioMs: 0 }]) === null &&
       fitSync([{ beat: 4, audioMs: 0 }, { beat: 4, audioMs: 1000 }]) === null &&
       fitSync([{ beat: 0, audioMs: Number.NaN }, { beat: 4, audioMs: 2000 }]) === null,
+    '',
+  )
+
+  /**
+   * adj1138（用户 2026-10-24 要我**验证他的理解**）：
+   * 「如果只有一个锚点，谱面应该是按头部 `J:` 定的节拍计算拍速」——对，这就是现行口径；
+   * 现在它是引擎里的**一个纯函数**（`effectiveFitOf`），下面用断言钉住。
+   *
+   * 真实 case：`安和桥.jps`（`J: 65`）+ 一条锚点 `5:1.5 @ 3.999s`（即 beat 16.5）。
+   */
+  const scoreBeatMs1138 = 60000 / 65
+  const fitOne = effectiveFitOf([{ beat: 16.5, audioMs: 3999 }], scoreBeatMs1138)
+  check(
+    'adj1138 1 条锚点 ⇒ 拍速就是谱面 J:（923.0769ms/拍），不由锚点推',
+    fitOne !== null && Math.abs(fitOne.beatMs - scoreBeatMs1138) < 1e-9,
+    String(fitOne?.beatMs),
+  )
+  check(
+    'adj1138 1 条锚点 ⇒ 只解偏移：3999 − 16.5×923.0769 = −11231.77ms',
+    fitOne !== null && Math.abs(fitOne.offsetMs - (3999 - 16.5 * scoreBeatMs1138)) < 1e-9,
+    String(fitOne?.offsetMs),
+  )
+  check(
+    'adj1138 这就是"音频 0 时谱面已在 4:1.17"的来源（0 秒处拍位 = 12.168）',
+    fitOne !== null && Math.abs((0 - fitOne.offsetMs) / fitOne.beatMs - 12.168) < 0.01,
+    String(fitOne ? (0 - fitOne.offsetMs) / fitOne.beatMs : ''),
+  )
+  check(
+    'adj1138 负对照：若改用"谱面从音频 0 开始"反推速度 ⇒ ♩≈248（离谱）⇒ 速度必须取 J:',
+    Math.round(60000 / (3999 / 16.5)) === 248,
+    String(Math.round(60000 / (3999 / 16.5))),
+  )
+  const fitTwo1138 = effectiveFitOf(
+    [
+      { beat: 0, audioMs: 2000 },
+      { beat: 64, audioMs: 61400 },
+    ],
+    scoreBeatMs1138,
+  )
+  check(
+    'adj1138 2 条锚点 ⇒ 拍速由两点解出（59400/64 = 928.125ms/拍），不再用 J:',
+    fitTwo1138 !== null && Math.abs(fitTwo1138.beatMs - 59400 / 64) < 1e-9,
+    String(fitTwo1138?.beatMs),
+  )
+  check(
+    'adj1138 0 条锚点 ⇒ null（没有拟合，调用方按"谱面从音频 0、速度用 J:"兜底）',
+    effectiveFitOf([], scoreBeatMs1138) === null,
     '',
   )
   check(
