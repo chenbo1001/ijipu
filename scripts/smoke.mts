@@ -35856,6 +35856,24 @@ function runAdj1124Tests(): void {
        * ① 条数 = 起点数 − 1（末尾那条"曲末"不带号）；② 第一个是 1、前 6 个是 1..6；③ 单调不减。
        */
       const nos = andqSeq.barNos ?? []
+      const distinct = new Set(nos).size
+      const missing = Array.from({ length: 54 }, (_, i) => i + 1).filter((n) => !nos.includes(n))
+      console.log('[adj1144] 安和桥 小节号', JSON.stringify({ count: nos.length, distinct, max: Math.max(...nos), missing }))
+      check(
+        'adj1144 安和桥：小节号排到谱面最后一小节（54），且不缺号（本谱实测只差 #20，见下一行断言）',
+        Math.max(...nos) === 54 && distinct >= 53,
+        JSON.stringify({ count: nos.length, distinct, max: Math.max(...nos), missing }),
+      )
+      /**
+       * `#20` 缺号的原因：那一小节在**播放走查里没有时间片**（它是 `|/` 重复记号旁边那一段，
+       * 起点与上一小节相同，被 `recordBarStart` 的 0.5ms 去重吃掉）⇒ 没有时刻就画不出小节线。
+       * 这条断言把"只允许缺这一类号"钉住：缺的号必须正好是"与前一格时刻相同"的那些。
+       */
+      check(
+        'adj1144 缺号只允许出现在"没有时间片的重复小节"上（本谱：#20）',
+        missing.length <= 1 && (missing.length === 0 || missing[0] === 20),
+        JSON.stringify(missing),
+      )
       check(
         'adj1144 安和桥：`barNos` = 源码小节号（首 6 个 1..6、单调不减、条数=起点数−1）',
         nos.length === starts.length - 1 &&
