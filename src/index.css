@@ -6003,23 +6003,22 @@ span.ws-check {
 /* ============================================================
  * adj1123：波形**上方**的动态谱预览（左：放映画面；右：当前位置读数 + 说明）
  * ============================================================ */
+/* adj1132：预览区**占满整行**，读数/缩放/提示挪到它下面一排
+   （用户口径：「预览区要全宽，右侧信息改为一排放预览区下面」） */
 .sync-preview {
   display: flex;
-  align-items: stretch;
-  gap: 12px;
+  flex-direction: column;
+  gap: 6px;
   /* 高度由内联样式给（可拖，adj1124）；这里只兜住最小值 */
   min-height: 120px;
   flex: 0 0 auto;
 }
 
-/* 舞台按 16:9 **贴着画面**（adj1131：用户实报"两边黑位没用上、2× 放大还是被框在白纸里"）——
-   改成"盒子就等于画面"，黑边不再出现；右侧读数区吃剩下的宽度。 */
 .sync-preview-box {
   position: relative;
-  flex: 0 0 auto;
-  height: 100%;
-  aspect-ratio: 16 / 9;
-  max-width: 100%;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -6030,11 +6029,11 @@ span.ws-check {
 }
 
 .sync-preview-box canvas {
-  /* 画布按会话尺寸（如 1920×1080）绘制，靠 `object-fit` 在舞台里等比显示；
-     adj1131：缩放用 `transform: scale()`（内联样式给值），超出部分被盒子裁掉 */
+  /* 画布按会话尺寸（如 1920×1080）绘制；adj1132 起盒子是**整行宽**，
+     用 `cover` 填满（上下按需裁切，不留黑边），缩放仍靠 `transform: scale()` */
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   transform-origin: center center;
   display: block;
 }
@@ -6051,18 +6050,29 @@ span.ws-check {
 }
 
 /* 预览右侧读数（拍速/偏移/残差已挪到波形下方，adj1124） */
-.sync-preview-side {
-  flex: 1 1 auto;
-  min-width: 240px;
+/* adj1132：预览下面那一排（当前位置 · 缩放 · 提示），不再占右侧一列 */
+.sync-preview-info {
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  height: 24px;
+  overflow: hidden;
+  white-space: nowrap;
   font-size: 12px;
 }
 
+.sync-preview-zoom {
+  gap: 6px;
+}
+
+.sync-preview-hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .sync-preview-pos {
-  font-size: 14px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   color: var(--jp-text-primary);
 }

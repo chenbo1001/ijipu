@@ -1247,11 +1247,12 @@ export function SyncDialog() {
               </span>
             )}
           </div>
-          <div className="sync-preview-side">
-            <div className="sync-preview-pos">
+          {/* adj1132（用户 2026-10-24）：右侧信息改成预览区**下面一排**，预览本身占满整个宽度 */}
+          <div className="sync-preview-info">
+            <span className="sync-preview-pos">
               <span ref={previewInfoRef}>{syncCopy.previewNow}</span>
-            </div>
-            <label className="sync-row">
+            </span>
+            <label className="sync-row sync-preview-zoom">
               <span className="sync-label">{syncCopy.previewZoom}</span>
               <select
                 className="sync-select"
@@ -1274,7 +1275,7 @@ export function SyncDialog() {
                 ))}
               </select>
             </label>
-            <div className="sync-dim">{syncCopy.previewHint}</div>
+            <span className="sync-dim sync-preview-hint">{syncCopy.previewHint}</span>
           </div>
         </div>
         {/* 预览 ↔ 下方：往上拖 = 预览变高（下面整体跟着平移） */}
