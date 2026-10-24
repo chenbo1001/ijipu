@@ -35643,6 +35643,19 @@ function runAdj1124Tests(): void {
     !('previewZoom' in DEFAULT_SYNC_LAYOUT) && !('previewZoom' in d),
     JSON.stringify(Object.keys(DEFAULT_SYNC_LAYOUT)),
   )
+  /**
+   * adj1134（用户 2026-10-24 实报「色块位与音频时点没对齐」）：
+   * 台面里"色块轨道"和"游标换算"必须是**同一个拍速**——第一版轨道写死 120bpm 占位（500ms/拍），
+   * 而游标按谱面 J:（如 70bpm=857ms/拍）⇒ 越往后偏得越多。这里钉住这条。
+   */
+  const dialogSrcAdj = String(readFileSync('src/dialogs/SyncDialog.tsx', 'utf8'))
+  check(
+    'adj1134 台面：色块轨道与游标同源（都走 scoreBeatMs，不许再写死 500ms/拍）',
+    /const beatMs = scoreBeatMs/.test(dialogSrcAdj) &&
+      /sessionMsOfAudioMs\(audioMs, fitForPreview, scoreBeatMs\)/.test(dialogSrcAdj) &&
+      !/const beatMs = 500\b/.test(dialogSrcAdj),
+    '',
+  )
   const dragged = resizeSyncLayout(DEFAULT_SYNC_LAYOUT, 100, 60, 1440, 900)
   check(
     'adj1124 拖右下角：宽 +100；高 820+60=880 超过视口 ⇒ 夹到 876',

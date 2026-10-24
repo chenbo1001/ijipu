@@ -93,6 +93,7 @@ export function SyncDialog() {
   /** adj1133：预览直接用应用的预览 ⇒ 位置/色块走 docStore 的既有通道 */
   const setCurrentMs = useDocStore((s) => s.setCurrentMs)
   const setPlayheadTrack = useDocStore((s) => s.setPlayheadTrack)
+  const setPlayheadBeat = useDocStore((s) => s.setPlayheadBeat)
   /** adj1133：缩放跟顶栏同一个偏好（`ijipu.previewZoom`），不再自己造一套 */
   const previewZoom = useUiStore((s) => s.previewZoom)
   const setPreviewZoom = useUiStore((s) => s.setPreviewZoom)
@@ -283,11 +284,21 @@ export function SyncDialog() {
    * 时间基准：色块轨道按**谱面 `J:`** 建（`beatMs = 500` = 120bpm 占位），
    * `currentMs` 用 `sessionMsOfAudioMs` 从音频时刻换算过来（拍数不变、只换秒数）。
    */
+  /** 谱面拍速（`J:`）——轨道与游标换算都只用它，`adj1134` 起在下面两处共用同一个值 */
+  const scoreBpm = useMemo(() => inferBpm(parseResult), [parseResult])
+  const scoreBeatMs = 60000 / scoreBpm
+
   useEffect(() => {
     if (doc === null) return
     const lay = layoutScore(parseResult, pageConfig)
     const seq = buildPlaySequence(parseResult, lay, 120)
-    const beatMs = 500
+    /**
+     * ⚠ adj1134（用户 2026-10-24 实报「色块位与音频时点没对齐」）：
+     * 这里的 `beatMs` **必须**和 `paintPreview` 里换算 `currentMs` 用的同一个值（谱面 `J:`），
+     * 否则轨道按 500ms/拍、游标按 857ms/拍（J:=70）⇒ 色块越走越偏。
+     * 第一版就是写死 120bpm 占位，才有这个 bug。
+     */
+    const beatMs = scoreBeatMs
     setPlayheadTrack(
       seq.events.flatMap((e) =>
         (e.playheadSegs ?? []).map((s) => ({
@@ -308,8 +319,17 @@ export function SyncDialog() {
         })),
       ),
     )
-    return () => setPlayheadTrack([])
-  }, [doc === null, parseResult, pageConfig, setPlayheadTrack])
+    // 跳跳球的拍网格也用**同一套**时间（否则球和色块会各走各的）
+    setPlayheadBeat(
+      beatMs,
+      0,
+      (seq.barStartsMs ?? []).map((ms) => (ms / 500) * beatMs),
+    )
+    return () => {
+      setPlayheadTrack([])
+      setPlayheadBeat(0, 0, [])
+    }
+  }, [doc === null, parseResult, pageConfig, scoreBeatMs, setPlayheadBeat, setPlayheadTrack])
 
   /**
    * 小节起点**拍位**（与速度无关）：用任意拍速建一次播放序列，`barStartsMs / beatMs` 即拍。
@@ -321,8 +341,6 @@ export function SyncDialog() {
     return (seq.barStartsMs ?? []).map((ms) => ms / 500)
   }, [parseResult, pageConfig])
 
-  const scoreBpm = useMemo(() => inferBpm(parseResult), [parseResult])
-  const scoreBeatMs = 60000 / scoreBpm
   const fit = doc?.tempo ?? null
   /** 没有解算结果时（<2 条锚点）也画刻度：用谱面 J + 第一条锚点的偏移 */
   const effFit = useMemo(() => {
