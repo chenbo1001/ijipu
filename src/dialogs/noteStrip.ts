@@ -20,6 +20,8 @@ export interface NoteCellInput {
   beat: number
   /** 时值（拍） */
   beats: number
+  /** adj1144：MIDI 音高（半音整数），用来画"亮柱高度 = 音高" */
+  midi?: number
 }
 
 /** 排上的一格（已换算到音频时间轴） */
@@ -30,6 +32,8 @@ export interface StripCell {
   audioMs: number
   /** 宽度（毫秒） */
   widthMs: number
+  /** adj1144：MIDI 音高（缺省 = 不知道音高 ⇒ 按最低画） */
+  midi?: number
 }
 
 /** 拍 → 音频毫秒（与 `engine` 的 `audioMsOfBeat` 同一口径；这里不引引擎，保持本文件零依赖） */
@@ -53,9 +57,31 @@ export function stripCellsOf(
     const audioMs = audioMsOfBeat(fit, n.beat)
     const widthMs = n.beats * fit.beatMs
     if (audioMs + widthMs <= 0) continue
-    out.push({ beat: n.beat, beats: n.beats, audioMs, widthMs })
+    out.push({
+      beat: n.beat,
+      beats: n.beats,
+      audioMs,
+      widthMs,
+      ...(typeof n.midi === 'number' && Number.isFinite(n.midi) ? { midi: n.midi } : {}),
+    })
   }
   return out
+}
+
+/**
+ * adj1144（用户 2026-10-25）：
+ * 「下半部格子的高度，取整首曲子的最低音占格子的 1/10 高，最高音占格子整个高度，
+ *   音符按十二律等分（一个八度 12 份）」——把 MIDI 音高换算成 **0~1 的高度比例**。
+ *
+ * - 最低音 ⇒ 0.1；最高音 ⇒ 1.0；中间按**半音**线性等分（十二平均律，一个八度 12 份）；
+ * - 全曲只有一个音高（或没有音高信息）⇒ 0.1（"最低音"那条），不会画成满格；
+ * - 结果**量化到 0.001**，减少无意义的重渲染差异。
+ */
+export function pitchHeightOf(midi: number | undefined, minMidi: number, maxMidi: number): number {
+  if (typeof midi !== 'number' || !Number.isFinite(midi)) return 0.1
+  const span = maxMidi - minMidi
+  const raw = span > 0 ? 0.1 + 0.9 * ((midi - minMidi) / span) : 0.1
+  return Math.min(1, Math.max(0.1, Math.round(raw * 1000) / 1000))
 }
 
 /**

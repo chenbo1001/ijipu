@@ -18,6 +18,7 @@ import {
   fitSync,
   effectiveFitOf,
   inferBpm,
+  pitchToMidiNote,
   layoutScore,
   residualBeatsOf,
   sessionMsOfAudioMs,
@@ -37,7 +38,7 @@ import { parseSyncDoc, mixPlanOf, joinPath, serializeSyncDoc, sidecarPathOf, syn
 import { readSidecarText, writeSidecarText, downloadSidecarText } from '../export/video/syncIo'
 import { listWorkspaces } from '../store/workspace'
 // adj1137：波形上方那条"音符格子排"（纯几何）
-import { cellRectPct, stripCellsOf } from './noteStrip'
+import { cellRectPct, pitchHeightOf, stripCellsOf } from './noteStrip'
 import { canUseDynamicVideo } from '../export/video/capability'
 import { syncCopy } from '../brand/copy'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
@@ -357,14 +358,45 @@ export function SyncDialog() {
     [scoreSeq, scoreBeatMs],
   )
 
+  /**
+   * adj1144（用户 2026-10-25 实报「台面小节序号比谱面差 1」）：
+   * 序号**用引擎给的源码小节号**（`barNos`），不再用"下标 + 1"——反复段会让下标整首错开。
+   * 引擎没给（比如切片结果）才回退到下标。
+   */
+  const barNoOf = useCallback(
+    (i: number): number => scoreSeq.barNos?.[i] ?? i + 1,
+    [scoreSeq],
+  )
+
   /** adj1137（用户 2026-10-24 的想法）：主音符合成一条"格子排"，与波形共用同一时间轴 */
   const noteCells = useMemo(
     () =>
       scoreSeq.events
         .filter((e) => e.placed.playable && e.durationMs > 0)
-        .map((e) => ({ beat: e.atMs / scoreBeatMs, beats: e.durationMs / scoreBeatMs })),
+        .map((e) => {
+          // adj1144：带上音高（MIDI 半音），用来画"亮柱高度 = 音高"
+          const name = e.pitch ?? e.placed.audioPitch
+          const midi = typeof name === 'string' && name !== '' ? pitchToMidiNote(name) : undefined
+          return {
+            beat: e.atMs / scoreBeatMs,
+            beats: e.durationMs / scoreBeatMs,
+            ...(midi !== undefined && Number.isFinite(midi) ? { midi } : {}),
+          }
+        }),
     [scoreSeq, scoreBeatMs],
   )
+
+  /** adj1144：全曲音高范围（最低/最高各占一个端点，用来把音高换算成柱高） */
+  const midiRange = useMemo(() => {
+    let lo = Number.POSITIVE_INFINITY
+    let hi = Number.NEGATIVE_INFINITY
+    for (const c of noteCells) {
+      if (c.midi === undefined) continue
+      lo = Math.min(lo, c.midi)
+      hi = Math.max(hi, c.midi)
+    }
+    return Number.isFinite(lo) && Number.isFinite(hi) ? { lo, hi } : null
+  }, [noteCells])
 
   const fit = doc?.tempo ?? null
   /** 没有解算结果时（<2 条锚点）也画刻度：用谱面 J + 第一条锚点的偏移 */
@@ -426,21 +458,23 @@ export function SyncDialog() {
     (b: number): string => {
       for (let i = barStartBeats.length - 1; i >= 0; i--) {
         if (b >= barStartBeats[i] - 1e-6) {
-          return `${i + 1}:${Math.round((b - barStartBeats[i]) * 100) / 100 + 1}`
+          return `${barNoOf(i)}:${Math.round((b - barStartBeats[i]) * 100) / 100 + 1}`
         }
       }
       return `${b}`
     },
-    [barStartBeats],
+    [barStartBeats, barNoOf],
   )
 
   const beatOfBarBeat = useCallback(
     (barNo: number, beatNo: number): number | null => {
-      const start = barStartBeats[barNo - 1]
+      // adj1144：按**源码小节号**找起点（反复段同一个小节号可能出现两次 ⇒ 取第一次出现的那个）
+      const i = barStartBeats.findIndex((_, idx) => barNoOf(idx) === barNo)
+      const start = i >= 0 ? barStartBeats[i] : undefined
       if (start === undefined) return null
       return start + (beatNo - 1)
     },
-    [barStartBeats],
+    [barStartBeats, barNoOf],
   )
 
   /**
@@ -452,12 +486,12 @@ export function SyncDialog() {
     (b: number): string => {
       for (let i = barStartBeats.length - 1; i >= 0; i--) {
         if (b >= barStartBeats[i] - 1e-6) {
-          return `${i + 1}:${(b - barStartBeats[i] + 1).toFixed(2)}`
+          return `${barNoOf(i)}:${(b - barStartBeats[i] + 1).toFixed(2)}`
         }
       }
       return b.toFixed(2)
     },
-    [barStartBeats],
+    [barStartBeats, barNoOf],
   )
 
   /**
@@ -1422,13 +1456,14 @@ export function SyncDialog() {
         <div className="sync-split" onPointerDown={startDrag('preview')} title={syncCopy.splitPreviewHint} />
 
         {/* adj1137：音符格子排（在波形**上面**，与波形同一时间轴、同步缩放；点一格跳过去）
-            adj1142：和波形包在同一个 `gap:0` 的组里，两排之间没有缝；高度=波形 1/2 */}
+            adj1142：和波形包在同一个 `gap:0` 的组里，两排之间没有缝
+            adj1144：高度=波形 3/4；格子分上下两段，下段亮、柱高按音高（十二律等分） */}
         <div className="sync-wave-group" ref={groupRef}>
         {stripCells.length > 0 && (
           <div
             className="sync-notes"
             data-sync="note-strip"
-            style={{ height: `${Math.max(24, Math.round(layout.waveH / 2))}px` }}
+            style={{ height: `${Math.max(32, Math.round((layout.waveH * 3) / 4))}px` }}
             title={syncCopy.stripHint}
           >
             {/* adj1141：小节线 + 小节号都画在**这一排**（亮色）；锚点解出来后同一根线在波形里也贯通 */}
@@ -1439,7 +1474,7 @@ export function SyncDialog() {
               const every = viewWin.winMs > 90000 ? 8 : viewWin.winMs > 45000 ? 4 : viewWin.winMs > 15000 ? 2 : 1
               return (
                 <div key={`bar-${i}`} className="sync-bar-line" style={{ left: `${pct}%` }}>
-                  {i % every === 0 && <span className="sync-bar-no">{i + 1}</span>}
+                  {i % every === 0 && <span className="sync-bar-no">{barNoOf(i)}</span>}
                 </div>
               )
             })}
@@ -1451,7 +1486,14 @@ export function SyncDialog() {
                   key={`${cell.beat}-${i}`}
                   type="button"
                   className="sync-note-cell"
-                  style={{ left: `${rect.leftPct}%`, width: `${rect.widthPct}%` }}
+                  style={
+                    {
+                      left: `${rect.leftPct}%`,
+                      width: `${rect.widthPct}%`,
+                      // adj1144：下段亮柱的高度比例（最低音 0.1、最高音 1；按半音等分）
+                      '--h': String(midiRange ? pitchHeightOf(cell.midi, midiRange.lo, midiRange.hi) : 0.1),
+                    } as React.CSSProperties
+                  }
                   title={`${barBeatLabel(cell.beat)} · ${audioClockOf(cell.audioMs)}`}
                   onClick={() => {
                     stopSource()

@@ -6206,17 +6206,37 @@ span.ws-check {
   white-space: nowrap;
 }
 
+/* adj1144（用户 2026-10-25 的规格）：
+   格子分上下两段 —— 上段暗（介于格子亮色与底色之间）、下段亮；
+   下段按**音高**给高度（`--h`：最低音 0.1、最高音 1，十二律等分）；
+   鼠标移上去整格提亮，但两段仍分得开（用 filter，不是换同一个颜色）。 */
 .sync-note-cell {
   position: absolute;
   /* 上面留出序号那一条（10px 字 + 2px），下面贴边 */
   top: 14px;
-  bottom: 2px;
+  bottom: 0;
   padding: 0;
   border: 0;
   border-left: 1px solid rgb(15 18 24 / 85%);
-  border-radius: 2px;
-  background: rgb(120 160 210 / 55%);
+  border-radius: 2px 2px 0 0;
+  background: rgb(72 98 132 / 70%); /* 上段：暗 */
   cursor: pointer;
+  overflow: hidden;
+}
+
+.sync-note-cell::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(var(--h, 0.1) * 100%);
+  border-radius: 1px 1px 0 0;
+  background: rgb(150 190 235 / 85%); /* 下段：亮（当前格子颜色再亮一点） */
+}
+
+.sync-note-cell:hover {
+  filter: brightness(1.28);
 }
 
 /* adj1139：快捷对齐那两粒按钮（两种"长度不一致"的入口） */
@@ -6229,7 +6249,7 @@ span.ws-check {
 }
 
 .sync-note-cell:hover {
-  background: rgb(140 190 250 / 85%);
+  filter: brightness(1.28);
 }
 
 /* 分区之间的拖拽分隔条（预览↔波形、波形↔参数行） */

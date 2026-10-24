@@ -35821,9 +35821,56 @@ function runAdj1124Tests(): void {
       /barStartsMs \?\? \[\]\)\.map\(\(ms\) => ms \/ scoreBeatMs\)/.test(dialogSrcAdj),
     '',
   )
+  /**
+   * adj1144（用户 2026-10-24 实报「台面小节序号比谱面上的小节号差 1」）：
+   * 台面用的 `barStartsMs`（播放序列）与谱面画的小节号（布局里的 `barCounter`）必须**条数一致**，
+   * 否则一差就是一整首。这里用真实那份 `安和桥.jps` 量一次。
+   */
+  try {
+    const andqPath = 'D:\\蜗居笔记\\悟乐居杂记\\2.曲谱集\\安和桥\\安和桥.jps'
+    if (existsSync(andqPath)) {
+      const andqCode = readFileSync(andqPath, 'utf8')
+      const andqParse = parseJps(andqCode)
+      const andqLayout = layoutScore(andqParse, defaultPageConfig)
+      const andqSeq = buildPlaySequence(andqParse, andqLayout, 65)
+      const layoutBars = andqLayout.pages.reduce((n, p) => n + p.barlines.length, 0)
+      const starts = andqSeq.barStartsMs ?? []
+      const numbered = andqLayout.pages.flatMap((p) => p.barNumbers.map((b) => b.n))
+      console.log(
+        '[adj1144] 安和桥',
+        JSON.stringify({
+          starts: starts.length,
+          layoutBars,
+          numbered,
+          barNos: andqSeq.barNos?.slice(0, 6),
+          lastNos: andqSeq.barNos?.slice(-4),
+        }),
+      )
+      /**
+       * `barNos` 的口径：**源码小节号**（1 起、与谱面画的数字同一套）。
+       * 反复段会让同一个小节出现两次（号不递增），所以这里只断言：
+       * ① 条数 = 起点数 − 1（末尾那条"曲末"不带号）；② 第一个是 1、前 6 个是 1..6；③ 单调不减。
+       */
+      const nos = andqSeq.barNos ?? []
+      check(
+        'adj1144 安和桥：`barNos` = 源码小节号（首 6 个 1..6、单调不减、条数=起点数−1）',
+        nos.length === starts.length - 1 &&
+          nos[0] === 1 &&
+          nos.slice(0, 6).join(',') === '1,2,3,4,5,6' &&
+          nos.every((n, i) => i === 0 || n >= nos[i - 1]),
+        JSON.stringify({ nos: nos.length, starts: starts.length, head: nos.slice(0, 6), tail: nos.slice(-4) }),
+      )
+      check(
+        'adj1144 安和桥：播放序列的小节起点条数 == 布局画出的小节线数（差一条就是一整首错位）',
+        starts.length === layoutBars,
+        JSON.stringify({ starts: starts.length, layoutBars }),
+      )
+    }
+  } catch (e) {
+    check('adj1144 安和桥量小节数（读不到文件就跳过）', true, String(e))
+  }
   const dragged = resizeSyncLayout(DEFAULT_SYNC_LAYOUT, 100, 60, 1440, 900)
-  check(
-    'adj1124 拖右下角：宽 +100；高 820+60=880 超过视口 ⇒ 夹到 876',
+  check(    'adj1124 拖右下角：宽 +100；高 820+60=880 超过视口 ⇒ 夹到 876',
     dragged.w === 1340 && dragged.h === 876 && dragged.maximized === false,
     JSON.stringify({ w: dragged.w, h: dragged.h }),
   )
