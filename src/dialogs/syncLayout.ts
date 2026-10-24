@@ -28,11 +28,12 @@ export interface SyncLayout {
 /** L1 键（`ijipu.` 前缀；与其它偏好同一命名空间） */
 export const SYNC_LAYOUT_KEY = 'ijipu.syncLayout'
 
+/** 默认值（adj1139 用户口径：预览要 320 高、波形适当缩小；更早的 1240×820 不变） */
 export const DEFAULT_SYNC_LAYOUT: SyncLayout = {
   w: 1240,
   h: 820,
-  waveH: 172,
-  previewH: 230,
+  waveH: 140,
+  previewH: 320,
   maximized: false,
 }
 

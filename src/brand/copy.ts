@@ -1349,6 +1349,18 @@ export const syncCopy = {
     `这条锚点等于说"前 ${beats} 拍只用了 ${span}"，谱面第 1 拍会被推到音频 0 之前。拍号填错了？还是伴奏有前奏？再打一条锚点才能定速度。`,
   /** adj1137：波形上面那条音符格子排 */
   stripHint: '音符格子排：每格一个主音符、宽度=时值；点一格就跳到那个音（与波形同步缩放）',
+  /** adj1139：伴奏比谱面长时，谱面开始之前那段 */
+  headWaitLabel: '前奏（等谱面开始）',
+  headWaitNote: (span: string) => `开头 ${span} 是前奏：球停在第一个音，等谱面开始`,
+  /** adj1139：两条"快捷对齐"按钮（两种长度不一致的落地入口） */
+  quickAlignTitle: '快捷对齐',
+  quickAlignHeadWait: '谱面第 1 拍 = 当前播放头',
+  quickAlignHeadWaitHint: '伴奏前面还有一段前奏时用：谱面第 1 拍从当前位置开始，之前那段球停在第一个音',
+  quickAlignSkip: '0 秒 = 谱面',
+  quickAlignSkipHint: '谱面比伴奏长、开头几拍要跳过时用：把音频 0 秒对齐到指定的小节:拍',
+  quickAlignHeadWaitDone: (span: string) => `已把谱面第 1 拍对齐到 ${span}（之前那段算前奏）`,
+  quickAlignSkipDone: (pos: string) => `已把音频 0 秒对齐到谱面 ${pos}`,
+  anchorDup: '已经有一条"谱面第 1 拍"的锚点了，先删掉旧的',
   anchorHint: '只有一条锚点：只调偏移，速度按谱面 J:',
   /** 右侧微调区的占位（左侧列表已经提示过"还没有锚点"，这里不重复同一句） */
   selectAnchor: '选中左侧的锚点，这里可以 ±ms 微调、锁定、回退重听',

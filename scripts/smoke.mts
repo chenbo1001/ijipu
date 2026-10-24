@@ -35664,9 +35664,14 @@ function runAdj1124Tests(): void {
   console.log('[adj1124] 对拍台尺寸：夹紧 / 拖拽 / 默认值')
   const d = normalizeSyncLayout(DEFAULT_SYNC_LAYOUT, 1440, 900)
   check(
-    'adj1124 默认值原样通过（窗口够大时不缩放）',
-    d.w === 1240 && d.h === 820 && d.waveH === 172 && d.previewH === 230,
+    'adj1124/adj1139 默认值原样通过（1240×820；波形 140、预览 320 = 用户 2026-10-24 口径）',
+    d.w === 1240 && d.h === 820 && d.waveH === 140 && d.previewH === 320,
     JSON.stringify(d),
+  )
+  check(
+    'adj1139 格子排:波形 = 1:4（按波形高 /4，最少 18px）',
+    Math.max(18, Math.round(d.waveH / 4)) === 35 && Math.max(18, Math.round(90 / 4)) === 23,
+    String(Math.max(18, Math.round(d.waveH / 4))),
   )
   const huge = normalizeSyncLayout({ ...DEFAULT_SYNC_LAYOUT, w: 5000, h: 5000 }, 1440, 900)
   check(
@@ -35788,16 +35793,16 @@ function runAdj1124Tests(): void {
   )
   check(
     'adj1124 拖分隔条：只改自己那一项（预览 -50 / 波形 +40）',
-    resizePreviewH(DEFAULT_SYNC_LAYOUT, -50, 900).previewH === 180 &&
-      resizePreviewH(DEFAULT_SYNC_LAYOUT, -50, 900).waveH === 172 &&
-      resizeWaveH(DEFAULT_SYNC_LAYOUT, 40, 900).waveH === 212 &&
-      resizeWaveH(DEFAULT_SYNC_LAYOUT, 40, 900).previewH === 230,
+    resizePreviewH(DEFAULT_SYNC_LAYOUT, -50, 900).previewH === 270 &&
+      resizePreviewH(DEFAULT_SYNC_LAYOUT, -50, 900).waveH === 140 &&
+      resizeWaveH(DEFAULT_SYNC_LAYOUT, 40, 900).waveH === 180 &&
+      resizeWaveH(DEFAULT_SYNC_LAYOUT, 40, 900).previewH === 320,
     '',
   )
   const grew = resizePreviewH(DEFAULT_SYNC_LAYOUT, 400, 900)
   check(
-    'adj1124 预览往下拖 ⇒ 面板自己长高（视口 900 时封顶 876，预览最多 876−172−360=344）',
-    grew.previewH === 344 && grew.h === 876,
+    'adj1124 预览往下拖 ⇒ 面板自己长高（视口 900 时封顶 876，预览最多 876−140−360=376）',
+    grew.previewH === 376 && grew.h === 876,
     JSON.stringify({ preview: grew.previewH, h: grew.h }),
   )
   check(

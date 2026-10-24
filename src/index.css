@@ -6168,14 +6168,23 @@ span.ws-check {
 
 .sync-note-cell {
   position: absolute;
-  top: 2px;
-  bottom: 2px;
+  top: 3px;
+  bottom: 3px;
   padding: 0;
   border: 0;
   border-left: 1px solid rgb(15 18 24 / 85%);
   border-radius: 2px;
   background: rgb(120 160 210 / 55%);
   cursor: pointer;
+}
+
+/* adj1139：快捷对齐那两粒按钮（两种"长度不一致"的入口） */
+.sync-quick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 2px;
+  flex-wrap: wrap;
 }
 
 .sync-note-cell:hover {

@@ -388,6 +388,19 @@ export function SyncDialog() {
     if (impliedOffset >= -2 * scoreBeatMs) return ''
     return syncCopy.anchorImplausible(String(Math.round(a.beat * 100) / 100), audioClockOf(a.audioMs))
   }, [doc, scoreBeatMs])
+
+  /**
+   * adj1139（用户 2026-10-24「长度不一致 ⇒ 两个都做」）：
+   * **伴奏比谱面长**时，谱面第 1 拍落在音频 `offsetMs`（>0）⇒ 前面那段是「前奏等待」：
+   *  - 波形上淡淡标出来；
+   *  - 播放到这段时，预览的谱面时刻夹在 0（球停在第一个音上原地跳，直到谱面开始）。
+   * 反过来（谱面先于音频开始）由 `singleAnchorWarn` 那条红字提醒，不在这里处理。
+   */
+  const headWaitMs = useMemo(() => {
+    if (effFit === null) return 0
+    const wait = effFit.offsetMs - trim.startMs
+    return wait > 0 ? wait : 0
+  }, [effFit, trim.startMs])
   /** adj1126：波形当前视野（整曲 or 缩放后的窗口），刻度与读数都用它 */
   const viewWin = viewWindow(view, durMs)
   /** adj1127：横向滚动条的滑块位置/宽度（整曲时 `visible=false`） */
@@ -804,6 +817,25 @@ export function SyncDialog() {
       ctx.fillRect(x1, 0, W - x1, WAVE_H)
     }
 
+    /**
+     * adj1139（用户 2026-10-24 拍板的两种"长度不一致"处理之一）：
+     * **伴奏比谱面长** ⇒ 谱面开始之前那段音频是「前奏等待」，在这里淡淡标出来，
+     * 播放时球停在第一个音（`paintPreview` 把负的谱面时刻夹到 0）。
+     */
+    if (headWaitMs > 60) {
+      const h0 = Math.max(trim.startMs, v0)
+      const h1 = Math.min(effFit ? effFit.offsetMs : trim.startMs, v0 + winMs)
+      if (h1 > h0) {
+        const xa = xOf(h0)
+        const xb = xOf(h1)
+        ctx.fillStyle = 'rgba(255,205,110,0.16)'
+        ctx.fillRect(xa, 0, xb - xa, WAVE_H)
+        ctx.fillStyle = 'rgba(255,225,160,0.95)'
+        ctx.font = '10px system-ui, sans-serif'
+        ctx.fillText(syncCopy.headWaitLabel, xa + 4, WAVE_H - 6)
+      }
+    }
+
     // 小节刻度 + 拍刻度（有 effFit 才画：没有锚点时不知道音频位置）
     if (effFit) {
       barStartBeats.forEach((b, i) => {
@@ -926,7 +958,7 @@ export function SyncDialog() {
 
     // 动态谱预览与波形共用同一个播放头（adj1123）
     paintPreview(playheadRef.current)
-  }, [audio, doc, durMs, effFit, barStartBeats, paintPreview, pending, sel, trim.endMs, trim.startMs, view, layout.waveH])
+  }, [audio, doc, durMs, effFit, barStartBeats, headWaitMs, paintPreview, pending, sel, trim.endMs, trim.startMs, view, layout.waveH])
 
   useEffect(() => {
     drawRef.current = draw
@@ -1367,9 +1399,15 @@ export function SyncDialog() {
         {/* 预览 ↔ 下方：往上拖 = 预览变高（下面整体跟着平移） */}
         <div className="sync-split" onPointerDown={startDrag('preview')} title={syncCopy.splitPreviewHint} />
 
-        {/* adj1137：音符格子排（在波形**上面**，与波形同一时间轴、同步缩放；点一格跳过去） */}
+        {/* adj1137：音符格子排（在波形**上面**，与波形同一时间轴、同步缩放；点一格跳过去）
+            adj1139：高度按波形 **1:4** 给（用户口径"音符格和波形约 1:4 或 1:5"） */}
         {stripCells.length > 0 && (
-          <div className="sync-notes" data-sync="note-strip" title={syncCopy.stripHint}>
+          <div
+            className="sync-notes"
+            data-sync="note-strip"
+            style={{ height: `${Math.max(18, Math.round(layout.waveH / 4))}px` }}
+            title={syncCopy.stripHint}
+          >
             {stripCells.map((cell, i) => {
               const rect = cellRectPct(cell, viewWin.v0, viewWin.winMs)
               if (rect === null) return null
@@ -1593,6 +1631,44 @@ export function SyncDialog() {
           <div className="sync-anchors">
             <div className="sync-anchors-head">
               {syncCopy.anchors}（{doc.anchors.length}）
+            </div>
+            {/* adj1139：两种"长度不一致"的快捷入口（等价于打一条特殊锚点，数据仍是 anchors） */}
+            <div className="sync-quick">
+              <span className="sync-dim">{syncCopy.quickAlignTitle}</span>
+              <button
+                type="button"
+                className="btn sync-mini"
+                data-sync="align-head"
+                title={syncCopy.quickAlignHeadWaitHint}
+                onClick={() => {
+                  const at = Math.round(playheadRef.current)
+                  if (doc.anchors.some((a) => Math.abs(a.beat) < 1e-6)) {
+                    setNotice(syncCopy.anchorDup)
+                    return
+                  }
+                  addAnchor({ beat: 0, audioMs: at })
+                  setNotice(syncCopy.quickAlignHeadWaitDone(audioClockOf(at)))
+                }}
+              >
+                {syncCopy.quickAlignHeadWait}
+              </button>
+              <button
+                type="button"
+                className="btn sync-mini"
+                data-sync="align-skip"
+                title={syncCopy.quickAlignSkipHint}
+                onClick={() => {
+                  const b = beatOfBarBeat(bar, beat)
+                  if (b === null || bar < 1 || beat < 1) {
+                    setNotice(syncCopy.beatPosInvalid)
+                    return
+                  }
+                  addAnchor({ beat: b, audioMs: 0 })
+                  setNotice(syncCopy.quickAlignSkipDone(`${bar}:${beat}`))
+                }}
+              >
+                {syncCopy.quickAlignSkip} {bar}:{beat}
+              </button>
             </div>
             {doc.anchors.length === 0 && <div className="sync-dim sync-pad">{syncCopy.noAnchors}</div>}
             {doc.anchors.map((a: SyncAnchor, i: number) => (

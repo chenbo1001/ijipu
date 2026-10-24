@@ -2150,8 +2150,8 @@ async function main() {
           })()`,
         )
         check(
-          'adj1121/adj1122 对拍台真的渲染出来（面板有尺寸、波形画布 + 下侧时间标尺都在；不是白屏）',
-          syncUi.panel && syncUi.h > 300 && syncUi.w > 600 && syncUi.canvas && syncUi.canvasH >= 180,
+          'adj1121/adj1122/adj1139 对拍台真的渲染出来（面板有尺寸、波形画布 + 下侧时间标尺都在；不是白屏）',
+          syncUi.panel && syncUi.h > 300 && syncUi.w > 600 && syncUi.canvas && syncUi.canvasH >= 120,
           JSON.stringify(syncUi),
         )
         // adj1123：波形**上方**要有动态谱预览（会话异步建好 ⇒ 轮询等它出图）
