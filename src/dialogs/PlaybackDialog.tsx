@@ -918,7 +918,8 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
                 onClick={() => openModal('sync')}
                 title={syncCopy.title}
               >
-                <ToolIcon name="settings" size={14} />
+                {/* 没有"节拍器/对拍"这类图标（`public/icons/` 里没有），宁可不放图标，
+                    也不借用齿轮（`settings`）——那会让人以为点开的是设置 */}
                 {syncCopy.syncOpen}
               </button>
             )}
