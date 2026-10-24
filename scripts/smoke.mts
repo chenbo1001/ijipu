@@ -16223,6 +16223,27 @@ function runAdj594MeasureBeatsTests() {
   console.log('[125] measure beats validation vs meter (adj594)')
   const meterWarns = (src: string) => parseJpsRaw(src).errors.filter((e) => METER_WARN_RE.test(e.message))
 
+/**
+ * adj1147（用户 2026-10-25：「空小节通常是谱有错误，一般不会发生，可以在编辑器里给告警」）：
+ * 两个小节线之间一个带时值元素都没有 ⇒ 报 warning；行首/行尾那些 `|`、`||` 不许误报。
+ */
+const emptyBarWarns = (src: string) => parseJpsRaw(src).errors.filter((e) => /空小节/.test(e.message))
+check(
+  'adj1147 空小节给告警（`1 2 3 4 | | 1 2 3 4 |` ⇒ 报第 2 小节）',
+  (() => {
+    const w = emptyBarWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | | 1 2 3 4 |\n')
+    return w.length === 1 && /第 2 小节/.test(w[0].message) && w[0].severity === 'warning'
+  })(),
+  JSON.stringify(emptyBarWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | | 1 2 3 4 |\n').map((e) => e.message)),
+)
+check(
+  'adj1147 负对照：没有空小节、行首 `|`、行尾 `||`、`{jz}` 静默小节都不报空小节',
+  emptyBarWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 |\n').length === 0 &&
+    emptyBarWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: | 1 2 3 4 | 1 2 3 4 ||\n').length === 0 &&
+    emptyBarWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 0{jz 16} | 1 2 3 4 |\n').length === 0,
+  JSON.stringify(emptyBarWarns('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: | 1 2 3 4 | 1 2 3 4 ||\n').map((e) => e.message)),
+)
+
   // ① 纯函数：拍号解析 / 临时拍号解析 / 小节时值合计
   check(
     'adj594 `meterBeatsOf` 取分子（`4/4`→4、`6/8 (2/4)`→6、缺省→null）',
