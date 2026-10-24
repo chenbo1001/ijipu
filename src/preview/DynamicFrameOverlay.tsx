@@ -68,6 +68,8 @@ export function DynamicFrameOverlay() {
   const cardStyle = useUiStore((s) => s.dynamicCardStyle)
   const setDynamicCardStyle = useUiStore((s) => s.setDynamicCardStyle)
   const customCardStyle = useUiStore((s) => s.dynamicCardStyleCustom)
+  /** adj1135：进对拍台时要把相机位的预览音**停下来**（用户实报"合成音停不住、两路声音叠在一起"） */
+  const modal = useUiStore((s) => s.modal)
   /**
    * adj1089：平移方式虽然是**引擎读**的（`renderer.ts` 里取 `uiStore.getState().panMode`），
    * 但这里必须也订阅它并放进"重建会话"的依赖里 —— 否则用户在设置里换了平移方式，
@@ -293,6 +295,18 @@ export function DynamicFrameOverlay() {
   }, [on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, syncRev, paint])
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
+
+  /**
+   * adj1135（用户 2026-10-24 实报「合成音停不住、只能回试听里停」）：
+   * 打开对拍台时把**相机位的预览音**停下来——它是另一条音轨（伴奏 + 合成音混音），
+   * 不停的话会和台面里的播放叠在一起，而且台面的暂停按钮管不到它。
+   */
+  useEffect(() => {
+    if (modal !== 'sync') return
+    audioPlayerRef.current?.stop()
+    cancelAnimationFrame(rafRef.current)
+    setPlaying(false)
+  }, [modal])
 
   const tick = useCallback(
     (ts: number) => {

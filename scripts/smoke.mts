@@ -35656,6 +35656,30 @@ function runAdj1124Tests(): void {
       !/const beatMs = 500\b/.test(dialogSrcAdj),
     '',
   )
+  /**
+   * adj1135（用户 2026-10-24 实报「合成音停不住，只能回试听里停」「当前位置位数不一，整行一直晃」）：
+   *  ① 台面的合成音是 `await` 渲染的 ⇒ 必须有**代次令牌**，否则等回来时早被停了还 start；
+   *  ② 相机位的预览音在进台面时要停（那是另一条音轨，台面按钮管不到）；
+   *  ③ 读数用定长两位小数（`11:2.72`），不是 `2.7199999999999998`。
+   */
+  check(
+    'adj1135 台面：合成音用代次令牌防"停不掉"（`playGenRef` + `alive()` 判定）',
+    /playGenRef\.current \+= 1/.test(dialogSrcAdj) &&
+      /const alive = \(\) => playGenRef\.current === gen/.test(dialogSrcAdj) &&
+      /if \(!alive\(\)\) return/.test(dialogSrcAdj),
+    '',
+  )
+  const overlaySrcA = String(readFileSync('src/preview/DynamicFrameOverlay.tsx', 'utf8'))
+  check(
+    'adj1135 进对拍台时停掉相机位预览音（否则两路声音叠在一起）',
+    /modal !== 'sync'\) return/.test(overlaySrcA) && /audioPlayerRef\.current\?\.stop\(\)/.test(overlaySrcA),
+    '',
+  )
+  check(
+    'adj1135 当前位置读数定长（两位小数），不再出现 2.7199999999999998',
+    /barBeatLabelFixed/.test(dialogSrcAdj) && /\.toFixed\(2\)/.test(dialogSrcAdj),
+    '',
+  )
   const dragged = resizeSyncLayout(DEFAULT_SYNC_LAYOUT, 100, 60, 1440, 900)
   check(
     'adj1124 拖右下角：宽 +100；高 820+60=880 超过视口 ⇒ 夹到 876',

@@ -382,6 +382,23 @@ export function SyncDialog() {
   )
 
   /**
+   * adj1135（用户 2026-10-24 实报「当前位置位数不一，这一行一直晃」）：
+   * 读数用**定长**格式（拍号两位小数，`11:2.72`）——原来是"能省就省"的 `2.7199999999999998`，
+   * 宽度一会儿长一会儿短，后面几个控件就跟着左右跳。
+   */
+  const barBeatLabelFixed = useCallback(
+    (b: number): string => {
+      for (let i = barStartBeats.length - 1; i >= 0; i--) {
+        if (b >= barStartBeats[i] - 1e-6) {
+          return `${i + 1}:${(b - barStartBeats[i] + 1).toFixed(2)}`
+        }
+      }
+      return b.toFixed(2)
+    },
+    [barStartBeats],
+  )
+
+  /**
    * adj1133：把**音频时刻**换算成谱面时刻，并推给应用预览（`currentMs` ⇒ 高亮/色块跟着走）。
    * 顺带更新"当前位置"读数（`小节:拍`）。没对拍时按"谱面从音频 0 开始"的假设走。
    */
@@ -392,10 +409,10 @@ export function SyncDialog() {
       setCurrentMs(t)
       if (previewInfoRef.current) {
         const beat = t / scoreBeatMs
-        previewInfoRef.current.textContent = `${syncCopy.previewNow} ${barBeatLabel(beat)}（第 ${Math.floor(beat) + 1} 拍）`
+        previewInfoRef.current.textContent = `${syncCopy.previewNow} ${barBeatLabelFixed(beat)}（第 ${Math.floor(beat) + 1} 拍）`
       }
     },
-    [barBeatLabel, effFit, scoreBeatMs, setCurrentMs],
+    [barBeatLabelFixed, effFit, scoreBeatMs, setCurrentMs],
   )
 
   // ---------- 播放器（AudioContext + 手动循环，便于节拍器每圈重排） ----------
@@ -417,6 +434,11 @@ export function SyncDialog() {
   const clicksRef = useRef<OscillatorNode[]>([])
   /** 节拍器已经排到哪一刻（音频 ms） */
   const schedRef = useRef(0)
+  /**
+   * adj1135：播放"代次"。每次开播 +1；`stopSource()` 也 +1。
+   * 合成音渲染是 `await`，回来时若代次变了就说明用户已经停了 ⇒ 不许再 `start()`。
+   */
+  const playGenRef = useRef(0)
 
   const clearClicks = useCallback(() => {
     for (const o of clicksRef.current) {
@@ -443,6 +465,8 @@ export function SyncDialog() {
   }, [meterOn, loopOn])
 
   const stopSource = useCallback(() => {
+    // adj1135：让"正在渲染合成音"的那一路知道已经作废（否则它渲染完还会 start 出一条没人管的音轨）
+    playGenRef.current += 1
     for (const s of sourcesRef.current) {
       try {
         s.stop()
@@ -545,12 +569,22 @@ export function SyncDialog() {
         return
       }
       stopSource()
+      /** 代次令牌要在 `await` **之前**取（`stopSource` 也会 +1） */
+      const gen = (playGenRef.current += 1)
+      const alive = () => playGenRef.current === gen
       const ctx = ensureCtx()
       await ctx.resume()
+      if (!alive()) return
+      /**
+       * adj1135（用户 2026-10-24 实报「合成音停下来停不住，只能在试听里停」）：
+       * 合成音要**先渲染**（`await ensureSynthBuffer()`，可能几秒）。这段等待期间如果用户按了
+       * 暂停/关闭，`stopSource()` 跑的时候 `sourcesRef` 还是空的 ⇒ 之后再 `start()` 的那条
+       * 合成音**没人管**，只能靠别处停。现在用**代次令牌**：等到渲染完先看这一代还活着没，
+       * 死了就立刻取消；而且创建一条就立刻登记一条（不再攒到最后）。
+       */
       const from = Math.max(0, Math.min(fromMs, trim.endMs - 1))
       const mix = useSyncStore.getState().doc?.mix ?? { source: 'file' as const, accomp: 1, synth: 0.5 }
       const plan = mixPlanOf(mix)
-      const sources: AudioBufferSourceNode[] = []
       /**
        * adj1129（用户 2026-10-24：「添加终点后应在最后一拍里音量渐小至无声，以免停得太突兀」）：
        * 台面试听也在**结束前最后一拍**把音量线性压到 0（与出片音轨同一口径）。
@@ -576,11 +610,12 @@ export function SyncDialog() {
         src.connect(gain)
         gain.connect(ctx.destination)
         src.start(0, from / 1000)
-        sources.push(src)
+        sourcesRef.current.push(src)
       }
       // ② 合成音（按设定的合成音量；按拍速比例变速，才能跟伴奏同进）
       if (plan.playSynth) {
         const sb = await ensureSynthBuffer()
+        if (!alive()) return
         if (sb) {
           const fitForPreview = effFit ?? { beatMs: scoreBeatMs, offsetMs: 0 }
           const scoreStartSec = Math.max(0, sessionMsOfAudioMs(from, fitForPreview, scoreBeatMs)) / 1000
@@ -593,15 +628,14 @@ export function SyncDialog() {
           src.connect(gain)
           gain.connect(ctx.destination)
           src.start(0, Math.min(scoreStartSec, Math.max(0, sb.duration - 0.01)))
-          sources.push(src)
+          sourcesRef.current.push(src)
         }
       }
-      if (sources.length === 0) {
+      if (sourcesRef.current.length === 0) {
         setNotice(syncCopy.synthFailed)
         return
       }
-      sourcesRef.current = sources
-      srcRef.current = sources[0] ?? null
+      srcRef.current = sourcesRef.current[0] ?? null
       startRef.current = { at: ctx.currentTime, from }
       loopRef.current = loop ?? null
       playheadRef.current = from

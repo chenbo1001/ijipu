@@ -2300,6 +2300,13 @@ async function main() {
          */
         const scrollShown = await evalJs(c, `!!document.querySelector('.sync-scroll')`)
         const readoutBefore = await evalJs(c, `document.querySelector('.sync-view-readout')?.textContent ?? ''`)
+        // adj1135：当前位置必须是**定长**两位数（`11:2.72（第 42 拍）`），否则整行会左右晃
+        const posText = await evalJs(c, `document.querySelector('.sync-preview-pos')?.textContent?.trim() ?? ''`)
+        check(
+          'adj1135 当前位置读数定长（拍号两位小数、无浮点尾巴）',
+          /\d+:\d+\.\d{2}（第 \d+ 拍）/.test(posText) && !/\d{6,}/.test(posText),
+          JSON.stringify(posText),
+        )
         const thumbDragged = await dragBy('.sync-scroll-thumb', -80, 0)
         await sleep(350)
         const afterThumb = await evalJs(c, `document.querySelector('.sync-view-readout')?.textContent ?? ''`)

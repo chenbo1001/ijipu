@@ -6060,6 +6060,9 @@ span.ws-check {
 }
 
 .sync-preview-pos {
+  /* adj1135：定宽 + 等宽数字——读数一直是"11:2.72（第 42 拍）"这种长度，
+     宽度不再随数字位数跳，后面几个控件就不会左右晃 */
+  min-width: 230px;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
   color: var(--jp-text-primary);
