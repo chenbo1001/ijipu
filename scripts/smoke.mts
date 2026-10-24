@@ -140,7 +140,7 @@ import {
   zoomView,
 } from '../src/dialogs/syncRuler.ts'
 // adj1137：波形上方的音符格子排（纯几何）
-import { stripCellsOf, cellRectPct } from '../src/dialogs/noteStrip.ts'
+import { stripCellsOf, cellRectPct, barLabelsOf } from '../src/dialogs/noteStrip.ts'
 // adj1124：对拍台尺寸/分区高度/预览比例（纯函数 + L1）
 import {
   DEFAULT_SYNC_LAYOUT,
@@ -35782,6 +35782,39 @@ function runAdj1124Tests(): void {
         b === null &&
         c !== null && Math.abs(c.leftPct - 90) < 1e-9 && Math.abs(c.widthPct - 10) < 1e-9
       )
+    })(),
+    '',
+  )
+  /**
+   * adj1146（用户 2026-10-25：「第 20 小节没有号，我的意见是要有」）：
+   * 缺号（空小节等）补在**后一根小节线上**，号一个不少、但**不造假线**。
+   */
+  check(
+    'adj1146 缺号补在后一根线上（1,2,4 ⇒ 补 3 挂在第 2 根线上、stack=1）',
+    (() => {
+      const labels = barLabelsOf([0, 4, 8], (i) => [1, 2, 4][i])
+      return (
+        labels.length === 4 &&
+        labels.map((l) => l.no).join(',') === '1,2,3,4' &&
+        labels.find((l) => l.no === 3)?.beat === 8 &&
+        labels.find((l) => l.no === 3)?.stack === 1 &&
+        labels.find((l) => l.no === 4)?.stack === 0
+      )
+    })(),
+    '',
+  )
+  /**
+   * adj1146（用户同一条：「谱面中有些地方有临时 4/4 变 2/4，小节线也应跟随变化」）：
+   * 小节起点必须按**真实拍数**累加 —— 换拍号后每小节 2 拍（而不是硬编码 4 拍/小节）。
+   */
+  check(
+    'adj1146 换拍号后小节线跟随（4/4 两小节 + 2/4 两小节 ⇒ 起点 0,4,8,10 拍）',
+    (() => {
+      const pr = parseJps('V: 1.0\nB: 换拍号\nD: C\nP: 4/4\nQ: 1 2 3 4 | 1 2 3 4 |\nP: 2/4\nQ: 1 2 | 1 2 |\n')
+      const seq = buildPlaySequence(pr, layoutScore(pr, DUR_CFG), 60)
+      const beats = (seq.barStartsMs ?? []).map((ms) => ms / 1000)
+      console.log('[adj1146] 换拍号 小节起点(拍)', JSON.stringify(beats))
+      return beats.length >= 5 && beats[0] === 0 && Math.abs(beats[1] - 4) < 1e-6 && Math.abs(beats[2] - 8) < 1e-6 && Math.abs(beats[3] - 10) < 1e-6
     })(),
     '',
   )

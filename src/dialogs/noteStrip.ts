@@ -85,9 +85,43 @@ export function pitchHeightOf(midi: number | undefined, minMidi: number, maxMidi
 }
 
 /**
- * 一格在可见窗口里的位置（百分比 0~100）。
- * 完全在窗口外 ⇒ `null`（不渲染，省 DOM）；跨窗口边界的格子按边界裁。
+ * adj1146（用户 2026-10-25：「第 20 小节没有号……我的意见是要有」）：
+ * 把"小节起点 + 它的号"整理成**要画的标签**，并把**缺掉的号补回来**。
+ *
+ * 为什么会缺号（用户问「还有没其它情况会导致几个小节连在一起」）：
+ *  ① **空小节**（只有 `&` 修饰符 / 什么都没有）：播放走查是"按事件"记起点，一个事件都没有的小节
+ *     就没人给它记时刻 ⇒ 号被跳过（本谱 #20 就是这种）；
+ *  ② **间奏块**（`{jz N}` / `8{jz 16}`）：额外拍不产生小节线，几个小节会挤在同一段静默里；
+ *  ③ **重复记号**（`|/ ` 重复上一小节 / `|: :|` 反复段）：同一个小节号会出现两次（这是对的，不该去重）；
+ *  ④ **临时拍号**（`P: 2/4` 之后又回 4/4）：小节**长度**变了，但号的连续性不受影响
+ *     —— 只要按"每根小节线一个号"来数就对。
+ *
+ * 补号规则：`no` 比上一个大 1 以上 ⇒ 中间缺的号**挂在后一根线**上（同一 x，上下错开画），
+ * 这样"号一个不少"，但**不会凭空造出一条假的小节线**。
  */
+export interface BarLabel {
+  /** 小节号（1 起） */
+  no: number
+  /** 它挂在哪根小节线上（拍；与 `barStartBeats` 同一口径） */
+  beat: number
+  /** 同一根线上第几个（0 = 正常位置，>0 = 补号，往上错开） */
+  stack: number
+}
+
+export function barLabelsOf(beats: readonly number[], noOf: (i: number) => number): BarLabel[] {
+  const out: BarLabel[] = []
+  let prevNo = 0
+  for (let i = 0; i < beats.length; i++) {
+    const no = noOf(i)
+    if (no > prevNo + 1) {
+      // 缺号：都挂在这一根线上（不造线），按顺序往上叠
+      for (let k = prevNo + 1; k < no; k++) out.push({ no: k, beat: beats[i], stack: no - k })
+    }
+    out.push({ no, beat: beats[i], stack: 0 })
+    prevNo = Math.max(prevNo, no)
+  }
+  return out
+}
 export function cellRectPct(
   cell: { audioMs: number; widthMs: number },
   v0: number,

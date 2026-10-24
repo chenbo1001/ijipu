@@ -38,7 +38,7 @@ import { parseSyncDoc, mixPlanOf, joinPath, serializeSyncDoc, sidecarPathOf, syn
 import { readSidecarText, writeSidecarText, downloadSidecarText } from '../export/video/syncIo'
 import { listWorkspaces } from '../store/workspace'
 // adj1137：波形上方那条"音符格子排"（纯几何）
-import { cellRectPct, pitchHeightOf, stripCellsOf } from './noteStrip'
+import { barLabelsOf, cellRectPct, pitchHeightOf, stripCellsOf } from './noteStrip'
 import { canUseDynamicVideo } from '../export/video/capability'
 import { syncCopy } from '../brand/copy'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
@@ -367,6 +367,9 @@ export function SyncDialog() {
     (i: number): number => scoreSeq.barNos?.[i] ?? i + 1,
     [scoreSeq],
   )
+
+  /** adj1146：要画的小节号（缺号补在同一根线上；见 `noteStrip.ts` 的口径说明） */
+  const barLabels = useMemo(() => barLabelsOf(barStartBeats, barNoOf), [barStartBeats, barNoOf])
 
   /** adj1137（用户 2026-10-24 的想法）：主音符合成一条"格子排"，与波形共用同一时间轴 */
   const noteCells = useMemo(
@@ -1466,16 +1469,29 @@ export function SyncDialog() {
             style={{ height: `${Math.max(32, Math.round((layout.waveH * 3) / 4))}px` }}
             title={syncCopy.stripHint}
           >
-            {/* adj1141：小节线 + 小节号都画在**这一排**（亮色）；锚点解出来后同一根线在波形里也贯通 */}
+            {/* adj1141：小节线画在**这一排**（亮色），锚点解出来后同一根线在波形里也贯通
+                adj1146：小节号单独一层——把缺掉的号（空小节）补在同一根线上，号一个不少 */}
             {barStartBeats.map((b, i) => {
               const ms = stripFit.offsetMs + b * stripFit.beatMs
               const pct = ((ms - viewWin.v0) / viewWin.winMs) * 100
               if (pct < 0 || pct > 100) return null
+              return <div key={`bar-${i}`} className="sync-bar-line" style={{ left: `${pct}%` }} />
+            })}
+            {barLabels.map((lb, i) => {
               const every = viewWin.winMs > 90000 ? 8 : viewWin.winMs > 45000 ? 4 : viewWin.winMs > 15000 ? 2 : 1
+              // 补号一律显示；正常号按视野密度抽稀（但第 1 小节总显示）
+              if (lb.stack === 0 && (lb.no - 1) % every !== 0) return null
+              const ms = stripFit.offsetMs + lb.beat * stripFit.beatMs
+              const pct = ((ms - viewWin.v0) / viewWin.winMs) * 100
+              if (pct < 0 || pct > 100) return null
               return (
-                <div key={`bar-${i}`} className="sync-bar-line" style={{ left: `${pct}%` }}>
-                  {i % every === 0 && <span className="sync-bar-no">{barNoOf(i)}</span>}
-                </div>
+                <span
+                  key={`no-${lb.no}-${i}`}
+                  className={`sync-bar-no${lb.stack > 0 ? ' is-fill' : ''}`}
+                  style={{ left: `calc(${pct}% + 3px)`, top: `${1 + lb.stack * 11}px` }}
+                >
+                  {lb.no}
+                </span>
               )
             })}
             {stripCells.map((cell, i) => {
