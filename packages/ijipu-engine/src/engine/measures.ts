@@ -121,55 +121,10 @@ export function checkMeasureBeats(result: ParseResult): ParseError[] {
     // adj594：小节号**按声部累加**（不按行重来）——同一旋律折成多行 `Q:` 时，
     // 第二行的第一小节是「第 N+1 小节」而不是又从「第 1 小节」开始。
     let measureNo = cur.measureNo
-    /** adj1147：本行是否已经出现过"有内容的小节"（行首连续的 `|` 不算空小节） */
-    let sawContent = false
-    /** adj1147：等下一个有内容的小节出现时再报（避免行尾一堆 `||` 刷假告警） */
-    let pendingEmpty: { no: number; line: number; pos: number }[] = []
-    /** adj1147：本小节里的**非小节线 token 数**（`&dc` / `{jz}` / `@乐器@` 都算"有东西"，不算空小节） */
-    let barTokens = 0
 
-    const flush = (atBarline: boolean): void => {
-      /**
-       * adj1147（用户 2026-10-25：「空小节通常是谱有错误，一般不会发生，可以在编辑器里给告警」）：
-       * 两个小节线之间**一个带时值的元素都没有** ⇒ 报一条 warning（空小节）。
-       *
-       * 三条防误报：
-       *  ① 行首那些 `|`（换行后的续行、`||` 收尾、`|:` 反复记号）不算空小节 —— 只有
-       *     "前面已经出现过至少一个**有内容**的小节"之后，空小节才被记下来；
-       *  ② 行尾那段（`flush(false)`）永远不报：那是"闭合用的尾巴"，不是空小节；
-       *  ③ 报的时刻推迟到**下一个有内容的小节**出现时（`pendingEmpty`）——
-       *     这样行尾的连续 `||` 不会刷出一串假告警。
-       */
-      /**
-       * adj1147：只有**这一小节里连一个 token 都没有**才算"空小节"。
-       *
-       * 为什么不是"没有带时值的元素"：`| &dc |`（只有走向记号）、`| &zkh |`（只有括号）、
-       * `| @乐器@ |`、`| {jz 16} |`（间奏）这些**都不是空小节**，一报就会把
-       * 官方文档示例和真实谱面全刷成告警（实测：SYNTAX.md 示例 19 与一首真实谱都中招）。
-       */
-      if (measure.length === 0 && barTokens === 0) {
-        if (!atBarline || !sawContent) return
-        measureNo += 1
-        pendingEmpty.push({ no: measureNo, line: line.pos.line, pos: prefixLen })
-        return
-      }
+    const flush = (): void => {
+      if (measure.length === 0) return
       measureNo += 1
-      if (pendingEmpty.length > 0) {
-        for (const p of pendingEmpty) {
-          out.push(
-            errAt(
-              `第 ${p.no} 小节没有任何音符或休止符（空小节）`,
-              p.line,
-              p.pos,
-              'warning',
-              '空小节通常是漏写了一个音：补上音符或休止符 `0`，或者删掉多余的 `|`；' +
-                '确实要留一段静默（间奏）就写成 `0{jz N}`',
-            ),
-          )
-        }
-        pendingEmpty = []
-      }
-      sawContent = true
       const sum = measureBeatsOf(measure)
       /**
        * adj595（用户要求）：**首小节只查"整数拍"**——弱起（不完全小节）可以短于拍号
@@ -208,20 +163,11 @@ export function checkMeasureBeats(result: ParseResult): ParseError[] {
       }
       measure = []
       firstTok = null
-      barTokens = 0
     }
 
     for (const t of line.tokens) {
       if (t.kind === 'barline') {
-        /**
-         * adj1147：**结构性的小节线不算"小节边界上的空小节"**。
-         *
-         * 实测反例（`docs/SYNTAX.md` 示例三）：`… |] |: 6 7 1' 2' :|` 里 `|]`（跳房子结束）与 `|:`
-         * （反复开始）**紧挨着**，中间当然没有任何音符 —— 那是记号的排列，不是空小节。
-         * 只有普通小节线 `|` / `||` 旁边的空档才可能是"漏写了音"。
-         */
-        const structural = t.type === '|:' || t.type === ':|' || t.type === ':|:' || t.type === '|/'
-        flush(!structural)
+        flush()
         // 这条小节线上的临时拍号：从**下一个小节**开始生效（与 docs/SYNTAX.md 示例一致）
         const inline = inlineMeterBeats(t.comment)
         if (inline !== null) {
@@ -230,12 +176,11 @@ export function checkMeasureBeats(result: ParseResult): ParseError[] {
         }
         continue
       }
-      barTokens += 1
       if (!isDurational(t)) continue // 记号/括号/乐器/临时段不参与小节时值
       if (!firstTok) firstTok = t
       measure.push(t)
     }
-    flush(false) // 行尾未闭合的小节（不当作"空小节"报）
+    flush() // 行尾未闭合的小节
     voiceMeter.set(line.voice, { beats, text: meterText, measureNo })
   }
 
