@@ -1495,17 +1495,15 @@ export function SyncDialog() {
                     } as React.CSSProperties
                   }
                   title={`${barBeatLabel(cell.beat)} · ${audioClockOf(cell.audioMs)}`}
-                  onClick={() => {
-                    stopSource()
+                  onClick={(e) => {
                     /**
-                     * adj1141（用户实报「格子悬停提示的音符位是对的，但点进去预览显示的是别的音符」）：
-                     * 以前这里 `Math.max(0, …)` 把**负时刻**夹成 0 —— 当锚点把谱面推到音频 0 之前时
-                     * （如 `5:1.5 @ 3.9s`），前半段格子的音频时刻都是负数，点下去全被夹到 0，
-                     * 预览就永远停在"音频 0 那一拍"。播放头允许是负数：波形上会被裁到左边缘，
-                     * 但**预览按拍位走**，才和格子的提示一致。
+                     * adj1145（用户 2026-10-25：「点格子不对，点波形同一位置就对了」）：
+                     * 以前点格子用的是**格子自己的起始时刻**（`cell.audioMs`），而点波形用的是
+                     * **鼠标那一像素对应的时刻**。两者在"格子很长 / 格子起点被窗口裁掉 / 多个格子挤在一起"
+                     * 时会差半拍甚至一拍 —— 用户看到的就是"点格子跳到旁边那个音"。
+                     * 现在格子直接复用波形那套换算（同一个 `msOfClientX`），点哪儿就是哪儿。
                      */
-                    playheadRef.current = audio ? Math.min(cell.audioMs, durMs) : cell.audioMs
-                    drawRef.current()
+                    seekTo(msOfClientX(e.clientX), false)
                   }}
                 />
               )

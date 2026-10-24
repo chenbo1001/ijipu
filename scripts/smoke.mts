@@ -35802,10 +35802,14 @@ function runAdj1124Tests(): void {
       Math.abs(sessionMsOfAudioMs(negCells[1].audioMs, fitNeg, scoreBeatMsJ65) - 20 * scoreBeatMsJ65) < 1e-6,
     JSON.stringify(negCells.map((c) => Math.round(c.audioMs))),
   )
+  /**
+   * adj1145（用户实报「点格子跳到旁边那个音，点波形同一位置就对了」）：
+   * 格子必须走**波形那套**换算（`msOfClientX`），不许再用格子自己的起始时刻。
+   */
   check(
-    'adj1141 点格子不再把负时刻夹成 0（源码级：不许 `Math.max(0, Math.min(cell.audioMs`）',
-    !/Math\.max\(0, Math\.min\(cell\.audioMs/.test(dialogSrcAdj) &&
-      /playheadRef\.current = audio \? Math\.min\(cell\.audioMs, durMs\) : cell\.audioMs/.test(dialogSrcAdj),
+    'adj1145 点格子复用波形的换算（`seekTo(msOfClientX(...))`，不再用 `cell.audioMs`）',
+    /seekTo\(msOfClientX\(e\.clientX\), false\)/.test(dialogSrcAdj) &&
+      !/playheadRef\.current = audio \? Math\.min\(cell\.audioMs/.test(dialogSrcAdj),
     '',
   )
   /**
