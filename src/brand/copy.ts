@@ -1351,6 +1351,9 @@ export const syncCopy = {
   tapTitle: '这一拍是谱面的哪一处？',
   barLabel: '小节',
   beatLabel: '拍',
+  /** adj1130：谱位是 1 起（与标记段 / `--from 27:3` 同一口径） */
+  beatPosHint: '小节:拍都从 1 数（第 1 小节第 1 拍 = 1:1）',
+  beatPosInvalid: '小节和拍都从 1 开始：第 1 小节第 1 拍请写 1:1（写 0 会算到上一小节最后一拍）',
   tapConfirm: '记下',
   tapCancel: '取消',
   rewind: '回退 3 秒重听',

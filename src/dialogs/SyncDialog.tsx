@@ -885,6 +885,15 @@ export function SyncDialog() {
 
   const confirmTap = () => {
     if (!pending) return
+    /**
+     * adj1130（用户 2026-10-24 问「第 1 小节第 1 拍写 1:1 还是 1:0」）：
+     * 谱位是 **1 起**（与标记段、`--from 27:3` 同一套口径）⇒ 第 1 小节第 1 拍 = `1:1`。
+     * 写 0 会算到**上一小节的最后一拍**去（错得还很像样），所以这里直接挡住并说清怎么写。
+     */
+    if (!Number.isFinite(bar) || !Number.isFinite(beat) || bar < 1 || beat < 1) {
+      setNotice(syncCopy.beatPosInvalid)
+      return
+    }
     const b = beatOfBarBeat(bar, beat)
     if (b === null) {
       setNotice(`谱面没有第 ${bar} 小节`)
@@ -1415,6 +1424,8 @@ export function SyncDialog() {
             <span className="sync-dim">
               {fmtSec(pending.audioMs)} → {bar}:{beat}
             </span>
+            {/* adj1130：把"1 起"写在这儿，省得猜 1:0 还是 1:1 */}
+            <span className="sync-dim">{syncCopy.beatPosHint}</span>
             <button type="button" className="btn" onClick={confirmTap}>
               {syncCopy.tapConfirm}
             </button>
