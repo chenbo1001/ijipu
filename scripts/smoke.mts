@@ -35592,8 +35592,8 @@ function runAdj1124Tests(): void {
   )
   const dragged = resizeSyncLayout(DEFAULT_SYNC_LAYOUT, 100, 60, 1440, 900)
   check(
-    'adj1124 拖右下角：宽高各自加位移，并取消最大化',
-    dragged.w === 1340 && dragged.h === 820 && dragged.maximized === false,
+    'adj1124 拖右下角：宽 +100；高 820+60=880 超过视口 ⇒ 夹到 876',
+    dragged.w === 1340 && dragged.h === 876 && dragged.maximized === false,
     JSON.stringify({ w: dragged.w, h: dragged.h }),
   )
   check(
