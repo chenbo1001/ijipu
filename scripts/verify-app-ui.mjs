@@ -2510,6 +2510,54 @@ async function main() {
           cellRect !== null && afterCell !== beforeCell,
           JSON.stringify({ beforeCell, afterCell }),
         )
+        /**
+         * adj1143（用户 2026-10-24）：「音符格子条也要跟波形一样响应滚轮和 Shift+滚轮」。
+         * 把鼠标放在**格子条**上滚（不是波形），视野与读数都要跟着动。
+         */
+        const stripCenter = await evalJs(
+          c,
+          `(() => {
+            const el = document.querySelector('[data-sync="note-strip"]')
+            if (!el) return null
+            const r = el.getBoundingClientRect()
+            return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
+          })()`,
+        )
+        const spanBeforeStripWheel = await evalJs(c, `document.querySelector('[data-sync="view"]')?.value ?? '?'`)
+        if (stripCenter) {
+          await c.send('Input.dispatchMouseEvent', {
+            type: 'mouseWheel',
+            x: stripCenter.x,
+            y: stripCenter.y,
+            deltaX: 0,
+            deltaY: -120,
+          })
+        }
+        await sleep(400)
+        const spanAfterStripWheel = await evalJs(c, `document.querySelector('[data-sync="view"]')?.value ?? '?'`)
+        check(
+          'adj1143 音符格子条上滚轮也能缩放（视野长度变了，和波形同一套）',
+          stripCenter !== null && spanAfterStripWheel !== spanBeforeStripWheel,
+          JSON.stringify({ spanBeforeStripWheel, spanAfterStripWheel }),
+        )
+        const readBeforeStripPan = await evalJs(c, `document.querySelector('.sync-view-readout')?.textContent?.trim() ?? ''`)
+        if (stripCenter) {
+          await c.send('Input.dispatchMouseEvent', {
+            type: 'mouseWheel',
+            x: stripCenter.x,
+            y: stripCenter.y,
+            deltaX: 0,
+            deltaY: 120,
+            modifiers: 8, // Shift
+          })
+        }
+        await sleep(400)
+        const readAfterStripPan = await evalJs(c, `document.querySelector('.sync-view-readout')?.textContent?.trim() ?? ''`)
+        check(
+          'adj1143 音符格子条上 Shift+滚轮也能左右平移（读数左缘变了）',
+          readAfterStripPan !== readBeforeStripPan,
+          JSON.stringify({ readBeforeStripPan, readAfterStripPan }),
+        )
 
         /**
          * adj1128（用户 2026-10-24 实报的三条）：

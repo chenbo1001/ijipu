@@ -133,6 +133,8 @@ export function SyncDialog() {
   const dragRef = useRef<{ kind: 'panel' | 'preview' | 'wave'; x: number; y: number; base: SyncLayout } | null>(null)
 
   const wrapRef = useRef<HTMLDivElement | null>(null)
+  /** adj1143：格子条 + 波形的公共容器（滚轮缩放/平移挂在它上面，两排都能用） */
+  const groupRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const previewInfoRef = useRef<HTMLSpanElement | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
@@ -1128,10 +1130,15 @@ export function SyncDialog() {
   /**
    * 滚轮缩放：**保持鼠标那一处的时刻在屏幕上不动**。
    * 用原生监听（React 的 wheel 是被动事件，`preventDefault` 无效，页面会跟着一起滚）。
+   *
+   * adj1143（用户 2026-10-24）：「音符格子条也要跟波形一样响应滚轮」——
+   * 所以监听挂在**两排的公共容器** `.sync-wave-group` 上（格子条 + 波形都算），
+   * 水平方向的换算仍用波形画布的矩形（它和容器同宽）。
    */
   useEffect(() => {
+    const group = groupRef.current
     const c = canvasRef.current
-    if (!c) return
+    if (!group || !c) return
     const onWheelNative = (e: WheelEvent) => {
       /**
        * adj1131（用户 2026-10-24）：
@@ -1160,8 +1167,8 @@ export function SyncDialog() {
         return zoomView(v, durMs, e.deltaY > 0 ? 1.25 : 0.8, anchor)
       })
     }
-    c.addEventListener('wheel', onWheelNative, { passive: false })
-    return () => c.removeEventListener('wheel', onWheelNative)
+    group.addEventListener('wheel', onWheelNative, { passive: false })
+    return () => group.removeEventListener('wheel', onWheelNative)
   }, [durMs])
 
   /** 以播放头为中心缩放（键盘 `+` / `-` 用） */
@@ -1416,7 +1423,7 @@ export function SyncDialog() {
 
         {/* adj1137：音符格子排（在波形**上面**，与波形同一时间轴、同步缩放；点一格跳过去）
             adj1142：和波形包在同一个 `gap:0` 的组里，两排之间没有缝；高度=波形 1/2 */}
-        <div className="sync-wave-group">
+        <div className="sync-wave-group" ref={groupRef}>
         {stripCells.length > 0 && (
           <div
             className="sync-notes"
