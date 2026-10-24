@@ -819,31 +819,6 @@ export function SyncDialog() {
           </button>
         </div>
 
-        <div className="sync-row">
-          <span className="sync-label">{syncCopy.audioLabel}</span>
-          {audio ? (
-            <span className="sync-name">
-              {doc.audio} · {fmtSec(durMs)}
-            </span>
-          ) : (
-            <span className="sync-name sync-dim">
-              {doc.audio !== '' ? `${syncCopy.audioMissing}：${doc.audio}` : syncCopy.noAudio}
-            </span>
-          )}
-          <input ref={fileRef} type="file" accept="audio/*,.mp3,.m4a,.wav,.flac" className="sync-file" onChange={(e) => void onPickAudio(e)} />
-          <button type="button" className="btn" disabled={decodeState === 'busy'} onClick={() => fileRef.current?.click()}>
-            {audio ? syncCopy.repickAudio : syncCopy.pickAudio}
-          </button>
-          {decodeState === 'busy' && <span className="sync-dim">{syncCopy.decoding}</span>}
-          <span className="sync-grow" />
-          <button type="button" className="btn" onClick={() => (playing ? stopSource() : void startPlayback(playheadRef.current))} disabled={!audio}>
-            {playing ? syncCopy.pause : syncCopy.play}
-          </button>
-          <button type="button" className="btn" onClick={tap} disabled={!audio}>
-            {syncCopy.tap}
-          </button>
-        </div>
-
         {/* adj1123/adj1124：波形**上方**的动态谱预览；高度可拖（分隔条），比例可切（16:9 / 9:16 / 1:1） */}
         <div className="sync-preview" style={{ height: `${layout.previewH}px` }}>
           <div className="sync-preview-box">
@@ -873,8 +848,35 @@ export function SyncDialog() {
             <div className="sync-dim">{syncCopy.previewHint}</div>
           </div>
         </div>
-        {/* 预览 ↔ 波形：往上拖 = 预览变高，波形不动 */}
+        {/* 预览 ↔ 下方：往上拖 = 预览变高（下面整体跟着平移） */}
         <div className="sync-split" onPointerDown={startDrag('preview')} title={syncCopy.splitPreviewHint} />
+
+        {/* adj1125（用户 2026-10-24）：伴奏与播放/打点**放在预览与波形之间**——关联操作就近，
+            上面是"看谱"、下面是"听音"，这一排就是两者的交接处 */}
+        <div className="sync-row">
+          <span className="sync-label">{syncCopy.audioLabel}</span>
+          {audio ? (
+            <span className="sync-name">
+              {doc.audio} · {fmtSec(durMs)}
+            </span>
+          ) : (
+            <span className="sync-name sync-dim">
+              {doc.audio !== '' ? `${syncCopy.audioMissing}：${doc.audio}` : syncCopy.noAudio}
+            </span>
+          )}
+          <input ref={fileRef} type="file" accept="audio/*,.mp3,.m4a,.wav,.flac" className="sync-file" onChange={(e) => void onPickAudio(e)} />
+          <button type="button" className="btn" disabled={decodeState === 'busy'} onClick={() => fileRef.current?.click()}>
+            {audio ? syncCopy.repickAudio : syncCopy.pickAudio}
+          </button>
+          {decodeState === 'busy' && <span className="sync-dim">{syncCopy.decoding}</span>}
+          <span className="sync-grow" />
+          <button type="button" className="btn" onClick={() => (playing ? stopSource() : void startPlayback(playheadRef.current))} disabled={!audio}>
+            {playing ? syncCopy.pause : syncCopy.play}
+          </button>
+          <button type="button" className="btn" onClick={tap} disabled={!audio}>
+            {syncCopy.tap}
+          </button>
+        </div>
 
         <div ref={wrapRef} className="sync-wave">
           <canvas ref={canvasRef} onClick={onWaveClick} />

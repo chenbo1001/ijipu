@@ -2153,6 +2153,26 @@ async function main() {
         )
         check('adj1123 波形上方有动态谱预览（会话建好、画布 1920×1080 已出图）', previewReady)
 
+        // adj1125（用户 2026-10-24）：伴奏 + 播放/打点 必须落在**预览与波形之间**（关联操作就近）
+        const orderCheck = await evalJs(
+          c,
+          `(() => {
+            const top = (el) => (el ? Math.round(el.getBoundingClientRect().top) : -1)
+            const audioRow = [...document.querySelectorAll('.sync-panel > .sync-row')].find((el) => el.textContent.includes('伴奏'))
+            return {
+              preview: top(document.querySelector('.sync-preview')),
+              audio: top(audioRow),
+              wave: top(document.querySelector('.sync-wave')),
+              label: audioRow ? audioRow.innerText.replace(/\\n/g, ' ').slice(0, 20) : '',
+            }
+          })()`,
+        )
+        check(
+          'adj1125 伴奏/播放/打点夹在预览与波形之间（上：看谱；下：听音）',
+          orderCheck.preview > 0 && orderCheck.preview < orderCheck.audio && orderCheck.audio < orderCheck.wave,
+          JSON.stringify(orderCheck),
+        )
+
         /**
          * adj1124（用户 2026-10-24 实报「窗口无法调整大小，和最大化」「波形/预览高度要能调」
          * 「预览谱面要能调整显示比率」）：这些全是**交互**，源码断言证明不了，只能真拖。
