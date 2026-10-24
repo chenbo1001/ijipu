@@ -1009,6 +1009,27 @@ CLI `--sync/--no-sync/--audio`；调性提示。
 
 **还没做的两件小事**（P0 余项）：
 
+### 4-G 「长度不一致」的两种处理（用户 2026-10-24 拍板：**两个都做**）
+
+**判据**（都从已解算的 `fit` 得出，不改 sidecar 结构）：
+
+| 情况 | 判据 | 台面（已完成 adj1139） | 出片/相机位（**待做 adj1140**） |
+|---|---|---|---|
+| 伴奏比谱面长（前面多一段） | `fit.offsetMs − trim.startMs > 60ms` | 波形上淡黄标出「前奏（等谱面开始）」；播放到这段时谱面时刻夹在 0 ⇒ **球停在第一个音** | 需要 **pre-roll**：视频开头这段音频照放，谱面定格在第 1 拍（不显示片头卡），`totalMs += headWaitMs` |
+| 谱面比伴奏长（开头几拍要跳过） | `fit.offsetMs < 0` 且用户接受 | 「快捷对齐」按钮：**0 秒 = 谱面 N:M**（写一条 `audioMs = 0` 的锚点） | 已天然正确（`offsetMs < 0` 时谱面开头就在音频 0 之前，出片按 `trim` 从音频 0 开始、谱面早已开始） |
+
+**台面的两条快捷入口**（都是"打一条特殊锚点"，不引入新字段、命令行/插件都能读）：
+- 「谱面第 1 拍 = 当前播放头」⇒ `addAnchor({ beat: 0, audioMs: 播放头 })`；
+- 「0 秒 = 谱面 N:M」⇒ `addAnchor({ beat: beatOfBarBeat(N,M), audioMs: 0 })`。
+
+**adj1140 的 pre-roll 实现要点**（下一轮）：
+1. `createDynamicSession(..., { headWaitMs })`：把 `leadInMs` 与 `headWaitMs` 分开——
+   `headWaitMs` 段**不显示片头卡**，画面用 `draw(ctx, 0)`（谱面第一帧）+ 球原地跳；
+2. `renderer.ts` 的 `events.atMs += leadInMs` 之后再 `+= headWaitMs`，`totalMs` 同样加；
+3. 伴奏轨 `whenSec` 前移到 `trim.startMs`（不放过头段），`playbackRate` 不变；
+4. 断言：`offsetMs = 1200` 时 `totalMs` 比不等待长 1200、且 `draw(600)` 与 `draw(0)` 的色块位置相同（= 定格）。
+
+
 - 间奏块的**中性灰**：`playheadBaseOf` 加一个 `interlude` 色位，并让 `TimedRect`/`playheadTrack`
   透传 `interlude` 标记（纯显示改动）；
 - 片头卡的 `♩=实际（原谱 X）`：改 `renderer.ts` 的 `introMeta` 显示逻辑（**只在 sidecar 生效时**）。
