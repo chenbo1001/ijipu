@@ -1344,6 +1344,8 @@ export const syncCopy = {
   tipPick: '按空格播放，听到要打的那一下按 T',
   anchors: '锚点',
   noAnchors: '还没有锚点：播到能确认的那一拍按 T',
+  /** 右侧微调区的占位（左侧列表已经提示过"还没有锚点"，这里不重复同一句） */
+  selectAnchor: '选中左侧的锚点，这里可以 ±ms 微调、锁定、回退重听',
   anchorHint: '只有一条锚点：只调偏移，速度按谱面 J:',
   tap: 'T 打点',
   tapTitle: '这一拍是谱面的哪一处？',

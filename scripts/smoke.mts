@@ -126,6 +126,8 @@ import {
 import { tempoLineOf } from '../src/export/video/cardLayout.ts'
 // adj1120：伴奏轨/波形/混音（纯函数：建轨计划、包络、逐采样相加）
 import { accompanimentPlan, mixSamples, waveformPeaks, ACCOMP_SAMPLE_RATE } from '../src/export/video/accompaniment.ts'
+// adj1122：波形下方时间标尺的刻度选择（纯函数）
+import { timeScaleOf, timeLabelOf } from '../src/dialogs/syncRuler.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES, gmVoiceRef, gmVoiceProgram, countScoreInstrumentSwitches, noteIdStringOf, slicePlaySequenceByNoteRange, resolvePracticeRange, slicePlaySequenceByRange, extendRangeEndToSlurEnd } from '@ijipu/engine/playback/index.ts'
@@ -21086,6 +21088,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1119Tests())
       // adj1120：伴奏轨建轨计划 / 波形包络 / 混音（纯函数）
       .then(() => runAdj1120Tests())
+      // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
+      .then(() => runAdj1122Tests())
       .then(() => {
         console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
         process.exit(failed === 0 ? 0 : 1)
@@ -35485,4 +35489,49 @@ function runAdj1120Tests(): void {
   )
   const silence = mixSamples([{ channels: a, gain: 0 }], 4, 2)
   check('adj1120 混音：增益 0 的轨不参与（全 0）', Array.from(silence[0]).every((v) => v === 0), '')
+}
+
+/**
+ * adj1122（用户 2026-10-24：「在音频波形图下侧显示时间标尺，以方便定位」）。
+ *
+ * 标尺该画多密是**纯数学**（可视时长 ÷ 像素宽），必须能在这里断言：
+ *  · 整曲（4 分钟 / 1200px）⇒ 15 秒一格、17 条；
+ *  · 30 秒档 ⇒ 2 秒一格；
+ *  · 放大到 3 秒 ⇒ 0.2 秒一格（次刻度 40ms）；
+ *  · 文字格式按步长决定小数位（`m:ss` / `m:ss.s` / `m:ss.ss`），且**不多写 0**。
+ */
+function runAdj1122Tests(): void {
+  console.log('[adj1122] 时间标尺：刻度选择与文字格式')
+  const all = timeScaleOf(0, 245300, 1200)
+  check(
+    'adj1122 整曲 4 分钟 / 1200px：15 秒一格、共 17 条、次刻度 3.75 秒',
+    all.stepMs === 15000 && all.ticks.length === 17 && all.minorMs === 3750 && all.ticks[0] === 0 && all.ticks[16] === 240000,
+    JSON.stringify({ step: all.stepMs, n: all.ticks.length, minor: all.minorMs }),
+  )
+  const half = timeScaleOf(0, 30000, 1200)
+  check(
+    'adj1122 30 秒档：2 秒一格、共 16 条',
+    half.stepMs === 2000 && half.ticks.length === 16 && half.ticks[1] === 2000,
+    JSON.stringify({ step: half.stepMs, n: half.ticks.length }),
+  )
+  const zoomed = timeScaleOf(60000, 63000, 1200)
+  check(
+    'adj1122 放大到 3 秒（从 1:00 起）：0.2 秒一格、次刻度 40ms、首刻度=60000',
+    zoomed.stepMs === 200 && zoomed.minorMs === 40 && zoomed.ticks[0] === 60000 && zoomed.ticks.length === 16,
+    JSON.stringify({ step: zoomed.stepMs, minor: zoomed.minorMs, first: zoomed.ticks[0] }),
+  )
+  check(
+    'adj1122 文字：整曲 `m:ss`；放大后按步长给 1~2 位小数（不多写 0）',
+    timeLabelOf(0, 15000) === '0:00' &&
+      timeLabelOf(65000, 1000) === '1:05' &&
+      timeLabelOf(60200, 200) === '1:00.2' &&
+      timeLabelOf(1250, 250) === '0:01.25',
+    [timeLabelOf(0, 15000), timeLabelOf(65000, 1000), timeLabelOf(60200, 200), timeLabelOf(1250, 250)].join(' | '),
+  )
+  check(
+    'adj1122 边界：负起点夹到 0、极窄画布不炸且刻度数有上限',
+    timeScaleOf(-5000, 10000, 60).ticks[0] === 0 &&
+      timeScaleOf(0, 3600000, 40).ticks.length <= 400,
+    String(timeScaleOf(0, 3600000, 40).ticks.length),
+  )
 }

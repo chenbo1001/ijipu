@@ -6093,13 +6093,17 @@ span.ws-check {
   cursor: crosshair;
 }
 
+/* adj1122：提示挪到**右上角**——下侧现在是时间标尺，压在标尺上会挡住刻度 */
 .sync-wave-hint {
   position: absolute;
-  left: 8px;
-  bottom: 6px;
+  right: 8px;
+  top: 6px;
   font-size: 11px;
   color: var(--jp-text-muted);
   pointer-events: none;
+  background: rgb(15 18 24 / 65%);
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 
 .sync-body {

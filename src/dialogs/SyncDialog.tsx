@@ -21,9 +21,13 @@ import { decodeAccompaniment, waveformPeaks } from '../export/video/accompanimen
 import { syncDocStale } from '../export/video/syncDoc'
 import { canUseDynamicVideo } from '../export/video/capability'
 import { syncCopy } from '../brand/copy'
+// adj1122：波形下方时间标尺的刻度选择（纯函数）
+import { timeLabelOf, timeScaleOf } from './syncRuler'
 
 /** 波形高度（CSS px） */
 const WAVE_H = 172
+/** 波形**下侧时间标尺**的高度（用户 2026-10-24：「在音频波形图下侧显示时间标尺，以方便定位」） */
+const RULER_H = 20
 /** 微调步长可选值（用户说"先定一步多长，精细后面再调"） */
 const STEPS = [1, 5, 10, 50] as const
 /** "回退几秒重听"：锚点前 3 秒 → 锚点后 2 秒 */
@@ -252,19 +256,27 @@ export function SyncDialog() {
     const wrap = wrapRef.current
     if (!c || !wrap || !doc) return
     const W = Math.max(200, wrap.clientWidth)
+    const totalH = WAVE_H + RULER_H
     const dpr = window.devicePixelRatio || 1
-    if (c.width !== Math.round(W * dpr) || c.height !== Math.round(WAVE_H * dpr)) {
+    if (c.width !== Math.round(W * dpr) || c.height !== Math.round(totalH * dpr)) {
       c.width = Math.round(W * dpr)
-      c.height = Math.round(WAVE_H * dpr)
+      c.height = Math.round(totalH * dpr)
       c.style.width = `${W}px`
-      c.style.height = `${WAVE_H}px`
+      c.style.height = `${totalH}px`
     }
     const ctx = c.getContext('2d')
     if (!ctx) return
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    ctx.clearRect(0, 0, W, WAVE_H)
+    // 每帧显式定一次文字基线：标尺用 `top`、其它标签用默认 `alphabetic`，
+    // 否则上下文状态会跨帧残留、下一帧的小节号整体下移（adj1122 实测）
+    ctx.textBaseline = 'alphabetic'
+    ctx.clearRect(0, 0, W, totalH)
+    // 波形区
     ctx.fillStyle = '#1f2329'
     ctx.fillRect(0, 0, W, WAVE_H)
+    // 标尺区（比波形再暗一档：一眼能分出"这是刻度条"）
+    ctx.fillStyle = '#171a1f'
+    ctx.fillRect(0, WAVE_H, W, RULER_H)
 
     // 可视窗口：整曲 / 30 秒（以播放头为中心）
     const winMs = zoom === '30' ? Math.min(30000, durMs) : durMs
@@ -358,14 +370,60 @@ export function SyncDialog() {
       }
     }
 
-    // 播放头
+    // ── 时间标尺（波形下侧，adj1122）────────────────────────────
+    const scale = timeScaleOf(v0, v0 + winMs, W, 64)
+    ctx.strokeStyle = 'rgba(255,255,255,0.10)'
+    ctx.beginPath()
+    ctx.moveTo(0, WAVE_H + 0.5)
+    ctx.lineTo(W, WAVE_H + 0.5)
+    ctx.stroke()
+    // 次刻度（不写字）
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)'
+    ctx.beginPath()
+    let minorN = 0
+    for (let t = Math.ceil(v0 / scale.minorMs) * scale.minorMs; t <= v0 + winMs && minorN < 2000; t += scale.minorMs, minorN++) {
+      const x = xOf(t)
+      ctx.moveTo(x, WAVE_H)
+      ctx.lineTo(x, WAVE_H + 3)
+    }
+    ctx.stroke()
+    // 主刻度 + 时间文字（`m:ss` / `m:ss.s`）
+    ctx.font = '10px system-ui, sans-serif'
+    ctx.textBaseline = 'top'
+    ctx.textAlign = 'left'
+    for (const t of scale.ticks) {
+      const x = xOf(t)
+      ctx.strokeStyle = 'rgba(255,255,255,0.42)'
+      ctx.beginPath()
+      ctx.moveTo(x, WAVE_H)
+      ctx.lineTo(x, WAVE_H + 7)
+      ctx.stroke()
+      const label = timeLabelOf(t, scale.stepMs)
+      const tw = ctx.measureText(label).width
+      // 首尾的标签往里收，别被画布边缘裁掉
+      const lx = Math.min(Math.max(2, x + 3), Math.max(2, W - tw - 2))
+      ctx.fillStyle = 'rgba(174,184,204,0.92)'
+      ctx.fillText(label, lx, WAVE_H + 7)
+    }
+    // 保留段的两端在标尺上再标一次（掐头去尾时对齐用）
+    ctx.strokeStyle = 'rgba(255,200,87,0.75)'
+    for (const ms of [trim.startMs, trim.endMs]) {
+      const x = xOf(ms)
+      if (x < 0 || x > W) continue
+      ctx.beginPath()
+      ctx.moveTo(x, WAVE_H)
+      ctx.lineTo(x, WAVE_H + RULER_H)
+      ctx.stroke()
+    }
+
+    // 播放头（贯穿波形与标尺）
     const px = xOf(playheadRef.current)
     if (px >= 0 && px <= W) {
       ctx.strokeStyle = '#ffffff'
       ctx.lineWidth = 1
       ctx.beginPath()
       ctx.moveTo(px, 0)
-      ctx.lineTo(px, WAVE_H)
+      ctx.lineTo(px, WAVE_H + RULER_H)
       ctx.stroke()
     }
 
@@ -749,7 +807,7 @@ export function SyncDialog() {
                 </div>
               </>
             ) : (
-              <div className="sync-dim sync-pad">{syncCopy.noAnchors}</div>
+              <div className="sync-dim sync-pad">{syncCopy.selectAnchor}</div>
             )}
 
             <div className="sync-row sync-row-tight">

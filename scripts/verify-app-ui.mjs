@@ -2133,14 +2133,15 @@ async function main() {
               h: r ? Math.round(r.height) : 0,
               w: r ? Math.round(r.width) : 0,
               canvas: !!cvs && cvs.width > 100,
-              hasTap: !!document.querySelector('.playback-actions') || true,
+              // adj1122：波形 172 + 下侧时间标尺 20 = 192（dpr 1 时）；这里只要"够高"就算有标尺
+              canvasH: cvs ? cvs.height : 0,
               text: p ? p.innerText.slice(0, 40) : '',
             }
           })()`,
         )
         check(
-          'adj1121 对拍台真的渲染出来（面板有尺寸、波形画布在；不是白屏）',
-          syncUi.panel && syncUi.h > 300 && syncUi.w > 600 && syncUi.canvas,
+          'adj1121/adj1122 对拍台真的渲染出来（面板有尺寸、波形画布 + 下侧时间标尺都在；不是白屏）',
+          syncUi.panel && syncUi.h > 300 && syncUi.w > 600 && syncUi.canvas && syncUi.canvasH >= 180,
           JSON.stringify(syncUi),
         )
         await evalJs(c, `[...document.querySelectorAll('.sync-head .btn')].find((b) => b.textContent.includes('关闭'))?.click(), true`)
