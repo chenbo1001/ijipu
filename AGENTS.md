@@ -167,6 +167,18 @@
     - 排版口径的完整说明见 `docs/SPACE-LAYOUT.md`（空间优先）与 `docs/ALIGNMENT-PRINCIPLES.md`
       （多声部/段层的上下对齐）。
 
+13. **【多端职责分工】重功能只在桌面壳**（用户 2026-10-24 定，**一直生效**；完整口径见工作区根 `AGENTS.md` §五）：
+
+    - **重**（视频导出、对拍、批量渲染、音色库扫描/下载…）⇒ **桌面壳实现**，网站 / Obsidian 插件
+      **不给入口**；**轻**（预览、简单编辑、格式化、导出源码）⇒ 三端都做，共用引擎与同一份渲染/编辑代码。
+    - **新增跨端功能：回复里先给「分类结论 + 处置清单 + 要拍板的地方」，再写代码**；边界模糊先问用户。
+    - 环境判定只走 `brand/env.ts`（`isTauriShell()` / `isHostFrame()` / `isDevBuild()`）；
+      整块功能的能力闸门放模块自己的 `capability.ts`（范例 `src/export/video/capability.ts` 的
+      `canUseDynamicVideo()` / `canGenerateVideo()`），入口与执行都读它。
+    - **入口在桌面专属块里 ≠ 功能自己有闸门**：例如对拍台（`dialogs/SyncDialog.tsx`）目前只靠
+      "入口在相机位里"被挡住（2026-10-24 现状）；一旦要分端，必须补显式闸门，别只靠隐蔽。
+    - 改某一端边界时：同步方案文档里的「平台」表 + 在 `docs/ERRORS-LOG.md` 记一条（要求 → 边界 → 验证）。
+
 ## 六、临时验证脚本
 - 命名 `scripts/_tmp_*.mts`，用后**必删**、禁提交 git；引擎验证优先并入 smoke
 - 只读 samples/、docs/ 真实文件；产物只写 `dist-smoke/`、`dist-preview/`，验证后清理
