@@ -35785,6 +35785,29 @@ function runAdj1124Tests(): void {
     })(),
     '',
   )
+  /**
+   * adj1141（用户实报「格子悬停提示的音符位对，但点进去预览显示的不是那个音符」）：
+   * 根因是点击时把**负的音频时刻** `Math.max(0, …)` 夹成了 0。用他那一刻的真实拟合
+   * （J: 65 + 一条 `16.5 @ 3.999s` 锚点 ⇒ offset = −11231.77）验证：
+   * 负偏移下，任何一格的音频时刻换回谱面时刻都**正好等于它自己的拍位**。
+   */
+  const scoreBeatMsJ65 = 60000 / 65
+  const fitNeg = { beatMs: scoreBeatMsJ65, offsetMs: 3999 - 16.5 * scoreBeatMsJ65 }
+  // 这条拟合下谱面第 13 拍才刚过音频 0（第 1..12 拍全在负时刻，本来就不该有格子）
+  const negCells = stripCellsOf([{ beat: 13, beats: 1 }, { beat: 20, beats: 1 }], fitNeg)
+  check(
+    'adj1141 负偏移：格子时刻 → 谱面时刻正好是它自己的拍（beat 13 ⇒ 13×拍长）',
+    negCells.length === 2 &&
+      Math.abs(sessionMsOfAudioMs(negCells[0].audioMs, fitNeg, scoreBeatMsJ65) - 13 * scoreBeatMsJ65) < 1e-6 &&
+      Math.abs(sessionMsOfAudioMs(negCells[1].audioMs, fitNeg, scoreBeatMsJ65) - 20 * scoreBeatMsJ65) < 1e-6,
+    JSON.stringify(negCells.map((c) => Math.round(c.audioMs))),
+  )
+  check(
+    'adj1141 点格子不再把负时刻夹成 0（源码级：不许 `Math.max(0, Math.min(cell.audioMs`）',
+    !/Math\.max\(0, Math\.min\(cell\.audioMs/.test(dialogSrcAdj) &&
+      /playheadRef\.current = audio \? Math\.min\(cell\.audioMs, durMs\) : cell\.audioMs/.test(dialogSrcAdj),
+    '',
+  )
   const dragged = resizeSyncLayout(DEFAULT_SYNC_LAYOUT, 100, 60, 1440, 900)
   check(
     'adj1124 拖右下角：宽 +100；高 820+60=880 超过视口 ⇒ 夹到 876',

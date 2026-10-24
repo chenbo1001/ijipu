@@ -838,7 +838,7 @@ export function SyncDialog() {
 
     // 小节刻度 + 拍刻度（有 effFit 才画：没有锚点时不知道音频位置）
     if (effFit) {
-      barStartBeats.forEach((b, i) => {
+      barStartBeats.forEach((b) => {
         const ms = effFit.offsetMs + b * effFit.beatMs
         if (ms < v0 || ms > v0 + winMs) return
         const x = xOf(ms)
@@ -848,16 +848,9 @@ export function SyncDialog() {
         ctx.lineTo(x, WAVE_H)
         ctx.stroke()
         /**
-         * 标注密度跟着视野走（adj1140）：整曲时每 8 小节标一次，放大后逐步变密，
-         * 免得 200 秒的曲子挤满数字、或放大后一个数字都没有。
-         * 数字就是**小节号**（`i + 1`，从 1 起），写在两条小节线之间那条线的右上方。
+         * adj1141（用户 2026-10-24）：**小节号挪到上面"音符格子"那排**（那里亮色、字更大），
+         * 波形这一侧只保留贯穿下来的竖线，不再写字。
          */
-        const labelEvery = winMs > 90000 ? 8 : winMs > 45000 ? 4 : winMs > 15000 ? 2 : 1
-        if (i % labelEvery === 0) {
-          ctx.fillStyle = 'rgba(160,210,255,0.9)'
-          ctx.font = '10px system-ui, sans-serif'
-          ctx.fillText(String(i + 1), x + 3, 12)
-        }
       })
     }
 
@@ -1425,9 +1418,21 @@ export function SyncDialog() {
           <div
             className="sync-notes"
             data-sync="note-strip"
-            style={{ height: `${Math.max(18, Math.round(layout.waveH / 4))}px` }}
+            style={{ height: `${Math.max(24, Math.round(layout.waveH / 2))}px` }}
             title={syncCopy.stripHint}
           >
+            {/* adj1141：小节线 + 小节号都画在**这一排**（亮色）；锚点解出来后同一根线在波形里也贯通 */}
+            {barStartBeats.map((b, i) => {
+              const ms = stripFit.offsetMs + b * stripFit.beatMs
+              const pct = ((ms - viewWin.v0) / viewWin.winMs) * 100
+              if (pct < 0 || pct > 100) return null
+              const every = viewWin.winMs > 90000 ? 8 : viewWin.winMs > 45000 ? 4 : viewWin.winMs > 15000 ? 2 : 1
+              return (
+                <div key={`bar-${i}`} className="sync-bar-line" style={{ left: `${pct}%` }}>
+                  {i % every === 0 && <span className="sync-bar-no">{i + 1}</span>}
+                </div>
+              )
+            })}
             {stripCells.map((cell, i) => {
               const rect = cellRectPct(cell, viewWin.v0, viewWin.winMs)
               if (rect === null) return null
@@ -1440,7 +1445,14 @@ export function SyncDialog() {
                   title={`${barBeatLabel(cell.beat)} · ${audioClockOf(cell.audioMs)}`}
                   onClick={() => {
                     stopSource()
-                    playheadRef.current = Math.max(0, Math.min(cell.audioMs, durMs))
+                    /**
+                     * adj1141（用户实报「格子悬停提示的音符位是对的，但点进去预览显示的是别的音符」）：
+                     * 以前这里 `Math.max(0, …)` 把**负时刻**夹成 0 —— 当锚点把谱面推到音频 0 之前时
+                     * （如 `5:1.5 @ 3.9s`），前半段格子的音频时刻都是负数，点下去全被夹到 0，
+                     * 预览就永远停在"音频 0 那一拍"。播放头允许是负数：波形上会被裁到左边缘，
+                     * 但**预览按拍位走**，才和格子的提示一致。
+                     */
+                    playheadRef.current = audio ? Math.min(cell.audioMs, durMs) : cell.audioMs
                     drawRef.current()
                   }}
                 />

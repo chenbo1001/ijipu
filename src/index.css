@@ -6163,22 +6163,45 @@ span.ws-check {
   background: rgb(128 134 148 / 92%);
 }
 
-/* adj1137：波形上方的音符格子排（与波形同一时间轴、同步缩放） */
+/* adj1137：波形上方的音符格子排（与波形同一时间轴、同步缩放）
+   adj1141：紧贴波形（间距 0）、高度 = 波形 1/2（内联给），里面还画小节线和小节号 */
 .sync-notes {
   position: relative;
   flex: 0 0 auto;
   height: 16px;
-  margin-bottom: 2px;
+  margin-bottom: 0;
   border: 1px solid var(--jp-border);
-  border-radius: 4px;
-  background: #171a1f;
+  border-bottom: 0;
+  border-radius: 4px 4px 0 0;
+  background: #14171c;
   overflow: hidden;
+}
+
+/* 小节线：在这一排里亮色、带序号，并（有拟合时）在波形里同一条线向下贯通 */
+.sync-bar-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgb(150 210 255 / 80%);
+  pointer-events: none;
+}
+
+.sync-bar-no {
+  position: absolute;
+  top: 1px;
+  left: 3px;
+  font-size: 10px;
+  line-height: 12px;
+  color: rgb(196 228 255 / 95%);
+  white-space: nowrap;
 }
 
 .sync-note-cell {
   position: absolute;
-  top: 3px;
-  bottom: 3px;
+  /* 上面留出序号那一条（10px 字 + 2px），下面贴边 */
+  top: 14px;
+  bottom: 2px;
   padding: 0;
   border: 0;
   border-left: 1px solid rgb(15 18 24 / 85%);
