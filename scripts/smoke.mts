@@ -142,7 +142,6 @@ import {
 // adj1124：对拍台尺寸/分区高度/预览比例（纯函数 + L1）
 import {
   DEFAULT_SYNC_LAYOUT,
-  PREVIEW_ZOOMS,
   loadSyncLayout,
   normalizeSyncLayout,
   resizePreviewH,
@@ -35617,7 +35616,7 @@ function runAdj1124Tests(): void {
   const d = normalizeSyncLayout(DEFAULT_SYNC_LAYOUT, 1440, 900)
   check(
     'adj1124 默认值原样通过（窗口够大时不缩放）',
-    d.w === 1240 && d.h === 820 && d.waveH === 172 && d.previewH === 230 && d.previewZoom === 1,
+    d.w === 1240 && d.h === 820 && d.waveH === 172 && d.previewH === 230,
     JSON.stringify(d),
   )
   const huge = normalizeSyncLayout({ ...DEFAULT_SYNC_LAYOUT, w: 5000, h: 5000 }, 1440, 900)
@@ -35638,12 +35637,11 @@ function runAdj1124Tests(): void {
     overflow.previewH === 120,
     JSON.stringify({ h: overflow.h, wave: overflow.waveH, preview: overflow.previewH }),
   )
+  // adj1133：预览改用应用自己的 PreviewPane ⇒ 台面布局里不再有 previewZoom（缩放走顶栏那个偏好）
   check(
-    'adj1124/adj1127 预览缩放夹紧：0.1 ⇒ 0.5、99 ⇒ 3、非数字 ⇒ 1（不是"16:9 那种比例"）',
-    normalizeSyncLayout({ ...DEFAULT_SYNC_LAYOUT, previewZoom: 0.1 }, 1440, 900).previewZoom === 0.5 &&
-      normalizeSyncLayout({ ...DEFAULT_SYNC_LAYOUT, previewZoom: 99 }, 1440, 900).previewZoom === 3 &&
-      normalizeSyncLayout({ ...DEFAULT_SYNC_LAYOUT, previewZoom: Number.NaN }, 1440, 900).previewZoom === 1,
-    '',
+    'adj1133 台面布局里没有 previewZoom 字段（缩放只有一个来源：顶栏的 `ijipu.previewZoom`）',
+    !('previewZoom' in DEFAULT_SYNC_LAYOUT) && !('previewZoom' in d),
+    JSON.stringify(Object.keys(DEFAULT_SYNC_LAYOUT)),
   )
   const dragged = resizeSyncLayout(DEFAULT_SYNC_LAYOUT, 100, 60, 1440, 900)
   check(
@@ -35746,10 +35744,5 @@ function runAdj1127Tests(): void {
     scrollThumb(VIEW_ALL, dur).visible === false &&
       scrollThumb(VIEW_ALL, dur).widthPct === 100,
     JSON.stringify(scrollThumb(VIEW_ALL, dur)),
-  )
-  check(
-    'adj1127 预览缩放默认 1×、档位里含 2×（下拉用）',
-    DEFAULT_SYNC_LAYOUT.previewZoom === 1 && PREVIEW_ZOOMS.includes(2),
-    PREVIEW_ZOOMS.join(','),
   )
 }

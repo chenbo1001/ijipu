@@ -20,13 +20,13 @@ import {
   layoutScore,
   residualBeatsOf,
   sessionMsOfAudioMs,
-  type DynamicPresetId,
   type SyncAnchor,
 } from '@ijipu/engine'
 import { useDocStore } from '../store/docStore'
 import { useSyncStore } from '../store/syncStore'
 import { useUiStore } from '../store/uiStore'
-import { createDynamicSession, type DynamicSession } from '../export/video/renderer'
+// adj1133：预览直接用应用自己的预览（排版/渲染/高亮/缩放/滚动都不再自己造）
+import { PreviewPane } from '../preview/PreviewPane'
 import { renderToAudioBuffer } from '../export/audio'
 import { createHqCache, resolveHqBank } from '../playback/spessaCache'
 import { resolveActiveLibrary } from '../playback/spessaSynthBackend'
@@ -50,9 +50,8 @@ import {
   zoomView,
   type WaveView,
 } from './syncRuler'
-// adj1124：台面尺寸/分区高度/预览比例（可调整、存 L1）
+// adj1124：台面尺寸/分区高度（可调整、存 L1）
 import {
-  PREVIEW_ZOOMS,
   loadSyncLayout,
   normalizeSyncLayout,
   resizePreviewH,
@@ -91,6 +90,12 @@ export function SyncDialog() {
   const save = useSyncStore((s) => s.save)
   const clear = useSyncStore((s) => s.clear)
   const replaceDoc = useSyncStore((s) => s.replaceDoc)
+  /** adj1133：预览直接用应用的预览 ⇒ 位置/色块走 docStore 的既有通道 */
+  const setCurrentMs = useDocStore((s) => s.setCurrentMs)
+  const setPlayheadTrack = useDocStore((s) => s.setPlayheadTrack)
+  /** adj1133：缩放跟顶栏同一个偏好（`ijipu.previewZoom`），不再自己造一套 */
+  const previewZoom = useUiStore((s) => s.previewZoom)
+  const setPreviewZoom = useUiStore((s) => s.setPreviewZoom)
   /** adj1128：保存要写同目录的 sidecar —— 只有桌面壳打开的 `.jps` 才有绝对路径 */
   const nativePath = useDocStore((s) => s.nativePath)
   /** adj1131：从**工作区**打开的谱没有 `nativePath`（只有 `binding`）——保存也要能落到磁盘 */
@@ -100,8 +105,7 @@ export function SyncDialog() {
   const [sel, setSel] = useState(0)
   const [meterOn, setMeterOn] = useState(false)
   const [loopOn, setLoopOn] = useState(true)
-  const [stepMs, setStepMs] = useState<number>(5)
-  /**
+  const [stepMs, setStepMs] = useState<number>(5)  /**
    * adj1126（用户 2026-10-24：「波形也要能缩放，单位宽度上显示的波形时长，默认整曲」）：
    * 视野 = `{spanMs, startMs}`；**`spanMs = 0` 就是整曲**（默认）。
    * 滚轮缩放、拖动平移、`0` 回整曲；刻度/播放头/点击定位全部走同一个 `viewWindow` 口径。
@@ -125,11 +129,7 @@ export function SyncDialog() {
 
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  /** adj1123：波形上方的**动态谱预览**（按谱面 J: 建一次，对拍只按比例缩放） */
-  const previewRef = useRef<HTMLCanvasElement | null>(null)
-  const previewSessionRef = useRef<DynamicSession | null>(null)
   const previewInfoRef = useRef<HTMLSpanElement | null>(null)
-  const [previewState, setPreviewState] = useState<'building' | 'ready' | 'error'>('building')
   const fileRef = useRef<HTMLInputElement | null>(null)
   const metaRef = useRef<HTMLSpanElement | null>(null)
   const playheadRef = useRef(0)
@@ -275,36 +275,41 @@ export function SyncDialog() {
   }
 
   /**
-   * adj1123（用户 2026-10-24：「波形上面还应放谱的预览图，锚定位后播放时同步显示动态谱」）：
-   * 在台面里建一个**放映会话**，播放时按伴奏走。
+   * adj1133（用户 2026-10-24：「预览能否就放应用的预览，缩放也参考应用的顶栏，别重复造轮子」）：
+   * 预览直接用应用自己的 `PreviewPane`（同一份排版/渲染/缩放/滚动），这里只负责：
+   *  · 按对拍结果把**播放位置**推到 `docStore.currentMs`（预览就会跟着高亮走）；
+   *  · 建一次**色块轨道**（与试听同一套数据：`event.playheadSegs`）。
    *
-   * 为什么按**谱面 `J:`** 建、而不是按对拍拍速建：微调每按一次 ±5ms 拍速都会变，
-   * 按拍速建就要重建会话（几百毫秒/次，手感全毁）。这两个时间轴只差一个**比例**
-   * （`sessionMsOfAudioMs`：拍数不变、只换秒数），所以建一次、按比例缩放即可。
-   * 片头/片尾卡不要（`leadInMs: 0, endCardMs: 0`）——对拍只看谱面那一帧。
+   * 时间基准：色块轨道按**谱面 `J:`** 建（`beatMs = 500` = 120bpm 占位），
+   * `currentMs` 用 `sessionMsOfAudioMs` 从音频时刻换算过来（拍数不变、只换秒数）。
    */
   useEffect(() => {
-    let cancelled = false
-    setPreviewState('building')
-    void createDynamicSession(code, '16x9' as DynamicPresetId, pageConfig, undefined, {
-      leadInMs: 0,
-      endCardMs: 0,
-    })
-      .then((s) => {
-        if (cancelled) return
-        previewSessionRef.current = s
-        setPreviewState('ready')
-        // 会话好了立刻画一帧（此时可能还停在 0）
-        drawRef.current()
-      })
-      .catch(() => {
-        if (!cancelled) setPreviewState('error')
-      })
-    return () => {
-      cancelled = true
-      previewSessionRef.current = null
-    }
-  }, [code, pageConfig])
+    if (doc === null) return
+    const lay = layoutScore(parseResult, pageConfig)
+    const seq = buildPlaySequence(parseResult, lay, 120)
+    const beatMs = 500
+    setPlayheadTrack(
+      seq.events.flatMap((e) =>
+        (e.playheadSegs ?? []).map((s) => ({
+          atMs: e.atMs + s.beat * beatMs,
+          durationMs: s.beats * beatMs,
+          pageIndex: s.pageIndex,
+          x: s.x,
+          y: s.y,
+          width: s.width,
+          voice: s.voice,
+          group: s.group,
+          ...(s.instrument !== undefined ? { instrument: s.instrument } : {}),
+          ...(s.yTopMin !== undefined ? { yTopMin: s.yTopMin } : {}),
+          ...(s.yBottomMax !== undefined ? { yBottomMax: s.yBottomMax } : {}),
+          ...(s.playVoice !== undefined ? { playVoice: s.playVoice } : {}),
+          ...(s.gain !== undefined ? { gain: s.gain } : {}),
+          ...(s.interlude === true ? { interlude: true } : {}),
+        })),
+      ),
+    )
+    return () => setPlayheadTrack([])
+  }, [doc === null, parseResult, pageConfig, setPlayheadTrack])
 
   /**
    * 小节起点**拍位**（与速度无关）：用任意拍速建一次播放序列，`barStartsMs / beatMs` 即拍。
@@ -359,41 +364,20 @@ export function SyncDialog() {
   )
 
   /**
-   * 画一帧**动态谱预览**：音频时刻 → 会话时刻（按拍速比例换算），顺带更新"当前位置"读数。
-   * 没对拍（`effFit` 为空）时按"谱面从音频 0 开始"的假设走，至少能看谱。
+   * adj1133：把**音频时刻**换算成谱面时刻，并推给应用预览（`currentMs` ⇒ 高亮/色块跟着走）。
+   * 顺带更新"当前位置"读数（`小节:拍`）。没对拍时按"谱面从音频 0 开始"的假设走。
    */
   const paintPreview = useCallback(
     (audioMs: number) => {
-      const s = previewSessionRef.current
-      const c = previewRef.current
-      if (!s || !c) return
-      if (c.width !== s.width || c.height !== s.height) {
-        c.width = s.width
-        c.height = s.height
-      }
-      const ctx = c.getContext('2d')
-      if (!ctx) return
       const fitForPreview = effFit ?? { beatMs: scoreBeatMs, offsetMs: 0 }
-      const t = Math.max(0, Math.min(s.totalMs - 1, sessionMsOfAudioMs(audioMs, fitForPreview, scoreBeatMs)))
-      /**
-       * adj1131（用户 2026-10-24：「放大后明明两边有黑空位，还是限制在白色区域内，显示不全」）：
-       * 缩放**改在 CSS 层做**（`transform: scale()` + 盒子裁剪），不再在画布里放大。
-       *
-       * 为什么这样才对：谱面是竖的、画布是 16:9 ⇒ 画面左右本来就有黑边（那是相机取景，
-       * 不是"空位"）。在画布里放大只会把黑边一起放大，音符仍被框在白纸里；
-       * 而按元素放大后，黑边被**推到盒子外面裁掉**，谱面自然占满整块预览区。
-       */
-      s.draw(ctx, t)
-      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      const t = Math.max(0, sessionMsOfAudioMs(audioMs, fitForPreview, scoreBeatMs))
+      setCurrentMs(t)
       if (previewInfoRef.current) {
         const beat = t / scoreBeatMs
-        const z = layout.previewZoom
-        previewInfoRef.current.textContent = `${syncCopy.previewNow} ${barBeatLabel(beat)}（第 ${Math.floor(beat) + 1} 拍）${
-          Math.abs(z - 1) > 1e-6 ? ` · ${z}×` : ''
-        }`
+        previewInfoRef.current.textContent = `${syncCopy.previewNow} ${barBeatLabel(beat)}（第 ${Math.floor(beat) + 1} 拍）`
       }
     },
-    [barBeatLabel, effFit, scoreBeatMs, layout.previewZoom],
+    [barBeatLabel, effFit, scoreBeatMs, setCurrentMs],
   )
 
   // ---------- 播放器（AudioContext + 手动循环，便于节拍器每圈重排） ----------
@@ -516,16 +500,17 @@ export function SyncDialog() {
   const [synthState, setSynthState] = useState<'idle' | 'loading' | 'error'>('idle')
 
   const ensureSynthBuffer = useCallback(async (): Promise<AudioBuffer | null> => {
-    const s = previewSessionRef.current
-    if (!s) return null
-    const key = `${s.totalMs}|${s.bpm}|${code.length}`
+    // adj1133：不再借"放映会话"，按谱面 J: 现建一条序列（与台面的时间基准一致）
+    const lay = layoutScore(parseResult, pageConfig)
+    const seq = buildPlaySequence(parseResult, lay, scoreBpm)
+    const key = `${seq.totalMs}|${scoreBpm}|${code.length}`
     if (synthBufRef.current?.key === key) return synthBufRef.current.buf
     setSynthState('loading')
     try {
       const lib = resolveActiveLibrary(useUiStore.getState().playbackHqLibrary).lib
       const cache = createHqCache()
       const { bank } = await resolveHqBank(lib, cache, hostBankUrl(lib.id))
-      const buf = await renderToAudioBuffer(s.events, bank, { bpm: s.bpm })
+      const buf = await renderToAudioBuffer(seq.events, bank, { bpm: scoreBpm })
       synthBufRef.current = { key, buf }
       setSynthState('idle')
       return buf
@@ -533,7 +518,7 @@ export function SyncDialog() {
       setSynthState('error')
       return null
     }
-  }, [code.length])
+  }, [code.length, pageConfig, parseResult, scoreBpm])
 
   const startPlayback = useCallback(
     async (fromMs: number, loop?: { startMs: number; endMs: number }) => {
@@ -1236,45 +1221,42 @@ export function SyncDialog() {
           </button>
         </div>
 
-        {/* adj1123/adj1124：波形**上方**的动态谱预览；高度可拖（分隔条），比例可切（16:9 / 9:16 / 1:1） */}
+        {/* adj1133（用户 2026-10-24）：预览直接**复用应用自己的预览**（同一份排版/渲染/高亮/滚动），
+            高度仍可拖；缩放走顶栏同一个偏好 `ijipu.previewZoom` */}
         <div className="sync-preview" style={{ height: `${layout.previewH}px` }}>
           <div className="sync-preview-box">
-            {/* adj1131：缩放走 CSS（见 paintPreview 的说明）——黑边被裁到盒外，谱面占满预览区 */}
-            <canvas ref={previewRef} style={{ transform: `scale(${layout.previewZoom})` }} />
-            {previewState !== 'ready' && (
-              <span className="sync-preview-tip">
-                {previewState === 'building' ? syncCopy.previewBuilding : syncCopy.previewFailed}
-              </span>
-            )}
+            <PreviewPane />
           </div>
-          {/* adj1132（用户 2026-10-24）：右侧信息改成预览区**下面一排**，预览本身占满整个宽度 */}
           <div className="sync-preview-info">
             <span className="sync-preview-pos">
               <span ref={previewInfoRef}>{syncCopy.previewNow}</span>
             </span>
-            <label className="sync-row sync-preview-zoom">
+            <span className="sync-row sync-preview-zoom">
               <span className="sync-label">{syncCopy.previewZoom}</span>
-              <select
-                className="sync-select"
-                data-sync="preview-zoom"
-                value={layout.previewZoom}
-                onChange={(e) =>
-                  setLayout(
-                    normalizeSyncLayout(
-                      { ...layoutRef.current, previewZoom: Number(e.target.value) },
-                      viewportRef.current.w,
-                      viewportRef.current.h,
-                    ),
-                  )
-                }
+              <button
+                type="button"
+                className="btn sync-mini"
+                data-sync="zoom-out"
+                disabled={previewZoom <= 50}
+                onClick={() => setPreviewZoom(Math.max(50, previewZoom - 10))}
+                title={syncCopy.zoomOutHint}
               >
-                {PREVIEW_ZOOMS.map((z) => (
-                  <option key={z} value={z}>
-                    {z}×
-                  </option>
-                ))}
-              </select>
-            </label>
+                −
+              </button>
+              <span className="sync-name" data-sync="zoom-value">
+                {previewZoom}%
+              </span>
+              <button
+                type="button"
+                className="btn sync-mini"
+                data-sync="zoom-in"
+                disabled={previewZoom >= 200}
+                onClick={() => setPreviewZoom(Math.min(200, previewZoom + 10))}
+                title={syncCopy.zoomInHint}
+              >
+                +
+              </button>
+            </span>
             <span className="sync-dim sync-preview-hint">{syncCopy.previewHint}</span>
           </div>
         </div>

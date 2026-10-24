@@ -1414,7 +1414,9 @@ export const syncCopy = {
   previewNow: '当前位置',
   previewHint: '播放时这里跟着伴奏走：看跳跳球落在第几拍、色块是不是压在这一下。',
   /* ---- adj1124/adj1127：台面尺寸与预览缩放 ---- */
-  previewZoom: '预览缩放',
+  previewZoom: '谱面缩放',
+  zoomInHint: '放大谱面（与顶栏同一个缩放）',
+  zoomOutHint: '缩小谱面（与顶栏同一个缩放）',
   scrollHint: '拖动滑块平移视野；点空白处跳过去',
   maximize: '最大化',
   restore: '还原',

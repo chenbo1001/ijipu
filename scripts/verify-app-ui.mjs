@@ -2155,13 +2155,30 @@ async function main() {
           JSON.stringify(syncUi),
         )
         // adj1123：波形**上方**要有动态谱预览（会话异步建好 ⇒ 轮询等它出图）
+        // adj1133：预览＝应用自己的 `PreviewPane`（真 SVG 谱面 + 自己的滚动容器），不再是我们画的画布
         const previewReady = await waitFor(
           c,
-          `(() => { const el = document.querySelector('.sync-preview-box canvas'); return !!el && el.width >= 1000 && el.height >= 500 })()`,
-          '动态谱预览会话（16:9 画布）',
+          `(() => {
+            const pane = document.querySelector('.sync-preview-box .preview-pane')
+            if (!pane) return false
+            const svg = pane.querySelector('.preview-svg svg')
+            const sc = pane.querySelector('.preview-zoom-scale')
+            return !!svg && !!sc && svg.getBoundingClientRect().height > 40
+          })()`,
+          '应用预览（SVG 谱面）',
           80,
         )
-        check('adj1123 波形上方有动态谱预览（会话建好、画布 1920×1080 已出图）', previewReady)
+        check('adj1133 预览用的是应用自己的 PreviewPane（.preview-pane 里有 SVG 谱面 + 缩放层）', previewReady)
+        // 预览能滚动（谱面比预览区高 ⇒ 必须有滚动条）
+        const scrollable = await evalJs(
+          c,
+          `(() => { const p = document.querySelector('.sync-preview-box .preview-pane'); if (!p) return null; return { sh: p.scrollHeight, ch: p.clientHeight, overflow: getComputedStyle(p).overflowY } })()`,
+        )
+        check(
+          'adj1133 预览区可以滚动（内容比可视区高 ⇒ 出现滚动条）',
+          scrollable !== null && scrollable.sh > scrollable.ch && scrollable.overflow === 'auto',
+          JSON.stringify(scrollable),
+        )
 
         // adj1128（用户 2026-10-24：「这些按钮放到波形下面、跟下面的按钮整合，节省上面空间」）
         const orderCheck = await evalJs(
@@ -2395,32 +2412,38 @@ async function main() {
         )
         await dragBy('.sync-split', 0, -50)
         await sleep(300)
-        // ④ adj1127/adj1131：预览**缩放比率**——现在走 CSS（`transform: scale`），
-        //    所以画布尺寸不变、元素的计算样式变成 matrix(2,…)（黑边被盒子裁掉）
-        await evalJs(
-          c,
-          `(() => { const s = document.querySelector('[data-sync="preview-zoom"]'); if (!s) return false; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; setter.call(s, '2'); s.dispatchEvent(new Event('change', { bubbles: true })); return true })()`,
-        )
-        await sleep(600)
-        const zoomed = await evalJs(
+        // ④ adj1133：缩放**跟顶栏同一个偏好**——点台面里的 `+` 要看到百分比变化、
+        //    而且应用预览的缩放层（`.preview-zoom-scale`）真的跟着变
+        const zoomBefore = await evalJs(
           c,
           `(() => {
-            const el = document.querySelector('.sync-preview-box canvas')
-            if (!el) return { w: 0, h: 0, transform: '', zoom: '?' }
-            const z = document.querySelector('[data-sync="preview-zoom"]')
-            return { w: el.width, h: el.height, transform: getComputedStyle(el).transform, zoom: z ? z.value : '?' }
+            const v = document.querySelector('[data-sync="zoom-value"]')?.textContent?.trim() ?? ''
+            const sc = document.querySelector('.sync-preview-box .preview-zoom-scale')
+            return { value: v, zoom: sc ? sc.style.zoom : '' }
+          })()`,
+        )
+        await evalJs(c, `document.querySelector('[data-sync="zoom-in"]')?.click(), true`)
+        await sleep(400)
+        const zoomAfter = await evalJs(
+          c,
+          `(() => {
+            const v = document.querySelector('[data-sync="zoom-value"]')?.textContent?.trim() ?? ''
+            const sc = document.querySelector('.sync-preview-box .preview-zoom-scale')
+            const stored = localStorage.getItem('ijipu.previewZoom')
+            return { value: v, zoom: sc ? sc.style.zoom : '', stored }
           })()`,
         )
         check(
-          'adj1127/adj1131 预览缩放 2×：画布仍 1920×1080，元素被 CSS 放大到 2 倍（黑边被裁到盒外）',
-          zoomed.zoom === '2' && zoomed.w === 1920 && zoomed.h === 1080 && /matrix\(2[,)]/.test(String(zoomed.transform)),
-          JSON.stringify(zoomed),
+          'adj1133 台面里的 ± 改的是**顶栏同一个缩放**（百分比 100%→110%、缩放层 zoom 1→1.1、落盘同一个键）',
+          zoomBefore.value === '100%' &&
+            zoomAfter.value === '110%' &&
+            zoomBefore.zoom === '1' &&
+            zoomAfter.zoom === '1.1' &&
+            zoomAfter.stored === '110',
+          JSON.stringify({ zoomBefore, zoomAfter }),
         )
-        // 收尾：缩放回 1×
-        await evalJs(
-          c,
-          `(() => { const s = document.querySelector('[data-sync="preview-zoom"]'); if (!s) return false; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; setter.call(s, '1'); s.dispatchEvent(new Event('change', { bubbles: true })); return true })()`,
-        )
+        // 收尾：缩回 100%
+        await evalJs(c, `document.querySelector('[data-sync="zoom-out"]')?.click(), true`)
         await sleep(300)
 
         /**

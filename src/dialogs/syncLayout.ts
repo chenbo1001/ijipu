@@ -8,7 +8,7 @@
  *  - 面板宽高可拖右下角改、可最大化/还原（双击标题条也行）；
  *  - 预览区高度、波形高度各自可拖分隔条改；
  *  - 中间的锚点/微调区吃剩余高度（`flex:1`），面板变大它就变大；
- *  - 预览固定 16:9 画布（与成片同一套相机），另给一个 **`previewZoom`（0.5~3 倍）** 看细节。
+ *  - 预览用**应用自己的预览组件**（`PreviewPane`），缩放跟顶栏同一个偏好（adj1133）。
  *
  * 这些是**这台机器上的偏好**（L1），换台机器不一样很正常 —— 存 `ijipu.syncLayout`。
  */
@@ -21,12 +21,6 @@ export interface SyncLayout {
   waveH: number
   /** 预览区高度（px） */
   previewH: number
-  /**
-   * 预览**缩放比率**（1 = 原样；2 = 放大两倍看细节）。
-   * 注意：这不是"16:9 / 9:16"那种画布比例——画布固定 16:9（与成片一致），
-   * 这里只是把渲染结果整体放大/缩小（用户 2026-10-24 明确要"缩放比率"）。
-   */
-  previewZoom: number
   /** 是否最大化 */
   maximized: boolean
 }
@@ -39,12 +33,8 @@ export const DEFAULT_SYNC_LAYOUT: SyncLayout = {
   h: 820,
   waveH: 172,
   previewH: 230,
-  previewZoom: 1,
   maximized: false,
 }
-
-/** 预览缩放的可选档位（下拉里列这些，避免拖出一个 1.037× 这种怪数） */
-export const PREVIEW_ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const
 
 /** 各区块的合理范围（拖太狠会"看不出东西"，这里兜住） */
 export const SYNC_LAYOUT_LIMITS = {
@@ -54,8 +44,6 @@ export const SYNC_LAYOUT_LIMITS = {
   waveMax: 420,
   previewMin: 120,
   previewMax: 520,
-  zoomMin: 0.5,
-  zoomMax: 3,
   /**
    * 除了预览/波形，标题条 + 三排参数 + 分隔条 + 底部状态/按钮 + **至少一二百像素的锚点区**
    * 至少要这么多高（少了它，底部就会只剩一条缝、内容被切——adj1124 实测）。
@@ -83,15 +71,10 @@ export function normalizeSyncLayout(l: SyncLayout, viewW: number, viewH: number)
     lim.previewMin,
     lim.previewMax,
   )
-  const previewZoom = clamp(
-    Number.isFinite(l.previewZoom) ? l.previewZoom : DEFAULT_SYNC_LAYOUT.previewZoom,
-    lim.zoomMin,
-    lim.zoomMax,
-  )
   // 预览 + 波形 + 其它，最少要留 `chromeMin`
   const budget = h - waveH - lim.chromeMin
   if (previewH > budget) previewH = Math.max(lim.previewMin, budget)
-  return { w, h, waveH, previewH, previewZoom, maximized: l.maximized === true }
+  return { w, h, waveH, previewH, maximized: l.maximized === true }
 }
 
 /** 从 L1 读（坏值/没有 ⇒ 默认；一律过一遍夹紧） */
