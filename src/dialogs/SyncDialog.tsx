@@ -43,6 +43,7 @@ import { timeLabelOf, timeScaleOf } from './syncRuler'
 import {
   VIEW_ALL,
   VIEW_PRESETS_MS,
+  audioClockOf,
   clampView,
   panView,
   scrollThumb,
@@ -354,6 +355,19 @@ export function SyncDialog() {
 
   const durMs = Math.max(1, doc?.audioDurationMs || (audio ? Math.round(audio.duration * 1000) : 1))
   const trim = doc?.trim ?? { startMs: 0, endMs: durMs }
+  /**
+   * adj1136（用户 2026-10-24 看到"打开台面时绝对零时落在第 4 小节"）：
+   * 只有 **1 条**锚点时，速度按谱面 `J:` 走 ⇒ "谱面第 1 拍"被推到音频 0 **之前**
+   * （他这条：beat 16.5 @ 3.91s ⇒ 谱面起点在 −11.3s，等于"前 16.5 拍只用了 3.9 秒"）。
+   * 这多半是拍号填错、或伴奏有前奏——把隐含结论摆出来提醒，**不自动改用户数据**。
+   */
+  const singleAnchorWarn = useMemo(() => {
+    if (doc === null || doc.anchors.length !== 1) return ''
+    const a = doc.anchors[0]
+    const impliedOffset = a.audioMs - a.beat * scoreBeatMs
+    if (impliedOffset >= -2 * scoreBeatMs) return ''
+    return syncCopy.anchorImplausible(String(Math.round(a.beat * 100) / 100), audioClockOf(a.audioMs))
+  }, [doc, scoreBeatMs])
   /** adj1126：波形当前视野（整曲 or 缩放后的窗口），刻度与读数都用它 */
   const viewWin = viewWindow(view, durMs)
   /** adj1127：横向滚动条的滑块位置/宽度（整曲时 `visible=false`） */
@@ -409,7 +423,8 @@ export function SyncDialog() {
       setCurrentMs(t)
       if (previewInfoRef.current) {
         const beat = t / scoreBeatMs
-        previewInfoRef.current.textContent = `${syncCopy.previewNow} ${barBeatLabelFixed(beat)}（第 ${Math.floor(beat) + 1} 拍）`
+        // adj1136：`小节:拍（第 N 拍）` + **绝对时点**（音频文件里的 m:ss.ss）
+        previewInfoRef.current.textContent = `${syncCopy.previewNow} ${barBeatLabelFixed(beat)}（第 ${Math.floor(beat) + 1} 拍）· ${audioClockOf(audioMs)}`
       }
     },
     [barBeatLabelFixed, effFit, scoreBeatMs, setCurrentMs],
@@ -939,8 +954,12 @@ export function SyncDialog() {
     if (last) {
       const label = barBeatLabel(last.beat)
       const [b, k] = label.split(':').map(Number)
+      /**
+       * adj1136：默认值要**取整**——`barBeatLabel` 返回 `4:1.33` 这种带小数的显示，
+       * 直接塞回输入框就会造出"第 1.33 拍"这种半拍锚点（用户 sidecar 里的 `beat: 16.5` 就是这么来的）。
+       */
       setBar(b)
-      setBeat(k)
+      setBeat(Math.max(1, Math.round(k)))
     }
   }
 
@@ -1311,6 +1330,8 @@ export function SyncDialog() {
             </span>
             <span className="sync-dim sync-preview-hint">{syncCopy.previewHint}</span>
           </div>
+          {/* adj1136：单锚点推出的不可能结论（不静默） */}
+          {singleAnchorWarn !== '' && <div className="sync-warn sync-preview-warn">{singleAnchorWarn}</div>}
         </div>
         {/* 预览 ↔ 下方：往上拖 = 预览变高（下面整体跟着平移） */}
         <div className="sync-split" onPointerDown={startDrag('preview')} title={syncCopy.splitPreviewHint} />

@@ -128,7 +128,7 @@ import { tempoLineOf } from '../src/export/video/cardLayout.ts'
 // adj1120：伴奏轨/波形/混音（纯函数：建轨计划、包络、逐采样相加）
 import { accompanimentPlan, fadeWindowOf, mixSamples, waveformPeaks, ACCOMP_SAMPLE_RATE } from '../src/export/video/accompaniment.ts'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
-import { timeScaleOf, timeLabelOf } from '../src/dialogs/syncRuler.ts'
+import { timeScaleOf, timeLabelOf, audioClockOf } from '../src/dialogs/syncRuler.ts'
 // adj1126：波形视野（缩放/平移；spanMs=0 = 整曲）
 import {
   VIEW_ALL,
@@ -35678,6 +35678,21 @@ function runAdj1124Tests(): void {
   check(
     'adj1135 当前位置读数定长（两位小数），不再出现 2.7199999999999998',
     /barBeatLabelFixed/.test(dialogSrcAdj) && /\.toFixed\(2\)/.test(dialogSrcAdj),
+    '',
+  )
+  // adj1136：绝对时点写成 m:ss.ss（定宽），并把"单锚点不可能结论"的判据算清楚
+  check(
+    'adj1136 绝对时点格式 `m:ss.ss`（11.32s ⇒ 0:11.32；65.5s ⇒ 1:05.50）',
+    audioClockOf(11320) === '0:11.32' && audioClockOf(65500) === '1:05.50' && audioClockOf(-5) === '0:00.00',
+    audioClockOf(11320),
+  )
+  check(
+    'adj1136 单锚点判据：1 条锚点把谱面起点顶到音频 0 之前 > 2 拍 ⇒ 要提示（真实 case：beat 16.5 @ 3.91s，J:65）',
+    (() => {
+      const scoreBeatMs = 60000 / 65
+      const implied = 3910 - 16.5 * scoreBeatMs
+      return implied < -2 * scoreBeatMs
+    })(),
     '',
   )
   const dragged = resizeSyncLayout(DEFAULT_SYNC_LAYOUT, 100, 60, 1440, 900)

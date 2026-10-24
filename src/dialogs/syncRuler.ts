@@ -86,7 +86,20 @@ export interface WaveView {
 
 export const VIEW_ALL: WaveView = { spanMs: 0, startMs: 0 }
 
-/** 视野预设（0 = 整曲） */
+/**
+ * adj1136（用户 2026-10-24：「当前位置可以显示 小节:拍位 + 绝对时点位置(s)」）：
+ * 绝对时点写成 **`m:ss.ss`**（固定两位小数，宽度不跳）。
+ */
+export function audioClockOf(ms: number): string {
+  const total = Math.max(0, ms)
+  const min = Math.floor(total / 60000)
+  const restSec = (total - min * 60000) / 1000
+  return `${min}:${restSec.toFixed(2).padStart(5, '0')}`
+}
+
+/**
+ * 视野预设（0 = 整曲）
+ */
 export const VIEW_PRESETS_MS = [0, 300000, 120000, 60000, 30000, 10000] as const
 
 /** 视野过短没意义（低于 1 秒就看不清波形了） */

@@ -6059,6 +6059,13 @@ span.ws-check {
   text-overflow: ellipsis;
 }
 
+/* adj1136：单锚点推出的"不可能结论"提示（独占一行，允许换行） */
+.sync-preview-warn {
+  flex: 0 0 auto;
+  white-space: normal;
+  line-height: 1.45;
+}
+
 .sync-preview-pos {
   /* adj1135：定宽 + 等宽数字——读数一直是"11:2.72（第 42 拍）"这种长度，
      宽度不再随数字位数跳，后面几个控件就不会左右晃 */
