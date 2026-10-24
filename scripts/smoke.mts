@@ -126,7 +126,7 @@ import {
 // adj1119：片头卡速度行（对拍后写"实际 + （原谱 X）"）
 import { tempoLineOf } from '../src/export/video/cardLayout.ts'
 // adj1120：伴奏轨/波形/混音（纯函数：建轨计划、包络、逐采样相加）
-import { accompanimentPlan, mixSamples, waveformPeaks, ACCOMP_SAMPLE_RATE } from '../src/export/video/accompaniment.ts'
+import { accompanimentPlan, fadeWindowOf, mixSamples, waveformPeaks, ACCOMP_SAMPLE_RATE } from '../src/export/video/accompaniment.ts'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
 import { timeScaleOf, timeLabelOf } from '../src/dialogs/syncRuler.ts'
 // adj1126：波形视野（缩放/平移；spanMs=0 = 整曲）
@@ -35494,6 +35494,32 @@ function runAdj1120Tests(): void {
   )
   check('adj1120 谱面起点已越过保留段末尾 ⇒ 整段不放（duration=0）', past.durationSec === 0, JSON.stringify(past))
   check('adj1120 渲染采样率与合成音一致（44100）', ACCOMP_SAMPLE_RATE === 44100, String(ACCOMP_SAMPLE_RATE))
+  // adj1129：收尾淡出窗口（最后一拍渐小到无声）
+  const planForFade = accompanimentPlan(
+    { beatMs: 500, offsetMs: 3200 },
+    { startMs: 0, endMs: 245300 },
+    { leadInMs: 3700, sourceStartMs: 0, totalMs: 60000 },
+  )
+  const fade = fadeWindowOf(planForFade, 500)
+  check(
+    'adj1129 淡出：结束前最后一拍开始降、结束时到 0（会话 3.7s 起放 56.3s ⇒ 60.0s 结束、59.5s 起降）',
+    Math.abs((fade.fadeStartSec ?? -1) - 59.5) < 1e-9 && Math.abs(fade.fadeEndSec - 60) < 1e-9,
+    JSON.stringify(fade),
+  )
+  const noFade = fadeWindowOf(planForFade, 0)
+  check(
+    'adj1129 淡出时长 0 ⇒ 不淡出（fadeStartSec = null），但结束时刻照常给',
+    noFade.fadeStartSec === null && Math.abs(noFade.fadeEndSec - 60) < 1e-9,
+    JSON.stringify(noFade),
+  )
+  check(
+    'adj1129 淡出不越界：淡出时长比整段还长 ⇒ 从开始就淡（起点夹到 whenSec）',
+    (() => {
+      const f = fadeWindowOf(planForFade, 999999)
+      return f.fadeStartSec !== null && Math.abs(f.fadeStartSec - 3.7) < 1e-9 && Math.abs(f.fadeEndSec - 60) < 1e-9
+    })(),
+    '',
+  )
 
   // ② 波形包络
   const peaks = waveformPeaks([new Float32Array([0, 0.5, -0.9, 0.2])], 2)

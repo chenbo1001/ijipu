@@ -71,6 +71,32 @@ export function accompanimentPlan(fit: TempoFit, trim: TrimRange, session: Sessi
 }
 
 /**
+ * 收尾淡出（用户 2026-10-24：「添加终点后应在最后一拍里音量渐小至无声，以免停得太突兀」）。
+ *
+ * 口径：在 `endMs` 前**最后一拍**（`fadeMs`）里线性降到 0，`endMs` 之后是静音。
+ * 返回的是**会话时间轴**上的秒数（与 `accompanimentPlan` 同一坐标系）。
+ */
+export interface FadeWindow {
+  /** 开始降音量的时刻（秒，会话时间轴）；`null` = 不淡出 */
+  fadeStartSec: number | null
+  /** 完全静音的时刻（秒） */
+  fadeEndSec: number
+}
+
+/**
+ * 算淡出窗口（纯函数，可断言）。
+ *
+ * @param plan      建轨计划（`whenSec` 是音频真正开始的时刻）
+ * @param fadeMs    淡出时长（一般传**一拍**：`60000 / bpm`）
+ */
+export function fadeWindowOf(plan: AccompPlan, fadeMs: number): FadeWindow {
+  const endSec = plan.whenSec + plan.durationSec
+  const fade = Math.max(0, Math.min(fadeMs, plan.durationSec * 1000)) / 1000
+  if (plan.durationSec <= 0 || fade <= 0) return { fadeStartSec: null, fadeEndSec: endSec }
+  return { fadeStartSec: Math.max(plan.whenSec, endSec - fade), fadeEndSec: endSec }
+}
+
+/**
  * 波形包络：把整条音频压成 `buckets` 个桶，每桶取 min/max（画竖线用）。
  *
  * **纯函数**（只吃 `Float32Array`）⇒ Node 里可断言。
@@ -158,6 +184,8 @@ export async function buildAccompanimentTrack(
   fit: TempoFit,
   trim: TrimRange,
   session: SessionTiming,
+  /** 收尾淡出时长（ms，一般传一拍）；0 = 不淡出 */
+  fadeOutMs = 0,
 ): Promise<AudioBuffer> {
   const plan = accompanimentPlan(fit, trim, session)
   const len = Math.max(1, Math.ceil((session.totalMs / 1000) * ACCOMP_SAMPLE_RATE))
@@ -165,7 +193,15 @@ export async function buildAccompanimentTrack(
   if (plan.durationSec > 0) {
     const src = ctx.createBufferSource()
     src.buffer = audio
-    src.connect(ctx.destination)
+    const gain = ctx.createGain()
+    const fade = fadeWindowOf(plan, fadeOutMs)
+    // 收尾淡出：最后一拍线性降到 0（用户要求"不要停得太突兀"）
+    if (fade.fadeStartSec !== null) {
+      gain.gain.setValueAtTime(1, fade.fadeStartSec)
+      gain.gain.linearRampToValueAtTime(0, fade.fadeEndSec)
+    }
+    src.connect(gain)
+    gain.connect(ctx.destination)
     src.start(plan.whenSec, plan.offsetSec, plan.durationSec)
   }
   return ctx.startRendering()

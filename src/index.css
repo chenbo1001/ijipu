@@ -6255,6 +6255,36 @@ span.ws-check {
   width: 88px;
 }
 
+/* adj1129：伴奏那一行用三栏网格——左：伴奏；中：播放/打点（真居中）；右：视野 */
+.sync-audio-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  column-gap: 10px;
+}
+
+.sync-audio-left,
+.sync-audio-mid,
+.sync-audio-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sync-audio-left {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.sync-audio-mid {
+  justify-content: center;
+}
+
+.sync-audio-right {
+  justify-content: flex-end;
+}
+
 .sync-anchors {
   width: 320px;
   min-width: 260px;

@@ -33,7 +33,7 @@ import { resolveActiveLibrary } from '../playback/spessaSynthBackend'
 import { hostBankUrl } from '../store/hostBridge'
 import { decodeAccompaniment, waveformPeaks } from '../export/video/accompaniment'
 import { parseSyncDoc, mixPlanOf, serializeSyncDoc, sidecarPathOf, syncDocStale } from '../export/video/syncDoc'
-import { readSidecarText, writeSidecarText } from '../export/video/syncIo'
+import { readSidecarText, writeSidecarText, downloadSidecarText } from '../export/video/syncIo'
 import { canUseDynamicVideo } from '../export/video/capability'
 import { syncCopy } from '../brand/copy'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
@@ -170,12 +170,18 @@ export function SyncDialog() {
     save(code, fileName)
     const latest = useSyncStore.getState().doc
     if (latest === null) return
+    const text = serializeSyncDoc(latest)
     if (!nativePath) {
-      setNotice(syncCopy.saved)
+      // adj1129：网页/开发模式没有同目录写入 ⇒ 下载一份真文件（别只写本机缓存）
+      // `fileName` 可能已经被去掉了 `.jps`（网页/示例稿），这里补回来，文件名才对得上
+      const base = fileName === '' ? '未命名.jps' : /\.jps$/i.test(fileName) ? fileName : `${fileName}.jps`
+      const name = sidecarPathOf(base).split(/[\\/]/).pop() ?? '未命名.jps.sync.json'
+      downloadSidecarText(name, text)
+      setNotice(syncCopy.savedDownloaded(name))
       return
     }
     const target = sidecarPathOf(nativePath)
-    const res = await writeSidecarText(target, serializeSyncDoc(latest))
+    const res = await writeSidecarText(target, text)
     const name = target.split(/[\\/]/).pop() ?? target
     setNotice(res.ok ? syncCopy.savedFile(name) : syncCopy.saveFailed(res.error))
   }, [code, doc, fileName, nativePath, save])
@@ -518,12 +524,28 @@ export function SyncDialog() {
       const mix = useSyncStore.getState().doc?.mix ?? { source: 'file' as const, accomp: 1, synth: 0.5 }
       const plan = mixPlanOf(mix)
       const sources: AudioBufferSourceNode[] = []
+      /**
+       * adj1129（用户 2026-10-24：「添加终点后应在最后一拍里音量渐小至无声，以免停得太突兀」）：
+       * 台面试听也在**结束前最后一拍**把音量线性压到 0（与出片音轨同一口径）。
+       */
+      const beatMsNow = effFit?.beatMs ?? scoreBeatMs
+      const endMs = loop ? loop.endMs : trim.endMs
+      const fadeStartMs = Math.max(from, endMs - beatMsNow)
+      const canFade = endMs - fadeStartMs > 20
+      const applyFade = (gain: GainNode, base: number) => {
+        if (!canFade || base <= 0) return
+        const t0 = ctx.currentTime + (fadeStartMs - from) / 1000
+        const t1 = ctx.currentTime + (endMs - from) / 1000
+        gain.gain.setValueAtTime(base, t0)
+        gain.gain.linearRampToValueAtTime(0, t1)
+      }
       // ① 伴奏（按设定的伴奏音量）
       if (plan.playAcc) {
         const src = ctx.createBufferSource()
         src.buffer = audio
         const gain = ctx.createGain()
         gain.gain.value = mix.accomp
+        applyFade(gain, mix.accomp)
         src.connect(gain)
         gain.connect(ctx.destination)
         src.start(0, from / 1000)
@@ -540,6 +562,7 @@ export function SyncDialog() {
           src.playbackRate.value = scoreBeatMs / fitForPreview.beatMs
           const gain = ctx.createGain()
           gain.gain.value = mix.synth
+          applyFade(gain, mix.synth)
           src.connect(gain)
           gain.connect(ctx.destination)
           src.start(0, Math.min(scoreStartSec, Math.max(0, sb.duration - 0.01)))
@@ -1128,7 +1151,11 @@ export function SyncDialog() {
       >
         <div
           className="sync-head"
-          onDoubleClick={() => setLayout({ ...layoutRef.current, maximized: !layoutRef.current.maximized })}
+          onDoubleClick={(e) => {
+            // adj1129：双击标题条才最大化——**点在按钮/输入上不算**（用户实报"双击保存变成最大化"）
+            if ((e.target as HTMLElement).closest('button, input, select')) return
+            setLayout({ ...layoutRef.current, maximized: !layoutRef.current.maximized })
+          }}
         >
           <b>
             {syncCopy.title}：{fileName}
@@ -1231,30 +1258,35 @@ export function SyncDialog() {
         <div className="sync-split" onPointerDown={startDrag('wave')} title={syncCopy.splitWaveHint} />
         {/* 第一排（紧贴波形下沿）：伴奏 + 播放 + 打点 + 视野 —— 用户 2026-10-24 要求
             「这些按钮放到波形下面、跟下面的按钮整合，节省上面的空间」 */}
-        <div className="sync-row">
-          <span className="sync-label">{syncCopy.audioLabel}</span>
-          {audio ? (
-            <span className="sync-name">
-              {doc.audio} · {fmtSec(durMs)}
-            </span>
-          ) : (
-            <span className="sync-name sync-dim">
-              {doc.audio !== '' ? `${syncCopy.audioMissing}：${doc.audio}` : syncCopy.noAudio}
-            </span>
-          )}
-          <input ref={fileRef} type="file" accept="audio/*,.mp3,.m4a,.wav,.flac" className="sync-file" onChange={(e) => void onPickAudio(e)} />
-          <button type="button" className="btn" disabled={decodeState === 'busy'} onClick={() => fileRef.current?.click()}>
-            {audio ? syncCopy.repickAudio : syncCopy.pickAudio}
-          </button>
-          {decodeState === 'busy' && <span className="sync-dim">{syncCopy.decoding}</span>}
-          <button type="button" className="btn" onClick={() => (playing ? stopSource() : void startPlayback(playheadRef.current))} disabled={!audio}>
-            {playing ? syncCopy.pause : syncCopy.play}
-          </button>
-          <button type="button" className="btn" onClick={tap} disabled={!audio}>
-            {syncCopy.tap}
-          </button>
-          <span className="sync-grow" />
+        <div className="sync-row sync-audio-row">
+          <div className="sync-audio-left">
+            <span className="sync-label">{syncCopy.audioLabel}</span>
+            {audio ? (
+              <span className="sync-name">
+                {doc.audio} · {fmtSec(durMs)}
+              </span>
+            ) : (
+              <span className="sync-name sync-dim">
+                {doc.audio !== '' ? `${syncCopy.audioMissing}：${doc.audio}` : syncCopy.noAudio}
+              </span>
+            )}
+            <input ref={fileRef} type="file" accept="audio/*,.mp3,.m4a,.wav,.flac" className="sync-file" onChange={(e) => void onPickAudio(e)} />
+            <button type="button" className="btn" disabled={decodeState === 'busy'} onClick={() => fileRef.current?.click()}>
+              {audio ? syncCopy.repickAudio : syncCopy.pickAudio}
+            </button>
+            {decodeState === 'busy' && <span className="sync-dim">{syncCopy.decoding}</span>}
+          </div>
+          {/* adj1129（用户 2026-10-24）：播放 / T打点 **在这一行居中** */}
+          <div className="sync-audio-mid">
+            <button type="button" className="btn" onClick={() => (playing ? stopSource() : void startPlayback(playheadRef.current))} disabled={!audio}>
+              {playing ? syncCopy.pause : syncCopy.play}
+            </button>
+            <button type="button" className="btn" onClick={tap} disabled={!audio}>
+              {syncCopy.tap}
+            </button>
+          </div>
           {/* adj1126：视野（单位宽度显示的时长）；滚轮也能缩放，`0` 回整曲 */}
+          <div className="sync-audio-right">
           <span className="sync-label">{syncCopy.viewSpan}</span>
           <select
             className="sync-select"
@@ -1286,7 +1318,7 @@ export function SyncDialog() {
           <span className="sync-name sync-dim sync-view-readout">
             {fmtSec(viewWin.v0)} – {fmtSec(viewWin.v0 + viewWin.winMs)}
           </span>
-          <span className="sync-dim">{syncCopy.viewHint}</span>
+          </div>
         </div>
 
         {/* 第二排：保留段 + 节拍器/循环/步长（都在波形正下方，用户口径「与音频相关的放波形条上下」） */}

@@ -53,15 +53,17 @@
  * ② 两边改**同一块** ⇒ 确认条应走"要你决定"、差异框里标"冲突"，选「用右」+ 应用后**外部那一版进文件、本地那版被换掉**。
  */
 import { createServer } from 'node:http'
-import { readFileSync, existsSync, statSync } from 'node:fs'
+import { readFileSync, existsSync, statSync, mkdirSync, rmSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { rm } from 'node:fs/promises'
+import { readdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')
+/** adj1129：下载目录（验证"保存真的产出文件"，跑完清掉） */
+const DL = path.join(tmpdir(), `ijipu-verify-dl-${Date.now()}`)
 
 /** 只列 `dist/` 里真会出现的扩展名（少了哪个，那个资源就是 404、页面会静默缺东西） */
 const MIME = {
@@ -253,6 +255,14 @@ async function main() {
     await c.send('Page.addScriptToEvaluateOnNewDocument', {
       source: 'window.__IJIPU_FORCE_DESKTOP__ = true',
     })
+    // adj1129：把下载目录指到临时目录——"保存真的产出一个文件"要能落到磁盘上核对
+    try {
+      rmSync(DL, { recursive: true, force: true })
+      mkdirSync(DL, { recursive: true })
+      await c.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: DL })
+    } catch {
+      /* 老版本 CDP 没有这个命令：后续断言会退化为"只看到提示" */
+    }
     await c.send('Page.navigate', { url: `${origin}/app/` })
 
     console.log('[verify-app-ui] adj959：应用内手册的「目录」浮层（真点）')
@@ -2384,11 +2394,60 @@ async function main() {
         const saveClicked = await evalJs(c, `(() => { const b = document.querySelector('[data-sync="save"]'); if (!b) return false; b.click(); return true })()`)
         const saveNotice = await waitFor(
           c,
-          `(() => { const t = document.querySelector('.sync-status')?.textContent ?? ''; return /已存本机缓存|已保存：|保存失败/.test(t) })()`,
+          `(() => { const t = document.querySelector('.sync-status')?.textContent ?? ''; return /已下载|已保存：|保存失败|已存本机缓存/.test(t) })()`,
           '保存后的提示',
           40,
         )
         check('adj1128 点「保存」有明确结果提示（不是静默无反应）', saveClicked && saveNotice, '')
+        /**
+         * adj1129（用户实报「提示存本机缓存，没看到对拍文件」）：
+         * 网页/开发模式下保存必须**真的产出文件**（下载 JSON），不能只写 localStorage。
+         * 这里把下载目录指到临时目录，再看文件到底有没有落地、内容像不像对拍文件。
+         */
+        let downloaded = ''
+        let dlText = ''
+        // 下载是异步落盘：轮询最多 ~3 秒
+        for (let i = 0; i < 15 && downloaded === ''; i++) {
+          try {
+            const files = await readdir(DL)
+            downloaded = files.find((f) => f.endsWith('.sync.json')) ?? ''
+          } catch {
+            downloaded = ''
+          }
+          if (downloaded === '') await sleep(200)
+        }
+        if (downloaded !== '') {
+          try {
+            dlText = await readFile(path.join(DL, downloaded), 'utf8')
+          } catch {
+            dlText = ''
+          }
+        }
+        check(
+          'adj1129 「保存」在网页/开发模式下真的下载出 `*.sync.json`（里面有 anchors/tempo 字段）',
+          downloaded !== '' && /"anchors"/.test(dlText) && /"tempo"/.test(dlText),
+          JSON.stringify({ downloaded, head: dlText.slice(0, 40) }),
+        )
+        // adj1129：双击「保存」不能变成最大化（用户实报）
+        const headBoxBefore = await evalJs(c, `Math.round(document.querySelector('.sync-panel').getBoundingClientRect().width)`)
+        const saveRect = await evalJs(
+          c,
+          `(() => { const b = document.querySelector('[data-sync="save"]'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } })()`,
+        )
+        if (saveRect) {
+          for (const count of [1, 2]) {
+            await c.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: saveRect.x, y: saveRect.y, button: 'left', clickCount: count })
+            await c.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: saveRect.x, y: saveRect.y, button: 'left', clickCount: count })
+            await sleep(60)
+          }
+        }
+        await sleep(400)
+        const headBoxAfter = await evalJs(c, `Math.round(document.querySelector('.sync-panel').getBoundingClientRect().width)`)
+        check(
+          'adj1129 双击「保存」不会把窗口最大化（双击只在标题条空白处生效）',
+          headBoxAfter === headBoxBefore,
+          JSON.stringify({ before: headBoxBefore, after: headBoxAfter }),
+        )
 
         // ② 音量：把伴奏音量拖到 0.6，再真播放，看 GainNode 的值
         await evalJs(

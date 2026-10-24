@@ -51,3 +51,24 @@ export async function writeSidecarText(path: string, text: string): Promise<Side
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
+
+/**
+ * adj1129：网页 / 开发模式没有同目录写入 ⇒ **下载一份真的文件**。
+ *
+ * 用户实报「点保存提示存本机缓存，没看到对拍文件」——只写 localStorage 等于没给文件。
+ * 下载下来的 `xxx.jps.sync.json` 放回谱文件旁边就能被读到（桌面版打开时会读它）。
+ */
+export function downloadSidecarText(name: string, text: string): void {
+  const blob = new Blob([text], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  // 有些 WebView/Chrome 版本要求 <a> 在文档里才真正触发下载（实测 headless 下必须挂上）
+  a.style.display = 'none'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  // 立刻 revoke 会让部分实现拿不到数据，挪到下一个任务
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}

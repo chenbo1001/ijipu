@@ -191,7 +191,8 @@ export function DynamicFrameOverlay() {
     const sd = useSyncStore.getState()
     const doc = sd.doc
     if (doc !== null && doc.tempo !== null && sd.audio !== null && doc.mix.source !== 'synth') {
-      const acc = await buildAccompanimentTrack(sd.audio, doc.tempo, doc.trim, session)
+      // adj1129：收尾淡出——最后一拍渐小到无声（用户口径：不要停得太突兀）
+      const acc = await buildAccompanimentTrack(sd.audio, doc.tempo, doc.trim, session, 60000 / session.bpm)
       if (doc.mix.source === 'file') return acc
       const lib = resolveActiveLibrary(useUiStore.getState().playbackHqLibrary).lib
       const cache = (cacheRef.current ??= createHqCache())

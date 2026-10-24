@@ -1388,6 +1388,7 @@ export const syncCopy = {
   keyMismatch: '谱面与伴奏调性不一致，注意音高',
   saved: '已存本机缓存（网页/开发模式没有 sidecar 文件）',
   savedFile: (name: string) => `已保存：${name}`,
+  savedDownloaded: (name: string) => `已下载 ${name}（网页/开发模式不能写同目录；放回谱文件旁边即可）`,
   saveFailed: (e: string) => `保存失败：${e}`,
   saveHint: '把对拍参数写进同目录的 sidecar 文件（`.jps.sync.json`）',
   closeHint: '关掉台面（Esc 也行）',
