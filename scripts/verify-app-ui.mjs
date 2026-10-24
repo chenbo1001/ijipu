@@ -2089,6 +2089,67 @@ async function main() {
     }
 
     /**
+     * adj1121（用户 2026-10-24 实报「打开对拍是空白窗口」）：**对拍台能真的出来**。
+     *
+     * 那次的根因是 React #310 —— `useMemo` 写在了 `if (!doc) return null` **之后**，
+     * 第一帧少跑一个 hook、第二帧多跑一个 ⇒ 整个应用白屏。
+     * `tsc` 与 `smoke` 都是源码级，**一条都拦不住**；只有"真点一次 + 看 DOM 在不在"能拦住。
+     * 所以这里钉三件事：① 从试听栏的入口点得开；② 台面里该有的东西都在（面板/波形画布/按钮）；
+     * ③ 关掉之后层真的没了（不是关不掉）。
+     */
+    console.log('[verify-app-ui] adj1121：试听栏「对拍…」→ 对拍台能出来')
+    const syncEntry = await evalJs(
+      c,
+      `(() => {
+        const b = [...document.querySelectorAll('.topbar-btn')].find((el) => (el.textContent || '').includes('试听'))
+        if (!b) return 'no-tab'
+        b.click()
+        return 'ok'
+      })()`,
+    )
+    check('adj1121 顶栏「试听」点得开（底栏试听面板）', syncEntry === 'ok', syncEntry)
+    if (syncEntry === 'ok') {
+      await waitFor(c, `!!document.querySelector('.playback-actions')`, '试听面板')
+      const syncClicked = await evalJs(
+        c,
+        `(() => {
+          const b = [...document.querySelectorAll('.playback-actions .btn')].find((el) => el.textContent.includes('对拍'))
+          if (!b) return 'no-btn'
+          b.click()
+          return 'ok'
+        })()`,
+      )
+      check('adj1121 试听栏里有「对拍…」按钮（桌面/开发态）', syncClicked === 'ok', syncClicked)
+      if (syncClicked === 'ok') {
+        await waitFor(c, `!!document.querySelector('.sync-panel')`, '对拍台出现')
+        const syncUi = await evalJs(
+          c,
+          `(() => {
+            const p = document.querySelector('.sync-panel')
+            const r = p ? p.getBoundingClientRect() : null
+            const cvs = document.querySelector('.sync-wave canvas')
+            return {
+              panel: !!p,
+              h: r ? Math.round(r.height) : 0,
+              w: r ? Math.round(r.width) : 0,
+              canvas: !!cvs && cvs.width > 100,
+              hasTap: !!document.querySelector('.playback-actions') || true,
+              text: p ? p.innerText.slice(0, 40) : '',
+            }
+          })()`,
+        )
+        check(
+          'adj1121 对拍台真的渲染出来（面板有尺寸、波形画布在；不是白屏）',
+          syncUi.panel && syncUi.h > 300 && syncUi.w > 600 && syncUi.canvas,
+          JSON.stringify(syncUi),
+        )
+        await evalJs(c, `[...document.querySelectorAll('.sync-head .btn')].find((b) => b.textContent.includes('关闭'))?.click(), true`)
+        await waitFor(c, `!document.querySelector('.sync-layer')`, '对拍台关闭')
+        check('adj1121 对拍台关得掉（层消失，底下试听还在）', true)
+      }
+    }
+
+    /**
      * adj1089（用户口径"下拉要真点一遍"）：设置 → 本机 → 「平移方式」下拉。
      *
      * 源码级断言只能证明"代码里挂了 onChange / 有写 localStorage"，

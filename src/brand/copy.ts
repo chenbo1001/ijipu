@@ -1328,6 +1328,8 @@ export const cardStyleCopy = {
  */
 export const syncCopy = {
   title: '对拍（伴奏对齐）',
+  /** 非桌面端（网站/插件）即便绕过入口进来也只显示这一行 */
+  desktopOnly: '对拍要在桌面版里做（解码音频、写 sidecar 都需要桌面能力）',
   /** 相机位上的入口按钮（短） */
   syncOpen: '对拍…',
   /** 相机位上状态前缀：`对拍 ♩=96` */
@@ -1380,4 +1382,7 @@ export const syncCopy = {
   saved: '已保存到本机；写 sidecar 文件待接',
   play: '播放',
   pause: '暂停',
+  /** 波形缩放（按钮上写"当前是什么档"，点一下切另一档） */
+  zoomAll: '视图：整曲',
+  zoom30: '视图：30 秒',
 } as const

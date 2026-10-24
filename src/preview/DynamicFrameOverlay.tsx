@@ -614,16 +614,7 @@ export function DynamicFrameOverlay() {
           ) : (
             <span className="dyn-frame-label">{dynamicVideoCopy.rangeAll}</span>
           )}
-          {/* adj1119：对拍台入口 + 当前对拍状态（有 sidecar 才显示拍速/偏移） */}
-          <button
-            type="button"
-            className="btn dyn-frame-sync"
-            disabled={encoding || preparingAudio}
-            onClick={() => openModal('sync')}
-            title={syncCopy.title}
-          >
-            {syncCopy.syncOpen}
-          </button>
+          {/* adj1121：对拍入口**挪到试听栏**（对拍是边听边对的活）；相机位只保留当前对拍状态 */}
           {syncBpm !== null && (
             <span className="dyn-frame-meta dyn-frame-sync-badge">
               {syncCopy.syncBadge} ♩={Math.round(syncBpm)}

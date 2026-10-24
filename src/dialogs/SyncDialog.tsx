@@ -19,6 +19,7 @@ import { useSyncStore } from '../store/syncStore'
 import { useUiStore } from '../store/uiStore'
 import { decodeAccompaniment, waveformPeaks } from '../export/video/accompaniment'
 import { syncDocStale } from '../export/video/syncDoc'
+import { canUseDynamicVideo } from '../export/video/capability'
 import { syncCopy } from '../brand/copy'
 
 /** 波形高度（CSS px） */
@@ -369,8 +370,11 @@ export function SyncDialog() {
     }
 
     if (metaRef.current) {
-      const cur = playheadRef.current
-      metaRef.current.textContent = `${fmtSec(cur)} / ${fmtSec(durMs)}`
+      // 没选伴奏时别显示 `0.000s / 0.001s`（看起来像坏数据）
+      metaRef.current.textContent =
+        audio !== null || doc.audioDurationMs > 1
+          ? `${fmtSec(playheadRef.current)} / ${fmtSec(durMs)}`
+          : ''
     }
   }, [audio, doc, durMs, effFit, barStartBeats, pending, sel, trim.endMs, trim.startMs, zoom])
 
@@ -524,13 +528,43 @@ export function SyncDialog() {
     return () => window.removeEventListener('keydown', keyboard)
   }, [keyboard])
 
-  if (!doc) return null
-
+  /**
+   * ⚠ `adj1121`：**所有 hook 必须在下面这个提前返回之前**。
+   *
+   * 第一版把 `residuals` 的 `useMemo` 写在 `if (!doc) return null` 之后 ⇒ 第一帧（doc 还是 null）
+   * 只跑到一半 hook，第二帧（doc 建好）多跑一个 hook ⇒ React #310
+   * 「Rendered more hooks than during the previous render」⇒ **整个应用白屏**。
+   * `tsc`/`smoke` 都发现不了，只有真浏览器点一次才看得见（已补 `verify:app-ui` 断言）。
+   */
   const residuals = useMemo(() => {
     if (!doc || doc.tempo === null) return []
     const f = fitSync(doc.anchors)
     return f === null ? [] : residualBeatsOf(f)
   }, [doc])
+
+  if (!doc) return null
+
+  /**
+   * adj1121（AGENTS 五·3）：**功能自己要有闸门**，不能只靠"入口藏在相机位/试听里"。
+   * 网站与 Obsidian 插件不该出现对拍台；万一被别的入口打开，这里只显示一行说明。
+   */
+  if (!canUseDynamicVideo()) {
+    return (
+      <div className="sync-layer">
+        <div className="sync-panel">
+          <div className="sync-head">
+            <b>{syncCopy.title}</b>
+            <span className="sync-grow" />
+            <button type="button" className="btn" onClick={() => closeModal()}>
+              {syncCopy.close}
+            </button>
+          </div>
+          <div className="sync-dim sync-pad">{syncCopy.desktopOnly}</div>
+        </div>
+      </div>
+    )
+  }
+
   const worst = residuals.length > 0 ? Math.max(...residuals) : 0
   const stale = syncDocStale(doc, code)
   const selAnchor = doc.anchors[sel]
@@ -616,7 +650,7 @@ export function SyncDialog() {
             ))}
           </select>
           <button type="button" className="btn" onClick={() => setZoom(zoom === 'all' ? '30' : 'all')}>
-            {zoom === 'all' ? '整曲' : '30 秒'}
+            {zoom === 'all' ? syncCopy.zoomAll : syncCopy.zoom30}
           </button>
         </div>
 
@@ -715,7 +749,7 @@ export function SyncDialog() {
                 </div>
               </>
             ) : (
-              <div className="sync-dim sync-pad">{syncCopy.anchorHint}</div>
+              <div className="sync-dim sync-pad">{syncCopy.noAnchors}</div>
             )}
 
             <div className="sync-row sync-row-tight">
@@ -759,7 +793,7 @@ export function SyncDialog() {
               <span>
                 {syncCopy.residual} {doc.tempo ? `±${Math.round(worst * doc.tempo.beatMs)}ms` : '—'}
               </span>
-              {doc.tempo === null && <span className="sync-dim">{syncCopy.anchorHint}</span>}
+              {doc.anchors.length === 1 && <span className="sync-dim">{syncCopy.anchorHint}</span>}
               {usable && (
                 <button
                   type="button"

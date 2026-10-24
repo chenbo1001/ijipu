@@ -11154,5 +11154,28 @@ smoke 五条含"来源切换成对"结构断言与负对照） |
   ③ **括号类扫描器要认识新标记**：`findSegmentEnd` 这种"找第一个右括号"的函数，
      遇到新引入的成对标记必须先跳过它，否则报错文案会误导用户（本次报的还是"你没写拍数"）。
 
+### E-2026-527 打开「对拍」整个应用白屏：hook 写在 `if (!doc) return null` 之后（用户 2026-10-24 实报，adj1121）
+
+- **现象**：点试听栏的「对拍…」，窗口变**全白**（不是面板空白、是整个应用没了）。
+- **根因**：`SyncDialog.tsx` 里 `const residuals = useMemo(...)` 写在了
+  `if (!doc) return null` **之后**。第一帧 `doc` 还是 `null`（`ensureFor` 在 effect 里才建），
+  组件在这里提前返回 ⇒ 这一帧少跑一个 hook；第二帧 `doc` 有了，多跑一个 hook ⇒
+  **React #310「Rendered more hooks than during the previous render」** ⇒ React 卸载整棵树 ⇒ 白屏。
+  实测抓到的原文（CDP `Runtime.exceptionThrown`）：
+  `Minified React error #310 ... at R ... at Object.ws [as useMemo] ... at SyncDialog-*.js`。
+- **为什么拦不住**：`tsc` 与 `npm run smoke` 都是源码级（不渲染组件），
+  而 `verify:app-ui` 当时**没有一条用例点开对拍台** ⇒ 三道门全绿、用户一点就白屏。
+- **解决**：把 `residuals` 的 `useMemo` 提到提前返回**之前**（hook 顺序恒定）；
+  顺手补三条：没选伴奏时不显示 `0.000s / 0.001s`、缩放按钮写"视图：整曲/30 秒"、
+  0 条锚点时提示"还没有锚点"（原来误显示"只有一条锚点…"）。
+- **验证**：`npm run verify:app-ui` 新增 `adj1121` 四条（顶栏「试听」点得开 → 试听栏有「对拍…」→
+  台面真有尺寸且波形画布在 → 关得掉），`全部通过 ✅（116 项）`；`smoke` ✓/✗ 见提交信息。
+- **预防**：
+  ① **`return null` 之前不许再有 hook**（`useMemo`/`useCallback`/`useEffect` 一律上移）——
+     需要"没数据就不渲染"时，把提前返回放到**所有 hook 之后**；
+  ② **新对话框一律补一条 `verify:app-ui` 用例**（"点开 → 关键元素在 → 关得掉"）。
+     源码级断言证明不了"能渲染"——这正是 `adj959` 那条教训的第二次复发；
+  ③ 调试这类白屏用 CDP 抓 `Runtime.exceptionThrown`（临时脚本用完即删），别靠猜。
+
 
 
