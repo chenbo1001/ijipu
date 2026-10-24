@@ -33,9 +33,17 @@ import { canUseDynamicVideo } from '../export/video/capability'
 import { syncCopy } from '../brand/copy'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
 import { timeLabelOf, timeScaleOf } from './syncRuler'
+// adj1124：台面尺寸/分区高度/预览比例（可调整、存 L1）
+import {
+  loadSyncLayout,
+  normalizeSyncLayout,
+  resizePreviewH,
+  resizeSyncLayout,
+  resizeWaveH,
+  saveSyncLayout,
+  type SyncLayout,
+} from './syncLayout'
 
-/** 波形高度（CSS px） */
-const WAVE_H = 172
 /** 波形**下侧时间标尺**的高度（用户 2026-10-24：「在音频波形图下侧显示时间标尺，以方便定位」） */
 const RULER_H = 20
 /** 微调步长可选值（用户说"先定一步多长，精细后面再调"） */
@@ -76,6 +84,16 @@ export function SyncDialog() {
   const [bar, setBar] = useState(1)
   const [beat, setBeat] = useState(1)
   const [notice, setNotice] = useState('')
+  /**
+   * adj1124（用户 2026-10-24）：**台面尺寸/分区高度/预览比例**可调，并记住（L1）。
+   * 拖的过程中只改 state（不写盘），松手/离散操作才 `saveSyncLayout`。
+   */
+  const [layout, setLayout] = useState<SyncLayout>(() =>
+    loadSyncLayout(typeof window === 'undefined' ? 1440 : window.innerWidth, typeof window === 'undefined' ? 900 : window.innerHeight),
+  )
+  const viewportRef = useRef({ w: 1440, h: 900 })
+  /** 拖拽用的临时状态（pointerdown 时记起点，move 时算 delta） */
+  const dragRef = useRef<{ kind: 'panel' | 'preview' | 'wave'; x: number; y: number; base: SyncLayout } | null>(null)
 
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -100,6 +118,67 @@ export function SyncDialog() {
     ensureFor(fileName, code)
   }, [ensureFor, fileName, code])
 
+  // ---------- adj1124：台面尺寸（可拖右下角 / 最大化 / 记 L1） ----------
+  /** 记住上一次渲染出来的 layout（拖拽松手时要在监听里读它，而监听只挂一次） */
+  const layoutRef = useRef(layout)
+  useEffect(() => {
+    layoutRef.current = layout
+    // 拖动过程中不写盘（每帧写一次 localStorage 会卡），松手才写
+    if (dragRef.current === null) saveSyncLayout(layout)
+  }, [layout])
+
+  /** 视口大小变了：重新夹紧（比如把窗口拖小了，台面不能比视口还大） */
+  useEffect(() => {
+    const sync = () => {
+      viewportRef.current = { w: window.innerWidth, h: window.innerHeight }
+      setLayout((l) => normalizeSyncLayout(l, window.innerWidth, window.innerHeight))
+    }
+    sync()
+    window.addEventListener('resize', sync)
+    return () => window.removeEventListener('resize', sync)
+  }, [])
+
+  /**
+   * 三处拖拽统一在 window 上收 move/up（指针可能在拖动中离开那个 6px 的分隔条）：
+   *  - `panel`：右下角 ⇒ 同时改宽高；
+   *  - `preview`：预览与波形之间 ⇒ 只改预览高度（下面的区域自然让位）；
+   *  - `wave`：波形与参数行之间 ⇒ 只改波形高度。
+   */
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const d = dragRef.current
+      if (!d) return
+      const { w, h } = viewportRef.current
+      const dx = e.clientX - d.x
+      const dy = e.clientY - d.y
+      setLayout(
+        d.kind === 'panel'
+          ? resizeSyncLayout(d.base, dx, dy, w, h)
+          : d.kind === 'preview'
+            ? resizePreviewH(d.base, dy, h, w)
+            : resizeWaveH(d.base, dy, h, w),
+      )
+    }
+    const onUp = () => {
+      if (dragRef.current === null) return
+      dragRef.current = null
+      saveSyncLayout(layoutRef.current)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+  }, [])
+
+  const startDrag = (kind: 'panel' | 'preview' | 'wave') => (e: React.PointerEvent) => {
+    e.preventDefault()
+    dragRef.current = { kind, x: e.clientX, y: e.clientY, base: layoutRef.current }
+  }
+
   /**
    * adj1123（用户 2026-10-24：「波形上面还应放谱的预览图，锚定位后播放时同步显示动态谱」）：
    * 在台面里建一个**放映会话**，播放时按伴奏走。
@@ -112,7 +191,7 @@ export function SyncDialog() {
   useEffect(() => {
     let cancelled = false
     setPreviewState('building')
-    void createDynamicSession(code, '16x9' as DynamicPresetId, pageConfig, undefined, {
+    void createDynamicSession(code, layout.aspect as DynamicPresetId, pageConfig, undefined, {
       leadInMs: 0,
       endCardMs: 0,
     })
@@ -130,7 +209,7 @@ export function SyncDialog() {
       cancelled = true
       previewSessionRef.current = null
     }
-  }, [code, pageConfig])
+  }, [code, pageConfig, layout.aspect])
 
   /**
    * 小节起点**拍位**（与速度无关）：用任意拍速建一次播放序列，`barStartsMs / beatMs` 即拍。
@@ -329,6 +408,8 @@ export function SyncDialog() {
     const wrap = wrapRef.current
     if (!c || !wrap || !doc) return
     const W = Math.max(200, wrap.clientWidth)
+    // adj1124：波形高度由「拖分隔条」控制（`layout.waveH`）；标尺高度固定
+    const WAVE_H = layout.waveH
     const totalH = WAVE_H + RULER_H
     const dpr = window.devicePixelRatio || 1
     if (c.width !== Math.round(W * dpr) || c.height !== Math.round(totalH * dpr)) {
@@ -510,7 +591,7 @@ export function SyncDialog() {
 
     // 动态谱预览与波形共用同一个播放头（adj1123）
     paintPreview(playheadRef.current)
-  }, [audio, doc, durMs, effFit, barStartBeats, paintPreview, pending, sel, trim.endMs, trim.startMs, zoom])
+  }, [audio, doc, durMs, effFit, barStartBeats, paintPreview, pending, sel, trim.endMs, trim.startMs, zoom, layout.waveH])
 
   useEffect(() => {
     drawRef.current = draw
@@ -706,14 +787,30 @@ export function SyncDialog() {
 
   return (
     <div className="sync-layer">
-      <div className="sync-panel">
-        <div className="sync-head">
+      {/* adj1124：面板宽高可拖、可最大化；拖右下角那个斜纹把手（`.sync-resize`） */}
+      <div
+        className="sync-panel"
+        style={layout.maximized ? { width: '100%', height: '100%' } : { width: `${layout.w}px`, height: `${layout.h}px` }}
+      >
+        <div
+          className="sync-head"
+          onDoubleClick={() => setLayout({ ...layoutRef.current, maximized: !layoutRef.current.maximized })}
+          title={syncCopy.headHint}
+        >
           <b>
             {syncCopy.title}：{fileName}
           </b>
           <span ref={metaRef} className="sync-meta" />
           <span className="sync-grow" />
           {stale && <span className="sync-warn">{syncCopy.stale}</span>}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setLayout({ ...layoutRef.current, maximized: !layoutRef.current.maximized })}
+            title={syncCopy.maximizeHint}
+          >
+            {layout.maximized ? syncCopy.restore : syncCopy.maximize}
+          </button>
           <button type="button" className="btn" onClick={() => { save(code, fileName); setNotice(syncCopy.saved) }}>
             {syncCopy.save}
           </button>
@@ -747,8 +844,8 @@ export function SyncDialog() {
           </button>
         </div>
 
-        {/* adj1123（用户 2026-10-24）：波形**上方**放动态谱预览——锚点定好后，播放时能一边听一边看谱走到哪 */}
-        <div className="sync-preview">
+        {/* adj1123/adj1124：波形**上方**的动态谱预览；高度可拖（分隔条），比例可切（16:9 / 9:16 / 1:1） */}
+        <div className="sync-preview" style={{ height: `${layout.previewH}px` }}>
           <div className="sync-preview-box">
             <canvas ref={previewRef} />
             {previewState !== 'ready' && (
@@ -761,27 +858,30 @@ export function SyncDialog() {
             <div className="sync-preview-pos">
               <span ref={previewInfoRef}>{syncCopy.previewNow}</span>
             </div>
-            {/* 拍速/偏移/残差挪到这里：右侧空着也是空着，而且这三项正是"边看边对"时要盯的数 */}
-            <div className="sync-preview-stats">
-              <span>
-                {syncCopy.bpm} ♩={doc.tempo ? Math.round(doc.tempo.bpm) : '—'}（谱面 {Math.round(scoreBpm)}）
-              </span>
-              <span>
-                {syncCopy.offset} {doc.tempo ? fmtSec(doc.tempo.offsetMs) : '—'}
-              </span>
-              <span>
-                {syncCopy.residual} {doc.tempo ? `±${Math.round(worst * doc.tempo.beatMs)}ms` : '—'}
-              </span>
-            </div>
-            {worst > 1 && <div className="sync-warn">{syncCopy.residualWarn}</div>}
+            <label className="sync-row">
+              <span className="sync-label">{syncCopy.previewAspect}</span>
+              <select
+                className="sync-select"
+                value={layout.aspect}
+                onChange={(e) => setLayout(normalizeSyncLayout({ ...layoutRef.current, aspect: e.target.value as SyncLayout['aspect'] }, viewportRef.current.w, viewportRef.current.h))}
+              >
+                <option value="16x9">16:9</option>
+                <option value="9x16">9:16</option>
+                <option value="1x1">1:1</option>
+              </select>
+            </label>
             <div className="sync-dim">{syncCopy.previewHint}</div>
           </div>
         </div>
+        {/* 预览 ↔ 波形：往上拖 = 预览变高，波形不动 */}
+        <div className="sync-split" onPointerDown={startDrag('preview')} title={syncCopy.splitPreviewHint} />
 
         <div ref={wrapRef} className="sync-wave">
           <canvas ref={canvasRef} onClick={onWaveClick} />
           <div className="sync-wave-hint">{syncCopy.tipPick}</div>
         </div>
+        {/* 波形 ↔ 参数行：往上拖 = 波形变高 */}
+        <div className="sync-split" onPointerDown={startDrag('wave')} title={syncCopy.splitWaveHint} />
 
         <div className="sync-row">
           <span className="sync-label">{syncCopy.trim}</span>
@@ -798,6 +898,13 @@ export function SyncDialog() {
             {syncCopy.trimAll}
           </button>
           <span className="sync-grow" />
+          <button type="button" className="btn" onClick={() => setZoom(zoom === 'all' ? '30' : 'all')}>
+            {zoom === 'all' ? syncCopy.zoomAll : syncCopy.zoom30}
+          </button>
+        </div>
+
+        {/* 第二排：节拍器/循环/步长（都在波形正下方，用户口径「与音频相关的放波形条上下」） */}
+        <div className="sync-row sync-row-tight">
           <label className="sync-check">
             <input type="checkbox" checked={meterOn} onChange={(e) => setMeterOn(e.target.checked)} />
             {syncCopy.metronome}
@@ -814,9 +921,52 @@ export function SyncDialog() {
               </option>
             ))}
           </select>
-          <button type="button" className="btn" onClick={() => setZoom(zoom === 'all' ? '30' : 'all')}>
-            {zoom === 'all' ? syncCopy.zoomAll : syncCopy.zoom30}
-          </button>
+          <span className="sync-grow" />
+        </div>
+
+        {/* adj1124（用户口径「与音频相关的放波形条上下」）：对拍读数 + 混音都紧贴波形，不再散到右下角 */}
+        <div className="sync-row sync-row-tight">
+          <span className="sync-name">
+            {syncCopy.bpm} ♩={doc.tempo ? Math.round(doc.tempo.bpm) : '—'}（谱面 {Math.round(scoreBpm)}）
+          </span>
+          <span className="sync-name">
+            {syncCopy.offset} {doc.tempo ? fmtSec(doc.tempo.offsetMs) : '—'}
+          </span>
+          <span className="sync-name">
+            {syncCopy.residual} {doc.tempo ? `±${Math.round(worst * doc.tempo.beatMs)}ms` : '—'}
+          </span>
+          {worst > 1 && <span className="sync-warn">{syncCopy.residualWarn}</span>}
+          <span className="sync-grow" />
+          <span className="sync-label">{syncCopy.mixSource}</span>
+          <select
+            className="sync-select"
+            value={doc.mix.source}
+            onChange={(e) => setMix({ source: e.target.value as 'file' | 'synth' | 'mix' })}
+          >
+            <option value="file">{syncCopy.mixFile}</option>
+            <option value="mix">{syncCopy.mixBoth}</option>
+            <option value="synth">{syncCopy.mixSynth}</option>
+          </select>
+          <span className="sync-label">{syncCopy.accompGainShort}</span>
+          <input
+            className="sync-mix-range"
+            type="range"
+            min={0}
+            max={2}
+            step={0.05}
+            value={doc.mix.accomp}
+            onChange={(e) => setMix({ accomp: Number(e.target.value) })}
+          />
+          <span className="sync-label">{syncCopy.synthGainShort}</span>
+          <input
+            className="sync-mix-range"
+            type="range"
+            min={0}
+            max={2}
+            step={0.05}
+            value={doc.mix.synth}
+            onChange={(e) => setMix({ synth: Number(e.target.value) })}
+          />
         </div>
 
         {pending && (
@@ -917,38 +1067,7 @@ export function SyncDialog() {
               <div className="sync-dim sync-pad">{syncCopy.selectAnchor}</div>
             )}
 
-            <div className="sync-row sync-row-tight">
-              <span className="sync-label">{syncCopy.mixSource}</span>
-              <select
-                className="sync-select"
-                value={doc.mix.source}
-                onChange={(e) => setMix({ source: e.target.value as 'file' | 'synth' | 'mix' })}
-              >
-                <option value="file">{syncCopy.mixFile}</option>
-                <option value="mix">{syncCopy.mixBoth}</option>
-                <option value="synth">{syncCopy.mixSynth}</option>
-              </select>
-              <span className="sync-label">{syncCopy.accompGain}</span>
-              <input
-                type="range"
-                min={0}
-                max={2}
-                step={0.05}
-                value={doc.mix.accomp}
-                onChange={(e) => setMix({ accomp: Number(e.target.value) })}
-              />
-              <span className="sync-label">{syncCopy.synthGain}</span>
-              <input
-                type="range"
-                min={0}
-                max={2}
-                step={0.05}
-                value={doc.mix.synth}
-                onChange={(e) => setMix({ synth: Number(e.target.value) })}
-              />
-            </div>
-
-            {/* 拍速/偏移/残差已挪到上方预览右侧（adj1123）；这里只留"清空"与提示 */}
+            {/* 混音已挪到波形下面（adj1124）；这里只留"清空"与提示 */}
             <div className="sync-status">
               {doc.anchors.length === 1 && <span className="sync-dim">{syncCopy.anchorHint}</span>}
               {notice !== '' && <span className="sync-dim">{notice}</span>}
@@ -967,6 +1086,10 @@ export function SyncDialog() {
             </div>
           </div>
         </div>
+        {/* adj1124：右下角拖拽把手（改面板宽高；松手才写 L1） */}
+        {!layout.maximized && (
+          <div className="sync-resize" onPointerDown={startDrag('panel')} title={syncCopy.resizeHint} />
+        )}
       </div>
     </div>
   )

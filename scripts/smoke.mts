@@ -128,6 +128,15 @@ import { tempoLineOf } from '../src/export/video/cardLayout.ts'
 import { accompanimentPlan, mixSamples, waveformPeaks, ACCOMP_SAMPLE_RATE } from '../src/export/video/accompaniment.ts'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
 import { timeScaleOf, timeLabelOf } from '../src/dialogs/syncRuler.ts'
+// adj1124：对拍台尺寸/分区高度/预览比例（纯函数 + L1）
+import {
+  DEFAULT_SYNC_LAYOUT,
+  loadSyncLayout,
+  normalizeSyncLayout,
+  resizePreviewH,
+  resizeSyncLayout,
+  resizeWaveH,
+} from '../src/dialogs/syncLayout.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES, gmVoiceRef, gmVoiceProgram, countScoreInstrumentSwitches, noteIdStringOf, slicePlaySequenceByNoteRange, resolvePracticeRange, slicePlaySequenceByRange, extendRangeEndToSlurEnd } from '@ijipu/engine/playback/index.ts'
@@ -21090,6 +21099,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1120Tests())
       // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
       .then(() => runAdj1122Tests())
+      // adj1124：对拍台尺寸/分区高度/预览比例（可拖可最大化，记 L1）
+      .then(() => runAdj1124Tests())
       .then(() => {
         console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
         process.exit(failed === 0 ? 0 : 1)
@@ -35541,5 +35552,67 @@ function runAdj1122Tests(): void {
     timeScaleOf(-5000, 10000, 60).ticks[0] === 0 &&
       timeScaleOf(0, 3600000, 40).ticks.length <= 400,
     String(timeScaleOf(0, 3600000, 40).ticks.length),
+  )
+}
+
+/**
+ * adj1124（用户 2026-10-24：「窗口无法调整大小和最大化」「波形/预览高度要能调」）：
+ * 台面尺寸与分区的**夹紧规则**。这些数直接决定"拖过头会不会把界面拖没"，必须能断言。
+ */
+function runAdj1124Tests(): void {
+  console.log('[adj1124] 对拍台尺寸：夹紧 / 拖拽 / 默认值')
+  const d = normalizeSyncLayout(DEFAULT_SYNC_LAYOUT, 1440, 900)
+  check(
+    'adj1124 默认值原样通过（窗口够大时不缩放）',
+    d.w === 1240 && d.h === 820 && d.waveH === 172 && d.previewH === 230 && d.aspect === '16x9',
+    JSON.stringify(d),
+  )
+  const huge = normalizeSyncLayout({ ...DEFAULT_SYNC_LAYOUT, w: 5000, h: 5000 }, 1440, 900)
+  check(
+    'adj1124 拖太大 ⇒ 夹到视口内（留 12px 边）',
+    huge.w === 1416 && huge.h === 876,
+    JSON.stringify({ w: huge.w, h: huge.h }),
+  )
+  const tiny = normalizeSyncLayout({ ...DEFAULT_SYNC_LAYOUT, w: 10, h: 10, waveH: 10, previewH: 10 }, 1440, 900)
+  check(
+    'adj1124 拖太小 ⇒ 夹到最小尺寸（面板 760×520、波形 90、预览 120）',
+    tiny.w === 760 && tiny.h === 520 && tiny.waveH === 90 && tiny.previewH === 120,
+    JSON.stringify({ w: tiny.w, h: tiny.h, wave: tiny.waveH, preview: tiny.previewH }),
+  )
+  const overflow = normalizeSyncLayout({ ...DEFAULT_SYNC_LAYOUT, h: 520, waveH: 420, previewH: 520 }, 1440, 900)
+  check(
+    'adj1124 预览+波形吃光高度 ⇒ 先压预览，至少留 120（底部锚点区不被挤成 0）',
+    overflow.previewH === 120,
+    JSON.stringify({ h: overflow.h, wave: overflow.waveH, preview: overflow.previewH }),
+  )
+  check(
+    'adj1124 非法比例 ⇒ 回默认 16:9（不把画布搞成 0 宽）',
+    normalizeSyncLayout({ ...DEFAULT_SYNC_LAYOUT, aspect: '4x3' as never }, 1440, 900).aspect === '16x9',
+    '',
+  )
+  const dragged = resizeSyncLayout(DEFAULT_SYNC_LAYOUT, 100, 60, 1440, 900)
+  check(
+    'adj1124 拖右下角：宽高各自加位移，并取消最大化',
+    dragged.w === 1340 && dragged.h === 820 && dragged.maximized === false,
+    JSON.stringify({ w: dragged.w, h: dragged.h }),
+  )
+  check(
+    'adj1124 拖分隔条：只改自己那一项（预览 -50 / 波形 +40）',
+    resizePreviewH(DEFAULT_SYNC_LAYOUT, -50, 900).previewH === 180 &&
+      resizePreviewH(DEFAULT_SYNC_LAYOUT, -50, 900).waveH === 172 &&
+      resizeWaveH(DEFAULT_SYNC_LAYOUT, 40, 900).waveH === 212 &&
+      resizeWaveH(DEFAULT_SYNC_LAYOUT, 40, 900).previewH === 230,
+    '',
+  )
+  const grew = resizePreviewH(DEFAULT_SYNC_LAYOUT, 400, 900)
+  check(
+    'adj1124 预览往下拖 ⇒ 面板自己长高（视口 900 时封顶 876，预览最多 876−172−360=344）',
+    grew.previewH === 344 && grew.h === 876,
+    JSON.stringify({ preview: grew.previewH, h: grew.h }),
+  )
+  check(
+    'adj1124 Node 里没有 localStorage 也不炸（回默认）',
+    loadSyncLayout(1440, 900).w === DEFAULT_SYNC_LAYOUT.w,
+    String(loadSyncLayout(1440, 900).w),
   )
 }

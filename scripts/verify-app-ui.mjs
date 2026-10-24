@@ -2152,6 +2152,87 @@ async function main() {
           80,
         )
         check('adj1123 波形上方有动态谱预览（会话建好、画布 1920×1080 已出图）', previewReady)
+
+        /**
+         * adj1124（用户 2026-10-24 实报「窗口无法调整大小，和最大化」「波形/预览高度要能调」
+         * 「预览谱面要能调整显示比率」）：这些全是**交互**，源码断言证明不了，只能真拖。
+         */
+        const mouse = async (type, x, y) =>
+          c.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 })
+        const dragBy = async (selector, dx, dy) => {
+          const r = await evalJs(
+            c,
+            `(() => { const el = document.querySelector('${selector}'); if (!el) return null; const b = el.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 } })()`,
+          )
+          if (!r) return false
+          await mouse('mousePressed', r.x, r.y)
+          for (let i = 1; i <= 5; i++) {
+            await mouse('mouseMoved', r.x + (dx * i) / 5, r.y + (dy * i) / 5)
+            await sleep(40)
+          }
+          await mouse('mouseReleased', r.x + dx, r.y + dy)
+          return true
+        }
+        const panelBox = async () =>
+          evalJs(
+            c,
+            `(() => { const p = document.querySelector('.sync-panel').getBoundingClientRect(); const pv = document.querySelector('.sync-preview').getBoundingClientRect(); return { w: Math.round(p.width), h: Math.round(p.height), preview: Math.round(pv.height) } })()`,
+          )
+        const before = await panelBox()
+        // ① 最大化 / 还原
+        await evalJs(c, `[...document.querySelectorAll('.sync-head .btn')].find((b) => b.textContent.includes('最大化'))?.click(), true`)
+        await sleep(350)
+        const maxed = await panelBox()
+        const winW = await evalJs(c, `window.innerWidth`)
+        check(
+          'adj1124 最大化：面板铺到窗口（≈视口宽 − 16~40）',
+          maxed.w > before.w + 50 && Math.abs(maxed.w - (winW - 16)) < 60,
+          JSON.stringify({ before: before.w, maxed: maxed.w, winW }),
+        )
+        await evalJs(c, `[...document.querySelectorAll('.sync-head .btn')].find((b) => b.textContent.includes('还原'))?.click(), true`)
+        await sleep(350)
+        const restored = await panelBox()
+        check('adj1124 还原：回到原来的大小', restored.w === before.w && restored.h === before.h, JSON.stringify(restored))
+        // ② 拖右下角把手：宽 +80
+        await dragBy('.sync-resize', 80, 0)
+        await sleep(350)
+        const resized = await panelBox()
+        check(
+          'adj1124 拖右下角：面板真的变宽（+80 左右）',
+          Math.abs(resized.w - (before.w + 80)) <= 4,
+          JSON.stringify({ w: resized.w }),
+        )
+        await dragBy('.sync-resize', -80, 0)
+        await sleep(300)
+        // ③ 拖"预览↔波形"分隔条：预览变高
+        const okSplit = await dragBy('.sync-split', 0, 50)
+        await sleep(350)
+        const afterSplit = await panelBox()
+        check(
+          'adj1124 拖分隔条：预览真的变高（+50 左右，面板跟着长高）',
+          okSplit && afterSplit.preview > before.preview + 30,
+          JSON.stringify({ preview: afterSplit.preview }),
+        )
+        await dragBy('.sync-split', 0, -50)
+        await sleep(300)
+        // ④ 预览比例 9:16 ⇒ 画布变成竖的
+        await evalJs(
+          c,
+          `(() => { const s = document.querySelector('.sync-preview-side select'); if (!s) return false; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; setter.call(s, '9x16'); s.dispatchEvent(new Event('change', { bubbles: true })); return true })()`,
+        )
+        const portrait = await waitFor(
+          c,
+          `(() => { const el = document.querySelector('.sync-preview-box canvas'); return !!el && el.height > el.width })()`,
+          '9:16 预览会话',
+          80,
+        )
+        check('adj1124 预览比例切 9:16：会话真的重建为竖屏画布（1080×1920）', portrait)
+        // 收尾：切回 16:9，别影响后面的用例
+        await evalJs(
+          c,
+          `(() => { const s = document.querySelector('.sync-preview-side select'); if (!s) return false; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; setter.call(s, '16x9'); s.dispatchEvent(new Event('change', { bubbles: true })); return true })()`,
+        )
+        await sleep(300)
         await evalJs(c, `[...document.querySelectorAll('.sync-head .btn')].find((b) => b.textContent.includes('关闭'))?.click(), true`)
         await waitFor(c, `!document.querySelector('.sync-layer')`, '对拍台关闭')
         check('adj1121 对拍台关得掉（层消失，底下试听还在）', true)

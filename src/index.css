@@ -6007,7 +6007,9 @@ span.ws-check {
   display: flex;
   align-items: stretch;
   gap: 12px;
-  height: 230px;
+  /* 高度由内联样式给（可拖，adj1124）；这里只兜住最小值 */
+  min-height: 120px;
+  flex: 0 0 auto;
 }
 
 /* 舞台铺满整行（左右留黑边是正常的"放映窗口"观感），读数固定在右侧 320px */
@@ -6026,9 +6028,11 @@ span.ws-check {
 }
 
 .sync-preview-box canvas {
+  /* 画布按会话尺寸（如 1920×1080 或 1080×1920）绘制，靠 `object-fit` 在舞台里等比显示：
+     换比例不用改布局，舞台宽度也不跳（adj1124） */
+  width: 100%;
   height: 100%;
-  width: auto;
-  max-width: 100%;
+  object-fit: contain;
   display: block;
 }
 
@@ -6043,9 +6047,10 @@ span.ws-check {
   background: rgb(15 18 24 / 72%);
 }
 
+/* 预览右侧读数（拍速/偏移/残差已挪到波形下方，adj1124） */
 .sync-preview-side {
-  flex: 0 0 320px;
-  width: 320px;
+  flex: 0 0 300px;
+  width: 300px;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -6061,13 +6066,7 @@ span.ws-check {
 }
 
 /* 拍速/偏移/残差（从底部状态行挪上来，紧挨着预览） */
-.sync-preview-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 18px;
-  color: var(--jp-text-secondary);
-  font-variant-numeric: tabular-nums;
-}
+/* 拍速/偏移/残差（adj1124：已从预览右侧挪到波形下方，这个类不再使用） */
 
 /* ============================================================
  * adj1119：对拍台（应用内独立台面）
@@ -6080,12 +6079,16 @@ span.ws-check {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 8px;
   background: rgb(0 0 0 / 55%);
 }
 
+/* 宽高由 JS 写内联样式（可拖 / 可最大化，adj1124）；这里只兜住"不比视口还大" */
 .sync-panel {
-  width: min(1240px, 96vw);
-  height: min(760px, 94vh);
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -6097,11 +6100,45 @@ span.ws-check {
   box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
 }
 
+/* 右下角拖拽把手（斜纹） */
+.sync-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background-image: linear-gradient(135deg, transparent 45%, var(--jp-text-muted) 45%, var(--jp-text-muted) 55%, transparent 55%);
+  background-size: 6px 6px;
+  border-bottom-right-radius: 10px;
+  opacity: 0.7;
+}
+
+.sync-resize:hover {
+  opacity: 1;
+}
+
+/* 分区之间的拖拽分隔条（预览↔波形、波形↔参数行） */
+.sync-split {
+  height: 6px;
+  margin: -3px 0;
+  border-radius: 3px;
+  cursor: row-resize;
+  background: transparent;
+  flex: 0 0 6px;
+}
+
+.sync-split:hover {
+  background: var(--jp-accent);
+  opacity: 0.45;
+}
+
 .sync-head {
   display: flex;
   align-items: center;
   gap: 10px;
   font-size: 13px;
+  user-select: none;
 }
 
 .sync-meta {
@@ -6123,6 +6160,8 @@ span.ws-check {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  /* 参数行不参与压缩：面板高度不够时由中间的锚点/微调区让位（adj1124） */
+  flex: 0 0 auto;
   font-size: 12px;
 }
 
@@ -6150,6 +6189,8 @@ span.ws-check {
 /* 波形：外层用相对定位，提示文字压在左下角 */
 .sync-wave {
   position: relative;
+  /* 高度由 canvas 的内联高度决定（可拖，adj1124）；不许被挤扁 */
+  flex: 0 0 auto;
   border: 1px solid var(--jp-border);
   border-radius: 6px;
   overflow: hidden;
@@ -6176,10 +6217,16 @@ span.ws-check {
 }
 
 .sync-body {
-  flex: 1;
+  /* 吃剩余高度；面板变小就先压这里，里面各自滚动（用户要求"最下一排跟随缩放高度"） */
+  flex: 1 1 0;
   min-height: 0;
   display: flex;
   gap: 12px;
+}
+
+/* 混音两个滑杆固定窄一点，否则窄窗口下会把整行挤到换行（adj1124） */
+.sync-mix-range {
+  width: 88px;
 }
 
 .sync-anchors {

@@ -1378,6 +1378,9 @@ export const syncCopy = {
   mixBoth: '伴奏+合成',
   accompGain: '伴奏音量',
   synthGain: '合成音音量',
+  /** 波形下方那一排用短标签（窄窗口不换行，adj1124） */
+  accompGainShort: '伴奏',
+  synthGainShort: '合成',
   key: '伴奏调性',
   keyNone: '未填',
   keyMismatch: '谱面与伴奏调性不一致，注意音高',
@@ -1392,4 +1395,13 @@ export const syncCopy = {
   previewFailed: '动态谱没建起来（谱面还有错？）',
   previewNow: '当前位置',
   previewHint: '播放时这里跟着伴奏走：看跳跳球落在第几拍、色块是不是压在这一下。',
+  /* ---- adj1124：台面尺寸/分区可调 ---- */
+  previewAspect: '预览比例',
+  maximize: '最大化',
+  restore: '还原',
+  maximizeHint: '最大化 / 还原（也可以双击标题条）',
+  headHint: '双击这里切换最大化',
+  resizeHint: '拖这里改窗口大小',
+  splitPreviewHint: '上下拖：改预览高度',
+  splitWaveHint: '上下拖：改波形高度',
 } as const
