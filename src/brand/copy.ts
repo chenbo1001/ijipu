@@ -1387,4 +1387,9 @@ export const syncCopy = {
   /** 波形缩放（按钮上写"当前是什么档"，点一下切另一档） */
   zoomAll: '视图：整曲',
   zoom30: '视图：30 秒',
+  /* ---- adj1123：波形上方的动态谱预览 ---- */
+  previewBuilding: '正在准备动态谱…',
+  previewFailed: '动态谱没建起来（谱面还有错？）',
+  previewNow: '当前位置',
+  previewHint: '播放时这里跟着伴奏走：看跳跳球落在第几拍、色块是不是压在这一下。',
 } as const

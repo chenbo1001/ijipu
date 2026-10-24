@@ -2144,6 +2144,14 @@ async function main() {
           syncUi.panel && syncUi.h > 300 && syncUi.w > 600 && syncUi.canvas && syncUi.canvasH >= 180,
           JSON.stringify(syncUi),
         )
+        // adj1123：波形**上方**要有动态谱预览（会话异步建好 ⇒ 轮询等它出图）
+        const previewReady = await waitFor(
+          c,
+          `(() => { const el = document.querySelector('.sync-preview-box canvas'); return !!el && el.width >= 1000 && el.height >= 500 })()`,
+          '动态谱预览会话（16:9 画布）',
+          80,
+        )
+        check('adj1123 波形上方有动态谱预览（会话建好、画布 1920×1080 已出图）', previewReady)
         await evalJs(c, `[...document.querySelectorAll('.sync-head .btn')].find((b) => b.textContent.includes('关闭'))?.click(), true`)
         await waitFor(c, `!document.querySelector('.sync-layer')`, '对拍台关闭')
         check('adj1121 对拍台关得掉（层消失，底下试听还在）', true)

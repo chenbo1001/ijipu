@@ -13,10 +13,20 @@
  *  - 参数先存 L1（`syncStore`），相机位/导出已经按它重建会话、带上伴奏。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { buildPlaySequence, fitSync, inferBpm, layoutScore, residualBeatsOf, type SyncAnchor } from '@ijipu/engine'
+import {
+  buildPlaySequence,
+  fitSync,
+  inferBpm,
+  layoutScore,
+  residualBeatsOf,
+  sessionMsOfAudioMs,
+  type DynamicPresetId,
+  type SyncAnchor,
+} from '@ijipu/engine'
 import { useDocStore } from '../store/docStore'
 import { useSyncStore } from '../store/syncStore'
 import { useUiStore } from '../store/uiStore'
+import { createDynamicSession, type DynamicSession } from '../export/video/renderer'
 import { decodeAccompaniment, waveformPeaks } from '../export/video/accompaniment'
 import { syncDocStale } from '../export/video/syncDoc'
 import { canUseDynamicVideo } from '../export/video/capability'
@@ -69,6 +79,11 @@ export function SyncDialog() {
 
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  /** adj1123：波形上方的**动态谱预览**（按谱面 J: 建一次，对拍只按比例缩放） */
+  const previewRef = useRef<HTMLCanvasElement | null>(null)
+  const previewSessionRef = useRef<DynamicSession | null>(null)
+  const previewInfoRef = useRef<HTMLSpanElement | null>(null)
+  const [previewState, setPreviewState] = useState<'building' | 'ready' | 'error'>('building')
   const fileRef = useRef<HTMLInputElement | null>(null)
   const metaRef = useRef<HTMLSpanElement | null>(null)
   const playheadRef = useRef(0)
@@ -84,6 +99,38 @@ export function SyncDialog() {
   useEffect(() => {
     ensureFor(fileName, code)
   }, [ensureFor, fileName, code])
+
+  /**
+   * adj1123（用户 2026-10-24：「波形上面还应放谱的预览图，锚定位后播放时同步显示动态谱」）：
+   * 在台面里建一个**放映会话**，播放时按伴奏走。
+   *
+   * 为什么按**谱面 `J:`** 建、而不是按对拍拍速建：微调每按一次 ±5ms 拍速都会变，
+   * 按拍速建就要重建会话（几百毫秒/次，手感全毁）。这两个时间轴只差一个**比例**
+   * （`sessionMsOfAudioMs`：拍数不变、只换秒数），所以建一次、按比例缩放即可。
+   * 片头/片尾卡不要（`leadInMs: 0, endCardMs: 0`）——对拍只看谱面那一帧。
+   */
+  useEffect(() => {
+    let cancelled = false
+    setPreviewState('building')
+    void createDynamicSession(code, '16x9' as DynamicPresetId, pageConfig, undefined, {
+      leadInMs: 0,
+      endCardMs: 0,
+    })
+      .then((s) => {
+        if (cancelled) return
+        previewSessionRef.current = s
+        setPreviewState('ready')
+        // 会话好了立刻画一帧（此时可能还停在 0）
+        drawRef.current()
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewState('error')
+      })
+    return () => {
+      cancelled = true
+      previewSessionRef.current = null
+    }
+  }, [code, pageConfig])
 
   /**
    * 小节起点**拍位**（与速度无关）：用任意拍速建一次播放序列，`barStartsMs / beatMs` 即拍。
@@ -131,6 +178,32 @@ export function SyncDialog() {
       return start + (beatNo - 1)
     },
     [barStartBeats],
+  )
+
+  /**
+   * 画一帧**动态谱预览**：音频时刻 → 会话时刻（按拍速比例换算），顺带更新"当前位置"读数。
+   * 没对拍（`effFit` 为空）时按"谱面从音频 0 开始"的假设走，至少能看谱。
+   */
+  const paintPreview = useCallback(
+    (audioMs: number) => {
+      const s = previewSessionRef.current
+      const c = previewRef.current
+      if (!s || !c) return
+      if (c.width !== s.width || c.height !== s.height) {
+        c.width = s.width
+        c.height = s.height
+      }
+      const ctx = c.getContext('2d')
+      if (!ctx) return
+      const fitForPreview = effFit ?? { beatMs: scoreBeatMs, offsetMs: 0 }
+      const t = Math.max(0, Math.min(s.totalMs - 1, sessionMsOfAudioMs(audioMs, fitForPreview, scoreBeatMs)))
+      s.draw(ctx, t)
+      if (previewInfoRef.current) {
+        const beat = t / scoreBeatMs
+        previewInfoRef.current.textContent = `${syncCopy.previewNow} ${barBeatLabel(beat)}（第 ${Math.floor(beat) + 1} 拍）`
+      }
+    },
+    [barBeatLabel, effFit, scoreBeatMs],
   )
 
   // ---------- 播放器（AudioContext + 手动循环，便于节拍器每圈重排） ----------
@@ -434,7 +507,10 @@ export function SyncDialog() {
           ? `${fmtSec(playheadRef.current)} / ${fmtSec(durMs)}`
           : ''
     }
-  }, [audio, doc, durMs, effFit, barStartBeats, pending, sel, trim.endMs, trim.startMs, zoom])
+
+    // 动态谱预览与波形共用同一个播放头（adj1123）
+    paintPreview(playheadRef.current)
+  }, [audio, doc, durMs, effFit, barStartBeats, paintPreview, pending, sel, trim.endMs, trim.startMs, zoom])
 
   useEffect(() => {
     drawRef.current = draw
@@ -671,6 +747,37 @@ export function SyncDialog() {
           </button>
         </div>
 
+        {/* adj1123（用户 2026-10-24）：波形**上方**放动态谱预览——锚点定好后，播放时能一边听一边看谱走到哪 */}
+        <div className="sync-preview">
+          <div className="sync-preview-box">
+            <canvas ref={previewRef} />
+            {previewState !== 'ready' && (
+              <span className="sync-preview-tip">
+                {previewState === 'building' ? syncCopy.previewBuilding : syncCopy.previewFailed}
+              </span>
+            )}
+          </div>
+          <div className="sync-preview-side">
+            <div className="sync-preview-pos">
+              <span ref={previewInfoRef}>{syncCopy.previewNow}</span>
+            </div>
+            {/* 拍速/偏移/残差挪到这里：右侧空着也是空着，而且这三项正是"边看边对"时要盯的数 */}
+            <div className="sync-preview-stats">
+              <span>
+                {syncCopy.bpm} ♩={doc.tempo ? Math.round(doc.tempo.bpm) : '—'}（谱面 {Math.round(scoreBpm)}）
+              </span>
+              <span>
+                {syncCopy.offset} {doc.tempo ? fmtSec(doc.tempo.offsetMs) : '—'}
+              </span>
+              <span>
+                {syncCopy.residual} {doc.tempo ? `±${Math.round(worst * doc.tempo.beatMs)}ms` : '—'}
+              </span>
+            </div>
+            {worst > 1 && <div className="sync-warn">{syncCopy.residualWarn}</div>}
+            <div className="sync-dim">{syncCopy.previewHint}</div>
+          </div>
+        </div>
+
         <div ref={wrapRef} className="sync-wave">
           <canvas ref={canvasRef} onClick={onWaveClick} />
           <div className="sync-wave-hint">{syncCopy.tipPick}</div>
@@ -841,17 +948,10 @@ export function SyncDialog() {
               />
             </div>
 
+            {/* 拍速/偏移/残差已挪到上方预览右侧（adj1123）；这里只留"清空"与提示 */}
             <div className="sync-status">
-              <span>
-                {syncCopy.bpm} ♩={doc.tempo ? Math.round(doc.tempo.bpm) : '—'}（谱面 {Math.round(scoreBpm)}）
-              </span>
-              <span>
-                {syncCopy.offset} {doc.tempo ? fmtSec(doc.tempo.offsetMs) : '—'}
-              </span>
-              <span>
-                {syncCopy.residual} {doc.tempo ? `±${Math.round(worst * doc.tempo.beatMs)}ms` : '—'}
-              </span>
               {doc.anchors.length === 1 && <span className="sync-dim">{syncCopy.anchorHint}</span>}
+              {notice !== '' && <span className="sync-dim">{notice}</span>}
               {usable && (
                 <button
                   type="button"
@@ -865,8 +965,6 @@ export function SyncDialog() {
                 </button>
               )}
             </div>
-            {worst > 1 && <div className="sync-warn">{syncCopy.residualWarn}</div>}
-            {notice !== '' && <div className="sync-dim">{notice}</div>}
           </div>
         </div>
       </div>

@@ -104,7 +104,7 @@ const parseJps = (src: string) => {
   return { ...r, errors: r.errors.filter((e) => !METER_WARN_RE.test(e.message)) }
 }
 // adj1119：伴奏对拍的纯数学 + 边车文件（界面/出片/命令行共用同一份口径）
-import { fitSync, audioMsOfBeat, beatOfAudioMs, residualBeatsOf, bpmOfFit, inTrimRange, displayBpm, INTERLUDE_COLOR } from '@ijipu/engine/index.ts'
+import { fitSync, audioMsOfBeat, beatOfAudioMs, residualBeatsOf, bpmOfFit, inTrimRange, displayBpm, sessionMsOfAudioMs, INTERLUDE_COLOR } from '@ijipu/engine/index.ts'
 import {
   SYNC_SUFFIX,
   SYNC_VERSION,
@@ -35298,6 +35298,14 @@ function runAdj1119Tests(): void {
       !inTrimRange({ startMs: 100, endMs: 200 }, 99) &&
       inTrimRange(undefined, 123),
     '',
+  )
+  // adj1123：对拍台的动态谱预览——音频时刻 → 会话时刻（按拍速比例换算，拍数不变）
+  const fitForPreview = { beatMs: 622.65625, offsetMs: 3200 }
+  check(
+    'adj1123 预览时间轴：拍速不同只按比例缩放（第 128 拍：音频 82900ms → 会话 96000ms @750ms/拍）',
+    Math.abs(sessionMsOfAudioMs(3200 + 128 * 622.65625, fitForPreview, 750) - 96000) < 1e-6 &&
+      Math.abs(sessionMsOfAudioMs(82900, fitForPreview, 622.65625) - 79700) < 1e-6,
+    String(sessionMsOfAudioMs(3200 + 128 * 622.65625, fitForPreview, 750)),
   )
 
   // ④ sidecar
