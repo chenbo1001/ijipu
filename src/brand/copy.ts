@@ -1401,8 +1401,9 @@ export const syncCopy = {
   previewFailed: '动态谱没建起来（谱面还有错？）',
   previewNow: '当前位置',
   previewHint: '播放时这里跟着伴奏走：看跳跳球落在第几拍、色块是不是压在这一下。',
-  /* ---- adj1124：台面尺寸/分区可调 ---- */
-  previewAspect: '预览比例',
+  /* ---- adj1124/adj1127：台面尺寸与预览缩放 ---- */
+  previewZoom: '预览缩放',
+  scrollHint: '拖动滑块平移视野；点空白处跳过去',
   maximize: '最大化',
   restore: '还原',
   maximizeHint: '最大化 / 还原（也可以双击标题条）',

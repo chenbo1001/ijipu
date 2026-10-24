@@ -134,12 +134,14 @@ import {
   VIEW_MIN_MS,
   clampView,
   panView,
+  scrollThumb,
   viewWindow,
   zoomView,
 } from '../src/dialogs/syncRuler.ts'
 // adj1124：对拍台尺寸/分区高度/预览比例（纯函数 + L1）
 import {
   DEFAULT_SYNC_LAYOUT,
+  PREVIEW_ZOOMS,
   loadSyncLayout,
   normalizeSyncLayout,
   resizePreviewH,
@@ -21112,6 +21114,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1124Tests())
       // adj1126：波形视野（缩放/平移，默认整曲）
       .then(() => runAdj1126Tests())
+      // adj1127：横向滚动条（滑块位置/宽度）+ 预览缩放比率
+      .then(() => runAdj1127Tests())
       .then(() => {
         console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
         process.exit(failed === 0 ? 0 : 1)
@@ -35575,7 +35579,7 @@ function runAdj1124Tests(): void {
   const d = normalizeSyncLayout(DEFAULT_SYNC_LAYOUT, 1440, 900)
   check(
     'adj1124 默认值原样通过（窗口够大时不缩放）',
-    d.w === 1240 && d.h === 820 && d.waveH === 172 && d.previewH === 230 && d.aspect === '16x9',
+    d.w === 1240 && d.h === 820 && d.waveH === 172 && d.previewH === 230 && d.previewZoom === 1,
     JSON.stringify(d),
   )
   const huge = normalizeSyncLayout({ ...DEFAULT_SYNC_LAYOUT, w: 5000, h: 5000 }, 1440, 900)
@@ -35597,8 +35601,10 @@ function runAdj1124Tests(): void {
     JSON.stringify({ h: overflow.h, wave: overflow.waveH, preview: overflow.previewH }),
   )
   check(
-    'adj1124 非法比例 ⇒ 回默认 16:9（不把画布搞成 0 宽）',
-    normalizeSyncLayout({ ...DEFAULT_SYNC_LAYOUT, aspect: '4x3' as never }, 1440, 900).aspect === '16x9',
+    'adj1124/adj1127 预览缩放夹紧：0.1 ⇒ 0.5、99 ⇒ 3、非数字 ⇒ 1（不是"16:9 那种比例"）',
+    normalizeSyncLayout({ ...DEFAULT_SYNC_LAYOUT, previewZoom: 0.1 }, 1440, 900).previewZoom === 0.5 &&
+      normalizeSyncLayout({ ...DEFAULT_SYNC_LAYOUT, previewZoom: 99 }, 1440, 900).previewZoom === 3 &&
+      normalizeSyncLayout({ ...DEFAULT_SYNC_LAYOUT, previewZoom: Number.NaN }, 1440, 900).previewZoom === 1,
     '',
   )
   const dragged = resizeSyncLayout(DEFAULT_SYNC_LAYOUT, 100, 60, 1440, 900)
@@ -35674,5 +35680,38 @@ function runAdj1126Tests(): void {
     'adj1126 视野长度 ≥ 全长 ⇒ 直接按整曲处理（不存奇怪的 startMs）',
     clampView({ spanMs: dur, startMs: 1234 }, dur).spanMs === 0,
     '',
+  )
+}
+
+/**
+ * adj1127（用户 2026-10-24）：
+ *  ① 「波形放大后要一个横向滚动条」——滑块位置/宽度必须由**同一份视野**算出来；
+ *  ② 「预览的显示比率是**缩放比率**，不是 9:16 那种比例」——改由 `previewZoom` 控制。
+ */
+function runAdj1127Tests(): void {
+  console.log('[adj1127] 横向滚动条 + 预览缩放比率')
+  const dur = 200000
+  const t1 = scrollThumb({ spanMs: 30000, startMs: 10000 }, dur)
+  check(
+    'adj1127 滑块：30s 视野 / 200s 全长 ⇒ 宽 15%、左 5%',
+    t1.visible && Math.abs(t1.widthPct - 15) < 1e-9 && Math.abs(t1.leftPct - 5) < 1e-9,
+    JSON.stringify(t1),
+  )
+  const t2 = scrollThumb({ spanMs: 30000, startMs: 999999 }, dur)
+  check(
+    'adj1127 滑块右端不越界（拖到最右 ⇒ 左 85%）',
+    Math.abs(t2.leftPct - 85) < 1e-9,
+    JSON.stringify(t2),
+  )
+  check(
+    'adj1127 整曲时滑块不显示（没有可滚的）',
+    scrollThumb(VIEW_ALL, dur).visible === false &&
+      scrollThumb(VIEW_ALL, dur).widthPct === 100,
+    JSON.stringify(scrollThumb(VIEW_ALL, dur)),
+  )
+  check(
+    'adj1127 预览缩放默认 1×、档位里含 2×（下拉用）',
+    DEFAULT_SYNC_LAYOUT.previewZoom === 1 && PREVIEW_ZOOMS.includes(2),
+    PREVIEW_ZOOMS.join(','),
   )
 }

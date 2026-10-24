@@ -2185,7 +2185,7 @@ async function main() {
           c,
           `(() => {
             const sr = 8000
-            const secs = 4
+            const secs = 60
             const n = sr * secs
             const ab = new ArrayBuffer(44 + n * 2)
             const dv = new DataView(ab)
@@ -2210,7 +2210,7 @@ async function main() {
           '临时伴奏解码完成（4 秒）',
           60,
         )
-        check('adj1126 临时 WAV 能走真实解码路径（4 秒）', fixture === 'ok' && decoded, String(fixture))
+        check('adj1126 临时 WAV 能走真实解码路径（60 秒）', fixture === 'ok' && decoded, String(fixture))
         const waveRect = await evalJs(
           c,
           `(() => { const el = document.querySelector('.sync-wave canvas'); if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } })()`,
@@ -2234,27 +2234,13 @@ async function main() {
           }))()`,
         )
         check(
-          'adj1126 滚轮缩放真的生效（4s → 3.2s，视野选择器给出具体时长，读数给出可视区间）',
-          afterWheel.span === '3200' && /\d\.\d{3}s\s*–\s*\d\.\d{3}s/.test(afterWheel.readout),
+          'adj1126 滚轮缩放真的生效（60s → 48s，视野选择器给出具体时长，读数给出可视区间）',
+          afterWheel.span === '48000' && /s\s*[–-]\s*\d/.test(afterWheel.readout),
           JSON.stringify({ before: viewBefore, ...afterWheel }),
         )
-        // 按 0 回整曲
-        for (const type of ['keyDown', 'keyUp']) {
-          await c.send('Input.dispatchKeyEvent', {
-            type,
-            key: '0',
-            code: 'Digit0',
-            windowsVirtualKeyCode: 48,
-            nativeVirtualKeyCode: 48,
-          })
-        }
-        await sleep(350)
-        const afterZero = await evalJs(c, `document.querySelector('[data-sync="view"]')?.value ?? '?'`)
-        check('adj1126 按 0 回「整曲」', afterZero === '0', String(afterZero))
-
         /**
-         * adj1124（用户 2026-10-24 实报「窗口无法调整大小，和最大化」「波形/预览高度要能调」
-         * 「预览谱面要能调整显示比率」）：这些全是**交互**，源码断言证明不了，只能真拖。
+         * adj1124（用户 2026-10-24 实报「窗口无法调整大小，和最大化」「波形/预览高度要能调」）：
+         * 这些全是**交互**，源码断言证明不了，只能真拖。
          */
         const mouse = async (type, x, y) =>
           c.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 })
@@ -2278,6 +2264,38 @@ async function main() {
             `(() => { const p = document.querySelector('.sync-panel').getBoundingClientRect(); const pv = document.querySelector('.sync-preview').getBoundingClientRect(); return { w: Math.round(p.width), h: Math.round(p.height), preview: Math.round(pv.height) } })()`,
           )
         const before = await panelBox()
+
+        /**
+         * adj1127（用户 2026-10-24「波形放大后要一个横向滚动条」）：
+         * 放大后必须出现滚动条；拖滑块能平移视野（读数变）；按 `0` 回整曲后滚动条消失。
+         */
+        const scrollShown = await evalJs(c, `!!document.querySelector('.sync-scroll')`)
+        const readoutBefore = await evalJs(c, `document.querySelector('.sync-view-readout')?.textContent ?? ''`)
+        const thumbDragged = await dragBy('.sync-scroll-thumb', -80, 0)
+        await sleep(350)
+        const afterThumb = await evalJs(c, `document.querySelector('.sync-view-readout')?.textContent ?? ''`)
+        check(
+          'adj1127 放大后出现横向滚动条，拖滑块能平移视野（读数跟着变）',
+          scrollShown && thumbDragged && afterThumb !== readoutBefore,
+          JSON.stringify({ scrollShown, thumbDragged, before: readoutBefore, after: afterThumb }),
+        )
+        // 按 0 回整曲 ⇒ 滚动条消失
+        for (const type of ['keyDown', 'keyUp']) {
+          await c.send('Input.dispatchKeyEvent', {
+            type,
+            key: '0',
+            code: 'Digit0',
+            windowsVirtualKeyCode: 48,
+            nativeVirtualKeyCode: 48,
+          })
+        }
+        await sleep(350)
+        const afterZero = await evalJs(
+          c,
+          `({ span: document.querySelector('[data-sync="view"]')?.value ?? '?', scroll: !!document.querySelector('.sync-scroll') })`,
+        )
+        check('adj1126/adj1127 按 0 回「整曲」，横向滚动条随之消失', afterZero.span === '0' && afterZero.scroll === false, JSON.stringify(afterZero))
+
         // ① 最大化 / 还原
         await evalJs(c, `[...document.querySelectorAll('.sync-head .btn')].find((b) => b.textContent.includes('最大化'))?.click(), true`)
         await sleep(350)
@@ -2314,22 +2332,44 @@ async function main() {
         )
         await dragBy('.sync-split', 0, -50)
         await sleep(300)
-        // ④ 预览比例 9:16 ⇒ 画布变成竖的
+        // ④ adj1127：预览**缩放比率**（不是 16:9 那种画布比例）——改 2× 后画出来的像素要变
+        const shotBefore = await evalJs(
+          c,
+          `(() => {
+            const el = document.querySelector('.sync-preview-box canvas')
+            if (!el) return { hash: '', bytes: 0 }
+            const s = el.toDataURL()
+            let h = 0
+            for (let i = 0; i < s.length; i += 1013) h = (h * 31 + s.charCodeAt(i)) | 0
+            return { hash: String(h), bytes: s.length }
+          })()`,
+        )
         await evalJs(
           c,
-          `(() => { const s = document.querySelector('.sync-preview-side select'); if (!s) return false; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; setter.call(s, '9x16'); s.dispatchEvent(new Event('change', { bubbles: true })); return true })()`,
+          `(() => { const s = document.querySelector('[data-sync="preview-zoom"]'); if (!s) return false; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; setter.call(s, '2'); s.dispatchEvent(new Event('change', { bubbles: true })); return true })()`,
         )
-        const portrait = await waitFor(
+        await sleep(600)
+        const zoomed = await evalJs(
           c,
-          `(() => { const el = document.querySelector('.sync-preview-box canvas'); return !!el && el.height > el.width })()`,
-          '9:16 预览会话',
-          80,
+          `(() => {
+            const el = document.querySelector('.sync-preview-box canvas')
+            if (!el) return { w: 0, h: 0, hash: '', zoom: '?' }
+            const s = el.toDataURL()
+            let h = 0
+            for (let i = 0; i < s.length; i += 1013) h = (h * 31 + s.charCodeAt(i)) | 0
+            const z = document.querySelector('[data-sync="preview-zoom"]')
+            return { w: el.width, h: el.height, hash: String(h), zoom: z ? z.value : '?' }
+          })()`,
         )
-        check('adj1124 预览比例切 9:16：会话真的重建为竖屏画布（1080×1920）', portrait)
-        // 收尾：切回 16:9，别影响后面的用例
+        check(
+          'adj1127 预览缩放 2×：画布尺寸不变（1920×1080）、但画出来的像素变了（真的放大）',
+          zoomed.zoom === '2' && zoomed.w === 1920 && zoomed.h === 1080 && zoomed.hash !== shotBefore.hash,
+          JSON.stringify({ before: shotBefore, after: zoomed }),
+        )
+        // 收尾：缩放回 1×
         await evalJs(
           c,
-          `(() => { const s = document.querySelector('.sync-preview-side select'); if (!s) return false; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; setter.call(s, '16x9'); s.dispatchEvent(new Event('change', { bubbles: true })); return true })()`,
+          `(() => { const s = document.querySelector('[data-sync="preview-zoom"]'); if (!s) return false; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; setter.call(s, '1'); s.dispatchEvent(new Event('change', { bubbles: true })); return true })()`,
         )
         await sleep(300)
         await evalJs(c, `[...document.querySelectorAll('.sync-head .btn')].find((b) => b.textContent.includes('关闭'))?.click(), true`)

@@ -131,3 +131,22 @@ export function panView(view: WaveView, durMs: number, dxMs: number): WaveView {
   if (v.spanMs === 0) return VIEW_ALL
   return clampView({ spanMs: v.spanMs, startMs: v.startMs + dxMs }, durMs)
 }
+
+/**
+ * adj1127（用户 2026-10-24：「波形放大后要一个横向滚动条」）：
+ * 滚动条滑块在整曲里的位置与宽度（百分比 0~100）。
+ *
+ * 整曲时 `visible = false`（没有可滚的），界面据此隐藏那一条。
+ */
+export function scrollThumb(
+  view: WaveView,
+  durMs: number,
+): { leftPct: number; widthPct: number; visible: boolean } {
+  const v = clampView(view, durMs)
+  const dur = Math.max(1, durMs)
+  if (v.spanMs === 0) return { leftPct: 0, widthPct: 100, visible: false }
+  const widthPct = Math.min(100, (v.spanMs / dur) * 100)
+  // 右端不许越界（浮点误差会让滑块跑出轨道 0.01px，看着像"能动一点"）
+  const leftPct = Math.max(0, Math.min(100 - widthPct, (v.startMs / dur) * 100))
+  return { leftPct, widthPct, visible: true }
+}

@@ -6118,6 +6118,30 @@ span.ws-check {
   opacity: 1;
 }
 
+/* adj1127：波形横向滚动条（放大后才出现） */
+.sync-scroll {
+  position: relative;
+  height: 10px;
+  margin-top: 2px;
+  border-radius: 5px;
+  background: rgb(255 255 255 / 7%);
+  cursor: pointer;
+  flex: 0 0 auto;
+  touch-action: none;
+}
+
+.sync-scroll-thumb {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 30%);
+}
+
+.sync-scroll-thumb:hover {
+  background: rgb(255 255 255 / 45%);
+}
+
 /* 分区之间的拖拽分隔条（预览↔波形、波形↔参数行） */
 .sync-split {
   height: 6px;

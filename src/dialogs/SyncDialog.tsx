@@ -39,12 +39,14 @@ import {
   VIEW_PRESETS_MS,
   clampView,
   panView,
+  scrollThumb,
   viewWindow,
   zoomView,
   type WaveView,
 } from './syncRuler'
 // adj1124：台面尺寸/分区高度/预览比例（可调整、存 L1）
 import {
+  PREVIEW_ZOOMS,
   loadSyncLayout,
   normalizeSyncLayout,
   resizePreviewH,
@@ -206,7 +208,7 @@ export function SyncDialog() {
   useEffect(() => {
     let cancelled = false
     setPreviewState('building')
-    void createDynamicSession(code, layout.aspect as DynamicPresetId, pageConfig, undefined, {
+    void createDynamicSession(code, '16x9' as DynamicPresetId, pageConfig, undefined, {
       leadInMs: 0,
       endCardMs: 0,
     })
@@ -224,7 +226,7 @@ export function SyncDialog() {
       cancelled = true
       previewSessionRef.current = null
     }
-  }, [code, pageConfig, layout.aspect])
+  }, [code, pageConfig])
 
   /**
    * 小节起点**拍位**（与速度无关）：用任意拍速建一次播放序列，`barStartsMs / beatMs` 即拍。
@@ -253,6 +255,8 @@ export function SyncDialog() {
   const trim = doc?.trim ?? { startMs: 0, endMs: durMs }
   /** adj1126：波形当前视野（整曲 or 缩放后的窗口），刻度与读数都用它 */
   const viewWin = viewWindow(view, durMs)
+  /** adj1127：横向滚动条的滑块位置/宽度（整曲时 `visible=false`） */
+  const thumb = scrollThumb(view, durMs)
 
   /** 拍号 → "第 N 小节第 K 拍"（给锚点列表/打点默认值用） */
   const barBeatLabel = useCallback(
@@ -293,13 +297,28 @@ export function SyncDialog() {
       if (!ctx) return
       const fitForPreview = effFit ?? { beatMs: scoreBeatMs, offsetMs: 0 }
       const t = Math.max(0, Math.min(s.totalMs - 1, sessionMsOfAudioMs(audioMs, fitForPreview, scoreBeatMs)))
+      /**
+       * adj1127（用户 2026-10-24：「预览的显示比率不是 9:16 为类的比率，是**缩放比率**」）：
+       * 画布固定 16:9（与成片同一套相机），这里只是把渲染结果**以中心为原点整体缩放**看细节。
+       * 先无条件清一遍整块画布：`s.draw` 内部那次 `clearRect` 会被缩放变换带着走，
+       * 缩小时清不干净（会留上一帧的边）。
+       */
+      const zoom = Math.min(3, Math.max(0.5, layout.previewZoom))
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.clearRect(0, 0, c.width, c.height)
+      if (Math.abs(zoom - 1) > 1e-6) {
+        ctx.setTransform(zoom, 0, 0, zoom, (c.width * (1 - zoom)) / 2, (c.height * (1 - zoom)) / 2)
+      }
       s.draw(ctx, t)
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
       if (previewInfoRef.current) {
         const beat = t / scoreBeatMs
-        previewInfoRef.current.textContent = `${syncCopy.previewNow} ${barBeatLabel(beat)}（第 ${Math.floor(beat) + 1} 拍）`
+        previewInfoRef.current.textContent = `${syncCopy.previewNow} ${barBeatLabel(beat)}（第 ${Math.floor(beat) + 1} 拍）${
+          Math.abs(zoom - 1) > 1e-6 ? ` · ${zoom}×` : ''
+        }`
       }
     },
-    [barBeatLabel, effFit, scoreBeatMs],
+    [barBeatLabel, effFit, scoreBeatMs, layout.previewZoom],
   )
 
   // ---------- 播放器（AudioContext + 手动循环，便于节拍器每圈重排） ----------
@@ -796,6 +815,44 @@ export function SyncDialog() {
     [durMs],
   )
 
+  /**
+   * adj1127（用户 2026-10-24「波形放大后要一个横向滚动条」）：
+   * 滑块拖动 = 平移视野；点轨道空白 = 把视野中心挪到那里。
+   */
+  const scrollDragRef = useRef<{ x: number; baseStart: number; width: number } | null>(null)
+
+  const onScrollPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const thumb = scrollThumb(view, durMs)
+    const x = e.clientX - rect.left
+    const leftPx = (thumb.leftPct / 100) * rect.width
+    const rightPx = leftPx + (thumb.widthPct / 100) * rect.width
+    if (x < leftPx || x > rightPx) {
+      const centerMs = (Math.min(Math.max(0, x), rect.width) / Math.max(1, rect.width)) * durMs
+      const span = view.spanMs > 0 ? view.spanMs : durMs
+      setView(clampView({ spanMs: span, startMs: centerMs - span / 2 }, durMs))
+      return
+    }
+    scrollDragRef.current = { x: e.clientX, baseStart: viewWin.v0, width: Math.max(1, rect.width) }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  const onScrollPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = scrollDragRef.current
+    if (!d) return
+    const dx = e.clientX - d.x
+    setView((v) => clampView({ spanMs: v.spanMs, startMs: d.baseStart + (dx / d.width) * durMs }, durMs))
+  }
+
+  const onScrollPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    scrollDragRef.current = null
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {
+      /* 指针已经不在了 */
+    }
+  }
+
   const keyboard = useCallback(
     (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
@@ -943,15 +1000,26 @@ export function SyncDialog() {
               <span ref={previewInfoRef}>{syncCopy.previewNow}</span>
             </div>
             <label className="sync-row">
-              <span className="sync-label">{syncCopy.previewAspect}</span>
+              <span className="sync-label">{syncCopy.previewZoom}</span>
               <select
                 className="sync-select"
-                value={layout.aspect}
-                onChange={(e) => setLayout(normalizeSyncLayout({ ...layoutRef.current, aspect: e.target.value as SyncLayout['aspect'] }, viewportRef.current.w, viewportRef.current.h))}
+                data-sync="preview-zoom"
+                value={layout.previewZoom}
+                onChange={(e) =>
+                  setLayout(
+                    normalizeSyncLayout(
+                      { ...layoutRef.current, previewZoom: Number(e.target.value) },
+                      viewportRef.current.w,
+                      viewportRef.current.h,
+                    ),
+                  )
+                }
               >
-                <option value="16x9">16:9</option>
-                <option value="9x16">9:16</option>
-                <option value="1x1">1:1</option>
+                {PREVIEW_ZOOMS.map((z) => (
+                  <option key={z} value={z}>
+                    {z}×
+                  </option>
+                ))}
               </select>
             </label>
             <div className="sync-dim">{syncCopy.previewHint}</div>
@@ -999,9 +1067,22 @@ export function SyncDialog() {
           />
           <div className="sync-wave-hint">{syncCopy.tipPick}</div>
         </div>
+
+        {/* adj1127：放大后给一条横向滚动条（整曲时它没有意义，隐藏） */}
+        {thumb.visible && (
+          <div
+            className="sync-scroll"
+            onPointerDown={onScrollPointerDown}
+            onPointerMove={onScrollPointerMove}
+            onPointerUp={onScrollPointerUp}
+            onPointerCancel={onScrollPointerUp}
+            title={syncCopy.scrollHint}
+          >
+            <div className="sync-scroll-thumb" style={{ left: `${thumb.leftPct}%`, width: `${thumb.widthPct}%` }} />
+          </div>
+        )}
         {/* 波形 ↔ 参数行：往上拖 = 波形变高 */}
         <div className="sync-split" onPointerDown={startDrag('wave')} title={syncCopy.splitWaveHint} />
-
         <div className="sync-row">
           <span className="sync-label">{syncCopy.trim}</span>
           <span className="sync-name">
