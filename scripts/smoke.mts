@@ -35808,6 +35808,19 @@ function runAdj1124Tests(): void {
       /playheadRef\.current = audio \? Math\.min\(cell\.audioMs, durMs\) : cell\.audioMs/.test(dialogSrcAdj),
     '',
   )
+  /**
+   * adj1142（用户实报「格子写 2:1，色块却落在 2:4」）：
+   * 台面里的色块轨道**只能有一条序列、一个拍速**。之前轨道另按 120bpm 重建
+   * ⇒ `e.atMs` 是"拍×500"、`s.beat` 却乘 `scoreBeatMs`，轨道压成 0.54 倍，色块往后窜 3 拍。
+   */
+  check(
+    'adj1142 台面里只有一条播放序列、且它就是按谱面 J: 建的（不许再有 120bpm 的第二条）',
+    /buildPlaySequence\(parseResult, lay, scoreBpm\)/.test(dialogSrcAdj) &&
+      !/buildPlaySequence\([^)]*,\s*120\)/.test(dialogSrcAdj) &&
+      /e\.atMs \/ scoreBeatMs/.test(dialogSrcAdj) &&
+      /barStartsMs \?\? \[\]\)\.map\(\(ms\) => ms \/ scoreBeatMs\)/.test(dialogSrcAdj),
+    '',
+  )
   const dragged = resizeSyncLayout(DEFAULT_SYNC_LAYOUT, 100, 60, 1440, 900)
   check(
     'adj1124 拖右下角：宽 +100；高 820+60=880 超过视口 ⇒ 夹到 876',

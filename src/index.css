@@ -6164,7 +6164,16 @@ span.ws-check {
 }
 
 /* adj1137：波形上方的音符格子排（与波形同一时间轴、同步缩放）
-   adj1141：紧贴波形（间距 0）、高度 = 波形 1/2（内联给），里面还画小节线和小节号 */
+   adj1141：高度 = 波形 1/2（内联给），里面还画小节线和小节号
+   adj1142：和波形一起包在 `.sync-wave-group`（gap:0）里 ⇒ 两排真的贴住，`.sync-panel` 的 6px gap 管不到里面 */
+.sync-wave-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
 .sync-notes {
   position: relative;
   flex: 0 0 auto;

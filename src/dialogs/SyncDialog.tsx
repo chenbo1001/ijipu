@@ -294,17 +294,15 @@ export function SyncDialog() {
 
   useEffect(() => {
     if (doc === null) return
-    const lay = layoutScore(parseResult, pageConfig)
-    const seq = buildPlaySequence(parseResult, lay, 120)
     /**
-     * ⚠ adj1134（用户 2026-10-24 实报「色块位与音频时点没对齐」）：
-     * 这里的 `beatMs` **必须**和 `paintPreview` 里换算 `currentMs` 用的同一个值（谱面 `J:`），
-     * 否则轨道按 500ms/拍、游标按 857ms/拍（J:=70）⇒ 色块越走越偏。
-     * 第一版就是写死 120bpm 占位，才有这个 bug。
+     * ⚠ adj1142（用户 2026-10-24 实报「第 1 个格子点下去没色块、第 2 个格子却跳到第 3 个音符」）：
+     * 轨道必须用**同一份序列 + 同一个拍速**（`scoreSeq` 就是按谱面 `J:` 建的）。
+     * 之前这里另外按 120bpm 重建了一次，`e.atMs`（拍×500）与 `s.beat×scoreBeatMs` 混着用，
+     * 轨道被压成 0.54 倍 ⇒ 色块整体往前窜。**别在这里再建第二条序列。**
      */
     const beatMs = scoreBeatMs
     setPlayheadTrack(
-      seq.events.flatMap((e) =>
+      scoreSeq.events.flatMap((e) =>
         (e.playheadSegs ?? []).map((s) => ({
           atMs: e.atMs + s.beat * beatMs,
           durationMs: s.beats * beatMs,
@@ -324,11 +322,7 @@ export function SyncDialog() {
       ),
     )
     // 跳跳球的拍网格也用**同一套**时间（否则球和色块会各走各的）
-    setPlayheadBeat(
-      beatMs,
-      0,
-      (seq.barStartsMs ?? []).map((ms) => (ms / 500) * beatMs),
-    )
+    setPlayheadBeat(beatMs, 0, barStartBeats.map((b) => b * beatMs))
     return () => {
       setPlayheadTrack([])
       setPlayheadBeat(0, 0, [])
@@ -343,14 +337,22 @@ export function SyncDialog() {
    * 谱面播放序列（按 120bpm 建一次，只用来取**拍位几何**：小节起点 / 音符起拍与时值）。
    * 时间换算一律由 `audioMsOfBeat(fit, beat)` 负责，所以这里用什么 bpm 建都无所谓。
    */
+  /**
+   * 谱面播放序列（**按谱面 J: 的拍速**建）——台面里"格子 / 小节线 / 色块轨道"三处都用它，
+   * 且三处的毫秒都是**谱面时间轴**（`beat × scoreBeatMs`）。
+   *
+   * ⚠ adj1142（用户 2026-10-24 实报「第 1 个格子点下去没有色块、第 2 个格子却跳到第 3 个音符」）：
+   * 之前这里按 **120bpm** 建，却用 `scoreBeatMs` 换算 —— `e.atMs = 拍×500` 与 `s.beat×923` 两个基准混用，
+   * 轨道整整压扁成 0.54 倍，色块自然跑到后面的音符上。**一个时间轴只能有一个拍速。**
+   */
   const scoreSeq = useMemo(() => {
     const lay = layoutScore(parseResult, pageConfig)
-    return buildPlaySequence(parseResult, lay, 120)
-  }, [parseResult, pageConfig])
+    return buildPlaySequence(parseResult, lay, scoreBpm)
+  }, [parseResult, pageConfig, scoreBpm])
 
   const barStartBeats = useMemo(
-    () => (scoreSeq.barStartsMs ?? []).map((ms) => ms / 500),
-    [scoreSeq],
+    () => (scoreSeq.barStartsMs ?? []).map((ms) => ms / scoreBeatMs),
+    [scoreSeq, scoreBeatMs],
   )
 
   /** adj1137（用户 2026-10-24 的想法）：主音符合成一条"格子排"，与波形共用同一时间轴 */
@@ -358,8 +360,8 @@ export function SyncDialog() {
     () =>
       scoreSeq.events
         .filter((e) => e.placed.playable && e.durationMs > 0)
-        .map((e) => ({ beat: e.atMs / 500, beats: e.durationMs / 500 })),
-    [scoreSeq],
+        .map((e) => ({ beat: e.atMs / scoreBeatMs, beats: e.durationMs / scoreBeatMs })),
+    [scoreSeq, scoreBeatMs],
   )
 
   const fit = doc?.tempo ?? null
@@ -1413,7 +1415,8 @@ export function SyncDialog() {
         <div className="sync-split" onPointerDown={startDrag('preview')} title={syncCopy.splitPreviewHint} />
 
         {/* adj1137：音符格子排（在波形**上面**，与波形同一时间轴、同步缩放；点一格跳过去）
-            adj1139：高度按波形 **1:4** 给（用户口径"音符格和波形约 1:4 或 1:5"） */}
+            adj1142：和波形包在同一个 `gap:0` 的组里，两排之间没有缝；高度=波形 1/2 */}
+        <div className="sync-wave-group">
         {stripCells.length > 0 && (
           <div
             className="sync-notes"
@@ -1474,6 +1477,7 @@ export function SyncDialog() {
           <div className="sync-wave-hint">
             {syncCopy.tipPick} · {syncCopy.barLabelHint}
           </div>
+        </div>
         </div>
 
         {/* adj1127：放大后给一条横向滚动条（整曲时它没有意义，隐藏） */}
