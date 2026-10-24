@@ -35,6 +35,8 @@ import { decodeAccompaniment, waveformPeaks } from '../export/video/accompanimen
 import { parseSyncDoc, mixPlanOf, joinPath, serializeSyncDoc, sidecarPathOf, syncDocStale } from '../export/video/syncDoc'
 import { readSidecarText, writeSidecarText, downloadSidecarText } from '../export/video/syncIo'
 import { listWorkspaces } from '../store/workspace'
+// adj1137：波形上方那条"音符格子排"（纯几何）
+import { cellRectPct, stripCellsOf } from './noteStrip'
 import { canUseDynamicVideo } from '../export/video/capability'
 import { syncCopy } from '../brand/copy'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
@@ -336,11 +338,28 @@ export function SyncDialog() {
    * 小节起点**拍位**（与速度无关）：用任意拍速建一次播放序列，`barStartsMs / beatMs` 即拍。
    * `{jz}` 的额外拍已经算在里面 ⇒ 与播放口径一致。
    */
-  const barStartBeats = useMemo(() => {
+  /**
+   * 谱面播放序列（按 120bpm 建一次，只用来取**拍位几何**：小节起点 / 音符起拍与时值）。
+   * 时间换算一律由 `audioMsOfBeat(fit, beat)` 负责，所以这里用什么 bpm 建都无所谓。
+   */
+  const scoreSeq = useMemo(() => {
     const lay = layoutScore(parseResult, pageConfig)
-    const seq = buildPlaySequence(parseResult, lay, 120)
-    return (seq.barStartsMs ?? []).map((ms) => ms / 500)
+    return buildPlaySequence(parseResult, lay, 120)
   }, [parseResult, pageConfig])
+
+  const barStartBeats = useMemo(
+    () => (scoreSeq.barStartsMs ?? []).map((ms) => ms / 500),
+    [scoreSeq],
+  )
+
+  /** adj1137（用户 2026-10-24 的想法）：主音符合成一条"格子排"，与波形共用同一时间轴 */
+  const noteCells = useMemo(
+    () =>
+      scoreSeq.events
+        .filter((e) => e.placed.playable && e.durationMs > 0)
+        .map((e) => ({ beat: e.atMs / 500, beats: e.durationMs / 500 })),
+    [scoreSeq],
+  )
 
   const fit = doc?.tempo ?? null
   /** 没有解算结果时（<2 条锚点）也画刻度：用谱面 J + 第一条锚点的偏移 */
@@ -372,6 +391,17 @@ export function SyncDialog() {
   const viewWin = viewWindow(view, durMs)
   /** adj1127：横向滚动条的滑块位置/宽度（整曲时 `visible=false`） */
   const thumb = scrollThumb(view, durMs)
+  /**
+   * adj1137（用户 2026-10-24 的想法）：**音符格子排**——每个主音符一格、宽度=时值，
+   * 与波形**同一时间轴**（`offsetMs + 拍 × beatMs`）。锚点落在拍上时，格子左缘正好压在锚点线上，
+   * 所以"对没对上"一眼可见。点击格子 ⇒ 播放头/色块跳到那个音。
+   * 还没对拍时按"谱面从音频 0 开始、速度用 J:"先画出来（否则没锚点就看不到，没法用来找位置）。
+   */
+  const stripFit = useMemo(
+    () => effFit ?? { beatMs: scoreBeatMs, offsetMs: 0 },
+    [effFit, scoreBeatMs],
+  )
+  const stripCells = useMemo(() => stripCellsOf(noteCells, stripFit), [noteCells, stripFit])
 
   /** 拍号 → "第 N 小节第 K 拍"（给锚点列表/打点默认值用） */
   const barBeatLabel = useCallback(
@@ -1335,6 +1365,30 @@ export function SyncDialog() {
         </div>
         {/* 预览 ↔ 下方：往上拖 = 预览变高（下面整体跟着平移） */}
         <div className="sync-split" onPointerDown={startDrag('preview')} title={syncCopy.splitPreviewHint} />
+
+        {/* adj1137：音符格子排（在波形**上面**，与波形同一时间轴、同步缩放；点一格跳过去） */}
+        {stripCells.length > 0 && (
+          <div className="sync-notes" data-sync="note-strip" title={syncCopy.stripHint}>
+            {stripCells.map((cell, i) => {
+              const rect = cellRectPct(cell, viewWin.v0, viewWin.winMs)
+              if (rect === null) return null
+              return (
+                <button
+                  key={`${cell.beat}-${i}`}
+                  type="button"
+                  className="sync-note-cell"
+                  style={{ left: `${rect.leftPct}%`, width: `${rect.widthPct}%` }}
+                  title={`${barBeatLabel(cell.beat)} · ${audioClockOf(cell.audioMs)}`}
+                  onClick={() => {
+                    stopSource()
+                    playheadRef.current = Math.max(0, Math.min(cell.audioMs, durMs))
+                    drawRef.current()
+                  }}
+                />
+              )
+            })}
+          </div>
+        )}
 
         <div ref={wrapRef} className="sync-wave">
           <canvas

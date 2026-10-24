@@ -6154,6 +6154,34 @@ span.ws-check {
   background: rgb(128 134 148 / 92%);
 }
 
+/* adj1137：波形上方的音符格子排（与波形同一时间轴、同步缩放） */
+.sync-notes {
+  position: relative;
+  flex: 0 0 auto;
+  height: 16px;
+  margin-bottom: 2px;
+  border: 1px solid var(--jp-border);
+  border-radius: 4px;
+  background: #171a1f;
+  overflow: hidden;
+}
+
+.sync-note-cell {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid rgb(15 18 24 / 85%);
+  border-radius: 2px;
+  background: rgb(120 160 210 / 55%);
+  cursor: pointer;
+}
+
+.sync-note-cell:hover {
+  background: rgb(140 190 250 / 85%);
+}
+
 /* 分区之间的拖拽分隔条（预览↔波形、波形↔参数行） */
 .sync-split {
   height: 6px;

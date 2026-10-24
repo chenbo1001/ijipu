@@ -139,6 +139,8 @@ import {
   viewWindow,
   zoomView,
 } from '../src/dialogs/syncRuler.ts'
+// adj1137：波形上方的音符格子排（纯几何）
+import { stripCellsOf, cellRectPct } from '../src/dialogs/noteStrip.ts'
 // adj1124：对拍台尺寸/分区高度/预览比例（纯函数 + L1）
 import {
   DEFAULT_SYNC_LAYOUT,
@@ -35692,6 +35694,42 @@ function runAdj1124Tests(): void {
       const scoreBeatMs = 60000 / 65
       const implied = 3910 - 16.5 * scoreBeatMs
       return implied < -2 * scoreBeatMs
+    })(),
+    '',
+  )
+  /**
+   * adj1137（用户 2026-10-24 的想法）：音符格子排——每格一个主音符、宽度=时值，
+   * 与波形**共用同一时间轴**（`offsetMs + 拍 × beatMs`），所以"锚点处格子左缘对齐"是构造出来的。
+   */
+  const fitStrip = { beatMs: 600, offsetMs: 2000 }
+  const cells = stripCellsOf(
+    [
+      { beat: 0, beats: 1 },
+      { beat: 1, beats: 0.5 },
+      { beat: 1.5, beats: 0.5 },
+      { beat: -10, beats: 1 }, // 完全在 0 之前 ⇒ 丢掉
+    ],
+    fitStrip,
+  )
+  check(
+    'adj1137 格子：拍 → 音频毫秒 + 宽度（offset 2000、600ms/拍）',
+    cells.length === 3 &&
+      cells[0].audioMs === 2000 &&
+      cells[1].audioMs === 2600 &&
+      Math.abs(cells[1].widthMs - 300) < 1e-9,
+    JSON.stringify(cells),
+  )
+  check(
+    'adj1137 格子：可见窗口百分比（跨边界的按边界裁、窗口外返回 null）',
+    (() => {
+      const a = cellRectPct({ audioMs: 2000, widthMs: 500 }, 1800, 1000)
+      const b = cellRectPct({ audioMs: 100, widthMs: 200 }, 1800, 1000)
+      const c = cellRectPct({ audioMs: 2700, widthMs: 500 }, 1800, 1000)
+      return (
+        a !== null && Math.abs(a.leftPct - 20) < 1e-9 && Math.abs(a.widthPct - 50) < 1e-9 &&
+        b === null &&
+        c !== null && Math.abs(c.leftPct - 90) < 1e-9 && Math.abs(c.widthPct - 10) < 1e-9
+      )
     })(),
     '',
   )

@@ -2454,6 +2454,47 @@ async function main() {
         await sleep(300)
 
         /**
+         * adj1137（用户 2026-10-24 的想法）：波形上方要有**音符格子排**；点一格要让播放头跳过去。
+         */
+        const strip = await evalJs(
+          c,
+          `(() => {
+            const el = document.querySelector('[data-sync="note-strip"]')
+            if (!el) return { cells: 0, w: 0 }
+            const cells = [...el.querySelectorAll('.sync-note-cell')]
+            return { cells: cells.length, w: Math.round(el.getBoundingClientRect().width), widths: cells.slice(0, 3).map((x) => Math.round(x.getBoundingClientRect().width)) }
+          })()`,
+        )
+        check(
+          'adj1137 波形上方有音符格子排（每格一个主音符；宽度=时值，见冒烟的几何断言）',
+          strip.cells >= 3 && strip.w > 300 && strip.widths.some((w) => w > 0),
+          JSON.stringify(strip),
+        )
+        const beforeCell = await evalJs(c, `document.querySelector('.sync-preview-pos')?.textContent?.trim() ?? ''`)
+        const cellRect = await evalJs(
+          c,
+          `(() => {
+            const cells = [...document.querySelectorAll('[data-sync="note-strip"] .sync-note-cell')]
+            const el = cells[Math.min(cells.length - 1, Math.floor(cells.length * 0.6))]
+            if (!el) return null
+            const r = el.getBoundingClientRect()
+            return { x: Math.round(r.left + Math.min(4, r.width / 2)), y: Math.round(r.top + r.height / 2) }
+          })()`,
+        )
+        if (cellRect) {
+          for (const type of ['mousePressed', 'mouseReleased']) {
+            await c.send('Input.dispatchMouseEvent', { type, x: cellRect.x, y: cellRect.y, button: 'left', clickCount: 1 })
+          }
+        }
+        await sleep(400)
+        const afterCell = await evalJs(c, `document.querySelector('.sync-preview-pos')?.textContent?.trim() ?? ''`)
+        check(
+          'adj1137 点格子 ⇒ 播放头/色块跳到那个音（当前位置跟着变）',
+          cellRect !== null && afterCell !== beforeCell,
+          JSON.stringify({ beforeCell, afterCell }),
+        )
+
+        /**
          * adj1128（用户 2026-10-24 实报的三条）：
          *  ① 「保存没有实现」——点保存要看得到结果提示（桌面写文件 / 网页只有本机缓存，两者都要如实说）；
          *  ② 「音量调整无效」——真点播放，量一下 GainNode 上设的增益（必须等于滑杆值）；
