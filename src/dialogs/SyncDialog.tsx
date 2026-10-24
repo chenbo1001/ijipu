@@ -32,8 +32,9 @@ import { createHqCache, resolveHqBank } from '../playback/spessaCache'
 import { resolveActiveLibrary } from '../playback/spessaSynthBackend'
 import { hostBankUrl } from '../store/hostBridge'
 import { decodeAccompaniment, waveformPeaks } from '../export/video/accompaniment'
-import { parseSyncDoc, mixPlanOf, serializeSyncDoc, sidecarPathOf, syncDocStale } from '../export/video/syncDoc'
+import { parseSyncDoc, mixPlanOf, joinPath, serializeSyncDoc, sidecarPathOf, syncDocStale } from '../export/video/syncDoc'
 import { readSidecarText, writeSidecarText, downloadSidecarText } from '../export/video/syncIo'
+import { listWorkspaces } from '../store/workspace'
 import { canUseDynamicVideo } from '../export/video/capability'
 import { syncCopy } from '../brand/copy'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
@@ -92,6 +93,8 @@ export function SyncDialog() {
   const replaceDoc = useSyncStore((s) => s.replaceDoc)
   /** adj1128：保存要写同目录的 sidecar —— 只有桌面壳打开的 `.jps` 才有绝对路径 */
   const nativePath = useDocStore((s) => s.nativePath)
+  /** adj1131：从**工作区**打开的谱没有 `nativePath`（只有 `binding`）——保存也要能落到磁盘 */
+  const binding = useDocStore((s) => s.binding)
 
   const [playing, setPlaying] = useState(false)
   const [sel, setSel] = useState(0)
@@ -144,14 +147,38 @@ export function SyncDialog() {
   }, [ensureFor, fileName, code])
 
   /**
+   * adj1131：算出这份谱的 sidecar **绝对路径**。
+   *
+   * 两条来源：
+   *  · `nativePath`：原生「打开」的谱（最直接）；
+   *  · `binding`：从**工作区**打开的谱（桌面的路径后端有 `dir` 绝对路径）——
+   *    用户实报「tauri:dev 下保存还是走下载」，就是只认了 `nativePath`。
+   * 两样都没有（网页/示例/粘贴稿）⇒ `null`，调用方退回"下载 JSON"。
+   */
+  const resolveSidecarPath = useCallback(async (): Promise<string | null> => {
+    if (nativePath !== null && nativePath !== '') return sidecarPathOf(nativePath)
+    if (binding === null) return null
+    try {
+      const list = await listWorkspaces()
+      const rec = list.find((r) => r.id === binding.wsId)
+      const dir = typeof rec?.dir === 'string' && rec.dir !== '' ? rec.dir : ''
+      if (dir === '') return null
+      return sidecarPathOf(joinPath(dir, binding.segs.join('\\')))
+    } catch {
+      return null
+    }
+  }, [binding, nativePath])
+
+  /**
    * adj1128：打开台面时**先读同目录的 sidecar**（比 L1 兜底权威）。
    * 只在"本地还没有锚点"时采用磁盘内容，免得覆盖用户刚打的点。
    */
   useEffect(() => {
-    if (!nativePath) return
     let cancelled = false
     void (async () => {
-      const r = await readSidecarText(sidecarPathOf(nativePath))
+      const target = await resolveSidecarPath()
+      if (target === null) return
+      const r = await readSidecarText(target)
       if (cancelled || !r.ok || r.text === null) return
       const parsed = parseSyncDoc(r.text)
       if (parsed.doc === null) return
@@ -162,16 +189,17 @@ export function SyncDialog() {
     return () => {
       cancelled = true
     }
-  }, [nativePath, replaceDoc])
+  }, [resolveSidecarPath, replaceDoc])
 
-  /** adj1128（用户实报「保存没有实现」）：真的写 sidecar；网页/开发模式退回本机缓存并如实说明 */
+  /** adj1128（用户实报「保存没有实现」）：真的写 sidecar；实在没有磁盘路径就下载一份 */
   const onSave = useCallback(async () => {
     if (doc === null) return
     save(code, fileName)
     const latest = useSyncStore.getState().doc
     if (latest === null) return
     const text = serializeSyncDoc(latest)
-    if (!nativePath) {
+    const target = await resolveSidecarPath()
+    if (target === null) {
       // adj1129：网页/开发模式没有同目录写入 ⇒ 下载一份真文件（别只写本机缓存）
       // `fileName` 可能已经被去掉了 `.jps`（网页/示例稿），这里补回来，文件名才对得上
       const base = fileName === '' ? '未命名.jps' : /\.jps$/i.test(fileName) ? fileName : `${fileName}.jps`
@@ -180,11 +208,10 @@ export function SyncDialog() {
       setNotice(syncCopy.savedDownloaded(name))
       return
     }
-    const target = sidecarPathOf(nativePath)
     const res = await writeSidecarText(target, text)
     const name = target.split(/[\\/]/).pop() ?? target
     setNotice(res.ok ? syncCopy.savedFile(name) : syncCopy.saveFailed(res.error))
-  }, [code, doc, fileName, nativePath, save])
+  }, [code, doc, fileName, resolveSidecarPath, save])
 
   // ---------- adj1124：台面尺寸（可拖右下角 / 最大化 / 记 L1） ----------
   /** 记住上一次渲染出来的 layout（拖拽松手时要在监听里读它，而监听只挂一次） */
@@ -349,23 +376,20 @@ export function SyncDialog() {
       const fitForPreview = effFit ?? { beatMs: scoreBeatMs, offsetMs: 0 }
       const t = Math.max(0, Math.min(s.totalMs - 1, sessionMsOfAudioMs(audioMs, fitForPreview, scoreBeatMs)))
       /**
-       * adj1127（用户 2026-10-24：「预览的显示比率不是 9:16 为类的比率，是**缩放比率**」）：
-       * 画布固定 16:9（与成片同一套相机），这里只是把渲染结果**以中心为原点整体缩放**看细节。
-       * 先无条件清一遍整块画布：`s.draw` 内部那次 `clearRect` 会被缩放变换带着走，
-       * 缩小时清不干净（会留上一帧的边）。
+       * adj1131（用户 2026-10-24：「放大后明明两边有黑空位，还是限制在白色区域内，显示不全」）：
+       * 缩放**改在 CSS 层做**（`transform: scale()` + 盒子裁剪），不再在画布里放大。
+       *
+       * 为什么这样才对：谱面是竖的、画布是 16:9 ⇒ 画面左右本来就有黑边（那是相机取景，
+       * 不是"空位"）。在画布里放大只会把黑边一起放大，音符仍被框在白纸里；
+       * 而按元素放大后，黑边被**推到盒子外面裁掉**，谱面自然占满整块预览区。
        */
-      const zoom = Math.min(3, Math.max(0.5, layout.previewZoom))
-      ctx.setTransform(1, 0, 0, 1, 0, 0)
-      ctx.clearRect(0, 0, c.width, c.height)
-      if (Math.abs(zoom - 1) > 1e-6) {
-        ctx.setTransform(zoom, 0, 0, zoom, (c.width * (1 - zoom)) / 2, (c.height * (1 - zoom)) / 2)
-      }
       s.draw(ctx, t)
       ctx.setTransform(1, 0, 0, 1, 0, 0)
       if (previewInfoRef.current) {
         const beat = t / scoreBeatMs
+        const z = layout.previewZoom
         previewInfoRef.current.textContent = `${syncCopy.previewNow} ${barBeatLabel(beat)}（第 ${Math.floor(beat) + 1} 拍）${
-          Math.abs(zoom - 1) > 1e-6 ? ` · ${zoom}×` : ''
+          Math.abs(z - 1) > 1e-6 ? ` · ${z}×` : ''
         }`
       }
     },
@@ -989,12 +1013,30 @@ export function SyncDialog() {
     const c = canvasRef.current
     if (!c) return
     const onWheelNative = (e: WheelEvent) => {
+      /**
+       * adj1131（用户 2026-10-24）：
+       *  · 无修饰键 + 滚轮 = 缩放；
+       *  · **Shift + 滚轮 = 左右平移**（新加）；
+       *  · **Ctrl / ⌘ / Alt + 滚轮一律不接管**——交给浏览器（Ctrl+滚轮是页面缩放），
+       *    免得"想缩小页面"却把波形缩了。
+       */
+      if (e.ctrlKey || e.metaKey || e.altKey) return
       e.preventDefault()
       const rect = c.getBoundingClientRect()
-      const x = Math.min(Math.max(0, e.clientX - rect.left), Math.max(1, rect.width))
+      const width = Math.max(1, rect.width)
+      if (e.shiftKey) {
+        // 多数鼠标在 Shift 下把纵向滚动塞进 deltaY；触控板可能是 deltaX
+        const d = e.deltaY !== 0 ? e.deltaY : e.deltaX
+        setView((v) => {
+          const { winMs } = viewWindow(v, durMs)
+          return panView(v, durMs, (d * winMs) / width)
+        })
+        return
+      }
+      const x = Math.min(Math.max(0, e.clientX - rect.left), width)
       setView((v) => {
         const { v0, winMs } = viewWindow(v, durMs)
-        const anchor = v0 + (x / Math.max(1, rect.width)) * winMs
+        const anchor = v0 + (x / width) * winMs
         return zoomView(v, durMs, e.deltaY > 0 ? 1.25 : 0.8, anchor)
       })
     }
@@ -1197,7 +1239,8 @@ export function SyncDialog() {
         {/* adj1123/adj1124：波形**上方**的动态谱预览；高度可拖（分隔条），比例可切（16:9 / 9:16 / 1:1） */}
         <div className="sync-preview" style={{ height: `${layout.previewH}px` }}>
           <div className="sync-preview-box">
-            <canvas ref={previewRef} />
+            {/* adj1131：缩放走 CSS（见 paintPreview 的说明）——黑边被裁到盒外，谱面占满预览区 */}
+            <canvas ref={previewRef} style={{ transform: `scale(${layout.previewZoom})` }} />
             {previewState !== 'ready' && (
               <span className="sync-preview-tip">
                 {previewState === 'building' ? syncCopy.previewBuilding : syncCopy.previewFailed}

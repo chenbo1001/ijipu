@@ -6012,12 +6012,14 @@ span.ws-check {
   flex: 0 0 auto;
 }
 
-/* 舞台铺满整行（左右留黑边是正常的"放映窗口"观感），读数固定在右侧 320px */
+/* 舞台按 16:9 **贴着画面**（adj1131：用户实报"两边黑位没用上、2× 放大还是被框在白纸里"）——
+   改成"盒子就等于画面"，黑边不再出现；右侧读数区吃剩下的宽度。 */
 .sync-preview-box {
   position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 0 0 auto;
   height: 100%;
+  aspect-ratio: 16 / 9;
+  max-width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -6028,11 +6030,12 @@ span.ws-check {
 }
 
 .sync-preview-box canvas {
-  /* 画布按会话尺寸（如 1920×1080 或 1080×1920）绘制，靠 `object-fit` 在舞台里等比显示：
-     换比例不用改布局，舞台宽度也不跳（adj1124） */
+  /* 画布按会话尺寸（如 1920×1080）绘制，靠 `object-fit` 在舞台里等比显示；
+     adj1131：缩放用 `transform: scale()`（内联样式给值），超出部分被盒子裁掉 */
   width: 100%;
   height: 100%;
   object-fit: contain;
+  transform-origin: center center;
   display: block;
 }
 
@@ -6049,9 +6052,8 @@ span.ws-check {
 
 /* 预览右侧读数（拍速/偏移/残差已挪到波形下方，adj1124） */
 .sync-preview-side {
-  flex: 0 0 300px;
-  width: 300px;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-width: 240px;
   display: flex;
   flex-direction: column;
   gap: 8px;
