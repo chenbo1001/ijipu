@@ -66,3 +66,43 @@ export function endCardLayout(W: number, H: number): EndCardLayout {
   const lineRatio = wide ? 0.14 : tall ? 0.18 : 0.16
   return { titleSize, sloganSize, urlSize, titleY, accentY, sloganY, urlY, maxW, lineRatio, lineH }
 }
+
+/**
+ * adj1118（用户 2026-10-24 定）：片头卡上的**速度那一行**怎么写。
+ *
+ * 规则（与"sidecar 只做对齐、不改谱面"同一口径）：
+ *  - 没对拍（`usedBpm` 与谱面 `J:` 相同，误差 < 0.5）⇒ 就写谱面的值：`♩=80`；
+ *  - 对拍了（不同）⇒ 写**实际**并标原值：`♩=96（原谱 80）`；
+ *  - 谱面本来没有 `J:` ⇒ 有实际值就写实际值，没有就空串（不硬造）。
+ *
+ * 为什么取整：96.4 → 96；误差 <1 拍/分肉耳无感，写小数反而像机器输出。
+ * 为什么保留 `tempoText`（`稍慢` 之类）：那是谱面作者的意图，跟"对拍得到的实际速度"不冲突，
+ * 放在括号外面。
+ *
+ * 纯函数 ⇒ smoke 直接断言（不用渲染位图）。
+ */
+export function tempoLineOf(
+  meta:
+    | { tempoNum?: string | number | null; tempoText?: string | null; tempo?: string | null }
+    | undefined,
+  usedBpm: number,
+): string {
+  const rawNum = meta?.tempoNum
+  const num =
+    typeof rawNum === 'number'
+      ? rawNum
+      : typeof rawNum === 'string' && rawNum.trim() !== ''
+        ? Number(rawNum)
+        : Number.NaN
+  const textRaw = meta?.tempoText
+  const text = typeof textRaw === 'string' ? textRaw.trim() : ''
+  const tail = text !== '' ? ` ${text}` : ''
+  if (!Number.isFinite(num) || num <= 0) {
+    return meta?.tempo ?? ''
+  }
+  const used = Math.round(usedBpm)
+  if (!Number.isFinite(usedBpm) || usedBpm <= 0) return `♩=${Math.round(num)}${tail}`
+  // 没对拍（或差不到半拍）⇒ 与谱面一致，不写"原谱"
+  if (Math.abs(usedBpm - num) < 0.5) return `♩=${Math.round(num)}${tail}`
+  return `♩=${used}（原谱 ${Math.round(num)}）${tail}`
+}

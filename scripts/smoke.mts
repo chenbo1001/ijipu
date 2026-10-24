@@ -103,6 +103,27 @@ const parseJps = (src: string) => {
   const r = parseJpsRaw(src)
   return { ...r, errors: r.errors.filter((e) => !METER_WARN_RE.test(e.message)) }
 }
+// adj1119：伴奏对拍的纯数学 + 边车文件（界面/出片/命令行共用同一份口径）
+import { fitSync, audioMsOfBeat, beatOfAudioMs, residualBeatsOf, bpmOfFit, inTrimRange, displayBpm, INTERLUDE_COLOR } from '@ijipu/engine/index.ts'
+import {
+  SYNC_SUFFIX,
+  SYNC_VERSION,
+  sidecarPathOf,
+  joinPath as joinSyncPath,
+  resolveAudioPath,
+  codeFingerprint,
+  parseSyncDoc,
+  serializeSyncDoc,
+  makeSyncDoc,
+  syncDocIsUsable,
+  syncDocStale,
+  isSidecarPath,
+  dirNameOf,
+  isAbsolutePath,
+  DEFAULT_SYNC_MIX,
+} from '../src/export/video/syncDoc.ts'
+// adj1119：片头卡速度行（对拍后写"实际 + （原谱 X）"）
+import { tempoLineOf } from '../src/export/video/cardLayout.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES, gmVoiceRef, gmVoiceProgram, countScoreInstrumentSwitches, noteIdStringOf, slicePlaySequenceByNoteRange, resolvePracticeRange, slicePlaySequenceByRange, extendRangeEndToSlurEnd } from '@ijipu/engine/playback/index.ts'
@@ -21059,6 +21080,8 @@ runAdj927ExternalChangeTests()
       .then(() => runDynamicCameraTests())
       // adj1118：间奏标记 `{jz N}`（替换口径 / 零宽 / 格式化不被拆数字 / 小节校验豁免）
       .then(() => runAdj1118Tests())
+      // adj1119：间奏块中性灰 + 片头卡速度行 + 对拍纯数学 + sidecar 读写
+      .then(() => runAdj1119Tests())
       .then(() => {
         console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
         process.exit(failed === 0 ? 0 : 1)
@@ -35155,5 +35178,213 @@ function runAdj1118Tests(): void {
     'adj1118 高亮：`{jz 16}` 整体按 decoration 着色',
     hl.some((t) => t.cls === 'decoration' && t.text === '{jz 16}'),
     JSON.stringify(hl),
+  )
+}
+
+/**
+ * adj1119（用户 2026-10-24 定的口径）：间奏块中性灰 + 片头卡速度行 + 对拍纯数学 + sidecar。
+ *
+ * 这一组只守"纯函数与接线"（不渲染位图、不碰 AudioContext）：
+ *  ① 间奏块的 `interlude` 标记一路传到取色（灰）与视频 `TimedRect`；
+ *  ② 片头卡的 `♩=96（原谱 80）` 口径；
+ *  ③ `fitSync`（2 条精确 / 3+ 最小二乘 / 残差 / 段诊断 / 告警用"拍"而不是 BPM 差）；
+ *  ④ sidecar 的路径规则、容错解析（坏 JSON / 版本更高 / 缺音频 / 同拍位 / 裁剪夹紧）、
+ *     往返、以及"不信文件里的 tempo，一律按 anchors 重算"。
+ */
+function runAdj1119Tests(): void {
+  console.log('[adj1119] 间奏灰 / 片头卡速度 / 对拍数学 / sidecar')
+
+  // ① 间奏块：标记 → 色块 → 取色
+  const srcJz = 'V: 1.0\nB: t\nD: C\nP: 4/4\nJ: 120\nQ: 0{jz 16} 1 2 3 |\n'
+  const parsedJz = parseJpsRaw(srcJz)
+  const layJz = layoutScore(parsedJz, DUR_CFG)
+  const seqJz = buildPlaySequence(parsedJz, layJz, 120)
+  const restEv = seqJz.events.find((e) => !e.placed.playable)
+  const trackJz = buildRectTrack(seqJz)
+  const jzRect = trackJz.rects.find((r) => r.interlude === true)
+  check(
+    'adj1119 间奏块：`playheadSegs` 带 interlude（中性灰的前提）',
+    restEv?.playheadSegs?.[0]?.interlude === true,
+    JSON.stringify(restEv?.playheadSegs?.[0]),
+  )
+  check(
+    'adj1119 间奏块：视频侧 `TimedRect` 也带 interlude，且时长 = 16 拍',
+    jzRect !== undefined && Math.abs(jzRect.t1 - jzRect.t0 - 8000) < 0.5,
+    jzRect ? String(jzRect.t1 - jzRect.t0) : 'missing',
+  )
+  check(
+    'adj1119 取色：interlude ⇒ 中性灰；普通块不受影响',
+    playheadBaseOf({ voice: 1, interlude: true }, new Map()) === INTERLUDE_COLOR &&
+      playheadBaseOf({ voice: 1 }, new Map()) !== INTERLUDE_COLOR,
+    INTERLUDE_COLOR,
+  )
+
+  // ② 片头卡速度行
+  check(
+    'adj1119 片头卡速度：没对拍写谱面值；对拍后写"实际（原谱 X）"',
+    tempoLineOf({ tempoNum: '80' }, 80) === '♩=80' &&
+      tempoLineOf({ tempoNum: '80' }, 96.4) === '♩=96（原谱 80）',
+    tempoLineOf({ tempoNum: '80' }, 96.4),
+  )
+  check(
+    'adj1119 片头卡速度：谱面速度文字保留在括号外',
+    tempoLineOf({ tempoNum: '80', tempoText: '稍慢' }, 96.4) === '♩=96（原谱 80） 稍慢',
+    tempoLineOf({ tempoNum: '80', tempoText: '稍慢' }, 96.4),
+  )
+  check(
+    'adj1119 片头卡速度：差 <0.5 视为一致；没有 J: 时不硬造',
+    tempoLineOf({ tempoNum: '80' }, 80.3) === '♩=80' && tempoLineOf({}, 96) === '' && tempoLineOf({ tempo: '♩=80' }, 96) === '♩=80',
+    '',
+  )
+
+  // ③ 对拍纯数学
+  const two = fitSync([{ beat: 4, audioMs: 3200 }, { beat: 132, audioMs: 82900 }])
+  check(
+    'adj1119 两条锚点精确解（beatMs = 79700/128）',
+    two !== null && Math.abs(two.beatMs - 79700 / 128) < 1e-9,
+    String(two?.beatMs),
+  )
+  check(
+    'adj1119 拍 ↔ 音频毫秒可逆',
+    two !== null && Math.abs(beatOfAudioMs(two, audioMsOfBeat(two, 37.5)) - 37.5) < 1e-9,
+    '',
+  )
+  check(
+    'adj1119 段诊断：一段、BPM 96.4、与全局偏差 0',
+    two !== null && two.segments.length === 1 && two.segments[0].bpm === 96.4 && two.segments[0].delta === 0,
+    JSON.stringify(two?.segments),
+  )
+  const three = fitSync([{ beat: 0, audioMs: 0 }, { beat: 4, audioMs: 2000 }, { beat: 8, audioMs: 5000 }])
+  check(
+    'adj1119 三条锚点最小二乘（beatMs=625、offset=-166.67）',
+    three !== null && Math.abs(three.beatMs - 625) < 1e-9 && Math.abs(three.offsetMs + 500 / 3) < 1e-6,
+    `${three?.beatMs} / ${three?.offsetMs}`,
+  )
+  check(
+    'adj1119 最小二乘的残差之和 ≈ 0',
+    three !== null && Math.abs(three.residualsMs.reduce((a, b) => a + b, 0)) < 1e-6,
+    String(three?.residualsMs.reduce((a, b) => a + b, 0)),
+  )
+  const badThree = fitSync([{ beat: 0, audioMs: 0 }, { beat: 4, audioMs: 2000 }, { beat: 8, audioMs: 10000 }])
+  check(
+    'adj1119 告警判据是"某条锚点偏 > 1 拍"（不是"两段 BPM 差"）',
+    badThree !== null && residualBeatsOf(badThree).some((b) => b > 1),
+    JSON.stringify(badThree && residualBeatsOf(badThree).map((b) => Math.round(b * 100) / 100)),
+  )
+  check(
+    'adj1119 非法输入：<2 条 / 同拍位 / 非有限数 ⇒ null',
+    fitSync([{ beat: 0, audioMs: 0 }]) === null &&
+      fitSync([{ beat: 4, audioMs: 0 }, { beat: 4, audioMs: 1000 }]) === null &&
+      fitSync([{ beat: 0, audioMs: Number.NaN }, { beat: 4, audioMs: 2000 }]) === null,
+    '',
+  )
+  check(
+    'adj1119 显示口径：displayBpm 取整、bpmOfFit 是实数',
+    displayBpm(622.65625) === 96 && two !== null && Math.abs(bpmOfFit(two) - 60000 / 622.65625) < 1e-9,
+    '',
+  )
+  check(
+    'adj1119 裁剪区间判定（半开区间；缺省视为整段）',
+    inTrimRange({ startMs: 100, endMs: 200 }, 150) &&
+      !inTrimRange({ startMs: 100, endMs: 200 }, 200) &&
+      !inTrimRange({ startMs: 100, endMs: 200 }, 99) &&
+      inTrimRange(undefined, 123),
+    '',
+  )
+
+  // ④ sidecar
+  check(
+    'adj1119 sidecar 路径：原名 + `.sync.json`',
+    sidecarPathOf('C:\\谱\\赤伶.jps') === 'C:\\谱\\赤伶.jps.sync.json' &&
+      isSidecarPath('a.jps.sync.json') &&
+      !isSidecarPath('a.jps') &&
+      SYNC_SUFFIX === '.sync.json',
+    '',
+  )
+  check(
+    'adj1119 路径拼接：Windows / Unix / 绝对路径覆盖',
+    joinSyncPath('C:\\谱', '伴奏.mp3') === 'C:\\谱\\伴奏.mp3' &&
+      joinSyncPath('/a/b', 'c.mp3') === '/a/b/c.mp3' &&
+      joinSyncPath('C:\\谱', 'D:\\x.mp3') === 'D:\\x.mp3' &&
+      resolveAudioPath('C:\\谱\\赤伶.jps', '伴奏.mp3') === 'C:\\谱\\伴奏.mp3' &&
+      dirNameOf('C:\\谱\\赤伶.jps') === 'C:\\谱' &&
+      isAbsolutePath('D:\\x') &&
+      !isAbsolutePath('x.mp3'),
+    '',
+  )
+  const doc0 = makeSyncDoc({
+    audio: '伴奏.mp3',
+    audioDurationMs: 300000,
+    anchors: [{ beat: 0, audioMs: 0 }, { beat: 8, audioMs: 4000 }],
+    code: 'Q: 1 2 3 4 |',
+    now: '2026-10-24T00:00:00+08:00',
+  })
+  check(
+    'adj1119 makeSyncDoc：解出 500ms/拍、120bpm、指纹 8 位',
+    doc0.tempo !== null && doc0.tempo.beatMs === 500 && doc0.segments[0].bpm === 120 && /^[0-9a-f]{8}$/.test(doc0.codeHash),
+    JSON.stringify(doc0.tempo),
+  )
+  const round = parseSyncDoc(serializeSyncDoc(doc0))
+  check(
+    'adj1119 sidecar 往返：锚点/裁剪/混音原样回来',
+    round.doc !== null &&
+      round.doc.anchors.length === 2 &&
+      round.doc.audio === '伴奏.mp3' &&
+      round.doc.trim.endMs === 300000 &&
+      round.doc.mix.accomp === DEFAULT_SYNC_MIX.accomp,
+    round.error ?? '',
+  )
+  const staleJson = JSON.stringify({ ...doc0, tempo: { beatMs: 999, offsetMs: 999, bpm: 60 } })
+  check(
+    'adj1119 手改过 tempo 也不信：一律按 anchors 重算',
+    parseSyncDoc(staleJson).doc?.tempo?.beatMs === 500,
+    '',
+  )
+  check(
+    'adj1119 坏 JSON / 版本更高 / 缺 audio ⇒ 明确报错',
+    parseSyncDoc('{').error !== undefined &&
+      parseSyncDoc(JSON.stringify({ ...doc0, version: 99 })).error !== undefined &&
+      parseSyncDoc(JSON.stringify({ ...doc0, audio: '' })).error !== undefined,
+    '',
+  )
+  check(
+    'adj1119 裁剪夹紧 + 同拍位去重都给提示（且 doc 仍可用）',
+    (() => {
+      const r = parseSyncDoc(
+        JSON.stringify({
+          ...doc0,
+          audioDurationMs: 10000,
+          trim: { startMs: 2000, endMs: 99999 },
+          anchors: [{ beat: 4, audioMs: 0 }, { beat: 4, audioMs: 100 }, { beat: 8, audioMs: 2000 }],
+        }),
+      )
+      return (
+        r.doc !== null &&
+        r.doc.trim.endMs === 10000 &&
+        r.doc.anchors.length === 2 &&
+        (r.warnings ?? []).length > 0
+      )
+    })(),
+    '',
+  )
+  check(
+    'adj1119 能不能出片：要 2 条锚点 + 有 audio',
+    !syncDocIsUsable(null) &&
+      !syncDocIsUsable({ ...doc0, anchors: [doc0.anchors[0]!], tempo: null }) &&
+      syncDocIsUsable(doc0),
+    '',
+  )
+  check(
+    'adj1119 谱面改过（codeHash 不同）⇒ stale 提示；没指纹不算改过',
+    !syncDocStale(doc0, 'Q: 1 2 3 4 |') &&
+      syncDocStale(doc0, 'Q: 1 2 3 4 5 |') &&
+      !syncDocStale({ ...doc0, codeHash: '' }, 'x'),
+    '',
+  )
+  check(
+    'adj1119 指纹稳定且区分（同源码同值、改一个字符就变）',
+    codeFingerprint('Q: 1 2 3 4 |') === codeFingerprint('Q: 1 2 3 4 |') &&
+      codeFingerprint('Q: 1 2 3 4 |') !== codeFingerprint('Q: 1 2 3 4 5 |'),
+    '',
   )
 }

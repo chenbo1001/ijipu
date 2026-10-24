@@ -681,6 +681,8 @@ export function PlaybackDialog({ inline = false }: { inline?: boolean } = {}) {
             ...(s.playVoice !== undefined ? { playVoice: s.playVoice } : {}),
             // adj451：力度倍率（与音频事件同源）——预留给强弱单/力度记号，先透传备用
             ...(s.gain !== undefined ? { gain: s.gain } : {}),
+            // adj1118：间奏块（中性灰）——试听时色块停在 `0` 上也是灰的
+            ...(s.interlude === true ? { interlude: true } : {}),
           })),
         ),
       )

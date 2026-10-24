@@ -425,8 +425,9 @@ export function matchInterludeHead(content: string, at: number):
 （`alignSameBeatSegs` 只处理 <1 拍的段，碰不到它；`maxSpanMs` 变大只影响
 `rectsActiveAt` 的回扫窗口，性能无碍。）
 
-留一个小设计项：间奏块的**配色**。现在按音色/声部取色，间奏块用同色会像"在唱"，
-建议改成中性灰（新增一个 `interlude` 色位，或复用休止符现有配色）。
+间奏块的**配色**：已实现（`adj1119`）——`playheadSegs`/`TimedRect` 带 `interlude: true`，
+`playheadBaseOf` 见它返回中性灰 `INTERLUDE_COLOR = rgba(120,124,130,…)`；
+视频（`renderer`）与试听（`PreviewPane`/`PlaybackDialog`）共用同一条链路，断言 3 条。
 
 **(2) "合成音时一拍走过" —— 我建议 P0 不做隐式分叉**
 
@@ -871,6 +872,22 @@ sidecar 的 `codeHash` 对不上时，这一行追加 `（谱面改过，请复�
 **与计划的偏差**：① 小节校验改为**静默豁免**（引擎没有 `info` 级别，见 §4-A5 第 4 条）；
 ② 新增 `findSegmentEnd` 的跳过逻辑与 `interludeDiagnostics` 两处（计划外，但不做就会误导用户）。
 
+### 第 1b 步（已做，`adj1119`）：间奏灰 + 片头卡速度 + 对拍地基
+
+| 文件 | 改了什么 |
+|---|---|
+| `engine/playback/playhead.ts` | `INTERLUDE_COLOR`（中性灰）+ `PlayheadSeg`/`PlayheadPos` 认 `interlude`，`playheadBaseOf` 优先取灰 |
+| `engine/dynamic/types.ts` / `timeline.ts` | `TimedRect.interlude` 透传（视频侧） |
+| `engine/playback/sequence.ts` | 间奏色块打 `interlude: true` |
+| `src/dialogs/PlaybackDialog.tsx` / `src/store/docStore.ts` | 试听轨道也透传（谱面预览同色） |
+| `src/export/video/cardLayout.ts` | `tempoLineOf`（片头卡写 `♩=96（原谱 80）`，纯函数可断言） |
+| `src/export/video/renderer.ts` | 片头卡速度行改用 `tempoLineOf(meta, beat)` |
+| `engine/playback/sync.ts`（新） | `fitSync`（2 条精确 / 3+ 最小二乘 / 残差 / 段诊断）、`audioMsOfBeat`、`beatOfAudioMs`、`residualBeatsOf`（**告警按"偏 > 1 拍"**）、`inTrimRange`、`displayBpm` |
+| `src/export/video/syncDoc.ts`（新） | sidecar 解析/序列化/路径（`赤伶.jps.sync.json`）/指纹/`makeSyncDoc`/`stale` |
+
+**验证**：`npm run smoke` → `✓ 4501 / ✗ 0`，CLI 176 项；新增 `adj1119` 断言 25 条（含负对照：
+普通块不是灰、坏 JSON/高版本/缺 audio 都报错、手改 tempo 不信、同拍位去重、裁剪夹紧）。
+
 ### 第 2 步（宿主，1.5 天）：sidecar + 对拍台骨架（波形 + 起止点 + 打点 + 单锚点）
 
 - sidecar 读写（Rust `mv_sync_read/write` + 网站降级）、`src/export/video/syncDoc.ts`（内存态 + 脏标记）；
@@ -1022,7 +1039,7 @@ sidecar 的 `codeHash` 对不上时，这一行追加 `（谱面改过，请复�
 ```powershell
 # 基线（开工前、每次改动后）
 cd D:\Coding\JianpuScript\ijipu
-npm run smoke     # 现在的结果：✓ 4448 / ✗ 0 + CLI 169 项
+npm run smoke     # 现在的结果：✓ 4501 / ✗ 0 + CLI 176 项
 
 # 语法与时间轴（第 1 步）：自己写一份临时谱，放在工作区 .dsh-tmp/ 下
 # ⚠ 别放 dist-smoke/——vite 构建会先清空它

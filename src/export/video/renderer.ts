@@ -52,7 +52,7 @@ import { withOverlay } from '../../store/overlayAssets'
 import { pickPracticeCandidate } from './practicePick'
 import { brand } from '../../brand/tokens'
 import { CARD_SANS, CARD_SERIF, DEFAULT_CARD_STYLE, type CardStyle } from './cardTemplates'
-import { endCardLayout } from './cardLayout'
+import { endCardLayout, tempoLineOf } from './cardLayout'
 
 /**
  * 页面位图的放大倍数：4 倍跟拍时，取景框宽 = 1080/4 = 270 页面单位，
@@ -573,9 +573,12 @@ export async function createDynamicSession(
       const title = (meta?.titles[0] ?? '').trim() || '未命名'
       const subtitle = (meta?.titles.slice(1).join(' ') ?? '').trim()
       const authors = (meta?.authors.join(' / ') ?? '').trim()
-      const tempo = meta?.tempoNum
-        ? `♩=${meta.tempoNum}${meta.tempoText ? ` ${meta.tempoText}` : ''}`
-        : (meta?.tempo ?? '')
+      /**
+       * adj1118：速度那一行交给纯函数 `tempoLineOf`——
+       * 对拍过（`beat` ≠ 谱面 `J:`）时写 **实际拍速 + （原谱 X）**，没对拍就写谱面的值。
+       * 口径见 `cardLayout.ts`；谱面本身不显示这个差异（sidecar 只做对齐）。
+       */
+      const tempo = tempoLineOf(meta, beat)
       const key = keySignatureOf(meta?.key ?? '')
       const rest = [meta?.meter ?? '', tempo].filter((p) => p.length > 0)
       /**

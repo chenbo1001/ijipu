@@ -136,7 +136,7 @@ interface DocState {
    *  adj451：`gain` = 该拍段所属事件的**力度倍率**（与音频事件同源，缺省 1）——目前由 adj427 写入
    *  （重叠伴奏/第二声部 0.75），**预留给强弱单（渐强/渐弱）与力度记号**：后续算出逐音力度后，
    *  音频与色块轨道自动同步，无需再改数据结构 */
-  playheadTrack: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number; instrument?: string; yTopMin?: number; yBottomMax?: number; playVoice?: 'accomp' | 'main' | 'second'; gain?: number }[]
+  playheadTrack: { atMs: number; durationMs: number; pageIndex: number; x: number; y: number; width: number; voice: number; group: number; instrument?: string; yTopMin?: number; yBottomMax?: number; playVoice?: 'accomp' | 'main' | 'second'; gain?: number; interlude?: boolean }[]
   /**
    * adj1048：试听「拍网格」——跳跳球要按**拍**落，不能按音落（一拍可能有两个八分音符）。
    * `playheadBeatMs` = 一拍多少毫秒；`playheadAnchorMs` = 第一拍对应的时刻。
