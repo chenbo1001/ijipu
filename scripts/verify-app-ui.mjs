@@ -2153,7 +2153,7 @@ async function main() {
         )
         check('adj1123 波形上方有动态谱预览（会话建好、画布 1920×1080 已出图）', previewReady)
 
-        // adj1125（用户 2026-10-24）：伴奏 + 播放/打点 必须落在**预览与波形之间**（关联操作就近）
+        // adj1128（用户 2026-10-24：「这些按钮放到波形下面、跟下面的按钮整合，节省上面空间」）
         const orderCheck = await evalJs(
           c,
           `(() => {
@@ -2161,15 +2161,17 @@ async function main() {
             const audioRow = [...document.querySelectorAll('.sync-panel > .sync-row')].find((el) => el.textContent.includes('伴奏'))
             return {
               preview: top(document.querySelector('.sync-preview')),
-              audio: top(audioRow),
               wave: top(document.querySelector('.sync-wave')),
+              audio: top(audioRow),
               label: audioRow ? audioRow.innerText.replace(/\\n/g, ' ').slice(0, 20) : '',
             }
           })()`,
         )
         check(
-          'adj1125 伴奏/播放/打点夹在预览与波形之间（上：看谱；下：听音）',
-          orderCheck.preview > 0 && orderCheck.preview < orderCheck.audio && orderCheck.audio < orderCheck.wave,
+          'adj1128 伴奏/播放/打点挪到**波形下方**（预览 → 波形 → 参数行，省掉上面那一排）',
+          orderCheck.preview > 0 &&
+            orderCheck.preview < orderCheck.wave &&
+            orderCheck.wave < orderCheck.audio,
           JSON.stringify(orderCheck),
         )
 
@@ -2371,6 +2373,86 @@ async function main() {
           c,
           `(() => { const s = document.querySelector('[data-sync="preview-zoom"]'); if (!s) return false; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; setter.call(s, '1'); s.dispatchEvent(new Event('change', { bubbles: true })); return true })()`,
         )
+        await sleep(300)
+
+        /**
+         * adj1128（用户 2026-10-24 实报的三条）：
+         *  ① 「保存没有实现」——点保存要看得到结果提示（桌面写文件 / 网页只有本机缓存，两者都要如实说）；
+         *  ② 「音量调整无效」——真点播放，量一下 GainNode 上设的增益（必须等于滑杆值）；
+         *  ③ 「节拍器关不掉」——关掉之后不能再有新排的"嗒"（计数不再增长）。
+         */
+        const saveClicked = await evalJs(c, `(() => { const b = document.querySelector('[data-sync="save"]'); if (!b) return false; b.click(); return true })()`)
+        const saveNotice = await waitFor(
+          c,
+          `(() => { const t = document.querySelector('.sync-status')?.textContent ?? ''; return /已存本机缓存|已保存：|保存失败/.test(t) })()`,
+          '保存后的提示',
+          40,
+        )
+        check('adj1128 点「保存」有明确结果提示（不是静默无反应）', saveClicked && saveNotice, '')
+
+        // ② 音量：把伴奏音量拖到 0.6，再真播放，看 GainNode 的值
+        await evalJs(
+          c,
+          `(() => {
+            window.__gains = []
+            window.__oscCount = 0
+            if (!window.__gainPatched) {
+              window.__gainPatched = true
+              const orig = AudioContext.prototype.createGain
+              AudioContext.prototype.createGain = function (...a) {
+                const g = orig.apply(this, a)
+                window.__gains.push(g)
+                return g
+              }
+              const origOsc = AudioContext.prototype.createOscillator
+              AudioContext.prototype.createOscillator = function (...a) {
+                window.__oscCount++
+                return origOsc.apply(this, a)
+              }
+            }
+            const ranges = [...document.querySelectorAll('.sync-row input[type=range]')]
+            const acc = ranges[0]
+            if (!acc) return false
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+            setter.call(acc, '0.6')
+            acc.dispatchEvent(new Event('change', { bubbles: true }))
+            return true
+          })()`,
+        )
+        await sleep(200)
+        // 先把节拍器打开（要在播放**之前**开，才看得到它排"嗒"）
+        await evalJs(c, `(() => { const cb = [...document.querySelectorAll('.sync-check input')][0]; if (!cb) return false; if (!cb.checked) cb.click(); return cb.checked })()`)
+        await sleep(200)
+        const playRect = await evalJs(
+          c,
+          `(() => { const b = [...document.querySelectorAll('.sync-row .btn')].find((el) => el.textContent.trim() === '播放'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } })()`,
+        )
+        if (playRect) {
+          for (const type of ['mousePressed', 'mouseReleased']) {
+            await c.send('Input.dispatchMouseEvent', { type, x: playRect.x, y: playRect.y, button: 'left', clickCount: 1 })
+          }
+        }
+        await sleep(1400)
+        const gains = await evalJs(c, `(window.__gains || []).map((g) => Math.round(g.gain.value * 100) / 100)`)
+        check(
+          'adj1128 伴奏音量真的进了音频图（拖到 0.6 ⇒ GainNode = 0.6，不再是死滑杆）',
+          Array.isArray(gains) && gains.includes(0.6),
+          JSON.stringify(gains),
+        )
+        // ③ 节拍器：此刻已排了 4 秒窗口 ⇒ 关掉之后计数必须停
+        const oscOn = await evalJs(c, `window.__oscCount || 0`)
+        await evalJs(c, `(() => { const cb = [...document.querySelectorAll('.sync-check input')][0]; if (!cb) return false; if (cb.checked) cb.click(); return !cb.checked })()`)
+        await sleep(1500)
+        const oscOff1 = await evalJs(c, `window.__oscCount || 0`)
+        await sleep(1200)
+        const oscOff2 = await evalJs(c, `window.__oscCount || 0`)
+        check(
+          'adj1128 关掉节拍器后不再排新的"嗒"（计数停止增长）',
+          oscOn > 0 && oscOff1 === oscOff2,
+          JSON.stringify({ 开着: oscOn, 关掉后1: oscOff1, 关掉后2: oscOff2 }),
+        )
+        // 停止播放，别把声音带进后面的用例
+        await evalJs(c, `[...document.querySelectorAll('.sync-row .btn')].find((el) => el.textContent.trim() === '暂停')?.click(), true`)
         await sleep(300)
         await evalJs(c, `[...document.querySelectorAll('.sync-head .btn')].find((b) => b.textContent.includes('关闭'))?.click(), true`)
         await waitFor(c, `!document.querySelector('.sync-layer')`, '对拍台关闭')

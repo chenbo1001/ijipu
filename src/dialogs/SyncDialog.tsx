@@ -27,8 +27,13 @@ import { useDocStore } from '../store/docStore'
 import { useSyncStore } from '../store/syncStore'
 import { useUiStore } from '../store/uiStore'
 import { createDynamicSession, type DynamicSession } from '../export/video/renderer'
+import { renderToAudioBuffer } from '../export/audio'
+import { createHqCache, resolveHqBank } from '../playback/spessaCache'
+import { resolveActiveLibrary } from '../playback/spessaSynthBackend'
+import { hostBankUrl } from '../store/hostBridge'
 import { decodeAccompaniment, waveformPeaks } from '../export/video/accompaniment'
-import { syncDocStale } from '../export/video/syncDoc'
+import { parseSyncDoc, mixPlanOf, serializeSyncDoc, sidecarPathOf, syncDocStale } from '../export/video/syncDoc'
+import { readSidecarText, writeSidecarText } from '../export/video/syncIo'
 import { canUseDynamicVideo } from '../export/video/capability'
 import { syncCopy } from '../brand/copy'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
@@ -84,6 +89,9 @@ export function SyncDialog() {
   const setMix = useSyncStore((s) => s.setMix)
   const save = useSyncStore((s) => s.save)
   const clear = useSyncStore((s) => s.clear)
+  const replaceDoc = useSyncStore((s) => s.replaceDoc)
+  /** adj1128：保存要写同目录的 sidecar —— 只有桌面壳打开的 `.jps` 才有绝对路径 */
+  const nativePath = useDocStore((s) => s.nativePath)
 
   const [playing, setPlaying] = useState(false)
   const [sel, setSel] = useState(0)
@@ -130,10 +138,47 @@ export function SyncDialog() {
   const rafRef = useRef(0)
   const playingRef = useRef(false)
 
-  // 打开台面：恢复同名谱的副本（没有就新建空 doc）
+  /** 打开台面：恢复同名谱的副本（没有就新建空 doc） */
   useEffect(() => {
     ensureFor(fileName, code)
   }, [ensureFor, fileName, code])
+
+  /**
+   * adj1128：打开台面时**先读同目录的 sidecar**（比 L1 兜底权威）。
+   * 只在"本地还没有锚点"时采用磁盘内容，免得覆盖用户刚打的点。
+   */
+  useEffect(() => {
+    if (!nativePath) return
+    let cancelled = false
+    void (async () => {
+      const r = await readSidecarText(sidecarPathOf(nativePath))
+      if (cancelled || !r.ok || r.text === null) return
+      const parsed = parseSyncDoc(r.text)
+      if (parsed.doc === null) return
+      const cur = useSyncStore.getState().doc
+      if (cur !== null && cur.anchors.length > 0) return
+      replaceDoc(parsed.doc)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [nativePath, replaceDoc])
+
+  /** adj1128（用户实报「保存没有实现」）：真的写 sidecar；网页/开发模式退回本机缓存并如实说明 */
+  const onSave = useCallback(async () => {
+    if (doc === null) return
+    save(code, fileName)
+    const latest = useSyncStore.getState().doc
+    if (latest === null) return
+    if (!nativePath) {
+      setNotice(syncCopy.saved)
+      return
+    }
+    const target = sidecarPathOf(nativePath)
+    const res = await writeSidecarText(target, serializeSyncDoc(latest))
+    const name = target.split(/[\\/]/).pop() ?? target
+    setNotice(res.ok ? syncCopy.savedFile(name) : syncCopy.saveFailed(res.error))
+  }, [code, doc, fileName, nativePath, save])
 
   // ---------- adj1124：台面尺寸（可拖右下角 / 最大化 / 记 L1） ----------
   /** 记住上一次渲染出来的 layout（拖拽松手时要在监听里读它，而监听只挂一次） */
@@ -334,10 +379,39 @@ export function SyncDialog() {
     return si.from + (ctx.currentTime - si.at) * 1000
   }, [])
 
+  /** 正在播放的所有音源（adj1128 起可能同时有"伴奏 + 合成音"两条） */
+  const sourcesRef = useRef<AudioBufferSourceNode[]>([])
+  /** 已经排进 AudioContext 的"嗒"——关掉节拍器时必须把它们全停掉（否则听起来"关不掉"） */
+  const clicksRef = useRef<OscillatorNode[]>([])
+  /** 节拍器已经排到哪一刻（音频 ms） */
+  const schedRef = useRef(0)
+
+  const clearClicks = useCallback(() => {
+    for (const o of clicksRef.current) {
+      try {
+        o.stop()
+        o.disconnect()
+      } catch {
+        /* 已经停了 */
+      }
+    }
+    clicksRef.current = []
+    schedRef.current = 0
+  }, [])
+
+  /**
+   * adj1128：`meterOn` 要放 ref 里读——`tick` 是启动播放那一刻的闭包，
+   * 直接读 state 会**永远读到 true**（关掉开关后还在排"嗒"）。这是"关不掉"的第二个根因。
+   */
+  const meterRef = useRef(meterOn)
+  const loopRefOn = useRef(loopOn)
+  useEffect(() => {
+    meterRef.current = meterOn
+    loopRefOn.current = loopOn
+  }, [meterOn, loopOn])
+
   const stopSource = useCallback(() => {
-    const s = srcRef.current
-    srcRef.current = null
-    if (s) {
+    for (const s of sourcesRef.current) {
       try {
         s.stop()
       } catch {
@@ -345,36 +419,91 @@ export function SyncDialog() {
       }
       s.disconnect()
     }
+    sourcesRef.current = []
+    srcRef.current = null
+    clearClicks()
     cancelAnimationFrame(rafRef.current)
     playingRef.current = false
     setPlaying(false)
-  }, [])
+  }, [clearClicks])
 
-  /** 节拍器：从 `fromMs` 到 `toMs` 预先排"嗒"（拍点；最多 2000 下，防止超长曲拖垮） */
-  const scheduleClicks = useCallback(
-    (fromMs: number, toMs: number) => {
-      if (!meterOn || !effFit) return
-      const ctx = ensureCtx()
-      const k0 = Math.ceil((fromMs - effFit.offsetMs) / effFit.beatMs - 1e-9)
+  /**
+   * 节拍器（adj1128 修"关不掉"）：**只排未来 4 秒**，`tick` 每帧续排。
+   *
+   * 第一版是一次把整段（甚至整个循环窗口）都排出去 —— 点关掉开关时那些已经排进
+   * `AudioContext` 的振荡器照样会响，看起来就是"关不掉"。现在：
+   *  · 只排窗口内 4 秒，关掉时 `clearClicks()` 立刻全停；
+   *  · 点击时刻**就是拍点**（`offsetMs + k × beatMs`），不再额外加 20ms 延迟（那会让"嗒"总是晚一点）。
+   */
+  const scheduleClicksUntil = useCallback(
+    (untilMs: number) => {
+      if (!meterRef.current) return
+      const ctx = ctxRef.current
+      if (!ctx) return
+      /**
+       * 拍点 = **谱面拍点**。还没对拍（0/1 条锚点）时没有 `effFit`，
+       * 按"谱面从音频 0 开始、速度用谱面 J:"先响着 —— 这样"没对拍也能听拍子"，
+       * 对拍之后再跟着锚点走（不再是"点了没反应"）。
+       */
+      const clock = effFit ?? { beatMs: scoreBeatMs, offsetMs: 0 }
+      const from = Math.max(schedRef.current, playheadRef.current - 40, 0)
+      if (untilMs <= from) return
+      const beatMs = clock.beatMs
+      const k0 = Math.ceil((from - clock.offsetMs) / beatMs - 1e-9)
       let n = 0
-      for (let k = k0; n < 2000; k++) {
-        const at = effFit.offsetMs + k * effFit.beatMs
-        if (at >= toMs) break
-        if (at < fromMs - 1) continue
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
-        osc.frequency.value = 900
-        gain.gain.value = 0.22
-        osc.connect(gain)
-        gain.connect(ctx.destination)
-        const t = ctx.currentTime + Math.max(0, (at - fromMs) / 1000) + 0.02
-        osc.start(t)
-        osc.stop(t + 0.035)
+      for (let k = k0; n < 400; k++) {
+        const at = clock.offsetMs + k * beatMs
+        if (at > untilMs) break
+        if (at >= from) {
+          const osc = ctx.createOscillator()
+          const gain = ctx.createGain()
+          osc.frequency.value = 1000
+          gain.gain.value = 0.22
+          osc.connect(gain)
+          gain.connect(ctx.destination)
+          const when = ctx.currentTime + Math.max(0, (at - from) / 1000)
+          osc.start(when)
+          osc.stop(when + 0.04)
+          clicksRef.current.push(osc)
+        }
         n++
       }
+      schedRef.current = Math.max(from, untilMs)
     },
-    [ensureCtx, effFit, meterOn],
+    [effFit, scoreBeatMs],
   )
+
+  /**
+   * adj1128（用户 2026-10-24 实报「声音选合成音还是伴奏、音量也没用」）：
+   * 台面里的试听改为**按混音设置真的播**——
+   *  - `file`：只播伴奏（音量 = 伴奏音量）；
+   *  - `synth`：只播合成音（按谱面 `J:` 渲染，按拍速比例变速对齐）；
+   *  - `mix`：两条一起播，各自音量。
+   *
+   * 合成音要现渲染（SpessaSynth 离线渲一遍），所以懒加载 + 缓存；渲染期间显示提示。
+   */
+  const synthBufRef = useRef<{ key: string; buf: AudioBuffer } | null>(null)
+  const [synthState, setSynthState] = useState<'idle' | 'loading' | 'error'>('idle')
+
+  const ensureSynthBuffer = useCallback(async (): Promise<AudioBuffer | null> => {
+    const s = previewSessionRef.current
+    if (!s) return null
+    const key = `${s.totalMs}|${s.bpm}|${code.length}`
+    if (synthBufRef.current?.key === key) return synthBufRef.current.buf
+    setSynthState('loading')
+    try {
+      const lib = resolveActiveLibrary(useUiStore.getState().playbackHqLibrary).lib
+      const cache = createHqCache()
+      const { bank } = await resolveHqBank(lib, cache, hostBankUrl(lib.id))
+      const buf = await renderToAudioBuffer(s.events, bank, { bpm: s.bpm })
+      synthBufRef.current = { key, buf }
+      setSynthState('idle')
+      return buf
+    } catch {
+      setSynthState('error')
+      return null
+    }
+  }, [code.length])
 
   const startPlayback = useCallback(
     async (fromMs: number, loop?: { startMs: number; endMs: number }) => {
@@ -385,22 +514,56 @@ export function SyncDialog() {
       stopSource()
       const ctx = ensureCtx()
       await ctx.resume()
-      const src = ctx.createBufferSource()
-      src.buffer = audio
-      src.connect(ctx.destination)
       const from = Math.max(0, Math.min(fromMs, trim.endMs - 1))
-      src.start(0, from / 1000)
-      srcRef.current = src
+      const mix = useSyncStore.getState().doc?.mix ?? { source: 'file' as const, accomp: 1, synth: 0.5 }
+      const plan = mixPlanOf(mix)
+      const sources: AudioBufferSourceNode[] = []
+      // ① 伴奏（按设定的伴奏音量）
+      if (plan.playAcc) {
+        const src = ctx.createBufferSource()
+        src.buffer = audio
+        const gain = ctx.createGain()
+        gain.gain.value = mix.accomp
+        src.connect(gain)
+        gain.connect(ctx.destination)
+        src.start(0, from / 1000)
+        sources.push(src)
+      }
+      // ② 合成音（按设定的合成音量；按拍速比例变速，才能跟伴奏同进）
+      if (plan.playSynth) {
+        const sb = await ensureSynthBuffer()
+        if (sb) {
+          const fitForPreview = effFit ?? { beatMs: scoreBeatMs, offsetMs: 0 }
+          const scoreStartSec = Math.max(0, sessionMsOfAudioMs(from, fitForPreview, scoreBeatMs)) / 1000
+          const src = ctx.createBufferSource()
+          src.buffer = sb
+          src.playbackRate.value = scoreBeatMs / fitForPreview.beatMs
+          const gain = ctx.createGain()
+          gain.gain.value = mix.synth
+          src.connect(gain)
+          gain.connect(ctx.destination)
+          src.start(0, Math.min(scoreStartSec, Math.max(0, sb.duration - 0.01)))
+          sources.push(src)
+        }
+      }
+      if (sources.length === 0) {
+        setNotice(syncCopy.synthFailed)
+        return
+      }
+      sourcesRef.current = sources
+      srcRef.current = sources[0] ?? null
       startRef.current = { at: ctx.currentTime, from }
       loopRef.current = loop ?? null
       playheadRef.current = from
       playingRef.current = true
       setPlaying(true)
-      if (meterOn) scheduleClicks(from, loop ? loop.endMs : trim.endMs)
+      schedRef.current = from
+      if (meterRef.current) scheduleClicksUntil(from + 4000)
       const tick = () => {
         if (!playingRef.current) return
         const t = currentMs()
         playheadRef.current = Math.min(t, trim.endMs)
+        if (meterRef.current) scheduleClicksUntil(Math.min(trim.endMs, t + 4000))
         drawRef.current()
         const lp = loopRef.current
         if (lp && t >= lp.endMs) {
@@ -415,7 +578,7 @@ export function SyncDialog() {
       }
       rafRef.current = requestAnimationFrame(tick)
     },
-    [audio, currentMs, ensureCtx, meterOn, scheduleClicks, stopSource, trim.endMs],
+    [audio, currentMs, ensureCtx, effFit, ensureSynthBuffer, meterOn, scheduleClicksUntil, scoreBeatMs, stopSource, trim.endMs],
   )
 
   /** 当前锚点的"回退几秒重听"窗口 */
@@ -909,6 +1072,11 @@ export function SyncDialog() {
     return () => window.removeEventListener('keydown', keyboard)
   }, [keyboard])
 
+  /** adj1128：关掉节拍器立刻静音（只排了未来 4 秒，但已排的那几秒也要停） */
+  useEffect(() => {
+    if (!meterOn) clearClicks()
+  }, [meterOn, clearClicks])
+
   /**
    * ⚠ `adj1121`：**所有 hook 必须在下面这个提前返回之前**。
    *
@@ -961,7 +1129,6 @@ export function SyncDialog() {
         <div
           className="sync-head"
           onDoubleClick={() => setLayout({ ...layoutRef.current, maximized: !layoutRef.current.maximized })}
-          title={syncCopy.headHint}
         >
           <b>
             {syncCopy.title}：{fileName}
@@ -977,10 +1144,16 @@ export function SyncDialog() {
           >
             {layout.maximized ? syncCopy.restore : syncCopy.maximize}
           </button>
-          <button type="button" className="btn" onClick={() => { save(code, fileName); setNotice(syncCopy.saved) }}>
+          <button
+            type="button"
+            className="btn"
+            data-sync="save"
+            onClick={() => void onSave()}
+            title={syncCopy.saveHint}
+          >
             {syncCopy.save}
           </button>
-          <button type="button" className="btn" onClick={() => closeModal()}>
+          <button type="button" className="btn" onClick={() => closeModal()} title={syncCopy.closeHint}>
             {syncCopy.close}
           </button>
         </div>
@@ -1028,33 +1201,6 @@ export function SyncDialog() {
         {/* 预览 ↔ 下方：往上拖 = 预览变高（下面整体跟着平移） */}
         <div className="sync-split" onPointerDown={startDrag('preview')} title={syncCopy.splitPreviewHint} />
 
-        {/* adj1125（用户 2026-10-24）：伴奏与播放/打点**放在预览与波形之间**——关联操作就近，
-            上面是"看谱"、下面是"听音"，这一排就是两者的交接处 */}
-        <div className="sync-row">
-          <span className="sync-label">{syncCopy.audioLabel}</span>
-          {audio ? (
-            <span className="sync-name">
-              {doc.audio} · {fmtSec(durMs)}
-            </span>
-          ) : (
-            <span className="sync-name sync-dim">
-              {doc.audio !== '' ? `${syncCopy.audioMissing}：${doc.audio}` : syncCopy.noAudio}
-            </span>
-          )}
-          <input ref={fileRef} type="file" accept="audio/*,.mp3,.m4a,.wav,.flac" className="sync-file" onChange={(e) => void onPickAudio(e)} />
-          <button type="button" className="btn" disabled={decodeState === 'busy'} onClick={() => fileRef.current?.click()}>
-            {audio ? syncCopy.repickAudio : syncCopy.pickAudio}
-          </button>
-          {decodeState === 'busy' && <span className="sync-dim">{syncCopy.decoding}</span>}
-          <span className="sync-grow" />
-          <button type="button" className="btn" onClick={() => (playing ? stopSource() : void startPlayback(playheadRef.current))} disabled={!audio}>
-            {playing ? syncCopy.pause : syncCopy.play}
-          </button>
-          <button type="button" className="btn" onClick={tap} disabled={!audio}>
-            {syncCopy.tap}
-          </button>
-        </div>
-
         <div ref={wrapRef} className="sync-wave">
           <canvas
             ref={canvasRef}
@@ -1083,19 +1229,29 @@ export function SyncDialog() {
         )}
         {/* 波形 ↔ 参数行：往上拖 = 波形变高 */}
         <div className="sync-split" onPointerDown={startDrag('wave')} title={syncCopy.splitWaveHint} />
+        {/* 第一排（紧贴波形下沿）：伴奏 + 播放 + 打点 + 视野 —— 用户 2026-10-24 要求
+            「这些按钮放到波形下面、跟下面的按钮整合，节省上面的空间」 */}
         <div className="sync-row">
-          <span className="sync-label">{syncCopy.trim}</span>
-          <span className="sync-name">
-            {fmtSec(trim.startMs)} → {fmtSec(trim.endMs)}
-          </span>
-          <button type="button" className="btn" disabled={!audio} onClick={() => setTrim({ startMs: Math.round(playheadRef.current), endMs: trim.endMs })}>
-            {syncCopy.trimStartNow}
+          <span className="sync-label">{syncCopy.audioLabel}</span>
+          {audio ? (
+            <span className="sync-name">
+              {doc.audio} · {fmtSec(durMs)}
+            </span>
+          ) : (
+            <span className="sync-name sync-dim">
+              {doc.audio !== '' ? `${syncCopy.audioMissing}：${doc.audio}` : syncCopy.noAudio}
+            </span>
+          )}
+          <input ref={fileRef} type="file" accept="audio/*,.mp3,.m4a,.wav,.flac" className="sync-file" onChange={(e) => void onPickAudio(e)} />
+          <button type="button" className="btn" disabled={decodeState === 'busy'} onClick={() => fileRef.current?.click()}>
+            {audio ? syncCopy.repickAudio : syncCopy.pickAudio}
           </button>
-          <button type="button" className="btn" disabled={!audio} onClick={() => setTrim({ startMs: trim.startMs, endMs: Math.round(playheadRef.current) })}>
-            {syncCopy.trimEndNow}
+          {decodeState === 'busy' && <span className="sync-dim">{syncCopy.decoding}</span>}
+          <button type="button" className="btn" onClick={() => (playing ? stopSource() : void startPlayback(playheadRef.current))} disabled={!audio}>
+            {playing ? syncCopy.pause : syncCopy.play}
           </button>
-          <button type="button" className="btn" disabled={!audio} onClick={() => setTrim({ startMs: 0, endMs: durMs })}>
-            {syncCopy.trimAll}
+          <button type="button" className="btn" onClick={tap} disabled={!audio}>
+            {syncCopy.tap}
           </button>
           <span className="sync-grow" />
           {/* adj1126：视野（单位宽度显示的时长）；滚轮也能缩放，`0` 回整曲 */}
@@ -1133,9 +1289,23 @@ export function SyncDialog() {
           <span className="sync-dim">{syncCopy.viewHint}</span>
         </div>
 
-        {/* 第二排：节拍器/循环/步长（都在波形正下方，用户口径「与音频相关的放波形条上下」） */}
+        {/* 第二排：保留段 + 节拍器/循环/步长（都在波形正下方，用户口径「与音频相关的放波形条上下」） */}
         <div className="sync-row sync-row-tight">
-          <label className="sync-check">
+          <span className="sync-label">{syncCopy.trim}</span>
+          <span className="sync-name">
+            {fmtSec(trim.startMs)} → {fmtSec(trim.endMs)}
+          </span>
+          <button type="button" className="btn" disabled={!audio} onClick={() => setTrim({ startMs: Math.round(playheadRef.current), endMs: trim.endMs })}>
+            {syncCopy.trimStartNow}
+          </button>
+          <button type="button" className="btn" disabled={!audio} onClick={() => setTrim({ startMs: trim.startMs, endMs: Math.round(playheadRef.current) })}>
+            {syncCopy.trimEndNow}
+          </button>
+          <button type="button" className="btn" disabled={!audio} onClick={() => setTrim({ startMs: 0, endMs: durMs })}>
+            {syncCopy.trimAll}
+          </button>
+          <span className="sync-grow" />
+          <label className="sync-check" title={syncCopy.metronomeHint}>
             <input type="checkbox" checked={meterOn} onChange={(e) => setMeterOn(e.target.checked)} />
             {syncCopy.metronome}
           </label>
@@ -1170,6 +1340,7 @@ export function SyncDialog() {
           <span className="sync-label">{syncCopy.mixSource}</span>
           <select
             className="sync-select"
+            data-sync="mix-source"
             value={doc.mix.source}
             onChange={(e) => setMix({ source: e.target.value as 'file' | 'synth' | 'mix' })}
           >
@@ -1177,6 +1348,9 @@ export function SyncDialog() {
             <option value="mix">{syncCopy.mixBoth}</option>
             <option value="synth">{syncCopy.mixSynth}</option>
           </select>
+          {/* adj1128：选合成音时要现渲染（第一次慢），如实显示状态 */}
+          {synthState === 'loading' && <span className="sync-dim">{syncCopy.synthLoading}</span>}
+          {synthState === 'error' && <span className="sync-warn">{syncCopy.synthFailed}</span>}
           <span className="sync-label">{syncCopy.accompGainShort}</span>
           <input
             className="sync-mix-range"

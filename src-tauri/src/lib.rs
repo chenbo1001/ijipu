@@ -126,6 +126,44 @@ fn write_external_file(path: String, text: String) -> Result<(), String> {
     Ok(())
 }
 
+/// adj1128：读对拍边车文件（`赤伶.jps.sync.json`）。
+///
+/// 为什么不复用 `read_native_probe`：那个返回的是"外部改动检测"用的形状（含 mtime），
+/// 而且**文件不存在时报错**；这里"文件不存在"是**正常状态**（还没对拍过）⇒ 返回 `None`，
+/// 前端据此新建，而不是弹一个红字。
+#[tauri::command]
+fn sync_read_file(path: String) -> Result<Option<String>, String> {
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{}: {}", path, e)),
+    }
+}
+
+/// adj1128：写对拍边车文件——**允许新建**（`write_external_file` 要求文件已存在，
+/// 而 sidecar 第一次保存时必然不存在）。
+///
+/// 与 `write_external_file` 同一口径：写完**回读校验**，不一致就报错，绝不谎报已保存。
+/// 只写一个同目录的小 JSON，不建目录、不覆盖目录。
+#[tauri::command]
+fn sync_write_file(path: String, text: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if p.is_dir() {
+        return Err(format!("目标是目录，不能当文件写：{}", path));
+    }
+    if let Some(dir) = p.parent() {
+        if !dir.is_dir() {
+            return Err(format!("目录不存在：{}", dir.display()));
+        }
+    }
+    std::fs::write(&p, &text).map_err(|e| format!("{}: {}", path, e))?;
+    let back = std::fs::read_to_string(&p).map_err(|e| format!("回读失败 {}: {}", path, e))?;
+    if back != text {
+        return Err("写入后回读内容与预期不一致".to_string());
+    }
+    Ok(())
+}
+
 /// adj966：读一个**系统文件**的当前内容 + mtime（毫秒）——"外部改动检测"的原生 IO。
 ///
 /// 为什么要单独一条命令：既有的 `ws_read_text` 要求"工作区根 + 相对段"，
@@ -173,6 +211,39 @@ mod native_probe_tests {
         assert!(missing.is_err(), "不存在的文件必须报错");
         let as_dir = read_native_probe(dir.to_string_lossy().to_string());
         assert!(as_dir.is_err(), "目录不是普通文件，必须报错");
+        let _ = std::fs::remove_file(&f);
+    }
+}
+
+/// adj1128：对拍边车文件（`xxx.jps.sync.json`）的读写。
+///
+/// 三条判据都是"错了会骗用户"的地方：
+///  ① 写**允许新建**（第一版复用 `write_external_file` 就因为"要求文件已存在"而根本存不了）；
+///  ② 读遇到"文件不存在"要返回 `Ok(None)`（还没对拍过是正常状态，不是错误）；
+///  ③ 写完回读必须与写入一致，否则报错（绝不谎报已保存）。
+#[cfg(test)]
+mod sync_io_tests {
+    use super::{sync_read_file, sync_write_file};
+
+    #[test]
+    fn writes_new_file_and_reads_back() {
+        let dir = std::env::temp_dir().join("ijipu-sync-io-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("曲.jps.sync.json");
+        let _ = std::fs::remove_file(&f);
+        // ① 文件不存在时读 ⇒ None（不是错误）
+        assert_eq!(sync_read_file(f.to_string_lossy().to_string()).unwrap(), None);
+        // ② 第一次写 = 新建
+        let text = "{\n  \"version\": 1\n}\n";
+        sync_write_file(f.to_string_lossy().to_string(), text.to_string()).unwrap();
+        // ③ 回读一致
+        assert_eq!(
+            sync_read_file(f.to_string_lossy().to_string()).unwrap().as_deref(),
+            Some(text)
+        );
+        // ④ 目录不存在 ⇒ 明确报错
+        let bad = dir.join("no-such-dir").join("x.json");
+        assert!(sync_write_file(bad.to_string_lossy().to_string(), "x".to_string()).is_err());
         let _ = std::fs::remove_file(&f);
     }
 }
@@ -1032,6 +1103,9 @@ pub fn run() {
             sf_soundfont_open_dir,
             take_pending_open_files,
             write_external_file,
+            // adj1128：对拍边车文件（`赤伶.jps.sync.json`）读写——**允许新建**
+            sync_read_file,
+            sync_write_file,
             // adj966：按绝对路径读系统文件 + 取 mtime（外部改动检测的轮询 IO）
             read_native_probe,
             // adj568：桌面端工作区（原生选目录 + 按路径读写）

@@ -46,6 +46,11 @@ interface SyncState {
   rev: number
   /** 打开对拍台时调用：先恢复 L1 里同名谱的副本（伴奏仍需重选）；没有就新建一份空的 */
   ensureFor: (fileName: string, code: string) => void
+  /**
+   * adj1128：用**磁盘上的 sidecar** 整个替换内存副本。
+   * 打开台面时会先读同目录的 `.jps.sync.json`（比 L1 兜底更权威）。
+   */
+  replaceDoc: (doc: SyncDoc) => void
   setAudio: (name: string, buf: AudioBuffer | null) => void
   addAnchor: (a: SyncAnchor) => void
   updateAnchor: (i: number, patch: Partial<SyncAnchor>) => void
@@ -86,6 +91,10 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       doc: makeSyncDoc({ audio: '', audioDurationMs: 0, anchors: [], code }),
       rev: get().rev + 1,
     })
+  },
+
+  replaceDoc: (doc) => {
+    set({ doc: recompute(doc), rev: get().rev + 1 })
   },
 
   setAudio: (name, buf) => {

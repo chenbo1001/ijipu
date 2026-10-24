@@ -115,6 +115,7 @@ import {
   parseSyncDoc,
   serializeSyncDoc,
   makeSyncDoc,
+  mixPlanOf,
   syncDocIsUsable,
   syncDocStale,
   isSidecarPath,
@@ -35428,6 +35429,17 @@ function runAdj1119Tests(): void {
     codeFingerprint('Q: 1 2 3 4 |') === codeFingerprint('Q: 1 2 3 4 |') &&
       codeFingerprint('Q: 1 2 3 4 |') !== codeFingerprint('Q: 1 2 3 4 5 |'),
     '',
+  )
+  // adj1128：混音三档 → 到底放哪几条轨（台面试听与出片共用这一张表）
+  check(
+    'adj1128 混音映射：伴奏 ⇒ 只伴奏；合成 ⇒ 只合成；伴奏+合成 ⇒ 两条（不再"选什么都放伴奏"）',
+    mixPlanOf({ source: 'file', accomp: 1, synth: 0.5 }).playAcc === true &&
+      mixPlanOf({ source: 'file', accomp: 1, synth: 0.5 }).playSynth === false &&
+      mixPlanOf({ source: 'synth', accomp: 1, synth: 0.5 }).playAcc === false &&
+      mixPlanOf({ source: 'synth', accomp: 1, synth: 0.5 }).playSynth === true &&
+      mixPlanOf({ source: 'mix', accomp: 1, synth: 0.5 }).playAcc === true &&
+      mixPlanOf({ source: 'mix', accomp: 1, synth: 0.5 }).playSynth === true,
+    JSON.stringify(mixPlanOf({ source: 'mix', accomp: 1, synth: 0.5 })),
   )
 }
 

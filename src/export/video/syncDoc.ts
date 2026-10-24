@@ -246,6 +246,20 @@ export function syncDocIsUsable(doc: SyncDoc | null | undefined): doc is SyncDoc
   return doc !== null && doc !== undefined && doc.tempo !== null && doc.audio !== ''
 }
 
+/**
+ * adj1128：混音三档 → "这次到底放哪几条轨"。
+ *
+ * 用户 2026-10-24 实报「选合成音还是伴奏、选伴奏+合成也是伴奏」——根因是台面试听
+ * **根本没看这个设置**（直接放了伴奏）。抽成纯函数后，台面试听与相机位/出片共用一张表，
+ * 且能在 Node 里断言（改坏了立刻红灯）。
+ */
+export function mixPlanOf(mix: SyncMix): { playAcc: boolean; playSynth: boolean } {
+  return {
+    playAcc: mix.source !== 'synth',
+    playSynth: mix.source !== 'file',
+  }
+}
+
 /** 谱面改过没有（codeHash 不同 ⇒ 相机位要提示"锚点请复核"） */
 export function syncDocStale(doc: SyncDoc | null | undefined, code: string): boolean {
   if (!doc) return false

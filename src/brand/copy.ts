@@ -1360,6 +1360,8 @@ export const syncCopy = {
   remove: '删除',
   step: '步长',
   metronome: '节拍器',
+  /** adj1128：说明"嗒"落在哪（用户口径：要跟谱面的拍点） */
+  metronomeHint: '按谱面拍点响：还没对拍时按"谱面从音频 0 开始、速度用 J:"，对拍后跟着锚点的偏移与拍速',
   trim: '保留段',
   trimStartNow: '起点=当前',
   trimEndNow: '终点=当前',
@@ -1384,7 +1386,13 @@ export const syncCopy = {
   key: '伴奏调性',
   keyNone: '未填',
   keyMismatch: '谱面与伴奏调性不一致，注意音高',
-  saved: '已保存到本机；写 sidecar 文件待接',
+  saved: '已存本机缓存（网页/开发模式没有 sidecar 文件）',
+  savedFile: (name: string) => `已保存：${name}`,
+  saveFailed: (e: string) => `保存失败：${e}`,
+  saveHint: '把对拍参数写进同目录的 sidecar 文件（`.jps.sync.json`）',
+  closeHint: '关掉台面（Esc 也行）',
+  synthLoading: '正在渲染合成音…（第一次会慢一点）',
+  synthFailed: '合成音渲染失败（音色库没准备好？），这次只播伴奏',
   play: '播放',
   pause: '暂停',
   /** 波形缩放（按钮上写"当前是什么档"，点一下切另一档） */

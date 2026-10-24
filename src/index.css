@@ -6118,13 +6118,15 @@ span.ws-check {
   opacity: 1;
 }
 
-/* adj1127：波形横向滚动条（放大后才出现） */
+/* adj1127：波形横向滚动条（放大后才出现）
+ * adj1128：颜色**不能**用"白色半透明"——浅色主题下面是白底，滑块等于隐形（用户实报）。
+ * 改成中性灰，深浅两个主题都看得见。 */
 .sync-scroll {
   position: relative;
-  height: 10px;
+  height: 12px;
   margin-top: 2px;
-  border-radius: 5px;
-  background: rgb(255 255 255 / 7%);
+  border-radius: 6px;
+  background: rgb(128 134 148 / 22%);
   cursor: pointer;
   flex: 0 0 auto;
   touch-action: none;
@@ -6134,12 +6136,12 @@ span.ws-check {
   position: absolute;
   top: 1px;
   bottom: 1px;
-  border-radius: 4px;
-  background: rgb(255 255 255 / 30%);
+  border-radius: 6px;
+  background: rgb(128 134 148 / 72%);
 }
 
 .sync-scroll-thumb:hover {
-  background: rgb(255 255 255 / 45%);
+  background: rgb(128 134 148 / 92%);
 }
 
 /* 分区之间的拖拽分隔条（预览↔波形、波形↔参数行） */
