@@ -128,6 +128,15 @@ import { tempoLineOf } from '../src/export/video/cardLayout.ts'
 import { accompanimentPlan, mixSamples, waveformPeaks, ACCOMP_SAMPLE_RATE } from '../src/export/video/accompaniment.ts'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
 import { timeScaleOf, timeLabelOf } from '../src/dialogs/syncRuler.ts'
+// adj1126：波形视野（缩放/平移；spanMs=0 = 整曲）
+import {
+  VIEW_ALL,
+  VIEW_MIN_MS,
+  clampView,
+  panView,
+  viewWindow,
+  zoomView,
+} from '../src/dialogs/syncRuler.ts'
 // adj1124：对拍台尺寸/分区高度/预览比例（纯函数 + L1）
 import {
   DEFAULT_SYNC_LAYOUT,
@@ -21101,6 +21110,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1122Tests())
       // adj1124：对拍台尺寸/分区高度/预览比例（可拖可最大化，记 L1）
       .then(() => runAdj1124Tests())
+      // adj1126：波形视野（缩放/平移，默认整曲）
+      .then(() => runAdj1126Tests())
       .then(() => {
         console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
         process.exit(failed === 0 ? 0 : 1)
@@ -35614,5 +35625,54 @@ function runAdj1124Tests(): void {
     'adj1124 Node 里没有 localStorage 也不炸（回默认）',
     loadSyncLayout(1440, 900).w === DEFAULT_SYNC_LAYOUT.w,
     String(loadSyncLayout(1440, 900).w),
+  )
+}
+
+/**
+ * adj1126（用户 2026-10-24：「波形也要能缩放，单位宽度上显示的波形时长，默认整曲」）。
+ *
+ * 视野是纯几何：`spanMs = 0` 表示整曲；缩放要**保持鼠标那一处的时刻不动**；
+ * 平移要夹在音频范围内；缩得比整曲还长就自动回整曲。
+ */
+function runAdj1126Tests(): void {
+  console.log('[adj1126] 波形视野：整曲 / 缩放保锚点 / 平移夹紧')
+  const dur = 200000
+  const all = viewWindow(VIEW_ALL, dur)
+  check(
+    'adj1126 默认整曲：v0=0、窗口=全长（`spanMs=0` 时 startMs 被忽略）',
+    all.v0 === 0 && all.winMs === dur && viewWindow({ spanMs: 0, startMs: 99999 }, dur).v0 === 0,
+    JSON.stringify(all),
+  )
+  const zoomed = zoomView(VIEW_ALL, dur, 0.8, 50000)
+  const zw = viewWindow(zoomed, dur)
+  const anchorRatio = (50000 - zw.v0) / zw.winMs
+  check(
+    'adj1126 滚轮放大：视野 200s→160s，左缘 10s；鼠标那一处的相对位置不变（0.25）',
+    zoomed.spanMs === 160000 &&
+      zoomed.startMs === 10000 &&
+      Math.abs(anchorRatio - 0.25) < 1e-9,
+    JSON.stringify({ ...zoomed, anchorRatio }),
+  )
+  check(
+    'adj1126 缩到比整曲还长 ⇒ 自动回整曲',
+    zoomView({ spanMs: 80000, startMs: 0 }, dur, 3, 40000).spanMs === 0,
+    '',
+  )
+  check(
+    'adj1126 下限 1 秒（防止缩成一条缝）',
+    viewWindow(zoomView(VIEW_ALL, dur, 0.0001, 0), dur).winMs === VIEW_MIN_MS,
+    String(viewWindow(zoomView(VIEW_ALL, dur, 0.0001, 0), dur).winMs),
+  )
+  const panned = panView({ spanMs: 30000, startMs: 10000 }, dur, 5000)
+  const pannedEnd = panView({ spanMs: 30000, startMs: 10000 }, dur, 999999)
+  check(
+    'adj1126 平移：+5s ⇒ 左缘 15s；拖过头 ⇒ 夹到 dur−span（170s）',
+    panned.startMs === 15000 && pannedEnd.startMs === 170000,
+    JSON.stringify({ panned: panned.startMs, end: pannedEnd.startMs }),
+  )
+  check(
+    'adj1126 视野长度 ≥ 全长 ⇒ 直接按整曲处理（不存奇怪的 startMs）',
+    clampView({ spanMs: dur, startMs: 1234 }, dur).spanMs === 0,
+    '',
   )
 }

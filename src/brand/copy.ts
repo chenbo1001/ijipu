@@ -1390,6 +1390,12 @@ export const syncCopy = {
   /** 波形缩放（按钮上写"当前是什么档"，点一下切另一档） */
   zoomAll: '视图：整曲',
   zoom30: '视图：30 秒',
+  /* ---- adj1126：波形视野（缩放/平移） ---- */
+  viewSpan: '视野',
+  viewAll: '整曲',
+  viewMinutes: (n: number) => `${n} 分钟`,
+  viewSeconds: (n: number) => `${n} 秒`,
+  viewHint: '滚轮缩放 · 拖动平移 · 0 回整曲',
   /* ---- adj1123：波形上方的动态谱预览 ---- */
   previewBuilding: '正在准备动态谱…',
   previewFailed: '动态谱没建起来（谱面还有错？）',

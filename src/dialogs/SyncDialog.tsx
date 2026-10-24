@@ -33,6 +33,16 @@ import { canUseDynamicVideo } from '../export/video/capability'
 import { syncCopy } from '../brand/copy'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
 import { timeLabelOf, timeScaleOf } from './syncRuler'
+// adj1126：波形视野（缩放/平移；`spanMs = 0` = 整曲，默认）
+import {
+  VIEW_ALL,
+  VIEW_PRESETS_MS,
+  clampView,
+  panView,
+  viewWindow,
+  zoomView,
+  type WaveView,
+} from './syncRuler'
 // adj1124：台面尺寸/分区高度/预览比例（可调整、存 L1）
 import {
   loadSyncLayout,
@@ -78,7 +88,12 @@ export function SyncDialog() {
   const [meterOn, setMeterOn] = useState(false)
   const [loopOn, setLoopOn] = useState(true)
   const [stepMs, setStepMs] = useState<number>(5)
-  const [zoom, setZoom] = useState<'all' | '30'>('all')
+  /**
+   * adj1126（用户 2026-10-24：「波形也要能缩放，单位宽度上显示的波形时长，默认整曲」）：
+   * 视野 = `{spanMs, startMs}`；**`spanMs = 0` 就是整曲**（默认）。
+   * 滚轮缩放、拖动平移、`0` 回整曲；刻度/播放头/点击定位全部走同一个 `viewWindow` 口径。
+   */
+  const [view, setView] = useState<WaveView>(VIEW_ALL)
   const [decodeState, setDecodeState] = useState<'idle' | 'busy' | 'error'>('idle')
   const [pending, setPending] = useState<{ audioMs: number } | null>(null)
   const [bar, setBar] = useState(1)
@@ -236,6 +251,8 @@ export function SyncDialog() {
 
   const durMs = Math.max(1, doc?.audioDurationMs || (audio ? Math.round(audio.duration * 1000) : 1))
   const trim = doc?.trim ?? { startMs: 0, endMs: durMs }
+  /** adj1126：波形当前视野（整曲 or 缩放后的窗口），刻度与读数都用它 */
+  const viewWin = viewWindow(view, durMs)
 
   /** 拍号 → "第 N 小节第 K 拍"（给锚点列表/打点默认值用） */
   const barBeatLabel = useCallback(
@@ -432,10 +449,16 @@ export function SyncDialog() {
     ctx.fillStyle = '#171a1f'
     ctx.fillRect(0, WAVE_H, W, RULER_H)
 
-    // 可视窗口：整曲 / 30 秒（以播放头为中心）
-    const winMs = zoom === '30' ? Math.min(30000, durMs) : durMs
-    const center = playheadRef.current || doc.anchors[sel]?.audioMs || 0
-    const v0 = zoom === '30' ? Math.max(0, Math.min(durMs - winMs, center - winMs / 2)) : 0
+    // 视野：整曲（默认）或缩放后的窗口——刻度、播放头、点击定位都走这一个口径
+    const { v0, winMs } = viewWindow(view, durMs)
+    // 缩放状态下播放：播放头跑出视野就重新居中（暂停时不动，免得抢用户的平移）
+    if (view.spanMs > 0 && playingRef.current) {
+      const t = playheadRef.current
+      if (t < v0 || t > v0 + winMs) {
+        const start = Math.max(0, Math.min(durMs - view.spanMs, t - view.spanMs / 2))
+        setView(clampView({ spanMs: view.spanMs, startMs: start }, durMs))
+      }
+    }
     const xOf = (ms: number): number => ((ms - v0) / winMs) * W
 
     // 包络（按像素桶，缓存）
@@ -591,7 +614,7 @@ export function SyncDialog() {
 
     // 动态谱预览与波形共用同一个播放头（adj1123）
     paintPreview(playheadRef.current)
-  }, [audio, doc, durMs, effFit, barStartBeats, paintPreview, pending, sel, trim.endMs, trim.startMs, zoom, layout.waveH])
+  }, [audio, doc, durMs, effFit, barStartBeats, paintPreview, pending, sel, trim.endMs, trim.startMs, view, layout.waveH])
 
   useEffect(() => {
     drawRef.current = draw
@@ -685,22 +708,93 @@ export function SyncDialog() {
     }
   }
 
+  /** 把屏幕上某一点换成音频时刻（视野的唯一映射，点击与拖动都用它） */
+  const msOfClientX = useCallback(
+    (clientX: number): number => {
+      const c = canvasRef.current
+      if (!c) return 0
+      const rect = c.getBoundingClientRect()
+      const { v0, winMs } = viewWindow(view, durMs)
+      const x = Math.min(Math.max(0, clientX - rect.left), Math.max(1, rect.width))
+      return v0 + (x / Math.max(1, rect.width)) * winMs
+    },
+    [durMs, view],
+  )
+
   /** 点击波形：定位播放头（并停声）；按住 Shift 点到的地方直接试听 */
-  const onWaveClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const c = canvasRef.current
-    const wrap = wrapRef.current
-    if (!c || !wrap || !doc) return
-    const rect = c.getBoundingClientRect()
-    const W = rect.width
-    const winMs = zoom === '30' ? Math.min(30000, durMs) : durMs
-    const center = playheadRef.current || 0
-    const v0 = zoom === '30' ? Math.max(0, Math.min(durMs - winMs, center - winMs / 2)) : 0
-    const ms = v0 + ((e.clientX - rect.left) / W) * winMs
-    stopSource()
-    playheadRef.current = Math.max(0, Math.min(ms, durMs))
-    draw()
-    if (e.shiftKey) void startPlayback(playheadRef.current)
+  const seekTo = useCallback(
+    (ms: number, shiftKey: boolean) => {
+      stopSource()
+      playheadRef.current = Math.max(0, Math.min(ms, durMs))
+      drawRef.current()
+      if (shiftKey) void startPlayback(playheadRef.current)
+    },
+    [durMs, startPlayback, stopSource],
+  )
+
+  /**
+   * adj1126：拖动平移 + 点击定位（同一个指针手势里区分）——
+   * 位移 < 4px 当作点击（定位播放头），超过就当作平移（视野左缘动，播放头不动）。
+   */
+  const panRef = useRef<{ x: number; moved: boolean; winMs: number; width: number } | null>(null)
+
+  const onWavePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const { winMs } = viewWindow(view, durMs)
+    panRef.current = { x: e.clientX, moved: false, winMs, width: Math.max(1, rect.width) }
+    e.currentTarget.setPointerCapture(e.pointerId)
   }
+
+  const onWavePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const d = panRef.current
+    if (!d) return
+    const dx = e.clientX - d.x
+    if (!d.moved && Math.abs(dx) < 4) return
+    d.moved = true
+    if (view.spanMs === 0) return
+    // 往右拖 = 看更早的地方（视野左缘左移）
+    setView((v) => panView(v, durMs, (-dx * d.winMs) / d.width))
+  }
+
+  const onWavePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const d = panRef.current
+    panRef.current = null
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {
+      /* 指针已经不在了 */
+    }
+    if (!d || !d.moved) seekTo(msOfClientX(e.clientX), e.shiftKey)
+  }
+
+  /**
+   * 滚轮缩放：**保持鼠标那一处的时刻在屏幕上不动**。
+   * 用原生监听（React 的 wheel 是被动事件，`preventDefault` 无效，页面会跟着一起滚）。
+   */
+  useEffect(() => {
+    const c = canvasRef.current
+    if (!c) return
+    const onWheelNative = (e: WheelEvent) => {
+      e.preventDefault()
+      const rect = c.getBoundingClientRect()
+      const x = Math.min(Math.max(0, e.clientX - rect.left), Math.max(1, rect.width))
+      setView((v) => {
+        const { v0, winMs } = viewWindow(v, durMs)
+        const anchor = v0 + (x / Math.max(1, rect.width)) * winMs
+        return zoomView(v, durMs, e.deltaY > 0 ? 1.25 : 0.8, anchor)
+      })
+    }
+    c.addEventListener('wheel', onWheelNative, { passive: false })
+    return () => c.removeEventListener('wheel', onWheelNative)
+  }, [durMs])
+
+  /** 以播放头为中心缩放（键盘 `+` / `-` 用） */
+  const zoomAtPlayhead = useCallback(
+    (factor: number) => {
+      setView((v) => zoomView(v, durMs, factor, playheadRef.current))
+    },
+    [durMs],
+  )
 
   const keyboard = useCallback(
     (e: KeyboardEvent) => {
@@ -729,13 +823,28 @@ export function SyncDialog() {
         setMeterOn((v) => !v)
         return
       }
+      // adj1126：`+/-` 缩放（以播放头为中心），`0` 回整曲
+      if (e.key === '+' || e.key === '=') {
+        e.preventDefault()
+        zoomAtPlayhead(0.8)
+        return
+      }
+      if (e.key === '-' || e.key === '_') {
+        e.preventDefault()
+        zoomAtPlayhead(1.25)
+        return
+      }
+      if (e.key === '0') {
+        setView(VIEW_ALL)
+        return
+      }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault()
         const step = e.shiftKey ? 1 : stepMs
         nudge(e.key === 'ArrowLeft' ? -step : step)
       }
     },
-    [closeModal, nudge, pending, startPlayback, stepMs, stopSource],
+    [closeModal, nudge, pending, startPlayback, stepMs, stopSource, zoomAtPlayhead],
   )
 
   useEffect(() => {
@@ -879,7 +988,15 @@ export function SyncDialog() {
         </div>
 
         <div ref={wrapRef} className="sync-wave">
-          <canvas ref={canvasRef} onClick={onWaveClick} />
+          <canvas
+            ref={canvasRef}
+            onPointerDown={onWavePointerDown}
+            onPointerMove={onWavePointerMove}
+            onPointerUp={onWavePointerUp}
+            onPointerCancel={() => {
+              panRef.current = null
+            }}
+          />
           <div className="sync-wave-hint">{syncCopy.tipPick}</div>
         </div>
         {/* 波形 ↔ 参数行：往上拖 = 波形变高 */}
@@ -900,9 +1017,39 @@ export function SyncDialog() {
             {syncCopy.trimAll}
           </button>
           <span className="sync-grow" />
-          <button type="button" className="btn" onClick={() => setZoom(zoom === 'all' ? '30' : 'all')}>
-            {zoom === 'all' ? syncCopy.zoomAll : syncCopy.zoom30}
-          </button>
+          {/* adj1126：视野（单位宽度显示的时长）；滚轮也能缩放，`0` 回整曲 */}
+          <span className="sync-label">{syncCopy.viewSpan}</span>
+          <select
+            className="sync-select"
+            data-sync="view"
+            value={view.spanMs === 0 ? 0 : view.spanMs}
+            onChange={(e) => {
+              const spanMs = Number(e.target.value)
+              setView(
+                spanMs === 0
+                  ? VIEW_ALL
+                  : clampView({ spanMs, startMs: Math.max(0, playheadRef.current - spanMs / 2) }, durMs),
+              )
+            }}
+            title={syncCopy.viewHint}
+          >
+            {VIEW_PRESETS_MS.map((ms) => (
+              <option key={ms} value={ms}>
+                {ms === 0
+                  ? syncCopy.viewAll
+                  : ms >= 60000
+                    ? syncCopy.viewMinutes(ms / 60000)
+                    : syncCopy.viewSeconds(ms / 1000)}
+              </option>
+            ))}
+            {view.spanMs > 0 && !VIEW_PRESETS_MS.includes(view.spanMs as (typeof VIEW_PRESETS_MS)[number]) && (
+              <option value={view.spanMs}>{syncCopy.viewSeconds(Math.round(view.spanMs / 100) / 10)}</option>
+            )}
+          </select>
+          <span className="sync-name sync-dim sync-view-readout">
+            {fmtSec(viewWin.v0)} – {fmtSec(viewWin.v0 + viewWin.winMs)}
+          </span>
+          <span className="sync-dim">{syncCopy.viewHint}</span>
         </div>
 
         {/* 第二排：节拍器/循环/步长（都在波形正下方，用户口径「与音频相关的放波形条上下」） */}

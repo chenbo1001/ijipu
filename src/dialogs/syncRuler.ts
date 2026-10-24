@@ -70,3 +70,64 @@ export function timeLabelOf(ms: number, stepMs: number): string {
       : (restMs / 1000).toFixed(decimals).padStart(decimals === 1 ? 4 : 5, '0')
   return `${min}:${secText}`
 }
+
+/**
+ * 波形的**视野**（用户 2026-10-24：「波形也要能缩放，单位宽度上显示的波形时长，默认整曲」）。
+ *
+ * 口径：`spanMs === 0` **表示整曲**（默认），此时不存 `startMs`——
+ * 这样"换了伴奏/时长变了"之后不用重新算，天然还是整曲。
+ */
+export interface WaveView {
+  /** 视野长度（ms）；**0 = 整曲** */
+  spanMs: number
+  /** 视野左缘（ms）；整曲时忽略 */
+  startMs: number
+}
+
+export const VIEW_ALL: WaveView = { spanMs: 0, startMs: 0 }
+
+/** 视野预设（0 = 整曲） */
+export const VIEW_PRESETS_MS = [0, 300000, 120000, 60000, 30000, 10000] as const
+
+/** 视野过短没意义（低于 1 秒就看不清波形了） */
+export const VIEW_MIN_MS = 1000
+
+/**
+ * 夹进合法范围：`spanMs ≥ durMs` 视为整曲；否则把左缘夹到 `[0, dur − span]`。
+ */
+export function clampView(view: WaveView, durMs: number): WaveView {
+  const dur = Math.max(1, durMs)
+  const span = Number.isFinite(view.spanMs) ? view.spanMs : 0
+  if (span <= 0 || span >= dur) return VIEW_ALL
+  const want = Math.max(VIEW_MIN_MS, span)
+  const start = Math.min(Math.max(0, Number.isFinite(view.startMs) ? view.startMs : 0), Math.max(0, dur - want))
+  return { spanMs: want, startMs: start }
+}
+
+/** 视口 → 实际窗口（`v0` 左缘、`winMs` 长度） */
+export function viewWindow(view: WaveView, durMs: number): { v0: number; winMs: number } {
+  const v = clampView(view, durMs)
+  if (v.spanMs === 0) return { v0: 0, winMs: Math.max(1, durMs) }
+  return { v0: v.startMs, winMs: v.spanMs }
+}
+
+/**
+ * 缩放：保持 `anchorMs`（鼠标那一处的时刻）**在屏幕上的位置不动**。
+ * `factor > 1` = 放大（视野变短），`< 1` = 缩小；缩到比整曲还长 ⇒ 回整曲。
+ */
+export function zoomView(view: WaveView, durMs: number, factor: number, anchorMs: number): WaveView {
+  const { v0, winMs } = viewWindow(view, durMs)
+  const dur = Math.max(1, durMs)
+  const ratio = Math.min(1, Math.max(0, (anchorMs - v0) / winMs))
+  const next = winMs * factor
+  if (!(next > 0) || next >= dur) return VIEW_ALL
+  const span = Math.max(VIEW_MIN_MS, next)
+  return clampView({ spanMs: span, startMs: anchorMs - ratio * span }, dur)
+}
+
+/** 平移：`dxMs > 0` = 往右看（视野起点变大） */
+export function panView(view: WaveView, durMs: number, dxMs: number): WaveView {
+  const v = clampView(view, durMs)
+  if (v.spanMs === 0) return VIEW_ALL
+  return clampView({ spanMs: v.spanMs, startMs: v.startMs + dxMs }, durMs)
+}

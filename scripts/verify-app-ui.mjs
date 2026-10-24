@@ -2174,6 +2174,85 @@ async function main() {
         )
 
         /**
+         * adj1126（用户 2026-10-24「波形也要能缩放，默认整曲」）：真滚轮缩一次，看视野选择器变没变；
+         * 再按 `0` 回整曲。
+         *
+         * 为什么先造一条 4 秒 WAV 喂进去：视野是"时长比例"，**没有音频时全长只有 1ms**，
+         * 缩放当然什么也不会变（那是正确行为，不是 bug）。这里在页面里现造一个 WAV `File`
+         * （不依赖本机文件），喂给 `.sync-file` 走真实的解码路径。
+         */
+        const fixture = await evalJs(
+          c,
+          `(() => {
+            const sr = 8000
+            const secs = 4
+            const n = sr * secs
+            const ab = new ArrayBuffer(44 + n * 2)
+            const dv = new DataView(ab)
+            const ws = (off, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i)) }
+            ws(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); ws(8, 'WAVE'); ws(12, 'fmt ')
+            dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true)
+            dv.setUint32(24, sr, true); dv.setUint32(28, sr * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true)
+            ws(36, 'data'); dv.setUint32(40, n * 2, true)
+            for (let i = 0; i < n; i++) dv.setInt16(44 + i * 2, Math.round(Math.sin(i / 20) * 12000), true)
+            const input = document.querySelector('.sync-file')
+            if (!input) return 'no-input'
+            const dt = new DataTransfer()
+            dt.items.add(new File([ab], 'verify-fixture.wav', { type: 'audio/wav' }))
+            input.files = dt.files
+            input.dispatchEvent(new Event('change', { bubbles: true }))
+            return 'ok'
+          })()`,
+        )
+        const decoded = await waitFor(
+          c,
+          `(() => { const t = document.querySelector('.sync-meta')?.textContent || ''; return t.includes('/') && !t.startsWith('0.000s / 0.001') })()`,
+          '临时伴奏解码完成（4 秒）',
+          60,
+        )
+        check('adj1126 临时 WAV 能走真实解码路径（4 秒）', fixture === 'ok' && decoded, String(fixture))
+        const waveRect = await evalJs(
+          c,
+          `(() => { const el = document.querySelector('.sync-wave canvas'); if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } })()`,
+        )
+        const viewBefore = await evalJs(c, `document.querySelector('[data-sync="view"]')?.value ?? '?'`)
+        if (waveRect) {
+          await c.send('Input.dispatchMouseEvent', {
+            type: 'mouseWheel',
+            x: waveRect.x,
+            y: waveRect.y,
+            deltaX: 0,
+            deltaY: -120,
+          })
+          await sleep(400)
+        }
+        const afterWheel = await evalJs(
+          c,
+          `(() => ({
+            span: document.querySelector('[data-sync="view"]')?.value ?? '?',
+            readout: document.querySelector('.sync-view-readout')?.textContent?.trim() ?? '',
+          }))()`,
+        )
+        check(
+          'adj1126 滚轮缩放真的生效（4s → 3.2s，视野选择器给出具体时长，读数给出可视区间）',
+          afterWheel.span === '3200' && /\d\.\d{3}s\s*–\s*\d\.\d{3}s/.test(afterWheel.readout),
+          JSON.stringify({ before: viewBefore, ...afterWheel }),
+        )
+        // 按 0 回整曲
+        for (const type of ['keyDown', 'keyUp']) {
+          await c.send('Input.dispatchKeyEvent', {
+            type,
+            key: '0',
+            code: 'Digit0',
+            windowsVirtualKeyCode: 48,
+            nativeVirtualKeyCode: 48,
+          })
+        }
+        await sleep(350)
+        const afterZero = await evalJs(c, `document.querySelector('[data-sync="view"]')?.value ?? '?'`)
+        check('adj1126 按 0 回「整曲」', afterZero === '0', String(afterZero))
+
+        /**
          * adj1124（用户 2026-10-24 实报「窗口无法调整大小，和最大化」「波形/预览高度要能调」
          * 「预览谱面要能调整显示比率」）：这些全是**交互**，源码断言证明不了，只能真拖。
          */
