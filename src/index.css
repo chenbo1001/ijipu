@@ -5999,3 +5999,221 @@ span.ws-check {
   pointer-events: none;
   z-index: 3;
 }
+
+/* ============================================================
+ * adj1119：对拍台（应用内独立台面）
+ * 盖住整个窗口、自带标题条与工具条；`Esc` 由组件自己处理关闭。
+ * ============================================================ */
+.sync-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 55%);
+}
+
+.sync-panel {
+  width: min(1240px, 96vw);
+  height: min(760px, 94vh);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px 12px;
+  border: 1px solid var(--jp-border);
+  border-radius: 10px;
+  background: var(--jp-bg-panel);
+  color: var(--jp-text-primary);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+}
+
+.sync-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.sync-meta {
+  color: var(--jp-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sync-grow {
+  flex: 1;
+}
+
+.sync-warn {
+  color: var(--jp-warning);
+  font-size: 12px;
+}
+
+.sync-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.sync-row-tight {
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.sync-label {
+  color: var(--jp-text-secondary);
+}
+
+.sync-name {
+  font-variant-numeric: tabular-nums;
+}
+
+.sync-dim {
+  color: var(--jp-text-muted);
+}
+
+.sync-file {
+  display: none;
+}
+
+/* 波形：外层用相对定位，提示文字压在左下角 */
+.sync-wave {
+  position: relative;
+  border: 1px solid var(--jp-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #1f2329;
+}
+
+.sync-wave canvas {
+  display: block;
+  width: 100%;
+  cursor: crosshair;
+}
+
+.sync-wave-hint {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  font-size: 11px;
+  color: var(--jp-text-muted);
+  pointer-events: none;
+}
+
+.sync-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+}
+
+.sync-anchors {
+  width: 320px;
+  min-width: 260px;
+  overflow: auto;
+  border: 1px solid var(--jp-border);
+  border-radius: 6px;
+  padding: 6px;
+}
+
+.sync-anchors-head {
+  font-size: 12px;
+  color: var(--jp-text-secondary);
+  margin-bottom: 6px;
+}
+
+.sync-anchor {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.sync-anchor:hover {
+  background: var(--jp-bg-panel-hover);
+}
+
+.sync-anchor.is-on {
+  background: var(--jp-bg-panel-active);
+  outline: 1px solid var(--jp-accent);
+}
+
+.sync-anchor-idx {
+  width: 16px;
+  text-align: center;
+  color: var(--jp-text-muted);
+}
+
+.sync-anchor-pos {
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.sync-mini {
+  padding: 1px 6px;
+  font-size: 11px;
+}
+
+.sync-fine {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid var(--jp-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.sync-fine-head {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.sync-pad {
+  padding: 6px 2px;
+}
+
+.sync-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--jp-border);
+  font-size: 12px;
+  color: var(--jp-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sync-tap {
+  background: rgb(255 123 114 / 12%);
+  border: 1px solid rgb(255 123 114 / 45%);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.sync-num {
+  width: 58px;
+}
+
+.sync-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--jp-text-secondary);
+}
+
+.sync-select {
+  padding: 2px 4px;
+}
+
+/* 相机位上的对拍入口与状态（adj1119） */
+.dyn-frame-sync-badge {
+  color: var(--jp-accent);
+  font-variant-numeric: tabular-nums;
+}

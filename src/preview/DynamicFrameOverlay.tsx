@@ -20,7 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DynamicPresetId } from '@ijipu/engine'
 import { useDocStore } from '../store/docStore'
 import { useUiStore, type DynamicAspect, type DynamicCardStyleId, type DynamicMode } from '../store/uiStore'
-import { dynamicVideoCopy } from '../brand/copy'
+import { dynamicVideoCopy, syncCopy } from '../brand/copy'
 import { createDynamicSession, type DynamicSession } from '../export/video/renderer'
 import { CARD_TEMPLATES, cardStyleById, type CardStyle } from '../export/video/cardTemplates'
 import { resolveCardImage } from '../store/cardImageStore'
@@ -31,6 +31,9 @@ import { renderToAudioBuffer } from '../export/audio'
 import { createHqCache, resolveHqBank } from '../playback/spessaCache'
 import { resolveActiveLibrary } from '../playback/spessaSynthBackend'
 import { hostBankUrl } from '../store/hostBridge'
+// adj1119：对拍（sidecar）——相机位按它重建会话、带上伴奏
+import { effectiveSyncBpm, useSyncStore } from '../store/syncStore'
+import { buildAccompanimentTrack, mixAudioBuffers } from '../export/video/accompaniment'
 
 /**
  * adj1097（用户 2026-10-23 实报「卡片加了背景图片，但导出的视频没有背景图片」）：
@@ -87,6 +90,13 @@ export function DynamicFrameOverlay() {
   const videoExportEnabled = canGenerateVideo()
   const code = useDocStore((s) => s.code)
   const pageConfig = useDocStore((s) => s.pageConfig)
+  /**
+   * adj1119：对拍结果（sidecar）。`rev` = 对拍台的改动计数：
+   * 它一变就作废音轨、重建会话（`bpm` 可能变了）。
+   */
+  const syncDoc = useSyncStore((s) => s.doc)
+  const syncRev = useSyncStore((s) => s.rev)
+  const syncBpm = effectiveSyncBpm(syncDoc)
 
   const [rect, setRect] = useState<DOMRect | null>(null)
   const [status, setStatus] = useState<'busy' | 'ready' | 'error'>('busy')
@@ -170,8 +180,31 @@ export function DynamicFrameOverlay() {
     }
   }, [])
 
-  /** 音源按会话渲染（预览与生成视频共用） */
+  /**
+   * 音源按会话渲染（预览与生成视频共用）。
+   *
+   * adj1119：有对拍结果时**优先用伴奏**（`mix.source = 'file'`）——
+   * 不调 SpessaSynth，出片更快、也不依赖音色库；`mix` 时再叠一条合成音。
+   * 没对拍 / 选了"合成音" ⇒ 完全走今天的路径。
+   */
   const renderAudioFor = useCallback(async (session: DynamicSession): Promise<AudioBuffer> => {
+    const sd = useSyncStore.getState()
+    const doc = sd.doc
+    if (doc !== null && doc.tempo !== null && sd.audio !== null && doc.mix.source !== 'synth') {
+      const acc = await buildAccompanimentTrack(sd.audio, doc.tempo, doc.trim, session)
+      if (doc.mix.source === 'file') return acc
+      const lib = resolveActiveLibrary(useUiStore.getState().playbackHqLibrary).lib
+      const cache = (cacheRef.current ??= createHqCache())
+      const { bank } = await resolveHqBank(lib, cache, hostBankUrl(lib.id))
+      const synth = await renderToAudioBuffer(session.events, bank, { bpm: session.bpm })
+      return mixAudioBuffers(
+        [
+          { buffer: synth, gain: doc.mix.synth },
+          { buffer: acc, gain: doc.mix.accomp },
+        ],
+        session.totalMs,
+      )
+    }
     const lib = resolveActiveLibrary(useUiStore.getState().playbackHqLibrary).lib
     const cache = (cacheRef.current ??= createHqCache())
     const { bank } = await resolveHqBank(lib, cache, hostBankUrl(lib.id))
@@ -199,7 +232,7 @@ export function DynamicFrameOverlay() {
   }, [renderAudioFor])
 
   /**
-   * 事件序列真的换了（源码/页面/标记段/3 分钟口径）才作废音轨；
+   * 事件序列真的换了（源码/页面/标记段/3 分钟口径/对拍改动）才作废音轨；
    * 换比例不算——比例只影响相机画布，不影响声音。
    */
   useEffect(() => {
@@ -207,7 +240,7 @@ export function DynamicFrameOverlay() {
     audioPlayerRef.current?.setBuffer(null)
     audioBufferRef.current = null
     audioLoadRef.current = null
-  }, [code, pageConfig, range, mode])
+  }, [code, pageConfig, range, mode, syncRev])
 
   // 打开 / 换比例 / 换源码或页面 / 换范围 / 换时长 ⇒ 重建会话
   useEffect(() => {
@@ -224,7 +257,8 @@ export function DynamicFrameOverlay() {
     sessionRef.current = null
     void (async () => {
       // adj1085 / adj1097：背景图引用（`ijipu-blob:`）在**建会话前**解析成 data URL（与导出共用入口）
-      return createDynamicSession(code, aspect as DynamicPresetId, pageConfig, undefined, {
+      // adj1119：有对拍结果 ⇒ 用 sidecar 的拍速重建播放序列（相机/球/音轨同一个速度）
+      return createDynamicSession(code, aspect as DynamicPresetId, pageConfig, syncBpm ?? undefined, {
         range,
         leadInMs: withCards ? LEAD_IN_MS : 0,
         // adj1113：不勾"带片头片尾" ⇒ 片尾也 0；勾着就按默认 2.5 秒品牌落版
@@ -255,7 +289,7 @@ export function DynamicFrameOverlay() {
     return () => {
       cancelled = true
     }
-  }, [on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, paint])
+  }, [on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, syncRev, paint])
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
 
@@ -369,6 +403,8 @@ export function DynamicFrameOverlay() {
         panMode,
         // adj1094：行末提前平移量（拍）
         rowLeadBeats,
+        // adj1119：对拍拍速（有 sidecar 才传；出片与预览同一份速度）
+        ...(syncBpm !== null ? { bpm: syncBpm } : {}),
         // 逐次导出都重新按会话渲音轨：分段/遍次变了，事件序列就不同（缓存只能按会话建）
         ...(withAudio ? { makeAudio: renderAudioFor } : {}),
         onProgress: (p, ph) => {
@@ -577,6 +613,23 @@ export function DynamicFrameOverlay() {
             </>
           ) : (
             <span className="dyn-frame-label">{dynamicVideoCopy.rangeAll}</span>
+          )}
+          {/* adj1119：对拍台入口 + 当前对拍状态（有 sidecar 才显示拍速/偏移） */}
+          <button
+            type="button"
+            className="btn dyn-frame-sync"
+            disabled={encoding || preparingAudio}
+            onClick={() => openModal('sync')}
+            title={syncCopy.title}
+          >
+            {syncCopy.syncOpen}
+          </button>
+          {syncBpm !== null && (
+            <span className="dyn-frame-meta dyn-frame-sync-badge">
+              {syncCopy.syncBadge} ♩={Math.round(syncBpm)}
+              {syncDoc?.tempo ? ` · 偏移 ${(syncDoc.tempo.offsetMs / 1000).toFixed(2)}s` : ''}
+              {syncDoc?.mix.source === 'synth' ? ` · ${syncCopy.mixSynth}` : ''}
+            </span>
           )}
           <button
             type="button"

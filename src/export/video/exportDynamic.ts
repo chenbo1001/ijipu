@@ -56,6 +56,12 @@ export interface DynamicExportOptions {
    */
   rowLeadBeats?: number
   /**
+   * adj1119：**对拍得到的实际拍速**（`60000 / beatMs`）。传了就按它重建播放序列
+   * （相机/球/音轨同一个速度）；不传 = 用谱面 `J:`（今天的路径）。
+   * 由调用方从 sidecar 取（本文件不读 store）。
+   */
+  bpm?: number
+  /**
    * 音轨工厂。**不传 = 无声**（不是"忘了"）：调用方明确决定要不要声音。
    * 失败由调用方处理（界面那边是"本次导出无声"的提示，命令行是回包里说明）。
    */
@@ -86,7 +92,7 @@ export async function exportDynamicVideo(opts: DynamicExportOptions): Promise<Dy
    * 只在**建会话时**少给这两个时长，卡片模板照旧传（片头片尾都不画时它用不上，但少一个分叉）。
    */
   const withCards = opts.cards !== false
-  const session = await createDynamicSession(opts.code, opts.aspect, opts.pageConfig, undefined, {
+  const session = await createDynamicSession(opts.code, opts.aspect, opts.pageConfig, opts.bpm, {
     range: opts.range,
     leadInMs: withCards ? LEAD_IN_MS : 0,
     ...(withCards ? {} : { endCardMs: 0 }),

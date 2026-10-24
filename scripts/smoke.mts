@@ -124,6 +124,8 @@ import {
 } from '../src/export/video/syncDoc.ts'
 // adj1119：片头卡速度行（对拍后写"实际 + （原谱 X）"）
 import { tempoLineOf } from '../src/export/video/cardLayout.ts'
+// adj1120：伴奏轨/波形/混音（纯函数：建轨计划、包络、逐采样相加）
+import { accompanimentPlan, mixSamples, waveformPeaks, ACCOMP_SAMPLE_RATE } from '../src/export/video/accompaniment.ts'
 import { splitTempo } from '@ijipu/engine/parser/parser.ts'
 import { parseKey } from '@ijipu/engine/layout/index.ts'
 import { buildPlaySequence, inferBpm, schedulePlay, matchInstrument, resolveInstrument, eventsToMidi, pitchToMidiNote, instrumentToProgram, pcmToWav, SAMPLER_LIBRARIES, getSamplerLibrary, classifyNetwork, GmChannelAllocator, GM_MELODIC_CHANNELS, GM_VOICES, gmVoiceRef, gmVoiceProgram, countScoreInstrumentSwitches, noteIdStringOf, slicePlaySequenceByNoteRange, resolvePracticeRange, slicePlaySequenceByRange, extendRangeEndToSlurEnd } from '@ijipu/engine/playback/index.ts'
@@ -2342,8 +2344,8 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
     'leadIn/endCard 任一没跟着复选框走，预览就会和成片对不上',
   )
   check(
-    'adj1113 `withCards` 进了"重建会话"的依赖（点一下立刻重画，不继续播旧会话）',
-    /\}, \[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, paint\]\)/.test(overlay),
+    'adj1113/adj1119 `withCards` 与对拍（`syncBpm`/`syncRev`）都进了"重建会话"的依赖（点了立刻重画，不继续播旧会话）',
+    /\}, \[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, syncRev, paint\]\)/.test(overlay),
   )
   check(
     'adj1113 导出透传 `cards: withCards`；不带片头片尾时卡片下拉/自定义按钮禁用（不是悄悄忽略）',
@@ -21082,6 +21084,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1118Tests())
       // adj1119：间奏块中性灰 + 片头卡速度行 + 对拍纯数学 + sidecar 读写
       .then(() => runAdj1119Tests())
+      // adj1120：伴奏轨建轨计划 / 波形包络 / 混音（纯函数）
+      .then(() => runAdj1120Tests())
       .then(() => {
         console.log(failed === 0 ? '\nALL SMOKE TESTS PASSED ✅' : `\n${failed} CHECKS FAILED ❌`)
         process.exit(failed === 0 ? 0 : 1)
@@ -33853,8 +33857,8 @@ function runDynamicCameraTests(): void {
         /panMode: useUiStore\.getState\(\)\.panMode/.test(cliSrcAdj),
     )
     check(
-      'adj1089/adj1094/adj1113 换了平移方式/提前量/带不带片头片尾都会**重建相机会话**（否则点了没反应：还在放旧会话）',
-      /\[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, paint\]/.test(
+      'adj1089/adj1094/adj1113/adj1119 换了平移方式/提前量/片头片尾/对拍都会**重建相机会话**（否则点了没反应：还在放旧会话）',
+      /\[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, syncRev, paint\]/.test(
         overlaySrcAdj,
       ),
     )
@@ -35387,4 +35391,98 @@ function runAdj1119Tests(): void {
       codeFingerprint('Q: 1 2 3 4 |') !== codeFingerprint('Q: 1 2 3 4 5 |'),
     '',
   )
+}
+
+/**
+ * adj1120：伴奏轨的**建轨计划** / **波形包络** / **混音**（全部纯函数，Node 直接断言）。
+ *
+ * 这三件事一旦算错，症状都是"音画错开但看不出哪错了"，所以必须能在没有浏览器的地方验：
+ *  · `accompanimentPlan`：片头静音、`offset`、`trim` 三者的先后关系（掐头去尾 + 标记段起点）；
+ *  · `waveformPeaks`：包络取 min/max、多声道取"绝对值更大"（单/立体声一样粗）；
+ *  · `mixSamples`：逐采样相加 + clamp（±1），增益为 0 的轨不参与。
+ */
+function runAdj1120Tests(): void {
+  console.log('[adj1120] 伴奏建轨计划 / 波形 / 混音')
+
+  // ① 建轨计划
+  const whole = accompanimentPlan(
+    { beatMs: 500, offsetMs: 3200 },
+    { startMs: 0, endMs: 245300 },
+    { leadInMs: 3700, sourceStartMs: 0, totalMs: 60000 },
+  )
+  check(
+    'adj1120 整曲：片头 3.7s 静音 → 从音频 3.2s 起放，放到会话结束（56.3s）',
+    whole.whenSec === 3.7 && whole.offsetSec === 3.2 && Math.abs(whole.durationSec - 56.3) < 1e-9,
+    JSON.stringify(whole),
+  )
+  const trimmed = accompanimentPlan(
+    { beatMs: 500, offsetMs: 3200 },
+    { startMs: 10000, endMs: 245300 },
+    { leadInMs: 3700, sourceStartMs: 0, totalMs: 60000 },
+  )
+  check(
+    'adj1120 掐头：保留段从 10s 开始 ⇒ 片头后再静音 6.8s，从音频 10s 起放',
+    Math.abs(trimmed.whenSec - 10.5) < 1e-9 &&
+      Math.abs(trimmed.offsetSec - 10) < 1e-9 &&
+      Math.abs(trimmed.durationSec - 49.5) < 1e-9,
+    JSON.stringify(trimmed),
+  )
+  const ranged = accompanimentPlan(
+    { beatMs: 500, offsetMs: 3200 },
+    { startMs: 0, endMs: 245300 },
+    { leadInMs: 3700, sourceStartMs: 20000, totalMs: 60000 },
+  )
+  check(
+    'adj1120 标记段：sourceStartMs 进音频起点（3200+20000）',
+    ranged.whenSec === 3.7 && Math.abs(ranged.offsetSec - 23.2) < 1e-9,
+    JSON.stringify(ranged),
+  )
+  const past = accompanimentPlan(
+    { beatMs: 500, offsetMs: 30000 },
+    { startMs: 0, endMs: 25000 },
+    { leadInMs: 0, sourceStartMs: 0, totalMs: 60000 },
+  )
+  check('adj1120 谱面起点已越过保留段末尾 ⇒ 整段不放（duration=0）', past.durationSec === 0, JSON.stringify(past))
+  check('adj1120 渲染采样率与合成音一致（44100）', ACCOMP_SAMPLE_RATE === 44100, String(ACCOMP_SAMPLE_RATE))
+
+  // ② 波形包络
+  const peaks = waveformPeaks([new Float32Array([0, 0.5, -0.9, 0.2])], 2)
+  check(
+    'adj1120 波形：按桶取 min/max',
+    peaks.length === 2 &&
+      peaks[0].min === 0 &&
+      Math.abs(peaks[0].max - 0.5) < 1e-6 &&
+      Math.abs(peaks[1].min + 0.9) < 1e-6 &&
+      Math.abs(peaks[1].max - 0.2) < 1e-6,
+    JSON.stringify(peaks),
+  )
+  const stereo = waveformPeaks(
+    [new Float32Array([0.2, -0.2]), new Float32Array([-0.5, 0.5])],
+    1,
+  )
+  check(
+    'adj1120 波形：多声道的正负峰值都取（不能只看绝对值更大的那个）',
+    Math.abs(stereo[0].min + 0.5) < 1e-6 && Math.abs(stereo[0].max - 0.5) < 1e-6,
+    JSON.stringify(stereo),
+  )
+  check('adj1120 波形：空音频给全 0（不抛异常）', waveformPeaks([], 4).every((p) => p.min === 0 && p.max === 0), '')
+
+  // ③ 混音（逐采样相加 + clamp）
+  const a = [new Float32Array([0.6, -0.6, 0.2, 0]), new Float32Array([0.1, 0.1, 0.1, 0.1])]
+  const b = [new Float32Array([0.6, -0.6, 0, 0]), new Float32Array([0.1, 0.1, 0.1, 0.1])]
+  const mixed = mixSamples(
+    [
+      { channels: a, gain: 1 },
+      { channels: b, gain: 1 },
+    ],
+    4,
+    2,
+  )
+  check(
+    'adj1120 混音：相加后 clamp 到 ±1（0.6+0.6 → 1，-0.6-0.6 → -1）',
+    mixed[0][0] === 1 && mixed[0][1] === -1 && Math.abs(mixed[0][2] - 0.2) < 1e-6,
+    Array.from(mixed[0]).join(','),
+  )
+  const silence = mixSamples([{ channels: a, gain: 0 }], 4, 2)
+  check('adj1120 混音：增益 0 的轨不参与（全 0）', Array.from(silence[0]).every((v) => v === 0), '')
 }

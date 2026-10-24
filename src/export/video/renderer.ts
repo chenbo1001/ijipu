@@ -94,6 +94,16 @@ export interface DynamicSession {
   events: PlayEvent[]
   /** 拍速（音轨渲染要用同一个值，否则音画对不上） */
   bpm: number
+  /**
+   * adj1119：会话实际用的**片头时长**（`cards:false` 时是 0）。
+   * 伴奏轨要按它在最前面补静音（`buildAccompanimentTrack`）。
+   */
+  leadInMs: number
+  /**
+   * adj1119：**标记段被切掉的那段时长**（整曲 = 0）。
+   * 伴奏轨的起点 = `offsetMs + sourceStartMs`，不能只按 `offsetMs` 从曲首算。
+   */
+  sourceStartMs: number
   /** 画一帧，返回相机位置与"是否在跟拍"（供界面显示） */
   draw: (ctx: DrawCtx, tMs: number) => { frame: CameraFrame; following: boolean }
 }
@@ -170,6 +180,12 @@ export async function createDynamicSession(
 
   // 标记段：用与试听**完全相同**的口径切出这一段（时间归零），并跳过满宽片头
   let skipIntro = false
+  /**
+   * adj1119：标记段被切掉的那段时长（**切片之前**取）。
+   * 伴奏轨的起点 = `offsetMs + sourceStartMs`——整曲时它是 0；只按 `offsetMs` 算的话，
+   * 标记段导出会从曲首的伴奏开始放（音画整体错开）。
+   */
+  let sourceStartMs = 0
   if (opts?.range) {
     // adj1102：终点在排版里存在但没有事件 ⇒ 是被连音线/同音合并了，按"紧邻的前一个音"配
     const res = resolvePracticeRange(seq, opts.range.startId, opts.range.endId, {
@@ -179,6 +195,7 @@ export async function createDynamicSession(
     // adj1083：用户在下拉里选过「第 N 遍」就按那个候选导；否则才用解析器默认的第一个候选。
     // 此前只传 note id，多遍次时永远取第 1 个候选，用户选的第 2/3 遍不会生效。
     const cand = pickPracticeCandidate(res.candidates, res.pick, opts.range.pass)
+    if (cand) sourceStartMs = Math.max(0, seq.events[cand.i0]?.atMs ?? 0)
     const sliced = cand ? slicePlaySequenceByRange(seq, cand.i0, cand.i1) : null
     if (!sliced) throw new Error('标记段无效，请重新标记')
     seq = sliced
@@ -886,6 +903,9 @@ export async function createDynamicSession(
     height: camera.viewH,
     events: seq.events,
     bpm: beat,
+    // adj1119：伴奏轨用它补片头静音 / 定位标记段起点
+    leadInMs,
+    sourceStartMs,
     draw,
   }
 }

@@ -56,6 +56,8 @@ const FileDiffDialog = lazy(() => import('./dialogs/FileDiffDialog').then((m) =>
 // adj963（用户要求）：「保存到工作区」专用对话框（插件嵌入版的保存主入口）
 const SaveAsDialog = lazy(() => import('./dialogs/SaveAsDialog').then((m) => ({ default: m.SaveAsDialog })))
 const CardStyleDialog = lazy(() => import('./dialogs/CardStyleDialog').then((m) => ({ default: m.CardStyleDialog })))
+// adj1119：对拍台（应用内独立台面；相机位「对拍…」触发）
+const SyncDialog = lazy(() => import('./dialogs/SyncDialog').then((m) => ({ default: m.SyncDialog })))
 
 function App() {
   const viewType = useDocStore((s) => s.viewType)
@@ -661,6 +663,8 @@ function App() {
       {modal === 'saveAs' && <Suspense fallback={null}><SaveAsDialog /></Suspense>}
       {/* adj1074：自定义卡片风格（相机位「自定义…」触发） */}
       {modal === 'cardStyle' && <Suspense fallback={null}><CardStyleDialog /></Suspense>}
+      {/* adj1119：对拍台（独立台面） */}
+      {modal === 'sync' && <Suspense fallback={null}><SyncDialog /></Suspense>}
       {/* adj928：两栏源码差异框（确认条 → 「查看差异」；左本地 / 右外部，可直接做决定） */}
       {fileDiff && <Suspense fallback={null}><FileDiffDialog /></Suspense>}
     </div>
