@@ -847,7 +847,13 @@ export function SyncDialog() {
         ctx.moveTo(x, 0)
         ctx.lineTo(x, WAVE_H)
         ctx.stroke()
-        if (i % 4 === 0) {
+        /**
+         * 标注密度跟着视野走（adj1140）：整曲时每 8 小节标一次，放大后逐步变密，
+         * 免得 200 秒的曲子挤满数字、或放大后一个数字都没有。
+         * 数字就是**小节号**（`i + 1`，从 1 起），写在两条小节线之间那条线的右上方。
+         */
+        const labelEvery = winMs > 90000 ? 8 : winMs > 45000 ? 4 : winMs > 15000 ? 2 : 1
+        if (i % labelEvery === 0) {
           ctx.fillStyle = 'rgba(160,210,255,0.9)'
           ctx.font = '10px system-ui, sans-serif'
           ctx.fillText(String(i + 1), x + 3, 12)
@@ -1332,6 +1338,33 @@ export function SyncDialog() {
           </b>
           <span ref={metaRef} className="sync-meta" />
           <span className="sync-grow" />
+          {/* adj1140（用户 2026-10-24）：谱面缩放挪到右上角（和最大化/保存/关闭一排） */}
+          <span className="sync-row sync-preview-zoom">
+            <span className="sync-label">{syncCopy.previewZoom}</span>
+            <button
+              type="button"
+              className="btn sync-mini"
+              data-sync="zoom-out"
+              disabled={previewZoom <= 50}
+              onClick={() => setPreviewZoom(Math.max(50, previewZoom - 10))}
+              title={syncCopy.zoomOutHint}
+            >
+              −
+            </button>
+            <span className="sync-name" data-sync="zoom-value">
+              {previewZoom}%
+            </span>
+            <button
+              type="button"
+              className="btn sync-mini"
+              data-sync="zoom-in"
+              disabled={previewZoom >= 200}
+              onClick={() => setPreviewZoom(Math.min(200, previewZoom + 10))}
+              title={syncCopy.zoomInHint}
+            >
+              +
+            </button>
+          </span>
           {stale && <span className="sync-warn">{syncCopy.stale}</span>}
           <button
             type="button"
@@ -1361,36 +1394,23 @@ export function SyncDialog() {
           <div className="sync-preview-box">
             <PreviewPane />
           </div>
+          {/* adj1140（用户 2026-10-24）：这一排改成**伴奏**信息；缩放去了右上角、当前位置去了波形下面 */}
           <div className="sync-preview-info">
-            <span className="sync-preview-pos">
-              <span ref={previewInfoRef}>{syncCopy.previewNow}</span>
-            </span>
-            <span className="sync-row sync-preview-zoom">
-              <span className="sync-label">{syncCopy.previewZoom}</span>
-              <button
-                type="button"
-                className="btn sync-mini"
-                data-sync="zoom-out"
-                disabled={previewZoom <= 50}
-                onClick={() => setPreviewZoom(Math.max(50, previewZoom - 10))}
-                title={syncCopy.zoomOutHint}
-              >
-                −
-              </button>
-              <span className="sync-name" data-sync="zoom-value">
-                {previewZoom}%
+            <span className="sync-label">{syncCopy.audioLabel}</span>
+            {audio ? (
+              <span className="sync-audio-name">
+                {doc.audio} · {fmtSec(durMs)}
               </span>
-              <button
-                type="button"
-                className="btn sync-mini"
-                data-sync="zoom-in"
-                disabled={previewZoom >= 200}
-                onClick={() => setPreviewZoom(Math.min(200, previewZoom + 10))}
-                title={syncCopy.zoomInHint}
-              >
-                +
-              </button>
-            </span>
+            ) : (
+              <span className="sync-audio-name sync-dim">
+                {doc.audio !== '' ? `${syncCopy.audioMissing}：${doc.audio}` : syncCopy.noAudio}
+              </span>
+            )}
+            <input ref={fileRef} type="file" accept="audio/*,.mp3,.m4a,.wav,.flac" className="sync-file" onChange={(e) => void onPickAudio(e)} />
+            <button type="button" className="btn sync-mini" disabled={decodeState === 'busy'} onClick={() => fileRef.current?.click()}>
+              {audio ? syncCopy.repickAudio : syncCopy.pickAudio}
+            </button>
+            {decodeState === 'busy' && <span className="sync-dim">{syncCopy.decoding}</span>}
             <span className="sync-dim sync-preview-hint">{syncCopy.previewHint}</span>
           </div>
           {/* adj1136：单锚点推出的不可能结论（不静默） */}
@@ -1439,7 +1459,9 @@ export function SyncDialog() {
               panRef.current = null
             }}
           />
-          <div className="sync-wave-hint">{syncCopy.tipPick}</div>
+          <div className="sync-wave-hint">
+            {syncCopy.tipPick} · {syncCopy.barLabelHint}
+          </div>
         </div>
 
         {/* adj1127：放大后给一条横向滚动条（整曲时它没有意义，隐藏） */}
@@ -1457,25 +1479,13 @@ export function SyncDialog() {
         )}
         {/* 波形 ↔ 参数行：往上拖 = 波形变高 */}
         <div className="sync-split" onPointerDown={startDrag('wave')} title={syncCopy.splitWaveHint} />
-        {/* 第一排（紧贴波形下沿）：伴奏 + 播放 + 打点 + 视野 —— 用户 2026-10-24 要求
-            「这些按钮放到波形下面、跟下面的按钮整合，节省上面的空间」 */}
+        {/* 第一排（紧贴波形下沿）：**当前位置** + 播放 + 打点 + 视野 ——
+            adj1140：伴奏信息挪到预览下面那一排，这里换成当前位置（两处对调） */}
         <div className="sync-row sync-audio-row">
           <div className="sync-audio-left">
-            <span className="sync-label">{syncCopy.audioLabel}</span>
-            {audio ? (
-              <span className="sync-name">
-                {doc.audio} · {fmtSec(durMs)}
-              </span>
-            ) : (
-              <span className="sync-name sync-dim">
-                {doc.audio !== '' ? `${syncCopy.audioMissing}：${doc.audio}` : syncCopy.noAudio}
-              </span>
-            )}
-            <input ref={fileRef} type="file" accept="audio/*,.mp3,.m4a,.wav,.flac" className="sync-file" onChange={(e) => void onPickAudio(e)} />
-            <button type="button" className="btn" disabled={decodeState === 'busy'} onClick={() => fileRef.current?.click()}>
-              {audio ? syncCopy.repickAudio : syncCopy.pickAudio}
-            </button>
-            {decodeState === 'busy' && <span className="sync-dim">{syncCopy.decoding}</span>}
+            <span className="sync-preview-pos">
+              <span ref={previewInfoRef}>{syncCopy.previewNow}</span>
+            </span>
           </div>
           {/* adj1129（用户 2026-10-24）：播放 / T打点 **在这一行居中** */}
           <div className="sync-audio-mid">

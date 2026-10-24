@@ -6075,6 +6075,15 @@ span.ws-check {
   color: var(--jp-text-primary);
 }
 
+/* adj1140：预览下面那一排的伴奏名（会被长文件名撑开，允许省略） */
+.sync-audio-name {
+  overflow: hidden;
+  max-width: 46%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 /* 拍速/偏移/残差（从底部状态行挪上来，紧挨着预览） */
 /* 拍速/偏移/残差（adj1124：已从预览右侧挪到波形下方，这个类不再使用） */
 

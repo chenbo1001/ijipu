@@ -2181,24 +2181,41 @@ async function main() {
         )
 
         // adj1128（用户 2026-10-24：「这些按钮放到波形下面、跟下面的按钮整合，节省上面空间」）
+        // adj1140：伴奏挪到预览下面那一排、当前位置挪到波形下面那一排，缩放挪到右上角
         const orderCheck = await evalJs(
           c,
           `(() => {
             const top = (el) => (el ? Math.round(el.getBoundingClientRect().top) : -1)
-            const audioRow = [...document.querySelectorAll('.sync-panel > .sync-row')].find((el) => el.textContent.includes('伴奏'))
+            const info = document.querySelector('.sync-preview-info')
+            const audioRow = document.querySelector('.sync-audio-row')
             return {
               preview: top(document.querySelector('.sync-preview')),
+              strip: top(document.querySelector('[data-sync="note-strip"]')),
               wave: top(document.querySelector('.sync-wave')),
               audio: top(audioRow),
-              label: audioRow ? audioRow.innerText.replace(/\\n/g, ' ').slice(0, 20) : '',
+              infoHasAudio: !!info && (info.textContent || '').includes('伴奏'),
+              infoHasPick: !!info && !!info.querySelector('button'),
+              nowInAudioRow: !!audioRow?.querySelector('.sync-audio-left .sync-preview-pos'),
+              nowText: audioRow?.querySelector('.sync-audio-left')?.textContent?.trim().slice(0, 24) ?? '',
+              zoomInHead: !!document.querySelector('.sync-head [data-sync="zoom-value"]'),
             }
           })()`,
         )
         check(
-          'adj1128 伴奏/播放/打点挪到**波形下方**（预览 → 波形 → 参数行，省掉上面那一排）',
+          'adj1128 预览 → 格子排 → 波形 → 参数行（垂直顺序对）',
           orderCheck.preview > 0 &&
-            orderCheck.preview < orderCheck.wave &&
+            orderCheck.strip > orderCheck.preview &&
+            orderCheck.wave > orderCheck.strip &&
             orderCheck.wave < orderCheck.audio,
+          JSON.stringify(orderCheck),
+        )
+        check(
+          'adj1140 伴奏在预览下面那一排、当前位置在波形下面那一排、谱面缩放在右上角',
+          orderCheck.infoHasAudio &&
+            orderCheck.infoHasPick &&
+            orderCheck.nowInAudioRow &&
+            orderCheck.nowText.includes('当前位置') &&
+            orderCheck.zoomInHead,
           JSON.stringify(orderCheck),
         )
 

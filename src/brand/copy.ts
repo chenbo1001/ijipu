@@ -1342,6 +1342,8 @@ export const syncCopy = {
   decoding: '正在解码…',
   decodeFailed: '这个文件解不开，换 mp3 / wav / m4a 试试',
   tipPick: '按空格播放，听到要打的那一下按 T',
+  /** adj1140：波形上沿蓝字是小节号（用户问过一次，写成常驻提示） */
+  barLabelHint: '上沿蓝字=小节号',
   anchors: '锚点',
   noAnchors: '还没有锚点：播到能确认的那一拍按 T',
   /** adj1136：单锚点推出的"谱面起点在音频 0 之前"不可能结论 */
