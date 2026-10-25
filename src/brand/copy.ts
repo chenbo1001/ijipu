@@ -1244,8 +1244,6 @@ export const dynamicVideoCopy = {
   outputSound: '输出声音',
   outputSoundHint:
     '决定预览与成片用哪条声音：伴奏（对拍文件里的音频）/ 伴奏+合成 / 合成音；两条音量各自 0–200%。改完重新播放或生成即生效。',
-  outputSoundNoSync: '没有找到对拍文件（.jps.sync.json）——先在试听栏「对拍…」里选伴奏并打锚点',
-  outputSoundNoTempo: '对拍还没解出速度：先去对拍台打两条锚点',
   outputSoundNoAudio: '伴奏还没加载',
   pickAccompaniment: '加载伴奏…',
   audioLoaded: '伴奏已加载（保留段不变）',

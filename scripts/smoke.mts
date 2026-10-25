@@ -21119,6 +21119,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1149Tests())
       // adj1150：相机位输出声音（三档 + 两条音量 / 自动找 sidecar）+ 播放从保留段开头
       .then(() => runAdj1150Tests())
+      // adj1152：锚点 0 / 1 / 2+ 的口径（相机位不再要求两条锚点）
+      .then(() => runAdj1152Tests())
       // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
       .then(() => runAdj1122Tests())
       // adj1124：对拍台尺寸/分区高度/预览比例（可拖可最大化，记 L1）
@@ -35656,7 +35658,7 @@ function runAdj1148Tests(): void {
   )
   check(
     'adj1148 相机位与导出都传 headWaitMs（两侧同一口径）',
-    /preRollMsOf\(syncDoc\.tempo, syncDoc\.trim\)/.test(overlaySrc) &&
+    /preRollMsOf\(syncFit, syncDoc\.trim\)/.test(overlaySrc) &&
       /headWaitMs > 0 \? \{ headWaitMs \} : \{\}/.test(overlaySrc) &&
       /opts\.headWaitMs > 0 \? \{ headWaitMs: opts\.headWaitMs \}/.test(exportDynamicSrc),
     '',
@@ -35785,6 +35787,60 @@ function runAdj1150Tests(): void {
   check(
     'adj1150/1151 播放起点真的走 playStartMsOf（台面按播放不会从音频 0 开始）',
     /const from = playStartMsOf\(fromMs, trim\)/.test(syncSrc),
+    '',
+  )
+}
+
+/**
+ * adj1152：锚点 0 / 1 / 2+ 的**口径**（用户 2026-10-25 逐条给出）：
+ *  · 0 条：谱面按 `J:`（或默认拍速），伴奏/合成音都从头、默认对齐；
+ *  · 1 条：拍速仍取 `J:`，这条只解偏移；
+ *  · 2 条：由锚点解实际拍速；多条：`fitSync` 最小二乘。
+ *
+ * 以前相机位要求 `doc.tempo !== null`，而 `doc.tempo` 只有 ≥2 条锚点才非空 ⇒ 0/1 条时
+ * 「输出声音」整排被禁用，还提示"先去打两条锚点"。现在统一走 `effectiveFitOf` + 0 条的默认兜底。
+ */
+function runAdj1152Tests(): void {
+  console.log('[adj1152] 锚点口径：0 / 1 / 2+ 都能在相机位用')
+  const scoreBeatMs = 500
+  check(
+    'adj1152 1 条锚点：拍速取谱面 J:（500ms），偏移由锚点解（7277）',
+    (() => {
+      const f = effectiveFitOf([{ beat: 0, audioMs: 7277 }], scoreBeatMs)
+      return f !== null && f.beatMs === scoreBeatMs && f.offsetMs === 7277
+    })(),
+    '',
+  )
+  check(
+    'adj1152 0 条锚点：effectiveFitOf 返回 null（相机用 {J:, 0} 兜底，不再禁用声音档）',
+    effectiveFitOf([], scoreBeatMs) === null,
+    '',
+  )
+
+  const overlaySrc = readFileSync(join(root, 'src/preview/DynamicFrameOverlay.tsx'), 'utf8')
+  const syncSrc = readFileSync(join(root, 'src/dialogs/SyncDialog.tsx'), 'utf8')
+  check(
+    'adj1152 相机位用 `tempo ?? effectiveFitOf` 算有效拟合，声音档不再被 tempo 卡住',
+    /syncDoc\.tempo \?\? effectiveFitOf\(syncDoc\.anchors, scoreBeatMs\)/.test(overlaySrc) &&
+      !/syncDoc\.tempo === null/.test(overlaySrc),
+    '',
+  )
+  check(
+    'adj1152 相机位 0 条锚点也放伴奏：fit 兜底 {拍速=J:, 偏移=0}',
+    /doc\.tempo \?\? effectiveFitOf\(doc\.anchors, scoreBeatMs\) \?\? \{ beatMs: scoreBeatMs, offsetMs: 0 \}/.test(
+      overlaySrc,
+    ),
+    '',
+  )
+  check(
+    'adj1152 相机位前奏等待也用有效拟合（1 条锚点的偏移会进 pre-roll）',
+    /preRollMsOf\(syncFit, syncDoc\.trim\)/.test(overlaySrc),
+    '',
+  )
+  check(
+    'adj1152 台面读数显示有效拟合（1 条锚点也能看到拍速/偏移，不再显示 —）',
+    /♩=\{effFit \? Math\.round\(60000 \/ effFit\.beatMs\)/.test(syncSrc) &&
+      /syncCopy\.offset} \{effFit \? fmtSec\(effFit\.offsetMs\)/.test(syncSrc),
     '',
   )
 }

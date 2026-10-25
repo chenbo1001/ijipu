@@ -1087,6 +1087,24 @@ CLI `--sync/--no-sync/--audio`；调性提示。
 音量进混音、`setAudioBuffer` 不重置保留段、台面播放走 `playStartMsOf`）；`verify:app-ui` 打开相机位
 真点三档与音量滑杆（含百分比跟变）。
 
+### 4-K 锚点 0 / 1 / 2+ 的口径（adj1152，用户 2026-10-25 逐条给出）
+
+| 锚点数 | 拍速（`beatMs`） | 偏移（`offsetMs`） | 相机/出片 |
+|---|---|---|---|
+| **0** | 谱面 `J:`（或默认拍速） | **0**（默认对齐） | 伴奏与合成音都从头、默认对齐 |
+| **1** | 谱面 `J:`（`effectiveFitOf`，不由锚点推） | 由这条锚点解 | 用该偏移对齐；有前奏则走 pre-roll |
+| **2** | 由两点解实际拍速 | 由锚点解 | 按实际拍速 |
+| **多** | `fitSync` 最小二乘 | 同上 | 同上 |
+
+根因：相机位原来要求 `doc.tempo !== null`，而 `doc.tempo` **只有 ≥2 条锚点才非空** ⇒ 0/1 条时
+「输出声音」整排被禁用，还提示"先去对拍台打两条锚点"（用户截图）。现在统一：
+`syncFit = doc.tempo ?? effectiveFitOf(anchors, scoreBeatMs)`，0 条时再用 `{拍速=J:, 偏移=0}` 兜底；
+台面的拍速/偏移读数也改用 `effFit`（1 条锚点不再显示 `—`）。`tempo` 字段本身仍只存"2+ 解算结果"
+（1 条无法只凭锚点定速度，这是引擎口径）。
+
+断言：`smoke` 的 `adj1152` 6 条（1 条锚点拍速/偏移、0 条 null、相机不再被 tempo 卡住、
+0 条 fit 兜底、pre-roll 用有效拟合、台面读数用 effFit）。
+
 
 
 - 间奏块的**中性灰**：`playheadBaseOf` 加一个 `interlude` 色位，并让 `TimedRect`/`playheadTrack`

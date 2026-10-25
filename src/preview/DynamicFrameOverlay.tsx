@@ -16,8 +16,8 @@
  * 再实现一遍，无法保证"框里看到的 = 导出的"。这里复用导出的那份会话画布，
  * 只做等比缩放——这才是"不重复造轮子"。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { DynamicPresetId } from '@ijipu/engine'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { parseJps, inferBpm, effectiveFitOf, type DynamicPresetId } from '@ijipu/engine'
 import { useDocStore } from '../store/docStore'
 import { useUiStore, type DynamicAspect, type DynamicCardStyleId, type DynamicMode } from '../store/uiStore'
 import { dynamicVideoCopy, syncCopy } from '../brand/copy'
@@ -32,7 +32,7 @@ import { createHqCache, resolveHqBank } from '../playback/spessaCache'
 import { resolveActiveLibrary } from '../playback/spessaSynthBackend'
 import { hostBankUrl } from '../store/hostBridge'
 // adj1119：对拍（sidecar）——相机位按它重建会话、带上伴奏
-import { effectiveSyncBpm, useSyncStore } from '../store/syncStore'
+import { useSyncStore } from '../store/syncStore'
 import { buildAccompanimentTrack, decodeAccompaniment, mixAudioBuffers, preRollMsOf } from '../export/video/accompaniment'
 import type { SyncMix } from '../export/video/syncDoc'
 // adj1150：相机位打开时自己找同目录的 sidecar（与对拍台共用路径规则）
@@ -101,14 +101,27 @@ export function DynamicFrameOverlay() {
    */
   const syncDoc = useSyncStore((s) => s.doc)
   const syncRev = useSyncStore((s) => s.rev)
-  const syncBpm = effectiveSyncBpm(syncDoc)
+  /**
+   * adj1152（用户 2026-10-25 的锚点口径）：
+   *  · **0 条锚点**：谱面按 `J:`（或默认拍速），伴奏与合成音都从头、默认对齐（偏移 0）；
+   *  · **1 条锚点**：拍速仍取谱面 `J:`，这条只解偏移（引擎 `effectiveFitOf`）；
+   *  · **2 条及以上**：由锚点解实际拍速（`doc.tempo`，最小二乘）。
+   *
+   * 所以相机位**不能**再要求 `doc.tempo !== null`（那等于要求 ≥2 条锚点）。
+   */
+  const scoreBeatMs = useMemo(() => 60000 / inferBpm(parseJps(code)), [code])
+  const syncFit = useMemo(() => {
+    if (syncDoc === null) return null
+    return syncDoc.tempo ?? effectiveFitOf(syncDoc.anchors, scoreBeatMs)
+  }, [syncDoc, scoreBeatMs])
+  const syncBpm = syncFit !== null ? 60000 / syncFit.beatMs : null
   /**
    * adj1148：**前奏等待**——伴奏比谱面长、谱面第 1 拍在音频 `offsetMs` 时，
    * 视频开头先把这段伴奏放出来、谱面定格第 1 拍。标记段（`range`）没有前奏，不等待。
    */
   const headWaitMs =
-    range === null && syncDoc !== null && syncDoc.tempo !== null && syncDoc.audio !== ''
-      ? preRollMsOf(syncDoc.tempo, syncDoc.trim)
+    range === null && syncDoc !== null && syncDoc.audio !== '' && syncFit !== null
+      ? preRollMsOf(syncFit, syncDoc.trim)
       : 0
   /**
    * adj1150（用户 2026-10-25）：相机位要能**直接决定成片用哪条声音**（伴奏 / 伴奏+合成 / 合成音）
@@ -236,9 +249,18 @@ export function DynamicFrameOverlay() {
   const renderAudioFor = useCallback(async (session: DynamicSession): Promise<AudioBuffer> => {
     const sd = useSyncStore.getState()
     const doc = sd.doc
-    if (doc !== null && doc.tempo !== null && sd.audio !== null && doc.mix.source !== 'synth') {
+    /**
+     * adj1152：**0 条锚点也要能放伴奏**（用户口径：默认它们是对齐的）。
+     * 有 sidecar + 伴奏 ⇒ 有效拟合 = `tempo`（2+）→ `effectiveFitOf`（1 条）→ 默认 `{拍速=J:, 偏移=0}`。
+     */
+    const scoreBeatMs = 60000 / session.bpm
+    const fit =
+      doc === null
+        ? null
+        : doc.tempo ?? effectiveFitOf(doc.anchors, scoreBeatMs) ?? { beatMs: scoreBeatMs, offsetMs: 0 }
+    if (doc !== null && fit !== null && sd.audio !== null && doc.audio !== '' && doc.mix.source !== 'synth') {
       // adj1129：收尾淡出——最后一拍渐小到无声（用户口径：不要停得太突兀）
-      const acc = await buildAccompanimentTrack(sd.audio, doc.tempo, doc.trim, session, 60000 / session.bpm)
+      const acc = await buildAccompanimentTrack(sd.audio, fit, doc.trim, session, 60000 / session.bpm)
       /**
        * adj1150：相机位的两条音量也要**真的进成片/预览**——
        * 以前 `file` 直接返回原始伴奏（音量被忽略）、`synth` 也是满音量；现在按 `mix` 缩放。
@@ -684,7 +706,7 @@ export function DynamicFrameOverlay() {
               className="dyn-frame-select"
               data-sync="dyn-mix-source"
               value={syncDoc.mix.source}
-              disabled={encoding || preparingAudio || syncDoc.tempo === null}
+              disabled={encoding || preparingAudio}
               title={dynamicVideoCopy.outputSoundHint}
               aria-label={dynamicVideoCopy.outputSound}
               onChange={(e) => changeMix({ source: e.target.value as SyncMix['source'] })}
@@ -702,7 +724,7 @@ export function DynamicFrameOverlay() {
               max={2}
               step={0.05}
               value={syncDoc.mix.accomp}
-              disabled={encoding || preparingAudio || syncDoc.tempo === null}
+              disabled={encoding || preparingAudio}
               aria-label={syncCopy.accompGain}
               onChange={(e) => changeMix({ accomp: Number(e.target.value) })}
             />
@@ -716,14 +738,11 @@ export function DynamicFrameOverlay() {
               max={2}
               step={0.05}
               value={syncDoc.mix.synth}
-              disabled={encoding || preparingAudio || syncDoc.tempo === null}
+              disabled={encoding || preparingAudio}
               aria-label={syncCopy.synthGain}
               onChange={(e) => changeMix({ synth: Number(e.target.value) })}
             />
             <span className="dyn-frame-meta dyn-frame-mix-val">{Math.round(syncDoc.mix.synth * 100)}%</span>
-            {syncDoc.tempo === null && (
-              <span className="dyn-frame-meta">{dynamicVideoCopy.outputSoundNoTempo}</span>
-            )}
             {syncAudio === null && (
               <>
                 <span className="dyn-frame-meta">
@@ -817,7 +836,7 @@ export function DynamicFrameOverlay() {
           {syncBpm !== null && (
             <span className="dyn-frame-meta dyn-frame-sync-badge">
               {syncCopy.syncBadge} ♩={Math.round(syncBpm)}
-              {syncDoc?.tempo ? ` · 偏移 ${(syncDoc.tempo.offsetMs / 1000).toFixed(2)}s` : ''}
+              {syncFit ? ` · 偏移 ${(syncFit.offsetMs / 1000).toFixed(2)}s` : ''}
               {syncDoc?.mix.source === 'synth' ? ` · ${syncCopy.mixSynth}` : ''}
             </span>
           )}

@@ -1431,7 +1431,8 @@ export function SyncDialog() {
   const worst = residuals.length > 0 ? Math.max(...residuals) : 0
   const stale = syncDocStale(doc, code)
   const selAnchor = doc.anchors[sel]
-  const usable = doc.tempo !== null && doc.audio !== ''
+  // adj1152：0/1 条锚点也算"有对拍数据"（清空按钮不该只在 ≥2 条时才出现）
+  const usable = doc.audio !== '' || doc.anchors.length > 0
 
   return (
     <div className="sync-layer">
@@ -1725,10 +1726,10 @@ export function SyncDialog() {
         {/* adj1124（用户口径「与音频相关的放波形条上下」）：对拍读数 + 混音都紧贴波形，不再散到右下角 */}
         <div className="sync-row sync-row-tight">
           <span className="sync-name">
-            {syncCopy.bpm} ♩={doc.tempo ? Math.round(doc.tempo.bpm) : '—'}（谱面 {Math.round(scoreBpm)}）
+            {syncCopy.bpm} ♩={effFit ? Math.round(60000 / effFit.beatMs) : '—'}（谱面 {Math.round(scoreBpm)}）
           </span>
           <span className="sync-name">
-            {syncCopy.offset} {doc.tempo ? fmtSec(doc.tempo.offsetMs) : '—'}
+            {syncCopy.offset} {effFit ? fmtSec(effFit.offsetMs) : '—'}
           </span>
           <span className="sync-name">
             {syncCopy.residual} {doc.tempo ? `±${Math.round(worst * doc.tempo.beatMs)}ms` : '—'}
