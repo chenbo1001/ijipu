@@ -1022,12 +1022,25 @@ CLI `--sync/--no-sync/--audio`；调性提示。
 - 「谱面第 1 拍 = 当前播放头」⇒ `addAnchor({ beat: 0, audioMs: 播放头 })`；
 - 「0 秒 = 谱面 N:M」⇒ `addAnchor({ beat: beatOfBarBeat(N,M), audioMs: 0 })`。
 
-**adj1140 的 pre-roll 实现要点**（下一轮）：
-1. `createDynamicSession(..., { headWaitMs })`：把 `leadInMs` 与 `headWaitMs` 分开——
+**adj1140 的 pre-roll 实现要点**（下一轮）：1. `createDynamicSession(..., { headWaitMs })`：把 `leadInMs` 与 `headWaitMs` 分开——
    `headWaitMs` 段**不显示片头卡**，画面用 `draw(ctx, 0)`（谱面第一帧）+ 球原地跳；
 2. `renderer.ts` 的 `events.atMs += leadInMs` 之后再 `+= headWaitMs`，`totalMs` 同样加；
 3. 伴奏轨 `whenSec` 前移到 `trim.startMs`（不放过头段），`playbackRate` 不变；
 4. 断言：`offsetMs = 1200` 时 `totalMs` 比不等待长 1200、且 `draw(600)` 与 `draw(0)` 的色块位置相同（= 定格）。
+
+### 4-H 「空小节」编辑器告警：**先不做**（用户 2026-10-25 定，方案 C）
+
+用户口径：「空小节通常是谱有错误，一般不会发生，可以在编辑器里给告警的」→ 试做后定为**先不做**，
+等真实实例再定改法。留档结论（谁接手都别重复踩）：
+
+- **判据**：两小节线之间**一个 token 都没有**才算空小节（不是"没有带时值的元素"——
+  `| &dc |`、`| {jz 16} |`、`| @乐器@ |` 都不是空小节）；
+- **坑 1**：`docs/SYNTAX.md` 示例三里有 `|] |:` **紧挨着**，结构小节线（`|:` `:|` `:|:` `|/`）旁的空档
+  不是空小节，否则官方示例直接被刷成告警；
+- **坑 2**：同一份引擎实现会让 `verify:app-ui` 的两条断言变红（「打字出未保存点」+「新建确认条」），
+  A/B 对照确认是这条告警引起、单独探针里打字正常 ⇒ **要么放 app 侧 problems 层，要么先 bisect 那条交互**；
+- 台面侧已有兜底：缺号（空小节没有时间片）会把号补在后一根小节线上（`adj1146`，`barLabelsOf`）。
+
 
 
 - 间奏块的**中性灰**：`playheadBaseOf` 加一个 `interlude` 色位，并让 `TimedRect`/`playheadTrack`
