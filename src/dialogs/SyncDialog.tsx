@@ -43,6 +43,7 @@ import { applySyncExtrasToUi } from '../store/syncExtras'
 import { barLabelsOf, cellRectPct, pitchHeightOf, stripCellsOf } from './noteStrip'
 import { canUseDynamicVideo } from '../export/video/capability'
 import { syncCopy } from '../brand/copy'
+import { isTauriShell } from '../brand/env'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
 import { timeLabelOf, timeScaleOf } from './syncRuler'
 // adj1126：波形视野（缩放/平移；`spanMs = 0` = 整曲，默认）
@@ -190,6 +191,12 @@ export function SyncDialog() {
     const text = serializeSyncDoc(latest)
     const target = await resolveSidecarPath(nativePath, binding)
     if (target === null) {
+      // adj1156：桌面壳里不能"下载到 Downloads"就算完——那份谱是浏览器句柄打开的，
+      // 壳拿不到目录；提示用户重新「打开/拖入」一次（拿到 nativePath 后就会写到同目录）。
+      if (isTauriShell()) {
+        setNotice(syncCopy.saveNoNativePath)
+        return
+      }
       // adj1129：网页/开发模式没有同目录写入 ⇒ 下载一份真文件（别只写本机缓存）
       // `fileName` 可能已经被去掉了 `.jps`（网页/示例稿），这里补回来，文件名才对得上
       const base = fileName === '' ? '未命名.jps' : /\.jps$/i.test(fileName) ? fileName : `${fileName}.jps`

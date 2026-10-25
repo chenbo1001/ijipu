@@ -31,7 +31,7 @@ import {
   type SavePhaseLog,
 } from './saveSupport'
 // adj954：设备判据迁到品牌层唯一出处（原在 store/saveSupport.ts）
-import { isCoarsePointerDevice, getRuntimeEnv } from '../brand/env'
+import { isCoarsePointerDevice, isTauriShell, getRuntimeEnv } from '../brand/env'
 // adj966：文件宿主能力与降级决策（纯函数；"要不要引导持久权限"也在这里判）
 import { hostProfile, shouldGuidePersistPermission, type PermState } from './fileHost'
 import { useUiStore, enabledVoicesOf } from './uiStore'
@@ -40,7 +40,7 @@ import { isHostEmbedded, shouldYieldBindingRestore } from './hostBridge'
 import { loadFontOverride, migrateLegacyEditorPrefs, hasShownPermGuide, markPermGuideShown } from './editorPrefs'
 import { normalizePastedSource } from './importSource'
 // adj538：桌面壳的「外部打开」（双击 .jps）——纯网页下这些函数一律惰性/空转，见该模块注释
-import { pickPrimary, writeExternalFile, type ExternalFile } from './externalOpen'
+import { pickPrimary, pickJpsFile, readNativeProbe, writeExternalFile, type ExternalFile } from './externalOpen'
 // adj540：工作区目录（Android/移动端"选一个文件夹当工作区"，纯网页，不需要壳）
 import {
   createFile,
@@ -1023,6 +1023,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
   },
   openFile: async () => {
     fileStateTouched = true
+    // adj1156：桌面壳走原生文件对话框 ⇒ 拿到真实路径，sidecar 才能写到 .jps 同目录
+    if (isTauriShell()) return openFileNative()
     const picker = (window as any).showOpenFilePicker
     // adj281：非安全上下文（http:// 或 file://）或非 Chromium 内核下无 showOpenFilePicker，
     // 降级用 <input type=file> 读取 .jps 文本——打开本质只读文本，不依赖文件系统 API
@@ -1779,20 +1781,27 @@ function adoptDoc(input: {
   noticeKind?: 'ok' | 'warn' | 'error'
 }): void {
   const { name, code, handle = null } = input
+  const nativePath = input.nativePath ?? null
+  const effectiveHandle = nativePath !== null ? null : handle
   fileStateTouched = true
-  if (handle) {
+  if (nativePath !== null) {
+    // adj1156：原生路径 = 系统文件；基准键与双击打开同一口径（后续写盘前要比基准）
+    setBaseline(bindingKeyOf({ kind: 'native', path: nativePath }), code, input.mtime ?? null)
+    // 与原生路径互斥：清掉可能残留的浏览器句柄，避免"保存写回上一个文件"
+    disconnectFileHandle()
+  } else if (effectiveHandle) {
     /**
      * adj966：句柄绑定的**系统文件**要记基准 —— 这里能拿到 `lastModified`，
      * 所以基准带 mtime ⇒ 轮询可先走"mtime 快筛"，连内容都不用读（`probeFileChange` ①）。
      */
     setBaseline(bindingKeyOf({ kind: 'handle', name }), code, input.mtime ?? null)
     // adj161：打开的文件成为操作主体，句柄持久化（下次保存直接写回）
-    void saveFileHandle(handle)
+    void saveFileHandle(effectiveHandle)
     /**
      * adj966：**网页 / PWA 的持久权限引导**（用户口径：把权限选择交给用户）——
      * 刚打开一个文件时是唯一合适的时机（权限气泡刚出现过）。只提示一次、**不阻断**任何操作。
      */
-    void guidePersistPermissionOnce(handle, name)
+    void guidePersistPermissionOnce(effectiveHandle, name)
   }
   try {
     localStorage.setItem(DRAFT_KEY, code)
@@ -1802,7 +1811,8 @@ function adoptDoc(input: {
   }
   // adj628：来源换成了这个本地文件 ⇒ 落盘的工作区来源必须清掉（否则下次加载又绑回老工作区文件）
   saveDraftSrc(null)
-  saveDraftNative(null)
+  // adj1156：原生路径要随草稿落盘（下次启动才恢复得回来）
+  saveDraftNative(nativePath)
   // adj212：打开文件时同步 pageConfig——此前漏了 mergeJpsConfig，
   // 其它浏览器打开带 # jps-config 的谱时页面设置仍是打开前的旧值
   const cfg = resolveConfig(code)
@@ -1812,10 +1822,10 @@ function adoptDoc(input: {
     parseResult: parseJps(code),
     pageConfig: cfg,
     dirty: false,
-    fileHandle: handle,
-    // adj538：改用对话框打开 ⇒ 与"外部路径"解绑（两者互斥，否则保存会写回上一个外部文件）
-    nativePath: null,
-    // adj540：同理与工作区解绑（三者互斥）
+    fileHandle: effectiveHandle,
+    // adj1156：原生打开时记真实路径；FSA 打开时保持 null（两者互斥）
+    nativePath,
+    // adj540：ditto，与工作区解绑
     binding: null,
     pendingBinding: null,
     activeNoteId: null,
@@ -1839,13 +1849,48 @@ function adoptDoc(input: {
    *  · 收在这一处：三条打开入口（对话框 / 拖入 / input 降级）都汇到本函数 ⇒ 不必各写一遍。
    * 不 await：装载动作是同步返回的，问那一句是"后台再问"，用户点「暂不」也不影响已经打开的文档。
    */
-  void askAssetDirOnOpen(localAssetRefs(cfg).length > 0, input.fileRef ?? null, input.nativePath ?? null)
+  const needAssets = localAssetRefs(cfg).length > 0
+  if (nativePath !== null) {
+    // 原生路径：只有"桌面/文档/下载"这三个浏览器禁授权目录需要解释原因；其它目录直接按路径读
+    void askSensitiveDirOnNativeOpen(needAssets, name, nativePath)
+  } else {
+    void askAssetDirOnOpen(needAssets, input.fileRef ?? null, null)
+  }
   useUiStore.getState().showNotice(input.notice, input.noticeKind ?? 'ok')
 }
 
 /** `adoptDoc` 用的 setter（模块级函数里拿不到 store 工厂的 `set`，走 zustand 的静态 setState） */
 function setDocState(partial: Partial<DocState>): void {
   useDocStore.setState(partial)
+}
+
+/**
+ * adj1156：桌面壳「打开」= 原生文件对话框 + 按绝对路径读文本。
+ *
+ * 与 FSA 路径的差别只有一点，但很关键：**知道文件在哪**。后续 Ctrl+S 写回原文件、
+ * sidecar 写同目录、按路径读伴奏、相对图片基准都靠 `nativePath`。
+ */
+async function openFileNative(): Promise<boolean> {
+  try {
+    const path = await pickJpsFile()
+    if (path === null) return false // 用户取消：静默
+    const probe = await readNativeProbe(path)
+    const name = fileBaseName(path)
+    adoptDoc({
+      name,
+      code: probe.text,
+      nativePath: path,
+      mtime: probe.mtimeMs,
+      notice: `${uiCopy.openOkPrefix}${name}.jps`,
+    })
+    console.info(`[iJipu] 原生打开文件：${path}`)
+    return true
+  } catch (e) {
+    const reason = e instanceof Error ? `${e.name}${e.message ? `: ${e.message}` : ''}` : String(e)
+    console.warn('[iJipu] 原生打开文件失败', e)
+    useUiStore.getState().showNotice(`${uiCopy.openFailedPrefix}${reason}`, 'error')
+    return false
+  }
 }
 
 function openFileViaInput(): Promise<boolean> {

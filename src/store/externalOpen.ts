@@ -92,6 +92,20 @@ export async function readNativeProbe(path: string): Promise<{ text: string; mti
 }
 
 /**
+ * adj1156：桌面壳的「打开」——走**原生文件对话框**，返回真实绝对路径。
+ *
+ * 为什么不用 WebView2 的 `showOpenFilePicker()`：浏览器文件句柄**不暴露所在目录**，
+ * 桌面壳拿不到路径就写不了同目录的 `xxx.jps.sync.json`（只能下载一份）。
+ * 纯网页/非桌面壳返回 `null`（调用方继续走 FSA）。
+ */
+export async function pickJpsFile(): Promise<string | null> {
+  const g = tauri()
+  if (!g?.core?.invoke) return null
+  const r = await g.core.invoke('pick_jps_file')
+  return typeof r === 'string' && r !== '' ? r : null
+}
+
+/**
  * 监听"后续再有文件要打开"（应用已运行时再次双击）：返回取消监听的函数。
  * 注意：**冷启动**那一次不走这里（事件可能早于本函数注册），而是由调用方在挂载时
  * 先 `drainExternalFiles()` 拉取一次——两条路都指向同一个队列，故不会漏也不会重。

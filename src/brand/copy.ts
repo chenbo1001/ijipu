@@ -1421,6 +1421,12 @@ export const syncCopy = {
   saved: '已存本机缓存（网页/开发模式没有 sidecar 文件）',
   savedFile: (name: string) => `已保存：${name}`,
   savedDownloaded: (name: string) => `已下载 ${name}（没有找到磁盘路径：这份谱不是从磁盘/工作区打开的）`,
+  /**
+   * adj1156：桌面壳里**不该**把 sidecar 下载到 Downloads。
+   * 出现这句 = 这份谱是浏览器文件句柄打开的（壳拿不到目录）⇒ 让用户重新「打开」一次。
+   */
+  saveNoNativePath:
+    '这份谱是浏览器文件句柄打开的，桌面壳拿不到它所在目录，没法写到 .jps 同目录。请用「打开」或把 .jps 拖进窗口重新打开一次，再保存。',
   saveFailed: (e: string) => `保存失败：${e}`,
   saveHint: '把对拍参数写进同目录的 sidecar 文件（`.jps.sync.json`）',
   closeHint: '关掉台面（Esc 也行）',

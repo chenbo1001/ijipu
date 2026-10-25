@@ -11365,5 +11365,22 @@ smoke 五条含"来源切换成对"结构断言与负对照） |
 - **预防**：**`.bat` 一律 ASCII**（中文交给应用 UI/文档）；**`.cmd` 调用必须 `call`**；
   需要环境变量时在 bat 里显式设，别依赖 PowerShell 5.1 读 UTF-8 脚本。
 
+### E-2026-538 桌面壳保存 sidecar 跑到下载目录（用户 2026-10-25 实报，adj1156）
+
+- **现象**：桌面壳里打开 `.jps`、对拍台点保存，`xxx.jps.sync.json` 出现在浏览器下载目录，
+  而不是 `.jps` 同目录；相机位改音量也只写 L1，sidecar 不更新。
+- **根因**：桌面壳的 Ctrl+O 仍走 WebView2 的 `showOpenFilePicker()`——只拿到浏览器**文件句柄**，
+  壳不知道文件在哪个目录；`resolveSidecarPath(nativePath, binding)` 两者都没有 ⇒ 返回 null
+  ⇒ 对拍台只能 `downloadSidecarText` 兜底。
+- **解决**（`adj1156`）：Rust 新增 `pick_jps_file`（原生对话框，只筛 `.jps`，返回绝对路径）；
+  桌面壳 `openFile` 先走 `openFileNative()`（原生对话框 + `read_native_probe` + `adoptDoc({nativePath})`）；
+  `adoptDoc` 认 `nativePath`（基准键/草稿路径/状态）；桌面壳没有 nativePath 时对拍台不再下载，
+  提示重新「打开/拖入」；浏览器保留下载兜底。
+- **验证**：`smoke` 的 `adj1156` 6 条；Rust `cargo check` 通过。
+  **旧稿必须重开一次**才拿到 nativePath。
+- **预防**：**"能读到文件"不等于"知道它在哪"**。桌面壳凡是要按路径写同目录附件的功能，
+  打开入口就必须走原生路径，不能贪 WebView 的 FSA 句柄；FSA 句柄只适合"写回本文件"。
+  这类差异要在"打开"这一处一次性定好来源，别让每个功能各自判断句柄有没有目录。
+
 
 

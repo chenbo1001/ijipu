@@ -21126,6 +21126,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1154Tests())
       // adj1155：sidecar extras（练习段/选中段/相机段）+ 自动保存 + 一键 tauri dev
       .then(() => runAdj1155Tests())
+      // adj1156：桌面壳「打开」走原生路径（sidecar 写回 .jps 同目录）
+      .then(() => runAdj1156Tests())
       // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
       .then(() => runAdj1122Tests())
       // adj1124：对拍台尺寸/分区高度/预览比例（可拖可最大化，记 L1）
@@ -27847,7 +27849,7 @@ function runAdj966Tests() {
    * adj966：**授权引导的接线**（首次成功打开 FSA 文件后调一次）——
    * 没有这一步，前面那三条判据就只是"口径存在"，用户永远看不到引导。
    */
-  const guideCall = 'void guidePersistPermissionOnce(handle, name)'
+  const guideCall = 'void guidePersistPermissionOnce(effectiveHandle, name)'
   check('adj966 接线：打开 FSA 文件成功后调用一次授权引导；"提示过"的标记在 L1 偏好里（`ijipu.permGuideShown`）',
     docSrcText.includes(guideCall) &&
       String(readFileSync('src/store/editorPrefs.ts', 'utf8')).includes("'ijipu.permGuideShown'") &&
@@ -36005,6 +36007,68 @@ function runAdj1155Tests(): void {
       /--check/.test(bat) &&
       // 允许注释里提"为什么不用 ps1"，但不许真的 dot-source / powershell 调它
       !/(?:^|\n)\s*(?:powershell|pwsh|\.)\b[^\n]*tauri-env\.ps1/i.test(bat),
+    '',
+  )
+}
+
+/**
+ * adj1156（用户 2026-10-25 实报）：桌面壳里保存 sidecar 仍跑到下载目录。
+ *
+ * 根因：桌面壳的 Ctrl+O 走的是 WebView2 的 `showOpenFilePicker()`，拿到的只是浏览器文件句柄，
+ * 壳不知道 `.jps` 在哪个目录 ⇒ `resolveSidecarPath` 返回 null ⇒ 降级下载。
+ * 解决：桌面壳「打开」改走 Rust 原生文件对话框，拿真实绝对路径（`nativePath`）。
+ */
+function runAdj1156Tests(): void {
+  console.log('[adj1156] 桌面壳「打开」走原生路径：sidecar 写回 .jps 同目录')
+  const libSrc = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8')
+  const extSrc = readFileSync(join(root, 'src/store/externalOpen.ts'), 'utf8')
+  const docSrc = readFileSync(join(root, 'src/store/docStore.ts'), 'utf8')
+  const syncSrc = readFileSync(join(root, 'src/dialogs/SyncDialog.tsx'), 'utf8')
+  const copySrc = readFileSync(join(root, 'src/brand/copy.ts'), 'utf8')
+
+  check(
+    'adj1156 Rust 有 `pick_jps_file`（原生对话框 + 只筛 .jps）并登记进 invoke_handler',
+    /fn pick_jps_file\(/.test(libSrc) &&
+      /add_filter\([^)]*jps/.test(libSrc) &&
+      /blocking_pick_file\(\)/.test(libSrc) &&
+      /\bpick_jps_file,/.test(libSrc),
+    '',
+  )
+  check(
+    'adj1156 前端 pickJpsFile：非桌面壳返回 null；桌面壳 invoke `pick_jps_file` 并拿字符串路径',
+    /export async function pickJpsFile/.test(extSrc) &&
+      /invoke\('pick_jps_file'\)/.test(extSrc) &&
+      /typeof r === 'string'/.test(extSrc),
+    '',
+  )
+  check(
+    'adj1156 桌面壳 openFile 先走 openFileNative（不再让 Ctrl+O 落到 FSA 句柄）',
+    /if \(isTauriShell\(\)\) return openFileNative\(\)/.test(docSrc) &&
+      /async function openFileNative/.test(docSrc) &&
+      /await pickJpsFile\(\)/.test(docSrc) &&
+      /await readNativeProbe\(path\)/.test(docSrc) &&
+      /nativePath: path/.test(docSrc),
+    '',
+  )
+  check(
+    'adj1156 adoptDoc 认 nativePath：保存基准/草稿路径/状态三处都带上（FSA 打开时仍是 null）',
+    /const nativePath = input\.nativePath \?\? null/.test(docSrc) &&
+      /effectiveHandle = nativePath !== null \? null : handle/.test(docSrc) &&
+      /setBaseline\(bindingKeyOf\(\{ kind: 'native', path: nativePath \}\)/.test(docSrc) &&
+      /saveDraftNative\(nativePath\)/.test(docSrc) &&
+      /^\s+nativePath,$/m.test(docSrc),
+    '',
+  )
+  check(
+    'adj1156 桌面壳里没有 nativePath 时**不再下载** sidecar，而是提示重新「打开/拖入」',
+    /if \(isTauriShell\(\)\) \{\s*setNotice\(syncCopy\.saveNoNativePath\)/.test(syncSrc) &&
+      /saveNoNativePath:/.test(copySrc),
+    '',
+  )
+  check(
+    'adj1156 负对照：浏览器（非桌面壳）仍保留下载兜底（这段没有被打包掉）',
+    /downloadSidecarText\(name, text\)/.test(syncSrc) &&
+      /savedDownloaded\(name\)/.test(syncSrc),
     '',
   )
 }

@@ -987,6 +987,27 @@ async fn ws_pick_dir(app: tauri::AppHandle) -> Option<String> {
     .and_then(|fp| fp.as_path().map(|p| p.to_string_lossy().into_owned()))
 }
 
+/// adj1156（用户 2026-10-25 实报「桌面壳里保存 sidecar 跑到下载目录」）：
+/// 桌面壳的「打开」必须走**原生文件对话框**，拿到真实绝对路径（`nativePath`）。
+///
+/// 在此之前 Ctrl+O 走的是 WebView2 的 `showOpenFilePicker()`：拿到的只是浏览器文件句柄，
+/// 桌面壳**不知道它在哪个目录**，于是 sidecar 只能降级成"下载一份"。
+#[tauri::command]
+async fn pick_jps_file(app: tauri::AppHandle) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("打开乐谱")
+            .add_filter("iJipu 乐谱", &["jps"])
+            .blocking_pick_file()
+    })
+    .await
+    .ok()
+    .flatten()
+    .and_then(|fp| fp.as_path().map(|p| p.to_string_lossy().into_owned()))
+}
+
 /// adj539：桌面端**不使用** Service Worker（前端资源随二进制内嵌，见 `src/main.tsx` 的 adj443 决定）。
 ///
 /// 但**历史版本注册过的 SW 会跨版本存活在 WebView2 用户数据目录里**（实测：`com.ijipu.app\EBWebView\
@@ -1171,6 +1192,8 @@ pub fn run() {
             read_native_probe,
             // adj568：桌面端工作区（原生选目录 + 按路径读写）
             ws_pick_dir,
+            // adj1156：桌面壳「打开」走原生长路径（sidecar 才能写到 .jps 同目录）
+            pick_jps_file,
             ws_list_dir,
             ws_dir_exists,
             ws_is_dir_empty,

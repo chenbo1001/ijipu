@@ -1158,6 +1158,29 @@ bat 自己设 `CARGO_HOME` / `RUSTUP_HOME` / `PATH`（工作区 `.cargo` + `ming
 断言：`smoke` 的 `adj1155` 9 条（schema 往返/显式空/旧文件缺字段、save 带 extras、自动保存接线、
 App 桥、练习段增删立即写、相机段、bat 内容）。
 
+### 4-N 桌面壳「打开」必须走原生路径：sidecar 才会写到 .jps 同目录（adj1156，用户 2026-10-25 实报）
+
+现象：桌面壳里点保存，sidecar 仍下载到 Downloads，不在 `.jps` 同目录。
+
+根因：桌面壳的 Ctrl+O 走的是 WebView2 的 `showOpenFilePicker()`——拿到的是**浏览器文件句柄**，
+壳不知道文件在哪个目录；`resolveSidecarPath(nativePath, binding)` 两者都没有 ⇒ 返回 `null`
+⇒ 对拍台降级 `downloadSidecarText`。
+
+解决：
+
+- Rust 新增 `pick_jps_file`（`tauri_plugin_dialog` 原生文件对话框，只筛 `.jps`，返回绝对路径）；
+- 桌面壳 `openFile` 先走 `openFileNative()`：原生对话框 → `read_native_probe` 读文本 + mtime →
+  `adoptDoc({ nativePath })`；`adoptDoc` 认 `nativePath`（基准键 `{kind:'native',path}`、草稿路径、
+  状态三处都带）；
+- 桌面壳里若确实没有 nativePath（旧句柄打开的稿），对拍台**不再下载**，提示
+  `syncCopy.saveNoNativePath`：重新「打开」或拖入一次；
+- 浏览器（非桌面壳）仍保留下载兜底（网页没有文件系统）。
+
+注意：**旧稿要重开一次**才拿到 `nativePath`；重开后 Ctrl+S / sidecar / 伴奏自动读都走真实路径。
+
+断言：`smoke` 的 `adj1156` 6 条（Rust 命令/筛选/注册、前端 pickJpsFile、openFileNative 接线、
+adoptDoc 认 nativePath、桌面壳 no-nativePath 提示、浏览器下载兜底负对照）。
+
 
 
 - 间奏块的**中性灰**：`playheadBaseOf` 加一个 `interlude` 色位，并让 `TimedRect`/`playheadTrack`
