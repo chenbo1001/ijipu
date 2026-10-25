@@ -21131,6 +21131,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1156Tests())
       // adj1157：台面自动读伴奏 + 桌面壳选伴奏记真实路径
       .then(() => runAdj1157Tests())
+      // adj1158：桌面壳「另存为」原生保存（存完即有 nativePath）
+      .then(() => runAdj1158Tests())
       // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
       .then(() => runAdj1122Tests())
       // adj1124：对拍台尺寸/分区高度/预览比例（可拖可最大化，记 L1）
@@ -36132,6 +36134,63 @@ function runAdj1157Tests(): void {
       sub: audioRefOf('C:\\a\\sub\\b.mp3', 'C:\\a\\x.jps'),
       other: audioRefOf('D:\\b.mp3', 'C:\\a\\x.jps'),
     }),
+  )
+}
+
+/**
+ * adj1158（用户 2026-10-25 口径：操作要简单统一）：桌面壳「另存为」改原生保存。
+ *
+ * 旧路：`showSaveFilePicker` 只给浏览器句柄 ⇒ 存完没有 `nativePath` ⇒ 还要"重开一次"才能存 sidecar。
+ * 新路：原生保存对话框 + Rust 一次写盘（回读校验）⇒ 直接拿到绝对路径、设置 `nativePath`。
+ */
+function runAdj1158Tests(): void {
+  console.log('[adj1158] 桌面壳「另存为」走原生保存：存完即普通原生文件，sidecar 直接同目录')
+  const libSrc = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8')
+  const extSrc = readFileSync(join(root, 'src/store/externalOpen.ts'), 'utf8')
+  const docSrc = readFileSync(join(root, 'src/store/docStore.ts'), 'utf8')
+
+  check(
+    'adj1158 Rust `save_jps_file`：原生保存对话框 + 写盘 + 回读校验 + 补 .jps + 注册',
+    /fn save_jps_file\(/.test(libSrc) &&
+      /set_file_name\(&name\)/.test(libSrc) &&
+      /blocking_save_file\(\)/.test(libSrc) &&
+      /set_extension\("jps"\)/.test(libSrc) &&
+      /read_to_string\(&p\)/.test(libSrc) &&
+      /\bsave_jps_file,/.test(libSrc),
+    '',
+  )
+  check(
+    'adj1158 前端 saveJpsFileNative：invoke `save_jps_file`，取消返回 null、失败抛错',
+    /export async function saveJpsFileNative/.test(extSrc) &&
+      /invoke\('save_jps_file', \{ name, text \}\)/.test(extSrc) &&
+      /typeof r === 'string'/.test(extSrc),
+    '',
+  )
+  check(
+    'adj1158 桌面壳 saveFileAs 先走原生分支；存完设置 nativePath + 基准 + 草稿路径（不用重开）',
+    /if \(isTauriShell\(\)\) return saveFileAsNative\(\)/.test(docSrc) &&
+      /async function saveFileAsNative/.test(docSrc) &&
+      /await saveJpsFileNative\(`\$\{defaultName\}\.jps`, code\)/.test(docSrc) &&
+      /setBaseline\(bindingKeyOf\(\{ kind: 'native', path \}\), code, null\)/.test(docSrc) &&
+      /saveDraftNative\(path\)/.test(docSrc) &&
+      /nativePath: path,/.test(docSrc),
+    '',
+  )
+  const ownerSrc = readFileSync(join(root, 'src/store/syncOwner.ts'), 'utf8')
+  const extrasSrc = readFileSync(join(root, 'src/store/syncExtras.ts'), 'utf8')
+  check(
+    'adj1158 另存为**接管** sync doc：同一份谱换路径不清锚点/音量（owner 单独模块，避免成环）',
+    /adoptSyncDocOwner\(\{ fileName: name, nativePath: path, binding: null \}\)/.test(docSrc) &&
+      /adoptSyncDocOwner/.test(ownerSrc) &&
+      /syncDocOwnerOf/.test(extrasSrc) &&
+      /setSyncDocOwner\(key\)/.test(extrasSrc),
+    '',
+  )
+  check(
+    'adj1158 负对照：浏览器（非桌面壳）仍走 FSA 另存为（showSaveFilePicker + saveTextToHandle）',
+    /showSaveFilePicker/.test(docSrc) &&
+      /saveTextToHandle\(handle, code/.test(docSrc),
+    '',
   )
 }
 

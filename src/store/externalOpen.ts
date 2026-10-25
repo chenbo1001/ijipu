@@ -106,6 +106,20 @@ export async function pickJpsFile(): Promise<string | null> {
 }
 
 /**
+ * adj1158：桌面壳「另存为」——原生保存对话框 + 同命令写盘 + 回读校验，返回**绝对路径**。
+ *
+ * 为什么不让前端拿到路径再用 FSA 写：那样存完 sidecar 还要用户"重新打开一次"，
+ * 用户明确说"太复杂"。一次做完，前端只负责把 `nativePath` 设上。
+ * 用户取消返回 `null`；写盘/回读失败抛错（调用方提示 `saveAsFailed`）。
+ */
+export async function saveJpsFileNative(name: string, text: string): Promise<string | null> {
+  const g = tauri()
+  if (!g?.core?.invoke) throw new Error('当前环境不支持原生另存为')
+  const r = await g.core.invoke('save_jps_file', { name, text })
+  return typeof r === 'string' && r !== '' ? r : null
+}
+
+/**
  * 监听"后续再有文件要打开"（应用已运行时再次双击）：返回取消监听的函数。
  * 注意：**冷启动**那一次不走这里（事件可能早于本函数注册），而是由调用方在挂载时
  * 先 `drainExternalFiles()` 拉取一次——两条路都指向同一个队列，故不会漏也不会重。

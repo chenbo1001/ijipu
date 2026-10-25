@@ -1207,6 +1207,29 @@ sidecar，之后刷新自动读。若伴奏就在 `.jps` 旁边，自动读直�
 断言：`smoke` 的 `adj1157` 5 条（Rust 命令/过滤/注册、前端 pickAudioFileNative、台面自动读、
 台面/相机选伴奏写真实路径、`audioRefOf` 纯函数四例）。
 
+### 4-P 桌面壳「另存为」也走原生保存：存完即有真实路径（adj1158，用户 2026-10-25 口径）
+
+用户原话：「要考虑使用者的心智能力，太复杂操作不来，以简洁、统一为要」。
+
+上一轮遗留的复杂点：桌面壳「另存为」仍走 WebView2 的 `showSaveFilePicker`，只给浏览器句柄，
+存完没有 `nativePath` ⇒ 用户还得「用打开重开一次」才能存 sidecar。这正是要消掉的多余步骤。
+
+解决：
+
+- Rust 新增 `save_jps_file(name, text)`：原生保存对话框 → 写盘 → 回读校验 → 返回绝对路径；
+  用户只写名字、没写扩展名时补 `.jps`。
+- 桌面壳 `saveFileAs` 先走 `saveFileAsNative()`；存完设置 `nativePath` / 基准（`{kind:'native',path}`）/
+  草稿路径 / 解绑句柄与工作区。之后 Ctrl+S、sidecar、伴奏自动读全按真实路径走，**不需要重开**。
+- 浏览器（非桌面壳）仍走 FSA 另存为（网页没有原生路径）。
+
+统一后的 Desktop 心智模型：
+
+> 「打开」是原生文件框；「另存为」也是原生文件框；存完就是普通本地 `.jps`；
+> sidecar / 伴奏都在它旁边，刷新自动读。
+
+断言：`smoke` 的 `adj1158` 4 条（Rust 保存命令/回读/补扩展名/注册、前端 saveJpsFileNative、
+saveFileAs 原生分支与 nativePath、浏览器 FSA 负对照）。
+
 
 
 - 间奏块的**中性灰**：`playheadBaseOf` 加一个 `interlude` 色位，并让 `TimedRect`/`playheadTrack`

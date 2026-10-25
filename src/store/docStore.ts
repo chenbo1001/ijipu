@@ -40,7 +40,9 @@ import { isHostEmbedded, shouldYieldBindingRestore } from './hostBridge'
 import { loadFontOverride, migrateLegacyEditorPrefs, hasShownPermGuide, markPermGuideShown } from './editorPrefs'
 import { normalizePastedSource } from './importSource'
 // adj538：桌面壳的「外部打开」（双击 .jps）——纯网页下这些函数一律惰性/空转，见该模块注释
-import { pickPrimary, pickJpsFile, readNativeProbe, writeExternalFile, type ExternalFile } from './externalOpen'
+import { pickPrimary, pickJpsFile, readNativeProbe, saveJpsFileNative, writeExternalFile, type ExternalFile } from './externalOpen'
+// adj1158：另存为成功后把内存 sync doc「接管」到新路径（不清掉锚点/音量）
+import { adoptSyncDocOwner } from './syncOwner'
 // adj540：工作区目录（Android/移动端"选一个文件夹当工作区"，纯网页，不需要壳）
 import {
   createFile,
@@ -1410,6 +1412,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
   },
   saveFileAs: async () => {
     fileStateTouched = true
+    // adj1158：桌面壳「另存为」也走原生对话框，存完就有 nativePath（sidecar 直接同目录）
+    if (isTauriShell()) return saveFileAsNative()
     const ui = useUiStore.getState()
     const picker = (window as any).showSaveFilePicker
     if (typeof picker !== 'function') {
@@ -1458,6 +1462,8 @@ export const useDocStore = create<DocState>()((set, get) => ({
       // adj363：写入期间用户可能继续输入，内容已变则保留未保存标记
       const tUi = performance.now()
       set({ fileHandle: handle, fileName: name, dirty: get().code !== code, nativePath: null, binding: null })
+      // adj1158：网页 FSA 另存为同样接管 sync doc（同一份谱换了文件名，别清掉锚点）
+      adoptSyncDocOwner({ fileName: name, nativePath: null, binding: null })
       phaseLog.tail('ui', performance.now() - tUi)
       reportSaved(t0, phaseLog, name)
       return true
@@ -1891,6 +1897,52 @@ async function openFileNative(): Promise<boolean> {
     useUiStore.getState().showNotice(`${uiCopy.openFailedPrefix}${reason}`, 'error')
     return false
   }
+}
+
+/**
+ * adj1158：桌面壳「另存为」= 原生保存对话框 + Rust 一次写盘（含回读校验）→ 设置 `nativePath`。
+ *
+ * 用户口径（2026-10-25）：操作要简单统一，不能"另存为之后还要重开一次才能存 sidecar"。
+ * 所以这里存完就是**普通原生文件**：Ctrl+S、sidecar、伴奏自动读全部按真实路径走，
+ * 用户不需要再做任何额外动作。
+ */
+async function saveFileAsNative(): Promise<boolean> {
+  const ui = useUiStore.getState()
+  const st = useDocStore.getState()
+  const nm = st.fileName
+  const isNamed = !!nm && nm !== '未命名'
+  const bTitle = st.parseResult.header.titles[0]
+  const defaultName = isNamed ? nm : bTitle && bTitle !== '未命名' ? bTitle : '未命名'
+  const code = st.code
+  let path: string | null
+  try {
+    path = await saveJpsFileNative(`${defaultName}.jps`, code)
+  } catch (e) {
+    console.warn('[iJipu] 原生另存为失败', e)
+    ui.showNotice(uiCopy.saveAsFailed, 'error')
+    return false
+  }
+  if (path === null) return false // 用户取消：静默
+  const name = fileBaseName(path)
+  // 写盘成功：基准跟到新文件（以后"写盘前比基准"认的是它）
+  setBaseline(bindingKeyOf({ kind: 'native', path }), code, null)
+  saveDraftSrc(null)
+  saveDraftNative(path)
+  void saveFileHandle(null)
+  useDocStore.setState({
+    fileName: name,
+    fileHandle: null,
+    nativePath: path,
+    binding: null,
+    pendingBinding: null,
+    // 保存对话框期间用户可能继续输入：内容变了就保留未保存标记
+    dirty: useDocStore.getState().code !== code,
+  })
+  // 同一份谱换了路径：sync doc（锚点/音量/练习段）跟着接管，别被"换文件清理"清掉
+  adoptSyncDocOwner({ fileName: name, nativePath: path, binding: null })
+  ui.showNotice(`${uiCopy.saveOk} ${name}`, 'ok')
+  console.info(`[iJipu] 原生另存为：${path}`)
+  return true
 }
 
 function openFileViaInput(): Promise<boolean> {

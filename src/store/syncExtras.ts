@@ -23,6 +23,7 @@ import { useUiStore } from './uiStore'
 import { docKeyOf } from './practiceMarks'
 import { resolveSidecarPath, loadSidecarFor } from './syncSidecar'
 import { writeSidecarText } from '../export/video/syncIo'
+import { setSyncDocOwner, syncDocOwnerOf } from './syncOwner'
 
 /** 自动保存防抖（ms）——混音滑杆会连续触发，拖完再写一次 */
 const SAVE_DEBOUNCE_MS = 600
@@ -32,8 +33,7 @@ function identityOf(d: { fileName: string; nativePath: string | null; binding: W
   return docKeyOf(d)
 }
 
-/** 这份内存 doc 是从哪个文件加载的；自动保存只写回同一个文件（防切文件时串写） */
-let docOwner = ''
+/** 这份内存 doc 是从哪个文件加载的：owner 状态在 `syncOwner.ts`（避免 docStore ↔ 本模块成环） */
 /** 是否允许自动保存（打开文件、读 sidecar 期间先关，防止把空状态写出去） */
 let saveEnabled = false
 /** 加载期间发生过的改动（读完后补写一次，别让"刚打开就加段"丢掉） */
@@ -133,7 +133,7 @@ async function flushSidecarSave(): Promise<void> {
   const identity = identityOf(ds)
   // 已经切到别的文件：放弃这次写入（宁可丢一次自动保存，也不能把旧谱写进新谱的 sidecar）
   if (pendingIdentity !== '' && pendingIdentity !== identity) return
-  if (docOwner !== identity) return
+  if (syncDocOwnerOf() !== identity) return
   const st = useSyncStore.getState()
   if (st.doc === null) return
 
@@ -191,7 +191,8 @@ export function useSyncSidecarExtras(): void {
     }
     void (async () => {
       // 内存里的 doc 属于别的文件（上一个谱）⇒ 清掉，避免把它的音量/锚点写进新 sidecar
-      if (docOwner !== '' && docOwner !== key) {
+      const owner = syncDocOwnerOf()
+      if (owner !== '' && owner !== key) {
         suppressSyncAutoSave(() => useSyncStore.getState().resetDoc())
       }
       const d = await loadSidecarFor(nativePath, binding)
@@ -200,7 +201,7 @@ export function useSyncSidecarExtras(): void {
         const cur = useSyncStore.getState().doc
         if (d !== null && cur === null) useSyncStore.getState().replaceDoc(d)
         if (d !== null) applySyncExtrasToUi(d)
-        docOwner = key
+        setSyncDocOwner(key)
       })
       enableAutoSave()
     })()
@@ -213,5 +214,5 @@ export function useSyncSidecarExtras(): void {
 
 /** 仅测试/调试用：当前内存 doc 的 owner（不参与 UI） */
 export function syncDocOwnerForTest(): string {
-  return docOwner
+  return syncDocOwnerOf()
 }

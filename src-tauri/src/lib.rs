@@ -1027,6 +1027,48 @@ async fn pick_audio_file(app: tauri::AppHandle) -> Option<String> {
     .and_then(|fp| fp.as_path().map(|p| p.to_string_lossy().into_owned()))
 }
 
+/// adj1158（用户 2026-10-25 口径：操作要简单统一）：
+/// 桌面壳「另存为」也走**原生保存对话框**，并在同一个命令里写盘 + 回读校验。
+///
+/// 为什么不能只返回路径让前端用 FSA 写：FSA 的 `showSaveFilePicker` 同样拿不到真实路径，
+/// 存完 sidecar 又要"重新打开一次"——这正是用户说"太复杂"的那一步。这里一次做完：
+/// 对话框 → 写盘 → 回读校验 → 返回绝对路径（前端据此设置 `nativePath`）。
+#[tauri::command]
+async fn save_jps_file(
+    app: tauri::AppHandle,
+    name: String,
+    text: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("另存为")
+            .set_file_name(&name)
+            .add_filter("iJipu 乐谱", &["jps"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(fp) = picked else {
+        return Ok(None); // 用户取消
+    };
+    let mut p = fp
+        .as_path()
+        .ok_or_else(|| "保存对话框没有返回本地路径".to_string())?
+        .to_path_buf();
+    // 用户在对话框里只写了名字、没写扩展名 ⇒ 补 .jps（与另存为的默认名同口径）
+    if p.extension().is_none() {
+        p.set_extension("jps");
+    }
+    std::fs::write(&p, &text).map_err(|e| format!("{}: {}", p.display(), e))?;
+    let back = std::fs::read_to_string(&p).map_err(|e| format!("回读失败 {}: {}", p.display(), e))?;
+    if back != text {
+        return Err("写入后回读内容与预期不一致".to_string());
+    }
+    Ok(Some(p.to_string_lossy().into_owned()))
+}
+
 /// adj539：桌面端**不使用** Service Worker（前端资源随二进制内嵌，见 `src/main.tsx` 的 adj443 决定）。
 ///
 /// 但**历史版本注册过的 SW 会跨版本存活在 WebView2 用户数据目录里**（实测：`com.ijipu.app\EBWebView\
@@ -1215,6 +1257,8 @@ pub fn run() {
             pick_jps_file,
             // adj1157：桌面壳选伴奏也拿真实路径（sidecar 记住位置，刷新自动读）
             pick_audio_file,
+            // adj1158：桌面壳「另存为」原生保存（一次完成写盘 + 回读，设置 nativePath）
+            save_jps_file,
             ws_list_dir,
             ws_dir_exists,
             ws_is_dir_empty,
