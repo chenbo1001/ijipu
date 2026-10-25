@@ -21124,6 +21124,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1152Tests())
       // adj1154：桌面自动读伴奏（sync_read_audio）
       .then(() => runAdj1154Tests())
+      // adj1155：sidecar extras（练习段/选中段/相机段）+ 自动保存 + 一键 tauri dev
+      .then(() => runAdj1155Tests())
       // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
       .then(() => runAdj1122Tests())
       // adj1124：对拍台尺寸/分区高度/预览比例（可拖可最大化，记 L1）
@@ -34950,7 +34952,7 @@ function runDynamicCameraTests(): void {
         pickPracticeCandidate(['first', 'second', 'third'], 1, 0) === 'first' &&
         pickPracticeCandidate(['first', 'second', 'third'], 0, 9) === 'first' &&
         pickPracticeCandidate([], 0, 1) === undefined &&
-        /range:\s*\{\s*startId:\s*m\.startId,\s*endId:\s*m\.endId,\s*pass:\s*m\.pass\s*\}/.test(barSrc) &&
+        /startId:\s*m\.startId,\s*endId:\s*m\.endId,\s*\.\.\.\(m\.pass !== undefined \? \{ pass: m\.pass \} : \{\}\)/.test(barSrc) &&
         /pickPracticeCandidate\(res\.candidates,\s*res\.pick,\s*opts\.range\.pass\)/.test(rendererSrc),
       'pass must flow mark -> camera -> session',
     )
@@ -35897,6 +35899,108 @@ function runAdj1154Tests(): void {
     /loadSidecarAudioFor\(nativePath, binding, d\)/.test(overlaySrc) &&
       /decodeAccompaniment\(bytes\)/.test(overlaySrc) &&
       /setAudioBuffer\(buf\)/.test(overlaySrc),
+    '',
+  )
+}
+
+/**
+ * adj1155（用户 2026-10-25 选方案 B）：把**练习段列表 / 选中段 / 相机导出段**也放进
+ * `xxx.jps.sync.json`，并在**试听里增删练习段时保存**（外加混音/锚点/保留段改动自动保存）。
+ *
+ * 这里钉住：schema 往返（含"显式空"与"旧文件缺字段"）、自动保存接线、一键 tauri dev 脚本。
+ */
+function runAdj1155Tests(): void {
+  console.log('[adj1155] sidecar extras：练习段/选中段/相机段 + 自动保存 + 一键 tauri dev')
+  const base = {
+    audio: '空山静E调伴奏.mp3',
+    audioDurationMs: 300000,
+    trim: { startMs: 0, endMs: 300000 },
+    anchors: [],
+    code: '',
+  }
+  const marker = { id: 'm1', name: '段 1', startId: '1_1_1_0', endId: '1_1_1_4', pass: 1 }
+  const range = { startId: '1_1_1_0', endId: '1_1_1_4', pass: 1 }
+  const full = makeSyncDoc({ ...base, marks: [marker], markId: 'm1', range })
+  const parsed = parseSyncDoc(serializeSyncDoc(full))
+  check(
+    'adj1155 往返：练习段列表 / 选中段 / 相机导出段都写进 sidecar 再读回来',
+    parsed.doc !== null &&
+      parsed.doc.marks?.length === 1 &&
+      parsed.doc.marks[0]?.id === 'm1' &&
+      parsed.doc.markId === 'm1' &&
+      parsed.doc.range?.startId === range.startId &&
+      parsed.doc.range?.pass === 1,
+    JSON.stringify(parsed.doc?.marks ?? null),
+  )
+  const cleared = parseSyncDoc(
+    serializeSyncDoc(makeSyncDoc({ ...base, marks: [], markId: '', range: null })),
+  )
+  check(
+    'adj1155 显式清空：`marks: []` / `markId: ""` / `range: null` 读回来仍是"明确没有"（旧文件不会复活）',
+    cleared.doc !== null &&
+      Array.isArray(cleared.doc.marks) &&
+      cleared.doc.marks.length === 0 &&
+      cleared.doc.markId === '' &&
+      cleared.doc.range === null,
+    JSON.stringify({ marks: cleared.doc?.marks, markId: cleared.doc?.markId, range: cleared.doc?.range }),
+  )
+  const oldDoc = parseSyncDoc(serializeSyncDoc(makeSyncDoc(base)))
+  check(
+    'adj1155 负对照：旧 sidecar 没有这些字段 ⇒ 读回来是 `undefined`（调用方回退 localStorage，而不是当成"删光"）',
+    oldDoc.doc !== null && oldDoc.doc.marks === undefined && oldDoc.doc.markId === undefined && oldDoc.doc.range === undefined,
+    '',
+  )
+
+  const storeSrc = readFileSync(join(root, 'src/store/syncStore.ts'), 'utf8')
+  const extrasSrc = readFileSync(join(root, 'src/store/syncExtras.ts'), 'utf8')
+  const appSrc = readFileSync(join(root, 'src/App.tsx'), 'utf8')
+  const barSrc = readFileSync(join(root, 'src/dialogs/PracticeMarkBar.tsx'), 'utf8')
+  const overlaySrc = readFileSync(join(root, 'src/preview/DynamicFrameOverlay.tsx'), 'utf8')
+  const exportPanelSrc = readFileSync(join(root, 'src/ui/dock/ExportPanel.tsx'), 'utf8')
+  check(
+    'adj1155 syncStore.save 把 marks/markId/range 原样带上（"没有这个字段"仍保持没有）',
+    /cur\.marks !== undefined \? \{ marks: cur\.marks \}/.test(storeSrc) &&
+      /cur\.markId !== undefined \? \{ markId: cur\.markId \}/.test(storeSrc) &&
+      /cur\.range !== undefined \? \{ range: cur\.range \}/.test(storeSrc),
+    '',
+  )
+  check(
+    'adj1155 自动保存：订阅 sync doc 变化 → 防抖 → save() + 写 sidecar（带 owner/切文件保护）',
+    /useSyncStore\.subscribe/.test(extrasSrc) &&
+      /SAVE_DEBOUNCE_MS/.test(extrasSrc) &&
+      /docOwner|pendingIdentity/.test(extrasSrc) &&
+      /writeSidecarText\(target, serializeSyncDoc\(latest\)\)/.test(extrasSrc),
+    '',
+  )
+  check(
+    'adj1155 App 级桥：打开文件读 sidecar extras（不靠相机/对拍台先打开）',
+    /useSyncSidecarExtras\(\)/.test(appSrc) &&
+      /loadSidecarFor\(nativePath, binding\)/.test(extrasSrc) &&
+      /applySyncExtrasToUi\(d\)/.test(extrasSrc),
+    '',
+  )
+  check(
+    'adj1155 试听里增删练习段 ⇒ 立刻写 sidecar（mirrorMarks + flushSyncAutoSave）',
+    /mirrorMarks\(\)/.test(barSrc) &&
+      /flushSyncAutoSave\(\)/.test(barSrc) &&
+      /useSyncStore\.getState\(\)\.setExtras/.test(barSrc),
+    '',
+  )
+  check(
+    'adj1155 相机导出段也持久化：练习段导出/相机位「整曲」都更新 sidecar；从导出面板进相机不再强制清空段',
+    /mirrorMarks\(\{ range \}\)/.test(barSrc) &&
+      /setExtras\(\{ range: null \}\)/.test(overlaySrc) &&
+      /setDynamicCamera\(\{ on: true, mode: '3min' \}\)/.test(exportPanelSrc) &&
+      !/setDynamicCamera\(\{ on: true, range: null, mode: '3min' \}\)/.test(exportPanelSrc),
+    '',
+  )
+  const bat = readFileSync(join(root, 'tauri-dev.bat'), 'utf8')
+  check(
+    'adj1155 一键 tauri dev：bat 从自身目录启动 + dot-source 环境 + npm run tauri:dev + 失败 pause',
+    /cd \/d "%~dp0"/.test(bat) &&
+      /scripts\\tauri-env\.ps1/.test(bat) &&
+      /npm run tauri:dev/.test(bat) &&
+      /pause/.test(bat),
     '',
   )
 }

@@ -21,6 +21,8 @@ import { seedQueryFromSelection } from './editor/findReplace'
 import { PreviewPane } from './preview/PreviewPane'
 import { useDocStore } from './store/docStore'
 import { useUiStore } from './store/uiStore'
+// adj1155：打开文件时读 sidecar extras，并在改动时自动写回（练习段/相机段/音量不再刷新即丢）
+import { useSyncSidecarExtras } from './store/syncExtras'
 // adj538：桌面壳「外部打开」（双击 .jps）——拉取待打开队列 + 监听后续打开请求
 import { drainExternalFiles, hasShell, onExternalOpen } from './store/externalOpen'
 // adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
@@ -68,6 +70,8 @@ function App() {
   const themeMode = useUiStore((s) => s.themeMode)
   // adj1000：深色预览柔化档位（挂到 <html data-soften>，由 styles/theme.css 消费）
   const previewSoften = useUiStore((s) => s.previewSoften)
+  // adj1155：sidecar extras（练习段/相机段/音量）—打开时读、改动时自动写回
+  useSyncSidecarExtras()
   const systemLight = useUiStore((s) => s.systemLight)
   const setSystemLight = useUiStore((s) => s.setSystemLight)
   const splitPct = useUiStore((s) => s.splitPct)

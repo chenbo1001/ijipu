@@ -37,6 +37,8 @@ import { mixPlanOf, serializeSyncDoc, sidecarPathOf, syncDocStale, codeFingerpri
 import { writeSidecarText, downloadSidecarText } from '../export/video/syncIo'
 // adj1150：sidecar 定位/读取抽到 store 层，相机位与对拍台共用同一套路径规则
 import { loadSidecarDocAt, resolveSidecarPath } from '../store/syncSidecar'
+// adj1155：sidecar 里的练习段/选中段/相机段也灌回 UI
+import { applySyncExtrasToUi } from '../store/syncExtras'
 // adj1137：波形上方那条"音符格子排"（纯几何）
 import { barLabelsOf, cellRectPct, pitchHeightOf, stripCellsOf } from './noteStrip'
 import { canUseDynamicVideo } from '../export/video/capability'
@@ -152,6 +154,8 @@ export function SyncDialog() {
   /** 打开台面：恢复同名谱的副本（没有就新建空 doc） */
   useEffect(() => {
     ensureFor(fileName, code)
+    const d = useSyncStore.getState().doc
+    if (d !== null) applySyncExtrasToUi(d)
   }, [ensureFor, fileName, code])
 
   /**
@@ -169,6 +173,8 @@ export function SyncDialog() {
       const cur = useSyncStore.getState().doc
       if (cur !== null && cur.anchors.length > 0) return
       replaceDoc(parsed)
+      // adj1155：盘上的练习段/选中段/相机段也一起生效
+      applySyncExtrasToUi(parsed)
     })()
     return () => {
       cancelled = true

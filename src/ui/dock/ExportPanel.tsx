@@ -322,7 +322,8 @@ export function ExportPanel() {
             type="button"
             className="btn"
             onClick={() => {
-              setDynamicCamera({ on: true, range: null, mode: '3min' })
+              // adj1155：保留上次选中的标记段（存在 sidecar 里）；要整曲请在相机位点「整曲」
+              setDynamicCamera({ on: true, mode: '3min' })
             }}
             disabled={busy !== null}
           >

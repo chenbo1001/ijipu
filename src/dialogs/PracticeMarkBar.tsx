@@ -21,10 +21,12 @@
  * 这里在「候选 > 1」时才显示第二个下拉（第 1 遍 / 第 2 遍 …，含跳越的标 `(含跳越)`），
  * 选过之后写回标记的 `pass`（持久化）。
  */
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { buildPlaySequence, layoutScore, noteIdStringOf, resolvePracticeRange, slicePlaySequenceByRange, flattenScoreNotes, spotOfIn, hasNoteId } from '@ijipu/engine'
 import { useDocStore } from '../store/docStore'
 import { useUiStore } from '../store/uiStore'
+import { useSyncStore } from '../store/syncStore'
+import { flushSyncAutoSave } from '../store/syncExtras'
 import { docKeyOf, loadMarks, saveMarks } from '../store/practiceMarks'
 // adj1101：下拉项「段1 [ 33:1 - 34:2 ]」的文本（纯函数，smoke 直接断言）
 import { markOptionText } from './practiceMarkText'
@@ -65,13 +67,52 @@ export function PracticeMarkBar(): React.JSX.Element {
 
   /** 文档身份（换文档 ⇒ 换一批标记）；对话框打开时从缓存载入 */
   const docKey = useMemo(() => docKeyOf({ fileName, binding, nativePath }), [fileName, binding, nativePath])
+  const syncDoc = useSyncStore((s) => s.doc)
+  const hasDoc = syncDoc !== null
+  const docMarks = syncDoc?.marks
+  const docMarkId = syncDoc?.markId
+  /** adj1155：数据没载完前不要回写（否则初始 `[]` 会把盘上的段删掉） */
+  const [ready, setReady] = useState(false)
+  /**
+   * adj1155：优先用 sidecar 里的练习段（用户选方案 B：练习段跟着 `xxx.jps.sync.json` 走）；
+   * 旧 sidecar 没有 `marks` 字段时回退 localStorage，并顺手迁移到 sidecar。
+   */
   useEffect(() => {
-    setMarks(loadMarks(docKey))
-  }, [docKey, setMarks])
-  /** 标记一变就落盘（缓存级保存；空列表会删键） */
+    setReady(false)
+    if (docMarks !== undefined) {
+      setMarks(docMarks)
+      setMarkId(docMarkId !== undefined && docMarks.some((m) => m.id === docMarkId) ? docMarkId : '')
+      setReady(true)
+      return
+    }
+    const fromLocal = loadMarks(docKey)
+    setMarks(fromLocal)
+    // 有 sidecar（doc 已加载）但还没有 marks 字段 ⇒ 把本机缓存里的段迁进去
+    if (hasDoc) {
+      useSyncStore.getState().setExtras({ marks: fromLocal, markId: '' })
+      void flushSyncAutoSave()
+    }
+    setReady(true)
+  }, [docKey, docMarks, docMarkId, hasDoc, setMarks, setMarkId])
+  /** 标记一变就落盘（本机缓存；空列表会删键）；sidecar 由自动保存负责 */
   useEffect(() => {
+    if (!ready) return
     saveMarks(docKey, marks)
-  }, [docKey, marks])
+  }, [docKey, marks, ready])
+
+  /** 把当前 uiStore 的练习段/选中段镜像进 syncStore.doc（自动保存据此写 sidecar） */
+  const mirrorMarks = (patch?: { markId?: string; range?: null | { startId: string; endId: string; pass?: number } }) => {
+    const st = useUiStore.getState()
+    useSyncStore.getState().setExtras({
+      marks: st.practiceMarks,
+      markId: patch?.markId ?? st.practiceMarkId,
+      ...(patch?.range !== undefined ? { range: patch.range } : {}),
+    })
+  }
+  const chooseMark = (id: string) => {
+    setMarkId(id)
+    mirrorMarks({ markId: id })
+  }
 
   const setPracticeRangeIds = useUiStore((s) => s.setPracticeRangeIds)
   const cur = marks.find((m) => m.id === markId)
@@ -219,7 +260,7 @@ export function PracticeMarkBar(): React.JSX.Element {
           <select
             className="dock-select practice-select"
             value={markId}
-            onChange={(e) => setMarkId(e.target.value)}
+            onChange={(e) => chooseMark(e.target.value)}
             title={playbackCopy.practiceSelectTitle}
           >
             {/* 第一项恒为「无」＝演奏全曲，不可删除 */}
@@ -237,11 +278,14 @@ export function PracticeMarkBar(): React.JSX.Element {
                 const m = marks.find((x) => x.id === markId)
                 if (!m) return
                 // adj1065：这一段交给预览区相机位；试听弹窗先关，才能看到取景
+                const range = { startId: m.startId, endId: m.endId, ...(m.pass !== undefined ? { pass: m.pass } : {}) }
                 setDynamicCamera({
                   on: true,
-                  range: { startId: m.startId, endId: m.endId, pass: m.pass },
+                  range,
                   mode: '3min',
                 })
+                // adj1155：相机导出段也写进 sidecar（刷新后仍是这一段）
+                mirrorMarks({ range })
                 closeModal()
               }}
               disabled={!videoExportEnabled || !marks.some((x) => x.id === markId)}
@@ -288,6 +332,11 @@ export function PracticeMarkBar(): React.JSX.Element {
             onClick={() => {
               const m = addMark()
               if (!m) showNotice(playbackCopy.practiceNeedBoth, 'warn')
+              else {
+                // adj1155（用户口径）：添加练习段时**立刻**保存进 sidecar
+                mirrorMarks()
+                void flushSyncAutoSave()
+              }
             }}
             disabled={!canAdd}
             title={playbackCopy.practiceAddHint}
@@ -297,7 +346,12 @@ export function PracticeMarkBar(): React.JSX.Element {
           </button>
           <button
             className="btn practice-btn"
-            onClick={() => deleteMark(markId)}
+            onClick={() => {
+              deleteMark(markId)
+              // adj1155：删除也立刻保存（清空时写 `marks: []`，不能靠"缺字段"被旧文件复活）
+              mirrorMarks()
+              void flushSyncAutoSave()
+            }}
             disabled={markId === ''}
             title={playbackCopy.practiceDeleteHint}
             aria-label={playbackCopy.practiceDelete}
@@ -317,7 +371,10 @@ export function PracticeMarkBar(): React.JSX.Element {
             <select
               className="dock-select practice-pass"
               value={String(cur.pass ?? 0)}
-              onChange={(e) => setPass(cur.id, Number(e.target.value))}
+              onChange={(e) => {
+                setPass(cur.id, Number(e.target.value))
+                mirrorMarks()
+              }}
               title={playbackCopy.practicePassTitle}
             >
               {candidates.map((c, i) => (

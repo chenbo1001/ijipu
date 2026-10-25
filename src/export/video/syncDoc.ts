@@ -50,9 +50,41 @@ export interface SyncDoc {
   /** 手选的伴奏调性（只做提示） */
   key?: string
   mix: SyncMix
+  /**
+   * adj1155（用户 2026-10-25 选方案 B）：**试听练习段列表**。
+   *
+   * 它本身不是"对拍数据"，但用户要求把"不适合进谱面设置"的东西集中到这份
+   * `xxx.jps.sync.json`（跟着谱走、刷新不丢）。字段可选：
+   *  · **没有这个字段** = 这份 sidecar 不管理练习段（旧文件，回退 localStorage）；
+   *  · **`[]`** = 明确"没有练习段"（用户删光了，必须能持久化删除）。
+   */
+  marks?: SyncPracticeMark[]
+  /** 当前选中的练习段 id（`''` = 无；缺字段 = 不管理） */
+  markId?: string
+  /**
+   * 相机位当前导出的标记段（来自练习段；`null` = 整曲）。
+   * 缺字段 = 这份 sidecar 还没管过它。
+   */
+  range?: SyncRange | null
   /** 存盘时谱面的 FNV-1a 指纹（改了谱 ⇒ 提示"锚点请复核"） */
   codeHash: string
   updatedAt: string
+}
+
+/** 练习段（与 `store/practiceMarks.ts` 的 `PracticeMark` 结构一致；export 层不反向依赖 store） */
+export interface SyncPracticeMark {
+  id: string
+  name: string
+  startId: string
+  endId: string
+  pass?: number
+}
+
+/** 相机位导出的标记段（与 `uiStore.dynamicCamera.range` 结构一致） */
+export interface SyncRange {
+  startId: string
+  endId: string
+  pass?: number
 }
 
 /** 默认声音设置 */
@@ -189,6 +221,50 @@ export function parseSyncDoc(text: string): { doc: SyncDoc | null; error?: strin
   }
 
   const key = typeof o.key === 'string' && o.key.trim() !== '' ? o.key.trim() : undefined
+  /**
+   * adj1155：练习段 / 选中段 / 相机导出段（可选字段）。
+   *
+   * 三种状态必须分清（见 `SyncDoc` 的注释）：
+   *  · 字段不存在 ⇒ `undefined`（旧 sidecar：调用方回退 localStorage）；
+   *  · 字段存在但为空 ⇒ `[]` / `''` / `null`（用户明确删光/选中"无"/整曲）。
+   */
+  let marks: SyncPracticeMark[] | undefined
+  if (Array.isArray(o.marks)) {
+    marks = []
+    const seen = new Set<string>()
+    for (const v of o.marks) {
+      if (v === null || typeof v !== 'object') continue
+      const m = v as Record<string, unknown>
+      const id = typeof m.id === 'string' ? m.id : ''
+      const startId = typeof m.startId === 'string' ? m.startId : ''
+      const endId = typeof m.endId === 'string' ? m.endId : ''
+      if (id === '' || startId === '' || endId === '' || seen.has(id)) continue
+      seen.add(id)
+      const pass =
+        typeof m.pass === 'number' && Number.isInteger(m.pass) && m.pass >= 0 ? m.pass : undefined
+      marks.push({
+        id,
+        name: typeof m.name === 'string' && m.name !== '' ? m.name : `段 ${marks.length + 1}`,
+        startId,
+        endId,
+        ...(pass !== undefined ? { pass } : {}),
+      })
+    }
+  }
+  const markId = typeof o.markId === 'string' ? o.markId : undefined
+  let range: SyncRange | null | undefined
+  if (o.range === null) {
+    range = null
+  } else if (o.range !== null && typeof o.range === 'object' && !Array.isArray(o.range)) {
+    const r = o.range as Record<string, unknown>
+    const startId = typeof r.startId === 'string' ? r.startId : ''
+    const endId = typeof r.endId === 'string' ? r.endId : ''
+    if (startId !== '' && endId !== '') {
+      const pass =
+        typeof r.pass === 'number' && Number.isInteger(r.pass) && r.pass >= 0 ? r.pass : undefined
+      range = { startId, endId, ...(pass !== undefined ? { pass } : {}) }
+    }
+  }
   const doc: SyncDoc = {
     version: SYNC_VERSION,
     audio,
@@ -199,6 +275,9 @@ export function parseSyncDoc(text: string): { doc: SyncDoc | null; error?: strin
     segments: fit?.segments ?? [],
     ...(key !== undefined ? { key } : {}),
     mix,
+    ...(marks !== undefined ? { marks } : {}),
+    ...(markId !== undefined ? { markId } : {}),
+    ...(range !== undefined ? { range } : {}),
     codeHash: typeof o.codeHash === 'string' ? o.codeHash : '',
     updatedAt: typeof o.updatedAt === 'string' ? o.updatedAt : new Date().toISOString(),
   }
@@ -218,6 +297,10 @@ export function makeSyncDoc(input: {
   anchors: SyncAnchor[]
   key?: string
   mix?: SyncMix
+  /** adj1155：练习段/选中段/相机导出段（缺省 = 不写这些字段，保持旧文件形状） */
+  marks?: SyncPracticeMark[]
+  markId?: string
+  range?: SyncRange | null
   code: string
   now?: string
 }): SyncDoc {
@@ -236,6 +319,9 @@ export function makeSyncDoc(input: {
     segments: fit?.segments ?? [],
     ...(input.key !== undefined && input.key !== '' ? { key: input.key } : {}),
     mix: input.mix ?? DEFAULT_SYNC_MIX,
+    ...(input.marks !== undefined ? { marks: input.marks } : {}),
+    ...(input.markId !== undefined ? { markId: input.markId } : {}),
+    ...(input.range !== undefined ? { range: input.range } : {}),
     codeHash: codeFingerprint(input.code),
     updatedAt: input.now ?? new Date().toISOString(),
   }

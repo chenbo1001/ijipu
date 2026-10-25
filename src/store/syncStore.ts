@@ -22,6 +22,8 @@ import {
   serializeSyncDoc,
   type SyncDoc,
   type SyncMix,
+  type SyncPracticeMark,
+  type SyncRange,
 } from '../export/video/syncDoc'
 
 /** L1 兜底键（Rust sidecar 读写接上后仍保留：先把"临时状态"救回来用） */
@@ -62,10 +64,17 @@ interface SyncState {
   removeAnchor: (i: number) => void
   setTrim: (t: SyncTrim) => void
   setMix: (m: Partial<SyncMix>) => void
+  /**
+   * adj1155：把**练习段/选中段/相机导出段**写进同一份 sidecar doc。
+   * 只更新内存并 `rev+1`；落盘由自动保存（或手动保存）统一做。
+   */
+  setExtras: (patch: { marks?: SyncPracticeMark[]; markId?: string; range?: SyncRange | null }) => void
   setKey: (k: string) => void
   setAudioName: (n: string) => void
   /** 保存：刷新 codeHash/时间戳 → 写 L1（sidecar 写盘下一步接） */
   save: (code: string, fileName: string) => void
+  /** adj1155：换文件时清掉内存 doc/audio（**不删 L1**，与 `clear` 区分） */
+  resetDoc: () => void
   clear: () => void
 }
 
@@ -168,6 +177,20 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     set({ doc: { ...cur, mix: { ...cur.mix, ...m } }, rev: get().rev + 1 })
   },
 
+  setExtras: (patch) => {
+    const cur = get().doc
+    if (cur === null) return
+    set({
+      doc: {
+        ...cur,
+        ...(patch.marks !== undefined ? { marks: patch.marks } : {}),
+        ...(patch.markId !== undefined ? { markId: patch.markId } : {}),
+        ...(patch.range !== undefined ? { range: patch.range } : {}),
+      },
+      rev: get().rev + 1,
+    })
+  },
+
   setKey: (k) => {
     const cur = get().doc
     if (cur === null) return
@@ -190,6 +213,10 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       anchors: cur.anchors,
       ...(cur.key !== undefined ? { key: cur.key } : {}),
       mix: cur.mix,
+      // adj1155：练习段/选中段/相机导出段跟着 sidecar 一起存（"没有这个字段"要保持没有）
+      ...(cur.marks !== undefined ? { marks: cur.marks } : {}),
+      ...(cur.markId !== undefined ? { markId: cur.markId } : {}),
+      ...(cur.range !== undefined ? { range: cur.range } : {}),
       code,
     })
     set({ doc, rev: get().rev + 1 })
@@ -198,6 +225,11 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     } catch {
       /* 配额满/隐私模式：保存失败不影响本次对拍 */
     }
+  },
+
+  resetDoc: () => {
+    // adj1155：换文件时只清内存（L1 留给"打开台面时按文件名恢复"）
+    set({ doc: null, audio: null, rev: get().rev + 1 })
   },
 
   clear: () => {

@@ -1123,6 +1123,38 @@ CLI `--sync/--no-sync/--audio`；调性提示。
 断言：`smoke` 的 `adj1154` 4 条（Rust 命令/白名单/注册、Rust 单测、前端两段、相机位自动加载）；
 Rust 侧 `cargo test --lib sync_io_tests`（含"读得到字节 + 拒收非音频"）。
 
+### 4-M sidecar 扩成「这首歌的附属设置」+ 一键 tauri dev（adj1155，用户 2026-10-25 选 B）
+
+用户口径：
+
+- `.sync.json` 里的 `sync` = **对拍**（音画同步），不是云同步；
+- 但可以把"不适合放进谱面设置"的东西放到这份 sidecar：**练习段列表、当前选中段、相机导出段**；
+- **试听里添加/删除练习段时保存**（不用再点对拍台的「保存」）。
+
+schema（`version` 仍为 1；可选字段，旧文件兼容）：
+
+| 字段 | 含义 | **缺字段** | **显式空** |
+|---|---|---|---|
+| `marks` | 练习段列表 | 旧文件 ⇒ 回退 localStorage | `[]` = 用户删光了 |
+| `markId` | 当前选中的练习段 | 不管理 | `''` = 选「无」 |
+| `range` | 相机位导出的标记段 | 不管理 | `null` = 整曲 |
+| `mix` | 声音档 + 两条音量（原本就有） | 默认值 | — |
+
+自动保存：
+
+1. App 级 `useSyncSidecarExtras`（`store/syncExtras.ts`）：打开/切换文件时读同目录 sidecar，
+   把 `marks/markId/range` 灌回 UI（`mix`/锚点由 doc 本身带回来）；
+2. 订阅 `syncStore.doc` 变化：混音/锚点/保留段改动 **600ms 防抖**写 sidecar；
+3. **试听里添加/删除练习段 ⇒ `mirrorMarks()` + `flushSyncAutoSave()` 立即写**；选段/遍次/相机段也写；
+4. 写盘走 `sync_write_file`；网页/开发浏览器只写 L1（`ijipu.mvSync.last`），不反复触发下载；
+5. 切文件用 `docOwner` / `pendingIdentity` 防串写；读盘期间关自动保存，读完再开（期间有改动就补写一次）。
+
+一键开发：`ijipu/tauri-dev.bat`（双击）——从自身目录启动、dot-source `scripts/tauri-env.ps1`、
+`npm run tauri:dev`、失败/退出后 `pause`。纯浏览器 `npm run dev` 没有文件系统，读写 sidecar 请用这个。
+
+断言：`smoke` 的 `adj1155` 9 条（schema 往返/显式空/旧文件缺字段、save 带 extras、自动保存接线、
+App 桥、练习段增删立即写、相机段、bat 内容）。
+
 
 
 - 间奏块的**中性灰**：`playheadBaseOf` 加一个 `interlude` 色位，并让 `TimedRect`/`playheadTrack`

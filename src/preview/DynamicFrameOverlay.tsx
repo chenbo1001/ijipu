@@ -38,6 +38,8 @@ import type { SyncMix } from '../export/video/syncDoc'
 import { effectiveSyncFitOf } from '../export/video/syncDoc'
 // adj1150：相机位打开时自己找同目录的 sidecar（与对拍台共用路径规则）
 import { loadSidecarAudioFor, loadSidecarFor } from '../store/syncSidecar'
+// adj1155：sidecar 里的练习段/相机段也灌回 UI
+import { applySyncExtrasToUi } from '../store/syncExtras'
 
 /**
  * adj1097（用户 2026-10-23 实报「卡片加了背景图片，但导出的视频没有背景图片」）：
@@ -127,6 +129,7 @@ export function DynamicFrameOverlay() {
    */
   const syncAudio = useSyncStore((s) => s.audio)
   const setMix = useSyncStore((s) => s.setMix)
+  const setExtras = useSyncStore((s) => s.setExtras)
   const setAudioBuffer = useSyncStore((s) => s.setAudioBuffer)
   const replaceSyncDoc = useSyncStore((s) => s.replaceDoc)
   const nativePath = useDocStore((s) => s.nativePath)
@@ -215,6 +218,7 @@ export function DynamicFrameOverlay() {
         if (useSyncStore.getState().doc !== null) return
         replaceSyncDoc(d)
       }
+      if (d !== null) applySyncExtrasToUi(d)
       if (d.audio === '' || useSyncStore.getState().audio !== null) return
       const bytes = await loadSidecarAudioFor(nativePath, binding, d)
       if (cancelled || bytes === null) return
@@ -833,7 +837,11 @@ export function DynamicFrameOverlay() {
                 type="button"
                 className="btn"
                 disabled={encoding || preparingAudio}
-                onClick={() => setDynamicCamera({ range: null })}
+                onClick={() => {
+                  // adj1155：整曲也要写回 sidecar（否则刷新后又回到上次的标记段）
+                  setDynamicCamera({ range: null })
+                  setExtras({ range: null })
+                }}
               >
                 {dynamicVideoCopy.rangeAll}
               </button>
