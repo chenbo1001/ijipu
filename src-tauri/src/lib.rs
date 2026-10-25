@@ -1008,6 +1008,25 @@ async fn pick_jps_file(app: tauri::AppHandle) -> Option<String> {
     .and_then(|fp| fp.as_path().map(|p| p.to_string_lossy().into_owned()))
 }
 
+/// adj1157（用户 2026-10-25 实报「刷新后每次都找不到伴奏」）：
+/// 桌面壳的「选择伴奏」也走**原生文件对话框**，拿真实绝对路径 —— 这样 sidecar 能记住
+/// "伴奏到底在哪"，下次刷新按路径自动读，不再只靠"和 .jps 同目录"猜。
+#[tauri::command]
+async fn pick_audio_file(app: tauri::AppHandle) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("选择伴奏")
+            .add_filter("音频", &["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "webm"])
+            .blocking_pick_file()
+    })
+    .await
+    .ok()
+    .flatten()
+    .and_then(|fp| fp.as_path().map(|p| p.to_string_lossy().into_owned()))
+}
+
 /// adj539：桌面端**不使用** Service Worker（前端资源随二进制内嵌，见 `src/main.tsx` 的 adj443 决定）。
 ///
 /// 但**历史版本注册过的 SW 会跨版本存活在 WebView2 用户数据目录里**（实测：`com.ijipu.app\EBWebView\
@@ -1194,6 +1213,8 @@ pub fn run() {
             ws_pick_dir,
             // adj1156：桌面壳「打开」走原生长路径（sidecar 才能写到 .jps 同目录）
             pick_jps_file,
+            // adj1157：桌面壳选伴奏也拿真实路径（sidecar 记住位置，刷新自动读）
+            pick_audio_file,
             ws_list_dir,
             ws_dir_exists,
             ws_is_dir_empty,

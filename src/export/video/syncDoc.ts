@@ -126,6 +126,23 @@ export function resolveAudioPath(jpsPath: string, audio: string): string {
   return joinPath(dirNameOf(jpsPath), audio)
 }
 
+/**
+ * adj1157：把选中的伴奏绝对路径写成 sidecar 里的 `audio`。
+ *
+ *  · 与 `.jps` 同目录（含子目录）⇒ 存**相对路径**（整个文件夹搬走仍能用）；
+ *  · 在别处 ⇒ 存**绝对路径**（下次刷新按它自动读）。
+ */
+export function audioRefOf(audioPath: string, jpsPath: string | null): string {
+  if (jpsPath === null || jpsPath === '') return audioPath
+  const dir = dirNameOf(jpsPath)
+  if (dir === '') return audioPath
+  for (const sep of ['\\', '/']) {
+    const prefix = `${dir}${sep}`
+    if (audioPath.startsWith(prefix)) return audioPath.slice(prefix.length)
+  }
+  return audioPath
+}
+
 /** FNV-1a 32 位（与 `diff/textDiff` 同一族；这里只给 sidecar 做"谱面改过没"的指纹） */
 export function codeFingerprint(code: string): string {
   let h = 0x811c9dc5

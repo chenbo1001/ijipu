@@ -111,6 +111,7 @@ import {
   sidecarPathOf,
   joinPath as joinSyncPath,
   resolveAudioPath,
+  audioRefOf,
   codeFingerprint,
   parseSyncDoc,
   serializeSyncDoc,
@@ -21128,6 +21129,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1155Tests())
       // adj1156：桌面壳「打开」走原生路径（sidecar 写回 .jps 同目录）
       .then(() => runAdj1156Tests())
+      // adj1157：台面自动读伴奏 + 桌面壳选伴奏记真实路径
+      .then(() => runAdj1157Tests())
       // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
       .then(() => runAdj1122Tests())
       // adj1124：对拍台尺寸/分区高度/预览比例（可拖可最大化，记 L1）
@@ -36070,6 +36073,65 @@ function runAdj1156Tests(): void {
     /downloadSidecarText\(name, text\)/.test(syncSrc) &&
       /savedDownloaded\(name\)/.test(syncSrc),
     '',
+  )
+}
+
+/**
+ * adj1157（用户 2026-10-25 实报）：刷新后对拍台每次都「找不到上次那条伴奏」。
+ *
+ * 两层根因：
+ *  ① 对拍台打开时**没有自动读伴奏**（相机位 adj1154 有，台面漏了）；
+ *  ② 桌面壳选伴奏走 `<input type=file>`，只拿到文件名，伴奏不在 `.jps` 同目录时永远找不回来。
+ * 解决：台面打开时 `loadSidecarAudioFor` 自动读；桌面壳选伴奏改原生对话框，把真实路径
+ * （同目录存相对、别处存绝对）写进 sidecar。
+ */
+function runAdj1157Tests(): void {
+  console.log('[adj1157] 伴奏自动读：台面补自动加载 + 桌面壳选伴奏记真实路径')
+  const libSrc = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8')
+  const ioSrc = readFileSync(join(root, 'src/export/video/syncIo.ts'), 'utf8')
+  const dialogSrc = readFileSync(join(root, 'src/dialogs/SyncDialog.tsx'), 'utf8')
+  const overlaySrc = readFileSync(join(root, 'src/preview/DynamicFrameOverlay.tsx'), 'utf8')
+
+  check(
+    'adj1157 Rust 有 `pick_audio_file`（原生对话框、音频扩展名过滤）并登记进 invoke_handler',
+    /fn pick_audio_file\(/.test(libSrc) &&
+      /add_filter\([^)]*mp3/.test(libSrc) &&
+      /blocking_pick_file\(\)/.test(libSrc) &&
+      /\bpick_audio_file,/.test(libSrc),
+    '',
+  )
+  check(
+    'adj1157 前端 pickAudioFileNative：invoke `pick_audio_file`，非桌面壳返回 null',
+    /export async function pickAudioFileNative/.test(ioSrc) &&
+      /invoke\('pick_audio_file'\)/.test(ioSrc) &&
+      /typeof p === 'string'/.test(ioSrc),
+    '',
+  )
+  check(
+    'adj1157 对拍台打开时**自动读伴奏**（不再干等用户每次重选）',
+    /const bytes = await loadSidecarAudioFor\(nativePath, binding, cur\)/.test(dialogSrc) &&
+      /setAudioBuffer\(buf\)/.test(dialogSrc) &&
+      /docAudio === '' \|\| audio !== null/.test(dialogSrc),
+    '',
+  )
+  check(
+    'adj1157 台面/相机位选伴奏后都把**真实路径**写回 doc.audio（不再只记文件名）',
+    /setAudio\(audioRefOf\(path, nativePath\), buf\)/.test(dialogSrc) &&
+      /setAudio\(audioRefOf\(path, nativePath\), buf\)/.test(overlaySrc) &&
+      /if \(isTauriShell\(\)\) void onPickMixAudioNative\(\)/.test(overlaySrc),
+    '',
+  )
+  check(
+    'adj1157 纯函数 audioRefOf：同目录存相对、子目录保留相对、别处存绝对',
+    audioRefOf('C:\\a\\b.mp3', 'C:\\a\\x.jps') === 'b.mp3' &&
+      audioRefOf('C:\\a\\sub\\b.mp3', 'C:\\a\\x.jps') === 'sub\\b.mp3' &&
+      audioRefOf('D:\\b.mp3', 'C:\\a\\x.jps') === 'D:\\b.mp3' &&
+      audioRefOf('C:\\a\\b.mp3', null) === 'C:\\a\\b.mp3',
+    JSON.stringify({
+      same: audioRefOf('C:\\a\\b.mp3', 'C:\\a\\x.jps'),
+      sub: audioRefOf('C:\\a\\sub\\b.mp3', 'C:\\a\\x.jps'),
+      other: audioRefOf('D:\\b.mp3', 'C:\\a\\x.jps'),
+    }),
   )
 }
 

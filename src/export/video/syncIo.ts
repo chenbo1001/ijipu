@@ -57,6 +57,24 @@ export async function readSidecarAudio(path: string): Promise<ArrayBuffer | null
   }
 }
 
+/**
+ * adj1157：桌面壳「选择伴奏」——原生文件对话框返回**绝对路径**。
+ *
+ * 为什么不能继续用 `<input type=file>`：浏览器 `File` 只有文件名，没有目录；
+ * 伴奏不在 `.jps` 同目录时，sidecar 只记名字就永远找不到。拿到路径后存进 `doc.audio`，
+ * 下次刷新按绝对路径自动读。
+ */
+export async function pickAudioFileNative(): Promise<string | null> {
+  const c = core()
+  if (c === null) return null
+  try {
+    const p = await c.invoke('pick_audio_file')
+    return typeof p === 'string' && p !== '' ? p : null
+  } catch {
+    return null
+  }
+}
+
 /** 写 sidecar（新建/覆盖；Rust 侧回读校验过） */
 export async function writeSidecarText(path: string, text: string): Promise<SidecarWrite> {
   const c = core()

@@ -1181,6 +1181,32 @@ App 桥、练习段增删立即写、相机段、bat 内容）。
 断言：`smoke` 的 `adj1156` 6 条（Rust 命令/筛选/注册、前端 pickJpsFile、openFileNative 接线、
 adoptDoc 认 nativePath、桌面壳 no-nativePath 提示、浏览器下载兜底负对照）。
 
+### 4-O 刷新后「找不到上次那条伴奏」：台面漏了自动读 + 选伴奏只记文件名（adj1157，用户 2026-10-25 实报）
+
+现象：桌面壳刷新后打开对拍台，伴奏一栏恒为「找不到上次那条伴奏，请重新选择：空山静E调伴奏.mp3」。
+
+两层根因：
+
+1. **对拍台没有自动读伴奏**：`adj1154` 只给相机位加了「打开时读 sidecar + 自动读伴奏」，
+   `SyncDialog` 仍要用户手动点「选择伴奏…」；
+2. **桌面壳选伴奏走 `<input type=file>`**：浏览器 `File` 只有文件名、没有目录；伴奏不在
+   `.jps` 同目录时，sidecar 只记 `空山静E调伴奏.mp3`，下次拼 `.jps` 同目录必然找不到。
+
+解决：
+
+- `SyncDialog` 打开时（`doc.audio` 非空且内存无 buffer）调 `loadSidecarAudioFor` 自动读、解码、
+  `setAudioBuffer`（保留用户的 trim/锚点）；读不到才保留手动入口。
+- Rust 新增 `pick_audio_file`（原生对话框，音频扩展名过滤）；桌面壳「选择伴奏…」走它，
+  `readSidecarAudio` 读字节；`audioRefOf(path, nativePath)` 决定写进 sidecar 的 `audio`：
+  同目录/子目录存**相对路径**，别处存**绝对路径**；相机位的手动选伴奏同一套。
+- 台面显示只露文件名（`baseNameOf`），绝对路径不糊一屏。
+
+注意：**旧 sidecar 里只有文件名、且伴奏不在 `.jps` 同目录**的，需要重选一次；选完路径写进
+sidecar，之后刷新自动读。若伴奏就在 `.jps` 旁边，自动读直接生效。
+
+断言：`smoke` 的 `adj1157` 5 条（Rust 命令/过滤/注册、前端 pickAudioFileNative、台面自动读、
+台面/相机选伴奏写真实路径、`audioRefOf` 纯函数四例）。
+
 
 
 - 间奏块的**中性灰**：`playheadBaseOf` 加一个 `interlude` 色位，并让 `TimedRect`/`playheadTrack`

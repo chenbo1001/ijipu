@@ -35,7 +35,9 @@ import { hostBankUrl } from '../store/hostBridge'
 import { useSyncStore } from '../store/syncStore'
 import { buildAccompanimentTrack, decodeAccompaniment, mixAudioBuffers, preRollMsOf } from '../export/video/accompaniment'
 import type { SyncMix } from '../export/video/syncDoc'
-import { effectiveSyncFitOf } from '../export/video/syncDoc'
+import { audioRefOf, effectiveSyncFitOf } from '../export/video/syncDoc'
+import { pickAudioFileNative, readSidecarAudio } from '../export/video/syncIo'
+import { isTauriShell } from '../brand/env'
 // adj1150：相机位打开时自己找同目录的 sidecar（与对拍台共用路径规则）
 import { loadSidecarAudioFor, loadSidecarFor } from '../store/syncSidecar'
 // adj1155：sidecar 里的练习段/相机段也灌回 UI
@@ -131,6 +133,7 @@ export function DynamicFrameOverlay() {
   const setMix = useSyncStore((s) => s.setMix)
   const setExtras = useSyncStore((s) => s.setExtras)
   const setAudioBuffer = useSyncStore((s) => s.setAudioBuffer)
+  const setAudio = useSyncStore((s) => s.setAudio)
   const replaceSyncDoc = useSyncStore((s) => s.replaceDoc)
   const nativePath = useDocStore((s) => s.nativePath)
   const binding = useDocStore((s) => s.binding)
@@ -515,6 +518,28 @@ export function DynamicFrameOverlay() {
     }
   }
 
+  /**
+   * adj1157：桌面壳走原生对话框，拿**真实路径**写回 `doc.audio`——
+   * 这样下次刷新自动读的就是这个位置，而不是只记得一个文件名。
+   */
+  const onPickMixAudioNative = async () => {
+    const path = await pickAudioFileNative()
+    if (path === null) return
+    try {
+      const bytes = await readSidecarAudio(path)
+      if (bytes === null) {
+        setMixNotice(dynamicVideoCopy.audioLoadFailed)
+        return
+      }
+      const buf = await decodeAccompaniment(bytes)
+      setAudio(audioRefOf(path, nativePath), buf)
+      setMixNotice(dynamicVideoCopy.audioLoaded)
+      pauseForMixChange()
+    } catch (err) {
+      setMixNotice(`${dynamicVideoCopy.audioLoadFailed}：${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   const exportVideo = async () => {
     const s = sessionRef.current
     if (!videoExportEnabled || !s || encoding) return
@@ -774,7 +799,11 @@ export function DynamicFrameOverlay() {
                   className="btn"
                   data-sync="dyn-mix-pick"
                   disabled={encoding}
-                  onClick={() => mixFileRef.current?.click()}
+                  onClick={() => {
+                    // adj1157：桌面壳原生选伴奏拿路径；网页仍走 <input>
+                    if (isTauriShell()) void onPickMixAudioNative()
+                    else mixFileRef.current?.click()
+                  }}
                 >
                   {dynamicVideoCopy.pickAccompaniment}
                 </button>

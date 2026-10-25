@@ -33,10 +33,10 @@ import { createHqCache, resolveHqBank } from '../playback/spessaCache'
 import { resolveActiveLibrary } from '../playback/spessaSynthBackend'
 import { hostBankUrl } from '../store/hostBridge'
 import { decodeAccompaniment, waveformPeaks } from '../export/video/accompaniment'
-import { mixPlanOf, serializeSyncDoc, sidecarPathOf, syncDocStale, codeFingerprint, playStartMsOf, effectiveSyncFitOf } from '../export/video/syncDoc'
-import { writeSidecarText, downloadSidecarText } from '../export/video/syncIo'
+import { mixPlanOf, serializeSyncDoc, sidecarPathOf, syncDocStale, codeFingerprint, playStartMsOf, effectiveSyncFitOf, audioRefOf } from '../export/video/syncDoc'
+import { writeSidecarText, downloadSidecarText, pickAudioFileNative, readSidecarAudio } from '../export/video/syncIo'
 // adj1150：sidecar 定位/读取抽到 store 层，相机位与对拍台共用同一套路径规则
-import { loadSidecarDocAt, resolveSidecarPath } from '../store/syncSidecar'
+import { loadSidecarDocAt, loadSidecarAudioFor, resolveSidecarPath } from '../store/syncSidecar'
 // adj1155：sidecar 里的练习段/选中段/相机段也灌回 UI
 import { applySyncExtrasToUi } from '../store/syncExtras'
 // adj1137：波形上方那条"音符格子排"（纯几何）
@@ -79,6 +79,16 @@ const AFTER_MS = 2000
 
 const fmtSec = (ms: number): string => `${(ms / 1000).toFixed(3)}s`
 
+/** 路径最后一段（显示用：绝对路径只露文件名） */
+function baseNameOf(path: string): string {
+  const i = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'))
+  return i < 0 ? path : path.slice(i + 1)
+}
+
+/**
+ * adj1157：把原生选中的伴奏路径写成 sidecar 里的 `audio`（实现收在 syncDoc，相机位共用）。
+ */
+
 export function SyncDialog() {
   const closeModal = useUiStore((s) => s.closeModal)
   const code = useDocStore((s) => s.code)
@@ -87,9 +97,11 @@ export function SyncDialog() {
   const pageConfig = useDocStore((s) => s.pageConfig)
 
   const doc = useSyncStore((s) => s.doc)
+  const docAudio = doc?.audio ?? ''
   const audio = useSyncStore((s) => s.audio)
   const ensureFor = useSyncStore((s) => s.ensureFor)
   const setAudio = useSyncStore((s) => s.setAudio)
+  const setAudioBuffer = useSyncStore((s) => s.setAudioBuffer)
   const addAnchor = useSyncStore((s) => s.addAnchor)
   const updateAnchor = useSyncStore((s) => s.updateAnchor)
   const removeAnchor = useSyncStore((s) => s.removeAnchor)
@@ -181,6 +193,47 @@ export function SyncDialog() {
       cancelled = true
     }
   }, [nativePath, binding, replaceDoc])
+
+  /**
+   * adj1157（用户 2026-10-25 实报「刷新后每次都找不到伴奏」）：打开台面时**自动读伴奏**。
+   *
+   * 相机位 adj1154 已有这一步，对拍台漏了 ⇒ 每次刷新都只能看到「找不到上次那条伴奏」。
+   * 路径规则与相机位共用 `loadSidecarAudioFor`：`doc.audio` 是绝对路径就原样读，
+   * 是相对名就拼 `.jps` 同目录；读不到保持手动入口（不弹错、不挡台面）。
+   */
+  useEffect(() => {
+    if (docAudio === '' || audio !== null) return
+    let cancelled = false
+    void (async () => {
+      setDecodeState('busy')
+      try {
+        const cur = useSyncStore.getState().doc
+        if (cur === null) {
+          setDecodeState('idle')
+          return
+        }
+        const bytes = await loadSidecarAudioFor(nativePath, binding, cur)
+        if (cancelled) return
+        if (bytes === null) {
+          setDecodeState('idle')
+          return
+        }
+        const buf = await decodeAccompaniment(bytes)
+        if (cancelled) return
+        // 用 setAudioBuffer：只按新长度夹紧保留段终点，不重置用户的 trim/锚点
+        setAudioBuffer(buf)
+        setDecodeState('idle')
+      } catch {
+        if (!cancelled) {
+          setDecodeState('error')
+          setNotice(syncCopy.decodeFailed)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [docAudio, nativePath, binding, audio, setAudioBuffer])
 
   /** adj1128（用户实报「保存没有实现」）：真的写 sidecar；实在没有磁盘路径就下载一份 */
   const onSave = useCallback(async () => {
@@ -1126,6 +1179,31 @@ export function SyncDialog() {
     }
   }
 
+  /**
+   * adj1157：桌面壳走原生对话框（拿绝对路径），并把路径写进 sidecar；
+   * 网页仍用上面的 `<input type=file>`（浏览器不给路径）。
+   */
+  const onPickAudioNative = async () => {
+    const path = await pickAudioFileNative()
+    if (path === null) return
+    setDecodeState('busy')
+    try {
+      const bytes = await readSidecarAudio(path)
+      if (bytes === null) {
+        setDecodeState('error')
+        setNotice(syncCopy.decodeFailed)
+        return
+      }
+      const buf = await decodeAccompaniment(bytes)
+      setAudio(audioRefOf(path, nativePath), buf)
+      setDecodeState('idle')
+      setNotice('')
+    } catch {
+      setDecodeState('error')
+      setNotice(syncCopy.decodeFailed)
+    }
+  }
+
   const tap = () => {
     if (!audio) {
       setNotice(syncCopy.noAudio)
@@ -1523,15 +1601,24 @@ export function SyncDialog() {
             <span className="sync-label">{syncCopy.audioLabel}</span>
             {audio ? (
               <span className="sync-audio-name">
-                {doc.audio} · {fmtSec(durMs)}
+                {baseNameOf(doc.audio)} · {fmtSec(durMs)}
               </span>
             ) : (
               <span className="sync-audio-name sync-dim">
-                {doc.audio !== '' ? `${syncCopy.audioMissing}：${doc.audio}` : syncCopy.noAudio}
+                {doc.audio !== '' ? `${syncCopy.audioMissing}：${baseNameOf(doc.audio)}` : syncCopy.noAudio}
               </span>
             )}
             <input ref={fileRef} type="file" accept="audio/*,.mp3,.m4a,.wav,.flac" className="sync-file" onChange={(e) => void onPickAudio(e)} />
-            <button type="button" className="btn sync-mini" disabled={decodeState === 'busy'} onClick={() => fileRef.current?.click()}>
+            <button
+              type="button"
+              className="btn sync-mini"
+              disabled={decodeState === 'busy'}
+              onClick={() => {
+                // adj1157：桌面壳用原生对话框拿真实路径；网页仍走 <input>
+                if (isTauriShell()) void onPickAudioNative()
+                else fileRef.current?.click()
+              }}
+            >
               {audio ? syncCopy.repickAudio : syncCopy.pickAudio}
             </button>
             {decodeState === 'busy' && <span className="sync-dim">{syncCopy.decoding}</span>}
