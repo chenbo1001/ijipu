@@ -35701,6 +35701,12 @@ function runAdj1149Tests(): void {
     '',
   )
   check(
+    'adj1149 从前奏里起播合成音要等谱面第 1 拍（delaySec，否则比伴奏早 offsetMs）',
+    /const delaySec = Math\.max\(0, \(fitForPreview\.offsetMs - atAudioMs\) \/ 1000\)/.test(syncSrc) &&
+      /src\.start\(ctx\.currentTime \+ delaySec/.test(syncSrc),
+    '',
+  )
+  check(
     'adj1149 界面把两个滑杆写清用途（全文标签 + 百分比），不再只有"伴奏/合成"两个词',
     /syncCopy\.accompGain\}/.test(syncSrc) &&
       /syncCopy\.synthGain\}/.test(syncSrc) &&

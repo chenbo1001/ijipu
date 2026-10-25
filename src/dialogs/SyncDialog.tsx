@@ -739,6 +739,11 @@ export function SyncDialog() {
       const startSynth = (buffer: AudioBuffer, atAudioMs: number) => {
         const fitForPreview = effFit ?? { beatMs: scoreBeatMs, offsetMs: 0 }
         const scoreStartSec = Math.max(0, sessionMsOfAudioMs(atAudioMs, fitForPreview, scoreBeatMs)) / 1000
+        /**
+         * adj1148/adj1149：从**前奏里**起播时（`atAudioMs < offsetMs`），谱面第 1 拍还没到，
+         * 合成音不能立刻响——要等 `offsetMs − atAudioMs` 再起，否则比伴奏早 1.2s（音画错开）。
+         */
+        const delaySec = Math.max(0, (fitForPreview.offsetMs - atAudioMs) / 1000)
         const cur = useSyncStore.getState().doc?.mix ?? mix
         const src = ctx.createBufferSource()
         src.buffer = buffer
@@ -748,7 +753,7 @@ export function SyncDialog() {
         applyFade(gain, cur.synth, atAudioMs)
         src.connect(gain)
         gain.connect(ctx.destination)
-        src.start(0, Math.min(scoreStartSec, Math.max(0, buffer.duration - 0.01)))
+        src.start(ctx.currentTime + delaySec, Math.min(scoreStartSec, Math.max(0, buffer.duration - 0.01)))
         sourcesRef.current.push(src)
         synthGainRef.current = gain
       }
