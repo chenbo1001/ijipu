@@ -21133,6 +21133,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1157Tests())
       // adj1158：桌面壳「另存为」原生保存（存完即有 nativePath）
       .then(() => runAdj1158Tests())
+      // adj1160：对拍台行顺序（伴奏名称紧挨当前位置上面）
+      .then(() => runAdj1160Tests())
       // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
       .then(() => runAdj1122Tests())
       // adj1124：对拍台尺寸/分区高度/预览比例（可拖可最大化，记 L1）
@@ -36190,6 +36192,37 @@ function runAdj1158Tests(): void {
     'adj1158 负对照：浏览器（非桌面壳）仍走 FSA 另存为（showSaveFilePicker + saveTextToHandle）',
     /showSaveFilePicker/.test(docSrc) &&
       /saveTextToHandle\(handle, code/.test(docSrc),
+    '',
+  )
+}
+
+/**
+ * adj1160（用户 2026-10-25 选「底部放一起」）：对拍台行顺序
+ * `预览 → 拖动条 → 音符格子 → 波形 → 拖动条 → 伴奏名称 → 当前位置`。
+ */
+function runAdj1160Tests(): void {
+  console.log('[adj1160] 对拍台行顺序：伴奏名称紧挨当前位置上面')
+  const src = readFileSync(join(root, 'src/dialogs/SyncDialog.tsx'), 'utf8')
+  const preview = src.indexOf('className="sync-preview"')
+  const split1 = src.indexOf("startDrag('preview')")
+  const strip = src.indexOf('data-sync="note-strip"')
+  const split2 = src.indexOf("startDrag('wave')")
+  const info = src.indexOf('className="sync-preview-info"')
+  const current = src.indexOf('className="sync-row sync-audio-row"')
+  check(
+    'adj1160 顺序：预览 → 拖动条 → 音符格子 → 波形 → 拖动条 → 伴奏名称 → 当前位置',
+    preview >= 0 &&
+      split1 > preview &&
+      strip > split1 &&
+      split2 > strip &&
+      info > split2 &&
+      current > info,
+    JSON.stringify({ preview, split1, strip, split2, info, current }),
+  )
+  check(
+    'adj1160 两条拖动条各只有一处（不会残留旧位置）',
+    (src.match(/startDrag\('preview'\)/g) ?? []).length === 1 &&
+      (src.match(/startDrag\('wave'\)/g) ?? []).length === 1,
     '',
   )
 }

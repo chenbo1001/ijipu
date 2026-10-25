@@ -1596,38 +1596,10 @@ export function SyncDialog() {
           <div className="sync-preview-box">
             <PreviewPane />
           </div>
-          {/* adj1140（用户 2026-10-24）：这一排改成**伴奏**信息；缩放去了右上角、当前位置去了波形下面 */}
-          <div className="sync-preview-info">
-            <span className="sync-label">{syncCopy.audioLabel}</span>
-            {audio ? (
-              <span className="sync-audio-name">
-                {baseNameOf(doc.audio)} · {fmtSec(durMs)}
-              </span>
-            ) : (
-              <span className="sync-audio-name sync-dim">
-                {doc.audio !== '' ? `${syncCopy.audioMissing}：${baseNameOf(doc.audio)}` : syncCopy.noAudio}
-              </span>
-            )}
-            <input ref={fileRef} type="file" accept="audio/*,.mp3,.m4a,.wav,.flac" className="sync-file" onChange={(e) => void onPickAudio(e)} />
-            <button
-              type="button"
-              className="btn sync-mini"
-              disabled={decodeState === 'busy'}
-              onClick={() => {
-                // adj1157：桌面壳用原生对话框拿真实路径；网页仍走 <input>
-                if (isTauriShell()) void onPickAudioNative()
-                else fileRef.current?.click()
-              }}
-            >
-              {audio ? syncCopy.repickAudio : syncCopy.pickAudio}
-            </button>
-            {decodeState === 'busy' && <span className="sync-dim">{syncCopy.decoding}</span>}
-            <span className="sync-dim sync-preview-hint">{syncCopy.previewHint}</span>
-          </div>
           {/* adj1136：单锚点推出的不可能结论（不静默） */}
           {singleAnchorWarn !== '' && <div className="sync-warn sync-preview-warn">{singleAnchorWarn}</div>}
         </div>
-        {/* 预览 ↔ 下方：往上拖 = 预览变高（下面整体跟着平移） */}
+        {/* adj1160（用户 2026-10-25 选「底部放一起」）：第一条拖动条在预览/音符格子之间 */}
         <div className="sync-split" onPointerDown={startDrag('preview')} title={syncCopy.splitPreviewHint} />
 
         {/* adj1137：音符格子排（在波形**上面**，与波形同一时间轴、同步缩放；点一格跳过去）
@@ -1730,6 +1702,34 @@ export function SyncDialog() {
         )}
         {/* 波形 ↔ 参数行：往上拖 = 波形变高 */}
         <div className="sync-split" onPointerDown={startDrag('wave')} title={syncCopy.splitWaveHint} />
+        {/* adj1160（用户 2026-10-25 选「底部放一起」）：伴奏名称紧挨在当前位置上面 */}
+        <div className="sync-preview-info">
+          <span className="sync-label">{syncCopy.audioLabel}</span>
+          {audio ? (
+            <span className="sync-audio-name">
+              {baseNameOf(doc.audio)} · {fmtSec(durMs)}
+            </span>
+          ) : (
+            <span className="sync-audio-name sync-dim">
+              {doc.audio !== '' ? `${syncCopy.audioMissing}：${baseNameOf(doc.audio)}` : syncCopy.noAudio}
+            </span>
+          )}
+          <input ref={fileRef} type="file" accept="audio/*,.mp3,.m4a,.wav,.flac" className="sync-file" onChange={(e) => void onPickAudio(e)} />
+          <button
+            type="button"
+            className="btn sync-mini"
+            disabled={decodeState === 'busy'}
+            onClick={() => {
+              // adj1157：桌面壳用原生对话框拿真实路径；网页仍走 <input>
+              if (isTauriShell()) void onPickAudioNative()
+              else fileRef.current?.click()
+            }}
+          >
+            {audio ? syncCopy.repickAudio : syncCopy.pickAudio}
+          </button>
+          {decodeState === 'busy' && <span className="sync-dim">{syncCopy.decoding}</span>}
+          <span className="sync-dim sync-preview-hint">{syncCopy.previewHint}</span>
+        </div>
         {/* 第一排（紧贴波形下沿）：**当前位置** + 播放 + 打点 + 视野 ——
             adj1140：伴奏信息挪到预览下面那一排，这里换成当前位置（两处对调） */}
         <div className="sync-row sync-audio-row">
