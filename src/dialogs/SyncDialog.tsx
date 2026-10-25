@@ -16,7 +16,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   buildPlaySequence,
   fitSync,
-  effectiveFitOf,
   inferBpm,
   pitchToMidiNote,
   layoutScore,
@@ -34,7 +33,7 @@ import { createHqCache, resolveHqBank } from '../playback/spessaCache'
 import { resolveActiveLibrary } from '../playback/spessaSynthBackend'
 import { hostBankUrl } from '../store/hostBridge'
 import { decodeAccompaniment, waveformPeaks } from '../export/video/accompaniment'
-import { mixPlanOf, serializeSyncDoc, sidecarPathOf, syncDocStale, codeFingerprint, playStartMsOf } from '../export/video/syncDoc'
+import { mixPlanOf, serializeSyncDoc, sidecarPathOf, syncDocStale, codeFingerprint, playStartMsOf, effectiveSyncFitOf } from '../export/video/syncDoc'
 import { writeSidecarText, downloadSidecarText } from '../export/video/syncIo'
 // adj1150：sidecar 定位/读取抽到 store 层，相机位与对拍台共用同一套路径规则
 import { loadSidecarDocAt, resolveSidecarPath } from '../store/syncSidecar'
@@ -378,16 +377,12 @@ export function SyncDialog() {
     return Number.isFinite(lo) && Number.isFinite(hi) ? { lo, hi } : null
   }, [noteCells])
 
-  const fit = doc?.tempo ?? null
-  /** 没有解算结果时（<2 条锚点）也画刻度：用谱面 J + 第一条锚点的偏移 */
   /**
-   * 有效拟合（adj1138 集中到引擎的 `effectiveFitOf`，口径有断言守着）：
-   * **1 条锚点 ⇒ 速度用谱面 `J:`、锚点只解偏移**；2 条以上才由锚点解速度。
+   * 有效拟合（adj1153 集中到 `effectiveSyncFitOf`）：
+   * **0 条锚点 ⇒ 保留段起点 = 谱面第 1 拍**；1 条 ⇒ 速度用谱面 `J:`、锚点只解偏移；
+   * 2 条以上才由锚点解速度。
    */
-  const effFit = useMemo(() => {
-    if (fit) return fit
-    return effectiveFitOf(doc?.anchors ?? [], scoreBeatMs)
-  }, [fit, doc, scoreBeatMs])
+  const effFit = useMemo(() => effectiveSyncFitOf(doc, scoreBeatMs), [doc, scoreBeatMs])
 
   const durMs = Math.max(1, doc?.audioDurationMs || (audio ? Math.round(audio.duration * 1000) : 1))
   const trim = doc?.trim ?? { startMs: 0, endMs: durMs }

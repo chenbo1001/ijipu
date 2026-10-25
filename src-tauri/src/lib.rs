@@ -140,6 +140,48 @@ fn sync_read_file(path: String) -> Result<Option<String>, String> {
     }
 }
 
+/// adj1154：伴奏音频的上限（256 MB；几百秒的无损也够）。
+const AUDIO_MAX_BYTES: u64 = 256 * 1024 * 1024;
+
+/// 按 sidecar 里记的文件名读伴奏字节。
+///
+/// 安全边界（与 `read_asset_bytes` 同一套思路）：
+///  · 只接受**音频扩展名**——不许拿一句路径把任意文件读进内存；
+///  · 单文件 ≤ 256 MB（正常伴奏远小于它）。
+fn read_audio_file_bytes(p: &Path) -> Result<Vec<u8>, String> {
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !matches!(
+        ext.as_str(),
+        "mp3" | "m4a" | "aac" | "wav" | "flac" | "ogg" | "opus" | "webm"
+    ) {
+        return Err(format!(
+            "只接受音频扩展名（mp3/m4a/aac/wav/flac/ogg/opus/webm）：{}",
+            p.display()
+        ));
+    }
+    let meta = std::fs::metadata(p).map_err(|e| format!("{}: {}", p.display(), e))?;
+    if meta.len() > AUDIO_MAX_BYTES {
+        return Err(format!(
+            "音频太大（超过 {}MB）：{}",
+            AUDIO_MAX_BYTES / 1024 / 1024,
+            p.display()
+        ));
+    }
+    std::fs::read(p).map_err(|e| format!("{}: {}", p.display(), e))
+}
+
+/// adj1154：桌面壳按 sidecar 记的路径**自动读伴奏**（否则每次重开都要再选一次）。
+/// 返回原始字节（`Response`，不经 JSON/base64 膨胀），前端交给 `decodeAccompaniment`。
+#[tauri::command(async)]
+fn sync_read_audio(path: String) -> Result<tauri::ipc::Response, String> {
+    let bytes = read_audio_file_bytes(Path::new(&path))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// adj1128：写对拍边车文件——**允许新建**（`write_external_file` 要求文件已存在，
 /// 而 sidecar 第一次保存时必然不存在）。
 ///
@@ -223,7 +265,7 @@ mod native_probe_tests {
 ///  ③ 写完回读必须与写入一致，否则报错（绝不谎报已保存）。
 #[cfg(test)]
 mod sync_io_tests {
-    use super::{sync_read_file, sync_write_file};
+    use super::{read_audio_file_bytes, sync_read_file, sync_write_file};
 
     #[test]
     fn writes_new_file_and_reads_back() {
@@ -245,6 +287,23 @@ mod sync_io_tests {
         let bad = dir.join("no-such-dir").join("x.json");
         assert!(sync_write_file(bad.to_string_lossy().to_string(), "x".to_string()).is_err());
         let _ = std::fs::remove_file(&f);
+    }
+
+    /// adj1154：伴奏字节读取的扩展名白名单 + 真实字节往返
+    #[test]
+    fn reads_audio_bytes_and_rejects_other_extensions() {
+        let dir = std::env::temp_dir().join("ijipu-sync-audio-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let audio = dir.join("伴奏.mp3");
+        let bytes = vec![0x49, 0x44, 0x33, 0x04, 0x00];
+        std::fs::write(&audio, &bytes).unwrap();
+        assert_eq!(read_audio_file_bytes(&audio).unwrap(), bytes);
+
+        let text = dir.join("谱.jps");
+        std::fs::write(&text, b"V: 1.0\n").unwrap();
+        assert!(read_audio_file_bytes(&text).is_err());
+        let _ = std::fs::remove_file(&audio);
+        let _ = std::fs::remove_file(&text);
     }
 }
 
@@ -1106,6 +1165,8 @@ pub fn run() {
             // adj1128：对拍边车文件（`赤伶.jps.sync.json`）读写——**允许新建**
             sync_read_file,
             sync_write_file,
+            // adj1154：按 sidecar 记的路径自动读伴奏（原始字节；扩展名/大小白名单）
+            sync_read_audio,
             // adj966：按绝对路径读系统文件 + 取 mtime（外部改动检测的轮询 IO）
             read_native_probe,
             // adj568：桌面端工作区（原生选目录 + 按路径读写）

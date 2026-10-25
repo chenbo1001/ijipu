@@ -11301,13 +11301,27 @@ smoke 五条含"来源切换成对"结构断言与负对照） |
 - **根因**：相机位用 `doc.tempo !== null` 当可用判据；而 `doc.tempo` 是 `fitSync` 的解算结果，
   **只有 ≥2 条锚点才非空** ⇒ 0 条与 1 条都被挡掉。台面的试听其实已经用 `effectiveFitOf`
   （1 条取 `J:` 只解偏移），两边口径不一致。
-- **解决**（`adj1152`）：相机位统一 `syncFit = doc.tempo ?? effectiveFitOf(anchors, scoreBeatMs)`；
-  0 条时 `renderAudioFor` 用 `{拍速=J:, 偏移=0}` 兜底（伴奏/合成音从头、默认对齐）；台面拍速/偏移读数
-  改用 `effFit`；0/1 条也显示「清空对拍」。
-- **验证**：`smoke` 的 `adj1152` 6 条（1 条拍速/偏移、0 条 null、相机去 tempo 闸门、0 条兜底、
-  pre-roll 用有效拟合、台面读数）；`verify:app-ui` 的相机位三档用例仍绿（1 条锚点）。
+- **解决**（`adj1152`/`adj1153`）：统一 `effectiveSyncFitOf(doc, scoreBeatMs)` =
+  `doc.tempo ?? effectiveFitOf(anchors, …)`；**0 条时兜底 `{拍速=J:, 偏移=trim.startMs}`
+  （用户确认：保留段起点 = 谱面第 1 拍）**。相机 `renderAudioFor` 与台面读数都用它；0/1 条也显示「清空对拍」。
+- **验证**：`smoke` 的 `adj1152` 6 条（0 条 offset=保留段起点、1 条拍速/偏移、2 条、无文档 null、
+  相机/台面同源、伴奏用有效拟合）；`verify:app-ui` 的相机位三档用例仍绿（1 条锚点）。
 - **预防**：**"能不能用"的判据不要绑在"最高精度解"上**——`fitSync` 是 2+ 的解，`effectiveFitOf`
   才是 0/1/2+ 的统一口径。凡是 UI 闸门读到某个解算字段，先问"它在低锚点数下是不是空的"。
+
+### E-2026-535 桌面重开还要手动「加载伴奏…」（用户 2026-10-25 要求，adj1154）
+
+- **现象**：sidecar 已记了伴奏文件名，相机位也能自动找到 sidecar，但内存里没有 `AudioBuffer`，
+  每次重开都要点一次「加载伴奏…」；用户原话「这操作太繁琐了」。
+- **根因**：`sync_read_file` 只能读文本 JSON；WebView 侧没有"按绝对路径读音频字节"的能力，
+  第一版只在相机位补了文件选择器兜底。
+- **解决**（`adj1154`）：Rust 新增 `sync_read_audio`（扩展名白名单 + 256MB 上限，原始字节经 `Response`）；
+  前端 `readSidecarAudio` + `loadSidecarAudioFor`（sidecar − `.sync.json` → `.jps` → 拼 `doc.audio`）；
+  相机位打开时自动读 + `decodeAccompaniment`，失败才保留手动入口。
+- **验证**：`smoke` 的 `adj1154` 4 条（Rust 命令/白名单/注册、Rust 单测、前端两段、相机位自动加载）；
+  Rust `cargo test --lib sync_io_tests`（含真实字节往返 + 拒收 `.jps` 扩展名）。
+- **预防**：**"文件在磁盘上"不等于"应用能用"**——sidecar 只记名字时，必须同时有"按名字读字节"的通道；
+  桌面专属读盘要走 Rust，并给扩展名/大小上限，别把任意路径变成读文件入口。
 
 
 

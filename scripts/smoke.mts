@@ -123,6 +123,7 @@ import {
   isAbsolutePath,
   DEFAULT_SYNC_MIX,
   playStartMsOf,
+  effectiveSyncFitOf,
 } from '../src/export/video/syncDoc.ts'
 // adj1119：片头卡速度行（对拍后写"实际 + （原谱 X）"）
 import { tempoLineOf } from '../src/export/video/cardLayout.ts'
@@ -21121,6 +21122,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1150Tests())
       // adj1152：锚点 0 / 1 / 2+ 的口径（相机位不再要求两条锚点）
       .then(() => runAdj1152Tests())
+      // adj1154：桌面自动读伴奏（sync_read_audio）
+      .then(() => runAdj1154Tests())
       // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
       .then(() => runAdj1122Tests())
       // adj1124：对拍台尺寸/分区高度/预览比例（可拖可最大化，记 L1）
@@ -35801,46 +35804,99 @@ function runAdj1150Tests(): void {
  * 「输出声音」整排被禁用，还提示"先去打两条锚点"。现在统一走 `effectiveFitOf` + 0 条的默认兜底。
  */
 function runAdj1152Tests(): void {
-  console.log('[adj1152] 锚点口径：0 / 1 / 2+ 都能在相机位用')
+  console.log('[adj1152] 锚点口径：0 / 1 / 2+ 都能在相机位用（0 条 = 保留段起点是第 1 拍）')
   const scoreBeatMs = 500
+  const trim = { startMs: 7277, endMs: 265247 }
+  const mk = (anchors: { beat: number; audioMs: number }[]) =>
+    makeSyncDoc({ audio: '空山静E调伴奏.mp3', audioDurationMs: 300000, trim, anchors, code: '' })
+
+  const f0 = effectiveSyncFitOf(mk([]), scoreBeatMs)
   check(
-    'adj1152 1 条锚点：拍速取谱面 J:（500ms），偏移由锚点解（7277）',
-    (() => {
-      const f = effectiveFitOf([{ beat: 0, audioMs: 7277 }], scoreBeatMs)
-      return f !== null && f.beatMs === scoreBeatMs && f.offsetMs === 7277
-    })(),
-    '',
+    'adj1152/1153 0 条锚点：拍速 = 谱面 J:（500ms）、偏移 = **保留段起点 7277**（保留段起点 = 第 1 拍）',
+    f0 !== null && f0.beatMs === scoreBeatMs && f0.offsetMs === 7277,
+    JSON.stringify(f0),
+  )
+  const f1 = effectiveSyncFitOf(mk([{ beat: 0, audioMs: 5000 }]), scoreBeatMs)
+  check(
+    'adj1152 1 条锚点：拍速取谱面 J:（500ms），偏移由这条锚点解（5000，不是 trim.start）',
+    f1 !== null && f1.beatMs === scoreBeatMs && f1.offsetMs === 5000,
+    JSON.stringify(f1),
+  )
+  const f2 = effectiveSyncFitOf(
+    mk([
+      { beat: 0, audioMs: 5000 },
+      { beat: 4, audioMs: 7000 },
+    ]),
+    scoreBeatMs,
   )
   check(
-    'adj1152 0 条锚点：effectiveFitOf 返回 null（相机用 {J:, 0} 兜底，不再禁用声音档）',
-    effectiveFitOf([], scoreBeatMs) === null,
+    'adj1152 2 条锚点：拍速由两点解出（500ms）、偏移 5000（不再用 J: / trim）',
+    f2 !== null && f2.beatMs === 500 && f2.offsetMs === 5000,
+    JSON.stringify(f2),
+  )
+  check(
+    'adj1152 负对照：没有对拍文档 ⇒ effectiveSyncFitOf 返回 null（相机退回谱面 J:）',
+    effectiveSyncFitOf(null, scoreBeatMs) === null,
     '',
   )
 
   const overlaySrc = readFileSync(join(root, 'src/preview/DynamicFrameOverlay.tsx'), 'utf8')
   const syncSrc = readFileSync(join(root, 'src/dialogs/SyncDialog.tsx'), 'utf8')
   check(
-    'adj1152 相机位用 `tempo ?? effectiveFitOf` 算有效拟合，声音档不再被 tempo 卡住',
-    /syncDoc\.tempo \?\? effectiveFitOf\(syncDoc\.anchors, scoreBeatMs\)/.test(overlaySrc) &&
+    'adj1152 相机位/台面都用同一个有效拟合（声音档不再被 `doc.tempo` 卡住）',
+    /effectiveSyncFitOf\(syncDoc, scoreBeatMs\)/.test(overlaySrc) &&
+      /effectiveSyncFitOf\(doc, scoreBeatMs\)/.test(syncSrc) &&
       !/syncDoc\.tempo === null/.test(overlaySrc),
     '',
   )
   check(
-    'adj1152 相机位 0 条锚点也放伴奏：fit 兜底 {拍速=J:, 偏移=0}',
-    /doc\.tempo \?\? effectiveFitOf\(doc\.anchors, scoreBeatMs\) \?\? \{ beatMs: scoreBeatMs, offsetMs: 0 \}/.test(
-      overlaySrc,
-    ),
-    '',
-  )
-  check(
-    'adj1152 相机位前奏等待也用有效拟合（1 条锚点的偏移会进 pre-roll）',
-    /preRollMsOf\(syncFit, syncDoc\.trim\)/.test(overlaySrc),
+    'adj1152/1153 相机位伴奏也用有效拟合（0 条锚点时从保留段起点起放）',
+    /const fit = effectiveSyncFitOf\(doc, 60000 \/ session\.bpm\)/.test(overlaySrc),
     '',
   )
   check(
     'adj1152 台面读数显示有效拟合（1 条锚点也能看到拍速/偏移，不再显示 —）',
     /♩=\{effFit \? Math\.round\(60000 \/ effFit\.beatMs\)/.test(syncSrc) &&
       /syncCopy\.offset} \{effFit \? fmtSec\(effFit\.offsetMs\)/.test(syncSrc),
+    '',
+  )
+}
+
+/**
+ * adj1154：桌面壳**自动读伴奏**（用户 2026-10-25：「要加一个桌面 sync_read_audio，
+ * 这操作太繁琐了」）。这里钉住 Rust 命令 / 白名单 / 前端接线 / 相机位自动加载。
+ */
+function runAdj1154Tests(): void {
+  console.log('[adj1154] 桌面自动读伴奏：Rust 命令 / 白名单 / 前端自动加载')
+  const rustSrc = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8')
+  const ioSrc = readFileSync(join(root, 'src/export/video/syncIo.ts'), 'utf8')
+  const sidecarSrc = readFileSync(join(root, 'src/store/syncSidecar.ts'), 'utf8')
+  const overlaySrc = readFileSync(join(root, 'src/preview/DynamicFrameOverlay.tsx'), 'utf8')
+  check(
+    'adj1154 Rust 有 `sync_read_audio` 并登记进 invoke_handler（原始字节 + 扩展名/大小白名单）',
+    /fn sync_read_audio\(path: String\) -> Result<tauri::ipc::Response, String>/.test(rustSrc) &&
+      /read_audio_file_bytes/.test(rustSrc) &&
+      /mp3" \| "m4a" \| "aac" \| "wav" \| "flac" \| "ogg" \| "opus" \| "webm"/.test(rustSrc) &&
+      /sync_read_audio,/.test(rustSrc),
+    '',
+  )
+  check(
+    'adj1154 Rust 单测覆盖"读得到字节 + 拒收非音频扩展名"',
+    /reads_audio_bytes_and_rejects_other_extensions/.test(rustSrc),
+    '',
+  )
+  check(
+    'adj1154 前端：readSidecarAudio → loadSidecarAudioFor（路径 = sidecar 去掉 .sync.json + doc.audio）',
+    /export async function readSidecarAudio/.test(ioSrc) &&
+      /loadSidecarAudioFor/.test(sidecarSrc) &&
+      /resolveAudioPath\(jps, doc\.audio\)/.test(sidecarSrc),
+    '',
+  )
+  check(
+    'adj1154 相机位打开时自动读 sidecar + 自动读伴奏（失败才保留手动入口）',
+    /loadSidecarAudioFor\(nativePath, binding, d\)/.test(overlaySrc) &&
+      /decodeAccompaniment\(bytes\)/.test(overlaySrc) &&
+      /setAudioBuffer\(buf\)/.test(overlaySrc),
     '',
   )
 }

@@ -1091,19 +1091,37 @@ CLI `--sync/--no-sync/--audio`；调性提示。
 
 | 锚点数 | 拍速（`beatMs`） | 偏移（`offsetMs`） | 相机/出片 |
 |---|---|---|---|
-| **0** | 谱面 `J:`（或默认拍速） | **0**（默认对齐） | 伴奏与合成音都从头、默认对齐 |
+| **0** | 谱面 `J:`（或默认拍速） | **`trim.startMs`**（用户 2026-10-25 确认：保留段起点 = 谱面第 1 拍） | 伴奏与合成音都从保留段起点开始、默认对齐 |
 | **1** | 谱面 `J:`（`effectiveFitOf`，不由锚点推） | 由这条锚点解 | 用该偏移对齐；有前奏则走 pre-roll |
 | **2** | 由两点解实际拍速 | 由锚点解 | 按实际拍速 |
 | **多** | `fitSync` 最小二乘 | 同上 | 同上 |
 
 根因：相机位原来要求 `doc.tempo !== null`，而 `doc.tempo` **只有 ≥2 条锚点才非空** ⇒ 0/1 条时
 「输出声音」整排被禁用，还提示"先去对拍台打两条锚点"（用户截图）。现在统一：
-`syncFit = doc.tempo ?? effectiveFitOf(anchors, scoreBeatMs)`，0 条时再用 `{拍速=J:, 偏移=0}` 兜底；
-台面的拍速/偏移读数也改用 `effFit`（1 条锚点不再显示 `—`）。`tempo` 字段本身仍只存"2+ 解算结果"
-（1 条无法只凭锚点定速度，这是引擎口径）。
+`effectiveSyncFitOf(doc, scoreBeatMs)` = `doc.tempo ?? effectiveFitOf(anchors, …)`，0 条时再兜底
+`{拍速 = J:, 偏移 = trim.startMs}`；台面的拍速/偏移读数也改用它（1 条锚点不再显示 `—`）。
+`tempo` 字段本身仍只存"2+ 解算结果"（1 条无法只凭锚点定速度，这是引擎口径）。
 
-断言：`smoke` 的 `adj1152` 6 条（1 条锚点拍速/偏移、0 条 null、相机不再被 tempo 卡住、
-0 条 fit 兜底、pre-roll 用有效拟合、台面读数用 effFit）。
+断言：`smoke` 的 `adj1152` 6 条（0 条 = 保留段起点、1 条拍速/偏移、2 条、无文档 null、
+相机/台面同源、伴奏用有效拟合）。
+
+### 4-L 桌面自动读伴奏：`sync_read_audio`（adj1154，用户 2026-10-25 要求）
+
+用户原话：「要加一个桌面 `sync_read_audio`，这操作太繁琐了」——sidecar 里已经记了伴奏文件名，
+重开应用却还要点一次「加载伴奏…」不合理。
+
+做法：
+
+1. Rust 新增 `sync_read_audio(path) -> Response`：只接受音频扩展名（mp3/m4a/aac/wav/flac/ogg/opus/webm）、
+   单文件 ≤ 256MB（与读图片的 `read_asset_bytes` 同一套安全边界，注释写明）；
+2. 前端 `syncIo.readSidecarAudio` + `syncSidecar.loadSidecarAudioFor`：
+   路径 = sidecar 路径去掉 `.sync.json` 得到 `.jps`，再拼 `doc.audio`（相对同目录 / 绝对原样）；
+3. 相机位打开时：没有 sidecar 就自己读 sidecar；内存没有伴奏就自动读 + `decodeAccompaniment`；
+   失败（网页、文件被移走、扩展名不认）**不挡相机位**，保留「加载伴奏…」手动入口；
+4. 手动入口仍保留：自动加载失败时用户还能点一次。
+
+断言：`smoke` 的 `adj1154` 4 条（Rust 命令/白名单/注册、Rust 单测、前端两段、相机位自动加载）；
+Rust 侧 `cargo test --lib sync_io_tests`（含"读得到字节 + 拒收非音频"）。
 
 
 

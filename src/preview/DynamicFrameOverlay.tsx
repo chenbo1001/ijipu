@@ -17,7 +17,7 @@
  * 只做等比缩放——这才是"不重复造轮子"。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { parseJps, inferBpm, effectiveFitOf, type DynamicPresetId } from '@ijipu/engine'
+import { parseJps, inferBpm, type DynamicPresetId } from '@ijipu/engine'
 import { useDocStore } from '../store/docStore'
 import { useUiStore, type DynamicAspect, type DynamicCardStyleId, type DynamicMode } from '../store/uiStore'
 import { dynamicVideoCopy, syncCopy } from '../brand/copy'
@@ -35,8 +35,9 @@ import { hostBankUrl } from '../store/hostBridge'
 import { useSyncStore } from '../store/syncStore'
 import { buildAccompanimentTrack, decodeAccompaniment, mixAudioBuffers, preRollMsOf } from '../export/video/accompaniment'
 import type { SyncMix } from '../export/video/syncDoc'
+import { effectiveSyncFitOf } from '../export/video/syncDoc'
 // adj1150：相机位打开时自己找同目录的 sidecar（与对拍台共用路径规则）
-import { loadSidecarFor } from '../store/syncSidecar'
+import { loadSidecarAudioFor, loadSidecarFor } from '../store/syncSidecar'
 
 /**
  * adj1097（用户 2026-10-23 实报「卡片加了背景图片，但导出的视频没有背景图片」）：
@@ -110,10 +111,7 @@ export function DynamicFrameOverlay() {
    * 所以相机位**不能**再要求 `doc.tempo !== null`（那等于要求 ≥2 条锚点）。
    */
   const scoreBeatMs = useMemo(() => 60000 / inferBpm(parseJps(code)), [code])
-  const syncFit = useMemo(() => {
-    if (syncDoc === null) return null
-    return syncDoc.tempo ?? effectiveFitOf(syncDoc.anchors, scoreBeatMs)
-  }, [syncDoc, scoreBeatMs])
+  const syncFit = useMemo(() => effectiveSyncFitOf(syncDoc, scoreBeatMs), [syncDoc, scoreBeatMs])
   const syncBpm = syncFit !== null ? 60000 / syncFit.beatMs : null
   /**
    * adj1148：**前奏等待**——伴奏比谱面长、谱面第 1 拍在音频 `offsetMs` 时，
@@ -200,19 +198,33 @@ export function DynamicFrameOverlay() {
   }, [withAudio])
 
   /**
-   * adj1150（用户 2026-10-25：「已经有 xxx.jps.sync.json，相机位却没有声音选项」）：
-   * 打开相机位时**自己找同目录的 sidecar**（与对拍台同一套定位规则）。
-   * 只在内存里还没有对拍结果时读；读不到就保持现状（相机照常出静音/合成音）。
+   * adj1150/adj1154（用户 2026-10-25：「已经有 xxx.jps.sync.json，相机位却没有声音选项」/
+   * 「自动读伴奏，手动选太繁琐」）：
+   * 打开相机位时**自己找同目录 sidecar**，并按 sidecar 记的文件名**自动读伴奏**（桌面壳）。
+   *  · 只在内存里还没有对拍结果时读 sidecar；读不到就保持现状；
+   *  · 伴奏不在内存里时自动读 + 解码；失败（网页/文件不在/扩展名不认）保留「加载伴奏…」。
    */
   useEffect(() => {
     if (!on) return
-    if (useSyncStore.getState().doc !== null) return
     let cancelled = false
     void (async () => {
-      const d = await loadSidecarFor(nativePath, binding)
-      if (cancelled || d === null) return
-      if (useSyncStore.getState().doc !== null) return
-      replaceSyncDoc(d)
+      let d = useSyncStore.getState().doc
+      if (d === null) {
+        d = await loadSidecarFor(nativePath, binding)
+        if (cancelled || d === null) return
+        if (useSyncStore.getState().doc !== null) return
+        replaceSyncDoc(d)
+      }
+      if (d.audio === '' || useSyncStore.getState().audio !== null) return
+      const bytes = await loadSidecarAudioFor(nativePath, binding, d)
+      if (cancelled || bytes === null) return
+      try {
+        const buf = await decodeAccompaniment(bytes)
+        if (cancelled) return
+        useSyncStore.getState().setAudioBuffer(buf)
+      } catch {
+        // 自动加载失败不挡相机位：那一排会显示「加载伴奏…」
+      }
     })()
     return () => {
       cancelled = true
@@ -250,14 +262,11 @@ export function DynamicFrameOverlay() {
     const sd = useSyncStore.getState()
     const doc = sd.doc
     /**
-     * adj1152：**0 条锚点也要能放伴奏**（用户口径：默认它们是对齐的）。
-     * 有 sidecar + 伴奏 ⇒ 有效拟合 = `tempo`（2+）→ `effectiveFitOf`（1 条）→ 默认 `{拍速=J:, 偏移=0}`。
+     * adj1152/adj1153：**0 条锚点也要能放伴奏**（用户口径：保留段起点 = 谱面第 1 拍）。
+     * 有 sidecar + 伴奏 ⇒ 有效拟合统一走 `effectiveSyncFitOf`（0 条 `{J:, trim.start}`、
+     * 1 条 `effectiveFitOf`、2+ `doc.tempo`）。
      */
-    const scoreBeatMs = 60000 / session.bpm
-    const fit =
-      doc === null
-        ? null
-        : doc.tempo ?? effectiveFitOf(doc.anchors, scoreBeatMs) ?? { beatMs: scoreBeatMs, offsetMs: 0 }
+    const fit = effectiveSyncFitOf(doc, 60000 / session.bpm)
     if (doc !== null && fit !== null && sd.audio !== null && doc.audio !== '' && doc.mix.source !== 'synth') {
       // adj1129：收尾淡出——最后一拍渐小到无声（用户口径：不要停得太突兀）
       const acc = await buildAccompanimentTrack(sd.audio, fit, doc.trim, session, 60000 / session.bpm)

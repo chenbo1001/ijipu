@@ -16,7 +16,7 @@
  * 纯函数（无 DOM、无 node:path）：路径拼接是手写的字符串运算，因为渲染进程里没有 `node:path`，
  * 而 Windows 的 `\` 与 `/` 都要认。
  */
-import { fitSync, bpmOfFit } from '@ijipu/engine'
+import { fitSync, bpmOfFit, effectiveFitOf } from '@ijipu/engine'
 import type { SyncAnchor, SyncSegmentStat, SyncTrim } from '@ijipu/engine'
 
 /** sidecar 后缀：`赤伶.jps` → `赤伶.jps.sync.json` */
@@ -258,6 +258,33 @@ export function mixPlanOf(mix: SyncMix): { playAcc: boolean; playSynth: boolean 
     playAcc: mix.source !== 'synth',
     playSynth: mix.source !== 'file',
   }
+}
+
+/**
+ * adj1153：**有效拟合（含 0 锚点的默认对齐）**——相机位、出片、台面共用。
+ *
+ * 用户 2026-10-25 确认：**0 条锚点时，保留段起点 = 谱面第 1 拍**。
+ * 所以默认偏移不是 0，而是 `trim.startMs`（保留段从哪开始，谱面就从哪开始）。
+ *
+ *  | 锚点数 | 拍速 | 偏移 |
+ *  |---|---|---|
+ *  | 0 | 谱面 `J:`（`scoreBeatMs`） | **`trim.startMs`**（默认对齐） |
+ *  | 1 | 谱面 `J:`（`effectiveFitOf`） | 由这条锚点解 |
+ *  | 2+ | `fitSync` 最小二乘 | 由锚点解 |
+ *
+ * 返回 `null` 只代表"没有对拍文档"（`doc === null`）；有文档就一定有可用拟合。
+ */
+export interface EffectiveSyncFit {
+  beatMs: number
+  offsetMs: number
+}
+
+export function effectiveSyncFitOf(doc: SyncDoc | null, scoreBeatMs: number): EffectiveSyncFit | null {
+  if (doc === null || !(scoreBeatMs > 0)) return null
+  const fit = doc.tempo ?? effectiveFitOf(doc.anchors, scoreBeatMs)
+  if (fit !== null) return { beatMs: fit.beatMs, offsetMs: fit.offsetMs }
+  // 0 条锚点：保留段起点 = 谱面第 1 拍
+  return { beatMs: scoreBeatMs, offsetMs: Math.max(0, doc.trim.startMs) }
 }
 
 /**

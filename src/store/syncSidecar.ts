@@ -9,10 +9,11 @@
 import {
   joinPath,
   parseSyncDoc,
+  resolveAudioPath,
   sidecarPathOf,
   type SyncDoc,
 } from '../export/video/syncDoc'
-import { readSidecarText } from '../export/video/syncIo'
+import { readSidecarAudio, readSidecarText } from '../export/video/syncIo'
 import { listWorkspaces } from './workspace'
 import type { WorkspaceBinding } from './docStore'
 
@@ -55,4 +56,23 @@ export async function loadSidecarFor(
   binding: WorkspaceBinding | null,
 ): Promise<SyncDoc | null> {
   return loadSidecarDocAt(await resolveSidecarPath(nativePath, binding))
+}
+
+/**
+ * adj1154：按 sidecar 里记的**伴奏文件名**自动读音频字节。
+ *
+ * 路径规则与保存同源：`sidecar 路径 − .sync.json` 得到 `.jps` 路径，
+ * 再用 `resolveAudioPath` 拼出音频（相对同目录 / 绝对路径原样）。
+ * 读不到返回 `null`（网页、文件被移走、扩展名不在白名单）⇒ 调用方保留手动入口。
+ */
+export async function loadSidecarAudioFor(
+  nativePath: string | null,
+  binding: WorkspaceBinding | null,
+  doc: SyncDoc,
+): Promise<ArrayBuffer | null> {
+  if (doc.audio === '') return null
+  const sidecar = await resolveSidecarPath(nativePath, binding)
+  if (sidecar === null) return null
+  const jps = sidecar.replace(/\.sync\.json$/i, '')
+  return readSidecarAudio(resolveAudioPath(jps, doc.audio))
 }

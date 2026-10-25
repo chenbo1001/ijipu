@@ -40,6 +40,23 @@ export async function readSidecarText(path: string): Promise<SidecarRead> {
   }
 }
 
+/**
+ * adj1154：按 sidecar 记的路径**自动读伴奏字节**（桌面壳 `sync_read_audio`）。
+ *
+ * 读不到就返回 `null`（不是异常）：网页/开发模式、文件被移走、扩展名不在白名单里，
+ * 都退回相机位的「加载伴奏…」手动入口；绝不因此挡住相机位。
+ */
+export async function readSidecarAudio(path: string): Promise<ArrayBuffer | null> {
+  const c = core()
+  if (c === null) return null
+  try {
+    const buf = await c.invoke('sync_read_audio', { path })
+    return buf instanceof ArrayBuffer ? buf : null
+  } catch {
+    return null
+  }
+}
+
 /** 写 sidecar（新建/覆盖；Rust 侧回读校验过） */
 export async function writeSidecarText(path: string, text: string): Promise<SidecarWrite> {
   const c = core()
