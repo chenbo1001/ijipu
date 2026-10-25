@@ -1149,8 +1149,11 @@ schema（`version` 仍为 1；可选字段，旧文件兼容）：
 4. 写盘走 `sync_write_file`；网页/开发浏览器只写 L1（`ijipu.mvSync.last`），不反复触发下载；
 5. 切文件用 `docOwner` / `pendingIdentity` 防串写；读盘期间关自动保存，读完再开（期间有改动就补写一次）。
 
-一键开发：`ijipu/tauri-dev.bat`（双击）——从自身目录启动、dot-source `scripts/tauri-env.ps1`、
-`npm run tauri:dev`、失败/退出后 `pause`。纯浏览器 `npm run dev` 没有文件系统，读写 sidecar 请用这个。
+一键开发：`ijipu/tauri-dev.bat`（双击）——**纯 ASCII**，不 dot-source `scripts/tauri-env.ps1`
+（Windows PowerShell 5.1 会把无 BOM 的 UTF-8 当 GBK 读，中文引号直接解析失败）；
+bat 自己设 `CARGO_HOME` / `RUSTUP_HOME` / `PATH`（工作区 `.cargo` + `mingw64\bin`），
+`call npm run tauri:dev`（`npm` 是 `.cmd`，批处理里不加 `call` 会在 npm 结束时整段提前退出），
+退出后 `pause`。带 `--check` 自检（cargo/rustc/npm 版本 + `cargo metadata`）。
 
 断言：`smoke` 的 `adj1155` 9 条（schema 往返/显式空/旧文件缺字段、save 带 extras、自动保存接线、
 App 桥、练习段增删立即写、相机段、bat 内容）。

@@ -11340,5 +11340,30 @@ smoke 五条含"来源切换成对"结构断言与负对照） |
 - **预防**：**"设置项"要同时回答三件事**：存在哪（L1/L2/L3）、什么时候写、什么时候读。只回答第一件
   就会出现"有字段但刷新回默认"。跨文件的自动保存必须带 **owner**，否则会把上一份谱写到新谱的 sidecar。
 
+### E-2026-537 一键 `tauri-dev.bat` 启动失败：ps1 乱码 + npm.cmd 吞掉批处理（用户 2026-10-25 实报，adj1155）
+
+- **现象**：双击 bat 后：
+  ```
+  D:\...\scripts\tauri-env.ps1:25 字符: 12
+  + $cargoV = 'cargo 涓嶅彲鐢?
+  表达式或语句中包含意外的标记“cargo”。
+  ...
+  failed to run 'cargo metadata' ... program not found
+  ```
+- **根因**（三个叠在一起）：
+  1. bat 调用的是 Windows PowerShell 5.1（`powershell`），它把**无 BOM 的 UTF-8** `.ps1` 按 ANSI/GBK 读，
+     中文引号被拆成非法 token，`tauri-env.ps1` 根本没执行完；
+  2. 因此 `PATH` 没加上工作区 `.cargo\bin`，`cargo metadata` 找不到 cargo；
+  3. 修 bat 时又踩到：批处理里直接写 `npm --version` / `npm run ...`（`npm` 是 `.cmd`）**不加 `call`**，
+     npm 结束时整个 bat 提前退出，后面的检查/启动都不执行。
+- **解决**（`adj1155`）：bat 改为**纯 ASCII、不 dot-source ps1**，直接设
+  `CARGO_HOME` / `RUSTUP_HOME` / `PATH`；`call npm run tauri:dev`；`--check` 用顶层标签跑
+  `cargo metadata`（别放进 `if (...)` 块，cmd 对 `... 1 >nul` 的解析会吃参数）。
+- **验证**：`cmd /c tauri-dev.bat --check` 实际输出
+  `cargo 1.97.1 / rustc 1.97.1 / npm 11.11.0 / [iJipu] check ok`；
+  `smoke` 的 `adj1155` bat 断言守住 ASCII/工作区工具链/`call npm`/`pause`。
+- **预防**：**`.bat` 一律 ASCII**（中文交给应用 UI/文档）；**`.cmd` 调用必须 `call`**；
+  需要环境变量时在 bat 里显式设，别依赖 PowerShell 5.1 读 UTF-8 脚本。
+
 
 

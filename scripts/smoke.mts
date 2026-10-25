@@ -35996,11 +35996,15 @@ function runAdj1155Tests(): void {
   )
   const bat = readFileSync(join(root, 'tauri-dev.bat'), 'utf8')
   check(
-    'adj1155 一键 tauri dev：bat 从自身目录启动 + dot-source 环境 + npm run tauri:dev + 失败 pause',
+    'adj1155 一键 tauri dev：bat 自己定位工作区工具链（不再走 UTF-8 ps1，避免 PowerShell 5.1 乱码）+ npm run tauri:dev + pause',
     /cd \/d "%~dp0"/.test(bat) &&
-      /scripts\\tauri-env\.ps1/.test(bat) &&
-      /npm run tauri:dev/.test(bat) &&
-      /pause/.test(bat),
+      /\.cargo/.test(bat) &&
+      /mingw64\\bin/.test(bat) &&
+      /call npm run tauri:dev/.test(bat) &&
+      /pause/.test(bat) &&
+      /--check/.test(bat) &&
+      // 允许注释里提"为什么不用 ps1"，但不许真的 dot-source / powershell 调它
+      !/(?:^|\n)\s*(?:powershell|pwsh|\.)\b[^\n]*tauri-env\.ps1/i.test(bat),
     '',
   )
 }
