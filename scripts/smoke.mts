@@ -126,7 +126,9 @@ import {
 // adj1119：片头卡速度行（对拍后写"实际 + （原谱 X）"）
 import { tempoLineOf } from '../src/export/video/cardLayout.ts'
 // adj1120：伴奏轨/波形/混音（纯函数：建轨计划、包络、逐采样相加）
-import { accompanimentPlan, fadeWindowOf, mixSamples, waveformPeaks, ACCOMP_SAMPLE_RATE } from '../src/export/video/accompaniment.ts'
+import { accompanimentPlan, fadeWindowOf, mixSamples, waveformPeaks, ACCOMP_SAMPLE_RATE, preRollMsOf } from '../src/export/video/accompaniment.ts'
+// adj1148：前奏等待的两条纯计算（renderer 的 draw 与 createDynamicSession 都用这一份）
+import { preRollFrameMs, shiftSequenceBy } from '../src/export/video/preRoll.ts'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
 import { timeScaleOf, timeLabelOf, audioClockOf } from '../src/dialogs/syncRuler.ts'
 // adj1126：波形视野（缩放/平移；spanMs=0 = 整曲）
@@ -2368,8 +2370,8 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
     'leadIn/endCard 任一没跟着复选框走，预览就会和成片对不上',
   )
   check(
-    'adj1113/adj1119 `withCards` 与对拍（`syncBpm`/`syncRev`）都进了"重建会话"的依赖（点了立刻重画，不继续播旧会话）',
-    /\}, \[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, syncRev, paint\]\)/.test(overlay),
+    'adj1113/adj1119/adj1148 `withCards`、对拍（`syncBpm`/`syncRev`）与前奏等待（`headWaitMs`）都进了"重建会话"的依赖（点了立刻重画，不继续播旧会话）',
+    /\}, \[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, syncRev, headWaitMs, paint\]\)/.test(overlay),
   )
   check(
     'adj1113 导出透传 `cards: withCards`；不带片头片尾时卡片下拉/自定义按钮禁用（不是悄悄忽略）',
@@ -21110,6 +21112,10 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1119Tests())
       // adj1120：伴奏轨建轨计划 / 波形包络 / 混音（纯函数）
       .then(() => runAdj1120Tests())
+      // adj1148：前奏等待（总长 +1200 / 定格帧映射 / 伴奏从 trim.start 起放）
+      .then(() => runAdj1148Tests())
+      // adj1149：混音播放中即时生效（Gain 引用 / 换档重开 / 合成缓存键 / 失败回退）
+      .then(() => runAdj1149Tests())
       // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
       .then(() => runAdj1122Tests())
       // adj1124：对拍台尺寸/分区高度/预览比例（可拖可最大化，记 L1）
@@ -33874,9 +33880,10 @@ function runDynamicCameraTests(): void {
     const exportSrcAdj = String(readFileSync('src/export/video/exportDynamic.ts', 'utf8'))
     const cliSrcAdj = String(readFileSync('src/export/video/cliWorker.ts', 'utf8'))
     check(
-      'adj1089 出片接线：`buildCameraTrack` 真的收到 panMode + beatMs + bars（bars = 小节起点 + 片头偏移）',
+      'adj1089 出片接线：`buildCameraTrack` 真的收到 panMode + beatMs + bars（bars = 小节起点 + 片头/前奏偏移）',
       /panMode,\s*beatMs,\s*bars:\s*ballBars/.test(rendererSrc) &&
-        /const ballBars = \(seq\.barStartsMs \?\? \[\]\)\.map\(\(s\) => s \+ leadInMs\)/.test(rendererSrc),
+        // adj1148：偏移从"只加片头"变成 `shiftMs = leadIn + headWait`（前奏等待也占时间轴）
+        /const ballBars = \(seq\.barStartsMs \?\? \[\]\)\.map\(\(s\) => s \+ shiftMs\)/.test(rendererSrc),
     )
     check(
       'adj1089/adj1094 平移方式只有一份来源（uiStore 的 L1 键；预览订阅、导出与命令行出片透传；默认按拍）',
@@ -33889,8 +33896,8 @@ function runDynamicCameraTests(): void {
         /panMode: useUiStore\.getState\(\)\.panMode/.test(cliSrcAdj),
     )
     check(
-      'adj1089/adj1094/adj1113/adj1119 换了平移方式/提前量/片头片尾/对拍都会**重建相机会话**（否则点了没反应：还在放旧会话）',
-      /\[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, syncRev, paint\]/.test(
+      'adj1089/adj1094/adj1113/adj1119/adj1148 换了平移方式/提前量/片头片尾/对拍/前奏等待都会**重建相机会话**（否则点了没反应：还在放旧会话）',
+      /\[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, syncRev, headWaitMs, paint\]/.test(
         overlaySrcAdj,
       ),
     )
@@ -35488,6 +35495,217 @@ function runAdj1119Tests(): void {
       mixPlanOf({ source: 'mix', accomp: 1, synth: 0.5 }).playAcc === true &&
       mixPlanOf({ source: 'mix', accomp: 1, synth: 0.5 }).playSynth === true,
     JSON.stringify(mixPlanOf({ source: 'mix', accomp: 1, synth: 0.5 })),
+  )
+}
+
+/**
+ * adj1148：**前奏等待**（pre-roll）——用户 2026-10-25 给的负向判据。
+ *
+ * 症状：伴奏比谱面长（谱面第 1 拍在音频 1.2s），出片却从 1.2s 才开始放伴奏，
+ * 前面那段前奏被吞掉；台面里已经有"定格"（球停第一拍），出片/相机位没有。
+ *
+ * 断言口径与实现**同源**：`renderer.ts` 的 `draw` 调 `preRollFrameMs`，
+ * `createDynamicSession` 调 `shiftSequenceBy`；伴奏轨调 `accompanimentPlan`。
+ * 所以这几条改坏了，用户看到的现象会立刻在冒烟里红灯。
+ */
+function runAdj1148Tests(): void {
+  console.log('[adj1148] 前奏等待：时长判据 / 总长 +1200 / 定格帧映射 / 伴奏提前起放')
+  const fit = { beatMs: 500, offsetMs: 1200 }
+  const trim = { startMs: 0, endMs: 60000 }
+
+  // ① 要不要等、等多久（纯判据）
+  check(
+    'adj1148 前奏等待判据：offsetMs=1200、trim.start=0 ⇒ 等 1200ms',
+    preRollMsOf(fit, trim) === 1200,
+    String(preRollMsOf(fit, trim)),
+  )
+  check(
+    'adj1148 不到 60ms 不等（不制造几乎看不见的定格）',
+    preRollMsOf({ beatMs: 500, offsetMs: 50 }, trim) === 0,
+    String(preRollMsOf({ beatMs: 500, offsetMs: 50 }, trim)),
+  )
+  check(
+    'adj1148 保留段已越过谱面起点（offset < trim.start）⇒ 不等',
+    preRollMsOf({ beatMs: 500, offsetMs: 0 }, { startMs: 800, endMs: 60000 }) === 0,
+    String(preRollMsOf({ beatMs: 500, offsetMs: 0 }, { startMs: 800, endMs: 60000 })),
+  )
+  check(
+    'adj1148 负对照：把前奏整段剪掉（trim.start=1200）⇒ 也不等（不是恒等 1200）',
+    preRollMsOf(fit, { startMs: 1200, endMs: 60000 }) === 0,
+    String(preRollMsOf(fit, { startMs: 1200, endMs: 60000 })),
+  )
+
+  // ② 总长：用户负向判据「totalMs 必须比不等待长 1200」
+  const base = {
+    events: [{ atMs: 0, durationMs: 500 }, { atMs: 500, durationMs: 500 }],
+    totalMs: 2000,
+    barStartsMs: [0, 1000],
+  }
+  const shifted = shiftSequenceBy(base, 1200)
+  check(
+    'adj1148 totalMs 比不等待长 1200（负向判据①）',
+    shifted.totalMs === base.totalMs + 1200,
+    JSON.stringify({ base: base.totalMs, shifted: shifted.totalMs }),
+  )
+  check(
+    'adj1148 每个事件也后移 1200（画面/音轨共用同一条时间轴）',
+    shifted.events.length === base.events.length &&
+      shifted.events.every((e, i) => e.atMs === base.events[i].atMs + 1200),
+    JSON.stringify(shifted.events),
+  )
+  check(
+    'adj1148 barStartsMs 保持相对值（消费时才加片头/前奏偏移，不重复平移）',
+    shifted.barStartsMs === base.barStartsMs,
+    JSON.stringify(shifted.barStartsMs),
+  )
+  check(
+    'adj1148 负对照：等待 0 不复制、不改总长（不是"恒加 1200"）',
+    shiftSequenceBy(base, 0) === base && shiftSequenceBy(base, 0).totalMs === 2000,
+    String(shiftSequenceBy(base, 0).totalMs),
+  )
+
+  // ③ 定格：用户负向判据「draw(600) 与 draw(0) 的色块位置必须相同」
+  //    同一个函数给出"该画哪一刻"；两帧都落在第 1 拍内 ⇒ 命中的是同一批色块。
+  const f0 = preRollFrameMs(0, 0, 1200, 500)
+  const f600 = preRollFrameMs(600, 0, 1200, 500)
+  check(
+    'adj1148 前奏段 draw(0)/draw(600) 都映射到第 1 拍内（色块位置相同，负向判据②）',
+    f0 === 1200 &&
+      f600 === 1300 &&
+      Math.floor((f0 - 1200) / 500) === 0 &&
+      Math.floor((f600 - 1200) / 500) === 0,
+    JSON.stringify({ f0, f600 }),
+  )
+  check(
+    'adj1148 前奏段结束（t=1200）⇒ 交给正常播放（不越界定格）',
+    preRollFrameMs(1200, 0, 1200, 500) === null && preRollFrameMs(-1, 0, 1200, 500) === null,
+    JSON.stringify([preRollFrameMs(1200, 0, 1200, 500), preRollFrameMs(-1, 0, 1200, 500)]),
+  )
+  /**
+   * ③b 用**真实引擎色块**再验一遍（不是只比时间数字）：
+   * 谱面写成八分音符（120bpm ⇒ 每块 250ms），所以"直接画 600ms"会换到第 3 块；
+   * 定格把两帧都映射到第 1 拍内 ⇒ 命中同一块。这就是用户说的"色块位置相同"。
+   */
+  {
+    const code1148 = 'V: 1.0\nB: 时间轴\nD: C\nP: 4/4\nJ: 120\nQ: 1/ 2/ 3/ 4/ | 5 6 7 1 |\n'
+    const parsed1148 = parseJps(code1148)
+    const lay1148 = layoutScore(parsed1148, DUR_CFG)
+    const seq1148 = buildPlaySequence(parsed1148, lay1148, 120)
+    const tr1148 = buildRectTrack(seq1148, { noteSize: DUR_CFG.note_size })
+    const idsAt = (t: number): string =>
+      rectsActiveAt(tr1148, t)
+        .map((r) => `${r.x},${r.y},${r.w}`)
+        .join('|')
+    const m0 = preRollFrameMs(0, 0, 1200, 500) ?? 0
+    const m600 = preRollFrameMs(600, 0, 1200, 500) ?? 0
+    check(
+      'adj1148 定格（引擎色块）：前奏段 draw(0)/draw(600) 命中同一块（负向判据②落地）',
+      idsAt(m0 - 1200) !== '' && idsAt(m0 - 1200) === idsAt(m600 - 1200),
+      JSON.stringify({ m0, m600, first: idsAt(m0 - 1200) }),
+    )
+    check(
+      'adj1148 负对照：不取定格、直接画 600ms ⇒ 换到了下一条色块（说明上一条不是恒真）',
+      idsAt(600) !== idsAt(0),
+      JSON.stringify({ at0: idsAt(0), at600: idsAt(600) }),
+    )
+  }
+  check(
+    'adj1148 有片头卡时定格从卡结束（leadIn）算起：t=3699 还在卡里、t=3700 起定格',
+    preRollFrameMs(3699, 3700, 1200, 500) === null && preRollFrameMs(3700, 3700, 1200, 500) === 4900,
+    JSON.stringify([preRollFrameMs(3699, 3700, 1200, 500), preRollFrameMs(3700, 3700, 1200, 500)]),
+  )
+
+  // ④ 伴奏轨：有前奏等待时**从 trim.start 起放**（whenSec 前移到片头卡结束）
+  const withWait = accompanimentPlan(fit, trim, { leadInMs: 0, headWaitMs: 1200, sourceStartMs: 0, totalMs: 21200 })
+  check(
+    'adj1148 伴奏不再等 1.2s：whenSec=0、offsetSec=0（前奏那段照放）',
+    withWait.whenSec === 0 && withWait.offsetSec === 0 && withWait.durationSec === 21.2,
+    JSON.stringify(withWait),
+  )
+  const withCards = accompanimentPlan(fit, trim, { leadInMs: 3700, headWaitMs: 1200, sourceStartMs: 0, totalMs: 24900 })
+  check(
+    'adj1148 有片头卡：伴奏在 3.7s（卡一结束）就起放，不是 4.9s',
+    withCards.whenSec === 3.7 && withCards.offsetSec === 0 && withCards.durationSec === 21.2,
+    JSON.stringify(withCards),
+  )
+  const noWait = accompanimentPlan(fit, trim, { leadInMs: 0, sourceStartMs: 0, totalMs: 21200 })
+  check(
+    'adj1148 负对照：不等待时仍从音频 1.2s 起放（whenSec=0、offsetSec=1.2，旧口径没被改坏）',
+    noWait.whenSec === 0 && noWait.offsetSec === 1.2,
+    JSON.stringify(noWait),
+  )
+
+  // ⑤ 接线（纯函数对了，还得真的被 renderer/相机位用上）
+  const rendererSrc = readFileSync(join(root, 'src/export/video/renderer.ts'), 'utf8')
+  const overlaySrc = readFileSync(join(root, 'src/preview/DynamicFrameOverlay.tsx'), 'utf8')
+  const exportDynamicSrc = readFileSync(join(root, 'src/export/video/exportDynamic.ts'), 'utf8')
+  check(
+    'adj1148 出片会话：片头/前奏都走 shiftSequenceBy，且 draw 用 preRollFrameMs 定格',
+    /shiftSequenceBy\(seq, leadInMs\)/.test(rendererSrc) &&
+      /shiftSequenceBy\(seq, headWaitMs\)/.test(rendererSrc) &&
+      /preRollFrameMs\(tMs, leadInMs, headWaitMs, beatMs\)/.test(rendererSrc),
+    '',
+  )
+  check(
+    'adj1148 会话把 headWaitMs 交出来（伴奏轨要用它提前起放）',
+    /headWaitMs,\s*\n\s*sourceStartMs,/.test(rendererSrc),
+    '',
+  )
+  check(
+    'adj1148 相机位与导出都传 headWaitMs（两侧同一口径）',
+    /preRollMsOf\(syncDoc\.tempo, syncDoc\.trim\)/.test(overlaySrc) &&
+      /headWaitMs > 0 \? \{ headWaitMs \} : \{\}/.test(overlaySrc) &&
+      /opts\.headWaitMs > 0 \? \{ headWaitMs: opts\.headWaitMs \}/.test(exportDynamicSrc),
+    '',
+  )
+}
+
+/**
+ * adj1149：对拍台混音**播放中即时生效**（用户 2026-10-25：「滑条滑了没变化、选合成音还是伴奏」）。
+ *
+ * 症状的根因是两条：
+ *  · 音量只在 `startPlayback` 开头写一次 GainNode ⇒ 播放中拖滑杆，store 变了、声音不变；
+ *  · 声音档只在开播时读一次 ⇒ 播放中换档，已排进 `AudioContext` 的轨不会变（听感永远是伴奏）。
+ *
+ * 这几条是**接线断言**（纯函数 `mixPlanOf` 已在 adj1128 钉住）；真正的"播放中真的变"由
+ * `npm run verify:app-ui` 那段真浏览器用例量 GainNode 值。这里放源码级闸门，防止哪天被删掉。
+ */
+function runAdj1149Tests(): void {
+  console.log('[adj1149] 混音播放中即时生效：Gain 引用 / 换档重开 / 合成缓存键 / 失败回退')
+  const syncSrc = readFileSync(join(root, 'src/dialogs/SyncDialog.tsx'), 'utf8')
+  check(
+    'adj1149 播放中改音量：两条轨的 GainNode 留了引用，并真的 setTargetAtTime',
+    /accGainRef\.current = gain/.test(syncSrc) &&
+      /synthGainRef\.current = gain/.test(syncSrc) &&
+      /g\.gain\.setTargetAtTime\(v, now, 0\.02\)/.test(syncSrc),
+    '',
+  )
+  check(
+    'adj1149 播放中换声音档：档位变了从当前播放头重开（不是继续放旧的）',
+    /mixSourceRef\.current = src/.test(syncSrc) &&
+      /startPlayback\(playheadRef\.current\)/.test(syncSrc) &&
+      /\[doc\?\.mix\.source, startPlayback\]/.test(syncSrc),
+    '',
+  )
+  check(
+    'adj1149 合成音缓存键 = 源码指纹（不再只看 code.length，改音高不换字数会放旧旋律）',
+    /const codeKey = codeFingerprint\(code\)/.test(syncSrc) &&
+      /seq\.totalMs\}\|\$\{scoreBpm\}\|\$\{codeKey\}/.test(syncSrc) &&
+      !/\$\{code\.length\}/.test(syncSrc),
+    '',
+  )
+  check(
+    'adj1149 只有合成音且渲染失败 ⇒ 按文案回退到伴奏（不再"什么都不响"）',
+    /const fallbackToAcc = synthOnly && synthBuf === null/.test(syncSrc) &&
+      /if \(plan\.playAcc \|\| fallbackToAcc\)/.test(syncSrc),
+    '',
+  )
+  check(
+    'adj1149 界面把两个滑杆写清用途（全文标签 + 百分比），不再只有"伴奏/合成"两个词',
+    /syncCopy\.accompGain\}/.test(syncSrc) &&
+      /syncCopy\.synthGain\}/.test(syncSrc) &&
+      /Math\.round\(doc\.mix\.accomp \* 100\)/.test(syncSrc),
+    '',
   )
 }
 

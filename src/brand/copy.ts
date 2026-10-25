@@ -1402,6 +1402,8 @@ export const syncCopy = {
   mixBoth: '伴奏+合成',
   accompGain: '伴奏音量',
   synthGain: '合成音音量',
+  /** adj1149（用户 2026-10-25：「滑条滑了没变化、选合成音还是伴奏」）：说明这排是**播放中即时生效**的 */
+  mixLiveHint: '声音档位与两条音量改了就生效（播放中也会立刻变）',
   /** 波形下方那一排用短标签（窄窗口不换行，adj1124） */
   accompGainShort: '伴奏',
   synthGainShort: '合成',

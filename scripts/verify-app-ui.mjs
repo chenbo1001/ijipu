@@ -2672,6 +2672,83 @@ async function main() {
           Array.isArray(gains) && gains.includes(0.6),
           JSON.stringify(gains),
         )
+        /**
+         * adj1149（用户 2026-10-25：「滑条滑了没什么变化」「选合成音还是伴奏，都是伴奏」）：
+         *
+         * 上一代只在**开播那一刻**读一次音量/声音档 ⇒ 播放中怎么拖都不变。这里在**播放中**做两件事：
+         *  ① 拖伴奏滑杆到 0.3 ⇒ 同一个 GainNode 的 value 要立刻变成 0.3（不重播）；
+         *  ② 把声音档切到「合成音」⇒ 旧轨要真的 stop、并且重新起播（不是继续放伴奏）。
+         */
+        await evalJs(
+          c,
+          `(() => {
+            const el = document.querySelector('[data-sync="mix-accomp"]')
+            if (!el) return false
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+            setter.call(el, '0.3')
+            el.dispatchEvent(new Event('change', { bubbles: true }))
+            return true
+          })()`,
+        )
+        await sleep(500)
+        const gainsLive = await evalJs(c, `(window.__gains || []).map((g) => Math.round(g.gain.value * 100) / 100)`)
+        check(
+          'adj1149 播放中拖「伴奏音量」⇒ 音频图里的增益立刻变 0.3（不用暂停再播）',
+          Array.isArray(gainsLive) && gainsLive.includes(0.3),
+          JSON.stringify(gainsLive),
+        )
+        const switchState = await evalJs(
+          c,
+          `(() => {
+            if (!window.__srcPatched) {
+              window.__srcPatched = true
+              const oStart = AudioBufferSourceNode.prototype.start
+              AudioBufferSourceNode.prototype.start = function (...a) {
+                window.__srcStarts = (window.__srcStarts || 0) + 1
+                return oStart.apply(this, a)
+              }
+              const oStop = AudioBufferSourceNode.prototype.stop
+              AudioBufferSourceNode.prototype.stop = function (...a) {
+                window.__srcStops = (window.__srcStops || 0) + 1
+                return oStop.apply(this, a)
+              }
+            }
+            window.__srcStarts = 0
+            window.__srcStops = 0
+            const el = document.querySelector('[data-sync="mix-source"]')
+            if (!el) return null
+            const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+            setter.call(el, 'mix')
+            el.dispatchEvent(new Event('change', { bubbles: true }))
+            return { value: el.value }
+          })()`,
+        )
+        let restarted = false
+        try {
+          // 换档会从当前播放头重开：先停旧轨、再起新轨（mix 会立刻起伴奏，合成音稍后接进来）
+          restarted = await waitFor(c, `(window.__srcStarts || 0) > 0`, '换档后重新起播', 120)
+        } catch {
+          restarted = false
+        }
+        const srcCounts = await evalJs(c, `({ starts: window.__srcStarts || 0, stops: window.__srcStops || 0 })`)
+        check(
+          'adj1149 播放中把声音切到「伴奏+合成」⇒ 旧伴奏真的停掉、播放重新开始（选择不再被忽略）',
+          switchState !== null && switchState.value === 'mix' && restarted && srcCounts.stops > 0 && srcCounts.starts > 0,
+          JSON.stringify({ switchState, srcCounts }),
+        )
+        // 切回「伴奏」再继续后面的节拍器用例（失败也没关系，别把状态留成"正在渲染合成音"）
+        await evalJs(
+          c,
+          `(() => {
+            const el = document.querySelector('[data-sync="mix-source"]')
+            if (!el) return false
+            const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+            setter.call(el, 'file')
+            el.dispatchEvent(new Event('change', { bubbles: true }))
+            return true
+          })()`,
+        )
+        await sleep(700)
         // ③ 节拍器：此刻已排了 4 秒窗口 ⇒ 关掉之后计数必须停
         const oscOn = await evalJs(c, `window.__oscCount || 0`)
         await evalJs(c, `(() => { const cb = [...document.querySelectorAll('.sync-check input')][0]; if (!cb) return false; if (cb.checked) cb.click(); return !cb.checked })()`)

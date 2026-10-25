@@ -34,7 +34,7 @@ import { createHqCache, resolveHqBank } from '../playback/spessaCache'
 import { resolveActiveLibrary } from '../playback/spessaSynthBackend'
 import { hostBankUrl } from '../store/hostBridge'
 import { decodeAccompaniment, waveformPeaks } from '../export/video/accompaniment'
-import { parseSyncDoc, mixPlanOf, joinPath, serializeSyncDoc, sidecarPathOf, syncDocStale } from '../export/video/syncDoc'
+import { parseSyncDoc, mixPlanOf, joinPath, serializeSyncDoc, sidecarPathOf, syncDocStale, codeFingerprint } from '../export/video/syncDoc'
 import { readSidecarText, writeSidecarText, downloadSidecarText } from '../export/video/syncIo'
 import { listWorkspaces } from '../store/workspace'
 // adj1137：波形上方那条"音符格子排"（纯几何）
@@ -530,6 +530,15 @@ export function SyncDialog() {
 
   /** 正在播放的所有音源（adj1128 起可能同时有"伴奏 + 合成音"两条） */
   const sourcesRef = useRef<AudioBufferSourceNode[]>([])
+  /**
+   * adj1149（用户 2026-10-25：「滑条滑了没变化、声音选合成音还是伴奏」）：
+   * 两条轨各自的 GainNode。**播放中**改音量要直接改它们（`startPlayback` 只在开头设一次值，
+   * 不保存引用的话滑杆就只在"下一次播放"生效——用户看到的就是"死滑杆"）。
+   */
+  const accGainRef = useRef<GainNode | null>(null)
+  const synthGainRef = useRef<GainNode | null>(null)
+  /** 声音三档的"上一档"：播放中换档要从当前播放头重开（否则已排进 AudioContext 的轨不会变） */
+  const mixSourceRef = useRef<'file' | 'synth' | 'mix' | null>(null)
   /** 已经排进 AudioContext 的"嗒"——关掉节拍器时必须把它们全停掉（否则听起来"关不掉"） */
   const clicksRef = useRef<OscillatorNode[]>([])
   /** 节拍器已经排到哪一刻（音频 ms） */
@@ -576,6 +585,9 @@ export function SyncDialog() {
       s.disconnect()
     }
     sourcesRef.current = []
+    // adj1149：GainNode 跟着音源一起作废（否则下一次播放的实时音量会改到已断开的旧节点上）
+    accGainRef.current = null
+    synthGainRef.current = null
     srcRef.current = null
     clearClicks()
     cancelAnimationFrame(rafRef.current)
@@ -645,7 +657,12 @@ export function SyncDialog() {
     // adj1133：不再借"放映会话"，按谱面 J: 现建一条序列（与台面的时间基准一致）
     const lay = layoutScore(parseResult, pageConfig)
     const seq = buildPlaySequence(parseResult, lay, scoreBpm)
-    const key = `${seq.totalMs}|${scoreBpm}|${code.length}`
+    /**
+     * adj1149：缓存键改用**源码指纹**（原来是 `code.length`）——
+     * 改了音高/拍子但字数不变时，旧缓存会被当成"还是那首歌"，合成音一直放旧旋律。
+     */
+    const codeKey = codeFingerprint(code)
+    const key = `${seq.totalMs}|${scoreBpm}|${codeKey}`
     if (synthBufRef.current?.key === key) return synthBufRef.current.buf
     setSynthState('loading')
     try {
@@ -660,7 +677,7 @@ export function SyncDialog() {
       setSynthState('error')
       return null
     }
-  }, [code.length, pageConfig, parseResult, scoreBpm])
+  }, [code, pageConfig, parseResult, scoreBpm])
 
   const startPlayback = useCallback(
     async (fromMs: number, loop?: { startMs: number; endMs: number }) => {
@@ -693,50 +710,70 @@ export function SyncDialog() {
       const endMs = loop ? loop.endMs : trim.endMs
       const fadeStartMs = Math.max(from, endMs - beatMsNow)
       const canFade = endMs - fadeStartMs > 20
-      const applyFade = (gain: GainNode, base: number) => {
+      /** 从**音频时刻** `atAudioMs`（当前播放到哪）推算淡出的绝对时刻 */
+      const applyFade = (gain: GainNode, base: number, atAudioMs: number) => {
         if (!canFade || base <= 0) return
-        const t0 = ctx.currentTime + (fadeStartMs - from) / 1000
-        const t1 = ctx.currentTime + (endMs - from) / 1000
+        const t0 = ctx.currentTime + Math.max(0, (fadeStartMs - atAudioMs) / 1000)
+        const t1 = ctx.currentTime + Math.max(0, (endMs - atAudioMs) / 1000)
         gain.gain.setValueAtTime(base, t0)
         gain.gain.linearRampToValueAtTime(0, t1)
       }
-      // ① 伴奏（按设定的伴奏音量）
-      if (plan.playAcc) {
+      /**
+       * adj1149：声音三档要**真的换**（用户 2026-10-25：「选合成音还是伴奏」）。
+       *
+       * 分两种时机：
+       *  · 只有合成音（`synth`）：**先渲染**再起播——没有第二条轨可以垫，渲染失败就按文案
+       *    回退到伴奏（`synthFailed` 写的"这次只播伴奏"以前没做到）；
+       *  · 伴奏+合成（`mix`）：先让伴奏响，合成音渲染完再从**那一刻的谱面位置**接进来
+       *    （不能等渲染完才起播，否则前几秒是静音；也不能用旧的 `from`，否则音画错开渲染时长）。
+       */
+      const synthOnly = plan.playSynth && !plan.playAcc
+      let synthBuf: AudioBuffer | null = null
+      if (synthOnly) {
+        synthBuf = await ensureSynthBuffer()
+        if (!alive()) return
+      }
+      /** adj1149：所有音源的时间基准（必须在 await 之前/之后取对，见上面两种时机） */
+      const startedAt = ctx.currentTime
+      const fallbackToAcc = synthOnly && synthBuf === null
+      const startSynth = (buffer: AudioBuffer, atAudioMs: number) => {
+        const fitForPreview = effFit ?? { beatMs: scoreBeatMs, offsetMs: 0 }
+        const scoreStartSec = Math.max(0, sessionMsOfAudioMs(atAudioMs, fitForPreview, scoreBeatMs)) / 1000
+        const cur = useSyncStore.getState().doc?.mix ?? mix
+        const src = ctx.createBufferSource()
+        src.buffer = buffer
+        src.playbackRate.value = scoreBeatMs / fitForPreview.beatMs
+        const gain = ctx.createGain()
+        gain.gain.value = cur.synth
+        applyFade(gain, cur.synth, atAudioMs)
+        src.connect(gain)
+        gain.connect(ctx.destination)
+        src.start(0, Math.min(scoreStartSec, Math.max(0, buffer.duration - 0.01)))
+        sourcesRef.current.push(src)
+        synthGainRef.current = gain
+      }
+      // ① 伴奏（按设定的伴奏音量；合成音失败时也走这里回退）
+      if (plan.playAcc || fallbackToAcc) {
         const src = ctx.createBufferSource()
         src.buffer = audio
         const gain = ctx.createGain()
         gain.gain.value = mix.accomp
-        applyFade(gain, mix.accomp)
+        applyFade(gain, mix.accomp, from)
         src.connect(gain)
         gain.connect(ctx.destination)
         src.start(0, from / 1000)
         sourcesRef.current.push(src)
+        accGainRef.current = gain
       }
-      // ② 合成音（按设定的合成音量；按拍速比例变速，才能跟伴奏同进）
-      if (plan.playSynth) {
-        const sb = await ensureSynthBuffer()
-        if (!alive()) return
-        if (sb) {
-          const fitForPreview = effFit ?? { beatMs: scoreBeatMs, offsetMs: 0 }
-          const scoreStartSec = Math.max(0, sessionMsOfAudioMs(from, fitForPreview, scoreBeatMs)) / 1000
-          const src = ctx.createBufferSource()
-          src.buffer = sb
-          src.playbackRate.value = scoreBeatMs / fitForPreview.beatMs
-          const gain = ctx.createGain()
-          gain.gain.value = mix.synth
-          applyFade(gain, mix.synth)
-          src.connect(gain)
-          gain.connect(ctx.destination)
-          src.start(0, Math.min(scoreStartSec, Math.max(0, sb.duration - 0.01)))
-          sourcesRef.current.push(src)
-        }
-      }
+      // ② 合成音：只有合成音时已经渲染好；mix 时先放伴奏，稍后补进来
+      if (plan.playSynth && synthBuf !== null) startSynth(synthBuf, from)
       if (sourcesRef.current.length === 0) {
         setNotice(syncCopy.synthFailed)
         return
       }
+      if (fallbackToAcc) setNotice(syncCopy.synthFailed)
       srcRef.current = sourcesRef.current[0] ?? null
-      startRef.current = { at: ctx.currentTime, from }
+      startRef.current = { at: startedAt, from }
       loopRef.current = loop ?? null
       playheadRef.current = from
       playingRef.current = true
@@ -761,9 +798,65 @@ export function SyncDialog() {
         rafRef.current = requestAnimationFrame(tick)
       }
       rafRef.current = requestAnimationFrame(tick)
+      // ③ mix：合成音渲染完再接到"此刻"（伴奏已经在响，不能停下重来）
+      if (plan.playSynth && !synthOnly && synthBuf === null) {
+        void (async () => {
+          const rendered = await ensureSynthBuffer()
+          if (!alive()) return
+          if (rendered === null) {
+            setNotice(syncCopy.synthFailed)
+            return
+          }
+          const nowAudioMs = from + (ctx.currentTime - startedAt) * 1000
+          if (nowAudioMs >= endMs) return
+          startSynth(rendered, nowAudioMs)
+        })()
+      }
     },
     [audio, currentMs, ensureCtx, effFit, ensureSynthBuffer, meterOn, scheduleClicksUntil, scoreBeatMs, stopSource, trim.endMs],
   )
+
+  /**
+   * adj1149：**播放中**改音量要立刻听到（用户 2026-10-25：「滑条滑了没什么变化」）。
+   *
+   * `startPlayback` 只在开播那一刻把 `mix.accomp/synth` 写进 GainNode；不在这里补一刀的话，
+   * 拖动滑杆只改 store、声音要等下一次播放才变。
+   */
+  useEffect(() => {
+    const ctx = ctxRef.current
+    if (!ctx || !playingRef.current) return
+    const now = ctx.currentTime
+    const apply = (g: GainNode | null, v: number) => {
+      if (!g) return
+      try {
+        // 20ms 平滑：不取消已排的收尾淡出（`setTargetAtTime` 不会把后面的事件删掉）
+        g.gain.setTargetAtTime(v, now, 0.02)
+      } catch {
+        g.gain.value = v
+      }
+    }
+    apply(accGainRef.current, doc?.mix.accomp ?? 1)
+    apply(synthGainRef.current, doc?.mix.synth ?? 0.5)
+  }, [doc?.mix.accomp, doc?.mix.synth])
+
+  /**
+   * adj1149：**播放中换档**（伴奏 / 合成音 / 伴奏+合成）要立刻换声音——
+   * 从当前播放头重开一次；暂停状态下只更新值，下次播放自然按新档走。
+   */
+  useEffect(() => {
+    const src = doc?.mix.source
+    if (src === undefined) return
+    if (mixSourceRef.current === null) {
+      mixSourceRef.current = src
+      return
+    }
+    if (mixSourceRef.current === src) return
+    mixSourceRef.current = src
+    if (!playingRef.current) return
+    const lp = loopRef.current
+    if (lp) void startPlayback(lp.startMs, lp)
+    else void startPlayback(playheadRef.current)
+  }, [doc?.mix.source, startPlayback])
 
   /** 当前锚点的"回退几秒重听"窗口 */
   const rewindWindow = useCallback(
@@ -1664,6 +1757,7 @@ export function SyncDialog() {
             className="sync-select"
             data-sync="mix-source"
             value={doc.mix.source}
+            title={syncCopy.mixLiveHint}
             onChange={(e) => setMix({ source: e.target.value as 'file' | 'synth' | 'mix' })}
           >
             <option value="file">{syncCopy.mixFile}</option>
@@ -1673,26 +1767,35 @@ export function SyncDialog() {
           {/* adj1128：选合成音时要现渲染（第一次慢），如实显示状态 */}
           {synthState === 'loading' && <span className="sync-dim">{syncCopy.synthLoading}</span>}
           {synthState === 'error' && <span className="sync-warn">{syncCopy.synthFailed}</span>}
-          <span className="sync-label">{syncCopy.accompGainShort}</span>
+          {/* adj1149：标签写全（用户 2026-10-25 问「这几个滑条是干什么的」），并显示百分比 */}
+          <span className="sync-label" title={syncCopy.mixLiveHint}>{syncCopy.accompGain}</span>
           <input
             className="sync-mix-range"
+            data-sync="mix-accomp"
             type="range"
             min={0}
             max={2}
             step={0.05}
             value={doc.mix.accomp}
+            title={syncCopy.mixLiveHint}
+            aria-label={syncCopy.accompGain}
             onChange={(e) => setMix({ accomp: Number(e.target.value) })}
           />
-          <span className="sync-label">{syncCopy.synthGainShort}</span>
+          <span className="sync-dim sync-mix-val">{Math.round(doc.mix.accomp * 100)}%</span>
+          <span className="sync-label" title={syncCopy.mixLiveHint}>{syncCopy.synthGain}</span>
           <input
             className="sync-mix-range"
+            data-sync="mix-synth"
             type="range"
             min={0}
             max={2}
             step={0.05}
             value={doc.mix.synth}
+            title={syncCopy.mixLiveHint}
+            aria-label={syncCopy.synthGain}
             onChange={(e) => setMix({ synth: Number(e.target.value) })}
           />
+          <span className="sync-dim sync-mix-val">{Math.round(doc.mix.synth * 100)}%</span>
         </div>
 
         {pending && (

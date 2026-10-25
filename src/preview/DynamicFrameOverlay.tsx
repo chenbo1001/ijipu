@@ -33,7 +33,7 @@ import { resolveActiveLibrary } from '../playback/spessaSynthBackend'
 import { hostBankUrl } from '../store/hostBridge'
 // adj1119：对拍（sidecar）——相机位按它重建会话、带上伴奏
 import { effectiveSyncBpm, useSyncStore } from '../store/syncStore'
-import { buildAccompanimentTrack, mixAudioBuffers } from '../export/video/accompaniment'
+import { buildAccompanimentTrack, mixAudioBuffers, preRollMsOf } from '../export/video/accompaniment'
 
 /**
  * adj1097（用户 2026-10-23 实报「卡片加了背景图片，但导出的视频没有背景图片」）：
@@ -99,6 +99,14 @@ export function DynamicFrameOverlay() {
   const syncDoc = useSyncStore((s) => s.doc)
   const syncRev = useSyncStore((s) => s.rev)
   const syncBpm = effectiveSyncBpm(syncDoc)
+  /**
+   * adj1148：**前奏等待**——伴奏比谱面长、谱面第 1 拍在音频 `offsetMs` 时，
+   * 视频开头先把这段伴奏放出来、谱面定格第 1 拍。标记段（`range`）没有前奏，不等待。
+   */
+  const headWaitMs =
+    range === null && syncDoc !== null && syncDoc.tempo !== null && syncDoc.audio !== ''
+      ? preRollMsOf(syncDoc.tempo, syncDoc.trim)
+      : 0
 
   const [rect, setRect] = useState<DOMRect | null>(null)
   const [status, setStatus] = useState<'busy' | 'ready' | 'error'>('busy')
@@ -264,6 +272,8 @@ export function DynamicFrameOverlay() {
       return createDynamicSession(code, aspect as DynamicPresetId, pageConfig, syncBpm ?? undefined, {
         range,
         leadInMs: withCards ? LEAD_IN_MS : 0,
+        // adj1148：前奏等待（伴奏照放、谱面定格第 1 拍）
+        ...(headWaitMs > 0 ? { headWaitMs } : {}),
         // adj1113：不勾"带片头片尾" ⇒ 片尾也 0；勾着就按默认 2.5 秒品牌落版
         ...(withCards ? {} : { endCardMs: 0 }),
         maxMs: mode === '3min' ? EXPORT_MAX_MS : undefined,
@@ -292,7 +302,7 @@ export function DynamicFrameOverlay() {
     return () => {
       cancelled = true
     }
-  }, [on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, syncRev, paint])
+  }, [on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, syncRev, headWaitMs, paint])
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
 
@@ -420,6 +430,8 @@ export function DynamicFrameOverlay() {
         rowLeadBeats,
         // adj1119：对拍拍速（有 sidecar 才传；出片与预览同一份速度）
         ...(syncBpm !== null ? { bpm: syncBpm } : {}),
+        // adj1148：前奏等待与预览同口径（导出也把那段伴奏放出来）
+        ...(headWaitMs > 0 ? { headWaitMs } : {}),
         // 逐次导出都重新按会话渲音轨：分段/遍次变了，事件序列就不同（缓存只能按会话建）
         ...(withAudio ? { makeAudio: renderAudioFor } : {}),
         onProgress: (p, ph) => {

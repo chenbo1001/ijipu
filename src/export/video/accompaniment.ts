@@ -28,8 +28,31 @@ export interface AccompPlan {
 /** 建轨需要的会话信息（`DynamicSession` 的结构子集，便于 Node 断言） */
 export interface SessionTiming {
   leadInMs: number
+  /**
+   * adj1148：**前奏等待**（片头卡之后、谱面第 1 拍之前那段音频）。
+   *
+   * 与 `leadInMs` 分开：`leadInMs` 是"没有声音的片头卡"，这段是"有伴奏、画面定格"；
+   * 伴奏要在**片头卡一结束**就从 `trim.startMs` 起放（不是等谱面开始才放），否则前奏会被吞掉。
+   */
+  headWaitMs?: number
   sourceStartMs: number
   totalMs: number
+}
+
+/**
+ * adj1148：要不要「前奏等待」，以及等多久（纯函数，Node 可断言）。
+ *
+ * 判据（方案 §4-G）：谱面第 1 拍对应的音频时刻 `offsetMs` 比保留段起点晚
+ * **超过 60ms** ⇒ 前面那段是前奏，视频开头要把它放出来、谱面定格在第 1 拍。
+ * 不到 60ms 当误差，不等待（否则每支视频都会多出一个几乎看不见的定格）。
+ *
+ * ⚠ 只对**整曲**有意义：标记段本身从曲中间开始，没有"前奏"这回事。
+ */
+export const PRE_ROLL_MIN_MS = 60
+
+export function preRollMsOf(fit: TempoFit, trim: TrimRange): number {
+  const gap = fit.offsetMs - trim.startMs
+  return gap > PRE_ROLL_MIN_MS ? Math.round(gap) : 0
 }
 
 /** 对拍结果的结构子集 */
@@ -49,15 +72,19 @@ export interface TrimRange {
  *
  * 推导：
  *  - 谱面时刻 `t` 对应的音频时刻 = `offsetMs + sourceStartMs + t`（`t` 从会话的"音乐起点"算）；
- *  - 会话时间轴 = `leadInMs` 静音 + 音乐（会话的 `t`）；所以音频在会话里的开始时刻
- *    = `leadInMs + max(0, 保留段起点 − 谱面起点对应的音频时刻)`；
- *  - 只放 `[trim.startMs, trim.endMs]` 里的部分：起点取 `max(谱面起点, trim.start)`，
+ *  - 会话时间轴 = `leadInMs` 静音 + （adj1148：`headWaitMs` 前奏等待）+ 音乐；
+ *  - **有前奏等待时**，谱面第 1 拍在会话里的时刻是 `leadInMs + headWaitMs`，
+ *    对应音频 `offsetMs + sourceStartMs` ⇒ 音频要**从片头卡一结束**就起放（`whenSec = leadInMs`），
+ *    源起点是 `trim.startMs`；没有前奏等待时退化成原口径（`whenSec = leadInMs + skip`）。
+ *  - 只放 `[trim.startMs, trim.endMs]` 里的部分：起点取 `max(谱面起点−headWait, trim.start)`，
  *    长度取"到 trim.end"与"到会话结束"的较小者。
  *
  * 边界：`offsetMs` 可能为负（伴奏比谱面短/从中间开始）；音频时刻必须夹进 trim。
  */
 export function accompanimentPlan(fit: TempoFit, trim: TrimRange, session: SessionTiming): AccompPlan {
-  const wantStart = fit.offsetMs + session.sourceStartMs
+  const headWaitMs = Math.max(0, session.headWaitMs ?? 0)
+  // 视频时间轴上的"音乐起点"是 leadIn + headWait；音频在此之前 headWait 就已经在放
+  const wantStart = fit.offsetMs + session.sourceStartMs - headWaitMs
   const start = Math.max(wantStart, trim.startMs)
   const skipMs = Math.max(0, start - wantStart)
   const remainInSession = session.totalMs - session.leadInMs - skipMs

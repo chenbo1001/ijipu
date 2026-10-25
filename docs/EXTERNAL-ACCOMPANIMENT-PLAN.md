@@ -1013,7 +1013,7 @@ CLI `--sync/--no-sync/--audio`；调性提示。
 
 **判据**（都从已解算的 `fit` 得出，不改 sidecar 结构）：
 
-| 情况 | 判据 | 台面（已完成 adj1139） | 出片/相机位（**待做 adj1140**） |
+| 情况 | 判据 | 台面（已完成 adj1139） | 出片/相机位（**已完成 adj1148**） |
 |---|---|---|---|
 | 伴奏比谱面长（前面多一段） | `fit.offsetMs − trim.startMs > 60ms` | 波形上淡黄标出「前奏（等谱面开始）」；播放到这段时谱面时刻夹在 0 ⇒ **球停在第一个音** | 需要 **pre-roll**：视频开头这段音频照放，谱面定格在第 1 拍（不显示片头卡），`totalMs += headWaitMs` |
 | 谱面比伴奏长（开头几拍要跳过） | `fit.offsetMs < 0` 且用户接受 | 「快捷对齐」按钮：**0 秒 = 谱面 N:M**（写一条 `audioMs = 0` 的锚点） | 已天然正确（`offsetMs < 0` 时谱面开头就在音频 0 之前，出片按 `trim` 从音频 0 开始、谱面早已开始） |
@@ -1022,11 +1022,14 @@ CLI `--sync/--no-sync/--audio`；调性提示。
 - 「谱面第 1 拍 = 当前播放头」⇒ `addAnchor({ beat: 0, audioMs: 播放头 })`；
 - 「0 秒 = 谱面 N:M」⇒ `addAnchor({ beat: beatOfBarBeat(N,M), audioMs: 0 })`。
 
-**adj1140 的 pre-roll 实现要点**（下一轮）：1. `createDynamicSession(..., { headWaitMs })`：把 `leadInMs` 与 `headWaitMs` 分开——
-   `headWaitMs` 段**不显示片头卡**，画面用 `draw(ctx, 0)`（谱面第一帧）+ 球原地跳；
-2. `renderer.ts` 的 `events.atMs += leadInMs` 之后再 `+= headWaitMs`，`totalMs` 同样加；
-3. 伴奏轨 `whenSec` 前移到 `trim.startMs`（不放过头段），`playbackRate` 不变；
-4. 断言：`offsetMs = 1200` 时 `totalMs` 比不等待长 1200、且 `draw(600)` 与 `draw(0)` 的色块位置相同（= 定格）。
+**adj1148 的 pre-roll 实现要点（已完成）**：1. `createDynamicSession(..., { headWaitMs })`：把 `leadInMs` 与 `headWaitMs` 分开——
+   `headWaitMs` 段**不显示片头卡**，画面用 `draw` 的定格帧（谱面第 1 拍 + 球原地弹）；
+2. `renderer.ts` 的 `shiftSequenceBy(seq, leadInMs)` 之后再 `shiftSequenceBy(seq, headWaitMs)`，`totalMs` 同样加；
+3. 伴奏轨 `accompanimentPlan` 的 `whenSec` 前移到片头卡结束（源起点 `trim.startMs`，不放过头段），`playbackRate` 不变；
+4. 断言（`smoke.mts` 的 `adj1148`）：`offsetMs = 1200` 时 `totalMs` 比不等待长 1200，且 `draw(600)` 与 `draw(0)`
+   命中**同一条色块**（用引擎 `rectsActiveAt` 验证；负对照是"不取定格时 600ms 会换块"）；
+5. 只对**整曲**生效（标记段从曲中间开始，没有前奏）；`headWaitMs = preRollMsOf(tempo, trim)`，相机位与出片同值，
+   `syncRev` / `headWaitMs` 都在"重建会话"的依赖里。
 
 ### 4-H 「空小节」编辑器告警：**先不做**（用户 2026-10-25 定，方案 C）
 
@@ -1040,6 +1043,26 @@ CLI `--sync/--no-sync/--audio`；调性提示。
 - **坑 2**：同一份引擎实现会让 `verify:app-ui` 的两条断言变红（「打字出未保存点」+「新建确认条」），
   A/B 对照确认是这条告警引起、单独探针里打字正常 ⇒ **要么放 app 侧 problems 层，要么先 bisect 那条交互**；
 - 台面侧已有兜底：缺号（空小节没有时间片）会把号补在后一根小节线上（`adj1146`，`barLabelsOf`）。
+
+### 4-I 混音在试听里「播放中即时生效」（adj1149，用户 2026-10-25 实报）
+
+用户原话：「如图里的滑条是什么用途，滑动没有什么变化，如果是音量，请实现，包括声音的选择没有变化，
+都是伴奏播放」。两条根因都**不是"没接"**，而是"只在开播那一刻接了一次"：
+
+- **音量**：`startPlayback` 把 `mix.accomp/synth` 写进 GainNode 之后就不再管；播放中拖滑杆只改 store。
+  （`adj1128` 的浏览器用例是在**播放前**拖到 0.6 再量，所以当时是绿的、用户一播中拖就是死的。）
+- **声音档**：同样只在开播时读一次；换档不会停旧轨/起新轨 ⇒ 听感"选什么都还是伴奏"。
+
+做法：
+
+1. 两条轨各存 GainNode 引用（`accGainRef` / `synthGainRef`），`doc.mix` 变化时用 `setTargetAtTime`（20ms 平滑）实时改；
+2. `doc.mix.source` 变化且正在播放 ⇒ 从当前播放头重开（循环中从循环起点重开）；
+3. 合成音缓存键改用源码指纹（`codeFingerprint`），不再只看 `code.length`（改音高不换字数会放旧旋律）；
+4. 只有合成音且渲染失败 ⇒ 按 `synthFailed` 文案回退到伴奏（以前是"什么都不响"）；
+5. 滑杆标签写全（伴奏音量 / 合成音音量）+ 百分比读数；`title` 写明"改了就生效"。
+
+断言：`smoke` 的 `adj1149` 五条接线闸门；`verify:app-ui` 在**播放中**把伴奏音量拖到 0.3（GainNode 立刻变 0.3）
+与换声音档（旧轨 `stop`、重新 `start`）两条真操作。
 
 
 

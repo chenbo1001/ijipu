@@ -6368,6 +6368,12 @@ span.ws-check {
   width: 88px;
 }
 
+/* adj1149：滑杆当前值（用户要能一眼看出"滑了没变"到底是没生效还是没注意） */
+.sync-mix-val {
+  min-width: 34px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* adj1129：伴奏那一行用三栏网格——左：伴奏；中：播放/打点（真居中）；右：视野 */
 .sync-audio-row {
   display: grid;

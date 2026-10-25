@@ -62,6 +62,13 @@ export interface DynamicExportOptions {
    */
   bpm?: number
   /**
+   * adj1148：**前奏等待**（ms；0/不传 = 没有）。
+   *
+   * 由调用方从 sidecar 算（`preRollMsOf(tempo, trim)`）：谱面第 1 拍比保留段起点晚时，
+   * 视频开头把这段伴奏照放、谱面定格第 1 拍，而不是把它吞掉。标记段导出不要传。
+   */
+  headWaitMs?: number
+  /**
    * 音轨工厂。**不传 = 无声**（不是"忘了"）：调用方明确决定要不要声音。
    * 失败由调用方处理（界面那边是"本次导出无声"的提示，命令行是回包里说明）。
    */
@@ -95,6 +102,8 @@ export async function exportDynamicVideo(opts: DynamicExportOptions): Promise<Dy
   const session = await createDynamicSession(opts.code, opts.aspect, opts.pageConfig, opts.bpm, {
     range: opts.range,
     leadInMs: withCards ? LEAD_IN_MS : 0,
+    // adj1148：前奏等待（与片头卡分开）
+    ...(opts.headWaitMs !== undefined && opts.headWaitMs > 0 ? { headWaitMs: opts.headWaitMs } : {}),
     ...(withCards ? {} : { endCardMs: 0 }),
     ...(opts.mode === '3min' ? { maxMs: EXPORT_MAX_MS } : {}),
     ...(opts.cardStyle === undefined ? {} : { cardStyle: opts.cardStyle }),

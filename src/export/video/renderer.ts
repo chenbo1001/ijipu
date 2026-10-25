@@ -53,6 +53,8 @@ import { pickPracticeCandidate } from './practicePick'
 import { brand } from '../../brand/tokens'
 import { CARD_SANS, CARD_SERIF, DEFAULT_CARD_STYLE, type CardStyle } from './cardTemplates'
 import { endCardLayout, tempoLineOf } from './cardLayout'
+// adj1148：前奏等待的两条纯计算（时间轴后移 / 定格帧时刻；smoke 直接断言这一份）
+import { preRollFrameMs, shiftSequenceBy } from './preRoll'
 
 /**
  * 页面位图的放大倍数：4 倍跟拍时，取景框宽 = 1080/4 = 270 页面单位，
@@ -100,6 +102,13 @@ export interface DynamicSession {
    */
   leadInMs: number
   /**
+   * adj1148：**前奏等待**（片头卡之后、谱面第 1 拍之前那段音频）。
+   *
+   * 这段时间里伴奏已经在放，画面**定格在谱面第 1 拍**（不画片头卡）；
+   * 伴奏轨据此把"起放时刻"提到 `leadInMs`（见 `accompanimentPlan`）。
+   */
+  headWaitMs: number
+  /**
    * adj1119：**标记段被切掉的那段时长**（整曲 = 0）。
    * 伴奏轨的起点 = `offsetMs + sourceStartMs`，不能只按 `offsetMs` 从曲首算。
    */
@@ -127,6 +136,11 @@ export async function createDynamicSession(
     range?: { startId: string; endId: string; pass?: number } | null
     /** 片头时长（ms，默认 2000；0 = 不要片头）。片头是**前置静音**，音画一起后移 */
     leadInMs?: number
+    /**
+     * adj1148：**前奏等待**（ms；0 = 没有）。谱面第 1 拍之前那段伴奏要照放，
+     * 画面定格在第 1 拍（片头卡之后、不画卡）。标记段导出没有"前奏"这回事，传了也忽略。
+     */
+    headWaitMs?: number
     /** 片尾时长（ms，默认 2500；0 = 不要片尾）。片尾是品牌落版，给个入口要人 */
     endCardMs?: number
     /**
@@ -204,13 +218,21 @@ export async function createDynamicSession(
 
   // 片头：整条时间轴后移 + 前置静音（音轨用同一份事件，所以天然同步）
   const leadInMs = Math.max(0, opts?.leadInMs ?? 2000)
-  if (leadInMs > 0) {
-    seq = {
-      ...seq,
-      events: seq.events.map((e) => ({ ...e, atMs: e.atMs + leadInMs })),
-      totalMs: seq.totalMs + leadInMs,
-    }
-  }
+  seq = shiftSequenceBy(seq, leadInMs)
+
+  /**
+   * adj1148：**前奏等待**（谱面第 1 拍之前那段伴奏）。
+   *
+   * 与片头卡分开：片头卡是"没声音 + 卡片"，这段是"有伴奏 + 谱面定格第 1 拍"。
+   * 事件整体再后移 `headWaitMs`，`totalMs` 也加——负向判据：offsetMs=1200 时，
+   * `totalMs` 必须比不等待长 1200（见 `preRoll.ts` 的 `shiftSequenceBy` 断言）。
+   *
+   * 标记段（`range`）本身从曲中间开始，没有"前奏"这回事 ⇒ 忽略传入值。
+   */
+  const headWaitMs = opts?.range ? 0 : Math.max(0, Math.round(opts?.headWaitMs ?? 0))
+  seq = shiftSequenceBy(seq, headWaitMs)
+  /** 片头卡 + 前奏等待：其后所有"相对时间"（小节起点等）统一加它 */
+  const shiftMs = leadInMs + headWaitMs
 
   /**
    * adj1064：整片上限（3 分钟）**先裁音乐、不裁片尾**。
@@ -227,7 +249,7 @@ export async function createDynamicSession(
     if (seq.totalMs > contentCap) {
       let cut = Math.max(0, contentCap)
       for (const b of seq.barStartsMs ?? []) {
-        const abs = b + leadInMs
+        const abs = b + shiftMs
         if (abs <= contentCap && abs > 0) cut = abs
       }
       const events = seq.events
@@ -240,8 +262,8 @@ export async function createDynamicSession(
         ...seq,
         events,
         totalMs: cut,
-        // `barStartsMs` 是相对时间（出片时统一 +leadInMs），这里也按相对值过滤
-        barStartsMs: (seq.barStartsMs ?? []).filter((b) => b + leadInMs <= cut),
+        // `barStartsMs` 是相对时间（出片时统一 +shiftMs），这里也按相对值过滤
+        barStartsMs: (seq.barStartsMs ?? []).filter((b) => b + shiftMs <= cut),
       }
     }
   }
@@ -265,7 +287,7 @@ export async function createDynamicSession(
    * 球要拿它做自由落体；相机会按 `t <= endMs` 过滤，且那一刻没有色块在响（`rectIndexAt` 返回 -1），
    * 不会多出一条 pans。
    */
-  const ballBars = (seq.barStartsMs ?? []).map((s) => s + leadInMs)
+  const ballBars = (seq.barStartsMs ?? []).map((s) => s + shiftMs)
   /**
    * adj1089：平移方式由调用方给（`uiStore.panMode` 的 L1 偏好；缺省 follow = 既有行为）。
    * 这里不读 store：预览要订阅它才能"改了下拉立刻重建会话"，所以依赖必须是显式的。
@@ -773,19 +795,38 @@ export async function createDynamicSession(
     /**
      * adj1067：片头卡 3 秒，最后 0.7 秒把画面淡入/推近到第一拍。
      * 不再区分整首/标记段——两者都用同一张自制卡，标记段也不会因为跨页而丢掉片头。
+     *
+     * adj1148：有**前奏等待**时，卡在 `leadInMs` 就结束（前奏段不画卡），
+     * 淡入目标是**谱面第 1 拍**（`musicStartMs`，即 leadIn + headWait 那一帧）。
      */
-    if (tMs < camera.firstT) {
-      const introEnd = Math.max(0, camera.firstT - INTRO_PAN_MS)
+    const musicStartMs = leadInMs + headWaitMs
+    const cardEndMs = headWaitMs > 0 ? leadInMs : camera.firstT
+    const introTargetMs = headWaitMs > 0 ? musicStartMs : camera.firstT
+    if (tMs < cardEndMs) {
+      const introEnd = Math.max(0, cardEndMs - INTRO_PAN_MS)
       const raw =
         introEnd <= 0 ? 1 : Math.max(0, Math.min(1, (tMs - introEnd) / INTRO_PAN_MS))
       const k = raw * raw * (3 - 2 * raw)
       if (k < 1) paintIntroCard(1 - k, tMs)
       if (k > 0) {
-        const target = cameraAt(camera, camera.firstT)
+        const target = cameraAt(camera, introTargetMs)
         // 0.94→1 的轻微推近，观感是"卡缩进谱面"，不是硬切
-        paintCamera({ ...target, zoom: target.zoom * (0.94 + 0.06 * k) }, k, camera.firstT)
+        paintCamera({ ...target, zoom: target.zoom * (0.94 + 0.06 * k) }, k, introTargetMs)
       }
       return { frame, following: false }
+    }
+
+    /**
+     * adj1148：前奏等待段——**谱面定格在第 1 拍**、伴奏照放。
+     *
+     * 画面时间只取第 1 拍内的相位（`% beatMs`）：色块位置与第 0 帧完全相同（负向判据），
+     * 跳跳球仍原地弹（观感不是"死画面"）。
+     */
+    if (headWaitMs > 0 && tMs < musicStartMs) {
+      const ft = preRollFrameMs(tMs, leadInMs, headWaitMs, beatMs) ?? musicStartMs
+      const frozen = cameraAt(camera, ft)
+      paintCamera(frozen, 1, ft)
+      return { frame: frozen, following: true }
     }
 
     /**
@@ -905,6 +946,8 @@ export async function createDynamicSession(
     bpm: beat,
     // adj1119：伴奏轨用它补片头静音 / 定位标记段起点
     leadInMs,
+    // adj1148：前奏等待（伴奏要提前到 leadIn 起放）
+    headWaitMs,
     sourceStartMs,
     draw,
   }
