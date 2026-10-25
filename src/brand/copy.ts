@@ -1240,6 +1240,16 @@ export const dynamicVideoCopy = {
   previewAudioFailed: '预览声音渲染失败，画面继续静音',
   empty: '这份谱没有可播放的音符',
   audioHint: '带声音需要音色库（首次约 30MB）',
+  /* ---- adj1150：相机位"输出声音"（与对拍台同一份 mix，存 sidecar） ---- */
+  outputSound: '输出声音',
+  outputSoundHint:
+    '决定预览与成片用哪条声音：伴奏（对拍文件里的音频）/ 伴奏+合成 / 合成音；两条音量各自 0–200%。改完重新播放或生成即生效。',
+  outputSoundNoSync: '没有找到对拍文件（.jps.sync.json）——先在试听栏「对拍…」里选伴奏并打锚点',
+  outputSoundNoTempo: '对拍还没解出速度：先去对拍台打两条锚点',
+  outputSoundNoAudio: '伴奏还没加载',
+  pickAccompaniment: '加载伴奏…',
+  audioLoaded: '伴奏已加载（保留段不变）',
+  audioLoadFailed: '伴奏加载失败',
   overCap: '这首超过 3 分钟：导出前 3 分钟（含片头与片尾），画面与声音一起截断',
   capping: '正在把音乐裁到 3 分钟内（保留片头与片尾）…',
   exportMp4: '生成视频',

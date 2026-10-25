@@ -5754,6 +5754,15 @@ span.ws-check {
   min-width: 140px;
   accent-color: var(--jp-accent, #00f0ff);
 }
+/* adj1150：输出声音那两条音量滑杆固定窄宽（与台面同一观感），别被上面的 flex:1 拉满 */
+.dyn-frame-controls input[type='range'].dyn-frame-range {
+  flex: 0 0 88px;
+  width: 88px;
+  min-width: 88px;
+}
+.dyn-frame-mix-val {
+  min-width: 34px;
+}
 .dyn-frame-controls .btn {
   padding: 3px 9px;
   font-size: 12px;

@@ -52,6 +52,11 @@ interface SyncState {
    */
   replaceDoc: (doc: SyncDoc) => void
   setAudio: (name: string, buf: AudioBuffer | null) => void
+  /**
+   * adj1150：相机位「加载伴奏…」用——只换内存里的 AudioBuffer，**保留 sidecar 的保留段**
+   * （`setAudio` 会把 `trim.endMs` 拉到整段，那是"换了一首伴奏"的口径，这里不能那么做）。
+   */
+  setAudioBuffer: (buf: AudioBuffer) => void
   addAnchor: (a: SyncAnchor) => void
   updateAnchor: (i: number, patch: Partial<SyncAnchor>) => void
   removeAnchor: (i: number) => void
@@ -110,6 +115,20 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         : cur.trim,
     }
     set({ doc: recompute(next), audio: buf, rev: get().rev + 1 })
+  },
+
+  setAudioBuffer: (buf) => {
+    const cur = get().doc
+    if (cur === null) return
+    const dur = Math.round(buf.duration * 1000)
+    // 只把保留段的**终点**夹到新长度内，起点与终点都保留（sidecar 里的裁剪是用户的决定）
+    const end = cur.trim.endMs > 0 ? Math.min(cur.trim.endMs, dur) : dur
+    const start = Math.min(cur.trim.startMs, end)
+    set({
+      audio: buf,
+      doc: { ...cur, audioDurationMs: dur, trim: { startMs: start, endMs: end } },
+      rev: get().rev + 1,
+    })
   },
 
   addAnchor: (a) => {

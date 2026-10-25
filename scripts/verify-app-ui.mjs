@@ -2764,9 +2764,126 @@ async function main() {
         // 停止播放，别把声音带进后面的用例
         await evalJs(c, `[...document.querySelectorAll('.sync-row .btn')].find((el) => el.textContent.trim() === '暂停')?.click(), true`)
         await sleep(300)
+        /**
+         * adj1150：相机位要有「输出声音」（声音档 + 两条音量）。
+         *
+         * 先补一条锚点（1 条就够：速度取谱面 `J:`），否则 `tempo === null`、相机位那排会禁用。
+         * 然后关台面 → 打开相机位，真点一遍三档与音量滑杆。
+         */
+        await evalJs(c, `document.querySelector('[data-sync="align-head"]')?.click(), true`)
+        await sleep(500)
         await evalJs(c, `[...document.querySelectorAll('.sync-head .btn')].find((b) => b.textContent.includes('关闭'))?.click(), true`)
         await waitFor(c, `!document.querySelector('.sync-layer')`, '对拍台关闭')
         check('adj1121 对拍台关得掉（层消失，底下试听还在）', true)
+
+        const exportTab = await evalJs(
+          c,
+          `(() => {
+            const b = [...document.querySelectorAll('.topbar-btn')].find((el) => (el.textContent || '').includes('导出'))
+            if (!b) return 'no-tab'
+            b.click()
+            return 'ok'
+          })()`,
+        )
+        if (exportTab === 'ok') {
+          await waitFor(c, `!!document.querySelector('.export-panel')`, '导出面板')
+          await evalJs(
+            c,
+            `[...document.querySelectorAll('.export-panel .btn')].find((b) => b.textContent.includes('动态谱视频'))?.click(), true`,
+          )
+          await waitFor(c, `!!document.querySelector('.dyn-frame-layer')`, '相机位层')
+          const mixReady = await waitFor(
+            c,
+            `!!document.querySelector('[data-sync="dyn-mix-source"]')`,
+            '相机位「输出声音」',
+            80,
+          )
+          const mixUi = await evalJs(
+            c,
+            `(() => {
+              const sel = document.querySelector('[data-sync="dyn-mix-source"]')
+              const acc = document.querySelector('[data-sync="dyn-mix-accomp"]')
+              const syn = document.querySelector('[data-sync="dyn-mix-synth"]')
+              return {
+                row: !!document.querySelector('[data-sync="dyn-mix"]'),
+                value: sel ? sel.value : '',
+                options: sel ? [...sel.options].map((o) => o.textContent.trim()) : [],
+                acc: acc ? acc.value : '',
+                syn: syn ? syn.value : '',
+                pcts: [...document.querySelectorAll('.dyn-frame-mix-val')].map((x) => (x.textContent || '').trim()),
+              }
+            })()`,
+          )
+          check(
+            'adj1150 相机位真的有「输出声音」：三档 + 两条音量 + 百分比（不是只在台面里）',
+            mixReady &&
+              mixUi.row &&
+              mixUi.value === 'file' &&
+              mixUi.options.join('/') === '伴奏/伴奏+合成/合成音' &&
+              mixUi.acc === '0.3' &&
+              mixUi.syn === '0.5' &&
+              mixUi.pcts.includes('30%') &&
+              mixUi.pcts.includes('50%'),
+            JSON.stringify(mixUi),
+          )
+          // 真改一次：切「合成音」+ 把伴奏音量拖到 0.7，看值/百分比都跟着变
+          const mixChanged = await evalJs(
+            c,
+            `(() => {
+              const sel = document.querySelector('[data-sync="dyn-mix-source"]')
+              const acc = document.querySelector('[data-sync="dyn-mix-accomp"]')
+              if (!sel || !acc) return null
+              const setSel = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+              setSel.call(sel, 'synth')
+              sel.dispatchEvent(new Event('change', { bubbles: true }))
+              const setNum = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+              setNum.call(acc, '0.7')
+              acc.dispatchEvent(new Event('change', { bubbles: true }))
+              return true
+            })()`,
+          )
+          await sleep(400)
+          const mixAfter = await evalJs(
+            c,
+            `(() => {
+              const sel = document.querySelector('[data-sync="dyn-mix-source"]')
+              const pcts = [...document.querySelectorAll('.dyn-frame-mix-val')].map((x) => (x.textContent || '').trim())
+              return { value: sel ? sel.value : '', pcts }
+            })()`,
+          )
+          check(
+            'adj1150 相机位改声音档/音量真的生效（值变了、百分比跟着变）',
+            mixChanged === true && mixAfter.value === 'synth' && mixAfter.pcts.includes('70%'),
+            JSON.stringify(mixAfter),
+          )
+          // 改回「伴奏」，别把后面的用例留在合成音
+          await evalJs(
+            c,
+            `(() => {
+              const sel = document.querySelector('[data-sync="dyn-mix-source"]')
+              if (!sel) return false
+              const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+              setter.call(sel, 'file')
+              sel.dispatchEvent(new Event('change', { bubbles: true }))
+              return true
+            })()`,
+          )
+          await sleep(300)
+          await evalJs(c, `document.querySelector('.dyn-frame-close')?.click(), true`)
+          await waitFor(c, `!document.querySelector('.dyn-frame-layer')`, '相机位关闭')
+          check('adj1150 相机位关得掉（输出声音改完不影响别的用例）', true)
+          // 关掉导出面板（只在它真的开着时才点，别把它反过来点开），后面的设置用例从干净界面开始
+          await evalJs(
+            c,
+            `(() => {
+              if (!document.querySelector('.export-panel')) return false
+              const b = [...document.querySelectorAll('.topbar-btn')].find((el) => (el.textContent || '').includes('导出'))
+              if (b) b.click()
+              return true
+            })()`,
+          )
+          await sleep(300)
+        }
       }
     }
 

@@ -33,7 +33,10 @@ import { resolveActiveLibrary } from '../playback/spessaSynthBackend'
 import { hostBankUrl } from '../store/hostBridge'
 // adj1119：对拍（sidecar）——相机位按它重建会话、带上伴奏
 import { effectiveSyncBpm, useSyncStore } from '../store/syncStore'
-import { buildAccompanimentTrack, mixAudioBuffers, preRollMsOf } from '../export/video/accompaniment'
+import { buildAccompanimentTrack, decodeAccompaniment, mixAudioBuffers, preRollMsOf } from '../export/video/accompaniment'
+import type { SyncMix } from '../export/video/syncDoc'
+// adj1150：相机位打开时自己找同目录的 sidecar（与对拍台共用路径规则）
+import { loadSidecarFor } from '../store/syncSidecar'
 
 /**
  * adj1097（用户 2026-10-23 实报「卡片加了背景图片，但导出的视频没有背景图片」）：
@@ -107,6 +110,17 @@ export function DynamicFrameOverlay() {
     range === null && syncDoc !== null && syncDoc.tempo !== null && syncDoc.audio !== ''
       ? preRollMsOf(syncDoc.tempo, syncDoc.trim)
       : 0
+  /**
+   * adj1150（用户 2026-10-25）：相机位要能**直接决定成片用哪条声音**（伴奏 / 伴奏+合成 / 合成音）
+   * 与两条音量——和台面里那排是同一份 `syncDoc.mix`（存 sidecar），不是另造一套设置。
+   */
+  const syncAudio = useSyncStore((s) => s.audio)
+  const setMix = useSyncStore((s) => s.setMix)
+  const setAudioBuffer = useSyncStore((s) => s.setAudioBuffer)
+  const replaceSyncDoc = useSyncStore((s) => s.replaceDoc)
+  const nativePath = useDocStore((s) => s.nativePath)
+  const binding = useDocStore((s) => s.binding)
+  const [mixNotice, setMixNotice] = useState('')
 
   const [rect, setRect] = useState<DOMRect | null>(null)
   const [status, setStatus] = useState<'busy' | 'ready' | 'error'>('busy')
@@ -128,6 +142,8 @@ export function DynamicFrameOverlay() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const seekRef = useRef<HTMLInputElement | null>(null)
   const metaRef = useRef<HTMLSpanElement | null>(null)
+  /** adj1150：sidecar 有伴奏文件名、但内存里还没有 AudioBuffer 时的"加载伴奏…"入口 */
+  const mixFileRef = useRef<HTMLInputElement | null>(null)
   const sessionRef = useRef<DynamicSession | null>(null)
   const cursorRef = useRef(0)
   const lastTsRef = useRef(0)
@@ -170,6 +186,26 @@ export function DynamicFrameOverlay() {
     withAudioRef.current = withAudio
   }, [withAudio])
 
+  /**
+   * adj1150（用户 2026-10-25：「已经有 xxx.jps.sync.json，相机位却没有声音选项」）：
+   * 打开相机位时**自己找同目录的 sidecar**（与对拍台同一套定位规则）。
+   * 只在内存里还没有对拍结果时读；读不到就保持现状（相机照常出静音/合成音）。
+   */
+  useEffect(() => {
+    if (!on) return
+    if (useSyncStore.getState().doc !== null) return
+    let cancelled = false
+    void (async () => {
+      const d = await loadSidecarFor(nativePath, binding)
+      if (cancelled || d === null) return
+      if (useSyncStore.getState().doc !== null) return
+      replaceSyncDoc(d)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [on, nativePath, binding, replaceSyncDoc])
+
   /** 画某一帧；进度条/读数走 ref，避免 60fps 重渲染整棵树 */
   const paint = useCallback((t: number) => {
     const s = sessionRef.current
@@ -203,7 +239,13 @@ export function DynamicFrameOverlay() {
     if (doc !== null && doc.tempo !== null && sd.audio !== null && doc.mix.source !== 'synth') {
       // adj1129：收尾淡出——最后一拍渐小到无声（用户口径：不要停得太突兀）
       const acc = await buildAccompanimentTrack(sd.audio, doc.tempo, doc.trim, session, 60000 / session.bpm)
-      if (doc.mix.source === 'file') return acc
+      /**
+       * adj1150：相机位的两条音量也要**真的进成片/预览**——
+       * 以前 `file` 直接返回原始伴奏（音量被忽略）、`synth` 也是满音量；现在按 `mix` 缩放。
+       */
+      if (doc.mix.source === 'file') {
+        return doc.mix.accomp === 1 ? acc : mixAudioBuffers([{ buffer: acc, gain: doc.mix.accomp }], session.totalMs)
+      }
       const lib = resolveActiveLibrary(useUiStore.getState().playbackHqLibrary).lib
       const cache = (cacheRef.current ??= createHqCache())
       const { bank } = await resolveHqBank(lib, cache, hostBankUrl(lib.id))
@@ -219,7 +261,10 @@ export function DynamicFrameOverlay() {
     const lib = resolveActiveLibrary(useUiStore.getState().playbackHqLibrary).lib
     const cache = (cacheRef.current ??= createHqCache())
     const { bank } = await resolveHqBank(lib, cache, hostBankUrl(lib.id))
-    return renderToAudioBuffer(session.events, bank, { bpm: session.bpm })
+    const synth = await renderToAudioBuffer(session.events, bank, { bpm: session.bpm })
+    // 没有 sidecar 时保持原来的满音量（默认 0.5 不该把"纯谱面合成音"固定调小）
+    const gain = doc !== null && doc.mix.source === 'synth' ? doc.mix.synth : 1
+    return gain === 1 ? synth : mixAudioBuffers([{ buffer: synth, gain }], session.totalMs)
   }, [])
 
   const prepareAudio = useCallback(async (): Promise<AudioBuffer | null> => {
@@ -302,7 +347,7 @@ export function DynamicFrameOverlay() {
     return () => {
       cancelled = true
     }
-  }, [on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, syncRev, headWaitMs, paint])
+  }, [on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, headWaitMs, paint])
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
 
@@ -400,6 +445,41 @@ export function DynamicFrameOverlay() {
     void startPlayback(cursorRef.current)
   }
 
+  /**
+   * adj1150：相机位改"输出声音"。
+   *
+   * 声音是**离线混出来的一整条 buffer**（预览与出片共用），所以要作废重渲——改完先暂停，
+   * 下一次播放/生成就用新设置；不假装"正在播的这条也能立刻变"（离线重渲可能要几秒）。
+   */
+  const pauseForMixChange = () => {
+    if (!playing) return
+    audioPlayerRef.current?.pause()
+    setPlaying(false)
+    cancelAnimationFrame(rafRef.current)
+    lastTsRef.current = 0
+  }
+
+  const changeMix = (patch: Partial<SyncMix>) => {
+    setMix(patch)
+    setMixNotice('')
+    pauseForMixChange()
+  }
+
+  /** sidecar 有文件名、但内存里没有伴奏（重开应用后）⇒ 在相机位里直接选一次 */
+  const onPickMixAudio = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    e.target.value = ''
+    if (!f) return
+    try {
+      const buf = await decodeAccompaniment(await f.arrayBuffer())
+      setAudioBuffer(buf)
+      setMixNotice(dynamicVideoCopy.audioLoaded)
+      pauseForMixChange()
+    } catch (err) {
+      setMixNotice(`${dynamicVideoCopy.audioLoadFailed}：${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   const exportVideo = async () => {
     const s = sessionRef.current
     if (!videoExportEnabled || !s || encoding) return
@@ -468,7 +548,13 @@ export function DynamicFrameOverlay() {
   if (!on || !rect || !dynamicVideoEnabled) return null
 
   const spec = ASPECTS.find((a) => a.id === aspect) ?? ASPECTS[0]
-  const maxH = Math.min(rect.height * 0.66, rect.height - 150)
+  /**
+   * adj1150：有「输出声音」那一排时，控制条多一行——画布要让出高度，
+   * 否则 controls 会超出预览区被 `.dyn-frame-layer { overflow:hidden }` 裁掉。
+   * 控制条自身再加 `maxHeight + overflow:auto` 兜底（窄/矮预览区也能滚到）。
+   */
+  const hasMixRow = syncDoc !== null
+  const maxH = Math.min(rect.height * (hasMixRow ? 0.55 : 0.66), rect.height - (hasMixRow ? 230 : 150))
   const maxW = rect.width * 0.9
   let h = Math.max(120, maxH)
   let w = h * spec.ratio
@@ -477,11 +563,12 @@ export function DynamicFrameOverlay() {
     h = w / spec.ratio
   }
   const left = rect.left + (rect.width - w) / 2
-  const top = rect.top + Math.max(6, (rect.height - h) * 0.3)
+  const top = rect.top + (hasMixRow ? 8 : Math.max(6, (rect.height - h) * 0.3))
   const boxH = Math.max(h, 120)
   const controlsW = Math.min(rect.width - 24, Math.max(w, 560))
   const controlsLeft = rect.left + (rect.width - controlsW) / 2
   const controlsTop = top + boxH + 10
+  const controlsMaxH = Math.max(120, rect.height - (controlsTop - rect.top) - 8)
   return (
     <div
       className="dyn-frame-layer"
@@ -501,7 +588,13 @@ export function DynamicFrameOverlay() {
 
       <div
         className="dyn-frame-controls"
-        style={{ left: controlsLeft - rect.left, top: controlsTop - rect.top, width: controlsW }}
+        style={{
+          left: controlsLeft - rect.left,
+          top: controlsTop - rect.top,
+          width: controlsW,
+          maxHeight: controlsMaxH,
+          overflowY: 'auto',
+        }}
       >
         <div className="dyn-frame-controls-row">
           <button
@@ -579,6 +672,85 @@ export function DynamicFrameOverlay() {
             {withCards ? effectiveCardStyle.description : dynamicVideoCopy.cardsOffHint}
           </span>
         </div>
+
+        {/* adj1150（用户 2026-10-25）：对拍文件存在时，相机位直接给「输出声音」——
+            声音档 + 两条音量，与台面共用同一份 `syncDoc.mix`，出片/预览都按它混音。 */}
+        {syncDoc !== null && (
+          <div className="dyn-frame-controls-row dyn-frame-mix" data-sync="dyn-mix">
+            <span className="dyn-frame-label" title={dynamicVideoCopy.outputSoundHint}>
+              {dynamicVideoCopy.outputSound}
+            </span>
+            <select
+              className="dyn-frame-select"
+              data-sync="dyn-mix-source"
+              value={syncDoc.mix.source}
+              disabled={encoding || preparingAudio || syncDoc.tempo === null}
+              title={dynamicVideoCopy.outputSoundHint}
+              aria-label={dynamicVideoCopy.outputSound}
+              onChange={(e) => changeMix({ source: e.target.value as SyncMix['source'] })}
+            >
+              <option value="file" disabled={syncAudio === null}>{syncCopy.mixFile}</option>
+              <option value="mix" disabled={syncAudio === null}>{syncCopy.mixBoth}</option>
+              <option value="synth">{syncCopy.mixSynth}</option>
+            </select>
+            <span className="dyn-frame-label">{syncCopy.accompGain}</span>
+            <input
+              className="dyn-frame-range"
+              data-sync="dyn-mix-accomp"
+              type="range"
+              min={0}
+              max={2}
+              step={0.05}
+              value={syncDoc.mix.accomp}
+              disabled={encoding || preparingAudio || syncDoc.tempo === null}
+              aria-label={syncCopy.accompGain}
+              onChange={(e) => changeMix({ accomp: Number(e.target.value) })}
+            />
+            <span className="dyn-frame-meta dyn-frame-mix-val">{Math.round(syncDoc.mix.accomp * 100)}%</span>
+            <span className="dyn-frame-label">{syncCopy.synthGain}</span>
+            <input
+              className="dyn-frame-range"
+              data-sync="dyn-mix-synth"
+              type="range"
+              min={0}
+              max={2}
+              step={0.05}
+              value={syncDoc.mix.synth}
+              disabled={encoding || preparingAudio || syncDoc.tempo === null}
+              aria-label={syncCopy.synthGain}
+              onChange={(e) => changeMix({ synth: Number(e.target.value) })}
+            />
+            <span className="dyn-frame-meta dyn-frame-mix-val">{Math.round(syncDoc.mix.synth * 100)}%</span>
+            {syncDoc.tempo === null && (
+              <span className="dyn-frame-meta">{dynamicVideoCopy.outputSoundNoTempo}</span>
+            )}
+            {syncAudio === null && (
+              <>
+                <span className="dyn-frame-meta">
+                  {dynamicVideoCopy.outputSoundNoAudio}
+                  {syncDoc.audio !== '' ? `：${syncDoc.audio}` : ''}
+                </span>
+                <input
+                  ref={mixFileRef}
+                  className="sync-file"
+                  type="file"
+                  accept="audio/*,.mp3,.m4a,.wav,.flac"
+                  onChange={(e) => void onPickMixAudio(e)}
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  data-sync="dyn-mix-pick"
+                  disabled={encoding}
+                  onClick={() => mixFileRef.current?.click()}
+                >
+                  {dynamicVideoCopy.pickAccompaniment}
+                </button>
+              </>
+            )}
+            {mixNotice !== '' && <span className="dyn-frame-meta">{mixNotice}</span>}
+          </div>
+        )}
 
         <div className="dyn-frame-controls-row">
           <span className="dyn-frame-label">{dynamicVideoCopy.presetLabel}</span>

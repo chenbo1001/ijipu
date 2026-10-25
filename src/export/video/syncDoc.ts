@@ -260,6 +260,24 @@ export function mixPlanOf(mix: SyncMix): { playAcc: boolean; playSynth: boolean 
   }
 }
 
+/**
+ * adj1151（用户 2026-10-25：「设了保留段，播放应该从保留段开头开始，别从音频 0 开始 /
+ * 只播放保留段」）：把播放起点**夹进保留段**。
+ *
+ *  - 起点在保留段之前 ⇒ 从保留段开头播；
+ *  - 起点已经到/过了保留段末尾 ⇒ 从头再播一遍保留段（否则按播放只会"停在末尾什么都不发生"）；
+ *  - 在段内 ⇒ 从当前位置继续。
+ *
+ * 纯函数（Node 可断言）。末尾留 1ms 的旧口径保留在半开区间判断里。
+ */
+export function playStartMsOf(fromMs: number, trim: SyncTrim): number {
+  const start = Math.max(0, trim.startMs)
+  const end = Math.max(start, trim.endMs)
+  if (fromMs <= start) return start
+  if (fromMs >= end - 1) return start
+  return fromMs
+}
+
 /** 谱面改过没有（codeHash 不同 ⇒ 相机位要提示"锚点请复核"） */
 export function syncDocStale(doc: SyncDoc | null | undefined, code: string): boolean {
   if (!doc) return false

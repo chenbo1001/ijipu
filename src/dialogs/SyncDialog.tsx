@@ -34,9 +34,10 @@ import { createHqCache, resolveHqBank } from '../playback/spessaCache'
 import { resolveActiveLibrary } from '../playback/spessaSynthBackend'
 import { hostBankUrl } from '../store/hostBridge'
 import { decodeAccompaniment, waveformPeaks } from '../export/video/accompaniment'
-import { parseSyncDoc, mixPlanOf, joinPath, serializeSyncDoc, sidecarPathOf, syncDocStale, codeFingerprint } from '../export/video/syncDoc'
-import { readSidecarText, writeSidecarText, downloadSidecarText } from '../export/video/syncIo'
-import { listWorkspaces } from '../store/workspace'
+import { mixPlanOf, serializeSyncDoc, sidecarPathOf, syncDocStale, codeFingerprint, playStartMsOf } from '../export/video/syncDoc'
+import { writeSidecarText, downloadSidecarText } from '../export/video/syncIo'
+// adj1150：sidecar 定位/读取抽到 store 层，相机位与对拍台共用同一套路径规则
+import { loadSidecarDocAt, resolveSidecarPath } from '../store/syncSidecar'
 // adj1137：波形上方那条"音符格子排"（纯几何）
 import { barLabelsOf, cellRectPct, pitchHeightOf, stripCellsOf } from './noteStrip'
 import { canUseDynamicVideo } from '../export/video/capability'
@@ -155,49 +156,25 @@ export function SyncDialog() {
   }, [ensureFor, fileName, code])
 
   /**
-   * adj1131：算出这份谱的 sidecar **绝对路径**。
-   *
-   * 两条来源：
-   *  · `nativePath`：原生「打开」的谱（最直接）；
-   *  · `binding`：从**工作区**打开的谱（桌面的路径后端有 `dir` 绝对路径）——
-   *    用户实报「tauri:dev 下保存还是走下载」，就是只认了 `nativePath`。
-   * 两样都没有（网页/示例/粘贴稿）⇒ `null`，调用方退回"下载 JSON"。
-   */
-  const resolveSidecarPath = useCallback(async (): Promise<string | null> => {
-    if (nativePath !== null && nativePath !== '') return sidecarPathOf(nativePath)
-    if (binding === null) return null
-    try {
-      const list = await listWorkspaces()
-      const rec = list.find((r) => r.id === binding.wsId)
-      const dir = typeof rec?.dir === 'string' && rec.dir !== '' ? rec.dir : ''
-      if (dir === '') return null
-      return sidecarPathOf(joinPath(dir, binding.segs.join('\\')))
-    } catch {
-      return null
-    }
-  }, [binding, nativePath])
-
-  /**
    * adj1128：打开台面时**先读同目录的 sidecar**（比 L1 兜底权威）。
    * 只在"本地还没有锚点"时采用磁盘内容，免得覆盖用户刚打的点。
+   *
+   * adj1150：路径定位/读取抽到 `store/syncSidecar.ts`——相机位"打开时自己找 sidecar"
+   * 与这里共用同一套规则（`nativePath` 优先、工作区 `binding` 兜底）。
    */
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const target = await resolveSidecarPath()
-      if (target === null) return
-      const r = await readSidecarText(target)
-      if (cancelled || !r.ok || r.text === null) return
-      const parsed = parseSyncDoc(r.text)
-      if (parsed.doc === null) return
+      const parsed = await loadSidecarDocAt(await resolveSidecarPath(nativePath, binding))
+      if (cancelled || parsed === null) return
       const cur = useSyncStore.getState().doc
       if (cur !== null && cur.anchors.length > 0) return
-      replaceDoc(parsed.doc)
+      replaceDoc(parsed)
     })()
     return () => {
       cancelled = true
     }
-  }, [resolveSidecarPath, replaceDoc])
+  }, [nativePath, binding, replaceDoc])
 
   /** adj1128（用户实报「保存没有实现」）：真的写 sidecar；实在没有磁盘路径就下载一份 */
   const onSave = useCallback(async () => {
@@ -206,7 +183,7 @@ export function SyncDialog() {
     const latest = useSyncStore.getState().doc
     if (latest === null) return
     const text = serializeSyncDoc(latest)
-    const target = await resolveSidecarPath()
+    const target = await resolveSidecarPath(nativePath, binding)
     if (target === null) {
       // adj1129：网页/开发模式没有同目录写入 ⇒ 下载一份真文件（别只写本机缓存）
       // `fileName` 可能已经被去掉了 `.jps`（网页/示例稿），这里补回来，文件名才对得上
@@ -219,7 +196,7 @@ export function SyncDialog() {
     const res = await writeSidecarText(target, text)
     const name = target.split(/[\\/]/).pop() ?? target
     setNotice(res.ok ? syncCopy.savedFile(name) : syncCopy.saveFailed(res.error))
-  }, [code, doc, fileName, resolveSidecarPath, save])
+  }, [binding, code, doc, fileName, nativePath, save])
 
   // ---------- adj1124：台面尺寸（可拖右下角 / 最大化 / 记 L1） ----------
   /** 记住上一次渲染出来的 layout（拖拽松手时要在监听里读它，而监听只挂一次） */
@@ -699,7 +676,8 @@ export function SyncDialog() {
        * 合成音**没人管**，只能靠别处停。现在用**代次令牌**：等到渲染完先看这一代还活着没，
        * 死了就立刻取消；而且创建一条就立刻登记一条（不再攒到最后）。
        */
-      const from = Math.max(0, Math.min(fromMs, trim.endMs - 1))
+      // adj1151：起点必须夹进保留段——设了 7.277s 的起点，按播放不能从音频 0 开始
+      const from = playStartMsOf(fromMs, trim)
       const mix = useSyncStore.getState().doc?.mix ?? { source: 'file' as const, accomp: 1, synth: 0.5 }
       const plan = mixPlanOf(mix)
       /**

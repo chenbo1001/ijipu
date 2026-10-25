@@ -122,6 +122,7 @@ import {
   dirNameOf,
   isAbsolutePath,
   DEFAULT_SYNC_MIX,
+  playStartMsOf,
 } from '../src/export/video/syncDoc.ts'
 // adj1119：片头卡速度行（对拍后写"实际 + （原谱 X）"）
 import { tempoLineOf } from '../src/export/video/cardLayout.ts'
@@ -2370,8 +2371,8 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
     'leadIn/endCard 任一没跟着复选框走，预览就会和成片对不上',
   )
   check(
-    'adj1113/adj1119/adj1148 `withCards`、对拍（`syncBpm`/`syncRev`）与前奏等待（`headWaitMs`）都进了"重建会话"的依赖（点了立刻重画，不继续播旧会话）',
-    /\}, \[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, syncRev, headWaitMs, paint\]\)/.test(overlay),
+    'adj1113/adj1119/adj1148 `withCards`、对拍拍速（`syncBpm`）与前奏等待（`headWaitMs`）都进了"重建会话"的依赖（点了立刻重画，不继续播旧会话）',
+    /\}, \[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, headWaitMs, paint\]\)/.test(overlay),
   )
   check(
     'adj1113 导出透传 `cards: withCards`；不带片头片尾时卡片下拉/自定义按钮禁用（不是悄悄忽略）',
@@ -21116,6 +21117,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1148Tests())
       // adj1149：混音播放中即时生效（Gain 引用 / 换档重开 / 合成缓存键 / 失败回退）
       .then(() => runAdj1149Tests())
+      // adj1150：相机位输出声音（三档 + 两条音量 / 自动找 sidecar）+ 播放从保留段开头
+      .then(() => runAdj1150Tests())
       // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
       .then(() => runAdj1122Tests())
       // adj1124：对拍台尺寸/分区高度/预览比例（可拖可最大化，记 L1）
@@ -33896,8 +33899,8 @@ function runDynamicCameraTests(): void {
         /panMode: useUiStore\.getState\(\)\.panMode/.test(cliSrcAdj),
     )
     check(
-      'adj1089/adj1094/adj1113/adj1119/adj1148 换了平移方式/提前量/片头片尾/对拍/前奏等待都会**重建相机会话**（否则点了没反应：还在放旧会话）',
-      /\[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, syncRev, headWaitMs, paint\]/.test(
+      'adj1089/adj1094/adj1113/adj1119/adj1148 换了平移方式/提前量/片头片尾/对拍拍速/前奏等待都会**重建相机会话**（否则点了没反应：还在放旧会话）；adj1150 起混音/音量**不重建会话**（只作废音轨）',
+      /\[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, headWaitMs, paint\]/.test(
         overlaySrcAdj,
       ),
     )
@@ -35711,6 +35714,77 @@ function runAdj1149Tests(): void {
     /syncCopy\.accompGain\}/.test(syncSrc) &&
       /syncCopy\.synthGain\}/.test(syncSrc) &&
       /Math\.round\(doc\.mix\.accomp \* 100\)/.test(syncSrc),
+    '',
+  )
+}
+
+/**
+ * adj1150：相机位「输出声音」+ adj1151「播放从保留段开头」。
+ *
+ * 用户 2026-10-25 实报两条：
+ *  ① 已经有 `xxx.jps.sync.json`，相机位却没有"用伴奏/合成音"的选择；
+ *  ② 设了保留段（如 7.277s 起），按播放仍从音频 0 开始。
+ * 这里把"纯判据"和"接线"都钉住；真 UI 由 `verify:app-ui` 打开相机位点一遍。
+ */
+function runAdj1150Tests(): void {
+  console.log('[adj1150] 相机位输出声音 / 播放从保留段开头 / 音量进混音')
+  const trim = { startMs: 7277, endMs: 265247 }
+  check(
+    'adj1150/1151 播放起点在保留段之前 ⇒ 从保留段开头（0 → 7277）',
+    playStartMsOf(0, trim) === 7277,
+    String(playStartMsOf(0, trim)),
+  )
+  check(
+    'adj1150/1151 播放起点已在保留段内 ⇒ 原样（40000 → 40000）',
+    playStartMsOf(40000, trim) === 40000,
+    String(playStartMsOf(40000, trim)),
+  )
+  check(
+    'adj1150/1151 播放起点已到/超过末尾 ⇒ 从头再播一遍保留段（不会"停在末尾什么都不发生"）',
+    playStartMsOf(999999, trim) === 7277 && playStartMsOf(265246, trim) === 7277,
+    JSON.stringify([playStartMsOf(999999, trim), playStartMsOf(265246, trim)]),
+  )
+  check(
+    'adj1150/1151 负对照：没有保留段（0..10000）时 0 仍从 0 开始（不是恒跳到某处）',
+    playStartMsOf(0, { startMs: 0, endMs: 10000 }) === 0 && playStartMsOf(1, { startMs: 0, endMs: 10000 }) === 1,
+    JSON.stringify([playStartMsOf(0, { startMs: 0, endMs: 10000 }), playStartMsOf(1, { startMs: 0, endMs: 10000 })]),
+  )
+
+  const overlaySrc = readFileSync(join(root, 'src/preview/DynamicFrameOverlay.tsx'), 'utf8')
+  const syncSrc = readFileSync(join(root, 'src/dialogs/SyncDialog.tsx'), 'utf8')
+  const storeSrc = readFileSync(join(root, 'src/store/syncStore.ts'), 'utf8')
+  check(
+    'adj1150 相机位有「声音档 + 伴奏音量 + 合成音音量 + 百分比」（对拍文件存在时才出现）',
+    /data-sync="dyn-mix-source"/.test(overlaySrc) &&
+      /data-sync="dyn-mix-accomp"/.test(overlaySrc) &&
+      /data-sync="dyn-mix-synth"/.test(overlaySrc) &&
+      /Math\.round\(syncDoc\.mix\.accomp \* 100\)/.test(overlaySrc) &&
+      /Math\.round\(syncDoc\.mix\.synth \* 100\)/.test(overlaySrc) &&
+      /syncDoc !== null && \(/.test(overlaySrc),
+    '',
+  )
+  check(
+    'adj1150 相机位改的是**同一份** sidecar mix（setMix），并在打开时自己找 sidecar',
+    /useSyncStore\(\(s\) => s\.setMix\)/.test(overlaySrc) &&
+      /loadSidecarFor\(nativePath, binding\)/.test(overlaySrc),
+    '',
+  )
+  check(
+    'adj1150 相机位两条音量真的进混音（file/synth 也缩放，不再被忽略）',
+    /gain: doc\.mix\.accomp/.test(overlaySrc) && /gain: doc\.mix\.synth/.test(overlaySrc),
+    '',
+  )
+  check(
+    'adj1150 伴奏未加载时可在相机位「加载伴奏…」，且不重置 sidecar 的保留段',
+    /data-sync="dyn-mix-pick"/.test(overlaySrc) &&
+      /setAudioBuffer\(buf\)/.test(overlaySrc) &&
+      /setAudioBuffer: \(buf\) =>/.test(storeSrc) &&
+      /trim: \{ startMs: start, endMs: end \}/.test(storeSrc),
+    '',
+  )
+  check(
+    'adj1150/1151 播放起点真的走 playStartMsOf（台面按播放不会从音频 0 开始）',
+    /const from = playStartMsOf\(fromMs, trim\)/.test(syncSrc),
     '',
   )
 }
