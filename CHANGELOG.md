@@ -5,7 +5,7 @@
 > 引擎 `packages/ijipu-engine` `0.44.0 → 0.45.0`（新增 `interlude`、`playback/sync`、
 > `playhead` 间奏块等；`adj1118` 起）；CLI 随应用 `0.75.0`；插件 `0.44.4 → 0.45.0`
 > （`vendor/engine` 同步 + 嵌入版到 0.75.0）。
-> 验证：`smoke` **✓4633 / ✗0**、`verify:app-ui` **147 / 0**、`build` 通过、`check:encoding` 459 文件、
+> 验证：`smoke` **✓4635 / ✗0**、`verify:app-ui` **147 / 0**、`build` 通过、`check:encoding` 459 文件、
 > `lint` 0 error、Rust `cargo check` 通过（含 `sync_read_file` / `sync_write_file` / `sync_read_audio` /
 > `pick_jps_file` / `pick_audio_file` / `save_jps_file`）。
 
