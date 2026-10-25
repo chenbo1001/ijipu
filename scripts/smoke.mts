@@ -21135,6 +21135,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1158Tests())
       // adj1160：对拍台行顺序（伴奏名称紧挨当前位置上面）
       .then(() => runAdj1160Tests())
+      // adj1161：间奏 0 上方标注「间奏16拍」
+      .then(() => runAdj1161Tests())
       // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
       .then(() => runAdj1122Tests())
       // adj1124：对拍台尺寸/分区高度/预览比例（可拖可最大化，记 L1）
@@ -36223,6 +36225,29 @@ function runAdj1160Tests(): void {
     'adj1160 两条拖动条各只有一处（不会残留旧位置）',
     (src.match(/startDrag\('preview'\)/g) ?? []).length === 1 &&
       (src.match(/startDrag\('wave'\)/g) ?? []).length === 1,
+    '',
+  )
+}
+
+/**
+ * adj1161（用户 2026-10-25）：`0{jz 16}` 在预览里只有一个 0，要在 0 上面标「间奏16拍」。
+ */
+function runAdj1161Tests(): void {
+  console.log('[adj1161] 间奏 0 上方标注「间奏16拍」')
+  const parsed = parseJpsRaw('V: 1.0\nB: 间奏\nQ: 0{jz 16} 1 2 3 4 |\n')
+  const lay = layoutScore(parsed, defaultPageConfig)
+  const host = lay.pages[0]?.notes.find((n) => n.token.kind === 'rest' && n.token.interludeBeats === 16)
+  const svg = renderScoreToSvg(lay)[0] ?? ''
+  const m = /<text[^>]*class="jp-interlude-label"[^>]*y="([\d.-]+)"[^>]*>间奏16拍<\/text>/.exec(svg)
+  check(
+    'adj1161 间奏 0 上方出现「间奏16拍」，且 y 在 0 上面（不是压在数字里）',
+    host !== undefined && m !== null && Number(m[1]) < host.y,
+    JSON.stringify({ hasHost: host !== undefined, labelY: m?.[1], noteY: host?.y }),
+  )
+  const plain = layoutScore(parseJpsRaw('V: 1.0\nB: 普通\nQ: 0 1 2 3 4 |\n'), defaultPageConfig)
+  check(
+    'adj1161 负对照：没有 {jz N} 的 0 不出现间奏标注',
+    !(renderScoreToSvg(plain)[0] ?? '').includes('间奏16拍'),
     '',
   )
 }
