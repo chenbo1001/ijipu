@@ -70,7 +70,7 @@ npx tauri build             # 打包 → src-tauri/target/release/bundle/nsis/*-
 
 本项目采用 **[GNU Affero General Public License v3.0（AGPL-3.0）](LICENSE)** 开源。
 
-**作者**：蜗牛🐌（[snail.zh@qq.com](mailto:snail.zh@qq.com)）
+**作者**：蜗牛🐌（[snail.zh@foxmail.com](mailto:snail.zh@foxmail.com)）
 
 - **允许**：自由使用、学习、修改、再分发；任何人部署为在线服务/网站时，必须向用户公开其修改后的完整源码（AGPL 网络条款）。
 - **遵循方式**：修改本项目衍生作品时，须同样以 AGPL-3.0 发布，并保留版权声明。

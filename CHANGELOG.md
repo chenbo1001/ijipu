@@ -5770,7 +5770,7 @@ adj482/adj540/adj543 等因口径变化而失效的旧断言）；真机（打�
 
 ### 修复
 
-- **应用内作者署名与联系方式**（`adj373`）：此前应用里没有任何作者信息。现在「帮助 → 关于」显示 **作者：蜗牛🐌　联系：snail.zh@qq.com**（取自品牌 tokens 的 `brand.author` / `brand.authorEmail`；邮箱留空则自动不显示「联系」行）。同时补齐包与产物元数据：`package.json` 的 `author`、`index.html` 的 `<meta name="author">`、桌面安装包的 `bundle.publisher` / `copyright`（NSIS 安装器会显示发布者与版权）、`README.md` 的作者行。smoke 新增 `[82]`（4 项）守住署名/邮箱格式不被误删或写坏。
+- **应用内作者署名与联系方式**（`adj373`）：此前应用里没有任何作者信息。现在「帮助 → 关于」显示 **作者：蜗牛🐌　联系：snail.zh@foxmail.com**（取自品牌 tokens 的 `brand.author` / `brand.authorEmail`；邮箱留空则自动不显示「联系」行）。同时补齐包与产物元数据：`package.json` 的 `author`、`index.html` 的 `<meta name="author">`、桌面安装包的 `bundle.publisher` / `copyright`（NSIS 安装器会显示发布者与版权）、`README.md` 的作者行。smoke 新增 `[82]`（4 项）守住署名/邮箱格式不被误删或写坏。
 
 ### 修复
 
