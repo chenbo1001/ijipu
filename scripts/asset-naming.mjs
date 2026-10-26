@@ -9,14 +9,14 @@
  *   iJipu-<Type>-<ResourceId>_<Version>_<Arch>-setup.exe
  *
  *  · `Type`：`SoundFont`（音色库）/ `Tool`（工具）
- *  · `ResourceId`：稳定 ASCII 标识（字母开头，只含字母数字），如 `GeneralUserGS` / `FluidR3GM` / `FFmpeg`
- *  · `Version`：**应用版本**（方便判断与哪一版 iJipu 配套；资源自身版本另存 manifest）
+ *  · `ResourceId`：稳定 ASCII 标识（大写字母开头，只含字母数字），如 `GeneralUserGS` / `FluidR3GM` / `FFmpeg`
+ *  · `Version`：**资源自身版本**（不是 iJipu 应用版本；资源不改就不升版本、不重打包）
  *  · `Arch`：`x64`（当前桌面安装包）
  *
  * 例：
- *   iJipu-SoundFont-GeneralUserGS_0.75.1_x64-setup.exe
- *   iJipu-SoundFont-FluidR3GM_0.75.1_x64-setup.exe
- *   iJipu-Tool-FFmpeg_0.75.1_x64-setup.exe
+ *   iJipu-SoundFont-GeneralUserGS_1.471.0_x64-setup.exe
+ *   iJipu-SoundFont-FluidR3GM_1.0.0_x64-setup.exe
+ *   iJipu-Tool-FFmpeg_1.0.0_x64-setup.exe
  *
  * 这条规则同时被 `build-assets-installer.mjs`、`check-assets-installer.mjs` 与冒烟断言使用；
  * 改格式只改这里，三处自动一致。
@@ -34,6 +34,9 @@ export const RESOURCE_TYPES = Object.keys(RESOURCE_TYPE_CN)
 /** 资源 id：**大写字母**开头，只含 ASCII 字母/数字（不跟中文名，避免 URL/文件名编码问题） */
 export const RESOURCE_ID_RE = /^[A-Z][A-Za-z0-9]*$/
 
+/** 资源自身版本：三段数字（例 1.471.0 / 1.0.0）；**不是应用版本** */
+export const RESOURCE_VERSION_RE = /^\d+\.\d+\.\d+$/
+
 /** 校验一个资源描述；返回错误数组（空 = 合法） */
 export function validateResourceDescriptor(r) {
   const errors = []
@@ -43,6 +46,9 @@ export function validateResourceDescriptor(r) {
     errors.push('id 必须大写字母开头、只含 ASCII 字母/数字（例：GeneralUserGS）')
   }
   if (typeof r.name !== 'string' || r.name.trim() === '') errors.push('name 不能为空')
+  if (typeof r.version !== 'string' || !RESOURCE_VERSION_RE.test(r.version)) {
+    errors.push('version 必须是资源自身版本（三段数字，例 1.471.0；不是应用版本）')
+  }
   if (typeof r.source !== 'string' || r.source.trim() === '') errors.push('source 不能为空')
   if (typeof r.dir !== 'string' || r.dir.trim() === '' || r.dir.includes('..') || /^[\\/]/.test(r.dir)) {
     errors.push('dir 必须是安装目录下的相对子目录（不能为空、不能 ..、不能绝对路径）')

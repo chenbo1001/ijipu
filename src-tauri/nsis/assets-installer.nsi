@@ -2,7 +2,7 @@
 ; assets-installer.nsi — 单个资源文件的独立安装器（2026-10-26 用户口径）
 ;
 ; 规则：**一个安装包只装一个资源文件**；文件名必须是
-;   iJipu-<Type>-<ResourceId>_<Version>_<Arch>-setup.exe
+;   iJipu-<Type>-<ResourceId>_<ResourceVersion>_<Arch>-setup.exe
 ; 具体见 scripts/asset-naming.mjs 与 docs/INSTALLER-NAMING.md。
 ;
 ; 构建：node scripts/build-assets-installer.mjs（调用 Tauri 的 makensis）
@@ -14,8 +14,8 @@
 ;   -DFILENAME=...         安装后的文件名
 ;   -DSOURCE=...           源文件绝对路径
 ; Optional:
-;   -DVERSION=<x.y.z>      应用版本（默认 0.1.0）
-;   -DOUTFILE=<path>       默认 iJipu-${TYPE}-${RESOURCE_ID}_${VERSION}_x64-setup.exe
+;   -DRESOURCE_VERSION=<x.y.z> 资源自身版本（默认 0.1.0；不是应用版本）
+;   -DOUTFILE=<path>       默认 iJipu-${TYPE}-${RESOURCE_ID}_${RESOURCE_VERSION}_x64-setup.exe
 ;
 ; 与主安装包的关系：主包不含大资源；本安装器靠 HKCU\Software\iJipu\InstallDir
 ; 找主程序，校验 ijipu.exe 后才允许安装；卸载只删自己装的那一个文件与自己的 manifest。
@@ -47,11 +47,11 @@ RequestExecutionLevel user
 !ifndef SOURCE
   !error "缺少 -DSOURCE=<源文件路径>"
 !endif
-!ifndef VERSION
-  !define VERSION "0.1.0"
+!ifndef RESOURCE_VERSION
+  !define RESOURCE_VERSION "0.1.0"
 !endif
 !ifndef OUTFILE
-  !define OUTFILE "iJipu-${TYPE}-${RESOURCE_ID}_${VERSION}_x64-setup.exe"
+  !define OUTFILE "iJipu-${TYPE}-${RESOURCE_ID}_${RESOURCE_VERSION}_x64-setup.exe"
 !endif
 
 ; 类型中文名（安装器 UI；文件名只用 ASCII 的 TYPE）
@@ -73,7 +73,7 @@ RequestExecutionLevel user
 !define MANIFEST "assets.${RESOURCE_ID}.manifest.json"
 
 Name "${APP_NAME}"
-Caption "${APP_NAME} ${VERSION}"
+Caption "${APP_NAME} ${RESOURCE_VERSION}"
 OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\iJipu"
 ShowInstDetails show
@@ -129,7 +129,7 @@ Section "-资源清单" SecManifest
   FileWrite $0 '  "id": "${RESOURCE_ID}",$\r$\n'
   FileWrite $0 '  "name": "${RESOURCE_NAME}",$\r$\n'
   FileWrite $0 '  "file": "${SUBDIR}/${FILENAME}",$\r$\n'
-  FileWrite $0 '  "appVersion": "${VERSION}",$\r$\n'
+  FileWrite $0 '  "resourceVersion": "${RESOURCE_VERSION}",$\r$\n'
   FileWrite $0 '  "installedAt": "${__DATE__} ${__TIME__}"$\r$\n'
   FileWrite $0 "}$\r$\n"
   FileClose $0
@@ -138,7 +138,7 @@ SectionEnd
 Section "-卸载信息"
   WriteUninstaller "$INSTDIR\${UNINSTALLER}"
   WriteRegStr HKCU "${UNINSTKEY}" "DisplayName" "${APP_NAME}"
-  WriteRegStr HKCU "${UNINSTKEY}" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKCU "${UNINSTKEY}" "DisplayVersion" "${RESOURCE_VERSION}"
   WriteRegStr HKCU "${UNINSTKEY}" "Publisher" "蜗牛🐌"
   WriteRegStr HKCU "${UNINSTKEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTKEY}" "DisplayIcon" "$INSTDIR\${MAIN_EXE}"

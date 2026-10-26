@@ -37,6 +37,22 @@ const body = lines
   .trim()
   .replace(/\n---\s*$/, '') // 各节之间用 --- 分隔，正文不需要
 
-writeFileSync(OUT, `${body}\n`, 'utf8')
+/**
+ * 固定尾注（2026-10-26）：资源安装包独立发布，**不随应用版本更新**。
+ * 每次应用 Release 都挂同一个资源 Release 链接，用户按需下载；不把资源资产混进应用 Release。
+ */
+const RESOURCES_RELEASE = 'https://github.com/snailhome/ijipu/releases/tag/resources'
+const footer = `
+
+---
+
+## 资源包（音色库 / 工具，独立发布）
+
+资源安装包**不随应用版本更新**；只有资源文件本身更新时才升资源版本、重发资源 Release。
+需要音色库/工具请到固定资源 Release 按需下载单个安装包：
+
+<${RESOURCES_RELEASE}>
+`
+writeFileSync(OUT, `${body}${footer}\n`, 'utf8')
 console.log(`[release-body] 命中：${lines[start]}`)
 console.log(`[release-body] 已写 ${OUT}：${body.split('\n').length} 行（CHANGELOG 共 ${lines.length} 行，只取当版）`)

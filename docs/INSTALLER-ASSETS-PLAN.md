@@ -1,12 +1,13 @@
 # 安装包与资源包方案（音色库 / 视频工具）
 
 > **⚠ 2026-10-26 规则变更（现行）**：不再做「一个资源包 exe 里勾选多个组件」；
-> **每个资源文件单独一个安装器**，文件名必须体现「资源类型 + 资源名称 + 版本」：
+> **每个资源文件单独一个安装器**，文件名必须体现「资源类型 + 资源名称 + 资源自身版本」：
 >
-> `iJipu-<SoundFont|Tool>-<ResourceId>_<Version>_x64-setup.exe`
+> `iJipu-<SoundFont|Tool>-<ResourceId>_<ResourceVersion>_x64-setup.exe`
 >
-> 例：`iJipu-SoundFont-GeneralUserGS_0.75.1_x64-setup.exe`、
-> `iJipu-Tool-FFmpeg_0.75.1_x64-setup.exe`。
+> 例：`iJipu-SoundFont-GeneralUserGS_1.471.0_x64-setup.exe`、
+> `iJipu-Tool-FFmpeg_1.0.0_x64-setup.exe`。
+> **资源版本与应用版本解耦**：应用发新版不重打包资源；资源文件本身更新才升版本。
 > 现行规则/实现/闸门见 **`docs/INSTALLER-NAMING.md`**；本文下面 §四 的「一个 exe、三个组件」
 > 是历史方案，已作废（保留仅作沿革）。
 
@@ -160,8 +161,8 @@
 **资源包（历史方案，已作废；现行见 `docs/INSTALLER-NAMING.md`）**
 
 > 2026-10-26 起改为**每个资源文件一个安装器**，不再有「一个 exe、三个可选组件」。
-> 现行文件名：`iJipu-SoundFont-GeneralUserGS_<版本>_x64-setup.exe`、
-> `iJipu-SoundFont-FluidR3GM_<版本>_x64-setup.exe`、`iJipu-Tool-FFmpeg_<版本>_x64-setup.exe`。
+> 现行文件名：`iJipu-SoundFont-GeneralUserGS_<资源版本>_x64-setup.exe`、
+> `iJipu-SoundFont-FluidR3GM_<资源版本>_x64-setup.exe`、`iJipu-Tool-FFmpeg_<资源版本>_x64-setup.exe`。
 > 用户按需下载单个安装包；每个包只装一个文件、单独卸载。
 
 | 资源类型 | 资源 id 示例 | 安装落点 |
@@ -266,7 +267,7 @@
 | 主应用 DisplayName | `iJipu` | `爱记谱 iJipu` |
 | 资源包 DisplayName | —— | `爱记谱 iJipu 音色库 · GeneralUser GS`（类型 + 资源名） |
 | 资源包卸载键 | —— | `...\Uninstall\iJipuAsset-<ResourceId>`（每个资源一个） |
-| 资源包文件名 | —— | `iJipu-<Type>-<ResourceId>_<版本>_x64-setup.exe`（ASCII，下载链接/命令行友好） |
+| 资源包文件名 | —— | `iJipu-<Type>-<ResourceId>_<资源版本>_x64-setup.exe`（ASCII，下载链接/命令行友好） |
 
 这样两个条目在列表里按同一前缀相邻，用户一眼能认出是一套；删资源包不会误删主程序，
 反之亦然。

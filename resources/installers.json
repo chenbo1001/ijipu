@@ -4,6 +4,7 @@
       "type": "SoundFont",
       "id": "GeneralUserGS",
       "name": "GeneralUser GS",
+      "version": "1.471.0",
       "source": "resources/soundfonts/generaluser_gs.sf2",
       "dir": "soundfonts",
       "file": "generaluser_gs.sf2"
@@ -12,6 +13,7 @@
       "type": "SoundFont",
       "id": "FluidR3GM",
       "name": "FluidR3 GM",
+      "version": "1.0.0",
       "source": "resources/soundfonts/FluidR3_GM.sf2",
       "dir": "soundfonts",
       "file": "FluidR3_GM.sf2"

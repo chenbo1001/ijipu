@@ -7,14 +7,15 @@
  * 命名规则唯一出处：`scripts/asset-naming.mjs`
  *   iJipu-<Type>-<ResourceId>_<Version>_<Arch>-setup.exe
  *
- * 资源清单：`resources/installers.json`（每项一个文件）。源文件不在仓库里时默认跳过；
- * 发布时传 `--strict` 让缺文件直接失败。
+ * 资源清单：`resources/installers.json`（每项一个文件，`version` 是**资源自身版本**）。
+ * 源文件不在仓库里时默认跳过；发布时传 `--strict` 让缺文件直接失败。
+ *
+ * **应用发版不重新构建资源**：只有资源文件/资源版本变化时，才构建对应资源安装器。
  *
  * 用法：
  *   node scripts/build-assets-installer.mjs
  *   node scripts/build-assets-installer.mjs --only GeneralUserGS
  *   node scripts/build-assets-installer.mjs --strict --outdir src-tauri/target/release/bundle/nsis
- *   node scripts/build-assets-installer.mjs --version 0.75.1
  *
  * 工具链：直接复用 Tauri 下载的 NSIS（`%LOCALAPPDATA%\tauri\NSIS`），不额外装 `makensis`。
  */
@@ -33,8 +34,6 @@ function arg(name, fallback = '') {
 }
 const hasFlag = (name) => process.argv.includes(`--${name}`)
 
-const appVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
-const version = arg('version', appVersion)
 const configPath = resolve(root, arg('config', 'resources/installers.json'))
 const outDir = resolve(root, arg('outdir', 'src-tauri/target/release/bundle/nsis'))
 const only = arg('only', '')
@@ -92,7 +91,7 @@ for (const r of config.resources) {
     skipped++
     continue
   }
-  const outFile = join(outDir, resourceInstallerName(r.type, r.id, version))
+  const outFile = join(outDir, resourceInstallerName(r.type, r.id, r.version))
   const args = [
     '/V2',
     `/DTYPE=${r.type}`,
@@ -101,7 +100,7 @@ for (const r of config.resources) {
     `/DSUBDIR=${r.dir}`,
     `/DFILENAME=${r.file}`,
     `/DSOURCE=${source}`,
-    `/DVERSION=${version}`,
+    `/DRESOURCE_VERSION=${r.version}`,
     `/DOUTFILE=${outFile}`,
   ]
   console.log(`[assets-installer] ${r.type}/${r.id} -> ${outFile}`)

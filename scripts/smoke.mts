@@ -36263,22 +36263,32 @@ function runAdj1162Tests(): void {
   console.log('[adj1162] 资源安装包命名：iJipu-<Type>-<Id>_<Version>_x64-setup.exe')
   check(
     'adj1162 音色库示例：SoundFont / GeneralUserGS',
-    resourceInstallerName('SoundFont', 'GeneralUserGS', '0.75.1') ===
-      'iJipu-SoundFont-GeneralUserGS_0.75.1_x64-setup.exe',
-    resourceInstallerName('SoundFont', 'GeneralUserGS', '0.75.1'),
+    resourceInstallerName('SoundFont', 'GeneralUserGS', '1.471.0') ===
+      'iJipu-SoundFont-GeneralUserGS_1.471.0_x64-setup.exe',
+    resourceInstallerName('SoundFont', 'GeneralUserGS', '1.471.0'),
   )
   check(
     'adj1162 工具示例：Tool / FFmpeg',
-    resourceInstallerName('Tool', 'FFmpeg', '0.75.1') === 'iJipu-Tool-FFmpeg_0.75.1_x64-setup.exe',
-    resourceInstallerName('Tool', 'FFmpeg', '0.75.1'),
+    resourceInstallerName('Tool', 'FFmpeg', '1.0.0') === 'iJipu-Tool-FFmpeg_1.0.0_x64-setup.exe',
+    resourceInstallerName('Tool', 'FFmpeg', '1.0.0'),
   )
-  const ok = { type: 'SoundFont', id: 'FluidR3GM', name: 'FluidR3 GM', source: 'x.sf2', dir: 'soundfonts', file: 'x.sf2' }
+  const ok = { type: 'SoundFont', id: 'FluidR3GM', name: 'FluidR3 GM', version: '1.0.0', source: 'x.sf2', dir: 'soundfonts', file: 'x.sf2' }
   check(
-    'adj1162 资源描述校验：合法通过；小写 id / 未知类型 / 带路径的 file 被拒',
+    'adj1162 资源描述校验：合法通过；小写 id / 未知类型 / 缺三段版本 / 带路径的 file 被拒',
     validateResourceDescriptor(ok).length === 0 &&
       validateResourceDescriptor({ ...ok, id: 'fluidr3' }).length > 0 &&
       validateResourceDescriptor({ ...ok, type: 'Other' }).length > 0 &&
+      validateResourceDescriptor({ ...ok, version: '1.0' }).length > 0 &&
       validateResourceDescriptor({ ...ok, file: '../x.sf2' }).length > 0,
+    '',
+  )
+  const releaseBodySrc = readFileSync(join(root, 'scripts/release-body.mjs'), 'utf8')
+  const readmeSrc = readFileSync(join(root, 'README.md'), 'utf8')
+  check(
+    'adj1162 应用 Release 正文固定挂「资源包独立 Release」链接，README 也有同一链接',
+    /releases\/tag\/resources/.test(releaseBodySrc) &&
+      /资源包（音色库 \/ 工具，独立发布）/.test(releaseBodySrc) &&
+      /releases\/tag\/resources/.test(readmeSrc),
     '',
   )
 }
