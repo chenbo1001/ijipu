@@ -1,3 +1,30 @@
+## [0.75.2] — 2026-10-26（**联系邮箱更新 + 资源安装包独立发布**：邮箱改为 `snail.zh@foxmail.com`；音色库/工具按「每个资源文件一个安装器」发布，文件名用资源自身版本，资源包固定走独立 Release `resources`，不再随应用版本重发。**PATCH**）
+
+> **版本判定（OP-02）**：**PATCH**（`0.75.1 → 0.75.2`）—— 联系信息与资源打包/发布方式调整，
+> 不改谱面语法、播放/渲染行为；**引擎不变**（仍 `0.45.1`）。
+> CLI 随应用 `0.75.2`；插件 `0.45.1 → 0.45.2`（嵌入版 0.75.2，`vendor/engine` 无差异）。
+> 验证：`smoke` **✓4641 / ✗0**、`verify:app-ui` **147 / 0**、`build` 通过、
+> `check:encoding` 463 文件、`check:assets` 全绿、两个资源安装器 `makensis` 实编通过。
+
+### 变更：联系邮箱
+
+- 品牌 tokens / 应用与 CLI 的 `package.json` / README / CHANGELOG 记录统一改为
+  `snail.zh@foxmail.com`；关于对话框的「联系」行同步。
+
+### 变更：资源安装包独立发布（`adj1162`）
+
+- 资源安装包改为**每个资源文件一个**，不再做「一个 exe 勾选多个资源」的合集；
+- 命名：`iJipu-<SoundFont|Tool>-<ResourceId>_<ResourceVersion>_x64-setup.exe`
+  - `ResourceVersion` 是**资源自身版本**，不是应用版本；应用发版不重打资源；
+  - 例：`iJipu-SoundFont-GeneralUserGS_1.471.0_x64-setup.exe`、
+    `iJipu-SoundFont-FluidR3GM_1.0.0_x64-setup.exe`；
+- 资源清单 `resources/installers.json`；构建支持 `--strict / --only`；
+- 每个资源自己的 manifest、卸载键与 `ResourceUninstallers` 登记；主卸载器「完全卸载」
+  会枚举并逐个调用各资源卸载器（旧 `iJipuAssets` 保留兼容）；
+- 资源包固定独立 Release：<https://github.com/snailhome/ijipu/releases/tag/resources>
+  - 应用 Release 正文由 `scripts/release-body.mjs` 自动追加该链接；
+  - README 的「下载」区也挂同一链接。
+
 ## [0.75.1] — 2026-10-25（**间奏标注**：`0{jz 16}` 在预览里不再只有一个 0，0 正上方标出「间奏16拍」；只加标注，不改排版宽度与播放时长。**PATCH**）
 
 > **版本判定（OP-02）**：**PATCH**（`0.75.0 → 0.75.1`）—— 只加一条渲染文字，不改语法/设置项/播放时间轴。
