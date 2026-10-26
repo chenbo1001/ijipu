@@ -20,11 +20,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const nsiPath = join(root, 'src-tauri', 'nsis', 'assets-installer.nsi')
 const hooksPath = join(root, 'src-tauri', 'nsis', 'hooks.nsh')
 const buildPath = join(root, 'scripts', 'build-assets-installer.mjs')
+const configPath = join(root, 'resources', 'installers.json')
 const nsi = existsSync(nsiPath) ? readFileSync(nsiPath, 'utf8') : ''
 const hooks = existsSync(hooksPath) ? readFileSync(hooksPath, 'utf8') : ''
 const build = existsSync(buildPath) ? readFileSync(buildPath, 'utf8') : ''
+const config = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8')) : { resources: [] }
 
-const sample = { type: 'SoundFont', id: 'GeneralUserGS', name: 'GeneralUser GS', version: '1.471.0', source: 'x', dir: 'soundfonts', file: 'x.sf2' }
+const sample = { type: 'SoundFont', id: 'GeneralUserGS', name: 'GeneralUser GS', version: '1.471.0', source: 'x', license: 'LICENSE.txt', dir: 'soundfonts', file: 'x.sf2' }
 const checks = [
   ['资源安装器脚本存在', nsi.length > 0],
   ['只允许 SoundFont / Tool 两种类型', nsi.includes('!if "${TYPE}" == "SoundFont"') && nsi.includes('!else if "${TYPE}" == "Tool"')],
@@ -37,6 +39,8 @@ const checks = [
   ['卸载只删自己那一个文件/manifest', nsi.includes('Delete "$INSTDIR\\${SUBDIR}\\${FILENAME}"') && nsi.includes('Delete "$INSTDIR\\${MANIFEST}"') && !nsi.includes('RMDir /r "$INSTDIR\\${SUBDIR}"')],
   ['资源卸载器在 ResourceUninstallers 里登记/注销', nsi.includes('!define RES_KEY "Software\\iJipu\\ResourceUninstallers"') && nsi.includes('WriteRegStr HKCU "${RES_KEY}" "${RESOURCE_ID}"') && nsi.includes('DeleteRegValue HKCU "${RES_KEY}" "${RESOURCE_ID}"')],
   ['版本用资源自身版本（不是应用版本）', nsi.includes('!define RESOURCE_VERSION') && nsi.includes('"resourceVersion": "${RESOURCE_VERSION}"') && !nsi.includes('/DVERSION=') && !build.includes('appVersion')],
+  ['音色库随附 LICENSE：安装、写 manifest、卸载、配置都有', nsi.includes('!ifdef LICENSE_SRC') && nsi.includes('File "/oname=${LICENSE_FILENAME}" "${LICENSE_SRC}"') && nsi.includes('"license":') && nsi.includes('Delete "$INSTDIR\\${SUBDIR}\\${LICENSE_FILENAME}"') && build.includes('/DLICENSE_SRC=') && (config.resources ?? []).filter((r) => r.type === 'SoundFont').every((r) => typeof r.license === 'string' && r.license.length > 0)],
+  ['缺 license 的 SoundFont 被校验拒绝', validateResourceDescriptor({ ...sample, license: '' }).length > 0],
   ['构建脚本按规则生成文件名（不再有 iJipu-Assets_ 固定名）', build.includes("from './asset-naming.mjs'") && build.includes('resourceInstallerName(r.type, r.id, r.version)') && !build.includes('iJipu-Assets_')],
   ['命名函数示例：SoundFont-GeneralUserGS', resourceInstallerName('SoundFont', 'GeneralUserGS', '1.471.0') === 'iJipu-SoundFont-GeneralUserGS_1.471.0_x64-setup.exe'],
   ['命名函数示例：Tool-FFmpeg', resourceInstallerName('Tool', 'FFmpeg', '1.0.0') === 'iJipu-Tool-FFmpeg_1.0.0_x64-setup.exe'],

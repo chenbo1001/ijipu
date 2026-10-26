@@ -47,6 +47,12 @@ RequestExecutionLevel user
 !ifndef SOURCE
   !error "缺少 -DSOURCE=<源文件路径>"
 !endif
+; 第三方资源必须随附许可：构建脚本对 SoundFont 强制传入 -DLICENSE_SRC
+!ifdef LICENSE_SRC
+  !ifndef LICENSE_FILENAME
+    !define LICENSE_FILENAME "LICENSE-${RESOURCE_ID}.txt"
+  !endif
+!endif
 !ifndef RESOURCE_VERSION
   !define RESOURCE_VERSION "0.1.0"
 !endif
@@ -81,7 +87,7 @@ ShowUninstDetails show
 
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "${APP_NAME}"
-!define MUI_WELCOMEPAGE_TEXT "这个安装包为「爱记谱 iJipu」补充${TYPE_CN}：${RESOURCE_NAME}。$\r$\n$\r$\n只装这一个资源文件；不需要的资源不必下载。$\r$\n$\r$\n安装位置会自动找主程序，也可以手动选择。"
+!define MUI_WELCOMEPAGE_TEXT "这个安装包为「爱记谱 iJipu」补充${TYPE_CN}：${RESOURCE_NAME}。$\r$\n$\r$\n只装这一个资源文件（含第三方许可）；不需要的资源不必下载。$\r$\n$\r$\n安装位置会自动找主程序，也可以手动选择。"
 !define MUI_DIRECTORYPAGE_TEXT_TOP "请选择 **iJipu 主程序所在目录**（里面有 ijipu.exe）。本资源会装进这个目录的 ${SUBDIR}\ 子目录。"
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_TEXT "启动爱记谱 iJipu"
@@ -118,6 +124,9 @@ FunctionEnd
 Section "${TYPE_CN}：${RESOURCE_NAME}" SecResource
   SetOutPath "$INSTDIR\${SUBDIR}"
   File "/oname=${FILENAME}" "${SOURCE}"
+  !ifdef LICENSE_SRC
+  File "/oname=${LICENSE_FILENAME}" "${LICENSE_SRC}"
+  !endif
 SectionEnd
 
 Section "-资源清单" SecManifest
@@ -129,6 +138,9 @@ Section "-资源清单" SecManifest
   FileWrite $0 '  "id": "${RESOURCE_ID}",$\r$\n'
   FileWrite $0 '  "name": "${RESOURCE_NAME}",$\r$\n'
   FileWrite $0 '  "file": "${SUBDIR}/${FILENAME}",$\r$\n'
+  !ifdef LICENSE_SRC
+  FileWrite $0 '  "license": "${SUBDIR}/${LICENSE_FILENAME}",$\r$\n'
+  !endif
   FileWrite $0 '  "resourceVersion": "${RESOURCE_VERSION}",$\r$\n'
   FileWrite $0 '  "installedAt": "${__DATE__} ${__TIME__}"$\r$\n'
   FileWrite $0 "}$\r$\n"
@@ -151,8 +163,11 @@ Section "-卸载信息"
 SectionEnd
 
 Section "Uninstall"
-  ; 只删本安装器装的那一个文件；用户自己导入/下载的其它库不动
+  ; 只删本安装器装的那一个文件（及其许可）；用户自己导入/下载的其它库不动
   Delete "$INSTDIR\${SUBDIR}\${FILENAME}"
+  !ifdef LICENSE_SRC
+  Delete "$INSTDIR\${SUBDIR}\${LICENSE_FILENAME}"
+  !endif
   Delete "$INSTDIR\${MANIFEST}"
   Delete "$INSTDIR\${UNINSTALLER}"
   DeleteRegValue HKCU "${RES_KEY}" "${RESOURCE_ID}"

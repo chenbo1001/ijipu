@@ -26,7 +26,7 @@ iJipu（爱记谱）本体以 **GNU Affero General Public License v3.0（AGPL-3.
 | 作者 | **S. Christian Collins**（s_chriscollins@hotmail.com） |
 | 主页 | <http://www.schristiancollins.com> |
 | 许可 | **GeneralUser GS License v2.0**（允许用在软件项目里、允许修改） |
-| 获取方式 | 应用内「音色库 → 可选/推荐音色库」里的「下载并导入 / 打开下载页」；或导入本地自备的 `.sf2` |
+| 获取方式 | 独立资源 Release 的 `iJipu-SoundFont-GeneralUserGS_1.471.1_x64-setup.exe`，装进 `soundfonts\`；安装包**随附 `LICENSE-GeneralUserGS.txt`** |
 
 许可是**明确允许**用在软件项目里的（原文："Please feel free to use it in your software
 projects, and to modify the SoundFont bank or its packaging to suit your needs."），
@@ -36,7 +36,22 @@ projects, and to modify the SoundFont bank or its packaging to suit your needs."
 但也有一些取自网络上免费（且合法）的 SoundFont，他**无法 100% 确认每个采样的来源**；
 Debian 因此在收录它时标记为 "unclean license"。iJipu 是**免费开源**项目、
 不靠这个音色库盈利，风险远低于商业软件；若你要把它用于**商业闭源产品**，这条不确定性请自行评估。
-完整说明见 `resources/soundfonts/README.md`（仓库内文档，不随安装包分发）。
+完整说明见 `resources/soundfonts/README.md`（仓库内文档）；分发包里随附的是许可原文
+`LICENSE-GeneralUserGS.txt`，与音色库一起装进 `soundfonts\`。
+
+---
+
+## 一之二、推荐的音色库：FluidR3 GM（独立资源安装包）
+
+| 项 | 内容 |
+|---|---|
+| 名称 | **FluidR3 GM**（`FluidR3_GM.sf2`） |
+| 作者 | **Frank Wen**（getfrank@gmail.com）；Debian 打包署名 **Toby Smithe** |
+| 许可 | **MIT License**（`ICMT` 元数据亦写明 "Licensed under the MIT License."） |
+| 获取方式 | 独立资源 Release 的 `iJipu-SoundFont-FluidR3GM_1.0.1_x64-setup.exe`，装进 `soundfonts\`；安装包**随附 `LICENSE-FluidR3.txt`** |
+
+许可全文与署名来源：`resources/soundfonts/LICENSE-FluidR3.txt`
+（依据 Debian `fluid-soundfont` 的 copyright 文件；MIT 要求保留版权与许可声明）。
 
 ---
 

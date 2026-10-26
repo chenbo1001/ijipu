@@ -241,10 +241,10 @@
   - 桌面端下载会走系统 curl，带进度，不受浏览器 CORS 限制。
 - **资源安装包目录**：桌面端额外识别 `%LOCALAPPDATA%\iJipu\soundfonts`。以后发「资源包」时，把库放到这里即可，不必再逐个导入。
 - **安装资源包**：在 GitHub 的**独立资源 Release**（`releases/tag/resources`）里按需下载**单个**资源安装包，
-  例如 `iJipu-SoundFont-GeneralUserGS_1.471.0_x64-setup.exe`、
-  `iJipu-SoundFont-FluidR3GM_1.0.0_x64-setup.exe`、
+  例如 `iJipu-SoundFont-GeneralUserGS_1.471.1_x64-setup.exe`、
+  `iJipu-SoundFont-FluidR3GM_1.0.1_x64-setup.exe`、
   `iJipu-Tool-FFmpeg_1.0.0_x64-setup.exe`。安装器会自动找主程序目录（校验 `ijipu.exe`），
-  只装这一个资源文件；装完在「音色库」里点「使用」即可。**资源安装包不随应用版本升级**，
+  只装这一个资源文件（**含第三方 LICENSE**）；装完在「音色库」里点「使用」即可。**资源安装包不随应用版本升级**，
   只有资源本身更新时才发新版本。卸载主程序时会问 **完全卸载 / 保留音色库与资源包**
   （默认保留，下次安装直接复用）；每个资源也能在「应用和功能」里单独卸载。
   命名规则见 `docs/INSTALLER-NAMING.md`。

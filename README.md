@@ -21,7 +21,7 @@
 - **主程序**（Windows 安装包）：<https://github.com/snailhome/ijipu/releases/latest>
 - **资源包（音色库 / 工具）**：<https://github.com/snailhome/ijipu/releases/tag/resources>
   - 资源安装包**独立发布，不随应用版本更新**；只有资源本身更新时才升资源版本。
-  - 按需下载单个资源，例如 `iJipu-SoundFont-GeneralUserGS_1.471.0_x64-setup.exe`；
+  - 按需下载单个资源，例如 `iJipu-SoundFont-GeneralUserGS_1.471.1_x64-setup.exe`；
     命名规则见 [docs/INSTALLER-NAMING.md](docs/INSTALLER-NAMING.md)。
 
 ## 功能现状
@@ -90,7 +90,7 @@ npx tauri build             # 打包 → src-tauri/target/release/bundle/nsis/*-
 - **GeneralUser GS v1.471**（作者 S. Christian Collins，[主页](http://www.schristiancollins.com)）——
   内置音色库 `resources/soundfonts/generaluser_gs.sf2`，按 **GeneralUser GS License v2.0** 分发；
   **主安装包不内置**，发布时按 [`docs/INSTALLER-NAMING.md`](docs/INSTALLER-NAMING.md) 生成
-  `iJipu-SoundFont-GeneralUserGS_1.471.0_x64-setup.exe` 独立资源安装包
+  `iJipu-SoundFont-GeneralUserGS_1.471.1_x64-setup.exe` 独立资源安装包
   （资源版本独立于应用版本，见 [`docs/INSTALLER-NAMING.md`](docs/INSTALLER-NAMING.md)）。
   许可原文见 `resources/soundfonts/LICENSE-GeneralUserGS.txt`；来源、署名，以及一处**使用者必须知道的保留说明**
   （原作者声明部分采样来源无法 100% 追证）见 [`resources/soundfonts/README.md`](resources/soundfonts/README.md)。

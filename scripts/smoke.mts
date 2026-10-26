@@ -36272,13 +36272,14 @@ function runAdj1162Tests(): void {
     resourceInstallerName('Tool', 'FFmpeg', '1.0.0') === 'iJipu-Tool-FFmpeg_1.0.0_x64-setup.exe',
     resourceInstallerName('Tool', 'FFmpeg', '1.0.0'),
   )
-  const ok = { type: 'SoundFont', id: 'FluidR3GM', name: 'FluidR3 GM', version: '1.0.0', source: 'x.sf2', dir: 'soundfonts', file: 'x.sf2' }
+  const ok = { type: 'SoundFont', id: 'FluidR3GM', name: 'FluidR3 GM', version: '1.0.0', source: 'x.sf2', license: 'LICENSE-FluidR3.txt', dir: 'soundfonts', file: 'x.sf2' }
   check(
-    'adj1162 资源描述校验：合法通过；小写 id / 未知类型 / 缺三段版本 / 带路径的 file 被拒',
+    'adj1162 资源描述校验：合法通过；小写 id / 未知类型 / 缺三段版本 / 缺 license / 带路径的 file 被拒',
     validateResourceDescriptor(ok).length === 0 &&
       validateResourceDescriptor({ ...ok, id: 'fluidr3' }).length > 0 &&
       validateResourceDescriptor({ ...ok, type: 'Other' }).length > 0 &&
       validateResourceDescriptor({ ...ok, version: '1.0' }).length > 0 &&
+      validateResourceDescriptor({ ...ok, license: '' }).length > 0 &&
       validateResourceDescriptor({ ...ok, file: '../x.sf2' }).length > 0,
     '',
   )

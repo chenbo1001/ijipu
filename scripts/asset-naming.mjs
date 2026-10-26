@@ -50,6 +50,13 @@ export function validateResourceDescriptor(r) {
     errors.push('version 必须是资源自身版本（三段数字，例 1.471.0；不是应用版本）')
   }
   if (typeof r.source !== 'string' || r.source.trim() === '') errors.push('source 不能为空')
+  // 第三方音色库必须随附许可（分发义务；Tool 可选）
+  if (r.type === 'SoundFont' && (typeof r.license !== 'string' || r.license.trim() === '')) {
+    errors.push('SoundFont 必须提供 license（第三方许可文件路径）')
+  }
+  if (r.license !== undefined && (typeof r.license !== 'string' || r.license.trim() === '')) {
+    errors.push('license 若提供，必须是非空路径')
+  }
   if (typeof r.dir !== 'string' || r.dir.trim() === '' || r.dir.includes('..') || /^[\\/]/.test(r.dir)) {
     errors.push('dir 必须是安装目录下的相对子目录（不能为空、不能 ..、不能绝对路径）')
   }

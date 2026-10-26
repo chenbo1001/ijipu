@@ -9,8 +9,10 @@
 
 | 类型 | 资源 | 版本 | 安装包 |
 |---|---|---|---|
-| 音色库 | GeneralUser GS | `1.471.0` | `iJipu-SoundFont-GeneralUserGS_1.471.0_x64-setup.exe` |
-| 音色库 | FluidR3 GM | `1.0.0` | `iJipu-SoundFont-FluidR3GM_1.0.0_x64-setup.exe` |
+| 音色库 | GeneralUser GS | `1.471.1` | `iJipu-SoundFont-GeneralUserGS_1.471.1_x64-setup.exe` |
+| 音色库 | FluidR3 GM | `1.0.1` | `iJipu-SoundFont-FluidR3GM_1.0.1_x64-setup.exe` |
+
+> 两个安装包都**随附对应 LICENSE**（GeneralUser GS License v2.0 / FluidR3 MIT），装进 `soundfonts\`，卸载时只删自己的许可。
 
 > 工具类型（`Tool`）已支持；有工具文件时在 `resources/installers.json` 增加一项即可。
 

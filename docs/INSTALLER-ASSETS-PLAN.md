@@ -5,7 +5,7 @@
 >
 > `iJipu-<SoundFont|Tool>-<ResourceId>_<ResourceVersion>_x64-setup.exe`
 >
-> 例：`iJipu-SoundFont-GeneralUserGS_1.471.0_x64-setup.exe`、
+> 例：`iJipu-SoundFont-GeneralUserGS_1.471.1_x64-setup.exe`、
 > `iJipu-Tool-FFmpeg_1.0.0_x64-setup.exe`。
 > **资源版本与应用版本解耦**：应用发新版不重打包资源；资源文件本身更新才升版本。
 > 现行规则/实现/闸门见 **`docs/INSTALLER-NAMING.md`**；本文下面 §四 的「一个 exe、三个组件」

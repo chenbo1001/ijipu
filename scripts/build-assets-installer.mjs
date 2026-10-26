@@ -8,6 +8,7 @@
  *   iJipu-<Type>-<ResourceId>_<Version>_<Arch>-setup.exe
  *
  * 资源清单：`resources/installers.json`（每项一个文件，`version` 是**资源自身版本**）。
+ * **音色库必须带 `license`**（第三方作品的分发义务）；许可文件会一起装进资源目录。
  * 源文件不在仓库里时默认跳过；发布时传 `--strict` 让缺文件直接失败。
  *
  * **应用发版不重新构建资源**：只有资源文件/资源版本变化时，才构建对应资源安装器。
@@ -21,7 +22,7 @@
  */
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resourceInstallerName, validateResourceDescriptor } from './asset-naming.mjs'
 
@@ -91,6 +92,12 @@ for (const r of config.resources) {
     skipped++
     continue
   }
+  // 许可文件是分发义务：配置了就必须存在；SoundFont 必须配置（见 asset-naming 校验）
+  const license = r.license ? resolve(root, r.license) : ''
+  if (license && !existsSync(license)) {
+    console.error(`[assets-installer] ${r.type}/${r.id} 的许可文件不存在：${r.license}`)
+    process.exit(1)
+  }
   const outFile = join(outDir, resourceInstallerName(r.type, r.id, r.version))
   const args = [
     '/V2',
@@ -103,6 +110,7 @@ for (const r of config.resources) {
     `/DRESOURCE_VERSION=${r.version}`,
     `/DOUTFILE=${outFile}`,
   ]
+  if (license) args.push(`/DLICENSE_SRC=${license}`, `/DLICENSE_FILENAME=${basename(license)}`)
   console.log(`[assets-installer] ${r.type}/${r.id} -> ${outFile}`)
   const res = spawnSync(makensis, [...args, script], {
     cwd: root,

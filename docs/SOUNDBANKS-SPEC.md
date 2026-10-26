@@ -119,7 +119,7 @@ GM 的 128 个中文名曾与 MIDI 标准**成段错位**，已按标准更正�
 - 安装包里**没有** `generaluser_gs.sf2`，也没有 `soundfonts/` 目录；
 - 首次安装后「已安装的音色库」列表**是空的**，页面提示"基础音色库需要先下载，否则没有声音"；
 - 三条获取路径：① 应用内「下载基础音色库」（只在"一个库都没有"时出现一个按钮）；② 资源安装包
-  （**每个资源文件一个独立安装器**，如 `iJipu-SoundFont-GeneralUserGS_1.471.0_x64-setup.exe`，
+  （**每个资源文件一个独立安装器**，如 `iJipu-SoundFont-GeneralUserGS_1.471.1_x64-setup.exe`，
   放在**独立资源 Release** `releases/tag/resources`，装进同一个目录；**资源版本不跟应用版本**，
   命名规则见 `docs/INSTALLER-NAMING.md`）；③ 「添加音色库…」导入本地文件。
 - **应用里不放推荐清单**（adj1023，用户口径「少即是多」）：介绍/评价在官网**独立页 `/soundfonts/`**
