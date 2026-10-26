@@ -88,6 +88,8 @@ import { endCardLayout } from '../src/export/video/cardLayout'
 import { flattenScoreNotes, measureSpotOf, resolveBarBeatRange } from '@ijipu/engine/index.ts'
 // adj900：从 URL 文本串导入源码（官网首页「在应用里试听这段」带过来的）
 import { JPS_PARAM_MAX_LEN, readJpsFromSearch, withoutJpsParam } from '../src/store/urlImport'
+// adj1162：资源安装包命名规则的唯一出处（构建/静态闸门/冒烟共用）
+import { resourceInstallerName, validateResourceDescriptor } from './asset-naming.mjs'
 import { inflateSync } from 'node:zlib'
 import { parseJps as parseJpsRaw, formatJps, formatLine, tokenizeJpsLine, tokenizeJpsMusic, interludeBeatsOf, matchInterludeHead, jpsBlockSpan, jpsBlockMarks, highlightModel, highlightLineModel, groupBlocksByLine, lineLevelOf, trackKeysOf, JPS_HIGHLIGHT_COLORS, JPS_PLAIN_COLORS, JPS_HL_CSS_VAR, createPlaybackClock, DEFAULT_NEW_JPS_TEMPLATE, configValuesEqual, isDefaultConfigValue, changedConfigKeys, instrumentColorMap, playheadBaseOf, primaryVoiceOf, playheadPosIn, tokenDuration, layoutScore, renderScoreToSvg, defaultPageConfig, metaAreaH, extractJpsConfig, mergeJpsConfig, writeJpsConfig, mergeConfigEdits, configCarryover, inspectJpsConfig, extractLegacyEditorPrefs, JPS_CONFIG_PREFIX, nonDefaultConfigKeys, OPTIONAL_CONFIG_FIELDS, defaultConfigForReset, SYS_FONT, SCORE_FONT_OPTIONS, EDITOR_FONT_OPTIONS, normalizeFontStack, applyFontOverride, clampEditorFontSize, splitNoteDur, digitSlotW, dotBodyW, augBodyW, slideBodyW, bracketBodyW, noteBodyW, nonDurGap, accidentalBodyW, accidentalPenDx, accidentalInkLeftDx, accidentalInkRightDx, accidentalFontSize, slideExtraW, slideGlyphInk, graceSlotLayout, graceSlideInk, mordentInkW, computeSegments, mainSpans, mainSpansInRange, beatRatio, segmentRowExtra, lyricCommentFontSize, lyricCommentWidth, LYRIC_COMMENT_GAP, segmentNoteIndexBase, decodeSegmentNoteId, buildIndexToPage, decodeTpNoteId, tpNoteIndexBase, measureBeatsOf, meterBeatsOf, inlineMeterBeats, GRACE_MARK_CODES, GRACE_MORDENT_CODES, rangeBox, applyRangeToSvg, readViewBoxOf, normalizeRangePad, minInkFor, MIN_INK_FALLBACK, NEAR_PAGE_RATIO, inkBoxOfLayout, inkBoxesOfLayout, INK_ESTIMATE_SLACK, insertPngPhys, readPngPhys, crc32, isPng, dpiForScale, pixelsPerMeterFor } from '@ijipu/engine/index.ts'
 // adj971：应用标题（`文件名.jps - 爱记谱 iJipu`）与版本串的**唯一来源** —— 冒烟直接调真函数，不抄模板
@@ -21137,6 +21139,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1160Tests())
       // adj1161：间奏 0 上方标注「间奏16拍」
       .then(() => runAdj1161Tests())
+      // adj1162：资源安装包命名规则（每资源一个、类型+名称+版本）
+      .then(() => runAdj1162Tests())
       // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
       .then(() => runAdj1122Tests())
       // adj1124：对拍台尺寸/分区高度/预览比例（可拖可最大化，记 L1）
@@ -36248,6 +36252,33 @@ function runAdj1161Tests(): void {
   check(
     'adj1161 负对照：没有 {jz N} 的 0 不出现间奏标注',
     !(renderScoreToSvg(plain)[0] ?? '').includes('间奏16拍'),
+    '',
+  )
+}
+
+/**
+ * adj1162（用户 2026-10-26）：大资源**每个文件一个安装包**，名字要体现「类型 + 名称 + 版本」。
+ */
+function runAdj1162Tests(): void {
+  console.log('[adj1162] 资源安装包命名：iJipu-<Type>-<Id>_<Version>_x64-setup.exe')
+  check(
+    'adj1162 音色库示例：SoundFont / GeneralUserGS',
+    resourceInstallerName('SoundFont', 'GeneralUserGS', '0.75.1') ===
+      'iJipu-SoundFont-GeneralUserGS_0.75.1_x64-setup.exe',
+    resourceInstallerName('SoundFont', 'GeneralUserGS', '0.75.1'),
+  )
+  check(
+    'adj1162 工具示例：Tool / FFmpeg',
+    resourceInstallerName('Tool', 'FFmpeg', '0.75.1') === 'iJipu-Tool-FFmpeg_0.75.1_x64-setup.exe',
+    resourceInstallerName('Tool', 'FFmpeg', '0.75.1'),
+  )
+  const ok = { type: 'SoundFont', id: 'FluidR3GM', name: 'FluidR3 GM', source: 'x.sf2', dir: 'soundfonts', file: 'x.sf2' }
+  check(
+    'adj1162 资源描述校验：合法通过；小写 id / 未知类型 / 带路径的 file 被拒',
+    validateResourceDescriptor(ok).length === 0 &&
+      validateResourceDescriptor({ ...ok, id: 'fluidr3' }).length > 0 &&
+      validateResourceDescriptor({ ...ok, type: 'Other' }).length > 0 &&
+      validateResourceDescriptor({ ...ok, file: '../x.sf2' }).length > 0,
     '',
   )
 }

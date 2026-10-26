@@ -1,0 +1,20 @@
+{
+  "resources": [
+    {
+      "type": "SoundFont",
+      "id": "GeneralUserGS",
+      "name": "GeneralUser GS",
+      "source": "resources/soundfonts/generaluser_gs.sf2",
+      "dir": "soundfonts",
+      "file": "generaluser_gs.sf2"
+    },
+    {
+      "type": "SoundFont",
+      "id": "FluidR3GM",
+      "name": "FluidR3 GM",
+      "source": "resources/soundfonts/FluidR3_GM.sf2",
+      "dir": "soundfonts",
+      "file": "FluidR3_GM.sf2"
+    }
+  ]
+}

@@ -80,7 +80,9 @@ npx tauri build             # 打包 → src-tauri/target/release/bundle/nsis/*-
 ## 第三方资源
 
 - **GeneralUser GS v1.471**（作者 S. Christian Collins，[主页](http://www.schristiancollins.com)）——
-  内置音色库 `resources/soundfonts/generaluser_gs.sf2`，按 **GeneralUser GS License v2.0** 随安装包分发。
+  内置音色库 `resources/soundfonts/generaluser_gs.sf2`，按 **GeneralUser GS License v2.0** 分发；
+  **主安装包不内置**，发布时按 [`docs/INSTALLER-NAMING.md`](docs/INSTALLER-NAMING.md) 生成
+  `iJipu-SoundFont-GeneralUserGS_<版本>_x64-setup.exe` 独立资源安装包。
   许可原文见 `resources/soundfonts/LICENSE-GeneralUserGS.txt`；来源、署名，以及一处**使用者必须知道的保留说明**
   （原作者声明部分采样来源无法 100% 追证）见 [`resources/soundfonts/README.md`](resources/soundfonts/README.md)。
 

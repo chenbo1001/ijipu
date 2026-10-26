@@ -197,14 +197,25 @@ FunctionEnd
     IfSilent ijipu_keep_assets
     MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "要完全卸载吗？$\r$\n$\r$\n是：同时删除音色库、资源包、本机配置（主题 / 卡片 / 草稿）和浏览器缓存。$\r$\n否：只删程序，以上全部保留（下次安装可直接复用）。" IDYES ijipu_full_uninstall IDNO ijipu_keep_assets
     ijipu_full_uninstall:
-      ; 先调用资源包卸载器（它只删自己装的 sf2/manifest）；调不到再按目录兜底。
+      ; ① 旧版「一个资源包装多个音色」的卸载器（兼容）
       ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\iJipuAssets" "UninstallString"
-      StrCmp $0 "" ijipu_assets_dir_only
+      StrCmp $0 "" ijipu_asset_legacy_done
       ExecWait '"$0" /S'
-      Goto ijipu_assets_cleanup
-      ijipu_assets_dir_only:
-      ijipu_assets_cleanup:
-      ; 「完全卸载」按目录清（含老版本随包的那份 generaluser_gs.sf2，它已不在新卸载清单里）。
+      ijipu_asset_legacy_done:
+      ; ② 新版：每个资源文件一个卸载器，登记在 ResourceUninstallers（值名 = 资源 id）。
+      ;    逐个调用后删登记；卸载器自己也会删，但主卸载器先删可保证枚举不跳项。
+      ijipu_res_loop:
+        EnumRegValue $R1 HKCU "Software\iJipu\ResourceUninstallers" 0
+        StrCmp $R1 "" ijipu_res_done
+        ReadRegStr $R2 HKCU "Software\iJipu\ResourceUninstallers" "$R1"
+        DeleteRegValue HKCU "Software\iJipu\ResourceUninstallers" "$R1"
+        StrCmp $R2 "" ijipu_res_loop
+        IfFileExists "$R2" 0 ijipu_res_loop
+        ExecWait '"$R2" /S'
+        Goto ijipu_res_loop
+      ijipu_res_done:
+      DeleteRegKey HKCU "Software\iJipu\ResourceUninstallers"
+      ; ③ 按目录兜底（含旧版随包的那份 generaluser_gs.sf2，它已不在新卸载清单里）。
       RMDir /r "$INSTDIR\soundfonts"
       RMDir /r "$INSTDIR\tools"
       ; adj1085：本机配置（%APPDATA%\iJipu）与 WebView2 的浏览器存储（旧配置/缓存）。

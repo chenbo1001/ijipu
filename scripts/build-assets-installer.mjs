@@ -1,24 +1,28 @@
 /**
- * scripts/build-assets-installer.mjs — 构建「爱记谱 iJipu 资源包」安装器
+ * scripts/build-assets-installer.mjs — 按**资源文件**逐个构建独立安装器（2026-10-26 规则）
  *
- * 用户口径（2026-10-21 / 2026-10-22）：
- *  - 主安装包不含音色库；资源包单独一个 exe，装进主程序目录的 soundfonts\；
- *  - 资源包只做音色库（ffmpeg 已不需要，见 INSTALLER-ASSETS-PLAN 顶部更新）；
- *  - 文件名 ASCII：`iJipu-Assets_<version>_x64-setup.exe`。
+ * 用户口径：音色库/工具等资源文件较大，**每个资源文件单独一个安装包**；
+ * 安装包名必须体现「资源类型 + 资源名称」，方便用户按需下载与区分。
+ *
+ * 命名规则唯一出处：`scripts/asset-naming.mjs`
+ *   iJipu-<Type>-<ResourceId>_<Version>_<Arch>-setup.exe
+ *
+ * 资源清单：`resources/installers.json`（每项一个文件）。源文件不在仓库里时默认跳过；
+ * 发布时传 `--strict` 让缺文件直接失败。
+ *
+ * 用法：
+ *   node scripts/build-assets-installer.mjs
+ *   node scripts/build-assets-installer.mjs --only GeneralUserGS
+ *   node scripts/build-assets-installer.mjs --strict --outdir src-tauri/target/release/bundle/nsis
+ *   node scripts/build-assets-installer.mjs --version 0.75.1
  *
  * 工具链：直接复用 Tauri 下载的 NSIS（`%LOCALAPPDATA%\tauri\NSIS`），不额外装 `makensis`。
- * 用法：
- *   node scripts/build-assets-installer.mjs \
- *     --generaluser resources/soundfonts/generaluser_gs.sf2 \
- *     [--fluidr3 resources/soundfonts/FluidR3_GM.sf2] \
- *     [--version 0.1.0] [--outdir src-tauri/target/release/bundle/nsis]
- *
- * 资源文件默认从 `resources/soundfonts/` 找；不在仓库里（体积大），发布时显式传入。
  */
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resourceInstallerName, validateResourceDescriptor } from './asset-naming.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const script = join(root, 'src-tauri', 'nsis', 'assets-installer.nsi')
@@ -27,26 +31,25 @@ function arg(name, fallback = '') {
   const i = process.argv.indexOf(`--${name}`)
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback
 }
+const hasFlag = (name) => process.argv.includes(`--${name}`)
 
-const version = arg('version', '0.1.0')
+const appVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+const version = arg('version', appVersion)
+const configPath = resolve(root, arg('config', 'resources/installers.json'))
 const outDir = resolve(root, arg('outdir', 'src-tauri/target/release/bundle/nsis'))
-const generalUser = resolve(
-  root,
-  arg('generaluser', existsSync(join(root, 'resources/soundfonts/generaluser_gs.sf2'))
-    ? 'resources/soundfonts/generaluser_gs.sf2'
-    : 'public/soundfonts/generaluser_gs.sf2'),
-)
-const fluidR3 = arg('fluidr3', existsSync(join(root, 'resources/soundfonts/FluidR3_GM.sf2'))
-  ? 'resources/soundfonts/FluidR3_GM.sf2'
-  : '')
+const only = arg('only', '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
+const strict = hasFlag('strict')
 
-if (!existsSync(generalUser)) {
-  console.error(`[assets-installer] 缺少基础音色库：${generalUser}`)
-  console.error('  请用 --generaluser <generaluser_gs.sf2> 指定（文件不进仓库，发布时传入）。')
+if (!existsSync(configPath)) {
+  console.error(`[assets-installer] 找不到资源清单：${configPath}`)
   process.exit(1)
 }
-if (fluidR3 && !existsSync(resolve(root, fluidR3))) {
-  console.error(`[assets-installer] 指定的高级音色库不存在：${fluidR3}`)
+const config = JSON.parse(readFileSync(configPath, 'utf8'))
+if (!Array.isArray(config.resources)) {
+  console.error('[assets-installer] resources/installers.json 里必须有 resources 数组')
   process.exit(1)
 }
 
@@ -62,29 +65,60 @@ if (!makensis) {
   process.exit(1)
 }
 const nsisDir = makensis.includes(join('tauri', 'NSIS'))
-  ? (makensis.includes(join('NSIS', 'Bin')) ? dirname(dirname(makensis)) : dirname(makensis))
+  ? makensis.includes(join('NSIS', 'Bin'))
+    ? dirname(dirname(makensis))
+    : dirname(makensis)
   : process.env.NSISDIR
-const outFile = join(outDir, `iJipu-Assets_${version}_x64-setup.exe`)
+
 mkdirSync(outDir, { recursive: true })
 
-const args = [
-  '/V2',
-  `/DGENERALUSER=${generalUser}`,
-  `/DVERSION=${version}`,
-  `/DOUTFILE=${outFile}`,
-]
-if (fluidR3) args.push(`/DFLUIDR3=${resolve(root, fluidR3)}`)
-args.push(script)
-
-console.log(`[assets-installer] ${makensis}`)
-console.log(`[assets-installer] -> ${outFile}`)
-const r = spawnSync(makensis, args, {
-  cwd: root,
-  stdio: 'inherit',
-  env: { ...process.env, ...(nsisDir ? { NSISDIR: nsisDir } : {}) },
-})
-if (r.status !== 0) {
-  console.error(`[assets-installer] makensis 退出码 ${r.status}`)
-  process.exit(r.status ?? 1)
+let built = 0
+let skipped = 0
+for (const r of config.resources) {
+  if (only.length > 0 && !only.includes(r?.id)) continue
+  const errors = validateResourceDescriptor(r)
+  if (errors.length > 0) {
+    console.error(`[assets-installer] 资源描述非法（${r?.id ?? '?'}）：${errors.join('；')}`)
+    process.exit(1)
+  }
+  const source = resolve(root, r.source)
+  if (!existsSync(source)) {
+    const msg = `[assets-installer] 跳过 ${r.type}/${r.id}：源文件不存在 ${r.source}`
+    if (strict) {
+      console.error(msg)
+      process.exit(1)
+    }
+    console.warn(msg)
+    skipped++
+    continue
+  }
+  const outFile = join(outDir, resourceInstallerName(r.type, r.id, version))
+  const args = [
+    '/V2',
+    `/DTYPE=${r.type}`,
+    `/DRESOURCE_ID=${r.id}`,
+    `/DRESOURCE_NAME=${r.name}`,
+    `/DSUBDIR=${r.dir}`,
+    `/DFILENAME=${r.file}`,
+    `/DSOURCE=${source}`,
+    `/DVERSION=${version}`,
+    `/DOUTFILE=${outFile}`,
+  ]
+  console.log(`[assets-installer] ${r.type}/${r.id} -> ${outFile}`)
+  const res = spawnSync(makensis, [...args, script], {
+    cwd: root,
+    stdio: 'inherit',
+    env: { ...process.env, ...(nsisDir ? { NSISDIR: nsisDir } : {}) },
+  })
+  if (res.status !== 0) {
+    console.error(`[assets-installer] makensis 退出码 ${res.status}（${r.id}）`)
+    process.exit(res.status ?? 1)
+  }
+  built++
 }
-console.log(`[assets-installer] ✓ ${outFile}`)
+
+if (built === 0 && skipped === 0) {
+  console.warn('[assets-installer] 清单里没有匹配的资源；什么都没构建')
+} else {
+  console.log(`[assets-installer] 完成：构建 ${built} 个，跳过 ${skipped} 个`)
+}
