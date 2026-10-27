@@ -36013,6 +36013,7 @@ function runAdj1155Tests(): void {
   const extrasSrc = readFileSync(join(root, 'src/store/syncExtras.ts'), 'utf8')
   const appSrc = readFileSync(join(root, 'src/App.tsx'), 'utf8')
   const barSrc = readFileSync(join(root, 'src/dialogs/PracticeMarkBar.tsx'), 'utf8')
+  const markLayerSrc = readFileSync(join(root, 'src/preview/PracticeMarkLayer.tsx'), 'utf8')
   const overlaySrc = readFileSync(join(root, 'src/preview/DynamicFrameOverlay.tsx'), 'utf8')
   const exportPanelSrc = readFileSync(join(root, 'src/ui/dock/ExportPanel.tsx'), 'utf8')
   check(
@@ -36035,6 +36036,12 @@ function runAdj1155Tests(): void {
     /useSyncSidecarExtras\(\)/.test(appSrc) &&
       /loadSidecarFor\(nativePath, binding\)/.test(extrasSrc) &&
       /applySyncExtrasToUi\(d\)/.test(extrasSrc),
+    '',
+  )
+  check(
+    'adj1168 对拍台打开时（modal=sync）不画试听标记段线',
+    /modal === 'sync'/.test(markLayerSrc) &&
+      /!showInDialog \|\| syncDialogOpen/.test(markLayerSrc),
     '',
   )
   check(
