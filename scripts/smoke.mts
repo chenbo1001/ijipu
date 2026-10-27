@@ -36055,6 +36055,16 @@ function runAdj1155Tests(): void {
     '',
   )
   check(
+    'adj1170 节拍器改用软音色（660Hz→440Hz / 0.07 / 短衰减），并在 HMR dispose 时停掉已排的嗒',
+    /METRONOME_HZ = 660/.test(syncSrc) &&
+      /METRONOME_GAIN = 0\.07/.test(syncSrc) &&
+      /CLICK_LOOKAHEAD_MS = 1500/.test(syncSrc) &&
+      /import\.meta\.hot\.dispose\(stopLiveClicks\)/.test(syncSrc) &&
+      /osc\.type = 'triangle'/.test(syncSrc) &&
+      !/osc\.frequency\.value = 1000/.test(syncSrc),
+    '',
+  )
+  check(
     'adj1155 试听里增删练习段 ⇒ 立刻写 sidecar（mirrorMarks + flushSyncAutoSave）',
     /mirrorMarks\(\)/.test(barSrc) &&
       /flushSyncAutoSave\(\)/.test(barSrc) &&

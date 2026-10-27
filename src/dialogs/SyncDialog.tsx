@@ -76,6 +76,32 @@ const STEPS = [1, 5, 10, 50] as const
 /** "回退几秒重听"：锚点前 3 秒 → 锚点后 2 秒 */
 const REWIND_MS = 3000
 const AFTER_MS = 2000
+/**
+ * adj1170：节拍器"嗒"的软音色（用户实报「不好听、太抢耳」）。
+ *
+ * 旧版是 1000Hz 正弦 + 0.22 增益、方起方停 ⇒ 像提示音，且 HMR 时旧模块排出去的
+ * 振荡器还会继续响几声。现在改成短衰减的三角波（660Hz → 440Hz、峰值 0.07），
+ * 起音 2ms、45ms 内收干净；并把已排进 AudioContext 的节点登记到模块级集合，
+ * HMR dispose 时统一停掉（见 `stopLiveClicks`）。
+ */
+const METRONOME_HZ = 660
+const METRONOME_GAIN = 0.07
+const METRONOME_MS = 45
+/** adj1170：节拍器只预排 1.5 秒（旧 4 秒；HMR/改 CSS 时残余的"嗒"更少） */
+const CLICK_LOOKAHEAD_MS = 1500
+const liveClicks = new Set<OscillatorNode>()
+function stopLiveClicks(): void {
+  for (const o of liveClicks) {
+    try {
+      o.stop()
+      o.disconnect()
+    } catch {
+      /* 已经自然结束 */
+    }
+  }
+  liveClicks.clear()
+}
+if (import.meta.hot) import.meta.hot.dispose(stopLiveClicks)
 
 const fmtSec = (ms: number): string => `${(ms / 1000).toFixed(3)}s`
 
@@ -597,6 +623,8 @@ export function SyncDialog() {
       }
     }
     clicksRef.current = []
+    // adj1170：连同 HMR 前旧模块排出去的"嗒"一起停掉
+    stopLiveClicks()
     schedRef.current = 0
   }, [])
 
@@ -661,15 +689,26 @@ export function SyncDialog() {
         const at = clock.offsetMs + k * beatMs
         if (at > untilMs) break
         if (at >= from) {
+          const when = ctx.currentTime + Math.max(0, (at - from) / 1000)
           const osc = ctx.createOscillator()
           const gain = ctx.createGain()
-          osc.frequency.value = 1000
-          gain.gain.value = 0.22
+          /**
+           * adj1170：短衰减的软"嗒"——旧版 1000Hz/0.22 方起方停太像提示音。
+           * 三角波从 660Hz 落到 440Hz，2ms 起音、45ms 内衰减到静音；
+           * 音头/音尾都有包络，不再有硬切的爆音。
+           */
+          osc.type = 'triangle'
+          osc.frequency.setValueAtTime(METRONOME_HZ, when)
+          osc.frequency.exponentialRampToValueAtTime(METRONOME_HZ * 0.667, when + METRONOME_MS / 1000)
+          gain.gain.setValueAtTime(0.0001, when)
+          gain.gain.exponentialRampToValueAtTime(METRONOME_GAIN, when + 0.002)
+          gain.gain.exponentialRampToValueAtTime(0.0001, when + METRONOME_MS / 1000)
           osc.connect(gain)
           gain.connect(ctx.destination)
-          const when = ctx.currentTime + Math.max(0, (at - from) / 1000)
           osc.start(when)
-          osc.stop(when + 0.04)
+          osc.stop(when + METRONOME_MS / 1000 + 0.01)
+          liveClicks.add(osc)
+          osc.onended = () => liveClicks.delete(osc)
           clicksRef.current.push(osc)
         }
         n++
@@ -823,12 +862,12 @@ export function SyncDialog() {
       playingRef.current = true
       setPlaying(true)
       schedRef.current = from
-      if (meterRef.current) scheduleClicksUntil(from + 4000)
+      if (meterRef.current) scheduleClicksUntil(from + CLICK_LOOKAHEAD_MS)
       const tick = () => {
         if (!playingRef.current) return
         const t = currentMs()
         playheadRef.current = Math.min(t, trim.endMs)
-        if (meterRef.current) scheduleClicksUntil(Math.min(trim.endMs, t + 4000))
+        if (meterRef.current) scheduleClicksUntil(Math.min(trim.endMs, t + CLICK_LOOKAHEAD_MS))
         drawRef.current()
         const lp = loopRef.current
         if (lp && t >= lp.endMs) {
