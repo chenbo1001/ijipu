@@ -56,6 +56,11 @@ export interface DynamicExportOptions {
    */
   rowLeadBeats?: number
   /**
+   * adj1164：相机位选定的**全篇统一音色**（音色名 ref；不传 = 自动随谱）。
+   * 预览与出片必须用同一份，否则成片音色与框里看到的不一致。
+   */
+  instrumentOverride?: string
+  /**
    * adj1119：**对拍得到的实际拍速**（`60000 / beatMs`）。传了就按它重建播放序列
    * （相机/球/音轨同一个速度）；不传 = 用谱面 `J:`（今天的路径）。
    * 由调用方从 sidecar 取（本文件不读 store）。
@@ -111,6 +116,8 @@ export async function exportDynamicVideo(opts: DynamicExportOptions): Promise<Dy
     ...(opts.panMode === undefined ? {} : { panMode: opts.panMode }),
     // adj1094：行末提前平移量透传
     ...(opts.rowLeadBeats === undefined ? {} : { rowLeadBeats: opts.rowLeadBeats }),
+    // adj1164：相机位音色覆盖透传（音频与色块配色同源）
+    ...(opts.instrumentOverride === undefined ? {} : { instrumentOverride: opts.instrumentOverride }),
   })
 
   let audio: AudioBuffer | null = null

@@ -17,9 +17,10 @@
  * 只做等比缩放——这才是"不重复造轮子"。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { parseJps, inferBpm, type DynamicPresetId } from '@ijipu/engine'
+import { parseJps, inferBpm, gmVoiceRef, type DynamicPresetId } from '@ijipu/engine'
+import { playbackVoiceOptions } from '@ijipu/engine/playback/voiceOptions'
 import { useDocStore } from '../store/docStore'
-import { useUiStore, type DynamicAspect, type DynamicCardStyleId, type DynamicMode } from '../store/uiStore'
+import { useUiStore, enabledVoicesOf, type DynamicAspect, type DynamicCardStyleId, type DynamicMode } from '../store/uiStore'
 import { dynamicVideoCopy, syncCopy } from '../brand/copy'
 import { createDynamicSession, type DynamicSession } from '../export/video/renderer'
 import { CARD_TEMPLATES, cardStyleById, type CardStyle } from '../export/video/cardTemplates'
@@ -72,7 +73,22 @@ export function DynamicFrameOverlay() {
   const aspect = useUiStore((s) => s.dynamicCamera.aspect)
   const range = useUiStore((s) => s.dynamicCamera.range)
   const mode = useUiStore((s) => s.dynamicCamera.mode)
+  /** adj1164：相机位音色下拉（L3 会话级，默认自动随谱） */
+  const instrument = useUiStore((s) => s.dynamicCamera.instrument)
+  const playbackHqEnabled = useUiStore(enabledVoicesOf)
+  const ethnicVoicesEnabled = useUiStore((s) => s.ethnicVoicesEnabled)
+  const instrumentOptions = useMemo(
+    () => playbackVoiceOptions(playbackHqEnabled, ethnicVoicesEnabled),
+    [playbackHqEnabled, ethnicVoicesEnabled],
+  )
+  const instrumentOverride = gmVoiceRef(instrument)
   const setDynamicCamera = useUiStore((s) => s.setDynamicCamera)
+  // 用户可能在相机位开着时取消勾选某个音色：失效选择退回归自动，不留下一个空下拉
+  useEffect(() => {
+    if (instrument !== null && !instrumentOptions.some((v) => v.program === instrument)) {
+      setDynamicCamera({ instrument: null })
+    }
+  }, [instrument, instrumentOptions, setDynamicCamera])
   const cardStyle = useUiStore((s) => s.dynamicCardStyle)
   const setDynamicCardStyle = useUiStore((s) => s.setDynamicCardStyle)
   const customCardStyle = useUiStore((s) => s.dynamicCardStyleCustom)
@@ -334,7 +350,7 @@ export function DynamicFrameOverlay() {
     audioPlayerRef.current?.setBuffer(null)
     audioBufferRef.current = null
     audioLoadRef.current = null
-  }, [code, pageConfig, range, mode, syncRev])
+  }, [code, pageConfig, range, mode, syncRev, instrument])
 
   // 打开 / 换比例 / 换源码或页面 / 换范围 / 换时长 ⇒ 重建会话
   useEffect(() => {
@@ -365,6 +381,8 @@ export function DynamicFrameOverlay() {
         panMode,
         // adj1094：行末提前平移量（拍）
         rowLeadBeats,
+        // adj1164：相机位音色（自动随谱时不传）
+        ...(instrumentOverride === undefined ? {} : { instrumentOverride }),
       })
     })()
       .then((s) => {
@@ -385,7 +403,7 @@ export function DynamicFrameOverlay() {
     return () => {
       cancelled = true
     }
-  }, [on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, headWaitMs, paint])
+  }, [on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, headWaitMs, instrumentOverride, paint])
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
 
@@ -568,6 +586,8 @@ export function DynamicFrameOverlay() {
         panMode,
         // adj1094：行末提前平移量（拍）
         rowLeadBeats,
+        // adj1164：出片与预览同一份音色（自动随谱时不传）
+        ...(instrumentOverride === undefined ? {} : { instrumentOverride }),
         // adj1119：对拍拍速（有 sidecar 才传；出片与预览同一份速度）
         ...(syncBpm !== null ? { bpm: syncBpm } : {}),
         // adj1148：前奏等待与预览同口径（导出也把那段伴奏放出来）
@@ -838,6 +858,25 @@ export function DynamicFrameOverlay() {
               {m.label}
             </button>
           ))}
+          <span className="dyn-frame-label" title={dynamicVideoCopy.instrumentHint}>
+            {dynamicVideoCopy.instrumentLabel}
+          </span>
+          <select
+            className="dyn-frame-select"
+            data-sync="dyn-instrument"
+            value={instrument ?? ''}
+            disabled={encoding || preparingAudio}
+            title={dynamicVideoCopy.instrumentHint}
+            aria-label={dynamicVideoCopy.instrumentLabel}
+            onChange={(e) => setDynamicCamera({ instrument: e.target.value === '' ? null : Number(e.target.value) })}
+          >
+            <option value="">{dynamicVideoCopy.instrumentAuto}</option>
+            {instrumentOptions.map((v) => (
+              <option key={v.program} value={v.program}>
+                {v.label}
+              </option>
+            ))}
+          </select>
           <label className="dock-field dyn-frame-audio">
             <input
               type="checkbox"

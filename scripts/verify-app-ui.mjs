@@ -1773,6 +1773,45 @@ async function main() {
           frame.w >= 1000 && frame.h >= 1000 && frame.controls && frame.outside,
           JSON.stringify(frame),
         )
+        // adj1164：相机位音色下拉——默认自动随谱，选具体音色后真的切换
+        const instSel = await evalJs(
+          c,
+          `(() => {
+            const el = document.querySelector('[data-sync="dyn-instrument"]')
+            if (!el) return { exists: false }
+            return { exists: true, value: el.value, labels: [...el.options].map((o) => o.textContent.trim()) }
+          })()`,
+        )
+        check(
+          'adj1164 相机位有音色下拉，默认「自动（随谱）」，且列出可用音色',
+          instSel.exists && instSel.value === '' && instSel.labels[0] === '自动（随谱）' && instSel.labels.length >= 2,
+          JSON.stringify(instSel),
+        )
+        const instPicked = await evalJs(
+          c,
+          `(() => {
+            const el = document.querySelector('[data-sync="dyn-instrument"]')
+            if (!el || el.options.length < 2) return ''
+            const target = el.options[1].value
+            const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+            setter.call(el, target)
+            el.dispatchEvent(new Event('change', { bubbles: true }))
+            return target
+          })()`,
+        )
+        await waitFor(
+          c,
+          `document.querySelector('[data-sync="dyn-instrument"]')?.value === ${JSON.stringify(instPicked)}`,
+          '相机位音色选中',
+        )
+        check('adj1164 相机位选具体音色真的生效（不是只改下拉显示）', instPicked !== '', instPicked)
+        // 换音色会重建会话；等生成按钮重新可用后再做后面的出片门断言（否则会把"重建中"误判成"不能用"）
+        await waitFor(
+          c,
+          `(() => { const b = document.querySelector('.dyn-frame-generate'); return !!b && !b.disabled })()`,
+          '相机位换音色后重建完成',
+          60,
+        )
         // adj1077：网站/插件只保留预览，生成视频禁用并提示仅桌面版
         const videoGate = await evalJs(
           c,

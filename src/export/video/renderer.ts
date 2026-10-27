@@ -169,6 +169,13 @@ export async function createDynamicSession(
      * 与 `panMode` 一样由调用方从 `uiStore.rowLeadBeats`（L1）取来传进来，本文件不读 store。
      */
     rowLeadBeats?: number
+    /**
+     * adj1164：相机位选定的**全篇统一音色**（音色名 ref；不传/空 = 自动随谱）。
+     *
+     * 只影响播放序列里的 `instrument`（音频与色块配色同源），不改谱面/排版；
+     * 传进来时由 `buildPlaySequence` 覆盖所有声部与曲内 `@` 切换。
+     */
+    instrumentOverride?: string
   },
 ): Promise<DynamicSession> {
   const preset = DYNAMIC_PRESETS[presetId]
@@ -190,7 +197,7 @@ export async function createDynamicSession(
   const parsed = parseJps(code)
   const layout = layoutScore(parsed, pageConfig)
   const beat = bpm !== undefined && bpm > 0 ? bpm : inferBpm(parsed)
-  let seq = buildPlaySequence(parsed, layout, beat)
+  let seq = buildPlaySequence(parsed, layout, beat, undefined, undefined, opts?.instrumentOverride)
 
   // 标记段：用与试听**完全相同**的口径切出这一段（时间归零），并跳过满宽片头
   let skipIntro = false

@@ -1245,6 +1245,11 @@ export const dynamicVideoCopy = {
   outputSoundHint:
     '决定预览与成片用哪条声音：伴奏（对拍文件里的音频）/ 伴奏+合成 / 合成音；两条音量各自 0–200%。改完重新播放或生成即生效。',
   outputSoundNoAudio: '伴奏还没加载',
+  /* ---- adj1164：相机位音色（默认自动随谱；不跟试听里的音色选择绑定） ---- */
+  instrumentLabel: '音色',
+  instrumentAuto: '自动（随谱）',
+  instrumentHint:
+    '自动：按谱面 Y: 与 @乐器名@ 的音色；选具体音色则全篇统一（所有声部、伴奏层与曲内切换都用它）。只影响声音与色块配色，不改谱面。这里的选择与试听里的音色互不影响。',
   pickAccompaniment: '加载伴奏…',
   audioLoaded: '伴奏已加载（保留段不变）',
   audioLoadFailed: '伴奏加载失败',

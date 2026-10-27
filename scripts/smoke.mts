@@ -2376,7 +2376,7 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
   )
   check(
     'adj1113/adj1119/adj1148 `withCards`、对拍拍速（`syncBpm`）与前奏等待（`headWaitMs`）都进了"重建会话"的依赖（点了立刻重画，不继续播旧会话）',
-    /\}, \[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, headWaitMs, paint\]\)/.test(overlay),
+    /\}, \[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, headWaitMs, instrumentOverride, paint\]\)/.test(overlay),
   )
   check(
     'adj1113 导出透传 `cards: withCards`；不带片头片尾时卡片下拉/自定义按钮禁用（不是悄悄忽略）',
@@ -21139,6 +21139,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1160Tests())
       // adj1161：间奏 0 上方标注「间奏16拍」
       .then(() => runAdj1161Tests())
+      // adj1164：相机位音色（自动随谱 / 全篇统一）
+      .then(() => runAdj1164Tests())
       // adj1162：资源安装包命名规则（每资源一个、类型+名称+版本）
       .then(() => runAdj1162Tests())
       // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
@@ -33921,8 +33923,8 @@ function runDynamicCameraTests(): void {
         /panMode: useUiStore\.getState\(\)\.panMode/.test(cliSrcAdj),
     )
     check(
-      'adj1089/adj1094/adj1113/adj1119/adj1148 换了平移方式/提前量/片头片尾/对拍拍速/前奏等待都会**重建相机会话**（否则点了没反应：还在放旧会话）；adj1150 起混音/音量**不重建会话**（只作废音轨）',
-      /\[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, headWaitMs, paint\]/.test(
+      'adj1089/adj1094/adj1113/adj1119/adj1148/adj1164 换了平移方式/提前量/片头片尾/对拍拍速/前奏等待/音色都会**重建相机会话**（否则点了没反应：还在放旧会话）；adj1150 起混音/音量**不重建会话**（只作废音轨）',
+      /\[on, aspect, code, pageConfig, range, mode, effectiveCardStyle, panMode, rowLeadBeats, withCards, syncBpm, headWaitMs, instrumentOverride, paint\]/.test(
         overlaySrcAdj,
       ),
     )
@@ -36253,6 +36255,29 @@ function runAdj1161Tests(): void {
     'adj1161 负对照：没有 {jz N} 的 0 不出现间奏标注',
     !(renderScoreToSvg(plain)[0] ?? '').includes('间奏16拍'),
     '',
+  )
+}
+
+/**
+ * adj1164（用户 2026-10-27）：相机位音色下拉——默认自动随谱；选定具体音色时全篇统一，
+ * 预览与出片共用。这里守引擎层的覆盖口径（界面接线见 verify:app-ui）。
+ */
+function runAdj1164Tests(): void {
+  console.log('[adj1164] 相机位音色：自动随谱 / 全篇统一覆盖')
+  const parsed = parseJps('V: 1.0\nB: t\nD: C\nP: 4/4\nQ: 1 2 3 4 |\n')
+  const layout = layoutScore(parsed, defaultPageConfig)
+  const auto = buildPlaySequence(parsed, layout, 120)
+  const forced = buildPlaySequence(parsed, layout, 120, undefined, undefined, '长笛')
+  const pitched = forced.events.filter((e) => e.instrument)
+  check(
+    'adj1164 选定音色 ⇒ 所有有声事件都用它（覆盖谱面/默认路由）',
+    pitched.length > 0 && pitched.every((e) => e.instrument === '长笛'),
+    pitched.map((e) => e.instrument ?? '(空)').join(','),
+  )
+  check(
+    'adj1164 自动随谱（不传覆盖）⇒ 不被强行改写',
+    auto.events.some((e) => e.instrument !== '长笛'),
+    auto.events[0]?.instrument ?? '(空)',
   )
 }
 

@@ -57,6 +57,11 @@ export interface DynamicCameraState {
   /** 标记段范围；null = 整曲。`pass` = 用户在下拉里选的候选遍次（0 起），缺省按解析器的第一个候选 */
   range: { startId: string; endId: string; pass?: number } | null
   mode: DynamicMode
+  /**
+   * adj1164：相机位成片音色（GM program）。`null` = **自动随谱**（按谱面 `Y:`/`@`）；
+   * 数字 = 全篇统一音色，预览与成片共用；与试听的音色选择互不影响。
+   */
+  instrument: number | null
 }
 
 /** adj1073：动态谱片头/片尾卡片模板（L1 用户偏好，持久化；不写进 .jps） */
@@ -848,7 +853,7 @@ export const useUiStore = create<UiState>()((set) => ({
   playbackTick: 0,
   showGuides: loadBool(SHOW_GUIDES_KEY, true),
   // adj1065：动态谱相机位（L3 会话级，不落盘）
-  dynamicCamera: { on: false, aspect: '9x16', range: null, mode: '3min' },
+  dynamicCamera: { on: false, aspect: '9x16', range: null, mode: '3min', instrument: null },
   // adj1073：卡片模板（L1，落盘；未知 id 回退 brand）
   dynamicCardStyle: loadDynamicCardStyle(initialCustomCardStyle),
   // adj1074：自定义卡片（L1，落盘；坏数据回退 null）
