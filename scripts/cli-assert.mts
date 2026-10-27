@@ -1622,6 +1622,37 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
         got.accompGain === 0.4,
       `code=${r.code} seen=${JSON.stringify(got)} err=${s.errs.join('｜').slice(0, 120)}`,
     )
+    const mix = makeIo({ 'a.jps': GOOD, 'a.jps.sync.json': SIDECAR })
+    let mixSeen: SeenVideo | null = null
+    mix.io.encodeVideo = async (req) => {
+      mixSeen = { ...req }
+      return { bytes: 2, audio: true }
+    }
+    const rMix = await runCli(
+      ['render', '-i', 'a.jps', '-t', 'mp4', '-o', 'x.mp4', '--sound', 'mix', '--accomp-gain', '0.8', '--synth-gain', '0.3'],
+      mix.io,
+    )
+    check(
+      'adj1166 `--sound mix` 两条音量**各自独立**：伴奏 0.8 / 合成 0.3 原样交给宿主',
+      rMix.code === EXIT.ok && mixSeen !== null && mixSeen.accompGain === 0.8 && mixSeen.synthGain === 0.3,
+      `code=${rMix.code} seen=${JSON.stringify(mixSeen)}`,
+    )
+    const mixDefault = makeIo({ 'a.jps': GOOD, 'a.jps.sync.json': SIDECAR })
+    let mixDefaultSeen: SeenVideo | null = null
+    mixDefault.io.encodeVideo = async (req) => {
+      mixDefaultSeen = { ...req }
+      return { bytes: 2, audio: true }
+    }
+    await runCli(['render', '-i', 'a.jps', '-t', 'mp4', '-o', 'x.mp4', '--sound', 'mix'], mixDefault.io)
+    check(
+      'adj1166 `--sound mix` 缺省音量：伴奏 1 / 合成 0.5（与相机位 DEFAULT_SYNC_MIX 一致）',
+      mixDefaultSeen !== null && mixDefaultSeen.accompGain === 1 && mixDefaultSeen.synthGain === 0.5,
+      `seen=${JSON.stringify(mixDefaultSeen)}`,
+    )
+    const badGain = makeIo({ 'a.jps': GOOD, 'a.jps.sync.json': SIDECAR })
+    badGain.io.encodeVideo = async () => ({ bytes: 1, audio: false })
+    const rBadGain = await runCli(['render', '-i', 'a.jps', '-t', 'mp4', '-o', 'x.mp4', '--sound', 'mix', '--accomp-gain', '3'], badGain.io)
+    check('adj1166 音量越界（3）⇒ 用法错误，不静默钳到 2', rBadGain.code === EXIT.usage, `code=${rBadGain.code}`)
     const missing = makeIo({ 'a.jps': GOOD })
     missing.io.encodeVideo = async () => ({ bytes: 1, audio: false })
     const rMissing = await runCli(['render', '-i', 'a.jps', '-t', 'mp4', '-o', 'x.mp4', '--sound', 'file'], missing.io)

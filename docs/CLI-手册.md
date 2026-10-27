@@ -423,8 +423,14 @@ ijipu cli render -i 赤伶.jps -t mp4 -o 混合.mp4 --mark 段1 --sound mix \
 ```
 
 - `--sound synth|file|mix`：合成音 / 伴奏 / 伴奏+合成；
+- **两条音量是独立参数**：
+
+| 选项 | 控制哪条声音 | 缺省 |
+| --- | --- | --- |
+| `--accomp-gain 0-2` | **伴奏**音量（`file` / `mix` 生效） | `1` |
+| `--synth-gain 0-2` | **合成音**音量（`synth` / `mix` 生效） | 纯合成 `1`；`mix` 时 `0.5` |
+
 - `--accomp <音频>` 覆盖 sidecar 里的伴奏路径（相对 sidecar 目录或绝对路径）；
-- `--accomp-gain` / `--synth-gain`：0–2；伴奏缺省 1，合成音在 mix 时缺省 0.5、纯合成时缺省 1；
 - `file` / `mix` 缺 sidecar 或伴奏 ⇒ 明确报错，不会静默退回合成音；
 - `--nosound` 与 `--sound` / `--accomp` / 两条音量互斥。
 

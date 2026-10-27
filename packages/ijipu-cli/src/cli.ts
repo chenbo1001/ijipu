@@ -210,7 +210,7 @@ const HELP = `iJipu 命令行（爱记谱）
                 [--card [brand|paper|ink|minimal]]                        片头片尾模板（不写 = 不带；只写 = 极简）
                 [--sound synth|file|mix]                                  合成音 / 伴奏 / 伴奏+合成（缺省 synth）
                 [--accomp <音频>]                                         覆盖 sidecar 的伴奏路径（只配 file/mix）
-                [--accomp-gain 0-2] [--synth-gain 0-2]                    两条音量（缺省 1）
+                [--accomp-gain 0-2] [--synth-gain 0-2]                    伴奏 / 合成音音量（缺省 1；mix 合成 0.5）
                 [--nosound]                                               导出无声视频（缺省带声音）
   play          -i <文件|-> -t midi|wav -o <输出>                           导出音频
   batch         --in <目录> [-o <目录>] [-t lint,svg,midi,fmt]              目录批量操作
