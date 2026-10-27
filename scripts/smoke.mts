@@ -35263,7 +35263,7 @@ function runAdj1118Tests(): void {
  *  ④ sidecar 的路径规则、容错解析（坏 JSON / 版本更高 / 缺音频 / 同拍位 / 裁剪夹紧）、
  *     往返、以及"不信文件里的 tempo，一律按 anchors 重算"。
  */
-function runAdj1119Tests(): void {
+async function runAdj1119Tests(): Promise<void> {
   console.log('[adj1119] 间奏灰 / 片头卡速度 / 对拍数学 / sidecar')
 
   // ① 间奏块：标记 → 色块 → 取色
@@ -35474,6 +35474,45 @@ function runAdj1119Tests(): void {
       parseSyncDoc(JSON.stringify({ ...doc0, audio: '' })).error !== undefined,
     '',
   )
+  /**
+   * adj1167（用户实报）：sidecar 里**只有标记段、没有伴奏**时也要读回来，
+   * 否则 `.jps` 打开后试听列表永远空 ⇒ 标记段设置失效。
+   */
+  const extrasOnly = parseSyncDoc(
+    JSON.stringify({
+      ...doc0,
+      audio: '',
+      marks: [{ id: 'm1', name: '段1', startId: '0_1_0_0', endId: '0_1_0_3' }],
+      markId: 'm1',
+      range: null,
+    }),
+  )
+  check(
+    'adj1167 只有 marks/range、没有 audio 的 sidecar 也能解析（恢复标记段；不参与对拍/伴奏）',
+    extrasOnly.doc !== null &&
+      extrasOnly.doc.audio === '' &&
+      extrasOnly.doc.marks?.length === 1 &&
+      extrasOnly.doc.marks?.[0]?.name === '段1' &&
+      extrasOnly.doc.markId === 'm1' &&
+      extrasOnly.doc.range === null &&
+      (extrasOnly.warnings ?? []).some((w) => w.includes('只恢复标记段')),
+    `doc=${JSON.stringify(extrasOnly.doc)} warn=${JSON.stringify(extrasOnly.warnings)}`,
+  )
+  if (extrasOnly.doc !== null) {
+    const { applySyncExtrasToUi } = await import('../src/store/syncExtras.ts')
+    const { useUiStore } = await import('../src/store/uiStore.ts')
+    useUiStore.getState().setPracticeMarks([])
+    useUiStore.getState().setPracticeMarkId('')
+    applySyncExtrasToUi(extrasOnly.doc)
+    const ui = useUiStore.getState()
+    check(
+      'adj1167 打开 .jps 的 sidecar 会把 marks/markId 灌回试听列表（不是只解析、不使用）',
+      ui.practiceMarks.length === 1 &&
+        ui.practiceMarks[0]?.name === '段1' &&
+        ui.practiceMarkId === 'm1',
+      JSON.stringify({ marks: ui.practiceMarks, markId: ui.practiceMarkId }),
+    )
+  }
   check(
     'adj1119 裁剪夹紧 + 同拍位去重都给提示（且 doc 仍可用）',
     (() => {

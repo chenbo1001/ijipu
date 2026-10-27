@@ -185,9 +185,25 @@ export function parseSyncDoc(text: string): { doc: SyncDoc | null; error?: strin
     return { doc: null, error: `对拍文件是更新版本（v${version}）生成的，请升级应用` }
   }
   const audio = typeof o.audio === 'string' ? o.audio.trim() : ''
-  if (audio === '') return { doc: null, error: '对拍文件里没有记伴奏文件名（audio）' }
+  /**
+   * adj1167：**只有标记段的 sidecar** 也要能读回来。
+   *
+   * 用户口径：`.jps` 打开时标记段应自动恢复到试听列表；如果 sidecar 里只有
+   * `marks`/`markId`/`range`、还没有伴奏（`audio` 为空），旧解析直接报"没有 audio"，
+   * 整份文件被丢弃 ⇒ 标记段设置失去意义。
+   *
+   * 现在：没有 audio 但有 extras ⇒ 允许解析（audio 留空，不参与对拍/伴奏；
+   * `syncDocIsUsable` 仍为 false，相机/对拍不会误把它当可用音轨）；
+   * 没有 audio 且没有任何 extras ⇒ 仍按旧口径明确报错。
+   */
+  const hasExtras =
+    Array.isArray(o.marks) ||
+    o.range !== undefined ||
+    typeof o.markId === 'string'
+  if (audio === '' && !hasExtras) return { doc: null, error: '对拍文件里没有记伴奏文件名（audio）' }
 
   const warnings: string[] = []
+  if (audio === '') warnings.push('没有音频（audio 为空）：只恢复标记段，不参与对拍/伴奏')
   const audioDurationMs = Math.max(0, finiteOr(o.audioDurationMs, 0))
   const trimRaw = (o.trim ?? {}) as Record<string, unknown>
   let startMs = Math.max(0, finiteOr(trimRaw.startMs, 0))

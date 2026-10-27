@@ -141,8 +141,9 @@ async function flushSidecarSave(): Promise<void> {
   suppressSyncAutoSave(() => st.save(ds.code, ds.fileName))
   const latest = useSyncStore.getState().doc
   if (latest === null) return
-  // 还没选伴奏（audio 为空）⇒ 不写 sidecar：解析器会拒收，也没地方放"这首歌的声音设置"
-  if (latest.audio === '') return
+  // 没有伴奏时也可以只为 marks/range 写 sidecar（adj1167：打开 .jps 要恢复标记段；
+  // 但既没有 audio 也没有 extras 的文件没有意义，不写）
+  if (latest.audio === '' && latest.marks === undefined && latest.range === undefined) return
 
   const target = await resolveSidecarPath(ds.nativePath, ds.binding)
   if (target === null) return // 网页/没有磁盘落点：L1 已写，别反复下载
