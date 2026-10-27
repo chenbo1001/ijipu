@@ -1594,7 +1594,7 @@ export function SyncDialog() {
             高度仍可拖；缩放走顶栏同一个偏好 `ijipu.previewZoom` */}
         <div className="sync-preview" style={{ height: `${layout.previewH}px` }}>
           <div className="sync-preview-box">
-            <PreviewPane />
+            <PreviewPane disableGuides />
           </div>
           {/* adj1136：单锚点推出的不可能结论（不静默） */}
           {singleAnchorWarn !== '' && <div className="sync-warn sync-preview-warn">{singleAnchorWarn}</div>}

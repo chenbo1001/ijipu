@@ -123,7 +123,7 @@ const PAGE_GAP_PX = 24
  * （同一套交互口径，两端不各写一个数；语义见 `engine/overlayGesture.ts` 里那段说明）。
  */
 
-export function PreviewPane() {
+export function PreviewPane({ disableGuides = false }: { disableGuides?: boolean } = {}) {
   const parseResult = useDocStore((s) => s.parseResult)
   const pageConfig = useDocStore((s) => s.pageConfig)
   const setPageConfig = useDocStore((s) => s.setPageConfig)
@@ -135,6 +135,8 @@ export function PreviewPane() {
   const activeNoteIds = useDocStore((s) => s.activeNoteIds)
   const jumpCursor = useDocStore((s) => s.jumpCursor)
   const showGuides = useUiStore((s) => s.showGuides)
+  /** adj1169：对拍窗口里**关掉排版辅助**（不可拖动页边距/行距，避免误操作改乱谱面） */
+  const guidesEnabled = showGuides && !disableGuides
   // adj965d（EP-13）：Alt 手势调的是哪一层（L3 会话级；两层都可用时由预览角落的切换器决定）
   const overlayEditLayer = useUiStore((s) => s.overlayEditLayer)
   const setOverlayEditLayer = useUiStore((s) => s.setOverlayEditLayer)
@@ -196,7 +198,7 @@ export function PreviewPane() {
    * adj965d：当前手势作用在哪一层（`null` = 三条前提不齐 ⇒ 完全不介入）。
    * ①「排版辅助」关 ⇒ 直接 `null`（负向判据）；②该层已启用 ③该层有内容 ⇒ 在纯模块里判。
    */
-  const overlayTarget = showGuides ? activeOverlayLayer(pageConfig, overlayEditLayer) : null
+  const overlayTarget = guidesEnabled ? activeOverlayLayer(pageConfig, overlayEditLayer) : null
   /** 两层都可用时才显示「调整对象」切换器（用户口径：只有一层或都没有，不显示切换器） */
   const overlaySwitcher = overlayTarget !== null && bothOverlayLayersVisible(pageConfig)
   /**
@@ -261,14 +263,14 @@ export function PreviewPane() {
   const rowTops = useMemo(() => (layout ? computeRowTops(layout, pageConfig.note_size) : []), [layout, pageConfig.note_size])
   const rowGuides = useMemo(
     () =>
-      layout
+      guidesEnabled && layout
         ? computeRowGuides(
             layout,
             { quci: pageConfig.height_quci, geci: pageConfig.geci_size },
             pageConfig.note_size,
           )
         : [],
-    [layout, pageConfig.height_quci, pageConfig.geci_size, pageConfig.note_size],
+    [guidesEnabled, layout, pageConfig.height_quci, pageConfig.geci_size, pageConfig.note_size],
   )
   /**
    * adj1090（用户口径）：**每页每个曲行的纵向范围**（曲部 + 词部）。
@@ -785,7 +787,7 @@ export function PreviewPane() {
     const label = (l: 'wm' | 'bg') => `${l === 'wm' ? overlayCopy.layerWm : overlayCopy.layerBg}（${l}）`
     const dump = (): string =>
       [
-        `排版辅助（前提①）=${yn(showGuides)}`,
+        `排版辅助（前提①）=${yn(guidesEnabled)}`,
         `当前调整对象=${overlayTarget === null ? '（无：三条前提不齐 ⇒ 手势完全不介入）' : label(overlayTarget)}`,
         `切换器=${yn(overlaySwitcher)}　尚未写入谱面提醒=${yn(overlayUnsaved)}`,
         `水印　手势可用=${yn(overlayLayerVisible(pageConfig, 'wm'))}　已写入谱面=${yn(overlayLayerPersisted(sourceConfig, 'wm'))}` +
@@ -796,7 +798,7 @@ export function PreviewPane() {
         `配置行=${(/# jps-config:.*/.exec(code) ?? ['（没有这一行）'])[0]}`,
       ].join('\n')
     ;(window as unknown as { __ijipuOverlay?: () => string }).__ijipuOverlay = dump
-  }, [showGuides, overlayTarget, overlaySwitcher, overlayUnsaved, pageConfig, sourceConfig, code])
+  }, [guidesEnabled, overlayTarget, overlaySwitcher, overlayUnsaved, pageConfig, sourceConfig, code])
 
   if (!layout || pagesHtml.length === 0) {
     return (
@@ -936,7 +938,7 @@ export function PreviewPane() {
                     />
                   )
                 })}
-                {showGuides && (
+                {guidesEnabled && (
                   <div
                     className="guide-layer"
                     style={{

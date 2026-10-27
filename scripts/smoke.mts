@@ -14699,7 +14699,7 @@ function runAdj965dOverlayGestureTests() {
   )
   check(
     'adj965d 前提①在代码里：`showGuides` 关 ⇒ 目标层为 `null`（不拦事件、不写盘 ⇒ 按 Alt 什么都不发生）',
-    /const overlayTarget = showGuides \? activeOverlayLayer\(pageConfig, overlayEditLayer\) : null/.test(paneSrc),
+    /const overlayTarget = guidesEnabled \? activeOverlayLayer\(pageConfig, overlayEditLayer\) : null/.test(paneSrc),
     '',
   )
   check(
@@ -36014,6 +36014,8 @@ function runAdj1155Tests(): void {
   const appSrc = readFileSync(join(root, 'src/App.tsx'), 'utf8')
   const barSrc = readFileSync(join(root, 'src/dialogs/PracticeMarkBar.tsx'), 'utf8')
   const markLayerSrc = readFileSync(join(root, 'src/preview/PracticeMarkLayer.tsx'), 'utf8')
+  const syncSrc = readFileSync(join(root, 'src/dialogs/SyncDialog.tsx'), 'utf8')
+  const previewSrc = readFileSync(join(root, 'src/preview/PreviewPane.tsx'), 'utf8')
   const overlaySrc = readFileSync(join(root, 'src/preview/DynamicFrameOverlay.tsx'), 'utf8')
   const exportPanelSrc = readFileSync(join(root, 'src/ui/dock/ExportPanel.tsx'), 'utf8')
   check(
@@ -36042,6 +36044,14 @@ function runAdj1155Tests(): void {
     'adj1168 对拍台打开时（modal=sync）不画试听标记段线',
     /modal === 'sync'/.test(markLayerSrc) &&
       /!showInDialog \|\| syncDialogOpen/.test(markLayerSrc),
+    '',
+  )
+  check(
+    'adj1169 对拍窗口关掉排版辅助：PreviewPane disableGuides ⇒ 不渲染 guide-layer / 不接手势',
+    /disableGuides = false/.test(previewSrc) &&
+      /guidesEnabled = showGuides && !disableGuides/.test(previewSrc) &&
+      /\{guidesEnabled && \(/.test(previewSrc) &&
+      /<PreviewPane disableGuides \/>/.test(syncSrc),
     '',
   )
   check(
