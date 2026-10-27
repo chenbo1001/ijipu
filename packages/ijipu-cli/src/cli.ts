@@ -122,6 +122,18 @@ export type CliIo = {
      * 宿主据此决定要不要渲音轨 —— 明确说"不要"，就不要白渲一条再丢掉。
      */
     withAudio: boolean
+    /**
+     * adj1166：声音来源。`synth` = 合成音（缺省，保持旧命令）；`file` = 伴奏；
+     * `mix` = 伴奏+合成。任务文件里原样带给隐藏窗口。
+     */
+    sound: 'synth' | 'file' | 'mix'
+    /** adj1166：`--sound file|mix` 时要用的对拍 sidecar 原文（`marks`/`trim`/`anchors`/`mix`） */
+    syncText: string | null
+    /** adj1166：伴奏绝对/相对路径（workdir 口径）；`synth` 时为 null */
+    audioPath: string | null
+    /** adj1166：两条音量（0–2；缺省 1） */
+    accompGain: number
+    synthGain: number
   }) => Promise<{ bytes: number; audio: boolean }>
   /**
    * adj814（A·P4 尾项）**可选能力**：监视文件变化（`--watch` 用）。
@@ -192,8 +204,13 @@ const HELP = `iJipu 命令行（爱记谱）
   render        -i <文件|-> -t svg|midi|png|jpg|pdf|mp4 -o <输出>           渲染导出
                 [--crop page|score] [--pad N] [--ink x,y,w,h]              画布范围（缺省 page = 整页）
                 [--from 27:3 --to 50:1 [--pass 2]]                        只导这一段（mp4）
+                [--mark 段1]                                              按 sidecar 里的标记段名导出（与 from/to 互斥）
+                [--sync <sidecar>]                                        对拍文件；缺省 <输入>.sync.json
                 [--aspect 9:16|1:1|16:9]                                  画布比例（缺省 9:16）
                 [--card [brand|paper|ink|minimal]]                        片头片尾模板（不写 = 不带；只写 = 极简）
+                [--sound synth|file|mix]                                  合成音 / 伴奏 / 伴奏+合成（缺省 synth）
+                [--accomp <音频>]                                         覆盖 sidecar 的伴奏路径（只配 file/mix）
+                [--accomp-gain 0-2] [--synth-gain 0-2]                    两条音量（缺省 1）
                 [--nosound]                                               导出无声视频（缺省带声音）
   play          -i <文件|-> -t midi|wav -o <输出>                           导出音频
   batch         --in <目录> [-o <目录>] [-t lint,svg,midi,fmt]              目录批量操作
@@ -328,6 +345,26 @@ type Parsed = {
    * 缺省带声音；这是布尔开关，所以**不需要**再给 `--sound` 的反向写法。
    */
   nosound: boolean
+  /**
+   * adj1166：按**标记段名**导出（读 `.jps.sync.json` 的 `marks`）。
+   *
+   * 与 `--from/--to` 互斥：名字来自 sidecar、可能重名，只给日常使用；
+   * 精确/无 sidecar 的脚本仍用 `--from/--to`。`--pass` 也不与 `--mark` 同用
+   * （段自己的 `pass` 已经存在 sidecar 里）。
+   */
+  mark: string | null
+  /** adj1166：对拍/标记段 sidecar 路径；缺省 = `<输入>.sync.json` */
+  sync: string | null
+  /**
+   * adj1166：声音来源（只在 `-t mp4` 有意义）。
+   * `synth` = 合成音（缺省，保持旧命令行为）；`file` = 伴奏；`mix` = 两者混合。
+   */
+  sound: string | null
+  /** adj1166：覆盖 sidecar 里的伴奏路径（相对 sidecar 目录或绝对路径） */
+  accomp: string | null
+  /** adj1166：伴奏 / 合成音增益（0–2，缺省 1） */
+  accompGain: string | null
+  synthGain: string | null
 }
 
 /** 手写参数解析（**不引依赖** —— AGENTS §一"新增依赖必须先询问"，这里完全用不着） */
@@ -361,8 +398,14 @@ function parseArgs(argv: string[]): Parsed {
     aspect: null,
     card: null,
     nosound: false,
+    mark: null,
+    sync: null,
+    sound: null,
+    accomp: null,
+    accompGain: null,
+    synthGain: null,
   }
-  const takesValue = new Set(['-i', '--input', '-o', '--output', '-t', '--type', '-s', '--set', '--config', '--format', '--crop', '--pad', '--ink', '--filter', '--from', '--to', '--pass', '--aspect', '--card'])
+  const takesValue = new Set(['-i', '--input', '-o', '--output', '-t', '--type', '-s', '--set', '--config', '--format', '--crop', '--pad', '--ink', '--filter', '--from', '--to', '--pass', '--aspect', '--card', '--mark', '--sync', '--sound', '--accomp', '--accomp-gain', '--synth-gain'])
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i]
     const next = (): string => {
@@ -445,6 +488,24 @@ function parseArgs(argv: string[]): Parsed {
       }
     } else if (a === '--nosound') {
       p.nosound = true
+    } else if (a === '--mark') {
+      const v = next()
+      if (v !== '') p.mark = v
+    } else if (a === '--sync') {
+      const v = next()
+      if (v !== '') p.sync = v
+    } else if (a === '--sound') {
+      const v = next()
+      if (v !== '') p.sound = v
+    } else if (a === '--accomp') {
+      const v = next()
+      if (v !== '') p.accomp = v
+    } else if (a === '--accomp-gain') {
+      const v = next()
+      if (v !== '') p.accompGain = v
+    } else if (a === '--synth-gain') {
+      const v = next()
+      if (v !== '') p.synthGain = v
     } else if (a === '--format') {
       const v = next()
       if (v === 'text' || v === 'json' || v === 'gh') p.format = v
@@ -542,6 +603,17 @@ function joinPath(dir: string, name: string): string {
   if (d === '' || d === '.') return name
   const sep = d.includes('\\') && !d.includes('/') ? '\\' : '/'
   return `${d}${sep}${name}`
+}
+
+/** 目录部分（两种斜杠都认；没有分隔符 ⇒ 当前目录） */
+function dirOf(p: string): string {
+  const i = Math.max(p.lastIndexOf('\\'), p.lastIndexOf('/'))
+  return i < 0 ? '' : p.slice(0, i)
+}
+
+/** 绝对路径判据（Windows 盘符 / UNC / Unix 根）；用于 sidecar 里的相对伴奏路径 */
+function isAbsolutePath(p: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\') || p.startsWith('/')
 }
 
 /**
@@ -1314,10 +1386,16 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
         p.pass !== null ||
         p.aspect !== null ||
         p.card !== null ||
-        p.nosound)
+        p.nosound ||
+        p.mark !== null ||
+        p.sync !== null ||
+        p.sound !== null ||
+        p.accomp !== null ||
+        p.accompGain !== null ||
+        p.synthGain !== null)
     ) {
       io.err(
-        '--from / --to / --pass / --aspect / --card / --nosound 只用于 -t mp4（其它类型没有"第几拍""画布比例""片头卡片""音轨"这些概念）',
+        '--from / --to / --pass / --aspect / --card / --nosound / --mark / --sync / --sound / --accomp / --accomp-gain / --synth-gain 只用于 -t mp4（其它类型没有"第几拍""画布比例""片头卡片""音轨"这些概念）',
       )
       return { code: EXIT.usage }
     }
@@ -1331,6 +1409,42 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
         io.err('--from 与 --to 要一起给（两个都不给 = 整曲）')
         return { code: EXIT.usage }
       }
+      // adj1166：名字段与位置段是两套入口，不能同时给（否则不知道听谁的）
+      if (p.mark !== null && (p.from !== null || p.to !== null)) {
+        io.err('--mark 与 --from/--to 不能同时给：名字段请用 --mark；精确位置请用 --from/--to')
+        return { code: EXIT.usage }
+      }
+      if (p.mark !== null && p.pass !== null) {
+        io.err('--mark 已带标记段自己的遍次，不能再给 --pass；要换遍次请改用 --from/--to --pass')
+        return { code: EXIT.usage }
+      }
+      const soundArg = (p.sound ?? 'synth').toLowerCase()
+      if (soundArg !== 'synth' && soundArg !== 'file' && soundArg !== 'mix') {
+        io.err(`--sound 支持 synth（合成音）| file（伴奏）| mix（伴奏+合成）；收到 “${String(p.sound)}”，不写则为 synth`)
+        return { code: EXIT.usage }
+      }
+      if (p.nosound && (p.sound !== null || p.accomp !== null || p.accompGain !== null || p.synthGain !== null)) {
+        io.err('--nosound 与 --sound / --accomp / --accomp-gain / --synth-gain 不能同时给')
+        return { code: EXIT.usage }
+      }
+      if (p.accomp !== null && soundArg === 'synth') {
+        io.err('--accomp 只用于 --sound file|mix（--sound synth 不使用伴奏）')
+        return { code: EXIT.usage }
+      }
+      const gainOf = (raw: string | null, name: string, fallback: number): number | null => {
+        if (raw === null) return fallback
+        const n = Number(raw)
+        if (!Number.isFinite(n) || n < 0 || n > 2) {
+          io.err(`${name} 需要 0–2 的数字（缺省 ${fallback}）；收到 “${raw}”`)
+          return null
+        }
+        return n
+      }
+      const accompGain = gainOf(p.accompGain, '--accomp-gain', 1)
+      if (accompGain === null) return { code: EXIT.usage }
+      // 与相机位 DEFAULT_SYNC_MIX 一致：纯合成音按满音量（旧行为），mix 时合成音默认 0.5
+      const synthGain = gainOf(p.synthGain, '--synth-gain', soundArg === 'mix' ? 0.5 : 1)
+      if (synthGain === null) return { code: EXIT.usage }
       let from: { bar: number; beat: number } | null = null
       let to: { bar: number; beat: number } | null = null
       if (p.from !== null && p.to !== null) {
@@ -1414,9 +1528,104 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
         )
         return { code: EXIT.render }
       }
+      /**
+       * adj1166：标记段名 / 伴奏都读同一份 `xxx.jps.sync.json`。
+       * 缺省路径 = `<输入>.sync.json`；`--sync` 可覆盖（侧车不在旁边时）。
+       *
+       * 不在 `--sound synth` 且没有 `--mark` 时必须读 sidecar：显式 file/mix 缺文件要报错，
+       * 不许静默退回合成音。
+       */
+      const inputPath = p.inputs[0]
+      const syncPath =
+        p.sync ??
+        (inputPath !== undefined && inputPath !== '-' ? `${inputPath}.sync.json` : null)
+      const needSidecar = p.mark !== null || soundArg !== 'synth'
+      let syncText: string | null = null
+      let syncObj: Record<string, unknown> | null = null
+      if (needSidecar) {
+        if (syncPath === null) {
+          io.err('--mark / --sound file|mix 需要具体 `.jps` 输入（不能从 stdin）')
+          return { code: EXIT.usage }
+        }
+        try {
+          syncText = await io.readFile(syncPath)
+        } catch {
+          io.err(
+            `找不到对拍文件：${syncPath}\n` +
+              '  --mark / --sound file|mix 需要 xxx.jps.sync.json；可用 --sync 指定路径。',
+          )
+          return { code: EXIT.noInput }
+        }
+        try {
+          const raw = JSON.parse(syncText) as unknown
+          if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('not object')
+          syncObj = raw as Record<string, unknown>
+        } catch {
+          io.err(`对拍文件不是合法 JSON：${syncPath}`)
+          return { code: EXIT.render }
+        }
+      }
+
+      let markStartId: string | null = null
+      let markEndId: string | null = null
+      let markPass: number | null = null
+      let markLabel = ''
+      if (p.mark !== null) {
+        const marks = Array.isArray(syncObj?.marks) ? (syncObj?.marks as unknown[]) : []
+        const hits = marks.filter(
+          (m): m is { id?: string; name: string; startId: string; endId: string; pass?: number } =>
+            m !== null &&
+            typeof m === 'object' &&
+            (m as { name?: unknown }).name === p.mark &&
+            typeof (m as { startId?: unknown }).startId === 'string' &&
+            typeof (m as { endId?: unknown }).endId === 'string',
+        )
+        if (hits.length === 0) {
+          const names = marks
+            .map((m) => (m !== null && typeof m === 'object' ? (m as { name?: unknown }).name : ''))
+            .filter((n): n is string => typeof n === 'string' && n !== '')
+          io.err(
+            `标记段里没有「${p.mark}」。${names.length > 0 ? `\n  现有：${names.join(' / ')}` : '\n  这份 sidecar 里没有 marks（先在试听里建标记段并保存）。'}`,
+          )
+          return { code: EXIT.usage }
+        }
+        if (hits.length > 1) {
+          io.err(`标记段名「${p.mark}」不唯一（${hits.length} 条），请先改名；名字必须能唯一定位一段。`)
+          return { code: EXIT.usage }
+        }
+        const m = hits[0]
+        markStartId = m.startId
+        markEndId = m.endId
+        markPass = typeof m.pass === 'number' && Number.isFinite(m.pass) ? m.pass : null
+        markLabel = m.name
+      }
+
+      let audioPath: string | null = null
+      if (soundArg !== 'synth') {
+        if (p.accomp !== null && !needSidecar) {
+          io.err('--accomp 只用于 --sound file|mix')
+          return { code: EXIT.usage }
+        }
+        const sidecarAudio = typeof syncObj?.audio === 'string' ? syncObj.audio.trim() : ''
+        const audioRef = p.accomp ?? sidecarAudio
+        if (audioRef === '') {
+          io.err(
+            `--sound ${soundArg} 需要伴奏：sidecar 里没有 audio，也没有给 --accomp。\n` +
+              '  先用对拍台/相机位选一次伴奏（会写进 xxx.jps.sync.json），或显式 --accomp <音频文件>。',
+          )
+          return { code: EXIT.usage }
+        }
+        audioPath = isAbsolutePath(audioRef) ? audioRef : joinPath(dirOf(syncPath ?? inputPath ?? ''), audioRef)
+      }
       let startId: string | null = null
       let endId: string | null = null
       let rangeText = '整曲'
+      if (markStartId !== null && markEndId !== null) {
+        startId = markStartId
+        endId = markEndId
+        pass = markPass
+        rangeText = markLabel
+      }
       if (from !== null && to !== null) {
         const layoutR = layoutScore(parsed, cfg)
         const r = resolveBarBeatRange(layoutR, from, to)
@@ -1452,10 +1661,17 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
       /** adj1114：片头片尾与声音都在这一行说清 —— 用户得能从终端确认"到底出的是什么片" */
       const cardText =
         cardStyleId === null ? '不带片头片尾' : `片头片尾：${CARD_NAMES[cardStyleId]}`
+      const soundText = p.nosound
+        ? '，无声'
+        : soundArg === 'synth'
+          ? '，合成音'
+          : soundArg === 'file'
+            ? '，伴奏'
+            : '，伴奏+合成'
       if (!p.quiet) {
         line(
           io,
-          `正在导出视频：${rangeText}${passText}（${aspectArg}，全片长，${cardText}${p.nosound ? '，无声' : ''}）`,
+          `正在导出视频：${rangeText}${passText}（${aspectArg}，全片长，${cardText}${soundText}）`,
         )
       }
       try {
@@ -1472,6 +1688,12 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
           cardStyleId,
           // adj1114：`--nosound` 明确不要声音；缺省与界面「带声音」勾选一致
           withAudio: !p.nosound,
+          // adj1166：声音来源与 sidecar/伴奏；默认 synth 保持旧命令行为
+          sound: p.nosound ? 'synth' : (soundArg as 'synth' | 'file' | 'mix'),
+          syncText,
+          audioPath,
+          accompGain,
+          synthGain,
         })
         if (!p.quiet) {
           const mb = (out.bytes / (1024 * 1024)).toFixed(1)
@@ -1488,6 +1710,8 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
             // adj1115：画布比例也写进 JSON（内部 id，与任务文件一致）
             aspect,
             card: cardStyleId,
+            sound: p.nosound ? 'none' : soundArg,
+            ...(markLabel !== '' ? { mark: markLabel } : {}),
             range: startId === null ? null : { startId, endId, pass },
           },
         }

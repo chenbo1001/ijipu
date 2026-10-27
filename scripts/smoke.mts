@@ -2397,7 +2397,7 @@ check('adj351 多声部第二组延续同声部：Q1=大钢琴 Q2=打击风琴 Q
   check(
     'adj1114 出片窗口照任务出片：`cardStyleId:null` ⇒ cards:false；`withAudio:false` ⇒ 不传 makeAudio',
     /job\.cardStyleId === null \|\| job\.cardStyleId === undefined[\s\S]{0,120}\{ cards: false \}/.test(worker) &&
-      /job\.withAudio === false \? \{\} : \{ makeAudio \}/.test(worker),
+      /job\.withAudio === false \? \{\} : \{ makeAudio:[\s\S]{0,120}makeAudioForJob\(job, s\)/.test(worker),
   )
   check(
     'adj1115 出片窗口透传 `--aspect`：任务里的画布比例真的进会话（不是只改终端那一行文案）',
@@ -21141,6 +21141,8 @@ runAdj927ExternalChangeTests()
       .then(() => runAdj1161Tests())
       // adj1164：相机位音色（自动随谱 / 全篇统一）
       .then(() => runAdj1164Tests())
+      // adj1165：相机位统一入口（导出不带参 / 试听带段与音色 / 相机内可选段）
+      .then(() => runAdj1165Tests())
       // adj1162：资源安装包命名规则（每资源一个、类型+名称+版本）
       .then(() => runAdj1162Tests())
       // adj1122：波形下方时间标尺（刻度选择 + 文字格式）
@@ -36006,8 +36008,8 @@ function runAdj1155Tests(): void {
   check(
     'adj1155 相机导出段也持久化：练习段导出/相机位「整曲」都更新 sidecar；从导出面板进相机不再强制清空段',
     /mirrorMarks\(\{ range \}\)/.test(barSrc) &&
-      /setExtras\(\{ range: null \}\)/.test(overlaySrc) &&
-      /setDynamicCamera\(\{ on: true, mode: '3min' \}\)/.test(exportPanelSrc) &&
+      /setExtras\(\{ range: null, markId: '' \}\)/.test(overlaySrc) &&
+      /openDynamicCamera\(\)/.test(exportPanelSrc) &&
       !/setDynamicCamera\(\{ on: true, range: null, mode: '3min' \}\)/.test(exportPanelSrc),
     '',
   )
@@ -36254,6 +36256,34 @@ function runAdj1161Tests(): void {
   check(
     'adj1161 负对照：没有 {jz N} 的 0 不出现间奏标注',
     !(renderScoreToSvg(plain)[0] ?? '').includes('间奏16拍'),
+    '',
+  )
+}
+
+/**
+ * adj1165（用户 2026-10-27）：相机位是**唯一出口**，两个入口只差"带不带参数"；
+ * 相机位自己也能选标记段（不靠试听入口强行带段）。
+ */
+function runAdj1165Tests(): void {
+  console.log('[adj1165] 相机位统一入口：导出面板不带参 / 试听带当前段与音色 / 相机内可选段')
+  const exportSrc = readFileSync(join(root, 'src/ui/dock/ExportPanel.tsx'), 'utf8')
+  const practiceSrc = readFileSync(join(root, 'src/dialogs/PracticeMarkBar.tsx'), 'utf8')
+  const overlaySrc = readFileSync(join(root, 'src/preview/DynamicFrameOverlay.tsx'), 'utf8')
+  check(
+    'adj1165 导出面板走 openDynamicCamera()（不带参数），不再自己 setDynamicCamera({on:true})',
+    exportSrc.includes('openDynamicCamera()') && !exportSrc.includes("setDynamicCamera({ on: true"),
+    '',
+  )
+  check(
+    'adj1165 试听入口把当前标记段 + 试听音色作为参数带进同一个相机位',
+    practiceSrc.includes('openDynamicCamera({ range, instrument: playbackHqVoice })'),
+    '',
+  )
+  check(
+    'adj1165 相机位内有标记段下拉（整曲 / 练习段），且切段会同步 range 到 sidecar',
+    overlaySrc.includes('data-sync="dyn-range"') &&
+      overlaySrc.includes('practiceMarks.map') &&
+      overlaySrc.includes('setExtras({ range: next, markId: id })'),
     '',
   )
 }

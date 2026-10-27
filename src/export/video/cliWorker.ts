@@ -20,6 +20,10 @@ import { createHqCache, resolveHqBank } from '../../playback/spessaCache'
 import { resolveActiveLibrary } from '../../playback/spessaSynthBackend'
 import { useUiStore } from '../../store/uiStore'
 import { hostBankUrl } from '../../store/hostBridge'
+// adj1166：命令行选伴奏/混音时，与相机位共用同一套对拍拟合与建轨
+import { buildAccompanimentTrack, decodeAccompaniment, mixAudioBuffers } from './accompaniment'
+import { effectiveSyncFitOf, parseSyncDoc } from './syncDoc'
+import { readSidecarAudio } from './syncIo'
 
 /** Rust 侧写的任务文件形状（与 `cli.ts` 的 `io.encodeVideo` 请求一一对应） */
 export interface CliVideoJob {
@@ -38,16 +42,66 @@ export interface CliVideoJob {
    * 老版本任务文件没有这个字段 ⇒ 按缺省 `true` 处理（见下面的 `job.withAudio === false`）。
    */
   withAudio: boolean
+  /** adj1166：合成音 / 伴奏 / 伴奏+合成（老任务没有 ⇒ 按 synth） */
+  sound?: 'synth' | 'file' | 'mix'
+  /** adj1166：对拍 sidecar 原文（file/mix 要用 trim/anchors/mix） */
+  syncText?: string | null
+  /** adj1166：伴奏路径（file/mix；已由 CLI 解析过相对路径） */
+  audioPath?: string | null
+  /** adj1166：两条音量（0–2；缺省 1） */
+  accompGain?: number
+  synthGain?: number
 }
 
 /**
  * 音轨：与界面预览/导出**同一套** HQ 音源（`resolveActiveLibrary` 选库 → `resolveHqBank` 取包 →
  * `renderToAudioBuffer` 离线渲染）。取不到就抛，由 `exportDynamicVideo` 退成无声片。
  */
-async function makeAudio(session: DynamicSession): Promise<AudioBuffer> {
+async function makeSynthAudio(session: DynamicSession): Promise<AudioBuffer> {
   const lib = resolveActiveLibrary(useUiStore.getState().playbackHqLibrary).lib
   const { bank } = await resolveHqBank(lib, createHqCache(), hostBankUrl(lib.id))
   return renderToAudioBuffer(session.events, bank, { bpm: session.bpm })
+}
+
+/**
+ * adj1166：按任务里的 `sound` 决定音轨：
+ *  · synth ⇒ 合成音（旧行为）；
+ *  · file  ⇒ 对拍 sidecar 的伴奏；
+ *  · mix   ⇒ 两者按增益混音。
+ *
+ * 与相机位 `DynamicFrameOverlay.renderAudioFor` 同一套拟合/建轨函数；
+ * 这里不读 store 的 sidecar（隐藏窗口），只消费 CLI 传进来的 sidecar 原文与伴奏路径。
+ */
+async function makeAudioForJob(job: CliVideoJob, session: DynamicSession): Promise<AudioBuffer> {
+  const sound = job.sound ?? 'synth'
+  if (sound === 'synth') {
+    const synth = await makeSynthAudio(session)
+    const gain = job.synthGain ?? 1
+    return gain === 1 ? synth : mixAudioBuffers([{ buffer: synth, gain }], session.totalMs)
+  }
+  const parsed = parseSyncDoc(job.syncText ?? '')
+  if (parsed.doc === null) throw new Error(parsed.error ?? '对拍文件不可用')
+  if (job.audioPath === null || job.audioPath === undefined || job.audioPath === '') {
+    throw new Error('缺少伴奏路径')
+  }
+  const bytes = await readSidecarAudio(job.audioPath)
+  if (bytes === null) throw new Error(`读不到伴奏：${job.audioPath}`)
+  const audio = await decodeAccompaniment(bytes)
+  const fit = effectiveSyncFitOf(parsed.doc, 60000 / session.bpm)
+  if (fit === null) throw new Error('对拍文件没有可用的拍速/偏移')
+  const acc = await buildAccompanimentTrack(audio, fit, parsed.doc.trim, session, 60000 / session.bpm)
+  const aGain = job.accompGain ?? 1
+  if (sound === 'file') {
+    return aGain === 1 ? acc : mixAudioBuffers([{ buffer: acc, gain: aGain }], session.totalMs)
+  }
+  const synth = await makeSynthAudio(session)
+  return mixAudioBuffers(
+    [
+      { buffer: synth, gain: job.synthGain ?? 1 },
+      { buffer: acc, gain: aGain },
+    ],
+    session.totalMs,
+  )
 }
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
@@ -139,7 +193,7 @@ export async function runCliVideoJob(raw: string | null = null): Promise<boolean
           : // pass 为 null 时不要写这个字段（`undefined` = 解析器默认候选）
             { startId: job.startId, endId: job.endId, ...(job.pass === null ? {} : { pass: job.pass }) },
       // adj1114：`--nosound` ⇒ 不传 `makeAudio`（`exportDynamic` 的口径：不传 = 无声，不白渲一条音轨）
-      ...(job.withAudio === false ? {} : { makeAudio }),
+      ...(job.withAudio === false ? {} : { makeAudio: (s: DynamicSession) => makeAudioForJob(job, s) }),
       onProgress,
     })
     const bytes = new Uint8Array(await res.blob.arrayBuffer())

@@ -221,6 +221,13 @@ ijipu cli lint -i 我的谱.jps > out.txt # cmd 与 PowerShell 的 > 都写出�
 ijipu cli render -i 赤伶.jps -t mp4 -o 赤伶-第2遍.mp4 --from 27:3 --to 50:1 --pass 2 --card ink
 ijipu cli render -i 我的谱.jps -t mp4 -o 整曲.mp4          # 不写起止 = 整曲
 ijipu cli render -i 我的谱.jps -o 整曲.mp4                  # -o 后缀即可推断类型
+
+# adj1166：有 sidecar 时按标记段名导出（不用自己换算小节:拍）
+ijipu cli render -i 赤伶.jps -t mp4 -o 段1.mp4 --mark 段1
+
+# 声音：合成音（缺省）/ 只伴奏 / 伴奏+合成
+ijipu cli render -i 赤伶.jps -t mp4 -o 段1-伴奏.mp4 --mark 段1 --sound file
+ijipu cli render -i 赤伶.jps -t mp4 -o 段1-混合.mp4 --mark 段1 --sound mix --accomp-gain 0.8 --synth-gain 0.5
 ```
 
 **拍位口径**（用户 2026-10-23 拍板：**只用这一种写法**）
@@ -231,6 +238,29 @@ ijipu cli render -i 我的谱.jps -o 整曲.mp4                  # -o 后缀即�
   `--from 27:3 --to 50:1` 到第 50 小节第 1 拍**之前**收住，不含那一拍。
 - `--pass N`：反复段落里的第 N 遍（**1 起**）；内部候选遍次 0 起，换算在 CLI 做。
   不给就按解析器的第一遍。与界面「标记段」的遍次下拉是同一套 `pickPracticeCandidate`。
+
+**标记段（`--mark`，adj1166）**
+
+- `--mark <名字>`：读同目录的 `<输入>.jps.sync.json`，按 `marks[].name` **精确匹配**，
+  用该段已存的起止音符与遍次；不需要再写 `--from/--to/--pass`。
+- 与 `--from/--to` **互斥**（一个名字、一个位置，同时给无法判断）；与 `--pass` **也互斥**
+  （段自己的遍次已经存在 sidecar 里）。
+- sidecar 不在旁边时用 `--sync <文件>` 指定。
+- 找不到名字 ⇒ 用法错误并列出已有段名；重名 ⇒ 明确报"不唯一"，不静默取第一条。
+- ⚠ 当前 sidecar 只有在**这份谱已有伴奏/对拍**时才会写盘；只在试听里建了标记段、
+  但没有伴奏的谱，`--mark` 可能找不到 sidecar —— 这种谱请用 `--from/--to`。
+
+**声音（`--sound`，adj1166）**
+
+- `--sound synth`（缺省）：合成音，保持旧命令行为；
+- `--sound file`：只放 sidecar 里的伴奏（不依赖音色库）；
+- `--sound mix`：伴奏 + 合成音；
+- `--accomp <音频>`：覆盖 sidecar 的 `audio` 路径（相对 sidecar 目录或绝对路径）；
+- `--accomp-gain` / `--synth-gain`：0–2，缺省伴奏 1；合成音在 `--sound mix` 时默认 0.5
+  （与相机位 `DEFAULT_SYNC_MIX` 一致），`--sound synth` 时默认 1（保持旧命令满音量）；
+- `file` / `mix` 必须能找到 sidecar + 伴奏，否则**明确报错**，不静默退回合成音；
+- `--nosound` 与 `--sound` / `--accomp` / 两条音量**互斥**；
+- `--mark` 与 `--sound file|mix` 共用同一份 sidecar，只读一次。
 - `--aspect 9:16|1:1|16:9`：画布比例（竖屏／方形／横屏），与相机位「画布」按钮**同一套写法**。
   只认这三种（`9x16` / `16x9` 这类内部 id 不认 —— 一种行为只留一种写法）；缺省 **9:16**，
   与界面相机位的默认画布一致。

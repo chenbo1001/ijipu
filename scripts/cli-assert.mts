@@ -1499,6 +1499,12 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
     cardStyleId: string | null
     withAudio: boolean
     output: string
+    /** adj1166 */
+    sound: string
+    syncText: string | null
+    audioPath: string | null
+    accompGain: number
+    synthGain: number
   }
   /**
    * 反复段落：`|: … :|` 把这两小节唱两遍。
@@ -1552,6 +1558,83 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
     seen !== null && seen.cardStyleId === null && seen.withAudio === true,
     `seen=${JSON.stringify(seen)}`,
   )
+
+  /**
+   * adj1166：标记段名 / 声音来源 / 音量参数。
+   * 标记与伴奏都从 sidecar 读；这里用内存 IO 精确断言"传进宿主的到底是哪一段、哪条音轨"。
+   */
+  const SIDECAR = JSON.stringify({
+    audio: 'a.mp3',
+    marks: [{ id: 'm1', name: '段1', startId: '0_1_0_0', endId: '0_1_0_3', pass: 1 }],
+  })
+  {
+    const m = makeIo({ 'a.jps': GOOD, 'a.jps.sync.json': SIDECAR })
+    let got: SeenVideo | null = null
+    m.io.encodeVideo = async (req) => {
+      got = { ...req }
+      return { bytes: 2, audio: true }
+    }
+    const r = await runCli(['render', '-i', 'a.jps', '-t', 'mp4', '-o', 'x.mp4', '--mark', '段1'], m.io)
+    check(
+      'adj1166 `--mark 段1` 从 sidecar 解出起止与段自带的遍次（不再需要 from/to）',
+      r.code === EXIT.ok && got !== null && got.startId === '0_1_0_0' && got.endId === '0_1_0_3' && got.pass === 1,
+      `code=${r.code} seen=${JSON.stringify(got)} err=${m.errs.join('｜').slice(0, 120)}`,
+    )
+    check(
+      'adj1166 `--mark` 默认 `--sound synth`（不碰伴奏）；`--mark` 不能与 from/to 同用',
+      got !== null && got.sound === 'synth' && got.withAudio === true,
+      `seen=${JSON.stringify(got)}`,
+    )
+    const bad = makeIo({ 'a.jps': GOOD, 'a.jps.sync.json': SIDECAR })
+    bad.io.encodeVideo = async () => ({ bytes: 1, audio: false })
+    const rBad = await runCli(
+      ['render', '-i', 'a.jps', '-t', 'mp4', '-o', 'x.mp4', '--mark', '段1', '--from', '1:1', '--to', '2:1'],
+      bad.io,
+    )
+    check('adj1166 `--mark` 与 --from/--to 互斥（报用法错误，不猜）', rBad.code === EXIT.usage, `code=${rBad.code}`)
+    const unknown = makeIo({ 'a.jps': GOOD, 'a.jps.sync.json': SIDECAR })
+    unknown.io.encodeVideo = async () => ({ bytes: 1, audio: false })
+    const rUnknown = await runCli(['render', '-i', 'a.jps', '-t', 'mp4', '-o', 'x.mp4', '--mark', '段9'], unknown.io)
+    check(
+      'adj1166 找不到标记段名 ⇒ 用法错误 + 列出已有段（不静默退回整曲）',
+      rUnknown.code === EXIT.usage && unknown.errs.join('').includes('段1'),
+      `code=${rUnknown.code} err=${unknown.errs.join('｜').slice(0, 100)}`,
+    )
+  }
+  {
+    const s = makeIo({ 'a.jps': GOOD, 'a.jps.sync.json': SIDECAR })
+    let got: SeenVideo | null = null
+    s.io.encodeVideo = async (req) => {
+      got = { ...req }
+      return { bytes: 2, audio: true }
+    }
+    const r = await runCli(
+      ['render', '-i', 'a.jps', '-t', 'mp4', '-o', 'x.mp4', '--sound', 'file', '--accomp-gain', '0.4'],
+      s.io,
+    )
+    check(
+      'adj1166 `--sound file` 读同一份 sidecar，把伴奏路径与 sync 原文交给宿主，并带 0.4 增益',
+      r.code === EXIT.ok &&
+        got !== null &&
+        got.sound === 'file' &&
+        got.syncText === SIDECAR &&
+        got.audioPath === 'a.mp3' &&
+        got.accompGain === 0.4,
+      `code=${r.code} seen=${JSON.stringify(got)} err=${s.errs.join('｜').slice(0, 120)}`,
+    )
+    const missing = makeIo({ 'a.jps': GOOD })
+    missing.io.encodeVideo = async () => ({ bytes: 1, audio: false })
+    const rMissing = await runCli(['render', '-i', 'a.jps', '-t', 'mp4', '-o', 'x.mp4', '--sound', 'file'], missing.io)
+    check(
+      'adj1166 `--sound file` 缺 sidecar ⇒ 输入不存在（不静默退回 synth）',
+      rMissing.code === EXIT.noInput && !('x.mp4' in missing.files),
+      `code=${rMissing.code} err=${missing.errs.join('｜').slice(0, 120)}`,
+    )
+    const conflict = makeIo({ 'a.jps': GOOD, 'a.jps.sync.json': SIDECAR })
+    conflict.io.encodeVideo = async () => ({ bytes: 1, audio: false })
+    const rConflict = await runCli(['render', '-i', 'a.jps', '-t', 'mp4', '-o', 'x.mp4', '--nosound', '--sound', 'mix'], conflict.io)
+    check('adj1166 `--nosound` 与 `--sound` 互斥', rConflict.code === EXIT.usage, `code=${rConflict.code}`)
+  }
 
   /**
    * ⚠ **真 bug 的回归**（adj1084 第一版就踩了）：

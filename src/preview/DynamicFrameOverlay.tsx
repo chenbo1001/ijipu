@@ -73,6 +73,19 @@ export function DynamicFrameOverlay() {
   const aspect = useUiStore((s) => s.dynamicCamera.aspect)
   const range = useUiStore((s) => s.dynamicCamera.range)
   const mode = useUiStore((s) => s.dynamicCamera.mode)
+  /** adj1165：相机位也能直接选标记段（不再只靠试听入口把段带进来） */
+  const practiceMarks = useUiStore((s) => s.practiceMarks)
+  const setPracticeMarkId = useUiStore((s) => s.setPracticeMarkId)
+  const selectedMarkId = useMemo(() => {
+    if (range === null) return ''
+    const hit = practiceMarks.find(
+      (m) =>
+        m.startId === range.startId &&
+        m.endId === range.endId &&
+        (m.pass ?? undefined) === (range.pass ?? undefined),
+    )
+    return hit?.id ?? ''
+  }, [practiceMarks, range])
   /** adj1164：相机位音色下拉（L3 会话级，默认自动随谱） */
   const instrument = useUiStore((s) => s.dynamicCamera.instrument)
   const playbackHqEnabled = useUiStore(enabledVoicesOf)
@@ -521,6 +534,23 @@ export function DynamicFrameOverlay() {
     pauseForMixChange()
   }
 
+  /** adj1165：相机位切换标记段；同步写 sidecar（range + markId），下次打开仍是这一段 */
+  const changeCameraRange = (id: string) => {
+    if (id === '__current__') return
+    if (id === '') {
+      setDynamicCamera({ range: null })
+      setPracticeMarkId('')
+      setExtras({ range: null, markId: '' })
+      return
+    }
+    const m = practiceMarks.find((x) => x.id === id)
+    if (!m) return
+    const next = { startId: m.startId, endId: m.endId, ...(m.pass !== undefined ? { pass: m.pass } : {}) }
+    setDynamicCamera({ range: next })
+    setPracticeMarkId(id)
+    setExtras({ range: next, markId: id })
+  }
+
   /** sidecar 有文件名、但内存里没有伴奏（重开应用后）⇒ 在相机位里直接选一次 */
   const onPickMixAudio = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -898,25 +928,23 @@ export function DynamicFrameOverlay() {
             />
             <span>带声音</span>
           </label>
-          {range ? (
-            <>
-              <span className="dyn-frame-label">{dynamicVideoCopy.rangeSegment}</span>
-              <button
-                type="button"
-                className="btn"
-                disabled={encoding || preparingAudio}
-                onClick={() => {
-                  // adj1155：整曲也要写回 sidecar（否则刷新后又回到上次的标记段）
-                  setDynamicCamera({ range: null })
-                  setExtras({ range: null })
-                }}
-              >
-                {dynamicVideoCopy.rangeAll}
-              </button>
-            </>
-          ) : (
-            <span className="dyn-frame-label">{dynamicVideoCopy.rangeAll}</span>
-          )}
+          <span className="dyn-frame-label">{dynamicVideoCopy.rangeSegment}</span>
+          <select
+            className="dyn-frame-select"
+            data-sync="dyn-range"
+            value={range === null ? '' : selectedMarkId || '__current__'}
+            disabled={encoding || preparingAudio}
+            aria-label={dynamicVideoCopy.rangeSegment}
+            onChange={(e) => changeCameraRange(e.target.value)}
+          >
+            <option value="">{dynamicVideoCopy.rangeAll}</option>
+            {practiceMarks.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+            {range !== null && selectedMarkId === '' && <option value="__current__">{dynamicVideoCopy.rangeUnlisted}</option>}
+          </select>
           {/* adj1121：对拍入口**挪到试听栏**（对拍是边听边对的活）；相机位只保留当前对拍状态 */}
           {syncBpm !== null && (
             <span className="dyn-frame-meta dyn-frame-sync-badge">

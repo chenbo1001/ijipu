@@ -1805,6 +1805,20 @@ async function main() {
           '相机位音色选中',
         )
         check('adj1164 相机位选具体音色真的生效（不是只改下拉显示）', instPicked !== '', instPicked)
+        // adj1165：入口统一后，标记段也收进相机位（整曲 + 练习段列表）
+        const rangeSel = await evalJs(
+          c,
+          `(() => {
+            const el = document.querySelector('[data-sync="dyn-range"]')
+            if (!el) return { exists: false }
+            return { exists: true, value: el.value, labels: [...el.options].map((o) => o.textContent.trim()) }
+          })()`,
+        )
+        check(
+          'adj1165 相机位有「标记段」下拉（含整曲；入口统一后不再只能靠试听带段）',
+          rangeSel.exists && rangeSel.labels[0] === '整曲',
+          JSON.stringify(rangeSel),
+        )
         // 换音色会重建会话；等生成按钮重新可用后再做后面的出片门断言（否则会把"重建中"误判成"不能用"）
         await waitFor(
           c,

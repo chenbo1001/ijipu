@@ -45,7 +45,9 @@ export function PracticeMarkBar(): React.JSX.Element {
   const setMarkId = useUiStore((s) => s.setPracticeMarkId)
   // adj1065：整段动态谱 = 预览区相机位（关掉试听弹窗，否则挡住预览区）
   const closeModal = useUiStore((s) => s.closeModal)
-  const setDynamicCamera = useUiStore((s) => s.setDynamicCamera)
+  const openDynamicCamera = useUiStore((s) => s.openDynamicCamera)
+  /** adj1165：试听里选的具体音色也作为相机位的默认参数带过去（自动时为 null） */
+  const playbackHqVoice = useUiStore((s) => s.playbackHqVoice)
   // adj1077：视频生成只开放给桌面壳；这里保留按钮但禁用，避免网站/插件“点了没反应”
   // adj1078：网站/插件连相机位都不显示 ⇒ 整个按钮不渲染；桌面壳才出现
   const dynamicVideoEnabled = canUseDynamicVideo()
@@ -277,13 +279,9 @@ export function PracticeMarkBar(): React.JSX.Element {
               onClick={() => {
                 const m = marks.find((x) => x.id === markId)
                 if (!m) return
-                // adj1065：这一段交给预览区相机位；试听弹窗先关，才能看到取景
+                // adj1065/adj1165：这一段交给预览区相机位；试听弹窗先关，才能看到取景
                 const range = { startId: m.startId, endId: m.endId, ...(m.pass !== undefined ? { pass: m.pass } : {}) }
-                setDynamicCamera({
-                  on: true,
-                  range,
-                  mode: '3min',
-                })
+                openDynamicCamera({ range, instrument: playbackHqVoice })
                 // adj1155：相机导出段也写进 sidecar（刷新后仍是这一段）
                 mirrorMarks({ range })
                 closeModal()

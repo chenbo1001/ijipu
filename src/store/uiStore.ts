@@ -462,6 +462,13 @@ interface UiState {
    */
   dynamicCamera: DynamicCameraState
   setDynamicCamera: (patch: Partial<DynamicCameraState>) => void
+  /**
+   * adj1165：打开相机位的**唯一入口**（导出面板 / 试听「导出这段」共用）。
+   *
+   * 不传参数 = 沿用相机位上次的标记段/音色；传 `range` / `instrument` = 作为本次默认值
+   * （试听入口把当前标记段与试听音色带进来）。相机里仍可改，两者不是两套导出。
+   */
+  openDynamicCamera: (opts?: { range?: DynamicCameraState['range']; instrument?: number | null }) => void
   /** adj1073：片头/片尾卡片模板（L1 用户偏好，落盘；预设/以后的自定义） */
   dynamicCardStyle: DynamicCardStyleId
   setDynamicCardStyle: (id: DynamicCardStyleId) => void
@@ -949,6 +956,17 @@ export const useUiStore = create<UiState>()((set) => ({
   setDebugBounds: (b) => set({ debugBounds: b }),
   // adj1065：动态谱相机位开关/比例/范围/时长（L3 会话级，不落盘）
   setDynamicCamera: (patch) => set((s) => ({ dynamicCamera: { ...s.dynamicCamera, ...patch } })),
+  // adj1165：两个入口共用同一相机位；参数只决定本次默认值
+  openDynamicCamera: (opts) =>
+    set((s) => ({
+      dynamicCamera: {
+        ...s.dynamicCamera,
+        on: true,
+        mode: '3min',
+        ...(opts?.range === undefined ? {} : { range: opts.range }),
+        ...(opts?.instrument === undefined ? {} : { instrument: opts.instrument }),
+      },
+    })),
   // adj1073：卡片模板是 L1，落盘；未知值由 load 回退
   setDynamicCardStyle: (id) => {
     try {

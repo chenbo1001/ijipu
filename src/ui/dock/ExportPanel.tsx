@@ -78,7 +78,7 @@ export function ExportPanel() {
   const setExportBg = useUiStore((s) => s.setExportBg)
   const setExportBgImage = useUiStore((s) => s.setExportBgImage)
   // adj1065：动态谱视频入口 = 预览区相机位（不再开弹窗）；整曲入口清掉标记段范围
-  const setDynamicCamera = useUiStore((s) => s.setDynamicCamera)
+  const openDynamicCamera = useUiStore((s) => s.openDynamicCamera)
   const dynamicVideoEnabled = canUseDynamicVideo()
   const previewSoften = useUiStore((s) => s.previewSoften)
   const setExportJob = useUiStore((s) => s.setExportJob)
@@ -322,8 +322,9 @@ export function ExportPanel() {
             type="button"
             className="btn"
             onClick={() => {
-              // adj1155：保留上次选中的标记段（存在 sidecar 里）；要整曲请在相机位点「整曲」
-              setDynamicCamera({ on: true, mode: '3min' })
+              // adj1155/adj1165：不带参数 ⇒ 沿用相机位上次的标记段/音色；
+              // 要整曲或换段在相机位里选。试听入口才把当前段作为参数带进来。
+              openDynamicCamera()
             }}
             disabled={busy !== null}
           >

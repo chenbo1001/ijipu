@@ -122,7 +122,7 @@ iJipu CLI 注册状态：已注册 ✓（终端里可以直接敲 ijipu）
 | `format` | 按应用规范规范化源码（与应用编辑器的格式化结果一致） | `-i` `-o` `--check` `--in-place` `--diff` |
 | `lint` | 语法检查（有错 ⇒ 退出码 3）；输入可以是目录 | `-i` `-r` `--filter` `--format text\|json\|gh` `--watch` |
 | `info` | 谱面概况（调号 / 行数 / 分组 / 问题数） | `-i` `-t text\|json` `--json` |
-| `render` | 渲染导出：`-t svg` ｜ `-t midi` ｜ `-t png` `-t jpg` `-t pdf` | `-i` `-t` `-o` `--crop` `--pad` `--ink` |
+| `render` | 渲染导出：`-t svg` ｜ `-t midi` ｜ `-t png` `-t jpg` `-t pdf` ｜ `-t mp4` | `-i` `-t` `-o` `--crop` `--pad` `--ink` `--mark` `--sound` |
 | `play` | 导出音频文件：`-t midi` ｜ `-t wav` | `-i` `-t` `-o` |
 | `batch` | 目录批量操作，任务可用逗号组合 | `--in` `-o` `-t lint,svg,midi,fmt` `-r` `--filter` |
 | `settings` | 查看某一个设置项的值与来源（只读） | `-i <谱>` `<键名>` `-s k=v` |
@@ -396,6 +396,37 @@ MIDI 是二进制，必须用 -o 指定文件（不能用 stdout）
 - `--nosound` 明确导出**不带声音**的视频；不写就是带声音（与相机位的「带声音」勾选一致）。
 - 缺省 **9:16、整曲时长**（不会像界面里的「3 分钟」那样把长曲悄悄截短）。
 - `-o` 必须写文件：MP4 是二进制，不能走 stdout。
+
+**按标记段名导出**（`--mark`，需要同目录的 `xxx.jps.sync.json`）：
+
+```text
+ijipu cli render -i 赤伶.jps -t mp4 -o 段1.mp4 --mark 段1
+```
+
+- `--mark` 用 sidecar 里 `marks` 的**名字**，段自己的遍次也一起用；不要再写 `--from/--to/--pass`；
+- `--sync <文件>` 可指定 sidecar（缺省是 `<输入>.jps.sync.json`）；
+- 找不到名字会列出已有段名；重名会明确报"不唯一"；
+- sidecar 只有在这份谱已有伴奏/对拍时才写盘；只有标记段、没有伴奏时请用 `--from/--to`。
+
+**声音选择**（`--sound`）：
+
+```text
+# 合成音（缺省，和旧命令一致）
+ijipu cli render -i 赤伶.jps -t mp4 -o 合成.mp4 --mark 段1
+
+# 只用伴奏（sidecar 里记的音频）
+ijipu cli render -i 赤伶.jps -t mp4 -o 伴奏.mp4 --mark 段1 --sound file
+
+# 伴奏 + 合成音，两条音量 0–2
+ijipu cli render -i 赤伶.jps -t mp4 -o 混合.mp4 --mark 段1 --sound mix \
+  --accomp-gain 0.8 --synth-gain 0.5
+```
+
+- `--sound synth|file|mix`：合成音 / 伴奏 / 伴奏+合成；
+- `--accomp <音频>` 覆盖 sidecar 里的伴奏路径（相对 sidecar 目录或绝对路径）；
+- `--accomp-gain` / `--synth-gain`：0–2；伴奏缺省 1，合成音在 mix 时缺省 0.5、纯合成时缺省 1；
+- `file` / `mix` 缺 sidecar 或伴奏 ⇒ 明确报错，不会静默退回合成音；
+- `--nosound` 与 `--sound` / `--accomp` / 两条音量互斥。
 
 只要动态谱、不要片头片尾（也是最省事的写法 —— 不写 `--card`）：
 

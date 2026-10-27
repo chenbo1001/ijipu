@@ -1261,6 +1261,8 @@ export const dynamicVideoCopy = {
   modeFull: '整首',
   rangeAll: '整曲',
   rangeSegment: '标记段',
+  /** adj1165：sidecar 里的段已不在练习段列表时，下拉里保留一个只读项 */
+  rangeUnlisted: '当前段（不在列表）',
   /* ---- adj1089：行中平移方式（设置 → 本机） ---- */
   panModeGroup: '动态视频',
   panModeLabel: '平移方式',
