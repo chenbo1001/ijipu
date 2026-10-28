@@ -1,6 +1,6 @@
 # iJipu 命令行使用手册
 
-> - 适用版本：**iJipu 0.75.2**
+> - 适用版本：**iJipu 0.76.0**
 > - 许可：**AGPL-3.0** ｜ 源码与问题反馈：<https://github.com/snailhome/ijipu>
 > - 共 13 个命令。下文示例均为**实跑输出**：以 `>` 开头的是输入的命令，紧随其后的是该命令的真实输出
 >   （这些示例都在 Windows 上**实跑过**，输出原文照录）。
@@ -55,7 +55,7 @@
 
 ```text
 > ijipu cli --version
-iJipu 0.75.2
+iJipu 0.76.0
 ```
 
 ```text
@@ -218,7 +218,7 @@ Q: 1"注释没闭合 2 3 4 |
 > ijipu cli lint -i 错谱.jps --json
 {
   "schema": 1,
-  "generator": "ijipu 0.75.2",
+  "generator": "ijipu 0.76.0",
   "input": "错谱.jps",
   "ok": false,
   …
@@ -232,7 +232,7 @@ Q: 1"注释没闭合 2 3 4 |
 > ijipu cli lint -i samples -r --json
 {
   "schema": 1,
-  "generator": "ijipu 0.75.2",
+  "generator": "ijipu 0.76.0",
   "files": [
 ```
 
@@ -333,7 +333,7 @@ Q: 1 2 3 4 |
 > ijipu cli info -i samples\ershenbu.jps --json
 {
   "schema": 1,
-  "generator": "ijipu 0.75.2",
+  "generator": "ijipu 0.76.0",
   …
   "groups": 3,
 ```
@@ -436,7 +436,7 @@ ijipu cli render -i 赤伶.jps -t mp4 -o 混合.mp4 --mark 段1 --sound mix \
 
 **在 `.bat` 里使用中文文件名（Windows）**
 
-终端里直接敲命令没问题，但把同一条命令写进 `.bat` 时，`cmd.exe` 会按**本机 OEM 代码页**解析批处理文件。`.bat` 若存成 UTF-8，中文会先变成乱码（常出现 `?`），CLI 拿到的文件名已经不存在，于是报 `ENOENT`。
+终端里直接敲命令没问题，但把同一条命令写进 `.bat` 时，`cmd.exe` 会按**本机命令行编码**（中文 Windows 通常是 GBK）解析批处理文件。`.bat` 若存成 UTF-8，中文会先变成乱码（常出现 `?`），CLI 拿到的文件名已经不存在，于是报 `ENOENT`。
 
 三种可靠写法（任选其一）：
 
@@ -447,7 +447,7 @@ ijipu cli render -t mp4 --card paper -i 安和桥.jps -o 安和桥.mp4
 ```
 
 > 这个 `.bat` 要存成 **UTF-8 无 BOM**；`chcp 65001` 必须在第一行（`@echo off` 之后）。
-> 某些旧版 Windows 仍会按 OEM 解析批处理，此时改用下面两种。
+> 某些旧版 Windows 仍会按旧编码解析批处理，此时改用下面两种。
 
 **写法二：`.bat` 存成 ANSI/GBK**（中文 Windows 最稳）
 
@@ -689,7 +689,7 @@ iJipu CLI doctor
 > ijipu cli doctor --json
 {
   "schema": 1,
-  "generator": "ijipu 0.75.2",
+  "generator": "ijipu 0.76.0",
   "capabilities": {
     "svg": true,
     "midi": true,
