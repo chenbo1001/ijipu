@@ -136,6 +136,8 @@ import { accompanimentPlan, fadeWindowOf, mixSamples, waveformPeaks, ACCOMP_SAMP
 import { preRollFrameMs, shiftSequenceBy } from '../src/export/video/preRoll.ts'
 // adj1122：波形下方时间标尺的刻度选择（纯函数）
 import { timeScaleOf, timeLabelOf, audioClockOf } from '../src/dialogs/syncRuler.ts'
+// adj1172：节拍器排点（纯函数；用开播锚点映射到 AudioContext 时间）
+import { planMetronomeClicks } from '../src/dialogs/metronomeSchedule.ts'
 // adj1126：波形视野（缩放/平移；spanMs=0 = 整曲）
 import {
   VIEW_ALL,
@@ -36072,6 +36074,55 @@ function runAdj1155Tests(): void {
       !/const marker = document\.querySelector\('\.playhead-marker'\)/.test(previewSrc),
     '',
   )
+  {
+    /**
+     * adj1172（用户实报「节拍器落点没落到拍子开头、比合成音慢」）：
+     * 拍点必须用开播锚点映射；续排窗口起点变化绝不能改变同一个拍点的 whenSec。
+     */
+    const a = planMetronomeClicks({
+      fromMs: 5000,
+      untilMs: 7000,
+      beatMs: 500,
+      offsetMs: 5000,
+      startAt: 10,
+      startFromMs: 5000,
+    })
+    const b = planMetronomeClicks({
+      fromMs: 6000,
+      untilMs: 7000,
+      beatMs: 500,
+      offsetMs: 5000,
+      startAt: 10,
+      startFromMs: 5000,
+    })
+    const off = planMetronomeClicks({
+      fromMs: 5000,
+      untilMs: 6000,
+      beatMs: 500,
+      offsetMs: 3200,
+      startAt: 10,
+      startFromMs: 5000,
+    })
+    check(
+      'adj1172 节拍器拍点用开播锚点映射（5000ms 起步 ⇒ when 10.0/10.5/11.0…）',
+      a.length === 5 &&
+        a[0]?.audioMs === 5000 &&
+        Math.abs((a[0]?.whenSec ?? 0) - 10) < 1e-9 &&
+        Math.abs((a[1]?.whenSec ?? 0) - 10.5) < 1e-9 &&
+        Math.abs((a[4]?.whenSec ?? 0) - 12) < 1e-9,
+      JSON.stringify(a),
+    )
+    check(
+      'adj1172 续排窗口从 6000 开始时，同一个 6000ms 拍点仍是 11.0s（不随 from 游标漂移）',
+      b.length === 3 && Math.abs((b[0]?.whenSec ?? 0) - 11) < 1e-9,
+      JSON.stringify(b),
+    )
+    check(
+      'adj1172 拍点先按 offset 落位：offset=3200、startFrom=5000 ⇒ 第一击 5200ms/10.2s（不是 10.0）',
+      off.length === 2 && off[0]?.audioMs === 5200 && Math.abs((off[0]?.whenSec ?? 0) - 10.2) < 1e-9,
+      JSON.stringify(off),
+    )
+  }
   check(
     'adj1155 试听里增删练习段 ⇒ 立刻写 sidecar（mirrorMarks + flushSyncAutoSave）',
     /mirrorMarks\(\)/.test(barSrc) &&

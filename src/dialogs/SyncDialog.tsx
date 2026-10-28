@@ -41,6 +41,8 @@ import { loadSidecarDocAt, loadSidecarAudioFor, resolveSidecarPath } from '../st
 import { applySyncExtrasToUi } from '../store/syncExtras'
 // adj1137：波形上方那条"音符格子排"（纯几何）
 import { barLabelsOf, cellRectPct, pitchHeightOf, stripCellsOf } from './noteStrip'
+// adj1172：节拍器排点的纯计算（用开播锚点把拍点映射到 AudioContext 时间）
+import { planMetronomeClicks } from './metronomeSchedule'
 import { canUseDynamicVideo } from '../export/video/capability'
 import { syncCopy } from '../brand/copy'
 import { isTauriShell } from '../brand/env'
@@ -680,40 +682,53 @@ export function SyncDialog() {
        * 对拍之后再跟着锚点走（不再是"点了没反应"）。
        */
       const clock = effFit ?? { beatMs: scoreBeatMs, offsetMs: 0 }
-      const from = Math.max(schedRef.current, playheadRef.current - 40, 0)
+      /**
+       * adj1172：`from` 是**排点游标**（上次排到哪），不是"此刻音频在哪"。
+       * 映射必须用开播时记下的锚点 `(startRef.at, startRef.from)`：
+       * 同一个拍点无论什么时候续排，`whenSec` 都相同 ⇒ 与伴奏/合成音重合。
+       */
+      const si = startRef.current
+      if (!si) return
+      const from = Math.max(schedRef.current, 0)
       if (untilMs <= from) return
-      const beatMs = clock.beatMs
-      const k0 = Math.ceil((from - clock.offsetMs) / beatMs - 1e-9)
-      let n = 0
-      for (let k = k0; n < 400; k++) {
-        const at = clock.offsetMs + k * beatMs
-        if (at > untilMs) break
-        if (at >= from) {
-          const when = ctx.currentTime + Math.max(0, (at - from) / 1000)
-          const osc = ctx.createOscillator()
-          const gain = ctx.createGain()
-          /**
-           * adj1170：短衰减的软"嗒"——旧版 1000Hz/0.22 方起方停太像提示音。
-           * 三角波从 660Hz 落到 440Hz，2ms 起音、45ms 内衰减到静音；
-           * 音头/音尾都有包络，不再有硬切的爆音。
-           */
-          osc.type = 'triangle'
-          osc.frequency.setValueAtTime(METRONOME_HZ, when)
-          osc.frequency.exponentialRampToValueAtTime(METRONOME_HZ * 0.667, when + METRONOME_MS / 1000)
-          gain.gain.setValueAtTime(0.0001, when)
-          gain.gain.exponentialRampToValueAtTime(METRONOME_GAIN, when + 0.002)
-          gain.gain.exponentialRampToValueAtTime(0.0001, when + METRONOME_MS / 1000)
-          osc.connect(gain)
-          gain.connect(ctx.destination)
-          osc.start(when)
-          osc.stop(when + METRONOME_MS / 1000 + 0.01)
-          liveClicks.add(osc)
-          osc.onended = () => liveClicks.delete(osc)
-          clicksRef.current.push(osc)
-        }
-        n++
+      const plan = planMetronomeClicks({
+        fromMs: from,
+        untilMs,
+        beatMs: clock.beatMs,
+        offsetMs: clock.offsetMs,
+        startAt: si.at,
+        startFromMs: si.from,
+      })
+      for (const { whenSec } of plan) {
+        /**
+         * 已经过去的拍点不再补（补也只能"立刻响"，反而比音源晚）。
+         * 只容许 20ms 内的调度延迟：夹到当前时刻，听感上仍在拍点上。
+         */
+        if (whenSec < ctx.currentTime - 0.02) continue
+        const when = Math.max(ctx.currentTime, whenSec)
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        /**
+         * adj1170：短衰减的软"嗒"——旧版 1000Hz/0.22 方起方停太像提示音。
+         * 三角波从 660Hz 落到 440Hz，2ms 起音、45ms 内衰减到静音；
+         * 音头/音尾都有包络，不再有硬切的爆音。
+         */
+        osc.type = 'triangle'
+        osc.frequency.setValueAtTime(METRONOME_HZ, when)
+        osc.frequency.exponentialRampToValueAtTime(METRONOME_HZ * 0.667, when + METRONOME_MS / 1000)
+        gain.gain.setValueAtTime(0.0001, when)
+        gain.gain.exponentialRampToValueAtTime(METRONOME_GAIN, when + 0.002)
+        gain.gain.exponentialRampToValueAtTime(0.0001, when + METRONOME_MS / 1000)
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+        osc.start(when)
+        osc.stop(when + METRONOME_MS / 1000 + 0.01)
+        liveClicks.add(osc)
+        osc.onended = () => liveClicks.delete(osc)
+        clicksRef.current.push(osc)
       }
-      schedRef.current = Math.max(from, untilMs)
+      // +1ms：下一轮从窗口末尾之后开始，既不漏拍，也不会把边界那一拍排两次
+      schedRef.current = untilMs + 0.001
     },
     [effFit, scoreBeatMs],
   )
