@@ -36065,6 +36065,14 @@ function runAdj1155Tests(): void {
     '',
   )
   check(
+    'adj1171 播放跟随滚动只查本预览自己的 .preview-pane（对拍台同时挂着主预览，不能全局取第一个色块）',
+    /scrollerRef: RefObject<HTMLDivElement \| null>/.test(previewSrc) &&
+      /scroller\?\.querySelector\('\.playhead-marker'\)/.test(previewSrc) &&
+      /scroller\?\.querySelectorAll\('\.preview-zoom-scale'\)/.test(previewSrc) &&
+      !/const marker = document\.querySelector\('\.playhead-marker'\)/.test(previewSrc),
+    '',
+  )
+  check(
     'adj1155 试听里增删练习段 ⇒ 立刻写 sidecar（mirrorMarks + flushSyncAutoSave）',
     /mirrorMarks\(\)/.test(barSrc) &&
       /flushSyncAutoSave\(\)/.test(barSrc) &&

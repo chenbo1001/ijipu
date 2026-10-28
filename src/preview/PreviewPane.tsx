@@ -5,7 +5,7 @@
  * 联动（M3）：activeNoteId 高亮对应音符并滚动；点击音符/歌词跳转编辑器光标。
  * 辅助虚线（adj7）：页面四边距 + 每行行距虚线，按住拖拽直接调整页面设置。
  */
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 import { useDocStore } from '../store/docStore'
 import { useUiStore, enabledVoicesOf } from '../store/uiStore'
 // adj529：预览页基准宽（与顶栏"双击比率按宽度适配"的反算算式同源）
@@ -894,6 +894,7 @@ export function PreviewPane({ disableGuides = false }: { disableGuides?: boolean
                   pages={layout.pages}
                   noteSize={pageConfig.note_size}
                   rowSpans={rowSpansByPage}
+                  scrollerRef={paneRef}
                 />
                 {/* adj987h（用户需求）：试听「标记段」的标记线（每行一段 + 两端小竖头 + 循环 ⟲） */}
                 <PracticeMarkLayer page={page} noteSize={pageConfig.note_size} />
@@ -1274,6 +1275,7 @@ function PlayheadLayer({
   pages,
   noteSize,
   rowSpans,
+  scrollerRef,
 }: {
   page: ScorePage
   pages: ScorePage[]
@@ -1283,6 +1285,8 @@ function PlayheadLayer({
    * 曲部（同组多声部 + 段层）到它最后一行歌词。试听换行时据此把整组滚进视界。
    */
   rowSpans: RowSpan[][]
+  /** adj1171：本预览自己的滚动容器；对拍台里同时挂着主预览，不能再用 document 全局找 */
+  scrollerRef: RefObject<HTMLDivElement | null>
 }) {
   const currentMs = useDocStore((s) => s.currentMs)
   const track = useDocStore((s) => s.playheadTrack)
@@ -1387,8 +1391,8 @@ function PlayheadLayer({
     if (track.length === 0 || currentMs <= 0) return
     if (panMode === 'follow') {
       // 色块由本层渲染 ⇒ 直接量它在屏幕上的位置最省事（不用把 SVG 坐标换算回视口坐标）
-      const marker = document.querySelector('.playhead-marker')
-      const scroller = marker?.closest('.preview-pane')
+      const scroller = scrollerRef.current
+      const marker = scroller?.querySelector('.playhead-marker')
       if (!(marker instanceof HTMLElement) || !(scroller instanceof HTMLElement)) return
       const scRect = scroller.getBoundingClientRect()
       const scrollLeft = scroller.scrollLeft
@@ -1418,8 +1422,8 @@ function PlayheadLayer({
      * 页面元素按**序号**取、再按"这一页实际渲染宽 / 页宽"折成内容 px：
      * 预览的缩放有两层（pageConfig 字号 + 用户预览比率），逐处自己算缩放迟早算错。
      */
-    const pageEl = document.querySelectorAll('.preview-zoom-scale')[page.index]
-    const scroller = pageEl?.closest('.preview-pane')
+    const scroller = scrollerRef.current
+    const pageEl = scroller?.querySelectorAll('.preview-zoom-scale')[page.index]
     if (!(pageEl instanceof HTMLElement) || !(scroller instanceof HTMLElement)) return
     const scRect = scroller.getBoundingClientRect()
     const pageRect = pageEl.getBoundingClientRect()
@@ -1474,7 +1478,7 @@ function PlayheadLayer({
     if (target !== null && Math.abs(target - scroller.scrollLeft) >= 1) {
       scroller.scrollTo({ left: target, behavior: 'smooth' })
     }
-  }, [currentMs, track, segsOfPage, rowSpans, panMode, beatMs, beatBars, anchorMs, rowLeadMs, page.index, page.width])
+  }, [currentMs, track, segsOfPage, rowSpans, panMode, beatMs, beatBars, anchorMs, rowLeadMs, page.index, page.width, scrollerRef])
 
   /**
    * adj1090（用户 2026-10-23 口径）：**纵向**滚动——首次播放 / 换行时，判断"曲部 + 词部"
@@ -1502,8 +1506,8 @@ function PlayheadLayer({
      * 页面元素按**序号**取，不按色块反查：跨页那一刻可能两页同时有色块，
      * `document.querySelector('.playhead-marker')` 会拿到前一页的块 ⇒ 页面顶算错。
      */
-    const pageEl = document.querySelectorAll('.preview-zoom-scale')[page.index]
-    const scroller = pageEl?.closest('.preview-pane')
+    const scroller = scrollerRef.current
+    const pageEl = scroller?.querySelectorAll('.preview-zoom-scale')[page.index]
     if (!(pageEl instanceof HTMLElement) || !(scroller instanceof HTMLElement)) return
     const scRect = scroller.getBoundingClientRect()
     const pageRect = pageEl.getBoundingClientRect()
@@ -1523,7 +1527,7 @@ function PlayheadLayer({
     if (target === null) return
     if (Math.abs(target - scroller.scrollTop) < 1) return
     scroller.scrollTo({ top: target, behavior: 'smooth' })
-  }, [currentMs, track, rowSpans, rowLeadMs, page.index, page.height])
+  }, [currentMs, track, rowSpans, rowLeadMs, page.index, page.height, scrollerRef])
 
   if (track.length === 0 || currentMs <= 0) return null
   // adj427：按「本页 + 曲行 + 声部 + 音色」**逐组**定位——重叠区（bz 伴奏 / dsb 第二声部）
