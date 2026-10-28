@@ -138,6 +138,8 @@ import { preRollFrameMs, shiftSequenceBy } from '../src/export/video/preRoll.ts'
 import { timeScaleOf, timeLabelOf, audioClockOf } from '../src/dialogs/syncRuler.ts'
 // adj1172：节拍器排点（纯函数；用开播锚点映射到 AudioContext 时间）
 import { planMetronomeClicks } from '../src/dialogs/metronomeSchedule.ts'
+// adj1173：节拍器强弱拍判据（纯函数；与界面共用同一份）
+import { isStrongMetronomeBeat, metronomeClickSpec } from '../src/playback/metronome.ts'
 // adj1126：波形视野（缩放/平移；spanMs=0 = 整曲）
 import {
   VIEW_ALL,
@@ -36124,11 +36126,45 @@ function runAdj1155Tests(): void {
     )
   }
   check(
+    'adj1173 强弱拍判据：barStartBeats 上的拍是强拍，其余不是（容差 0.02 拍）',
+    isStrongMetronomeBeat(0, [0, 4, 8]) &&
+      isStrongMetronomeBeat(4, [0, 4, 8]) &&
+      isStrongMetronomeBeat(8.01, [0, 4, 8]) &&
+      !isStrongMetronomeBeat(3.9, [0, 4, 8]) &&
+      !isStrongMetronomeBeat(12, [0, 4, 8]),
+    '',
+  )
+  {
+    /**
+     * 用户口径「嘣恰恰恰」：强拍与弱拍必须是**两套发音**，不是同一个音调音量。
+     * 这里逐个音色量：强拍第一个音层的频率 < 弱拍，且强拍更长。
+     */
+    const timbres = ['woodblock', 'bangzi', 'gear', 'electronic'] as const
+    const pairs = timbres.map((t) => {
+      const s = metronomeClickSpec(t, true)
+      const w = metronomeClickSpec(t, false)
+      const st = s.find((l) => l.kind === 'tone')
+      const wt = w.find((l) => l.kind === 'tone')
+      return {
+        timbre: t,
+        strongHz: st?.kind === 'tone' ? st.fromHz : 0,
+        weakHz: wt?.kind === 'tone' ? wt.fromHz : 0,
+        strongSec: Math.max(...s.map((l) => l.seconds)),
+        weakSec: Math.max(...w.map((l) => l.seconds)),
+      }
+    })
+    check(
+      'adj1173 强拍是低音「嘣」、弱拍是高音「恰」：四种音色都强拍更低且更长',
+      pairs.every((p) => p.strongHz > 0 && p.weakHz > p.strongHz && p.strongSec > p.weakSec),
+      JSON.stringify(pairs),
+    )
+  }
+  check(
     'adj1173 节拍器有音色下拉（木鱼/梆子/齿轮/电子），且每小节第一拍用重音',
     /METRONOME_TIMBRES = \['woodblock', 'bangzi', 'gear', 'electronic'\]/.test(metronomeSrc) &&
-      /strong \? 1\.16 : 1/.test(metronomeSrc) &&
+      /export function metronomeClickSpec\(timbre: MetronomeTimbre, strong: boolean\)/.test(metronomeSrc) &&
       /scheduleMetronomeClick\(ctx, when, timbreRef\.current, strong\)/.test(syncSrc) &&
-      /const strong = barStartBeats\.some/.test(syncSrc) &&
+      /isStrongMetronomeBeat\(beat, barStartBeats\)/.test(syncSrc) &&
       /data-sync="metronome-timbre"/.test(syncSrc) &&
       /METRONOME_TIMBRE_KEY/.test(uiStoreSrc),
     '',

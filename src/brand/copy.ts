@@ -1401,7 +1401,7 @@ export const syncCopy = {
   metronomeHint: '按谱面拍点响：还没对拍时按"谱面从音频 0 开始、速度用 J:"，对拍后跟着锚点的偏移与拍速',
   /** adj1173：节拍器音色下拉 + 强弱拍说明 */
   metronomeTimbre: '音色',
-  metronomeTimbreHint: '每小节第一拍重音、其余轻拍；音色只影响"嗒"的质感，不影响拍点位置',
+  metronomeTimbreHint: '每小节第一拍低音「嘣」，其余高音「恰」；音色只改质感，不影响拍点位置',
   metronomeTimbres: {
     woodblock: '木鱼',
     bangzi: '梆子',

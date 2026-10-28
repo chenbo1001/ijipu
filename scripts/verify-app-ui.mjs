@@ -2242,6 +2242,28 @@ async function main() {
             timbreSel.labels.join(',') === '木鱼,梆子,齿轮,电子',
           JSON.stringify(timbreSel),
         )
+        // 下拉真的接了状态：切到梆子 ⇒ 本机偏好落盘（不是只画了一个下拉）
+        const timbreChanged = await evalJs(
+          c,
+          `(() => {
+            const s = document.querySelector('[data-sync="metronome-timbre"]')
+            if (!s) return null
+            s.value = 'bangzi'
+            s.dispatchEvent(new Event('change', { bubbles: true }))
+            return s.value
+          })()`,
+        )
+        const timbrePersisted = await waitFor(
+          c,
+          `localStorage.getItem('ijipu.metronomeTimbre') === 'bangzi'`,
+          '节拍器音色落盘',
+          20,
+        )
+        check(
+          'adj1173 切换音色真的生效并记住（bangzi ⇒ localStorage ijipu.metronomeTimbre）',
+          timbreChanged === 'bangzi' && timbrePersisted,
+          JSON.stringify({ timbreChanged, timbrePersisted }),
+        )
         // 预览能滚动（谱面比预览区高 ⇒ 必须有滚动条）
         const scrollable = await evalJs(
           c,

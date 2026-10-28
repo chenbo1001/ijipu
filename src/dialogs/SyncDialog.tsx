@@ -44,7 +44,7 @@ import { barLabelsOf, cellRectPct, pitchHeightOf, stripCellsOf } from './noteStr
 // adj1172：节拍器排点的纯计算（用开播锚点把拍点映射到 AudioContext 时间）
 import { planMetronomeClicks } from './metronomeSchedule'
 // adj1173：节拍器音色/强弱拍合成（木头、梆子、齿轮、电子）
-import { METRONOME_TIMBRES, scheduleMetronomeClick, type MetronomeTimbre } from '../playback/metronome'
+import { METRONOME_TIMBRES, isStrongMetronomeBeat, scheduleMetronomeClick, type MetronomeTimbre } from '../playback/metronome'
 import { canUseDynamicVideo } from '../export/video/capability'
 import { syncCopy } from '../brand/copy'
 import { isTauriShell } from '../brand/env'
@@ -716,7 +716,7 @@ export function SyncDialog() {
          * 其余轻拍。`beat` 是谱面拍位，与 barStartBeats 同一套刻度。
          */
         const beat = (audioMs - clock.offsetMs) / clock.beatMs
-        const strong = barStartBeats.some((b) => Math.abs(beat - b) < 1e-3)
+        const strong = isStrongMetronomeBeat(beat, barStartBeats)
         const nodes = scheduleMetronomeClick(ctx, when, timbreRef.current, strong)
         for (const node of nodes) {
           liveClicks.add(node)

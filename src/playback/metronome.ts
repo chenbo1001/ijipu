@@ -18,6 +18,24 @@ export function isMetronomeTimbre(v: unknown): v is MetronomeTimbre {
   return typeof v === 'string' && (METRONOME_TIMBRES as readonly string[]).includes(v)
 }
 
+/**
+ * 这一拍是不是小节的强拍。
+ *
+ * 用 `barStartBeats`（谱面拍位）判断，容差 0.02 拍：
+ *  - 2ms 的浮点/取整误差不会漏掉强拍；
+ *  - 也不会把相邻半拍误判成强拍。
+ *
+ * 单独抽出来是为了在 smoke 里直接断言，而不是只能靠"听起来对不对"。
+ */
+export function isStrongMetronomeBeat(
+  beat: number,
+  barStartBeats: readonly number[],
+  epsilon = 0.02,
+): boolean {
+  if (!Number.isFinite(beat)) return false
+  return barStartBeats.some((b) => Math.abs(beat - b) <= epsilon)
+}
+
 /** 每个 AudioContext 一份噪声缓冲（齿轮/木鱼的起音用；不重复分配） */
 const noiseBuffers = new WeakMap<AudioContext, AudioBuffer>()
 function noiseBuffer(ctx: AudioContext, seconds: number): AudioBuffer {
@@ -83,11 +101,83 @@ function noise(
   return src
 }
 
+export type MetronomeClickLayer =
+  | {
+      kind: 'tone'
+      type: OscillatorType
+      fromHz: number
+      toHz: number
+      peak: number
+      seconds: number
+    }
+  | { kind: 'noise'; peak: number; seconds: number; highpassHz: number }
+
+/**
+ * 强拍/弱拍的**两套发音**（用户口径：嘣恰恰恰）。
+ *
+ * 不是把同一个音简单调大/调高：强拍是**低音「嘣」**（低频、稍长、带一点噪声木体），
+ * 弱拍是**高音「恰」**（高频、很短）。四种音色分别有自己的强/弱材料，
+ * 所以换音色时"嘣/恰"的音色也会跟着变，但强弱关系始终是"低—高—高—高"。
+ *
+ * 抽成纯函数是为了让 smoke 能直接量"强拍频率一定低于弱拍"。
+ */
+export function metronomeClickSpec(timbre: MetronomeTimbre, strong: boolean): MetronomeClickLayer[] {
+  if (strong) {
+    switch (timbre) {
+      case 'bangzi':
+        // 梆子：低沉的空腔"梆"
+        return [
+          { kind: 'tone', type: 'sawtooth', fromHz: 210, toHz: 120, peak: 0.06, seconds: 0.095 },
+          { kind: 'noise', peak: 0.006, seconds: 0.018, highpassHz: 600 },
+        ]
+      case 'gear':
+        // 齿轮：低频的机械"咔"
+        return [
+          { kind: 'tone', type: 'square', fromHz: 150, toHz: 95, peak: 0.035, seconds: 0.08 },
+          { kind: 'noise', peak: 0.03, seconds: 0.045, highpassHz: 350 },
+        ]
+      case 'electronic':
+        // 电子：低音"嘣"
+        return [{ kind: 'tone', type: 'sine', fromHz: 220, toHz: 130, peak: 0.07, seconds: 0.09 }]
+      case 'woodblock':
+      default:
+        // 木鱼：低音木体"笃"
+        return [
+          { kind: 'tone', type: 'triangle', fromHz: 320, toHz: 180, peak: 0.07, seconds: 0.085 },
+          { kind: 'noise', peak: 0.008, seconds: 0.012, highpassHz: 800 },
+        ]
+    }
+  }
+  switch (timbre) {
+    case 'bangzi':
+      // 梆子：高音短"梆"
+      return [
+        { kind: 'tone', type: 'sawtooth', fromHz: 900, toHz: 700, peak: 0.04, seconds: 0.035 },
+        { kind: 'noise', peak: 0.003, seconds: 0.008, highpassHz: 1500 },
+      ]
+    case 'gear':
+      // 齿轮：高频棘轮"嚓"
+      return [
+        { kind: 'noise', peak: 0.045, seconds: 0.025, highpassHz: 2000 },
+        { kind: 'tone', type: 'square', fromHz: 2100, toHz: 1700, peak: 0.012, seconds: 0.018 },
+      ]
+    case 'electronic':
+      // 电子：高音短"嘀"
+      return [{ kind: 'tone', type: 'sine', fromHz: 1100, toHz: 820, peak: 0.04, seconds: 0.035 }]
+    case 'woodblock':
+    default:
+      // 木鱼：高音短"嗒"
+      return [
+        { kind: 'tone', type: 'triangle', fromHz: 1250, toHz: 1000, peak: 0.045, seconds: 0.032 },
+        { kind: 'noise', peak: 0.003, seconds: 0.006, highpassHz: 2800 },
+      ]
+  }
+}
+
 /**
  * 排一次「嗒」；返回的节点已 start，调用方负责登记/停止（HMR 停声也靠它）。
  *
- * `strong` = 这一拍是不是小节第一拍：强拍音高约 ×1.16、音量约 ×1.18；
- * 弱拍约 ×0.72。差别刻意做得清楚，但不至于又变成提示音。
+ * 强/弱由 `metronomeClickSpec` 给出**完全不同的材料**，不是同一个音变音量。
  */
 export function scheduleMetronomeClick(
   ctx: AudioContext,
@@ -95,30 +185,9 @@ export function scheduleMetronomeClick(
   timbre: MetronomeTimbre,
   strong: boolean,
 ): AudioScheduledSourceNode[] {
-  const p = strong ? 1.16 : 1
-  const g = strong ? 1.18 : 0.72
-  switch (timbre) {
-    case 'bangzi':
-      // 梆子：偏低的木头，短促、有空腔感
-      return [
-        tone(ctx, when, 'triangle', 560 * p, 380 * p, 0.06 * g, 0.055),
-        noise(ctx, when, 0.008 * g, 0.012, 1800),
-      ]
-    case 'gear':
-      // 齿轮：一截高频噪声 + 很短的金属尖头
-      return [
-        noise(ctx, when, 0.05 * g, 0.03, 1400),
-        tone(ctx, when, 'square', 1800 * p, 1300 * p, 0.012 * g, 0.018),
-      ]
-    case 'electronic':
-      // 电子：柔和的正弦短音（原 adj1170 的软音色）
-      return [tone(ctx, when, 'sine', 660 * p, 440 * p, 0.05 * g, 0.045)]
-    case 'woodblock':
-    default:
-      // 木鱼：高频、干脆的木头
-      return [
-        tone(ctx, when, 'triangle', 1050 * p, 780 * p, 0.055 * g, 0.04),
-        noise(ctx, when, 0.006 * g, 0.008, 2400),
-      ]
-  }
+  return metronomeClickSpec(timbre, strong).map((layer) =>
+    layer.kind === 'tone'
+      ? tone(ctx, when, layer.type, layer.fromHz, layer.toHz, layer.peak, layer.seconds)
+      : noise(ctx, when, layer.peak, layer.seconds, layer.highpassHz),
+  )
 }
