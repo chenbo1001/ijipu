@@ -86,6 +86,7 @@ ijipu cli render -i 我的谱.jps -t midi -o 我的谱.mid
 | 为什么是**直接调用** | **实测**（2026-10-14，Windows 11 26300.9457，cmd 代码页 936）：直接调用 ⇒ 重定向文件 89 字节、退出码 3 ✓；`start /wait "" … %*` ⇒ **0 字节**（`start` 不给子进程传重定向句柄）✗。cmd **会等批处理文件**，所以直接调用就是同步的 |
 | 为什么不加 `cli` | **实测**：垫片若写成 `ijipu.exe cli %*`，用户敲的 `ijipu cli lint …` 会变成 `ijipu.exe cli cli lint …`（报「命令 "cli" 尚未实现」✗）⇒ 垫片**透明**转交 `%*` |
 | 为什么注释纯 ASCII | cmd 按 **OEM 代码页**（本机 936）解析 `.cmd`；UTF-8 中文注释在 DBCS 页上可能错位，而垫片坏掉＝命令行全坏（`scripts/git-push.bat` 的 "ASCII safe" 同一原因）。冒烟 `adj946` 钉住"纯 ASCII + 无 BOM" |
+| 用户 `.bat` 里的中文 | 同理：cmd 按 OEM 代码页解析**用户的批处理文件**，UTF-8 中文在进入 CLI 前就变成乱码（常带 `?`）。终端直接敲是 Unicode 输入，所以不犯。处置：`.bat` 存 ANSI/GBK，或首行 `chcp 65001` + UTF-8 无 BOM；最稳是 `.bat` 不写中文，用 `for %%f in (*.jps)` 从目录取真实文件名（见 `CLI-手册` §2.6） |
 | 注册口径 | 注册进 PATH 的是 **`<安装目录>\bin`**（不是安装目录本身 ✗）—— 由 TS `binDirOf()` **唯一一处**推导；`.CMD` 在 `PATHEXT` 里、`.exe` 不在 PATH 里 ⇒ 敲 `ijipu` 命中垫片 ✓ |
 | 双击/关联 | **不受影响**：`ijipu.exe` 仍是 GUI 子系统程序（双击 `.jps` / 关联打开照旧开窗口、不闪黑框 ✓） |
 | 旧形态兼容 | `adj944` 曾注册"安装目录本身"：`status` 认出它（`legacy`，并按**未注册**报）→ 点「注册」**顺手换掉**；`unregister` **两种都摘**；卸载钩子（`nsis/cli-path.nsh`）也**两条都摘** ✓ |

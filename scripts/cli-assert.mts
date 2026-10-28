@@ -1668,6 +1668,20 @@ console.log('\n— adj1084 命令行视频（-t mp4 / 小节:拍）—')
   }
 
   /**
+   * adj1175：Windows `.bat` 的 UTF-8→OEM 乱码常把路径里的字节变成 `?`；
+   * 读不到时给一条可照做的编码提示，不要只甩 ENOENT。
+   */
+  {
+    const b = makeIo({})
+    const r = await runCli(['render', '-i', '瀹夊拰妗?jps', '-t', 'mp4', '-o', 'x.mp4'], b.io)
+    check(
+      'adj1175 输入路径含 `?`（.bat 乱码特征）⇒ 退出码 2，并提示改成 ANSI/GBK 或 chcp 65001',
+      r.code === EXIT.noInput && b.errs.join('').includes('批处理') && b.errs.join('').includes('chcp 65001'),
+      `code=${r.code} err=${b.errs.join('｜').slice(0, 160)}`,
+    )
+  }
+
+  /**
    * ⚠ **真 bug 的回归**（adj1084 第一版就踩了）：
    * `PlacedToken.barIndex` 是**曲行内**编号，每换一行就从 0 起；第一版按"页内偏移 + barIndex"
    * 算全局小节号 ⇒ 整份谱被算成只有 6 小节（用户写 `--from 27:3` 直接报"没有第 27 小节"）。

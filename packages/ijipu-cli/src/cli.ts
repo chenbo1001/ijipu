@@ -526,6 +526,21 @@ async function readInput(spec: string | undefined, io: CliIo): Promise<{ text: s
   return { text: await io.readFile(spec), fromStdin: false }
 }
 
+/**
+ * adj1175：Windows `.bat` 里传中文文件名时，cmd 会按 OEM 代码页解析批处理，
+ * UTF-8 中文会变成乱码（常带 `?`），到 CLI 时文件已经“不存在”了。
+ * 只在路径里真的出现 `?`/替换符时提示，不干扰正常的“文件没找到”。
+ */
+function batchEncodingHint(spec: string | undefined): string {
+  if (spec === undefined) return ''
+  if (!spec.includes('?') && !spec.includes('\uFFFD')) return ''
+  return (
+    '\n提示：这像是 .bat 批处理文件编码问题（中文被按 OEM 代码页解析）。' +
+    '请把 .bat 存为 ANSI/GBK，或在第一行加 chcp 65001 后存 UTF-8（无 BOM）；' +
+    '也可以改用 for %%f in (*.jps) do ... 让 cmd 从目录取真实文件名。'
+  )
+}
+
 /** 输出：`-o -` 或 `-o` 省略 = stdout；`-o 文件` = 写文件 */
 async function writeOutput(spec: string | null, text: string, io: CliIo): Promise<string> {
   if (spec === null || spec === '-') {
@@ -1339,7 +1354,7 @@ export async function runCli(argv: string[], io: CliIo, meta?: { version?: strin
     try {
       src = (await readInput(p.inputs[0], io)).text
     } catch (e) {
-      io.err(`读输入失败：${String(e)}`)
+      io.err(`读输入失败：${String(e)}${batchEncodingHint(p.inputs[0])}`)
       return { code: EXIT.noInput }
     }
     const type = inferType(p)

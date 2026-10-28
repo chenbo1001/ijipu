@@ -434,6 +434,50 @@ ijipu cli render -i 赤伶.jps -t mp4 -o 混合.mp4 --mark 段1 --sound mix \
 - `file` / `mix` 缺 sidecar 或伴奏 ⇒ 明确报错，不会静默退回合成音；
 - `--nosound` 与 `--sound` / `--accomp` / 两条音量互斥。
 
+**在 `.bat` 里使用中文文件名（Windows）**
+
+终端里直接敲命令没问题，但把同一条命令写进 `.bat` 时，`cmd.exe` 会按**本机 OEM 代码页**解析批处理文件。`.bat` 若存成 UTF-8，中文会先变成乱码（常出现 `?`），CLI 拿到的文件名已经不存在，于是报 `ENOENT`。
+
+三种可靠写法（任选其一）：
+
+```text
+@echo off
+chcp 65001 >nul
+ijipu cli render -t mp4 --card paper -i 安和桥.jps -o 安和桥.mp4
+```
+
+> 这个 `.bat` 要存成 **UTF-8 无 BOM**；`chcp 65001` 必须在第一行（`@echo off` 之后）。
+> 某些旧版 Windows 仍会按 OEM 解析批处理，此时改用下面两种。
+
+**写法二：`.bat` 存成 ANSI/GBK**（中文 Windows 最稳）
+
+用记事本「另存为 → 编码：ANSI」，或 VS Code「通过编码保存 → GBK/GB2312」，命令原样写：
+
+```text
+@echo off
+ijipu cli render -t mp4 --card paper -i 安和桥.jps -o 安和桥.mp4
+```
+
+**写法三：`.bat` 里完全不写中文**（推荐给固定目录）
+
+让 `cmd` 自己从目录里取真实文件名（`%%~ff` 是完整路径，`%%~nf` 是去掉扩展名的文件名），中文由文件系统给出，不经过批处理编码：
+
+```text
+@echo off
+for %%f in (*.jps) do (
+  ijipu cli render -t mp4 --card paper -i "%%~ff" -o "%%~nf.mp4"
+)
+```
+
+这个写法会把当前目录的每个 `.jps` 都渲染一份；目录里只有一首谱时就是你要的那一首。
+
+也可以用 PowerShell 脚本（`.ps1` 存 UTF-8，Windows PowerShell 5.1 建议带 BOM）：
+
+```text
+$src = '安和桥.jps'
+ijipu cli render -t mp4 --card paper -i $src -o ([IO.Path]::GetFileNameWithoutExtension($src) + '.mp4')
+```
+
 只要动态谱、不要片头片尾（也是最省事的写法 —— 不写 `--card`）：
 
 ```text
