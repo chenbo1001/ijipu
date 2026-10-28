@@ -36018,6 +36018,8 @@ function runAdj1155Tests(): void {
   const markLayerSrc = readFileSync(join(root, 'src/preview/PracticeMarkLayer.tsx'), 'utf8')
   const syncSrc = readFileSync(join(root, 'src/dialogs/SyncDialog.tsx'), 'utf8')
   const previewSrc = readFileSync(join(root, 'src/preview/PreviewPane.tsx'), 'utf8')
+  const metronomeSrc = readFileSync(join(root, 'src/playback/metronome.ts'), 'utf8')
+  const uiStoreSrc = readFileSync(join(root, 'src/store/uiStore.ts'), 'utf8')
   const overlaySrc = readFileSync(join(root, 'src/preview/DynamicFrameOverlay.tsx'), 'utf8')
   const exportPanelSrc = readFileSync(join(root, 'src/ui/dock/ExportPanel.tsx'), 'utf8')
   check(
@@ -36057,12 +36059,10 @@ function runAdj1155Tests(): void {
     '',
   )
   check(
-    'adj1170 节拍器改用软音色（660Hz→440Hz / 0.07 / 短衰减），并在 HMR dispose 时停掉已排的嗒',
-    /METRONOME_HZ = 660/.test(syncSrc) &&
-      /METRONOME_GAIN = 0\.07/.test(syncSrc) &&
-      /CLICK_LOOKAHEAD_MS = 1500/.test(syncSrc) &&
+    'adj1170 节拍器 1.5s 预排 + HMR dispose 停掉已排的嗒；旧 1000Hz 硬提示音已不存在',
+    /CLICK_LOOKAHEAD_MS = 1500/.test(syncSrc) &&
       /import\.meta\.hot\.dispose\(stopLiveClicks\)/.test(syncSrc) &&
-      /osc\.type = 'triangle'/.test(syncSrc) &&
+      /liveClicks = new Set<AudioScheduledSourceNode>/.test(syncSrc) &&
       !/osc\.frequency\.value = 1000/.test(syncSrc),
     '',
   )
@@ -36123,6 +36123,16 @@ function runAdj1155Tests(): void {
       JSON.stringify(off),
     )
   }
+  check(
+    'adj1173 节拍器有音色下拉（木鱼/梆子/齿轮/电子），且每小节第一拍用重音',
+    /METRONOME_TIMBRES = \['woodblock', 'bangzi', 'gear', 'electronic'\]/.test(metronomeSrc) &&
+      /strong \? 1\.16 : 1/.test(metronomeSrc) &&
+      /scheduleMetronomeClick\(ctx, when, timbreRef\.current, strong\)/.test(syncSrc) &&
+      /const strong = barStartBeats\.some/.test(syncSrc) &&
+      /data-sync="metronome-timbre"/.test(syncSrc) &&
+      /METRONOME_TIMBRE_KEY/.test(uiStoreSrc),
+    '',
+  )
   check(
     'adj1155 试听里增删练习段 ⇒ 立刻写 sidecar（mirrorMarks + flushSyncAutoSave）',
     /mirrorMarks\(\)/.test(barSrc) &&

@@ -12,6 +12,8 @@ import { DEFAULT_THEME, DEFAULT_THEME_MODE, type ThemeMode } from '../brand/them
 import { getRuntimeEnv, isCoarsePointerDevice } from '../brand/env'
 // adj966g：底栏默认页按**本端能力档**决定（要权限的那一档展开在工作区，PC/插件收起）
 import { hostProfile, shouldOpenWorkspaceDock } from './fileHost'
+// adj1173：节拍器音色（L1 用户偏好；取值域与合成音在 playback/metronome）
+import { DEFAULT_METRONOME_TIMBRE, METRONOME_TIMBRES, type MetronomeTimbre } from '../playback/metronome'
 // adj987（用户需求）：试听「练习段」的数据类型与命名（标记本身按文档存，见 practiceMarks.ts）
 import { defaultMarkName, nextMarkId, type PracticeMark } from './practiceMarks'
 // L1「用户个性」：编辑器偏好 + 字体覆盖（不进谱面；详见 docs/SETTINGS-AUDIT.md 分层）
@@ -177,6 +179,19 @@ function loadPanMode(): PanMode {
 const ROW_LEAD_BEATS_KEY = 'ijipu.rowLeadBeats'
 export const ROW_LEAD_BEATS_DEFAULT = 0.5
 export const ROW_LEAD_BEATS_MAX = 2
+
+/** adj1173：节拍器音色（L1；用户选择跨运行记住） */
+const METRONOME_TIMBRE_KEY = 'ijipu.metronomeTimbre'
+
+/** 读失败 / 旧版本没有这个键 / 脏值 ⇒ 回退木鱼 */
+function loadMetronomeTimbre(): MetronomeTimbre {
+  try {
+    const v = localStorage.getItem(METRONOME_TIMBRE_KEY)
+    return METRONOME_TIMBRES.includes(v as MetronomeTimbre) ? (v as MetronomeTimbre) : DEFAULT_METRONOME_TIMBRE
+  } catch {
+    return DEFAULT_METRONOME_TIMBRE
+  }
+}
 
 /** 读失败 / 旧版本没有这个键 / 越界 ⇒ 回退默认半拍（并钳到 [0, 2]） */
 function loadRowLeadBeats(): number {
@@ -497,6 +512,10 @@ interface UiState {
   rowLeadBeats: number
   /** adj1094：写入前钳到 [0, ROW_LEAD_BEATS_MAX]，脏值忽略 */
   setRowLeadBeats: (beats: number) => void
+  /** adj1173：节拍器音色（L1，落 localStorage；木鱼/梆子/齿轮/电子） */
+  metronomeTimbre: MetronomeTimbre
+  /** adj1173：写入前校验取值，脏值忽略、不落盘 */
+  setMetronomeTimbre: (t: MetronomeTimbre) => void
   /**
    * adj905q（用户规格见 `docs/PREVIEW-DEBUG-BOUNDARIES.md`）：**预览可视调试**开关。
    * 开启后在预览里叠加「时值格 / 墨迹 / 段层」三套边界虚线（几何来自引擎
@@ -869,6 +888,8 @@ export const useUiStore = create<UiState>()((set) => ({
   panMode: loadPanMode(),
   // adj1094：行末提前平移量（L1，落盘；默认半拍）
   rowLeadBeats: loadRowLeadBeats(),
+  // adj1173：节拍器音色（L1，落盘；缺省木鱼）
+  metronomeTimbre: loadMetronomeTimbre(),
   // adj905q：预览可视调试 —— **L3 会话级**，刻意不读 localStorage（重开即恢复默认关）
   debugBounds: false,
   // adj965d（EP-13）：预览区 Alt 手势默认调**背景层**（L3 会话级，不落盘）
@@ -1027,6 +1048,19 @@ export const useUiStore = create<UiState>()((set) => ({
       /* 忽略 */
     }
     set({ rowLeadBeats: v })
+  },
+  /**
+   * adj1173：节拍器音色（L1）。
+   * 写入前校验：只接受 `METRONOME_TIMBRES` 里的值，脏值不落盘、不改内存。
+   */
+  setMetronomeTimbre: (t) => {
+    if (!METRONOME_TIMBRES.includes(t)) return
+    try {
+      localStorage.setItem(METRONOME_TIMBRE_KEY, t)
+    } catch {
+      /* 忽略隐私模式/配额异常 */
+    }
+    set({ metronomeTimbre: t })
   },
   // adj965d：Alt 手势调哪一层（L3 会话级）——**不落盘**；默认背景层：
   // 需要摆位置的通常是垫进来的那张背景图（水印多为居中一个）

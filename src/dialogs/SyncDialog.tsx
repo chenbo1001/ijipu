@@ -43,6 +43,8 @@ import { applySyncExtrasToUi } from '../store/syncExtras'
 import { barLabelsOf, cellRectPct, pitchHeightOf, stripCellsOf } from './noteStrip'
 // adj1172：节拍器排点的纯计算（用开播锚点把拍点映射到 AudioContext 时间）
 import { planMetronomeClicks } from './metronomeSchedule'
+// adj1173：节拍器音色/强弱拍合成（木头、梆子、齿轮、电子）
+import { METRONOME_TIMBRES, scheduleMetronomeClick, type MetronomeTimbre } from '../playback/metronome'
 import { canUseDynamicVideo } from '../export/video/capability'
 import { syncCopy } from '../brand/copy'
 import { isTauriShell } from '../brand/env'
@@ -79,19 +81,16 @@ const STEPS = [1, 5, 10, 50] as const
 const REWIND_MS = 3000
 const AFTER_MS = 2000
 /**
- * adj1170：节拍器"嗒"的软音色（用户实报「不好听、太抢耳」）。
+ * adj1170/1173：节拍器排点与音色。
  *
- * 旧版是 1000Hz 正弦 + 0.22 增益、方起方停 ⇒ 像提示音，且 HMR 时旧模块排出去的
- * 振荡器还会继续响几声。现在改成短衰减的三角波（660Hz → 440Hz、峰值 0.07），
- * 起音 2ms、45ms 内收干净；并把已排进 AudioContext 的节点登记到模块级集合，
+ * 旧版是 1000Hz 正弦 + 0.22 增益、方起方停 ⇒ 像提示音；现在音色在
+ * `playback/metronome.ts` 里按「木鱼 / 梆子 / 齿轮 / 电子」合成，
+ * 每小节第一拍重音、其余轻拍。已排进 AudioContext 的节点登记到模块级集合，
  * HMR dispose 时统一停掉（见 `stopLiveClicks`）。
  */
-const METRONOME_HZ = 660
-const METRONOME_GAIN = 0.07
-const METRONOME_MS = 45
 /** adj1170：节拍器只预排 1.5 秒（旧 4 秒；HMR/改 CSS 时残余的"嗒"更少） */
 const CLICK_LOOKAHEAD_MS = 1500
-const liveClicks = new Set<OscillatorNode>()
+const liveClicks = new Set<AudioScheduledSourceNode>()
 function stopLiveClicks(): void {
   for (const o of liveClicks) {
     try {
@@ -153,6 +152,9 @@ export function SyncDialog() {
   const [playing, setPlaying] = useState(false)
   const [sel, setSel] = useState(0)
   const [meterOn, setMeterOn] = useState(false)
+  // adj1173：节拍器音色（L1 偏好；图标/强弱拍由合成函数统一处理）
+  const metronomeTimbre = useUiStore((s) => s.metronomeTimbre)
+  const setMetronomeTimbre = useUiStore((s) => s.setMetronomeTimbre)
   const [loopOn, setLoopOn] = useState(true)
   const [stepMs, setStepMs] = useState<number>(5)  /**
    * adj1126（用户 2026-10-24：「波形也要能缩放，单位宽度上显示的波形时长，默认整曲」）：
@@ -606,7 +608,7 @@ export function SyncDialog() {
   /** 声音三档的"上一档"：播放中换档要从当前播放头重开（否则已排进 AudioContext 的轨不会变） */
   const mixSourceRef = useRef<'file' | 'synth' | 'mix' | null>(null)
   /** 已经排进 AudioContext 的"嗒"——关掉节拍器时必须把它们全停掉（否则听起来"关不掉"） */
-  const clicksRef = useRef<OscillatorNode[]>([])
+  const clicksRef = useRef<AudioScheduledSourceNode[]>([])
   /** 节拍器已经排到哪一刻（音频 ms） */
   const schedRef = useRef(0)
   /**
@@ -636,10 +638,13 @@ export function SyncDialog() {
    */
   const meterRef = useRef(meterOn)
   const loopRefOn = useRef(loopOn)
+  /** adj1173：播放中换音色也从下一拍起生效（tick 闭包不能一直读旧 state） */
+  const timbreRef = useRef(metronomeTimbre)
   useEffect(() => {
     meterRef.current = meterOn
     loopRefOn.current = loopOn
-  }, [meterOn, loopOn])
+    timbreRef.current = metronomeTimbre
+  }, [meterOn, loopOn, metronomeTimbre])
 
   const stopSource = useCallback(() => {
     // adj1135：让"正在渲染合成音"的那一路知道已经作废（否则它渲染完还会 start 出一条没人管的音轨）
@@ -699,38 +704,30 @@ export function SyncDialog() {
         startAt: si.at,
         startFromMs: si.from,
       })
-      for (const { whenSec } of plan) {
+      for (const { whenSec, audioMs } of plan) {
         /**
          * 已经过去的拍点不再补（补也只能"立刻响"，反而比音源晚）。
          * 只容许 20ms 内的调度延迟：夹到当前时刻，听感上仍在拍点上。
          */
         if (whenSec < ctx.currentTime - 0.02) continue
         const when = Math.max(ctx.currentTime, whenSec)
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
         /**
-         * adj1170：短衰减的软"嗒"——旧版 1000Hz/0.22 方起方停太像提示音。
-         * 三角波从 660Hz 落到 440Hz，2ms 起音、45ms 内衰减到静音；
-         * 音头/音尾都有包络，不再有硬切的爆音。
+         * adj1173：强弱拍 —— 小节第一拍（barStartBeats 命中的那一拍）重音，
+         * 其余轻拍。`beat` 是谱面拍位，与 barStartBeats 同一套刻度。
          */
-        osc.type = 'triangle'
-        osc.frequency.setValueAtTime(METRONOME_HZ, when)
-        osc.frequency.exponentialRampToValueAtTime(METRONOME_HZ * 0.667, when + METRONOME_MS / 1000)
-        gain.gain.setValueAtTime(0.0001, when)
-        gain.gain.exponentialRampToValueAtTime(METRONOME_GAIN, when + 0.002)
-        gain.gain.exponentialRampToValueAtTime(0.0001, when + METRONOME_MS / 1000)
-        osc.connect(gain)
-        gain.connect(ctx.destination)
-        osc.start(when)
-        osc.stop(when + METRONOME_MS / 1000 + 0.01)
-        liveClicks.add(osc)
-        osc.onended = () => liveClicks.delete(osc)
-        clicksRef.current.push(osc)
+        const beat = (audioMs - clock.offsetMs) / clock.beatMs
+        const strong = barStartBeats.some((b) => Math.abs(beat - b) < 1e-3)
+        const nodes = scheduleMetronomeClick(ctx, when, timbreRef.current, strong)
+        for (const node of nodes) {
+          liveClicks.add(node)
+          node.onended = () => liveClicks.delete(node)
+          clicksRef.current.push(node)
+        }
       }
       // +1ms：下一轮从窗口末尾之后开始，既不漏拍，也不会把边界那一拍排两次
       schedRef.current = untilMs + 0.001
     },
-    [effFit, scoreBeatMs],
+    [barStartBeats, effFit, scoreBeatMs],
   )
 
   /**
@@ -1857,6 +1854,21 @@ export function SyncDialog() {
             <input type="checkbox" checked={meterOn} onChange={(e) => setMeterOn(e.target.checked)} />
             {syncCopy.metronome}
           </label>
+          {/* adj1173：节拍器音色（木鱼/梆子/齿轮/电子）；第一拍重音、其余轻拍 */}
+          <span className="sync-label">{syncCopy.metronomeTimbre}</span>
+          <select
+            className="sync-select"
+            data-sync="metronome-timbre"
+            value={metronomeTimbre}
+            onChange={(e) => setMetronomeTimbre(e.target.value as MetronomeTimbre)}
+            title={syncCopy.metronomeTimbreHint}
+          >
+            {METRONOME_TIMBRES.map((t) => (
+              <option key={t} value={t}>
+                {syncCopy.metronomeTimbres[t]}
+              </option>
+            ))}
+          </select>
           <label className="sync-check">
             <input type="checkbox" checked={loopOn} onChange={(e) => setLoopOn(e.target.checked)} />
             {syncCopy.loop}

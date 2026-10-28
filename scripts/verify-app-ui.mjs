@@ -2222,6 +2222,26 @@ async function main() {
           80,
         )
         check('adj1133 预览用的是应用自己的 PreviewPane（.preview-pane 里有 SVG 谱面 + 缩放层）', previewReady)
+        // adj1173：节拍器音色下拉真的在台面里，且四种音色齐全（木鱼/梆子/齿轮/电子）
+        const timbreSel = await evalJs(
+          c,
+          `(() => {
+            const s = document.querySelector('[data-sync="metronome-timbre"]')
+            if (!s) return null
+            return {
+              values: [...s.options].map((o) => o.value),
+              labels: [...s.options].map((o) => o.textContent),
+              selected: s.value,
+            }
+          })()`,
+        )
+        check(
+          'adj1173 对拍台有节拍器音色下拉（4 种：木鱼/梆子/齿轮/电子）',
+          timbreSel !== null &&
+            timbreSel.values.join(',') === 'woodblock,bangzi,gear,electronic' &&
+            timbreSel.labels.join(',') === '木鱼,梆子,齿轮,电子',
+          JSON.stringify(timbreSel),
+        )
         // 预览能滚动（谱面比预览区高 ⇒ 必须有滚动条）
         const scrollable = await evalJs(
           c,
